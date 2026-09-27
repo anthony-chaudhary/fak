@@ -454,11 +454,21 @@ func discoverSymptomSelections(ctx context.Context, git Runner, repoDir, commit,
 		}
 	}
 	if len(explicitRegex) > 0 {
-		tree, code, err := git(ctx, repoDir, "ls-tree", "-r", "--name-only", commit)
-		if err != nil || code != 0 {
-			return nil, "could not inspect candidate tests for explicit selector"
+		// Exact selectors found in changed tests can use one Git search to find
+		// every matching file in the changed packages. Keep the full scan for
+		// broad selectors and for runners that cannot perform the search.
+		paths := []string(nil)
+		if exactSelectorsMatchedChangedTests(explicit, explicitMatched) {
+			paths = grepExplicitTestPaths(ctx, git, repoDir, commit, explicit, changedPackages)
 		}
-		for _, rel := range strings.Split(tree, "\n") {
+		if paths == nil {
+			tree, code, err := git(ctx, repoDir, "ls-tree", "-r", "--name-only", commit)
+			if err != nil || code != 0 {
+				return nil, "could not inspect candidate tests for explicit selector"
+			}
+			paths = strings.Split(tree, "\n")
+		}
+		for _, rel := range paths {
 			rel = strings.ReplaceAll(strings.TrimSpace(rel), "\\", "/")
 			pkg := goTestPackage(rel)
 			if !changedPackages[pkg] || !strings.HasSuffix(rel, "_test.go") {
@@ -514,6 +524,54 @@ func discoverSymptomSelections(ctx context.Context, git Runner, repoDir, commit,
 		selections = append(selections, symptomSelection{Package: pkg, Tests: names})
 	}
 	return selections, ""
+}
+
+func exactSelectorsMatchedChangedTests(selectors []string, matched []bool) bool {
+	if len(selectors) == 0 || len(selectors) != len(matched) {
+		return false
+	}
+	for i, selector := range selectors {
+		if !matched[i] || len(selector) < 3 || selector[0] != '^' || selector[len(selector)-1] != '$' {
+			return false
+		}
+		literal := selector[1 : len(selector)-1]
+		if regexp.QuoteMeta(literal) != literal {
+			return false
+		}
+	}
+	return true
+}
+
+func grepExplicitTestPaths(ctx context.Context, git Runner, repoDir, commit string, selectors []string, changedPackages map[string]bool) []string {
+	args := []string{"grep", "-l", "-F"}
+	for _, selector := range selectors {
+		args = append(args, "-e", selector[1:len(selector)-1])
+	}
+	args = append(args, commit, "--")
+	packages := make([]string, 0, len(changedPackages))
+	for pkg := range changedPackages {
+		packages = append(packages, pkg)
+	}
+	sort.Strings(packages)
+	args = append(args, packages...)
+	out, code, err := git(ctx, repoDir, args...)
+	if err != nil || code != 0 {
+		return nil
+	}
+	var paths []string
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, commit+":") {
+			return nil
+		}
+		rel := strings.TrimPrefix(line, commit+":")
+		if strings.HasSuffix(rel, "_test.go") && changedPackages[goTestPackage(rel)] {
+			paths = append(paths, rel)
+		}
+	}
+	return paths
 }
 
 func goTestPackage(rel string) string {
