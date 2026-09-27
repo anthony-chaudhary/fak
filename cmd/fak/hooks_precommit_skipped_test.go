@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/hooks"
+	"github.com/anthony-chaudhary/fak/internal/safecommit"
 )
 
 // hooks_precommit_skipped_test.go — #5299: a pre-commit gate whose Check returns an error is
@@ -158,11 +160,28 @@ func TestPreCommitFullGateRunReportsNoSkips(t *testing.T) {
 	}
 	repo := newRepoWith(t, map[string]string{"src/x.go": "package x\n"})
 	withPreCommitGates(t, cleanGate("CANARY_ONE"), cleanGate("CANARY_TWO"))
+	// Since #11459 (287941a795) pre-commit also runs the COMMITTED_RED build-check whenever a
+	// .go path is staged. This fixture has an unborn HEAD, so the real gate cannot run (`git
+	// rev-parse HEAD` exits 128) and prints "build-check skipped-infra". That is a genuine
+	// skip, not a delivered verdict, so pin the build-check to a delivered "passed" verdict to
+	// keep this witness about "every gate delivered a verdict => no skips reported".
+	t.Setenv("FLEET_BUILDCHECK_GUARD", "")
+	t.Setenv("ALLOW_COMMITTED_RED", "")
+	prevBuildCheck := commitBuildCheckGate
+	buildCheckCalls := 0
+	commitBuildCheckGate = func(io.Writer, string, []string) (safecommit.BuildCheckOutcome, string) {
+		buildCheckCalls++
+		return safecommit.BuildCheckPassed, ""
+	}
+	t.Cleanup(func() { commitBuildCheckGate = prevBuildCheck })
 
 	t.Run("human_report_stays_quiet", func(t *testing.T) {
 		var out, errb bytes.Buffer
 		if code := runHooks(&out, &errb, []string{"pre-commit", "--root", repo}); code != 0 {
 			t.Fatalf("a clean gate set must pass: exit %d; stderr=%s", code, errb.String())
+		}
+		if buildCheckCalls == 0 {
+			t.Fatal("the staged .go path must route through the build-check gate")
 		}
 		if strings.Contains(errb.String(), "skipped") {
 			t.Fatalf("a run where every gate delivered a verdict must report no skips; got %q", errb.String())

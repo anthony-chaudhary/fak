@@ -226,10 +226,16 @@ func TestResolveCodexMCPEntryPrefersLiteralConfig(t *testing.T) {
 
 func TestDoctorMCPResolvesRelativeExecutableInCwd(t *testing.T) {
 	dir := t.TempDir()
-	probeName := "probe"
-	targetName := probeName
+	// On Windows a bare command name resolves from the current directory, which Go
+	// reports as exec.ErrDot and diagnoseMCP deliberately accepts (#10850). POSIX exec
+	// never searches the cwd for a bare name (execvp only walks $PATH), so the MCP host
+	// would not spawn `probe` there either; the portable spelling of "the executable
+	// in the cwd" is the explicit relative path `./probe`.
+	probeName := "./probe"
+	targetName := "probe"
 	if runtime.GOOS == "windows" {
-		targetName += ".exe"
+		probeName = "probe"
+		targetName = "probe.exe"
 	}
 	probePath := filepath.Join(dir, targetName)
 	if err := os.WriteFile(probePath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
@@ -251,5 +257,8 @@ func TestDoctorMCPResolvesRelativeExecutableInCwd(t *testing.T) {
 	}
 	if got := stageStatus(rep, "executable_resolution"); got != "pass" {
 		t.Fatalf("expected executable_resolution pass, got %q", got)
+	}
+	if !filepath.IsAbs(rep.Command) {
+		t.Fatalf("cwd executable must be reported by absolute path, got %q", rep.Command)
 	}
 }
