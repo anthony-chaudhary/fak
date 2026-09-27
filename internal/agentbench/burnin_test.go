@@ -124,3 +124,40 @@ func TestBurnInControllerRequiresFullDurationCoverageAndDrain(t *testing.T) {
 func completeBurnInEpoch(spec burnInEpochSpec, at time.Time) burnInEpochReceipt {
 	return burnInEpochReceipt{Ordinal: spec.Ordinal, Complete: true, SteadyRequests: 256, ControlRequests: 24, TaskAttempts: spec.Tasks, AcceptedTasks: spec.Tasks, PrimingRequests: 2, ReplayRetries: 1, AreasVisited: 4, PressureStatus: "unknown", SourceEditRereadPassed: true, IntentionalCancellationObserved: true, RecoveryPassed: true, CompletedAt: at}
 }
+
+func TestBurnInControllerSharesAbsoluteDrainBudget(t *testing.T) {
+	plan, err := profileplan.Build(profileplan.Options{Profile: "burn-in", PreferredConcurrency: 2, Duration: 2 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	now := start
+	identity := burnInIdentity{ModelID: "fixture", ConfigDigest: "config", WorkloadDigest: "workload"}
+	normal := burnInNormalAdmission{Qualified: true, Concurrency: 2, Identity: identity}
+	var epochDeadline time.Time
+	_, err = runBurnInController(context.Background(), burnInControllerConfig{
+		Plan: plan, Identity: identity, Normal: &normal, Now: func() time.Time { return now },
+		RunEpoch: func(ctx context.Context, spec burnInEpochSpec, cutoff time.Time) burnInEpochReceipt {
+			var ok bool
+			epochDeadline, ok = ctx.Deadline()
+			if !ok {
+				t.Error("epoch has no absolute drain deadline")
+			}
+			now = cutoff.Add(60 * time.Second)
+			return burnInEpochReceipt{Ordinal: spec.Ordinal, Partial: true, CompletedAt: now}
+		},
+		Drain: func(ctx context.Context, remaining time.Duration) error {
+			if remaining != 30*time.Second {
+				t.Errorf("drain received %v, want remaining 30s", remaining)
+			}
+			deadline, ok := ctx.Deadline()
+			if !ok || deadline.After(epochDeadline) {
+				t.Errorf("drain extends epoch deadline: epoch=%v drain=%v", epochDeadline, deadline)
+			}
+			return nil
+		},
+	})
+	if err == nil {
+		t.Fatal("one partial epoch must not qualify")
+	}
+}
