@@ -795,7 +795,16 @@ func serveQ4KFitOptions(path string, ws *ggufload.WeightSource, be compute.Backe
 		// uses -- not the device aperture: a device-scale bound judged against real host RAM
 		// is the bug that rule exists to prevent. The load path derives from the same rule
 		// over the same fit, so estimate and load carry a byte-identical budget (fak#13205).
-		opts = append(opts, ggufload.WithStreamedDenseQ4KWorkingSet(serveStreamedDenseQ4KWorkingSetBound(serveStreamedHostFit(be, &fit))))
+		hostFit := serveStreamedHostFit(be, &fit)
+		if hostFit.avail() <= 0 {
+			// No budget in scope (serveFitBudget{}: doctor facts, Metal startup-peak
+			// admission): keep the unbounded streamed route, whose estimate is
+			// unsupported, so admission retains the conservative raw-payload plan
+			// (#11962) instead of charging a zero stream-through dense side.
+			opts = append(opts, ggufload.WithStreamedDenseQ4K(true))
+			return opts
+		}
+		opts = append(opts, ggufload.WithStreamedDenseQ4KWorkingSet(serveStreamedDenseQ4KWorkingSetBound(hostFit)))
 	}
 	return opts
 }
