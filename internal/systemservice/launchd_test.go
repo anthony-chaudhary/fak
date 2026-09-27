@@ -1,9 +1,16 @@
 package systemservice
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
+	"os"
+	"os/exec"
+	"reflect"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -644,5 +651,509 @@ func TestParseLaunchctlPrintErrors(t *testing.T) {
 	}
 	if _, err := ParseLaunchctlPrint("some random prose without label or target"); !errors.Is(err, ErrMalformedLaunchctlOutput) {
 		t.Fatalf("missing label: %v", err)
+	}
+}
+
+// sampleNotRunningWithCoalitionsPrint is a stopped job whose nested
+// resource/jetsam coalition blocks still report `state = active` and
+// `type = resource|jetsam`. Only the top-level keys may drive the status.
+const sampleNotRunningWithCoalitionsPrint = `gui/501/com.fak.up = {
+	active count = 0
+	path = /Users/example/Library/LaunchAgents/com.fak.up.plist
+	type = LaunchAgent
+	state = not running
+
+	program = /Users/example/.local/bin/fak-native
+	arguments = {
+		/Users/example/.local/bin/fak-native
+		up
+		--headless
+	}
+
+	environment = {
+		XPC_SERVICE_NAME => com.fak.up
+	}
+
+	domain = gui/501 [100024]
+	runs = 3
+	last exit code = 0
+
+	resource coalition = {
+		ID = 4295
+		type = resource
+		state = active
+		active count = 0
+		name = com.fak.up
+	}
+
+	jetsam coalition = {
+		ID = 4296
+		type = jetsam
+		state = active
+		active count = 0
+		name = com.fak.up
+	}
+
+	spawn type = daemon (3)
+	properties = keepalive | runatload | inferred program
+}
+`
+
+func TestParseLaunchctlPrintNotRunningIgnoresNestedCoalitionState(t *testing.T) {
+	st, err := ParseLaunchctlPrint(sampleNotRunningWithCoalitionsPrint)
+	if err != nil {
+		t.Fatalf("ParseLaunchctlPrint failed: %v", err)
+	}
+	if st.State != "not running" {
+		t.Fatalf("state = %q, want %q (nested coalition state leaked)", st.State, "not running")
+	}
+	if st.Type != "LaunchAgent" {
+		t.Fatalf("type = %q, want LaunchAgent (nested coalition type leaked)", st.Type)
+	}
+	if st.IsRunning() {
+		t.Fatal("IsRunning() = true for a not-running job")
+	}
+	code, ok := st.ExitCode()
+	if !ok || code != 0 {
+		t.Fatalf("ExitCode = (%d, %v), want (0, true)", code, ok)
+	}
+	if st.Phase != servicespec.PhaseStopped {
+		t.Fatalf("phase = %q, want %q", st.Phase, servicespec.PhaseStopped)
+	}
+}
+
+// sampleRealFakUpRunningPrint is a scrubbed `launchctl print gui/<uid>/com.fak.up`
+// capture of a running LaunchAgent on macOS 26 (uid -> 501, home ->
+// /Users/example, SSH_AUTH_SOCK value redacted). The nested coalition blocks
+// carry their own `type = ...` / `state = active` keys.
+const sampleRealFakUpRunningPrint = `gui/501/com.fak.up = {
+	active count = 1
+	path = /Users/example/Library/LaunchAgents/com.fak.up.plist
+	type = LaunchAgent
+	state = running
+
+	program = /Users/example/.local/bin/fak-native
+	arguments = {
+		/Users/example/.local/bin/fak-native
+		up
+		--headless
+		--model
+		27B
+		--context
+		20480
+		--max-rss
+		25769803776
+		--max-rss-sustain
+		3m
+	}
+
+	stdout path = /tmp/fak-up.log
+	stderr path = /tmp/fak-up.err
+	inherited environment = {
+		SSH_AUTH_SOCK => <redacted>
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		OSLogRateLimit => 64
+		XPC_SERVICE_NAME => com.fak.up
+	}
+
+	domain = gui/501 [100024]
+	asid = 100024
+	minimum runtime = 30
+	exit timeout = 5
+	runs = 50
+	pid = 74723
+	immediate reason = inefficient
+	forks = 27
+	execs = 1
+	initialized = 1
+	trampolined = 1
+	started suspended = 0
+	proxy started suspended = 0
+	checked allocations = 0 (queried = 1)
+	checked allocations reason = no host
+	checked allocations flags = 0x0
+	last exit code = 0
+
+	resource coalition = {
+		ID = 4295
+		type = resource
+		state = active
+		active count = 1
+		name = com.fak.up
+	}
+
+	jetsam coalition = {
+		ID = 4296
+		type = jetsam
+		state = active
+		active count = 1
+		name = com.fak.up
+	}
+
+	spawn type = daemon (3)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	jetsam thread limit = 32
+	cpumon = default
+
+	properties = keepalive | runatload | inferred program
+}
+`
+
+func TestParseLaunchctlPrintRealFakUpRunning(t *testing.T) {
+	st, err := ParseLaunchctlPrint(sampleRealFakUpRunningPrint)
+	if err != nil {
+		t.Fatalf("ParseLaunchctlPrint failed: %v", err)
+	}
+	if st.Label != "com.fak.up" {
+		t.Fatalf("label = %q", st.Label)
+	}
+	if st.Domain != "gui/501" {
+		t.Fatalf("domain = %q, want gui/501", st.Domain)
+	}
+	if st.Target != "gui/501/com.fak.up" {
+		t.Fatalf("target = %q", st.Target)
+	}
+	if st.State != "running" {
+		t.Fatalf("state = %q, want running (nested coalition state leaked?)", st.State)
+	}
+	if st.Type != "LaunchAgent" {
+		t.Fatalf("type = %q, want LaunchAgent (nested coalition type leaked?)", st.Type)
+	}
+	if st.PID != 74723 {
+		t.Fatalf("pid = %d, want 74723", st.PID)
+	}
+	if st.PlistPath != "/Users/example/Library/LaunchAgents/com.fak.up.plist" {
+		t.Fatalf("plist path = %q", st.PlistPath)
+	}
+	if st.Program != "/Users/example/.local/bin/fak-native" {
+		t.Fatalf("program = %q", st.Program)
+	}
+	wantArgs := []string{
+		"/Users/example/.local/bin/fak-native", "up", "--headless",
+		"--model", "27B", "--context", "20480",
+		"--max-rss", "25769803776", "--max-rss-sustain", "3m",
+	}
+	if !reflect.DeepEqual(st.Arguments, wantArgs) {
+		t.Fatalf("arguments = %q, want %q", st.Arguments, wantArgs)
+	}
+	if st.Runs != 50 {
+		t.Fatalf("runs = %d, want 50", st.Runs)
+	}
+	wantProps := []string{"keepalive", "runatload", "inferred program"}
+	if !reflect.DeepEqual(st.Properties, wantProps) {
+		t.Fatalf("properties = %q, want %q", st.Properties, wantProps)
+	}
+	if !slices.Contains(st.Properties, "keepalive") {
+		t.Fatalf("properties %q missing keepalive", st.Properties)
+	}
+	code, ok := st.ExitCode()
+	if !ok || code != 0 {
+		t.Fatalf("ExitCode = (%d, %v), want (0, true)", code, ok)
+	}
+	if st.ExitReason != "inefficient" {
+		t.Fatalf("exit reason = %q, want inefficient", st.ExitReason)
+	}
+	if !st.IsRunning() {
+		t.Fatal("IsRunning() should be true")
+	}
+	if st.Phase != servicespec.PhaseReady {
+		t.Fatalf("phase = %q, want %q", st.Phase, servicespec.PhaseReady)
+	}
+}
+
+func TestParseLaunchctlPrintNestedBlocksDoNotLeakIntoTopLevel(t *testing.T) {
+	// Nested blocks reuse top-level key names; none of them may win.
+	raw := `gui/501/com.fak.nested = {
+	path = /Users/example/Library/LaunchAgents/com.fak.nested.plist
+	type = LaunchAgent
+	state = not running
+	program = /usr/local/bin/fak
+	endpoints = {
+		"com.fak.nested.port" = {
+			port = 0x1234
+			active = 0
+			state = active
+			pid = 999
+		}
+	}
+	event triggers = {
+		trigger = {
+			type = com.apple.notifyd.matching
+			state = active
+			path = /tmp/nested
+			domain = gui/999
+			last exit code = 9
+		}
+	}
+	last exit code = (never exited)
+}
+`
+	st, err := ParseLaunchctlPrint(raw)
+	if err != nil {
+		t.Fatalf("ParseLaunchctlPrint failed: %v", err)
+	}
+	if st.State != "not running" || st.Type != "LaunchAgent" || st.PID != 0 {
+		t.Fatalf("nested keys leaked: state=%q type=%q pid=%d", st.State, st.Type, st.PID)
+	}
+	if st.PlistPath != "/Users/example/Library/LaunchAgents/com.fak.nested.plist" || st.Domain != "gui/501" {
+		t.Fatalf("nested path/domain leaked: path=%q domain=%q", st.PlistPath, st.Domain)
+	}
+	if st.LastExitCode != nil {
+		t.Fatalf("last exit code = %d, want nil (never exited)", *st.LastExitCode)
+	}
+	if st.Arguments != nil || st.Properties != nil {
+		t.Fatalf("absent arguments/properties should be nil: %q %q", st.Arguments, st.Properties)
+	}
+	if st.Phase != servicespec.PhaseStopped {
+		t.Fatalf("phase = %q, want %q", st.Phase, servicespec.PhaseStopped)
+	}
+}
+
+func TestParseLaunchctlPrintHeaderlessTreatsDepthZeroAsTopLevel(t *testing.T) {
+	raw := "\tstate = not running\n\tprogram = /usr/local/bin/fak\n\tresource coalition = {\n\t\tstate = active\n\t}\n\tenvironment = {\n\t\tXPC_SERVICE_NAME => com.fak.headless\n\t}\n\tlast exit code = 0\n"
+	st, err := ParseLaunchctlPrint(raw)
+	if err != nil {
+		t.Fatalf("ParseLaunchctlPrint failed: %v", err)
+	}
+	if st.Label != "com.fak.headless" || st.Target != "com.fak.headless" {
+		t.Fatalf("label/target = %q/%q", st.Label, st.Target)
+	}
+	if st.State != "not running" || st.Program != "/usr/local/bin/fak" {
+		t.Fatalf("state=%q program=%q", st.State, st.Program)
+	}
+	if st.Phase != servicespec.PhaseStopped {
+		t.Fatalf("phase = %q, want %q", st.Phase, servicespec.PhaseStopped)
+	}
+}
+
+func TestParseLaunchctlPrintExitCodeWithTrailingText(t *testing.T) {
+	raw := `gui/501/com.fak.up = {
+	path = /Users/example/Library/LaunchAgents/com.fak.up.plist
+	type = LaunchAgent
+	state = not running
+	program = /Users/example/.local/bin/fak-native
+	domain = gui/501 [100024]
+	runs = 7
+	last exit code = 1: Operation not permitted
+}
+`
+	st, err := ParseLaunchctlPrint(raw)
+	if err != nil {
+		t.Fatalf("ParseLaunchctlPrint failed: %v", err)
+	}
+	code, ok := st.ExitCode()
+	if !ok || code != 1 {
+		t.Fatalf("ExitCode = (%d, %v), want (1, true)", code, ok)
+	}
+	if st.Phase != servicespec.PhaseFailed {
+		t.Fatalf("phase = %q, want %q", st.Phase, servicespec.PhaseFailed)
+	}
+	if st.Observed.LastExit == nil || st.Observed.LastExit.Code != 1 || st.Observed.LastExit.Class != servicespec.ExitCrash {
+		t.Fatalf("last exit = %+v, want code 1 / crash", st.Observed.LastExit)
+	}
+	if st.Runs != 7 {
+		t.Fatalf("runs = %d, want 7", st.Runs)
+	}
+}
+
+func TestParseLeadingInt(t *testing.T) {
+	for in, want := range map[string]int{"0": 0, "3": 3, "1: Operation not permitted": 1, " 78:EX_CONFIG": 78, "-1": -1} {
+		if got, ok := parseLeadingInt(in); !ok || got != want {
+			t.Fatalf("parseLeadingInt(%q) = (%d, %v), want (%d, true)", in, got, ok, want)
+		}
+	}
+	for _, in := range []string{"", "(never exited)", "-", "abc"} {
+		if got, ok := parseLeadingInt(in); ok {
+			t.Fatalf("parseLeadingInt(%q) = (%d, true), want not ok", in, got)
+		}
+	}
+}
+
+func TestParseLaunchctlPrintDisabled(t *testing.T) {
+	modern := "\n\tdisabled services = {\n\t\t\"com.docker.helper\" => enabled\n\t\t\"com.fak.up\" => enabled\n\t\t\"com.fak.up.old\" => disabled\n\t\t\"com.apple.Siri.agent\" => disabled\n\t}\n"
+	legacy := "\n\tdisabled services = {\n\t\t\"com.fak.up\" => false\n\t\t\"com.fak.guard\" => true\n\t}\n"
+	cases := []struct {
+		name, output, label  string
+		wantDisabled, wantOK bool
+	}{
+		{"modern enabled", modern, "com.fak.up", false, true},
+		{"modern disabled", modern, "com.fak.up.old", true, true},
+		{"modern disabled other", modern, "com.apple.Siri.agent", true, true},
+		{"legacy false means enabled", legacy, "com.fak.up", false, true},
+		{"legacy true means disabled", legacy, "com.fak.guard", true, true},
+		{"not found", modern, "com.fak.absent", false, false},
+		{"prefix is not a match", modern, "com.fak", false, false},
+		{"empty output", "", "com.fak.up", false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			disabled, found := ParseLaunchctlPrintDisabled(tc.output, tc.label)
+			if disabled != tc.wantDisabled || found != tc.wantOK {
+				t.Fatalf("ParseLaunchctlPrintDisabled(%q) = (%v, %v), want (%v, %v)", tc.label, disabled, found, tc.wantDisabled, tc.wantOK)
+			}
+		})
+	}
+}
+
+func TestProjectLaunchdEnableDisableCommands(t *testing.T) {
+	agent, err := ProjectLaunchd(&servicespec.Spec{
+		Schema:   servicespec.SchemaV1,
+		Identity: servicespec.Identity{Node: "node-macos-2", Service: "up"},
+		Kind:     servicespec.KindService,
+		Desired:  servicespec.DesiredRunning,
+		Command:  []string{"/usr/local/bin/fak", "up"},
+	}, LaunchdInput{Type: LaunchAgent, UID: 501, PlistDir: "~/Library/LaunchAgents"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "launchctl enable gui/501/com.fak.up"; agent.Commands.Enable != want || agent.EnableCommand() != want {
+		t.Fatalf("enable cmd = %q, want %q", agent.Commands.Enable, want)
+	}
+	if want := "launchctl disable gui/501/com.fak.up"; agent.Commands.Disable != want || agent.DisableCommand() != want {
+		t.Fatalf("disable cmd = %q, want %q", agent.Commands.Disable, want)
+	}
+
+	daemon, err := ProjectLaunchd(baseLaunchdSpec(), LaunchdInput{Type: LaunchDaemon, EnvironmentFiles: []string{"/etc/fak/gateway.env"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "launchctl enable system/com.fak.gateway"; daemon.EnableCommand() != want {
+		t.Fatalf("enable cmd = %q, want %q", daemon.EnableCommand(), want)
+	}
+	if want := "launchctl disable system/com.fak.gateway"; daemon.DisableCommand() != want {
+		t.Fatalf("disable cmd = %q, want %q", daemon.DisableCommand(), want)
+	}
+
+	raw, err := json.Marshal(agent.Commands)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{`"enable":"launchctl enable gui/501/com.fak.up"`, `"disable":"launchctl disable gui/501/com.fak.up"`} {
+		if !strings.Contains(string(raw), w) {
+			t.Fatalf("commands JSON missing %s: %s", w, raw)
+		}
+	}
+}
+
+// TestParseLaunchctlPrintLiveWitness parses the host's real, read-only
+// `launchctl print gui/<uid>/<label>` and `launchctl print-disabled gui/<uid>`
+// output. Opt-in: set FAK_LAUNCHD_LIVE_LABEL (e.g. com.fak.up) on macOS.
+func TestParseLaunchctlPrintLiveWitness(t *testing.T) {
+	label := os.Getenv("FAK_LAUNCHD_LIVE_LABEL")
+	if runtime.GOOS != "darwin" || label == "" {
+		t.Skip("set FAK_LAUNCHD_LIVE_LABEL on macOS to parse live launchctl output")
+	}
+	domain := fmt.Sprintf("gui/%d", os.Getuid())
+	out, err := exec.Command("launchctl", "print", domain+"/"+label).CombinedOutput()
+	if err != nil {
+		t.Skipf("launchctl print %s/%s: %v: %s", domain, label, err, out)
+	}
+	st, err := ParseLaunchctlPrint(string(out))
+	if err != nil {
+		t.Fatalf("ParseLaunchctlPrint(live) failed: %v", err)
+	}
+	if st.Label != label || st.Domain != domain {
+		t.Fatalf("label/domain = %q/%q, want %q/%q", st.Label, st.Domain, label, domain)
+	}
+	if st.Type != string(LaunchAgent) && st.Type != string(LaunchDaemon) {
+		t.Fatalf("type = %q, want a launchd job type (nested block leaked?)", st.Type)
+	}
+	if st.State == "active" {
+		t.Fatalf("state = %q: nested coalition state leaked into the job state", st.State)
+	}
+	if st.Program == "" && len(st.Arguments) == 0 {
+		t.Fatalf("neither program nor arguments parsed from live output")
+	}
+	if st.State == "running" && (st.PID <= 0 || st.Phase != servicespec.PhaseReady) {
+		t.Fatalf("running job parsed pid=%d phase=%q", st.PID, st.Phase)
+	}
+	t.Logf("live %s: state=%q type=%q pid=%d runs=%d phase=%q program=%q args=%q properties=%q",
+		st.Target, st.State, st.Type, st.PID, st.Runs, st.Phase, st.Program, st.Arguments, st.Properties)
+
+	dis, err := exec.Command("launchctl", "print-disabled", domain).CombinedOutput()
+	if err != nil {
+		t.Skipf("launchctl print-disabled %s: %v", domain, err)
+	}
+	disabled, found := ParseLaunchctlPrintDisabled(string(dis), label)
+	t.Logf("live print-disabled %s: disabled=%v found=%v", label, disabled, found)
+}
+
+// TestParseLaunchctlPrintReviewRegressions pins the real-output shapes an
+// independent review of 868 live prints found (#13535): inline block closes,
+// argv that mentions a not-found phrase, verbatim argv, truncation, a merged
+// stderr preamble, and the no-GUI-domain refusal.
+func TestParseLaunchctlPrintReviewRegressions(t *testing.T) {
+	// launchctl prints data descriptors without a trailing newline, so a
+	// block's "}" lands at the end of a content line (networkserviceproxy).
+	inlineClose := "gui/501/com.apple.networkserviceproxy = {\n\tstate = running\n\tpid = 812\n" +
+		"\tevent triggers = {\n\t\tnew-handles => {\n\t\t\tdescriptor = {\n\t\t\t\t\"aux-data\" => {\n" +
+		"\t\t\t\t\t\"NSPServerAuxilaryData\" => \t\t\t\t\t\"NSPProxyAgentManagerAuxilaryData\" => \t\t\t\t}\n" +
+		"\t\t\t\t\"handles-array\" => [\n\t\t\t\t\t2 = {\n\t\t\t\t\t\t\"key-material\" => \t\t\t\t\t}\n" +
+		"\t\t\t\t]\n\t\t\t}\n\t\t}\n\t}\n" +
+		"\tproperties = supports transactions | supports pressured exit | system service | exponential throttling | tle system\n}\n"
+	st, err := ParseLaunchctlPrint(inlineClose)
+	if err != nil {
+		t.Fatalf("inline close: %v", err)
+	}
+	if len(st.Properties) != 5 || st.State != "running" || st.PID != 812 {
+		t.Fatalf("inline close: properties=%q state=%q pid=%d", st.Properties, st.State, st.PID)
+	}
+
+	// A running job whose own argv and exit text contain not-found phrases.
+	mentions := "gui/501/com.fak.x = {\n\tstate = running\n\targuments = {\n\t\t/usr/local/bin/x\n\t\t--msg=service is not loaded\n\t}\n" +
+		"\tpid = 4242\n\tlast exit code = 3: No such process\n}\n"
+	st, err = ParseLaunchctlPrint(mentions)
+	if err != nil {
+		t.Fatalf("phrase in argv read as not found: %v", err)
+	}
+	if st.PID != 4242 || st.LastExitCode == nil || *st.LastExitCode != 3 || len(st.Arguments) != 2 {
+		t.Fatalf("mentions: pid=%d exit=%v args=%q", st.PID, st.LastExitCode, st.Arguments)
+	}
+
+	// argv is copied verbatim: surrounding spaces, an empty entry, and a "}".
+	verbatim := "gui/501/com.fak.v = {\n\tstate = running\n\targuments = {\n\t\t/usr/local/bin/x\n\t\t  spaced  \n\t\t\n\t\t}\n\t\t--after\n\t}\n\tpid = 7\n\tresource coalition = {\n\t\tstate = active\n\t}\n}\n"
+	st, err = ParseLaunchctlPrint(verbatim)
+	if err != nil {
+		t.Fatalf("verbatim: %v", err)
+	}
+	want := []string{"/usr/local/bin/x", "  spaced  ", "", "}", "--after"}
+	if strings.Join(st.Arguments, "|") != strings.Join(want, "|") || st.State != "running" || st.PID != 7 {
+		t.Fatalf("verbatim: args=%q state=%q pid=%d", st.Arguments, st.State, st.PID)
+	}
+
+	// Truncated output must not pass as a (stale-looking) definition.
+	for name, raw := range map[string]string{
+		"mid-args":     "gui/501/com.fak.t = {\n\tstate = running\n\targuments = {\n\t\t/usr/local/bin/x\n\t\tup\n",
+		"never-closed": "gui/501/com.fak.t = {\n\tstate = running\n\tpid = 9\n",
+	} {
+		if _, err := ParseLaunchctlPrint(raw); !errors.Is(err, ErrMalformedLaunchctlOutput) {
+			t.Fatalf("truncated %s: err = %v, want ErrMalformedLaunchctlOutput", name, err)
+		}
+	}
+
+	// A merged stderr preamble before the header.
+	st, err = ParseLaunchctlPrint("launchctl: warning: something\ngui/501/com.fak.p = {\n\tstate = running\n\tpid = 11\n}\n")
+	if err != nil || st.Target != "gui/501/com.fak.p" || st.State != "running" || st.PID != 11 {
+		t.Fatalf("preamble: st=%+v err=%v", st, err)
+	}
+
+	// No GUI session for the uid (e.g. over SSH) is a not-found, not malformed.
+	if _, err := ParseLaunchctlPrint("Bad request.\nCould not find domain for user gui: 99999\n"); !errors.Is(err, ErrLaunchctlServiceNotFound) {
+		t.Fatalf("no gui domain: err = %v", err)
+	}
+
+	// A signal termination with no exit-code line is surfaced as the reason.
+	st, err = ParseLaunchctlPrint("gui/501/com.fak.s = {\n\tstate = not running\n\tlast terminating signal = Terminated: 15\n}\n")
+	if err != nil || st.LastExitCode != nil || st.ExitReason != "terminated by signal: Terminated: 15" {
+		t.Fatalf("signal: st=%+v err=%v", st, err)
 	}
 }

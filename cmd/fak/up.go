@@ -59,6 +59,7 @@ func printUpHelp(w io.Writer) {
 	fmt.Fprintln(w, "  --bundle-verify-key <key>   optional public key / signature verification key for bundle")
 	fmt.Fprintln(w, "  --policy <path>             path to security policy file")
 	fmt.Fprintln(w, "  --help, -h                  show this help message")
+	printUpServiceHelp(w)
 }
 
 // upHelpFlagLines renders the human-readable synopsis for each flag registered
@@ -129,6 +130,10 @@ func isServeDelegation(argv []string) bool {
 // When raw serve-specific flags are passed, it delegates directly to serve.
 // Otherwise, it runs the turnkey Apple Silicon model provisioner and interactive server.
 func cmdUp(argv []string) {
+	if isUpServiceVerb(argv) {
+		cmdUpService(argv)
+		return
+	}
 	for _, arg := range argv {
 		if arg == "--help" || arg == "-h" || arg == "help" {
 			printUpHelp(os.Stdout)

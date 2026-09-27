@@ -244,6 +244,7 @@ Flags:
 - `fak up --dry-run`: profile unified memory and print the allocation plan without loading weights.
 - `fak up --headless`: run the background server without opening the terminal REPL.
 - `fak up --model 27B`: override auto-selected model tier.
+- `fak up status` / `fak up off [--for 30m]` / `fak up on`: control the default-on native service, the `com.fak.up` LaunchAgent. `off` writes a dev-off marker and runs `launchctl bootout`, so the service stays off for dev work (a bench run, a real-model test). A plain `off` also runs `launchctl disable`, which keeps the service off across logins until `on`. `off --for <dur>` skips the disable and starts a waker that runs `on` when the window lapses. A reboot during the window restores the service early, since it is default-on. `on` re-enables the job, re-bootstraps it from the plist, and waits for `/healthz` to report ready. launchd ignores plist edits until the next bootstrap, and `status` reports that drift as `STALE_DEFINITION` (#13535).
 
 ---
 
