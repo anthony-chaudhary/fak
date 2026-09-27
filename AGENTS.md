@@ -454,10 +454,24 @@ peer's `MERGE_HEAD`, and reconcile divergence in place with `fak sync apply`. Th
 the preventive contract; the query surfaces are the token-specific recovery path.
 
 Check setup failures with `python tools/extend_preflight.py`; the full contributor
-contract is [`CONTRIBUTING.md`](CONTRIBUTING.md). If a refusal is genuinely wrong,
+contract is [`CONTRIBUTING.md`](CONTRIBUTING.md). Recover first; a complaint never
+authorizes bypassing a refusal, lease, or gate. If a refusal is genuinely wrong,
 file its witnessed, deduplicated appeal with `fak complain --summary "…" --reason
-<TOKEN> --tool <Tool> --from-journal --args-digest <sha256:…> --live`. Recover
-first; appeal only when the guard, not the call, is wrong. Taxonomy and routing:
+<TOKEN> --tool <Tool> --from-journal --args-digest <sha256:…> --workspace
+<blocked-root> --live`. When two enforced workflow obligations leave no compliant
+sequence after safe recovery is exhausted, file the exact command, output, attempted
+routes, and unblock condition with `fak complain --domain workflow --kind catch-22
+--summary "…" --rationale-file <absolute-scrubbed-evidence> --workspace
+<blocked-root> --repo <owner/repo> --live`; use `completion-blocker` for a general
+completion blocker. Success requires a reported created or updated issue. If live
+filing cannot fetch GitHub, the command exits nonzero before any remote issue action,
+reports JSON mode `pending-local`, and retains a scrubbed stable-key receipt under
+`<blocked-root>/.fak/complaints/pending`. Inspect it without contacting GitHub with
+`fak complain --pending --workspace <blocked-root> --json`; do not claim remote
+success. When GitHub recovers, repeat the same stable complaint and `--live` command;
+a verified create/update removes its receipt. An unverified sync also exits nonzero
+and retains the receipt. The receipt is recovery evidence, never permission to bypass
+a refusal, lease, or gate. Taxonomy and routing:
 [`docs/notes/CONCEPT-AGENT-FRICTION-COMPLAINT-CHANNELS-2026-06-29.md`](docs/notes/CONCEPT-AGENT-FRICTION-COMPLAINT-CHANNELS-2026-06-29.md).
 
 ## Releasing and planning

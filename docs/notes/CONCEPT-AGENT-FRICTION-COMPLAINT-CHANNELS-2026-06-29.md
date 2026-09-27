@@ -91,10 +91,7 @@ it actionable instead of noise.
    sets `FAK_COMPLAIN_LIVE=1` so every appeal auto-files without threading the flag
    through each call. A dry-run says loudly on stderr that NO ticket was filed, so a
    printed plan is never mistaken for a tracked appeal — the "worked around it and
-   journaled it privately" failure this note exists to kill. **Next checkable step:**
-   add a `workflow`/`dev` complaint domain so the *same* deduping channel covers
-   general agentic-dev friction (the classes above), and reference it from
-   [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) so it is discoverable by default.
+   journaled it privately" failure this note exists to kill.
 
 3. **Structured, verifiable refusal** — when the right move is to *decline green
    with a reason* rather than render an unearned OK. Channel: the DOS closed refusal
@@ -109,7 +106,27 @@ it actionable instead of noise.
    `internal/dogfoodissues` fold that the guard-appeal path already reuses): a stable
    marker key folds the N-th occurrence onto one issue and bumps an occurrence count,
    so a recurring papercut becomes a *stronger* signal over time rather than a pile
-   of duplicates.
+   of duplicates. The `workflow` complaint domain is shipped for this channel. A
+   catch-22 or completion blocker is genuine only after recovery and alternate safe
+   routes are exhausted; capture the exact command and output, attempted routes, and
+   unblock condition in a scrubbed file, then run:
+
+   ```text
+   fak complain --domain workflow --kind catch-22 --summary "<one-line summary>" --rationale-file <absolute-scrubbed-evidence> --workspace <blocked-root> --repo <owner/repo> --live
+   ```
+
+   Use `completion-blocker` for a general completion blocker. `--workspace` binds
+   journal discovery and complaint context to the affected checkout. Filing a
+   complaint does not authorize bypassing a refusal, lease, or gate. Treat the
+   complaint as filed only when the live command reports a created or updated issue.
+   Before contacting GitHub, a live run writes a scrubbed, stable-key receipt under
+   `<blocked-root>/.fak/complaints/pending`. A GitHub fetch failure exits nonzero
+   before any remote issue action and reports JSON mode `pending-local`; an
+   unverified sync also exits nonzero and leaves the receipt in place. Inspect the
+   queue without contacting GitHub using `fak complain --pending --workspace
+   <blocked-root> --json`, and do not claim remote success. When GitHub recovers,
+   repeat the same stable complaint and `--live` command; a verified create/update
+   removes its receipt. This recovery path does not authorize bypassing any guard.
 
 ## How to complain well (so it is signal, not noise)
 
@@ -137,13 +154,11 @@ each one a property the channels above already enforce:
   the DOS refusal vocabulary (`dos_refuse_reasons` / `dos_check_reason`) are the
   stable channels an agent can use right now. The dedup/escalation machinery
   (`internal/dogfoodissues`) is shipped and reused by the appeal path. `fak complain`
-  is now wired (`cmd/fak/main.go`); it files a deduped gh ticket with the witnessed
-  verdict attached. To make filing the default rather than an easily-forgotten
-  `--live` opt-in, set `FAK_COMPLAIN_LIVE=1` fleet-wide so every appeal auto-files;
-  a dry-run discloses on stderr that nothing was filed so it is never mistaken for a
-  tracked ticket.
-- **`not yet`:** a single verb that covers *general* agentic-dev friction (not just
-  guard appeals) — the `workflow`/`dev` complaint domain — is not yet wired. The next
-  checkable step is in channel (2) above: add that domain to the same deduping
-  channel. This note is the durable half — the taxonomy and routing an agent needs to
-  complain well *today*, through the channels that already exist.
+   now carries both journal-bound guard appeals and `workflow` complaints for
+   general agentic-dev friction. To make filing the default rather than an
+   easily-forgotten `--live` opt-in, set `FAK_COMPLAIN_LIVE=1` fleet-wide. A dry-run
+   discloses on stderr that nothing was filed and creates no pending receipt. A live
+   GitHub fetch failure exits nonzero with `pending-local` and leaves a scrubbed local
+   receipt; list it with `fak complain --pending --workspace <blocked-root> --json`,
+   then repeat the same stable complaint after GitHub recovers. Only a verified
+   create/update clears the receipt and establishes remote success.
