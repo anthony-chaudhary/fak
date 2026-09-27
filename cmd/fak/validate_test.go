@@ -18,6 +18,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
+// validateWSLDistroPrefix and validateWSLPathPrefix mirror the capability-probe
+// header internal/validate parses, so the stub speaks the live protocol.
+const (
+	validateWSLDistroPrefix = "__FAK_VALIDATE_DISTRO__="
+	validateWSLPathPrefix   = "__FAK_VALIDATE_PATH__="
+)
+
 func TestValidateTimeoutReturnsStructuredPartialResultAndProgress(t *testing.T) {
 	oldHook := validatePhaseHook
 	validatePhaseHook = func(ctx context.Context, phase string) {
@@ -100,43 +107,6 @@ func TestNormalizeMinePathsPrunesScratchDirsUnlessExplicit(t *testing.T) {
 	}
 }
 
-func TestOwnedTestRunExpressionSelectsOnlyOwnedTests(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, "p", "owned_test.go")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	body := `package p
-
-import "testing"
-
-func helper() {}
-func TestZulu(t *testing.T) {}
-func BenchmarkOwned(b *testing.B) {}
-func FuzzOwned(f *testing.F) {}
-func TestAlpha(t *testing.T) {}
-`
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got, err := ownedTestRunExpression(root, []string{"p/owned_test.go"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "^(FuzzOwned|TestAlpha|TestZulu)$"
-	if got != want {
-		t.Fatalf("test run expression=%q, want %q", got, want)
-	}
-
-	gotMixed, err := ownedTestRunExpression(root, []string{"p/owned_test.go", "p/production.go"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotMixed != "" {
-		t.Fatalf("test run expression with mixed paths=%q, want %q", gotMixed, "")
-	}
-}
-
 func runValidateJSON(t *testing.T, argv []string) (validateResult, int, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
@@ -191,139 +161,6 @@ func TestAdd(t *testing.T) {
 	}
 }
 
-func TestValidateTestRunnerSelectsWSLOnWindows(t *testing.T) {
-	if !defaultValidateWSLTests("windows") {
-		t.Fatal("Windows must default to WSL tests")
-	}
-	if defaultValidateWSLTests("linux") {
-		t.Fatal("non-Windows hosts must retain native tests")
-	}
-	if got := validateTestRunner("windows", true); got != "wsl.exe bash -lc go test" {
-		t.Fatalf("Windows runner = %q, want WSL", got)
-	}
-	if got := validateTestRunner("linux", true); got != "go test" {
-		t.Fatalf("Linux runner = %q, want native Go", got)
-	}
-	if got := validateTestRunner("windows", false); got != "go test" {
-		t.Fatalf("opt-out runner = %q, want native Go", got)
-	}
-}
-
-func TestValidateWSLCapabilitySurfaceCoversEveryExternalCommand(t *testing.T) {
-	got := strings.Join(validateWSLRequiredCommandNames(), ",")
-	want := "bash,cp,git,go,gofmt,ls,mkdir,mv,pwd,rm,tail,tar,wsl.exe,xargs"
-	if got != want {
-		t.Fatalf("WSL capability surface = %q, want %q", got, want)
-	}
-	phaseCommands := make(map[string]bool)
-	for _, surface := range validateWSLCommandSurface {
-		if surface.phase == "" || len(surface.commands) == 0 {
-			t.Fatalf("invalid WSL command surface: %+v", surface)
-		}
-		for _, command := range surface.commands {
-			phaseCommands[surface.phase+"/"+command] = true
-		}
-	}
-	for _, want := range []string{
-		"test_materialize/tar", "extract_tip/git", "extract_tip/xargs",
-		"cleanup/rm", "overlay/cp", "overlay/pwd", "go_checks/gofmt",
-	} {
-		if !phaseCommands[want] {
-			t.Fatalf("WSL command surface omits %s", want)
-		}
-	}
-}
-
-func TestValidateWSLCapabilityPreflightReportsMissingAndCachesByIdentity(t *testing.T) {
-	checkRuns := stubValidateWSLCapabilityCommands(t, "Ubuntu-24.04\n/usr/local/bin:/usr/bin", "rm\ngit\n")
-	first := preflightValidateWSLCapabilitiesWithin(context.Background())
-	if first.Status != "missing" || !strings.HasPrefix(first.Identity, "Ubuntu-24.04@path:") || strings.Contains(first.Identity, "/usr") || strings.Join(first.Missing, ",") != "git,rm" || first.Cached {
-		t.Fatalf("first verdict = %+v", first)
-	}
-	if !strings.Contains(first.Detail, "no fallback selected") {
-		t.Fatalf("detail = %q; want explicit no-fallback verdict", first.Detail)
-	}
-	encoded, err := json.Marshal(first)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(encoded), "/usr/local/bin") {
-		t.Fatalf("verdict leaks raw PATH: %s", encoded)
-	}
-	second := preflightValidateWSLCapabilitiesWithin(context.Background())
-	if !second.Cached || strings.Join(second.Missing, ",") != "git,rm" {
-		t.Fatalf("cached verdict = %+v", second)
-	}
-	if *checkRuns != 1 {
-		t.Fatalf("capability check runs = %d, want 1 for stable identity", *checkRuns)
-	}
-}
-
-func TestValidateWSLCapabilityScriptReportsGofmtMissingFromPATH(t *testing.T) {
-	script := validateWSLCapabilityScript([]string{"wsl.exe", "go", "gofmt"})
-	if !strings.Contains(script, "for cmd in 'go' 'gofmt'") || !strings.Contains(script, "command -v \"$cmd\"") {
-		t.Fatalf("capability script does not check bare go and gofmt through PATH: %s", script)
-	}
-	if strings.Contains(script, "GOROOT") || strings.Contains(script, "go env") {
-		t.Fatalf("capability script accepts a GOROOT-only gofmt that the real command cannot invoke: %s", script)
-	}
-
-	stubValidateWSLCapabilityCommands(t, "Ubuntu-24.04\n/usr/bin", "gofmt\n")
-	verdict := preflightValidateWSLCapabilitiesWithin(context.Background())
-	if verdict.Status != "missing" || strings.Join(verdict.Missing, ",") != "gofmt" {
-		t.Fatalf("verdict = %+v; want go present and bare gofmt missing", verdict)
-	}
-}
-
-func TestValidateWSLCapabilityPreflightTypesMissingHostLauncher(t *testing.T) {
-	resetValidateWSLCapabilityCacheForTest()
-	oldLookPath := validateWSLLookPath
-	oldCommand := validateWSLCommand
-	validateWSLLookPath = func(string) (string, error) { return "", os.ErrNotExist }
-	validateWSLCommand = func(context.Context, ...string) ([]byte, error) {
-		t.Fatal("WSL command must not run without the host launcher")
-		return nil, nil
-	}
-	t.Cleanup(func() {
-		validateWSLLookPath = oldLookPath
-		validateWSLCommand = oldCommand
-		resetValidateWSLCapabilityCacheForTest()
-	})
-	verdict := preflightValidateWSLCapabilitiesWithin(context.Background())
-	if verdict.Status != "missing" || strings.Join(verdict.Missing, ",") != "wsl.exe" {
-		t.Fatalf("verdict = %+v", verdict)
-	}
-}
-
-func TestValidateWSLCapabilityPreflightBoundsProbe(t *testing.T) {
-	resetValidateWSLCapabilityCacheForTest()
-	oldLookPath := validateWSLLookPath
-	oldCommand := validateWSLCommand
-	validateWSLLookPath = func(string) (string, error) { return `C:\Windows\System32\wsl.exe`, nil }
-	var remaining time.Duration
-	validateWSLCommand = func(ctx context.Context, _ ...string) ([]byte, error) {
-		deadline, ok := ctx.Deadline()
-		if !ok {
-			t.Fatal("WSL capability probe has no deadline")
-		}
-		remaining = time.Until(deadline)
-		return []byte(validateWSLDistroPrefix + "Ubuntu-24.04\n" + validateWSLPathPrefix + "/usr/bin\n"), nil
-	}
-	t.Cleanup(func() {
-		validateWSLLookPath = oldLookPath
-		validateWSLCommand = oldCommand
-		resetValidateWSLCapabilityCacheForTest()
-	})
-
-	verdict := preflightValidateWSLCapabilitiesWithin(context.Background())
-	if verdict.Status != "ready" {
-		t.Fatalf("verdict = %+v", verdict)
-	}
-	if remaining <= 0 || remaining > validateWSLPreflightTimeout {
-		t.Fatalf("probe deadline remaining = %s, want (0, %s]", remaining, validateWSLPreflightTimeout)
-	}
-}
-
 func TestValidateMissingWSLCapabilityStopsBeforeWorkspaceAllocation(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("Windows selects the WSL workspace")
@@ -354,7 +191,6 @@ func TestValidateMissingWSLCapabilityStopsBeforeWorkspaceAllocation(t *testing.T
 
 func stubValidateWSLCapabilityCommands(t *testing.T, identity, missing string) *int {
 	t.Helper()
-	resetValidateWSLCapabilityCacheForTest()
 	oldLookPath := validateWSLLookPath
 	oldCommand := validateWSLCommand
 	checkRuns := 0
@@ -376,58 +212,8 @@ func stubValidateWSLCapabilityCommands(t *testing.T, identity, missing string) *
 	t.Cleanup(func() {
 		validateWSLLookPath = oldLookPath
 		validateWSLCommand = oldCommand
-		resetValidateWSLCapabilityCacheForTest()
 	})
 	return &checkRuns
-}
-
-func resetValidateWSLCapabilityCacheForTest() {
-	validateWSLCapabilities.Lock()
-	validateWSLCapabilities.byIdentity = make(map[string]validateWSLCapabilityVerdict)
-	validateWSLCapabilities.identityByLauncher = make(map[string]string)
-	validateWSLCapabilities.Unlock()
-}
-
-func TestValidateTestArgsDisableCacheAndKeepRunBeforeTargets(t *testing.T) {
-	got := validateTestArgs("^TestOwned$", []string{"./internal/owned"})
-	want := []string{"test", "-count=1", "-run", "^TestOwned$", "./internal/owned"}
-	if strings.Join(got, "|") != strings.Join(want, "|") {
-		t.Fatalf("validate test args = %v, want %v", got, want)
-	}
-}
-
-func TestValidateBuildAndVetArgsArePathPortable(t *testing.T) {
-	tests := []struct {
-		mode string
-		want []string
-	}{
-		{"build", []string{"build", "-trimpath", "-buildvcs=false", "./internal/owned"}},
-		{"vet", []string{"vet", "-trimpath", "./internal/owned"}},
-	}
-	for _, tc := range tests {
-		got := validateGoCheckArgs(tc.mode, []string{"./internal/owned"})
-		if strings.Join(got, "|") != strings.Join(tc.want, "|") {
-			t.Fatalf("%s args = %v, want exact %v", tc.mode, got, tc.want)
-		}
-	}
-}
-
-func TestRenderValidateReportsRunnerOnFailure(t *testing.T) {
-	var out bytes.Buffer
-	renderValidate(&out, validateResult{
-		Tip:    "0123456789abcdef",
-		Runner: "wsl.exe bash -lc go test",
-		Failures: []ciPreflightFailure{{
-			Step:   "test",
-			Detail: "deliberate fixture failure",
-		}},
-	})
-	got := out.String()
-	for _, want := range []string{"runner: wsl.exe bash -lc go test", "test: deliberate fixture failure"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("render = %q; want %q", got, want)
-		}
-	}
 }
 
 func TestValidateRequiresExplicitMine(t *testing.T) {
@@ -967,54 +753,4 @@ func validateContains(values []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func TestReadWSLWorktreeGitDirTranslatesWindowsPaths(t *testing.T) {
-	cases := []struct {
-		name    string
-		gitdir  string
-		wantWSL string
-		wantOK  bool
-	}{
-		{
-			name:    "windows absolute forward slash",
-			gitdir:  "gitdir: C:/work/fak/.git/worktrees/worker-1\n",
-			wantWSL: "/mnt/c/work/fak/.git/worktrees/worker-1",
-			wantOK:  true,
-		},
-		{
-			name:    "windows absolute backslash",
-			gitdir:  "gitdir: C:\\work\\fak\\.git\\worktrees\\worker-2\n",
-			wantWSL: "/mnt/c/work/fak/.git/worktrees/worker-2",
-			wantOK:  true,
-		},
-		{
-			name:    "d drive path",
-			gitdir:  "gitdir: D:/data/repo/.git/worktrees/sub1",
-			wantWSL: "/mnt/d/data/repo/.git/worktrees/sub1",
-			wantOK:  true,
-		},
-		{
-			name:    "not a gitdir file",
-			gitdir:  "ref: refs/heads/main\n",
-			wantWSL: "",
-			wantOK:  false,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, ".git"), []byte(tc.gitdir), 0644); err != nil {
-				t.Fatal(err)
-			}
-			gotWSL, ok := readWSLWorktreeGitDir(dir)
-			if ok != tc.wantOK {
-				t.Fatalf("ok=%v want %v", ok, tc.wantOK)
-			}
-			if gotWSL != tc.wantWSL {
-				t.Fatalf("got=%q want %q", gotWSL, tc.wantWSL)
-			}
-		})
-	}
 }
