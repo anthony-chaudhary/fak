@@ -35,9 +35,8 @@ Install with `curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak
 Try the local workflow on a supported Apple Silicon configuration:
 
 1. Start local inference (`fak up`):
-   Probes unified memory with `macfit` to choose a model/context budget with
-   headroom, and a memory-pressure governor holds new work back instead of
-   pushing the Mac into swap. Starts the local OpenAI-compatible endpoint on
+   Sizes a model/context budget from unified memory (`macfit`), holds new work
+   back under memory pressure instead of swapping, and starts the local OpenAI-compatible endpoint on
    `:8080` and opens an interactive chat REPL. Use `fak up --mock` to inspect the workflow without
    a model or GPU; mock output is not inference performance evidence.
    ```bash
@@ -58,20 +57,15 @@ Try the local workflow on a supported Apple Silicon configuration:
    ```
    The same local endpoint also backs Claude Code (`fak claude`, via an
    Anthropic Messages adapter), Codex (`fak codex`), and [Pi](docs/integrations/pi.md).
-   Compatible agents can reuse shared instructions and repository context.
-   Inspect actual cache reuse and task outcomes; a fresh prefix still requires
-   prefill, and reuse depends on model state, backend support, and cache identity.
+   Compatible agents reuse shared instructions and repository context; a fresh
+   prefix still needs prefill, and reuse depends on model, backend, and cache identity.
 
 3. Inspect the subagent benchmark:
    ```bash
    fak bench subagent --concurrency=4
    ```
-   This does not replace a real coding-task acceptance witness. Check the
-   benchmark's engine, execution regime, and receipt before treating its output
-   as hardware evidence; simulated output does not qualify a physical device.
-
-> [!TIP]
-> New to subagents? Follow the [Subagents Guide](docs/subagents-guide.md) to launch `fak up` and run parallel cohorts with shared-prefix cache reuse.
+   Check its engine, regime, and receipt before treating output as hardware
+   evidence; it does not replace a real coding-task acceptance witness.
 
 ### Governance for external agents (`fak guard`)
 
@@ -85,10 +79,9 @@ In-kernel policy adjudication checks every tool call in under a microsecond befo
 
 ## Latest hardware results — 2026-09-25
 
-The front page shows one row per supported hardware family. Latest means the newest
-committed performance receipt for that platform, not the newest code change. A row can be
-historical or held when no newer quality-complete measurement exists. The table reports measured
-throughput with claim boundaries beside each result and links to its receipt.
+One row per hardware family: the newest committed performance receipt for that platform,
+with its claim boundary and receipt link. A row stays historical until a newer quality-complete
+measurement exists.
 
 | Platform | Latest witnessed result | Status & Details |
 |---|---|---|
@@ -96,12 +89,9 @@ throughput with claim boundaries beside each result and links to its receipt.
 | AMD | Qwen3.6-27B on RX 7600: the pure-fak TG1 microbench measured 1.24 decode tok/s versus 0.99 for the local llama.cpp Vulkan baseline; observed 2026-06-19. | Narrow, older-model microbench. No accepted current Qwen3.8 AMD result exists. [AMD receipt](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |
 | NVIDIA | Qwen2.5-3B Q8_0 on a physical Hopper H100: fak reached 111.9 decode tok/s, 17.4% above its f32 path; observed 2026-09-05. | Native CUDA result; llama.cpp Q8_0 was 3.24× as fast at 362.7 tok/s in the same run. [H100 receipt](docs/benchmarks/GCP-H100-RESULTS.md) |
 
-Read the status column before comparing rates: results compare matched envelopes against explicit baseline runtimes on identical hardware.
-
-Use the [benchmark index](docs/benchmarks/README.md) for hardware history and model-specific
-results. Use [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) for claim boundaries and canonical
-receipts. For Mac local model setup and head-to-head Apple Silicon Metal measurements, see the
-[Mac local models guide](docs/fak/mac-local-models.md) and the [three-way Mac benchmark](docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md). For agent UI workflows, see the [Mac agent UI guide](docs/fak/mac-agent-ui.md).
+Read the status column before comparing rates. History: [benchmark index](docs/benchmarks/README.md);
+claim boundaries: [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md); Mac setup:
+[Mac local models](docs/fak/mac-local-models.md) and [Mac agent UI](docs/fak/mac-agent-ui.md).
 
 ## Why run coding agents on fak
 
@@ -113,52 +103,22 @@ receipts. For Mac local model setup and head-to-head Apple Silicon Metal measure
   milestone requires qualified defaults; current MTP decoding requires explicit
   selection. See the [implementation snapshot](docs/local-agent-milestone.md#current-implementation-is-narrower-than-the-milestone).
 - **Real-time multi-agent visibility:** Inspect live cross-agent reuse rates, per-subagent token breakdowns, and savings sparklines directly in your terminal overlay (`fak info` / `fak guard`) to see and verify the speedup as subagents execute concurrently.
-- **Keep reusable state close to compute:** Device-resident caching and direct
-  GPU storage paths aim to reduce paging and copy overhead on supported hardware.
-  GPU residency and physical NVMe-to-GPU DMA are different claims. The current
-  [claim ledger](CLAIMS.md) and [milestone](docs/local-agent-milestone.md) explain
-  the wiring and qualification limits; a default-valued flag alone proves neither.
-- **Run on your own hardware:** Native backends target Apple Silicon, AMD, and
-  NVIDIA with different support envelopes — and different delivery channels:
-  The installer defaults to Apple Silicon Metal on darwin/arm64 and bundled Vulkan
-  on linux/amd64, including AMD Strix Halo. NVIDIA users are directed to
-  `ghcr.io/anthony-chaudhary/fak:cuda-latest` with `--gpus all`.
-  CPU archives are secondary references selected with `--variant cpu`.
-  The latest published GitHub release carries the Metal archive; v0.55.x assets
-  follow its publication. Vulkan publication remains pending its release and
-  hardware gate. Missing GPU assets fail with an actionable message.
-  Apple acceleration is fak-native Metal; MLX is a comparison runtime.
-  New native-performance work prefers Qwen3.8. Choose a supported model/backend
-  and measure the actual local workflow.
+- **Keep reusable state close to compute:** Device-resident caching and direct GPU
+  storage paths aim to cut paging and copy overhead; GPU residency and physical
+  NVMe-to-GPU DMA are separate claims, qualified in the [claim ledger](CLAIMS.md).
+- **Run on your own hardware:** Native backends target Apple Silicon (fak-native
+  Metal), AMD and Strix Halo (bundled Vulkan), and NVIDIA
+  (`ghcr.io/anthony-chaudhary/fak:cuda-latest` with `--gpus all`), each with its own
+  support envelope; external engines are explicit references only
+  ([native inference goal](docs/native-inference-goal.md)).
 - **Default-deny capability floor:** Protect your workspace from unintended commands, path escapes, or tool poisoning. Every tool call is verified against a capability floor before execution; subagents get their own narrower floor, and a circuit breaker stops an agent stuck retrying a failing tool. Drop-in wrappers protect existing agents like Claude Code, Codex, OpenCode, and Cursor with zero rewrites.
 
-Native inference provides direct execution on local silicon, with external engines supported as an explicit reference; see the [native inference goal](docs/native-inference-goal.md) for details.
+## Configure agent profiles
 
-## Default priorities & operating modes
-
-fak is organized around a focused four-tier default priority hierarchy:
-
-1. **fak all in one (serving and harness + memory — the "one touch" thing):** The primary focus is the [automatic local-agent milestone](docs/local-agent-milestone.md): model serving, agent execution, capability-floor governance, and reusable context through one approachable runtime. Qualification requires a real task and independent acceptance evidence on a supported machine.
-2. **fak serving only:** High-performance model inference runtime (`fak serve`), disaggregated gateway, KV-cache context acceleration, and native model execution.
-3. **fak harness only:** Standalone agent governance (`fak guard`) with a default-deny capability floor and tool adjudication over external models.
-4. **other things:** Standalone utilities, peripheral tools, benchmarks, and off-spine extensions.
-
-## Install and configure
+Built-in work and output profiles cut token waste and resist unnecessary dependencies:
 
 ```bash
-# macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
-
-# Any host with Go 1.26+
-go install github.com/anthony-chaudhary/fak/cmd/fak@latest
-
-# Inspect the shipped profiles
 fak agent profiles
-```
-
-Tune agent execution with built-in work and output profiles that cut token waste and resist unnecessary dependencies:
-
-```bash
 fak guard --output-profile caveman:medium --work-profile ponytail:high -- codex \
   "Remove the duplicate cache without adding a dependency."
 ```
@@ -181,10 +141,12 @@ Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium`
 
 ## Commercial serving
 
-We run one of your repetitive repo workloads — test-candidate generation, codebase Q&A, or doc maintenance — on a managed, metered inference route, and we prove it against your current baseline on your acceptance criteria before you pay for ongoing operation. Qualification is a two-week pilot on one workload with a continue/stop recommendation. Claims are confidence-tiered: the inference quality is measured at raw-compute parity and decode advantage [SW-VERIFIED]; production readiness is not yet claimed. The pilot is a fixed fee; ongoing operation is metered. To start, open an issue in this repository describing your workload — every inquiry routes into our pipeline ledger (channel=oss).
-
-Provenance: gtm-t08 commercial-serving touchpoint.
+We run one repetitive repo workload (test-candidate generation, codebase Q&A, or doc
+maintenance) on a managed, metered inference route and prove it against your baseline
+and acceptance criteria in a fixed-fee two-week pilot before ongoing metered operation.
+Inference quality is [SW-VERIFIED] at raw-compute parity; production readiness is not yet
+claimed. To start, open an issue describing your workload (channel=oss).
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-09-25 vs VERSION 0.55.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-09-27 vs VERSION 0.55.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->

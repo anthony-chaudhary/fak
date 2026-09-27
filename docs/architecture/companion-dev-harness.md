@@ -28,7 +28,7 @@ Historically, developer tooling, 5-gate boundary checkers (`cmd/fak-boundary`), 
 
 ### The Resolution: The Companion-Aware Dev Harness
 This specification codifies the **Asymmetric Companion Paradigm** and establishes the **Companion-Aware Dev Harness**:
-1. **Public `fak` is the open-core engine standard**: It builds, vets, and tests standalone with zero dependencies on private infrastructure. External contributors and public CI enjoy a completely clean, hermetic development experience.
+1. **Public `fak` is the open-core engine standard**: It builds, vets, and tests standalone without importing or calling any private infrastructure. External contributors and public CI enjoy a completely clean, hermetic development experience.
 2. **Automatic Companion Discovery & Governance**: When `fak-private` is present side-by-side in internal environments, `fak` automatically discovers it and activates the complete validation harness (5-gate boundary checks, secret leak audits, context provenance minting, and ticket inspection) by default.
 3. **Retirement of the "Strictly Better" Dichotomy**: Operating natively from `fak` now provides the exact same safety floor, verification gates, and quality ratchets as `fak-private`. Native CWD development in `fak` is first-class. CWD is chosen strictly based on architectural domain (public engine vs. private platform/factory), never because of a disparity in tooling or safety.
 

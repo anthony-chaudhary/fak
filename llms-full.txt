@@ -54,6 +54,7 @@ connects new work to operator value. Do not turn this direction into a shipped c
 - Fak-native execution-engine doctrine, matched-envelope rule, external-reference boundary, and deterministic docs guard: [`docs/native-inference-goal.md`](docs/native-inference-goal.md)
 - Performance-RSI loop doctrine, 16 canonical dimensions, dominant bottleneck derivation, matched-baseline evidence rules, and scorecard CLI: [`docs/notes/PERFORMANCE-RSI-LOOP-DOCTRINE.md`](docs/notes/PERFORMANCE-RSI-LOOP-DOCTRINE.md)
 - Memory-concept ranking dossier (superset): [`docs/superset/MEMORY-CONCEPT-RANKINGS.md`](docs/superset/MEMORY-CONCEPT-RANKINGS.md) — 10 memory concepts M1–M10 ranked fak-vs-engines with evidence, per-engine evidence tables, and adopt-or-SKIP verdicts
+- [The managed-context glossary and product contract](docs/managed-context-glossary.md): the public glossary for managed context — assumption, resident view, pinned objective, budget envelope, reset transaction, context query, memory promotion, and cache state — each grounded in the shipped mechanism, stating what fak manages automatically, what it asks the user about, and what stays user-controlled. The product-facing companion to [context-is-not-memory](docs/CONTEXT-IS-NOT-MEMORY.md) (#1571, epic #1570).
 - External system architecture, interfaces, and trust boundaries: [`docs/architecture.md`](docs/architecture.md)
 - Builder stability and ownership ladder (CLI → semantic protocol → public Go API → sidecar → internal leaves): [`docs/builder-contract-ladder.md`](docs/builder-contract-ladder.md)
 - Detailed integration architecture and extension seams: [`docs/fak/agent-integration-architecture.md`](docs/fak/agent-integration-architecture.md)
@@ -534,7 +535,7 @@ is a no-op). **When you cite evidence in a claim or a handoff, prefer `module@re
        - `fak-dev audit-leak [--staged|--all]` bridges to `tools/scrub_public_copy.py`
        - `fak-dev ticket [list|show|next]` bridges to companion `docs/tickets/`
   2. **Atomic implementation & self-verification**: Decompose work into single-concern leaves, write/update tests, and verify on-device (`fak validate --mine <paths>`, `go test ./internal/<pkg>/...`).
-  3. **Stage-and-commit by explicit path**: All commits must be made via `fak commit --path` or `fak sweep --apply`. Lint the subject (`fak commit --preview`) and commit only your touched paths (`fak commit --path <p> -m "<subject> (fak <leaf>)"` or `fak sweep --apply --lane <lane> -m "<subject>"`).
+  3. **Stage-and-commit by explicit path**: All commits must be made via `fak commit --path` or `fak sweep --apply`. Lint the subject (`fak commit --preview`) and commit only your touched paths (`fak commit --path <p> -m "<subject> (fak <leaf>)"` or `fak sweep --apply --lane <lane> -m "<subject>"`). A `COMMITTED_RED` refused only in its test step, and only because tests already fail on the landing base, may land with `--no-build-check` without asking (operator policy 2026-09-26). All six conditions and the receipts in `.claude/skills/commit-clean/SKILL.md`, section "Pre-existing red", must hold.
   4. **Safe push unprompted**: Push verified commits via `fak sync push` or `fak commit --push`. `fak sync push` automatically retries transient non-fast-forward races (when a peer lands between fetch and push while HEAD already contains origin) and stops safely on genuine diverged states. Never wait for an operator prompt to push once the tree is green.
   - **Safe merge & trunk convergence**:
     - **Active `MERGE_HEAD` gate**: Check `.git/MERGE_HEAD` before any staging or landing. If an in-flight merge is active (`MERGE_IN_PROGRESS`), unstage local paths (`git restore --staged`) and wait; never abort, reset, or finish a peer's merge.
@@ -588,10 +589,24 @@ peer's `MERGE_HEAD`, and reconcile divergence in place with `fak sync apply`. Th
 the preventive contract; the query surfaces are the token-specific recovery path.
 
 Check setup failures with `python tools/extend_preflight.py`; the full contributor
-contract is [`CONTRIBUTING.md`](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md). If a refusal is genuinely wrong,
+contract is [`CONTRIBUTING.md`](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md). Recover first; a complaint never
+authorizes bypassing a refusal, lease, or gate. If a refusal is genuinely wrong,
 file its witnessed, deduplicated appeal with `fak complain --summary "…" --reason
-<TOKEN> --tool <Tool> --from-journal --args-digest <sha256:…> --live`. Recover
-first; appeal only when the guard, not the call, is wrong. Taxonomy and routing:
+<TOKEN> --tool <Tool> --from-journal --args-digest <sha256:…> --workspace
+<blocked-root> --live`. When two enforced workflow obligations leave no compliant
+sequence after safe recovery is exhausted, file the exact command, output, attempted
+routes, and unblock condition with `fak complain --domain workflow --kind catch-22
+--summary "…" --rationale-file <absolute-scrubbed-evidence> --workspace
+<blocked-root> --repo <owner/repo> --live`; use `completion-blocker` for a general
+completion blocker. Success requires a reported created or updated issue. If live
+filing cannot fetch GitHub, the command exits nonzero before any remote issue action,
+reports JSON mode `pending-local`, and retains a scrubbed stable-key receipt under
+`<blocked-root>/.fak/complaints/pending`. Inspect it without contacting GitHub with
+`fak complain --pending --workspace <blocked-root> --json`; do not claim remote
+success. When GitHub recovers, repeat the same stable complaint and `--live` command;
+a verified create/update removes its receipt. An unverified sync also exits nonzero
+and retains the receipt. The receipt is recovery evidence, never permission to bypass
+a refusal, lease, or gate. Taxonomy and routing:
 [`docs/notes/CONCEPT-AGENT-FRICTION-COMPLAINT-CHANNELS-2026-06-29.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-AGENT-FRICTION-COMPLAINT-CHANNELS-2026-06-29.md).
 
 ## Releasing and planning
@@ -4119,6 +4134,17 @@ decoding and physical GPU Direct paths are not universally enabled or qualified.
 See the [local-agent milestone](https://github.com/anthony-chaudhary/fak/blob/main/docs/local-agent-milestone.md) for the current
 wiring, the meaning of automatic, and the evidence required to earn the claim.
 
+**Where it stands on speed:** on an Apple M3 Pro running Qwen3.8-27B,
+fak's own Metal engine measured 6.86 decode tok/s, 0.985× a pinned llama.cpp
+reference build on the same Mac, with token-for-token identical output
+(observed 2026-09-03). That is
+parity with the strongest local engine, not yet a lead; see the
+[Qwen results](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) for the receipt.
+
+**Pick your path:** run a local agent → [Try fak](#try-fak) · guard an agent you
+already use → [`fak guard`](#governance-for-external-agents-fak-guard) · check the
+evidence → [benchmarks](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/README.md) and [claims](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
+
 ## Try fak
 
 Install with `curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh` (or `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`).
@@ -4126,9 +4152,9 @@ Install with `curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak
 Try the local workflow on a supported Apple Silicon configuration:
 
 1. Start local inference (`fak up`):
-   Probes unified memory with `macfit` to choose a model/context budget with
-   headroom. Starts the local OpenAI-compatible endpoint on `:8080` and opens
-   an interactive chat REPL. Use `fak up --mock` to inspect the workflow without
+   Sizes a model/context budget from unified memory (`macfit`), holds new work
+   back under memory pressure instead of swapping, and starts the local OpenAI-compatible endpoint on
+   `:8080` and opens an interactive chat REPL. Use `fak up --mock` to inspect the workflow without
    a model or GPU; mock output is not inference performance evidence.
    ```bash
    fak up
@@ -4146,24 +4172,21 @@ Try the local workflow on a supported Apple Silicon configuration:
    ```
    "Using parallel subagents, audit the packages under internal/ and report their status"
    ```
-   Compatible agents can reuse shared instructions and repository context.
-   Inspect actual cache reuse and task outcomes; a fresh prefix still requires
-   prefill, and reuse depends on model state, backend support, and cache identity.
+   The same local endpoint also backs Claude Code (`fak claude`, via an
+   Anthropic Messages adapter), Codex (`fak codex`), and [Pi](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/pi.md).
+   Compatible agents reuse shared instructions and repository context; a fresh
+   prefix still needs prefill, and reuse depends on model, backend, and cache identity.
 
 3. Inspect the subagent benchmark:
    ```bash
    fak bench subagent --concurrency=4
    ```
-   This does not replace a real coding-task acceptance witness. Check the
-   benchmark's engine, execution regime, and receipt before treating its output
-   as hardware evidence; simulated output does not qualify a physical device.
-
-> [!TIP]
-> New to subagents? Follow the [Subagents Guide](https://github.com/anthony-chaudhary/fak/blob/main/docs/subagents-guide.md) to launch `fak up` and run parallel cohorts with shared-prefix cache reuse.
+   Check its engine, regime, and receipt before treating output as hardware
+   evidence; it does not replace a real coding-task acceptance witness.
 
 ### Governance for external agents (`fak guard`)
 
-Already running Claude Code or Codex? Wrap the agent you already run with one command to add a default-deny capability floor. fak forwards Codex subscription credentials with no API key required and blocks tools outside the allowed policy without breaking the task:
+Already running Claude Code or Codex? Wrap the agent you already run with one command to add a default-deny capability floor (only allowed tools run; everything else is blocked). fak forwards Codex subscription credentials with no API key required and blocks tools outside the allowed policy without breaking the task:
 
 ```bash
 fak guard -- codex
@@ -4171,12 +4194,11 @@ fak guard -- codex
 
 In-kernel policy adjudication checks every tool call in under a microsecond before execution. See the [interactive showcase](https://github.com/anthony-chaudhary/fak/blob/main/docs/showcase.html) for a guided tour, or run `fak agent --offline` (# -> task completed) to inspect policy decisions with zero setup.
 
-## Latest hardware results — 2026-09-08
+## Latest hardware results — 2026-09-25
 
-The front page shows one row per supported hardware family. Latest means the newest
-committed performance receipt for that platform, not the newest code change. A row can be
-historical or held when no newer quality-complete measurement exists. The table reports measured
-throughput with claim boundaries beside each result and links to its receipt.
+One row per hardware family: the newest committed performance receipt for that platform,
+with its claim boundary and receipt link. A row stays historical until a newer quality-complete
+measurement exists.
 
 | Platform | Latest witnessed result | Status & Details |
 |---|---|---|
@@ -4184,12 +4206,9 @@ throughput with claim boundaries beside each result and links to its receipt.
 | AMD | Qwen3.6-27B on RX 7600: the pure-fak TG1 microbench measured 1.24 decode tok/s versus 0.99 for the local llama.cpp Vulkan baseline; observed 2026-06-19. | Narrow, older-model microbench. No accepted current Qwen3.8 AMD result exists. [AMD receipt](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |
 | NVIDIA | Qwen2.5-3B Q8_0 on a physical Hopper H100: fak reached 111.9 decode tok/s, 17.4% above its f32 path; observed 2026-09-05. | Native CUDA result; llama.cpp Q8_0 was 3.24× as fast at 362.7 tok/s in the same run. [H100 receipt](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/GCP-H100-RESULTS.md) |
 
-Read the status column before comparing rates: results compare matched envelopes against explicit baseline runtimes on identical hardware.
-
-Use the [benchmark index](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/README.md) for hardware history and model-specific
-results. Use [BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) for claim boundaries and canonical
-receipts. For Mac local model setup and head-to-head Apple Silicon Metal measurements, see the
-[Mac local models guide](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/mac-local-models.md) and the [three-way Mac benchmark](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md). For agent UI workflows, see the [Mac agent UI guide](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/mac-agent-ui.md).
+Read the status column before comparing rates. History: [benchmark index](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/README.md);
+claim boundaries: [BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md); Mac setup:
+[Mac local models](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/mac-local-models.md) and [Mac agent UI](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/mac-agent-ui.md).
 
 ## Why run coding agents on fak
 
@@ -4201,52 +4220,22 @@ receipts. For Mac local model setup and head-to-head Apple Silicon Metal measure
   milestone requires qualified defaults; current MTP decoding requires explicit
   selection. See the [implementation snapshot](https://github.com/anthony-chaudhary/fak/blob/main/docs/local-agent-milestone.md#current-implementation-is-narrower-than-the-milestone).
 - **Real-time multi-agent visibility:** Inspect live cross-agent reuse rates, per-subagent token breakdowns, and savings sparklines directly in your terminal overlay (`fak info` / `fak guard`) to see and verify the speedup as subagents execute concurrently.
-- **Keep reusable state close to compute:** Device-resident caching and direct
-  GPU storage paths aim to reduce paging and copy overhead on supported hardware.
-  GPU residency and physical NVMe-to-GPU DMA are different claims. The current
-  [claim ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) and [milestone](https://github.com/anthony-chaudhary/fak/blob/main/docs/local-agent-milestone.md) explain
-  the wiring and qualification limits; a default-valued flag alone proves neither.
-- **Run on your own hardware:** Native backends target Apple Silicon, AMD, and
-  NVIDIA with different support envelopes — and different delivery channels:
-  The installer defaults to Apple Silicon Metal on darwin/arm64 and bundled Vulkan
-  on linux/amd64, including AMD Strix Halo. NVIDIA users are directed to
-  `ghcr.io/anthony-chaudhary/fak:cuda-latest` with `--gpus all`.
-  CPU archives are secondary references selected with `--variant cpu`.
-  The Metal archive is available on v0.54.0, backfilled from that exact tag.
-  Vulkan publication remains pending its release and hardware gate. Missing GPU
-  assets fail with an actionable message.
-  Apple acceleration is fak-native Metal; MLX is a comparison runtime.
-  New native-performance work prefers Qwen3.8. Choose a supported model/backend
-  and measure the actual local workflow.
-- **Default-deny capability floor:** Protect your workspace from unintended commands, path escapes, or tool poisoning. Every tool call is verified against a capability floor before execution. Drop-in wrappers protect existing agents like Claude Code, Codex, OpenCode, and Cursor with zero rewrites.
+- **Keep reusable state close to compute:** Device-resident caching and direct GPU
+  storage paths aim to cut paging and copy overhead; GPU residency and physical
+  NVMe-to-GPU DMA are separate claims, qualified in the [claim ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
+- **Run on your own hardware:** Native backends target Apple Silicon (fak-native
+  Metal), AMD and Strix Halo (bundled Vulkan), and NVIDIA
+  (`ghcr.io/anthony-chaudhary/fak:cuda-latest` with `--gpus all`), each with its own
+  support envelope; external engines are explicit references only
+  ([native inference goal](https://github.com/anthony-chaudhary/fak/blob/main/docs/native-inference-goal.md)).
+- **Default-deny capability floor:** Protect your workspace from unintended commands, path escapes, or tool poisoning. Every tool call is verified against a capability floor before execution; subagents get their own narrower floor, and a circuit breaker stops an agent stuck retrying a failing tool. Drop-in wrappers protect existing agents like Claude Code, Codex, OpenCode, and Cursor with zero rewrites.
 
-Native inference provides direct execution on local silicon, with external engines supported as an explicit reference; see the [native inference goal](https://github.com/anthony-chaudhary/fak/blob/main/docs/native-inference-goal.md) for details.
+## Configure agent profiles
 
-## Default priorities & operating modes
-
-fak is organized around a focused four-tier default priority hierarchy:
-
-1. **fak all in one (serving and harness + memory — the "one touch" thing):** The primary focus is the [automatic local-agent milestone](https://github.com/anthony-chaudhary/fak/blob/main/docs/local-agent-milestone.md): model serving, agent execution, capability-floor governance, and reusable context through one approachable runtime. Qualification requires a real task and independent acceptance evidence on a supported machine.
-2. **fak serving only:** High-performance model inference runtime (`fak serve`), disaggregated gateway, KV-cache context acceleration, and native model execution.
-3. **fak harness only:** Standalone agent governance (`fak guard`) with a default-deny capability floor and tool adjudication over external models.
-4. **other things:** Standalone utilities, peripheral tools, benchmarks, and off-spine extensions.
-
-## Install and configure
+Built-in work and output profiles cut token waste and resist unnecessary dependencies:
 
 ```bash
-# macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
-
-# Any host with Go 1.26+
-go install github.com/anthony-chaudhary/fak/cmd/fak@latest
-
-# Inspect the shipped profiles
 fak agent profiles
-```
-
-Tune agent execution with built-in work and output profiles that cut token waste and resist unnecessary dependencies:
-
-```bash
 fak guard --output-profile caveman:medium --work-profile ponytail:high -- codex \
   "Remove the duplicate cache without adding a dependency."
 ```
@@ -4262,20 +4251,22 @@ Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium`
 | Check what is shipped, limited, or planned | [Status](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md) · [claims](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) · [feature matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/features.md) |
 | Browse performance evidence | [Mac](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md) · [AMD](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) · [NVIDIA](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-10944-nvidia-gcp-overnight/README.md) · [all benchmarks](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/README.md) |
 | Is the cache paying off? (trend) | [Cache-value roll-up](https://github.com/anthony-chaudhary/fak/blob/main/docs/cache-value-rollup.md) — kernel reuse and provider-dollar savings kept in separate, unblended tracks |
-| Connect another agent or model | [Codex](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/openai-codex.md) · [Claude Code](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/claude.md) · [subagents](https://github.com/anthony-chaudhary/fak/blob/main/docs/subagents-guide.md) · [Mac local models](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/mac-local-models.md) · [all integrations](https://github.com/anthony-chaudhary/fak/tree/main/docs/integrations) |
+| Connect another agent or model | [Codex](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/openai-codex.md) · [Claude Code](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/claude.md) · [Pi](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/pi.md) · [subagents](https://github.com/anthony-chaudhary/fak/blob/main/docs/subagents-guide.md) · [Mac local models](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/mac-local-models.md) · [all integrations](https://github.com/anthony-chaudhary/fak/tree/main/docs/integrations) |
 | Understand the runtime | [Architecture](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md) · [capability map](https://github.com/anthony-chaudhary/fak/blob/main/docs/CAPABILITIES.md) · [CLI reference](https://github.com/anthony-chaudhary/fak/blob/main/docs/cli-reference.md) |
 | Learn in prerequisite order | [Start here](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md) · [learning path](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md) · [documentation index](https://github.com/anthony-chaudhary/fak/blob/main/docs/index.md) |
 | Build on fak | [Go API](https://github.com/anthony-chaudhary/fak/tree/main/pkg) · [harness contract](https://github.com/anthony-chaudhary/fak/blob/main/docs/harness-kit-contract.md) · [contributing](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md) |
 
 ## Commercial serving
 
-We run one of your repetitive repo workloads — test-candidate generation, codebase Q&A, or doc maintenance — on a managed, metered inference route, and we prove it against your current baseline on your acceptance criteria before you pay for ongoing operation. Qualification is a two-week pilot on one workload with a continue/stop recommendation. Claims are confidence-tiered: the inference quality is measured at raw-compute parity and decode advantage [SW-VERIFIED]; production readiness is not yet claimed. The pilot is a fixed fee; ongoing operation is metered. To start, open an issue in this repository describing your workload — every inquiry routes into our pipeline ledger (channel=oss).
-
-Provenance: gtm-t08 commercial-serving touchpoint.
+We run one repetitive repo workload (test-candidate generation, codebase Q&A, or doc
+maintenance) on a managed, metered inference route and prove it against your baseline
+and acceptance criteria in a fixed-fee two-week pilot before ongoing metered operation.
+Inference quality is [SW-VERIFIED] at raw-compute parity; production readiness is not yet
+claimed. To start, open an issue describing your workload (channel=oss).
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-09-12 vs VERSION 0.54.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-09-27 vs VERSION 0.55.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
 
 ---
 
@@ -4684,6 +4675,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [2026-09-19 — V4.1 native track: promoted the O(E log k) partial top-k into the V4 router seam (#12975), landed and closed](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/2026-09-19-v41-12975-partial-top-k-landed.md) -- auto-indexed dated note.
 - [`docs/notes/CONCEPT-STUDY-AZHU9701-NINFER-4090D-2026-09-03.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-STUDY-AZHU9701-NINFER-4090D-2026-09-03.md) — pinned deep study of Azhu9701/ninfer-4090d@3eaa163: a Windows RTX 4090 D inference deployment dossier whose headline 114-SM wave-grid / DirectStorage 1.3 / E8-lattice KV claims are unverified README prose (no engine source in-repo, no license), with two genuine artifacts — a restart-based load-adaptive draft-depth controller and a tool-call-drift salvage patch; dynamic MTP depth is PRESENT-on-axis in fak, while lax parameter salvage is PARTIAL and filed as #12944; parent #10193, portfolio #10960.
 - [Three-Tree Synchronization Invariants and Multi-Node Safe Sync Rules](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/SAFE-SYNC-THREE-TREE-INVARIANTS-2026-09-09.md) -- auto-indexed dated note.
 - [`docs/notes/CONCEPT-STUDY-PURE-GO-HOST-BINDINGS-2026-09-08.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-STUDY-PURE-GO-HOST-BINDINGS-2026-09-08.md) — inventory and source-pinned migration plan for replacing accelerator CGo/C++ host shims with Go-toolchain-owned bindings while retaining CUDA/PTX, MSL, SPIR-V, explicit engine identity, and real-device witnesses; parent #12210, shipped loader spine #12212, sequenced Vulkan leaves #12283–#12286, CUDA loader #11657; receipt `study_3cd46be3b861ab9872e7c8cb01f81def505a9cecbbc6cf80e728087c689558dc`.
@@ -7214,6 +7206,1009 @@ This dossier establishes the conceptual foundation (R0) of the superset claim: *
 | M8 | R0 | #3143 | **CLOSED (SKIP)**: High quality tax on coding agents |
 | M9 | R1 | #2241 | Hybrid SWA/GDN/Mamba unified memory plane |
 | M10 | R2 | #3414 | **CLOSED (SHIPPED)**: Economically-priced spill-before-drop |
+| W6 | R0 | #2625 | **CLOSED (SKIP)**: A-MEM neighbor-rewrite declined; value already held by proposal-only `consolidate` + `recall.Dream` + W5 supersession + read-time verifier + `memory-compact`. See [CONCEPT-STUDY-A-MEM-NOTE-EVOLUTION-W6-2026-09-21](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-STUDY-A-MEM-NOTE-EVOLUTION-W6-2026-09-21.md). |
+
+---
+
+# The managed-context glossary and product contract
+
+> Source: `docs/managed-context-glossary.md`
+
+---
+llms_authority: true
+title: "The managed-context glossary and product contract"
+description: "The public glossary for fak's managed-context promise: assumption, resident view, pinned objective, budget envelope, reset transaction, context query, memory promotion, cache state, and relay vocabulary — grounded in shipped mechanisms where available and explicitly marked when planned."
+---
+
+# The managed-context glossary and product contract
+
+*Program: [managed-context](https://github.com/anthony-chaudhary/fak/issues/1570). Issue:
+[#1571](https://github.com/anthony-chaudhary/fak/issues/1571).*
+
+fak already runs strong context mechanisms — a planner, a durability gate, a wall-clock
+budget, a reset ledger. What was missing was a plain-language contract that lets a user
+stop managing those assumptions in their head. This page is that contract: the core terms,
+each defined by what fak automatically manages, what it will ask the user about instead of
+silently assuming, and what remains fully user-controlled. Entries grounded in shipped code
+name the real Go type or function behind them. The relay vocabulary is called out as a
+planned, data-only extension until the #1860 relay rungs consume it.
+
+For the separate budget-sizing doctrine behind long-context defaults, see
+[`long-context-defaults.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/long-context-defaults.md): it defines HardContextCap, MVC,
+MECW, target resident budget, output reserve, and provenance labels.
+
+**How to read each entry:**
+
+- **What fak manages** — the mechanism runs without you; you do not have to track it.
+- **What fak asks about** — the cases where fak will not guess; it surfaces a decision or a
+  query instead of silently assuming.
+- **What stays user-controlled** — the knobs and overrides that are yours, always.
+
+---
+
+## 1. Assumption
+
+**Definition.** A fact-like item a context plan may rely on, tagged with *where it came
+from* and *how confident fak is in it* — not a bare string, a scored, provenanced claim.
+
+**Shipped mechanism:** `ctxplan.Assumption` (`internal/ctxplan/assumption.go`). Every
+assumption carries a closed provenance class (`AssumptionSource`: `user_stated`,
+`witnessed`, `inferred`, `stale`, `unknown`) and a confidence in `[0,1]`. `AssessAssumptions`
+scores each one against a policy (`DefaultAssumptionPolicy`: 0.65 minimum confidence, 0.80
+for inferred claims) and resolves it to one of three closed actions — `use`, `query`, or
+`refresh` — never a fourth, silent "assume it's fine."
+
+- **What fak manages:** scoring every assumption's confidence against its source class and
+  deciding, deterministically, whether it's safe to act on. A `user_stated` fact with
+  reasonable confidence is used without friction.
+- **What fak asks about:** anything that scores below the bar — an `inferred` guess under
+  0.80 confidence, or a `stale`/`unknown`-sourced fact — comes back as `query` or `refresh`,
+  not a silent pass. `AssumptionReport.EffectSafe` is `false` until every assumption clears,
+  so an effectful action cannot proceed on an unresolved guess.
+- **What stays user-controlled:** the confidence thresholds (`AssumptionPolicy`) and every
+  `user_stated` fact's content — fak never overrides something you told it directly.
+
+---
+
+## 2. Resident view
+
+**Definition.** The bounded, O(1) set of context spans that are actually materialized into
+the current turn — as opposed to the full, unbounded history sitting behind it.
+
+**Shipped mechanism:** `ctxplan` (`internal/ctxplan/doc.go`, `plan.go`, `layout.go`). fak
+treats the current turn's context as a re-planned *view* over a lossless store, not a
+linearly growing transcript and not a lossy summary. A `Layout` controls four independently
+tunable areas (`Base`, `Current`, `Recent`, `Deep`), each with its own span count and
+precision (`exact`, `planned`, or `pointer`); `Optimize` chooses which spans populate the
+view under a hard token `Budget`, and every span it elides is `Faithful` — kept recoverable
+by a content-address handle, never destroyed (`faithful.go`).
+
+- **What fak manages:** which spans are resident right now, replanned every turn against the
+  budget, and how the old-vs-new tradeoff is struck — recency, durability, and predicted
+  relevance all factor into `Optimize`'s selection, so you don't hand-curate the window.
+- **What fak asks about:** nothing silently disappears. An elided span is cold, not gone; a
+  mid-turn reference to something not currently resident produces one closed-vocabulary page
+  fault outcome (`ctxplan.PageFaultOutcome`) — served back in or explicitly refused — never a
+  silent omission.
+- **What stays user-controlled:** the `Layout` shape itself (how much of each area to keep,
+  and at what precision) and the token `Budget` cap. You can widen recent history or force a
+  span resident via a pin; fak never makes the view unbounded on your behalf.
+
+---
+
+## 3. Pinned objective
+
+**Definition.** The user's standing, active goal, represented as a stable, addressable span
+that must survive a hidden context reset, replan, or session migration unchanged.
+
+**Shipped mechanism:** `ctxplan.ObjectivePin` (`internal/ctxplan/objective.go`), wired into
+session-reset carryover by `sessionreset.PinObjective` / `RepinObjective` /
+`CarryObjective` (`internal/sessionreset/objective.go`). A pin's `PinID` is assigned once and
+never regenerated; its `Digest` is a content address over the pin's identity fields, so
+"the objective was preserved" is a checkable equality (`ReconcileObjective`), not a narrative
+claim. Reconciliation returns a closed `ObjectiveOutcome` a host must branch on.
+
+- **What fak manages:** carrying your stated objective forward across every hidden restart —
+  a budget-exhaustion reset, a replan, a session migration — and detecting, structurally,
+  whether the carried objective drifted from what you actually asked for.
+- **What fak asks about:** any reconcile outcome other than `Preserved`/`Established`
+  surfaces as a typed decision the host must act on, not a silently-accepted rewrite. A pin
+  is never inferred from thin air — it derives from your own stated text (the first durable
+  user line), never a model's paraphrase standing in for your intent.
+- **What stays user-controlled:** the objective's text. fak reconciles identity and content
+  drift; it does not decide what your goal *should* be, and it never substitutes its own
+  guess at your objective for what you stated.
+
+---
+
+## 4. Budget envelope
+
+**Definition.** The set of orthogonal limits — turns, output tokens, context tokens,
+clarification queries, and wall-clock time — that together bound how much a session may
+spend before it must pause, reset, or stop.
+
+**Shipped mechanism:** `session.Budget` (`internal/session/session.go`) covers the token
+axes (`TurnsLeft`, `TokensLeft`, `ContextTokensLeft`/`Cap`,
+`ClarificationQueriesLeft`/`Cap`); `session.TimeBudget` (`internal/session/timebudget.go`,
+issue #1584) adds the orthogonal wall-clock axis, because real elapsed time keeps ticking
+whether or not the model is spending tokens. Both are reset-aware: a hidden context reset
+carries the remaining budget and elapsed time forward onto the fresh trace
+(`session.ResetBudgetRearm`, `Table.RecontinueAt`) instead of quietly resetting to zero.
+
+- **What fak manages:** debiting every axis as the session runs, warning before
+  exhaustion (the pre-exhaustion warning measures consumed share against the stamped cap),
+  and re-arming the *same* remaining budget onto a fresh trace after a hidden reset — so a
+  reset never silently grants (or loses) unearned runway.
+- **What fak asks about:** exhaustion on any axis is a distinct, named reason
+  (`ReasonBudgetTokens`/`Turns`/`Context`, `ReasonTimeBudgetExhausted`) surfaced to the
+  caller — never a bare timeout with no explanation of which envelope ran out.
+- **What stays user-controlled:** every limit is a value you set (or leave unconfigured,
+  meaning unbounded — `session.Unbounded`/`TimeUnbounded`). fak never lowers a configured
+  budget on its own; it only spends against the number you gave it.
+
+---
+
+## 5. Reset transaction
+
+**Definition.** The replayable audit row for one context-budget reset — what carried over
+from the old trace to the new one, what did not, and why.
+
+**Shipped mechanism:** `session.ResetTransaction` (`internal/session/reset_transaction.go`).
+It records the old/new trace ids, the fresh `ResetBudgetRearm`, a `SeedDigest` over the
+carryover seed, the `Contributors` that built it, and — critically — every
+`ResetOmittedSpan`: a payload-free pointer (role + content digest + reason) to transcript
+bytes that did **not** land verbatim in the fresh session. Nothing is dropped without a
+named reason attached to a checkable digest.
+
+- **What fak manages:** performing the reset — building the carryover seed, re-arming the
+  budget envelope, and writing the full transaction record — without your intervention when
+  a budget axis exhausts.
+- **What fak asks about:** nothing about what got omitted is left implicit. Every span that
+  didn't survive the reset verbatim is named in `OmittedSpans` with a reason and a digest, so
+  "what did the reset drop" is answerable from the record itself, not from re-reading the old
+  transcript.
+- **What stays user-controlled:** you can inspect the transaction after the fact (it's a
+  plain JSON-serializable record — `ResetTransactionSchema`), and the objective pin plus any
+  explicit pins in your `Layout` are the mechanism you use to keep specific facts from ever
+  being reset-eligible in the first place.
+
+---
+
+## 6. Context query
+
+**Definition.** A model-authored (or user-authored) request that states *what the next
+turns will need* and gets back a typed, inspectable view — the agent-callable front door
+onto the same planner that runs the resident view.
+
+**Shipped mechanism:** `ctxplan.PlanQuery` / `Plan` / `PlanView`
+(`internal/ctxplan/query.go`). A caller states `Intents` (predicted reference strings for
+the upcoming horizon) plus optional `Budget`, `Horizon`, `Pins`, and `Weights`; the query
+lowers into the same `Forecast` the host path uses and runs the identical `PlanCells` —
+the facade adds no second planner and no divergence. An under-specified query (empty
+intents) still plans against sane defaults rather than erroring.
+
+- **What fak manages:** resolving an unset budget from the query's own shape
+  (`RecommendBudgetForForecast`) so a caller that only states intent still gets a sensibly
+  sized working set, and enforcing every invariant the host path already enforces — a query
+  can never pin a sealed or tombstoned span into view, and it can never exceed budget.
+- **What fak asks about:** the returned `PlanView` is fully inspectable — selected spans,
+  elided spans, cost used, and an `Explain` trace — so "why did I get this view" is always
+  answerable, not a black box.
+- **What stays user-controlled:** what you (or the agent acting on your behalf) declare as
+  intent, and any explicit budget/horizon/pin override. fak plans against your stated intent;
+  it does not substitute its own prediction when you've supplied one.
+
+---
+
+## 7. Memory promotion
+
+**Definition.** The write-time decision that moves a fact from live, ephemeral context into
+durable, cross-session memory — gated so that "it's 3pm" never becomes a standing belief
+and "I prefer afternoons" does.
+
+**Shipped mechanism:** the durability classifier in `internal/ctxmmu` stamps a closed
+durability class (`turn`, `session`, `bounded`, `durable`) on every admitted value, defaulting
+to the shortest-lived class for anything unclassified (see
+[`CONTEXT-IS-NOT-MEMORY.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/CONTEXT-IS-NOT-MEMORY.md)). `memq.PromotionRecord`
+(`internal/memq/promotion.go`) is the audit trail for any write that actually crosses into
+durable storage: it names the source span, the durability class earned, and a closed
+consent class — `ConsentExplicit` (you asked for it), `ConsentInferred` (the system judged
+it durable-worthy), or `ConsentUnknown` (fails closed to the weakest claim). A `turn`-class
+fact never mints a promotion record at all — it was never a candidate.
+
+- **What fak manages:** refusing promotion by default. An observation has to *earn* the
+  `durable` class before it's written to long-term memory; the default for anything
+  unclassified is to expire, not persist.
+- **What fak asks about:** every promotion that actually happens is tagged with *why* —
+  `ConsentExplicit` vs `ConsentInferred` — so you can distinguish "I told it to remember
+  this" from "it inferred this was worth keeping," rather than one undifferentiated memory
+  store.
+- **What stays user-controlled:** anything you state explicitly earns `ConsentExplicit` and
+  the `durable` class outright. Inferred promotions are the ones fak is conservative about —
+  the false-negative (forgetting something durable) is cheap and recoverable by re-asking;
+  the false-positive (promoting an ephemeral remark) is the expensive direction fak biases
+  against.
+
+---
+
+## 8. Cache state
+
+**Definition.** The warmth belief fak holds about a provider's prompt-prefix cache — whether
+a chained request is likely to land on a shard that already has your prefix warm — and the
+guards that keep fak from trusting that belief past what it's worth.
+
+**Shipped mechanism:** the agent wire layer's `prompt_cache_key` derivation
+(`internal/agent`): every OpenAI-Responses request carries a stable 32-hex-char hash of its
+cacheable head (model + system instructions + tools), biasing chained requests that share a
+prefix onto the same warm upstream cache node. Off the request path, `internal/vcachegov`
+and `internal/vcachecal` are the decision/proof layer: the governor classifies prefixes
+(pin / lazy-rebuild / ride-natural / evict) and budgets warming inside rate-limit headroom,
+and `vcachecal.Concentration` measures whether a workload is concentrated enough (a Zipf
+exponent `s > 1`) for warming to pay off at all, flagging a flat workload as structurally
+defeated rather than warming a tail that will never pay back. (An earlier version of this
+entry claimed a shipped governor-side affinity router with autoscale-rehash detection and
+warming-burst caps; that router never had a live caller and was cut in #5190.)
+
+- **What fak manages:** pinning a stable per-prefix routing hint on the wire, classifying
+  and budgeting the warm set off-path, and measuring up front whether your workload's shape
+  makes cache warming worth doing.
+- **What fak asks about:** nothing here is ever load-bearing for correctness — cache
+  warmth is a cost/latency *belief*, confirmed by provider telemetry, never an authority to
+  omit context. A miss costs latency; it never silently drops a fact from your session.
+- **What stays user-controlled:** correctness never depends on cache state (a provider's
+  load balancer can always route elsewhere), so nothing about your session's behavior changes
+  based on whether the cache is warm or cold — only its cost and latency do.
+
+---
+
+## 9. Relay vocabulary
+
+**Definition.** The planned perpetual-session vocabulary for running one long goal as a
+sequence of bounded context windows without asking the model to summarize itself.
+
+**Status:** planned/data-only contract for epic #1860. The concept spine is
+[`docs/notes/CONCEPT-PERPETUAL-SESSIONS-2026-07-01.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-PERPETUAL-SESSIONS-2026-07-01.md);
+the closed reason rows live in
+[`docs/notes/RELAY-REASON-VOCABULARY-2026-07-01.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RELAY-REASON-VOCABULARY-2026-07-01.md);
+the baton wire shape lives in
+[`docs/notes/RELAY-BATON-SCHEMA-2026-07-01.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RELAY-BATON-SCHEMA-2026-07-01.md).
+No shipped driver consumes these terms yet.
+
+- **Relay.** A single goal executed as an ordered sequence of bounded legs; the operator
+  starts the relay, and the `done_when` check decides when the goal is over.
+- **Leg.** One bounded session window in a relay, corresponding to one `Generation`, that
+  ends only at a safe point and never mid-tool-call or mid-write.
+- **Baton.** The pointer-only handoff a closing leg writes for its successor: objective pin,
+  re-verifiable progress cursor, next action, open questions, durable artifact pointers, and
+  tombstone, with no transcript bytes and no `claimed` field.
+- **Tombstone.** The closing leg's typed exit record: a closed relay reason token plus the
+  commit anchor and short display note explaining why the leg ended.
+- **Externalize gate.** The fail-closed pre-rotation check that every load-bearing fact from
+  the leg is already durable as a commit, ledger row, memory slug, issue, or other witnessed
+  pointer before a baton may be trusted for rotation.
+- **Safe point.** A quiescent boundary where ending the leg cannot corrupt work: no in-flight
+  tool call, no half-written commit, a green or explicitly parked tree, and a next action that
+  fits in one baton line.
+- **Flat-context invariant.** The relay property that peak resident context is bounded by
+  the per-leg ceiling, independent of the goal's total duration or number of rotations.
+
+- **What fak manages:** not yet shipped. The planned driver will detect arm/fire conditions,
+  write and read batons, re-verify cursors, preserve lease continuity, and rotate only at a
+  safe point.
+- **What fak asks about:** anything the externalize gate cannot prove durable, any stale
+  baton cursor, and any objective mismatch. Those become typed relay outcomes, not prose.
+- **What stays user-controlled:** the objective text, `done_when` predicate, relay budget
+  envelope, and operator choice to launch, park, resume, or stop the relay.
+
+---
+
+## What this adds up to
+
+A reader should now be able to state, plainly: fak automatically manages *what's resident in
+context right now* (assumption scoring, the resident view, budget accounting, reset
+bookkeeping) and *what's structurally safe to skip* (elided-but-recoverable spans, cache
+warmth as a non-authoritative bias). It asks the user (or defers to an explicit decision)
+whenever a fact's confidence, durability, or promotion status is ambiguous — never silently
+guessing on the expensive-to-get-wrong side. And it leaves fully user-controlled: every
+explicit statement of fact, every budget number, every layout/pin override, and the
+objective itself. The relay section extends the vocabulary for the planned perpetual-session
+mode while keeping its unshipped status explicit.
+
+## See also
+
+- [Managed-context continuous usage semantics](https://github.com/anthony-chaudhary/fak/blob/main/docs/managed-context-continuous-usage.md) — the
+  user-facing contract for preserving continuity across hidden context resets without
+  making the user manage the context window manually.
+- [Perpetual sessions](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-PERPETUAL-SESSIONS-2026-07-01.md) — the relay concept
+  spine that defines the long-running, flat-context mode.
+- [Relay baton schema](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RELAY-BATON-SCHEMA-2026-07-01.md) — field-level contract for
+  `fak.relay.baton.v1`.
+- [Relay reason vocabulary](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RELAY-REASON-VOCABULARY-2026-07-01.md) — closed
+  relay/tombstone reason rows.
+- [Context is not memory](https://github.com/anthony-chaudhary/fak/blob/main/docs/CONTEXT-IS-NOT-MEMORY.md) — the durability axis behind memory
+  promotion, in full.
+- [`internal/ctxplan` package doc](https://github.com/anthony-chaudhary/fak/blob/main/internal/ctxplan/doc.go) — the resident-view / context-query
+  planner in full, including the Postgres-planner correspondence this glossary summarizes.
+- [The four layers of agent memory](https://github.com/anthony-chaudhary/fak/blob/main/docs/MEMORY-LAYERS-EXPLAINER.md) — the spatial/trust axis this
+  glossary's memory-promotion entry complements.
+- [Glossary: core vocabulary, shared memory, and before/during words](https://github.com/anthony-chaudhary/fak/blob/main/docs/glossary.md) — the
+  disambiguation glossary for overloaded internal terms; this page is the product-facing
+  contract, that page is the internal-vocabulary house style.
+
+---
+
+# context-is-not-memory
+
+> Source: `docs/CONTEXT-IS-NOT-MEMORY.md`
+
+---
+title: "Context is not memory: the truth-duration axis in fak"
+description: "Why fak separates context from memory by how long a fact stays true, and enforces a write-time gate that defaults ephemeral facts to expire, not persist."
+---
+
+# Context is not memory — the durability axis the KV story leaves out
+
+*Why "it's 3pm right now" and "I prefer afternoon meetings" are not the same kind of
+fact, why a memory system that can't tell them apart is dangerous, and the one
+write-time decision that separates them.*
+
+## TL;DR
+
+The agent-memory literature has spent its effort on **where a remembered value lives,
+how it's named, and whether it can be safely shared** — fak's own four-layer story
+(routing / addressing / fusion / semantics, see
+[`MEMORY-LAYERS-EXPLAINER.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/MEMORY-LAYERS-EXPLAINER.md)) is itself a map of that
+*spatial/trust* axis. But there is a second axis, orthogonal to all of it: **how long is
+this fact true, and should it therefore become memory at all?** A few have *named* this
+axis (cognitive science decades ago; bitemporal databases; a 2026 agent-memory paper —
+§5 is honest about all of them). What essentially nobody does is **enforce it as a
+write-time gate**: classify truth-duration at the moment a value would cross into durable
+store, and *refuse the promotion by default.* Production memory systems leave it to an
+LLM's "seems useful later" judgment or to read-time ranking — never to a gate.
+
+The clean statement: **context and memory are not separated by size, recency, or
+where the bytes sit. They are separated by truth-duration.** *Context* is what is true
+*now* and useful *now* — the current time, the file you have open, the step you're on
+in a checkout flow, the mood the user is in this afternoon. *Memory* is what stays true
+across the situations where it might be retrieved — a preference, an identity, a
+learned skill, a relationship. The two are different **because of how long they remain
+valid**, not because of how recently they arrived or how much room is left in the
+window.
+
+The operator's example is the whole thesis in one line: *"the context is that it's X
+time, but I don't want that in memory in general."* "It's 3pm" must be **in context**
+(the model needs it to act now) and must **never be promoted to memory** (it will be
+false in an hour and actively misleading tomorrow). A memory system with no principled
+answer to *what earns promotion* gets this exactly backwards: it remembers the
+timestamp and forgets the preference, because its write trigger is salience or
+overflow, and "it's 3pm" is salient and "I like afternoons" was never said loudly.
+
+**This is a write-policy problem, and it is decidable at exactly one place: the moment
+a value crosses from the live turn into durable store.** That moment is the
+write-time admission gate fak already owns for *quarantine* — the context-MMU. The
+missing rung is to make that gate classify not just *is this safe to keep* (trust) but
+*how long is this true* (durability), and to default ephemeral facts to **expire, not
+persist.** Forgetting the timestamp is not a failure of the memory system. It is the
+memory system working.
+
+---
+
+## 1. The two axes are orthogonal — and the field only built one
+
+It is worth being precise about what's new here, because fak already has a deep memory
+story and this must not be a restatement of it.
+
+The existing story (S1–S6 in `DISAGGREGATED-AGENT-MEMORY.md` (private companion — not published),
+and the four-layer explainer) is about a **single value** — *one cell* — and asks:
+where does it live, what's its name, can two readers share it, may a writer mutate or
+evict it, who wrote it, who may act on it. Call this the **spatial / trust axis**.
+Every one of those questions presumes the value *exists as something worth holding* and
+asks what may be *done* to it.
+
+The axis this doc is about is upstream of all of that. Before "where does this cell
+live and who may touch it," there is: **should this become a durable cell at all, or
+is it situational state that should evaporate when the situation ends?** Call this the
+**temporal / durability axis**. It is a property of the *fact*, not of the *cell* —
+and it is decided at *write* time, before any of the S1–S6 questions are even asked.
+
+```
+                    TEMPORAL / DURABILITY AXIS  (this doc)
+                    "how long is this true — should it become memory?"
+                    ephemeral ───────────────────────────► durable
+                        │                                      │
+        "it's 3pm" ─────┤                                      ├───── "prefers afternoons"
+   "user is in checkout"┤                                      ├───── "user's name is Sam"
+     "model is on step 3"┤                                     ├───── "deploys go through staging"
+                        │                                      │
+   ─────────────────────┼──────────────────────────────────────────────────►
+                        │              SPATIAL / TRUST AXIS  (S1–S6, the KV story)
+                        │              "where does the cell live, who may touch it?"
+                        ▼              routing · addressing · fusion · mutation ·
+                  belongs in CONTEXT,  isolation · provenance · capability · arbitration
+                  must NOT promote
+```
+
+The two are independent. A *durable* fact still has to be addressed, isolated, and
+attributed (the S1–S6 questions apply to it). An *ephemeral* fact is one the S1–S6
+questions should **never get to ask about**, because it should never have been written
+to the durable tier in the first place. The field built the horizontal axis and mostly
+skipped the vertical one. **The vertical one is where "it's 3pm" lives.**
+
+---
+
+## 2. Why systems get this backwards — the write trigger is the wrong variable
+
+Naive and even sophisticated memory systems decide *what to remember* using one of a
+handful of triggers. None of them is durability, and that mismatch is the bug:
+
+- **Overflow / summarization-on-full.** When the context window fills, summarize the
+  oldest turns and store the summary. The trigger is *running out of room*. But
+  running out of room has nothing to do with whether a fact stays true — you summarize
+  whatever happened to be old, timestamp and mood and preference alike, and the summary
+  launders the ephemeral into the permanent. (This is the MemGPT / virtual-context
+  paging shape: it solves *space*, not *durability*.)
+- **Recency.** Keep what's recent, drop what's stale. But "it's 3pm" is maximally
+  recent and minimally durable; recency is *anti-correlated* with what you want for a
+  timestamp. Recency is a good proxy for *relevance to the current turn* (i.e. for what
+  belongs in **context**) and a terrible proxy for *what belongs in memory*.
+- **Importance / salience scoring.** Score each observation and keep the high-scorers
+  (the Generative Agents "memory stream" shape: importance + recency + relevance). But
+  salience answers "how much does this matter *right now*," which is again a context
+  question. A fire alarm is maximally salient and entirely ephemeral. A quietly stated
+  lifelong preference is low-salience and maximally durable.
+- **Explicit user save ("remember this").** Correct when it fires, but it offloads the
+  whole classification onto the user, and the interesting failures are exactly the ones
+  the user *didn't* think to flag — the assistant silently promoting a one-off remark.
+
+The through-line: **every common write trigger is a proxy for "relevant to the present
+moment," which is the definition of context — and then the system uses it to decide
+membership in memory.** That category error is why you get the two signature failures:
+
+1. **The ephemeral promoted.** A timestamp, a location, a transient mood, a one-time
+   task state gets written as if it were a standing fact. The user mentions once that
+   they're stressed; the assistant now treats "user is anxious" as a durable trait and
+   colors every future reply. The user is in a checkout flow; the agent remembers "user
+   is buying X" forever. *"It's 3pm" becomes a permanent belief about the user's day.*
+2. **The durable dropped.** Meanwhile the genuinely durable fact — stated quietly,
+   long ago, not salient when it was said — ages out under the recency/overflow policy,
+   because nothing about the write trigger noticed it would still be true in a year.
+
+Both failures are the *same* root cause: the system has no representation of
+**truth-duration**, so it substitutes a present-moment proxy and gets a present-moment
+answer to a long-horizon question.
+
+---
+
+## 3. The relatable examples — context-only facts vs memory-worthy facts
+
+The distinction is intuitive once you have the right pairs in hand. In every pair, the
+left item belongs in **context** (the model should know it *to act now*) and must
+**not** be promoted to durable memory; the right item belongs in **memory** (retrieve
+it into context when the situation calls for it).
+
+| Situational — context only, let it expire | Durable — memory-worthy, retrieve when relevant |
+|---|---|
+| "It's 3:47pm." | "I prefer afternoon meetings." |
+| "You're in the checkout flow right now." | "My shipping address is …" |
+| "I'm in a hurry today." | "I like concise answers." |
+| "I'm frustrated with this bug." | "I'm a Go developer." |
+| "The terminal is showing an error." | "I run tests through WSL on this box." |
+| "We're on step 3 of the wizard." | "I always want a confirmation before deletes." |
+| "It's raining here now." | "I live in Seattle." |
+| "The user just pasted a stack trace." | "This service deploys through staging first." |
+| "The current branch is `feature/x`." | "We work directly on `main` in this repo." |
+| "I'm tired, keep it short." | "Default to short answers unless I ask for detail." |
+
+Notice the *pattern* in the pairs, because it is the actual classifier:
+
+- **The same surface fact can be either, depending on the verb.** "It's raining" is
+  context; "I live somewhere it rains" is memory. The ephemeral version is an
+  **observation of the present**; the durable version is a **disposition or standing
+  state**. The job of the write gate is to keep the observation and *not* mint the
+  disposition unless there's evidence the disposition is real.
+- **The dangerous promotions are the left column dressed as the right.** "I'm in a
+  hurry today" → "user always wants speed over thoroughness." "I'm frustrated with this
+  bug" → "user is generally negative." The harm isn't that the fact was wrong when
+  observed — it's that an observation-of-the-present was **generalized into a
+  standing-trait** with no warrant. Most real-world "creepy memory" complaints about
+  consumer assistants are exactly this move.
+- **The clean memory-worthy facts share a tense.** Read the right column: they're
+  habitual / dispositional ("I prefer," "I always," "we work"), not punctual ("right
+  now," "today," "currently"). Tense and aspect are a startlingly good *cheap* signal
+  for the durability classification — punctual/progressive aspect leans ephemeral,
+  habitual/stative aspect leans durable. (Not sufficient on its own, but a strong
+  prior, and computable without a model call.)
+
+A second worked example, because it's the operator's and it's the sharpest: **"it's X
+time."** The agent absolutely needs the current time *in context* — to schedule, to say
+"good morning," to compute "the deploy was 20 minutes ago." It must **never** write
+"the time is 3pm" to memory, because (a) it's false within the hour, and (b) the next
+session that retrieves it will act on a stale time as if current — the
+*stale-as-current* failure, which is worse than not knowing the time at all, because the
+agent doesn't know it's wrong. The correct durable residue of a thousand "it's X time"
+observations is not any timestamp; it's a *derived disposition* — "the user is usually
+active in the afternoon" — which is a different, genuinely durable fact that a
+consolidation step could mint, and which is itself never a raw timestamp.
+
+---
+
+## 4. Our push: durability is a write-time classification, and the default is *expire*
+
+Here is the part that is fak's to claim, because it follows from where fak already
+stands. Three moves.
+
+### Move 1 — Promote on durability, not on salience or overflow.
+
+The decision "does this become memory" should be a function of **estimated
+truth-duration**, computed at the write boundary, *independent of* how salient or
+recent or space-pressured the value is. Concretely, every value crossing the
+context→memory boundary gets a **durability class** — the same shape as a TTL
+(time-to-live) on a cache entry, but semantic rather than clock-driven:
+
+- **`turn`** — true only this turn (the open file, the current step, the pasted error).
+  Lives in context, dies at turn end. *Never* eligible for memory.
+- **`session`** — true for this session (the task at hand, the working branch, today's
+  mood). Lives in context for the session, dies at session end.
+- **`bounded`** — true until a stated expiry or a superseding event ("I'm on vacation
+  until the 30th"). A durable cell *with a validity interval* — must carry its
+  expiry and be re-checked, never read as timelessly true.
+- **`durable`** — true across sessions until explicitly revised (preferences, identity,
+  learned procedures). The only class that earns an unconditional write to long-term
+  memory.
+
+The headline policy inversion: **the default for an un-classified observation is the
+shortest-lived class that fits, not the longest.** Naive systems default to *persist*
+(everything is remembered unless evicted); the durability-correct default is *expire*
+(nothing is promoted unless it earns `durable`). This is the single most important bit,
+and it's the operator's instinct exactly: *"I don't want that in memory in general"* —
+the **general** case is don't-remember; promotion is the exception that must be earned.
+
+### Move 2 — fak already owns the place this decision must be made.
+
+The durability class can only be assigned where the value crosses from the live turn
+into durable store — at the **write-time admission gate.** That is not a new component
+fak would need to invent; it is the context-MMU, which *already* runs an admit-time
+verdict on every value for a *different* property (trust: admit / transform /
+quarantine — `internal/ctxmmu`, `kvmmu.AdmitResult`). Durability is a second verdict
+on the same gate:
+
+- The gate already sees **what a span is** (tool result vs reasoning vs user text — the
+  state machine gives it; a serving engine on an anonymous token stream cannot).
+- The gate already sees **who wrote it** (provenance stamp, `internal/ifc`).
+- The missing field is **how long it's true** — a `durability` tag alongside the
+  existing taint/provenance tags, defaulting to the shortest class.
+
+This is why the durability axis is *fak's* to add and not a serving engine's: the
+classification needs the structure (turn boundaries, span types, principal identity)
+that exists **only at the agent syscall boundary** and is erased at the token-serving
+boundary. The same vantage that makes quarantine decidable makes durability decidable.
+It is one more admit-time tag on a gate that already runs.
+
+The seam is not hypothetical — it is already shaped for this. The admit-time `Verdict`
+(`internal/abi/types.go`) is a discriminated union carrying a closed `Kind`, a closed
+`Reason`, *and* an explicitly **OPEN `Meta map[string]string`** ("ignored if unknown").
+A `durability` class is exactly an additive `Meta` tag on the verdict the gate already
+returns — and because `Meta` is forward-compatible by construction (an older reader
+drops an unknown key rather than breaking), the durability tag can ship without
+touching the closed trainable verdict set. The shortest-lived default is itself the
+fail-closed posture the ABI already takes elsewhere: an unknown verdict kind resolves
+to its fail-closed `FallbackClass`, and an un-classified observation resolves to the
+shortest-lived durability class. *Same gate, same fail-closed instinct, one more tag.*
+
+### Move 3 — the ephemeral/durable split makes the *forgetting* primitive principled.
+
+fak's sharpest primitive is **coherent middle-eviction**: remove a span from a kept
+sequence, byte-identical to never having seen it (S2, `Kraw` re-rotation). Today the
+*trigger* for eviction is trust (quarantine a poisoned span) or pressure (LRU-ish). The
+durability axis gives eviction a **principled, non-pressure trigger**: a `turn`-class
+or `session`-class span is *evicted on schedule by its own TTL*, not when the cache
+happens to fill. "It's 3pm" isn't dropped because the window got tight; it's dropped
+because **its truth-duration expired** — and the eviction is exact, so the surviving
+context is byte-correct as if the timestamp were never there. **Forgetting-by-design,
+on a clock the fact itself sets, with a bit-exact result.** That is the union of fak's
+two strongest ideas — the durability classification (this doc) and the exact eraser
+(S2) — and neither serving-layer caches nor naive memory stores can do it: they either
+keep everything until pressure forces a blind LRU drop, or they forget approximately.
+
+### Why the default must be *expire* — the failures aren't symmetric.
+
+It's tempting to call this a tuning knob: set the promotion threshold somewhere
+sensible and accept some error in both directions. But the two error directions have
+**very different costs**, and that asymmetry is what forces the default.
+
+- **Failing to remember a durable fact** (a false-negative promotion) is *recoverable
+  and self-correcting*: the user states the preference again, or the agent asks. The
+  cost is a little redundancy. The fact is still true, so a second chance to capture it
+  always comes.
+- **Remembering an ephemeral fact as durable** (a false-positive promotion) is
+  *silent, persistent, and acts as confident truth*: the stale timestamp, the one-off
+  mood frozen into a trait, the checkout-flow state that haunts every future session.
+  Nobody re-states "actually I'm *not* anxious in general" because nobody knows the
+  agent quietly concluded it. The fact is now false, surfaced as true, with no signal
+  that it's wrong — the **stale-as-current** failure, which is strictly worse than
+  absence.
+
+A false negative costs a re-ask; a false positive costs a wrong belief that nobody
+knows to correct. When the costs are that lopsided, you don't center the threshold —
+you **bias hard toward the cheap error.** Defaulting to *expire* makes every
+un-earned promotion a recoverable re-ask instead of a silent wrong belief. This is the
+same logic as fak's fail-closed admission: an *unwitnessed* claim is refused, not
+trusted, because trusting-when-wrong is the expensive direction. Durability inherits
+the posture — **un-classified means ephemeral, because remembering-when-wrong is the
+expensive direction.**
+
+> **The one-line version.** *Trust* decides whether a value may enter memory; *durability*
+> decides whether it should — and for how long. fak built the gate for the first; the
+> second is the same gate with one more tag, and its correct default is **expire.**
+
+---
+
+## 5. The honest prior art — who's near this, and where the gap really is
+
+We are not the first to notice that context and memory are different, or that time
+matters. The contribution here is narrower and sharper, so it's worth being exact about
+what's already known. (All of the following was cross-checked against primary sources in
+a research sweep; the attributions below are the *corrected* ones — several popular
+restatements get the dates or the credit wrong.)
+
+**Cognitive science has the deepest version, and got there decades ago.** Tulving (1972)
+split **episodic** memory (specific events located in time and place — inherently
+contextual, time-stamped) from **semantic** memory (decontextualized, generic facts).
+The crucial operation for us is the one *between* them: turning a context-rich episode
+into a context-stripped fact is exactly the promotion decision — and the brain does
+*not* promote everything. Complementary Learning Systems theory (McClelland, McNaughton
+& O'Reilly, 1995) explains *why* there must be two systems at all: a fast, sparse
+hippocampal learner for one-shot episodes and a slow, distributed neocortical learner
+for generalized knowledge, because cramming fast learning into one overlapping store
+causes **catastrophic interference**. Consolidation (largely during sleep replay) is not
+archival copying — it is *selective transformation* that distills gist and lets verbatim
+detail decay. And **forgetting is an adaptive feature** (directed/retrieval-induced
+forgetting actively suppress competitors), not decay-by-neglect. The honest summary:
+*the AI field imported the storage-hierarchy metaphor (working vs long-term) and skipped
+the selective consolidation that is the entire point.* (One correction to the usual
+retelling: "mental time travel" is Tulving 1983, not the 1972 paper; and hippocampal
+*index* theory — store a sparse pointer, not the content — is Teyler & DiScenna 1986,
+distinct from the pattern-separation/completion machinery often bolted onto it.)
+
+**Databases solved the time-validity half cleanly, and the agent field is re-deriving
+it.** Bitemporal modeling (Snodgrass; standardized in SQL:2011) gives every fact a
+**valid-time** (when it's true in the world) distinct from a **transaction-time** (when
+the system recorded it). "It's 3pm" is a fact with a ~one-hour valid-time; storing it as
+a timeless assertion is simply a modeling error the database world fixed long ago. The
+strongest production port into agent memory is **Zep/Graphiti** (Rasmussen et al., 2025):
+a bi-temporal knowledge graph that stamps every fact edge with `(t_valid, t_invalid)`
+and, on contradiction, **invalidates rather than deletes** — preserving history. But
+note the precise limit: Zep models durable-fact *revision over time*; it does not gate
+*promotion* — everything extracted becomes a graph fact, just a temporally-bounded one.
+
+**The primitive we lean on already has a name — and it's from 2023, not 2026.** Zhang &
+Choi, *"Mitigating Temporal Misalignment by Discarding Outdated Facts"* (EMNLP 2023,
+arXiv:2305.14824), define the task of **fact duration prediction** — predicting *how long
+a given fact will remain true* so a model can distinguish stable from volatile knowledge.
+That is exactly the estimator the durability classifier needs, named three years before we
+wrote this. **We do not claim to have invented truth-duration estimation; we build on it.**
+Our contribution is the *systems* move downstream of the predictor — making that estimate
+an *enforced write-time promotion gate* with expire-by-default — not the ML primitive of
+estimating duration. (An earlier draft of this doc called a 2026 paper "the first to
+formalize the axis"; the sweep corrected that — the axis was named in 2023, and saying
+otherwise is exactly the kind of "first to" overclaim this project's honesty discipline
+exists to kill.)
+
+**The closest taxonomy and the closest mechanism — both already exist, and naming them is
+what makes our claim survive.** Two results sit nearer than anything above, and the gap is
+only visible once they're drawn precisely:
+- **"Beyond Dialogue Time" (2026)** formalizes **ephemeral-vs-durable as a write-time
+  taxonomy** — routing facts to *permanent* / *long-term* / *temporary* classes, with
+  "durative" memories carrying validity windows on a semantic timeline separate from
+  dialogue time. That is the same *axis* this doc draws. We cite it as confirmation the
+  axis is real — prior art to build *on*, not precede.
+- **Springdrift** (Brady 2026, arXiv:2604.04660), an auditable persistent agent runtime,
+  is the closest *mechanism* neighbor: its Facts store is explicitly "scoped and decayed."
+  But the line is sharp and load-bearing: Springdrift decays facts on an **append-only**
+  JSONL log replayed chronologically — *decay-by-default on a store that never drops a
+  record* — which is the opposite default from ours (**expire-by-default, refuse to
+  promote**), and the decay is a read-time half-life, not a write-time admission gate.
+- **Cloudflare Agent Memory** (2025) ships the closest *mainstream-vendor* write-time
+  split — four first-class types (Facts / Events / Instructions / Tasks) where session
+  Tasks are deprioritized after the session. But that is a content-*type* label that
+  *deprioritizes*, not an estimated-truth-duration gate that *expires*.
+
+**So where is the actual gap?** Not in "noticing time matters," not in "predicting fact
+duration" (Zhang-Choi 2023), not in "naming the ephemeral/durable axis" (Beyond Dialogue
+Time), not in "decaying a fact store" (Springdrift) or "typing memory by lifespan"
+(Cloudflare) — all of that is covered. The gap is that across the production agent-memory
+systems, the *write policy* is one of three families and **none is a principled, enforced
+durability gate** (§6 has the verified roster):
+
+1. **Capacity-driven** (MemGPT/Letta, LlamaIndex): promote on overflow — summarize the
+   oldest turns when the window fills. The trigger is *"it doesn't fit,"* not *"it's
+   durable."*
+2. **LLM-judgment** (Mem0's ADD/UPDATE/DELETE/NOOP; Letta block edits;
+   ChatGPT/Claude/Gemini auto-synthesis): an LLM decides per-fact what to keep — the
+   only place "is this transient?" is even *implicitly* asked, and the systems
+   themselves (Mem0's own docs) admit it misclassifies.
+3. **Score-based, at *read* time** (Generative Agents' importance+recency+relevance;
+   MemoryBank's Ebbinghaus decay+reinforcement): write *everything*, then approximate
+   durability post-hoc via retrieval ranking or forget-by-disuse.
+
+The one true cognitive-architecture analog of a principled split — **ACT-R**'s
+base-level activation (frequency/recency, context-*independent* → durable) cleanly
+separated from spreading activation (context-*dependent* → contextual) — is exactly the
+distinction the LLM systems gesture at but do not implement. **The opening, then, is the
+one thing none of them has: a write-time admission gate that classifies estimated
+truth-duration and refuses to promote a contextual fact to durable memory — with
+expire as the default.** That is a reference-monitor posture, and a reference monitor at
+the agent syscall boundary is precisely what fak is.
+
+---
+
+## 6. SOTA, verified — the roster behind §5
+
+Every row below was cross-checked against a primary source; verdicts are from an
+adversarial fact-check pass (`CONFIRMED` = primary source agrees; `PARTLY` = true with a
+correction noted). Nothing here is `REFUTED` — the prior-art shape held up — but several
+attributions were *corrected*, and those corrections are the value of the pass.
+
+### Agent / LLM memory systems — the write-policy roster
+
+| System | Write policy (what triggers a durable write) | Handles ephemeral-vs-durable? |
+|---|---|---|
+| **MemGPT / Letta** (Packer et al., 2023) | Overflow: summarize main context → external store when the window fills, via LLM tool calls | No — trigger is *capacity*, not durability |
+| **Letta memory blocks** | Agent rewrites labeled, size-capped blocks (`human`, `persona`) | Soft proxy (label routing); nothing stops a transient fact landing in the durable `human` block |
+| **Mem0** | Two-pass: extract candidate facts → LLM picks ADD/UPDATE/DELETE/NOOP vs retrieved similars; scopes conversation/session/user | Closest in production (session vs user scope) — but scope is an LLM call its **own docs say misclassifies**; no native expiry |
+| **Zep / Graphiti** (Rasmussen et al., 2025) | Extract to a **bi-temporal** graph; stamp `(t_valid, t_invalid)`; invalidate-not-delete on conflict | Models fact *revision* over time, not *promotion* — everything extracted is written |
+| **Springdrift** (Brady, 2026) | Append-only JSONL Facts store, replayed chronologically; entries "scoped and **decayed**" by read-time half-life | Closest *mechanism* — but decay-by-default on a store that never drops a record; opposite default from expire-by-default, and read-time not a write gate |
+| **Cloudflare Agent Memory** (2025) | Four first-class types (Facts / Events / Instructions / Tasks); session **Tasks deprioritized** after the session | Closest *mainstream-vendor* write-time split — but a content-*type* label that deprioritizes, not a truth-duration estimate that expires |
+| **Generative Agents** (Park et al., 2023) | Write **everything** to a flat memory stream; LLM importance score (1–10) + recency decay + relevance gate **retrieval**, not the write | Approximated at **read** time; transient observations are still stored |
+| **MemoryBank** (Zhong et al., 2023) | Write all; **Ebbinghaus** strength decays with time, reinforced on recall | Forget-by-disuse — a recalled transient fact gets reinforced *as if* durable |
+| **A-MEM** (Xu et al., 2025) | Every interaction → a linked Zettelkasten note; "memory evolution" updates links | Dynamic organization, not a promotion gate; no transient filter |
+| **LangGraph / LangMem** | Names the semantic/episodic/procedural taxonomy + hot-path vs background write timing | Plumbing, not policy — *what* to write to which namespace is left to the developer |
+| **LlamaIndex Memory** | Token-overflow flush short-term → long-term blocks by priority | Capacity-driven, like MemGPT |
+| **ChatGPT memory** (OpenAI) | Two tiers: durable **Saved memories** (explicit or model-judged, auditable) + mutable **Reference chat history** (mined, not item-auditable) | A de-facto durable/contextual split in production, but promotion to Saved is an **opaque** model judgment with no published durability criterion |
+| **Claude memory** (Anthropic) | Opt-in, **project-scoped**, user-viewable/editable memory summary via LLM synthesis | User-controllable surface, but no published explicit contextual-vs-durable promotion rule |
+| **ACT-R** (cognitive architecture) | Working memory = the *activated slice* of long-term memory; base-level activation (freq/recency, context-independent) vs spreading (context-dependent) | The **principled analog** of durable-vs-contextual — which the LLM systems gesture at but don't implement |
+
+The pattern reads straight down the right column: **everyone separates a live context
+from a durable store; almost no one gates the boundary on truth-duration at write time.**
+
+### Cognitive science — the principled grounding (verified)
+
+- **Episodic vs semantic** (Tulving 1972, `CONFIRMED` with date correction): episodic is
+  spatio-temporally indexed and context-rich; semantic is decontextualized gist. *The
+  context-stripping between them is the promotion operation.* ("Mental time travel" is
+  the 1983 elaboration, not 1972 — don't misattribute it.)
+- **Complementary Learning Systems** (McClelland, McNaughton & O'Reilly 1995,
+  `CONFIRMED`): two systems are *necessary* — fast sparse hippocampal episodic capture +
+  slow distributed neocortical generalization — because one overlapping store suffers
+  catastrophic interference. The 2016 update (Kumaran, Hassabis & McClelland) refines it:
+  *schema-consistent* new facts can integrate fast — which maps to "a fact consistent
+  with known durable preferences can be promoted cheaply."
+- **Working memory** (Baddeley & Hitch 1974; episodic buffer 2000, `CONFIRMED`): a small,
+  transient, capacity-limited workspace that *binds* streams — the cognitive twin of the
+  context window, explicitly **not** the durable store.
+- **Bitemporal data modeling** (Snodgrass; SQL:2011, `CONFIRMED`): valid-time vs
+  transaction-time; a contradicting update *closes the old interval* rather than
+  overwriting. The mature, boring, correct prior art for "true now, not true forever."
+- **Fact duration prediction** (Zhang & Choi, EMNLP 2023, arXiv:2305.14824, `CONFIRMED`):
+  defines the *task* of predicting how long a fact stays true, to discard outdated facts
+  and improve calibration under temporal misalignment. This is the **estimator primitive**
+  the durability classifier consumes — named in 2023. fak's contribution is the systems
+  move (estimate → *enforced write-time promotion gate* → expire-by-default), not the
+  estimation itself; cite this as the thing we build on, never as something we precede.
+
+### Failure modes — the verified harms of getting it wrong
+
+The harms aren't hypothetical, and they're the strongest argument for an enforced gate
+with an expire default:
+
+- **Adversarial promotion is a real, named attack.** The **SpAIware** incident
+  (Rehberger / Embrace The Red) demonstrated a single untrusted input laundered into a
+  *persistent, cross-session* compromise. **OWASP** now codifies this as **Memory
+  Poisoning (T1)**, defined verbatim as *"turning a transient attack into a persistent
+  behavioral bias."* That is precisely the ephemeral→durable boundary, weaponized — and
+  it's exactly the boundary fak's quarantine gate already guards for trust. The
+  durability tag closes the *benign* version of the same hole.
+- **Stale-as-current is measurable.** The **STALE** benchmark finds even the best model
+  is only **~55%** accurate at knowing when its own stored memories have gone invalid —
+  because retrieval scores semantic similarity *blind to time*, so a fact "true once"
+  resurfaces as "true now." That is the timestamp/location-leak failure with a number on
+  it.
+- **Over-remembering is self-defeating, not just creepy.** Unbounded retention degrades
+  retrieval (memory rot / context pollution), collides with the right-to-be-forgotten
+  (GDPR Art. 17 — and "unlearning" is often reversible obfuscation, per CMU work), and
+  in sensitive settings causes real harm (durably storing a one-off emotional disclosure
+  → the assistant treats a passing state as a standing trait; mental-health researchers
+  have disabled memory entirely over exactly this). **Forgetting the ephemeral is a
+  correctness requirement, not a nicety.**
+
+### The field is converging on this *now* — and naming the exact gap
+
+Two 2025–2026 signals say the durability axis has moved from "nobody's looking" to "the
+named frontier," which sharpens rather than weakens the case — the contribution is the
+*enforced write-time gate*, not the observation:
+
+- **A provider shipped the mechanism without the discipline.** Anthropic's context-editing
+  + memory tool (Sept 2025) has been publicly critiqued as **"a garbage collector without
+  write barriers"** — which is precisely this doc's argument said from the outside. A GC
+  reclaims space; a *write barrier* is the check that runs at the moment of a write to keep
+  the heap coherent. Shipping eviction (the GC) without an admission gate (the write
+  barrier) is exactly "promote freely, clean up later" — the failure §2 anatomizes. **The
+  durability gate *is* the write barrier**: the check that runs at the promotion moment, not
+  the sweep that runs after.
+- **A survey named consolidation the #1 open problem.** The 2026 *"Memory for Autonomous
+  LLM Agents"* survey states the thesis almost verbatim — *"Forgetting is not a bug; it is
+  a feature… current systems handle it crudely… no validation that safety-critical records
+  survive"* — and ranks principled consolidation / learning-to-forget as the top frontier.
+  Independent convergence on the problem statement; the open lane is the *enforced*
+  mechanism, which is where fak's reference-monitor posture is the natural home.
+
+The positioning consequence (see `DIRECTION-ADVANTAGES-2026-06-19.md` (private companion — not published)):
+the "reference monitor for agent *actions*" category is now contested (Microsoft's
+"Agent OS" gates effects sub-millisecond). The half no incumbent has assembled is the
+**result/memory** half — typed fail-closed RESULT admission **plus** write-time durability
+classification **plus** byte-exact eviction, composed in one binary. S7 is the durability
+third of that surviving wedge.
+
+### From concept to code — the buildable ladder (tracked)
+
+Rung 1 has **landed** (`[SHIPPED]`); rungs 2–3 are the tracked follow-ons of a sequenced
+epic against fak's real seams (**#82**), grounded in `internal/abi`, `internal/ctxmmu`,
+`internal/recall`, and `internal/kvmmu`:
+
+- **Rung 1 — minimal, proves the inversion. `[SHIPPED]`.** A write-time `classifyDurability`
+  (a cheap lexical/tense prior — *not* a model call, *not* the Zhang-Choi estimator) stamps
+  `Verdict.Meta["durability"]` in `ctxmmu.MMU.Admit`; `recall` gained a **default-expire
+  promotion gate** (`PromotionWarn` default / `PromotionEnforce` opt-in) that refuses to
+  promote a non-`durable` page. The bite test witnesses it end to end: `it's 3pm → turn →
+  refused promotion`; `the user prefers afternoons → durable → promoted`. (#82; the
+  migrated #497-#500 child references are stale/unrelated in this repo, and live rung-1
+  child numbers still need remapping; `TestABIGoldenFreeze` is unmoved.)
+- **Rung 2 — bitemporal, kills stale-as-current.** A `recall.Page` validity interval
+  (`ValidFrom`/`ValidTo`) + an as-of read gate (`ErrExpired`) makes the `bounded` class
+  the first temporally-enforced one (the Zep/Graphiti + SQL:2011 spine). (#81.)
+- **Rung 3 — engine-integrated, the distinctive move.** A `Segment` TTL over the bit-exact
+  `KVCache.Evict` (`Kraw` re-rotation) so a turn/session span is **forgotten on a clock the
+  fact itself sets**, byte-identical to never-having-seen-it — the in-context forgetting a
+  pressure-driven LRU cache structurally cannot do. (#80.)
+- **Close-out.** [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) durability row + flip this doc's tag to `[SHIPPED]` for what
+  landed. (#82; the migrated #503 reference is stale/unrelated in this repo.)
+
+The honest scope is on the tickets: rung 1 ships the inversion with a lexical classifier;
+`bounded` is a reserved value until rung 2 gives it a validity field; the byte-exact
+guarantee on rung 3 holds only for spans no later token attended (mid-context expiry is a
+coherent *compaction*, not never-saw). The seam itself costs zero ABI surface — `Meta` is
+the OPEN, forward-compatible map, so none of this moves the frozen ABI golden.
+
+### Rung-1 design contract (the ratified seam — #82)
+
+The six decisions the classifier feature, the promotion-gate feature, and the bite test
+all agree on, with the exact shipped symbols:
+
+1. **Attach point = `abi.Verdict.Meta["durability"]`** (`internal/abi/types.go:226`, the OPEN
+   map). NOT a new `VerdictKind` (durability is orthogonal to trust — a span can be Allow
+   AND turn-class — so it must not collide with the most-restrictive-wins fold) and NOT a
+   `ReasonCode` (that is the CLOSED refusal vocabulary; durability is not a refusal).
+   Confirmed zero ABI cost: `TestABIGoldenFreeze` serializes only the closed-enum integers,
+   so a runtime `Meta` stamp does not move it.
+2. **Classifier signature = `classifyDurability(c *abi.ToolCall, body []byte) string`**
+   (`internal/ctxmmu/mmu.go`, mirroring `ScreenBytes`). It leans on bytes (and may consult
+   the tool); it does NOT yet take a turn index / session id / principal / as-of clock —
+   threading those into the rank-10 `ResultAdmitter` signature is a NAMED follow-on, not
+   this rung.
+3. **Emitted vocabulary v1 = {turn, session, durable}** (`ctxmmu.DurabilityTurn` /
+   `…Session` / `…Durable`). `bounded` is a RESERVED value the lexical prior does not emit
+   (no validity-interval home until rung 2); readers degrade unknown/`bounded` fail-closed.
+4. **Fail-closed default = `turn`** at both writer and reader (`ctxmmu.classifyDurability`'s
+   `default:` arm and `recall.promotionClass`), mirroring `abi.FallbackDeny`. Unclassified ⇒
+   ephemeral, because a false-positive promotion (a poltergeist fact recalled as current) is
+   the expensive direction; a false-negative is recoverable.
+5. **`recall.Page.Durability string` (json `durability,omitempty`)** (`internal/recall/recall.go:61`)
+   so the disposition is auditable in `manifest.json`. JSON, not ABI — no golden touch.
+6. **Two-commit honesty split.** Commit 1 = classifier + `Meta` tag + `Page.Durability`
+   stamped, promotion gate in **WARN** (record the class, count a would-refuse, still
+   persist) — non-behavior-changing, so every caller can be audited. Commit 2 = the
+   **ENFORCE** posture (`PromotionEnforce`) where a non-`durable` benign page is not promoted.
+
+**Classifier honesty scope:** v1 is a regex/keyword/tense prior (punctual deictics + bare
+clock times ⇒ turn; habitual/stative frames ⇒ durable), explicitly **NOT** the Zhang-Choi
+fact-duration estimator (§5), which has no callsite and is deferred.
+
+**Realized posture (the WARN deliverable, honest):** `PromotionWarn` is the *default*, and
+`PromotionEnforce` is **opt-in** (`Recorder.WithPromotion`). The enforce flip is gated on a
+caller audit, because the existing benign-round-trip callers expect every non-quarantined
+result to persist: `internal/cdb/ingest.go` (the production session-ingest path) and the
+`internal/recall` round-trip tests record turn-class benign bodies and would lose them
+under a global enforce default. (`recall/dream.go` is a read-side consumer of an
+already-loaded image, not a `Recorder` caller, so the enforce flip does not affect it.)
+The WARN audit count
+(`Recorder.RefusedPromotions`) is the signal those callers are migrated; flipping the
+*default* to enforce is the named follow-on, not rung 1.
+
+**Migration trap (flagged, not conflated):** an empty `Durability` on an ALREADY-PERSISTED
+page must later default to **`durable`** — it crossed the old promotion-free gate — the
+OPPOSITE of the in-gate `turn` default for a live observation. That inverse default lands
+with rung 2's read gate; conflating the two would silently expire the existing recall store.
+
+### Disposition-minting gate — the generalization boundary, one level up (#1598)
+
+Rung 1 answers *"how long is this span true"* per write. It does not answer a narrower,
+downstream question a consolidation step can still get wrong: *may ONE situational
+observation be generalized into a standing trait about the user at all?* "I am tired
+today" is `turn`-class and correctly evicted on schedule — but nothing stopped a
+summarizer from free-associating it into "user prefers short answers" and minting THAT
+as `durable`, which is the ephemeral-promoted failure (§2) one level up: not a raw fact
+outliving its turn, but a fabricated durable belief the raw fact never supported.
+
+`internal/ctxmmu/disposition.go` closes that gap with a small, pure, additive type set —
+`Observation` (the raw remark), `Disposition` (the standing trait a caller wants to
+derive from it), `Evidence` (what backs the generalization: `EvidenceCorroboration` with
+independent corroborating observations reaching `MinCorroboration`, `EvidenceUserConfirmed`,
+or `EvidenceEstablishedPattern`) — and one pure decision function, `GateDisposition`, that
+returns a closed, typed `DispositionOutcome` (`OutcomeMinted` /
+`OutcomeRefusedUnsupported` / `OutcomeRefusedInsufficientCorroboration`). It never
+silently drops and never silently promotes. The default is refuse: a single
+observation with no evidence is `OutcomeRefusedUnsupported` regardless of how
+durable-shaped its own tense is, because one utterance minting a cross-session belief is
+the expensive direction (§4). This is a second, narrower gate that sits *above*
+`classifyDurability`, not a replacement for it — a minted `Disposition` carries
+`DurabilityDurable`, the same vocabulary rung 1 already shipped.
+
+---
+
+## See also
+
+- [`MEMORY-LAYERS-EXPLAINER.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/MEMORY-LAYERS-EXPLAINER.md) — the *spatial/trust* axis
+  (routing / addressing / fusion / semantics). This doc is the **orthogonal**
+  *temporal/durability* axis the four layers don't cover.
+- [`integrations/agent-memory.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/agent-memory.md) — the integration
+  checklist for routing memory writes, recalls, deletes, and durable-promotion decisions
+  through fak when composing with mem0, Letta, Zep/Graphiti, LangMem, or MCP memory tools.
+- `DISAGGREGATED-AGENT-MEMORY.md` (private companion — not published) — S1–S6 memory
+  semantics; the durability classification here is the natural **S7** (promotion /
+  truth-duration), upstream of all six.
+- [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — honesty ledger; the rung-1 durability gate (classifier +
+  `Verdict.Meta["durability"]` tag + `recall.Page.Durability` + default-expire promotion
+  gate) is now `[SHIPPED]`; the TTL scheduler (rung 3), the `bounded` validity-window
+  (rung 2), and Dream-time consolidation remain follow-on `[STUB]` rungs.
+
+---
+
+## Appendix: the thesis as one decision tree
+
+For a fact arriving in a turn, the write gate asks two independent questions — and only
+one path ends in durable memory:
+
+```
+   A value arrives in the turn
+            │
+            ▼
+   ┌─────────────────────────┐   trust axis (S1–S6): SHIPPED gate
+   │ Safe to keep at all?     │── no ──► QUARANTINE (held out, page-out, witness to clear)
+   │ (poison / secret?)       │
+   └─────────────────────────┘
+            │ yes
+            ▼
+   ┌─────────────────────────┐   durability axis (this doc, S7): rung-1 SHIPPED gate
+   │ How long is it true?     │
+   └─────────────────────────┘
+        │        │        │        │
+      turn    session  bounded  durable
+        │        │        │        │
+        ▼        ▼        ▼        ▼
+   live in   live in   durable    the ONLY
+   context,  context,  cell WITH  class that
+   evict at  evict at  a validity earns an
+   turn end  session   window,    unconditional
+   (TTL)     end       re-checked write to memory
+        └────────┴────────┘            │
+     never promoted to memory          ▼
+     (default for un-classified)   long-term store
+```
+
+"It's 3pm" passes the trust gate (it's safe) and lands in **turn** on the durability
+gate — used now, evicted on schedule, never written to memory. "I prefer afternoons"
+passes both and is the one thing that earns the durable write. *That* is context vs
+memory, made into a decision the gate can actually take.
 
 ---
 
@@ -10634,6 +11629,7 @@ Flags:
 - `fak up --dry-run`: profile unified memory and print the allocation plan without loading weights.
 - `fak up --headless`: run the background server without opening the terminal REPL.
 - `fak up --model 27B`: override auto-selected model tier.
+- `fak up status` / `fak up off [--for 30m]` / `fak up on`: control the default-on native service, the `com.fak.up` LaunchAgent. `off` writes a dev-off marker and runs `launchctl bootout`, so the service stays off for dev work (a bench run, a real-model test). A plain `off` also runs `launchctl disable`, which keeps the service off across logins until `on`. `off --for <dur>` skips the disable and starts a waker that runs `on` when the window lapses. A reboot during the window restores the service early, since it is default-on. `on` re-enables the job, re-bootstraps it from the plist, and waits for `/healthz` to report ready. launchd ignores plist edits until the next bootstrap, and `status` reports that drift as `STALE_DEFINITION` (#13535).
 
 ---
 
@@ -14299,7 +15295,7 @@ Numbers in different envelope keys are not interchangeable. Quote the key, model
 | **DIAGNOSTIC** | `q38-q4km-cuda-a100-cache-parity` | Cache hits were about **0.2–0.3 tok/s**; the attribution rerun was **0/5 exact**. Pinned llama.cpp reference median was **36.55 tok/s**. | `HOLD_CACHE_RESTORE_REGRESSION` and `HOLD_BELOW_PARITY`. The reference is parity diagnosis only, not the fak execution path. | [#8819 attribution](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md) and [#8848 campaign](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8848-qwen38-overnight/README.md); observed **2026-08-25**; review by **2026-09-01**. |
 | **CURRENT** | `q38-a100-p2060-prompt-attention` | Exact-artifact prefill **195.7 → 217.5 tok/s** (**+11.1%**) at 2060 tokens, with full-model state parity. | Accepted component-path gain from #8643; it is not the whole serving path. HTTP remains timing/parity-only and default serving remains below llama.cpp. | [#8643 issue receipt](https://github.com/anthony-chaudhary/fak/issues/8643), commit `2b54497aa0`; observed **2026-08-24**; review by **2026-09-07**. |
 | **CURRENT** | `q38-q4km-native-metal-m3pro-sequence-prefill` | Forward-owned sequence prefill: **43.8% faster prefill** (10,284.5 vs 18,304.9 ms), **1 command buffer vs 192**, 0 fallbacks. | `PASS` for M2 sequence boundary; closes #9230/#9525. | [#9525 receipt](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-9525-qwen38-sequence-prefill/README.md); observed **2026-09-03**; review by **2026-09-17**. |
-| **HISTORICAL** | `q38-q4km-native-metal-m3pro-fullrun` | Accepted full-run decode **2.3–2.9 tok/s**; full prefill **3.2–8.4 tok/s** depending on probe. | Functional `PASS`, below parity. The review window passed without a comparable renewal, so this row is retained only as dated evidence. | [Metal detail](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/QWEN38-27B-LATEST.md) and [run receipt](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/qwen38-27b-2026-08-20/metal-native-run-summary.json); observed **2026-08-20**; reviewed through **2026-08-27**. |
+| **CURRENT** | `q38-q4km-native-metal-m3pro-fullrun` | Matched full-run decode **6.8633 tok/s**, full prefill **76.19 tok/s** (P32/T64, temperature 0, 3 repetitions). | `PASS`: exact greedy token equality across all 64 positions and logit parity (max abs diff 0.0001 ≤ 0.001 tolerance) with **0 fallbacks**; throughput ratio **0.9852** vs pinned llama.cpp b9828 (6.9667 tok/s) ≥ 0.95 threshold. Engine `fak-native`, backend `metal`, forward path `metal/qwen35-hybrid-session-v1`, `fallback_active=false`. | [#9513 M10 parity receipt](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-9513-qwen38-m10-parity/README.md); artifact `unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe` SHA-256 `7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169`; Apple M3 Pro, 18 GPU cores, 36 GiB, darwin/arm64; observed **2026-09-03**; review by **2026-09-17**. Superseded 2026-08-20 full-run range **2.3–2.9 tok/s** remains in the [Metal detail](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/QWEN38-27B-LATEST.md). |
 | **HISTORICAL** | `q36-q4km-metal-m3pro-parity-bar` | llama.cpp Metal: **51.55 prefill / 7.29 decode tok/s**. fak resident-Q4_K Metal: **2.6 at P=27 / 7.3 at P=940 prefill, 1.2 decode tok/s**. | Architecture predecessor only; do not present it as current Qwen3.8 performance. | [Qwen3.6 parity results](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/QWEN36-PARITY-RESULTS.md); observed **2026-06-26**; retained as predecessor context. |
 
 **No accepted current Qwen3.8 performance row is indexed for AMD/Vulkan or CPU-only hardware.** Absence is not a zero or a failed benchmark.
@@ -15000,9 +15996,9 @@ There are two useful fak entry points:
 | If you run... | Use this fak path | Why |
 |---|---|---|
 | Current Codex CLI or IDE extension | `fak serve --stdio` as an MCP server | Codex supports MCP, and fak exposes verdict tools without changing Codex's model wire. |
-| Codex Desktop App for Windows (UI/UX) | `fak codex mcp install` + capability floor | Connects fak as an immutable local MCP server in the desktop app's Settings -> MCP panel; lets you run `approval_policy = "never"` safely without modal prompt fatigue or destructive execution risk. |
-| Codex CLI with an OpenAI API key and you want fak in front of the model wire | `fak codex -- <codex args...>` | One command starts `fak manage`, launches Codex, and injects per-run Codex `-c model_provider=fak` overrides for the Responses wire. |
-| Codex CLI on Mac against local `fak serve` ("raw", without guard) | `fak codex --raw` | First-class raw Codex harness against native Apple Silicon Metal `fak serve` backend with automated `-c` provider injection. |
+| Codex Desktop App for Windows (UI/UX) | `fak codex mcp install` + capability floor | Connects fak as an immutable local MCP server in the desktop app's Settings -> MCP panel. Fak tools are available for explicit calls; Codex's own shell calls are not automatically mediated. |
+| Codex CLI when you want a guarded launch | `fak codex --guard -- <codex args...>` | Starts the Fak guard and launches Codex through the guarded route. Check its dry-run command before relying on that boundary. |
+| Codex CLI on Mac against local `fak serve` (raw, without guard) | `fak codex` (or `fak codex --raw`) | The default launcher uses the raw local serving route and Codex's native approvals and sandbox. |
 | OpenAI SDKs, OpenAI Agents SDK, LangChain, LlamaIndex, or any Chat Completions client | `fak serve` as an OpenAI-compatible gateway | The client already calls `/v1/chat/completions`, so you repoint its base URL to fak. Endpoint-by-endpoint compatibility and current limits: [openai.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/openai.md). |
 
 Honest wire boundary: current Codex model-provider docs are Responses-oriented. fak can
@@ -15018,9 +16014,9 @@ OpenAI-compatible SDKs and Chat Completions agents, use the base-URL proxy path 
 ## Why this matters to Codex
 
 Codex reads `AGENTS.md` before it works in this repo. The repo-level rules already tell
-it the build, test, commit, and guardrail contract. fak adds a second layer: the kernel can
-adjudicate proposed tool calls and tool results with a default-deny floor that a prompt
-cannot talk around.
+it the build, test, commit, and guardrail contract. Fak can adjudicate proposed tool
+calls and results when they cross its MCP or guarded model-wire boundary. The
+verdict also depends on the loaded policy; the example dev policy is `default_open`.
 
 Use the right path for the job:
 
@@ -15099,14 +16095,14 @@ For Codex CLI sessions where you have an `OPENAI_API_KEY` available and want fak
 mediate Codex's model wire directly, use the launcher:
 
 ```bash
-./fak codex --dry-run --split off -- exec --json "List active MCP servers only."
-./fak codex -- exec --json "Summarize AGENTS.md."
+./fak codex --guard --dry-run --split off -- exec --json "List active MCP servers only."
+./fak codex --guard -- exec --json "Summarize AGENTS.md."
 ```
 
 The dry-run should print a command shaped like:
 
 ```text
-fak manage --split off ... -- codex --dangerously-bypass-approvals-and-sandbox exec --json ...
+fak guard --split off ... -- codex --dangerously-bypass-approvals-and-sandbox exec --json ...
 ```
 
 ### UserPromptSubmit modes
@@ -15176,7 +16172,7 @@ CODEX_HOME="$HOME/.codex-codexFOUR" fak guard -- codex
 
 The expected status after successful ChatGPT authentication is `Logged in using ChatGPT`.
 When hardened mode blocks a direct session because fak cannot enforce its next model
-call, relaunch with `fak codex` (preferred) or `fak manage -- codex`.
+call, relaunch with `fak codex --guard` (preferred) or `fak manage -- codex`.
 
 For a deliberately direct-provider continuation while hardened mode remains selected,
 pass `--allow-direct` when invoking the hook, or set
@@ -15255,7 +16251,7 @@ $env:CODEX_HOME = 'C:\Users\USER\.codex-codexFOUR'
 This direct launch is only an authentication-bootstrap escape hatch. Return ordinary and
 model-bearing sessions to `fak guard` as soon as status reports `Logged in using ChatGPT`.
 The normal response to a raw-session continuation block is to exit and restart with
-`fak codex`. For one deliberately unguarded repair session, use the scoped break-glass
+`fak codex --guard`. For one deliberately unguarded repair session, use the scoped break-glass
 launcher. It starts raw Codex by default, prints an unavoidable warning, removes any inherited
 loopback/guard state, and restores the normal default as soon as that child exits:
 
@@ -15297,8 +16293,8 @@ and prove normal service:
 
 ```powershell
 Remove-Item Env:FAK_CODEX_RAW_RECOVERY -ErrorAction SilentlyContinue
-fak codex --dry-run
-fak codex
+fak codex --guard --dry-run
+fak codex --guard
 ```
 
 Do not persist the variable in a shell profile, user environment, worker manifest, or CI
@@ -15477,24 +16473,6 @@ does not run:
 
 ```powershell
 python tools\codex_fak_gate.py `
-  --tool git_add `
-  --expect-deny `
-  --expect-reason DEFAULT_DENY `
-  --redact-command `
-  --command-label git-add-deny `
-  --json `
-  --dry-run `
-  --out experiments\agent-live\codex-fak-gate-git-add-deny-$env:CODEX_THREAD_ID.json
-python tools\codex_fak_gate.py `
-  --tool git_commit `
-  --expect-deny `
-  --expect-reason DEFAULT_DENY `
-  --redact-command `
-  --command-label git-commit-deny `
-  --json `
-  --dry-run `
-  --out experiments\agent-live\codex-fak-gate-git-commit-deny-$env:CODEX_THREAD_ID.json
-python tools\codex_fak_gate.py `
   --tool git_push `
   --expect-deny `
   --expect-reason POLICY_BLOCK `
@@ -15505,11 +16483,14 @@ python tools\codex_fak_gate.py `
   --out experiments\agent-live\codex-fak-gate-git-push-deny-$env:CODEX_THREAD_ID.json
 ```
 
-Use this for Codex's own operating loop: `run_tests` before Python test commands,
-`go_test` before Go test commands, default-denied names such as `git_add` and
-`git_commit` before local history mutation, and deny-listed names such as
-`git_push` before any publish path. JSON reports record the verdict, command
-identity, and exit code; command stdout/stderr are dropped unless
+Use this for Codex's own operating loop: `run_tests` before Python test commands
+and `go_test` before Go test commands. The example dev policy is `default_open`:
+`git_add` and `git_commit` are allowed in a direct preflight, so these probes
+cannot serve as a local history gate. Use Fak's scoped commit and landing verbs
+for repository changes, and verify a stricter policy explicitly if needed.
+`git_push` is explicitly denied when that named call crosses the Fak boundary;
+this does not intercept an independent Codex shell command. JSON reports record
+the verdict, command identity, and exit code; command stdout/stderr are dropped unless
 `--include-command-output` is set.
 
 Fold the gate reports into the dogfood witness when you want one report to prove both
@@ -15730,14 +16711,19 @@ In the Codex Desktop App:
 2. Verify `fak` appears as a connected server exposing `fak_adjudicate` and `fak_syscall`.
 3. Restart or reload Codex Desktop to ensure the background app-server binds the updated entry.
 
-### 2. Solving Approval Prompt Fatigue with an External Capability Floor
+### 2. Keep the MCP and Codex approval boundaries distinct
 
 Codex Desktop introduces granular approval modes (`approval_policy = "always" | "on-request" | "never"`) and sandbox profiles (`sandbox_mode = ":workspace" | "danger-full-access"`).
 
-* **The Problem:** Operators face modal approval fatigue on every routine command, or select `approval_policy = "never"` / `danger-full-access` which exposes the system to catastrophic deletion (`rm -rf`, `Remove-Item -Force`) and repo clobbering (`git push`).
-* **The `fak` Solution:** Keep `approval_policy = "never"` in Codex Desktop while letting `fak` enforce the default-deny capability floor:
-  - Benign dev actions (`go test`, `git status`, file reads) proceed autonomously with zero modal dialogs.
-  - Destructive commands (`rm -rf`, unconstrained pipes) and self-modifications (`.git/`, kernel files) are structurally blocked (`POLICY_BLOCK`, `SELF_MODIFY`).
+The MCP install exposes Fak tools, including `fak_adjudicate` for a verdict
+before Codex executes a proposed call, `fak_syscall` for registered calls Fak
+executes, and `fak_admit` for screening results Codex obtained elsewhere.
+Codex's native shell calls do not automatically cross this MCP boundary.
+Keep Codex approvals and sandbox settings appropriate to those calls. For a
+separate guarded Codex CLI process, use the explicit `fak codex --guard` route
+and verify its dry-run launch shape. A policy's actual posture and deny rules
+must be checked with `fak policy --check` and `fak preflight` before claiming a
+specific command is blocked.
 
 ### 3. Mitigating Windows Desktop Quirks & Upstream Issues
 
@@ -15753,15 +16739,15 @@ For a deep empirical study of the local Windows install, architecture, and issue
 
 ## What the kernel blocks for coding workflows
 
-`examples/dev-agent-policy.json` is the coding-agent floor. It allows ordinary
-read/search/list flows plus build and test commands. It blocks publish and
-self-modification surfaces.
+`examples/dev-agent-policy.json` is an example coding-agent floor. It uses
+`default_open`, allows common read/build/test names, and explicitly denies
+some publish operations. The table applies to calls that actually reach Fak.
 
 | Attempt | Kernel result |
 |---|---|
 | Read/search/list calls | Allowed when the tool is on the allow-list or prefix allow-list. |
 | `git_diff`, `git_log`, `git_status`, `go_build`, `go_test`, `run_tests` | Allowed by the dev-agent policy. |
-| `git_add`, `git_commit` | Denied by the default-deny floor unless routed through a narrower release/ship gate. |
+| `git_add`, `git_commit`, and other unlisted names | Allowed by this `default_open` example unless another policy rung denies the particular arguments. |
 | `git_push`, `git_merge`, `git_tag` | Denied with `POLICY_BLOCK`. |
 | Writes to `.git/`, `internal/kernel/`, `internal/policy/`, `VERSION`, or `dos.toml` | Denied by the self-modify floor. |
 | Secret-shaped fields such as `api_key`, `token`, or `authorization` | Redacted or quarantined by result-side guards. |
@@ -15801,7 +16787,7 @@ Clients still call fak's supported inbound routes. That means:
 | `codex exec --json` has no fak events | The MCP server is not enabled for that Codex run, or the task did not call fak. |
 | OpenAI SDK gets 404 | OpenAI-compatible clients need the `/v1` suffix: `http://127.0.0.1:8080/v1`. |
 | Anthropic SDK gets 404 | Anthropic clients need the origin without `/v1`: `http://127.0.0.1:8080`. |
-| Everything is denied | Load a policy with `--policy`; with no policy the floor fails closed. |
+| An unexpected call is allowed | Inspect `fak policy --check <policy>` and run `fak preflight` for that exact tool and arguments; the example policy is `default_open`. |
 | You tried to point default Codex model traffic at fak | Use MCP instead, or use a client/framework path that explicitly speaks Chat Completions to fak. |
 
 ## Source alignment
@@ -16706,7 +17692,7 @@ fak worktree worker land --worktree <dir> [flags]
 - `--base-sha <sha>`: Commit SHA the worktree was pinned at (diff base; default: `HEAD`).
 - `--msg-file <file>`: Commit message file for `git commit -s -F` (defaults to worktree tip message).
 - `--paths <path>`: Scopes the commit to specific paths; repeatable (default: entire applied diff).
-- `--verify <hook>`: Pre-land verification executed inside the worktree (`off` or `go-build`).
+- `--verify <hook>`: Pre-land verification executed inside the worktree (`off` or `go-build`). Use `off` only for a pre-existing red: the same packages fail with the same first error on the landing base, and every condition and receipt in `.claude/skills/commit-clean/SKILL.md` "Pre-existing red" holds.
 - `--core-lock-maintenance-witness <claim>`: Witness claim required when modifying core-locked paths.
 - `--recovery-remote <remote>`: Git remote receiving candidate recovery ref before trunk CAS.
 - `--require-remote-recovery`: Refuses trunk CAS if remote candidate read-back fails.
@@ -16786,6 +17772,29 @@ A worktree is eligible for `gc` removal only when **both** conditions are proven
 
 1. **Owner process is dead:** The PID recorded in the owner stamp no longer exists.
 2. **Lane lease is released:** The lease oracle confirms the stamped lease is inactive.
+
+#### Land-verify candidates (`--candidates`)
+
+`land` verifies a workspace whose `go.work` escapes the repository in a detached
+checkout named `.fak-cand-validate-*` beside the repository (in the system temp
+directory otherwise), and removes it when verification ends. A land that is killed
+first (for example by a supervisor's deadline) cannot remove it. `gc --candidates`
+collects those leaked checkouts:
+
+```bash
+fak worktree worker gc --candidates [--legacy-max-age <duration>]
+fak worktree worker gc --candidates --apply [--legacy-max-age <duration>]
+```
+
+A candidate named `.fak-cand-validate-<pid>-<start>-<n>` is eligible when that pid
+and process start time no longer identify a running process. A name without an
+owner identity is eligible once untouched past `--legacy-max-age` (default `2h`). Each
+directory is removed before `git worktree prune` runs against the repository it was
+registered in. A land killed inside `git worktree add` also leaves git's
+`initializing` lock on a registration whose directory is gone, which a plain prune
+never clears; the sweep removes that lock under the same owner/age rule so the
+prune collects it. Candidates never hold unique work: each is a copy of an existing
+commit plus a diff the worker worktree still holds.
 
 ### 6. `publish` and `recover` — Remote publication and crash recovery
 

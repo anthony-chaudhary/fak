@@ -1,9 +1,14 @@
-package vdso
+package strmatch
 
 import "strings"
 
-// search_replace.go — the tolerant search/replace matcher behind the Edit tool's
+// relindent.go — the tolerant search/replace matcher behind the Edit tool's
 // drift recovery path.
+//
+// It lives in strmatch (tier 1), not in vdso (tier 3), because its consumer is
+// the tier-2 codetools Edit engine: a codetools -> vdso edge is an upward import
+// the architest layering gate refuses. Keeping the matcher pure and low-tier lets
+// any layer reuse it without inverting the DAG.
 //
 // The dominant LLM edit failure is not a wrong intent: the model read a block,
 // then re-emitted it in old_string with the block re-indented (2 spaces where the
@@ -49,7 +54,7 @@ func MatchAndReplaceRelativeIndent(content, oldStr, newStr string) (string, bool
 	// The matched block's own base indentation is the leading whitespace of its
 	// first non-blank line; the replacement is re-indented onto it. The block's
 	// final line keeps its own terminator (including a possible newline).
-	base := leadingWhitespace(firstNonBlank(block))
+	base := leadingWhitespace(firstNonBlankLine(block))
 	replacement := reindent(block, splitLines(newStr), base)
 
 	var b strings.Builder
@@ -175,7 +180,7 @@ func reindent(oldBlock []line, newLines []line, base string) string {
 	if len(newLines) == 0 {
 		return ""
 	}
-	modelBase := leadingWhitespace(firstNonBlank(newLines))
+	modelBase := leadingWhitespace(firstNonBlankLine(newLines))
 	var b strings.Builder
 	for i, l := range newLines {
 		body := strings.TrimLeft(l.text, " \t")
@@ -216,9 +221,9 @@ func leadingWhitespace(line string) string {
 	return line[:i]
 }
 
-// firstNonBlank returns the first line with non-whitespace content, or "" when
+// firstNonBlankLine returns the first line with non-whitespace content, or "" when
 // every line is blank.
-func firstNonBlank(lines []line) string {
+func firstNonBlankLine(lines []line) string {
 	for _, l := range lines {
 		if strings.TrimSpace(l.text) != "" {
 			return l.text

@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
-	"github.com/anthony-chaudhary/fak/internal/vdso"
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // mutation.go owns the side-effecting filesystem engines. They do not invoke a shell.
@@ -213,14 +213,14 @@ func (t *Toolset) editLocked(ctx context.Context, a EditArgs, target mutationTar
 		// always wins (this branch is unreachable when n >= 1); a UNIQUE
 		// relative-indentation match is applied in place, and an ambiguous match
 		// still refuses rather than guessing which occurrence the model meant.
-		if tolerant, ok := vdso.MatchAndReplaceRelativeIndent(string(b), a.OldString, a.NewString); ok {
+		if tolerant, ok := strmatch.MatchAndReplaceRelativeIndent(string(b), a.OldString, a.NewString); ok {
 			next := []byte(tolerant)
 			if int64(len(next)) > t.limits.MaxWriteBytes {
 				return refuse(CodeTooLarge, "Edit result exceeds byte bound").JSON(), true
 			}
 			return t.finishEdit(ctx, a, target, info, observed, next, 1)
 		}
-		if count, comparable := vdso.RelativeIndentMatchCount(string(b), a.OldString); comparable && count >= 2 {
+		if count, comparable := strmatch.RelativeIndentMatchCount(string(b), a.OldString); comparable && count >= 2 {
 			return refuse(CodeEditConflict, fmt.Sprintf("Edit old_string matched 0 exact bytes and %d relative-indentation-tolerant candidates; want exactly 1, so the edit is too ambiguous to apply; file not changed. Extend old_string with more unique surrounding context for one explicit Edit retry. If unresolved, stop; do not guess.", count)+nearestHint(string(b), a.OldString)).JSON(), true
 		}
 		return refuse(CodeEditConflict, "Edit old_string matched 0 occurrences"+nearestHint(string(b), a.OldString)+"; file not changed. Read the same authorized file_path with bounded offset and limit around the intended edit; use the returned version as expected_version and current exact text with unique surrounding context for one explicit Edit retry. If unresolved, stop; do not guess or retry automatically.").JSON(), true
@@ -303,7 +303,7 @@ func (t *Toolset) finishEdit(ctx context.Context, a EditArgs, target mutationTar
 // wrong-revision old_string becomes actionable (re-read here) instead of a dead
 // end. Returns "" when no comparable region exists.
 func nearestHint(content, oldString string) string {
-	line, score, ok := vdso.NearestLineHint(content, oldString)
+	line, score, ok := strmatch.NearestLineHint(content, oldString)
 	if !ok {
 		return ""
 	}
