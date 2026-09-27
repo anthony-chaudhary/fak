@@ -88,9 +88,13 @@ func TestCachevalueReportJSONReproducesFold(t *testing.T) {
 	cachevalueReportNow = twoTrackReportNow
 	defer func() { cachevalueReportNow = restore }()
 
+	// The recall-injection debit defaults to the cwd-relative .fak/recall-injections.jsonl,
+	// which other package tests write into cmd/fak; the pure fold below never reads it, so
+	// the CLI must be pinned to an absent ledger or a second run in the same tree diverges.
 	var out, errb bytes.Buffer
 	code := runCachevalueReport(&out, &errb, []string{
-		"--ledger", track1, "--savings-ledger", track2, "--usage-ledger", filepath.Join(dir, "absent-usage.jsonl"), "--json",
+		"--ledger", track1, "--savings-ledger", track2, "--usage-ledger", filepath.Join(dir, "absent-usage.jsonl"),
+		"--recall-injection-ledger", filepath.Join(dir, "absent-recall-injections.jsonl"), "--json",
 	})
 	if code != 0 {
 		t.Fatalf("report --json exit = %d, stderr=%s", code, errb.String())
