@@ -85,10 +85,17 @@ func ProjectStatus(e StatusEvidence) StatusProjection {
 
 func safeStatusIdentity(value string) string {
 	value = strings.TrimSpace(value)
-	if value == "" || filepath.IsAbs(value) || filepath.VolumeName(value) != "" || strings.HasPrefix(value, "/") || strings.HasPrefix(value, `\`) {
+	if value == "" || filepath.IsAbs(value) || filepath.VolumeName(value) != "" || strings.HasPrefix(value, "/") || strings.HasPrefix(value, `\`) || hasDriveLetterPrefix(value) {
 		return ""
 	}
 	return value
+}
+
+// hasDriveLetterPrefix recognizes a Windows drive path ("C:\...", "c:/...") on every
+// host: filepath.VolumeName only does so on Windows, so evidence written on Windows
+// and projected by a Linux/WSL reader would otherwise leak the local path.
+func hasDriveLetterPrefix(value string) bool {
+	return len(value) >= 2 && value[1] == ':' && (('a' <= value[0] && value[0] <= 'z') || ('A' <= value[0] && value[0] <= 'Z'))
 }
 
 func differentRevision(head, base string) bool {
