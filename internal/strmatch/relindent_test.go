@@ -1,8 +1,8 @@
-package vdso
+package strmatch
 
 import "testing"
 
-// search_replace_test.go — the tolerant matcher's contract. The load-bearing
+// relindent_test.go — the tolerant matcher's contract. The load-bearing
 // properties are (1) exact match wins and is never reinterpreted, (2) a tolerant
 // match must be unique or the matcher refuses, and (3) the replacement keeps the
 // TARGET's absolute indentation while preserving the model's relative shape.
