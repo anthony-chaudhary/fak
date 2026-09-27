@@ -36,10 +36,15 @@ const (
 type Server struct {
 	mu           sync.RWMutex
 	cfg          *config.Config
+	mgrCfg       shard.ManagerConfig
 	shardManager *shard.Manager
 	metrics      *metrics.Collector
 	status       atomic.Value
 	startedAt    time.Time
+
+	// released is set once Stop has freed shardManager. Stop is terminal for a
+	// manager, so the next Start provisions a fresh one from mgrCfg (#13518).
+	released bool
 }
 
 // NewServer constructs an initialized L3 cache server from configuration.
@@ -75,6 +80,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 
 	s := &Server{
 		cfg:          cfg,
+		mgrCfg:       mgrCfg,
 		shardManager: manager,
 		metrics:      collector,
 	}
@@ -90,6 +96,15 @@ func (s *Server) Start(ctx context.Context) error {
 	curr := s.status.Load().(ServerStatus)
 	if curr == StatusRunning {
 		return fmt.Errorf("l3server: server is already running")
+	}
+
+	if s.released {
+		manager, err := shard.NewManager(s.mgrCfg)
+		if err != nil {
+			return fmt.Errorf("l3server: re-provision shard manager: %w", err)
+		}
+		s.shardManager = manager
+		s.released = false
 	}
 
 	s.status.Store(StatusStarting)
@@ -116,6 +131,7 @@ func (s *Server) Stop(ctx context.Context) error {
 
 	if s.shardManager != nil {
 		s.shardManager.Stop()
+		s.released = true
 	}
 	return nil
 }

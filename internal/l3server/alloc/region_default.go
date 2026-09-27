@@ -4,13 +4,18 @@ package alloc
 
 import "fmt"
 
+// maxDevHeap is the per-region heap ceiling on non-Linux dev hosts. It keeps
+// unit tests from committing gigabytes of host memory (#11311).
+const maxDevHeap = 64 << 20
+
 func (r *Region) allocate() error {
-	allocSize := r.size
-	const maxDevHeap = 64 << 20 // 64MB dev ceiling on non-Linux
-	if allocSize > maxDevHeap {
-		allocSize = maxDevHeap
+	if r.size > maxDevHeap {
+		// Report the capped size as the region size: every slot and offset
+		// computation derives from Size(), so it must never exceed the backing
+		// array (#13518).
+		r.size = maxDevHeap
 	}
-	r.data = make([]byte, allocSize)
+	r.data = make([]byte, r.size)
 	r.isMapped = false
 	return nil
 }
