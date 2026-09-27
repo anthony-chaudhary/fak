@@ -320,9 +320,16 @@ func buildDecomposeRow(d issuepolicy.IssueDraft, review issuepolicy.Review, plan
 	}
 	row.Children = make([]decomposeChildResult, 0, len(specs))
 	for _, spec := range specs {
+		args, err := decomposeCreateArgs(spec, d.Number)
+		if err != nil {
+			row.Disposition = dispositionError
+			row.Error = err.Error()
+			row.Children = nil
+			return row
+		}
 		row.Children = append(row.Children, decomposeChildResult{
 			Title: strings.TrimSpace(spec.Title),
-			Args:  decomposeCreateArgs(spec, d.Number),
+			Args:  args,
 		})
 	}
 	return row
@@ -393,14 +400,22 @@ func scaffoldChildBody(parent int, parentTitle string) string {
 // decomposeCreateArgs builds the `gh issue create` argv for one child, matching
 // runIssueCreateWith's shape (inline --body; one --label per label). The runner
 // executes via exec with an arg slice, so the multi-line body needs no quoting.
-func decomposeCreateArgs(spec decomposeChildSpec, parent int) []string {
-	args := []string{"issue", "create", "--title", strings.TrimSpace(spec.Title), "--body", spec.Body}
-	for _, l := range spec.Labels {
+func decomposeCreateArgs(spec decomposeChildSpec, parent int) ([]string, error) {
+	body, processLabel, err := issuepolicy.TagGeneratedIssue(spec.Body, "unknown")
+	if err != nil {
+		return nil, fmt.Errorf("decomposed child of #%d: %w", parent, err)
+	}
+	labels, err := issueCreateProcessCauseLabels(spec.Labels, strings.TrimPrefix(processLabel, issuepolicy.ProcessCauseLabelPrefix))
+	if err != nil {
+		return nil, fmt.Errorf("decomposed child of #%d: %w", parent, err)
+	}
+	args := []string{"issue", "create", "--title", strings.TrimSpace(spec.Title), "--body", body}
+	for _, l := range labels {
 		if s := strings.TrimSpace(l); s != "" {
 			args = append(args, "--label", s)
 		}
 	}
-	return args
+	return args, nil
 }
 
 // --- apply -----------------------------------------------------------------

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -424,12 +425,18 @@ func SyncIssuePlan(plan []IssuePlanRow, repo string, labels []string, runner Iss
 			}
 			args = []string{"issue", "edit", num, "--title", row.Title, "--body", row.Body}
 		} else {
-			args = []string{"issue", "create", "--title", row.Title, "--body", row.Body}
+			body, causeLabel, err := issuepolicy.TagGeneratedIssue(row.Body, "none")
+			if err != nil {
+				rows = append(rows, IssueSyncRow{Key: row.Key, Action: row.Action, OK: false, Stderr: err.Error()})
+				continue
+			}
+			args = []string{"issue", "create", "--title", row.Title, "--body", body}
 			for _, label := range mergeMaturityLabels(maturityTriageLabels, labels) {
-				if strings.TrimSpace(label) != "" {
+				if strings.TrimSpace(label) != "" && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(label)), issuepolicy.ProcessCauseLabelPrefix) {
 					args = append(args, "--label", strings.TrimSpace(label))
 				}
 			}
+			args = append(args, "--label", causeLabel)
 		}
 		if repo != "" {
 			args = append(args, "--repo", repo)

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 	"github.com/anthony-chaudhary/fak/internal/taskdecision"
 	"github.com/anthony-chaudhary/fak/internal/taskmgr"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -321,7 +322,18 @@ func syncTaskHandoffPlan(plan []taskmgr.HandoffIssuePlanRow, repo string, labels
 	}
 	results := make([]taskHandoffSyncRow, 0, len(plan))
 	for _, row := range plan {
-		args := taskHandoffGHArgs(row, repo, labels)
+		rowLabels := labels
+		if row.Action != "update" {
+			body, causeLabel, err := issuepolicy.TagGeneratedIssue(row.Body, "none")
+			if err != nil {
+				results = append(results, taskHandoffSyncRow{Key: row.Key, Action: row.Action, OK: false, Stderr: err.Error()})
+				continue
+			}
+			row.Body = body
+			row.Labels = removeTaskHandoffProcessCauseLabels(row.Labels)
+			rowLabels = append(removeTaskHandoffProcessCauseLabels(labels), causeLabel)
+		}
+		args := taskHandoffGHArgs(row, repo, rowLabels)
 		stdout, stderr, ok := run(args)
 		results = append(results, taskHandoffSyncRow{
 			Key:    row.Key,
@@ -332,6 +344,17 @@ func syncTaskHandoffPlan(plan []taskmgr.HandoffIssuePlanRow, repo string, labels
 		})
 	}
 	return results
+}
+
+func removeTaskHandoffProcessCauseLabels(labels []string) []string {
+	out := make([]string, 0, len(labels))
+	for _, label := range labels {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(label)), issuepolicy.ProcessCauseLabelPrefix) {
+			continue
+		}
+		out = append(out, label)
+	}
+	return out
 }
 
 func taskHandoffGHArgs(row taskmgr.HandoffIssuePlanRow, repo string, labels []string) []string {

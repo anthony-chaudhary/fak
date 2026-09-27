@@ -210,6 +210,11 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 	if code, refused := runIssueCreateScrubGate(stdout, stderr, result, *privateRoot, *title, resolvedBody, *asJSON); refused {
 		return code
 	}
+	processCause := issuepolicy.AssessProcessCause(resolvedBody)
+	if !processCause.Valid {
+		fmt.Fprintf(stderr, "fak-dev issue create: invalid process cause: %s\n", strings.Join(processCause.Errors, "; "))
+		return 2
+	}
 
 	if !*rawBody {
 		var err error
@@ -252,10 +257,23 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 		return 2
 	}
 	resolvedBody = classifiedBody
+	// Scope and classification helpers can add authored text after the first
+	// check. Bind the label to the exact body sent to gh, including dry runs and
+	// paths that skip the discoverability audit.
+	processCause = issuepolicy.AssessProcessCause(resolvedBody)
+	if !processCause.Valid {
+		fmt.Fprintf(stderr, "fak-dev issue create: invalid process cause: %s\n", strings.Join(processCause.Errors, "; "))
+		return 2
+	}
 
 	labelList := issueFanoutSplit(*labels)
 	if !*rawBody {
 		labelList = issueCreateShiftLeftLabels(*title, resolvedBody, labelList)
+	}
+	labelList, err = issueCreateProcessCauseLabels(labelList, processCause.Primary)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak-dev issue create: %v\n", err)
+		return 2
 	}
 	args := []string{"issue", "create", "--title", *title, "--body", resolvedBody}
 	for _, l := range labelList {
@@ -342,6 +360,30 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 	}
 	fmt.Fprintln(stdout, result.URL)
 	return 0
+}
+
+func issueCreateProcessCauseLabels(labels []string, primary string) ([]string, error) {
+	want := issuepolicy.ProcessCauseLabel(primary)
+	out := make([]string, 0, len(labels)+1)
+	seenWant := false
+	for _, label := range labels {
+		label = strings.TrimSpace(label)
+		if strings.HasPrefix(strings.ToLower(label), issuepolicy.ProcessCauseLabelPrefix) {
+			if !strings.EqualFold(label, want) {
+				return nil, fmt.Errorf("explicit process-cause label %q conflicts with body declaration %q", label, primary)
+			}
+			if seenWant {
+				continue
+			}
+			seenWant = true
+			label = want
+		}
+		out = append(out, label)
+	}
+	if !seenWant {
+		out = append(out, want)
+	}
+	return out, nil
 }
 
 // issueCreateShiftLeftLabels derives and defaults canonical fleet labels from title and body

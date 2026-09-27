@@ -66,7 +66,7 @@ func rsNumberZeroSections() []reachabilitySection {
 		// Two task-list items declare an atomic scope class; the phrase
 		// "definition of done" satisfies HasDoD without being a heading that
 		// aliases to the done-condition review section.
-		Body: "- [ ] land the guarded change\n- [ ] close when the definition of done is met",
+		Body: "Process cause: none\n- [ ] land the guarded change\n- [ ] close when the definition of done is met",
 	})
 	return sections
 }
@@ -147,7 +147,11 @@ func TestRequiredSectionsContract_RequiredReviewSectionsGateDispatch(t *testing.
 		for _, h := range entry.Headings {
 			norm := normalizeHeading(h)
 			variant := base
-			variant.Body = rsRemoveSectionFrom(rsNumberZeroSections(), norm)
+			if entry.Field == "process_cause" {
+				variant.Body = strings.Replace(base.Body, "Process cause: none\n", "", 1)
+			} else {
+				variant.Body = rsRemoveSectionFrom(rsNumberZeroSections(), norm)
+			}
 			if ReviewIssueDraft(variant, Options{}).Dispatchability != Dispatchable {
 				gated = true
 				break

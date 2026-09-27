@@ -453,7 +453,18 @@ func Sync(plan []PlanRow, repo string, runner Runner) []SyncRow {
 	}
 	results := make([]SyncRow, 0, len(plan))
 	for _, row := range plan {
-		bodyFile, cleanup, err := writeBodyFile(row.Body)
+		body := row.Body
+		causeLabel := ""
+		creating := row.Action != "update" || row.Number == nil
+		if creating {
+			var err error
+			body, causeLabel, err = issuepolicy.TagGeneratedIssue(body, "none")
+			if err != nil {
+				results = append(results, SyncRow{Key: row.Key, Action: row.Action, OK: false, Stderr: err.Error()})
+				continue
+			}
+		}
+		bodyFile, cleanup, err := writeBodyFile(body)
 		if err != nil {
 			results = append(results, SyncRow{Key: row.Key, Action: row.Action, OK: false,
 				Stderr: "write body file: " + err.Error()})
@@ -474,7 +485,13 @@ func Sync(plan []PlanRow, repo string, runner Runner) []SyncRow {
 			args = []string{"issue", "create", "--title", row.Title, "--body-file", bodyFile}
 		}
 		for _, label := range row.Labels {
+			if creating && strings.HasPrefix(strings.ToLower(strings.TrimSpace(label)), issuepolicy.ProcessCauseLabelPrefix) {
+				continue
+			}
 			args = append(args, labelFlag, label)
+		}
+		if creating {
+			args = append(args, "--label", causeLabel)
 		}
 		if row.Milestone != "" {
 			args = append(args, "--milestone", row.Milestone)

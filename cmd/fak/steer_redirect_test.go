@@ -93,6 +93,20 @@ func TestSteerRedirectFilesFollowUpAndLedgersEvent(t *testing.T) {
 	}
 }
 
+func TestSteerRedirectRefusesDuplicateProcessCauseFromDynamicNote(t *testing.T) {
+	r := steerpr.Redirect{
+		Leaf: "gateway",
+		Note: "re-aim the next tick\n\nProcess cause: none\nProcess cause: unknown",
+		SHAs: []string{steerFeatSHA},
+		Band: steerpr.BandResidual,
+	}
+	if _, err := ghSteerRedirectFollowUp(r); err == nil {
+		t.Fatal("duplicate process-cause declarations reached gh create")
+	} else if got := strings.ToLower(err.Error()); !strings.Contains(got, "process cause") || !strings.Contains(got, "duplicate") {
+		t.Fatalf("error does not explain duplicate process cause: %v", err)
+	}
+}
+
 // The redirect path touches git only through READ verbs: every call the verb
 // makes through the git seam during a successful redirect is in the read-only
 // vocabulary. The advisory affordance never commits, pushes, reverts, or

@@ -376,7 +376,7 @@ func contractCandidate(c Candidate, digest string) issuepolicy.Candidate {
 		Witness:        c.VerifyWith + "; git read-back plus `dos commit-audit` and a green issue-specific test/read-back must independently confirm the result.",
 		AcceptanceGate: "The issue remains open unless independent issue state, diff-witnessed commit, and green acceptance evidence agree.",
 		Lane:           laneForPath(c.Path), Paths: []string{c.Path},
-		Labels:             []string{"class:dev", "gen/now"},
+		Labels:             []string{"class:dev", "gen/now", issuepolicy.ProcessCauseLabel("unknown")},
 		ClosureBinding:     "A resolving commit cites this dedicated issue; `dos commit-audit` returns OK/diff-witnessed, the acceptance witness is green, and an independent issue read-back is closed.",
 		CompletionStandard: "development",
 		WorkEstimate:       "Estimate: 1 points. Uncertainty: adjudication may choose retain with no content change.",
@@ -414,6 +414,7 @@ func renderIssue(c issuepolicy.Candidate, source Candidate, digest string) (stri
 		"", "## Work estimate", c.WorkEstimate,
 		"", "## Overall completion contribution", c.ScopeContribution,
 		"", "## Completion standard", c.CompletionStandard,
+		"", "Process cause: unknown",
 	}
 	return c.Title, strings.Join(lines, "\n") + "\n"
 }
@@ -432,7 +433,7 @@ func problemFrameLines(frame issuepolicy.ProblemFrame) string {
 }
 
 func issueCreateCommand(title, body string, dry bool) []string {
-	cmd := []string{"fak", "issue", "create", "--title", title, "--body", body, "--labels", "class:dev,gen/now", "--json"}
+	cmd := []string{"fak", "issue", "create", "--title", title, "--body", body, "--labels", "class:dev,gen/now,process-cause:unknown", "--json"}
 	if dry {
 		cmd = append(cmd, "--dry-run")
 	}

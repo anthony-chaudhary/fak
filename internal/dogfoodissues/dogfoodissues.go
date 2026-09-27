@@ -927,10 +927,19 @@ func SyncWithOptions(plan []PlanRow, repo string, labels []string, runner Runner
 			num := strconv.Itoa(*row.Number)
 			args = []string{"issue", "edit", num, "--title", row.Title, "--body", row.Body}
 		} else {
-			args = []string{"issue", "create", "--title", row.Title, "--body", row.Body}
+			body, causeLabel, err := issuepolicy.TagGeneratedIssue(row.Body, "none")
+			if err != nil {
+				results = append(results, SyncRow{Key: row.Key, Action: row.Action, OK: false, Stderr: err.Error()})
+				continue
+			}
+			args = []string{"issue", "create", "--title", row.Title, "--body", body}
 			for _, label := range mergeDogfoodIssueLabels(row.Labels, labels) {
+				if strings.HasPrefix(strings.ToLower(strings.TrimSpace(label)), issuepolicy.ProcessCauseLabelPrefix) {
+					continue
+				}
 				args = append(args, "--label", label)
 			}
+			args = append(args, "--label", causeLabel)
 		}
 		if strings.TrimSpace(row.Milestone) != "" {
 			args = append(args, "--milestone", strings.TrimSpace(row.Milestone))

@@ -420,6 +420,7 @@ func hddIssueBody(s hddScaffold, key, verdictPath string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<!-- fak-harness-debt-key: %s -->\n", key)
 	b.WriteString("# Harness-debt: retire a graded scaffold\n\n")
+	b.WriteString("Process cause: harness-failure\n\n")
 	fmt.Fprintf(&b, "- Stable key: `%s`\n", key)
 	fmt.Fprintf(&b, "- Scaffold: `%s`\n", s.ID)
 	fmt.Fprintf(&b, "- Grade: `%s` (HARD)\n", s.Grade)
@@ -495,10 +496,11 @@ func hddSync(plan []hddPlanRow, repo string, labels []string, runner hddRunner) 
 	for _, row := range plan {
 		args := []string{"issue", "create", "--title", row.Title, "--body", row.Body}
 		for _, label := range hddMergeLabels(hddDefaultTriageLabels, labels) {
-			if strings.TrimSpace(label) != "" {
+			if strings.TrimSpace(label) != "" && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(label)), "process-cause:") {
 				args = append(args, "--label", label)
 			}
 		}
+		args = append(args, "--label", "process-cause:harness-failure")
 		if repo != "" {
 			args = append(args, "--repo", repo)
 		}

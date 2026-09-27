@@ -101,7 +101,7 @@ func TestIssueCreateBuildsExpectedGHArgs(t *testing.T) {
 		t.Fatalf("runner calls = %d, want 1", len(calls))
 	}
 	joined := strings.Join(calls[0], " ")
-	for _, want := range []string{"issue create", "--title feat: thing", "--body body text", "--label agent-handoff", "--label next-step", "--repo owner/repo"} {
+	for _, want := range []string{"issue create", "--title feat: thing", "--body Process cause: none", "body text", "--label agent-handoff", "--label next-step", "--repo owner/repo"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("gh args missing %q: %v", want, calls[0])
 		}
@@ -130,7 +130,8 @@ func TestIssueCreateBodyFileReadsContent(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, errb.String())
 	}
-	if !strings.Contains(strings.Join(calls[0], " "), "--body body from file") {
+	joined := strings.Join(calls[0], " ")
+	if !strings.Contains(joined, "--body Process cause: none") || !strings.Contains(joined, "body from file") {
 		t.Fatalf("gh args missing file body: %v", calls[0])
 	}
 }
@@ -485,10 +486,33 @@ func TestIssueCreateAuditDiscoverabilityAllowsDispatchable(t *testing.T) {
 // These tests exercise issue policy and argv after a clean scrub verdict.
 // Gate refusal and the real subprocess have separate fixtures.
 func runIssueCreateWithCleanScrub(stdout, stderr io.Writer, argv []string, runner issueCreateRunner) int {
+	argv = appendDefaultProcessCause(argv)
+	return runIssueCreateWithCleanScrubNoDefault(stdout, stderr, argv, runner)
+}
+
+func runIssueCreateWithCleanScrubNoDefault(stdout, stderr io.Writer, argv []string, runner issueCreateRunner) int {
 	previous := issueScrubGateHook
 	issueScrubGateHook = func(_, _, _ string) issueScrubGateVerdict {
 		return issueScrubGateVerdict{Ran: true, Clean: true}
 	}
 	defer func() { issueScrubGateHook = previous }()
 	return runIssueCreateWith(stdout, stderr, argv, runner)
+}
+
+func appendDefaultProcessCause(argv []string) []string {
+	out := append([]string(nil), argv...)
+	for i := 0; i+1 < len(out); i++ {
+		switch out[i] {
+		case "--body":
+			if strings.TrimSpace(out[i+1]) != "" && !strings.Contains(strings.ToLower(out[i+1]), "process cause:") {
+				out[i+1] = "Process cause: none\n\n" + out[i+1]
+			}
+		case "--body-file":
+			data, err := os.ReadFile(out[i+1])
+			if err == nil && !strings.Contains(strings.ToLower(string(data)), "process cause:") {
+				_ = os.WriteFile(out[i+1], []byte("Process cause: none\n\n"+string(data)), 0o644)
+			}
+		}
+	}
+	return out
 }

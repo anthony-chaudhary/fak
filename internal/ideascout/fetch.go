@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/ghexec"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 type LiveFetcher struct {
@@ -220,10 +221,18 @@ func (f LiveFetcher) EnsureLabels() error {
 }
 
 func (f LiveFetcher) CreateIssue(issue IssuePlan, milestone string) (string, error) {
-	args := []string{"issue", "create", "--title", issue.Title, "--body", issue.Body}
+	body, causeLabel, err := issuepolicy.TagGeneratedIssue(issue.Body, "none")
+	if err != nil {
+		return "", err
+	}
+	args := []string{"issue", "create", "--title", issue.Title, "--body", body}
 	for _, lab := range issue.Labels {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(lab)), issuepolicy.ProcessCauseLabelPrefix) {
+			continue
+		}
 		args = append(args, "--label", lab)
 	}
+	args = append(args, "--label", causeLabel)
 	if milestone != "" {
 		args = append(args, "--milestone", milestone)
 	}

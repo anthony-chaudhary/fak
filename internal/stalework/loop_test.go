@@ -54,6 +54,13 @@ func TestBuildLoopRefusesDispatchUntilDedicatedIssueExists(t *testing.T) {
 			t.Fatalf("generated issue missing %q", want)
 		}
 	}
+	if got := strings.Count(u.Issue.Body, "Process cause: unknown"); got != 1 {
+		t.Fatalf("generated issue process-cause declaration count = %d, want 1:\n%s", got, u.Issue.Body)
+	}
+	command := strings.Join(u.Issue.Command, "\x00")
+	if got := strings.Count(command, "process-cause:unknown"); got != 1 {
+		t.Fatalf("generated create command process-cause label count = %d, want 1: %v", got, u.Issue.Command)
+	}
 	if plan.Counts.Launches != 0 || plan.Counts.CreatePlanned != 1 {
 		t.Fatalf("counts=%+v, want dry-run create and zero launches", plan.Counts)
 	}

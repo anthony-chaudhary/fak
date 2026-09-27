@@ -98,6 +98,7 @@ func wipOrphanTicketBody(t wipOrphanTicket) string {
 	var b strings.Builder
 	b.WriteString(wipOrphanTicketMarker(t.Key))
 	b.WriteString("\n\n")
+	b.WriteString("Process cause: handoff-failure\n\n")
 	b.WriteString("A crashed session left an orphaned working-tree checkpoint that `fak wip reconcile` classified **QUARANTINE**: the delta is unlanded AND does not apply cleanly to the current tree, so it is neither auto-reclaimed nor discarded. This ticket tracks that orphaned WIP so it is not silently lost.\n\n")
 	fmt.Fprintf(&b, "- Session: `%s`\n", t.Session)
 	fmt.Fprintf(&b, "- Start SHA: `%s`\n", t.SHA12)
@@ -247,7 +248,7 @@ func wipGHFindByKey(ctx context.Context, key string) ([]int, error) {
 // wipGHCreateIssue files the issue and returns its number, parsed from the issue URL
 // gh prints on success.
 func wipGHCreateIssue(ctx context.Context, title, body string) (int, error) {
-	cmd := exec.CommandContext(ctx, "gh", "issue", "create", "--title", title, "--body", body)
+	cmd := exec.CommandContext(ctx, "gh", "issue", "create", "--title", title, "--body", body, "--label", "process-cause:handoff-failure")
 	configureDispatchHelperCommand(cmd)
 	var out, errb strings.Builder
 	cmd.Stdout = &out

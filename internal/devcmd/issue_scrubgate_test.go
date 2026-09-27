@@ -26,7 +26,7 @@ func TestIssueCreateScrubGateVerdicts(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, dryRun := range []bool{false, true} {
-				title, body := "synthetic-title-marker", "synthetic-body-marker"
+				title, body := "synthetic-title-marker", "synthetic-body-marker\n\nProcess cause: none"
 				issueScrubGateHook = func(_ string, gotTitle, gotBody string) issueScrubGateVerdict {
 					if gotTitle != title || gotBody != body {
 						t.Fatal("gate did not receive both issue fields")

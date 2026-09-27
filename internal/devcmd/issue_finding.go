@@ -296,6 +296,11 @@ func applyFindingLive(stdout, stderr io.Writer, plan modelroute.FindingPlan, res
 		}
 		args, ok := findingMutationArgs(item, repo, authoring)
 		if !ok {
+			if item.Action == modelroute.FindingCreate {
+				result.Refusal = "generated finding has an invalid process cause or body"
+				fmt.Fprintf(stderr, "fak-dev issue finding: %s\n", result.Refusal)
+				return 2
+			}
 			// A non-create mutation targeting a finding created earlier in this same
 			// batch has no issue number yet; it is folded into the create, so skip.
 			continue
@@ -338,8 +343,12 @@ func findingMutationArgs(item modelroute.FindingPlanItem, repo string, authoring
 		if err != nil {
 			return nil, false
 		}
+		body, processLabel, err := issuepolicy.TagGeneratedIssue(body, "unknown")
+		if err != nil {
+			return nil, false
+		}
 		args := []string{"issue", "create", "--title", title, "--body", body}
-		for _, label := range findingIssueLabels() {
+		for _, label := range append(findingIssueLabels(), processLabel) {
 			args = append(args, "--label", label)
 		}
 		return withRepo(args), true
