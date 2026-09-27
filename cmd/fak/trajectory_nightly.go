@@ -64,18 +64,25 @@ func runTrajectoryNightly(stdout, stderr io.Writer, args []string) int {
 			return 2
 		}
 	}
-	sources := trajectory.DefaultAuditSources()
-	for i := range sources {
-		switch sources[i].Name {
+	// The nightly attribution fold is versioned for the Claude and Codex corpora only
+	// (runBoundedAttributionAudit rejects any other source as unsupported). Select them
+	// explicitly: DefaultAuditSources grew an OpenCode root for audit reports in
+	// 21209fcd9e (#11297), and inheriting it made every nightly run collection_failed.
+	var sources []trajectory.AuditSource
+	for _, source := range trajectory.DefaultAuditSources() {
+		switch source.Name {
 		case trajectory.AuditSourceClaude:
 			if strings.TrimSpace(*claudeRoot) != "" {
-				sources[i].Root = *claudeRoot
+				source.Root = *claudeRoot
 			}
 		case trajectory.AuditSourceCodex:
 			if strings.TrimSpace(*codexRoot) != "" {
-				sources[i].Root = *codexRoot
+				source.Root = *codexRoot
 			}
+		default:
+			continue
 		}
+		sources = append(sources, source)
 	}
 	receipt := trajectory.RunAttributionNightly(trajectory.AttributionNightlyOptions{
 		Sources: sources, Budget: budget, Now: at, Corpus: strings.TrimSpace(*corpus),
