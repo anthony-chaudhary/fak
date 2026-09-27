@@ -200,7 +200,7 @@ func TestBuildCodexLaunchArgvSkipPermissionsOff(t *testing.T) {
 
 func TestRunCodexDryRun(t *testing.T) {
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{
+	rc := runCodex(&out, &errb, []string{"--guard",
 		"--dry-run",
 		"--split", "off",
 		"--policy", "floor.json",
@@ -232,7 +232,7 @@ func TestRunCodexDryRun(t *testing.T) {
 
 func TestRunCodexDryRunExplicitSkipPermissions(t *testing.T) {
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{
+	rc := runCodex(&out, &errb, []string{"--guard",
 		"--dry-run",
 		"--split", "off",
 		"--skip-permissions",
@@ -443,7 +443,7 @@ func TestCodexDryRunSubprocessPermissions(t *testing.T) {
 		{name: "approve-for-me alone preserves sandbox and uses automated reviewer", extra: []string{"--approve-for-me"}, wantBypass: false, wantBanner: "automated approval reviewer (sandbox active)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			args := []string{"codex", "--freshness-gate", "off", "--dry-run", "--split", "off"}
+			args := []string{"codex", "--guard", "--freshness-gate", "off", "--dry-run", "--split", "off"}
 			args = append(args, tc.extra...)
 			args = append(args, "--", "exec", "check the repo")
 			cmd := exec.Command(built, args...)
@@ -482,7 +482,7 @@ func TestRunCodexExecSeam(t *testing.T) {
 	t.Cleanup(func() { codexLaunchRun = orig })
 
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{"--split", "off", "--loop-gate", "off", "--", "exec", "do x"})
+	rc := runCodex(&out, &errb, []string{"--guard", "--split", "off", "--loop-gate", "off", "--", "exec", "do x"})
 	if rc != 17 {
 		t.Fatalf("runCodex rc=%d, want seam rc 17; stderr=%s", rc, errb.String())
 	}
@@ -514,7 +514,7 @@ func TestRunCodexLoopGateRefusesBeforeSpawn(t *testing.T) {
 	t.Cleanup(func() { codexLaunchRun = orig })
 
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{
+	rc := runCodex(&out, &errb, []string{"--guard",
 		"--split", "off",
 		"--codex-home", home,
 		"--loop-gate", "loop",
@@ -560,7 +560,7 @@ func TestRunCodexLoopGateDefaultOffSkipsAudit(t *testing.T) {
 	t.Cleanup(func() { codexLaunchRun = orig })
 
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{
+	rc := runCodex(&out, &errb, []string{"--guard",
 		"--split", "off",
 		"--codex-home", home,
 		"--", "exec", "do x",
@@ -588,7 +588,7 @@ func TestRunCodexLoopGateEnvironmentOptInRefusesBeforeSpawn(t *testing.T) {
 	t.Cleanup(func() { codexLaunchRun = orig })
 
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{
+	rc := runCodex(&out, &errb, []string{"--guard",
 		"--split", "off",
 		"--codex-home", home,
 		"--loop-gate-since-hours", "0",
@@ -724,7 +724,7 @@ func TestRunCodexLoopGateAllowsForwardProgressPlanTraffic(t *testing.T) {
 	t.Cleanup(func() { codexLaunchRun = orig })
 
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{
+	rc := runCodex(&out, &errb, []string{"--guard",
 		"--split", "off",
 		"--codex-home", home,
 		"--loop-gate", "loop",
@@ -772,7 +772,7 @@ func TestRunCodexLoopGateAllowsNewestAbruptCrash(t *testing.T) {
 	t.Cleanup(func() { codexLaunchRun = orig })
 
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{
+	rc := runCodex(&out, &errb, []string{"--guard",
 		"--split", "off",
 		"--codex-home", home,
 		"--loop-gate", "loop",
@@ -846,7 +846,7 @@ func TestRunCodexLoopGateAllowsGuardedRemediationForDirectLoops(t *testing.T) {
 	t.Cleanup(func() { codexLaunchRun = orig })
 
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{
+	rc := runCodex(&out, &errb, []string{"--guard",
 		"--split", "off",
 		"--codex-home", home,
 		"--loop-gate", "loop",
@@ -873,7 +873,7 @@ func TestRunCodexLoopGateRefusesCurrentDirectThread(t *testing.T) {
 	t.Cleanup(func() { codexLaunchRun = orig })
 
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{
+	rc := runCodex(&out, &errb, []string{"--guard",
 		"--split", "off",
 		"--codex-home", home,
 		"--loop-gate", "loop",
@@ -913,7 +913,7 @@ func TestRunCodexLoopGateAllowsCurrentGuardWitnessedThread(t *testing.T) {
 	t.Cleanup(func() { codexLaunchRun = orig })
 
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{
+	rc := runCodex(&out, &errb, []string{"--guard",
 		"--split", "off",
 		"--codex-home", home,
 		"--loop-gate", "loop",
@@ -942,7 +942,7 @@ func TestRunCodexLoopGateOffAllowsSpawn(t *testing.T) {
 	t.Cleanup(func() { codexLaunchRun = orig })
 
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{
+	rc := runCodex(&out, &errb, []string{"--guard",
 		"--split", "off",
 		"--codex-home", home,
 		"--loop-gate", "off",
@@ -964,7 +964,7 @@ func TestRunCodexLoopGateInvalidThreshold(t *testing.T) {
 	t.Cleanup(func() { codexLaunchRun = orig })
 
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{"--loop-gate", "urgent"})
+	rc := runCodex(&out, &errb, []string{"--guard", "--loop-gate", "urgent"})
 	if rc != 2 || !strings.Contains(errb.String(), "invalid --loop-gate") {
 		t.Fatalf("invalid loop gate rc=%d stdout=%s stderr=%s", rc, out.String(), errb.String())
 	}
@@ -1033,7 +1033,7 @@ func TestRunCodexSuccessfulLaunchUsesConciseTimedStatus(t *testing.T) {
 	t.Cleanup(func() { codexLaunchRun = orig })
 
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{"--split", "off", "--loop-gate", "off", "--", "exec", "do x"})
+	rc := runCodex(&out, &errb, []string{"--guard", "--split", "off", "--loop-gate", "off", "--", "exec", "do x"})
 	if rc != 0 {
 		t.Fatalf("runCodex rc=%d, want 0; stderr=%s", rc, errb.String())
 	}
@@ -1055,7 +1055,7 @@ func TestRunCodexSuccessfulLaunchUsesConciseTimedStatus(t *testing.T) {
 
 func TestRunCodexDryRunRetainsCommandDetails(t *testing.T) {
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{"--dry-run", "--split", "off", "--", "exec", "do x"})
+	rc := runCodex(&out, &errb, []string{"--guard", "--dry-run", "--split", "off", "--", "exec", "do x"})
 	if rc != 0 {
 		t.Fatalf("runCodex rc=%d, want 0; stderr=%s", rc, errb.String())
 	}
@@ -1136,7 +1136,7 @@ func TestCodexLauncherSynchronizesProjectAssets(t *testing.T) {
 
 	t.Chdir(ws)
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{"--split", "off", "--loop-gate", "off", "--quiet", "--", "exec", "do task"})
+	rc := runCodex(&out, &errb, []string{"--guard", "--split", "off", "--loop-gate", "off", "--quiet", "--", "exec", "do task"})
 	if rc != 0 {
 		t.Fatalf("runCodex returned %d, stderr: %s", rc, errb.String())
 	}
@@ -1194,7 +1194,7 @@ func TestBuildCodexLaunchArgvApproveForMe(t *testing.T) {
 
 func TestRunCodexDryRunNativePermissionsApproveForMe(t *testing.T) {
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{
+	rc := runCodex(&out, &errb, []string{"--guard",
 		"--dry-run",
 		"--split", "off",
 		"--native-permissions",
@@ -1261,7 +1261,7 @@ func TestRunCodexExecSeamApproveForMe(t *testing.T) {
 	t.Cleanup(func() { codexLaunchRun = orig })
 
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{
+	rc := runCodex(&out, &errb, []string{"--guard",
 		"--split", "off",
 		"--loop-gate", "off",
 		"--native-permissions",

@@ -5,9 +5,32 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/dropin"
 )
+
+// isolateAgentEndpointEnv unsets every ambient input resolveAgentEndpoint reads
+// ahead of (or alongside) the stubbed probe, restoring them at cleanup. A host
+// that exports a provider base URL (a WSL distro with OPENAI_BASE_URL pointed at
+// its local router) otherwise resolves before the probe and a live endpoint
+// answers the model-detect call, so the same commit passed on Windows and failed
+// under WSL. FAK_GATEWAY_KEY would trigger a live credential challenge.
+func isolateAgentEndpointEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{
+		dropin.EnvVar("openai", ""),
+		dropin.EnvVar("anthropic", ""),
+		dropin.EnvVar("gemini", ""),
+		"FAK_AGENT_ROUTER_ORIGIN",
+		"FAK_GATEWAY_KEY",
+	} {
+		t.Setenv(k, "") // records the original value for cleanup
+		_ = os.Unsetenv(k)
+	}
+}
 
 // stubAgentRouterProbe installs a canned router probe for the duration of one
 // test so the native-router resolution is hermetic: no test binds
@@ -15,6 +38,7 @@ import (
 // test verdict.
 func stubAgentRouterProbe(t *testing.T, model string, ok bool, hit *bool) {
 	t.Helper()
+	isolateAgentEndpointEnv(t)
 	prev := agentRouterProbe
 	agentRouterProbe = func() (string, string, bool) {
 		if hit != nil {
@@ -30,6 +54,7 @@ func stubAgentRouterProbe(t *testing.T, model string, ok bool, hit *bool) {
 // resolver adopts the origin that actually answered.
 func stubAgentRouterProbeOrigin(t *testing.T, origin, model string, ok bool) {
 	t.Helper()
+	isolateAgentEndpointEnv(t)
 	prev := agentRouterProbe
 	agentRouterProbe = func() (string, string, bool) {
 		return origin, model, ok

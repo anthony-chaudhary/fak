@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,12 +20,29 @@ func sha256Hex(b []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// attestTestProbeTools names every tool the attest tests in this file probe.
+var attestTestProbeTools = []string{"delete_all", "read_record", "run_read_query", "x", "__fak_attest_unmatched__"}
+
+// resetAttestProbeTraces clears the adjudicator circuit-breaker history on the
+// per-tool traces runProbe folds under ("fak-attest/<tool>"). The breaker turns
+// the third consecutive identical deny on one trace into DOOM_LOOP; a `fak
+// attest` process runs one attestation, but this package runs several, so in
+// full-suite order TestRunAttestJSONShape read DOOM_LOOP instead of the floor.
+func resetAttestProbeTraces() {
+	for _, tool := range attestTestProbeTools {
+		adjudicator.Default.ResetCircuitBreaker("fak-attest/" + tool)
+	}
+}
+
 // restorePolicy resets the global adjudicator + IFC policy an `applyPolicy` call
-// mutates, so one attest run cannot leak its floor into a sibling test.
+// mutates, so one attest run cannot leak its floor into a sibling test, and
+// isolates the probe traces' circuit-breaker history on both sides of the test.
 func restorePolicy(t *testing.T) {
+	resetAttestProbeTraces()
 	t.Cleanup(func() {
 		adjudicator.Default.SetPolicy(adjudicator.DefaultPolicy())
 		ifc.ConfigureDefaultPolicy(ifc.Policy{})
+		resetAttestProbeTraces()
 	})
 }
 
@@ -204,7 +222,8 @@ func TestRunAttestJSONShape(t *testing.T) {
 	var out, errb bytes.Buffer
 	code := runAttest(&out, &errb, []string{"--policy", policy, "--json", "--quiet"})
 	if code != 0 {
-		t.Fatalf("exit=%d stderr=%s", code, errb.String())
+		// --quiet leaves stderr empty on a probe failure; the JSON names the probe.
+		t.Fatalf("exit=%d stderr=%s attestation=%s", code, errb.String(), out.String())
 	}
 	var got attestation
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
@@ -223,6 +242,22 @@ func TestRunAttestJSONShape(t *testing.T) {
 	raw, _ := os.ReadFile(policy)
 	if want := sha256Hex(raw); got.Policy.SHA256 != want {
 		t.Fatalf("sha256 = %s, want %s", got.Policy.SHA256, want)
+	}
+}
+
+// TestRunAttestIsolatedAcrossTestsInOneProcess pins restorePolicy's trace reset:
+// three attestations of the same floor in one process, each isolated the way a
+// sibling test is, must all prove it rather than trip the circuit breaker.
+func TestRunAttestIsolatedAcrossTestsInOneProcess(t *testing.T) {
+	policy := writeTemp(t, "floor.json", `{"allow": ["read_record"], "deny": {"delete_all": "POLICY_BLOCK"}}`)
+	for i := 1; i <= 3; i++ {
+		t.Run(fmt.Sprintf("run%d", i), func(t *testing.T) {
+			restorePolicy(t)
+			var out, errb bytes.Buffer
+			if code := runAttest(&out, &errb, []string{"--policy", policy, "--json", "--quiet"}); code != 0 {
+				t.Fatalf("attestation %d exit=%d, want 0 (probe trace state leaked across tests); attestation=%s", i, code, out.String())
+			}
+		})
 	}
 }
 

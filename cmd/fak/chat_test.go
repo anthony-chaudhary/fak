@@ -668,6 +668,25 @@ func TestDetectServerModel_FromModels(t *testing.T) {
 }
 
 func TestServeModelDefaultFromGGUFAlias(t *testing.T) {
+	// Hermetic: the embedded alias expands to an hf:// URI, and resolving that is
+	// a live multi-GB Hugging Face download on any host without the file cached
+	// (a WSL distro hung here for the full go test timeout). A private
+	// FAK_MODELS_DIR whose user registry.json overlay points the same alias at a
+	// local file keeps the alias -> model-name rule under test with no network.
+	modelsDir := t.TempDir()
+	t.Setenv("FAK_MODELS_DIR", modelsDir)
+	local := filepath.Join(modelsDir, "Qwen3.8-27B-Q4_K_M.gguf")
+	if err := os.WriteFile(local, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	overlay, err := json.Marshal(map[string]string{"qwen38:27b-q4": local})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(modelsDir, "registry.json"), overlay, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	rt := &serveRuntime{}
 	gguf := "qwen38:27b-q4"
 	tok := ""
@@ -683,5 +702,8 @@ func TestServeModelDefaultFromGGUFAlias(t *testing.T) {
 	rt.resolveServeModelSources(sf)
 	if *sf.model != "qwen38:27b-q4" {
 		t.Fatalf("expected sf.model to default to GGUF alias %q, got %q", "qwen38:27b-q4", *sf.model)
+	}
+	if *sf.ggufPath != local {
+		t.Fatalf("sf.ggufPath = %q, want the registry target %q", *sf.ggufPath, local)
 	}
 }
