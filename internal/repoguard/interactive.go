@@ -66,8 +66,8 @@ func ClassifyInteractive(command string) []Violation {
 // tokenizeSegment splits seg into shell tokens (shlex-aware, falling back to whitespace
 // fields when shlex parsing fails on an unbalanced quote) and strips a leading env-var
 // assignment / `env` verb prefix, returning the resolved verb, its operands, and whether
-// an editor-override env var was seen — the identical front-end classifyInteractive and
-// classifySleepWait both run over each command segment before their differing checks.
+// an editor-override env var was seen — the shared front-end the segment rungs run before
+// their differing checks (the sleep rung uses sleepSegmentVerb, which also skips prefixes).
 func tokenizeSegment(seg string) (verb string, operands []string, overridden bool) {
 	toks, ok := shlexSplit(seg)
 	if !ok {

@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // ReasonForegroundSleep is the structured advisory token for long foreground
@@ -28,7 +30,8 @@ import (
 const ReasonForegroundSleep = "FOREGROUND_SLEEP"
 
 // DefaultForegroundSleepThresholdS is the advisory threshold: a single sleep
-// invocation at or above this many seconds is flagged.
+// invocation at or above this many seconds is flagged. The command layer may
+// override it (FAK_SLEEP_THRESHOLD_S) through Hints.SleepThresholdS.
 const DefaultForegroundSleepThresholdS = 120.0
 
 // foregroundSleepFix pre-fills the background-wait alternatives, mirroring the
@@ -40,13 +43,36 @@ const foregroundSleepFix = "wait in the background instead: Bash run_in_backgrou
 // the sleep underneath is still seen.
 var shellFlowKeywords = setOf("do", "then", "else", "elif", "while", "until", "time")
 
+// sleepCommandPrefixes are the words that can stand in front of a sleep in
+// command position without making it an argument: the flow keywords plus the
+// benign command prefixes (`sudo -E sleep 300`, `nohup sleep 300`). Each may be
+// followed by dash-flags, mirroring repo_guard.py _BASH_SLEEP_RE.
+var sleepCommandPrefixes = setOf("do", "then", "else", "elif", "while", "until", "time",
+	"sudo", "nice", "command", "exec", "nohup", "builtin", "env")
+
 // ClassifySleepWait returns FOREGROUND_SLEEP advisories for long foreground
-// sleep timers in a shell command. Pure string work.
+// sleep timers in a shell command at the default threshold. Pure string work.
 func ClassifySleepWait(command string) []Violation {
-	return classifySleepWait(command)
+	return classifySleepWait(command, 0)
 }
 
-func classifySleepWait(command string) []Violation {
+// ClassifySleepWaitThreshold is ClassifySleepWait at an explicit threshold in
+// seconds; thresholdS <= 0 means DefaultForegroundSleepThresholdS.
+func ClassifySleepWaitThreshold(command string, thresholdS float64) []Violation {
+	return classifySleepWait(command, thresholdS)
+}
+
+// runInBackground reports a harness-level background call
+// (`"run_in_background": true`): the whole call never holds the turn.
+func runInBackground(toolInput map[string]any) bool {
+	v, ok := toolInput["run_in_background"].(bool)
+	return ok && v
+}
+
+func classifySleepWait(command string, thresholdS float64) []Violation {
+	if thresholdS <= 0 {
+		thresholdS = DefaultForegroundSleepThresholdS
+	}
 	// A command that backgrounds anything (`sleep 300 &`) does not provably
 	// hold the turn — splitSegments erases the `&`, so check the raw text and
 	// skip the whole command. Advisory rung: prefer the false negative.
@@ -55,12 +81,9 @@ func classifySleepWait(command string) []Violation {
 	}
 	var out []Violation
 	for _, seg := range splitSegments(command) {
-		verb, operands, _ := tokenizeSegment(seg)
-		for shellFlowKeywords[verb] {
-			verb, operands, _ = stripEnvAndEnvVerb(operands)
-		}
+		verb, operands := sleepSegmentVerb(seg)
 		seconds, known := sleepSeconds(verb, operands)
-		if !known || seconds < DefaultForegroundSleepThresholdS {
+		if !known || seconds < thresholdS {
 			continue
 		}
 		out = append(out, Violation{
@@ -73,6 +96,35 @@ func classifySleepWait(command string) []Violation {
 		})
 	}
 	return out
+}
+
+// sleepSegmentVerb resolves the command-position verb of one segment for the
+// sleep rung: leading NAME=VALUE assignments and sleepCommandPrefixes (each with
+// its dash-flags) are skipped, so `sudo -E sleep 300` resolves to sleep while
+// `echo sleep 300` stays echo.
+func sleepSegmentVerb(seg string) (verb string, operands []string) {
+	toks, ok := shlexSplit(seg)
+	if !ok {
+		toks = strings.Fields(seg)
+	}
+	i := 0
+	for i < len(toks) {
+		if _, isAssign := envAssignName(toks[i]); isAssign {
+			i++
+			continue
+		}
+		if !sleepCommandPrefixes[strings.TrimSuffix(pathutil.Base(toks[i]), ".exe")] {
+			break
+		}
+		i++
+		for i < len(toks) && strings.HasPrefix(toks[i], "-") {
+			i++
+		}
+	}
+	if i >= len(toks) {
+		return "", nil
+	}
+	return strings.TrimSuffix(pathutil.Base(toks[i]), ".exe"), toks[i+1:]
 }
 
 // sleepSeconds resolves the total duration of one sleep invocation. known is
