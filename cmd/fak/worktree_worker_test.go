@@ -2411,6 +2411,95 @@ func TestWorktreeWorkerLandPrepareAccept(t *testing.T) {
 	}
 }
 
+func TestWorktreeWorkerSandboxCompatiblePreparedLandAccept(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	t.Setenv(workerworktree.PoolCapEnv, "0")
+	t.Setenv("GOFLAGS", "-tags=preparedcli")
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(filepath.Join(repo, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git -C %s %s: %v: %s", dir, strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git(repo, "init", "-q", "-b", "main")
+	git(repo, "config", "user.email", "t@t")
+	git(repo, "config", "user.name", "t")
+	git(repo, "config", "commit.gpgsign", "false")
+	git(repo, "config", "core.hooksPath", "")
+	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example.com/sandboxprepared\n\ngo 1.21\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "pkg", "calc.go"), []byte("package pkg\n\nfunc Calc(n int) int { return n }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(repo, "add", ".")
+	git(repo, "commit", "-qm", "base")
+	base := git(repo, "rev-parse", "HEAD")
+
+	raw := captureWorktreeWorkerStdout(t, func() {
+		worktreeWorkerPrepare([]string{
+			"--root", repo,
+			"--lane", "cmd",
+			"--key", "sandbox-prepared-land",
+			"--sandbox-compatible",
+			"--wt-root", filepath.Join(root, "workers"),
+		})
+	})
+	var worker worktreePrepareOut
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &worker); err != nil {
+		t.Fatalf("decode sandbox-compatible prepare: %v; raw=%q", err, raw)
+	}
+	if !worker.OK || !worker.SandboxCompatible || worker.Path == "" {
+		t.Fatalf("sandbox-compatible prepare failed: %+v", worker)
+	}
+	if err := os.WriteFile(filepath.Join(worker.Path, "pkg", "calc.go"), []byte("package pkg\n\nfunc Calc(n int) int { if n < 0 { return -n }; return n }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	originalBuild, originalSymptom := worktreeWorkerPreparedGoBuildVerify, worktreeWorkerPreparedSymptomVerify
+	buildCalls, symptomCalls := 0, 0
+	worktreeWorkerPreparedGoBuildVerify = func(string) (bool, string) { buildCalls++; return true, "built" }
+	worktreeWorkerPreparedSymptomVerify = func(string, string, []string) workerworktree.Result {
+		symptomCalls++
+		return workerworktree.Result{OK: true}
+	}
+	t.Cleanup(func() {
+		worktreeWorkerPreparedGoBuildVerify, worktreeWorkerPreparedSymptomVerify = originalBuild, originalSymptom
+	})
+	paths := []string{"pkg/calc.go"}
+	prep, receipt, code, stderr := runPreparedCLI(t, preparedCLIArgs("prepare", repo, worker.Path, base, paths))
+	if code != 0 || !prep.OK || receipt == nil || receipt.ReceiptID == "" {
+		t.Fatalf("prepare result=%+v receipt=%+v code=%d stderr=%s", prep, receipt, code, stderr)
+	}
+	if buildCalls != 1 || symptomCalls != 0 {
+		t.Fatalf("prepare verifier calls: build=%d symptom=%d", buildCalls, symptomCalls)
+	}
+
+	acceptArgs := preparedCLIArgs("accept", repo, worker.Path, base, paths)
+	acceptArgs = append(acceptArgs, "--receipt-id", receipt.ReceiptID)
+	accepted, _, code, stderr := runPreparedCLI(t, acceptArgs)
+	if code != 0 || !accepted.OK || !accepted.Committed {
+		t.Fatalf("accept result=%+v code=%d stderr=%s", accepted, code, stderr)
+	}
+	if buildCalls != 1 || symptomCalls != 0 {
+		t.Fatalf("accept reran verifiers: build=%d symptom=%d", buildCalls, symptomCalls)
+	}
+	if head := git(repo, "rev-parse", "refs/heads/main"); head != receipt.CandidateSHA {
+		t.Fatalf("accepted head=%s candidate=%s", head, receipt.CandidateSHA)
+	}
+}
+
 func TestWorktreeWorkerLandPrepareFixRunsBuildAndSymptom(t *testing.T) {
 	repo, wt, base, paths := newPreparedCLIWorkerFixture(t, true)
 	originalBuild, originalSymptom := worktreeWorkerPreparedGoBuildVerify, worktreeWorkerPreparedSymptomVerify
