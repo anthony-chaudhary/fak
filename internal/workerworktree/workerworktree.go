@@ -178,7 +178,10 @@ type Result struct {
 	Disambiguation   *DisambiguationWitnesses `json:"disambiguation,omitempty"`
 	RecoveryRef      string                   `json:"recovery_ref,omitempty"`
 	RemoteRecovery   *RemoteReadback          `json:"remote_recovery,omitempty"`
-	Cost             *LandCostReceipt         `json:"cost,omitempty"`
+	// SharedSync is the post-CAS refresh of the shared root checkout for the
+	// landed paths; a non-synced status comes with LandResultLandedSyncIncomplete.
+	SharedSync *SharedSyncReceipt `json:"shared_sync,omitempty"`
+	Cost       *LandCostReceipt   `json:"cost,omitempty"`
 	// pooled is internal lifecycle evidence: unlike generic same-key reuse, this
 	// Prepare exclusively reserved an idle member and may safely destroy it if the
 	// post-materialization owner/state write fails.

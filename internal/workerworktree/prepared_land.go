@@ -145,14 +145,10 @@ func AcceptPreparedLand(root, wtPath string, expected PreparedLandExpectation, g
 	if rc, out := run(git, root, []string{"update-ref", receipt.TargetRef, receipt.CandidateSHA, receipt.ParentSHA}); rc != 0 {
 		return preparedReprepare("prepared target changed during acceptance; prepare again", tail(out, 200))
 	}
-	detail := "recovery-ref=" + receipt.RecoveryRef
-	coArgs := append([]string{"checkout", receipt.CandidateSHA, "--"}, receipt.CandidatePaths...)
-	if rc, out := run(git, root, coArgs); rc != 0 {
-		detail += "; landed " + shortSHA(receipt.CandidateSHA) + " but working-tree sync failed: " + tail(out, 200)
-	}
-	return Result{OK: true, Code: LandResultSuccess, Applied: true, Committed: true, CommitSHA: receipt.CandidateSHA,
+	sync := syncSharedCheckout(git, root, receipt.ParentSHA, receipt.CandidateSHA, receipt.CandidatePaths)
+	return withSharedSync(Result{OK: true, Code: LandResultSuccess, Applied: true, Committed: true, CommitSHA: receipt.CandidateSHA,
 		Reason: "accepted verified prospective landing " + shortSHA(receipt.CandidateSHA),
-		Detail: detail, RecoveryRef: receipt.RecoveryRef}
+		Detail: "recovery-ref=" + receipt.RecoveryRef, RecoveryRef: receipt.RecoveryRef}, sync, receipt.CandidateSHA)
 }
 
 func revalidatePreparedLand(root, wtPath string, receipt PreparedLandReceipt, cfg landConfig, git GitRunner) Result {

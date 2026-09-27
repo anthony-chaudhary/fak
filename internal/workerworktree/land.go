@@ -522,7 +522,7 @@ func landPrepared(root, wtPath, baseSHA, commitMsgFile string, paths []string, v
 			if r.DroppedOutOfLane == 0 {
 				r.DroppedOutOfLane = droppedOutOfLane
 			}
-			if r.OK && r.Committed {
+			if r.OK && r.Committed && r.Code != LandResultLandedSyncIncomplete {
 				r.Code = LandResultSuccess
 			}
 			return r
@@ -540,7 +540,7 @@ func landPrepared(root, wtPath, baseSHA, commitMsgFile string, paths []string, v
 			if r.DroppedOutOfLane == 0 {
 				r.DroppedOutOfLane = droppedOutOfLane
 			}
-			if r.OK && r.Committed {
+			if r.OK && r.Committed && r.Code != LandResultLandedSyncIncomplete {
 				r.Code = LandResultSuccess
 			}
 			return r
@@ -1193,18 +1193,16 @@ func landIsolatedProspectivePrepared(root, wtPath, diff, msgFile string, paths [
 				Reason: "isolated-index land " + shortSHA(newCommit) + " (race-free, #3547)",
 				Detail: detail, Disambiguation: disambiguation, RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt}, true
 		}
-		coArgs := append([]string{"checkout", newCommit, "--"}, syncPaths...)
-		if rc, out := run(git, root, coArgs); rc != 0 {
-			detail += "; landed " + shortSHA(newCommit) + " but working-tree sync failed: " + tail(out, 200)
-			if len(syncPaths) > len(paths) {
-				fallbackArgs := append([]string{"checkout", newCommit, "--"}, paths...)
-				_, _ = run(git, root, fallbackArgs)
-			}
+		sync := syncSharedCheckout(git, root, oldHEAD, newCommit, syncPaths)
+		if sync.Status != SharedSyncSynced && len(syncPaths) > len(paths) {
+			// A peer path can fail the combined refresh; the worker's own landed
+			// paths must still reach the root, and any peer gap stays reported.
+			sync = sync.withWorkerRetry(syncSharedCheckout(git, root, oldHEAD, newCommit, paths), paths)
 		}
 		finishSync()
-		return Result{OK: true, Code: LandResultSuccess, Applied: true, Committed: true, CommitSHA: newCommit,
+		return withSharedSync(Result{OK: true, Code: LandResultSuccess, Applied: true, Committed: true, CommitSHA: newCommit,
 			Reason: "isolated-index land " + shortSHA(newCommit) + " (race-free, #3547)",
-			Detail: detail, Disambiguation: disambiguation, RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt}, true
+			Detail: detail, Disambiguation: disambiguation, RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt}, sync, newCommit), true
 	}
 	// Every bounded attempt lost its CAS — preserve the candidate for explicit
 	// reconciliation rather than exposing the shared index under contention.
