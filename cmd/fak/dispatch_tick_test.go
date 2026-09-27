@@ -426,6 +426,19 @@ func TestDispatchCodexAmbientOAuthBucketKeepsConfiguredCap(t *testing.T) {
 	withDispatchJSONHelper(t, func(root string, args ...string) (map[string]any, error) {
 		return map[string]any{"ok": true}, nil
 	})
+	// The shared helper's `dos loop` stub arms a kernel lease target of 3, which is
+	// below the configured cap of 4 and would bind cap_terms as "lease" -- masking the
+	// property under test. Raise the lease target above the configured cap so the only
+	// terms left that could shrink the cap are the codex seat/worker census this test
+	// is about (ambient UIs must consume neither).
+	helperExternal := dispatchRunExternalJSON
+	dispatchRunExternalJSON = func(root string, timeout time.Duration, name string, args ...string) (map[string]any, error) {
+		if name == "dos" {
+			return map[string]any{"alive": float64(0), "target": float64(10), "verdict": "FILLING"}, nil
+		}
+		return helperExternal(root, timeout, name, args...)
+	}
+	t.Cleanup(func() { dispatchRunExternalJSON = helperExternal })
 	oldCodex, oldWorkers := dispatchProbeCodexProcessRows, dispatchProbeWorkerProcessRows
 	rows := func() ([]dispatchCodexProcessRow, error) {
 		return []dispatchCodexProcessRow{
@@ -451,7 +464,13 @@ func TestDispatchCodexAmbientOAuthBucketKeepsConfiguredCap(t *testing.T) {
 		t.Fatalf("verdict = %v, want SPAWN_OK; payload=%v", got["verdict"], got)
 	}
 	if got["cap"] != 4 {
-		t.Fatalf("cap = %v, want configured cap 4", got["cap"])
+		t.Fatalf("cap = %v, want configured cap 4; cap_terms=%v", got["cap"], got["cap_terms"])
+	}
+	if terms, _ := got["cap_terms"].(map[string]any); terms["limiting"] != "configured" {
+		t.Fatalf("cap_terms.limiting = %v, want configured (ambient UIs must not bind a cap term); cap_terms=%v", terms["limiting"], terms)
+	}
+	if got["live"] != 0 || got["headroom"] != 4 {
+		t.Fatalf("live=%v headroom=%v, want 0/4: ambient Codex UIs are not fleet workers", got["live"], got["headroom"])
 	}
 }
 
@@ -1294,12 +1313,34 @@ func TestDispatchTickLiveFailsNonzeroEarlyExitAndPinsClaudeAccountEnv(t *testing
 	}
 }
 
+// stageDispatchAmbientCodexLogin makes a `--backend codex` tick hermetic. The codex
+// preflight admits against the ambient Codex login (CODEX_HOME, else ~/.codex) and the
+// host process table, not the stubbed claude roster, so without this the verdict is a
+// property of the machine: a dev box with `codex login` done passes, a clean CI/WSL
+// host refuses REFUSE_NO_ACCOUNT before the spawn path under test is ever reached.
+func stageDispatchAmbientCodexLogin(t *testing.T) {
+	t.Helper()
+	codexHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(`{"ok":true}`), 0o600); err != nil {
+		t.Fatalf("write codex auth fixture: %v", err)
+	}
+	t.Setenv("CODEX_HOME", codexHome)
+	t.Setenv("FAK_CODEX_OAUTH_SESSIONS", "10")
+	oldCodex, oldWorkers := dispatchProbeCodexProcessRows, dispatchProbeWorkerProcessRows
+	noRows := func() ([]dispatchCodexProcessRow, error) { return nil, nil }
+	dispatchProbeCodexProcessRows, dispatchProbeWorkerProcessRows = noRows, noRows
+	t.Cleanup(func() {
+		dispatchProbeCodexProcessRows, dispatchProbeWorkerProcessRows = oldCodex, oldWorkers
+	})
+}
+
 // TestDispatchTickRefusesSpawnedWhenPromptFuelMissingLate pins #11491 outcome B: a
 // guarded codex worker that refuses on PROMPT_FUEL_MISSING AFTER the 5s spawn probe
 // window has closed (early_exit.alive=true) must NOT be reported as durable launch
 // success. The receipt must be SPAWN_FAILED with the fuel token named.
 func TestDispatchTickRefusesSpawnedWhenPromptFuelMissingLate(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	stageDispatchAmbientCodexLogin(t)
 	root := t.TempDir()
 	// Isolate the fixture workspace from this checkout's git ancestry: on a shared
 	// worktree t.TempDir() lands under the repo, letting `git rev-parse HEAD` ascend
@@ -1372,6 +1413,7 @@ func TestDispatchTickRefusesSpawnedWhenPromptFuelMissingLate(t *testing.T) {
 // worker fixing the bug.
 func TestDispatchTickDoesNotMisfireOnWorkerEditingFuelToken(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	stageDispatchAmbientCodexLogin(t)
 	root := t.TempDir()
 	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(root))
 	assertPrepared := installDispatchManagedFixture(t, root)

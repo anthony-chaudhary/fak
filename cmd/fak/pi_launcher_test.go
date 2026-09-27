@@ -377,6 +377,10 @@ func TestProbePiBackendLoopbackFallback(t *testing.T) {
 	if err != nil {
 		t.Skipf("no IPv6 loopback on this host: %v", err)
 	}
+	if !localhostResolvesToFamily(true) {
+		_ = ln.Close()
+		t.Skip("localhost does not resolve to ::1 here (stock WSL/Debian /etc/hosts); see TestProbePiBackendLoopbackFallbackIPv4Listener for the mirror")
+	}
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" {
 			w.Header().Set("Content-Type", "application/json")

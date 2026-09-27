@@ -27,17 +27,21 @@ func TestValidateTimeoutReturnsStructuredPartialResultAndProgress(t *testing.T) 
 	}
 	t.Cleanup(func() { validatePhaseHook = oldHook })
 
+	// The hook parks resolve_ref until the deadline, so the timeout only has to outlast
+	// resolve_root (a real git spawn). 5ms did not under full-package load: the deadline
+	// landed inside resolve_root and the witness named the wrong phase.
+	const timeout = 2 * time.Second
 	res, code, stderr := runValidateJSON(t, []string{
 		"--root", t.TempDir(),
 		"--mine", "p/p.go",
-		"--timeout", "5ms",
+		"--timeout", timeout.String(),
 		"--progress",
 		"--json",
 	})
 	if code == 0 || res.OK || !res.Partial || !res.TimedOut || res.Reason != "TIMEOUT" {
 		t.Fatalf("code=%d stderr=%q result=%+v", code, stderr, res)
 	}
-	if res.TimeoutMS != (5*time.Millisecond).Milliseconds() || res.ElapsedMS < 0 {
+	if res.TimeoutMS != timeout.Milliseconds() || res.ElapsedMS < 0 {
 		t.Fatalf("timeout_ms=%d elapsed_ms=%d", res.TimeoutMS, res.ElapsedMS)
 	}
 	if len(res.Overlays.Checked) != 0 || len(res.Overlays.Skipped) != 1 || res.Overlays.Skipped[0] != "p/p.go" {

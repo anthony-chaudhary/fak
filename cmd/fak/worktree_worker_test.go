@@ -590,30 +590,61 @@ func TestSingleReapStatusStallReturnsWithinBound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Since #12404 the reap first captures a before-lifecycle inventory under the SAME
+	// deadline, and that inventory runs its own `git status ... -z` in the checkout. So a
+	// worktree whose status stalls now fails closed there (REAP_PRESTATE_UNKNOWN); the
+	// REAP_TIMEOUT arm of ReapChecked is reached only when just its own status probe (no
+	// -z) stalls. Both arms must stay bounded, refuse, and preserve the worktree.
 	shimDir := t.TempDir()
 	shim := filepath.Join(shimDir, "git")
-	body := "#!/bin/sh\nif [ \"$PWD\" = \"$FAK_REAP_STALL_DIR\" ] && [ \"$1\" = status ]; then sleep 30; fi\nexec \"$FAK_REAP_REAL_GIT\" \"$@\"\n"
+	body := "#!/bin/sh\n" +
+		"if [ \"$PWD\" = \"$FAK_REAP_STALL_DIR\" ] && [ \"$1\" = status ]; then\n" +
+		"  case \"$FAK_REAP_STALL_MATCH:$*\" in\n" +
+		"    any:*) sleep 30 ;;\n" +
+		"    checked:*\" -z\"*) ;;\n" +
+		"    checked:*) sleep 30 ;;\n" +
+		"  esac\n" +
+		"fi\n" +
+		"exec \"$FAK_REAP_REAL_GIT\" \"$@\"\n"
 	if err := os.WriteFile(shim, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	env := []string{
-		"PATH=" + shimDir + string(os.PathListSeparator) + os.Getenv("PATH"),
-		"FAK_REAP_STALL_DIR=" + worktree,
-		"FAK_REAP_REAL_GIT=" + realGit,
-	}
-	res := runReapCommand(t, 3*time.Second, env, "--root", repo, "--worktree", worktree, "--max-wait", "200ms")
-	if res.code != 1 || res.elapsed > 2*time.Second {
-		t.Fatalf("stalled reap was not bounded: exit=%d elapsed=%s stdout=%q stderr=%q", res.code, res.elapsed, res.stdout, res.stderr)
-	}
-	if !strings.Contains(res.stderr, "REAP_PROGRESS code=REAP_STARTED") {
-		t.Fatalf("stalled reap emitted no progress before refusal: %q", res.stderr)
-	}
-	got := reapReceipt(t, res.stdout)
-	if got["code"] != "REAP_TIMEOUT" || got["ok"] != false || got["preserved"] != true {
-		t.Fatalf("stalled reap receipt=%v", got)
-	}
-	if _, err := os.Stat(worktree); err != nil {
-		t.Fatalf("timed-out reap removed worktree: %v", err)
+	for _, tc := range []struct {
+		name, match, maxWait string
+		deadline, bound      time.Duration
+		code, detail         string
+	}{
+		// Every status in the checkout stalls: the pre-inventory hits the deadline first.
+		{"inventory status stalls", "any", "200ms", 3 * time.Second, 2 * time.Second, ReapCodePrestateUnknown, "context deadline exceeded"},
+		// Only ReapChecked's probe stalls: the inventory completes, the checked reap times
+		// out. The wider budget leaves the real inventory room to finish on a loaded host.
+		{"checked status stalls", "checked", "2s", 10 * time.Second, 6 * time.Second, "REAP_TIMEOUT", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := []string{
+				"PATH=" + shimDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+				"FAK_REAP_STALL_DIR=" + worktree,
+				"FAK_REAP_STALL_MATCH=" + tc.match,
+				"FAK_REAP_REAL_GIT=" + realGit,
+			}
+			res := runReapCommand(t, tc.deadline, env, "--root", repo, "--worktree", worktree, "--max-wait", tc.maxWait)
+			if res.code != 1 || res.elapsed > tc.bound {
+				t.Fatalf("stalled reap was not bounded: exit=%d elapsed=%s stdout=%q stderr=%q", res.code, res.elapsed, res.stdout, res.stderr)
+			}
+			if !strings.Contains(res.stderr, "REAP_PROGRESS code=REAP_STARTED") {
+				t.Fatalf("stalled reap emitted no progress before refusal: %q", res.stderr)
+			}
+			got := reapReceipt(t, res.stdout)
+			if got["code"] != tc.code || got["ok"] != false || got["preserved"] != true {
+				t.Fatalf("stalled reap receipt=%v, want code %s", got, tc.code)
+			}
+			if detail, _ := got["detail"].(string); !strings.Contains(detail, tc.detail) {
+				t.Fatalf("stalled reap detail=%q, want it to name %q", detail, tc.detail)
+			}
+			if _, err := os.Stat(worktree); err != nil {
+				t.Fatalf("timed-out reap removed worktree: %v", err)
+			}
+		})
 	}
 }
 
