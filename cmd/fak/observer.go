@@ -14,6 +14,11 @@ func cmdObserver(argv []string) {
 	os.Exit(runObserver(os.Stdout, os.Stderr, argv))
 }
 
+// registerObserverScreen installs the screen process-wide. The registration has no
+// unregister, so it is a seam: an in-process caller (a package test) can observe the
+// call without leaving a shared screen behind for every later adjudication.
+var registerObserverScreen = func(screen *observer.ObserverSemanticScreen) { screen.Register() }
+
 func runObserver(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak observer", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -24,7 +29,7 @@ func runObserver(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	screen := observer.NewObserverSemanticScreen(nil)
-	screen.Register()
+	registerObserverScreen(screen)
 
 	report := map[string]any{
 		"registered": true,
