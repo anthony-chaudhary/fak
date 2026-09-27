@@ -125,3 +125,60 @@ func TestBuildPlanCarriesDomain(t *testing.T) {
 		t.Fatalf("default plan domain = %q, want guard", guard.Domain)
 	}
 }
+
+// TestWorkflowBlockerKindsHaveDistinctStableRoutes pins the two blocker complaint
+// classes independently of the CLI. They must remain separate dedup streams, render
+// their own workflow framing and preserve the historical guard-domain default.
+func TestWorkflowBlockerKindsHaveDistinctStableRoutes(t *testing.T) {
+	const (
+		summary   = "required recovery was itself refused"
+		rationale = "The prescribed recovery could not run.\nThe refusal therefore had no reachable exit."
+	)
+	wants := map[string]string{
+		"catch-22":           "workflow-complaint/catch-22/policy-block/fak-flow/required-recovery-was-itself-refused",
+		"completion-blocker": "workflow-complaint/completion-blocker/policy-block/fak-flow/required-recovery-was-itself-refused",
+	}
+	seen := map[string]bool{}
+	for kind, wantKey := range wants {
+		t.Run(kind, func(t *testing.T) {
+			normalized, err := NormalizeKindFor("workflow", kind)
+			if err != nil || normalized != kind {
+				t.Fatalf("NormalizeKindFor(workflow, %q) = (%q, %v)", kind, normalized, err)
+			}
+			if strings.TrimSpace(WorkflowKinds[kind]) == "" {
+				t.Fatalf("workflow kind %q has no actionable description", kind)
+			}
+			complaint := Complaint{
+				Domain: "workflow", Kind: kind, Reason: "POLICY_BLOCK", Tool: "fak-flow",
+				Summary: summary, Rationale: rationale,
+			}
+			if got := complaint.Key(); got != wantKey {
+				t.Fatalf("%s key = %q, want %q", kind, got, wantKey)
+			}
+			if seen[complaint.Key()] {
+				t.Fatalf("workflow blocker kinds collided on key %q", complaint.Key())
+			}
+			seen[complaint.Key()] = true
+			body := complaint.Body(2)
+			for _, want := range []string{
+				"# Workflow friction (agent report)",
+				"- kind: `" + kind + "` — " + WorkflowKinds[kind],
+				rationale,
+				"- occurrences: `2`",
+			} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("%s body missing %q:\n%s", kind, want, body)
+				}
+			}
+		})
+	}
+
+	guardKind, err := NormalizeKindFor("", "")
+	if err != nil || guardKind != DefaultKind {
+		t.Fatalf("empty guard kind = (%q, %v), want %q", guardKind, err, DefaultKind)
+	}
+	guard := Complaint{Kind: guardKind, Summary: summary}
+	if got, want := guard.Key(), "guard-complaint/false-positive/none/any/required-recovery-was-itself-refused"; got != want {
+		t.Fatalf("guard default key = %q, want historical %q", got, want)
+	}
+}

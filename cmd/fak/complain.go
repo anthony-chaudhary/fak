@@ -33,9 +33,12 @@ import (
 	"os"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/agentopt"
 	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
 	"github.com/anthony-chaudhary/fak/internal/guardcomplaint"
 )
+
+const complaintRationaleFileMaxBytes = 16 << 10
 
 func cmdComplain(argv []string) { os.Exit(runComplain(os.Stdout, os.Stderr, argv)) }
 
@@ -45,12 +48,13 @@ func cmdComplain(argv []string) { os.Exit(runComplain(os.Stdout, os.Stderr, argv
 func runComplain(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("complain", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	domain := fs.String("domain", guardcomplaint.DefaultDomain, "complaint domain: guard (capability-floor appeal) | workflow (non-guard dev friction: shared-tree-clobber, tool-timeout, lane-collision)")
-	kind := fs.String("kind", "", "complaint class within the domain (empty = the domain default). guard: false-positive|over-broad|latency|confusing|other. workflow: shared-tree-clobber|tool-timeout|lane-collision|other")
+	domain := fs.String("domain", guardcomplaint.DefaultDomain, "complaint domain: guard (capability-floor appeal) | workflow (non-guard dev friction and completion blockers)")
+	kind := fs.String("kind", "", "complaint class within the domain (empty = the domain default). guard: false-positive|over-broad|latency|confusing|other. workflow: shared-tree-clobber|tool-timeout|lane-collision|completion-blocker|catch-22|other")
 	reason := fs.String("reason", "", "the guard reason token being appealed (e.g. FILE_ADMISSION, OUT_OF_TREE_WRITE); in the workflow domain, free context for the friction")
 	tool := fs.String("tool", "", "the refused tool (e.g. Bash, Write)")
 	summary := fs.String("summary", "", "one-line headline of the complaint (required; drives the dedup key)")
 	rationale := fs.String("rationale", "", "why the agent judges the guard wrong — and the recovery it wanted")
+	rationaleFile := fs.String("rationale-file", "", "read a multiline rationale from a file, scrub sensitive text, and attach it (maximum 16 KiB; mutually exclusive with --rationale)")
 	fromJournal := fs.Bool("from-journal", false, "attach one matching DENY/QUARANTINE verdict from the guard decision journal as the witness; ambiguous reason/tool matches attach nothing until disambiguated")
 	journal := fs.String("journal", "", "explicit guard-audit journal path to pull the witness from (default: discover under --workspace and the user config dir)")
 	journalSeq := fs.Uint64("journal-seq", 0, "select the exact journal row sequence (requires --from-journal)")
@@ -73,6 +77,10 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak complain: --summary is required (the one-line headline that identifies the complaint)")
 		return 2
 	}
+	if flagSet(fs, "rationale") && flagSet(fs, "rationale-file") {
+		fmt.Fprintln(stderr, "fak complain: --rationale and --rationale-file are mutually exclusive")
+		return 2
+	}
 	if !*fromJournal && (*journalSeq != 0 || strings.TrimSpace(*traceID) != "" || strings.TrimSpace(*argsDigest) != "") {
 		fmt.Fprintln(stderr, "fak complain: --journal-seq, --trace-id, and --args-digest require --from-journal")
 		return 2
@@ -82,9 +90,22 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak complain: %v\n", err)
 		return 2
 	}
+	rationaleText := strings.TrimSpace(*rationale)
+	if path := strings.TrimSpace(*rationaleFile); path != "" {
+		var err error
+		rationaleText, err = readComplaintRationaleFile(path)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak complain: --rationale-file: %v\n", err)
+			return 2
+		}
+	}
 	normKind, err := guardcomplaint.NormalizeKindFor(normDomain, *kind)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak complain: %v\n", err)
+		return 2
+	}
+	if normDomain == "workflow" && (normKind == "completion-blocker" || normKind == "catch-22") && rationaleText == "" {
+		fmt.Fprintf(stderr, "fak complain: workflow kind %q requires --rationale or --rationale-file with the command, output, recovery attempted, and unblock condition\n", normKind)
 		return 2
 	}
 
@@ -101,7 +122,7 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 		Reason:    strings.TrimSpace(*reason),
 		Tool:      strings.TrimSpace(*tool),
 		Summary:   strings.TrimSpace(*summary),
-		Rationale: strings.TrimSpace(*rationale),
+		Rationale: rationaleText,
 	}
 
 	// Pull the witnessed verdict from the journal unless told not to. An absent
@@ -176,6 +197,27 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak complain: dry-run — NO gh ticket was filed. Add --live to file now, or set FAK_COMPLAIN_LIVE=1 to auto-file every complaint.")
 	}
 	return 0
+}
+
+func readComplaintRationaleFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	b, err := io.ReadAll(io.LimitReader(f, complaintRationaleFileMaxBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if len(b) > complaintRationaleFileMaxBytes {
+		return "", fmt.Errorf("%s exceeds the 16 KiB limit", path)
+	}
+	rationale := strings.TrimSpace(agentopt.ScrubText(string(b)))
+	if rationale == "" {
+		return "", fmt.Errorf("%s is empty", path)
+	}
+	return rationale, nil
 }
 
 // complainLiveMode resolves whether a complaint should actually file a gh ticket.
