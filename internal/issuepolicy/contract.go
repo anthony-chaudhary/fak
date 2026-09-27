@@ -69,6 +69,7 @@ const (
 	ReasonClosureWitnessMismatch      = "ISSUE_CLOSURE_WITNESS_MISMATCH"
 	ReasonClosureProductionGap        = "ISSUE_CLOSURE_PRODUCTION_GAP"
 	ReasonDependencyRelationAmbiguous = "ISSUE_DEPENDENCY_RELATION_AMBIGUOUS"
+	ReasonProcessCauseInvalid         = "ISSUE_PROCESS_CAUSE_INVALID"
 )
 
 const MaxDispatchExpectedSteps = 8
@@ -370,6 +371,7 @@ type Review struct {
 	WitnessGrade      WitnessGrade             `json:"witness_grade"`
 	BornRouted        BornRouted               `json:"born_routed"`
 	BornMerged        BornMerged               `json:"born_merged"`
+	ProcessCause      ProcessCauseReadout      `json:"process_cause"`
 }
 
 // ReviewCandidate grades c. OK means the candidate is safe to sync as a
@@ -633,6 +635,7 @@ func reviewCandidate(c Candidate, opt Options, allowLegacyProblemFrame bool) Rev
 func ReviewIssueDraft(d IssueDraft, opt Options) Review {
 	candidate := CandidateFromIssueDraft(d)
 	review := reviewCandidate(candidate, opt, true)
+	review.ProcessCause = AssessProcessCause(d.Body)
 	review.BriefReadiness = assessIssueBrief(d, candidate)
 	review.ProblemFrame = AssessProblemFrame(d)
 	if review.BriefReadiness.Enforced && !review.BriefReadiness.Ready {
@@ -675,6 +678,17 @@ func ReviewIssueDraft(d IssueDraft, opt Options) Review {
 			review.Reasons = removeReasons(review.Reasons, ReasonUnrouted, ReasonScopeIncomplete)
 			review.OK = len(review.Reasons) == 0
 		}
+	}
+	if d.Number == 0 && !review.ProcessCause.Valid {
+		review.OK = false
+		review.Verdict = "needs_process_cause"
+		review.Dispatchability = TriageOnly
+		addReviewReason(&review, ReasonProcessCauseInvalid)
+		review.MissingFields = appendUnique(review.MissingFields, "process_cause")
+		if !review.ProcessCause.Declared {
+			review.MissingSections = appendUnique(review.MissingSections, "process_cause")
+		}
+		review.Coordination = appendUnique(review.Coordination, review.ProcessCause.Errors...)
 	}
 	if hasAmbiguousModernAfterDependency(d.Body) {
 		review.OK = false

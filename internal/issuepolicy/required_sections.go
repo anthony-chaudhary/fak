@@ -43,6 +43,7 @@ func RequiredSections() RequiredSectionsContract {
 	return RequiredSectionsContract{
 		Schema: RequiredSectionsSchema,
 		Sections: []RequiredSection{
+			{Field: "process_cause", Headings: []string{"Process cause", "Process cause detail"}, Required: true, Source: "review", Repair: "add exactly one 'Process cause: <primary>' declaration; concurrency also requires one closed-vocabulary 'Process cause detail: <detail>' declaration"},
 			{Field: "current_state", Headings: []string{"Current state", "Today", "Current baseline", "Baseline", "Motivation", "Problem"}, Required: true, Source: "review", Repair: "add ## Current state describing the current baseline the leaf changes"},
 			{Field: "scope", Headings: []string{"Scope", "Core through-line", "In scope", "Gold-plating boundary", "Out of scope"}, Required: true, Source: "review", Repair: "add ## Scope, or both a through-line section (## Core through-line / ## In scope) and a boundary section (## Gold-plating boundary / ## Out of scope)"},
 			{Field: "done_condition", Headings: []string{"Done condition", "Definition of done", "Acceptance criteria", "Done when", "DoD", "Done condition / witness"}, Required: true, Source: "review", Repair: "add ## Done condition with a checkable done-condition list"},

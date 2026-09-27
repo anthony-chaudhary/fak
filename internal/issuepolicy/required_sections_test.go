@@ -17,6 +17,7 @@ func TestRequiredSectionsHeadingsPresentInCanonicalDraft(t *testing.T) {
 	// with no issue number; probe them against a not-yet-filed variant.
 	unfiled := base
 	unfiled.Number = 0
+	unfiled.Body += "Process cause: none\n"
 	body := base.Body
 	sections := markdownSections(body)
 	for _, s := range RequiredSections().Sections {
@@ -27,6 +28,11 @@ func TestRequiredSectionsHeadingsPresentInCanonicalDraft(t *testing.T) {
 			// scope_class and definition_of_done are predicate checks over the
 			// body (a task-list and a done-condition phrase), not heading-block
 			// lookups; assert those predicates hold separately below.
+			continue
+		}
+		if s.Field == "process_cause" {
+			// Process cause is a top-level field declaration rather than a
+			// markdown section heading; its filing-time gate is asserted below.
 			continue
 		}
 		found := false
@@ -60,6 +66,9 @@ func TestRequiredSectionsHeadingsPresentInCanonicalDraft(t *testing.T) {
 	if flowmetrics.HasDoD(unfiled.Body) {
 		t.Errorf("canonical draft unexpectedly names a done-condition phrase; the definition_of_done contract entry is untested")
 	}
+	if cause := AssessProcessCause(unfiled.Body); !cause.Valid || cause.Primary != "none" {
+		t.Errorf("unfiled draft process cause = %+v, want valid none declaration", cause)
+	}
 	_ = body
 }
 
@@ -81,6 +90,17 @@ func TestRequiredSectionsGateOnDispatch(t *testing.T) {
 	sections := markdownSections(base.Body)
 	for _, s := range RequiredSections().Sections {
 		if !s.Required || s.Source == "discoverability" {
+			continue
+		}
+		if s.Field == "process_cause" {
+			unfiled := base
+			unfiled.Number = 0
+			unfiled.Body += "Process cause: none\n"
+			withoutCause := unfiled
+			withoutCause.Body = strings.Replace(unfiled.Body, "Process cause: none\n", "", 1)
+			if ReviewIssueDraft(withoutCause, Options{}).Dispatchability == Dispatchable {
+				t.Errorf("required field %q does not gate a new issue draft", s.Field)
+			}
 			continue
 		}
 		gated := false

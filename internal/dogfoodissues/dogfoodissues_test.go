@@ -416,9 +416,12 @@ func TestSyncUsesPlanLabelsAndGlobalLabels(t *testing.T) {
 			labels = append(labels, calls[0][i+1])
 		}
 	}
-	want := []string{"guardrsi", "needs-project", "backlog"}
+	want := []string{"guardrsi", "needs-project", "backlog", "process-cause:none"}
 	if strings.Join(labels, ",") != strings.Join(want, ",") {
 		t.Fatalf("labels = %+v, want %+v; args=%+v", labels, want, calls[0])
+	}
+	if got := strings.Count(createdBody, "Process cause: none"); got != 1 {
+		t.Fatalf("created body process-cause declaration count = %d, want 1:\n%s", got, createdBody)
 	}
 	if got := dogfoodArgAfter(calls[0], "--milestone"); got != DefaultMilestone {
 		t.Fatalf("create milestone = %q, want %q; args=%+v", got, DefaultMilestone, calls[0])

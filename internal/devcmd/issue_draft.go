@@ -229,6 +229,8 @@ func issueDraftBody(title, lane, marker string) string {
 	if title != "" {
 		fmt.Fprintf(&b, "# %s\n\n", title)
 	}
+	b.WriteString("Process cause: TODO (select one: concurrency, infrastructure-lag, model-failure, harness-failure, scoping-failure, verification-gap, handoff-failure, other, unknown, none)\n")
+	b.WriteString("<!-- For concurrency, add Process cause detail: shared-state | lease-contention | integration-order | resource-contention | ownership-overlap -->\n\n")
 	b.WriteString("## Core through-line\n\n")
 	b.WriteString("TODO: name the shortest change -> real seam -> observable outcome -> witness path.\n\n")
 	b.WriteString("## Gold-plating boundary\n\n")

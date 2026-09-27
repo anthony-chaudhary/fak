@@ -8,8 +8,8 @@ import (
 )
 
 func TestDispatchAuditIssueLabelsMarkTriageOnly(t *testing.T) {
-	got := dispatchAuditIssueLabels()
-	want := []string{"dispatch", "observability", "needs-triage", "triage-only"}
+	got := dispatchAuditIssueLabels("process-cause:unknown")
+	want := []string{"dispatch", "observability", "needs-triage", "triage-only", "process-cause:unknown"}
 	if len(got) != len(want) {
 		t.Fatalf("labels = %+v, want %+v", got, want)
 	}
@@ -17,6 +17,9 @@ func TestDispatchAuditIssueLabelsMarkTriageOnly(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("labels = %+v, want %+v", got, want)
 		}
+	}
+	if got := strings.Count(strings.Join(got, "\x00"), "process-cause:"); got != 1 {
+		t.Fatalf("process-cause label count = %d, want 1: %v", got, dispatchAuditIssueLabels("process-cause:unknown"))
 	}
 }
 

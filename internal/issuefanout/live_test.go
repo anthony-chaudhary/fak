@@ -73,11 +73,18 @@ func TestFileLiveFilesUnseenSkipsSeenAndRerunsClean(t *testing.T) {
 		"\x00--label\x00qa",
 		"\x00--label\x00" + c.Generation,
 		"\x00--label\x00" + c.Priority,
+		"\x00--label\x00process-cause:none",
 		"\x00--milestone\x00" + MilestoneForGeneration(c.Generation),
 	} {
 		if !strings.Contains(call, want) {
 			t.Fatalf("create argv missing %q:\n%v", want, gh.calls[0])
 		}
+	}
+	if strings.Count(call, "Process cause: none") != 1 {
+		t.Fatalf("create argv process-cause declaration count = %d, want 1:\n%v", strings.Count(call, "Process cause: none"), gh.calls[0])
+	}
+	if strings.Count(call, "\x00--label\x00process-cause:none") != 1 {
+		t.Fatalf("create argv process-cause label count = %d, want 1:\n%v", strings.Count(call, "\x00--label\x00process-cause:none"), gh.calls[0])
 	}
 
 	// Rerun against a tracker that now carries the filed bodies: files zero,

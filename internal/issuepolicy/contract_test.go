@@ -607,6 +607,7 @@ func TestReviewIssueDraftHoldsMissingDoneConditionOrWitness(t *testing.T) {
 
 func TestReviewIssueDraftRequiresDeclaredScopeAndDefinitionOfDoneBeforeFiling(t *testing.T) {
 	validBody := strings.Join([]string{
+		"Process cause: none",
 		"### Parent context",
 		"A filing-time issue contract.",
 		"### Current state",

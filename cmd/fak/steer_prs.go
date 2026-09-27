@@ -38,6 +38,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/ghexec"
 	"github.com/anthony-chaudhary/fak/internal/issuecohort"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 	"github.com/anthony-chaudhary/fak/internal/steerpr"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
 )
@@ -429,7 +430,11 @@ func ghSteerRedirectFollowUp(r steerpr.Redirect) (string, error) {
 		}
 		return r.Issue, nil
 	}
-	create, cancel := ghexec.CommandTimeout(nil, ghexec.DefaultTimeout, "issue", "create", "--title", r.FollowUpTitle(), "--body", r.FollowUpBody())
+	body, processLabel, err := issuepolicy.TagGeneratedIssue(r.FollowUpBody(), "none")
+	if err != nil {
+		return "", fmt.Errorf("redirect follow-up process cause: %w", err)
+	}
+	create, cancel := ghexec.CommandTimeout(nil, ghexec.DefaultTimeout, "issue", "create", "--title", r.FollowUpTitle(), "--body", body, "--label", processLabel)
 	defer cancel()
 	out, err := create.Output()
 	if err != nil {

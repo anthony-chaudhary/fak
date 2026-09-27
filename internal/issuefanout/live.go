@@ -264,8 +264,14 @@ func FileLive(plan Plan, existing []Issue, opt LiveOptions) (LiveResult, error) 
 		StrictBornRouted:  true,
 		StrictProjectWork: true,
 	}
-	for _, c := range plan.Candidates {
-		r := issuepolicy.ReviewIssueDraft(liveIssueDraft(c), strict)
+	authored := make([]issuepolicy.IssueDraft, len(plan.Candidates))
+	for i, c := range plan.Candidates {
+		draft, err := taggedLiveIssueDraft(c)
+		if err != nil {
+			return LiveResult{}, refusef("issuefanout: live candidate %s has invalid process-cause metadata (%v); no issues were filed", c.Key, err)
+		}
+		authored[i] = draft
+		r := issuepolicy.ReviewIssueDraft(draft, strict)
 		if !r.OK || r.Dispatchability != issuepolicy.Dispatchable {
 			detail := strings.Join(r.Reasons, ", ")
 			if len(r.MissingFields) > 0 {
@@ -275,7 +281,7 @@ func FileLive(plan Plan, existing []Issue, opt LiveOptions) (LiveResult, error) 
 		}
 	}
 	res := LiveResult{Schema: LiveSchema, Input: plan.Input, DedupeCap: dedupeCap, Scanned: len(existing)}
-	for _, c := range plan.Candidates {
+	for i, c := range plan.Candidates {
 		row := FileRow{Key: c.Key, Title: c.Title}
 		if n, seen := seenIn(existing, c.Key, legacyMarkerKey(plan.Input, c.Key), plan.Input.SpineRef); seen {
 			row.Action = "skipped"
@@ -286,10 +292,10 @@ func FileLive(plan Plan, existing []Issue, opt LiveOptions) (LiveResult, error) 
 			res.Rows = append(res.Rows, row)
 			continue
 		}
-		body := LiveBody(c)
+		body := authored[i].Body
 		args := []string{"issue", "create", "--title", c.Title, "--body", body}
-		for _, label := range LiveLabels(c) {
-			args = append(args, "--label", label)
+		for _, label := range authored[i].Labels {
+			args = append(args, "--label", label.Name)
 		}
 		if m := MilestoneForGeneration(c.Generation); m != "" {
 			args = append(args, "--milestone", m)
@@ -325,11 +331,24 @@ func FileLive(plan Plan, existing []Issue, opt LiveOptions) (LiveResult, error) 
 }
 
 func liveIssueDraft(c issuepolicy.Candidate) issuepolicy.IssueDraft {
-	labels := make([]issuepolicy.IssueLabel, 0, len(LiveLabels(c)))
+	draft, _ := taggedLiveIssueDraft(c)
+	return draft
+}
+
+func taggedLiveIssueDraft(c issuepolicy.Candidate) (issuepolicy.IssueDraft, error) {
+	body, causeLabel, err := issuepolicy.TagGeneratedIssue(LiveBody(c), "none")
+	if err != nil {
+		return issuepolicy.IssueDraft{}, err
+	}
+	labels := make([]issuepolicy.IssueLabel, 0, len(LiveLabels(c))+1)
 	for _, label := range LiveLabels(c) {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(label)), issuepolicy.ProcessCauseLabelPrefix) {
+			continue
+		}
 		labels = append(labels, issuepolicy.IssueLabel{Name: label})
 	}
-	return issuepolicy.IssueDraft{Title: c.Title, Body: LiveBody(c), Labels: labels}
+	labels = append(labels, issuepolicy.IssueLabel{Name: causeLabel})
+	return issuepolicy.IssueDraft{Title: c.Title, Body: body, Labels: labels}, nil
 }
 
 // seenIn returns the first existing issue carrying either the qualified key or

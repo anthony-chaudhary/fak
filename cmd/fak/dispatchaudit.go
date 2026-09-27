@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchaudit"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 // runDispatchAudit is the testable core of `fak dispatch audit`.
@@ -172,10 +173,16 @@ func fileAuditFindings(stdout, stderr io.Writer, runsDir string, rep dispatchaud
 		}
 		body := fmt.Sprintf("Auto-filed by `fak dispatch audit`.\n\n- dispatchability: `triage_only`\n- %s: `%s`\n- backend: `%s`\n- code-site: `%s`\n- fingerprint: `%s`\n- first log: `%s`\n\n%s",
 			kindLabel, kind, f.Backend, f.CodeSite, f.Fingerprint, f.Log, f.Detail)
+		body, processLabel, causeErr := issuepolicy.TagGeneratedIssue(body, "unknown")
+		if causeErr != nil {
+			fmt.Fprintf(stderr, "file-issues: invalid process cause for %s: %v\n", f.Fingerprint, causeErr)
+			rc = 1
+			continue
+		}
 		args := []string{"issue", "create",
 			"--title", f.Title,
 			"--body", body}
-		for _, label := range dispatchAuditIssueLabels() {
+		for _, label := range dispatchAuditIssueLabels(processLabel) {
 			args = append(args, "--label", label)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -198,8 +205,8 @@ func fileAuditFindings(stdout, stderr io.Writer, runsDir string, rep dispatchaud
 	return rc
 }
 
-func dispatchAuditIssueLabels() []string {
-	return []string{"dispatch", "observability", "needs-triage", "triage-only"}
+func dispatchAuditIssueLabels(processLabel string) []string {
+	return []string{"dispatch", "observability", "needs-triage", "triage-only", processLabel}
 }
 
 // openIssueTitles scans `gh issue list` for open titles so the dedup can avoid a
