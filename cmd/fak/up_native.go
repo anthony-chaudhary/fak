@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,6 +64,13 @@ type turnkeyNativeStartup struct {
 	// ("NO_ELIGIBLE_QUALIFICATION_CONTEXT"), so a metal_live=true + mtp_active=false
 	// startup is self-explaining instead of silent.
 	MTPInactiveReason string `json:"mtp_inactive_reason,omitempty"`
+	// MTPInactiveDetail is the bounded cause behind MTPInactiveReason: which live
+	// fact was underivable, or which derived envelope has no reviewed record.
+	MTPInactiveDetail string `json:"mtp_inactive_detail,omitempty"`
+	// MTPQualification is the exact runtime qualification key derived from live
+	// startup facts: the identity a reviewed catalog record must bind. The artifact
+	// digest is filled only once a live record matched every other field.
+	MTPQualification *turnkeyMTPQualificationKey `json:"mtp_qualification,omitempty"`
 }
 
 func (r *turnkeyNativeResources) Close() error {
@@ -124,6 +133,18 @@ type turnkeyNativeLoadDeps struct {
 	// admitted; otherwise active=false plus the concrete typed inactive reason.
 	// nil preserves the fail-closed default (inactive, NO_ELIGIBLE_QUALIFICATION_CONTEXT).
 	resolveMTPStatus func(*turnkeyMTPQualificationResult, *agent.InKernelPlanner) (bool, string)
+	// metalDevice reads the live Metal device name for the qualification device
+	// identity; hashArtifact digests the loaded artifact once a reviewed record
+	// could match; retainMTPHead keeps the MTP head resident for one load and
+	// returns the restore. mtpCatalog overrides the embedded reviewed catalog. A nil
+	// seam leaves that fact underivable, so qualification fails closed.
+	metalDevice   func() string
+	hashArtifact  func(string) (string, error)
+	retainMTPHead func() func()
+	mtpCatalog    []byte
+	// memoryOverride reports an operator memory override of the host probe; nil
+	// means none (tests inject host memory through hostMemory instead).
+	memoryOverride func() bool
 }
 
 func defaultTurnkeyNativeLoadDeps() turnkeyNativeLoadDeps {
@@ -152,17 +173,26 @@ func defaultTurnkeyNativeLoadDeps() turnkeyNativeLoadDeps {
 			return m.EagerMetalQ8Residency()
 		},
 		resolveMTPStatus: defaultResolveTurnkeyMTPStatus,
+		metalDevice:      metalgemm.DeviceName,
+		hashArtifact:     turnkeyMTPArtifactSHA256,
+		retainMTPHead: func() func() {
+			prior := fakmodel.RetainMTP
+			fakmodel.SetRetainMTP(true)
+			return func() { fakmodel.SetRetainMTP(prior) }
+		},
+		memoryOverride: func() bool {
+			return strings.TrimSpace(os.Getenv("FAK_UP_MEMORY_BYTES")) != "" || strings.TrimSpace(os.Getenv("FAK_UP_AVAILABLE_BYTES")) != ""
+		},
 	}
 }
 
 // defaultResolveTurnkeyMTPStatus is the fail-closed default for the startup MTP
-// status seam. The exact runtime qualification identity is not constructible
-// within this leaf, so it deliberately selects against a zero context: an empty
-// or unmatched reviewed catalog resolves to the NO_ELIGIBLE_QUALIFICATION_CONTEXT
-// refusal. Reported status is derived from the SAME canary admission that gates
-// execution (Qwen38MTPCanaryResult), so mtp_active can never contradict observed
-// behavior: a matched record alone does not report active unless the planner's
-// canary admission actually selected MTP.
+// status seam. An empty or unmatched reviewed catalog resolves to the
+// NO_ELIGIBLE_QUALIFICATION_CONTEXT refusal. Reported status is derived from the
+// SAME predicate that gates execution (MetalMTPAdmitted: an installed coordinator
+// whose canary admission selects MTP), so mtp_active can never contradict
+// observed behavior: a matched record alone does not report active, and a canary
+// refusal reports its own typed downgrade reason.
 func defaultResolveTurnkeyMTPStatus(result *turnkeyMTPQualificationResult, planner *agent.InKernelPlanner) (bool, string) {
 	if result == nil || result.Selection == nil {
 		reason := turnkeyMTPNoEligibleContext
@@ -184,9 +214,11 @@ func defaultResolveTurnkeyMTPStatus(result *turnkeyMTPQualificationResult, plann
 		return false, string(reason)
 	}
 	// Derive the reported status from the same decision that gates execution.
-	decision := planner.Qwen38MTPCanaryResult()
-	if decision.Engine == fakmodel.Qwen38EngineMTP {
+	if planner.MetalMTPAdmitted() {
 		return true, ""
+	}
+	if decision := planner.Qwen38MTPCanaryResult(); decision.DowngradeReason != "" {
+		return false, string(decision.DowngradeReason)
 	}
 	reason := result.Refusal
 	if reason == "" {
@@ -221,10 +253,38 @@ func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string
 		}
 	}
 
+	mtpCatalog := deps.mtpCatalog
+	if mtpCatalog == nil {
+		mtpCatalog = turnkeyMTPEvidenceCatalogJSON
+	}
+	// The MTP head is dropped at load by default; keep it resident only when a
+	// live reviewed record exists for this device, so the empty shipped catalog
+	// (and every other host) costs no memory. A load that fails only because the
+	// head was retained (an MTP layout the loader refuses) retries without it: MTP
+	// then refuses on the missing head instead of failing startup.
+	retainMTP := false
+	if metal && deps.retainMTPHead != nil && deps.metalDevice != nil && (deps.memoryOverride == nil || !deps.memoryOverride()) {
+		device := turnkeyMTPDeviceCompatibility(deps.metalDevice(), startup.HostTotalBefore)
+		retainMTP = turnkeyMTPCatalogHasLiveRecordFor(mtpCatalog, time.Now(), device)
+	}
+	var artifactBefore os.FileInfo
+	if info, statErr := os.Stat(modelPath); statErr == nil {
+		artifactBefore = info
+	}
+
 	var model *fakmodel.Model
 	var q4k bool
 	var profile *gateway.ModelLoadProfile
 	release, err := deps.admitAndLoad(metal, modelPath, func() {
+		if retainMTP {
+			func() {
+				defer deps.retainMTPHead()()
+				model, q4k, profile = deps.loadModel(modelPath, backend, contextTokens, deps.fitOverride)
+			}()
+			if model != nil {
+				return
+			}
+		}
 		model, q4k, profile = deps.loadModel(modelPath, backend, contextTokens, deps.fitOverride)
 	}, deps.fitFloor)
 	if err != nil {
@@ -267,13 +327,42 @@ func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string
 	}
 
 	planner := deps.newPlanner(model, tok, modelID, q4k, backend, metal, contextTokens)
-	// The MTP status needs the built planner's admission state, so it is resolved
-	// after planner construction. A nil seam keeps the fail-closed default.
-	if deps.resolveMTPStatus == nil {
-		startup.MTPActive, startup.MTPInactiveReason = defaultResolveTurnkeyMTPStatus(nil, planner)
-	} else {
-		result := embeddedTurnkeyMTPQualification(time.Now(), turnkeyMTPQualificationContext{})
-		startup.MTPActive, startup.MTPInactiveReason = deps.resolveMTPStatus(&result, planner)
+	// Qualification needs the built planner's fixed settings and admission state,
+	// so it runs after planner construction, from live startup facts only.
+	facts := turnkeyMTPRuntimeFacts{
+		Model: model, ArtifactPath: modelPath, ArtifactBefore: artifactBefore, MetalLive: metal, ResidentQ4K: q4k,
+		HostTotalBytes: startup.HostTotalAfter, HostAvailableBytes: startup.HostAvailableAfter,
+		MTP: fakmodel.DefaultMetalMTPConfig(),
+	}
+	if metal && deps.metalDevice != nil {
+		facts.MetalDevice = deps.metalDevice()
+	}
+	if deps.memoryOverride != nil {
+		facts.MemoryOverride = deps.memoryOverride()
+	}
+	if planner != nil {
+		facts.Planner = planner.RuntimeConfig()
+	}
+	result, runtime := qualifyTurnkeyMTP(mtpCatalog, time.Now(), facts, deps.hashArtifact)
+	if runtime.Qualification.ModelFamily != "" {
+		key := runtime.Qualification
+		startup.MTPQualification = &key
+	}
+	if result.Selection != nil && planner != nil {
+		if err := admitTurnkeyMTPSelection(planner, result.Selection, facts.MTP); err != nil {
+			result.Detail = turnkeyMTPBoundedDetail("admission: " + err.Error())
+		}
+	}
+	resolveMTPStatus := deps.resolveMTPStatus
+	if resolveMTPStatus == nil {
+		resolveMTPStatus = defaultResolveTurnkeyMTPStatus
+	}
+	startup.MTPActive, startup.MTPInactiveReason = resolveMTPStatus(&result, planner)
+	if !startup.MTPActive {
+		startup.MTPInactiveDetail = result.Detail
+		if planner != nil && result.Selection != nil && result.Detail == "" {
+			startup.MTPInactiveDetail = turnkeyMTPBoundedDetail(planner.Qwen38MTPCanaryResult().RejectionReason)
+		}
 	}
 
 	return &turnkeyNativeResources{
