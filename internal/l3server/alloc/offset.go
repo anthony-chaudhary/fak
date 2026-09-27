@@ -55,10 +55,13 @@ func NewOffsetAllocator(cfg OffsetAllocatorConfig) (*OffsetAllocator, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate region: %w", err)
 	}
+	// The region may be smaller than requested (non-Linux dev ceiling), so
+	// size the free list from what actually backs it (#13518).
+	regionSize := region.Size()
 
 	maxAllocs := cfg.MaxAllocations
 	if maxAllocs == 0 {
-		maxAllocs = uint32(cfg.MaxMemoryBytes / 64)
+		maxAllocs = uint32(regionSize / 64)
 		if maxAllocs > 4194304 {
 			maxAllocs = 4194304
 		}
@@ -67,7 +70,7 @@ func NewOffsetAllocator(cfg OffsetAllocatorConfig) (*OffsetAllocator, error) {
 
 	oa := &OffsetAllocator{
 		region:       region,
-		regionSize:   cfg.MaxMemoryBytes,
+		regionSize:   regionSize,
 		nodes:        make([]offsetNode, maxNodes),
 		freeNodes:    make([]uint32, 0, maxNodes-1),
 		offsetToNode: make(map[uint64]uint32, maxAllocs),
@@ -83,7 +86,7 @@ func NewOffsetAllocator(cfg OffsetAllocatorConfig) (*OffsetAllocator, error) {
 
 	const reservedOffset uint64 = 64
 	freeStart := reservedOffset
-	freeSize := cfg.MaxMemoryBytes - reservedOffset
+	freeSize := regionSize - reservedOffset
 
 	oa.nodes[0] = offsetNode{
 		dataOffset:   freeStart,

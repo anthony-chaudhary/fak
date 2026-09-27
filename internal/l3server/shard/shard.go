@@ -313,6 +313,8 @@ type Shard struct {
 	ops             chan ShardOp
 	quit            chan struct{}
 	done            chan struct{} // closed when run() exits
+	lifeMu          sync.Mutex    // serializes Start/Stop; the run loop never takes it
+	life            shardLife     // guarded by lifeMu
 	config          ShardConfig
 	dispatchTimeout time.Duration
 	sizeTracker     *valueSizeTracker
@@ -475,8 +477,27 @@ func New(cfg ShardConfig) (*Shard, error) {
 	return s, nil
 }
 
-// Start launches the shard's goroutine, pinned to an OS thread.
+// shardLife is a shard's lifecycle stage. Stop is terminal because it
+// releases the allocator, so a stopped shard never runs again.
+type shardLife uint8
+
+const (
+	shardIdle shardLife = iota
+	shardRunning
+	shardStopped
+)
+
+// Start launches the shard's goroutine, pinned to an OS thread. It is
+// idempotent: a second Start never spawns a second run loop over the same
+// state, and Start after Stop is a no-op because Stop released the allocator
+// (#13518).
 func (s *Shard) Start() {
+	s.lifeMu.Lock()
+	defer s.lifeMu.Unlock()
+	if s.life != shardIdle {
+		return
+	}
+	s.life = shardRunning
 	go s.run()
 }
 
@@ -590,9 +611,24 @@ func (s *Shard) SubmitAsync(op ShardOp) bool {
 	}
 }
 
-// Stop signals the shard goroutine to exit.
+// Stop signals the shard goroutine to exit; Done closes once it has drained
+// pending ops and released the allocator. Stop is idempotent, and a shard that
+// never started releases its allocator here so Done still closes (#13518).
 func (s *Shard) Stop() {
-	close(s.quit)
+	s.lifeMu.Lock()
+	defer s.lifeMu.Unlock()
+	switch s.life {
+	case shardStopped:
+		return
+	case shardRunning:
+		close(s.quit)
+	case shardIdle:
+		close(s.quit)
+		s.drainOps()
+		s.allocPtr.Load().a.Close()
+		close(s.done)
+	}
+	s.life = shardStopped
 }
 
 // Done returns a channel that is closed when the shard goroutine has exited.

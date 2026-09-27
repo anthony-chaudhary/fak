@@ -239,38 +239,85 @@ func TestSlabResetCounters(t *testing.T) {
 	}
 }
 
-func TestModelAwareWeights_Dominant(t *testing.T) {
-	perShardMem := uint64(32) * 1024 * 1024 * 1024
-	sa, err := NewSlabAllocator(SlabConfig{
-		MaxMemoryBytes: perShardMem,
-		ModelPageBytes: 5242880,
-	})
+// plannedClassBytes returns the planned region bytes and slot size of the
+// class that would hold valueSize. Weight-policy tests assert on the plan
+// rather than the realized NumSlots because non-Linux dev hosts cap region
+// backing (#13518); TestSlabRealizedCapacityWithinPlanAndBacking pins how
+// the realized capacity relates to the plan.
+func plannedClassBytes(t *testing.T, cfg SlabConfig, valueSize uint64) (regionBytes, classSize uint64) {
+	t.Helper()
+	plans, err := planSlabClasses(cfg)
+	if err != nil {
+		t.Fatalf("planSlabClasses: %v", err)
+	}
+	for _, p := range plans {
+		if p.size >= valueSize {
+			return p.regionBytes, p.size
+		}
+	}
+	return 0, 0
+}
+
+// TestSlabRealizedCapacityWithinPlanAndBacking pins the plan/realization split
+// (#13518): a class never reports more slot bytes than its region backs or
+// than the plan assigned, and it matches the plan exactly whenever the host
+// backs the full planned region.
+func TestSlabRealizedCapacityWithinPlanAndBacking(t *testing.T) {
+	cfg := SlabConfig{MaxMemoryBytes: 256 * 1024 * 1024, ModelPageBytes: 5242880}
+	plans, err := planSlabClasses(cfg)
+	if err != nil {
+		t.Fatalf("planSlabClasses: %v", err)
+	}
+	sa, err := NewSlabAllocator(cfg)
 	if err != nil {
 		t.Fatalf("NewSlabAllocator: %v", err)
 	}
 	defer sa.Close()
 
-	modelSlots, modelClassSize := sa.ModelClassCapacity(5242880)
+	if sa.NumClasses() != len(plans) {
+		t.Fatalf("allocator has %d classes, plan has %d", sa.NumClasses(), len(plans))
+	}
+	for i, p := range plans {
+		cls := sa.ClassInfo(i)
+		if cls.Size != p.size {
+			t.Fatalf("class %d: size %d, plan %d", i, cls.Size, p.size)
+		}
+		backing := uint64(len(cls.Region.Data()))
+		realized := cls.Allocator.NumSlots() * cls.Size
+		if cls.Region.Size() != backing {
+			t.Errorf("class %d: Region.Size()=%d but backing len=%d", cls.Size, cls.Region.Size(), backing)
+		}
+		if realized > backing {
+			t.Errorf("class %d: %d slot bytes exceed %d backing bytes", cls.Size, realized, backing)
+		}
+		if realized > p.regionBytes {
+			t.Errorf("class %d: %d slot bytes exceed the %d planned bytes", cls.Size, realized, p.regionBytes)
+		}
+		if backing == p.regionBytes && realized != p.regionBytes {
+			t.Errorf("class %d: fully backed plan of %d bytes realized only %d", cls.Size, p.regionBytes, realized)
+		}
+	}
+}
+
+func TestModelAwareWeights_Dominant(t *testing.T) {
+	perShardMem := uint64(32) * 1024 * 1024 * 1024
+	cfg := SlabConfig{
+		MaxMemoryBytes: perShardMem,
+		ModelPageBytes: 5242880,
+	}
+
+	modelBytes, modelClassSize := plannedClassBytes(t, cfg, 5242880)
 	if modelClassSize != 5242880 {
 		t.Fatalf("expected class size 5242880, got %d", modelClassSize)
 	}
+	modelSlots := modelBytes / modelClassSize
 
-	modelBytes := modelSlots * modelClassSize
 	fraction := float64(modelBytes) / float64(perShardMem)
 	t.Logf("model class: %d slots × %d bytes = %.1f GB (%.1f%% of %.0f GB)",
 		modelSlots, modelClassSize, float64(modelBytes)/(1<<30), fraction*100, float64(perShardMem)/(1<<30))
 
-	// The fraction-of-requested-memory invariant holds only where the platform
-	// can actually back a region of the requested size. On the capped dev path
-	// (non-Linux, 64MB/region) the region is smaller by design, so the honest
-	// subject is the weighted shape, not a fraction of an unbacked number.
-	if regionBackingCap() == 0 {
-		if fraction < 0.50 {
-			t.Errorf("model class got only %.1f%% of memory, expected >= 50%%", fraction*100)
-		}
-	} else {
-		t.Logf("region backing capped at %d bytes on this platform; skipping fraction-of-requested assertion (weighting shape is covered by TestModelClassCapacity/TestMemoryMap)",
-			regionBackingCap())
+	if fraction < 0.50 {
+		t.Errorf("model class got only %.1f%% of memory, expected >= 50%%", fraction*100)
 	}
 }
 
@@ -421,45 +468,29 @@ func TestMemoryMapNoModel(t *testing.T) {
 
 func TestModelAwareWeights_MismatchNeighbor(t *testing.T) {
 	perShardMem := uint64(32) * 1024 * 1024 * 1024
-	sa, err := NewSlabAllocator(SlabConfig{
+	cfg := SlabConfig{
 		MaxMemoryBytes: perShardMem,
 		ModelPageBytes: 2560000,
-	})
-	if err != nil {
-		t.Fatalf("NewSlabAllocator: %v", err)
 	}
-	defer sa.Close()
 
-	slots2M, classSize2M := sa.ModelClassCapacity(2031616)
+	bytes2M, classSize2M := plannedClassBytes(t, cfg, 2031616)
 	if classSize2M != 2097152 {
 		t.Fatalf("expected 2031616 to land in class 2097152, got %d", classSize2M)
 	}
-	bytes2M := slots2M * classSize2M
 	frac2M := float64(bytes2M) / float64(perShardMem)
 
-	slotsModel, classSizeModel := sa.ModelClassCapacity(2560000)
+	if frac2M < 0.05 {
+		t.Errorf("2097152 class (neighbor) got only %.1f%% of memory, expected >= 5%%", frac2M*100)
+	}
+
+	bytesModel, classSizeModel := plannedClassBytes(t, cfg, 2560000)
 	if classSizeModel != 2560000 {
 		t.Fatalf("expected class size 2560000, got %d", classSizeModel)
 	}
-	bytesModel := slotsModel * classSizeModel
 	fracModel := float64(bytesModel) / float64(perShardMem)
 
-	// Fractions are only comparable against the requested per-shard memory where
-	// the platform can back a region that large; on the capped dev path each
-	// region is bounded by RegionBackingCap, so assert the shape instead.
-	if regionBackingCap() == 0 {
-		if frac2M < 0.05 {
-			t.Errorf("2097152 class (neighbor) got only %.1f%% of memory, expected >= 5%%", frac2M*100)
-		}
-		if fracModel < 0.50 {
-			t.Errorf("model class got only %.1f%% of memory, expected >= 50%%", fracModel*100)
-		}
-	} else {
-		if slots2M == 0 || slotsModel == 0 {
-			t.Errorf("neighbor/model classes must retain slots on the capped path (2M=%d model=%d)", slots2M, slotsModel)
-		}
-		t.Logf("region backing capped at %d bytes; neighbor %.2f%%/model %.2f%% of requested (shape asserted)",
-			regionBackingCap(), frac2M*100, fracModel*100)
+	if fracModel < 0.50 {
+		t.Errorf("model class got only %.1f%% of memory, expected >= 50%%", fracModel*100)
 	}
 }
 
@@ -483,11 +514,12 @@ func TestModelAwareWeights_NoNeighborWithoutModel(t *testing.T) {
 
 func TestSlabDedicatedMode(t *testing.T) {
 	mpb := uint64(5242880)
-	sa, err := NewSlabAllocator(SlabConfig{
+	cfg := SlabConfig{
 		MaxMemoryBytes: 256 * 1024 * 1024,
 		ModelPageBytes: mpb,
 		Dedicated:      true,
-	})
+	}
+	sa, err := NewSlabAllocator(cfg)
 	if err != nil {
 		t.Fatalf("NewSlabAllocator: %v", err)
 	}
@@ -505,21 +537,13 @@ func TestSlabDedicatedMode(t *testing.T) {
 		t.Errorf("expected second class = %d bytes, got %d", mpb, c1.Size)
 	}
 
-	modelSlots := c1.Allocator.NumSlots()
-	keySlots := c0.Allocator.NumSlots()
-	modelBytes := modelSlots * c1.Size
-	keyBytes := keySlots * c0.Size
+	modelBytes, _ := plannedClassBytes(t, cfg, c1.Size)
+	keyBytes, _ := plannedClassBytes(t, cfg, c0.Size)
 	totalBytes := modelBytes + keyBytes
 	modelFrac := float64(modelBytes) / float64(totalBytes)
 
-	// The >=90% share is only meaningful where the region is backed at its
-	// requested size; under the capped dev path both classes shrink, so the
-	// share still holds but is checked only on the full-backing platform.
-	if regionBackingCap() == 0 && modelFrac < 0.90 {
+	if modelFrac < 0.90 {
 		t.Errorf("model class got only %.1f%% of memory, expected >= 90%%", modelFrac*100)
-	} else if regionBackingCap() != 0 {
-		t.Logf("region backing capped at %d bytes; dedicated share %.1f%% (weighting asserted via class shape)",
-			regionBackingCap(), modelFrac*100)
 	}
 
 	keyAlloc, err := sa.Alloc(100)

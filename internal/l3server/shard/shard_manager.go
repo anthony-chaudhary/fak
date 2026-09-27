@@ -59,6 +59,12 @@ type Manager struct {
 	shardReady []atomic.Bool // len == numShards; set true after each shard is allocated+started
 	allReady   atomic.Bool   // set when all shards allocated + vacuum started
 
+	// Lifecycle: Start and Stop are idempotent and Stop is terminal, matching
+	// the shards it owns (#13518).
+	lifeMu  sync.Mutex
+	started bool // guarded by lifeMu
+	stopped bool // guarded by lifeMu
+
 	// Client-reported model page size hint (triggers slab rebuild)
 	modelPageHint atomic.Uint64
 
@@ -301,7 +307,14 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 }
 
 // Start starts all shard goroutines and the vacuum coordinator (if enabled).
+// A repeated Start, or a Start after Stop, is a no-op.
 func (m *Manager) Start() {
+	m.lifeMu.Lock()
+	defer m.lifeMu.Unlock()
+	if m.started || m.stopped {
+		return
+	}
+	m.started = true
 	for _, s := range m.shards {
 		s.Start()
 	}
@@ -503,16 +516,28 @@ func (m *Manager) AllocateShards(cfg ManagerConfig) error {
 	return nil
 }
 
-// Stop stops the vacuum coordinator and all shard goroutines, then waits for them to finish.
+// Stop stops the vacuum coordinator and all shard goroutines, then waits for
+// them to finish and release their allocators. Stop is idempotent and also
+// completes on a manager that was never started.
 func (m *Manager) Stop() {
+	m.lifeMu.Lock()
+	defer m.lifeMu.Unlock()
+	if m.stopped {
+		return
+	}
+	m.stopped = true
 	m.stopVacuum()
 	// Signal all shards to stop
 	for _, s := range m.shards {
-		s.Stop()
+		if s != nil {
+			s.Stop()
+		}
 	}
 	// Wait for all shard goroutines to exit
 	for _, s := range m.shards {
-		<-s.Done()
+		if s != nil {
+			<-s.Done()
+		}
 	}
 }
 
