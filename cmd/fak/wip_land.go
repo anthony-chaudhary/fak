@@ -211,7 +211,7 @@ func wipLandWith(ctx context.Context, repo, session string, opts wipLandOptions)
 	}
 	res.Subject = subject
 
-	cr, err := safecommit.Commit(ctx, safecommit.Options{
+	scOpts := safecommit.Options{
 		Dir:     repo,
 		Paths:   files,
 		Message: subject,
@@ -222,7 +222,21 @@ func wipLandWith(ctx context.Context, repo, session string, opts wipLandOptions)
 		// so a land invoked with -C on a different repo (a fleet host landing a crashed
 		// peer) would otherwise serialize on the wrong .git. See wipCommitLockPath.
 		Lock: safecommit.LockOptions{Path: wipCommitLockPath(ctx, repo)},
-	})
+		// The land acts AS the checkpoint's session. safecommit's peer-WIP guard
+		// attributes every path a refs/fak/wip/* delta touches to that ref's session
+		// unless it is the acting one, and the checkpoint being landed touches every
+		// landed path by construction — so without this its own ref reads as a peer
+		// and every land (a successor's adopt --land above all, whose process session
+		// can never match) refuses PEER_WIP_COLLISION. Other sessions' refs still count.
+		SessionID: session,
+	}
+	if opts.All {
+		// --all is the operator's declared sweep of the whole snapshot, peers' captured
+		// edits included (#5539); wipResolveLandScope already adjudicated it, so the
+		// generic checkpoint attribution must not silently revoke that escape.
+		scOpts.PeerWIPChecker = func(string) (string, bool) { return "", false }
+	}
+	cr, err := safecommit.Commit(ctx, scOpts)
 	if err != nil {
 		res.Reason = firstNonEmpty(cr.Reason, "COMMIT_ERROR")
 		return res, 1, fmt.Errorf("safecommit: %w", err)
