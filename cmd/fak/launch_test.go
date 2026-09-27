@@ -504,7 +504,12 @@ func TestLaunchStatusEmptyConfigIsInactiveAndRejectsProviderArg(t *testing.T) {
 	if code := runLaunch(&out, &errb, []string{"status"}); code != 0 {
 		t.Fatalf("status code=%d stderr=%s", code, errb.String())
 	}
-	for _, want := range []string{"default: (unset)", "interception: inactive (no configured providers)", "build: unknown"} {
+	// The build line reports the running binary's identity. Whether a test binary
+	// carries vcs.revision depends on the toolchain and checkout (a git-backed
+	// checkout stamps it; an unstamped build reports "unknown"), so the expected
+	// value comes from the same runtime identity instead of assuming "unknown".
+	wantBuild := "build: " + firstNonEmpty(buildIdentityFromRuntime().CommitShort, "unknown") + "\n"
+	for _, want := range []string{"default: (unset)", "interception: inactive (no configured providers)", wantBuild} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("status missing %q: %s", want, out.String())
 		}

@@ -194,6 +194,12 @@ func TestOpsRunEnvironment(t *testing.T) {
 	t.Setenv("OPENCODE_HOME", filepath.Join(t.TempDir(), "ambient-opencode"))
 	t.Setenv("FAK_OPS_SELECTED_A", "sentinel-selected-a")
 	t.Setenv("FAK_OPS_SELECTED_B", "sentinel-selected-b")
+	// The child environment FORWARDS the platform temp variables; it never synthesizes
+	// one. Windows always carries TEMP/TMP, but a Linux/WSL login often has no TMPDIR
+	// at all (os.TempDir falls back to /tmp), so pin a parent TMPDIR to make the
+	// pass-through witness hermetic instead of host-dependent.
+	platformTemp := t.TempDir()
+	t.Setenv("TMPDIR", platformTemp)
 
 	qualifiedGateway := func() *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -317,8 +323,8 @@ func TestOpsRunEnvironment(t *testing.T) {
 		if got.env["PATH"] == "" {
 			t.Errorf("%s child lost PATH", model)
 		}
-		if got.env["TMP"] == "" && got.env["TEMP"] == "" && got.env["TMPDIR"] == "" {
-			t.Errorf("%s child lost platform temp environment", model)
+		if got.env["TMPDIR"] != platformTemp {
+			t.Errorf("%s child lost platform temp environment: TMPDIR=%q, want the parent's %q", model, got.env["TMPDIR"], platformTemp)
 		}
 		if got.env["XDG_CONFIG_HOME"] == "" || got.env["XDG_CONFIG_HOME"] == ambientConfig || got.env["XDG_DATA_HOME"] == "" || got.env["XDG_DATA_HOME"] == ambientData {
 			t.Errorf("%s child config/auth roots are not run-scoped: config=%q data=%q", model, got.env["XDG_CONFIG_HOME"], got.env["XDG_DATA_HOME"])

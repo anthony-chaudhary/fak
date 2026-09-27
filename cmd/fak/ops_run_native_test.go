@@ -178,6 +178,12 @@ func TestOpsNativeEnvironment(t *testing.T) {
 		} {
 			t.Setenv(key, value)
 		}
+		// The native child FORWARDS the platform temp variables; it never synthesizes one.
+		// Windows always carries TEMP/TMP, but a Linux/WSL login often has no TMPDIR at all
+		// (os.TempDir falls back to /tmp), so pin a parent TMPDIR to make the pass-through
+		// witness hermetic instead of host-dependent.
+		platformTemp := t.TempDir()
+		t.Setenv("TMPDIR", platformTemp)
 		observed, receipt := run(t)
 		for _, key := range []string{"NODE_OPTIONS", "OPENCODE_HOME", "OPENCODE_CONFIG"} {
 			if value := observed[key]; value != "" {
@@ -190,8 +196,8 @@ func TestOpsNativeEnvironment(t *testing.T) {
 		if observed["XDG_CONFIG_HOME"] == "" || observed["XDG_CONFIG_HOME"] == ambientConfig || observed["XDG_DATA_HOME"] == "" || observed["XDG_DATA_HOME"] == ambientData {
 			t.Errorf("native child runtime roots are not isolated: config=%q data=%q", observed["XDG_CONFIG_HOME"], observed["XDG_DATA_HOME"])
 		}
-		if observed["PATH"] == "" || (observed["TEMP"] == "" && observed["TMP"] == "" && observed["TMPDIR"] == "") {
-			t.Errorf("native child lost required platform runtime: PATH=%q TEMP=%q TMP=%q TMPDIR=%q", observed["PATH"], observed["TEMP"], observed["TMP"], observed["TMPDIR"])
+		if observed["PATH"] == "" || observed["TMPDIR"] != platformTemp {
+			t.Errorf("native child lost required platform runtime: PATH=%q TEMP=%q TMP=%q TMPDIR=%q (want parent TMPDIR %q)", observed["PATH"], observed["TEMP"], observed["TMP"], observed["TMPDIR"], platformTemp)
 		}
 		if strings.Contains(string(receipt), "ambient-startup-hook") || strings.Contains(string(receipt), `"ambient"`) {
 			t.Fatalf("metadata receipt leaked ambient startup config: %s", receipt)

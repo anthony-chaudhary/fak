@@ -126,7 +126,9 @@ func TestNativeHelpMatchesTheGatewayRouting(t *testing.T) {
 	// Pinned to the call and its receiver, not to the argument spelling: the seed the loop
 	// is handed is refactored independently of who drives the stream (it went task ->
 	// seed.Task with the native wire), and that is not a fact this help text asserts.
-	if !strings.Contains(nativeServe, "agent.RunArmStream(ctx, s.planner,") {
+	// The receiver is s.chatPlanner(ctx) since 19629a538c (#5633/#12836): a roster-bound
+	// request drives its admitted account's planner, an unbound one the boot s.planner.
+	if !strings.Contains(nativeServe, "agent.RunArmStream(ctx, s.chatPlanner(ctx),") {
 		t.Fatal("runNativeArmStream no longer calls agent.RunArmStream — the help names it as the streamed driver")
 	}
 	if !strings.Contains(nativeServe, "if s.stopGate != nil {") {

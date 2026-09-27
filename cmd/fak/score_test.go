@@ -53,6 +53,9 @@ func TestScoreRoutesCoverTheMetaVerbs(t *testing.T) {
 		"token-defaults",
 		"ui-quality",
 		"verifier-exposure",
+		// be999cf22d added the multi-wave planning route without a pin update; both
+		// lists are sorted below, so the entry's position here is free.
+		"debt-orchestrator",
 	}
 	got := make([]string, 0, len(scoreRoutes))
 	for name, route := range scoreRoutes {

@@ -2,7 +2,10 @@ package safecommit
 
 import (
 	"context"
+	"errors"
 	"io"
+	"os"
+	"os/exec"
 	"slices"
 	"testing"
 )
@@ -61,6 +64,58 @@ func TestNewGitCmdDirWiring(t *testing.T) {
 	}
 	if got := newGitCmd(context.Background(), "", "status").Dir; got != "" {
 		t.Errorf("empty dir must stay empty, got %q", got)
+	}
+}
+
+// TestNewGitCmdTreeCancel: a cancelled git invocation reaps git's whole descendant tree
+// (hooks and whatever they launched), not git alone, and Wait's pipe drain is bounded. A
+// bare CommandContext kill left the 2026-09-26 pre-commit hook tree running and holding
+// the output pipes after the commit deadline fired.
+func TestNewGitCmdTreeCancel(t *testing.T) {
+	var reaped []int
+	orig := killGitTree
+	killGitTree = func(pid int) (bool, string) {
+		reaped = append(reaped, pid)
+		return true, "stub: tree reaped"
+	}
+	t.Cleanup(func() { killGitTree = orig })
+
+	for _, args := range [][]string{{"commit", "-m", "x", "--", "a"}, {"push"}, {"status"}} {
+		cmd := newGitCmd(context.Background(), "", args...)
+		if cmd.Cancel == nil {
+			t.Fatalf("newGitCmd(%v): Cancel is nil — a deadline would kill git alone and orphan its hook tree", args)
+		}
+		if cmd.WaitDelay != gitWaitDelay {
+			t.Fatalf("newGitCmd(%v): WaitDelay = %s, want %s — a surviving descendant could hang Wait on the pipes", args, cmd.WaitDelay, gitWaitDelay)
+		}
+		self, err := os.FindProcess(os.Getpid())
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd.Process = self // the stubbed reaper never signals it
+		if err := cmd.Cancel(); err != nil {
+			t.Fatalf("newGitCmd(%v): Cancel returned %v after a successful tree reap", args, err)
+		}
+	}
+	if len(reaped) != 3 || reaped[0] != os.Getpid() {
+		t.Fatalf("Cancel must hand git's pid to the tree reaper each time, got %v", reaped)
+	}
+
+	// A deadline that fires after Wait already collected git must not reap anything (the
+	// pid may be recycled) and must answer os.ErrProcessDone, so exec does not report a
+	// commit that landed as a context error.
+	done := exec.Command(os.Args[0], "-test.run=^$")
+	if err := done.Run(); err != nil {
+		t.Fatalf("start an exited stand-in process: %v", err)
+	}
+	cmd := newGitCmd(context.Background(), "", "commit", "-m", "x")
+	cmd.Process = done.Process
+	reaped = nil
+	if err := cmd.Cancel(); !errors.Is(err, os.ErrProcessDone) {
+		t.Fatalf("Cancel on an already-collected process = %v, want os.ErrProcessDone", err)
+	}
+	if len(reaped) != 0 {
+		t.Fatalf("Cancel walked a finished pid %v — it may belong to an unrelated process by now", reaped)
 	}
 }
 

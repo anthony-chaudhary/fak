@@ -7,13 +7,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -36,12 +39,22 @@ import (
 //     gate stands down instead of re-flagging the vetted commit as an unvetted bare sweep.
 //     A raw `git commit` carries no marker and is still gated, so the marker must never
 //     leak onto a read probe or push.
+//
+// It also bounds what a deadline leaves behind. `git commit` and `git push` run the
+// repository's hooks as git's CHILDREN (sh, then python / go / the tools they launch), and
+// bare CommandContext cancellation kills only git.exe: the hook tree lingers, keeps the
+// output pipes open (so Wait never returns), and keeps working against a commit that is
+// already being reported as stalled. configureGitTreeCancel makes a cancel reap git's
+// whole descendant tree, and gitWaitDelay bounds the pipe drain even if a descendant
+// escaped the walk.
 func newGitCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	windowgate.ConfigureBackgroundCommand(cmd)
+	configureGitTreeCancel(cmd)
+	cmd.WaitDelay = gitWaitDelay
 	cmd.Stdin = strings.NewReader("")
 	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
-	if len(args) > 0 && args[0] == "commit" {
+	if isCommitInvocation(args) {
 		cmd.Env = append(cmd.Env, "FAK_SAFECOMMIT_VETTED=1")
 	}
 	if dir != "" {
@@ -50,17 +63,86 @@ func newGitCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
 	return cmd
 }
 
+// gitWaitDelay bounds how long Wait keeps draining git's output after a cancel. The tree
+// kill normally closes every pipe holder at once; this is the backstop for a descendant
+// the tree walk could not see, so a cancelled commit returns instead of hanging on it.
+const gitWaitDelay = 10 * time.Second
+
+// configureGitTreeCancel wires cmd.Cancel to procguard's process-TREE reaper (the native
+// Toolhelp walk on Windows; a descendant walk plus SIGKILL on POSIX), falling back to
+// killing git alone if the tree reap fails. It deliberately does NOT use
+// procguard.ConfigureProcessTreeCancel, whose POSIX half moves the child into its own
+// process group: an interactive `fak commit` would then stop delivering the terminal's
+// Ctrl-C to git and its hooks, and an aborted commit would finish detached in the
+// background. Reaping by descendant walk keeps git in the caller's group.
+//
+// A deadline can also fire in the instant after git already exited but before Wait read the
+// context result. exec then still calls Cancel, and a nil return would make Wait report a
+// commit that LANDED as a context error (COMMIT_STALLED, and a retry would find nothing
+// staged) — while walking a pid Windows may already have recycled would reap an unrelated
+// tree. So a root that Wait has already collected answers os.ErrProcessDone and nothing is
+// killed (gitRootCollected).
+func configureGitTreeCancel(cmd *exec.Cmd) {
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		if gitRootCollected(cmd.Process) {
+			return os.ErrProcessDone
+		}
+		if ok, _ := killGitTree(cmd.Process.Pid); ok {
+			return nil
+		}
+		return cmd.Process.Kill()
+	}
+}
+
+// killGitTree is the tree reaper behind configureGitTreeCancel; a package var so the
+// guard test can prove the cancel path reaches it without killing anything.
+var killGitTree = procguard.KillPID
+
+// gitRootCollected reports whether Wait has already reaped p, using the os package's own
+// synchronized handle state (a null signal never touches the process). POSIX reports that
+// as os.ErrProcessDone. Windows reports syscall.EINVAL, because os deliberately marks a
+// waited process "released" there rather than "done"; a running process answers EWINDOWS
+// to a null signal instead, and safecommit never calls Release, so EINVAL is unambiguous.
+// (Go's default Process.Kill cancel hits the same EINVAL there and would surface it as a
+// Wait error for a process that exited cleanly.)
+func gitRootCollected(p *os.Process) bool {
+	err := p.Signal(syscall.Signal(0))
+	if errors.Is(err, os.ErrProcessDone) {
+		return true
+	}
+	return runtime.GOOS == "windows" && errors.Is(err, syscall.EINVAL)
+}
+
+// isCommitInvocation reports whether args is a `git commit` — the one mutation that takes
+// the vetted-commit marker and whose kill can orphan a partial commit's index locks.
+func isCommitInvocation(args []string) bool {
+	return len(args) > 0 && args[0] == "commit"
+}
+
 // realRunner is the default Runner: it runs the real git binary. It mirrors
 // witness.gitRunner's contract — a non-zero git exit is returned in code (not err); err
 // signals git could not be EXECUTED at all — with one deliberate difference: it MERGES
 // stderr into the returned stdout. The executor needs a hook's refusal / a push rejection
 // message to surface in Result.Detail, which witness (Stderr = nil) discards.
+//
+// A `git commit` that the context killed (the post-validation deadline firing mid-hook)
+// is rolled back the way git itself would have on a clean failure: the dead
+// next-index-<pid>.lock it created during this run and the index.lock that pairs with it
+// are removed, so the timeout does not wedge the shared index lane for every peer (see
+// killedcommit.go).
 func realRunner(ctx context.Context, dir string, args ...string) (string, int, error) {
 	cmd := newGitCmd(ctx, dir, args...)
 	var buf strings.Builder
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
+	started := time.Now()
 	err := cmd.Run()
+	if err != nil && ctx.Err() != nil && isCommitInvocation(args) && cmd.Process != nil {
+		rollbackKilledCommit(dir, started)
+	}
 	if err == nil {
 		return buf.String(), 0, nil
 	}

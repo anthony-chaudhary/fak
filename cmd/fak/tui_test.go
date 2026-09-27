@@ -91,10 +91,12 @@ func TestTUIIssueReportRanksAndLinksEpic(t *testing.T) {
 }
 
 // TestTUIIssueActionsTriageNeedsYouResidualOnly pins the decenter-the-human fold
-// over the pane's surfaced actions: only a genuine authority call (a person
-// setting priority) stays NeedsHuman; a ready gh command routes to TAKE_OBVIOUS
-// and an unlabeled triage to FRESH_CONTEXT, so the "needs you" surface is
-// residual-only.
+// over the pane's surfaced actions: a ready gh command routes to TAKE_OBVIOUS and
+// every review-only action -- unlabeled triage AND an unset priority -- routes to
+// FRESH_CONTEXT, so the "needs you" surface is residual-only. Since #12418
+// (b016483c64) an unset priority is agent-operated by default too: only an action
+// carrying an explicit typed escalation is HUMAN_RESIDUAL, and this pane surfaces
+// none, so nothing here pages a person.
 func TestTUIIssueActionsTriageNeedsYouResidualOnly(t *testing.T) {
 	asOf, err := time.Parse("2006-01-02", "2026-06-25")
 	if err != nil {
@@ -102,7 +104,7 @@ func TestTUIIssueActionsTriageNeedsYouResidualOnly(t *testing.T) {
 	}
 	issues := []tuiIssue{
 		// Unprioritized, unlabeled, recently updated -> review whose reason names
-		// needs-priority -> HUMAN_RESIDUAL (only a person sets priority).
+		// needs-priority -> FRESH_CONTEXT (review-only, no explicit escalation).
 		{Number: 20, Title: "triage me please", State: "OPEN",
 			CreatedAt: "2026-06-10T00:00:00Z", UpdatedAt: "2026-06-20T00:00:00Z"},
 		// Idle question -> close-dormant-question hands over a ready gh command ->
@@ -127,7 +129,7 @@ func TestTUIIssueActionsTriageNeedsYouResidualOnly(t *testing.T) {
 		disp       string
 		needsHuman bool
 	}{
-		20: {"HUMAN_RESIDUAL", true},
+		20: {"FRESH_CONTEXT", false},
 		21: {"TAKE_OBVIOUS", false},
 		22: {"FRESH_CONTEXT", false},
 	}
@@ -141,11 +143,14 @@ func TestTUIIssueActionsTriageNeedsYouResidualOnly(t *testing.T) {
 				num, got.Disposition, got.NeedsHuman, w.disp, w.needsHuman)
 		}
 	}
-	if report.Counts.NeedsYou != 1 {
-		t.Fatalf("needs_you = %d, want 1 (only #20 sets priority)", report.Counts.NeedsYou)
+	if !strings.Contains(byNum[20].Reason, "needs-priority") {
+		t.Fatalf("issue #20 reason = %q, want the needs-priority review (the unset-priority case under test)", byNum[20].Reason)
 	}
-	if report.Counts.AgentClearable != 2 {
-		t.Fatalf("agent_clearable = %d, want 2 (#21 + #22)", report.Counts.AgentClearable)
+	if report.Counts.NeedsYou != 0 {
+		t.Fatalf("needs_you = %d, want 0 (no surfaced action carries an explicit escalation)", report.Counts.NeedsYou)
+	}
+	if report.Counts.AgentClearable != 3 {
+		t.Fatalf("agent_clearable = %d, want 3 (#20 + #21 + #22)", report.Counts.AgentClearable)
 	}
 }
 

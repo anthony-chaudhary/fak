@@ -22,9 +22,17 @@ func reconcileFixtureRoot(t *testing.T) string {
 	return root
 }
 
+// reconcileClosedWindow pins the fixture as a closed past window. Live vs
+// process_death for an open final start is decided by file mtime against the wall
+// clock (default --fresh-mins 120), and a fresh checkout (CI, a validator's clean
+// copy) stamps the fixture with a just-now mtime, which typed the open start Live
+// and left residual_unaccounted=1. --fresh-mins 0 disables the freshness window so
+// the fold is a function of the committed bytes alone, not of when they were checked out.
+var reconcileClosedWindow = []string{"--fresh-mins", "0"}
+
 func TestSessionAuditReconcileJSONFixtureSmoke(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	rc := runSessionAuditReconcile(&stdout, &stderr, []string{"--root", reconcileFixtureRoot(t), "--json"})
+	rc := runSessionAuditReconcile(&stdout, &stderr, append([]string{"--root", reconcileFixtureRoot(t), "--json"}, reconcileClosedWindow...))
 	if rc != 0 {
 		t.Fatalf("rc = %d, stderr: %s", rc, stderr.String())
 	}
@@ -35,6 +43,7 @@ func TestSessionAuditReconcileJSONFixtureSmoke(t *testing.T) {
 		`"task_complete": 3`,
 		`"turn_aborted": 1`,
 		`"raw_unaccounted": 3`,
+		`"process_death": 1`,
 		`"residual_unaccounted": 0`,
 		`"all_starts_typed": true`,
 		`"scanned": 4`,
@@ -55,7 +64,7 @@ func TestSessionAuditReconcileJSONFixtureSmoke(t *testing.T) {
 
 func TestSessionAuditReconcileTextFixtureSmoke(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	rc := runSessionAuditReconcile(&stdout, &stderr, []string{"--root", reconcileFixtureRoot(t)})
+	rc := runSessionAuditReconcile(&stdout, &stderr, append([]string{"--root", reconcileFixtureRoot(t)}, reconcileClosedWindow...))
 	if rc != 0 {
 		t.Fatalf("rc = %d, stderr: %s", rc, stderr.String())
 	}

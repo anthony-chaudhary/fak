@@ -369,16 +369,40 @@ func TestDispatchWaveSharedHostEndToEndMicroBackend(t *testing.T) {
 	}
 }
 
-// liveE2EEndpointEnv returns the first configured live endpoint env var, or ""
-// when none is set. The integration witness SKIPS with this reason rather than
-// silently passing when the operator has no live model backend (#13083).
+// liveE2EEndpointEnvName is the ONE opt-in for the #13083 live wave witness: an
+// OpenAI-compatible base URL the operator deliberately points the test at.
+const liveE2EEndpointEnvName = "FAK_E2E_LIVE_BASE_URL"
+
+// liveE2EAPIKeyEnvName optionally carries the bearer key for that endpoint. It is
+// separate on purpose: an ambient OPENAI_API_KEY is never forwarded to the opted-in URL.
+const liveE2EAPIKeyEnvName = "FAK_E2E_LIVE_API_KEY"
+
+// liveE2EEndpointEnv returns the dedicated live-endpoint opt-in, or "" when it is
+// unset. Ambient provider config (OPENAI_BASE_URL, OPENAI_API_BASE, FAK_GATEWAY_URL)
+// is deliberately NOT an opt-in: a login shell or dev box routinely exports those
+// for everyday tooling, and treating them as consent turned an ordinary
+// `go test ./cmd/fak` into a live network witness that failed whenever the ambient
+// server was down or not tool-capable. The witness SKIPS with this reason rather
+// than silently passing when the operator has not opted in (#13083).
 func liveE2EEndpointEnv() (string, string) {
-	for _, name := range []string{"FAK_E2E_LIVE_BASE_URL", "OPENAI_BASE_URL", "OPENAI_API_BASE", "FAK_GATEWAY_URL"} {
-		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
-			return name, v
-		}
+	if v := strings.TrimSpace(os.Getenv(liveE2EEndpointEnvName)); v != "" {
+		return liveE2EEndpointEnvName, v
 	}
 	return "", ""
+}
+
+// pinLiveE2EPlannerEndpoint routes the real live planner selection
+// (defaultDispatchHostEnrollWorker) to the opted-in endpoint and nothing else: the
+// Anthropic and gateway branches it would otherwise prefer from ambient env are
+// cleared, and the only key sent is the dedicated liveE2EAPIKeyEnvName value.
+func pinLiveE2EPlannerEndpoint(t *testing.T, endpoint string) {
+	t.Helper()
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("OPENAI_API_BASE", "")
+	t.Setenv("FAK_GATEWAY_URL", "")
+	t.Setenv("OPENAI_BASE_URL", endpoint)
+	t.Setenv("OPENAI_API_KEY", strings.TrimSpace(os.Getenv(liveE2EAPIKeyEnvName)))
 }
 
 // stuckStepPlanner is the adversarial gateway for the wave-seam close witness: its
@@ -497,15 +521,17 @@ func TestDispatchWaveSharedHostCloseIsBoundedAgainstACtxIgnoringAgent(t *testing
 // (tool_calls > 0), and zero post-wave lane collisions (every in-process lease was
 // handed back, so the wave leaves no live lane behind).
 //
-// It requires a live endpoint. When none is configured the test SKIPS with an
-// explicit, recorded reason -- it never silently passes. Gate vars (first match
-// wins): FAK_E2E_LIVE_BASE_URL | OPENAI_BASE_URL | OPENAI_API_BASE | FAK_GATEWAY_URL.
+// It requires an explicitly opted-in live endpoint: set FAK_E2E_LIVE_BASE_URL to an
+// OpenAI-compatible base URL (and FAK_E2E_LIVE_API_KEY if it needs a key). Unset, the
+// test SKIPS with an explicit, recorded reason -- it never silently passes. Ambient
+// provider env (OPENAI_BASE_URL, OPENAI_API_BASE, FAK_GATEWAY_URL) never opts in.
 func TestDispatchWaveSharedHostLiveBackendEndToEnd(t *testing.T) {
 	envName, endpoint := liveE2EEndpointEnv()
 	if envName == "" {
-		t.Skipf("SKIP (witnessed no-live-endpoint): none of FAK_E2E_LIVE_BASE_URL, OPENAI_BASE_URL, OPENAI_API_BASE, FAK_GATEWAY_URL is set; the #13083 live wave witness requires a configured model backend")
+		t.Skipf("SKIP (witnessed no-live-endpoint): %s is not set; the #13083 live wave witness runs only against an explicitly opted-in OpenAI-compatible endpoint (ambient OPENAI_BASE_URL/OPENAI_API_BASE/FAK_GATEWAY_URL do not opt in)", liveE2EEndpointEnvName)
 	}
 	t.Logf("live wave witness: using %s=%s", envName, endpoint)
+	pinLiveE2EPlannerEndpoint(t, endpoint)
 
 	const n = 4
 	root := t.TempDir()

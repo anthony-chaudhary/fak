@@ -69,11 +69,14 @@ func TestRunKVBMTraceCorpusCheck(t *testing.T) {
 		t.Fatalf("runKVBM trace exit=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	out := stdout.String()
+	// The exact oracle is 300, not the historical 350: ab5de1fe5b (#13001) stopped the
+	// Belady DP from seeding a miss with an over-budget "keep everything" state, so the
+	// bound is now the reachable optimum, which cost-aware eviction attains on this corpus.
 	for _, want := range []string{
 		"kvbm trace: issue2675-synthetic-zipf-bimodal-agent-prefix",
 		"cost-aware: hits=300/800",
 		"lru:        hits=150/800",
-		"oracle:    hits=350/800 exact=true",
+		"oracle:    hits=300/800 exact=true",
 		"gdr>=lru=true",
 		"stability_no_worse=true",
 		"verdict: PASS",

@@ -21,6 +21,13 @@ package safecommit
 //     so it is left untouched and the caller reports "another git process is
 //     active" instead of git's generic crash text — still the retryable LOCK_BUSY.
 //
+//  3. NAMED DEAD OWNER ⇒ REAP SOONER: a partial commit (`git commit -- <paths>`, the
+//     shape safecommit issues) holds index.lock AND next-index-<pid>.lock through its
+//     hooks. When a next-index file pairs with the lock by mtime and its pid is dead
+//     (partialcommit.go), the lock's creator is named and proven gone, so the lock is
+//     reaped once frozen for DefaultPartialCommitOwnerDeadAge instead of the long
+//     no-owner window, and the dead writer's next-index file goes with it.
+//
 // Only the index lock is auto-reaped. A ref lock (refs/heads/*.lock, packed-refs)
 // can be held by a concurrent push whose window is legitimately long, and it
 // carries no comparable age guarantee, so ref-lock contention keeps the plain
@@ -28,6 +35,7 @@ package safecommit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,6 +56,14 @@ import (
 // lower layer.
 const DefaultStaleIndexLockAge = 15 * time.Minute
 
+// DefaultPartialCommitOwnerDeadAge is the short frozen window after which an index.lock
+// whose partial-commit creator is NAMED (a paired next-index-<pid>.lock) and DEAD is
+// reaped. The long DefaultStaleIndexLockAge only ever stood in for "the holder is gone";
+// once a dead pid proves it, one frozen minute suffices. It mirrors
+// commitlane.DefaultOwnerDeadIndexAge for the same reason DefaultStaleIndexLockAge mirrors
+// commitlane.DefaultStaleIndexAge.
+const DefaultPartialCommitOwnerDeadAge = 60 * time.Second
+
 // Injection points for tests: the reaper's clock, stat, and remove. Production
 // uses the real filesystem; tests substitute these to exercise stale/fresh/absent
 // without racing a real crash.
@@ -55,6 +71,8 @@ var (
 	staleIndexNow    = time.Now
 	staleIndexStat   = os.Stat
 	staleIndexRemove = os.Remove
+	staleIndexGlob   = filepath.Glob
+	staleIndexAlive  = processAlive
 )
 
 // isIndexLockContention reports whether git's failure names the INDEX lock
@@ -71,15 +89,26 @@ type staleIndexLockReap struct {
 	Present    bool   // an index.lock existed at probe time
 	AgeSeconds int64  // its age when probed (for the event and the message)
 	Path       string // the lock path probed
+	// OwnerPID is the partial-commit creator named by a paired next-index-<pid>.lock
+	// (0 when no residue pairs), and OwnerDead whether every pairing writer is gone.
+	OwnerPID  int
+	OwnerDead bool
+	// ReapedByOwner marks a reap proven by the dead named owner rather than by age;
+	// PartnerPath is that owner's next-index file, removed alongside the lock.
+	ReapedByOwner bool
+	PartnerPath   string
 }
 
 // reapStaleIndexLock removes <gitDir>/index.lock when it is provably ABANDONED:
-// present AND older than threshold. Age is the whole signal — index.lock records
-// no owning PID, and git never legitimately holds it for minutes, so an
-// over-threshold mtime is a crash artifact with no live owner to disturb. A fresh
-// lock (under threshold, or threshold <= 0) is left untouched. Best-effort and
-// fail-safe: an absent or unreadable lock reaps nothing, and a remove failure
-// leaves the caller's existing LOCK_BUSY path as the backstop.
+// present AND older than threshold, or present, frozen for
+// DefaultPartialCommitOwnerDeadAge, and paired with a next-index-<pid>.lock whose pid is
+// dead (the lock's creator is named and gone). Without a named owner age is the whole
+// signal — index.lock records no owning PID, and git never legitimately holds it for
+// minutes, so an over-threshold mtime is a crash artifact with no live owner to disturb.
+// A fresh, unowned lock (under threshold, or threshold <= 0) is left untouched, and a
+// non-positive threshold disables both reaps. Best-effort and fail-safe: an absent or
+// unreadable lock reaps nothing, and a remove failure leaves the caller's existing
+// LOCK_BUSY path as the backstop.
 func reapStaleIndexLock(gitDir string, threshold time.Duration) staleIndexLockReap {
 	path := filepath.Join(gitDir, "index.lock")
 	res := staleIndexLockReap{Path: path}
@@ -88,15 +117,55 @@ func reapStaleIndexLock(gitDir string, threshold time.Duration) staleIndexLockRe
 		return res // absent or unreadable => nothing to reap
 	}
 	res.Present = true
-	if age := staleIndexNow().Sub(fi.ModTime()); age > 0 {
-		res.AgeSeconds = int64(age / time.Second)
-		if threshold > 0 && age >= threshold {
-			if staleIndexRemove(path) == nil {
-				res.Reaped = true
+	age := staleIndexNow().Sub(fi.ModTime())
+	if age <= 0 {
+		return res
+	}
+	res.AgeSeconds = int64(age / time.Second)
+	if threshold <= 0 {
+		return res
+	}
+	if age >= threshold {
+		if staleIndexRemove(path) == nil {
+			res.Reaped = true
+		}
+		return res
+	}
+	res.OwnerPID, res.OwnerDead, _ = partialCommitOwnerOf(gitDir, fi.ModTime())
+	if res.OwnerPID > 0 && res.OwnerDead && age >= DefaultPartialCommitOwnerDeadAge {
+		if staleIndexRemove(path) == nil {
+			res.Reaped, res.ReapedByOwner = true, true
+			partner := filepath.Join(gitDir, NextIndexLockName(res.OwnerPID))
+			if rerr := staleIndexRemove(partner); rerr == nil || errors.Is(rerr, os.ErrNotExist) {
+				res.PartnerPath = partner
 			}
 		}
 	}
 	return res
+}
+
+// partialCommitOwnerOf scans gitDir's next-index-<pid>.lock residue and names the
+// partial-commit creator of an index.lock last modified at indexMod (see
+// PartialCommitOwner). Liveness is probed only for files that pair by mtime, so a pile of
+// old residue costs a stat each, not a process probe each.
+func partialCommitOwnerOf(gitDir string, indexMod time.Time) (pid int, dead bool, ok bool) {
+	matches, err := staleIndexGlob(filepath.Join(gitDir, NextIndexLockGlob))
+	if err != nil {
+		return 0, false, false
+	}
+	var cands []NextIndexCandidate
+	for _, m := range matches {
+		cpid := NextIndexLockPID(filepath.Base(m))
+		if cpid <= 0 {
+			continue
+		}
+		fi, serr := staleIndexStat(m)
+		if serr != nil || !NextIndexPairsIndexLock(indexMod, fi.ModTime()) {
+			continue
+		}
+		cands = append(cands, NextIndexCandidate{PID: cpid, ModTime: fi.ModTime(), Alive: staleIndexAlive(cpid)})
+	}
+	return PartialCommitOwner(indexMod, cands)
 }
 
 // resolveGitDir returns the absolute .git directory for dir via the injected
@@ -128,13 +197,37 @@ func recoverStaleIndexLock(ctx context.Context, run Runner, dir string, args []s
 	if gitDir == "" {
 		return "", "", nil, false
 	}
+	if redirected, _ := indexRedirected(ctx, run, dir, gitDir); redirected {
+		// Inside another git's hook GIT_INDEX_FILE is inherited: the lock git just refused
+		// on is <that file>.lock, and <gitdir>/index.lock is the OUTER git's live lock (its
+		// name still matches isIndexLockContention). Neither reap may touch it. An
+		// unanswered query keeps the long-standing behavior rather than disabling the reap.
+		return "", "", nil, false
+	}
 	reap := reapStaleIndexLock(gitDir, DefaultStaleIndexLockAge)
 	switch {
 	case reap.Reaped:
-		reapEventf("INDEX_LOCK_REAPED age=%ds path=%s", reap.AgeSeconds, reap.Path)
+		if reap.ReapedByOwner {
+			reapEventf("INDEX_LOCK_REAPED partial_commit_owner_dead pid=%d age=%ds path=%s partner=%s",
+				reap.OwnerPID, reap.AgeSeconds, reap.Path, reap.PartnerPath)
+		} else {
+			reapEventf("INDEX_LOCK_REAPED age=%ds path=%s", reap.AgeSeconds, reap.Path)
+		}
 		out, code, rerr := runRidingLockContention(ctx, run, dir, args...)
 		r, d, e := classifyMutation(out, code, rerr)
 		return r, d, e, true
+	case reap.Present && reap.OwnerPID > 0 && reap.OwnerDead:
+		// Named dead owner, not yet frozen for the short window: say so, so the operator
+		// sees the lock will clear on its own instead of hunting a phantom live writer.
+		return ReasonLockBusy,
+			fmt.Sprintf("index.lock (held %ds) was left by dead partial commit pid %d; it is reaped once frozen %s; retry shortly",
+				reap.AgeSeconds, reap.OwnerPID, DefaultPartialCommitOwnerDeadAge),
+			nil, true
+	case reap.Present && reap.OwnerPID > 0:
+		return ReasonLockBusy,
+			fmt.Sprintf("another git process is active (partial commit pid %d holds index.lock %ds); retry shortly",
+				reap.OwnerPID, reap.AgeSeconds),
+			nil, true
 	case reap.Present:
 		// Fresh index.lock: a live git may hold it. Do not reap; replace git's
 		// generic crash text with a precise, retryable message.

@@ -3,11 +3,208 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestCronRunExecutionLockChild(t *testing.T) {
+	dash := -1
+	for i, arg := range os.Args {
+		if arg == "--" {
+			dash = i
+			break
+		}
+	}
+	if dash < 0 || len(os.Args) <= dash+2 {
+		return
+	}
+	mode, marker := os.Args[dash+1], os.Args[dash+2]
+	if mode == "lock" {
+		if len(os.Args) <= dash+4 {
+			t.Fatal("lock helper requires execution lock and release paths")
+		}
+		var stdout, stderr bytes.Buffer
+		code := runCron(&stdout, &stderr, []string{
+			"run", "--job", "crash-holder", "--ledger", filepath.Join(filepath.Dir(marker), "holder.jsonl"),
+			"--interval", "1h", "--slot", "holder-slot", "--timeout", "20s",
+			"--execution-lock", os.Args[dash+3], "--",
+			os.Args[0], "-test.run=^TestCronRunExecutionLockChild$", "--", "hold", marker, os.Args[dash+4],
+		})
+		if code != 0 {
+			t.Fatalf("lock-holder run = code %d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		}
+		return
+	}
+	if err := os.WriteFile(marker, []byte("spawned"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if mode != "hold" {
+		return
+	}
+	if len(os.Args) <= dash+3 {
+		t.Fatal("hold helper requires a release path")
+	}
+	release := os.Args[dash+3]
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		if _, err := os.Stat(release); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for release marker %s", release)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestCronRunOverlappingExecutionLock(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "workspace.run.lock")
+	firstLedger := filepath.Join(dir, "first.jsonl")
+	secondLedger := filepath.Join(dir, "second.jsonl")
+	ready := filepath.Join(dir, "first-spawned")
+	release := filepath.Join(dir, "release-first")
+	busySpawn := filepath.Join(dir, "busy-spawned")
+	afterSpawn := filepath.Join(dir, "after-spawned")
+
+	type result struct {
+		code   int
+		stdout string
+		stderr string
+	}
+	firstDone := make(chan result, 1)
+	go func() {
+		var stdout, stderr bytes.Buffer
+		code := runCron(&stdout, &stderr, []string{
+			"run", "--job", "long-job", "--ledger", firstLedger,
+			"--interval", "1h", "--slot", "slot-a", "--timeout", "20s",
+			"--execution-lock", lockPath, "--",
+			os.Args[0], "-test.run=^TestCronRunExecutionLockChild$", "--", "hold", ready, release,
+		})
+		firstDone <- result{code: code, stdout: stdout.String(), stderr: stderr.String()}
+	}()
+	waitForCronRunMarker(t, ready)
+
+	var busyOut, busyErr bytes.Buffer
+	busyCode := runCron(&busyOut, &busyErr, []string{
+		"run", "--job", "distinct-job", "--ledger", secondLedger,
+		"--interval", "1h", "--slot", "slot-b", "--timeout", "20s",
+		"--execution-lock", lockPath, "--",
+		os.Args[0], "-test.run=^TestCronRunExecutionLockChild$", "--", "mark", busySpawn,
+	})
+	if busyCode != 3 || !strings.Contains(busyOut.String(), "status=skipped_busy") {
+		t.Fatalf("overlap = code %d stdout=%q stderr=%q; want skipped_busy", busyCode, busyOut.String(), busyErr.String())
+	}
+	if _, err := os.Stat(busySpawn); !os.IsNotExist(err) {
+		t.Fatalf("busy child spawned: stat error = %v", err)
+	}
+	busyRuns, err := cronReadRuns(secondLedger)
+	if err != nil {
+		t.Fatalf("read busy ledger: %v", err)
+	}
+	if len(busyRuns) != 1 {
+		t.Fatalf("busy ledger records = %d, want 1: %+v", len(busyRuns), busyRuns)
+	}
+	busyRecord := busyRuns[0]
+	if busyRecord.Job != "distinct-job" || busyRecord.Slot != "slot-b" ||
+		busyRecord.Status != "skipped_busy" || busyRecord.Outcome != "skipped_busy" ||
+		busyRecord.ExitCode != 3 {
+		t.Fatalf("busy ledger record = %+v", busyRecord)
+	}
+
+	if err := os.WriteFile(release, []byte("release"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first := <-firstDone
+	if first.code != 0 {
+		t.Fatalf("first run = code %d stdout=%q stderr=%q", first.code, first.stdout, first.stderr)
+	}
+
+	var afterOut, afterErr bytes.Buffer
+	afterCode := runCron(&afterOut, &afterErr, []string{
+		"run", "--job", "distinct-job", "--ledger", secondLedger,
+		"--interval", "1h", "--slot", "slot-c", "--timeout", "20s",
+		"--execution-lock", lockPath, "--",
+		os.Args[0], "-test.run=^TestCronRunExecutionLockChild$", "--", "mark", afterSpawn,
+	})
+	if afterCode != 0 {
+		t.Fatalf("post-release run = code %d stdout=%q stderr=%q", afterCode, afterOut.String(), afterErr.String())
+	}
+	waitForCronRunMarker(t, afterSpawn)
+}
+
+func TestCronRunAbandonedExecutionLockRecovery(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "abandoned.run.lock")
+	ready := filepath.Join(dir, "holder-ready")
+	release := filepath.Join(dir, "holder-release")
+	spawned := filepath.Join(dir, "successor-spawned")
+	ledger := filepath.Join(dir, "successor.jsonl")
+
+	holder := exec.Command(os.Args[0], "-test.run=^TestCronRunExecutionLockChild$", "--", "lock", ready, lockPath, release)
+	configureDispatchHelperCommand(holder)
+	var holderOutput bytes.Buffer
+	holder.Stdout = &holderOutput
+	holder.Stderr = &holderOutput
+	if err := holder.Start(); err != nil {
+		t.Fatalf("start lock holder: %v", err)
+	}
+	waited := false
+	t.Cleanup(func() {
+		if !waited && holder.Process != nil {
+			_ = holder.Process.Kill()
+			_ = holder.Wait()
+		}
+	})
+	waitForCronRunMarker(t, ready)
+	if err := holder.Process.Kill(); err != nil {
+		t.Fatalf("kill lock holder: %v", err)
+	}
+	if err := holder.Wait(); err == nil {
+		t.Fatal("killed lock holder exited successfully; crash fixture did not crash")
+	}
+	waited = true
+	// The holder's child may outlive its killed parent. Release its bounded wait
+	// so the fixture leaves no stray test process behind.
+	if err := os.WriteFile(release, []byte("release"), 0o644); err != nil {
+		t.Fatalf("release killed holder child: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runCron(&stdout, &stderr, []string{
+		"run", "--job", "post-crash-job", "--ledger", ledger,
+		"--interval", "1h", "--slot", "post-crash-slot", "--timeout", "20s",
+		"--execution-lock", lockPath, "--",
+		os.Args[0], "-test.run=^TestCronRunExecutionLockChild$", "--", "mark", spawned,
+	})
+	if code != 0 {
+		t.Fatalf("post-crash run = code %d stdout=%q stderr=%q holder=%q", code, stdout.String(), stderr.String(), holderOutput.String())
+	}
+	waitForCronRunMarker(t, spawned)
+	runs, err := cronReadRuns(ledger)
+	if err != nil || len(runs) != 1 || runs[0].Status != cronRunStatusRan {
+		t.Fatalf("post-crash ledger = %+v err=%v", runs, err)
+	}
+}
+
+func waitForCronRunMarker(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for marker %s", path)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
 
 func TestCronRunRealExecution(t *testing.T) {
 	// 1. Executes a real subprocess, verifies outcome "ran", ledger records, and receipt

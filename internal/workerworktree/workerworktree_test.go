@@ -627,7 +627,7 @@ func TestExpandLandPathsRecursiveGlobAdmission(t *testing.T) {
 
 	t.Run("untracked descendant", func(t *testing.T) {
 		g := newFakeGit().
-			reply("ls-files", 0, "cmd/fak/new.go\n").
+			reply("ls-files", 0, "cmd/fak/new.go\x00"). // ls-files -z is NUL-terminated
 			reply("add", 0, "").
 			reply("diff", 0, "cmd/fak/new.go\n")
 		got, err := expandLandPaths("/wt", "base", []string{"cmd/fak/**"}, g.run)
@@ -1532,12 +1532,23 @@ func TestLandIsolatedForcedOffLeavesBaselineUnchanged(t *testing.T) {
 	g := replyLandDiff(newFakeGit(), "x\n", "diff --git a/x b/x\n@@\n-old\n+new\n", "x\n").
 		reply("apply", 0, "").
 		reply("commit", 0, "[main abc] msg")
+	// Record the isolated path's env-runner calls so entering it is observable.
+	saved := isolatedGitEnv
+	isolatedGitEnv = g.runEnv
+	defer func() { isolatedGitEnv = saved }()
 	res := Land("/trunk", "/wt/fak-worker-wt-tools-abc", "feedface", "/tmp/msg.txt", []string{"x"}, nil, g.run)
 	if !res.OK || !res.Committed {
 		t.Fatalf("baseline land must still work with the gate off: %+v", res)
 	}
-	if len(g.callsWithPrefix("symbolic-ref")) != 0 || len(g.callsWithPrefix("commit-tree")) != 0 {
-		t.Fatalf("gate OFF must never enter the isolated path: %v", g.calls)
+	// symbolic-ref is NOT an isolated-only marker: the shared stale-base ancestor
+	// check resolves the trunk ref through it on both paths (#1649), so exactly one
+	// is expected; the isolated path's first step resolves its CAS branch with a
+	// second. Its later steps are isolated-only: a temp-index read-tree/commit-tree
+	// and the CAS update-ref.
+	if len(g.callsWithPrefix("symbolic-ref")) != 1 ||
+		len(g.envCallsWithPrefix("read-tree")) != 0 || len(g.envCallsWithPrefix("commit-tree")) != 0 ||
+		len(g.callsWithPrefix("update-ref")) != 0 {
+		t.Fatalf("gate OFF must never enter the isolated path: calls=%v envCalls=%v", g.calls, g.envCalls)
 	}
 	if len(g.callsWithPrefix("commit")) != 1 {
 		t.Fatalf("baseline path-scoped commit expected: %v", g.calls)
@@ -2385,13 +2396,14 @@ func TestWorkerLandTypedTerminalResults(t *testing.T) {
 		t.Setenv(LandReadbackEnv, "0")
 		// The shared-root HEAD does NOT contain the base, but the trunk ref main
 		// does. The stale-base gate must test main, not HEAD, so this land must
-		// proceed (never refuse as stale-base).
+		// proceed (never refuse as stale-base). Since #1649 the default ref is the
+		// root's symbolic-ref HEAD; a main-based land names main explicitly.
 		g := replyLandDiff(newFakeGit(), "x\n", "diff --git a/x b/x\n@@\n-old\n+new\n", "x\n").
 			reply("rev-parse", 0, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n").
 			reply("merge-base", 0, "").
 			reply("apply", 0, "").
 			reply("commit", 0, "[main abc] msg")
-		res := Land("/trunk", "/wt/fak-worker-wt-test-1", "base123", "/tmp/msg.txt", []string{"x"}, nil, g.run)
+		res := Land("/trunk", "/wt/fak-worker-wt-test-1", "base123", "/tmp/msg.txt", []string{"x"}, nil, g.run, WithLandBranch("main"))
 		if res.Code == LandResultStaleBase {
 			t.Fatalf("main-based land was refused as stale-base while HEAD was off-trunk: %+v", res)
 		}
@@ -2412,7 +2424,7 @@ func TestWorkerLandTypedTerminalResults(t *testing.T) {
 			reply("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
 			reply("rev-parse", 0, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n").
 			reply("merge-base", 1, "")
-		res := Land("/trunk", "/wt/fak-worker-wt-test-1", "stalebase123", "/tmp/msg.txt", nil, nil, g.run)
+		res := Land("/trunk", "/wt/fak-worker-wt-test-1", "stalebase123", "/tmp/msg.txt", nil, nil, g.run, WithLandBranch("main"))
 		if res.OK || res.Code != LandResultStaleBase {
 			t.Fatalf("want code %q and OK=false, got %+v", LandResultStaleBase, res)
 		}

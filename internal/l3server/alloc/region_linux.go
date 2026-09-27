@@ -17,6 +17,11 @@ const (
 	mapHuge1GB = 30 << 26
 )
 
+// regionBackingCap reports the largest backing a single Region may occupy on
+// this platform. Linux mmaps the full requested size (no dev ceiling), so 0
+// means uncapped.
+func regionBackingCap() uint64 { return 0 }
+
 func (r *Region) allocate() error {
 	flags := syscall.MAP_PRIVATE | syscall.MAP_ANONYMOUS | 0x8000
 	if r.useHuge {

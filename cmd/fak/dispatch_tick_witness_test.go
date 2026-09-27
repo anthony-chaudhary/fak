@@ -747,8 +747,21 @@ func TestDispatchLandVerify(t *testing.T) {
 		t.Fatalf("refusal must name why the land was refused (operator log), got %q", red.Reason)
 	}
 
-	// Pass-on-green: a worktree that builds lands normally (applied + committed).
+	// A green verify is necessary, not sufficient: since #11235 (ac1969c051) the
+	// default-on isolated land fails closed on a whole-tree (nil paths) land and
+	// preserves the worktree for reconciliation instead of touching the shared index.
 	dispatchLandVerify = func(string) (bool, string) { return true, "" }
+	t.Setenv(workerworktree.IsolatedLandEnv, "") // unset == default-on, whatever the shell exports
+	isolated := landWorkerWorktreeVerified(t.TempDir(), "wt", "base", nil, fakeGit)
+	if isolated.OK || isolated.Applied || isolated.Committed || !isolated.Preserved || isolated.Code != workerworktree.LandResultReconciliationRequired {
+		t.Fatalf("green verify on a path-less isolated land must refuse and preserve (reconciliation-required), got %+v", isolated)
+	}
+
+	// Pass-on-green: a worktree that builds lands normally (applied + committed). The
+	// fake git models the shared-index apply+commit land, so take the explicit
+	// operator escape hatch off the isolated path; the verify gate under test runs
+	// before either landing strategy is chosen.
+	t.Setenv(workerworktree.IsolatedLandEnv, "0")
 	green := landWorkerWorktreeVerified(t.TempDir(), "wt", "base", nil, fakeGit)
 	if !green.OK || !green.Applied || !green.Committed {
 		t.Fatalf("green verify must land the diff (applied+committed), got %+v", green)

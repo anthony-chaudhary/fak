@@ -169,20 +169,39 @@ func TestProjectSettingsUsesCrossPlatformRepoGuardDelegate(t *testing.T) {
 	if err := json.Unmarshal(raw, &settings); err != nil {
 		t.Fatalf("parse %s: %v", settingsPath, err)
 	}
+	// The project settings also register `dos hook pretool` as a second PreToolUse entry
+	// (539d5a1e3a; sh wrapper removed by #10851), so the #7053 pin is "exactly one repo-guard
+	// hook, routed through the FAK delegate" plus "no project hook needs a POSIX shell" — not
+	// "PreToolUse has exactly one entry".
+	for event, entries := range settings.Hooks {
+		for _, entry := range entries {
+			for _, hook := range entry.Hooks {
+				if strings.Contains(strings.ToLower(hook.Command), "sh") {
+					t.Fatalf("%s hook transport must not require a POSIX shell on Windows: command=%q args=%q", event, hook.Command, hook.Args)
+				}
+			}
+		}
+	}
 	pretool := settings.Hooks["PreToolUse"]
-	if len(pretool) != 1 || len(pretool[0].Hooks) != 1 {
-		t.Fatalf("PreToolUse must have exactly one project repo-guard hook: %+v", pretool)
-	}
-	if pretool[0].Matcher != "Bash|Read|Write|Edit|MultiEdit|NotebookEdit" {
-		t.Fatalf("repo-guard matcher changed: %q", pretool[0].Matcher)
-	}
-	hook := pretool[0].Hooks[0]
 	wantArgs := []string{"hooks", "agent", "pretool", "-delegate", "repoguard"}
-	if hook.Command != "fak" || !slices.Equal(hook.Args, wantArgs) {
-		t.Fatalf("repo-guard must use the cross-platform agent-hook registry, got command=%q args=%q", hook.Command, hook.Args)
+	var guardMatchers []string
+	for _, entry := range pretool {
+		for _, hook := range entry.Hooks {
+			invocation := strings.ToLower(hook.Command + " " + strings.Join(hook.Args, " "))
+			if !strings.Contains(invocation, "repoguard") && !strings.Contains(invocation, "repo_guard") {
+				continue
+			}
+			if hook.Command != "fak" || !slices.Equal(hook.Args, wantArgs) {
+				t.Fatalf("repo-guard must use the cross-platform agent-hook registry, got command=%q args=%q", hook.Command, hook.Args)
+			}
+			guardMatchers = append(guardMatchers, entry.Matcher)
+		}
 	}
-	if strings.Contains(strings.ToLower(hook.Command), "sh") {
-		t.Fatalf("repo-guard transport must not require a POSIX shell on Windows: %q", hook.Command)
+	if len(guardMatchers) != 1 {
+		t.Fatalf("PreToolUse must have exactly one project repo-guard hook, got %d: %+v", len(guardMatchers), pretool)
+	}
+	if guardMatchers[0] != "Bash|Read|Write|Edit|MultiEdit|NotebookEdit" {
+		t.Fatalf("repo-guard matcher changed: %q", guardMatchers[0])
 	}
 }
 

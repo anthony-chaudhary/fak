@@ -473,8 +473,13 @@ func TestApplySchedExitMask(t *testing.T) {
 // task reporting the untrustworthy exit 0, a conhost-shimmed task whose launch
 // Task Scheduler itself refused (real failure, must survive), a direct-action
 // task whose exit 0 is trustworthy, and a running conhost task.
+//
+// FleetSupervisorWatchdog is a RECURRING watchdog, so it carries a NextRunTime:
+// since bc2e1c8125 (#6499-#6501) a row with a LastRunTime, no NextRunTime and a
+// 0/0x41304 result classifies as a "completed" one-shot, which is not the
+// recurring-watchdog posture #5095 pins.
 const schedScanMaskFixture = `[
-  {"TaskName":"FleetSupervisorWatchdog","State":"Ready","LogonType":"Interactive","LastRunTime":"2026-07-16T04:00:00.0000000-07:00","LastTaskResult":0,"ActionExecute":"conhost.exe","ActionArguments":"--headless powershell.exe -NoProfile -File watchdog.ps1"},
+  {"TaskName":"FleetSupervisorWatchdog","State":"Ready","LogonType":"Interactive","LastRunTime":"2026-07-16T04:00:00.0000000-07:00","NextRunTime":"2026-07-16T05:00:00.0000000-07:00","LastTaskResult":0,"ActionExecute":"conhost.exe","ActionArguments":"--headless powershell.exe -NoProfile -File watchdog.ps1"},
   {"TaskName":"FleetResumeWatchdog","State":"Ready","LogonType":"Interactive","LastTaskResult":-2147020576,"ActionExecute":"C:\\WINDOWS\\System32\\conhost.exe","ActionArguments":"--headless powershell.exe -File resume.ps1"},
   {"TaskName":"FakFleetJanitor","State":"Ready","LogonType":"S4U","LastTaskResult":0,"ActionExecute":"powershell.exe","ActionArguments":"-NoProfile -File janitor.ps1"},
   {"TaskName":"FleetControlPaneTick","State":"Running","LastTaskResult":267009,"ActionExecute":"conhost.exe","ActionArguments":"--headless cmd.exe /c tick.cmd"}

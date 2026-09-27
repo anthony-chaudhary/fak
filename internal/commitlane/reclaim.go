@@ -29,6 +29,24 @@
 // pid. The decision reads raw facts, not Report.Verdict, because a dead-pid
 // fak-commit.lock (VerdictStale) can mask an independently reapable orphaned index.lock
 // in the verdict precedence.
+//
+// NAMED-OWNER PROOFS. A bare index.lock names nobody, but the orphans fak manufactures
+// most often DO have a named creator beside them, and a dead named creator is stronger
+// evidence than fifteen frozen minutes, so either proof reaps once the lock is frozen past
+// the SHORT owner-dead window (IndexLock.FrozenHint) and is not advancing:
+//
+//   - a sibling .git/fak-commit.lock whose stamped pid is dead (fak writes it before it
+//     lets git touch the index), and
+//   - a paired .git/next-index-<pid>.lock whose pid is dead (IndexLock.OwnerPID /
+//     OwnerDead): `git commit -- <paths>` writes index.lock, then creates its temporary
+//     index, and holds both through its hooks, so a next-index file not older than the lock
+//     names the lock's creator (safecommit.PartialCommitOwner). A commit killed mid-hook —
+//     the 2026-09-26 incident — leaves exactly this pair.
+//
+// Neither proof is vetoed by an unrelated by-name live writer or a failed process probe:
+// the owner is named and proven dead by pid, not inferred from an inventory. When the
+// pairing proof holds, the dead writer's next-index partner is reaped with its lock, since
+// it is the same writer's rollback residue.
 package commitlane
 
 // IndexLockReclaimReason is the closed vocabulary explaining a reclaim decision, so a
@@ -60,15 +78,21 @@ const (
 	// grace window — a writer could be mid-write between process samples. Keep until it
 	// ages past the window.
 	ReclaimKeepFresh IndexLockReclaimReason = "keep_fresh"
-	// ReclaimReapOwnerDead: the lock is frozen past the SHORT owner-dead window AND its
-	// creator is NAMED and provably dead — a sibling .git/fak-commit.lock holding a pid that
-	// is no longer running. That is the same direct dead-owner refutation the next-index path
-	// already trusts (there the pid is in the filename; here it is in the sibling lock fak
-	// writes before it touches the index), so it does not need the fifteen-minute stand-in
-	// for "the holder is gone". This is the branch that unwedges #5335's dominant case: a
-	// `fak commit` killed at its tool timeout orphans its OWN index.lock, and the lane must
-	// not stay blocked for the rest of the grace window while a peer swarm keeps producing
-	// more of them.
+	// ReclaimReapOwnerDead: the lock is frozen past the SHORT owner-dead window, is not
+	// advancing, AND its creator is NAMED and provably dead by pid. Two named-owner proofs
+	// qualify:
+	//   - a sibling .git/fak-commit.lock holding a pid that is no longer running (fak writes
+	//     it before it touches the index) — #5335's dominant case, a `fak commit` killed at
+	//     its tool timeout orphaning its OWN index.lock;
+	//   - a paired .git/next-index-<pid>.lock (not older than the lock) whose pid is no longer
+	//     running: a partial `git commit -- <paths>` killed mid-hook leaves its index.lock and
+	//     its temporary index together, and the temp file's name is the lock's owner
+	//     (IndexLock.OwnerPID/OwnerDead) — the 2026-09-26 incident.
+	// Either is the same direct dead-owner refutation the next-index path already trusts, so
+	// it does not need the fifteen-minute stand-in for "the holder is gone", and neither an
+	// unrelated by-name live writer nor a failed process probe vetoes it. For the pairing
+	// proof the dead partner next-index file is reaped with the same reason (see
+	// DecideNextIndexReclaim).
 	ReclaimReapOwnerDead IndexLockReclaimReason = "reap_owner_dead"
 	// ReclaimKeepAdvancing: a second sample a settle window later saw the lock's mtime move
 	// or its size change. Some process is writing THIS lock right now, so it is not an
@@ -76,10 +100,11 @@ const (
 	// the guard that makes the age-only reaps above safe: age can misread a live-but-slow
 	// writer as abandoned, an advancing mtime cannot.
 	ReclaimKeepAdvancing IndexLockReclaimReason = "keep_advancing"
-	// ReclaimKeepLiveOwner: a next-index-<pid>.lock whose named pid is STILL RUNNING.
-	// Only reachable for next-index residue, whose filename carries its writer's pid —
-	// index.lock has no owner to name. Keep: that process may still rename the temp file
-	// over .git/index, and deleting it would corrupt an in-flight index write.
+	// ReclaimKeepLiveOwner: a next-index-<pid>.lock whose named pid is STILL RUNNING. Keep:
+	// that process may still rename the temp file over .git/index, and deleting it would
+	// corrupt an in-flight index write. For index.lock it is reachable only when a paired
+	// next-index file names the lock's creator (IndexLock.OwnerPID) and that pid is live —
+	// a bare index.lock has no owner to name — and only for a lock no reap branch took.
 	ReclaimKeepLiveOwner IndexLockReclaimReason = "keep_live_owner"
 )
 
@@ -102,15 +127,17 @@ type IndexLockReclaimDecision struct {
 // refine the keep REASON for a FRESH lock, where a writer could be mid-write between
 // process samples. The checks read raw facts in priority order — absence, then an
 // advancing lock, then staleness (reap), then a dead named owner (reap), then, for a fresh
-// lock, probe trust and a live writer.
+// lock, a live named owner, probe trust and a live writer.
 //
 // Two witnesses refine that (#5335 item 3). An ADVANCING lock — one whose mtime moved across
 // the observer's bounded settle window — is kept unconditionally, ahead of every age gate:
 // age can misread a live-but-slow writer as abandoned, a moving mtime cannot, so this is
 // what keeps the age-only reaps safe. And a lock frozen past the SHORT owner-dead window
-// whose creator is NAMED and dead (a sibling fak-commit.lock holding a dead pid) reaps
-// without serving out the long grace window, because that window only ever stood in for the
-// owner proof this case actually has.
+// whose creator is NAMED and dead reaps without serving out the long grace window, because
+// that window only ever stood in for the owner proof this case actually has. The creator is
+// named either by a sibling fak-commit.lock holding a dead pid, or by a paired
+// next-index-<pid>.lock whose pid is dead (a partial commit killed mid-hook; see
+// IndexLock.OwnerPID). Neither named-owner branch consults the process inventory.
 func DecideIndexLockReclaim(rep Report) IndexLockReclaimDecision {
 	d := IndexLockReclaimDecision{Path: rep.IndexLock.Path}
 	switch {
@@ -141,6 +168,17 @@ func DecideIndexLockReclaim(rep Report) IndexLockReclaimDecision {
 		// above has already ruled out anyone writing this lock.
 		d.Reap = true
 		d.Reason = ReclaimReapOwnerDead
+	case partialCommitOwnerDead(rep):
+		// Frozen past the short window AND a paired next-index-<pid>.lock names this lock's
+		// creator, whose pid is gone: a partial commit killed mid-hook (2026-09-26). Same
+		// standing as the sibling-lock proof above — named and dead by pid — so an unrelated
+		// by-name writer or a failed inventory does not veto it.
+		d.Reap = true
+		d.Reason = ReclaimReapOwnerDead
+	case rep.IndexLock.OwnerPID > 0 && !rep.IndexLock.OwnerDead:
+		// Fresh lock whose paired next-index file names a LIVE partial commit: that process
+		// holds this lock (it may be sitting in a hook). Keep, and say who holds it.
+		d.Reason = ReclaimKeepLiveOwner
 	case rep.ProcessProbe != "ok":
 		// Fresh lock + untrusted inventory: cannot rule out a live mid-write holder. Keep.
 		d.Reason = ReclaimKeepProbeFailed
@@ -165,6 +203,19 @@ func indexLockOwnerDead(rep Report) bool {
 	return rep.IndexLock.FrozenHint && rep.CommitLock.Stale && rep.CommitLock.HolderPID > 0
 }
 
+// partialCommitOwnerDead reports the second named-owner proof: a present, NON-advancing
+// index.lock frozen past the short owner-dead window whose paired next-index-<pid>.lock
+// (IndexLock.OwnerPID, attributed by safecommit.PartialCommitOwner on raw mtimes) names a
+// creator that is no longer running — and no live pairing writer exists (OwnerDead). The
+// freeze is required alongside the pid so a lock a live writer is still filling can never
+// be mistaken for the dead writer's residue; the pairing's age ordering already refuses
+// residue that predates a newer lock. It is also the gate for reaping that partner file in
+// DecideNextIndexReclaim, so the two decisions cannot disagree.
+func partialCommitOwnerDead(rep Report) bool {
+	lock := rep.IndexLock
+	return lock.Present && !lock.Advancing && lock.FrozenHint && lock.OwnerDead && lock.OwnerPID > 0
+}
+
 // NextIndexReclaim is the per-file reclaim verdict for one observed
 // .git/next-index-<pid>.lock temp file, in the same closed reason vocabulary as the
 // index.lock decision so a loop can match reasons without parsing prose.
@@ -186,15 +237,24 @@ type NextIndexReclaim struct {
 //   - the file must be stale past the grace window, so a writer that is merely slow
 //     between process samples is never raced.
 //
-// Reap is again the sole fall-through: it is unreachable unless every guard passes.
+// Reap is again the sole fall-through for every row but one: when the index.lock decision
+// holds the partial-commit named-owner proof (partialCommitOwnerDead), the row that proof
+// named — PID == IndexLock.OwnerPID, owner not alive — is that dead writer's rollback
+// partner and is reaped with reason ReclaimReapOwnerDead alongside its lock, without the
+// probe, live-writer, or staleness gates (its owner is named and dead by pid, exactly as
+// for the lock). A live named owner still vetoes it, and every other row keeps the gates.
 func DecideNextIndexReclaim(rep Report) []NextIndexReclaim {
 	if len(rep.NextIndexLocks) == 0 {
 		return nil
 	}
+	pairedDead := partialCommitOwnerDead(rep)
 	out := make([]NextIndexReclaim, 0, len(rep.NextIndexLocks))
 	for _, lock := range rep.NextIndexLocks {
 		d := NextIndexReclaim{Path: lock.Path, PID: lock.PID}
 		switch {
+		case pairedDead && lock.PID == rep.IndexLock.OwnerPID && !lock.OwnerAlive:
+			d.Reap = true
+			d.Reason = ReclaimReapOwnerDead
 		case rep.ProcessProbe != "ok":
 			d.Reason = ReclaimKeepProbeFailed
 		case len(rep.LiveWriters) > 0:

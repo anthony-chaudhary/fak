@@ -72,7 +72,9 @@ func TestUltracodeChildAccessCompilation(t *testing.T) {
 	if observer.Access.PolicyPath == "" || writer.Access.PolicyPath == "" {
 		t.Fatalf("compiled policy paths missing: observer=%q writer=%q", observer.Access.PolicyPath, writer.Access.PolicyPath)
 	}
-	assertChildAccessVerdict(t, observer.Access.Policy, "Read", `{"file_path":"README.md"}`, abi.VerdictAllow)
+	// A Read is admitted as the floor's sanctioned Read->fak_read re-route (#11150), not a bare
+	// ALLOW; assertChildAccessAdmits accepts exactly that shape and nothing looser.
+	assertChildAccessAdmits(t, observer.Access.Policy, "Read", `{"file_path":"README.md"}`)
 	assertChildAccessVerdict(t, observer.Access.Policy, "Write", `{"file_path":"cmd/fak/access/nope.go","content":"x"}`, abi.VerdictDeny)
 	assertChildAccessVerdict(t, observer.Access.Policy, "Bash", `{"command":"echo x > cmd/fak/access/nope.go"}`, abi.VerdictDeny)
 	assertChildAccessVerdict(t, writer.Access.Policy, "Write", `{"file_path":"cmd/fak/access/ok.go","content":"x"}`, abi.VerdictAllow)
@@ -209,6 +211,17 @@ func TestUltracodeChildAccessLowersTypedWorkerEffectIntoLaunch(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("effect prompt missing %q: %s", want, prompt)
 		}
+	}
+}
+
+// assertChildAccessAdmits asserts the compiled child policy ADMITS the call: a bare ALLOW, or
+// the shipped floor's sanctioned native read-family re-route (floorAdmits, guard_replay_test.go).
+func assertChildAccessAdmits(t *testing.T, runtime policy.Runtime, tool, args string) {
+	t.Helper()
+	call := &abi.ToolCall{Tool: tool, Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(args)}}
+	got := adjudicator.New(runtime.Adjudicator).Adjudicate(context.Background(), call)
+	if ok, why := floorAdmits(tool, got); !ok {
+		t.Fatalf("%s %s not admitted: %s; allow=%v", tool, args, why, runtime.Adjudicator.Allow)
 	}
 }
 

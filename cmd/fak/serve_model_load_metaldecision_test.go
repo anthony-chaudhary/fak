@@ -80,9 +80,16 @@ func TestResolveServeMetalDecisionWrapper(t *testing.T) {
 				}
 				return
 			}
-			wantReason := skipReasonNoDevice
-			if !metalgemm.Compiled() {
-				wantReason = skipReasonNotCompiled
+			// The reason is shaded only on darwin, the one GOOS whose auto-selection
+			// targets Metal (the same fde203d514 contract
+			// TestResolveServeMetalDecisionDarwinOnlyReason pins). Elsewhere a declined
+			// Metal means "never the target", so the wrapper must leave it empty.
+			var wantReason serveMetalSkipReason
+			if runtime.GOOS == "darwin" {
+				wantReason = skipReasonNoDevice
+				if !metalgemm.Compiled() {
+					wantReason = skipReasonNotCompiled
+				}
 			}
 			if decision.skippedBecause != wantReason {
 				t.Fatalf("skippedBecause = %q, want %q (compiled=%t available=%t)", decision.skippedBecause, wantReason, metalgemm.Compiled(), metalgemm.Available())

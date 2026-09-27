@@ -174,8 +174,9 @@ type Options struct {
 	AuthorityValidator AuthorityValidator
 
 	// PostValidationTimeout bounds total post-validation execution (review, lock wait,
-	// staging, commit, verification, push) with phase evidence (#11844).
-	// When 0, DefaultPostValidationTimeout applies if the context has no shorter deadline.
+	// staging, commit — including the repository's commit hooks — verification, push) with
+	// phase evidence (#11844). When 0, DefaultPostValidationTimeout applies if the context
+	// has no shorter deadline. Values above MaxPostValidationTimeout are clamped to it.
 	PostValidationTimeout time.Duration
 
 	// Timeout is an alias/shorthand for PostValidationTimeout (#11844).
@@ -364,6 +365,8 @@ func buildCommitArgs(signOff bool, msgPath string, paths []string) []string {
 // a fake Runner + fake LockFunc exercise the whole step-ordered algorithm — including the
 // race remedy — with no git and no repo. See the package doc for the discipline it encodes.
 func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (res Result, err error) {
+	opts.PostValidationTimeout = clampPostValidationTimeout(opts.PostValidationTimeout)
+	opts.Timeout = clampPostValidationTimeout(opts.Timeout)
 	tracker := newPhaseTracker(opts, DefaultPostValidationTimeout)
 	if opts.PostValidationTimeout > 0 {
 		tracker.deadline = opts.PostValidationTimeout

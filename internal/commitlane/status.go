@@ -168,8 +168,22 @@ type IndexLock struct {
 	Advancing bool `json:"advancing,omitempty"`
 	// SettleMillis records the settle window actually spent, so a reclaim refusal (or a
 	// reap) can be audited against the window that produced its Advancing verdict.
-	SettleMillis int64  `json:"settle_millis,omitempty"`
-	Detail       string `json:"detail,omitempty"`
+	SettleMillis int64 `json:"settle_millis,omitempty"`
+	// OwnerPID names this lock's creator when it was taken by a PARTIAL commit
+	// (`git commit -- <paths>`, the only commit shape safecommit issues). Such a commit
+	// writes index.lock first and then creates <gitdir>/next-index-<pid>.lock, holding both
+	// through its hooks, so a next-index file whose mtime is not older than this lock's is
+	// its partner and the pid in that filename is the lock's owner. Residue left by an
+	// earlier dead writer is always OLDER than a lock a live peer took afterwards, so it
+	// never pairs. Zero when no next-index file pairs (a bare index.lock names nobody). See
+	// safecommit.PartialCommitOwner.
+	OwnerPID int `json:"owner_pid,omitempty"`
+	// OwnerDead is true when OwnerPID is set and EVERY pairing next-index file's pid is gone.
+	// A live pairing writer always wins (OwnerDead=false). Combined with FrozenHint and a
+	// non-advancing lock it is the named-owner proof that reaps without the long grace
+	// window (ReclaimReapOwnerDead).
+	OwnerDead bool   `json:"owner_dead,omitempty"`
+	Detail    string `json:"detail,omitempty"`
 }
 
 // NextIndexLock is one observed .git/next-index-<pid>.lock temp file. Unlike index.lock
@@ -246,12 +260,14 @@ func Status(ctx context.Context, opts Options) (Report, error) {
 	rep.GitDir = cleanPath(gitDir)
 
 	rep.CommitLock = probeCommitLock(filepath.Join(rep.GitDir, "fak-commit.lock"), opts.ProbeLock)
-	rep.IndexLock = probeIndexLock(filepath.Join(rep.GitDir, "index.lock"), opts, now)
-	nextIndex, nerr := probeNextIndexLocks(rep.GitDir, opts.Glob, opts.Stat, opts.PIDAlive, now, opts.StaleIndexAge)
+	indexLock, indexMod := probeIndexLock(filepath.Join(rep.GitDir, "index.lock"), opts, now)
+	rep.IndexLock = indexLock
+	nextIndex, nextMods, nerr := probeNextIndexLocks(rep.GitDir, opts.Glob, opts.Stat, opts.PIDAlive, now, opts.StaleIndexAge)
 	rep.NextIndexLocks = nextIndex
 	if nerr != "" {
 		rep.Errors = append(rep.Errors, "next-index scan: "+nerr)
 	}
+	attributePartialCommitOwner(&rep.IndexLock, indexMod, nextIndex, nextMods)
 	// The no-op staged-deletion audit (#5339). It costs exactly ONE extra git read on a
 	// clean index (the name-only diff comes back empty and the batched hash reads never
 	// run), and it fails open and silent, so a probe that cannot run adds no warning and
@@ -396,15 +412,19 @@ func probeCommitLock(path string, probe ProbeLockFunc) CommitLock {
 // The window is spent only when a lock is present, so the clear lane costs nothing, and it is
 // spent through the injected Sleep so tests exercise this path without any wall-clock wait.
 // It never removes a file.
-func probeIndexLock(path string, opts Options, now time.Time) IndexLock {
+//
+// The second return is the raw mtime the age was computed from (zero when the lock is
+// absent). IndexLock.ModTime is a second-resolution RFC3339 string, too coarse to order the
+// lock against its next-index partner, so the partial-commit pairing reads this instead.
+func probeIndexLock(path string, opts Options, now time.Time) (IndexLock, time.Time) {
 	first := opts.Stat(path)
 	out := IndexLock{Path: path, Present: first.Exists}
 	if first.Err != "" {
 		out.Detail = first.Err
-		return out
+		return out, time.Time{}
 	}
 	if !first.Exists {
-		return out
+		return out, time.Time{}
 	}
 
 	if opts.SettleWindow > 0 {
@@ -423,7 +443,7 @@ func probeIndexLock(path string, opts Options, now time.Time) IndexLock {
 		// reclaim, and reporting a vanished file as present would invite the actuator to
 		// delete whatever a live writer creates next.
 		out.Present = false
-		return out
+		return out, time.Time{}
 	default:
 		out.Advancing = second.ModTime.After(first.ModTime) || second.Size != first.Size
 	}
@@ -450,7 +470,26 @@ func probeIndexLock(path string, opts Options, now time.Time) IndexLock {
 			}
 		}
 	}
-	return out
+	return out, second.ModTime
+}
+
+// attributePartialCommitOwner fills IndexLock.OwnerPID/OwnerDead from the next-index
+// residue observed beside a PRESENT index.lock, using safecommit's partial-commit pairing
+// on the raw (full-resolution) mtimes. It only annotates the report — nothing is removed,
+// and an absent lock, a failed next-index scan, or residue that does not pair leaves both
+// fields zero, so the age gates alone still apply. nextMods is parallel to rows.
+func attributePartialCommitOwner(lock *IndexLock, indexMod time.Time, rows []NextIndexLock, nextMods []time.Time) {
+	if !lock.Present || len(rows) == 0 || len(rows) != len(nextMods) {
+		return
+	}
+	cands := make([]safecommit.NextIndexCandidate, 0, len(rows))
+	for i, row := range rows {
+		cands = append(cands, safecommit.NextIndexCandidate{PID: row.PID, ModTime: nextMods[i], Alive: row.OwnerAlive})
+	}
+	if pid, dead, ok := safecommit.PartialCommitOwner(indexMod, cands); ok {
+		lock.OwnerPID = pid
+		lock.OwnerDead = dead
+	}
 }
 
 // NextIndexGlob is the filename pattern git leaves behind when an index writer dies
@@ -466,17 +505,20 @@ var nextIndexPIDRe = regexp.MustCompile(`(?i)^next-index-(\d+)\.lock$`)
 // actuator's. A file that vanishes between the glob and the stat is simply dropped: it
 // is already gone, so there is nothing left to reclaim. Returns a non-empty string when
 // the scan itself failed, so the caller can surface it as a report error rather than
-// silently reporting "no residue" from a broken probe.
-func probeNextIndexLocks(gitDir string, glob GlobFunc, stat FileStatFunc, alive PIDAliveFunc, now time.Time, staleAge time.Duration) ([]NextIndexLock, string) {
+// silently reporting "no residue" from a broken probe. The second return carries each
+// row's raw mtime (parallel to the rows) for the partial-commit pairing, which must not
+// order files on the second-resolution ModTime string.
+func probeNextIndexLocks(gitDir string, glob GlobFunc, stat FileStatFunc, alive PIDAliveFunc, now time.Time, staleAge time.Duration) ([]NextIndexLock, []time.Time, string) {
 	if strings.TrimSpace(gitDir) == "" {
-		return nil, ""
+		return nil, nil, ""
 	}
 	matches, err := glob(filepath.Join(gitDir, NextIndexGlob))
 	if err != nil {
-		return nil, err.Error()
+		return nil, nil, err.Error()
 	}
 	sort.Strings(matches)
 	out := make([]NextIndexLock, 0, len(matches))
+	mods := make([]time.Time, 0, len(matches))
 	for _, path := range matches {
 		f := stat(path)
 		if !f.Exists {
@@ -500,11 +542,12 @@ func probeNextIndexLocks(gitDir string, glob GlobFunc, stat FileStatFunc, alive 
 			row.StaleHint = staleAge > 0 && age >= staleAge
 		}
 		out = append(out, row)
+		mods = append(mods, f.ModTime)
 	}
 	if len(out) == 0 {
-		return nil, ""
+		return nil, nil, ""
 	}
-	return out, ""
+	return out, mods, ""
 }
 
 func finalize(rep *Report) {
@@ -514,6 +557,15 @@ func finalize(rep *Report) {
 		rep.Verdict = VerdictStale
 		rep.Reason = fmt.Sprintf("fak commit lock is held by dead PID %d", rep.CommitLock.HolderPID)
 		rep.NextAction = "run `fak tree-doctor --apply` or retry `fak commit`; both use the PID-guarded stale-lock reaper"
+	case partialCommitOwnerDead(*rep):
+		// The lock names its creator (a paired next-index-<pid>.lock) and that pid is gone,
+		// the lock is frozen, and nobody is writing it: an orphan, not a busy lane — whatever
+		// unrelated git/fak process a by-name inventory happens to list right now.
+		rep.OK = false
+		rep.Verdict = VerdictStale
+		rep.Reason = fmt.Sprintf("git index.lock is orphaned: its partial-commit owner PID %d (%s) is dead",
+			rep.IndexLock.OwnerPID, safecommit.NextIndexLockName(rep.IndexLock.OwnerPID))
+		rep.NextAction = "run `fak commit --reclaim-stale-index-lock --apply`"
 	case rep.IndexLock.StaleHint && !rep.IndexLock.Advancing && len(rep.LiveWriters) == 0:
 		rep.OK = false
 		rep.Verdict = VerdictBlocked
@@ -551,11 +603,40 @@ func busyReason(rep Report) string {
 	case rep.CommitLock.HolderPID > 0 && rep.CommitLock.HolderAlive:
 		return fmt.Sprintf("fak commit lock is held by live PID %d", rep.CommitLock.HolderPID)
 	case rep.IndexLock.Present:
-		return "git index.lock is present and a matching live writer was found"
+		return indexLockBusyReason(rep)
 	case len(rep.LiveWriters) > 0:
 		return "matching live git/fak writer process found"
 	default:
 		return "commit lane is busy"
+	}
+}
+
+// indexLockBusyReason explains a busy lane whose blocker is a present index.lock, from the
+// evidence actually observed. It claims "a matching live writer was found" ONLY when the
+// process inventory listed one: the 2026-09-26 incident read that sentence for a lock whose
+// named owner was dead, and nobody questioned it. A named owner outranks a by-name listing,
+// and an empty listing says so instead of implying a writer.
+func indexLockBusyReason(rep Report) string {
+	lock := rep.IndexLock
+	age := fmt.Sprintf("age %ds", lock.AgeSeconds)
+	switch {
+	case lock.OwnerPID > 0 && !lock.OwnerDead:
+		return fmt.Sprintf("git index.lock is held by live partial commit PID %d (%s)",
+			lock.OwnerPID, safecommit.NextIndexLockName(lock.OwnerPID))
+	case lock.Advancing:
+		return fmt.Sprintf("git index.lock is present (%s) and its mtime is advancing: a live writer is holding it", age)
+	case lock.OwnerPID > 0 && lock.OwnerDead:
+		// Reached only when the owner-dead stale verdict did not fire, i.e. the lock has not
+		// been frozen for the short owner-dead window yet.
+		return fmt.Sprintf("git index.lock is present (%s); its partial-commit owner PID %d is dead but the lock is not yet frozen for the owner-dead window",
+			age, lock.OwnerPID)
+	case len(rep.LiveWriters) > 0:
+		return "git index.lock is present and a matching live writer was found"
+	case rep.ProcessProbe != "ok":
+		return fmt.Sprintf("git index.lock is present (%s); the process inventory did not run (%s), so live writers are unknown",
+			age, rep.ProcessProbe)
+	default:
+		return fmt.Sprintf("git index.lock is present (%s) with no matching live writer found; it is younger than the stale window", age)
 	}
 }
 

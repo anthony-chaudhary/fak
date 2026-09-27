@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -66,15 +67,20 @@ func TestManageNativeAdmissionTokenBudgetPlumbsToAdmissionPolicy(t *testing.T) {
 	lease.Release()
 
 	// The other half of the story: at the un-raised default the same floor prompt is
-	// exactly the #10597 shed, so the knob is what changed the outcome — not a lax gate.
-	defController, _, err := newGuardNativeAdmissionController("manage", gateway.DefaultAdmissionPolicy().TokenBudget)
+	// exactly the #10597 failure, so the knob is what changed the outcome — not a lax gate.
+	// Since #12655 (3891cd508c) a request that can never fit the scheduler budget is a
+	// typed VerdictRefused (400 invalid_request_error) rather than a retryable shed (429),
+	// with the same "exceed scheduler token budget" reason the issue quoted.
+	defaultBudget := gateway.DefaultAdmissionPolicy().TokenBudget
+	defController, _, err := newGuardNativeAdmissionController("manage", defaultBudget)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = defController.Acquire(context.Background(), gateway.SeqRequest{TraceID: "issue-10597-manage-shed", Tokens: opencodeFloorPromptTokens})
 	var admissionErr *gateway.AdmissionError
-	if !errors.As(err, &admissionErr) || admissionErr.Verdict != gateway.VerdictShed {
-		t.Fatalf("the un-raised managed gateway must shed the %d-token floor prompt (the #10597 failure the knob escapes), got %v", opencodeFloorPromptTokens, err)
+	wantReason := fmt.Sprintf("request tokens %d exceed scheduler token budget %d", opencodeFloorPromptTokens, defaultBudget)
+	if !errors.As(err, &admissionErr) || admissionErr.Verdict != gateway.VerdictRefused || admissionErr.Reason != wantReason {
+		t.Fatalf("the un-raised managed gateway must refuse the %d-token floor prompt as impossible (%q; the #10597 failure the knob escapes), got %v", opencodeFloorPromptTokens, wantReason, err)
 	}
 
 	if _, _, err := newGuardNativeAdmissionController("manage", 0); err == nil || !strings.Contains(err.Error(), "--native-admission-token-budget must be positive") {

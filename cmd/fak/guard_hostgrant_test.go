@@ -7,10 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/hostgrant"
+	"github.com/anthony-chaudhary/fak/internal/processalive"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -35,6 +38,7 @@ func TestGuardHostGrantChildProcess(t *testing.T) {
 func TestGuardHostGrantSerializesRealChildren(t *testing.T) {
 	t.Setenv("FAK_GUARD_HOSTGRANT_PATH", filepath.Join(t.TempDir(), "host-grants.json"))
 	t.Setenv("FAK_GUARD_HOSTGRANT_CAPACITY", "1")
+	requireGuardHostGrantOwnerIdentity(t)
 
 	first := newGuardHostGrantChild(t, filepath.Join(t.TempDir(), "first.started"))
 	firstJob, firstRelease, err := startGuardChildWithHostGrant(context.Background(), first.cmd, windowgate.ManagedJobConfig{})
@@ -70,6 +74,7 @@ func TestGuardHostGrantSerializesRealChildren(t *testing.T) {
 func TestGuardHostGrantStartFailureReleases(t *testing.T) {
 	t.Setenv("FAK_GUARD_HOSTGRANT_PATH", filepath.Join(t.TempDir(), "host-grants.json"))
 	t.Setenv("FAK_GUARD_HOSTGRANT_CAPACITY", "1")
+	requireGuardHostGrantOwnerIdentity(t)
 
 	missing := filepath.Join(t.TempDir(), "missing-guard-child")
 	if _, _, err := startGuardChildWithHostGrant(context.Background(), exec.Command(missing), windowgate.ManagedJobConfig{}); err == nil {
@@ -89,6 +94,7 @@ func TestGuardHostGrantDuplicateRequestIsFenced(t *testing.T) {
 	t.Setenv("FAK_GUARD_HOSTGRANT_PATH", filepath.Join(t.TempDir(), "host-grants.json"))
 	t.Setenv("FAK_GUARD_HOSTGRANT_CAPACITY", "2")
 	t.Setenv("FAK_GUARD_HOSTGRANT_REQUEST_ID", "fixed-guard-attempt")
+	requireGuardHostGrantOwnerIdentity(t)
 
 	first := newGuardHostGrantChild(t, filepath.Join(t.TempDir(), "first.started"))
 	firstJob, firstRelease, err := startGuardChildWithHostGrant(context.Background(), first.cmd, windowgate.ManagedJobConfig{})
@@ -153,6 +159,7 @@ func TestGuardHostGrantReserveMismatchDoesNotStartChild(t *testing.T) {
 	t.Setenv("FAK_GUARD_HOSTGRANT_PATH", path)
 	t.Setenv("FAK_GUARD_HOSTGRANT_CAPACITY", "2")
 	t.Setenv("FAK_GUARD_HOSTGRANT_REQUEST_ID", "ordinary-second")
+	requireGuardHostGrantOwnerIdentity(t)
 	child := newGuardHostGrantChild(t, filepath.Join(t.TempDir(), "must-not-start.started"))
 	job, release, err := startGuardChildWithHostGrant(context.Background(), child.cmd, windowgate.ManagedJobConfig{})
 	if !errors.Is(err, hostgrant.ErrCapacityMismatch) {
@@ -179,6 +186,38 @@ func TestGuardHostGrantUnconfiguredIsNoop(t *testing.T) {
 	}
 	waitGuardHostGrantMarker(t, child.marker)
 	finishGuardHostGrantChild(t, child, job, release)
+}
+
+// requireGuardHostGrantOwnerIdentity gates the tests that need a real kernel
+// process identity. startGuardChildWithHostGrant fences every grant on (PID,
+// process start time) so a stale row can never be borrowed by a later process
+// that reused the PID, and processalive.StartTime supplies that start time only
+// on Windows today (internal/processalive/start_other.go returns ok=false on
+// every other platform). Where it is unavailable, the configured admission path
+// must fail closed BEFORE any child starts; that contract is witnessed here, and
+// only then are the Windows-only grant-serialization assertions skipped.
+// Call it after the test's FAK_GUARD_HOSTGRANT_* environment is set.
+func requireGuardHostGrantOwnerIdentity(t *testing.T) {
+	t.Helper()
+	if startedAt, ok := processalive.StartTime(os.Getpid()); ok && !startedAt.IsZero() {
+		return
+	}
+	child := newGuardHostGrantChild(t, filepath.Join(t.TempDir(), "no-owner-identity.started"))
+	job, release, err := startGuardChildWithHostGrant(context.Background(), child.cmd, windowgate.ManagedJobConfig{})
+	_ = child.stdin.Close()
+	if child.cmd.Process != nil {
+		_ = child.cmd.Wait()
+	}
+	if err == nil || !strings.Contains(err.Error(), "process start time unavailable") {
+		t.Fatalf("host-grant admission without a kernel process start time = %v, want the fail-closed start-time refusal", err)
+	}
+	if job != nil || release != nil || child.cmd.Process != nil {
+		t.Fatalf("admission without owner identity launched or returned lifecycle: job=%v release=%v process=%v", job, release != nil, child.cmd.Process)
+	}
+	if _, statErr := os.Stat(child.marker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("admission without owner identity started the child: marker stat error = %v, want not-exist", statErr)
+	}
+	t.Skipf("processalive.StartTime is unavailable on %s, so configured host-grant admission fails closed before start (witnessed above); grant serialization needs a platform with a kernel start-time reader", runtime.GOOS)
 }
 
 type guardHostGrantTestChild struct {

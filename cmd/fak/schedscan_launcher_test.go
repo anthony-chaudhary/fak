@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -238,6 +239,14 @@ func TestSchedLauncherAuditCatchesTheAuditedRegressions(t *testing.T) {
 // self-update shape — a task pinned to a removed tools/.bin/fak.exe kept "succeeding"
 // while converging no binary. The audit must call that BROKEN and name the missing file.
 func TestSchedLauncherAuditFlagsADeadActionProgram(t *testing.T) {
+	// Windows-only: the nested-binary check keeps only paths the HOST's filepath.IsAbs
+	// accepts (schedReferencedBinaries), and a drive-letter path is not absolute on
+	// Linux/macOS, so there the audit abstains instead of stat'ing a Windows path the
+	// host cannot see. The existence check is only meaningful on the Windows box that
+	// owns the scheduled tasks and their binaries.
+	if runtime.GOOS != "windows" {
+		t.Skip("drive-letter action paths are only absolute (and stat-able) on a Windows host")
+	}
 	origStat := schedStatFn
 	defer func() { schedStatFn = origStat }()
 	// Only the missing program path fails; everything else (the in-tree script) exists.
@@ -274,21 +283,31 @@ func TestSchedLauncherAuditFlagsADeadActionProgram(t *testing.T) {
 // a headless shim checks the WRAPPED program (not conhost), and a bare name with no
 // directory abstains (returning "") instead of manufacturing a false "missing".
 func TestSchedResolveActionProgramPath(t *testing.T) {
+	// The working-directory join uses the host's filepath.Join, so the literal
+	// Windows-path join is pinned on Windows only (on Linux it would read
+	// `C:\work\fak/sub\fak.exe`); the host-native join case keeps the "relative
+	// program joins the working directory" choice witnessed on every OS.
+	hostWorkDir := filepath.Join(t.TempDir(), "fak")
 	cases := []struct {
 		name               string
 		exe, args, workDir string
 		want               string
+		windowsOnly        bool
 	}{
-		{"absolute program path", `C:\work\fak\fak.exe`, `serve`, "", `C:\work\fak\fak.exe`},
-		{"bare name abstains (PATH-resolved, not checkable)", `fak.exe`, `serve`, "", ""},
-		{"headless shim checks the wrapped program", "conhost.exe", `--headless powershell.exe -File "C:\work\fak\x.ps1"`, "", ""},
-		{"headless shim with a wrapped program path", "conhost.exe", `--headless "C:\Program Files\Python313\python.exe" "x.py"`, "", `C:\Program Files\Python313\python.exe`},
-		{"headless shim with an UNQUOTED program path containing spaces", "conhost.exe", `--headless C:\Program Files\WindowsApps\Microsoft.PowerShell_7.6.4.0_x64__8wekyb3d8bbwe\pwsh.exe -NoProfile -File "C:\work\fak\x.ps1"`, "", `C:\Program Files\WindowsApps\Microsoft.PowerShell_7.6.4.0_x64__8wekyb3d8bbwe\pwsh.exe`},
-		{"headless shim with a bare wrapped name abstains", "conhost.exe", `--headless pwsh.exe -NoProfile -File "C:\work\fak\x.ps1"`, "", ""},
-		{"relative program joins the working directory", `sub\fak.exe`, `serve`, `C:\work\fak`, `C:\work\fak\sub\fak.exe`},
+		{"absolute program path", `C:\work\fak\fak.exe`, `serve`, "", `C:\work\fak\fak.exe`, false},
+		{"bare name abstains (PATH-resolved, not checkable)", `fak.exe`, `serve`, "", "", false},
+		{"headless shim checks the wrapped program", "conhost.exe", `--headless powershell.exe -File "C:\work\fak\x.ps1"`, "", "", false},
+		{"headless shim with a wrapped program path", "conhost.exe", `--headless "C:\Program Files\Python313\python.exe" "x.py"`, "", `C:\Program Files\Python313\python.exe`, false},
+		{"headless shim with an UNQUOTED program path containing spaces", "conhost.exe", `--headless C:\Program Files\WindowsApps\Microsoft.PowerShell_7.6.4.0_x64__8wekyb3d8bbwe\pwsh.exe -NoProfile -File "C:\work\fak\x.ps1"`, "", `C:\Program Files\WindowsApps\Microsoft.PowerShell_7.6.4.0_x64__8wekyb3d8bbwe\pwsh.exe`, false},
+		{"headless shim with a bare wrapped name abstains", "conhost.exe", `--headless pwsh.exe -NoProfile -File "C:\work\fak\x.ps1"`, "", "", false},
+		{"relative program joins the working directory", `sub\fak.exe`, `serve`, `C:\work\fak`, `C:\work\fak\sub\fak.exe`, true},
+		{"relative program joins the working directory (host-native paths)", filepath.Join("sub", "fak.exe"), `serve`, hostWorkDir, filepath.Join(hostWorkDir, "sub", "fak.exe"), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.windowsOnly && runtime.GOOS != "windows" {
+				t.Skip("Windows-path join semantics: filepath.Join uses the host separator")
+			}
 			got := schedResolveActionProgramPath(tc.exe, tc.args, tc.workDir)
 			if got != tc.want {
 				t.Fatalf("resolve = %q, want %q", got, tc.want)
