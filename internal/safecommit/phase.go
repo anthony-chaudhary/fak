@@ -48,7 +48,34 @@ const PhaseEvidenceSchema = "fak-safecommit-phase-evidence/1"
 
 // DefaultPostValidationTimeout bounds total post-validation execution when no explicit
 // timeout is configured on Options and the context has no shorter deadline.
-const DefaultPostValidationTimeout = 30 * time.Second
+//
+// The window includes `git commit`, and therefore the repository's own pre-commit and
+// commit-msg hooks, so it must exceed the slowest hook set a supported checkout runs. The
+// public repo's .githooks/pre-commit (secret scrub, companion boundary check, fak-dev
+// boundary) was measured at 2-3 minutes on the Windows fleet host (boundary check alone
+// 62s/92s/96s, fak-dev boundary 57s, 2026-09-26). The earlier 30s default made every
+// normal commit there structurally impossible: the deadline killed git mid-hook and
+// reported COMMIT_STALLED. Ten minutes keeps roughly 3x headroom over that measurement
+// while still bounding a genuine stall; callers with slower hooks raise it per call
+// (`fak commit --commit-timeout`, FAK_COMMIT_TIMEOUT, or Options.PostValidationTimeout).
+const DefaultPostValidationTimeout = 10 * time.Minute
+
+// MaxPostValidationTimeout caps any configured post-validation deadline. A partial commit
+// leaves index.lock untouched for as long as its hooks run, and every age-only reaper in
+// the fleet (this package's in-commit recovery, `fak commit status --reclaim-stale-index-lock`)
+// treats an index.lock frozen for DefaultStaleIndexLockAge as abandoned. A commit allowed
+// to run that long would have its LIVE lock reaped out from under it by a peer, so the
+// budget stops a minute short of that age.
+const MaxPostValidationTimeout = DefaultStaleIndexLockAge - time.Minute
+
+// clampPostValidationTimeout bounds a configured post-validation deadline by
+// MaxPostValidationTimeout; zero and negative (unset) pass through unchanged.
+func clampPostValidationTimeout(d time.Duration) time.Duration {
+	if d > MaxPostValidationTimeout {
+		return MaxPostValidationTimeout
+	}
+	return d
+}
 
 // PhaseReceipt records timing and outcome for a single commit execution phase (#11844).
 type PhaseReceipt struct {
