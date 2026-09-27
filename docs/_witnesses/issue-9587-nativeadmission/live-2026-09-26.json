@@ -1,0 +1,333 @@
+{
+  "schema": "fak.issue-9587-nativeadmission-live/1",
+  "issue": 9587,
+  "captured": "2026-09-26",
+  "host": {
+    "soc": "Apple M3 Pro",
+    "gpu_cores": 18,
+    "total_bytes": 38654705664,
+    "os": "darwin/arm64"
+  },
+  "engine": "fak-native",
+  "binary": "fak built from the #9587 worktree before the review fixes that landed with 0fbaa0516 (base d5840f2e9 + the admission-lifecycle diff). Differences from 0fbaa0516: a teardown that hits WeightSessionsActiveError now keeps the reservation until process exit (cleanup deferred_to_exit) instead of releasing it; the steady receipt now subtracts (peak - steady) from reserved_bytes; the in-process peak RSS probe now reads getrusage (it was empty on darwin here, so these receipts measure swap only and the time_l_* fields carry RSS).",
+  "note": "Receipts are the verbatim JSON lines the serve emitted on stderr. time_l_* values come from /usr/bin/time -l around each serve process. swap_bytes is host-wide (shared host with other workloads), not attributable to one process.",
+  "arms": [
+    {
+      "arm": "small-coresidency-aggregate",
+      "env": {
+        "FAK_NATIVE_ADMISSION": "aggregate"
+      },
+      "ledger_before": {
+        "schema": "fak-local-memory-reservations/2",
+        "reservations": [
+          {
+            "id": "4a7ef3e6f9e0ab09069e2179cb9d3177",
+            "owner_pid": 42493,
+            "startup_peak_bytes": 21026703360,
+            "steady_bytes": 19952961536,
+            "held_bytes": 21026703360,
+            "phase": "startup"
+          }
+        ]
+      },
+      "ledger_both_resident": {
+        "schema": "fak-local-memory-reservations/2",
+        "reservations": [
+          {
+            "id": "701c02d2b840c378e1307b360f06febc",
+            "owner_pid": 75591,
+            "startup_peak_bytes": 926368128,
+            "steady_bytes": 264676608,
+            "held_bytes": 264676608,
+            "phase": "steady"
+          },
+          {
+            "id": "73a5eaf8cd28ce475d8417ccd000c5d6",
+            "owner_pid": 86303,
+            "startup_peak_bytes": 4432707584,
+            "steady_bytes": 3358965760,
+            "held_bytes": 3358965760,
+            "phase": "steady"
+          }
+        ]
+      },
+      "ledger_after_sigterm": {
+        "schema": "fak-local-memory-reservations/2",
+        "reservations": []
+      },
+      "serves": [
+        {
+          "model": "SmolLM2-135M-Instruct-Q8_0.gguf",
+          "receipts": [
+            {
+              "schema": "fak.metal-unified-memory-reservation/2",
+              "engine": "fak-native",
+              "verdict": "ADMIT",
+              "reason": "reserved",
+              "model": "SmolLM2-135M-Instruct-Q8_0.gguf",
+              "topology": "apple-unified-memory",
+              "host_unified": true,
+              "host_addressable": false,
+              "planned_bytes": {
+                "startup_peak_bytes": 926368128,
+                "steady_bytes": 264676608
+              },
+              "allocatable_bytes": 14027975680,
+              "available_bytes": 13101607552,
+              "reserved_bytes": 926368128,
+              "total_bytes": 38654705664,
+              "pressure": "normal",
+              "owner_pid": 75591,
+              "reservation_id": "701c02d2b840c378e1307b360f06febc",
+              "phase": "startup",
+              "swap_bytes": 3401905603,
+              "cleanup": "active",
+              "timestamp": "2026-09-27T05:55:05.351995Z",
+              "stage": "admit",
+              "admission_mode": "aggregate",
+              "live_allocatable_bytes": 14027975680,
+              "compressed_bytes": 5882462208,
+              "topology_probed": true,
+              "measured": [
+                "swap_bytes"
+              ]
+            },
+            {
+              "schema": "fak.metal-unified-memory-reservation/2",
+              "engine": "fak-native",
+              "verdict": "ADMIT",
+              "reason": "steady",
+              "model": "SmolLM2-135M-Instruct-Q8_0.gguf",
+              "topology": "apple-unified-memory",
+              "host_unified": true,
+              "host_addressable": false,
+              "planned_bytes": {
+                "startup_peak_bytes": 926368128,
+                "steady_bytes": 264676608
+              },
+              "allocatable_bytes": 14027975680,
+              "available_bytes": 13101607552,
+              "reserved_bytes": 926368128,
+              "total_bytes": 38654705664,
+              "pressure": "normal",
+              "owner_pid": 75591,
+              "reservation_id": "701c02d2b840c378e1307b360f06febc",
+              "phase": "steady",
+              "swap_bytes": 3393516995,
+              "cleanup": "active",
+              "timestamp": "2026-09-27T05:55:44.842771Z",
+              "stage": "steady",
+              "admission_mode": "aggregate",
+              "live_allocatable_bytes": 14027975680,
+              "compressed_bytes": 5882462208,
+              "topology_probed": true,
+              "measured": [
+                "swap_bytes"
+              ]
+            },
+            {
+              "schema": "fak.metal-unified-memory-reservation/2",
+              "engine": "fak-native",
+              "verdict": "RELEASED",
+              "reason": "teardown",
+              "model": "SmolLM2-135M-Instruct-Q8_0.gguf",
+              "topology": "apple-unified-memory",
+              "host_unified": true,
+              "host_addressable": false,
+              "planned_bytes": {
+                "startup_peak_bytes": 926368128,
+                "steady_bytes": 264676608
+              },
+              "allocatable_bytes": 8554146816,
+              "available_bytes": 8554146816,
+              "reserved_bytes": 0,
+              "total_bytes": 38654705664,
+              "pressure": "warning",
+              "owner_pid": 75591,
+              "reservation_id": "701c02d2b840c378e1307b360f06febc",
+              "phase": "released",
+              "swap_bytes": 9338030653,
+              "cleanup": "released",
+              "timestamp": "2026-09-27T05:57:47.279539Z",
+              "stage": "release",
+              "admission_mode": "aggregate",
+              "live_allocatable_bytes": 8554146816,
+              "compressed_bytes": 17111646208,
+              "topology_probed": true,
+              "teardown_error": "model: cannot close weights while 1 session(s) remain",
+              "measured": [
+                "swap_bytes"
+              ]
+            }
+          ],
+          "time_l_maximum_resident_set_bytes": 1089732608,
+          "time_l_peak_memory_footprint_bytes": 1192625928
+        },
+        {
+          "model": "Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf",
+          "receipts": [
+            {
+              "schema": "fak.metal-unified-memory-reservation/2",
+              "engine": "fak-native",
+              "verdict": "ADMIT",
+              "reason": "reserved",
+              "model": "Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf",
+              "topology": "apple-unified-memory",
+              "host_unified": true,
+              "host_addressable": false,
+              "planned_bytes": {
+                "startup_peak_bytes": 4432707584,
+                "steady_bytes": 3358965760
+              },
+              "allocatable_bytes": 12291845120,
+              "available_bytes": 7594460928,
+              "reserved_bytes": 4697384192,
+              "total_bytes": 38654705664,
+              "pressure": "normal",
+              "owner_pid": 86303,
+              "reservation_id": "73a5eaf8cd28ce475d8417ccd000c5d6",
+              "phase": "startup",
+              "swap_bytes": 3368351171,
+              "cleanup": "active",
+              "timestamp": "2026-09-27T05:56:08.697276Z",
+              "stage": "admit",
+              "admission_mode": "aggregate",
+              "live_allocatable_bytes": 12291845120,
+              "compressed_bytes": 6923698176,
+              "topology_probed": true,
+              "measured": [
+                "swap_bytes"
+              ]
+            },
+            {
+              "schema": "fak.metal-unified-memory-reservation/2",
+              "engine": "fak-native",
+              "verdict": "ADMIT",
+              "reason": "steady",
+              "model": "Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf",
+              "topology": "apple-unified-memory",
+              "host_unified": true,
+              "host_addressable": false,
+              "planned_bytes": {
+                "startup_peak_bytes": 4432707584,
+                "steady_bytes": 3358965760
+              },
+              "allocatable_bytes": 12291845120,
+              "available_bytes": 7594460928,
+              "reserved_bytes": 4697384192,
+              "total_bytes": 38654705664,
+              "pressure": "normal",
+              "owner_pid": 86303,
+              "reservation_id": "73a5eaf8cd28ce475d8417ccd000c5d6",
+              "phase": "steady",
+              "swap_bytes": 6298334659,
+              "cleanup": "active",
+              "timestamp": "2026-09-27T05:56:55.891835Z",
+              "stage": "steady",
+              "admission_mode": "aggregate",
+              "live_allocatable_bytes": 12291845120,
+              "compressed_bytes": 6923698176,
+              "topology_probed": true,
+              "measured": [
+                "swap_bytes"
+              ]
+            },
+            {
+              "schema": "fak.metal-unified-memory-reservation/2",
+              "engine": "fak-native",
+              "verdict": "RELEASED",
+              "reason": "teardown",
+              "model": "Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf",
+              "topology": "apple-unified-memory",
+              "host_unified": true,
+              "host_addressable": false,
+              "planned_bytes": {
+                "startup_peak_bytes": 4432707584,
+                "steady_bytes": 3358965760
+              },
+              "allocatable_bytes": 5367589888,
+              "available_bytes": 5102913280,
+              "reserved_bytes": 264676608,
+              "total_bytes": 38654705664,
+              "pressure": "warning",
+              "owner_pid": 86303,
+              "reservation_id": "73a5eaf8cd28ce475d8417ccd000c5d6",
+              "phase": "released",
+              "swap_bytes": 9388362301,
+              "cleanup": "released",
+              "timestamp": "2026-09-27T05:57:46.615578Z",
+              "stage": "release",
+              "admission_mode": "aggregate",
+              "live_allocatable_bytes": 5367589888,
+              "compressed_bytes": 20344438784,
+              "topology_probed": true,
+              "teardown_error": "model: cannot close weights while 1 session(s) remain",
+              "measured": [
+                "swap_bytes"
+              ]
+            }
+          ],
+          "time_l_maximum_resident_set_bytes": 3026386944,
+          "time_l_peak_memory_footprint_bytes": 6153278648
+        }
+      ]
+    },
+    {
+      "arm": "qwen38-27b-q4km-default",
+      "env": {},
+      "artifact": {
+        "file": "Qwen3.8-27B-Q4_K_M.gguf",
+        "bytes": 17106775008
+      },
+      "ledger_before": {
+        "schema": "fak-local-memory-reservations/2",
+        "reservations": []
+      },
+      "ledger_after": {
+        "schema": "fak-local-memory-reservations/2",
+        "reservations": []
+      },
+      "receipts": [
+        {
+          "schema": "fak.metal-unified-memory-reservation/2",
+          "engine": "fak-native",
+          "verdict": "REJECT",
+          "reason": "aggregate_capacity",
+          "model": "Qwen3.8-27B-Q4_K_M.gguf",
+          "topology": "apple-unified-memory",
+          "host_unified": true,
+          "host_addressable": false,
+          "planned_bytes": {
+            "startup_peak_bytes": 21026703360,
+            "steady_bytes": 19952961536
+          },
+          "allocatable_bytes": 5937441792,
+          "available_bytes": 5937441792,
+          "reserved_bytes": 0,
+          "total_bytes": 38654705664,
+          "pressure": "warning",
+          "owner_pid": 10049,
+          "swap_bytes": 5221646336,
+          "cleanup": "none",
+          "timestamp": "2026-09-27T05:59:32.503384Z",
+          "stage": "refuse",
+          "admission_mode": "default",
+          "live_allocatable_bytes": 5937441792,
+          "compressed_bytes": 19547209728,
+          "topology_probed": true,
+          "remedy_hint": "requested startup peak 19.58 GiB (steady 18.58 GiB) exceeds available allocatable capacity 5.53 GiB (host total 36.00 GiB, active reservations 0.00 GiB); select a smaller model or quantization",
+          "measured": [
+            "swap_bytes"
+          ]
+        }
+      ],
+      "time_l_maximum_resident_set_bytes": 110297088,
+      "time_l_peak_memory_footprint_bytes": 86524888,
+      "host_monitor_tail": [
+        "89s http=000 swapM=7488.94 free=37",
+        "92s http=000 swapM=7827.00 free=37",
+        "95s http=000 swapM=8121.81 free=37"
+      ]
+    }
+  ]
+}
