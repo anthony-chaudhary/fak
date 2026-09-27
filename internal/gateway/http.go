@@ -22,6 +22,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
+	"github.com/anthony-chaudhary/fak/pkg/deploykit/probe"
 	"github.com/anthony-chaudhary/fak/pkg/turncost"
 )
 
@@ -291,10 +292,14 @@ func (s *Server) Handler() http.Handler {
 	for _, rt := range s.routeTable() {
 		mux.HandleFunc(rt.pattern, rt.handler)
 	}
-	// /readyz is an orchestration probe rather than a product API route. Keep it
-	// outside routeTable so API-spec and follower-fanout coverage remain scoped
-	// to callable runtime surfaces.
-	mux.HandleFunc("/readyz", s.handleReady)
+	// /readyz and /version are orchestration probes rather than product API
+	// routes. The shared deploykit probe contract mounts them outside routeTable
+	// so API-spec and follower-fanout coverage remain scoped to callable runtime
+	// surfaces. /healthz stays in routeTable, so Mount keeps its handler, and
+	// Drain is nil, so the gateway mounts no drain route.
+	if err := probe.Mount(mux, probe.Hooks{Ready: s.handleReady, Version: probe.SelfVersion}); err != nil {
+		panic("gateway: mount probe routes: " + err.Error())
+	}
 	mux.HandleFunc("/v1/fak/arms", s.handleFakArms)
 	mux.HandleFunc("/v1/fak/arms/traffic", s.handleFakArmsTraffic)
 	mux.HandleFunc("/v1/fak/arms/lease", s.handleFakArmsLease)
