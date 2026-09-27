@@ -166,16 +166,22 @@ func TestLocalNativeLauncherLifetimeOwnershipConformance(t *testing.T) {
 		owner          string
 		marker         string
 	}
-	const sharedOwner = "loadLocalLauncherModelWithMetalLease"
+	// 0fbaa05166 (#9587) moved serve onto admitLocalMetalModel, which owns the
+	// reservation lifecycle; loadLocalLauncherModelWithMetalLease survives only as
+	// a wrapper for loaders that cannot report failure.
+	const sharedOwner = "admitLocalMetalModel"
 	launchers := []launcher{
-		{name: "serve", file: "serve.go", metalAvailable: true, owner: sharedOwner, marker: "loadLocalLauncherModelWithMetalLease("},
+		{name: "serve", file: "serve.go", metalAvailable: true, owner: sharedOwner, marker: "admitLocalMetalModel("},
 		{name: "up", file: "up.go", metalAvailable: true, owner: sharedOwner, marker: "cmdServe(argv)"},
 		{name: "guard", file: "guard_local.go", metalAvailable: false, marker: "guardDetectLocalBackend"},
 		// model-canary has a distinct lifetime owner because it replaces an
 		// incumbent process, runs a candidate, restores the incumbent, and only
 		// then releases. Its shared OS lease is acquired by the Darwin adapter.
 		{name: "model-canary", file: "model_canary_run_darwin.go", metalAvailable: true, owner: "modelCanaryLease", marker: "gpulease.Acquire(gpulease.Options{Path: cfg.Path"},
-		{name: "run", file: "run_model.go", metalAvailable: false, marker: "metal=false"},
+		// `fak run` auto-selects the Metal forward since #12467 (5665f83906 removed
+		// its CPU-only "metal=false" first cut), so it is a Metal launcher and must
+		// hold the shared lifetime owner like serve does.
+		{name: "run", file: "run_model.go", metalAvailable: true, owner: sharedOwner, marker: "admitLocalMetalModel("},
 		{name: "scout", file: "scout_native.go", metalAvailable: false, marker: "metal=false"},
 	}
 
@@ -202,7 +208,7 @@ func TestLocalNativeLauncherLifetimeOwnershipConformance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Count(string(serveSource), "loadLocalLauncherModelWithMetalLease("); got != 1 {
+	if got := strings.Count(string(serveSource), "admitLocalMetalModel("); got != 1 {
 		t.Fatalf("serve ownership acquisitions=%d, want 1", got)
 	}
 	upSource, err := os.ReadFile("up.go")
@@ -474,6 +480,10 @@ func TestFakUpTurnkeyBootstrap(t *testing.T) {
 	// commit the auto 27B budget (16 GiB / 64 layers) leaks through and the test
 	// fails; after the fix it reports the 3B geometry (2 GiB / 16 layers).
 	t.Run("ModelOverrideSelectsTierGeometry", func(t *testing.T) {
+		// Pin the KV tier: resolveUpKVPrecision reads (and re-publishes) the
+		// process-global FAK_UP_KV_PRECISION, so an ambient or leaked value must not
+		// change the per-token geometry this witness asserts.
+		t.Setenv("FAK_UP_KV_PRECISION", "")
 		var out bytes.Buffer
 		var errOut bytes.Buffer
 		runTurnkeyUp(nil, &out, &errOut, []string{"--dry-run", "--memory-gib", "36", "--model", "3B", "--json"})
@@ -492,10 +502,15 @@ func TestFakUpTurnkeyBootstrap(t *testing.T) {
 			t.Fatalf("--model 3B Layers = %d, want 16", plan.Tier.Layers)
 		}
 		// The stale 27B KV budget (Layers=64,KVHeads=4,HeadDim=128) must not survive:
-		// the 3B geometry is Layers=16,KVHeads=2,HeadDim=128 at FP16.
-		threeKV := uint64(2 * 16 * 2 * 128 * 2)
+		// the 3B geometry is Layers=16,KVHeads=2,HeadDim=128. The plan charges the
+		// realized KV tier, which defaults to exact f32 (4 bytes/element) since
+		// 4d4a839011 plumbed --kv-precision; the FP16 literal predates that default.
+		if plan.KVPrecision != fakmodel.KVPrecisionFP32 {
+			t.Fatalf("--model 3B KVPrecision = %q, want the default realized tier %q", plan.KVPrecision, fakmodel.KVPrecisionFP32)
+		}
+		threeKV := uint64(2 * 16 * 2 * 128 * 4)
 		if plan.KVBytesPerToken != threeKV {
-			t.Fatalf("--model 3B KVBytesPerToken = %d, want %d (3B geometry)", plan.KVBytesPerToken, threeKV)
+			t.Fatalf("--model 3B KVBytesPerToken = %d, want %d (3B geometry at f32)", plan.KVBytesPerToken, threeKV)
 		}
 		if plan.HeadroomRatio < 0.20 {
 			t.Fatalf("--model 3B headroom = %.3f, want >= 0.20", plan.HeadroomRatio)
@@ -903,6 +918,12 @@ func TestApplyTurnkeyModelOverrideSwapsGeometry(t *testing.T) {
 	// Drive the real dry-run CLI path (present before the fix) so this test
 	// compiles against the parent source and fails there, then passes on the
 	// fix. Issue #12986: `--model <tier>` must select the named tier's geometry.
+	//
+	// The plan charges the realized KV tier (default exact f32 since 4d4a839011,
+	// resolved from the process-global FAK_UP_KV_PRECISION), so pin it empty here
+	// and assert the geometry at 4 bytes/element.
+	t.Setenv("FAK_UP_KV_PRECISION", "")
+	const f32Bytes = 4
 	parse := func(t *testing.T, argv ...string) macfit.TurnkeyProfile {
 		t.Helper()
 		var out, errOut bytes.Buffer
@@ -918,15 +939,18 @@ func TestApplyTurnkeyModelOverrideSwapsGeometry(t *testing.T) {
 	if base.Tier.Name != "27B" {
 		t.Fatalf("auto tier on 36 GiB = %q, want 27B", base.Tier.Name)
 	}
+	if want := uint64(2 * 64 * 4 * 128 * f32Bytes); base.KVBytesPerToken != want {
+		t.Fatalf("auto 27B KVBytesPerToken = %d, want 27B geometry at f32 %d", base.KVBytesPerToken, want)
+	}
 
 	three := parse(t, "--model", "3B", "--json")
 	if three.Tier.Name != "3B" || three.Tier.WeightBytes != 2*macfit.GiB || three.Tier.Layers != 16 {
 		t.Fatalf("--model 3B geometry = name %q weight %d layers %d; want 3B / %d / 16",
 			three.Tier.Name, three.Tier.WeightBytes, three.Tier.Layers, 2*macfit.GiB)
 	}
-	if three.KVBytesPerToken != uint64(2*16*2*128*2) {
-		t.Fatalf("--model 3B KVBytesPerToken = %d, want 3B geometry %d (not 27B %d)",
-			three.KVBytesPerToken, uint64(2*16*2*128*2), base.KVBytesPerToken)
+	if want := uint64(2 * 16 * 2 * 128 * f32Bytes); three.KVBytesPerToken != want {
+		t.Fatalf("--model 3B KVBytesPerToken = %d, want 3B geometry at f32 %d (not 27B %d)",
+			three.KVBytesPerToken, want, base.KVBytesPerToken)
 	}
 	allocated := three.Tier.WeightBytes + three.ContextBudgetTokens*three.KVBytesPerToken
 	if allocated+three.HeadroomBytes != 36*macfit.GiB {
@@ -955,6 +979,9 @@ func TestApplyTurnkeyModelOverrideSwapsGeometry(t *testing.T) {
 // auto-selected 27B tier and WeightBytes stays at 16 GiB, failing the assertion;
 // after the fix it reports the 3B geometry (2 GiB / 16 layers).
 func TestModelOverride3BSelectsGeometry(t *testing.T) {
+	// Pin the realized KV tier (default exact f32 since 4d4a839011); the
+	// process-global FAK_UP_KV_PRECISION would otherwise change the geometry.
+	t.Setenv("FAK_UP_KV_PRECISION", "")
 	var out bytes.Buffer
 	var errOut bytes.Buffer
 	runTurnkeyUp(nil, &out, &errOut, []string{"--dry-run", "--memory-gib", "36", "--model", "3B", "--json"})
@@ -969,7 +996,7 @@ func TestModelOverride3BSelectsGeometry(t *testing.T) {
 	if plan.Tier.Layers != 16 {
 		t.Fatalf("--model 3B Layers = %d, want 16", plan.Tier.Layers)
 	}
-	if plan.KVBytesPerToken != uint64(2*16*2*128*2) {
-		t.Fatalf("--model 3B KVBytesPerToken = %d, want the 3B geometry %d", plan.KVBytesPerToken, uint64(2*16*2*128*2))
+	if want := uint64(2 * 16 * 2 * 128 * 4); plan.KVBytesPerToken != want {
+		t.Fatalf("--model 3B KVBytesPerToken = %d, want the 3B geometry at f32 %d", plan.KVBytesPerToken, want)
 	}
 }
