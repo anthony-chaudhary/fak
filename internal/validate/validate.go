@@ -1071,21 +1071,52 @@ func extractCommittedTipWSLWithin(ctx context.Context, repo, tip string) (string
 		"git -C " + quotedDir + " update-ref --no-deref HEAD " + posixQuote(tip) + "; " +
 		"ls -1t " + posixQuote(cacheDir) + "/*.tar 2>/dev/null | tail -n +4 | xargs -r rm -f --; " +
 		"trap - ERR INT TERM"
-	cmd := windowgate.CommandContext(ctx, "wsl.exe", "--cd", repo, "bash", "-lc", script)
-	windowgate.ConfigureBackgroundCommand(cmd)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		cleanupValidateWSLDir(wslDir)
-		detail := strings.TrimSpace(string(out))
+	// WSL git reads .git/packed-refs through drvfs non-atomically while Windows-side
+	// landers rewrite it, and git archive parses packed-refs even for a full SHA, so a
+	// torn read is transient: rerun the idempotent script (it recreates wslDir) with a
+	// bounded backoff for that signature only; every other failure stays fail-closed.
+	const attempts = 4
+	wait := 250 * time.Millisecond
+	for attempt := 1; ; attempt++ {
+		out, err := validateWSLCommand(ctx, "--cd", repo, "bash", "-lc", script)
+		if err == nil {
+			return wslDir, nil
+		}
 		if ctx.Err() != nil {
+			cleanupValidateWSLDir(wslDir)
 			return "", ctx.Err()
 		}
+		detail := strings.TrimSpace(string(out))
 		if detail == "" {
 			detail = err.Error()
 		}
-		return "", fmt.Errorf("materialize committed tip in WSL: %s", detail)
+		if !isTransientPackedRefsRead(detail) {
+			cleanupValidateWSLDir(wslDir)
+			return "", fmt.Errorf("materialize committed tip in WSL: %s", detail)
+		}
+		if attempt == attempts {
+			cleanupValidateWSLDir(wslDir)
+			return "", fmt.Errorf("materialize committed tip in WSL: %s (transient packed-refs read persisted across %d attempts)", detail, attempts)
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			cleanupValidateWSLDir(wslDir)
+			return "", ctx.Err()
+		case <-timer.C:
+		}
+		wait *= 2
 	}
-	return wslDir, nil
+}
+
+func isTransientPackedRefsRead(detail string) bool {
+	if !strings.Contains(detail, "packed-refs") {
+		return false
+	}
+	return strings.Contains(detail, "unterminated line in") ||
+		strings.Contains(detail, "unexpected line in") ||
+		strings.Contains(detail, "couldn't read")
 }
 
 func cleanupValidateWSLDir(dir string) {
@@ -1096,9 +1127,7 @@ func cleanupValidateWSLDir(dir string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := windowgate.CommandContext(ctx, "wsl.exe", "bash", "-lc", "rm -rf -- "+posixQuote(dir))
-	windowgate.ConfigureBackgroundCommand(cmd)
-	_ = cmd.Run()
+	_, _ = validateWSLCommand(ctx, "bash", "-lc", "rm -rf -- "+posixQuote(dir))
 }
 
 func overlayMinePathsWSLWithin(ctx context.Context, srcRoot, wslRoot string, paths []string, checked func(string)) error {
