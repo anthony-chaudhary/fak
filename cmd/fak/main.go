@@ -1323,8 +1323,10 @@ func applyFloorWithProfile(path string, profile string) {
 	if profile == "" {
 		profile = strings.TrimSpace(os.Getenv("FAK_PROFILE"))
 	}
+	implicitDefault := false
 	if path == "" && profile == "" {
 		profile = string(policy.ProfileStandard)
+		implicitDefault = true
 	}
 	policyReloadMu.Lock()
 	defer policyReloadMu.Unlock()
@@ -1335,7 +1337,9 @@ func applyFloorWithProfile(path string, profile string) {
 		must(err)
 		_, err = applyPolicyRuntimeLocked(rt, "profile:"+string(prof), "", "", false)
 		must(err)
-		fmt.Fprintf(os.Stderr, "fak: applied permission profile %s\n", prof)
+		if !implicitDefault {
+			fmt.Fprintf(os.Stderr, "fak: applied permission profile %s\n", prof)
+		}
 		return
 	}
 	_, _, err := loadAndApplyPolicyWithProfileLocked(path, profile, false)

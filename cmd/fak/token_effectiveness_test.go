@@ -99,7 +99,10 @@ func TestTokenGatePassIsStrictAndDuplicateSafe(t *testing.T) {
 	if blocker := tokenGateBlocker(sources, &deferColdToolsGate); blocker != "" {
 		t.Fatalf("valid declaration + strict PASS stayed blocked: %s", blocker)
 	}
-	withoutPass := tokenDefaultSources{root: repoRoot()}
+	// Model the receipt as absent explicitly rather than trusting the checkout not to
+	// carry one: this case witnesses the gate logic (OPEN declaration + no PASS blocks),
+	// so it must not flip when a PASS receipt file is present on disk.
+	withoutPass := tokenDefaultSources{root: repoRoot()}.withOverride(deferColdToolsGate.PassArtifact, "")
 	if blocker := tokenGateBlocker(withoutPass, &deferColdToolsGate); !strings.Contains(blocker, "#3536 OPEN") {
 		t.Fatalf("valid OPEN declaration without PASS did not block: %q", blocker)
 	}

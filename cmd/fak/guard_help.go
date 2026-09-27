@@ -88,7 +88,7 @@ var guardFlagGroups = []guardFlagGroup{
 		"task-handoff-repo", "task-handoff-live", "operator-directed", "host-recovery",
 	}},
 	{"Budgets, resets & session governance", []string{
-		"context-budget-tokens", "max-duration", "budget-envelope",
+		"context-budget-tokens", "max-duration", "budget-envelope", "resource-budget",
 		"soft-deadline-lead", "commit-grace-period", "child-stop-grace",
 		"reset-on-budget", "restart-on-budget", "restart-limit", "restart-seed-dir", "restart-seed-handback",
 		"session-id", "session-pressure-gate",
@@ -99,7 +99,7 @@ var guardFlagGroups = []guardFlagGroup{
 	{"Local in-kernel model", []string{
 		"gguf", "local", "alongside", "backend", "metal", "tokenizer", "remote-serve", "speculative",
 		"gpudirect-overflow",
-		"native-admission-token-budget",
+		"native-admission-token-budget", "kv-precision",
 		"native-qwen-q4k-prefill-chunk-tokens", "native-qwen35-metal-gdn-sequence",
 		"native-q4k-gateup-slab", "native-prefix-profile", "vulkan-q4k-profile", "vulkan-stage-q4k",
 	}},
