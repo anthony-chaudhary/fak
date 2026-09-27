@@ -40,6 +40,11 @@ import (
 
 const complaintRationaleFileMaxBytes = 16 << 10
 
+var (
+	complainFetchExisting = guardcomplaint.FetchExisting
+	complainSync          = guardcomplaint.Sync
+)
+
 func cmdComplain(argv []string) { os.Exit(runComplain(os.Stdout, os.Stderr, argv)) }
 
 // runComplain is the testable core: it returns the process exit code instead of
@@ -66,11 +71,15 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 	existingJSON := fs.String("existing-json", "", "fixture list of existing gh issues for dry-run tests")
 	fetchExisting := fs.Bool("fetch-existing", false, "dry-run but query gh to classify create vs update")
 	live := fs.Bool("live", false, "create/update the GitHub issue with gh (or set FAK_COMPLAIN_LIVE=1 to auto-file every complaint fleet-wide)")
+	pending := fs.Bool("pending", false, "list locally pending live complaints without contacting GitHub")
 	asJSON := fs.Bool("json", false, "emit machine-readable plan/result")
 	var labels stringList
 	fs.Var(&labels, "label", "label to add to a newly-created complaint; repeatable (default: "+guardcomplaint.Label+")")
 	if !parseFlags(fs, argv) {
 		return 2
+	}
+	if *pending {
+		return runComplainPending(stdout, stderr, *workspace, *asJSON)
 	}
 
 	if strings.TrimSpace(*summary) == "" {
@@ -90,7 +99,7 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak complain: %v\n", err)
 		return 2
 	}
-	rationaleText := strings.TrimSpace(*rationale)
+	rationaleText := strings.TrimSpace(agentopt.ScrubText(*rationale))
 	if path := strings.TrimSpace(*rationaleFile); path != "" {
 		var err error
 		rationaleText, err = readComplaintRationaleFile(path)
@@ -119,9 +128,9 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 	c := guardcomplaint.Complaint{
 		Domain:    normDomain,
 		Kind:      normKind,
-		Reason:    strings.TrimSpace(*reason),
-		Tool:      strings.TrimSpace(*tool),
-		Summary:   strings.TrimSpace(*summary),
+		Reason:    strings.TrimSpace(agentopt.ScrubText(*reason)),
+		Tool:      strings.TrimSpace(agentopt.ScrubText(*tool)),
+		Summary:   strings.TrimSpace(agentopt.ScrubText(*summary)),
 		Rationale: rationaleText,
 	}
 
@@ -147,6 +156,15 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
+	var pendingPath string
+	if liveMode {
+		pendingPath, err = writeComplaintPending(*workspace, *repo, c)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak complain: persist pending complaint: %v\n", err)
+			return 2
+		}
+	}
+
 	var existing []dogfoodissues.Issue
 	switch {
 	case *existingJSON != "":
@@ -155,8 +173,15 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 			return 2
 		}
 	case liveMode || *fetchExisting:
-		existing, err = guardcomplaint.FetchExisting(*repo, *limit)
+		existing, err = complainFetchExisting(*repo, *limit)
 		if err != nil {
+			if liveMode {
+				if emitErr := emitComplaintPending(stdout, stderr, pendingPath, *asJSON); emitErr != nil {
+					fmt.Fprintf(stderr, "fak complain: emit pending complaint result: %v\n", emitErr)
+				}
+				fmt.Fprintf(stderr, "fak complain: GitHub fetch failed; complaint remains pending at %s: %v\n", pendingPath, err)
+				return 1
+			}
 			fmt.Fprintf(stderr, "fak complain: %v\n", err)
 			return 2
 		}
@@ -178,20 +203,37 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 		if len(useLabels) == 0 {
 			useLabels = []string{guardcomplaint.LabelFor(normDomain)}
 		}
-		result.Synced = []dogfoodissues.SyncRow{guardcomplaint.Sync(row, *repo, useLabels, nil)}
+		result.Synced = []dogfoodissues.SyncRow{complainSync(row, *repo, useLabels, nil)}
+	}
+
+	if liveMode {
+		for _, s := range result.Synced {
+			if !s.OK || !s.Verified {
+				if emitErr := emitComplaintPending(stdout, stderr, pendingPath, *asJSON); emitErr != nil {
+					fmt.Fprintf(stderr, "fak complain: emit pending complaint result: %v\n", emitErr)
+				}
+				fmt.Fprintf(stderr, "fak complain: GitHub sync was not verified; complaint remains pending at %s", pendingPath)
+				if detail := strings.TrimSpace(s.Stderr); detail != "" {
+					fmt.Fprintf(stderr, ": %s", detail)
+				}
+				fmt.Fprintln(stderr)
+				return 1
+			}
+		}
+		// The verified remote result is authoritative. Clear its local fallback
+		// before writing stdout so an output failure cannot strand a receipt that
+		// falsely claims the already-filed complaint is still pending.
+		if err := removeComplaintPending(pendingPath); err != nil {
+			fmt.Fprintf(stderr, "fak complain: GitHub sync succeeded, but removing pending complaint %s failed: %v\n", pendingPath, err)
+			return 1
+		}
 	}
 
 	if code := emitJSONOrPrintln(stdout, stderr, "fak complain", *asJSON, result, guardcomplaint.Render(result)); code != 0 {
 		return code
 	}
 
-	if liveMode {
-		for _, s := range result.Synced {
-			if !s.OK {
-				return 1
-			}
-		}
-	} else {
+	if !liveMode {
 		// A dry-run files nothing. Disclose that loudly so the complaint is not
 		// mistaken for a filed ticket, and name BOTH ways to actually file.
 		fmt.Fprintln(stderr, "fak complain: dry-run — NO gh ticket was filed. Add --live to file now, or set FAK_COMPLAIN_LIVE=1 to auto-file every complaint.")
