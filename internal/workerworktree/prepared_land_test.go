@@ -116,6 +116,163 @@ func TestPrepareProspectiveLandBindsExactCandidateAndAcceptDoesNotVerify(t *test
 	}
 }
 
+func TestAcceptPreparedLandSandboxLocalizedWorktree(t *testing.T) {
+	f := newPreparedFixture(t, "feature.txt")
+	r, prep, obs := prepareCandidate(t, f)
+	if !prep.OK {
+		t.Fatalf("prepare localized candidate: %+v", prep)
+	}
+	localizePreparedFixture(t, f)
+
+	verifyCalls, prospectiveCalls := obs.verify, obs.prospective
+	got := AcceptPreparedLand(f.root, f.wt, preparedWant(f, r), nil)
+	if !got.OK || got.Code != LandResultSuccess || !got.Committed {
+		t.Fatalf("accept sandbox-localized candidate: %+v", got)
+	}
+	if obs.verify != verifyCalls || obs.prospective != prospectiveCalls {
+		t.Fatal("accept reran verification")
+	}
+	if head := strings.TrimSpace(mustGit(t, f.root, "rev-parse", "refs/heads/main")); head != r.CandidateSHA {
+		t.Fatalf("accepted head=%s candidate=%s", head, r.CandidateSHA)
+	}
+}
+
+func TestAcceptPreparedLandSandboxLocalizedRejectsForgedOrigin(t *testing.T) {
+	f := newPreparedFixture(t, "feature.txt")
+	r, prep, _ := prepareCandidate(t, f)
+	if !prep.OK {
+		t.Fatalf("prepare localized candidate: %+v", prep)
+	}
+	localizePreparedFixture(t, f)
+
+	forged := filepath.Join(f.root, ".git", "worktrees", "forged")
+	if err := os.MkdirAll(forged, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(forged, "gitdir"), []byte(filepath.Join(f.root, "foreign", ".git")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.wt, ".gitdir", "original_gitdir"), []byte(forged+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	before := strings.TrimSpace(mustGit(t, f.root, "rev-parse", "refs/heads/main"))
+	got := AcceptPreparedLand(f.root, f.wt, preparedWant(f, r), nil)
+	if got.OK || got.Code != LandResultPreparedReprepare || got.Reason != "prepared worktree belongs to a different repository" {
+		t.Fatalf("forged localization accepted: %+v", got)
+	}
+	if after := strings.TrimSpace(mustGit(t, f.root, "rev-parse", "refs/heads/main")); after != before {
+		t.Fatalf("forged localization moved target: before=%s after=%s", before, after)
+	}
+
+	rootCommon := filepath.Join(f.root, ".git")
+	if err := os.WriteFile(filepath.Join(rootCommon, "gitdir"), []byte(filepath.Join(f.wt, ".git")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.wt, ".gitdir", "original_gitdir"), []byte(rootCommon+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got = AcceptPreparedLand(f.root, f.wt, preparedWant(f, r), nil)
+	if got.OK || got.Code != LandResultPreparedReprepare || got.Reason != "prepared worktree belongs to a different repository" {
+		t.Fatalf("worktrees parent localization accepted: %+v", got)
+	}
+	if after := strings.TrimSpace(mustGit(t, f.root, "rev-parse", "refs/heads/main")); after != before {
+		t.Fatalf("worktrees parent localization moved target: before=%s after=%s", before, after)
+	}
+
+	foreign := filepath.Join(t.TempDir(), "foreign.git")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.wt, ".gitdir", "original_gitdir"), []byte(foreign+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got = AcceptPreparedLand(f.root, f.wt, preparedWant(f, r), nil)
+	if got.OK || got.Code != LandResultPreparedReprepare || got.Reason != "prepared worktree belongs to a different repository" {
+		t.Fatalf("foreign localization accepted: %+v", got)
+	}
+}
+
+func TestAcceptPreparedLandSandboxLocalizedRejectsSymlinkedOrigin(t *testing.T) {
+	f := newPreparedFixture(t, "feature.txt")
+	r, prep, _ := prepareCandidate(t, f)
+	if !prep.OK {
+		t.Fatalf("prepare localized candidate: %+v", prep)
+	}
+	original := localizePreparedFixture(t, f)
+	marker := filepath.Join(f.wt, ".gitdir", "original_gitdir")
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+	markerTarget := filepath.Join(t.TempDir(), "origin-marker")
+	if err := os.WriteFile(markerTarget, []byte(original+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(markerTarget, marker); err != nil {
+		t.Skipf("symlink creation unsupported: %v", err)
+	}
+
+	before := strings.TrimSpace(mustGit(t, f.root, "rev-parse", "refs/heads/main"))
+	got := AcceptPreparedLand(f.root, f.wt, preparedWant(f, r), nil)
+	if got.OK || got.Code != LandResultPreparedReprepare || got.Reason != "prepared worktree belongs to a different repository" {
+		t.Fatalf("symlinked localization marker accepted: %+v", got)
+	}
+	if after := strings.TrimSpace(mustGit(t, f.root, "rev-parse", "refs/heads/main")); after != before {
+		t.Fatalf("symlinked localization marker moved target: before=%s after=%s", before, after)
+	}
+}
+
+func TestPreparedLocalizedWorktreeBridge(t *testing.T) {
+	root := t.TempDir()
+	rootCommon := filepath.Join(root, ".git")
+	admin := filepath.Join(rootCommon, "worktrees", "worker")
+	wt := filepath.Join(root, "worker")
+	localized := filepath.Join(wt, ".gitdir")
+	for _, dir := range []string{admin, localized} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dotGit := filepath.Join(wt, ".git")
+	if err := os.WriteFile(dotGit, []byte("gitdir: .gitdir\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(admin, "gitdir"), []byte(dotGit+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(localized, "original_gitdir")
+	if err := os.WriteFile(marker, []byte(admin+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !preparedLocalizedWorktreeMatches(rootCommon, localized, wt) {
+		t.Fatal("valid reciprocal localization bridge did not match")
+	}
+
+	if err := os.WriteFile(filepath.Join(rootCommon, "gitdir"), []byte(dotGit+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(marker, []byte(rootCommon+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if preparedLocalizedWorktreeMatches(rootCommon, localized, wt) {
+		t.Fatal("worktrees parent matched despite reciprocal pointer")
+	}
+
+	foreign := filepath.Join(t.TempDir(), "foreign-admin")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(foreign, "gitdir"), []byte(dotGit+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(marker, []byte(foreign+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if preparedLocalizedWorktreeMatches(rootCommon, localized, wt) {
+		t.Fatal("foreign localization marker matched")
+	}
+}
+
 func TestAcceptPreparedLandRejectsAlteredBindingsWithoutRefMovement(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -454,4 +611,44 @@ func rewritePrepared(t *testing.T, f preparedFixture, r PreparedLandReceipt, mut
 	if err = os.WriteFile(path, append(raw, '\n'), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func localizePreparedFixture(t *testing.T, f preparedFixture) string {
+	t.Helper()
+	dotGit := filepath.Join(f.wt, ".git")
+	raw, err := os.ReadFile(dotGit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pointer := strings.TrimSpace(string(raw))
+	original, ok := strings.CutPrefix(pointer, "gitdir:")
+	if !ok {
+		t.Fatalf("unexpected worktree .git pointer %q", pointer)
+	}
+	original = strings.TrimSpace(original)
+	if !filepath.IsAbs(original) {
+		original = filepath.Join(f.wt, original)
+	}
+	original = filepath.Clean(original)
+
+	localized := filepath.Join(f.wt, ".gitdir")
+	if err := os.CopyFS(localized, os.DirFS(filepath.Join(f.root, ".git"))); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"HEAD", "index"} {
+		data, err := os.ReadFile(filepath.Join(original, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(localized, name), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(localized, "original_gitdir"), []byte(original+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dotGit, []byte("gitdir: .gitdir\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return original
 }

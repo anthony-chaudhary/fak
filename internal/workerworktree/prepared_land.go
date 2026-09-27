@@ -164,9 +164,7 @@ func revalidatePreparedLand(root, wtPath string, receipt PreparedLandReceipt, cf
 	}
 	rootCommon, rootErr := preparedGitCommonDir(root, git)
 	worktreeCommon, worktreeErr := preparedGitCommonDir(wtPath, git)
-	rootInfo, rootStatErr := os.Stat(rootCommon)
-	worktreeInfo, worktreeStatErr := os.Stat(worktreeCommon)
-	if rootErr != nil || worktreeErr != nil || rootStatErr != nil || worktreeStatErr != nil || !os.SameFile(rootInfo, worktreeInfo) {
+	if rootErr != nil || worktreeErr != nil || !preparedCommonDirMatches(rootCommon, worktreeCommon, wtPath) {
 		return preparedReprepare("prepared worktree belongs to a different repository", "")
 	}
 	// The checked-out-branch equality is only meaningful for the default land,
@@ -334,6 +332,123 @@ func preparedGitCommonDir(root string, git GitRunner) (string, error) {
 		return "", err
 	}
 	return filepath.Clean(abs), nil
+}
+
+func preparedCommonDirMatches(rootCommon, worktreeCommon, wtPath string) bool {
+	rootInfo, rootErr := os.Stat(rootCommon)
+	worktreeInfo, worktreeErr := os.Stat(worktreeCommon)
+	if rootErr == nil && worktreeErr == nil && os.SameFile(rootInfo, worktreeInfo) {
+		return true
+	}
+	return preparedLocalizedWorktreeMatches(rootCommon, worktreeCommon, wtPath)
+}
+
+func preparedLocalizedWorktreeMatches(rootCommon, worktreeCommon, wtPath string) bool {
+	rootCanonical, rootInfo, err := preparedCanonicalExistingPath(rootCommon)
+	if err != nil || !rootInfo.IsDir() {
+		return false
+	}
+	worktreeCanonical, worktreeInfo, err := preparedCanonicalExistingPath(wtPath)
+	if err != nil || !worktreeInfo.IsDir() {
+		return false
+	}
+
+	localizedPath := filepath.Join(worktreeCanonical, ".gitdir")
+	localizedCanonical, localizedInfo, err := preparedCanonicalExistingPath(localizedPath)
+	if err != nil || !localizedInfo.IsDir() || !preparedDirectChild(worktreeCanonical, localizedCanonical) {
+		return false
+	}
+	if info, err := os.Lstat(localizedPath); err != nil || info.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	_, commonInfo, err := preparedCanonicalExistingPath(worktreeCommon)
+	if err != nil || !commonInfo.IsDir() || !os.SameFile(localizedInfo, commonInfo) {
+		return false
+	}
+
+	markerPath := filepath.Join(localizedCanonical, "original_gitdir")
+	if info, err := os.Lstat(markerPath); err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return false
+	}
+	marker, err := os.ReadFile(markerPath)
+	if err != nil {
+		return false
+	}
+	originalPath := strings.TrimSpace(string(marker))
+	if !filepath.IsAbs(originalPath) || preparedHasParentTraversal(originalPath) {
+		return false
+	}
+	originalPath = filepath.Clean(originalPath)
+	if info, err := os.Lstat(originalPath); err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return false
+	}
+	originalCanonical, originalInfo, err := preparedCanonicalExistingPath(originalPath)
+	if err != nil || !originalInfo.IsDir() {
+		return false
+	}
+
+	worktreesPath := filepath.Join(rootCanonical, "worktrees")
+	if info, err := os.Lstat(worktreesPath); err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return false
+	}
+	worktreesCanonical, worktreesInfo, err := preparedCanonicalExistingPath(worktreesPath)
+	if err != nil || !worktreesInfo.IsDir() || !preparedDirectChild(worktreesCanonical, originalCanonical) {
+		return false
+	}
+
+	reciprocalPath := filepath.Join(originalCanonical, "gitdir")
+	if info, err := os.Lstat(reciprocalPath); err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return false
+	}
+	reciprocal, err := os.ReadFile(reciprocalPath)
+	if err != nil {
+		return false
+	}
+	reciprocalTarget := strings.TrimSpace(string(reciprocal))
+	if !filepath.IsAbs(reciprocalTarget) || preparedHasParentTraversal(reciprocalTarget) {
+		return false
+	}
+	_, reciprocalInfo, err := preparedCanonicalExistingPath(reciprocalTarget)
+	if err != nil {
+		return false
+	}
+	dotGitPath := filepath.Join(worktreeCanonical, ".git")
+	if info, err := os.Lstat(dotGitPath); err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return false
+	}
+	dotGitCanonical, dotGitInfo, err := preparedCanonicalExistingPath(dotGitPath)
+	return err == nil && preparedDirectChild(worktreeCanonical, dotGitCanonical) && os.SameFile(reciprocalInfo, dotGitInfo)
+}
+
+func preparedCanonicalExistingPath(path string) (string, os.FileInfo, error) {
+	abs, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return "", nil, err
+	}
+	canonical, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", nil, err
+	}
+	canonical, err = filepath.Abs(filepath.Clean(canonical))
+	if err != nil {
+		return "", nil, err
+	}
+	info, err := os.Stat(canonical)
+	return filepath.Clean(canonical), info, err
+}
+
+func preparedDirectChild(parent, child string) bool {
+	rel, err := filepath.Rel(parent, child)
+	return err == nil && rel != "." && rel != ".." && !filepath.IsAbs(rel) && filepath.Dir(rel) == "."
+}
+
+func preparedHasParentTraversal(path string) bool {
+	for _, part := range strings.FieldsFunc(path, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func preparedReceiptID(receipt PreparedLandReceipt) (string, error) {
