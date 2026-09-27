@@ -115,9 +115,13 @@ type BitmapAllocator struct {
 }
 
 // NewBitmapAllocator creates a bitmap allocator for fixed-size slots within a region.
+// A region smaller than one slot yields an allocator with no usable slots.
 func NewBitmapAllocator(region *Region, slotSize uint64) *BitmapAllocator {
 	numSlots := region.Size() / slotSize
 	bitmapLen := (numSlots + 63) / 64
+	if bitmapLen == 0 {
+		bitmapLen = 1
+	}
 	bitmap := make([]uint64, bitmapLen)
 
 	// Reserve slot 0
@@ -129,7 +133,9 @@ func NewBitmapAllocator(region *Region, slotSize uint64) *BitmapAllocator {
 		numSlots: numSlots,
 		bitmap:   bitmap,
 	}
-	ba.freeCount.Store(int64(numSlots - 1))
+	if numSlots > 0 {
+		ba.freeCount.Store(int64(numSlots - 1))
+	}
 	return ba
 }
 

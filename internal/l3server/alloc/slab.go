@@ -76,7 +76,79 @@ type Allocation struct {
 	Size     uint64
 }
 
+// slabClassPlan is the logical placement of one size class: the bytes the
+// weight policy assigns it before any platform backs them. The realized
+// capacity can be smaller where the host caps region backing
+// (region_default.go), so policy assertions read the plan and capacity
+// reporting reads the realized region (#13518).
+type slabClassPlan struct {
+	size        uint64
+	weight      float64
+	regionBytes uint64 // a multiple of size; devdax alignment is applied later
+}
+
 func NewSlabAllocator(cfg SlabConfig) (*SlabAllocator, error) {
+	plans, err := planSlabClasses(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	finalWeights := make(map[uint64]float64, len(plans))
+	for _, p := range plans {
+		finalWeights[p.size] = p.weight
+	}
+
+	var devdaxOffset uint64
+
+	sa := &SlabAllocator{
+		maxMemory:      cfg.MaxMemoryBytes,
+		useHuge:        cfg.resolvedHugePageSizeKB() > 0,
+		hugePageSizeKB: cfg.resolvedHugePageSizeKB(),
+		classWeights:   finalWeights,
+	}
+
+	for _, p := range plans {
+		sz := p.size
+		regionSize := p.regionBytes
+
+		var region *Region
+		if cfg.DevdaxPath != "" {
+			const align2MB uint64 = 2 * 1024 * 1024
+			regionSize = ((regionSize + align2MB - 1) / align2MB) * align2MB
+			region, err = NewDevdaxRegion(cfg.DevdaxPath, devdaxOffset, regionSize)
+			devdaxOffset += regionSize
+			if err == nil && cfg.DevdaxCapacity > 0 && devdaxOffset > cfg.DevdaxCapacity {
+				region.Close()
+				for j := 0; j < len(sa.classes); j++ {
+					sa.classes[j].Region.Close()
+				}
+				return nil, fmt.Errorf("devdax capacity exceeded: need %d bytes but device is %d bytes",
+					devdaxOffset, cfg.DevdaxCapacity)
+			}
+		} else {
+			region, err = NewRegion(regionSize, cfg.regionHugePageSizeKB(regionSize))
+		}
+		if err != nil {
+			for j := 0; j < len(sa.classes); j++ {
+				sa.classes[j].Region.Close()
+			}
+			return nil, fmt.Errorf("failed to allocate region for class %d: %w", sz, err)
+		}
+
+		alloc := NewBitmapAllocator(region, sz)
+		sa.classes = append(sa.classes, SlabClass{
+			Size:      sz,
+			Allocator: alloc,
+			Region:    region,
+		})
+	}
+
+	return sa, nil
+}
+
+// planSlabClasses resolves the size classes and their weighted region bytes
+// without allocating anything.
+func planSlabClasses(cfg SlabConfig) ([]slabClassPlan, error) {
 	classes := buildSizeClasses(cfg)
 	if len(classes) == 0 {
 		return nil, fmt.Errorf("no size classes configured")
@@ -190,20 +262,7 @@ func NewSlabAllocator(cfg SlabConfig) (*SlabAllocator, error) {
 		}
 	}
 
-	finalWeights := make(map[uint64]float64, len(deduped))
-	for i, sz := range deduped {
-		finalWeights[sz] = weights[i]
-	}
-
-	var devdaxOffset uint64
-
-	sa := &SlabAllocator{
-		maxMemory:      cfg.MaxMemoryBytes,
-		useHuge:        cfg.resolvedHugePageSizeKB() > 0,
-		hugePageSizeKB: cfg.resolvedHugePageSizeKB(),
-		classWeights:   finalWeights,
-	}
-
+	plans := make([]slabClassPlan, len(deduped))
 	for i, sz := range deduped {
 		memFraction := weights[i] / totalWeight
 		regionSize := uint64(float64(cfg.MaxMemoryBytes) * memFraction)
@@ -219,41 +278,9 @@ func NewSlabAllocator(cfg SlabConfig) (*SlabAllocator, error) {
 				regionSize = maxRegion
 			}
 		}
-
-		var region *Region
-		var err error
-		if cfg.DevdaxPath != "" {
-			const align2MB uint64 = 2 * 1024 * 1024
-			regionSize = ((regionSize + align2MB - 1) / align2MB) * align2MB
-			region, err = NewDevdaxRegion(cfg.DevdaxPath, devdaxOffset, regionSize)
-			devdaxOffset += regionSize
-			if err == nil && cfg.DevdaxCapacity > 0 && devdaxOffset > cfg.DevdaxCapacity {
-				region.Close()
-				for j := 0; j < len(sa.classes); j++ {
-					sa.classes[j].Region.Close()
-				}
-				return nil, fmt.Errorf("devdax capacity exceeded: need %d bytes but device is %d bytes",
-					devdaxOffset, cfg.DevdaxCapacity)
-			}
-		} else {
-			region, err = NewRegion(regionSize, cfg.regionHugePageSizeKB(regionSize))
-		}
-		if err != nil {
-			for j := 0; j < len(sa.classes); j++ {
-				sa.classes[j].Region.Close()
-			}
-			return nil, fmt.Errorf("failed to allocate region for class %d: %w", sz, err)
-		}
-
-		alloc := NewBitmapAllocator(region, sz)
-		sa.classes = append(sa.classes, SlabClass{
-			Size:      sz,
-			Allocator: alloc,
-			Region:    region,
-		})
+		plans[i] = slabClassPlan{size: sz, weight: weights[i], regionBytes: regionSize}
 	}
-
-	return sa, nil
+	return plans, nil
 }
 
 func (sa *SlabAllocator) allocFromClass(classIdx int, requestSize uint64) (Allocation, error) {
