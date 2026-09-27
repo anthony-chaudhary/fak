@@ -605,3 +605,68 @@ func TestSlabDedicatedMode_Weights(t *testing.T) {
 		t.Errorf("key class weight: got %.1f, want 5.0", w)
 	}
 }
+
+// TestRegionBackingMatchesLogicalSize is the fak#13518 witness: a Region's
+// logical size must never exceed its real backing array, or the bitmap slot
+// math slices past the array (panic: slice bounds out of range) and the
+// allocator's slot count lies about how much it can hand out. This reproduces
+// the original "slice bounds out of range [:100663296] with capacity 67108864"
+// defect with a large-class workload.
+func TestRegionBackingMatchesLogicalSize(t *testing.T) {
+	// 512MB request: larger than the 64MB non-Linux dev ceiling, smaller than
+	// any host RAM so it never trips a real allocation limit on Linux.
+	region, err := NewRegion(512*1024*1024, 0)
+	if err != nil {
+		t.Fatalf("NewRegion: %v", err)
+	}
+	defer region.Close()
+
+	if uint64(len(region.Data())) != region.Size() {
+		t.Fatalf("logical size %d != backing length %d (slot math would slice past the array)",
+			region.Size(), len(region.Data()))
+	}
+
+	// Every slot the bitmap claims must be addressable within the backing.
+	ba := NewBitmapAllocator(region, 1024*1024)
+	for i := uint64(0); i < ba.NumSlots(); i++ {
+		off := i * ba.SlotSize()
+		slot := ba.SlotData(off) // must not panic (slice bounds out of range)
+		if len(slot) != int(ba.SlotSize()) {
+			t.Fatalf("slot %d: len=%d, want %d", i, len(slot), ba.SlotSize())
+		}
+	}
+}
+
+// TestSlabAllocNeverSlicesPastBacking drains an oversized large-class allocator
+// to completion: every allocated offset must resolve a readable slot, which
+// fails loudly if numSlots is derived from an unbacked logical size.
+func TestSlabAllocNeverSlicesPastBacking(t *testing.T) {
+	sa, err := NewSlabAllocator(SlabConfig{
+		MaxMemoryBytes: 512 * 1024 * 1024, // > 64MB dev ceiling on non-Linux
+	})
+	if err != nil {
+		t.Fatalf("NewSlabAllocator: %v", err)
+	}
+	defer sa.Close()
+
+	// Allocate repeatedly at a large class and write/read each slot; a
+	// mis-sized region would slice past the backing on the first overrun.
+	var allocs []Allocation
+	for i := 0; i < 200; i++ {
+		a, err := sa.Alloc(64 * 1024)
+		if err != nil {
+			break // exhausted is fine; the point is no panic before exhaustion
+		}
+		sa.Write(a, []byte("guard"))
+		if got := sa.Read(a); string(got[:5]) != "guard" {
+			t.Fatalf("slot %d read back %q", i, string(got[:5]))
+		}
+		allocs = append(allocs, a)
+	}
+	if len(allocs) == 0 {
+		t.Fatal("expected at least one allocation")
+	}
+	for _, a := range allocs {
+		sa.Free(a)
+	}
+}

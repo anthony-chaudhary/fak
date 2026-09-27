@@ -70,6 +70,41 @@ func TestL3ServerDefaultConfig(t *testing.T) {
 	}
 }
 
+// TestL3ServerStartStopIdempotent is the fak#13518 lifecycle witness: repeated
+// Start/Stop cycles must not panic with "close of closed channel". Before the
+// fix the second Stop re-closed each shard's single-shot quit/done channels.
+func TestL3ServerStartStopIdempotent(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.NumShards = 2
+	cfg.MaxMemoryGB = 1
+
+	srv, err := NewServer(&cfg)
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
+
+	ctx := context.Background()
+	for cycle := 0; cycle < 3; cycle++ {
+		if err := srv.Start(ctx); err != nil {
+			t.Fatalf("cycle %d: Start failed: %v", cycle, err)
+		}
+		if srv.Status() != StatusRunning {
+			t.Fatalf("cycle %d: expected StatusRunning, got %v", cycle, srv.Status())
+		}
+		if err := srv.Stop(ctx); err != nil {
+			t.Fatalf("cycle %d: Stop failed: %v", cycle, err)
+		}
+		if srv.Status() != StatusStopped {
+			t.Fatalf("cycle %d: expected StatusStopped, got %v", cycle, srv.Status())
+		}
+	}
+
+	// A redundant Stop on an already-stopped server is a no-op.
+	if err := srv.Stop(ctx); err != nil {
+		t.Fatalf("redundant Stop failed: %v", err)
+	}
+}
+
 // TestL3ServerRepeatedStartStop pins #13518: repeated Stop and a
 // Start-Stop-Start-Stop cycle must not panic with "close of closed channel",
 // and a restarted server must serve from a freshly provisioned shard manager.
