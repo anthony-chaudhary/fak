@@ -1,5 +1,7 @@
 package compute
 
+import "sort"
+
 // ContextSizeConfig is the model geometry the context auto-sizer needs to turn a
 // context-token count into a memory plan: the KV-store layout, the per-token HAL
 // scratch geometry, and the model's declared full context window. It is the
@@ -23,6 +25,52 @@ type ContextSizeConfig struct {
 	// device-scoped ones. False (the zero value, every discrete backend) keeps the
 	// historical device-only subtraction byte-for-byte.
 	PoolSharedWithHost bool
+
+	// CompressedKV is the OPTIONAL per-layer compressed KV schedule (compressed_kv.go) a
+	// model projection sets when its KV is a window-plus-compressed-rows schedule
+	// (DeepSeek-V4 Flash compress_ratios) rather than one row per cached position per
+	// layer. Non-empty, it REPLACES the uniform EstimateKVStoreBytes(KV, tokens) charge in
+	// KVBytes, the per-context plan, and the largest-fitting derivation; KV itself stays the
+	// allocation geometry. Nil (the zero value) is the uniform case, byte-identical to
+	// before this field existed. PLANNING geometry only, like KVConfig.WindowPerLayer.
+	CompressedKV []CompressedKVLayer
+}
+
+// KVBytes is the resident KV charge at `tokens` cached positions: the compressed schedule
+// when CompressedKV is set, else the uniform EstimateKVStoreBytes(KV, tokens) verbatim.
+// tokens <= 0 yields 0 on both arms.
+func (c ContextSizeConfig) KVBytes(tokens int) int64 {
+	if len(c.CompressedKV) > 0 {
+		return CompressedKVBytes(c.CompressedKV, tokens)
+	}
+	return EstimateKVStoreBytes(c.KV, tokens)
+}
+
+// KVBytesPerToken is the per-token KV slope a token-denominated budget divides by. For a
+// compressed schedule it is CompressedKVBound's perToken — an upper-bound slope valid only
+// alongside FixedKVBytesPerStream; uniformly it is EstimateKVStoreBytes(KV, 1), the
+// historical bytes-per-token, verbatim.
+func (c ContextSizeConfig) KVBytesPerToken() int64 {
+	if len(c.CompressedKV) > 0 {
+		_, perToken := CompressedKVBound(c.CompressedKV)
+		return perToken
+	}
+	return EstimateKVStoreBytes(c.KV, 1)
+}
+
+// FixedKVBytesPerStream is the context-independent KV state one stream holds however few
+// tokens it has, so KVBytes(t) + SessionState <= FixedKVBytesPerStream + KVBytesPerToken·t.
+// For a compressed schedule that is CompressedKVBound's fixed term (window rows plus ceil
+// slack) plus SessionState.Total() (the compressor's in-flight rows ride there); for the
+// pinned DeepSeek-V4 Flash fixture 11,366,912 + 49,526,784 = 60,893,696 B [SW-VERIFIED].
+// Uniformly it is 0 DELIBERATELY: a recurrent SessionState (Qwen3.5) stays out of the
+// per-token warmup derivation exactly as it was before this method existed.
+func (c ContextSizeConfig) FixedKVBytesPerStream() int64 {
+	if len(c.CompressedKV) == 0 {
+		return 0
+	}
+	fixed, _ := CompressedKVBound(c.CompressedKV)
+	return saturatingAddInt64(fixed, c.SessionState.Total())
 }
 
 // PerContextMemoryPlan builds the per-context memory demands — the KV store sized to
@@ -30,11 +78,18 @@ type ContextSizeConfig struct {
 // call sites share. Weight demands are arm-specific (device-lean / cpu-offload / f32 /
 // resident) and stay caller-side; this owns only the context-sized portion. tokens <= 0
 // omits the KV demand (scratch still applies), matching the fail-open behavior both call
-// sites had before they delegated here.
+// sites had before they delegated here. A compressed schedule (CompressedKV) charges its
+// KVBytes as one f32 "compressed-kv-rows" demand in place of the uniform HAL KV store.
 func (c ContextSizeConfig) PerContextMemoryPlan(tokens int) MemoryPlan {
 	var plan MemoryPlan
 	if tokens > 0 {
-		plan = append(plan, EstimateKVStoreMemoryPlan(c.KV, tokens)...)
+		if len(c.CompressedKV) > 0 {
+			if kvBytes := c.KVBytes(tokens); kvBytes > 0 {
+				plan = append(plan, MemoryDemand{Class: MemoryKVCache, Bytes: kvBytes, Detail: "compressed-kv-rows", DType: F32.String()})
+			}
+		} else {
+			plan = append(plan, EstimateKVStoreMemoryPlan(c.KV, tokens)...)
+		}
 	}
 	plan = append(plan, c.SessionState...)
 	return append(plan, EstimateHALTransientMemoryPlan(c.Scratch)...)
@@ -133,10 +188,24 @@ func (c ContextSizeConfig) contextTokens(override int, weights MemoryPlan, avail
 // window (nothing to shrink); at the floor the plan stays small and the load-time fit check
 // refuses a box too small to hold even that. Fail-open: KV geometry it cannot size yields the
 // full window, never a refusal here.
+//
+// A compressed schedule (CompressedKV) is not linear in tokens (window rows saturate, ceil rows
+// step), so instead of dividing by a per-token cost the KV headroom is inverted exactly: the
+// largest t in [1, MaxContext] with KVBytes(t) <= headroom, found by binary search over the
+// monotone KVBytes. The same floor/MaxContext clamps then apply to both arms, and a schedule
+// that charges nothing even at MaxContext fails open to the full window.
 func (c ContextSizeConfig) largestFittingContext(weights MemoryPlan, avail int64) int {
-	perToken := EstimateKVStoreBytes(c.KV, 1)
-	if perToken <= 0 {
-		return c.MaxContext // cannot size KV → fail open to the full window
+	compressed := len(c.CompressedKV) > 0
+	var perToken int64
+	if compressed {
+		if c.KVBytes(c.MaxContext) <= 0 {
+			return c.MaxContext // cannot size the compressed rows → fail open to the full window
+		}
+	} else {
+		perToken = EstimateKVStoreBytes(c.KV, 1)
+		if perToken <= 0 {
+			return c.MaxContext // cannot size KV → fail open to the full window
+		}
 	}
 	scratch := EstimateHALTransientMemoryPlan(c.Scratch).Total()
 	fixed := c.SessionState.DeviceTotal()
@@ -144,7 +213,15 @@ func (c ContextSizeConfig) largestFittingContext(weights MemoryPlan, avail int64
 	if c.PoolSharedWithHost {
 		weightScoped = weights.Total()
 	}
-	fit := (avail - weightScoped - fixed - scratch) / perToken
+	headroom := avail - weightScoped - fixed - scratch
+	var fit int64
+	if compressed {
+		// sort.Search yields the count of leading t in [1, MaxContext] that fit, which for a
+		// monotone KVBytes is the largest fitting t (0 when not even one token fits).
+		fit = int64(sort.Search(c.MaxContext, func(i int) bool { return c.KVBytes(i+1) > headroom }))
+	} else {
+		fit = headroom / perToken
+	}
 	floor := int64(MinAutoContextTokens)
 	if floor > int64(c.MaxContext) {
 		floor = int64(c.MaxContext) // a model whose full window is below the floor cannot exceed it

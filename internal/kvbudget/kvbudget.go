@@ -106,11 +106,13 @@ type Shape struct {
 	HeadDim    int
 	VHeadDim   int
 	// PerLayer is the OPTIONAL per-layer refinement of the uniform geometry above
-	// — a sliding-window cap and, for MHA, differing head widths on the layers
-	// that have them (#5498). Nil (the zero value, and what every Shape built
-	// today carries) means uniform: every layer attends over the whole context at
-	// the scalar geometry, and every figure below is bit-for-bit what it was
-	// before this field existed. It is a POINTER so Shape stays comparable.
+	// — a sliding-window cap, for MHA differing head widths on the layers that
+	// have them (#5498), and a compression schedule with per-layer indexer widths
+	// (DeepSeek-V4 Flash compress_ratios, #13555). Nil (the zero value, and what
+	// every uniform-attention Shape carries) means uniform: every layer attends
+	// over the whole context at the scalar geometry, and every figure below is
+	// bit-for-bit what it was before this field existed. It is a POINTER so Shape
+	// stays comparable.
 	PerLayer *LayerProfile
 }
 
@@ -135,11 +137,15 @@ type Quant struct {
 }
 
 // The KV quants the triage doc §3.4 names as levers. F16 is the llama.cpp
-// default and the precision every cell in the doc's table is computed at.
+// default and the precision every cell in the doc's table is computed at. F32 is
+// not a lever but a fact: the native DeepSeek-V4 attention state (window ring,
+// compressor rows, indexer keys) stores float32 rows, so sizing its compressed
+// schedule charges 4 B/elem whatever KV precision tier the generic layout uses.
 var (
 	F16  = Quant{Name: "f16", BytesPerElem: 2}  // default; the doc's table precision
 	Q8_0 = Quant{Name: "q8_0", BytesPerElem: 1} // ~2× the fit at a quality cost
 	Q4   = Quant{Name: "q4", BytesPerElem: 0.5} // ~4× the fit at a larger quality cost
+	F32  = Quant{Name: "f32", BytesPerElem: 4}  // native V4 attention state stores f32 rows
 )
 
 // MLAElemsPerToken is the MLA latent + decoupled rope key cached per token,
@@ -185,9 +191,9 @@ func (s Shape) KVBytesPerToken(q Quant) float64 {
 
 // KVGiBPerStream is the full KV cache GiB one stream of ctx tokens holds at the
 // given quant: ctx × KV_bytes/token ÷ 1024³ (doc §3.3) for a uniform Shape, and
-// the per-layer sum bounded at min(window, ctx) for one that declares a
-// PerLayer profile (#5498). This is the exact value; reportGiB rounds it to the
-// doc's tabulated precision.
+// the per-layer sum bounded at min(window, ctx) — plus any compressed rows — for
+// one that declares a PerLayer profile (#5498, #13555). This is the exact value;
+// reportGiB rounds it to the doc's tabulated precision.
 func (s Shape) KVGiBPerStream(ctx int, q Quant) float64 {
 	return s.KVBytesPerStream(ctx, q) / GiB
 }

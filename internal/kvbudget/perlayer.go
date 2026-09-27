@@ -23,15 +23,36 @@ package kvbudget
 // # The zero value changes nothing
 //
 // The refinement hangs off ONE new optional field, Shape.PerLayer, a *nil*
-// pointer by default. A Shape that declares no profile (every Shape that exists
-// today, including GLM52DSA and everything model.Config.KVCacheShape builds)
-// takes the same expression it always took, so its answer is bit-for-bit
-// unchanged — see uniform() below and TestPerLayerZeroValueIsBitIdentical. The
-// pointer also keeps Shape COMPARABLE (`==`), which callers rely on.
+// pointer by default. A Shape that declares no profile (GLM52DSA and every
+// uniform-attention Shape model.Config.KVCacheShape builds) takes the same
+// expression it always took, so its answer is bit-for-bit unchanged — see
+// uniform() below and TestPerLayerZeroValueIsBitIdentical. The pointer also
+// keeps Shape COMPARABLE (`==`), which callers rely on. The compression axis
+// below keeps the same promise for every profile that does not declare it: a
+// window-only profile sizes exactly as it did before that axis existed.
 //
 // The per-token methods above are deliberately left alone: with a window there
 // is no single per-token figure, so the ctx-dependent truth lives in the new
 // *PerStream methods and the per-token ones keep their uniform meaning.
+//
+// # Compressed schedules
+//
+// DeepSeek-V4 Flash adds a second per-layer axis, compress_ratios (#13555). A
+// layer with ratio r > 0 keeps, besides its sliding window, one compressed row
+// per r positions for the whole context, so its row count at ctx is
+//
+//	min(window, ctx) + ceil(ctx / r)
+//
+// — linear in ctx at slope 1/r (r = 4 or 128), with a flat window term. A
+// window alone UNDER-counts such a layer, the unsafe direction for admission,
+// so a profile that declares the window for these families must declare the
+// ratios too. The V4 lightning indexer rides the compressed rows: an indexing
+// layer keeps one key of its per-layer index width per compressed row, not per
+// token.
+//
+// This is PLANNING geometry — what the native V4 attention state holds, sized
+// for admission and context fit — derived by reading that state's code, not an
+// allocator's layout and not a hardware measurement.
 
 // LayerProfile is a Shape's optional per-layer geometry: the layers that differ
 // from the Shape's uniform scalars. Every slice is independently optional and
@@ -63,6 +84,18 @@ type LayerProfile struct {
 	NumKVHeads []int
 	HeadDim    []int
 	VHeadDim   []int
+	// CompressRatio is the per-layer compression ratio (DeepSeek-V4 Flash
+	// compress_ratios): a layer with r > 0 additionally retains
+	// CompressedRows(l, ctx) = ceil(ctx / r) rows at the layer's row width, ON
+	// TOP of its window rows. A non-positive entry (and any layer past the end)
+	// compresses nothing — there is no scalar to fall back to.
+	CompressRatio []int
+	// IndexHeadDim is the per-layer indexer key width. A positive entry makes
+	// layer l cache one key of that width per compressed row when it compresses
+	// (ratio > 0), else one per retained token (LayerTokens). A non-positive
+	// entry (and any layer past the end) falls back to the Shape's scalar
+	// IndexHeadDim for l < IndexLayers, else no indexer.
+	IndexHeadDim []int
 }
 
 // perLayerOr returns the per-layer override for layer l, or the uniform scalar
@@ -87,29 +120,53 @@ func (s Shape) uniform() bool {
 	p := s.PerLayer
 	return p == nil ||
 		(len(p.Window) == 0 && len(p.NumKVHeads) == 0 &&
-			len(p.HeadDim) == 0 && len(p.VHeadDim) == 0)
+			len(p.HeadDim) == 0 && len(p.VHeadDim) == 0 &&
+			len(p.CompressRatio) == 0 && len(p.IndexHeadDim) == 0)
 }
 
-// LayerTokens is the number of KV token-slots layer l holds once a stream has
-// reached ctx tokens: min(Window[l], ctx) for a window-capped layer, and ctx for
-// a layer that attends over the whole context. This is the single place the
-// window bound is applied.
+// compresses reports whether layer l declares a positive compression ratio.
+func (s Shape) compresses(l int) bool {
+	return s.PerLayer != nil && perLayerOr(s.PerLayer.CompressRatio, l, 0) > 0
+}
+
+// CompressedRows is the number of compressed rows layer l retains once a
+// stream has reached ctx tokens: ceil(ctx / r) for a layer whose CompressRatio
+// r is positive, and 0 for a layer that compresses nothing or a non-positive
+// ctx. Ceil, not floor: a trailing partial group is charged a whole row, so the
+// figure never under-counts (ctx = r·k + 1 is where the two differ).
+func (s Shape) CompressedRows(l, ctx int) int {
+	if !s.compresses(l) || ctx <= 0 {
+		return 0
+	}
+	r := s.PerLayer.CompressRatio[l]
+	rows := ctx / r // split form: ctx + r - 1 could overflow near MaxInt
+	if ctx%r != 0 {
+		rows++
+	}
+	return rows
+}
+
+// LayerTokens is the number of KV rows layer l holds once a stream has reached
+// ctx tokens: min(Window[l], ctx) for a window-capped layer, ctx for a layer
+// that attends over the whole context, plus CompressedRows(l, ctx) on a layer
+// that compresses. This is the single place the window bound is applied.
 func (s Shape) LayerTokens(l, ctx int) int {
 	if s.PerLayer == nil {
 		return ctx
 	}
+	rows := ctx
 	if w := perLayerOr(s.PerLayer.Window, l, 0); w > 0 && w < ctx {
-		return w
+		rows = w
 	}
-	return ctx
+	return rows + s.CompressedRows(l, ctx)
 }
 
 // cachedTokens is the total per-layer token-slots the first n layers hold at
-// ctx: Σ_{l<n} LayerTokens(l, ctx). For an unwindowed Shape it is exactly
-// n × ctx, which is what makes every uniform figure below reduce to the
-// pre-refinement one.
+// ctx: Σ_{l<n} LayerTokens(l, ctx). For a Shape with neither a window nor a
+// compression ratio it is exactly n × ctx, which is what makes every uniform
+// figure below reduce to the pre-refinement one.
 func (s Shape) cachedTokens(n, ctx int) int {
-	if s.PerLayer == nil || len(s.PerLayer.Window) == 0 {
+	if s.PerLayer == nil || (len(s.PerLayer.Window) == 0 && len(s.PerLayer.CompressRatio) == 0) {
 		return n * ctx
 	}
 	total := 0
@@ -120,8 +177,9 @@ func (s Shape) cachedTokens(n, ctx int) int {
 }
 
 // MLAElemsPerStream is the MLA latent + decoupled rope key a whole stream of ctx
-// tokens holds: Σ over layers of min(window, ctx) × (KVLoraRank + QKRopeHeadDim).
-// Without windows it is ctx × MLAElemsPerToken().
+// tokens holds: Σ over layers of LayerTokens(l, ctx) × (KVLoraRank +
+// QKRopeHeadDim) — min(window, ctx), plus ceil(ctx / r) on a compressing layer.
+// Without windows or ratios it is ctx × MLAElemsPerToken().
 func (s Shape) MLAElemsPerStream(ctx int) int {
 	return s.cachedTokens(s.Layers, ctx) * (s.KVLoraRank + s.QKRopeHeadDim)
 }
@@ -129,8 +187,33 @@ func (s Shape) MLAElemsPerStream(ctx int) int {
 // IndexElemsPerStream is the DSA indexer key a whole stream holds, summed over
 // the index layers under the same window bound. IndexLayers is an upper bound at
 // Layers (doc §3.3), so the first IndexLayers windows are the ones that apply.
+//
+// A profile that declares CompressRatio or IndexHeadDim is summed layer by layer
+// over [0, Layers) instead: each layer's key width (its IndexHeadDim entry, else
+// the scalar for l < IndexLayers, else none) times its compressed rows when it
+// compresses — the V4 indexer keys compressed rows, not tokens — else its
+// retained tokens. Any other Shape takes the original expression untouched.
 func (s Shape) IndexElemsPerStream(ctx int) int {
-	return s.cachedTokens(s.IndexLayers, ctx) * s.IndexHeadDim
+	p := s.PerLayer
+	if p == nil || (len(p.CompressRatio) == 0 && len(p.IndexHeadDim) == 0) {
+		return s.cachedTokens(s.IndexLayers, ctx) * s.IndexHeadDim
+	}
+	total := 0
+	for l := 0; l < s.Layers; l++ {
+		width := perLayerOr(p.IndexHeadDim, l, 0)
+		if width <= 0 {
+			width = 0
+			if l < s.IndexLayers {
+				width = s.IndexHeadDim
+			}
+		}
+		rows := s.LayerTokens(l, ctx)
+		if s.compresses(l) {
+			rows = s.CompressedRows(l, ctx)
+		}
+		total += rows * width
+	}
+	return total
 }
 
 // MHAElemsPerStream is the full per-head K+V a whole stream holds for standard
@@ -155,7 +238,8 @@ func (s Shape) MHAElemsPerStream(ctx int) int {
 // KVElemsPerStream is the total KV elements a stream of ctx tokens holds,
 // branched on attention arch exactly as KVElemsPerToken is. This — not
 // ctx × KVElemsPerToken() — is the ctx-dependent truth once any layer caps its
-// window, and it equals ctx × KVElemsPerToken() whenever no layer does.
+// window or compresses, and it equals ctx × KVElemsPerToken() whenever the
+// Shape declares no profile.
 func (s Shape) KVElemsPerStream(ctx int) int {
 	if s.Kind == MHA {
 		return s.MHAElemsPerStream(ctx)
@@ -166,7 +250,7 @@ func (s Shape) KVElemsPerStream(ctx int) int {
 // KVBytesPerStream is the full KV footprint of one stream of ctx tokens at the
 // given quant. An unrefined Shape takes the original ctx × KV-bytes/token
 // expression untouched (bit-identical at any quant); a refined one sums its
-// layers under the window bound.
+// layers under the window bound plus any compressed rows.
 func (s Shape) KVBytesPerStream(ctx int, q Quant) float64 {
 	if s.uniform() {
 		return float64(ctx) * s.KVBytesPerToken(q)

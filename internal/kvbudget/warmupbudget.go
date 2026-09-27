@@ -18,6 +18,14 @@ package kvbudget
 // hardware, no network, and no wall clock in this file. Bad or empty
 // measurements fail closed to a zero, typed-reason budget: never a huge or a
 // negative budget.
+//
+// A compressed KV schedule (DeepSeek-V4 Flash, #13555) is not purely per-token:
+// each stream also holds context-independent state — its window rows, the
+// compressed rows' ceil slack, the compressor's in-flight buffer — however few
+// tokens it has. Dividing the whole measurement by a per-token slope would hand
+// that fixed state out as tokens, so WarmupCapacity can carry it per stream and
+// the derive withholds it for every stream admission may run at once. With no
+// fixed state declared the derive is the original fold, byte for byte.
 
 import "math"
 
@@ -46,8 +54,15 @@ const (
 	ReasonReserveOutOfRange Reason = "reserve_fraction_out_of_range"
 	// ReasonBelowOneUnit fails closed when a positive measurement, after the
 	// reserve is applied, no longer holds even one whole token (or one whole
-	// block) — the fitted room rounds down to a zero admittable budget.
+	// block) — the fitted room rounds down to a zero admittable budget. With
+	// fixed per-stream state declared, it also covers a measurement that the
+	// withheld fixed state consumes entirely.
 	ReasonBelowOneUnit Reason = "measured_below_one_unit"
+	// ReasonUnboundedStreamState fails closed when a WarmupCapacity declares
+	// fixed per-stream state but no positive MaxConcurrentStreams: without a
+	// stream bound the fixed state cannot be withheld, and deriving anyway would
+	// over-admit.
+	ReasonUnboundedStreamState Reason = "unbounded_fixed_stream_state"
 )
 
 // DerivedBudget is the outcome of turning a warmup measurement into an admission
@@ -65,8 +80,15 @@ type DerivedBudget struct {
 	// WarmupBlockCapacity). Zero on fail-closed.
 	ReservedAmount int64
 	// KeptAmount is the measured amount left after the reserve, in the same unit.
-	// Zero on fail-closed.
+	// Zero on fail-closed. With fixed per-stream state it is what is left after
+	// the reserve AND FixedStateAmount — the room the token budget divides —
+	// except when the fixed state consumes the whole kept measurement, where it
+	// is the kept measurement itself.
 	KeptAmount int64
+	// FixedStateAmount is the bytes withheld for MaxConcurrentStreams ×
+	// FixedBytesPerStream (saturating) before the per-token divide. Zero when no
+	// fixed per-stream state is declared.
+	FixedStateAmount int64
 }
 
 // Derived reports whether the budget was derived (a positive budget with an
@@ -137,8 +159,18 @@ type WarmupCapacity struct {
 	// zero or negative value fails the derive closed (no room measured).
 	UsableBytes int64
 	// BytesPerToken is the measured KV footprint of one token. A zero or
-	// negative value fails the derive closed (no divisor).
+	// negative value fails the derive closed (no divisor). For a compressed
+	// schedule it is the per-token slope bound, not an average.
 	BytesPerToken int64
+	// FixedBytesPerStream is the context-independent KV state one stream holds
+	// however few tokens it has (a compressed schedule's window rows, ceil
+	// slack, compressor in-flight buffer). Zero or negative means a per-token
+	// layout: the derive is byte-identical to the original fold.
+	FixedBytesPerStream int64
+	// MaxConcurrentStreams is how many streams can hold that fixed state at once
+	// (the admission max-num-seqs). Required (> 0) when FixedBytesPerStream > 0;
+	// ignored otherwise.
+	MaxConcurrentStreams int64
 }
 
 // DeriveTokenBudget turns the byte-measured warmup probe into an admission token
@@ -148,9 +180,76 @@ type WarmupCapacity struct {
 // measurement or unit fails closed to a zero, typed-reason budget; a positive
 // measurement that holds under one token's bytes after the reserve fails closed
 // with ReasonBelowOneUnit. Deterministic; no hardware, no clock.
+//
+// With FixedBytesPerStream > 0 the fixed state of MaxConcurrentStreams streams
+// is withheld after the reserve and before the divide:
+// floor((UsableBytes − reserve − MaxConcurrentStreams × FixedBytesPerStream) /
+// BytesPerToken). See deriveWithFixedState.
 func (c WarmupCapacity) DeriveTokenBudget(fraction float64) DerivedBudget {
-	// One token is the unit here, so tokens-per-unit is 1.
-	return deriveBudget(c.UsableBytes, c.BytesPerToken, 1, fraction)
+	if c.FixedBytesPerStream <= 0 {
+		// One token is the unit here, so tokens-per-unit is 1.
+		return deriveBudget(c.UsableBytes, c.BytesPerToken, 1, fraction)
+	}
+	return c.deriveWithFixedState(fraction)
+}
+
+// deriveWithFixedState is the byte derive for a layout with fixed per-stream
+// state. It validates in deriveBudget's order (unit size, reserve range,
+// measured capacity), then fails closed on an unbounded stream count, then
+// withholds the reserve and the saturating MaxConcurrentStreams ×
+// FixedBytesPerStream before dividing the rest by BytesPerToken. Fixed state
+// that meets or exceeds the kept measurement, or a remainder under one token,
+// fails closed with ReasonBelowOneUnit. On success ReservedAmount + KeptAmount +
+// FixedStateAmount == UsableBytes. Monotone in UsableBytes; never negative.
+func (c WarmupCapacity) deriveWithFixedState(fraction float64) DerivedBudget {
+	if c.BytesPerToken <= 0 {
+		return DerivedBudget{Reason: ReasonInvalidUnitSize}
+	}
+	if !validReserveFraction(fraction) {
+		return DerivedBudget{Reason: ReasonReserveOutOfRange}
+	}
+	if c.UsableBytes <= 0 {
+		return DerivedBudget{Reason: ReasonNoMeasuredCapacity}
+	}
+	if c.MaxConcurrentStreams <= 0 {
+		return DerivedBudget{Reason: ReasonUnboundedStreamState}
+	}
+	kept, reserved := applyReserve(c.UsableBytes, fraction)
+	fixed := saturatingMul(c.MaxConcurrentStreams, c.FixedBytesPerStream)
+	if fixed >= kept {
+		return DerivedBudget{
+			Reason:           ReasonBelowOneUnit,
+			ReservedAmount:   reserved,
+			KeptAmount:       kept,
+			FixedStateAmount: fixed,
+		}
+	}
+	room := kept - fixed
+	units := room / c.BytesPerToken // floor division; room > 0, BytesPerToken > 0
+	if units <= 0 {
+		return DerivedBudget{
+			Reason:           ReasonBelowOneUnit,
+			ReservedAmount:   reserved,
+			KeptAmount:       room,
+			FixedStateAmount: fixed,
+		}
+	}
+	return DerivedBudget{
+		TokenBudget:      units,
+		ReservedAmount:   reserved,
+		KeptAmount:       room,
+		FixedStateAmount: fixed,
+	}
+}
+
+// saturatingMul returns a × b for positive a and b, clamped to math.MaxInt64
+// instead of wrapping: an absurd stream count times a large fixed state must
+// read as "consumes everything", never as a small or negative product.
+func saturatingMul(a, b int64) int64 {
+	if a > math.MaxInt64/b {
+		return math.MaxInt64
+	}
+	return a * b
 }
 
 // WarmupBlockCapacity carries a warmup probe measured in KV BLOCKS: the count of
