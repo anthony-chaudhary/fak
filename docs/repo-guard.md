@@ -124,6 +124,19 @@ added later denies until explicitly softened).
 - `FAK_REPO_GUARD=warn` — **cap** every rung at advisory (softens `deny`, never escalates).
 - default (unset / `enforce`) — apply the per-reason severity table above.
 
+**Exec-form hook (`--mode`)** — the compiled `repoguard` binary can be wired as an
+exec-form hook, which spawns it directly with no shell (no bash, no Python) and so
+cannot carry an env prefix like `FAK_REPO_GUARD=warn`. Pass the same posture as a flag:
+
+```json
+{"matcher": "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit",
+ "hooks": [{"type": "command", "command": "<fak checkout>/tools/.bin/repoguard.exe", "args": ["--hook", "--mode", "warn"]}]}
+```
+
+`--mode` takes `enforce|warn|off` and applies only when `FAK_REPO_GUARD` is unset or blank —
+a non-blank env var still wins. A missing binary is a non-blocking hook error, so the
+call proceeds (fail-open).
+
 **Per-reason dial** — `FAK_REPO_GUARD_SEVERITY=REASON=level,REASON=level` sets the
 severity for individual reasons (a comma list; malformed pairs are skipped). Precedence:
 the master switch wins, then this per-reason override, then the default table.

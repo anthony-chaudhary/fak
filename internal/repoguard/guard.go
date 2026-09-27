@@ -723,6 +723,9 @@ type Hints struct {
 	// LeafDeclarations is the lane/tier taxonomy the UNDECLARED_LEAF rung compares
 	// a written internal/<leaf> path against.
 	LeafDeclarations LeafDeclarations
+	// SleepThresholdS overrides the FOREGROUND_SLEEP threshold in seconds
+	// (FAK_SLEEP_THRESHOLD_S); 0 means DefaultForegroundSleepThresholdS.
+	SleepThresholdS float64
 }
 
 func evaluate(toolName string, toolInput map[string]any, workspaceRoot string, safeRoots []string) []Violation {
@@ -742,14 +745,14 @@ func evaluateWithHints(toolName string, toolInput map[string]any, workspaceRoot 
 		violations = append(violations, classifyCommand(command, workspaceRoot, safeRoots)...)
 		violations = append(violations, classifyInteractive(command)...)
 		violations = append(violations, classifyWorkspaceCd(command, workspaceRoot)...)
-		violations = append(violations, classifySleepWait(command)...)
+		violations = append(violations, foregroundSleeps(command, toolInput, hints)...)
 		return append(violations, classifyForegroundNetworkLoop(command)...)
 	case "PowerShell":
 		// PowerShell has its own syntax-aware inventory rung in addition to
 		// the cross-shell foreground-wait advisory.
 		command := stringField(toolInput, "command")
 		violations := ClassifyBuildCacheClean(command)
-		violations = append(violations, classifySleepWait(command)...)
+		violations = append(violations, foregroundSleeps(command, toolInput, hints)...)
 		return append(violations, classifyForegroundPowerShellInventory(command)...)
 	case "shell_command", "functions.shell_command":
 		return ClassifyBuildCacheClean(stringField(toolInput, "command"))
@@ -768,6 +771,16 @@ func evaluateWithHints(toolName string, toolInput map[string]any, workspaceRoot 
 	return nil
 }
 
+// foregroundSleeps runs the FOREGROUND_SLEEP rung for a Bash/PowerShell call. A
+// harness-backgrounded call (run_in_background) never holds the turn, so it
+// yields nothing; the other rungs are unaffected.
+func foregroundSleeps(command string, toolInput map[string]any, hints Hints) []Violation {
+	if runInBackground(toolInput) {
+		return nil
+	}
+	return classifySleepWait(command, hints.SleepThresholdS)
+}
+
 // Evaluate classifies one tool call using the repo-guard structural rules.
 func Evaluate(toolName string, toolInput map[string]any, workspaceRoot string, safeRoots []string) []Violation {
 	return evaluate(toolName, toolInput, workspaceRoot, safeRoots)
@@ -781,7 +794,8 @@ func EvaluateWithLiveMonitorIDs(toolName string, toolInput map[string]any, works
 
 // EvaluateWithHints classifies one tool call with every IO-derived hint the
 // command layer resolved: live Monitor ids for the Read rung, and the lane/tier
-// taxonomy for the UNDECLARED_LEAF rung on Write/Edit.
+// taxonomy for the UNDECLARED_LEAF rung on Write/Edit, and the FOREGROUND_SLEEP
+// threshold override.
 func EvaluateWithHints(toolName string, toolInput map[string]any, workspaceRoot string, safeRoots []string, hints Hints) []Violation {
 	return evaluateWithHints(toolName, toolInput, workspaceRoot, safeRoots, hints)
 }

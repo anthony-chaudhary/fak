@@ -7,11 +7,14 @@
 //
 //	repoguard --hook                 # PreToolUse hook: read the tool call as JSON on
 //	                                 # stdin, emit a deny decision on a violation.
+//	repoguard --hook --mode warn     # exec-form hooks: same as FAK_REPO_GUARD=warn;
+//	                                 # the env var still wins.
 //	repoguard --check "<cmd>" --json # classify one Bash command (control-pane / CI).
 //	repoguard --selftest             # run the built-in case table and exit.
 //
 // Fail-OPEN on any internal error (a guard bug must never wedge a live fleet).
-// Soften with FAK_REPO_GUARD=warn (log, allow) or disable with FAK_REPO_GUARD=off.
+// Soften with FAK_REPO_GUARD=warn (log, allow) or disable with FAK_REPO_GUARD=off;
+// an exec-form hook (no shell, so no env prefix) passes --mode instead.
 package main
 
 import (
@@ -21,6 +24,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +33,7 @@ import (
 
 func main() {
 	hook := flag.Bool("hook", false, "Claude Code PreToolUse hook mode (reads JSON on stdin)")
+	mode := flag.String("mode", "", "hook mode when FAK_REPO_GUARD is unset: enforce|warn|off (exec-form hooks cannot set env)")
 	selftest := flag.Bool("selftest", false, "run the built-in case table and exit")
 	check := flag.String("check", "", "classify a single Bash command and report")
 	workspace := flag.String("workspace", "", "workspace root (default: nearest .git above cwd)")
@@ -41,7 +46,7 @@ func main() {
 	case *selftest:
 		os.Exit(runSelftest(os.Stdout))
 	case *hook:
-		os.Exit(runHook(os.Stdin, os.Stdout, os.Stderr))
+		os.Exit(runHookMode(os.Stdin, os.Stdout, os.Stderr, *mode))
 	case *summary:
 		os.Exit(runSummary(*workspace, *recentN, *asJSON, os.Stdout))
 	case *check != "":
@@ -70,15 +75,30 @@ type hookPayload struct {
 	SessionID string         `json:"session_id"`
 }
 
-// runHook parses a PreToolUse payload and emits a deny decision on a violation.
-// Fail-open on any error (defense-in-depth must never wedge the fleet). Always
-// returns 0 — a deny is signalled through the JSON decision on stdout, not the
-// exit code. Mirrors repo_guard.run_hook.
-func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
-	mode := strings.ToLower(strings.TrimSpace(os.Getenv("FAK_REPO_GUARD")))
-	if mode == "" {
-		mode = "enforce"
+// resolveMode picks the hook's master-switch mode. FAK_REPO_GUARD always wins
+// when set; otherwise the --mode flag (exec-form hooks cannot set env); otherwise
+// "enforce". Both sources are trimmed and lower-cased.
+func resolveMode(flagMode string) string {
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("FAK_REPO_GUARD"))); v != "" {
+		return v
 	}
+	if v := strings.ToLower(strings.TrimSpace(flagMode)); v != "" {
+		return v
+	}
+	return "enforce"
+}
+
+// runHook is runHookMode with no --mode flag (env or the "enforce" default).
+func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
+	return runHookMode(stdin, stdout, stderr, "")
+}
+
+// runHookMode parses a PreToolUse payload and emits a deny decision on a
+// violation. Fail-open on any error (defense-in-depth must never wedge the
+// fleet). Always returns 0 — a deny is signalled through the JSON decision on
+// stdout, not the exit code. Mirrors repo_guard.run_hook.
+func runHookMode(stdin io.Reader, stdout, stderr io.Writer, flagMode string) int {
+	mode := resolveMode(flagMode)
 	if mode == "off" {
 		return 0
 	}
@@ -108,6 +128,7 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
 	hints := repoguard.Hints{
 		LiveMonitorIDs:   liveMonitorIDsForRead(payload, workspaceRoot, stderr),
 		LeafDeclarations: leafDeclarationsForWrite(payload, workspaceRoot),
+		SleepThresholdS:  sleepThresholdFromEnv(),
 	}
 	violations := repoguard.EvaluateWithHints(payload.ToolName, payload.ToolInput, workspaceRoot, safeRoots, hints)
 	if len(violations) == 0 {
@@ -221,6 +242,17 @@ func severityOverridesFromEnv() map[string]repoguard.Severity {
 	return repoguard.ParseSeverityOverrides(os.Getenv("FAK_REPO_GUARD_SEVERITY"))
 }
 
+// sleepThresholdFromEnv reads FAK_SLEEP_THRESHOLD_S: a positive integer
+// overrides the FOREGROUND_SLEEP threshold; empty, non-numeric, or <= 0 yields 0
+// (the default) — a guard knob never fails closed on a typo.
+func sleepThresholdFromEnv() float64 {
+	v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("FAK_SLEEP_THRESHOLD_S")))
+	if err != nil || v <= 0 {
+		return 0
+	}
+	return float64(v)
+}
+
 func liveMonitorIDsForRead(payload hookPayload, workspaceRoot string, stderr io.Writer) map[string]bool {
 	if payload.ToolName != "Read" {
 		return nil
@@ -292,7 +324,7 @@ func runCheck(command, workspace string, asJSON bool, stdout io.Writer) int {
 	safeRoots := repoguard.SafeRootsForWorkspace(ws)
 	violations := repoguard.ClassifyCommand(command, ws, safeRoots)
 	violations = append(violations, repoguard.ClassifyInteractive(command)...)
-	violations = append(violations, repoguard.ClassifySleepWait(command)...)
+	violations = append(violations, repoguard.ClassifySleepWaitThreshold(command, sleepThresholdFromEnv())...)
 	violations = append(violations, repoguard.ClassifyForegroundNetworkLoop(command)...)
 	violations = append(violations, repoguard.ClassifyForegroundPowerShellInventory(command)...)
 	if violations == nil {
