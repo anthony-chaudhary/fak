@@ -32,14 +32,17 @@ const (
 	cronRunStatusFailed           = "failed"
 	cronRunStatusTimeout          = "timeout"
 	cronRunStatusExpired          = "expired"
+	cronRunStatusSkippedBusy      = "skipped_busy"
 
 	cronRunOutcomeSucceeded        = "succeeded"
 	cronRunOutcomeFailed           = "failed"
 	cronRunOutcomeTimeout          = "timeout"
 	cronRunOutcomeSkippedDuplicate = "skipped_duplicate"
 	cronRunOutcomeExpired          = "expired"
+	cronRunOutcomeSkippedBusy      = "skipped_busy"
 
 	cronRunExitTimeout = 124
+	cronRunExitBusy    = 3
 
 	// cronRunMaxInterruptCeiling bounds the operator override. The default
 	// remains CronHardInterruptCeiling; longer jobs must opt in explicitly.
@@ -129,6 +132,7 @@ func runCronRun(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit outcome receipt as JSON instead of human key-value")
 	until := fs.String("until", "", "expiration deadline (RFC3339); ticks after this time are marked expired")
 	workdir := fs.String("workdir", "", "working directory for child command execution")
+	executionLock := fs.String("execution-lock", "", "shared execution lock path; default is <ledger>.run.lock")
 
 	// Find the trailing "--" separator for command arguments
 	dashIdx := -1
@@ -268,6 +272,43 @@ func runCronRun(stdout, stderr io.Writer, argv []string) int {
 			return cronExitDeduped
 		}
 	}
+
+	executionLockPath := strings.TrimSpace(*executionLock)
+	if executionLockPath == "" {
+		executionLockPath = *ledger + ".run.lock"
+	}
+	releaseExecution, busy, err := cronRunExecutionLock(executionLockPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak cron run: %v\n", err)
+		return 2
+	}
+	if busy {
+		attemptedAt := time.Now().UTC().Format(time.RFC3339)
+		if err := cronAppendJSONL(*ledger, cronRunRecord{
+			Schema: cronRunSchema, Job: *job, Slot: slotKey,
+			Status: cronRunStatusSkippedBusy, Outcome: cronRunOutcomeSkippedBusy,
+			ExitCode: cronRunExitBusy, DurationMS: 0,
+			Command:   strings.Join(cmdArgs, " "),
+			Error:     "execution lock held by another active run",
+			StartedAt: attemptedAt, FinishedAt: attemptedAt,
+		}); err != nil {
+			fmt.Fprintf(stderr, "fak cron run: append busy record: %v\n", err)
+			return 2
+		}
+		emitCronRunReceipt(stdout, *asJSON, cronRunReceipt{
+			Schema:     cronRunReceiptSchema,
+			Job:        *job,
+			Slot:       slotKey,
+			Status:     cronRunStatusSkippedBusy,
+			Outcome:    cronRunOutcomeSkippedBusy,
+			ExitCode:   cronRunExitBusy,
+			DurationMS: 0,
+			Command:    strings.Join(cmdArgs, " "),
+			Error:      "execution lock held by another active run",
+		})
+		return cronRunExitBusy
+	}
+	defer func() { _ = releaseExecution() }()
 
 	// Slot admitted: append fire record
 	fireRec := cronFireRecord{

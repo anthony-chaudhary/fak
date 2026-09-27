@@ -306,6 +306,7 @@ func resolveOpsLedgerPath(repoRoot, companionRoot, jobName string) string {
 
 func buildOpsCronRunArgs(fakBin, repoRoot, companionRoot, workload, jobName string, interval, timeout time.Duration) []string {
 	ledgerPath := resolveOpsLedgerPath(repoRoot, companionRoot, jobName)
+	executionLockPath := filepath.Join(filepath.Dir(ledgerPath), "opencode-ops-workspace.run.lock")
 	intervalStr := formatOpsDuration(interval)
 	timeoutStr := formatOpsDuration(timeout)
 
@@ -371,6 +372,7 @@ func buildOpsCronRunArgs(fakBin, repoRoot, companionRoot, workload, jobName stri
 		"--timeout", timeoutStr,
 		"--interrupt-ceiling", timeoutStr,
 		"--workdir", repoRoot,
+		"--execution-lock", executionLockPath,
 		"--",
 	}
 	return append(runArgs, childCmd...)

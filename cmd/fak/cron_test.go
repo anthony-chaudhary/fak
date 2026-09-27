@@ -700,3 +700,28 @@ func TestCronRunInterruptCeilingOverride(t *testing.T) {
 		}
 	})
 }
+
+func TestOpsSchedulesShareCronExecutionLock(t *testing.T) {
+	root := t.TempDir()
+	issue := buildOpsCronRunArgs("fak", root, "", "issue-orchestrator", "opencode-issue-orchestrator", time.Hour, 10*time.Minute)
+	debt := buildOpsCronRunArgs("fak", root, "", "debt-orchestrator", "opencode-debt-orchestrator", time.Hour, 10*time.Minute)
+
+	lockArg := func(args []string) string {
+		t.Helper()
+		for i, arg := range args {
+			if arg == "--execution-lock" && i+1 < len(args) {
+				return args[i+1]
+			}
+		}
+		t.Fatalf("missing --execution-lock in %v", args)
+		return ""
+	}
+	issueLock, debtLock := lockArg(issue), lockArg(debt)
+	if issueLock != debtLock {
+		t.Fatalf("ops execution locks differ: issue=%q debt=%q", issueLock, debtLock)
+	}
+	want := filepath.Join(root, ".fak", "ledgers", "opencode-ops-workspace.run.lock")
+	if issueLock != want {
+		t.Fatalf("ops execution lock = %q, want %q", issueLock, want)
+	}
+}
