@@ -214,6 +214,23 @@ func countCandidateScopeEscapes(genv GitEnvRunner, git GitRunner, root string, e
 	return CountPathsOutsideTrees(strings.FieldsFunc(out, func(r rune) bool { return r == 0 }), paths), true
 }
 
+// candidateTreeUnchanged reports whether the built candidate tree is exactly
+// oldHEAD's tree, i.e. the worker patch adds nothing on top of current trunk.
+// It reads the commit object (not rev-parse) and FAILS OPEN: any unreadable or
+// unparsable commit returns false so this guard never manufactures a refusal.
+func candidateTreeUnchanged(genv GitEnvRunner, root string, env map[string]string, oldHEAD, treeSHA string) bool {
+	if oldHEAD == "" || treeSHA == "" {
+		return false
+	}
+	rc, out := runEnv(genv, root, env, []string{"cat-file", "commit", oldHEAD})
+	if rc != 0 {
+		return false
+	}
+	first, _, _ := strings.Cut(out, "\n")
+	tree, ok := strings.CutPrefix(strings.TrimSpace(first), "tree ")
+	return ok && strings.TrimSpace(tree) == treeSHA
+}
+
 func expandLandPaths(wtPath, diffRef string, requested []string, git GitRunner) ([]string, error) {
 	// Intent-to-add is needed only for untracked files: tracked files are already
 	// visible to git diff. Including --cached here expands a declared directory or
@@ -938,10 +955,12 @@ func landIsolatedProspectivePrepared(root, wtPath, diff, msgFile string, paths [
 					return isolatedLandReconciliation(wtPath, "could not seed isolated index", out)
 				}
 				// Stage the worker diff into the throwaway index ONLY (--cached never touches
-				// the working tree). A conflict here — first try or re-apply after a lost CAS —
-				// means a concurrent change to the SAME paths; preserve it for explicit
-				// reconciliation rather than force it or mutate the shared index.
-				if rc, out := runEnv(genv, root, env, []string{"apply", "--cached", "--whitespace=nowarn", patch}); rc != 0 {
+				// the working tree). --3way merges against the patch's recorded preimage
+				// blobs, so a trunk edit that only moved the hunk's context lines is
+				// accepted as a clean 3-way merge. Only a true overlapping conflict fails
+				// here (non-zero exit, unmerged stages left in the throwaway index) and
+				// is preserved for explicit reconciliation rather than forced.
+				if rc, out := runEnv(genv, root, env, []string{"apply", "--cached", "--3way", "--whitespace=nowarn", patch}); rc != 0 {
 					finishIndex()
 					return isolatedLandReconciliation(wtPath, "worker patch conflicts with current trunk", out)
 				}
@@ -961,10 +980,13 @@ func landIsolatedProspectivePrepared(root, wtPath, diff, msgFile string, paths [
 				return isolatedLandReconciliation(wtPath, "could not seed isolated index", out)
 			}
 			// Stage the worker diff into the throwaway index ONLY (--cached never touches
-			// the working tree). A conflict here — first try or re-apply after a lost CAS —
-			// means a concurrent change to the SAME paths; preserve it for explicit
+			// the working tree). The worker base is usually many trunk commits behind,
+			// so --3way merges against the patch's recorded preimage blobs: a peer edit
+			// near (but not on) the worker's hunk is a clean 3-way merge, not a refusal.
+			// Only a true overlapping conflict fails here (non-zero exit, unmerged
+			// stages left in the throwaway index); preserve it for explicit
 			// reconciliation rather than force it or mutate the shared index.
-			if rc, out := runEnv(genv, root, env, []string{"apply", "--cached", "--whitespace=nowarn", patch}); rc != 0 {
+			if rc, out := runEnv(genv, root, env, []string{"apply", "--cached", "--3way", "--whitespace=nowarn", patch}); rc != 0 {
 				finishIndex()
 				return isolatedLandReconciliation(wtPath, "worker patch conflicts with current trunk", out)
 			}
@@ -975,6 +997,13 @@ func landIsolatedProspectivePrepared(root, wtPath, diff, msgFile string, paths [
 				return isolatedLandReconciliation(wtPath, "could not write isolated candidate tree", tree)
 			}
 			finishIndex()
+		}
+		// A 3-way apply (or merge-tree rebase) of a change trunk already carries
+		// merges cleanly to trunk's own tree; committing it would mint an empty
+		// duplicate. Refuse for reconciliation exactly as a plain apply of an
+		// already-landed patch did.
+		if candidateTreeUnchanged(genv, root, env, oldHEAD, treeSHA) {
+			return isolatedLandReconciliation(wtPath, "worker patch is already present in current trunk", "candidate tree equals trunk tree "+shortSHA(treeSHA))
 		}
 		// Pre-CAS candidate delta fence: the built tree must not change any path
 		// outside the declared scope. Refuse BEFORE commit-tree/update-ref so trunk
