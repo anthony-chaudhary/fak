@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	rmetrics "runtime/metrics"
 	"sort"
 	"sync"
 	"time"
@@ -35,10 +34,11 @@ const (
 	LivenessStalled LivenessClass = "stalled"
 )
 
-// Sampler reads this process' resource state. The default sampler uses the Go
-// runtime: memory stats, goroutine count, and runtime CPU-class seconds when the
-// Go toolchain exposes that metric. The clock is injectable so tests can prove ETA
-// and elapsed-time math without sleeping.
+// Sampler reads this process' resource state. The default sampler (SampleRuntime)
+// reads one availability-checked runtime/metrics vector: memory classes,
+// goroutine count, and runtime CPU-class seconds, naming any field the Go
+// toolchain does not expose in ResourceSample.Unavailable. The clock is
+// injectable so tests can prove ETA and elapsed-time math without sleeping.
 type Sampler func(processStart, now time.Time) ResourceSample
 
 type Option func(*Manager)
@@ -184,6 +184,9 @@ type ResourceSample struct {
 	HeapSysBytes   uint64  `json:"heap_sys_bytes,omitempty"`
 	SysBytes       uint64  `json:"sys_bytes,omitempty"`
 	Goroutines     int     `json:"goroutines,omitempty"`
+	// Unavailable names the fields above that the sampler could not observe
+	// (#10182); their zero is not a measurement.
+	Unavailable []string `json:"unavailable,omitempty"`
 }
 
 type ResourceDelta struct {
@@ -194,6 +197,8 @@ type ResourceDelta struct {
 	HeapSysBytes   int64   `json:"heap_sys_bytes,omitempty"`
 	SysBytes       int64   `json:"sys_bytes,omitempty"`
 	Goroutines     int     `json:"goroutines,omitempty"`
+	// Unavailable names fields unobserved at either end; their delta is zeroed.
+	Unavailable []string `json:"unavailable,omitempty"`
 }
 
 type ResourceWindow struct {
@@ -662,30 +667,6 @@ func (m *Manager) stepSnapshotLocked(step *stepState, now time.Time, current Res
 	return out
 }
 
-func SampleRuntime(processStart, now time.Time) ResourceSample {
-	var ms runtime.MemStats
-	runtime.ReadMemStats(&ms)
-	return ResourceSample{
-		TSUnixNano:     now.UnixNano(),
-		WallSeconds:    seconds(now.Sub(processStart)),
-		CPUSeconds:     runtimeCPUSeconds(),
-		HeapAllocBytes: ms.HeapAlloc,
-		HeapInuseBytes: ms.HeapInuse,
-		HeapSysBytes:   ms.HeapSys,
-		SysBytes:       ms.Sys,
-		Goroutines:     runtime.NumGoroutine(),
-	}
-}
-
-func runtimeCPUSeconds() float64 {
-	samples := []rmetrics.Sample{{Name: "/cpu/classes/total:cpu-seconds"}}
-	rmetrics.Read(samples)
-	if samples[0].Value.Kind() != rmetrics.KindFloat64 {
-		return 0
-	}
-	return samples[0].Value.Float64()
-}
-
 func (m *Manager) sampleAt(now time.Time) ResourceSample {
 	s := m.sampler(m.started, now)
 	if s.TSUnixNano == 0 {
@@ -779,7 +760,7 @@ func estimate(start, now time.Time, state State, p progressState) (*float64, *in
 }
 
 func resourceDelta(start, current ResourceSample) ResourceDelta {
-	return ResourceDelta{
+	return withoutUnavailable(ResourceDelta{
 		WallSeconds:    current.WallSeconds - start.WallSeconds,
 		CPUSeconds:     current.CPUSeconds - start.CPUSeconds,
 		HeapAllocBytes: signedDelta(current.HeapAllocBytes, start.HeapAllocBytes),
@@ -787,7 +768,7 @@ func resourceDelta(start, current ResourceSample) ResourceDelta {
 		HeapSysBytes:   signedDelta(current.HeapSysBytes, start.HeapSysBytes),
 		SysBytes:       signedDelta(current.SysBytes, start.SysBytes),
 		Goroutines:     current.Goroutines - start.Goroutines,
-	}
+	}, start, current)
 }
 
 func signedDelta(current, start uint64) int64 {

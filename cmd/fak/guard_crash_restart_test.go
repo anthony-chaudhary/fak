@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -418,31 +419,24 @@ func TestGuardCodexCLIUsageFailureStopsBeforeRestart(t *testing.T) {
 	statePath := filepath.Join(dir, "child-state")
 	auditPath := filepath.Join(dir, "audit.jsonl")
 
-	cmd := exec.Command(os.Args[0], "guard")
-	guardArgs := strings.Join([]string{
+	run := newGuardCrashWitnessRun(t, dir, []string{
 		"--quiet", "--provider", "openai",
 		"--api-key-env", "FAK_GUARD_CRASH_WITNESS_KEY",
 		"--audit", auditPath,
 		"--", codexPath, "--fak-guard-crash-witness-child",
-	}, " ")
-	cmd.Env = append(os.Environ(),
-		guardE2EHelperEnv+"="+guardArgs,
+	},
 		"FAK_GUARD_CRASH_WITNESS_KEY=test-only",
 		"FAK_GUARD_CRASH_WITNESS_STATE="+statePath,
 		"FAK_GUARD_CRASH_WITNESS_MODE=codex-usage",
-		"FAK_FLEET_BUS="+filepath.Join(dir, "fleet-bus"),
 		guardCrashRestartLimitEnv+"=3",
 	)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err := run.run(t)
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 2 {
-		t.Fatalf("guard exit=%v, want preserved child exit 2\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+		t.Fatalf("guard exit=%v, want preserved child exit 2\nstdout:\n%s\nstderr:\n%s", err, run.stdout.String(), run.stderr.String())
 	}
-	gotStderr := stderr.String()
+	gotStderr := run.stderr.String()
 	for _, want := range []string{
 		"error: unexpected argument '--full-auto' found",
 		"Usage: codex exec [OPTIONS] [PROMPT]",
@@ -514,7 +508,6 @@ func runGuardCodexInvalidJSONFailureStopsBeforeRestart(t *testing.T, maxDuration
 	statePath := filepath.Join(dir, "child-state")
 	auditPath := filepath.Join(dir, "audit.jsonl")
 
-	cmd := exec.Command(os.Args[0], "guard")
 	args := []string{
 		"--quiet", "--provider", "openai",
 		"--api-key-env", "FAK_GUARD_CRASH_WITNESS_KEY",
@@ -524,29 +517,23 @@ func runGuardCodexInvalidJSONFailureStopsBeforeRestart(t *testing.T, maxDuration
 		args = append(args, "--max-duration", maxDuration)
 	}
 	args = append(args, "--", codexPath, "exec", "resume", "test-session", "--json", "--fak-guard-crash-witness-child")
-	guardArgs := strings.Join(args, " ")
-	cmd.Env = append(os.Environ(),
-		guardE2EHelperEnv+"="+guardArgs,
+	run := newGuardCrashWitnessRun(t, dir, args,
 		"FAK_GUARD_CRASH_WITNESS_KEY=test-only",
 		"FAK_GUARD_CRASH_WITNESS_STATE="+statePath,
 		"FAK_GUARD_CRASH_WITNESS_MODE=codex-invalid-json",
-		"FAK_FLEET_BUS="+filepath.Join(dir, "fleet-bus"),
 		guardCrashRestartLimitEnv+"=3",
 	)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err := run.run(t)
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
-		t.Fatalf("guard exit=%v, want preserved child exit 1\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+		t.Fatalf("guard exit=%v, want preserved child exit 1\nstdout:\n%s\nstderr:\n%s", err, run.stdout.String(), run.stderr.String())
 	}
 	const failedEvent = `{"type":"turn.failed","error":{"message":"failed to parse function arguments: EOF while parsing an object at line 1 column 2","codex_error_info":"other"}}` + "\n"
-	if got := stdout.String(); got != failedEvent {
+	if got := run.stdout.String(); got != failedEvent {
 		t.Fatalf("stdout changed: got %q, want %q", got, failedEvent)
 	}
-	gotStderr := stderr.String()
+	gotStderr := run.stderr.String()
 	for _, want := range []string{"codex progress sentinel", guardCodexInvalidJSONReason} {
 		if !strings.Contains(gotStderr, want) {
 			t.Fatalf("stderr missing %q:\n%s", want, gotStderr)
@@ -610,34 +597,27 @@ func TestGuardCodexUnrelatedExitOneRemainsRestartable(t *testing.T) {
 			codexPath := guardNamedCodexTestBinary(t, dir)
 			statePath := filepath.Join(dir, "child-state")
 			auditPath := filepath.Join(dir, "audit.jsonl")
-			cmd := exec.Command(os.Args[0], "guard")
-			guardArgs := strings.Join([]string{
+			run := newGuardCrashWitnessRun(t, dir, []string{
 				"--quiet", "--provider", "openai",
 				"--api-key-env", "FAK_GUARD_CRASH_WITNESS_KEY",
 				"--audit", auditPath,
 				"--", codexPath, "exec", "--json", "--fak-guard-crash-witness-child",
-			}, " ")
-			cmd.Env = append(os.Environ(),
-				guardE2EHelperEnv+"="+guardArgs,
+			},
 				"FAK_GUARD_CRASH_WITNESS_KEY=test-only",
 				"FAK_GUARD_CRASH_WITNESS_STATE="+statePath,
 				"FAK_GUARD_CRASH_WITNESS_MODE="+tc.mode,
-				"FAK_FLEET_BUS="+filepath.Join(dir, "fleet-bus"),
 				guardCrashRestartLimitEnv+"=3",
 			)
-			var stdout, stderr bytes.Buffer
-			cmd.Stdout = &stdout
-			cmd.Stderr = &stderr
-			if err := cmd.Run(); err != nil {
-				t.Fatalf("guard did not recover unrelated exit 1: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+			if err := run.run(t); err != nil {
+				t.Fatalf("guard did not recover unrelated exit 1: %v\nstdout:\n%s\nstderr:\n%s", err, run.stdout.String(), run.stderr.String())
 			}
-			if got := stdout.String(); got != tc.wantStdout {
+			if got := run.stdout.String(); got != tc.wantStdout {
 				t.Fatalf("stdout=%q, want preserved %q", got, tc.wantStdout)
 			}
 			if got := strings.TrimSpace(string(mustReadFile(t, statePath))); got != "2" {
 				t.Fatalf("child launch count=%s, want one restart", got)
 			}
-			gotStderr := stderr.String()
+			gotStderr := run.stderr.String()
 			if !strings.Contains(gotStderr, "restarting the child") || strings.Contains(gotStderr, guardCodexInvalidJSONReason) {
 				t.Fatalf("unrelated exit-1 supervision status:\n%s", gotStderr)
 			}
@@ -664,6 +644,69 @@ func TestGuardCodexUnrelatedExitOneRemainsRestartable(t *testing.T) {
 			}
 		})
 	}
+}
+
+// guardCrashWitnessDeadline bounds every real `fak guard` launch in this file. Each launch
+// finishes in about a second; the bound exists so a wedged guard (a child that never exits,
+// a relaunch that recurses, or a grandchild that keeps the stdout/stderr pipes open) fails
+// this test fast with the captured streams instead of consuming the whole `go test` timeout.
+// It is sized to the failure mode, not the happy path, like guardE2EHangDeadline.
+const guardCrashWitnessDeadline = 2 * time.Minute
+
+// guardCrashWitnessRun is one real `fak guard` process driven through TestMain's
+// guardE2EHelperEnv hook, with its streams captured for assertions.
+type guardCrashWitnessRun struct {
+	ctx    context.Context
+	cmd    *exec.Cmd
+	stdout bytes.Buffer
+	stderr bytes.Buffer
+}
+
+// newGuardCrashWitnessRun prepares the real guard entry point as a child process. Beyond the
+// helper argv, it pins the per-test state the guard would otherwise take from the host:
+//   - FAK_FLEET_BUS and FAK_SESSION_REGISTRY live under dir. TestMain's package-wide
+//     registry is shared by every test in the binary, so an in-process test that wrote
+//     child-registration rows there made a later --max-duration guard (whose durable session
+//     restore reads the same path) log a schema collision in full-package runs.
+//   - FAK_HEADLESS=1 keeps guardOwnsInteractiveTerminal false. Under Windows Terminal
+//     (WT_SESSION) or a Unix TERM, each launch otherwise records an operator interactive
+//     session row in the real user and machine guard registries, and every nonzero-exit
+//     witness here leaves that row without its deferred tombstone because the guard ends in
+//     os.Exit.
+//
+// extraEnv is appended last, so a test can override any of these.
+func newGuardCrashWitnessRun(t *testing.T, dir string, guardArgs []string, extraEnv ...string) *guardCrashWitnessRun {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), guardCrashWitnessDeadline)
+	t.Cleanup(cancel)
+	run := &guardCrashWitnessRun{ctx: ctx}
+	// Keep a real verb-shaped argv for recordGuardUsage, while TestMain takes the guard
+	// command from guardE2EHelperEnv. The production binary always has os.Args[1]="guard".
+	run.cmd = exec.CommandContext(ctx, os.Args[0], "guard")
+	// After a deadline kill, stop waiting for pipe EOF too: a surviving grandchild that
+	// inherited stdout/stderr must not turn the bounded failure back into a hang.
+	run.cmd.WaitDelay = 10 * time.Second
+	run.cmd.Env = append(os.Environ(),
+		guardE2EHelperEnv+"="+strings.Join(guardArgs, " "),
+		"FAK_FLEET_BUS="+filepath.Join(dir, "fleet-bus"),
+		"FAK_SESSION_REGISTRY="+filepath.Join(dir, "sessions.jsonl"),
+		"FAK_HEADLESS=1",
+	)
+	run.cmd.Env = append(run.cmd.Env, extraEnv...)
+	run.cmd.Stdout = &run.stdout
+	run.cmd.Stderr = &run.stderr
+	return run
+}
+
+// run executes the guard and returns its exit error. A deadline kill is a test failure that
+// reports both captured streams; it is never returned as an ordinary exit status.
+func (r *guardCrashWitnessRun) run(t *testing.T) error {
+	t.Helper()
+	err := r.cmd.Run()
+	if errors.Is(r.ctx.Err(), context.DeadlineExceeded) {
+		t.Fatalf("fak guard did not exit within %s and was killed (%v)\nstdout:\n%s\nstderr:\n%s", guardCrashWitnessDeadline, err, r.stdout.String(), r.stderr.String())
+	}
+	return err
 }
 
 func mustReadFile(t *testing.T, path string) []byte {
@@ -722,30 +765,21 @@ func TestGuardParentSurvivesHarnessCrash(t *testing.T) {
 	observedPath := filepath.Join(dir, "observed.jsonl")
 	auditPath := filepath.Join(dir, "audit.jsonl")
 
-	// Keep a real verb-shaped argv for recordGuardUsage, while TestMain takes the guard
-	// command from guardE2EHelperEnv. The production binary always has os.Args[1]="guard".
-	cmd := exec.Command(os.Args[0], "guard")
-	guardArgs := strings.Join([]string{
+	run := newGuardCrashWitnessRun(t, dir, []string{
 		"--quiet", "--provider", "anthropic",
 		"--api-key-env", "FAK_GUARD_CRASH_WITNESS_KEY",
 		"--audit", auditPath,
 		"--", os.Args[0], "--fak-guard-crash-witness-child",
-	}, " ")
-	cmd.Env = append(os.Environ(),
-		guardE2EHelperEnv+"="+guardArgs,
+	},
 		"FAK_GUARD_CRASH_WITNESS_KEY=test-only",
 		"FAK_GUARD_CRASH_WITNESS_STATE="+statePath,
 		"FAK_GUARD_CRASH_WITNESS_OBSERVED="+observedPath,
-		"FAK_FLEET_BUS="+filepath.Join(dir, "fleet-bus"),
 	)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("guard process did not converge after child crash: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	if err := run.run(t); err != nil {
+		t.Fatalf("guard process did not converge after child crash: %v\nstdout:\n%s\nstderr:\n%s", err, run.stdout.String(), run.stderr.String())
 	}
-	if got := stderr.String(); !strings.Contains(got, "guard remains up and is restarting the child in place") {
+	if got := run.stderr.String(); !strings.Contains(got, "guard remains up and is restarting the child in place") {
 		t.Fatalf("guard did not report parent/child crash isolation:\n%s", got)
 	}
 

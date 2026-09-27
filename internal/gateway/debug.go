@@ -4,15 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/guardvars"
+	"github.com/anthony-chaudhary/fak/internal/harnessres"
 	"github.com/anthony-chaudhary/fak/internal/resumemetrics"
+	"github.com/anthony-chaudhary/fak/internal/runtimeobs"
 )
 
 type debugVarsResponse struct {
@@ -169,6 +173,39 @@ type debugRuntimeVars struct {
 	GOMAXPROCS   int             `json:"gomaxprocs"`
 	NumGoroutine int             `json:"num_goroutine"`
 	Memory       debugMemoryVars `json:"memory"`
+	// GoRuntime is the typed runtime/metrics receipt (#10182): scheduler
+	// states and latency, GC cycles/CPU/pauses, and memory split into Go heap
+	// vs runtime-mapped vs process RSS. Unreadable axes are JSON null and named
+	// in go_runtime.unavailable. Diff two scrapes with runtimeobs.Diff.
+	GoRuntime runtimeobs.Receipt `json:"go_runtime"`
+}
+
+// goRuntimeCollector is process-global because runtime/metrics are: every
+// Server in the process reports one epoch and a monotonic seq, so successive
+// /debug/vars scrapes are Diff-able.
+var goRuntimeCollector = sync.OnceValue(func() *runtimeobs.Collector {
+	return runtimeobs.New(runtimeobs.WithRSSReader(selfRSSReader(runtime.GOOS)))
+})
+
+// selfRSSReader returns the current-RSS reader for the platforms where
+// harnessres has one (Linux /proc, Windows working set). Elsewhere (darwin has
+// only a peak via getrusage) it returns nil, which the receipt names no_reader,
+// so read_failed keeps meaning "a reader exists and failed".
+func selfRSSReader(goos string) func() (uint64, bool) {
+	switch goos {
+	case "linux", "windows":
+		return selfRSSBytes
+	}
+	return nil
+}
+
+// selfRSSBytes reads this process's resident set through harnessres.
+func selfRSSBytes() (uint64, bool) {
+	pr, ok := harnessres.ReadProcessResource(os.Getpid())
+	if !ok || !pr.HaveRSS {
+		return 0, false
+	}
+	return pr.RSSBytes, true
 }
 
 type debugMemoryVars struct {
@@ -700,6 +737,7 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 			GOMAXPROCS:   runtime.GOMAXPROCS(0),
 			NumGoroutine: runtime.NumGoroutine(),
 			Memory:       newDebugMemoryVars(&mem),
+			GoRuntime:    goRuntimeCollector().Sample(),
 		},
 		Kernel: debugKernelVars{
 			Submits:      c.Submits,

@@ -386,7 +386,20 @@ func buildRunPlanner(ctx context.Context, modelRef, backendName string, metalFla
 			os.Exit(1)
 		}
 	} else {
-		load()
+		// Same admission seam as serve (#9586/#9587): a load that leaves no in-kernel
+		// model releases the reservation without marking it steady, and the release
+		// frees the weights before handing the reservation and GPU lease back.
+		residencyRelease, err = admitLocalMetalModel(useMetal, ref, gpulease.Options{}, metalAdmissionSpec{
+			Load: func() bool {
+				load()
+				return inKernelModel != nil
+			},
+			Teardown: func() error { return closeAdmittedModelWeights(inKernelModel) },
+		})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fak run: Metal model residency:", err)
+			os.Exit(1)
+		}
 	}
 	if inKernelModel == nil {
 		if residencyRelease != nil {

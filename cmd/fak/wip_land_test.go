@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 // landTestRepo builds a throwaway repo (via wipTestRepo) whose HEAD is on `main`, the
@@ -166,6 +168,45 @@ func TestWipLandOwnWipCommitsPresentDelta(t *testing.T) {
 	}
 	if !res.Committed || !res.Verified {
 		t.Fatalf("expected a verified commit, got %+v", res)
+	}
+}
+
+// TestWipLandStillRefusesAnotherSessionsCheckpointedPath bounds the self-ownership fix:
+// land tells safecommit it acts AS the landed session, so only THAT session's ref stops
+// reading as a peer. A path another session's live checkpoint also captured is still that
+// peer's WIP under safecommit's guard, and a declared --path land of it refuses rather
+// than committing it.
+func TestWipLandStillRefusesAnotherSessionsCheckpointedPath(t *testing.T) {
+	// Hermetic against the host: the guard mode knob and the managed-worker marker (which
+	// enables narrow hunk reconciliation) must both be at their shared-tree defaults.
+	t.Setenv("FAK_PEER_WIP_GUARD", "")
+	t.Setenv(workerworktree.WorktreeDirEnv, "")
+	ctx := context.Background()
+	dir, file := landTestRepo(t)
+
+	if err := os.WriteFile(file, []byte("base line\ncontested edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wipCheckpoint(ctx, dir, "peersess", true, 1000); err != nil {
+		t.Fatalf("peer checkpoint: %v", err)
+	}
+	if _, err := wipCheckpoint(ctx, dir, "sessA", true, 1001); err != nil {
+		t.Fatalf("checkpoint: %v", err)
+	}
+	headBefore, err := gitWipOut(ctx, dir, nil, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, code, err := wipLandWith(ctx, dir, "sessA", wipLandOptions{Paths: []string{"note.txt"}})
+	if code != 1 || err == nil || res.Committed {
+		t.Fatalf("expected a safecommit peer refusal (rc=1, err, no commit), got rc=%d err=%v res=%+v", code, err, res)
+	}
+	if res.Reason != "PEER_WIP_COLLISION" || !strings.Contains(err.Error(), "peersess") || strings.Contains(err.Error(), "session sessA") {
+		t.Fatalf("refusal must name the OTHER session only: reason=%q err=%v", res.Reason, err)
+	}
+	if headAfter, err := gitWipOut(ctx, dir, nil, "rev-parse", "HEAD"); err != nil || headAfter != headBefore {
+		t.Fatalf("a refused land moved HEAD: before=%s after=%s err=%v", headBefore, headAfter, err)
 	}
 }
 
