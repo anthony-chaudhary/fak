@@ -1,10 +1,10 @@
 ---
 name: issue-orchestrator
-description: Plan, partition, and coordinate multi-wave parallel subagent campaigns to resolve and close GitHub issues across the repository. Uses `fak issue-orchestrator --plan-waves` (or `fak issue-lanes`) to partition the...
+description: Plan, partition, and coordinate multi-wave parallel subagent campaigns to resolve and close GitHub issues. Uses `fak issue-orchestrator --plan-waves` (or `fak issue-lanes`) to partition the backlog into...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/issue-orchestrator/SKILL.md
-  canonical-description-hash: 3b96d8448da6feb44c221659c0e9fb7f6facfb521f5380bdf30344f320c481f4
+  canonical-description-hash: 48698ce85debd151860dd41d680003f19baba35ab9d8317a701da66cc690f84b
 ---
 
 # Canonical project skill adapter

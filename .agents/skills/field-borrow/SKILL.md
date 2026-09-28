@@ -1,10 +1,10 @@
 ---
 name: field-borrow
-description: High-priority default "inspired by" workflow. Invoke proactively whenever an external product, repository, paper, standard, benchmark, release, issue, PR, roadmap, design discussion, or field practice could improve...
+description: High-priority default "inspired by" workflow. Invoke proactively whenever an external product, repository, paper, standard, benchmark, release, issue, PR, or field practice could improve fak—not only on explicit...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/field-borrow/SKILL.md
-  canonical-description-hash: d5b6d9dedb8e6216fff47debc967761659c3fd8b4cf7650f4a357b5be0f66033
+  canonical-description-hash: 719c12995618316fb051d6db67e4a4bcd7d95ccee89b60b5f9d6af6063546da2
 ---
 
 # Canonical project skill adapter

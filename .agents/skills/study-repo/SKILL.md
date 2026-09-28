@@ -5,7 +5,7 @@ metadata:
   opencode: claude-only
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/study-repo/SKILL.md
-  canonical-description-hash: 5fa87dabbd97a8fd5904ed2ae0084828d1b42b71980cfa2bcc301e9aa4c727c5
+  canonical-description-hash: ca725337d26671571dd35d6d3f05a6fe1214ce22500ee7ec5ae0a2f480686670
 ---
 
 # Canonical project skill adapter

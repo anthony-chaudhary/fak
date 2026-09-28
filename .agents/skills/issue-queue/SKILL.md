@@ -1,10 +1,10 @@
 ---
 name: issue-queue
-description: One repeatable, evidence-backed pass that manages, prioritizes, and resolves a bounded batch of backlog issues worst-first using specialized subagents. Inspects the issue queue via `fak issue-orchestrator` and `fak...
+description: One repeatable, evidence-backed pass that prioritizes and resolves a bounded batch of backlog issues worst-first using specialized subagents. Inspects the queue via `fak issue-orchestrator` and `fak dispatch order`,...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/issue-queue/SKILL.md
-  canonical-description-hash: d21c1ad8772283f501c37707956a090acfdc9da35f0307801aba8673434b79be
+  canonical-description-hash: 461ac29a658acc23a77d1be000c4d3290ac9f46120f0acd0376d388ecec5e5c6
 ---
 
 # Canonical project skill adapter

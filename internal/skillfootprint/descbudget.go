@@ -34,9 +34,10 @@ import "fmt"
 // Changing this number is the whole point: it is the reviewable justification for a
 // change to the resident userland tax. Raise it only alongside the skill
 // description that grew it; lower it whenever a trim banks a win. Pinned at the
-// measured floor at the time of the #5444 pin (see the baseline doc for the exact
-// skill count and the regeneration command).
-const SkillDescriptionBudgetBytes = 34000
+// measured floor (see the baseline doc for the exact skill count and the regeneration
+// command). Re-pinned 34000 → 33769 (73 skills) after trimming the heaviest
+// descriptions paid for the +536 B two new skills added and banked the remainder.
+const SkillDescriptionBudgetBytes = 33769
 
 // SkillDescriptionRatchetSlackBytes is how far the measured floor may sit BELOW the
 // budget before the gate demands the ceiling be re-pinned. It absorbs incidental

@@ -1,6 +1,6 @@
 ---
 name: field-borrow
-description: High-priority default "inspired by" workflow. Invoke proactively whenever an external product, repository, paper, standard, benchmark, release, issue, PR, roadmap, design discussion, or field practice could improve fak—not only on explicit borrow requests. Mine code, tests, docs, history, releases, open/closed issues, PRs, discussions, roadmaps, and provenance; date observations and source events; directly port/adapt when exact-source licensing permits; explore the spirit of promising proposed or incomplete ideas; then dogfood fak self-query to classify PRESENT/PARTIAL/ABSENT before shipping or filing witnessed gaps. Assign each. Use when this named workflow matches the task.
+description: High-priority default "inspired by" workflow. Invoke proactively whenever an external product, repository, paper, standard, benchmark, release, issue, PR, or field practice could improve fak—not only on explicit borrow requests. Mine code, tests, docs, history, issues, PRs, roadmaps, and provenance; date observations; port/adapt directly when exact-source licensing permits; explore the spirit of promising incomplete ideas; then dogfood fak self-query to classify PRESENT/PARTIAL/ABSENT before shipping or filing witnessed gaps. Use when this named workflow matches the task.
 ---
 
 # field-borrow — borrow from the field, but witness the gap against yourself first
