@@ -46,6 +46,9 @@ const (
 	WorkWaitingCoordination WorkState = "waiting-coordination"
 	WorkWaitingEvidence     WorkState = "waiting-evidence"
 	WorkCapacityHold        WorkState = "capacity-hold"
+	// WorkComplete is a packet whose exit was met by an accepted receipt. It carries
+	// the accepted Result instead of a NextAction and never consumes a worker.
+	WorkComplete WorkState = "complete"
 )
 
 type EvidenceRef struct {
@@ -133,6 +136,18 @@ type WorkPacket struct {
 	BlockedByIDs      []string  `json:"blocked_by_ids,omitempty"`
 	NextAction        string    `json:"next_action"`
 	ExitWhen          string    `json:"exit_when"`
+	// RelatedIssues follow Issue in the rendered reference (an accepted receipt, a
+	// reopened owner) without replacing the packet's primary issue.
+	RelatedIssues []int `json:"related_issues,omitempty"`
+	// SatisfiedDependencyIDs are hard dependencies already met by a complete packet,
+	// kept so the program order stays visible after the dependency closes.
+	SatisfiedDependencyIDs []string `json:"satisfied_dependency_ids,omitempty"`
+	// BlockedByCondition is a current blocker that is not a work packet (a device
+	// window, a host condition); BlockedByIDs remains the packet-to-packet form.
+	BlockedByCondition string `json:"blocked_by_condition,omitempty"`
+	// Result is the accepted outcome of a complete packet; required exactly when
+	// State is WorkComplete, where it replaces NextAction.
+	Result string `json:"result,omitempty"`
 }
 
 // OSSRoute is a current queue projection, not a claim that a candidate source
@@ -298,7 +313,7 @@ func BuildCurrentSnapshot(graph Graph) (CurrentSnapshot, error) {
 			},
 		},
 		Programs: []ExecutionProgram{
-			{ID: "mac-top10", Name: "Qwen3.8 Mac next ten", AuthorityIssue: 9430, ConstraintIDs: []string{"metal-startup-capacity", "metal-resident-decode", "native-serving-stack", "measurement-control-loop"}, HeroMetric: "10 / 10 quality-clean, net-positive KEEP receipts", CurrentResult: "0 / 10 KEEP; M1 and M2 mechanisms landed at 58fc89e29 and 8a423b8a5 but await exact keep/reject measurements", SequenceRule: "M1-M4 are the memory/submission spine; M5 is the exact receipt gate; M6-M9 are isolated serving arms; M10 is matched close-out. Same-device experiments are serial."},
+			{ID: "mac-top10", Name: "Qwen3.8 Mac next ten", AuthorityIssue: 9430, ConstraintIDs: []string{"metal-startup-capacity", "metal-resident-decode", "native-serving-stack", "measurement-control-loop"}, HeroMetric: "10 / 10 quality-clean, net-positive KEEP receipts", CurrentResult: "2 / 10 KEEP (M1 #9482 and M2 #9525 only); M10's `d3cf7df2e` bundle retains delivery credit but its performance credit was invalidated on 2026-09-27", SequenceRule: "M3-M4 remain the memory/submission spine; M5 is the exact receipt gate; M6-M9 are isolated serving arms; reopened #9513/#2723 own the M10 real-process close-out rerun. Same-device experiments are serial."},
 			{ID: "cuda-cache-hit", Name: "CUDA exact-cache-hit setup and correctness", AuthorityIssue: 9420, ConstraintIDs: []string{"cuda-cache-correctness"}, HeroMetric: "5/5 cold and 5/5 identical-hit exact with one immutable-weight upload and zero fallback", CurrentResult: "implementation landed at b12f23f04; hardware receipt pending; source lease still live", SequenceRule: "Release the landed source work cleanly, then accept performance only from the matched exact-output A100 receipt."},
 			{ID: "cuda-cold-decode", Name: "CUDA P=1 decode hill climb", AuthorityIssue: 8635, ConstraintIDs: []string{"cuda-cold-decode", "measurement-control-loop"}, HeroMetric: "quality-clean repeated default-path end-to-end gain", CurrentResult: "Q8_1 and DP4A unwitnessed", SequenceRule: "Q8_1 numerical gate, then DP4A A/B, then default routing; never combine the first two arms."},
 			{ID: "profile-control-loop", Name: "Real profile and regression return loop", AuthorityIssue: 8922, ConstraintIDs: []string{"measurement-control-loop"}, HeroMetric: "real Metal and CUDA profiles consumed by one scheduled/manual gate verdict", CurrentResult: "synthetic profiles only; exact owners are #9495, #9497, and #9498", SequenceRule: "Capture scrubbed real profiles independently; wire workflow consumption only after both validate."},
@@ -306,8 +321,8 @@ func BuildCurrentSnapshot(graph Graph) (CurrentSnapshot, error) {
 		WorkPackets: []WorkPacket{
 			{ID: "cuda.cache-weight-residency", Name: "Model-lifetime immutable CUDA weight residency", ProgramID: "cuda-cache-hit", ConstraintIDs: []string{"cuda-cache-correctness"}, Issue: 9420, ProgramOrder: 1, State: WorkRunning, Owner: "anthony-chaudhary / live DOS lease", Lane: "model+compute", Paths: []string{"internal/model/**", "internal/compute/cuda*"}, NextAction: "Read back landed commit b12f23f04, release the completed source leases, then run the matched A100 receipt; do not count the implementation commit as a performance result.", ExitWhen: "One upload survives sequential/concurrent sessions, teardown frees once, and the matched cache-hit receipt is exact with zero fallback."},
 
-			{ID: "mac.m1-streamed-q4k-no-copy", Name: "M1 no-copy streamed Q4_K keep/reject receipt", ProgramID: "mac-top10", ConstraintIDs: []string{"metal-startup-capacity"}, Issue: 8325, ProgramOrder: 1, State: WorkReady, Owner: "unassigned", Lane: "hardware+docs", Paths: []string{"docs/_witnesses/**"}, NextAction: "Assign #8325's exact-model measurement and run it from trunk containing #9073 commit 58fc89e29; record startup, steady memory, swap, identity, quality, and fallback.", ExitWhen: "The landed no-copy mechanism earns M1 KEEP from a safe exact end-to-end memory/performance receipt, or is rejected and replaced without KEEP credit."},
-			{ID: "mac.m2-whole-sequence-prefill", Name: "M2 backend-nil sequence keep/reject receipt", ProgramID: "mac-top10", ConstraintIDs: []string{"metal-resident-decode"}, Issue: 9230, ProgramOrder: 2, State: WorkWaitingDependency, Owner: "unassigned", Lane: "hardware+docs", Paths: []string{"docs/_witnesses/**"}, HardDependencyIDs: []string{"mac.m1-streamed-q4k-no-copy"}, NextAction: "After M1 establishes a safe exact envelope, run #9230's P32 A/B from trunk containing #9456 commit 8a423b8a5; #9444 remains rejected as an invalid compute-HAL premise.", ExitWhen: "The exact resident sequence arm passes #9230 quality/accounting with zero fallback and every clean repetition improves with median prefill >=15%, or is retained as REJECT with no KEEP credit."},
+			{ID: "mac.m1-streamed-q4k-no-copy", Name: "M1 no-copy streamed Q4_K keep/reject receipt", ProgramID: "mac-top10", ConstraintIDs: []string{"metal-startup-capacity"}, Issue: 8325, RelatedIssues: []int{9482}, ProgramOrder: 1, State: WorkComplete, Owner: "accepted receipt #9482", Lane: "hardware+docs", Paths: []string{"docs/_witnesses/**"}, Result: "Exact campaign accepted with 184/184 Q4_K tensors mapped, 8.33 GB zero-copy Metal residency, 0 fallbacks, 42.5% median first-token improvement, and 15.7% median prefill improvement.", ExitWhen: "M1 earns KEEP 1/10."},
+			{ID: "mac.m2-whole-sequence-prefill", Name: "M2 backend-nil sequence keep/reject receipt", ProgramID: "mac-top10", ConstraintIDs: []string{"metal-resident-decode"}, Issue: 9230, RelatedIssues: []int{9525}, ProgramOrder: 2, State: WorkComplete, Owner: "accepted receipt #9525", Lane: "hardware+docs", Paths: []string{"docs/_witnesses/**"}, SatisfiedDependencyIDs: []string{"mac.m1-streamed-q4k-no-copy"}, Result: "Exact P32 campaign accepted with 1 command buffer vs 192, 0 fallbacks, 43.8% median prefill improvement, and 43.9% median first-token improvement.", ExitWhen: "M2 earns KEEP 2/10."},
 			{ID: "mac.m3-q8-gdn-handoff", Name: "M3 Q8 projection-to-GDN device handoff", ProgramID: "mac-top10", ConstraintIDs: []string{"metal-resident-decode"}, Issue: 9216, ProgramOrder: 3, State: WorkWaitingDependency, Owner: "unassigned", Lane: "metal", Paths: []string{"internal/metalgemm/**", "internal/model/**"}, HardDependencyIDs: []string{"mac.m2-whole-sequence-prefill"}, NextAction: "Dispatch only after M2 establishes the sequence owner; isolate the Q8-to-GDN handoff in that submission.", ExitWhen: "The exact P32 arm preserves parity and shows positive end-to-end movement with one terminal core readback."},
 			{ID: "mac.m4-coarse-resident-decode", Name: "M4 coarse resident hybrid decode graph", ProgramID: "mac-top10", ConstraintIDs: []string{"metal-resident-decode"}, Issue: 8324, ProgramOrder: 4, State: WorkWaitingDependency, Owner: "unassigned", Lane: "model+metal", Paths: []string{"internal/model/**", "internal/compute/metal*", "internal/metalgemm/**"}, HardDependencyIDs: []string{"mac.m3-q8-gdn-handoff"}, NextAction: "Run command-buffer amortization and fused graph coverage as separately attributed OFF/ON arms.", ExitWhen: "The exact default fak-native path is quality-clean and meets the >=5 tok/s promotion floor, or a real profile selects a different driver."},
 			{ID: "mac.m5-exact-p32t64-receipt", Name: "M5 quality-clean exact P32/T64 receipt", ProgramID: "mac-top10", ConstraintIDs: []string{"metal-startup-capacity", "measurement-control-loop"}, Issue: 9430, ProgramOrder: 5, State: WorkCapacityHold, Owner: "unassigned", Lane: "hardware+docs", Paths: []string{"docs/_witnesses/**"}, HardDependencyIDs: []string{"mac.m1-streamed-q4k-no-copy", "mac.m2-whole-sequence-prefill", "mac.m3-q8-gdn-handoff", "mac.m4-coarse-resident-decode"}, NextAction: "After M1-M4, #9430 must create/reconcile a replacement ship-alone receipt leaf because #8972 was closed without meeting its gate; use >=64 GiB Apple Silicon if admission still exceeds 36 GiB.", ExitWhen: "The replacement leaf accepts three quality-complete exact native/control repetitions with zero fallback and safe memory."},
@@ -315,7 +330,7 @@ func BuildCurrentSnapshot(graph Graph) (CurrentSnapshot, error) {
 			{ID: "mac.m7-prefix-reuse", Name: "M7 exact-prefix block reuse", ProgramID: "mac-top10", ConstraintIDs: []string{"native-serving-stack"}, Issue: 8395, ProgramOrder: 7, State: WorkWaitingDependency, Owner: "unassigned", Lane: "modelengine", Paths: []string{"internal/modelengine/**", "internal/cache*/**"}, HardDependencyIDs: []string{"mac.m6-paged-hybrid-state"}, NextAction: "Reconcile and file one ship-alone child, then run prefix reuse with paged state fixed ON.", ExitWhen: "The child has a complete isolated quality, latency, throughput, cache-identity, and fallback receipt."},
 			{ID: "mac.m8-chunked-prefill", Name: "M8 bounded chunked-prefill scheduling", ProgramID: "mac-top10", ConstraintIDs: []string{"native-serving-stack"}, Issue: 8395, ProgramOrder: 8, State: WorkWaitingDependency, Owner: "unassigned", Lane: "agent+modelengine", Paths: []string{"internal/agent/**", "internal/modelengine/**", "internal/model/**"}, HardDependencyIDs: []string{"mac.m5-exact-p32t64-receipt"}, NextAction: "Reconcile one current child for live scheduling/interleaving, preserving landed append-capable prefill.", ExitWhen: "Identical outputs and positive net TTFT/ITL movement are accepted without unsafe memory growth."},
 			{ID: "mac.m9-resident-cobatching", Name: "M9 resident hybrid co-batching", ProgramID: "mac-top10", ConstraintIDs: []string{"native-serving-stack"}, Issue: 8395, ProgramOrder: 9, State: WorkWaitingDependency, Owner: "unassigned", Lane: "agent+model", Paths: []string{"internal/agent/**", "internal/model/**"}, HardDependencyIDs: []string{"mac.m5-exact-p32t64-receipt"}, NextAction: "Reconcile one current child and exercise the live coalescer with per-session hybrid state parity.", ExitWhen: "Non-serial execution and positive aggregate throughput are accepted with exact per-session state."},
-			{ID: "mac.m10-parity-reconvergence", Name: "M10 matched parity reconvergence", ProgramID: "mac-top10", ConstraintIDs: []string{"measurement-control-loop", "metal-resident-decode", "native-serving-stack"}, Issue: 9430, ProgramOrder: 10, State: WorkWaitingDependency, Owner: "unassigned", Lane: "hardware+docs", Paths: []string{"docs/_witnesses/**", "docs/benchmarks/**"}, HardDependencyIDs: []string{"mac.m6-paged-hybrid-state", "mac.m7-prefix-reuse", "mac.m8-chunked-prefill", "mac.m9-resident-cobatching"}, NextAction: "Create the close-out leaf only after M6-M9 have isolated keep/reject receipts.", ExitWhen: "A same-artifact fak-native versus pinned comparator campaign publishes the exact current result without mixed envelopes."},
+			{ID: "mac.m10-parity-reconvergence", Name: "M10 matched parity reconvergence", ProgramID: "mac-top10", ConstraintIDs: []string{"measurement-control-loop", "metal-resident-decode", "native-serving-stack"}, Issue: 9513, RelatedIssues: []int{2723, 9430}, ProgramOrder: 10, State: WorkWaitingCoordination, Owner: "reopened #9513/#2723", Lane: "hardware+docs", Paths: []string{"docs/_witnesses/**", "docs/benchmarks/**"}, BlockedByCondition: "exclusive quiescent M3 Pro campaign window", NextAction: "After host quiescence and candidate-bound validity/budget review, run a serialized real-process 3+3 P32/T64 fak-native versus pinned llama.cpp b9828 campaign; bind resolvable source and binary hashes and retain raw output, health, residency, fallback, exact-token, and logit evidence.", ExitWhen: "The same-artifact physical campaign is replayable and quality-complete; committed-JSON replay from `d3cf7df2e` remains delivery evidence only."},
 
 			{ID: "cuda.q8_1-numerical-gate", Name: "Q8_1 activation numerical gate", ProgramID: "cuda-cold-decode", ConstraintIDs: []string{"cuda-cold-decode"}, Issue: 8635, ProgramOrder: 1, State: WorkWaitingCoordination, Owner: "unassigned", Lane: "compute", Paths: []string{"internal/compute/cuda*"}, BlockedByIDs: []string{"cuda.cache-weight-residency"}, NextAction: "After #9420 releases compute paths, run the strict Q8_1 OFF/ON numerical gate with the scalar arm explicitly OFF in the candidate.", ExitWhen: "Cosine, exact argmax, maxAbs, artifact identity, and raw output pass the issue gate."},
 			{ID: "cuda.dp4a-q4k-mmvq", Name: "DP4A Q4_K MMVQ A/B", ProgramID: "cuda-cold-decode", ConstraintIDs: []string{"cuda-cold-decode"}, Issue: 8635, ProgramOrder: 2, State: WorkWaitingDependency, Owner: "unassigned", Lane: "compute", Paths: []string{"internal/compute/cuda*"}, HardDependencyIDs: []string{"cuda.q8_1-numerical-gate"}, NextAction: "With Q8_1 fixed ON, run the signed DP4A OFF/ON full-model A/B.", ExitWhen: "Repeated same-artifact end-to-end gain passes quality and zero-fallback gates."},
@@ -416,17 +431,46 @@ func ValidateCurrentSnapshot(graph Graph, snapshot CurrentSnapshot) error {
 	validWorkStates := map[WorkState]bool{
 		WorkRunning: true, WorkReady: true, WorkWaitingDependency: true,
 		WorkWaitingCoordination: true, WorkWaitingEvidence: true, WorkCapacityHold: true,
+		WorkComplete: true,
 	}
 	packetIDs := map[string]bool{}
+	packetStates := map[string]WorkState{}
 	for _, packet := range snapshot.WorkPackets {
 		if packetIDs[packet.ID] || strings.TrimSpace(packet.ID) == "" {
 			return fmt.Errorf("duplicate or empty work packet %q", packet.ID)
 		}
 		packetIDs[packet.ID] = true
+		packetStates[packet.ID] = packet.State
 	}
 	for _, packet := range snapshot.WorkPackets {
-		if strings.TrimSpace(packet.Name) == "" || !programIDs[packet.ProgramID] || len(packet.ConstraintIDs) == 0 || packet.Issue <= 0 || !validWorkStates[packet.State] || strings.TrimSpace(packet.Owner) == "" || strings.TrimSpace(packet.Lane) == "" || len(packet.Paths) == 0 || strings.TrimSpace(packet.NextAction) == "" || strings.TrimSpace(packet.ExitWhen) == "" {
+		if strings.TrimSpace(packet.Name) == "" || !programIDs[packet.ProgramID] || len(packet.ConstraintIDs) == 0 || packet.Issue <= 0 || !validWorkStates[packet.State] || strings.TrimSpace(packet.Owner) == "" || strings.TrimSpace(packet.Lane) == "" || len(packet.Paths) == 0 || strings.TrimSpace(packet.ExitWhen) == "" {
 			return fmt.Errorf("invalid work packet %q", packet.ID)
+		}
+		// A complete packet reports its accepted result; every other state still owes a
+		// next action and has no result to report.
+		if packet.State == WorkComplete {
+			if strings.TrimSpace(packet.Result) == "" {
+				return fmt.Errorf("complete work packet %q has no accepted result", packet.ID)
+			}
+		} else if strings.TrimSpace(packet.NextAction) == "" || strings.TrimSpace(packet.Result) != "" {
+			return fmt.Errorf("open work packet %q needs a next action and no result", packet.ID)
+		}
+		seenIssues := map[int]bool{packet.Issue: true}
+		for _, issue := range packet.RelatedIssues {
+			if issue <= 0 || seenIssues[issue] {
+				return fmt.Errorf("work packet %q has invalid or duplicate related issue #%d", packet.ID, issue)
+			}
+			seenIssues[issue] = true
+		}
+		for _, dependencyID := range packet.SatisfiedDependencyIDs {
+			if !packetIDs[dependencyID] || dependencyID == packet.ID || packetStates[dependencyID] != WorkComplete {
+				return fmt.Errorf("work packet %q marks %q satisfied but it is not a complete packet", packet.ID, dependencyID)
+			}
+			for _, open := range packet.HardDependencyIDs {
+				if open == dependencyID {
+					return fmt.Errorf("work packet %q lists %q as both open and satisfied", packet.ID, dependencyID)
+				}
+			}
 		}
 		for _, constraintID := range packet.ConstraintIDs {
 			if !constraintIDs[constraintID] {
@@ -542,19 +586,32 @@ func RenderCurrentMarkdown(snapshot CurrentSnapshot) string {
 		if packet.ProgramOrder > 0 {
 			order = fmt.Sprintf("%d", packet.ProgramOrder)
 		}
-		dependencies := "—"
+		var dependencyParts []string
 		if len(packet.HardDependencyIDs) > 0 {
-			dependencies = "Depends: `" + strings.Join(packet.HardDependencyIDs, "`, `") + "`"
+			dependencyParts = append(dependencyParts, "Depends: `"+strings.Join(packet.HardDependencyIDs, "`, `")+"`")
+		}
+		if len(packet.SatisfiedDependencyIDs) > 0 {
+			dependencyParts = append(dependencyParts, "Satisfied: `"+strings.Join(packet.SatisfiedDependencyIDs, "`, `")+"`")
 		}
 		if len(packet.BlockedByIDs) > 0 {
-			if dependencies != "—" {
-				dependencies += "<br>"
-			} else {
-				dependencies = ""
-			}
-			dependencies += "Blocked now: `" + strings.Join(packet.BlockedByIDs, "`, `") + "`"
+			dependencyParts = append(dependencyParts, "Blocked now: `"+strings.Join(packet.BlockedByIDs, "`, `")+"`")
 		}
-		fmt.Fprintf(&b, "| %s / `%s` — %s<br>#%d | `%s` | `%s`<br>Owner: %s<br>Lane: `%s` | %s | **Next:** %s<br>**Exit when:** %s |\n", order, packet.ID, packet.Name, packet.Issue, packet.ProgramID, packet.State, packet.Owner, packet.Lane, dependencies, packet.NextAction, packet.ExitWhen)
+		if condition := strings.TrimSpace(packet.BlockedByCondition); condition != "" {
+			dependencyParts = append(dependencyParts, "Blocked now: "+condition)
+		}
+		dependencies := "—"
+		if len(dependencyParts) > 0 {
+			dependencies = strings.Join(dependencyParts, "<br>")
+		}
+		issues := fmt.Sprintf("#%d", packet.Issue)
+		for _, issue := range packet.RelatedIssues {
+			issues += fmt.Sprintf("/#%d", issue)
+		}
+		nextExit := fmt.Sprintf("**Next:** %s<br>**Exit when:** %s", packet.NextAction, packet.ExitWhen)
+		if packet.State == WorkComplete {
+			nextExit = fmt.Sprintf("**Result:** %s<br>**Exit:** %s", packet.Result, packet.ExitWhen)
+		}
+		fmt.Fprintf(&b, "| %s / `%s` — %s<br>%s | `%s` | `%s`<br>Owner: %s<br>Lane: `%s` | %s | %s |\n", order, packet.ID, packet.Name, issues, packet.ProgramID, packet.State, packet.Owner, packet.Lane, dependencies, nextExit)
 	}
 
 	b.WriteString("\n## Graph-dependency-ready arms and collisions\n\n")
