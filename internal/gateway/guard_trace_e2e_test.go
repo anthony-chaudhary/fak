@@ -111,6 +111,7 @@ func TestGuardTraceFiresFloorAndRecordsJournalOpenAI(t *testing.T) {
 }
 
 func assertGuardTraceEndToEnd(t *testing.T, provider string) {
+	installEmptyTestLeaseAuthority(t)
 	f, err := guardtrace.LoadFixture(filepath.Join("testdata", "guard-trace-e2e.json"))
 	if err != nil {
 		t.Fatalf("load fixture: %v", err)

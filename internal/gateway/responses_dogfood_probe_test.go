@@ -43,6 +43,7 @@ func (p *scriptedMultiTurnPlanner) Complete(ctx context.Context, m []agent.Messa
 func (p *scriptedMultiTurnPlanner) Model() string { return "scripted-multi-turn" }
 
 func TestResponsesToolElisionAndCASRestoreDogfoodProbe(t *testing.T) {
+	installEmptyTestLeaseAuthority(t)
 	casDir := t.TempDir()
 	t.Setenv("FAK_CTXRESTORE_CAS_DIR", casDir)
 
@@ -56,7 +57,7 @@ func TestResponsesToolElisionAndCASRestoreDogfoodProbe(t *testing.T) {
 
 	planner := &scriptedMultiTurnPlanner{
 		turns: []*agent.Completion{
-			// Turn 1: Model requests allow_fetch_data
+			// Turn 1: Model requests allow_read_data
 			{
 				FinishReason: "tool_calls",
 				Message: agent.Message{
@@ -65,7 +66,7 @@ func TestResponsesToolElisionAndCASRestoreDogfoodProbe(t *testing.T) {
 						{
 							ID:       "c_fetch",
 							Type:     "function",
-							Function: agent.Func{Name: "allow_fetch_data", Arguments: `{"target":"big_dataset"}`},
+							Function: agent.Func{Name: "allow_read_data", Arguments: `{"target":"big_dataset"}`},
 						},
 					},
 				},
@@ -165,7 +166,7 @@ func TestResponsesToolElisionAndCASRestoreDogfoodProbe(t *testing.T) {
 			"tools": []any{
 				map[string]any{
 					"type":        "function",
-					"name":        "allow_fetch_data",
+					"name":        "allow_read_data",
 					"description": "fetch large data",
 					"parameters":  map[string]any{"type": "object"},
 				},
@@ -229,8 +230,8 @@ func TestResponsesToolElisionAndCASRestoreDogfoodProbe(t *testing.T) {
 		map[string]any{"type": "message", "role": "user", "content": "analyze big telemetry dataset"},
 	}
 	resp1 := sendResponsesTurn(conversation)
-	if len(resp1.Output) == 0 || resp1.Output[0].Name != "allow_fetch_data" {
-		t.Fatalf("expected tool call allow_fetch_data, got: %+v", resp1.Output)
+	if len(resp1.Output) == 0 || resp1.Output[0].Name != "allow_read_data" {
+		t.Fatalf("expected tool call allow_read_data, got: %+v", resp1.Output)
 	}
 
 	// 2. Turn 2: Return 40 KiB tool result
@@ -238,7 +239,7 @@ func TestResponsesToolElisionAndCASRestoreDogfoodProbe(t *testing.T) {
 		map[string]any{
 			"type":      "function_call",
 			"call_id":   "c_fetch",
-			"name":      "allow_fetch_data",
+			"name":      "allow_read_data",
 			"arguments": `{"target":"big_dataset"}`,
 		},
 		map[string]any{

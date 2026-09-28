@@ -83,6 +83,7 @@ func TestChatProxyFailsClosedOnUnparsedToolCallClaim(t *testing.T) {
 // reasoning_content is an unknown field the OpenAI adapter ignores, so it must
 // not break tool-call parsing.
 func TestChatProxyParsesGLMThinkingModeToolCall(t *testing.T) {
+	installEmptyTestLeaseAuthority(t)
 	abi.ResetForTest()
 	abi.RegisterRegionBackend(inlineBackend{})
 	abi.RegisterEngine("test", echoEngine{})
@@ -95,12 +96,12 @@ func TestChatProxyParsesGLMThinkingModeToolCall(t *testing.T) {
 				"message": map[string]any{
 					"role":              "assistant",
 					"content":           "",
-					"reasoning_content": "The user wants a listing. I should call the allow_glm tool.",
+					"reasoning_content": "The user wants a listing. I should call the allow_list_glm tool.",
 					"tool_calls": []any{map[string]any{
 						"id":   "call_1",
 						"type": "function",
 						"function": map[string]any{
-							"name":      "allow_glm",
+							"name":      "allow_list_glm",
 							"arguments": `{"path":"."}`,
 						},
 					}},
@@ -128,7 +129,7 @@ func TestChatProxyParsesGLMThinkingModeToolCall(t *testing.T) {
 		Model:    "client-model",
 		Messages: []agent.Message{{Role: agent.RoleUser, Content: "list the dir"}},
 		Tools: []agent.ToolDef{
-			{Type: "function", Function: agent.ToolDefFunction{Name: "allow_glm", Parameters: json.RawMessage(`{"type":"object"}`)}},
+			{Type: "function", Function: agent.ToolDefFunction{Name: "allow_list_glm", Parameters: json.RawMessage(`{"type":"object"}`)}},
 		},
 	}, &resp)
 	if code != 200 {
@@ -137,8 +138,8 @@ func TestChatProxyParsesGLMThinkingModeToolCall(t *testing.T) {
 	if resp.Choices[0].FinishReason != "tool_calls" {
 		t.Fatalf("finish_reason = %q, want tool_calls (the GLM tool call must survive)", resp.Choices[0].FinishReason)
 	}
-	if len(resp.Choices[0].Message.ToolCalls) != 1 || resp.Choices[0].Message.ToolCalls[0].Function.Name != "allow_glm" {
-		t.Fatalf("expected the adjudicated allow_glm call to be returned; got %+v", resp.Choices[0].Message.ToolCalls)
+	if len(resp.Choices[0].Message.ToolCalls) != 1 || resp.Choices[0].Message.ToolCalls[0].Function.Name != "allow_list_glm" {
+		t.Fatalf("expected the adjudicated allow_list_glm call to be returned; got %+v", resp.Choices[0].Message.ToolCalls)
 	}
 }
 

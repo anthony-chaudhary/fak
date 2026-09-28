@@ -42,6 +42,7 @@ func openCodeSchemaServer(t *testing.T) (*Server, *adjudicator.Adjudicator) {
 }
 
 func TestOpenCodeAdvertisedStandardToolSchemaTranslation(t *testing.T) {
+	installEmptyTestLeaseAuthority(t)
 	srv, _ := openCodeSchemaServer(t)
 	tests := []struct {
 		name       string
@@ -127,6 +128,7 @@ func TestOpenCodeAdvertisedStandardToolSchemaTranslation(t *testing.T) {
 }
 
 func TestOpenCodeToolSchemaTranslationStaysConservative(t *testing.T) {
+	installEmptyTestLeaseAuthority(t)
 	srv, monitor := openCodeSchemaServer(t)
 
 	ctx := withClientToolSchemas(context.Background(), []agent.ToolDef{openCodeSchemaTool("edit", "filePath", "oldString", "newString")})
@@ -260,6 +262,7 @@ func TestOpenCodeProjectionPreservesCanonicalRepairedValue(t *testing.T) {
 }
 
 func TestOpenCodeEditFileStreamUsesAdvertisedEditDialect(t *testing.T) {
+	installEmptyTestLeaseAuthority(t)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request ChatRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {

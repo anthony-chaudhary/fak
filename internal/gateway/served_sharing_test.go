@@ -134,12 +134,13 @@ func TestServed_CrossAgentTier2Hit(t *testing.T) {
 // that route's shared read, while a PEER's shared read of a different route stays
 // warm — and the written route's own read is correctly invalidated.
 func TestServed_ScopedInvalidationSparesPeer(t *testing.T) {
+	installEmptyTestLeaseAuthority(t)
 	srv, _ := newSharingServer(t, vdso.Resource)
 	const (
-		route1 = `{"origin":"SFO","destination":"JFK"}` // entity flights:SFO-JFK
-		route2 = `{"origin":"LAX","destination":"SEA"}` // entity flights:LAX-SEA
+		route1 = `{"origin":"SFO","destination":"JFK"}`                                                      // entity flights:SFO-JFK
+		route2 = `{"origin":"LAX","destination":"SEA","file_path":"internal/gateway/testdata/booking.json"}` // entity flights:LAX-SEA
 		read   = "search_direct_flight"
-		book   = "book_flight"
+		book   = "write_book_flight"
 	)
 
 	// Warm both routes (agent A), then confirm a peer (agent B) shares both.
@@ -152,13 +153,17 @@ func TestServed_ScopedInvalidationSparesPeer(t *testing.T) {
 		t.Fatalf("peer read of route2 should be a tier-2 hit before any write, got served_by=%q tier=%q", by, tier)
 	}
 
-	// A booking on route2 (a write) — scoped to entity flights:LAX-SEA.
-	wv, _, err := srv.syscall(context.Background(), book, route2, false /*readOnly*/, "", "agent-writer")
+	// A booking on route2 (a write) — scoped to entity flights:LAX-SEA. Build the
+	// same canonical call, then enter the kernel directly: the served gateway now
+	// correctly refuses mutating syscalls until an atomic lease guard exists, while
+	// this test's subject is the vDSO's scoped invalidation after an admitted write.
+	tc, err := srv.buildCall(context.Background(), book, route2, false /*readOnly*/, "", "agent-writer")
 	if err != nil {
-		t.Fatalf("served booking: %v", err)
+		t.Fatalf("build booking: %v", err)
 	}
-	if wv.Kind != "ALLOW" {
-		t.Fatalf("served booking verdict=%q, want ALLOW", wv.Kind)
+	result, verdict := srv.k.Syscall(context.Background(), tc)
+	if verdict.Kind != abi.VerdictAllow || result == nil {
+		t.Fatalf("kernel booking verdict=%+v result=%+v, want ALLOW", verdict, result)
 	}
 
 	// THE PEER STAYS WARM: a different agent's shared read of route1 is still a tier-2
