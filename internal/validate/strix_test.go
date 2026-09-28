@@ -22,6 +22,7 @@ func TestIsGPURelatedValidationKeywordArm(t *testing.T) {
 		{"docs path mentioning strix and halo must not trigger", []string{"docs/tickets/strix-halo-franchise/INDEX.md"}, false},
 		{"control-plane test file mentioning halo must not trigger", []string{"platform/obs/stack/halo_test.go"}, false},
 		{"control-plane source under platform/strix must not trigger", []string{"platform/strix/opencode_runtime.go"}, false},
+		{"private factory Halo validator helper must not trigger", []string{"cmd/fak-flow/halo_verify.go"}, false},
 		{"test file outside gpu roots mentioning halo must not trigger", []string{"internal/foo/halo_test.go"}, false},
 		{"test file under gpu root still triggers via root", []string{"internal/amdgpu/x_test.go"}, true},
 		{"public non-test source with vulkan keyword still triggers", []string{"internal/serve/vulkan_backend.go"}, true},

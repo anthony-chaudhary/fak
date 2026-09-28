@@ -88,13 +88,16 @@ func isGPURelatedValidation(mine []string) bool {
 }
 
 // keywordArmApplies reports whether the loose GPU-keyword substring test may
-// fire for a source path. Test files and the control-plane `platform/` tree are
-// excluded; see isGPURelatedValidation.
+// fire for a source path. Test files and private factory/control-plane trees
+// are excluded; see isGPURelatedValidation.
 func keywordArmApplies(norm string) bool {
 	if strings.HasSuffix(strings.ToLower(norm), "_test.go") {
 		return false
 	}
 	if norm == "platform" || strings.HasPrefix(norm, "platform/") {
+		return false
+	}
+	if norm == "cmd/fak-flow" || strings.HasPrefix(norm, "cmd/fak-flow/") {
 		return false
 	}
 	return true

@@ -351,6 +351,11 @@ func TestIsGPURelatedValidation(t *testing.T) {
 			expected: false,
 		},
 		{
+			name:     "private factory Halo validator helper must not trigger",
+			mine:     []string{"cmd/fak-flow/halo_verify.go"},
+			expected: false,
+		},
+		{
 			name:     "test file outside gpu roots mentioning halo must not trigger",
 			mine:     []string{"internal/foo/halo_test.go"},
 			expected: false,
