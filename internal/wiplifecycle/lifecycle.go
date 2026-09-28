@@ -26,6 +26,12 @@ type Capture struct {
 	Artifact   string `json:"artifact,omitempty"`
 	ObservedAt string `json:"observed_at,omitempty"`
 	Error      string `json:"error,omitempty"`
+	// Focus names the one checkout Known is scoped to (wipinventory.Options.Focus);
+	// empty means the whole inventory had to be captured.
+	Focus string `json:"focus,omitempty"`
+	// Advisory joins the best-effort failures outside Focus. They are recorded in
+	// the artifact but do not make a focused capture unknown.
+	Advisory string `json:"advisory,omitempty"`
 }
 
 type Diagnostic struct {
@@ -68,6 +74,14 @@ func Begin(root, kind, id string, now time.Time) (Receipt, error) {
 // runner. Bounded operational callers use this seam to keep lifecycle evidence
 // inside the same wall-clock contract as the mutation it brackets.
 func BeginWithRunner(root, kind, id string, now time.Time, runner wipinventory.Runner) (Receipt, error) {
+	return BeginWithOptions(root, kind, id, now, runner, wipinventory.Options{})
+}
+
+// BeginWithOptions is BeginWithRunner with inventory options. A caller about to
+// mutate one checkout passes it as Options.Focus: the before capture is then
+// Known once that checkout's own state is captured, and failures elsewhere in
+// the fleet are kept as Advisory instead of refusing the mutation.
+func BeginWithOptions(root, kind, id string, now time.Time, runner wipinventory.Runner, opts wipinventory.Options) (Receipt, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return Receipt{}, err
@@ -107,7 +121,7 @@ func BeginWithRunner(root, kind, id string, now time.Time, runner wipinventory.R
 		Schema: Schema, OperationID: id, Kind: kind, Repository: filepath.ToSlash(root),
 		StartedAt: now.UTC().Format(time.RFC3339Nano), ReceiptPath: filepath.ToSlash(filepath.Join(dir, receiptFile)),
 	}
-	receipt.Before = capture(root, filepath.Join(staging, "before.json"), now, runner)
+	receipt.Before = capture(root, filepath.Join(staging, "before.json"), now, runner, opts)
 	receipt.Before.Artifact = filepath.ToSlash(filepath.Join(dir, "before.json"))
 	if err := writeReceiptAt(filepath.Join(staging, receiptFile), receipt); err != nil {
 		return receipt, err
@@ -133,7 +147,7 @@ func FinishWithRunner(root, id string, now time.Time, runner wipinventory.Runner
 	if err != nil {
 		return Receipt{}, err
 	}
-	receipt.After = capture(root, filepath.Join(dir, "after.json"), now, runner)
+	receipt.After = capture(root, filepath.Join(dir, "after.json"), now, runner, wipinventory.Options{})
 	receipt.FinishedAt = now.UTC().Format(time.RFC3339Nano)
 	if err := writeReceipt(receipt); err != nil {
 		return receipt, err
@@ -233,17 +247,23 @@ func sortReceipts(receipts []Receipt) {
 	})
 }
 
-func capture(root, path string, now time.Time, runner wipinventory.Runner) Capture {
-	rep := wipinventory.Collect(root, now, runner)
+func capture(root, path string, now time.Time, runner wipinventory.Runner, opts wipinventory.Options) Capture {
+	rep := wipinventory.Collect(root, now, runner, opts)
 	b, err := rep.JSON()
 	if err == nil {
 		err = atomicWrite(path, append(b, '\n'))
 	}
 	capture := Capture{Known: err == nil && len(rep.Errors) == 0, Artifact: filepath.ToSlash(path), ObservedAt: rep.ObservedAt.Format(time.RFC3339Nano)}
+	if rep.Focus != nil {
+		capture.Focus = rep.Focus.Path
+	}
 	if err != nil {
 		capture.Error = err.Error()
 	} else if len(rep.Errors) > 0 {
 		capture.Error = strings.Join(rep.Errors, "; ")
+	}
+	if len(rep.Advisory) > 0 {
+		capture.Advisory = strings.Join(rep.Advisory, "; ")
 	}
 	return capture
 }

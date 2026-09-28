@@ -495,7 +495,7 @@ func TestAcceptPreparedLandFreshAdmissionPreservesRootState(t *testing.T) {
 }
 func TestPreparedLandRejectsNonContainedPathsBeforeRefMovement(t *testing.T) {
 	absolute := filepath.Join(t.TempDir(), "absolute-outside.txt")
-	for _, bad := range []string{`..\outside`, "../outside", absolute, `C:foo`, "bad\x00path"} {
+	for _, bad := range []string{`..\outside`, "../outside", absolute, `C:foo`, `\rooted`, "bad\x00path"} {
 		name := strings.ReplaceAll(strings.ReplaceAll(bad, `\`, "_"), "/", "_")
 		t.Run("prepare_"+name, func(t *testing.T) {
 			f := newPreparedFixture(t, "feature.txt")

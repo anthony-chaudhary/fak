@@ -316,6 +316,146 @@ func TestCheckpointsBatchesMultipleRefs(t *testing.T) {
 	}
 }
 
+// focusRunner answers a fleet of two registered worker worktrees, a focus and one
+// other, and can fail either one's status probe independently.
+type focusRunner struct {
+	root, focus, other   string
+	failFocus, failOther bool
+	mu                   sync.Mutex
+	calls                []focusCall
+}
+
+type focusCall struct {
+	dir  string
+	args string
+}
+
+func (f *focusRunner) Run(dir string, args ...string) ([]byte, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, focusCall{dir: dir, args: strings.Join(args, " ")})
+	f.mu.Unlock()
+	key := args[0]
+	if len(args) > 1 {
+		key += " " + args[1]
+	}
+	switch {
+	case key == "rev-parse HEAD":
+		return []byte("abc123\n"), nil
+	case key == "rev-parse --git-path":
+		return []byte(filepath.Join(f.root, ".git", "info", "exclude") + "\n"), nil
+	case key == "status --porcelain=v1" && samePath(dir, f.focus):
+		if f.failFocus {
+			return nil, errors.New("status stalled")
+		}
+		return []byte(" M focus.go\x00"), nil
+	case key == "status --porcelain=v1" && samePath(dir, f.other):
+		if f.failOther {
+			return nil, errors.New("status stalled")
+		}
+		return []byte(" M other.go\x00"), nil
+	case key == "status --porcelain=v1" && samePath(dir, f.root):
+		return []byte(""), nil
+	case key == "ls-files --others", key == "ls-files -v":
+		return []byte(""), nil
+	case key == "worktree list":
+		return []byte("worktree " + filepath.ToSlash(f.root) + "\nHEAD abc123\nbranch refs/heads/main\n\n" +
+			"worktree " + filepath.ToSlash(f.focus) + "\nHEAD def456\nbranch refs/heads/focus-branch\n\n" +
+			"worktree " + filepath.ToSlash(f.other) + "\nHEAD 0ff1ce\ndetached\n"), nil
+	case args[0] == "for-each-ref":
+		return []byte(""), nil
+	case args[0] == "config":
+		return nil, errors.New("unset")
+	}
+	return nil, errors.New("unexpected: " + filepath.ToSlash(dir) + " git " + strings.Join(args, " "))
+}
+
+func (f *focusRunner) recorded() []focusCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]focusCall(nil), f.calls...)
+}
+
+func (f *focusRunner) statusCalls(dir string) int {
+	n := 0
+	for _, call := range f.recorded() {
+		if strings.HasPrefix(call.args, "status ") && samePath(call.dir, dir) {
+			n++
+		}
+	}
+	return n
+}
+
+func TestCollectFocusScopesCompletenessToTheFocus(t *testing.T) {
+	root := t.TempDir()
+	workerRoot := filepath.Join(root, "workers")
+	focus := filepath.Join(workerRoot, workerMarker+"-focus")
+	other := filepath.Join(workerRoot, workerMarker+"-other")
+	for _, path := range []string{focus, other} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Unix(1700000100, 0)
+	focusSlash, otherSlash := filepath.ToSlash(focus), filepath.ToSlash(other)
+
+	t.Run("another worktree's failure is advisory", func(t *testing.T) {
+		f := &focusRunner{root: root, focus: focus, other: other, failOther: true}
+		rep := Collect(root, now, f, Options{WorkerRoot: workerRoot, Focus: focus})
+		if len(rep.Errors) != 0 {
+			t.Fatalf("a failure outside the focus made the focused report incomplete: errors=%q", rep.Errors)
+		}
+		if len(rep.Advisory) != 1 || !strings.Contains(rep.Advisory[0], "workers/"+workerMarker+"-other") {
+			t.Fatalf("advisory=%q, want exactly the other worktree's failure", rep.Advisory)
+		}
+		if rep.Focus == nil {
+			t.Fatal("focused report carries no focus capture")
+		}
+		if !rep.Focus.Tracked.Known || rep.Focus.Tracked.Count != 1 || rep.Focus.HEAD != "def456" || rep.Focus.Branch != "focus-branch" {
+			t.Fatalf("focus=%#v, want the dirty registered focus row", *rep.Focus)
+		}
+		if len(rep.Worktrees) != 2 {
+			t.Fatalf("worktrees=%#v, want the focus and the other row", rep.Worktrees)
+		}
+		if n := f.statusCalls(focus); n != 1 {
+			t.Fatalf("focus status probed %d times, want once (reused for its registered row)", n)
+		}
+		calls := f.recorded()
+		if first := calls[0]; !strings.HasPrefix(first.args, "status --porcelain=v1") || !samePath(first.dir, focus) {
+			t.Fatalf("first git call=%s git %s, want the focus status ahead of the inventory", filepath.ToSlash(first.dir), first.args)
+		}
+	})
+
+	t.Run("the focus's own failure is the only error", func(t *testing.T) {
+		f := &focusRunner{root: root, focus: focus, other: other, failFocus: true}
+		rep := Collect(root, now, f, Options{WorkerRoot: workerRoot, Focus: focus})
+		if len(rep.Errors) != 1 || !strings.HasPrefix(rep.Errors[0], "focus ") || !strings.Contains(rep.Errors[0], focusSlash) {
+			t.Fatalf("errors=%q, want exactly the focus's own failure", rep.Errors)
+		}
+		for _, advisory := range rep.Advisory {
+			if strings.Contains(advisory, focusSlash) {
+				t.Fatalf("focus failure downgraded to advisory: %q", rep.Advisory)
+			}
+		}
+		if rep.Focus == nil || rep.Focus.Tracked.Known {
+			t.Fatalf("focus=%#v, want an unknown focus capture", rep.Focus)
+		}
+		if n := f.statusCalls(focus); n != 1 {
+			t.Fatalf("failed focus status probed %d times, want once", n)
+		}
+	})
+
+	t.Run("without a focus every failure stays an error", func(t *testing.T) {
+		f := &focusRunner{root: root, focus: focus, other: other, failOther: true}
+		rep := Collect(root, now, f, Options{WorkerRoot: workerRoot})
+		if want := "checkout " + otherSlash + ": status stalled"; !containsString(rep.Errors, want) {
+			t.Fatalf("errors=%q, want legacy error %q", rep.Errors, want)
+		}
+		if len(rep.Advisory) != 0 || rep.Focus != nil {
+			t.Fatalf("unfocused report grew focus semantics: advisory=%q focus=%#v", rep.Advisory, rep.Focus)
+		}
+	})
+}
+
 func treeState(t *testing.T, root string) []string {
 	t.Helper()
 	var out []string

@@ -407,18 +407,19 @@ func TestWorkerReapRefusesWhenPreLifecycleInventoryIsUnknown(t *testing.T) {
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	git := func(args ...string) string {
+	gitIn := func(dir string, args ...string) string {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 		cmd.Env = append(os.Environ(),
 			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
 			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+			t.Fatalf("git -C %s %s: %v: %s", dir, strings.Join(args, " "), err, out)
 		}
 		return strings.TrimSpace(string(out))
 	}
+	git := func(args ...string) string { return gitIn(repo, args...) }
 	git("init", "-q", "-b", "main")
 	git("config", "user.email", "t@t")
 	git("config", "user.name", "t")
@@ -454,10 +455,16 @@ func TestWorkerReapRefusesWhenPreLifecycleInventoryIsUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Force before-inventory unknown pre-state: corrupt .git/index in repo so
-	// wipinventory.Collect encounters a git error during population capture,
-	// rendering receipt.Before.Known = false.
-	indexPath := filepath.Join(repo, ".git", "index")
+	// Force before-inventory unknown pre-state: corrupt the FOCUS checkout's OWN
+	// index — the worker worktree this reap is about to remove — so the
+	// wipinventory.Collect population capture of THAT checkout fails inside
+	// Options.Focus, rendering receipt.Before.Known = false. The before capture is
+	// scoped to the target, so a failure anywhere else is only Advisory; the main
+	// repo's index must stay healthy or this test would prove nothing.
+	indexPath := filepath.FromSlash(gitIn(worktree, "rev-parse", "--path-format=absolute", "--git-path", "index"))
+	if strings.EqualFold(filepath.Clean(indexPath), filepath.Clean(filepath.Join(repo, ".git", "index"))) {
+		t.Fatalf("resolved focus index %q is the main repo's index; corrupting it is Advisory under the scoped capture, not a refusal", indexPath)
+	}
 	savedIndex, err := os.ReadFile(indexPath)
 	if err != nil {
 		t.Fatal(err)
@@ -484,7 +491,7 @@ func TestWorkerReapRefusesWhenPreLifecycleInventoryIsUnknown(t *testing.T) {
 		t.Fatalf("want no removal receipt emitted, got removed=true")
 	}
 
-	// Restore .git/index
+	// Restore the focus worktree's index
 	if err := os.WriteFile(indexPath, savedIndex, 0o644); err != nil {
 		t.Fatal(err)
 	}

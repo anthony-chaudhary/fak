@@ -171,16 +171,73 @@ type Report struct {
 	Checkpoints      []Checkpoint  `json:"wip_checkpoints"`
 	CheckpointsKnown bool          `json:"wip_checkpoints_known"`
 	IgnoreInputs     IgnoreInputs  `json:"ignore_visibility"`
-	Errors           []string      `json:"errors,omitempty"`
+	// Focus is the Options.Focus checkout's own capture, the only evidence Errors
+	// covers in a focused report. It is also listed in Worktrees when registered.
+	Focus  *Checkout `json:"focus,omitempty"`
+	Errors []string  `json:"errors,omitempty"`
+	// Advisory holds the best-effort capture failures outside Focus. They stay in
+	// the report but do not make a focused report incomplete.
+	Advisory []string `json:"advisory_errors,omitempty"`
 }
-type Options struct{ WorkerRoot string }
+type Options struct {
+	WorkerRoot string
+	// Focus scopes completeness to one checkout, such as the worker worktree a
+	// single reap is about to remove. It is probed before anything else, so a
+	// deadline shared with a large fleet reaches it first, and only its own
+	// capture failure lands in Errors; every other failure moves to Advisory.
+	Focus string
+}
+
+// focusCapture is the Options.Focus checkout, probed ahead of the inventory and
+// reused (never re-probed) when the worktree listing reaches its registration.
+type focusCapture struct {
+	checkout Checkout
+	err      error
+	path     string
+	info     os.FileInfo
+}
+
+func probeFocus(path string, now time.Time, r Runner) *focusCapture {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	c, err := checkout(path, "", "", now, r)
+	info, _ := os.Stat(path)
+	return &focusCapture{checkout: c, err: err, path: path, info: info}
+}
+
+// matches accepts either spelling of the same directory: git lists worktrees in
+// its own path form, which may differ from the caller's (slashes, case, 8.3
+// short names, symlinked temp roots).
+func (f *focusCapture) matches(path string, info os.FileInfo) bool {
+	return samePath(path, f.path) || (f.info != nil && info != nil && os.SameFile(f.info, info))
+}
+
+func (f *focusCapture) failures() []string {
+	name := filepath.ToSlash(f.path)
+	switch {
+	case f.err != nil:
+		return []string{"focus " + name + ": " + f.err.Error()}
+	case !f.checkout.Untracked.Known:
+		return []string{"focus " + name + ": untracked: " + f.checkout.Untracked.Error}
+	}
+	return nil
+}
 
 func Collect(root string, now time.Time, r Runner, opts ...Options) Report {
 	abs, err := filepath.Abs(root)
 	if err == nil {
 		root = abs
 	}
+	var opt Options
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
 	rep := Report{Schema: Schema, ObservedAt: now.UTC(), Repository: filepath.ToSlash(root)}
+	var focus *focusCapture
+	if opt.Focus != "" {
+		focus = probeFocus(opt.Focus, now, r)
+	}
 	rep.HEAD = one(root, r, &rep, "rev-parse", "HEAD")
 	rep.Main, err = checkout(root, rep.HEAD, "main", now, r)
 	if err != nil {
@@ -189,10 +246,10 @@ func Collect(root string, now time.Time, r Runner, opts ...Options) Report {
 	rep.Ignored = populationZ(root, r, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z")
 	recordPopulationError(&rep, "ignored_generated", &rep.Ignored)
 	workerRoot := defaultWorkerRoot()
-	if len(opts) > 0 && opts[0].WorkerRoot != "" {
-		workerRoot = opts[0].WorkerRoot
+	if opt.WorkerRoot != "" {
+		workerRoot = opt.WorkerRoot
 	}
-	rep.Worktrees, rep.StaleWorkers = worktrees(root, workerRoot, r, &rep)
+	rep.Worktrees, rep.StaleWorkers = worktrees(root, workerRoot, r, &rep, focus)
 	rep.Checkpoints, rep.CheckpointsKnown = checkpoints(root, r, &rep)
 	labelProtection(&rep)
 	rep.IgnoreInputs = ignoreInputs(root, r)
@@ -200,6 +257,19 @@ func Collect(root string, now time.Time, r Runner, opts ...Options) Report {
 		rep.Errors = append(rep.Errors, "ignore_visibility: "+rep.IgnoreInputs.Error)
 	}
 	sort.Strings(rep.Errors)
+	if focus != nil {
+		// The focus's own failure is never appended above, so everything collected
+		// so far is outside the focus.
+		rep.Advisory, rep.Errors = rep.Errors, focus.failures()
+		c := focus.checkout
+		for _, w := range rep.Worktrees {
+			if w.Path == c.Path {
+				c = w // carries the protection label
+				break
+			}
+		}
+		rep.Focus = &c
+	}
 	return rep
 }
 func one(root string, r Runner, rep *Report, args ...string) string {
@@ -277,7 +347,7 @@ func observeAge(p *Population, root, name string, now time.Time) {
 	}
 }
 
-func worktrees(root, workerRoot string, r Runner, rep *Report) ([]Checkout, []StaleWorker) {
+func worktrees(root, workerRoot string, r Runner, rep *Report, focus *focusCapture) ([]Checkout, []StaleWorker) {
 	out, err := r.Run(root, "worktree", "list", "--porcelain")
 	if err != nil {
 		rep.Errors = append(rep.Errors, "registered_worker_worktrees: "+err.Error())
@@ -286,6 +356,7 @@ func worktrees(root, workerRoot string, r Runner, rep *Report) ([]Checkout, []St
 	registered := map[string]bool{}
 	var pending []checkoutSpec
 	var stale []StaleWorker
+	focusRegistered := false
 	for _, block := range strings.Split(strings.TrimSpace(string(out)), "\n\n") {
 		path, head, branch, prunable := "", "", "detached", ""
 		for _, line := range strings.Split(block, "\n") {
@@ -308,13 +379,22 @@ func worktrees(root, workerRoot string, r Runner, rep *Report) ([]Checkout, []St
 			stale = append(stale, StaleWorker{Path: filepath.ToSlash(path), Kind: "registered-prunable", Detail: prunable})
 			continue
 		}
-		if _, statErr := os.Stat(path); statErr != nil {
+		info, statErr := os.Stat(path)
+		if statErr != nil {
 			stale = append(stale, StaleWorker{Path: filepath.ToSlash(path), Kind: "registered-missing", Detail: statErr.Error()})
+			continue
+		}
+		if focus != nil && focus.matches(path, info) {
+			focus.checkout.Path, focus.checkout.HEAD, focus.checkout.Branch = filepath.ToSlash(path), head, branch
+			focusRegistered = true
 			continue
 		}
 		pending = append(pending, checkoutSpec{path: path, head: head, branch: branch})
 	}
 	live, checkoutErrors := probeCheckouts(pending, rep.ObservedAt, r)
+	if focusRegistered {
+		live = append(live, focus.checkout)
+	}
 	rep.Errors = append(rep.Errors, checkoutErrors...)
 	entries, readErr := os.ReadDir(workerRoot)
 	if readErr != nil && !os.IsNotExist(readErr) {
