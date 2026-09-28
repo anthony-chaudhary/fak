@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// TestMetalAttentionFlashContract verifies that attention.metal and metal_shim.m
+// TestMetalAttentionFlashContract verifies that attention.metal and metal_shim.c
 // implement threadgroup-tiled FlashAttention with online softmax and SIMD shuffle
 // reductions to eliminate scalar thread execution and register spilling (#12521).
 func TestMetalAttentionFlashContract(t *testing.T) {
@@ -53,13 +53,13 @@ func TestMetalAttentionFlashContract(t *testing.T) {
 	}
 }
 
-// TestMetalAttentionZeroCopyContract verifies that metal_shim.m wires
+// TestMetalAttentionZeroCopyContract verifies that metal_shim.c wires
 // newBufferWithBytesNoCopy and shared storage mode for zero-copy UMA buffer aliasing.
 func TestMetalAttentionZeroCopyContract(t *testing.T) {
 	shimCandidates := []string{
-		"metal_shim.m",
-		filepath.Join("internal", "compute", "metal_shim.m"),
-		filepath.Join("..", "..", "internal", "compute", "metal_shim.m"),
+		"metal_shim.c",
+		filepath.Join("internal", "compute", "metal_shim.c"),
+		filepath.Join("..", "..", "internal", "compute", "metal_shim.c"),
 	}
 	var shimBytes []byte
 	var err error
@@ -70,7 +70,7 @@ func TestMetalAttentionZeroCopyContract(t *testing.T) {
 		}
 	}
 	if len(shimBytes) == 0 {
-		t.Fatalf("could not read metal_shim.m from candidate paths: %v", shimCandidates)
+		t.Fatalf("could not read metal_shim.c from candidate paths: %v", shimCandidates)
 	}
 	shimSrc := string(shimBytes)
 
@@ -86,7 +86,7 @@ func TestMetalAttentionZeroCopyContract(t *testing.T) {
 	}
 	for _, tok := range requiredShimTokens {
 		if !strings.Contains(shimSrc, tok) {
-			t.Errorf("metal_shim.m missing required zero-copy / pipeline token %q", tok)
+			t.Errorf("metal_shim.c missing required zero-copy / pipeline token %q", tok)
 		}
 	}
 }
@@ -95,9 +95,9 @@ func TestMetalAttentionZeroCopyContract(t *testing.T) {
 // encodes into the caller-owned command buffer without synchronous waitUntilCompleted stalls.
 func TestMetalAttentionPipelineBarriers(t *testing.T) {
 	shimCandidates := []string{
-		"metal_shim.m",
-		filepath.Join("internal", "compute", "metal_shim.m"),
-		filepath.Join("..", "..", "internal", "compute", "metal_shim.m"),
+		"metal_shim.c",
+		filepath.Join("internal", "compute", "metal_shim.c"),
+		filepath.Join("..", "..", "internal", "compute", "metal_shim.c"),
 	}
 	var shimBytes []byte
 	var err error
@@ -108,13 +108,13 @@ func TestMetalAttentionPipelineBarriers(t *testing.T) {
 		}
 	}
 	if len(shimBytes) == 0 {
-		t.Fatalf("could not read metal_shim.m: %v", err)
+		t.Fatalf("could not read metal_shim.c: %v", err)
 	}
 	shimSrc := string(shimBytes)
 
 	encodeIdx := strings.Index(shimSrc, "fmetal_command_encode_attention_f32")
 	if encodeIdx == -1 {
-		t.Fatal("metal_shim.m missing fmetal_command_encode_attention_f32")
+		t.Fatal("metal_shim.c missing fmetal_command_encode_attention_f32")
 	}
 	encodeBlock := shimSrc[encodeIdx:]
 	endBlock := strings.Index(encodeBlock, "\n}\n")

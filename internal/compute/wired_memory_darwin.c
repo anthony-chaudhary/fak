@@ -1,7 +1,9 @@
 //go:build darwin && cgo
 
-// wired_memory_darwin.m — programmatic macOS wired working-set memory locking
+// wired_memory_darwin.c — programmatic macOS wired working-set memory locking
 // via mach_vm_wire and mlock fallback to eliminate swap stalls.
+// Objective-C despite the .c extension: wired_memory_darwin.go's `#cgo CFLAGS: -x
+// objective-c` compiles it as such (see "One libobjc per binary" in metal.go).
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>

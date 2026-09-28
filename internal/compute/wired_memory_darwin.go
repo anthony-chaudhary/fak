@@ -3,6 +3,7 @@
 package compute
 
 /*
+#cgo CFLAGS: -x objective-c
 #cgo LDFLAGS: -framework Foundation -framework Metal
 #include "wired_memory_darwin.h"
 */

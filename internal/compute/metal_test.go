@@ -654,11 +654,11 @@ func TestMetalAttention(t *testing.T) {
 		}
 	}
 
-	// 2. Verify metal_shim.m contains zero-copy UMA allocator and command-encoding tokens.
+	// 2. Verify metal_shim.c contains zero-copy UMA allocator and command-encoding tokens.
 	shimCandidates := []string{
-		"metal_shim.m",
-		filepath.Join("internal", "compute", "metal_shim.m"),
-		filepath.Join("..", "..", "internal", "compute", "metal_shim.m"),
+		"metal_shim.c",
+		filepath.Join("internal", "compute", "metal_shim.c"),
+		filepath.Join("..", "..", "internal", "compute", "metal_shim.c"),
 	}
 	var shimBytes []byte
 	for _, p := range shimCandidates {
@@ -668,7 +668,7 @@ func TestMetalAttention(t *testing.T) {
 		}
 	}
 	if len(shimBytes) == 0 {
-		t.Fatalf("could not read metal_shim.m from any candidate path: %v", shimCandidates)
+		t.Fatalf("could not read metal_shim.c from any candidate path: %v", shimCandidates)
 	}
 	shimSrc := string(shimBytes)
 
@@ -682,7 +682,7 @@ func TestMetalAttention(t *testing.T) {
 	}
 	for _, tok := range requiredShimTokens {
 		if !strings.Contains(shimSrc, tok) {
-			t.Errorf("metal_shim.m missing required zero-copy / pipelined token %q", tok)
+			t.Errorf("metal_shim.c missing required zero-copy / pipelined token %q", tok)
 		}
 	}
 

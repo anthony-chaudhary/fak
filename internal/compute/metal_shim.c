@@ -1,8 +1,11 @@
 //go:build darwin && arm64 && cgo
 
-// metal_shim.m — the Metal / MetalPerformanceShaders hardware seam behind the typed
+// metal_shim.c — the Metal / MetalPerformanceShaders hardware seam behind the typed
 // compute.Backend, compiled DIRECTLY by cgo's clang (no offline step, unlike CUDA's nvcc
-// or Vulkan's glslc — Objective-C + an embedded MSL source string build in-process). It
+// or Vulkan's glslc — Objective-C + an embedded MSL source string build in-process).
+// This file is Objective-C despite the .c extension: metal.go's `#cgo CFLAGS: -x
+// objective-c` compiles it as such, and the extension keeps cmd/go from adding a second
+// -lobjc to every binary (see "One libobjc per binary" in metal.go). It
 // mirrors cuda_kernels.cu function-for-function: every op is f32, and this is an *Approx*
 // peer of the cpuref *Reference* — held to argmax-exact + logit-cosine, NOT max|Δ|=0.
 // MPSMatrixMultiplication (a different reduction order than the model's fdot tree) is what
@@ -10,7 +13,7 @@
 //
 // The device + command queue are owned by internal/metalgemm (gDev/gQueue): compute's
 // registry backend and the model-engine GEMM/decode lane now share one Metal singleton.
-// Memory management in this file is MANUAL (MRC — cgo compiles .m without -fobjc-arc):
+// Memory management in this file is MANUAL (MRC — this package compiles without -fobjc-arc):
 // "new…"/"alloc" objects are +1 owned and released explicitly; each op body is wrapped
 // in an @autoreleasepool so transient descriptors/command buffers don't accumulate.
 // Buffers use MTLResourceStorageModeShared (Apple Silicon unified memory), so host<->device

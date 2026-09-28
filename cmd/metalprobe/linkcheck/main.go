@@ -2,7 +2,7 @@
 
 // Command linkcheck is the cgo probe leaf invoked by cmd/metalprobe on darwin/arm64.
 // It links internal/compute + internal/metalgemm — the two go-metal leaves whose cgo
-// pieces (metal_shim.m, metal.m) clang compiles in-process — so building and running
+// pieces (metal_shim.c, metal.m) clang compiles in-process — so building and running
 // this leaf on a provisioned host proves the whole cgo Metal build path links AND can
 // initialize a live device. It prints one machine line for cmd/metalprobe to parse:
 //

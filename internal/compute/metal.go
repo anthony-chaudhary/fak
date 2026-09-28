@@ -8,7 +8,7 @@
 // (cpu-ref) stays the Default, so nothing silently runs on the GPU.
 //
 // Every method delegates to the flat C ABI in metal_backend.h (implemented by
-// metal_shim.m, compiled in-process by cgo's clang — no offline kernel build, unlike the
+// metal_shim.c, compiled in-process by cgo's clang — no offline kernel build, unlike the
 // CUDA/Vulkan backends). metal_shim binds to internal/metalgemm's process-wide Metal
 // device/queue, so the compute registry and model-engine GEMM lane share one hardware seam.
 // The Go side re-validates shapes and owns the Tensor type; the C side carries only opaque
@@ -17,10 +17,21 @@
 // runtime-compiled MSL compute kernels, full synth-decode parity vs cpuref on this box.
 // Quantized device GEMM, async/stream pipelining, and an on-GPU Evict are tracked
 // follow-ups (the Go MatMul refuses non-F32 weights with a clear message).
+//
+// One libobjc per binary: this package's Objective-C sources (metal_shim.c,
+// wired_memory_darwin.c) deliberately use a .c extension plus `#cgo CFLAGS: -x
+// objective-c`, not .m. cmd/go appends -lobjc to the link of EVERY package holding .m
+// files, and internal/metalgemm (always linked beside this package) already holds .m
+// files, so a .m file here put -lobjc on the link line twice and Apple's ld printed
+// "ld: warning: ignoring duplicate libraries: '-lobjc'" on every cgo link of cmd/fak and
+// cmd/fak-dev (i.e. every `go run`). libobjc still links: metalgemm's -lobjc covers it,
+// and -framework Foundation re-exports libobjc.A.dylib regardless.
+// TestComputeHoldsNoObjectiveCMFiles pins it; do not add .m files to this package.
 
 package compute
 
 /*
+#cgo CFLAGS: -x objective-c
 #cgo LDFLAGS: -framework Foundation -framework Metal -framework MetalPerformanceShaders
 #include <stdlib.h>
 #include "metal_backend.h"
