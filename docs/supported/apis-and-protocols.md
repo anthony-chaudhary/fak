@@ -116,7 +116,7 @@ The principal served routes, from the Claude Code integration guide and the
 | `GET /healthz` | Liveness (the only auth-exempt route) |
 
 The reference also documents the additional fak-native routes `/v1/fak/context/change`
-(tombstone a recall page), `/v1/fak/policy/reload`, and `/v1/fak/trace/reset`, plus
+(currently refuses persisted changes until an act-bound lease is available), `/v1/fak/policy/reload`, and `/v1/fak/trace/reset`, plus
 `/v1/messages/count_tokens` and `/debug/vars`.
 
 ### The fak_* MCP tools
@@ -132,7 +132,7 @@ fak-native request DTO), from [`examples/mcp/README.md`](https://github.com/anth
 | `fak_changes` | Drain the cross-agent "what changed" feed (typed mutations and revocations since your cursor). | To re-plan or evict your cache when another agent changed shared data |
 | `fak_revoke` | Refute an external world-state witness found poisoned or stale; every entry admitted under it is evicted fleet-wide. | When you discover a witness you relied on is bad |
 
-A sixth tool, `fak_context_change` (tombstone a recall page), is exposed over the
+A sixth tool, `fak_context_change` (currently refuses persisted changes until an act-bound lease is available), is exposed over the
 `/mcp` HTTP transport and documented in the
 [MCP tool-result wire](../mcp-tool-result.md); the five above are the ones an agent
 reaches for during a normal session.

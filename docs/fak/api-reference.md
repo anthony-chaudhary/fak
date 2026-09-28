@@ -124,7 +124,7 @@ policy refusal. This is what lets a refusal cost a non-Go agent zero extra model
 | POST | [`/v1/fak/admit`](#post-v1fakadmit) | fak-native | Admit a client-executed tool **result** |
 | GET·POST | [`/v1/fak/changes`](#getpost-v1fakchanges) | fak-native | Drain the cross-agent change feed |
 | POST | [`/v1/fak/revoke`](#post-v1fakrevoke) | fak-native | Refute a world-state witness |
-| POST | [`/v1/fak/context/change`](#post-v1fakcontextchange) | fak-native | Tombstone a recall page |
+| POST | [`/v1/fak/context/change`](#post-v1fakcontextchange) | fak-native | Refuse unfenced persisted context changes |
 | POST | [`/v1/fak/policy/reload`](#post-v1fakpolicyreload) | fak-native | Hot-reload the policy manifest |
 | POST | [`/v1/fak/route/reload`](#post-v1fakroutereload) | fak-native | Force-reload the model-routing manifest |
 | POST | [`/v1/fak/trace/reset`](#post-v1faktracereset) | fak-native | Clear a session's IFC taint mark |
@@ -402,10 +402,12 @@ re-admission under it is refused, and the eviction is broadcast on the change fe
 
 ### `POST /v1/fak/context/change`
 
-Records a safe, requester-initiated mutation against a persisted recall core image.
-Deliberately **negative-only**: today the only accepted mutation is a **tombstone** that
-suppresses one persisted recall page from future model-visible context. The core
-image's CAS bytes are preserved for audit.
+This route currently refuses persisted context changes with `403` and
+`fak_context_change requires an act-bound lease`. It does not mutate the recall
+image. The internal context-change primitive remains negative-only: its tombstone
+suppresses a page from future model-visible context while retaining the page row
+and CAS bytes for audit. The route will require an act-bound lease before it can
+invoke that primitive.
 
 **Request** (`ContextChangeRequest`)
 
@@ -419,9 +421,8 @@ image's CAS bytes are preserved for audit.
 | `requested_by` | string | Optional requesting identity. |
 | `witness` | string | Optional supporting external witness. |
 
-**Response** (`ContextChangeResponse`): the applied ledger row — `image_dir`, `id`,
-`action`, `step`, `digest`, `reason`, `requested_by`, `witness`, `trust_epoch`, plus
-`applied` and `tombstoned` booleans. `400` on a malformed body or a rejected mutation.
+**Response:** `403` for a valid mutation request until an act-bound lease is
+available; `400` for a malformed body. No ledger row is persisted.
 
 ### `POST /v1/fak/policy/reload`
 
@@ -566,18 +567,19 @@ A request body is one JSON-RPC message. A **notification** (no `id`, e.g.
 | `fak_admit` | `/v1/fak/admit` | Admit a client-executed result. |
 | `fak_changes` | `/v1/fak/changes` | Drain the change feed (`{since}`). |
 | `fak_revoke` | `/v1/fak/revoke` | Refute a witness (`{witness}`, required). |
-| `fak_context_change` | `/v1/fak/context/change` | Tombstone a recall page. |
+| `fak_context_change` | `/v1/fak/context/change` | Refuses persisted changes until an act-bound lease is available. |
 
-A `tools/call` result wraps the matching fak-native response JSON as a single text
-content block, with `isError: false`. **A DENY is a valid result, not an error** —
-JSON-RPC errors are reserved for protocol/internal faults:
+A successful `tools/call` result wraps the matching fak-native response JSON as
+a single text content block, with `isError: false`. **A kernel DENY is a valid
+result.** The currently unfenced `fak_context_change` route instead returns a
+JSON-RPC error requiring an act-bound lease:
 
 | Code | Meaning |
 |---|---|
 | `-32700` | Parse error (unparseable frame). |
 | `-32600` | Invalid request (`jsonrpc` ≠ `"2.0"`, or an oversized frame on stdio). |
 | `-32601` | Method not found. |
-| `-32602` | Invalid params (bad `tools/call` arguments, unknown tool, or a kernel argument error). |
+| `-32602` | Invalid params (bad `tools/call` arguments, unknown tool, a kernel argument error, or the current `fak_context_change` act-bound lease refusal). |
 | `-32603` | Internal error. |
 
 For the MCP tool-result wire format in depth, see

@@ -160,22 +160,17 @@ func (b blockClone) MaterializeOwned(root, lane, key, baseSHA, wtRoot string, gi
 	}
 	wt := Path(lane, key, wtRoot)
 	if _, err := os.Stat(wt); err == nil {
-		rc, out := run(git, root, []string{"worktree", "list", "--porcelain"})
-		if rc == 0 {
-			for _, p := range parseWorktreePaths(out) {
-				if samePath(p, wt) {
-					if PoolCap() > 0 {
-						if meta, err := readPoolMember(wt); err == nil && meta.State == poolStateIdle {
-							if res, ok := leaseSpecificPooled(root, wt, base, git, owner); ok {
-								return res
-							}
-							return Result{OK: false, Path: wt, BaseSHA: base,
-								Reason: "same-key idle pool member could not be leased — fail open"}
-						}
+		if live, _ := liveWorktreeRegistration(root, wt, git); live {
+			if PoolCap() > 0 {
+				if meta, err := readPoolMember(wt); err == nil && meta.State == poolStateIdle {
+					if res, ok := leaseSpecificPooled(root, wt, base, git, owner); ok {
+						return res
 					}
-					return Result{OK: true, Path: wt, BaseSHA: base, Reused: true}
+					return Result{OK: false, Path: wt, BaseSHA: base,
+						Reason: "same-key idle pool member could not be leased — fail open"}
 				}
 			}
+			return Result{OK: true, Path: wt, BaseSHA: base, Reused: true}
 		}
 	}
 	if k := PoolCap(); k > 0 {

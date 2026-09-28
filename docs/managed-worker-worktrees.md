@@ -153,7 +153,7 @@ fak worktree worker prepare --lane <lane> --key <key> [flags]
 - `--base-sha <sha>`: Commit SHA to pin the detached worktree at (defaults to trunk `HEAD`).
 - `--wt-root <dir>`: Parent directory override for the worktree.
 - `--lease-id <id>`: Lease identity for the owner stamp (defaults to `FAK_LEASE_ID` or `resolve-<lane>`).
-- `--owner-pid <pid>`: Process ID of the owning worker (defaults to current PID).
+- `--owner-pid <pid>`: Process ID of the owning worker. Defaults to the `prepare` process itself, which exits as soon as it prints its receipt; the tree is then protected from the prepare-time dead sweep only for the dead-owner grace window (15 minutes from prepare, or while dirty). Pass the long-lived worker's PID.
 - `--capacity-reason <why>`: Advisory explanation when creating worktrees above the setpoint (50).
 - `--message <msg>`: Intended signed commit message, stored in the `.intent` sidecar.
 - `--path <path>`: Repeatable flag recording intended touch paths for `LAND_READY` lifecycle detection.
@@ -161,7 +161,9 @@ fak worktree worker prepare --lane <lane> --key <key> [flags]
 
 #### Behavior and output
 
-- If a worktree with the same lane and key already exists and is clean, it is reused (`reused: true`).
+- If a worktree with the same lane and key already exists and is clean, it is reused (`reused: true`). Reuse requires a live git registration (listed, not prunable, `.git` link present) and is re-read after stamping; a gutted target is refused (`ORPHAN_TARGET_REFUSED`) and a target that vanishes mid-prepare reports `PREPARE_REUSE_LOST`.
+- Attempts for the same lane and key are serialized by a per-target lock under `.fak-worker-prepare-locks`; a timed-out attempt removes its partial tree before releasing it, and a concurrent attempt waits (up to its budget, or `FAK_WORKER_PREPARE_LOCK_WAIT` when unbounded) or reports `PREPARE_BUSY` without touching the target.
+- `--message` and `--path` are validated before anything is materialized.
 - If `.worktreeinclude` exists in the repo root or worktree, declared include patterns are copied.
 - Writes an owner stamp containing `pid`, `lease_id`, and `created_at`.
 - Above the advisory capacity setpoint of 50 active worktrees, `capacity` returns an advisory notice.

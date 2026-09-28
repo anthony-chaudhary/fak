@@ -260,7 +260,7 @@ What Codex gets from this path:
 | `fak_adjudicate` | Ask the kernel for a verdict before running a call. |
 | `fak_syscall` | Let the kernel adjudicate and execute a registered call. |
 | `fak_admit` | Screen a tool result before it re-enters model context. |
-| `fak_context_change` | Read the "what changed" feed when a shared state surface is present. |
+| `fak_context_change` | Currently refuses persisted recall changes until an act-bound lease is available. |
 
 Use this path when you are running Codex itself. It preserves Codex's current model wire and
 adds fak as an explicit, inspectable tool boundary.

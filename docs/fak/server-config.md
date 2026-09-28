@@ -427,7 +427,7 @@ When `--addr` is set (without `--stdio`), the gateway exposes these HTTP routes:
 | `/v1/fak/admit` | POST | Fak native: admit a client-produced tool result through quarantine. |
 | `/v1/fak/changes` | GET/POST | Cross-agent "what changed" feed (vdso coherence bus). |
 | `/v1/fak/revoke` | POST | Revoke a witness, evicting pooled entries admitted under it. |
-| `/v1/fak/context/change` | POST | Request a context-control mutation (e.g., tombstone) on a persisted core image. |
+| `/v1/fak/context/change` | POST | Refuses persisted context changes until an act-bound lease is available. |
 | `/v1/fak/policy/reload` | POST | Reload the capability-floor manifest from disk (requires `--policy`). |
 | `/v1/fak/trace/reset` | POST | Reset one trace's process-local taint ledger mark. |
 | `/v1/models` | GET | List available models (mirrors `--model`). |
@@ -462,7 +462,7 @@ When `--stdio` is set, the gateway serves MCP over stdin/stdout with newline-del
 - `fak_admit` — Admit tool results
 - `fak_changes` — Cross-agent coherence feed
 - `fak_revoke` — Witness revocation
-- `fak_context_change` — Context mutations
+- `fak_context_change` — Refuses persisted context changes until an act-bound lease is available
 
 ---
 

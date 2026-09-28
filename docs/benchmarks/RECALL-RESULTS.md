@@ -51,9 +51,10 @@ the in-process primitives never had. It adds **nothing** to the frozen ABI.
   page it no longer wants in future context. The tombstone is durable manifest
   metadata; it suppresses `Resolve`/`Recall`/`cdb.WorkingSet`, but it does **not**
   delete the CAS bytes or mutate the original page row, so audit evidence remains.
-  The operator/agent-facing surfaces are `fak debug --cmd tombstone --step N
-  --reason ... --requested-by ...`, HTTP `POST /v1/fak/context/change`, and MCP
-  `fak_context_change`; each persists the same ledger row back to the core image.
+  The local `fak debug --cmd tombstone --step N --reason ... --requested-by ...`
+  path persists the ledger row. At the current HEAD, HTTP
+  `POST /v1/fak/context/change` and MCP `fak_context_change` refuse persisted
+  writes until an act-bound lease protects the effect.
 - Two **additive, read-only** accessors on the shipped `ctxmmu.MMU` (`Held()`,
   `Cleared()`) expose exactly the quarantine state the design note says to serialize.
   They change no `Admit`/`PageIn`/`Clear` behaviour (diff is +30 lines, all new
@@ -96,7 +97,7 @@ the persist→reload boundary — the load-bearing result.
 | `go test ./internal/recall/` | **PASS** (fresh, includes durable quarantine, tightened re-screen, tombstone context-control, and dream cleanup witnesses) |
 | `go test ./internal/cdb/` | **PASS** (fresh, includes working-set exclusion of tombstoned pages) |
 | `go test ./cmd/fak/` | **PASS** (fresh, includes `cmdDebug --cmd tombstone` persistence witness) |
-| `go test ./internal/gateway/` | **PASS** (fresh, includes HTTP `/v1/fak/context/change` and MCP `fak_context_change` persistence witness) |
+| `go test ./internal/gateway/` | **PASS** at the original benchmark revision (then included HTTP `/v1/fak/context/change` and MCP `fak_context_change` persistence witness; both routes now refuse unfenced writes) |
 | `go test ./internal/abi/` (ABI golden freeze) | **PASS, fresh** — proves the ctxmmu edit is additive-only; the freeze is unbroken |
 | `git diff fak/internal/ctxmmu/mmu.go` | +30 lines, two new read-only methods only; no edit to `Admit`/`PageIn`/`Clear` |
 | `grep abi.Register fak/internal/recall/` | **zero** — recall registers nothing with the ABI; it is a pure consumer |
