@@ -36,6 +36,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -498,11 +499,8 @@ func PrepareOwnedBounded(root, lane, key, baseSHA, wtRoot string, owner OwnerSta
 	if rc == 0 {
 		base = strings.TrimSpace(out)
 	}
-	res := prepareOwnedWithBackend(root, lane, key, base, wtRoot, git, defaultIsolationBackend, owner, true)
-	if !res.OK && res.Path != "" && !res.Reused && (res.Code == "PREPARE_TIMEOUT" || ctx.Err() != nil) {
-		cleanupPartialPrepareBounded(root, res.Path)
-	}
-	if ctx.Err() != nil && !res.OK {
+	res := prepareOwnedLocked(ctx, root, lane, key, base, wtRoot, git, defaultIsolationBackend, owner, true)
+	if ctx.Err() != nil && !res.OK && res.Code != PrepareCodeBusy {
 		out := prepareTimeoutResult(res.Path, base, "materialization/readiness", ctx.Err())
 		out.Reused = res.Reused
 		out.Preserved = res.Reused
@@ -532,11 +530,53 @@ func PrepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRun
 }
 
 func prepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRunner, backend IsolationBackend, owner OwnerStamp, verifyReady bool) Result {
+	return prepareOwnedLocked(nil, root, lane, key, baseSHA, wtRoot, git, backend, owner, verifyReady)
+}
+
+// prepareOwnedLocked runs one prepare attempt while holding its target lock
+// (prepare_lock.go). ctx is a bounded prepare's budget, nil when unbounded: it
+// caps the lock wait and, once spent, lets the attempt remove a partial tree it
+// created itself. That removal happens before the lock is released, so it can
+// never delete a tree a later attempt has adopted.
+func prepareOwnedLocked(ctx context.Context, root, lane, key, baseSHA, wtRoot string, git GitRunner, backend IsolationBackend, owner OwnerStamp, verifyReady bool) Result {
 	sweepDeadWorktrees(root, wtRoot, git)
 	if backend == nil {
 		backend = defaultIsolationBackend
 	}
 	owner = normalizeOwnerStamp(owner)
+	target := Path(lane, key, wtRoot)
+	wait := prepareLockWait()
+	if ctx != nil {
+		if deadline, ok := ctx.Deadline(); ok {
+			wait = time.Until(deadline)
+		}
+	}
+	var res Result
+	lockErr := withPrepareTargetLock(target, wait, func() {
+		res = prepareTarget(root, lane, key, baseSHA, wtRoot, git, backend, owner, verifyReady)
+		if ctx != nil && !res.OK && res.Path != "" && !res.Reused && !res.Preserved &&
+			(res.Code == "PREPARE_TIMEOUT" || ctx.Err() != nil) {
+			// The bounded runner is spent; give removal of this attempt's own
+			// partial tree a fresh budget.
+			cleanupPartialPrepareBounded(root, res.Path)
+		}
+	})
+	if lockErr == nil {
+		return res
+	}
+	out := Result{OK: false, Code: PrepareCodeBusy, Path: target, BaseSHA: baseSHA, Preserved: true,
+		Reason: "another prepare attempt holds this worker worktree target - nothing was touched; retry after it reports",
+		Detail: lockErr.Error()}
+	if !errors.Is(lockErr, errPrepareTargetBusy) {
+		out.Code = ""
+		out.Reason = "could not take the worker worktree prepare lock - fail open"
+	}
+	return out
+}
+
+// prepareTarget is one attempt's materialize → verify → stamp sequence. The
+// caller holds the target lock.
+func prepareTarget(root, lane, key, baseSHA, wtRoot string, git GitRunner, backend IsolationBackend, owner OwnerStamp, verifyReady bool) Result {
 	var res Result
 	if owned, ok := backend.(ownedIsolationBackend); ok {
 		res = owned.MaterializeOwned(root, lane, key, baseSHA, wtRoot, git, owner)
@@ -607,8 +647,47 @@ func prepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRun
 		res.OK = false
 		res.Reason = "could not persist worktree owner/pool metadata — fail open"
 		res.Detail = metadataErr.Error() + cleanupDetail
+		return res
+	}
+	if res.Reused && !res.pooled && isGitWorktreeBackend(backend) {
+		return confirmReusedWorktree(root, res, git)
 	}
 	return res
+}
+
+// confirmReusedWorktree re-reads a same-key reuse after it was stamped, so a
+// receipt never names a tree that a deleter outside the target lock (an orphaned
+// git child of a killed command, a manual reap) removed while prepare ran.
+func confirmReusedWorktree(root string, res Result, git GitRunner) Result {
+	live, listOK := liveWorktreeRegistration(root, res.Path, git)
+	if live {
+		return res
+	}
+	out := Result{OK: false, Path: res.Path, BaseSHA: res.BaseSHA, Reused: true}
+	if !listOK {
+		out.Code = "PREPARE_NOT_READY"
+		out.Preserved = true
+		out.Reason = "reused worker worktree registration could not be read back - no ready receipt emitted"
+		return out
+	}
+	out.Code = PrepareCodeReuseLost
+	out.Reason = "reused worker worktree lost its checkout or git registration during prepare - no ready receipt emitted"
+	out.Preserved = discardReuseMetadata(res.Path)
+	return out
+}
+
+// discardReuseMetadata withdraws the lease, owner and pool records written for a
+// reuse that could not be confirmed. WriteWorkerLease re-creates a vanished
+// directory to hold lease.json, so a directory left empty is removed as well; any
+// other remaining content is kept for orphan adjudication.
+func discardReuseMetadata(wtPath string) (preserved bool) {
+	_ = os.Remove(filepath.Join(wtPath, WorkerLeaseFileName))
+	_ = os.Remove(filepath.Join(wtPath, WorkerLeaseFileName+".tmp"))
+	removeOwnerStamp(wtPath)
+	removePoolMemberState(wtPath)
+	_ = os.Remove(wtPath)
+	_, err := os.Stat(wtPath)
+	return err == nil
 }
 
 func verifyPreparedWorktree(res Result, git GitRunner) Result {
@@ -699,25 +778,22 @@ func (gitWorktree) MaterializeOwned(root, lane, key, baseSHA, wtRoot string, git
 	wt := Path(lane, key, wtRoot)
 	if _, err := os.Stat(wt); err == nil {
 		// Already prepared (a retry / re-dispatch). Reuse only if git still tracks
-		// it, rather than erroring on `worktree add` over an existing dir.
-		rc, out := run(git, root, []string{"worktree", "list", "--porcelain"})
-		if rc == 0 {
-			for _, p := range parseWorktreePaths(out) {
-				if samePath(p, wt) {
-					if PoolCap() > 0 {
-						// An idle member at the same derived path is a NEW lease, not
-						// the historical retry case: reserve and sanitize it first.
-						if meta, err := readPoolMember(wt); err == nil && meta.State == poolStateIdle {
-							if res, ok := leaseSpecificPooled(root, wt, base, git, owner); ok {
-								return res
-							}
-							return Result{OK: false, Path: wt, BaseSHA: base,
-								Reason: "same-key idle pool member could not be leased — fail open"}
-						}
+		// it as a live checkout, rather than erroring on `worktree add` over an
+		// existing dir. A listed-but-prunable registration is a gutted tree, not a
+		// reusable one.
+		if live, _ := liveWorktreeRegistration(root, wt, git); live {
+			if PoolCap() > 0 {
+				// An idle member at the same derived path is a NEW lease, not
+				// the historical retry case: reserve and sanitize it first.
+				if meta, err := readPoolMember(wt); err == nil && meta.State == poolStateIdle {
+					if res, ok := leaseSpecificPooled(root, wt, base, git, owner); ok {
+						return res
 					}
-					return Result{OK: true, Path: wt, BaseSHA: base, Reused: true}
+					return Result{OK: false, Path: wt, BaseSHA: base,
+						Reason: "same-key idle pool member could not be leased — fail open"}
 				}
 			}
+			return Result{OK: true, Path: wt, BaseSHA: base, Reused: true}
 		}
 		return Result{
 			OK:             false,

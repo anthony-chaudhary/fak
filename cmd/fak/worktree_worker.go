@@ -208,7 +208,7 @@ func worktreeWorkerPrepare(argv []string) {
 	key := fs.String("key", "", "worker's unique key (issue number, wave id, pid) — hashed into the dir name")
 	baseSHA := fs.String("base-sha", "", "commit to pin the detached worktree at (default: trunk HEAD)")
 	leaseID := fs.String("lease-id", "", "lease identity to retain in the owner stamp (default: FAK_LEASE_ID or resolve-<lane>)")
-	ownerPID := fs.Int("owner-pid", os.Getpid(), "owner process PID to retain in the owner stamp")
+	ownerPID := fs.Int("owner-pid", os.Getpid(), "owner process PID to retain in the owner stamp (default: this prepare process, which exits on return, so the tree is only protected for the dead-owner grace window; pass the long-lived worker's PID)")
 	capacityReason := fs.String("capacity-reason", "", "why worker-worktree growth above the advisory setpoint is needed (advisory; never blocks)")
 	message := fs.String("message", "", "intended signed commit message retained for lifecycle recovery")
 	sandboxCompatible := fs.Bool("sandbox-compatible", false, "localize worktree gitdir pointer for strict host sandboxes")
@@ -217,6 +217,14 @@ func worktreeWorkerPrepare(argv []string) {
 	wtRoot := fs.String("wt-root", "", "parent dir for the worktree (default: FLEET_WORKER_WORKTREE_ROOT or per-OS scratch)")
 	root := fs.String("root", "", "repo root (default: discover from cwd)")
 	fs.Parse(argv)
+
+	// Refuse a malformed intent before any side effect: refusing it after
+	// materialization leaked a stamped worktree whose default owner (this
+	// process) was about to exit.
+	if (strings.TrimSpace(*message) == "") != (len(paths) == 0) {
+		worktreeWorkerEmit(workerworktree.Result{OK: false, Reason: "--message and at least one --path must be supplied together"})
+		os.Exit(1)
+	}
 
 	repoRoot := worktreeWorkerRoot(*root)
 	capacityCensus := workerworktree.CapacityCensusFor(repoRoot, nil)
@@ -255,12 +263,8 @@ func worktreeWorkerPrepare(argv []string) {
 		}
 		if res.OK {
 			out.Env = workerworktree.WorktreeEnv(nil, res.Path)
-			if strings.TrimSpace(*message) != "" || len(paths) > 0 {
-				if strings.TrimSpace(*message) == "" || len(paths) == 0 {
-					res.OK, res.Reason = false, "--message and at least one --path must be supplied together"
-					out.Result = res
-					out.Env = nil
-				} else if err := workerworktree.SaveIntent(res.Path, res.BaseSHA, *message, paths); err != nil {
+			if strings.TrimSpace(*message) != "" {
+				if err := workerworktree.SaveIntent(res.Path, res.BaseSHA, *message, paths); err != nil {
 					res.OK, res.Reason = false, "save worker land intent: "+err.Error()
 					out.Result = res
 					out.Env = nil
