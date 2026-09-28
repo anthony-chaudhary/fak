@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
+	"github.com/anthony-chaudhary/fak/internal/testgit"
 )
 
 // guard_login_e2e_test.go — the END-TO-END witness for the "fak guard gets stuck on login
@@ -87,7 +88,9 @@ func TestMain(m *testing.M) {
 	// the existing copy assertions pin. Tests that mean to witness a successful divorce inject their
 	// own rotating spawn instead.
 	divorceRefreshSpawn = func(context.Context, string) error { return nil }
-	os.Exit(m.Run())
+	// Hermetic git: fixture `git config user.*` writes and commits can never reach the real
+	// checkout or the operator's global config, even under a git hook's exported GIT_DIR.
+	os.Exit(testgit.RunGitIsolated(m))
 }
 
 // runGuardE2E execs this test binary in helper mode as `fak guard <args>` under env, with a

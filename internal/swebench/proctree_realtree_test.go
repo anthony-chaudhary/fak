@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/procguard"
+	"github.com/anthony-chaudhary/fak/internal/testgit"
 )
 
 // Env guards for the DeepSWE-adapter teardown witness (issue #3106). RunInstance
@@ -36,7 +37,9 @@ func TestMain(m *testing.M) {
 		runAdapterTreeHelper()
 		return
 	}
-	os.Exit(m.Run())
+	// Hermetic git: fixture `git config user.*` writes and commits can never
+	// reach the real checkout or the operator's global config.
+	os.Exit(testgit.RunGitIsolated(m))
 }
 
 // runAdapterTreeHelper is the fake DeepSWE adapter RunInstance execs: it spawns a real

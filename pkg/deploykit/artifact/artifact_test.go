@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/testgit"
 	"github.com/anthony-chaudhary/fak/pkg/deploykit"
 )
 
@@ -33,7 +34,9 @@ func TestMain(m *testing.M) {
 			_ = os.Unsetenv(k)
 		}
 	}
-	os.Exit(m.Run())
+	// Hermetic git beyond the scrub above: a fixture `git config --global` write
+	// lands in a private copy, and a changed checkout identity fails the run.
+	os.Exit(testgit.RunGitIsolated(m))
 }
 
 const (

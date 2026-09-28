@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/testgit"
 )
 
 // Reap witness for #3103 (sibling of #2989): RunPyEnvelope's timeout branch must
@@ -41,7 +43,9 @@ func TestMain(m *testing.M) {
 		time.Sleep(2 * time.Minute)
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+	// Hermetic git: fixture `git config user.*` writes and commits can never
+	// reach the real checkout or the operator's global config.
+	os.Exit(testgit.RunGitIsolated(m))
 }
 
 // beatUntilKilled rewrites path every ~80ms until it is killed (or a safety
