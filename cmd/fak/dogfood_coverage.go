@@ -10,6 +10,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dogfoodcoverage"
 )
 
+// `fak dogfood-coverage` - the Go port of the deleted tools/dogfood_coverage.py:
+// score how much of the real dev workflow eats the kernel (coverage %, dogfood
+// debt, A-F grade) over internal/dogfoodcoverage. `--check` exits 1 on any HARD
+// dogfood debt; .github/workflows/dogfood-coverage.yml runs it as the CI gate.
+//
+// Wired as the top-level `dogfood-coverage` case in main.go, classified TierDev in
+// internal/devindex/tiers.go with its manifest synopsis alongside.
 func cmdDogfoodCoverage(argv []string) {
 	os.Exit(runDogfoodCoverage(os.Stdout, os.Stderr, argv))
 }
