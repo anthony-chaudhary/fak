@@ -73,7 +73,7 @@ address and the bearer key. Replace the example address and key with the values 
 by the host's installer:
 
 ```bash
-fak node use 100.64.0.10:8080 --key 'PASTE_PRINTED_GATEWAY_KEY'
+fak node use <host>:8080 --key 'PASTE_PRINTED_GATEWAY_KEY'
 fak agent                               # saved router is the default
 fak chat                                # same saved router
 ```
