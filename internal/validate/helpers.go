@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
 )
@@ -81,10 +83,37 @@ func validateTestRunner(goos string, wsl bool) string {
 	return "go test"
 }
 
-func validateTestArgs(testRun string, targets []string) []string {
+// validateGoTestTimeoutMaxMargin caps the head start go test's own -timeout alarm
+// gets over the validate deadline.
+const validateGoTestTimeoutMaxMargin = 5 * time.Minute
+
+// validateGoTestTimeout derives go test's -timeout from the validate budget left at
+// now. Without it Go's 10m default governed even under `fak commit
+// --build-check-timeout 90m`, so a green-but-slow cmd/fak suite on a loaded host died
+// as "test timed out after 10m0s" (#13558). The alarm is set a margin (a tenth of the
+// remaining budget, at most validateGoTestTimeoutMaxMargin) short of the deadline so
+// that for a truly hung test Go's panic and goroutine dump name it before the context
+// kill discards them. A context with no deadline returns 0: nothing external bounds
+// the run, so Go's own default stays in charge.
+func validateGoTestTimeout(ctx context.Context, now time.Time) time.Duration {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return 0
+	}
+	remaining := deadline.Sub(now)
+	margin := min(remaining/10, validateGoTestTimeoutMaxMargin)
+	// -timeout 0 disables the alarm, so an exhausted budget still gets a positive one.
+	return max((remaining - margin).Truncate(time.Second), time.Second)
+}
+
+// validateTestArgs builds the isolated go test argv; timeout 0 omits -timeout.
+func validateTestArgs(testRun string, timeout time.Duration, targets []string) []string {
 	// Tests require filesystem-valid source paths from runtime.Caller(0) (e.g. for
 	// package introspection and dos.toml validation); do not pass -trimpath here (#9788).
 	args := []string{"test", "-count=1"}
+	if timeout > 0 {
+		args = append(args, "-timeout", timeout.String())
+	}
 	if testRun != "" {
 		args = append(args, "-run", testRun)
 	}

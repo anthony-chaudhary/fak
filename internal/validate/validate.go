@@ -183,7 +183,7 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")
 	ref := fs.String("ref", "HEAD", "committed base ref or sha")
 	asJSON := fs.Bool("json", false, "emit the result as JSON")
-	timeout := fs.Duration("timeout", defaultValidateTimeout, "maximum total validation time")
+	timeout := fs.Duration("timeout", defaultValidateTimeout, "maximum total validation time; affected go test runs get a -timeout just inside what remains")
 	progress := fs.Bool("progress", validateWriterIsTerminal(stderr), "emit phase progress to stderr (default on when stderr is a TTY)")
 	testOnly := fs.Bool("test-only", false, "skip affected-package build/vet and run only affected tests in the isolated checkout")
 	wslTests := fs.Bool("wsl-tests", defaultValidateWSLTests(runtime.GOOS), "run isolated affected tests through WSL (default on Windows hosts)")
@@ -407,7 +407,7 @@ func runValidateTestsPhase(ctx context.Context, stdout io.Writer, res *validateR
 	}
 	res.Runner = validateTestRunner(runtime.GOOS, wslTests)
 	testTargets := packagePatternsForRoot(dir, res.Tested, fileToPkg)
-	args := validateTestArgs(effectiveTestRun, testTargets)
+	args := validateTestArgs(effectiveTestRun, validateGoTestTimeout(ctx, validateNow()), testTargets)
 	if auditSelection {
 		args = validateJSONTestArgs(args)
 	}
@@ -431,7 +431,7 @@ func runValidateTestsPhase(ctx context.Context, stdout io.Writer, res *validateR
 func runValidateAuditSelectionPhase(ctx context.Context, stdout io.Writer, res *validateResult, recorder *validateRecorder, r, dir, tip string, paths []string, fileToPkg map[string]string, selectedObservation affectedtests.TestObservation, wslTests, wslWorkspace, asJSON bool) (int, bool) {
 	fullPackages := validateAllPackages(fileToPkg)
 	phase := recorder.start("test_audit_full")
-	fullArgs := validateJSONTestArgs(validateTestArgs("", packagePatternsForRoot(dir, fullPackages, fileToPkg)))
+	fullArgs := validateJSONTestArgs(validateTestArgs("", validateGoTestTimeout(ctx, validateNow()), packagePatternsForRoot(dir, fullPackages, fileToPkg)))
 	detail, _ := runValidateTestCommand(ctx, r, dir, tip, fullArgs, wslTests, wslWorkspace)
 	fullObservation := parseValidateTestObservation(detail, fullPackages, ctx.Err() == nil)
 	if code, timedOut := finishValidateContextPhase(stdout, res, recorder, phase, "test_audit_full", asJSON); timedOut {
