@@ -119,7 +119,6 @@ concurrent = [
   "toolprocgate",
   "slackwire",
   "slackoutbox",
-  "doshook",
   "cacheheadlines",
   "dogfoodcoverage",
   "cachedocaudit",
@@ -1788,7 +1787,6 @@ computebuild = ["internal/computebuild/**"]
 ctxplanlint = ["internal/ctxplanlint/**"]
 director = ["internal/director/**"]
 dogfoodcoverage = ["internal/dogfoodcoverage/**"]
-doshook = ["internal/doshook/**"]
 effortbench = ["internal/effortbench/**"]
 freshstatus = ["internal/freshstatus/**"]
 goalrunner = ["internal/goalrunner/**"]
