@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -16,6 +17,16 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/issueorchestrator"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
+
+// issueOrchestratorExitZeroCommand is a real, immediately-exiting child process for the
+// spawn seams below: they need a live *os.Process to hand back, not a real worker.
+// cmd.exe exists only on Windows (and under WSL interop), so a Linux CI runner gets sh.
+func issueOrchestratorExitZeroCommand() *exec.Cmd {
+	if runtime.GOOS == "windows" {
+		return exec.Command("cmd.exe", "/c", "exit 0")
+	}
+	return exec.Command("sh", "-c", "exit 0")
+}
 
 func writeTestIssuesFile(t *testing.T, issues []issueorchestrator.Issue) string {
 	t.Helper()
@@ -1448,7 +1459,7 @@ func TestIssueOrchestrator_ExactTreeLeaseAcquisitionBeforeSpawn(t *testing.T) {
 	}
 
 	startDispatchWorkerFunc = func(cmd *exec.Cmd) error {
-		dummy := exec.Command("cmd.exe", "/c", "exit 0")
+		dummy := issueOrchestratorExitZeroCommand()
 		if err := dummy.Start(); err != nil {
 			return err
 		}
@@ -1720,7 +1731,7 @@ func TestIssueOrchestrator_NarrowedPathRecording(t *testing.T) {
 	}
 
 	startDispatchWorkerFunc = func(cmd *exec.Cmd) error {
-		dummy := exec.Command("cmd.exe", "/c", "exit 0")
+		dummy := issueOrchestratorExitZeroCommand()
 		if err := dummy.Start(); err != nil {
 			return err
 		}
