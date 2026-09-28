@@ -1,0 +1,32 @@
+# fak AGENTS.md byte floor (epic #3229). KIND<TAB>path<TAB>count, counts in bytes.
+# Explained in docs/context-budget/agents-md-floor.md; gated by internal/agentsindex/bytefloor.go.
+# DOC_BYTES is the ceiling: LF-normalized AGENTS.md bytes (== git cat-file -s HEAD:AGENTS.md).
+# SECTION_BYTES rows are each heading's OWN bytes when the ceiling was pinned. They must sum
+# to DOC_BYTES and only attribute a refusal to the sections that regrew.
+# Regenerate in the same commit as the AGENTS.md change it justifies; never hand-edit one number:
+#   go test ./internal/agentsindex -run TestAgentsMDByteFloorAtHEAD -update-agents-md-floor
+DOC_BYTES	AGENTS.md	52301
+SECTION_BYTES	AGENTS.md#(preamble)	861
+SECTION_BYTES	AGENTS.md#default-scope-when-launched-from-this-repo	1743
+SECTION_BYTES	AGENTS.md#mandatory-automated-public-oss-placement-for-new-work	1176
+SECTION_BYTES	AGENTS.md#divide-and-conquer	3907
+SECTION_BYTES	AGENTS.md#scope-discipline-for-smaller-models	5261
+SECTION_BYTES	AGENTS.md#first-local-agent-product-milestone	931
+SECTION_BYTES	AGENTS.md#native-inference-performance-invariant	2059
+SECTION_BYTES	AGENTS.md#what-this-project-is	553
+SECTION_BYTES	AGENTS.md#default-priorities	1103
+SECTION_BYTES	AGENTS.md#repo-layout	835
+SECTION_BYTES	AGENTS.md#build-test-run	833
+SECTION_BYTES	AGENTS.md#which-shared-tree-question-are-you-asking	1284
+SECTION_BYTES	AGENTS.md#the-60-second-proof	857
+SECTION_BYTES	AGENTS.md#the-local-machine-is-the-control-point-not-the-compute-boundary	1589
+SECTION_BYTES	AGENTS.md#proof-by-default	3337
+SECTION_BYTES	AGENTS.md#track-work-in-github-before-implementation	1843
+SECTION_BYTES	AGENTS.md#cross-repository-issue-quoting-and-qualification	1087
+SECTION_BYTES	AGENTS.md#new-work-defaults	1986
+SECTION_BYTES	AGENTS.md#focus-on-move-forward-over-conclusions	1581
+SECTION_BYTES	AGENTS.md#version-everything	1034
+SECTION_BYTES	AGENTS.md#hard-rules	10977
+SECTION_BYTES	AGENTS.md#if-the-kernel-refuses-you	3904
+SECTION_BYTES	AGENTS.md#releasing-and-planning	1677
+SECTION_BYTES	AGENTS.md#where-to-go-next	1883
