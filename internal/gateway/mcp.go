@@ -1219,7 +1219,7 @@ func toolDescriptors() []map[string]any {
 		}.toMap(),
 		mcpToolDescriptor{
 			Name:        "fak_memory_run",
-			Description: "RUN a memory query against a backend: pick a built-in {driver} or supply an inline {query}; parameterize with {intent,k,budget}; point at a recall core image with {image_dir} (default: an in-memory demo corpus). Effects default to PROPOSED — set {apply:true} to enact the safe negative-only/storage mutations (tombstone, prune). Sealed spans are never rendered (the trust gate); consolidate/reclassify never persist this rung. Returns the per-step trace, the rendered set, proposed/applied effects, refusals, and stats.",
+			Description: "RUN a memory query against a backend: pick a built-in {driver} or supply an inline {query}; parameterize with {intent,k,budget}; point at a recall core image with {image_dir} (default: an in-memory demo corpus). Effects remain PROPOSED. {apply:true} is refused until an act-bound lease can protect the mutation. Sealed spans are never rendered (the trust gate); consolidate/reclassify never persist this rung. Returns the per-step trace, the rendered set, proposed effects, refusals, and stats.",
 			InputSchema: memoryInputSchema,
 			Annotations: mutatingToolAnnotations(),
 		}.toMap(),
@@ -1355,7 +1355,7 @@ var memoryInputSchema = json.RawMessage(`{
     "k": {"type": "integer", "description": "limit (driver-specific; 0 = driver default)"},
     "budget": {"type": "integer", "description": "byte budget for the rendered/selected set (0 = unbounded)"},
     "image_dir": {"type": "string", "description": "run (not explain): path to a recall core image; omit for the in-memory demo corpus"},
-    "apply": {"type": "boolean", "description": "run only: APPLY the safe negative-only/storage mutations (tombstone, prune). Default false = propose only (fail-closed)"},
+    "apply": {"type": "boolean", "description": "run only: mutation request; true is refused until an act-bound lease can protect the effect. Default false = propose only"},
     "backend": {"type": "string", "description": "run only: recall source. \"\" (default) = recall image at image_dir else demo; \"codex\" = read the external Codex memories home as a READ-ONLY generated recall layer (every cell external/untrusted, gated — not an AGENTS.md replacement)"},
     "codex_home": {"type": "string", "description": "run only, backend=codex: the Codex memories home to read (default: $CODEX_HOME; never silently ~/.codex over MCP)"},
     "include_chronicle": {"type": "boolean", "description": "run only, backend=codex: also include the higher-risk screen-generated chronicle memories. Default false"}
