@@ -204,6 +204,7 @@ func TestToolprocReuseInvalidatesOnMutation(t *testing.T) {
 // status command coalesces inside its window and STOPS at the boundary, and the hit
 // exposes its stale-age and freshness-window provenance.
 func TestToolprocReuseCoalescesQueryOnlyInsideFreshnessWindow(t *testing.T) {
+	installEmptyTestLeaseAuthority(t)
 	dir := t.TempDir()
 	const args = `{"command":"git status --porcelain"}`
 	const body = `{"stdout":" M internal/gateway/toolproc_reuse.go"}`
@@ -214,15 +215,15 @@ func TestToolprocReuseCoalescesQueryOnlyInsideFreshnessWindow(t *testing.T) {
 			Repeat:          toolproc.RepeatConfig{DefaultFreshnessMS: 60_000},
 		})
 		ctx := WithPrincipal(context.Background(), "tenantReuse")
-		reuseTurn(t, srv, ctx, "tr", "q1", "Bash", args, body)
-		served, line := reuseTurn(t, srv, ctx, "tr", "q2", "Bash", args, body)
+		reuseTurn(t, srv, ctx, "tr", "q1", "bash_read", args, body)
+		served, line := reuseTurn(t, srv, ctx, "tr", "q2", "bash_read", args, body)
 		if !served {
 			t.Fatal("a status poll inside its freshness window must coalesce")
 		}
 		if !strings.Contains(line, "toolproc_reuse.go") {
 			t.Fatalf("coalesced line must carry the cached stdout, got %q", line)
 		}
-		_, meta, ok := srv.reuseServe(ctx, "Bash", args)
+		_, meta, ok := srv.reuseServe(ctx, "bash_read", args)
 		if !ok {
 			t.Fatal("reuseServe must report the same coalesced hit")
 		}
@@ -243,9 +244,9 @@ func TestToolprocReuseCoalescesQueryOnlyInsideFreshnessWindow(t *testing.T) {
 			Repeat:          toolproc.RepeatConfig{DefaultFreshnessMS: 1},
 		})
 		ctx := WithPrincipal(context.Background(), "tenantReuse")
-		reuseTurn(t, srv, ctx, "tr", "q1", "Bash", args, body)
+		reuseTurn(t, srv, ctx, "tr", "q1", "bash_read", args, body)
 		time.Sleep(30 * time.Millisecond) // 30x the 1ms window
-		if served, line := reuseTurn(t, srv, ctx, "tr", "q2", "Bash", args, body); served {
+		if served, line := reuseTurn(t, srv, ctx, "tr", "q2", "bash_read", args, body); served {
 			t.Fatalf("a status poll PAST its freshness window must run fresh, got %q", line)
 		}
 	})
@@ -255,8 +256,8 @@ func TestToolprocReuseCoalescesQueryOnlyInsideFreshnessWindow(t *testing.T) {
 			Repeat: toolproc.RepeatConfig{DefaultFreshnessMS: 60_000},
 		})
 		ctx := WithPrincipal(context.Background(), "tenantReuse")
-		reuseTurn(t, srv, ctx, "tr", "q1", "Bash", args, body)
-		if served, _ := reuseTurn(t, srv, ctx, "tr", "q2", "Bash", args, body); served {
+		reuseTurn(t, srv, ctx, "tr", "q1", "bash_read", args, body)
+		if served, _ := reuseTurn(t, srv, ctx, "tr", "q2", "bash_read", args, body); served {
 			t.Fatal("mutable-status coalescing is OPT-IN: unopted, a poll must never be answered locally")
 		}
 	})
@@ -266,6 +267,7 @@ func TestToolprocReuseCoalescesQueryOnlyInsideFreshnessWindow(t *testing.T) {
 // write, an unregistered command, and a write-SHAPED tool name are each refused
 // twice over — never retained on the deposit side, never answered on the serve side.
 func TestToolprocReuseNeverServesWriteOrUnknown(t *testing.T) {
+	installEmptyTestLeaseAuthority(t)
 	dir, name := writeReuseFile(t, "notes.md", "notes\n")
 	cases := []struct {
 		what string
@@ -273,9 +275,9 @@ func TestToolprocReuseNeverServesWriteOrUnknown(t *testing.T) {
 		args string
 	}{
 		{"registered write", "Bash", `{"command":"git commit -m x"}`},
-		{"unregistered command", "Bash", `{"command":"curl https://example.invalid"}`},
+		{"unregistered command", "bash_read", `{"command":"curl https://example.invalid"}`},
 		{"write-shaped tool name over a read path", "Write", `{"file_path":"` + name + `"}`},
-		{"write-shaped tool name over a read command", "Edit", `{"command":"cat ` + name + `"}`},
+		{"write-shaped tool name over a read command", "Edit", `{"command":"cat ` + name + `","file_path":"` + name + `"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.what, func(t *testing.T) {

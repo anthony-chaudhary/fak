@@ -71,6 +71,7 @@ func TestCanonicalToolNormalization_Table(t *testing.T) {
 }
 
 func TestCanonicalToolNormalization(t *testing.T) {
+	installEmptyTestLeaseAuthority(t)
 	abi.ResetForTest()
 	abi.RegisterRegionBackend(inlineBackend{})
 	abi.RegisterEngine("test", echoEngine{})
@@ -103,7 +104,7 @@ func TestCanonicalToolNormalization(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. functions.exec_command resolves against canonical "exec_command" allow rule
-	wv, _, err := srv.adjudicate(ctx, "functions.exec_command", `{"command":"echo 1"}`, false, "", "trace-1")
+	wv, _, err := srv.adjudicate(ctx, "functions.exec_command", `{"command":"echo 1"}`, true, "", "trace-1")
 	if err != nil {
 		t.Fatalf("adjudicate(functions.exec_command): %v", err)
 	}
@@ -130,7 +131,7 @@ func TestCanonicalToolNormalization(t *testing.T) {
 	}
 
 	// 4. OpenCode single-prefixed bash_exec_command resolves against canonical "exec_command"
-	wv, _, err = srv.adjudicate(ctx, "bash_exec_command", `{"command":"pwd"}`, false, "", "trace-4")
+	wv, _, err = srv.adjudicate(ctx, "bash_exec_command", `{"command":"pwd"}`, true, "", "trace-4")
 	if err != nil {
 		t.Fatalf("adjudicate(bash_exec_command): %v", err)
 	}
