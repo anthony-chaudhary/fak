@@ -15,6 +15,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/loopdrive"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -42,6 +43,34 @@ func runLeaserefRelease(stdout, stderr io.Writer, argv []string) int {
 	if !*force && *holder == "" {
 		fmt.Fprintln(stderr, "fak leaseref release: --holder is required (or --force to delete a wedged record without the holder check)")
 		return 2
+	}
+	if *force && leaseCoordinatorRequested() {
+		fmt.Fprintln(stderr, "fak leaseref release: --force cannot bypass a configured coordinator")
+		return 2
+	}
+	if leaseCoordinatorRequested() && *dir != "" {
+		fmt.Fprintln(stderr, "fak leaseref release: --dir cannot select a coordinator workspace; configure its URL explicitly")
+		return 2
+	}
+	coordinator, configured, coordinatorErr := configuredLeaseCoordinator()
+	if configured {
+		if coordinatorErr != nil {
+			fmt.Fprintf(stderr, "fak leaseref release: %v\n", coordinatorErr)
+			return 1
+		}
+		result, err := coordinator.write(context.Background(), "release", gateway.LeaseWriteRequest{
+			ID: *id, Holder: *holder, Generation: *gen,
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "fak leaseref release: %v\n", err)
+			return 1
+		}
+		if result.OK {
+			ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceRelease,
+				leaseref.Record{ID: *id, Holder: *holder, Generation: *gen},
+				resolveAmbientLeaserefConfig(*announce, *announceIssue, *announceRepo))
+		}
+		return emitLeaserefOutcome(stdout, stderr, coordinatorFenceVerdict(result, *gen), result.OK, "release")
 	}
 	store := leaseref.NewInDir(*dir)
 	ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceLeaserefRelease, store, "", false)

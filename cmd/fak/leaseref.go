@@ -13,14 +13,17 @@ package main
 // `live` is the headline: it emits the non-expired records projected into the
 // exact live_leases shape a dos_arbitrate-style admission kernel consumes, so an
 // arbiter on machine B can SEE a lease machine A pushed (after an ordinary fetch)
-// instead of being blind to it. The wiring an operator runs is, e.g.:
+// instead of being blind to it. Configured acquire/renew/release calls instead
+// use one authenticated HTTP coordinator; local refs are the unconfigured
+// visibility tier. The wiring an operator runs is, e.g.:
 //
 //   git fetch origin 'refs/fak/locks/*:refs/fak/locks/*'
 //   dos arbitrate --lane <l> --tree <t> --leases "$(fak leaseref live)"
 //
-// HONEST BOUNDARY (kept in lockstep with the package doc): this is DISTRIBUTION /
-// VISIBILITY, not atomic acquisition — it lets the arbiter see a cross-machine
-// conflict, it does not arbitrate a same-fetch-window race. Documented in
+// HONEST BOUNDARY (kept in lockstep with the package doc): local refs are
+// DISTRIBUTION / VISIBILITY, not atomic acquisition. A configured single HTTP
+// coordinator serializes its own clients, but does not fence arbitrary writes.
+// Documented in
 // docs/cli-reference.md.
 
 import (
@@ -32,6 +35,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/loopdrive"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -99,15 +103,24 @@ func (r *repeatedString) Set(v string) error {
 	return nil
 }
 
-// fencedResult is the acquire/renew JSON shape: the deny-as-value verdict plus, on admit, the
-// WRITTEN record (so the caller learns its assigned Generation — the fencing token it must
-// present on every later write/fence). On a refusal Record is omitted.
+// fencedResult is the acquire/renew JSON shape. The verdict always carries the
+// fencing token. Local writes also include the complete stored record on admit;
+// coordinator writes omit it until the wire can return every record field.
 type fencedResult struct {
 	Verdict leaseref.FenceVerdict `json:"verdict"`
 	Record  *leaseref.Record      `json:"record,omitempty"`
 }
 
 const leaserefUsage = `fak leaseref - cross-machine lease visibility (over internal/leaseref, #825)
+
+  FAK_LEASE_COORDINATOR_URL and FAK_LEASE_COORDINATOR_KEY_FILE together select
+  the authenticated HTTP arbiter for acquire/renew/release. HTTPS is required
+  outside loopback. A configured authority error never falls back to local refs.
+  The coordinator wire does not yet bind --session or fence a write callback:
+  --session acquisition, local fence, and --force release fail closed in this mode.
+  --dir is refused: the configured URL alone selects the coordinator workspace.
+  Coordinator acquire/renew output carries the authoritative verdict/token but
+  no record: the wire does not return the full stored TTL/acquisition metadata.
 
   fak leaseref live [--dir DIR]
       Read the NON-EXPIRED records under refs/fak/locks/* and emit them as the
@@ -806,6 +819,30 @@ func runLeaserefAcquire(stdout, stderr io.Writer, argv []string) int {
 	if *holder == "" && *session != "" {
 		*holder = leaseref.MintHolder(leaseref.LocalNodeID(*dir), *session)
 	}
+	if leaseCoordinatorRequested() && *dir != "" {
+		fmt.Fprintln(stderr, "fak leaseref acquire: --dir cannot select a coordinator workspace; configure its URL explicitly")
+		return 2
+	}
+	coordinator, configured, coordinatorErr := configuredLeaseCoordinator()
+	if configured {
+		if coordinatorErr != nil {
+			fmt.Fprintf(stderr, "fak leaseref acquire: %v\n", coordinatorErr)
+			return 1
+		}
+		if *holder == "" || *session != "" || *ttl <= 0 {
+			fmt.Fprintln(stderr, "fak leaseref acquire: coordinator mode requires --holder and positive --ttl; --session is not yet supported by the coordinator wire")
+			return 2
+		}
+		result, err := coordinator.write(context.Background(), "acquire", gateway.LeaseWriteRequest{
+			ID: *id, Holder: *holder, TreeGlobs: trees, TTLSeconds: *ttl,
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "fak leaseref acquire: %v\n", err)
+			return 1
+		}
+		out := fencedResult{Verdict: coordinatorFenceVerdict(result, 0)}
+		return emitLeaserefOutcome(stdout, stderr, out, result.OK, "acquire")
+	}
 	store := leaseref.NewInDir(*dir)
 	ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceLeaserefAcquire, store, "", false)
 	rec, v, err := store.AcquireFenced(context.Background(), leaseref.Record{
@@ -853,6 +890,10 @@ func runLeaserefFence(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak leaseref fence: --id is required")
 		return 2
 	}
+	if leaseCoordinatorRequested() {
+		fmt.Fprintln(stderr, "fak leaseref fence: coordinator mode has no atomic write-boundary fence; refusing a local snapshot")
+		return 2
+	}
 	store := leaseref.NewInDir(*dir)
 	v, err := store.Fence(context.Background(), leaseref.Record{ID: *id, Holder: *holder, Generation: *gen}, time.Now())
 	return emitLeaserefResult(stdout, stderr, v, err, "fak leaseref fence", "fence", func(v leaseref.FenceVerdict) bool { return v.OK })
@@ -876,6 +917,26 @@ func runLeaserefRenew(stdout, stderr io.Writer, argv []string) int {
 	if *id == "" || *holder == "" {
 		fmt.Fprintln(stderr, "fak leaseref renew: --id and --holder are required")
 		return 2
+	}
+	if leaseCoordinatorRequested() && *dir != "" {
+		fmt.Fprintln(stderr, "fak leaseref renew: --dir cannot select a coordinator workspace; configure its URL explicitly")
+		return 2
+	}
+	coordinator, configured, coordinatorErr := configuredLeaseCoordinator()
+	if configured {
+		if coordinatorErr != nil {
+			fmt.Fprintf(stderr, "fak leaseref renew: %v\n", coordinatorErr)
+			return 1
+		}
+		result, err := coordinator.write(context.Background(), "renew", gateway.LeaseWriteRequest{
+			ID: *id, Holder: *holder, Generation: *gen, TTLSeconds: *ttl,
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "fak leaseref renew: %v\n", err)
+			return 1
+		}
+		out := fencedResult{Verdict: coordinatorFenceVerdict(result, *gen)}
+		return emitLeaserefOutcome(stdout, stderr, out, result.OK, "renew")
 	}
 	store := leaseref.NewInDir(*dir)
 	ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceLeaserefRenew, store, "", false)
