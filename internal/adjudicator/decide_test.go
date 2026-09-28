@@ -10,7 +10,7 @@ import (
 )
 
 func TestTransparentTransformGrepAndGlob(t *testing.T) {
-	a := New(Policy{})
+	a := New(admitting("grep", "glob", "rg", "find"))
 	ctx := context.Background()
 
 	t.Run("grep with regex and filePath transforms to fak_grep", func(t *testing.T) {

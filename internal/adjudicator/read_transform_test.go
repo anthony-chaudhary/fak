@@ -9,8 +9,19 @@ import (
 	_ "github.com/anthony-chaudhary/fak/internal/blob"
 )
 
+// admitting is a floor that affirmatively allows the named tools. The fak_*
+// rewrite applies only to an ADMITTED call, so the rewrite-shape tests below run
+// against a floor that admits the host tool; the zero Policy default-denies it.
+func admitting(tools ...string) Policy {
+	allow := make(map[string]bool, len(tools))
+	for _, tool := range tools {
+		allow[tool] = true
+	}
+	return Policy{Allow: allow}
+}
+
 func TestReadTransformToFakRead(t *testing.T) {
-	a := New(Policy{})
+	a := New(admitting("Read", "read", "READ"))
 	ctx := context.Background()
 
 	tests := []struct {
@@ -120,13 +131,13 @@ func TestReadTransformToFakRead(t *testing.T) {
 }
 
 func TestReadWithoutPathDoesNotTransform(t *testing.T) {
-	a := New(Policy{})
+	a := New(admitting("Read"))
 	ctx := context.Background()
 
-	// Read without path/filePath/file_path falls through (not transformed).
+	// Read without path/filePath/file_path is admitted as-is (not transformed).
 	call := inlineCall("Read", `{"other":"value"}`)
 	v := a.Adjudicate(ctx, call)
-	if v.Kind == abi.VerdictTransform {
-		t.Fatalf("Read without path should not transform, got VerdictTransform")
+	if v.Kind != abi.VerdictAllow {
+		t.Fatalf("Read without path: got %v, want VerdictAllow without transform", v.Kind)
 	}
 }

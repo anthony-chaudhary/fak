@@ -727,129 +727,6 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) (verdict 
 	// Decode args once for the structural checks.
 	args := decodeArgs(ctx, c)
 
-	// In-syscall transparent transform from Read to fak_read (#11150).
-	if lowerTool == "read" && args != nil {
-		var pathVal any
-		found := false
-		for _, key := range []string{"file_path", "filePath", "path"} {
-			if v, ok := args[key]; ok && v != nil {
-				pathVal = v
-				found = true
-				break
-			}
-		}
-		if found {
-			normalizedArgs := make(map[string]any, len(args))
-			for k, v := range args {
-				if k == "filePath" || k == "path" {
-					continue
-				}
-				normalizedArgs[k] = v
-			}
-			normalizedArgs["file_path"] = pathVal
-			if ref, ok := putJSON(ctx, normalizedArgs); ok {
-				return abi.Verdict{
-					Kind:    abi.VerdictTransform,
-					By:      "monitor/read_to_fak_read",
-					Payload: abi.TransformPayload{NewTool: "fak_read", NewArgs: ref},
-					Meta:    map[string]string{"reversibility_autorepair": "read_to_fak_read"},
-				}
-			}
-		}
-	}
-
-	// In-syscall transparent transform from grep-family tools to fak_grep (#11499).
-	if (lowerTool == "grep" || lowerTool == "rg" || lowerTool == "ripgrep" || lowerTool == "search") && args != nil {
-		var patternVal any
-		patternFound := false
-		for _, key := range []string{"pattern", "regex", "query"} {
-			if v, ok := args[key]; ok && v != nil {
-				patternVal = v
-				patternFound = true
-				break
-			}
-		}
-		if patternFound {
-			var pathVal any
-			pathFound := false
-			for _, key := range []string{"path", "filePath", "file_path", "dir", "directory"} {
-				if v, ok := args[key]; ok && v != nil {
-					pathVal = v
-					pathFound = true
-					break
-				}
-			}
-
-			normalizedArgs := make(map[string]any, len(args))
-			for k, v := range args {
-				switch k {
-				case "pattern", "regex", "query", "path", "filePath", "file_path", "dir", "directory":
-					continue
-				default:
-					normalizedArgs[k] = v
-				}
-			}
-			normalizedArgs["pattern"] = patternVal
-			if pathFound && pathVal != nil {
-				normalizedArgs["path"] = pathVal
-			}
-			if ref, ok := putJSON(ctx, normalizedArgs); ok {
-				return abi.Verdict{
-					Kind:    abi.VerdictTransform,
-					By:      "monitor/grep_to_fak_grep",
-					Payload: abi.TransformPayload{NewTool: "fak_grep", NewArgs: ref},
-					Meta:    map[string]string{"reversibility_autorepair": "grep_to_fak_grep"},
-				}
-			}
-		}
-	}
-
-	// In-syscall transparent transform from glob-family tools to fak_glob (#11499).
-	if (lowerTool == "glob" || lowerTool == "find") && args != nil {
-		var patternVal any
-		patternFound := false
-		for _, key := range []string{"pattern", "glob", "query"} {
-			if v, ok := args[key]; ok && v != nil {
-				patternVal = v
-				patternFound = true
-				break
-			}
-		}
-		if patternFound {
-			var pathVal any
-			pathFound := false
-			for _, key := range []string{"path", "directory", "dir", "filePath", "file_path"} {
-				if v, ok := args[key]; ok && v != nil {
-					pathVal = v
-					pathFound = true
-					break
-				}
-			}
-
-			normalizedArgs := make(map[string]any, len(args))
-			for k, v := range args {
-				switch k {
-				case "pattern", "glob", "query", "path", "directory", "dir", "filePath", "file_path":
-					continue
-				default:
-					normalizedArgs[k] = v
-				}
-			}
-			normalizedArgs["pattern"] = patternVal
-			if pathFound && pathVal != nil {
-				normalizedArgs["path"] = pathVal
-			}
-			if ref, ok := putJSON(ctx, normalizedArgs); ok {
-				return abi.Verdict{
-					Kind:    abi.VerdictTransform,
-					By:      "monitor/glob_to_fak_glob",
-					Payload: abi.TransformPayload{NewTool: "fak_glob", NewArgs: ref},
-					Meta:    map[string]string{"reversibility_autorepair": "glob_to_fak_glob"},
-				}
-			}
-		}
-	}
-
 	// Coarse risk class for the RungProfile (#666). Computed ONCE from the DECODED
 	// args (never model-controlled Meta), and ONLY when a profile is installed — a
 	// nil profile runs every rung regardless (pr.runs == true), so the default floor
@@ -858,6 +735,17 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) (verdict 
 	var cl class
 	if pr != nil {
 		cl = riskClassLower(lowerTool, args)
+	}
+
+	// In-syscall transparent rewrite of host Read / grep / glob tools to fak_read /
+	// fak_grep / fak_glob (#11150, #11499). Chosen here, applied last: every rung
+	// below still judges the ORIGINAL call and only its Allow is rewritten, so the
+	// rewrite can never launder a call the floor refuses into a dispatched one.
+	if rw, ok := transparentRewriteFor(lowerTool, args); ok {
+		if pr.runs(cl, rungArgPredicate) {
+			rw.tool, rw.preds = c.Tool, argPreds // the promoted args answer to the same arg rules
+		}
+		defer func() { verdict = rw.admit(ctx, p, verdict) }()
 	}
 
 	// SELF_MODIFY: a write-shaped call whose target matches a protected glob is a
