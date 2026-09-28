@@ -395,8 +395,13 @@ func TestModelClassCapacity(t *testing.T) {
 }
 
 func TestMemoryMap(t *testing.T) {
+	// MemoryMap only needs the class layout, but NewSlabAllocator really
+	// mmaps (MAP_POPULATE on Linux) every region. A 32 GiB budget cannot be
+	// committed on a 16 GB CI runner (ENOMEM on the 5 MiB model region), so
+	// size the allocator to 512 MiB. The fraction-of-budget policy at 32 GiB
+	// is covered plan-only by TestModelAwareWeights_*.
 	sa, err := NewSlabAllocator(SlabConfig{
-		MaxMemoryBytes: 32 * 1024 * 1024 * 1024,
+		MaxMemoryBytes: 512 * 1024 * 1024,
 		ModelPageBytes: 5242880,
 	})
 	if err != nil {

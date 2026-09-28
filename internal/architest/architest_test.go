@@ -170,7 +170,6 @@ var tier = map[string]int{
 	"quality":               2,                // missing-middle quality-ladder spine (epic #4509): versioned quality-case schema + reference/engine Runner adapters + deterministic differential comparator & rubric oracle + replay-complete result/failure-bundle; off the hot path. NOT pureRoot: the incremental-Unicode oracle's first-divergence offset delegates to strmatch(1) rather than carrying the copy `fak benchmarks`' name matcher already had (bfb2e3fa7), so it imports a sibling leaf.
 	"trunkbuildprobe":       2,                // release-gate diagnosis (Go port of tools/trunk_build_probe.py): parses `go build` errors + hunts forgotten-`git add` definers; imports windowgate(1) for hidden subprocesses, off the hot path.
 	"godsplitplan":          1,                // doc-comment-aware Go split boundary+hazard planner (Go port of tools/godsplit_plan.py): the /modularize skill's planner + the decl-fold refactorverify reuses; stdlib-only, off the hot path.
-	"doshook":               2,                // native-first launcher for Claude Code/DOS hooks (Go port of tools/dos_hook.py); imports windowgate(2), off the hot path.
 	"cacheheadlines":        1,                // cache-win headline plane and provenance linter (Go port of tools/check_cache_headlines.py); stdlib-only, off the hot path.
 	"dogfoodcoverage":       1,                // dogfood-coverage scorecard across fleet and journals (Go port of tools/dogfood_coverage.py); stdlib-only, off the hot path.
 	"cachedocaudit":         1,                // cachevalue doc numbers and arithmetic audit (Go port of tools/cachedoc_numbers_audit.py); stdlib-only, off the hot path.
@@ -793,7 +792,7 @@ var tier = map[string]int{
 	"agentdescriptor":            1, // stdlib-only agent descriptor identity and validation contract.
 	"agentic":                    2, // deterministic agentic-objective fold over native performance evidence.
 	"archfitness":                1, // stdlib-only architecture fitness report contract.
-	"causalreceipt":              1, // stdlib-only causal-receipt validation and ordering primitive.
+	"causalreceipt":              2, // causal-receipt validation/ordering contract plus Produce, which folds a computetrace(1) artifact into a receipt (23d4a6ad7) -- a foundation-composite like computetune(2), not a stdlib-only primitive.
 	"cloudhandoff":               1, // stdlib-only cloud handoff contract and deterministic planner.
 	"composition":                1, // stdlib-only immutable composition identity and validation contract.
 	"docsearch":                  2, // shared documentation loader/search composite over trigram ranking.
@@ -872,6 +871,16 @@ var tier = map[string]int{
 	"cluster":                    1, // multi-Mac point-to-point mesh allocation and Thunderbolt 5 RDMA discovery (#12596).
 	"agentbench":                 5,
 	"beam":                       3, // beam-search primitive over the batched decode session (#12409): BeamIndirectionTable maps logical (beam,pos) to physical KV slots as pure integer moves, plus a thin driver over model.BatchSession.StepBatch; imports model(2), off the hot path.
+	// The seven rows below were undeclared on the trunk (advisory under the scoped CI gate,
+	// a hard failure in any git-archive checkout such as `fak validate`); each is the
+	// minimum tier `fak new-leaf -suggest-tier <leaf>` derives from the leaf's imports.
+	"benchpromotion": 1, // stdlib-only hardware benchmark promotion packet schema and verification.
+	"landingvoucher": 1, // stdlib-only landing voucher generator and pre-landing invariant auditor.
+	"servewarmup":    1, // stdlib-only serve-side boot warmup wiring with a typed timeout.
+	"hostgrant":      2, // durable host-local resource grants composed over flock(1).
+	"parentwatch":    2, // parent-exit context cancellation composed over processalive(1).
+	"validate":       2, // isolated prospective validation pipeline over affectedtests(1), committedtree(2) and windowgate(2).
+	"radixpager":     4, // ctxmmu pager adapter over radixkv(4) and model; imported only by pkg/ctxmmu.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

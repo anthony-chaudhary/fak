@@ -130,7 +130,10 @@ func readLaneRoster(t *testing.T) laneRoster {
 			if !ok {
 				continue
 			}
-			if lane := strings.TrimSpace(key); lane != "" {
+			// A TOML key may be quoted (`"gateway-a2a" = [...]`, as every hyphenated
+			// gateway-* sub-lane is); the lane is the bare key, never the quotes — the same
+			// normalization internal/devindex parseLanes applies (b10d7f7e7).
+			if lane := strings.Trim(strings.TrimSpace(key), `"'`); lane != "" {
 				r.trees[lane] = quotedTokens(val)
 			}
 		}
@@ -256,6 +259,61 @@ func treesOverlap(a, b string) bool {
 	return pa == pb || pathContains(pa, pb) || pathContains(pb, pa)
 }
 
+// subLaneParent returns the leaf lane that lane is a declared intra-leaf SUB-LANE of, or ""
+// when it is not one. dos.toml's gateway-* block (97629354b) carves ADDITIVE, write-disjoint
+// sub-lanes out of ONE co-compiling leaf package: each is named <leaf>-<surface>, every glob it
+// claims lies under internal/<leaf>/, and the parent keeps internal/<leaf>/** UNCHANGED so a
+// caller naming the leaf still gets the whole leaf. Parent-over-child overlap is therefore the
+// documented nesting (dos.toml header: "A SUB-LANE IS NEVER MORE PERMISSIVE THAN ITS ROOT" — a
+// parent holder blocks every descendant), not two independent leaves fighting over one tree.
+//
+// All three conditions are required, so the exemption cannot launder a real partition breach:
+// the `<leaf>-` name is the explicit opt-in, the parent must be a leaf lane rooted at its own
+// internal/<leaf>/** (not some other lane's tree), and a sub-lane glob that escapes the parent's
+// directory disqualifies the lane. Sibling sub-lanes and sub-lane-vs-foreign-leaf pairs are
+// still checked by the disjointness gate.
+func subLaneParent(lane string, trees map[string][]string) string {
+	globs := trees[lane]
+	if len(globs) == 0 {
+		return ""
+	}
+	for i := strings.IndexByte(lane, '-'); i > 0; {
+		parent := lane[:i]
+		if parentOwnsLeafRoot(trees[parent], parent) && globsWithin(globs, "internal/"+parent+"/") {
+			return parent
+		}
+		next := strings.IndexByte(lane[i+1:], '-')
+		if next < 0 {
+			break
+		}
+		i += 1 + next
+	}
+	return ""
+}
+
+// parentOwnsLeafRoot reports whether a lane's tree claims its own leaf root internal/<leaf>/**.
+func parentOwnsLeafRoot(globs []string, leaf string) bool {
+	for _, g := range globs {
+		if strings.TrimSpace(g) == "internal/"+leaf+"/**" {
+			return true
+		}
+	}
+	return false
+}
+
+// globsWithin reports whether every glob lies strictly under dir (a "/"-terminated prefix) and
+// is narrower than dir itself: a glob equal to dir or to dir+"**" re-claims the whole leaf, which
+// is a duplicate of the parent, not a sub-lane of it.
+func globsWithin(globs []string, dir string) bool {
+	for _, g := range globs {
+		g = strings.TrimSpace(g)
+		if !strings.HasPrefix(g, dir) || g == dir || g == dir+"**" {
+			return false
+		}
+	}
+	return len(globs) > 0
+}
+
 // TestLeafTreesArePairwiseDisjoint is the third half of the same invariant: dos.toml's
 // header says "the honest partition is ONE LANE PER LEAF", and a partition is only a
 // partition if the parts do not overlap. Coverage (TestEveryLeafDeclaresLane) proves every
@@ -267,7 +325,10 @@ func treesOverlap(a, b string) bool {
 //
 // Scope: globs rooted at internal/, i.e. the LEAF trees the header invariant is about. The
 // non-leaf trees (cmd/**, docs/**, the release file list) are deliberately nesting umbrella
-// scopes and are not part of the leaf partition.
+// scopes and are not part of the leaf partition. A declared intra-leaf sub-lane
+// (`<leaf>-<surface>`, every glob inside internal/<leaf>/ — see subLaneParent) refines its own
+// leaf lane rather than competing with it, so only the parent<->own-child pair is exempt;
+// siblings and foreign leaves are still held pairwise disjoint.
 //
 // Unscoped by push, for the same reason TestLaneRosterHasNoDuplicates is: dos.toml is
 // itself an EXCLUSIVE lane, so only one worker at a time may edit it and a new overlap is
@@ -298,6 +359,10 @@ func TestLeafTreesArePairwiseDisjoint(t *testing.T) {
 		for j := i + 1; j < len(claims); j++ {
 			if claims[i].lane == claims[j].lane || !treesOverlap(claims[i].glob, claims[j].glob) {
 				continue
+			}
+			if subLaneParent(claims[i].lane, roster.trees) == claims[j].lane ||
+				subLaneParent(claims[j].lane, roster.trees) == claims[i].lane {
+				continue // a declared sub-lane nesting inside its own leaf lane (see subLaneParent)
 			}
 			bad = append(bad, "lane "+claims[i].lane+" ("+claims[i].glob+") overlaps lane "+
 				claims[j].lane+" ("+claims[j].glob+")")
@@ -371,6 +436,40 @@ func TestLaneCoverageRulesRejectTheRegression(t *testing.T) {
 	} {
 		if got := treesOverlap(tc.a, tc.b); got != tc.want {
 			t.Errorf("treesOverlap(%q, %q) = %v, want %v (%s)", tc.a, tc.b, got, tc.want, tc.name)
+		}
+	}
+	subTrees := map[string][]string{
+		"gateway":           {"internal/gateway/**"},
+		"gateway-a2a":       {"internal/gateway/a2a*.go"},
+		"gateway-multi-seg": {"internal/gateway/multi_*.go", "internal/gateway/seg*.go"},
+		"gateway-escape":    {"internal/gateway/x*.go", "internal/agent/**"},
+		"gateway-whole":     {"internal/gateway/**"},
+		"gateway-dir":       {"internal/gateway/"},
+		"gate":              {"internal/gate/**"},
+		"gate-way":          {"internal/gateway/a2a*.go"},
+		"resume":            {"internal/resume/**"},
+		"scan":              {"internal/resume/scan/**"},
+		"orphan-sub":        {"internal/orphan/x*.go"},
+		"cmd-shim":          {"internal/gateway/cmd*.go"},
+		"cmd":               {"cmd/**"},
+	}
+	for _, tc := range []struct {
+		name, lane, want string
+	}{
+		{"declared sub-lane refines its leaf", "gateway-a2a", "gateway"},
+		{"multi-hyphen sub-lane still resolves", "gateway-multi-seg", "gateway"},
+		{"a glob escaping the leaf disqualifies", "gateway-escape", ""},
+		{"re-claiming the whole leaf is not a sub-lane", "gateway-whole", ""},
+		{"the bare leaf directory is not a sub-lane", "gateway-dir", ""},
+		{"the string-prefix trap (gate vs gateway)", "gate-way", ""},
+		{"a nested leaf without the opt-in name", "scan", ""},
+		{"no parent lane declared", "orphan-sub", ""},
+		{"parent must own its own internal/ root", "cmd-shim", ""},
+		{"a flat leaf lane has no parent", "gateway", ""},
+		{"an undeclared lane has no parent", "gateway-missing", ""},
+	} {
+		if got := subLaneParent(tc.lane, subTrees); got != tc.want {
+			t.Errorf("subLaneParent(%q) = %q, want %q (%s)", tc.lane, got, tc.want, tc.name)
 		}
 	}
 	if got := duplicateLanes([]string{"a", "b", "a", "c", "b"}); len(got) != 2 {

@@ -355,7 +355,10 @@ func (c *Catalog) parseLanes(text string) {
 		if eq < 0 {
 			continue
 		}
-		name := strings.ToLower(strings.TrimSpace(t[:eq]))
+		// A TOML key may be quoted (`"gateway-lifecycle" = [...]`, as every
+		// hyphenated gateway-* sub-lane is); the lane name is the bare key, never
+		// the quotes, so LaneForPath/LeafByName/SuggestStamp see gateway-lifecycle.
+		name := strings.ToLower(strings.Trim(strings.TrimSpace(t[:eq]), `"'`))
 		if name == "" {
 			continue
 		}

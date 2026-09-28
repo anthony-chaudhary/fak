@@ -8,10 +8,23 @@
 # on every push, it just no longer sits on the release-decide critical path.
 #
 # Contract: release_decide reads this workflow's latest decisive (completed)
-# conclusion on main. A green ci-fast run clears CI_BASE_RED even while the
-# `-race` job in ci.yml is still in flight; a red ci-fast run still holds the
-# cut. If this signal is missing/unknown, release_decide FALLS BACK to the whole
-# ci.yml run, so a missing fast signal never cuts on a blind base.
+# conclusion on main — the RUN-level conclusion + headSha from `gh run list`
+# (tools/release_context.py), never a job name. A
+# green ci-fast run clears CI_BASE_RED even while the `-race` job in ci.yml is
+# still in flight; a red ci-fast run still holds the cut. If this signal is
+# missing/unknown, release_decide FALLS BACK to the whole ci.yml run, so a
+# missing fast signal never cuts on a blind base.
+#
+# Shape (decisive on a 2-core hosted runner): one serial `go test ./...` summed
+# ~3100s of package test time over 2 slots plus compile/link and hit the 30m
+# step bound before it could conclude, so the run was never green. The test set
+# is now sharded over a deterministic partition of `go list ./...` into parallel
+# matrix jobs; build/vet/architest stay in one job; and the final
+# `build-vet-test-fast` job (same id and check name as before) needs every job
+# and is red unless all of them are green, so the run conclusion stays the one
+# meaningful verdict. Each shard runs `go test -timeout=20m` INSIDE a 35m step
+# bound: a hung test binary dies as a decisive, diagnosable go-test failure (with
+# its goroutine dump) before the runner kills the step.
 name: ci-fast
 
 on:
@@ -42,26 +55,29 @@ concurrency:
   group: ${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' && (inputs.intent == 'release' || inputs.intent == '')) && format('release-{0}', inputs.sha != '' && inputs.sha || github.run_id) || (github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('ref-{0}', github.ref)) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || !(github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && (inputs.intent == 'release' || inputs.intent == ''))) }}
 
+env:
+  # The exact toolchain comes from go.mod (go 1.26); GOTOOLCHAIN=auto lets
+  # `go` fetch it if the runner's Go is older.
+  GOTOOLCHAIN: auto
+  # Bound package/compiler fan-out to each job's explicit two-way runtime budget.
+  # Matching -p to GOMAXPROCS lets independent packages make progress
+  # without unbounded process pressure or changing the package/test set.
+  GOMAXPROCS: "2"
+  GOFLAGS: "-p=2"
+
 jobs:
-  build-vet-test-fast:
-    name: build · vet · test (no -race, fast release gate)
+  build-vet-fast:
+    name: build · vet · tier gate (fast release gate)
     runs-on: ubuntu-latest
-    env:
-      # The exact toolchain comes from go.mod (go 1.26); GOTOOLCHAIN=auto lets
-      # `go` fetch it if the runner's Go is older.
-      GOTOOLCHAIN: auto
-      # Bound package/compiler fan-out to the job's explicit two-way runtime budget.
-      # Matching -p to GOMAXPROCS lets independent packages make progress
-      # without unbounded process pressure or changing the package/test set.
-      GOMAXPROCS: "2"
-      GOFLAGS: "-p=2"
-    defaults:
-      run:
-        working-directory: .
+    timeout-minutes: 30
     steps:
+      # Every job checks out the SAME commit: the event SHA (push/PR), or the
+      # pinned `sha` input on a dispatch. An explicit branch ref would fetch the
+      # branch tip at checkout time, so parallel jobs on a hot trunk could test
+      # different trees; an empty ref keeps actions/checkout's event default.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.sha != '' && inputs.sha || github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}
           # Full history + tags: the release-substrate tests read the release
           # note AT the tag, which a default shallow checkout doesn't fetch.
           fetch-depth: 0
@@ -73,8 +89,8 @@ jobs:
 
       # Build/test cache: share the SAME content-addressed GOCACHE prefix as
       # ci.yml's build-vet-test job (gobuild, non-race) so a warm cache skips
-      # unchanged packages and unchanged tests. A restored entry is never wrong
-      # — a miss just rebuilds.
+      # unchanged packages. A restored entry is never wrong — a miss just
+      # rebuilds.
       - name: cache Go build/test artifacts
         uses: actions/cache@v4
         with:
@@ -102,33 +118,124 @@ jobs:
       - name: architest tier gate (uncached)
         run: go test -count=1 ./internal/architest/ -run '^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$'
 
+  go-test-shard:
+    name: go test ./... (no -race) · shard ${{ matrix.shard }}/${{ strategy.job-total }}
+    runs-on: ubuntu-latest
+    # Outlasts the 35m step bound below, so the step (not the job) is what ends
+    # a stuck shard and the failure keeps its step identity in the run log.
+    timeout-minutes: 45
+    strategy:
+      # Every shard runs to its own verdict: one red shard must not cancel the
+      # others and hide their failures from the same run.
+      fail-fast: false
+      matrix:
+        # Human labels only. The partition keys on strategy.job-index /
+        # strategy.job-total, so adding or removing a label re-partitions every
+        # package exactly once with no second number to keep in sync.
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}
+          # Full history + tags: the release-substrate tests read the release
+          # note AT the tag, which a default shallow checkout doesn't fetch.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # zero external deps -> no go.sum to key a cache on
+
+      # Restore-only: every shard starts from the shared gobuild GOCACHE prefix
+      # (ci.yml build-vet-test / build-vet-fast save it). Shards never save, so N
+      # parallel jobs do not multiply the repository's cache footprint.
+      - name: restore Go build/test cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
+            ${{ runner.os }}-gobuild-
+
       - name: install pinned OpenAPI validator
         run: python -m pip install --quiet --disable-pip-version-check PyYAML==6.0.2 openapi-spec-validator==0.7.2
 
-      # The correctness gate: the same `go test ./...` as ci.yml, WITHOUT `-race`.
-      # This is the fast decisive conclusion release_decide waits on. Keep the
-      # command observable: hosted runners have otherwise ended a 20-minute
-      # silent step without retaining the package failure output (#6982).
+      # The correctness gate: the same `go test ./...` package set as ci.yml,
+      # WITHOUT `-race`, split so each package runs in exactly one shard:
+      # package k (1-based, `go list ./...` order) belongs to shard (k-1) mod N.
+      # `go list` output is sorted and every job checks out the same commit, so
+      # the shards partition one package list deterministically. Keep the command
+      # observable: hosted runners have otherwise ended a 20-minute silent step
+      # without retaining the package failure output (#6982). -timeout=20m is the
+      # per-test-binary bound (the default 10m already clipped cmd/fak at
+      # 600.06s); the 35m step bound outlasts it plus compile/link.
       - name: go test ./... (no -race)
-        timeout-minutes: 30
+        timeout-minutes: 35
         shell: bash
         env:
           FAK_REQUIRE_OPENAPI_VALIDATOR: "1"
+          SHARD_INDEX: ${{ strategy.job-index }}
+          SHARD_TOTAL: ${{ strategy.job-total }}
         run: |
           set -uo pipefail
+          all_file="$RUNNER_TEMP/ci-fast-packages.txt"
+          shard_file="$RUNNER_TEMP/ci-fast-shard-packages.txt"
+          if ! go list ./... > "$all_file"; then
+            echo "::error::go list ./... failed; cannot partition the package set"
+            exit 1
+          fi
+          awk -v n="$SHARD_TOTAL" -v i="$SHARD_INDEX" '(NR - 1) % n == i' "$all_file" > "$shard_file"
+          total=$(wc -l < "$all_file")
+          count=$(wc -l < "$shard_file")
+          echo "shard $((SHARD_INDEX + 1))/$SHARD_TOTAL: $count of $total packages at $(git rev-parse HEAD)"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::shard $((SHARD_INDEX + 1))/$SHARD_TOTAL selected no packages from go list ./..."
+            exit 1
+          fi
+          mapfile -t shard_pkgs < "$shard_file"
           status_file="$RUNNER_TEMP/ci-fast-go-test.status"
           (
             set +e
-            go test ./... 2>&1 | tee "$RUNNER_TEMP/ci-fast-go-test.log"
+            go test -timeout=20m "${shard_pkgs[@]}" 2>&1 | tee "$RUNNER_TEMP/ci-fast-go-test.log"
             printf '%s\n' "${PIPESTATUS[0]}" > "$status_file"
           ) &
           test_pid=$!
           while kill -0 "$test_pid" 2>/dev/null; do
             sleep 60
             if kill -0 "$test_pid" 2>/dev/null; then
-              echo "::notice::go test ./... is still running ($(date -u +%FT%TZ))"
+              echo "::notice::go test ./... shard $((SHARD_INDEX + 1))/$SHARD_TOTAL is still running ($(date -u +%FT%TZ))"
             fi
           done
           wait "$test_pid" || true
           test -s "$status_file"
           exit "$(cat "$status_file")"
+
+  # The single verdict job, kept at the pre-shard job id and check name. It runs
+  # whenever the run itself was not cancelled — including after a failed or
+  # timed-out dependency — and is red unless build/vet/architest AND every go
+  # test shard concluded success, so a skipped or cancelled shard can never pass
+  # as green. A cancelled run (PR supersession) skips it and stays indecisive.
+  build-vet-test-fast:
+    name: build · vet · test (no -race, fast release gate)
+    needs: [build-vet-fast, go-test-shard]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Keep this step's name and text free of the step/cause keywords the
+      # release-status classifiers match (vet, architest, cache, timeout, ...):
+      # the failing shard or gate job carries the real cause, and this verdict
+      # step should only ever read as the go test gate.
+      - name: require every go test shard and the build gate green
+        shell: bash
+        env:
+          BUILD_VET_RESULT: ${{ needs.build-vet-fast.result }}
+          GO_TEST_SHARDS_RESULT: ${{ needs.go-test-shard.result }}
+        run: |
+          echo "build-vet-fast: $BUILD_VET_RESULT"
+          echo "go-test-shard (all shards): $GO_TEST_SHARDS_RESULT"
+          if [ "$BUILD_VET_RESULT" != "success" ] || [ "$GO_TEST_SHARDS_RESULT" != "success" ]; then
+            echo "::error::fast release gate is red: build-vet-fast=$BUILD_VET_RESULT, go-test-shard=$GO_TEST_SHARDS_RESULT"
+            exit 1
+          fi

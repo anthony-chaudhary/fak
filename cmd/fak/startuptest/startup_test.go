@@ -90,7 +90,7 @@ func TestAgentDefaultLiveStartsInteractiveBeforeInference(t *testing.T) {
 		t.Fatalf("checkout CLI exited with %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
 	}
 
-	if got := stdout.String(); !strings.Contains(got, "native REPL") || !strings.Contains(got, "you> ") {
+	if got := stdout.String(); !strings.Contains(got, "fak chat | startup-fixture") || !strings.Contains(got, "Type a message.") || !strings.Contains(got, "you> ") {
 		t.Fatalf("default live agent did not show the interactive prompt before EOF:\n%s", got)
 	}
 	if got := generations.Load(); got != 0 {

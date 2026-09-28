@@ -324,7 +324,13 @@ func (s *Session) weightHALKQuant(name string, qt *kQuantTensor) compute.Tensor 
 		panic("model: unsupported resident expert k-quant: " + qt.kind.String())
 	}
 	host := func() compute.Tensor {
-		return desc.NewHostTensor(qt.out, qt.in, qt.raw)
+		// A bounded streamed-dense k-quant (#13201) is held as a lazy range with no raw bytes;
+		// fault it in here exactly as weightHALQ4K does, rather than staging an empty payload.
+		raw, err := qt.materializeRaw()
+		if err != nil {
+			panic("model: lazy " + qt.kind.String() + " read " + name + ": " + err.Error())
+		}
+		return desc.NewHostTensor(qt.out, qt.in, raw)
 	}
 	return s.weightHALStagedBounded(desc.KeyPrefix()+name, name, host, desc.Dtype(), kQuantResidentBytes(qt))
 }

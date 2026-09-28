@@ -470,7 +470,11 @@ func normalizePreparedPaths(paths []string) ([]string, error) {
 	out := make([]string, 0, len(paths))
 	for _, raw := range paths {
 		raw = strings.TrimSpace(raw)
-		if strings.IndexByte(raw, 0) >= 0 || filepath.IsAbs(raw) || filepath.VolumeName(raw) != "" {
+		// Receipts move between Windows and Linux hosts, so reject rooted,
+		// UNC-style, and drive-letter paths (including drive-relative "C:foo")
+		// on every host, not only where filepath recognizes them.
+		if strings.IndexByte(raw, 0) >= 0 || filepath.IsAbs(raw) || filepath.VolumeName(raw) != "" ||
+			hasDriveLetterPrefix(raw) || strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, `\`) {
 			return nil, fmt.Errorf("unsafe path %q", raw)
 		}
 		p := pathpkg.Clean(strings.ReplaceAll(raw, "\\", "/"))

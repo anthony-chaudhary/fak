@@ -1,10 +1,12 @@
 package gateway
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -57,6 +59,25 @@ func newGuardTraceServer(t *testing.T, provider string, f *guardtrace.Fixture) (
 	}
 	t.Cleanup(srv.Close)
 	return srv, upstream
+}
+
+// useGuardTraceWorkspace points workspace lease admission at a private
+// workspace that already holds the fixture's .fak/ state dir. The fixture's
+// allowed writes land under .fak/, and lease admission only admits a new leaf
+// whose parent directory already exists. The real checkout's .fak/ is
+// gitignored and exists only if some other package's test happened to create
+// it earlier on the same checkout, which a sharded `go test` run does not
+// guarantee. Call after installEmptyTestLeaseAuthority, whose cleanup resets
+// the provider.
+func useGuardTraceWorkspace(t *testing.T) {
+	t.Helper()
+	workspace := t.TempDir()
+	if err := os.Mkdir(filepath.Join(workspace, ".fak"), 0o755); err != nil {
+		t.Fatalf("create guard-trace workspace state dir: %v", err)
+	}
+	SetWorkspaceLeaseAdmissionProvider(func(context.Context) (WorkspaceLeaseAdmissionView, error) {
+		return WorkspaceLeaseAdmissionView{WorkspaceRoot: workspace}, nil
+	})
 }
 
 // upstreamBaseURL gives the proxy planner the base its adapter appends its endpoint to.
@@ -112,6 +133,7 @@ func TestGuardTraceFiresFloorAndRecordsJournalOpenAI(t *testing.T) {
 
 func assertGuardTraceEndToEnd(t *testing.T, provider string) {
 	installEmptyTestLeaseAuthority(t)
+	useGuardTraceWorkspace(t)
 	f, err := guardtrace.LoadFixture(filepath.Join("testdata", "guard-trace-e2e.json"))
 	if err != nil {
 		t.Fatalf("load fixture: %v", err)

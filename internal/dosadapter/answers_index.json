@@ -893,8 +893,8 @@
   {
     "answer": "Refuse with a token from a closed, checkable vocabulary \u2014 not a prose sentence the next step has to parse. `pip install \"dos-kernel[mcp]\"`, then `dos refuse-reasons` / `dos doctor`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
     "commands": [
-      "dos check-reason",
       "dos doctor",
+      "dos man wedge <TOKEN> --explain",
       "dos refuse-reasons"
     ],
     "path": "docs/answers/refuse-an-agent-action-with-a-structured-reason.md",

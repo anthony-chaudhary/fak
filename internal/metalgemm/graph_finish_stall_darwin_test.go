@@ -29,12 +29,33 @@ func graphStallFixture(t *testing.T) *ProjectionGraph {
 	return g
 }
 
+// pollGraphUntil re-checks cond on a 1ms ticker until it holds or timeout elapses, and
+// reports whether it held. The native owner/quarantine release it waits on is driven by a
+// Metal completion on another thread, so there is no Go channel to block on; a ticker-driven
+// poll bounded by an explicit deadline timer is the #11307 idiom (no bare time.Sleep).
+func pollGraphUntil(timeout time.Duration, cond func() bool) bool {
+	if cond() {
+		return true
+	}
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		select {
+		case <-tick.C:
+			if cond() {
+				return true
+			}
+		case <-deadline.C:
+			return cond()
+		}
+	}
+}
+
 func waitForGraphOwnerCount(t *testing.T, want int) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for graphLiveOwnerCount() != want && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
+	pollGraphUntil(5*time.Second, func() bool { return graphLiveOwnerCount() == want })
 	if got := graphLiveOwnerCount(); got != want {
 		t.Fatalf("native graph owner count=%d want %d", got, want)
 	}
@@ -255,19 +276,23 @@ func TestProjectionGraphFinishTimeoutQuarantinesOwnersUntilRealTerminalCompletio
 		t.Fatalf("quarantine leaked native graph buffers: got %d want %d", got, graphBufferBaseline)
 	}
 	var probe *ProjectionGraph
-	deadline := time.Now().Add(5 * time.Second)
-	for {
+	var unexpected error
+	admitted := pollGraphUntil(5*time.Second, func() bool {
 		probe, err = BeginProjectionGraph(q4kTestVector(256, 12959), nil, nil, 1, 256)
 		if err == nil {
-			break
+			return true
 		}
 		if err.Error() != "metalgemm: projection graph unavailable while a timed-out command buffer remains quarantined" {
-			t.Fatalf("unexpected post-terminal graph admission error: %v", err)
+			unexpected = err
+			return true
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("graph admission remained quarantined after terminal cleanup: %v", err)
-		}
-		time.Sleep(time.Millisecond)
+		return false
+	})
+	if unexpected != nil {
+		t.Fatalf("unexpected post-terminal graph admission error: %v", unexpected)
+	}
+	if !admitted || probe == nil {
+		t.Fatalf("graph admission remained quarantined after terminal cleanup: %v", err)
 	}
 	probe.Free()
 	state.Close()
