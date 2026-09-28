@@ -183,8 +183,7 @@ func TestBlockCloneDirectFileClone(t *testing.T) {
 		if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
 			t.Fatalf("cloneFileBlocks failed (%v) but left destination behind", err)
 		}
-		t.Logf("cloneFileBlocks unsupported on this volume/platform: %v", err)
-		return
+		t.Skipf("host volume lacks block cloning (%v); cleanup contract verified, CoW content checks need ReFS/Dev Drive, APFS, or a FICLONE filesystem", err)
 	}
 
 	// Verify dst content matches src.
@@ -217,6 +216,43 @@ func TestBlockCloneDirectFileClone(t *testing.T) {
 	// Cloning onto an existing dst must fail (EEXIST on Darwin, O_EXCL on Linux/Windows).
 	if dupErr := cloneFileBlocks(src, dst); dupErr == nil {
 		t.Fatal("cloneFileBlocks onto existing dst succeeded, expected error")
+	}
+}
+
+// TestCloneTreeRegularFilesOnAnyVolume witnesses that CloneTree succeeds on a
+// volume without block cloning: a failed per-file clone must leave no
+// destination behind, or the O_EXCL byte-copy fallback collides with it.
+func TestCloneTreeRegularFilesOnAnyVolume(t *testing.T) {
+	src := t.TempDir()
+	files := map[string]string{
+		"a.txt":            "alpha\n",
+		"nested/b.txt":     strings.Repeat("beta\n", 2048),
+		"nested/deep/c.go": "package c\n",
+	}
+	for rel, body := range files {
+		full := filepath.Join(src, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dst := filepath.Join(t.TempDir(), "clone")
+	if err := CloneTree(src, dst); err != nil {
+		if errors.Is(err, ErrBlockCloneUnsupported) {
+			t.Skipf("CloneTree unavailable on this platform: %v", err)
+		}
+		t.Fatalf("CloneTree: %v", err)
+	}
+	for rel, body := range files {
+		got, err := os.ReadFile(filepath.Join(dst, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("read cloned %s: %v", rel, err)
+		}
+		if string(got) != body {
+			t.Fatalf("cloned %s = %d bytes, want %d", rel, len(got), len(body))
+		}
 	}
 }
 

@@ -21,6 +21,7 @@ func treeCloneTestFixture(t *testing.T) (string, string) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}
+	requireSymlinkCapability(t)
 	// The warm pool would let Prepare lease an idle member and bypass the
 	// materialization we are witnessing; force the pre-pool create path.
 	t.Setenv(PoolCapEnv, "0")
@@ -63,6 +64,20 @@ func treeCloneTestFixture(t *testing.T) (string, string) {
 	runBlockCloneGitTest(t, repo, "commit", "-q", "-m", "base")
 	base := strings.TrimSpace(runBlockCloneGitTest(t, repo, "rev-parse", "HEAD"))
 	return repo, base
+}
+
+// requireSymlinkCapability skips when this process cannot create symlinks, as
+// on Windows without Developer Mode or SeCreateSymbolicLinkPrivilege. The tree
+// fixture tracks a symlink, so without the capability it cannot be built.
+func requireSymlinkCapability(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "target"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("target", filepath.Join(dir, "link")); err != nil {
+		t.Skipf("host cannot create symlinks (enable Windows Developer Mode or run elevated): %v", err)
+	}
 }
 
 // cloneTreeCopyTest is a deterministic copy-based recursive tree clone used to

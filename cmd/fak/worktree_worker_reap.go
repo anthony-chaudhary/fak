@@ -56,7 +56,19 @@ func worktreeWorkerReap(argv []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), *maxWait)
 	defer cancel()
 	git := workerworktree.BoundedGitRunner(ctx)
-	finishLifecycle, receipt, err := beginAutomaticWIPLifecycleWithGit(repoRoot, "worker-reap", os.Stderr, git)
+	target := strings.TrimSpace(*worktree)
+	if !workerworktree.IsWorkerWorktree(target) {
+		// ReapChecked refuses a non-worker path before running git. Do it before
+		// the lifecycle capture would probe an arbitrary directory as its focus.
+		worktreeWorkerEmit(workerworktree.ReapChecked(repoRoot, target, "", git))
+		os.Exit(1)
+	}
+	// The before receipt must hold the TARGET's own pre-state; the rest of the
+	// fleet is recorded best-effort and never refuses this reap. Half the deadline
+	// caps that capture so ReapChecked always keeps the other half.
+	finishLifecycle, receipt, err := beginAutomaticWIPLifecycleWithGit(repoRoot, "worker-reap", os.Stderr, boundedLifecycle{
+		ctx: ctx, beforeBudget: *maxWait / 2, focus: target,
+	})
 	defer finishLifecycle()
 	if err != nil || !receipt.Before.Known {
 		detail := ""
@@ -68,14 +80,14 @@ func worktreeWorkerReap(argv []string) {
 		worktreeWorkerEmit(workerworktree.Result{
 			OK:        false,
 			Code:      ReapCodePrestateUnknown,
-			Path:      strings.TrimSpace(*worktree),
+			Path:      target,
 			Preserved: true,
-			Reason:    "before lifecycle inventory could not be captured completely",
+			Reason:    "the target worktree's before lifecycle state could not be captured",
 			Detail:    detail,
 		})
 		os.Exit(1)
 	}
-	res := workerworktree.ReapChecked(repoRoot, strings.TrimSpace(*worktree), strings.TrimSpace(*supersededBy), git)
+	res := workerworktree.ReapChecked(repoRoot, target, strings.TrimSpace(*supersededBy), git)
 	worktreeWorkerEmit(res)
 	if !res.OK {
 		os.Exit(1)

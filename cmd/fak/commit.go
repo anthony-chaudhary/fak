@@ -99,6 +99,25 @@ func (m *messageList) Set(v string) error {
 // joins to "" so assembleMessage still treats "no -m" as the -F/stdin/required-message case.
 func (m messageList) Joined() string { return strings.Join([]string(m), "\n\n") }
 
+// validateCommitTimeout rejects a post-validation budget the commit cannot honour, as a
+// usage error rather than a silent clamp. Zero means "unset": safecommit's own
+// DefaultPostValidationTimeout then applies. A negative value is meaningless (it would
+// cancel the phase outright rather than shorten it), and a value above
+// safecommit.MaxPostValidationTimeout would let a LIVE commit outlive the stale-index age
+// that every age-only reaper — this package's in-commit recovery and `fak commit status
+// --reclaim-stale-index-lock` alike — treats as an abandoned lock, so a peer could reap the
+// lock out from under a still-running hook set. The cap itself is admissible: it is exactly
+// the age the library already considers safe.
+func validateCommitTimeout(d time.Duration) error {
+	if d < 0 {
+		return fmt.Errorf("--commit-timeout must not be negative")
+	}
+	if d > safecommit.MaxPostValidationTimeout {
+		return fmt.Errorf("--commit-timeout %s exceeds the %s maximum", d, safecommit.MaxPostValidationTimeout)
+	}
+	return nil
+}
+
 // runCommit is the `fak commit` shim: it assembles a safecommit.Options from flags
 // (message from -m / -F / stdin; paths from repeated --path AND/OR positionals after --),
 // runs the safe-commit algorithm, and reports the structured Result. Exit codes mirror the
@@ -127,6 +146,12 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	noBuildCheck := fs.Bool("no-build-check", false, "skip the COMMITTED_RED prospective-tree compile gate before the commit (default: gate ON — refuses a commit that would red the committed trunk)")
 	buildCheckTimeout := fs.Duration("build-check-timeout", defaultValidateTimeout, "maximum duration for prospective validation (default 4m); controls prospective validation, not advisory-lock waiting or earlier build/materialization phases")
 	allowBuildCheckTimeout := fs.Bool("allow-build-check-timeout", os.Getenv("FAK_COMMIT_BUILD_CHECK") == "allow-timeout", "land the commit even when the build gate TIMES OUT instead of refusing BUILD_CHECK_TIMEOUT (exit 3): an explicit opt-in to fail open on an unchecked tree, reported as build_check.failed_open in --json and docked in the score (#6006)")
+	// --commit-timeout is the ONLY way to widen the post-validation budget, and that budget
+	// covers the repository's own pre-commit/commit-msg hooks: on a host whose hooks run
+	// longer than safecommit.DefaultPostValidationTimeout, every commit is structurally
+	// impossible until this is raised. Unset (0) keeps the library default; the cap keeps a
+	// live commit from outliving the stale-index age its own lock reapers judge abandoned.
+	commitTimeout := fs.Duration("commit-timeout", 0, fmt.Sprintf("post-validation budget covering this repo's pre-commit/commit-msg hooks (default %s, max %s; %s reports exhaustion of this budget)", safecommit.DefaultPostValidationTimeout, safecommit.MaxPostValidationTimeout, safecommit.ReasonCommitStalled))
 	reviewModel := fs.String("review-model", envOrDefault("FAK_REVIEW_MODEL", ""), "optional scout model id, or comma-separated model ids, that must pass/refute this diff before commit; a multi-model quorum blocks on any refute")
 	reviewMinModels := fs.Int("review-min-models", envIntOrDefault("FAK_REVIEW_MIN_MODELS", 0), "minimum usable review verdicts required when --review-model names multiple models (default: 2, or 1 for a single model)")
 	reviewObjective := fs.String("review-objective", envOrDefault("FAK_REVIEW_OBJECTIVE", ""), "objective given to --review-model (default: FAK_GOAL_OBJECTIVE, then first commit-message line)")
@@ -151,6 +176,24 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	}
 	if *buildCheckTimeout <= 0 {
 		fmt.Fprintln(stderr, "fak commit: --build-check-timeout must be greater than zero")
+		return 2
+	}
+	// FAK_COMMIT_TIMEOUT is the per-host form of --commit-timeout (the seam
+	// safecommit's DefaultPostValidationTimeout doc names), consulted only when the flag
+	// left the budget unset. An unparsable value is a usage error rather than a silent
+	// fallback: a typo'd budget must never masquerade as the library default.
+	if *commitTimeout == 0 {
+		if raw := strings.TrimSpace(os.Getenv("FAK_COMMIT_TIMEOUT")); raw != "" {
+			parsed, perr := time.ParseDuration(raw)
+			if perr != nil {
+				fmt.Fprintf(stderr, "fak commit: FAK_COMMIT_TIMEOUT %q is not a duration: %v\n", raw, perr)
+				return 2
+			}
+			*commitTimeout = parsed
+		}
+	}
+	if err := validateCommitTimeout(*commitTimeout); err != nil {
+		fmt.Fprintf(stderr, "fak commit: %v\n", err)
 		return 2
 	}
 	*dir = pathutil.ExpandTilde(*dir)
@@ -357,6 +400,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		SignOff:                    !*noSignoff || signoff,
 		Push:                       *push,
 		Lock:                       safecommit.LockOptions{Timeout: *lockTimeout},
+		PostValidationTimeout:      *commitTimeout,
 		Review:                     review,
 		CoreLockMaintenanceWitness: *coreLockWitness,
 	})
@@ -1042,6 +1086,14 @@ func renderCommitResult(stdout io.Writer, res safecommit.Result) {
 	if res.Reason == safecommit.ReasonLockBusy {
 		fmt.Fprintln(stdout, "  wedged? `fak commit --reclaim-stale-commit-lock` probes only the serialized commit lock (add --apply to remove a proven stale owner); `fak commit status` shows the live owner")
 		fmt.Fprintln(stdout, "  separate git residue: `fak commit --reclaim-stale-index-lock` handles only index.lock and next-index files")
+	}
+	// A COMMIT_STALLED result is the post-validation budget expiring mid-`git commit` — on a
+	// shared-trunk host the repository's own pre-commit/commit-msg hooks are what usually
+	// outlast it. Name the knob inline: the operator is already at the ref, and a flag they
+	// were never shown is the whole remedy. The hint stays off every other reason, so a
+	// LOCK_BUSY or a validation refusal never sends anyone chasing a timeout.
+	if res.Reason == safecommit.ReasonCommitStalled {
+		fmt.Fprintf(stdout, "  hooks outlasted the budget? widen it for the next attempt: `fak commit --commit-timeout 20m` (default %s, max %s; unset keeps the library default)\n", safecommit.DefaultPostValidationTimeout, safecommit.MaxPostValidationTimeout)
 	}
 	if res.Reason == safecommit.ReasonPreStagedPathOverlap || strings.Contains(res.Reason, safecommit.ReasonPreStagedPathOverlap) || strings.Contains(res.Detail, safecommit.ReasonPreStagedPathOverlap) {
 		fmt.Fprintln(stdout, "  remedy: unstage pre-existing index changes via `git restore --staged <paths>` (worktree edits stay), then retry `fak commit`")
