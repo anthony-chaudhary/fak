@@ -1,15 +1,51 @@
 package validate
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/amdgpu"
 )
+
+const publicFakModulePath = "github.com/anthony-chaudhary/fak"
+
+// automaticStrixValidationEligible limits implicit physical validation to the
+// public runtime module whose source archive contains the compute implementation
+// and shaders. fak-validate is also used against companion repositories; a GPU
+// word in those control-plane paths must not build a public runtime candidate
+// from the companion repository's unrelated Git tree.
+func automaticStrixValidationEligible(root string, mine []string) bool {
+	if !isGPURelatedValidation(mine) {
+		return false
+	}
+	f, err := os.Open(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) != 2 || fields[0] != "module" {
+			continue
+		}
+		modulePath := fields[1]
+		if unquoted, err := strconv.Unquote(modulePath); err == nil {
+			modulePath = unquoted
+		}
+		return modulePath == publicFakModulePath
+	}
+	return false
+}
 
 // isGPURelatedValidation reports whether any changed paths affect GPU/compute subsystems.
 func isGPURelatedValidation(mine []string) bool {
@@ -179,8 +215,8 @@ func executeStrixValidationPhase(
 	ablateArg string,
 	mine []string,
 ) error {
-	// If not explicit and changes do not touch GPU packages, skip immediately (0.0 ms)
-	if !explicitStrix && !isGPURelatedValidation(mine) {
+	// Implicit hardware validation applies only to GPU paths in the public runtime module.
+	if !explicitStrix && !automaticStrixValidationEligible(root, mine) {
 		res.SkippedPhases = append(res.SkippedPhases, "strix_validation")
 		return nil
 	}
