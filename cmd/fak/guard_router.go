@@ -27,11 +27,13 @@ import (
 // router auto-connect (resolveRouterAPIKey).
 const guardRouterKeyEnv = "FAK_GATEWAY_KEY"
 
+const guardRouterPairedKeySource = "paired node"
+
 // guardRouterUpstream is the resolved --router target.
 type guardRouterUpstream struct {
 	origin    string // router origin, no trailing slash or /v1 (the Anthropic adapter appends /v1/messages)
 	key       string // router gateway key; "" when the router runs keyless
-	keySource string // env var the key came from, for the banner ("" when keyless)
+	keySource string // env var or paired node, for the banner ("" when keyless)
 }
 
 // guardRouterInputs are the flag values --router composes with.
@@ -46,10 +48,12 @@ type guardRouterInputs struct {
 }
 
 // resolveGuardRouterUpstream validates the --router flag combination and resolves the
-// router origin and key. Pure apart from getenv, so the precedence is unit-tested:
-// origin = --base-url, else routerOrigin() (FAK_AGENT_ROUTER_ORIGIN, else the default
-// local router); key = the --api-key-env variable (which must be non-empty when named),
-// else FAK_GATEWAY_KEY, else keyless.
+// router origin and key. The paired-key fallback reads node.json and proves the
+// selected router's possession of that key over /healthz. Precedence:
+// origin = --base-url, else routerOrigin(); key = the --api-key-env variable
+// (which must be non-empty when named), else FAK_GATEWAY_KEY, else a saved node
+// pairing after the selected origin proves the key. A paired key that fails
+// proof is refused; an empty or absent pairing remains keyless.
 func resolveGuardRouterUpstream(in guardRouterInputs, getenv func(string) string) (guardRouterUpstream, error) {
 	switch {
 	case strings.TrimSpace(in.remoteServe) != "":
@@ -81,6 +85,20 @@ func resolveGuardRouterUpstream(in guardRouterInputs, getenv func(string) string
 	}
 	if key := strings.TrimSpace(getenv(guardRouterKeyEnv)); key != "" {
 		up.key, up.keySource = key, guardRouterKeyEnv
+		return up, nil
+	}
+	if key, paired := pairedNodeRouterAPIKey(origin); paired {
+		if key != "" {
+			up.key, up.keySource = key, guardRouterPairedKeySource
+			return up, nil
+		}
+		cfg, err := nodeReadCfg()
+		if err != nil || strings.TrimRight(strings.TrimSpace(cfg.URL), "/") != origin {
+			return guardRouterUpstream{}, errors.New("--router: paired node configuration changed during key verification; retry")
+		}
+		if strings.TrimSpace(cfg.Key) != "" {
+			return guardRouterUpstream{}, fmt.Errorf("--router: paired node key for %s did not prove the router's possession; re-pair with `fak node use` or pass --api-key-env VAR", origin)
+		}
 	}
 	return up, nil
 }
@@ -127,6 +145,9 @@ func guardRouterAuthLine(u guardRouterUpstream) string {
 func (u guardRouterUpstream) authPhrase() string {
 	if u.keySource == "" {
 		return "keyless router; the Claude subscription token is not sent"
+	}
+	if u.keySource == guardRouterPairedKeySource {
+		return "router key from paired node as a bearer token; the Claude subscription token is not sent"
 	}
 	return "router key from $" + u.keySource + " as a bearer token; the Claude subscription token is not sent"
 }

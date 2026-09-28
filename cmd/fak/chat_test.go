@@ -3,15 +3,21 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
@@ -463,6 +469,8 @@ func TestChatClearCommandResetsContext(t *testing.T) {
 }
 
 func TestChatAutoConnectDiagnosticUsesShortModelLabel(t *testing.T) {
+	t.Setenv("FAK_AGENT_ROUTER_ORIGIN", "http://127.0.0.1:8080")
+	t.Setenv("OPENAI_BASE_URL", "")
 	const (
 		fullModel  = `/var/lib/fak/models/Qwen3.8-27B-UD-Q2_K_XL.gguf`
 		shortModel = "Qwen3.8-27B-UD-Q2_K_XL"
@@ -524,6 +532,198 @@ func TestChatAutoConnectDiagnosticUsesShortModelLabel(t *testing.T) {
 		if strings.Contains(got, leaked) {
 			t.Fatalf("auto-connect output leaked model path detail %q:\n%s", leaked, got)
 		}
+	}
+}
+
+// TestChatDefaultsToSharedGateway exercises the no-flag chat path through a
+// real HTTP gateway fixture after `fak node use`: discovery, credential proof,
+// and inference must all use the paired shared origin.
+func TestChatDefaultsToSharedGateway(t *testing.T) {
+	if os.Getenv("FAK_TEST_CHAT_SHARED_GATEWAY_HELPER") == "1" {
+		cmdChat([]string{"--task", "say hello", "--tools=none", "--memory=false", "--max-turns=1"})
+		return
+	}
+
+	const key = "shared-gateway-test-key"
+	var (
+		mu         sync.Mutex
+		healthHits int
+		proofHits  int
+		chatHits   int
+		chatAuth   string
+		chatModel  string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			mu.Lock()
+			healthHits++
+			mu.Unlock()
+			if challenge := r.Header.Get(routerAuthChallengeHeader); challenge != "" {
+				nonce, err := base64.StdEncoding.DecodeString(challenge)
+				if err != nil || len(nonce) != 32 {
+					http.Error(w, "invalid challenge", http.StatusBadRequest)
+					return
+				}
+				mac := hmac.New(sha256.New, []byte(key))
+				_, _ = mac.Write([]byte(routerAuthProofDomain))
+				_, _ = mac.Write(nonce)
+				w.Header().Set(routerAuthProofHeader, base64.StdEncoding.EncodeToString(mac.Sum(nil)))
+				mu.Lock()
+				proofHits++
+				mu.Unlock()
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"ok":true,"model":"shared-model"}`)
+		case "/v1/chat/completions":
+			var request struct {
+				Model string `json:"model"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				http.Error(w, "invalid request", http.StatusBadRequest)
+				return
+			}
+			mu.Lock()
+			chatHits++
+			chatAuth = r.Header.Get("Authorization")
+			chatModel = request.Model
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"model":"shared-model","choices":[{"message":{"role":"assistant","content":"shared gateway reply"},"finish_reason":"stop"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	configHome := t.TempDir()
+	t.Setenv("HOME", configHome)
+	t.Setenv("APPDATA", configHome)
+	t.Setenv("FAK_AGENT_ROUTER_ORIGIN", "")
+	t.Setenv("FAK_GATEWAY_KEY", "")
+	t.Setenv("OPENAI_BASE_URL", "")
+	t.Setenv("GEMINI_API_KEY", "provider-key-must-not-reach-router")
+	var nodeOut, nodeErr bytes.Buffer
+	if code := runNode(&nodeOut, &nodeErr, []string{"use", srv.URL, "--key", key, "--no-check"}); code != 0 {
+		t.Fatalf("fak node use: exit %d: %s", code, nodeErr.String())
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestChatDefaultsToSharedGateway$")
+	cmd.Env = append(os.Environ(), "FAK_TEST_CHAT_SHARED_GATEWAY_HELPER=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("fak chat shared gateway run: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "shared gateway reply") {
+		t.Fatalf("chat answer did not come from shared gateway:\n%s", out)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if healthHits == 0 || proofHits != 1 || chatHits != 1 {
+		t.Fatalf("shared gateway requests: health=%d proof=%d chat=%d, want health>0 proof=1 chat=1", healthHits, proofHits, chatHits)
+	}
+	if chatAuth != "Bearer "+key || chatModel != "shared-model" {
+		t.Fatalf("shared gateway inference: auth=%q model=%q", chatAuth, chatModel)
+	}
+}
+
+func TestChatEndpointSelectionHelper(t *testing.T) {
+	if os.Getenv("FAK_TEST_CHAT_ENDPOINT_HELPER") != "1" {
+		return
+	}
+	cmdChat([]string{"--task", "say hello", "--tools=none", "--memory=false", "--max-turns=1"})
+}
+
+func testChatPairNode(t *testing.T, origin string) {
+	t.Helper()
+	configHome := t.TempDir()
+	t.Setenv("HOME", configHome)
+	t.Setenv("APPDATA", configHome)
+	t.Setenv("FAK_AGENT_ROUTER_ORIGIN", "")
+	t.Setenv("FAK_GATEWAY_KEY", "")
+	var nodeErr bytes.Buffer
+	if code := runNode(io.Discard, &nodeErr, []string{"use", origin, "--no-check"}); code != 0 {
+		t.Fatalf("fak node use: exit %d: %s", code, nodeErr.String())
+	}
+}
+
+func testChatEndpointSubprocess(t *testing.T) (string, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestChatEndpointSelectionHelper$")
+	cmd.Env = append(os.Environ(), "FAK_TEST_CHAT_ENDPOINT_HELPER=1")
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func TestChatPairedRouterDownFailsLoud(t *testing.T) {
+	const pairedOrigin = "http://127.0.0.1:0"
+	testChatPairNode(t, pairedOrigin)
+	t.Setenv("OPENAI_BASE_URL", "")
+
+	out, err := testChatEndpointSubprocess(t)
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+		t.Fatalf("down paired router exit = %v, want code 1:\n%s", err, out)
+	}
+	if !strings.Contains(out, pairedOrigin) || !strings.Contains(out, "not responding") {
+		t.Fatalf("missing paired-router failure guidance:\n%s", out)
+	}
+}
+
+func TestChatProviderEnvOverridesPairedRouter(t *testing.T) {
+	var mu sync.Mutex
+	pairedHits := 0
+	paired := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		pairedHits++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/healthz" {
+			_, _ = io.WriteString(w, `{"ok":true,"model":"paired-model"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"model":"paired-model","choices":[{"message":{"role":"assistant","content":"paired reply"},"finish_reason":"stop"}]}`)
+	}))
+	defer paired.Close()
+
+	providerAuth, providerModel := "", ""
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"ok":true,"model":"provider-model"}`)
+		case "/v1/chat/completions":
+			var request struct {
+				Model string `json:"model"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				http.Error(w, "invalid request", http.StatusBadRequest)
+				return
+			}
+			mu.Lock()
+			providerAuth, providerModel = r.Header.Get("Authorization"), request.Model
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"model":"provider-model","choices":[{"message":{"role":"assistant","content":"provider reply"},"finish_reason":"stop"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer provider.Close()
+
+	testChatPairNode(t, paired.URL)
+	t.Setenv("OPENAI_BASE_URL", provider.URL+"/v1")
+	t.Setenv("GEMINI_API_KEY", "provider-key")
+	out, err := testChatEndpointSubprocess(t)
+	if err != nil || !strings.Contains(out, "provider reply") {
+		t.Fatalf("chat did not use provider env endpoint: %v\n%s", err, out)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if pairedHits != 0 || providerAuth != "Bearer provider-key" || providerModel != "provider-model" {
+		t.Fatalf("endpoint precedence: paired hits=%d, provider auth=%q, model=%q", pairedHits, providerAuth, providerModel)
 	}
 }
 

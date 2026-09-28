@@ -201,6 +201,20 @@ func TestAdmitServeBindOnRealFlagSurface(t *testing.T) {
 	}
 }
 
+func TestServeAllowLANWithoutAuth(t *testing.T) {
+	fs, sf := newServeFlagSet()
+	if err := fs.Parse([]string{"--addr", "0.0.0.0:8080", "--allow-lan"}); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	var stderr bytes.Buffer
+	if admitServeBind(sf, &stderr) {
+		t.Fatal("--allow-lan without an inbound key admitted an off-host listener")
+	}
+	if !strings.Contains(stderr.String(), serveBindRefusalToken) {
+		t.Fatalf("refusal omitted %s: %s", serveBindRefusalToken, stderr.String())
+	}
+}
+
 // repoDosToml reads the workspace refusal vocabulary, walking up from the package dir so the
 // test does not care how deep cmd/fak sits.
 func repoDosToml(t *testing.T) string {

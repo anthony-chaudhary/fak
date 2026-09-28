@@ -1,13 +1,18 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dropin"
 )
@@ -20,6 +25,7 @@ import (
 // under WSL. FAK_GATEWAY_KEY would trigger a live credential challenge.
 func isolateAgentEndpointEnv(t *testing.T) {
 	t.Helper()
+	nodeTestRedirectConfig(t) // ambient node.json must not change loopback tests
 	for _, k := range []string{
 		dropin.EnvVar("openai", ""),
 		dropin.EnvVar("anthropic", ""),
@@ -250,5 +256,223 @@ func TestAgentEndpointResolverUsesProbedOrigin(t *testing.T) {
 	}
 	if *af.model != "qwen38:27b-q4" {
 		t.Fatalf("model = %q, want the probed served model id", *af.model)
+	}
+}
+
+// A paired gateway is the bare agent's default endpoint, and its saved key is
+// released only after that endpoint answers a fresh keyed health challenge.
+func TestAgentEndpointResolverUsesPairedNode(t *testing.T) {
+	isolateAgentEndpointEnv(t)
+	const key = "paired-gateway-key"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		if challenge := r.Header.Get(routerAuthChallengeHeader); challenge != "" {
+			nonce, err := base64.StdEncoding.DecodeString(challenge)
+			if err != nil || len(nonce) != 32 {
+				http.Error(w, "invalid challenge", http.StatusBadRequest)
+				return
+			}
+			mac := hmac.New(sha256.New, []byte(key))
+			_, _ = mac.Write([]byte(routerAuthProofDomain))
+			_, _ = mac.Write(nonce)
+			w.Header().Set(routerAuthProofHeader, base64.StdEncoding.EncodeToString(mac.Sum(nil)))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true,"model":"served-paired"}`)
+	}))
+	defer srv.Close()
+	if err := nodeWriteCfg(nodeCfg{URL: srv.URL, Key: key}); err != nil {
+		t.Fatalf("nodeWriteCfg: %v", err)
+	}
+	if got := routerOrigin(); got != srv.URL {
+		t.Fatalf("routerOrigin = %q, want paired node %q", got, srv.URL)
+	}
+
+	fs, af := newAgentFlagSet()
+	if err := fs.Parse(nil); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	ep := agentEndpointResolver(af, false, false, false, io.Discard)
+	if ep.baseURL != srv.URL+"/v1" || ep.routerKey != key || *af.model != "served-paired" {
+		t.Fatalf("paired baseURL = %q, key verified = %t, model = %q; want %s/v1, true, served-paired", ep.baseURL, ep.routerKey == key, *af.model, srv.URL)
+	}
+	if got := agentRouterProbeTimeout("http://192.0.2.9:8080"); got != 2*time.Second {
+		t.Fatalf("remote probe timeout = %s, want 2s", got)
+	}
+	if got := agentRouterProbeTimeout(agentRouterOrigin); got != 150*time.Millisecond {
+		t.Fatalf("loopback probe timeout = %s, want 150ms", got)
+	}
+
+	// A bad saved key must not fall through to a workspace key, even if that
+	// workspace happens to name the same endpoint.
+	writeRouterConfig(t, srv.URL+"/v1", "unproved-workspace-key")
+	if err := nodeWriteCfg(nodeCfg{URL: srv.URL, Key: "wrong-paired-key"}); err != nil {
+		t.Fatalf("nodeWriteCfg wrong key: %v", err)
+	}
+	if got := resolveRouterAPIKey("", false, true, srv.URL+"/v1"); got != "" {
+		t.Fatal("unproved paired key fell through to a workspace credential")
+	}
+	if err := nodeWriteCfg(nodeCfg{URL: srv.URL}); err != nil {
+		t.Fatalf("nodeWriteCfg missing key: %v", err)
+	}
+	if got := resolveRouterAPIKey("", false, true, srv.URL+"/v1"); got != "" {
+		t.Fatal("missing paired key fell through to a workspace credential")
+	}
+	if _, paired := pairedNodeRouterAPIKey(srv.URL + "-other"); paired {
+		t.Fatal("a different origin matched the saved paired node")
+	}
+}
+
+func TestAgentPairedNodePrecedenceAndDown(t *testing.T) {
+	isolateAgentEndpointEnv(t)
+	const paired = "http://127.0.0.1:0"
+	if err := nodeWriteCfg(nodeCfg{URL: paired, Key: "paired-key"}); err != nil {
+		t.Fatalf("nodeWriteCfg: %v", err)
+	}
+	if got := routerOrigin(); got != paired {
+		t.Fatalf("paired router origin = %q, want %q", got, paired)
+	}
+	if origin, _, ok := probeLocalRouterOrigin(); ok {
+		t.Fatalf("down paired node silently fell back to %q", origin)
+	}
+	var guidance strings.Builder
+	agentNoEndpointGuidance(&guidance, true)
+	if !strings.Contains(guidance.String(), paired) || strings.Contains(guidance.String(), agentRouterOrigin) {
+		t.Fatalf("down-node guidance named the wrong router: %s", guidance.String())
+	}
+	t.Setenv("FAK_AGENT_ROUTER_ORIGIN", "http://127.0.0.1:2")
+	if got := routerOrigin(); got != "http://127.0.0.1:2" {
+		t.Fatalf("explicit router origin = %q, want env override", got)
+	}
+	t.Setenv("OPENAI_BASE_URL", "http://127.0.0.1:0/v1")
+	fs, af := newAgentFlagSet()
+	if err := fs.Parse(nil); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if ep := agentEndpointResolver(af, false, false, false, io.Discard); ep.baseURL != "http://127.0.0.1:0/v1" || ep.routerProbed {
+		t.Fatalf("provider base URL did not override paired node and router env: baseURL=%q routerProbed=%t", ep.baseURL, ep.routerProbed)
+	}
+}
+
+// A saved IPv4 loopback node may answer only on IPv6. The actual localhost
+// fallback must receive the paired key after proving possession, while an
+// unrelated origin must never inherit that pairing.
+func TestAgentPairedNodeKeyOnLoopbackFamilyFallback(t *testing.T) {
+	isolateAgentEndpointEnv(t)
+	ln, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Skipf("IPv6 loopback is unavailable: %v", err)
+	}
+	const key = "family-fallback-key"
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		if challenge := r.Header.Get(routerAuthChallengeHeader); challenge != "" {
+			nonce, err := base64.StdEncoding.DecodeString(challenge)
+			if err != nil || len(nonce) != 32 {
+				http.Error(w, "invalid challenge", http.StatusBadRequest)
+				return
+			}
+			mac := hmac.New(sha256.New, []byte(key))
+			_, _ = mac.Write([]byte(routerAuthProofDomain))
+			_, _ = mac.Write(nonce)
+			w.Header().Set(routerAuthProofHeader, base64.StdEncoding.EncodeToString(mac.Sum(nil)))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true,"model":"ipv6-model"}`)
+	}))
+	srv.Listener = ln
+	srv.Start()
+	defer srv.Close()
+	_, port, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatalf("listener address: %v", err)
+	}
+	pairedOrigin := "http://127.0.0.1:" + port
+	fallbackOrigin := "http://localhost:" + port
+	if _, ok := probeGatewayOnce(agentRouterProbeClient(fallbackOrigin), fallbackOrigin); !ok {
+		t.Skip("localhost does not resolve to the available IPv6 loopback listener")
+	}
+	if err := nodeWriteCfg(nodeCfg{URL: pairedOrigin, Key: key}); err != nil {
+		t.Fatalf("nodeWriteCfg: %v", err)
+	}
+	if origin, model, ok := probeLocalRouterOrigin(); !ok || origin != fallbackOrigin || model != "ipv6-model" {
+		t.Fatalf("fallback probe = (%q, %q, %t), want (%q, ipv6-model, true)", origin, model, ok, fallbackOrigin)
+	}
+	if got, paired := pairedNodeRouterAPIKey(fallbackOrigin); !paired || got != key {
+		t.Fatalf("fallback credential = (paired=%t, verified=%t), want (true, true)", paired, got == key)
+	}
+	if _, paired := pairedNodeRouterAPIKey("http://example.invalid:" + port); paired {
+		t.Fatal("an unrelated host inherited the loopback pairing")
+	}
+
+	// If a different server later answers the selected IPv4 origin, that
+	// server must not borrow the still-running IPv6 gateway's valid proof.
+	wrong, err := net.Listen("tcp4", "127.0.0.1:"+port)
+	if err != nil {
+		t.Logf("cannot bind the paired IPv4 address beside IPv6: %v", err)
+		return
+	}
+	wrongServer := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true,"model":"wrong-model"}`)
+	}))
+	wrongServer.Listener = wrong
+	wrongServer.Start()
+	defer wrongServer.Close()
+	if origin, model, ok := probeLocalRouterOrigin(); !ok || origin != pairedOrigin || model != "wrong-model" {
+		t.Fatalf("selected origin = (%q, %q, %t), want unproved IPv4 server", origin, model, ok)
+	}
+	if got, paired := pairedNodeRouterAPIKey(pairedOrigin); !paired || got != "" {
+		t.Fatalf("unproved selected origin borrowed another loopback gateway's key: paired=%t released=%t", paired, got != "")
+	}
+}
+
+// A redirecting selected origin must not borrow another gateway's health proof
+// and then receive the paired bearer on its own inference path.
+func TestAgentPairedNodeRejectsRedirectedProof(t *testing.T) {
+	isolateAgentEndpointEnv(t)
+	const key = "real-gateway-key"
+	real := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		if challenge := r.Header.Get(routerAuthChallengeHeader); challenge != "" {
+			nonce, err := base64.StdEncoding.DecodeString(challenge)
+			if err != nil || len(nonce) != 32 {
+				http.Error(w, "invalid challenge", http.StatusBadRequest)
+				return
+			}
+			mac := hmac.New(sha256.New, []byte(key))
+			_, _ = mac.Write([]byte(routerAuthProofDomain))
+			_, _ = mac.Write(nonce)
+			w.Header().Set(routerAuthProofHeader, base64.StdEncoding.EncodeToString(mac.Sum(nil)))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true,"model":"real-model"}`)
+	}))
+	defer real.Close()
+	redirecting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, real.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer redirecting.Close()
+	if err := nodeWriteCfg(nodeCfg{URL: redirecting.URL, Key: key}); err != nil {
+		t.Fatalf("nodeWriteCfg: %v", err)
+	}
+	if got, paired := pairedNodeRouterAPIKey(redirecting.URL); !paired || got != "" {
+		t.Fatalf("redirected origin released paired key: paired=%t keyReleased=%t", paired, got != "")
+	}
+	if origin, _, ok := probeLocalRouterOrigin(); ok {
+		t.Fatalf("redirected origin was accepted as live: %q", origin)
 	}
 }

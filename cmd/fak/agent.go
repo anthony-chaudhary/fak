@@ -127,35 +127,60 @@ func cmdAgent(argv []string) {
 	runAgent(argv)
 }
 
-// agentRouterOrigin is the unified endpoint's default origin: the local fak
-// serve gateway (`fak serve` binds 127.0.0.1:8080 by default), which fronts
-// every upstream behind one OpenAI-compatible address.
+// agentRouterOrigin is the loopback fallback when no gateway was selected by
+// environment or `fak node use`.
 const agentRouterOrigin = "http://127.0.0.1:8080"
 
-// agentRouterProbe probes the local fak router for liveness, the served model
+// agentRouterProbe probes the selected fak router for liveness, the served model
 // id, and the origin that actually answered (the literal origin or its loopback
 // family fallback, e.g. 127.0.0.1 -> localhost). It is a package var so tests
 // override it with a stub instead of binding 127.0.0.1:8080 — a dev-box mock
 // serve on that port must never be able to flip a test verdict.
 var agentRouterProbe = probeLocalRouterOrigin
 
-// routerOrigin returns the origin to probe: the default agentRouterOrigin, or
-// FAK_AGENT_ROUTER_ORIGIN when set so a test (or an operator fronting the
-// gateway on a non-default address family) can point the probe elsewhere.
+// routerOrigin resolves the explicit agent origin, then the node paired by
+// `fak node use`, then the loopback fallback. A configured node remains the
+// target when down; falling through to a local router would switch providers.
 func routerOrigin() string {
 	if o := strings.TrimSpace(os.Getenv("FAK_AGENT_ROUTER_ORIGIN")); o != "" {
-		return o
+		return strings.TrimRight(o, "/")
+	}
+	if cfg, err := nodeReadCfg(); err == nil {
+		if o := strings.TrimRight(strings.TrimSpace(cfg.URL), "/"); o != "" {
+			return o
+		}
 	}
 	return agentRouterOrigin
 }
 
-// probeLocalRouterOrigin probes the default fak router origin and reports the
+// Remote LAN gateways need a bounded network allowance. Keep the existing
+// 150ms probe for loopback so a missing local serve fails quickly.
+func agentRouterProbeTimeout(origin string) time.Duration {
+	host, _, err := nodeUpstreamHost(origin)
+	if err == nil && !nodeHostIsLoopback(host) {
+		return 2 * time.Second
+	}
+	return 150 * time.Millisecond
+}
+
+// A redirect could let the selected origin borrow a different gateway's
+// liveness response or HMAC proof, then receive the saved bearer itself.
+func agentRouterProbeClient(origin string) *http.Client {
+	return &http.Client{
+		Timeout: agentRouterProbeTimeout(origin),
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+// probeLocalRouterOrigin probes the selected fak router origin and reports the
 // origin that answered, so a caller that later dials the endpoint uses the
 // address family that is actually live (a WSL2 gateway can be exposed on [::1]
 // only, where the 127.0.0.1 literal is refused).
 func probeLocalRouterOrigin() (origin, model string, ok bool) {
 	o := routerOrigin()
-	client := &http.Client{Timeout: 150 * time.Millisecond}
+	client := agentRouterProbeClient(o)
 	// Probe the literal and its family fallback with the single-origin probe so
 	// the ORIGIN THAT ANSWERED is known — probeLocalGateway would silently retry
 	// the fallback and report the literal as live, sending the eventual inference
@@ -192,7 +217,7 @@ var agentEndpointResolver = resolveAgentEndpoint
 
 // resolveAgentEndpoint resolves the endpoint `fak agent` runs on, in priority
 // order: explicit --base-url, the provider env var, an explicit provider's
-// default base URL, then a live probe of the local fak router — the NATIVE
+// default base URL, then a live probe of the selected fak router — the NATIVE
 // default that mirrors `fak chat`'s auto-connect and the pi/opencode launchers:
 // the agent points at the unified endpoint without flags, so provider, key,
 // and model churn is absorbed behind the router instead of re-entering the
@@ -550,7 +575,7 @@ func runAgent(argv []string) {
 		}
 		if key == "" {
 			if endpoint.routerProbed && !apiKeyExplicit {
-				fmt.Fprintln(os.Stderr, "fak agent: automatic gateway credential withheld because the router did not prove it; restart an updated fak serve or pass --api-key-env VAR")
+				fmt.Fprintln(os.Stderr, "fak agent: no verified gateway credential; if this gateway requires authentication, re-pair with `fak node use HOST[:PORT] --key KEY` or pass --api-key-env VAR")
 			} else {
 				// A local endpoint (e.g. the transformers shim) needs no key; a remote
 				// one will return 401, which the planner surfaces clearly. Warn, proceed.
@@ -735,11 +760,8 @@ func verifiedRouterCredential(origin, candidate string) string {
 	if candidate == "" {
 		return ""
 	}
-	client := &http.Client{Timeout: 150 * time.Millisecond}
+	client := agentRouterProbeClient(origin)
 	if probeRouterAuthProof(client, origin, candidate) {
-		return candidate
-	}
-	if fallback, ok := fakclient.LoopbackFallbackURL(origin); ok && probeRouterAuthProof(client, fallback, candidate) {
 		return candidate
 	}
 	return ""
@@ -776,11 +798,39 @@ func probeRouterAuthProof(client *http.Client, origin, candidate string) bool {
 	_, _ = mac.Write(nonce)
 	return hmac.Equal(proof, mac.Sum(nil))
 }
+
+// pairedNodeRouterAPIKey returns the saved key only when the selected origin
+// matches node.json or its single loopback-family fallback and answers a fresh
+// HMAC health challenge at that selected origin. paired distinguishes a missing
+// or rejected paired key from no matching node, so callers do not fall through
+// to another saved credential on auth failure.
+func pairedNodeRouterAPIKey(origin string) (key string, paired bool) {
+	cfg, err := nodeReadCfg()
+	selected := strings.TrimRight(strings.TrimSpace(origin), "/")
+	configured := strings.TrimRight(strings.TrimSpace(cfg.URL), "/")
+	if err != nil || selected == "" || configured == "" {
+		return "", false
+	}
+	if selected != configured {
+		fallback, ok := fakclient.LoopbackFallbackURL(configured)
+		if !ok || strings.TrimRight(fallback, "/") != selected {
+			return "", false
+		}
+	}
+	if isTemplateCredential(strings.TrimSpace(cfg.Key)) {
+		return "", true
+	}
+	return verifiedRouterCredential(selected, cfg.Key), true
+}
+
 func resolveRouterAPIKey(apiKeyEnv string, explicitKeyEnv, autoRouter bool, baseURL string) string {
 	if autoRouter && !explicitKeyEnv {
+		origin := strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
 		if key := os.Getenv("FAK_GATEWAY_KEY"); key != "" {
-			origin := strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
 			return verifiedRouterCredential(origin, key)
+		}
+		if key, paired := pairedNodeRouterAPIKey(origin); paired {
+			return key
 		}
 		return workspaceRouterAPIKey(baseURL)
 	}

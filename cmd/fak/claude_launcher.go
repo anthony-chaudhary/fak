@@ -56,16 +56,34 @@ func cmdClaude(argv []string) {
 	os.Exit(runClaude(os.Stdout, os.Stderr, argv))
 }
 
+// defaultClaudeAddr resolves the fak serve gateway when neither --gateway-url nor
+// --base-url is given. FAK_MAC_GATEWAY wins: it is the fak-specific variable a
+// person sets on purpose. ANTHROPIC_BASE_URL comes next, and only when it names a
+// non-Anthropic host (a custom fak serve gateway). The Claude desktop app and Claude
+// Code export ANTHROPIC_BASE_URL=https://api.anthropic.com into every child shell,
+// so trusting that value would point a local launch (local model id, dogfood key)
+// at the real Anthropic API. Otherwise the local default applies.
 func defaultClaudeAddr() string {
-	if v := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("FAK_MAC_GATEWAY")); v != "" {
 		return projectassets.NormalizeClaudeBaseURL(v)
 	}
-	if v := strings.TrimSpace(os.Getenv("FAK_MAC_GATEWAY")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL")); v != "" && !claudeIsOfficialAnthropicURL(v) {
 		return projectassets.NormalizeClaudeBaseURL(v)
 	}
 	return projectassets.DefaultClaudeBaseURL
 }
 
+// claudeIsOfficialAnthropicURL reports whether raw names Anthropic's own API (any
+// scheme, case, trailing slash or path; a bare host counts too), which can never
+// be a fak serve gateway.
+func claudeIsOfficialAnthropicURL(raw string) bool {
+	return nodeIsAnthropicUpstream(raw) || nodeIsAnthropicUpstream(projectassets.NormalizeClaudeBaseURL(raw))
+}
+
+// defaultClaudeModel is the fallback model when no --model is given and the
+// /healthz probe names no served model. An inherited ANTHROPIC_MODEL is kept on
+// purpose: the Claude desktop app does not export it (only ANTHROPIC_BASE_URL),
+// and a live launch prefers the model fak serve reports over this fallback.
 func defaultClaudeModel() string {
 	if v := strings.TrimSpace(os.Getenv("ANTHROPIC_MODEL")); v != "" {
 		return v

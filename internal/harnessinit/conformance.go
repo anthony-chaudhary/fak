@@ -69,7 +69,7 @@ type crossDogfoodFixture struct {
 
 // CrossDogfood runs the matrix without a key, model, network, GPU, or installed harness
 // CLI. Generated products import the public harnesskit package through a local module
-// replacement and execute with GOPROXY=off.
+// replacement and execute with GOPROXY=off, pinned to a local toolchain (GOTOOLCHAIN=local).
 func CrossDogfood(ctx context.Context, repoRoot string) (CrossDogfoodMatrix, error) {
 	repoRoot, err := filepath.Abs(repoRoot)
 	if err != nil {
@@ -156,7 +156,7 @@ func crossDogfoodRow(ctx context.Context, repoRoot, work string, fixture crossDo
 	if err := addLocalModuleReplacement(productDir, repoRoot); err != nil {
 		return CrossDogfoodRow{}, err
 	}
-	receipt, err := runExternalSelfcheck(ctx, productDir)
+	receipt, err := runExternalSelfcheck(ctx, productDir, repoRoot)
 	if err != nil {
 		return CrossDogfoodRow{}, err
 	}
@@ -215,10 +215,14 @@ func addLocalModuleReplacement(productDir, repoRoot string) error {
 	return os.WriteFile(path, append(raw, replacement...), 0o644)
 }
 
-func runExternalSelfcheck(ctx context.Context, productDir string) (harnesskit.LaunchReceipt, error) {
-	cmd := exec.CommandContext(ctx, "go", "run", "-mod=mod", "./cmd/product", "--selfcheck")
+func runExternalSelfcheck(ctx context.Context, productDir, repoRoot string) (harnesskit.LaunchReceipt, error) {
+	goBin, err := resolveOfflineGo(ctx, productDir, repoRoot)
+	if err != nil {
+		return harnesskit.LaunchReceipt{}, fmt.Errorf("external selfcheck: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, goBin, "run", "-mod=mod", "./cmd/product", "--selfcheck")
 	cmd.Dir = productDir
-	cmd.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off", "GOWORK=off")
+	cmd.Env = offlineGoEnv(os.Environ())
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

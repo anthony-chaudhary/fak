@@ -57,7 +57,7 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 	fs := flag.NewFlagSet("chat", flag.ExitOnError)
 	cf := &chatFlags{}
 	cf.provider = fs.String("provider", "openai", "provider transcript wire: openai, anthropic, gemini, or xai")
-	cf.baseURL = fs.String("base-url", "", "provider base URL (empty => offline mock planner; no upstream)")
+	cf.baseURL = fs.String("base-url", "", "provider base URL (empty => provider env or selected gateway, then offline mock when unconfigured)")
 	cf.model = fs.String("model", "gemini-3.8-flash", "model id")
 	cf.apiKeyEnv = fs.String("api-key-env", "GEMINI_API_KEY", "env var holding the API key")
 	cf.codexAuth = fs.Bool("codex-auth", false, "explicitly reuse a Codex-managed ChatGPT login read-only; Codex owns renewal")
@@ -98,8 +98,8 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 //
 // It is deliberately NOT cmdAgent (a one-shot A/B benchmark) nor cmdTUI (a loops
 // console): each line of input is one human turn, driven through the fak arm of
-// RunArm in-process, with no upstream required (the offline mock planner is the
-// default, matching `fak agent`). --base-url swaps in a live provider planner.
+// RunArm in-process. A provider env or a selected gateway supplies the live
+// default; an unconfigured chat falls back to the offline mock planner.
 func cmdChat(argv []string) {
 	fs, cf := newChatFlagSet()
 	_ = fs.Parse(argv)
@@ -205,18 +205,30 @@ func cmdChat(argv []string) {
 	effectiveBaseURL := *cf.baseURL
 	autoRouter := false
 	autoRouterKey := ""
-	if effectiveBaseURL == "" && providerExplicit && !*cf.offline {
-		effectiveBaseURL = dropin.DefaultBaseURL(*cf.provider)
+	if effectiveBaseURL == "" {
+		if env := strings.TrimSpace(os.Getenv(dropin.EnvVar(*cf.provider, ""))); env != "" {
+			effectiveBaseURL = env
+		} else if providerExplicit && !*cf.offline {
+			effectiveBaseURL = dropin.DefaultBaseURL(*cf.provider)
+		}
 	}
 	if effectiveBaseURL == "" && !*cf.offline && !baseURLExplicit {
-		if localModel, ok := probeLocalGateway("http://127.0.0.1:8080"); ok {
-			effectiveBaseURL = "http://127.0.0.1:8080/v1"
+		if origin, routerModel, ok := probeLocalRouterOrigin(); ok {
+			effectiveBaseURL = strings.TrimRight(origin, "/") + "/v1"
 			autoRouter = true
 			autoRouterKey = resolveRouterAPIKey("", false, true, effectiveBaseURL)
-			if !modelExplicit && localModel != "" && localModel != "mock" {
-				*cf.model = localModel
+			if !modelExplicit && routerModel != "" && routerModel != "mock" {
+				*cf.model = routerModel
 			}
-			fmt.Fprintln(os.Stderr, "fak chat: connected to local gateway")
+			fmt.Fprintf(os.Stderr, "fak chat: connected to gateway at %s\n", origin)
+		} else {
+			configured := strings.TrimSpace(os.Getenv("FAK_AGENT_ROUTER_ORIGIN")) != ""
+			if cfg, err := nodeReadCfg(); err == nil && strings.TrimSpace(cfg.URL) != "" {
+				configured = true
+			}
+			if configured {
+				must(fmt.Errorf("fak chat: configured router at %s not responding; start it, select another with `fak node use`, or pass --offline for a mock", routerOrigin()))
+			}
 		}
 	} else if effectiveBaseURL != "" && !modelExplicit && !*cf.offline {
 		if serverModel := detectServerModel(effectiveBaseURL); serverModel != "" && serverModel != "mock" {

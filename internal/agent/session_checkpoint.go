@@ -13,8 +13,19 @@ import (
 // DefaultSessionCheckpointDir is the default workspace directory for session checkpoints.
 const DefaultSessionCheckpointDir = ".fak/sessions"
 
+// SessionCheckpointVersion is the on-disk layout version SaveSessionCheckpoint stamps.
+// LoadSessionCheckpoint refuses any other non-zero version instead of guessing at a
+// layout this build does not know. An absent (zero) version is a checkpoint written
+// before the field existed, which has version 1's layout.
+const SessionCheckpointVersion = 1
+
+// ErrUnsupportedSessionCheckpointVersion is returned (wrapped) by LoadSessionCheckpoint
+// for a checkpoint whose version this build cannot read.
+var ErrUnsupportedSessionCheckpointVersion = errors.New("session checkpoint: unsupported version")
+
 // SessionCheckpoint represents the durable state of an agent session at a turn boundary.
 type SessionCheckpoint struct {
+	Version   int       `json:"version"`
 	SessionID string    `json:"session_id"`
 	CWD       string    `json:"cwd"`
 	Task      string    `json:"task"`
@@ -28,7 +39,10 @@ type SessionCheckpoint struct {
 	Status    string    `json:"status"`
 }
 
-// SaveSessionCheckpoint writes a session checkpoint to a JSON file in dir named <session_id>.json.
+// SaveSessionCheckpoint writes a session checkpoint to a JSON file in dir named
+// <session_id>.json, stamped with SessionCheckpointVersion. The write is crash-safe: the
+// file is replaced atomically and fsynced (publishSessionCheckpoint), so a crash or a
+// failed write leaves the previous checkpoint loadable.
 func SaveSessionCheckpoint(dir string, cp SessionCheckpoint) error {
 	if strings.TrimSpace(cp.SessionID) == "" {
 		return errors.New("session checkpoint: session_id is required")
@@ -43,6 +57,7 @@ func SaveSessionCheckpoint(dir string, cp SessionCheckpoint) error {
 		cp.CreatedAt = time.Now().UTC()
 	}
 	cp.UpdatedAt = time.Now().UTC()
+	cp.Version = SessionCheckpointVersion
 	if cp.Status == "" {
 		cp.Status = "active"
 	}
@@ -61,14 +76,15 @@ func SaveSessionCheckpoint(dir string, cp SessionCheckpoint) error {
 	if err != nil {
 		return fmt.Errorf("session checkpoint: marshal %s: %w", cp.SessionID, err)
 	}
-	if err := os.WriteFile(targetPath, data, 0o644); err != nil {
+	if err := publishSessionCheckpoint(targetPath, data); err != nil {
 		return fmt.Errorf("session checkpoint: write %s: %w", targetPath, err)
 	}
 	return nil
 }
 
 // LoadSessionCheckpoint reads a session checkpoint from either an explicit file path or
-// a session ID resolved within defaultDir (or DefaultSessionCheckpointDir if empty).
+// a session ID resolved within defaultDir (or DefaultSessionCheckpointDir if empty). A
+// checkpoint with an unknown version is refused with ErrUnsupportedSessionCheckpointVersion.
 func LoadSessionCheckpoint(pathOrID string, defaultDir string) (*SessionCheckpoint, error) {
 	pathOrID = strings.TrimSpace(pathOrID)
 	if pathOrID == "" {
@@ -98,10 +114,23 @@ func LoadSessionCheckpoint(pathOrID string, defaultDir string) (*SessionCheckpoi
 	if err != nil {
 		return nil, fmt.Errorf("session checkpoint: read %s: %w", targetPath, err)
 	}
+	// Check the version before decoding the rest, so a future layout is refused by version
+	// rather than by whatever field-shape error it would trip first.
+	var head struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(data, &head); err != nil {
+		return nil, fmt.Errorf("session checkpoint: unmarshal %s: %w", targetPath, err)
+	}
+	if head.Version != 0 && head.Version != SessionCheckpointVersion {
+		return nil, fmt.Errorf("%w: %s is version %d, this build reads version %d",
+			ErrUnsupportedSessionCheckpointVersion, targetPath, head.Version, SessionCheckpointVersion)
+	}
 	var cp SessionCheckpoint
 	if err := json.Unmarshal(data, &cp); err != nil {
 		return nil, fmt.Errorf("session checkpoint: unmarshal %s: %w", targetPath, err)
 	}
+	cp.Version = SessionCheckpointVersion
 	if cp.SessionID == "" {
 		base := filepath.Base(targetPath)
 		cp.SessionID = strings.TrimSuffix(base, ".json")

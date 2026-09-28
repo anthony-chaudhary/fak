@@ -325,3 +325,68 @@ func TestClaudeDirectPermissionChoice(t *testing.T) {
 		})
 	}
 }
+
+// TestClaudeDefaultAddrIgnoresInheritedOfficialAPI pins the gateway precedence when no
+// --gateway-url/--base-url is given. The Claude desktop app and Claude Code export
+// ANTHROPIC_BASE_URL=https://api.anthropic.com into every child shell, so `fak claude`
+// run from inside a Claude Code session must not treat that value as a fak serve gateway.
+func TestClaudeDefaultAddrIgnoresInheritedOfficialAPI(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		anthropicURL string
+		macGateway   string
+		want         string
+	}{
+		{name: "nothing set uses local default", want: "http://127.0.0.1:8080"},
+		{name: "inherited official API", anthropicURL: "https://api.anthropic.com", want: "http://127.0.0.1:8080"},
+		{name: "official API with slash and path", anthropicURL: "https://api.anthropic.com/v1/", want: "http://127.0.0.1:8080"},
+		{name: "official API upper case", anthropicURL: "HTTPS://API.ANTHROPIC.COM", want: "http://127.0.0.1:8080"},
+		{name: "official API bare host", anthropicURL: "api.anthropic.com", want: "http://127.0.0.1:8080"},
+		{name: "custom gateway still honored", anthropicURL: "http://10.0.0.5:8080/v1/", want: "http://10.0.0.5:8080"},
+		{name: "lookalike host is not official", anthropicURL: "https://api.anthropic.com.example.net", want: "https://api.anthropic.com.example.net"},
+		{name: "mac gateway over official API", anthropicURL: "https://api.anthropic.com", macGateway: "http://mac.example:8080/", want: "http://mac.example:8080"},
+		{name: "mac gateway over custom gateway", anthropicURL: "http://10.0.0.5:8080", macGateway: "http://mac.example:8080", want: "http://mac.example:8080"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("ANTHROPIC_BASE_URL", tc.anthropicURL)
+			t.Setenv("FAK_MAC_GATEWAY", tc.macGateway)
+			if got := defaultClaudeAddr(); got != tc.want {
+				t.Fatalf("defaultClaudeAddr() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestClaudeDryRunGatewayPrecedence drives the real flag path: an inherited official
+// ANTHROPIC_BASE_URL resolves to the local fak serve default, and an explicit
+// --gateway-url/--base-url beats every environment variable.
+func TestClaudeDryRunGatewayPrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		macGateway string
+		flags      []string
+		want       string
+	}{
+		{name: "inherited official API falls back to local", want: "http://127.0.0.1:8080"},
+		{name: "mac gateway env", macGateway: "http://mac.example:8080", want: "http://mac.example:8080"},
+		{name: "explicit gateway-url wins", macGateway: "http://mac.example:8080", flags: []string{"--gateway-url", "http://127.0.0.1:65530"}, want: "http://127.0.0.1:65530"},
+		{name: "explicit base-url wins", macGateway: "http://mac.example:8080", flags: []string{"--base-url", "http://127.0.0.1:65529/"}, want: "http://127.0.0.1:65529"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+			t.Setenv("FAK_MAC_GATEWAY", tc.macGateway)
+			args := append([]string{"--dry-run", "--no-probe", "--model", "fixture"}, tc.flags...)
+			var stdout, stderr bytes.Buffer
+			if code := runClaude(&stdout, &stderr, args); code != 0 {
+				t.Fatalf("runClaude code=%d stderr=%s", code, stderr.String())
+			}
+			errOut := stderr.String()
+			if !strings.Contains(errOut, "gateway     = "+tc.want+"\n") {
+				t.Fatalf("want gateway %q in dry-run output:\n%s", tc.want, errOut)
+			}
+			if !strings.Contains(errOut, "ANTHROPIC_BASE_URL="+tc.want+"\n") {
+				t.Fatalf("want child ANTHROPIC_BASE_URL=%s in dry-run output:\n%s", tc.want, errOut)
+			}
+		})
+	}
+}
