@@ -22,6 +22,7 @@ var (
 )
 
 type wholeTokenReport struct {
+	ModelConfig   *model.Config         `json:"model_config,omitempty"`
 	BindingSHA256 string                `json:"binding_sha256"`
 	Host          nativeHostIdentity    `json:"host"`
 	Operations    []wholeTokenOperation `json:"operations"`
@@ -153,6 +154,9 @@ func runWholeToken(s *model.Session, prompt []int, steps int, route string, star
 			return report, errors.New("prompt ID outside vocabulary")
 		}
 	}
+	cfg := s.M.Cfg
+	cfg.LayerTypes = append([]string(nil), cfg.LayerTypes...)
+	report.ModelConfig = &cfg
 	// Consume the backend-neutral whole-sequence seam: the witness never names the
 	// concrete Qwen35 Metal receipt or backend types. The adapter behind this
 	// interface is the unchanged Metal path on the legacy lane, and the backend
@@ -201,7 +205,7 @@ func runWholeToken(s *model.Session, prompt []int, steps int, route string, star
 			if err := validateWholeTokenBackendOperation(operation, route, sequence); err != nil {
 				return report, err
 			}
-		} else if err := validateWholeTokenOperation(operation, route, sequence, report.SequencePath); err != nil {
+		} else if err := validateWholeTokenOperation(operation, route, sequence, report.SequencePath, report.ModelConfig); err != nil {
 			return report, err
 		}
 		report.Operations = append(report.Operations, operation)
@@ -282,7 +286,7 @@ func runWholeTokenCLI(f *benchFlags, m *model.Model, started time.Time, newSessi
 				environment[key] = value
 			}
 		}
-		for _, key := range []string{"FAK_METAL_STREAM_Q4K", "FAK_Q4K", nativeProfileSequenceSelector, nativeProfileDecodeHandoffControl} {
+		for _, key := range wholeTokenExecutionEnvironmentKeys() {
 			if value, present := os.LookupEnv(key); present {
 				environment[key] = value
 			}
@@ -322,12 +326,20 @@ type wholeTokenOperation struct {
 // a concrete Qwen35/Metal constant. A nil sequence means readback of a serialized
 // artifact: the caller supplies the capability token recorded at build time
 // (report.SequencePath) so a fabricated path still fails.
-func validateWholeTokenOperation(op wholeTokenOperation, route string, sequence model.WholeSequenceSession, recordedPath string) error {
+func validateWholeTokenOperation(op wholeTokenOperation, route string, sequence model.WholeSequenceSession, recordedPath string, configs ...*model.Config) error {
 	path := recordedPath
 	executed := model.WholeSequenceEvidenceExecuted
 	if sequence != nil {
 		path = sequence.WholeSequencePath()
 		executed = sequence.WholeSequenceExecutedEvidence()
+	}
+	if len(configs) != 0 {
+		if configs[0] == nil && route == "per-layer" {
+			return errors.New("per-layer report lacks model configuration")
+		}
+		if configs[0] != nil {
+			return model.ValidateWholeSequenceOperationForConfig(route, path, executed, op.WholeSequenceOperation, *configs[0])
+		}
 	}
 	return model.ValidateWholeSequenceOperation(route, path, executed, op.WholeSequenceOperation)
 }
@@ -394,9 +406,15 @@ func validateWholeTokenReport(report wholeTokenReport) error {
 	for _, op := range report.Operations {
 		// A readback validates a serialized artifact: it pins each receipt to the
 		// capability token the live session recorded at build time.
-		if err := validateWholeTokenOperation(op, report.ExpectedRoute, nil, report.SequencePath); err != nil {
+		if err := validateWholeTokenOperation(op, report.ExpectedRoute, nil, report.SequencePath, report.ModelConfig); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// Missing entries mean unset; a literal zero remains distinct in the report.
+func wholeTokenExecutionEnvironmentKeys() []string {
+	return []string{"FAK_METAL_STREAM_Q4K", "FAK_Q4K", nativeProfileSequenceSelector, nativeProfileDecodeHandoffControl,
+		"FAK_GGUF_MMAP", "FAK_QWEN35_WHOLE_TOKEN_DECODE", "FAK_QWEN35_WHOLE_TOKEN_GEMV", "FAK_QWEN35_WHOLE_TOKEN_GEMV_VEC", "FAK_QWEN35_WHOLE_TOKEN_POOL", "FAK_QWEN35_WHOLE_TOKEN_GDN_FUSED", "FAK_QWEN35_PERSISTENT_DECODE_DKV"}
 }

@@ -590,6 +590,33 @@ type WholeSequenceOperation struct {
 // It is the exact semantics of the former cmd/modelbench validation, lifted into
 // the model so a non-Qwen test double can drive it.
 func ValidateWholeSequenceOperation(route, path string, executed WholeSequenceEvidenceState, op WholeSequenceOperation) error {
+	return validateWholeSequenceOperationBlocks(route, path, executed, op, 1)
+}
+
+// ValidateWholeSequenceOperationForConfig checks a complete legacy decode Step.
+// AUTO accepts one block per configured linear-attention layer on this route.
+func ValidateWholeSequenceOperationForConfig(route, path string, executed WholeSequenceEvidenceState, op WholeSequenceOperation, cfg Config) error {
+	// expectedBlocks is uint64 because the comparison it feeds is against
+	// WholeSequenceHandoff.BlockAcceptedCalls, a uint64 receipt counter.
+	expectedBlocks := uint64(1)
+	if route == "per-layer" {
+		if cfg.NumLayers <= 0 || len(cfg.LayerTypes) != cfg.NumLayers {
+			return fmt.Errorf("model: incomplete per-layer configuration")
+		}
+		expectedBlocks = 0
+		for l := 0; l < cfg.NumLayers; l++ {
+			if cfg.isLinearAttnLayer(l) {
+				expectedBlocks++
+			}
+		}
+		if expectedBlocks == 0 {
+			return fmt.Errorf("model: per-layer configuration has no linear-attention blocks")
+		}
+	}
+	return validateWholeSequenceOperationBlocks(route, path, executed, op, expectedBlocks)
+}
+
+func validateWholeSequenceOperationBlocks(route, path string, executed WholeSequenceEvidenceState, op WholeSequenceOperation, expectedBlocks uint64) error {
 	if op.CacheAfter != op.CacheBefore+1 {
 		return fmt.Errorf("model: whole-sequence Step did not advance exactly one cache position")
 	}
@@ -608,8 +635,8 @@ func ValidateWholeSequenceOperation(route, path string, executed WholeSequenceEv
 			return fmt.Errorf("model: whole-sequence Step lacks a fresh successful whole-token receipt; fallback is non-qualifying")
 		}
 	case "per-layer":
-		if op.Before != op.After || n.BlockAcceptedCalls != c.BlockAcceptedCalls+1 || n.MixerAcceptedCalls != c.MixerAcceptedCalls || n.ResidentAcceptedCalls != c.ResidentAcceptedCalls {
-			return fmt.Errorf("model: whole-sequence source-control Step did not execute exactly one prior AUTO per-layer block route")
+		if op.Before != op.After || n.BlockAcceptedCalls != c.BlockAcceptedCalls+expectedBlocks || n.MixerAcceptedCalls != c.MixerAcceptedCalls || n.ResidentAcceptedCalls != c.ResidentAcceptedCalls {
+			return fmt.Errorf("model: whole-sequence source-control Step did not execute the configured AUTO per-layer block count")
 		}
 	default:
 		return fmt.Errorf("model: unknown whole-sequence route %q", route)

@@ -516,3 +516,52 @@ func TestValidateWholeTokenFlagsAdmitsBackendLane(t *testing.T) {
 		t.Fatal("-metal with a named -backend was admitted")
 	}
 }
+
+func TestWholeTokenControlUsesConfiguredBlockCountAndRecordsSelector(t *testing.T) {
+	cfg := model.Config{NumLayers: 4, LayerTypes: []string{"linear_attention", "linear_attention", "linear_attention", "full_attention"}}
+	op := wholeTokenOperation{WholeSequenceOperation: model.WholeSequenceOperation{CacheBefore: 32, CacheAfter: 33}}
+	op.Before.Tokens = 32
+	op.After = op.Before
+	op.CountsAfter.BlockAcceptedCalls = 3
+	if err := validateWholeTokenOperation(op, "per-layer", nil, "", &cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, count := range []uint64{0, 1, 2, 4} {
+		op.CountsAfter.BlockAcceptedCalls = count
+		if validateWholeTokenOperation(op, "per-layer", nil, "", &cfg) == nil {
+			t.Fatalf("accepted %d blocks for three linear layers", count)
+		}
+	}
+	op.CountsAfter.BlockAcceptedCalls = 3
+	report := wholeTokenReport{ExpectedRoute: "per-layer", ModelConfig: &cfg, Tokens: []int{7}, Operations: []wholeTokenOperation{op}}
+	report.BindingSHA256, _ = wholeTokenBinding(report)
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded wholeTokenReport
+	if err = json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if err = validateWholeTokenReport(decoded); err != nil {
+		t.Fatal(err)
+	}
+	decoded.ModelConfig = nil
+	decoded.BindingSHA256, _ = wholeTokenBinding(decoded)
+	if validateWholeTokenReport(decoded) == nil {
+		t.Fatal("accepted missing configuration")
+	}
+	cfg.LayerTypes = cfg.LayerTypes[:3]
+	if validateWholeTokenOperation(op, "per-layer", nil, "", &cfg) == nil {
+		t.Fatal("accepted incomplete layer configuration")
+	}
+	keys := map[string]bool{}
+	for _, key := range wholeTokenExecutionEnvironmentKeys() {
+		keys[key] = true
+	}
+	for _, key := range []string{"FAK_QWEN35_WHOLE_TOKEN_DECODE", "FAK_QWEN35_WHOLE_TOKEN_GEMV", "FAK_QWEN35_WHOLE_TOKEN_GEMV_VEC", "FAK_QWEN35_WHOLE_TOKEN_POOL", "FAK_QWEN35_WHOLE_TOKEN_GDN_FUSED", "FAK_QWEN35_PERSISTENT_DECODE_DKV", "FAK_GGUF_MMAP"} {
+		if !keys[key] {
+			t.Fatalf("unrecorded control %s", key)
+		}
+	}
+}
