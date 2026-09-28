@@ -322,8 +322,8 @@
       "canonical": "handleFakContextChange (gateway route)",
       "family": "context-ctx",
       "kind": "symbol",
-      "definition": "handleFakContextChange is the gateway HTTP handler for POST /v1/fak/context/change that records a requester-initiated tombstone against a persisted recall core image.",
-      "distinction": "Not the recall-kernel apply method (RequestContextChange (recall)); it is the wire route that decodes the request and delegates to that method.",
+      "definition": "handleFakContextChange is the gateway HTTP handler for POST /v1/fak/context/change that refuses persisted mutation until an act-bound lease can protect the effect.",
+      "distinction": "Not the recall-kernel apply method (RequestContextChange (recall)); this wire route decodes the request but currently refuses the persisted write.",
       "distinct_from": [
         "contextchange-apply",
         "RequestContextChange (recall)"

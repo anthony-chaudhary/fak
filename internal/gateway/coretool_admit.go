@@ -320,7 +320,7 @@ var CoreToolsPalette = []MCPToolDescriptor{
 	},
 	{
 		Name:            "fak_context_change",
-		Description:     "Mutate persisted recall core image context",
+		Description:     "Request a persisted recall context change (refused until an act-bound lease is available)",
 		DestructiveHint: true,
 		OpenWorldHint:   false,
 	},

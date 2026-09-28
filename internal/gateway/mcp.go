@@ -525,8 +525,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 			return s.sessionReset(ctx, req)
 		})
 	case "fak_context_change":
-		return mcpDecodeCall[ContextChangeRequest](p.Arguments, "fak_context_change", func(req ContextChangeRequest) (any, error) {
-			return s.contextChange(ctx, req)
+		return mcpDecodeCall[ContextChangeRequest](p.Arguments, "fak_context_change", func(_ ContextChangeRequest) (any, error) {
+			return nil, errors.New(contextChangeActFenceRefusal)
 		})
 	case "fak_memory_drivers":
 		return mcpToolResult(map[string]any{"drivers": s.memoryDrivers()}), nil
@@ -1188,7 +1188,7 @@ func toolDescriptors() []map[string]any {
 		}.toMap(),
 		mcpToolDescriptor{
 			Name:        "fak_context_change",
-			Description: "Request a safe negative-only context mutation against a persisted recall core image. Today this records a tombstone for one page: future Resolve/Recall/working-set assembly skips it, while the original page row and CAS bytes remain available for audit. Pass {image_dir, step, reason, requested_by?, digest?, witness?, action?}; action may be omitted, 'tombstone', or 'tombstone_page'.",
+			Description: "Request a negative-only context mutation against a persisted recall core image. This route currently refuses writes until an act-bound lease can protect the effect. The intended tombstone preserves the original page row and CAS bytes for audit. Pass {image_dir, step, reason, requested_by?, digest?, witness?, action?}; action may be omitted, 'tombstone', or 'tombstone_page'.",
 			InputSchema: json.RawMessage(`{
   "type": "object",
   "properties": {

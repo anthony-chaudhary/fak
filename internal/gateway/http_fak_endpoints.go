@@ -325,9 +325,10 @@ func (s *Server) handleFakRevoke(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, RevokeResponse{Witness: req.Witness, Evicted: evicted, TrustEpoch: te})
 }
 
-// handleFakContextChange records a safe requester-initiated mutation against a
-// persisted recall core image. The only shipped mutation is a tombstone that
-// suppresses one page from future model-visible recall without deleting evidence.
+// Context changes persist a recall image. The HTTP route cannot hold a lease
+// epoch across that write yet, so it refuses valid mutation requests.
+const contextChangeActFenceRefusal = "fak_context_change requires an act-bound lease"
+
 func (s *Server) handleFakContextChange(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -336,12 +337,7 @@ func (s *Server) handleFakContextChange(w http.ResponseWriter, r *http.Request) 
 	if !decodeRequestBody(w, r, &req) {
 		return
 	}
-	resp, err := s.contextChange(r.Context(), req)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
+	writeErr(w, http.StatusForbidden, contextChangeActFenceRefusal)
 }
 
 // handleFakPolicyReload reloads the configured policy manifest in-place. The

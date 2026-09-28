@@ -56,11 +56,10 @@ A deletion certificate is a portable, re-checkable receipt that binds a bit-exac
 
 ## If I want a memory to be absent from future context, do I delete it from the core image?
 
-You file a tombstone, not a delete: the recall-side analogue of deletion is a negative-only, evidence-preserving tombstone. `Session.RequestContextChange` records a tombstone that suppresses future page-in for resolve, recall, and working-set ranking, but never deletes the CAS bytes or mutates the original page row, so the audit evidence stays intact. The tombstone is written into the manifest's context-changes and re-persisted, so it is durable across reloads. Operator and agent surfaces include `fak debug --cmd tombstone`, the HTTP route `POST /v1/fak/context/change`, and the MCP tool `fak_context_change`.
+You file a tombstone, not a delete: the recall-side analogue of deletion is a negative-only, evidence-preserving tombstone. `Session.RequestContextChange` records a tombstone that suppresses future page-in for resolve, recall, and working-set ranking, but never deletes the CAS bytes or mutates the original page row, so the audit evidence stays intact. The tombstone is written into the manifest's context-changes and re-persisted, so it is durable across reloads. The local `fak debug --cmd tombstone` path remains available. The HTTP route `POST /v1/fak/context/change` and MCP tool `fak_context_change` currently refuse persisted writes until an act-bound lease protects the effect.
 
 ## What happens if the on-disk swap device is tampered with before reload?
 
 A tampered core image fails closed at load: `recall.Load` verifies that every CAS blob hashes to its digest key, and if any blob does not match it refuses the whole image. Because the store is content-addressed, the digest is the identity, so flipping a byte inside a stored blob under its unchanged key is detected. The witness `TestCorruptCASFailsClosed` decodes the CAS, flips a byte inside a stored blob, and asserts the load is rejected. This is the same integrity discipline a deletion certificate uses when it re-derives its anchor row from the journal.
 
 ## Is the recall core image zero-copy, and what is the storage tradeoff?
-

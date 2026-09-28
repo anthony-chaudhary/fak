@@ -5,10 +5,9 @@ description: "Specifies the MCP tool-result envelope and SyscallResponse fields 
 
 # MCP tool-result shape (the `SyscallResponse` wire)
 
-The fak gateway is an MCP server (JSON-RPC 2.0, stdio or `POST /mcp`). Six tools
-route a proposed call or result through the kernel:
+The fak gateway is an MCP server (JSON-RPC 2.0, stdio or `POST /mcp`). These six fak-native tools are among its exposed tools:
 `fak_adjudicate`, `fak_syscall`, `fak_admit`, `fak_changes`, `fak_revoke`,
-`fak_context_change`. Every one returns its payload through the **same MCP
+`fak_context_change`. Successful calls return their payload through the **MCP
 tool-result envelope** (`mcpToolResult` in `internal/gateway/mcp.go`):
 
 ```json
@@ -18,16 +17,17 @@ tool-result envelope** (`mcpToolResult` in `internal/gateway/mcp.go`):
 }
 ```
 
-`isError` is **always `false`**. A deny/quarantine is a successful adjudication —
-the outcome lives in the verdict *inside* the `text`, never in `isError`. A
-JSON-RPC `error` object is reserved for protocol/build faults (bad params,
-unknown tool), not for a refusal.
+In a successful tool result, `isError` is `false`. A kernel deny/quarantine is a
+successful adjudication: its outcome lives in the verdict inside `text`.
+`fak_context_change` currently returns a JSON-RPC error requiring an act-bound
+lease for a valid persisted mutation request; it does not return a success
+envelope or mutate the recall image.
 
 The `text` field is a JSON-encoded document. For `fak_adjudicate` and
 `fak_syscall` (and `fak_admit`) that document is a **`SyscallResponse`**. This
-doc specifies that shape; `fak_changes` / `fak_revoke` / `fak_context_change`
-return their own response structs (`ChangesResponse`, `RevokeResponse`,
-`ContextChangeResponse`) through the identical envelope.
+doc specifies that shape; successful `fak_changes` / `fak_revoke` calls return
+their own response structs (`ChangesResponse`, `RevokeResponse`) through the
+identical envelope.
 
 ## `SyscallResponse` fields
 

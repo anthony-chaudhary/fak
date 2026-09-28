@@ -259,10 +259,10 @@ type SessionResetResponse struct {
 }
 
 // ContextChangeRequest is the body of POST /v1/fak/context/change and the
-// `arguments` of the fak_context_change MCP tool. It is deliberately
-// negative-only: today the only accepted mutation is a tombstone that suppresses
-// one persisted recall page from future model-visible context. The core image's
-// CAS bytes are preserved for audit.
+// `arguments` of the fak_context_change MCP tool. The internal context-change
+// primitive is negative-only, but HTTP and MCP currently refuse its persisted
+// mutation until they can hold an act-bound lease. The core image's CAS bytes
+// remain available for audit.
 type ContextChangeRequest struct {
 	ImageDir    string `json:"image_dir"`
 	Action      string `json:"action,omitempty"`

@@ -1287,12 +1287,12 @@ paths:
   /v1/fak/context/change:
     post:
       tags: [fak-native]
-      summary: Tombstone a recall page
+      summary: Refuse unfenced persisted context changes
       description: |
-        Records a safe, requester-initiated mutation against a persisted recall core
-        image. Deliberately negative-only: today the only accepted mutation is a
-        tombstone that suppresses one persisted recall page from future
-        model-visible context. The core image's CAS bytes are preserved for audit.
+        Currently refuses persisted context changes until an act-bound lease can
+        protect the effect. The internal context-change primitive is negative-only:
+        its tombstone suppresses a recall page from future model-visible context
+        while retaining the page row and CAS bytes for audit.
       requestBody:
         required: true
         content:
@@ -1300,13 +1300,10 @@ paths:
             schema: { $ref: '#/components/schemas/ContextChangeRequest' }
             example: { image_dir: "/srv/fak/core", step: 4, reason: "stale after revoke", action: tombstone }
       responses:
-        '200':
-          description: The applied context-control ledger row.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ContextChangeResponse' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: An act-bound lease is required; the recall image was not mutated.
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
   /v1/fak/cache/posture:

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -2301,7 +2300,7 @@ func TestChatCompletionsInvalidSamplingParamsIsBadRequest(t *testing.T) {
 	}
 }
 
-func TestContextChangeTombstonesRecallImageOverHTTPAndMCP(t *testing.T) {
+func TestContextChangeRoutesFailClosedWithoutActBoundLease(t *testing.T) {
 	srv := newTestServer(t)
 	ctx := context.Background()
 
@@ -2309,44 +2308,71 @@ func TestContextChangeTombstonesRecallImageOverHTTPAndMCP(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	var httpResp ContextChangeResponse
-	code := postJSON(t, ts.URL+"/v1/fak/context/change", ContextChangeRequest{
+	var httpResp struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	httpBody, err := json.Marshal(ContextChangeRequest{
 		ImageDir:    httpDir,
 		Step:        0,
 		Digest:      httpDigest,
 		Reason:      "semantic stale preference",
 		RequestedBy: "agent",
-	}, &httpResp)
-	if code != http.StatusOK {
-		t.Fatalf("POST /v1/fak/context/change = %d, want 200", code)
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if httpResp.Action != string(recall.ContextActionTombstone) || !httpResp.Applied || !httpResp.Tombstoned {
-		t.Fatalf("http context change response not an applied tombstone: %+v", httpResp)
+	r, err := http.Post(ts.URL+"/v1/fak/context/change", "application/json", bytes.NewReader(httpBody))
+	if err != nil {
+		t.Fatal(err)
 	}
-	assertRecallImageTombstoned(t, ctx, httpDir)
+	httpRaw, err := io.ReadAll(r.Body)
+	r.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(httpRaw, &httpResp); err != nil {
+		t.Fatalf("decode context-change refusal: %v (%s)", err, httpRaw)
+	}
+	if r.StatusCode != http.StatusForbidden || !strings.Contains(httpResp.Error.Message, "act-bound lease") {
+		t.Fatalf("POST /v1/fak/context/change = %d, error=%q; want 403 act-bound lease refusal", r.StatusCode, httpResp.Error.Message)
+	}
+	assertRecallImageUnchanged(t, ctx, httpDir)
 
 	mcpDir, mcpDigest := writeRecallImage(t, "gateway-context-mcp")
-	params, _ := json.Marshal(map[string]any{
-		"name": "fak_context_change",
-		"arguments": map[string]any{
-			"image_dir":    mcpDir,
-			"action":       "tombstone",
-			"step":         0,
-			"digest":       mcpDigest,
-			"reason":       "do not rehydrate into future context",
-			"requested_by": "self-audit",
+	mcpBody, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "fak_context_change",
+			"arguments": map[string]any{
+				"image_dir":    mcpDir,
+				"action":       "tombstone",
+				"step":         0,
+				"digest":       mcpDigest,
+				"reason":       "do not rehydrate into future context",
+				"requested_by": "self-audit",
+			},
 		},
 	})
-	res, rerr := srv.callTool(ctx, params)
-	if rerr != nil {
-		t.Fatalf("fak_context_change rpc error: %v", rerr.Message)
+	if err != nil {
+		t.Fatal(err)
 	}
-	var mcpResp ContextChangeResponse
-	decodeMCPText(t, res, &mcpResp)
-	if mcpResp.Action != string(recall.ContextActionTombstone) || !mcpResp.Applied || !mcpResp.Tombstoned {
-		t.Fatalf("mcp context change response not an applied tombstone: %+v", mcpResp)
+	mcpHTTP, err := http.Post(ts.URL+"/mcp", "application/json", bytes.NewReader(mcpBody))
+	if err != nil {
+		t.Fatal(err)
 	}
-	assertRecallImageTombstoned(t, ctx, mcpDir)
+	defer mcpHTTP.Body.Close()
+	var mcpResp rpcDecoded
+	if err := json.NewDecoder(mcpHTTP.Body).Decode(&mcpResp); err != nil {
+		t.Fatal(err)
+	}
+	if mcpHTTP.StatusCode != http.StatusOK || mcpResp.Error == nil || mcpResp.Result != nil || !strings.Contains(mcpResp.Error.Message, "act-bound lease") {
+		t.Fatalf("fak_context_change MCP status=%d response=%+v, want HTTP 200 JSON-RPC error with no result and act-bound lease refusal", mcpHTTP.StatusCode, mcpResp)
+	}
+	assertRecallImageUnchanged(t, ctx, mcpDir)
 }
 
 // ---------------------------------------------------------------------------
@@ -2922,17 +2948,17 @@ func writeRecallImage(t *testing.T, sessionID string) (dir, digest string) {
 	return dir, sess.Manifest.Pages[0].Digest
 }
 
-func assertRecallImageTombstoned(t *testing.T, ctx context.Context, dir string) {
+func assertRecallImageUnchanged(t *testing.T, ctx context.Context, dir string) {
 	t.Helper()
 	sess, err := recall.Load(dir)
 	if err != nil {
-		t.Fatalf("reload tombstoned recall image: %v", err)
+		t.Fatalf("reload unchanged recall image: %v", err)
 	}
-	if !sess.Tombstoned(0) {
-		t.Fatal("reloaded recall image lost the context tombstone")
+	if sess.Tombstoned(0) {
+		t.Fatal("context-change refusal persisted a tombstone")
 	}
-	if _, err := sess.Resolve(ctx, 0); !errors.Is(err, recall.ErrTombstoned) {
-		t.Fatalf("Resolve after context tombstone: want ErrTombstoned, got %v", err)
+	if _, err := sess.Resolve(ctx, 0); err != nil {
+		t.Fatalf("Resolve after context-change refusal: %v", err)
 	}
 }
 
