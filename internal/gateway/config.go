@@ -350,6 +350,14 @@ type Config struct {
 	//
 	// `fak serve` feeds this from --stream-soft-progress-timeout.
 	StreamSoftProgressTimeout time.Duration
+	// FirstTokenWatchdog is the resolved buffered first-token watchdog window: how long a
+	// buffered planner call may run before it produces its completion (its first token)
+	// before the turn fails as a typed 504 upstream_stalled. ZERO (every caller that never
+	// sets it) keeps agent.FirstTokenWatchdogTimeout, the backend-blind 60s default with its
+	// FAK_STREAM_STALL_TIMEOUT_S override. `fak serve` feeds this from
+	// agent.ResolveFirstTokenWatchdog so a CPU-backend in-kernel chat defaults to
+	// agent.CPUBackendFirstTokenWatchdogTimeout while an explicit override still wins.
+	FirstTokenWatchdog time.Duration
 	// PinUpstreamCredential makes the gateway authenticate the upstream with its OWN
 	// configured APIKey and IGNORE the inbound client's credential — the subscription
 	// path, where fak holds the real OAuth token and the wrapped client only sends a

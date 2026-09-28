@@ -579,9 +579,10 @@ type Server struct {
 	kvStatsCache agent.KVMemoryStats
 	kvStatsAt    time.Time
 	kvStatsValid bool
-	// firstTokenWatchdog resolves the buffered first-token watchdog window. nil (the
-	// production default) means agent.FirstTokenWatchdogTimeout; an in-package test
-	// overrides it to a short window. Unexported and config-free by design.
+	// firstTokenWatchdog resolves the buffered first-token watchdog window. nil means
+	// agent.FirstTokenWatchdogTimeout; New sets it from a positive Config.FirstTokenWatchdog
+	// (the backend-aware window `fak serve` resolves), and an in-package test may override
+	// it to a short window.
 	firstTokenWatchdog func() time.Duration
 	// servedSide is the deployment-constant serving locality selectChatPlanner
 	// resolved for the deployments that do NOT proxy: self-hosted for the in-kernel

@@ -115,11 +115,62 @@ func IsFirstTokenStall(err error) bool {
 	return errors.As(err, &e) && e.Kind == stallKindFirstToken
 }
 
-// FirstTokenWatchdogTimeout is the bounded first-token window for the buffered completion
-// path. It reuses the stream idle window (FAK_STREAM_STALL_TIMEOUT_S, default 60s, clamped
-// [5s,600s]) so the buffered and streaming paths share one operator-tunable deadline and no
-// second knob can drift from it.
-func FirstTokenWatchdogTimeout() time.Duration { return streamStallTimeout() }
+// FirstTokenWatchdogTimeout is the backend-blind first-token window for the buffered
+// completion path. It reuses the stream idle window (FAK_STREAM_STALL_TIMEOUT_S, default 60s,
+// band [5s,600s]) so the buffered and streaming paths share one operator-tunable deadline and
+// no second knob can drift from it. A server that knows its chat decodes on the CPU backend
+// resolves a backend-aware default through ResolveFirstTokenWatchdog instead.
+func FirstTokenWatchdogTimeout() time.Duration {
+	d, _ := ResolveFirstTokenWatchdog(false)
+	return d
+}
+
+// CPUBackendFirstTokenWatchdogTimeout is the buffered first-token window a server defaults to
+// when its in-kernel chat decodes on the CPU backend. A cold or long prompt against a large
+// model on a CPU backend (for example a ~30 GiB resident Q4K model on an integrated-APU host)
+// legitimately needs minutes of prefill before its first token, so the 60s backend-blind
+// default aborted the very first real request as upstream_stalled. It is pinned to the top of
+// the FAK_STREAM_STALL_TIMEOUT_S band (streamStallMaxS): the largest window the operator knob
+// itself could ask for, so the default never exceeds what an explicit override may express.
+const CPUBackendFirstTokenWatchdogTimeout = streamStallMaxS * time.Second
+
+// FirstTokenWatchdogSource names where an effective first-token window came from, so a
+// server can print the window together with the reason it has that value.
+type FirstTokenWatchdogSource string
+
+const (
+	// FirstTokenWatchdogSourceEnv: an in-band FAK_STREAM_STALL_TIMEOUT_S override.
+	FirstTokenWatchdogSourceEnv FirstTokenWatchdogSource = "env"
+	// FirstTokenWatchdogSourceCPUBackend: no override; the chat decodes on the CPU backend.
+	FirstTokenWatchdogSourceCPUBackend FirstTokenWatchdogSource = "cpu-backend default"
+	// FirstTokenWatchdogSourceDefault: no override; the backend-blind stream idle default.
+	FirstTokenWatchdogSourceDefault FirstTokenWatchdogSource = "default"
+)
+
+// ResolveFirstTokenWatchdog resolves the buffered first-token window and its source. An
+// in-band FAK_STREAM_STALL_TIMEOUT_S always wins, with the same band semantics as the stream
+// idle deadline (a value outside [5s,600s] or unparseable is ignored, never clamped). Absent
+// an override, a CPU-backend chat gets CPUBackendFirstTokenWatchdogTimeout and every other
+// deployment keeps the 60s stream idle default exactly.
+//
+// Only the FIRST-TOKEN window is backend-aware. The inter-byte stall deadline
+// (streamStallTimeout) guards HTTP upstream reads, never the in-kernel CPU decode, so it
+// keeps its 60s default and upstream stall detection is not loosened.
+func ResolveFirstTokenWatchdog(cpuBackend bool) (time.Duration, FirstTokenWatchdogSource) {
+	return resolveFirstTokenWatchdog(os.Getenv("FAK_STREAM_STALL_TIMEOUT_S"), cpuBackend)
+}
+
+// resolveFirstTokenWatchdog is ResolveFirstTokenWatchdog with the environment value injected,
+// so the resolution rule is provable without mutating process state.
+func resolveFirstTokenWatchdog(envValue string, cpuBackend bool) (time.Duration, FirstTokenWatchdogSource) {
+	if d, ok := parseBandedSeconds(envValue, streamStallMinS, streamStallMaxS); ok {
+		return d, FirstTokenWatchdogSourceEnv
+	}
+	if cpuBackend {
+		return CPUBackendFirstTokenWatchdogTimeout, FirstTokenWatchdogSourceCPUBackend
+	}
+	return defaultStreamStallTimeout, FirstTokenWatchdogSourceDefault
+}
 
 // SoftProgressStall is the evidence a soft no-progress deadline hands to its observer BEFORE
 // any destructive recovery (#10638). It mirrors the sanitized facts the offline audit consumes
@@ -384,8 +435,17 @@ func (s *stallReader) Close() error {
 // still emitting is never tripped. The ceiling is 600s because a window longer than the
 // whole-request timeout could never fire.
 func streamStallTimeout() time.Duration {
-	return envClampedTimeout("FAK_STREAM_STALL_TIMEOUT_S", 60*time.Second, 5, 600)
+	return envClampedTimeout("FAK_STREAM_STALL_TIMEOUT_S", defaultStreamStallTimeout, streamStallMinS, streamStallMaxS)
 }
+
+// defaultStreamStallTimeout and the [streamStallMinS, streamStallMaxS] band are the single
+// source of truth for FAK_STREAM_STALL_TIMEOUT_S, shared by the inter-byte stall deadline
+// and the first-token watchdog resolution so the two cannot drift.
+const (
+	defaultStreamStallTimeout = 60 * time.Second
+	streamStallMinS           = 5
+	streamStallMaxS           = 600
+)
 
 // streamMaxDuration is the absolute total-duration deadline for a streamed turn.
 // Default OFF (0 = no deadline). When set via FAK_STREAM_MAX_DURATION_S, it is clamped
@@ -507,10 +567,21 @@ func openAIChunkAdvancesTurn(c openAIStreamChunk) bool {
 // unset/unparseable, and accepting the override only when it lands in [minS, maxS] seconds.
 // Shared by the planner whole-request timeout and the stream idle-read deadline.
 func envClampedTimeout(key string, def time.Duration, minS, maxS int) time.Duration {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= minS && n <= maxS {
-			return time.Duration(n) * time.Second
-		}
+	if d, ok := parseBandedSeconds(os.Getenv(key), minS, maxS); ok {
+		return d
 	}
 	return def
+}
+
+// parseBandedSeconds parses a whole-second value and reports whether it is set, parseable,
+// and inside [minS, maxS]. Anything else reports false so the caller keeps its default.
+func parseBandedSeconds(v string, minS, maxS int) (time.Duration, bool) {
+	if v == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < minS || n > maxS {
+		return 0, false
+	}
+	return time.Duration(n) * time.Second, true
 }

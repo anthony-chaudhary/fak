@@ -376,6 +376,12 @@ func New(cfg Config) (*Server, error) {
 	// is up.
 	s.loops = newBgloopSupervisor(s)
 
+	// A positive Config.FirstTokenWatchdog pins the buffered first-token window `fak serve`
+	// resolved for its chat backend; zero keeps the agent default read per call.
+	if window := cfg.FirstTokenWatchdog; window > 0 {
+		s.firstTokenWatchdog = func() time.Duration { return window }
+	}
+
 	var anchor int
 	if cfg.CompactAnchorHead {
 		anchor = 1
@@ -1526,10 +1532,12 @@ func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, mes
 // completeWithFirstTokenWatchdog runs the buffered planner call under a bounded FIRST-TOKEN
 // window. A buffered completion writes no byte until completeServed returns, so for a
 // buffered turn the first token IS the completion — there is nothing else to observe while
-// the planner prefill runs. The window is the streaming default (agent.FirstTokenWatchdogTimeout),
-// so a wedged or slow-prefill planner fails loud as a typed UpstreamStalledError{first-token}
-// (mapped by upstreamErrorStatus to the same 504 upstream_stalled surface) instead of hanging
-// silently for the whole planner timeout.
+// the planner prefill runs. The window is Config.FirstTokenWatchdog when set (the
+// backend-aware window `fak serve` resolves, 600s for a CPU-backend in-kernel chat), else the
+// streaming default (agent.FirstTokenWatchdogTimeout), so a wedged or slow-prefill planner
+// fails loud as a typed UpstreamStalledError{first-token} (mapped by upstreamErrorStatus to
+// the same 504 upstream_stalled surface) instead of hanging silently for the whole planner
+// timeout.
 //
 // The planner call stays on the CALLING goroutine — it must not move to a watchdog goroutine,
 // because complete's recover re-panics non-evict panics for the outermost withMetrics handler

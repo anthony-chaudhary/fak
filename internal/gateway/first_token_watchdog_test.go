@@ -165,3 +165,57 @@ func TestFirstTokenWatchdogDefaultWindowIsConservative(t *testing.T) {
 		// Expected: the 60s default has not elapsed, so the request is still in flight.
 	}
 }
+
+// TestFirstTokenWatchdogConfigWindowReachesWatchdog proves Config.FirstTokenWatchdog (the
+// backend-aware window `fak serve` resolves) is the window the buffered watchdog enforces:
+// a positive value pins it, and zero leaves the per-call agent default in charge.
+func TestFirstTokenWatchdogConfigWindowReachesWatchdog(t *testing.T) {
+	unset := newTestServerWithConfig(t, Config{EngineID: "test", Model: "test-model", VDSO: true})
+	if unset.firstTokenWatchdog != nil {
+		t.Fatal("zero Config.FirstTokenWatchdog must leave the agent default in charge")
+	}
+
+	pinned := newTestServerWithConfig(t, Config{EngineID: "test", Model: "test-model", VDSO: true, FirstTokenWatchdog: agent.CPUBackendFirstTokenWatchdogTimeout})
+	if pinned.firstTokenWatchdog == nil || pinned.firstTokenWatchdog() != agent.CPUBackendFirstTokenWatchdogTimeout {
+		t.Fatalf("Config.FirstTokenWatchdog=%s did not reach the watchdog seam", agent.CPUBackendFirstTokenWatchdogTimeout)
+	}
+
+	planner := newCollectivePlanner("test-model", "never delivered", nil)
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(planner.release) }) }
+	srv := newTestServerWithConfig(t, Config{EngineID: "test", Model: "test-model", VDSO: true, FirstTokenWatchdog: 150 * time.Millisecond})
+	srv.planner = planner
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	t.Cleanup(release)
+
+	body, err := json.Marshal(map[string]any{
+		"model":    "test-model",
+		"messages": []map[string]string{{"role": "user", "content": "wedge the prefill"}},
+		"stream":   false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *http.Response, 1)
+	go func() {
+		resp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
+		if err != nil {
+			done <- nil
+			return
+		}
+		done <- resp
+	}()
+	select {
+	case resp := <-done:
+		if resp == nil {
+			t.Fatal("non-streaming request failed at the transport")
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusGatewayTimeout {
+			t.Fatalf("status = %d, want 504 from the Config-pinned first-token window", resp.StatusCode)
+		}
+	case <-time.After(firstTokenWatchdogBudget):
+		t.Fatal("Config-pinned first-token window never fired")
+	}
+}
