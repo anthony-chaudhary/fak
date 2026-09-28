@@ -166,6 +166,30 @@ const (
 	bbLatencyMinSpeedup = 1.0
 )
 
+// jsonRoundTripReport is one operation of the JSON comparator: build a subagent
+// report, serialize it, and parse it back. It returns the serialized bytes so the
+// deliberately regressed Blackboard path can carry exactly the comparator's own
+// per-operation work.
+func jsonRoundTripReport(subagentID string) []byte {
+	report := SubagentReportPayload{
+		SubagentID: subagentID,
+		Topic:      "benchmark:json",
+		Epoch:      1,
+		Content:    "simulated artifact content from worker",
+		Metadata:   map[string]string{"key": "value"},
+		Timestamp:  "2026-09-05T12:00:00Z",
+	}
+	data, err := json.Marshal(report)
+	if err != nil {
+		panic(err)
+	}
+	var parsed SubagentReportPayload
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		panic(err)
+	}
+	return data
+}
+
 // measureJSONLatency runs the JSON serialize/parse comparator for one trial and
 // returns its wall-clock duration for totalOps operations.
 func measureJSONLatency() time.Duration {
@@ -177,22 +201,7 @@ func measureJSONLatency() time.Duration {
 			defer wg.Done()
 			idStr := fmt.Sprintf("worker-%d", workerID)
 			for i := 0; i < bbLatencyOpsPerWorker; i++ {
-				report := SubagentReportPayload{
-					SubagentID: idStr,
-					Topic:      "benchmark:json",
-					Epoch:      1,
-					Content:    "simulated artifact content from worker",
-					Metadata:   map[string]string{"key": "value"},
-					Timestamp:  "2026-09-05T12:00:00Z",
-				}
-				data, err := json.Marshal(report)
-				if err != nil {
-					panic(err)
-				}
-				var parsed SubagentReportPayload
-				if err := json.Unmarshal(data, &parsed); err != nil {
-					panic(err)
-				}
+				_ = jsonRoundTripReport(idStr)
 			}
 		}(w)
 	}
@@ -202,8 +211,16 @@ func measureJSONLatency() time.Duration {
 
 // measureBlackboardLatency runs the Blackboard zero-copy pointer-sharing path
 // for one trial and returns its wall-clock duration for totalOps operations.
-// When slow is true it adds a deliberate per-operation delay so the acceptance
-// rule can be proven regression-sensitive.
+//
+// When slow is true the path deliberately loses zero-copy — the regression the
+// acceptance rule exists to catch: every publish carries a freshly serialized
+// copy of the report (the comparator's own serialize/parse round-trip, verbatim)
+// and every lookup parses its own copy back out. The injected cost is CPU work
+// that is a strict superset of the comparator's, so it scales with core count
+// and GOMAXPROCS exactly as the comparator does. A per-operation time.Sleep did
+// not: the 20 workers' sleeps overlap in wall-clock time and burn no CPU, so on a
+// 2-core runner the CPU-bound JSON comparator was the slower side and the
+// "regressed" Blackboard still won by ~1-3x, failing the control on every run.
 func measureBlackboardLatency(slow bool) time.Duration {
 	bb := ctxmmu.NewBlackboard()
 	sharedRef := &abi.Ref{
@@ -221,17 +238,32 @@ func measureBlackboardLatency(slow bool) time.Duration {
 		go func(workerID int) {
 			defer wg.Done()
 			topic := fmt.Sprintf("bench:worker-%d", workerID)
+			idStr := fmt.Sprintf("worker-%d", workerID)
 			for i := 0; i < bbLatencyOpsPerWorker; i++ {
+				ref := sharedRef
 				if slow {
-					time.Sleep(5 * time.Microsecond)
+					data := jsonRoundTripReport(idStr)
+					ref = &abi.Ref{
+						Kind:   abi.RefInline,
+						Inline: data,
+						Len:    int64(len(data)),
+						Taint:  abi.TaintTrusted,
+						Scope:  abi.ScopeAgent,
+					}
 				}
-				id, err := bb.Publish(topic, sharedRef, 1, nil)
+				id, err := bb.Publish(topic, ref, 1, nil)
 				if err != nil {
 					panic(err)
 				}
 				entry, ok := bb.Lookup(id)
 				if !ok || entry == nil || entry.Ref == nil {
 					panic(fmt.Sprintf("bb.Lookup failed for %s", id))
+				}
+				if slow {
+					var parsed SubagentReportPayload
+					if err := json.Unmarshal(entry.Ref.Inline, &parsed); err != nil {
+						panic(err)
+					}
 				}
 				_ = entry.Ref.Inline
 			}
@@ -254,6 +286,23 @@ func minDuration(ds []time.Duration) time.Duration {
 	return min
 }
 
+// measureBlackboardSpeedup is the acceptance measurement: bbLatencyTrials
+// interleaved trials of the JSON comparator and the Blackboard path (deliberately
+// regressed when slow is true), reduced to the fastest trial of each and their
+// ratio. The healthy test and its regression control both call it, so the
+// control exercises exactly the comparison the acceptance rule applies.
+func measureBlackboardSpeedup(slow bool) (minJSON, minBB time.Duration, speedup float64) {
+	jsonDurations := make([]time.Duration, bbLatencyTrials)
+	bbDurations := make([]time.Duration, bbLatencyTrials)
+	for trial := 0; trial < bbLatencyTrials; trial++ {
+		jsonDurations[trial] = measureJSONLatency()
+		bbDurations[trial] = measureBlackboardLatency(slow)
+	}
+	minJSON = minDuration(jsonDurations)
+	minBB = minDuration(bbDurations)
+	return minJSON, minBB, float64(minJSON) / float64(minBB)
+}
+
 func TestBlackboard_ZeroCopyVsJSONLatency(t *testing.T) {
 	// Sampling envelope: bbLatencyTrials independent trials of the same
 	// concurrent workload; the fastest trial of each path is compared. The
@@ -261,18 +310,9 @@ func TestBlackboard_ZeroCopyVsJSONLatency(t *testing.T) {
 	// is stable under representative suite load while a real slow-path
 	// regression (fastest Blackboard trial no longer beating fastest JSON) still
 	// fails.
-	jsonDurations := make([]time.Duration, bbLatencyTrials)
-	bbDurations := make([]time.Duration, bbLatencyTrials)
-	for trial := 0; trial < bbLatencyTrials; trial++ {
-		jsonDurations[trial] = measureJSONLatency()
-		bbDurations[trial] = measureBlackboardLatency(false)
-	}
-
-	minJSON := minDuration(jsonDurations)
-	minBB := minDuration(bbDurations)
+	minJSON, minBB, speedup := measureBlackboardSpeedup(false)
 	minJSONLatency := minJSON / time.Duration(bbLatencyTotalOps)
 	minBBLatency := minBB / time.Duration(bbLatencyTotalOps)
-	speedup := float64(minJSON) / float64(minBB)
 
 	t.Logf("=== %d Simulated Concurrent Workers Latency Comparison (fastest of %d trials) ===",
 		bbLatencyWorkers, bbLatencyTrials)
@@ -291,18 +331,19 @@ func TestBlackboard_ZeroCopyVsJSONLatency(t *testing.T) {
 }
 
 // TestBlackboard_LatencyGuardRejectsRegression proves the acceptance rule above
-// is regression-sensitive: a deliberately slowed Blackboard path must fail the
-// same speedup comparison that the healthy path passes.
+// is regression-sensitive: a Blackboard path that has lost zero-copy (it now
+// serializes and parses the payload on every hop) must fail the same
+// fastest-of-N speedup comparison that the healthy path passes, on any core
+// count.
 func TestBlackboard_LatencyGuardRejectsRegression(t *testing.T) {
-	jsonDur := measureJSONLatency()
-	slowBB := measureBlackboardLatency(true)
-	speedup := float64(jsonDur) / float64(slowBB)
+	minJSON, minSlowBB, speedup := measureBlackboardSpeedup(true)
 
 	if speedup >= bbLatencyMinSpeedup {
-		t.Fatalf("guard failed to reject an intentional slow-path regression: speedup %.2fx >= floor %.1fx",
-			speedup, bbLatencyMinSpeedup)
+		t.Fatalf("guard failed to reject an intentional slow-path regression: speedup %.2fx >= floor %.1fx (regressed blackboard %v vs json %v)",
+			speedup, bbLatencyMinSpeedup, minSlowBB, minJSON)
 	}
-	t.Logf("intentional slow-path control correctly rejected: speedup %.2fx < floor %.1fx", speedup, bbLatencyMinSpeedup)
+	t.Logf("intentional slow-path control correctly rejected: speedup %.2fx < floor %.1fx (regressed blackboard %v vs json %v)",
+		speedup, bbLatencyMinSpeedup, minSlowBB, minJSON)
 }
 
 func BenchmarkJSONSerialization_20Workers(b *testing.B) {
