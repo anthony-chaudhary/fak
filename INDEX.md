@@ -299,6 +299,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [2026-09-28: AGENTS.md sectioned loader, wiring estimate (#3535)](docs/notes/2026-09-28-agents-md-sectioned-loader-estimate.md) -- auto-indexed dated note.
 - [2026-09-19 — V4.1 native track: promoted the O(E log k) partial top-k into the V4 router seam (#12975), landed and closed](docs/notes/2026-09-19-v41-12975-partial-top-k-landed.md) -- auto-indexed dated note.
 - [`docs/notes/CONCEPT-STUDY-AZHU9701-NINFER-4090D-2026-09-03.md`](docs/notes/CONCEPT-STUDY-AZHU9701-NINFER-4090D-2026-09-03.md) — pinned deep study of Azhu9701/ninfer-4090d@3eaa163: a Windows RTX 4090 D inference deployment dossier whose headline 114-SM wave-grid / DirectStorage 1.3 / E8-lattice KV claims are unverified README prose (no engine source in-repo, no license), with two genuine artifacts — a restart-based load-adaptive draft-depth controller and a tool-call-drift salvage patch; dynamic MTP depth is PRESENT-on-axis in fak, while lax parameter salvage is PARTIAL and filed as #12944; parent #10193, portfolio #10960.
 - [Three-Tree Synchronization Invariants and Multi-Node Safe Sync Rules](docs/notes/SAFE-SYNC-THREE-TREE-INVARIANTS-2026-09-09.md) -- auto-indexed dated note.
