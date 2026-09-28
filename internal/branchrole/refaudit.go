@@ -260,7 +260,9 @@ var refClassByExactPath = map[string]string{
 	"internal/closureaudit/acceptance.go":                            RefClassDevelopmentSource,
 	"internal/fleettrend/fleettrend.go":                              RefClassDevelopmentSource,
 	"internal/rsl/rsl.go":                                            RefClassDevelopmentSource,
+	"internal/validate/validate.go":                                  RefClassDevelopmentSource,
 	"internal/versionskew/versionskew.go":                            RefClassDevelopmentSource,
+	"internal/workerworktree/land.go":                                RefClassDevelopmentSource,
 	"internal/modelroute/testdata/issue_audit_bundle_real_3851.json": RefClassFixture,
 	"tools/concept_disambiguation_scorecard.data/rows-witness-proof-20260709.json": RefClassFixture,
 
