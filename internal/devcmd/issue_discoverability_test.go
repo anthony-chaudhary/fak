@@ -72,8 +72,20 @@ demo
 `
 }
 
+// validDispatchableDraftBody is validDispatchableIssueBody filed as a new
+// draft (no issue number). issuepolicy.ReviewIssueDraft requires exactly one
+// `Process cause:` declaration on an unnumbered draft
+// (ISSUE_PROCESS_CAUSE_INVALID), so a draft that should audit as dispatchable
+// carries one. The bare body stays cause-free for the tests that pin the
+// missing-cause refusal (issue_create_process_cause_test.go).
+func validDispatchableDraftBody(lane string, paths []string, steps int) string {
+	return "Process cause: none\n\n" + validDispatchableIssueBody(lane, paths, steps)
+}
+
 func validSerialIssueBody() string {
-	return `## Working spine
+	return `Process cause: none
+
+## Working spine
 Update ABI frozen types
 
 ## Current state
@@ -132,7 +144,7 @@ demo
 }
 
 func TestIssueDiscoverabilityParallelWaveDispatchable(t *testing.T) {
-	body := validDispatchableIssueBody("compute", []string{"internal/compute/kernel.go"}, 4)
+	body := validDispatchableDraftBody("compute", []string{"internal/compute/kernel.go"}, 4)
 	var stdout, stderr bytes.Buffer
 	code := runIssueDiscoverability(&stdout, &stderr, []string{
 		"--title", "feat(compute): optimize kernel",
@@ -403,7 +415,7 @@ func TestIssueDiscoverabilityFileAndFromIssues(t *testing.T) {
 
 	// 1. Markdown file via --body-file / --file
 	mdPath := filepath.Join(dir, "draft.md")
-	mdContent := "# feat(compute): speedup kernel\n\n" + validDispatchableIssueBody("compute", []string{"internal/compute/kernel.go"}, 4)
+	mdContent := "# feat(compute): speedup kernel\n\n" + validDispatchableDraftBody("compute", []string{"internal/compute/kernel.go"}, 4)
 	if err := os.WriteFile(mdPath, []byte(mdContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -517,7 +529,7 @@ func TestIssueDiscoverabilityFlagsValidation(t *testing.T) {
 }
 
 func TestIssueDiscoverabilityRoutedViaRunIssue(t *testing.T) {
-	body := validDispatchableIssueBody("compute", []string{"internal/compute/kernel.go"}, 4)
+	body := validDispatchableDraftBody("compute", []string{"internal/compute/kernel.go"}, 4)
 	var stdout, stderr bytes.Buffer
 	code := RunIssue(&stdout, &stderr, []string{
 		"discoverability",
