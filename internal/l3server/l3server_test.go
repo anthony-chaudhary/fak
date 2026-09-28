@@ -61,12 +61,85 @@ func TestL3ServerLifecycle(t *testing.T) {
 }
 
 func TestL3ServerDefaultConfig(t *testing.T) {
+	// The real default is appliance-sized (512 GB on Linux) and NewServer
+	// commits every slab byte up front (MAP_POPULATE), which OOM-kills a CI
+	// runner. Exercise the nil-config path through the seam with the defaults
+	// bounded to a test-sized budget.
+	orig := defaultConfig
+	t.Cleanup(func() { defaultConfig = orig })
+	calls := 0
+	defaultConfig = func() config.Config {
+		calls++
+		cfg := orig()
+		cfg.NumShards = 2
+		cfg.MaxMemoryGB = 1
+		return cfg
+	}
+
 	srv, err := NewServer(nil)
 	if err != nil {
 		t.Fatalf("NewServer with nil config failed: %v", err)
 	}
 	if srv == nil {
 		t.Fatal("expected non-nil server")
+	}
+	t.Cleanup(func() { _ = srv.Stop(context.Background()) })
+
+	if calls != 1 {
+		t.Fatalf("expected nil config to resolve through defaultConfig once, got %d calls", calls)
+	}
+	want := config.DefaultConfig()
+	if srv.cfg == nil {
+		t.Fatal("expected server to retain the defaulted config")
+	}
+	if srv.cfg.EvictionPolicy != want.EvictionPolicy || srv.cfg.MaxKeys != want.MaxKeys {
+		t.Fatalf("nil config did not resolve to DefaultConfig: eviction=%q max_keys=%d, want %q/%d",
+			srv.cfg.EvictionPolicy, srv.cfg.MaxKeys, want.EvictionPolicy, want.MaxKeys)
+	}
+	if srv.mgrCfg.MaxMemoryGB != 1 || srv.mgrCfg.NumShards != 2 {
+		t.Fatalf("manager config not derived from defaulted config: %+v", srv.mgrCfg)
+	}
+}
+
+// TestL3ServerStopReleasesUnstartedServer pins the CI OOM fix: NewServer
+// commits the shard slabs, so Stop on a never-started server must release them
+// rather than no-op, and a redundant Stop afterwards stays a no-op.
+func TestL3ServerStopReleasesUnstartedServer(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.NumShards = 2
+	cfg.MaxMemoryGB = 1
+
+	srv, err := NewServer(&cfg)
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
+	if srv.ShardManager() == nil {
+		t.Fatal("expected NewServer to provision a shard manager")
+	}
+
+	ctx := context.Background()
+	if err := srv.Stop(ctx); err != nil {
+		t.Fatalf("Stop on unstarted server failed: %v", err)
+	}
+	if srv.ShardManager() != nil {
+		t.Fatal("expected Stop to release the unstarted server's shard manager")
+	}
+	if srv.Status() != StatusStopped {
+		t.Fatalf("expected StatusStopped, got %v", srv.Status())
+	}
+	if err := srv.Stop(ctx); err != nil {
+		t.Fatalf("redundant Stop failed: %v", err)
+	}
+
+	// The released server can still be started; Start re-provisions.
+	if err := srv.Start(ctx); err != nil {
+		t.Fatalf("Start after releasing Stop failed: %v", err)
+	}
+	if srv.ShardManager() == nil {
+		t.Fatal("expected Start to re-provision a shard manager")
+	}
+	if err := srv.Stop(ctx); err != nil {
+		t.Fatalf("final Stop failed: %v", err)
 	}
 }
 

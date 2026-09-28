@@ -16,6 +16,8 @@ func TestBenchmarkRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServer failed: %v", err)
 	}
+	// NewServer commits the slab memory; release it before the next test.
+	t.Cleanup(func() { _ = srv.Stop(context.Background()) })
 	if srv.Version() == "" {
 		t.Fatal("expected non-empty version")
 	}
@@ -33,6 +35,11 @@ func BenchmarkL3ServerInitialization(b *testing.B) {
 			b.Fatalf("NewServer failed: %v", err)
 		}
 		_ = srv.Version()
+		// Release the committed slabs outside the timed region so b.N
+		// iterations do not accumulate b.N GB of resident memory.
+		b.StopTimer()
+		_ = srv.Stop(context.Background())
+		b.StartTimer()
 	}
 }
 
@@ -76,6 +83,7 @@ func BenchmarkL3ServerStatus(b *testing.B) {
 	if err != nil {
 		b.Fatalf("NewServer failed: %v", err)
 	}
+	b.Cleanup(func() { _ = srv.Stop(context.Background()) })
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

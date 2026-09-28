@@ -43,10 +43,19 @@ type Server struct {
 	startedAt    time.Time
 }
 
+// defaultConfig supplies the configuration NewServer uses when given nil. It is
+// a package seam so tests can exercise the nil-config path without provisioning
+// the appliance-sized default (512 GB on Linux, fully committed up front by the
+// MAP_POPULATE slab regions).
+var defaultConfig = config.DefaultConfig
+
 // NewServer constructs an initialized L3 cache server from configuration.
+//
+// NewServer provisions (and on Linux commits) every shard's slab memory; call
+// Stop to release it even if the server is never started.
 func NewServer(cfg *config.Config) (*Server, error) {
 	if cfg == nil {
-		def := config.DefaultConfig()
+		def := defaultConfig()
 		cfg = &def
 	}
 
@@ -119,13 +128,15 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Stop initiates graceful termination of all shards and frees memory mappings.
 // Stop is idempotent: a Stop on an already-stopped server is a no-op, and the
-// released manager is dropped so the next Start provisions a fresh one.
+// released manager is dropped so the next Start provisions a fresh one. A
+// server that was constructed but never started still holds the shard
+// allocators NewServer provisioned, so Stop releases those too.
 func (s *Server) Stop(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	curr := s.status.Load().(ServerStatus)
-	if curr == StatusStopped {
+	if curr == StatusStopped && s.shardManager == nil {
 		return nil
 	}
 
