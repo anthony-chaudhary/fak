@@ -16,6 +16,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -115,6 +116,30 @@ func cronRunEffectiveTimeout(requested, interruptCeiling time.Duration) (time.Du
 		return interruptCeiling, nil
 	}
 	return requested, nil
+}
+
+// cronChildEnvForWorkdir is the environment for a cron child that runs in
+// workdir: the launcher's environment plus extra, without any PWD or OLDPWD
+// (names compared case-insensitively, as Windows does), and with PWD naming
+// the absolute workdir. exec.Cmd.Dir moves only the child's cwd; os/exec
+// rewrites PWD only off Windows and only when Env is nil, so a Git Bash
+// launcher's PWD would still name the launcher's directory. opencode trusts
+// PWD over its cwd: it boots a second instance for that directory and never
+// exits after its turn.
+func cronChildEnvForWorkdir(workdir string, extra []string) []string {
+	if abs, err := filepath.Abs(workdir); err == nil {
+		workdir = abs
+	}
+	base := append(os.Environ(), extra...)
+	env := make([]string, 0, len(base)+1)
+	for _, kv := range base {
+		name, _, _ := strings.Cut(kv, "=")
+		if strings.EqualFold(name, "PWD") || strings.EqualFold(name, "OLDPWD") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	return append(env, "PWD="+workdir)
 }
 
 // runCronRun implements `fak cron run`.
@@ -339,6 +364,7 @@ func runCronRun(stdout, stderr io.Writer, argv []string) int {
 	configureDispatchHelperCommand(c)
 	if *workdir != "" {
 		c.Dir = *workdir
+		c.Env = cronChildEnvForWorkdir(*workdir, nil)
 	}
 	c.Stdout = stdout
 	c.Stderr = stderr

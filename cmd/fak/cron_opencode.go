@@ -222,8 +222,8 @@ func cronProbeOpenCodeVersion(cmdName string, workdir string, env []string) stri
 	configureDispatchHelperCommand(c)
 	if workdir != "" {
 		c.Dir = workdir
-	}
-	if len(env) > 0 {
+		c.Env = cronChildEnvForWorkdir(workdir, env)
+	} else if len(env) > 0 {
 		c.Env = append(os.Environ(), env...)
 	}
 	out, err := c.Output()
@@ -547,8 +547,8 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 		configureDispatchHelperCommand(c)
 		if opts.Workdir != "" {
 			c.Dir = opts.Workdir
-		}
-		if len(opts.Env) > 0 {
+			c.Env = cronChildEnvForWorkdir(opts.Workdir, opts.Env)
+		} else if len(opts.Env) > 0 {
 			c.Env = append(os.Environ(), opts.Env...)
 		}
 
