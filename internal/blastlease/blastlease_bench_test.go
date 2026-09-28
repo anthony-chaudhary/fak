@@ -3,9 +3,11 @@ package blastlease_test
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -85,7 +87,10 @@ func BenchmarkLive(b *testing.B) {
 	ctx := context.Background()
 	t0 := time.Now()
 
-	for i := 0; i < 20; i++ {
+	// leaseCount is the fixture size: Live must return every lease acquired
+	// below, so the len() checks assert against the acquired count itself.
+	const leaseCount = 20
+	for i := 0; i < leaseCount; i++ {
 		rec := leaseref.Record{
 			ID:          fmt.Sprintf("lane-%02d", i),
 			TreeGlobs:   []string{fmt.Sprintf("internal/pkg%d/**", i), fmt.Sprintf("cmd/pkg%d/**", i)},
@@ -104,8 +109,8 @@ func BenchmarkLive(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Live failed: %v", err)
 	}
-	if len(initial) != 20 {
-		b.Fatalf("Live returned %d leases, want 20", len(initial))
+	if len(initial) != leaseCount {
+		b.Fatalf("Live returned %d leases, want %d", len(initial), leaseCount)
 	}
 
 	b.ReportAllocs()
@@ -115,16 +120,17 @@ func BenchmarkLive(b *testing.B) {
 		if err != nil {
 			b.Fatalf("Live failed: %v", err)
 		}
-		if len(leases) != 20 {
-			b.Fatalf("Live returned %d leases, want 20", len(leases))
+		if len(leases) != leaseCount {
+			b.Fatalf("Live returned %d leases, want %d", len(leases), leaseCount)
 		}
 	}
 }
 
 func TestAllocationBudget(t *testing.T) {
 	dir := t.TempDir()
+	const records = 10
 	path := filepath.Join(dir, "leases_10.jsonl")
-	data := generateSyntheticJSONL(10)
+	data := generateSyntheticJSONL(records)
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
@@ -134,12 +140,12 @@ func TestAllocationBudget(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Read failed: %v", err)
 		}
-		if len(leases) != 10 {
-			t.Fatalf("got %d leases, want 10", len(leases))
+		if len(leases) != records {
+			t.Fatalf("got %d leases, want %d", len(leases), records)
 		}
 	})
 
-	t.Logf("Read 10 records allocations per run: %.1f", allocs)
+	t.Logf("Read %d records allocations per run: %.1f", records, allocs)
 	const maxBudget = 40.0
 	if allocs > maxBudget {
 		t.Fatalf("allocations per run %.1f exceeds budget %.1f", allocs, maxBudget)
@@ -193,27 +199,59 @@ func TestReadThroughputLinear(t *testing.T) {
 		_, _ = blastlease.Read(path1000)
 	}
 
-	// Verify runtime throughput scaling: 1000 records (10x) should scale ~10x, well below 30x
-	const iters = 50
-	t0 := time.Now()
-	for i := 0; i < iters; i++ {
-		if _, err := blastlease.Read(path100); err != nil {
+	// Verify runtime throughput scaling: one Read of 1000 records (10x workload)
+	// should take ~10x one Read of 100 records, well below maxLinearRatio.
+	//
+	// Sampling envelope: a single back-to-back timing of each size is
+	// load-sensitive - under `go test ./...` on a shared runner (GOMAXPROCS=2,
+	// -p=2) preemption, a GC cycle, or a neighbour package can land inside just
+	// one of the two windows and inflate the ratio with no code change (CI
+	// observed dur100=2.72ms but dur1000=164ms, a 60x ratio, while the package
+	// alone measures ~6-18x). Two measures cancel that noise without moving the
+	// ceiling:
+	//   - Equal exposure: each window reads the same number of records (10x as
+	//     many Reads of the 100-record file), so both windows are equally long
+	//     and equally likely to be preempted; the ratio is taken per Read.
+	//   - Fastest of N: the sizes are timed in interleaved trials, each after a
+	//     GC, and the fastest trial of each size is compared. Host contention
+	//     only ever ADDS time, so the minimum is the least-contended estimate.
+	// A genuinely super-linear parser (O(n^2) => ~100x per Read for 10x records)
+	// still exceeds the ceiling on its best trial.
+	const (
+		throughputTrials = 21
+		reads1000        = 2
+		reads100         = reads1000 * 10 // same record volume as the 1000-record window
+		maxLinearRatio   = 30.0
+	)
+	best100 := time.Duration(math.MaxInt64)
+	best1000 := time.Duration(math.MaxInt64)
+	for trial := 0; trial < throughputTrials; trial++ {
+		best100 = min(best100, timeReads(t, path100, reads100))
+		best1000 = min(best1000, timeReads(t, path1000, reads1000))
+	}
+
+	perRead100 := best100 / reads100
+	perRead1000 := best1000 / reads1000
+	ratio := float64(perRead1000) / float64(perRead100)
+	t.Logf("runtime ratio per Read 1000/100 records (10x workload, fastest of %d trials): %.2fx (read100=%v, read1000=%v)",
+		throughputTrials, ratio, perRead100, perRead1000)
+	if ratio > maxLinearRatio {
+		t.Fatalf("throughput scales super-linearly: 10x workload took %.2fx time per Read on the fastest of %d trials (ceiling %.0fx)",
+			ratio, throughputTrials, maxLinearRatio)
+	}
+}
+
+// timeReads returns the wall-clock duration of n consecutive blastlease.Read
+// calls on path. It collects garbage first so a GC cycle owed by earlier
+// allocations is not charged to this window.
+func timeReads(t *testing.T, path string, n int) time.Duration {
+	t.Helper()
+	runtime.GC()
+	start := time.Now()
+	for i := 0; i < n; i++ {
+		if _, err := blastlease.Read(path); err != nil {
 			t.Fatalf("Read failed: %v", err)
 		}
 	}
-	dur100 := time.Since(t0)
-
-	t1 := time.Now()
-	for i := 0; i < iters; i++ {
-		if _, err := blastlease.Read(path1000); err != nil {
-			t.Fatalf("Read failed: %v", err)
-		}
-	}
-	dur1000 := time.Since(t1)
-
-	ratio := float64(dur1000) / float64(dur100)
-	t.Logf("runtime ratio 1000/100 records (10x workload): %.2fx (dur100=%v, dur1000=%v)", ratio, dur100, dur1000)
-	if ratio > 30.0 {
-		t.Fatalf("throughput scales super-linearly: 10x workload took %.2fx time", ratio)
-	}
+	return time.Since(start)
 }
