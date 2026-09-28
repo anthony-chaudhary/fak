@@ -290,7 +290,7 @@ func TestFormatOpencodePrompt_ShiftLeftSoftwareFirst(t *testing.T) {
 	}
 
 	// 3. Verifies coordination edges / open dependencies are alignment assumptions unless typed start-blocking.
-	if !strings.Contains(prompt, "treat open dependencies as alignment assumptions unless typed start-blocking") {
+	if !strings.Contains(prompt, "Treat open dependencies as alignment assumptions unless typed start-blocking") {
 		t.Fatalf("prompt missing coordination edge alignment instruction:\n%s", prompt)
 	}
 	if !strings.Contains(prompt, "alignment assumptions") {
