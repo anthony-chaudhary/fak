@@ -603,6 +603,11 @@ type Config struct {
 	// value lets wrapped CLIs that do not expose trace headers still share one
 	// operator-addressable session budget.
 	DefaultTraceID string
+	// MCPSessionBearer authenticates that POST /mcp came from the child configured by
+	// this guard launch. It deliberately grants no workspace lease ownership: the
+	// current DOS authority has no server-authenticated binding from a launch to a row.
+	// The bearer is hashed during New and the plaintext is not retained by Server.
+	MCPSessionBearer string
 	// GuardRecoveryPrompt is a one-time, model-visible recovery note supplied by
 	// `fak guard` when the previous guarded run recorded capability-floor refusals.
 	// The gateway injects it into the first Anthropic Messages request for this

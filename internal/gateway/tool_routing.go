@@ -236,9 +236,9 @@ type WorkspaceAdmissionLease struct {
 }
 
 // WorkspaceLeaseAdmissionView binds lease rows to the same trusted workspace
-// root used to canonicalize proposed write paths. OwnSession is retained for
-// wire compatibility only: session IDs in Git refs and DOS rows are
-// caller-selected text, so admission grants no ownership exemption from them.
+// root used to canonicalize proposed write paths. OwnSession is retained for wire
+// compatibility only: no current production acquisition path authenticates a DOS
+// row to a guard launch, so admission grants no ownership exemption from this text.
 type WorkspaceLeaseAdmissionView struct {
 	WorkspaceRoot string
 	OwnSession    string

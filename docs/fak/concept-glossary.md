@@ -741,3 +741,10 @@ internal/workerworktree.cleanupTopologyCandidate is verifyTopologyCandidate's de
 internal/workerworktree.sweepTopologyCandidatesBeforeCreate is the rate-limited, two-removal-bounded sweep a land runs before creating its own verify checkout.
 
 **Distinct from:** The bounded in-land trigger of SweepTopologyCandidates - NOT the unbounded operator verb fak worktree worker gc --candidates.
+
+
+### MCP session bearer (guard launch capability)
+
+The per-launch random credential written into the guarded child's MCP HTTP config and hash-validated by the gateway to prove that an MCP request came from that launched child; it grants no workspace lease ownership.
+
+**Distinct from:** It proves guard-child launch provenance for MCP requests; it is not the gateway RequireKey/defaultGatewayBearerToken traffic credential and not the stored SHA-256 digest.

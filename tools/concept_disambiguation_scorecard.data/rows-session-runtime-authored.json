@@ -59,5 +59,24 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "mcp-session-bearer",
+      "canonical": "MCP session bearer (guard launch capability)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The per-launch random credential written into the guarded child's MCP HTTP config and hash-validated by the gateway to prove that an MCP request came from that launched child; it grants no workspace lease ownership.",
+      "distinction": "It proves guard-child launch provenance for MCP requests; it is not the gateway RequireKey/defaultGatewayBearerToken traffic credential and not the stored SHA-256 digest.",
+      "distinct_from": [
+        "x-gateway-engine-defaultgatewaybearertoken"
+      ],
+      "aliases": [],
+      "grounding": "mcpsessionbearer",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

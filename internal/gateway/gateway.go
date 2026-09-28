@@ -28,6 +28,7 @@ package gateway
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log"
@@ -71,6 +72,8 @@ func (e *ConfigError) Error() string {
 // registered — i.e. internal/registrations was imported) and that EngineID names
 // a registered engine. It fails loud rather than degrade to a permissive default.
 func New(cfg Config) (*Server, error) {
+	mcpSessionBearer := strings.TrimSpace(cfg.MCPSessionBearer)
+	mcpSessionBearerDigest := sha256.Sum256([]byte(mcpSessionBearer))
 	// fak_read is part of this server's default MCP inventory, so arm its confined
 	// execution route before the server can advertise the tool. Preserve any caller-
 	// supplied narrower root; only the missing default route needs startup repair.
@@ -274,6 +277,8 @@ func New(cfg Config) (*Server, error) {
 		resetOnBudget:                cfg.ResetOnBudget,
 		budgetDrained:                cfg.OnBudgetExhausted,
 		defaultTraceID:               strings.TrimSpace(cfg.DefaultTraceID),
+		mcpSessionAuthEnabled:        mcpSessionBearer != "",
+		mcpSessionBearerDigest:       mcpSessionBearerDigest,
 		guardRecoveryPrompt:          strings.TrimSpace(cfg.GuardRecoveryPrompt),
 		startup:                      startup,
 		planner:                      planner,

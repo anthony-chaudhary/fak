@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,6 +31,8 @@ import (
 // guardMCPServerName is the key this repo's own .mcp.json and examples/mcp/.mcp.json
 // already use for fak's MCP surface, kept consistent here.
 const guardMCPServerName = "fak"
+const guardMCPSessionHeader = "X-Fak-MCP-Session"
+const guardMCPConfigFileName = "fak-mcp-config.json"
 
 // guardMCPInstall records what the MCP config injection did, for the banner and tests.
 type guardMCPInstall struct {
@@ -47,8 +51,17 @@ type guardMCPClientConfig struct {
 }
 
 type guardMCPClientServer struct {
-	Type string `json:"type"`
-	URL  string `json:"url"`
+	Type    string            `json:"type"`
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
+func newGuardMCPSessionBearer() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("mint MCP session bearer: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
 // guardIsFakCommand reports whether command invokes fak or fak-agent as its executable base name.
@@ -60,30 +73,74 @@ func guardIsFakCommand(command []string) bool {
 	return base == "fak" || base == "fak-agent"
 }
 
+func guardSupportsMCPRegistration(command []string) bool {
+	return len(command) > 0 && (guardPreCompactIsClaudeCommand(command) || guardIsFakCommand(command))
+}
+
 // installGuardMCPRegistration wires fak's MCP surface into a Claude Code or fak / fak-agent
 // child by writing a session-scoped --mcp-config file that points "fak" at the gateway's /mcp
 // endpoint. An unsupported agent, or enabled=false (the operator's --mcp-register=false
 // opt-out for an operator who supplies their own MCP config), returns command
 // unchanged with no install performed. An empty command is a no-op.
 func installGuardMCPRegistration(command []string, enabled bool, gwURL string) ([]string, guardMCPInstall, error) {
+	return installGuardMCPRegistrationWithBearer(command, enabled, gwURL, "")
+}
+
+func installGuardMCPRegistrationWithBearer(command []string, enabled bool, gwURL, bearer string) ([]string, guardMCPInstall, error) {
+	return installGuardMCPRegistrationWithAuth(command, enabled, gwURL, bearer, "")
+}
+
+func installGuardMCPRegistrationWithAuth(command []string, enabled bool, gwURL, sessionBearer, gatewayBearer string) ([]string, guardMCPInstall, error) {
 	if !enabled {
 		return command, guardMCPInstall{Reason: "disabled"}, nil
 	}
-	if len(command) == 0 || (!guardPreCompactIsClaudeCommand(command) && !guardIsFakCommand(command)) {
+	if !guardSupportsMCPRegistration(command) {
 		return command, guardMCPInstall{Reason: "non-claude-child"}, nil
 	}
 	dir, err := guardSessionTempDir("mcp")
 	if err != nil {
 		return command, guardMCPInstall{}, err
 	}
-	return installGuardMCPRegistrationAt(command, gwURL, dir)
+	rewritten, install, err := installGuardMCPRegistrationAtWithAuth(command, gwURL, dir, sessionBearer, gatewayBearer)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+	}
+	return rewritten, install, err
+}
+
+// cleanupGuardMCPRegistration removes only the per-session directory allocated for
+// this process's injected MCP config. The exact file and temp-owner checks prevent a
+// malformed install record from widening RemoveAll; dead-owner reaping remains the
+// fallback when hard process death bypasses normal exit cleanup.
+func cleanupGuardMCPRegistration(in guardMCPInstall) error {
+	if !in.Applied {
+		return nil
+	}
+	configPath := filepath.Clean(in.ConfigPath)
+	if filepath.Base(configPath) != guardMCPConfigFileName {
+		return fmt.Errorf("refusing to clean unexpected MCP config path %q", in.ConfigPath)
+	}
+	dir := filepath.Dir(configPath)
+	hook, pid, ok := guardTempDirOwner(filepath.Base(dir))
+	if !ok || hook != "mcp" || pid != os.Getpid() {
+		return fmt.Errorf("refusing to clean unowned MCP config directory %q", dir)
+	}
+	return os.RemoveAll(dir)
 }
 
 // installGuardMCPRegistrationAt is installGuardMCPRegistration with the session
 // directory injected, so tests can assert on the written file without touching the OS
 // temp dir. It performs the same child-support gate as installGuardMCPRegistration.
 func installGuardMCPRegistrationAt(command []string, gwURL, dir string) ([]string, guardMCPInstall, error) {
-	if len(command) == 0 || (!guardPreCompactIsClaudeCommand(command) && !guardIsFakCommand(command)) {
+	return installGuardMCPRegistrationAtWithBearer(command, gwURL, dir, "")
+}
+
+func installGuardMCPRegistrationAtWithBearer(command []string, gwURL, dir, bearer string) ([]string, guardMCPInstall, error) {
+	return installGuardMCPRegistrationAtWithAuth(command, gwURL, dir, bearer, "")
+}
+
+func installGuardMCPRegistrationAtWithAuth(command []string, gwURL, dir, sessionBearer, gatewayBearer string) ([]string, guardMCPInstall, error) {
+	if !guardSupportsMCPRegistration(command) {
 		return command, guardMCPInstall{Reason: "non-claude-child"}, nil
 	}
 	if strings.TrimSpace(dir) == "" {
@@ -92,9 +149,9 @@ func installGuardMCPRegistrationAt(command []string, gwURL, dir string) ([]strin
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return command, guardMCPInstall{}, err
 	}
-	configPath := filepath.Join(dir, "fak-mcp-config.json")
+	configPath := filepath.Join(dir, guardMCPConfigFileName)
 	mcpURL := guardMCPURLFromGatewayBase(gwURL)
-	if err := writeGuardMCPConfig(configPath, mcpURL); err != nil {
+	if err := writeGuardMCPConfig(configPath, mcpURL, sessionBearer, gatewayBearer); err != nil {
 		return command, guardMCPInstall{}, err
 	}
 	isFak := guardIsFakCommand(command)
@@ -118,9 +175,19 @@ func installGuardMCPRegistrationAt(command []string, gwURL, dir string) ([]strin
 
 // writeGuardMCPConfig writes the one-server MCP client config naming "fak" as a remote
 // HTTP MCP server at mcpURL.
-func writeGuardMCPConfig(path, mcpURL string) error {
+func writeGuardMCPConfig(path, mcpURL, sessionBearer, gatewayBearer string) error {
+	server := guardMCPClientServer{Type: "http", URL: mcpURL}
+	if sessionBearer = strings.TrimSpace(sessionBearer); sessionBearer != "" {
+		server.Headers = map[string]string{guardMCPSessionHeader: "Bearer " + sessionBearer}
+	}
+	if gatewayBearer = strings.TrimSpace(gatewayBearer); gatewayBearer != "" {
+		if server.Headers == nil {
+			server.Headers = make(map[string]string)
+		}
+		server.Headers["Authorization"] = "Bearer " + gatewayBearer
+	}
 	cfg := guardMCPClientConfig{MCPServers: map[string]guardMCPClientServer{
-		guardMCPServerName: {Type: "http", URL: mcpURL},
+		guardMCPServerName: server,
 	}}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

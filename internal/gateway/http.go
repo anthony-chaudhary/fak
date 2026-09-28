@@ -238,7 +238,7 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/v1/leases/", s.handleLeaseWrite},
 		{"/v1/sessions", s.handleLeaseSessions},
 		// MCP-over-HTTP, operational endpoints.
-		{"/mcp", s.handleMCPHTTP},
+		{"/mcp", s.handleAuthenticatedMCPHTTP},
 		{"/healthz", s.handleHealthWithAuthProof},
 		{"/metrics", s.handleMetrics},
 		{"/debug/vars", s.handleDebugVars},

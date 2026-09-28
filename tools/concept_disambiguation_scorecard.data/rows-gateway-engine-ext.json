@@ -714,7 +714,8 @@
       "distinction": "It is the RESOLVER returning the token value, distinct from FAK_GATEWAY_KEY which is the env var it reads.",
       "distinct_from": [
         "FAK_GATEWAY_KEY",
-        "gateway"
+        "gateway",
+        "mcp-session-bearer"
       ],
       "aliases": [],
       "grounding": "defaultgatewaybearertoken",

@@ -727,6 +727,14 @@ func cmdManageCommand(commandName string, argv []string) {
 	guardTraceID = resolveGuardSessionID(guardTraceID, guardDurabilityWanted, session.DescriptorMeta{
 		CacheKey: sessionCacheKey(sessionDurabilityHost(), sessionWorkingDir(), "", command),
 	}, newGuardLaunchNonce())
+	guardMCPSessionBearer := ""
+	if *mcpRegister && guardSupportsMCPRegistration(command) {
+		guardMCPSessionBearer, err = newGuardMCPSessionBearer()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fak guard:", err)
+			os.Exit(1)
+		}
+	}
 	if err := installGuardDevAttestation(guardTraceID, *policyPath); err != nil {
 		fmt.Fprintln(os.Stderr, "fak guard: development lease attestation refused:", err)
 		os.Exit(2)
@@ -1050,6 +1058,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		ResetOnBudget:       resetOnBudgetHook(*resetOnBudget, contextBudgetLimit),
 		OnBudgetExhausted:   restarter.OnBudgetExhausted,
 		DefaultTraceID:      guardTraceID,
+		MCPSessionBearer:    guardMCPSessionBearer,
 		GuardRecoveryPrompt: guardRecoveryPrompt(refusalCarryForward),
 		StartTime:           t0,
 		StartupPhases:       startupPhases,
@@ -1500,12 +1509,30 @@ func cmdManageCommand(commandName string, argv []string) {
 	// claude` session can reach them with no manual .mcp.json setup.
 	srv.RecordStartupPhase("guard-installers", time.Since(installersStarted), "measured")
 	mcpStarted := time.Now()
-	command, mcpInstall, err := installGuardMCPRegistration(command, *mcpRegister, gwURL)
+	command, mcpInstall, err := installGuardMCPRegistrationWithAuth(command, *mcpRegister, gwURL, guardMCPSessionBearer, requireKey)
 	srv.RecordStartupPhase("mcp-registration", time.Since(mcpStarted), "measured")
 	if err != nil {
 		cancel()
 		fmt.Fprintf(os.Stderr, "fak guard: MCP registration setup failed: %v\n", err)
 		os.Exit(1)
+	}
+	if mcpInstall.Applied {
+		// The generated config carries launch and gateway bearers. Remove it on every
+		// normal terminal path; the guarded temp-dir reaper handles hard process death.
+		var mcpCleanupOnce sync.Once
+		cleanupMCP := func() {
+			mcpCleanupOnce.Do(func() {
+				if err := cleanupGuardMCPRegistration(mcpInstall); err != nil {
+					fmt.Fprintf(os.Stderr, "fak guard: MCP registration cleanup failed: %v\n", err)
+				}
+			})
+		}
+		defer cleanupMCP()
+		cancelGateway := cancel
+		cancel = func() {
+			cleanupMCP()
+			cancelGateway()
+		}
 	}
 	if mcpInstall.Applied && mcpInstall.IsFak {
 		injected = append(injected, [2]string{"FAK_MCP_CONFIG", mcpInstall.ConfigPath})

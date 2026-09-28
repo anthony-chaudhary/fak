@@ -6281,6 +6281,16 @@
           "category": "incidental",
           "reason": "The localadmission envelope type (weights + per-session KV/state for the enforced session bound + cohort scratch) that the native Metal admission reservation is sized from; defined by its doc comment in internal/localadmission/envelope.go and only consumed by that seam and its receipt.",
           "token": "SessionResidencyPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Derived implementation flag recording whether an MCP launch bearer was configured; it has no independent protocol or authority semantics.",
+          "token": "mcpsessionauthenabled"
+        },
+        {
+          "category": "incidental",
+          "reason": "SHA-256 storage representation used only for constant-time comparison of the MCP session bearer; it is not a separately addressable credential or concept.",
+          "token": "mcpsessionbearerdigest"
         }
       ],
       "exclude": [
@@ -6522,6 +6532,8 @@
         "matchedSessions",
         "materializeSessionMoveCheckpoint",
         "max_preallocated_draft_slots",
+        "mcpsessionauthenabled",
+        "mcpsessionbearerdigest",
         "member_sessions",
         "microagentSessionID",
         "mixedQKVSession",
