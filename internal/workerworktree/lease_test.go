@@ -181,6 +181,10 @@ func TestReapDeadWorktreeCleansStaleLocks(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}
+	// Prepare's dead-worktree sweep runs through the process-wide debounced
+	// DefaultSweepGate; start from a clean gate and leave one behind.
+	ResetSweepGateForTest()
+	t.Cleanup(ResetSweepGateForTest)
 	root := t.TempDir()
 	rawGit(t, root, "init", "-q", "-b", "main")
 	rawGit(t, root, "config", "user.email", "reap@test")
@@ -236,6 +240,9 @@ func TestReapDeadWorktreeCleansStaleLocks(t *testing.T) {
 	// 4. Invoke Prepare for a new worktree.
 	// The automated dead worktree sweep in Prepare must detect the dead/stale worktree,
 	// forcibly unlock it, prune it, and successfully initialize the new worktree.
+	// The first Prepare above already swept and armed the 30s debounce
+	// cooldown, so clear the gate to let this Prepare's sweep actually run.
+	ResetSweepGateForTest()
 	newRes := Prepare(root, "freshlane", "freshkey", "", wtRoot, nil)
 	if !newRes.OK {
 		t.Fatalf("Prepare failed after sweeping dead worktree: %+v", newRes)
@@ -243,7 +250,7 @@ func TestReapDeadWorktreeCleansStaleLocks(t *testing.T) {
 
 	// 5. Prove the dead worktree is pruned and no stale lock remains
 	_, listAfter := rawGit(t, root, "worktree", "list")
-	if strings.Contains(listAfter, crashedPath) {
+	if strings.Contains(listAfter, crashedPath) || strings.Contains(listAfter, filepath.ToSlash(crashedPath)) {
 		t.Fatalf("dead worktree %q still present in git worktree list:\n%s", crashedPath, listAfter)
 	}
 	if strings.Contains(listAfter, "locked") {
