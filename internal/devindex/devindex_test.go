@@ -156,6 +156,32 @@ func TestSuggestStamp(t *testing.T) {
 	}
 }
 
+// TestParseLanesQuotedKey pins that a quoted [lanes.trees] key (TOML's spelling
+// for a hyphenated name such as the gateway-* sub-lanes) names the bare lane:
+// the quotes must not leak into LaneForPath, LeafByName, or the ship stamp.
+func TestParseLanesQuotedKey(t *testing.T) {
+	root := t.TempDir()
+	dosToml := "[lanes.trees]\n" +
+		"gateway = [\"internal/gateway/**\"]\n" +
+		"\"gateway-lifecycle\" = [\"internal/gateway/reset_*.go\", \"internal/gateway/gateway.go\"]\n"
+	if err := os.WriteFile(filepath.Join(root, "dos.toml"), []byte(dosToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := c.LaneForPath("internal/gateway/gateway.go"); got != "gateway-lifecycle" {
+		t.Errorf("LaneForPath(gateway.go) = %q, want gateway-lifecycle", got)
+	}
+	if _, ok := c.LeafByName("gateway-lifecycle"); !ok {
+		t.Errorf("quoted key produced no gateway-lifecycle leaf; got %v", names(c.Leaves))
+	}
+	if got := c.SuggestStamp("internal/gateway/gateway.go"); got != "(fak gateway-lifecycle)" {
+		t.Errorf("SuggestStamp(gateway.go) = %q, want (fak gateway-lifecycle)", got)
+	}
+}
+
 func TestParseDocs(t *testing.T) {
 	c, _ := Load(writeSyntheticRepo(t))
 	// The synthetic repo links README, FLEET, and gateway in INDEX.md but also
@@ -485,8 +511,23 @@ func TestRealRepoDogfood(t *testing.T) {
 			t.Errorf("devindex leaf should exist on disk (it is this package)")
 		}
 	}
-	if c.LaneForPath("internal/gateway/gateway.go") != "gateway" {
-		t.Error("live LaneForPath disagrees with the gateway tree")
+	// The gateway lane is split into write-disjoint gateway-* sub-lanes in
+	// dos.toml, and a file a sub-lane lists explicitly binds to that sub-lane
+	// ahead of the parent internal/gateway/** tree. The live answer must be the
+	// parent lane or a gateway-* sub-lane that really declares the file.
+	const gwFile = "internal/gateway/gateway.go"
+	switch lane := c.LaneForPath(gwFile); {
+	case lane == "gateway":
+	case strings.HasPrefix(lane, "gateway-"):
+		if sub, ok := c.LeafByName(lane); !ok || !strings.Contains(sub.Tree, gwFile) {
+			t.Errorf("live LaneForPath(%s) = %q, but that sub-lane does not declare the file", gwFile, lane)
+		}
+	default:
+		t.Errorf("live LaneForPath(%s) = %q, want the gateway lane or a gateway-* sub-lane", gwFile, lane)
+	}
+	// A gateway path no sub-lane lists explicitly still resolves to the parent tree.
+	if lane := c.LaneForPath("internal/gateway/zz_devindex_parent_probe.go"); lane != "gateway" {
+		t.Errorf("live LaneForPath disagrees with the gateway tree: got %q for an unlisted gateway file", lane)
 	}
 	// The claim/status join must bind to the live CLAIMS.md, not silently no-op:
 	// the gateway leaf carries shipped claims in the real ledger.
