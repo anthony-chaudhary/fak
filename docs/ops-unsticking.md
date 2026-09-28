@@ -164,6 +164,47 @@ costs 1.66x a naive tick in mandatory read context before any work happens.
 baseline_tokens_measured` as standing metrics. When the first exceeds ~0.3 the
 ladder is inverted, and the correct response is to delete a gate, not to tune it.
 
+### Lesson 4b — A guard that cannot tell "peer is working" from "snapshot is incomplete" blocks everything
+
+Found while landing the Lesson-5 work, and the purest instance of this page's
+thesis found so far.
+
+`fak commit` refused with `PEER_WIP_COLLISION` on
+`internal/heavinessscore/*` — files no live session was editing. The tree holds
+**46 `refs/fak/wip/*` checkpoints** and the attribution scan reads every one. Two
+defects compound:
+
+1. **Partial-tree snapshots are read as complete trees.** The offending refs hold
+   8,069 and 333 files against **23,708** on HEAD, so the ~19,000 files absent from
+   each are attributed to that peer. Fifteen `reap-*` refs from 2026-09-25
+   collectively claim essentially the whole repository.
+2. **Historical presence is not classified as historical presence.** The other six
+   offending refs date from 2026-09-10 and 2026-09-25, and their diff against HEAD
+   is `616 insertions(+)` with **zero deletions** — `internal/heavinessscore/` did
+   not exist yet in those snapshots. `internal/safecommit/peerwip.go` already
+   defines `OwnershipHistoricalPresence` for exactly this case, and the guard
+   fires the collision anyway.
+
+**Verified before overriding:** no live process owned any of the six session ids;
+the thirteen refs from 2026-09-26 onward are full trees carrying only the
+clean-base version; and no ref held a *conflicting* hunk. Committed with
+`FAK_PEER_WIP_GUARD=warn` — a first-class mode of the guard
+(`internal/safecommit/peerwip.go`), not an override: the attribution scan still
+runs and still records, it just stops refusing. `off` was not used, and no ref was
+deleted.
+
+**Why this is Lesson 1 again.** The DOA outage was invisible because a liveness
+count cannot register failure. This is the same failure in the safety path: a
+collision check that fires on "absent from an old snapshot" cannot register the
+case it exists for, and a guard that blocks every commit is indistinguishable from
+a guard protecting you. **A gate whose false-positive rate approaches 100% is not a
+gate** — it is an outage shaped like a safety mechanism.
+
+**Apply:** expire `refs/fak/wip/*` by age (a three-day-old checkpoint from a dead
+session is not a peer), and skip any ref in the attribution scan whose tree is not
+a superset of the paths it is asked about. Until both land, a `PEER_WIP_COLLISION`
+on a file with no live owner should be re-derived by hand before it is believed.
+
 ### Lesson 5 — The simple path needs a scorecard or it can never win
 
 This is the lesson with the longest tail, because it protects the thing that is
@@ -234,8 +275,9 @@ it should be measured with the same ruler as the path that already works.**
 | 2 | **Publish `launched / planned`.** It was already the field distinguishing the 24 from the 1; it was just never aggregated. | **SHIPPED** — `cmd/fak/dispatch_status_goallaunch.go` |
 | 3 | **Emit `preflight_ms / tick_total_ms` per tick** and alarm above 300‰. | **SHIPPED** — `dispatchTickLoopMetrics` |
 | 4 | **Fix or un-recommend the MCP `dos_arbitrate` path.** It fails open; the runbook says so; the earlier fix was retracted. | **OPEN** — cross-repo, in dos-kernel |
-| 5 | **Re-base or replace `refusal_vocab_size`.** | **PARTIAL** — scorecard regenerated; KPI still 0.000 at 149 |
+| 5 | **Re-base or replace `refusal_vocab_size`.** | **SHIPPED** — `9c2ca42c7`; 86 → 22.2, 149 → 7.8 |
 | 6 | **Stand up the naive arm as a measured control.** | **OPEN** — needs a scheduled arm |
+| 7 | **Expire `refs/fak/wip/*` by age and skip non-superset refs in the collision scan.** | **OPEN** — blocking every `fak commit` (Lesson 4b) |
 
 ### What shipped looks like
 
