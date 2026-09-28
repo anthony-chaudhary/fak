@@ -29,6 +29,19 @@
     },
     {
       "class": "ci_action",
+      "reference": "actions/cache/restore@v4",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "Restore-only sub-action of actions/cache used by the sharded ci-fast go test jobs (246b2a618); moving major tag like its parent."
+    },
+    {
+      "class": "ci_action",
       "reference": "actions/cache@v4",
       "consumer_domains": [
         ".github/workflows"
@@ -212,17 +225,32 @@
       "class": "container_base",
       "reference": "nvidia/cuda:12.6.2-devel-ubuntu22.04",
       "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "CI job container for the cuda-build.yml sm_89 nvcc leg; 12.6 cannot emit the Blackwell targets, so those legs run on 12.8.1-devel."
+    },
+    {
+      "class": "container_base",
+      "reference": "nvidia/cuda:12.8.1-devel-ubuntu22.04",
+      "consumer_domains": [
+        ".github/workflows",
         "Dockerfile.cuda"
       ],
       "status": "used",
       "pin": "unresolved",
       "digest": "",
       "license_record": "none",
-      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "Dockerfile.cuda build stage and the cuda-build.yml sm_100/sm_120 nvcc legs (compute_100/compute_120 need a 12.8 toolkit)."
     },
     {
       "class": "container_base",
-      "reference": "nvidia/cuda:12.6.2-runtime-ubuntu22.04",
+      "reference": "nvidia/cuda:12.8.1-runtime-ubuntu22.04",
       "consumer_domains": [
         "Dockerfile.cuda"
       ],
@@ -230,7 +258,8 @@
       "pin": "unresolved",
       "digest": "",
       "license_record": "none",
-      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "Dockerfile.cuda runtime stage the shipped CUDA image is built on."
     },
     {
       "class": "downloaded_asset",
@@ -317,6 +346,19 @@
       "digest": "",
       "license_record": "none",
       "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "package_runner",
+      "reference": "pip:PyYAML==6.0.2",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "immutable",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "CI OpenAPI schema-validator step. Version-pinned but not hash-pinned. The same `pip install` also fetches openapi-spec-validator==0.7.2, which the single-distribution pip extractor does not yet record."
     },
     {
       "class": "package_runner",
@@ -544,6 +586,32 @@
     },
     {
       "class": "subprocess_tool",
+      "reference": "ifconfig",
+      "consumer_domains": [
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "macOS-only (internal/cluster tb5_rdma_darwin.go): reads bridge0 state for the Thunderbolt RDMA probe."
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "ioreg",
+      "consumer_domains": [
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "macOS-only (internal/macfit): display-geometry probe; output format is an unpinned external contract."
+    },
+    {
+      "class": "subprocess_tool",
       "reference": "launchctl",
       "consumer_domains": [
         "cmd"
@@ -566,6 +634,19 @@
       "digest": "",
       "license_record": "none",
       "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "networksetup",
+      "consumer_domains": [
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "macOS-only (internal/cluster tb5_rdma_darwin.go): lists hardware ports and can disable the Thunderbolt Bridge service, i.e. it mutates host network configuration, not just reads it."
     },
     {
       "class": "subprocess_tool",
@@ -718,6 +799,32 @@
     },
     {
       "class": "subprocess_tool",
+      "reference": "rdma_ctl",
+      "consumer_domains": [
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "macOS-only (internal/cluster tb5_rdma_darwin.go): `rdma_ctl status` for RDMA over Thunderbolt 5; absent on most hosts."
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "schtasks",
+      "consumer_domains": [
+        "cmd"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "Windows Task Scheduler (cmd/fak garden loop, ops schedule, node install) spawned without the .exe suffix; same host binary as the schtasks.exe row."
+    },
+    {
+      "class": "subprocess_tool",
       "reference": "schtasks.exe",
       "consumer_domains": [
         "cmd"
@@ -759,16 +866,18 @@
       "consumer_domains": [
         "internal"
       ],
-      "status": "used",
+      "status": "prospective",
       "pin": "host_provided",
       "digest": "",
       "license_record": "none",
-      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "Still spawned, but no longer by literal name: internal/amdgpu resolves it via LookPath and pins its digest before exec, and cmd/fak benchloop fleet dispatch passes the name through a helper, so the literal-exec extractor counts those sites as skipped. Kept (as gofmt is) so the register still names it."
     },
     {
       "class": "subprocess_tool",
       "reference": "sysctl",
       "consumer_domains": [
+        "cmd",
         "internal"
       ],
       "status": "used",
@@ -781,7 +890,8 @@
       "class": "subprocess_tool",
       "reference": "system_profiler",
       "consumer_domains": [
-        "cmd"
+        "cmd",
+        "internal"
       ],
       "status": "used",
       "pin": "host_provided",
@@ -860,6 +970,19 @@
       "digest": "",
       "license_record": "none",
       "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "xcode-select",
+      "consumer_domains": [
+        "cmd"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "cmd/metalprobe presence probe for the Xcode command-line tools (`xcode-select -p`)."
     },
     {
       "class": "subprocess_tool",

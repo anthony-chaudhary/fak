@@ -81,7 +81,8 @@ const (
 	classPackageRunner effectClass = "package_runner"
 	// classCIAction is a GitHub Actions `uses:` reference.
 	classCIAction effectClass = "ci_action"
-	// classContainerBase is a Dockerfile `FROM` image.
+	// classContainerBase is a Dockerfile `FROM` image, or a CI job/service container image
+	// (`container:` / `image:` in a workflow) that a runner pulls and executes the job inside.
 	classContainerBase effectClass = "container_base"
 	// classDownloadedAsset is a curl/wget fetch of an https artifact.
 	classDownloadedAsset effectClass = "downloaded_asset"
@@ -368,6 +369,29 @@ func (c *collector) scanDockerfile(path, text string) {
 	}
 }
 
+// reWorkflowImage matches a workflow job/service container image written on the key's own
+// line: `container: <image>`, `image: <image>` (under container:/services:), and the common
+// matrix form (`- arch: sm_89` / `image: nvidia/cuda:...` feeding `container: ${{ matrix.image }}`).
+// `[ \t]*` rather than `\s*` after the colon is load-bearing: a bare mapping key (`container:`
+// followed by an indented `image:`) or a JOB named `image:` must not swallow the next line.
+var reWorkflowImage = regexp.MustCompile(`(?m)^[ \t]*(?:-[ \t]*)?(?:container|image):[ \t]*["']?([^\s"'#]+)`)
+
+// scanWorkflowImages records the container images a CI job runs inside. They are the same
+// supply-chain surface as a Dockerfile FROM (a moving tag the runner pulls and executes), so
+// they share classContainerBase; an expression-valued image (`${{ matrix.image }}`,
+// `${{ steps.meta.outputs.image }}`) is resolved at run time and is counted as a skip — its
+// literal values, when they live in a matrix, are matched on their own `image:` lines.
+func (c *collector) scanWorkflowImages(path, text string) {
+	for _, m := range reWorkflowImage.FindAllStringSubmatch(text, -1) {
+		ref := m[1]
+		if strings.Contains(ref, "${{") {
+			c.skip(path, classContainerBase, "workflow container image is a run-time expression", ref)
+			continue
+		}
+		c.add(classContainerBase, ref, path)
+	}
+}
+
 // --- Downloaded assets ------------------------------------------------------
 
 var reFetchURL = regexp.MustCompile(`\b(?:curl|wget)\b[^\n\r]*?(https://[^\s"'\\)]+)`)
@@ -442,6 +466,7 @@ func discoverEffects(tree map[string]string) ([]effect, scanStats, error) {
 			c.scanGoMod(p, text)
 		case strings.HasPrefix(p, ".github/workflows/"):
 			c.scanWorkflow(p, text)
+			c.scanWorkflowImages(p, text)
 			c.scanPackageRunners(p, text)
 			c.scanFetches(p, text)
 		case strings.HasPrefix(base, "Dockerfile"):
@@ -847,7 +872,10 @@ func TestThirdPartyEffectsRegisterCoversTree(t *testing.T) {
 func syntheticRepo() map[string]string {
 	return map[string]string{
 		"go.mod": "module example.com/synth\n\ngo 1.26\n\nrequire example.org/dep v1.2.3\n",
-		".github/workflows/ci.yml": "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n" +
+		".github/workflows/ci.yml": "jobs:\n  image:\n    outputs:\n      image: ${{ steps.meta.outputs.image }}\n" +
+			"  build:\n    strategy:\n      matrix:\n        include:\n          - arch: sm_89\n" +
+			"            image: example.org/ci-image:1.0\n    container: ${{ matrix.image }}\n" +
+			"    steps:\n      - uses: actions/checkout@v4\n" +
 			"      - run: go install example.org/tool/cmd/tool@latest\n",
 		"Dockerfile":          "FROM golang:1.26 AS build\nRUN curl -fsSL https://example.org/asset.tgz -o /tmp/a.tgz\n",
 		"internal/x/spawn.go": "package x\n\nfunc f() { _ = exec.Command(\"nvidia-smi\", \"-L\") }\n",
@@ -869,6 +897,7 @@ func TestEffectDiscoveryFindsEachMechanism(t *testing.T) {
 		{Class: classPackageRunner, Reference: "go:example.org/tool/cmd/tool@latest"},
 		{Class: classCIAction, Reference: "actions/checkout@v4"},
 		{Class: classContainerBase, Reference: "golang:1.26"},
+		{Class: classContainerBase, Reference: "example.org/ci-image:1.0"},
 		{Class: classDownloadedAsset, Reference: "https://example.org/asset.tgz"},
 	}
 	for _, w := range want {
@@ -877,6 +906,15 @@ func TestEffectDiscoveryFindsEachMechanism(t *testing.T) {
 				"nothing makes the real-tree gate pass by looking at an empty set, which is the silently "+
 				"inert failure this fixture exists to catch. Discovered: %v",
 				w.Class, w.Reference, effects)
+		}
+	}
+	// A job named `image:` (no value on its line) and an expression-valued image must NOT be
+	// read as a third-party image: the first would swallow the next line, the second is a
+	// run-time value whose literal matrix entries are matched on their own lines.
+	for _, e := range effects {
+		if e.Class == classContainerBase && (strings.Contains(e.Reference, "${{") ||
+			strings.HasPrefix(e.Reference, "outputs") || strings.HasPrefix(e.Reference, "strategy")) {
+			t.Errorf("workflow image extractor recorded a non-image %q", e.Reference)
 		}
 	}
 	for _, c := range effectClasses {
