@@ -2,13 +2,17 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
@@ -53,6 +57,32 @@ func TestGuardMCPRegistrationInstallsClaudeConfig(t *testing.T) {
 	}
 	if fak.Type != "http" || fak.URL != "http://127.0.0.1:4567/mcp" {
 		t.Fatalf("fak server = %+v, want http server at .../mcp", fak)
+	}
+}
+
+func TestGuardMCPConfigKeepsLaunchAndGatewayCredentialsSeparate(t *testing.T) {
+	dir := t.TempDir()
+	_, install, err := installGuardMCPRegistrationAtWithAuth(
+		[]string{"claude"}, "http://127.0.0.1:4567", dir,
+		" session-token ", " gateway-token ",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(install.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg guardMCPClientConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	headers := cfg.MCPServers[guardMCPServerName].Headers
+	if got := headers[guardMCPSessionHeader]; got != "Bearer session-token" {
+		t.Fatalf("launch provenance header = %q", got)
+	}
+	if got := headers["Authorization"]; got != "Bearer gateway-token" {
+		t.Fatalf("gateway authorization header = %q", got)
 	}
 }
 
@@ -106,11 +136,17 @@ func TestGuardMCPURLFromGatewayBase(t *testing.T) {
 // proving the wired-up config reaches the live runtime self-query/memory surface,
 // not just a config file with the right shape.
 func TestGuardMCPRegistrationReachesLiveGatewayMCPEndpoint(t *testing.T) {
+	const (
+		bearer     = "guard-launch-secret"
+		gatewayKey = "guard-gateway-secret"
+	)
 	srv, err := gateway.New(gateway.Config{
-		EngineID:     "inkernel",
-		Model:        "guard-mcp-test",
-		Invalidation: "global",
-		Logf:         func(string, ...any) {},
+		EngineID:         "inkernel",
+		Model:            "guard-mcp-test",
+		Invalidation:     "global",
+		Logf:             func(string, ...any) {},
+		MCPSessionBearer: bearer,
+		RequireKey:       gatewayKey,
 	})
 	if err != nil {
 		t.Fatalf("gateway.New: %v", err)
@@ -119,13 +155,22 @@ func TestGuardMCPRegistrationReachesLiveGatewayMCPEndpoint(t *testing.T) {
 	defer httpSrv.Close()
 
 	dir := t.TempDir()
-	_, install, err := installGuardMCPRegistrationAt([]string{"claude"}, httpSrv.URL, dir)
+	_, install, err := installGuardMCPRegistrationAtWithAuth([]string{"claude"}, httpSrv.URL, dir, bearer, gatewayKey)
 	if err != nil {
 		t.Fatalf("install mcp registration: %v", err)
 	}
 	if !install.Applied {
 		t.Fatalf("mcp registration not applied: %+v", install)
 	}
+	configBytes, err := os.ReadFile(install.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config guardMCPClientConfig
+	if err := json.Unmarshal(configBytes, &config); err != nil {
+		t.Fatal(err)
+	}
+	authHeaders := config.MCPServers[guardMCPServerName].Headers
 
 	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
 	req, err := http.NewRequest(http.MethodPost, install.URL, bytes.NewReader(body))
@@ -133,6 +178,9 @@ func TestGuardMCPRegistrationReachesLiveGatewayMCPEndpoint(t *testing.T) {
 		t.Fatalf("build request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	for key, value := range authHeaders {
+		req.Header.Set(key, value)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST %s: %v", install.URL, err)
@@ -160,6 +208,73 @@ func TestGuardMCPRegistrationReachesLiveGatewayMCPEndpoint(t *testing.T) {
 		if !names[want] {
 			t.Fatalf("tools/list at %s missing %s: got %+v", install.URL, want, names)
 		}
+	}
+}
+
+func TestGuardMCPNormalExitRemovesPlaintextCredentialConfig(t *testing.T) {
+	root := t.TempDir()
+	helperSource := filepath.Join(root, "helper.go")
+	helperBinary := filepath.Join(root, "fak-agent")
+	if runtime.GOOS == "windows" {
+		helperBinary += ".exe"
+	}
+	const helper = `package main
+import ("encoding/json"; "os")
+func main() {
+	p := os.Getenv("FAK_MCP_CONFIG")
+	b, err := os.ReadFile(p); if err != nil { panic(err) }
+	out, _ := json.Marshal(map[string]string{"path": p, "body": string(b)})
+	if err := os.WriteFile(os.Getenv("FAK_MCP_CAPTURE"), out, 0600); err != nil { panic(err) }
+}`
+	if err := os.WriteFile(helperSource, []byte(helper), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	build := exec.Command("go", "build", "-o", helperBinary, helperSource)
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build child: %v\n%s", err, out)
+	}
+
+	capture := filepath.Join(root, "capture.json")
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, os.Args[0], "guard")
+	child.Env = append(os.Environ(),
+		guardE2EHelperEnv+"=--quiet --provider anthropic --api-key-env FAK_TEST_MCP_UPSTREAM --require-key-env FAK_TEST_MCP_GATEWAY --audit off -- "+helperBinary,
+		"FAK_TEST_MCP_UPSTREAM=upstream-test-only",
+		"FAK_TEST_MCP_GATEWAY=gateway-test-only",
+		"FAK_MCP_CAPTURE="+capture,
+		"FAK_FLEET_BUS="+filepath.Join(root, "fleet-bus"),
+		"FAK_SESSION_REGISTRY="+filepath.Join(root, "sessions.jsonl"),
+		"FAK_HEADLESS=1", "TMP="+root, "TEMP="+root,
+	)
+	if out, err := child.CombinedOutput(); err != nil {
+		t.Fatalf("guard process: %v\n%s", err, out)
+	}
+	if ctx.Err() != nil {
+		t.Fatal(ctx.Err())
+	}
+	data, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var observed map[string]string
+	if err := json.Unmarshal(data, &observed); err != nil {
+		t.Fatal(err)
+	}
+	var config guardMCPClientConfig
+	if err := json.Unmarshal([]byte(observed["body"]), &config); err != nil {
+		t.Fatalf("child observed invalid MCP config: %v: %s", err, observed["body"])
+	}
+	headers := config.MCPServers[guardMCPServerName].Headers
+	if got := headers["Authorization"]; got != "Bearer gateway-test-only" {
+		t.Fatalf("child gateway credential = %q", got)
+	}
+	launch := strings.TrimPrefix(headers[guardMCPSessionHeader], "Bearer ")
+	if launch == "" || launch == headers[guardMCPSessionHeader] || launch == "gateway-test-only" {
+		t.Fatalf("child launch credential was not independently minted: %q", headers[guardMCPSessionHeader])
+	}
+	if _, err := os.Stat(observed["path"]); !os.IsNotExist(err) {
+		t.Fatalf("credential config survived normal child exit: path=%q err=%v", observed["path"], err)
 	}
 }
 

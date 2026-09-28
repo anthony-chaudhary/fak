@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/engine"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 )
 
@@ -39,6 +42,83 @@ func callFakAdjudicate(t *testing.T, srv *Server, arguments string) (SyscallResp
 		t.Fatalf("decode response: %v", err)
 	}
 	return response, nil
+}
+
+func TestMCPRouteCarriesLaunchProvenanceWithoutLeaseOwnership(t *testing.T) {
+	// Own the process-global test registry so this witness is independent of which
+	// registry-mutating gateway test ran immediately before it.
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("mock", engine.MockEngine)
+	abi.RegisterAdjudicator(0, toolAdj{})
+
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "owned"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const claimedSession = "wire-claimed-session"
+	var provenance []bool
+	SetLeasePlaneProviders(nil, func(context.Context) (LeasePresenceView, error) {
+		return LeasePresenceView{ClassifiedLeases: json.RawMessage(`[]`)}, nil
+	})
+	SetWorkspaceLeaseAdmissionProvider(func(ctx context.Context) (WorkspaceLeaseAdmissionView, error) {
+		provenance = append(provenance, authenticatedMCPLaunch(ctx))
+		return WorkspaceLeaseAdmissionView{
+			WorkspaceRoot: root,
+			OwnSession:    claimedSession,
+			Leases: []WorkspaceAdmissionLease{{
+				TreeGlobs: []string{"owned/**"},
+				SessionID: claimedSession,
+			}},
+		}, nil
+	})
+	t.Cleanup(func() {
+		SetLeasePlaneProviders(nil, nil)
+		SetWorkspaceLeaseAdmissionProvider(nil)
+	})
+
+	srv, err := New(Config{
+		EngineID:         "mock",
+		Model:            "mcp-launch-auth-test",
+		Invalidation:     "global",
+		MCPSessionBearer: "launch-secret",
+		DefaultTraceID:   claimedSession,
+		Logf:             func(string, ...any) {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fak_adjudicate","arguments":{"tool":"allow_write","arguments":{"filePath":"owned/probe.txt","content":"proposal-only"},"trace_id":"wire-claimed-session"}}}`
+	for _, tc := range []struct {
+		name   string
+		header string
+		want   bool
+	}{
+		{name: "matching", header: "Bearer launch-secret", want: true},
+		{name: "wrong", header: "Bearer wrong"},
+		{name: "malformed", header: "launch-secret"},
+		{name: "absent"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := len(provenance)
+			req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			if tc.header != "" {
+				req.Header.Set("X-Fak-MCP-Session", tc.header)
+			}
+			rec := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			if len(provenance) != before+1 || provenance[before] != tc.want {
+				t.Fatalf("provider provenance=%v, want appended %v", provenance[before:], tc.want)
+			}
+			if !strings.Contains(rec.Body.String(), "LEASE_HELD") {
+				t.Fatalf("launch provenance claimed lease ownership: %s", rec.Body.String())
+			}
+		})
+	}
 }
 
 func assertAdjudicateReceipt(t *testing.T, receipt *AdjudicateReceipt, outcome string) {
