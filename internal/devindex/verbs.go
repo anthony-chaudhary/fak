@@ -22,6 +22,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/devhandoff"
 )
 
 // Verb is one entry of the structured CLI-verb catalog: the verb name as typed
@@ -549,7 +551,7 @@ func (c *Catalog) Verbs() []Verb {
 // liveDevDispatchTokens returns the lowercased tokens of cmd/fak-dev/main.go's
 // top-level dispatch switch — the set of verbs the *dev* artifact actually routes.
 // Nil when the file cannot be read (an installed binary outside a repo), which sends
-// binaryForVerb to its tier-derived fallback. It reuses devDispatchVerbs, the same
+// binaryForVerb to its compiled-inventory fallback. It reuses devDispatchVerbs, the same
 // scan the tier-coverage test uses, so the two can never disagree (#13093).
 func (c *Catalog) liveDevDispatchTokens() []string {
 	b, err := os.ReadFile(filepath.Join(c.Root, "cmd", "fak-dev", "main.go"))
@@ -563,12 +565,16 @@ func (c *Catalog) liveDevDispatchTokens() []string {
 // `<binary> <verb>` rendering (#13093). A verb whose canonical spelling is in the
 // fak-dev dispatch set is advertised as `fak-dev <verb>`; every other verb belongs to
 // the `fak` catalog `Verbs()` already derives from cmd/fak/main.go. When the dev
-// switch is unreadable (devTokens empty — an installed binary outside a repo) it falls
-// back to the tier table: a TierDev verb is dev-routed, everything else is `fak`. This
-// is a second, coarser home for the same fact, used only when the live switch is gone.
+// switch is unreadable (devTokens empty — an installed binary outside a repo, or a
+// catalog rooted in the companion checkout) it falls back to devhandoff.IsCommand, the
+// compiled-in fak-dev command inventory that cmd/fak's dev_inventory_test holds equal
+// to cmd/fak-dev's dispatcher. It must NOT fall back to the concept tier: TierDev is
+// the `fak dev <verb>` help namespace, and most TierDev verbs (claude, code-debt, ...)
+// are routed only by cmd/fak, so a tier-derived label advertised `fak-dev claude`,
+// which exits 2.
 func binaryForVerb(name string, devTokens []string) string {
 	if len(devTokens) == 0 {
-		if tierFor(name) == TierDev {
+		if devhandoff.IsCommand(strings.ToLower(name)) {
 			return BinaryFakDev
 		}
 		return BinaryFak

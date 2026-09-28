@@ -105,14 +105,88 @@ func TestSearchVerbIsTaggedFak(t *testing.T) {
 	t.Fatal("search missing from the derived catalog")
 }
 
+// TestFallbackVerbBinaryMatchesRealDispatch is the no-switch half of the #13093
+// invariant. A catalog rooted where neither cmd/fak/main.go nor cmd/fak-dev/main.go is
+// readable — `go run ../fak/cmd/fak-dev feature query` from the companion checkout, or
+// an installed binary outside a repo — takes the curated-overlay path, and every card
+// it emits must still name a binary whose switch routes the verb. The old fallback read
+// the concept tier (TierDev -> fak-dev), but TierDev is the `fak dev <verb>` help
+// namespace, not the fak-dev artifact, so ~330 cmd/fak-only verbs (claude,
+// claude-mac-fak, code-debt, c, ...) were advertised as `fak-dev <verb>`, which exits 2.
+// A curated entry neither switch dispatches is a curation-drift question, not a label
+// one, and is skipped here.
+func TestFallbackVerbBinaryMatchesRealDispatch(t *testing.T) {
+	root := repoRoot(t)
+	mainB, err := os.ReadFile(filepath.Join(root, "cmd", "fak", "main.go"))
+	if err != nil {
+		t.Skipf("no cmd/fak/main.go (%v)", err)
+	}
+	devB, err := os.ReadFile(filepath.Join(root, "cmd", "fak-dev", "main.go"))
+	if err != nil {
+		t.Skipf("no cmd/fak-dev/main.go (%v)", err)
+	}
+	mainSet := tokenSet(mainDispatchVerbs(mainB))
+	devSet := tokenSet(devDispatchVerbs(devB))
+
+	fallback := &Catalog{Root: t.TempDir()} // no readable dispatch switch: the overlay path
+	if len(fallback.liveDispatchTokens()) != 0 || len(fallback.liveDevDispatchTokens()) != 0 {
+		t.Fatal("temp-dir catalog unexpectedly read a dispatch switch; the fallback path is not exercised")
+	}
+	checked := 0
+	for _, v := range fallback.Verbs() {
+		n := strings.ToLower(v.Name)
+		if !mainSet[n] && !devSet[n] {
+			continue
+		}
+		checked++
+		set, other := mainSet, devSet
+		if v.Binary == BinaryFakDev {
+			set, other = devSet, mainSet
+		}
+		if !set[n] {
+			t.Errorf("fallback card advertises `%s %s` but that binary cannot route it (other binary routes it: %v)",
+				v.Binary, v.Name, other[n])
+		}
+	}
+	if checked == 0 {
+		t.Fatal("fallback catalog emitted no dispatched verbs; nothing was checked")
+	}
+}
+
+// TestClaudeVerbsAreTaggedFak pins the concrete defect: `claude` and `claude-mac-fak`
+// are dispatched by cmd/fak (`fak claude --help` works; `fak-dev claude` exits 2), so a
+// card built from either the live catalog or the no-switch fallback must say `fak`.
+func TestClaudeVerbsAreTaggedFak(t *testing.T) {
+	for _, name := range []string{"claude", "claude-mac-fak"} {
+		if got := binaryForVerb(name, nil); got != BinaryFak {
+			t.Errorf("fallback binaryForVerb(%s) = %q, want %q", name, got, BinaryFak)
+		}
+	}
+	root := repoRoot(t)
+	c, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load(%q): %v", root, err)
+	}
+	for _, v := range c.Verbs() {
+		if (v.Name == "claude" || v.Name == "claude-mac-fak") && v.Binary != BinaryFak {
+			t.Errorf("live catalog tags %s as %q, want %q", v.Name, v.Binary, BinaryFak)
+		}
+	}
+}
+
 // TestBinaryForVerbFallback pins the no-repo fallback: with no readable dev switch the
-// label falls to the tier table (TierDev -> fak-dev, else fak) rather than going empty.
+// label falls to the compiled-in fak-dev inventory (devhandoff.IsCommand -> fak-dev,
+// else fak) rather than going empty — never to the concept tier.
 func TestBinaryForVerbFallback(t *testing.T) {
 	if got := binaryForVerb("index", nil); got != BinaryFakDev {
 		t.Errorf("binaryForVerb(index, no dev tokens) = %q, want %q", got, BinaryFakDev)
 	}
 	if got := binaryForVerb("serve", nil); got != BinaryFak {
 		t.Errorf("binaryForVerb(serve, no dev tokens) = %q, want %q", got, BinaryFak)
+	}
+	// A TierDev verb that only cmd/fak dispatches is still `fak`.
+	if got := binaryForVerb("code-debt", nil); got != BinaryFak {
+		t.Errorf("binaryForVerb(code-debt, no dev tokens) = %q, want %q", got, BinaryFak)
 	}
 	if got := binaryForVerb("search", []string{"index", "buildcheck"}); got != BinaryFak {
 		t.Errorf("binaryForVerb(search, dev set) = %q, want %q", got, BinaryFak)

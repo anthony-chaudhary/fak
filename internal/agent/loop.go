@@ -99,6 +99,14 @@ type ArmMetrics struct {
 	// stop" a field, not an inference — the whole point of first-class session state.
 	StoppedBySession string `json:"stopped_by_session,omitempty"`
 
+	// CheckpointSaveErrors counts session-checkpoint saves (WithSessionCheckpoint) that
+	// failed this run, and CheckpointSaveError is the most recent failure. A failed save
+	// does not fail the turn, and the previous checkpoint stays loadable because the write
+	// is atomic, but the failure is witnessed here instead of dropped. Zero/empty on every
+	// run without a checkpoint or whose saves all landed.
+	CheckpointSaveErrors int    `json:"checkpoint_save_errors,omitempty"`
+	CheckpointSaveError  string `json:"checkpoint_save_error,omitempty"`
+
 	// ResumedPendingTurn is the write-ahead turn checkpoint (#1363) this arm RE-ENTERED on
 	// start: when the run is keyed on a session whose drive state carries a non-zero
 	// PendingTurn — a prior attempt was interrupted mid-retry and the table was Restore'd

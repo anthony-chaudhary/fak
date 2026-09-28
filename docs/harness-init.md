@@ -51,6 +51,10 @@ descriptor. Exact host, wire, repoint, adapter-version, and digest identities mu
 seam. Each row also mutates its resolved descriptor and requires the prior graph and lock to fail
 closed as stale. Generated external products use a local module replacement with `GOPROXY=off`,
 so the command needs no key, model, network, or GPU and does not require the three host CLIs.
+Because `GOSUMDB=off` forbids Go toolchain switches, the product build is pinned to
+`GOTOOLCHAIN=local` on the first installed toolchain that satisfies the product and fak `go`
+directives (`$GOROOT/bin/go`, then `PATH` `go`, then module-cache toolchains); a stale `PATH` `go`
+no longer fails the selfcheck when a satisfying toolchain is cached.
 
 The same command is supported natively on Windows and through WSL. The checked-in machine
 readout, including both platform witnesses, is

@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -1174,7 +1176,13 @@ func (r *armRunner) saveCheckpoint(turn int, status string) {
 	}
 	createdAt := r.cfg.sessionCheckpointCreatedAt
 	if createdAt.IsZero() {
-		if existing, err := LoadSessionCheckpoint(r.cfg.sessionCheckpointID, dir); err == nil && !existing.CreatedAt.IsZero() {
+		existing, err := LoadSessionCheckpoint(r.cfg.sessionCheckpointID, dir)
+		if errors.Is(err, ErrUnsupportedSessionCheckpointVersion) {
+			// A newer build owns this checkpoint; overwriting it would silently downgrade it.
+			r.recordCheckpointSaveError(turn, err)
+			return
+		}
+		if err == nil && !existing.CreatedAt.IsZero() {
 			createdAt = existing.CreatedAt
 		} else {
 			createdAt = time.Now().UTC()
@@ -1213,5 +1221,20 @@ func (r *armRunner) saveCheckpoint(turn int, status string) {
 		UpdatedAt: time.Now().UTC(),
 		Status:    status,
 	}
-	_ = SaveSessionCheckpoint(dir, cp)
+	if err := SaveSessionCheckpoint(dir, cp); err != nil {
+		r.recordCheckpointSaveError(turn, err)
+	}
+}
+
+// recordCheckpointSaveError surfaces a checkpoint that was not saved without failing the
+// turn: the checkpoint is a resume aid, not the turn's result, so the loop keeps its
+// non-fatal posture. The failure is counted on the arm's witness and logged instead of
+// dropped, and because SaveSessionCheckpoint publishes atomically the previous
+// checkpoint on disk stays loadable, so a resume lands on the last good turn.
+func (r *armRunner) recordCheckpointSaveError(turn int, err error) {
+	if r.metrics != nil {
+		r.metrics.CheckpointSaveErrors++
+		r.metrics.CheckpointSaveError = err.Error()
+	}
+	log.Printf("fak agent: session checkpoint %q turn %d not saved: %v", r.cfg.sessionCheckpointID, turn+1, err)
 }

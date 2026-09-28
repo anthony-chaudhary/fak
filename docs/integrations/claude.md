@@ -89,7 +89,7 @@ fak claude
 ```
 
 `fak claude` is the dedicated first-class launcher for Claude Code:
-1. Automatically connects to the local Mac `fak serve` backend at `http://127.0.0.1:8080` (or `ANTHROPIC_BASE_URL` / `--gateway-url`).
+1. Automatically connects to the local Mac `fak serve` backend at `http://127.0.0.1:8080`. Precedence: `--gateway-url`/`--base-url`, then `FAK_MAC_GATEWAY`, then `ANTHROPIC_BASE_URL` unless it names `api.anthropic.com` (the value Claude Code exports into its child shells), then the local default.
 2. Probes `/healthz` to discover the live served model (e.g. `qwen38:27b-q4`) and configures all Claude model tiers (`ANTHROPIC_MODEL`, Opus, Sonnet, Haiku).
 3. Sets `ANTHROPIC_API_KEY=fak-local-dogfood`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, and `API_TIMEOUT_MS=1800000`.
 4. Launches Claude Code directly as a raw harness talking to the backend's `/v1/messages` endpoint.
