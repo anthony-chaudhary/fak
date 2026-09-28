@@ -25,6 +25,31 @@ func newTestShard(t *testing.T, id int, modelPageBytes uint64, warmupOps int, au
 	return s
 }
 
+// rebuildWaitTimeout bounds waitDetectionStatus. It is a hang guard, not a
+// latency budget: the poll returns as soon as the state is observed.
+const rebuildWaitTimeout = 10 * time.Second
+
+// waitDetectionStatus polls the shard's size-detection snapshot until it
+// reports want, or the timeout passes, and returns the last snapshot seen.
+//
+// The auto-rebuild that moves a shard from "detected" to "rebuilt" is
+// asynchronous: startMigration builds a fresh slab allocator (a 64 MiB mmap
+// that takes 70-330ms on a 2-core CI runner) in a background goroutine, and
+// the shard goroutine then migrates entries and freezes the tracker in
+// finalizeMigration. A fixed sleep races that pipeline, so callers wait on the
+// observable state instead.
+func waitDetectionStatus(t *testing.T, s *Shard, want string, timeout time.Duration) DetectionSnapshot {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		snap := s.SizeDetectionSnapshot()
+		if snap.Status == want || !time.Now().Before(deadline) {
+			return snap
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func TestVacuumEvaluation_NoDetection(t *testing.T) {
 	// A shard with no detected size should not need rebalancing.
 	s := newTestShard(t, 0, 0, 1000, true)
@@ -342,14 +367,7 @@ func TestVacuumRebalancePreservesData(t *testing.T) {
 	}
 
 	// Wait for async allocator construction + migration to complete
-	var snap DetectionSnapshot
-	for i := 0; i < 100; i++ {
-		snap = s.SizeDetectionSnapshot()
-		if snap.Status == "rebuilt" {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	snap := waitDetectionStatus(t, s, "rebuilt", rebuildWaitTimeout)
 	if snap.Status != "rebuilt" {
 		t.Fatalf("expected status 'rebuilt', got %q", snap.Status)
 	}
@@ -1139,9 +1157,7 @@ func TestVacuumNoInfiniteLoopAutoDetect(t *testing.T) {
 	}
 
 	// Wait for auto-rebuild to complete
-	time.Sleep(100 * time.Millisecond)
-
-	snap := s.SizeDetectionSnapshot()
+	snap := waitDetectionStatus(t, s, "rebuilt", rebuildWaitTimeout)
 	if snap.Status != "rebuilt" {
 		t.Fatalf("expected status 'rebuilt', got %q", snap.Status)
 	}
@@ -1193,9 +1209,9 @@ func TestVacuumSkipsFrozenShard(t *testing.T) {
 			Result:  make(chan OpResult, 1),
 		})
 	}
-	time.Sleep(100 * time.Millisecond)
 
-	snap := s.SizeDetectionSnapshot()
+	// Wait for auto-rebuild to complete
+	snap := waitDetectionStatus(t, s, "rebuilt", rebuildWaitTimeout)
 	if snap.Status != "rebuilt" {
 		t.Fatalf("expected status 'rebuilt', got %q", snap.Status)
 	}
@@ -1276,10 +1292,8 @@ func TestJustDetectedPreservedOnSemFull(t *testing.T) {
 		Result:  make(chan OpResult, 1),
 	})
 
-	// Give migration time to complete
-	time.Sleep(200 * time.Millisecond)
-
-	snap = s.SizeDetectionSnapshot()
+	// Wait for the retried migration to complete
+	snap = waitDetectionStatus(t, s, "rebuilt", rebuildWaitTimeout)
 	if snap.Status != "rebuilt" {
 		t.Errorf("expected status 'rebuilt' after retry, got %q", snap.Status)
 	}
