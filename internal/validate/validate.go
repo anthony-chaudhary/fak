@@ -1130,63 +1130,6 @@ func cleanupValidateWSLDir(dir string) {
 	_, _ = validateWSLCommand(ctx, "bash", "-lc", "rm -rf -- "+posixQuote(dir))
 }
 
-func overlayMinePathsWSLWithin(ctx context.Context, srcRoot, wslRoot string, paths []string, checked func(string)) error {
-	stage, err := os.MkdirTemp("", "fak-validate-overlay-*")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(stage)
-	if err := overlayMinePathsWithin(ctx, srcRoot, stage, paths, nil); err != nil {
-		return err
-	}
-	stageWSL, err := validateWSLPwdWithin(ctx, stage)
-	if err != nil {
-		return err
-	}
-	commands := []string{"set -euo pipefail"}
-	for _, rel := range paths {
-		dst := strings.TrimSuffix(wslRoot, "/") + "/" + filepath.ToSlash(rel)
-		staged := filepath.Join(stage, filepath.FromSlash(rel))
-		if _, statErr := os.Stat(staged); statErr == nil {
-			parent := strings.TrimSuffix(wslRoot, "/") + "/" + filepath.ToSlash(filepath.Dir(filepath.FromSlash(rel)))
-			src := strings.TrimSuffix(stageWSL, "/") + "/" + filepath.ToSlash(rel)
-			commands = append(commands, "mkdir -p -- "+posixQuote(parent), "cp -- "+posixQuote(src)+" "+posixQuote(dst))
-		} else if os.IsNotExist(statErr) {
-			commands = append(commands, "rm -rf -- "+posixQuote(dst))
-		} else {
-			return statErr
-		}
-	}
-	cmd := windowgate.CommandContext(ctx, "wsl.exe", "bash", "-lc", strings.Join(commands, "; "))
-	windowgate.ConfigureBackgroundCommand(cmd)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return fmt.Errorf("overlay owned paths in WSL: %s", strings.TrimSpace(string(out)))
-	}
-	if checked != nil {
-		for _, rel := range paths {
-			checked(rel)
-		}
-	}
-	return nil
-}
-
-func validateWSLPwdWithin(ctx context.Context, windowsDir string) (string, error) {
-	cmd := windowgate.CommandContext(ctx, "wsl.exe", "--cd", windowsDir, "bash", "-lc", "pwd")
-	windowgate.ConfigureBackgroundCommand(cmd)
-	out, err := cmd.Output()
-	if err != nil {
-		if ctx.Err() != nil {
-			return "", ctx.Err()
-		}
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
 func runValidateWSLCommandWithin(ctx context.Context, root string, args ...string) ([]byte, error) {
 	command := "set -euo pipefail; cd " + posixQuote(root) + "; exec"
 	for _, arg := range args {
