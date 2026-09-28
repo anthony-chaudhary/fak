@@ -93,6 +93,13 @@ const (
 	reasonSoftLine = 12 // structured refusal reasons an operator must understand
 	reasonRef      = 30 // the headroom reference (no hard ceiling -- refusals are SOFT)
 
+	// The refusal SCORE is re-based past reasonRef; see refusalVocabScore. reasonRef stays the
+	// pressure headroom end and becomes the score curve's documented break; reasonWall is the
+	// new zero, the same 200-token navigation wall the verb surface declares (verbHardCeiling),
+	// held as its own constant so moving the verb ceiling cannot silently re-scale refusals.
+	reasonBreakScore = 50  // the score at the break: past the original reference is failing territory
+	reasonWall       = 200 // at/past this the vocabulary is a wall and the score floors at 0
+
 	metaShareSoftLine = 0.08 // share of verbs that are meta-scorecards/RSI (clutter the surface)
 	metaShareRef      = 0.25 // the headroom reference
 )
@@ -355,6 +362,29 @@ func magnitudeScore(value, softLine, ceiling float64) float64 {
 	return 100 * (1 - (value-softLine)/(ceiling-softLine))
 }
 
+// refusalVocabScore is the re-based refusal_vocab_size score. The plain magnitudeScore ramp
+// (100 at the soft line, 0 at reasonRef=30) was written when the vocabulary held ~12-20 reasons;
+// every count from 30 up clamped to 0, so 86 reasons and 149 reasons both read 0.000 and the KPI
+// carried no information. The re-based curve is piecewise with ONE documented break at reasonRef:
+//
+//   - n <= 12:       100 (at/under the soft line reads as good, unchanged)
+//   - 12 < n <= 30:  linear 100 -> 50 (the original era's headroom, at half its old amplitude)
+//   - 30 < n < 200:  logarithmic 50 -> 0 (each doubling of the vocabulary costs the same points)
+//   - n >= 200:      0 (the wall; the Soft signal says the scale has saturated again)
+//
+// It is monotone non-increasing in n, so more structured refusals never score better.
+func refusalVocabScore(n float64) float64 {
+	switch {
+	case n <= reasonSoftLine:
+		return 100
+	case n <= reasonRef:
+		return 100 - (100-reasonBreakScore)*(n-reasonSoftLine)/(reasonRef-reasonSoftLine)
+	case n >= reasonWall:
+		return 0
+	}
+	return reasonBreakScore * (1 - math.Log(n/reasonRef)/math.Log(float64(reasonWall)/reasonRef))
+}
+
 // headroomConsumed is the normalized pressure contribution of one magnitude term: the share of the
 // soft->ceiling headroom the value has consumed, as an integer 0-100 (clamped). Normalizing every
 // term to its own span is what makes a verb, a flag, and a refusal reason commensurable in the
@@ -484,14 +514,17 @@ func kpiFrontDoorFlagBurden(s Surface) scorecard.KPI {
 // hit. Each is correct by design, but every reason is one more way a green change is refused at the
 // seam and one more token the operator must learn. SOFT -- the only cheap "fix" would be deleting a
 // real guard, which is the wrong move; the signal is the trend, watched not gamed. (agent_readiness
-// also reads these blocks, for recovery-mapping not size -- see the package doc.)
+// also reads these blocks, for recovery-mapping not size -- see the package doc.) The score rides
+// the re-based refusalVocabScore curve; the pressure term keeps the original soft->ref headroom.
 func kpiRefusalVocabSize(s Surface) scorecard.KPI {
 	n := float64(s.RefusalReasons)
 	k := scorecard.KPI{
-		Key: "refusal_vocab_size", Group: "ceremony", Score: magnitudeScore(n, reasonSoftLine, reasonRef),
-		Detail: fmt.Sprintf("%d structured refusal reasons in the vocabulary (soft %d)", s.RefusalReasons, reasonSoftLine),
+		Key: "refusal_vocab_size", Group: "ceremony", Score: refusalVocabScore(n),
+		Detail: fmt.Sprintf("%d structured refusal reasons in the vocabulary (soft %d, log break %d, wall %d)", s.RefusalReasons, reasonSoftLine, reasonRef, reasonWall),
 	}
-	if s.RefusalReasons > reasonSoftLine {
+	if s.RefusalReasons >= reasonWall {
+		k.Soft = []string{fmt.Sprintf("%d structured refusal reasons reach the %d-reason wall -- the score is floored and no longer discriminates; consolidate reasons or re-base the scale", s.RefusalReasons, reasonWall)}
+	} else if s.RefusalReasons > reasonSoftLine {
 		k.Soft = []string{fmt.Sprintf("%d structured refusal reasons -- each is a correct guard, but the trend is the operator's cognitive load; keep new reasons earning their place", s.RefusalReasons)}
 	}
 	return k
@@ -519,6 +552,9 @@ func kpiConfigSurface(s Surface) scorecard.KPI {
 
 // pressureByTerm returns the per-magnitude-KPI headroom-consumed contributions, keyed for the
 // corpus breakdown so a reader sees WHERE the pressure concentrates (H1 of the self-audit).
+// The refusal term deliberately stays on the original soft->ref headroom and reads 100 (headroom
+// exhausted) past reasonRef: re-spanning it onto the re-based score curve would LOWER the
+// heaviness_pressure headline with no change to the surface, so the score re-base leaves it alone.
 func pressureByTerm(s Surface) map[string]int {
 	return map[string]int{
 		"cli_verb_count":         headroomConsumed(float64(len(s.Verbs)), verbSoftLine, verbHardCeiling),

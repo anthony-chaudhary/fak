@@ -1,6 +1,7 @@
 package heavinessscore
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,6 +176,94 @@ func TestRefusalVocabSize_SoftOnly(t *testing.T) {
 	if len(k.Soft) != 1 {
 		t.Errorf("20 reasons (over soft line) must be a soft signal, got %v", k.Soft)
 	}
+	// Past the wall the KPI is still SOFT, but the signal must say the scale has saturated.
+	wall := kpiRefusalVocabSize(Surface{RefusalReasons: reasonWall})
+	if len(wall.Defects) != 0 || len(wall.Soft) != 1 || !strings.Contains(wall.Soft[0], "no longer discriminates") {
+		t.Errorf("at the wall: want one saturation soft signal and no hard debt, got defects=%v soft=%v", wall.Defects, wall.Soft)
+	}
+}
+
+func TestRefusalVocabScore_SeparatesHistoricalReadings(t *testing.T) {
+	// The vocabulary has read 86 and 149 reasons; the original linear ramp (0 at reasonRef=30)
+	// scored BOTH 0 -- the saturation this re-base exists to fix. Witness the old failure, then
+	// require the re-based KPI to separate them, in the right direction, off both clamps.
+	if old86, old149 := magnitudeScore(86, reasonSoftLine, reasonRef), magnitudeScore(149, reasonSoftLine, reasonRef); old86 != 0 || old149 != 0 {
+		t.Fatalf("regression witness: the original ramp should floor both readings, got 86=%v 149=%v", old86, old149)
+	}
+	s86 := kpiRefusalVocabSize(Surface{RefusalReasons: 86}).Score
+	s149 := kpiRefusalVocabSize(Surface{RefusalReasons: 149}).Score
+	if s86 == s149 {
+		t.Fatalf("86 and 149 reasons both score %v -- the scale still does not discriminate", s86)
+	}
+	if s86-s149 < 10 {
+		t.Errorf("86 reasons (%.1f) must score clearly better than 149 (%.1f), gap %.1f < 10", s86, s149, s86-s149)
+	}
+	for n, sc := range map[int]float64{86: s86, 149: s149} {
+		if sc <= 0 || sc >= reasonBreakScore {
+			t.Errorf("%d reasons scored %.2f, want strictly inside (0, %d): past the break, off the floor", n, sc, reasonBreakScore)
+		}
+	}
+}
+
+func TestRefusalVocabScore_PinnedCurve(t *testing.T) {
+	// The documented shape: 100 through the soft line, linear to 50 at the break, log to 0 at
+	// the wall. Pinned so a silent re-tune of any anchor shows up as a diff, not a vibe.
+	for _, c := range []struct {
+		n    float64
+		want float64
+	}{
+		{0, 100}, {12, 100}, {21, 75}, {30, 50}, {86, 22.24}, {149, 7.76}, {200, 0}, {1000, 0},
+	} {
+		if got := refusalVocabScore(c.n); math.Abs(got-c.want) > 0.01 {
+			t.Errorf("refusalVocabScore(%v) = %.3f, want %.2f", c.n, got, c.want)
+		}
+	}
+}
+
+func TestRefusalVocabScore_SoftLineReadsGood(t *testing.T) {
+	if got := refusalVocabScore(reasonSoftLine); got != 100 {
+		t.Errorf("the soft line must score the top of the range, got %v", got)
+	}
+	// One reason past the soft line still reads as an A, not a cliff.
+	if got := refusalVocabScore(reasonSoftLine + 1); got < 90 {
+		t.Errorf("one reason past the soft line scored %.2f, want >= 90", got)
+	}
+	// Past the original reference the vocabulary is failing territory (GradeStd F is < 60).
+	if got := refusalVocabScore(reasonRef + 1); got >= 60 {
+		t.Errorf("past the break scored %.2f, want < 60 (failing)", got)
+	}
+}
+
+func TestRefusalVocabScore_Monotonic(t *testing.T) {
+	// More structured refusals never score better; inside (soft, wall) every added reason costs.
+	prev := refusalVocabScore(0)
+	for n := 1; n <= 3*reasonWall; n++ {
+		got := refusalVocabScore(float64(n))
+		if got < 0 || got > 100 {
+			t.Fatalf("refusalVocabScore(%d) = %v outside [0,100]", n, got)
+		}
+		if got > prev {
+			t.Fatalf("refusalVocabScore(%d) = %v > refusalVocabScore(%d) = %v: more reasons scored better", n, got, n-1, prev)
+		}
+		if n > reasonSoftLine && n <= reasonWall && got >= prev {
+			t.Fatalf("refusalVocabScore(%d) = %v did not fall from %v inside the discriminating range", n, got, prev)
+		}
+		prev = got
+	}
+	// Continuous at the break: the linear and log segments meet at reasonBreakScore.
+	if lo, hi := refusalVocabScore(reasonRef-1e-9), refusalVocabScore(reasonRef+1e-9); math.Abs(lo-hi) > 1e-6 {
+		t.Errorf("discontinuity at the break: %v vs %v", lo, hi)
+	}
+}
+
+func TestRefusalPressureTerm_NotRebased(t *testing.T) {
+	// The score re-base must not quietly lighten the heaviness_pressure headline: the refusal
+	// term keeps the original soft->ref headroom, exhausted (100) at both historical readings.
+	for _, n := range []int{86, 149} {
+		if got := pressureByTerm(Surface{RefusalReasons: n})["refusal_vocab_size"]; got != 100 {
+			t.Errorf("refusal pressure term at %d reasons = %d, want 100 (headroom exhausted, unchanged by the re-base)", n, got)
+		}
+	}
 }
 
 func TestVerbTierSplit_ContinuityWitness(t *testing.T) {
@@ -305,6 +394,15 @@ func TestBuild_LiveTree(t *testing.T) {
 	}
 	if !registeredOK || registeredFlags < commonFlags {
 		t.Errorf("registered guard flags = %v, want an integer preserving the complete surface (>= %d common)", p.Corpus["registered_guard_flags"], commonFlags)
+	}
+	// Inside the re-based scale's discriminating range the refusal KPI must not read a clamp: a
+	// KPI pinned at 0 (the pre-re-base state at 86 and 149 reasons) carries no information.
+	if reasons, _ := p.Corpus["refusal_reasons"].(int); reasons > reasonSoftLine && reasons < reasonWall {
+		for _, k := range p.KPIs {
+			if k.Key == "refusal_vocab_size" && (k.Score <= 0 || k.Score >= 100) {
+				t.Errorf("live-tree refusal_vocab_size scored %v at %d reasons, want strictly inside (0,100)", k.Score, reasons)
+			}
+		}
 	}
 	t.Logf("live-tree operator-heaviness: debt=%d pressure=%d verbs=%v (frontdoor=%v dev=%v) flags=%v common/%v registered reasons=%v",
 		debt, pressure, verbs, fd, dv, commonFlags, registeredFlags, p.Corpus["refusal_reasons"])
