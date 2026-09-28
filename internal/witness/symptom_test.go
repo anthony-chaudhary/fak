@@ -517,10 +517,13 @@ func TestSymptomExplicitTagsReachExecutor(t *testing.T) {
 
 	// Record every exec argv. This closure is pointer-distinct from the package-default
 	// commandRunner, so runSelector uses it rather than falling through to RunPipeWitness.
+	// Go witnesses run through the selected path (`go test -json -run <changed test>`),
+	// which needs a JSON `run` event per selector, so the fake speaks test2json.
 	// resolveSymptomExec runs GREEN at the fix FIRST, then RED at the parent, so:
-	//   - first go test invocation (green at the fix): a pass
+	//   - first go test invocation (green at the fix): the selected test runs and passes
 	//   - second (red at the parent): a REAL test failure — not a build failure, so it is
 	//     classified as red symptom evidence (no isGoBuildFailure marker is present).
+	const run = "{\"Action\":\"run\",\"Package\":\"m\",\"Test\":\"TestSignNegative\"}\n"
 	var seen [][]string
 	goTestCalls := 0
 	exec := func(_ context.Context, _ string, argv ...string) (string, int, error) {
@@ -530,9 +533,11 @@ func TestSymptomExplicitTagsReachExecutor(t *testing.T) {
 		}
 		goTestCalls++
 		if goTestCalls == 1 {
-			return "", 0, nil // green at the fix
+			return run + "{\"Action\":\"pass\",\"Package\":\"m\",\"Test\":\"TestSignNegative\"}\n", 0, nil // green at the fix
 		}
-		return "--- FAIL: TestSignNegative\n    sign_test.go:6: Sign(-3)=0, want -1\nFAIL\nFAIL\tm\t0.010s\nFAIL\n", 1, nil
+		return run +
+			"{\"Action\":\"output\",\"Package\":\"m\",\"Test\":\"TestSignNegative\",\"Output\":\"    sign_test.go:6: Sign(-3)=0, want -1\\n\"}\n" +
+			"{\"Action\":\"fail\",\"Package\":\"m\",\"Test\":\"TestSignNegative\"}\n", 1, nil
 	}
 
 	r := NewWithRunners(gitRunner, exec, dir).WithSymptomTags([]string{"vulkan"})
@@ -545,7 +550,7 @@ func TestSymptomExplicitTagsReachExecutor(t *testing.T) {
 	}
 	// The composition claim: every recorded `go test` argv carries the explicit tag. The
 	// test file is untagged, so this tag could only have travelled from WithSymptomTags.
-	want := []string{"go", "test", "-count=1", "./.", "-tags", "vulkan"}
+	want := []string{"go", "test", "-json", "-count=1", "-run", "(?:^TestSignNegative$)", "./.", "-tags", "vulkan"}
 	found := false
 	for _, argv := range seen {
 		if !containsArg(argv, "-tags") || !containsArg(argv, "vulkan") {
