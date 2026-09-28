@@ -213,9 +213,7 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 		// arm, and the selective Q6_K arm (fak#13310). A Q6-only effect must price eligible
 		// Q6_K at packed bytes here, or admission would charge the Q8 fallback while the
 		// loader retains the packed tensor.
-		retainKQuant := loadOpts.residentDenseKQuant ||
-			(loadOpts.residentDenseQ2K && info.Type == TensorQ2_K) ||
-			(loadOpts.residentDenseQ6K && info.Type == TensorQ6_K)
+		retainKQuant := denseKQuantRetained(loadOpts, info.Type)
 		packedKQuant := info.Type != TensorQ4_K && residentable &&
 			((qwenMTP && info.Type == TensorQ6_K) || (retainKQuant && model.ResidentKQuantEligible(cfg, canon)))
 		n, dtype := payload, ggufTensorDTypeLabel(info.Type)
@@ -248,8 +246,11 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 		// loader's lazyDenseQ4KTensorWork / lazyKQuantTensorWork branches), so they are charged to
 		// a single bounded HOST working set rather than the full dense side. denseBoundedEligible
 		// is the SAME predicate the loader dispatches on, so the estimate and the loader cannot
-		// disagree about which tensors the policy covers.
-		if loadOpts.streamedDenseBounded && denseBoundedEligible(cfg, info.Type, canon) {
+		// disagree about which tensors the policy covers. A non-Q4_K type the residency options
+		// send to Q8 (denseKQuantRetained false) is not held lazily by the loader either, so it
+		// stays on the Q8 device charge above instead of folding into the host working set.
+		if loadOpts.streamedDenseBounded && denseBoundedEligible(cfg, info.Type, canon) &&
+			(info.Type == TensorQ4_K || denseKQuantRetained(loadOpts, info.Type)) {
 			if hostDenseStreamed > math.MaxUint64-n {
 				return nil, fmt.Errorf("gguf: streamed-dense estimate bytes overflow")
 			}

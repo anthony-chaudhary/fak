@@ -164,3 +164,77 @@ func TestQwen38StreamedDenseQ2KLoaderBuildsWithoutQ2KPayloadRead(t *testing.T) {
 		t.Fatal("exact-model dense Q2_K tensor was not checkpoint-backed")
 	}
 }
+
+// TestStreamedDenseKQuantHonoursResidencyOptions pins the residency contract of the #13201
+// bounded-lazy route: the streamed-dense loader may hold a non-Q4_K dense k-quant as a lazy range
+// ONLY when the residency options retain that type. A backend that disabled dense k-quant
+// residency (WithDenseKQuantResident(false), e.g. modelbench's Vulkan mixed-quant load) has no
+// kernel for the format, so the tensor must take the dequant-to-Q8 path exactly as the resident
+// load does; before the gate it stayed lazy in the raw k-quant store and the HAL forward fell
+// through to a missing-f32-tensor panic. The estimate fold must agree with the loader.
+func TestStreamedDenseKQuantHonoursResidencyOptions(t *testing.T) {
+	const (
+		dim   = 256
+		vocab = 4
+		head  = "lm_head.weight"
+	)
+	q6Path := buildQwen35GGUFFixture(t, "qwen35", dim, vocab, TensorQ2_K, TensorQ6_K, false, false)
+	q5Path := buildQwen35GGUFFixture(t, "qwen35", dim, vocab, TensorQ2_K, TensorQ5_K, false, false)
+	for _, tc := range []struct {
+		name     string
+		path     string
+		opts     []Q4KLoadOption
+		retained bool
+	}{
+		{"default-retains-lazy", q6Path, nil, true},
+		{"q8-fallback", q6Path, []Q4KLoadOption{WithDenseKQuantResident(false)}, false},
+		{"q6-only-retains-q6", q6Path, []Q4KLoadOption{WithDenseKQuantResident(false), WithDenseQ6KResident(true)}, true},
+		{"q6-only-converts-q5", q5Path, []Q4KLoadOption{WithDenseKQuantResident(false), WithDenseQ6KResident(true)}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := LoadModelQ4KStreamedDense(tc.path, nil, tc.opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = m.CloseWeights() })
+			if tc.retained {
+				if !m.KQuantLazy(head) || m.HasQ8(head) {
+					t.Fatalf("retained dense k-quant %s: lazy=%v q8=%v; want lazy k-quant, no Q8", head, m.KQuantLazy(head), m.HasQ8(head))
+				}
+				return
+			}
+			if m.HasKQuant(head) || !m.HasQ8(head) {
+				t.Fatalf("non-retained dense k-quant %s: kquant=%v q8=%v; want the Q8 conversion", head, m.HasKQuant(head), m.HasQ8(head))
+			}
+		})
+	}
+
+	// Estimate parity under the BOUNDED policy: a Q6_K head the options send to Q8 is charged at
+	// its Q8 bytes on the device side, not folded into the bounded host working set.
+	ws, err := OpenWeights(q6Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ws.Close() })
+	const (
+		packedQ6Output   = vocab * blockQ6KBytes
+		q8FallbackOutput = vocab * dim / 32 * 36
+		unboundedHost    = int64(1) << 40
+	)
+	q8Plan, err := ws.EstimateQ4KLoadMemoryPlan(WithDenseKQuantResident(false), WithStreamedDenseQ4KWorkingSet(unboundedHost))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q6Plan, err := ws.EstimateQ4KLoadMemoryPlan(WithDenseKQuantResident(false), WithDenseQ6KResident(true), WithStreamedDenseQ4KWorkingSet(unboundedHost))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q8Host := memoryPlanBytesByDetail(q8Plan)["gguf-host-dense-streamed"]
+	q6Host := memoryPlanBytesByDetail(q6Plan)["gguf-host-dense-streamed"]
+	if q6Host-q8Host != packedQ6Output {
+		t.Fatalf("bounded host row: q6-retained %d - q8-fallback %d = %d, want the packed Q6_K head %d", q6Host, q8Host, q6Host-q8Host, packedQ6Output)
+	}
+	if got, want := q8Plan.Total()-q6Plan.Total(), int64(q8FallbackOutput-packedQ6Output); got != want {
+		t.Fatalf("plan total delta (q8-fallback - q6-retained) = %d, want Q8 head %d - packed head %d = %d", got, q8FallbackOutput, packedQ6Output, want)
+	}
+}

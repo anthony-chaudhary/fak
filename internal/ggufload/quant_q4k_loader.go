@@ -772,6 +772,19 @@ func lazyDenseKQuantBoundedEligible(cfg model.Config, t TensorType, canon string
 	return model.ResidentKQuantEligible(cfg, canon)
 }
 
+// denseKQuantRetained is the ONE residency predicate that decides whether a dense non-Q4_K
+// k-quant of type t keeps its source representation (resident or bounded-lazy) rather than
+// taking the dequant-to-Q8 path: blanket dense k-quant residency, the selective Q2_K arm, or the
+// selective Q6_K arm. The resident branch, the streamed-dense lazy branch and the estimate in
+// estimate.go all consult it, so a backend that disabled dense k-quant residency (because it has
+// no kernel for the format) can never have the bounded-lazy route re-admit that tensor into the
+// raw k-quant store where its HAL cannot reach it.
+func denseKQuantRetained(o q4kLoadOptions, t TensorType) bool {
+	return o.residentDenseKQuant ||
+		(o.residentDenseQ2K && t == TensorQ2_K) ||
+		(o.residentDenseQ6K && t == TensorQ6_K)
+}
+
 // applyLazyKQuantByType routes a lazyKQuant pending tensor to the matching per-type lazy builder
 // entry (AddLazyKQuantQ2K/Q3K/Q5K/Q6K, exported by package model for exactly this consumer), so
 // the unexported kQuantKind never crosses the package boundary. A type with no lazy entry is a
@@ -1197,8 +1210,11 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 	// falling through to the raw resident charge. The gate is the loader's OWN bounded-dense
 	// eligibility (block geometry + ResidentKQuantEligible), so the estimate fold in estimate.go
 	// can mirror it exactly and the two cannot disagree. Q4_K is excluded because the branch above
-	// already owns it.
-	if loadOpts.streamedDenseQ4K && info.Type != TensorQ4_K && lazyDenseKQuantBoundedEligible(cfg, info.Type, canon) {
+	// already owns it. The route is also gated on the residency options (denseKQuantRetained): a
+	// type the caller asked to convert to Q8 must fall through to that conversion below rather
+	// than be held lazily in the raw k-quant store its backend cannot execute.
+	if loadOpts.streamedDenseQ4K && info.Type != TensorQ4_K && denseKQuantRetained(loadOpts, info.Type) &&
+		lazyDenseKQuantBoundedEligible(cfg, info.Type, canon) {
 		return s.lazyKQuantTensorWork(info, canon, tw.tickBytes)
 	}
 	shape, raw, ok := s.shapeAndBytesOrFail(info, &tw)
@@ -1221,9 +1237,7 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 		tw.acctResident = true
 		return tw
 	}
-	retainDenseKQuant := loadOpts.residentDenseKQuant ||
-		(loadOpts.residentDenseQ2K && info.Type == TensorQ2_K) ||
-		(loadOpts.residentDenseQ6K && info.Type == TensorQ6_K)
+	retainDenseKQuant := denseKQuantRetained(loadOpts, info.Type)
 	if _, _, residentable := residentExpertBlockGeometry(info.Type); retainDenseKQuant && residentable &&
 		info.Type != TensorQ4_K && !archUsesMLAMoELayout(cfg.ModelType) &&
 		model.ResidentKQuantEligible(cfg, canon) {
