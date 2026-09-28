@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -132,6 +131,18 @@ func TestOpencodeLiveGatewayWireTransitWitness(t *testing.T) {
 	t.Cleanup(journal.ResetActiveForTest)
 	t.Setenv("TEST_UPSTREAM_KEY", upstreamKey)
 
+	// The guard serves its gateway only while its child runs and tears it down when the child
+	// exits, so a child that exits on its own (the old `echo`) raced every request below: on a
+	// loaded host the gateway was gone before the health poll ever saw it. The child is this
+	// test binary held in TestOpencodeLiveGuardChildHelper until the test creates childRelease.
+	childRelease := filepath.Join(tempDir, "child-release")
+	t.Setenv(opencodeLiveChildReleaseEnv, childRelease)
+	releaseChild := func() {
+		if err := os.WriteFile(childRelease, []byte("release\n"), 0o600); err != nil {
+			t.Errorf("release guard child: %v", err)
+		}
+	}
+
 	// Pick a free local port for the gateway
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -153,14 +164,13 @@ func TestOpencodeLiveGatewayWireTransitWitness(t *testing.T) {
 			t.Log("in-process guard still running at cleanup; its process-global state may leak")
 		}
 	})
+	// Registered last so it runs before the wait above: a test that fails early still lets
+	// the held child (and so the guard) finish instead of idling out its bound.
+	t.Cleanup(releaseChild)
 	go func() {
 		defer close(guardExited)
-		childCmd := "cmd"
-		childArgs := []string{"/c", "echo", "opencode-child-running"}
-		if runtime.GOOS != "windows" {
-			childCmd = "sh"
-			childArgs = []string{"-c", "echo opencode-child-running"}
-		}
+		childCmd := os.Args[0]
+		childArgs := []string{"-test.run=^TestOpencodeLiveGuardChildHelper$"}
 		argv := []string{
 			"--provider", "openai",
 			"--addr", gwAddr,
@@ -181,16 +191,20 @@ func TestOpencodeLiveGatewayWireTransitWitness(t *testing.T) {
 
 	gwURL := "http://" + gwAddr + "/v1"
 
-	// Wait for gateway to become healthy
+	// Wait for gateway to become healthy. The held child keeps it serving, so the only ways
+	// out are a healthy probe, the guard exiting (a real failure, reported with its code), or
+	// a generous startup bound sized for a loaded 2-core CI runner.
 	client := &http.Client{Timeout: 2 * time.Second}
 	var ready bool
-	for i := 0; i < 50; i++ {
-		time.Sleep(50 * time.Millisecond)
+	for deadline := time.Now().Add(30 * time.Second); !ready && time.Now().Before(deadline); {
+		select {
+		case <-guardExited:
+			t.Fatalf("guard exited (code %d) before its gateway at %s became healthy", <-guardDone, gwAddr)
+		case <-time.After(50 * time.Millisecond):
+		}
 		resp, err := client.Get("http://" + gwAddr + "/healthz")
 		if err == nil && resp.StatusCode == http.StatusOK {
-			_ = resp.Body.Close()
 			ready = true
-			break
 		}
 		if resp != nil {
 			_ = resp.Body.Close()
@@ -257,14 +271,16 @@ func TestOpencodeLiveGatewayWireTransitWitness(t *testing.T) {
 		t.Fatalf("upstream saw auth %q, want %q (credential swap failed)", authSent, "Bearer "+upstreamKey)
 	}
 
-	// Wait for guard child to complete
+	// Release the held child and wait for the guard to finish its teardown, so the journal
+	// read below sees every row the session recorded.
+	releaseChild()
 	select {
 	case code := <-guardDone:
 		if code != 0 {
 			t.Logf("guard exited with code %d (acceptable for test child)", code)
 		}
-	case <-time.After(5 * time.Second):
-		t.Log("guard still finishing")
+	case <-time.After(60 * time.Second):
+		t.Fatal("guard did not finish within 60s of its child being released")
 	}
 
 	// Check 4: Tool call was adjudicated and recorded in the audit journal
@@ -275,6 +291,29 @@ func TestOpencodeLiveGatewayWireTransitWitness(t *testing.T) {
 		}
 		t.Logf("audit journal verified: %d hash-chained rows intact", n)
 	}
+}
+
+// opencodeLiveChildReleaseEnv names the file whose creation releases the guard-launched
+// stand-in child of TestOpencodeLiveGatewayWireTransitWitness.
+const opencodeLiveChildReleaseEnv = "FAK_TEST_OPENCODE_LIVE_CHILD_RELEASE"
+
+// TestOpencodeLiveGuardChildHelper is the stand-in agent child the in-process guard launches
+// in TestOpencodeLiveGatewayWireTransitWitness (this test binary re-exec'd). It stays alive —
+// and so keeps the guard's gateway serving — until the parent test creates the release file,
+// then exits 0. The bound only reaps an orphan whose parent died. As a normal test (env unset)
+// it is a no-op.
+func TestOpencodeLiveGuardChildHelper(t *testing.T) {
+	release := os.Getenv(opencodeLiveChildReleaseEnv)
+	if release == "" {
+		return
+	}
+	_, _ = os.Stdout.WriteString("opencode-child-running\n")
+	for deadline := time.Now().Add(2 * time.Minute); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if _, err := os.Stat(release); err == nil {
+			os.Exit(0)
+		}
+	}
+	os.Exit(3)
 }
 
 // restoreProcessEnvOnCleanup snapshots the whole process environment and puts it back at
