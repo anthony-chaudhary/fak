@@ -1156,6 +1156,13 @@ func TestOpsRunLifecycleAlreadyExitedChild(t *testing.T) {
 		_, _ = os.Stdout.WriteString("ready\n")
 		os.Exit(0)
 	}
+	if os.Getenv("FAK_OPS_TEST_CHILD_HOLD_UNTIL_CANCEL") == "1" {
+		// Stay alive until the parent's cancellation kills this process tree; the sleep
+		// only bounds an orphan if the parent dies first.
+		_, _ = os.Stdout.WriteString("ready\n")
+		time.Sleep(time.Minute)
+		os.Exit(0)
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -1177,7 +1184,12 @@ func TestOpsRunLifecycleAlreadyExitedChild(t *testing.T) {
 		t.Fatalf("probe exited process = %q, want exited", probed)
 	}
 
-	// 3. Test execution where probe reports exited at cancellation attempt
+	// 3. Test execution where probe reports exited at cancellation attempt. The cancel hook
+	// (and so the lifecycle record) only runs if the context is cancelled while cmd.Wait is
+	// still waiting: os/exec skips Cancel once it has reaped the child. A child that exits
+	// right after "ready" races that reap against cancel() and intermittently leaves no
+	// record, so the child is held alive until cancelled and the exited-at-cancel state
+	// comes from the stubbed probe, which is the path under test.
 	oldProbe := opsRunProbeChildState
 	t.Cleanup(func() { opsRunProbeChildState = oldProbe })
 	opsRunProbeChildState = func(cmd *exec.Cmd) string {
@@ -1193,7 +1205,7 @@ func TestOpsRunLifecycleAlreadyExitedChild(t *testing.T) {
 		lc   []opsRunLifecycleRecord
 	)
 	go func() {
-		code, _, _, l := executeOpsRun(ctx, w, io.Discard, []string{exe, "-test.run=^TestOpsRunLifecycleAlreadyExitedChild$"}, append(os.Environ(), "FAK_OPS_TEST_CHILD_EXIT_EARLY=1"), nil)
+		code, _, _, l := executeOpsRun(ctx, w, io.Discard, []string{exe, "-test.run=^TestOpsRunLifecycleAlreadyExitedChild$"}, append(os.Environ(), "FAK_OPS_TEST_CHILD_HOLD_UNTIL_CANCEL=1"), nil)
 		lcMu.Lock()
 		lc = l
 		lcMu.Unlock()
