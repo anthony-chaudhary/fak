@@ -313,7 +313,7 @@ type Shard struct {
 	ops             chan ShardOp
 	quit            chan struct{}
 	done            chan struct{} // closed when run() exits
-	lifeMu          sync.Mutex    // serializes Start/Stop; the run loop never takes it
+	lifeMu          sync.Mutex    // serializes Start/Stop and async allocator delivery; the run loop never takes it
 	life            shardLife     // guarded by lifeMu
 	config          ShardConfig
 	dispatchTimeout time.Duration
@@ -625,6 +625,7 @@ func (s *Shard) Stop() {
 	case shardIdle:
 		close(s.quit)
 		s.drainOps()
+		s.discardPendingAlloc()
 		s.allocPtr.Load().a.Close()
 		close(s.done)
 	}
@@ -788,6 +789,9 @@ func (s *Shard) run() {
 		defer runtime.UnlockOSThread()
 	}
 	defer close(s.done)
+	// Whatever path the loop exits by, an allocator a builder parked in the
+	// mailbox before Stop would otherwise never be committed or closed.
+	defer s.discardPendingAlloc()
 
 	// Pin to NUMA node if topology was detected
 	if s.config.NUMANode >= 0 {
@@ -973,13 +977,7 @@ func (s *Shard) runLoopBody(ticker *time.Ticker, ttlTicker *time.Ticker, utilTic
 			s.checkUtilizationWarnings(lastWarnLevel)
 		case <-s.quit:
 			s.drainOps()
-			select {
-			case pa := <-s.pendingAlloc:
-				pa.newAlloc.Close()
-				s.allocBuilding.Store(false)
-				s.releaseMigrateSem()
-			default:
-			}
+			s.discardPendingAlloc()
 			s.allocPtr.Load().a.Close()
 			return true
 		}

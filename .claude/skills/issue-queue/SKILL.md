@@ -1,6 +1,6 @@
 ---
 name: issue-queue
-description: One repeatable, evidence-backed pass that manages, prioritizes, and resolves a bounded batch of backlog issues worst-first using specialized subagents. Inspects the issue queue via `fak issue-orchestrator` and `fak dispatch order`, partitions into ready-leaves, triage, and subdivide cohorts, arbitrates lane leases via `dos arbitrate`, dispatches parallel isolated worker subagents, independently witnesses reproduction tests with cross-validators, re-measures queue burndown with `--compare`, and commits with `(fak <leaf>)`. Use when managing the issue queue, picking the next bounded batch of issues to resolve, or advancing issue burndown.
+description: One repeatable, evidence-backed pass that prioritizes and resolves a bounded batch of backlog issues worst-first using specialized subagents. Inspects the queue via `fak issue-orchestrator` and `fak dispatch order`, partitions into ready-leaves, triage, and subdivide cohorts, arbitrates lane leases via `dos arbitrate`, dispatches isolated workers, independently witnesses reproduction tests, re-measures burndown with `--compare`, and commits with `(fak <leaf>)`. Use when managing the issue queue, picking the next bounded batch of issues, or advancing issue burndown.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Write, Edit, Grep, Glob, Task

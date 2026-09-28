@@ -145,7 +145,8 @@ func TestStrixComparatorAuthorityBindsApprovedReferenceAndAcceptedConnection(t *
 		}
 	}
 	if os.Getenv("FAK_STRIX_EXCHANGE_PIDNS") != "1" {
-		command := exec.Command("unshare", "--user", "--map-current-user", "--pid", "--fork", "--mount-proc", os.Args[0], "-test.run=^TestStrixComparatorAuthorityBindsApprovedReferenceAndAcceptedConnection$")
+		requireStrixWitnessNamespace(t)
+		command := exec.Command("unshare", strixWitnessNamespaceArgv(os.Args[0], "-test.run=^TestStrixComparatorAuthorityBindsApprovedReferenceAndAcceptedConnection$")...)
 		command.Env = append(os.Environ(), "FAK_STRIX_EXCHANGE_PIDNS=1")
 		output, err := command.CombinedOutput()
 		if err != nil {

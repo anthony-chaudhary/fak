@@ -23,6 +23,7 @@ func TestOOMNotTriggeredOnFragmentation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	t.Cleanup(s.Stop) // never started: Stop unmaps the allocator New mapped
 	// Don't start goroutine â€” we'll call methods directly
 
 	// Simulate 10 consecutive alloc failures
@@ -54,6 +55,7 @@ func TestOOMTriggeredWhenAllSaturated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	t.Cleanup(s.Stop) // never started: Stop unmaps the allocator New mapped
 
 	// Fill ALL slab classes to >90% by allocating various sizes
 	a := s.allocPtr.Load().a
@@ -94,6 +96,7 @@ func TestOOMClearedOnSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	t.Cleanup(s.Stop) // never started: Stop unmaps the allocator New mapped
 
 	// Force OOM state directly
 	s.oomActive = true
@@ -226,6 +229,7 @@ func TestProbabilisticPressureRejection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	t.Cleanup(s.Stop) // never started: Stop unmaps the allocator New mapped
 	s.systemPressureLevel = pressure
 
 	accepted := 0
@@ -257,6 +261,7 @@ func TestProbabilisticPressureLevel3(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	t.Cleanup(s.Stop) // never started: Stop unmaps the allocator New mapped
 	s.systemPressureLevel = pressure
 
 	accepted := 0

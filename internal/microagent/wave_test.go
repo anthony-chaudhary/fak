@@ -170,13 +170,40 @@ func TestWaveHostPartialAdmissionIsObservable(t *testing.T) {
 	// The agents block in Step so the single worker cannot retire one and free a
 	// queue slot mid-enrollment; admission is then exactly Workers + Queue.
 	release := make(chan struct{})
-	defer close(release)
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
 	started := &atomic.Int64{}
 	enrollments := make([]Enrollment, 4)
 	for i := range enrollments {
 		enrollments[i] = Enrollment{ID: "p-" + strconv.Itoa(i), Agent: &blockingWaveAgent{release: release, started: started}}
 	}
-	admitted := w.Enroll(enrollments)
+
+	// Park the single worker inside the first agent's Step BEFORE enrolling the
+	// rest. Whether the worker has dequeued p-0 by the time p-1..p-3 are offered
+	// is a scheduling race (it loses at GOMAXPROCS=2: the worker goroutine has not
+	// reached its receive, so p-0 occupies a queue slot and only 2 are admitted);
+	// waiting for the observable "in Step" state pins the in-flight slot.
+	head := w.Enroll(enrollments[:1])
+	if got := Admitted(head); got != 1 {
+		t.Fatalf("first enrollment admitted=%d, want 1 (refusal: %v)", got, FirstRefusal(head))
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for started.Load() < 1 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := started.Load(); got != 1 {
+		t.Fatalf("worker never parked in the first agent's Step (started=%d)", got)
+	}
+
+	// The worker is pinned and the queue is empty: of the remaining batch exactly
+	// Queue=2 fit and the tail is refused loudly, per agent, in input order.
+	tail := w.Enroll(enrollments[1:])
+	admitted := make([]EnrollmentResult, 0, len(enrollments))
+	admitted = append(append(admitted, head...), tail...)
 	if got := Admitted(admitted); got != 3 {
 		t.Fatalf("admitted=%d, want 3 (queue=2 + 1 in-flight)", got)
 	}
@@ -186,6 +213,25 @@ func TestWaveHostPartialAdmissionIsObservable(t *testing.T) {
 	}
 	if admitted[3].Admitted || !errors.Is(admitted[3].Err, ErrQueueFull) {
 		t.Fatalf("4th enrollment result=%+v, want refused with ErrQueueFull", admitted[3])
+	}
+
+	// The admitted agents still run to completion: no silently dropped tail and
+	// no admitted agent stranded by the refusal.
+	close(release)
+	released = true
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	results, err := w.DrainAll(ctx)
+	if err != nil {
+		t.Fatalf("DrainAll: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("reaped %d results, want the 3 admitted agents", len(results))
+	}
+	for _, r := range results {
+		if !r.Done || r.Err != nil {
+			t.Fatalf("admitted agent %s did not complete: %+v", r.ID, r)
+		}
 	}
 }
 

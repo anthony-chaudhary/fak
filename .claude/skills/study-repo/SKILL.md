@@ -1,6 +1,6 @@
 ---
 name: study-repo
-description: High-priority deep study of external code and proposals for fak. Invoke proactively whenever a repository, package, PR, issue, release, paper-with-code, or implementation is relevant—not only on explicit study requests. Acquire into scratch and pin revisions; mine code, tests, docs, history, releases, open and closed issues, PRs, discussions, roadmaps, and license/provenance; date every observation; directly port or adapt implementation when licensing permits; and explore both shipped mechanisms and the transferable spirit of proposed or incomplete ideas. Extract many source-anchored candidates, then. Use when this named workflow matches the task.
+description: High-priority deep study of external code and proposals for fak. Invoke proactively whenever a repository, package, PR, issue, release, paper-with-code, or implementation is relevant—not only on explicit study requests. Acquire into scratch and pin revisions; mine code, tests, docs, history, issues, PRs, roadmaps, and license/provenance; date every observation; port or adapt directly when licensing permits; explore shipped mechanisms and the transferable spirit of incomplete ideas; extract source-anchored candidates. Use when this named workflow matches the task.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Grep, Glob, Write, Edit, WebFetch, WebSearch, Agent, mcp__fak__fak_feature_query, mcp__fak__fak_capabilities, mcp__fak__fak_index_docs, mcp__fak__fak_index_leaves, mcp__fak__fak_index_verbs, mcp__fak__fak_index_claims

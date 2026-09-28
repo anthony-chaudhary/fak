@@ -36,32 +36,37 @@ go test ./internal/skillfootprint   # the enforcing test; -v logs the same figur
 ## Baseline (measured)
 
 ```
-skill footprint [interactive]: 71 skill(s); resident floor = 34000 bytes (~8500 tokens);
-  description floor = 34000 B; name-only floor = 956 B; at-rest card floor = 16466 bytes
-  at-rest intent slice (#5560): across 71 skill(s)
+skill footprint [interactive]: 73 skill(s); resident floor = 33769 bytes (~8442 tokens);
+  description floor = 33769 B; name-only floor = 978 B; at-rest card floor = 17021 bytes
+  at-rest intent slice (#5560): 12490 B across 73 skill(s)
 ```
 
 Heaviest resident descriptions — the trim targets:
 
 | rank | bytes | skill |
 |-----:|------:|-------|
-| 1 | 731 | debt-orchestrator |
-| 2 | 686 | field-borrow |
-| 3 | 680 | refresh-readme |
-| 4 | 657 | study-repo |
-| 5 | 652 | refresh-cachedoc-numbers |
-| 6 | 648 | milestone-score |
-| 7 | 647 | modularize |
-| 8 | 645 | issue-orchestrator |
+| 1 | 641 | git-subagent-sync |
+| 2 | 640 | token-defaults-score |
+| 3 | 633 | industry-score |
+| 4 | 630 | operator-heaviness-score |
+| 5 | 622 | quality-score |
+| 6 | 620 | negframe-score |
+| 7 | 617 | disambiguation-score |
+| 8 | 612 | dojo-rsi-score |
 
-The full 71-skill breakdown is what `fak skill footprint --top 0` prints; only the
+The full 73-skill breakdown is what `fak skill footprint --top 0` prints; only the
 head is pinned here so a drift is legible in review.
 
-`name-only floor = 956 B` is the size of the headroom: **33.0 kB of the 34.0 kB
+`name-only floor = 978 B` is the size of the headroom: **32.8 kB of the 33.8 kB
 resident floor is description prose**, and every skill stays invocable by name
 without a single byte of it.
 
-**Last re-pin: 33982 → 34000 B (+18, 71 skills)** — align goal scratch memory path in resident description.
+**Last re-pin: 34000 → 33769 B (−231, 73 skills)** — two new skills (ci-repair,
+opencode-wave) and description edits grew the floor to 34536 B (+536 over the pin);
+trimming the eight heaviest descriptions (field-borrow, refresh-readme,
+refresh-cachedoc-numbers, study-repo, milestone-score, modularize, issue-orchestrator,
+issue-queue — mostly redundant clauses and truncated fragments) recovered 767 B, and
+the 231 B below the old pin is banked rather than left as headroom.
 
 ## Provenance (Law A2 — every value carries its provenance)
 
@@ -91,7 +96,7 @@ in the twenty days that followed, the measured floor grew from 36,237 B to 47,23
 and taste lost 30% in three weeks.
 
 `internal/skillfootprint.CheckDescriptions` gates the measured floor against a
-committed ceiling, `SkillDescriptionBudgetBytes` (currently **34000**), as a one-way
+committed ceiling, `SkillDescriptionBudgetBytes` (currently **33769**), as a one-way
 ratchet:
 
 | Direction | Reason | What it means |

@@ -1,6 +1,6 @@
 ---
 name: milestone-score
-description: One repeatable pass that makes the milestone report's CLIMB and ROADMAP retirable by the RSI loop — the milestone counterpart of quality-score (code) and stability-score (trust under iteration). Runs the milestone scorecard (`fak milestone-scorecard --json`) over the report's OWN two dimensions — the distance-from-MATURED climb shortfall across the M0..M7 support-maturity grid PLUS the un-progressed tracked-epic roadmap gaps — folds them into one deterministic milestone_debt integer + a worst-first milestone_worklist, retires debt worst-first (climb the lowest-rung cell to M4, then close. Use when this named workflow matches the task.
+description: One repeatable pass that makes the milestone report's CLIMB and ROADMAP retirable by the RSI loop — the milestone counterpart of quality-score (code) and stability-score (trust under iteration). Runs `fak milestone-scorecard --json` over the report's OWN two dimensions — the M0..M7 support-maturity climb shortfall PLUS the un-progressed tracked-epic roadmap gaps — folds them into one deterministic milestone_debt integer + a worst-first milestone_worklist, and retires debt worst-first. Use when this named workflow matches the task.
 user-invocable: true
 allowed-tools: Read, Bash, Write, Edit, Grep, Glob
 ---

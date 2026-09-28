@@ -86,17 +86,54 @@ func (s *Shard) startMigration(weights map[uint64]float64, freezeAfter bool) boo
 		log.Printf("[rebalance] shard %d: allocator created in %s (async, shard stayed responsive)",
 			shardID, time.Since(allocStart).Truncate(time.Millisecond))
 
-		// Deliver to shard's run loop â€” non-blocking in case shard is shutting down
-		select {
-		case s.pendingAlloc <- &pendingAllocResult{newAlloc: newAlloc, weights: weights, freezeAfter: freezeAfter}:
-		default:
-			log.Printf("[rebalance] shard %d: allocator discarded (shard busy or shutting down)", shardID)
+		// Deliver to the shard's run loop, or close the allocator here when no run
+		// loop will ever commit it (shard stopped, or the mailbox is occupied).
+		if !s.deliverPendingAlloc(&pendingAllocResult{newAlloc: newAlloc, weights: weights, freezeAfter: freezeAfter}) {
 			newAlloc.Close()
 			s.allocBuilding.Store(false)
 			s.releaseMigrateSem()
 		}
 	}()
 	return true
+}
+
+// deliverPendingAlloc hands an asynchronously built allocator to the run loop's
+// single-slot mailbox. It reports false, leaving ownership (close, allocBuilding,
+// migrate semaphore) with the caller, when the shard is already stopped or the
+// mailbox is occupied.
+//
+// The stopped check and the send happen under lifeMu, the lock Stop holds while it
+// closes quit and marks the shard stopped. A builder that finishes after Stop can
+// therefore never park an allocator in the mailbox: once the run loop has exited
+// (or for a shard that never started) nothing would drain it again, and the mapped
+// allocator would leak for the life of the process.
+func (s *Shard) deliverPendingAlloc(pa *pendingAllocResult) bool {
+	s.lifeMu.Lock()
+	defer s.lifeMu.Unlock()
+	if s.life == shardStopped {
+		log.Printf("[rebalance] shard %d: allocator discarded (shard stopped)", s.id)
+		return false
+	}
+	select {
+	case s.pendingAlloc <- pa:
+		return true
+	default:
+		log.Printf("[rebalance] shard %d: allocator discarded (shard busy)", s.id)
+		return false
+	}
+}
+
+// discardPendingAlloc closes an allocator still parked in the mailbox and
+// releases what its builder acquired. The run loop calls it on exit and Stop
+// calls it for a never-started shard: past either point nothing commits it.
+func (s *Shard) discardPendingAlloc() {
+	select {
+	case pa := <-s.pendingAlloc:
+		pa.newAlloc.Close()
+		s.allocBuilding.Store(false)
+		s.releaseMigrateSem()
+	default:
+	}
 }
 
 // commitMigration is called by the shard's run loop when a pendingAllocResult

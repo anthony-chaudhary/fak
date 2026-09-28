@@ -190,10 +190,17 @@ func TestOpsRunPi(t *testing.T) {
 				t.Fatalf("args %q: exit=%d want 2 (refused); stderr=%s", args, code, stderr.String())
 			}
 		}
-		// A missing base URL is refused before launch too (no silent fallback route).
+		// A missing base URL is refused before launch too (no silent fallback route). The
+		// refusal is a receipted preflight (exit 1), which runs only after the Pi binary
+		// resolves; an unresolvable binary is a setup error (exit 2) that never reaches it.
+		// Pin --pi-bin to an existing file, as every other launch-path case here does, so
+		// the witness does not depend on a `pi` install on the host PATH.
 		var stderr bytes.Buffer
-		if code := runOpsPi(io.Discard, &stderr, []string{"--harness", "pi", "--workspace", dir, "--prompt-file", prompt, "--receipt", receipt, "--model", "m"}); code != 1 {
+		if code := runOpsPi(io.Discard, &stderr, []string{"--harness", "pi", "--workspace", dir, "--prompt-file", prompt, "--receipt", receipt, "--model", "m", "--pi-bin", os.Args[0]}); code != 1 {
 			t.Fatalf("missing --base-url exit=%d want 1; stderr=%s", code, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "missing_explicit_base_url") {
+			t.Fatalf("missing --base-url refused for the wrong reason; stderr=%s", stderr.String())
 		}
 	})
 

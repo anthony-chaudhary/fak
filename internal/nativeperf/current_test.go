@@ -63,11 +63,22 @@ func TestCurrentSnapshotCoversConstraintsWavesAndOSSWalk(t *testing.T) {
 			t.Errorf("missing current work packet %q", want)
 		}
 	}
-	if packetByID["cuda.cache-weight-residency"].State != WorkRunning || packetByID["mac.m1-streamed-q4k-no-copy"].State != WorkReady || packetByID["mac.m2-whole-sequence-prefill"].State != WorkWaitingDependency {
-		t.Fatalf("live dispatch states are not explicit: cache=%q m1=%q m2=%q", packetByID["cuda.cache-weight-residency"].State, packetByID["mac.m1-streamed-q4k-no-copy"].State, packetByID["mac.m2-whole-sequence-prefill"].State)
+	// M1 and M2 closed on accepted receipts (#9482, #9525); M10's performance credit was
+	// retracted on 2026-09-27 and its close-out reopened under #9513/#2723 (90b051f58).
+	if packetByID["cuda.cache-weight-residency"].State != WorkRunning || packetByID["mac.m1-streamed-q4k-no-copy"].State != WorkComplete || packetByID["mac.m2-whole-sequence-prefill"].State != WorkComplete || packetByID["mac.m10-parity-reconvergence"].State != WorkWaitingCoordination {
+		t.Fatalf("live dispatch states are not explicit: cache=%q m1=%q m2=%q m10=%q", packetByID["cuda.cache-weight-residency"].State, packetByID["mac.m1-streamed-q4k-no-copy"].State, packetByID["mac.m2-whole-sequence-prefill"].State, packetByID["mac.m10-parity-reconvergence"].State)
 	}
 	if packetByID["mac.m1-streamed-q4k-no-copy"].Issue != 8325 || packetByID["mac.m2-whole-sequence-prefill"].Issue != 9230 {
 		t.Fatalf("corrected Mac packet owners are stale: m1=#%d m2=#%d", packetByID["mac.m1-streamed-q4k-no-copy"].Issue, packetByID["mac.m2-whole-sequence-prefill"].Issue)
+	}
+	if got := packetByID["mac.m1-streamed-q4k-no-copy"].RelatedIssues; len(got) != 1 || got[0] != 9482 {
+		t.Fatalf("M1 accepted receipt issue = %v, want [9482]", got)
+	}
+	if got := packetByID["mac.m2-whole-sequence-prefill"].RelatedIssues; len(got) != 1 || got[0] != 9525 {
+		t.Fatalf("M2 accepted receipt issue = %v, want [9525]", got)
+	}
+	if m10 := packetByID["mac.m10-parity-reconvergence"]; m10.Issue != 9513 || strings.TrimSpace(m10.BlockedByCondition) == "" || len(m10.HardDependencyIDs) != 0 {
+		t.Fatalf("M10 reopened close-out is stale: issue=#%d blocked=%q deps=%v", m10.Issue, m10.BlockedByCondition, m10.HardDependencyIDs)
 	}
 	if packetByID["profile.real-metal"].Issue != 9495 || packetByID["profile.real-cuda"].Issue != 9497 || packetByID["profile.returned-receipt-gate"].Issue != 9498 {
 		t.Fatalf("profile-control-loop owners are stale: metal=#%d cuda=#%d gate=#%d", packetByID["profile.real-metal"].Issue, packetByID["profile.real-cuda"].Issue, packetByID["profile.returned-receipt-gate"].Issue)
@@ -114,6 +125,42 @@ func TestValidateCurrentSnapshotRejectsStaleAndMissingReadyWork(t *testing.T) {
 	if err := ValidateCurrentSnapshot(graph, badDependency); err == nil || !strings.Contains(err.Error(), "invalid dependency/blocker") {
 		t.Fatalf("bad packet dependency error = %v", err)
 	}
+
+	packetIndex := func(s CurrentSnapshot, id string) int {
+		for i, packet := range s.WorkPackets {
+			if packet.ID == id {
+				return i
+			}
+		}
+		t.Fatalf("missing work packet %q", id)
+		return -1
+	}
+	withPacket := func(id string, edit func(*WorkPacket)) CurrentSnapshot {
+		s := snapshot
+		s.WorkPackets = append([]WorkPacket(nil), snapshot.WorkPackets...)
+		edit(&s.WorkPackets[packetIndex(s, id)])
+		return s
+	}
+	for _, tc := range []struct {
+		name string
+		snap CurrentSnapshot
+		want string
+	}{
+		{"complete without result", withPacket("mac.m1-streamed-q4k-no-copy", func(p *WorkPacket) { p.Result = "" }), "has no accepted result"},
+		{"open with result", withPacket("mac.m3-q8-gdn-handoff", func(p *WorkPacket) { p.Result = "accepted" }), "needs a next action and no result"},
+		{"open without next action", withPacket("mac.m3-q8-gdn-handoff", func(p *WorkPacket) { p.NextAction = "" }), "needs a next action and no result"},
+		{"duplicate related issue", withPacket("mac.m1-streamed-q4k-no-copy", func(p *WorkPacket) { p.RelatedIssues = []int{8325} }), "invalid or duplicate related issue"},
+		{"satisfied by an open packet", withPacket("mac.m3-q8-gdn-handoff", func(p *WorkPacket) {
+			p.HardDependencyIDs, p.SatisfiedDependencyIDs = nil, []string{"mac.m4-coarse-resident-decode"}
+		}), "is not a complete packet"},
+		{"open and satisfied at once", withPacket("mac.m3-q8-gdn-handoff", func(p *WorkPacket) {
+			p.SatisfiedDependencyIDs = []string{"mac.m2-whole-sequence-prefill"}
+		}), "both open and satisfied"},
+	} {
+		if err := ValidateCurrentSnapshot(graph, tc.snap); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: error = %v, want %q", tc.name, err, tc.want)
+		}
+	}
 }
 
 func TestRenderCurrentMarkdownIsDeterministicAndExplicit(t *testing.T) {
@@ -136,6 +183,12 @@ func TestRenderCurrentMarkdownIsDeterministicAndExplicit(t *testing.T) {
 		"36 GiB laptop placement",
 		"Divide-and-conquer execution",
 		"mac.m1-streamed-q4k-no-copy",
+		"<br>#8325/#9482 |",
+		"`complete`<br>Owner: accepted receipt #9482",
+		"**Result:** Exact campaign accepted",
+		"<br>**Exit:** M1 earns KEEP 1/10. |",
+		"| Satisfied: `mac.m1-streamed-q4k-no-copy` |",
+		"| Blocked now: exclusive quiescent M3 Pro campaign window |",
 		"cuda.cache-weight-residency",
 		"waiting-coordination",
 		"Graph-dependency-ready arms",

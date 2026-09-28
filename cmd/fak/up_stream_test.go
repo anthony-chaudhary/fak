@@ -110,10 +110,22 @@ func TestTurnkeyIncrementalStreamFlushesBeforeGenerationCompletes(t *testing.T) 
 		}
 		before.WriteString(line)
 	}
+	// The load-bearing ordering: the client already holds the first fragment while the
+	// planner is still parked on p.release, i.e. before generation has completed — so
+	// nothing terminal may have reached the wire yet.
+	for _, terminal := range []string{`"finish_reason":"stop"`, "data: [DONE]"} {
+		if strings.Contains(before.String(), terminal) {
+			t.Fatalf("terminal %s reached the client before generation completed: %s", terminal, before.String())
+		}
+	}
+	// The fragment reached the client through the planner's sink. The planner records
+	// that only AFTER sink() returns, and sink() flushes to the client first, so the
+	// client can legitimately win the race to here; wait for the record (bounded)
+	// rather than demanding it already happened.
 	select {
 	case <-p.firstSent:
-	default:
-		t.Fatal("client observed content before planner recorded sink delivery")
+	case <-ctx.Done():
+		t.Fatalf("planner never recorded sink delivery of the observed content: %v", ctx.Err())
 	}
 	close(p.release)
 	released = true

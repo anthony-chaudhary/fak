@@ -1,6 +1,6 @@
 ---
 name: refresh-cachedoc-numbers
-description: Refresh the recent-operational cachevalue numbers in a guarded doc (e.g. docs/integrations/fable5-more-usage-for-free.md) when this-week's telemetry has moved on. Re-derives the frozen snapshots from live `fak cachevalue report`, reconciles the doc's rendered numbers + snapshot_date to the fresh capture, and re-runs the hermetic audit until it is clean. The audit (fak cachedoc-numbers-audit / internal/cachedocaudit, gated in `make cachedoc-numbers-lint`) binds every rendered number to a committed snapshot field and checks the arithmetic invariants the doc asserts — this skill is the maintenance loop that keeps that. Use when this named workflow matches the task.
+description: Refresh the recent-operational cachevalue numbers in a guarded doc (e.g. docs/integrations/fable5-more-usage-for-free.md) when this-week's telemetry has moved on. Re-derives the frozen snapshots from live `fak cachevalue report`, reconciles the doc's rendered numbers + snapshot_date to the fresh capture, and re-runs the hermetic audit (fak cachedoc-numbers-audit, gated in `make cachedoc-numbers-lint`) until every rendered number binds to a committed snapshot field and the doc's arithmetic invariants hold. Use when this named workflow matches the task.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Edit, Grep, Glob

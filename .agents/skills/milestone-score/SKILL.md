@@ -1,10 +1,10 @@
 ---
 name: milestone-score
-description: One repeatable pass that makes the milestone report's CLIMB and ROADMAP retirable by the RSI loop — the milestone counterpart of quality-score (code) and stability-score (trust under iteration). Runs the milestone...
+description: One repeatable pass that makes the milestone report's CLIMB and ROADMAP retirable by the RSI loop — the milestone counterpart of quality-score (code) and stability-score (trust under iteration). Runs `fak...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/milestone-score/SKILL.md
-  canonical-description-hash: f2daebc58d3d6e36a7c169be2f727d3de42db46de8cfeebfaa07305f861b53b0
+  canonical-description-hash: bf7ffceadef3a9b101bc59926536d2463a96d60922528ea73771e95b4ce8022a
 ---
 
 # Canonical project skill adapter

@@ -1,6 +1,6 @@
 ---
 name: issue-orchestrator
-description: Plan, partition, and coordinate multi-wave parallel subagent campaigns to resolve and close GitHub issues across the repository. Uses `fak issue-orchestrator --plan-waves` (or `fak issue-lanes`) to partition the active issue backlog into pairwise tree-disjoint, collision-free cohorts, arbitrates lane and tree leases via `dos arbitrate`, dispatches parallel isolated worker subagents per wave via the `task` tool, independently witnesses landed bug fixes and features, commits with explicit paths and issue citations, and drives campaign burndowns. Use when running bulk issue resolution, feature wave burndowns, or multi-agent issue campaigns.
+description: Plan, partition, and coordinate multi-wave parallel subagent campaigns to resolve and close GitHub issues. Uses `fak issue-orchestrator --plan-waves` (or `fak issue-lanes`) to partition the backlog into tree-disjoint cohorts, arbitrates lane and tree leases via `dos arbitrate`, dispatches isolated worker subagents per wave, independently witnesses landed fixes, commits with explicit paths and issue citations, and drives burndowns. Use when running bulk issue resolution, feature wave burndowns, or multi-agent issue campaigns.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Write, Edit, Grep, Glob, Task

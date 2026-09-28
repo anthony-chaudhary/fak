@@ -259,25 +259,28 @@ func TestTurnTrace_LowOverheadNanosecondTimers(t *testing.T) {
 	t.Run("simulated_turn_overhead_under_1_percent", func(t *testing.T) {
 		tracer := NewTurnLatencyTracer("simulated-turn")
 
-		// Simulate phases with sleep of ~200 µs each (total ~1 ms)
+		// Simulate a turn-scale decode step (total >= 15 ms, GPU kernel dominant).
+		// The 1% budget must be judged against turn-sized phases: with ~1 ms of
+		// sleeps the budget is 10 µs for ten clock-bracketed calls, which one
+		// cache-cold call on a loaded CI runner can spend on its own.
 		tracer.StartPhase(TurnPhaseHostDispatch)
-		time.Sleep(200 * time.Microsecond)
+		time.Sleep(2 * time.Millisecond)
 		tracer.EndPhase()
 
 		tracer.StartPhase(TurnPhasePrefixLookup)
-		time.Sleep(100 * time.Microsecond)
+		time.Sleep(1 * time.Millisecond)
 		tracer.EndPhase()
 
 		tracer.StartPhase(TurnPhaseKVAllocation)
-		time.Sleep(100 * time.Microsecond)
+		time.Sleep(1 * time.Millisecond)
 		tracer.EndPhase()
 
 		tracer.StartPhase(TurnPhaseGPUKernel)
-		time.Sleep(500 * time.Microsecond)
+		time.Sleep(10 * time.Millisecond)
 		tracer.EndPhase()
 
 		tracer.StartPhase(TurnPhaseTokenSampling)
-		time.Sleep(100 * time.Microsecond)
+		time.Sleep(1 * time.Millisecond)
 		tracer.EndPhase()
 
 		report, err := tracer.Report()
@@ -501,23 +504,26 @@ func TestTurnTrace_PhaseNormalization(t *testing.T) {
 func TestTurnTrace_TimePhaseAndTimeCallback(t *testing.T) {
 	tracer := NewTurnLatencyTracer("patterns")
 
+	// Phases are turn-scale (total >= 35 ms) so Report's 1% overhead guard is
+	// judged against a realistic turn rather than ~1.5 ms of microsecond sleeps.
+
 	// Pattern 1: closure callback
 	stop := tracer.StartPhase(TurnPhaseHostDispatch)
-	time.Sleep(50 * time.Microsecond)
+	time.Sleep(5 * time.Millisecond)
 	stop()
 
 	// Pattern 2: TimePhase helper
 	tracer.TimePhase(TurnPhasePrefixLookup, func() {
-		time.Sleep(30 * time.Microsecond)
+		time.Sleep(3 * time.Millisecond)
 	})
 
 	// Pattern 3: explicit EndPhase
 	tracer.Start(TurnPhaseKVAllocation)
-	time.Sleep(20 * time.Microsecond)
+	time.Sleep(2 * time.Millisecond)
 	tracer.EndPhase()
 
-	tracer.RecordPhase(TurnPhaseGPUKernel, 200*time.Microsecond)
-	tracer.RecordPhase(TurnPhaseTokenSampling, 50*time.Microsecond)
+	tracer.RecordPhase(TurnPhaseGPUKernel, 20*time.Millisecond)
+	tracer.RecordPhase(TurnPhaseTokenSampling, 5*time.Millisecond)
 
 	report, err := tracer.Report()
 	if err != nil {
@@ -541,32 +547,47 @@ func TestTurnTrace_TimePhaseAndTimeCallback(t *testing.T) {
 	}
 }
 
-// TestTurnTrace_ConcurrentRecording proves thread safety under concurrent goroutines.
+// TestTurnTrace_ConcurrentRecording proves thread safety under concurrent goroutines
+// and that Report's < 1% overhead guard holds for a turn-scale workload.
+//
+// The recorded durations model a real decode turn (50 steps, ~20 ms GPU kernel
+// per token), not nanosecond placeholders: 250 records whose phases summed to
+// 35 µs could never meet a 1% budget (350 ns), because each record's own
+// lock + map update + clock read costs more than 1.4 ns on any platform with a
+// fine-grained monotonic clock (Linux measured 200-700 ns per record).
 func TestTurnTrace_ConcurrentRecording(t *testing.T) {
+	const (
+		steps        = 50
+		hostDispatch = 100 * time.Microsecond
+		prefixLookup = 50 * time.Microsecond
+		kvAllocation = 30 * time.Microsecond
+		gpuKernel    = 20 * time.Millisecond
+		tokenSample  = 20 * time.Microsecond
+	)
 	tracer := NewTurnLatencyTracer("concurrent")
 	var wg sync.WaitGroup
 
-	for i := 0; i < 50; i++ {
+	for i := 0; i < steps; i++ {
 		wg.Add(5)
 		go func() {
 			defer wg.Done()
-			tracer.RecordPhase(TurnPhaseHostDispatch, 100*time.Nanosecond)
+			tracer.RecordPhase(TurnPhaseHostDispatch, hostDispatch)
 		}()
 		go func() {
 			defer wg.Done()
-			tracer.RecordPhase(TurnPhasePrefixLookup, 50*time.Nanosecond)
+			tracer.RecordPhase(TurnPhasePrefixLookup, prefixLookup)
 		}()
 		go func() {
 			defer wg.Done()
-			tracer.RecordPhase(TurnPhaseKVAllocation, 30*time.Nanosecond)
+			tracer.RecordPhase(TurnPhaseKVAllocation, kvAllocation)
 		}()
 		go func() {
 			defer wg.Done()
-			tracer.RecordPhase(TurnPhaseGPUKernel, 500*time.Nanosecond)
+			tracer.RecordPhase(TurnPhaseGPUKernel, gpuKernel)
 		}()
 		go func() {
 			defer wg.Done()
-			tracer.RecordPhase(TurnPhaseTokenSampling, 20*time.Nanosecond)
+			tracer.RecordPhase(TurnPhaseTokenSampling, tokenSample)
 		}()
 	}
 
@@ -577,10 +598,23 @@ func TestTurnTrace_ConcurrentRecording(t *testing.T) {
 		t.Fatalf("report failed: %v", err)
 	}
 
-	if report.HostDispatchNs != 50*100 {
-		t.Errorf("HostDispatchNs = %d, want %d", report.HostDispatchNs, 50*100)
+	if want := int64(steps) * hostDispatch.Nanoseconds(); report.HostDispatchNs != want {
+		t.Errorf("HostDispatchNs = %d, want %d", report.HostDispatchNs, want)
 	}
-	if report.GPUKernelNs != 50*500 {
-		t.Errorf("GPUKernelNs = %d, want %d", report.GPUKernelNs, 50*500)
+	if want := int64(steps) * prefixLookup.Nanoseconds(); report.PrefixLookupNs != want {
+		t.Errorf("PrefixLookupNs = %d, want %d", report.PrefixLookupNs, want)
+	}
+	if want := int64(steps) * kvAllocation.Nanoseconds(); report.KVAllocationNs != want {
+		t.Errorf("KVAllocationNs = %d, want %d", report.KVAllocationNs, want)
+	}
+	if want := int64(steps) * gpuKernel.Nanoseconds(); report.GPUKernelNs != want {
+		t.Errorf("GPUKernelNs = %d, want %d", report.GPUKernelNs, want)
+	}
+	if want := int64(steps) * tokenSample.Nanoseconds(); report.TokenSamplingNs != want {
+		t.Errorf("TokenSamplingNs = %d, want %d", report.TokenSamplingNs, want)
+	}
+	if !report.OverheadValid {
+		t.Errorf("OverheadValid = false: overhead %d ns is %.4f%% of %d ns turn (limit %.2f%%)",
+			report.OverheadNs, report.OverheadPct, report.TotalWallNs, MaxTracerOverheadPct)
 	}
 }

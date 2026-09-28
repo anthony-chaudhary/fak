@@ -12,6 +12,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/guardtrace"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/policy"
@@ -25,6 +26,37 @@ import (
 // cmd/fak.
 const guardTraceFixturePath = "../../internal/gateway/testdata/guard-trace-e2e.json"
 const guardContextTraceFixturePath = "testdata/guard-trace-context-e2e.json"
+
+// installEmptyReplayLeaseAuthority supplies the host-owned half of the gateway's workspace
+// write admission for replay tests whose subject is the floor + journal + report, not lease
+// ownership. The provider cmd/fak installs at init (serveWorkspaceLeaseAdmission) shells out
+// to the `dos` CLI and reads the process cwd's live lease refs, so without this the fixture's
+// benign writes land on DEFAULT_DENY ("workspace lease authority read failed") on any host
+// without `dos` on PATH (CI), or on LEASE_HELD where a peer holds a lease over the tree. The
+// lease boundary itself is witnessed by TestFakAdjudicateUsesRealDOSWorkspaceLease and the
+// internal/gateway admission tests; the gateway twin of this replay
+// (internal/gateway guard_trace_e2e_test.go) pins the same empty authority.
+func installEmptyReplayLeaseAuthority(t *testing.T) {
+	t.Helper()
+	root := t.TempDir()
+	// Admission canonicalizes a new leaf only through an existing parent, so give the
+	// workspace the .fak/ state dir a fak-managed checkout has; the fixture's benign writes
+	// (.fak/guard-trace-*.txt, .fak/authorized_keys) land there.
+	if err := os.Mkdir(filepath.Join(root, ".fak"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gateway.SetLeasePlaneProviders(serveLeasePlaneLeases, func(context.Context) (gateway.LeasePresenceView, error) {
+		return gateway.LeasePresenceView{ClassifiedLeases: json.RawMessage(`[]`)}, nil
+	})
+	gateway.SetWorkspaceLeaseAdmissionProvider(func(context.Context) (gateway.WorkspaceLeaseAdmissionView, error) {
+		return gateway.WorkspaceLeaseAdmissionView{WorkspaceRoot: root}, nil
+	})
+	// Restore exactly what leaseplane_endpoint.go's init installed for the rest of the package.
+	t.Cleanup(func() {
+		gateway.SetLeasePlaneProviders(serveLeasePlaneLeases, serveLeasePlanePresence)
+		gateway.SetWorkspaceLeaseAdmissionProvider(serveWorkspaceLeaseAdmission)
+	})
+}
 
 // TestGuardReplayShippedFloorDeniesEveryFixtureDanger is the anti-drift witness: the REAL
 // shipped guard floor (guardDefaultPolicyJSON, the one --replay-trace installs by default)
@@ -128,6 +160,7 @@ func TestGuardReplayRunsCleanOnBothWires(t *testing.T) {
 	// would name that foreign path instead of the fak-guard-replay- default asserted below, and
 	// verification would fail once that test's TempDir is gone.
 	journal.ResetActiveForTest()
+	installEmptyReplayLeaseAuthority(t)
 	for _, wire := range []string{"anthropic", "openai"} {
 		t.Run(wire, func(t *testing.T) {
 			t.Cleanup(journal.ResetActiveForTest)
@@ -203,6 +236,7 @@ func TestGuardReplayWritesExplicitContextSnapshot(t *testing.T) {
 func TestGuardReplayHonorsExplicitAuditPath(t *testing.T) {
 	dir := t.TempDir()
 	t.Cleanup(journal.ResetActiveForTest)
+	installEmptyReplayLeaseAuthority(t)
 	auditPath := filepath.Join(dir, "replay-audit.jsonl")
 
 	var sb strings.Builder
