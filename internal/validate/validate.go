@@ -323,9 +323,9 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 		res.OK = false
 		res.Failures = append(res.Failures, ciPreflightFailure{Step: "test-select", Detail: graphErr.Error()})
 	} else {
-		buildTargets := selectValidatePackages(&res, &recorder, dir, paths, fileToPkg, edges, baseFileToPkg, baseEdges)
+		vetTargets, buildTargets := selectValidatePackages(&res, &recorder, dir, paths, fileToPkg, edges, baseFileToPkg, baseEdges)
 		if !*testOnly {
-			if code, timedOut := runValidateBuildAndVet(ctx, stdout, &res, &recorder, dir, wslWorkspace, *asJSON, buildTargets); timedOut {
+			if code, timedOut := runValidateBuildAndVet(ctx, stdout, &res, &recorder, dir, wslWorkspace, *asJSON, vetTargets, buildTargets); timedOut {
 				return code
 			}
 		}
@@ -375,8 +375,8 @@ func runValidateGofmtPhase(ctx context.Context, stdout io.Writer, res *validateR
 	return 0, false
 }
 
-func runValidateBuildAndVet(ctx context.Context, stdout io.Writer, res *validateResult, recorder *validateRecorder, dir string, wslWorkspace, asJSON bool, buildTargets []string) (int, bool) {
-	if len(buildTargets) == 0 {
+func runValidateBuildAndVet(ctx context.Context, stdout io.Writer, res *validateResult, recorder *validateRecorder, dir string, wslWorkspace, asJSON bool, vetTargets, buildTargets []string) (int, bool) {
+	if len(vetTargets) == 0 {
 		recorder.skip("build", "no affected package")
 		recorder.skip("vet", "no affected package")
 		return 0, false
@@ -384,16 +384,20 @@ func runValidateBuildAndVet(ctx context.Context, stdout io.Writer, res *validate
 	// The base is a committed tip; only changed packages and their importer closure
 	// can become newly red. Rebuilding ./... made two-file checks scale with the
 	// entire repository and was the dominant #6568 timeout signature.
-	phase := recorder.start("build")
-	if code, timedOut := runValidateCheckPhase(stdout, res, recorder, phase, "build", errors.New("affected package build failed"), asJSON, func() (string, bool) {
-		return validateRunGoCheckWithin(ctx, dir, wslWorkspace, validateGoCheckArgs("build", buildTargets)...)
-	}); timedOut {
-		return code, true
+	if len(buildTargets) == 0 {
+		recorder.skip("build", "no affected package with non-test Go files")
+	} else {
+		phase := recorder.start("build")
+		if code, timedOut := runValidateCheckPhase(stdout, res, recorder, phase, "build", errors.New("affected package build failed"), asJSON, func() (string, bool) {
+			return validateRunGoCheckWithin(ctx, dir, wslWorkspace, validateGoCheckArgs("build", buildTargets)...)
+		}); timedOut {
+			return code, true
+		}
 	}
 
-	phase = recorder.start("vet")
+	phase := recorder.start("vet")
 	if code, timedOut := runValidateCheckPhase(stdout, res, recorder, phase, "vet", errors.New("affected package vet failed"), asJSON, func() (string, bool) {
-		return validateRunGoCheckWithin(ctx, dir, wslWorkspace, validateGoCheckArgs("vet", buildTargets)...)
+		return validateRunGoCheckWithin(ctx, dir, wslWorkspace, validateGoCheckArgs("vet", vetTargets)...)
 	}); timedOut {
 		return code, true
 	}
@@ -459,8 +463,13 @@ func runValidateAuditSelectionPhase(ctx context.Context, stdout io.Writer, res *
 }
 
 // selectValidatePackages restores deleted-path graph context, then records live
-// changed packages for tests and returns the live importer closure for build/vet.
-func selectValidatePackages(res *validateResult, recorder *validateRecorder, dir string, paths []string, fileToPkg map[string]string, edges map[string][]string, baseFileToPkg map[string]string, baseEdges map[string][]string) []string {
+// changed packages for tests and returns the live importer closure for vet plus the
+// subset of it that go build can name. A test-only package (every Go file it owns is a
+// _test.go, such as the external red-then-green witness internal/validate/timeoutregression)
+// is vetted but never built: `go build` refuses an explicitly named package with "no
+// non-test Go files", which would red every delta whose importer closure reaches it.
+func selectValidatePackages(res *validateResult, recorder *validateRecorder, dir string, paths []string, fileToPkg map[string]string, edges map[string][]string, baseFileToPkg map[string]string, baseEdges map[string][]string) (vetTargets, buildTargets []string) {
+	buildable := validateBuildablePackages(fileToPkg)
 	for file, pkg := range baseFileToPkg {
 		if _, exists := fileToPkg[file]; !exists {
 			fileToPkg[file] = pkg
@@ -481,14 +490,29 @@ func selectValidatePackages(res *validateResult, recorder *validateRecorder, dir
 			res.Tested = append(res.Tested, pkg)
 		}
 	}
-	var buildPkgs []string
+	var vetPkgs, buildPkgs []string
 	for _, pkg := range selected {
 		if livePkgs[pkg] { // omit a package deleted by this delta
-			buildPkgs = append(buildPkgs, pkg)
+			vetPkgs = append(vetPkgs, pkg)
+			if buildable[pkg] {
+				buildPkgs = append(buildPkgs, pkg)
+			}
 		}
 	}
 	phase.finish(nil)
-	return packagePatternsForRoot(dir, buildPkgs, fileToPkg)
+	return packagePatternsForRoot(dir, vetPkgs, fileToPkg), packagePatternsForRoot(dir, buildPkgs, fileToPkg)
+}
+
+// validateBuildablePackages reports the packages in fileToPkg that own at least one
+// non-test Go file, i.e. the ones `go build` accepts when named explicitly.
+func validateBuildablePackages(fileToPkg map[string]string) map[string]bool {
+	buildable := make(map[string]bool, len(fileToPkg))
+	for file, pkg := range fileToPkg {
+		if strings.HasSuffix(file, ".go") && !strings.HasSuffix(file, "_test.go") {
+			buildable[pkg] = true
+		}
+	}
+	return buildable
 }
 
 func normalizeMinePaths(root string, raw []string) ([]string, error) {
