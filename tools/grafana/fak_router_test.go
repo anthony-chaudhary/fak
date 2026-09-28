@@ -139,3 +139,45 @@ func TestFakRouterDashboardRoutingModeHonesty(t *testing.T) {
 		}
 	}
 }
+
+// TestFakRouterStatusZeroIsNotBareNumeric pins the legibility contract on the
+// "Attempts by status" panel. In fak_router_attempts_total the `status` label is
+// the observed HTTP status, and the value `0` is NOT a count of zero: it means a
+// transport error (dial failure, timeout, reset) that never produced an HTTP
+// status. The live router writes a real, growing `status="0"` series on every
+// transport failure, so a legend that renders the bare string `0` reads to an
+// operator as "zero attempts" on a router that is actually failing upstream.
+//
+// The panel must relabel the `0` bucket to a self-describing legend and say what
+// `0` means, so the number can never be misread as an idle bucket.
+func TestFakRouterStatusZeroIsNotBareNumeric(t *testing.T) {
+	d := loadFakRouter(t)
+
+	var status *fakRouterPanel
+	for i := range d.Panels {
+		if d.Panels[i].Title == "Attempts by status" {
+			status = &d.Panels[i]
+			break
+		}
+	}
+	if status == nil {
+		t.Fatalf("%s must expose an 'Attempts by status' panel", fakRouterPath)
+	}
+	if len(status.Targets) == 0 {
+		t.Fatalf("panel 'Attempts by status' has no query target")
+	}
+	expr := status.Targets[0].Expr
+
+	// The query must relabel status="0" to a self-describing legend. A bare
+	// `sum by (status)` renders a series called `0`, indistinguishable from a
+	// zero count.
+	if !strings.Contains(expr, "label_replace") || !strings.Contains(expr, "transport") {
+		t.Errorf("panel 'Attempts by status' expr must relabel status=\"0\" to a named transport-error legend "+
+			"(label_replace), otherwise the 0 bucket renders as a bare '0' that reads as a zero count; got: %s", expr)
+	}
+	// The description must teach the meaning too, so the panel stays legible when
+	// the series is absent.
+	if !strings.Contains(status.Description, "transport") {
+		t.Errorf("panel 'Attempts by status' description must explain that status=0 is a transport error, not a zero count; got: %q", status.Description)
+	}
+}

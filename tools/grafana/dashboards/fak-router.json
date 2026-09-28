@@ -937,7 +937,7 @@
       "id": 18,
       "type": "timeseries",
       "title": "Attempts by status",
-      "description": "Cumulative routing attempts partitioned by outcome status, re-read each scrape. A rising error status is the first signal of backend trouble.",
+      "description": "Cumulative routing attempts partitioned by the upstream result, re-read each scrape. The legend is the HTTP status the backend returned, except `0`, which is relabelled `0 (transport error)` because it is NOT a count of zero: `status=\"0\"` means the attempt never got an HTTP response at all (dial failure, timeout, reset). A rising error band is the first signal of backend trouble: `402` is a credit wall, `429` rate limiting, `5xx` a backend fault, and `0 (transport error)` an unreachable or hanging upstream. An absent series is unavailable evidence, never a healthy zero.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -951,7 +951,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (status) (fak_router_attempts_total{job=\"fak_router\"})",
+          "expr": "sum by (status) (label_replace(fak_router_attempts_total{job=\"fak_router\"}, \"status\", \"0 (transport error)\", \"status\", \"0\"))",
           "legendFormat": "{{status}}",
           "datasource": {
             "type": "prometheus",
