@@ -322,6 +322,7 @@ func TestStaggeredWarmup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(mgr.Stop) // never started: Stop unmaps every shard's allocator
 
 	warmups := make(map[int]bool)
 	for i := 0; i < mgr.NumShards(); i++ {
