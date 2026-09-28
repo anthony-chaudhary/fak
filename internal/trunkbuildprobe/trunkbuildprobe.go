@@ -521,7 +521,10 @@ func goWorkPathEscapes(operand, root string) bool {
 	if filepath.IsAbs(operand) {
 		resolved = filepath.Clean(operand)
 	} else {
-		resolved = filepath.Clean(filepath.Join(root, filepath.FromSlash(operand)))
+		// Resolve against rootAbs, the same base Rel compares to: joining onto
+		// a relative root would yield a relative path Rel cannot relate to
+		// rootAbs, silently reading every relative escape as in-tree.
+		resolved = filepath.Clean(filepath.Join(rootAbs, filepath.FromSlash(operand)))
 	}
 	rel, err := filepath.Rel(rootAbs, resolved)
 	if err != nil {

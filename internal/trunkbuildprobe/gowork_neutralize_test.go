@@ -3,15 +3,28 @@ package trunkbuildprobe
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
+
+// goWorkTestPaths returns an absolute, OS-appropriate stand-in for the probe's
+// extract root plus an absolute path outside it. `C:\work\fak-private` is only
+// absolute on Windows: on Linux it is a relative path, so filepath.Rel cannot
+// relate the resolved operand to it and every escape reads as the fail-closed
+// "keep" answer.
+func goWorkTestPaths() (root, outside string) {
+	if runtime.GOOS == "windows" {
+		return `C:\work\fak-private`, `C:\other\repo`
+	}
+	return "/work/fak-private", "/other/repo"
+}
 
 // TestGoWorkUsesEscapingPath covers the workspace-escape classifier that gates
 // go.work neutralization in the committed-tree probe. A committed `go.work`
 // naming a sibling outside the extract must be detected; an in-tree workspace
 // must be left alone.
 func TestGoWorkUsesEscapingPath(t *testing.T) {
-	root := filepath.Join("C:", string(filepath.Separator), "work", "fak-private")
+	root, outside := goWorkTestPaths()
 	cases := []struct {
 		name string
 		body string
@@ -44,7 +57,7 @@ func TestGoWorkUsesEscapingPath(t *testing.T) {
 		},
 		{
 			name: "absolute escape",
-			body: "go 1.26.0\nuse C:\\other\\repo\n",
+			body: "go 1.26.0\nuse " + outside + "\n",
 			want: true,
 		},
 		{
