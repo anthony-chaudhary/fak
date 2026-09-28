@@ -8,8 +8,8 @@
 # on every push, it just no longer sits on the release-decide critical path.
 #
 # Contract: release_decide reads this workflow's latest decisive (completed)
-# conclusion on main (`gh run list --workflow ci-fast.yml --branch main
-# --status completed`: the RUN-level conclusion + headSha, never a job name). A
+# conclusion on main — the RUN-level conclusion + headSha from `gh run list`
+# (tools/release_context.py), never a job name. A
 # green ci-fast run clears CI_BASE_RED even while the `-race` job in ci.yml is
 # still in flight; a red ci-fast run still holds the cut. If this signal is
 # missing/unknown, release_decide FALLS BACK to the whole ci.yml run, so a
