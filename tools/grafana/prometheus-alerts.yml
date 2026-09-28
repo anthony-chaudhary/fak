@@ -538,3 +538,104 @@ groups:
         annotations:
           summary: "fak ops worktree/session plane is unreadable"
           description: "The live worktree or session census plane has been down for 15m, so live-worker and at-risk-worktree counts are unknown, not zero. Check the worktree root and git availability on the exporting host."
+
+  # Cross-context divergence. The same population (agent runs / workers) is
+  # counted by several independent sources: the ARL-1 run ledger (fak_ops), the
+  # public fleet session registry (fak_fleet), and the workers exporter
+  # (fak_ops_workers). When one source climbs while a sibling that should move
+  # with it stays flat, at least one of them is lying or mis-scoped. Witnessed
+  # 2026-09-28: fak_ops_agent_runs_by_harness +84/h (706 of 818 24h rows were
+  # opencode launch_refused) while fak_fleet_registered_runs moved 0/h.
+  #
+  # fak_ops:context_growth:delta1h{context} is each source's 1h growth, summed to
+  # one series per context. A context whose source or plane is down is ABSENT
+  # (never a fabricated 0), so a divergence below only fires when BOTH sides were
+  # observed. Records-only group: evaluated in order, so the divergence rules can
+  # read the growth rules of the same evaluation.
+  - name: fak_ops_context_growth
+    interval: 1m
+    rules:
+      - record: fak_ops:context_growth:delta1h
+        expr: sum(delta(fak_ops_agent_runs_by_harness{job="fak_ops"}[1h]))
+        labels:
+          context: ops_run_ledger_harness
+      - record: fak_ops:context_growth:delta1h
+        expr: sum(delta(fak_ops_agent_runs_by_harness_phase{job="fak_ops",phase!="launch_refused"}[1h]))
+        labels:
+          context: ops_run_ledger_started
+      - record: fak_ops:context_growth:delta1h
+        expr: sum(delta(fak_ops_agent_runs_by_harness_phase{job="fak_ops",phase="launch_refused"}[1h]))
+        labels:
+          context: ops_run_ledger_refused
+      - record: fak_ops:context_growth:delta1h
+        expr: sum(delta(fak_fleet_registered_runs{job="fak_fleet"}[1h]))
+        labels:
+          context: fleet_registry
+      - record: fak_ops:context_growth:delta1h
+        expr: sum(delta(fak_fleet_registered_runs_by_state{job="fak_fleet",state="active"}[1h]))
+        labels:
+          context: fleet_active_runs
+      - record: fak_ops:context_growth:delta1h
+        expr: sum(delta(fak_fleet_sessions_by_liveness{job="fak_fleet",liveness="live"}[1h]))
+        labels:
+          context: fleet_live_sessions
+      - record: fak_ops:context_growth:delta1h
+        expr: sum(delta(fak_ops_live_worktrees{job="fak_ops_workers"}[1h])) and on() (sum(fak_ops_worktree_plane_up{job="fak_ops_workers"}) == 1)
+        labels:
+          context: live_worktrees
+      - record: fak_ops:context_growth:delta1h
+        expr: sum(delta(fak_ops_workers_live{job="fak_ops_workers"}[1h])) and on() (sum(fak_ops_sessions_plane_up{job="fak_ops_workers"}) == 1)
+        labels:
+          context: workers_live
+
+      # fak_ops:context_divergence:delta1h{rising,flat} = the rising context's 1h
+      # growth, present only when it grew >= 5 AND the flat context grew less
+      # than a tenth as much. Absent = consistent or unobserved. The empty
+      # context label drops the inherited growth label.
+      - record: fak_ops:context_divergence:delta1h
+        expr: fak_ops:context_growth:delta1h{context="ops_run_ledger_harness"} >= 5 and on() (fak_ops:context_growth:delta1h{context="fleet_registry"} * 10 < on() fak_ops:context_growth:delta1h{context="ops_run_ledger_harness"})
+        labels:
+          context: ""
+          rising: ops_run_ledger_harness
+          flat: fleet_registry
+      - record: fak_ops:context_divergence:delta1h
+        expr: fak_ops:context_growth:delta1h{context="ops_run_ledger_started"} >= 5 and on() (fak_ops:context_growth:delta1h{context="fleet_registry"} * 10 < on() fak_ops:context_growth:delta1h{context="ops_run_ledger_started"})
+        labels:
+          context: ""
+          rising: ops_run_ledger_started
+          flat: fleet_registry
+      - record: fak_ops:context_divergence:delta1h
+        expr: fak_ops:context_growth:delta1h{context="fleet_registry"} >= 5 and on() (fak_ops:context_growth:delta1h{context="ops_run_ledger_harness"} * 10 < on() fak_ops:context_growth:delta1h{context="fleet_registry"})
+        labels:
+          context: ""
+          rising: fleet_registry
+          flat: ops_run_ledger_harness
+      - record: fak_ops:context_divergence:delta1h
+        expr: fak_ops:context_growth:delta1h{context="ops_run_ledger_refused"} >= 5 and on() (fak_ops:context_growth:delta1h{context="ops_run_ledger_started"} * 10 < on() fak_ops:context_growth:delta1h{context="ops_run_ledger_refused"})
+        labels:
+          context: ""
+          rising: ops_run_ledger_refused
+          flat: ops_run_ledger_started
+      - record: fak_ops:context_divergence:delta1h
+        expr: fak_ops:context_growth:delta1h{context="fleet_active_runs"} >= 5 and on() (fak_ops:context_growth:delta1h{context="fleet_live_sessions"} * 10 < on() fak_ops:context_growth:delta1h{context="fleet_active_runs"})
+        labels:
+          context: ""
+          rising: fleet_active_runs
+          flat: fleet_live_sessions
+      - record: fak_ops:context_divergence:delta1h
+        expr: fak_ops:context_growth:delta1h{context="live_worktrees"} >= 5 and on() (fak_ops:context_growth:delta1h{context="workers_live"} * 10 < on() fak_ops:context_growth:delta1h{context="live_worktrees"})
+        labels:
+          context: ""
+          rising: live_worktrees
+          flat: workers_live
+
+  - name: fak_ops_context_divergence
+    rules:
+      - alert: FakOpsContextDivergence
+        expr: fak_ops:context_divergence:delta1h > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak ops counts diverge across contexts: {{ $labels.rising }} rises, {{ $labels.flat }} is flat"
+          description: "Over the trailing hour {{ $labels.rising }} grew by {{ $value | printf \"%.0f\" }} while {{ $labels.flat }}, which counts the same population from another source, grew less than a tenth as much, for 30m. One source is mis-scoped or lying. If rising=ops_run_ledger_harness or ops_run_ledger_refused, check the phase split (fak_ops_agent_runs_by_harness_phase): launch_refused rows never started a worker; read refusal_reason in .fak/agent-runs.jsonl. See the Cross-context divergence row on the Fleet Work dashboard (uid fak-ops-fleet-work)."

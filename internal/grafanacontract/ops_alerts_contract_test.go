@@ -35,7 +35,10 @@ type OpsGroup struct {
 var (
 	opsGroupLine = regexp.MustCompile(`^\s*-\s+name:\s*(\S+)\s*$`)
 	opsAlertLine = regexp.MustCompile(`^\s*-\s+alert:\s*(\S+)\s*$`)
-	opsFieldLine = regexp.MustCompile(`^(\s+)(expr|severity|summary|description):\s*(.*)$`)
+	// opsRecordLine opens a recording rule. It ends the current alert so the
+	// record's own expr/labels are never attributed to a preceding alert.
+	opsRecordLine = regexp.MustCompile(`^\s*-\s+record:\s*(\S+)\s*$`)
+	opsFieldLine  = regexp.MustCompile(`^(\s+)(expr|severity|summary|description):\s*(.*)$`)
 )
 
 // ParseAlertGroups scans a Prometheus rule file and returns its groups in file
@@ -72,6 +75,11 @@ func ParseAlertGroups(text string) []OpsGroup {
 			}
 			cur.Alerts = append(cur.Alerts, OpsAlert{Name: m[1]})
 			alert = &cur.Alerts[len(cur.Alerts)-1]
+			inAnnotations = false
+			continue
+		}
+		if opsRecordLine.MatchString(line) {
+			alert = nil
 			inAnnotations = false
 			continue
 		}
@@ -158,6 +166,12 @@ func opsAlertContract() []opsAlertSpec {
 				"FakOpsIssueBacklogGrowing",
 				"FakOpsThroughputCensusTruncated",
 				"FakOpsWorktreePlaneDown",
+			},
+		},
+		{
+			Group: "fak_ops_context_divergence",
+			Alerts: []string{
+				"FakOpsContextDivergence",
 			},
 		},
 	}
@@ -411,5 +425,279 @@ func TestOpsAlertsNameExportedMetrics(t *testing.T) {
 	sort.Strings(missing)
 	if len(missing) > 0 {
 		t.Errorf("ops alert exprs name metrics no ops exporter exports: %v", missing)
+	}
+}
+
+// contextRecord is one recording rule recovered by the line scan below.
+type contextRecord struct {
+	Record  string
+	Expr    string
+	Context string
+	Rising  string
+	Flat    string
+}
+
+var (
+	ctxLabelLine = regexp.MustCompile(`^\s+(expr|context|rising|flat):\s*(.*)$`)
+	ctxRefLine   = regexp.MustCompile(`context="([a-z0-9_]+)"`)
+)
+
+const (
+	contextGrowthRecord     = "fak_ops:context_growth:delta1h"
+	contextDivergenceRecord = "fak_ops:context_divergence:delta1h"
+)
+
+// parseRecordingRules is a line scan over `- record:` entries: each record's
+// expr and its context/rising/flat labels. An `- alert:` or `- name:` line ends
+// the current record, so alert fields are never attributed to a record.
+func parseRecordingRules(text string) []contextRecord {
+	var out []contextRecord
+	cur := -1
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.TrimRight(raw, "\r")
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if m := opsRecordLine.FindStringSubmatch(line); m != nil {
+			out = append(out, contextRecord{Record: m[1]})
+			cur = len(out) - 1
+			continue
+		}
+		if opsAlertLine.MatchString(line) || opsGroupLine.MatchString(line) {
+			cur = -1
+			continue
+		}
+		if cur < 0 {
+			continue
+		}
+		m := ctxLabelLine.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		val := strings.Trim(strings.TrimSpace(m[2]), `"'`)
+		switch m[1] {
+		case "expr":
+			out[cur].Expr = val
+		case "context":
+			out[cur].Context = val
+		case "rising":
+			out[cur].Rising = val
+		case "flat":
+			out[cur].Flat = val
+		}
+	}
+	return out
+}
+
+// contextDivergenceProblems returns every contract violation for the
+// context-growth/divergence recording rules: a divergence side naming an
+// undefined growth context (a dangling pair), a divergence rule missing a
+// rising/flat label, or an expr that does not reference both of its contexts.
+func contextDivergenceProblems(recs []contextRecord) []string {
+	defined := map[string]bool{}
+	for _, r := range recs {
+		if r.Record == contextGrowthRecord && r.Context != "" {
+			defined[r.Context] = true
+		}
+	}
+	var problems []string
+	for i, r := range recs {
+		if r.Record != contextDivergenceRecord {
+			continue
+		}
+		id := fmt.Sprintf("divergence rule #%d (rising=%q flat=%q)", i, r.Rising, r.Flat)
+		if r.Rising == "" || r.Flat == "" {
+			problems = append(problems, id+": missing rising/flat label")
+			continue
+		}
+		if r.Rising == r.Flat {
+			problems = append(problems, id+": rising and flat name the same context")
+		}
+		for _, side := range []string{r.Rising, r.Flat} {
+			if !defined[side] {
+				problems = append(problems, fmt.Sprintf("%s: context %q has no %s rule (dangling pair)", id, side, contextGrowthRecord))
+			}
+		}
+		refs := map[string]bool{}
+		for _, m := range ctxRefLine.FindAllStringSubmatch(r.Expr, -1) {
+			refs[m[1]] = true
+		}
+		for _, side := range []string{r.Rising, r.Flat} {
+			if !refs[side] {
+				problems = append(problems, fmt.Sprintf("%s: expr does not reference context %q", id, side))
+			}
+		}
+	}
+	return problems
+}
+
+// TestOpsContextDivergenceRecordingRules pins the records-only
+// fak_ops_context_growth group: all eight growth contexts are defined, at least
+// one divergence rule exists, and every divergence rule's rising/flat labels
+// name defined contexts that its expr actually compares.
+func TestOpsContextDivergenceRecordingRules(t *testing.T) {
+	raw, err := os.ReadFile(prometheusAlertsPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", prometheusAlertsPath, err)
+	}
+	recs := parseRecordingRules(string(raw))
+
+	defined := map[string]bool{}
+	divergences := 0
+	for _, r := range recs {
+		switch r.Record {
+		case contextGrowthRecord:
+			if r.Context == "" {
+				t.Errorf("%s rule with expr %q has no context label", contextGrowthRecord, r.Expr)
+			}
+			if defined[r.Context] {
+				t.Errorf("%s context %q defined more than once", contextGrowthRecord, r.Context)
+			}
+			defined[r.Context] = true
+			if strings.TrimSpace(r.Expr) == "" {
+				t.Errorf("%s context %q: empty expr", contextGrowthRecord, r.Context)
+			}
+		case contextDivergenceRecord:
+			divergences++
+		}
+	}
+	for _, want := range []string{
+		"ops_run_ledger_harness",
+		"ops_run_ledger_started",
+		"ops_run_ledger_refused",
+		"fleet_registry",
+		"fleet_active_runs",
+		"fleet_live_sessions",
+		"live_worktrees",
+		"workers_live",
+	} {
+		if !defined[want] {
+			t.Errorf("%s context %q not defined in %s", contextGrowthRecord, want, prometheusAlertsPath)
+		}
+	}
+	if divergences == 0 {
+		t.Errorf("no %s rules found in %s", contextDivergenceRecord, prometheusAlertsPath)
+	}
+	for _, p := range contextDivergenceProblems(recs) {
+		t.Error(p)
+	}
+}
+
+// TestOpsContextDivergenceNegativeControl proves the divergence check reports a
+// dangling pair (flat context with no growth rule) and an expr that omits one
+// of its contexts, and passes the well-formed pair.
+func TestOpsContextDivergenceNegativeControl(t *testing.T) {
+	const growth = `groups:
+  - name: fak_ops_context_growth
+    rules:
+      - record: fak_ops:context_growth:delta1h
+        expr: sum(delta(a[1h]))
+        labels:
+          context: alpha
+      - record: fak_ops:context_growth:delta1h
+        expr: sum(delta(b[1h]))
+        labels:
+          context: beta
+`
+	divergence := func(rising, flat, expr string) string {
+		return "      - record: fak_ops:context_divergence:delta1h\n" +
+			"        expr: " + expr + "\n" +
+			"        labels:\n" +
+			"          context: \"\"\n" +
+			"          rising: " + rising + "\n" +
+			"          flat: " + flat + "\n"
+	}
+	cases := []struct {
+		name     string
+		text     string
+		wantSubs []string
+	}{
+		{
+			"well-formed pair passes",
+			growth + divergence("alpha", "beta", `fak_ops:context_growth:delta1h{context="alpha"} >= 5 and on() (fak_ops:context_growth:delta1h{context="beta"} * 10 < on() fak_ops:context_growth:delta1h{context="alpha"})`),
+			nil,
+		},
+		{
+			"undefined flat context is dangling",
+			growth + divergence("alpha", "gamma", `fak_ops:context_growth:delta1h{context="alpha"} >= 5 and on() (fak_ops:context_growth:delta1h{context="gamma"} * 10 < on() fak_ops:context_growth:delta1h{context="alpha"})`),
+			[]string{`context "gamma" has no fak_ops:context_growth:delta1h rule`},
+		},
+		{
+			"expr missing flat reference is reported",
+			growth + divergence("alpha", "beta", `fak_ops:context_growth:delta1h{context="alpha"} >= 5`),
+			[]string{`expr does not reference context "beta"`},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			problems := contextDivergenceProblems(parseRecordingRules(tc.text))
+			if len(tc.wantSubs) == 0 && len(problems) != 0 {
+				t.Fatalf("want no problems, got %v", problems)
+			}
+			if len(tc.wantSubs) > 0 && len(problems) == 0 {
+				t.Fatalf("want problems containing %v, got none", tc.wantSubs)
+			}
+			joined := strings.Join(problems, "\n")
+			for _, sub := range tc.wantSubs {
+				if !strings.Contains(joined, sub) {
+					t.Errorf("problems %v do not contain %q", problems, sub)
+				}
+			}
+		})
+	}
+}
+
+// TestOpsAlertParserIgnoresRecordingRules is the regression for the records-only
+// group: `expr:` lines under `- record:` must never be attributed to an alert,
+// whether the records sit in their own group or follow an alert in the same one.
+func TestOpsAlertParserIgnoresRecordingRules(t *testing.T) {
+	raw, err := os.ReadFile(prometheusAlertsPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", prometheusAlertsPath, err)
+	}
+	groups := ParseAlertGroups(string(raw))
+	g, ok := groupByName(groups, "fak_ops_context_growth")
+	if !ok {
+		t.Fatalf("records-only group fak_ops_context_growth not found in %s", prometheusAlertsPath)
+	}
+	if len(g.Alerts) != 0 {
+		t.Errorf("records-only group fak_ops_context_growth parsed %d alerts, want 0: %+v", len(g.Alerts), g.Alerts)
+	}
+	for _, grp := range groups {
+		for _, a := range grp.Alerts {
+			if strings.Contains(a.Expr, contextGrowthRecord) {
+				t.Errorf("%s/%s: expr %q carries a recording rule's expr", grp.Name, a.Name, a.Expr)
+			}
+		}
+	}
+	want := contextDivergenceRecord + " > 0"
+	div, ok := groupByName(groups, "fak_ops_context_divergence")
+	if !ok || len(div.Alerts) != 1 || div.Alerts[0].Expr != want {
+		t.Errorf("fak_ops_context_divergence = %+v (found=%v), want one alert with expr %q", div, ok, want)
+	}
+
+	// Mixed group: a record after an alert must not overwrite the alert's expr.
+	const mixed = `groups:
+  - name: mixed
+    rules:
+      - alert: A
+        expr: up == 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "s"
+          description: "d"
+      - record: some:record
+        expr: sum(x)
+        labels:
+          context: c
+`
+	mg, ok := groupByName(ParseAlertGroups(mixed), "mixed")
+	if !ok || len(mg.Alerts) != 1 {
+		t.Fatalf("mixed group = %+v (found=%v), want one alert", mg, ok)
+	}
+	if got := mg.Alerts[0].Expr; got != "up == 0" {
+		t.Errorf("alert A expr = %q, want %q (record expr leaked into alert)", got, "up == 0")
 	}
 }

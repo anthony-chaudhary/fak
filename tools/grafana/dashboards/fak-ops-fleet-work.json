@@ -4061,6 +4061,253 @@
         "text": {}
       },
       "id": 54
+    },
+    {
+      "type": "row",
+      "title": "Cross-context divergence - same population, different sources",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 112,
+        "w": 24,
+        "h": 1
+      },
+      "panels": [],
+      "id": 55
+    },
+    {
+      "type": "timeseries",
+      "title": "Harness runs by phase (1h growth)",
+      "description": "Growth over the trailing hour of *Runs by harness*, split by run phase. A `launch_refused` row never started a worker (routing/lane/fallback refused it), so a climbing *Runs by harness* that is all `launch_refused` is a refusal storm, not harness work: the fleet session registry, live workers and productive time will stay flat. Witnessed 2026-09-28: 706 of 818 24h rows were opencode `launch_refused` (622 `fallback_dirty`).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 113,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (harness, phase) (delta(fak_ops_agent_runs_by_harness_phase{job=\"fak_ops\"}[1h]))",
+          "legendFormat": "{{harness}} {{phase}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "id": 56
+    },
+    {
+      "type": "timeseries",
+      "title": "Context growth, 1h (one series per source)",
+      "description": "Each independent source's 1h growth (recording rule `fak_ops:context_growth:delta1h`): the ARL-1 run ledger (all harness rows, started-only, refused-only), the fleet session registry (registered, active, live) and the workers exporter (live worktrees, live workers). Series that should move together and do not are the anomaly. A missing series means that source or its plane is down: unobserved, not zero.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 113,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "fak_ops:context_growth:delta1h",
+          "legendFormat": "{{context}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "id": 57
+    },
+    {
+      "type": "stat",
+      "title": "Diverged pairs (rising vs flat, 1h)",
+      "description": "One tile per diverged pair (recording rule `fak_ops:context_divergence:delta1h`): the rising context grew >= 5 in the trailing hour while its sibling grew less than a tenth as much. The value is the rising growth. Empty = every observed pair is consistent. Alert `FakOpsContextDivergence` fires after 30m.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 121,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "fak_ops:context_divergence:delta1h",
+          "legendFormat": "{{rising}} up / {{flat}} flat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNAVAILABLE",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "id": 58
     }
   ]
 }
