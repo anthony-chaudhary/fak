@@ -141,8 +141,12 @@ func TestValidateStrixRequiresControllerAuthorityBeforeDiscovery(t *testing.T) {
 
 	t.Run("runValidate forwards operator-selected root", func(t *testing.T) {
 		repo, git := seedGitFixtureRepo(t)
+		// Automatic (non --strix) hardware validation is scoped to the public runtime
+		// module (internal/validate automaticStrixValidationEligible, 8a78ce093), so the
+		// fixture must declare that module for the GPU-path change to reach the
+		// controller-authority gate at all; a gitfixture.test module skips the phase.
 		commitFiles(t, repo, git, "seed", map[string]string{
-			"go.mod":                         cleanGoMod,
+			"go.mod":                         "module github.com/anthony-chaudhary/fak\n\ngo 1.26\n",
 			"internal/amdgpu/strix_probe.go": "package amdgpu\n\nfunc StrixProbe() {}\n",
 		})
 		resolvedRoot, err := filepath.Abs(repo)
