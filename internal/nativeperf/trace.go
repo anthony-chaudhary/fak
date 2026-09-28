@@ -556,10 +556,16 @@ func (t *TurnLatencyTracer) EndPhase(phase ...TurnPhase) time.Duration {
 	return dur
 }
 
-// RecordPhase adds a time.Duration to the specified phase bucket.
+// RecordPhase adds a time.Duration to the specified phase bucket. It is the
+// concurrency-safe recording path (StartPhase/EndPhase track one active
+// phase), so its overhead clock starts once the lock is held: time spent
+// queued behind another recorder is that recorder's critical section, which
+// its own RecordPhase already counts. Counting the wait too would bill the
+// same wall time once per waiter, scaling overhead_pct with the number of
+// concurrent recorders instead of with the tracer's bookkeeping cost.
 func (t *TurnLatencyTracer) RecordPhase(phase TurnPhase, d time.Duration) {
-	t0 := time.Now()
 	t.mu.Lock()
+	t0 := time.Now()
 	defer func() {
 		overhead := time.Since(t0)
 		t.overheadNs += overhead.Nanoseconds()
