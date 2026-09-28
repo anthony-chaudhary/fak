@@ -88,6 +88,8 @@ type dispatchStatusSnapshot struct {
 	IssuesInFlight  []int                      `json:"issues_in_flight"`
 	LanesHeld       []string                   `json:"lanes_held"`
 	Workers         []dispatchStatusWorker     `json:"workers"`
+	Throughput      *dispatchThroughput        `json:"throughput,omitempty"`
+	GoalLaunches    *dispatchGoalLaunchRate    `json:"goal_launches,omitempty"`
 	Focus           *dispatchStatusFocus       `json:"focus,omitempty"`
 	SpawnHealth     *dispatchStatusSpawnHealth `json:"spawn_health,omitempty"`
 	Trajectory      *trajctl.Status            `json:"trajectory,omitempty"`
@@ -98,6 +100,7 @@ func runDispatchStatus(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("dispatch status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	runsDir := fs.String("runs-dir", dispatchProgressRunsDir, "directory of dispatch worker logs")
+	goalRunsDir := fs.String("goal-runs-dir", "", "directory of goal-launch receipts (default: <workspace>/"+dispatchGoalRunsDirName+")")
 	workspace := fs.String("workspace", "", "workspace root for the focus WIP-breadth section (default: repo root)")
 	asJSON := fs.Bool("json", false, "emit the fleet-dispatch-status/1 JSON payload")
 	asMarkdown := fs.Bool("markdown", false, "render the operator status card as Markdown")
@@ -119,6 +122,16 @@ func runDispatchStatus(stdout, stderr io.Writer, argv []string) int {
 	}
 	snap := dispatchStatusScan(*runsDir, root)
 	snap.Progress = dispatchProgressFold(root)
+	// HEADLINE FIRST (gateshare/fak/lesson-1). The card used to lead with
+	// live_worker_count, a pure liveness number, so a fleet whose every spawn died at
+	// argv parse rendered identically to an idle one for six days. Throughput folds
+	// commits-in-window against the finished-spawn census so those two states separate.
+	snap.Throughput = dispatchThroughputFoldWindowed(root, snap.LiveWorkerCount, snap.SpawnHealth)
+	goals := *goalRunsDir
+	if goals == "" {
+		goals = filepath.Join(root, dispatchGoalRunsDirName)
+	}
+	snap.GoalLaunches = dispatchGoalLaunchRateFold(goals)
 
 	if *asJSON {
 		return encodeJSONOrFail(stdout, stderr, snap, "fak dispatch status")
@@ -277,9 +290,17 @@ func dispatchStatusLaneField(lanes []string) string {
 
 func renderDispatchStatus(snap dispatchStatusSnapshot) string {
 	var b strings.Builder
+	// Line 1 is the LANDING count, not the liveness count. A reader who stops after one
+	// line must have read the number that is able to fail.
+	if line := dispatchThroughputLine(snap.Throughput); line != "" {
+		fmt.Fprintf(&b, "%s\n", line)
+	}
 	fmt.Fprintf(&b, "dispatch status — %d live worker(s)\n", snap.LiveWorkerCount)
 	fmt.Fprintf(&b, "runs-dir: %s\n", snap.RunsDir)
 	fmt.Fprintf(&b, "lanes held: %s\n", dispatchStatusLaneField(snap.LanesHeld))
+	if line := dispatchGoalLaunchLine(snap.GoalLaunches); line != "" {
+		fmt.Fprintf(&b, "%s\n", line)
+	}
 	if line := dispatchStatusSpawnHealthLine(snap.SpawnHealth); line != "" {
 		fmt.Fprintf(&b, "%s\n", line)
 	}
@@ -310,9 +331,16 @@ func renderDispatchStatus(snap dispatchStatusSnapshot) string {
 
 func renderDispatchStatusMarkdown(snap dispatchStatusSnapshot) string {
 	var b strings.Builder
+	// Same ordering contract as the text card: landing first, liveness second.
+	if line := dispatchThroughputLine(snap.Throughput); line != "" {
+		fmt.Fprintf(&b, "%s\n\n", line)
+	}
 	fmt.Fprintf(&b, "### dispatch status — %d live worker(s)\n\n", snap.LiveWorkerCount)
 	fmt.Fprintf(&b, "- runs-dir: `%s`\n", snap.RunsDir)
 	fmt.Fprintf(&b, "- lanes held: %s\n", dispatchStatusLaneField(snap.LanesHeld))
+	if line := dispatchGoalLaunchLine(snap.GoalLaunches); line != "" {
+		fmt.Fprintf(&b, "- %s\n", line)
+	}
 	if line := dispatchStatusSpawnHealthLine(snap.SpawnHealth); line != "" {
 		fmt.Fprintf(&b, "- %s\n", line)
 	}
