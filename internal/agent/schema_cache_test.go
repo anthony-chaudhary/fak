@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/leakcheck"
@@ -108,13 +109,19 @@ func TestNormalizedSchemaCacheBounded(t *testing.T) {
 	leakcheck.BoundedSize(t, 1000, cap, step, c.len)
 }
 
+// schemaCacheObservableRun numbers each invocation of TestNormalizedSchemaCacheLenObservable
+// within one test binary, so a repeated run (-count=N) stores keys the process-global cache
+// has not already retained instead of re-storing the previous run's keys (a no-op).
+var schemaCacheObservableRun atomic.Int64
+
 // TestNormalizedSchemaCacheLenObservable proves the global cache's footprint is visible
 // through the public store path (#3297 DoD: a count metric so growth is observable) and
 // stays within the shipped cap.
 func TestNormalizedSchemaCacheLenObservable(t *testing.T) {
+	run := schemaCacheObservableRun.Add(1)
 	before := normalizedSchemaCacheLen()
 	for i := 0; i < 50; i++ {
-		raw := json.RawMessage(fmt.Sprintf(`{"type":"object","obs":%d}`, i))
+		raw := json.RawMessage(fmt.Sprintf(`{"type":"object","obs":%d,"run":%d}`, i, run))
 		storeNormalizedSchema(schemaCacheKeyOpenAI, true, raw, json.RawMessage(`{}`))
 	}
 	after := normalizedSchemaCacheLen()
