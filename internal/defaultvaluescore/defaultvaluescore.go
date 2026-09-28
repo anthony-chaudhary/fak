@@ -125,6 +125,10 @@ var offWithReason = map[string]reviewedDefaultDecision{
 		reason:   "only the launcher knows model window minus output reserve; a gateway guess is harmful in both directions",
 		reviewBy: "2026-11-01",
 	},
+	"native-compact-history-budget": {
+		reason:   "0 is the derive sentinel, not off: the native wire compacts to (resolved --native-context-tokens window - 32000 output reserve) * 60%, and an explicit value overrides it (docs/long-context-defaults.md); distinct from the passthrough-only --compact-history-budget",
+		reviewBy: "2026-11-01",
+	},
 	"engine-cache-engine": {
 		reason:   "needs a configured self-hosted serving engine and admin credential",
 		reviewBy: "2026-11-01",
