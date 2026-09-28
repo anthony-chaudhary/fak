@@ -276,8 +276,9 @@ it should be measured with the same ruler as the path that already works.**
 | 3 | **Emit `preflight_ms / tick_total_ms` per tick** and alarm above 300‰. | **SHIPPED** — `dispatchTickLoopMetrics` |
 | 4 | **Fix or un-recommend the MCP `dos_arbitrate` path.** It fails open; the runbook says so; the earlier fix was retracted. | **OPEN** — cross-repo, in dos-kernel |
 | 5 | **Re-base or replace `refusal_vocab_size`.** | **SHIPPED** — `9c2ca42c7`; 86 → 22.2, 149 → 7.8 |
-| 6 | **Stand up the naive arm as a measured control.** | **OPEN** — needs a scheduled arm |
+| 6 | **Stand up the naive arm as a measured control.** | **SHIPPED** — `f2e9caded`; `fak naive-control compare` |
 | 7 | **Expire `refs/fak/wip/*` by age and skip non-superset refs in the collision scan.** | **OPEN** — blocking every `fak commit` (Lesson 4b) |
+| 8 | **Ratchet `AGENTS.md` bytes.** It was the largest context slice and the only one of the three context-budget floors with no gate. | **SHIPPED** — `b81fa0d7a`, floor pinned at 52,301 |
 
 ### What shipped looks like
 
@@ -299,6 +300,10 @@ nothing landed, 0 still live — this is an outage, not an idle fleet` instead o
 
 - `internal/dispatchdoa` — the dead-on-arrival detector built from the 2026-07-28
   incident; the package doc is the primary source for symptom 2.
+- `internal/naivecontrol` + `fak naive-control compare` — the two arms on one ruler
+  (item 6). Today it prints `UNKNOWN` for every field and `INCONCLUSIVE`; that is the
+  correct answer until the arms have run.
+- `internal/agentsindex` byte floor — the `AGENTS.md` ratchet (item 8).
 - `docs/agentic-issue-dispatch.md` — the runbook; §3 is the GO-is-not-a-promise
   clarification behind lesson 2.
 - `docs/OPERATOR-HEAVINESS.md` — the scorecard behind lesson 5, regenerated
