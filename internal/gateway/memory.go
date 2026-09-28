@@ -20,8 +20,9 @@ import (
 // MemoryRequest is the arguments object for fak_memory_explain / fak_memory_run. Supply
 // either a built-in `driver` name or an inline authored `query`; parameterize with
 // intent/k/budget; point `run` at a recall image with `image_dir` (default: the
-// in-memory demo corpus). `apply` is honored only by run and only enacts the safe
-// negative-only / storage mutations (tombstone, prune); the default is dry-run.
+// in-memory demo corpus). `apply` requests a storage mutation, which the gateway
+// refuses until a lease epoch can be held across the actual effect. Runs without
+// `apply` remain dry-run.
 type MemoryRequest struct {
 	Driver   string      `json:"driver,omitempty"`
 	Query    *memq.Query `json:"query,omitempty"`
@@ -87,10 +88,13 @@ func (s *Server) memoryExplain(req MemoryRequest) (memq.Plan, error) {
 	return memq.Explain(q), nil
 }
 
-// memoryRun executes a request's query against the chosen backend. Mutations apply
-// only when req.Apply is set (and then only the safe tombstone/prune effects); the
-// default is a dry-run proposal — the same fail-closed default the CLI enforces.
+// memoryRun executes a request's query against the chosen backend. A mutating run
+// needs an act-bound lease epoch, which this route cannot yet supply. Refuse it
+// before backend loading so direct MCP and plugin routes share the same fence.
 func (s *Server) memoryRun(ctx context.Context, req MemoryRequest) (memq.Result, error) {
+	if req.Apply {
+		return memq.Result{}, errors.New("fak_memory_run apply requires an act-bound lease")
+	}
 	q, err := req.resolveQuery()
 	if err != nil {
 		return memq.Result{}, err
@@ -121,11 +125,7 @@ func (s *Server) memoryRun(ctx context.Context, req MemoryRequest) (memq.Result,
 	default:
 		backend = memq.NewDemoStore()
 	}
-	caps := memq.Caps{}
-	if req.Apply {
-		caps = memq.AllowAll()
-	}
-	res, err := memq.Run(ctx, backend, q, caps)
+	res, err := memq.Run(ctx, backend, q, memq.Caps{})
 	if err != nil {
 		return memq.Result{}, err
 	}
