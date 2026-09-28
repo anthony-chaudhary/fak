@@ -338,7 +338,8 @@ func TestLeaseWritePlaneRefusalsAreDenyAsValue(t *testing.T) {
 	}
 
 	// STALE_LEASE: A holds it live; B tries to renew A's lease.
-	if a := postLease(t, ts.URL, "acquire", LeaseWriteRequest{ID: "lane", Holder: "A", TTLSeconds: 300}); !a.OK {
+	a := postLease(t, ts.URL, "acquire", LeaseWriteRequest{ID: "lane", Holder: "A", TTLSeconds: 300})
+	if !a.OK {
 		t.Fatalf("A acquire = %+v, want ok", a)
 	}
 	sl := postLease(t, ts.URL, "renew", LeaseWriteRequest{ID: "lane", Holder: "B", TTLSeconds: 300})
@@ -350,7 +351,7 @@ func TestLeaseWritePlaneRefusalsAreDenyAsValue(t *testing.T) {
 	}
 
 	// Release by the real holder is an admitted OK, and a re-release is idempotent-OK.
-	rel := postLease(t, ts.URL, "release", LeaseWriteRequest{ID: "lane", Holder: "A"})
+	rel := postLease(t, ts.URL, "release", LeaseWriteRequest{ID: "lane", Holder: "A", Generation: a.Generation})
 	if !rel.OK {
 		t.Fatalf("A release = %+v, want ok", rel)
 	}
