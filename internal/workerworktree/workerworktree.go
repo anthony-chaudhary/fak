@@ -1086,7 +1086,14 @@ func safeRemoveAll(path string) error {
 	for i := 0; i < 6; i++ {
 		_ = filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
 			if err == nil {
-				_ = os.Chmod(p, 0o666)
+				// Clear Windows read-only bits. Directories keep the owner
+				// search bit: a 0666 directory cannot be opened on Unix, so
+				// RemoveAll would fail with permission denied.
+				mode := os.FileMode(0o666)
+				if info.IsDir() {
+					mode = 0o755
+				}
+				_ = os.Chmod(p, mode)
 			}
 			return nil
 		})
