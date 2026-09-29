@@ -1078,7 +1078,14 @@ func writeOpsRunReceipt(path string, receipt opsRunReceipt) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".ops-run-*.json")
+	// A newly registered routine may target a receipt directory that does not
+	// exist yet; create it before the atomic temp file so the first occurrence
+	// succeeds without operator mkdir (issue #13024).
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, ".ops-run-*.json")
 	if err != nil {
 		return err
 	}

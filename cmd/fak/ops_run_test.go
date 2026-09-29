@@ -1308,6 +1308,65 @@ func TestOpsRunReceiptTimedOutFallback(t *testing.T) {
 	}
 }
 
+// TestWriteOpsRunReceiptCreatesMissingParentDir is the regression for #13024:
+// a routine whose --receipt target directory does not yet exist must have its
+// first occurrence succeed instead of failing every run with ENOENT.
+func TestWriteOpsRunReceiptCreatesMissingParentDir(t *testing.T) {
+	root := t.TempDir()
+	receipt := filepath.Join(root, "receipts", "git-garden", "last.json")
+	if _, err := os.Stat(filepath.Dir(receipt)); !os.IsNotExist(err) {
+		t.Fatalf("precondition: parent dir must be absent, got %v", err)
+	}
+	want := opsRunReceipt{Status: "succeeded", ExitCode: 0}
+	if err := writeOpsRunReceipt(receipt, want); err != nil {
+		t.Fatalf("writeOpsRunReceipt into absent parent dir: %v", err)
+	}
+	data, err := os.ReadFile(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got opsRunReceipt
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != want.Status || got.ExitCode != want.ExitCode {
+		t.Fatalf("receipt = %+v, want %+v", got, want)
+	}
+	if info, err := os.Stat(filepath.Dir(receipt)); err != nil || !info.IsDir() {
+		t.Fatalf("parent dir not created: err=%v", err)
+	}
+}
+
+// TestWriteOpsRunReceiptExistingDirUnchanged guards the non-regression half of
+// #13024: routines whose receipt directory already exists keep the prior
+// atomic-write behavior (temp file + rename), with no behavior change.
+func TestWriteOpsRunReceiptExistingDirUnchanged(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "receipts")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	receipt := filepath.Join(dir, "last.json")
+	if err := os.WriteFile(receipt, []byte("previous\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want := opsRunReceipt{Status: "failed", ExitCode: 1}
+	if err := writeOpsRunReceipt(receipt, want); err != nil {
+		t.Fatalf("writeOpsRunReceipt into existing dir: %v", err)
+	}
+	data, err := os.ReadFile(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got opsRunReceipt
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != want.Status || got.ExitCode != want.ExitCode {
+		t.Fatalf("receipt = %+v, want %+v", got, want)
+	}
+}
+
 func TestResolvePOSIXOpenCodeBinary(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX-only install-location resolver")
