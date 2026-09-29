@@ -29,35 +29,36 @@ fak footprint --top 8    # just the heaviest N
 ## Baseline (measured)
 
 ```
-mcp-footprint: 19 tools · floor 4507 est. tokens (20283 bytes, ESTIMATED)
+mcp-footprint: 24 tools · floor 5221 est. tokens (23496 bytes, ESTIMATED)
 ```
 
-Re-pinned for #6011: #6022 retired the repository index MCP tools, taking the registry
-from 26 tools to 19 and the measured whole-schema floor from 5464 to 4507 estimated
-tokens (957 banked). The reduction was won by removing tools, not by relaxing the
-ratchet — the slack it opened is banked into the constant rather than left as headroom.
+Re-pinned 21→24 tools for the three hardware-in-the-loop tools 4820f4698 registered
+(`fak_hil_audit_comparison` 149, `fak_hil_microdose` 98, `fak_hil_probe` 49 = 296
+estimated tokens); the other 21 tools net −5 against the previous 4930 pin. Earlier:
+19→21 tools (#11644/#11648) for the context-restore and chat tools, and #6011, where
+#6022 retired the repository index MCP tools (26→19 tools, 5464→4507, 957 banked).
 
 Heaviest contributors (the cold-schema deferral targets for #3231/#3232):
 
 | rank | est. tokens | bytes | tool |
 |-----:|------------:|------:|------|
 | 1 | 503 | 2264 | fak_trajquery |
-| 2 | 496 | 2234 | fak_memory_run |
-| 3 | 451 | 2033 | fak_memory_explain |
-| 4 | 348 | 1566 | fak_admit |
-| 5 | 271 | 1222 | fak_context_change |
-| 6 | 261 | 1175 | fak_read |
-| 7 | 244 | 1101 | fak_feature_query |
-| 8 | 222 | 999 | fak_adjudicate |
+| 2 | 498 | 2242 | fak_memory_run |
+| 3 | 459 | 2068 | fak_memory_explain |
+| 4 | 428 | 1929 | fak_admit |
+| 5 | 280 | 1264 | fak_context_restore |
+| 6 | 277 | 1247 | fak_context_change |
+| 7 | 272 | 1225 | fak_read |
+| 8 | 244 | 1101 | fak_feature_query |
 
-The full 19-tool breakdown is what `fak footprint` prints; only the head is
+The full 24-tool breakdown is what `fak footprint` prints; only the head is
 pinned here so a drift is legible in review.
 
 ## The gate (#2924)
 
 Measuring the floor does not keep the core narrow — a number that cannot refuse a
 change is still just taste. `internal/mcpfootprint.CheckFloor` gates the measured
-floor against a committed ceiling, `FloorBudgetTokens` (currently **4507**), as a
+floor against a committed ceiling, `FloorBudgetTokens` (currently **5221**), as a
 one-way ratchet:
 
 | Direction | Reason | What it means |
@@ -92,25 +93,27 @@ through the same estimator (a description-only `ToolDef` carries no name or para
 bytes, so the number never drifts from `EstimateAnthropicTokens`).
 
 ```
-always-sent fak_* description floor: 1552 est. tokens across 19 tools
+always-sent fak_* description floor: 1661 est. tokens across 24 tools
 ```
 
-Re-pinned for #6011 alongside the whole-schema floor: retiring the repository index
-tools (#6022) took the description slice from 1966 to 1552 estimated tokens across
-19 rather than 26 tools. The values are estimator-derived, not provider-billed token
-counts.
+Re-pinned 19→24 tools alongside the whole-schema floor: the three HIL tools from
+4820f4698 add 119 estimated description tokens (`fak_hil_audit_comparison` 45,
+`fak_hil_microdose` 42, `fak_hil_probe` 32), and the remaining 21 tools sit 10 below
+the previous 1552 pin. Earlier, #6011 retired the repository index tools (#6022),
+taking the slice from 1966 to 1552 across 19 rather than 26 tools. The values are
+estimator-derived, not provider-billed token counts.
 
 Heaviest description bodies (the trim targets — `fak footprint` ranks the full schema;
 `PerToolDescription` ranks the prose slice):
 
 | rank | est. tokens | tool |
 |-----:|------------:|------|
-| 1 | 156 | fak_admit |
-| 2 | 115 | fak_memory_run |
-| 3 | 101 | fak_read |
-| 4 | 94 | fak_tools_search |
-| 5 | 92 | fak_session_reset |
-| 6 | 85 | fak_context_change |
+| 1 | 177 | fak_admit |
+| 2 | 109 | fak_memory_run |
+| 3 | 92 | fak_session_reset |
+| 4 | 83 | fak_context_change |
+| 5 | 80 | fak_capabilities |
+| 6 | 80 | fak_memory_drivers |
 
 | Direction | Reason | What it means |
 |---|---|---|

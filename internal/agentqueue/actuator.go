@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/pkg/sysproc"
 )
 
 // LaunchSpec maps durable intent to the existing guarded dispatch lifecycle.
@@ -35,6 +37,7 @@ type ExecRunner struct{}
 
 func (ExecRunner) Run(ctx context.Context, name string, args ...string) error {
 	command := exec.CommandContext(ctx, name, args...)
+	sysproc.ConfigureBackground(command)
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
 	}

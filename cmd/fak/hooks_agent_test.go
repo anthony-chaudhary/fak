@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -13,12 +15,150 @@ import (
 // cmd/fak/hooks_agent_test.go — the #5607 contract: an agent-lifecycle hook that COULD NOT RUN
 // must say so instead of exiting 0.
 //
-// The defect these pin lives in .claude/settings.json, where every entry is
+// The defect these pin lived in the #5607-era .claude/settings.json, where every entry was
 // `python -c "...; subprocess.call(argv); sys.exit(0)"`. subprocess.call returns the child's exit
 // code, the value is dropped, and sys.exit(0) overrides — so a missing script, a crashed
 // interpreter, and a clean pass are byte-identical to the harness. That is failclosed-audit.md
 // FINDING 2, and it is the epic #5601 shape: a check whose absence renders like a check that
 // passed.
+
+// fakeDosHookEnv switches the test binary into the stand-in `dos` CLI (see
+// TestAgentHookFakeDosHelperProcess). The companion vars carry the exit code and stdout the
+// stand-in should produce.
+const (
+	fakeDosHookEnv       = "FAK_TEST_FAKE_DOS_HOOK"
+	fakeDosHookRCEnv     = "FAK_TEST_FAKE_DOS_HOOK_RC"
+	fakeDosHookStdoutEnv = "FAK_TEST_FAKE_DOS_HOOK_STDOUT"
+)
+
+// stubDosHookCommand swaps the dosHookCommand seam for the duration of one test.
+func stubDosHookCommand(t *testing.T, prefix []string, ok bool) {
+	t.Helper()
+	orig := dosHookCommand
+	dosHookCommand = func() ([]string, bool) { return prefix, ok }
+	t.Cleanup(func() { dosHookCommand = orig })
+}
+
+// useFakeDosHook points the seam at this test binary re-executed as a stand-in `dos` that exits
+// rc and writes stdout verbatim — a Go-native child, so the tests need neither a real dos install
+// nor an interpreter on PATH. The delegate appends `hook <event> --workspace <root>` after the
+// `--`, and the stand-in verifies that tail before answering.
+func useFakeDosHook(t *testing.T, rc int, stdout string) {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	t.Setenv(fakeDosHookEnv, "1")
+	t.Setenv(fakeDosHookRCEnv, strconv.Itoa(rc))
+	t.Setenv(fakeDosHookStdoutEnv, stdout)
+	stubDosHookCommand(t, []string{exe, "-test.run=^TestAgentHookFakeDosHelperProcess$", "--"}, true)
+}
+
+// TestAgentHookFakeDosHelperProcess is not a real test: it is the stand-in `dos` CLI that
+// useFakeDosHook re-executes. Run normally (env unset) it skips. As the child it checks the argv
+// tail is the `dos hook <event> --workspace <dir>` shape settings.json wires, then answers with
+// the configured stdout and exit code. A malformed tail exits 3, which runHooksAgent classifies
+// as "failed" — so every caller asserting 0 or 2 also pins the argv shape end to end.
+func TestAgentHookFakeDosHelperProcess(t *testing.T) {
+	if os.Getenv(fakeDosHookEnv) != "1" {
+		t.Skip("helper process for the dos-hook delegate tests; runs only as a re-exec'd child")
+	}
+	args := os.Args
+	for i, a := range args {
+		if a == "--" {
+			args = args[i+1:]
+			break
+		}
+	}
+	if len(args) != 4 || args[0] != "hook" || args[2] != "--workspace" || args[3] == "" {
+		fmt.Fprintf(os.Stderr, "fake dos: want `hook <event> --workspace <root>`, got %q\n", args)
+		os.Exit(3)
+	}
+	if !slices.Contains(agentHookEvents, args[1]) {
+		fmt.Fprintf(os.Stderr, "fake dos: unknown hook event %q\n", args[1])
+		os.Exit(3)
+	}
+	_, _ = os.Stdout.WriteString(os.Getenv(fakeDosHookStdoutEnv))
+	rc, err := strconv.Atoi(os.Getenv(fakeDosHookRCEnv))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fake dos: bad %s: %v\n", fakeDosHookRCEnv, err)
+		os.Exit(3)
+	}
+	os.Exit(rc)
+}
+
+// TestDosHookDelegateArgv_RunsKernelHookVerb pins the delegate's resolved command: the dos
+// kernel CLI prefix followed by `hook <event> --workspace <root>`, the same verb settings.json
+// invokes directly (#10851) — and it must not write into the seam's prefix slice.
+func TestDosHookDelegateArgv_RunsKernelHookVerb(t *testing.T) {
+	prefix := make([]string, 1, 8) // spare capacity: an in-place append would alias it
+	prefix[0] = filepath.Join("opt", "bin", "dos")
+	stubDosHookCommand(t, prefix, true)
+	root := t.TempDir()
+	seen := 0
+	for _, d := range agentHookRegistry() {
+		if d.Name != "dos-hook" {
+			continue
+		}
+		seen++
+		argv, ok := d.Argv(root)
+		want := []string{prefix[0], "hook", d.Event, "--workspace", root}
+		if !ok || !slices.Equal(argv, want) {
+			t.Errorf("dos-hook/%s Argv = %q, %v; want %q, true", d.Event, argv, ok, want)
+		}
+	}
+	if seen == 0 {
+		t.Fatal("no dos-hook delegate registered — this test would be vacuous")
+	}
+	if len(prefix) != 1 || prefix[:cap(prefix)][1] != "" {
+		t.Errorf("delegate appended into the seam's prefix slice: %q", prefix[:cap(prefix)])
+	}
+}
+
+// TestDosHookCommand_MissingDosIsNotFound drives the REAL seam with `dos` off PATH: it must
+// report not-found (ok=false) rather than invent a command.
+func TestDosHookCommand_MissingDosIsNotFound(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if argv, ok := dosHookCommand(); ok || argv != nil {
+		t.Fatalf("dosHookCommand() with an empty PATH = %q, %v; want nil, false", argv, ok)
+	}
+}
+
+// TestRunHooksAgent_DosNotOnPathReportsCouldNotRun is the #5607 contract for the kernel-CLI
+// delegate: no `dos` on this box means the lifecycle event was NOT checked. It must exit 1
+// (visible, non-blocking), say could-not-run, and leave an incident row — never a silent pass.
+func TestRunHooksAgent_DosNotOnPathReportsCouldNotRun(t *testing.T) {
+	stubDosHookCommand(t, nil, false)
+	root := t.TempDir()
+	var out, errb bytes.Buffer
+	rc := runHooksAgent(&out, &errb, strings.NewReader("{}"), []string{"stop", "--root", root, "--json"})
+	if rc != 1 {
+		t.Fatalf("missing dos returned %d, want 1 (could-not-run, non-blocking)\nstdout: %s\nstderr: %s",
+			rc, out.String(), errb.String())
+	}
+	var got struct {
+		Delegate string `json:"delegate"`
+		Status   string `json:"status"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("--json did not emit valid JSON: %v\n%s", err, out.String())
+	}
+	if got.Delegate != "dos-hook" || got.Status != "could-not-run" {
+		t.Errorf("report = %+v, want dos-hook could-not-run", got)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, ".fak", "hooks-agent-incidents.jsonl"))
+	if err != nil {
+		t.Fatalf("a could-not-run must persist an incident row: %v", err)
+	}
+	var inc agentHookIncident
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &inc); err != nil {
+		t.Fatalf("decode incident: %v (%s)", err, raw)
+	}
+	if inc.Delegate != "dos-hook" || inc.Event != "stop" || inc.Status != "could-not-run" || inc.ExitCode != -1 {
+		t.Errorf("incident = %+v, want stop/dos-hook could-not-run exit -1", inc)
+	}
+}
 
 // TestAgentHookOutcome_ContractTable is the core of the issue, driven directly because the
 // classification is pure. The load-bearing rows are the two that used to collapse into 0.
@@ -313,9 +453,11 @@ func TestAgentHookPick_UnknownDelegateRefuses(t *testing.T) {
 }
 
 // TestRunHooksAgent_MissingDelegateReportsCouldNotRun is the end-to-end witness for the reported
-// bug. Pointed at a root with no tools/ at all, today's wrapper exits 0; this must exit non-zero,
-// name the delegate, and NOT use the block code.
+// bug. With the delegate's command absent (no `dos` on PATH), the old wrapper exited 0; this must
+// exit non-zero, name the delegate, and NOT use the block code.
 func TestRunHooksAgent_MissingDelegateReportsCouldNotRun(t *testing.T) {
+	// Pin the absence: with a real `dos` on the box the stop delegate would otherwise run it.
+	stubDosHookCommand(t, nil, false)
 	empty := t.TempDir()
 	var out, errb bytes.Buffer
 	rc := runHooksAgent(&out, &errb, strings.NewReader("{}"),
@@ -349,6 +491,7 @@ func TestRunHooksAgent_MissingDelegateReportsCouldNotRun(t *testing.T) {
 // TestRunHooksAgent_HumanRunNamesTheGap: without --json the degraded run still has to be legible
 // on stderr — a silent non-zero is only marginally better than a silent zero.
 func TestRunHooksAgent_HumanRunNamesTheGap(t *testing.T) {
+	stubDosHookCommand(t, nil, false)
 	empty := t.TempDir()
 	var out, errb bytes.Buffer
 	if rc := runHooksAgent(&out, &errb, strings.NewReader("{}"), []string{"stop", "--root", empty}); rc == 0 {
@@ -383,14 +526,8 @@ func TestRunHooksAgent_UnknownEventExitsNonBlocking(t *testing.T) {
 // forwarded byte-for-byte rather than rewritten by the wrapper.
 func TestRunHooksAgent_ForwardsChildExitAndStdout(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "tools"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// A stand-in dos_hook.py that answers on stdout and refuses with the block code.
-	script := "import sys; sys.stdout.write('{\"decision\":\"block\"}'); sys.exit(2)\n"
-	if err := os.WriteFile(filepath.Join(root, "tools", "dos_hook.py"), []byte(script), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// A stand-in `dos` that answers on stdout and refuses with the block code.
+	useFakeDosHook(t, 2, `{"decision":"block"}`)
 	var out, errb bytes.Buffer
 	rc := runHooksAgent(&out, &errb, strings.NewReader("{}"), []string{"stop", "--root", root})
 	if rc != 2 {
@@ -404,12 +541,7 @@ func TestRunHooksAgent_ForwardsChildExitAndStdout(t *testing.T) {
 
 func TestRunHooksAgent_BlockedChildPersistsIncident(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "tools"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "tools", "dos_hook.py"), []byte("import sys; sys.exit(2)\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	useFakeDosHook(t, 2, "")
 	var out, errb bytes.Buffer
 	if rc := runHooksAgent(&out, &errb, strings.NewReader("{}"), []string{"stop", "--root", root}); rc != 2 {
 		t.Fatalf("blocked delegate returned %d, want 2: %s", rc, errb.String())
@@ -429,12 +561,7 @@ func TestRunHooksAgent_BlockedChildPersistsIncident(t *testing.T) {
 
 func TestRunHooksAgent_CleanChildDoesNotCreateIncidentLedger(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "tools"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "tools", "dos_hook.py"), []byte("import sys; sys.exit(0)\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	useFakeDosHook(t, 0, "")
 	var out, errb bytes.Buffer
 	if rc := runHooksAgent(&out, &errb, strings.NewReader("{}"), []string{"stop", "--root", root}); rc != 0 {
 		t.Fatalf("clean delegate returned %d: %s", rc, errb.String())
@@ -448,12 +575,7 @@ func TestRunHooksAgent_CleanChildDoesNotCreateIncidentLedger(t *testing.T) {
 // runs and allows must exit 0 and stay quiet, because this fires on every single tool call.
 func TestRunHooksAgent_CleanChildExitsZeroQuietly(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "tools"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "tools", "dos_hook.py"), []byte("import sys; sys.exit(0)\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	useFakeDosHook(t, 0, "")
 	var out, errb bytes.Buffer
 	if rc := runHooksAgent(&out, &errb, strings.NewReader("{}"), []string{"stop", "--root", root}); rc != 0 {
 		t.Fatalf("a clean delegate returned %d, want 0\nstdout: %s\nstderr: %s", rc, out.String(), errb.String())

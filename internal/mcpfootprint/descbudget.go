@@ -41,10 +41,13 @@ import (
 //
 // Changing this number is the whole point: it is the reviewable justification for a
 // change to the per-call prose tax. Raise it only alongside the description that grew
-// it; lower it whenever a trim banks a win. Pinned at the measured HEAD floor: 19 tools
-// · 1552 est. description tokens (see docs/context-budget/mcp-tool-floor.md). Re-pinned
-// 26→19 tools (#6011) after #6022 retired the repository index MCP tools.
-const DescriptionBudgetTokens = 1552
+// it; lower it whenever a trim banks a win. Pinned at the measured HEAD floor: 24 tools
+// · 1661 est. description tokens (see docs/context-budget/mcp-tool-floor.md). Re-pinned
+// 26→19 tools (#6011) after #6022 retired the repository index MCP tools; re-pinned
+// 19→24 tools for the context-restore/chat tools and the three HIL tools 4820f4698
+// registered (fak_hil_audit_comparison 45 + fak_hil_microdose 42 + fak_hil_probe 32 =
+// 119 est. tokens; the rest net -10).
+const DescriptionBudgetTokens = 1661
 
 // DescriptionRatchetSlackTokens is how far the measured description sum may sit BELOW
 // the budget before the gate demands the ceiling be re-pinned. It absorbs incidental

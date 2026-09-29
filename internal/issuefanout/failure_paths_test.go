@@ -110,6 +110,36 @@ var refusalContract = []struct {
 		},
 		want: []string{"requires --parent-issue", "--parent-baseline-points"},
 	}, {
+		site: "live candidate invalid process-cause metadata",
+		drive: func(t *testing.T) error {
+			in := spineInput()
+			in.ParentIssue = 36
+			in.ParentBaseline = 100
+			in.CompletionStandard = "demo"
+			plan, err := Build(in)
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			// An authored cause outside the closed vocabulary must refuse the whole
+			// batch, never be silently overwritten by the generator's fallback.
+			plan.Candidates[0].CurrentState += "\n\nProcess cause: bogus"
+			res, err := FileLive(plan, nil, LiveOptions{Runner: func([]string) (string, string, bool) {
+				t.Fatal("process-cause preflight must refuse before the runner")
+				return "", "", false
+			}})
+			if !reflect.DeepEqual(res, LiveResult{}) {
+				t.Fatalf("a refused FileLive leaked a partial result: %+v", res)
+			}
+			return err
+		},
+		want: []string{
+			"has invalid process-cause metadata",
+			`unknown Process cause "bogus"`,
+			"fix the `Process cause:` declaration",
+			"regenerate the full plan",
+			"no issues were filed",
+		},
+	}, {
 		site: "strict post-filing issue contract",
 		drive: func(t *testing.T) error {
 			in := spineInput()

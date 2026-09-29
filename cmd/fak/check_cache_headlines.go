@@ -10,6 +10,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cacheheadlines"
 )
 
+// `fak check-cache-headlines` - the Go port of the deleted
+// tools/check_cache_headlines.py: refuse a cache "win" headline that omits its
+// plane + provenance label (internal/cacheheadlines). `--audit-tree` scans the
+// tracked tree, `--audit-staged` the staged additions (pre-commit).
+//
+// Wired as the top-level `check-cache-headlines` case in main.go, classified
+// TierDev in internal/devindex/tiers.go with its manifest synopsis alongside.
 func cmdCheckCacheHeadlines(argv []string) {
 	os.Exit(runCheckCacheHeadlines(os.Stdout, os.Stderr, argv))
 }

@@ -19,7 +19,8 @@ import (
 // delegate from a compiled verb instead of a `python -c` wrapper, and make a delegate that COULD
 // NOT RUN say so (#5607).
 //
-// The wiring this replaces is, verbatim from .claude/settings.json:
+// The wiring this replaced was, verbatim from the #5607-era .claude/settings.json (that
+// launcher script has since been deleted; the dos-hook delegates now run `dos hook` directly):
 //
 //	python -c "...; subprocess.call([sys.executable, .../dos_hook.py, 'pretool', ...]); sys.exit(0)"
 //
@@ -67,14 +68,21 @@ type agentHookDelegate struct {
 // agentHookRegistry mirrors the live .claude/settings.json wiring one delegate per hooks entry,
 // so cutting an entry over to this verb is a substitution and not a redesign. The mirror is
 // pinned by a test that reads settings.json, so drift in either direction fails the build.
+//
+// The dos-hook delegates run the dos kernel's OWN hook CLI — `dos hook <event> --workspace
+// <root>` — exactly what settings.json invokes directly since #10851. The Python launcher they
+// used to resolve (tools/dos_hook.py) and its Go port (internal/doshook) are gone: the kernel's
+// `dos hook` superseded both, so there is no fak-side wrapper left to go stale.
 func agentHookRegistry() []agentHookDelegate {
 	dosHook := func(event string) func(string) ([]string, bool) {
 		return func(root string) ([]string, bool) {
-			script := filepath.Join(root, "tools", "dos_hook.py")
-			if !fileExistsAt(script) {
+			prefix, ok := dosHookCommand()
+			if !ok || len(prefix) == 0 {
 				return nil, false
 			}
-			return []string{pythonExe(), script, event, "--workspace", root}, true
+			// Copy the prefix: appending in place could alias a seam-owned backing array.
+			argv := append([]string(nil), prefix...)
+			return append(argv, "hook", event, "--workspace", root), true
 		}
 	}
 	return []agentHookDelegate{
@@ -83,6 +91,18 @@ func agentHookRegistry() []agentHookDelegate {
 		{Name: "dos-hook", Event: "posttool", Argv: dosHook("posttool")},
 		{Name: "dos-hook", Event: "stop", Argv: dosHook("stop")},
 	}
+}
+
+// dosHookCommand resolves the argv PREFIX of the dos kernel CLI the dos-hook delegates append
+// `hook <event> --workspace <root>` to. ok=false means `dos` is not on PATH: the delegate could
+// not run, which runHooksAgent REPORTS (exit 1, incident row) — never a silent pass. It is a
+// package var so tests can substitute a stand-in without a real dos install.
+var dosHookCommand = func() ([]string, bool) {
+	dos, err := exec.LookPath("dos")
+	if err != nil {
+		return nil, false
+	}
+	return []string{dos}, true
 }
 
 // repoguardArgv prefers the compiled repoguard, falling back to its Python source — the same
@@ -228,7 +248,7 @@ func runHooksAgent(stdout, stderr io.Writer, stdin io.Reader, argv []string) int
 
 	child, ok := d.Argv(r)
 	if !ok {
-		detail := "delegate command is not present under " + r
+		detail := "delegate command is not present under " + r + " or on PATH"
 		appendAgentHookIncident(r, d, -1, "could-not-run", detail)
 		return agentHookReport(stdout, stderr, *asJSON, d, -1, "could-not-run", detail, 1)
 	}

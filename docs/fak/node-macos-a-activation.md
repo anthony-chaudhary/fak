@@ -13,7 +13,7 @@ awake, and verify that guarded audit journals are real.
 
 This is the runbook that turns node-macos-a into a 24/7 **guarded** dogfood node — the
 one that finally flips `audit_journal_evidence` from a configured wire into an exercised
-one, taking `tools/dogfood_coverage.py` from grade **B** to **A** (issue #731).
+one, taking `fak dogfood-coverage` from grade **B** to **A** (issue #731).
 
 ## What "activated" means
 
@@ -82,9 +82,9 @@ ls .dispatch-runs/guard-audit/*.jsonl
 wc -l .dispatch-runs/guard-audit/*.jsonl
 
 # audit_journal_evidence is now met; coverage should read grade A:
-python tools/dogfood_coverage.py
+fak dogfood-coverage
 #   dogfood-coverage: 100.0% (9/9 KPIs)  grade A  dogfood_debt 0  audit_rows N>0
-python tools/dogfood_coverage.py --check    # exit 0 (the #731 gate)
+fak dogfood-coverage --check    # exit 0 (the #731 gate)
 ```
 
 The same coverage payload is emitted on a cadence by `.github/workflows/dogfood-coverage.yml`
@@ -107,5 +107,5 @@ throughout, because grade A depends only on this soft KPI.
 - `tools/com.fak.dogfood-fleet.plist` — the guarded-tick cadence unit (this issue)
 - `tools/com.fak.serve-gateway.plist` — the 24/7 gateway daemon
 - `tools/issue_dispatch.py` — the preflight-gated guarded dispatch tick
-- `tools/dogfood_coverage.py` — counts `.dispatch-runs/guard-audit/*.jsonl` as `audit_journal_evidence`
+- `fak dogfood-coverage` — counts `.dispatch-runs/guard-audit/*.jsonl` as `audit_journal_evidence`
 - `docs/fak/always-on-dogfood-server.md` — the Mac/GCP always-on tiers design

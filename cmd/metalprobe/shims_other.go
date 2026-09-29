@@ -7,6 +7,8 @@ package main
 
 import (
 	"os/exec"
+
+	"github.com/anthony-chaudhary/fak/pkg/sysproc"
 )
 
 // checkGoTool verifies the go toolchain is present in PATH.
@@ -36,7 +38,7 @@ func checkClang() ToolCheck {
 // runLinkcheck executes the cgo probe leaf through the go tool, returning its
 // combined output and exit code.
 func runLinkcheck() (string, int) {
-	cmd := exec.Command("go", "run", "./cmd/metalprobe/linkcheck")
+	cmd := sysproc.Command("go", "run", "./cmd/metalprobe/linkcheck")
 	outBytes, err := cmd.CombinedOutput()
 	exit := 0
 	if err != nil {

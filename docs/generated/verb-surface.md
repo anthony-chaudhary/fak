@@ -6,10 +6,10 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1258<br>
-rows: 1259<br>
-unverified rows: 0 / 1259<br>
-source-only rows absent from help: 1023
+parsed files: 1257<br>
+rows: 1262<br>
+unverified rows: 0 / 1262<br>
+source-only rows absent from help: 1026
 
 ## Surface table
 
@@ -171,6 +171,7 @@ source-only rows absent from help: 1023
 | `fak cache help` |  | cacheUsage | `case` arm of the dispatch switch in runCache() | NONE | — | **SOURCE ONLY** |
 | `fak cache namespaces` |  | runCacheNamespaces | `case` arm of the dispatch switch in runCache() | NONE | — | **SOURCE ONLY** |
 | `fak cache status` |  | runCacheStatus | `case` arm of the dispatch switch in runCache() | NONE | — | **SOURCE ONLY** |
+| `fak cachedoc-numbers-audit` | doc-numbers gate: every headline number in a cachevalue doc traces to its committed snapshot | cmdCachedocNumbersAudit / internal/cachedocaudit | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak cachesweep` | sweep a prefix-access trace across cache budgets: reuse curve, infinite-cache ceiling, 99% ROI knee | runCachesweep / internal/cachesweep | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak cachevalue` | the cache-value rollup: realized agent-memory / KV-reuse savings | cmdCachevalue | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak cadence` | consolidated regular-cadence report: scores, maturity, work-done, releases in one envelope | cmdCadence / internal/cadencereport, internal/trendreport | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
@@ -184,6 +185,7 @@ source-only rows absent from help: 1023
 | `fak chat` | minimal chat client against a fak serve/guard gateway | cmdChat / internal/abi, internal/adjudicator, internal/agent, internal/canon, internal/dropin, internal/ifc, internal/journal, internal/memoryread, internal/memq, internal/policy, internal/ratelimit, internal/systools, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbA() | STRUCTURAL | `DEFAULT_DENY`, `POLICY_BLOCK` | yes |
 | `fak chatops` | the inbound read-only Slack control door: answers help/ping/status/fleet behind a fail-closed admin allowlist | cmdChatOps / internal/chatops, internal/chatrelay, internal/scoreboard, internal/slackenv | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak chatrelay` | the chat-relay Slack surface bridging a channel to a gateway | cmdChatRelay / internal/chatrelay | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
+| `fak check-cache-headlines` | cache-headline gate: refuse a cache-win headline that omits its plane + provenance label | cmdCheckCacheHeadlines / internal/cacheheadlines | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak check-tool-failure` | lookup the closed non-guard tool-failure vocabulary (summary/fix/retryable) | cmdCheckToolFailure / internal/auditreason, internal/pathutil, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbB() | RUNTIME | — | yes |
 | `fak checkpoint-debt-dispatch` | checkpoint-scorecard -> sink: fan one deduped finding per (subsystem, axis) gap to stdout/localdb/github | cmdCheckpointDebtDispatch / internal/checkpointscore, internal/findingsink | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak checkpoint-scorecard` | score which long-running process subsystems persist resumable WIP state and expose witnessed status | cmdCheckpointScorecard / internal/checkpointscore | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
@@ -370,6 +372,7 @@ source-only rows absent from help: 1023
 | `fak doctor telemetry` |  | runDoctorTelemetry / internal/trajectory | `if` arm of the dispatch in runDoctor() | NONE | — | **SOURCE ONLY** |
 | `fak doctor terminal-risk` |  | runDoctorTerminalRisk / internal/terminalrisk | `if` arm of the dispatch in runDoctor() | NONE | — | **SOURCE ONLY** |
 | `fak doctor trust` |  | runDoctorTrust / internal/httptrust | `if` arm of the dispatch in runDoctor() | NONE | — | yes |
+| `fak dogfood-coverage` | score how much of the dev workflow eats the kernel: coverage %, dogfood debt, A-F grade; --check gates | cmdDogfoodCoverage / internal/dogfoodcoverage | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak dogfood-issues` | file dogfood issues from observed agent-experience defects | cmdDogfoodIssues / internal/dogfoodissues | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | yes |
 | `fak dogfood-score` | scores the launched-session dogfooding loop: wired to run honestly + truthful self-report | cmdDogfoodScore / internal/dogfoodscore | `case` arm of the dispatch switch in dispatchExtendedVerbA() | STRUCTURAL | `REFUSE_AT_CAP`, `REFUSE_NO_SEAT` | **SOURCE ONLY** |
 | `fak dojo` | the prediction-vs-reality gym: score each calibration lever's claimed vs realized behavior | cmdDojo | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |

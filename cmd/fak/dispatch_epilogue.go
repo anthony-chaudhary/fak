@@ -114,12 +114,14 @@ func runDispatchEpilogueSubmit(stdout, stderr io.Writer, argv []string) int {
 		}
 		cmdArgs := append([]string{"diff", "HEAD", "--"}, paths...)
 		cmd := exec.Command("git", cmdArgs...)
+		configureDispatchHelperCommand(cmd)
 		cmd.Dir = dir
 		out, err := cmd.CombinedOutput()
 		if err == nil && len(out) > 0 {
 			patchContent = string(out)
 		} else {
 			cmdCached := exec.Command("git", append([]string{"diff", "--cached", "--"}, paths...)...)
+			configureDispatchHelperCommand(cmdCached)
 			cmdCached.Dir = dir
 			cachedOut, _ := cmdCached.CombinedOutput()
 			if len(cachedOut) > 0 {

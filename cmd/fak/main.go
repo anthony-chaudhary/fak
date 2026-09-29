@@ -673,6 +673,8 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 		cmdOpt(args)
 	case "dogfood-score":
 		cmdDogfoodScore(args)
+	case "dogfood-coverage":
+		cmdDogfoodCoverage(args)
 	case "concept-usage-score":
 		cmdConceptUsageScore(args)
 	case "propagation-scorecard":
@@ -800,6 +802,10 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		os.Exit(runCachesweep(os.Stdout, os.Stderr, args))
 	case "cache":
 		cmdCache(args)
+	case "check-cache-headlines":
+		cmdCheckCacheHeadlines(args)
+	case "cachedoc-numbers-audit":
+		cmdCachedocNumbersAudit(args)
 	case "sweep-speculative":
 		cmdSweepSpeculative(args)
 	case "savings":

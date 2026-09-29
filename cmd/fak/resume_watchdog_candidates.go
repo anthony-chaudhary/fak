@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/sessiondiag"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func rwMergeSessiondiagCandidates(plan []resume.WatchdogPlanRow, windowHours float64) ([]resume.WatchdogPlanRow, sessiondiag.WatchdogCandidateReport) {
@@ -35,6 +36,7 @@ func rwSessiondiagCandidates(windowHours float64) sessiondiag.WatchdogCandidateR
 	}
 	since := strconv.FormatFloat(windowHours, 'f', -1, 64) + "h"
 	cmd := exec.Command(exe, "sessiondiag", "--inventory", "--watchdog-candidates", "--json", "--since", since)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {

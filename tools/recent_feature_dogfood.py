@@ -10,7 +10,7 @@ this repo and otherwise tend to rot as isolated commands:
   * `internal/callavoid` avoided-call economics tests
   * `internal/promptmmu` tool-pruning tests
   * `tools/code_slop_scorecard.py` as a real scorecard consumer
-  * `tools/dogfood_coverage.py` as the live dogfood scorecard
+  * `fak dogfood-coverage` as the live dogfood scorecard
 
 It writes its evidence under `.fak/recent-feature-dogfood/<stamp>/`, which is
 ignored local run state. Wrap it with `fak loop run` when scheduling:
@@ -233,7 +233,7 @@ def build_suite(root: Path, out_dir: Path, *, include_go_tests: bool = True) -> 
         Probe(
             key="dogfood-coverage-scorecard",
             description="run the live dogfood coverage scorecard",
-            command=[py, "tools/dogfood_coverage.py", "--json"],
+            command=fak + ["dogfood-coverage", "--json"],
             json_source="stdout",
             validator="dogfood_coverage",
         ),

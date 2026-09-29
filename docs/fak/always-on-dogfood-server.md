@@ -206,16 +206,16 @@ You measure dogfooding with two things: a **coverage scorecard** and the **audit
 journals** the guarded workers leave behind. Configuration is not evidence — a flag can
 say "on" while nothing ran — so both checks cross-check reality on the live host.
 
-**The scorecard.** `tools/dogfood_coverage.py` imports `dispatch_worker` and calls the
+**The scorecard.** `fak dogfood-coverage` loads `dispatch_worker` and calls the
 live `guarded_launch_command` on *this* host, so the score reflects what would actually
 launch — not what a config claims. It folds its KPIs into one `coverage` percent, a
 `dogfood_debt` integer (count of unmet HARD affordances), an A–F grade, and a
 control-pane JSON payload.
 
 ```bash
-python tools/dogfood_coverage.py            # human report
-python tools/dogfood_coverage.py --json      # control-pane payload
-python tools/dogfood_coverage.py --check     # exit 1 if any HARD KPI is unmet
+fak dogfood-coverage            # human report
+fak dogfood-coverage --json     # control-pane payload
+fak dogfood-coverage --check    # exit 1 if any HARD KPI is unmet
 ```
 
 The HARD KPIs are the ones that must hold for the fleet to be kernel-adjudicated at
@@ -223,7 +223,7 @@ all:
 
 - `fleet_leaf_guarded` — the leaf launcher really fronts a claude worker with `fak manage`
   on this host (a behavior check, not a grep).
-- `bin_resolvable` — a `fak` binary resolves, so the fail-open path is not silently
+- `fak_bin_resolvable` — a `fak` binary resolves, so the fail-open path is not silently
   dropping coverage to 0%.
 - `guard_default_on` — `FLEET_DOGFOOD_GUARD` is not disabled in the live environment.
 - `issue_dispatch_wired` — the scheduled-task lane routes its spawn through the guard path.
@@ -237,7 +237,7 @@ per-session key is deliberate: the hash-chained journal has no inter-process loc
 concurrent same-lane workers sharing one file would braid two independent chains into a
 forked, unverifiable journal. A per-session file lets each `fak manage` own its own valid
 chain; the interactive `fak manage` default writes one under your user config dir.
-`dogfood_coverage.py` counts the decision rows across those journals (`audit_rows` in the
+`fak dogfood-coverage` counts the decision rows across those journals (`audit_rows` in the
 payload) — that is the proof the wire was *exercised*, not merely wired. Verify any one
 chain is intact (glob the lane prefix to find them):
 
@@ -245,7 +245,7 @@ chain is intact (glob the lane prefix to find them):
 fak audit verify .dispatch-runs/guard-audit/<lane>-claude-<pid>-<id>.jsonl
 ```
 
-Run `dogfood_coverage.py` on a `/loop` cadence to keep the number from rotting; watch
+Run `fak dogfood-coverage` on a `/loop` cadence to keep the number from rotting; watch
 `audit_rows` climb as the always-on fleet works, and watch `coverage` hit and hold A.
 
 ---
@@ -267,7 +267,7 @@ FLEET_DOGFOOD_GUARD=0 python tools/issue_dispatch.py --live   # this node: worke
 in-tree `tools/.bin/fak[.exe]` the dogfood launcher builds, then `fak` on PATH. If none
 resolves it returns nothing and the worker launches **unwrapped** rather than failing.
 A host that has never built `fak` still dispatches — it just dogfoods 0% until you build
-the binary (which is exactly what `dogfood_coverage.py`'s `bin_resolvable` KPI flags).
+the binary (which is exactly what `fak dogfood-coverage`'s `fak_bin_resolvable` KPI flags).
 The fleet must keep moving; coverage is a goal, never a gate on getting work done.
 
 **Timeout floors so the gateway never truncates a long turn.** `fak manage` fronts the
@@ -292,5 +292,5 @@ or the VPC), never the public internet.
 - [`DOGFOOD-CLAUDE.md`](https://github.com/anthony-chaudhary/fak/blob/main/DOGFOOD-CLAUDE.md) — the one-command dogfood launcher and the `/v1/messages` adjudication proxy
 - [`docs/fak/server-quickstart.md`](server-quickstart.md) — every way to start a `fak serve` gateway (auth, policy, in-kernel, cloud)
 - `cmd/fak/guard.go` — the `fak manage` front door (child-only base URL, subscription default, default-on hash-chained journal)
-- `tools/dogfood_coverage.py` — the coverage scorecard (run it to measure the 3x)
+- `fak dogfood-coverage` (`internal/dogfoodcoverage`) — the coverage scorecard (run it to measure the 3x)
 - `tools/gcp_accel.py` — the GCP accelerator ladder for the GPU-burst in-kernel path

@@ -106,7 +106,7 @@ func repositoryRoot(t *testing.T) string {
 func writeExternalModule(t *testing.T, root, main string) string {
 	t.Helper()
 	dir := t.TempDir()
-	gomod := "module example.com/clean-harness-product\n\ngo 1.26\n\nrequire " + harnesskitModule + " v0.0.0\n\nreplace " + harnesskitModule + " => " + filepath.ToSlash(root) + "\n"
+	gomod := "module example.com/clean-harness-product\n\ngo " + rootGoDirective(t, root) + "\n\nrequire " + harnesskitModule + " v0.0.0\n\nreplace " + harnesskitModule + " => " + filepath.ToSlash(root) + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +114,26 @@ func writeExternalModule(t *testing.T, root, main string) string {
 		t.Fatal(err)
 	}
 	return dir
+}
+
+// rootGoDirective returns the `go` directive of the repository's own go.mod. A consumer module
+// must declare at least the go version of every module it requires, and the bare language
+// version "1.26" sorts BEFORE the release "1.26.0" the root declares, so a hard-coded
+// "go 1.26" made every clean-module `go run` stop with "updates to go.mod needed". Mirroring
+// the root keeps the fixture a minimal, already-tidy consumer as the root's directive moves.
+func rootGoDirective(t *testing.T, root string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatalf("read root go.mod: %v", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if f := strings.Fields(line); len(f) >= 2 && f[0] == "go" {
+			return f[1]
+		}
+	}
+	t.Fatalf("root go.mod at %s declares no go directive", root)
+	return ""
 }
 
 func runGo(t *testing.T, dir string, wantSuccess bool, args ...string) string {

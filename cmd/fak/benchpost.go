@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/benchpost"
 	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // cmdBenchPost / cmdBenchRequest post fak BENCH-CHANNEL rollups. They are reached as
@@ -117,6 +118,7 @@ func loadRequestPlan(planJSON, now, python string, stderr io.Writer) (*benchpost
 		return benchpost.LoadPlan(planJSON)
 	case now != "":
 		cmd := exec.CommandContext(ctx(), python, "tools/bench_plan.py", "--now", now, "--json")
+		windowgate.ConfigureBackgroundCommand(cmd)
 		cmd.Stderr = stderr
 		out, err := cmd.Output()
 		if err != nil {

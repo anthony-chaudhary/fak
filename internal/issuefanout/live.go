@@ -268,7 +268,7 @@ func FileLive(plan Plan, existing []Issue, opt LiveOptions) (LiveResult, error) 
 	for i, c := range plan.Candidates {
 		draft, err := taggedLiveIssueDraft(c)
 		if err != nil {
-			return LiveResult{}, refusef("issuefanout: live candidate %s has invalid process-cause metadata (%v); no issues were filed", c.Key, err)
+			return LiveResult{}, refusef("issuefanout: live candidate %s has invalid process-cause metadata (%v) — fix the `Process cause:` declaration in the candidate text (exactly one known cause, plus a `Process cause detail:` only for concurrency) or drop it so the `none` fallback is recorded, then regenerate the full plan; no issues were filed", c.Key, err)
 		}
 		authored[i] = draft
 		r := issuepolicy.ReviewIssueDraft(draft, strict)
