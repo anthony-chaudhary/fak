@@ -950,12 +950,21 @@ func dispatchSpawnMap(s dispatchSpawnResult) map[string]any {
 	return out
 }
 
-func recordDispatchTickLoop(root, ledger string, payload map[string]any) map[string]any {
-	if strings.TrimSpace(ledger) == "" {
-		ledger = defaultLoopLedger()
-	}
-	runID := dispatchLoopRunID(payload)
-	loopID := dispatchTickLoopID(dispatchMapString(payload, "backend"), dispatchMapString(payload, "goal"))
+// dispatchTickPreflightPermilleKey is the ledger metric name carrying admission time as a
+// permille share of the whole tick (gateshare/fak/lesson-4). Absent when the tick recorded
+// no preflight duration or no total, which is an honest "not measured" rather than a zero.
+const dispatchTickPreflightPermilleKey = "preflight_share_permille"
+
+// dispatchTickPreflightAlarmPermille is the alarm boundary for the payload-to-gate ratio:
+// 300‰ means admission consumed 30% of the tick. Above it the correct response is to delete
+// a gate, not to tune one, so it is reported rather than auto-tuned.
+const dispatchTickPreflightAlarmPermille = 300
+
+// dispatchTickLoopMetrics folds one tick payload into the ledger metrics map. It is
+// extracted from recordDispatchTickLoop so the payload-to-gate ratio is testable
+// hermetically — the ratio's whole value is that it is computed on EVERY tick, and a
+// test that could only reach it by writing a real ledger would be a test nobody runs.
+func dispatchTickLoopMetrics(payload map[string]any) map[string]int64 {
 	pre := mapAt(payload, "preflight")
 	metrics := map[string]int64{
 		"live":             boolInt(payload["live"]),
@@ -983,7 +992,28 @@ func recordDispatchTickLoop(root, ledger string, payload map[string]any) map[str
 			}
 			metrics[key] = ms
 		}
+		// Payload-to-gate ratio: admission time as a PERMILLE share of the whole tick
+		// (gateshare/fak/lesson-4). The two constituent ms are already folded above; this
+		// is the one number that says whether the ladder is inverted — a tick that spends
+		// more wall-clock deciding to work than working is a gate that has become the
+		// product. Integer permille (not a float ratio) because the ledger metrics map is
+		// map[string]int64 and a fold must never round two different ticks to the same
+		// value at the alarm boundary. Absent (not zero) when either duration is missing,
+		// because 0 would claim the gate was free.
+		if pf, total := tm["preflight"], tm["total"]; total > 0 && pf > 0 {
+			metrics[dispatchTickPreflightPermilleKey] = (pf * 1000) / total
+		}
 	}
+	return metrics
+}
+
+func recordDispatchTickLoop(root, ledger string, payload map[string]any) map[string]any {
+	if strings.TrimSpace(ledger) == "" {
+		ledger = defaultLoopLedger()
+	}
+	runID := dispatchLoopRunID(payload)
+	loopID := dispatchTickLoopID(dispatchMapString(payload, "backend"), dispatchMapString(payload, "goal"))
+	metrics := dispatchTickLoopMetrics(payload)
 	evidence := []loopmgr.EvidenceRef{}
 	if n := dispatchMapInt(payload, "target_issue"); n != 0 {
 		evidence = append(evidence, loopmgr.EvidenceRef{Kind: "issue", Ref: strconv.Itoa(n)})

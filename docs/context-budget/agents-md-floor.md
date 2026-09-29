@@ -1,9 +1,9 @@
 ---
-title: "AGENTS.md instruction-pulled floor - measured baseline"
-description: "The measured per-section baseline (#5445) for AGENTS.md, the instruction-pulled per-agent floor that epic #3229's resident-floor surfaces cannot see."
+title: "AGENTS.md instruction-pulled floor - measured baseline and byte ratchet"
+description: "The measured per-section baseline (#5445) for AGENTS.md, the instruction-pulled per-agent floor that epic #3229's resident-floor surfaces cannot see, and the byte ratchet pinned on it at 52,301 bytes on 2026-09-28."
 ---
 
-# The AGENTS.md instruction-pulled floor — measured baseline (#5445)
+# The AGENTS.md instruction-pulled floor — measured baseline and byte ratchet (#5445)
 
 Part of epic **#3229** (shrink the always-sent token floor). This is the measured
 baseline for the epic's largest *unmeasured* slice.
@@ -15,9 +15,9 @@ seats in context before turn 1, which `/context` and `fak footprint` (#3230) can
 both see and `internal/mcpfootprint` can ratchet.
 
 `AGENTS.md` is not one of those, and it is bigger than all of them. `CLAUDE.md` is
-resident and genuinely lean — **2,227 B ≈ 556 est. tokens** — but its third line is
-an instruction: *read `AGENTS.md` first*. Every agent that obeys pays
-`AGENTS.md`'s **49,882 B ≈ 13,301 est. tokens** as a turn-1 `Read`. Because those
+resident and far smaller — **8,303 B ≈ 2,214 est. tokens** on 2026-09-28 — but it
+instructs: *read `AGENTS.md` first*. Every agent that obeys pays
+`AGENTS.md`'s **52,301 B ≈ 13,946 est. tokens** (2026-09-28) as a turn-1 `Read`. Because those
 bytes are *pulled by an instruction* rather than *seated in the system prompt*,
 they appear in **neither** surface this epic built to make the floor visible: not
 in `/context`, not in `fak footprint`. A floor in effect but not in form.
@@ -28,23 +28,26 @@ resident byte is in the stable prefix from turn 0, so it is a cache-read on ever
 turn after the first. An instruction-pulled byte is paid at full price on the turn
 it is read, then joins the message history — riding every later turn and occupying
 window until compaction sheds it. Neither surface the epic built reports the
-second, which is why 13,301 tokens per agent have gone unpriced.
+second, which is why ~14k tokens per agent went unpriced.
 
 Where it sits next to the slices the epic already gates:
 
 | Slice | est. tokens | form | gated? | measured by |
 |---|---:|---|---|---|
-| **AGENTS.md (turn-1 `Read`)** | **13,301** | instruction-pulled | **no** | `fak footprint --doc AGENTS.md` |
-| `.claude/skills` resident descriptions | 11,809 | resident | not yet — #5444 | `fak skill footprint` |
+| **AGENTS.md (turn-1 `Read`)** | **13,946** | instruction-pulled | **yes — [byte ratchet](#the-byte-ratchet-2026-09-28)** | `fak footprint --doc AGENTS.md` |
+| `.claude/skills` resident descriptions | 11,809 | resident | yes — `skillfootprint/descbudget.go` (#5444) | `fak skill footprint` |
 | fak MCP tool schemas | 5,888 | resident | yes — `floorgate.go` | `fak footprint` |
-| ‣ of which description prose | 1,966 | resident | yes — `descbudget.go` | `fak footprint` |
-| `CLAUDE.md` | 556 | resident | no (already lean) | `fak footprint --doc CLAUDE.md` |
+| ‣ of which description prose | 1,966 | resident | yes — `mcpfootprint/descbudget.go` | `fak footprint` |
+| `CLAUDE.md` | 2,214 | resident | no | `fak footprint --doc CLAUDE.md` |
 
-Every row is a command a reader can re-run, not a quoted estimate; the skills row
-is 47,236 B across 58 skills at the same ~4 B/token divisor.
+Every row is a command a reader can re-run, not a quoted estimate. The AGENTS.md
+and CLAUDE.md rows were re-measured on 2026-09-28 with the doc estimator (3.75
+B/token). The skills and MCP rows are the 2026-07-28 figures, and their own pages
+carry the current pins. The skills row was 47,236 B across 58 skills at a flat 4
+B/token.
 
-The per-agent pull chain is `CLAUDE.md` + `AGENTS.md` = **17,282 est. tokens**, of
-which 96.8% is the pulled half.
+The per-agent pull chain is `CLAUDE.md` + `AGENTS.md` = **16,160 est. tokens**, of
+which 86.3% is the pulled half.
 
 ## Regenerate it
 
@@ -75,6 +78,110 @@ Two reading rules for the table below:
   that invariant is what makes each percentage mean something, and it is witnessed
   by a test rather than asserted here.
 
+## The byte ratchet (2026-09-28)
+
+`AGENTS.md` now has a one-way byte floor, the same two-sided ratchet its siblings
+run (`floorgate.go`, `skillfootprint/descbudget.go`):
+
+- **Floor:** `DOC_BYTES	AGENTS.md	52301` in [`agents-md-floor.tsv`](agents-md-floor.tsv),
+  the file's size at `HEAD` on 2026-09-28 (`git cat-file -s HEAD:AGENTS.md`).
+- **Gate:** `internal/agentsindex/bytefloor.go`, enforced by
+  `TestAgentsMDByteFloorAtHEAD` in every `go test ./...` run, which CI's
+  `ci-fast` shards run.
+- **Growth** past the floor refuses as `AGENTS_MD_FLOOR_EXCEEDED`.
+- **A trim** of more than 200 B (`FloorSlackBytes`, less than the smallest
+  Hard-rules bullet, 229 B) refuses as `AGENTS_MD_FLOOR_STALE` until the win is
+  banked. Deleting any whole bullet must therefore be banked.
+- **Re-pin** in the same commit as the change that justifies it, then update the
+  figure on this page:
+
+```bash
+go test ./internal/agentsindex -run TestAgentsMDByteFloorAtHEAD -update-agents-md-floor
+```
+
+### Why the floor is 52,301 and not a smaller number
+
+The floor is today's honest size. It does not flatter the file.
+
+- **Not 49,882.** That figure, quoted below as the post-cookbook baseline, is
+  working-copy bytes from a CRLF checkout. The committed blob at `a7474d30f0` was
+  49,241 B (plus 641 line-ending bytes = 49,882). Pinning at either number would
+  record the regrowth since then as already paid, when it is 3,060 B of real growth
+  in like-for-like bytes.
+- **Not 21,538.** That was the low after the #8705 trim. A floor there would red
+  every commit until 30,763 B are trimmed, which makes it a trim task. The ratchet
+  lands first and stops the growth. The trim is a separate change, and the STALE
+  direction makes that change re-pin the floor down.
+
+### How it counts
+
+The floor counts LF-normalized bytes, which equals the committed blob size on every
+platform. Raw working-tree bytes would refuse a byte-identical commit on a CRLF
+checkout. They are also why some of this page's older figures read high.
+
+The baseline follows the counted-ratchet contract of `internal/promptlint/breath`:
+
+- **Stable keys.** Rows are `KIND<TAB>path<TAB>count`. A section is keyed by its
+  heading slug (the same slug `agentsindex` pages by), never by a line number, so
+  inserting a line renumbers nothing. `agentsindex` numbers repeated slugs by
+  position (`notes`, `notes-2`), which would shift keys. The gate therefore refuses
+  two headings that share a slug, and names both lines.
+- **Counts, not presence.** Trimming a section and re-pinning tightens its count.
+  Growth past the count is caught even though the key already exists.
+- **Strict parsing.** A row that does not parse is a hard error naming its line.
+  So is a duplicate key, a missing `DOC_BYTES` row, or `SECTION_BYTES` rows that do
+  not sum to `DOC_BYTES`. That last check refuses a hand-raised ceiling, so a raise
+  must go through the regenerate command.
+- **Honest claim.** A green run says only that AGENTS.md is not growing.
+
+Only `DOC_BYTES` gates. The `SECTION_BYTES` rows are each heading's own bytes at pin
+time (the level-1 title and lede are the `(preamble)` row). They exist so a refusal
+names where the bytes came back. Moving prose between sections is not refused.
+
+A real refusal, from adding one Hard-rules bullet and one new section to a scratch
+copy of the file:
+
+```text
+AGENTS_MD_FLOOR_EXCEEDED: AGENTS.md is 52892 bytes, 591 bytes over its committed floor of 52301. Every agent that obeys CLAUDE.md reads this file whole on turn 1, so each byte is paid in every session (`fak footprint --doc AGENTS.md` prices it in est. tokens).
+  Sections most likely to have regrown (own bytes vs the pinned baseline):
+      +419 B  L392  Hard rules (enforced below the agent layer)  [hard-rules: 10977 -> 11396]
+      +172 B  L502  Session etiquette  [new heading "session-etiquette", not in the baseline; a rename shows here too]
+  Fix, in order: (1) move the new prose one hop away (a linked doc, `dos man wedge <TOKEN>`, or a fak verb) and leave a one-line pointer; (2) trim elsewhere in AGENTS.md to pay for it; (3) only if every agent needs it on turn 1, re-pin in the SAME commit with `go test ./internal/agentsindex -run TestAgentsMDByteFloorAtHEAD -update-agents-md-floor` and update the figure in docs/context-budget/agents-md-floor.md.
+```
+
+Because both the baseline and the measurement partition the file, the named growths
+sum to the overage (419 + 172 = 591).
+
+### Size history
+
+Committed blob bytes, `git cat-file -s <commit>:AGENTS.md`:
+
+| Date | Commit | Bytes | Event |
+|---|---|---:|---|
+| 2026-06-21 | `1029e37cf` (v0.30.0) | 5,563 | |
+| 2026-08-23 | `b0ff8778a3` | 83,681 | peak |
+| 2026-08-23 | `a7474d30f0` | 49,241 | refusal cookbook paged out (#5445) |
+| 2026-08-23 | `2edab7a264` | 32,723 | Hard-rules de-duplication (#8698) |
+| 2026-08-23 | `8ef75f513b` | 21,538 | whole-file trim (#8705); 5,743 est. tokens |
+| 2026-09-28 | `75c870b62` | **52,301** | floor pinned; 13,946 est. tokens |
+
+The file was cut 3.9× and then regrew 2.4× over the next 34 days (the last growth
+commit landed on 2026-09-26). By section, the +30,763 B
+since `8ef75f513b` landed as follows:
+
+| Growth | Section |
+|---:|---|
+| +16,889 | eight sections that did not exist at the #8705 low (largest: *Scope discipline for smaller models* 5,261, *Divide and conquer* 3,907, *Track work in GitHub* 1,843, *Focus on "move forward"* 1,581) |
+| +6,576 | *Hard rules* (own bytes 4,401 → 10,977) |
+| +2,315 | *If the kernel refuses you* (1,589 → 3,904) |
+| +1,743 | *Proof by default* (1,594 → 3,337) |
+| +1,220 | *Native inference performance invariant* (839 → 2,059) |
+| +2,020 | seven other sections, net of a −92 B trim |
+
+Those rows are where a trim pays most. The sectioned loader from #3535 (transferred;
+now `fak-private#2046`) would stop charging them to every session; see
+[the wiring estimate](../notes/2026-09-28-agents-md-sectioned-loader-estimate.md).
+
 ## Measured inventory after paging the refusal cookbook
 
 Regenerate from the repository root:
@@ -84,7 +191,12 @@ fak footprint --doc AGENTS.md
 fak footprint --doc AGENTS.md --json
 ```
 
-Post-trim result on 2026-08-23:
+Post-trim result on 2026-08-23. The figures in this section mix two measurements.
+The 83,681 B / 22,314-token peak is the LF blob. Most other byte figures here
+(49,882, 22,782, 33,136, 6,036) are working-copy bytes from a CRLF checkout, so
+their ratios run slightly low. The [size history](#size-history) above has
+like-for-like blob bytes, and [how it counts](#how-it-counts) explains the
+difference.
 
 ```text
 doc-footprint: AGENTS.md · 13301 est. tokens (49882 bytes, ESTIMATED, instruction-pulled) · 17 section(s)
@@ -144,15 +256,6 @@ A 15-agent run pays the instruction-pulled floor once per agent. At that width, 
 whole-file floor drops from about **334,710** to **199,515** estimated tokens, while
 the refusal slice drops from **144,120** to **6,465** estimated tokens. These are
 house-estimator values, not provider-billed measurements.
-## What is deliberately NOT gated here
-
-There is still **no ratchet on AGENTS.md bytes**; this page records measured reductions rather than defining a policy ceiling.
-`internal/mcpfootprint/floorgate.go` earns its `FLOOR_BUDGET_STALE` direction
-precisely because a ceiling pinned at today's number *banks* today's bloat: the
-gate would have defended 49,882 B as acceptable. The current 21,769 B baseline is now a defensible input for a separate ratchet; pin the
-ceiling at the post-trim number. Until then this page is a dated measurement, not a
-contract, and the regeneration command above is how a reader gets a current one.
-
 ## Witness
 
 - `cmd/fak.TestDocFootprintPartitionsFile` proves the inventory is a faithful
@@ -171,11 +274,36 @@ contract, and the regeneration command above is how a reader gets a current one.
   chosen from.
 - `cmd/fak.TestDocFootprintVerbJSON` runs the verb against the **real** AGENTS.md
   and re-checks the partition there, so the table above is reproducible rather than
-  hand-typed. It deliberately pins no byte total — see the section above.
+  hand-typed. It pins no byte total; the ratchet below does.
+- `internal/agentsindex.TestAgentsMDByteFloorAtHEAD` is the ratchet: the real
+  AGENTS.md must sit inside `[floor − 200, floor]` of the committed
+  [`agents-md-floor.tsv`](agents-md-floor.tsv).
+- The rest of `internal/agentsindex/bytefloor_test.go` covers the contract on
+  synthetic docs. Growth past the floor fails and names the section. A doc at the
+  floor passes. Fixing one of two findings tightens the floor, and re-growth is then
+  caught. Every corrupt baseline row is a hard error naming its line. Keys stay
+  stable when a line is inserted, and two headings sharing a slug are refused. A
+  CRLF checkout measures the same as the blob. `CheckFloor` is bound to
+  `FloorSlackBytes`, and a refusal ranks the regrown sections, flags new headings,
+  and counts any beyond the first five. `TestAgentsMDFloorDocPinsTheCeiling` fails
+  if this page drops the floor figure, the regenerate command, or either refusal
+  token.
+- On 2026-09-28 an out-of-tree mutation run applied 21 mutants to `bytefloor.go`
+  (flipped band edges, a lenient parser, dropped checks, broken attribution). The
+  suite killed all 21.
 
 ## Open follow-ons
 
-The cookbook and Hard-rules paging are complete. A separate ratchet can now pin the post-trim ceiling without banking the old bloat.
+- **Trim and re-pin.** The ratchet stops growth; it does not shrink the file. Trim
+  the sections in the history table above, then run the regenerate command so
+  `AGENTS_MD_FLOOR_STALE` banks the win.
+- **Wire the sectioned loader** (#3535, now `fak-private#2046`). `internal/agentsindex`
+  already parses and pages the file through `fak dev index agents`, but nothing on the
+  session path uses it. What wiring it would take and save is estimated in
+  [the 2026-09-28 note](../notes/2026-09-28-agents-md-sectioned-loader-estimate.md).
+- **Register the refusal tokens.** `AGENTS_MD_FLOOR_EXCEEDED` and
+  `AGENTS_MD_FLOOR_STALE` are not yet `[reasons.*]` rows in `dos.toml`, the step
+  #5444 took for the skill floor's tokens.
 
 ## Cross-links
 
@@ -187,7 +315,7 @@ The cookbook and Hard-rules paging are complete. A separate ratchet can now pin 
 - [The Footprint Ladder](../footprint-ladder.md) — the doctrine both floors serve:
   add a capability at the highest rung that works.
 - **#5444** — the `.claude/skills` resident description floor, the other userland
-  slice `/context` shows but nothing gates.
+  slice `/context` shows, gated by `internal/skillfootprint/descbudget.go`.
 - **#3980** — register every fak-emitted refusal token in `dos.toml` with a
   structural drift gate; the measurement above says the AGENTS.md cookbook is
   already fully covered.
