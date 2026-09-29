@@ -58,7 +58,7 @@ status = [0, 0, 0, 0]  (unchanged — the copy was never synced back)
 
 - `_batch_exist` (mexists) always reports all keys as "existing" (0 = exists)
 - `batch_set_v1` never writes any real KV data (dedup thinks everything already stored)
-- `batch_exists` reports 100% cache hits (triggers useless prefetch reads)
+- `batch_exists` reports 100% KV cache hits (observed; triggers useless prefetch reads)
 - PrisKV server stats show: `set_ops: 1, keys_inuse: 0, set_bytes: 2` (only warmup data stored)
 
 ### Resolution (RESOLVED)
