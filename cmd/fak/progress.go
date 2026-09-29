@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const (
@@ -27,6 +28,7 @@ const (
 var progressNow = time.Now
 var progressCommand = func(dir, name string, args ...string) ([]byte, error) {
 	c := exec.Command(name, args...)
+	windowgate.ConfigureBackgroundCommand(c)
 	c.Dir = dir
 	return c.Output()
 }

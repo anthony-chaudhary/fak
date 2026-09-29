@@ -19,6 +19,7 @@ import (
 
 	configaccounts "github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // guard_codex.go — the first-class `fak guard -- codex` wiring. It is the OpenAI-Codex
@@ -971,6 +972,7 @@ func (s *GuardCodexSandboxSession) ExecuteCommand(ctx context.Context, command [
 		}
 
 		cmd := exec.CommandContext(ctx, wrappedCmd[0], wrappedCmd[1:]...)
+		windowgate.ConfigureBackgroundCommand(cmd)
 		cmd.Dir = s.WorkspaceRoot
 		cmd.Env = append(os.Environ(), env...)
 
@@ -1012,6 +1014,7 @@ func (s *GuardCodexSandboxSession) ExecuteCommand(ctx context.Context, command [
 	}
 
 	cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = s.WorkspaceRoot
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf

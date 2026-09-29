@@ -18,6 +18,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessprotocol"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
+	"github.com/anthony-chaudhary/fak/pkg/sysproc"
 )
 
 // Engine identifies the execution engine descriptor used across harness runs.
@@ -217,6 +218,7 @@ func (a *Adapter) Run(ctx context.Context, text string) error {
 		defer a.cfg.Session.Release(a.cfg.InputLease)
 	}
 	cmd := exec.CommandContext(ctx, a.cfg.Command, a.cfg.Args...)
+	sysproc.ConfigureBackground(cmd)
 	cmd.Dir = a.cfg.Workspace
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

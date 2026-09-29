@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // overrideCompanionRoots is used in unit tests to simulate missing or custom companion roots.
@@ -242,6 +244,7 @@ func RunCompanionGate(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	cmd := exec.Command("go", subArgs...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	cmd.Stdin = os.Stdin
@@ -306,6 +309,7 @@ func RunCompanionProvenance(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	cmd := exec.Command("go", subArgs...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	cmd.Stdin = os.Stdin
@@ -468,6 +472,7 @@ func RunCompanionStrix(stdout, stderr io.Writer, argv []string) int {
 	subArgs = append(subArgs, argv...)
 
 	cmd := exec.Command("go", subArgs...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	cmd.Stdin = os.Stdin

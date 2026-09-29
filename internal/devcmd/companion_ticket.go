@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // TicketInfo represents metadata and content of an architectural ticket.
@@ -571,6 +573,7 @@ func runTicketNext(stdout, stderr io.Writer, privRoot string, args []string) int
 	subArgs = append(subArgs, args...)
 
 	cmd := exec.Command("go", subArgs...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	cmd.Stdin = os.Stdin

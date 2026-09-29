@@ -23,6 +23,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
 	"github.com/anthony-chaudhary/fak/internal/slackwire"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func cmdLoop(argv []string) { os.Exit(runLoop(os.Stdout, os.Stderr, argv)) }
@@ -670,6 +671,7 @@ func learningDocsDebtFromScorecard(root string) (int64, bool) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, py, filepath.Join(root, "tools", "learning_scorecard.py"), "--json")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil && len(bytes.TrimSpace(out)) == 0 {

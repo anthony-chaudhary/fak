@@ -10,6 +10,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/fleetmetrics"
 	"github.com/anthony-chaudhary/fak/internal/superloop"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 type superloopResidual struct {
@@ -34,6 +35,7 @@ type superloopResidual struct {
 
 var superloopResidualCommand = func(root, name string, args ...string) ([]byte, error) {
 	cmd := exec.Command(name, args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	return cmd.Output()
 }

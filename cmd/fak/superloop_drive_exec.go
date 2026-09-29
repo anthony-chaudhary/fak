@@ -26,6 +26,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/superloop"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // superloopDriveExec records how `--execute` handled a driven member's own front door:
@@ -174,6 +175,7 @@ func superloopRunFrontDoorLive(command string, timeout time.Duration, out io.Wri
 		defer cancel()
 	}
 	cmd := exec.CommandContext(c, name, append(pre, command)...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Stdout = out
 	cmd.Stderr = out
 	err := cmd.Run()

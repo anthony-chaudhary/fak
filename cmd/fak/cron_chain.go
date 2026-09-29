@@ -38,6 +38,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const (
@@ -266,6 +267,7 @@ func cronRunScript(script string) (string, error) {
 	} else {
 		c = exec.CommandContext(ctx, "sh", "-c", script)
 	}
+	windowgate.ConfigureBackgroundCommand(c)
 	c.WaitDelay = 5 * time.Second
 	c.Cancel = func() error {
 		if c.Process != nil && c.Process.Pid > 0 {

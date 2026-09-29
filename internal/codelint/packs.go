@@ -18,6 +18,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/pkg/sysproc"
 )
 
 // DefaultPacks returns the kernel's built-in packs: Go and JSON parse in-process
@@ -209,6 +211,7 @@ func runChecker(ctx context.Context, bin string, args []string) (stdout, stderr 
 	cctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(cctx, bin, args...)
+	sysproc.ConfigureBackground(cmd)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
