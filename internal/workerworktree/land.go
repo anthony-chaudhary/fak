@@ -1252,16 +1252,15 @@ func verifyTopologyCandidate(root, ref, prospectiveDiff string, verify VerifyHoo
 		}
 		parent = filepath.Dir(rootAbs)
 	}
-	candDir, err := os.MkdirTemp(parent, ".fak-cand-validate-*")
+	// A killed land never runs the deferred cleanup below; its owner-named
+	// candidate is collected by a later land's sweep (candidate.go).
+	sweepTopologyCandidatesBeforeCreate(root, parent, git)
+	candDir, err := os.MkdirTemp(parent, topologyCandidatePattern())
 	if err != nil {
 		return false, "failed to create topology-preserving candidate temp dir: " + err.Error()
 	}
 	_ = os.Remove(candDir)
-	cleanup := func() {
-		run(git, root, []string{"worktree", "remove", "--force", candDir})
-		run(git, root, []string{"worktree", "prune"})
-		_ = os.RemoveAll(candDir)
-	}
+	cleanup := func() { cleanupTopologyCandidate(root, candDir, git) }
 	defer cleanup()
 
 	if rc, out := run(git, root, []string{"-c", "core.longpaths=true", "worktree", "add", "--detach", candDir, ref}); rc != 0 {
