@@ -1,10 +1,10 @@
 <!-- fak-cross-key: oss-refresh-20260929-cache-pin-owner -->
-# Make shared page pin release ownership-safe
+# Audit shared page pin ownership and prove a consuming path
 
 ```routing
 lane: ctxmmu
-paths: ["internal/ctxmmu/paged_store.go", "internal/ctxmmu/paged_store_test.go"]
-expected_steps: 5
+paths: ["docs/tickets/oss-refresh-20260929/TICKET-cache-pin-owner.md"]
+expected_steps: 3
 ```
 
 ## Target repository
@@ -17,7 +17,7 @@ Read source-confirmed invariant -> reproduce through the public runtime seam -> 
 
 ## Current state
 
-Pin and Unpin are digest-counted without owner identity. A duplicate release by one caller can consume another caller's pin. This is an API safety gap; the study does not prove a live duplicate-release incident.
+Pin and Unpin are digest-counted without owner identity. A duplicate release can consume another owner's count in a constructed API example. Coordinator readback found no production call to PagedStore.Pin/Unpin in the public tree; the MMU stages and reads pages without using those methods. This is a source-level concern, not a demonstrated runtime defect. The first deliverable is a consuming-path audit and an explicit disposition.
 
 ## Source and license
 
@@ -25,7 +25,7 @@ LMCache proposed PR #5098, head dc0939588e3dac720b6fefe125d91d1c613f407e; lmcach
 
 ## Core through-line
 
-Introduce an additive owner/generation pin receipt with idempotent release, then connect one real consuming path and explicitly bound compatibility of legacy callers. Expand the scope fence only through a witnessed consuming caller, not an unused helper.
+Trace PagedStore construction, its interfaces and all Pin/Unpin consumers at the claimed public revision. Record file:line evidence and an executable reachability witness when a production consumer exists. If no consumer exists, close as WATCH with a concrete future trigger; do not add unused receipt machinery. If a consuming defect is reproduced, create a separately scoped implementation contract covering the actual caller and independent regression.
 
 ## Gold-plating boundary
 
@@ -45,10 +45,9 @@ All unchecked criteria below must be satisfied through the real consuming entryp
 
 ## Definition of done
 
-- [ ] Reproduce the current gap through the real target entrypoint.
-- [ ] Implement the bounded change and independent edge-case regression.
-- [ ] With owners A and B on one digest, releasing A twice must leave B protected under eviction pressure; stale generation and cancellation cases fail safely; a real caller obtains and releases the receipt.
-- [ ] Verify `go test ./internal/ctxmmu -count=1`, public leak/boundary checks, and commit/land through the public native workflow.
+- [ ] Audit the current public tree for PagedStore construction, interfaces, Pin/Unpin call sites and production entrypoint reachability; retain commands and file:line evidence in this specification.
+- [ ] Record WATCH if no consuming path exists, with a trigger when a real caller begins pinning; otherwise reproduce the actual caller failure and register a distinct implementation contract with that caller in its scope.
+- [ ] Run `go test ./internal/ctxmmu -count=1`; retain a public signed commit containing the audit receipt. No runtime repair or hardware claim is required for this audit.
 
 ## Witness
 
@@ -60,7 +59,7 @@ go test ./internal/ctxmmu -count=1
 
 Process cause: verification-gap
 
-Source readback exposes an unguarded invariant; a real-entrypoint regression is required before claiming the repair.
+Source readback exposes a possible invariant gap; production reachability must be resolved before implementation is justified.
 
 ## Acceptance gate
 
@@ -76,8 +75,8 @@ OSS refresh campaign GOAL-oss-refresh-20260929. This bounded leaf is grounded by
 
 ## Why this is next
 
-The source-confirmed invariant gap affects trustworthy cache reuse or loading in the public native runtime. Add the smallest independent correctness regression before expanding features.
+This bounded audit prevents a source-only concern from becoming unused runtime code and preserves the upstream ownership lesson for a future real consumer.
 
 ## Closure binding
 
-Close this native ticket only after its reproduction and acceptance command pass on the resolving signed public commit, with the ticket ID and source attribution recorded.
+Close this audit only after its consuming-path disposition and acceptance receipt are committed, with any proved implementation outcome routed to a distinct native contract.
