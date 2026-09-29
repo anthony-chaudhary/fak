@@ -228,6 +228,20 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 	req.Messages = messages
 	applySessionPaceToAnthropicRequest(req, sessionTurn)
+	// Mid-conversation cache-break detector (#2847, Track C of epic #2834): observe the
+	// admitted session's INBOUND stable prefix (system + tool schema + already-sent history)
+	// BEFORE any request-side transform, so a mutation the HARNESS made is attributed here
+	// and fak's own sanctioned rewrites (which run later in prepareServedAnthropicRequest)
+	// are never misread as mutations. Off by default; warn witnesses + prices the break and
+	// proceeds; deny refuses the turn (409) so the warm prefix survives. Keyed on the
+	// canonical admitted trace; covers the buffered and both streaming proxy arms below,
+	// the Claude-Code-shaped path the issue names. The native owned loop returned above and
+	// is deliberately excluded — it runs its own multi-turn session, for which one Observe
+	// per request would be the wrong granularity.
+	if v, denied := s.observeCacheBreak(reqTrace, req); denied {
+		cacheBreakRefusal(w, v)
+		return
+	}
 	s.injectGuardRecoveryPrompt(req, reqTrace)
 	prep := s.prepareServedAnthropicRequest(ctx, r, req, reqTrace, sessionTurn)
 	compacted := prep.compacted

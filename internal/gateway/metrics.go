@@ -411,13 +411,15 @@ type gatewayMetrics struct {
 	// cache-break — a warm prompt prefix that broke mid-conversation — carrying the
 	// closed cause (toolset_change/altered_turn/rebuilt_prompt/provider_quirk/unknown)
 	// and the cold-rebuild token cost it caused, folded through internal/metrics so the
-	// guard exit summary and the Prometheus surface read the SAME numbers. The SOURCE of
-	// the events (the mid-conversation prefix-mutation detector) is sibling #2915;
-	// recordCacheBreak is the seam that detector calls. Until #2915 wires a live producer
-	// this sink stays empty and the family renders a clean zero (its HELP/TYPE declared,
-	// no samples), the same dogfooded-at-zero posture the deny-all/auth-refresh families
-	// keep so a panel exists from the first scrape. Kept off inferenceMu — folded only at
-	// scrape / exit-summary time, never on the hot path.
+	// guard exit summary and the Prometheus surface read the SAME numbers. The live
+	// producer is the mid-conversation prefix-mutation detector (#2847,
+	// internal/gateway/cache_break_live.go, armed by Config.CacheBreak); recordCacheBreak
+	// is the seam it calls under warn, and deny-mode breaks (never forwarded) are
+	// deliberately NOT recorded here as incurred. With the lever off this sink stays
+	// empty and the family renders a clean zero (its HELP/TYPE declared, no samples), the
+	// same dogfooded-at-zero posture the deny-all/auth-refresh families keep so a panel
+	// exists from the first scrape. Kept off inferenceMu — folded only at scrape /
+	// exit-summary time, never on the hot path.
 	cacheBreakMu     sync.Mutex
 	cacheBreakEvents []metrics.CacheBreakEvent
 

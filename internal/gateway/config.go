@@ -759,6 +759,25 @@ type Config struct {
 	// default-on through its ablation row. The ablation harness also enables it with
 	// FAK_ABLATE_PREFIX_GUARD=1.
 	PrefixGuard bool
+	// CacheBreak selects the mid-conversation cache-break detector's lever (#2847, Track C
+	// of epic #2834): "" / "off" (the default) leaves it disarmed; "warn" detects a turn
+	// whose stable prefix (system + tool schema + already-sent history) diverged from the
+	// session's established prefix, witnesses "cache broken here, +N tokens", records the
+	// induced cache_creation on the #2916 sink, and lets the turn proceed; "deny" refuses
+	// the mutation before it reaches the wire (409), keeping the warm prefix and booking the
+	// cost as AVOIDED instead of incurred. Parsed by metrics.ParseCacheBreakPolicy, so an
+	// unrecognized value folds to off and can never silently arm a denying gate. Default
+	// off, Anthropic /v1/messages passthrough only; content-free state (digests, never
+	// prompt bytes), per session trace.
+	//
+	// INTERACTION: the detector observes the INBOUND prefix, so under "deny" it will also
+	// refuse a harness turn whose history was rewritten by a CPU-side tool (a Read result
+	// replaced after its file changed) — a legitimate mutation the harness itself made.
+	// deny is therefore meant to run where such mutations are not expected (a frozen or
+	// append-only harness); "warn" measures without refusing and is the safe default to
+	// start with.
+	CacheBreak string
+
 	// VCacheAnchor, when true, arms the M2 star-anchor canonicalization as a DEFAULT-ON
 	// pre-flight gate on the flagship Anthropic PASSTHROUGH (#1493): before any other body
 	// transform, apply cachemeta.RecommendLayout (agent.PlaceAnthropicCacheBreakpointWithOutcome)

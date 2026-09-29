@@ -18,6 +18,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/kv"
 	"github.com/anthony-chaudhary/fak/internal/kvbudget"
 	"github.com/anthony-chaudhary/fak/internal/macobs"
+	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
@@ -945,6 +946,19 @@ type Server struct {
 	// fak_prefix_guard_* determinism witness (observePrefixGuard). Lossless — wire bytes
 	// are never changed; off keeps the family at its emit-at-0 zeros.
 	prefixGuard bool
+
+	// cacheBreakPolicy mirrors Config.CacheBreak (#2847, Track C of epic #2834): the closed
+	// off/warn/deny lever for the mid-conversation cache-break detector. off (the zero
+	// value) is a no-op; warn witnesses and prices a mid-conversation prefix mutation on
+	// the #2916 sink; deny refuses it before the wire so the warm prefix survives.
+	cacheBreakPolicy metrics.CacheBreakPolicy
+	// cacheBreakMu guards cacheBreakDetectors: ONE content-free detector per session trace
+	// (three digests and a length, never prompt bytes). Minted lazily by
+	// cacheBreakDetectorForLocked and bounded by maxCacheBreakSessions with the same
+	// generational reset as resetHealth/ctxValue. A detector is not safe for concurrent
+	// use, so the whole observe is held under this lock.
+	cacheBreakMu        sync.Mutex
+	cacheBreakDetectors map[string]*metrics.CacheBreakDetector
 
 	// vcacheAnchor mirrors Config.VCacheAnchor: when true the Anthropic passthrough runs the M2
 	// star-anchor pre-flight rewrite (maybeAnchorAnthropicRaw) by DEFAULT — hoisting volatile

@@ -300,6 +300,7 @@ func New(cfg Config) (*Server, error) {
 		elideStaleReads:              cfg.ElideStaleReads,
 		provider:                     strings.TrimSpace(cfg.Provider),
 		prefixGuard:                  cfg.PrefixGuard || envEnabled("FAK_ABLATE_PREFIX_GUARD"),
+		cacheBreakPolicy:             parseCacheBreakPolicyEnv(cfg.CacheBreak),
 		vcacheAnchor:                 cfg.VCacheAnchor || envEnabled("FAK_ABLATE_BP_PLAN"),
 		vcacheCalibration:            cloneVCacheRuntimeCalibration(cfg.VCacheCalibration),
 		toolFloorDenies:              cfg.ToolFloorDenies,
