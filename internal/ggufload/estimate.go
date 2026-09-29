@@ -307,6 +307,71 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 	return plan, nil
 }
 
+// q4kExpandedUpperBoundDetail labels the rows EstimateQ4KLoadExpandedMemoryPlan returns, so a
+// sizing report can tell the conservative expanded bound from the option-exact logical estimate.
+const q4kExpandedUpperBoundDetail = "gguf-native-q4k-expanded-upper-bound"
+
+// EstimateQ4KLoadExpandedMemoryPlan is the conservative UPPER BOUND of the resident-Q4K loader's
+// weight footprint, for a host-memory sizing decision that must never undercharge what the loader
+// can materialize. EstimateQ4KLoadMemoryPlan prices every eligible dense non-Q4_K k-quant/IQ
+// matmul weight at its PACKED payload whenever the option list leaves dense k-quant residency on
+// (the resolveQ4KLoadOptions default). Whether the loader actually keeps those tensors packed is a
+// backend/option decision the header does not carry: every backend-bearing caller passes
+// WithDenseKQuantResident(false), and then computeQ4KTensorWork dequantizes each such tensor and
+// the QuantBuilder stores it as native Q8 (estimateNativeQ8LogicalBytes, 1.125 B/weight) -- for the
+// 27B UD-Q2_K_XL header that is 30.87 GiB resident against a 17.92 GiB packed estimate (and 9.14
+// GiB on disk). A context auto-sizer charging the packed figure admitted a KV cache that, added to
+// the expanded resident weights, overran physical RAM.
+//
+// The bound re-runs the SAME per-tensor accounting with every dense k-quant retention option forced
+// off, i.e. the loader's own expansion branch; per tensor native Q8 (1.125 B/weight) dominates
+// every packed encoding the loader can retain (the densest, Q8_0, is 1.0625 B/weight), so the
+// forced-off plan is never below the option-exact one. Packed embedding options are kept as passed
+// (they are validated artifact selections, not backend capability guesses).
+//
+// When the transformed-storage estimate is unqualified (ErrQ4KLoadEstimateUnsupported) the
+// historical fallback was the ON-DISK payload, a lower bound for any tensor the loader expands. For
+// a DENSE checkpoint the bound is instead the larger of the raw payload and the lean-Q8 arm's
+// element-based charge (EstimateQ8LoadMemoryPlan: every quant matmul weight at native Q8, every
+// other tensor at F32), which dominates each loader outcome for a dense tensor. A MoE checkpoint
+// keeps the raw-payload policy: its routed-expert bulk is held raw by the loader, and an
+// element-based charge would inflate it ~2x.
+func (s *WeightSource) EstimateQ4KLoadExpandedMemoryPlan(opts ...Q4KLoadOption) (compute.MemoryPlan, error) {
+	if s == nil || s.File == nil {
+		return nil, fmt.Errorf("gguf: Q4K expanded estimate requires a weight source")
+	}
+	forced := append(append([]Q4KLoadOption(nil), opts...),
+		WithDenseKQuantResident(false), WithDenseQ2KResident(false), WithDenseQ6KResident(false))
+	plan, err := s.EstimateQ4KLoadMemoryPlan(forced...)
+	if errors.Is(err, ErrQ4KLoadEstimateUnsupported) {
+		cfg, cerr := s.File.Config()
+		if cerr != nil {
+			return nil, cerr
+		}
+		raw, rerr := s.EstimateLoadMemoryPlan()
+		if rerr != nil || cfg.IsMoE() {
+			return raw, rerr
+		}
+		q8, qerr := s.EstimateQ8LoadMemoryPlan()
+		if qerr != nil {
+			return nil, qerr
+		}
+		if q8.Total() > raw.Total() {
+			return q8, nil
+		}
+		return raw, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	for i := range plan {
+		if plan[i].Detail == "gguf-native-q4k-logical-weights" {
+			plan[i].Detail = q4kExpandedUpperBoundDetail
+		}
+	}
+	return plan, nil
+}
+
 // denseBoundedEligible is the ONE bounded-dense eligibility predicate, shared by BOTH the
 // non-MoE fold in EstimateQ4KLoadMemoryPlan and the MoE fold in
 // EstimateMoEBoundedDenseHostMemoryPlan, and mirrored EXACTLY by the loader's dispatch in
