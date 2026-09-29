@@ -2291,7 +2291,7 @@
     },
     {
       "type": "row",
-      "title": "Lanes, tickets & public/private split",
+      "title": "Ticket populations - native store vs git-tracked corpus",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -2304,8 +2304,8 @@
     },
     {
       "type": "stat",
-      "title": "Tickets total",
-      "description": "Native tickets observed in the store.",
+      "title": "Native store records",
+      "description": "Total records in the NATIVE git-ref contract store (.git/fak/tickets). This is the operational store the scheduler leases from - it is NOT a work backlog and MUST NOT be summed with Docs/tickets corpus (the git-tracked prose tickets are a separate population).",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -2382,14 +2382,14 @@
     },
     {
       "type": "stat",
-      "title": "Tickets present",
-      "description": "1 = the native ticket store was readable for the visibility split.",
+      "title": "Native store present",
+      "description": "1 = the native git-ref ticket store was readable (0 = unavailable, not an empty store).",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
-        "x": 4,
+        "x": 16,
         "y": 69,
         "w": 4,
         "h": 6
@@ -2464,14 +2464,14 @@
     },
     {
       "type": "stat",
-      "title": "Public tickets",
-      "description": "Tickets whose declared source resolves to the public repository.",
+      "title": "Mirror-origin tickets",
+      "description": "Native-store records with an upstream forge issue: a declared source.ref, or the gh-<owner>~<repo>-<n> mirror id grammar. These are the records with a GitHub counterpart to mirror to.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
-        "x": 8,
+        "x": 4,
         "y": 69,
         "w": 4,
         "h": 6
@@ -2479,7 +2479,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(fak_ops_tickets_by_visibility{job=\"fak_ops\",visibility=\"public\"})",
+          "expr": "sum(fak_ops_tickets_by_kind{job=\"fak_ops\",kind=\"mirror\"})",
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
@@ -2542,14 +2542,14 @@
     },
     {
       "type": "stat",
-      "title": "Private tickets",
-      "description": "Tickets whose declared source resolves to the private repository.",
+      "title": "Native-authored tickets",
+      "description": "Native-store records with NO upstream - authored directly against the native store. This is a KIND, not an 'unclassified' failure: a native ticket has no forge issue to mirror to, so it correctly carries no source ref.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
-        "x": 12,
+        "x": 8,
         "y": 69,
         "w": 4,
         "h": 6
@@ -2557,7 +2557,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(fak_ops_tickets_by_visibility{job=\"fak_ops\",visibility=\"private\"})",
+          "expr": "sum(fak_ops_tickets_by_kind{job=\"fak_ops\",kind=\"native\"})",
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
@@ -2620,14 +2620,14 @@
     },
     {
       "type": "stat",
-      "title": "Unclassified tickets",
-      "description": "Tickets whose visibility could not be classified. Never guessed.",
+      "title": "Docs/tickets corpus",
+      "description": "Markdown tickets in the git-TRACKED prose corpus (docs/tickets/**), excluding reserved index/readme/summary/template files. A SEPARATE population from the native store - prose specs checked into the tree, not operational contracts. Never sum it with Native store records.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
-        "x": 16,
+        "x": 12,
         "y": 69,
         "w": 4,
         "h": 6
@@ -2635,7 +2635,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(fak_ops_tickets_by_visibility{job=\"fak_ops\",visibility=\"unknown\"})",
+          "expr": "fak_ops_tickets_docs_total{job=\"fak_ops\"}",
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
@@ -2776,8 +2776,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Tickets by visibility over time",
-      "description": "Public vs private vs unclassified ticket split (item 7).",
+      "title": "Native tickets by visibility over time",
+      "description": "Public vs private vs unknown source visibility over time. A native-authored record reads 'unknown' because it has no forge repository - read it with Native tickets by kind to separate 'no upstream' from a genuine classification gap.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -3073,6 +3073,17 @@
           "refId": "D",
           "expr": "fak_ops_fleet_work_present{job=\"fak_ops\"}",
           "legendFormat": "fleet-work plane",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "E",
+          "expr": "fak_ops_tickets_docs_present{job=\"fak_ops\"}",
+          "legendFormat": "Docs ticket corpus",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -4308,6 +4319,166 @@
         "textMode": "auto"
       },
       "id": 58
+    },
+    {
+      "type": "stat",
+      "title": "Docs corpus present",
+      "description": "1 = the git-tracked docs ticket corpus (docs/tickets/**) was readable. 0 means the count is unavailable, not zero.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 69,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "fak_ops_tickets_docs_present{job=\"fak_ops\"}",
+          "legendFormat": "{{instance}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNAVAILABLE",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "id": 200
+    },
+    {
+      "type": "timeseries",
+      "title": "Native tickets by kind over time",
+      "description": "Mirror-origin vs native-authored records over time. A complete partition of Native store records.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 75,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind) (fak_ops_tickets_by_kind{job=\"fak_ops\"})",
+          "legendFormat": "{{kind}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "id": 201
     }
   ]
 }
