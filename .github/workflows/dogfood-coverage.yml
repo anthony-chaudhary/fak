@@ -1,8 +1,8 @@
 # Dogfood-coverage gate + cadence (issue #731).
 #
-# `tools/dogfood_coverage.py` measures how much of the real dev workflow eats the
-# kernel — it cross-checks LIVE behavior (calls `guarded_launch_command`, counts
-# audit rows), folds the KPIs into a `coverage` %, a `dogfood_debt` integer, and an
+# `fak dogfood-coverage` (internal/dogfoodcoverage) measures how much of the real dev
+# workflow eats the kernel — it cross-checks LIVE behavior (calls `guarded_launch_command`,
+# counts audit rows), folds the KPIs into a `coverage` %, a `dogfood_debt` integer, and an
 # A–F grade, and emits a control-pane JSON payload. It was a one-shot tool: nothing
 # ran it on a cadence or gated on it. This workflow closes both halves:
 #
@@ -10,7 +10,7 @@
 #                (e.g. `FLEET_DOGFOOD_GUARD=0`, or the `fak guard` front door
 #                deleted) flips a HARD KPI and FAILS the build. The hermetic proof
 #                that the gate actually catches that regression is
-#                `tools/dogfood_coverage_gate_test.py` (run first, below).
+#                `go test ./internal/dogfoodcoverage` (run first, below).
 #   * CADENCE  — `schedule:` re-runs it daily so the number can't silently rot, and
 #                the `--json` payload is written to the run's step summary so the
 #                coverage % is surfaced over time without anyone re-running it.

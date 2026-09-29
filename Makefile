@@ -377,10 +377,11 @@ claims-lint:
 # (a fixed set of known legacy-headline shapes, cleared by ANY co-located plane/provenance
 # label -- same discipline as check_provenance_labels). The unit test pins the pass/fail
 # contract (unlabeled headline FAILS, labeled headline PASSES); the tree audit proves the
-# committed corpus is clean. Pure Python, no dos/Go dependency, so it runs unconditionally.
+# committed corpus is clean. Native Go (`fak check-cache-headlines`, logic in
+# internal/cacheheadlines), no dos/Python dependency, so it runs unconditionally.
 cache-headline-lint:
-	@python3 tools/check_cache_headlines_test.py
-	@python3 tools/check_cache_headlines.py --audit-tree
+	@go test -count=1 ./internal/cacheheadlines/
+	@go run ./cmd/fak check-cache-headlines --audit-tree
 
 # cachedoc-numbers-lint: the checking layer for RECENT-OPERATIONAL cachevalue docs
 # (e.g. docs/integrations/fable5-more-usage-for-free.md). BENCHMARK-AUTHORITY.md is the
@@ -393,11 +394,12 @@ cache-headline-lint:
 # audit is fully hermetic: doc render == manifest expected == snapshot field, and the
 # sums/formulas close. False-positive-free by design -- open-ended/live windows are
 # checked against the frozen snapshot ONLY, never re-derived to equality (see the window
-# taxonomy in the tool). The unit test pins the pass/fail contract; the tree audit proves
-# the committed corpus is clean. Pure Python, no dos/Go dependency -- runs unconditionally.
+# taxonomy in internal/cachedocaudit). The unit test pins the pass/fail contract; the tree
+# audit proves the committed corpus is clean. Native Go (`fak cachedoc-numbers-audit`,
+# logic in internal/cachedocaudit), no dos/Python dependency -- runs unconditionally.
 cachedoc-numbers-lint:
-	@python3 tools/cachedoc_numbers_audit_test.py
-	@python3 tools/cachedoc_numbers_audit.py
+	@go test -count=1 ./internal/cachedocaudit/
+	@go run ./cmd/fak cachedoc-numbers-audit
 
 # salience (dos-kernel docs/391): the first WIRED consumer of the `dos salience` verdict
 # (it was built-but-latent — nothing routed on it; see the usefulness audit in

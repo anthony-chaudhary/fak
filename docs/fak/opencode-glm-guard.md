@@ -105,7 +105,7 @@ Without the base URL the same command stays unguarded (`guarded:false`) — the 
 default. Both behaviors are pinned by `tools/dispatch_worker_glm_guard_test.py`.
 
 A guarded opencode worker that completes a tick writes a journal under
-`.dispatch-runs/guard-audit/<lane>-opencode-*.jsonl`, which `tools/dogfood_coverage.py`
+`.dispatch-runs/guard-audit/<lane>-opencode-*.jsonl`, which `fak dogfood-coverage`
 counts toward `audit_journal_evidence` — the same witness that lifts the dogfood
 coverage score (issue #731).
 
@@ -123,4 +123,4 @@ remaining step.
 - `tools/dispatch_worker.py` — `guard_wrap`, `FLEET_DOGFOOD_GUARD_BASEURL`, `guard_provider`
 - `scripts/dogfood-opencode-glm.sh` — the per-node discover+export+launch wrapper
 - `tools/dispatch_worker_glm_guard_test.py` — the guarded/unguarded contract test
-- `tools/dogfood_coverage.py` — counts the journal a guarded worker writes (#731)
+- `fak dogfood-coverage` — counts the journal a guarded worker writes (#731)

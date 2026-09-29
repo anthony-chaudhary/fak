@@ -60,7 +60,7 @@ gcloud compute ssh fak-dogfood-control --zone us-central1-a --command '
 ```
 
 A journal under `.dispatch-runs/guard-audit/` on the VM is the same `audit_journal_evidence`
-witness `tools/dogfood_coverage.py` counts (issue #731) — so a live Tier-2 VM is a second
+witness `fak dogfood-coverage` counts (issue #731) — so a live Tier-2 VM is a second
 way to flip coverage to grade A, independent of the Mac node (#729).
 
 ## GPU burst (separate lane)
