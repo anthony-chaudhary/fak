@@ -604,12 +604,6 @@ func isToolDeclarationsMessage(msg agent.Message) bool {
 	return false
 }
 
-// isDurableContextMessage determines whether a message carries durable context
-// (repomap, memory cards, project rules, stable document context, file tree).
-func isDurableContextMessage(msg agent.Message) bool {
-	return isProjectRulesMessage(msg) || isWorkspaceContextMessage(msg) || isRepomapOrMemoryContext(msg)
-}
-
 func isRepomapOrMemoryContext(msg agent.Message) bool {
 	r := strings.ToLower(strings.TrimSpace(msg.Role))
 	if r == "user" || r == "assistant" || r == "tool" || r == "function" ||
@@ -885,22 +879,6 @@ func normalizeToolDeclarationText(s string) string {
 		return strings.Join(res, "\n")
 	}
 	return s
-}
-
-func computeStablePrefixHash(tier1, tier2, tier3, tier4 []agent.Message) string {
-	h := sha256.New()
-	writeTier := func(name string, msgs []agent.Message) {
-		h.Write([]byte(name + "_START\n"))
-		for _, m := range msgs {
-			h.Write([]byte(fmt.Sprintf("role:%s|name:%s|content:%s\n", m.Role, m.Name, m.Content)))
-		}
-		h.Write([]byte(name + "_END\n"))
-	}
-	writeTier("TIER1", tier1)
-	writeTier("TIER2", tier2)
-	writeTier("TIER3", tier3)
-	writeTier("TIER4", tier4)
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 // CanonicalizeMessages sorts messages into canonical 5 tiers (Tier 1 System -> Tier 2 Tools ->
