@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
+	"github.com/anthony-chaudhary/fak/pkg/worktreecheck"
 )
 
 const (
@@ -116,28 +117,77 @@ func worktreeWorkerGC(argv []string) {
 }
 
 // worktreeWorkerGCCandidates collects the verify-only candidate checkouts a killed
-// land leaves beside the repository (or in the system temp directory). A land
-// already sweeps a few before creating its own; this is the unbounded operator
+// land or exec-witness run leaves behind. Both families are swept in every parent a
+// full sweep must cover (the sibling parent and/or the system temp directory); a
+// land already sweeps a few before creating its own, this is the unbounded operator
 // form. Dry-run unless apply.
 func worktreeWorkerGCCandidates(repoRoot string, apply bool, legacyMaxAge time.Duration) {
-	parent, err := workerworktree.TopologyCandidateParent(repoRoot)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "fak worktree worker gc --candidates: "+err.Error())
-		os.Exit(1)
+	parents := worktreecheck.TopologyCandidateParents(repoRoot)
+	now := time.Now()
+	reports := make([]worktreecheck.SweepReport, 0, len(parents))
+	for _, parent := range parents {
+		reports = append(reports, worktreecheck.Sweep(repoRoot, parent, worktreecheck.SweepOptions{
+			Now:          now,
+			LegacyMaxAge: legacyMaxAge,
+			Apply:        apply,
+		}))
 	}
-	report := workerworktree.SweepTopologyCandidates(repoRoot, parent, nil, workerworktree.CandidateSweepOptions{
-		Now:          time.Now(),
-		LegacyMaxAge: legacyMaxAge,
-		Apply:        apply,
-	})
-	worktreeWorkerEmit(report)
+
+	// A single parent keeps the historical single-report JSON shape. A multi-parent
+	// sweep (a sibling-escaping workspace scans both the sibling dir and temp) wraps
+	// the per-parent reports in one top-level receipt with roll-up counts.
+	if len(reports) == 1 {
+		report := reports[0]
+		worktreeWorkerEmit(report)
+		worktreeWorkerGCCandidatesSummary(apply, report.Reaped, report.WouldReap, report.Parent, len(report.Failures))
+		if len(report.Failures) > 0 {
+			os.Exit(1)
+		}
+		return
+	}
+
+	out := worktreeGCCandidatesOut{
+		Mode:    "dry-run",
+		Parents: parents,
+		Reports: reports,
+	}
 	if apply {
-		fmt.Fprintf(os.Stderr, "reaped %d/%d owner-gone land-verify candidates in %s (%d failures)\n", report.Reaped, report.WouldReap, report.Parent, len(report.Failures))
-	} else {
-		fmt.Fprintf(os.Stderr, "would reap %d owner-gone land-verify candidates in %s, 0 deleted (dry-run; pass --apply to collect)\n", report.WouldReap, report.Parent)
+		out.Mode = "apply"
 	}
-	if len(report.Failures) > 0 {
+	failures := 0
+	for _, report := range reports {
+		scanned, reaped, kept := worktreecheck.Counts(report)
+		out.Scanned += scanned
+		out.WouldReap += report.WouldReap
+		out.Reaped += reaped
+		out.Kept += kept
+		failures += len(report.Failures)
+	}
+	worktreeWorkerEmit(out)
+	worktreeWorkerGCCandidatesSummary(apply, out.Reaped, out.WouldReap, strings.Join(parents, ", "), failures)
+	if failures > 0 {
 		os.Exit(1)
+	}
+}
+
+// worktreeGCCandidatesOut is the multi-parent receipt: one nested report per parent
+// plus the roll-up the operator reads first. The single-parent case keeps emitting
+// the bare CandidateSweepReport for backward compatibility.
+type worktreeGCCandidatesOut struct {
+	Mode      string                      `json:"mode"`
+	Parents   []string                    `json:"parents"`
+	Reports   []worktreecheck.SweepReport `json:"reports"`
+	Scanned   int                         `json:"scanned"`
+	WouldReap int                         `json:"would_reap"`
+	Reaped    int                         `json:"reaped"`
+	Kept      int                         `json:"kept"`
+}
+
+func worktreeWorkerGCCandidatesSummary(apply bool, reaped, wouldReap int, where string, failures int) {
+	if apply {
+		fmt.Fprintf(os.Stderr, "reaped %d/%d owner-gone verify candidates in %s (%d failures)\n", reaped, wouldReap, where, failures)
+	} else {
+		fmt.Fprintf(os.Stderr, "would reap %d owner-gone verify candidates in %s, 0 deleted (dry-run; pass --apply to collect)\n", wouldReap, where)
 	}
 }
 

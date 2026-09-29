@@ -37,6 +37,12 @@ import (
 const (
 	topologyCandidatePrefix = ".fak-cand-validate-"
 
+	// execWitnessCandidatePrefix is the sibling verify-checkout family the exec
+	// witness rung creates (internal/witness scratchWorktree). A witness run killed
+	// by a deadline leaks it the same way a killed land leaks a topology candidate,
+	// so the one owner-aware sweep collects both.
+	execWitnessCandidatePrefix = "fak-exec-witness-"
+
 	// LegacyCandidateMaxAge is how long a candidate without an owner identity in
 	// its name (created by a binary older than the owner-named candidates) must sit
 	// untouched before a sweep collects it. Its directory mtime moves when the
@@ -53,6 +59,11 @@ const (
 	candidateSweepLandLimit = 2
 )
 
+// topologyCandidatePrefixes is every verify-checkout family the one owner-aware
+// sweep collects. Both producers name their checkout through
+// OwnerNamedScratchPattern, so the same pid/start identity parsing applies to each.
+var topologyCandidatePrefixes = []string{topologyCandidatePrefix, execWitnessCandidatePrefix}
+
 // candidateOwner is the creator identity encoded in a candidate name. Start is the
 // process start time in Unix milliseconds, or 0 on a platform that exposes none.
 type candidateOwner struct {
@@ -60,22 +71,48 @@ type candidateOwner struct {
 	Start int64
 }
 
-// topologyCandidatePattern is the os.MkdirTemp pattern for a candidate owned by
-// this process: prefix, pid, base-36 start millis, then MkdirTemp's random suffix.
-func topologyCandidatePattern() string {
+// isTopologyCandidateName reports whether name is a verify-checkout directory of
+// any family the sweep collects.
+func isTopologyCandidateName(name string) bool {
+	for _, prefix := range topologyCandidatePrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// OwnerNamedScratchPattern returns an os.MkdirTemp pattern that encodes this
+// process's identity (pid + base36 start millis) under prefix, so a later sweep
+// can prove the creator is gone. prefix must end with '-'.
+func OwnerNamedScratchPattern(prefix string) string {
 	pid := os.Getpid()
 	start := int64(0)
 	if t, ok := processstart.Start(pid); ok {
 		start = t.UnixMilli()
 	}
-	return topologyCandidatePrefix + strconv.Itoa(pid) + "-" + strconv.FormatInt(start, 36) + "-*"
+	return prefix + strconv.Itoa(pid) + "-" + strconv.FormatInt(start, 36) + "-*"
+}
+
+// topologyCandidatePattern is the os.MkdirTemp pattern for a land-verify candidate
+// owned by this process: prefix, pid, base-36 start millis, then MkdirTemp's random
+// suffix.
+func topologyCandidatePattern() string {
+	return OwnerNamedScratchPattern(topologyCandidatePrefix)
 }
 
 // parseTopologyCandidateOwner reads the owner identity from a candidate directory
 // name. It returns false for a legacy name (a bare MkdirTemp suffix) and for
 // anything malformed, which the sweep then judges by age alone.
 func parseTopologyCandidateOwner(name string) (candidateOwner, bool) {
-	rest, found := strings.CutPrefix(name, topologyCandidatePrefix)
+	rest := ""
+	found := false
+	for _, prefix := range topologyCandidatePrefixes {
+		if r, ok := strings.CutPrefix(name, prefix); ok {
+			rest, found = r, true
+			break
+		}
+	}
 	if !found {
 		return candidateOwner{}, false
 	}
@@ -182,7 +219,7 @@ func SweepTopologyCandidates(root, parent string, git GitRunner, opts CandidateS
 	}
 	pruneDirs := map[string]bool{}
 	for _, entry := range entries {
-		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), topologyCandidatePrefix) {
+		if !entry.IsDir() || !isTopologyCandidateName(entry.Name()) {
 			continue
 		}
 		item := classifyTopologyCandidate(filepath.Join(parent, entry.Name()), opts)
@@ -296,7 +333,7 @@ func sweepLockedCandidateRegistrations(root string, git GitRunner, opts Candidat
 			continue
 		}
 		wt := filepath.Dir(filepath.Clean(strings.TrimSpace(string(gitdir))))
-		if !strings.HasPrefix(filepath.Base(wt), topologyCandidatePrefix) {
+		if !isTopologyCandidateName(filepath.Base(wt)) {
 			continue
 		}
 		if _, err := os.Stat(wt); !os.IsNotExist(err) {
