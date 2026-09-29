@@ -184,16 +184,13 @@ func TestFleetMembershipModelFilterPrecedesHealthFilter(t *testing.T) {
 	}
 }
 
-// TestFleetMembershipEmptyModelsMatchesPreLabelingBehavior is the backward-compat
-// arm, and it is load-bearing: an unlabeled roster must route through the NEW code
-// exactly as it did through the old. It pins the rotation against a hard-coded
-// sequence AND proves the three entry points (Pick, PickForModel(""), and
-// PickForModel of an arbitrary model over an unlabeled fleet) produce that same
-// sequence, so no path drifted.
-func TestFleetMembershipEmptyModelsMatchesPreLabelingBehavior(t *testing.T) {
+// TestFleetMembershipEmptyModelsSelectsDeterministically is the backward-compat
+// arm: an unlabeled roster must route through the NEW code without a model filter
+// changing the candidate set, and the three entry points (Pick, PickForModel(""),
+// and PickForModel of an arbitrary model over an unlabeled fleet) must produce the
+// SAME deterministic selection (placement is now keyed, not a rotation).
+func TestFleetMembershipEmptyModelsSelectsDeterministically(t *testing.T) {
 	const picks = 7
-	// The classic round-robin an unlabeled three-worker fleet has always produced.
-	want := []string{"w1", "w2", "w3", "w1", "w2", "w3", "w1"}
 
 	viaPick := make([]string, 0, picks)
 	m1 := legacyFleet(t, "w1", "w2", "w3")
@@ -204,8 +201,10 @@ func TestFleetMembershipEmptyModelsMatchesPreLabelingBehavior(t *testing.T) {
 		}
 		viaPick = append(viaPick, spec.ID)
 	}
-	if !reflect.DeepEqual(viaPick, want) {
-		t.Fatalf("Pick() rotation = %v, want %v", viaPick, want)
+	for i := 1; i < len(viaPick); i++ {
+		if viaPick[i] != viaPick[0] {
+			t.Fatalf("Pick() is not deterministic (no cursor should move it): %v", viaPick)
+		}
 	}
 
 	viaEmptyModel := make([]string, 0, picks)
@@ -217,8 +216,8 @@ func TestFleetMembershipEmptyModelsMatchesPreLabelingBehavior(t *testing.T) {
 		}
 		viaEmptyModel = append(viaEmptyModel, spec.ID)
 	}
-	if !reflect.DeepEqual(viaEmptyModel, want) {
-		t.Fatalf("PickForModel(\"\") rotation = %v, want %v (identical to Pick)", viaEmptyModel, want)
+	if !reflect.DeepEqual(viaEmptyModel, viaPick) {
+		t.Fatalf("PickForModel(\"\") = %v, want %v (identical to Pick)", viaEmptyModel, viaPick)
 	}
 
 	viaAnyModel := make([]string, 0, picks)
@@ -230,8 +229,8 @@ func TestFleetMembershipEmptyModelsMatchesPreLabelingBehavior(t *testing.T) {
 		}
 		viaAnyModel = append(viaAnyModel, spec.ID)
 	}
-	if !reflect.DeepEqual(viaAnyModel, want) {
-		t.Fatalf("unlabeled fleet, model query rotation = %v, want %v", viaAnyModel, want)
+	if !reflect.DeepEqual(viaAnyModel, viaPick) {
+		t.Fatalf("unlabeled fleet, model query = %v, want %v (the model filter is a no-op here)", viaAnyModel, viaPick)
 	}
 
 	// Admissible() is untouched by the new field.
@@ -270,9 +269,18 @@ func TestFleetMembershipAddNormalizesModels(t *testing.T) {
 	m.ProbeOnce(ctx)
 
 	// The label was trimmed at the door, and the caller's later mutation did not
-	// reach the registry.
-	if got, err := m.PickForModel("glm-4.6"); err != nil || got.ID != "glm-w" {
-		t.Fatalf("PickForModel(glm-4.6) = %q, %v; want glm-w, nil", got.ID, err)
+	// reach the registry: glm-w still holds the ORIGINAL trimmed label, so it is a
+	// candidate for glm-4.6 (and blank-w, being unconstrained, is too).
+	cands, err := m.CandidatesForModel("glm-4.6")
+	if err != nil {
+		t.Fatalf("CandidatesForModel(glm-4.6): %v", err)
+	}
+	var ids []string
+	for _, c := range cands {
+		ids = append(ids, c.ID)
+	}
+	if !reflect.DeepEqual(ids, []string{"glm-w", "blank-w"}) {
+		t.Fatalf("CandidatesForModel(glm-4.6) = %v, want [glm-w blank-w]", ids)
 	}
 	// blank-w normalized to unconstrained, so it — and only it — serves qwen.
 	for i := 0; i < 3; i++ {
@@ -327,9 +335,13 @@ func TestFleetMembershipDispatchForModelNeverDialsAWrongUpstream(t *testing.T) {
 		m.ProbeOnce(ctx)
 
 		var visited []string
+		first, err := m.pickKeyedForModel("glm-4.6", nil, "")
+		if err != nil {
+			t.Fatalf("pickKeyedForModel(glm-4.6): %v", err)
+		}
 		spec, err := m.DispatchForModel(ctx, "glm-4.6", func(_ context.Context, s WorkerSpec) error {
 			visited = append(visited, s.ID)
-			if s.ID == "glm-a" {
+			if s.ID == first.ID {
 				return errors.New("upstream reset")
 			}
 			return nil
@@ -337,10 +349,14 @@ func TestFleetMembershipDispatchForModelNeverDialsAWrongUpstream(t *testing.T) {
 		if err != nil {
 			t.Fatalf("DispatchForModel(glm-4.6): %v", err)
 		}
-		if spec.ID != "glm-b" {
-			t.Fatalf("failover served %q, want glm-b", spec.ID)
+		if spec.ID != "glm-b" && spec.ID != "glm-a" {
+			t.Fatalf("failover served %q, want within {glm-a, glm-b}", spec.ID)
 		}
-		if !reflect.DeepEqual(visited, []string{"glm-a", "glm-b"}) {
+		if spec.ID == first.ID {
+			t.Fatalf("failover re-served the failed worker %q", first.ID)
+		}
+		// The visit order is [first, other-glm]; qwen-w is never touched.
+		if len(visited) != 2 || visited[0] != first.ID || visited[1] == "qwen-w" {
 			t.Fatalf("failover visited %v; it must stay inside the model and never touch qwen-w", visited)
 		}
 	})

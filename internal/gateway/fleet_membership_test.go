@@ -169,11 +169,20 @@ func TestFleetMembershipDispatchFailoverAndTypedVerdict(t *testing.T) {
 	mustAdd(t, m, WorkerSpec{ID: "w2"})
 	m.ProbeOnce(context.Background())
 
-	// w1 fails the send; the request must fail over to w2 and be served there.
+	// Keyed placement is deterministic, so the FIRST worker tried is fixed for the
+	// empty key; fail exactly that one and the request must fail over to the other.
+	first, err := m.pickKeyedForModel("", nil, "")
+	if err != nil {
+		t.Fatalf("pickKeyedForModel: %v", err)
+	}
+	other := "w1"
+	if first.ID == "w1" {
+		other = "w2"
+	}
 	var served []string
 	got, err := m.Dispatch(context.Background(), func(_ context.Context, spec WorkerSpec) error {
 		served = append(served, spec.ID)
-		if spec.ID == "w1" {
+		if spec.ID == first.ID {
 			return errors.New("connection refused")
 		}
 		return nil
@@ -181,15 +190,15 @@ func TestFleetMembershipDispatchFailoverAndTypedVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dispatch with one healthy fallback: %v", err)
 	}
-	if got.ID != "w2" {
-		t.Fatalf("served by %q, want failover to w2", got.ID)
+	if got.ID != other {
+		t.Fatalf("served by %q, want failover to %q", got.ID, other)
 	}
-	if len(served) != 2 || served[0] != "w1" || served[1] != "w2" {
-		t.Fatalf("send order = %v, want [w1 w2] (tried w1 then failed over)", served)
+	if len(served) != 2 || served[0] != first.ID || served[1] != other {
+		t.Fatalf("send order = %v, want [%s %s] (tried %s then failed over)", served, first.ID, other, first.ID)
 	}
 	// A failover transition was recorded against the worker we moved off of.
-	if !hasEvent(m.DrainEvents(), EventFailover, "w1") {
-		t.Fatalf("no failover event recorded for w1")
+	if !hasEvent(m.DrainEvents(), EventFailover, first.ID) {
+		t.Fatalf("no failover event recorded for %s", first.ID)
 	}
 
 	// Now make EVERY admissible worker fail the send: no silent drop, typed verdict.

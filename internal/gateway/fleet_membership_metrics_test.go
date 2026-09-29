@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -85,9 +86,14 @@ func TestFleetMembershipMetricsFailoverAndLiveGauges(t *testing.T) {
 	mustAdd(t, m, WorkerSpec{ID: "wb"})
 	m.ProbeOnce(context.Background())
 
-	// wa fails the send, the request fails over to wb -> a failover transition on wa.
+	// The keyed rendezvous picks the first worker deterministically; fail it and the
+	// request must fail over to the other -> a failover transition on the first.
+	first, err := m.pickKeyedForModel("", nil, "")
+	if err != nil {
+		t.Fatalf("pickKeyedForModel: %v", err)
+	}
 	if _, err := m.Dispatch(context.Background(), func(_ context.Context, s WorkerSpec) error {
-		if s.ID == "wa" {
+		if s.ID == first.ID {
 			return errors.New("connection refused")
 		}
 		return nil
@@ -109,7 +115,7 @@ func TestFleetMembershipMetricsFailoverAndLiveGauges(t *testing.T) {
 	out := b.String()
 
 	for _, want := range []string{
-		`fak_gateway_fleet_membership_transitions_total{worker="wa",kind="failover"} 1`,
+		fmt.Sprintf(`fak_gateway_fleet_membership_transitions_total{worker=%q,kind="failover"} 1`, first.ID),
 		`fak_gateway_fleet_worker_draining{worker="wb"} 1`,
 		`fak_gateway_fleet_worker_inflight{worker="wb"} 1`,
 		`fak_gateway_fleet_worker_admissible{worker="wb"} 0`, // draining -> not admissible

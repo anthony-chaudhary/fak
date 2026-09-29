@@ -20,8 +20,9 @@ var ErrReplicaDispatchEmpty = errors.New("gateway: replica dispatch has no repli
 // shared prefix (a leading run of stable segment identities — see prefixSegments),
 // and a load function (each candidate's live in-flight count, 0 when unknown); the
 // policy returns the chosen replica. Returning ok=false makes the dispatch fall back to
-// its built-in round-robin, so a policy is purely additive and never strands a request.
-// CacheAwarePolicy is the issue-#41 implementation; nil leaves the dispatch policy-free.
+// its built-in pure keyed rendezvous, so a policy is purely additive and never strands
+// a request. CacheAwarePolicy is the issue-#41 implementation; nil leaves the dispatch
+// policy-free.
 type PickPolicy interface {
 	Pick(candidates []PlannerReplica, prefix []string, load func(name string) int) (PlannerReplica, bool)
 }
@@ -48,20 +49,26 @@ type ReplicaInfo struct {
 }
 
 // ReplicaDispatch is an agent.Planner that dispatches turns across a fixed replica set.
+//
+// Placement is a PURE keyed rendezvous over the declared (and, when membership is
+// armed, admissible) replica set: the request's shared-prefix identity selects the
+// winner, so the same request always lands on the same replica and there is no
+// mutable counter to make a decision a function of history (see hrwScore). The
+// failover path re-runs the same rendezvous with the failed replica removed, which
+// yields the next distinct winner with no cursor.
 type ReplicaDispatch struct {
 	model    string
 	replicas []PlannerReplica
-	next     atomic.Uint64
 
 	// membership is the optional live health/drain/failover loop the dispatch reads.
-	// When nil the dispatch stays policy-free (blind round-robin over every replica).
-	// When attached (WithMembership), pick() routes only to replicas the loop
-	// currently marks admissible — so an unhealthy or draining worker drops out of
-	// the rotation within the health interval — and returns ErrNoHealthyWorker (a
-	// typed verdict, never a silent drop) when none is admissible. It is an atomic
-	// pointer because the host arms it at Serve — with the gateway already accepting
-	// requests — so the publish genuinely races the request-goroutine reads; every
-	// read goes through liveMembership().
+	// When nil the dispatch stays policy-free (pure keyed placement over every
+	// replica). When attached (WithMembership), pick() routes only to replicas the
+	// loop currently marks admissible — so an unhealthy or draining worker drops out
+	// within the health interval — and returns ErrNoHealthyWorker (a typed verdict,
+	// never a silent drop) when none is admissible. It is an atomic pointer because
+	// the host arms it at Serve — with the gateway already accepting requests — so
+	// the publish genuinely races the request-goroutine reads; every read goes
+	// through liveMembership().
 	membership atomic.Pointer[FleetMembership]
 
 	// fleet is the live membership this dispatch was BUILT against but has not yet armed.
@@ -75,11 +82,11 @@ type ReplicaDispatch struct {
 	fleet *FleetMembership
 
 	// policy is the optional cache-aware placement policy (issue #41). When nil the
-	// dispatch keeps its round-robin pick unchanged; when set (WithPickPolicy), pick()
+	// dispatch keeps its pure keyed pick unchanged; when set (WithPickPolicy), pick()
 	// scores the admissible candidates by prefix residency × inverse load and falls
-	// back to round-robin only if the policy declines. It composes with membership:
-	// the candidate set is the admissible subset, and the load function is each
-	// admissible worker's live in-flight count.
+	// back to the keyed rendezvous only if the policy declines. It composes with
+	// membership: the candidate set is the admissible subset, and the load function is
+	// each admissible worker's live in-flight count.
 	policy PickPolicy
 
 	// Hedge is default-off and applies only to buffered Complete calls.
@@ -207,11 +214,11 @@ func (r *ReplicaDispatch) FleetMembership() *FleetMembership {
 // WithMembership attaches a live FleetMembership so the dispatch routes only to
 // admissible (healthy, non-draining) replicas. A replica is bound to a worker by
 // Name == WorkerSpec.ID; a replica absent from membership, still unknown, drained,
-// or unhealthy is dropped from the rotation, and a pick with no admissible worker
-// returns ErrNoHealthyWorker instead of falling through to a dead upstream. Passing
-// nil restores the policy-free blind round-robin. Returns r for chaining. It is safe
-// to call concurrently with routing: the publish is a single atomic store the
-// request-goroutine reads observe through liveMembership.
+// or unhealthy is dropped from the eligible set, and a pick with no admissible
+// worker returns ErrNoHealthyWorker instead of falling through to a dead upstream.
+// Passing nil restores the policy-free keyed placement over every replica. Returns
+// r for chaining. It is safe to call concurrently with routing: the publish is a
+// single atomic store the request-goroutine reads observe through liveMembership.
 func (r *ReplicaDispatch) WithMembership(m *FleetMembership) *ReplicaDispatch {
 	if r == nil {
 		return nil
@@ -232,9 +239,9 @@ func (r *ReplicaDispatch) liveMembership() *FleetMembership {
 }
 
 // WithPickPolicy attaches a cache-aware placement policy (issue #41). pick() then asks
-// the policy to choose among the admissible candidates, falling back to round-robin if
-// the policy declines. Passing nil restores the policy-free round-robin. Returns r for
-// chaining (composes with WithMembership).
+// the policy to choose among the admissible candidates, falling back to the pure
+// keyed rendezvous if the policy declines. Passing nil restores the policy-free
+// keyed placement. Returns r for chaining (composes with WithMembership).
 func (r *ReplicaDispatch) WithPickPolicy(p PickPolicy) *ReplicaDispatch {
 	if r == nil {
 		return nil
@@ -417,8 +424,14 @@ func (r *ReplicaDispatch) CompleteStream(ctx context.Context, sink agent.StreamS
 }
 
 func (r *ReplicaDispatch) reserveForMessages(messages []agent.Message, opts []agent.SampleOpt) (reservedPlannerReplica, error) {
+	// The shared-prefix segment run is the request's stable placement identity: the
+	// cache-aware policy keys on it, and the policy-free keyed rendezvous fallback
+	// keys on it too (replicaRendezvousKey), so the same request replays to the same
+	// replica with no counter. Compute it whenever the dispatch may place blindly as
+	// well as when a policy is attached; a request with no messages yields an empty
+	// key, which is still deterministic.
 	var prefix []string
-	if r != nil && r.policy != nil {
+	if r != nil {
 		prefix = prefixSegments(messages)
 	}
 	return r.reserveWithDecode(prefix, nil, decodeFootprintRouteRequest{ExpectedOutputTokens: sampleMaxTokens(opts)})
@@ -562,7 +575,7 @@ func (r *ReplicaDispatch) reservationPicker(prefix []string, byName map[string]P
 				}
 			}
 		}
-		workerID, ok := r.roundRobinCandidate(inflight)
+		workerID, ok := r.keyedCandidate(inflight, prefix)
 		return fleetReservationPickResult{workerID: workerID}, ok
 	}
 }
@@ -575,21 +588,78 @@ func bookingBlocks(created, existing *decodeFootprintReservation) int {
 	return booking.bookedBlocks()
 }
 
-func (r *ReplicaDispatch) roundRobinCandidate(candidates map[string]int) (string, bool) {
-	if len(candidates) == 0 || len(r.replicas) == 0 {
+// keyedCandidate is the policy-free placement primitive: a keyed rendezvous over
+// the eligible replicas, ordered by hrwScore(prefixKey, name). It is pure and
+// stateless — the same (prefix, eligible set) always yields the same winner — and
+// it never reads or advances a mutable cursor, so a decision is replayable. The
+// candidate map is the set the caller has already filtered (admissible replicas
+// the request may still try); an empty map reports false so the caller returns its
+// typed verdict rather than a hang. The rendezvous key is the request's shared
+// prefix (see prefixSegments); an empty/degenerate prefix still spreads because
+// hrwScore hashes the member identity too.
+func (r *ReplicaDispatch) keyedCandidate(candidates map[string]int, prefix []string) (string, bool) {
+	if len(candidates) == 0 {
 		return "", false
 	}
-	n := uint64(len(r.replicas))
-	start := r.next.Add(1) - 1
-	for i := uint64(0); i < n; i++ {
-		name := r.replicas[int((start+i)%n)].Name
-		if _, ok := candidates[name]; ok {
-			return name, true
+	key := replicaRendezvousKey(prefix)
+	var best string
+	var bestScore uint64
+	for name := range candidates {
+		score := hrwScore(key, name)
+		if best == "" || score > bestScore || (score == bestScore && name < best) {
+			best, bestScore = name, score
 		}
 	}
-	return "", false
+	return best, best != ""
 }
 
+// replicaRendezvousKey folds the request's shared-prefix segment run into the
+// stable string the rendezvous hashes against each member's name. An absent prefix
+// yields "", which still spreads across members because hrwScore hashes the member
+// identity alongside it.
+func replicaRendezvousKey(prefix []string) string {
+	if len(prefix) == 0 {
+		return ""
+	}
+	return strings.Join(prefix, "\x00")
+}
+
+// hrwScore is the gateway's rendezvous hash: 64-bit FNV-1a over key || ':' ||
+// memberID with a SplitMix64 avalanche finalizer. The construction is identical to
+// the private fabric's routing.BalanceScore / platform/gateway.ComputeHRWScore, so
+// a decision computed on either axis for the same identity agrees — the shared
+// constant is DUPLICATED with this citation rather than imported across the
+// boundary. It is a pure function of its inputs: no clock, no counter, no state.
+func hrwScore(key, memberID string) uint64 {
+	const (
+		offset64 = 14695981039346656037
+		prime64  = 1099511628211
+	)
+	hash := uint64(offset64)
+	for i := 0; i < len(key); i++ {
+		hash ^= uint64(key[i])
+		hash *= prime64
+	}
+	hash ^= uint64(':')
+	hash *= prime64
+	for i := 0; i < len(memberID); i++ {
+		hash ^= uint64(memberID[i])
+		hash *= prime64
+	}
+	// SplitMix64 avalanche: FNV-1a alone leaves visible bit bias on keys that
+	// differ only in a short suffix (the shape of a session/request id), so the
+	// finalizer is load-bearing, not decoration.
+	hash ^= hash >> 30
+	hash *= 0xbf58476d1ce4e5b9
+	hash ^= hash >> 27
+	hash *= 0x94d049bb133111eb
+	hash ^= hash >> 31
+	return hash
+}
+
+// pick is the cached placement entry point: it asks the attached policy first and
+// falls back to the pure keyed rendezvous when no policy is attached or the policy
+// declines. handled=false from pickByPolicy means "use the fallback".
 func (r *ReplicaDispatch) pick(prefix []string) (PlannerReplica, error) {
 	if r == nil || len(r.replicas) == 0 {
 		return PlannerReplica{}, ErrReplicaDispatchEmpty
@@ -599,7 +669,64 @@ func (r *ReplicaDispatch) pick(prefix []string) (PlannerReplica, error) {
 			return repl, err
 		}
 	}
-	return r.pickRoundRobin()
+	return r.pickKeyed(prefix)
+}
+
+// pickRoundRobin is the policy-free placement. Despite the historical name it is
+// now a KEYED rendezvous, not a rotation: the request's shared-prefix identity
+// chooses the replica, so the decision is pure and replayable and no counter is
+// consulted. It still returns the typed no-worker verdict (never a dead upstream)
+// when membership leaves nothing admissible.
+func (r *ReplicaDispatch) pickRoundRobin() (PlannerReplica, error) {
+	return r.pickKeyed(nil)
+}
+
+// pickKeyed is pickRoundRobin's core, taking the request's shared prefix so the
+// winner is a function of request identity. Over every configured replica (or,
+// when membership is attached, the admissible subset), it selects the highest
+// rendezvous score. A worker that does not hold r.model is filtered out before
+// health is even consulted, so a heterogeneous fleet never hands this dispatch's
+// request to a worker serving a different model; an unhealthy or draining holder
+// drops from the admissible set within the health interval; and when nothing is
+// left it returns the typed verdict membership decided rather than route to a
+// wrong or dead upstream.
+func (r *ReplicaDispatch) pickKeyed(prefix []string) (PlannerReplica, error) {
+	if len(r.replicas) == 0 {
+		return PlannerReplica{}, ErrReplicaDispatchEmpty
+	}
+	if r.liveMembership() == nil {
+		key := replicaRendezvousKey(prefix)
+		var best PlannerReplica
+		var bestScore uint64
+		for _, repl := range r.replicas {
+			score := hrwScore(key, repl.Name)
+			if best.Name == "" || score > bestScore || (score == bestScore && repl.Name < best.Name) {
+				best, bestScore = repl, score
+			}
+		}
+		return best, nil
+	}
+	admit, err := r.admitSet()
+	if err != nil {
+		return PlannerReplica{}, err
+	}
+	key := replicaRendezvousKey(prefix)
+	var best PlannerReplica
+	var bestScore uint64
+	found := false
+	for _, repl := range r.replicas {
+		if _, ok := admit[repl.Name]; !ok {
+			continue
+		}
+		score := hrwScore(key, repl.Name)
+		if !found || score > bestScore || (score == bestScore && repl.Name < best.Name) {
+			best, bestScore, found = repl, score, true
+		}
+	}
+	if !found {
+		return PlannerReplica{}, ErrNoHealthyWorker
+	}
+	return best, nil
 }
 
 // pickByPolicy runs the attached cache-aware policy over the admissible candidate set.
@@ -671,37 +798,6 @@ func (r *ReplicaDispatch) candidatesAndLoad() ([]PlannerReplica, func(string) in
 		inflight[st.Spec.ID] = st.Inflight
 	}
 	return candidates, func(name string) int { return inflight[name] }, nil
-}
-
-// pickRoundRobin is the policy-free placement: round-robin over every replica, or —
-// when membership is attached — over the admissible subset, returning the typed
-// no-worker verdict rather than routing to a dead upstream. This is the dispatch's
-// behavior whenever no cache-aware policy is attached or the policy declines.
-func (r *ReplicaDispatch) pickRoundRobin() (PlannerReplica, error) {
-	n := uint64(len(r.replicas))
-	start := r.next.Add(1) - 1 // advance the shared cursor exactly once per pick
-	if r.liveMembership() == nil {
-		return r.replicas[int(start%n)], nil
-	}
-	// Membership-gated: round-robin only over the replicas the live health/drain
-	// loop currently admits FOR THIS ROUTER'S MODEL, scanning forward from the cursor
-	// so picks still spread across the admissible subset. A worker that does not hold
-	// r.model is filtered out before health is even consulted, so a heterogeneous
-	// fleet never hands this dispatch's request to a worker serving a different model;
-	// an unhealthy or draining holder drops from the rotation within the health
-	// interval; and when nothing is left we return the typed verdict membership
-	// decided rather than route to a wrong or dead upstream.
-	admit, err := r.admitSet()
-	if err != nil {
-		return PlannerReplica{}, err
-	}
-	for i := uint64(0); i < n; i++ {
-		repl := r.replicas[int((start+i)%n)]
-		if _, ok := admit[repl.Name]; ok {
-			return repl, nil
-		}
-	}
-	return PlannerReplica{}, ErrNoHealthyWorker
 }
 
 // prefixSegments lowers a request's messages into the shared-prefix segment run the

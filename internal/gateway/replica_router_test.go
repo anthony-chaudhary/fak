@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"sync"
 	"testing"
@@ -103,7 +104,7 @@ func TestReplicaDispatchValidatesStaticRegistry(t *testing.T) {
 	}
 }
 
-func TestReplicaDispatchRoundRobinsCompleteAndForwardsInputs(t *testing.T) {
+func TestReplicaDispatchKeyedPlacementAndForwardsInputs(t *testing.T) {
 	a := &replicaDispatchTestPlanner{name: "r1"}
 	b := &replicaDispatchTestPlanner{name: "r2"}
 	c := &replicaDispatchTestPlanner{name: "r3"}
@@ -125,6 +126,8 @@ func TestReplicaDispatchRoundRobinsCompleteAndForwardsInputs(t *testing.T) {
 
 	messages := []agent.Message{{Role: agent.RoleUser, Content: "hi"}}
 	tools := []agent.ToolDef{{Type: "function", Function: agent.ToolDefFunction{Name: "search"}}}
+	// A keyed rendezvous is deterministic: the SAME request always lands on the
+	// same replica. Five identical requests all hit one winner (no rotation).
 	var got []string
 	for i := 0; i < 5; i++ {
 		comp, err := router.Complete(context.Background(), messages, tools, agent.WithMaxTokens(17), agent.WithModel("client-model"))
@@ -133,9 +136,24 @@ func TestReplicaDispatchRoundRobinsCompleteAndForwardsInputs(t *testing.T) {
 		}
 		got = append(got, comp.Message.Content)
 	}
-	want := []string{"r1", "r2", "r3", "r1", "r2"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("round-robin = %v, want %v", got, want)
+	for i := 1; i < len(got); i++ {
+		if got[i] != got[0] {
+			t.Fatalf("identical requests were placed on different replicas: %v (placement is not a pure function of the request)", got)
+		}
+	}
+	// Distinct request identities spread across the replica set: over enough
+	// prefixes every replica is chosen at least once (no counter involved).
+	seen := map[string]bool{}
+	for i := 0; i < 64; i++ {
+		key := fmt.Sprintf("distinct-prefix-%d", i)
+		repl, err := router.pickKeyed([]string{key})
+		if err != nil {
+			t.Fatalf("pickKeyed(%s): %v", key, err)
+		}
+		seen[repl.Name] = true
+	}
+	if len(seen) != 3 {
+		t.Fatalf("keyed rendezvous spread over %d/3 replicas: %v", len(seen), seen)
 	}
 	for _, planner := range []*replicaDispatchTestPlanner{a, b, c} {
 		for _, sp := range planner.samples() {
@@ -170,18 +188,26 @@ func TestReplicaDispatchCompleteIsConcurrentSafe(t *testing.T) {
 	wg.Wait()
 	aComplete, _ := a.counts()
 	bComplete, _ := b.counts()
-	if aComplete != calls/2 || bComplete != calls/2 {
-		t.Fatalf("complete counts = r1:%d r2:%d, want %d each", aComplete, bComplete, calls/2)
+	// Keyed placement is deterministic for a fixed request identity, so every
+	// identical concurrent call lands on the SAME replica (no cursor to race).
+	if aComplete+bComplete != calls {
+		t.Fatalf("complete counts = r1:%d r2:%d, want %d total", aComplete, bComplete, calls)
+	}
+	if aComplete != calls && bComplete != calls {
+		t.Fatalf("identical concurrent requests were split across replicas: r1:%d r2:%d", aComplete, bComplete)
 	}
 }
 
-// dispatchCounts runs n round-robin Completes and tallies which replica served each
-// (the test planner echoes its own model name as the completion content).
+// dispatchCounts runs n Completes with DISTINCT request identities (a distinct
+// leading message yields a distinct rendezvous key) and tallies which replica
+// served each. Because placement is a pure function of request identity, distinct
+// requests spread across the eligible replicas with no counter.
 func dispatchCounts(t *testing.T, router *ReplicaDispatch, n int) map[string]int {
 	t.Helper()
 	got := make(map[string]int)
 	for i := 0; i < n; i++ {
-		comp, err := router.Complete(context.Background(), nil, nil)
+		messages := []agent.Message{{Role: agent.RoleUser, Content: fmt.Sprintf("dispatch-%d", i)}}
+		comp, err := router.Complete(context.Background(), messages, nil)
 		if err != nil {
 			t.Fatalf("Complete(%d): %v", i, err)
 		}
@@ -226,10 +252,11 @@ func TestReplicaDispatchRoutesOnlyToHealthyWorkersWithHysteresis(t *testing.T) {
 		t.Fatalf("unprobed fleet: Complete err = %v, want ErrNoHealthyWorker", err)
 	}
 
-	// One probe tick admits both (HealthyAfter=1); the router round-robins them.
+	// One probe tick admits both (HealthyAfter=1); distinct request identities
+	// spread across them with no counter.
 	mem.ProbeOnce(ctx)
-	if got := dispatchCounts(t, router, 4); got["ra"] != 2 || got["rb"] != 2 {
-		t.Fatalf("healthy fleet round-robin = %v, want ra:2 rb:2", got)
+	if got := dispatchCounts(t, router, 16); got["ra"] == 0 || got["rb"] == 0 || got["ra"]+got["rb"] != 16 {
+		t.Fatalf("healthy fleet keyed spread = %v, want both replicas serving 16 requests", got)
 	}
 
 	// w-b begins failing. ONE failed tick must NOT evict it (UnhealthyAfter=2).
@@ -237,15 +264,15 @@ func TestReplicaDispatchRoutesOnlyToHealthyWorkersWithHysteresis(t *testing.T) {
 	healthy["w-b"] = false
 	mu.Unlock()
 	mem.ProbeOnce(ctx)
-	if got := dispatchCounts(t, router, 4); got["rb"] == 0 {
+	if got := dispatchCounts(t, router, 16); got["rb"] == 0 {
 		t.Fatalf("single transient failure flapped w-b out of rotation: %v", got)
 	}
 
 	// A second consecutive failure crosses w-b to unhealthy: the router drops it
 	// within the bounded health interval and every request now lands on w-a.
 	mem.ProbeOnce(ctx)
-	if got := dispatchCounts(t, router, 4); got["rb"] != 0 || got["ra"] != 4 {
-		t.Fatalf("unhealthy worker still in rotation: %v, want ra:4 rb:0", got)
+	if got := dispatchCounts(t, router, 16); got["rb"] != 0 || got["ra"] != 16 {
+		t.Fatalf("unhealthy worker still in rotation: %v, want ra:16 rb:0", got)
 	}
 }
 
@@ -291,9 +318,10 @@ func TestReplicaDispatchDrainStopsNewWorkAndTypedVerdict(t *testing.T) {
 	}
 }
 
-// TestReplicaDispatchWithoutMembershipStaysBlindRoundRobin pins the opt-in contract:
-// a router with no membership attached keeps the policy-free rotation unchanged.
-func TestReplicaDispatchWithoutMembershipStaysBlindRoundRobin(t *testing.T) {
+// TestReplicaDispatchWithoutMembershipStaysPolicyFree pins the opt-in contract: a
+// router with no membership attached keeps the pure keyed placement over every
+// replica (still spreading distinct requests, still deterministic per request).
+func TestReplicaDispatchWithoutMembershipStaysPolicyFree(t *testing.T) {
 	a := &replicaDispatchTestPlanner{name: "ra"}
 	b := &replicaDispatchTestPlanner{name: "rb"}
 	router, err := NewReplicaDispatch("fleet", []PlannerReplica{{Name: "w-a", Planner: a}, {Name: "w-b", Planner: b}})
@@ -301,7 +329,7 @@ func TestReplicaDispatchWithoutMembershipStaysBlindRoundRobin(t *testing.T) {
 		t.Fatalf("NewReplicaDispatch: %v", err)
 	}
 	if got := dispatchCounts(t, router, 4); got["ra"] != 2 || got["rb"] != 2 {
-		t.Fatalf("blind round-robin = %v, want ra:2 rb:2", got)
+		t.Fatalf("policy-free keyed spread = %v, want ra:2 rb:2", got)
 	}
 }
 
@@ -315,11 +343,15 @@ func TestReplicaDispatchStreamsOnlyWhenEveryReplicaSupportsStreaming(t *testing.
 	if mixed.StreamingSupported() {
 		t.Fatalf("mixed router advertised streaming support")
 	}
-	if _, err := mixed.CompleteStream(context.Background(), nil, nil, nil); err != nil {
+	// Route one request at the streaming replica and one at the buffered replica by
+	// keyed identity; the buffered winner must surface ErrStreamingUnsupported.
+	streamMsg := messageKeyingTo(t, mixed, "stream")
+	if _, err := mixed.CompleteStream(context.Background(), nil, streamMsg, nil); err != nil {
 		t.Fatalf("first streaming replica should stream: %v", err)
 	}
-	if _, err := mixed.CompleteStream(context.Background(), nil, nil, nil); !errors.Is(err, agent.ErrStreamingUnsupported) {
-		t.Fatalf("second non-streaming replica error = %v, want ErrStreamingUnsupported", err)
+	bufferedMsg := messageKeyingTo(t, mixed, "buffered")
+	if _, err := mixed.CompleteStream(context.Background(), nil, bufferedMsg, nil); !errors.Is(err, agent.ErrStreamingUnsupported) {
+		t.Fatalf("buffered replica error = %v, want ErrStreamingUnsupported", err)
 	}
 
 	a := &replicaDispatchTestPlanner{name: "a", streaming: true, streamingSupported: true}
@@ -331,17 +363,40 @@ func TestReplicaDispatchStreamsOnlyWhenEveryReplicaSupportsStreaming(t *testing.
 	if !router.StreamingSupported() {
 		t.Fatalf("streaming router did not advertise streaming support")
 	}
-	var deltas []string
-	for i := 0; i < 2; i++ {
-		_, err := router.CompleteStream(context.Background(), func(delta string) error {
-			deltas = append(deltas, delta)
+	// Distinct request identities spread across both streaming replicas.
+	seen := map[string]bool{}
+	for i := 0; i < 8; i++ {
+		comp, err := router.CompleteStream(context.Background(), func(delta string) error {
+			seen[delta] = true
 			return nil
-		}, nil, nil)
+		}, []agent.Message{{Role: agent.RoleUser, Content: fmt.Sprintf("stream-%d", i)}}, nil)
 		if err != nil {
 			t.Fatalf("CompleteStream(%d): %v", i, err)
 		}
+		if comp == nil {
+			t.Fatalf("CompleteStream(%d): nil completion", i)
+		}
 	}
-	if want := []string{"a", "b"}; !reflect.DeepEqual(deltas, want) {
-		t.Fatalf("stream deltas = %v, want %v", deltas, want)
+	if !seen["a"] || !seen["b"] {
+		t.Fatalf("streaming replicas served = %v, want both a and b over distinct requests", seen)
 	}
+}
+
+// messageKeyingTo finds a synthetic request whose shared-prefix rendezvous selects
+// the replica named want, so a test can steer a keyed (counter-free) dispatch to a
+// specific replica without reaching into its internals.
+func messageKeyingTo(t *testing.T, router *ReplicaDispatch, want string) []agent.Message {
+	t.Helper()
+	for i := 0; i < 4096; i++ {
+		messages := []agent.Message{{Role: agent.RoleUser, Content: fmt.Sprintf("steer-%s-%d", want, i)}}
+		repl, err := router.pickKeyed(prefixSegments(messages))
+		if err != nil {
+			t.Fatalf("pickKeyed: %v", err)
+		}
+		if repl.Name == want {
+			return messages
+		}
+	}
+	t.Fatalf("no synthetic request in 4096 selects replica %q", want)
+	return nil
 }

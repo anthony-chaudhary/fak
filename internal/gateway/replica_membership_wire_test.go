@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -69,12 +70,15 @@ func (p *fleetWireProbeReplica) probes() int {
 	return p.probeCalls
 }
 
-// fleetWireTally runs n Completes and tallies which replica served each.
+// fleetWireTally runs n Completes with DISTINCT request identities (a distinct
+// leading message keys a distinct rendezvous slot) and tallies which replica
+// served each. Keyed placement is counter-free, so distinct requests spread.
 func fleetWireTally(t *testing.T, router *ReplicaDispatch, n int) map[string]int {
 	t.Helper()
 	got := make(map[string]int)
 	for i := 0; i < n; i++ {
-		comp, err := router.Complete(context.Background(), nil, nil)
+		messages := []agent.Message{{Role: agent.RoleUser, Content: fmt.Sprintf("wire-%d", i)}}
+		comp, err := router.Complete(context.Background(), messages, nil)
 		if err != nil {
 			t.Fatalf("Complete(%d): %v", i, err)
 		}
@@ -118,8 +122,8 @@ func TestReplicaMembershipWireUnhealthyReplicaDropsFromRotation(t *testing.T) {
 	ctx := context.Background()
 	fm.ProbeOnce(ctx) // admit both
 
-	if got := fleetWireTally(t, router, 4); got["ra"] != 2 || got["rb"] != 2 {
-		t.Fatalf("healthy fleet round-robin = %v, want ra:2 rb:2", got)
+	if got := fleetWireTally(t, router, 16); got["ra"] == 0 || got["rb"] == 0 || got["ra"]+got["rb"] != 16 {
+		t.Fatalf("healthy fleet keyed spread = %v, want both replicas serving 16 requests", got)
 	}
 
 	mu.Lock()
@@ -221,14 +225,14 @@ func TestReplicaMembershipWireOptOutStaysBlind(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewReplicaDispatch: %v", err)
 	}
-	if got := fleetWireTally(t, router, 4); got["ra"] != 2 || got["rb"] != 2 {
-		t.Fatalf("no-membership blind round-robin = %v, want ra:2 rb:2", got)
+	if got := fleetWireTally(t, router, 4); got["ra"]+got["rb"] != 4 || got["ra"] == 0 || got["rb"] == 0 {
+		t.Fatalf("no-membership policy-free spread = %v, want both replicas over 4 distinct requests", got)
 	}
 
-	// Explicit nil restores the blind rotation.
+	// Explicit nil restores the same policy-free keyed placement.
 	router.WithMembership(nil)
-	if got := fleetWireTally(t, router, 4); got["ra"] != 2 || got["rb"] != 2 {
-		t.Fatalf("WithMembership(nil) blind round-robin = %v, want ra:2 rb:2", got)
+	if got := fleetWireTally(t, router, 4); got["ra"]+got["rb"] != 4 || got["ra"] == 0 || got["rb"] == 0 {
+		t.Fatalf("WithMembership(nil) policy-free spread = %v, want both replicas over 4 distinct requests", got)
 	}
 }
 
@@ -291,8 +295,8 @@ func TestReplicaMembershipWireBuildRegistersReplicaIDs(t *testing.T) {
 	}
 	fm.ProbeOnce(context.Background()) // both probe healthy (200)
 	router.WithMembership(fm)
-	if got := fleetWireTally(t, router, 4); got["ra"] != 2 || got["rb"] != 2 {
-		t.Fatalf("built membership healthy round-robin = %v, want ra:2 rb:2", got)
+	if got := fleetWireTally(t, router, 16); got["ra"] == 0 || got["rb"] == 0 || got["ra"]+got["rb"] != 16 {
+		t.Fatalf("built membership keyed spread = %v, want both replicas over 16 requests", got)
 	}
 
 	b.setProbeErr(errors.New("upstream refused"))
@@ -300,7 +304,7 @@ func TestReplicaMembershipWireBuildRegistersReplicaIDs(t *testing.T) {
 	// hysteresis defaults apply: UnhealthyAfter=2 means ONE failed beat must not
 	// evict a healthy worker. Two consecutive failures cross B to unhealthy.
 	fm.ProbeOnce(context.Background())
-	if got := fleetWireTally(t, router, 4); got["rb"] == 0 {
+	if got := fleetWireTally(t, router, 16); got["rb"] == 0 {
 		t.Fatalf("a single failed beat flapped replica B out of rotation: %v", got)
 	}
 	fm.ProbeOnce(context.Background())

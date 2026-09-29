@@ -197,8 +197,7 @@ type FleetMembership struct {
 
 	mu      sync.Mutex
 	workers map[string]*memberWorker
-	order   []string // stable registration order, for deterministic round-robin
-	rr      uint64   // round-robin cursor over the admissible set
+	order   []string // stable registration order, for deterministic keyed ties
 	events  []MembershipEvent
 }
 
@@ -690,13 +689,20 @@ func (m *FleetMembership) releaseWorkerLocked(id string, w *memberWorker) {
 	}
 }
 
-// Pick returns the next admissible worker round-robin over the live admissible
-// set — the placement read the router performs against membership. It reports
-// false when no worker is admissible (the caller then returns a typed verdict
-// rather than dropping the request). Pick does NOT acquire; use Dispatch for the
-// acquire / failover / release lifecycle.
+// Pick returns the admissible worker the empty-identity rendezvous selects — the
+// placement read the router performs against membership. It reports false when no
+// worker is admissible (the caller then returns a typed verdict rather than
+// dropping the request). Pick does NOT acquire; use Dispatch for the acquire /
+// failover / release lifecycle.
+//
+// The selection is a PURE keyed rendezvous over the live admissible set, not a
+// mutable round-robin cursor: the same registry state always yields the same
+// worker, so a placement is replayable. A caller that needs request-identity
+// spreading supplies a key through the reservation path (ReplicaDispatch), which
+// keys on the request's shared prefix; an empty key here is deterministic and is
+// what the legacy keyless callers get.
 func (m *FleetMembership) Pick() (WorkerSpec, bool) {
-	spec, err := m.pickExceptForModel("", nil)
+	spec, err := m.pickKeyedForModel("", nil, "")
 	return spec, err == nil
 }
 
@@ -706,7 +712,7 @@ func (m *FleetMembership) Pick() (WorkerSpec, bool) {
 // ErrNoHealthyWorker when a holder exists but none is currently admissible
 // (outage). An empty model is unconstrained and behaves exactly like Pick.
 func (m *FleetMembership) PickForModel(model string) (WorkerSpec, error) {
-	return m.pickExceptForModel(model, nil)
+	return m.pickKeyedForModel(model, nil, "")
 }
 
 // CandidatesForModel returns the admissible workers that hold model, in
@@ -763,27 +769,36 @@ func (m *FleetMembership) classifyForModelLocked(model string) ([]string, error)
 	return ids, nil
 }
 
-// pickExceptForModel is the one placement primitive: it applies the
-// model-before-health classification, then round-robins over the surviving
-// candidates, skipping ids already tried. The cursor advances exactly as the
-// un-modeled path always did, so an unconstrained call is unchanged.
-func (m *FleetMembership) pickExceptForModel(model string, skip map[string]struct{}) (WorkerSpec, error) {
+// pickKeyedForModel is the one placement primitive: it applies the
+// model-before-health classification, then selects the highest rendezvous score
+// over the surviving candidates under key, skipping ids already tried. It is pure
+// and replayable — no cursor is read or advanced — so the same (key, candidate
+// set) always yields the same worker, and failover simply re-runs it with the
+// failed id excluded. The key is the request's stable placement identity (its
+// shared-prefix run); an empty key is the keyless behaviour the legacy Pick path
+// gets, and remains deterministic.
+func (m *FleetMembership) pickKeyedForModel(model string, skip map[string]struct{}, key string) (WorkerSpec, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	adm, err := m.classifyForModelLocked(model)
 	if err != nil {
 		return WorkerSpec{}, err
 	}
-	n := uint64(len(adm))
-	for i := uint64(0); i < n; i++ {
-		id := adm[int((m.rr+i)%n)]
+	best, found := "", false
+	var bestScore uint64
+	for _, id := range adm {
 		if _, done := skip[id]; done {
 			continue
 		}
-		m.rr += i + 1
-		return m.workers[id].spec, nil
+		score := hrwScore(key, id)
+		if !found || score > bestScore || (score == bestScore && id < best) {
+			best, bestScore, found = id, score, true
+		}
 	}
-	return WorkerSpec{}, ErrNoHealthyWorker
+	if !found {
+		return WorkerSpec{}, ErrNoHealthyWorker
+	}
+	return m.workers[best].spec, nil
 }
 
 // Dispatch routes a request to an admissible worker and retries on the NEXT
@@ -812,7 +827,7 @@ func (m *FleetMembership) DispatchForModel(ctx context.Context, model string, se
 	tried := make(map[string]struct{})
 	var lastErr error
 	for {
-		spec, pickErr := m.pickExceptForModel(model, tried)
+		spec, pickErr := m.pickKeyedForModel(model, tried, "")
 		if pickErr != nil {
 			// A model nobody holds is a configuration verdict, never an outage —
 			// it is not wrapped in ErrNoHealthyWorker even mid-failover.

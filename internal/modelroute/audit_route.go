@@ -521,38 +521,40 @@ func evaluateAuditRouteCandidate(
 		return decision
 	}
 	decision.ProviderHealth = providerHealth[identity.Provider]
-	switch decision.ProviderHealth {
-	case AuditProviderHealthy, AuditProviderDegraded:
-	case AuditProviderUnhealthy:
-		decision.SkipReason = AuditSkipProviderUnhealthy
-		return decision
-	default:
+	if decision.ProviderHealth == "" {
 		decision.ProviderHealth = AuditProviderUnknown
-		decision.SkipReason = AuditSkipProviderHealthUnknown
-		return decision
 	}
+	// Provider health is a reactive liveness verdict owned by the failover plane.
+	// The selector RECORDS it on the receipt but never lets it remove a candidate
+	// or decide order: a candidate that is merely slow or briefly unhealthy stays
+	// selected-eligible, so it is still reachable when the candidates ordered
+	// ahead of it fail. docs/ROUTER-FAILOVER-AUTHORITY.md §2.1 states the rule —
+	// "a balancer never produces a severity verdict, and never consumes one" — so
+	// a health verdict is not a selection input here.
+
 	decision.Capacity = capacity[configured.ID]
-	switch decision.Capacity {
-	case AuditCapacityAvailable:
-	case AuditCapacitySaturated:
+	if decision.Capacity == "" {
+		decision.Capacity = AuditCapacityUnknown
+	}
+	// Capacity is the one SELECTION-stage admission fact this selector keeps: a
+	// candidate whose capacity is SATURATED cannot take the request, so it is
+	// refused here as a PRE-FLIGHT ADMISSION decision rather than ejected by a
+	// reactive verdict. An UNMEASURED capacity is deliberately NOT a refusal — it
+	// is a deprioritisation, so the candidate stays admissible and ranks behind
+	// the measured-available ones (see sortAuditRouteDecisions). That mirrors the
+	// balance plane's fail-open rule: a missing measurement narrows preference,
+	// never service.
+	if decision.Capacity == AuditCapacitySaturated {
 		decision.SkipReason = AuditSkipCapacitySaturated
 		return decision
-	default:
-		decision.Capacity = AuditCapacityUnknown
-		decision.SkipReason = AuditSkipCapacityUnknown
-		return decision
 	}
+
 	decision.Cooldown = cooldown[configured.ID]
-	switch decision.Cooldown {
-	case AuditCooldownReady:
-	case AuditCooldownActive:
-		decision.SkipReason = AuditSkipCooldownActive
-		return decision
-	default:
+	if decision.Cooldown == "" {
 		decision.Cooldown = AuditCooldownUnknown
-		decision.SkipReason = AuditSkipCooldownUnknown
-		return decision
 	}
+	// Cooldown is a reactive credential verdict owned elsewhere. Like health it is
+	// recorded on the receipt and never excludes a candidate or decides order.
 	if !configured.Capability.MeetsRequirement(plan.RequiredTier) {
 		decision.SkipReason = AuditSkipBelowTierFloor
 		return decision
@@ -692,9 +694,13 @@ func sortAuditRouteDecisions(decisions []AuditRouteCandidateDecision) {
 		if a.Preference != b.Preference {
 			return a.Preference < b.Preference
 		}
-		aHealth, bHealth := auditHealthRank(a.ProviderHealth), auditHealthRank(b.ProviderHealth)
-		if aHealth != bHealth {
-			return aHealth < bHealth
+		// Order comes from the capacity MEASUREMENT, never from a health or
+		// cooldown verdict (§2.1). A measured-available candidate ranks ahead of
+		// an unmeasured one, which is the fail-open deprioritisation the balance
+		// plane uses: the unmeasured member still serves, it is simply not first.
+		aCapacity, bCapacity := auditCapacityRank(a.Capacity), auditCapacityRank(b.Capacity)
+		if aCapacity != bCapacity {
+			return aCapacity < bCapacity
 		}
 		if a.Priority != b.Priority {
 			return a.Priority < b.Priority
@@ -710,9 +716,11 @@ func sortAuditRouteDecisions(decisions []AuditRouteCandidateDecision) {
 }
 
 // auditDiversifiedQuorumGroups enumerates every valid provider+family+weights
-// diverse quorum, then orders groups by worst provider health, bounded summed
-// priority, total microunit cost, and stable IDs. The roster is capped so
+// diverse quorum, then orders groups by worst capacity measurement, bounded
+// summed priority, total microunit cost, and stable IDs. The roster is capped so
 // exhaustive selection is bounded and cannot fall into a greedy local optimum.
+// Health is deliberately absent from the ordering: it is a reactive verdict, not
+// a selection measurement (§2.1).
 func auditDiversifiedQuorumGroups(decisions []AuditRouteCandidateDecision, quorum int) [][]int {
 	var chosen []int
 	var groups [][]int
@@ -746,9 +754,9 @@ func auditDiversifiedQuorumGroups(decisions []AuditRouteCandidateDecision, quoru
 		search(0)
 	}
 	sort.Slice(groups, func(i, j int) bool {
-		aHealth, bHealth := auditQuorumGroupWorstHealth(decisions, groups[i]), auditQuorumGroupWorstHealth(decisions, groups[j])
-		if aHealth != bHealth {
-			return aHealth < bHealth
+		aCapacity, bCapacity := auditQuorumGroupWorstCapacity(decisions, groups[i]), auditQuorumGroupWorstCapacity(decisions, groups[j])
+		if aCapacity != bCapacity {
+			return aCapacity < bCapacity
 		}
 		aPriority, bPriority := auditQuorumGroupPriority(decisions, groups[i]), auditQuorumGroupPriority(decisions, groups[j])
 		if aPriority != bPriority {
@@ -763,10 +771,10 @@ func auditDiversifiedQuorumGroups(decisions []AuditRouteCandidateDecision, quoru
 	return groups
 }
 
-func auditQuorumGroupWorstHealth(decisions []AuditRouteCandidateDecision, indexes []int) int {
+func auditQuorumGroupWorstCapacity(decisions []AuditRouteCandidateDecision, indexes []int) int {
 	worst := 0
 	for _, index := range indexes {
-		if rank := auditHealthRank(decisions[index].ProviderHealth); rank > worst {
+		if rank := auditCapacityRank(decisions[index].Capacity); rank > worst {
 			worst = rank
 		}
 	}
@@ -801,25 +809,24 @@ func auditQuorumGroupKey(decisions []AuditRouteCandidateDecision, indexes []int)
 	return strings.Join(ids, "\x00")
 }
 
-func auditHealthRank(status AuditProviderHealthStatus) int {
-	if status == AuditProviderHealthy {
+// auditCapacityRank orders candidates by their capacity MEASUREMENT, the only
+// selection signal this selector consumes. Available (0) leads; an unmeasured
+// capacity (1) is deprioritised but still selectable; Saturated never reaches
+// this ordering because it is refused as pre-flight admission. Health and
+// cooldown verdicts are intentionally NOT inputs here — §2.1 forbids ordering on
+// a severity verdict.
+func auditCapacityRank(status AuditCapacityStatus) int {
+	switch status {
+	case AuditCapacityAvailable:
 		return 0
-	}
-	if status == AuditProviderDegraded {
+	default:
 		return 1
 	}
-	return 2
 }
 
 func auditNoRouteReason(decisions []AuditRouteCandidateDecision, diversifiedQuorum bool) AuditRouteNoRouteReason {
-	if allAuditRouteSkippedFor(decisions, AuditSkipProviderUnhealthy, AuditSkipProviderHealthUnknown) {
-		return AuditNoRouteNoHealthyProvider
-	}
-	if allAuditRouteSkippedFor(decisions, AuditSkipCapacitySaturated, AuditSkipCapacityUnknown) {
+	if allAuditRouteSkippedFor(decisions, AuditSkipCapacitySaturated) {
 		return AuditNoRouteNoCapacity
-	}
-	if allAuditRouteSkippedFor(decisions, AuditSkipCooldownActive, AuditSkipCooldownUnknown) {
-		return AuditNoRouteCooldown
 	}
 	if allAuditRouteSkippedFor(decisions, AuditSkipBelowTierFloor) {
 		return AuditNoRouteTierFloor

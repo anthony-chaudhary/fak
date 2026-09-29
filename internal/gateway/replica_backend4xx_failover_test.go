@@ -68,20 +68,22 @@ func armFleet(t *testing.T, srv *Server) {
 // TestReplicaDispatchBackend405FailsOverUnarmed is the issue's prescribed scenario
 // (Config{BaseURL, ReplicaBaseURLs} behind Handler(), no Serve fence). It asserts the
 // ACTUAL observation: the reservation is nil, so completeReserved does not retarget and
-// the 405 is surfaced terminally. Production arms membership at Serve, so this is the
-// startup-race window only — see the ARMED test for the steady-state behavior.
+// the selected replica's 405 is surfaced terminally. Placement is a keyed rendezvous
+// (LB-16), so WHICH replica is selected is not fixed; both return 405 and the invariant
+// under test is that exactly ONE is dialed and its 405 is terminal (no failover).
+// Production arms membership at Serve, so this is the startup-race window only — see
+// the ARMED test for the steady-state behavior.
 func TestReplicaDispatchBackend405FailsOverUnarmed(t *testing.T) {
 	var primaryHits, secondaryHits atomic.Int32
-	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		primaryHits.Add(1)
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}))
+	reject405 := func(hits *atomic.Int32) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			hits.Add(1)
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}
+	primary := httptest.NewServer(reject405(&primaryHits))
 	defer primary.Close()
-	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		secondaryHits.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, fleetCompletionBody)
-	}))
+	secondary := httptest.NewServer(reject405(&secondaryHits))
 	defer secondary.Close()
 
 	srv := newBackend4xxGateway(t, primary, secondary)
@@ -94,12 +96,13 @@ func TestReplicaDispatchBackend405FailsOverUnarmed(t *testing.T) {
 		Messages: []agent.Message{{Role: agent.RoleUser, Content: "hi"}},
 	}, &resp)
 
+	total := primaryHits.Load() + secondaryHits.Load()
 	t.Logf("OBSERVED(unarmed) status=%d primaryHits=%d secondaryHits=%d",
 		code, primaryHits.Load(), secondaryHits.Load())
 
-	if code != http.StatusMethodNotAllowed || primaryHits.Load() != 1 || secondaryHits.Load() != 0 {
-		t.Fatalf("unarmed expectation changed: status=%d primaryHits=%d secondaryHits=%d (want 405/1/0)",
-			code, primaryHits.Load(), secondaryHits.Load())
+	// Unarmed: no reservation → no retarget, so exactly one dial and a terminal 405.
+	if code != http.StatusMethodNotAllowed || total != 1 {
+		t.Fatalf("unarmed expectation changed: status=%d totalHits=%d (want 405/1)", code, total)
 	}
 }
 

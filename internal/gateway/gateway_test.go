@@ -514,7 +514,7 @@ func TestHealthReportsMockPlanner(t *testing.T) {
 	}
 }
 
-func TestGatewayReplicaBaseURLsRoundRobinProxy(t *testing.T) {
+func TestGatewayReplicaBaseURLsKeyedProxy(t *testing.T) {
 	abi.ResetForTest()
 	abi.RegisterRegionBackend(inlineBackend{})
 	abi.RegisterEngine("test", echoEngine{})
@@ -557,12 +557,13 @@ func TestGatewayReplicaBaseURLsRoundRobinProxy(t *testing.T) {
 		t.Fatalf(`/healthz planner = %v, want "replica"`, health["planner"])
 	}
 
-	var got []string
-	for i := 0; i < 4; i++ {
+	// Distinct request identities spread across both replicas with no counter.
+	seen := map[string]bool{}
+	for i := 0; i < 16; i++ {
 		var resp ChatResponse
 		code := postJSON(t, ts.URL+"/v1/chat/completions", ChatRequest{
 			Model:    "fleet-model",
-			Messages: []agent.Message{{Role: agent.RoleUser, Content: "hi"}},
+			Messages: []agent.Message{{Role: agent.RoleUser, Content: fmt.Sprintf("request-%d", i)}},
 		}, &resp)
 		if code != http.StatusOK {
 			t.Fatalf("request %d status = %d, want 200", i, code)
@@ -570,14 +571,13 @@ func TestGatewayReplicaBaseURLsRoundRobinProxy(t *testing.T) {
 		if len(resp.Choices) != 1 {
 			t.Fatalf("request %d choices = %d, want 1", i, len(resp.Choices))
 		}
-		got = append(got, resp.Choices[0].Message.Content)
+		seen[resp.Choices[0].Message.Content] = true
 	}
-	want := []string{"replica-a", "replica-b", "replica-a", "replica-b"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("served replica sequence = %v, want %v", got, want)
+	if !seen["replica-a"] || !seen["replica-b"] {
+		t.Fatalf("keyed placement used replicas %v, want both replica-a and replica-b over distinct requests", seen)
 	}
-	if aHits != 2 || bHits != 2 {
-		t.Fatalf("upstream hits = replica-a:%d replica-b:%d, want 2 each", aHits, bHits)
+	if aHits == 0 || bHits == 0 || aHits+bHits != 16 {
+		t.Fatalf("upstream hits = replica-a:%d replica-b:%d, want both > 0 and 16 total", aHits, bHits)
 	}
 }
 

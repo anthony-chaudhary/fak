@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -158,10 +159,11 @@ func TestChatProxyStreamUsesReplicaDispatch(t *testing.T) {
 	defer ts.Close()
 
 	var got []string
-	for i := 0; i < 2; i++ {
+	seen := map[string]bool{}
+	for i := 0; i < 8; i++ {
 		reqBody, _ := json.Marshal(map[string]any{
 			"model":    "stream-fleet",
-			"messages": []map[string]string{{"role": "user", "content": "hello"}},
+			"messages": []map[string]string{{"role": "user", "content": fmt.Sprintf("stream-%d", i)}},
 			"stream":   true,
 		})
 		httpResp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", bytes.NewReader(reqBody))
@@ -182,12 +184,13 @@ func TestChatProxyStreamUsesReplicaDispatch(t *testing.T) {
 			content.WriteString(c.Choices[0].Delta.Content)
 		}
 		got = append(got, content.String())
+		seen[content.String()] = true
 	}
-	if want := []string{"stream-a", "stream-b"}; strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("stream replica sequence = %v, want %v", got, want)
+	if !seen["stream-a"] || !seen["stream-b"] {
+		t.Fatalf("stream replica spread = %v, want both stream-a and stream-b over distinct requests", seen)
 	}
-	if aHits != 1 || bHits != 1 {
-		t.Fatalf("stream upstream hits = a:%d b:%d, want one each", aHits, bHits)
+	if aHits == 0 || bHits == 0 {
+		t.Fatalf("stream upstream hits = a:%d b:%d, want both > 0", aHits, bHits)
 	}
 }
 

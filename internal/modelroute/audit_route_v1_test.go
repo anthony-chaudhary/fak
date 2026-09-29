@@ -166,7 +166,7 @@ func TestPlanIssueAuditReciprocalMatrix(t *testing.T) {
 	}
 }
 
-func TestPlanIssueAuditSkipsSameFamilyAliasesAndUnhealthyProviders(t *testing.T) {
+func TestPlanIssueAuditSkipsSameFamilyAliasesAndKeepsUnhealthyProvidersSelectable(t *testing.T) {
 	authors, _, _ := auditRouteV1Fixtures()
 	roster := auditRouteV1Roster("gpt-primary", "gpt-alias", "claude-primary", "local-open")
 	health := auditRouteV1Health(roster)
@@ -182,19 +182,110 @@ func TestPlanIssueAuditSkipsSameFamilyAliasesAndUnhealthyProviders(t *testing.T)
 		}
 	}
 
+	// §2.1: an unhealthy provider is a reactive failover verdict, NOT a selection
+	// input. The candidate stays admitted (selected-eligible) and the receipt still
+	// records its health, so the retry/failover path — not the selector — handles it.
 	health.Providers["openai"] = AuditProviderUnhealthy
 	claudePlan, err := PlanIssueAudit(authors["claude"], AuditRiskDefault, roster, health)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("an unhealthy provider must stay selectable, got: %v", err)
 	}
-	if got := claudePlan.Candidates[0].CandidateID; got != "local-open" {
-		t.Fatalf("unhealthy OpenAI provider primary = %q, want local-open", got)
+	if got := claudePlan.Candidates[0].CandidateID; got != "gpt-primary" {
+		t.Fatalf("unhealthy-but-cheap OpenAI primary = %q, want gpt-primary (health is not a selection input)", got)
 	}
 	for _, id := range []string{"gpt-primary", "gpt-alias"} {
 		decision, _ := auditRouteV1Considered(claudePlan, id)
-		if decision.SkipReason != AuditSkipProviderUnhealthy {
-			t.Fatalf("unhealthy provider decision %s = %+v", id, decision)
+		if !decision.Admitted || decision.SkipReason != AuditSkipNone {
+			t.Fatalf("unhealthy provider %s was removed from selection: %+v", id, decision)
 		}
+		if decision.ProviderHealth != AuditProviderUnhealthy {
+			t.Fatalf("health verdict %s not recorded on the receipt: %+v", id, decision)
+		}
+	}
+}
+
+// TestPlanIssueAuditSelectionIgnoresHealthAndCooldownVerdicts is the §2.1 witness:
+// the selector's admission and order are a function of the capacity MEASUREMENT
+// and the declared preference/priority/cost, never of a provider health or
+// cooldown verdict. Two identical inputs must also be byte-identical (no cursor,
+// no history).
+func TestPlanIssueAuditSelectionIgnoresHealthAndCooldownVerdicts(t *testing.T) {
+	authors, _, _ := auditRouteV1Fixtures()
+	roster := auditRouteV1Roster("gpt-primary", "local-open")
+
+	baseline := auditRouteV1Health(roster)
+	want, err := PlanIssueAudit(authors["claude"], AuditRiskDefault, roster, baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Flip every reactive verdict this selector used to consume.
+	reactive := auditRouteV1Health(roster)
+	reactive.Providers["openai"] = AuditProviderUnhealthy
+	reactive.Cooldown["gpt-primary"] = AuditCooldownActive
+	got, err := PlanIssueAudit(authors["claude"], AuditRiskDefault, roster, reactive)
+	if err != nil {
+		t.Fatalf("reactive verdicts must not refuse a route: %v", err)
+	}
+
+	// The verdicts are recorded on the receipt...
+	decision, _ := auditRouteV1Considered(got, "gpt-primary")
+	if decision.SkipReason != AuditSkipNone || !decision.Admitted {
+		t.Fatalf("health/cooldown removed a candidate from selection: %+v", decision)
+	}
+	if decision.ProviderHealth != AuditProviderUnhealthy || decision.Cooldown != AuditCooldownActive {
+		t.Fatalf("reactive verdicts not recorded on the receipt: %+v", decision)
+	}
+
+	// ...but they change neither the admitted set nor the order.
+	if gotIDs, wantIDs := auditRouteV1CandidateIDs(got), auditRouteV1CandidateIDs(want); !reflect.DeepEqual(gotIDs, wantIDs) {
+		t.Fatalf("health/cooldown changed selection order: got %v, want %v", gotIDs, wantIDs)
+	}
+
+	// Replay: identical inputs, byte-identical output.
+	again, err := PlanIssueAudit(authors["claude"], AuditRiskDefault, roster, reactive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotJSON, _ := json.Marshal(got)
+	againJSON, _ := json.Marshal(again)
+	if string(gotJSON) != string(againJSON) {
+		t.Fatalf("two identical selections differ (selection is not replayable):\n%s\n%s", gotJSON, againJSON)
+	}
+}
+
+// TestPlanIssueAuditCapacityIsPreflightAdmissionNotReactiveEjection pins the one
+// selection-stage exclusion that remains: a SATURATED capacity is a declared limit
+// the request would exceed, so it is refused as pre-flight admission. An
+// UNMEASURED capacity is fail-open — deprioritised behind the measured-available
+// candidate, never refused.
+func TestPlanIssueAuditCapacityIsPreflightAdmissionNotReactiveEjection(t *testing.T) {
+	authors, _, _ := auditRouteV1Fixtures()
+	roster := auditRouteV1Roster("gpt-primary", "local-open")
+
+	saturated := auditRouteV1Health(roster)
+	saturated.Capacity["gpt-primary"] = AuditCapacitySaturated
+	plan, err := PlanIssueAudit(authors["claude"], AuditRiskDefault, roster, saturated)
+	if err != nil || plan.Candidates[0].CandidateID != "local-open" {
+		t.Fatalf("saturated capacity fallback = %v err=%v", auditRouteV1CandidateIDs(plan), err)
+	}
+	if decision, _ := auditRouteV1Considered(plan, "gpt-primary"); decision.SkipReason != AuditSkipCapacitySaturated {
+		t.Fatalf("saturated capacity decision = %+v", decision)
+	}
+
+	// Unmeasured capacity is NOT a refusal: the candidate stays admitted and the
+	// route still succeeds (fail-open). Preference dominates the order here, so
+	// gpt-primary still leads — the point is that an unmeasured measurement never
+	// ejects it.
+	unmeasured := auditRouteV1Health(roster)
+	delete(unmeasured.Capacity, "gpt-primary")
+	plan, err = PlanIssueAudit(authors["claude"], AuditRiskDefault, roster, unmeasured)
+	if err != nil {
+		t.Fatalf("unmeasured capacity must fail open: %v", err)
+	}
+	decision, _ := auditRouteV1Considered(plan, "gpt-primary")
+	if !decision.Admitted || decision.Capacity != AuditCapacityUnknown {
+		t.Fatalf("unmeasured capacity candidate was refused rather than admitted: %+v", decision)
 	}
 }
 
@@ -341,26 +432,20 @@ func TestPlanIssueAuditQuorumSearchFindsDiversifiedSubset(t *testing.T) {
 	}
 }
 
-func TestPlanIssueAuditQuorumRanksHealthThenPriorityThenCost(t *testing.T) {
+func TestPlanIssueAuditQuorumRanksCapacityThenPriorityThenCost(t *testing.T) {
 	aliases := []AuditIdentityAlias{}
 	var candidates []AuditAuditorConfig
-	for i, spec := range []struct {
-		id, provider, family string
-		price, priority      int64
-	}{
-		{id: "a", provider: "p1", family: "f1", price: 1, priority: 5},
-		{id: "b", provider: "p2", family: "f2", price: 1, priority: 5},
-		{id: "c", provider: "p3", family: "f3", price: 10, priority: 0},
-		{id: "d", provider: "p4", family: "f4", price: 10, priority: 0},
-	} {
-		weights := "w" + spec.id
-		aliases = append(aliases, auditRouteV1Alias(spec.id, "model-"+spec.id, spec.provider, spec.family, weights))
+	// Every candidate starts at priority 0 and price 10; the sub-checks vary one
+	// factor at a time. Lower priority number and lower cost both rank better.
+	for _, id := range []string{"a", "b", "c", "d"} {
+		provider, family := "p"+id, "f"+id
+		weights := "w" + id
+		aliases = append(aliases, auditRouteV1Alias(id, "model-"+id, provider, family, weights))
 		candidates = append(candidates, AuditAuditorConfig{
-			ID: spec.id, Identity: auditRouteV1Identity(spec.id, spec.provider, spec.family, weights, "http-reviewer", "hosted", "api", "high"),
-			Capability: TierT1, CapabilitySource: "benchmark:" + spec.id, Priority: int(spec.priority),
-			Price: AuditRoutePrice{InputMicrosPerMillionTokens: spec.price, OutputMicrosPerMillionTokens: spec.price},
+			ID: id, Identity: auditRouteV1Identity(id, provider, family, weights, "http-reviewer", "hosted", "api", "high"),
+			Capability: TierT1, CapabilitySource: "benchmark:" + id, Priority: 0,
+			Price: AuditRoutePrice{InputMicrosPerMillionTokens: 10, OutputMicrosPerMillionTokens: 10},
 		})
-		_ = i
 	}
 	roster := AuditRouteRoster{
 		Schema: AuditRouteRosterSchema, Aliases: aliases, Candidates: candidates, UnknownAuthorQuorum: 2, EstimatedInputTokens: 1_000_000,
@@ -368,39 +453,50 @@ func TestPlanIssueAuditQuorumRanksHealthThenPriorityThenCost(t *testing.T) {
 	health := AuditRouteHealth{
 		Schema: AuditRouteHealthSchema,
 		Providers: map[string]AuditProviderHealthStatus{
-			"p1": AuditProviderDegraded, "p2": AuditProviderDegraded, "p3": AuditProviderHealthy, "p4": AuditProviderHealthy,
+			"pa": AuditProviderHealthy, "pb": AuditProviderHealthy, "pc": AuditProviderHealthy, "pd": AuditProviderHealthy,
 		},
-		Capacity: map[string]AuditCapacityStatus{"a": AuditCapacityAvailable, "b": AuditCapacityAvailable, "c": AuditCapacityAvailable, "d": AuditCapacityAvailable},
+		Capacity: map[string]AuditCapacityStatus{"c": AuditCapacityAvailable, "d": AuditCapacityAvailable},
 		Cooldown: map[string]AuditCooldownStatus{"a": AuditCooldownReady, "b": AuditCooldownReady, "c": AuditCooldownReady, "d": AuditCooldownReady},
 	}
+	// Capacity MEASUREMENT is the outer key: c,d are measured AVAILABLE, a,b are
+	// unmeasured, and even though a,b have the BETTER (lower) priority they do not
+	// win — the unmeasured pair is deprioritised, not ejected. Health/cooldown
+	// verdicts are not consulted at all (§2.1).
+	roster.Candidates[0].Priority = 0
+	roster.Candidates[1].Priority = 0
+	roster.Candidates[2].Priority = 5
+	roster.Candidates[3].Priority = 5
 	plan, err := PlanIssueAudit(AuditIdentity{Model: "unknown"}, AuditRiskDefault, roster, health)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := plan.QuorumGroups[0].CandidateIDs; !reflect.DeepEqual(got, []string{"c", "d"}) {
-		t.Fatalf("healthy quorum did not beat cheap degraded quorum: %+v", plan.QuorumGroups)
+		t.Fatalf("measured-available quorum did not beat unmeasured quorum: %+v", plan.QuorumGroups)
 	}
 
-	for provider := range health.Providers {
-		health.Providers[provider] = AuditProviderHealthy
-	}
-	plan, err = PlanIssueAudit(AuditIdentity{Model: "unknown"}, AuditRiskDefault, roster, health)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := plan.QuorumGroups[0].CandidateIDs; !reflect.DeepEqual(got, []string{"c", "d"}) {
-		t.Fatalf("priority did not beat cheaper group: %+v", plan.QuorumGroups)
-	}
-
-	for i := range roster.Candidates {
-		roster.Candidates[i].Priority = 0
-	}
+	// Everyone measured AVAILABLE; now priority decides (lower number wins).
+	health.Capacity["a"] = AuditCapacityAvailable
+	health.Capacity["b"] = AuditCapacityAvailable
 	plan, err = PlanIssueAudit(AuditIdentity{Model: "unknown"}, AuditRiskDefault, roster, health)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := plan.QuorumGroups[0].CandidateIDs; !reflect.DeepEqual(got, []string{"a", "b"}) {
-		t.Fatalf("cost did not break equal health/priority tie: %+v", plan.QuorumGroups)
+		t.Fatalf("priority did not beat equal-capacity tie: %+v", plan.QuorumGroups)
+	}
+
+	// Equal capacity and priority; cost breaks the tie (a,b cheaper).
+	for i := range roster.Candidates {
+		roster.Candidates[i].Priority = 0
+	}
+	roster.Candidates[0].Price = AuditRoutePrice{InputMicrosPerMillionTokens: 1, OutputMicrosPerMillionTokens: 1}
+	roster.Candidates[1].Price = AuditRoutePrice{InputMicrosPerMillionTokens: 1, OutputMicrosPerMillionTokens: 1}
+	plan, err = PlanIssueAudit(AuditIdentity{Model: "unknown"}, AuditRiskDefault, roster, health)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := plan.QuorumGroups[0].CandidateIDs; !reflect.DeepEqual(got, []string{"a", "b"}) {
+		t.Fatalf("cost did not break equal capacity/priority tie: %+v", plan.QuorumGroups)
 	}
 }
 
@@ -522,17 +618,21 @@ func TestPlanIssueAuditRejectsDriverTierQuorumAndHealthAmbiguity(t *testing.T) {
 	})
 }
 
-func TestPlanIssueAuditCooldownAndPermutationDeterminism(t *testing.T) {
+func TestPlanIssueAuditCooldownIsRecordedNotConsumedAndPermutationDeterminism(t *testing.T) {
 	authors, _, _ := auditRouteV1Fixtures()
 	roster := auditRouteV1Roster("gpt-primary", "local-open")
 	health := auditRouteV1Health(roster)
 	health.Cooldown["gpt-primary"] = AuditCooldownActive
 	plan, err := PlanIssueAudit(authors["claude"], AuditRiskDefault, roster, health)
-	if err != nil || plan.Candidates[0].CandidateID != "local-open" {
-		t.Fatalf("cooldown fallback = %v err=%v", auditRouteV1CandidateIDs(plan), err)
+	if err != nil {
+		t.Fatalf("cooldown must not remove a candidate: %v", err)
+	}
+	// gpt-primary still leads on preference/cost; the verdict is recorded, not consumed.
+	if plan.Candidates[0].CandidateID != "gpt-primary" {
+		t.Fatalf("cooldown reordered selection = %v", auditRouteV1CandidateIDs(plan))
 	}
 	decision, _ := auditRouteV1Considered(plan, "gpt-primary")
-	if decision.SkipReason != AuditSkipCooldownActive {
+	if !decision.Admitted || decision.Cooldown != AuditCooldownActive {
 		t.Fatalf("cooldown decision = %+v", decision)
 	}
 
@@ -583,45 +683,69 @@ func TestPlanIssueAuditHighRiskProviderDiversityAndRootCauseRefusals(t *testing.
 	})
 
 	authors, candidates, aliases := auditRouteV1Fixtures()
-	t.Run("unknown-all-unhealthy", func(t *testing.T) {
+	t.Run("reactive-verdicts-never-refuse", func(t *testing.T) {
+		// §2.1: providers unhealthy AND cooldown active are reactive failover
+		// verdicts. The selector must still produce a route; it records the
+		// verdicts rather than consuming them.
 		roster := auditRouteV1Roster("gpt-primary", "claude-primary")
 		health := auditRouteV1Health(roster)
 		health.Providers["openai"] = AuditProviderUnhealthy
 		health.Providers["anthropic"] = AuditProviderUnhealthy
-		_, err := PlanIssueAudit(authors["unknown"], AuditRiskDefault, roster, health)
-		var noRoute *AuditNoRouteError
-		if !errors.As(err, &noRoute) || noRoute.Reason != AuditNoRouteNoHealthyProvider {
-			t.Fatalf("unknown unhealthy root cause = %#v", err)
+		health.Cooldown["gpt-primary"] = AuditCooldownActive
+		health.Cooldown["claude-primary"] = AuditCooldownActive
+		plan, err := PlanIssueAudit(authors["unknown"], AuditRiskDefault, roster, health)
+		if err != nil {
+			t.Fatalf("reactive verdicts refused a route: %v", err)
+		}
+		if len(plan.Candidates) == 0 {
+			t.Fatal("reactive verdicts emptied the selection")
 		}
 	})
-	t.Run("missing-capacity", func(t *testing.T) {
+	t.Run("unmeasured-capacity-fails-open", func(t *testing.T) {
 		roster := auditRouteV1Roster("gpt-primary")
 		health := auditRouteV1Health(roster)
 		delete(health.Capacity, "gpt-primary")
+		plan, err := PlanIssueAudit(authors["claude"], AuditRiskDefault, roster, health)
+		if err != nil {
+			t.Fatalf("unmeasured capacity must fail open, not refuse: %v", err)
+		}
+		decision, _ := auditRouteV1Considered(plan, "gpt-primary")
+		if !decision.Admitted || decision.Capacity != AuditCapacityUnknown {
+			t.Fatalf("unmeasured capacity decision = %+v", decision)
+		}
+	})
+	t.Run("ejected-capacity-still-refuses", func(t *testing.T) {
+		roster := auditRouteV1Roster("gpt-primary")
+		health := auditRouteV1Health(roster)
+		health.Capacity["gpt-primary"] = AuditCapacitySaturated
 		_, err := PlanIssueAudit(authors["claude"], AuditRiskDefault, roster, health)
 		var noRoute *AuditNoRouteError
 		if !errors.As(err, &noRoute) || noRoute.Reason != AuditNoRouteNoCapacity {
-			t.Fatalf("missing capacity root cause = %#v", err)
+			t.Fatalf("saturated capacity root cause = %#v", err)
 		}
 	})
-	t.Run("unknown-provider-health", func(t *testing.T) {
+	t.Run("unknown-provider-health-still-selectable", func(t *testing.T) {
 		roster := auditRouteV1Roster("gpt-primary")
 		health := auditRouteV1Health(roster)
 		health.Providers["openai"] = AuditProviderUnknown
-		_, err := PlanIssueAudit(authors["claude"], AuditRiskDefault, roster, health)
-		var noRoute *AuditNoRouteError
-		if !errors.As(err, &noRoute) || noRoute.Reason != AuditNoRouteNoHealthyProvider {
-			t.Fatalf("unknown provider root cause = %#v", err)
+		plan, err := PlanIssueAudit(authors["claude"], AuditRiskDefault, roster, health)
+		if err != nil {
+			t.Fatalf("unknown provider health refused a route: %v", err)
+		}
+		if decision, _ := auditRouteV1Considered(plan, "gpt-primary"); !decision.Admitted {
+			t.Fatalf("unknown provider health removed a candidate: %+v", decision)
 		}
 	})
-	t.Run("unknown-cooldown", func(t *testing.T) {
+	t.Run("unknown-cooldown-still-selectable", func(t *testing.T) {
 		roster := auditRouteV1Roster("gpt-primary")
 		health := auditRouteV1Health(roster)
 		delete(health.Cooldown, "gpt-primary")
-		_, err := PlanIssueAudit(authors["claude"], AuditRiskDefault, roster, health)
-		var noRoute *AuditNoRouteError
-		if !errors.As(err, &noRoute) || noRoute.Reason != AuditNoRouteCooldown {
-			t.Fatalf("unknown cooldown root cause = %#v", err)
+		plan, err := PlanIssueAudit(authors["claude"], AuditRiskDefault, roster, health)
+		if err != nil {
+			t.Fatalf("unknown cooldown refused a route: %v", err)
+		}
+		if decision, _ := auditRouteV1Considered(plan, "gpt-primary"); !decision.Admitted {
+			t.Fatalf("unknown cooldown removed a candidate: %+v", decision)
 		}
 	})
 	t.Run("cost-overflow", func(t *testing.T) {
