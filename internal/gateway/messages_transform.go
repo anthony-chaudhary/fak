@@ -2,11 +2,9 @@ package gateway
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
@@ -23,20 +21,6 @@ func (s *Server) maybeElideStaleReadMessages(trace string, messages []agent.Mess
 	return agent.ElideStaleReadMessages(messages, func(id, excerpt string, body []byte) {
 		s.stashRestore(trace, id, excerpt, body)
 	})
-}
-
-func decodedToolPath(arguments string) string {
-	var args map[string]json.RawMessage
-	if json.Unmarshal([]byte(arguments), &args) != nil {
-		return ""
-	}
-	for _, key := range []string{"file_path", "path", "notebook_path"} {
-		var path string
-		if json.Unmarshal(args[key], &path) == nil && strings.TrimSpace(path) != "" {
-			return path
-		}
-	}
-	return ""
 }
 
 // anthropicServedRequest carries the results of the served-path request-side

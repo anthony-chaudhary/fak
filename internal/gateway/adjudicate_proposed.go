@@ -18,22 +18,14 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
 
-// fastPathLookup probes the registered vDSO fast paths (the same abi.FastPaths()
-// registry kernel.Submit consults) for a fresh cached answer, returning the first hit.
-// It is the served-turn analogue of the kernel's fast-path loop — Lookup-only, so a
-// miss executes nothing — and respects whichever vDSO instance the gateway wired.
-func fastPathLookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) {
-	r, ok, _ := fastPathLookupProofSource(ctx, c)
-	return r, ok
-}
-
-// fastPathLookupProofSource retains real vDSO provenance from the same lookup
-// that supplies the response. Consumers still enforce freshness and result gates.
-func fastPathLookupProofSource(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool, bool) {
-	r, ok, receipt := fastPathLookupReceipt(ctx, c)
-	return r, ok, receipt.Matches(r)
-}
-
+// fastPathLookupReceipt probes the registered vDSO fast paths (the same
+// abi.FastPaths() registry kernel.Submit consults) for a fresh cached answer,
+// returning the first hit. It is the served-turn analogue of the kernel's
+// fast-path loop — Lookup-only, so a miss executes nothing — and respects
+// whichever vDSO instance the gateway wired. The returned receipt retains real
+// vDSO provenance from the same lookup that supplies the response (the caller
+// checks receipt.Matches(res)); consumers still enforce freshness and result
+// gates.
 func fastPathLookupReceipt(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool, *vdso.LookupReceipt) {
 	ctx, receipt := vdso.WithLookupReceipt(ctx)
 	for _, fp := range abi.FastPaths() {
