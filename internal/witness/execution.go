@@ -7,9 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/processalive"
+	"github.com/anthony-chaudhary/fak/internal/processstart"
 )
 
 // ExecutionVerdict is the execution witness label space. It is deliberately
@@ -333,6 +338,170 @@ func (v *ExecutionVerifier) workspaceNeedsSiblingTopology(ctx context.Context, r
 	return false
 }
 
+// THE EXEC-WITNESS SCRATCH LEAK
+//
+// scratchWorktree materializes a detached scratch checkout and removes it in a
+// deferred cleanup. A defer does not run when the process is killed, and a kill
+// is the ordinary way a bounded land ends: a supervisor that bounds the work
+// terminates the whole process tree (taskkill /T /F on Windows), and so does an
+// agent tool timeout. Every such kill left a full checkout plus its git worktree
+// registration beside the repository. A killed process cannot clean up after
+// itself, so the next one does: the scratch directory name carries its creator's
+// identity (pid and kernel process-start time), and every creation first sweeps
+// its parent for scratch whose creator is provably gone. The scratch content is a
+// pure function of a commit that already exists, so collecting one never loses
+// work. Liveness still fails toward keeping: an owner whose start time cannot be
+// read is treated as live, and a legacy name without an identity is collected only
+// after legacyExecWitnessMaxAge.
+const (
+	execWitnessScratchPrefix = "fak-exec-witness-"
+
+	// legacyExecWitnessMaxAge is how long a scratch directory without an owner
+	// identity in its name must sit untouched before a sweep collects it. Its
+	// directory mtime moves when the checkout starts writing, so the age measures
+	// time since the checkout began; a supervised land is killed long before this.
+	legacyExecWitnessMaxAge = 2 * time.Hour
+
+	// execWitnessSweepInterval rate-limits the sweep a checkout runs before
+	// creating a scratch directory, per parent directory and process.
+	execWitnessSweepInterval = 10 * time.Minute
+
+	// execWitnessSweepLimit bounds how many orphaned scratch directories one
+	// checkout collects, so a large backlog cannot stall the witness.
+	execWitnessSweepLimit = 2
+)
+
+// execWitnessOwner is the creator identity encoded in a scratch directory name.
+// Start is the process start time in Unix milliseconds, or 0 on a platform that
+// exposes none.
+type execWitnessOwner struct {
+	PID   int
+	Start int64
+}
+
+// execWitnessPattern is the os.MkdirTemp pattern for scratch owned by this
+// process: prefix, pid, base-36 start millis, then MkdirTemp's random suffix.
+func execWitnessPattern() string {
+	pid := os.Getpid()
+	start := int64(0)
+	if t, ok := processstart.Start(pid); ok {
+		start = t.UnixMilli()
+	}
+	return execWitnessScratchPrefix + strconv.Itoa(pid) + "-" + strconv.FormatInt(start, 36) + "-*"
+}
+
+// parseExecWitnessOwner reads the owner identity from a scratch directory name.
+// It returns false for a legacy name (a bare MkdirTemp suffix) and for anything
+// malformed, which the sweep then judges by age alone.
+func parseExecWitnessOwner(name string) (execWitnessOwner, bool) {
+	rest, found := strings.CutPrefix(name, execWitnessScratchPrefix)
+	if !found {
+		return execWitnessOwner{}, false
+	}
+	parts := strings.Split(rest, "-")
+	if len(parts) != 3 || parts[2] == "" {
+		return execWitnessOwner{}, false
+	}
+	pid, err := strconv.Atoi(parts[0])
+	if err != nil || pid <= 0 {
+		return execWitnessOwner{}, false
+	}
+	start, err := strconv.ParseInt(parts[1], 36, 64)
+	if err != nil || start < 0 {
+		return execWitnessOwner{}, false
+	}
+	return execWitnessOwner{PID: pid, Start: start}, true
+}
+
+// classifyExecWitnessScratch decides one scratch directory. An owner-named
+// directory is eligible exactly when its owner process is gone (or the pid was
+// reused); a legacy name is eligible only once it has been untouched for
+// legacyMaxAge. It fails toward keeping when the entry cannot be stat'd.
+func classifyExecWitnessScratch(path string, now time.Time, legacyMaxAge time.Duration, alive func(int) bool, start func(int) (time.Time, bool)) (eligible bool, ownerPID int, reason string) {
+	info, statErr := os.Stat(path)
+	age := time.Duration(0)
+	if statErr == nil {
+		if age = now.Sub(info.ModTime()); age < 0 {
+			age = 0
+		}
+	}
+	if owner, ok := parseExecWitnessOwner(filepath.Base(path)); ok {
+		ownerPID = owner.PID
+		switch {
+		case !alive(owner.PID):
+			reason = "owner_exited"
+		case owner.Start != 0:
+			if started, known := start(owner.PID); known && started.UnixMilli() != owner.Start {
+				reason = "owner_pid_reused"
+			} else {
+				reason = "owner_process_live"
+			}
+		default:
+			reason = "owner_process_live"
+		}
+		return reason != "owner_process_live", ownerPID, reason
+	}
+	switch {
+	case statErr != nil:
+		return false, 0, "stat_failed"
+	case age < legacyMaxAge:
+		return false, 0, "legacy_too_young"
+	default:
+		return true, 0, "legacy_stale"
+	}
+}
+
+// sweepExecWitnessScratch classifies every scratch directory in parent and, under
+// apply, removes the eligible ones (bounded by limit; limit<=0 means no cap). It
+// reports how many were eligible and how many were actually removed.
+func sweepExecWitnessScratch(parent string, now time.Time, apply bool, limit int, legacyMaxAge time.Duration, alive func(int) bool, start func(int) (time.Time, bool)) (wouldReap, reaped int) {
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return 0, 0
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), execWitnessScratchPrefix) {
+			continue
+		}
+		path := filepath.Join(parent, entry.Name())
+		eligible, _, _ := classifyExecWitnessScratch(path, now, legacyMaxAge, alive, start)
+		if !eligible {
+			continue
+		}
+		wouldReap++
+		if apply && (limit <= 0 || reaped < limit) {
+			if err := os.RemoveAll(path); err == nil {
+				reaped++
+			}
+		}
+	}
+	return wouldReap, reaped
+}
+
+var (
+	execWitnessSweepMu   sync.Mutex
+	execWitnessSweepLast = map[string]time.Time{}
+)
+
+// sweepExecWitnessScratchBeforeCreate runs the bounded, rate-limited sweep a
+// checkout performs before creating its own scratch directory. A package variable
+// so tests of the checkout flow can stub it out.
+var sweepExecWitnessScratchBeforeCreate = func(parent string) {
+	if parent == "" {
+		return
+	}
+	now := time.Now()
+	execWitnessSweepMu.Lock()
+	last, seen := execWitnessSweepLast[parent]
+	if seen && now.Sub(last) < execWitnessSweepInterval {
+		execWitnessSweepMu.Unlock()
+		return
+	}
+	execWitnessSweepLast[parent] = now
+	execWitnessSweepMu.Unlock()
+	sweepExecWitnessScratch(parent, now, true, execWitnessSweepLimit, legacyExecWitnessMaxAge, processalive.Check, processstart.Start)
+}
+
 func (v *ExecutionVerifier) scratchWorktree(ctx context.Context, ref string) (string, func(), error) {
 	// A checked-in workspace that references a sibling module (the private repo's
 	// `use ../fak`) only resolves when the scratch checkout preserves that sibling
@@ -346,13 +515,25 @@ func (v *ExecutionVerifier) scratchWorktree(ctx context.Context, ref string) (st
 			parent = filepath.Dir(rootAbs)
 		}
 	}
-	dir, err := os.MkdirTemp(parent, "fak-exec-witness-*")
+	sweepExecWitnessScratchBeforeCreate(parent)
+	dir, err := os.MkdirTemp(parent, execWitnessPattern())
 	if err != nil {
 		return "", nil, err
 	}
 	if err := os.Remove(dir); err != nil {
 		_ = os.RemoveAll(dir)
 		return "", nil, err
+	}
+	// Materialize with the phased no-checkout path so a kill during the expensive
+	// checkout leaves a directory whose name carries this process's identity for a
+	// later sweep, rather than a half-checked-out tree. Fall back to the ordinary
+	// full checkout if the phased path fails for any reason.
+	if v.materializeScratchWorktree(ctx, dir, ref) {
+		cleanup := func() {
+			_, _, _ = v.gitRun()(context.Background(), v.dir, "worktree", "remove", "--force", dir)
+			_ = os.RemoveAll(dir)
+		}
+		return dir, cleanup, nil
 	}
 	_, code, runErr := v.gitRun()(ctx, v.dir, "worktree", "add", "--detach", "--quiet", dir, ref)
 	if runErr != nil {
@@ -368,6 +549,35 @@ func (v *ExecutionVerifier) scratchWorktree(ctx context.Context, ref string) (st
 		_ = os.RemoveAll(dir)
 	}
 	return dir, cleanup, nil
+}
+
+// materializeScratchWorktree performs the phased no-checkout materialization:
+// `worktree add --no-checkout` (which registers the worktree cheaply) followed by
+// `checkout --force` and `reset --hard` inside the new directory. It reports
+// whether every step succeeded; on any failure it removes the directory and any
+// registration so the caller can retry with the ordinary full checkout.
+func (v *ExecutionVerifier) materializeScratchWorktree(ctx context.Context, dir, ref string) bool {
+	_, code, err := v.gitRun()(ctx, v.dir, "worktree", "add", "--detach", "--quiet", "--no-checkout", dir, ref)
+	if err != nil || code != 0 {
+		v.discardScratchWorktree(dir)
+		return false
+	}
+	if _, code, err = v.gitRun()(ctx, dir, "checkout", "--force", ref); err != nil || code != 0 {
+		v.discardScratchWorktree(dir)
+		return false
+	}
+	if _, code, err = v.gitRun()(ctx, dir, "reset", "--hard", ref); err != nil || code != 0 {
+		v.discardScratchWorktree(dir)
+		return false
+	}
+	return true
+}
+
+// discardScratchWorktree removes a partially materialized scratch directory and
+// any git registration so the caller can retry it cleanly.
+func (v *ExecutionVerifier) discardScratchWorktree(dir string) {
+	_, _, _ = v.gitRun()(context.Background(), v.dir, "worktree", "remove", "--force", dir)
+	_ = os.RemoveAll(dir)
 }
 
 func (v *ExecutionVerifier) expectSelectors(ctx context.Context, dir, ref, kind string, selectors []ExecutionSelector, wantPass bool, res *ExecutionResult) bool {
