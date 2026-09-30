@@ -385,10 +385,11 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 
 	// 2) Prefill ONLY the divergent suffix (the whole prompt on a miss). Device hybrid
 	// snapshots cannot be truncated when a radix edge later splits: recurrent GDN state is
-	// position-dependent. Materialize one stable block boundary before the leaf so sibling
+	// position-dependent. Materialize one exact shared-prefix boundary before the leaf so sibling
 	// prompts can restore a complete snapshot rather than merely matching an unusable
-	// mid-edge token run. The boundary is deliberately bounded to one per request; Qwen
-	// snapshots own substantial recurrent state even when the token prefix is short.
+	// mid-edge token run. A cold miss keeps the fixed-block fallback. The checkpoint is
+	// deliberately bounded to one per request; Qwen snapshots own substantial recurrent
+	// state even when the token prefix is short.
 	logits := cachedLogits
 	if logits == nil {
 		tp := time.Now()
@@ -440,7 +441,13 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			}
 		}
 		prefillAt := matched
-		checkpoint := inKernelAdaptiveSnapshotCheckpoint(prefillAt, cacheable, len(ids))
+		checkpointPrefix := cacheable
+		if p.qwen35MetalGDNSequence && p.backend == nil && p.metal && p.q4k && p.m.Cfg.IsQwen35Hybrid() {
+			// Native sequence admission requires a fresh prompt. Preserve its existing
+			// grid checkpoints instead of adding off-grid hits it cannot restore.
+			checkpointPrefix = (checkpointPrefix / inKernelSnapshotCheckpointTokens) * inKernelSnapshotCheckpointTokens
+		}
+		checkpoint := inKernelAdaptiveSnapshotCheckpoint(prefillAt, checkpointPrefix, len(ids))
 		if admit && (p.backend != nil || inKernelHostSnapshotReuse(p)) && checkpoint > prefillAt {
 			logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:checkpoint], measurement)
 			if err != nil {
@@ -1211,17 +1218,16 @@ func inKernelSnapshotCheckpoint(matched, promptTokens int) int {
 	return checkpoint
 }
 
-// inKernelAdaptiveSnapshotCheckpoint materializes a restorable device snapshot
-// at the deepest block fully contained in a structurally shared prefix. Recurrent
+// inKernelAdaptiveSnapshotCheckpoint materializes a complete snapshot
+// at the exact boundary of a structurally shared prefix. Recurrent
 // snapshots cannot be synthesized by splitting a later leaf, so this repairs the
 // boundary for the next sibling while retaining the historical one-checkpoint
 // limit and strict-before-prompt fallback.
+// Adapted from oMLX's off-grid prefill-tail snapshots (Apache-2.0):
+// https://github.com/jundot/omlx/blob/8288884d9b4f6db7b547633a94d36794c6b1d52d/omlx/scheduler.py
 func inKernelAdaptiveSnapshotCheckpoint(matched, cacheable, promptTokens int) int {
 	if cacheable > matched && cacheable < promptTokens {
-		checkpoint := (cacheable / inKernelSnapshotCheckpointTokens) * inKernelSnapshotCheckpointTokens
-		if checkpoint > matched {
-			return checkpoint
-		}
+		return cacheable
 	}
 	return inKernelSnapshotCheckpoint(matched, promptTokens)
 }
