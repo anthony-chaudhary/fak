@@ -89,14 +89,25 @@ func (r Regime) Complete() bool {
 }
 
 // RegimeKey derives a stable, canonical, deterministic string key for the decode regime.
+//
+// Version 2 quotes every string-valued field independently, making field boundaries
+// injective even when values contain the labels and delimiters used by the encoding.
+// The version change deliberately starts a cold namespace instead of migrating legacy
+// keys whose ambiguous identity cannot be recovered safely. This invariant is adapted
+// from vLLM PR #51899 at 166608ec098c860e27ab385d0a7450b9b06a238f (Apache-2.0);
+// the representation here is native to fak and copies no upstream implementation.
 func (r Regime) RegimeKey() string {
-	return strings.Join([]string{
-		"model=" + r.ModelID,
-		"sha=" + r.ModelSHA,
-		"dtype=" + string(r.DType),
-		"quant=" + string(r.QuantPolicy),
-		"rope=" + r.RoPE.Key(),
-	}, ";")
+	return fmt.Sprintf(
+		"v2;model=%s;sha=%s;dtype=%s;quant=%s;rope.base=%s;rope.scale=%s;rope.type=%s;rope.dim=%d",
+		strconv.Quote(r.ModelID),
+		strconv.Quote(r.ModelSHA),
+		strconv.Quote(string(r.DType)),
+		strconv.Quote(string(r.QuantPolicy)),
+		strconv.FormatFloat(r.RoPE.Base, 'g', -1, 64),
+		strconv.FormatFloat(r.RoPE.Scale, 'g', -1, 64),
+		strconv.Quote(r.RoPE.ScalingType),
+		r.RoPE.Dim,
+	)
 }
 
 // Hash returns the 32-byte cryptographic SHA-256 digest of the canonical RegimeKey.

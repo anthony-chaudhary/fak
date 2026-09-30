@@ -64,6 +64,48 @@ func TestRegime_KeyAndHash(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=10ms lane=default
+func TestRegime_DelimiterAdversarialIdentityDoesNotAliasCache(t *testing.T) {
+	left := sampleRegime()
+	left.ModelID = "a;sha=b"
+	left.ModelSHA = "c"
+	right := sampleRegime()
+	right.ModelID = "a"
+	right.ModelSHA = "b;sha=c"
+
+	if !left.Complete() || !right.Complete() {
+		t.Fatal("adversarial fixtures must be complete regimes")
+	}
+	if left == right {
+		t.Fatal("adversarial fixtures must be unequal regimes")
+	}
+	if left.RegimeKey() == right.RegimeKey() {
+		t.Errorf("unequal delimiter-adversarial regimes produced the same key: %q", left.RegimeKey())
+	}
+	if left.Hash() == right.Hash() {
+		t.Error("unequal delimiter-adversarial regimes produced the same hash")
+	}
+
+	identical := left
+	if identical.RegimeKey() != left.RegimeKey() || identical.Hash() != left.Hash() {
+		t.Fatal("identical regime identity must remain deterministic")
+	}
+
+	scoped := NewScoped(0)
+	owner := CacheIdentity{Tenant: "delimiter-tenant", Agent: "worker-1"}
+	tokens := []int{17, 23, 42}
+	if err := scoped.AdmitPrivateRegime(left, owner, tokens, newTestKV(71), nil); err != nil {
+		t.Fatalf("admit left regime: %v", err)
+	}
+	gotKV, _, matched, _, err := scoped.LookupRegime(right, owner, tokens)
+	if err != nil {
+		t.Fatalf("lookup right regime: %v", err)
+	}
+	if matched != 0 || gotKV != nil {
+		t.Errorf("cache lookup aliased unequal regimes: matched=%d kv=%v", matched, gotKV)
+	}
+}
+
 // TestRegime_EveryAxisIsLoadBearing verifies that mutating ANY single axis of the regime
 // (model ID, model SHA, dtype, quant policy, or any RoPE field) changes the RegimeKey, Hash,
 // and causes Match to fail with the specific divergent axis.
