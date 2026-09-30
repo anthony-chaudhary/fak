@@ -162,7 +162,7 @@ func TestAGUIAdapterPreservesStreamingAndStateSemantics(t *testing.T) {
 
 func TestAdapterRegistryRequiresExplicitSource(t *testing.T) {
 	registry := DefaultAdapterRegistry()
-	if got := strings.Join(registry.Sources(), ","); got != "ag-ui-jsonl,claude-code-jsonl,codex-jsonl,fak-agent-native-receipt-json,openai-chat-export-jsonl" {
+	if got := strings.Join(registry.Sources(), ","); got != "ag-ui-jsonl,claude-code-jsonl,codex-jsonl,fak-agent-native-receipt-json,openai-chat-export-jsonl,pi-jsonl" {
 		t.Fatalf("sources=%q", got)
 	}
 	if _, _, err := registry.Ingest("guess", []byte(`{}`)); err == nil || !strings.Contains(err.Error(), "no trajectory adapter") {
@@ -213,7 +213,7 @@ func TestClaudeAndOpenAIExportAdaptersPreserveSemanticsAndFidelity(t *testing.T)
 		}, "\n") + "\n", []EventKind{EventMessage, EventTool}},
 	}
 	registry := DefaultAdapterRegistry()
-	if got := strings.Join(registry.Sources(), ","); got != "ag-ui-jsonl,claude-code-jsonl,codex-jsonl,fak-agent-native-receipt-json,openai-chat-export-jsonl" {
+	if got := strings.Join(registry.Sources(), ","); got != "ag-ui-jsonl,claude-code-jsonl,codex-jsonl,fak-agent-native-receipt-json,openai-chat-export-jsonl,pi-jsonl" {
 		t.Fatalf("sources=%q", got)
 	}
 	for _, tc := range cases {
@@ -257,4 +257,169 @@ func TestExportAdaptersReturnPartialReceiptOnMalformedRecord(t *testing.T) {
 	if len(events) != 1 || receipt.MalformedRecord != 1 || receipt.InputRecords != 2 || receipt.EventDigest == "" {
 		t.Fatalf("partial receipt lost: events=%d receipt=%#v", len(events), receipt)
 	}
+}
+
+// TestPiAdapter pins #13368: the Pi session JSONL adapter registers with the
+// existing Adapter/FidelityReceipt API and preserves session/entry/parent IDs,
+// active branch order, raw digest, tool-call/result linkage, usage provenance and
+// unknown kinds. The fixture is an inline sanitized copy of the installed Pi
+// session schema (version 3); no private transcript is used.
+const piFixture = `{"type":"session","version":3,"id":"pi-session-1","timestamp":"2026-09-30T00:00:00.000Z","cwd":"C:/work/fak"}
+{"type":"model_change","id":"mc1","parentId":null,"timestamp":"2026-09-30T00:00:01.000Z","provider":"hive-ai","modelId":"deepseek-ai/DeepSeek-V4.1-Flash"}
+{"type":"message","id":"u1","parentId":"mc1","timestamp":"2026-09-30T00:00:02.000Z","message":{"role":"user","content":[{"type":"text","text":"run the tests"}]}}
+{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-09-30T00:00:03.000Z","message":{"role":"assistant","content":[{"type":"text","text":"running"},{"type":"toolCall","id":"call_1","name":"bash","arguments":{"command":"go test ./..."}}],"usage":{"input":100,"output":20,"totalTokens":120},"provider":"hive-ai","model":"deepseek-ai/DeepSeek-V4.1-Flash"}}
+{"type":"message","id":"r1","parentId":"a1","timestamp":"2026-09-30T00:00:04.000Z","message":{"role":"toolResult","toolCallId":"call_1","toolName":"bash","content":[{"type":"text","text":"ok"}]}}
+{"type":"future_kind","id":"x1","parentId":"r1","timestamp":"2026-09-30T00:00:05.000Z","opaque":true}
+`
+
+func TestPiAdapter(t *testing.T) {
+	registry := DefaultAdapterRegistry()
+	if got := strings.Join(registry.Sources(), ","); !strings.Contains(got, "pi-jsonl") {
+		t.Fatalf("pi-jsonl not registered: %q", got)
+	}
+
+	first, firstReceipt, err := registry.Ingest("pi-jsonl", []byte(piFixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, secondReceipt, err := registry.Ingest("pi-jsonl", []byte(piFixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(first, second) || !reflect.DeepEqual(firstReceipt, secondReceipt) {
+		t.Fatal("pi ingestion is not deterministic")
+	}
+	if firstReceipt.SourceType != "pi-jsonl" || firstReceipt.Adapter != "pi-jsonl" || firstReceipt.AdapterVersion == "" {
+		t.Fatalf("receipt identity wrong: %#v", firstReceipt)
+	}
+	if firstReceipt.InputRecords != 6 || firstReceipt.MalformedRecord != 0 {
+		t.Fatalf("record accounting wrong: %#v", firstReceipt)
+	}
+	if firstReceipt.UnknownKinds["future_kind"] != 1 {
+		t.Fatalf("unknown kind not counted: %#v", firstReceipt.UnknownKinds)
+	}
+
+	// Session/entry/parent IDs and raw digests are preserved on every event.
+	for _, event := range first {
+		if event.ConversationID != "pi-session-1" {
+			t.Fatalf("event %s conversation=%q, want pi-session-1", event.ID, event.ConversationID)
+		}
+		if event.Source.EventID == "" || event.Source.RawDigest == "" || event.Source.SessionID != "pi-session-1" {
+			t.Fatalf("event lacks preserved source identity: %#v", event.Source)
+		}
+	}
+
+	// Kinds in order: session, model_change, user msg, assistant msg, tool
+	// (proposed), tool (completed), unknown observation.
+	wantKinds := []EventKind{EventRunLifecycle, EventObservation, EventMessage, EventMessage, EventTool, EventTool, EventObservation}
+	if len(first) != len(wantKinds) {
+		t.Fatalf("event count = %d, want %d: %#v", len(first), len(wantKinds), first)
+	}
+	for i, want := range wantKinds {
+		if first[i].Kind != want {
+			t.Fatalf("event %d kind=%q, want %q", i, first[i].Kind, want)
+		}
+	}
+
+	// Tool-call/result linkage: the completed tool names the proposed call.
+	var proposed, completed *Event
+	for i := range first {
+		if first[i].Kind == EventTool && first[i].Action == "proposed" {
+			proposed = &first[i]
+		}
+		if first[i].Kind == EventTool && first[i].Action == "completed" {
+			completed = &first[i]
+		}
+	}
+	if proposed == nil || completed == nil {
+		t.Fatalf("missing tool proposed/completed pairing: %#v", first)
+	}
+	if !contains(completed.ParentIDs, proposed.Source.EventID) {
+		t.Fatalf("completed tool does not link to its call: parent=%v call=%q", completed.ParentIDs, proposed.Source.EventID)
+	}
+	if proposed.Payload == nil || !strings.Contains(string(proposed.Payload), "go test") {
+		t.Fatalf("tool call arguments not preserved: %s", proposed.Payload)
+	}
+
+	// Usage provenance survives on the assistant message payload.
+	var assistantPayload string
+	for _, event := range first {
+		if event.Kind == EventMessage && strings.Contains(string(event.Payload), `"assistant"`) {
+			assistantPayload = string(event.Payload)
+		}
+	}
+	if !strings.Contains(assistantPayload, "totalTokens") {
+		t.Fatalf("usage provenance not preserved: %s", assistantPayload)
+	}
+}
+
+// TestPiAdapterBranchedSessionIsNotFlattened pins that a parent-linked branch is
+// preserved as distinct entries with their parent IDs, rather than collapsed into
+// one fictitious executed trajectory.
+func TestPiAdapterBranchedSessionIsNotFlattened(t *testing.T) {
+	const branched = `{"type":"session","version":3,"id":"pi-branch","timestamp":"2026-09-30T00:00:00.000Z"}
+{"type":"message","id":"root","parentId":"","timestamp":"2026-09-30T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"go"}]}}
+{"type":"message","id":"left","parentId":"root","timestamp":"2026-09-30T00:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"left"}]}}
+{"type":"message","id":"right","parentId":"root","timestamp":"2026-09-30T00:00:03.000Z","message":{"role":"assistant","content":[{"type":"text","text":"right"}]}}
+`
+	events, _, err := DefaultAdapterRegistry().Ingest("pi-jsonl", []byte(branched))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var leftEv, rightEv *Event
+	for i := range events {
+		switch events[i].Source.EventID {
+		case "left":
+			leftEv = &events[i]
+		case "right":
+			rightEv = &events[i]
+		}
+	}
+	if leftEv == nil || rightEv == nil {
+		t.Fatalf("branch entries dropped: %#v", events)
+	}
+	if !contains(leftEv.ParentIDs, "root") || !contains(rightEv.ParentIDs, "root") {
+		t.Fatalf("branch parent IDs not preserved: left=%v right=%v", leftEv.ParentIDs, rightEv.ParentIDs)
+	}
+}
+
+// TestPiAdapterDuplicateToolResultDoesNotDuplicateEffect ensures a repeated
+// terminal record for the same tool call does not create a second tool effect.
+func TestPiAdapterDuplicateToolResultDoesNotDuplicateEffect(t *testing.T) {
+	const dup = `{"type":"session","version":3,"id":"pi-dup","timestamp":"2026-09-30T00:00:00.000Z"}
+{"type":"message","id":"a1","timestamp":"2026-09-30T00:00:01.000Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"call_9","name":"bash","arguments":{"command":"ls"}}]}}
+{"type":"message","id":"r1","timestamp":"2026-09-30T00:00:02.000Z","message":{"role":"toolResult","toolCallId":"call_9","toolName":"bash","content":[]}}
+{"type":"message","id":"r1dup","timestamp":"2026-09-30T00:00:03.000Z","message":{"role":"toolResult","toolCallId":"call_9","toolName":"bash","content":[]}}
+`
+	events, _, err := DefaultAdapterRegistry().Ingest("pi-jsonl", []byte(dup))
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := 0
+	for _, event := range events {
+		if event.Kind == EventTool && event.Action == "completed" {
+			completed++
+		}
+	}
+	if completed != 1 {
+		t.Fatalf("duplicate terminal record created %d tool effects, want 1", completed)
+	}
+}
+
+// TestPiAdapterRejectsUnsupportedVersion: a session that declares a schema
+// version this adapter does not understand cannot qualify a run.
+func TestPiAdapterRejectsUnsupportedVersion(t *testing.T) {
+	const future = `{"type":"session","version":99,"id":"pi-future","timestamp":"2026-09-30T00:00:00.000Z"}` + "\n"
+	if _, _, err := DefaultAdapterRegistry().Ingest("pi-jsonl", []byte(future)); err == nil {
+		t.Fatal("unsupported Pi session version must be refused, not qualified")
+	}
+}
+
+func contains(values []string, want string) bool {
+	for _, v := range values {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
