@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/codetools"
@@ -180,6 +181,7 @@ type CodeToolsOptions struct {
 	ExtraDirs            []string
 	EnableContextControl bool
 	ExactAllowedCommands []string
+	MaxCommandTime       time.Duration
 	EnableQuestion       bool
 	QuestionResolver     QuestionResolver
 }
@@ -191,7 +193,7 @@ func ArmCodeToolsWithOptions(opts CodeToolsOptions) ([]ToolDef, error) {
 		extraDirs = append(extraDirs, opts.SkillsDir)
 	}
 	extraDirs = append(extraDirs, opts.ExtraDirs...)
-	defs, err := armCodeToolsFull(opts.Root, opts.Focused, opts.ExactCommandsOnly, opts.EnableSkills, opts.ExactAllowedCommands, extraDirs...)
+	defs, err := armCodeToolsFullWithMaxCommandTime(opts.Root, opts.Focused, opts.ExactCommandsOnly, opts.EnableSkills, opts.ExactAllowedCommands, opts.MaxCommandTime, extraDirs...)
 	if err != nil {
 		return nil, err
 	}
@@ -214,11 +216,20 @@ func ArmCodeToolsWithOptions(opts CodeToolsOptions) ([]ToolDef, error) {
 }
 
 func armCodeToolsFull(root string, focused, exactCommandsOnly, enableSkills bool, exactAllowedCommands []string, extraDirs ...string) ([]ToolDef, error) {
+	return armCodeToolsFullWithMaxCommandTime(root, focused, exactCommandsOnly, enableSkills, exactAllowedCommands, 0, extraDirs...)
+}
+
+func armCodeToolsFullWithMaxCommandTime(root string, focused, exactCommandsOnly, enableSkills bool, exactAllowedCommands []string, maxCommandTime time.Duration, extraDirs ...string) ([]ToolDef, error) {
+	limits := codetools.DefaultLimits()
+	if maxCommandTime != 0 {
+		limits.MaxCommandTime = maxCommandTime
+	}
 	ts, err := codetools.New(codetools.Config{
 		Root:                 root,
 		FocusedCommands:      focused,
 		ExactCommandsOnly:    exactCommandsOnly,
 		ExactAllowedCommands: exactAllowedCommands,
+		Limits:               limits,
 	})
 	if err != nil {
 		return nil, err

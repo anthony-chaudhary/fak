@@ -276,32 +276,30 @@ folded from `docs/nightrun/*.jsonl` + `experiments/ablate/*.json`).
 
 The **Ops plane** is the repository watching its own autonomous work: cadence routines, the
 queue, the report window, the stuck-work join, goal lifecycle, and the worker/issue-throughput
-census. Two exporters feed it (both live in the private companion repo; the *rules and panels*
-are public here):
+census. Two exporters feed it (both live in the private companion repo; the alert rules remain public here and the unified operations dashboard is owned by the private companion):
 
 | Scrape job | Exporter | Serves | Feeds |
 |---|---|---|---|
-| `fak_ops` | `fak-ops-dashboard --addr 0.0.0.0:9101 --repo-root .` | `fak_ops_*` at `:9101/metrics` — the ops plane fold: routines, queue, report window, stuck-work join, canonical goals, child resources **plus the fleet-work plane** (unlanded worktree census, ARL-1 agent-run attribution, public/private ticket split) | **FAK Ops \| Ops Plane Statuses** (uid `fak-ops-statuses`) and **FAK Ops \| Fleet Work in Flight & Agent Attribution** (uid `fak-ops-fleet-work`) |
-| `fak_ops_workers` | `fak-sync ops throughput-metrics --serve --addr 0.0.0.0:9094` | `fak_ops_*` at `:9094/metrics` — the live worktree/session census plus one bounded (24h) `gh` issue census folded into the 6m/30m/60m/12h/24h windows | **FAK Ops \| Workers, Queue & Issue Throughput** (uid `fak-ops-workers-queue`) |
+| `fak_ops` | `fak-ops-dashboard --addr 0.0.0.0:9101 --repo-root .` | `fak_ops_*` at `:9101/metrics` — the ops plane fold: routines, queue, report window, stuck-work join, canonical goals, child resources **plus the fleet-work plane** (unlanded worktree census, ARL-1 agent-run attribution, public/private ticket split) | **Fak Ops** (uid `fak-ops`, provisioned by the companion operations stack) |
+| `fak_ops_workers` | `fak-sync ops throughput-metrics --serve --addr 0.0.0.0:9094` | `fak_ops_*` at `:9094/metrics` — the live worktree/session census plus one bounded (24h) `gh` issue census folded into the 6m/30m/60m/12h/24h windows | **Fak Ops** (uid `fak-ops`, provisioned by the companion operations stack) |
 
 Both jobs scrape at `60s` with a raised `scrape_timeout` (`45s` / `60s`) because each is a live
 disk fold per scrape, not a hot path.
 
-### The ops dashboards are hand-authored JSON
+### One companion-owned Ops dashboard
 
-`dashboards/fak-ops-statuses.json`, `dashboards/fak-ops-workers-queue.json` and
-`dashboards/fak-ops-fleet-work.json` are **edited
-directly** — they are *not* emitted by [`gen_dashboard.py`](gen_dashboard.py), which writes
-only the fleet / gateway / cache / guard / dogfood / startup set (see [Regenerate the
-dashboard](#regenerate-the-dashboard)). Re-running the generator will not touch them and will
-not undo a panel fix; open the JSON, not the generator.
+The Statuses, Workers & Queue, and Fleet Work dashboards are consolidated into
+**Fak Ops** at `/d/fak-ops`. The private companion owns its canonical JSON and
+contracts. Its operations stack provisions that asset for Docker and native
+Grafana alongside the public runtime dashboards; the public dashboard generator
+does not emit an Ops copy. A standalone public checkout continues to provision
+its runtime dashboards without requiring the companion.
 
-The `fak-ops-fleet-work` panels answer: unlanded work volume by census state and by worktree, which
-harness / router model provider / model each agent run used, per-harness wall vs **derived**
-productive time, and the public-vs-private ticket split. Every panel carries a `*_present` gauge;
-a `0` presence means *unavailable*, never a measured zero. The metric-name contract between the
-exporter (`platform/ops/dashboard/fleetwork.go`) and this dashboard is witnessed by
-`TestFleetWork_DashboardMetricContract` in fak-private.
+The consolidated sections retain scheduler health, live workers, durable queues,
+issue and landing throughput, unlanded work, attribution and productivity,
+tickets and goals, and evidence diagnostics. Similar counts from distinct scrape
+jobs and collection windows remain separate. Presence gauges distinguish missing
+evidence from measured zero.
 
 ### Ops alert rules — fire on the confession, never on a coincidence of zeros
 

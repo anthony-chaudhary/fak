@@ -1,0 +1,39 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart LR
+  subgraph REG["internal/compute — one registry, one rule"]
+    reg["compute.Register(Backend)<br/>a new backend is a NEW file + ONE Register call — never an edit to the forward loop"]
+    tier["Register / Pick is a runtime registry.<br/>Build tags gate what COMPILES in;<br/>Tier() is each backend's private probe."]
+    reg --- tier
+  end
+
+  subgraph NOW["Witnessed today"]
+    cpu["cpu-ref — Default<br/>pure-Go scalar reference<br/>the bit-exact floor"]
+    cuda["cuda — Approx<br/>real RTX 4070, argmax-exact"]
+    vk["vulkan — Approx<br/>real Radeon RX 7600, cosine 1.0"]
+    mtl["metal — Approx<br/>real Apple M3 Pro, first light"]
+  end
+
+  subgraph NEXT["Target / in progress"]
+    rocm["ROCm / Strix Halo gfx1151"]
+    lowp["FP4 / MXFP4 / Q8_1 + DP4A"]
+    mesh["multi-node collectives (TP x PP x EP)"]
+  end
+
+  reg --> cpu
+  reg --> cuda
+  reg --> vk
+  reg --> mtl
+  reg -.-> rocm
+  reg -.-> lowp
+  reg -.-> mesh
+
+  lift["What the seam lifts in the TYPE SYSTEM:<br/>dtype enum | no host pointer on a Tensor | runtime registry not build-tag dispatch |<br/>async Buffer.Ready() | whole-op interface | layout descriptor | streamed weight residency."]
+
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  class reg,tier kernel;
+  class cpu,cuda,vk,mtl pass;
+  class rocm,lowp,mesh note;
+  class lift world;

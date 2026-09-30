@@ -52,6 +52,8 @@ type agentFlags struct {
 	codeTools             *bool
 	codeWorkspace         *string
 	allowBashCommands     exactBashCommandList
+	bashCommandTimeout    *time.Duration
+	bashCommandTimeoutSet bool
 	sysTools              *bool
 	mcpTools              *bool
 	subagents             *bool
@@ -100,6 +102,7 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.codeTools = fs.Bool("code-tools", true, "arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the current repository; use --code-tools=false to disable")
 	af.codeWorkspace = fs.String("code-workspace", "", "override the workspace root for default-on bounded repository code tools")
 	fs.Var(&af.allowBashCommands, "allow-bash-command", "grant one byte-exact command to the bounded native Bash tool (repeatable; focused defaults and all other safety gates remain active)")
+	af.bashCommandTimeout = fs.Duration("bash-command-timeout", 2*time.Minute, "hard timeout for each bounded native Bash command (positive, maximum 10m)")
 	af.sysTools = fs.Bool("sys-tools", true, "arm safe read-only system and web utility tools (get_time, fetch_web, web_search); use --sys-tools=false to disable")
 	af.mcpTools = fs.Bool("mcp-tools", true, "arm native fak MCP features (fak_read, fak_tools_search, fak_adjudicate, fak_syscall); use --mcp-tools=false to disable")
 	af.subagents = fs.Bool("subagents", true, "arm kernel-mediated child subagent task tools (task_spawn, task_wait, task_status, task_cancel); enabled by default")
@@ -300,7 +303,13 @@ func runAgent(argv []string) {
 	}
 	fs, af := newAgentFlagSet()
 	_ = fs.Parse(argv)
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "bash-command-timeout" {
+			af.bashCommandTimeoutSet = true
+		}
+	})
 	must(validateAgentBashCommandGrants(*af.codeTools, af.allowBashCommands))
+	must(validateAgentBashCommandTimeout(*af.codeTools, *af.bashCommandTimeout, af.bashCommandTimeoutSet))
 
 	if *af.resume == "" && fs.NArg() > 0 && fs.Arg(0) == "resume" {
 		if fs.NArg() < 2 || strings.HasPrefix(fs.Arg(1), "-") {

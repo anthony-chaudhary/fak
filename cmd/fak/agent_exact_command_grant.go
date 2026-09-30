@@ -42,5 +42,6 @@ func armAgentCodeTools(root string, af *agentFlags) ([]agent.ToolDef, error) {
 		EnableSkills:         *af.skills,
 		ExtraDirs:            extraDirs,
 		ExactAllowedCommands: []string(af.allowBashCommands),
+		MaxCommandTime:       *af.bashCommandTimeout,
 	})
 }

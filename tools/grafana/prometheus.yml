@@ -119,7 +119,7 @@ scrape_configs:
     # seconds; the scrape_timeout below is raised to match.
     # Start it with (from the fak-private repo):
     #   fak-ops-dashboard --addr 0.0.0.0:9101 --repo-root .
-    # Feeds "FAK Ops | Ops Plane Statuses" (uid fak-ops-statuses).
+    # Feeds the companion Fak Ops dashboard (uid fak-ops).
     metrics_path: /metrics
     scrape_interval: 60s
     scrape_timeout: 45s
@@ -134,7 +134,7 @@ scrape_configs:
     #   fak-sync ops throughput-metrics --serve --addr 0.0.0.0:9094
     # ONE bounded gh census (24h) is folded into the 6m/30m/60m/12h/24h
     # windows per scrape, plus the live worktree census and the ops queue fold.
-    # Feeds "FAK Ops | Workers, Queue & Issue Throughput" (uid fak-ops-workers-queue).
+    # Feeds the companion Fak Ops dashboard (uid fak-ops).
     metrics_path: /metrics
     scrape_interval: 60s
     scrape_timeout: 60s

@@ -1,0 +1,52 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TB
+  subgraph T5["tier 5 — integrator (top-level wiring)"]
+    direction LR
+    ag["internal/agent<br/>managed loop + the one OpenAI HTTP client"]
+    gw["internal/gateway<br/>fak serve: OpenAI + MCP endpoint"]
+  end
+  subgraph T4["tier 4 — composer"]
+    direction LR
+    eng2["internal/modelengine<br/>fused in-kernel engine (id in-kernel)"]
+    rkv["internal/radixkv<br/>automatic prefix discovery"]
+    kmmu["internal/kvmmu<br/>verdict -> mechanical span evict"]
+    hr["internal/headroom<br/>page-in compression"]
+  end
+  subgraph T3["tier 3 — mechanism"]
+    direction LR
+    adj["internal/adjudicator<br/>call-side capability floor"]
+    cmmu["internal/ctxmmu<br/>result-side admission gate"]
+    pf["internal/preflight<br/>cheapest-refutation ladder"]
+    vdso["internal/vdso<br/>local fast path for repeat calls"]
+    e1["internal/engine<br/>driven-engine seam"]
+  end
+  subgraph T2["tier 2 — foundation"]
+    direction LR
+    mo["internal/model<br/>pure-Go forward pass; KV cache is a Go object"]
+    co["internal/compute<br/>HAL: cpu-ref / cuda / vulkan / metal"]
+  end
+  subgraph T1["tier 1 — primitive"]
+    direction LR
+    kv1["internal/kv<br/>KV pages, LRU/FIFO, block store"]
+    bl["internal/blob<br/>content-addressed store (the CAS)"]
+  end
+  subgraph T0["tier 0 — root (frozen)"]
+    direction LR
+    abi["internal/abi<br/>frozen ABI + Register* seams<br/>the one tree every leaf imports"]
+  end
+
+  note["Import rule: a package may import only from tiers at or below its own<br/>(internal/architest, enforced every run). A new idea is a NEW directory +<br/>ONE Register* call + one blank-import in internal/registrations — no spine edit."]
+  e1 -.->|"explicitly selected, reference only — never a silent fallback"| ext[["vLLM / SGLang / llm-d / Dynamo / llama.cpp"]]
+
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+
+  class abi gate;
+  class mo,co,eng2 kernel;
+  class adj,cmmu,pf,vdso,e1 gate;
+  class kv1,bl,rkv,kmmu,hr mem;
+  class note note;
+  class ext world;

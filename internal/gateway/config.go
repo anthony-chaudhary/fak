@@ -886,9 +886,11 @@ type Config struct {
 	Native bool
 	// NativeMaxTurns caps the owned loop's model round-trips per served request when Native
 	// is set. <= 0 falls back to DefaultNativeMaxTurns. Inert when Native is false.
-	NativeMaxTurns      int
-	NativeCodeWorkspace string // optional root for the six kernel coding engines
-	NativeSpeculate     bool   // opt-in effect-free coding speculation on native turns
+	NativeMaxTurns             int
+	NativeCodeWorkspace        string        // optional root for the six kernel coding engines
+	NativeExactAllowedCommands []string      // optional byte-exact additions to the focused Bash command set
+	NativeMaxCommandTime       time.Duration // optional per-command Bash ceiling; zero preserves the code-tool default
+	NativeSpeculate            bool          // opt-in effect-free coding speculation on native turns
 	// VDSOProxyFill, when true, warms the vDSO tier-2 cache from ADMITTED inbound
 	// tool_result blocks on the proxy path: an ALLOWED, read-only-shaped result the
 	// client sends back fills (tool,args)->result so a LATER re-proposed identical read
