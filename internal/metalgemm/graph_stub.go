@@ -18,6 +18,9 @@ type GraphReceipt struct {
 	IntermediateReadbacks, HostReadbacks      int
 	HostUploadBytes, HostReadbackBytes        uint64
 	GPUMilliseconds, WaitMilliseconds         float64
+	// Graph-tracked allocation evidence; unavailable on the portable stub.
+	AllocatedBuffers    int
+	RetainedBufferBytes uint64
 }
 type GraphResult struct{}
 type ProjectionGraph struct{}

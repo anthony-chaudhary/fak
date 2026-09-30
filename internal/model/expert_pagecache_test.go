@@ -68,6 +68,10 @@ func TestGGUFExpertPageCacheWarmReadAvoidsSecondDeviceRead(t *testing.T) {
 	wantStart := d.Offset + int64(e*stride)
 	wantAlignedStart := pageAlignDown(wantStart, page)
 	wantAlignedEnd := pageAlignUp(wantStart+int64(stride), page)
+	// A host page may extend beyond this fixture's source bound.
+	if wantAlignedEnd > int64(len(fix.file)) {
+		wantAlignedEnd = int64(len(fix.file))
+	}
 
 	first, warm, err := src.readExpertPageCache(d.Name, e)
 	if err != nil {
