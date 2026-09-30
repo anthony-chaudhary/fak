@@ -165,7 +165,7 @@ quickstart is [`docs/fak/neo-cloud-deploy.md`](../fak/neo-cloud-deploy.md).
 
 | Verb | What it does | Try |
 | --- | --- | --- |
-| `fak macbench` | Apple-silicon decode-longgen + prefill-sweep benchmark driver. | `fak macbench -h` |
+| `fak macbench` | Apple-silicon decode-longgen + prefill-sweep benchmark driver. Optional `--min-gpu-util` requires a finite floor and a proven serving-engine CPU/device pair; unknown telemetry exits nonzero. Zero disables the engagement gate. | `fak macbench -h` |
 | `fak macfit` | Models Apple unified-memory capacity for many concurrent agents (`internal/macfit`). | `fak macfit -h` |
 | `fak mac` | Crisp handle for the mac path (long form `fak claude-mac-fak`); both spellings route to one handler. | `fak mac -h` |
 | `fak deepseekbench` | DeepSeek V4 Pro/Flash TTFT/TPOT/context-scaling scorecard (thin wire over `internal/deepseekbench`). | `fak deepseekbench -h` |
@@ -173,6 +173,15 @@ quickstart is [`docs/fak/neo-cloud-deploy.md`](../fak/neo-cloud-deploy.md).
 | `fak kvbm` | Replays a KV-block-manager trace and proves the #2666 validation shape; exit 1 unless proven. | `fak kvbm replay` |
 | `fak bench-ingest` | Folds checked-in benchmark snapshot fixtures (Terminal-Bench, SWE-bench, FrontierSWE) into a provenanced `modelscore` registry, refusing any unprovenanced row. | `fak bench-ingest -h` |
 | `fak microbench` | Turns "ultra-light memory/CPU, thousands of agents in one process" into a measured number with zero provider spend: boots the real `internal/microagent` host at N agents, reports RSS/agent against a guarded-CLI process-pair baseline, and appends the row as JSONL. | `fak microbench -h` |
+
+For `fak macbench`, a known CPU/device pair fails engagement only when CPU
+utilization dominates while the device remains below the declared floor.
+The current CLI has no proven serving-engine telemetry pair: an armed run
+reports `engagement.status=unknown`, `reason=engine_unbound` and exits 1.
+Client CPU and host GPU observations do not establish engine engagement;
+this safeguard supplies no hardware qualification witness. Finite nonpositive
+floors preserve the existing report and exit behavior; nonfinite floors are
+usage errors (exit 2).
 
 ### F. Standalone binaries under `cmd/`
 

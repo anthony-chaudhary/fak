@@ -92,11 +92,15 @@ const clockTicksPerSecond = 100
 // read at all — it exited between census and sample, or this platform has no reader —
 // which the caller reports as `unreadable` rather than folding in as a free process.
 //
-// Linux only: the numbers come from /proc/<pid>/{stat,statm}. Darwin exposes no
-// equivalent per-PID view to the stdlib (its answer is libproc, which is cgo), so it
-// reports unreadable rather than a fabricated zero.
+// Linux numbers come from /proc/<pid>/{stat,statm}. Darwin's self PID reuses
+// Getrusage through readProcSelf; other Darwin PIDs remain unreadable because
+// the stdlib has no equivalent per-PID view (libproc requires cgo).
 func readProcPID(pid int) (procSample, bool) {
 	var s procSample
+	if runtime.GOOS == "darwin" && pid == os.Getpid() {
+		s = readProcSelf()
+		return s, s.haveCPU || s.havePeakRSS || s.haveRSS || s.haveIO
+	}
 	if runtime.GOOS != "linux" || pid <= 0 {
 		return s, false
 	}
