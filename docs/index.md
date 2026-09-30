@@ -19,7 +19,7 @@ FAK coordinates the whole agent path, not isolated components. Start with the [c
 | Learning the whole system | [8-module flagship course](courses/end-to-end-inference-agent-harness-memory.md) | Follow one request across native inference, the agent harness, policy, context, memory, observability, and proof; use the [99-course learning path](../LEARNING-PATH.md) for prerequisite ordering and deeper study. |
 | Building or integrating an agent or client | [Agent runtime](explainers/agent-runtime.md) | Understand the category and ownership boundary, choose an interface, and follow the proposal-to-continuation flow. |
 | Handling denied tool calls in a harness | [Tool feedback continuation](explainers/tool-feedback-continuation.md) | Close the wire turn, carry the refusal into context, and resume at a bounded harness turn boundary. |
-| Improving or comparing local inference | [Fak-native inference doctrine](native-inference-goal.md) | Keep native product work inside fak, classify explicit llama.cpp uses, and apply the matched-envelope rule. |
+| Improving or comparing local inference | [Fak-native inference doctrine](native-inference-goal.md) | Keep product inference Fak-native; study and incorporate OSS mechanisms; classify direct development/PoC/comparison evidence separately; match tuned baselines. |
 | Deploying or operating | [Deployment guide](fak/deployment-guide.md) | Choose an operating envelope, then configure and observe the service. |
 | Contributing | [Contributor guide](../CONTRIBUTING.md) and [developer tooling](dev-tooling.md) | Find the owning document first, then build, test, change, and prove the repository under its current contracts. |
 | Researching design or history | [Notes archive](notes/) | Find rationale and dated evidence, then check current code and tests before relying on it. |
@@ -110,6 +110,13 @@ intended to beat llama.cpp in matched, quality-constrained envelopes while retai
 of kernels, memory, scheduling, cache, adaptation, and operations. Current broad serving-speed
 claims still need a benchmark-authority row; the doctrine is the direction, not a substitute for
 evidence.
+
+Direct OSS development, business proofs of concept, and comparisons are permitted
+in their own evidence plane; they do not close the [native workflow milestone](local-agent-milestone.md).
+Study and incorporate OSS techniques into Fak-native before reinvention. The
+[product orientation](project-orientation.md#primary-adaptation-index) tracks verified
+useful adaptation pace relative to comparable market and past windows. Earn one
+notable native milestone before adding compute scale.
 
 ## Tool-call controls
 
