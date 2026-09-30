@@ -453,6 +453,21 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 						break
 					}
 					if err != nil {
+						// Distinguish a PRE-commit failure from a POST-commit one by the
+						// receipt the backend fills only after its single FinishRead commit
+						// (Accepted==true with Available==false is the pre-commit shape; the
+						// backend returns its terminal receipt with Available==true once the
+						// command buffer has committed). A pre-commit encode/graph failure
+						// leaves host KV/Kraw/V and Cache positions unmutated, so it fails
+						// OPEN: stop the panel walk and replay the unconsumed rows through
+						// the host path. #13473 was exactly this shape reported as
+						// accepted==true, so the old unconditional panic killed the serving
+						// process on every harness-sized prompt.
+						if !receipt.Available {
+							break
+						}
+						// Post-commit: the device GDN state has advanced, so the route
+						// cannot be replayed on the host. Fail closed and retire the owner.
 						panic(s.failQwen35MetalForwardSequence(err))
 					}
 					hidden = h
@@ -489,15 +504,21 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 					}
 				}
 				if executedPanels > 0 {
+					// The executed panels may cover fewer rows than the planned
+					// panelCover when a pre-commit panel failure declines mid-walk
+					// (fail-open). Reconcile and replay from the ACTUAL executed
+					// rows so the host cache order stays [device rows][host rows]
+					// and no token is silently skipped.
+					covered := executedRows
 					// Reconcile the device-resident KV BEFORE the trailing remainder
 					// runs: the triple holds the panel-covered rows for every
 					// full-attention layer, and this single download restores the host
 					// cache contract the decode path depends on. Doing it first keeps
-					// the host cache row order [panelCover device rows][rem host rows]
+					// the host cache row order [covered device rows][rem host rows]
 					// matching the appended positions. A reconcile failure is fatal
 					// (accepted), never a silent partial cache.
 					if deviceAdmitter != nil && deviceKV != nil {
-						if err := deviceAdmitter.ReconcileDeviceKV(s, deviceBase, executedRows); err != nil {
+						if err := deviceAdmitter.ReconcileDeviceKV(s, deviceBase, covered); err != nil {
 							panic(s.failQwen35MetalForwardSequence(err))
 						}
 						if keeper, ok := deviceAdmitter.(qwen35MetalDeviceKVKeeper); ok {
@@ -509,7 +530,7 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 							}
 						}
 					}
-					rem := ids[panelCover:]
+					rem := ids[covered:]
 					if len(rem) > 0 {
 						hidden = s.prefillQwen35HybridQ4KHidden(rem)
 						agg.Tokens += len(rem)
