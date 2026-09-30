@@ -51,6 +51,7 @@ type agentFlags struct {
 	policyPath            *string
 	codeTools             *bool
 	codeWorkspace         *string
+	allowBashCommands     exactBashCommandList
 	sysTools              *bool
 	mcpTools              *bool
 	subagents             *bool
@@ -98,6 +99,7 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.policyPath = fs.String("policy", "", "load the capability floor from a manifest (default: the built-in floor plus bounded repository code tools when enabled; see `fak policy --dump`)")
 	af.codeTools = fs.Bool("code-tools", true, "arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the current repository; use --code-tools=false to disable")
 	af.codeWorkspace = fs.String("code-workspace", "", "override the workspace root for default-on bounded repository code tools")
+	fs.Var(&af.allowBashCommands, "allow-bash-command", "grant one byte-exact command to the bounded native Bash tool (repeatable; focused defaults and all other safety gates remain active)")
 	af.sysTools = fs.Bool("sys-tools", true, "arm safe read-only system and web utility tools (get_time, fetch_web, web_search); use --sys-tools=false to disable")
 	af.mcpTools = fs.Bool("mcp-tools", true, "arm native fak MCP features (fak_read, fak_tools_search, fak_adjudicate, fak_syscall); use --mcp-tools=false to disable")
 	af.subagents = fs.Bool("subagents", true, "arm kernel-mediated child subagent task tools (task_spawn, task_wait, task_status, task_cancel); enabled by default")
@@ -298,6 +300,7 @@ func runAgent(argv []string) {
 	}
 	fs, af := newAgentFlagSet()
 	_ = fs.Parse(argv)
+	must(validateAgentBashCommandGrants(*af.codeTools, af.allowBashCommands))
 
 	if *af.resume == "" && fs.NArg() > 0 && fs.Arg(0) == "resume" {
 		if fs.NArg() < 2 || strings.HasPrefix(fs.Arg(1), "-") {
@@ -503,16 +506,7 @@ func runAgent(argv []string) {
 	}
 	var catalog []agent.ToolDef
 	if *af.codeTools {
-		var extraDirs []string
-		if *af.skillsDir != "" {
-			extraDirs = append(extraDirs, *af.skillsDir)
-		}
-		codeCatalog, armErr := agent.ArmCodeToolsWithOptions(agent.CodeToolsOptions{
-			Root:         root,
-			Focused:      true,
-			EnableSkills: *af.skills,
-			ExtraDirs:    extraDirs,
-		})
+		codeCatalog, armErr := armAgentCodeTools(root, af)
 		must(armErr)
 		defer agent.DisarmCodeTools()
 		catalog = append(catalog, codeCatalog...)
