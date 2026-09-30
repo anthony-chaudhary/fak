@@ -1,6 +1,9 @@
 package model
 
-import "github.com/anthony-chaudhary/fak/internal/compute"
+import (
+	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/model/ffn"
+)
 
 // expertInputDeviceAdmitted is the shared admission for the incremental device expert
 // seam. It admits a bias-free SiLU (no GELU) expert on a DeviceMemory backend, with an
@@ -121,6 +124,18 @@ func (s *Session) q4kExpertDownDeviceWeight(downName string) (compute.Tensor, bo
 	}
 }
 
+// clampSwiGLUProjections applies the expert's asymmetric projection clamp before
+// activation: the gate has only an upper bound; the up branch has both bounds.
+// Contract: https://github.com/jundot/omlx/blob/3f2d07e8dff257119329e0a2e9821df81182f05d/omlx/patches/deepseek_v41/language.py#L551-L555
+func clampSwiGLUProjections(gate, up []float32, limit float32) {
+	if limit > 0 {
+		for i := range gate {
+			gate[i] = min(gate[i], limit)
+			up[i] = max(-limit, min(up[i], limit))
+		}
+	}
+}
+
 // q4kExpertInputHAL runs the two Q4_K expert input projections plus SwiGLU on a device backend
 // and returns the fused host intermediate. It is the narrow half of the seam: a caller that needs
 // the I-wide intermediate on the host (e.g. a caller whose down projection has no device kernel)
@@ -128,6 +143,15 @@ func (s *Session) q4kExpertDownDeviceWeight(downName string) (compute.Tensor, bo
 // the intermediate resident and returns the final [H] output instead. No device capability means a
 // clean decline, never a semantic fallback.
 func q4kExpertInputHAL(s *Session, gateName, upName string, xn any, intermediate, hidden int) ([]float32, bool) {
+	return q4kExpertInputHALWithLimit(s, gateName, upName, xn, intermediate, hidden, 0)
+}
+
+// q4kExpertInputHALWithLimit retains the device weight admission and gate/up
+// MatMuls. A positive limit reads only the two intermediate-width projection
+// rows for the configured clamp and host SiLU; the weights stay compressed and
+// resident. Without a limit, SwiGLU and the single intermediate read stay on the
+// historical device path. The caller's down projection already consumes a host row.
+func q4kExpertInputHALWithLimit(s *Session, gateName, upName string, xn any, intermediate, hidden int, limit float32) ([]float32, bool) {
 	gateW, gateKey, upW, upKey, x, ok := expertInputDeviceAdmitted(s, gateName, upName, xn, hidden)
 	if !ok {
 		return nil, false
@@ -158,6 +182,25 @@ func q4kExpertInputHAL(s *Session, gateName, upName string, xn any, intermediate
 	defer s.Backend.Free(xd)
 	g := s.Backend.MatMul(gateW, xd)
 	u := s.Backend.MatMul(upW, xd)
+	if limit > 0 {
+		gate := s.Backend.Read(g)
+		up := s.Backend.Read(u)
+		if len(gate) != intermediate || len(up) != intermediate {
+			s.Backend.Free(g)
+			s.Backend.Free(u)
+			panic("model: device expert gate/up returned wrong intermediate size")
+		}
+		clampSwiGLUProjections(gate, up, limit)
+		out, err := ffn.Gated(gate, up, silu, func(activated []float32) ([]float32, error) {
+			return activated, nil
+		})
+		s.Backend.Free(g)
+		s.Backend.Free(u)
+		if err != nil {
+			panic(err)
+		}
+		return out, true
+	}
 	fused := s.Backend.SwiGLU(g, u)
 	out := s.Backend.Read(fused)
 	s.Backend.Free(g)

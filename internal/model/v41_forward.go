@@ -133,9 +133,10 @@ type v41ForwardState struct {
 
 	// expertGateUp is the OPTIONAL device gate/up callback the session installs
 	// when its backend can run a routed expert's gate/up projections plus SwiGLU
-	// (the shared q4kExpertInputHAL operation from TICKET-05, bound in
+	// (the shared q4kExpertInputHALWithLimit operation, bound in
 	// Session.v41State). When non-nil the MoE loop offers each pick to it first:
-	// on a handled result the I-wide fused intermediate comes from the device and
+	// on a handled result the I-wide intermediate uses device projections and
+	// the configured clamp (bounded host projection rows when needed), and
 	// only the existing host down contraction runs over it, so the gate/up f32
 	// weights are never materialized on the host. A nil callback (Model.Forward,
 	// a non-device session, or a backend the shared operation declines) preserves
@@ -154,8 +155,8 @@ const (
 	// v41GateUpDeclined: the shared device operation did not admit this expert, so
 	// the caller falls through to the host triple byte-for-byte.
 	v41GateUpDeclined v41ExpertGateUpOutcome = iota
-	// v41GateUpHandled: gate MatMul, up MatMul and SwiGLU all ran on the backend
-	// and the returned slice is the I-wide fused intermediate.
+	// v41GateUpHandled: gate/up MatMuls ran on the backend, and the returned
+	// slice is the I-wide intermediate after the configured SwiGLU activation.
 	v41GateUpHandled
 	// v41GateUpError: a selected device execution failed; it must remain visible.
 	v41GateUpError
@@ -164,8 +165,8 @@ const (
 // v41ExpertGateUpFunc is the optional per-pick device gate/up operation. It
 // receives the routed expert's layer stem and the normalized input, and reports
 // one of the closed v41ExpertGateUpOutcome values. On v41GateUpHandled it returns
-// the I-wide fused intermediate (gate ⊙ silu, then SwiGLU) produced on the device
-// backend, sized to the expert intermediate width.
+// the I-wide fused intermediate from device gate/up projections and the
+// configured SwiGLU activation, sized to the expert intermediate width.
 type v41ExpertGateUpFunc func(layer int, stem string, xn []float32) ([]float32, v41ExpertGateUpOutcome, error)
 
 // v41ProjScratch is the per-forward REUSED materialization target for the two
@@ -2681,7 +2682,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	return nil
 }
 
-// v41SwiGLU is the standard SwiGLU expert/sub-layer: down(silu(w1 x) * w3 x).
+// v41SwiGLU is the configured SwiGLU expert/sub-layer: down(silu(clamp(w1 x)) * clamp(w3 x)).
 // v41SharedExpertSwiGLU is the streaming-safe shared-expert SwiGLU: it applies the
 // three shared-expert leaves through v41ProjMatRows (resident store form, bounded
 // block scratch) instead of materializing each whole f32 weight, so the shared
@@ -2697,6 +2698,7 @@ func (m *Model) v41SharedExpertSwiGLU(l int, xn []float32, cfg Config) ([]float3
 	if err != nil {
 		return nil, err
 	}
+	clampSwiGLUProjections(h1, h3, float32(cfg.SwigluLimit))
 	return ffn.Gated(h1, h3, func(v float32) float32 { return act(v, cfg) }, func(activated []float32) ([]float32, error) {
 		return m.v41ProjMatRows(l, "ffn.shared_experts.w2.weight", activated, H, I)
 	})
@@ -2705,6 +2707,7 @@ func (m *Model) v41SharedExpertSwiGLU(l int, xn []float32, cfg Config) ([]float3
 func v41SwiGLU(w1, w3, w2, xn []float32, I, H int, cfg Config) []float32 {
 	h1 := matRows(w1, xn, I, H)
 	h3 := matRows(w3, xn, I, H)
+	clampSwiGLUProjections(h1, h3, float32(cfg.SwigluLimit))
 	y, err := ffn.Gated(h1, h3, func(v float32) float32 { return act(v, cfg) }, func(activated []float32) ([]float32, error) {
 		return matRows(w2, activated, H, I), nil
 	})
@@ -2929,8 +2932,8 @@ func (s *Session) stepV41(id int) []float32 {
 }
 
 // v41State lazily installs the session's V4.1 continuation state. When the
-// session's backend can run a routed expert's gate/up projections plus SwiGLU on
-// device (the shared q4kExpertInputHAL operation from TICKET-05), the state also
+// session's backend can run a routed expert's gate/up projections on device
+// (the shared q4kExpertInputHALWithLimit operation), the state also
 // binds the optional device gate/up callback so the MoE loop can keep the gate/up
 // f32 weights off the host and feed the existing host down contraction. A
 // non-device session or a backend the shared operation declines leaves the
@@ -2948,7 +2951,7 @@ func (s *Session) v41State() *v41ForwardState {
 // V4.1 session backend, or returns nil when the session has no device backend
 // that could execute it. It resolves the two gate/up projection names from the
 // routed expert stem exactly as the host triple does, runs the shared
-// q4kExpertInputHAL (which itself admits only bias-free SiLU experts whose gate
+// q4kExpertInputHALWithLimit (which itself admits only bias-free SiLU experts whose gate
 // and up weights have a device representation the ACTUAL backend can serve), and
 // maps its (out, ok) result onto the closed outcome vocabulary. The helper's own
 // admission is the gate: a non-device backend, a GELU expert, a biased
@@ -2962,7 +2965,7 @@ func (s *Session) v41ExpertGateUpFunc() v41ExpertGateUpFunc {
 	return func(layer int, stem string, xn []float32) ([]float32, v41ExpertGateUpOutcome, error) {
 		gateName := layerName(layer, stem+".w1.weight")
 		upName := layerName(layer, stem+".w3.weight")
-		out, ok := q4kExpertInputHAL(s, gateName, upName, xn, cfg.MoEIntermediateSize, cfg.HiddenSize)
+		out, ok := q4kExpertInputHALWithLimit(s, gateName, upName, xn, cfg.MoEIntermediateSize, cfg.HiddenSize, float32(cfg.SwigluLimit))
 		if !ok {
 			return nil, v41GateUpDeclined, nil
 		}
