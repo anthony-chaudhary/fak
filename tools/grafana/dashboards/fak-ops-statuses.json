@@ -7,7 +7,7 @@
     "appliance"
   ],
   "schemaVersion": 39,
-  "version": 3,
+  "version": 4,
   "editable": false,
   "timezone": "browser",
   "refresh": "30s",
@@ -1927,6 +1927,666 @@
         "textMode": "auto",
         "orientation": "auto",
         "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 44,
+      "type": "row",
+      "title": "Evidence availability & admission liveness",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 60,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 45,
+      "type": "stat",
+      "title": "Ops state file present (1 = readable)",
+      "description": "Presence of the Ops state file (`.fak/ops.json`). **1 = the file exists and was read; 0 = it is absent.** This is the *explain-the-absence* gate for every routine/queue/interval panel on this board: when it is 0 those panels legitimately read 0 and must be read as an absent plane, never as a healthy empty one. It confirms presence only, not freshness - pair it with *Snapshot age (s) - fold freshness*.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 61,
+        "w": 4,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fak_ops_state_present{job=\"fak_ops\"}",
+          "legendFormat": "__auto",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNAVAILABLE",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 1
+                }
+              ]
+            }
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 46,
+      "type": "stat",
+      "title": "Admission plane observed (1 = read)",
+      "description": "Whether the admission-liveness plane could READ the process table. **1 = read; 0 = the process-table read failed** (no lister, timeout, or permission). A 0 here makes the verdict below `unobserved` - the liveness is unknown, never a measured `no_live_run`. This gate is why a broken probe can never be read as a healthy idle scheduler.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 61,
+        "w": 4,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fak_ops_admission_up{job=\"fak_ops\"}",
+          "legendFormat": "__auto",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNAVAILABLE",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 1
+                }
+              ]
+            }
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 47,
+      "type": "stat",
+      "title": "Admission verdict (live ops run)",
+      "description": "The worst live `ops run` verdict, decided by joining the process table to the state file. **admission_stalled** = a live ops run older than the stall threshold that has recorded no interval since it started (wedged before admission). **admitting** = the run recorded an interval since start. **starting** = no interval yet but younger than the threshold. **no_live_run** = the process table was read and holds no ops run. **unobserved** = the process table or state file could not be read, so liveness is unknown - never reported as no_live_run. This is the panel that catches a wedged scheduler that would otherwise hide behind the last recorded `failed/idle` interval.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 61,
+        "w": 4,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "count by (verdict) (fak_ops_admission_verdict{job=\"fak_ops\"} == 1)",
+          "legendFormat": "{{verdict}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNAVAILABLE",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 1
+                }
+              ]
+            }
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "admission_stalled": {
+                  "color": "red",
+                  "index": 0,
+                  "text": "STALLED"
+                },
+                "admitting": {
+                  "color": "green",
+                  "index": 1,
+                  "text": "Admitting"
+                },
+                "starting": {
+                  "color": "yellow",
+                  "index": 2,
+                  "text": "Starting"
+                },
+                "no_live_run": {
+                  "color": "blue",
+                  "index": 3,
+                  "text": "No live run"
+                },
+                "unobserved": {
+                  "color": "orange",
+                  "index": 4,
+                  "text": "UNOBSERVED"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 48,
+      "type": "stat",
+      "title": "Admission stalled runs",
+      "description": "Count of live `ops run` processes past the stall threshold that recorded no interval since start. **0 = no run is wedged; > 0 = the scheduler instance is wedged before admission** and the state file is stale even though a process is alive. Front panel for the `admission_stalled` reason token; the exporter's /status page and `ops api` diagnostics carry the pid, age and last state write.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 61,
+        "w": 4,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fak_ops_admission_stalled{job=\"fak_ops\"}",
+          "legendFormat": "__auto",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNAVAILABLE",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 1
+                }
+              ]
+            }
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 49,
+      "type": "stat",
+      "title": "Admission live runs",
+      "description": "Live `ops run` process trees observed on the host by the admission-liveness plane. This is the DENOMINATOR for the verdict above: 0 with verdict `no_live_run` means no scheduler is running (correct when intentionally stopped), while 0 with verdict `unobserved` means the process table could not be read - an unavailable measurement, not a stopped scheduler.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 61,
+        "w": 4,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fak_ops_admission_live_runs{job=\"fak_ops\"}",
+          "legendFormat": "__auto",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNAVAILABLE",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "blue",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 50,
+      "type": "stat",
+      "title": "Collector up (1 = collecting)",
+      "description": "Administrative status of the Fak Ops statuses exporter: **1 = collecting; 0 = it is deliberately not collecting.** This is the exporter's own report, independent of Prometheus reachability (panel 3). Both reading 0 means Prometheus cannot reach the exporter; here 0 with Prometheus `up` 1 means the exporter is up but administratively stopped.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 61,
+        "w": 4,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fak_ops_up{job=\"fak_ops\"}",
+          "legendFormat": "__auto",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNAVAILABLE",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 1
+                }
+              ]
+            }
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 51,
+      "type": "stat",
+      "title": "Stuck plane availability (1 = observed)",
+      "description": "Per-plane observation state of the stuck-work join, as a total closed map over every plane (issues, tickets, leases, worktrees, workers). **1 = the plane was observed; 0 = its probe failed OR the caller deliberately skipped it.** This is the trust gate for *Stuck total* and *Stuck planes census*: a plane reading 0 here makes its stuck count a NON-MEASUREMENT - a timed-out workers census serializes a bare 0 that must never be read as \"nothing stuck\" (the confident-wrong-direction degradation). Read this before treating any stuck count as clean.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 68,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fak_ops_stuck_plane_available{job=\"fak_ops\"}",
+          "legendFormat": "{{plane}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNAVAILABLE",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "red",
+                  "value": null
+                },
+                {
+                  "color": "green",
+                  "value": 1
+                }
+              ]
+            }
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 52,
+      "type": "stat",
+      "title": "Stuck join partial (1 = degraded)",
+      "description": "**1 = at least one stuck-work plane degraded** (failed probe, timeout, or deliberate skip); 0 = every plane measured. When 1 the aggregate stuck counts are an under-count, so *Stuck total* must not be read as clean - a degraded join is a NON-MEASUREMENT for its planes, never a measured zero. Distinct from the whole-exporter *Exporter partial*: this isolates the stuck join. The named cause (plane + operation) is on the exporter's /status page.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 68,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fak_ops_stuck_partial{job=\"fak_ops\"}",
+          "legendFormat": "__auto",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNAVAILABLE",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 1
+                }
+              ]
+            }
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 53,
+      "type": "timeseries",
+      "title": "Admission verdict over time",
+      "description": "The one-hot admission verdict series graphed over the selected range, so a transition into `admission_stalled` is visible as it happens rather than only as a current value. Each scrape emits exactly one `1` across the five closed verdicts. A band that jumps to `admission_stalled` and stays there is the wedge signature; `unobserved` bands mark windows where the process table or state file could not be read.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 76,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fak_ops_admission_verdict{job=\"fak_ops\"}",
+          "legendFormat": "{{verdict}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNAVAILABLE",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
       }
     }
   ]

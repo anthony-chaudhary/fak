@@ -22,7 +22,8 @@ type fakOpsPanel struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Targets     []struct {
-		Expr string `json:"expr"`
+		Expr         string `json:"expr"`
+		LegendFormat string `json:"legendFormat"`
 	} `json:"targets"`
 }
 
@@ -272,6 +273,90 @@ func TestFakOpsStatusesPopulationLabels(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestFakOpsStatusesAvailabilityPanels is the scoped witness for the
+// availability-evidence gap: the exporter emits the admission-liveness plane and
+// the typed per-plane stuck availability, but a board that never queries them
+// leaves an operator unable to tell a measured zero from a plane that was never
+// observed. This contract binds the two ends: every availability family must be
+// queried, and the panels that gate a stuck count must say so.
+func TestFakOpsStatusesAvailabilityPanels(t *testing.T) {
+	d := loadFakOpsStatuses(t)
+
+	// The exporter families that carry evidence-availability (as opposed to a
+	// measurement). Every one must appear in a panel query, or the board is
+	// blind to its own confidence state.
+	families := []string{
+		"fak_ops_up",
+		"fak_ops_state_present",
+		"fak_ops_stuck_plane_available",
+		"fak_ops_stuck_partial",
+		"fak_ops_admission_up",
+		"fak_ops_admission_stalled",
+		"fak_ops_admission_live_runs",
+		"fak_ops_admission_verdict",
+	}
+
+	var exprs []string
+	for _, p := range d.Panels {
+		for _, tgt := range p.Targets {
+			if e := strings.TrimSpace(tgt.Expr); e != "" {
+				exprs = append(exprs, e)
+			}
+		}
+	}
+	joined := strings.Join(exprs, "\n")
+	for _, fam := range families {
+		if !strings.Contains(joined, fam) {
+			t.Errorf("shipped %s queries no panel for the availability family %q; the evidence state is invisible to operators", fakOpsStatusesPath, fam)
+		}
+	}
+
+	// The per-plane availability panel must keep its per-plane legend so a 0
+	// can be attributed to the specific plane that was not observed.
+	for _, p := range d.Panels {
+		for _, tgt := range p.Targets {
+			if !strings.Contains(tgt.Expr, "fak_ops_stuck_plane_available") {
+				continue
+			}
+			if !strings.Contains(tgt.LegendFormat, "{{plane}}") {
+				t.Errorf("panel %d %q must label the stuck-availability series by {{plane}}; got legend %q", p.ID, p.Title, tgt.LegendFormat)
+			}
+		}
+	}
+
+	// The panels that gate a stuck count on an observation must say that a 0
+	// from an unobserved plane is a NON-measurement, the exact inversion the
+	// confident-wrong-direction degradation (#2841) is about.
+	for _, p := range d.Panels {
+		for _, tgt := range p.Targets {
+			if !strings.Contains(tgt.Expr, "fak_ops_stuck_plane_available") &&
+				!strings.Contains(tgt.Expr, "fak_ops_stuck_partial") {
+				continue
+			}
+			text := panelText(p)
+			if !strings.Contains(text, "never") && !strings.Contains(text, "non-measurement") {
+				t.Errorf("availability panel %d %q must state that an unobserved (0) plane is not a measured zero; got:\n%s", p.ID, p.Title, text)
+			}
+		}
+	}
+
+	// The admission verdict panel must enumerate the closed verdict where a
+	// wedge is named, so an operator reads the stall rather than the vocabulary.
+	var verdictText string
+	for _, p := range d.Panels {
+		for _, tgt := range p.Targets {
+			if strings.Contains(tgt.Expr, "fak_ops_admission_verdict") && p.Type == "stat" {
+				verdictText = panelText(p)
+			}
+		}
+	}
+	if verdictText == "" {
+		t.Fatal("no stat panel queries fak_ops_admission_verdict")
+	}
+	mustContain(t, "admission verdict panel", verdictText,
+		"admission_stalled", "no_live_run", "unobserved")
 }
 
 // TestDockerComposeDefaultsLightTheme pins the light-theme default for every
