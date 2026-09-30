@@ -223,6 +223,12 @@ type Qwen35MetalForwardSequenceReceipt struct {
 	Device                      string                           `json:"device,omitempty"`
 	SourceRevision              string                           `json:"source_revision,omitempty"`
 	ArtifactSHA256              string                           `json:"artifact_sha256,omitempty"`
+	// Graph-tracked input, intermediate and terminal Metal buffers retained until
+	// graph teardown; sequential panels report the maximum over their graphs.
+	// Excludes untracked constants and attention temporaries, GDN state, persistent
+	// KV and weights; this is not a process or device working-set measure.
+	AllocatedBuffers    int    `json:"allocated_buffers"`
+	RetainedBufferBytes uint64 `json:"retained_buffer_bytes"`
 }
 
 type qwen35MetalForwardSequenceRunner interface {
@@ -493,6 +499,8 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 						agg.TerminalReadbacks += receipt.TerminalReadbacks
 						agg.HostUploadBytes += receipt.HostUploadBytes
 						agg.HostReadbackBytes += receipt.HostReadbackBytes
+						agg.AllocatedBuffers = max(agg.AllocatedBuffers, receipt.AllocatedBuffers)
+						agg.RetainedBufferBytes = max(agg.RetainedBufferBytes, receipt.RetainedBufferBytes)
 						agg.Committed = agg.Committed && receipt.Committed
 						agg.CompletedWait = agg.CompletedWait && receipt.CompletedWait
 						agg.TimingAvailable = agg.TimingAvailable && receipt.TimingAvailable

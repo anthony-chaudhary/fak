@@ -10,6 +10,8 @@ typedef struct {
     int completed_wait;
     int encoders;
     int host_readbacks;
+    int allocated_buffers;
+    uint64_t retained_buffer_bytes;
     double gpu_milliseconds;
     double wait_milliseconds;
     int timing_available;
@@ -120,6 +122,13 @@ type GraphReceipt struct {
 	IntermediateReadbacks, HostReadbacks      int
 	HostUploadBytes, HostReadbackBytes        uint64
 	GPUMilliseconds, WaitMilliseconds         float64
+	// AllocatedBuffers and RetainedBufferBytes count distinct graph-tracked
+	// Metal buffers, including input, intermediate and terminal results. All
+	// remain retained until Free, so the bytes are their peak for this graph.
+	// Untracked constants and attention temporaries, GDN state, persistent KV
+	// and weights are outside this scope. The snapshot survives errors and teardown.
+	AllocatedBuffers    int
+	RetainedBufferBytes uint64
 }
 
 type GraphResult struct {
@@ -711,7 +720,7 @@ func (g *ProjectionGraph) SetBufferPool(depth int) bool {
 // graph's recycle pool. The result must not be read, AddInPlace'd, or otherwise consumed
 // after Release. It is a no-op when the pool is disabled.
 func (g *ProjectionGraph) Release(r *GraphResult) {
-	if g == nil || g.ptr == nil || g.finished || g.freed || r == nil || r.ptr == nil || r.graph != g {
+	if g == nil || g.ptr == nil || g.finished || g.freed || r == nil || r.ptr == nil || r.graph != g || r.released {
 		return
 	}
 	C.mg_graph_recycle_result(g.ptr, r.ptr)
@@ -1540,7 +1549,7 @@ func (g *ProjectionGraph) Finish() (GraphReceipt, error) {
 		inject = 2
 	}
 	ok := C.mg_graph_finish(g.ptr, &r, inject) != 0
-	receipt := GraphReceipt{Committed: r.committed != 0, CompletedWait: r.completed_wait != 0, TimingAvailable: r.timing_available != 0, Encoders: int(r.encoders), HostReadbacks: int(r.host_readbacks), HostUploadBytes: g.hostUploadBytes, GPUMilliseconds: float64(r.gpu_milliseconds), WaitMilliseconds: float64(r.wait_milliseconds)}
+	receipt := GraphReceipt{Committed: r.committed != 0, CompletedWait: r.completed_wait != 0, TimingAvailable: r.timing_available != 0, Encoders: int(r.encoders), HostReadbacks: int(r.host_readbacks), HostUploadBytes: g.hostUploadBytes, AllocatedBuffers: int(r.allocated_buffers), RetainedBufferBytes: uint64(r.retained_buffer_bytes), GPUMilliseconds: float64(r.gpu_milliseconds), WaitMilliseconds: float64(r.wait_milliseconds)}
 	if !ok && receipt.Committed && !receipt.CompletedWait {
 		g.quarantineCommittedGraph()
 		return receipt, commandBufferStallError(receipt.WaitMilliseconds, int(r.status_code), int(r.error_code), cString(&r.error_text[0]), "graph finish")

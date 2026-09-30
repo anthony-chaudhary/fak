@@ -920,6 +920,7 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, i
 		CommandBuffers: 1, Encoders: graphReceipt.Encoders, TerminalWaits: 1, TerminalReadbacks: graphReceipt.HostReadbacks,
 		IntermediateWaits: graphReceipt.IntermediateWaits, IntermediateReadbacks: graphReceipt.IntermediateReadbacks,
 		HostUploadBytes: graphReceipt.HostUploadBytes, HostReadbackBytes: graphReceipt.HostReadbackBytes,
+		AllocatedBuffers: graphReceipt.AllocatedBuffers, RetainedBufferBytes: graphReceipt.RetainedBufferBytes,
 		Committed: graphReceipt.Committed, CompletedWait: graphReceipt.CompletedWait, TimingAvailable: graphReceipt.TimingAvailable,
 		GPUMilliseconds: graphReceipt.GPUMilliseconds, WaitMilliseconds: graphReceipt.WaitMilliseconds,
 	}
@@ -1293,10 +1294,10 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 		g.SetGEMVDecode()
 		g.SetGEMVVectorized(os.Getenv("FAK_QWEN35_WHOLE_TOKEN_GEMV_VEC") != "0")
 	}
-	// Recycle dead intermediate projection/norm buffers per shape. Opt-in (env) so the
-	// default graph keeps its call-owned allocations; the terminal KV and final-norm
-	// results are never released and remain valid for FinishRead.
-	if os.Getenv("FAK_QWEN35_WHOLE_TOKEN_POOL") == "1" {
+	// Recycle dead intermediate projection/norm buffers per shape by default.
+	// FAK_QWEN35_WHOLE_TOKEN_POOL=0 restores fresh allocations for rollback or A/B
+	// measurement. Terminal KV and final-norm results remain pinned for FinishRead.
+	if os.Getenv("FAK_QWEN35_WHOLE_TOKEN_POOL") != "0" {
 		g.SetBufferPool(8)
 	}
 	if b.injectForwardPostSubmitFailure {
@@ -1376,7 +1377,10 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 			if runErr != nil {
 				return nil, receipt, true, runErr
 			}
-			for _, consumed := range qkv {
+			// Attention.V aliases qkv[2], including the packed-Q8 attention
+			// entry. Keep that buffer pinned through the terminal KV readback;
+			// recycling it here would let a later projection overwrite the row.
+			for _, consumed := range qkv[:2] {
 				g.Release(consumed)
 			}
 			g.Release(q)
@@ -1431,6 +1435,7 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 		CommandBuffers: 1, Encoders: graphReceipt.Encoders, TerminalWaits: 1, TerminalReadbacks: graphReceipt.HostReadbacks,
 		IntermediateWaits: graphReceipt.IntermediateWaits, IntermediateReadbacks: graphReceipt.IntermediateReadbacks,
 		HostUploadBytes: graphReceipt.HostUploadBytes, HostReadbackBytes: graphReceipt.HostReadbackBytes,
+		AllocatedBuffers: graphReceipt.AllocatedBuffers, RetainedBufferBytes: graphReceipt.RetainedBufferBytes,
 		Committed: graphReceipt.Committed, CompletedWait: graphReceipt.CompletedWait, TimingAvailable: graphReceipt.TimingAvailable,
 		GPUMilliseconds: graphReceipt.GPUMilliseconds, WaitMilliseconds: graphReceipt.WaitMilliseconds,
 	}

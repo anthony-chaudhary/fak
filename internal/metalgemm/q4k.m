@@ -1836,6 +1836,7 @@ typedef struct {
     NSMutableDictionary *pool; // recycled [NSNumber length] -> NSMutableArray of idle buffers
     int pool_buffers;          // live buffers currently parked in pool
     int P, in, encoders, committed, readbacks, buffers, wait_limit_ms;
+    uint64_t retained_buffer_bytes; // graph-tracked buffers; all remain retained until Free
     int graph_gemv_p1;         // 1 routes P=1 graph projections to the GEMV kernels
     int graph_gemv_vectorized; // P=1 graph projections: 1 selects q4k_gemv_vectorized
     int graph_mm_mode;         // Q4_K projection candidate: 0 scalar, 2 wide-tile cooperative-SMEM
@@ -1849,18 +1850,21 @@ static _Atomic int gGraphLiveBuffers;
 static void mg_graph_track_buffer(MGProjectionGraph *g, id<MTLBuffer> buffer) {
     if (!g || !buffer) return;
     g->buffers++;
+    g->retained_buffer_bytes += (uint64_t)buffer.length;
     atomic_fetch_add_explicit(&gGraphLiveBuffers, 1, memory_order_relaxed);
 }
 
 static void mg_graph_release_tracked_buffers(MGProjectionGraph *g) {
     if (!g) return;
     int buffers=g->buffers;
-    g->xf=nil;g->xq=nil;g->xd=nil;g->results=nil;g->buffers=0;
+    g->xf=nil;g->xq=nil;g->xd=nil;g->results=nil;g->buffers=0;g->retained_buffer_bytes=0;
     if (buffers) atomic_fetch_sub_explicit(&gGraphLiveBuffers, buffers, memory_order_relaxed);
 }
 
 typedef struct {
     int committed, completed_wait, encoders, host_readbacks;
+    int allocated_buffers;
+    uint64_t retained_buffer_bytes;
     double gpu_milliseconds, wait_milliseconds;
     int timing_available;
     int status_code, error_code, device_ok;
@@ -1970,6 +1974,9 @@ void mg_graph_recycle_result(void *opaque, void *ptr) {
     NSUInteger n=b.length/sizeof(float);
     NSMutableArray *idle=[g->pool objectForKey:@(n)];
     if(!idle){idle=[NSMutableArray array];[g->pool setObject:idle forKey:@(n)];}
+    // Different GraphResult handles may name the same buffer. Park each buffer
+    // once, or two subsequent allocations could alias each other's live output.
+    if([idle indexOfObjectIdenticalTo:b]!=NSNotFound)return;
     if([idle count]>=(NSUInteger)g->graph_buf_pool)return; // bounded ring
     [idle addObject:b];g->pool_buffers++;
 }
@@ -2073,7 +2080,7 @@ void *mg_graph_encode_q8_from(void *opaque,int wid,void*q,void*d,int elems){retu
 // error_text) so the caller can report a typed stall instead of a silent hang. Return stays 1 only
 // for a Completed, non-injected submit and 0 otherwise; the receipt distinguishes an injected test
 // failure from a real device failure.
-int mg_graph_finish(void *opaque,mg_graph_receipt*r,int inject_post_submit_failure){MGProjectionGraph*g=opaque;if(r)memset(r,0,sizeof(*r));if(!g||g->committed||g->encoders==0)return 0;g->committed=1;CFAbsoluteTime t=CFAbsoluteTimeGetCurrent();dispatch_semaphore_t gsem=dispatch_semaphore_create(0);[g->cb addCompletedHandler:^(id<MTLCommandBuffer> b){(void)b;dispatch_semaphore_signal(gsem);}];[g->cb commit];long gto=dispatch_semaphore_wait(gsem,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(g->wait_limit_ms*NSEC_PER_MSEC)));g->wait_ms=(CFAbsoluteTimeGetCurrent()-t)*1000.;int completed=gto==0&&g->cb.status==MTLCommandBufferStatusCompleted;int inject_device_fault=inject_post_submit_failure==2;if(r){r->committed=1;r->completed_wait=inject_device_fault?0:completed;r->status_code=inject_device_fault?MTLCommandBufferStatusError:(int)g->cb.status;NSError*err=inject_device_fault?nil:g->cb.error;r->device_ok=(r->completed_wait&&err==nil)?1:0;if(inject_device_fault){snprintf(r->error_text,sizeof(r->error_text),"injected device fault");}else if(err){r->error_code=(int)err.code;NSString*desc=err.localizedDescription;if(desc){const char*u=[desc UTF8String];if(u)snprintf(r->error_text,sizeof(r->error_text),"%s",u);}}r->encoders=g->encoders;r->host_readbacks=g->readbacks;r->wait_milliseconds=g->wait_ms;if(@available(macOS 10.15,*)){double a=g->cb.GPUStartTime,b=g->cb.GPUEndTime;if(b>=a&&a>0){r->gpu_milliseconds=(b-a)*1000.;r->timing_available=1;}}}int observed=r?(inject_device_fault?0:completed):completed;return observed&&!inject_post_submit_failure;}
+int mg_graph_finish(void *opaque,mg_graph_receipt*r,int inject_post_submit_failure){MGProjectionGraph*g=opaque;if(r)memset(r,0,sizeof(*r));if(!g||g->committed||g->encoders==0)return 0;if(r){r->allocated_buffers=g->buffers;r->retained_buffer_bytes=g->retained_buffer_bytes;}g->committed=1;CFAbsoluteTime t=CFAbsoluteTimeGetCurrent();dispatch_semaphore_t gsem=dispatch_semaphore_create(0);[g->cb addCompletedHandler:^(id<MTLCommandBuffer> b){(void)b;dispatch_semaphore_signal(gsem);}];[g->cb commit];long gto=dispatch_semaphore_wait(gsem,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(g->wait_limit_ms*NSEC_PER_MSEC)));g->wait_ms=(CFAbsoluteTimeGetCurrent()-t)*1000.;int completed=gto==0&&g->cb.status==MTLCommandBufferStatusCompleted;int inject_device_fault=inject_post_submit_failure==2;if(r){r->committed=1;r->completed_wait=inject_device_fault?0:completed;r->status_code=inject_device_fault?MTLCommandBufferStatusError:(int)g->cb.status;NSError*err=inject_device_fault?nil:g->cb.error;r->device_ok=(r->completed_wait&&err==nil)?1:0;if(inject_device_fault){snprintf(r->error_text,sizeof(r->error_text),"injected device fault");}else if(err){r->error_code=(int)err.code;NSString*desc=err.localizedDescription;if(desc){const char*u=[desc UTF8String];if(u)snprintf(r->error_text,sizeof(r->error_text),"%s",u);}}r->encoders=g->encoders;r->host_readbacks=g->readbacks;r->wait_milliseconds=g->wait_ms;if(@available(macOS 10.15,*)){double a=g->cb.GPUStartTime,b=g->cb.GPUEndTime;if(b>=a&&a>0){r->gpu_milliseconds=(b-a)*1000.;r->timing_available=1;}}}int observed=r?(inject_device_fault?0:completed):completed;return observed&&!inject_post_submit_failure;}
 int mg_graph_await_terminal(void *opaque){MGProjectionGraph*g=opaque;if(!g||!g->committed||!g->cb)return 0;[g->cb waitUntilCompleted];return g->cb.status==MTLCommandBufferStatusCompleted;}
 int mg_graph_read(void*opaque,void*result,float*dst,int n){MGProjectionGraph*g=opaque;id<MTLBuffer>y=(__bridge id<MTLBuffer>)result;if(!g||!g->committed||!y||!dst||n<0||![g->results containsObject:y])return 0;memcpy(dst,[y contents],(NSUInteger)n*sizeof(float));g->readbacks++;return 1;}
 int mg_graph_read_pack(void*opaque,void**results,const int*sizes,int count,float*dst,int total){MGProjectionGraph*g=opaque;if(!g||!g->committed||!results||!sizes||count<=0||!dst||total<0)return 0;int off=0;for(int i=0;i<count;i++){id<MTLBuffer>y=(__bridge id<MTLBuffer>)results[i];int n=sizes[i];if(!y||n<0||off>total-n||![g->results containsObject:y])return 0;memcpy(dst+off,[y contents],(NSUInteger)n*sizeof(float));off+=n;}if(off!=total)return 0;g->readbacks++;return 1;}

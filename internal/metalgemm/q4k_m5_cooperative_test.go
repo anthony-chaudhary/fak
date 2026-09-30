@@ -5,6 +5,7 @@ package metalgemm
 import (
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -152,6 +153,9 @@ func TestQ4KM5CrossoverGatesPanelRegime(t *testing.T) {
 	}
 	// q4kGEMMModeForPrompt must never reach mode 2 without the SetGEMMUseM5 opt-in, even for
 	// P>=64 on a device the pinned table admits.
+	// Isolate M5 policy from MM32's separate small-panel selector.
+	priorMM := q4kUseMM.Swap(false)
+	defer q4kUseMM.Store(priorMM)
 	priorM5 := q4kUseM5.Swap(false)
 	defer q4kUseM5.Store(priorM5)
 	for _, P := range []int{32, 64, 128, 256} {
@@ -161,18 +165,36 @@ func TestQ4KM5CrossoverGatesPanelRegime(t *testing.T) {
 	}
 
 	const device, osVersion = "Apple M3 Pro", "26.6.2"
-	// On the device the pinned production row was measured on, the opt-in must reach mode 2 for
-	// the widened panel shapes INSIDE the measured band. This is the end-to-end gate the row
-	// exists to open: P=64 and P=128 are the measured endpoints.
-	if Q4KM5CrossoverPredicate(device, osVersion, 64) {
-		q4kUseM5.Store(true)
-		for _, P := range []int{64, 128} {
-			if got := q4kGEMMModeForPrompt(P); got != Q4KGEMMModeM5CooperativeSMEM {
-				t.Fatalf("P=%d on the pinned device selected %v, want mode 2", P, got)
-			}
+	// Pin the measured endpoints independently of the live host. The encode-time selector
+	// must also match the actual OS; a matching device on an unreceipted OS stays scalar.
+	for _, P := range []int{64, 128} {
+		if !Q4KM5CrossoverPredicate(device, osVersion, P) {
+			t.Fatalf("pinned production row did not admit its measured P=%d endpoint", P)
 		}
-		q4kUseM5.Store(false)
 	}
+	liveDevice, liveOS := DeviceName(), OSVersion()
+	assertLiveSelector := func(P int) {
+		t.Helper()
+		wantMode, wantRequested := Q4KGEMMModeScalar, Q4KGEMMExecutedScalar
+		// Both admitting rows in this test have this fixed identity and measured band.
+		// Keep the live expectation independent of the production predicate under test.
+		if Available() && q4kUseM5.Load() && strings.HasPrefix(liveDevice, device) &&
+			strings.HasPrefix(liveOS, "26") && P >= 64 && P <= 128 {
+			wantMode, wantRequested = Q4KGEMMModeM5CooperativeSMEM, Q4KGEMMExecutedM5CooperativeSMEM
+		}
+		got := q4kGEMMModeForPrompt(P)
+		if got != wantMode {
+			t.Fatalf("live device=%q OS=%q P=%d selected %v, want %v", liveDevice, liveOS, P, got, wantMode)
+		}
+		if requested := q4kGEMMRequestedExecution(P, got); requested != wantRequested {
+			t.Fatalf("live device=%q OS=%q P=%d requested identity=%v, want %v", liveDevice, liveOS, P, requested, wantRequested)
+		}
+	}
+	q4kUseM5.Store(true)
+	for _, P := range []int{64, 128} {
+		assertLiveSelector(P)
+	}
+	q4kUseM5.Store(false)
 	// A row below the >=1.10x gate must NOT admit mode 2.
 	withPinnedCrossoverRow(t, q4kM5CrossoverRow{Family: device, OSVersion: "26", MinP: 64, MaxP: 128, MinRatio: 1.09, Witness: "witness://below-gate"}, func() {
 		if Q4KM5CrossoverPredicate(device, osVersion, 64) {
@@ -199,24 +221,10 @@ func TestQ4KM5CrossoverGatesPanelRegime(t *testing.T) {
 		}
 		q4kUseM5.Store(true)
 		defer q4kUseM5.Store(false)
-		// The encode-time selector consults the LIVE device, so the mode-2 assertions only hold
-		// where Metal reports a matching device; on any other host the selector stays scalar.
-		if Available() && DeviceName() == device {
-			if got := q4kGEMMModeForPrompt(64); got != Q4KGEMMModeM5CooperativeSMEM {
-				t.Fatalf("P=64 with an admitting row selected %v, want mode 2", got)
-			}
-			if got := q4kGEMMModeForPrompt(128); got != Q4KGEMMModeM5CooperativeSMEM {
-				t.Fatalf("P=128 with an admitting row selected %v, want mode 2", got)
-			}
-			// P=256 is inside the widened panel regime (P>=64) but outside the measured band, so
-			// even with the opt-in on and an admitting row it must stay scalar (fail-closed).
-			if got := q4kGEMMModeForPrompt(256); got != Q4KGEMMModeScalar {
-				t.Fatalf("P=256 outside the measured band selected %v, want scalar", got)
-			}
-			// The typed requested identity must report mode 2 (not scalar) for the admitted shape.
-			if req := q4kGEMMRequestedExecution(64, q4kGEMMModeForPrompt(64)); req != Q4KGEMMExecutedM5CooperativeSMEM {
-				t.Fatalf("P=64 requested identity=%v, want M5CooperativeSMEM", req)
-			}
+		// Assert both admitted and fail-closed live identities, including a matching device
+		// with a mismatched OS and panels outside the measured band or wide-tile envelope.
+		for _, P := range []int{32, 64, 128, 256} {
+			assertLiveSelector(P)
 		}
 		// P<64 is outside the wide-tile envelope even under an admitting row.
 		if got := q4kGEMMModeForPrompt(32); got == Q4KGEMMModeM5CooperativeSMEM {
