@@ -127,6 +127,47 @@ func TestFFNGatedAdaptersBitExact(t *testing.T) {
 	})
 }
 
+// TestFFNSharedExpertOriginalBodyParity proves that the benchmark's original-body
+// arm (legacyV41SharedExpertSwiGLU) reproduces the shipped shared adapter
+// (v41SharedExpertSwiGLU) bit-for-bit on the benchmark's own reduced V4.1 fixture,
+// across both activation policies the benchmark times.
+//
+// Scope note: the shipped adapter runs clampSwiGLUProjections at cfg.SwigluLimit
+// while the pre-#13435 original body does not. The clamp is INERT on this fixture
+// (the reduced weights keep every projection well under the inherited limit of
+// 10), so this parity holds because the clamp is a no-op here, not because the two
+// bodies are unconditionally equivalent. Do not raise the fixture scale without
+// revisiting this comparison.
+//
+// fak-test:runtime fast est=80ms lane=default
+func TestFFNSharedExpertOriginalBodyParity(t *testing.T) {
+	t.Parallel()
+	m := v41ReducedModelLayers(t, 1)
+	xn := ffnTestValues(m.Cfg.HiddenSize, 0.015625)
+	siluCfg := m.Cfg
+	siluCfg.ActGeluTanh = false
+	siluCfg.ActGeluErf = false
+	geluCfg := m.Cfg
+	geluCfg.ActGeluTanh = true
+	for _, activation := range []struct {
+		name string
+		cfg  Config
+	}{
+		{name: "SiLU", cfg: siluCfg},
+		{name: "GELUTanh", cfg: geluCfg},
+	} {
+		want, err := legacyV41SharedExpertSwiGLU(m, 0, xn, activation.cfg)
+		if err != nil {
+			t.Fatalf("original body %s: %v", activation.name, err)
+		}
+		got, err := m.v41SharedExpertSwiGLU(0, xn, activation.cfg)
+		if err != nil {
+			t.Fatalf("adapter %s: %v", activation.name, err)
+		}
+		assertFloat32BitsEqual(t, "shared-original-body-"+activation.name, want, got)
+	}
+}
+
 // TestFFNAdapterActivationMatrix extends the independent old-body parity of
 // TestFFNGatedAdaptersBitExact across every supported activation policy for each
 // of the three production adapters (routed V4.1, shared V4.1, dense). The prior
@@ -278,6 +319,32 @@ func legacyV41SwiGLU(w1, w3, w2, xn []float32, I, H int, cfg Config) []float32 {
 	return matRows(w2, h, H, I)
 }
 
+// legacyV41SharedExpertSwiGLU is the shared-expert composition as it stood at the
+// pre-#13435 baseline: the three shared-expert leaves projected through
+// v41ProjMatRows and an inline act(h1)*h3 elementwise product, with no
+// clampSwiGLUProjections call. It is the original body the shared adapter is
+// measured against, not a reimplementation of the adapter.
+func legacyV41SharedExpertSwiGLU(m *Model, l int, xn []float32, cfg Config) ([]float32, error) {
+	I, H := cfg.MoEIntermediateSize, cfg.HiddenSize
+	h1, err := m.v41ProjMatRows(l, "ffn.shared_experts.w1.weight", xn, I, H)
+	if err != nil {
+		return nil, err
+	}
+	h3, err := m.v41ProjMatRows(l, "ffn.shared_experts.w3.weight", xn, I, H)
+	if err != nil {
+		return nil, err
+	}
+	h := make([]float32, I)
+	for i := 0; i < I; i++ {
+		h[i] = act(h1[i], cfg) * h3[i]
+	}
+	y, err := m.v41ProjMatRows(l, "ffn.shared_experts.w2.weight", h, H, I)
+	if err != nil {
+		return nil, err
+	}
+	return y, nil
+}
+
 func legacyDenseSwiGLUApply(m *Model, layer int, xn any, mat matKernel) []float32 {
 	cfg := m.Cfg
 	H, I := cfg.HiddenSize, cfg.IntermediateSize
@@ -330,6 +397,41 @@ func BenchmarkFFNGatedAdapters(b *testing.B) {
 						b.ReportAllocs()
 						for i := 0; i < b.N; i++ {
 							ffnAdapterTestSink = bench.run()
+						}
+					})
+				}
+			})
+		}
+	})
+
+	b.Run("V41Shared", func(b *testing.B) {
+		m := v41ReducedModelLayers(b, 1)
+		xn := ffnTestValues(m.Cfg.HiddenSize, 0.015625)
+		geluCfg := m.Cfg
+		geluCfg.ActGeluTanh = true
+		for _, activation := range []struct {
+			name string
+			cfg  Config
+		}{
+			{name: "SiLU", cfg: m.Cfg},
+			{name: "GELUTanh", cfg: geluCfg},
+		} {
+			b.Run(activation.name, func(b *testing.B) {
+				for _, bench := range []struct {
+					name string
+					run  func() ([]float32, error)
+				}{
+					{name: "Adapter", run: func() ([]float32, error) { return m.v41SharedExpertSwiGLU(0, xn, activation.cfg) }},
+					{name: "Legacy", run: func() ([]float32, error) { return legacyV41SharedExpertSwiGLU(m, 0, xn, activation.cfg) }},
+				} {
+					b.Run(bench.name, func(b *testing.B) {
+						b.ReportAllocs()
+						for i := 0; i < b.N; i++ {
+							out, err := bench.run()
+							if err != nil {
+								b.Fatal(err)
+							}
+							ffnAdapterTestSink = out
 						}
 					})
 				}

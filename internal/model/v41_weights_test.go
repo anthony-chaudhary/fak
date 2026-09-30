@@ -13,7 +13,7 @@ import (
 // v41TestReducedConfig narrows the real admitted V4.1 config to small, internally
 // consistent axes so fixtures stay tiny while the retained metadata pointer keeps
 // IsDeepSeekV41() true. Every narrowed axis is one DeepSeekV41Inventory reads.
-func v41TestReducedConfig(t *testing.T, layers, experts int) Config {
+func v41TestReducedConfig(t testing.TB, layers, experts int) Config {
 	t.Helper()
 	_, cfg := readDeepSeekV41Config(t)
 	cfg.NumLayers = layers
