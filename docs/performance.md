@@ -26,19 +26,8 @@ compose.
 
 This direction does not mint a current win. Each comparison still names the executing engine,
 the matched envelope, and the authority row. llama.cpp can be selected explicitly as a
-development or business proof of concept, alongside benchmark, parity/reference,
-interoperability, or study uses. These are separate evidence planes and cannot close
-the native product milestone. Direct OSS never silently
+benchmark, parity/reference, migration/interoperability, or borrowing aid; it never silently
 turns a failed or unsupported native run into a passing external result.
-
-Study current OSS and incorporate useful techniques and mechanisms into Fak-native
-before reinvention. Custom work requires a consequential witnessed gap and useful
-net benefit against current tuned OSS after integration and maintenance cost.
-The [first milestone](local-agent-milestone.md) earns one useful native coding workflow
-on existing supported hardware before compute expansion. Include failures, retries,
-setup, operator effort, and all overhead in matched comparisons. The
-[adaptation index](project-orientation.md#primary-adaptation-index) compares verified
-useful shipping pace against comparable market and prior windows; unmeasured is unknown.
 
 ### Current native-performance work
 

@@ -1,6 +1,6 @@
 ---
 title: "Fak-native inference doctrine: own the engine and beat the reference"
-description: "The canonical boundary for local inference work: fak-native is the product and performance path; Direct OSS is permitted for development, business proofs of concept, and comparisons in a separate evidence plane, never a silent native fallback."
+description: "The canonical boundary for local inference work: fak-native is the product and performance path; llama.cpp is an explicit benchmark, diagnosis, interoperability, or borrowing reference, never a silent fallback."
 ---
 
 # Fak-native inference is the product path
@@ -13,7 +13,7 @@ should link here. Benchmark indexes, issues, and runtime docs should do the same
 restating a different engine policy.
 
 > **TL;DR:** Build and optimize local inference inside fak. Use llama.cpp deliberately as a
-> reference and study input; direct OSS development or business PoCs stay separate from native product evidence.
+> reference, never quietly as the implementation.
 
 ## The invariant, in plain language
 
@@ -24,17 +24,13 @@ restating a different engine policy.
 **Performance target:** In matched, quality-constrained envelopes, fak-native must beat llama.cpp.
 
 <!-- native-engine-doctrine:explicit-reference-only -->
-**Direct-use boundary:** Direct OSS use is permitted for development, business proofs of concept, comparisons, parity diagnosis, interoperability, and study; it never closes the native product milestone.
+**Reference boundary:** llama.cpp is permitted only when explicitly selected for benchmarks, parity/reference diagnosis, migration/interoperability, or ego-free borrowing.
 
 <!-- native-engine-doctrine:no-silent-fallback -->
 **Fallback boundary:** fak never selects llama.cpp as a fallback for native or performance work.
 
 <!-- native-engine-doctrine:owned-stack -->
 **Ownership reason:** fak must understand and control the full engine stack so higher-order gains compose. That stack covers kernels and memory, scheduling and cache, plus adaptation and operations.
-
-**Borrow-first rule:** Study current OSS, reuse or incorporate its techniques and mechanisms into Fak-native before reinventing them. Preserve license obligations, attribution, revision pins, and the owned execution boundary. Custom implementation must close a consequential witnessed gap with useful net benefit against current tuned OSS after integration and maintenance cost.
-
-The [product orientation](project-orientation.md) owns adaptation pace relative to comparable market and past shipping rates. Earn [one useful native workflow](local-agent-milestone.md) before compute expansion. This direction changes no runtime defaults and claims no completed qualification.
 
 These are engineering invariants, not an unsupported claim that fak currently wins every
 comparison. A current performance or efficiency claim still needs a scoped row in
@@ -64,7 +60,7 @@ the model is an external runtime even when fak launched it, fronts it, or consum
 
 | Term | Meaning |
 |---|---|
-| fak-native | Model loading and inference execute through fak's in-kernel model and compute path. This is the preferred core local product and performance path. |
+| fak-native | Model loading and inference execute through fak's in-kernel model and compute path. This is the local product and performance path. |
 | native backend | A compute-HAL implementation selected inside fak-native, such as CPU, CUDA, or Metal. Changing a native backend does not replace the inference engine. |
 | explicit external reference runtime | llama.cpp or another independently implemented engine selected explicitly for a bounded benchmark, comparison, parity/reference diagnosis, migration/interoperability task, or ego-free study and borrowing. |
 | gateway/provider upstream | A remote or separately served model behind the fak gateway. This can be a supported operating mode, but it is external inference and is never evidence for fak-native performance. |
@@ -112,11 +108,10 @@ claim. Equal tokens per second with worse correctness does not win. A fast exter
 fak's gateway is not a fak-native result. A native result that is slower today remains valuable
 evidence because it names the gap that native work must retire.
 
-## Explicit OSS uses and their evidence planes
+## The four explicit llama.cpp uses
 
 | Explicit use | What is allowed | What the result means |
 |---|---|---|
-| Development / business PoC | Explicitly use existing OSS to develop the project or validate a bounded business hypothesis. | Development or PoC evidence only; no native execution, workflow qualification, or milestone credit. |
 | Benchmark | Run a pinned llama.cpp build as the tuned baseline in a matched envelope. | A comparison bar. It proves only what the measured rows and envelope state. |
 | Parity/reference diagnosis | Compare tokenization, logits, greedy tokens, tensor transforms, or intermediate values to localize a correctness difference. | Reference evidence. Passing or failing narrows the defect; it does not transfer engine ownership. |
 | Migration/interoperability | Read or produce compatible artifacts, validate a migration, or explicitly front a llama.cpp service while moving a workload. | Compatibility evidence. The run remains external inference unless the model executes inside fak. |
@@ -132,7 +127,7 @@ Closed vendor accelerator runtimes execute outside the fak-native engine.
 This classification applies when FLM or OGA/Lemonade selects a closed runtime;
 the frontend name alone does not identify the execution engine.
 
-Select an explicit use for each vendor-runtime run; closed vendor execution is not OSS:
+Select one of the same four explicit uses for each vendor-runtime run:
 
 - Benchmark: measure an external baseline in a matched envelope.
 - Parity/reference diagnosis: compare outputs to locate a correctness difference.
@@ -143,7 +138,7 @@ Vendor-runtime receipts name the actual engine, device, and explicit use.
 NPU placement does not convert external execution into fak-native performance evidence.
 fak never automatically substitutes a vendor accelerator runtime for native execution.
 When native support is unavailable, return an explicit unsupported result; an operator
-may separately select an external development, PoC, comparison, or interoperability run; retain that evidence plane.
+may separately select an external comparison or interoperability run.
 
 ## Default and failure behavior
 
@@ -155,7 +150,7 @@ For work classified as native inference or native performance:
 | A native CPU, CUDA, or Metal backend is selected. | Stay inside the fak-owned compute boundary. |
 | The model, backend, device, or memory envelope is unsupported. | Return an explicit unsupported, unavailable, or not-yet result. |
 | Native launch fails. | Keep the native failure and its evidence. |
-| The operator selects llama.cpp. | Reclassify it as explicitly selected development, business PoC, comparison, diagnosis, interoperability, or borrowing work; never native product evidence. |
+| The operator selects llama.cpp. | Reclassify the run as benchmark, diagnosis, interoperability, or borrowing work. |
 
 Do not add `auto`, recovery, convenience, or “best available” behavior that turns a native
 request into llama.cpp execution without the operator making that change. A loud native gap is
@@ -167,7 +162,7 @@ Before accepting a native implementation or performance claim, ask:
 
 1. Did the model execute inside fak?
 2. Does the command, result, or receipt name the engine?
-3. If external OSS ran, is its development, business PoC, comparison, diagnosis, interoperability, or study evidence plane explicit?
+3. If llama.cpp ran, which of the four explicit uses justified it?
 4. Is the comparison envelope matched and quality-constrained?
 5. If fak-native could not run, did the path report that gap instead of changing engines?
 6. If an external idea was borrowed, where is the fak-owned implementation and its native
@@ -179,7 +174,7 @@ do not use it to close a fak-native performance claim.
 
 ## Deterministic docs guard
 
-This docs-only guard pins the native ownership, borrow-first, and direct-use invariant sentences and the seven inbound links
+This docs-only guard pins the five required invariant sentences and the seven inbound links
 that make the doctrine discoverable. Run it from the repository root:
 
 ```powershell
@@ -187,12 +182,11 @@ $canonical = 'docs/native-inference-goal.md'
 $requiredPhrases = @(
   'fak-native is the product and performance path for local inference.'
   'In matched, quality-constrained envelopes, fak-native must beat llama.cpp.'
-  'Direct OSS use is permitted for development, business proofs of concept, comparisons, parity diagnosis, interoperability, and study; it never closes the native product milestone.'
+  'llama.cpp is permitted only when explicitly selected for benchmarks, parity/reference diagnosis, migration/interoperability, or ego-free borrowing.'
   'fak never selects llama.cpp as a fallback for native or performance work.'
   'fak must understand and control the full engine stack so higher-order gains compose. That stack covers kernels and memory, scheduling and cache, plus adaptation and operations.'
 )
 $requiredPhrases += @(
-  'Study current OSS, reuse or incorporate its techniques and mechanisms into Fak-native before reinventing them.'
   'Closed vendor accelerator runtimes execute outside the fak-native engine.'
   'Vendor-runtime receipts name the actual engine, device, and explicit use.'
   'fak never automatically substitutes a vendor accelerator runtime for native execution.'
@@ -226,7 +220,7 @@ if ($failures.Count) {
 Expected output:
 
 ```text
-PASS native-inference-doctrine phrases=9 inbound_links=7
+PASS native-inference-doctrine phrases=8 inbound_links=7
 ```
 
 Run the repository link and index gates after this guard; they prove the linked target resolves,
