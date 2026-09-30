@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -127,6 +128,10 @@ type turnkeyNativeLoadDeps struct {
 	// request already finds the device full. It returns the fail-closed reason on decline, or
 	// nil when promotion succeeded or was not applicable.
 	eagerMetalResidency func(*fakmodel.Model) error
+	// scavengeLoaderHeap returns eligible idle Go pages to the OS once the model,
+	// eager device residency, and tokenizer are ready, before planner construction.
+	// It runs only during successful startup; nil leaves injected loads unchanged.
+	scavengeLoaderHeap func()
 	// resolveMTPStatus resolves the truthful startup speculative state from the
 	// actual qualification result + planner admission. It returns active=true with
 	// an empty reason only when a reviewed record matched AND the coordinator was
@@ -148,6 +153,11 @@ type turnkeyNativeLoadDeps struct {
 }
 
 func defaultTurnkeyNativeLoadDeps() turnkeyNativeLoadDeps {
+	// Keep loader heap reclamation opt-in until startup performance is qualified.
+	var scavengeLoaderHeap func()
+	if raw := strings.TrimSpace(os.Getenv("FAK_UP_SCAVENGE_LOADER_HEAP")); raw == "1" || strings.EqualFold(raw, "true") {
+		scavengeLoaderHeap = debug.FreeOSMemory
+	}
 	return turnkeyNativeLoadDeps{
 		resolveBackend: func() (compute.Backend, error) { return resolveServeChatBackend("") },
 		resolveMetal:   func() (serveMetalDecision, error) { return resolveServeMetalDecision(false, false, "") },
@@ -162,10 +172,11 @@ func defaultTurnkeyNativeLoadDeps() turnkeyNativeLoadDeps {
 			m, q4k, profile, _ := loadServeInKernelModel(path, backend, false, contextTokens, nil, 1, fit)
 			return m, q4k, profile
 		},
-		loadTokenizer:  func(path string) (*tokenizer.Tokenizer, bool) { return resolveServeTokenizer("", path) },
-		newPlanner:     newTurnkeyInKernelPlanner,
-		hostMemory:     compute.HostSystemMemoryInfo,
-		metalResidency: func() (int, int) { return metalgemm.LiveQ6KWeights(), metalgemm.LiveQ8Weights() },
+		loadTokenizer:      func(path string) (*tokenizer.Tokenizer, bool) { return resolveServeTokenizer("", path) },
+		newPlanner:         newTurnkeyInKernelPlanner,
+		hostMemory:         compute.HostSystemMemoryInfo,
+		metalResidency:     func() (int, int) { return metalgemm.LiveQ6KWeights(), metalgemm.LiveQ8Weights() },
+		scavengeLoaderHeap: scavengeLoaderHeap,
 		eagerMetalResidency: func(m *fakmodel.Model) error {
 			if m == nil {
 				return nil
@@ -294,9 +305,6 @@ func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string
 		release()
 		return nil, fmt.Errorf("failed to load %q into the in-kernel engine", modelPath)
 	}
-	if deps.hostMemory != nil {
-		startup.HostTotalAfter, startup.HostAvailableAfter, _ = deps.hostMemory()
-	}
 	if profile != nil {
 		startup.LoadMode = profile.Mode
 		startup.LoadSeconds = profile.TotalSeconds
@@ -324,6 +332,15 @@ func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string
 		_ = model.CloseWeights()
 		release()
 		return nil, fmt.Errorf("%q has no usable tokenizer; pass a GGUF with an embedded tokenizer", modelPath)
+	}
+
+	if deps.scavengeLoaderHeap != nil {
+		deps.scavengeLoaderHeap()
+	}
+	// Sample after residency promotion and loader-heap scavenging so the startup
+	// receipt and MTP qualification use the memory state the planner will inherit.
+	if deps.hostMemory != nil {
+		startup.HostTotalAfter, startup.HostAvailableAfter, _ = deps.hostMemory()
 	}
 
 	planner := deps.newPlanner(model, tok, modelID, q4k, backend, metal, contextTokens)
