@@ -58,9 +58,10 @@ func (m *Model) ResidentReport() *ResidentReport {
 		if qt.lazy != nil {
 			bytes = qt.lazy.Bytes
 		}
-		if qt.lazy == nil {
-			r.Q4KBytes += int64(bytes)
-		}
+		// A prepared mapped view is CPU-resident even while its lazy metadata
+		// remains available for offset-aware Metal uploads. Bare descriptors
+		// have no raw bytes to charge.
+		r.Q4KBytes += int64(len(qt.raw))
 		// Params count logical weights even when the checkpoint payload is lazy.
 		r.Q4KParams += int64(bytes / q4kBlockBytes * qkK)
 	}

@@ -139,7 +139,7 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 			route = MetalFallbackQ4KGEMVPanelCPU
 		}
 		s.recordMetalFallback(route)
-		if qt.lazy != nil {
+		if qt.lazy != nil && len(qt.raw) == 0 {
 			panic("model: lazy Q4_K Metal GEMM upload failed: " + name)
 		}
 		return q4kGemm(qt, Xf, P)
@@ -433,7 +433,7 @@ func (s *Session) q4kMatRowsDispatch(name string, qt *q4kTensor, xf []float32) [
 		})
 	}) {
 		s.recordMetalFallback(MetalFallbackQ4KGEMVCPU)
-		if qt.lazy != nil {
+		if qt.lazy != nil && len(qt.raw) == 0 {
 			panic("model: lazy Q4_K Metal GEMV upload failed: " + name)
 		}
 		return q4kMatRows(qt, xf)
