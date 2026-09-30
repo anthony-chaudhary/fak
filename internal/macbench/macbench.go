@@ -527,9 +527,90 @@ type Report struct {
 	// GPUUtilPct is the sampled device_utilization_pct observed during the run
 	// (0 = not sampled). It is populated by the CLI caller (fak macbench) from
 	// the platform observability collector, so this package stays dependency-free.
-	GPUUtilPct float64  `json:"gpu_utilization_pct,omitempty"`
-	Headline   string   `json:"headline,omitempty"`
-	Errors     []string `json:"errors,omitempty"`
+	GPUUtilPct float64 `json:"gpu_utilization_pct,omitempty"`
+	// CPUUtilPct is serving-engine CPU utilization in percent of one core.
+	// It is populated only from an observed, engine-bound engagement pair;
+	// absence is explained by Engagement rather than graded as an idle CPU.
+	CPUUtilPct float64 `json:"cpu_utilization_pct,omitempty"`
+	// Engagement is the CPU-vs-device verdict. It is nil unless the caller armed
+	// a positive MinGPUUtil floor, mirroring how SLO is nil under zero floors.
+	Engagement *EngagementVerdict `json:"engagement,omitempty"`
+	Headline   string             `json:"headline,omitempty"`
+	Errors     []string           `json:"errors,omitempty"`
+}
+
+// EngagementVerdict grades whether a run actually exercised the Apple Silicon
+// accelerator, rather than topping out on a CPU-side fallback that still
+// satisfies the absolute throughput floors. It is populated only when the caller
+// set a positive MinGPUUtil floor; under the default (zero) floor it is nil and
+// the report stays byte-identical to the pre-engagement envelope.
+type EngagementVerdict struct {
+	Schema        string  `json:"schema"`
+	Status        string  `json:"status"`
+	Reason        string  `json:"reason,omitempty"`
+	MinGPUUtilPct float64 `json:"min_gpu_util_pct"`
+	DeviceUtilPct float64 `json:"device_util_pct"`
+	CPUUtilPct    float64 `json:"cpu_util_pct"`
+	// DeviceOK reports the device sample clearing the declared floor on its own.
+	DeviceOK bool `json:"device_ok"`
+	// CPUDominant reports the CPU sample exceeding the device sample — the shape
+	// of a run that burned cores while the accelerator idled.
+	CPUDominant bool `json:"cpu_dominant"`
+	// OK is false for unknown telemetry. A known run FAILS only when the CPU
+	// dominates AND the device stayed below the floor. An engaged device passes,
+	// so the gate cannot be satisfied by raising CPU load.
+	OK bool `json:"ok"`
+}
+
+// GradeEngagement grades a run's paired CPU/device utilization samples against a
+// minimum GPU engagement floor. A non-positive floor is treated as waived and
+// returns nil, so the default (unarmed) report carries no verdict and no drift.
+// Callers must establish that both samples are present and engine-bound before
+// using this known-pair helper; otherwise use GradeEngagementObserved.
+func GradeEngagement(cpuPct, devicePct, minGPUUtil float64) *EngagementVerdict {
+	return GradeEngagementObserved(cpuPct, devicePct, minGPUUtil, true, true, true)
+}
+
+// GradeEngagementObserved requires present CPU/device samples bound to the
+// serving engine. Missing or unrelated telemetry is unknown and cannot pass an
+// armed witness. The numeric rule is unchanged for a known, valid sample pair.
+func GradeEngagementObserved(cpuPct, devicePct, minGPUUtil float64, cpuPresent, devicePresent, engineBound bool) *EngagementVerdict {
+	if minGPUUtil <= 0 {
+		return nil
+	}
+	v := &EngagementVerdict{
+		Schema:        "fak.macbench.engagement.v1",
+		Status:        "unknown",
+		MinGPUUtilPct: minGPUUtil,
+	}
+	if math.IsNaN(minGPUUtil) || math.IsInf(minGPUUtil, 0) {
+		v.MinGPUUtilPct = 0
+		v.Reason = "invalid_floor"
+		return v
+	}
+	switch {
+	case !engineBound:
+		v.Reason = "engine_unbound"
+	case !cpuPresent:
+		v.Reason = "cpu_unavailable"
+	case !devicePresent:
+		v.Reason = "device_unavailable"
+	case math.IsNaN(cpuPct) || math.IsInf(cpuPct, 0) || cpuPct < 0 || math.IsNaN(devicePct) || math.IsInf(devicePct, 0) || devicePct < 0:
+		v.Reason = "invalid_sample"
+	}
+	if v.Reason != "" {
+		return v
+	}
+	v.DeviceUtilPct = devicePct
+	v.CPUUtilPct = cpuPct
+	v.DeviceOK = devicePct >= minGPUUtil
+	v.CPUDominant = cpuPct > devicePct
+	v.OK = v.DeviceOK || !v.CPUDominant
+	v.Status = "fail"
+	if v.OK {
+		v.Status = "pass"
+	}
+	return v
 }
 
 // SLOVerdict is the ABSOLUTE throughput grade for a macbench run. It is

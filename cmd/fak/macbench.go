@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -77,8 +78,13 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 	concurrency := fs.Int("concurrency", 2, "concurrent requests for the 2stream suite")
 	minPrefillTPS := fs.Float64("min-prefill-tps", 0, "absolute prefill throughput floor in tokens/second; >0 fails the run when no row meets it (0 disables)")
 	minDecodeTPS := fs.Float64("min-decode-tps", 0, "absolute decode throughput floor in tokens/second; >0 fails the run when no row meets it (0 disables)")
+	minGPUUtil := fs.Float64("min-gpu-util", 0, "minimum Apple Silicon device utilization in percent; >0 requires a proven serving-engine CPU/device pair, exits nonzero for unknown telemetry or CPU dominance below the device floor (0 disables)")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if math.IsNaN(*minGPUUtil) || math.IsInf(*minGPUUtil, 0) {
+		fmt.Fprintln(stderr, "fak macbench: --min-gpu-util must be finite")
 		return 2
 	}
 	key, err := resolveMacBenchKeyForRun(*keyEnv, *keyFile, *fetchKey, *sshHost, *sshKey, *gateway, suite)
@@ -124,6 +130,13 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 	if gpuUtilAfter > rep.GPUUtilPct {
 		rep.GPUUtilPct = gpuUtilAfter
 	}
+	// macobs observes this host, and client CPU counters do not identify
+	// the serving process. Neither establishes the serving engine's paired CPU/device telemetry, even for a
+	// loopback gateway. Keep the armed witness unknown until that binding exists;
+	// a zero floor preserves the existing report and exit behavior.
+	if *minGPUUtil > 0 {
+		rep.Engagement = macbench.GradeEngagementObserved(0, 0, *minGPUUtil, false, false, false)
+	}
 	if *asJSON {
 		_ = writeIndentedJSONNoEscape(stdout, rep)
 	} else {
@@ -135,6 +148,15 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 	if rep.SLO != nil && !rep.SLO.OK {
 		fmt.Fprintf(stderr, "fak macbench: SLO MISS best_prefill=%.1f tok/s (floor %.1f) best_decode=%.1f tok/s (floor %.1f)\n",
 			rep.SLO.BestPrefillTPS, rep.SLO.MinPrefillTPS, rep.SLO.BestDecodeTPS, rep.SLO.MinDecodeTPS)
+		return 1
+	}
+	if rep.Engagement != nil && !rep.Engagement.OK {
+		if rep.Engagement.Status == "unknown" {
+			fmt.Fprintf(stderr, "fak macbench: GPU ENGAGEMENT UNKNOWN (%s): serving-engine CPU/device telemetry pair is not established; client CPU and local host GPU cannot satisfy --min-gpu-util\n", rep.Engagement.Reason)
+			return 1
+		}
+		fmt.Fprintf(stderr, "fak macbench: GPU ENGAGEMENT MISS device=%.1f%% (floor %.1f%%) while cpu=%.1f%% dominated: the run topped out on CPU with the accelerator idle\n",
+			rep.Engagement.DeviceUtilPct, rep.Engagement.MinGPUUtilPct, rep.Engagement.CPUUtilPct)
 		return 1
 	}
 	return 0
