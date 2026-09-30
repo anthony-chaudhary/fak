@@ -185,7 +185,8 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 					for d := 0; d < opt.HeadDim; d++ {
 						dot += q[qBase+d] * kv[kvBase+d]
 					}
-					sum += exp32(dot*opt.Softmax - maxScore)
+					// Match the rounded float32 score used by the maximum pass.
+					sum += exp32(float32(dot*opt.Softmax) - maxScore)
 				}
 				if sum == 0 {
 					continue
@@ -202,7 +203,7 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 					for d := 0; d < opt.HeadDim; d++ {
 						dot += q[qBase+d] * kv[kvBase+d]
 					}
-					weight := exp32(dot*opt.Softmax-maxScore) / sum
+					weight := exp32(float32(dot*opt.Softmax)-maxScore) / sum
 					for d := 0; d < opt.HeadDim; d++ {
 						o[oBase+d] += weight * kv[kvBase+d]
 					}
