@@ -212,6 +212,7 @@ fak manage claude           # short: fak m claude; or: fak manage --provider ope
 | **Every benchmark number** | [Benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) |
 | **Every per-run benchmark sheet** (results · runbooks · pending/gated) | [docs/benchmarks index](benchmarks/README.md) |
 | **Everything fak supports** | [What fak supports](supported/README.md) — models · features · clouds · APIs/MCP · harnesses · engines |
+| **How the core engine works today, and where it is going** | [Engine visuals](engine-visuals.md) — the frozen-ABI tier graph, token journey, KV/context-MMU hierarchy, the fit fork, the native lever loop, and the backend registry |
 | **Every machine fak runs on** | [Hardware matrix](HARDWARE-MATRIX.md) (4 platforms · 2 CPU ISAs · 4 GPU backends) |
 | **How fak serves at scale** | [Serving plans](serving/README.md) — dual-track · poly-model · hardware-aware & regenerable KV |
 | **What's real, what's not** | [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) |
