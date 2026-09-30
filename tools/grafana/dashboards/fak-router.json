@@ -33,8 +33,8 @@
     },
     {
       "type": "link",
-      "title": "Ops fleet work",
-      "url": "/d/fak-ops-fleet-work",
+      "title": "Fak Ops",
+      "url": "/d/fak-ops",
       "keepTime": true,
       "includeVars": true,
       "icon": "external link"
