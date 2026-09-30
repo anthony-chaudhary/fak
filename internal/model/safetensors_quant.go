@@ -273,7 +273,7 @@ func loadSafetensorsQuantDir(dir string, cfg Config, open safetensorsFileOpener,
 // quantize resident matmul weights immediately and keep only the small f32 tensors.
 type QuantBuilder struct {
 	m         *Model
-	raw       []byte
+	rawChunks [][]byte
 	off       int
 	tied      bool
 	built     bool
@@ -345,7 +345,14 @@ func (b *QuantBuilder) AddF32Tensor(name string, shape []int, data []float32) er
 	if elems != len(data) {
 		return fmt.Errorf("model: tensor %s has %d values, shape wants %d", name, len(data), elems)
 	}
-	return quantizeDecodedFloatTensorIntoWithRetention(name, shape, data, nil, b.m, b.tied, &b.raw, &b.off, b.mtpRetention())
+	var raw []byte
+	err = quantizeDecodedFloatTensorIntoWithRetention(name, shape, data, nil, b.m, b.tied, &raw, &b.off, b.mtpRetention())
+	// Each input is copied into an owned chunk before Add returns. Keep any
+	// bytes appended before an error, matching the existing partial-add behavior.
+	if len(raw) > 0 {
+		b.rawChunks = append(b.rawChunks, raw)
+	}
+	return err
 }
 
 // SetQ2KEmbedding attaches a packed Q2_K embedding table to the model being built.
@@ -374,10 +381,22 @@ func (b *QuantBuilder) Build() (*Model, error) {
 		return nil, fmt.Errorf("model: QuantBuilder already built")
 	}
 	b.built = true
-	b.m.raw = b.raw
 	if len(b.m.q8w) == 0 && len(b.m.q4kw) == 0 && len(b.m.kqw) == 0 && len(b.m.q2w) == 0 && b.m.Q2KEmbedding == nil {
+		// Build is single-use even on failure, so no caller can recover these
+		// chunks through a later Build. Release them without copying the arena.
+		b.rawChunks = nil
 		return nil, fmt.Errorf("model: no quantizable weights found")
 	}
+	// Coalesce once with exact capacity, rather than retaining the spare capacity
+	// accumulated by growing one arena throughout the load.
+	if b.off > 0 {
+		b.m.raw = make([]byte, b.off)
+		off := 0
+		for _, raw := range b.rawChunks {
+			off += copy(b.m.raw[off:], raw)
+		}
+	}
+	b.rawChunks = nil
 	b.m.initQ8CacheIfComplete()
 	return b.m, nil
 }
@@ -909,7 +928,11 @@ func appendAliasedF32(source, canonical string, got, want []int, data []float32,
 
 func appendQuantF32Tensor(m *Model, raw *[]byte, off *int, name string, shape []int, data []float32) {
 	appendF32Tensor(m.manifest, raw, name, shape, data)
-	*off = len(*raw)
+	// raw can be one builder chunk; off remains the offset in the final arena.
+	meta := m.manifest[name]
+	meta.Offset = *off
+	m.manifest[name] = meta
+	*off += meta.Nbytes
 }
 
 func anyQ8Present(m *Model, names ...string) bool {
