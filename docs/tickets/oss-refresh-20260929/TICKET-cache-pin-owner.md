@@ -25,7 +25,7 @@ LMCache proposed PR #5098, head dc0939588e3dac720b6fefe125d91d1c613f407e; lmcach
 
 ## Core through-line
 
-Trace PagedStore construction, its interfaces and all Pin/Unpin consumers at the claimed public revision. Record file:line evidence and an executable reachability witness when a production consumer exists. If no consumer exists, close as WATCH with a concrete future trigger; do not add unused receipt machinery. If a consuming defect is reproduced, create a separately scoped implementation contract covering the actual caller and independent regression.
+Trace PagedStore construction, its interfaces and all Pin/Unpin consumers at the claimed public revision. Record file:line evidence and an executable reachability witness when a production consumer exists. If no consumer exists, close as WATCH with a concrete future trigger; do not add unused receipt machinery. If a consuming defect is reproduced, record a follow-up implementation recommendation covering the actual caller and independent regression. Creation of that separately scoped ticket occurs after this audit, outside its markdown-only edit scope.
 
 ## Gold-plating boundary
 
@@ -46,7 +46,7 @@ All unchecked criteria below must be satisfied through the real consuming entryp
 ## Definition of done
 
 - [ ] Audit the current public tree for PagedStore construction, interfaces, Pin/Unpin call sites and production entrypoint reachability; retain commands and file:line evidence in this specification.
-- [ ] Record WATCH if no consuming path exists, with a trigger when a real caller begins pinning; otherwise reproduce the actual caller failure and register a distinct implementation contract with that caller in its scope.
+- [ ] Record WATCH if no consuming path exists, with a trigger when a real caller begins pinning; otherwise reproduce the actual caller failure and record a distinct implementation follow-up with the caller, required scope and acceptance. Register that follow-up after the audit.
 - [ ] Run `go test ./internal/ctxmmu -count=1`; retain a public signed commit containing the audit receipt. No runtime repair or hardware claim is required for this audit.
 
 ## Witness
@@ -79,4 +79,4 @@ This bounded audit prevents a source-only concern from becoming unused runtime c
 
 ## Closure binding
 
-Close this audit only after its consuming-path disposition and acceptance receipt are committed, with any proved implementation outcome routed to a distinct native contract.
+Close this audit only after its consuming-path disposition and acceptance receipt are committed, with any proved implementation outcome recorded for subsequent routing to a distinct native contract.
