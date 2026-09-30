@@ -2,6 +2,7 @@ package fakpack
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -78,6 +79,181 @@ func createTestFixtures(t testing.TB) (dir, lockPath, policyPath, assetsDir, bin
 	}
 
 	return dir, lockPath, policyPath, assetsDir, binDir, modelPath
+}
+
+// writeBinClosureLock writes a minimal v2 product lock that declares exactly the
+// named components (id==file name in the bin dir) and nothing else.
+func writeBinClosureLock(t testing.TB, path string, comps ...string) {
+	t.Helper()
+	var sb strings.Builder
+	sb.WriteString(`{"schema":"fak.harness-product-lock/v2","id":"sha256:declared-binary-closure-lock","components":[`)
+	for i, id := range comps {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		sb.WriteString(`{"id":"` + id + `","version":"1.0.0","digest":"sha256:declared","source":"bin/` + id + `"}`)
+	}
+	sb.WriteString(`]}`)
+	if err := os.WriteFile(path, []byte(sb.String()), 0o644); err != nil {
+		t.Fatalf("writing lock %s: %v", path, err)
+	}
+}
+
+// binariesLayerDigest returns the manifest-declared digest of the binaries layer.
+func binariesLayerDigest(t testing.TB, res *CreateResult) string {
+	t.Helper()
+	for _, l := range res.Layers {
+		if l.MediaType == MediaTypeBinaries {
+			return l.Digest
+		}
+	}
+	t.Fatalf("no binaries layer in result: %+v", res.Layers)
+	return ""
+}
+
+// binariesLayerEntries returns the set of names archived in the bundle's binaries
+// layer, including a base-name alias for each entry.
+func binariesLayerEntries(t testing.TB, bundlePath string) map[string]bool {
+	t.Helper()
+	files, err := readArchive(bundlePath)
+	if err != nil {
+		t.Fatalf("readArchive(%s): %v", bundlePath, err)
+	}
+	var manifest Manifest
+	if err := json.Unmarshal(files["manifest.json"], &manifest); err != nil {
+		t.Fatalf("unmarshal manifest: %v", err)
+	}
+	for _, layer := range manifest.Layers {
+		if layer.MediaType != MediaTypeBinaries {
+			continue
+		}
+		hexDigest := strings.TrimPrefix(layer.Digest, "sha256:")
+		blob, ok := files["blobs/sha256/"+hexDigest]
+		if !ok {
+			t.Fatalf("binaries blob %s missing", layer.Digest)
+		}
+		entries, err := listTarGzFiles(blob)
+		if err != nil {
+			t.Fatalf("listTarGzFiles(binaries): %v", err)
+		}
+		return entries
+	}
+	t.Fatal("no binaries layer in manifest")
+	return nil
+}
+
+// TestCreateDeclaredBinaryClosure witnesses that the packaged binaries layer is
+// exactly the lock-declared component closure: unrelated executables never enter,
+// a missing or escaping declared executable fails before publication, and
+// identical inputs yield identical content digests.
+func TestCreateDeclaredBinaryClosure(t *testing.T) {
+	t.Run("declared_only", func(t *testing.T) {
+		dir, lockPath, _, _, binDir, _ := createTestFixtures(t)
+		if err := os.WriteFile(filepath.Join(binDir, "helper"), []byte("#!/bin/sh\necho helper\n"), 0o755); err != nil {
+			t.Fatalf("write helper: %v", err)
+		}
+		// Unrelated executable that is NOT referenced by the lock.
+		if err := os.WriteFile(filepath.Join(binDir, "rogue"), []byte("#!/bin/sh\necho rogue\n"), 0o755); err != nil {
+			t.Fatalf("write rogue: %v", err)
+		}
+		writeBinClosureLock(t, lockPath, "my-worker", "helper")
+
+		outBundle := filepath.Join(dir, "bundle.fakpack")
+		if _, err := Create(CreateOptions{LockPath: lockPath, BinDir: binDir, OutPath: outBundle}); err != nil {
+			t.Fatalf("Create failed: %v", err)
+		}
+
+		entries := binariesLayerEntries(t, outBundle)
+		for _, want := range []string{"my-worker", "helper"} {
+			if !entries[want] {
+				t.Fatalf("declared binary %q absent from binaries layer; got %v", want, entries)
+			}
+		}
+		if entries["rogue"] {
+			t.Fatalf("unrelated executable %q leaked into binaries layer; got %v", "rogue", entries)
+		}
+	})
+
+	t.Run("missing_declared_fails", func(t *testing.T) {
+		dir, lockPath, _, _, binDir, _ := createTestFixtures(t)
+		writeBinClosureLock(t, lockPath, "ghost")
+		outBundle := filepath.Join(dir, "ghost.fakpack")
+
+		_, err := Create(CreateOptions{LockPath: lockPath, BinDir: binDir, OutPath: outBundle})
+		if err == nil {
+			t.Fatal("expected Create to refuse a missing declared binary")
+		}
+		if Code(err) != ErrComponentMissing {
+			t.Fatalf("expected code %s, got %q (%v)", ErrComponentMissing, Code(err), err)
+		}
+		if _, statErr := os.Stat(outBundle); !os.IsNotExist(statErr) {
+			t.Fatalf("archive must not be published on refusal, stat err=%v", statErr)
+		}
+	})
+
+	t.Run("escape_refused", func(t *testing.T) {
+		dir, lockPath, _, _, binDir, _ := createTestFixtures(t)
+		// A file one level above BinDir, reachable only by ../ traversal.
+		if err := os.WriteFile(filepath.Join(dir, "outside"), []byte("#!/bin/sh\necho outside\n"), 0o755); err != nil {
+			t.Fatalf("write outside: %v", err)
+		}
+		writeBinClosureLock(t, lockPath, "escapee")
+		// Force Source to be the traversal path, not the base name.
+		lockTraversal := `{"schema":"fak.harness-product-lock/v2","id":"sha256:escape","components":[{"id":"escapee","version":"1.0.0","digest":"sha256:declared","source":"../outside"}]}`
+		if err := os.WriteFile(lockPath, []byte(lockTraversal), 0o644); err != nil {
+			t.Fatalf("write traversal lock: %v", err)
+		}
+		outBundle := filepath.Join(dir, "escape.fakpack")
+
+		_, err := Create(CreateOptions{LockPath: lockPath, BinDir: binDir, OutPath: outBundle})
+		if err == nil || Code(err) != ErrComponentMissing {
+			t.Fatalf("expected traversal refusal %s, got %v", ErrComponentMissing, err)
+		}
+		if _, statErr := os.Stat(outBundle); !os.IsNotExist(statErr) {
+			t.Fatalf("archive must not be published on traversal refusal, stat err=%v", statErr)
+		}
+
+		// Symlink escape, best effort: symlink creation may be unavailable.
+		target := filepath.Join(dir, "link-target")
+		if err := os.WriteFile(target, []byte("#!/bin/sh\necho link\n"), 0o755); err != nil {
+			t.Fatalf("write symlink target: %v", err)
+		}
+		if err := os.Symlink(target, filepath.Join(binDir, "link-escape")); err != nil {
+			t.Logf("symlink unsupported, skipping symlink escape: %v", err)
+			return
+		}
+		if err := os.WriteFile(lockPath, []byte(`{"schema":"fak.harness-product-lock/v2","id":"sha256:link-escape","components":[{"id":"link-escape","version":"1.0.0","digest":"sha256:declared","source":"bin/link-escape"}]}`), 0o644); err != nil {
+			t.Fatalf("write symlink lock: %v", err)
+		}
+		outSymlink := filepath.Join(dir, "symlink-escape.fakpack")
+		_, err = Create(CreateOptions{LockPath: lockPath, BinDir: binDir, OutPath: outSymlink})
+		if err == nil || Code(err) != ErrComponentMissing {
+			t.Fatalf("expected symlink refusal %s, got %v", ErrComponentMissing, err)
+		}
+	})
+
+	t.Run("deterministic_digest", func(t *testing.T) {
+		dir, lockPath, _, _, binDir, _ := createTestFixtures(t)
+		if err := os.WriteFile(filepath.Join(binDir, "helper"), []byte("#!/bin/sh\necho helper\n"), 0o755); err != nil {
+			t.Fatalf("write helper: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(binDir, "rogue"), []byte("#!/bin/sh\necho rogue\n"), 0o755); err != nil {
+			t.Fatalf("write rogue: %v", err)
+		}
+		writeBinClosureLock(t, lockPath, "my-worker", "helper")
+
+		resA, err := Create(CreateOptions{LockPath: lockPath, BinDir: binDir, OutPath: filepath.Join(dir, "a.fakpack")})
+		if err != nil {
+			t.Fatalf("Create A failed: %v", err)
+		}
+		resB, err := Create(CreateOptions{LockPath: lockPath, BinDir: binDir, OutPath: filepath.Join(dir, "b.fakpack")})
+		if err != nil {
+			t.Fatalf("Create B failed: %v", err)
+		}
+		if digA, digB := binariesLayerDigest(t, resA), binariesLayerDigest(t, resB); digA != digB {
+			t.Fatalf("binaries layer digest not deterministic: %s != %s", digA, digB)
+		}
+	})
 }
 
 func TestFakPackRoundtrip(t *testing.T) {
