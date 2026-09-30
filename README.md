@@ -7,21 +7,15 @@
 **Fak is building the open runtime that makes useful local agents practical on your own machine.**
 
 Start locally, give an agent real work, and keep useful context across turns.
-Our first milestone is one useful native local coding workflow on one existing
-supported device/model, with Strix Halo as the initial proving ground. OpenCode may
-supply interaction and tools; Fak-native owns model loading and inference, and
-Fak guard/context/lifecycle stay core. Study existing OSS and incorporate useful
-techniques before reinventing them; direct OSS development, business proofs of
-concept, and comparisons remain a separate evidence plane.
+Our first breakthrough milestone combines native inference, speculative decoding,
+and agentic caching into an experience whose qualified acceleration is automatic.
+The capability floor bounds what tools the agent may execute.
 
-**Status:** this native workflow remains a milestone to qualify. Pin one supported
-model/quantization by current compatibility evidence; earn a normal documented start,
-an independently accepted repository change, restart/follow-up, context invalidation,
-engine identity, and a current tuned OSS comparison within declared quality/time/memory
-budgets. Count failures and all overhead. Optional speculative and direct-I/O paths
-require their own qualification. Ship one notable milestone before compute expansion.
-See the [milestone](docs/local-agent-milestone.md), [engine doctrine](docs/native-inference-goal.md),
-and [product orientation](docs/project-orientation.md#primary-adaptation-index).
+**Status:** this is the product milestone we are working toward. Today,
+automatic setup and cache reuse have specific model/backend limits; speculative
+decoding and physical GPU Direct paths are not universally enabled or qualified.
+See the [local-agent milestone](docs/local-agent-milestone.md) for the current
+wiring, the meaning of automatic, and the evidence required to earn the claim.
 
 **Where it stands on speed:** on an Apple M3 Pro running Qwen3.8-27B,
 fak's own Metal engine measured 6.86 decode tok/s, 0.985× a pinned llama.cpp
@@ -106,7 +100,7 @@ claim boundaries: [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md); Mac setup:
   reuse across turns and compatible agents, with correct invalidation and isolation.
 - **Accelerate generation automatically:** Native kernels, memory sizing,
   quantization, and speculative decoding are parts of one local workflow. The
-  acceleration target requires qualified defaults; current MTP decoding requires explicit
+  milestone requires qualified defaults; current MTP decoding requires explicit
   selection. See the [implementation snapshot](docs/local-agent-milestone.md#current-implementation-is-narrower-than-the-milestone).
 - **Real-time multi-agent visibility:** Inspect live cross-agent reuse rates, per-subagent token breakdowns, and savings sparklines directly in your terminal overlay (`fak info` / `fak guard`) to see and verify the speedup as subagents execute concurrently.
 - **Keep reusable state close to compute:** Device-resident caching and direct GPU
@@ -115,8 +109,7 @@ claim boundaries: [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md); Mac setup:
 - **Run on your own hardware:** Native backends target Apple Silicon (fak-native
   Metal), AMD and Strix Halo (bundled Vulkan), and NVIDIA
   (`ghcr.io/anthony-chaudhary/fak:cuda-latest` with `--gpus all`), each with its own
-  support envelope; direct OSS development, business PoCs, and comparisons stay in
-  a separate evidence plane and cannot close the native product milestone
+  support envelope; external engines are explicit references only
   ([native inference goal](docs/native-inference-goal.md)).
 - **Default-deny capability floor:** Protect your workspace from unintended commands, path escapes, or tool poisoning. Every tool call is verified against a capability floor before execution; subagents get their own narrower floor, and a circuit breaker stops an agent stuck retrying a failing tool. Drop-in wrappers protect existing agents like Claude Code, Codex, OpenCode, and Cursor with zero rewrites.
 

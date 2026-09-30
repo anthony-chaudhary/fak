@@ -1,19 +1,13 @@
 # Useful local agents, accelerated automatically
 
-**Direction updated: 2026-09-30. Status: native product milestone to qualify.**
+**Direction set: 2026-09-09. Status: product milestone to qualify.**
 
-Ship one useful native local coding workflow on one existing supported device/model
-before compute expansion. Strix Halo is the initial proving ground. OpenCode may
-supply interaction and tools; Fak-native owns model loading and inference, while
-public Fak guard/context/lifecycle remain core. Pin one supported model artifact and
-quantization from current compatibility evidence; do not expand scope arbitrarily.
-
-Study existing OSS and incorporate useful techniques and mechanisms into the owned
-native path before reinvention. Qualified acceleration and legal context reuse
-support the workflow; speculative decoding and direct I/O are separately qualified
-mechanisms, not prerequisites for this first shipment. Direct OSS runs for development,
-business proofs of concept, and comparisons remain useful in their own evidence plane
-and cannot close this native milestone.
+Fak's first breakthrough milestone is to make useful local agents practical on
+local machines: responsive, economical, and simple to run. A developer starts
+Fak, gives an agent real work, and gets the benefit of native inference,
+speculative decoding, and reusable agent context through the normal workflow.
+Qualified acceleration should be automatic, with no collection of tuning flags
+required to obtain the supported experience.
 
 This is the first milestone we intend to earn. It does not assert that Fak is
 the world's first local-agent runtime or that every capability below is already
@@ -24,7 +18,7 @@ ownership and comparisons.
 ## Tell the story through the work
 
 **Short positioning:** Fak is building the open runtime for useful local agents,
-with owned native execution and qualified acceleration on supported machines.
+with acceleration that works automatically on supported machines.
 
 **The experience we are building:** start locally, run a real agent task, and
 keep working without repeatedly rebuilding the same context. Fak should make
@@ -79,7 +73,7 @@ Recheck these seams at the revision being shipped:
 |---|---|---|
 | Local startup and backend choice | `fak up` targets Apple Silicon with model/context memory sizing; Metal can be selected automatically. CUDA/Vulkan selection is not a universal automatic default. | [up](../cmd/fak/up.go), [model/backend selection](../cmd/fak/serve_model_load.go) |
 | In-kernel prefix reuse | Default-on for eligible architecture/backend snapshot combinations. Device paths need compatible state; reuse is not universal. | [planner configuration](../internal/agent/inkernel_planner_config.go) |
-| Speculative decoding | Metal hybrid-model MTP requires explicit configuration such as `FAK_SPECULATIVE=mtp`. Default-on speculation remains a separately qualified acceleration target. | [MTP eligibility](../internal/gateway/chat_completions.go), [MTP claim status](claims/qwen38-native-mtp-speculative-decode.md) |
+| Speculative decoding | Metal hybrid-model MTP requires explicit configuration such as `FAK_SPECULATIVE=mtp`. Default-on speculation is still a milestone requirement. | [MTP eligibility](../internal/gateway/chat_completions.go), [MTP claim status](claims/qwen38-native-mtp-speculative-decode.md) |
 | GPU Direct overflow | A true-valued CLI flag does not establish execution: the serve field has no runtime consumer in this snapshot. The claim ledger labels NVIDIA BaM NVMe evidence simulated. | [serve flags](../cmd/fak/serve.go), [claim ledger](../CLAIMS.md) |
 
 ## Earn the milestone on one real local workflow
@@ -88,11 +82,7 @@ Choose a bounded coding task with an independent acceptance witness: inspect a
 repository, make a change, run its relevant check, and resume or reuse compatible
 context for a follow-up. Keep the model, quality floor, machine, task inputs, and
 resource budget explicit. Test at least one compatible subagent branch if fanout
-is part of the claim. Start with one qualified model/device combination. Use one documented normal start
-through actual OpenCode (when selected) tools and Fak-native inference; after
-independent acceptance of the repository change, restart and complete a follow-up.
-Change relevant inputs or authority and witness precise context invalidation.
-External OSS development or PoC success does not satisfy these native criteria.
+is part of the claim. Start with one qualified model/device combination.
 
 Before running, declare absolute task-latency and interactive-response ceilings,
 memory limits, and a correctness floor appropriate to that workload. Then retain:
@@ -103,11 +93,7 @@ memory limits, and a correctness floor appropriate to that workload. Then retain
   claimed, and cache invalidation/recovery behavior.
 - Memory pressure, operator setup/intervention, and energy or cost when measured.
   Missing measurements stay unmeasured.
-- A current tuned OSS comparison with matched hardware, task/model/quantization,
-  quality, budgets, and cache state; name any safeguard differences and account for
-  full native integration overhead. Retain every attempt, failure, retry, interruption,
-  fallback reason, and setup/operator cost. Missing observations stay unknown.
-- The
+- A tuned baseline with matched task/model/quality and cache state, plus the
   exact automatic configuration and any fallback or disabled features.
 - Durable receipts naming date, source SHA, model/artifact, device, compiler,
   driver, power/thermal state, commands, sample count, and acceptance witness.
@@ -135,12 +121,7 @@ Use this brief when planning, delegating, reviewing, or writing product copy:
 In each worker packet name: **workflow; bottleneck; entry-point/call-path seam;
 supported model/device; expected default; acceptance witness; evidence still
 missing**. Prefer a bounded improvement to that path over additional knobs,
-backend breadth, compute expansion, or factory automation without a named product dependency.
-Study and borrow before reinvention; custom work requires a consequential witnessed
-gap and useful net benefit against current tuned OSS after integration and maintenance
-cost. The [product orientation](project-orientation.md#primary-adaptation-index)
-tracks verified useful shipping pace against comparable market and prior windows;
-unmeasured ratios stay unknown.
+backend breadth, or factory automation without a named product dependency.
 
 Lead public explanations with useful local work and automatic acceleration.
 Explain speculative decoding and agentic caching as the mechanisms supporting
