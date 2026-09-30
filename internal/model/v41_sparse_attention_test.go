@@ -153,6 +153,64 @@ func TestV41SparseAttentionSinkOracle(t *testing.T) {
 	}
 }
 
+// TestV41SparseAttentionSinkHighMagnitudeScore proves finite, high-magnitude
+// scores preserve the single valid KV row exactly. Its normalized weight is
+// one: there is no competing row, and a zero sink contributes exp(-score) = 0.
+// fak-test:runtime fast est=1ms lane=default
+func TestV41SparseAttentionSinkHighMagnitudeScore(t *testing.T) {
+	const headDim = 512
+	q := make([]float32, headDim)
+	kv := make([]float32, headDim)
+	for i := range q {
+		q[i] = 3.2e19
+		kv[i] = 1
+	}
+	scale := float32(1.0 / math.Sqrt(float64(headDim)))
+	// Independently establish that the analytic score is finite and the sink
+	// contributes zero in floating-point arithmetic, without a producer helper.
+	score := float64(q[0]) * float64(headDim) * float64(scale)
+	if math.IsNaN(score) || math.IsInf(score, 0) || math.Exp(-score) != 0 {
+		t.Fatalf("fixture requires a finite score with zero sink contribution: %g", score)
+	}
+
+	wantBits := math.Float32bits(1)
+	matchesKV := func(v float32) bool {
+		return !math.IsNaN(float64(v)) && !math.IsInf(float64(v), 0) && math.Float32bits(v) == wantBits
+	}
+	// These negative controls prove the assertion rejects invalid outputs;
+	// a subtraction-based tolerance check would accidentally accept NaN.
+	for _, invalid := range []float32{float32(math.NaN()), float32(math.Inf(1)), float32(math.Inf(-1)), 0} {
+		if matchesKV(invalid) {
+			t.Fatalf("invalid output %g matched the analytic KV value", invalid)
+		}
+	}
+
+	for _, tc := range []struct {
+		name string
+		sink []float32
+	}{
+		{name: "nil_sink"},
+		{name: "zero_sink", sink: []float32{0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := V41SparseAttentionSink(q, kv, tc.sink, []int32{0}, V41SparseAttentionSinkOptions{
+				B: 1, M: 1, Heads: 1, HeadDim: headDim, TopK: 1, N: 1, Softmax: scale,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != headDim {
+				t.Fatalf("output length %d want %d", len(got), headDim)
+			}
+			for i, v := range got {
+				if !matchesKV(v) {
+					t.Fatalf("element %d got %g (bits %#08x), want finite KV 1 (bits %#08x)", i, v, math.Float32bits(v), wantBits)
+				}
+			}
+		})
+	}
+}
+
 // TestV41SparseAttentionSinkIgnoresInvalidRows proves a -1 index contributes
 // neither score nor value: reordering/relocating invalid slots must not change
 // the output, and an all-invalid row yields an all-zero output.

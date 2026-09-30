@@ -640,8 +640,10 @@ func applyRope(hv, cos, sin []float32) {
 	half := len(cos)
 	for j := 0; j < half; j++ {
 		a, b := hv[j], hv[j+half]
-		hv[j] = a*cos[j] - b*sin[j]
-		hv[j+half] = b*cos[j] + a*sin[j]
+		// Match the serial model's float32 product rounding. Explicit conversions
+		// prevent optional FMA fusion from changing the rotated bits.
+		hv[j] = float32(a*cos[j]) - float32(b*sin[j])
+		hv[j+half] = float32(b*cos[j]) + float32(a*sin[j])
 	}
 }
 

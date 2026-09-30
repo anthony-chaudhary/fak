@@ -7,8 +7,9 @@ package model
 // (q4kExpertInputHAL, the incremental seam's two-projection + SwiGLU helper) into the
 // production V4.1 MoE loop through the optional v41ForwardState.expertGateUp callback.
 // On a device backend whose MatMul serves a checkpoint-tier Q2_K gate/up slate, the
-// gate + up projections and the SwiGLU run on the device and only the I-wide fused
-// intermediate crosses back for the EXISTING host Q3_K down contraction — the gate/up
+// gate + up projections run on the device. A zero-limit expert also runs fused
+// SwiGLU there; a positive limit reads only the two I-wide projection vectors
+// for the bounded host clamp/activation before the existing Q3_K down contraction. The gate/up
 // f32 weights are never materialized on the host, and no full-device triple is claimed.
 //
 // Independence: the "host oracle" is the SAME reduced fixture driven with the callback
@@ -205,63 +206,174 @@ func v41DecodeHistory(t *testing.T, s *Session, ids []int) [][]float32 {
 }
 
 // TestV41Q2KGateUpHALKeepsDownOnHost is the fak#13358 positive witness: a V4.1 session
-// whose routed experts carry a Q2_K gate/up slate on a device backend must run gate, up
-// and SwiGLU on the device through the shared #13357 operation, keep the Q3_K down
+// whose routed experts carry a Q2_K gate/up slate on a device backend must run gate/up
+// on the device, retain fused device SwiGLU at limit zero, keep the Q3_K down
 // contraction on the host (Q3_K has no device kernel), and reproduce the historical host
 // triple's logits within tolerance. The device seam is the per-pick token-major
 // contraction, which is exactly the contraction a fresh session's first decode step runs
 // (seq == 1); a later step recomputes the whole history through the expert-major grouped
 // contraction, which is a separate #13304 path this leaf does not touch.
+// fak-test:runtime medium est=30s lane=default
 func TestV41Q2KGateUpHALKeepsDownOnHost(t *testing.T) {
 	setQ4KSDOTForTest(false)
 	t.Cleanup(func() { setQ4KSDOTForTest(true) })
 
 	m := v41MixedQuantExpertModel(t)
+	for _, limit := range []float64{0, 2} {
+		name := "zero limit fused activation"
+		if limit > 0 {
+			name = "positive limit device projections"
+		}
+		t.Run(name, func(t *testing.T) {
+			m.Cfg.SwigluLimit = limit
 
-	// Host oracle: a fresh session with no device backend, so the callback is nil and the
-	// historical host gate/up/down triple runs for the same first decode step.
-	hostSess := &Session{M: m}
-	if hostSess.v41ExpertGateUpFunc() != nil {
-		t.Fatal("a session with no backend bound a device gate/up callback")
-	}
-	want := v41DecodeHistory(t, hostSess, []int{1})
-
-	// Device arm: the shared seam must activate and run exactly two MatMuls (gate, up)
-	// plus one SwiGLU per routed pick on the device.
-	be := &v41HalSeamBackend{Backend: compute.Default()}
-	devSess := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
-	if devSess.v41ExpertGateUpFunc() == nil {
-		t.Fatal("a DeviceMemory session did not bind the device gate/up callback")
-	}
-	got := v41DecodeHistory(t, devSess, []int{1})
-
-	// One decode Step (seq == 1) runs the token-major MoE contraction: NumExpertsPerTok
-	// routed picks, each running gate + up (two device MatMuls) and one fused SwiGLU.
-	picks := m.Cfg.NumExpertsPerTok * m.Cfg.NumLayers
-	if be.matmuls != 2*picks {
-		t.Fatalf("device MatMul count = %d, want %d (gate+up per routed pick)", be.matmuls, 2*picks)
-	}
-	if be.swiglu != picks {
-		t.Fatalf("device SwiGLU count = %d, want %d (one fused SwiGLU per routed pick)", be.swiglu, picks)
-	}
-
-	// The Q3_K down projection has no device kernel, so it must not have been staged as
-	// a device weight: the down contraction stayed on the host.
-	for l := 0; l < m.Cfg.NumLayers; l++ {
-		for e := 0; e < m.Cfg.NumExperts; e++ {
-			down := layerName(l, "ffn.experts."+itoa(e)+".w2.weight")
-			if _, staged := devSess.halW["kquant-raw:"+down]; staged {
-				t.Fatalf("Q3_K down %s was staged on the device; it has no HAL kernel and must stay on the host", down)
+			// Host oracle: a fresh session with no device backend, so the callback is nil and the
+			// historical host gate/up/down triple runs for the same first decode step.
+			hostSess := &Session{M: m}
+			if hostSess.v41ExpertGateUpFunc() != nil {
+				t.Fatal("a session with no backend bound a device gate/up callback")
 			}
+			want := v41DecodeHistory(t, hostSess, []int{1})
+
+			// Device arm: the shared seam must activate and run exactly two MatMuls (gate, up)
+			// plus one device SwiGLU per routed pick when the limit is zero.
+			be := &v41HalSeamBackend{Backend: compute.Default()}
+			devSess := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
+			if devSess.v41ExpertGateUpFunc() == nil {
+				t.Fatal("a DeviceMemory session did not bind the device gate/up callback")
+			}
+			got := v41DecodeHistory(t, devSess, []int{1})
+
+			// One decode Step (seq == 1) runs the token-major MoE contraction: NumExpertsPerTok
+			// routed picks, each running gate + up (two device MatMuls).
+			picks := m.Cfg.NumExpertsPerTok * m.Cfg.NumLayers
+			if be.matmuls != 2*picks {
+				t.Fatalf("device MatMul count = %d, want %d (gate+up per routed pick)", be.matmuls, 2*picks)
+			}
+			if limit == 0 && be.swiglu != picks {
+				t.Fatalf("zero-limit device SwiGLU count = %d, want %d (one fused SwiGLU per routed pick)", be.swiglu, picks)
+			}
+
+			// The Q3_K down projection has no device kernel, so it must not have been staged as
+			// a device weight: the down contraction stayed on the host.
+			for l := 0; l < m.Cfg.NumLayers; l++ {
+				for e := 0; e < m.Cfg.NumExperts; e++ {
+					down := layerName(l, "ffn.experts."+itoa(e)+".w2.weight")
+					if _, staged := devSess.halW["kquant-raw:"+down]; staged {
+						t.Fatalf("Q3_K down %s was staged on the device; it has no HAL kernel and must stay on the host", down)
+					}
+				}
+			}
+
+			// Token-history parity: the device gate/up + host down reproduces the host triple.
+			if len(got) != len(want) {
+				t.Fatalf("device arm returned %d logit rows, want %d", len(got), len(want))
+			}
+			for tkn := range got {
+				assertV41LogitsClose(t, got[tkn], want[tkn], "device Q2_K gate/up + host Q3_K down vs host triple")
+			}
+		})
+	}
+}
+
+// The callback is driven directly so the activation limit cannot be hidden by
+// the remaining attention, expert weighting, or LM-head contractions.
+// fak-test:runtime fast est=20ms lane=default
+func TestV41SwigluLimitGateUpHALRetainsDeviceProjections(t *testing.T) {
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+	const H, I = 256, 256
+	stem := "ffn.experts.0"
+	gateName := layerName(0, stem+".w1.weight")
+	upName := layerName(0, stem+".w3.weight")
+	m := &Model{
+		Cfg: Config{HiddenSize: H, MoEIntermediateSize: I, SwigluLimit: 2},
+		kqw: map[string]*kQuantTensor{
+			gateName: q2kFixtureTensor(I, H, 0x13358),
+			upName:   q2kFixtureTensor(I, H, 0x13359),
+		},
+	}
+	w1, ok := m.residentF32Mat(gateName)
+	if !ok {
+		t.Fatal("resident Q2_K gate missing from oracle fixture")
+	}
+	w3, ok := m.residentF32Mat(upName)
+	if !ok {
+		t.Fatal("resident Q2_K up missing from oracle fixture")
+	}
+	// Calibrate the input to expose finite projections near +/-5. This makes
+	// upper and lower saturation non-vacuous without driving SiLU into underflow.
+	var largest float32
+	for _, weights := range [][]float32{w1, w3} {
+		for row := 0; row < I; row++ {
+			var sum float32
+			for _, value := range weights[row*H : (row+1)*H] {
+				sum += value
+			}
+			largest = max(largest, abs32(sum))
 		}
 	}
-
-	// Token-history parity: the device gate/up + host down reproduces the host triple.
-	if len(got) != len(want) {
-		t.Fatalf("device arm returned %d logit rows, want %d", len(got), len(want))
+	if largest == 0 {
+		t.Fatal("Q2_K projections are vacuous")
 	}
-	for tkn := range got {
-		assertV41LogitsClose(t, got[tkn], want[tkn], "device Q2_K gate/up + host Q3_K down vs host triple")
+	identity := make([]float32, I*I)
+	for i := 0; i < I; i++ {
+		identity[i*I+i] = 1
+	}
+	for _, sign := range []float32{1, -1} {
+		name := "upper bounds"
+		if sign < 0 {
+			name = "negative gate remains unbounded"
+		}
+		t.Run(name, func(t *testing.T) {
+			x := make([]float32, H)
+			for i := range x {
+				x[i] = sign * 5 / largest
+			}
+			// Prove both projections cross the applicable limit in this arm.
+			for name, weights := range map[string][]float32{"gate": w1, "up": w3} {
+				crossed := false
+				for row := 0; row < I; row++ {
+					var sum float32
+					for col, value := range x {
+						sum += weights[row*H+col] * value
+					}
+					crossed = crossed || sign*sum > float32(m.Cfg.SwigluLimit)
+				}
+				if !crossed {
+					t.Fatalf("%s projection never crossed limit %g", name, m.Cfg.SwigluLimit)
+				}
+			}
+			want := v41SwigluLimitReference(w1, w3, identity, x, I, H, float32(m.Cfg.SwigluLimit))
+			be := &v41HalSeamBackend{Backend: compute.Default()}
+			s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
+			defer s.Close()
+			callback := s.v41ExpertGateUpFunc()
+			if callback == nil {
+				t.Fatal("device gate/up callback absent")
+			}
+			got, outcome, err := callback(0, stem, x)
+			if err != nil || outcome != v41GateUpHandled {
+				t.Fatalf("positive-limit device callback outcome=%v err=%v, want handled", outcome, err)
+			}
+			if be.matmuls != 2 {
+				t.Fatalf("positive-limit device MatMul count=%d, want 2 (gate+up)", be.matmuls)
+			}
+			for _, name := range []string{gateName, upName} {
+				if _, staged := s.halW["kquant-raw:"+name]; !staged {
+					t.Fatalf("compressed projection %s was not staged on device", name)
+				}
+				if m.has(name) {
+					t.Fatalf("projection %s unexpectedly has an f32 manifest fallback", name)
+				}
+			}
+			for i, value := range got {
+				if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+					t.Fatalf("device activation[%d]=%g, want finite", i, value)
+				}
+			}
+			assertV41LogitsClose(t, got, want, "device projection activation vs independent limited f32 oracle")
+		})
 	}
 }
 

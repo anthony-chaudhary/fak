@@ -23,10 +23,10 @@ package model
 // which the #13290 attribution retargeted onto the upstream magnitude source.
 //
 // RED-ON-PARENT. The test drives the REAL forwardV41 on a full-geometry fixture
-// whose attn.wq_a.weight is scaled so large that, WITHOUT the q_norm stage, the
-// 512-wide q-lora latent projects to an unbounded query and the 512-term
-// accumulation overflows. On the parent commit the forward fails closed with a
-// non-finite attention output; with the #13290 latent norm wired it stays finite.
+// whose pre-norm attn.wq_a/attn.wkv weights are magnified while attn.wq_b
+// retains its ordinary scale. RMSNorm bounds its own output, not an arbitrarily
+// amplified projection downstream. The full forward must stay finite, match the
+// independent scalar oracle, and discriminate omission of either latent norm.
 // The fixture is a small but internally consistent FULL geometry (HeadDim at the
 // published 512, one head), and the same public helpers the production forward
 // uses are re-applied here as an independent scalar oracle.
@@ -63,11 +63,10 @@ func v41SetTensorScale(m *Model, name string, scale float32) {
 }
 
 // TestV41AttnLatentNormAppliedOnFullPath is the #13290 RED->GREEN witness. It
-// runs the real full-path forward on a fixture whose q-lora projection is scaled
-// to ~1e18 per element: without the q_norm stage the 512-term attention
-// accumulation overflows to a non-finite value (the witnessed pre-fix failure);
-// with the norm wired the projection is bounded, the logits are finite, and the
-// production attention input matches the independent scalar oracle.
+// runs the real full-path forward with large pre-norm projections, preserves
+// the ordinary post-norm up-projection, and compares finite logits to an
+// independent full-forward oracle with discriminating norm-omission controls.
+// fak-test:runtime medium est=5s lane=default
 func TestV41AttnLatentNormAppliedOnFullPath(t *testing.T) {
 	const eps = 1e-6
 
@@ -134,26 +133,48 @@ func TestV41AttnLatentNormAppliedOnFullPath(t *testing.T) {
 
 	// --- (3) The production full-path forward stays finite ---------------------
 	// v41RawFullFlattenedMHC is a real FULL-geometry fixture (HeadDim at the
-	// published 512, one head). Scale attn.wq_a, attn.wq_b and attn.wkv up so the
-	// un-normed q-lora latent and KV vector overflow the 512-term attention
-	// accumulation; the wired q_norm/kv_norm bound both to unit RMS and keep the
-	// result finite.
-	m := v41RawFullFlattenedMHC(t)
-	v41SetTensorScale(m, layerName(0, "attn.wq_a.weight"), 1e18)
-	v41SetTensorScale(m, layerName(0, "attn.wq_b.weight"), 1e18)
-	v41SetTensorScale(m, layerName(0, "attn.wkv.weight"), 1e18)
+	// published 512, one head). Magnify only the PRE-norm projections, preserving
+	// their original directions and keeping RMSNorm's f32 sum of squares finite.
+	// Nonuniform gains make each omitted norm observably different; wq_b stays
+	// at its ordinary scale because it runs after q_norm.
+	m := v41LatentNormPatchedMHC(t)
+	for _, suffix := range []string{"attn.wq_a.weight", "attn.wkv.weight"} {
+		name := layerName(0, suffix)
+		weights := append([]float32(nil), m.tensor(name)...)
+		for i := range weights {
+			weights[i] *= 1e6
+		}
+		v41WriteTensorF32(t, m, name, weights)
+	}
 	if err := m.v41ForwardAdmitted(); err != nil {
 		t.Fatalf("full-geometry model refused at admission: %v", err)
 	}
 	act, err := m.forwardV41([]int{0, 1}, nil)
 	if err != nil {
-		t.Fatalf("full-path forward error = %v, want nil (missing attn.wq_a_norm/attn.kv_norm would overflow to non-finite here)", err)
+		t.Fatalf("full-path forward error = %v, want finite normalized projections", err)
 	}
+	if act == nil || len(act.Logits) != 2 {
+		t.Fatalf("full-path forward returned %v, want two logit rows", act)
+	}
+	want := v41OracleForwardLatentNorm(t, m, []int{0, 1}, v41LatentNormOpts{})
 	for r, row := range act.Logits {
 		for i, v := range row {
 			if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
 				t.Fatalf("logits[%d][%d] = %v, want finite; the latent norm did not bound the attention input", r, i, v)
 			}
+		}
+		v41LogitsClose(t, "large pre-norm full forward", row, want[r])
+	}
+	for _, control := range []struct {
+		name string
+		opts v41LatentNormOpts
+	}{
+		{name: "omit Q norm", opts: v41LatentNormOpts{omitQ: true}},
+		{name: "omit KV norm", opts: v41LatentNormOpts{omitKV: true}},
+	} {
+		bad := v41OracleForwardLatentNorm(t, m, []int{0, 1}, control.opts)
+		if !v41LogitsDiverge(sysFlatten(want), sysFlatten(bad), cpuOracleTol) {
+			t.Fatalf("%s does not move full-forward logits beyond tolerance %g", control.name, cpuOracleTol)
 		}
 	}
 }
