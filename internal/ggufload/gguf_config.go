@@ -117,7 +117,7 @@ func readHeader(r io.Reader, mapped int64) (*File, error) {
 		if tensors[i].Offset%align != 0 {
 			return nil, fmt.Errorf("gguf: tensor %s offset %d is not %d-byte aligned", tensors[i].Name, tensors[i].Offset, align)
 		}
-		if data+tensors[i].Offset > uint64(math.MaxInt64) {
+		if tensors[i].Offset > uint64(math.MaxInt64)-data {
 			return nil, fmt.Errorf("gguf: tensor %s file offset overflows int64", tensors[i].Name)
 		}
 		tensors[i].FileOffset = int64(data + tensors[i].Offset)
