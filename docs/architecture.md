@@ -58,8 +58,11 @@ inference governed by fak's agent boundary; it is not fak-native model execution
 
 For local native and performance work, the [fak-native inference doctrine](native-inference-goal.md)
 is authoritative: fak-native is the product and performance path, intended to beat llama.cpp in
-matched, quality-constrained envelopes. llama.cpp remains an explicit benchmark,
-parity/reference, migration/interoperability, or borrowing aid, never a silent fallback. This
+matched, quality-constrained envelopes. Study OSS and incorporate useful techniques
+and mechanisms into the owned native path before reinvention. Direct OSS development,
+business proofs of concept, comparisons, diagnosis, interoperability, and study are
+permitted in a separate evidence plane; they cannot close the native product milestone
+and never silently replace native execution. This
 distinction preserves fak's ownership of kernels, memory, scheduling, cache, adaptation, and
 operations while keeping current claims subordinate to benchmark evidence.
 

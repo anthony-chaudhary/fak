@@ -111,27 +111,32 @@ When operating as or delegating to smaller models, enforce scoping safeguards:
 
 ## First local-agent product milestone
 
-**Useful local agents, accelerated automatically.** The current public product
-milestone is practical, performant local agent work through the normal entry
-point: native inference, qualified speculative decoding enabled by default,
-legal agentic prefix/KV reuse, and supported device-resident/direct GPU paths.
-Read [the milestone and worker brief](docs/local-agent-milestone.md) before
-planning native performance, caching, local UX, or public positioning work.
+**One useful native local coding workflow before compute expansion.** Start on one
+existing supported device/model; Strix Halo is the initial proving ground. OpenCode
+may supply harness interaction and tools; Fak-native owns model loading/inference,
+and Fak guard/context/lifecycle remain core. Read the [milestone](docs/local-agent-milestone.md)
+and [product orientation](docs/project-orientation.md) before planning or delegating.
+Pin one supported model/quantization by current compatibility evidence. Earn a
+normal documented start, independently accepted repository change, restart/follow-up,
+context invalidation, exact engine identity, and matched current tuned OSS comparison
+within predeclared quality/time/memory budgets, accounting for failures and full overhead.
 
-Make qualified acceleration automatic and observable. In worker packets name
-the workflow, bottleneck, entry-point seam, supported model/device, expected
-default, acceptance witness, and missing evidence. Prefer time to verified task
-completion over isolated token-rate peaks. Distinguish shipped defaults from
-opt-in code and hardware qualification; this is our first milestone to earn,
-not an established world-first claim.
+Study and incorporate useful OSS techniques and mechanisms into Fak-native before
+reinventing them. Custom work must close a consequential witnessed gap with useful
+net benefit against current tuned OSS after integration and maintenance cost.
+Adaptation pace compares verified useful capability shipping rate with comparable
+market rate and the median of at least three prior comparable windows; unknown
+measurements remain unknown. This is direction, not qualification or shipped behavior.
 
 ## Native inference performance invariant
 
 For any native-inference or performance task, keep model execution **fak-native all the
 way**. The product path is intended to beat llama.cpp in matched, quality-constrained
 envelopes while fak retains ownership of kernels, memory, scheduling, cache, adaptation,
-and operations. llama.cpp is allowed only when explicitly selected for benchmarks,
-parity/reference diagnosis, migration/interoperability, or ego-free borrowing. Never add
+and operations. Direct OSS is also allowed for explicitly selected development and business proofs
+of concept, alongside benchmarks, parity/reference diagnosis, interoperability, and
+study. These runs occupy a separate evidence plane and cannot close the native product
+milestone. Study and incorporate useful techniques into Fak-native before reinvention. Never add
 an `auto`, recovery, or convenience path that silently changes native/performance work to
 llama.cpp. Before accepting evidence, ask whether the model executed inside fak and whether
 the receipt names that engine. Canonical definitions, matched-envelope rules, and the

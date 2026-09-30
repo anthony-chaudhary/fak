@@ -11,14 +11,44 @@ description: "The active orientation for fak: preserve managed context, choose c
 
 ## Verdict
 
-**Current product milestone (2026-09-09): [Useful local agents, accelerated
-automatically](local-agent-milestone.md).** Make performant local agent work
-practical through native execution, qualified default acceleration, and reusable
-agent context. This sharpens the current investment emphasis: a normal local
-entry point, a real task, and an independent outcome receipt. The milestone
-specifies automatic behavior and distinguishes present wiring from qualification.
-It does not replace the centrality framework below; classify a change by its
-effect on this workflow, not by the number of backends or optimizations it adds.
+**Direction updated 2026-09-30:** Build the best native integration of existing
+open source techniques and mechanisms. Core product execution prefers Fak-native;
+study and incorporate established OSS work before reinvention. Custom technology
+must close a consequential witnessed gap with useful net benefit against current
+tuned OSS after integration and maintenance cost. Direct OSS use is permitted for
+development, business proofs of concept, and comparisons in a separate evidence plane;
+it does not qualify the native product.
+
+**First product milestone: [one useful native local coding workflow](local-agent-milestone.md).**
+Use one existing supported device/model, with Strix Halo as the initial proving ground.
+OpenCode may supply interaction/tools; Fak-native owns inference, and public Fak
+guard/context/lifecycle remain core. Pin one compatible model/quantization. Earn
+normal startup, an independently accepted repository change, restart/follow-up,
+context invalidation, exact engine identity, and matched tuned OSS evidence within
+predeclared quality/time/memory budgets, accounting for every attempt and full overhead.
+Ship this notable milestone before compute expansion. This remains unqualified and
+changes no runtime defaults. The [engine doctrine](native-inference-goal.md) owns
+the execution and attribution boundary.
+
+### Primary adaptation index
+
+Let **S** be independently verified useful capability shipments per fixed review
+window. Count each shipment once only after ordinary-entrypoint acceptance and a
+released reproducible artifact. Attempts, commits, code presence, and self-produced
+reports are not shipments. Predeclare the comparable capability cohort, review-window
+length, acceptance/quality/resource constraints, and market comparators.
+
+- **Market index:** our S / comparable market S for the same cohort and window.
+- **Historical index:** our S / median S across at least three prior comparable windows.
+
+Keep dated revision-pinned comparator evidence and the same acceptance/counting rule.
+Report useful outcomes, quality, regressions, integration burden, and maintenance
+beside shipping rates. Unmeasured or non-comparable inputs, fewer than three comparable
+historical windows, and zero/missing denominators yield **unknown**. No ratio is measured
+by this strategy update. Reuse existing receipts rather than inventing another platform.
+
+The milestone sharpens the centrality framework below: judge changes by effects on
+the owned native workflow, not backend breadth, invention count, or factory output.
 
 fak's center is the **kernel-mediated agent turn**:
 
@@ -57,7 +87,7 @@ The first-party harness itself is not constitutionally Core. It can become a ref
 - **Demote or retire machinery** when usage and avoided cost no longer exceed maintenance, integration, and cognitive load.
 - **Review before stale:** the canonical snapshot has an explicit review date; staleness requests judgment but never auto-rewrites strategy.
 
-The machine-readable authority is `internal/orientation/orientation.json`; inspect it with `fak orientation` or `fak orientation --json`. It records current role, horizon, evidence state, retained contract, and increase/decrease triggers for each capability family.
+The existing capability-classification snapshot is `internal/orientation/orientation.json`; inspect it with `fak orientation` or `fak orientation --json`. It records current role, horizon, evidence state, retained contract, and increase/decrease triggers for each capability family. This strategy update does not change that runtime snapshot or implement the adaptation index; this page owns the new direction and index definition.
 
 The original fail-closed policy seam remains central, but it is not the whole product. Concurrent cache reuse exposed the larger user problem: agents repeatedly pay to reconstruct context and execution setup. Routing, compaction, repeat serving, recovery, and policy belong together when they improve one real mediated turn. Project automation does not become product Core merely because fak's maintainers use it heavily.
 
