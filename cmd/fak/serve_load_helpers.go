@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -533,7 +535,8 @@ func loadResidentQ4KProfiled(ggufPath string, tLoad time.Time, opts ...ggufload.
 	// opts carries the per-rank expert shard (ggufload.WithExpertShard) for a sharded expert-
 	// parallel serve: this process admits ONLY its band's routed experts into the resident store,
 	// so its footprint is the replicated remainder + one band (â‰ˆ model/ranks), not the full model.
-	// Empty opts (the default, every non-EP serve) is byte-identical to the old LoadModelQ4KProfile.
+	// The existing mmap choice retains eligible checkpoint bytes below; ordinary
+	// file readers preserve the historical resident loader.
 	var mm *fakmodel.Model
 	var err error
 	// The streamed arms need a checkpoint that outlives the model; the lifetime-CLOSING entry
@@ -547,6 +550,19 @@ func loadResidentQ4KProfiled(ggufPath string, tLoad time.Time, opts ...ggufload.
 		mm, err = ggufload.LoadModelQ4KStreamedExperts(ggufPath, prof, effects.StreamedExpertBytes, opts...)
 	case effects.StreamedDenseQ4K || os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1":
 		mm, err = ggufload.LoadModelQ4KStreamedDense(ggufPath, prof, opts...)
+	case serveMappedQ4KResidencyRequested():
+		// Reuse the checkpoint-owning entry, then prepare CPU views before
+		// publication. This keeps ordinary residency and fallback semantics;
+		// explicit streamed policies above retain their original working sets.
+		mm, err = ggufload.LoadModelQ4KStreamedDense(ggufPath, prof, opts...)
+		if err == nil {
+			err = mm.RetainMappedQ4KResidency()
+			if err != nil {
+				if closeErr := mm.CloseWeights(); closeErr != nil {
+					err = fmt.Errorf("%w; checkpoint close: %v", err, closeErr)
+				}
+			}
+		}
 	default:
 		mm, err = ggufload.LoadModelQ4KProfileOptions(ggufPath, prof, opts...)
 	}
@@ -554,6 +570,19 @@ func loadResidentQ4KProfiled(ggufPath string, tLoad time.Time, opts ...ggufload.
 	modelengine.PreloadQ4K(mm)
 	loadNanos := time.Since(tLoad).Nanoseconds()
 	return mm, prof, loadNanos
+}
+
+func serveMappedQ4KResidencyRequested() bool {
+	// Keep other platforms' loader-owned NUMA placement and replica policy.
+	if runtime.GOOS != "darwin" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_GGUF_MMAP"))) {
+	case "1", "on", "true":
+		return true
+	default:
+		return false
+	}
 }
 
 // loadResidentQ4KDevice is the device Q4_K arm's shared tail: it runs the profiled resident
