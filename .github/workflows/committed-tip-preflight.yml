@@ -1,0 +1,283 @@
+# Draft verification carrier only. This qualifies the pinned target, not this
+# workflow's PR merge/head, release readiness, or the complete test suite.
+name: Committed-tip preflight witness
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+    paths: [.github/workflows/committed-tip-preflight.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  exact-tip-preflight:
+    name: Official committed-tip preflight / 962aaeee
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'dot/committed-tip-preflight-962aaeee'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      GOMAXPROCS: "2"
+      GOFLAGS: -p=1
+      GOWORK: "off"
+      GOTOOLCHAIN: local
+      TMPDIR: ${{ runner.temp }}/committed-tip-preflight/tmp
+      GOTMPDIR: ${{ runner.temp }}/committed-tip-preflight/go-tmp
+      GOCACHE: ${{ runner.temp }}/committed-tip-preflight/go-cache
+      GOMODCACHE: ${{ runner.temp }}/committed-tip-preflight/go-mod
+      PREFLIGHT_EVIDENCE_DIR: ${{ runner.temp }}/committed-tip-preflight-evidence
+      CARRIER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      CARRIER_MERGE_SHA: ${{ github.sha }}
+      CARRIER_WORKFLOW_SHA: ${{ github.workflow_sha }}
+      CARRIER_WORKFLOW_REF: ${{ github.workflow_ref }}
+    steps:
+      - name: Check hosted capacity and open evidence
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, shutil, time
+          evidence = pathlib.Path(os.environ["PREFLIGHT_EVIDENCE_DIR"])
+          evidence.mkdir(parents=True, exist_ok=True)
+          for name in ("TMPDIR", "GOTMPDIR", "GOCACHE", "GOMODCACHE"):
+              pathlib.Path(os.environ[name]).mkdir(parents=True, exist_ok=True)
+          memory = dict(line.split(":", 1) for line in pathlib.Path("/proc/meminfo").read_text().splitlines())
+          available_memory = int(memory["MemAvailable"].split()[0]) * 1024
+          free = {name: shutil.disk_usage(path).free for name, path in {
+              "workspace": os.environ["GITHUB_WORKSPACE"], "temporary": os.environ["RUNNER_TEMP"]
+          }.items()}
+          report = {"time_unix": time.time(), "free_bytes": free, "available_memory_bytes": available_memory,
+                    "minimum_initial_free_bytes": 8 * 1024**3, "minimum_initial_memory_bytes": 6 * 1024**3,
+                    "hosted_command_executed": False}
+          report["ok"] = min(free.values()) >= report["minimum_initial_free_bytes"] and available_memory >= report["minimum_initial_memory_bytes"]
+          (evidence / "capacity-before-checkout.json").write_text(json.dumps(report, indent=2) + "\n")
+          print(json.dumps(report))
+          raise SystemExit(0 if report["ok"] else 1)
+          PY
+
+      - uses: actions/checkout@v4
+        with:
+          repository: anthony-chaudhary/fak
+          ref: 962aaeee1e6b49e9a6fc2ad3ecce601edd54f21f
+          path: source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
+          cache: false
+
+      - name: Run and verify the official exact-tip receipt
+        timeout-minutes: 50
+        working-directory: source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import datetime, hashlib, json, os, pathlib, re, shutil, signal, subprocess, sys, time, urllib.request
+
+          def validate_receipt(raw, exit_code, resource_aborted):
+              import json
+              if type(raw) is not str or type(exit_code) is not int or exit_code != 0:
+                  return False
+              if type(resource_aborted) is not bool or resource_aborted:
+                  return False
+              def pairs(items):
+                  result = {}
+                  for key, value in items:
+                      if key in result:
+                          raise ValueError("duplicate JSON key")
+                      result[key] = value
+                  return result
+              def invalid_constant(value):
+                  raise ValueError("non-JSON constant")
+              try:
+                  result = json.loads(raw, object_pairs_hook=pairs, parse_constant=invalid_constant)
+              except (ValueError, TypeError, RecursionError):
+                  return False
+              if type(result) is not dict:
+                  return False
+              expected = "962aaeee1e6b49e9a6fc2ad3ecce601edd54f21f"
+              if type(result.get("ref")) is not str or result["ref"] != expected:
+                  return False
+              if type(result.get("tip")) is not str or result["tip"] != expected:
+                  return False
+              if type(result.get("ok")) is not bool or result["ok"] is not True:
+                  return False
+              if "failures" not in result:
+                  return False
+              if result["failures"] is not None and (type(result["failures"]) is not list or result["failures"]):
+                  return False
+              if "skipped" in result and (type(result["skipped"]) is not list or result["skipped"]):
+                  return False
+              return True
+
+          target = "962aaeee1e6b49e9a6fc2ad3ecce601edd54f21f"
+          target_tree = "898b7c9dbc10c132e5cdd6fe742cd836ea32f3c4"
+          source = pathlib.Path.cwd().resolve()
+          evidence = pathlib.Path(os.environ["PREFLIGHT_EVIDENCE_DIR"]).resolve()
+          evidence.mkdir(parents=True, exist_ok=True)
+          stdout_path, stderr_path = evidence / "preflight.stdout.json", evidence / "preflight.stderr.log"
+          stdout_path.touch()
+          stderr_path.touch()
+          process = None
+          report = {"schema": "fak-hosted-preflight-witness/1", "target_sha": target, "target_tree": target_tree,
+                    "started_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "status": "INCOMPLETE",
+                    "command_exit": None, "resource_aborted": False, "abort_reason": None,
+                    "hosted_command_executed": False, "accepted": False, "carrier_qualified": False,
+                    "carrier": {key: os.environ.get(key, "") for key in (
+                        "CARRIER_HEAD_SHA", "CARRIER_MERGE_SHA", "CARRIER_WORKFLOW_SHA", "CARRIER_WORKFLOW_REF",
+                        "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_JOB", "GITHUB_EVENT_NAME")},
+                    "runner": {key: os.environ.get(key, "") for key in ("RUNNER_OS", "RUNNER_ARCH", "ImageOS", "ImageVersion")}}
+
+          def write_json(name, data):
+              (evidence / name).write_text(json.dumps(data, indent=2, allow_nan=False) + "\n")
+
+          def git(*args):
+              return subprocess.check_output(["git", *args], cwd=source, text=True, timeout=30).strip()
+
+          def binding():
+              return {"head": git("rev-parse", "HEAD"), "tree": git("rev-parse", "HEAD^{tree}"),
+                      "status": git("status", "--porcelain=v1", "--untracked-files=all")}
+
+          def resources():
+              memory = dict(line.split(":", 1) for line in pathlib.Path("/proc/meminfo").read_text().splitlines())
+              return {"time_unix": time.time(), "workspace_free_bytes": shutil.disk_usage(source).free,
+                      "temporary_free_bytes": shutil.disk_usage(os.environ["RUNNER_TEMP"]).free,
+                      "available_memory_bytes": int(memory["MemAvailable"].split()[0]) * 1024}
+
+          def stop_owned_process():
+              if process is None:
+                  return
+              # The leader may exit while its descendants remain. Signal only the
+              # group this supervisor created with start_new_session=True, then
+              # finish group cleanup independently from reaping the leader.
+              group = process.pid
+              try:
+                  os.killpg(group, signal.SIGTERM)
+              except ProcessLookupError:
+                  process.wait(timeout=10)
+                  return
+              deadline = time.monotonic() + 10
+              while time.monotonic() < deadline:
+                  try:
+                      os.killpg(group, 0)
+                  except ProcessLookupError:
+                      break
+                  time.sleep(0.2)
+              try:
+                  os.killpg(group, signal.SIGKILL)
+              except ProcessLookupError:
+                  pass
+              process.wait(timeout=10)
+
+          try:
+              write_json("supervisor.json", report)
+              before = binding()
+              write_json("source-before.json", before)
+              if before != {"head": target, "tree": target_tree, "status": ""}:
+                  raise RuntimeError("checkout does not match the clean reviewed target")
+              for key in ("TMPDIR", "GOTMPDIR", "GOCACHE", "GOMODCACHE", "PREFLIGHT_EVIDENCE_DIR"):
+                  path = pathlib.Path(os.environ[key]).resolve()
+                  if path == source or source in path.parents:
+                      raise RuntimeError("cache/temp/evidence path enters the target checkout")
+              report["go_version"] = subprocess.check_output(["go", "version"], text=True, timeout=30).strip()
+              if " go1.26.6 " not in report["go_version"]:
+                  raise RuntimeError("unexpected Go toolchain")
+              report["python_version"] = sys.version.split()[0]
+              workflow_sha = os.environ["CARRIER_WORKFLOW_SHA"]
+              if re.fullmatch(r"[0-9a-f]{40}", workflow_sha) is None:
+                  raise RuntimeError("invalid carrier workflow SHA")
+              workflow_url = "https://raw.githubusercontent.com/anthony-chaudhary/fak/" + workflow_sha + "/.github/workflows/committed-tip-preflight.yml"
+              with urllib.request.urlopen(workflow_url, timeout=30) as response:
+                  workflow_bytes = response.read(262145)
+              if not workflow_bytes or len(workflow_bytes) > 262144:
+                  raise RuntimeError("carrier workflow exceeds provenance byte bound")
+              report["workflow_source_url"] = workflow_url
+              report["workflow_sha256"] = hashlib.sha256(workflow_bytes).hexdigest()
+              report["environment"] = {key: os.environ[key] for key in (
+                  "GOMAXPROCS", "GOFLAGS", "GOWORK", "GOTOOLCHAIN", "TMPDIR", "GOTMPDIR", "GOCACHE", "GOMODCACHE")}
+              argv = ["go", "run", "-trimpath", "./cmd/fak-dev", "ci-preflight", "--root", str(source),
+                      "--ref", target, "--smoke", "--json"]
+              report["argv"] = argv
+              report["command_timeout_seconds"] = 2700
+              report["minimum_free_bytes"] = 2 * 1024**3
+              report["minimum_memory_bytes"] = 1536 * 1024**2
+              initial = resources()
+              write_json("capacity-before-command.json", initial)
+              if min(initial["workspace_free_bytes"], initial["temporary_free_bytes"]) < 6 * 1024**3 or initial["available_memory_bytes"] < 4 * 1024**3:
+                  raise RuntimeError("insufficient capacity after checkout/toolchain setup")
+              started = time.monotonic()
+              with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr, (evidence / "resources.jsonl").open("w") as samples:
+                  process = subprocess.Popen(argv, cwd=source, stdout=stdout, stderr=stderr, start_new_session=True)
+                  report["hosted_command_executed"] = True
+                  write_json("supervisor.json", report)
+                  while process.poll() is None:
+                      sample = resources()
+                      samples.write(json.dumps(sample) + "\n")
+                      samples.flush()
+                      reason = None
+                      if min(sample["workspace_free_bytes"], sample["temporary_free_bytes"]) < report["minimum_free_bytes"]:
+                          reason = "disk reserve crossed"
+                      elif sample["available_memory_bytes"] < report["minimum_memory_bytes"]:
+                          reason = "memory reserve crossed"
+                      elif time.monotonic() - started >= report["command_timeout_seconds"]:
+                          reason = "command wall timeout"
+                      elif max(stdout_path.stat().st_size, stderr_path.stat().st_size) > 8 * 1024**2:
+                          reason = "raw output budget crossed"
+                      if reason:
+                          report["resource_aborted"] = True
+                          report["abort_reason"] = reason
+                          write_json("supervisor.json", report)
+                          stop_owned_process()
+                          break
+                      time.sleep(2)
+                  report["command_exit"] = process.wait()
+              write_json("command-exit.json", {"exit_code": report["command_exit"], "resource_aborted": report["resource_aborted"], "abort_reason": report["abort_reason"]})
+              after = binding()
+              write_json("source-after.json", after)
+              report["source_unchanged"] = before == after
+              witness = pathlib.Path(git("rev-parse", "--git-path", "fak-committed-build-success/" + target + ".json"))
+              if not witness.is_absolute():
+                  witness = source / witness
+              if witness.is_file():
+                  report["official_git_build_witness_sha256"] = hashlib.sha256(witness.read_bytes()).hexdigest()
+              raw = stdout_path.read_text(encoding="utf-8")
+              report["accepted"] = validate_receipt(raw, report["command_exit"], report["resource_aborted"]) and report["source_unchanged"]
+              report["status"] = "PASS" if report["accepted"] else "FAIL"
+          except Exception as error:
+              report["supervisor_error"] = type(error).__name__ + ": " + str(error)
+              stop_owned_process()
+              if process is not None:
+                  report["command_exit"] = process.poll()
+              try:
+                  write_json("source-after.json", binding())
+              except Exception as binding_error:
+                  report["source_readback_error"] = str(binding_error)
+          finally:
+              report["finished_utc"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+              write_json("command-exit.json", {"exit_code": report["command_exit"], "resource_aborted": report["resource_aborted"], "abort_reason": report["abort_reason"]})
+              write_json("supervisor.json", report)
+              hashes = []
+              for path in sorted(evidence.iterdir()):
+                  if path.is_file() and path.name != "SHA256SUMS":
+                      hashes.append(hashlib.sha256(path.read_bytes()).hexdigest() + "  " + path.name)
+              (evidence / "SHA256SUMS").write_text("\n".join(hashes) + "\n")
+              print(json.dumps(report, indent=2))
+          raise SystemExit(0 if report["accepted"] else 1)
+          PY
+
+      - name: Preserve exact-tip evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: committed-tip-preflight-962aaeee-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.PREFLIGHT_EVIDENCE_DIR }}/*.json
+            ${{ env.PREFLIGHT_EVIDENCE_DIR }}/*.jsonl
+            ${{ env.PREFLIGHT_EVIDENCE_DIR }}/*.log
+            ${{ env.PREFLIGHT_EVIDENCE_DIR }}/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
