@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:283b49a7918204d9aea578a3a7f8e98abd75f5a2fe55ac7db4a5a704642201f2",
-  "tracked_files": 23820,
-  "tracked_bytes": 491778406,
+  "content_root": "sha256:17f133c1d416a8d6c7dd99719459a2bc413cecc9818ab5e760ec1fa678077092",
+  "tracked_files": 23821,
+  "tracked_bytes": 491782538,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -77285,8 +77285,8 @@
     },
     {
       "path": "internal/agent/codetools.go",
-      "content_sha256": "sha256:3f35ebc2be9696b1378bc687be38e6087b7f0a3483ab13cf7481aed0bb47497b",
-      "bytes": 11494,
+      "content_sha256": "sha256:1aff98c43346583af79fad2c4b58461898bf5c4e24db0646f4bacc87933ab151",
+      "bytes": 11924,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -119423,6 +119423,15 @@
       "path": "internal/gateway/native_receipt_metrics_test.go",
       "content_sha256": "sha256:33a738ebca16a0aa351b7b0bb13c3fe6f26689ca91cfdebd3b618682693776ee",
       "bytes": 3998,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "internal/gateway/native_registry_rearm_contract_test.go",
+      "content_sha256": "sha256:a9c5124623cc8561b8c17a3bed0d6fe2d3f0d07f3135e9a2879a4a1cac8009fa",
+      "bytes": 3702,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
