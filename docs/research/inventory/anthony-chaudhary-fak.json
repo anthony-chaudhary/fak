@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:e531cb951051b21bb5f49e43ae41a350a88f048638408e5293cc7a4058e76439",
-  "tracked_files": 23819,
-  "tracked_bytes": 491771801,
+  "content_root": "sha256:283b49a7918204d9aea578a3a7f8e98abd75f5a2fe55ac7db4a5a704642201f2",
+  "tracked_files": 23820,
+  "tracked_bytes": 491778406,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -1413,8 +1413,8 @@
     },
     {
       "path": ".github/workflows/build-matrix.yml",
-      "content_sha256": "sha256:f56f131b3fc802f6d3bf4281c5872781c938a8a2ca403779e6f5324d1fb344da",
-      "bytes": 2697,
+      "content_sha256": "sha256:f5c26080f9e7b3dae0f50bf624511d0918dd5908a1b2f79fe58228165b0e09ba",
+      "bytes": 2984,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -87719,11 +87719,20 @@
     },
     {
       "path": "internal/buildwitness/variants.go",
-      "content_sha256": "sha256:1bab8a449f215f4263d1c79420aef1d5158843e9a0ee85bb4710f9d4612b9f7a",
-      "bytes": 5422,
+      "content_sha256": "sha256:7afdabf4e4e589a9ab2da2693bf32361a5e958ce0441e3c6faf1db7ec34cbc29",
+      "bytes": 6108,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
+      ]
+    },
+    {
+      "path": "internal/buildwitness/variants_alias_coverage_test.go",
+      "content_sha256": "sha256:c0f75186ad87d28df5b7db6aa6d39beccbd29dd5b68881e7b94a192a23c944a6",
+      "bytes": 5632,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
       ]
     },
     {
