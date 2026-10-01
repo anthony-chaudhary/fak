@@ -213,6 +213,7 @@ type StagedDiff struct {
 	AddedRenamedPaths []string               // --diff-filter=AR name list (file-admission scope)
 	IndexPaths        []string               // all candidate-index paths (for cross-file semantic gates)
 	Treeish           string                 // ":" for index, or a committed tip for CI range checks
+	baseTree          string                 // resolved selected base for a committed range; empty for staged/path views
 
 	// cacheMu guards fileCache. The pre-commit CLI bounds each gate with a wall-clock budget and
 	// ABANDONS a gate that overruns it (#5335) — it cannot cancel one, since Gate.Check takes no
@@ -345,26 +346,37 @@ func ReadRangeDiff(root, base, tip string) (*StagedDiff, error) {
 	if strings.TrimSpace(base) == "" || strings.TrimSpace(tip) == "" {
 		return nil, ErrCouldNotRun
 	}
-	d := &StagedDiff{Root: root, run: realRunner, ctx: context.Background(), Treeish: tip + ":", AddedByFile: map[string][]AddedLine{}, fileCache: map[string]fileEntry{}}
-	out, code, err := realRunner(d.ctx, root, "diff", "--unified=0", "--no-color", "--diff-filter=ACMR", base, tip)
+	// Resolve both endpoints once: reject options, paths and non-commit objects,
+	// and keep subsequent diff/catalog reads stable if a named ref moves.
+	for _, ref := range []*string{&base, &tip} {
+		out, code, err := realRunner(context.Background(), root, "rev-parse", "--verify", "--end-of-options", *ref+"^{commit}")
+		if err != nil || code != 0 || strings.TrimSpace(out) == "" {
+			return nil, ErrCouldNotRun
+		}
+		*ref = strings.TrimSpace(out)
+	}
+	d := &StagedDiff{Root: root, run: realRunner, ctx: context.Background(), Treeish: tip + ":", baseTree: base, AddedByFile: map[string][]AddedLine{}, fileCache: map[string]fileEntry{}}
+	out, code, err := realRunner(d.ctx, root, "diff", "--unified=0", "--no-color", "--diff-filter=ACMR", base, tip, "--")
 	if err != nil || code != 0 {
 		return nil, ErrCouldNotRun
 	}
 	d.AddedByFile = parseUnifiedAddedLines(out)
-	out, code, err = realRunner(d.ctx, root, "diff", "--name-only", "--diff-filter=ACMR", base, tip)
-	if err == nil && code == 0 {
-		for _, x := range strings.Split(out, "\n") {
-			if x = strings.TrimSpace(x); x != "" {
-				d.StagedPaths = append(d.StagedPaths, filepath.ToSlash(x))
-			}
+	out, code, err = realRunner(d.ctx, root, "diff", "--name-only", "--diff-filter=ACMR", base, tip, "--")
+	if err != nil || code != 0 {
+		return nil, ErrCouldNotRun
+	}
+	for _, x := range strings.Split(out, "\n") {
+		if x = strings.TrimSpace(x); x != "" {
+			d.StagedPaths = append(d.StagedPaths, filepath.ToSlash(x))
 		}
 	}
 	out, code, err = realRunner(d.ctx, root, "ls-tree", "-r", "--name-only", tip)
-	if err == nil && code == 0 {
-		for _, x := range strings.Split(out, "\n") {
-			if x = strings.TrimSpace(x); x != "" {
-				d.IndexPaths = append(d.IndexPaths, filepath.ToSlash(x))
-			}
+	if err != nil || code != 0 {
+		return nil, ErrCouldNotRun
+	}
+	for _, x := range strings.Split(out, "\n") {
+		if x = strings.TrimSpace(x); x != "" {
+			d.IndexPaths = append(d.IndexPaths, filepath.ToSlash(x))
 		}
 	}
 	return d, nil
@@ -499,7 +511,7 @@ func (d *StagedDiff) FileBytes(rel string) ([]byte, bool) {
 			b, exists = []byte(out), true
 		}
 	}
-	if !exists {
+	if !exists && d.baseTree == "" {
 		var err error
 		b, err = os.ReadFile(filepath.Join(d.Root, filepath.FromSlash(rel)))
 		exists = err == nil
