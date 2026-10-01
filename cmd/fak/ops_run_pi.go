@@ -428,7 +428,7 @@ func runOpsPi(stdout, stderr io.Writer, args []string) int {
 		preflight := opsRunInferenceRefusalWithStatus(wire, *baseURL, *model, "missing_explicit_base_url", "refused")
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
 	}
-	preflight, err := opsRunInferencePreflight(ctx, guardProbeBaseURLForPi(gatewayProbeURL), *model)
+	preflight, err := opsRunInferencePreflight(ctx, guardProbeBaseURLForPi(gatewayProbeURL), *model, *apiKeyEnv)
 	receipt.InferencePreflight = &preflight
 	if err != nil {
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
