@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:17f133c1d416a8d6c7dd99719459a2bc413cecc9818ab5e760ec1fa678077092",
+  "content_root": "sha256:26219a9ae8a0f46433496e52fc7b890f4978ce991a4658a71a649de50e797ae4",
   "tracked_files": 23821,
-  "tracked_bytes": 491782538,
+  "tracked_bytes": 491783212,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -201075,8 +201075,8 @@
     },
     {
       "path": "tools/concept_disambiguation_scorecard.data/_meta.json",
-      "content_sha256": "sha256:5542765743484d3e8835689a31f7358bbea2b5164ebcadb44152a0dc5e03686d",
-      "bytes": 728576,
+      "content_sha256": "sha256:af11353201606cb77045830c15f39b60314d8fefaf525f45a07d3e29b3f2a4e9",
+      "bytes": 729250,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
