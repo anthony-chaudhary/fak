@@ -49,7 +49,13 @@ func (s *turnkeyServer) handleTokenize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !s.beginChatRequest() {
+	switch s.admitChatRequest() {
+	case admissionGranted:
+		// admitted
+	case admissionAtCapacity:
+		writeTurnkeyBackpressure(w, "server_at_capacity", s.capacity().MaxSessions)
+		return
+	default:
 		http.Error(w, "server stopping", http.StatusServiceUnavailable)
 		return
 	}
