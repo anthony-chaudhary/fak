@@ -36,7 +36,12 @@ import "github.com/anthony-chaudhary/fak/internal/kvbudget"
 // streams fit, which for an admission gate means refusing streams that would have
 // fit. A header with no per-layer data (every model that is uniformly global)
 // leaves PerLayer nil and keeps its previous numbers bit-for-bit.
+// The admitted V4 Flash schedule instead retains a shared head-width row for
+// its window and compressed history, plus ratio-4 indexer keys (#13556).
 func (c Config) KVCacheShape() kvbudget.Shape {
+	if s, ok := c.v4FlashCompressedKVShape(); ok {
+		return s
+	}
 	if c.KVLoraRank > 0 {
 		s := kvbudget.Shape{
 			Kind:          kvbudget.MLA,
@@ -112,6 +117,11 @@ func (c Config) KVCacheShape() kvbudget.Shape {
 // ctx × bytes-per-token one — algebraically equal, but no longer bit-identical at
 // every quant, which is the property perlayer.go's zero value promises.
 func (c Config) kvWindowPerLayer() []int {
+	// A window alone omits compressed history. Unknown compressed schedules
+	// (including V4.1's shared-source layout) retain the uniform reservation.
+	if c.hasKVCompressionSchedule() {
+		return nil
+	}
 	n := c.NumLayers
 	if n <= 0 || len(c.Window) == 0 {
 		return nil
@@ -129,6 +139,33 @@ func (c Config) kvWindowPerLayer() []int {
 		return nil
 	}
 	return out
+}
+
+func (c Config) hasKVCompressionSchedule() bool {
+	return len(c.CompressRatios) > 0 ||
+		(c.DeepSeekV41 != nil && len(c.DeepSeekV41.CompressRatios) > 0)
+}
+
+// v4FlashCompressedKVShape uses the admitted Flash layout: RoPE is contained
+// inside one shared K=V head-width row, with an indexer only on ratio-4 layers.
+// The trailing schedule entries describe prediction layers, not decoder KV.
+func (c Config) v4FlashCompressedKVShape() (kvbudget.Shape, bool) {
+	if !isDeepSeekV4FlashProfile(c) || !isDeepSeekV4FlashCompressSchedule(c.CompressRatios) ||
+		c.HeadDim != 512 || c.IndexHeadDim != 128 || c.IndexNHeads != 64 {
+		return kvbudget.Shape{}, false
+	}
+	p := &kvbudget.LayerProfile{
+		Window:        make([]int, c.NumLayers),
+		CompressRatio: append([]int(nil), c.CompressRatios[:c.NumLayers]...),
+		IndexHeadDim:  make([]int, c.NumLayers),
+	}
+	for l, ratio := range p.CompressRatio {
+		p.Window[l] = V4FlashWindowSize
+		if ratio == 4 {
+			p.IndexHeadDim[l] = c.IndexHeadDim
+		}
+	}
+	return kvbudget.Shape{Kind: kvbudget.MLA, Layers: c.NumLayers, KVLoraRank: c.HeadDim, PerLayer: p}, true
 }
 
 // kvPerLayerOverride returns a copy of a per-layer geometry slice (head width,
