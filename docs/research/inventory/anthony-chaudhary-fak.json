@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:94f5eac7594a2fc1ad9b9b2a3e6207a038d1071862eed3c0a447e3a630723ed6",
-  "tracked_files": 23818,
-  "tracked_bytes": 491762362,
+  "content_root": "sha256:e531cb951051b21bb5f49e43ae41a350a88f048638408e5293cc7a4058e76439",
+  "tracked_files": 23819,
+  "tracked_bytes": 491771801,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -1566,8 +1566,8 @@
     },
     {
       "path": ".github/workflows/garden.yml",
-      "content_sha256": "sha256:62ad652e9074d655b0cc1cf58dc6f91c8b3738ef7c4acf4a4317196662adc5e8",
-      "bytes": 4095,
+      "content_sha256": "sha256:ce7847e4ce07201ac8f9f6af598ba978219abe60035aeca2dda5a3b0f22fe390",
+      "bytes": 5278,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -196072,6 +196072,15 @@
       "path": "internal/workflowaudit/workflowaudit_test.go",
       "content_sha256": "sha256:7f306fef8b41fdc192605f173c6ef97b3b76588141c8104be3e7a89628b2c228",
       "bytes": 9542,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "internal/workflowlint/garden_workflow_regression_test.go",
+      "content_sha256": "sha256:00a6886ad648f1b687ff6dd47103370de0e145914f3119716b04b94727add05a",
+      "bytes": 8256,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"

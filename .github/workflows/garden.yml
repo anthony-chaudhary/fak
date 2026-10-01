@@ -71,24 +71,44 @@ jobs:
       - name: garden bundle self-test
         run: go test ./internal/gardenbundle/
 
-      # The GATE: exit 1 when a gating member regressed or a pass failed to run.
+      # Collect once: the gate's source-bound payload also supplies the summary.
+      # Explicit Bash keeps pipefail enabled so tee cannot hide a failed gate.
       - name: garden bundle gate (--check)
-        run: go run ./cmd/fak garden --check
+        shell: bash
+        run: go run ./cmd/fak garden --check --json | tee "$RUNNER_TEMP/garden-payload.json"
 
-      # The CADENCE payload: surface the human report + control-pane JSON to the run
-      # summary so the garden verdict is tracked over time (esp. on the daily cron).
+      # Render the captured verdict even after a red gate, without recollecting.
+      # Missing or invalid evidence is a reporting failure, never a green substitute.
       - name: garden bundle payload -> step summary
         if: always()
+        shell: bash
         run: |
+          payload="$RUNNER_TEMP/garden-payload.json"
+          if [ ! -s "$payload" ]; then
+            echo "::error::garden gate payload is missing or empty; collection was not completed"
+            echo "Garden summary unavailable: the gate produced no complete payload." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if ! jq -e -s 'length == 1 and (.[0] |
+            type == "object" and .schema == "fak-garden-bundle/1" and
+            (.gate_exit == 0 or .gate_exit == 1) and
+            (.gate_message | type == "string") and
+            (.commit | type == "string") and
+            (.next_action | type == "string") and
+            (.members | type == "array"))' "$payload" > /dev/null; then
+            echo "::error::garden gate payload is invalid or incomplete; refusing to recollect"
+            echo "Garden summary unavailable: the captured gate payload is invalid or incomplete." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           {
             echo "## garden bundle"
             echo '```'
-            go run ./cmd/fak garden || true
+            jq -r '.gate_message, ("Source commit: " + .commit), ("Next action: " + .next_action)' "$payload"
             echo '```'
             echo '<details><summary>control-pane payload</summary>'
             echo
             echo '```json'
-            go run ./cmd/fak garden --json || true
+            cat "$payload"
             echo '```'
             echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"
