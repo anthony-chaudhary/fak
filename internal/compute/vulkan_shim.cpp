@@ -242,7 +242,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -269,6 +269,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
         return g_dp.otherArgmax;
     case K_QWEN35_GDN_Q8_IN_PROJ: case K_QWEN35_GDN_CONV: case K_QWEN35_GDN_RECURRENT:
     case K_QWEN35_GDN_PREFILL_TILED: case K_QWEN35_GDN_PREFILL_NORM:
+    case K_QWEN35_GDN_VERIFY_TILED:
     case K_GLM_KDA_REREAD: case K_GLM_KDA_WAVE32:
         return g_dp.otherGDN;
     case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q4K_MATMUL_COOPMAT: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_COUNT:
@@ -330,6 +331,25 @@ uint32_t g_gdn_prefill_max_groups_y = 0;
 int g_gdn_prefill_mode = -1;
 uint64_t g_gdn_prefill_tiled_calls = 0;
 uint64_t g_gdn_prefill_scalar_calls = 0;
+// Verify-width (1..7 token) register-resident variant, admitted per geometry by
+// an on-device self-check. -1 = follow the verdict, 0 = force stock, 1 = request
+// the candidate (still requiring a true verdict). g_gdn_verify_verdict holds the
+// cached self-check result for the one admitted production geometry.
+int g_have_gdn_verify_tiled = 0;
+int g_gdn_verify_mode = -1;
+int g_gdn_verify_verdict = 0;
+int g_gdn_verify_checked = 0;
+float g_gdn_verify_deviation = 0.0f;
+uint64_t g_gdn_verify_tiled_calls = 0;
+uint64_t g_gdn_verify_scalar_calls = 0;
+// Test-only forced-disagreement hook: when nonzero the self-check reports failure
+// and the route must fall back to the stock kernel.
+int g_gdn_verify_force_disagree = 0;
+// Prefill-class (>=8 token) self-check verdict, cached per geometry alongside the
+// verify-width verdict. The tiled route requires a true verdict once the default
+// flip is earned; until then the explicit request path still requires it.
+int g_gdn_tiled_verdict = 0;
+float g_gdn_tiled_deviation = 0.0f;
 int g_have_coopmat = 0;
 // Candidate Q4_K cooperative-matrix prefill arm (2D block-tiled). Requires the native
 // cooperative-matrix capability AND a 2D-grid shader that built; default retains scalar.
@@ -1303,6 +1323,237 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
 inline Buffer* B(const void* h) { return (Buffer*)h; }
 inline Buffer* B(void* h)       { return (Buffer*)h; }
 
+// ---- GDN register-resident self-check --------------------------------------------------
+//
+// One geometry-checked self-check per (geometry, width class), run on the same
+// device that will execute the candidate, once before the first forward and never
+// inside one. Both the stock recurrent shader and the register-resident candidate
+// run on identical synthetic operands; the verdict admits a class only when the
+// normwise max relative deviation of both `core` and the final recurrent state
+// stays within kGdnVerifyDeviationMax. The candidates reassociate the FP32 sums,
+// so bit identity is explicitly not demanded (contrast upstream, which does demand
+// it). The stock kernel is used on any disagreement.
+//
+// Two width classes exist: the verify-width class (1..7 tokens) uses the DVPL=2
+// verify shader, and the prefill class (>=8 tokens) uses the 16-token tiled shader.
+// Both are checked here so a selected candidate of either class falls back to stock
+// when it disagrees on the device in use.
+static constexpr float kGdnVerifyDeviationMax = 1e-6f;
+constexpr int kGdnVerifyWidthCount = 4;
+constexpr int kGdnVerifyWidths[kGdnVerifyWidthCount] = {1, 4, 16, 64};
+// True entries are the prefill-tiled class (>=8), false entries the verify class.
+constexpr bool kGdnVerifyIsTiled[kGdnVerifyWidthCount] = {false, false, true, true};
+
+struct VerifyScratch {
+    Buffer *convOut = nullptr, *core[kGdnVerifyWidthCount] = {};
+    ~VerifyScratch() {
+        if (convOut) destroyBuffer(convOut);
+        for (int i = 0; i < kGdnVerifyWidthCount; ++i) {
+            if (core[i]) destroyBuffer(core[i]);
+        }
+    }
+};
+
+// Deterministic wide-magnitude operands. A fixed LCG keeps the check reproducible
+// across runs and devices without pulling in <random>.
+float verifyOperand(uint32_t& s, float scale) {
+    s = s * 1664525u + 1013904223u;
+    return (float)((int32_t)(s >> 9) - (int32_t)(1u << 22)) / (float)(1u << 22) * scale;
+}
+
+float gdnVerifyDeviation(const float* got, const float* ref, size_t n) {
+    float maxDelta = 0.0f, maxRef = 0.0f;
+    for (size_t i = 0; i < n; ++i) {
+        float delta = fabsf(got[i] - ref[i]);
+        float refAbs = fabsf(ref[i]);
+        if (delta > maxDelta) maxDelta = delta;
+        if (refAbs > maxRef) maxRef = refAbs;
+    }
+    if (maxRef <= 0.0f) return (maxDelta <= 0.0f) ? 0.0f : 1.0f;
+    return maxDelta / maxRef;
+}
+
+// Run both kernels on identical operands for one width and return the worst
+// (core, state) normwise max relative deviation. Returns a negative value when a
+// dispatch or allocation failed. `tiledClass` selects the prefill-tiled candidate;
+// otherwise the DVPL=2 verify-width candidate runs.
+float gdnVerifyRunWidth(VerifyScratch& scratch, int slot, int tokens, bool tiledClass,
+                        int conv_dim, int n_k, int n_v, int k_hd, int v_hd, int kernel, float eps) {
+    const size_t convOutBytes = (size_t)tokens * conv_dim * sizeof(float);
+    const size_t coreBytes = (size_t)tokens * n_v * v_hd * sizeof(float);
+    const size_t stateBytes = (size_t)n_v * k_hd * v_hd * sizeof(float);
+    const size_t convStateBytes = (size_t)(kernel - 1) * conv_dim * sizeof(float);
+    const size_t stateCount = stateBytes / sizeof(float);
+
+    if (scratch.convOut) { destroyBuffer(scratch.convOut); scratch.convOut = nullptr; }
+    scratch.convOut = allocBuffer(convOutBytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, STORAGE_USAGE);
+    scratch.core[slot] = allocBuffer(coreBytes, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, STORAGE_USAGE);
+    if (!scratch.convOut || !scratch.core[slot]) {
+        // Free whatever did allocate so a failed width never leaks into the next.
+        if (scratch.convOut) { destroyBuffer(scratch.convOut); scratch.convOut = nullptr; }
+        if (scratch.core[slot]) { destroyBuffer(scratch.core[slot]); scratch.core[slot] = nullptr; }
+        return -1.0f;
+    }
+
+    const size_t mixedCount = (size_t)tokens * conv_dim;
+    const size_t zCount = (size_t)tokens * n_v * v_hd;
+    const size_t gateCount = (size_t)tokens * n_v;
+    const size_t convWCount = (size_t)conv_dim * kernel;
+    std::vector<float> mixed(mixedCount), z(zCount), beta(gateCount), alpha(gateCount);
+    std::vector<float> convW(convWCount), aLog(n_v), dtBias(n_v), norm(v_hd);
+    std::vector<float> convStateWrite((size_t)(kernel - 1) * conv_dim);
+    std::vector<float> stateInit(stateCount);
+    uint32_t seed = 0x5eed1234u + (uint32_t)(tokens * 2654435761u);
+    for (float& v : mixed) v = verifyOperand(seed, 0.35f);
+    for (float& v : z) v = verifyOperand(seed, 0.6f);
+    for (float& v : beta) v = verifyOperand(seed, 0.5f);
+    for (float& v : alpha) v = verifyOperand(seed, 0.4f);
+    for (float& v : convW) v = verifyOperand(seed, 0.2f);
+    for (float& v : aLog) v = verifyOperand(seed, 0.1f) - 1.0f;
+    for (float& v : dtBias) v = verifyOperand(seed, 0.1f);
+    for (float& v : norm) v = verifyOperand(seed, 0.1f) + 1.0f;
+    for (float& v : convStateWrite) v = verifyOperand(seed, 0.05f);
+    for (float& v : stateInit) v = verifyOperand(seed, 0.02f);
+
+    const VkMemoryPropertyFlags hostVis =
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    Buffer* dMixed = allocBuffer(mixedCount * sizeof(float), hostVis, STORAGE_USAGE);
+    Buffer* dZ = allocBuffer(zCount * sizeof(float), hostVis, STORAGE_USAGE);
+    Buffer* dBeta = allocBuffer(gateCount * sizeof(float), hostVis, STORAGE_USAGE);
+    Buffer* dAlpha = allocBuffer(gateCount * sizeof(float), hostVis, STORAGE_USAGE);
+    Buffer* dConvW = allocBuffer(convWCount * sizeof(float), hostVis, STORAGE_USAGE);
+    Buffer* dALog = allocBuffer((size_t)n_v * sizeof(float), hostVis, STORAGE_USAGE);
+    Buffer* dDtBias = allocBuffer((size_t)n_v * sizeof(float), hostVis, STORAGE_USAGE);
+    Buffer* dNorm = allocBuffer((size_t)v_hd * sizeof(float), hostVis, STORAGE_USAGE);
+    Buffer* dConvState = allocBuffer(convStateBytes ? convStateBytes : 4, hostVis, STORAGE_USAGE);
+    // dScalarState / dVerifyState are the two final recurrent states; the core pair
+    // lives in scratch.core[slot] (stock) and dVerifyCore (register-resident).
+    Buffer* dScalarState = allocBuffer(stateBytes, hostVis, STORAGE_USAGE);
+    Buffer* dVerifyState = allocBuffer(stateBytes, hostVis, STORAGE_USAGE);
+    Buffer* dVerifyCore = allocBuffer(coreBytes, hostVis, STORAGE_USAGE);
+    Buffer* dReadout = allocBuffer(coreBytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, STORAGE_USAGE);
+    bool ok = dMixed && dZ && dBeta && dAlpha && dConvW && dALog && dDtBias && dNorm &&
+              dConvState && dScalarState && dVerifyState && dVerifyCore && dReadout;
+    if (ok) {
+        copyHostToDevice(dMixed, mixed.data(), mixedCount * sizeof(float));
+        copyHostToDevice(dZ, z.data(), zCount * sizeof(float));
+        copyHostToDevice(dBeta, beta.data(), gateCount * sizeof(float));
+        copyHostToDevice(dAlpha, alpha.data(), gateCount * sizeof(float));
+        copyHostToDevice(dConvW, convW.data(), convWCount * sizeof(float));
+        copyHostToDevice(dALog, aLog.data(), (size_t)n_v * sizeof(float));
+        copyHostToDevice(dDtBias, dtBias.data(), (size_t)n_v * sizeof(float));
+        copyHostToDevice(dNorm, norm.data(), (size_t)v_hd * sizeof(float));
+        copyHostToDevice(dScalarState, stateInit.data(), stateBytes);
+        copyHostToDevice(dVerifyState, stateInit.data(), stateBytes);
+    }
+
+    struct ConvPC { int tokens, conv_dim, kernel; } cpc{tokens, conv_dim, kernel};
+    struct RecPC { int tokens, conv_dim, n_k, n_v, k_hd, v_hd; float eps; } rpc{tokens, conv_dim, n_k, n_v, k_hd, v_hd, eps};
+
+    // Arm A: stock recurrent shader. Its conv state runs in its own buffer.
+    Buffer* scalarConvState = allocBuffer(convStateBytes ? convStateBytes : 4, hostVis, STORAGE_USAGE);
+    if (ok && scalarConvState) copyHostToDevice(scalarConvState, convStateWrite.data(), convStateBytes);
+    ok = ok && scalarConvState;
+    if (ok) {
+        Buffer* cbufs[4] = {dMixed, dConvW, scalarConvState, scratch.convOut};
+        ok = dispatch(g_kern[K_QWEN35_GDN_CONV], cbufs, &cpc, sizeof(cpc), (uint32_t)((conv_dim + 63) / 64));
+    }
+    if (ok) {
+        Buffer* rbufs[9] = {scratch.convOut, dZ, dBeta, dAlpha, dALog, dDtBias, dNorm, dScalarState, scratch.core[slot]};
+        ok = dispatch(g_kern[K_QWEN35_GDN_RECURRENT], rbufs, &rpc, sizeof(rpc), (uint32_t)n_v);
+    }
+
+    // Arm B: the register-resident candidate for this class + shared norm pass.
+    if (ok) {
+        copyHostToDevice(dConvState, convStateWrite.data(), convStateBytes);
+        Buffer* cbufs[4] = {dMixed, dConvW, dConvState, scratch.convOut};
+        ok = dispatch(g_kern[K_QWEN35_GDN_CONV], cbufs, &cpc, sizeof(cpc), (uint32_t)((conv_dim + 63) / 64));
+    }
+    if (ok) {
+        Buffer* rbufs[9] = {scratch.convOut, dZ, dBeta, dAlpha, dALog, dDtBias, dNorm, dVerifyState, dReadout};
+        if (tiledClass) {
+            ok = dispatch(g_kern[K_QWEN35_GDN_PREFILL_TILED], rbufs, &rpc, sizeof(rpc), 4, (uint32_t)n_v);
+        } else {
+            ok = dispatch(g_kern[K_QWEN35_GDN_VERIFY_TILED], rbufs, &rpc, sizeof(rpc),
+                          (uint32_t)((v_hd + 7) / 8), (uint32_t)n_v);
+        }
+    }
+    if (ok) {
+        Buffer* rbufs[9] = {dReadout, dZ, dBeta, dAlpha, dALog, dDtBias, dNorm, dVerifyState, dVerifyCore};
+        ok = dispatch(g_kern[K_QWEN35_GDN_PREFILL_NORM], rbufs, &rpc, sizeof(rpc), (uint32_t)n_v, (uint32_t)tokens);
+    }
+
+    float deviation = -1.0f;
+    if (ok) {
+        std::vector<float> stockCore(coreBytes / sizeof(float)), verifyCore(coreBytes / sizeof(float));
+        std::vector<float> stockState(stateCount), verifyState(stateCount);
+        bool read = copyDeviceToHost(stockCore.data(), scratch.core[slot], coreBytes) == VK_SUCCESS &&
+                    copyDeviceToHost(verifyCore.data(), dVerifyCore, coreBytes) == VK_SUCCESS &&
+                    copyDeviceToHost(stockState.data(), dScalarState, stateBytes) == VK_SUCCESS &&
+                    copyDeviceToHost(verifyState.data(), dVerifyState, stateBytes) == VK_SUCCESS;
+        if (read) {
+            float coreDev = gdnVerifyDeviation(verifyCore.data(), stockCore.data(), stockCore.size());
+            float stateDev = gdnVerifyDeviation(verifyState.data(), stockState.data(), stateCount);
+            deviation = coreDev > stateDev ? coreDev : stateDev;
+        }
+    }
+
+    if (dReadout) destroyBuffer(dReadout);
+    if (dVerifyCore) destroyBuffer(dVerifyCore);
+    if (dVerifyState) destroyBuffer(dVerifyState);
+    if (dScalarState) destroyBuffer(dScalarState);
+    if (scalarConvState) destroyBuffer(scalarConvState);
+    for (Buffer* b : {dMixed, dZ, dBeta, dAlpha, dConvW, dALog, dDtBias, dNorm, dConvState}) if (b) destroyBuffer(b);
+    // Release this width's durable result before the next width allocates, so
+    // the check's device peak stays at one width class instead of all four.
+    if (scratch.core[slot]) { destroyBuffer(scratch.core[slot]); scratch.core[slot] = nullptr; }
+    return deviation;
+}
+
+// Run every width class once and cache one verdict per class. Returns the worst
+// candidate deviation (>= 0 on a clean run, -1 on failure).
+float gdnVerifySelfCheck() {
+    const int conv_dim = 10240, n_k = 16, n_v = 48, k_hd = 128, v_hd = 128, kernel = 4;
+    g_gdn_verify_checked = 1;
+    if (g_gdn_verify_force_disagree) {
+        g_gdn_verify_verdict = 0;
+        g_gdn_tiled_verdict = 0;
+        g_gdn_verify_deviation = 1.0f;
+        g_gdn_tiled_deviation = 1.0f;
+        return 1.0f;
+    }
+    if (!g_ready || !g_have_gdn_prefill_tiled) {
+        g_gdn_verify_verdict = 0;
+        g_gdn_tiled_verdict = 0;
+        g_gdn_verify_deviation = -1.0f;
+        g_gdn_tiled_deviation = -1.0f;
+        return -1.0f;
+    }
+    VerifyScratch scratch;
+    float worst = 0.0f;
+    for (int i = 0; i < kGdnVerifyWidthCount; ++i) {
+        const bool tiledClass = kGdnVerifyIsTiled[i];
+        // The tiled class needs the prefill pipeline; the verify class needs its own.
+        if (tiledClass ? !g_have_gdn_prefill_tiled : !g_have_gdn_verify_tiled) {
+            if (tiledClass) { g_gdn_tiled_verdict = 0; g_gdn_tiled_deviation = -1.0f; }
+            else { g_gdn_verify_verdict = 0; g_gdn_verify_deviation = -1.0f; }
+            continue;
+        }
+        float dev = gdnVerifyRunWidth(scratch, i, kGdnVerifyWidths[i], tiledClass, conv_dim, n_k, n_v, k_hd, v_hd, kernel, 1e-5f);
+        int verdict = (dev >= 0.0f && dev <= kGdnVerifyDeviationMax) ? 1 : 0;
+        if (tiledClass) {
+            g_gdn_tiled_verdict = verdict;
+            g_gdn_tiled_deviation = dev;
+        } else {
+            g_gdn_verify_verdict = verdict;
+            g_gdn_verify_deviation = dev;
+        }
+        if (dev < 0.0f) return -1.0f;
+        if (dev > worst) worst = dev;
+    }
+    return worst;
+}
+
 } // namespace
 
 // ---- C ABI ----------------------------------------------------------------------
@@ -1473,6 +1724,14 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
          limits.maxComputeWorkGroupSize[1] >= 8 && limits.maxComputeSharedMemorySize >= 20864 &&
          limits.maxComputeWorkGroupCount[0] >= 48 && limits.maxComputeWorkGroupCount[1] >= 48) ? 1 : 0;
     g_gdn_prefill_required_subgroup = g_have_gdn_prefill_tiled && requiredSubgroup32;
+    // Both width classes of the register-resident candidate (verify-width and
+    // prefill-tiled) share the subgroup and shared-memory prerequisites. The
+    // per-geometry on-device self-check decides whether each is selected.
+    // Verify-width (1..7 token) register-resident variant. It shares the tiled
+    // path's subgroup and shared-memory prerequisites but needs only one 32-wide
+    // workgroup per eight value dims (no 16-token LDS panel), so it reuses the
+    // same admission flag. The per-geometry device self-check decides whether it
+    // is actually selected at run time.
 
     bool needSubgroupControl = (g_have_glm_kda_wave32 != 0) || g_q4k_wave32_required_subgroup || g_gdn_prefill_required_subgroup || (g_have_coopmat != 0);
     if (needSubgroupControl) {
@@ -1595,6 +1854,14 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         const bool tiled = buildKernel(g_kern[K_QWEN35_GDN_PREFILL_TILED], P("qwen35_gdn_prefill_tiled.spv"), 9, 6 * sizeof(int) + sizeof(float), subgroup);
         const bool norm = buildKernel(g_kern[K_QWEN35_GDN_PREFILL_NORM], P("qwen35_gdn_prefill_norm.spv"), 9, 6 * sizeof(int) + sizeof(float));
         g_have_gdn_prefill_tiled = tiled && norm;
+        if (g_have_gdn_prefill_tiled) {
+            // The verify-width variant is independent of the tiled pipeline: a regex or
+            // driver that rejects one module must not disable the other's kernel.
+            g_have_gdn_verify_tiled =
+                buildKernel(g_kern[K_QWEN35_GDN_VERIFY_TILED], P("qwen35_gdn_verify_tiled.spv"), 9, 6 * sizeof(int) + sizeof(float), subgroup) ? 1 : 0;
+        } else {
+            g_have_gdn_verify_tiled = 0;
+        }
     }
     if (g_have_glm_kda_wave32) {
         ok &= buildKernel(g_kern[K_GLM_KDA_REREAD], P("glm_kda_recurrent_reread.spv"), 7, sizeof(int), 32);
@@ -1656,6 +1923,9 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     }
 
     g_ready = true;
+    // One per-geometry device self-check, before the first forward and never
+    // inside one. Its verdict is cached and read by the verify-width route.
+    gdnVerifySelfCheck();
     return 0;
 }
 
@@ -2562,6 +2832,45 @@ extern "C" int fvk_debug_gdn_prefill_tiled_available(void) {
     return g_ready && g_have_gdn_prefill_tiled;
 }
 
+extern "C" int fvk_debug_gdn_verify_tiled_available(void) {
+    return g_ready && g_have_gdn_verify_tiled;
+}
+
+extern "C" void fvk_debug_gdn_verify_tiled_mode(int mode) {
+    g_gdn_verify_mode = (mode == -1 || mode == 1) ? mode : 0;
+}
+
+extern "C" void fvk_debug_gdn_verify_tiled_reset(void) {
+    g_gdn_verify_tiled_calls = 0;
+    g_gdn_verify_scalar_calls = 0;
+}
+
+extern "C" void fvk_debug_gdn_verify_tiled_snapshot(uint64_t* verify, uint64_t* scalar) {
+    if (verify) *verify = g_gdn_verify_tiled_calls;
+    if (scalar) *scalar = g_gdn_verify_scalar_calls;
+}
+
+extern "C" int fvk_debug_gdn_verify_tiled_verdict(float* deviation) {
+    if (deviation) *deviation = g_gdn_verify_deviation;
+    return g_gdn_verify_verdict;
+}
+
+extern "C" int fvk_debug_gdn_tiled_verdict(float* deviation) {
+    if (deviation) *deviation = g_gdn_tiled_deviation;
+    return g_gdn_tiled_verdict;
+}
+
+extern "C" int fvk_debug_gdn_verify_tiled_checked(void) {
+    return g_gdn_verify_checked;
+}
+
+extern "C" void fvk_debug_gdn_verify_tiled_force_disagree(int enabled) {
+    g_gdn_verify_force_disagree = enabled ? 1 : 0;
+    // Re-run the cached self-check so the forced-disagreement hook takes effect
+    // immediately; the forced path never dispatches a kernel.
+    gdnVerifySelfCheck();
+}
+
 extern "C" void fvk_debug_gdn_prefill_tiled_mode(int mode) {
     g_gdn_prefill_mode = (mode == -1 || mode == 1) ? mode : 0;
 }
@@ -2569,6 +2878,7 @@ extern "C" void fvk_debug_gdn_prefill_tiled_mode(int mode) {
 extern "C" void fvk_debug_gdn_prefill_tiled_reset(void) {
     g_gdn_prefill_tiled_calls = 0;
     g_gdn_prefill_scalar_calls = 0;
+    g_gdn_verify_tiled_calls = 0;
 }
 
 extern "C" void fvk_debug_gdn_prefill_tiled_snapshot(uint64_t* tiled, uint64_t* scalar) {
@@ -2588,13 +2898,30 @@ extern "C" int fvk_qwen35_gdn_preprojected_f32(
     Buffer* conv_out = gdnConvOutScratch((size_t)tokens * conv_dim * sizeof(float));
     if (!conv_out) return 3;
     const char* optIn = std::getenv("FAK_VULKAN_GDN_PREFILL_TILED");
-    const bool requested = g_gdn_prefill_mode == 1 ||
-        (g_gdn_prefill_mode == -1 && optIn && optIn[0] == '1' && optIn[1] == '\0');
-    const bool tiled = requested && g_have_gdn_prefill_tiled &&
-        tokens >= 8 && (uint32_t)tokens <= g_gdn_prefill_max_groups_y &&
-        n_k == 16 && n_v == 48 && k_hd == 128 && v_hd == 128 && conv_dim == 10240;
+    const bool requestedByEnv = optIn && optIn[0] == '1' && optIn[1] == '\0';
+    const bool optOut = optIn && optIn[0] == '0' && optIn[1] == '\0';
+    const bool productionGeometry = n_k == 16 && n_v == 48 && k_hd == 128 && v_hd == 128 && conv_dim == 10240;
+    // Prefill-class (>=8) route. The explicit request path (debug mode 1 or env
+    // "1") requires a true self-check verdict. An unset variable stays stock until a
+    // default flip is earned; `=0` also stays stock.
+    constexpr bool kGdnTiledDefaultFlipEarned = false; // pending the [HW-WITNESSED] Strix A/B, #12735, #12098
+    const bool tiledRequested = g_gdn_prefill_mode == 1 ||
+        (g_gdn_prefill_mode == -1 && (requestedByEnv || kGdnTiledDefaultFlipEarned));
+    const bool tiled = tiledRequested && g_have_gdn_prefill_tiled && g_gdn_tiled_verdict != 0 &&
+        tokens >= 8 && (uint32_t)tokens <= g_gdn_prefill_max_groups_y && productionGeometry;
+    // Verify-width (1..7 token) route. `FAK_VULKAN_GDN_PREFILL_TILED=0` forces the
+    // stock kernel; an explicit request (debug mode 1 or env "1") selects the
+    // candidate but still requires a true self-check verdict. With the variable
+    // unset the route follows the verdict only once the default flip is earned for
+    // the width class; until then the default stays stock.
+    constexpr bool kGdnVerifyDefaultFlipEarned = false; // pending the [HW-WITNESSED] Strix A/B, #12735, #12098
+    const bool verifyRequested = !optOut && g_gdn_verify_mode != 0 &&
+        (g_gdn_prefill_mode == 1 || g_gdn_verify_mode == 1 || requestedByEnv ||
+         kGdnVerifyDefaultFlipEarned);
+    const bool verify = verifyRequested && g_have_gdn_verify_tiled && g_gdn_verify_verdict &&
+        tokens >= 1 && tokens < 8 && productionGeometry;
     Buffer* readout = nullptr;
-    if (tiled) {
+    if (tiled || verify) {
         readout = gdnPrefillReadoutScratch((size_t)tokens * n_v * v_hd * sizeof(float));
         // Once selected, resource failure is an error, never a silent replay
         // after a partially updated recurrent or convolution state.
@@ -2614,9 +2941,23 @@ extern "C" int fvk_qwen35_gdn_preprojected_f32(
         rbufs[8] = B(core);
         if (!dispatch(g_kern[K_QWEN35_GDN_PREFILL_NORM], rbufs, &rpc, sizeof(rpc), (uint32_t)n_v, (uint32_t)tokens)) return 7;
         ++g_gdn_prefill_tiled_calls;
+    } else if (verify) {
+        // The verify-width variant writes the unnormalised readout to the
+        // scratch readout, then the shared norm pass finalises `core`.
+        rbufs[8] = readout;
+        if (!dispatch(g_kern[K_QWEN35_GDN_VERIFY_TILED], rbufs, &rpc, sizeof(rpc),
+                      (uint32_t)((v_hd + 7) / 8), (uint32_t)n_v)) return 6;
+        rbufs[0] = readout;
+        rbufs[8] = B(core);
+        if (!dispatch(g_kern[K_QWEN35_GDN_PREFILL_NORM], rbufs, &rpc, sizeof(rpc), (uint32_t)n_v, (uint32_t)tokens)) return 7;
+        // The unified candidate counter tracks either register-resident route; the
+        // verify counter is the finer per-width breakdown surfaced by the debug seam.
+        ++g_gdn_prefill_tiled_calls;
+        ++g_gdn_verify_tiled_calls;
     } else {
         if (!dispatch(g_kern[K_QWEN35_GDN_RECURRENT], rbufs, &rpc, sizeof(rpc), (uint32_t)n_v)) return 8;
         ++g_gdn_prefill_scalar_calls;
+        if (tokens >= 1 && tokens < 8 && productionGeometry) ++g_gdn_verify_scalar_calls;
     }
     return 0;
 }
