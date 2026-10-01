@@ -22,7 +22,7 @@ func withIssueCreateDedupeFetcher(t *testing.T, fetch issueCreateDedupeFunc) {
 }
 
 func TestIssueCreateDedupeGateRefusesNearDuplicate(t *testing.T) {
-	fetch := func(cap int) ([]byte, error) { return []byte(nearDupBacklog), nil }
+	fetch := func(cap int, repo string) ([]byte, error) { return []byte(nearDupBacklog), nil }
 	result := &issueCreateResult{}
 	var out, errb bytes.Buffer
 	code, refused := issueCreateRunDedupeGate(&out, &errb, result, fetch, true, 0, 0, false,
@@ -40,7 +40,7 @@ func TestIssueCreateDedupeGateRefusesNearDuplicate(t *testing.T) {
 }
 
 func TestIssueCreateDedupeGateFailsOpenOnFetchError(t *testing.T) {
-	fetch := func(cap int) ([]byte, error) { return nil, errors.New("gh: not found") }
+	fetch := func(cap int, repo string) ([]byte, error) { return nil, errors.New("gh: not found") }
 	result := &issueCreateResult{}
 	var out, errb bytes.Buffer
 	code, refused := issueCreateRunDedupeGate(&out, &errb, result, fetch, true, 0, 0, false,
@@ -54,7 +54,7 @@ func TestIssueCreateDedupeGateFailsOpenOnFetchError(t *testing.T) {
 }
 
 func TestIssueCreateDedupeGateWarnOnly(t *testing.T) {
-	fetch := func(cap int) ([]byte, error) { return []byte(nearDupBacklog), nil }
+	fetch := func(cap int, repo string) ([]byte, error) { return []byte(nearDupBacklog), nil }
 	result := &issueCreateResult{}
 	var out, errb bytes.Buffer
 	code, refused := issueCreateRunDedupeGate(&out, &errb, result, fetch, true, 0, 0, true,
@@ -69,7 +69,7 @@ func TestIssueCreateDedupeGateWarnOnly(t *testing.T) {
 }
 
 func TestIssueCreateDedupeGateDisarmed(t *testing.T) {
-	fetch := func(cap int) ([]byte, error) {
+	fetch := func(cap int, repo string) ([]byte, error) {
 		t.Fatalf("fetch must never run while the gate is disarmed")
 		return nil, nil
 	}
@@ -127,7 +127,7 @@ func TestIssueCreateWriteBackFiledMarkerReplacesExisting(t *testing.T) {
 }
 
 func TestIssueCreateDedupeGateViaRunIssueCreateWith(t *testing.T) {
-	withIssueCreateDedupeFetcher(t, func(cap int) ([]byte, error) { return []byte(nearDupBacklog), nil })
+	withIssueCreateDedupeFetcher(t, func(cap int, repo string) ([]byte, error) { return []byte(nearDupBacklog), nil })
 	body := "## Parent context\n#1\n\n## Core through-line\nChange -> seam -> outcome -> witness.\n\n## Gold-plating boundary\nNo extras." + validIssueCreateProblemFrame("Core")
 	var out, errb bytes.Buffer
 	code := runIssueCreateWithCleanScrub(&out, &errb, []string{
