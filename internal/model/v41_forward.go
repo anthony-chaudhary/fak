@@ -47,6 +47,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/model/ffn"
 )
@@ -2577,6 +2578,15 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			return err
 		}
 	} else {
+		// The multi-token token-major arm (test-forced, or a panel that the
+		// grouped path did not take) contracts each pick through the row-parallel
+		// twin; the seq == 1 decode fallback through this same arm keeps the
+		// package-level serial contraction, because three tiny expert GEMVs per
+		// pick would pay the parFor dispatch barrier with no bandwidth to reclaim.
+		contract := v41SwiGLU
+		if seq > 1 {
+			contract = v41SwiGLUParallel
+		}
 		for t := 0; t < seq; t++ {
 			xn := rmsnormCfg(x[t], ffnNorm, eps, cfg)
 			routed := make([]float32, H)
@@ -2620,7 +2630,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 				// weights, so the ledger can attribute the 492 s first token
 				// (fak#13294) to scalar contraction vs tier IO. Inert with no clock.
 				contractOpen := m.v41NowNanos()
-				y := v41SwiGLU(w1, w3, w2, xn, cfg.MoEIntermediateSize, H, cfg)
+				y := contract(w1, w3, w2, xn, cfg.MoEIntermediateSize, H, cfg)
 				if contractOpen != 0 {
 					m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
 				} else {
@@ -2704,12 +2714,78 @@ func (m *Model) v41SharedExpertSwiGLU(l int, xn []float32, cfg Config) ([]float3
 	})
 }
 
+// v41SwiGLUParallelCalls counts V4.1 routed-expert contractions dispatched through
+// the row-parallel kernel while the test-only witness is enabled. Production pays
+// zero: the counter is touched only when v41SwiGLUWitnessOn is true, mirroring the
+// hostBatchWitnessOn idiom in moe_host_batch.go.
+var (
+	v41SwiGLUParallelCalls int64
+	v41SwiGLUWitnessOn     bool
+)
+
+// enableV41SwiGLUWitness turns the parallel-dispatch witness ON for a test and
+// zeroes the counter. Production never calls it.
+func enableV41SwiGLUWitness() {
+	v41SwiGLUWitnessOn = true
+	atomic.StoreInt64(&v41SwiGLUParallelCalls, 0)
+}
+
+// v41SwiGLUDispatches reports how many large routed-expert contractions ran on the
+// row-parallel kernel since enableV41SwiGLUWitness.
+func v41SwiGLUDispatches() int64 { return atomic.LoadInt64(&v41SwiGLUParallelCalls) }
+
+// v41SwiGLU is the V4.1 routed-expert contraction: down(silu(clamp(w1 x)) *
+// clamp(w3 x)). It is the package-level serial form, and it stays the reference
+// every adapter witness compares against (ffn_composition_test.go,
+// v41_swiglu_limit_test.go). See v41SwiGLUParallel for the bulk-prefill twin.
 func v41SwiGLU(w1, w3, w2, xn []float32, I, H int, cfg Config) []float32 {
 	h1 := matRows(w1, xn, I, H)
 	h3 := matRows(w3, xn, I, H)
 	clampSwiGLUProjections(h1, h3, float32(cfg.SwigluLimit))
 	y, err := ffn.Gated(h1, h3, func(v float32) float32 { return act(v, cfg) }, func(activated []float32) ([]float32, error) {
 		return matRows(w2, activated, H, I), nil
+	})
+	if err != nil {
+		panic(err)
+	}
+	return y
+}
+
+// v41SwiGLUParallel is the ROW-PARALLEL twin of v41SwiGLU, used for the BULK
+// prefill routed-expert contraction (the largest single attributed bucket of the
+// physical strix3 30-token prefill: contraction=57.381 s of 265.48 s, fak#13294).
+//
+// It is byte-for-byte v41SwiGLU's arithmetic: the only difference is the kernel
+// that reduces each output row, and parMatRows splits OUTPUT ROWS across cores
+// while every row keeps the identical in-order mathx.FDot reduction — the contract
+// pinned by parallel.go and TestParallelMatchesSerial. Below parThreshold the
+// kernel is the historical matRows, so a reduced-geometry expert is unchanged.
+//
+// The gate is the flat element count I*H ONE projection moves, deliberately shared
+// by all three projections: at the published V4.1 expert geometry (I=2304, H=5120)
+// all three are 11.8M elements — far above parThreshold — so gate/up AND down all
+// ride the parallel kernel, whereas gating each projection on its own out*in would
+// leave the down projection on the serial path at some geometries.
+//
+// CALLERS: the multi-token panel contraction (v41ContractRoutedGrouped, only
+// reached for seq > 1) and the multi-token token-major arm. The one-position
+// incremental decode seam (v41LayerStep / prefillV41Suffix via forwardV41Step)
+// keeps the package-level serial v41SwiGLU, because at seq == 1 the three tiny
+// expert GEMVs per pick would pay the parFor dispatch barrier ~3*k*40 times a
+// token — a pure cost with no bandwidth to reclaim.
+func v41SwiGLUParallel(w1, w3, w2, xn []float32, I, H int, cfg Config) []float32 {
+	proj := matRows
+	if I*H >= parThreshold {
+		if v41SwiGLUWitnessOn {
+			atomic.AddInt64(&v41SwiGLUParallelCalls, 1)
+		}
+		proj = parMatRows
+	}
+	h1 := proj(w1, xn, I, H)
+	h3 := proj(w3, xn, I, H)
+	clampSwiGLUProjections(h1, h3, float32(cfg.SwigluLimit))
+	y, err := ffn.Gated(h1, h3, func(v float32) float32 { return act(v, cfg) }, func(activated []float32) ([]float32, error) {
+		return proj(w2, activated, H, I), nil
 	})
 	if err != nil {
 		panic(err)

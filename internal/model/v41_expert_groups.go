@@ -225,7 +225,7 @@ func (m *Model) v41ContractRoutedGrouped(l int, x [][]float32, perTokenPicks [][
 			// Same #13299 attribution as the token-major loop: one note per
 			// contracted (token, pick) row, so the ledger's bucket counts match.
 			contractOpen := m.v41NowNanos()
-			y := v41SwiGLU(w1, w3, w2, xn, I, H, cfg)
+			y := v41SwiGLUParallel(w1, w3, w2, xn, I, H, cfg)
 			if contractOpen != 0 {
 				m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
 			} else {
