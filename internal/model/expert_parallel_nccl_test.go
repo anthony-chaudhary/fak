@@ -7,25 +7,28 @@ import (
 	"testing"
 )
 
-// NCCLCollectiveEPReceipt schema for Issue #10946.
-type NCCLCollectiveEPReceipt struct {
-	Schema                  string  `json:"schema"`
-	Issue                   int     `json:"issue"`
-	Role                    string  `json:"role"`
-	Engine                  string  `json:"engine"`
-	ModelArchitecture       string  `json:"model_architecture"`
-	RanksTested             []int   `json:"ranks_tested"`
-	CollectiveOperation     string  `json:"collective_operation"`
-	LogitParityVsSingleRank float64 `json:"logit_parity_vs_single_rank"`
-	MaxAbsoluteDelta        float64 `json:"max_absolute_delta"`
-	ShardingProven          bool    `json:"sharding_proven"`
+// LocalCollectiveEPReceipt describes a synthetic host operator check, not NCCL qualification.
+type LocalCollectiveEPReceipt struct {
+	Schema                   string  `json:"schema"`
+	Issue                    int     `json:"issue"`
+	Role                     string  `json:"role"`
+	Engine                   string  `json:"engine"`
+	Fixture                  string  `json:"fixture"`
+	EvidenceScope            string  `json:"evidence_scope"`
+	HardwareQualified        bool    `json:"hardware_qualified"`
+	RanksTested              []int   `json:"ranks_tested"`
+	CollectiveOperation      string  `json:"collective_operation"`
+	DeltaCosineVsSingleRank  float64 `json:"delta_cosine_vs_single_rank"`
+	MaxAbsoluteDelta         float64 `json:"max_absolute_delta"`
+	SyntheticShardingChecked bool    `json:"synthetic_sharding_checked"`
 }
 
-func TestNCCLCollectiveExpertParallelForward(t *testing.T) {
+// fak-test:runtime fast est=10ms lane=default
+func TestLocalCollectiveExpertParallelDeltaReceipt(t *testing.T) {
 	// Build synthetic 8-expert MoE model
 	m := epGenMoeModel(8, 4)
 
-	// Rank 1 reference (single-device forward)
+	// Rank 1 reference (host expert delta)
 	plan1, err := ExpertParallelPlan(8, 1)
 	if err != nil {
 		t.Fatalf("ExpertParallelPlan(8, 1) failed: %v", err)
@@ -47,7 +50,7 @@ func TestNCCLCollectiveExpertParallelForward(t *testing.T) {
 		t.Fatalf("single-rank EP delta failed: %v", err)
 	}
 
-	// Multi-rank cross-device EP forward (ranks = 2, 4, 8)
+	// Host-only EP partial reduction (ranks = 2, 4, 8)
 	ranksList := []int{2, 4, 8}
 	var maxAbsDiff float64
 	var minCosine float64 = 1.0
@@ -61,7 +64,7 @@ func TestNCCLCollectiveExpertParallelForward(t *testing.T) {
 		if err != nil {
 			t.Fatalf("multi-rank EP delta (ranks=%d) failed: %v", ranks, err)
 		}
-		cos := float64(cosineSimilarity(deltaSingle, deltaMulti))
+		cos := epCosine(deltaSingle, deltaMulti)
 		if cos < minCosine {
 			minCosine = cos
 		}
@@ -75,28 +78,27 @@ func TestNCCLCollectiveExpertParallelForward(t *testing.T) {
 	}
 
 	// Emit witness receipt
-	receipt := NCCLCollectiveEPReceipt{
-		Schema:                  "fak-nccl-ep-collective/v1",
-		Issue:                   10946,
-		Role:                    "candidate",
-		Engine:                  "fak-native",
-		ModelArchitecture:       "GLM-5.3 / Qwen3.8 MoE",
-		RanksTested:             ranksList,
-		CollectiveOperation:     "NCCL AllReduceSum",
-		LogitParityVsSingleRank: minCosine,
-		MaxAbsoluteDelta:        maxAbsDiff,
-		ShardingProven:          true,
+	receipt := LocalCollectiveEPReceipt{
+		Schema:                   "fak-local-ep-software-check/v2",
+		Issue:                    10946,
+		Role:                     "software-check",
+		Engine:                   "fak-native",
+		Fixture:                  "synthetic 8-expert MoE",
+		EvidenceScope:            "host ExpertParallelDelta; no NCCL, GPU, model artifacts, or logits",
+		HardwareQualified:        false,
+		RanksTested:              ranksList,
+		CollectiveOperation:      "LocalCollective.AllReduceSum (host float32)",
+		DeltaCosineVsSingleRank:  minCosine,
+		MaxAbsoluteDelta:         maxAbsDiff,
+		SyntheticShardingChecked: true,
 	}
 
-	receiptDir := filepath.Join("..", "..", "docs", "_witnesses", "issue-10946-nccl-ep-collective")
-	if err := os.MkdirAll(receiptDir, 0755); err != nil {
-		t.Logf("note: could not create witness dir: %v", err)
-		return
-	}
+	receiptDir := t.TempDir()
 	data, err := json.MarshalIndent(receipt, "", "  ")
 	if err != nil {
 		t.Fatalf("failed to marshal receipt: %v", err)
 	}
+	t.Logf("software receipt: %s", data)
 	receiptPath := filepath.Join(receiptDir, "receipt.json")
 	if err := os.WriteFile(receiptPath, data, 0644); err != nil {
 		t.Fatalf("failed to write receipt: %v", err)
