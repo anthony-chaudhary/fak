@@ -2123,7 +2123,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if cfg.DeepSeekV41 != nil {
 		for _, eng := range cfg.DeepSeekV41.EngramLayerIDs {
 			if eng == l {
-				if err := m.v41EngramInject(l, x, tokens, eps); err != nil {
+				if err := m.v41EngramInject(l, x, streams, full, tokens, eps); err != nil {
 					return err
 				}
 				break
