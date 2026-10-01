@@ -24,6 +24,42 @@ description: "How to run local models (Qwen3.8-27B and peers) natively on Apple 
 
 ---
 
+## Ternary Bonsai-2 27B (PQ2_0)
+
+The [Prism Bonsai-2 GGUF](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf)
+uses Qwen3.8's hybrid architecture, signed Hadamard activations, and packed
+group-128 ternary matrices. The native `fak` loader retains `PQ2_0` blocks and
+runs this checkpoint on the CPU on Apple Silicon. An explicit `--metal` request
+refuses until the model's Metal residency and transform path are qualified.
+
+Pull the pinned, tested artifact, then use the local GGUF path printed by the
+pull command:
+
+```bash
+fak model pull 'hf://prism-ml/Ternary-Bonsai-2-27B-gguf@b072e1d3b35a0a630cece372c2127528e0994386/Ternary-Bonsai-2-27B-PQ2_0.gguf'
+
+MODEL=/absolute/path/to/Ternary-Bonsai-2-27B-PQ2_0.gguf
+FAK_STREAM_STALL_TIMEOUT_S=600 fak serve --gguf "$MODEL" \
+  --backend cpu --engine inkernel --native-context-tokens 512 \
+  --model bonsai2-pq2 --addr 127.0.0.1:18080
+```
+
+The longer first-token window accommodates CPU prefill of this 27B checkpoint;
+it does not switch to another inference engine. Once `/healthz` reports
+`ok: true`, use the ordinary chat endpoint:
+
+```bash
+curl -sS http://127.0.0.1:18080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"bonsai2-pq2","messages":[{"role":"user","content":"Reply with ready."}],"max_tokens":8,"temperature":0,"fak":{"native_inference_receipt":true}}'
+```
+
+The native receipt should report `engine: "inkernel"`, a CPU backend, and
+`fallback_active: false`. The pinned artifact's SHA-256 is
+`3907dc1658db1f78a9826bf8d5bcb8dc65db0d466388937af57f2294fae62ec1`.
+
+---
+
 ## Build and qualify the native Metal binary
 
 Metal support is compiled into the native `darwin/arm64` build with CGo enabled.

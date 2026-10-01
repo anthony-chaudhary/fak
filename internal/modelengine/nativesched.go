@@ -279,8 +279,15 @@ func newNativeScheduler(m *model.Model, prepare schedPrepareFunc) *NativeSchedul
 		coupler:       NewDefaultWorkerCoupler(),
 		closeSession:  func(sess *model.Session) { sess.Close() },
 	}
-	if m != nil && m.Q4KCount() > 0 {
+	if m != nil && (m.Q4KCount() > 0 || m.Q2Count() > 0) {
 		s.qwenPrefillCap = &residentQ4KPrefillCapability{model: m}
+		if m.Q2Count() > 0 {
+			// A PQ2-only Bonsai checkpoint has no Q4_K weights, but its packed
+			// matmuls require the same resident session kernel and Qwen hybrid
+			// prefill route. Select that lane from model-owned residency even
+			// when the caller did not set the historical Q4K intent flag.
+			s.residentQ4K = true
+		}
 	}
 	return s
 }

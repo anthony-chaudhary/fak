@@ -118,10 +118,13 @@ func serveSizingArmForSelected(be compute.Backend, cpuOffloadExperts, useMetal b
 // is inspection, so it always emits.
 func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpuOffloadExperts bool, requestedNativeContextTokens int, model string, diskBytes int64) (serveSizingArtifact, error) {
 	warnings := []string{}
+	pq2Checkpoint := servePQ2Artifact(ggufload.ClassifyTensorQuant(ws.File.Tensors))
 	if be != nil && cpuOffloadExperts && !be.Caps().UploadDtype {
 		warnings = append(warnings, fmt.Sprintf("--cpu-offload-experts requires backend %q to advertise quantized UploadDtype (Q8_0 upload); a live serve refuses this combination", be.Name()))
 	}
-	useMetal := be == nil && serveMetalAvailable()
+	// Live serve chooses the packed CPU path for PQ2_0 even when Metal is
+	// available. Keep the dry-run arm, memory fit and pool receipt on that path.
+	useMetal := be == nil && !pq2Checkpoint && serveMetalAvailable()
 	selectedArm := resolveServeNativeContextLoadArm(ws, be, cpuOffloadExperts, useMetal)
 	cpuOffloadActive := false
 	if be != nil && cpuOffloadExperts {
@@ -216,10 +219,14 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 		UsableBytes:   max(hostFit.avail(), 0),
 	})
 
+	armLabel := serveSizingArmForSelected(be, cpuOffloadActive, useMetal, selectedArm)
+	if pq2Checkpoint && be == nil && selectedArm == serveLoadArmResidentQ4K {
+		armLabel = "cpu-resident-pq2_0"
+	}
 	return serveSizingArtifact{
 		Version:                     serveSizingVersion,
 		Model:                       model,
-		Arm:                         serveSizingArmForSelected(be, cpuOffloadActive, useMetal, selectedArm),
+		Arm:                         armLabel,
 		NativeContextTokens:         resolution.RequestedTokens,
 		ContextBudgetTokens:         resolution.RequestedTokens,
 		ModelDeclaredContextTokens:  resolution.ModelDeclaredTokens,

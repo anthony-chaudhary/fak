@@ -157,11 +157,11 @@ func tensorPayloadBytes(t TensorInfo) (uint64, error) {
 			return 0, fmt.Errorf("gguf: tensor %s IQ3_XXS element count %d is not a multiple of %d", t.Name, elems, qkK)
 		}
 		return payload(elems/qkK, blockIQ3XXSBytes)
-	case TensorQ2_0:
+	case TensorQ2_0, TensorPQ2_0:
 		if elems%128 != 0 {
-			return 0, fmt.Errorf("gguf: tensor %s Q2_0 element count %d is not a multiple of 128", t.Name, elems)
+			return 0, fmt.Errorf("gguf: tensor %s %s element count %d is not a multiple of 128", t.Name, t.Type, elems)
 		}
-		return payload(elems/128, blockQ2_0Bytes)
+		return payload(elems/128, blockPQ2_0Bytes)
 	case TensorQ1_0:
 		if elems%128 != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s Q1_0 element count %d is not a multiple of 128", t.Name, elems)
@@ -391,8 +391,8 @@ func dequantF32IntoLimited(scratch []float32, t TensorInfo, raw []byte, workerLi
 			return nil, err
 		}
 		dequantQ4_0Limited(out, raw, workerLimit)
-	case TensorQ2_0:
-		if _, err := checkQuantPayload(t, elems, raw, 128, blockQ2_0Bytes, "Q2_0"); err != nil {
+	case TensorQ2_0, TensorPQ2_0:
+		if _, err := checkQuantPayload(t, elems, raw, 128, blockPQ2_0Bytes, t.Type.String()); err != nil {
 			return nil, err
 		}
 		dequantQ2_0Scalar(out, raw)

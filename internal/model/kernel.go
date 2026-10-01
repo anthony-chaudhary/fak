@@ -261,7 +261,7 @@ func requireResidentShape(store, name string, storedOut, storedIn, out, in int) 
 // weight) is what lets a dynamic adapter ride on a quantized base the merge path
 // cannot reach.
 func (m *Model) residentMatRows(name string, x []float32, out, in int) []float32 {
-	y := m.residentMatRowsBase(name, x, out, in)
+	y := m.residentMatRowsBase(name, m.prismProjectInput(name, x), out, in)
 	m.loraApply(name, x, y)
 	return y
 }

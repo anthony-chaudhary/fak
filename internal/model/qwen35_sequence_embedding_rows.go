@@ -28,14 +28,15 @@ func (s *Session) qwen35EmbeddingRows(ids []int) ([]float32, error) {
 	packed := m.Q2KEmbedding
 	if packed != nil {
 		if packed.Vocab() != vocab || packed.Hidden() != hidden {
-			return nil, fmt.Errorf("model: packed Q2_K embedding shape [%d,%d], want [%d,%d]", packed.Vocab(), packed.Hidden(), vocab, hidden)
+			return nil, fmt.Errorf("model: packed %s embedding shape [%d,%d], want [%d,%d]", packed.Format(), packed.Vocab(), packed.Hidden(), vocab, hidden)
 		}
-		if hidden%qkK != 0 {
-			return nil, fmt.Errorf("model: packed Q2_K embedding hidden dimension %d is not divisible by %d", hidden, qkK)
+		blockWeights, blockBytes := packed.format.blockWeights(), packed.format.blockBytes()
+		if hidden%blockWeights != 0 {
+			return nil, fmt.Errorf("model: packed %s embedding hidden dimension %d is not divisible by %d", packed.Format(), hidden, blockWeights)
 		}
-		wantBytes := int64(vocab) * int64(hidden/qkK) * int64(q2kBlockBytes)
+		wantBytes := int64(vocab) * int64(hidden/blockWeights) * int64(blockBytes)
 		if int64(packed.Bytes()) != wantBytes {
-			return nil, fmt.Errorf("model: packed Q2_K embedding payload is %d bytes, want %d", packed.Bytes(), wantBytes)
+			return nil, fmt.Errorf("model: packed %s embedding payload is %d bytes, want %d", packed.Format(), packed.Bytes(), wantBytes)
 		}
 	} else {
 		const name = "model.embed_tokens.weight"

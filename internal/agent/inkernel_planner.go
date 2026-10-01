@@ -3178,15 +3178,16 @@ func nativeCacheRestoreSourceFor(tier radixkv.SnapshotTier, matched int) model.N
 
 func (p *InKernelPlanner) nativeSelectionIdentity() (model.NativeSelectionIdentity, string, error) {
 	backend, forwardPath := p.executionIdentity()
+	quantization := p.nativeSelectionQuantization()
 	identity := model.NativeSelectionIdentity{
 		Schema:              model.NativeSelectionIdentitySchemaV1,
 		ModelRef:            p.modelID,
 		Backend:             backend,
 		ForwardPath:         forwardPath,
-		Quantization:        p.nativeSelectionQuantization(),
+		Quantization:        quantization,
 		PrefillChunkTokens:  p.nativeInferencePrefillChunkTokens(),
 		CPUOffloadExperts:   p.nativeSelectionCPUOffloadExperts(),
-		Q4KGateUpOutputSlab: p.q4kGateUpOutputSlab,
+		Q4KGateUpOutputSlab: p.q4kGateUpOutputSlab && quantization == model.NativeSelectionQuantizationQ4K,
 	}
 	digest, err := identity.Digest()
 	if err != nil {
@@ -3197,6 +3198,15 @@ func (p *InKernelPlanner) nativeSelectionIdentity() (model.NativeSelectionIdenti
 
 func (p *InKernelPlanner) nativeSelectionQuantization() string {
 	if p != nil && p.q4k {
+		// Resident Q2_0 and Prism PQ2_0 reuse Session.Q4K's mixed-quant
+		// execution path. The attached Prism contract distinguishes the two
+		// on-disk formats after both reach the same packed Q2 weight store.
+		if p.m != nil && p.m.Q2Count() > 0 {
+			if p.m.HasPrismHadamard() {
+				return model.NativeSelectionQuantizationPQ2_0
+			}
+			return model.NativeSelectionQuantizationQ2_0
+		}
 		return model.NativeSelectionQuantizationQ4K
 	}
 	if p != nil && p.quant {

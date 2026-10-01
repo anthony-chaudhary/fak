@@ -96,8 +96,19 @@ func serveDeviceResidentQ4K(backend compute.Backend) bool {
 // the encodings in the artifact itself. Backend capability alone must never relabel an
 // all-Q8_0 checkpoint as resident Q4_K.
 func serveArtifactResidentQ4K(backend compute.Backend, artifact ggufload.ArtifactQuant) bool {
+	if servePQ2Artifact(artifact) {
+		// PQ2_0 is CPU-resident today. The common resident session flag selects
+		// the packed matmul path; a device backend has no PQ2 execution kernel, so
+		// the backend == nil conjunct is the device exclusion. No serveMetalAvailable()
+		// probe belongs here: gating on Apple Metal made this gate disagree with
+		// resolveHostServeLoadArm, which selects the packed resident arm for the same
+		// checkpoint on a non-Metal host.
+		return backend == nil && os.Getenv("FAK_Q4K") != "0"
+	}
 	return (artifact.Q4KResident || artifact.Recipe == "UD-Q2_K_XL") && serveDeviceResidentQ4K(backend)
 }
+
+func servePQ2Artifact(artifact ggufload.ArtifactQuant) bool { return artifact.Name == "PQ2_0" }
 
 // serveArtifactCPUOffloadExperts is the artifact-derived offload predicate: it reports whether
 // the header's ROUTED expert tensors are all backed by an encoding the host-offload loader can
@@ -452,7 +463,11 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		// hold raw Q4_K / k-quant weights RESIDENT in Unified Memory (raw super-blocks, resident decode,
 		// dequant-fused Metal MSL GEMM kernels), eliminating the silent CPU Q8 dequantization loop.
 		must(fitServeGGUFPathOnHostForArm(ggufPath, serveLoadArmResidentQ4K, contextBudgetTokens, fit))
-		loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", "GGUF Apple-Silicon Metal load -> resident quantized weights in Unified Memory (raw super-blocks, resident decode, ~0.56 B/param vs Q8 ~1 B/param)"))
+		if servePQ2Artifact(artifactQuant) {
+			loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", "GGUF PQ2_0 load -> packed CPU ternary matmul; Metal PQ2 execution is not yet wired"))
+		} else {
+			loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", "GGUF Apple-Silicon Metal load -> resident quantized weights in Unified Memory (raw super-blocks, resident decode, ~0.56 B/param vs Q8 ~1 B/param)"))
+		}
 		mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad, q4kOpts...)
 		loadMessages = append(loadMessages, serveStartupMessage("resident-layout", "info", fakmodel.FormatResidentReport(mm.ResidentReport())))
 		profile := withServeStartupMessages(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k", ggufPath, loadNanos)), loadMessages...)
@@ -492,7 +507,8 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 			Bottleneck: "f32-load",
 		}), memPlan, backend), loadMessages...)
 		return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
-	case (os.Getenv("FAK_Q4K") != "" && os.Getenv("FAK_Q4K") != "0") && artifactQuant.Q4KResident:
+	case (os.Getenv("FAK_Q4K") != "" && os.Getenv("FAK_Q4K") != "0") && artifactQuant.Q4KResident ||
+		servePQ2Artifact(artifactQuant) && os.Getenv("FAK_Q4K") != "0":
 		// CPU-path memory-fit pre-flight (#974): refuse cleanly with a typed FitTooBig BEFORE the
 		// all-resident load can drive MemAvailable to ~0 and OOM-wedge the host (parity with the
 		// device path's fit plan). Fail-open where host RAM is not probeable.
@@ -508,6 +524,9 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		// the device cpu-offload case) so both the streamed summary and the gateway /metrics
 		// profile carry the resident-vs-dequant breakdown â€” the witness #975 needs.
 		mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad, q4kOpts...)
+		if servePQ2Artifact(artifactQuant) {
+			loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", "GGUF PQ2_0 load -> packed CPU ternary matmul; Metal PQ2 execution is not yet wired"))
+		}
 		loadMessages = append(loadMessages, serveStartupMessage("resident-layout", "info", fakmodel.FormatResidentReport(mm.ResidentReport())))
 		profile := withServeStartupMessages(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k", ggufPath, loadNanos)), loadMessages...)
 		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
@@ -784,7 +803,7 @@ func resolveMetalServeLoadArm(ws *ggufload.WeightSource) serveLoadArm {
 		return serveLoadArmResidentQ4K
 	}
 	quant := ggufload.ClassifyTensorQuant(ws.File.Tensors)
-	if (quant.Q4KResident || quant.Recipe == "UD-Q2_K_XL") && os.Getenv("FAK_Q4K") != "0" {
+	if (quant.Q4KResident || quant.Recipe == "UD-Q2_K_XL" || servePQ2Artifact(quant)) && os.Getenv("FAK_Q4K") != "0" {
 		return serveLoadArmResidentQ4K
 	}
 	return serveLoadArmQuantProfileQ8

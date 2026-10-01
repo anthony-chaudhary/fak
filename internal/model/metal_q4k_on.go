@@ -168,6 +168,9 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 // amortizing). Each filled slice is [P*out] token-major and uses the same P-specific kernel as
 // q4kGemmDispatch.
 func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]float32 {
+	if s.M.prism != nil {
+		return nil // grouped activation omits each member's signed Hadamard
+	}
 	if !s.MetalQ4K || !metalgemm.Available() || P <= 0 {
 		return nil
 	}
@@ -311,6 +314,9 @@ func (s *Session) q8GemmDispatch(name string, qt *q8Tensor, Xq *q8Panel) []float
 // of raw-Q4_K residency; grouping them pays one Metal command-buffer roundtrip instead of one per
 // projection. Non-Q8 names are left nil for the caller's existing fallback.
 func (s *Session) q8GemmGroupDispatch(names []string, Xq *q8Panel, P int) [][]float32 {
+	if s.M.prism != nil {
+		return nil // shared Q8 panel was quantized before per-weight rotation
+	}
 	if os.Getenv("FAK_Q8_GEMM_GROUP") != "1" || !s.MetalQ4K || !metalgemm.Available() || Xq == nil || P <= 0 {
 		return nil
 	}
@@ -472,6 +478,11 @@ func (s *Session) q8MatRowsDispatch(name string, qt *q8Tensor, xf []float32) []f
 // only when no member could be Metal-routed. Results are bit-identical to calling the per-name
 // dispatches, up to the existing Metal float-order tolerance.
 func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][]float32 {
+	// A Prism group may assign distinct signs to members that share xf. Let
+	// mulGroup invoke the per-name transform before each resident dispatch.
+	if s.M.prism != nil {
+		return nil
+	}
 	if !s.MetalQ4K || !metalgemm.Available() {
 		return nil
 	}
@@ -588,6 +599,9 @@ func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][
 // per-matmul path. The Metal kernel is silu-only and adds no bias, so the caller must gate on a
 // non-GELU activation and bias-free MLP. Bit-identical to the per-matmul path up to GPU float-order.
 func (s *Session) q4kFusedMLP(gateName, upName, downName string, x []float32) []float32 {
+	if s.M.prism != nil {
+		return nil
+	}
 	if !s.MetalQ4K || !metalgemm.Available() {
 		return nil
 	}
@@ -650,6 +664,9 @@ func (s *Session) q4kFusedMLP(gateName, upName, downName string, x []float32) []
 // is resident Q6_K, and the whole batch shares one geometry — the q4_k_m residency the fused path needs.
 // The gate-weighted sum stays on the host so the routed-delta reduction order matches the loop exactly.
 func (s *Session) q4kFusedMLPBatch(gate, up, down []string, x []float32) [][]float32 {
+	if s.M.prism != nil {
+		return nil
+	}
 	if !s.MetalQ4K || !metalgemm.Available() {
 		return nil
 	}

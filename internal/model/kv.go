@@ -950,7 +950,7 @@ func (s *Session) hostMatKernel() matKernel {
 	if s.Q4 && m.q4w != nil {
 		return sessionQ4Kernel{s: s}
 	}
-	if s.Q4K && (m.q4kw != nil || len(m.kqw) > 0) {
+	if s.Q4K && (m.q4kw != nil || len(m.kqw) > 0 || len(m.q2w) > 0) {
 		return sessionQ4KKernel{s: s}
 	}
 	if s.Quant {

@@ -371,6 +371,25 @@ func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
 		writeBackendUnavailableBail(os.Stderr, "fak serve", *sf.backendName)
 		os.Exit(2)
 	}
+	// A PQ2-only Bonsai artifact has a resident CPU ternary kernel but no
+	// model-wired Metal or compute-HAL PQ2 kernel yet. Select its CPU forward
+	// before publishing a backend receipt or reserving the Metal device.
+	pq2Checkpoint := false
+	if path := strings.TrimSpace(*sf.ggufPath); path != "" {
+		if info, statErr := os.Stat(path); statErr == nil && !info.IsDir() {
+			if artifact, inspectErr := ggufload.ClassifyArtifactQuant(path); inspectErr == nil {
+				pq2Checkpoint = servePQ2Artifact(artifact)
+			}
+		}
+	}
+	if pq2Checkpoint && os.Getenv("FAK_Q4K") == "0" {
+		fmt.Fprintln(os.Stderr, "fak serve: PQ2_0 checkpoint requires packed resident inference; unset FAK_Q4K=0")
+		os.Exit(2)
+	}
+	if pq2Checkpoint && chatBackend != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: PQ2_0 checkpoint has no native %s kernel; use --backend cpu for packed CPU inference\n", chatBackend.Name())
+		os.Exit(2)
+	}
 	if chatBackend != nil {
 		rt.addStartupMessage(newServeStartupMessage("serve", "compute-backend", "info",
 			fmt.Sprintf("in-kernel chat decode -> device backend %q", chatBackend.Name())))
@@ -387,6 +406,15 @@ func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
+	}
+	if pq2Checkpoint && useMetal {
+		if *sf.metal || os.Getenv("FAK_METAL") != "" {
+			fmt.Fprintln(os.Stderr, "fak serve: PQ2_0 checkpoint has no model-wired Metal kernel yet; use --backend cpu for packed CPU inference")
+			os.Exit(2)
+		}
+		useMetal = false
+		rt.addStartupMessage(newServeStartupMessage("serve", "compute-backend", "info",
+			"PQ2_0 checkpoint -> packed CPU ternary inference (Metal PQ2 kernel not yet wired)"))
 	}
 	if useMetal {
 		rt.addStartupMessage(newServeStartupMessage("serve", "compute-backend", "info",
