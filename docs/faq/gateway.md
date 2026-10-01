@@ -28,11 +28,36 @@ Anthropic SDKs append `/v1` themselves, so an Anthropic base URL ending in `/v1`
 
 ## How does the gateway decide whether to proxy an upstream, run the in-kernel model, or mock?
 
-The gateway picks its planner backend by a fixed precedence: `--base-url` set means a live proxy in front of your upstream provider; otherwise `--gguf` (with no `--base-url`) loads the in-kernel model and decodes locally; otherwise it falls back to a deterministic scripted mock with a loud boot warning. The `--provider` flag (`openai`, `anthropic`, `gemini`, `xai`) selects the upstream wire when proxying. You can confirm which backend is live: `/healthz` reports the `planner` field as `mock`, `proxy`, `inkernel`, or `unknown`. The in-kernel path is a correctness reference, not a production serving engine — prefer fronting a real token engine for scale.
+Read the `planner` field in `/healthz` to identify the chat-generation path used by
+`/v1/chat/completions` and `/v1/messages`. The `--provider` flag (`openai`,
+`anthropic`, `gemini`, `xai`) selects the upstream wire when proxying.
+
+| `planner` | Chat-generation path |
+|---|---|
+| `mock` | Deterministic scripted fallback when neither an upstream nor an in-kernel model is configured; startup emits a loud warning. |
+| `proxy` | One configured upstream planner endpoint. |
+| `replica` | Two or more configured upstream planner endpoints behind the replica dispatcher. |
+| `inkernel` | A loaded local model with its tokenizer, with no upstream configured. |
+| `dual` | A loaded local model with its tokenizer alongside an upstream planner: the local model ID (and `local` alias) routes in-kernel; other model IDs route upstream. |
+| `unknown` | A nil or unrecognized planner; this does not establish that a real model is serving. |
+
+`replica` describes a multi-upstream proxy fleet, not duplicate local model weights
+or a tool-execution mode. The current dispatcher uses keyed placement over the
+configured replicas, filtered by health and drain state once live membership is
+armed; an attached placement policy can choose among the admissible replicas.
+
+The adjacent `engine` field is independent: it identifies the registered ABI
+tool-execution engine used for allowed kernel/syscall dispatch. It does not name
+the chat model backend. For example, `engine: mock` with `planner: replica` is a
+valid combination: the compatibility tool engine is mock while chat goes to
+upstream planners. Use `planner` to distinguish scripted chat from a configured
+model path; the classification alone is not a per-request quality or readiness
+guarantee. See the [health response schema](../fak/openapi.yaml) and the
+[planner classification](../../internal/gateway/tool_routing.go) for the contract.
 
 ## How do I put `fak serve` in front of an existing upstream model?
 
-Pass `--base-url URL` (and `--provider`) to make `/v1/chat/completions` and `/v1/messages` a live adjudicating proxy in front of your upstream provider, with `--api-key-env VAR` naming the environment variable that holds the upstream bearer token. The flag names the env var, never the literal key value — fak reads the secret from the environment and forwards it upstream. With `--base-url` empty, the gateway runs offline against the scripted mock instead. The request model name passes through to the upstream verbatim, so your existing prompts and tool definitions stay unchanged.
+Pass `--base-url URL` (and `--provider`) to make `/v1/chat/completions` and `/v1/messages` a live adjudicating proxy in front of your upstream provider, with `--api-key-env VAR` naming the environment variable that holds the upstream bearer token. The flag names the env var, never the literal key value — fak reads the secret from the environment and forwards it upstream. With no upstream or local model configured, the gateway runs offline against the scripted mock instead. The request model name passes through to the upstream verbatim, so your existing prompts and tool definitions stay unchanged.
 
 ```bash
 fak serve --addr 127.0.0.1:8080 --provider openai --base-url https://api.openai.com/v1 --model gpt-4o --api-key-env OPENAI_API_KEY --policy floor.json
@@ -87,4 +112,3 @@ Yes — one `fak serve` process serves both the OpenAI-compatible `/v1/chat/comp
 Yes — `fak serve` is an MCP server over HTTP at `/mcp` and over stdio with `--stdio`, both serving the same JSON-RPC 2.0 dispatch. The stdio transport has no listener and no auth surface. It negotiates protocol versions `2024-11-05`, `2025-03-26`, and `2025-06-18`, falling back to the first, and reports `serverInfo.name` as `fak-gateway`. It exposes the tools `fak_adjudicate`, `fak_syscall`, `fak_admit`, `fak_changes`, `fak_revoke`, and `fak_context_change`. A DENY is a valid tool result with `isError:false`; only genuine protocol faults become JSON-RPC errors.
 
 ## When does the Anthropic wire forward my request bytes untouched to the real Anthropic API?
-
