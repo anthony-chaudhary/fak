@@ -11,7 +11,42 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
+
+// Pressure relief must preserve the signed retention policy, including keep-none,
+// rather than restore it from MaxTokens, which also reports zero for keep-all.
+// fak-test:runtime fast est=1ms lane=default
+func TestInKernelHostMemoryBudgetReliefPreservesRetention(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tree *radixkv.Tree
+		want int
+	}{
+		{"keep-none", radixkv.NewWithRetention(0), 0},
+		{"signed-bounded", radixkv.NewWithRetention(4), 4},
+		{"signed-unbounded", radixkv.NewWithRetention(-1), 8},
+		{"legacy-bounded", radixkv.New(4), 4},
+		{"legacy-unbounded", radixkv.New(0), 8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &InKernelPlanner{tree: tc.tree}
+			p.trimPrefixCacheForHostPressure(func() bool { return false })
+			for _, ids := range [][]int{{1, 2, 3, 4}, {5, 6, 7, 8}} {
+				boundary, matched := p.tree.Lookup(ids)
+				leaf := p.tree.Insert(boundary, ids[matched:], nil)
+				p.tree.Done(leaf)
+			}
+			// Insert protects its own leased leaf. Apply the retained budget after
+			// both requests release their leases, without changing that budget.
+			p.tree.PlanBoundedEviction(1)
+			p.tree.ConfirmEvictions()
+			if got := p.tree.Stats().Tokens; got != tc.want {
+				t.Fatalf("retained tokens after pressure relief = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
 
 // These tests pin the #13267 host-memory admission for the host-session (Metal) seam: a
 // planner with backend == nil has no compute.Backend for refuseOversizeRequest to ask, so an
