@@ -26,7 +26,7 @@ const issueCreateDedupeReason = "ISSUE_NEAR_DUPLICATE"
 // number,title,body` bytes; ParseBacklog does the decoding. It is injectable so
 // tests can supply a fake backlog without ever invoking real gh - the same
 // seam shape as issueCreateRunner.
-type issueCreateDedupeFunc func(cap int) ([]byte, error)
+type issueCreateDedupeFunc func(cap int, repo string) ([]byte, error)
 
 // issueCreateDedupeFetcher is the default fetcher: a read-only, bounded, 60s
 // `gh issue list --state open --json number,title,body` - the same shape as
@@ -51,14 +51,18 @@ type issueCreateDedupeJSON struct {
 // offline-safe by construction: read-only gh, one bounded page, no writes
 // anywhere. The caller decides what a failure means - the create gate FAILS
 // OPEN, so an offline host can still file.
-func fetchIssueCreateDedupeBacklog(cap int) ([]byte, error) {
+func fetchIssueCreateDedupeBacklog(cap int, repo string) ([]byte, error) {
 	if cap <= 0 {
 		cap = issuefanout.DefaultDedupeCap
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "gh", "issue", "list", "--state", "open",
-		"--limit", strconv.Itoa(cap), "--json", "number,title,body")
+	args := []string{"issue", "list", "--state", "open",
+		"--limit", strconv.Itoa(cap), "--json", "number,title,body"}
+	if strings.TrimSpace(repo) != "" {
+		args = append(args, "--repo", repo)
+	}
+	cmd := exec.CommandContext(ctx, "gh", args...)
 	configureDispatchHelperCommand(cmd)
 	b, err := cmd.CombinedOutput()
 	if err != nil {
@@ -97,7 +101,7 @@ func issueCreateRunDedupeGate(stdout, stderr io.Writer, result *issueCreateResul
 	if fetch == nil {
 		fetch = issueCreateDedupeFetcher
 	}
-	raw, err := fetch(effectiveCap)
+	raw, err := fetch(effectiveCap, result.Repo)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak-dev issue create: near-duplicate check skipped (failing open): %v\n", err)
 		block.Error = err.Error()
