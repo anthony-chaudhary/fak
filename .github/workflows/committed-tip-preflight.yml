@@ -24,21 +24,26 @@ jobs:
       GOFLAGS: -p=1
       GOWORK: "off"
       GOTOOLCHAIN: local
-      TMPDIR: ${{ runner.temp }}/committed-tip-preflight/tmp
-      GOTMPDIR: ${{ runner.temp }}/committed-tip-preflight/go-tmp
-      GOCACHE: ${{ runner.temp }}/committed-tip-preflight/go-cache
-      GOMODCACHE: ${{ runner.temp }}/committed-tip-preflight/go-mod
-      PREFLIGHT_EVIDENCE_DIR: ${{ runner.temp }}/committed-tip-preflight-evidence
       CARRIER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       CARRIER_MERGE_SHA: ${{ github.sha }}
       CARRIER_WORKFLOW_SHA: ${{ github.workflow_sha }}
       CARRIER_WORKFLOW_REF: ${{ github.workflow_ref }}
     steps:
       - name: Check hosted capacity and open evidence
+        env:
+          TMPDIR: ${{ runner.temp }}/committed-tip-preflight/tmp
+          GOTMPDIR: ${{ runner.temp }}/committed-tip-preflight/go-tmp
+          GOCACHE: ${{ runner.temp }}/committed-tip-preflight/go-cache
+          GOMODCACHE: ${{ runner.temp }}/committed-tip-preflight/go-mod
+          PREFLIGHT_EVIDENCE_DIR: ${{ runner.temp }}/committed-tip-preflight-evidence
         shell: bash
         run: |
           python3 - <<'PY'
           import json, os, pathlib, shutil, time
+          # Step env is available now; export the same paths for later steps.
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              for name in ("TMPDIR", "GOTMPDIR", "GOCACHE", "GOMODCACHE", "PREFLIGHT_EVIDENCE_DIR"):
+                  env_file.write(f"{name}={os.environ[name]}\n")
           evidence = pathlib.Path(os.environ["PREFLIGHT_EVIDENCE_DIR"])
           evidence.mkdir(parents=True, exist_ok=True)
           for name in ("TMPDIR", "GOTMPDIR", "GOCACHE", "GOMODCACHE"):
