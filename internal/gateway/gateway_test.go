@@ -556,6 +556,9 @@ func TestGatewayReplicaBaseURLsKeyedProxy(t *testing.T) {
 	if health["planner"] != "replica" {
 		t.Fatalf(`/healthz planner = %v, want "replica"`, health["planner"])
 	}
+	if health["engine"] != "test" {
+		t.Fatalf(`/healthz engine = %v, want configured tool engine "test" independently of replica planner`, health["engine"])
+	}
 
 	// Distinct request identities spread across both replicas with no counter.
 	seen := map[string]bool{}
