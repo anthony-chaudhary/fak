@@ -262,8 +262,20 @@ func TestVulkanQwen35GDNTiledPrefillParityAndSplitContinuation(t *testing.T) {
 		v.VulkanDebugResetGDNTiledPrefillProfile()
 		got := d.run(0, 1)
 		tiled, original := v.VulkanDebugGDNTiledPrefillProfileSnapshot()
-		if tiled != 0 || original != 1 {
-			t.Fatalf("P1 dispatch attribution tiled/original=%d/%d, want 0/1", tiled, original)
+		// The T=1 route now follows the verify-width self-check verdict: an admitted
+		// device runs the register-resident variant (tiled=1), a declined or
+		// unsupported device keeps the stock kernel (original=1). Both are correct;
+		// the route must match the verdict exactly.
+		admitted, _, checked := v.VulkanDebugGDNVerifyTiledVerdict()
+		if !checked {
+			t.Fatal("verify-width self-check did not run before the first forward")
+		}
+		if admitted {
+			if tiled != 1 || original != 0 {
+				t.Fatalf("P1 dispatch attribution tiled/original=%d/%d, want 1/0 for an admitted verdict", tiled, original)
+			}
+		} else if tiled != 0 || original != 1 {
+			t.Fatalf("P1 dispatch attribution tiled/original=%d/%d, want 0/1 for a declined verdict", tiled, original)
 		}
 		qwen35GDNTiledAssertRelativeL2(t, "P1 output", got, want)
 		qwen35GDNTiledAssertRelativeL2(t, "P1 convolution state", v.Read(d.convState), wantC)
@@ -401,16 +413,31 @@ func BenchmarkVulkanQwen35GDNTiledPrefillComponentAB(b *testing.B) {
 	}
 	qwen35GDNTiledRequireAvailable(b, v)
 	defer v.VulkanDebugSetGDNTiledPrefillMode(-1)
+	defer v.VulkanDebugSetGDNVerifyTiledMode(-1)
 
-	for _, tokens := range []int{32, 128, 512} {
+	for _, tokens := range []int{1, 4, 16, 32, 128, 512} {
 		b.Run("P"+strconv.Itoa(tokens), func(b *testing.B) {
+			// The verify-width route (1..7 tokens) additionally requires the
+			// on-device self-check to admit the candidate; a declining device
+			// correctly stays on the stock route, so this width has no A/B.
+			useVerify := tokens < 8
+			if useVerify {
+				admitted, deviation, checked := v.VulkanDebugGDNVerifyTiledVerdict()
+				if !admitted {
+					b.Skipf("verify-width self-check declined the candidate (checked=%v deviation=%g); route correctly stays stock at P%d", checked, deviation, tokens)
+				}
+			}
 			f := newQwen35GDNTiledFixture(tokens)
 			scalar := newQwen35GDNTiledDeviceCase(b, v, f)
 			candidate := newQwen35GDNTiledDeviceCase(b, v, f)
 			scalarPanel := scalar.uploadPanel(0, tokens)
 			candidatePanel := candidate.uploadPanel(0, tokens)
 			runArm := func(mode int, d *qwen35GDNTiledDeviceCase) (time.Duration, []float32) {
-				v.VulkanDebugSetGDNTiledPrefillMode(mode)
+				if useVerify {
+					v.VulkanDebugSetGDNVerifyTiledMode(mode)
+				} else {
+					v.VulkanDebugSetGDNTiledPrefillMode(mode)
+				}
 				start := time.Now()
 				var output []float32
 				if mode == 0 {
@@ -433,7 +460,11 @@ func BenchmarkVulkanQwen35GDNTiledPrefillComponentAB(b *testing.B) {
 			candidateSamples := make([]time.Duration, 0, pairs)
 			orders := make([]string, 0, pairs)
 			var scalarOutput, candidateOutput []float32
-			v.VulkanDebugResetGDNTiledPrefillProfile()
+			if useVerify {
+				v.VulkanDebugResetGDNVerifyTiledProfile()
+			} else {
+				v.VulkanDebugResetGDNTiledPrefillProfile()
+			}
 			b.ResetTimer()
 			for i := 0; i < pairs; i++ {
 				if i%2 == 0 {
@@ -453,8 +484,14 @@ func BenchmarkVulkanQwen35GDNTiledPrefillComponentAB(b *testing.B) {
 				}
 			}
 			b.StopTimer()
-			if tiled, original := v.VulkanDebugGDNTiledPrefillProfileSnapshot(); tiled != int64(pairs) || original != int64(pairs) {
-				b.Fatalf("A/B dispatch attribution tiled/original=%d/%d, want %d/%d", tiled, original, pairs, pairs)
+			var routeCandidate, routeOriginal int64
+			if useVerify {
+				routeCandidate, routeOriginal = v.VulkanDebugGDNVerifyTiledProfileSnapshot()
+			} else {
+				routeCandidate, routeOriginal = v.VulkanDebugGDNTiledPrefillProfileSnapshot()
+			}
+			if routeCandidate != int64(pairs) || routeOriginal != int64(pairs) {
+				b.Fatalf("A/B dispatch attribution tiled/original=%d/%d, want %d/%d", routeCandidate, routeOriginal, pairs, pairs)
 			}
 			qwen35GDNTiledAssertRelativeL2(b, "measured A/B output", candidateOutput, scalarOutput)
 			qwen35GDNTiledAssertRelativeL2(b, "measured A/B convolution state", v.Read(candidate.convState), v.Read(scalar.convState))
@@ -480,6 +517,16 @@ func BenchmarkVulkanQwen35GDNTiledPrefillComponentAB(b *testing.B) {
 				"state_trajectory": "paired arms start equal and advance once per pair; final output and durable states pass relative-L2 and argmax checks",
 				"claim_scope":      "physical preprojected component only; no full-model token throughput claim",
 			}
+			selfCheckAdmitted, selfCheckDeviation, selfCheckChecked := v.VulkanDebugGDNVerifyTiledVerdict()
+			tiledAdmitted, tiledDeviation := v.VulkanDebugGDNTiledVerdict()
+			receipt["self_check_admitted"] = selfCheckAdmitted
+			receipt["tiled_self_check_admitted"] = tiledAdmitted
+			receipt["tiled_self_check_deviation"] = tiledDeviation
+			if selfCheckChecked {
+				receipt["self_check_deviation"] = selfCheckDeviation
+			} else {
+				receipt["self_check_checked"] = false
+			}
 			encoded, err := json.Marshal(receipt)
 			if err != nil {
 				b.Fatal(err)
@@ -496,5 +543,175 @@ func BenchmarkVulkanQwen35GDNTiledPrefillComponentAB(b *testing.B) {
 			}
 			b.ReportMetric(float64(pairTotal.Nanoseconds())/float64(pairs), "ns/op")
 		})
+	}
+}
+
+// qwen35GDNVerifyTiledRequireAvailable skips when the verify-width (1..7
+// token) register-resident pipeline was not built into this device bundle.
+func qwen35GDNVerifyTiledRequireAvailable(tb testing.TB, v *vulkanBackend) {
+	tb.Helper()
+	if v.VulkanDebugGDNVerifyTiledAvailable() {
+		return
+	}
+	if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") == "1" {
+		tb.Fatal("required Vulkan device does not expose the verify-width GDN pipeline")
+	}
+	tb.Skip("verify-width GDN pipeline unavailable in this Vulkan bundle")
+}
+
+// qwen35GDNVerifyTiledRequireAdmitted skips when the on-device self-check ran
+// but declined the candidate. The route-attribution tests below only hold when
+// the verdict admits the pipeline, and a required device that declines is a
+// real failure rather than a skip.
+func qwen35GDNVerifyTiledRequireAdmitted(tb testing.TB, v *vulkanBackend) {
+	tb.Helper()
+	admitted, deviation, checked := v.VulkanDebugGDNVerifyTiledVerdict()
+	if admitted {
+		return
+	}
+	if !checked {
+		tb.Fatal("verify-width self-check has not run before any forward")
+	}
+	if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") == "1" {
+		tb.Fatalf("required Vulkan device self-check did not admit the verify-width pipeline (deviation=%g)", deviation)
+	}
+	tb.Skipf("verify-width self-check declined the pipeline on this device (deviation=%g)", deviation)
+}
+
+func TestVulkanQwen35GDNVerifyWidthParityAndRoute(t *testing.T) {
+	v := vk(t)
+	qwen35GDNTiledRequireAvailable(t, v)
+	qwen35GDNVerifyTiledRequireAvailable(t, v)
+	qwen35GDNVerifyTiledRequireAdmitted(t, v)
+	defer v.VulkanDebugSetGDNVerifyTiledMode(-1)
+
+	_, deviation, checked := v.VulkanDebugGDNVerifyTiledVerdict()
+	if !checked {
+		t.Fatal("verify-width self-check has not run before any forward")
+	}
+	if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") == "1" {
+		if math.IsNaN(float64(deviation)) || math.IsInf(float64(deviation), 0) || deviation <= 0 || deviation > 1e-6 {
+			t.Fatalf("self-check deviation=%g, want finite and in (0, 1e-6]", deviation)
+		}
+	}
+
+	for _, tokens := range []int{1, 2, 4, 7} {
+		t.Run("T"+strconv.Itoa(tokens), func(t *testing.T) {
+			f := newQwen35GDNTiledFixture(tokens)
+			want, wantC, wantR := qwen35GDNTiledCPUOracle(f)
+			d := newQwen35GDNTiledDeviceCase(t, v, f)
+			v.VulkanDebugSetGDNVerifyTiledMode(1)
+			v.VulkanDebugResetGDNVerifyTiledProfile()
+			got := d.run(0, tokens)
+			verifyCalls, scalarCalls := v.VulkanDebugGDNVerifyTiledProfileSnapshot()
+			if verifyCalls != 1 || scalarCalls != 0 {
+				t.Fatalf("T%d verify dispatches verify/scalar=%d/%d, want 1/0", tokens, verifyCalls, scalarCalls)
+			}
+			qwen35GDNTiledAssertRelativeL2(t, "verify output", got, want)
+			qwen35GDNTiledAssertRelativeL2(t, "verify convolution state", v.Read(d.convState), wantC)
+			qwen35GDNTiledAssertRelativeL2(t, "verify recurrent state", v.Read(d.recurrentState), wantR)
+			qwen35GDNTiledAssertTokenArgmax(t, got, want, tokens, f.nV*f.vHd)
+		})
+	}
+
+	t.Run("T1StockRouteWhenMode0", func(t *testing.T) {
+		f := newQwen35GDNTiledFixture(1)
+		want, wantC, wantR := qwen35GDNTiledCPUOracle(f)
+		d := newQwen35GDNTiledDeviceCase(t, v, f)
+		v.VulkanDebugSetGDNVerifyTiledMode(0)
+		v.VulkanDebugResetGDNVerifyTiledProfile()
+		got := d.run(0, 1)
+		verifyCalls, scalarCalls := v.VulkanDebugGDNVerifyTiledProfileSnapshot()
+		if verifyCalls != 0 || scalarCalls != 1 {
+			t.Fatalf("T1 mode0 verify/scalar=%d/%d, want 0/1", verifyCalls, scalarCalls)
+		}
+		qwen35GDNTiledAssertRelativeL2(t, "stock output", got, want)
+		qwen35GDNTiledAssertRelativeL2(t, "stock convolution state", v.Read(d.convState), wantC)
+		qwen35GDNTiledAssertRelativeL2(t, "stock recurrent state", v.Read(d.recurrentState), wantR)
+	})
+
+	t.Run("T7UsesVerifyRouteT8DoesNot", func(t *testing.T) {
+		f7 := newQwen35GDNTiledFixture(7)
+		d7 := newQwen35GDNTiledDeviceCase(t, v, f7)
+		v.VulkanDebugSetGDNVerifyTiledMode(1)
+		v.VulkanDebugResetGDNVerifyTiledProfile()
+		d7.run(0, 7)
+		if verify7, _ := v.VulkanDebugGDNVerifyTiledProfileSnapshot(); verify7 != 1 {
+			t.Fatalf("T7 verify dispatches=%d, want 1", verify7)
+		}
+
+		f8 := newQwen35GDNTiledFixture(8)
+		d8 := newQwen35GDNTiledDeviceCase(t, v, f8)
+		v.VulkanDebugSetGDNVerifyTiledMode(1)
+		v.VulkanDebugResetGDNVerifyTiledProfile()
+		d8.run(0, 8)
+		// T>=8 must not use the verify route; it may legitimately use the
+		// prefill-tiled or stock route, so the scalar count is unconstrained.
+		if verify8, _ := v.VulkanDebugGDNVerifyTiledProfileSnapshot(); verify8 != 0 {
+			t.Fatalf("T8 verify dispatches=%d, want 0 (T>=8 is not a verify width)", verify8)
+		}
+	})
+}
+
+func TestVulkanQwen35GDNSelfCheckRunsOnceBeforeForward(t *testing.T) {
+	v := vk(t)
+	qwen35GDNTiledRequireAvailable(t, v)
+	qwen35GDNVerifyTiledRequireAvailable(t, v)
+	defer v.VulkanDebugSetGDNVerifyTiledMode(-1)
+
+	// Called before any d.run / Qwen35GDNPreprojected forward, so a false
+	// 'checked' proves the self-check did not run at init.
+	admitted1, deviation1, checked1 := v.VulkanDebugGDNVerifyTiledVerdict()
+	if !checked1 {
+		t.Fatal("self-check not checked before any forward")
+	}
+
+	admitted2, deviation2, checked2 := v.VulkanDebugGDNVerifyTiledVerdict()
+	if !checked2 {
+		t.Fatal("self-check verdict lost checked state on repeat call")
+	}
+	if admitted1 != admitted2 || math.Float32bits(deviation1) != math.Float32bits(deviation2) {
+		t.Fatalf("self-check verdict unstable across calls: (%v,%v) then (%v,%v)", admitted1, deviation1, admitted2, deviation2)
+	}
+
+	v.VulkanDebugSetGDNVerifyTiledMode(1)
+	v.VulkanDebugResetGDNVerifyTiledProfile()
+	d := newQwen35GDNTiledDeviceCase(t, v, newQwen35GDNTiledFixture(1))
+	d.run(0, 1)
+
+	admitted3, deviation3, checked3 := v.VulkanDebugGDNVerifyTiledVerdict()
+	if !checked3 || admitted3 != admitted1 || math.Float32bits(deviation3) != math.Float32bits(deviation1) {
+		t.Fatalf("self-check verdict changed after forward: (%v,%v,%v), want (%v,%v,true)", admitted3, deviation3, checked3, admitted1, deviation1)
+	}
+}
+
+func TestVulkanQwen35GDNSelfCheckForcedDisagreementFallsBack(t *testing.T) {
+	v := vk(t)
+	qwen35GDNTiledRequireAvailable(t, v)
+	qwen35GDNVerifyTiledRequireAvailable(t, v)
+	qwen35GDNVerifyTiledRequireAdmitted(t, v)
+	defer v.VulkanDebugSetGDNVerifyTiledMode(-1)
+	defer v.VulkanDebugSetGDNVerifyTiledForceDisagree(false)
+
+	v.VulkanDebugSetGDNVerifyTiledForceDisagree(true)
+	f := newQwen35GDNTiledFixture(1)
+	want, wantC, wantR := qwen35GDNTiledCPUOracle(f)
+	d := newQwen35GDNTiledDeviceCase(t, v, f)
+	v.VulkanDebugSetGDNVerifyTiledMode(1)
+	v.VulkanDebugResetGDNVerifyTiledProfile()
+	got := d.run(0, 1)
+
+	verifyCalls, scalarCalls := v.VulkanDebugGDNVerifyTiledProfileSnapshot()
+	if verifyCalls != 0 || scalarCalls != 1 {
+		t.Fatalf("forced disagreement verify/scalar=%d/%d, want 0/1 (stock route)", verifyCalls, scalarCalls)
+	}
+	qwen35GDNTiledAssertRelativeL2(t, "forced-disagreement output", got, want)
+	qwen35GDNTiledAssertRelativeL2(t, "forced-disagreement convolution state", v.Read(d.convState), wantC)
+	qwen35GDNTiledAssertRelativeL2(t, "forced-disagreement recurrent state", v.Read(d.recurrentState), wantR)
+
+	v.VulkanDebugSetGDNVerifyTiledForceDisagree(false)
+	admitted, deviation, checked := v.VulkanDebugGDNVerifyTiledVerdict()
+	if !checked || !admitted {
+		t.Fatalf("verdict after clearing forced disagreement: admitted=%v checked=%v deviation=%g, want true/true", admitted, checked, deviation)
 	}
 }

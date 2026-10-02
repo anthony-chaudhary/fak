@@ -156,17 +156,26 @@ func RunCompileCheck(goBin, root string, plan MatrixCompilePlan) (string, error)
 
 // GHAMatrixEntry represents an item in GitHub Actions matrix include list.
 type GHAMatrixEntry struct {
-	Target   string `json:"target"`
-	GOOS     string `json:"goos"`
-	GOARCH   string `json:"goarch"`
-	Variant  string `json:"variant"`
-	Tags     string `json:"tags"`
-	Advisory bool   `json:"advisory"`
+	Target   string   `json:"target"`
+	GOOS     string   `json:"goos"`
+	GOARCH   string   `json:"goarch"`
+	Variant  string   `json:"variant"`
+	Variants []string `json:"variants"`
+	Tags     string   `json:"tags"`
+	Advisory bool     `json:"advisory"`
 }
 
-// BuildGHAMatrix produces the include list for GitHub Actions matrix consumption.
+// BuildGHAMatrix produces one entry per declared compile configuration, retaining
+// the first variant as canonical and listing all covered variants in manifest order.
 func BuildGHAMatrix(manifest *VariantManifest, pureOnly bool) map[string][]GHAMatrixEntry {
 	var includes []GHAMatrixEntry
+	type configuration struct {
+		target   ReleaseTarget
+		cgo      string
+		tags     string
+		advisory bool
+	}
+	canonical := make(map[configuration]int)
 	variants := manifest.Variants
 	if pureOnly {
 		variants = manifest.PureGoVariants()
@@ -180,11 +189,20 @@ func BuildGHAMatrix(manifest *VariantManifest, pureOnly bool) map[string][]GHAMa
 					continue
 				}
 			}
+			// Raw tags and CGO settings are part of the key; target aliases alone
+			// cannot establish equivalent compilation or failure policy.
+			key := configuration{t, v.CGOEnabled, v.Tags, v.IsAdvisory()}
+			if index, ok := canonical[key]; ok {
+				includes[index].Variants = append(includes[index].Variants, v.Name)
+				continue
+			}
+			canonical[key] = len(includes)
 			includes = append(includes, GHAMatrixEntry{
 				Target:   t.String(),
 				GOOS:     t.GOOS,
 				GOARCH:   t.GOARCH,
 				Variant:  v.Name,
+				Variants: []string{v.Name},
 				Tags:     v.Tags,
 				Advisory: v.IsAdvisory(),
 			})

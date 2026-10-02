@@ -3,13 +3,16 @@ package model
 import "strings"
 
 // resident_report.go — observability for the resident hybrid Q4_K model: tallies which
-// weights landed in which resident store (raw Q4_K vs Q8_0 vs f32) and the bytes each
+// weights landed in which resident store (raw Q2_0/Q4_K vs Q8_0 vs f32) and the bytes each
 // contributes, then derives the per-decode-token bandwidth stream. This is the small,
 // 27B-free way to SEE the load's memory shape + the decode-bandwidth win (and predict
 // tok/s) — run it right after LoadModelQ4K, before any generation. cmd/q4kdiag prints it.
 
 // ResidentReport is a point-in-time tally of a loaded Model's resident weight stores.
 type ResidentReport struct {
+	Q2Tensors  int   `json:"q2_tensors"` // matmul weights held as raw PQ2_0 blocks
+	Q2Bytes    int64 `json:"q2_bytes"`
+	Q2Params   int64 `json:"q2_params"`
 	Q4KTensors int   `json:"q4k_tensors"` // matmul weights held as raw Q4_K blocks
 	Q4KBytes   int64 `json:"q4k_bytes"`   // their resident bytes (the q4_k_m majority)
 	Q4KParams  int64 `json:"q4k_params"`  // weight elements those bytes encode
@@ -25,6 +28,10 @@ type ResidentReport struct {
 	Q2KEmbedTensors int   `json:"q2k_embed_tensors"`
 	Q2KEmbedBytes   int64 `json:"q2k_embed_bytes"`
 	Q2KEmbedParams  int64 `json:"q2k_embed_params"`
+	// PQ2Embed* is the packed GGUF group-128 ternary embedding table.
+	PQ2EmbedTensors int   `json:"pq2_embed_tensors"`
+	PQ2EmbedBytes   int64 `json:"pq2_embed_bytes"`
+	PQ2EmbedParams  int64 `json:"pq2_embed_params"`
 	// Q4KEmbed* is the packed Q4_K embedding table. It remains separate from
 	// Q4K* because row-gather embeddings are excluded from decode weight traffic.
 	Q4KEmbedTensors int   `json:"q4k_embed_tensors"`
@@ -33,9 +40,9 @@ type ResidentReport struct {
 	F32Tensors      int   `json:"f32_tensors"` // small f32 manifest tensors (norms, embed, biases)
 	F32Bytes        int64 `json:"f32_bytes"`   // their resident bytes
 
-	TotalResidentBytes int64 `json:"total_resident_bytes"` // q4k + q8 + kquant + packed embeds + f32
+	TotalResidentBytes int64 `json:"total_resident_bytes"` // q2 + q4k + q8 + kquant + packed embeds + f32
 	// DecodeBytesPerToken is the weight-byte stream one batch=1 decode step walks: every
-	// matmul weight (q4k + q8) is read exactly once per generated token, so this is the
+	// matmul weight (q2 + q4k + q8 + kquant) is read once per generated token, so this is the
 	// bandwidth-bound number that sets the decode tok/s ceiling (tok/s ≈ memBW / this).
 	// Embedding is a row-gather (hidden·4 B), not a full stream, so it is excluded; norms
 	// are negligible. f32 here is small-tensor-only and not on the matmul stream.
@@ -44,7 +51,7 @@ type ResidentReport struct {
 	DecodeGiBPerToken float64 `json:"decode_gib_per_token"`
 }
 
-// ResidentReport tallies the model's resident weight stores. It walks the q4kw/q8w maps +
+// ResidentReport tallies the model's resident weight stores. It walks the q2w/q4kw/q8w maps +
 // the f32 manifest once (O(tensor count), no allocation on the hot path) — cheap to run
 // after load. For a q4_k_m Qwen3.6 the expectation is a dominant Q4K majority (MLP +
 // v/o_proj + lm_head where the GGUF used Q4_K) and a small Q8 minority (the normalize-
@@ -52,15 +59,21 @@ type ResidentReport struct {
 // the split that makes decode-bandwidth competitive with llama.cpp's q4_k_m.
 func (m *Model) ResidentReport() *ResidentReport {
 	r := &ResidentReport{}
+	for _, qt := range m.q2w {
+		r.Q2Tensors++
+		r.Q2Bytes += int64(len(qt.raw)) + int64(len(qt.q)) + int64(len(qt.d))*4
+		r.Q2Params += int64(qt.out) * int64(qt.in)
+	}
 	for _, qt := range m.q4kw {
 		r.Q4KTensors++
 		bytes := len(qt.raw)
 		if qt.lazy != nil {
 			bytes = qt.lazy.Bytes
 		}
-		if qt.lazy == nil {
-			r.Q4KBytes += int64(bytes)
-		}
+		// A prepared mapped view is CPU-resident even while its lazy metadata
+		// remains available for offset-aware Metal uploads. Bare descriptors
+		// have no raw bytes to charge.
+		r.Q4KBytes += int64(len(qt.raw))
 		// Params count logical weights even when the checkpoint payload is lazy.
 		r.Q4KParams += int64(bytes / q4kBlockBytes * qkK)
 	}
@@ -76,11 +89,16 @@ func (m *Model) ResidentReport() *ResidentReport {
 		r.KQuantParams += int64(len(qt.raw) / qt.kind.blockBytes() * qt.kind.blockWeights())
 	}
 	if m.Q2KEmbedding != nil {
-		if m.Q2KEmbedding.Format() == "Q4_K" {
+		switch m.Q2KEmbedding.Format() {
+		case "Q4_K":
 			r.Q4KEmbedTensors = 1
 			r.Q4KEmbedBytes = int64(m.Q2KEmbedding.Bytes())
 			r.Q4KEmbedParams = int64(m.Q2KEmbedding.Vocab()) * int64(m.Q2KEmbedding.Hidden())
-		} else {
+		case "PQ2_0":
+			r.PQ2EmbedTensors = 1
+			r.PQ2EmbedBytes = int64(m.Q2KEmbedding.Bytes())
+			r.PQ2EmbedParams = int64(m.Q2KEmbedding.Vocab()) * int64(m.Q2KEmbedding.Hidden())
+		default:
 			r.Q2KEmbedTensors = 1
 			r.Q2KEmbedBytes = int64(m.Q2KEmbedding.Bytes())
 			r.Q2KEmbedParams = int64(m.Q2KEmbedding.Vocab()) * int64(m.Q2KEmbedding.Hidden())
@@ -90,12 +108,12 @@ func (m *Model) ResidentReport() *ResidentReport {
 		r.F32Tensors++
 		r.F32Bytes += int64(meta.Nbytes)
 	}
-	r.TotalResidentBytes = r.Q4KBytes + r.Q8Bytes + r.KQuantBytes + r.Q2KEmbedBytes + r.Q4KEmbedBytes + r.F32Bytes
-	// The matmul weights read per decode token = all of q4kw + q8w + kqw (the LM head is in
+	r.TotalResidentBytes = r.Q2Bytes + r.Q4KBytes + r.Q8Bytes + r.KQuantBytes + r.Q2KEmbedBytes + r.PQ2EmbedBytes + r.Q4KEmbedBytes + r.F32Bytes
+	// The matmul weights read per decode token = all of q2w + q4kw + q8w + kqw (the LM head is in
 	// one of them; every projection + MLP weight streams once). This is the decode bandwidth.
 	// Embedding is a row-gather (hidden·4 B), not a full stream, so it is excluded; norms
 	// are negligible. f32 here is small-tensor-only and not on the matmul stream.
-	r.DecodeBytesPerToken = r.Q4KBytes + r.Q8Bytes + r.KQuantBytes
+	r.DecodeBytesPerToken = r.Q2Bytes + r.Q4KBytes + r.Q8Bytes + r.KQuantBytes
 	r.DecodeGiBPerToken = float64(r.DecodeBytesPerToken) / (1 << 30)
 	return r
 }
@@ -119,7 +137,7 @@ func isRoutedExpertTensor(name string) bool {
 // (the only weights expert parallelism shards across ranks — model.layers.<L>.mlp.experts.<e>.*)
 // and the replicated remainder (dense FFN + attention + router + embeddings + the always-on shared
 // expert — held on EVERY rank). It walks the SAME resident stores ResidentReport tallies
-// (q4kw / q8w / kqw / the f32 manifest), so it is quant-correct BY CONSTRUCTION — every tensor is
+// (q2w / q4kw / q8w / kqw / the f32 manifest), so it is quant-correct BY CONSTRUCTION — every tensor is
 // counted at its actual resident size in whatever store holds it, never an f32 estimate of a
 // quantized weight — and replicated+expert equals ResidentReport().TotalResidentBytes (the test
 // pins this). It partitions purely by NAME (isRoutedExpertTensor).
@@ -142,6 +160,9 @@ func (m *Model) MoEResidentWeightBytes() (replicated, expert int64, ok bool) {
 	}
 	for name, qt := range m.q4kw {
 		add(name, int64(len(qt.raw)))
+	}
+	for name, qt := range m.q2w {
+		add(name, int64(len(qt.raw))+int64(len(qt.q))+int64(len(qt.d))*4)
 	}
 	for name, qt := range m.q8w {
 		add(name, int64(len(qt.q))+int64(len(qt.d))*4)
@@ -179,10 +200,13 @@ func FormatResidentReport(r *ResidentReport) string {
 	embedStr := ""
 	if r.Q2KEmbedTensors > 0 {
 		embedStr = "  Q2_K_embed=" + itoa(r.Q2KEmbedTensors) + "/" + fmtFloat(mib(r.Q2KEmbedBytes)) + "MiB"
+	} else if r.PQ2EmbedTensors > 0 {
+		embedStr = "  PQ2_0_embed=" + itoa(r.PQ2EmbedTensors) + "/" + fmtFloat(mib(r.PQ2EmbedBytes)) + "MiB"
 	} else if r.Q4KEmbedTensors > 0 {
 		embedStr = "  Q4_K_embed=" + itoa(r.Q4KEmbedTensors) + "/" + fmtFloat(mib(r.Q4KEmbedBytes)) + "MiB"
 	}
-	return "resident: Q4_K=" + itoa(r.Q4KTensors) + " tensors/" + fmtFloat(mib(r.Q4KBytes)) + "MiB" +
+	return "resident: Q2_0=" + itoa(r.Q2Tensors) + " tensors/" + fmtFloat(mib(r.Q2Bytes)) + "MiB" +
+		"  Q4_K=" + itoa(r.Q4KTensors) + " tensors/" + fmtFloat(mib(r.Q4KBytes)) + "MiB" +
 		"  rawExpertQuant=" + itoa(r.KQuantTensors) + "/" + fmtFloat(mib(r.KQuantBytes)) + "MiB" +
 		"  Q8=" + itoa(r.Q8Tensors) + "/" + fmtFloat(mib(r.Q8Bytes)) + "MiB" +
 		embedStr +

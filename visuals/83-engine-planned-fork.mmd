@@ -1,0 +1,27 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  user(["One user / agent / group<br/>working set + concurrency"]) --> fit{"Does the whole group<br/>fit ONE appliance?<br/>KV <= 128 GiB unified<br/>one heavy lane, relaxed SLO"}
+  fit -->|"FITS (the common case)"| halo["Local Strix Halo<br/>~$2.5k CAPEX, ~$6.60/mo power<br/>scarce: FLOPS | rich: memory + SSD"]
+  fit -->|"does NOT fit"| rack["GB300-class rack<br/>$5-10M, 120-140 kW<br/>scarce: nothing | rich: FLOPs"]
+  halo --> keep["STORE AGGRESSIVELY<br/>keep the bytes; recompute almost never"]
+  rack --> recomp["RECOMPUTE FREELY<br/>caching barely matters there"]
+  keep --> value["Compute-avoidance value =<br/>avoided prefill-seconds x watt-cost"]
+  recomp --> value
+
+  doctrine["Planned engine direction: fak-native is the product and performance path.<br/>Own kernels + memory + scheduling + cache + adaptation + ops so gains compose.<br/>llama.cpp is explicit benchmark / parity / migration / borrow — never a silent fallback."]
+
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+  class user world;
+  class fit gate;
+  class halo mem;
+  class rack frontier;
+  class keep pass;
+  class recomp deny;
+  class value pass;
+  class doctrine note;

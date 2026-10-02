@@ -1,0 +1,33 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart LR
+  subgraph ENGINE["The kernel owns the bytes (the point)"]
+    subgraph KV["KV cache tiering — a pageable hierarchy"]
+      l1[("L1 HBM<br/>hot, resident<br/>the scarce tier")]
+      l2[("L2 DRAM<br/>host memory")]
+      l3[("L3 SSD<br/>local NVMe")]
+      l4[("L4 recompute<br/>the backstop: drop, re-prefill")]
+      plan("restore vs recompute: move bytes only if cheaper than redoing them")
+      l1 --- l2 --- l3 --- l4
+      plan --- l2
+    end
+    subgraph CTX["Context MMU — one page table for both views"]
+      gate{"Admit the tool result?"}
+      pass["PASS: bytes enter protected context"]
+      quar["QUARANTINE: held out; pages in<br/>only after a witness clear"]
+      pageout["PAGE OUT: oversize-but-benign<br/>-> a sub-2KB pointer; bytes stay in the CAS"]
+    end
+  end
+  ptrv["The model sees a pointer;<br/>the CAS holds the bytes<br/>(same store the vDSO tier-2 uses)"]
+  plan --> ptrv
+  pageout --> ptrv
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+  class l1,l2,l3,l4 mem;
+  class gate,plan gate;
+  class pass,pageout pass;
+  class quar deny;
+  class ptrv note;

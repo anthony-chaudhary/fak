@@ -14,7 +14,7 @@ import (
 
 const deepSeekV41ConfigSHA256 = "8be45ce0476004a3f529fd896115a4a2e800a129ad2d3ec05b16050f52e21879"
 
-func readDeepSeekV41Config(t *testing.T) ([]byte, Config) {
+func readDeepSeekV41Config(t testing.TB) ([]byte, Config) {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", "deepseek_v41_flash_config.json"))
 	if err != nil {

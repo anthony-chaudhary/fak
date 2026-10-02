@@ -14,15 +14,23 @@ import (
 // DoubleBufferManager orchestrates dual 16MB ping-pong buffers inside the 32MB MALL Infinity Cache.
 // It overlaps layer L arithmetic computation on 40 CUs at >1.2 TB/s with asynchronous DMA/scalar
 // prefetch of layer L+1 weights from physical DRAM at 273.1 GB/s.
+type prefetchOperation struct {
+	descriptor PrefetchDescriptor
+	cancel     chan struct{}
+}
+
 type DoubleBufferManager struct {
 	cfg      DoubleBufferConfig
 	bufferA  *MALLBuffer
 	bufferB  *MALLBuffer
 	activeID BufferID
 
-	mu             sync.RWMutex
-	activePrefetch *PrefetchDescriptor
-	prefetchMu     sync.Mutex
+	mu         sync.RWMutex
+	prefetches [2]*prefetchOperation
+	workers    sync.WaitGroup
+	computing  [2]int
+	ownership  *sync.Cond
+	resetting  bool
 
 	metrics   DoubleBufferMetrics
 	metricsMu sync.RWMutex
@@ -148,6 +156,7 @@ func NewDoubleBufferManager(opts ...Option) (*DoubleBufferManager, error) {
 		latencies: make([]float64, 0, 1024),
 	}
 
+	mgr.ownership = sync.NewCond(&mgr.mu)
 	return mgr, nil
 }
 
@@ -210,35 +219,43 @@ func (m *DoubleBufferManager) PrefetchLayerTo(targetID BufferID, desc PrefetchDe
 			ErrCapacityExceeded, desc.SizeBytes, m.cfg.BufferCapacityBytes)
 	}
 
-	targetBuf := m.GetBuffer(targetID)
-	currentState := targetBuf.State()
-
-	if currentState != BufferEmpty && currentState != BufferRecycling {
-		return nil, fmt.Errorf("%w: buffer %s is in state %s (expected EMPTY or RECYCLING)",
-			ErrBufferBusy, targetID, currentState)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed || m.resetting {
+		return nil, ErrBufferNotReady
 	}
-
+	if targetID != BufferIDA && targetID != BufferIDB {
+		return nil, ErrOutOfBounds
+	}
+	targetBuf := m.bufferA
+	if targetID == BufferIDB {
+		targetBuf = m.bufferB
+	}
+	currentState := targetBuf.State()
+	if currentState != BufferEmpty && currentState != BufferRecycling || m.computing[targetID] != 0 {
+		return nil, fmt.Errorf("%w: buffer %s is in state %s", ErrBufferBusy, targetID, currentState)
+	}
 	if err := targetBuf.SetState(BufferPrefetching); err != nil {
 		return nil, err
 	}
-
-	targetBuf.ActiveLayer = desc.LayerID
-	targetBuf.SubLayerID = desc.SubLayerID
-
+	targetBuf.stateMu.Lock()
+	targetBuf.ActiveLayer, targetBuf.SubLayerID = desc.LayerID, desc.SubLayerID
+	targetBuf.stateMu.Unlock()
 	fence := desc.Fence
 	if fence == nil {
 		fence = NewCompletionFence()
 	}
-
-	m.prefetchMu.Lock()
-	descCopy := desc
-	descCopy.Status = PrefetchInProgress
-	descCopy.ScheduledAt = time.Now()
-	descCopy.Fence = fence
-	m.activePrefetch = &descCopy
-	m.prefetchMu.Unlock()
-
-	go m.runPrefetchTransfer(targetBuf, descCopy, fence)
+	desc.Status, desc.ScheduledAt, desc.Fence = PrefetchInProgress, time.Now(), fence
+	op := &prefetchOperation{descriptor: desc, cancel: make(chan struct{})}
+	// A direct public buffer Reset may free this slot before the previous
+	// transfer finishes. Revoke that operation before replacing its identity.
+	if previous := m.prefetches[targetID]; previous != nil {
+		close(previous.cancel)
+		previous.descriptor.Fence.SignalError(ErrBufferNotReady)
+	}
+	m.prefetches[targetID] = op
+	m.workers.Add(1)
+	go m.runPrefetchTransfer(targetBuf, op)
 
 	return fence, nil
 }
@@ -251,63 +268,47 @@ func (m *DoubleBufferManager) PrefetchNextLayer(desc PrefetchDescriptor) (*Compl
 }
 
 // runPrefetchTransfer executes the asynchronous transfer in a dedicated background goroutine.
-func (m *DoubleBufferManager) runPrefetchTransfer(targetBuf *MALLBuffer, desc PrefetchDescriptor, fence *CompletionFence) {
+func (m *DoubleBufferManager) runPrefetchTransfer(targetBuf *MALLBuffer, op *prefetchOperation) {
+	defer m.workers.Done()
+	desc := op.descriptor
 	transferStart := time.Now()
-
-	// If configured to simulate transfer delay based on physical DRAM bandwidth (273.1 GB/s)
 	if m.cfg.SimulateTransferDelay {
-		transferSec := float64(desc.SizeBytes) / (m.cfg.DRAMBandwidthGBs * 1e9)
-		if transferSec > 0 {
-			time.Sleep(time.Duration(transferSec * float64(time.Second)))
+		delay := time.Duration(float64(desc.SizeBytes) / (m.cfg.DRAMBandwidthGBs * 1e9) * float64(time.Second))
+		timer := time.NewTimer(delay)
+		select {
+		case <-timer.C:
+		case <-op.cancel:
+			timer.Stop()
+			return
 		}
 	}
-
-	// In-memory simulation: copy weight payload into aligned buffer slice if provided
-	if len(desc.Payload) > 0 {
-		copyLen := int64(len(desc.Payload))
-		if copyLen > desc.SizeBytes {
-			copyLen = desc.SizeBytes
-		}
-		copy(targetBuf.Data[:copyLen], desc.Payload[:copyLen])
-	}
-
-	duration := time.Since(transferStart)
-	completedAt := time.Now()
-
-	// Update buffer state: PREFETCHING -> READY
-	if err := targetBuf.SetState(BufferReady); err != nil {
-		fence.SignalError(err)
-		m.prefetchMu.Lock()
-		if m.activePrefetch != nil {
-			m.activePrefetch.Status = PrefetchFailed
-		}
-		m.prefetchMu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed || m.resetting || m.prefetches[targetBuf.ID] != op {
 		return
 	}
-
+	if len(desc.Payload) > 0 {
+		copyLen := min(int64(len(desc.Payload)), desc.SizeBytes)
+		targetBuf.stateMu.Lock()
+		copy(targetBuf.Data[:copyLen], desc.Payload[:copyLen])
+		targetBuf.stateMu.Unlock()
+	}
+	completedAt := time.Now()
+	duration := time.Since(transferStart)
+	targetBuf.stateMu.Lock()
 	targetBuf.lastPrefetch = completedAt
-
-	// Calculate simulated or measured bandwidth
-	var bw float64
-	if duration.Seconds() > 0 {
-		bw = (float64(desc.SizeBytes) / 1e9) / duration.Seconds()
-	} else {
-		bw = m.cfg.DRAMBandwidthGBs
+	targetBuf.stateMu.Unlock()
+	if err := targetBuf.SetState(BufferReady); err != nil {
+		op.descriptor.Status = PrefetchFailed
+		desc.Fence.SignalError(err)
+		return
 	}
-
-	m.prefetchMu.Lock()
-	if m.activePrefetch != nil {
-		m.activePrefetch.Status = PrefetchCompleted
-		m.activePrefetch.CompletedAt = completedAt
-		m.activePrefetch.Duration = duration
-		m.activePrefetch.BandwidthGBs = bw
+	op.descriptor.Status, op.descriptor.CompletedAt, op.descriptor.Duration = PrefetchCompleted, completedAt, duration
+	if duration > 0 {
+		op.descriptor.BandwidthGBs = float64(desc.SizeBytes) / 1e9 / duration.Seconds()
 	}
-	m.prefetchMu.Unlock()
-
-	// Update telemetry
 	m.recordPrefetchSuccess(desc.SizeBytes, duration)
-
-	fence.Signal()
+	desc.Fence.Signal()
 }
 
 // recordPrefetchSuccess updates internal metrics upon successful prefetch completion.
@@ -352,24 +353,24 @@ func (m *DoubleBufferManager) FlipWait(timeout time.Duration) (*MALLBuffer, erro
 	// If inactive buffer is still prefetching and timeout is allowed, wait for in-flight fence
 	inactiveState := currentInactive.State()
 	if inactiveState == BufferPrefetching && timeout > 0 {
-		m.prefetchMu.Lock()
-		var fence *CompletionFence
-		if m.activePrefetch != nil {
-			fence = m.activePrefetch.Fence
-		}
-		m.prefetchMu.Unlock()
-
-		if fence != nil {
-			if err := fence.Wait(timeout); err != nil {
+		op := m.prefetches[currentInactive.ID]
+		if op != nil {
+			m.mu.Unlock()
+			err := op.descriptor.Fence.Wait(timeout)
+			m.mu.Lock()
+			if err != nil || m.closed || m.resetting || m.prefetches[currentInactive.ID] != op || m.activeID != currentActive.ID {
 				m.metricsMu.Lock()
 				m.metrics.PrefetchUnderrunCount++
 				m.metricsMu.Unlock()
-				return nil, fmt.Errorf("%w: prefetch underrun on %s: %v", ErrBufferNotReady, currentInactive.ID, err)
+				return nil, fmt.Errorf("%w: prefetch operation changed or unavailable", ErrBufferNotReady)
 			}
 		}
 		inactiveState = currentInactive.State()
 	}
 
+	if m.computing[currentActive.ID] != 0 || m.computing[currentInactive.ID] != 0 {
+		return nil, ErrBufferBusy
+	}
 	// Verify that inactive buffer is ready
 	if inactiveState != BufferReady {
 		m.metricsMu.Lock()
@@ -381,8 +382,11 @@ func (m *DoubleBufferManager) FlipWait(timeout time.Duration) (*MALLBuffer, erro
 
 	// Calculate prefetch lead time (elapsed time between prefetch completion and flip request)
 	var leadTimeNs int64
-	if !currentInactive.lastPrefetch.IsZero() {
-		leadTime := swapStart.Sub(currentInactive.lastPrefetch)
+	currentInactive.stateMu.RLock()
+	lastPrefetch := currentInactive.lastPrefetch
+	currentInactive.stateMu.RUnlock()
+	if !lastPrefetch.IsZero() {
+		leadTime := swapStart.Sub(lastPrefetch)
 		if leadTime > 0 {
 			leadTimeNs = leadTime.Nanoseconds()
 		}
@@ -392,7 +396,9 @@ func (m *DoubleBufferManager) FlipWait(timeout time.Duration) (*MALLBuffer, erro
 	if err := currentInactive.SetState(BufferComputing); err != nil {
 		return nil, err
 	}
+	currentInactive.stateMu.Lock()
 	currentInactive.lastCompute = swapStart
+	currentInactive.stateMu.Unlock()
 
 	// Transition previously active buffer: COMPUTING / READY / EMPTY -> RECYCLING -> EMPTY
 	activeState := currentActive.State()
@@ -401,8 +407,10 @@ func (m *DoubleBufferManager) FlipWait(timeout time.Duration) (*MALLBuffer, erro
 			return nil, err
 		}
 		// Reset layer tracking for recycled buffer
+		currentActive.stateMu.Lock()
 		currentActive.ActiveLayer = -1
 		currentActive.SubLayerID = -1
+		currentActive.stateMu.Unlock()
 		if err := currentActive.SetState(BufferEmpty); err != nil {
 			return nil, err
 		}
@@ -441,26 +449,44 @@ func (m *DoubleBufferManager) ExecuteCompute(ctx context.Context, layerID int, c
 		return err
 	}
 
-	activeBuf := m.ActiveBuffer()
+	m.mu.Lock()
+	if m.closed || m.resetting {
+		m.mu.Unlock()
+		return ErrBufferNotReady
+	}
+	activeBuf := m.bufferA
+	if m.activeID == BufferIDB {
+		activeBuf = m.bufferB
+	}
 	state := activeBuf.State()
 
 	// If buffer is READY, promote to COMPUTING
 	if state == BufferReady {
 		if err := activeBuf.SetState(BufferComputing); err != nil {
+			m.mu.Unlock()
 			return err
 		}
 		state = BufferComputing
 	}
 
 	if state != BufferComputing {
+		m.mu.Unlock()
 		return fmt.Errorf("%w: active buffer %s is in state %s (expected COMPUTING)",
 			ErrBufferNotReady, activeBuf.ID, state)
 	}
 
-	if activeBuf.ActiveLayer != -1 && activeBuf.ActiveLayer != layerID {
+	activeBuf.stateMu.RLock()
+	activeLayer := activeBuf.ActiveLayer
+	activeBuf.stateMu.RUnlock()
+	if activeLayer != -1 && activeLayer != layerID {
+		m.mu.Unlock()
 		return fmt.Errorf("%w: layer mismatch in %s: active=%d requested=%d",
-			ErrComputeFailed, activeBuf.ID, activeBuf.ActiveLayer, layerID)
+			ErrComputeFailed, activeBuf.ID, activeLayer, layerID)
 	}
+
+	m.computing[activeBuf.ID]++
+	m.mu.Unlock()
+	defer func() { m.mu.Lock(); m.computing[activeBuf.ID]--; m.ownership.Broadcast(); m.mu.Unlock() }()
 
 	start := time.Now()
 	var computeErr error
@@ -578,12 +604,21 @@ func CalculateVarianceReductionPct(baseline, optimized []float64) float64 {
 
 // RecycleInactive recycles the inactive buffer, clearing its state back to BufferEmpty.
 func (m *DoubleBufferManager) RecycleInactive() error {
-	inactive := m.InactiveBuffer()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed || m.resetting {
+		return ErrBufferNotReady
+	}
+	inactive := m.bufferB
+	if m.activeID == BufferIDB {
+		inactive = m.bufferA
+	}
 	state := inactive.State()
-	if state == BufferComputing {
-		return fmt.Errorf("%w: cannot recycle buffer %s while computing", ErrInvalidStateTransition, inactive.ID)
+	if state == BufferComputing || state == BufferPrefetching || m.computing[inactive.ID] != 0 {
+		return ErrBufferBusy
 	}
 	inactive.Reset()
+	m.prefetches[inactive.ID] = nil
 	return nil
 }
 
@@ -591,6 +626,25 @@ func (m *DoubleBufferManager) RecycleInactive() error {
 func (m *DoubleBufferManager) Reset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.closed {
+		return
+	}
+	for m.resetting {
+		m.ownership.Wait()
+		if m.closed {
+			return
+		}
+	}
+	m.resetting = true
+	m.cancelPrefetchesLocked()
+	for m.computing[0] != 0 || m.computing[1] != 0 {
+		m.ownership.Wait()
+	}
+	m.mu.Unlock()
+	m.workers.Wait()
+	m.mu.Lock()
+	m.resetting = false
+	m.ownership.Broadcast()
 
 	m.bufferA.Reset()
 	m.bufferB.Reset()
@@ -612,16 +666,32 @@ func (m *DoubleBufferManager) Reset() {
 // Close releases resources and prevents further buffer operations.
 func (m *DoubleBufferManager) Close() error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.closed {
-		return nil
+	for m.resetting {
+		m.ownership.Wait()
 	}
 	m.closed = true
-
+	m.cancelPrefetchesLocked()
+	for m.computing[0] != 0 || m.computing[1] != 0 {
+		m.ownership.Wait()
+	}
+	m.mu.Unlock()
+	m.workers.Wait()
+	m.mu.Lock()
 	m.bufferA.Reset()
 	m.bufferB.Reset()
+	m.mu.Unlock()
 	return nil
+}
+
+// cancelPrefetchesLocked invalidates ownership before buffers may be cleared.
+func (m *DoubleBufferManager) cancelPrefetchesLocked() {
+	for id, op := range m.prefetches {
+		if op != nil {
+			close(op.cancel)
+			op.descriptor.Fence.SignalError(ErrBufferNotReady)
+			m.prefetches[id] = nil
+		}
+	}
 }
 
 // Metrics returns a snapshot copy of current operational metrics.

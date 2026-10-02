@@ -112,6 +112,26 @@ func dequantQ2G128Tensor(qt *q2Tensor) []float32 {
 	return w
 }
 
+// q2MatRowsBatch projects a row-major token panel through one resident ternary
+// matrix without expanding the full matrix. Each token owns its output row;
+// distinct tokens can dequantize the same immutable blocks concurrently.
+func q2MatRowsBatch(qt *q2Tensor, X []float32, rows int) []float32 {
+	if rows <= 0 || len(X) != rows*qt.in {
+		panic("model: Q2_0 activation panel shape mismatch")
+	}
+	Y := make([]float32, rows*qt.out)
+	if rows == 1 {
+		q2MatRowsInto(qt, X, Y)
+		return Y
+	}
+	parFor(rows, currentWorkerCount(), func(lo, hi int) {
+		for row := lo; row < hi; row++ {
+			q2MatRowsRange(qt, X[row*qt.in:(row+1)*qt.in], Y[row*qt.out:(row+1)*qt.out], 0, qt.out)
+		}
+	})
+	return Y
+}
+
 // AddResidentQ2 stores a raw GGUF Q2_0 payload as a resident g128 q2Tensor under the
 // canonical name resolved through the qwen35 source chain, skipping any f32 round
 // trip. shape is the model [out, in] convention (in a multiple of 128). Idempotent for

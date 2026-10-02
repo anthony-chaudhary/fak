@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -26,6 +27,11 @@ func runConcept(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "fak concept:", err)
 		return 1
 	}
+	// Committed admission reads its catalog from the selected tip, so unrelated
+	// working-tree metadata must not prevent that immutable check from running.
+	if args[0] == "admission" {
+		return runConceptAdmission(stdout, stderr, root, args[1:])
+	}
 	c, err := conceptcatalog.Load(root)
 	if err != nil {
 		fmt.Fprintln(stderr, "fak concept:", err)
@@ -36,8 +42,6 @@ func runConcept(stdout, stderr io.Writer, args []string) int {
 		return runConceptPosition(stdout, stderr, c, args[1:])
 	case "classify":
 		return runConceptClassify(stdout, stderr, c, args[1:])
-	case "admission":
-		return runConceptAdmission(stdout, stderr, root, args[1:])
 	case "freshness":
 		fs := flag.NewFlagSet("concept freshness", flag.ContinueOnError)
 		fs.SetOutput(stderr)
@@ -167,13 +171,41 @@ func runConceptGenerate(out, errw io.Writer, c conceptcatalog.Catalog, args []st
 
 func runConceptAdmission(out, errw io.Writer, root string, args []string) int {
 	fs := flag.NewFlagSet("concept admission", flag.ContinueOnError)
-	fs.SetOutput(errw)
+	var parseOutput bytes.Buffer
+	fs.SetOutput(&parseOutput)
 	var pathsFlag string
 	fs.StringVar(&pathsFlag, "paths", "", "repo-relative paths to evaluate for concept admission (comma-separated)")
 	fs.StringVar(&pathsFlag, "path", "", "alias for --paths")
+	base := fs.String("base", "", "committed admission range base (requires --tip)")
+	tip := fs.String("tip", "", "committed admission range tip (requires --base)")
 	jsonOut := fs.Bool("json", false, "emit all staged findings as JSON")
-	if fs.Parse(args) != nil {
+	parseErr := fs.Parse(args)
+	rangeMode, pathsSet := false, false
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "base", "tip":
+			rangeMode = true
+		case "paths", "path":
+			pathsSet = true
+		}
+	})
+	if !rangeMode {
+		// Preserve the legacy catalog preflight, including its precedence over
+		// parse errors. Range mode validates only committed catalog bytes.
+		if _, err := conceptcatalog.Load(root); err != nil {
+			fmt.Fprintln(errw, "fak concept:", err)
+			return 1
+		}
+	}
+	if parseErr != nil {
+		_, _ = io.Copy(errw, &parseOutput)
 		return 2
+	}
+	if rangeMode {
+		if strings.TrimSpace(*base) == "" || strings.TrimSpace(*tip) == "" || pathsSet || fs.NArg() != 0 {
+			fmt.Fprintln(errw, "fak concept admission: --base and --tip require non-empty values and cannot be combined with paths")
+			return 2
+		}
 	}
 	var targetPaths []string
 	if pathsFlag != "" {
@@ -191,7 +223,9 @@ func runConceptAdmission(out, errw io.Writer, root string, args []string) int {
 
 	var d *hooks.StagedDiff
 	var err error
-	if len(targetPaths) > 0 {
+	if rangeMode {
+		d, err = hooks.ReadRangeDiff(root, *base, *tip)
+	} else if len(targetPaths) > 0 {
 		d, err = hooks.ReadPathsDiff(root, targetPaths)
 	} else {
 		d, err = hooks.ReadStagedDiff(root)
@@ -224,10 +258,13 @@ func runConceptAdmission(out, errw io.Writer, root string, args []string) int {
 			OK       bool            `json:"ok"`
 			Findings []hooks.Finding `json:"findings"`
 		}{"fak.concept_admission.v1", len(findings) == 0, findings})
-		return 0
+	} else {
+		for _, f := range findings {
+			fmt.Fprintf(out, "CONCEPT_ADMISSION %s:%d: %s\n", f.File, f.Line, f.Detail)
+		}
 	}
-	for _, f := range findings {
-		fmt.Fprintf(out, "CONCEPT_ADMISSION %s:%d: %s\n", f.File, f.Line, f.Detail)
+	if rangeMode && len(findings) > 0 {
+		return 1
 	}
 	return 0
 }

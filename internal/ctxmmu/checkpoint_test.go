@@ -269,7 +269,8 @@ func TestInPlaceCheckpoint_SharedTokenPoolPinning(t *testing.T) {
 	// 5000 max tokens total capacity
 	maxTokens := 5000
 	pool := NewSharedTokenPoolWithConfig(maxTokens, int64(maxTokens)*DefaultPoolBytesPerToken, DefaultPoolBytesPerToken, 1.0)
-	cm := NewCheckpointManager(nil, pool, nil, nil)
+	forkMgr := NewForkManager()
+	cm := NewCheckpointManager(nil, pool, forkMgr, nil)
 
 	streamA := "agent-stream-A"
 	streamB := "agent-stream-B"
@@ -280,6 +281,20 @@ func TestInPlaceCheckpoint_SharedTokenPoolPinning(t *testing.T) {
 	}
 	if err := pool.Commit(streamA, 500); err != nil {
 		t.Fatalf("pool.Commit streamA failed: %v", err)
+	}
+
+	// SharedTokenPool owns counts only. The token sequence and the KV pages the
+	// checkpoint pins must come from a real state owner (fak#12600).
+	forkedA, regErr := forkMgr.RegisterSession(streamA, BlockGranularity64)
+	if regErr != nil {
+		t.Fatalf("RegisterSession streamA failed: %v", regErr)
+	}
+	streamATokens := make([]int32, 500)
+	for i := range streamATokens {
+		streamATokens[i] = int32(7000 + i)
+	}
+	if appErr := forkedA.AppendTokens(streamATokens...); appErr != nil {
+		t.Fatalf("AppendTokens streamA failed: %v", appErr)
 	}
 
 	if pool.CommittedTokens() != 500 || pool.ReservedTokens() != 1500 {
@@ -633,7 +648,21 @@ func TestInPlaceCheckpoint_EdgeCasesAndConvenienceFunctions(t *testing.T) {
 	_ = pool.Reserve(pkgSid, 200)
 	_ = pool.Commit(pkgSid, 100)
 
-	pkgMgr := NewCheckpointManager(mmu, pool, nil, nil)
+	// Package-level convenience wrappers still require a real state owner: pool
+	// accounting alone cannot produce a restorable descriptor (fak#12600).
+	pkgForkMgr := NewForkManager()
+	pkgForkSess, pkgRegErr := pkgForkMgr.RegisterSession(pkgSid, BlockGranularity64)
+	if pkgRegErr != nil {
+		t.Fatalf("RegisterSession %s failed: %v", pkgSid, pkgRegErr)
+	}
+	pkgTokens := make([]int32, 100)
+	for i := range pkgTokens {
+		pkgTokens[i] = int32(9000 + i)
+	}
+	if pkgAppErr := pkgForkSess.AppendTokens(pkgTokens...); pkgAppErr != nil {
+		t.Fatalf("AppendTokens %s failed: %v", pkgSid, pkgAppErr)
+	}
+	pkgMgr := NewCheckpointManager(mmu, pool, pkgForkMgr, nil)
 	SetDefaultCheckpointManager(pkgMgr)
 
 	pkgDesc, err := SaveInPlaceCheckpoint(pkgSid)
@@ -648,4 +677,37 @@ func TestInPlaceCheckpoint_EdgeCasesAndConvenienceFunctions(t *testing.T) {
 		t.Fatalf("package-level RestoreInPlaceCheckpoint failed: %v", err)
 	}
 	_ = ReapExpiredCheckpoints(time.Now())
+}
+
+// TestCheckpointRejectsPoolOnlyAccounting pins the fail-closed state-authority contract
+// (fak#12600): SharedTokenPool owns COUNTS only — it has no token IDs and no KV payload.
+// A checkpoint built from pool accounting alone therefore describes model state that
+// never existed, and restoring that self-consistent descriptor reports success for a
+// zero-copy restore of nothing.
+//
+// The previous construction synthesized token IDs as 1000+i and returned a descriptor
+// with no pinned physical or COW blocks; RestoreInPlaceCheckpoint then validated the
+// fabricated hash and returned nil. Save must now fail with ErrSessionNotFound, and no
+// token sequence may be synthesized from counters alone.
+func TestCheckpointRejectsPoolOnlyAccounting(t *testing.T) {
+	pool := NewSharedTokenPoolWithConfig(16, 16*1024, 1024, 1)
+	if err := pool.Reserve("request-a", 4); err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+	if err := pool.Commit("request-a", 2); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	// No ForkManager and no COWPageTable: accounting is the ONLY evidence.
+	cm := NewCheckpointManager(nil, pool, nil, nil)
+	desc, err := cm.SaveInPlaceCheckpoint("request-a")
+	if errors.Is(err, ErrSessionNotFound) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("SaveInPlaceCheckpoint error = %v, want ErrSessionNotFound", err)
+	}
+	restoreErr := cm.RestoreInPlaceCheckpoint("request-a", desc)
+	t.Fatalf("pool-only checkpoint fabricated tokens=%v pinned_physical=%d pinned_cow=%d and restore_err=%v; want SaveInPlaceCheckpoint to fail with ErrSessionNotFound",
+		desc.TokenSequence, len(desc.PinnedBlocks), len(desc.PinnedCOWBlocks), restoreErr)
 }

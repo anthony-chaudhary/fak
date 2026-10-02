@@ -17,6 +17,7 @@ type Q2KEmbedding struct {
 	vocab  int
 	hidden int
 	format packedEmbeddingFormat
+	prism  *prismHadamardState
 }
 
 type packedEmbeddingFormat uint8
@@ -24,6 +25,7 @@ type packedEmbeddingFormat uint8
 const (
 	packedEmbeddingQ2K packedEmbeddingFormat = iota + 1
 	packedEmbeddingQ4K
+	packedEmbeddingPQ2
 )
 
 // NewQ2KEmbedding constructs a validated Q2KEmbedding instance.
@@ -38,15 +40,22 @@ func NewQ4KEmbedding(data []byte, vocab, hidden int) (*Q2KEmbedding, error) {
 	return newPackedEmbedding(data, vocab, hidden, packedEmbeddingQ4K)
 }
 
+// NewPQ2Embedding retains Prism's group-128 ternary token table and decodes
+// only requested rows. It shares the bounded gather API of Q2_K/Q4_K tables.
+func NewPQ2Embedding(data []byte, vocab, hidden int) (*Q2KEmbedding, error) {
+	return newPackedEmbedding(data, vocab, hidden, packedEmbeddingPQ2)
+}
+
 func newPackedEmbedding(data []byte, vocab, hidden int, format packedEmbeddingFormat) (*Q2KEmbedding, error) {
 	if vocab <= 0 || hidden <= 0 {
 		return nil, fmt.Errorf("model: invalid embedding dimensions: vocab=%d, hidden=%d", vocab, hidden)
 	}
-	if hidden%qkK != 0 {
-		return nil, fmt.Errorf("model: embedding hidden dimension %d is not divisible by %d", hidden, qkK)
+	blockWeights := format.blockWeights()
+	if hidden%blockWeights != 0 {
+		return nil, fmt.Errorf("model: embedding hidden dimension %d is not divisible by %d", hidden, blockWeights)
 	}
 	blockBytes := format.blockBytes()
-	blocksPerRow := int64(hidden / qkK)
+	blocksPerRow := int64(hidden / blockWeights)
 	if blocksPerRow > math.MaxInt64/int64(blockBytes) || int64(vocab) > math.MaxInt64/(blocksPerRow*int64(blockBytes)) {
 		return nil, fmt.Errorf("model: embedding payload size overflows int64")
 	}
@@ -67,10 +76,20 @@ func newPackedEmbedding(data []byte, vocab, hidden int, format packedEmbeddingFo
 }
 
 func (f packedEmbeddingFormat) blockBytes() int {
+	if f == packedEmbeddingPQ2 {
+		return q2G128BlockBytes
+	}
 	if f == packedEmbeddingQ4K {
 		return q4kBlockBytes
 	}
 	return q2kBlockBytes
+}
+
+func (f packedEmbeddingFormat) blockWeights() int {
+	if f == packedEmbeddingPQ2 {
+		return qBlk2G128
+	}
+	return qkK
 }
 
 // Format returns the GGUF quantization format retained in the packed backing.
@@ -80,6 +99,9 @@ func (q *Q2KEmbedding) Format() string {
 	}
 	if q.format == packedEmbeddingQ4K {
 		return "Q4_K"
+	}
+	if q.format == packedEmbeddingPQ2 {
+		return "PQ2_0"
 	}
 	return "Q2_K"
 }
@@ -120,18 +142,26 @@ func (q *Q2KEmbedding) GatherRow(tokenID int, dst []float32, scale float32) erro
 	if len(dst) < q.hidden {
 		return fmt.Errorf("model: destination buffer len %d < hidden %d", len(dst), q.hidden)
 	}
-	nBlocks := q.hidden / qkK
+	blockWeights := q.format.blockWeights()
+	nBlocks := q.hidden / blockWeights
 	blockBytes := q.format.blockBytes()
 	rowBytes := nBlocks * blockBytes
 	rowStart := tokenID * rowBytes
 	rowData := q.raw[rowStart : rowStart+rowBytes]
 	for b := 0; b < nBlocks; b++ {
 		blk := rowData[b*blockBytes : (b+1)*blockBytes]
-		if q.format == packedEmbeddingQ4K {
-			q4kDequantSuperBlock(dst[b*qkK:(b+1)*qkK], blk)
-		} else {
-			q2kDequantSuperBlock(dst[b*qkK:(b+1)*qkK], blk)
+		row := dst[b*blockWeights : (b+1)*blockWeights]
+		switch q.format {
+		case packedEmbeddingQ4K:
+			q4kDequantSuperBlock(row, blk)
+		case packedEmbeddingPQ2:
+			dequantQ2G128Block(row, blk)
+		default:
+			q2kDequantSuperBlock(row, blk)
 		}
+	}
+	if q.prism != nil {
+		q.prism.inverseEmbeddingRow(dst[:q.hidden])
 	}
 	if scale != 0 && scale != 1.0 {
 		for i := 0; i < q.hidden; i++ {

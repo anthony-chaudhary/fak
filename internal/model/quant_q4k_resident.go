@@ -54,7 +54,7 @@ func (s *Session) headKQuant(xf []float32) []float32 {
 	y, t := s.headLogitsBuf()
 	name := s.M.kqHeadName()
 	qt := s.M.kqw[name]
-	s.kQuantMatRowsIntoDispatch(name, qt, xf, y)
+	s.kQuantMatRowsIntoDispatch(name, qt, s.M.prismProjectInput(name, xf), y)
 	logitScaleInPlace(y, s.M.Cfg)
 	s.phaseEnd("lm_head_kquant", t)
 	return y
@@ -67,9 +67,20 @@ func (s *Session) headQ4K(xf []float32) []float32 {
 	if qt == nil {
 		qt = s.M.q4kw[s.M.q4kHeadName()]
 	}
-	q4kMatRowsInto(qt, xf, y)
+	q4kMatRowsInto(qt, s.M.prismProjectInput(s.M.q4kHeadName(), xf), y)
 	logitScaleInPlace(y, s.M.Cfg)
 	s.phaseEnd("lm_head_q4k", t)
+	return y
+}
+
+// headQ2 applies a packed ternary output projection without materializing the
+// large vocabulary matrix as f32 or silently falling through to the embedding.
+func (s *Session) headQ2(xf []float32) []float32 {
+	y, t := s.headLogitsBuf()
+	name := s.M.residentHeadName()
+	q2MatRowsInto(s.M.q2w[name], s.M.prismProjectInput(name, xf), y)
+	logitScaleInPlace(y, s.M.Cfg)
+	s.phaseEnd("lm_head_q2", t)
 	return y
 }
 
@@ -88,6 +99,9 @@ func (s *Session) headResident(xf []float32) []float32 {
 	// (which would mis-read). kQuantMatRows is byte-identical to the dequant path.
 	if m.kqHeadName() != "" {
 		return s.headKQuant(xf)
+	}
+	if m.q2w[m.residentHeadName()] != nil {
+		return s.headQ2(xf)
 	}
 	if m.q4head != nil {
 		return s.headQ4(xf)

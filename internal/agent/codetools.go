@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/codetools"
@@ -102,7 +103,7 @@ func isFullFileVersion(version string) bool {
 //
 // WHY A GATE RATHER THAN A DIRECT REGISTRATION. abi.RegisterAdjudicator APPENDS, so
 // arming twice would stack two rungs that both decide every call. codeToolGate is
-// registered exactly ONCE and holds the live toolset behind an atomic pointer, so
+// registered once per registry and holds the live toolset behind an atomic pointer, so
 // re-arming (a second run, a test, a re-Configure) swaps the toolset instead of growing
 // the chain. Unarmed, the gate defers on every call and the loop is byte-for-byte the
 // historical loop.
@@ -120,9 +121,23 @@ type codeToolGate struct{}
 var (
 	// armedCodeTools is the live toolset, or nil when the coding tools are not armed.
 	armedCodeTools atomic.Pointer[codetools.Toolset]
-	// codeToolGateOnce guards the one-time chain registration.
-	codeToolGateOnce sync.Once
+	// Serialize the presence check and registration so concurrent arming cannot
+	// append duplicate gates, including after a test clears the ABI registry.
+	codeToolGateMu sync.Mutex
 )
+
+func ensureCodeToolGate() {
+	codeToolGateMu.Lock()
+	defer codeToolGateMu.Unlock()
+	for _, rung := range abi.Adjudicators() {
+		if _, ok := rung.(codeToolGate); ok {
+			return
+		}
+	}
+	// A process-lifetime sync.Once cannot restore a gate after ResetForTest.
+	// Re-arm the same routing/policy gate at its canonical rank, never a substitute.
+	abi.RegisterAdjudicator(codeToolRank, codeToolGate{})
+}
 
 // Caps advertises no optional capabilities.
 func (codeToolGate) Caps() []abi.Capability { return nil }
@@ -180,6 +195,7 @@ type CodeToolsOptions struct {
 	ExtraDirs            []string
 	EnableContextControl bool
 	ExactAllowedCommands []string
+	MaxCommandTime       time.Duration
 	EnableQuestion       bool
 	QuestionResolver     QuestionResolver
 }
@@ -191,7 +207,7 @@ func ArmCodeToolsWithOptions(opts CodeToolsOptions) ([]ToolDef, error) {
 		extraDirs = append(extraDirs, opts.SkillsDir)
 	}
 	extraDirs = append(extraDirs, opts.ExtraDirs...)
-	defs, err := armCodeToolsFull(opts.Root, opts.Focused, opts.ExactCommandsOnly, opts.EnableSkills, opts.ExactAllowedCommands, extraDirs...)
+	defs, err := armCodeToolsFullWithMaxCommandTime(opts.Root, opts.Focused, opts.ExactCommandsOnly, opts.EnableSkills, opts.ExactAllowedCommands, opts.MaxCommandTime, extraDirs...)
 	if err != nil {
 		return nil, err
 	}
@@ -214,11 +230,20 @@ func ArmCodeToolsWithOptions(opts CodeToolsOptions) ([]ToolDef, error) {
 }
 
 func armCodeToolsFull(root string, focused, exactCommandsOnly, enableSkills bool, exactAllowedCommands []string, extraDirs ...string) ([]ToolDef, error) {
+	return armCodeToolsFullWithMaxCommandTime(root, focused, exactCommandsOnly, enableSkills, exactAllowedCommands, 0, extraDirs...)
+}
+
+func armCodeToolsFullWithMaxCommandTime(root string, focused, exactCommandsOnly, enableSkills bool, exactAllowedCommands []string, maxCommandTime time.Duration, extraDirs ...string) ([]ToolDef, error) {
+	limits := codetools.DefaultLimits()
+	if maxCommandTime != 0 {
+		limits.MaxCommandTime = maxCommandTime
+	}
 	ts, err := codetools.New(codetools.Config{
 		Root:                 root,
 		FocusedCommands:      focused,
 		ExactCommandsOnly:    exactCommandsOnly,
 		ExactAllowedCommands: exactAllowedCommands,
+		Limits:               limits,
 	})
 	if err != nil {
 		return nil, err
@@ -237,7 +262,7 @@ func armCodeToolsFull(root string, focused, exactCommandsOnly, enableSkills bool
 		armedSkills.Store(nil)
 	}
 
-	codeToolGateOnce.Do(func() { abi.RegisterAdjudicator(codeToolRank, codeToolGate{}) })
+	ensureCodeToolGate()
 	return CodeToolCatalog(), nil
 }
 

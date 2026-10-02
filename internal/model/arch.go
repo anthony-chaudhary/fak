@@ -506,6 +506,7 @@ func (m *Model) embedRowsInto(X []float32, ids []int, H int, cfg Config) {
 	embed := m.embedRows()
 	for row, id := range ids {
 		copy(X[row*H:(row+1)*H], embed[id*H:(id+1)*H])
+		m.prismInverseEmbeddingRow("model.embed_tokens.weight", X[row*H:(row+1)*H])
 		scaleEmbedInPlace(X[row*H:(row+1)*H], cfg)
 	}
 }

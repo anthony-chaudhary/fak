@@ -36,6 +36,7 @@ scoped to what it proves.
 |---|---|
 | Logos, marks, favicon, color tokens | [`brand/`](brand/) |
 | General product overview | [`76-agent-kernel-overview.svg`](76-agent-kernel-overview.svg) |
+| Core engine architecture (today + planned) | [`../docs/engine-visuals.md`](../docs/engine-visuals.md) — figures `80`–`85` |
 | Session-management story | [`77-managed-session.svg`](77-managed-session.svg) |
 | Reproducibility / proof story | [`78-proof-ladder.svg`](78-proof-ladder.svg) |
 | Current measured token economics | [`75-token-savings-frontdoor.svg`](75-token-savings-frontdoor.svg) + [`74-session-effectiveness.svg`](74-session-effectiveness.svg) |

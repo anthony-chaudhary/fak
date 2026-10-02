@@ -77,6 +77,34 @@ func TestRecoverManualPlanRefusesExecute(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=10ms lane=default
+func TestRecoverPeerWIPCollisionPreservesWork(t *testing.T) {
+	var out, errb bytes.Buffer
+	if rc := runRecover(&out, &errb, []string{"PEER_WIP_COLLISION", "--dry-run", "--trunk", "main"}); rc != 0 {
+		t.Fatalf("dry-run rc=%d stderr=%s", rc, &errb)
+	}
+	for _, want := range []string{"fak wip attribute --json", "fak wip reconcile --json", "Preserve valid peer work", "Never blindly apply an all-deletion checkpoint", "--expected-oid <oid>", "explicit operator disposition", "never autoquarantines"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("dry-run missing %q: %s", want, &out)
+		}
+	}
+	plan := recoveryPlans("main")["PEER_WIP_COLLISION"]
+	if plan.Executable || len(plan.Steps) != 2 {
+		t.Fatalf("expected manual diagnostic plan: %+v", plan)
+	}
+	for _, step := range plan.Steps {
+		if !step.Safe || len(step.Argv) != 4 || step.Argv[0] != "fak" || step.Argv[1] != "wip" || (step.Argv[2] != "attribute" && step.Argv[2] != "reconcile") || step.Argv[3] != "--json" {
+			t.Fatalf("non-diagnostic step: %+v", step)
+		}
+	}
+	out.Reset()
+	errB := &errb
+	errB.Reset()
+	if rc := runRecover(&out, errB, []string{"PEER_WIP_COLLISION", "--execute", "--trunk", "main"}); rc != recoverExitRefusal {
+		t.Fatalf("execute rc=%d stdout=%s stderr=%s", rc, &out, errB)
+	}
+}
+
 func TestRecoverSystemCommitHeadroomIsBoundedAndManual(t *testing.T) {
 	var out, errb bytes.Buffer
 	if rc := runRecover(&out, &errb, []string{"SYSTEM_COMMIT_HEADROOM", "--dry-run"}); rc != 0 {

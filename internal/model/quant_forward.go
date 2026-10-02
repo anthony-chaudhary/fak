@@ -306,7 +306,7 @@ func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
 			// fewer weight bytes/token than Q8, raising the decode ceiling. The block
 			// orchestration (RMSNorm, RoPE, GQA, GDN recurrent scan, SwiGLU) is unchanged.
 			mat = matKernel(sessionQ4Kernel{s})
-		} else if s.Q4K && (m.q4kw != nil || len(m.kqw) > 0) {
+		} else if s.Q4K && (m.q4kw != nil || len(m.kqw) > 0 || len(m.q2w) > 0) {
 			// Resident raw Q4_K decode (plan P1): same blockStep skeleton, but the q4_k_m
 			// matmul majority streams at 0.5625 B/weight (raw GGUF bytes, no round-trip) and
 			// the Q6_K minority (attn_qkv/ffn_down) falls back to the Q8 GEMV inside the kernel.
@@ -325,6 +325,7 @@ func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
 		} else {
 			embed := m.embedRows()
 			x = append([]float32(nil), embed[id*H:(id+1)*H]...)
+			m.prismInverseEmbeddingRow("model.embed_tokens.weight", x)
 			scaleEmbedInPlace(x, cfg) // Gemma; no-op for Llama
 		}
 		for l := 0; l < cfg.NumLayers; l++ {

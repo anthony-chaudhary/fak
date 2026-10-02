@@ -559,7 +559,7 @@ type sessionQ4KKernel struct{ s *Session }
 func (k sessionQ4KKernel) prep(x []float32) any { return x }
 
 func (k sessionQ4KKernel) mul(name string, x any, out, in int) []float32 {
-	xf := x.([]float32)
+	xf := k.s.M.prismProjectInput(name, x.([]float32))
 	if qt := k.s.M.q4kw[name]; qt != nil {
 		// Resident raw Q4_K matmul weight (the q4_k_m majority): inline-dequant GEMV on CPU,
 		// or the Metal q4_k GEMV under MetalQ4K (q4kMatRowsDispatch).
@@ -574,6 +574,10 @@ func (k sessionQ4KKernel) mul(name string, x any, out, in int) []float32 {
 		y := make([]float32, qt.out)
 		k.s.kQuantMatRowsIntoDispatch(name, qt, xf, y)
 		return y
+	}
+	if qt := k.s.M.q2w[name]; qt != nil {
+		requireResidentShape("resident Q2_0", name, qt.out, qt.in, out, in)
+		return q2MatRows(qt, xf)
 	}
 	// Quant matmul weights with no resident Q4_K or k-quant copy (qwen3.5 attn_qkv → split
 	// q/k/v) fall back to the proven Q8_0 GEMV. The f32 activation is quantized on demand for

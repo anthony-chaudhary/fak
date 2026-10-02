@@ -45,6 +45,8 @@ jobs:
           echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
 
   compile-matrix:
+    # Equivalent configurations share one check. Default checks cover the named
+    # darwin-arm64, linux-amd64 and windows-amd64 profiles; logs retain all variants.
     name: compile · ${{ matrix.variant }} (${{ matrix.target }})
     needs: plan
     runs-on: ubuntu-latest
@@ -65,7 +67,9 @@ jobs:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          COVERED_VARIANTS: ${{ toJSON(matrix.variants) }}
         run: |
+          printf 'Covered variants: %s\n' "$COVERED_VARIANTS"
           tags_arg=""
           if [ -n "${{ matrix.tags }}" ]; then
             tags_arg="-tags ${{ matrix.tags }}"

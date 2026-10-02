@@ -1,16 +1,18 @@
 {
-  "schema": "fak-nccl-ep-collective/v1",
+  "schema": "fak-local-ep-software-check/v2",
   "issue": 10946,
-  "role": "candidate",
+  "role": "software-check",
   "engine": "fak-native",
-  "model_architecture": "GLM-5.3 / Qwen3.8 MoE",
+  "fixture": "synthetic 8-expert MoE",
+  "evidence_scope": "host ExpertParallelDelta; no NCCL, GPU, model artifacts, or logits",
+  "hardware_qualified": false,
   "ranks_tested": [
     2,
     4,
     8
   ],
-  "collective_operation": "NCCL AllReduceSum",
-  "logit_parity_vs_single_rank": 1,
+  "collective_operation": "LocalCollective.AllReduceSum (host float32)",
+  "delta_cosine_vs_single_rank": 0.9999999999999979,
   "max_absolute_delta": 4.656612873077393e-10,
-  "sharding_proven": true
+  "synthetic_sharding_checked": true
 }

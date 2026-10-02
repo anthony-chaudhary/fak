@@ -203,7 +203,13 @@ func New(cfg Config) (*Server, error) {
 	var nativeCodeCatalog []agent.ToolDef
 	if cfg.NativeCodeWorkspace != "" {
 		var armErr error
-		nativeCodeCatalog, armErr = agent.ArmFocusedCodeTools(cfg.NativeCodeWorkspace)
+		exactAllowedCommands := append([]string(nil), cfg.NativeExactAllowedCommands...)
+		nativeCodeCatalog, armErr = agent.ArmCodeToolsWithOptions(agent.CodeToolsOptions{
+			Root:                 cfg.NativeCodeWorkspace,
+			Focused:              true,
+			ExactAllowedCommands: exactAllowedCommands,
+			MaxCommandTime:       cfg.NativeMaxCommandTime,
+		})
 		if armErr != nil {
 			return nil, fmt.Errorf("native code workspace: %w", armErr)
 		}
