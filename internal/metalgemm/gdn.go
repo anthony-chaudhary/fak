@@ -15,6 +15,7 @@ typedef struct {
     int state_h2d_transfers;
     int state_d2h_transfers;
     int host_recurrence_steps;
+    int chunk_recurrence_steps;
     int owned_buffers;
     int private_state_buffers;
     int panel_h2d_transfers;
@@ -37,6 +38,7 @@ int mg_gdn_live_buffers(void);
 int mg_gdn_owner_capacity(void);
 uint64_t mg_gdn_current_allocated_size(void);
 void mg_gdn_set_force_baseline(int force);
+void mg_gdn_set_force_chunked_off(int force);
 int mg_test_run_shuffle(const float *in, float *out);
 */
 import "C"
@@ -136,11 +138,13 @@ type GDNStateHandle uint64
 
 // GDNAccounting binds one call to native command-buffer and state-ownership facts.
 type GDNAccounting struct {
-	CommandBufferID                       uint64
-	Committed, CompletedWait              bool
-	Encoders                              int
-	StateH2DTransfers, StateD2HTransfers  int
-	HostRecurrenceSteps                   int
+	CommandBufferID                      uint64
+	Committed, CompletedWait             bool
+	Encoders                             int
+	StateH2DTransfers, StateD2HTransfers int
+	HostRecurrenceSteps                  int
+	// ChunkRecurrenceSteps counts C=8 chunks completed by the native MLX-derived pipeline.
+	ChunkRecurrenceSteps                  int
 	OwnedBuffers, PrivateStateBuffers     int
 	PanelH2DTransfers, OutputD2HTransfers int
 	StateBytes                            uint64
@@ -231,7 +235,8 @@ func accountingFromC(event C.mg_gdn_event) GDNAccounting {
 		StateD2HTransfers: int(event.state_d2h_transfers), HostRecurrenceSteps: int(event.host_recurrence_steps),
 		OwnedBuffers: int(event.owned_buffers), PrivateStateBuffers: int(event.private_state_buffers),
 		PanelH2DTransfers: int(event.panel_h2d_transfers), OutputD2HTransfers: int(event.output_d2h_transfers),
-		StateBytes: uint64(event.state_bytes),
+		ChunkRecurrenceSteps: int(event.chunk_recurrence_steps),
+		StateBytes:           uint64(event.state_bytes),
 	}
 }
 
@@ -463,4 +468,14 @@ func RunTestShuffle(in, out []float32) bool {
 		return false
 	}
 	return C.mg_test_run_shuffle((*C.float)(unsafe.Pointer(&in[0])), (*C.float)(unsafe.Pointer(&out[0]))) == 1
+}
+
+// SetGDNForceChunkedOff disables the chunk pipeline for matched packed-kernel
+// diagnostics. Set it only while no GDN operation is active.
+func SetGDNForceChunkedOff(force bool) {
+	if force {
+		C.mg_gdn_set_force_chunked_off(1)
+	} else {
+		C.mg_gdn_set_force_chunked_off(0)
+	}
 }

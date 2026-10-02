@@ -17,6 +17,7 @@ typedef struct {
     int state_h2d_transfers;
     int state_d2h_transfers;
     int host_recurrence_steps;
+    int chunk_recurrence_steps;
     int owned_buffers;
     int private_state_buffers;
     int panel_h2d_transfers;
@@ -48,8 +49,18 @@ static id<MTLComputePipelineState> gGDNConvPSO;
 static id<MTLComputePipelineState> gGDNQKNormPSO;
 static id<MTLComputePipelineState> gGDNRecurrentPSO;
 static id<MTLComputePipelineState> gGDNRecurrentPackedPSO;
+static id<MTLComputePipelineState> gGDNRecurrentChunkPSO;
+static NSString *gGDNChunkSrc;
+void mg_gdn_set_chunk_source(const char *source) {
+    gGDNChunkSrc = [NSString stringWithUTF8String:source];
+}
 static BOOL gGDNPipelineAttempted;
 static int gGDNForceBaseline = 0;
+static int gGDNForceChunkedOff = 0;
+
+void mg_gdn_set_force_chunked_off(int force) {
+    gGDNForceChunkedOff = force;
+}
 
 void mg_gdn_set_force_baseline(int force) {
     gGDNForceBaseline = force;
@@ -340,7 +351,7 @@ static int mg_gdn_pipelines(void) {
         if (gGDNPipelineAttempted) return 0;
         gGDNPipelineAttempted = YES;
         NSError *error = nil;
-        id<MTLLibrary> library = [gDev newLibraryWithSource:gGDNSrc options:nil error:&error];
+        id<MTLLibrary> library = [gDev newLibraryWithSource:[gGDNSrc stringByAppendingString:gGDNChunkSrc ?: @""] options:nil error:&error];
         if (library == nil) {
             NSLog(@"mg_gdn: MSL compile failed: %@", error);
             return 0;
@@ -351,6 +362,11 @@ static int mg_gdn_pipelines(void) {
         gGDNRecurrentPackedPSO = [gDev newComputePipelineStateWithFunction:[library newFunctionWithName:@"gdn_recurrent_packed_8row"] error:&error];
         if (gGDNConvPSO == nil || gGDNQKNormPSO == nil || gGDNRecurrentPSO == nil || gGDNRecurrentPackedPSO == nil) {
             NSLog(@"mg_gdn: pipeline creation failed: %@", error);
+            return 0;
+        }
+        gGDNRecurrentChunkPSO = [gDev newComputePipelineStateWithFunction:[library newFunctionWithName:@"gdn_recurrent_chunk8"] error:&error];
+        if (gGDNRecurrentChunkPSO == nil) {
+            NSLog(@"mg_gdn: chunk pipeline creation failed: %@", error);
             return 0;
         }
         return 1;
@@ -481,6 +497,10 @@ int mg_gdn_state_run(int owner,
             recPSO = gGDNRecurrentPackedPSO;
             recThreads = (vHd / 8) * 32;
         }
+        if (!gGDNForceBaseline && !gGDNForceChunkedOff && tokens >= 16 && kHd == 128 && (vHd % 8) == 0 && gGDNRecurrentChunkPSO != nil) {
+            recPSO = gGDNRecurrentChunkPSO;
+            recThreads = (vHd / 8) * 32;
+        }
         [encoder setComputePipelineState:recPSO];
         [encoder setBuffer:convOutB offset:0 atIndex:0]; [encoder setBuffer:qNormB offset:0 atIndex:1]; [encoder setBuffer:kNormB offset:0 atIndex:2];
         [encoder setBuffer:zB offset:0 atIndex:3]; [encoder setBuffer:bB offset:0 atIndex:4]; [encoder setBuffer:aB offset:0 atIndex:5];
@@ -500,7 +520,10 @@ int mg_gdn_state_run(int owner,
         if (event != NULL) event->completed_wait = command.status == MTLCommandBufferStatusCompleted;
         if (command.status != MTLCommandBufferStatusCompleted || injectPostSubmitFailure) return -1;
         memcpy(core, coreB.contents, (size_t)tokens * valueDim * sizeof(float));
-        if (event != NULL) event->output_d2h_transfers = 1;
+        if (event != NULL) {
+            event->output_d2h_transfers = 1;
+            event->chunk_recurrence_steps = recPSO == gGDNRecurrentChunkPSO ? (tokens + 7) / 8 : 0;
+        }
         return 1;
     }
 }
@@ -588,7 +611,7 @@ void *mg_gdn_graph_encode(void *graph, int owner,
     id<MTLComputeCommandEncoder>encoder=[command computeCommandEncoder];
     [encoder setComputePipelineState:gGDNConvPSO];[encoder setBuffer:mixed offset:0 atIndex:0];[encoder setBuffer:convWB offset:0 atIndex:1];[encoder setBuffer:(__bridge id<MTLBuffer>)slot.conv offset:0 atIndex:2];[encoder setBuffer:convOut offset:0 atIndex:3];[encoder setBytes:&tokens length:sizeof(tokens) atIndex:4];[encoder setBytes:&convDim length:sizeof(convDim) atIndex:5];[encoder setBytes:&convKernel length:sizeof(convKernel) atIndex:6];[encoder dispatchThreads:MTLSizeMake((NSUInteger)convDim,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];[encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
     int qThreads=mg_gdn_threads(kHd);[encoder setComputePipelineState:gGDNQKNormPSO];[encoder setBuffer:convOut offset:0 atIndex:0];[encoder setBuffer:qNorm offset:0 atIndex:1];[encoder setBuffer:kNorm offset:0 atIndex:2];[encoder setBytes:&tokens length:sizeof(tokens) atIndex:3];[encoder setBytes:&convDim length:sizeof(convDim) atIndex:4];[encoder setBytes:&nK length:sizeof(nK) atIndex:5];[encoder setBytes:&kHd length:sizeof(kHd) atIndex:6];[encoder dispatchThreadgroups:MTLSizeMake((NSUInteger)nK,(NSUInteger)tokens,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)qThreads,1,1)];[encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
-    int vThreads=mg_gdn_threads(vHd);id<MTLComputePipelineState> recPSO=gGDNRecurrentPSO;int recThreads=vThreads;if(!gGDNForceBaseline&&kHd==128&&(vHd%8)==0&&gGDNRecurrentPackedPSO!=nil){recPSO=gGDNRecurrentPackedPSO;recThreads=(vHd/8)*32;}[encoder setComputePipelineState:recPSO];[encoder setBuffer:convOut offset:0 atIndex:0];[encoder setBuffer:qNorm offset:0 atIndex:1];[encoder setBuffer:kNorm offset:0 atIndex:2];[encoder setBuffer:z offset:0 atIndex:3];[encoder setBuffer:b offset:0 atIndex:4];[encoder setBuffer:a offset:0 atIndex:5];[encoder setBuffer:aLogB offset:0 atIndex:6];[encoder setBuffer:dtBiasB offset:0 atIndex:7];[encoder setBuffer:normB offset:0 atIndex:8];[encoder setBuffer:(__bridge id<MTLBuffer>)slot.recurrent offset:0 atIndex:9];[encoder setBuffer:core offset:0 atIndex:10];[encoder setBytes:&tokens length:sizeof(tokens) atIndex:11];[encoder setBytes:&convDim length:sizeof(convDim) atIndex:12];[encoder setBytes:&nK length:sizeof(nK) atIndex:13];[encoder setBytes:&nV length:sizeof(nV) atIndex:14];[encoder setBytes:&kHd length:sizeof(kHd) atIndex:15];[encoder setBytes:&vHd length:sizeof(vHd) atIndex:16];[encoder setBytes:&eps length:sizeof(eps) atIndex:17];[encoder dispatchThreadgroups:MTLSizeMake((NSUInteger)nV,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)recThreads,1,1)];[encoder endEncoding];return (__bridge void*)core;
+    int vThreads=mg_gdn_threads(vHd);id<MTLComputePipelineState> recPSO=gGDNRecurrentPSO;int recThreads=vThreads;if(!gGDNForceBaseline&&kHd==128&&(vHd%8)==0&&gGDNRecurrentPackedPSO!=nil){recPSO=gGDNRecurrentPackedPSO;recThreads=(vHd/8)*32;}if(!gGDNForceBaseline&&!gGDNForceChunkedOff&&tokens>=16&&kHd==128&&(vHd%8)==0&&gGDNRecurrentChunkPSO!=nil){recPSO=gGDNRecurrentChunkPSO;recThreads=(vHd/8)*32;}[encoder setComputePipelineState:recPSO];[encoder setBuffer:convOut offset:0 atIndex:0];[encoder setBuffer:qNorm offset:0 atIndex:1];[encoder setBuffer:kNorm offset:0 atIndex:2];[encoder setBuffer:z offset:0 atIndex:3];[encoder setBuffer:b offset:0 atIndex:4];[encoder setBuffer:a offset:0 atIndex:5];[encoder setBuffer:aLogB offset:0 atIndex:6];[encoder setBuffer:dtBiasB offset:0 atIndex:7];[encoder setBuffer:normB offset:0 atIndex:8];[encoder setBuffer:(__bridge id<MTLBuffer>)slot.recurrent offset:0 atIndex:9];[encoder setBuffer:core offset:0 atIndex:10];[encoder setBytes:&tokens length:sizeof(tokens) atIndex:11];[encoder setBytes:&convDim length:sizeof(convDim) atIndex:12];[encoder setBytes:&nK length:sizeof(nK) atIndex:13];[encoder setBytes:&nV length:sizeof(nV) atIndex:14];[encoder setBytes:&kHd length:sizeof(kHd) atIndex:15];[encoder setBytes:&vHd length:sizeof(vHd) atIndex:16];[encoder setBytes:&eps length:sizeof(eps) atIndex:17];[encoder dispatchThreadgroups:MTLSizeMake((NSUInteger)nV,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)recThreads,1,1)];[encoder endEncoding];return (__bridge void*)core;
 }
 
 // Encode B independent P=1 owners into one caller-owned projection graph. The
