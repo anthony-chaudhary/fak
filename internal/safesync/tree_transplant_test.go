@@ -763,3 +763,95 @@ func TestSyntheticTreeTransplantBatchCheckout(t *testing.T) {
 func TestTransplantDisjointTreeBatchedCheckout(t *testing.T) {
 	TestSyntheticTreeTransplantBatchCheckout(t)
 }
+
+// fak-test:runtime medium est=2s lane=default
+func TestSyntheticTreeTransplantSignsOffEffectiveCommitter(t *testing.T) {
+	// Neither ambient Git overrides nor user configuration may choose fixture identity.
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(name, "GIT_") || name == "EMAIL" {
+			t.Setenv(name, "")
+			if err := os.Unsetenv(name); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("LC_ALL", "C")
+	t.Setenv("TZ", "UTC")
+	t.Setenv("GIT_AUTHOR_NAME", "Distinct Author")
+	t.Setenv("GIT_AUTHOR_EMAIL", "author@example.test")
+	t.Setenv("GIT_COMMITTER_NAME", "Effective Committer")
+	t.Setenv("GIT_COMMITTER_EMAIL", "committer@example.test")
+	t.Setenv("GIT_AUTHOR_DATE", "1700000000 +0000")
+	t.Setenv("GIT_COMMITTER_DATE", "1700000000 +0000")
+
+	repo := t.TempDir()
+	git(t, repo, "init", "--template=", "-b", "main")
+	git(t, repo, "config", "core.autocrlf", "false")
+	git(t, repo, "config", "user.name", "Configured Identity")
+	git(t, repo, "config", "user.email", "config@example.test")
+	writeFile(t, filepath.Join(repo, "base.txt"), "shared base\n")
+	git(t, repo, "add", "base.txt")
+	git(t, repo, "commit", "-m", "base")
+
+	git(t, repo, "checkout", "-b", "incoming")
+	writeFile(t, filepath.Join(repo, "incoming.txt"), "incoming change\n")
+	git(t, repo, "add", "incoming.txt")
+	git(t, repo, "commit", "-m", "incoming")
+	targetSHA := revString(t, repo, "HEAD")
+	git(t, repo, "checkout", "main")
+	writeFile(t, filepath.Join(repo, "local.txt"), "local change\n")
+	git(t, repo, "add", "local.txt")
+	git(t, repo, "commit", "-m", "local")
+	headSHA := revString(t, repo, "HEAD")
+
+	// Build the expected union independently of merge-tree, then restore the index.
+	incomingBlob := revString(t, repo, targetSHA+":incoming.txt")
+	git(t, repo, "update-index", "--add", "--cacheinfo", "100644", incomingBlob, "incoming.txt")
+	wantTree := strings.TrimSpace(gitOutput(t, repo, "write-tree"))
+	git(t, repo, "read-tree", headSHA)
+
+	mergeSHA, err := TransplantDisjointTreeWithRunner(context.Background(), RealRunner, repo, "main", headSHA, targetSHA, "refs/heads/incoming")
+	if err != nil {
+		t.Fatalf("TransplantDisjointTreeWithRunner: %v", err)
+	}
+	if mergeSHA == "" {
+		t.Fatal("transplant returned no commit")
+	}
+	if got := revString(t, repo, "HEAD"); got != mergeSHA {
+		t.Fatalf("HEAD = %s, want synthetic commit %s", got, mergeSHA)
+	}
+
+	// Lowercase identity formats read the stored identities without mailmap rewriting.
+	const wantCommitter = "Effective Committer <committer@example.test>"
+	metadata := strings.TrimSpace(gitOutput(t, repo, "show", "-s", "--format=%cn <%ce>%n%an <%ae>%n%T%n%P", mergeSHA))
+	wantMetadata := strings.Join([]string{
+		wantCommitter,
+		"Distinct Author <author@example.test>",
+		wantTree,
+		headSHA + " " + targetSHA,
+	}, "\n")
+	if metadata != wantMetadata {
+		t.Fatalf("stored committer, author, tree, or ordered parents differ:\ngot:\n%s\nwant:\n%s", metadata, wantMetadata)
+	}
+
+	body := strings.TrimSpace(gitOutput(t, repo, "show", "-s", "--format=%B", mergeSHA))
+	paragraphs := strings.Split(body, "\n\n")
+	wantSignoff := "Signed-off-by: " + wantCommitter
+	signoffs := 0
+	for _, line := range strings.Split(paragraphs[len(paragraphs)-1], "\n") {
+		if strings.HasPrefix(line, "Signed-off-by:") {
+			signoffs++
+			if line != wantSignoff {
+				t.Fatalf("signoff = %q, want effective committer %q", line, wantSignoff)
+			}
+		}
+	}
+	if signoffs != 1 {
+		t.Fatalf("want exactly one %q trailer, got %d in commit message %q", wantSignoff, signoffs, body)
+	}
+}
