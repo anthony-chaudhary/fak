@@ -34,6 +34,8 @@ import (
 // The policy is benched against the canonical compute.KVEvictLRU over the SAME event stream
 // and the same Belady oracle, so the comparison is apples-to-apples and the existing LRU /
 // CostAware witnesses in internal/compute are left byte-identical (compatibility preserved).
+// Because hysteresis can decline a miss, that shared oracle is the admission-control
+// (bypass) Belady bound, not the demand-paging one the always-admit replays use.
 
 // hysteresisMarginDescriptor is the human-readable admit rule, mirrored from colibri tier.h.
 const hysteresisMarginDescriptor = "hot > victim + victim/4 + 4"
@@ -86,8 +88,9 @@ type ExpertResidencyLFUReport struct {
 
 // ReplayExpertResidencyLFUDecay replays the trace under the value-aware (hysteresis +
 // LFU-decay) residency policy and against the canonical pagedRing LRU baseline, scoring both
-// with the same offline Belady oracle. It reuses the trace's validated event stream so the
-// two policies see identical expert identities and resident byte sizes.
+// with the same offline Belady oracle (the bypass-capable bound). It reuses the trace's
+// validated event stream so the two policies see identical expert identities and resident
+// byte sizes.
 func ReplayExpertResidencyLFUDecay(trace ExpertAccessTrace, opts ExpertResidencyLFUOptions) (ExpertResidencyLFUReport, error) {
 	events, err := trace.replayEvents()
 	if err != nil {
@@ -102,8 +105,14 @@ func ReplayExpertResidencyLFUDecay(trace ExpertAccessTrace, opts ExpertResidency
 		decayEvery = defaultDecayEveryAccesses
 	}
 
-	oracle := compute.BeladyKVReplayOracle(events, budget)
-	lru := compute.ReplayKVCacheMulti(events, budget, compute.KVEvictLRU)[compute.KVEvictLRU]
+	// The value-aware policy BYPASSES misses (hysteresis admission), so the bound it is
+	// scored against must allow bypass too: the demand-paging BeladyKVReplayOracle is not an
+	// upper bound for it (on the hot-set jitter fixture it sits below what this policy
+	// reaches). LRU always admits, so it can never exceed this bound either; both rows are
+	// scored against the same oracle so the good-decision ratios stay comparable.
+	oracle := compute.BeladyKVReplayBypassOracle(events, budget)
+	lru := compute.ReplayKVCacheResult(events, budget, compute.KVEvictLRU)
+	lru.GoodDecisionRatio = mathx.AgainstOracle(lru.HitTokens, oracle.HitTokens)
 	row := simulateLFUDecayResidency(events, budget, decayEvery)
 	row.GoodDecisionRatio = mathx.AgainstOracle(row.HitTokens, oracle.HitTokens)
 

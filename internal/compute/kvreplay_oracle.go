@@ -116,6 +116,16 @@ func BeladyKVReplayOracle(events []KVReplayEvent, budget int) KVReplayOracleResu
 	return KVReplayOracleResult{HitTokens: r.HitTokens, AccessTokens: r.AccessTokens, Exact: r.Exact}
 }
 
+// BeladyKVReplayBypassOracle is BeladyKVReplayOracle for a cache with admission control:
+// a miss may be declined (bypassed) instead of admitted. BeladyKVReplayOracle models
+// demand paging, so it is the bound for always-admit policies (LRU, cost-aware) but NOT
+// for a policy that can bypass, which can legitimately exceed it. A thin shim over
+// replayoracle.BeladyWithBypass.
+func BeladyKVReplayBypassOracle(events []KVReplayEvent, budget int) KVReplayOracleResult {
+	r := replayoracle.BeladyWithBypass(toReplayEvents(events), budget)
+	return KVReplayOracleResult{HitTokens: r.HitTokens, AccessTokens: r.AccessTokens, Exact: r.Exact}
+}
+
 // toReplayEvents projects compute's replay rows onto the shared oracle event type.
 func toReplayEvents(events []KVReplayEvent) []replayoracle.Event {
 	out := make([]replayoracle.Event, len(events))
