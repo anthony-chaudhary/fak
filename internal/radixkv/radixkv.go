@@ -485,6 +485,20 @@ func (t *Tree) SetRetention(n int) {
 	t.evictToBudget()
 }
 
+// Retention reports the signed retention dial: negative keeps all, zero keeps
+// none, and positive bounds cached tokens. Legacy unbounded budgets map to -1.
+// Unlike Stats.MaxTokens, this preserves the distinction needed to restore a
+// policy after a temporary pressure trim.
+func (t *Tree) Retention() int {
+	if t.retentionSet {
+		return t.retention
+	}
+	if t.maxTokens > 0 {
+		return t.maxTokens
+	}
+	return -1
+}
+
 // resolveBudget folds the retention dial (when set) or the legacy maxTokens budget
 // into (tokenBudget, evicts): evicts=false is keep-all (unbounded); evicts=true bounds
 // the tree to tokenBudget (0 for keep-none, N for evict-to-N).
