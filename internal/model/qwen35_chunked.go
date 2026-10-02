@@ -225,7 +225,7 @@ func (m *Model) linearAttnSeqBatchedState(l int, xn [][]float32, persistent *lin
 				ki := kn[i]
 				base := i * vHd
 				for d := 0; d < vHd; d++ {
-					kvmem[d] += st[base+d] * ki
+					kvmem[d] = gdnFMA32(st[base+d], ki, kvmem[d])
 				}
 			}
 			for d := 0; d < vHd; d++ {
@@ -237,8 +237,8 @@ func (m *Model) linearAttnSeqBatchedState(l int, xn [][]float32, persistent *lin
 				qi := qn[i]
 				base := i * vHd
 				for d := 0; d < vHd; d++ {
-					st[base+d] += ki * delta[d]
-					od[d] += st[base+d] * qi
+					st[base+d] = gdnFMA32(ki, delta[d], st[base+d])
+					od[d] = gdnFMA32(st[base+d], qi, od[d])
 				}
 			}
 		}

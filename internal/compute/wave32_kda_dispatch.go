@@ -416,6 +416,29 @@ func Wave32GatedDeltaNetStep(
 	wave32GatedDeltaNetStepGo(st, qn, kn, vh, bt, g, od, kvmem, delta)
 }
 
+// fmaF32 returns a*b+c with a single rounding. Every Go implementation of the
+// Gated-DeltaNet recurrence must use it for its three accumulate sites — the
+// kvmem reduction, the state update, and the readout — because the AVX-512 decode
+// kernel fuses exactly those three (VFMADD231PS in
+// internal/compute/deltanetavx512/deltanet_amd64.s) while a bare `acc += x*y`
+// rounds the product before the add. The resulting last-bit disagreement is not
+// cosmetic: a radix prefix-cache HIT replays state produced by the decode kernel
+// while a cache MISS (or a cold prefill) recomputes the SAME token span with this
+// Go loop, so identical input yields different bytes, the logits differ, and a
+// greedy argmax can flip onto the already-emitted token (fak-private#2624:
+// "17 18 18 19 20" under counting prompts).
+//
+// Exactness in float64 alone is NOT sufficient (a*b+c needs >53 bits, so the
+// float64 -> float32 step is a real double rounding); it is innocuous only because
+// p_int = 53 >= 2*p_final + 2 = 2*24 + 2 (Figueroa's theorem), so this equals a
+// single correctly-rounded float32 FMA and matches VFMADD231PS bit-for-bit. Note
+// that math.FMA is the only build-level-independent route to those semantics:
+// gc/amd64 does NOT auto-contract `x*y+z` into an FMA at any GOAMD64 level
+// (measured: MULSS+ADDSS at v1, v3 and v4).
+func fmaF32(a, b, c float32) float32 {
+	return float32(math.FMA(float64(a), float64(b), float64(c)))
+}
+
 func wave32GatedDeltaNetStepGo(
 	st []float32,
 	qn, kn, vh []float32,
@@ -434,37 +457,37 @@ func wave32GatedDeltaNetStepGo(
 			base := i * 128
 			for d := 0; d < 128; d += 16 {
 				st[base+d] *= g
-				kvmem[d] += st[base+d] * ki
+				kvmem[d] = fmaF32(st[base+d], ki, kvmem[d])
 				st[base+d+1] *= g
-				kvmem[d+1] += st[base+d+1] * ki
+				kvmem[d+1] = fmaF32(st[base+d+1], ki, kvmem[d+1])
 				st[base+d+2] *= g
-				kvmem[d+2] += st[base+d+2] * ki
+				kvmem[d+2] = fmaF32(st[base+d+2], ki, kvmem[d+2])
 				st[base+d+3] *= g
-				kvmem[d+3] += st[base+d+3] * ki
+				kvmem[d+3] = fmaF32(st[base+d+3], ki, kvmem[d+3])
 				st[base+d+4] *= g
-				kvmem[d+4] += st[base+d+4] * ki
+				kvmem[d+4] = fmaF32(st[base+d+4], ki, kvmem[d+4])
 				st[base+d+5] *= g
-				kvmem[d+5] += st[base+d+5] * ki
+				kvmem[d+5] = fmaF32(st[base+d+5], ki, kvmem[d+5])
 				st[base+d+6] *= g
-				kvmem[d+6] += st[base+d+6] * ki
+				kvmem[d+6] = fmaF32(st[base+d+6], ki, kvmem[d+6])
 				st[base+d+7] *= g
-				kvmem[d+7] += st[base+d+7] * ki
+				kvmem[d+7] = fmaF32(st[base+d+7], ki, kvmem[d+7])
 				st[base+d+8] *= g
-				kvmem[d+8] += st[base+d+8] * ki
+				kvmem[d+8] = fmaF32(st[base+d+8], ki, kvmem[d+8])
 				st[base+d+9] *= g
-				kvmem[d+9] += st[base+d+9] * ki
+				kvmem[d+9] = fmaF32(st[base+d+9], ki, kvmem[d+9])
 				st[base+d+10] *= g
-				kvmem[d+10] += st[base+d+10] * ki
+				kvmem[d+10] = fmaF32(st[base+d+10], ki, kvmem[d+10])
 				st[base+d+11] *= g
-				kvmem[d+11] += st[base+d+11] * ki
+				kvmem[d+11] = fmaF32(st[base+d+11], ki, kvmem[d+11])
 				st[base+d+12] *= g
-				kvmem[d+12] += st[base+d+12] * ki
+				kvmem[d+12] = fmaF32(st[base+d+12], ki, kvmem[d+12])
 				st[base+d+13] *= g
-				kvmem[d+13] += st[base+d+13] * ki
+				kvmem[d+13] = fmaF32(st[base+d+13], ki, kvmem[d+13])
 				st[base+d+14] *= g
-				kvmem[d+14] += st[base+d+14] * ki
+				kvmem[d+14] = fmaF32(st[base+d+14], ki, kvmem[d+14])
 				st[base+d+15] *= g
-				kvmem[d+15] += st[base+d+15] * ki
+				kvmem[d+15] = fmaF32(st[base+d+15], ki, kvmem[d+15])
 			}
 		}
 
@@ -492,38 +515,38 @@ func wave32GatedDeltaNetStepGo(
 			qi := qn[i]
 			base := i * 128
 			for d := 0; d < 128; d += 16 {
-				st[base+d] += ki * delta[d]
-				od[d] += st[base+d] * qi
-				st[base+d+1] += ki * delta[d+1]
-				od[d+1] += st[base+d+1] * qi
-				st[base+d+2] += ki * delta[d+2]
-				od[d+2] += st[base+d+2] * qi
-				st[base+d+3] += ki * delta[d+3]
-				od[d+3] += st[base+d+3] * qi
-				st[base+d+4] += ki * delta[d+4]
-				od[d+4] += st[base+d+4] * qi
-				st[base+d+5] += ki * delta[d+5]
-				od[d+5] += st[base+d+5] * qi
-				st[base+d+6] += ki * delta[d+6]
-				od[d+6] += st[base+d+6] * qi
-				st[base+d+7] += ki * delta[d+7]
-				od[d+7] += st[base+d+7] * qi
-				st[base+d+8] += ki * delta[d+8]
-				od[d+8] += st[base+d+8] * qi
-				st[base+d+9] += ki * delta[d+9]
-				od[d+9] += st[base+d+9] * qi
-				st[base+d+10] += ki * delta[d+10]
-				od[d+10] += st[base+d+10] * qi
-				st[base+d+11] += ki * delta[d+11]
-				od[d+11] += st[base+d+11] * qi
-				st[base+d+12] += ki * delta[d+12]
-				od[d+12] += st[base+d+12] * qi
-				st[base+d+13] += ki * delta[d+13]
-				od[d+13] += st[base+d+13] * qi
-				st[base+d+14] += ki * delta[d+14]
-				od[d+14] += st[base+d+14] * qi
-				st[base+d+15] += ki * delta[d+15]
-				od[d+15] += st[base+d+15] * qi
+				st[base+d] = fmaF32(ki, delta[d], st[base+d])
+				od[d] = fmaF32(st[base+d], qi, od[d])
+				st[base+d+1] = fmaF32(ki, delta[d+1], st[base+d+1])
+				od[d+1] = fmaF32(st[base+d+1], qi, od[d+1])
+				st[base+d+2] = fmaF32(ki, delta[d+2], st[base+d+2])
+				od[d+2] = fmaF32(st[base+d+2], qi, od[d+2])
+				st[base+d+3] = fmaF32(ki, delta[d+3], st[base+d+3])
+				od[d+3] = fmaF32(st[base+d+3], qi, od[d+3])
+				st[base+d+4] = fmaF32(ki, delta[d+4], st[base+d+4])
+				od[d+4] = fmaF32(st[base+d+4], qi, od[d+4])
+				st[base+d+5] = fmaF32(ki, delta[d+5], st[base+d+5])
+				od[d+5] = fmaF32(st[base+d+5], qi, od[d+5])
+				st[base+d+6] = fmaF32(ki, delta[d+6], st[base+d+6])
+				od[d+6] = fmaF32(st[base+d+6], qi, od[d+6])
+				st[base+d+7] = fmaF32(ki, delta[d+7], st[base+d+7])
+				od[d+7] = fmaF32(st[base+d+7], qi, od[d+7])
+				st[base+d+8] = fmaF32(ki, delta[d+8], st[base+d+8])
+				od[d+8] = fmaF32(st[base+d+8], qi, od[d+8])
+				st[base+d+9] = fmaF32(ki, delta[d+9], st[base+d+9])
+				od[d+9] = fmaF32(st[base+d+9], qi, od[d+9])
+				st[base+d+10] = fmaF32(ki, delta[d+10], st[base+d+10])
+				od[d+10] = fmaF32(st[base+d+10], qi, od[d+10])
+				st[base+d+11] = fmaF32(ki, delta[d+11], st[base+d+11])
+				od[d+11] = fmaF32(st[base+d+11], qi, od[d+11])
+				st[base+d+12] = fmaF32(ki, delta[d+12], st[base+d+12])
+				od[d+12] = fmaF32(st[base+d+12], qi, od[d+12])
+				st[base+d+13] = fmaF32(ki, delta[d+13], st[base+d+13])
+				od[d+13] = fmaF32(st[base+d+13], qi, od[d+13])
+				st[base+d+14] = fmaF32(ki, delta[d+14], st[base+d+14])
+				od[d+14] = fmaF32(st[base+d+14], qi, od[d+14])
+				st[base+d+15] = fmaF32(ki, delta[d+15], st[base+d+15])
+				od[d+15] = fmaF32(st[base+d+15], qi, od[d+15])
 			}
 		}
 		return
@@ -536,25 +559,25 @@ func wave32GatedDeltaNetStepGo(
 		d := 0
 		for ; d+8 <= vHd; d += 8 {
 			st[base+d] *= g
-			kvmem[d] += st[base+d] * ki
+			kvmem[d] = fmaF32(st[base+d], ki, kvmem[d])
 			st[base+d+1] *= g
-			kvmem[d+1] += st[base+d+1] * ki
+			kvmem[d+1] = fmaF32(st[base+d+1], ki, kvmem[d+1])
 			st[base+d+2] *= g
-			kvmem[d+2] += st[base+d+2] * ki
+			kvmem[d+2] = fmaF32(st[base+d+2], ki, kvmem[d+2])
 			st[base+d+3] *= g
-			kvmem[d+3] += st[base+d+3] * ki
+			kvmem[d+3] = fmaF32(st[base+d+3], ki, kvmem[d+3])
 			st[base+d+4] *= g
-			kvmem[d+4] += st[base+d+4] * ki
+			kvmem[d+4] = fmaF32(st[base+d+4], ki, kvmem[d+4])
 			st[base+d+5] *= g
-			kvmem[d+5] += st[base+d+5] * ki
+			kvmem[d+5] = fmaF32(st[base+d+5], ki, kvmem[d+5])
 			st[base+d+6] *= g
-			kvmem[d+6] += st[base+d+6] * ki
+			kvmem[d+6] = fmaF32(st[base+d+6], ki, kvmem[d+6])
 			st[base+d+7] *= g
-			kvmem[d+7] += st[base+d+7] * ki
+			kvmem[d+7] = fmaF32(st[base+d+7], ki, kvmem[d+7])
 		}
 		for ; d < vHd; d++ {
 			st[base+d] *= g
-			kvmem[d] += st[base+d] * ki
+			kvmem[d] = fmaF32(st[base+d], ki, kvmem[d])
 		}
 	}
 
@@ -579,26 +602,26 @@ func wave32GatedDeltaNetStepGo(
 		base := i * vHd
 		d := 0
 		for ; d+8 <= vHd; d += 8 {
-			st[base+d] += ki * delta[d]
-			od[d] += st[base+d] * qi
-			st[base+d+1] += ki * delta[d+1]
-			od[d+1] += st[base+d+1] * qi
-			st[base+d+2] += ki * delta[d+2]
-			od[d+2] += st[base+d+2] * qi
-			st[base+d+3] += ki * delta[d+3]
-			od[d+3] += st[base+d+3] * qi
-			st[base+d+4] += ki * delta[d+4]
-			od[d+4] += st[base+d+4] * qi
-			st[base+d+5] += ki * delta[d+5]
-			od[d+5] += st[base+d+5] * qi
-			st[base+d+6] += ki * delta[d+6]
-			od[d+6] += st[base+d+6] * qi
-			st[base+d+7] += ki * delta[d+7]
-			od[d+7] += st[base+d+7] * qi
+			st[base+d] = fmaF32(ki, delta[d], st[base+d])
+			od[d] = fmaF32(st[base+d], qi, od[d])
+			st[base+d+1] = fmaF32(ki, delta[d+1], st[base+d+1])
+			od[d+1] = fmaF32(st[base+d+1], qi, od[d+1])
+			st[base+d+2] = fmaF32(ki, delta[d+2], st[base+d+2])
+			od[d+2] = fmaF32(st[base+d+2], qi, od[d+2])
+			st[base+d+3] = fmaF32(ki, delta[d+3], st[base+d+3])
+			od[d+3] = fmaF32(st[base+d+3], qi, od[d+3])
+			st[base+d+4] = fmaF32(ki, delta[d+4], st[base+d+4])
+			od[d+4] = fmaF32(st[base+d+4], qi, od[d+4])
+			st[base+d+5] = fmaF32(ki, delta[d+5], st[base+d+5])
+			od[d+5] = fmaF32(st[base+d+5], qi, od[d+5])
+			st[base+d+6] = fmaF32(ki, delta[d+6], st[base+d+6])
+			od[d+6] = fmaF32(st[base+d+6], qi, od[d+6])
+			st[base+d+7] = fmaF32(ki, delta[d+7], st[base+d+7])
+			od[d+7] = fmaF32(st[base+d+7], qi, od[d+7])
 		}
 		for ; d < vHd; d++ {
-			st[base+d] += ki * delta[d]
-			od[d] += st[base+d] * qi
+			st[base+d] = fmaF32(ki, delta[d], st[base+d])
+			od[d] = fmaF32(st[base+d], qi, od[d])
 		}
 	}
 }
