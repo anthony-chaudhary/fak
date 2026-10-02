@@ -12872,6 +12872,11 @@
           "category": "incidental",
           "reason": "Counter of overwritten bounded proof-ring entries; it does not evict model context, cache entries or durable evidence.",
           "token": "EvictedReceipts"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported implementation constant sharing the admitted 3-percent available-memory boundary for issue #13537 between the existing BuildEvictionPressure and IsEvictionRisk helpers. It introduces no separate eviction mechanism, public policy API, or kernel pressure enum; the classifier and its percentage-versus-enum distinction remain the concept.",
+          "token": "evictionAvailablePercentFloor"
         }
       ],
       "id": "evict",
@@ -12907,6 +12912,7 @@
         "evictable",
         "evicting",
         "eviction",
+        "evictionAvailablePercentFloor",
         "eviction_postcondition_failed",
         "evictions_delta",
         "evicts",
