@@ -3587,9 +3587,25 @@ components:
       type: object
       properties:
         ok: { type: boolean, example: true }
-        engine: { type: string, description: 'The /v1/chat/completions backend id (`mock` | `proxy` | `inkernel`).' }
+        engine:
+          type: string
+          description: >-
+            Registered ABI tool-execution engine ID used for allowed kernel/syscall
+            dispatch. Independent of the chat-generation planner; for example,
+            engine mock with planner replica is valid. This is not a serving mode.
         model: { type: string }
-        planner: { type: string, description: 'The planner kind, so a probe can detect the silent offline-mock fallback.' }
+        planner:
+          type: string
+          enum: [mock, proxy, replica, inkernel, dual, unknown]
+          description: >-
+            Chat-generation path for /v1/chat/completions and /v1/messages:
+            mock is the deterministic scripted fallback; proxy is one upstream
+            planner endpoint; replica is two or more upstream planner endpoints
+            behind the replica dispatcher, not duplicated local weights; inkernel
+            is a loaded local model with its tokenizer; dual routes the local model
+            ID (and local alias) in-kernel and other model IDs upstream; unknown
+            denotes a nil or unrecognized planner. Independent of engine; a planner
+            classification alone does not guarantee per-request quality or readiness.
 
     DebugVarsResponse:
       type: object

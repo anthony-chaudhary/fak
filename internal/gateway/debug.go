@@ -187,14 +187,15 @@ var goRuntimeCollector = sync.OnceValue(func() *runtimeobs.Collector {
 	return runtimeobs.New(runtimeobs.WithRSSReader(selfRSSReader(runtime.GOOS)))
 })
 
-// selfRSSReader returns the current-RSS reader for the platforms where
-// harnessres has one (Linux /proc, Windows working set). Elsewhere (darwin has
-// only a peak via getrusage) it returns nil, which the receipt names no_reader,
-// so read_failed keeps meaning "a reader exists and failed".
+// selfRSSReader returns the current-RSS reader for Linux /proc, Windows working
+// set, or Darwin Mach resident_size. Unsupported builds return nil, which the
+// receipt names no_reader, so read_failed means a reader exists and failed.
 func selfRSSReader(goos string) func() (uint64, bool) {
 	switch goos {
 	case "linux", "windows":
 		return selfRSSBytes
+	case "darwin":
+		return harnessres.DarwinSelfRSSReader()
 	}
 	return nil
 }

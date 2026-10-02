@@ -162,6 +162,136 @@ func TestBuildGuardSplitPlanAppleTerminalCompanionWindow(t *testing.T) {
 	}
 }
 
+// TestBuildGuardSplitPlanWezTermBottom pins the WezTerm rung: the only macOS host with a
+// real CLI split of the CURRENT pane, so it gets a genuine 20% pane via
+// `wezterm cli split-pane --bottom --percent 20`, with the overlay run directly after `--`.
+func TestBuildGuardSplitPlanWezTermBottom(t *testing.T) {
+	plan, err := buildGuardSplitPlan("darwin", envFunc(map[string]string{"WEZTERM_PANE": "3"}), lookPathOK, "fak", "bottom", guardOverlayArgs())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan.Host != "wezterm" {
+		t.Fatalf("host = %q, want wezterm", plan.Host)
+	}
+	want := []string{"wezterm", "cli", "split-pane", "--bottom", "--percent", "20", "--", "fak", "info", "--gateway-url", "http://127.0.0.1:5000", "--interval", "2s", "--max-idle", "5m0s"}
+	if strings.Join(plan.Spawn, " ") != strings.Join(want, " ") {
+		t.Fatalf("spawn = %v\nwant   %v", plan.Spawn, want)
+	}
+	if !strings.Contains(plan.Geometry, "20%") {
+		t.Fatalf("wezterm is a real 20%% split; geometry = %q", plan.Geometry)
+	}
+}
+
+// TestBuildGuardSplitPlanWezTermRight uses the right-column orientation; the marker is
+// $TERM_PROGRAM this time so both recognition paths are covered.
+func TestBuildGuardSplitPlanWezTermRight(t *testing.T) {
+	plan, err := buildGuardSplitPlan("darwin", envFunc(map[string]string{"TERM_PROGRAM": "WezTerm"}), lookPathOK, "fak", "right", guardOverlayArgs())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan.Spawn[3] != "--right" {
+		t.Fatalf("right column should use wezterm --right, got %v", plan.Spawn)
+	}
+}
+
+// TestBuildGuardSplitPlanZellijBottom pins the zellij rung (issue #12304 names tmux/zellij):
+// $ZELLIJ marks a zellij session, and `zellij run -- <cmd...>` runs the overlay in a new pane.
+// A bottom strip uses `-d down`.
+func TestBuildGuardSplitPlanZellijBottom(t *testing.T) {
+	plan, err := buildGuardSplitPlan("linux", envFunc(map[string]string{"ZELLIJ": "0"}), lookPathFail, "fak", "bottom", guardOverlayArgs())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan.Host != "zellij" {
+		t.Fatalf("host = %q, want zellij", plan.Host)
+	}
+	want := []string{"zellij", "run", "-d", "down", "--", "fak", "info", "--gateway-url", "http://127.0.0.1:5000", "--interval", "2s", "--max-idle", "5m0s"}
+	if strings.Join(plan.Spawn, " ") != strings.Join(want, " ") {
+		t.Fatalf("spawn = %v\nwant   %v", plan.Spawn, want)
+	}
+}
+
+// TestBuildGuardSplitPlanZellijRight uses the right-column orientation: `-d right`.
+func TestBuildGuardSplitPlanZellijRight(t *testing.T) {
+	plan, err := buildGuardSplitPlan("linux", envFunc(map[string]string{"ZELLIJ": "0"}), lookPathFail, "fak", "right", guardOverlayArgs())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan.Host != "zellij" {
+		t.Fatalf("host = %q, want zellij", plan.Host)
+	}
+	if plan.Spawn[3] != "right" {
+		t.Fatalf("right column should use zellij -d right, got %v", plan.Spawn)
+	}
+}
+
+// TestBuildGuardSplitPlanZellijWinsLikeTmux: zellij is a first-class multiplexer alongside
+// tmux, so it must win over an unknown/absent macOS app marker and be in the fallback list.
+func TestBuildGuardSplitPlanZellijFallbackNamesZellij(t *testing.T) {
+	plan, err := buildGuardSplitPlan("linux", envFunc(nil), lookPathFail, "fak", "bottom", guardOverlayArgs())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan.Host != "none" {
+		t.Fatalf("host = %q, want none", plan.Host)
+	}
+	if !strings.Contains(plan.Fallback, "zellij") {
+		t.Fatalf("fallback should name zellij, got:\n%s", plan.Fallback)
+	}
+}
+
+// TestBuildGuardSplitPlanGhosttyCompanionWindow pins the Ghostty rung: no stable CLI to
+// split the current pane, so the overlay opens as a companion Ghostty window via `open -na`.
+func TestBuildGuardSplitPlanGhosttyCompanionWindow(t *testing.T) {
+	plan, err := buildGuardSplitPlan("darwin", envFunc(map[string]string{"GHOSTTY_RESOURCES_DIR": "/Applications/Ghostty.app/Contents/Resources"}), lookPathOK, "fak", "bottom", guardOverlayArgs())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan.Host != "ghostty" {
+		t.Fatalf("host = %q, want ghostty", plan.Host)
+	}
+	want := []string{"open", "-na", "Ghostty", "--args", "-e", "fak", "info", "--gateway-url", "http://127.0.0.1:5000", "--interval", "2s", "--max-idle", "5m0s"}
+	if strings.Join(plan.Spawn, " ") != strings.Join(want, " ") {
+		t.Fatalf("spawn = %v\nwant   %v", plan.Spawn, want)
+	}
+	if !strings.Contains(plan.Geometry, "companion Ghostty window") {
+		t.Fatalf("geometry should name the companion window, got %q", plan.Geometry)
+	}
+}
+
+// TestBuildGuardSplitPlanGhosttyDoesNotRequireOsascript pins the defect the adversarial
+// cross-validator found: Ghostty's spawn is `open -na Ghostty`, NOT osascript, so it must
+// resolve when osascript is absent from PATH. Before the fix the Ghostty rung was nested
+// inside the osascript gate and silently degraded to Host=none.
+func TestBuildGuardSplitPlanGhosttyDoesNotRequireOsascript(t *testing.T) {
+	// osascript missing, open present: Ghostty must still resolve.
+	lookPathNoOsascript := func(name string) (string, error) {
+		if name == "open" {
+			return "open", nil
+		}
+		return "", errors.New("not found")
+	}
+	plan, err := buildGuardSplitPlan("darwin", envFunc(map[string]string{"TERM_PROGRAM": "ghostty"}), lookPathNoOsascript, "fak", "bottom", guardOverlayArgs())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan.Host != "ghostty" {
+		t.Fatalf("host = %q, want ghostty when osascript is absent but open is present", plan.Host)
+	}
+
+	// Both missing: a Ghostty host degrades to none without panicking.
+	plan, err = buildGuardSplitPlan("darwin", envFunc(map[string]string{"TERM_PROGRAM": "ghostty"}), lookPathFail, "fak", "bottom", guardOverlayArgs())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan.Host != "none" {
+		t.Fatalf("host = %q, want none when open is absent", plan.Host)
+	}
+	if plan.Spawn != nil {
+		t.Fatalf("expected no spawn when open is absent, got %v", plan.Spawn)
+	}
+}
+
 // TestBuildGuardSplitPlanMacTerminalNeedsDarwin proves the mac rungs are gated on GOOS,
 // not just env: the same TERM_PROGRAM on another OS must keep today's silent fallthrough.
 func TestBuildGuardSplitPlanMacTerminalNeedsDarwin(t *testing.T) {
@@ -216,6 +346,32 @@ func TestBuildGuardSplitPlanNoMultiplexerFallback(t *testing.T) {
 	}
 	if !strings.Contains(plan.Fallback, "fak info --gateway-url http://127.0.0.1:5000") {
 		t.Fatalf("fallback should print the exact overlay command, got:\n%s", plan.Fallback)
+	}
+}
+
+// TestGuardSplitDegradedBanner pins the no-split-host inline banner: ON by default (the whole
+// point of #12304 is that the degraded path had no feedback at all), an honest LAUNCH-time
+// notice that points at `fak info` for live numbers rather than fabricating zeroed telemetry,
+// and silenced by FAK_SPLIT_BANNER=0 for an operator who wants a clean pane.
+func TestGuardSplitDegradedBanner(t *testing.T) {
+	on := guardSplitDegradedBanner(envFunc(nil))
+	if on == "" {
+		t.Fatal("banner should be enabled by default")
+	}
+	if !strings.Contains(on, "no split host") {
+		t.Fatalf("banner should name the degraded case, got %q", on)
+	}
+	if !strings.Contains(on, "fak info") || !strings.Contains(on, "another pane") {
+		t.Fatalf("banner should point at `fak info` in another pane for live status, got %q", on)
+	}
+	if strings.Contains(on, "fak · up ") {
+		t.Fatalf("degraded banner must not claim live telemetry, got %q", on)
+	}
+	if off := guardSplitDegradedBanner(envFunc(map[string]string{"FAK_SPLIT_BANNER": "0"})); off != "" {
+		t.Fatalf("FAK_SPLIT_BANNER=0 should silence the banner, got %q", off)
+	}
+	if off := guardSplitDegradedBanner(envFunc(map[string]string{"FAK_SPLIT_BANNER": "off"})); off != "" {
+		t.Fatalf("FAK_SPLIT_BANNER=off should silence the banner, got %q", off)
 	}
 }
 
@@ -275,6 +431,7 @@ func TestGuardSplitEnabled(t *testing.T) {
 	}{
 		{"auto in WT enables", "auto", map[string]string{"WT_SESSION": "x"}, true, true, true, false},
 		{"auto in tmux enables", "auto", map[string]string{"TMUX": "y"}, true, true, true, false},
+		{"auto in zellij enables", "auto", map[string]string{"ZELLIJ": "0"}, true, true, true, false},
 		{"auto with no multiplexer no-ops", "auto", nil, true, true, false, false},
 		{"auto nested never re-splits", "auto", map[string]string{"WT_SESSION": "x", "FAK_GUARD_SPLIT": "1"}, true, true, false, false},
 		{"auto non-interactive stdin no-ops", "auto", map[string]string{"WT_SESSION": "x"}, false, true, false, false},
@@ -323,6 +480,10 @@ func TestGuardSplitEnabledMacTerminals(t *testing.T) {
 		{"Apple Terminal enables", map[string]string{"TERM_PROGRAM": "Apple_Terminal"}, true},
 		{"iTerm2 via TERM_PROGRAM enables", map[string]string{"TERM_PROGRAM": "iTerm.app"}, true},
 		{"iTerm2 via session id enables", map[string]string{"ITERM_SESSION_ID": "w0t0p0"}, true},
+		{"WezTerm via pane id enables", map[string]string{"WEZTERM_PANE": "3"}, true},
+		{"WezTerm via TERM_PROGRAM enables", map[string]string{"TERM_PROGRAM": "WezTerm"}, true},
+		{"Ghostty via resources dir enables", map[string]string{"GHOSTTY_RESOURCES_DIR": "/Applications/Ghostty.app/Contents/Resources"}, true},
+		{"Ghostty via TERM_PROGRAM enables", map[string]string{"TERM_PROGRAM": "ghostty"}, true},
 		{"unknown TERM_PROGRAM no-ops", map[string]string{"TERM_PROGRAM": "vscode"}, false},
 		{"nested never re-splits", map[string]string{"TERM_PROGRAM": "Apple_Terminal", "FAK_GUARD_SPLIT": "1"}, false},
 	}

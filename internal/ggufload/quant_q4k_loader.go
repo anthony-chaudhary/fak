@@ -69,12 +69,14 @@ type q4kLoadOptions struct {
 	residentDenseQ6K     bool
 	residentQ2KEmbedding bool
 	residentQ4KEmbedding bool
+	residentPQ2Embedding bool // enabled by Prism PQ2 metadata
 	streamedExperts      bool
 	streamedExpertBytes  int64
 	streamedDenseQ4K     bool
 	streamedDenseBytes   int64
 	streamedDenseBounded bool
 	retainMTP            bool
+	prismGDNVGrouped     bool // checkpoint metadata, not a caller option
 }
 
 // Q4KLoadOption configures the direct-resident-Q4_K GGUF load path.
@@ -459,14 +461,14 @@ func (s *WeightSource) shapeAndBytesOrFail(info TensorInfo, tw *tensorWork) (sha
 }
 
 func (s *WeightSource) validateResidentQ2KEmbedding(cfg model.Config) error {
-	return s.validateResidentPackedEmbedding(cfg, TensorQ2_K, blockQ2KBytes)
+	return s.validateResidentPackedEmbedding(cfg, TensorQ2_K, qkK, blockQ2KBytes)
 }
 
 func (s *WeightSource) validateResidentQ4KEmbedding(cfg model.Config) error {
-	return s.validateResidentPackedEmbedding(cfg, TensorQ4_K, blockQ4KBytes)
+	return s.validateResidentPackedEmbedding(cfg, TensorQ4_K, qkK, blockQ4KBytes)
 }
 
-func (s *WeightSource) validateResidentPackedEmbedding(cfg model.Config, wantType TensorType, blockBytes uint64) error {
+func (s *WeightSource) validateResidentPackedEmbedding(cfg model.Config, wantType TensorType, blockWeights, blockBytes uint64) error {
 	format := wantType.String()
 	if !cfg.IsQwen35Hybrid() || cfg.IsMoE() {
 		return fmt.Errorf("gguf: resident %s embedding requires a dense Qwen3.5-family hybrid model", format)
@@ -512,10 +514,10 @@ func (s *WeightSource) validateResidentPackedEmbedding(cfg model.Config, wantTyp
 	if cfg.VocabSize != 0 && vocab != cfg.VocabSize {
 		return fmt.Errorf("gguf: token_embd.weight vocab %d != config %d", vocab, cfg.VocabSize)
 	}
-	if hidden%qkK != 0 {
-		return fmt.Errorf("gguf: token_embd.weight hidden dimension %d is not divisible by %d", hidden, qkK)
+	if uint64(hidden)%blockWeights != 0 {
+		return fmt.Errorf("gguf: token_embd.weight hidden dimension %d is not divisible by %d", hidden, blockWeights)
 	}
-	wantPayload := uint64(vocab) * (uint64(hidden) / qkK) * blockBytes
+	wantPayload := uint64(vocab) * (uint64(hidden) / blockWeights) * blockBytes
 	payloadBytes, err := tensorPayloadBytes(*embInfo)
 	if err != nil {
 		return err
@@ -542,6 +544,10 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 	if err != nil {
 		return nil, err
 	}
+	prism, err := s.File.PrismHadamardMeta()
+	if err != nil {
+		return nil, err
+	}
 	// Capture the default-off W3 decision once. Worker goroutines and GEMV loops never
 	// re-read process environment, so a load has one immutable selection contract.
 	w3Requested := model.W3MLPRequested()
@@ -552,6 +558,12 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 	if err != nil {
 		return nil, err
 	}
+	loadOpts.prismGDNVGrouped = prism != nil && prism.GDNVGrouped
+	if prism != nil {
+		if embedding, ok := s.Tensor("token_embd.weight"); ok && embedding.Type == TensorPQ2_0 {
+			loadOpts.residentPQ2Embedding = true
+		}
+	}
 	if loadOpts.residentQ2KEmbedding {
 		if err := s.validateResidentQ2KEmbedding(cfg); err != nil {
 			return nil, err
@@ -559,6 +571,14 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 	}
 	if loadOpts.residentQ4KEmbedding {
 		if err := s.validateResidentQ4KEmbedding(cfg); err != nil {
+			return nil, err
+		}
+	}
+	if loadOpts.residentPQ2Embedding {
+		if loadOpts.residentQ2KEmbedding || loadOpts.residentQ4KEmbedding {
+			return nil, fmt.Errorf("gguf: Prism PQ2_0 embedding conflicts with requested packed embedding format")
+		}
+		if err := s.validateResidentPackedEmbedding(cfg, TensorPQ2_0, 128, blockPQ2_0Bytes); err != nil {
 			return nil, err
 		}
 	}
@@ -653,6 +673,38 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 	m, err := builder.Build()
 	if err != nil {
 		return nil, err
+	}
+	if prism != nil {
+		spec := model.PrismHadamardSpec{
+			BlockSize:   prism.BlockSize,
+			SignWidths:  prism.SignWidths,
+			SignValues:  prism.SignValues,
+			GDNVGrouped: prism.GDNVGrouped,
+		}
+		canonicalize := func(raw []string) ([]string, error) {
+			out := make([]string, len(raw))
+			for i, name := range raw {
+				var ok bool
+				out[i], ok = CanonicalTensorNameArch(name, cfg.ModelType)
+				if !ok {
+					return nil, fmt.Errorf("gguf: prism.hadamard names unmapped tensor %q", name)
+				}
+				out[i], ok = model.QuantSourceTensorName(cfg, out[i])
+				if !ok {
+					return nil, fmt.Errorf("gguf: prism.hadamard names skipped tensor %q", name)
+				}
+			}
+			return out, nil
+		}
+		if spec.WeightNames, err = canonicalize(prism.WeightNames); err != nil {
+			return nil, err
+		}
+		if spec.InverseNames, err = canonicalize(prism.InverseNames); err != nil {
+			return nil, err
+		}
+		if err := m.SetPrismHadamard(spec); err != nil {
+			return nil, err
+		}
 	}
 	if expertTier != nil {
 		m.SetExpertCheckpoint(expertTier)
@@ -818,7 +870,13 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 				return err
 			}
 		case pt.q2kEmbed:
-			embed, err := model.NewQ2KEmbedding(pt.raw, pt.shape[0], pt.shape[1])
+			var embed *model.Q2KEmbedding
+			var err error
+			if pt.residentType == TensorPQ2_0 {
+				embed, err = model.NewPQ2Embedding(pt.raw, pt.shape[0], pt.shape[1])
+			} else {
+				embed, err = model.NewQ2KEmbedding(pt.raw, pt.shape[0], pt.shape[1])
+			}
 			if err != nil {
 				return err
 			}
@@ -927,7 +985,7 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 				if err := builder.AddResidentQ8_0(pt.name, pt.shape, pt.raw); err != nil {
 					return err
 				}
-			case TensorQ2_0:
+			case TensorQ2_0, TensorPQ2_0:
 				if err := builder.AddResidentQ2(pt.name, pt.shape, pt.raw); err != nil {
 					return err
 				}
@@ -1183,13 +1241,13 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 		tw.err = fmt.Errorf("gguf: no canonical mapping for tensor %s", info.Name)
 		return tw
 	}
-	if loadOpts.residentQ2KEmbedding && info.Name == "token_embd.weight" {
+	if (loadOpts.residentQ2KEmbedding || loadOpts.residentPQ2Embedding) && info.Name == "token_embd.weight" {
 		shape, raw, ok := s.shapeAndBytesOrFail(info, &tw)
 		if !ok {
 			return tw
 		}
 		tw.acctType, tw.acctExpert, tw.acctBytes, tw.acctTensors, tw.acctResident = info.Type.String(), false, tensorOnDiskBytes(info), 1, true
-		tw.pending = []pendingTensor{{q2kEmbed: true, name: canon, shape: shape, raw: raw}}
+		tw.pending = []pendingTensor{{q2kEmbed: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
 		return tw
 	}
 	if loadOpts.residentQ4KEmbedding && info.Name == "token_embd.weight" {
@@ -1232,6 +1290,16 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 		tw.err = fmt.Errorf("gguf: FAK_W3_MLP refuses IQ3_XXS tensor %s outside dense MLP W3 band", canon)
 		return tw
 	}
+	if info.Type == TensorPQ2_0 && prismPQ2ResidentEligible(cfg, canon, loadOpts.prismGDNVGrouped) {
+		normalized, err := normalizePrismPQ2Rows(canon, shape, raw, cfg)
+		if err != nil {
+			tw.err = err
+			return tw
+		}
+		tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: normalized}}
+		tw.acctResident = true
+		return tw
+	}
 	if info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon) {
 		tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
 		tw.acctResident = true
@@ -1250,7 +1318,12 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 		tw.err = err
 		return tw
 	}
-	data, err = normalizeCanonicalTensorData(canon, data, cfg)
+	// Prism's grouped GDN V checkpoint stores ssm_out's input columns in the
+	// head-major order the native forward already emits. The stock Qwen35 GGUF
+	// normalizer would reorder those columns a second time.
+	if !(loadOpts.prismGDNVGrouped && strings.HasSuffix(canon, ".linear_attn.out_proj.weight")) {
+		data, err = normalizeCanonicalTensorData(canon, data, cfg)
+	}
 	if err != nil {
 		tw.err = err
 		return tw

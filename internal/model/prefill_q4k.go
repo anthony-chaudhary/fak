@@ -104,11 +104,19 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 	proj := func(name string, Xf []float32, Xq *q8Panel) []float32 {
 		t := tic()
 		var r []float32
+		Xrot := m.prismProjectPanel(name, Xf, P)
 		if qt := m.q4kw[name]; qt != nil {
-			r = s.q4kGemmDispatch(name, qt, Xf, P)
+			r = s.q4kGemmDispatch(name, qt, Xrot, P)
 		} else if qt := m.kqw[name]; qt != nil {
-			r = s.kQuantGemmDispatch(name, qt, Xf, P)
+			r = s.kQuantGemmDispatch(name, qt, Xrot, P)
+		} else if qt := m.q2w[name]; qt != nil {
+			r = q2MatRowsBatch(qt, Xrot, P)
 		} else {
+			if m.prism != nil && m.prism.weightWidth[name] != 0 {
+				panel := &q8Panel{}
+				quantizeBatchPanelInto(panel, Xrot, P, m.prism.weightWidth[name])
+				Xq = panel
+			}
 			r = s.q8GemmDispatch(name, m.q8(name), Xq)
 		}
 		toc(&tGemm, t)
@@ -119,6 +127,7 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 	X := make([]float32, P*H)
 	for t, id := range ids {
 		copy(X[t*H:(t+1)*H], embed[id*H:(id+1)*H])
+		m.prismInverseEmbeddingRow("model.embed_tokens.weight", X[t*H:(t+1)*H])
 		scaleEmbedInPlace(X[t*H:(t+1)*H], cfg) // Gemma; no-op for Llama/Qwen
 	}
 

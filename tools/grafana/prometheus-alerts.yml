@@ -514,7 +514,7 @@ groups:
           severity: info
         annotations:
           summary: "fak issue backlog is growing"
-          description: "Issues are being opened faster than closed over the trailing 12h window (net {{ $value | printf \"%.1f\" }}/h) for 2h. This is a throughput trend, not an incident; see the Workers & Issue Throughput dashboard (uid fak-ops-workers-queue)."
+          description: "Issues are being opened faster than closed over the trailing 12h window (net {{ $value | printf \"%.1f\" }}/h) for 2h. This is a throughput trend, not an incident; see the Fak Ops dashboard (uid fak-ops)."
 
       # A truncated census renders a table that LOOKS complete. Alerting on the
       # confession is the only way an operator learns the throughput view is a
@@ -638,4 +638,4 @@ groups:
           severity: warning
         annotations:
           summary: "fak ops counts diverge across contexts: {{ $labels.rising }} rises, {{ $labels.flat }} is flat"
-          description: "Over the trailing hour {{ $labels.rising }} grew by {{ $value | printf \"%.0f\" }} while {{ $labels.flat }}, which counts the same population from another source, grew less than a tenth as much, for 30m. One source is mis-scoped or lying. If rising=ops_run_ledger_harness or ops_run_ledger_refused, check the phase split (fak_ops_agent_runs_by_harness_phase): launch_refused rows never started a worker; read refusal_reason in .fak/agent-runs.jsonl. See the Cross-context divergence row on the Fleet Work dashboard (uid fak-ops-fleet-work)."
+          description: "Over the trailing hour {{ $labels.rising }} grew by {{ $value | printf \"%.0f\" }} while {{ $labels.flat }}, which counts the same population from another source, grew less than a tenth as much, for 30m. One source is mis-scoped or lying. If rising=ops_run_ledger_harness or ops_run_ledger_refused, check the phase split (fak_ops_agent_runs_by_harness_phase): launch_refused rows never started a worker; read refusal_reason in .fak/agent-runs.jsonl. See the Cross-context divergence row on the Fak Ops dashboard (uid fak-ops)."

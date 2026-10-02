@@ -108,6 +108,16 @@ func TestMetalKVCacheRestoration(t *testing.T) {
 			t.Fatalf("pool.Commit failed: %v", err)
 		}
 
+		// SharedTokenPool owns counts only: the checkpointed token sequence and KV
+		// pages must come from a real state owner (fak#12600).
+		forkSess, regErr := forkMgr.RegisterSession(sessionID, ctxmmu.BlockGranularity64)
+		if regErr != nil {
+			t.Fatalf("RegisterSession failed: %v", regErr)
+		}
+		if appErr := forkSess.AppendTokens(forkFixtureTokens(tokenCount)...); appErr != nil {
+			t.Fatalf("AppendTokens failed: %v", appErr)
+		}
+
 		_, err := restorer.CheckpointOpenCode(sessionID)
 		if err != nil {
 			t.Fatalf("CheckpointOpenCode failed: %v", err)
@@ -189,8 +199,9 @@ func TestMetalKVCacheRestoration(t *testing.T) {
 	t.Run("FailClosedValidation", func(t *testing.T) {
 		mmu := ctxmmu.New()
 		pool := ctxmmu.NewSharedTokenPool()
-		cm := ctxmmu.NewCheckpointManager(mmu, pool, nil, nil)
-		restorer := ctxmmu.NewMetalKVRestorer(cm, nil, nil, pool, mmu)
+		forkMgr := ctxmmu.NewForkManager()
+		cm := ctxmmu.NewCheckpointManager(mmu, pool, forkMgr, nil)
+		restorer := ctxmmu.NewMetalKVRestorer(cm, forkMgr, nil, pool, mmu)
 
 		// 1. Empty session ID
 		if _, err := restorer.RestoreMetalKV(""); !errors.Is(err, ctxmmu.ErrEmptySessionID) {
@@ -209,6 +220,13 @@ func TestMetalKVCacheRestoration(t *testing.T) {
 		expiredID := "opencode-expired-sess"
 		_ = pool.Reserve(expiredID, 64)
 		_ = pool.Commit(expiredID, 64)
+		expiredSess, expiredRegErr := forkMgr.RegisterSession(expiredID, ctxmmu.BlockGranularity64)
+		if expiredRegErr != nil {
+			t.Fatalf("RegisterSession failed: %v", expiredRegErr)
+		}
+		if appErr := expiredSess.AppendTokens(forkFixtureTokens(64)...); appErr != nil {
+			t.Fatalf("AppendTokens failed: %v", appErr)
+		}
 		desc, err := restorer.CheckpointOpenCode(expiredID)
 		if err != nil {
 			t.Fatalf("CheckpointOpenCode failed: %v", err)
@@ -223,6 +241,13 @@ func TestMetalKVCacheRestoration(t *testing.T) {
 		freshID := "opencode-fresh-sess"
 		_ = pool.Reserve(freshID, 64)
 		_ = pool.Commit(freshID, 64)
+		freshSess, freshRegErr := forkMgr.RegisterSession(freshID, ctxmmu.BlockGranularity64)
+		if freshRegErr != nil {
+			t.Fatalf("RegisterSession failed: %v", freshRegErr)
+		}
+		if appErr := freshSess.AppendTokens(forkFixtureTokens(64)...); appErr != nil {
+			t.Fatalf("AppendTokens failed: %v", appErr)
+		}
 		_, _ = restorer.CheckpointOpenCode(freshID)
 		if _, err := restorer.RestoreMetalKV(freshID); err != nil {
 			t.Fatalf("first restore failed: %v", err)
@@ -252,6 +277,12 @@ func TestMetalKVCacheRestoration(t *testing.T) {
 				_ = pool.Reserve(sid, tokCount)
 				_ = pool.Commit(sid, tokCount)
 
+				// Real COW-backed pages: pool counters alone are not state authority (fak#12600).
+				if appErr := cowTable.AppendTokens(sid, cowFixtureTokens(tokCount)); appErr != nil {
+					t.Errorf("worker %d COW append failed: %v", workerID, appErr)
+					return
+				}
+
 				_, err := restorer.CheckpointOpenCode(sid)
 				if err != nil {
 					t.Errorf("worker %d checkpoint failed: %v", workerID, err)
@@ -279,12 +310,20 @@ func TestMetalKVCacheRestoration(t *testing.T) {
 	t.Run("PrometheusMetricsExport", func(t *testing.T) {
 		mmu := ctxmmu.New()
 		pool := ctxmmu.NewSharedTokenPool()
-		cm := ctxmmu.NewCheckpointManager(mmu, pool, nil, nil)
-		restorer := ctxmmu.NewMetalKVRestorer(cm, nil, nil, pool, mmu)
+		forkMgr := ctxmmu.NewForkManager()
+		cm := ctxmmu.NewCheckpointManager(mmu, pool, forkMgr, nil)
+		restorer := ctxmmu.NewMetalKVRestorer(cm, forkMgr, nil, pool, mmu)
 
 		sid := "opencode-metrics-test"
 		_ = pool.Reserve(sid, 512)
 		_ = pool.Commit(sid, 512)
+		metricsSess, metricsRegErr := forkMgr.RegisterSession(sid, ctxmmu.BlockGranularity64)
+		if metricsRegErr != nil {
+			t.Fatalf("RegisterSession failed: %v", metricsRegErr)
+		}
+		if appErr := metricsSess.AppendTokens(forkFixtureTokens(512)...); appErr != nil {
+			t.Fatalf("AppendTokens failed: %v", appErr)
+		}
 
 		_, _ = restorer.CheckpointOpenCode(sid)
 		_, err := restorer.RestoreMetalKV(sid)
@@ -337,4 +376,23 @@ func TestMetalKVCacheRestoration(t *testing.T) {
 			}
 		}
 	})
+}
+
+// forkFixtureTokens and cowFixtureTokens give a fixture session real token identity
+// in a state owner. SharedTokenPool accounting is capacity only, so a session that
+// is checkpointable must own actual token IDs and KV pages (fak#12600).
+func forkFixtureTokens(n int) []int32 {
+	tokens := make([]int32, n)
+	for i := range tokens {
+		tokens[i] = int32(3100 + i)
+	}
+	return tokens
+}
+
+func cowFixtureTokens(n int) []int {
+	tokens := make([]int, n)
+	for i := range tokens {
+		tokens[i] = 3100 + i
+	}
+	return tokens
 }

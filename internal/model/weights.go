@@ -250,6 +250,9 @@ type Model struct {
 	// q2w holds the optional resident ternary Q2_0 copy of matmul weights, fed the raw
 	// GGUF group-128 blocks straight from the loader and consumed by q2MatRows.
 	q2w map[string]*q2Tensor
+	// prism is the optional Bonsai-2 signed Hadamard activation contract. Only
+	// weights explicitly named by the GGUF declaration consume rotated inputs.
+	prism *prismHadamardState
 	// awqw holds the optional resident AWQ (Activation-aware Weight Quantization) 4-bit
 	// copy of the matmul weights, populated by LoadAWQ straight from an AutoAWQ
 	// safetensors export and consumed only by the opt-in AWQ path (awq.go). nil unless
@@ -610,6 +613,11 @@ func (m *Model) hasWeight(name string) bool {
 	}
 	if m.kqw != nil {
 		if _, ok := m.kqw[name]; ok {
+			return true
+		}
+	}
+	if m.q2w != nil {
+		if _, ok := m.q2w[name]; ok {
 			return true
 		}
 	}

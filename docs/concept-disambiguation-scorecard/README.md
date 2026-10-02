@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **542** (clarity 0 + coverage 542) |
+| **Disambiguation-debt (drive to 0)** | **550** (clarity 0 + coverage 550) |
 | **Crystal-clear concepts (and climbing)** | **1129** crystal of 2855 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2964 / 3506** (84.5% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2964 / 3514** (84.3% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 219 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **84** of 4075 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 89.9/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 89.8/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2855 concepts - score 89.9/100 (grade B) - disambiguation-debt 542
+concept-disambiguation chart - 2855 concepts - score 89.8/100 (grade B) - disambiguation-debt 550
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ##################.......... 1129
@@ -62,20 +62,20 @@ clarity mix by family (each cell = one concept):
   witness-proof    ***********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (163 concept(s); 83 crystal)
 
 coverage by family (positioned / discovered):
-  plan             ######################...... 440/550
-  session-runtime  ########################.... 280/333
-  cache            ########################.... 325/377
+  plan             ######################...... 440/551
+  session-runtime  #######################..... 280/335
+  cache            ########################.... 325/378
   context-ctx      ########################.... 250/293
   gateway-engine   #######################..... 210/253
   policy-capability ########################.... 219/254
-  guard-gate       ##########################.. 508/539
+  guard-gate       ##########################.. 508/540
+  pool             ################............ 40/71
   attention        #####################....... 88/118
-  pool             ################............ 40/70
   support-maturity ####################........ 73/101
   witness-proof    ########################.... 166/192
-  render-materialize #########################... 216/240
+  render-materialize #########################... 216/241
   evict            #####################....... 55/73
-  loop             ########################.... 100/116
+  loop             ########################.... 100/117
   layout           ##################.......... 20/32
   score-debt       ##########################.. 113/123
   decision         ##########################.. 60/64
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 84.5%  (2964/3506 confusable tokens positioned)
+namespace coverage  [###########################.....] 84.3%  (2964/3514 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 219
@@ -3146,20 +3146,20 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 440 | 550 | 110 |
-| session-runtime | 280 | 333 | 53 |
-| cache | 325 | 377 | 52 |
+| plan | 440 | 551 | 111 |
+| session-runtime | 280 | 335 | 55 |
+| cache | 325 | 378 | 53 |
 | context-ctx | 250 | 293 | 43 |
 | gateway-engine | 210 | 253 | 43 |
 | policy-capability | 219 | 254 | 35 |
-| guard-gate | 508 | 539 | 31 |
+| guard-gate | 508 | 540 | 32 |
+| pool | 40 | 71 | 31 |
 | attention | 88 | 118 | 30 |
-| pool | 40 | 70 | 30 |
 | support-maturity | 73 | 101 | 28 |
 | witness-proof | 166 | 192 | 26 |
-| render-materialize | 216 | 240 | 24 |
+| render-materialize | 216 | 241 | 25 |
 | evict | 55 | 73 | 18 |
-| loop | 100 | 116 | 16 |
+| loop | 100 | 117 | 17 |
 | layout | 20 | 32 | 12 |
 | score-debt | 113 | 123 | 10 |
 | decision | 60 | 64 | 4 |

@@ -47,6 +47,7 @@ type rolloutPayload struct {
 	Arguments string          `json:"arguments"` // function_call: a JSON string
 	Input     string          `json:"input"`     // custom_tool_call: raw tool input
 	Output    json.RawMessage `json:"output"`    // *_output: string or object
+	PayloadN  json.RawMessage `json:"payload"`   // response_item: nested payload
 	Action    *struct {
 		Command []string `json:"command"`
 	} `json:"action"` // local_shell_call
@@ -268,4 +269,180 @@ func parseRolloutTS(s string) int64 {
 		return t.UnixMilli()
 	}
 	return 0
+}
+
+// ---------------------------------------------------------------------------
+// Evidence view (#13416): a LOSSLESS, coverage-bearing companion to
+// IngestRollout. IngestRollout is deliberately lossy and tolerant — it
+// normalizes arguments to a Raw line and skips unknown/malformed rows — which is
+// right for analytics but cannot distinguish "a completely understood zero-call
+// transcript" from "we did not understand this input". IngestRolloutEvidence
+// answers that question without changing the legacy API: it preserves original
+// call inputs and reports explicit coverage counters, and it NEVER promotes an
+// unsupported or failed input to an observed zero.
+// ---------------------------------------------------------------------------
+
+// RolloutCallKind is the wire shape a call arrived as.
+type RolloutCallKind string
+
+const (
+	RolloutKindFunctionCall RolloutCallKind = "function_call"    // arguments live in Arguments
+	RolloutKindCustomTool   RolloutCallKind = "custom_tool_call" // input lives in Input
+	RolloutKindLocalShell   RolloutCallKind = "local_shell_call" // command lives in Command
+)
+
+// RolloutCall is one tool call preserved at its original wire granularity.
+// Unlike CallRecord.Raw it is never normalized: Arguments/Input are the exact
+// bytes the rollout carried, and Command is a copied array (not a synthesized
+// string), so a consumer can reason about losslessness. No output body is ever
+// retained.
+type RolloutCall struct {
+	Kind      RolloutCallKind `json:"kind"`
+	Name      string          `json:"name,omitempty"`
+	Arguments string          `json:"arguments,omitempty"` // function_call: unchanged
+	Input     string          `json:"input,omitempty"`     // custom_tool_call: unchanged
+	Command   []string        `json:"command,omitempty"`   // local_shell_call: copied
+	CallID    string          `json:"call_id,omitempty"`
+	AtMS      int64           `json:"at_ms,omitempty"`
+}
+
+// RolloutEvidence is the typed coverage verdict over a Codex rollout stream.
+// Complete is true only for a recognized stream read through EOF with every
+// nonblank record classified under an explicit supported schema, with at least
+// one record read — including a legitimately empty call list. Any unknown
+// top-level kind or response_item payload type, any malformed row, empty input,
+// or a non-EOF read error makes Complete false and is counted so a consumer can
+// tell "zero" from "unknown".
+type RolloutEvidence struct {
+	Calls       []RolloutCall `json:"calls"`
+	Complete    bool          `json:"complete"`
+	Records     int           `json:"records"`     // nonblank rows read
+	Unsupported int           `json:"unsupported"` // unknown top-level/response_item kinds
+	Malformed   int           `json:"malformed"`   // rows that were not valid JSON or lacked a payload
+	ReadError   error         `json:"-"`
+}
+
+// rolloutEvidenceRecord is the per-row classification. Any record that reaches a
+// supported branch is recognized; call records additionally emit a RolloutCall.
+type rolloutEvidenceRecord struct {
+	call       *RolloutCall
+	recognized bool
+	malformed  bool
+}
+
+// evidenceEnvelopeTypes are known non-tool top-level envelopes. They contribute
+// coverage but never calls or output bodies.
+var evidenceEnvelopeTypes = map[string]bool{
+	"session_meta": true, "turn_context": true, "event_msg": true, "compacted": true,
+}
+
+// evidenceResponseItemTypes are known nested response_item payload types that
+// carry no call of their own (messages, results, reasoning). A call-kind nested
+// payload is still ingested as a call.
+var evidenceResponseItemTypes = map[string]bool{
+	"message": true, "function_call_output": true, "custom_tool_call_output": true,
+	"local_shell_call_output": true, "reasoning": true,
+}
+
+// IngestRolloutEvidence streams a native Codex rollout JSONL log and returns a
+// lossless call view plus an explicit coverage verdict. It shares the scanner and
+// decoder with IngestRollout but never normalizes inputs and never silently
+// ignores a row it could not classify (see RolloutEvidence.Complete).
+func IngestRolloutEvidence(r io.Reader) RolloutEvidence {
+	br := bufio.NewReader(r)
+	var ev RolloutEvidence
+
+	for {
+		line, err := br.ReadString('\n')
+		if s := strings.TrimSpace(line); s != "" {
+			ev.Records++
+			rec := classifyEvidenceRow(s)
+			switch {
+			case rec.malformed:
+				ev.Malformed++
+			case rec.call != nil:
+				ev.Calls = append(ev.Calls, *rec.call)
+			case rec.recognized:
+				// coverage-only row (envelope, output, message)
+			default:
+				ev.Unsupported++
+			}
+		}
+		if err != nil {
+			if err != io.EOF {
+				ev.ReadError = err
+			}
+			break
+		}
+	}
+
+	// Complete only when the stream was fully understood: at least one record
+	// read, no unsupported rows, no malformed rows, and no read error. A
+	// malformed row and an unknown kind are tracked separately so the consumer
+	// can tell them apart, but either makes the coverage incomplete.
+	ev.Complete = ev.ReadError == nil && ev.Unsupported == 0 && ev.Malformed == 0 && ev.Records > 0
+	return ev
+}
+
+// classifyEvidenceRow parses one JSONL row and classifies it. It mirrors
+// ingestLine's tolerance (never panics) but reports rather than discards: a row
+// that cannot be parsed is left unrecognized so the caller counts it Malformed.
+func classifyEvidenceRow(s string) rolloutEvidenceRecord {
+	var outer rolloutLine
+	if err := json.Unmarshal([]byte(s), &outer); err != nil || len(outer.Payload) == 0 {
+		return rolloutEvidenceRecord{malformed: true} // not JSON, or no payload object
+	}
+	var p rolloutPayload
+	if err := json.Unmarshal(outer.Payload, &p); err != nil {
+		return rolloutEvidenceRecord{malformed: true}
+	}
+	// A response_item wraps its own payload; unwrap one level so a nested
+	// function_call is still a call and a nested message still contributes
+	// coverage. An unknown nested type stays unsupported.
+	if p.Type == "response_item" {
+		if len(p.PayloadN) == 0 {
+			return rolloutEvidenceRecord{recognized: true} // bare envelope
+		}
+		var nested rolloutPayload
+		if err := json.Unmarshal(p.PayloadN, &nested); err != nil {
+			return rolloutEvidenceRecord{malformed: true} // a malformed nested payload
+		}
+		if nested.Type == "" {
+			return rolloutEvidenceRecord{recognized: true}
+		}
+		return classifyEvidencePayload(nested, outer.Timestamp)
+	}
+	return classifyEvidencePayload(p, outer.Timestamp)
+}
+
+// classifyEvidencePayload classifies a single (possibly unwrapped) payload.
+func classifyEvidencePayload(p rolloutPayload, ts string) rolloutEvidenceRecord {
+	switch {
+	case evidenceEnvelopeTypes[p.Type]:
+		return rolloutEvidenceRecord{recognized: true}
+	case outputTypes[p.Type]:
+		return rolloutEvidenceRecord{recognized: true} // coverage only; body never retained
+	case p.Type == "function_call":
+		return rolloutEvidenceRecord{recognized: true, call: &RolloutCall{
+			Kind: RolloutKindFunctionCall, Name: p.Name, Arguments: p.Arguments,
+			CallID: p.CallID, AtMS: parseRolloutTS(ts),
+		}}
+	case p.Type == "custom_tool_call":
+		return rolloutEvidenceRecord{recognized: true, call: &RolloutCall{
+			Kind: RolloutKindCustomTool, Name: p.Name, Input: p.Input,
+			CallID: p.CallID, AtMS: parseRolloutTS(ts),
+		}}
+	case shellCallTypes[p.Type]:
+		var cmd []string
+		if p.Action != nil && len(p.Action.Command) > 0 {
+			cmd = append([]string(nil), p.Action.Command...) // copy: never alias the decoder buffer
+		}
+		return rolloutEvidenceRecord{recognized: true, call: &RolloutCall{
+			Kind: RolloutKindLocalShell, Name: p.Name, Command: cmd,
+			CallID: p.CallID, AtMS: parseRolloutTS(ts),
+		}}
+	case evidenceResponseItemTypes[p.Type]:
+		return rolloutEvidenceRecord{recognized: true}
+	}
+	return rolloutEvidenceRecord{} // unknown top-level kind
 }

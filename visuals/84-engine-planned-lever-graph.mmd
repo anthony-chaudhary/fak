@@ -1,0 +1,56 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TB
+  doc["Doctrine: fak-native is the product path.<br/>Beat llama.cpp inside a MATCHED, quality-constrained envelope."]
+
+  subgraph OWN["Own the full stack so higher-order gains compose"]
+    direction LR
+    k["Kernels"]
+    m["Memory"]
+    s["Scheduling"]
+    c["Cache"]
+    a["Adaptation"]
+    o["Operations"]
+  end
+  doc --> OWN
+
+  subgraph LOOP["The hill-climb loop (one lever at a time)"]
+    direction LR
+    env["Freeze an ENVELOPE<br/>(model + quant + HW + P/T + state)"]
+    base["Capture the baseline receipt"]
+    toggle["Toggle EXACTLY ONE lever<br/>conflicts OFF, dependencies fixed"]
+    cand["Capture the candidate receipt<br/>matched controls"]
+    gate{"Quality-clean<br/>AND end-to-end gain?"}
+    keep["KEEP: promote to the default path"]
+    reject["REJECT: retain the negative result, pick the next lever"]
+    env --> base --> toggle --> cand --> gate
+    gate -->|yes| keep
+    gate -->|no| reject
+  end
+
+  subgraph SERV["Serving levers — independently switchable"]
+    direction LR
+    pv["paged KV"]
+    pr["prefix reuse"]
+    cp["chunked prefill"]
+    cb["continuous batching"]
+  end
+  OWN --> LOOP
+  LOOP --> SERV
+
+  fence{"Evidence fence:<br/>expected = planning hypothesis only.<br/>witnessed = an accepted end-to-end receipt.<br/>A microbench or a different envelope cannot fill a Metal witness."}
+  gate -.-> fence
+
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+  class doc note;
+  class k,m,s,c,a,o kernel;
+  class env,base,toggle,cand kernel;
+  class gate gate;
+  class keep pass;
+  class reject deny;
+  class pv,pr,cp,cb mem;
+  class fence note;

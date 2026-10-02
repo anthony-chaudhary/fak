@@ -120,6 +120,16 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 	if err != nil {
 		return nil, err
 	}
+	prism, err := s.File.PrismHadamardMeta()
+	if err != nil {
+		return nil, err
+	}
+	loadOpts.prismGDNVGrouped = prism != nil && prism.GDNVGrouped
+	if prism != nil {
+		if embedding, ok := s.Tensor("token_embd.weight"); ok && embedding.Type == TensorPQ2_0 {
+			loadOpts.residentPQ2Embedding = true
+		}
+	}
 	standardDense := cfg.ModelType == "llama" || cfg.ModelType == "qwen2"
 	if (!cfg.IsQwen35Hybrid() && !standardDense) || cfg.IsMoE() {
 		return nil, fmt.Errorf("%w: requires dense Llama, Qwen2 or Qwen3.5-family weights", ErrQ4KLoadEstimateUnsupported)
@@ -134,6 +144,14 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 	}
 	if loadOpts.residentQ4KEmbedding {
 		if err := s.validateResidentQ4KEmbedding(cfg); err != nil {
+			return nil, err
+		}
+	}
+	if loadOpts.residentPQ2Embedding {
+		if loadOpts.residentQ2KEmbedding || loadOpts.residentQ4KEmbedding {
+			return nil, fmt.Errorf("gguf: Prism PQ2_0 embedding conflicts with requested packed embedding format")
+		}
+		if err := s.validateResidentPackedEmbedding(cfg, TensorPQ2_0, 128, blockPQ2_0Bytes); err != nil {
 			return nil, err
 		}
 	}
@@ -203,7 +221,7 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 		if err != nil {
 			return nil, err
 		}
-		packedEmbedding := info.Name == "token_embd.weight" && (loadOpts.residentQ2KEmbedding || loadOpts.residentQ4KEmbedding)
+		packedEmbedding := info.Name == "token_embd.weight" && (loadOpts.residentQ2KEmbedding || loadOpts.residentQ4KEmbedding || loadOpts.residentPQ2Embedding)
 		// The MTP loader preserves its closed Q4/Q6 matrix roles, including
 		// reordered q/k, independently of ordinary target residency options.
 		packedQ4 := info.Type == TensorQ4_K && (qwenMTP || model.ResidentQ4KEligible(cfg, canon))
@@ -215,7 +233,8 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 		// loader retains the packed tensor.
 		retainKQuant := denseKQuantRetained(loadOpts, info.Type)
 		packedKQuant := info.Type != TensorQ4_K && residentable &&
-			((qwenMTP && info.Type == TensorQ6_K) || (retainKQuant && model.ResidentKQuantEligible(cfg, canon)))
+			((qwenMTP && info.Type == TensorQ6_K) || (info.Type == TensorPQ2_0 && prismPQ2ResidentEligible(cfg, canon, loadOpts.prismGDNVGrouped)) ||
+				(retainKQuant && model.ResidentKQuantEligible(cfg, canon)))
 		n, dtype := payload, ggufTensorDTypeLabel(info.Type)
 		switch {
 		case packedEmbedding:

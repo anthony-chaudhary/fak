@@ -480,7 +480,7 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 		preflight := opsRunInferenceRefusal(*provider, *baseURL, *model, "unsupported_provider_protocol")
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
 	}
-	preflight, err := opsRunInferencePreflight(ctx, *baseURL, *model)
+	preflight, err := opsRunInferencePreflight(ctx, *baseURL, *model, *keyEnv)
 	receipt.InferencePreflight = &preflight
 	if err != nil {
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)

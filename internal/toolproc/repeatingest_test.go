@@ -9,6 +9,8 @@ package toolproc
 // typed inventory, with output SIZES joined and no body retained.
 
 import (
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -163,4 +165,148 @@ func TestIngestRolloutRetainsNoOutputBody(t *testing.T) {
 	if strings.Contains(recs[0].Raw, "SECRETLIKE") || strings.Contains(recs[0].Tool, "SECRETLIKE") {
 		t.Fatalf("output body leaked into a retained field: %+v", recs[0])
 	}
+}
+
+// TestIngestRolloutEvidence pins #13416: a lossless evidence view that
+// distinguishes a completely understood zero-call transcript from incomplete or
+// unsupported input, preserving original tool-call inputs without retaining any
+// output body. All fixtures are inline and synthetic; no live rollout is read.
+func TestIngestRolloutEvidence(t *testing.T) {
+	tests := []struct {
+		name        string
+		in          string
+		wantCalls   int
+		wantKind    []RolloutCallKind
+		wantCompl   bool
+		wantUnsup   int
+		wantMal     int
+		wantRecords int
+	}{
+		{
+			name: "complete metadata-only zero is Complete with no calls",
+			in: `{"timestamp":"2026-09-30T00:00:00Z","payload":{"type":"session_meta","id":"s1"}}
+{"timestamp":"2026-09-30T00:00:01Z","payload":{"type":"turn_context","model":"gpt-5"}}
+{"timestamp":"2026-09-30T00:00:02Z","payload":{"type":"event_msg","message":"ready"}}
+{"timestamp":"2026-09-30T00:00:03Z","payload":{"type":"compacted"}}
+`,
+			wantCalls: 0, wantCompl: true, wantRecords: 4,
+		},
+		{
+			name: "function_call preserves exact arguments",
+			in: `{"timestamp":"2026-09-30T00:00:00Z","payload":{"type":"function_call","name":"shell_command","arguments":"{\"command\":\"cmd\",\"x\":1}","call_id":"c1"}}
+{"timestamp":"2026-09-30T00:00:01Z","payload":{"type":"function_call_output","call_id":"c1","output":"ok"}}
+`,
+			wantCalls: 1, wantKind: []RolloutCallKind{RolloutKindFunctionCall}, wantCompl: true, wantRecords: 2,
+		},
+		{
+			name: "custom_tool_call preserves raw input",
+			in: `{"timestamp":"2026-09-30T00:00:00Z","payload":{"type":"custom_tool_call","name":"apply_patch","input":"*** Begin Patch\nx\n*** End Patch","call_id":"c2"}}
+`,
+			wantCalls: 1, wantKind: []RolloutCallKind{RolloutKindCustomTool}, wantCompl: true, wantRecords: 1,
+		},
+		{
+			name: "local_shell_call copies the command array",
+			in: `{"timestamp":"2026-09-30T00:00:00Z","payload":{"type":"local_shell_call","call_id":"c3","action":{"command":["bash","-lc","git status"]}}}
+`,
+			wantCalls: 1, wantKind: []RolloutCallKind{RolloutKindLocalShell}, wantCompl: true, wantRecords: 1,
+		},
+		{
+			name: "response_item wrapping a call is unwrapped",
+			in: `{"timestamp":"2026-09-30T00:00:00Z","payload":{"type":"response_item","payload":{"type":"function_call","name":"f","arguments":"{}","call_id":"c4"}}}
+`,
+			wantCalls: 1, wantKind: []RolloutCallKind{RolloutKindFunctionCall}, wantCompl: true, wantRecords: 1,
+		},
+		{
+			name: "unknown top-level kind makes coverage incomplete",
+			in: `{"timestamp":"2026-09-30T00:00:00Z","payload":{"type":"brand_new_kind"}}
+`,
+			wantCalls: 0, wantCompl: false, wantUnsup: 1, wantRecords: 1,
+		},
+		{
+			name: "malformed row makes coverage incomplete and is not a zero",
+			in: `{"timestamp":"2026-09-30T00:00:00Z","payload":{"type":"session_meta"}}
+not json at all
+`,
+			wantCalls: 0, wantCompl: false, wantMal: 1, wantRecords: 2,
+		},
+		{
+			name:      "empty input is incomplete, never a witnessed zero",
+			in:        ``,
+			wantCalls: 0, wantCompl: false, wantRecords: 0,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ev := IngestRolloutEvidence(strings.NewReader(tc.in))
+			if len(ev.Calls) != tc.wantCalls {
+				t.Fatalf("calls = %d, want %d (%+v)", len(ev.Calls), tc.wantCalls, ev.Calls)
+			}
+			if ev.Complete != tc.wantCompl {
+				t.Fatalf("Complete = %v, want %v", ev.Complete, tc.wantCompl)
+			}
+			if ev.Unsupported != tc.wantUnsup {
+				t.Fatalf("Unsupported = %d, want %d", ev.Unsupported, tc.wantUnsup)
+			}
+			if ev.Malformed != tc.wantMal {
+				t.Fatalf("Malformed = %d, want %d", ev.Malformed, tc.wantMal)
+			}
+			if ev.Records != tc.wantRecords {
+				t.Fatalf("Records = %d, want %d", ev.Records, tc.wantRecords)
+			}
+			for i, k := range tc.wantKind {
+				if ev.Calls[i].Kind != k {
+					t.Fatalf("call[%d].Kind = %q, want %q", i, ev.Calls[i].Kind, k)
+				}
+			}
+		})
+	}
+
+	// Exact bytes and ordering, plus no output-body retention.
+	ev := IngestRolloutEvidence(strings.NewReader(
+		`{"timestamp":"2026-09-30T00:00:00Z","payload":{"type":"function_call","name":"shell_command","arguments":"{\"command\":\"cmd\",\"x\":1}","call_id":"c1"}}
+{"timestamp":"2026-09-30T00:00:01Z","payload":{"type":"custom_tool_call","name":"apply_patch","input":"RAW","call_id":"c2"}}
+{"timestamp":"2026-09-30T00:00:02Z","payload":{"type":"function_call_output","call_id":"c1","output":"a secret body that must not be retained"}}
+`))
+	if ev.Calls[0].Arguments != `{"command":"cmd","x":1}` {
+		t.Fatalf("Arguments = %q, want exact bytes", ev.Calls[0].Arguments)
+	}
+	if ev.Calls[1].Input != "RAW" {
+		t.Fatalf("Input = %q, want RAW", ev.Calls[1].Input)
+	}
+	// The evidence view exposes no field carrying the output body.
+	blob, _ := json.Marshal(ev)
+	if strings.Contains(string(blob), "secret body") {
+		t.Fatalf("evidence view retained an output body: %s", blob)
+	}
+
+	// A local_shell command must be a COPY, not an alias of the decoder buffer.
+	ev2 := IngestRolloutEvidence(strings.NewReader(
+		`{"payload":{"type":"local_shell_call","call_id":"c9","action":{"command":["bash","-lc","x"]}}}`))
+	ev2.Calls[0].Command[0] = "mutated"
+	ev3 := IngestRolloutEvidence(strings.NewReader(
+		`{"payload":{"type":"local_shell_call","call_id":"c9","action":{"command":["bash","-lc","x"]}}}`))
+	if ev3.Calls[0].Command[0] != "bash" {
+		t.Fatalf("command array was aliased across calls: %v", ev3.Calls[0].Command)
+	}
+
+	// A reader failure must make coverage incomplete via ReadError.
+	ev4 := IngestRolloutEvidence(&failingReader{after: []byte(`{"payload":{"type":"session_meta"}}` + "\n")})
+	if ev4.Complete || ev4.ReadError == nil {
+		t.Fatalf("reader failure must be incomplete with a ReadError, got %+v", ev4)
+	}
+}
+
+// failingReader yields its prefix then returns a non-EOF error.
+type failingReader struct {
+	after []byte
+	done  bool
+}
+
+func (f *failingReader) Read(p []byte) (int, error) {
+	if !f.done {
+		f.done = true
+		n := copy(p, f.after)
+		return n, nil
+	}
+	return 0, errors.New("simulated read failure")
 }

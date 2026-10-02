@@ -113,6 +113,7 @@ func executeWatchdogAudit(script string) ([]byte, int, error) {
 		name = "powershell.exe"
 	}
 	cmd := exec.Command(name, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-Json")
+	configureDispatchHelperCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return out, 0, nil

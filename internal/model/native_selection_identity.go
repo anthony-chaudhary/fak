@@ -13,9 +13,11 @@ const (
 	// first native kernel-selection identity contract.
 	NativeSelectionIdentitySchemaV1 = "fak.kernel-selection/v1"
 
-	NativeSelectionQuantizationF32  = "F32"
-	NativeSelectionQuantizationQ8_0 = "Q8_0"
-	NativeSelectionQuantizationQ4K  = "Q4_K"
+	NativeSelectionQuantizationF32   = "F32"
+	NativeSelectionQuantizationQ8_0  = "Q8_0"
+	NativeSelectionQuantizationQ4K   = "Q4_K"
+	NativeSelectionQuantizationQ2_0  = "Q2_0"
+	NativeSelectionQuantizationPQ2_0 = "PQ2_0"
 )
 
 // NativeSelectionIdentity is the decoded, versioned functional identity of one
@@ -68,7 +70,7 @@ func (id NativeSelectionIdentity) Validate() error {
 		return fmt.Errorf("kernel selection identity forward_path is empty")
 	}
 	switch id.Quantization {
-	case NativeSelectionQuantizationF32, NativeSelectionQuantizationQ8_0, NativeSelectionQuantizationQ4K:
+	case NativeSelectionQuantizationF32, NativeSelectionQuantizationQ8_0, NativeSelectionQuantizationQ4K, NativeSelectionQuantizationQ2_0, NativeSelectionQuantizationPQ2_0:
 	default:
 		return fmt.Errorf("kernel selection identity quantization %q is unknown", id.Quantization)
 	}
@@ -78,8 +80,8 @@ func (id NativeSelectionIdentity) Validate() error {
 	if id.CPUOffloadExperts < 0 {
 		return fmt.Errorf("kernel selection identity cpu_offload_experts %d is negative", id.CPUOffloadExperts)
 	}
-	if id.Quantization != NativeSelectionQuantizationQ4K && id.PrefillChunkTokens != 0 {
-		return fmt.Errorf("kernel selection identity prefill chunk requires Q4_K quantization")
+	if id.Quantization != NativeSelectionQuantizationQ4K && id.Quantization != NativeSelectionQuantizationQ2_0 && id.Quantization != NativeSelectionQuantizationPQ2_0 && id.PrefillChunkTokens != 0 {
+		return fmt.Errorf("kernel selection identity prefill chunk requires resident Q4_K, Q2_0, or PQ2_0 quantization")
 	}
 	if id.Quantization != NativeSelectionQuantizationQ4K && id.Q4KGateUpOutputSlab {
 		return fmt.Errorf("kernel selection identity Q4_K gate/up output slab requires Q4_K quantization")

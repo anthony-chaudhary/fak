@@ -270,9 +270,21 @@ var opsRunInferenceProbeCache = struct {
 	entries map[string]opsRunInferenceProbeCacheEntry
 }{entries: make(map[string]opsRunInferenceProbeCacheEntry)}
 
-func opsRunInferencePreflight(ctx context.Context, baseURL, model string) (opsRunInferencePreflightReceipt, error) {
+func opsRunInferencePreflight(ctx context.Context, baseURL, model string, apiKeyEnv ...string) (opsRunInferencePreflightReceipt, error) {
+	apiKey := ""
+	if len(apiKeyEnv) > 0 && strings.TrimSpace(apiKeyEnv[0]) != "" {
+		apiKey = os.Getenv(strings.TrimSpace(apiKeyEnv[0]))
+		if strings.TrimSpace(apiKey) == "" {
+			receipt := opsRunInferenceRefusal("", baseURL, model, "missing_explicit_api_key")
+			return receipt, errors.New(receipt.Reason)
+		}
+	}
 	configSum := sha256.Sum256([]byte(strings.TrimSpace(baseURL) + "\x00" + strings.TrimSpace(model)))
-	cacheKey := hex.EncodeToString(configSum[:])
+	configKey := hex.EncodeToString(configSum[:])
+	// Credential identity isolates cached evidence in memory only. Receipts keep
+	// their configuration identity and never contain a credential fingerprint.
+	authSum := sha256.Sum256([]byte(apiKey))
+	cacheKey := configKey + "\x00" + hex.EncodeToString(authSum[:])
 	now := time.Now().UTC()
 
 	// Holding the lock across the one bounded request is deliberate: concurrent
@@ -286,12 +298,12 @@ func opsRunInferencePreflight(ctx context.Context, baseURL, model string) (opsRu
 		return cached.Receipt, nil
 	}
 
-	reason := opsRunProbeInferenceRoute(ctx, baseURL, model)
+	reason := opsRunProbeInferenceRoute(ctx, baseURL, model, apiKey)
 	status := "qualified"
 	if reason != "" {
 		status = "failed"
 	}
-	refSum := sha256.Sum256([]byte(opsRunInferencePreflightSchema + "\x00" + cacheKey + "\x00" + status + "\x00" + reason))
+	refSum := sha256.Sum256([]byte(opsRunInferencePreflightSchema + "\x00" + configKey + "\x00" + status + "\x00" + reason))
 	receipt := opsRunInferencePreflightReceipt{
 		Schema:     opsRunInferencePreflightSchema,
 		ReceiptRef: "sha256:" + hex.EncodeToString(refSum[:]),
@@ -333,7 +345,7 @@ func failOpsRunInferencePreflight(stderr io.Writer, receiptPath string, receipt 
 	return 1
 }
 
-func opsRunProbeInferenceRoute(ctx context.Context, baseURL, model string) string {
+func opsRunProbeInferenceRoute(ctx context.Context, baseURL, model, apiKey string) string {
 	endpoint, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil || endpoint.Scheme == "" || endpoint.Host == "" {
 		return "invalid_endpoint"
@@ -375,6 +387,9 @@ func opsRunProbeInferenceRoute(ctx context.Context, baseURL, model string) strin
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		if requestCtx.Err() != nil {
@@ -787,7 +802,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		preflight := opsRunInferenceRefusalWithStatus(*provider, *baseURL, *model, "missing_explicit_base_url", "refused")
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
 	}
-	preflight, err := opsRunInferencePreflight(ctx, *baseURL, *model)
+	preflight, err := opsRunInferencePreflight(ctx, *baseURL, *model, *apiKeyEnv)
 	receipt.InferencePreflight = &preflight
 	if err != nil {
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)

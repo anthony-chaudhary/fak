@@ -44,7 +44,7 @@ func NewAdapterRegistry(adapters ...Adapter) (*AdapterRegistry, error) {
 }
 
 func DefaultAdapterRegistry() *AdapterRegistry {
-	r, _ := NewAdapterRegistry(CodexJSONLAdapter{}, AGUIJSONLAdapter{}, ClaudeCodeJSONLAdapter{}, OpenAIChatExportAdapter{}, NativeReceiptAdapter{})
+	r, _ := NewAdapterRegistry(CodexJSONLAdapter{}, AGUIJSONLAdapter{}, ClaudeCodeJSONLAdapter{}, OpenAIChatExportAdapter{}, PiJSONLAdapter{}, NativeReceiptAdapter{})
 	return r
 }
 
@@ -305,6 +305,244 @@ func codexSemantics(envelopeType, subtype string) (EventKind, string, bool) {
 	default:
 		return "", "", false
 	}
+}
+
+// PiJSONLAdapter ingests the versioned Pi session JSONL log (one JSON object per
+// line). Pi records are a parent-linked tree: `session` opens the run with a schema
+// version, `model_change`/`thinking_level_change` are state, and `message` records
+// carry a role and typed content blocks (`text`, `toolCall`). Tool results arrive in
+// a follow-up `message` with role `toolResult` joined by `toolCallId`. The adapter
+// preserves session/entry/parent IDs, raw digests, tool-call/result linkage, usage
+// provenance (the whole message payload, including `usage`), and counts unknown
+// kinds rather than silently flattening them.
+type PiJSONLAdapter struct{}
+
+func (PiJSONLAdapter) Name() string       { return "pi-jsonl" }
+func (PiJSONLAdapter) Version() string    { return "1" }
+func (PiJSONLAdapter) SourceType() string { return "pi-jsonl" }
+
+// supportedPiSessionVersion is the pinned Pi session schema version this adapter
+// understands. A session that declares another version cannot qualify a run.
+const supportedPiSessionVersion = 3
+
+type piEnvelope struct {
+	Type          string          `json:"type"`
+	ID            string          `json:"id"`
+	ParentID      string          `json:"parentId"`
+	Timestamp     string          `json:"timestamp"`
+	Version       int             `json:"version"`
+	Cwd           string          `json:"cwd"`
+	Provider      string          `json:"provider"`
+	ModelID       string          `json:"modelId"`
+	ThinkingLevel string          `json:"thinkingLevel"`
+	Message       json.RawMessage `json:"message"`
+}
+
+type piMessage struct {
+	Role       string          `json:"role"`
+	ToolCallID string          `json:"toolCallId"`
+	ToolName   string          `json:"toolName"`
+	Content    json.RawMessage `json:"content"`
+	Usage      json.RawMessage `json:"usage"`
+}
+
+type piContentBlock struct {
+	Type      string          `json:"type"`
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Text      string          `json:"text"`
+	Arguments json.RawMessage `json:"arguments"`
+}
+
+func (a PiJSONLAdapter) Ingest(data []byte) ([]Event, FidelityReceipt, error) {
+	receipt := newReceipt(a.SourceType(), a.Name(), a.Version(), data)
+	var events []Event
+	sessionID := ""
+	unsupportedVersion := 0
+	versionUnsupported := false
+	toolResultsSeen := map[string]bool{}
+
+	err := scanJSONL(data, func(index int, raw []byte) error {
+		receipt.InputRecords++
+		var envelope piEnvelope
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			receipt.MalformedRecord++
+			return fmt.Errorf("pi-jsonl record %d: %w", index, err)
+		}
+		if envelope.Type == "session" {
+			sessionID = stringFieldRaw(envelope.ID, sessionID)
+			if envelope.Version != supportedPiSessionVersion {
+				unsupportedVersion = envelope.Version
+				versionUnsupported = true
+				receipt.UnknownKinds[fmt.Sprintf("session_version=%d", envelope.Version)]++
+			}
+		}
+		if sessionID == "" {
+			sessionID = "pi-import:" + strings.TrimPrefix(receipt.SourceDigest, "sha256:")[:16]
+		}
+		stamp, synthetic := nativeTime(envelope.Timestamp, index)
+		if synthetic {
+			receipt.SyntheticTimes++
+		}
+		emit := func(kind EventKind, action string, sourceEventID string, parents []string, payload json.RawMessage) error {
+			event := Event{
+				Schema: EventSchema, ID: canonicalEventID("pi", len(events), sourceEventID), ConversationID: sessionID,
+				Kind: kind, Action: action, Timestamp: stamp, Sequence: uint64(len(events) + 1), ParentIDs: parents,
+				Visibility: VisibilityDeveloper,
+				Source:     EventSource{Type: a.SourceType(), SessionID: sessionID, EventID: sourceEventID, OrderingKey: strconv.Itoa(index), RawDigest: digestBytes(raw), Adapter: a.Name(), AdapterVersion: a.Version()},
+				Payload:    payload,
+			}
+			if err := event.Validate(); err != nil {
+				return err
+			}
+			events = append(events, event)
+			return nil
+		}
+
+		switch envelope.Type {
+		case "session":
+			return emit(EventRunLifecycle, "started", envelope.ID, parentIDs(envelope.ParentID), json.RawMessage(raw))
+		case "model_change", "thinking_level_change":
+			return emit(EventObservation, "recorded", envelope.ID, parentIDs(envelope.ParentID), json.RawMessage(raw))
+		case "message":
+			var msg piMessage
+			if len(envelope.Message) == 0 || json.Unmarshal(envelope.Message, &msg) != nil {
+				receipt.MalformedRecord++
+				return fmt.Errorf("pi-jsonl record %d message: malformed", index)
+			}
+			switch msg.Role {
+			case "user", "assistant":
+				payload, normErr := normalizedPiMessage(msg)
+				if normErr != nil {
+					return normErr
+				}
+				if err := emit(EventMessage, "completed", envelope.ID, parentIDs(envelope.ParentID), payload); err != nil {
+					return err
+				}
+				// A tool call is an action the assistant proposed within its turn;
+				// preserve each block as its own linked event.
+				for _, block := range piBlocks(msg.Content) {
+					if block.Type != "toolCall" {
+						continue
+					}
+					callID := compactStrings(block.ID, envelope.ID)[0]
+					callPayload := block.Arguments
+					if len(callPayload) == 0 || !json.Valid(callPayload) {
+						callPayload = json.RawMessage(`{}`)
+					}
+					if err := emit(EventTool, "proposed", callID, compactStrings(envelope.ID, block.ID), callPayload); err != nil {
+						return err
+					}
+				}
+				return nil
+			case "toolResult":
+				if msg.ToolCallID != "" {
+					if toolResultsSeen[msg.ToolCallID] {
+						// Duplicate terminal record: count it, do not create a second
+						// tool effect for the same call.
+						receipt.Warnings = append(receipt.Warnings, "duplicate tool result for call "+msg.ToolCallID+" was not emitted twice")
+						return nil
+					}
+					toolResultsSeen[msg.ToolCallID] = true
+				}
+				resultPayload := json.RawMessage(`{}`)
+				if b, mErr := json.Marshal(map[string]any{"toolCallId": msg.ToolCallID, "toolName": msg.ToolName, "content": json.RawMessage(msg.Content)}); mErr == nil {
+					resultPayload = b
+				}
+				return emit(EventTool, "completed", envelope.ID, parentIDs(envelope.ParentID, msg.ToolCallID), resultPayload)
+			default:
+				receipt.UnknownKinds["message_role="+msg.Role]++
+				return emit(EventObservation, "recorded", envelope.ID, parentIDs(envelope.ParentID), json.RawMessage(raw))
+			}
+		default:
+			receipt.UnknownKinds[envelope.Type]++
+			payload := json.RawMessage(raw)
+			event := Event{
+				Schema: EventSchema, ID: canonicalEventID("pi", len(events), envelope.ID), ConversationID: sessionID,
+				Kind: EventObservation, Action: envelope.Type, Timestamp: stamp, Sequence: uint64(len(events) + 1), ParentIDs: parentIDs(envelope.ParentID),
+				Visibility: VisibilityDeveloper,
+				Source:     EventSource{Type: a.SourceType(), SessionID: sessionID, EventID: envelope.ID, OrderingKey: strconv.Itoa(index), RawDigest: digestBytes(raw), Adapter: a.Name(), AdapterVersion: a.Version()},
+				Payload:    payload, Loss: &LossReport{UnknownKinds: []string{envelope.Type}, Reason: "native kind preserved as observation"},
+			}
+			if err := event.Validate(); err != nil {
+				return err
+			}
+			events = append(events, event)
+			return nil
+		}
+	})
+	if err != nil {
+		receipt.EmittedEvents = len(events)
+		_ = finishReceipt(&receipt, events)
+		return events, receipt, err
+	}
+	if receipt.SyntheticTimes > 0 {
+		receipt.Warnings = append(receipt.Warnings, fmt.Sprintf("%d record(s) lacked a source timestamp; deterministic ordering timestamps were used", receipt.SyntheticTimes))
+	}
+	if len(receipt.UnknownKinds) > 0 {
+		receipt.Warnings = append(receipt.Warnings, "unsupported native kinds were counted and omitted")
+	}
+	if err := finishReceipt(&receipt, events); err != nil {
+		return events, receipt, err
+	}
+	if versionUnsupported {
+		return events, receipt, fmt.Errorf("pi-jsonl session schema version %d is unsupported (want %d); the run cannot be qualified", unsupportedVersion, supportedPiSessionVersion)
+	}
+	return events, receipt, nil
+}
+
+// normalizedPiMessage produces the stable message payload CompactTurns reads
+// (`role`/`text`) while preserving the original content blocks and the usage,
+// provider and model provenance a consumer needs. It never drops the native
+// blocks: they ride under `content`.
+func normalizedPiMessage(msg piMessage) (json.RawMessage, error) {
+	var textParts []string
+	for _, block := range piBlocks(msg.Content) {
+		if block.Type == "text" && strings.TrimSpace(block.Text) != "" {
+			textParts = append(textParts, block.Text)
+		}
+	}
+	object := map[string]any{"role": msg.Role, "text": strings.Join(textParts, "\n")}
+	if len(msg.Content) > 0 && json.Valid(msg.Content) {
+		object["content"] = json.RawMessage(msg.Content)
+	}
+	if msg.ToolCallID != "" {
+		object["tool_call_id"] = msg.ToolCallID
+	}
+	if msg.ToolName != "" {
+		object["tool_name"] = msg.ToolName
+	}
+	if len(msg.Usage) > 0 && json.Valid(msg.Usage) {
+		object["usage"] = json.RawMessage(msg.Usage)
+	}
+	normalized, err := json.Marshal(object)
+	if err != nil {
+		return nil, err
+	}
+	return normalized, nil
+}
+
+// piBlocks decodes a Pi message's typed content blocks; a non-list content yields none.
+func piBlocks(content json.RawMessage) []piContentBlock {
+	if len(content) == 0 {
+		return nil
+	}
+	var blocks []piContentBlock
+	if json.Unmarshal(content, &blocks) != nil {
+		return nil
+	}
+	return blocks
+}
+
+// parentIDs returns the non-empty parent identifiers in order.
+func parentIDs(values ...string) []string { return compactStrings(values...) }
+
+// stringFieldRaw returns value when non-blank, else fallback.
+func stringFieldRaw(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return value
+	}
+	return fallback
 }
 
 type AGUIJSONLAdapter struct{}
