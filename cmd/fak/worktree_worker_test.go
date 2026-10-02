@@ -1461,6 +1461,7 @@ func TestLandVerifyFlagParsesGoBuild(t *testing.T) {
 }
 
 func TestGoBuildVerifyRecreatesMissingBuildDirectories(t *testing.T) {
+	t.Setenv("FAK_SHARED_GOCACHE", "")
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain is not installed")
 	}
@@ -1482,6 +1483,7 @@ func TestGoBuildVerifyRecreatesMissingBuildDirectories(t *testing.T) {
 }
 
 func TestGoBuildVerifyFailsClosedWhenBuildDirectoryCannotBeCreated(t *testing.T) {
+	t.Setenv("FAK_SHARED_GOCACHE", "")
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain is not installed")
 	}

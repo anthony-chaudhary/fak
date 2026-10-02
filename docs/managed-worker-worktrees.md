@@ -26,8 +26,8 @@ Concurrent execution on a shared repository creates three major bottlenecks
 when multiple workers execute in the same working tree (#1334 / #1333):
 
 1. **Shared git index lock:** Simultaneous git commands collide on `.git/index.lock`.
-2. **Build cache collisions:** Shared Go build caches (`GOCACHE`) cause intermediate
-   compilation artifacts from one worker to turn another worker's builds red.
+2. **Build-state ownership:** Disposable caches and compiler temporary files need
+   a clear cleanup owner so one worker's cleanup does not remove another's state.
 3. **Dirty working tree cross-talk:** In-flight uncommitted edits from one session
    leak into diffs and status checks of another session.
 
@@ -38,9 +38,9 @@ single-source-of-truth trunk law (`OFF_TRUNK`):
   pinned to trunk HEAD (`git worktree add --detach <path> <sha>`). Because the
   worktree is not attached to `main`, git allows it to exist concurrently; because
   it is not on a feature branch, it never violates the off-trunk prohibition.
-- **Private build isolation:** Environment variables (`GOCACHE`, `GOTMPDIR`,
-  `DISPATCH_WORKSPACE`) point inside the worker's worktree directory, isolating
-  compilation caches and temporary files.
+- **Private build isolation by default:** `GOCACHE`, `GOTMPDIR`, and
+  `DISPATCH_WORKSPACE` point inside the worker's directory. An explicit shared
+  cache opt-in changes only `GOCACHE`; temporary files and source remain isolated.
 - **Single-writer landing (`land_worktree_diff`):** When a worker finishes, its
   diff-since-base is serialized and applied back onto `main` under its acquired
   lane lease. An isolated temporary index (`GIT_INDEX_FILE`) and compare-and-swap
@@ -115,17 +115,45 @@ fak-worker-wt-<lane>-<hashed-key>
 ### Build isolation environment variables
 
 When a worker process executes inside a managed worktree, its child environment
-is populated with isolated paths:
+uses these paths:
 
 | Variable | Value | Purpose |
 |---|---|---|
-| `GOCACHE` | `<worktree>/.gocache` | Private Go build cache; prevents cross-worker compiler pollution. |
+| `GOCACHE` | `<worktree>/.gocache` by default, or the absolute `FAK_SHARED_GOCACHE` path | Private cache by default; explicit shared-cache reuse when selected. |
 | `GOTMPDIR` | `<worktree>/.gotmp` | Private temporary directory for compiler operations. |
 | `DISPATCH_WORKSPACE` | `<worktree>` | Repoints tools to the isolated workspace root. |
 | `FLEET_WORKER_WORKTREE_DIR` | `<worktree>` | Identifies the active worktree directory to child processes. |
 
-Disposable build directories (`.gocache` and `.gotmp`) are created by
-`EnsureBuildDirs` during preparation, recreated upon reuse, and purged upon reap.
+`EnsureBuildDirs` creates or recreates the selected cache and private temporary
+directory when invoked before Go. It reports directory-creation errors and never
+recreates a missing worktree. Reaping removes directories inside the worktree;
+an external shared cache is outside that cleanup boundary.
+
+### Opt into an operator-owned shared Go cache
+
+Set `FAK_SHARED_GOCACHE` to an absolute directory outside all disposable
+worktrees. `WorktreeEnv` uses an explicitly supplied caller-map value first,
+otherwise the process environment. Whitespace is trimmed. Unset, empty, `off`,
+relative, or NUL-containing values retain `<worktree>/.gocache`; an explicit
+empty or invalid caller value also suppresses an ambient opt-in. An ambient
+`GOCACHE` alone does not enable this option. Inspect the returned `GOCACHE` in
+the preparation receipt to see the effective selection.
+
+Validation applies to the selected `GOCACHE` path. Other caller-map values,
+including the original `FAK_SHARED_GOCACHE` entry, are forwarded unchanged;
+constructing a valid process environment remains the caller's responsibility.
+
+Go's content-addressed build cache supports concurrent Go commands. Share it
+only among trusted writers, keep `GOTMPDIR` private, and manage the external
+directory's retention separately. This option adds no cache collector and does
+not give the worktree reaper ownership of shared storage. Unset
+`FAK_SHARED_GOCACHE` to restore the private-cache default; existing isolated-cache
+behavior is otherwise unchanged.
+
+Go does not detect changes to external C libraries imported through cgo. After
+changing those libraries, force the affected rebuild (for example, `go build -a`)
+or coordinate cache invalidation with the cache owner. Never clear a shared cache
+while other builds are using it. See `go help cache` for Go's cache contract.
 
 ## Lifecycle operations runbook
 

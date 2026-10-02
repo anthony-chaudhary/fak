@@ -14,8 +14,8 @@
 //  1. Each worker EDITS in its own throwaway worktree at a DETACHED HEAD pinned to
 //     the current trunk SHA (`git worktree add --detach <dir> <sha>`). A detached
 //     worktree is not on `main` (git does not refuse it) and not on a feature
-//     branch (it can never trip OFF_TRUNK); GOCACHE/GOTMPDIR point inside it so a
-//     broken build in one worktree cannot red another's.
+//     branch (it can never trip OFF_TRUNK); build directories are private by
+//     default, with an explicit shared Go cache option and always-private temp.
 //  2. The change LANDS on the trunk through a serialized commit-to-trunk step
 //     (Land): the worktree's diff-since-base is applied to the trunk worktree and
 //     committed there as a normal stamped, signed-off commit ON `main`. Nothing
@@ -24,10 +24,10 @@
 //
 // SAFETY STANCE: everything here is FAIL-OPEN and idempotent — a git error is
 // reported in the returned Result, never surfaced as a wedge, so wiring the
-// isolation in can only ADD isolation, never break a spawn or a sweep. The pure
-// planners (DirName/Path/WorktreeEnv/IsWorkerWorktree) are unit-tested without
-// git; the git-touching Prepare/Land/Reap take an injectable GitRunner so the
-// whole acquire→edit→land→reap path is exercised against a fake. See
+// isolation in can only ADD isolation, never break a spawn or a sweep. The path
+// and environment planners (DirName/Path/WorktreeEnv/IsWorkerWorktree) are tested
+// without git; Prepare/Land/Reap take an injectable GitRunner so the whole
+// acquire→edit→land→reap path is exercised against a fake. See
 // tools/worker_worktree.py for the reference implementation this mirrors 1:1.
 package workerworktree
 
@@ -62,6 +62,9 @@ const (
 	// so the switch is never overloaded as a path). The Python module reuses
 	// FLEET_WORKER_WORKTREE as the path marker; the Go wiring keeps them separate.
 	WorktreeDirEnv = "FLEET_WORKER_WORKTREE_DIR"
+	// SharedGoCacheEnv opts workers into an operator-owned absolute Go build cache.
+	// Empty or invalid values retain the default worktree-local cache.
+	SharedGoCacheEnv = "FAK_SHARED_GOCACHE"
 	// LandReadbackEnv makes Land re-read trunk HEAD after a path-scoped commit and
 	// confirm it actually carries the worker's intended paths — turning the silent
 	// shared-index-race false-success (#3547) into an honest LAND_READBACK_MISMATCH
@@ -361,12 +364,9 @@ func Path(lane, key, root string) string {
 	return filepath.Join(root, DirName(lane, key))
 }
 
-// WorktreeEnv returns the child env that isolates a worker's BUILD to its own
-// worktree, layered on top of whatever base the dispatcher already composed.
-// Pointing GOCACHE/GOTMPDIR INSIDE the worktree is what makes "a broken build in
-// one worker's worktree does not red another's" true. DISPATCH_WORKSPACE is
-// repointed at the worktree so a worker that reads it operates on its isolated
-// tree. Does not mutate base.
+// WorktreeEnv layers the managed worker's build environment over base without
+// mutating it. The cache is worktree-local unless SharedGoCacheEnv selects an
+// absolute path. Temporary files and workspace identity always remain private.
 func WorktreeEnv(base map[string]string, wtDir string) map[string]string {
 	env := make(map[string]string, len(base)+4)
 	for k, v := range base {
@@ -375,17 +375,27 @@ func WorktreeEnv(base map[string]string, wtDir string) map[string]string {
 	env["DISPATCH_WORKSPACE"] = wtDir
 	env[WorktreeDirEnv] = wtDir
 	env["GOCACHE"] = filepath.Join(wtDir, ".gocache")
+	// A caller's explicit key wins even when empty or invalid: it can disable an
+	// ambient opt-in without inheriting a different shared directory by accident.
+	sharedCache, explicit := base[SharedGoCacheEnv]
+	if !explicit {
+		sharedCache = os.Getenv(SharedGoCacheEnv)
+	}
+	sharedCache = strings.TrimSpace(sharedCache)
+	if filepath.IsAbs(sharedCache) && !strings.ContainsRune(sharedCache, '\x00') {
+		env["GOCACHE"] = sharedCache
+	}
 	env["GOTMPDIR"] = filepath.Join(wtDir, ".gotmp")
 	return env
 }
 
-// EnsureBuildDirs recreates the disposable Go build directories owned by a
-// managed worktree and returns the matching child environment. Reapers and
-// manual disk maintenance may remove either directory while the source
-// worktree remains valid, so callers must run this immediately before invoking
-// Go rather than relying on prepare-time state. The worktree itself must already
-// exist: refusing to recreate it keeps a reaped checkout from being resurrected
-// as an empty directory.
+// EnsureBuildDirs recreates the Go build directories selected for a managed
+// worktree and returns the matching child environment. An opted-in external
+// cache remains operator-owned. Reapers or disk maintenance may remove a
+// selected directory while the source worktree remains valid, so callers must
+// run this immediately before invoking Go rather than relying on prepare-time
+// state. The worktree itself must already exist: refusing to recreate it keeps
+// a reaped checkout from being resurrected as an empty directory.
 func EnsureBuildDirs(wtDir string) (map[string]string, error) {
 	info, err := os.Stat(wtDir)
 	if err != nil {

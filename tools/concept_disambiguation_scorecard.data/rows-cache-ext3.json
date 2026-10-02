@@ -88,7 +88,7 @@
       "kind": "config",
       "definition": "GOCACHE is the Go toolchain's on-disk build-artifact cache. internal/nightrun's preflightGoCache provisions a per-run GOCACHE under the build temp dir so a night run's compiles don't fail with 'build cache is required, but could not be located' on a HOME-less runner; export HOME or GOCACHE to keep a persistent cache across runs.",
       "distinction": "It is the Go COMPILER's build-artifact cache the night-run harness provisions, wholly unrelated to fak's runtime KV cache, the provider prompt-cache, or the cachevalue P&L — it caches object files, not tokens.",
-      "distinct_from": ["KV cache", "Provider cache", "vcache"],
+      "distinct_from": ["KV cache", "Provider cache", "vcache", "workerworktree-shared-go-cache-path"],
       "aliases": [],
       "grounding": "gocache",
       "grounding_kind": "symbol",

@@ -232,6 +232,7 @@ func TestDefaultRootHonoursEnv(t *testing.T) {
 }
 
 func TestWorktreeEnvIsolatesBuildIntoWorktree(t *testing.T) {
+	t.Setenv("FAK_SHARED_GOCACHE", "")
 	wt := filepath.FromSlash("/tmp/wt/fak-worker-wt-tools-abc")
 	env := WorktreeEnv(map[string]string{"PATH": "/usr/bin"}, wt)
 	if !strings.HasPrefix(env["GOCACHE"], wt) {
@@ -259,7 +260,111 @@ func TestWorktreeEnvDoesNotMutateBase(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=20ms lane=default
+func TestWorktreeSharedGoCacheOptIn(t *testing.T) {
+	const key = "FAK_SHARED_GOCACHE"
+	root := t.TempDir()
+	sharedA, sharedB := filepath.Join(root, "shared-a"), filepath.Join(root, "shared-b")
+	ptr := func(s string) *string { return &s }
+	for _, tc := range []struct {
+		name    string
+		ambient *string
+		base    *string
+		shared  string
+	}{
+		{name: "unset"},
+		{name: "empty", ambient: ptr("")},
+		{name: "off", ambient: ptr("off")},
+		{name: "relative", ambient: ptr("relative-cache")},
+		{name: "absolute", ambient: ptr(sharedA), shared: sharedA},
+		{name: "base-absolute-wins", ambient: ptr(sharedA), base: ptr(sharedB), shared: sharedB},
+		{name: "base-empty-disables", ambient: ptr(sharedA), base: ptr("")},
+		{name: "base-off-disables", ambient: ptr(sharedA), base: ptr("off")},
+		{name: "base-relative-isolates", ambient: ptr(sharedA), base: ptr("relative-cache")},
+		{name: "base-nul-isolates", ambient: ptr(sharedA), base: ptr(sharedB + "\x00")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(key, "")
+			if tc.ambient == nil {
+				if err := os.Unsetenv(key); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				t.Setenv(key, *tc.ambient)
+			}
+			base := map[string]string{
+				"PATH":     "preserved-path",
+				"GOCACHE":  filepath.Join(root, "ambient-cache-is-not-opt-in"),
+				"GOTMPDIR": filepath.Join(root, "ambient-temp-must-not-leak"),
+			}
+			if tc.base != nil {
+				base[key] = *tc.base
+			}
+			before := make(map[string]string, len(base))
+			for k, v := range base {
+				before[k] = v
+			}
+			for _, name := range []string{"worker-a", "worker-b"} {
+				wt := filepath.Join(root, name)
+				env := WorktreeEnv(base, wt)
+				wantCache := tc.shared
+				if wantCache == "" {
+					wantCache = filepath.Join(wt, ".gocache")
+				}
+				if env["GOCACHE"] != wantCache {
+					t.Errorf("%s GOCACHE = %q, want %q", name, env["GOCACHE"], wantCache)
+				}
+				if env["GOTMPDIR"] != filepath.Join(wt, ".gotmp") {
+					t.Errorf("%s GOTMPDIR = %q, want private temp", name, env["GOTMPDIR"])
+				}
+				if env["PATH"] != before["PATH"] || env["DISPATCH_WORKSPACE"] != wt || env[WorktreeDirEnv] != wt {
+					t.Errorf("%s unrelated environment or workspace identity changed: %#v", name, env)
+				}
+			}
+			if len(base) != len(before) {
+				t.Fatal("WorktreeEnv mutated the base map size")
+			}
+			for k, v := range before {
+				if base[k] != v {
+					t.Errorf("WorktreeEnv mutated base[%q]", k)
+				}
+			}
+		})
+	}
+
+	t.Run("selected-directories-and-creation-error", func(t *testing.T) {
+		wt := t.TempDir()
+		shared := filepath.Join(t.TempDir(), "shared-cache")
+		t.Setenv(key, shared)
+		for attempt := 0; attempt < 2; attempt++ {
+			env, err := EnsureBuildDirs(wt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if env["GOCACHE"] != shared || env["GOTMPDIR"] != filepath.Join(wt, ".gotmp") {
+				t.Fatalf("selected directories = %#v, want shared cache and private temp", env)
+			}
+			for _, path := range []string{shared, filepath.Join(wt, ".gotmp")} {
+				info, err := os.Stat(path)
+				if err != nil || !info.IsDir() {
+					t.Fatalf("directory %q: info=%v err=%v", path, info, err)
+				}
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if err := os.WriteFile(shared, []byte("not a directory"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := EnsureBuildDirs(wt); err == nil || !strings.Contains(err.Error(), "create GOCACHE directory") || !strings.Contains(err.Error(), shared) {
+			t.Fatalf("shared cache creation error = %v, want actionable GOCACHE path failure", err)
+		}
+	})
+}
+
 func TestEnsureBuildDirsRecreatesMissingOwnedDirectories(t *testing.T) {
+	t.Setenv("FAK_SHARED_GOCACHE", "")
 	wt := t.TempDir()
 	env, err := EnsureBuildDirs(wt)
 	if err != nil {
@@ -274,6 +379,7 @@ func TestEnsureBuildDirsRecreatesMissingOwnedDirectories(t *testing.T) {
 }
 
 func TestEnsureBuildDirsFailsClosedOnCreationError(t *testing.T) {
+	t.Setenv("FAK_SHARED_GOCACHE", "")
 	wt := t.TempDir()
 	gotmp := filepath.Join(wt, ".gotmp")
 	if err := os.WriteFile(gotmp, []byte("not a directory"), 0o644); err != nil {

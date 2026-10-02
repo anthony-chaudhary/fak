@@ -748,3 +748,10 @@ internal/workerworktree.sweepTopologyCandidatesBeforeCreate is the rate-limited,
 The per-launch random credential written into the guarded child's MCP HTTP config and hash-validated by the gateway to prove that an MCP request came from that launched child; it grants no workspace lease ownership.
 
 **Distinct from:** It proves guard-child launch provenance for MCP requests; it is not the gateway RequireKey/defaultGatewayBearerToken traffic credential and not the stored SHA-256 digest.
+
+
+### sharedCache (requested worker Go build-cache path)
+
+sharedCache is the requested Go build-cache path read by internal/workerworktree.WorktreeEnv from an explicit caller-map FAK_SHARED_GOCACHE value, otherwise the process environment. An explicit empty value suppresses ambient opt-in. After trimming, an absolute path without NUL selects GOCACHE; invalid or disabled input retains the worktree-local default.
+
+**Distinct from:** This is the worker opt-in path selection value, not GOCACHE itself, a runtime KV or provider cache, a warm-seeding copy, or cache-retention authority. GOTMPDIR remains worktree-private and the worktree reaper does not own an external shared cache.

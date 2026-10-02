@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "workerworktree-shared-go-cache-path",
+      "canonical": "sharedCache (requested worker Go build-cache path)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "sharedCache is the requested Go build-cache path read by internal/workerworktree.WorktreeEnv from an explicit caller-map FAK_SHARED_GOCACHE value, otherwise the process environment. An explicit empty value suppresses ambient opt-in. After trimming, an absolute path without NUL selects GOCACHE; invalid or disabled input retains the worktree-local default.",
+      "distinction": "This is the worker opt-in path selection value, not GOCACHE itself, a runtime KV or provider cache, a warm-seeding copy, or cache-retention authority. GOTMPDIR remains worktree-private and the worktree reaper does not own an external shared cache.",
+      "distinct_from": [
+        "x3-cache-gocache"
+      ],
+      "aliases": [],
+      "grounding": "sharedCache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
