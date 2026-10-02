@@ -102,11 +102,11 @@ func (c *Collector) writeServerState(b *strings.Builder, ltTotals *shardTotals, 
 		b.WriteString("# TYPE l3_server_payload_gb_in counter\n")
 		fmt.Fprintf(b, "l3_server_payload_gb_in %.6f\n", float64(ltTotals.bytesIn)/(1<<30))
 
-		b.WriteString("\n# HELP l3_server_payload_gb_out Total payload bytes served (value on GET hit) in GiB.\n")
+		b.WriteString("\n# HELP l3_server_payload_gb_out Total logical value bytes served by GET hits, including descriptors, in GiB.\n")
 		b.WriteString("# TYPE l3_server_payload_gb_out counter\n")
 		fmt.Fprintf(b, "l3_server_payload_gb_out %.6f\n", float64(ltTotals.bytesOut)/(1<<30))
 
-		b.WriteString("\n# HELP l3_server_rdma_read_gb_out Subset of payload_gb_out served via RDMA Read in GiB.\n")
+		b.WriteString("\n# HELP l3_server_rdma_read_gb_out Completed RDMA Read payload in GiB; completion accounting is unavailable in the public port, so this remains zero.\n")
 		b.WriteString("# TYPE l3_server_rdma_read_gb_out counter\n")
 		fmt.Fprintf(b, "l3_server_rdma_read_gb_out %.6f\n", float64(ltTotals.rdmaReadBytesOut)/(1<<30))
 
@@ -328,12 +328,14 @@ func (c *Collector) writeWireProtocol(b *strings.Builder, totals *shardTotals) {
 
 	if totals != nil {
 		const gb = 1 << 30
-		inlinePayloadSent := totals.bytesOut - totals.rdmaReadBytesOut
+		// Keep the legacy arithmetic for dashboard compatibility. Descriptor
+		// hits count logical bytes without establishing any wire transfer.
+		logicalPayloadResidual := totals.bytesOut - totals.rdmaReadBytesOut
 		effectiveSent := wireBytesSent + totals.rdmaReadBytesOut
 		opsRecv := wireBytesRecv - totals.bytesIn
-		opsSent := wireBytesSent - inlinePayloadSent
+		opsSentEstimate := wireBytesSent - logicalPayloadResidual
 
-		b.WriteString("\n# HELP l3_wire_effective_gb_sent_total Wire sent + RDMA Read payload in GiB.\n")
+		b.WriteString("\n# HELP l3_wire_effective_gb_sent_total Wire sent plus recorded completed RDMA Read payload in GiB; RDMA completion accounting is unavailable in the public port.\n")
 		b.WriteString("# TYPE l3_wire_effective_gb_sent_total counter\n")
 		fmt.Fprintf(b, "l3_wire_effective_gb_sent_total %.6f\n", float64(effectiveSent)/gb)
 
@@ -343,17 +345,17 @@ func (c *Collector) writeWireProtocol(b *strings.Builder, totals *shardTotals) {
 		fmt.Fprintf(b, "l3_wire_payload_gb_recv %.6f\n", float64(totals.bytesIn)/gb)
 
 		// Backward compatibility: deprecated in v0.22.0, kept for existing dashboards
-		b.WriteString("\n# HELP l3_wire_payload_gb_sent Inline payload bytes sent (excluding RDMA Read) in GiB (DEPRECATED: use l3_server_payload_gb_out).\n")
+		b.WriteString("\n# HELP l3_wire_payload_gb_sent Logical payload less recorded completed RDMA bytes in GiB, not measured inline traffic (DEPRECATED: use l3_server_payload_gb_out).\n")
 		b.WriteString("# TYPE l3_wire_payload_gb_sent counter\n")
-		fmt.Fprintf(b, "l3_wire_payload_gb_sent %.6f\n", float64(inlinePayloadSent)/gb)
+		fmt.Fprintf(b, "l3_wire_payload_gb_sent %.6f\n", float64(logicalPayloadResidual)/gb)
 
 		b.WriteString("\n# HELP l3_wire_ops_gb_recv Framing/opcode overhead bytes received in GiB.\n")
 		b.WriteString("# TYPE l3_wire_ops_gb_recv counter\n")
 		fmt.Fprintf(b, "l3_wire_ops_gb_recv %.6f\n", float64(opsRecv)/gb)
 
-		b.WriteString("\n# HELP l3_wire_ops_gb_sent Framing/opcode overhead bytes sent in GiB.\n")
+		b.WriteString("\n# HELP l3_wire_ops_gb_sent Legacy overhead estimate: wire bytes less logical payload residual in GiB; not measured framing and may be negative for descriptor reads.\n")
 		b.WriteString("# TYPE l3_wire_ops_gb_sent counter\n")
-		fmt.Fprintf(b, "l3_wire_ops_gb_sent %.6f\n", float64(opsSent)/gb)
+		fmt.Fprintf(b, "l3_wire_ops_gb_sent %.6f\n", float64(opsSentEstimate)/gb)
 
 		epochSec := time.Since(c.connReg.StatsEpoch()).Seconds()
 		if epochSec > 0 {
@@ -368,19 +370,19 @@ func (c *Collector) writeWireProtocol(b *strings.Builder, totals *shardTotals) {
 			b.WriteString("# TYPE l3_server_wire_throughput_gbps_in gauge\n")
 			fmt.Fprintf(b, "l3_server_wire_throughput_gbps_in %.6f\n", gbIn/epochSec)
 
-			b.WriteString("\n# HELP l3_wire_throughput_gbps_out Payload serve throughput in GiB/s.\n")
+			b.WriteString("\n# HELP l3_wire_throughput_gbps_out Logical payload serve throughput, including descriptor reads, in GiB/s.\n")
 			b.WriteString("# TYPE l3_wire_throughput_gbps_out gauge\n")
 			fmt.Fprintf(b, "l3_wire_throughput_gbps_out %.6f\n", gbOut/epochSec)
 
-			b.WriteString("\n# HELP l3_server_wire_throughput_gbps_out Payload serve throughput in GiB/s.\n")
+			b.WriteString("\n# HELP l3_server_wire_throughput_gbps_out Logical payload serve throughput, including descriptor reads, in GiB/s.\n")
 			b.WriteString("# TYPE l3_server_wire_throughput_gbps_out gauge\n")
 			fmt.Fprintf(b, "l3_server_wire_throughput_gbps_out %.6f\n", gbOut/epochSec)
 
-			b.WriteString("\n# HELP l3_wire_throughput_gbps_total Combined payload throughput in GiB/s.\n")
+			b.WriteString("\n# HELP l3_wire_throughput_gbps_total Combined logical payload throughput in GiB/s.\n")
 			b.WriteString("# TYPE l3_wire_throughput_gbps_total gauge\n")
 			fmt.Fprintf(b, "l3_wire_throughput_gbps_total %.6f\n", (gbIn+gbOut)/epochSec)
 
-			b.WriteString("\n# HELP l3_server_wire_throughput_gbps_total Combined payload throughput in GiB/s.\n")
+			b.WriteString("\n# HELP l3_server_wire_throughput_gbps_total Combined logical payload throughput in GiB/s.\n")
 			b.WriteString("# TYPE l3_server_wire_throughput_gbps_total gauge\n")
 			fmt.Fprintf(b, "l3_server_wire_throughput_gbps_total %.6f\n", (gbIn+gbOut)/epochSec)
 		}
@@ -1064,6 +1066,7 @@ func (c *Collector) MetricsJSONHandler(w http.ResponseWriter, r *http.Request) {
 			"gb_in":            float64(totals.bytesIn) / (1 << 30),
 			"gb_out":           float64(totals.bytesOut) / (1 << 30),
 			"rdma_read_gb_out": float64(totals.rdmaReadBytesOut) / (1 << 30),
+			"accounting":       "gb_out counts logical value bytes served, including descriptors; rdma_read_gb_out counts completed transfers only, whose accounting is unavailable in the public port.",
 		}
 		if totals.sets > 0 {
 			payload["avg_key_bytes"] = float64(totals.keyBytesIn) / float64(totals.sets)
@@ -1142,16 +1145,17 @@ func (c *Collector) MetricsJSONHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if totals != nil {
-			inlinePayloadSent := totals.bytesOut - totals.rdmaReadBytesOut
+			logicalPayloadResidual := totals.bytesOut - totals.rdmaReadBytesOut
 			effectiveSent := wireBytesSent + totals.rdmaReadBytesOut
 			opsRecv := wireBytesRecv - totals.bytesIn
-			opsSent := wireBytesSent - inlinePayloadSent
+			opsSentEstimate := wireBytesSent - logicalPayloadResidual
 
 			wire["effective_gb_sent_total"] = float64(effectiveSent) / gb
 			wire["payload_gb_recv"] = float64(totals.bytesIn) / gb
-			wire["payload_gb_sent"] = float64(inlinePayloadSent) / gb
+			wire["payload_gb_sent"] = float64(logicalPayloadResidual) / gb
 			wire["ops_gb_recv"] = float64(opsRecv) / gb
-			wire["ops_gb_sent"] = float64(opsSent) / gb
+			wire["ops_gb_sent"] = float64(opsSentEstimate) / gb
+			wire["accounting"] = "payload_gb_sent is logical payload less recorded completed RDMA bytes, not measured inline traffic; ops_gb_sent is a legacy overhead estimate and may be negative. Effective sent includes only recorded completed RDMA bytes, whose accounting is unavailable in the public port. Throughput uses logical payload."
 
 			epochSec := time.Since(c.connReg.StatsEpoch()).Seconds()
 			if epochSec > 0 {
