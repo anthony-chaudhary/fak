@@ -544,6 +544,20 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 	if err != nil {
 		return nil, err
 	}
+	// GGUF metadata and packed-row readers do not attach an executable Engram
+	// stage. Refuse the model before materializing weights rather than let the
+	// nil DeepSeekV41 config pointer silently omit a declared stage. Keep this
+	// fence at model-load admission so header inspection and row reads remain
+	// available while the full serving attachment is implemented.
+	if archIsDeepSeek41(cfg.ModelType) {
+		if eng := s.File.DeepSeek41Engram; eng != nil && len(eng.LayerIDs) > 0 {
+			return nil, &model.V41ForwardError{
+				Stage: "engram",
+				Layer: eng.LayerIDs[0],
+				Err:   fmt.Errorf("%w: GGUF-declared Engram has no executable serving attachment", model.ErrV41NativeUnsupported),
+			}
+		}
+	}
 	prism, err := s.File.PrismHadamardMeta()
 	if err != nil {
 		return nil, err
