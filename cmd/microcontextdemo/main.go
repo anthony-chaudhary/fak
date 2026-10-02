@@ -40,6 +40,9 @@ type config struct {
 	LiveInput      string
 	WorkUnits      []liveWorkUnit
 	Lineage        *microagent.Lineage
+
+	// SyntheticBeforeComplete is a test seam installed only on the synthetic endpoint.
+	SyntheticBeforeComplete func(context.Context) error
 }
 
 type report struct {
@@ -164,7 +167,9 @@ func run(ctx context.Context, cfg config) (result report, err error) {
 		if cfg.ControlledSoak {
 			return report{}, fmt.Errorf("controlled soak requires a live endpoint")
 		}
-		gw = newFakeEndpoint(base, cfg.Delay)
+		fake := newFakeEndpoint(base, cfg.Delay)
+		fake.beforeComplete = cfg.SyntheticBeforeComplete
+		gw = fake
 	}
 	host, err := microagent.NewHost(gw, microagent.Config{Workers: cfg.Workers, Queue: cfg.Contexts})
 	if err != nil {

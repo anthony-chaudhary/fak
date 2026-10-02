@@ -21,6 +21,8 @@ type fakeEndpoint struct {
 	peak     atomic.Int64
 	seenMu   sync.Mutex
 	seen     map[string]struct{}
+
+	beforeComplete func(context.Context) error
 }
 
 func newFakeEndpoint(base *sharedBase, delay time.Duration) *fakeEndpoint {
@@ -50,6 +52,11 @@ func (g *fakeEndpoint) Complete(ctx context.Context, messages []agent.Message, _
 	}
 	g.seen[id] = struct{}{}
 	g.seenMu.Unlock()
+	if g.beforeComplete != nil {
+		if err := g.beforeComplete(ctx); err != nil {
+			return nil, err
+		}
+	}
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
