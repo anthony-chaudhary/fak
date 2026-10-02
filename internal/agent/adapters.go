@@ -50,6 +50,12 @@ type TranscriptAdapter interface {
 	ParseResponse(raw []byte) (*Completion, error)
 }
 
+// responseFieldsParser separates provider field decoding from optional text-tool
+// recovery, which needs the tools offered by the current planner request.
+type responseFieldsParser interface {
+	parseResponseFields(raw []byte) (*Completion, error)
+}
+
 type adapterRequest struct {
 	Model       string
 	Messages    []Message
@@ -393,6 +399,11 @@ func marshalWithExtraBody(base any, extra json.RawMessage) ([]byte, error) {
 // taking the first choice's message/finish-reason, upgrading any legacy
 // function_call into a tool call, and carrying through usage and the echoed model.
 func (a openAIAdapter) ParseResponse(raw []byte) (*Completion, error) {
+	comp, err := a.parseResponseFields(raw)
+	return normalizeCompletionToolCalls(comp), err
+}
+
+func (a openAIAdapter) parseResponseFields(raw []byte) (*Completion, error) {
 	var cr openAIResponse
 	if err := json.Unmarshal(raw, &cr); err != nil {
 		return nil, fmt.Errorf("decode: %w (body: %s)", err, truncate(raw, 200))
@@ -412,13 +423,13 @@ func (a openAIAdapter) ParseResponse(raw []byte) (*Completion, error) {
 	finish := cr.Choices[0].FinishReason
 	normalizeLegacyOpenAIFunctionCall(&msg, &finish)
 	separateMessageReasoning(&msg)
-	return normalizeCompletionToolCalls(&Completion{
+	return &Completion{
 		Message:      msg,
 		FinishReason: finish,
 		Usage:        cr.Usage,
 		Model:        cr.Model,
 		ServiceTier:  parseServiceTier(a.Provider(), cr.ServiceTier),
-	}), nil
+	}, nil
 }
 
 func normalizeLegacyOpenAIFunctionCall(msg *Message, finish *string) {
@@ -827,7 +838,12 @@ func openAIResponsesTools(tools []ToolDef) []json.RawMessage {
 // the top-level output_text, extracts reasoning items into ReasoningContent, derives
 // the finish reason from the calls/status, and maps the input/output/cached/reasoning
 // token details into Usage.
-func (openAIResponsesAdapter) ParseResponse(raw []byte) (*Completion, error) {
+func (a openAIResponsesAdapter) ParseResponse(raw []byte) (*Completion, error) {
+	comp, err := a.parseResponseFields(raw)
+	return normalizeCompletionToolCalls(comp), err
+}
+
+func (a openAIResponsesAdapter) parseResponseFields(raw []byte) (*Completion, error) {
 	var rr openAIResponsesResponse
 	if err := json.Unmarshal(raw, &rr); err != nil {
 		return nil, fmt.Errorf("decode: %w (body: %s)", err, truncate(raw, 200))
@@ -933,7 +949,7 @@ func (openAIResponsesAdapter) ParseResponse(raw []byte) (*Completion, error) {
 		ToolCalls:        calls,
 	}
 	separateMessageReasoning(&msg)
-	return normalizeCompletionToolCalls(&Completion{
+	return &Completion{
 		Message:      msg,
 		FinishReason: finish,
 		Model:        rr.Model,
@@ -945,7 +961,7 @@ func (openAIResponsesAdapter) ParseResponse(raw []byte) (*Completion, error) {
 			PromptTokensDetails:     details,
 			CompletionTokensDetails: rr.Usage.OutputTokensDetails,
 		},
-	}), nil
+	}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1353,7 +1369,12 @@ func sanitizeSchemaRequired(m map[string]any) {
 // first candidate's text parts become content and its functionCall parts become tool
 // calls, the finishReason is lowercased (or "tool_calls" when calls are present), and
 // the usageMetadata token counts (including cached content) map into Usage.
-func (geminiAdapter) ParseResponse(raw []byte) (*Completion, error) {
+func (a geminiAdapter) ParseResponse(raw []byte) (*Completion, error) {
+	comp, err := a.parseResponseFields(raw)
+	return normalizeCompletionToolCalls(comp), err
+}
+
+func (a geminiAdapter) parseResponseFields(raw []byte) (*Completion, error) {
 	var gr geminiResponse
 	if err := json.Unmarshal(raw, &gr); err != nil {
 		return nil, fmt.Errorf("decode: %w (body: %s)", err, truncate(raw, 200))
@@ -1409,7 +1430,7 @@ func (geminiAdapter) ParseResponse(raw []byte) (*Completion, error) {
 		ToolCalls:        calls,
 	}
 	separateMessageReasoning(&msg)
-	return normalizeCompletionToolCalls(&Completion{
+	return &Completion{
 		Message:      msg,
 		FinishReason: finish,
 		Model:        gr.ModelVersion,
@@ -1419,5 +1440,5 @@ func (geminiAdapter) ParseResponse(raw []byte) (*Completion, error) {
 			TotalTokens:         gr.UsageMetadata.TotalTokenCount,
 			PromptTokensDetails: details,
 		},
-	}), nil
+	}, nil
 }
