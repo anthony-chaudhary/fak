@@ -2992,14 +2992,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	if inKernelEffectiveToolName(sp.ToolChoice, tools) != "" {
 		comp = enforceForcedToolChoice(comp, sp.ToolChoice, tools, messages)
 	}
-	// Fail closed on a TRUNCATED tool call: the in-kernel finishReason is "stop"/"length"
-	// (never "tool_calls"), so normalizeCompletionToolCalls cannot infer a drop from the
-	// finish reason. If decode emitted an unclosed <tool_call> opener that the lift could
-	// not recover, mark ToolCallsDropped so the conformance gate refuses the turn rather
-	// than silently leaking a half-formed call into Claude Code's context.
-	if len(comp.Message.ToolCalls) == 0 && strings.Contains(comp.Message.Content, "<tool_call>") {
-		comp.ToolCallsDropped = true
-	}
+	markInKernelDroppedToolCalls(comp)
 	return comp, nil
 }
 

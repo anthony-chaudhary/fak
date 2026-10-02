@@ -15,8 +15,9 @@ type EvictionPressure struct {
 	// (reuse/reclaim). A rising value across samples is direct evidence of
 	// pressure-driven eviction.
 	RecoveryCount int `json:"recovery_count"`
-	// MemorystatusLevel is the macOS memorystatus level: 1 = normal,
-	// 2 = warning (foreground pressure), 4 = critical (jetsam killing).
+	// MemorystatusLevel is kern.memorystatus_level, the integer percentage
+	// of available memory. It is not the separate 1/2/4 pressure enum exposed
+	// by kern.memorystatus_vm_pressure_level.
 	MemorystatusLevel int `json:"memorystatus_level"`
 	// WiredLimitBytes is the process/VM wired-memory ceiling used to model
 	// resident-memory headroom. 0 means the ceiling is unknown/unavailable.
@@ -30,8 +31,8 @@ type EvictionPressure struct {
 	// HeadroomFraction is HeadroomBytes / WiredLimitBytes, or 0 when
 	// WiredLimitBytes is 0 (guards division by zero).
 	HeadroomFraction float64 `json:"headroom_fraction"`
-	// AtRisk reports whether the observed headroom is below the configured
-	// reserve, i.e. an eviction/jetsam kill is plausible.
+	// AtRisk reports whether a positive available-memory percentage is below the
+	// eviction floor or known headroom is below the configured reserve.
 	AtRisk bool `json:"at_risk"`
 }
 
@@ -56,7 +57,7 @@ func BuildEvictionPressure(recoveryCount, memorystatusLevel int, wiredLimitBytes
 	// The reserve rule only applies when the wired ceiling is known; an
 	// unknown ceiling yields no evidence either way, so it defers entirely to
 	// the kernel memorystatus level.
-	atRisk := memorystatusLevel >= MemorystatusLevelWarning
+	atRisk := memorystatusLevel > 0 && memorystatusLevel < evictionAvailablePercentFloor
 	if underReserve := evictionReserveKnown(wiredLimitBytes) && reserveBytes > 0 && headroom < reserveBytes; underReserve {
 		atRisk = true
 	}
@@ -75,12 +76,12 @@ func BuildEvictionPressure(recoveryCount, memorystatusLevel int, wiredLimitBytes
 // IsEvictionRisk classifies whether the observed memory state is consistent
 // with an imminent eviction/jetsam kill. It is a pure predicate.
 //
-// A workload is at risk when either the kernel has escalated past the normal
-// memorystatus level (level >= MemorystatusLevelWarning) or the wired-limit
+// A workload is at risk when either its positive available-memory percentage
+// from kern.memorystatus_level is below the eviction floor or the wired-limit
 // headroom has fallen below the required reserve. A reserve of 0 means only
-// the memorystatus level is consulted.
+// the percentage is consulted.
 func IsEvictionRisk(memorystatusLevel int, headroomBytes, reserveBytes uint64) bool {
-	if memorystatusLevel >= MemorystatusLevelWarning {
+	if memorystatusLevel > 0 && memorystatusLevel < evictionAvailablePercentFloor {
 		return true
 	}
 	if reserveBytes > 0 && headroomBytes < reserveBytes {
@@ -97,16 +98,25 @@ func evictionReserveKnown(wiredLimitBytes uint64) bool {
 	return wiredLimitBytes > 0
 }
 
-// Memorystatus levels reported by the macOS kernel via
-// sysctl kern.memorystatus_level. Exposed as named constants so receipts and
-// tests share the closed vocabulary instead of bare literals.
+// evictionAvailablePercentFloor is this classifier's minimum available-memory
+// percentage. It is separate from analyzer.go's 15% degradation threshold and
+// is not a kernel jetsam threshold. Non-positive inputs retain abstention from
+// the percentage rule.
+const evictionAvailablePercentFloor = 3
+
+// Legacy pressure enum constants refer only to kern.memorystatus_vm_pressure_level,
+// not the available-memory percentage consumed by the eviction helpers.
 const (
-	// MemorystatusLevelNormal is the steady state: no pressure.
+	// MemorystatusLevelNormal is the vm-pressure enum's normal state.
+	//
+	// Deprecated: do not pass this enum to the percentage-based eviction helpers.
 	MemorystatusLevelNormal = 1
-	// MemorystatusLevelWarning indicates the system is under memory
-	// pressure and the kernel is actively reclaiming pages.
+	// MemorystatusLevelWarning is the vm-pressure enum's warning state.
+	//
+	// Deprecated: do not pass this enum to the percentage-based eviction helpers.
 	MemorystatusLevelWarning = 2
-	// MemorystatusLevelCritical indicates severe pressure; the kernel is
-	// evicting (jetsam-killing) processes to survive.
+	// MemorystatusLevelCritical is the vm-pressure enum's critical state.
+	//
+	// Deprecated: do not pass this enum to the percentage-based eviction helpers.
 	MemorystatusLevelCritical = 4
 )

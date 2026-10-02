@@ -57,6 +57,8 @@ func TestFloor2088MalformedDropRendersTypedCode(t *testing.T) {
 	comp := &agent.Completion{
 		ToolCallsDropped:       true,
 		ToolCallsDroppedReason: abi.ReasonMalformed,
+		FinishReason:           "length",
+		Usage:                  agent.Usage{CompletionTokens: 24},
 		Message:                agent.Message{Role: agent.RoleAssistant},
 	}
 	asst := comp.Message
@@ -76,6 +78,10 @@ func TestFloor2088MalformedDropRendersTypedCode(t *testing.T) {
 	}
 	if !strings.Contains(msg, "refusing to skip adjudication") {
 		t.Fatalf("refusal message %q must still state it refuses to skip adjudication", msg)
+	}
+	const legacy = "upstream tool-call format not recognized; refusing to skip adjudication (typed refusal: MALFORMED — the model's tool call could not be formed into an adjudicable call)"
+	if msg != legacy {
+		t.Fatalf("MALFORMED message changed: got %q, want %q", msg, legacy)
 	}
 }
 
@@ -101,6 +107,58 @@ func TestFloor2088OversizeDropRendersTypedCode(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=10ms lane=default
+func TestOversizeRefusalNamesBudget(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		tokens int
+	}{
+		{name: "observed usage", tokens: 24},
+		{name: "usage unavailable", tokens: 0},
+		{name: "invalid usage", tokens: -1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			comp := &agent.Completion{
+				ToolCallsDropped:       true,
+				ToolCallsDroppedReason: abi.ReasonOversize,
+				FinishReason:           "length",
+				Usage:                  agent.Usage{CompletionTokens: tt.tokens},
+				Message: agent.Message{Role: agent.RoleAssistant,
+					Content: `SECRET_REPLY_13562 <tool_call>{"arguments":"SECRET_ARGUMENT_13562`},
+				Raw: []byte("SECRET_RAW_13562"),
+			}
+			rec := httptest.NewRecorder()
+			if floor2088Server().validateChatCompletionConformance(rec, nil, comp, comp.Message, false, false, false, nil) {
+				t.Fatal("OVERSIZE call passed the conformance gate")
+			}
+			code, hasCode, msg := decodeErrEnvelope(t, rec)
+			if rec.Code != http.StatusBadGateway || !hasCode || code != "OVERSIZE" {
+				t.Fatalf("refusal status/code = %d/%q (present=%v), want 502/OVERSIZE", rec.Code, code, hasCode)
+			}
+			if !strings.HasPrefix(msg, "upstream tool-call format not recognized; refusing to skip adjudication") {
+				t.Fatalf("legacy refusal prefix changed: %q", msg)
+			}
+			for _, guidance := range []string{"max_tokens", "split", "call"} {
+				if !strings.Contains(msg, guidance) {
+					t.Errorf("OVERSIZE response lacks %q guidance: %q", guidance, msg)
+				}
+			}
+			if tt.tokens > 0 {
+				if !strings.Contains(msg, "24 completion tokens") {
+					t.Errorf("response omits observed completion usage: %q", msg)
+				}
+			} else if strings.Contains(msg, " completion tokens") {
+				t.Errorf("response invents a count for unavailable/invalid usage: %q", msg)
+			}
+			for _, secret := range []string{"SECRET_REPLY_13562", "SECRET_ARGUMENT_13562", "SECRET_RAW_13562"} {
+				if strings.Contains(rec.Body.String(), secret) {
+					t.Errorf("refusal exposes model payload %q", secret)
+				}
+			}
+		})
+	}
+}
+
 // TestFloor2088ReasonNoneKeepsOpaquePath is the fail-closed generic path: with
 // ReasonNone (unspecified unparseable upstream format) the historical opaque
 // message is emitted and NO typed code appears (code stays null).
@@ -109,6 +167,8 @@ func TestFloor2088ReasonNoneKeepsOpaquePath(t *testing.T) {
 	comp := &agent.Completion{
 		ToolCallsDropped:       true,
 		ToolCallsDroppedReason: abi.ReasonNone,
+		FinishReason:           "length",
+		Usage:                  agent.Usage{CompletionTokens: 24},
 		Message:                agent.Message{Role: agent.RoleAssistant},
 	}
 	rec := httptest.NewRecorder()
@@ -124,6 +184,11 @@ func TestFloor2088ReasonNoneKeepsOpaquePath(t *testing.T) {
 	}
 	if !strings.Contains(msg, "tool-call format not recognized") {
 		t.Fatalf("ReasonNone message = %q, want the historical opaque format", msg)
+	}
+	legacy := httptest.NewRecorder()
+	writeErr(legacy, http.StatusBadGateway, "upstream tool-call format not recognized; refusing to skip adjudication")
+	if rec.Body.String() != legacy.Body.String() {
+		t.Fatalf("ReasonNone body changed: got %q, want %q", rec.Body.String(), legacy.Body.String())
 	}
 }
 

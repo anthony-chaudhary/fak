@@ -8627,6 +8627,11 @@
           "category": "incidental",
           "reason": "Pre-existing agent.Completion.InKernelBatch coordinator receipt field referenced by the buffered native gateway path (#13317); a wire projection of the already-authoritative in-kernel batch receipt, not a new gateway concept.",
           "token": "inkernelbatch"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private post-decode completion guard that preserves fail-closed tool-call handling and assigns existing OVERSIZE or MALFORMED reason codes; it introduces no new gateway transport, execution engine, or admission authority.",
+          "token": "markInKernelDroppedToolCalls"
         }
       ],
       "id": "gateway-engine",
@@ -8734,6 +8739,7 @@
         "kernel_completion_timing",
         "kernels",
         "kernelwiki",
+        "markInKernelDroppedToolCalls",
         "microCacheKernel32",
         "microCacheMoveFileExW",
         "microCacheMovefileReplaceExisting",
@@ -12866,6 +12872,11 @@
           "category": "incidental",
           "reason": "Counter of overwritten bounded proof-ring entries; it does not evict model context, cache entries or durable evidence.",
           "token": "EvictedReceipts"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported implementation constant sharing the admitted 3-percent available-memory boundary for issue #13537 between the existing BuildEvictionPressure and IsEvictionRisk helpers. It introduces no separate eviction mechanism, public policy API, or kernel pressure enum; the classifier and its percentage-versus-enum distinction remain the concept.",
+          "token": "evictionAvailablePercentFloor"
         }
       ],
       "id": "evict",
@@ -12901,6 +12912,7 @@
         "evictable",
         "evicting",
         "eviction",
+        "evictionAvailablePercentFloor",
         "eviction_postcondition_failed",
         "evictions_delta",
         "evicts",

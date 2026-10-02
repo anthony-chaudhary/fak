@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Hermetic unit tests for tools/cuda_abi_parity.py.
 
-Pure synthetic inputs — no disk, no git, no CUDA — so the parity logic is pinned
-independent of the real tree. A final suite runs the checker against the actual repo
-seam and asserts it is in parity (the regression sentinel the gate relies on).
+Synthetic inputs and temporary seam files keep the parity logic independent of
+the real tree, with no git or CUDA required. A final suite runs the checker against
+the actual repo seam and asserts parity (the regression sentinel the gate relies on).
 """
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -56,6 +57,7 @@ class TestSymbolExtraction(unittest.TestCase):
             'extern "C" void fcuda_matmul_f32(const float *dW) { fcuda_free(tmp); }\n'
             "__global__ void k_internal_kernel(float *x) { x[0] = 0; }\n"   # NOT part of the ABI
             'static void fcuda_not_exported(void) {}\n'                     # no extern "C": ignored
+            'extern "C" int fcuda_declared_only(void);\n'                 # no body: ignored
         )
         # fcuda_free is only a call-site inside the body, NOT a definition.
         self.assertEqual(m.kernel_defs(cu), {"fcuda_matmul_f32"})
@@ -132,6 +134,95 @@ class TestParity(unittest.TestCase):
         self.assertTrue(pay["ok"])
         self.assertEqual(pay["corpus"]["soft_signals"], 0)  # documented-OK is not advisory debt
         self.assertEqual(pay["corpus"]["hard_mismatches"], 0)
+
+
+class TestCollectIncludes(unittest.TestCase):
+    """Exercise the reachable CUDA source closure without requiring a compiler."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        for rel in (*m.KERNELS, *m.BINDINGS):
+            self.write(rel, "// seam fixture\n")
+        self.write(m.HEADER, 'extern "C" int fcuda_test(void);\n')
+        self.write(m.BINDINGS[0], "C.fcuda_test()\n")
+
+    def write(self, rel, text):
+        path = self.root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def test_reachable_quoted_chain_and_cycle_are_in_parity(self):
+        self.write(m.KERNELS[0], (
+            '#include "cuda_backend.h"\n'
+            '#include "parts/entry.cuh"\n'
+            '#include "parts/entry.cuh"\n'
+            '#include <not_local.cuh>\n'
+            '// #include "not_source.cu"\n'
+        ))
+        self.write("internal/compute/parts/entry.cuh", '#include "../leaf.cu"\n')
+        self.write("internal/compute/leaf.cu", (
+            '#include "parts/entry.cuh"\n'
+            'extern "C" int fcuda_test(void) { return 0; }\n'
+        ))
+        self.write("internal/compute/unreachable.cu",
+                   'extern "C" int fcuda_unreachable(void) { return 0; }\n')
+        payload = m.collect(self.root)
+        self.assertEqual(payload["verdict"], "OK", payload)
+        self.assertEqual(payload["corpus"]["n_defined"], 1)
+        self.assertEqual(payload["corpus"]["hard_mismatches"], 0)
+        self.assertEqual(payload, m.collect(self.root))
+
+    def test_reachable_declaration_without_definition_remains_hard(self):
+        self.write(m.KERNELS[0], '#include "declarations.cuh"\n')
+        self.write("internal/compute/declarations.cuh",
+                   'extern "C" int fcuda_test(void);\n')
+        # A definition outside the include closure must not hide the missing body.
+        self.write("internal/compute/unreachable.cu",
+                   'extern "C" int fcuda_test(void) { return 0; }\n')
+        payload = m.collect(self.root)
+        self.assertEqual(payload["verdict"], "ACTION", payload)
+        self.assertEqual(payload["corpus"]["undefined"], ["fcuda_test"])
+        self.assertEqual(payload["corpus"]["n_defined"], 0)
+        self.assertEqual(payload["corpus"]["hard_mismatches"], 1)
+
+    def test_empty_root_reached_by_alias_remains_an_audit_error(self):
+        (self.root / "internal/compute/parts").mkdir()
+        self.write(m.KERNELS[1], "")
+        self.write(m.KERNELS[0], (
+            '#include "parts/../cuda_nccl.cu"\n'
+            'extern "C" int fcuda_test(void) { return 0; }\n'
+        ))
+        payload = m.collect(self.root)
+        self.assertEqual(payload["verdict"], "AUDIT_ERROR", payload)
+        self.assertFalse(payload["ok"])
+        self.assertIn(m.KERNELS[1], payload["reason"])
+
+    def test_unreadable_quoted_include_path_is_an_audit_error(self):
+        self.write("internal/compute/leaf.cu",
+                   'extern "C" int fcuda_test(void) { return 0; }\n')
+        self.write("internal/compute/notdir", "not a directory\n")
+        for include in ("missing/../leaf.cu", "notdir/../leaf.cu"):
+            with self.subTest(include=include):
+                # A readable alias must not hide a later ENOENT or ENOTDIR path.
+                self.write(m.KERNELS[0],
+                           f'#include "leaf.cu"\n#include "{include}"\n')
+                payload = m.collect(self.root)
+                self.assertEqual(payload["verdict"], "AUDIT_ERROR", payload)
+                self.assertFalse(payload["ok"])
+                self.assertIn(include, payload["reason"])
+
+    def test_missing_reachable_include_is_an_audit_error(self):
+        self.write(m.KERNELS[0], (
+            '#include "parts/entry.cuh"\n'
+            'extern "C" int fcuda_test(void) { return 0; }\n'
+        ))
+        self.write("internal/compute/parts/entry.cuh", '#include "missing.cuh"\n')
+        payload = m.collect(self.root)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["verdict"], "AUDIT_ERROR", payload)
+        self.assertIn("missing.cuh", payload["reason"])
 
 
 class TestAgainstRealTree(unittest.TestCase):

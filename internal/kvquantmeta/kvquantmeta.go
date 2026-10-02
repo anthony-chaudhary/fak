@@ -61,6 +61,26 @@ const (
 	ReasonUnsupportedTransition ReasonCode = "KVQUANT_UNSUPPORTED_TRANSITION"
 )
 
+// Adapted from vllm-project/vllm-metal PR #891, commit 77dd9480 (Apache-2.0):
+// a constant (zero-variance) cache block has max == min, so its block scale is
+// 0, the quantize step divides by 0, and dequantization returns NaN instead of
+// the constant. Fak expresses the upstream property as a scalar helper rather
+// than copying the upstream quantization implementation.
+const minScale float32 = 1e-8
+
+// FloorScale prevents a zero-variance cache block from producing a zero scale,
+// keeping the quantize divisor nonzero so the block stays finite and exactly
+// recoverable. The floor is a sane epsilon, not float32's smallest normal
+// (1.1754944e-38): that would leave q = (x-min)/scale large enough to overflow
+// float32 once x-min exceeds a few units. Scales already above the floor are
+// returned unchanged, so the helper cannot alter a well-conditioned block.
+func FloorScale(scale float32) float32 {
+	if scale < minScale {
+		return minScale
+	}
+	return scale
+}
+
 // Descriptor is a runtime-neutral KV-cache quantization contract. K and V are
 // separate on purpose and cannot be confused with model-weight precision.
 type Descriptor struct {

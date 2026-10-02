@@ -1,6 +1,9 @@
 package kvquantmeta
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 var testSupport = Support{
 	Schemes:     map[string][]string{"kvq": {"1"}},
@@ -72,5 +75,36 @@ func TestInvalidGroupingRequiresGroupSize(t *testing.T) {
 	got := Validate(d, testSupport)
 	if got.Supported || got.Reason != ReasonInvalidDescriptor || got.Detail != "group_size" {
 		t.Fatalf("got %#v", got)
+	}
+}
+
+// TestConstantBlockDequantizesExactly pins the zero-variance property: a cache
+// block whose values are all c has max == min, so the block scale is 0. Without
+// a floor the quantize divisor is 0 and the round trip is not finite; with the
+// floor the block stays finite and returns to c exactly.
+func TestConstantBlockDequantizesExactly(t *testing.T) {
+	if got := FloorScale(0); !(got > 0) || math.IsInf(float64(got), 0) || math.IsNaN(float64(got)) {
+		t.Fatalf("FloorScale(0) = %v, want a finite positive floor", got)
+	}
+	if got := FloorScale(minScale); got != minScale {
+		t.Fatalf("FloorScale(minScale) = %v, want the floor itself %v", got, minScale)
+	}
+	if got := FloorScale(4); got != 4 {
+		t.Fatalf("FloorScale(4) = %v, want an above-floor scale passed through unchanged", got)
+	}
+	// The floor is load-bearing: the unfloored zero scale yields 0/0.
+	var zero float32
+	if unfloored := (zero - zero) / (zero - zero); !math.IsNaN(float64(unfloored)) {
+		t.Fatalf("unfloored zero scale produced %v, want the NaN this test exists to prevent", unfloored)
+	}
+
+	for _, value := range []float32{0, -2.5, 7, 1 << 20} {
+		min, max := value, value
+		scale := FloorScale((max - min) / 255)
+		quantized := (value - min) / scale
+		got := min + quantized*scale
+		if math.IsInf(float64(got), 0) || math.IsNaN(float64(got)) || got != value {
+			t.Fatalf("constant block dequantized to %v (scale=%v), want finite %v", got, scale, value)
+		}
 	}
 }

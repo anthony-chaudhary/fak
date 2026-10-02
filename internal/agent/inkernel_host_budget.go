@@ -231,6 +231,7 @@ func (p *InKernelPlanner) trimPrefixCacheForHostPressure(fits func() bool) {
 	}
 	p.mu.Lock()
 	st := p.tree.Stats()
+	retention := p.tree.Retention()
 	p.mu.Unlock()
 	target := st.Tokens
 	for i := 0; i <= inKernelHostReliefHalvings && target > 0; i++ {
@@ -248,10 +249,6 @@ func (p *InKernelPlanner) trimPrefixCacheForHostPressure(fits func() bool) {
 		}
 	}
 	p.mu.Lock()
-	if st.MaxTokens > 0 {
-		p.tree.SetRetention(st.MaxTokens)
-	} else {
-		p.tree.SetRetention(-1)
-	}
+	p.tree.SetRetention(retention)
 	p.mu.Unlock()
 }

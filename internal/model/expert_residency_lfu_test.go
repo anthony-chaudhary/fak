@@ -139,3 +139,43 @@ func TestExpertResidencyLFUDecayRejectsInvalidTrace(t *testing.T) {
 		t.Fatal("KV evict policy identities collapsed")
 	}
 }
+
+// TestExpertResidencyLFUDecayGoodDecisionRatioNeverBeatsTheOracle is the invariant that
+// makes the oracle choice observable in the report rather than only in prose.
+//
+// The value-aware policy admits with hysteresis, so on a miss it may DECLINE the newcomer
+// and keep every resident. The demand-paging Belady optimum requires every fitting miss to
+// be admitted, so it is not an upper bound for that policy: on the routing-jitter fixture
+// the policy reaches 2016 hit tokens where demand paging tops out at 1152. Scoring the
+// policy against the demand-paging oracle therefore reported a GoodDecisionRatio of ~1.75,
+// i.e. the report claimed the policy BEAT an offline optimum, which is the symptom this
+// test pins.
+//
+// A good-decision ratio is achieved/oracle against an offline optimum, so it cannot exceed
+// 1.0 for any policy the oracle actually bounds. Assert that here rather than on the
+// oracle's identity, so the test keeps its meaning if the oracle is later re-derived.
+func TestExpertResidencyLFUDecayGoodDecisionRatioNeverBeatsTheOracle(t *testing.T) {
+	weight := int64(q4kBlockBytes)
+	for _, tc := range []struct{ hot, cold int }{
+		{2, 6}, {3, 4}, {4, 10}, {2, 1},
+	} {
+		trace := GenerateHotSetJitterTrace(tc.hot, tc.cold, weight, weight*int64(tc.hot))
+		report, err := ReplayExpertResidencyLFUDecay(trace, ExpertResidencyLFUOptions{})
+		if err != nil {
+			t.Fatalf("hot=%d cold=%d: ReplayExpertResidencyLFUDecay: %v", tc.hot, tc.cold, err)
+		}
+		if report.Oracle.Exact == false {
+			t.Fatalf("hot=%d cold=%d: expected the exact oracle path for %d spans", tc.hot, tc.cold, tc.hot+tc.cold)
+		}
+		if report.LFUDecay.GoodDecisionRatio > 1 {
+			t.Fatalf("hot=%d cold=%d: value-aware GoodDecisionRatio=%.4f exceeds the offline optimum "+
+				"(%d hits vs oracle %d); the policy can bypass a miss, so it must be scored against "+
+				"the admission-control oracle, not the demand-paging one",
+				tc.hot, tc.cold, report.LFUDecay.GoodDecisionRatio, report.LFUDecay.HitTokens, report.Oracle.HitTokens)
+		}
+		if report.LRU.GoodDecisionRatio > 1 {
+			t.Fatalf("hot=%d cold=%d: LRU GoodDecisionRatio=%.4f exceeds the offline optimum (%d vs %d)",
+				tc.hot, tc.cold, report.LRU.GoodDecisionRatio, report.LRU.HitTokens, report.Oracle.HitTokens)
+		}
+	}
+}

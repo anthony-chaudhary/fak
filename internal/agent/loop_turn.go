@@ -479,6 +479,9 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 	asst.Role = RoleAssistant
 	if comp.ToolCallsDropped && len(asst.ToolCalls) == 0 {
 		err := fmt.Errorf("%s arm turn %d: upstream announced tool_calls but none parsed; refusing to skip adjudication", r.metrics.Arm, turn+1)
+		if comp.ToolCallsDroppedReason != abi.ReasonNone {
+			err = fmt.Errorf("%s (%s)", err, abi.ReasonName(comp.ToolCallsDroppedReason))
+		}
 		action, herr := r.hardStop(err, func(cause error) error { return cause })
 		return Message{}, action, herr
 	}

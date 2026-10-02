@@ -1192,11 +1192,28 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			}
 			raw = decoded
 		}
-		comp, err := call.adapter.ParseResponse(raw)
+		var comp *Completion
+		if fields, ok := call.adapter.(responseFieldsParser); ok {
+			comp, err = fields.parseResponseFields(raw)
+		} else {
+			comp, err = call.adapter.ParseResponse(raw)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("planner: %s: %w", call.adapter.Provider(), err)
 		}
-		comp = normalizeCompletionToolCalls(comp)
+		if len(tools) > 0 {
+			comp = normalizeCompletionToolCalls(comp)
+		} else {
+			// With no offered tools, name-bearing JSON and tool-shaped text are
+			// answers. Preserve them while retaining native-call normalization and
+			// the existing fail-closed signal for calls announced but not decoded.
+			normalizeToolCallFields(&comp.Message)
+			if len(comp.Message.ToolCalls) > 0 {
+				comp.FinishReason = "tool_calls"
+			} else if finishReasonClaimsToolCalls(comp.FinishReason) {
+				comp.ToolCallsDropped = true
+			}
+		}
 		attachProviderReportedCost(comp, raw)
 		p.attachProviderCacheTelemetry(comp, call.body, call.adapter.Provider())
 		if call.cacheHint.Requested != nil {

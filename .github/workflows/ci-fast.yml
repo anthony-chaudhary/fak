@@ -26,6 +26,7 @@
 # bound: a hung test binary dies as a decisive, diagnosable go-test failure (with
 # its goroutine dump) before the runner kills the step.
 name: ci-fast
+run-name: ${{ github.event_name == 'workflow_dispatch' && 'ci-fast diagnostic (non-release)' || 'ci-fast' }} · ${{ github.sha }}
 
 on:
   push:
@@ -34,11 +35,11 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: "Exact trunk commit SHA to pin and run without supersession"
+        description: "Full 40-character commit SHA for a diagnostic, non-release run"
         required: false
         type: string
       intent:
-        description: "Run intent ('release' runs to completion without push supersession)"
+        description: "Requested scheduling intent only; every manual run is diagnostic, non-release"
         required: false
         default: "release"
         type: string
@@ -65,27 +66,84 @@ env:
   GOMAXPROCS: "2"
   GOFLAGS: "-p=2"
 
+# These receipts bind checkout commits and reported job execution. They do not
+# seal generated/untracked files or external Go inputs, and grant no release
+# admission by themselves; trusted consumer qualification is tracked in #12373.
 jobs:
+  candidate:
+    name: resolve immutable tested candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      tree: ${{ steps.source.outputs.tree }}
+      ci_class: ${{ steps.source.outputs.ci_class }}
+    steps:
+      - name: require an immutable requested revision
+        shell: bash
+        env:
+          REQUESTED_SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$REQUESTED_SHA" && ! "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::sha must be a full lowercase commit SHA, never a moving ref"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || github.sha }}
+      - name: bind actual commit and tree to this run
+        id: source
+        shell: bash
+        env:
+          REQUESTED_SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          tree=$(git rev-parse HEAD^{tree})
+          expected=${REQUESTED_SHA:-$GITHUB_SHA}
+          [[ "$sha" == "$expected" && "$sha" =~ ^[0-9a-f]{40}$ && "$tree" =~ ^[0-9a-f]{40}$ ]]
+          ci_class=fast
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then ci_class=diagnostic; fi
+          printf 'sha=%s\ntree=%s\nci_class=%s\n' "$sha" "$tree" "$ci_class" >> "$GITHUB_OUTPUT"
+          printf 'Tested commit: %s\nTested tree: %s\nRepresented event SHA: %s\nCI class: %s\n' "$sha" "$tree" "$GITHUB_SHA" "$ci_class" >> "$GITHUB_STEP_SUMMARY"
+
   build-vet-fast:
+    needs: candidate
     name: build · vet · tier gate (fast release gate)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      # Every job checks out the SAME commit: the event SHA (push/PR), or the
-      # pinned `sha` input on a dispatch. An explicit branch ref would fetch the
-      # branch tip at checkout time, so parallel jobs on a hot trunk could test
-      # different trees; an empty ref keeps actions/checkout's event default.
+      # Build and all shards consume the one resolved immutable commit and tree.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}
+          ref: ${{ needs.candidate.outputs.sha }}
           # Full history + tags: the release-substrate tests read the release
           # note AT the tag, which a default shallow checkout doesn't fetch.
           fetch-depth: 0
+
+      - name: verify tested candidate identity
+        id: source
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ needs.candidate.outputs.sha }}
+          EXPECTED_TREE: ${{ needs.candidate.outputs.tree }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          tree=$(git rev-parse HEAD^{tree})
+          printf 'sha=%s\ntree=%s\n' "$sha" "$tree" >> "$GITHUB_OUTPUT"
+          [[ "$sha" == "$EXPECTED_SHA" && "$tree" == "$EXPECTED_TREE" ]]
 
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false # zero external deps -> no go.sum to key a cache on
+
+      - name: record verification environment
+        shell: bash
+        run: |
+          go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "$GOMAXPROCS" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-fast-environment.json"
 
       # Build/test cache: share the SAME content-addressed GOCACHE prefix as
       # ci.yml's build-vet-test job (gobuild, non-race) so a warm cache skips
@@ -104,21 +162,73 @@ jobs:
       # checksum verifier (#1369) still catches a corrupted asset, on every
       # PR — not just when a real tag is cut.
       - name: verify-release-checksums self-test
+        id: checksum
         run: bash .github/scripts/verify-release-checksums_test.sh
 
       - name: build
+        id: build
         run: go build ./...
 
       - name: vet
+        id: vet
         run: go vet ./...
 
       # The architest tier/root/chat-client gates read the repository filesystem;
       # run them uncached so a new internal leaf or a stale tier-table row cannot
       # inherit a cached PASS from a previous commit.
       - name: architest tier gate (uncached)
+        id: tier
         run: go test -count=1 ./internal/architest/ -run '^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$'
 
+      - name: record exact job provenance
+        if: always()
+        shell: bash
+        env:
+          TESTED_SHA: ${{ steps.source.outputs.sha }}
+          TESTED_TREE: ${{ steps.source.outputs.tree }}
+          CI_CLASS: ${{ needs.candidate.outputs.ci_class }}
+          REQUESTED_INTENT: ${{ inputs.intent }}
+          JOB_RESULT: ${{ job.status }}
+          JOB_ID: build-vet-fast
+          SHARD_INDEX: "0"
+          SHARD_TOTAL: "0"
+          STEPS_JSON: ${{ toJSON(steps) }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" && "$(git rev-parse HEAD^{tree})" == "$TESTED_TREE" ]]
+          test -s "$RUNNER_TEMP/ci-fast-environment.json" || echo '{}' > "$RUNNER_TEMP/ci-fast-environment.json"
+          if [[ "$JOB_ID" == build-vet-fast ]]; then
+            commands='[["bash",".github/scripts/verify-release-checksums_test.sh"],["go","build","./..."],["go","vet","./..."],["go","test","-count=1","./internal/architest/","-run","^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$"]]'
+            coverage='{"kind":"build-vet","package_scope":"./..."}'
+          else
+            test -f "$RUNNER_TEMP/ci-fast-packages.txt" || : > "$RUNNER_TEMP/ci-fast-packages.txt"
+            test -f "$RUNNER_TEMP/ci-fast-shard-packages.txt" || : > "$RUNNER_TEMP/ci-fast-shard-packages.txt"
+            packages=$(jq -Rsc 'split("\n") | map(select(length > 0))' "$RUNNER_TEMP/ci-fast-shard-packages.txt")
+            all_packages=$(jq -Rsc 'split("\n") | map(select(length > 0))' "$RUNNER_TEMP/ci-fast-packages.txt")
+            jq '. + {FAK_REQUIRE_OPENAPI_VALIDATOR:"1"}' "$RUNNER_TEMP/ci-fast-environment.json" > "$RUNNER_TEMP/ci-fast-environment-complete.json"
+            mv "$RUNNER_TEMP/ci-fast-environment-complete.json" "$RUNNER_TEMP/ci-fast-environment.json"
+            commands=$(jq -nc --argjson packages "$packages" '[["go","test","-timeout=20m"] + $packages]')
+            coverage=$(jq -nc --argjson packages "$packages" --argjson all_packages "$all_packages" --argjson index "$SHARD_INDEX" --argjson total "$SHARD_TOTAL" '{kind:"go-test-shard",shard_index:$index,shard_total:$total,packages:$packages,all_packages:$all_packages}')
+          fi
+          jq -n --arg job "$JOB_ID" --arg sha "$TESTED_SHA" --arg tree "$TESTED_TREE" \
+            --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" \
+            --arg intent "$REQUESTED_INTENT" --arg result "$JOB_RESULT" --arg workflow_ref "$GITHUB_WORKFLOW_REF" \
+            --arg workflow_sha "$GITHUB_WORKFLOW_SHA" --arg runner_os "$RUNNER_OS" --arg runner_arch "$RUNNER_ARCH" \
+            --argjson commands "$commands" --argjson coverage "$coverage" --argjson steps "$STEPS_JSON" \
+            --slurpfile environment "$RUNNER_TEMP/ci-fast-environment.json" \
+            '{schema:"fak.ci-provenance.v1",workflow:"ci-fast",job:$job,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,ci_class:$ci_class,requested_intent:$intent,result:$result,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,workflow_ref:$workflow_ref,workflow_sha:$workflow_sha,runner:{os:$runner_os,arch:$runner_arch},commands:$commands,coverage:$coverage,environment:$environment[0],steps:($steps | with_entries(.value |= {outcome,conclusion}))}' \
+            > "$RUNNER_TEMP/ci-fast-$JOB_ID.json"
+      - name: upload job provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-fast-job-${{ github.run_id }}-${{ github.run_attempt }}-build-vet-fast
+          path: ${{ runner.temp }}/ci-fast-build-vet-fast.json
+          if-no-files-found: error
+
   go-test-shard:
+    needs: candidate
     name: go test ./... (no -race) · shard ${{ matrix.shard }}/${{ strategy.job-total }}
     runs-on: ubuntu-latest
     # Outlasts the 35m step bound below, so the step (not the job) is what ends
@@ -136,15 +246,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}
+          ref: ${{ needs.candidate.outputs.sha }}
           # Full history + tags: the release-substrate tests read the release
           # note AT the tag, which a default shallow checkout doesn't fetch.
           fetch-depth: 0
+
+      - name: verify tested candidate identity
+        id: source
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ needs.candidate.outputs.sha }}
+          EXPECTED_TREE: ${{ needs.candidate.outputs.tree }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          tree=$(git rev-parse HEAD^{tree})
+          printf 'sha=%s\ntree=%s\n' "$sha" "$tree" >> "$GITHUB_OUTPUT"
+          [[ "$sha" == "$EXPECTED_SHA" && "$tree" == "$EXPECTED_TREE" ]]
 
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false # zero external deps -> no go.sum to key a cache on
+
+      - name: record verification environment
+        shell: bash
+        run: |
+          go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "$GOMAXPROCS" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-fast-environment.json"
 
       # Restore-only: every shard starts from the shared gobuild GOCACHE prefix
       # (ci.yml build-vet-test / build-vet-fast save it). Shards never save, so N
@@ -171,6 +299,7 @@ jobs:
       # per-test-binary bound (the default 10m already clipped cmd/fak at
       # 600.06s); the 35m step bound outlasts it plus compile/link.
       - name: go test ./... (no -race)
+        id: tests
         timeout-minutes: 35
         shell: bash
         env:
@@ -211,14 +340,61 @@ jobs:
           test -s "$status_file"
           exit "$(cat "$status_file")"
 
+      - name: record exact job provenance
+        if: always()
+        shell: bash
+        env:
+          TESTED_SHA: ${{ steps.source.outputs.sha }}
+          TESTED_TREE: ${{ steps.source.outputs.tree }}
+          CI_CLASS: ${{ needs.candidate.outputs.ci_class }}
+          REQUESTED_INTENT: ${{ inputs.intent }}
+          JOB_RESULT: ${{ job.status }}
+          JOB_ID: go-test-shard-${{ strategy.job-index }}
+          SHARD_INDEX: ${{ strategy.job-index }}
+          SHARD_TOTAL: ${{ strategy.job-total }}
+          STEPS_JSON: ${{ toJSON(steps) }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" && "$(git rev-parse HEAD^{tree})" == "$TESTED_TREE" ]]
+          test -s "$RUNNER_TEMP/ci-fast-environment.json" || echo '{}' > "$RUNNER_TEMP/ci-fast-environment.json"
+          if [[ "$JOB_ID" == build-vet-fast ]]; then
+            commands='[["bash",".github/scripts/verify-release-checksums_test.sh"],["go","build","./..."],["go","vet","./..."],["go","test","-count=1","./internal/architest/","-run","^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$"]]'
+            coverage='{"kind":"build-vet","package_scope":"./..."}'
+          else
+            test -f "$RUNNER_TEMP/ci-fast-packages.txt" || : > "$RUNNER_TEMP/ci-fast-packages.txt"
+            test -f "$RUNNER_TEMP/ci-fast-shard-packages.txt" || : > "$RUNNER_TEMP/ci-fast-shard-packages.txt"
+            packages=$(jq -Rsc 'split("\n") | map(select(length > 0))' "$RUNNER_TEMP/ci-fast-shard-packages.txt")
+            all_packages=$(jq -Rsc 'split("\n") | map(select(length > 0))' "$RUNNER_TEMP/ci-fast-packages.txt")
+            jq '. + {FAK_REQUIRE_OPENAPI_VALIDATOR:"1"}' "$RUNNER_TEMP/ci-fast-environment.json" > "$RUNNER_TEMP/ci-fast-environment-complete.json"
+            mv "$RUNNER_TEMP/ci-fast-environment-complete.json" "$RUNNER_TEMP/ci-fast-environment.json"
+            commands=$(jq -nc --argjson packages "$packages" '[["go","test","-timeout=20m"] + $packages]')
+            coverage=$(jq -nc --argjson packages "$packages" --argjson all_packages "$all_packages" --argjson index "$SHARD_INDEX" --argjson total "$SHARD_TOTAL" '{kind:"go-test-shard",shard_index:$index,shard_total:$total,packages:$packages,all_packages:$all_packages}')
+          fi
+          jq -n --arg job "$JOB_ID" --arg sha "$TESTED_SHA" --arg tree "$TESTED_TREE" \
+            --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" \
+            --arg intent "$REQUESTED_INTENT" --arg result "$JOB_RESULT" --arg workflow_ref "$GITHUB_WORKFLOW_REF" \
+            --arg workflow_sha "$GITHUB_WORKFLOW_SHA" --arg runner_os "$RUNNER_OS" --arg runner_arch "$RUNNER_ARCH" \
+            --argjson commands "$commands" --argjson coverage "$coverage" --argjson steps "$STEPS_JSON" \
+            --slurpfile environment "$RUNNER_TEMP/ci-fast-environment.json" \
+            '{schema:"fak.ci-provenance.v1",workflow:"ci-fast",job:$job,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,ci_class:$ci_class,requested_intent:$intent,result:$result,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,workflow_ref:$workflow_ref,workflow_sha:$workflow_sha,runner:{os:$runner_os,arch:$runner_arch},commands:$commands,coverage:$coverage,environment:$environment[0],steps:($steps | with_entries(.value |= {outcome,conclusion}))}' \
+            > "$RUNNER_TEMP/ci-fast-$JOB_ID.json"
+      - name: upload job provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-fast-job-${{ github.run_id }}-${{ github.run_attempt }}-go-test-shard-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/ci-fast-go-test-shard-${{ strategy.job-index }}.json
+          if-no-files-found: error
+
   # The single verdict job, kept at the pre-shard job id and check name. It runs
   # whenever the run itself was not cancelled — including after a failed or
   # timed-out dependency — and is red unless build/vet/architest AND every go
   # test shard concluded success, so a skipped or cancelled shard can never pass
   # as green. A cancelled run (PR supersession) skips it and stays indecisive.
   build-vet-test-fast:
-    name: build · vet · test (no -race, fast release gate)
-    needs: [build-vet-fast, go-test-shard]
+    name: ${{ github.event_name == 'workflow_dispatch' && 'diagnostic · build · vet · test (non-release)' || 'build · vet · test (no -race, fast release gate)' }}
+    needs: [candidate, build-vet-fast, go-test-shard]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -239,3 +415,78 @@ jobs:
             echo "::error::fast release gate is red: build-vet-fast=$BUILD_VET_RESULT, go-test-shard=$GO_TEST_SHARDS_RESULT"
             exit 1
           fi
+      - name: collect exact job provenance
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ci-fast-job-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: ${{ runner.temp }}/ci-fast-provenance
+          merge-multiple: true
+      - name: verify complete candidate evidence
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ needs.candidate.outputs.sha }}
+          EXPECTED_TREE: ${{ needs.candidate.outputs.tree }}
+          CI_CLASS: ${{ needs.candidate.outputs.ci_class }}
+          REQUESTED_INTENT: ${{ inputs.intent }}
+          CANDIDATE_RESULT: ${{ needs.candidate.result }}
+          BUILD_VET_RESULT: ${{ needs.build-vet-fast.result }}
+          GO_TEST_SHARDS_RESULT: ${{ needs.go-test-shard.result }}
+        run: |
+          # ci-provenance: verify-fast-begin
+          set -euo pipefail
+          shopt -s nullglob
+          files=("$RUNNER_TEMP/ci-fast-provenance/"*.json)
+          qualified=false
+          if [[ "$CANDIDATE_RESULT" == success && "$BUILD_VET_RESULT" == success && "$GO_TEST_SHARDS_RESULT" == success && ${#files[@]} == 5 ]]; then
+            qualified=$(jq -se --arg sha "$EXPECTED_SHA" --arg tree "$EXPECTED_TREE" \
+              --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
+              --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" \
+              --arg intent "$REQUESTED_INTENT" '
+              ([.[] | select(.job == "build-vet-fast")][0].environment) as $environment |
+              ([.[] | select(.coverage.kind == "go-test-shard")][0].coverage.all_packages) as $all |
+              ($sha | test("^[0-9a-f]{40}$")) and ($tree | test("^[0-9a-f]{40}$")) and
+              ($run | test("^[1-9][0-9]*$")) and ($attempt | test("^[1-9][0-9]*$")) and
+              (($event == "workflow_dispatch" and $ci_class == "diagnostic") or (($event == "push" or $event == "pull_request") and $ci_class == "fast" and $sha == $represented)) and
+              (map(.job) | sort == ["build-vet-fast","go-test-shard-0","go-test-shard-1","go-test-shard-2","go-test-shard-3"]) and
+              ($all | type == "array" and length >= 4 and length == (unique | length) and all(.[]; type == "string" and length > 0)) and
+              all(.[];
+                .schema == "fak.ci-provenance.v1" and .workflow == "ci-fast" and .result == "success" and .release_eligible == false and
+                .source_scope == "git-commit-tree" and .effective_inputs_verified == false and
+                .tested_sha == $sha and .tested_tree == $tree and .represented_sha == $represented and .event == $event and .ref == $ref and
+                .run_id == $run and .run_attempt == $attempt and .ci_class == $ci_class and .requested_intent == $intent and
+                (.environment | [.GOVERSION,.GOOS,.GOARCH,.CGO_ENABLED,.GOFLAGS,.GOTOOLCHAIN,.GOMAXPROCS] | all(.[]; type == "string" and length > 0)) and
+                .environment.GOFLAGS == "-p=2" and .environment.GOMAXPROCS == "2" and .environment.GOTOOLCHAIN == "auto" and
+                (.environment | del(.FAK_REQUIRE_OPENAPI_VALIDATOR)) == $environment and
+                (if .job == "build-vet-fast" then
+                  .steps as $steps | all(["checksum","build","vet","tier"][]; $steps[.].outcome == "success" and $steps[.].conclusion == "success") and
+                  .coverage == {kind:"build-vet",package_scope:"./..."} and
+                  .commands == [["bash",".github/scripts/verify-release-checksums_test.sh"],["go","build","./..."],["go","vet","./..."],["go","test","-count=1","./internal/architest/","-run","^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$"]]
+                else
+                  .steps.tests.outcome == "success" and .steps.tests.conclusion == "success" and
+                  (.coverage as $c | .environment.FAK_REQUIRE_OPENAPI_VALIDATOR == "1" and $c.kind == "go-test-shard" and $c.shard_total == 4 and
+                  ($c.shard_index | type == "number" and . >= 0 and . < 4 and . == floor) and
+                  .job == ("go-test-shard-" + ($c.shard_index|tostring)) and $c.all_packages == $all and
+                  $c.packages == [$all | to_entries[] | select(.key % 4 == $c.shard_index) | .value] and
+                  .commands == [["go","test","-timeout=20m"] + $c.packages])
+                end))' "${files[@]}" || echo false)
+          fi
+          [[ "$qualified" == true ]] || qualified=false
+          jq -n --argjson qualified "$qualified" --arg sha "$EXPECTED_SHA" --arg tree "$EXPECTED_TREE" \
+            --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" --arg intent "$REQUESTED_INTENT" \
+            '{schema:"fak.ci-provenance.v1",workflow:"ci-fast",ci_class:$ci_class,requested_intent:$intent,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,required_jobs:["build-vet-fast","go-test-shard-0","go-test-shard-1","go-test-shard-2","go-test-shard-3"],verified:$qualified,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,release_ineligibility_reason:(if $event == "workflow_dispatch" then "diagnostic-run" elif $qualified then "effective-input-identity-not-sealed" else "incomplete-evidence" end)}' \
+            > "$RUNNER_TEMP/ci-fast-provenance.json"
+          cat "$RUNNER_TEMP/ci-fast-provenance.json" >> "$GITHUB_STEP_SUMMARY"
+          # Successful jobs from an earlier attempt are deliberately not reused.
+          if [[ "$qualified" != true ]]; then
+            echo "::error::CI provenance incomplete or mismatched. Re-run all jobs to produce one complete run attempt."
+            exit 1
+          fi
+          # ci-provenance: verify-fast-end
+      - name: upload aggregate provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-fast-provenance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-fast-provenance.json
+          if-no-files-found: error

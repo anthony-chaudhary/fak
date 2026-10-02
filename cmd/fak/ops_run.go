@@ -390,7 +390,10 @@ func opsRunProbeInferenceRoute(ctx context.Context, baseURL, model, apiKey strin
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	// A client-level Timeout mirrors the context deadline so the probe stays bounded
+	// even if a future caller drops the context (MISSING_HTTP_TIMEOUT).
+	client := &http.Client{Timeout: opsRunInferenceProbeTimeout}
+	resp, err := client.Do(req)
 	if err != nil {
 		if requestCtx.Err() != nil {
 			return "timeout"

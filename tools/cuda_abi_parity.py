@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """CUDA ABI parity — the GPU-free static cross-check of the CUDA seam.
 
-The CUDA backend is three files that have to agree on one flat C ABI:
+The CUDA backend has three source sets that must agree on one flat C ABI:
 
     internal/compute/cuda_backend.h   the prototypes (`fcuda_*`)  — the typed seam
     internal/compute/cuda_kernels.cu  the base definitions (`extern "C" … fcuda_*`)
@@ -15,8 +15,9 @@ forgot to expose — the failure surfaces only at the nvcc link / cgo build, whi
 this project happens on a **remote GPU node** (the win32 dev host has no CUDA toolkit
 and the GPU quota is walled). That is a slow, multi-host round trip to catch a typo.
 
-This checker closes that loop on the laptop: it reads the three files as TEXT (no nvcc,
-no GPU, no cgo) and reports every mismatch, so the whole class of "I renamed the kernel
+This checker closes that loop on the laptop: it reads the seam and the roots' local
+quoted includes as TEXT (no nvcc, no GPU, no cgo) and reports every mismatch, so the
+whole class of "I renamed the kernel
 but not the prototype" / "the binding calls a symbol the header doesn't declare" is
 caught in milliseconds, locally, before the push. It is the local feedback loop the
 remote-GPU dev process was missing — and a regression sentinel so the seam can't silently
@@ -75,15 +76,16 @@ SYM = r"fcuda_[A-Za-z0-9_]+"
 # declarations, not prose mentions.
 _DECL_RE = re.compile(rf"\b({SYM})\s*\(")
 # A .cu DEFINITION: an `extern "C" … fcuda_name(` — the exported symbol with a body. The
-# return type/signature may wrap, but the `extern "C"` lead and the `fcuda_name(` sit on
-# the same line in this codebase; the lead is what separates a definition from a call-site
+# return type/signature may wrap; the lead separates a definition from a call-site
 # (a bare `fcuda_free(x)` inside a function body has no `extern "C"`). DOTALL so a wrapped
 # `extern "C"\n void fcuda_x(` still pairs, while the `[^;{]*?` guard stops the non-greedy
-# run from leaping across a prior statement into an unrelated symbol.
-_DEF_RE = re.compile(rf'extern\s+"C"\s+[^;{{}}]*?\b({SYM})\s*\(', re.DOTALL)
+# run from leaping across a prior statement into an unrelated symbol. Requiring the
+# body also excludes prototypes in headers reached through quoted includes.
+_DEF_RE = re.compile(rf'extern\s+"C"\s+[^;{{}}]*?\b({SYM})\s*\([^;{{}}]*\)\s*\{{', re.DOTALL)
 # A cgo CALL: `C.fcuda_name(` in cuda.go.
 _CALL_RE = re.compile(rf"\bC\.({SYM})\b")
 _INCLUDE_RE = re.compile(r'(?m)^\s*#\s*include\s*[<"]([^>"]+)[>"]')
+_QUOTED_INCLUDE_RE = re.compile(r'(?m)^[ \t]*#[ \t]*include[ \t]*"([^"\r\n]+)"')
 
 # The tiny standalone-header portability floor this checker enforces without needing a
 # compiler. It deliberately covers only C standard types used by cuda_backend.h today:
@@ -327,10 +329,55 @@ def _read_many(root: Path, rels: tuple[str, ...]) -> tuple[str, list[str]]:
     return "\n".join(texts), missing
 
 
+def _read_kernel_sources(root: Path) -> tuple[str, list[str]]:
+    """Read only the roots' repository-local quoted-include closure.
+
+    This is source discovery, not a preprocessor: system headers and conditional
+    compilation are not interpreted. Canonical paths bound the traversal to the
+    repository and deduplicate cycles; root and include order keep it deterministic.
+    A missing or escaping include must fail the audit, never yield partial parity.
+    """
+    pending = [root / rel for rel in reversed(KERNELS)]
+    roots = set(pending)
+    seen: set[Path] = set()
+    texts: list[str] = []
+    errors: list[str] = []
+    while pending:
+        source = pending.pop()
+        rel = source.relative_to(root).as_posix()
+        try:
+            path = source.resolve(strict=True)
+            if not path.is_relative_to(root):
+                errors.append(f"{rel} (quoted include escapes repository)")
+                continue
+            # Open the original spelling before deduplication: normalization must
+            # not hide an unreadable alias such as missing/../leaf.cu.
+            text = source.read_text(encoding="utf-8")
+            if not text and source in roots:
+                errors.append(rel)
+            if path in seen:
+                continue
+            seen.add(path)
+        except (OSError, UnicodeError, RuntimeError, ValueError):
+            errors.append(rel)
+            continue
+        stripped = strip_comments(text)
+        texts.append(stripped)
+        includes: list[Path] = []
+        for match in _QUOTED_INCLUDE_RE.finditer(stripped):
+            name = match.group(1)
+            if Path(name).is_absolute():
+                errors.append(f'{rel}: "{name}" (quoted include must be repository-relative)')
+            else:
+                includes.append(source.parent / name)
+        pending.extend(reversed(includes))
+    return "\n".join(texts), errors
+
+
 def collect(root: Path) -> dict[str, Any]:
     root = root.resolve()
     htext = _read(root, HEADER)
-    ktext, kmissing = _read_many(root, KERNELS)
+    ktext, kmissing = _read_kernel_sources(root)
     gtext, gmissing = _read_many(root, BINDINGS)
     missing = [rel for rel, t in ((HEADER, htext),) if not t] + kmissing + gmissing
     if missing:

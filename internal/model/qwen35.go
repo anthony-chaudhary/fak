@@ -586,6 +586,36 @@ func ResetGDNStepCounters() {
 	atomic.StoreUint64(&vectorizedGDNStepCalls, 0)
 }
 
+// gdnFMA32 returns a*b+c with a single rounding. Every Go implementation of the
+// Gated-DeltaNet recurrence in this package — ScalarHeadStep's decode reference
+// below and the Q8, Q4_K, chunked, and backend-agnostic prefill scans — must use
+// it for its three accumulate sites (the kvmem reduction, the state update, and
+// the readout) so they stay bit-identical to the AVX-512 decode kernel, which
+// fuses exactly those three (VFMADD231PS in
+// github.com/anthony-chaudhary/fak/internal/compute/deltanetavx512). A bare
+// `acc += x*y` rounds the product before the add, and that last-bit split is not
+// cosmetic: a radix prefix-cache HIT replays state produced by the decode kernel
+// while a cache MISS (or a cold prefill) recomputes the SAME token span with the
+// Go prefill scan, so identical input yields different bytes, the logits differ,
+// and a greedy argmax can flip onto the already-emitted token (fak-private#2624:
+// "17 18 18 19 20" under counting prompts).
+//
+// Two independent facts make the float64 round trip a true float32 FMA, and the
+// second one is the load-bearing one:
+//   - every float32 is exactly representable in float64, so the operands and the
+//     product are exact; and
+//   - `a*b+c` then needs up to ~2*24 bits, so float64 -> float32 IS a genuine
+//     double rounding — but Figueroa's theorem makes double rounding innocuous
+//     whenever the intermediate precision satisfies p_int >= 2*p_final + 2. Here
+//     53 >= 2*24 + 2 = 50, so the two-step rounding is provably equal to a single
+//     correctly-rounded float32 FMA.
+//
+// Therefore this reproduces VFMADD231PS bit-for-bit on every architecture, and no
+// GOAMD64 level or compiler contraction can reintroduce the split.
+func gdnFMA32(a, b, c float32) float32 {
+	return float32(math.FMA(float64(a), float64(b), float64(c)))
+}
+
 // ScalarHeadStep performs the un-vectorized scalar reference Gated-DeltaNet recurrent step:
 //  1. Decay scaling: st[i, d] *= g
 //  2. Memory retrieval: kvmem[d] = sum_i st[i, d] * kn[i]
@@ -619,7 +649,7 @@ func ScalarHeadStep(
 		ki := kn[i]
 		base := i * vHd
 		for d := 0; d < vHd; d++ {
-			kvmem[d] += st[base+d] * ki
+			kvmem[d] = gdnFMA32(st[base+d], ki, kvmem[d])
 		}
 	}
 	for d := 0; d < vHd; d++ {
@@ -630,8 +660,8 @@ func ScalarHeadStep(
 		qi := qn[i]
 		base := i * vHd
 		for d := 0; d < vHd; d++ {
-			st[base+d] += ki * delta[d]
-			od[d] += st[base+d] * qi
+			st[base+d] = gdnFMA32(ki, delta[d], st[base+d])
+			od[d] = gdnFMA32(st[base+d], qi, od[d])
 		}
 	}
 }
