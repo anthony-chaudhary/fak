@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/rsiloop"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // roundUnit maps a float KPI to dos's non-negative integer --work unit "for the
@@ -107,6 +108,7 @@ var dosObserveTimeout = 30 * time.Second
 // the deadline WITHOUT spawning a real dos (deterministic, no subprocess or PATH).
 var dosObserveExec = func(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	return cmd.Run()
 }
