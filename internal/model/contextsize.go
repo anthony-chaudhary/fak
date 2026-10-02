@@ -49,6 +49,7 @@ func (c Config) ContextSizeConfigWithPrecision(prec compute.KVPrecision) compute
 		Precision:  prec,
 	}
 	var sessionState compute.MemoryPlan
+	var compressedKV []compute.CompressedKVLayer
 	if c.IsQwen35Hybrid() {
 		// The live Qwen35 paths never append token-indexed K/Kraw/V for a
 		// linear_attention layer. The direct path returns through linearAttnStep
@@ -78,18 +79,42 @@ func (c Config) ContextSizeConfigWithPrecision(prec compute.KVPrecision) compute
 		}
 	}
 	if HybridKVGroupsEnabled() {
+		if shape, ok := c.v4FlashCompressedKVShape(); ok {
+			compressedKV = make([]compute.CompressedKVLayer, shape.Layers)
+			var inflightBytes int64
+			for l, ratio := range shape.PerLayer.CompressRatio {
+				compressedKV[l] = compute.CompressedKVLayer{
+					WindowRows:    shape.PerLayer.Window[l],
+					Ratio:         ratio,
+					RowBytes:      int64(shape.KVLoraRank) * 4,
+					IndexRowBytes: int64(shape.PerLayer.IndexHeadDim[l]) * 4,
+				}
+				rows := ratio - 1
+				if ratio == 4 {
+					rows = 2*ratio - 1 // overlapping compressor retains both groups
+				}
+				if ratio > 0 {
+					inflightBytes += int64(rows) * int64(c.HiddenSize+c.HeadDim) * 4
+				}
+			}
+			sessionState = append(sessionState, compute.MemoryDemand{
+				Class: compute.MemoryKVCache, Bytes: inflightBytes,
+				Detail: "deepseek-v4-compressor-inflight-rows", DType: compute.F32.String(),
+			})
+		}
 		// KVCacheShape already normalizes the loader's -1 full-attention sentinel to
 		// kvbudget's non-positive "no window" spelling, which is the spelling
 		// compute.KVConfig.WindowPerLayer reads — so the slice crosses verbatim. A
 		// uniformly-global model leaves PerLayer (or PerLayer.Window) nil and the
 		// projection stays exactly the uniform one.
-		if p := c.KVCacheShape().PerLayer; p != nil {
+		if p := c.KVCacheShape().PerLayer; p != nil && !c.hasKVCompressionSchedule() {
 			kv.WindowPerLayer = p.Window
 		}
 	}
 	return compute.ContextSizeConfig{
 		KV:           kv,
 		SessionState: sessionState,
+		CompressedKV: compressedKV,
 		Scratch: compute.TransformerScratchConfig{
 			HiddenSize:       c.HiddenSize,
 			IntermediateSize: c.IntermediateSize,

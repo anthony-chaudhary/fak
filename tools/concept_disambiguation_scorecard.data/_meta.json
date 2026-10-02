@@ -3753,6 +3753,16 @@
           "category": "incidental",
           "reason": "One of three FAK_NATIVE_ADMISSION mode constants (default/aggregate/exclusive) local to the Metal admission seam; the doc comment defines each mode, so there is no collision to disambiguate.",
           "token": "nativeAdmissionAggregate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private synchronization for presence-check and registration of the existing rank-20 code-tool gate; replaces codeToolGateOnce and introduces no new policy or operator-facing guard concept.",
+          "token": "codeToolGateMu"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper restores the same codeToolGate at its unchanged rank after a completed test-only ABI registry reset; introduces no separate policy, capability, or operator-facing guard concept.",
+          "token": "ensureCodeToolGate"
         }
       ],
       "exclude": [
@@ -3872,6 +3882,7 @@
         "cmdCacheValueGateScore",
         "cmdGuardGoalQuestionHook",
         "codeToolGate",
+        "codeToolGateMu",
         "codeToolGateOnce",
         "commentQualityGate",
         "cooldownGateBlindWarning",
@@ -3882,6 +3893,7 @@
         "dispatchProcInfoFromProcguard",
         "enqueueGuardOperatorQuestionEscalationFailOpen",
         "enqueueGuardSessionThreadNotice",
+        "ensureCodeToolGate",
         "equalAggregate",
         "explicit_retirement_gate",
         "exposureGated",

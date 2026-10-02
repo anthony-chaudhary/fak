@@ -27,29 +27,42 @@ package model
 //  5. gate_s = sigmoid(copysign(sqrt(max(|dot_s|,1e-6)), dot_s)).
 //  6. residual_s[i] += bf16(gate_s * bf16(value[i])).
 //
-// Reduced-model reconciliation. The existing reduced forward (v41_forward.go
-// v41Layer) is not a four-stream residual: it carries one `x[t]` of width H and
-// stands in four IDENTICAL streams for the reference's hc persistent state (the
-// comment at v41_forward.go:540-542). The reference injects the same shared value
-// stream into each of the four HC streams, each scaled by that stream's own gate.
-// Because the four stand-in streams are identical at injection time, this file
-// collapses the write-back to the documented reduction
+// Persistent-stream schedule (full geometry). The forward now carries four
+// DISTINCT persistent mHC streams per position (v41_forward.go v41Layer: stream 0
+// is the live hidden state, streams 1..3 are the reference's persistent residual
+// streams). On the full path this file computes each HC stream's gate from that
+// stream's OWN vector h_s = streams[t][s], and adds the shared value stream into
+// the SAME stream:
+//
+//	streams[t][s][i] += bf16(gate_s * bf16(value[i]))   for s = 0..N_HC-1
+//
+// so the four streams diverge exactly as the reference schedule does and no
+// per-stream gated value is summed across streams. Stream 0 aliases x[t] on the
+// full path (v41_forward.go:2029-2036); x is re-synchronized from streams[t][0]
+// after the write so the two views can never drift.
+//
+// Reduced-model reconciliation. The reduced fixture (v41_forward.go v41Layer) is
+// not a four-stream residual: it carries one `x[t]` of width H and stands in four
+// IDENTICAL streams for the reference's hc persistent state. Because those
+// stand-in streams are identical at injection time, the reduced path preserves
+// the pre-existing single-vector reduction byte-for-byte:
 //
 //	x[t][i] += sum_{s=0}^{N_HC-1} bf16(gate_s * bf16(value[i]))
 //
-// i.e. the single vector receives the sum of the four per-stream gated values.
-// The gates still differ per stream (they read that stream's key), so the
-// reduction is not equivalent to one stream times four. The per-stream key and
-// value are bf16-rounded exactly as the Metal kernel rounds them; only the final
-// accumulation into the single stand-in vector is left in f32 because the four
-// reference streams cannot be represented by one vector. The test oracle mirrors
-// this reduction and matches within the CPU-oracle tolerance (the oracle
-// accumulates the RMS means in f64, the forward in f32). The witness shares the
-// retrieval primitives under test (Hash / GatherV41EngramRows / fp8E4M3ToF32)
-// and independently transcribes only the projection + gate + mix arithmetic, so
-// it is a genuine cross-implementation check for the injection stage, not for the
-// retrieval leaves already witnessed by v41_engram_test.go / v41_engram_stream_test.go.
-// Full-checkpoint parity stays [SW-VERIFIED]; no hardware witness is claimed.
+// i.e. one `h := x[t]`, the four gates still computed from x[t], and the four
+// per-stream gated values summed into the single vector. The gates still differ
+// per stream (each reads its own key), so the reduction is not equivalent to one
+// stream times four. The per-stream key and value are bf16-rounded exactly as the
+// Metal kernel rounds them; only the final accumulation into the single stand-in
+// vector is left in f32 because the four reference streams cannot be represented
+// by one vector. The test oracle mirrors this reduction and matches within the
+// CPU-oracle tolerance (the oracle accumulates the RMS means in f64, the forward
+// in f32). The witness shares the retrieval primitives under test (Hash /
+// GatherV41EngramRows / fp8E4M3ToF32) and independently transcribes only the
+// projection + gate + mix arithmetic, so it is a genuine cross-implementation
+// check for the injection stage, not for the retrieval leaves already witnessed
+// by v41_engram_test.go / v41_engram_stream_test.go. Full-checkpoint parity stays
+// [SW-VERIFIED]; no hardware witness is claimed.
 
 import (
 	"fmt"
@@ -182,10 +195,13 @@ func dequantV41EngramRow(row []byte, dim int) ([]float32, error) {
 }
 
 // v41EngramInject retrieves, dequantizes, projects, gates, and mixes the Engram
-// rows for one Engram layer into the reduced single-vector residual x. It is the
-// production transposition of the reference schedule documented at the top of
-// this file and is called at the START of v41Layer for declared Engram layers.
-func (m *Model) v41EngramInject(l int, x [][]float32, seq []int, eps float32) error {
+// rows for one Engram layer into the layer residual. On the full path it updates
+// the four DISTINCT persistent streams (streams[t][s] += bf16(gate_s*value)) and
+// keeps x synchronized with stream 0; on the reduced path it preserves the
+// single-vector reduction into x documented at the top of this file. It is the
+// production transposition of the reference schedule and is called at the START
+// of v41Layer for declared Engram layers.
+func (m *Model) v41EngramInject(l int, x [][]float32, streams [][][]float32, full bool, seq []int, eps float32) error {
 	stage := m.v41EngramStageFor()
 	if stage == nil {
 		return v41StageErr(v41StageEngram, l,
@@ -243,6 +259,31 @@ func (m *Model) v41EngramInject(l int, x [][]float32, seq []int, eps float32) er
 
 	rowVec := make([]float32, cols*dim)
 	projected := make([]float32, (hc+1)*H)
+	// Fail closed on malformed full geometry before any stream is mutated: the
+	// full path indexes streams[t][s] directly, so a short position or stream
+	// would otherwise panic instead of returning a typed error. The reduced path
+	// carries no persistent streams and is unaffected.
+	if full {
+		if len(streams) < len(seq) {
+			return v41StageErr(v41StageEngram, l,
+				fmt.Errorf("%w: Engram full geometry has %d stream positions for %d tokens",
+					ErrV41NativeUnsupported, len(streams), len(seq)))
+		}
+		for t := range seq {
+			if len(streams[t]) < hc {
+				return v41StageErr(v41StageEngram, l,
+					fmt.Errorf("%w: Engram full geometry position %d has %d streams, want >= %d",
+						ErrV41NativeUnsupported, t, len(streams[t]), hc))
+			}
+			for s := 0; s < hc; s++ {
+				if len(streams[t][s]) != H {
+					return v41StageErr(v41StageEngram, l,
+						fmt.Errorf("%w: Engram full geometry stream [%d][%d] has width %d, want %d",
+							ErrV41NativeUnsupported, t, s, len(streams[t][s]), H))
+				}
+			}
+		}
+	}
 	for t := range seq {
 		for c := 0; c < cols; c++ {
 			values, err := dequantV41EngramRow(gathered[t*cols+c], dim)
@@ -260,25 +301,55 @@ func (m *Model) v41EngramInject(l int, x [][]float32, seq []int, eps float32) er
 			value[i] = v41BF16(projected[hc*H+i])
 		}
 		h := x[t]
-		acc := make([]float32, H)
+		// acc is consumed only by the reduced-path reduction below; the full path
+		// writes each stream in place. Allocate it lazily so the full path keeps no
+		// unused per-position accumulator.
+		var acc []float32
+		if !full {
+			acc = make([]float32, H)
+		}
 		for s := 0; s < hc; s++ {
+			// Full geometry: each HC stream gates the shared value stream with its
+			// OWN persistent vector and adds the result back into that same stream.
+			// Reduced geometry: the four stand-in streams are identical, so the
+			// documented reduction gates every stream from the single x[t].
+			hs := h
+			if full {
+				hs = streams[t][s]
+			}
 			key := make([]float32, H)
 			var h2, k2, dotSum float32
 			for i := 0; i < H; i++ {
 				key[i] = v41BF16(projected[s*H+i])
-				hi := h[i]
+				hi := hs[i]
 				h2 += hi * hi
 				k2 += key[i] * key[i]
 				dotSum += hi * (qNorm[s*H+i] * kNorm[s*H+i]) * key[i]
 			}
 			dot := dotSum * rsqrtf(h2/float32(H)+eps) * rsqrtf(k2/float32(H)+eps) * rsqrtf(float32(H))
 			gate := float32(1) / (1 + expf(-copysignf(sqrtf(maxf(absf(dot), 1e-6)), dot)))
-			for i := 0; i < H; i++ {
-				acc[i] += v41BF16(gate * value[i])
+			if full {
+				// Each stream receives its own gated value; do NOT sum across streams.
+				stream := streams[t][s]
+				for i := 0; i < H; i++ {
+					stream[i] += v41BF16(gate * value[i])
+				}
+			} else {
+				for i := 0; i < H; i++ {
+					acc[i] += v41BF16(gate * value[i])
+				}
 			}
 		}
-		for i := 0; i < H; i++ {
-			h[i] += acc[i]
+		if full {
+			// streams[t][0] aliases x[t] on the full path (v41_forward.go:2029-2036),
+			// so stream 0's write-back already advanced x; copy explicitly to keep the
+			// synchronization self-evident and to cover a caller whose stream 0 is not
+			// the same slice as x[t].
+			copy(x[t], streams[t][0])
+		} else {
+			for i := 0; i < H; i++ {
+				h[i] += acc[i]
+			}
 		}
 	}
 	return nil

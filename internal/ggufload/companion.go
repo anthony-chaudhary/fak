@@ -97,6 +97,7 @@ var knownQuantTags = []quantDef{
 	{"IQ2_XS", 2.31},
 	{"IQ2_S", 2.5},
 	{"Q2_K", 2.5},
+	{"PQ2_0", 2.125},
 	{"Q2_0", 2.0},
 	// 1-bit
 	{"IQ1_M", 1.75},

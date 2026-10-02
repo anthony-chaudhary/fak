@@ -199,13 +199,19 @@ func admissionLeaf(p string) string {
 func gateConceptAdmission(d *StagedDiff) ([]Finding, error) {
 	metaBytes, ok := d.FileBytes("tools/concept_disambiguation_scorecard.data/_meta.json")
 	if !ok {
+		if d.baseTree != "" {
+			return nil, fmt.Errorf("%w: committed concept metadata is missing or unreadable", ErrCouldNotRun)
+		}
 		// No corpus metadata reachable: this gate judged nothing at all. Recording the zero is
 		// what separates it from a run that judged every staged symbol and admitted them (#5602).
 		d.NoteCandidates("CONCEPT_ADMISSION", 0, "staged non-test .go file(s) under internal/ or cmd/")
 		return nil, nil
 	}
 	var meta admissionMeta
-	if json.Unmarshal(metaBytes, &meta) != nil {
+	if err := json.Unmarshal(metaBytes, &meta); err != nil {
+		if d.baseTree != "" {
+			return nil, fmt.Errorf("%w: invalid committed concept metadata: %v", ErrCouldNotRun, err)
+		}
 		d.NoteCandidates("CONCEPT_ADMISSION", 0, "staged non-test .go file(s) under internal/ or cmd/")
 		return nil, nil
 	} // semantic gate owns malformed data
@@ -214,7 +220,7 @@ func gateConceptAdmission(d *StagedDiff) ([]Finding, error) {
 	// `git show` per shard made this gate spend 13 seconds on a docs-only commit. The
 	// fallback preserves hand-built/range fixtures and the prior fail-open behavior.
 	paths := append([]string{}, d.IndexPaths...)
-	if len(paths) == 0 {
+	if len(paths) == 0 && d.baseTree == "" {
 		matches, _ := filepath.Glob(filepath.Join(d.Root, "tools", "concept_disambiguation_scorecard.data", "rows-*.json"))
 		for _, abs := range matches {
 			rel, _ := filepath.Rel(d.Root, abs)
@@ -231,10 +237,16 @@ func gateConceptAdmission(d *StagedDiff) ([]Finding, error) {
 			b, exists = d.FileBytes(rel)
 		}
 		if !exists {
+			if d.baseTree != "" {
+				return nil, fmt.Errorf("%w: committed concept rows %s are unreadable", ErrCouldNotRun, rel)
+			}
 			continue
 		}
 		var doc admissionRows
-		if json.Unmarshal(b, &doc) != nil {
+		if err := json.Unmarshal(b, &doc); err != nil {
+			if d.baseTree != "" {
+				return nil, fmt.Errorf("%w: invalid committed concept rows %s: %v", ErrCouldNotRun, rel, err)
+			}
 			continue
 		}
 		for _, r := range doc.Rows {
@@ -300,9 +312,13 @@ func gateConceptAdmission(d *StagedDiff) ([]Finding, error) {
 						continue
 					}
 					// A rename/move or another use of an established token is not a new
-					// corpus admission: only tokens absent from committed HEAD qualify.
-					baseTree := "HEAD"
-					if strings.HasSuffix(d.Treeish, ":") && d.Treeish != ":" {
+					// corpus admission: range checks use the selected base, not tip's
+					// parent, which may already contain a token introduced in the range.
+					baseTree := d.baseTree
+					if baseTree == "" {
+						baseTree = "HEAD"
+					}
+					if d.baseTree == "" && strings.HasSuffix(d.Treeish, ":") && d.Treeish != ":" {
 						tip := strings.TrimSuffix(d.Treeish, ":")
 						if out, code, _ := d.run(d.ctx, d.Root, "rev-parse", tip+"^"); code == 0 && strings.TrimSpace(out) != "" {
 							baseTree = strings.TrimSpace(out)

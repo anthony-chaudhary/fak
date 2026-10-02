@@ -100,6 +100,9 @@ func (s *Session) qwen35ResidentDecodeAutoEligible() bool {
 	if s == nil || s.M == nil || s.Cache == nil || s.Backend != nil || !s.Q4K || !s.MetalQ4K {
 		return false
 	}
+	if s.M.prism != nil {
+		return false // fused Metal block has no signed Hadamard input stage
+	}
 	if qwen35ResidentDecodeAutoDisabled() {
 		return false
 	}
@@ -273,6 +276,9 @@ func (s *Session) EnableQwen35MetalGDNPreprojectedSequence() error {
 	path := Qwen35MetalGDNSequenceForwardPath
 	if s == nil || s.M == nil || !s.M.Cfg.IsQwen35Hybrid() {
 		return &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "session is not a Qwen hybrid"}
+	}
+	if s.M.prism != nil {
+		return &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "Prism Hadamard activation transform is not in the fused Metal graph"}
 	}
 	if s.Backend != nil || !s.Q4K || !s.MetalQ4K {
 		return &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "requires backend-nil resident-Q4_K Metal session"}
@@ -696,10 +702,11 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 		return scratch
 	}
 	proj := func(name string, Xf []float32, Xq *q8Panel) []float32 {
+		Xrot := m.prismProjectPanel(name, Xf, P)
 		if qt := m.q4kw[name]; qt != nil {
 			// q4kGemmDispatch is the CPU q4kGemm by default; under -tags fakmetal with
 			// s.MetalQ4K set it routes the q4_k-majority GEMM to the Metal q4_k dequant-GEMM.
-			return s.q4kGemmDispatch(name, qt, Xf, P)
+			return s.q4kGemmDispatch(name, qt, Xrot, P)
 		}
 		if qt := m.kqw[name]; qt != nil {
 			// Resident Q5_K/Q6_K matmul weight (the q4_k_m dense down_proj / lm_head now load
@@ -712,7 +719,15 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 			// The dispatch uses the Metal Q6_K GEMM when available; otherwise it is the same CPU
 			// kQuantMatRowsIntoBatch loop. Same Y layout (P×qt.out row-major); still lands in the
 			// q6kTime profile bucket.
-			return s.kQuantGemmDispatch(name, qt, Xf, P)
+			return s.kQuantGemmDispatch(name, qt, Xrot, P)
+		}
+		if qt := m.q2w[name]; qt != nil {
+			return q2MatRowsBatch(qt, Xrot, P)
+		}
+		if m.prism != nil && m.prism.weightWidth[name] != 0 {
+			panel := &q8Panel{}
+			quantizeBatchPanelInto(panel, Xrot, P, m.prism.weightWidth[name])
+			Xq = panel
 		}
 		return s.q8GemmDispatch(name, m.q8(name), Xq)
 	}
@@ -733,7 +748,7 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 				// here (most-recent-dispatch semantics) and add to the GPU-compute sub-total. On
 				// CPU fallback / non-fakmetal it is 0, so roundtrip absorbs all of this dt.
 				q4kGPUCompute += time.Duration(metalgemm.LastGEMMGPUMs() * float64(time.Millisecond))
-			case m.kqw[name] != nil:
+			case m.kqw[name] != nil, m.q2w[name] != nil:
 				q6kTime += dt
 			default:
 				q8Time += dt
@@ -800,6 +815,7 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 		embed := m.embedRows()
 		for t, id := range ids {
 			copy(X[t*H:(t+1)*H], embed[id*H:(id+1)*H])
+			m.prismInverseEmbeddingRow("model.embed_tokens.weight", X[t*H:(t+1)*H])
 			scaleEmbedInPlace(X[t*H:(t+1)*H], cfg)
 		}
 	}

@@ -220,6 +220,8 @@ type serveFlags struct {
 	nativeAdmissionProvenance    string
 	nativeCodeWorkspace          *string
 	nativeCodeTools              *bool
+	nativeAllowBashCommands      serveExactBashCommandList
+	nativeBashCommandTimeout     *time.Duration
 	nativeSpeculate              *bool
 	vdsoProxyFill                *bool
 	metricsSnapshot              *time.Duration
@@ -363,6 +365,8 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.nativeAdmissionTokenBudget = fs.Int("native-admission-token-budget", gateway.DefaultAdmissionPolicy().TokenBudget, "with in-kernel model: cap admitted token footprint. Must be positive (when not explicitly set, follows the resolved native context; 8192 is the unresolved/no-local-model fallback)")
 	sf.nativeCodeWorkspace = fs.String("native-code-workspace", "", "override workspace root for kernel coding tools. Requires --native.")
 	sf.nativeCodeTools = fs.Bool("native-code-tools", true, "arm bounded kernel coding tools in current workspace. Default true; pass false to disable.")
+	fs.Var(&sf.nativeAllowBashCommands, "native-allow-bash-command", "with --native, grant one byte-exact command to the server-owned bounded Bash tool (repeatable; focused defaults and all other safety gates remain active)")
+	sf.nativeBashCommandTimeout = fs.Duration("native-bash-command-timeout", 2*time.Minute, "with --native, hard timeout for each server-owned bounded Bash command (positive, maximum 10m)")
 	sf.nativeSpeculate = fs.Bool("native-speculate", false, "enable effect-free coding speculation. Requires --native-code-workspace.")
 	sf.vdsoProxyFill = fs.Bool("vdso-proxy-fill", false, "warm vDSO from admitted inbound tool_result blocks. Off by default — sound only when the principal is named and writes that touch the same resource reach fak (a proxy-closed world), so it is an explicit operator opt-in. Scoped per-principal; never fills a Shareable or write-shaped tool.")
 	sf.metricsSnapshot = fs.Duration("metrics-snapshot", 0, "periodically append an interim gateway-usage counter snapshot (internal/gatewayusageledger, .fak/nightrun/gateway-usage.jsonl) while this long-lived `fak serve` is up, so a crash before a clean exit still leaves a trail (#1610). 0 (default) disables periodic snapshots; the exit-time snapshot is always written regardless of this flag.")
@@ -657,6 +661,14 @@ func cmdServe(argv []string) {
 	// nothing, so it answers in milliseconds rather than after a weight load
 	// (shrink_lever_wire.go).
 	if !admitServeShrinkLevers(fs, sf, os.Stderr) {
+		os.Exit(2)
+	}
+	if err := validateServeNativeBashCommandGrants(*sf.native, *sf.nativeCodeTools, sf.nativeAllowBashCommands); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
+	if err := validateServeNativeBashCommandTimeout(*sf.native, *sf.nativeCodeTools, *sf.nativeBashCommandTimeout, sf.isExplicitFlag("native-bash-command-timeout")); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
 		os.Exit(2)
 	}
 
@@ -1034,11 +1046,13 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (*gateway.DurableControlIng
 		RouteAccounts: routeRoster,
 		// Native-harness keystone (#1316): drive agent.RunArm for a non-streaming
 		// /v1/messages turn. Off by default — the proxy path is byte-for-byte unchanged.
-		Native:              *sf.native,
-		NativeMaxTurns:      *sf.nativeMaxTurns,
-		NativeCodeWorkspace: *sf.nativeCodeWorkspace,
-		NativeSpeculate:     *sf.nativeSpeculate,
-		VDSOProxyFill:       *sf.vdsoProxyFill,
+		Native:                     *sf.native,
+		NativeMaxTurns:             *sf.nativeMaxTurns,
+		NativeCodeWorkspace:        *sf.nativeCodeWorkspace,
+		NativeExactAllowedCommands: append([]string(nil), sf.nativeAllowBashCommands...),
+		NativeMaxCommandTime:       *sf.nativeBashCommandTimeout,
+		NativeSpeculate:            *sf.nativeSpeculate,
+		VDSOProxyFill:              *sf.vdsoProxyFill,
 		// Streaming CONTENT-progress deadline (#5486, --stream-progress-timeout): the
 		// window a warm-but-unadvancing proxied stream is given before the turn is ended.
 		// gateway.newConfiguredHTTPPlanner carries it onto every proxy planner, where

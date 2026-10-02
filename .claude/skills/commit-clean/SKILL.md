@@ -33,6 +33,52 @@ One repeatable pass that lands YOUR finished paths on `main` with a lintable, bi
 
 ## The tools (dogfood these, not raw git)
 
+### Check access in the actual landing executor
+
+Before the first GitHub-dependent step or reporting an access blocker, check the
+executor and shell that will perform that step. A desktop terminal, noninteractive
+shell, and CI runner can share a host but have different `HOME`, `PATH`, and
+authentication state. A browser login or a successful read in another surface does
+not establish access for this `gh` invocation or for Git transport.
+
+Use `fak-dev orient env --paths <p> --json` to choose the supported Git shell and
+inspect host routing and leases. Its `CLEAR` verdict is not a GitHub authentication
+or landing-readiness witness. In the intended executor, resolve `git`, `gh`, `fak`,
+and `fak-dev` with that shell's command-discovery mechanism, then run these read-only
+checks in the selected shell:
+
+```text
+git rev-parse --show-toplevel
+git rev-parse HEAD
+gh auth status --hostname github.com
+gh api --hostname github.com user --jq .login
+gh repo view https://github.com/anthony-chaudhary/fak --json nameWithOwner,viewerPermission
+```
+
+Check that the resolved checkout is the intended workspace. Keep the GitHub host
+and target repository consistent when adapting these commands; an inherited
+`GH_HOST` must not silently change which service a check observes. Record the
+executor label, timestamp, checkout/base, resolved tool paths, account login,
+repository, and each command's actual outcome in a **local** receipt. Keep private
+paths, credential/config contents, and raw auth-status output out of public
+summaries; never use `gh auth status --show-token` or move credentials between
+execution contexts.
+
+A failed read describes the checked context. Before declaring GitHub unavailable
+or requesting reconnection, inspect the already-authorized intended executor;
+otherwise report that precise context and failed command as the blocker. Continue
+independent source verification where possible. If checkout/root resolution fails
+for a verified source-only archive, checkout-dependent landing remains unavailable
+there; do not invent Git history to turn source checks into committed-tip evidence.
+
+Successful API reads and reported permissions do not prove a Git push succeeded,
+that required native tools are ready, or that a write is authorized. All applicable
+ownership, sync, provenance, validation, hook, and witness gates still apply. Repeat
+the access check when the executor, account, host, or target changes; retain other
+evidence only within its original source and execution-environment scope.
+
+### Guarded validation and landing
+
 **Validate in isolation first, always** — compiles, vets, and tests prospective tree:
 
 ```bash
@@ -144,6 +190,7 @@ Before the split both nothing-landed classes returned 3, so a lander that (corre
 
 ## Steps
 
+0. **Bind access to the intended executor** — before a GitHub-dependent step or access-blocker claim, follow the read-only context check above; a result from another shell is not this executor's receipt.
 1. **Validate your owned delta** — run `fak validate --mine <p>...` over the exact files you changed. Prove prospective build, vet, and affected tests pass in isolation. If only the test step fails, and it fails identically on the landing base, follow **Pre-existing red**. Tests your change adds or modifies must still pass. For non-Go/docs-only changes, verify links.
 2. **List the exact paths YOU changed** — never a peer's. On a hot tree check mtimes/`git log -- <file>` if ownership is unclear.
 3. **Lint:** `fak commit --preview -m "<subject>" --path <p> …` — fix any subject/stamp/lane issue it flags before anything lands.

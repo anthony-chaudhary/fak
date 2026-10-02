@@ -1,20 +1,14 @@
 {
-  "schema": "fak-hf-reference-parity/v1",
+  "schema": "fak-synthetic-glm-mlp-software-check/v2",
   "issue": 10949,
-  "role": "candidate",
+  "role": "software-check",
   "engine": "fak-native",
-  "models_tested": [
-    "Qwen/Qwen3.8-27B",
-    "zai-org/GLM-5.3-Flash"
-  ],
-  "dense_cosine_similarity": {
-    "GLM-5.3-Flash": 0.9999999403953552,
-    "Qwen-3.8-27B": 0.999999
-  },
-  "moe_cosine_similarity": {
-    "GLM-5.3-Flash": 1,
-    "Qwen-3.8-27B": 0.999998
-  },
-  "bit_exact_parity_proven": true,
+  "fixture": "synthetic GLM-style dense and 8-expert MoE operators (16 input, 32 intermediate)",
+  "reference": "local float64 SwiGLU formula",
+  "reference_scope": "MLP math only; MoE shares native routing; no HuggingFace runtime, model weights, full forward, or Qwen execution",
+  "huggingface_qualified": false,
+  "bit_exact_parity_proven": false,
+  "dense_cosine_similarity": 0.9999999999999899,
+  "moe_cosine_similarity": 0.9999999999999908,
   "min_cosine_threshold": 0.9999
 }

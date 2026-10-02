@@ -235,6 +235,7 @@ var emittedRecoveryReasons = []string{
 	"PARENT_TOKEN_BUDGET_EXCEEDED",
 	"PARENT_WALL_DEADLINE_EXCEEDED",
 	"PATHSPEC_RACE",
+	"PEER_WIP_COLLISION",
 	"PII_EXFIL",
 	"PII_REDACTED",
 	"POLICY_BLOCK",
@@ -287,6 +288,22 @@ func recoveryPlans(trunk string) map[string]recoveryPlan {
 func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 	originTrunk := "origin/" + trunk
 	return map[string]recoveryPlan{
+		"PEER_WIP_COLLISION": {
+			Reason:     "PEER_WIP_COLLISION",
+			Summary:    "explicit paths overlap another session's checkpoint attribution; preserve peer work and inspect ownership",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"fak", "wip", "attribute", "--json"}, Summary: "read-only attribution of dirty hunks to checkpoint owners", Safe: true},
+				{Argv: []string{"fak", "wip", "reconcile", "--json"}, Summary: "read-only checkpoint reconciliation decisions", Safe: true},
+			},
+			Notes: []string{
+				"Preserve valid peer work; narrow commits to your exact authored paths and independently review checkpoint ownership.",
+				"Never blindly apply an all-deletion checkpoint or restore/delete work to clear attribution.",
+				"If the checkpoint is proven stale, review its exact refs/fak/wip/<session> and full OID before any disposition.",
+				"Companion fak-flow checkpoint quarantine --repo-root <repo> --ref <ref> --expected-oid <oid> --reason <reason> --json previews retained evidence; --owner-authorized --apply requires explicit operator disposition.",
+				"Default recovery never autoquarantines, restores, deletes, or applies checkpoint work.",
+			},
+		},
 		"BEHIND": {
 			Reason:     "BEHIND",
 			Summary:    "legacy sync divergence token; superseded by closed typed reasons",

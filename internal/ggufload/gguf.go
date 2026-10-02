@@ -58,6 +58,9 @@ const (
 	// 4 bits = scale, low 28 bits = four 7-bit sign selectors). 98 bytes per super-block.
 	blockIQ3XXSBytes = 2 + 3*qkK/8
 	blockQ2_0Bytes   = 34 // 128 elements: f16 scale + 2-bit codes
+	// PrismML llama.cpp adfffbe41b2c ggml-common.h declares PQ2_0 as the same
+	// group-128 block geometry; the external GGUF tag remains distinct.
+	blockPQ2_0Bytes = blockQ2_0Bytes
 	// Q1_0 (g128): the 1-bit binary sibling of Q2_0 for the Bonsai-27B 1-bit build
 	// (#4871) — one f16 scale + 128 contiguous 1-bit codes (16 B) per 128-element
 	// group = 18 bytes per block, ~1.125 bpw.
@@ -125,6 +128,9 @@ const (
 	TensorBF16    TensorType = 30
 	TensorMXFP4   TensorType = 39
 	TensorQ2_0    TensorType = 42
+	// PQ2_0 is Prism's Bonsai-2 ternary group-128 format (GGUF type 142).
+	// It shares Q2_0's decode, but is a separate on-disk format identifier.
+	TensorPQ2_0 TensorType = 142
 	// TensorQ1_0 is the 1-bit group-128 binary quant (Bonsai-27B 1-bit build,
 	// ~1.125 bpw). 43 is the next tag after the PrismML llama.cpp branch's Q2_0
 	// (ggml type 42, fidan/q2_0-b9587); confirm against a real Q1_0_g128 file
@@ -208,6 +214,8 @@ func (t TensorType) String() string {
 		return "MXFP4"
 	case TensorQ2_0:
 		return "Q2_0"
+	case TensorPQ2_0:
+		return "PQ2_0"
 	case TensorQ1_0:
 		return "Q1_0"
 	case TensorHQQ4:

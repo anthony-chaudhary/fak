@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"sync"
 	"testing"
@@ -612,5 +613,189 @@ func TestDoubleBuffer_CapacityAndErrorBounds(t *testing.T) {
 	}
 	if err := fence.Wait(10 * time.Millisecond); err != nil {
 		t.Errorf("expected nil error waiting on signaled fence, got: %v", err)
+	}
+}
+
+// fak-test:runtime slow est=1s lane=default
+// Software-only transfer overlap; the two completion fences and FlipWait must
+// refer to their own buffers even when the most recent transfer finishes first.
+func TestCB12DoubleBufferFlipWaitOwnFence(t *testing.T) {
+	mgr, err := NewDoubleBufferManager(WithSimulateTransferDelay(true), WithDRAMBandwidth(0.01))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+	slow, err := mgr.PrefetchLayerTo(BufferIDB, PrefetchDescriptor{LayerID: 21, SubLayerID: 2, SizeBytes: 3000000, Payload: []byte{21, 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fast, err := mgr.PrefetchLayerTo(BufferIDA, PrefetchDescriptor{LayerID: 10, SubLayerID: 1, SizeBytes: 10000, Payload: []byte{10, 1}})
+	if err != nil {
+		_ = slow.Wait(time.Second)
+		t.Fatal(err)
+	}
+	fastErr := fast.Wait(time.Second)
+	if fastErr != nil {
+		_ = slow.Wait(time.Second)
+		t.Fatal(fastErr)
+	}
+	if slow.IsSignaled() {
+		t.Fatal("slow transfer unexpectedly completed before overlap witness")
+	}
+	buf, flipErr := mgr.FlipWait(time.Second)
+	slowErr := slow.Wait(time.Second) // Join the real transfer before reporting failure.
+	if slowErr != nil {
+		t.Fatal(slowErr)
+	}
+	if flipErr != nil {
+		t.Fatalf("FlipWait followed a different buffer's already-complete fence: %v", flipErr)
+	}
+	if buf.ID != BufferIDB || buf.ActiveLayer != 21 || buf.SubLayerID != 2 {
+		t.Fatalf("wrong completed buffer metadata: %+v", buf)
+	}
+	got, err := buf.Slice(0, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, []byte{21, 2}) {
+		t.Fatalf("wrong completed payload: %v", got)
+	}
+}
+
+// fak-test:runtime fast est=0.1s lane=unit
+// Slice is a stable read snapshot; recycling the manager must not mutate bytes
+// already handed to a reader. No physical cache behavior is measured here.
+func TestCB12DoubleBufferSliceSurvivesReset(t *testing.T) {
+	mgr, err := NewDoubleBufferManager()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+	fence, err := mgr.PrefetchLayerTo(BufferIDB, PrefetchDescriptor{LayerID: 3, SubLayerID: 7, SizeBytes: 4, Payload: []byte{1, 2, 3, 4}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fence.Wait(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	buf := mgr.GetBuffer(BufferIDB)
+	snapshot, err := buf.Slice(0, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.Reset()
+	if !bytes.Equal(snapshot, []byte{1, 2, 3, 4}) {
+		t.Fatalf("Reset mutated published Slice snapshot: %v", snapshot)
+	}
+	current, err := buf.Slice(0, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(current, []byte{0, 0, 0, 0}) || buf.State() != BufferEmpty {
+		t.Fatalf("reset buffer not cleared: %v state=%v", current, buf.State())
+	}
+}
+
+// fak-test:runtime slow est=1s lane=default
+// Reset revokes the old transfer; its eventual completion may not publish into
+// a replacement layer or report successful completion for canceled ownership.
+func TestCB12DoubleBufferResetRevokesOldTransfer(t *testing.T) {
+	mgr, err := NewDoubleBufferManager(WithSimulateTransferDelay(true), WithDRAMBandwidth(0.01))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+	old, err := mgr.PrefetchLayerTo(BufferIDB, PrefetchDescriptor{LayerID: 91, SubLayerID: 9, SizeBytes: 3000000, Payload: []byte{91, 9}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.Reset()
+	replacement, err := mgr.PrefetchLayerTo(BufferIDB, PrefetchDescriptor{LayerID: 12, SubLayerID: 3, SizeBytes: 10000, Payload: []byte{12, 3}})
+	if err != nil {
+		_ = old.Wait(time.Second)
+		t.Fatal(err)
+	}
+	newErr := replacement.Wait(time.Second)
+	oldErr := old.Wait(time.Second)
+	if newErr != nil {
+		t.Fatal(newErr)
+	}
+	if oldErr == nil {
+		t.Error("reset transfer reported successful stale completion")
+	}
+	buf := mgr.GetBuffer(BufferIDB)
+	got, err := buf.Slice(0, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, []byte{12, 3}) || buf.ActiveLayer != 12 || buf.SubLayerID != 3 || buf.State() != BufferReady {
+		t.Fatalf("stale transfer corrupted replacement: payload=%v layer=%d sub=%d state=%s", got, buf.ActiveLayer, buf.SubLayerID, buf.State())
+	}
+}
+
+// fak-test:runtime fast est=0.2s lane=unit
+func TestCB12MALLBufferSliceRejectsOverflowAndShortData(t *testing.T) {
+	b := &MALLBuffer{CapacityBytes: 16, Data: []byte{1, 2}, state: BufferReady}
+	for _, v := range [][2]int64{{math.MaxInt64, 2}, {1, math.MaxInt64}, {0, 4}} {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("Slice(%d,%d) panicked: %v", v[0], v[1], r)
+				}
+			}()
+			if _, err := b.Slice(v[0], v[1]); err == nil {
+				t.Errorf("Slice(%d,%d) accepted invalid physical range", v[0], v[1])
+			}
+		}()
+	}
+}
+
+// fak-test:runtime slow est=1s lane=default
+// Public buffer Reset and manager prefetch must share metadata synchronization;
+// every accepted transfer fence is joined before the race witness returns.
+func TestCB12MALLBufferResetDuringPrefetchMetadata(t *testing.T) {
+	mgr, err := NewDoubleBufferManager()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+	buf := mgr.GetBuffer(BufferIDB)
+	start := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		<-start
+		for i := 0; i < 400; i++ {
+			buf.Reset()
+		}
+	}()
+	close(start)
+	var fences []*CompletionFence
+	for i := 0; i < 400; i++ {
+		f, err := mgr.PrefetchLayerTo(BufferIDB, PrefetchDescriptor{LayerID: i, SubLayerID: i % 7, SizeBytes: 2, Payload: []byte{1, 2}})
+		if err == nil {
+			fences = append(fences, f)
+		}
+	}
+	<-done
+	var joins sync.WaitGroup
+	unresolved := make(chan struct{}, len(fences))
+	for _, f := range fences {
+		joins.Add(1)
+		go func(f *CompletionFence) {
+			defer joins.Done()
+			if errors.Is(f.Wait(200*time.Millisecond), ErrFenceTimeout) {
+				unresolved <- struct{}{}
+			}
+		}(f)
+	}
+	joins.Wait()
+	close(unresolved)
+	if len(unresolved) > 0 {
+		t.Errorf("%d accepted transfer fences did not resolve after public Reset", len(unresolved))
+	}
+	mgr.Reset()
+	if buf.State() != BufferEmpty {
+		t.Fatalf("final reset state=%v", buf.State())
 	}
 }

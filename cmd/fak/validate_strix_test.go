@@ -406,6 +406,173 @@ func TestIsGPURelatedValidation(t *testing.T) {
 	}
 }
 
+// TestStrixValidationSelectionIsHostScopedForModelStateChanges pins the real
+// validator-selection seam for the host-side model changes that were blocked on
+// physical Strix hardware (#12382). Asserting on isGPURelatedValidation alone is
+// not the defect's acceptance witness: the observable the reporter hit is the
+// selection *result* — whether executeStrixValidationPhase skips or reaches
+// controller authority. This test therefore drives the phase itself and requires
+// that a host-side model path never touches authority, discovery, or the device
+// transport, while device-bearing paths and an explicit --strix still do.
+func TestStrixValidationSelectionIsHostScopedForModelStateChanges(t *testing.T) {
+	// The exact host-side path sets named in #12382, each a real change that
+	// passed gofmt/build/vet/its own tests and then failed only because the
+	// automatic Strix phase demanded unreachable physical hardware.
+	hostOnly := []struct {
+		name string
+		mine []string
+	}{
+		{
+			// #12342 MTP partial-commit transaction restore.
+			name: "mtp transaction rollback",
+			mine: []string{
+				"internal/model/mtp_transaction.go",
+				"internal/model/mtp_transaction_test.go",
+			},
+		},
+		{
+			// #12433 host-only test-fixture correction.
+			name: "embedding q2k test fixture",
+			mine: []string{"internal/model/embedding_q2k_test.go"},
+		},
+		{
+			// #12341/#12346 nonfinite guards in the V4.1 attention path.
+			name: "v41 attention nonfinite guards",
+			mine: []string{
+				"internal/model/v41/v41_sparse_attention.go",
+				"internal/model/v41_attention.go",
+				"internal/model/v41/v41_sparse_sink_nonfinite_guard_test.go",
+				"internal/model/v41_attention_nonfinite_guard_test.go",
+			},
+		},
+		{
+			// Mixed host-side model work alongside a non-device package.
+			name: "host model plus control plane",
+			mine: []string{
+				"internal/model/llm.go",
+				"internal/model/v4_topk_partial.go",
+				"cmd/fak/serve.go",
+			},
+		},
+	}
+
+	// Device-bearing paths must keep their physical requirement.
+	deviceBearing := []struct {
+		name string
+		mine []string
+	}{
+		{name: "amdgpu package", mine: []string{"internal/amdgpu/strix_validation.go"}},
+		{name: "compute package", mine: []string{"internal/compute/vulkan.go"}},
+		{name: "model vulkan backend", mine: []string{"internal/model/vulkan_glm_kda_physical_test.go"}},
+		{name: "model metal backend", mine: []string{"internal/model/metal_decode.go"}},
+		{name: "model gpudirect swap", mine: []string{"internal/model/qwen38_gpudirect_swap.go"}},
+	}
+
+	origAuthority := newStrixControllerAuthorityFn
+	origAuthorityValid := strixControllerAuthorityValidFn
+	origDiscover := discoverStrixTargetFn
+	origArchive := buildStrixCandidateArchiveFn
+	origRun := runStrixValidationFn
+	t.Cleanup(func() {
+		newStrixControllerAuthorityFn = origAuthority
+		strixControllerAuthorityValidFn = origAuthorityValid
+		discoverStrixTargetFn = origDiscover
+		buildStrixCandidateArchiveFn = origArchive
+		runStrixValidationFn = origRun
+	})
+
+	// runPhase drives the real selection seam and reports whether the phase
+	// skipped or engaged, plus how many device-plane calls it made.
+	runPhase := func(t *testing.T, explicit bool, mine []string) (skipped bool, res validateResult, err error) {
+		t.Helper()
+		authorityCalls, discoveryCalls, archiveCalls, transportCalls := 0, 0, 0, 0
+		newStrixControllerAuthorityFn = func(context.Context, string) (amdgpu.StrixControllerAuthority, error) {
+			authorityCalls++
+			// Refuse so an engaged phase terminates deterministically without
+			// any device contact; the call count is the observable.
+			return amdgpu.StrixControllerAuthority{}, &testStrixControllerAuthorityRefusal{code: "GIT_SNAPSHOT_UNATTESTED"}
+		}
+		strixControllerAuthorityValidFn = func(amdgpu.StrixControllerAuthority) bool { return true }
+		discoverStrixTargetFn = func(context.Context, string) (*amdgpu.StrixTarget, error) {
+			discoveryCalls++
+			return nil, errors.New("must not discover")
+		}
+		buildStrixCandidateArchiveFn = func(context.Context, string, string, []string) (amdgpu.StrixCandidateArchive, error) {
+			archiveCalls++
+			return amdgpu.StrixCandidateArchive{}, errors.New("must not archive")
+		}
+		runStrixValidationFn = func(context.Context, amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			transportCalls++
+			return nil, errors.New("must not transport")
+		}
+
+		res = validateResult{OK: true}
+		recorder := &validateRecorder{ctx: context.Background(), stderr: io.Discard, started: time.Now(), res: &res}
+		err = executeStrixValidationPhase(context.Background(), io.Discard, io.Discard, &res, recorder, "", explicit, "", "", "", mine)
+
+		for _, phase := range res.SkippedPhases {
+			if phase == "strix_validation" {
+				skipped = true
+			}
+		}
+		if skipped && (authorityCalls != 0 || discoveryCalls != 0 || archiveCalls != 0 || transportCalls != 0) {
+			t.Fatalf("skipped phase still touched the device plane: authority/discovery/archive/transport = %d/%d/%d/%d",
+				authorityCalls, discoveryCalls, archiveCalls, transportCalls)
+		}
+		if !skipped && authorityCalls == 0 {
+			t.Fatal("engaged phase never requested controller authority")
+		}
+		return skipped, res, err
+	}
+
+	for _, tt := range hostOnly {
+		t.Run("host only/"+tt.name, func(t *testing.T) {
+			if shouldRunStrixValidation(false, tt.mine) {
+				t.Fatalf("host-side paths %v were selected for automatic Strix hardware validation", tt.mine)
+			}
+			skipped, res, err := runPhase(t, false, tt.mine)
+			if err != nil {
+				t.Fatalf("host-side selection failed instead of skipping: %v", err)
+			}
+			if !skipped {
+				t.Fatalf("strix_validation was not recorded as skipped for %v", tt.mine)
+			}
+			if !res.OK || len(res.Failures) != 0 {
+				t.Fatalf("host-side skip stayed uncreditable: ok=%v failures=%+v", res.OK, res.Failures)
+			}
+			// Explicit --strix must still reach controller authority for the
+			// same paths: host scoping narrows the automatic trigger only and
+			// never becomes a bypass of an explicitly demanded device run.
+			skippedExplicit, _, errExplicit := runPhase(t, true, tt.mine)
+			if skippedExplicit || errExplicit == nil {
+				t.Fatalf("explicit --strix was skipped or passed for %v: skipped=%v err=%v", tt.mine, skippedExplicit, errExplicit)
+			}
+		})
+	}
+
+	for _, tt := range deviceBearing {
+		t.Run("device bearing/"+tt.name, func(t *testing.T) {
+			if !shouldRunStrixValidation(false, tt.mine) {
+				t.Fatalf("device paths %v lost their physical Strix requirement", tt.mine)
+			}
+			skipped, _, _ := runPhase(t, false, tt.mine)
+			if skipped {
+				t.Fatalf("device paths %v were skipped by the Strix phase", tt.mine)
+			}
+		})
+	}
+
+	t.Run("mixed host and device change still selects device", func(t *testing.T) {
+		mine := []string{"internal/model/llm.go", "internal/amdgpu/strix_validation.go"}
+		if !shouldRunStrixValidation(false, mine) {
+			t.Fatalf("mixed host+device change %v skipped physical validation", mine)
+		}
+		if skipped, _, _ := runPhase(t, false, mine); skipped {
+			t.Fatalf("mixed host+device change %v was skipped", mine)
+		}
+	})
+}
+
 func TestValidateStrix(t *testing.T) {
 	// Invariants on shouldRunStrixValidation
 	if !shouldRunStrixValidation(true, nil) {

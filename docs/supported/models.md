@@ -168,6 +168,7 @@ narrower-precision paths each have their own status.
 | **AWQ 4-bit** (activation-aware, symmetric, zero-point 8; safetensors only) | ~0.5625 | Implemented (`model.LoadAWQ`); CUDA kernel near-Q8 throughput, CPU scalar reference; oracle threshold cosine ≥0.95 | [awq-quantization.md](../explainers/awq-quantization.md) |
 | **GPTQ 4/8-bit** (AutoGPTQ/GPTQModel `qweight`/`qzeros`/`scales`, optional `g_idx`) | ~0.5 / ~1.0 plus scales | Implemented for CPU-resident in-kernel sessions (`model.LoadGPTQ`, opt-in `Session.GPTQ`); loader supports single-file and sharded safetensors and routes Llama/Mistral-shaped matmul weights through resident GPTQ GEMV. No native packed GPTQ CUDA throughput claim is made here. | `internal/model/gptq.go`; `go test ./internal/model -run TestGPTQ` |
 | **Q2_0 ternary GGUF** (g128: {-1,0,+1} weights, one f16 scale per 128 — the Ternary-Bonsai-27B quant) | ~0.27 (34-byte g128 blocks, kept packed-resident) | Implemented for CPU-resident sessions: `Q2_0` tensors load verbatim (no load-time dequant) and the forward GEMV runs on the packed form, bit-exact vs the independent dequant reference (`TestQ2ResidentMatchesDequant`, max\|Δ\|=0). CUDA `k_q2_0_gemm` HAL kernel and a Metal GEMV with in-shader 2-bit unpack landed; Metal parity is CI-witnessed on the Apple-Silicon runner (manual `metal-q2-parity` workflow). No end-to-end 27B serve witness yet — see the Bonsai note below | `internal/ggufload/gguf_q2_0_test.go`; `internal/model/quant_q2_resident_test.go`; `internal/metalgemm/q2_0_test.go`; `.github/workflows/metal-q2-parity.yml` |
+| **PQ2_0 Prism Bonsai-2 GGUF** (GGUF type 142, 128 ternary weights per 34-byte block) | ~0.27 | Native packed CPU load, prefill, decode, and HTTP chat witnessed on Apple M3 Pro using the pinned real 27B checkpoint; explicit Metal currently refuses because model-owned GPU residency is not wired | `internal/ggufload/gguf_pq2_0_synthetic_test.go`; `internal/model/prism_hadamard_projection_test.go`; `cmd/fak/serve_bonsai_pq2_admission_test.go`; [Mac recipe](../fak/mac-local-models.md#ternary-bonsai-2-27b-pq2_0) |
 
 Hardware coverage for these paths (Metal, Vulkan, CUDA Ada and Ampere, the CPU SIMD
 tiers) is in the [Hardware matrix](../HARDWARE-MATRIX.md). The `FAK_*` knobs that pick a
@@ -221,6 +222,26 @@ resolver families.
   The witnesses above are block-level and synthetic-fixture; the real-checkpoint smoke is
   weight-gated (the 27B GGUF is not in CI) and no transcript is committed yet. Until one
   lands, treat "fak serves Bonsai-27B end-to-end" as asserted, not proven.
+
+### Bonsai-2 (prism-ml Ternary-Bonsai-2-27B) — native Mac CPU witness
+
+The [Bonsai-2 PQ2_0 checkpoint](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf)
+is a separate Qwen3.8-derived artifact from the Qwen3.6 Bonsai checkpoint above.
+Its GGUF declares signed Hadamard projection transforms and a grouped GDN value
+layout. The native loader maps Prism's type-142 group-128 blocks to its packed
+ternary math and preserves the checkpoint's row order through lossless packed
+row permutations.
+
+On an Apple M3 Pro, the pinned `b072e1d3b35a0a630cece372c2127528e0994386`
+revision's PQ2_0 file (SHA-256
+`3907dc1658db1f78a9826bf8d5bcb8dc65db0d466388937af57f2294fae62ec1`)
+loaded through `fak serve`, returned `ok: true` from `/healthz`, and answered
+`Ready.` to `Reply with ready.` through `/v1/chat/completions`. The receipt
+reported `engine: inkernel`, `backend: cpu-ref`,
+`forward_path: cpu/qwen35-gdn-reference`, and `fallback_active: false`.
+This is a real text-generation witness, not a numeric logits-parity or throughput
+qualification. The [Mac recipe](../fak/mac-local-models.md#ternary-bonsai-2-27b-pq2_0)
+includes the first-token timeout needed for this CPU run.
 
 ---
 

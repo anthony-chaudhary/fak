@@ -1,0 +1,28 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  req["A request arrives at fak<br/>(prompt + tools + prior turns)"]
+  tok["Tokenize: render the prompt to token ids"]
+  radix{"Longest cached prefix<br/>already in the radix tree?"}
+  reuse["Reuse it: CLONE the cached K/V prefix<br/>(internal/radixkv finds it for you)"]
+  prefill["Prefill ONLY the uncached suffix<br/>F0 forward, rows -> weight bytes"]
+  decide{"Next token is a<br/>tool call?"}
+  call["Adjudicate the proposed tool call<br/>allow / deny / require-witness<br/>(evidence the model did NOT author)"]
+  ptr["Local fast path: answer a repeat in-syscall,<br/>no model round-trip"]
+  effect[["Run the tool: the effect reaches the world"]]
+  admit{"Result admission<br/>at the context MMU"}
+  denyres["Structured refusal becomes the result —<br/>a denied call never reaches the tool"]
+  contok["Admitted result bytes + generated tokens<br/>continue the run"]
+  kvgrow["Append new K/V to the kernel-owned cache;<br/>the radix tree records the new prefix"]
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  class req,tok untrusted;
+  class radix,decide,admit gate;
+  class reuse,kvgrow,ptr pass;
+  class prefill,call,contok kernel;
+  class effect world;
+  class denyres deny;

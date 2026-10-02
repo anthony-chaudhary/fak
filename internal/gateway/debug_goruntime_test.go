@@ -1,3 +1,5 @@
+// Default suites: go test ./internal/gateway and go test ./... (also under -race).
+// Focused suite: go test ./internal/gateway -run '^(TestSelfRSSReaderPlatforms|TestDebugVarsCarriesGoRuntimeReceipt)$' -count=1.
 package gateway
 
 import (
@@ -9,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/harnessres"
 	"github.com/anthony-chaudhary/fak/internal/runtimeobs"
 )
 
@@ -33,20 +36,25 @@ func getDebugVarsRaw(t *testing.T, url string) (debugVarsResponse, string) {
 	return vars, string(body)
 }
 
-// TestDebugVarsCarriesGoRuntimeReceipt proves the live /debug/vars route (not
-// just the runtimeobs leaf) serves the typed #10182 receipt and that two
-// scrapes are Diff-able within one process epoch.
+// fak-test:runtime fast est=100ms lane=default
 func TestSelfRSSReaderPlatforms(t *testing.T) {
 	for _, goos := range []string{"linux", "windows"} {
 		if selfRSSReader(goos) == nil {
 			t.Errorf("%s has a harnessres current-RSS reader; want it injected", goos)
 		}
 	}
-	if selfRSSReader("darwin") != nil {
-		t.Error("darwin has no current-RSS reader; want nil (no_reader), not a reader that always fails")
+	if got, want := selfRSSReader("darwin") != nil, harnessres.DarwinSelfRSSReader() != nil; got != want {
+		t.Errorf("darwin RSS reader injected = %v, want platform availability %v", got, want)
+	}
+	if selfRSSReader("unknown") != nil {
+		t.Error("unknown platform must preserve no_reader instead of injecting a failing reader")
 	}
 }
 
+// TestDebugVarsCarriesGoRuntimeReceipt proves the live /debug/vars route (not
+// just the runtimeobs leaf) serves the typed #10182 receipt and that two
+// scrapes are Diff-able within one process epoch.
+// fak-test:runtime integration est=200ms lane=default
 func TestDebugVarsCarriesGoRuntimeReceipt(t *testing.T) {
 	srv := newTestServer(t)
 	ts := httptest.NewServer(srv.Handler())

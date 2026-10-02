@@ -1,0 +1,275 @@
+#version 450
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_shuffle : require
+
+// Verify-width (1..7 token) register-resident Qwen GatedDeltaNet recurrence for
+// Wave32-class Vulkan devices.
+//
+// Layout adapted from Layr-Labs/mlxfast-bonsai2-27b-engine@5c03048
+// (Vendor/mlx-swift-lm/Libraries/MLXLLM/Models/Qwen35.swift, Qwen35GatedDeltaV3,
+// MIT). Each 8-lane group owns two value dimensions (DVPL = 2) and every lane
+// keeps 16 of the 128 key dims for BOTH rows in registers (R = 16). The two rows
+// form independent FMA chains that share one q/k load, and three
+// subgroupShuffleXor steps reduce across the eight lanes. Verify-width has no
+// 16-token LDS panel staging: q/k/v are re-read straight from convOut per token,
+// but the recurrent state is loaded once before the token loop and stored once
+// after it, so there is no per-token global read-modify-write.
+//
+// Because a 128-key Q/K L2 norm needs the whole key head, but only eight lanes
+// cooperate on one dv pair, the norm is reduced across those eight lanes rather
+// than staged through LDS. The readout is unnormalised: binding 8 receives the
+// raw recurrent readout and the shared qwen35_gdn_prefill_norm dispatch applies
+// the whole-head RMS norm and SiLU gate, exactly as the T>=8 tiled path.
+//
+// The integration selector admits only the production 128x128 geometry and
+// tokens in 1..7. Bounds checks keep the shader valid for any positive token
+// count if it is dispatched directly.
+//
+// Dispatch: ceil(vHd / 8) x nV x 1. local_size_x = 32 is one Wave32 subgroup
+// holding four independent eight-lane groups.
+layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer ConvOut { float convOut[]; };
+layout(std430, set = 0, binding = 1) readonly buffer Z       { float z[]; };
+layout(std430, set = 0, binding = 2) readonly buffer B       { float beta[]; };
+layout(std430, set = 0, binding = 3) readonly buffer A       { float alpha[]; };
+layout(std430, set = 0, binding = 4) readonly buffer ALog    { float aLog[]; };
+layout(std430, set = 0, binding = 5) readonly buffer DTBias  { float dtBias[]; };
+layout(std430, set = 0, binding = 6) readonly buffer Norm    { float norm[]; };
+layout(std430, set = 0, binding = 7) buffer State            { float state[]; };
+layout(std430, set = 0, binding = 8) writeonly buffer Readout { float readout[]; };
+
+layout(push_constant) uniform PC {
+    int tokens;
+    int convDim;
+    int nK;
+    int nV;
+    int kHd;
+    int vHd;
+    float eps;
+} pc;
+
+const int KEY_DIM = 128;
+const int RUN = 16;        // key dims owned by one lane
+const int VALUE_STEP = 8;  // value dims owned by one workgroup (four dv pairs)
+
+float softplus(float x) {
+    return x > 20.0 ? x : log(1.0 + exp(x));
+}
+
+// XOR distances 1, 2, and 4 never cross an eight-lane boundary inside a
+// subgroup, so reduce8 reduces exactly the eight lanes of one dv pair.
+float reduce8(float value) {
+    value += subgroupShuffleXor(value, 1u);
+    value += subgroupShuffleXor(value, 2u);
+    value += subgroupShuffleXor(value, 4u);
+    return value;
+}
+
+void main() {
+    // Derive recurrence ownership from subgroup built-ins. Vulkan does not
+    // promise that linear local invocation indices map monotonically onto
+    // subgroup lanes, so never index by gl_LocalInvocationIndex here.
+    int lane8 = int(gl_SubgroupInvocationID & 7u);
+    int group = int(gl_SubgroupInvocationID >> 3u);
+    int dvA = int(gl_WorkGroupID.x) * VALUE_STEP + group * 2;
+    int dvB = dvA + 1;
+    int h = int(gl_WorkGroupID.y);
+
+    bool geometryOK = pc.tokens > 0 && pc.tokens <= 7 && pc.kHd == KEY_DIM &&
+        pc.vHd == KEY_DIM && pc.nK > 0 && pc.nV > 0 && pc.nV % pc.nK == 0 &&
+        gl_SubgroupSize >= 8u;
+    if (!geometryOK || h >= pc.nV) {
+        return;
+    }
+
+    bool activeA = dvA < pc.vHd;
+    bool activeB = dvB < pc.vHd;
+    int repeat = pc.nV / pc.nK;
+    int kh = h / repeat;
+    int keyBase = kh * pc.kHd;
+    int valueBase = 2 * pc.nK * pc.kHd + h * pc.vHd;
+    int kLane = lane8;
+    int stride = 8;
+    uint groupBase = gl_SubgroupInvocationID & ~7u;
+
+    // 16 state floats for each of the two owned value dims, resident for the
+    // whole call. Striped ownership gives the eight cooperating lanes distinct
+    // LDS/register banks while collectively covering the 128-element column.
+    vec4 a0 = vec4(0.0), a1 = vec4(0.0), a2 = vec4(0.0), a3 = vec4(0.0);
+    vec4 b0 = vec4(0.0), b1 = vec4(0.0), b2 = vec4(0.0), b3 = vec4(0.0);
+    if (activeA) {
+        a0 = vec4(
+            state[(h * pc.kHd + kLane + stride * 0) * pc.vHd + dvA],
+            state[(h * pc.kHd + kLane + stride * 1) * pc.vHd + dvA],
+            state[(h * pc.kHd + kLane + stride * 2) * pc.vHd + dvA],
+            state[(h * pc.kHd + kLane + stride * 3) * pc.vHd + dvA]);
+        a1 = vec4(
+            state[(h * pc.kHd + kLane + stride * 4) * pc.vHd + dvA],
+            state[(h * pc.kHd + kLane + stride * 5) * pc.vHd + dvA],
+            state[(h * pc.kHd + kLane + stride * 6) * pc.vHd + dvA],
+            state[(h * pc.kHd + kLane + stride * 7) * pc.vHd + dvA]);
+        a2 = vec4(
+            state[(h * pc.kHd + kLane + stride * 8) * pc.vHd + dvA],
+            state[(h * pc.kHd + kLane + stride * 9) * pc.vHd + dvA],
+            state[(h * pc.kHd + kLane + stride * 10) * pc.vHd + dvA],
+            state[(h * pc.kHd + kLane + stride * 11) * pc.vHd + dvA]);
+        a3 = vec4(
+            state[(h * pc.kHd + kLane + stride * 12) * pc.vHd + dvA],
+            state[(h * pc.kHd + kLane + stride * 13) * pc.vHd + dvA],
+            state[(h * pc.kHd + kLane + stride * 14) * pc.vHd + dvA],
+            state[(h * pc.kHd + kLane + stride * 15) * pc.vHd + dvA]);
+    }
+    if (activeB) {
+        b0 = vec4(
+            state[(h * pc.kHd + kLane + stride * 0) * pc.vHd + dvB],
+            state[(h * pc.kHd + kLane + stride * 1) * pc.vHd + dvB],
+            state[(h * pc.kHd + kLane + stride * 2) * pc.vHd + dvB],
+            state[(h * pc.kHd + kLane + stride * 3) * pc.vHd + dvB]);
+        b1 = vec4(
+            state[(h * pc.kHd + kLane + stride * 4) * pc.vHd + dvB],
+            state[(h * pc.kHd + kLane + stride * 5) * pc.vHd + dvB],
+            state[(h * pc.kHd + kLane + stride * 6) * pc.vHd + dvB],
+            state[(h * pc.kHd + kLane + stride * 7) * pc.vHd + dvB]);
+        b2 = vec4(
+            state[(h * pc.kHd + kLane + stride * 8) * pc.vHd + dvB],
+            state[(h * pc.kHd + kLane + stride * 9) * pc.vHd + dvB],
+            state[(h * pc.kHd + kLane + stride * 10) * pc.vHd + dvB],
+            state[(h * pc.kHd + kLane + stride * 11) * pc.vHd + dvB]);
+        b3 = vec4(
+            state[(h * pc.kHd + kLane + stride * 12) * pc.vHd + dvB],
+            state[(h * pc.kHd + kLane + stride * 13) * pc.vHd + dvB],
+            state[(h * pc.kHd + kLane + stride * 14) * pc.vHd + dvB],
+            state[(h * pc.kHd + kLane + stride * 15) * pc.vHd + dvB]);
+    }
+
+    for (int t = 0; t < pc.tokens; ++t) {
+        int base = t * pc.convDim;
+
+        // Load the lane's 16 raw Q and K elements once. Both value rows reuse
+        // the same normalised q/k vectors, which is the shared-load win of the
+        // DVPL = 2 layout.
+        vec4 q0 = vec4(
+            convOut[base + keyBase + kLane + stride * 0],
+            convOut[base + keyBase + kLane + stride * 1],
+            convOut[base + keyBase + kLane + stride * 2],
+            convOut[base + keyBase + kLane + stride * 3]);
+        vec4 q1 = vec4(
+            convOut[base + keyBase + kLane + stride * 4],
+            convOut[base + keyBase + kLane + stride * 5],
+            convOut[base + keyBase + kLane + stride * 6],
+            convOut[base + keyBase + kLane + stride * 7]);
+        vec4 q2 = vec4(
+            convOut[base + keyBase + kLane + stride * 8],
+            convOut[base + keyBase + kLane + stride * 9],
+            convOut[base + keyBase + kLane + stride * 10],
+            convOut[base + keyBase + kLane + stride * 11]);
+        vec4 q3 = vec4(
+            convOut[base + keyBase + kLane + stride * 12],
+            convOut[base + keyBase + kLane + stride * 13],
+            convOut[base + keyBase + kLane + stride * 14],
+            convOut[base + keyBase + kLane + stride * 15]);
+        int kOffset = base + pc.nK * pc.kHd + keyBase;
+        vec4 k0 = vec4(
+            convOut[kOffset + kLane + stride * 0],
+            convOut[kOffset + kLane + stride * 1],
+            convOut[kOffset + kLane + stride * 2],
+            convOut[kOffset + kLane + stride * 3]);
+        vec4 k1 = vec4(
+            convOut[kOffset + kLane + stride * 4],
+            convOut[kOffset + kLane + stride * 5],
+            convOut[kOffset + kLane + stride * 6],
+            convOut[kOffset + kLane + stride * 7]);
+        vec4 k2 = vec4(
+            convOut[kOffset + kLane + stride * 8],
+            convOut[kOffset + kLane + stride * 9],
+            convOut[kOffset + kLane + stride * 10],
+            convOut[kOffset + kLane + stride * 11]);
+        vec4 k3 = vec4(
+            convOut[kOffset + kLane + stride * 12],
+            convOut[kOffset + kLane + stride * 13],
+            convOut[kOffset + kLane + stride * 14],
+            convOut[kOffset + kLane + stride * 15]);
+
+        // Q/K L2 norm over the full 128-element key head: reduce the eight lanes
+        // of this dv pair. Q carries the fixed 1e-6 epsilon and the 1/128 scale
+        // the reference uses; K carries only the epsilon.
+        float q2sum = reduce8(dot(q0, q0) + dot(q1, q1) + dot(q2, q2) + dot(q3, q3));
+        float k2sum = reduce8(dot(k0, k0) + dot(k1, k1) + dot(k2, k2) + dot(k3, k3));
+        float qInv = inversesqrt(q2sum + 1e-6) * inversesqrt(float(KEY_DIM));
+        float kInv = inversesqrt(k2sum + 1e-6);
+        q0 *= qInv; q1 *= qInv; q2 *= qInv; q3 *= qInv;
+        k0 *= kInv; k1 *= kInv; k2 *= kInv; k3 *= kInv;
+
+        float av = exp(-exp(aLog[h]) * softplus(alpha[t * pc.nV + h] + dtBias[h]));
+        float bv = 1.0 / (1.0 + exp(-beta[t * pc.nV + h]));
+
+        if (activeA) {
+            a0 *= av; a1 *= av; a2 *= av; a3 *= av;
+            float kvmem = reduce8(dot(a0, k0) + dot(a1, k1) + dot(a2, k2) + dot(a3, k3));
+            float delta = 0.0;
+            if (lane8 == 0) {
+                delta = (convOut[base + valueBase + dvA] - kvmem) * bv;
+            }
+            delta = subgroupShuffle(delta, groupBase);
+            a0 += k0 * delta; a1 += k1 * delta; a2 += k2 * delta; a3 += k3 * delta;
+            float outv = reduce8(dot(a0, q0) + dot(a1, q1) + dot(a2, q2) + dot(a3, q3));
+            if (lane8 == 0) {
+                readout[t * pc.nV * pc.vHd + h * pc.vHd + dvA] = outv;
+            }
+        }
+        if (activeB) {
+            b0 *= av; b1 *= av; b2 *= av; b3 *= av;
+            float kvmem = reduce8(dot(b0, k0) + dot(b1, k1) + dot(b2, k2) + dot(b3, k3));
+            float delta = 0.0;
+            if (lane8 == 0) {
+                delta = (convOut[base + valueBase + dvB] - kvmem) * bv;
+            }
+            delta = subgroupShuffle(delta, groupBase);
+            b0 += k0 * delta; b1 += k1 * delta; b2 += k2 * delta; b3 += k3 * delta;
+            float outv = reduce8(dot(b0, q0) + dot(b1, q1) + dot(b2, q2) + dot(b3, q3));
+            if (lane8 == 0) {
+                readout[t * pc.nV * pc.vHd + h * pc.vHd + dvB] = outv;
+            }
+        }
+    }
+
+    // In-place writeback preserves the persistent-state ABI and all nonzero
+    // incoming state. Every invocation owns disjoint (head,k,dv) cells.
+    if (activeA) {
+        state[(h * pc.kHd + kLane + stride * 0) * pc.vHd + dvA] = a0.x;
+        state[(h * pc.kHd + kLane + stride * 1) * pc.vHd + dvA] = a0.y;
+        state[(h * pc.kHd + kLane + stride * 2) * pc.vHd + dvA] = a0.z;
+        state[(h * pc.kHd + kLane + stride * 3) * pc.vHd + dvA] = a0.w;
+        state[(h * pc.kHd + kLane + stride * 4) * pc.vHd + dvA] = a1.x;
+        state[(h * pc.kHd + kLane + stride * 5) * pc.vHd + dvA] = a1.y;
+        state[(h * pc.kHd + kLane + stride * 6) * pc.vHd + dvA] = a1.z;
+        state[(h * pc.kHd + kLane + stride * 7) * pc.vHd + dvA] = a1.w;
+        state[(h * pc.kHd + kLane + stride * 8) * pc.vHd + dvA] = a2.x;
+        state[(h * pc.kHd + kLane + stride * 9) * pc.vHd + dvA] = a2.y;
+        state[(h * pc.kHd + kLane + stride * 10) * pc.vHd + dvA] = a2.z;
+        state[(h * pc.kHd + kLane + stride * 11) * pc.vHd + dvA] = a2.w;
+        state[(h * pc.kHd + kLane + stride * 12) * pc.vHd + dvA] = a3.x;
+        state[(h * pc.kHd + kLane + stride * 13) * pc.vHd + dvA] = a3.y;
+        state[(h * pc.kHd + kLane + stride * 14) * pc.vHd + dvA] = a3.z;
+        state[(h * pc.kHd + kLane + stride * 15) * pc.vHd + dvA] = a3.w;
+    }
+    if (activeB) {
+        state[(h * pc.kHd + kLane + stride * 0) * pc.vHd + dvB] = b0.x;
+        state[(h * pc.kHd + kLane + stride * 1) * pc.vHd + dvB] = b0.y;
+        state[(h * pc.kHd + kLane + stride * 2) * pc.vHd + dvB] = b0.z;
+        state[(h * pc.kHd + kLane + stride * 3) * pc.vHd + dvB] = b0.w;
+        state[(h * pc.kHd + kLane + stride * 4) * pc.vHd + dvB] = b1.x;
+        state[(h * pc.kHd + kLane + stride * 5) * pc.vHd + dvB] = b1.y;
+        state[(h * pc.kHd + kLane + stride * 6) * pc.vHd + dvB] = b1.z;
+        state[(h * pc.kHd + kLane + stride * 7) * pc.vHd + dvB] = b1.w;
+        state[(h * pc.kHd + kLane + stride * 8) * pc.vHd + dvB] = b2.x;
+        state[(h * pc.kHd + kLane + stride * 9) * pc.vHd + dvB] = b2.y;
+        state[(h * pc.kHd + kLane + stride * 10) * pc.vHd + dvB] = b2.z;
+        state[(h * pc.kHd + kLane + stride * 11) * pc.vHd + dvB] = b2.w;
+        state[(h * pc.kHd + kLane + stride * 12) * pc.vHd + dvB] = b3.x;
+        state[(h * pc.kHd + kLane + stride * 13) * pc.vHd + dvB] = b3.y;
+        state[(h * pc.kHd + kLane + stride * 14) * pc.vHd + dvB] = b3.z;
+        state[(h * pc.kHd + kLane + stride * 15) * pc.vHd + dvB] = b3.w;
+    }
+}

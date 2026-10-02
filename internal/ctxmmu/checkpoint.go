@@ -84,6 +84,12 @@ var (
 
 	// ErrInvalidAcceptedCount is returned when accepted count is out of bounds.
 	ErrInvalidAcceptedCount = errors.New("ctxmmu: invalid accepted token count")
+
+	// ErrNoRestorableState is returned when a descriptor claims committed tokens but
+	// retains neither a token sequence nor any physical or COW page backing it.
+	// Pool counters are capacity accounting, not state authority, so such a
+	// descriptor cannot be restored regardless of how self-consistent its hash is.
+	ErrNoRestorableState = errors.New("ctxmmu: descriptor claims committed tokens without restorable state")
 )
 
 // AttentionGeometry identifies the mask topology.
@@ -582,10 +588,11 @@ func (cm *CheckpointManager) SaveInPlaceCheckpoint(sessionID string) (*SessionDe
 		pinnedCOWBlocks []*PageBlock
 	)
 
-	// Step 1: Query SharedTokenPool usage and reclaim uncommitted output headroom
+	// Step 1: Read SharedTokenPool usage. Uncommitted output headroom is reclaimed
+	// only after state authority is established below, so a rejected save never
+	// mutates capacity accounting for an unrelated session.
 	if cm.pool != nil {
 		committed, reserved = cm.pool.StreamUsage(sessionID)
-		cm.pool.ReleaseHeadroom(sessionID)
 	}
 
 	// Step 2: Retain physical blocks and read tokens from ForkManager
@@ -626,12 +633,15 @@ func (cm *CheckpointManager) SaveInPlaceCheckpoint(sessionID string) (*SessionDe
 		}
 	}
 
-	// Session existence check: if managers are configured, session must exist in at least one
-	hasSession := (cm.forkMgr != nil && cm.forkMgr.HasSession(sessionID)) ||
-		(cm.cowTable != nil && cm.cowTable.HasSession(sessionID)) ||
-		(cm.pool != nil && (committed > 0 || reserved > 0))
+	// State authority: a restorable checkpoint must be sourced from a state owner.
+	// ForkManager and COWPageTable hold real token identity and KV pages;
+	// SharedTokenPool holds counts only, so positive pool counters are never proof
+	// that a session exists. Accounting without state would otherwise fabricate the
+	// token sequence and report a zero-copy restore of model state that never existed.
+	hasStateOwner := (cm.forkMgr != nil && cm.forkMgr.HasSession(sessionID)) ||
+		(cm.cowTable != nil && cm.cowTable.HasSession(sessionID))
 
-	if (cm.forkMgr != nil || cm.cowTable != nil || cm.pool != nil) && !hasSession {
+	if (cm.forkMgr != nil || cm.cowTable != nil || cm.pool != nil) && !hasStateOwner {
 		// Clean up any temporary pins taken
 		for _, b := range pinnedBlocks {
 			b.Release()
@@ -642,12 +652,10 @@ func (cm *CheckpointManager) SaveInPlaceCheckpoint(sessionID string) (*SessionDe
 		return nil, ErrSessionNotFound
 	}
 
-	// Fallback token sequence if only pool was tracked with committed tokens
-	if len(tokens) == 0 && committed > 0 {
-		tokens = make([]int32, committed)
-		for i := 0; i < committed; i++ {
-			tokens[i] = int32(1000 + i)
-		}
+	// Reclaim uncommitted output headroom now that the save will proceed. The pool
+	// contributes counts only; the token sequence above always comes from a state owner.
+	if cm.pool != nil {
+		cm.pool.ReleaseHeadroom(sessionID)
 	}
 
 	// Step 4: Harvest quarantined IDs from MMU
@@ -785,20 +793,30 @@ func (cm *CheckpointManager) RestoreInPlaceCheckpoint(sessionID string, desc *Se
 		return ErrPrefixHashMismatch
 	}
 
-	// Step 3: Re-reserve output headroom in SharedTokenPool
+	// Step 3: Fail closed on a descriptor whose only evidence is pool accounting.
+	// A descriptor claiming committed tokens with no token sequence and no retained
+	// physical or COW pages has no state to restore, even though its prefix hash is
+	// internally consistent. Validated before the headroom re-reserve so a rejected
+	// restore does not mutate pool capacity accounting.
+	if desc.CommittedTokens > 0 && len(desc.TokenSequence) == 0 &&
+		len(desc.PinnedBlocks) == 0 && len(desc.PinnedCOWBlocks) == 0 {
+		return ErrNoRestorableState
+	}
+
+	// Step 4: Re-reserve output headroom in SharedTokenPool
 	if cm.pool != nil && desc.HeadroomTokens > 0 {
 		if err := cm.pool.Reserve(sessionID, desc.HeadroomTokens); err != nil {
 			return fmt.Errorf("ctxmmu: failed to re-reserve headroom in shared token pool: %w", err)
 		}
 	}
 
-	// Step 4: Zero-copy resumption metadata
+	// Step 5: Zero-copy resumption metadata
 	desc.PhysicalBytesTransferred = 0
 	desc.Restored = true
 	desc.RestoredAt = time.Now()
 	desc.ResumptionLatency = time.Since(start)
 
-	// Step 5: Release checkpoint retention pins now that the stream is active
+	// Step 6: Release checkpoint retention pins now that the stream is active
 	desc.releasePinsLocked()
 
 	// Update manager record

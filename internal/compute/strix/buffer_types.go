@@ -235,13 +235,18 @@ func (b *MALLBuffer) IsSetDisjointWith(other *MALLBuffer) bool {
 	return b.SetRangeEnd < other.SetRangeStart || b.SetRangeStart > other.SetRangeEnd
 }
 
-// Slice returns a sub-slice of the buffer data with bounds checking.
+// Slice returns a detached snapshot with bounds checking. The snapshot remains
+// valid across manager transfers and Reset; each call allocates its own bytes.
 func (b *MALLBuffer) Slice(offset, length int64) ([]byte, error) {
-	if offset < 0 || length < 0 || offset+length > b.CapacityBytes {
+	b.stateMu.RLock()
+	defer b.stateMu.RUnlock()
+	if offset < 0 || length < 0 || offset > b.CapacityBytes || length > b.CapacityBytes-offset || offset > int64(len(b.Data)) || length > int64(len(b.Data))-offset {
 		return nil, fmt.Errorf("%w: offset=%d length=%d capacity=%d",
 			ErrOutOfBounds, offset, length, b.CapacityBytes)
 	}
-	return b.Data[offset : offset+length], nil
+	snapshot := make([]byte, length)
+	copy(snapshot, b.Data[offset:offset+length])
+	return snapshot, nil
 }
 
 // PrefetchStatus represents the state of an asynchronous DRAM-to-MALL prefetch operation.
@@ -260,7 +265,13 @@ const (
 
 // CompletionFence provides a thread-safe, deadlock-free synchronization primitive
 // between the asynchronous DRAM prefetch pipeline and WMMA compute wavefronts.
+type fenceLifetime struct {
+	done chan struct{}
+	err  error
+}
+
 type CompletionFence struct {
+	lifetime   *fenceLifetime
 	done       chan struct{}
 	mu         sync.Mutex
 	signaled   bool
@@ -270,9 +281,8 @@ type CompletionFence struct {
 
 // NewCompletionFence constructs an unsignaled completion fence.
 func NewCompletionFence() *CompletionFence {
-	return &CompletionFence{
-		done: make(chan struct{}),
-	}
+	done := make(chan struct{})
+	return &CompletionFence{done: done, lifetime: &fenceLifetime{done: done}}
 }
 
 // Signal marks the fence as completed, unblocking all current and future waiters.
@@ -296,18 +306,23 @@ func (f *CompletionFence) SignalError(err error) {
 		f.signaled = true
 		f.signaledAt = time.Now()
 		f.err = err
+		f.lifetime.err = err
 		close(f.done)
 	}
 }
 
 // Wait blocks until the fence is signaled or the given timeout elapses.
 func (f *CompletionFence) Wait(timeout time.Duration) error {
+	f.mu.Lock()
+	lifetime := f.lifetime
+	done := lifetime.done
+	f.mu.Unlock()
 	if timeout <= 0 {
 		select {
-		case <-f.done:
+		case <-done:
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			return f.err
+			return lifetime.err
 		default:
 			return ErrFenceTimeout
 		}
@@ -317,10 +332,10 @@ func (f *CompletionFence) Wait(timeout time.Duration) error {
 	defer timer.Stop()
 
 	select {
-	case <-f.done:
+	case <-done:
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		return f.err
+		return lifetime.err
 	case <-timer.C:
 		return ErrFenceTimeout
 	}
@@ -328,6 +343,10 @@ func (f *CompletionFence) Wait(timeout time.Duration) error {
 
 // WaitContext blocks until the fence is signaled, the context is cancelled, or the timeout elapses.
 func (f *CompletionFence) WaitContext(ctx context.Context, timeout time.Duration) error {
+	f.mu.Lock()
+	lifetime := f.lifetime
+	done := lifetime.done
+	f.mu.Unlock()
 	if timeout <= 0 {
 		return f.Wait(timeout)
 	}
@@ -336,10 +355,10 @@ func (f *CompletionFence) WaitContext(ctx context.Context, timeout time.Duration
 	defer timer.Stop()
 
 	select {
-	case <-f.done:
+	case <-done:
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		return f.err
+		return lifetime.err
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-timer.C:
@@ -384,6 +403,7 @@ func (f *CompletionFence) Reset() {
 	defer f.mu.Unlock()
 
 	f.done = make(chan struct{})
+	f.lifetime = &fenceLifetime{done: f.done}
 	f.signaled = false
 	f.signaledAt = time.Time{}
 	f.err = nil

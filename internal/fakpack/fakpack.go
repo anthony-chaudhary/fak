@@ -312,19 +312,53 @@ func Create(opts CreateOptions) (*CreateResult, error) {
 		}
 	}
 
-	// Check components
+	// Check components and build the binaries-layer allowlist. Only files that a
+	// normalized lock component resolves to are packaged; unrelated executables in
+	// the bin directory are deliberately excluded.
+	var binFiles []tarFileEntry
 	if opts.BinDir != "" {
+		binRoot, err := filepath.Abs(opts.BinDir)
+		if err != nil {
+			return nil, fmt.Errorf("resolve bin dir %s: %w", opts.BinDir, err)
+		}
+		binRoot, err = filepath.EvalSymlinks(binRoot)
+		if err != nil {
+			return nil, fmt.Errorf("resolve bin dir %s: %w", opts.BinDir, err)
+		}
+		seen := map[string]bool{}
 		for _, comp := range lock.Components {
-			found := false
+			resolved := ""
 			for _, name := range []string{comp.ID, comp.ID + ".exe", comp.Source, filepath.Base(comp.Source)} {
-				if _, err := os.Stat(filepath.Join(opts.BinDir, name)); err == nil {
-					found = true
-					break
+				candidate := filepath.Join(opts.BinDir, name)
+				fi, err := os.Lstat(candidate)
+				if err != nil || fi.IsDir() {
+					continue
 				}
+				// Resolve symlinks so a declared executable cannot point outside BinDir.
+				eval, err := filepath.EvalSymlinks(candidate)
+				if err != nil {
+					continue
+				}
+				absEval, err := filepath.Abs(eval)
+				if err != nil || !withinDir(binRoot, absEval) {
+					return nil, wrapError(ErrComponentMissing, fmt.Sprintf("component %q resolves outside bin dir %s", comp.ID, opts.BinDir), nil)
+				}
+				resolved = absEval
+				break
 			}
-			if !found {
+			if resolved == "" {
 				return nil, wrapError(ErrComponentMissing, fmt.Sprintf("component %q not found in bin dir %s", comp.ID, opts.BinDir), nil)
 			}
+			rel, err := filepath.Rel(binRoot, resolved)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return nil, wrapError(ErrComponentMissing, fmt.Sprintf("component %q resolves outside bin dir %s", comp.ID, opts.BinDir), nil)
+			}
+			archiveName := filepath.ToSlash(rel)
+			if seen[archiveName] {
+				continue
+			}
+			seen[archiveName] = true
+			binFiles = append(binFiles, tarFileEntry{path: resolved, name: archiveName})
 		}
 	}
 
@@ -394,10 +428,10 @@ func Create(opts CreateOptions) (*CreateResult, error) {
 	}
 	layers = append(layers, layerPayload{desc: assetsDesc, data: assetsBytes})
 
-	// 4. Binaries layer
+	// 4. Binaries layer (exactly the lock-declared executables, never the whole dir).
 	var binBytes []byte
 	if opts.BinDir != "" {
-		bb, err := buildTarGzFromDir(opts.BinDir)
+		bb, err := buildTarGzFromFiles(binFiles)
 		if err != nil {
 			return nil, fmt.Errorf("package bin dir: %w", err)
 		}
@@ -891,21 +925,54 @@ func extractTarGzToDir(data []byte, destDir string) error {
 	return nil
 }
 
+// tarFileEntry pairs an on-disk path with the name it should carry in a tar archive.
+type tarFileEntry struct {
+	path string
+	name string
+}
+
+// withinDir reports whether target is root itself or nested under root. Both paths
+// must already be absolute and symlink-resolved.
+func withinDir(root, target string) bool {
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func buildTarGzFromDir(dir string) ([]byte, error) {
-	var paths []string
-	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+	var entries []tarFileEntry
+	err := filepath.WalkDir(dir, func(p string, _ fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if p != dir {
-			paths = append(paths, p)
+		if p == dir {
+			return nil
 		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return err
+		}
+		entries = append(entries, tarFileEntry{path: p, name: filepath.ToSlash(rel)})
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("walk dir %s: %w", dir, err)
 	}
-	sort.Strings(paths)
+	sort.Slice(entries, func(i, j int) bool { return entries[i].name < entries[j].name })
+	return buildTarGzFromFiles(entries)
+}
+
+// buildTarGzFromFiles archives exactly the supplied entries with deterministic
+// ordering, using the same gzip/tar settings as the directory variant.
+func buildTarGzFromFiles(entries []tarFileEntry) ([]byte, error) {
+	sorted := make([]tarFileEntry, len(entries))
+	copy(sorted, entries)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].name < sorted[j].name })
 
 	var buf bytes.Buffer
 	gw := gzip.NewWriter(&buf)
@@ -913,20 +980,13 @@ func buildTarGzFromDir(dir string) ([]byte, error) {
 	gw.Header.OS = 255
 	tw := tar.NewWriter(gw)
 
-	for _, p := range paths {
-		info, err := os.Lstat(p)
+	for _, e := range sorted {
+		info, err := os.Lstat(e.path)
 		if err != nil {
 			_ = tw.Close()
 			_ = gw.Close()
 			return nil, err
 		}
-		rel, err := filepath.Rel(dir, p)
-		if err != nil {
-			_ = tw.Close()
-			_ = gw.Close()
-			return nil, err
-		}
-		cleanRel := filepath.ToSlash(rel)
 
 		hdr, err := tar.FileInfoHeader(info, "")
 		if err != nil {
@@ -934,7 +994,7 @@ func buildTarGzFromDir(dir string) ([]byte, error) {
 			_ = gw.Close()
 			return nil, err
 		}
-		hdr.Name = cleanRel
+		hdr.Name = e.name
 		hdr.ModTime = time.Unix(0, 0).UTC()
 		hdr.Uid = 0
 		hdr.Gid = 0
@@ -956,7 +1016,7 @@ func buildTarGzFromDir(dir string) ([]byte, error) {
 			_ = gw.Close()
 			return nil, err
 		}
-		f, err := os.Open(p)
+		f, err := os.Open(e.path)
 		if err != nil {
 			_ = tw.Close()
 			_ = gw.Close()
