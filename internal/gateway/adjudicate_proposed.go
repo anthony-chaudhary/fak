@@ -52,6 +52,13 @@ func toolCallDropRefusal(comp *agent.Completion) (msg, code string, typed bool) 
 		return "", "", false
 	}
 	name := abi.ReasonName(comp.ToolCallsDroppedReason)
+	if comp.ToolCallsDroppedReason == abi.ReasonOversize {
+		detail := "the model's tool call was cut off by the output-token budget"
+		if comp.Usage.CompletionTokens > 0 {
+			detail += fmt.Sprintf("; reported usage: %d completion tokens", comp.Usage.CompletionTokens)
+		}
+		return "upstream tool-call format not recognized; refusing to skip adjudication (typed refusal: " + name + " — " + detail + "; raise max_tokens or split the call into smaller calls)", name, true
+	}
 	return "upstream tool-call format not recognized; refusing to skip adjudication (typed refusal: " + name + " — the model's tool call could not be formed into an adjudicable call)", name, true
 }
 
