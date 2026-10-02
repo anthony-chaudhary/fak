@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"path/filepath"
+	"reflect"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -10,6 +13,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 )
 
+// fak-test:runtime fast est=100ms
 func TestRunRegistersEveryLogicalContextUnderStartingGoal(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "child-registrations.jsonl")
 	store := sessionregistry.Store{Path: path}
@@ -30,12 +34,70 @@ func TestRunRegistersEveryLogicalContextUnderStartingGoal(t *testing.T) {
 		Now: func() time.Time { return now.Add(time.Second) },
 	}
 
-	report, err := run(context.Background(), config{Contexts: 3, Workers: 2, Delay: 20 * time.Millisecond, Selfcheck: true, Lineage: lineage})
-	if err != nil {
-		t.Fatal(err)
+	cfg := config{Contexts: 3, Workers: 2, Delay: 0, Selfcheck: true, Lineage: lineage}
+	entered := make(chan struct{}, cfg.Workers)
+	released := make(chan struct{})
+	release := sync.OnceFunc(func() { close(released) })
+	var arrivals atomic.Int64
+	beforeComplete := func(ctx context.Context) error {
+		if arrivals.Add(1) <= int64(cfg.Workers) {
+			entered <- struct{}{}
+		}
+		select {
+		case <-released:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
-	if report.Verdict != "PASS" || report.Completed != 3 {
-		t.Fatalf("report = %+v", report)
+	// Keep this witness compilable against source without the seam: the failure
+	// must be run returning while the rendezvous is held, not an undefined field.
+	if field := reflect.ValueOf(&cfg).Elem().FieldByName("SyntheticBeforeComplete"); field.IsValid() {
+		field.Set(reflect.ValueOf(beforeComplete))
+	}
+	// The deadline only bounds a broken rendezvous; entry signals prove overlap.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	var result report
+	var runErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		result, runErr = run(ctx, cfg)
+	}()
+	defer func() {
+		cancel()
+		release()
+		<-done
+	}()
+	for i := 0; i < cfg.Workers; i++ {
+		select {
+		case <-entered:
+		case <-done:
+			t.Fatalf("run returned while synthetic completion rendezvous was held: entries=%d, want %d; report=%+v; err=%v", arrivals.Load(), cfg.Workers, result, runErr)
+		case <-ctx.Done():
+			t.Fatalf("waiting for synthetic completion entries: %v", ctx.Err())
+		}
+	}
+	select {
+	case <-done:
+		t.Fatalf("run returned before releasing synthetic completion rendezvous: report=%+v; err=%v", result, runErr)
+	default:
+	}
+	release()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatalf("waiting for released synthetic completions: %v", ctx.Err())
+	}
+	if got := arrivals.Load(); got != int64(cfg.Contexts) {
+		t.Fatalf("synthetic completion entries = %d, want %d", got, cfg.Contexts)
+	}
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	if result.Verdict != "PASS" || result.Completed != 3 || result.Failed != 0 ||
+		result.TurnCount != 3 || result.PhysicalWorkers != 2 || result.PeakInFlight != 2 {
+		t.Fatalf("report = %+v", result)
 	}
 	rows, err := store.ReadAll()
 	if err != nil {

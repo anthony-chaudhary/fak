@@ -131,6 +131,7 @@ func execCodeQuality(ctx context.Context, root string, argv []string) ([]byte, [
 		return nil, nil, 2, fmt.Errorf("empty command")
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	configureDispatchHelperCommand(cmd)
 	cmd.Dir = root
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

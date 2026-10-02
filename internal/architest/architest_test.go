@@ -2201,7 +2201,7 @@ func TestMetalComputeSharesMetalgemmDeviceSeam(t *testing.T) {
 		}
 	}
 
-	shimBytes, err := os.ReadFile(filepath.Join(internal, "compute", "metal_shim.m"))
+	shimBytes, err := os.ReadFile(filepath.Join(internal, "compute", "metal_shim.c"))
 	if err != nil {
 		t.Fatalf("read internal/compute/metal_shim.m: %v", err)
 	}

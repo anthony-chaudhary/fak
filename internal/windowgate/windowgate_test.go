@@ -718,6 +718,38 @@ func TestScanFilesScopesToSuppliedSetNotWholeTree(t *testing.T) {
 	}
 }
 
+// TestScoreAndObserverHelpersSuppressConsoleChildren is the focused #13602
+// contract: these background helpers must apply the existing no-console policy
+// before starting a child. ScanFiles uses the same policy as the whole-tree
+// guard without making this cheap regression depend on unrelated helper files.
+func TestScoreAndObserverHelpersSuppressConsoleChildren(t *testing.T) {
+	root := repoRoot(t)
+	for _, rel := range []string{
+		"cmd/fak/codequalityscore.go",
+		"cmd/fak/watchdog_audit_run.go",
+		"cmd/rsiloop/dosobserve.go",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			// ScanFiles intentionally ignores unreadable paths. A missing input
+			// must fail this regression rather than silently produce a clean report.
+			src, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+			if err != nil {
+				t.Fatalf("read background helper: %v", err)
+			}
+			if len(src) == 0 {
+				t.Fatal("background helper source is empty")
+			}
+			rep, err := ScanFiles(root, []string{rel})
+			if err != nil {
+				t.Fatalf("scan background helper: %v", err)
+			}
+			if len(rep.GoExecs) != 0 || !rep.OK() {
+				t.Fatalf("background helper reaches child execution without console suppression: %+v", rep)
+			}
+		})
+	}
+}
+
 // TestTrackedTreeHasNoPopups is the live trunk guard: the real repo's tracked
 // and untracked worktree .ps1 task installers, window-suppressing .py modules,
 // and hard-ratcheted Go helpers must be clean.
