@@ -8,6 +8,10 @@ import (
 func TestBuildEvictionPressure(t *testing.T) {
 	const gib = uint64(1) << 30
 
+	// Paired host fixture from #13537: kern.memorystatus_level=42 and
+	// kern.memorystatus_vm_pressure_level=1 (normal). These helpers consume
+	// the percentage, not the separate pressure enum: an input of 1 is 1%
+	// available and must not be mistaken for the enum's normal state.
 	tests := []struct {
 		name          string
 		recoveryCount int
@@ -21,7 +25,7 @@ func TestBuildEvictionPressure(t *testing.T) {
 	}{
 		{
 			name:         "normal headroom is not at risk",
-			level:        MemorystatusLevelNormal,
+			level:        42,
 			wiredLimit:   16 * gib,
 			resident:     8 * gib,
 			reserve:      gib,
@@ -31,7 +35,7 @@ func TestBuildEvictionPressure(t *testing.T) {
 		},
 		{
 			name:         "headroom below reserve is at risk",
-			level:        MemorystatusLevelNormal,
+			level:        42,
 			wiredLimit:   16 * gib,
 			resident:     16*gib - gib/2,
 			reserve:      gib,
@@ -40,9 +44,9 @@ func TestBuildEvictionPressure(t *testing.T) {
 			wantAtRisk:   true,
 		},
 		{
-			name:          "critical level is at risk even with ample headroom",
+			name:          "one percent available is at risk even with ample headroom",
 			recoveryCount: 42,
-			level:         MemorystatusLevelCritical,
+			level:         1,
 			wiredLimit:    64 * gib,
 			resident:      8 * gib,
 			reserve:       gib,
@@ -51,8 +55,8 @@ func TestBuildEvictionPressure(t *testing.T) {
 			wantAtRisk:    true,
 		},
 		{
-			name:         "warning level is at risk",
-			level:        MemorystatusLevelWarning,
+			name:         "two percent available is at risk",
+			level:        2,
 			wiredLimit:   16 * gib,
 			resident:     4 * gib,
 			reserve:      gib,
@@ -62,7 +66,7 @@ func TestBuildEvictionPressure(t *testing.T) {
 		},
 		{
 			name:         "resident exceeds wired limit clamps headroom to zero without wraparound",
-			level:        MemorystatusLevelNormal,
+			level:        42,
 			wiredLimit:   4 * gib,
 			resident:     8 * gib,
 			reserve:      gib,
@@ -72,7 +76,7 @@ func TestBuildEvictionPressure(t *testing.T) {
 		},
 		{
 			name:         "resident exactly at wired limit yields zero headroom",
-			level:        MemorystatusLevelNormal,
+			level:        42,
 			wiredLimit:   4 * gib,
 			resident:     4 * gib,
 			reserve:      gib,
@@ -82,7 +86,7 @@ func TestBuildEvictionPressure(t *testing.T) {
 		},
 		{
 			name:         "zero wired limit has zero fraction and does not panic",
-			level:        MemorystatusLevelNormal,
+			level:        42,
 			wiredLimit:   0,
 			resident:     0,
 			reserve:      gib,
@@ -92,12 +96,22 @@ func TestBuildEvictionPressure(t *testing.T) {
 		},
 		{
 			name:         "zero wired limit with zero reserve is not at risk",
-			level:        MemorystatusLevelNormal,
+			level:        42,
 			wiredLimit:   0,
 			resident:     0,
 			reserve:      0,
 			wantHeadroom: 0,
 			wantFraction: 0,
+			wantAtRisk:   false,
+		},
+		{
+			name:         "three percent available meets the eviction floor",
+			level:        3,
+			wiredLimit:   16 * gib,
+			resident:     8 * gib,
+			reserve:      gib,
+			wantHeadroom: 8 * gib,
+			wantFraction: 0.5,
 			wantAtRisk:   false,
 		},
 	}
@@ -132,12 +146,13 @@ func TestIsEvictionRisk(t *testing.T) {
 		reserve    uint64
 		wantAtRisk bool
 	}{
-		{"ample headroom, normal", MemorystatusLevelNormal, 8 << 30, 1 << 30, false},
-		{"headroom below reserve", MemorystatusLevelNormal, 1, 1 << 30, true},
-		{"headroom equal to reserve is not at risk", MemorystatusLevelNormal, 1 << 30, 1 << 30, false},
-		{"zero reserve defers to level only", MemorystatusLevelNormal, 0, 0, false},
-		{"zero reserve with warning level is at risk", MemorystatusLevelWarning, 1 << 30, 0, true},
-		{"critical wins regardless of headroom", MemorystatusLevelCritical, 1 << 40, 1 << 30, true},
+		{"ample headroom with 42 percent available", 42, 8 << 30, 1 << 30, false},
+		{"headroom below reserve", 42, 1, 1 << 30, true},
+		{"headroom equal to reserve is not at risk", 42, 1 << 30, 1 << 30, false},
+		{"zero reserve defers to percentage only", 42, 0, 0, false},
+		{"zero reserve with two percent available is at risk", 2, 1 << 30, 0, true},
+		{"one percent available wins regardless of headroom", 1, 1 << 40, 1 << 30, true},
+		{"three percent available meets the eviction floor", 3, 1 << 40, 0, false},
 	}
 
 	for _, tc := range tests {
