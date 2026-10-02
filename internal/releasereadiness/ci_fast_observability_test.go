@@ -675,3 +675,104 @@ func findRepoRoot(t *testing.T) string {
 		dir = parent
 	}
 }
+
+// A failed gate must still reach evidence collection and verification. This pins
+// the production scheduling declarations and executes its Bash seams; it does
+// not emulate GitHub Actions or exercise the artifact download/upload services.
+// fak-test:runtime fast est=100ms lane=default
+func TestFastReleaseGateWritesFailureEvidenceAfterRedGate(t *testing.T) {
+	t.Parallel()
+	workflow := readFastReleaseWorkflow(t)
+	job := workflowJobBlock(t, workflow, "build-vet-test-fast")
+	previous := -1
+	step := func(name string) string {
+		t.Helper()
+		marker := "      - name: " + name + "\n"
+		if strings.Count(job, marker) != 1 {
+			t.Fatalf("aggregate must have exactly one %q step", name)
+		}
+		if at := strings.Index(job, marker); at <= previous {
+			t.Fatalf("aggregate step %q is out of order", name)
+		} else {
+			previous = at
+		}
+		_, body, _ := strings.Cut(job, marker)
+		body, _, _ = strings.Cut(body, "\n      - ")
+		return body
+	}
+	gate := step("require every go test shard and the build gate green")
+	collect := step("collect exact job provenance")
+	verify := step("verify complete candidate evidence")
+	upload := step("upload aggregate provenance")
+	header, _, _ := strings.Cut(job, "    steps:\n")
+	if !strings.Contains("\n"+header, "\n    if: ${{ !cancelled() }}\n") {
+		t.Fatal("aggregate job must remain reachable after a failed dependency")
+	}
+	condition := regexp.MustCompile(`(?m)^        if: (.+)$`)
+	if condition.MatchString(gate) {
+		t.Fatal("initial all-green gate must remain unconditional")
+	}
+	for _, scheduled := range []struct{ name, body string }{{"collection", collect}, {"verification", verify}, {"upload", upload}} {
+		matches := condition.FindAllStringSubmatch(scheduled.body, -1)
+		if len(matches) != 1 || matches[0][1] != "always()" {
+			t.Fatalf("%s must declare if: always(); otherwise GitHub skips it after the red gate", scheduled.name)
+		}
+	}
+	if regexp.MustCompile(`(?m)^ {4,8}continue-on-error:`).MatchString(job) {
+		t.Fatal("aggregate must not mask the failed gate or verifier with continue-on-error")
+	}
+	if !strings.Contains("\n"+upload, "\n          path: ${{ runner.temp }}/ci-fast-provenance.json\n") {
+		t.Fatal("upload must consume the aggregate evidence written by the verifier")
+	}
+	requireProvenanceTools(t)
+	fixture := newFastProvenanceFixture()
+	fixture.env["BUILD_VET_RESULT"] = "failure"
+	fixture.env["GO_TEST_SHARDS_RESULT"] = "failure"
+	fixture.receipts[0]["result"] = "failure"
+	buildSteps := fixture.receipts[0]["steps"].(map[string]any)
+	buildSteps["build"] = map[string]string{"outcome": "failure", "conclusion": "failure"}
+	for _, name := range []string{"vet", "tier"} {
+		buildSteps[name] = map[string]string{"outcome": "skipped", "conclusion": "skipped"}
+	}
+	fixture.receipts[1]["result"] = "failure"
+	fixture.receipts[1]["steps"].(map[string]any)["tests"] = map[string]string{"outcome": "failure", "conclusion": "failure"}
+	dir := t.TempDir()
+	fixture.env["RUNNER_TEMP"] = dir
+	fixture.env["GITHUB_STEP_SUMMARY"] = filepath.Join(dir, "summary")
+	_, gateBody, found := strings.Cut(gate, "        run: |\n")
+	if !found {
+		t.Fatal("aggregate initial gate must have an executable run block")
+	}
+	var gateScript strings.Builder
+	for _, line := range strings.Split(gateBody, "\n") {
+		if strings.TrimSpace(line) != "" && !strings.HasPrefix(line, "          ") {
+			t.Fatalf("initial gate escaped YAML run block: %q", line)
+		}
+		gateScript.WriteString(strings.TrimPrefix(line, "          ") + "\n")
+	}
+	output, err := runProvenanceScript(t, gateScript.String(), dir, fixture.env)
+	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
+		t.Fatalf("initial gate must fail with exit 1, got %v; output: %s", err, output)
+	}
+	// These are the surviving per-job artifacts at the download boundary. The
+	// declarations above, rather than a test-only scheduler, establish reachability.
+	artifacts := filepath.Join(dir, "ci-fast-provenance")
+	if err := os.Mkdir(artifacts, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for i, receipt := range fixture.receipts {
+		writeProvenanceJSON(t, filepath.Join(artifacts, fmt.Sprintf("receipt-%d.json", i)), receipt)
+	}
+	output, err = runProvenanceScript(t, provenanceWorkflowScript(t, verify, "verify-fast"), dir, fixture.env)
+	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
+		t.Fatalf("verifier must write failure evidence and keep exit 1, got %v; output: %s", err, output)
+	}
+	var report map[string]any
+	readProvenanceJSON(t, filepath.Join(dir, "ci-fast-provenance.json"), &report)
+	if report["verified"] != false || report["release_eligible"] != false || report["release_ineligibility_reason"] != "incomplete-evidence" {
+		t.Fatalf("failed dependencies must produce explicitly unverified, non-release evidence: %+v", report)
+	}
+	if report["source_scope"] != "git-commit-tree" || report["effective_inputs_verified"] != false {
+		t.Fatalf("failure evidence must not upgrade its input-identity scope: %+v", report)
+	}
+}

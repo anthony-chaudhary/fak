@@ -416,12 +416,14 @@ jobs:
             exit 1
           fi
       - name: collect exact job provenance
+        if: always()
         uses: actions/download-artifact@v4
         with:
           pattern: ci-fast-job-${{ github.run_id }}-${{ github.run_attempt }}-*
           path: ${{ runner.temp }}/ci-fast-provenance
           merge-multiple: true
       - name: verify complete candidate evidence
+        if: always()
         shell: bash
         env:
           EXPECTED_SHA: ${{ needs.candidate.outputs.sha }}
