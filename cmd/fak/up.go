@@ -384,6 +384,13 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	}
 
 	explicit := explicitFlagNames(fs)
+	// A detached server's stdin reaches EOF immediately; only an attended
+	// terminal should select the REPL by default. Explicit mode flags still win.
+	if !explicit["headless"] {
+		if f, ok := in.(*os.File); ok {
+			*headless = !guardFdIsTerminal(int(f.Fd()))
+		}
+	}
 	if explicit["engine"] && *engineID == "mock" {
 		*mock = true
 	}
