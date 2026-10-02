@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:33325bec162f17ff94715a892a7511afe18a070689715c958733f029eb8fc73e",
+  "content_root": "sha256:9e0fd9108055ff1b17228a8609203952a3eaabef86cb57ab7b525ad4716a0a76",
   "tracked_files": 23823,
-  "tracked_bytes": 491809393,
+  "tracked_bytes": 491826725,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -78077,8 +78077,8 @@
     },
     {
       "path": "internal/agent/inkernel_host_budget.go",
-      "content_sha256": "sha256:cf1ef943be66db0ec82dbf933883c99420b493ce463dc9b44825e48aa83abcad",
-      "bytes": 10220,
+      "content_sha256": "sha256:88978bc97635734d854ff9adc92376a241b5a5810f60dea3538aa29955b60e07",
+      "bytes": 10187,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -78086,8 +78086,8 @@
     },
     {
       "path": "internal/agent/inkernel_host_budget_test.go",
-      "content_sha256": "sha256:f7b52fa3187e397d674d022dd5d35779d37a0628936d1b0074d68a178f68c392",
-      "bytes": 49928,
+      "content_sha256": "sha256:2dbfa949260e017f31843bb63cd27818d9fe0e1dd5e7bd96fbc81232d83d7b33",
+      "bytes": 51286,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -134778,8 +134778,8 @@
     },
     {
       "path": "internal/l3server/metrics/collector.go",
-      "content_sha256": "sha256:7d4ec0ebcce68c8a05ba0c05626fbb760f4ec430cc0686d5b93011d6e86700f8",
-      "bytes": 73902,
+      "content_sha256": "sha256:603dec8f07283b604c71afafc6838d5d4b80e43e93e53de477d2d4a14a864b9f",
+      "bytes": 75018,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -135066,8 +135066,8 @@
     },
     {
       "path": "internal/l3server/shard/shard_ops.go",
-      "content_sha256": "sha256:d559a03adf5194dd3f6ee35a838809ea43b898b5bc28bec1c5df904dadaa6789",
-      "bytes": 48357,
+      "content_sha256": "sha256:e20ab39d2af7a665c69e6c293526d7046842d6ff68dc02a963644b406d7b99de",
+      "bytes": 48552,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -135138,8 +135138,8 @@
     },
     {
       "path": "internal/l3server/transport/dispatch/dispatch_test.go",
-      "content_sha256": "sha256:fa57b55d825860f85056367e0fff64b2416e7fa758127670049d888a73b9a6a7",
-      "bytes": 27265,
+      "content_sha256": "sha256:63de62453a6e573de59985c074611e42c44d43e9d515d80b08846774b82b7e8a",
+      "bytes": 32099,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -168651,8 +168651,8 @@
     },
     {
       "path": "internal/radixkv/radixkv.go",
-      "content_sha256": "sha256:05452511174400de4e04eb4cc38e93be4236430d48bf2c71ffb49b0876c927cf",
-      "bytes": 75328,
+      "content_sha256": "sha256:e4c73fbe659af23cdb8e048004a3d0a3c459b9298fc5e9b5355bfebfd1f6704a",
+      "bytes": 75746,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -205305,8 +205305,8 @@
     },
     {
       "path": "tools/grafana/dashboards/fak-router.json",
-      "content_sha256": "sha256:b032a428e793f992930cdaf95348724fcb33a185899267a6a8fd59d4fa96e38b",
-      "bytes": 31639,
+      "content_sha256": "sha256:a3c77db5e976818973740f433879bc1ad79c8089a171af8198ec19a48de6ab86",
+      "bytes": 37013,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -205359,8 +205359,8 @@
     },
     {
       "path": "tools/grafana/fak_router_test.go",
-      "content_sha256": "sha256:4d0c74cf5e106add8cc86f763c01146b9afab42d5560cd3923b4ea14a42b25e1",
-      "bytes": 6863,
+      "content_sha256": "sha256:66ea244af4d88de3df5bdd9bb3ba4963c4b3441be576d700d46ca108f208b7ef",
+      "bytes": 10933,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
