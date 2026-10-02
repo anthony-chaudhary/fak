@@ -7,12 +7,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
 )
 
 // --- seam-injected unit tests (no git/go needed) ---------------------------------------
@@ -57,6 +60,12 @@ func (s prepushSeamSnapshot) restore() {
 // override a single seam to exercise one branch.
 func setupHappyPrepushSeams(t *testing.T) {
 	t.Helper()
+	// Keep the mocked build in the supported, Go-only receipt-reuse envelope.
+	t.Setenv("CGO_ENABLED", "0")
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GO111MODULE", "on")
+	t.Setenv("GOENV", "off")
+	t.Setenv("GOFLAGS", "")
 	snap := snapshotPrepushSeams()
 	t.Cleanup(snap.restore)
 	prepushRevParse = func(string, string) (string, error) { return "deadbeefcafef00dfeed", nil }
@@ -421,6 +430,18 @@ func TestEvaluatePrePushBuildBaseLoadErrorIsFailSafeRegression(t *testing.T) {
 func TestEvaluatePrePushBuildBaselineToleranceOffIsLegacy(t *testing.T) {
 	// With the tolerance disarmed, the pre-#3618 whole-tip verdict stands and no base attribution runs.
 	setTipFailureSeams(t, []string{"mod/p"}, map[string]bool{}) // would be TRUNK_ALREADY_RED if armed
+	const baseSHA, tipSHA = "1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222"
+	prepushRevParse = func(_ string, ref string) (string, error) {
+		if ref == "origin/main" {
+			return baseSHA, nil
+		}
+		return tipSHA, nil
+	}
+	var extracted []string
+	prepushExtractTip = func(_ string, ref string) (string, error) {
+		extracted = append(extracted, ref)
+		return t.TempDir(), nil
+	}
 	old := prepushBaselineTolerance
 	prepushBaselineTolerance = false
 	t.Cleanup(func() { prepushBaselineTolerance = old })
@@ -428,8 +449,11 @@ func TestEvaluatePrePushBuildBaselineToleranceOffIsLegacy(t *testing.T) {
 	if code != 1 || res.Verdict != "TRUNK_WOULD_NOT_COMPILE" {
 		t.Fatalf("with tolerance off the legacy whole-tip verdict must stand: verdict=%s code=%d", res.Verdict, code)
 	}
-	if res.BaseSha != "" || len(res.PreExistingRed) != 0 {
-		t.Fatalf("tolerance off must not run the baseline attribution: base=%q pre=%v", res.BaseSha, res.PreExistingRed)
+	if res.BaseSha != baseSHA {
+		t.Fatalf("tolerance off discarded the immutable admission range: base=%q want=%q", res.BaseSha, baseSHA)
+	}
+	if len(extracted) != 1 || extracted[0] != tipSHA || len(res.PreExistingRed) != 0 || len(res.Regressions) != 0 {
+		t.Fatalf("tolerance off performed baseline attribution: extracted=%q pre=%v regressions=%v", extracted, res.PreExistingRed, res.Regressions)
 	}
 }
 
@@ -978,38 +1002,441 @@ func TestPrunePrepushSuccessReceiptsBoundsFiles(t *testing.T) {
 	}
 }
 
-func TestPrepushTreeReceiptReusesCommitBuildCheck(t *testing.T) {
+func TestPrepushTreeReceiptCarriesUnqualifiedLegacyLabel(t *testing.T) {
 	oldCommon := prepushSuccessCommonDir
 	dir := t.TempDir()
 	prepushSuccessCommonDir = func(string) string { return dir }
 	t.Cleanup(func() { prepushSuccessCommonDir = oldCommon })
 	now := time.Unix(1_700_000_000, 0)
 	recordPrepushSuccessForTree("repo", "tree-a", now)
+	raw, err := os.ReadFile(prepushSuccessReceiptPath("repo", "tree-tree-a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receipt map[string]any
+	if err := json.Unmarshal(raw, &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if receipt["schema"] != "fak-prepush-success/2" || receipt["gate_contract"] != "unqualified-legacy-build/v1" {
+		t.Fatalf("tree-only evidence must not claim qualified range coverage: %s", raw)
+	}
 	if !prepushTreeSuccessReusable("repo", "tree-a", now.Add(time.Minute)) {
-		t.Fatal("green prospective-tree receipt was not reusable by pre-push")
+		t.Fatal("legacy storage helper did not recognize its own fresh tree receipt")
 	}
 	if prepushTreeSuccessReusable("repo", "tree-b", now.Add(time.Minute)) {
 		t.Fatal("receipt for a different immutable tree was reused")
 	}
 }
 
-func TestRunPrepushReusesCommitBuildReceiptOnlyForCoveredCommit(t *testing.T) {
-	oldCommon, oldRev, oldCovered, oldNow := prepushSuccessCommonDir, prepushTreeResolveFn, prepushCommitPathsCoveredFn, prepushNow
-	dir := t.TempDir()
-	prepushSuccessCommonDir = func(string) string { return dir }
-	prepushTreeResolveFn = func(string, string) (string, error) { return "tree-a", nil }
-	prepushCommitPathsCoveredFn = func(string, string) bool { return true }
-	now := time.Unix(1_700_000_000, 0)
-	prepushNow = func() time.Time { return now }
-	t.Cleanup(func() {
-		prepushSuccessCommonDir, prepushTreeResolveFn, prepushCommitPathsCoveredFn, prepushNow = oldCommon, oldRev, oldCovered, oldNow
-	})
-	recordPrepushSuccessForTree("repo", "tree-a", now)
-	var out, errOut bytes.Buffer
-	if code := runHooksPrePush(&out, &errOut, []string{"--root", "repo", "--tip", "tip-a"}); code != 0 {
-		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+// fak-test:runtime medium est=1s lane=default
+func TestRunPrepushTreeOnlyReceiptRequiresFreshRangeBuild(t *testing.T) {
+	f := newPrepushReceiptTruthFixture(t, "classified")
+	// Put the corpus treatment before the selected range so its final commit
+	// contains only Go paths, the shape admitted by the old tree-only shortcut.
+	f.base = f.tip
+	writeFile(t, f.root, "internal/demo/demo.go", "package demo\nconst CacheA = 1\nconst CacheBurst = 2\nconst Plain = 3\n")
+	f.tip = f.commit("Go-only candidate")
+	if !prepushCommitPathsCovered(f.root, f.tip) {
+		t.Fatal("fixture must reach the legacy tree-receipt coverage shortcut")
 	}
-	if !strings.Contains(out.String(), "source=commit-build-check") {
-		t.Fatalf("output did not name receipt source: %q", out.String())
+	tree := strings.TrimSpace(mustGitOut(t, f.root, "rev-parse", f.tip+"^{tree}"))
+	recordPrepushSuccessForTree(f.root, tree, prepushNow())
+	result, _ := f.run(0, "OK")
+	if f.buildCalls != 1 || f.testQualityCalls != 1 || result.BaseSha != f.base || result.Ref != f.tip {
+		t.Fatalf("tree-only evidence suppressed range work: build=%d advisory=%d result=%+v", f.buildCalls, f.testQualityCalls, result)
+	}
+}
+
+// fak-test:runtime medium est=2s lane=default
+func TestPrepushReceiptIncompleteCoverageRequiresFreshBuild(t *testing.T) {
+	for _, missing := range []string{"result", "selected_packages"} {
+		t.Run(missing, func(t *testing.T) {
+			f := newPrepushReceiptTruthFixture(t, "classified")
+			f.run(0, "OK")
+			path := prepushSuccessReceiptPath(f.root, f.tip)
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var receipt map[string]any
+			if err := json.Unmarshal(raw, &receipt); err != nil {
+				t.Fatal(err)
+			}
+			delete(receipt, "result")
+			if missing == "selected_packages" {
+				// A success label and matching endpoints do not name what was built.
+				receipt["result"] = map[string]any{
+					"ok": true, "verdict": "OK", "ref": f.tip, "base_sha": f.base,
+					"selected_packages": []string{},
+				}
+			}
+			raw, err = json.Marshal(receipt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			f.run(0, "OK")
+			if f.buildCalls != 2 || f.testQualityCalls != 2 {
+				t.Fatalf("incomplete %s suppressed work: builds=%d advisory=%d", missing, f.buildCalls, f.testQualityCalls)
+			}
+		})
+	}
+}
+
+// fak-test:runtime medium est=8s lane=default
+func TestPrepushExternalInputsRemainBuildableWithoutReuse(t *testing.T) {
+	for _, input := range []string{"cgo", "gopath", "workspace", "committed_workspace", "replacement", "modfile", "toolexec", "pkgdir", "pgo"} {
+		t.Run(input, func(t *testing.T) {
+			f := newPrepushReceiptTruthFixture(t, "classified")
+			external := t.TempDir()
+			inputName := "input"
+			if input == "modfile" {
+				inputName = "input.mod"
+			}
+			path := filepath.Join(external, inputName)
+			writeFile(t, external, inputName, "module mod\n\ngo 1.26.0\n")
+			switch input {
+			case "cgo":
+				t.Setenv("CGO_ENABLED", "1")
+			case "gopath":
+				t.Setenv("GO111MODULE", "off")
+			case "workspace":
+				writeFile(t, external, "go.work", fmt.Sprintf("go 1.26.0\nuse %q\n", filepath.ToSlash(f.root)))
+				t.Setenv("GOWORK", filepath.Join(external, "go.work"))
+			case "committed_workspace":
+				writeFile(t, f.root, "go.work", "go 1.26.0\nuse .\n")
+				f.tip = f.commit("workspace candidate")
+				// Even an inactive committed workspace is outside this receipt envelope.
+				t.Setenv("GOWORK", "off")
+			case "replacement":
+				writeFile(t, f.root, "go.mod", "module mod\n\ngo 1.26.0\nreplace example.com/external => ../external\n")
+				f.tip = f.commit("module with external replacement")
+			default:
+				if input == "pkgdir" {
+					path = external
+				}
+				t.Setenv("GOFLAGS", "-"+input+"="+path)
+			}
+			f.run(0, "OK")
+			// These bytes can change while the endpoint identities and path text stay put.
+			writeFile(t, external, inputName, "module mod\n\ngo 1.26.0\n// external bytes changed\n")
+			f.run(0, "OK")
+			if f.buildCalls != 2 || f.testQualityCalls != 2 {
+				t.Fatalf("unsupported %s was cached or blocked advisory work: builds=%d advisory=%d", input, f.buildCalls, f.testQualityCalls)
+			}
+		})
+	}
+}
+
+// fak-test:runtime medium est=1s lane=default
+func TestPrepushReceiptReusePreservesOriginalWitnessTime(t *testing.T) {
+	f := newPrepushReceiptTruthFixture(t, "classified")
+	initial := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	now := initial
+	prepushNow = func() time.Time { return now }
+	f.run(0, "OK")
+	if !committedbuildwitness.Fresh(f.root, f.tip, now) {
+		t.Fatal("fixture did not establish the original committed-build witness")
+	}
+	readCompletion := func() time.Time {
+		t.Helper()
+		raw, err := os.ReadFile(prepushSuccessReceiptPath(f.root, f.tip))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var receipt struct {
+			CompletedAt time.Time `json:"completed_at"`
+		}
+		if err := json.Unmarshal(raw, &receipt); err != nil {
+			t.Fatal(err)
+		}
+		return receipt.CompletedAt
+	}
+	if got := readCompletion(); !got.Equal(initial) {
+		t.Fatalf("initial completion=%s want=%s", got, initial)
+	}
+	now = initial.Add(time.Hour)
+	f.run(0, "OK")
+	if got := readCompletion(); !got.Equal(initial) || f.buildCalls != 1 || f.testQualityCalls != 2 {
+		t.Fatalf("reuse refreshed evidence or skipped advisory: completion=%s builds=%d advisory=%d", got, f.buildCalls, f.testQualityCalls)
+	}
+	if committedbuildwitness.Fresh(f.root, f.tip, initial.Add(committedbuildwitness.TTL+time.Second)) {
+		t.Fatal("cache hit extended the committed-build witness lifetime")
+	}
+	now = initial.Add(prepushSuccessReuseTTL + time.Second)
+	f.run(0, "OK")
+	if f.buildCalls != 2 || !readCompletion().Equal(now) {
+		t.Fatalf("expired receipt did not earn new evidence: builds=%d completion=%s", f.buildCalls, readCompletion())
+	}
+}
+
+// The fixture keeps Git range selection and concept admission real. Only expensive
+// Go work and the advisory scanner are stubbed, so receipts cannot stand in for
+// either immutable-range admission or a fresh inspection of the live working tree.
+type prepushReceiptTruthFixture struct {
+	t                            *testing.T
+	root, base, tip              string
+	buildCalls, testQualityCalls int
+	testQualityCode              int
+	contended, alreadyRed        bool
+}
+
+func newPrepushReceiptTruthFixture(t *testing.T, treatment string) *prepushReceiptTruthFixture {
+	t.Helper()
+	setupHappyPrepushSeams(t)
+	f := &prepushReceiptTruthFixture{t: t, root: t.TempDir()}
+	gitFixture(t, f.root, "init", "-q")
+	gitFixture(t, f.root, "config", "user.name", "Fixture")
+	gitFixture(t, f.root, "config", "user.email", "fixture@example.com")
+	gitFixture(t, f.root, "config", "commit.gpgsign", "false")
+	gitFixture(t, f.root, "config", "core.hooksPath", t.TempDir())
+	writeFile(t, f.root, "go.mod", "module mod\n\ngo 1.26.0\n")
+	writeFile(t, f.root, "tools/concept_disambiguation_scorecard.data/_meta.json", `{"families":[{"id":"cache","roots":["cache"],"ignore":[]}]}`)
+	writeFile(t, f.root, "tools/concept_disambiguation_scorecard.data/rows-demo.json", `{"rows":[{"id":"cache-a","family":"cache","grounding":"CacheA"}]}`)
+	writeFile(t, f.root, "internal/demo/demo.go", "package demo\nconst CacheA = 1\n")
+	f.base = f.commit("base")
+	writeFile(t, f.root, "internal/demo/demo.go", "package demo\nconst CacheA = 1\nconst CacheBurst = 2\n")
+	switch treatment {
+	case "classified":
+		writeFile(t, f.root, "tools/concept_disambiguation_scorecard.data/_meta.json", `{"families":[{"id":"cache","roots":["cache"],"ignore":["CacheBurst"]}]}`)
+	case "malformed":
+		writeFile(t, f.root, "tools/concept_disambiguation_scorecard.data/_meta.json", `{"families":`)
+	}
+	f.tip = f.commit("candidate")
+
+	oldCommon, oldTree, oldCovered := prepushSuccessCommonDir, prepushTreeResolveFn, prepushCommitPathsCoveredFn
+	oldSlot, oldTolerance, oldQuality := prepushAcquireBuildSlot, prepushBaselineTolerance, prepushTestQuality
+	t.Cleanup(func() {
+		prepushSuccessCommonDir, prepushTreeResolveFn, prepushCommitPathsCoveredFn = oldCommon, oldTree, oldCovered
+		prepushAcquireBuildSlot, prepushBaselineTolerance, prepushTestQuality = oldSlot, oldTolerance, oldQuality
+	})
+	t.Setenv("FAK_TRUNK_RED_MODE", "off")
+	prepushRevParse = prepushGitRevParse
+	prepushChangedFiles = gitChangedGoFilesRange
+	prepushResolveBase = func(string) string { return f.base }
+	prepushSuccessCommonDir = func(string) string { return filepath.Join(f.root, ".git") }
+	prepushTreeResolveFn = prepushGitRevParse
+	prepushCommitPathsCoveredFn = prepushCommitPathsCovered
+	prepushBaselineTolerance = true
+	prepushAcquireBuildSlot = func(advisory bool) (bool, func()) {
+		return !(advisory && f.contended), func() {}
+	}
+	prepushListGraph = func(string) (map[string]string, map[string][]string, int, error) {
+		return map[string]string{"internal/demo/demo.go": "mod/internal/demo"}, map[string][]string{}, 1, nil
+	}
+	prepushBuild = func(string, []string) (string, bool) {
+		f.buildCalls++
+		if f.alreadyRed {
+			return "# mod/internal/demo\ninternal/demo/demo.go:2: undefined: Missing\n", false
+		}
+		return "", true
+	}
+	prepushTestQuality = func(_, _ io.Writer, argv []string) int {
+		f.testQualityCalls++
+		if len(argv) != 2 || argv[0] != "--root" || argv[1] != f.root {
+			t.Fatalf("live test-quality argv=%q, want [--root %s]", argv, f.root)
+		}
+		return f.testQualityCode
+	}
+	return f
+}
+
+func (f *prepushReceiptTruthFixture) commit(message string) string {
+	f.t.Helper()
+	gitFixture(f.t, f.root, "add", ".")
+	gitFixture(f.t, f.root, "commit", "-q", "-m", message)
+	return strings.TrimSpace(mustGitOut(f.t, f.root, "rev-parse", "HEAD"))
+}
+
+func (f *prepushReceiptTruthFixture) run(wantCode int, wantVerdict string, extra ...string) (trunkBuildResult, string) {
+	f.t.Helper()
+	argv := append([]string{"--root", f.root, "--base", f.base, "--tip", f.tip, "--json"}, extra...)
+	var stdout, stderr bytes.Buffer
+	code := runHooksPrePush(&stdout, &stderr, argv)
+	if code != wantCode {
+		f.t.Fatalf("exit=%d want=%d; stdout=%s stderr=%s", code, wantCode, stdout.String(), stderr.String())
+	}
+	var result trunkBuildResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		f.t.Fatalf("--json must report gate results even on reuse: %v; stdout=%s", err, stdout.String())
+	}
+	if result.Verdict != wantVerdict || result.OK != (wantCode == 0) {
+		f.t.Fatalf("result=%+v, want verdict=%s ok=%v; stderr=%s", result, wantVerdict, wantCode == 0, stderr.String())
+	}
+	return result, stderr.String()
+}
+
+// fak-test:runtime medium est=5s lane=default
+func TestPrepushReceiptTruthfulness(t *testing.T) {
+	for _, tc := range []struct {
+		name, treatment string
+		check           func(*prepushReceiptTruthFixture)
+	}{
+		{
+			name: "green_build_rejects_immutable_unclassified_token",
+			check: func(f *prepushReceiptTruthFixture) {
+				// A peer's uncommitted corpus fix cannot admit the pushed objects.
+				writeFile(f.t, f.root, "tools/concept_disambiguation_scorecard.data/_meta.json", `{"families":[{"id":"cache","roots":["cache"],"ignore":["CacheBurst"]}]}`)
+				_, stderr := f.run(1, "CONCEPT_ADMISSION")
+				if !strings.Contains(stderr, "token=CacheBurst") || f.buildCalls != 1 || f.testQualityCalls != 1 {
+					f.t.Fatalf("missing real admission or advisory: build=%d quality=%d stderr=%s", f.buildCalls, f.testQualityCalls, stderr)
+				}
+			},
+		},
+		{
+			name: "same_range_reuses_only_build_and_reruns_live_advisory", treatment: "classified",
+			check: func(f *prepushReceiptTruthFixture) {
+				f.run(0, "OK")
+				writeFile(f.t, f.root, "tools/concept_disambiguation_scorecard.data/_meta.json", "broken live corpus")
+				f.testQualityCode = 1
+				_, stderr := f.run(0, "OK")
+				if f.buildCalls != 1 || f.testQualityCalls != 2 || !strings.Contains(stderr, "WARNING: test-quality ratchet") {
+					f.t.Fatalf("same range must reuse one green build and rerun advisory: build=%d quality=%d stderr=%s", f.buildCalls, f.testQualityCalls, stderr)
+				}
+			},
+		},
+		{
+			name: "committed_scanner_error_is_not_success", treatment: "malformed",
+			check: func(f *prepushReceiptTruthFixture) {
+				result, stderr := f.run(2, "COULD_NOT_RUN")
+				if !strings.Contains(result.Detail+stderr, "concept") || f.testQualityCalls != 1 {
+					f.t.Fatalf("scanner failure was not reported with advisory: result=%+v quality=%d stderr=%s", result, f.testQualityCalls, stderr)
+				}
+			},
+		},
+		{
+			name: "unreadable_range_is_not_success", treatment: "classified",
+			check: func(f *prepushReceiptTruthFixture) {
+				// Keep build-selection success independent of the actual admission range read.
+				prepushChangedFiles = func(string, string, string) ([]string, error) { return []string{"internal/demo/demo.go"}, nil }
+				f.base = strings.Repeat("f", 40)
+				f.run(2, "COULD_NOT_RUN")
+				if f.testQualityCalls != 1 {
+					f.t.Fatalf("range error skipped live advisory: calls=%d", f.testQualityCalls)
+				}
+			},
+		},
+		{
+			name: "changed_base_rebuilds", treatment: "classified",
+			check: func(f *prepushReceiptTruthFixture) {
+				nearBase := f.tip
+				writeFile(f.t, f.root, "internal/demo/demo.go", "package demo\nconst CacheA = 1\nconst CacheBurst = 2\nconst Plain = 3\n")
+				f.tip = f.commit("later Go change")
+				f.run(0, "OK")
+				f.base = nearBase
+				f.run(0, "OK")
+				if f.buildCalls != 2 {
+					f.t.Fatalf("changed base reused incompatible coverage: builds=%d", f.buildCalls)
+				}
+			},
+		},
+		{
+			name: "changed_tip_rebuilds", treatment: "classified",
+			check: func(f *prepushReceiptTruthFixture) {
+				f.run(0, "OK")
+				writeFile(f.t, f.root, "internal/demo/demo.go", "package demo\nconst CacheA = 1\nconst CacheBurst = 2\nconst Plain = 3\n")
+				f.tip = f.commit("later Go change")
+				f.run(0, "OK")
+				if f.buildCalls != 2 {
+					f.t.Fatalf("changed tip reused incompatible source: builds=%d", f.buildCalls)
+				}
+			},
+		},
+		{
+			name: "changed_build_environment_rebuilds", treatment: "classified",
+			check: func(f *prepushReceiptTruthFixture) {
+				f.t.Setenv("GOFLAGS", "-tags=receipt_first")
+				f.run(0, "OK")
+				f.t.Setenv("GOFLAGS", "-tags=receipt_second")
+				f.run(0, "OK")
+				if f.buildCalls != 2 {
+					f.t.Fatalf("changed build environment reused incompatible build: builds=%d", f.buildCalls)
+				}
+			},
+		},
+		{
+			name: "changed_policy_or_receipt_source_rebuilds", treatment: "classified",
+			check: func(f *prepushReceiptTruthFixture) {
+				f.run(0, "OK")
+				for _, field := range []string{"gate_contract", "tip"} {
+					path := prepushSuccessReceiptPath(f.root, f.tip)
+					raw, err := os.ReadFile(path)
+					if err != nil {
+						f.t.Fatal(err)
+					}
+					var receipt map[string]any
+					if err := json.Unmarshal(raw, &receipt); err != nil {
+						f.t.Fatal(err)
+					}
+					receipt[field] = "incompatible"
+					raw, err = json.Marshal(receipt)
+					if err != nil {
+						f.t.Fatal(err)
+					}
+					if err := os.WriteFile(path, raw, 0o600); err != nil {
+						f.t.Fatal(err)
+					}
+					before := f.buildCalls
+					f.run(0, "OK")
+					if f.buildCalls != before+1 {
+						f.t.Fatalf("changed receipt %s was reused: builds=%d previous=%d", field, f.buildCalls, before)
+					}
+				}
+			},
+		},
+		{
+			name: "commit_tree_receipt_does_not_cover_multicommit_range",
+			check: func(f *prepushReceiptTruthFixture) {
+				writeFile(f.t, f.root, "README.md", "An earlier non-Go change.\n")
+				f.commit("earlier documentation")
+				writeFile(f.t, f.root, "internal/demo/demo.go", "package demo\nconst CacheA = 1\nconst CacheBurst = 2\nconst Plain = 3\n")
+				f.tip = f.commit("last commit contains only Go")
+				if !prepushCommitPathsCovered(f.root, f.tip) {
+					f.t.Fatal("fixture must reach the legacy last-commit coverage shortcut")
+				}
+				tree := strings.TrimSpace(mustGitOut(f.t, f.root, "rev-parse", f.tip+"^{tree}"))
+				recordPrepushSuccessForTree(f.root, tree, prepushNow())
+				_, stderr := f.run(1, "CONCEPT_ADMISSION")
+				if f.buildCalls != 1 || f.testQualityCalls != 1 || !strings.Contains(stderr, "token=CacheBurst") {
+					f.t.Fatalf("incomplete tree receipt bypassed the whole range: build=%d quality=%d stderr=%s", f.buildCalls, f.testQualityCalls, stderr)
+				}
+			},
+		},
+		{
+			name: "contended_skip_does_not_mint_build_success", treatment: "classified",
+			check: func(f *prepushReceiptTruthFixture) {
+				f.contended = true
+				f.run(0, "SKIPPED_CONTENDED", "--advisory")
+				if committedbuildwitness.Fresh(f.root, f.tip, prepushNow()) {
+					f.t.Fatal("skipped build minted a committed-build success witness")
+				}
+				f.contended = false
+				f.run(0, "OK", "--advisory")
+				if f.buildCalls != 1 || f.testQualityCalls != 2 {
+					f.t.Fatalf("contended skip suppressed a fresh build: build=%d quality=%d", f.buildCalls, f.testQualityCalls)
+				}
+			},
+		},
+		{
+			name: "already_red_does_not_mint_build_success", treatment: "classified",
+			check: func(f *prepushReceiptTruthFixture) {
+				f.alreadyRed = true
+				f.run(0, "TRUNK_ALREADY_RED")
+				if committedbuildwitness.Fresh(f.root, f.tip, prepushNow()) {
+					f.t.Fatal("already-red build minted a committed-build success witness")
+				}
+				f.alreadyRed = false
+				f.run(0, "OK")
+				if f.buildCalls != 3 || f.testQualityCalls != 2 {
+					f.t.Fatalf("already-red receipt suppressed a fresh build: build=%d quality=%d", f.buildCalls, f.testQualityCalls)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.check(newPrepushReceiptTruthFixture(t, tc.treatment))
+		})
 	}
 }

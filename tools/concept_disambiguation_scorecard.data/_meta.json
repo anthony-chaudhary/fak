@@ -3763,6 +3763,11 @@
           "category": "incidental",
           "reason": "Private helper restores the same codeToolGate at its unchanged rank after a completed test-only ABI registry reset; introduces no separate policy, capability, or operator-facing guard concept.",
           "token": "ensureCodeToolGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private schema-2 receipt label for the existing pre-push git-hook gate; explicitly marks unqualified legacy build evidence and does not authorize schema-3 immutable-range reuse.",
+          "token": "prepushLegacyGateContract"
         }
       ],
       "exclude": [
@@ -4162,6 +4167,7 @@
         "parseGuardProviderSessionStart",
         "prepareGuardChildRegistration",
         "prepushGateContract",
+        "prepushLegacyGateContract",
         "printGuardAllowExpiries",
         "printGuardLaunchPostures",
         "proseGate",
