@@ -3,6 +3,9 @@ package dispatch
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -911,5 +914,130 @@ func TestHandleGetWithAllocCoordinatePath(t *testing.T) {
 	}
 	if miss.Found || miss.AllocInfo != nil {
 		t.Errorf("miss must be not-found with nil AllocInfo; got found=%v alloc=%+v", miss.Found, miss.AllocInfo)
+	}
+}
+
+// fak-test:runtime fast est=100ms
+func TestHandleGetWithAllocPayloadAccounting(t *testing.T) {
+	d := newTestDispatcher(t)
+	value := strings.Repeat("payload", 256)
+	setKey(t, d, "accounted", value)
+	shards := make([]*metrics.ShardMetrics, d.Manager.NumShards())
+	for i := range shards {
+		shards[i] = d.Manager.Shard(i).Metrics()
+	}
+	counters := func() [4]int64 {
+		var total [4]int64
+		for _, m := range shards {
+			total[0] += m.Gets()
+			total[1] += m.Hits()
+			total[2] += m.BytesOut()
+			total[3] += m.RDMAReadBytesOut()
+		}
+		return total
+	}
+	checkDelta := func(name string, before, want [4]int64) {
+		t.Helper()
+		got := counters()
+		for i := range got {
+			got[i] -= before[i]
+		}
+		if got != want {
+			t.Errorf("%s delta [Gets Hits BytesOut RDMAReadBytesOut] = %v, want %v", name, got, want)
+		}
+	}
+
+	msg := protocol.Message{
+		Header: protocol.Header{OpCode: protocol.OpGet},
+		Body:   protocol.EncodeKeyBody([]byte("accounted")),
+	}
+	before := counters()
+	res, err := d.HandleGetWithAlloc(msg)
+	if err != nil || res.Err != nil || !res.Found || !res.OK || res.AllocInfo == nil {
+		t.Fatalf("descriptor hit: result=%+v err=%v", res, err)
+	}
+	if res.Value != nil || res.AllocInfo.Size != uint64(len(value)) {
+		t.Fatalf("descriptor must expose only logical coordinates: Value length=%d, Size=%d", len(res.Value), res.AllocInfo.Size)
+	}
+	checkDelta("descriptor hit", before, [4]int64{1, 1, int64(res.AllocInfo.Size), 0})
+
+	before = counters()
+	miss, err := d.HandleGetWithAlloc(protocol.Message{
+		Header: protocol.Header{OpCode: protocol.OpGet},
+		Body:   protocol.EncodeKeyBody([]byte("absent")),
+	})
+	if err != nil || miss.Err != nil || miss.Found || miss.AllocInfo != nil || miss.Value != nil {
+		t.Fatalf("descriptor miss: result=%+v err=%v", miss, err)
+	}
+	checkDelta("descriptor miss", before, [4]int64{1, 0, 0, 0})
+
+	// The ordinary TCP dispatch path still copies and accounts for one value.
+	before = counters()
+	resp := d.Dispatch(msg)
+	gotValue, found, err := protocol.DecodeValueResponse(resp.Body)
+	if resp.Header.OpCode != protocol.RespValue || err != nil || !found || string(gotValue) != value {
+		t.Fatalf("copy GET: opcode=%#x found=%v err=%v value length=%d", resp.Header.OpCode, found, err, len(gotValue))
+	}
+	checkDelta("copy hit", before, [4]int64{1, 1, int64(len(value)), 0})
+
+	// No transport/completion hook ran. Legacy derived fields retain their
+	// arithmetic, but logical descriptor bytes are not measured wire payload.
+	c := metrics.NewCollector(&metrics.StartupState{}, d.ConnReg, nil, d.StartedAt)
+	c.SetShards(shards)
+	rec := httptest.NewRecorder()
+	c.MetricsJSONHandler(rec, httptest.NewRequest(http.MethodGet, "/debug/metrics.json", nil))
+	var exported struct {
+		Payload map[string]interface{} `json:"payload"`
+		Wire    map[string]interface{} `json:"wire"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &exported); err != nil {
+		t.Fatal(err)
+	}
+	logicalGB := float64(2*len(value)) / bytesPerGB
+	for _, tc := range []struct {
+		section map[string]interface{}
+		key     string
+		want    float64
+	}{
+		{exported.Payload, "gb_out", logicalGB},
+		{exported.Payload, "rdma_read_gb_out", 0},
+		{exported.Wire, "gb_sent_total", 0},
+		{exported.Wire, "effective_gb_sent_total", 0},
+		{exported.Wire, "payload_gb_sent", logicalGB},
+		{exported.Wire, "ops_gb_sent", -logicalGB},
+	} {
+		if got, ok := tc.section[tc.key].(float64); !ok || got != tc.want {
+			t.Errorf("collector %s = %v, want %v", tc.key, tc.section[tc.key], tc.want)
+		}
+	}
+
+	rec = httptest.NewRecorder()
+	c.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	help := make(map[string]string)
+	for _, line := range strings.Split(rec.Body.String(), "\n") {
+		if strings.HasPrefix(line, "# HELP ") {
+			name, text, _ := strings.Cut(strings.TrimPrefix(line, "# HELP "), " ")
+			help[name] = text
+		}
+	}
+	for _, tc := range []struct {
+		name  string
+		text  interface{}
+		words []string
+	}{
+		{"payload JSON accounting", exported.Payload["accounting"], []string{"logical", "completed", "unavailable"}},
+		{"wire JSON accounting", exported.Wire["accounting"], []string{"logical", "estimate", "not measured"}},
+		{"logical payload HELP", help["l3_server_payload_gb_out"], []string{"logical"}},
+		{"RDMA HELP", help["l3_server_rdma_read_gb_out"], []string{"completed", "unavailable"}},
+		{"legacy payload HELP", help["l3_wire_payload_gb_sent"], []string{"logical", "not measured"}},
+		{"derived overhead HELP", help["l3_wire_ops_gb_sent"], []string{"estimate"}},
+		{"effective wire HELP", help["l3_wire_effective_gb_sent_total"], []string{"completed", "unavailable"}},
+	} {
+		text, ok := tc.text.(string)
+		for _, word := range tc.words {
+			if !ok || !strings.Contains(strings.ToLower(text), word) {
+				t.Errorf("%s must explain %q; got %q", tc.name, word, text)
+			}
+		}
 	}
 }

@@ -881,6 +881,8 @@ var tier = map[string]int{
 	"parentwatch":    2, // parent-exit context cancellation composed over processalive(1).
 	"validate":       2, // isolated prospective validation pipeline over affectedtests(1), committedtree(2) and windowgate(2).
 	"radixpager":     4, // ctxmmu pager adapter over radixkv(4) and model; imported only by pkg/ctxmmu.
+	"naivecontrol":   2,
+	"testgit":        1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

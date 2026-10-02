@@ -377,6 +377,9 @@ func (s *Shard) handleGetAlloc(op ShardOp) OpResult {
 
 	s.eviction.Access(op.KeyHash)
 	s.metrics.IncrHits()
+	// Descriptor hits serve the same logical value as copy reads. Returning
+	// coordinates alone is not evidence that an RDMA transfer has completed.
+	s.metrics.AddBytesOut(int64(entry.ValueLen))
 	return OpResult{
 		Found: true,
 		OK:    true,
