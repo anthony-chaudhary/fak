@@ -8627,6 +8627,11 @@
           "category": "incidental",
           "reason": "Pre-existing agent.Completion.InKernelBatch coordinator receipt field referenced by the buffered native gateway path (#13317); a wire projection of the already-authoritative in-kernel batch receipt, not a new gateway concept.",
           "token": "inkernelbatch"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private post-decode completion guard that preserves fail-closed tool-call handling and assigns existing OVERSIZE or MALFORMED reason codes; it introduces no new gateway transport, execution engine, or admission authority.",
+          "token": "markInKernelDroppedToolCalls"
         }
       ],
       "id": "gateway-engine",
@@ -8734,6 +8739,7 @@
         "kernel_completion_timing",
         "kernels",
         "kernelwiki",
+        "markInKernelDroppedToolCalls",
         "microCacheKernel32",
         "microCacheMoveFileExW",
         "microCacheMovefileReplaceExisting",
