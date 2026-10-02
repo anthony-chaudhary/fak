@@ -4,6 +4,7 @@
 # reproducible form of the "CI green" claim: build + vet + test + the CLAIMS
 # honesty-ledger lint, the same gate as `make ci` / `scripts/ci.ps1`.
 name: ci
+run-name: ${{ github.event_name == 'workflow_dispatch' && 'ci diagnostic (non-release)' || 'ci' }} · ${{ github.sha }}
 
 on:
   push:
@@ -29,9 +30,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}
   cancel-in-progress: true
 
+# These receipts bind checkout commits and reported job execution. They do not
+# seal generated/untracked files or external Go inputs, and grant no release
+# admission by themselves; trusted consumer qualification is tracked in #12373.
 jobs:
   testroute-ci-only:
-    name: testroute CI-only / go test
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      tree: ${{ steps.source.outputs.tree }}
+      run_id: ${{ steps.source.outputs.run_id }}
+      run_attempt: ${{ steps.source.outputs.run_attempt }}
+    name: diagnostic testroute CI-only / go test (non-release)
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     env:
@@ -43,9 +52,21 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      - name: bind exact verification source and environment
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          tree=$(git rev-parse HEAD^{tree})
+          printf 'sha=%s\ntree=%s\nrun_id=%s\nrun_attempt=%s\n' "$sha" "$tree" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          [[ "$sha" == "$GITHUB_SHA" ]]
+          go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "${GOMAXPROCS:-}" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-environment.json"
+
       - name: install pinned OpenAPI validator
         run: python -m pip install --quiet --disable-pip-version-check PyYAML==6.0.2 openapi-spec-validator==0.7.2
       - name: validate and execute routed go test
+        id: routed_tests
         shell: bash
         env:
           FAK_REQUIRE_OPENAPI_VALIDATOR: "1"
@@ -55,8 +76,56 @@ jobs:
             exit 2
           fi
           mapfile -t go_test_args < <(jq -r '.[]' <<<"$GO_TEST_ARGS_JSON")
+          jq -nc --args '$ARGS.positional | [.]' -- go test "${go_test_args[@]}" > "$RUNNER_TEMP/ci-routed-command.json"
           go test "${go_test_args[@]}"
+      - name: record exact verification provenance
+        if: always()
+        shell: bash
+        env:
+          TESTED_SHA: ${{ steps.source.outputs.sha }}
+          TESTED_TREE: ${{ steps.source.outputs.tree }}
+          JOB_RESULT: ${{ job.status }}
+          STEPS_JSON: ${{ toJSON(steps) }}
+          JOB_ID: testroute-ci-only
+          CI_CLASS: diagnostic
+          CORE_COMMANDS_JSON: '[]'
+        run: |
+          # ci-provenance: record-ci-begin
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" && "$(git rev-parse HEAD^{tree})" == "$TESTED_TREE" ]]
+          test -s "$RUNNER_TEMP/ci-environment.json" || echo '{}' > "$RUNNER_TEMP/ci-environment.json"
+          if [[ "$JOB_ID" != race-detector ]]; then
+            jq '. + {FAK_REQUIRE_OPENAPI_VALIDATOR:"1"}' "$RUNNER_TEMP/ci-environment.json" > "$RUNNER_TEMP/ci-environment-complete.json"
+            mv "$RUNNER_TEMP/ci-environment-complete.json" "$RUNNER_TEMP/ci-environment.json"
+          fi
+          commands="$CORE_COMMANDS_JSON"
+          if [[ "$CI_CLASS" == diagnostic ]]; then
+            if [[ -f "$RUNNER_TEMP/ci-routed-command.json" ]]; then commands=$(cat "$RUNNER_TEMP/ci-routed-command.json"); else commands='[]'; fi
+          fi
+          jq -n --arg job "$JOB_ID" --arg sha "$TESTED_SHA" --arg tree "$TESTED_TREE" \
+            --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" \
+            --arg result "$JOB_RESULT" --arg workflow_ref "$GITHUB_WORKFLOW_REF" --arg workflow_sha "$GITHUB_WORKFLOW_SHA" \
+            --arg runner_os "$RUNNER_OS" --arg runner_arch "$RUNNER_ARCH" \
+            --argjson commands "$commands" --argjson steps "$STEPS_JSON" --slurpfile environment "$RUNNER_TEMP/ci-environment.json" \
+            '{schema:"fak.ci-provenance.v1",workflow:"ci",job:$job,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,ci_class:$ci_class,result:$result,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,workflow_ref:$workflow_ref,workflow_sha:$workflow_sha,runner:{os:$runner_os,arch:$runner_arch},commands:$commands,coverage:{scope:"core-verification-commands",job:$job},environment:$environment[0],steps:($steps | with_entries(.value |= {outcome,conclusion}))}' \
+            > "$RUNNER_TEMP/ci-$JOB_ID.json"
+          cat "$RUNNER_TEMP/ci-$JOB_ID.json" >> "$GITHUB_STEP_SUMMARY"
+          # ci-provenance: record-ci-end
+      - name: upload job provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-job-${{ github.run_id }}-${{ github.run_attempt }}-testroute-ci-only
+          path: ${{ runner.temp }}/ci-testroute-ci-only.json
+          if-no-files-found: error
+
   build-vet-test:
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      tree: ${{ steps.source.outputs.tree }}
+      run_id: ${{ steps.source.outputs.run_id }}
+      run_attempt: ${{ steps.source.outputs.run_attempt }}
     if: github.event_name != 'workflow_dispatch'
     name: build · vet · test · claims-lint
     runs-on: ubuntu-latest
@@ -83,6 +152,17 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false # zero external deps -> no go.sum to key a cache on
+
+      - name: bind exact verification source and environment
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          tree=$(git rev-parse HEAD^{tree})
+          printf 'sha=%s\ntree=%s\nrun_id=%s\nrun_attempt=%s\n' "$sha" "$tree" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          [[ "$sha" == "$GITHUB_SHA" ]]
+          go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "${GOMAXPROCS:-}" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-environment.json"
 
       # CI-spec impact (#4757): add the committed-diff concept-admission contract.
       # Consumer migrated: build-vet-test invokes the same Go gate as pre-commit/pre-push.
@@ -119,6 +199,7 @@ jobs:
         run: python tools/install_trunk_guard.py
 
       - name: build
+        id: build
         run: go build ./...
 
       # Format gate (G-001/#38): BLOCKING. The ~57 unformatted trunk files were cleared by a
@@ -138,6 +219,7 @@ jobs:
           echo "gofmt: clean"
 
       - name: vet
+        id: vet
         run: go vet ./...
 
       # The architest tier/root/chat-client gates read the repository filesystem, not
@@ -170,6 +252,7 @@ jobs:
       # run. Reporting (not a hard threshold) is the foundation — a specific floor is a
       # follow-on tuning once the baseline is known (issue #34).
       - name: test (+ coverage profile)
+        id: tests
         env:
           FAK_REQUIRE_OPENAPI_VALIDATOR: "1"
         run: go test -coverprofile=coverage.out ./...
@@ -253,6 +336,7 @@ jobs:
         run: go run ./cmd/fak disambiguation generate --check --json
 
       - name: claims-lint (every "- [" line in CLAIMS.md carries exactly one tag + a declared exposure state)
+        id: claims
         run: |
           go test -count=1 -v -run 'TestCLAIMSLedger' ./internal/claimcheck/
 
@@ -921,6 +1005,46 @@ jobs:
           cp internal/rsiloop/testdata/main-kpi-baseline.jsonl "${RUNNER_TEMP:-/tmp}/rsi-track.jsonl"
           go run ./cmd/rsiloop -mode track -repo . -baseline-ref HEAD -journal "${RUNNER_TEMP:-/tmp}/rsi-track.jsonl"
 
+      - name: record exact verification provenance
+        if: always()
+        shell: bash
+        env:
+          TESTED_SHA: ${{ steps.source.outputs.sha }}
+          TESTED_TREE: ${{ steps.source.outputs.tree }}
+          JOB_RESULT: ${{ job.status }}
+          STEPS_JSON: ${{ toJSON(steps) }}
+          JOB_ID: build-vet-test
+          CI_CLASS: full
+          CORE_COMMANDS_JSON: '[["go","build","./..."],["go","vet","./..."],["go","test","-coverprofile=coverage.out","./..."],["go","test","-count=1","-v","-run","TestCLAIMSLedger","./internal/claimcheck/"]]'
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" && "$(git rev-parse HEAD^{tree})" == "$TESTED_TREE" ]]
+          test -s "$RUNNER_TEMP/ci-environment.json" || echo '{}' > "$RUNNER_TEMP/ci-environment.json"
+          if [[ "$JOB_ID" != race-detector ]]; then
+            jq '. + {FAK_REQUIRE_OPENAPI_VALIDATOR:"1"}' "$RUNNER_TEMP/ci-environment.json" > "$RUNNER_TEMP/ci-environment-complete.json"
+            mv "$RUNNER_TEMP/ci-environment-complete.json" "$RUNNER_TEMP/ci-environment.json"
+          fi
+          commands="$CORE_COMMANDS_JSON"
+          if [[ "$CI_CLASS" == diagnostic ]]; then
+            if [[ -f "$RUNNER_TEMP/ci-routed-command.json" ]]; then commands=$(cat "$RUNNER_TEMP/ci-routed-command.json"); else commands='[]'; fi
+          fi
+          jq -n --arg job "$JOB_ID" --arg sha "$TESTED_SHA" --arg tree "$TESTED_TREE" \
+            --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" \
+            --arg result "$JOB_RESULT" --arg workflow_ref "$GITHUB_WORKFLOW_REF" --arg workflow_sha "$GITHUB_WORKFLOW_SHA" \
+            --arg runner_os "$RUNNER_OS" --arg runner_arch "$RUNNER_ARCH" \
+            --argjson commands "$commands" --argjson steps "$STEPS_JSON" --slurpfile environment "$RUNNER_TEMP/ci-environment.json" \
+            '{schema:"fak.ci-provenance.v1",workflow:"ci",job:$job,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,ci_class:$ci_class,result:$result,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,workflow_ref:$workflow_ref,workflow_sha:$workflow_sha,runner:{os:$runner_os,arch:$runner_arch},commands:$commands,coverage:{scope:"core-verification-commands",job:$job},environment:$environment[0],steps:($steps | with_entries(.value |= {outcome,conclusion}))}' \
+            > "$RUNNER_TEMP/ci-$JOB_ID.json"
+          cat "$RUNNER_TEMP/ci-$JOB_ID.json" >> "$GITHUB_STEP_SUMMARY"
+      - name: upload job provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-job-${{ github.run_id }}-${{ github.run_attempt }}-build-vet-test
+          path: ${{ runner.temp }}/ci-build-vet-test.json
+          if-no-files-found: error
+
   # E-001 (Go Race Detector Support): the data-race gate. The build-vet-test job
   # above runs `go test ./...` WITHOUT instrumentation; this job re-runs the SAME
   # suite under `-race`, which is the only thing that turns a benign-looking
@@ -935,6 +1059,11 @@ jobs:
   # so this is the reproducible home of the "race-free" claim. See
   # docs/testing/race-detector.md for how to run it locally (WSL/Linux/macOS).
   race-detector:
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      tree: ${{ steps.source.outputs.tree }}
+      run_id: ${{ steps.source.outputs.run_id }}
+      run_attempt: ${{ steps.source.outputs.run_attempt }}
     if: github.event_name != 'workflow_dispatch'
     name: race detector · go test -race ./...
     runs-on: ubuntu-latest
@@ -958,6 +1087,17 @@ jobs:
           go-version-file: go.mod
           cache: false # zero external deps -> no go.sum to key a cache on
 
+      - name: bind exact verification source and environment
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          tree=$(git rev-parse HEAD^{tree})
+          printf 'sha=%s\ntree=%s\nrun_id=%s\nrun_attempt=%s\n' "$sha" "$tree" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          [[ "$sha" == "$GITHUB_SHA" ]]
+          go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "${GOMAXPROCS:-}" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-environment.json"
+
       # Race-build cache, the single biggest CI-time win here: `-race` re-instruments and
       # recompiles the whole tree (the reason this job carries a 25m timeout). Its GOCACHE
       # entries are race-instrumented, so they get a SEPARATE key prefix (gorace) from the
@@ -976,6 +1116,7 @@ jobs:
         run: cc --version
 
       - name: go test -race ./... (zero data races)
+        id: race_tests
         # -count=1 forces a real, uncached run — the honest "fresh read-back" of
         # the race-free claim on every push/PR, never a cached green from before.
         # -timeout=25m: ThreadSanitizer instrumentation makes CPU-bound packages
@@ -983,6 +1124,46 @@ jobs:
         # default 10m per-package binary timeout. This only grants wall-clock; it
         # changes nothing about which tests run.
         run: go test -race -count=1 -timeout=25m ./...
+
+      - name: record exact verification provenance
+        if: always()
+        shell: bash
+        env:
+          TESTED_SHA: ${{ steps.source.outputs.sha }}
+          TESTED_TREE: ${{ steps.source.outputs.tree }}
+          JOB_RESULT: ${{ job.status }}
+          STEPS_JSON: ${{ toJSON(steps) }}
+          JOB_ID: race-detector
+          CI_CLASS: full
+          CORE_COMMANDS_JSON: '[["go","test","-race","-count=1","-timeout=25m","./..."]]'
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" && "$(git rev-parse HEAD^{tree})" == "$TESTED_TREE" ]]
+          test -s "$RUNNER_TEMP/ci-environment.json" || echo '{}' > "$RUNNER_TEMP/ci-environment.json"
+          if [[ "$JOB_ID" != race-detector ]]; then
+            jq '. + {FAK_REQUIRE_OPENAPI_VALIDATOR:"1"}' "$RUNNER_TEMP/ci-environment.json" > "$RUNNER_TEMP/ci-environment-complete.json"
+            mv "$RUNNER_TEMP/ci-environment-complete.json" "$RUNNER_TEMP/ci-environment.json"
+          fi
+          commands="$CORE_COMMANDS_JSON"
+          if [[ "$CI_CLASS" == diagnostic ]]; then
+            if [[ -f "$RUNNER_TEMP/ci-routed-command.json" ]]; then commands=$(cat "$RUNNER_TEMP/ci-routed-command.json"); else commands='[]'; fi
+          fi
+          jq -n --arg job "$JOB_ID" --arg sha "$TESTED_SHA" --arg tree "$TESTED_TREE" \
+            --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" \
+            --arg result "$JOB_RESULT" --arg workflow_ref "$GITHUB_WORKFLOW_REF" --arg workflow_sha "$GITHUB_WORKFLOW_SHA" \
+            --arg runner_os "$RUNNER_OS" --arg runner_arch "$RUNNER_ARCH" \
+            --argjson commands "$commands" --argjson steps "$STEPS_JSON" --slurpfile environment "$RUNNER_TEMP/ci-environment.json" \
+            '{schema:"fak.ci-provenance.v1",workflow:"ci",job:$job,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,ci_class:$ci_class,result:$result,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,workflow_ref:$workflow_ref,workflow_sha:$workflow_sha,runner:{os:$runner_os,arch:$runner_arch},commands:$commands,coverage:{scope:"core-verification-commands",job:$job},environment:$environment[0],steps:($steps | with_entries(.value |= {outcome,conclusion}))}' \
+            > "$RUNNER_TEMP/ci-$JOB_ID.json"
+          cat "$RUNNER_TEMP/ci-$JOB_ID.json" >> "$GITHUB_STEP_SUMMARY"
+      - name: upload job provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-job-${{ github.run_id }}-${{ github.run_attempt }}-race-detector
+          path: ${{ runner.temp }}/ci-race-detector.json
+          if-no-files-found: error
 
   # head-snapshot-build (#966): the build-vet-test job above builds the TIP of a
   # push. On this high-churn shared trunk a single push often carries SEVERAL
@@ -996,6 +1177,11 @@ jobs:
   # peer's pull. Bounded to the last 25 commits of the range (logged if truncated)
   # so a force-rebuild or a first push can't run unbounded.
   head-snapshot-build:
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      tree: ${{ steps.source.outputs.tree }}
+      run_id: ${{ steps.source.outputs.run_id }}
+      run_attempt: ${{ steps.source.outputs.run_attempt }}
     name: per-commit build · every pushed snapshot compiles
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
@@ -1014,7 +1200,18 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      - name: bind pushed snapshot source and attempt
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          tree=$(git rev-parse HEAD^{tree})
+          printf 'sha=%s\ntree=%s\nrun_id=%s\nrun_attempt=%s\n' "$sha" "$tree" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          [[ "$sha" == "$GITHUB_SHA" ]]
+
       - name: build each committed snapshot in the pushed range
+        id: snapshots
         env:
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
@@ -1053,3 +1250,46 @@ jobs:
             echo "  ok  $sha"
           done
           echo "all pushed snapshots compile"
+
+  ci-provenance:
+    name: verify CI evidence class and fixed job set
+    needs: [testroute-ci-only, build-vet-test, race-detector, head-snapshot-build]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: qualify the exact executed CI class
+        shell: bash
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          # ci-provenance: verify-full-begin
+          set -euo pipefail
+          # Outputs name actual checked-out commits; GitHub success alone is insufficient.
+          jq -ne --argjson jobs "$NEEDS_JSON" --arg sha "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" \
+            --arg ref "$GITHUB_REF" --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" '
+            (if $event == "workflow_dispatch" then ["testroute-ci-only"] elif $event == "push" then ["build-vet-test","race-detector","head-snapshot-build"] else ["build-vet-test","race-detector"] end) as $required |
+            ($jobs[$required[0]].outputs.tree // "") as $tree |
+            (($sha | test("^[0-9a-f]{40}$")) and ($tree | test("^[0-9a-f]{40}$")) and
+              ($run | test("^[1-9][0-9]*$")) and ($attempt | test("^[1-9][0-9]*$")) and
+              all($required[]; $jobs[.].result == "success" and $jobs[.].outputs.sha == $sha and $jobs[.].outputs.tree == $tree and $jobs[.].outputs.run_id == $run and $jobs[.].outputs.run_attempt == $attempt) and
+              (if $event == "workflow_dispatch" then $jobs["build-vet-test"].result == "skipped" and $jobs["race-detector"].result == "skipped" and $jobs["head-snapshot-build"].result == "skipped"
+               elif $event == "push" then $jobs["testroute-ci-only"].result == "skipped" and $jobs["head-snapshot-build"].result == "success"
+               elif $event == "pull_request" then $jobs["testroute-ci-only"].result == "skipped" and $jobs["head-snapshot-build"].result == "skipped"
+               else false end)) as $verified |
+            {schema:"fak.ci-provenance.v1",workflow:"ci",ci_class:(if $event == "workflow_dispatch" then "diagnostic" else "full" end),tested_sha:$sha,tested_tree:$tree,represented_sha:$sha,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,required_jobs:$required,jobs:$jobs,verified:$verified,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,release_ineligibility_reason:(if $event == "workflow_dispatch" then "diagnostic-run" elif $verified then "effective-input-identity-not-sealed" else "incomplete-evidence" end)}' \
+            > "$RUNNER_TEMP/ci-provenance.json"
+          cat "$RUNNER_TEMP/ci-provenance.json" >> "$GITHUB_STEP_SUMMARY"
+          # Prior-attempt jobs cannot be silently re-dated by a partial rerun.
+          if ! jq -e '.verified == true' "$RUNNER_TEMP/ci-provenance.json" > /dev/null; then
+            echo "::error::CI provenance incomplete or mismatched. Re-run all jobs to produce one complete run attempt."
+            exit 1
+          fi
+          # ci-provenance: verify-full-end
+      - name: upload aggregate provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-provenance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-provenance.json
+          if-no-files-found: error
