@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:09a7f9aa345eb80262046ef2d71e05d6188669899ce58107fbd53b9ae41c1c06",
-  "tracked_files": 23822,
-  "tracked_bytes": 491803220,
+  "content_root": "sha256:b3736a146c6f6a8e957f4a0d3280125ba296659a5a7b1d4efb4b0cd26941ba36",
+  "tracked_files": 23823,
+  "tracked_bytes": 491807093,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -26813,8 +26813,8 @@
     },
     {
       "path": "cmd/fak/up.go",
-      "content_sha256": "sha256:e2281340978bfabab4e1a2028bdc666f084b38a2791e1c02659ba906da70e08c",
-      "bytes": 81457,
+      "content_sha256": "sha256:c28321d56eb464c87830e3edbe56cf5c8862df6f5fc19b874f55450002c51e77",
+      "bytes": 81724,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -27076,6 +27076,15 @@
       "path": "cmd/fak/up_service_test.go",
       "content_sha256": "sha256:9a8e9743d8af8c941b4ba2c33c37808c926b41df86e28251ea9e5756ed9ac608",
       "bytes": 19190,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "cmd/fak/up_stdin_test.go",
+      "content_sha256": "sha256:bbbd5a7619305c9cddb9a57d4357b85e28596e5bebee7d072808a82a465601bf",
+      "bytes": 3606,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
