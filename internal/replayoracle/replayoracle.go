@@ -27,7 +27,27 @@ type Result struct {
 // it may keep any fitting subset of the current residents plus the accessed span, which is
 // the offline optimum. Larger traces fall back to a farthest-next-use approximation and
 // mark Exact=false.
+//
+// It models a DEMAND-PAGING cache: every miss that fits must be admitted. That is the
+// right bound for policies that always admit (LRU, cost-aware, the live expert ring); a
+// policy with admission control can legitimately exceed it and must be scored against
+// BeladyWithBypass instead.
 func Belady(events []Event, budget int) Result {
+	return belady(events, budget, false)
+}
+
+// BeladyWithBypass is Belady for a cache with ADMISSION CONTROL: on a miss the cache may
+// also decline to admit the accessed span and keep every current resident (a bypass),
+// which is always legal because the residents already fit the budget. It is the offline
+// optimum for policies that can bypass (e.g. hysteresis admission). Its exact bound is
+// never below Belady's on the same trace, because every demand-paging schedule is also a
+// bypass schedule. Above 63 distinct spans it falls back to farthest-next-use with bypass
+// and marks Exact=false.
+func BeladyWithBypass(events []Event, budget int) Result {
+	return belady(events, budget, true)
+}
+
+func belady(events []Event, budget int, bypass bool) Result {
 	filtered := validEvents(events)
 	access := 0
 	for _, ev := range filtered {
@@ -57,7 +77,7 @@ func Belady(events []Event, budget int) Result {
 		}
 	}
 	if len(spanIDs) > 63 {
-		hits := beladyGreedyHits(filtered, budget)
+		hits := beladyGreedyHits(filtered, budget, bypass)
 		return Result{HitTokens: hits, AccessTokens: access, Exact: false}
 	}
 
@@ -108,14 +128,20 @@ func Belady(events []Event, budget int) Result {
 			return v
 		}
 
-		// A miss MUST admit the accessed span, so only subsets of mask|bit that
-		// contain bit are legal continuations. Seed with the sentinel -1 and let
-		// the enumerated legal candidates raise it: a state that omits the missed
-		// span (e.g. mask&^bit == mask) can exceed budget and would otherwise
-		// score a hit no real cache can reach, inflating the "exact" optimum.
+		// Under demand paging a miss MUST admit the accessed span, so only subsets
+		// of mask|bit that contain bit are legal continuations. Seed with the
+		// sentinel -1 and let the enumerated legal candidates raise it: keeping
+		// mask unchanged (declining the miss) would score reuses a demand-paging
+		// cache cannot reach, inflating the "exact" optimum.
 		// The miss itself contributes no hit tokens; only future reuses score.
 		candidates := mask | bit
 		bestFuture := -1
+		if bypass {
+			// Admission control may decline the miss and keep every resident. mask
+			// is a state the DP already reached, so it fits the budget by
+			// construction; dropping residents without admitting never helps.
+			bestFuture = best(pos+1, mask)
+		}
 		for sub := candidates; ; sub = (sub - 1) & candidates {
 			if sub&bit != 0 && maskWeight(sub) <= budget {
 				if v := best(pos+1, sub); v > bestFuture {
@@ -148,7 +174,7 @@ func validEvents(events []Event) []Event {
 	return out
 }
 
-func beladyGreedyHits(events []Event, budget int) int {
+func beladyGreedyHits(events []Event, budget int, bypass bool) int {
 	resident := map[int]int{}
 	residentTokens := 0
 	hits := 0
@@ -157,8 +183,16 @@ func beladyGreedyHits(events []Event, budget int) int {
 			hits += ev.Tokens
 			continue
 		}
+		if bypass && budget > 0 && residentTokens+ev.Tokens > budget && len(resident) > 0 {
+			// Admission control: decline the newcomer when it is reused no sooner than
+			// the resident farthest-next-use would evict, so admitting it cannot help.
+			_, victimDistance := farthestNextUse(events, i+1, resident)
+			if nextUseDistance(events, i+1, ev.SpanID) >= victimDistance {
+				continue
+			}
+		}
 		for budget > 0 && residentTokens+ev.Tokens > budget && len(resident) > 0 {
-			victim := farthestNextUse(events, i+1, resident)
+			victim, _ := farthestNextUse(events, i+1, resident)
 			residentTokens -= resident[victim]
 			delete(resident, victim)
 		}
@@ -170,20 +204,27 @@ func beladyGreedyHits(events []Event, budget int) int {
 	return hits
 }
 
-func farthestNextUse(events []Event, start int, resident map[int]int) int {
+// farthestNextUse returns the resident reused last after start (ties to the lowest id)
+// and that reuse distance; a span never reused again has distance len(events)+1.
+func farthestNextUse(events []Event, start int, resident map[int]int) (int, int) {
 	victim := 0
 	bestDistance := -1
 	for id := range resident {
-		distance := len(events) + 1
-		for j := start; j < len(events); j++ {
-			if events[j].SpanID == id {
-				distance = j - start
-				break
-			}
-		}
+		distance := nextUseDistance(events, start, id)
 		if bestDistance < 0 || distance > bestDistance || (distance == bestDistance && id < victim) {
 			victim, bestDistance = id, distance
 		}
 	}
-	return victim
+	return victim, bestDistance
+}
+
+// nextUseDistance is how many events after start span id is next touched, or
+// len(events)+1 when it is never touched again.
+func nextUseDistance(events []Event, start, id int) int {
+	for j := start; j < len(events); j++ {
+		if events[j].SpanID == id {
+			return j - start
+		}
+	}
+	return len(events) + 1
 }
