@@ -755,3 +755,17 @@ The per-launch random credential written into the guarded child's MCP HTTP confi
 sharedCache is the requested Go build-cache path read by internal/workerworktree.WorktreeEnv from an explicit caller-map FAK_SHARED_GOCACHE value, otherwise the process environment. An explicit empty value suppresses ambient opt-in. After trimming, an absolute path without NUL selects GOCACHE; invalid or disabled input retains the worktree-local default.
 
 **Distinct from:** This is the worker opt-in path selection value, not GOCACHE itself, a runtime KV or provider cache, a warm-seeding copy, or cache-retention authority. GOTMPDIR remains worktree-private and the worktree reaper does not own an external shared cache.
+
+
+### SharedGoCacheEnv (Go constant naming worker shared-cache opt-in)
+
+SharedGoCacheEnv is the exported workerworktree Go constant whose value is FAK_SHARED_GOCACHE. Callers use it as the explicit WorktreeEnv map key for a requested shared Go build-cache path; it names the control rather than storing the selected directory.
+
+**Distinct from:** The constant is the Go API spelling of the same control named FAK_SHARED_GOCACHE in an environment or caller map. It is distinct from sharedCache, the requested path value that WorktreeEnv validates, and does not introduce separate cache ownership.
+
+
+### FAK_SHARED_GOCACHE (worker shared-cache opt-in environment key)
+
+FAK_SHARED_GOCACHE is the environment-key spelling of the worker shared Go build-cache opt-in, also exposed to Go callers as SharedGoCacheEnv. WorktreeEnv reads an explicit caller-map value before the ambient environment; an explicit empty value disables ambient opt-in, and only a trimmed absolute non-NUL path selects the child GOCACHE.
+
+**Distinct from:** This is the external key spelling of the same control named by SharedGoCacheEnv, not a second cache. It is distinct from sharedCache, the requested directory value, and from the selected GOCACHE destination. The external cache remains operator-owned and GOTMPDIR remains worktree-local.
