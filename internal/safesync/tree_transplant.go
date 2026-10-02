@@ -204,7 +204,21 @@ func TransplantDisjointTreeWithRunner(ctx context.Context, run Runner, repo, bra
 	treeOID := strings.TrimSpace(lines[0])
 
 	// 2. Mint two-parent merge commit object directly in Git ODB
-	msg := fmt.Sprintf("Merge %s (disjoint integrate) (fak safesync)", targetRef)
+	// Git's effective committer honors environment overrides that user config does not.
+	identRes := run(ctx, repo, "var", "GIT_COMMITTER_IDENT")
+	if identRes.Err != nil {
+		return "", fmt.Errorf("git var GIT_COMMITTER_IDENT execution failed: %w", identRes.Err)
+	}
+	if identRes.Code != 0 {
+		return "", fmt.Errorf("git var GIT_COMMITTER_IDENT exited with code %d: %s", identRes.Code, strings.TrimSpace(string(identRes.Stderr)))
+	}
+	ident := strings.TrimSpace(string(identRes.Stdout))
+	open, close := strings.LastIndexByte(ident, '<'), strings.LastIndexByte(ident, '>')
+	if open <= 0 || close <= open+1 || strings.TrimSpace(ident[:open]) == "" || strings.ContainsAny(ident, "\r\n") {
+		return "", errors.New("git var GIT_COMMITTER_IDENT returned invalid committer identity")
+	}
+	// Exclude the timestamp and timezone from the sign-off identity.
+	msg := fmt.Sprintf("Merge %s (disjoint integrate) (fak safesync)\n\nSigned-off-by: %s", targetRef, ident[:close+1])
 	ctRes := run(ctx, repo, "commit-tree", treeOID, "-p", headSHA, "-p", targetSHA, "-m", msg)
 	if ctRes.Err != nil {
 		return "", fmt.Errorf("git commit-tree execution failed: %w", ctRes.Err)
