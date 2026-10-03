@@ -441,6 +441,17 @@ func Park(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
 		if eff.Classification == EffectConflict {
 			hasConflict = true
 		} else if eff.Classification == EffectCleanReapply && hasMerge {
+			// Advance the selected path's index entry to the integrated HEAD
+			// before writing the merged working bytes. `git checkout newCommit -- p`
+			// writes the new baseline to BOTH the index and the worktree; the
+			// subsequent WriteFile replaces only the worktree, so the unique local
+			// effect stays unstaged while the index matches upstream. Without this
+			// the index keeps the pre-integration base blob (set at the "checkout
+			// HEAD" step above) and `git diff --cached` stages an inverse of the
+			// upstream hunk (#12690).
+			if idx := run(ctx, repo, "checkout", newCommit, "--", p); idx.Code != 0 {
+				return receipt, fmt.Errorf("advance selected index %s to %s: %s", p, newCommit, string(idx.Stderr))
+			}
 			fullPath := filepath.Join(repo, p)
 			dir := filepath.Dir(fullPath)
 			_ = os.MkdirAll(dir, 0755)

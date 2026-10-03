@@ -144,6 +144,94 @@ func TestParkAheadBehindUniqueRetainedIdenticalSuppressed(t *testing.T) {
 	}
 }
 
+// TestParkCleanReapplyAdvancesSelectedIndex is the regression for #12690: after a
+// clean_reapply the selected path's index entry must match the integrated HEAD so
+// `git status` does not report MM and `git diff --cached` cannot stage an inverse
+// of the upstream hunk. Trunk failed this: the index held the pre-integration base
+// blob while the working tree held the merged bytes.
+func TestParkCleanReapplyAdvancesSelectedIndex(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+
+	origin := filepath.Join(tmp, "origin")
+	mkdir(t, origin)
+	git(t, origin, "init", "-b", "main")
+	git(t, origin, "config", "user.name", "test")
+	git(t, origin, "config", "user.email", "test@example.com")
+	writeFile(t, filepath.Join(origin, "a.txt"), "top\nmiddle\nbottom\n")
+	git(t, origin, "add", ".")
+	git(t, origin, "commit", "-m", "base")
+
+	clone := filepath.Join(tmp, "clone")
+	git(t, tmp, "-c", "core.autocrlf=false", "clone", origin, clone)
+	git(t, clone, "config", "core.autocrlf", "false")
+	git(t, clone, "config", "user.name", "test")
+	git(t, clone, "config", "user.email", "test@example.com")
+
+	// Upstream adds an "incoming" hunk to a.txt.
+	writeFile(t, filepath.Join(origin, "a.txt"), "top\nincoming\nmiddle\nbottom\n")
+	git(t, origin, "add", "a.txt")
+	git(t, origin, "commit", "-m", "upstream update")
+	git(t, clone, "fetch", "origin")
+
+	// Local commit ahead of base so the integration is an ahead+behind merge.
+	writeFile(t, filepath.Join(clone, "local.txt"), "local commit\n")
+	git(t, clone, "add", "local.txt")
+	git(t, clone, "commit", "-m", "local commit ahead")
+
+	// Selected path is dirty: it carries the upstream hunk AND a unique local line.
+	writeFile(t, filepath.Join(clone, "a.txt"), "top\nincoming\nmiddle\nbottom\nunique\n")
+
+	// Unrelated staged sentinel that must survive the park unchanged.
+	writeFile(t, filepath.Join(clone, "staged.txt"), "staged sentinel\n")
+	git(t, clone, "add", "staged.txt")
+
+	rec, err := Park(ctx, ParkOptions{
+		Repo:      clone,
+		Session:   "sess-index",
+		Paths:     []string{"a.txt"},
+		TargetRef: "origin/main",
+		Apply:     true,
+	})
+	if err != nil {
+		t.Fatalf("Park err: %v", err)
+	}
+	if !rec.OK || rec.Status != ParkStatusRestored {
+		t.Fatalf("park status=%q ok=%v reason=%s", rec.Status, rec.OK, rec.Reason)
+	}
+	if len(rec.Effects) != 1 || rec.Effects[0].Classification != EffectCleanReapply {
+		t.Fatalf("effects = %+v, want clean_reapply", rec.Effects)
+	}
+
+	// The index baseline for the selected path must equal the integrated HEAD,
+	// not the pre-integration base blob.
+	indexBlob := gitOutput(t, clone, "show", ":a.txt")
+	headBlob := gitOutput(t, clone, "show", "HEAD:a.txt")
+	if indexBlob != headBlob {
+		t.Fatalf("selected index baseline = %q, want integrated HEAD blob %q", indexBlob, headBlob)
+	}
+
+	// Nothing for the selected path may be staged: a cached diff here would be an
+	// inverse of the upstream hunk.
+	if cached := strings.TrimSpace(gitOutput(t, clone, "diff", "--cached", "--name-only", "--", "a.txt")); cached != "" {
+		t.Fatalf("a.txt appears staged after clean_reapply: %q", cached)
+	}
+
+	// The working diff carries only the unique local effect.
+	workDiff := gitOutput(t, clone, "diff", "--", "a.txt")
+	if !strings.Contains(workDiff, "+unique") {
+		t.Fatalf("working diff missing the local effect: %q", workDiff)
+	}
+	if strings.Contains(workDiff, "-incoming") {
+		t.Fatalf("working diff staged an inverse of the upstream hunk: %q", workDiff)
+	}
+
+	// The unrelated staged sentinel is untouched.
+	if got := gitOutput(t, clone, "show", ":staged.txt"); got != "staged sentinel\n" {
+		t.Fatalf("staged.txt index content = %q, want unchanged sentinel", got)
+	}
+}
+
 func TestParkRefusalOnUnownedCollidingPaths(t *testing.T) {
 	ctx := context.Background()
 	tmp := t.TempDir()
