@@ -47,6 +47,22 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "plan-candidatearchive",
+      "canonical": "StrixCandidateArchive",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The deterministic candidate archive the Strix validation path stages for hardware: the repo's base git tip plus exactly the owned paths, packaged with the tarball bytes and their source SHA-256, built by BuildStrixCandidateArchive.",
+      "distinction": "The staged validation candidate SOURCE ARCHIVE (base tip + owned paths, digest-bound) - NOT Candidate (a scored planner span) and NOT the per-loop CandidatesExamined/candidateTokens counters.",
+      "distinct_from": ["candidate-planner"],
+      "aliases": [],
+      "grounding": "CandidateArchive",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }
