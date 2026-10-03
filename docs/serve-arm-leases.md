@@ -1,0 +1,13 @@
+# Durable research-arm leases
+
+`fak serve --arm-lease-store /absolute/private-directory/leases.json` retains acknowledged research-arm leases across serving restarts. Native and proxy serving can use the same path. Without the flag, leases remain in memory as before. Durable stores support Linux and Darwin; other platforms refuse startup when the flag is configured.
+
+Create the containing directory beforehand with mode `0700`, owned by the serving user. The snapshot and stable `.lock` sidecar use mode `0600`. Symlinks, nonregular files, unexpected ownership or permissions, corrupt snapshots, and another running owner cause startup refusal. Keep both files together. A missing snapshot beside an existing lock is an error, rather than an empty store.
+
+A fresh store starts with `durable_status: bootstrap` and denies inference. Its first lease acquisition must be exclusive. Only an acknowledged, persisted exclusive acquisition enables admission. That bootstrap requires an operator to quiesce previous serving activity separately: the store cannot recover leases or in-flight requests from a previous process that used memory-only coordination. The first durable acquisition creates a new lease identity; it does not reconstruct an old token.
+
+The existing research-arm control API acquires and releases leases. Active lease IDs, secret tokens, modes, concurrency limits, and expiry times survive reopening the store. Request counters and in-flight requests remain local to a process. Expired leases no longer block admission. Once initialized, the store remains ready after its final lease is released. Durable releases require the original secret token. Public snapshots redact tokens.
+
+The bounded research-arm snapshot reports `durable_status` as `bootstrap`, `ready`, `unavailable`, or `closed`. A failed write before replacement does not acknowledge or change the prior lease map. An uncertain replacement or directory sync disables admission and lease mutations until the store is reopened and its persisted state validated. An initialized snapshot that disappears also disables the coordinator. There is no automatic switch to memory-only coordination after a store failure.
+
+Serving opens the store before binding its listener and closes it after graceful HTTP shutdown. During a serving-mode transition, drain the old process, retain the same snapshot and lock path, restart with the flag, and verify the original lease through the control API before resuming work. Removing the flag discards durable admission authority from the new process; first hand off or release that authority explicitly.

@@ -31,7 +31,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/l3kv"
 	"github.com/anthony-chaudhary/fak/internal/macobs"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
-	"github.com/anthony-chaudhary/fak/internal/researcharm"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/snapshot"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
@@ -119,6 +118,7 @@ type serveFlags struct {
 	stdio                        *bool
 	provider                     *string
 	baseURL                      *string
+	armLeaseStore                *string
 	replicaBaseURLs              repeatedStringFlag
 	model                        *string
 	mock                         *bool
@@ -256,6 +256,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.workspaceAdmissionPermissive = fs.Bool("workspace-admission-permissive", rwEnvBool("FAK_WORKSPACE_ADMISSION_PERMISSIVE"), "explicitly admit workspace lease DEFAULT_DENY failures with observable would_deny details; peer LEASE_HELD and kernel policy denies remain enforced (env: FAK_WORKSPACE_ADMISSION_PERMISSIVE)")
 	sf.stdio = fs.Bool("stdio", false, "serve MCP over stdin/stdout (newline-delimited JSON-RPC) instead of HTTP")
 	sf.provider = fs.String("provider", "openai", "upstream provider transcript wire: openai, anthropic, gemini, or xai")
+	sf.armLeaseStore = fs.String("arm-lease-store", "", "private durable research-arm lease snapshot (Linux/Darwin; fresh store requires initial exclusive lease before inference)")
 	sf.baseURL = fs.String("base-url", "", "upstream provider base URL for the /v1/chat/completions proxy (empty = offline mock planner)")
 	fs.Var(&sf.replicaBaseURLs, "replica-base-url", "additional upstream provider base URL for a static round-robin replica fleet; repeat for N replicas. If --base-url is set, it is replica 1. Each replica's identity defaults to a stable endpoint-derived id (replica-<digest>) so the same upstream keeps its metric/residency labels regardless of flag order or a dropped peer; pass name=URL to pin an operator-chosen id.")
 	sf.model = fs.String("model", "mock", "model id (advertised by /v1/models; used for the upstream call)")
@@ -741,6 +742,11 @@ func cmdServe(argv []string) {
 	rt.resolveSessionPlane(sf)
 	rt.resolveObservers(sf)
 	resolveServeEngine(sf, explicit, rt.inKernelModel != nil)
+	defer func() {
+		if err := rt.closeServeArmLeases(); err != nil {
+			fmt.Fprintf(os.Stderr, "fak serve: close arm lease store: %v\n", err)
+		}
+	}()
 	controlIngress, err := rt.buildGateway(sf)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: control ingress: %v\n", err)
@@ -888,7 +894,7 @@ func loadServeRouteFile[T any](flagName, path, want string, load func(string) (T
 // buildGateway loads the optional model-routing policy, constructs the gateway
 // server from the resolved planes, and arms the admission controller for a pure
 // in-kernel serve.
-func (rt *serveRuntime) buildGateway(sf *serveFlags) (*gateway.DurableControlIngress, error) {
+func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableControlIngress, buildErr error) {
 	resolveServeEngine(sf, rt.explicitFlags, rt.inKernelModel != nil)
 	startupMessages := append([]gateway.StartupMessage(nil), rt.startupMessages...)
 	nativePlannerConfig := serveNativePlannerConfigWithContext(sf, rt.nativeContext.ResolvedTokens)
@@ -1078,19 +1084,33 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (*gateway.DurableControlIng
 	}
 	srv.AddStartupMessages(startupMessages...)
 	srv.SetModelLoadProfile(rt.loadProfile)
-	armsCoord := researcharm.NewCoordinator(16)
-	srv.SetResearchArmCoordinator(armsCoord)
+	if err := rt.configureServeArmLeases(sf, srv); err != nil {
+		if controlIngress != nil {
+			_ = controlIngress.Close()
+		}
+		return nil, err
+	}
+	armSetupComplete := false
+	defer func() {
+		if !armSetupComplete {
+			buildErr = errors.Join(buildErr, rt.closeServeArmLeases())
+			if controlIngress != nil {
+				buildErr = errors.Join(buildErr, controlIngress.Close())
+			}
+		}
+	}()
 	if rt.inKernelModel != nil && rt.inKernelTok != nil && strings.TrimSpace(*sf.baseURL) == "" && len(sf.replicaBaseURLs.Values()) == 0 {
 		controller, message, err := newServeNativeAdmissionController(sf)
-		must(err)
+		if err != nil {
+			return nil, err
+		}
 		srv.SetAdmissionController(controller)
 		srv.AddStartupMessages(message)
 	}
 	if maxTokens := sf.effectiveMaxTotalTokens(); maxTokens > 0 {
 		srv.SetMaxTotalTokens(maxTokens)
 		if err := srv.CheckMaxTotalTokens(maxTokens); err != nil {
-			fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
-			os.Exit(2)
+			return nil, err
 		}
 	}
 	// Control-plane SPEND CAP (#4859, the CLI half of #3273): --spend-cap builds the
@@ -1101,8 +1121,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (*gateway.DurableControlIng
 	// not bind is worse than a refused boot.
 	gov, scopeOf, err := buildSpendGovernor(sf.spendCap.Values(), *sf.spendScopeTrace, *sf.budgetWebhook)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "fak serve:", err)
-		os.Exit(1)
+		return nil, err
 	}
 	if gov != nil {
 		srv.SetSpendGovernor(gov, scopeOf)
@@ -1127,6 +1146,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (*gateway.DurableControlIng
 		})
 	}
 	rt.srv = srv
+	armSetupComplete = true
 	return controlIngress, nil
 }
 

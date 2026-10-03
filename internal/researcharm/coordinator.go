@@ -40,6 +40,10 @@ type Coordinator struct {
 	leases                map[string]*LeaseInfo
 	defaultMaxConcurrency int
 	enforceLeases         bool
+	store                 *leaseStore
+	closed                bool
+	storeErr              error
+	admissionReady        bool
 }
 
 type armState struct {
@@ -82,6 +86,12 @@ func (c *Coordinator) Admit(ctx context.Context, r *http.Request, endpoint strin
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if err := c.availableLocked(); err != nil {
+		return nil, err
+	}
+	if c.store != nil && !c.admissionReady {
+		return nil, fmt.Errorf("researcharm: durable admission requires initial exclusive lease")
+	}
 	c.pruneExpiredLeasesLocked(now)
 
 	// 1. Check exclusive leases held by other arms.
@@ -188,6 +198,12 @@ func (c *Coordinator) AcquireLease(req LeaseRequest) (*LeaseInfo, error) {
 	if req.Mode == "" {
 		req.Mode = LeaseModeShared
 	}
+	if req.Mode != LeaseModeShared && req.Mode != LeaseModeExclusive {
+		return nil, fmt.Errorf("researcharm: invalid lease mode %q", req.Mode)
+	}
+	if req.HolderPID < 0 || req.Concurrency < 0 {
+		return nil, fmt.Errorf("researcharm: negative lease PID or concurrency")
+	}
 	if req.TTL <= 0 {
 		req.TTL = 5 * time.Minute
 	}
@@ -196,11 +212,17 @@ func (c *Coordinator) AcquireLease(req LeaseRequest) (*LeaseInfo, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.pruneExpiredLeasesLocked(now)
+	if err := c.availableLocked(); err != nil {
+		return nil, err
+	}
+	if c.store != nil && !c.admissionReady && req.Mode != LeaseModeExclusive {
+		return nil, fmt.Errorf("researcharm: initial durable lease must be exclusive")
+	}
+	candidate := c.liveLeasesLocked(now)
 
 	// If exclusive requested, ensure no other arm holds an active lease or has in-flight requests.
 	if req.Mode == LeaseModeExclusive {
-		for _, l := range c.leases {
+		for _, l := range candidate {
 			if l.ArmID != req.ArmID {
 				return nil, fmt.Errorf("%w: active lease held by arm %q", ErrExclusiveLeaseHeld, l.ArmID)
 			}
@@ -212,7 +234,7 @@ func (c *Coordinator) AcquireLease(req LeaseRequest) (*LeaseInfo, error) {
 		}
 	} else {
 		// If shared requested, ensure no exclusive lease is held by another arm.
-		for _, l := range c.leases {
+		for _, l := range candidate {
 			if l.Mode == LeaseModeExclusive && l.ArmID != req.ArmID {
 				return nil, fmt.Errorf("%w: exclusive lease held by arm %q", ErrExclusiveLeaseHeld, l.ArmID)
 			}
@@ -234,12 +256,15 @@ func (c *Coordinator) AcquireLease(req LeaseRequest) (*LeaseInfo, error) {
 	}
 
 	// Replace any previous lease for this arm
-	for k, l := range c.leases {
+	for k, l := range candidate {
 		if l.ArmID == req.ArmID {
-			delete(c.leases, k)
+			delete(candidate, k)
 		}
 	}
-	c.leases[leaseID] = info
+	candidate[leaseID] = info
+	if err := c.commitLeasesLocked(candidate, true); err != nil {
+		return nil, err
+	}
 
 	// Ensure arm is registered
 	if _, ok := c.arms[req.ArmID]; !ok {
@@ -262,6 +287,9 @@ func (c *Coordinator) ReleaseLease(leaseID, token string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if err := c.availableLocked(); err != nil {
+		return err
+	}
 	l, ok := c.leases[leaseID]
 	if !ok {
 		// Look up by arm ID if not found by lease ID
@@ -278,12 +306,13 @@ func (c *Coordinator) ReleaseLease(leaseID, token string) error {
 		return ErrLeaseNotFound
 	}
 
-	if token != "" && l.Token != token {
+	if (c.store != nil || token != "") && l.Token != token {
 		return ErrInvalidLeaseToken
 	}
 
-	delete(c.leases, leaseID)
-	return nil
+	candidate := c.liveLeasesLocked(time.Now())
+	delete(candidate, leaseID)
+	return c.commitLeasesLocked(candidate, c.admissionReady)
 }
 
 // SetLimit updates the max concurrency limit for an arm.
@@ -360,7 +389,21 @@ func (c *Coordinator) Snapshot() Snapshot {
 		}
 	}
 
+	status := ""
+	if c.store != nil {
+		status = "ready"
+		if !c.admissionReady {
+			status = "bootstrap"
+		}
+		if c.storeErr != nil {
+			status = "unavailable"
+		}
+		if c.closed {
+			status = "closed"
+		}
+	}
 	return Snapshot{
+		DurableStatus: status,
 		Timestamp:     now,
 		TotalInflight: len(inflight),
 		TotalArms:     len(arms),
@@ -411,4 +454,54 @@ func randomHex(bytesLen int) string {
 		return fmt.Sprintf("%x", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b)
+}
+
+// Close stops admission before releasing the process-lifetime store lock.
+func (c *Coordinator) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil
+	}
+	c.closed = true
+	if c.store != nil {
+		return c.store.close()
+	}
+	return nil
+}
+
+func (c *Coordinator) availableLocked() error {
+	if c.closed {
+		return fmt.Errorf("researcharm: coordinator closed")
+	}
+	if c.storeErr != nil {
+		return fmt.Errorf("researcharm: lease store unavailable: %w", c.storeErr)
+	}
+	return nil
+}
+
+func (c *Coordinator) liveLeasesLocked(now time.Time) map[string]*LeaseInfo {
+	out := make(map[string]*LeaseInfo, len(c.leases))
+	for id, lease := range c.leases {
+		if now.Before(lease.ExpiresAt) {
+			cp := *lease
+			out[id] = &cp
+		}
+	}
+	return out
+}
+
+func (c *Coordinator) commitLeasesLocked(candidate map[string]*LeaseInfo, ready bool) error {
+	if c.store != nil {
+		uncertain, err := c.store.save(candidate, ready)
+		if err != nil {
+			if uncertain {
+				c.storeErr = err
+			}
+			return fmt.Errorf("researcharm: persist lease mutation: %w", err)
+		}
+	}
+	c.leases = candidate
+	c.admissionReady = ready
+	return nil
 }

@@ -37,6 +37,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/parentwatch"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/researcharm"
 	"github.com/anthony-chaudhary/fak/internal/servewarmup"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
@@ -82,6 +83,7 @@ type serveRuntime struct {
 	toolPlugins     []toolplugin.Plugin
 	toolPreferences toolplugin.PreferenceLayers
 	srv             *gateway.Server
+	armCoordinator  *researcharm.Coordinator
 	qwen38Deps      *qwen38RuntimeDependencies
 	llamaProcess    qwen38ChildProcess
 	strixPreflight  ServeStrixHaloPreflightResult

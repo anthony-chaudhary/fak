@@ -90,6 +90,7 @@ type InflightRequest struct {
 
 // Snapshot is the comprehensive state of all arms, active traffic, and leases.
 type Snapshot struct {
+	DurableStatus string            `json:"durable_status,omitempty"` // ready, bootstrap, closed, or unavailable.
 	Timestamp     time.Time         `json:"timestamp"`
 	TotalInflight int               `json:"total_inflight"`
 	TotalArms     int               `json:"total_arms"`
