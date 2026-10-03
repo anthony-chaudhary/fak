@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/toolcatalog"
@@ -122,23 +123,25 @@ func (s *Server) syscallWithPlugins(ctx context.Context, tool, rawArgs string, r
 // executePluginCall executes one already-built proposal through the same kernel
 // syscall/result rendering used by the legacy single-call path. The plugin host
 // does not own an engine and cannot execute directly.
-func (s *Server) executePluginCall(ctx context.Context, call *abi.ToolCall, readOnly bool) (WireVerdict, *ResultEnvelope, error) {
-	_, _, mutating, _ := adjudicateRawWriteTargets(call.Tool, string(resolveBytes(ctx, call.Args)), readOnly)
-	if mutating {
-		// The plugin host may transform the proposal after its first policy pass,
-		// so classify the final rebuilt call at the execution boundary. DOS has no
-		// operation that can hold its authoritative snapshot stable across an
-		// arbitrary plugin callback; keep mutations closed until that atomic act
-		// guard exists, exactly as the legacy syscall path does.
-		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, "atomic workspace lease guard is unavailable for mutating syscall"), nil, nil
+func (s *Server) executePluginCall(ctx context.Context, call *abi.ToolCall, readOnly bool) (wv WireVerdict, env *ResultEnvelope, err error) {
+	start := time.Now()
+	defer func() {
+		s.logGatewayOperation("syscall-plugin", call.TraceID, call.Tool, wv, err, time.Since(start))
+	}()
+	if refusal, refused := s.strictInitialWorkspaceExecution(ctx, call, readOnly); refused {
+		return refusal, nil, nil
 	}
+
 	if wv, env, handled, err := s.syscallNative(ctx, call, readOnly); handled {
 		return wv, env, err
 	}
-	r, verdict := s.k.Syscall(ctx, call)
+	r, verdict, admissionDetails, refusal := s.workspaceKernelSyscall(ctx, call, readOnly)
+	if refusal != nil {
+		return *refusal, nil, nil
+	}
+	defer func() { annotateWorkspaceExecution(&wv, admissionDetails) }()
 	s.rememberOriginSeq(call.TraceID, call.Tool, string(resolveBytes(ctx, call.Args)), call.SeqNo)
-	wv := renderVerdict(verdict, resultMeta(r))
-	var env *ResultEnvelope
+	wv = renderVerdict(verdict, resultMeta(r))
 	if r != nil {
 		env = &ResultEnvelope{Status: statusName(r.Status), Content: string(resolveBytes(ctx, r.Payload)), Meta: r.Meta}
 		s.recordRouteAccount(env, call.Tool, readOnly, call.Meta)

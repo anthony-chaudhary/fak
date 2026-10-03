@@ -70,6 +70,7 @@ type wiringRow struct {
 // regression. A "" Field marks a seam wired through a session.Table observer, not Config;
 // the serve.go-sets check is skipped for those (tracked by Flag presence instead).
 var servewiringData = []wiringRow{
+	{"workspaceadmissionpermissive", "--workspace-admission-permissive", "WorkspaceAdmissionPermissive", verdictOffByDefault, "internal/gateway/tool_routing.go", "admits lease DEFAULT_DENY with would_deny detail after kernel allow; preserves known peer conflicts"},
 	{"reloadcanary", "--policy-canary-turns", "PolicyCanaryTurns", verdictOffByDefault, "internal/gateway/policy_canary.go:7", "after a reload, rolls back on the configured consecutive deny-all streak; zero disables the canary"},
 	{"richdashboards", "--appliance-observability", "RichDashboards", verdictWired, "internal/gateway/gateway.go:315", "installs the lazy rich-dashboard manager and single-port proxy from the serve-selected dashboard configuration"},
 	{"otlp", "--otlp-traces-endpoint", "OTLPEndpoint", verdictOffByDefault, "internal/gateway/gateway.go:2081", "enables bounded asynchronous OTLP/HTTP JSON trace export; empty disables it"},

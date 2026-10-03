@@ -243,6 +243,7 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	s := &Server{
+		workspaceAdmissionPermissive: cfg.WorkspaceAdmissionPermissive,
 		k:                            k,
 		toolPlugins:                  append([]toolplugin.Plugin(nil), cfg.ToolPlugins...),
 		toolPreferences:              cfg.ToolPreferences,
