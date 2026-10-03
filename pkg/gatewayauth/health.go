@@ -8,6 +8,9 @@ import (
 	"net/http"
 )
 
+// KeyProofPath proves endpoint key possession without evaluating readiness.
+const KeyProofPath = "/v1/fak/key-proof"
+
 // WriteHealthProof adds the existing health proof header for a valid 32-byte
 // base64 challenge and a configured key. Missing or invalid challenges and empty
 // keys leave the response unchanged. It does not write a status or response body.

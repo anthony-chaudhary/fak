@@ -25,6 +25,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/systools"
 	"github.com/anthony-chaudhary/fak/pkg/fakclient"
+	"github.com/anthony-chaudhary/fak/pkg/gatewayauth"
 )
 
 type agentFlags struct {
@@ -774,32 +775,50 @@ func probeRouterAuthProof(client *http.Client, origin, candidate string) bool {
 	if client == nil || candidate == "" {
 		return false
 	}
+	budget := 150 * time.Millisecond
+	if client.Timeout > 0 && client.Timeout < budget {
+		budget = client.Timeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+	probeClient := *client
+	probeClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	nonce := make([]byte, 32)
 	if _, err := rand.Read(nonce); err != nil {
 		return false
 	}
 	origin = strings.TrimRight(strings.TrimSuffix(strings.TrimRight(origin, "/"), "/v1"), "/")
-	req, err := http.NewRequest(http.MethodGet, origin+"/healthz", nil)
-	if err != nil {
-		return false
+	for i, path := range []string{gatewayauth.KeyProofPath, "/healthz"} {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, origin+path, nil)
+		if err != nil {
+			return false
+		}
+		req.Header.Set(routerAuthChallengeHeader, base64.StdEncoding.EncodeToString(nonce))
+		resp, err := probeClient.Do(req)
+		if err != nil {
+			return false
+		}
+		// Legacy health proof is permitted only when the new endpoint is
+		// unsupported, and consumes the same request deadline.
+		if i == 0 && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusNotImplemented) {
+			_ = resp.Body.Close()
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			return false
+		}
+		proof, err := base64.StdEncoding.DecodeString(strings.TrimSpace(resp.Header.Get(routerAuthProofHeader)))
+		_ = resp.Body.Close()
+		if err != nil || len(proof) != sha256.Size {
+			return false
+		}
+		mac := hmac.New(sha256.New, []byte(candidate))
+		_, _ = mac.Write([]byte(routerAuthProofDomain))
+		_, _ = mac.Write(nonce)
+		return hmac.Equal(proof, mac.Sum(nil))
 	}
-	req.Header.Set(routerAuthChallengeHeader, base64.StdEncoding.EncodeToString(nonce))
-	resp, err := client.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return false
-	}
-	proof, err := base64.StdEncoding.DecodeString(strings.TrimSpace(resp.Header.Get(routerAuthProofHeader)))
-	if err != nil || len(proof) != sha256.Size {
-		return false
-	}
-	mac := hmac.New(sha256.New, []byte(candidate))
-	_, _ = mac.Write([]byte(routerAuthProofDomain))
-	_, _ = mac.Write(nonce)
-	return hmac.Equal(proof, mac.Sum(nil))
+	return false
 }
 
 // pairedNodeRouterAPIKey returns the saved key only when the selected origin
