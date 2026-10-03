@@ -79,6 +79,22 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "plan-waveplanschema",
+      "canonical": "WavePlanSchema (wave-plan wire schema id)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The canonical schema identifier constant `WavePlanSchema` (`internal/debtlane/wave.go`, `\"fak.debt-orchestrator-wave-plan.v1\"`) stamped onto every concurrent-safe wave plan so a consumer can verify the wire format of a plan it reads back.",
+      "distinction": "The wire-format VERSION ID stamped on a plan - NOT the campaign plan data itself (`WavePlan`) and NOT the per-wave execution plan (`dispatchWaveExecutionPlan`).",
+      "distinct_from": ["cov-debt-tail2-plan-waveplan"],
+      "aliases": ["debtlane.WavePlanSchema"],
+      "grounding": "WavePlanSchema",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }
