@@ -25,6 +25,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
+	"github.com/anthony-chaudhary/fak/internal/radixkv"
 
 	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
@@ -91,6 +92,18 @@ type NativeScheduler struct {
 	seqNo        int64
 	preemptRound int64
 	preemptStats NativePreemptionStats
+
+	// In-batch cold-prefix dedup (fak#1914). prefixFlights coalesces concurrent cold
+	// admissions whose prompts share a prefix so only one prefill leader runs the shared
+	// GEMM; twins adopt its KV. inBatchDedup is the opt-in switch (default false keeps
+	// the historical per-lane prefill byte-for-byte). prefixFlightsMu guards lazy init
+	// only; inBatchDedup and inBatchDedupStats are guarded by mu.
+	prefixFlights     *radixkv.PrefixFlightGroup
+	prefixFlightsMu   sync.Mutex
+	inBatchDedup      bool
+	inBatchDedupStats InBatchPrefixDedupStats
+	// prefillFlightHook is an unexported test witness; nil in production.
+	prefillFlightHook func()
 
 	coupler *WorkerCoupler
 
@@ -377,11 +390,11 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 	promptLen := len(prompt)
 	var logits []float32
 	if prefillChunkTokens == 0 {
-		prefillStarted := s.now()
-		logits = RunWithOp(s.coupler, OpPrefill, func() []float32 {
-			return sess.Prefill(prompt)
-		})
-		s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhasePrefill, s.now().Sub(prefillStarted))
+		if s.inBatchDedupEligible(sess, prompt) {
+			logits = s.prefillCoalesced(ctx, sess, prompt)
+		} else {
+			logits = s.coldPrefillSync(sess, prompt)
+		}
 		if s.captureQwenState {
 			executed, err := sess.FinalizeQwen35MetalStateIdentityReceipt()
 			if err != nil || !executed {
