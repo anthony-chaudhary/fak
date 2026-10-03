@@ -40,5 +40,49 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "pendingadmission-proofcontext",
+      "canonical": "ProofContext (pending-admission execution identity)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "pendingadmission.ProofContext is the neutral immutable identity of the companion commit and tree, Go executable and toolchain, test environment, workspace, and verifier used to prepare one pending candidate.",
+      "distinction": "An exact execution-input binding carried by a pending receipt; it is not qualification evidence, a runtime request context, an agent conversation context, or permission to accept the candidate.",
+      "distinct_from": [
+        "pendingadmission-contextdigest",
+        "contextspanledger",
+        "micro-context"
+      ],
+      "aliases": [],
+      "grounding": "ProofContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "pendingadmission-contextdigest",
+      "canonical": "ContextDigest (pending-admission proof-context digest)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "pendingadmission.Binding.ContextDigest is the canonical JSON digest of that binding's ProofContext, checked so the stored execution identity cannot drift independently of the exact candidate binding.",
+      "distinction": "A derived integrity field for ProofContext; it is not a free-form context identifier, a digest of candidate source, qualification evidence, or an acceptance verdict.",
+      "distinct_from": [
+        "pendingadmission-proofcontext",
+        "contextspanledger",
+        "micro-context"
+      ],
+      "aliases": [
+        "context_digest"
+      ],
+      "grounding": "ContextDigest",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "pendingadmission-proofcontext",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

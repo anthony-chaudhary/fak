@@ -18,6 +18,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/internal/witness"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
+	"github.com/anthony-chaudhary/fak/pkg/pendingadmission"
 )
 
 // cmdWorktreeVerb fronts `fak worktree <sub>`. Today it hosts the `worker`
@@ -609,6 +610,7 @@ var (
 type worktreeWorkerPreparedLandOut struct {
 	workerworktree.Result
 	PreparedReceipt *workerworktree.PreparedLandReceipt `json:"prepared_receipt,omitempty"`
+	PendingReceipt  *workerworktree.PendingLandReceipt  `json:"pending_receipt,omitempty"`
 }
 
 type worktreeWorkerPreparedVerificationRecipe struct {
@@ -923,7 +925,7 @@ func validateTestWitnessBytes(data []byte) (bool, string) {
 
 func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworktree.Result, int) {
 	mode := "legacy"
-	if len(argv) > 0 && (argv[0] == "prepare" || argv[0] == "accept") {
+	if len(argv) > 0 && (argv[0] == "prepare" || argv[0] == "accept" || argv[0] == "prepare-pending" || argv[0] == "accept-pending") {
 		mode, argv = argv[0], argv[1:]
 	}
 	returnEarly := func(res workerworktree.Result, code int) (workerworktree.Result, int) {
@@ -937,7 +939,11 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	worktree := fs.String("worktree", "", "the worker's worktree dir to land from (required)")
 	baseSHA := fs.String("base-sha", "", "the sha the worktree was pinned at — the diff ref (default: HEAD); must match the prepared worktree intent base")
 	msgFile := fs.String("msg-file", "", "commit message file for `git commit -s -F` (default: derive from the worktree tip)")
-	verify := fs.String("verify", "go-build", "pre-land witness run IN the worktree: off | go-build (default: go-build)")
+	verifyDefault := "go-build"
+	if mode == "prepare-pending" || mode == "accept-pending" {
+		verifyDefault = "off"
+	}
+	verify := fs.String("verify", verifyDefault, "pre-land witness run IN the worktree: off | go-build (default: go-build; pending modes: off)")
 	root := fs.String("root", "", "repo root the change lands on (default: discover from cwd)")
 	disambiguationTimeoutMS := fs.String("disambiguation-timeout-ms", "", "one shared whole-tree disambiguation deadline in milliseconds (1..900000; default 120000; no retries)")
 	coreLockWitness := fs.String("core-lock-maintenance-witness", "",
@@ -957,6 +963,9 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	requireTestWitness := fs.Bool("require-test-witness", false,
 		"require verified test witness receipt before landing worker diff")
 	receiptID := fs.String("receipt-id", "", "prepared landing receipt ID (required by accept)")
+	pendingContextFile := fs.String("pending-context-file", "", "strict neutral pending proof-context JSON (required by prepare-pending)")
+	debtAckFile := fs.String("debt-ack-file", "", "strict neutral durable pending-debt acknowledgement JSON (required by accept-pending)")
+	expectedRecipeDigest := fs.String("expected-recipe-digest", "", "expected lowercase sha256 recipe digest (required by accept-pending)")
 	var paths repeatedString
 	fs.Var(&paths, "paths", "path to scope the commit to (repeatable); omit to commit the whole applied diff")
 	if err := fs.Parse(argv); err != nil {
@@ -973,6 +982,16 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	}
 	if *symptomTimeout <= 0 {
 		return returnEarly(workerworktree.Result{OK: false, Code: "SYMPTOM_TIMEOUT_INVALID", Reason: "--symptom-timeout must be a positive duration", Detail: symptomTimeout.String()}, 2)
+	}
+	pendingMode := mode == "prepare-pending" || mode == "accept-pending"
+	if pendingMode {
+		verifyMode := strings.ToLower(strings.TrimSpace(*verify))
+		if verifyMode != "off" && verifyMode != "none" {
+			return returnEarly(workerworktree.Result{OK: false, Reason: "pending landing modes require --verify off"}, 2)
+		}
+		if *unsafeSkipSymptomWitness || len(selectedSymptomTests) > 0 || strings.TrimSpace(*symptomTags) != "" || *requireTestWitness {
+			return returnEarly(workerworktree.Result{OK: false, Reason: "pending landing modes do not accept verification or bypass flags"}, 2)
+		}
 	}
 
 	worktreeDir := strings.TrimSpace(*worktree)
@@ -1030,6 +1049,63 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 		opts = append(opts, workerworktree.WithRecoveryRemote(remote, *requireRemote))
 	}
 	if mode != "legacy" {
+		if mode == "prepare-pending" || mode == "accept-pending" {
+			var pendingReceipt *workerworktree.PendingLandReceipt
+			var res workerworktree.Result
+			if mode == "prepare-pending" {
+				proofFilePath := strings.TrimSpace(*pendingContextFile)
+				if proofFilePath == "" {
+					return returnEarly(workerworktree.Result{OK: false, Reason: "--pending-context-file is required"}, 2)
+				}
+				contextFile, err := os.Open(proofFilePath)
+				if err != nil {
+					return returnEarly(workerworktree.Result{OK: false, Reason: "open pending proof context: " + err.Error()}, 2)
+				}
+				context, decodeErr := pendingadmission.DecodeProofContext(contextFile)
+				closeErr := contextFile.Close()
+				if decodeErr != nil {
+					return returnEarly(workerworktree.Result{OK: false, Reason: "decode pending proof context: " + decodeErr.Error()}, 2)
+				}
+				if closeErr != nil {
+					return returnEarly(workerworktree.Result{OK: false, Reason: "close pending proof context: " + closeErr.Error()}, 2)
+				}
+				var timeoutErr error
+				res, timeoutErr = withWorkerLandDisambiguationTimeout(*disambiguationTimeoutMS, flagWasSet(fs, "disambiguation-timeout-ms"), func() workerworktree.Result {
+					receipt, got := workerworktree.PreparePendingLand(repoRoot, worktreeDir, strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile), []string(paths), context, nil, opts...)
+					if got.OK {
+						pendingReceipt = &receipt
+					}
+					return got
+				})
+				if timeoutErr != nil {
+					res = workerworktree.Result{OK: false, Code: workerworktree.DisambiguationTimeoutCode, Reason: "configure worker land disambiguation timeout: " + timeoutErr.Error()}
+				}
+			} else {
+				if *receiptID == "" || strings.TrimSpace(*debtAckFile) == "" || *expectedRecipeDigest == "" {
+					return returnEarly(workerworktree.Result{OK: false, Reason: "--receipt-id, --debt-ack-file, and --expected-recipe-digest are required"}, 2)
+				}
+				ackFile, err := os.Open(strings.TrimSpace(*debtAckFile))
+				if err != nil {
+					return returnEarly(workerworktree.Result{OK: false, Reason: "open pending debt acknowledgement: " + err.Error()}, 2)
+				}
+				ack, decodeErr := pendingadmission.DecodeDebtAck(ackFile)
+				closeErr := ackFile.Close()
+				if decodeErr != nil {
+					return returnEarly(workerworktree.Result{OK: false, Reason: "decode pending debt acknowledgement: " + decodeErr.Error()}, 2)
+				}
+				if closeErr != nil {
+					return returnEarly(workerworktree.Result{OK: false, Reason: "close pending debt acknowledgement: " + closeErr.Error()}, 2)
+				}
+				res = workerworktree.AcceptPendingLand(repoRoot, worktreeDir, workerworktree.PendingLandExpectation{
+					ReceiptID: *receiptID, RecipeDigest: *expectedRecipeDigest, Ack: ack,
+				}, nil, opts...)
+			}
+			emitWorktreeWorkerPreparedLand(stdout, worktreeWorkerPreparedLandOut{Result: res, PendingReceipt: pendingReceipt})
+			if !res.OK {
+				return res, 1
+			}
+			return res, 0
+		}
 		fixPolicy := "not-required"
 		if isFixSubject(subj) {
 			fixPolicy = "unsafe-bypass"
@@ -1123,7 +1199,7 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 
 func worktreeWorkerLand(argv []string) {
 	res, code := runWorktreeWorkerLand(os.Stdout, os.Stderr, argv)
-	if len(argv) == 0 || (argv[0] != "prepare" && argv[0] != "accept") {
+	if len(argv) == 0 || (argv[0] != "prepare" && argv[0] != "accept" && argv[0] != "prepare-pending" && argv[0] != "accept-pending") {
 		worktreeWorkerEmit(res)
 	}
 	if !res.OK {

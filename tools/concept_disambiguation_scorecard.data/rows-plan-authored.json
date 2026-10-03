@@ -84,5 +84,47 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "workerworktree-landcandidatecapture",
+      "canonical": "landCandidateCapture (prepared-candidate receipt variant)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "workerworktree.landCandidateCapture is the internal variant interface that lets one isolated candidate construction persist either the established verified receipt or the distinct pending-debt receipt.",
+      "distinction": "A receipt-capture adapter inside atomic landing; it does not select work, plan an agent task, authorize publication, or turn pending debt into verification.",
+      "distinct_from": [
+        "workerworktree-persistcandidateland",
+        "x-cov-plan-planstep",
+        "executionroute-roleplan"
+      ],
+      "aliases": [],
+      "grounding": "landCandidateCapture",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "workerworktree-persistcandidateland",
+      "canonical": "persistCandidateLand (candidate receipt persistence hook)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "workerworktree.persistCandidateLand is the landCandidateCapture method that persists the chosen verified or pending receipt variant for the exact already-constructed candidate.",
+      "distinction": "A persistence hook after candidate construction; it does not create a user plan, choose a candidate, verify one, acknowledge debt, or perform the target-ref CAS.",
+      "distinct_from": [
+        "workerworktree-landcandidatecapture",
+        "x-cov-plan-planstep",
+        "executionroute-roleplan"
+      ],
+      "aliases": [],
+      "grounding": "persistCandidateLand",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "workerworktree-landcandidatecapture",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

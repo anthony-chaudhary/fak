@@ -333,7 +333,7 @@ func land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	return landPrepared(root, wtPath, baseSHA, commitMsgFile, paths, verify, prospectiveVerify, nil, git, opts...)
 }
 
-func landPrepared(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, prospectiveVerify ProspectiveVerifyHook, prepared *preparedLandCapture, git GitRunner, opts ...LandOption) (res Result) {
+func landPrepared(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, prospectiveVerify ProspectiveVerifyHook, prepared landCandidateCapture, git GitRunner, opts ...LandOption) (res Result) {
 	cfg := newLandConfig(opts)
 	tracker := newLandProgressTracker(cfg)
 	cfg.tracker = tracker
@@ -452,8 +452,8 @@ func landPrepared(root, wtPath, baseSHA, commitMsgFile string, paths []string, v
 	if namesRC != 0 {
 		names = ""
 	}
-	if prospectiveVerify != nil && len(paths) == 0 {
-		return prospectiveVerify("", fmt.Errorf("explicit land paths are required for an isolated verified prospective commit"))
+	if (prospectiveVerify != nil || prepared != nil) && len(paths) == 0 {
+		return Result{OK: false, Code: LandResultPreparedMismatch, Preserved: true, Reason: "explicit prepared landing paths are required"}
 	}
 	tracker.setPatchScope(countPatchScopeFiles(names), int64(len(diff)))
 	droppedOutOfLane := 0
@@ -534,7 +534,7 @@ func landPrepared(root, wtPath, baseSHA, commitMsgFile string, paths []string, v
 	}
 
 	landingOp := func() Result {
-		if prospectiveVerify != nil {
+		if prospectiveVerify != nil || prepared != nil {
 			r, _ := landIsolatedProspectivePrepared(root, wtPath, diff, msgFile, paths, prospectiveVerify, prepared, verify, git, isolatedGitEnv, cfg, checkBase)
 			if r.DroppedOutOfLane == 0 {
 				r.DroppedOutOfLane = droppedOutOfLane
@@ -814,7 +814,7 @@ func landIsolatedProspectiveVerified(root, wtPath, diff, msgFile string, paths [
 	return landIsolatedProspectivePrepared(root, wtPath, diff, msgFile, paths, prospectiveVerify, nil, args...)
 }
 
-func landIsolatedProspectivePrepared(root, wtPath, diff, msgFile string, paths []string, prospectiveVerify ProspectiveVerifyHook, prepared *preparedLandCapture, args ...any) (Result, bool) {
+func landIsolatedProspectivePrepared(root, wtPath, diff, msgFile string, paths []string, prospectiveVerify ProspectiveVerifyHook, prepared landCandidateCapture, args ...any) (Result, bool) {
 	verify, git, genv, cfg, baseSHA := parseIsolatedArgs(args)
 	tracker := cfg.tracker
 	finishIsolationAdmission := beginLandPhase(tracker, "isolated-admission", 0)
@@ -1091,13 +1091,17 @@ func landIsolatedProspectivePrepared(root, wtPath, diff, msgFile string, paths [
 		}
 		finishRecovery()
 		if prepared != nil {
-			receipt, err := persistPreparedLand(root, wtPath, branch, oldHEAD, treeSHA, newCommit, paths, recoveryRef, disambiguation, prepared, git)
+			worktreeBase := resolveLandCommit(git, wtPath, baseSHA)
+			if worktreeBase == "" {
+				worktreeBase = resolveLandCommit(git, wtPath, "HEAD")
+			}
+			result, err := prepared.persistCandidateLand(root, wtPath, branch, oldHEAD, treeSHA, newCommit, paths, recoveryRef, worktreeBase, diff, disambiguation, git)
 			if err != nil {
 				return isolatedLandReconciliationResult(wtPath, Result{Reason: "could not persist prepared landing receipt", Detail: err.Error(), RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt}), true
 			}
-			prepared.receipt = receipt
-			return Result{OK: true, Code: LandResultPrepared, Applied: false, Committed: false, Preserved: true,
-				Reason: "verified prospective landing prepared at " + shortSHA(newCommit), RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt}, true
+			result.RecoveryRef = recoveryRef
+			result.RemoteRecovery = remoteReceipt
+			return result, true
 		}
 
 		if prospectiveVerify == nil && verify != nil {
