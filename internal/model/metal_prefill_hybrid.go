@@ -350,6 +350,20 @@ func qwen35MetalMTPProjectionReady(m *Model, name string) bool {
 	return false
 }
 
+func qwen35MetalForwardProjectionError(s *Session) error {
+	s.prefillQwen35HybridQ4KMetalUpload()
+	// Whole forward uses the same layer projections as MTP, but returns hidden
+	// rows rather than logits, so it does not require the MTP LM-head handle.
+	for _, name := range qwen35MetalMTPPanelProjectionNames(s.M.Cfg) {
+		if !qwen35MetalMTPProjectionReady(s.M, name) {
+			return &UnsupportedGDNPreprojectedSequenceError{
+				Path: Qwen35MetalGDNSequenceForwardPath, Reason: "resident graph projection unavailable: " + name,
+			}
+		}
+	}
+	return nil
+}
+
 func qwen35MetalMTPPanelAdmission(s *Session, ids []int) (*metalQwen35GDNSequenceBackend, qwen35MetalMTPHead, bool) {
 	if s == nil || s.M == nil || s.Cache == nil || len(ids) != qwen35MetalMTPVerifyPanelTokens ||
 		s.Backend != nil || !s.Q4K || !s.MetalQ4K || s.qwen35HAL == nil || !s.qwen35HAL.decodeAccepted ||
@@ -760,7 +774,9 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, i
 	// TestProjectionGraphQwenOrderedLongContextAttention (P32/base20000).
 	// Resolve every resident handle before graph construction. Once Begin succeeds,
 	// any failure remains accepted and cannot replay through the host forward.
-	s.prefillQwen35HybridQ4KMetalUpload()
+	if qwen35MetalForwardProjectionError(s) != nil {
+		return nil, Qwen35MetalForwardSequenceReceipt{}, false, nil
+	}
 	// embedRowsInto gathers through the packed Q2_K/Q4_K store when present and applies
 	// the embedding scale; embedRows() itself refuses (panics) a packed table.
 	X := make([]float32, P*H)
@@ -1491,6 +1507,7 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 }
 
 func init() {
+	qwen35MetalForwardProjectionAdmission = qwen35MetalForwardProjectionError
 	newQwen35MetalGDNSequenceBackend = func() Qwen35GDNPreprojectedSequenceBackend {
 		return &metalQwen35GDNSequenceBackend{states: make(map[Qwen35GDNAuxState]*metalgemm.GDNState)}
 	}

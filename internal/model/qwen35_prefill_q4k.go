@@ -160,6 +160,9 @@ const PrefillPanelRoundTripBudgetPromptTokens = 256
 // The model-only type keeps pure-Go builds free of Darwin/cgo GDNState symbols.
 var newQwen35MetalGDNSequenceBackend func() Qwen35GDNPreprojectedSequenceBackend
 
+// Native projection admission runs before allocating sequence auxiliary state.
+var qwen35MetalForwardProjectionAdmission func(*Session) error
+
 // Qwen35MetalGDNPreprojectedSequenceAvailable reports whether this build owns
 // the native Metal sequence backend. Callers use this capability readback to
 // distinguish an unselected supported route from a platform-unavailable route;
@@ -288,6 +291,11 @@ func (s *Session) EnableQwen35MetalGDNPreprojectedSequence() error {
 	}
 	if newQwen35MetalGDNSequenceBackend == nil {
 		return &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "native Metal GDN sequence is unavailable in this build"}
+	}
+	if qwen35MetalForwardProjectionAdmission != nil {
+		if err := qwen35MetalForwardProjectionAdmission(s); err != nil {
+			return err
+		}
 	}
 	accepted, err := s.initQwen35GDNPreprojectedSequence(newQwen35MetalGDNSequenceBackend())
 	if !accepted && err == nil {
