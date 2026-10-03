@@ -20,6 +20,26 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "plan-planwaves",
+      "canonical": "PlanWaves (wave partitioner)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The wave-partitioning function `PlanWaves` (internal/debtlane/wave.go: `PlanWaves(report Report, opts WavePlanOptions) WavePlan`; internal/issueorchestrator/wave.go: `PlanWaves(issues []Issue, opts WavePlanOptions) Plan`) that orders candidate work into collision-free, concurrent-safe waves under a `WavePlanOptions` config.",
+      "distinction": "The FUNCTION that partitions work into ordered waves - NOT the produced `WavePlan` campaign plan (its output) and NOT the `WavePlanOptions` config it consumes.",
+      "distinct_from": [
+        "cov-debt-tail2-plan-waveplan"
+      ],
+      "aliases": [
+        "debtlane.PlanWaves"
+      ],
+      "grounding": "PlanWaves",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }
