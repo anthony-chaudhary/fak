@@ -51,3 +51,5 @@ This map positions the current `plan` coverage backlog. Each entry names the exa
 
 - **`wipland`** — the exact `plan` symbol; distinct from the broader family label and sibling operations.
 - **`wiplandsubject`** — the exact `plan` symbol; distinct from the broader family label and sibling operations.
+- **`candidatetree`** — the speculative-decoding proposal TREE (`internal/model.CandidateTree`), a branch structure of candidate continuations verified against the target; distinct from the ctxplanner Candidate (a scored span) and from CandidateBlockedBy (dispatch prereq ordering).
+- **waveplan** — the debt-orchestrator multi-wave CAMPAIGN plan (debtlane.WavePlan, internal/debtlane/wave.go); distinct from the per-wave execution plan dispatchwaveexecutionplan and from the umbrella plan domain.

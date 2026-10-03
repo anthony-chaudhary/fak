@@ -3,14 +3,10 @@ package ggufload
 import (
 	"bytes"
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"testing"
-
-	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // writeV41UnboundEngramFixture writes an admission-only, two-shard checkpoint.
@@ -103,56 +99,34 @@ func writeV41UnboundEngramFixture(t *testing.T, withEngram bool) string {
 	return path
 }
 
-// TestDeepSeek41GGUFDeclaredEngramCannotLoadUnbound isolates the ordinary
-// GGUF load-admission seam, not full-checkpoint correctness. It compiles against
-// the unmodified parent: only existing loader/model APIs and test writers are used.
-// Parent behavior drops the table and returns a Model despite missing Engram
-// mixing tensors and runtime attachment. A named typed refusal is required.
-// fak-test:runtime fast est=100ms lane=default
-func TestDeepSeek41GGUFDeclaredEngramCannotLoadUnbound(t *testing.T) {
+// TestDeepSeek41GGUFDeclaredEngramAttachesOnLoad verifies the #13662 behavior
+// change: an ordinary Q4K streamed load of a fixture that DECLARES Engram and
+// ships a supported Q2_K table now succeeds and returns a model carrying the
+// attached stage, while the identical no-Engram geometry still loads. The
+// declared-but-unopenable refusal lives in
+// deepseek41_engram_serve_test.go (TestDeepSeek41EngramServingAttachment).
+// fak-test:runtime fast est=200ms lane=default
+func TestDeepSeek41GGUFDeclaredEngramAttachesOnLoad(t *testing.T) {
 	path := writeV41UnboundEngramFixture(t, true)
-	ws, err := OpenWeights(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ws.Close()
-	cfg, err := ws.File.Config()
-	if err != nil {
-		t.Fatalf("fixture header must be admitted before load: %v", err)
-	}
-	eng := ws.File.DeepSeek41Engram
-	if cfg.NumLayers != 2 || cfg.HiddenSize != 64 || eng == nil ||
-		len(eng.LayerIDs) != 1 || eng.LayerIDs[0] != 1 ||
-		eng.NHeads != 8 || eng.HeadDim != 256 || eng.MaxNgramSize != 4 || eng.PadTokenID != 2 {
-		t.Fatalf("fixture metadata drift: config=%+v Engram=%+v", cfg, eng)
-	}
-	if eng.Encoding != "" || len(eng.NumEmbeddings) != 0 || eng.CompressedVocabSize != 0 {
-		t.Fatalf("absent vcruz keys were fabricated: Engram=%+v", eng)
-	}
-	source, err := V41EngramQ2KOpen(ws, 1)
-	if err != nil {
-		t.Fatalf("fixture must carry a supported Q2_K table: %v", err)
-	}
-	if source.RowBytes() != 1024 || source.TableRows() != 72 {
-		t.Fatalf("fixture source rows=%d bytes=%d, want 72/1024", source.TableRows(), source.RowBytes())
-	}
-
 	m, err := LoadModelQ4KStreamedDenseContext(context.Background(), path, nil)
 	if m != nil {
 		defer m.CloseWeights()
 	}
-	if err == nil {
-		t.Fatal("GGUF loader returned a model after dropping a declared, unbound Engram stage")
+	if err != nil {
+		t.Fatalf("declared-Engram load refused: %v", err)
 	}
-	if !errors.Is(err, model.ErrV41NativeUnsupported) || !strings.Contains(strings.ToLower(err.Error()), "engram") {
-		t.Fatalf("load error=%v, want an Engram-named ErrV41NativeUnsupported", err)
+	if m == nil {
+		t.Fatal("declared-Engram load returned a nil model")
 	}
-	if m != nil {
-		t.Fatal("refused Engram load returned a partial model")
+	if !m.V41EngramAttached() {
+		t.Fatal("loaded model does not report an attached Engram stage")
+	}
+	if d41 := m.Cfg.DeepSeekV41; d41 == nil || len(d41.EngramLayerIDs) != 1 || d41.EngramLayerIDs[0] != 1 {
+		t.Fatalf("returned config does not carry the declared Engram layer: %+v", m.Cfg.DeepSeekV41)
 	}
 
 	// Anti-over-refusal: identical ordinary load geometry without any Engram
-	// declaration/table is still admitted. It is not used for forward execution.
+	// declaration/table is still admitted.
 	plain, err := LoadModelQ4KStreamedDenseContext(context.Background(), writeV41UnboundEngramFixture(t, false), nil)
 	if err != nil || plain == nil {
 		t.Fatalf("no-Engram control refused: model=%v err=%v", plain, err)

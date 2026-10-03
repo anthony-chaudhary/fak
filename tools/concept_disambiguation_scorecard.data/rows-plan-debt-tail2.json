@@ -1,0 +1,25 @@
+{
+  "rows": [
+    {
+      "id": "cov-debt-tail2-plan-waveplan",
+      "canonical": "WavePlan (debt-orchestrator campaign)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The multi-wave debt-retirement CAMPAIGN plan `debtlane.WavePlan` (internal/debtlane/wave.go), produced by `PlanWaves`: it partitions debt lanes into ordered, collision-free, concurrent-safe waves and reports total waves, planned lanes and projected grade.",
+      "distinction": "The whole CAMPAIGN plan for retiring debt in waves - NOT the per-issue execution plan `dispatchWaveExecutionPlan` (one wave's ready rows) and NOT the umbrella `plan` domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan",
+        "cov-debt250-plan-dispatchwaveexecutionplan"
+      ],
+      "aliases": [
+        "debtlane.WavePlan"
+      ],
+      "grounding": "WavePlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

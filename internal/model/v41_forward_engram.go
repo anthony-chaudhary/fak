@@ -96,6 +96,10 @@ type v41EngramStage struct {
 	// 1024 dequantized-f32). The forward dispatches row decode on it, so the
 	// packed and f32 dialects share one architecture-neutral stage.
 	rowBytes int
+	// bindings records the verified artifact binding each source was admitted
+	// under (zero for an unverified source), so the exported attach seam's
+	// receipt can prove the verified route was taken.
+	bindings []V41EngramArtifactBinding
 }
 
 // v41EngramStages attaches a stage to a *Model without widening the Model struct
@@ -169,6 +173,10 @@ func (m *Model) wireV41Engram(layout V41EngramLayout, srcs []V41EngramRowSource,
 		layout: layout, caches: caches, columns: columns,
 		headDim: m.Cfg.DeepSeekV41.EngramHeadDim, hc: 4,
 		layerIDs: append([]int(nil), ids...), rowBytes: rowBytes,
+	}
+	stage.bindings = make([]V41EngramArtifactBinding, len(srcs))
+	for i, src := range srcs {
+		stage.bindings[i], _ = V41EngramBinding(src)
 	}
 	v41EngramStages.Store(m, stage)
 	return nil
