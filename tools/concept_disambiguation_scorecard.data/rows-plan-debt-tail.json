@@ -19,6 +19,27 @@
       "gaps": []
     },
     {
+      "id": "cov-debt-tail-plan-candidatetree",
+      "canonical": "CandidateTree (speculative decode)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The speculative-decoding PROPOSAL TREE `internal/model.CandidateTree` (internal/model/speculative.go, speculative_branch_cache.go, metal_mtp.go): a branch structure of candidate continuation tokens whose paths are verified against the target model before any is committed.",
+      "distinction": "A speculative-decode BRANCH STRUCTURE of candidate continuations, verified against the target - NOT the ctxplanner Candidate (a scored context span) and NOT CandidateBlockedBy (the dispatch ready-set prereq ordering).",
+      "distinct_from": [
+        "candidate-planner",
+        "covg-plan-candidateblockedby"
+      ],
+      "aliases": [
+        "CandidateTree (speculative)"
+      ],
+      "grounding": "CandidateTree",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
       "id": "cov-debt-tail-plan-wiplandsubject",
       "canonical": "plan implementation surface for wiplandsubject",
       "family": "plan",
