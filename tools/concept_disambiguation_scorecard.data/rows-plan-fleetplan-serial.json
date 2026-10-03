@@ -1,0 +1,25 @@
+{
+  "rows": [
+    {
+      "id": "cov-plan-fleetplan",
+      "canonical": "FleetPlan (goalrunner fleet serial plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The declared multi-goal execution plan `goalrunner.FleetPlan` (internal/goalrunner/types.go), an ordered set of GoalContracts run serially by `RunFleetPlan`, which records per-contract witness evidence and a rollup (`SerializePlanJSON`, `RenderRollup`).",
+      "distinction": "The goalrunner FLEET-of-goals serial plan - NOT the swebench fleet RUNNER planner `FleetPlanner`/`newFleetPlanner` (which builds one swebench code planner from a gateway address) and NOT the debtlane CAMPAIGN plan `WavePlan` (debt lanes into concurrent-safe waves).",
+      "distinct_from": [
+        "x-plan-fleetplanner",
+        "cov-debt-tail2-plan-waveplan"
+      ],
+      "aliases": [
+        "goalrunner.FleetPlan"
+      ],
+      "grounding": "FleetPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
