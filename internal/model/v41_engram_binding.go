@@ -48,14 +48,37 @@ import (
 // separately from V41EngramShard's index-requested identity so observed and
 // requested identity cannot be conflated.
 //
-// Rows is the packed-row count (V41EngramPackedRowBytes each), so Size must equal
-// Rows*V41EngramPackedRowBytes. Digest is "sha256:<hex>" over the extent bytes.
+// Rows is the row count and RowBytes is the per-row width, so Size must equal
+// Rows*RowBytes. Digest is "sha256:<hex>" over the extent bytes.
+//
+// RowBytes makes the binding dialect-parameterized. The published V4.1 artifact's
+// Engram table is stored as Q2_K (one super-block per row), so the loader's
+// V41EngramQ2KOpen yields DEQUANTIZED f32 rows (qkK*4 = 1024 bytes), while the
+// raw-I8 converter dialect yields packed 264-byte rows (256 E4M3 + 8 E8M0). A
+// zero RowBytes means the packed dialect, preserving bindings written before the
+// width was explicit.
 type V41EngramArtifactBinding struct {
-	Shard  string
-	Offset int64
-	Size   int64
-	Rows   int
-	Digest string
+	Shard    string
+	Offset   int64
+	Size     int64
+	Rows     int
+	Digest   string
+	RowBytes int
+}
+
+// rowWidth resolves the effective per-row width, defaulting a zero RowBytes to
+// the packed dialect. It refuses any width the forward cannot consume, so an
+// unsupported dialect cannot be admitted by omission.
+func (b V41EngramArtifactBinding) rowWidth() (int, error) {
+	rb := b.RowBytes
+	if rb == 0 {
+		rb = V41EngramPackedRowBytes
+	}
+	if rb != V41EngramPackedRowBytes && rb != V41EngramF32RowBytes {
+		return 0, fmt.Errorf("binding row width %d is not a supported Engram row width (%d packed, %d f32)",
+			b.RowBytes, V41EngramPackedRowBytes, V41EngramF32RowBytes)
+	}
+	return rb, nil
 }
 
 // validate checks the binding's internal consistency and normalizes its digest.
@@ -65,11 +88,15 @@ func (b V41EngramArtifactBinding) validate() error {
 	if strings.TrimSpace(b.Shard) == "" {
 		return fmt.Errorf("binding declares no shard name")
 	}
+	rowBytes, err := b.rowWidth()
+	if err != nil {
+		return err
+	}
 	if b.Offset < 0 || b.Size <= 0 || b.Rows <= 0 {
 		return fmt.Errorf("binding extent offset=%d size=%d rows=%d", b.Offset, b.Size, b.Rows)
 	}
-	if b.Size != int64(b.Rows)*V41EngramPackedRowBytes {
-		return fmt.Errorf("binding size=%d is not rows=%d * %d packed bytes", b.Size, b.Rows, V41EngramPackedRowBytes)
+	if b.Size != int64(b.Rows)*int64(rowBytes) {
+		return fmt.Errorf("binding size=%d is not rows=%d * %d bytes", b.Size, b.Rows, rowBytes)
 	}
 	digest := strings.ToLower(strings.TrimSpace(b.Digest))
 	const prefix = "sha256:"
@@ -112,22 +139,24 @@ func v41EngramDigestExtent(reader io.ReaderAt, offset, size int64) (string, erro
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// NewV41VerifiedPackedEngramRowSource returns a packed 264-byte row reader whose
-// backing bytes have been verified against a loader-established artifact binding.
-// It is the fail-closed route for removing native admission refusal: the shard
-// name, extent, and row count must agree with the binding, the shard's observed
-// identity must match the requested identity, and the extent's content address
-// must equal the binding's digest. Any disagreement is refused before a single row
-// can be served, so a wrong shard/range cannot reach Engram projection or
-// Prefill/Step.
-func NewV41VerifiedPackedEngramRowSource(reader io.ReaderAt, shard V41EngramShard, binding V41EngramArtifactBinding) (V41EngramRowSource, error) {
+// NewV41VerifiedEngramRowSource returns a row reader over the binding's declared
+// dialect whose backing bytes have been verified against a loader-established
+// artifact binding. RowBytes() reports the bound width (264 packed or 1024 f32),
+// so a caller cannot pair a packed reader with an f32 binding by accident. The
+// shard name, extent, and row count must agree with the binding, the shard's
+// observed identity must match the requested identity, and the extent's content
+// address must equal the binding's digest. Any disagreement is refused before a
+// single row can be served, so a wrong shard/range cannot reach Engram projection
+// or Prefill/Step.
+func NewV41VerifiedEngramRowSource(reader io.ReaderAt, shard V41EngramShard, binding V41EngramArtifactBinding) (V41EngramRowSource, error) {
 	if err := binding.validate(); err != nil {
 		return nil, &V41EngramStreamError{Kind: V41EngramStreamGeometry, Row: -1, Shard: shard.ID,
 			Err: fmt.Errorf("invalid artifact binding: %w", err)}
 	}
+	rowBytes, _ := binding.rowWidth()
 	// The reader-side geometry checks (nil reader, packed extent, requested==observed
 	// name) are the prepared-reader contract; reuse them rather than restating them.
-	base, err := NewV41PackedEngramRowSource(reader, shard)
+	base, err := newV41PreparedEngramRowSource(reader, shard, rowBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -147,30 +176,38 @@ func NewV41VerifiedPackedEngramRowSource(reader io.ReaderAt, shard V41EngramShar
 		return nil, &V41EngramStreamError{Kind: V41EngramStreamBindingMismatch, Row: -1, Shard: shard.ID,
 			Err: fmt.Errorf("shard bytes digest %s does not match bound artifact %s", observed, binding.Digest)}
 	}
-	return &v41VerifiedPackedEngramRowSource{inner: base, binding: binding}, nil
+	return &v41VerifiedEngramRowSource{inner: base, binding: binding, rowBytes: rowBytes}, nil
 }
 
-// v41VerifiedPackedEngramRowSource is a V41EngramRowSource that only exists once
+// NewV41VerifiedPackedEngramRowSource is the packed-264 dialect entry point. It
+// keeps the exact behaviour of the original constructor (the binding must be a
+// packed-dialect binding) so existing callers are byte-for-byte unchanged.
+func NewV41VerifiedPackedEngramRowSource(reader io.ReaderAt, shard V41EngramShard, binding V41EngramArtifactBinding) (V41EngramRowSource, error) {
+	return NewV41VerifiedEngramRowSource(reader, shard, binding)
+}
+
+// v41VerifiedEngramRowSource is a V41EngramRowSource that only exists once
 // its backing bytes have been verified. It delegates reads to the prepared source
 // so per-read behavior (bounds checks, short-read refusal, accounting) is exactly
 // the unverified path's; only the constructor's admission gate differs.
-type v41VerifiedPackedEngramRowSource struct {
-	inner   V41EngramRowSource
-	binding V41EngramArtifactBinding
+type v41VerifiedEngramRowSource struct {
+	inner    V41EngramRowSource
+	binding  V41EngramArtifactBinding
+	rowBytes int
 }
 
-func (*v41VerifiedPackedEngramRowSource) RowBytes() int { return V41EngramPackedRowBytes }
+func (s *v41VerifiedEngramRowSource) RowBytes() int { return s.rowBytes }
 
-func (s *v41VerifiedPackedEngramRowSource) ReadRows(start, count int, dst []byte) (int, error) {
+func (s *v41VerifiedEngramRowSource) ReadRows(start, count int, dst []byte) (int, error) {
 	return s.inner.ReadRows(start, count, dst)
 }
 
 // V41EngramBinding reports the verified artifact binding a source was admitted
 // under, and whether the source carries one at all. A loader uses it to prove that
 // every source wired into the forward is verified: an implementation that is not
-// *v41VerifiedPackedEngramRowSource reports ok=false.
+// *v41VerifiedEngramRowSource reports ok=false.
 func V41EngramBinding(src V41EngramRowSource) (V41EngramArtifactBinding, bool) {
-	if v, ok := src.(*v41VerifiedPackedEngramRowSource); ok {
+	if v, ok := src.(*v41VerifiedEngramRowSource); ok {
 		return v.binding, true
 	}
 	return V41EngramArtifactBinding{}, false

@@ -12,6 +12,13 @@ import (
 // 256 bytes of FP8 weights followed by 8 bytes of E8M0 scales.
 const V41EngramPackedRowBytes = 264
 
+// V41EngramF32RowBytes is the DEQUANTIZED width of one V4.1 Engram row when the
+// table is stored as Q2_K: one 256-element super-block per row (qkK), expanded to
+// little-endian float32 = qkK*4 = 1024 bytes. The published vcruz Q2_K artifact
+// uses this dialect; the loader's V41EngramQ2KOpen yields rows at this width, so
+// the forward must consume it beside the packed 264-byte dialect.
+const V41EngramF32RowBytes = qkK * 4
+
 // V41EngramStreamErrorKind classifies fail-closed Engram retrieval failures.
 type V41EngramStreamErrorKind string
 
@@ -68,44 +75,58 @@ type V41EngramShard struct {
 }
 
 type v41PackedEngramRowSource struct {
-	reader io.ReaderAt
-	shard  V41EngramShard
+	reader   io.ReaderAt
+	shard    V41EngramShard
+	rowBytes int
 }
 
 // NewV41PackedEngramRowSource creates a packed 264-byte row reader over a
 // declared shard extent.
 func NewV41PackedEngramRowSource(reader io.ReaderAt, shard V41EngramShard) (V41EngramRowSource, error) {
+	return newV41PreparedEngramRowSource(reader, shard, V41EngramPackedRowBytes)
+}
+
+// newV41PreparedEngramRowSource is the width-parameterized prepared reader. It
+// validates the declared extent against rowBytes and reports the same width from
+// RowBytes(), so the same geometry contract serves both the packed (264) and
+// dequantized-f32 (1024) dialects. A width outside the two supported dialects is
+// refused before any IO, so an unknown dialect cannot be admitted by omission.
+func newV41PreparedEngramRowSource(reader io.ReaderAt, shard V41EngramShard, rowBytes int) (V41EngramRowSource, error) {
+	if rowBytes != V41EngramPackedRowBytes && rowBytes != V41EngramF32RowBytes {
+		return nil, &V41EngramStreamError{Kind: V41EngramStreamGeometry, Row: -1, Shard: shard.ID,
+			Err: fmt.Errorf("unsupported Engram row width %d (want %d packed or %d f32)", rowBytes, V41EngramPackedRowBytes, V41EngramF32RowBytes)}
+	}
 	if reader == nil || shard.Rows <= 0 || shard.Offset < 0 || shard.Size <= 0 ||
-		int64(shard.Rows) > math.MaxInt64/V41EngramPackedRowBytes ||
-		shard.Size != int64(shard.Rows)*V41EngramPackedRowBytes ||
+		int64(shard.Rows) > math.MaxInt64/int64(rowBytes) ||
+		shard.Size != int64(shard.Rows)*int64(rowBytes) ||
 		shard.Offset > math.MaxInt64-shard.Size {
 		return nil, &V41EngramStreamError{Kind: V41EngramStreamGeometry, Row: -1, Shard: shard.ID,
-			Err: fmt.Errorf("invalid packed shard extent offset=%d size=%d rows=%d", shard.Offset, shard.Size, shard.Rows)}
+			Err: fmt.Errorf("invalid packed shard extent offset=%d size=%d rows=%d rowBytes=%d", shard.Offset, shard.Size, shard.Rows, rowBytes)}
 	}
 	if shard.ID == "" || shard.ExpectedID == "" || shard.ID != shard.ExpectedID {
 		return nil, &V41EngramStreamError{Kind: V41EngramStreamShardMismatch, Row: -1, Shard: shard.ID,
 			Err: fmt.Errorf("observed identity %q does not match expected %q", shard.ID, shard.ExpectedID)}
 	}
-	return &v41PackedEngramRowSource{reader: reader, shard: shard}, nil
+	return &v41PackedEngramRowSource{reader: reader, shard: shard, rowBytes: rowBytes}, nil
 }
 
-func (*v41PackedEngramRowSource) RowBytes() int { return V41EngramPackedRowBytes }
+func (s *v41PackedEngramRowSource) RowBytes() int { return s.rowBytes }
 
 func (s *v41PackedEngramRowSource) ReadRows(start, count int, dst []byte) (int, error) {
 	if start < 0 || count <= 0 || start > s.shard.Rows || count > s.shard.Rows-start {
 		return 0, &V41EngramStreamError{Kind: V41EngramStreamOutOfBounds, Row: start, Shard: s.shard.ID,
 			Err: fmt.Errorf("row range [%d,%d) outside [0,%d)", start, start+count, s.shard.Rows)}
 	}
-	if count > math.MaxInt/V41EngramPackedRowBytes {
+	if count > math.MaxInt/s.rowBytes {
 		return 0, &V41EngramStreamError{Kind: V41EngramStreamGeometry, Row: start, Shard: s.shard.ID,
 			Err: fmt.Errorf("row byte count overflows")}
 	}
-	want := count * V41EngramPackedRowBytes
+	want := count * s.rowBytes
 	if len(dst) < want {
 		return 0, &V41EngramStreamError{Kind: V41EngramStreamGeometry, Row: start, Shard: s.shard.ID,
 			Err: fmt.Errorf("destination bytes=%d want=%d", len(dst), want)}
 	}
-	offset := s.shard.Offset + int64(start)*V41EngramPackedRowBytes
+	offset := s.shard.Offset + int64(start)*int64(s.rowBytes)
 	if offset < s.shard.Offset || int64(want) > s.shard.Offset+s.shard.Size-offset {
 		return 0, &V41EngramStreamError{Kind: V41EngramStreamOutOfBounds, Row: start, Shard: s.shard.ID,
 			Err: fmt.Errorf("packed read exceeds declared shard extent")}

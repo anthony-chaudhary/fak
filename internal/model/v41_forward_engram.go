@@ -65,6 +65,7 @@ package model
 // [SW-VERIFIED]; no hardware witness is claimed.
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"sync"
@@ -91,6 +92,10 @@ type v41EngramStage struct {
 	headDim  int
 	hc       int
 	layerIDs []int
+	// rowBytes is the per-row width every wired source serves (264 packed or
+	// 1024 dequantized-f32). The forward dispatches row decode on it, so the
+	// packed and f32 dialects share one architecture-neutral stage.
+	rowBytes int
 }
 
 // v41EngramStages attaches a stage to a *Model without widening the Model struct
@@ -129,17 +134,31 @@ func (m *Model) wireV41Engram(layout V41EngramLayout, srcs []V41EngramRowSource,
 			ErrV41NativeUnsupported, len(ids), len(layout.Rows), len(srcs))
 	}
 	columns := (layout.MaxNgramSize - 1) * layout.HeadsPerNgram
-	caches := make([]*V41EngramRowCache, len(srcs))
+	// Every source must serve the same dialect; a mixed-width set would make the
+	// stage's row decode ambiguous, so a disagreement is a named refusal. A
+	// source's own RowBytes() is authoritative — the stage never assumes packed.
+	rowBytes := srcs[0].RowBytes()
+	if rowBytes != V41EngramPackedRowBytes && rowBytes != V41EngramF32RowBytes {
+		return fmt.Errorf("%w: Engram source row width %d is neither packed %d nor f32 %d",
+			ErrV41NativeUnsupported, rowBytes, V41EngramPackedRowBytes, V41EngramF32RowBytes)
+	}
 	for i, src := range srcs {
 		if src == nil {
 			return fmt.Errorf("%w: nil Engram row source for layer %d", ErrV41NativeUnsupported, ids[i])
 		}
+		if got := src.RowBytes(); got != rowBytes {
+			return fmt.Errorf("%w: Engram source for layer %d has row width %d, want %d (all sources must share one dialect)",
+				ErrV41NativeUnsupported, ids[i], got, rowBytes)
+		}
+	}
+	caches := make([]*V41EngramRowCache, len(srcs))
+	for i, src := range srcs {
 		budget := budgetBytes
-		if budget < int64(V41EngramPackedRowBytes) {
-			budget = int64(V41EngramPackedRowBytes)
+		if budget < int64(rowBytes) {
+			budget = int64(rowBytes)
 		}
 		cache, err := NewV41EngramRowCache(src, V41EngramRowCacheOptions{
-			TableRows: int(layout.Rows[i]), RowBytes: V41EngramPackedRowBytes, BudgetBytes: budget,
+			TableRows: int(layout.Rows[i]), RowBytes: rowBytes, BudgetBytes: budget,
 		})
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrV41NativeUnsupported, err)
@@ -149,7 +168,7 @@ func (m *Model) wireV41Engram(layout V41EngramLayout, srcs []V41EngramRowSource,
 	stage := &v41EngramStage{
 		layout: layout, caches: caches, columns: columns,
 		headDim: m.Cfg.DeepSeekV41.EngramHeadDim, hc: 4,
-		layerIDs: append([]int(nil), ids...),
+		layerIDs: append([]int(nil), ids...), rowBytes: rowBytes,
 	}
 	v41EngramStages.Store(m, stage)
 	return nil
@@ -163,6 +182,36 @@ func (s *v41EngramStage) cacheIndex(l int) int {
 		}
 	}
 	return -1
+}
+
+// decodeV41EngramRow decodes one cached row of the stage's dialect into dim f32
+// values: the packed 264-byte dialect is dequantized (E4M3 weights * E8M0 scales),
+// and the dequantized-f32 dialect (1024 bytes, the published Q2_K table) is read
+// little-endian. Both dialects fail closed on a width they do not own.
+func decodeV41EngramRow(row []byte, dim, rowBytes int) ([]float32, error) {
+	switch rowBytes {
+	case V41EngramPackedRowBytes:
+		return dequantV41EngramRow(row, dim)
+	case V41EngramF32RowBytes:
+		if len(row) != V41EngramF32RowBytes {
+			return nil, fmt.Errorf("%w: Engram f32 row has %d bytes, want %d",
+				ErrV41NativeUnsupported, len(row), V41EngramF32RowBytes)
+		}
+		if dim <= 0 || dim > qkK {
+			return nil, fmt.Errorf("%w: Engram f32 row dim %d outside [1,%d]", ErrV41NativeUnsupported, dim, qkK)
+		}
+		out := make([]float32, dim)
+		for j := 0; j < dim; j++ {
+			value := math.Float32frombits(binary.LittleEndian.Uint32(row[j*4:]))
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+				return nil, fmt.Errorf("%w: Engram f32 row value %d is non-finite", ErrV41NativeUnsupported, j)
+			}
+			out[j] = value
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("%w: unsupported Engram row width %d", ErrV41NativeUnsupported, rowBytes)
+	}
 }
 
 // dequantV41EngramRow dequantizes one packed 264-byte row into DIM f32 values.
@@ -286,7 +335,7 @@ func (m *Model) v41EngramInject(l int, x [][]float32, streams [][][]float32, ful
 	}
 	for t := range seq {
 		for c := 0; c < cols; c++ {
-			values, err := dequantV41EngramRow(gathered[t*cols+c], dim)
+			values, err := decodeV41EngramRow(gathered[t*cols+c], dim, stage.rowBytes)
 			if err != nil {
 				return v41StageErr(v41StageEngram, l, err)
 			}
