@@ -11,11 +11,11 @@ const qwen38KernelProvenance = "testdata/qwen38_kernel_provenance.json"
 
 func TestQwen38KernelProvenanceManifest(t *testing.T) {
 	manifest := loadQwen38KernelProvenance(t)
-	if got := len(manifest.Upstreams); got != 8 {
-		t.Fatalf("upstreams = %d, want 8", got)
+	if got := len(manifest.Upstreams); got != 9 {
+		t.Fatalf("upstreams = %d, want 9", got)
 	}
-	if got := len(manifest.Kernels); got != 2 {
-		t.Fatalf("kernels = %d, want two bounded Qwen3.8 seeds", got)
+	if got := len(manifest.Kernels); got != 3 {
+		t.Fatalf("kernels = %d, want three bounded Qwen3.8 seeds", got)
 	}
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {

@@ -419,11 +419,15 @@ func kQuantMatRowsSubset(qt *kQuantTensor, x []float32, subset []int) []float32 
 	// qt.raw into a bare slice-bounds panic (#13218).
 	qt.ensureRawCPU("subset projection")
 	y := newSubsetLogits(subset, qt.out)
-	if qt.kind == kindQ6K && kQuantSDOTEnabled(qt.kind) {
+	if (qt.kind == kindQ6K || qt.kind == kindQ2K) && kQuantSDOTEnabled(qt.kind) {
 		qv := quantizeVecQ8(x)
+		reduce, combine, groups := q6kReduceRow, q6kCombineRow, q6kGroupsPerBlock
+		if qt.kind == kindQ2K {
+			reduce, combine, groups = q2kReduceRow, q2kCombineRow, q2kGroupsPerBlock
+		}
 		parForRange(len(subset), len(subset)*qt.in, func(lo, hi int) {
-			is := make([]int32, qt.nblk*q6kGroupsPerBlock)
-			ss := make([]int32, qt.nblk*q6kGroupsPerBlock)
+			is := make([]int32, qt.nblk*groups)
+			ss := make([]int32, qt.nblk*groups)
 			rowBytes := qt.rowBytes()
 			for i := lo; i < hi; i++ {
 				tok := subset[i]
@@ -431,8 +435,8 @@ func kQuantMatRowsSubset(qt *kQuantTensor, x []float32, subset []int) []float32 
 					continue
 				}
 				row := qt.raw[tok*rowBytes : (tok+1)*rowBytes]
-				q6kReduceRow(row, qt.nblk, qv.q, is, ss)
-				y[i] = q6kCombineRow(row, qt.nblk, qv.d, is, ss)
+				reduce(row, qt.nblk, qv.q, is, ss)
+				y[i] = combine(row, qt.nblk, qv.d, is, ss)
 			}
 		})
 		return y

@@ -12,6 +12,16 @@
       "notice_rule": "Retain the copyright and permission notice in copies or substantial portions."
     },
     {
+      "id": "llama.cpp-quants-x86",
+      "repository": "https://github.com/ggml-org/llama.cpp",
+      "sha": "83078fec0db82d6b5a00d9599062c38c39145755",
+      "license": "MIT",
+      "license_file": "LICENSE",
+      "copyright_notice": "Copyright (c) 2023-2026 The ggml authors",
+      "notice_file": "LICENSE",
+      "notice_rule": "Retain the copyright and permission notice in copies or substantial portions."
+    },
+    {
       "id": "mlx-lm",
       "repository": "https://github.com/ml-explore/mlx-lm",
       "sha": "d5b6c8c49774ed7fd40c97f964b1e7f10e2f0ccb",
@@ -83,6 +93,15 @@
     }
   ],
   "kernels": [
+    {
+      "id": "q2k-int8-cpu-decode",
+      "upstream": "llama.cpp-quants-x86",
+      "source_path": "ggml/src/ggml-cpu/arch/x86/quants.c",
+      "destination": "internal/model/quant_kquant_int8_q2k.go",
+      "decision": "ADAPT",
+      "attribution": "Integer Q2_K x Q8_K reduction adapted from llama.cpp ggml_vec_dot_q2_K_q8_K\n// (ggml/src/ggml-cpu/arch/x86/quants.c) and dequantize_row_q2_K (ggml/src/ggml-quants.c) at\n// 83078fec0db82d6b5a00d9599062c38c39145755 (MIT).",
+      "parity_witness": "internal/model/quant_kquant_int8_q2k_test.go"
+    },
     {
       "id": "qwen38-cuda-gdn-sequence",
       "upstream": "llama.cpp",

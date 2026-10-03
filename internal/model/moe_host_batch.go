@@ -144,8 +144,11 @@ func kQuantBatchRows(ts []*kQuantTensor, acts [][]float32, rowsPer int, y [][]fl
 	batchExpertRows(K, rowsPer, ts[0].in, func(e, rlo, rhi int) {
 		if useInt8[e] {
 			ranger := q5kMatRowsRangeInt8
-			if ts[e].kind == kindQ6K {
+			switch ts[e].kind {
+			case kindQ6K:
 				ranger = q6kMatRowsRangeInt8
+			case kindQ2K:
+				ranger = q2kMatRowsRangeInt8
 			}
 			ranger(ts[e], qvs[e], y[e], rlo, rhi)
 		} else {

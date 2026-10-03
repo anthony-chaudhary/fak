@@ -56,12 +56,13 @@ var kQuantSDOTDefault = func() bool {
 
 // kQuantSDOTEnabled reports whether the int8 k-quant decode path runs for this weight kind. Both
 // kindQ5K (q5kMatRowsRangeInt8, this file) and kindQ6K (q6kMatRowsRangeInt8, quant_kquant_int8_q6k.go)
-// are implemented; the legacy ggml kindQ8_0/kindQ4_0 blocks ride the compute CIQ kernel
-// (ciqMatRowsRangeInt8, quant_kquant_ciq.go) under the same gate. Any other kind keeps the f32
-// reduction. The test force wins; otherwise the FAK_KQ_INT8 env decides.
+// are implemented, as is kindQ2K (q2kMatRowsRangeInt8, quant_kquant_int8_q2k.go); the legacy ggml
+// kindQ8_0/kindQ4_0 blocks ride the compute CIQ kernel (ciqMatRowsRangeInt8, quant_kquant_ciq.go)
+// under the same gate. Any other kind keeps the f32 reduction. The test force wins; otherwise the
+// FAK_KQ_INT8 env decides.
 func kQuantSDOTEnabled(kind kQuantKind) bool {
 	switch kind {
-	case kindQ5K, kindQ6K, kindQ8_0, kindQ4_0:
+	case kindQ5K, kindQ6K, kindQ8_0, kindQ4_0, kindQ2K:
 	default:
 		return false
 	}
