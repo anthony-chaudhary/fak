@@ -1044,3 +1044,257 @@ func TestNativeScheduler_PrefixCacheAwarePrefill(t *testing.T) {
 		nativeSchedulerEndManualDrain(sCached)
 	})
 }
+
+// TestNativeSchedulerProductionArmingChunkParity is the fresh-context witness for the
+// serving arming path: Engine.nativeScheduler() must ARM the existing bounded/resumable
+// prefill ceiling for a model that minted its resident capability from model-owned Q4_K
+// or Q2_0 residency, and that armed scheduler must consume a prompt longer than the
+// ceiling across strictly-advancing scheduler ITERATIONS with the same generated-token
+// sequence as a synchronous prefill. It also pins the contract's negative cases: an
+// unsupported / non-resident model stays synchronous, an explicit zero disables the
+// feature, and a subthreshold positive ceiling is refused and leaves it disabled.
+//
+// It exercises the production seam (New + Preload + nativeScheduler) rather than the
+// test-only newNativeScheduler constructor, so a regression that leaves the ceiling
+// unarmed on the serving path is caught here even though every mechanism test passes.
+func TestNativeSchedulerProductionArmingChunkParity(t *testing.T) {
+	const residentBudget = nativeServingPrefillTokensPerIteration // 32
+	longPrompt := nativeSchedulerQwenPrompt(residentBudget + 5)   // strictly longer, non-multiple
+
+	t.Run("production_arming_and_multi_iteration_parity", func(t *testing.T) {
+		m := nativeSchedulerPrefillModel(t)
+		e := New()
+		e.Preload(m)
+		s := e.nativeScheduler()
+
+		// (1) PRODUCTION ARMING: the serving entry point arms the ceiling from residency.
+		if s.qwenPrefillCap == nil {
+			t.Fatal("production scheduler minted no qwenPrefillCap for a resident model")
+		}
+		if s.qwenPrefillTokens < nativeQwenPrefillMinChunkTokens {
+			t.Fatalf("production arming left qwenPrefillTokens = %d, want positive >= %d", s.qwenPrefillTokens, nativeQwenPrefillMinChunkTokens)
+		}
+		ceiling := s.qwenPrefillTokens
+		if len(longPrompt) <= ceiling {
+			t.Fatalf("fixture prompt %d does not exceed armed ceiling %d", len(longPrompt), ceiling)
+		}
+
+		// Keep the production scheduler (arming, capability, session/token flags) and only
+		// replace the byte-level prepare hook with the exact prompt under test.
+		s.prepare = nativeSchedulerPrefillPrepare(map[string][]int{"long": longPrompt})
+		nativeSchedulerBeginManualDrain(t, s)
+
+		var events []nativeSchedulerEvent
+		var prefills []nativeSchedulerEvent
+		s.observeNativeEvent = func(event nativeSchedulerEvent) {
+			events = append(events, event)
+			if event.Kind == nativeSchedulerEventPrefill && event.Lane != nil && event.Lane.tool == "long" {
+				prefills = append(prefills, event)
+			}
+		}
+
+		req := nativeSchedulerAdmitLane(t, s, "long")
+		if req.state != schedLanePrefilling {
+			t.Fatalf("armed production admission state = %d, want PREFILLING", req.state)
+		}
+		if len(req.logits) != 0 || req.sess.Cache.Len() != 0 {
+			t.Fatalf("armed production admission logits=%d cache=%d, want both empty before the first chunk",
+				len(req.logits), req.sess.Cache.Len())
+		}
+
+		// (2b) Drive iterations until the lane enters DECODE with the cursor at the prompt end.
+		// Collect every generated token as it appears; the transition iteration may already
+		// emit the first continuation token.
+		got := make([]int, 0, genTokens)
+		iterations := 0
+		for req.state != schedLaneDecode && iterations < 20 {
+			iterations++
+			nativeSchedulerDriveIteration(t, s)
+			got = append(got, nativeSchedulerDrainAvailable(req)...)
+		}
+		if req.state != schedLaneDecode {
+			t.Fatalf("armed production lane state = %d after %d iterations, want DECODE", req.state, iterations)
+		}
+		if req.promptCursor != len(longPrompt) {
+			t.Fatalf("armed production promptCursor = %d, want prompt end %d", req.promptCursor, len(longPrompt))
+		}
+		if len(prefills) < 2 {
+			t.Fatalf("armed production prompt split into %d chunks, want >=2 across iterations; events=%+v", len(prefills), events)
+		}
+
+		// (2a) chunks strictly advance: no gaps, no overlap, each <= ceiling, later iteration.
+		cursor := 0
+		for i, ev := range prefills {
+			if ev.ChunkStart != cursor {
+				t.Fatalf("chunk %d starts at %d, want contiguous cursor %d", i, ev.ChunkStart, cursor)
+			}
+			if ev.ChunkLen <= 0 || ev.ChunkLen > ceiling {
+				t.Fatalf("chunk %d length = %d, want (0, ceiling=%d]", i, ev.ChunkLen, ceiling)
+			}
+			if i > 0 && ev.Iteration <= prefills[i-1].Iteration {
+				t.Fatalf("chunk %d iteration %d not strictly after chunk %d iteration %d",
+					i, ev.Iteration, i-1, prefills[i-1].Iteration)
+			}
+			cursor += ev.ChunkLen
+		}
+		if cursor != len(longPrompt) {
+			t.Fatalf("prefill chunks consumed %d tokens, want prompt length %d (no re-prefill of consumed tokens)",
+				cursor, len(longPrompt))
+		}
+
+		// (2c) the generated-token sequence equals a synchronous-prefill oracle.
+		want := nativeSchedulerSynchronousTokens(m, longPrompt)
+		for len(got) < genTokens && !req.terminal {
+			nativeSchedulerDriveIteration(t, s)
+			got = append(got, nativeSchedulerDrainAvailable(req)...)
+		}
+		if len(got) < genTokens {
+			t.Fatalf("chunked production emitted %d/%d tokens (terminal=%t state=%d cursor=%d logits=%d)",
+				len(got), genTokens, req.terminal, req.state, req.promptCursor, len(req.logits))
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("chunked production tokens = %v, synchronous oracle = %v", got, want)
+		}
+
+		nativeSchedulerEndManualDrain(s)
+	})
+
+	t.Run("unsupported_fallback_stays_synchronous", func(t *testing.T) {
+		// (3a) FAK_QWEN35_PREFILL_TOKEN_LOOP forces the diagnostic synchronous path even
+		// for an otherwise-resident model; the capability is still minted and armed but
+		// the chunk budget refuses, so admission is synchronous.
+		t.Run("token_loop_env", func(t *testing.T) {
+			t.Setenv("FAK_QWEN35_PREFILL_TOKEN_LOOP", "1")
+			m := nativeSchedulerPrefillModel(t)
+			e := New()
+			e.Preload(m)
+			s := e.nativeScheduler()
+			if s.qwenPrefillCap == nil {
+				t.Fatal("resident model minted no capability")
+			}
+			if s.qwenPrefillTokens < nativeQwenPrefillMinChunkTokens {
+				t.Fatalf("arming skipped: qwenPrefillTokens=%d", s.qwenPrefillTokens)
+			}
+			s.prepare = nativeSchedulerPrefillPrepare(map[string][]int{"loop": longPrompt})
+			nativeSchedulerBeginManualDrain(t, s)
+			var prefillEvents int
+			s.observeNativeEvent = func(ev nativeSchedulerEvent) {
+				if ev.Kind == nativeSchedulerEventPrefill {
+					prefillEvents++
+				}
+			}
+			req := nativeSchedulerAdmitLane(t, s, "loop")
+			if req.state != schedLaneDecode || req.promptCursor != len(longPrompt) || len(req.logits) == 0 {
+				t.Fatalf("token-loop admission = state %d cursor %d logits %d, want synchronous DECODE/%d/nonempty",
+					req.state, req.promptCursor, len(req.logits), len(longPrompt))
+			}
+			nativeSchedulerDriveIteration(t, s)
+			if prefillEvents != 0 {
+				t.Fatalf("token-loop model emitted %d bounded-prefill events, want synchronous admission", prefillEvents)
+			}
+			req.Cancel()
+			nativeSchedulerDriveIteration(t, s)
+			nativeSchedulerDrainAvailable(req)
+			nativeSchedulerEndManualDrain(s)
+		})
+
+		// (3b) A non-Qwen-hybrid, non-resident (Q8-only) model mints no capability, so the
+		// production arming is a no-op and admission stays synchronous.
+		t.Run("q8_only_model", func(t *testing.T) {
+			q8Only := model.NewSynthetic(SyntheticConfig())
+			q8Only.Quantize()
+			e := New()
+			e.Preload(q8Only)
+			s := e.nativeScheduler()
+			if s.qwenPrefillCap != nil {
+				t.Fatal("Q8-only model minted a resident prefill capability")
+			}
+			if s.qwenPrefillTokens != 0 {
+				t.Fatalf("unsupported arming set qwenPrefillTokens = %d, want 0 (no-op)", s.qwenPrefillTokens)
+			}
+			// Do not force the Q4_K routing intent: this model owns no resident quantized
+			// weights, so admit it through the historical unquantized session path.
+			s.prepare = func(_ context.Context, call *abi.ToolCall, _ *model.Model) schedPrepare {
+				return schedPrepare{prompt: append([]int(nil), longPrompt...)}
+			}
+			nativeSchedulerBeginManualDrain(t, s)
+			req := nativeSchedulerAdmitLane(t, s, "q8")
+			if req.state != schedLaneDecode || req.promptCursor != len(longPrompt) || len(req.logits) == 0 {
+				t.Fatalf("Q8-only admission = state %d cursor %d logits %d, want synchronous DECODE/%d/nonempty",
+					req.state, req.promptCursor, len(req.logits), len(longPrompt))
+			}
+			req.Cancel()
+			nativeSchedulerDriveIteration(t, s)
+			nativeSchedulerDrainAvailable(req)
+			nativeSchedulerEndManualDrain(s)
+		})
+	})
+
+	t.Run("zero_disable_stays_synchronous", func(t *testing.T) {
+		s := NewNativeScheduler(nativeSchedulerPrefillModel(t))
+		if s.qwenPrefillCap == nil {
+			t.Fatal("no capability to exercise zero-disable")
+		}
+		if err := s.SetQwenPrefillMaxTokensPerIteration(residentBudget); err != nil {
+			t.Fatalf("arm: %v", err)
+		}
+		if err := s.SetQwenPrefillMaxTokensPerIteration(0); err != nil {
+			t.Fatalf("SetQwenPrefillMaxTokensPerIteration(0): %v", err)
+		}
+		if s.qwenPrefillTokens != 0 {
+			t.Fatalf("SetQwenPrefillMaxTokensPerIteration(0) left qwenPrefillTokens=%d, want 0", s.qwenPrefillTokens)
+		}
+		s.prepare = nativeSchedulerPrefillPrepare(map[string][]int{"zero": longPrompt})
+		nativeSchedulerBeginManualDrain(t, s)
+		req := nativeSchedulerAdmitLane(t, s, "zero")
+		if req.state != schedLaneDecode || req.promptCursor != len(longPrompt) {
+			t.Fatalf("zero-disabled admission = state %d cursor %d, want synchronous DECODE/%d",
+				req.state, req.promptCursor, len(longPrompt))
+		}
+		req.Cancel()
+		nativeSchedulerDriveIteration(t, s)
+		nativeSchedulerDrainAvailable(req)
+		nativeSchedulerEndManualDrain(s)
+	})
+
+	t.Run("subthreshold_refusal_disables", func(t *testing.T) {
+		s := NewNativeScheduler(nativeSchedulerPrefillModel(t))
+		err := s.SetQwenPrefillMaxTokensPerIteration(nativeQwenPrefillMinChunkTokens - 1)
+		if err == nil {
+			t.Fatalf("subthreshold ceiling %d accepted, want refusal error", nativeQwenPrefillMinChunkTokens-1)
+		}
+		if s.qwenPrefillTokens != 0 {
+			t.Fatalf("subthreshold refusal left qwenPrefillTokens=%d, want disabled 0", s.qwenPrefillTokens)
+		}
+	})
+
+	t.Run("pq2_only_residency_mints_capability_and_arms", func(t *testing.T) {
+		b := model.NewQuantBuilder(model.Config{
+			ModelType:        "qwen35",
+			HiddenSize:       128,
+			IntermediateSize: 128,
+			NumLayers:        1,
+		}, false)
+		if err := b.AddResidentQ2("model.layers.0.mlp.up_proj.weight", []int{128, 128}, make([]byte, 128*34)); err != nil {
+			t.Fatal(err)
+		}
+		m, err := b.Build()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m.Q2Count() != 1 || m.Q4KCount() != 0 {
+			t.Fatalf("PQ2 fixture: Q2=%d Q4K=%d, want 1/0", m.Q2Count(), m.Q4KCount())
+		}
+		e := New()
+		e.Preload(m)
+		s := e.nativeScheduler()
+		if s.qwenPrefillCap == nil || !s.residentQ4K {
+			t.Fatalf("PQ2-only production scheduler: cap=%t residentQ4K=%t, want both true",
+				s.qwenPrefillCap != nil, s.residentQ4K)
+		}
+		if s.qwenPrefillTokens < nativeQwenPrefillMinChunkTokens {
+			t.Fatalf("PQ2-only production scheduler qwenPrefillTokens=%d, want armed >= %d",
+				s.qwenPrefillTokens, nativeQwenPrefillMinChunkTokens)
+		}
+	})
+}

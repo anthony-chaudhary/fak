@@ -17,6 +17,16 @@ import (
 // token-loop fallback on the first chunk.
 const nativeQwenPrefillMinChunkTokens = 16
 
+// nativeServingPrefillTokensPerIteration is the fixed per-iteration prefill token
+// ceiling the serving admission path arms for a resident-Qwen model (see
+// Engine.nativeScheduler). It is a bounded serving default, not a tunable: it is
+// deliberately below the serving prompt cap (maxPromptTokens) so an ordinary
+// serving prompt can actually exceed it and be split across scheduler iterations
+// rather than prefilled whole inside one. No configuration surface is added; the
+// existing per-iteration mechanism — and its documented refusal below
+// nativeQwenPrefillMinChunkTokens — is reused unchanged.
+const nativeServingPrefillTokensPerIteration = 32
+
 var errNativeSchedulerLaneNotDecodeReady = errors.New("modelengine: native scheduler lane is not decode-ready")
 
 // residentQ4KPrefillCapability is minted from model-owned residency when the

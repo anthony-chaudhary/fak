@@ -266,6 +266,22 @@ func (e *Engine) nativeScheduler() *NativeScheduler {
 		})
 		sched.SetQ4KGateUpOutputSlab(e.q4kGateUpOutputSlab)
 		sched.SetMaxRunning(nativeMaxRunningFromEnv())
+		// Arm the bounded, resumable prefill ceiling on the serving admission path.
+		// The mechanism (SetQwenPrefillMaxTokensPerIteration / qwenPrefillChunkBudget /
+		// advanceQwenPrefill) existed but was unreachable from production: only tests
+		// set it, so every production admission took qwenPrefillChunkBudget's
+		// sub-threshold early return and prefilled whole inside one scheduler
+		// iteration. Arming here is a no-op for an unsupported model — the chunk
+		// budget re-checks residency qualification and returns 0 — so non-resident
+		// engines keep the synchronous admission path unchanged.
+		if sched.qwenPrefillCap != nil {
+			// nativeServingPrefillTokensPerIteration is a fixed constant >= the
+			// resident minimum, so the setter cannot refuse it: this error return is
+			// statically unreachable. Ignore it rather than panic so a future constant
+			// edit below the minimum degrades to the setter's documented zero-disable
+			// (synchronous admission) instead of crashing a serving process.
+			_ = sched.SetQwenPrefillMaxTokensPerIteration(nativeServingPrefillTokensPerIteration)
+		}
 		if p := nativePreemptionPolicyFromEnv(); p.MaxBlocks > 0 {
 			sched.SetKVPreemptionPolicy(p)
 		}
