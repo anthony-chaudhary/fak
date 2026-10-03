@@ -316,9 +316,14 @@ func (s *Store) Get(ctx context.Context, id string) (Record, bool, error) {
 }
 
 // isLeaseRef reports whether a full ref under refs/fak/locks/ is a LOCK lease (not a
-// session descriptor, intent lease, or contract record).
+// session descriptor, intent lease, contract record, or reserved subtree).
 func isLeaseRef(ref string) bool {
 	if !strings.HasPrefix(ref, refPrefix) {
+		return false
+	}
+	// Reserved subtrees have independent schemas. Even unknown versions or
+	// malformed descendants must never enter generic lease expiry and reaping.
+	if strings.HasPrefix(ref, refPrefix+"contract/") || strings.HasPrefix(ref, refPrefix+"epoch/") {
 		return false
 	}
 	if isSessionRef(ref) {
