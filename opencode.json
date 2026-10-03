@@ -97,7 +97,7 @@
                             "type":  "local"
                         }
             },
-    "model":  "fak-router/deepseek-ai/DeepSeek-V4.1-Flash",
+    "model":  "hive-ai/deepseek-ai/DeepSeek-V4.1-Flash",
     "permission":  {
                        "dos*":  "allow",
                        "dos_*":  "allow",
@@ -189,7 +189,7 @@
                                  ".agents/skills"
                              ]
                },
-    "small_model":  "fak-router/deepseek-ai/DeepSeek-V4.1-Flash",
+    "small_model":  "hive-ai/deepseek-ai/DeepSeek-V4.1-Flash",
     "snapshot":  false,
     "subagent_depth":  2
 }
