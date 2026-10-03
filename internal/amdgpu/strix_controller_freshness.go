@@ -13,6 +13,12 @@ const (
 	strixControllerStaleToken       = "STALE_VALIDATOR_BINARY"
 	strixControllerUnsupportedToken = "UNSUPPORTED_VALIDATOR_BINARY"
 	strixControllerWSLRecovery      = "use a current stamped WSL build with /proc/self/exe authority"
+	// strixControllerDarwinRecovery names the usable controller route when a
+	// Darwin build cannot observe its own mapped image. The refusal code stays
+	// the generic unattested token, so only the recovery text changes: a Darwin
+	// rebuild cannot produce a mapped-image observation, and telling the operator
+	// otherwise sends them to re-run a build that is guaranteed to refuse again.
+	strixControllerDarwinRecovery = "run validation from a Linux controller using a current stamped build with /proc/self/exe authority and authenticated device access; a Darwin controller has no mapped-image observation, so rebuilding there cannot attest"
 )
 
 // StrixControllerAuthority is an opaque proof that the mapped controller
@@ -124,6 +130,9 @@ func newStrixControllerAuthorityRefusal(code string, _ error, recovery string) *
 func strixControllerObservationRefusal(goos string, cause error) error {
 	if goos == "windows" {
 		return newStrixControllerAuthorityRefusal(strixControllerUnsupportedToken, cause, strixControllerWSLRecovery)
+	}
+	if goos == "darwin" {
+		return newStrixControllerAuthorityRefusal(strixGitSnapshotUnattestedToken, cause, strixControllerDarwinRecovery)
 	}
 	return newStrixControllerAuthorityRefusal(strixGitSnapshotUnattestedToken, cause, "")
 }

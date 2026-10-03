@@ -216,6 +216,39 @@ func TestStrixControllerAuthorityRequiresSemanticEpochAndSameHandleProvenance(t 
 			}
 		})
 
+		t.Run("Darwin refuses without transport and names the Linux controller route", func(t *testing.T) {
+			var events []string
+			deps := baseDeps()
+			deps.goos = "darwin"
+			deps.observe = func() (strixControllerProvenance, error) {
+				events = append(events, "observe")
+				return strixControllerProvenance{}, errors.New(`/private/fak`)
+			}
+			deps.snapshot = func(context.Context, string) (*strixGitObjectSnapshot, error) {
+				events = append(events, "snapshot")
+				return nil, nil
+			}
+			authority, err := newStrixControllerAuthorityWith(context.Background(), `/private/repository`, deps)
+			refusal := asRefusal(t, err, strixGitSnapshotUnattestedToken)
+			// The authority stays fail-closed: nothing is minted, and no snapshot
+			// transport is attempted once mapped-image observation is unavailable.
+			if authority.valid() || strings.Join(events, ",") != "observe" {
+				t.Fatalf("authority/events = %v %q, want no authority and observe-only", authority.valid(), events)
+			}
+			// Recovery must name the usable controller route rather than implying a
+			// stale build: a Darwin rebuild cannot produce a mapped-image observation.
+			recovery := refusal.Recovery()
+			if !strings.Contains(recovery, "/proc/self/exe") {
+				t.Fatalf("Darwin recovery = %q, want the Linux /proc/self/exe controller route", recovery)
+			}
+			if !strings.Contains(recovery, "Linux") {
+				t.Fatalf("Darwin recovery = %q, want it to name the Linux controller explicitly", recovery)
+			}
+			if strings.Contains(err.Error(), "/private/") || strings.Contains(recovery, "/private/") {
+				t.Fatalf("Darwin refusal leaked local detail: err=%v recovery=%q", err, recovery)
+			}
+		})
+
 		t.Run("snapshot creation error retains cleanup retry", func(t *testing.T) {
 			calls := 0
 			snapshot := &strixGitObjectSnapshot{root: "opaque-owned-snapshot", removeAll: func(string) error {
