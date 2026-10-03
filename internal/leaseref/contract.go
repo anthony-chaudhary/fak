@@ -93,25 +93,69 @@ type ContractRecord struct {
 	TTLSeconds  int           `json:"ttl_seconds"`
 }
 
-// UnmarshalJSON supports both acquired_unix/renewed_unix and acquired_at/renewed_at.
+// UnmarshalJSON supports both acquired_unix/renewed_unix (the public int64 schema)
+// and acquired_at/renewed_at. The _at aliases are written by the private workspace
+// as RFC3339 strings, while older public writers kept them as int64 unix seconds, so
+// each alias tolerates either shape. A string that is not a valid RFC3339 instant
+// errors rather than decoding to zero: an unreadable liveness signal must fail
+// closed, never read as "acquired at the epoch".
 func (r *ContractRecord) UnmarshalJSON(data []byte) error {
 	type raw ContractRecord
 	var aux struct {
 		raw
-		AcquiredAlt int64 `json:"acquired_at"`
-		RenewedAlt  int64 `json:"renewed_at"`
+		AcquiredAlt json.RawMessage `json:"acquired_at"`
+		RenewedAlt  json.RawMessage `json:"renewed_at"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
 	*r = ContractRecord(aux.raw)
-	if r.AcquiredAt == 0 && aux.AcquiredAlt != 0 {
-		r.AcquiredAt = aux.AcquiredAlt
+	if r.AcquiredAt == 0 {
+		v, err := altUnixSeconds(aux.AcquiredAlt, "acquired_at")
+		if err != nil {
+			return err
+		}
+		r.AcquiredAt = v
 	}
-	if r.RenewedAt == 0 && aux.RenewedAlt != 0 {
-		r.RenewedAt = aux.RenewedAlt
+	if r.RenewedAt == 0 {
+		v, err := altUnixSeconds(aux.RenewedAlt, "renewed_at")
+		if err != nil {
+			return err
+		}
+		r.RenewedAt = v
 	}
 	return nil
+}
+
+// altUnixSeconds decodes a contract timestamp alias (acquired_at / renewed_at) into
+// unix seconds. It accepts an empty/absent value, an integer, or an RFC3339 string.
+// Any other shape — including a malformed string or a non-integral number — returns
+// an error so a corrupt liveness field fails closed instead of silently reading zero.
+func altUnixSeconds(raw json.RawMessage, field string) (int64, error) {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" {
+		return 0, nil
+	}
+	if s[0] == '"' {
+		var str string
+		if err := json.Unmarshal(raw, &str); err != nil {
+			return 0, fmt.Errorf("leaseref: %s is not a string: %w", field, err)
+		}
+		str = strings.TrimSpace(str)
+		if str == "" {
+			return 0, nil
+		}
+		ts, err := time.Parse(time.RFC3339, str)
+		if err != nil {
+			return 0, fmt.Errorf("leaseref: %s %q is not a valid RFC3339 timestamp: %w", field, str, err)
+		}
+		return ts.Unix(), nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return 0, fmt.Errorf("leaseref: %s is neither an integer nor an RFC3339 string: %w", field, err)
+	}
+	return n.Int64()
 }
 
 // effectiveActiveAt returns the later of AcquiredAt and RenewedAt.

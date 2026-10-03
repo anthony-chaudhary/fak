@@ -520,6 +520,89 @@ func TestContractRecordJSONSerialization(t *testing.T) {
 	}
 }
 
+// TestUnmarshalAcquiredAt pins the reverse-schema-skew tolerance: a lock written by
+// the private serving workspace carries acquired_at/renewed_at as RFC3339 STRINGS,
+// while the public schema uses int64 unix seconds (acquired_unix/renewed_unix). The
+// reader must decode either shape to the correct instant, let the native int fields
+// win when both are present, and fail closed on a malformed timestamp rather than
+// silently decoding to zero (which would make a live lease read as expired).
+func TestUnmarshalAcquiredAt(t *testing.T) {
+	const rfc = "2026-09-21T19:32:05Z"
+	rfcInstant, err := time.Parse(time.RFC3339, rfc)
+	if err != nil {
+		t.Fatalf("fixture RFC3339 parse: %v", err)
+	}
+
+	cases := []struct {
+		name         string
+		doc          string
+		wantAcquired int64
+		wantRenewed  int64
+		wantErr      bool
+	}{
+		{
+			name:         "native int schema round-trips",
+			doc:          `{"ticket_id":"t","acquired_unix":9990,"renewed_unix":9995,"ttl_seconds":60}`,
+			wantAcquired: 9990,
+			wantRenewed:  9995,
+		},
+		{
+			name:         "peer-written RFC3339 acquired_at decodes to the correct instant",
+			doc:          `{"ticket_id":"t","acquired_at":"` + rfc + `","ttl_seconds":60}`,
+			wantAcquired: rfcInstant.Unix(),
+		},
+		{
+			name:         "peer-written RFC3339 renewed_at decodes too",
+			doc:          `{"ticket_id":"t","acquired_at":"` + rfc + `","renewed_at":"` + rfc + `","ttl_seconds":60}`,
+			wantAcquired: rfcInstant.Unix(),
+			wantRenewed:  rfcInstant.Unix(),
+		},
+		{
+			name:         "native int wins when both are present",
+			doc:          `{"ticket_id":"t","acquired_unix":100,"acquired_at":"` + rfc + `","ttl_seconds":60}`,
+			wantAcquired: 100,
+		},
+		{
+			name:         "legacy int-valued alias still honored",
+			doc:          `{"ticket_id":"t","acquired_at":9990,"renewed_at":9995,"ttl_seconds":60}`,
+			wantAcquired: 9990,
+			wantRenewed:  9995,
+		},
+		{
+			name:    "malformed acquired_at string fails closed",
+			doc:     `{"ticket_id":"t","acquired_at":"not-a-timestamp","ttl_seconds":60}`,
+			wantErr: true,
+		},
+		{
+			name:    "malformed renewed_at shape fails closed",
+			doc:     `{"ticket_id":"t","acquired_at":"` + rfc + `","renewed_at":true,"ttl_seconds":60}`,
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var rec ContractRecord
+			err := json.Unmarshal([]byte(tc.doc), &rec)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected an error for %s, got record %+v", tc.doc, rec)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("json.Unmarshal(%s): %v", tc.doc, err)
+			}
+			if rec.AcquiredAt != tc.wantAcquired {
+				t.Fatalf("AcquiredAt = %d, want %d", rec.AcquiredAt, tc.wantAcquired)
+			}
+			if rec.RenewedAt != tc.wantRenewed {
+				t.Fatalf("RenewedAt = %d, want %d", rec.RenewedAt, tc.wantRenewed)
+			}
+		})
+	}
+}
+
 // TestContractRealGitRoundTripAndZeroRefsLeaked runs against real git in an isolated temp dir,
 // verifies operations end-to-end, and proves zero test refs leaked into the real repository.
 func TestContractRealGitRoundTripAndZeroRefsLeaked(t *testing.T) {
