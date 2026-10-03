@@ -398,6 +398,132 @@ func TestV4PartialTopKFlagSelectsBoundedKernel(t *testing.T) {
 	}
 }
 
+// TestV4PartialTopKQualificationDefaultDecision qualifies the pinned default
+// posture of the opt-in top-k kernel against a small, independent oracle. The
+// oracle is an insertion-based selection written in-test (descending value,
+// lower expert index first on ties) and calls NO production helper, so a
+// tie-break bug shared by the reference sort and the kernel cannot hide here.
+func TestV4PartialTopKQualificationDefaultDecision(t *testing.T) {
+	const E, K = V41RouterExperts, V41RouterTopK
+
+	// (1) The opt-in kernel is undeclared by default. Pin that observation
+	// before touching anything, and restore on every exit path.
+	if v4BitonicTopKEnabled() {
+		t.Fatal("default posture violated: v4BitonicTopKEnabled() = true, want false (kernel is opt-in)")
+	}
+	defer SetV4BitonicTopK(false)
+
+	// (2) Deterministic E=384 fixture: seeded noise plus a deliberate 7-way
+	// tie block so the lower-index-first tie-break is load-bearing.
+	rng := rand.New(rand.NewSource(20261003))
+	choice := make([]float32, E)
+	for i := range choice {
+		choice[i] = rng.Float32()
+	}
+	tieBlock := []int{7, 40, 128, 219, 300, 351, 383}
+	for _, i := range tieBlock {
+		choice[i] = 42.5
+	}
+
+	// (3) Independent oracle: insertion-based top-K, no production helper.
+	oracle := func(src []float32, k int) []int {
+		out := make([]int, 0, k)
+		for i := range src {
+			// rank a ahead of b: higher value, else lower index.
+			ahead := func(a, b int) bool {
+				if src[a] != src[b] {
+					return src[a] > src[b]
+				}
+				return a < b
+			}
+			pos := len(out)
+			for j := range out {
+				if ahead(i, out[j]) {
+					pos = j
+					break
+				}
+			}
+			out = append(out, 0)
+			copy(out[pos+1:], out[pos:])
+			out[pos] = i
+			if len(out) > k {
+				out = out[:k]
+			}
+		}
+		return out
+	}
+
+	want := oracle(choice, K)
+	// The oracle's own output must be self-consistent before it is used as a
+	// reference: exactly K entries, each a valid expert index, strictly
+	// decreasing in the pinned ranking.
+	if len(want) != K {
+		t.Fatalf("oracle width = %d, want %d", len(want), K)
+	}
+	seen := make(map[int]bool, K)
+	for i, idx := range want {
+		if idx < 0 || idx >= E {
+			t.Fatalf("oracle[%d] = %d out of range [0,%d)", i, idx, E)
+		}
+		if seen[idx] {
+			t.Fatalf("oracle repeats expert %d: %v", idx, want)
+		}
+		seen[idx] = true
+		if i > 0 {
+			prev := want[i-1]
+			if choice[prev] < choice[idx] || (choice[prev] == choice[idx] && prev >= idx) {
+				t.Fatalf("oracle not in pinned order at %d: expert %d (v=%g) before expert %d (v=%g)",
+					i, prev, choice[prev], idx, choice[idx])
+			}
+		}
+	}
+
+	// (4) Flag OFF: the reference E-wide stable ordering; first K equals oracle.
+	SetV4BitonicTopK(false)
+	ref := v4TopKIndices(choice, K)
+	if len(ref) != E {
+		t.Fatalf("flag OFF reference width = %d, want full E=%d ordering", len(ref), E)
+	}
+	if !reflect.DeepEqual(ref[:K], want) {
+		t.Fatalf("flag OFF top-%d = %v, want oracle %v", K, ref[:K], want)
+	}
+	if v4BitonicTopKEnabled() {
+		t.Fatal("flag OFF read-back = true, want false")
+	}
+
+	// (5) Flag ON: exactly K bounded indices, equal to the oracle, and the
+	// production partial-select kernel agrees with the seam.
+	SetV4BitonicTopK(true)
+	got := v4TopKIndices(choice, K)
+	if len(got) != K {
+		t.Fatalf("flag ON width = %d, want exactly K=%d bounded indices", len(got), K)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("flag ON top-%d = %v, want oracle %v", K, got, want)
+	}
+	partial := v4PartialTopKIndices(choice, K)
+	if !reflect.DeepEqual(partial, want) {
+		t.Fatalf("v4PartialTopKIndices = %v, want oracle %v (kernel parity)", partial, want)
+	}
+
+	// (6) Fail-closed widths: k<=0 or k>len(choice) returns the full reference
+	// ordering on both flag postures.
+	for _, k := range []int{0, -1, E + 1} {
+		for _, on := range []bool{false, true} {
+			SetV4BitonicTopK(on)
+			if w := len(v4TopKIndices(choice, k)); w != E {
+				t.Fatalf("fail-closed k=%d flag=%v width = %d, want E=%d", k, on, w, E)
+			}
+		}
+	}
+
+	// (7) Restore checked default; the deferred Set is the safety net.
+	SetV4BitonicTopK(false)
+	if v4BitonicTopKEnabled() {
+		t.Fatal("post-condition violated: v4BitonicTopKEnabled() = true, want false")
+	}
+}
+
 // BenchmarkV4TopKIndicesE384 measures the E=384 top-k selection three ways: the
 // reference full stable sort, the opt-in partial-selection kernel the flag now
 // selects (v4PartialTopKIndices), and the retired full bitonic network it
