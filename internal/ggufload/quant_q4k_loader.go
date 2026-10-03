@@ -545,19 +545,11 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 		return nil, err
 	}
 	// GGUF metadata and packed-row readers do not attach an executable Engram
-	// stage. Refuse the model before materializing weights rather than let the
-	// nil DeepSeekV41 config pointer silently omit a declared stage. Keep this
-	// fence at model-load admission so header inspection and row reads remain
-	// available while the full serving attachment is implemented.
-	if archIsDeepSeek41(cfg.ModelType) {
-		if eng := s.File.DeepSeek41Engram; eng != nil && len(eng.LayerIDs) > 0 {
-			return nil, &model.V41ForwardError{
-				Stage: "engram",
-				Layer: eng.LayerIDs[0],
-				Err:   fmt.Errorf("%w: GGUF-declared Engram has no executable serving attachment", model.ErrV41NativeUnsupported),
-			}
-		}
-	}
+	// stage on their own. For a declared Engram we build and attach the verified
+	// stage to the returned model below (attachV41EngramServing). A declared
+	// layer with no openable, verified table still refuses with a typed
+	// ErrV41NativeUnsupported from that attachment, so a declared stage is never
+	// silently omitted.
 	prism, err := s.File.PrismHadamardMeta()
 	if err != nil {
 		return nil, err
@@ -743,6 +735,12 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 		if err := m.ValidateResidentW3MLP(); err != nil {
 			return nil, err
 		}
+	}
+	// Attach the declared V4.1 Engram serving stage to the built model. No-op
+	// when the file declares none; a declared-but-unsupported table refuses with
+	// a typed ErrV41NativeUnsupported (the fence's contract, preserved).
+	if err := attachV41EngramServing(m, s); err != nil {
+		return nil, err
 	}
 	return m, nil
 }
