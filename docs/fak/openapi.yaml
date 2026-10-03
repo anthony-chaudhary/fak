@@ -3731,7 +3731,7 @@ components:
         this is an architectural fact, not a truncated list.
       properties:
         id: { type: integer, example: 0 }
-        n_ctx: { type: integer, description: The loaded model's declared context window, when it declared one. }
+        n_ctx: { type: integer, description: "The loaded model's declared context window, when it declared one." }
         is_processing:
           type: boolean
           description: Whether any in-kernel turn has been observed by the KV-prefix tap.
