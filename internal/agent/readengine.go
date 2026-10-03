@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/fakroot"
 )
 
 // readengine.go — the real filesystem-read engine that backs the `fak_read` MCP tool
@@ -31,19 +32,47 @@ import (
 // engine. No Claude Code change is required — the model opts in via `claude mcp add fak`.
 //
 // Soundness boundary: this engine is READ-ONLY and path-confined. It never writes, and it
-// refuses any path that escapes the configured read root (default: the working tree), so a
-// model-supplied `file_path` cannot exfiltrate /etc/shadow or a path outside the project.
-// A refused or failed read returns a Status=Error result (deny-as-value), never a panic.
+// refuses any path that escapes EVERY configured read root, so a model-supplied `file_path`
+// cannot exfiltrate /etc/shadow or a path outside the project. The default root set is the
+// working tree PLUS, when the canonical ladder proves one exists, the declared companion
+// PUBLIC fak checkout — see RegisterReadEngine for why that widening is asymmetric and why
+// every extra root is structurally proved to be the public checkout. A refused or failed
+// read returns a Status=Error result (deny-as-value), never a panic.
 
 // FakReadEngineID is the engine id `fak_read` binds on its abi.ToolCall so k.Syscall
 // dispatches a cache MISS here (the vDSO fast path serves a hit before dispatch).
 const FakReadEngineID = "fakread"
 
-// readEngine performs a working-tree-confined filesystem read. root is the directory reads
-// are confined to; a path resolving outside it is refused. An empty root means "the process
-// cwd", resolved once at registration.
+// readEngine performs a working-tree-confined filesystem read. roots are the directories
+// reads are confined to (at least one); a path resolving outside EVERY root is refused.
+// A RELATIVE path is resolved against roots[0] — the working tree — and may then land in
+// any declared root, so the `../fak/README.md` spelling that motivated the widening works
+// unchanged. Both halves of the confinement (lexical and symlink) test the UNION of the
+// roots, so widening admits the union and nothing else. The zero engine has no roots and
+// therefore refuses everything.
 type readEngine struct {
-	root string
+	roots []string
+}
+
+// primaryRoot is the root a relative path argument resolves against.
+func (e readEngine) primaryRoot() string {
+	if len(e.roots) == 0 {
+		return ""
+	}
+	return e.roots[0]
+}
+
+// lexicallyConfined reports whether abs is lexically inside at least one root. The
+// per-root filepath.Rel + dot-dot test is the lexical half of the confinement; it runs
+// once PER root, so widening the root set widens only the union of the admitted trees
+// and never turns a "escapes every root" verdict into a pass.
+func (e readEngine) lexicallyConfined(abs string) bool {
+	for _, root := range e.roots {
+		if rel, err := filepath.Rel(root, abs); err == nil && !escapes(rel) {
+			return true
+		}
+	}
+	return false
 }
 
 // Caps reports no optional capabilities — a plain read engine advertises none.
@@ -120,20 +149,14 @@ func (e readEngine) readWithOptions(pathArg string, offset, limit int, lineNumbe
 	}
 	abs := pathArg
 	if !filepath.IsAbs(abs) {
-		abs = filepath.Join(e.root, abs)
+		abs = filepath.Join(e.primaryRoot(), abs)
 	}
 	abs = filepath.Clean(abs)
-	if rel, err := filepath.Rel(e.root, abs); err != nil || rel == ".." || hasDotDotPrefix(rel) {
+	if !e.lexicallyConfined(abs) {
 		return errResult("path_escape", "confinement", "path escapes the read root")
 	}
-	// Symlink confinement: resolve symlinks on abs and verify the resolved path remains inside realRoot (#11399).
-	if realPath, err := filepath.EvalSymlinks(abs); err == nil {
-		realRoot, rErr := filepath.EvalSymlinks(e.root)
-		if rErr == nil {
-			if rel, err := filepath.Rel(realRoot, realPath); err != nil || rel == ".." || hasDotDotPrefix(rel) {
-				return errResult("path_escape", "confinement", "path escapes the read root via symlink")
-			}
-		}
+	if escaped := e.symlinkEscapes(abs); escaped {
+		return errResult("path_escape", "confinement", "path escapes the read root via symlink")
 	}
 	data, err := os.ReadFile(abs)
 	if err != nil {
@@ -199,20 +222,89 @@ func (e readEngine) readWithOptions(pathArg string, offset, limit int, lineNumbe
 }
 
 // hasDotDotPrefix reports whether a filepath.Rel result begins with a parent-dir segment
-// ("../" or "..\\"), i.e. the target escapes the base. A bare ".." is handled by the caller.
+// ("../" or "..\\"), i.e. the target escapes the base. A bare ".." is handled by escapes.
 func hasDotDotPrefix(rel string) bool {
 	return len(rel) >= 3 && rel[0] == '.' && rel[1] == '.' && (rel[2] == '/' || rel[2] == '\\')
+}
+
+// escapes reports whether a filepath.Rel result leaves its base.
+func escapes(rel string) bool { return rel == ".." || hasDotDotPrefix(rel) }
+
+// symlinkEscapes is the symlink half of the confinement (#11399): it resolves abs and
+// every root and reports whether the resolved path lands outside ALL of them. The test
+// runs once per root, so a widened root set cannot launder a symlink out of every root.
+// A path that does not resolve (missing file) or a root that does not resolve is not a
+// symlink escape — os.ReadFile reports the real reason, as before.
+func (e readEngine) symlinkEscapes(abs string) bool {
+	realPath, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return false
+	}
+	resolved := false
+	for _, root := range e.roots {
+		realRoot, rErr := filepath.EvalSymlinks(root)
+		if rErr != nil {
+			continue
+		}
+		resolved = true
+		if rel, err := filepath.Rel(realRoot, realPath); err == nil && !escapes(rel) {
+			return false
+		}
+	}
+	return resolved
 }
 
 // RegisterReadEngine registers the working-tree-confined read engine under FakReadEngineID,
 // confined to root (empty => the process cwd). Idempotent-friendly: re-registering replaces
 // the driver. Called from Configure so `fak guard` / `fak serve` arm the fak_read miss path.
+//
+// An EMPTY root also admits the declared companion PUBLIC fak checkout, when the canonical
+// discovery ladder (internal/fakroot) can prove one exists: a directory counts only when
+// `cmd/fak/main.go` is on disk, and the private companion checkout has no cmd/fak tree — so
+// this widening is asymmetric and can never admit fak-private from a public cwd. Without the
+// widening, `fak serve --stdio` run from fak-private default-denied fak_read of the sibling
+// public workspace it is literally joined to by go.work. A non-empty root is taken verbatim,
+// with no discovery, so callers that pin a root keep exactly the confinement they had.
 func RegisterReadEngine(root string) {
-	if root == "" {
-		if cwd, err := os.Getwd(); err == nil {
-			root = cwd
+	defaulted := root == ""
+	cwd, _ := os.Getwd()
+	if defaulted {
+		root = cwd
+	}
+	roots := []string{filepath.Clean(root)}
+	if defaulted && cwd != "" {
+		ladder := fakroot.Ladder{Cwd: cwd}
+		if companion := ladder.Discover(); companion != "" {
+			roots = appendUniqueRoots(roots, companion)
 		}
 	}
-	root = filepath.Clean(root)
-	abi.RegisterEngine(FakReadEngineID, readEngine{root: root})
+	abi.RegisterEngine(FakReadEngineID, readEngine{roots: roots})
+}
+
+// RegisterReadEngineRoots registers the read engine confined to EXACTLY the given roots —
+// the additive-roots entry point. The first root resolves relative path arguments; every
+// root admits absolute ones. No cwd defaulting and NO discovery run, so a caller can widen
+// the set deliberately (add more roots) or narrow it back to one (opt out of the
+// companion-root widening RegisterReadEngine performs).
+func RegisterReadEngineRoots(roots ...string) {
+	set := make([]string, 0, len(roots))
+	for _, r := range roots {
+		set = appendUniqueRoots(set, r)
+	}
+	abi.RegisterEngine(FakReadEngineID, readEngine{roots: set})
+}
+
+// appendUniqueRoots appends dir (cleaned) unless it is empty or already present, keeping
+// registration order — roots[0] stays the primary working tree.
+func appendUniqueRoots(roots []string, dir string) []string {
+	if strings.TrimSpace(dir) == "" {
+		return roots
+	}
+	dir = filepath.Clean(dir)
+	for _, existing := range roots {
+		if existing == dir {
+			return roots
+		}
+	}
+	return append(roots, dir)
 }

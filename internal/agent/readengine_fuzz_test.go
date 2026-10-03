@@ -22,7 +22,7 @@ func FuzzReadEngineRoundTrip(f *testing.F) {
 		if err := os.WriteFile(path, data, 0o644); err != nil {
 			t.Skip()
 		}
-		raw, isErr := (readEngine{root: root}).read(name)
+		raw, isErr := (readEngine{roots: []string{root}}).read(name)
 		if isErr {
 			t.Fatalf("read failed: %s", raw)
 		}

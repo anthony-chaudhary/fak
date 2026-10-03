@@ -107,7 +107,7 @@ func rawMCPToolCatalog() []ToolDef {
 					"outcome is executed_cold_read or verified_fresh_reuse, and typed errors expose code/source without raw filesystem text. " +
 					"Prefer {file_paths:[...]} for independent reads so one call expresses their width; {file_path} remains the unchanged single-file form. " +
 					"Every path is adjudicated and cached independently, and batch results stay in request order.",
-				Parameters: rawSchema(`{"type":"object","properties":{"file_path":{"type":"string","description":"the path of the file to read (absolute, or relative to the working tree)"},"file_paths":{"type":"array","items":{"type":"string"},"description":"independent file paths to read in one call; preferred when reading more than one file"},"trace_id":{"type":"string","description":"optional session trace id; omitted means the gateway mints one and returns it"},"witness":{"type":"string","description":"optional external world-state token (a git commit / blob hash) the read is taken at"}}}`),
+				Parameters: rawSchema(`{"type":"object","properties":{"file_path":{"type":"string","description":"the path of the file to read (relative to the working tree, or absolute inside a declared read root — the working tree plus, when discoverable, the companion public fak checkout; anything else is refused with path_escape)"},"file_paths":{"type":"array","items":{"type":"string"},"description":"independent file paths to read in one call; preferred when reading more than one file"},"trace_id":{"type":"string","description":"optional session trace id; omitted means the gateway mints one and returns it"},"witness":{"type":"string","description":"optional external world-state token (a git commit / blob hash) the read is taken at"}}}`),
 			},
 		},
 		{

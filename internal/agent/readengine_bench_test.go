@@ -13,7 +13,7 @@ func BenchmarkReadEngine(b *testing.B) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		b.Fatal(err)
 	}
-	e := readEngine{root: root}
+	e := readEngine{roots: []string{root}}
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	b.ResetTimer()

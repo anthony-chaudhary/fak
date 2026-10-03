@@ -25,7 +25,7 @@ func decodeReadBody(t testing.TB, raw []byte) map[string]any {
 
 func TestReadEngineOutcomeMatrix(t *testing.T) {
 	root := t.TempDir()
-	e := readEngine{root: root}
+	e := readEngine{roots: []string{root}}
 	large := strings.Repeat("abcdefgh", 32<<10)
 	cases := []struct {
 		name string
@@ -113,7 +113,7 @@ func TestReadEngineOutcomeMatrix(t *testing.T) {
 
 func TestReadEngineMutationShapes(t *testing.T) {
 	root := t.TempDir()
-	e := readEngine{root: root}
+	e := readEngine{roots: []string{root}}
 	path := filepath.Join(root, "mutable.txt")
 	for _, data := range [][]byte{[]byte("aaaa"), []byte("bbbb"), []byte("x"), []byte("growth-value")} {
 		if err := os.WriteFile(path, data, 0o644); err != nil {
@@ -148,7 +148,7 @@ func TestReadEngineConcurrentReads(t *testing.T) {
 	if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := readEngine{root: root}
+	e := readEngine{roots: []string{root}}
 	var wg sync.WaitGroup
 	errs := make(chan string, 32)
 	for i := 0; i < cap(errs); i++ {
@@ -198,7 +198,7 @@ func TestReadEngineSymlinkConfinement(t *testing.T) {
 		t.Skipf("skipping symlink test: symlink creation not permitted: %v", err)
 	}
 
-	e := readEngine{root: rootDir}
+	e := readEngine{roots: []string{rootDir}}
 
 	// 1. In-root symlink pointing outside e.root must be refused with path_escape / confinement.
 	raw, isErr := e.read("link_outside.txt")
@@ -235,7 +235,7 @@ func TestReadEngineSymlinkConfinement(t *testing.T) {
 
 func TestReadEngineLinePaginationAndNumbering(t *testing.T) {
 	root := t.TempDir()
-	e := readEngine{root: root}
+	e := readEngine{roots: []string{root}}
 	filePath := filepath.Join(root, "lines.txt")
 	var lines []string
 	for i := 1; i <= 10; i++ {

@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/fakroot"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -67,133 +68,31 @@ func verbFlagUsage(fs *flag.FlagSet, _ string) {
 	}
 }
 
+// The fak-repo-root discovery ladder now lives in internal/fakroot — the ONE canonical
+// copy (this file used to own it). These three wrappers stay so every existing caller
+// and test in this package keeps compiling unchanged, and so the exec-backed rung-1
+// probe stays where it was: the ladder body spawns nothing by design.
+
+// isFakRepoRoot is the thin wrapper over fakroot.IsRepoRoot.
 func isFakRepoRoot(dir string) bool {
-	if strings.TrimSpace(dir) == "" {
-		return false
-	}
-	st, err := os.Stat(filepath.Join(dir, "cmd", "fak", "main.go"))
-	return err == nil && !st.IsDir()
+	return fakroot.IsRepoRoot(dir)
 }
 
+// parseGoWorkUseDirs is the thin wrapper over fakroot.ParseGoWorkUseDirs.
 func parseGoWorkUseDirs(workPath string) []string {
-	b, err := os.ReadFile(workPath)
-	if err != nil {
-		return nil
-	}
-	workDir := filepath.Dir(workPath)
-	var dirs []string
-	inUseBlock := false
-
-	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if idx := strings.Index(line, "//"); idx >= 0 {
-			line = strings.TrimSpace(line[:idx])
-		}
-		if line == "" {
-			continue
-		}
-		if inUseBlock {
-			if strings.HasPrefix(line, ")") {
-				inUseBlock = false
-				continue
-			}
-			entry := strings.Trim(line, `"'`+" \t\r")
-			dirs = append(dirs, filepath.Clean(filepath.Join(workDir, entry)))
-		} else if strings.HasPrefix(line, "use (") || line == "use (" {
-			inUseBlock = true
-		} else if strings.HasPrefix(line, "use ") {
-			rest := strings.TrimSpace(strings.TrimPrefix(line, "use "))
-			entry := strings.Trim(rest, `"'`+" \t\r")
-			dirs = append(dirs, filepath.Clean(filepath.Join(workDir, entry)))
-		}
-	}
-	return dirs
+	return fakroot.ParseGoWorkUseDirs(workPath)
 }
 
+// discoverRepoRoot supplies the ladder with the one input it deliberately does not
+// compute itself — the `git rev-parse --show-toplevel` subprocess — and returns the
+// discovered public fak checkout, or "" when none is discoverable.
 func discoverRepoRoot() string {
-	// 1. Check if current git repo has cmd/fak/main.go.
 	var gitRoot string
 	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
 	windowgate.ConfigureBackgroundCommand(cmd)
 	if out, err := cmd.Output(); err == nil {
 		gitRoot = strings.TrimSpace(string(out))
-		if isFakRepoRoot(gitRoot) {
-			return gitRoot
-		}
 	}
-
-	// 2. Check $FAK_ROOT.
-	if envRoot := strings.TrimSpace(os.Getenv("FAK_ROOT")); envRoot != "" {
-		if abs, err := filepath.Abs(envRoot); err == nil && isFakRepoRoot(abs) {
-			return abs
-		}
-		if isFakRepoRoot(envRoot) {
-			return envRoot
-		}
-	}
-
-	// 3. Check go.work in CWD and git root (parse `use` entries to locate a directory with cmd/fak/main.go).
 	cwd, _ := os.Getwd()
-	checkWorkDirs := func(workPath string) string {
-		for _, dir := range parseGoWorkUseDirs(workPath) {
-			if isFakRepoRoot(dir) {
-				return dir
-			}
-		}
-		return ""
-	}
-	if cwd != "" {
-		if found := checkWorkDirs(filepath.Join(cwd, "go.work")); found != "" {
-			return found
-		}
-	}
-	if gitRoot != "" && !strings.EqualFold(gitRoot, cwd) {
-		if found := checkWorkDirs(filepath.Join(gitRoot, "go.work")); found != "" {
-			return found
-		}
-	}
-
-	// 4. Check child directory "fak" in cwd and git root (e.g. running from parent workspace like C:\work).
-	childDirs := []string{"fak"}
-	if cwd != "" {
-		childDirs = append(childDirs, filepath.Join(cwd, "fak"))
-	}
-	if gitRoot != "" && !strings.EqualFold(gitRoot, cwd) {
-		childDirs = append(childDirs, filepath.Join(gitRoot, "fak"))
-	}
-	for _, cand := range childDirs {
-		abs, err := filepath.Abs(cand)
-		if err == nil && isFakRepoRoot(abs) {
-			return abs
-		}
-		if isFakRepoRoot(cand) {
-			return cand
-		}
-	}
-
-	// 5. Check sibling ../fak or ..\fak.
-	siblingCandidates := []string{
-		filepath.Join("..", "fak"),
-	}
-	if cwd != "" {
-		siblingCandidates = append(siblingCandidates, filepath.Join(cwd, "..", "fak"))
-	}
-	if gitRoot != "" {
-		siblingCandidates = append(siblingCandidates, filepath.Join(gitRoot, "..", "fak"))
-	}
-	for _, cand := range siblingCandidates {
-		abs, err := filepath.Abs(cand)
-		if err == nil && isFakRepoRoot(abs) {
-			return abs
-		}
-		if isFakRepoRoot(cand) {
-			return cand
-		}
-	}
-
-	// 6. Only fall back to the git root if it is genuinely a fak repo root; never return a non-fak directory.
-	if gitRoot != "" && isFakRepoRoot(gitRoot) {
-		return gitRoot
-	}
-	return ""
+	return fakroot.Ladder{GitRoot: gitRoot, Cwd: cwd}.Discover()
 }
