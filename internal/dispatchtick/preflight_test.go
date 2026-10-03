@@ -54,6 +54,11 @@ func TestHostCapacityBindingDeterministicOnTie(t *testing.T) {
 }
 
 func TestDefaultMaxWorkersFallbackPinned(t *testing.T) {
+	// Pin the built-in fallbacks, not an ambient override: clear FAK_MAX_WORKERS
+	// so a host that exports it cannot red this pin (and the whole package) with
+	// a value the compile-time default never claimed. The override path is
+	// covered separately by TestDefaultMaxWorkersEnvOverridePreservesLowerCeiling.
+	t.Setenv("FAK_MAX_WORKERS", "")
 	// Platform defaults are aspirational; adaptive gates can only pull the
 	// effective cap down.
 	if got := defaultMaxWorkers("darwin"); got != 30 {
