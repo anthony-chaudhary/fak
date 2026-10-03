@@ -63,6 +63,22 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "plan-planonly",
+      "canonical": "PlanOnly (dry-run launch mode)",
+      "family": "plan",
+      "kind": "config",
+      "definition": "The goalrunner launch option `PlanOnly` (`plan_only`) that resolves the account, runs the shift-left preflight, formats and writes the prompt plus a plan-only receipt, then returns WITHOUT spawning a worker.",
+      "distinction": "The DRY-RUN launch mode that spawns nothing - NOT the executed dispatch plan `LaunchPlan` (pricing's wave-grouped targets) and NOT the campaign `WavePlan` (debtlane's ordered waves).",
+      "distinct_from": ["x-plan-launchplan"],
+      "aliases": ["plan_only"],
+      "grounding": "PlanOnly",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }
