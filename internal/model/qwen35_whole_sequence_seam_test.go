@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -207,5 +208,142 @@ func TestWholeSequenceReceiptAdapterIsNeutral(t *testing.T) {
 	})
 	if handoff.Mode != "AUTO" || handoff.BlockAcceptedCalls != 2 || handoff.MixerAcceptedCalls != 1 || handoff.ResidentAcceptedCalls != 3 {
 		t.Fatalf("handoff adapter drifted: %+v", handoff)
+	}
+}
+
+// neutralWholeTokenOperation builds one valid neutral whole-token operation for
+// the given capability path. It names only the neutral tokens and receipt shape:
+// no Qwen35/Metal type and no session is constructed, so it is the receipt half
+// of the contract, decoupled from whichever model owns the execution.
+func neutralWholeTokenOperation(path string) WholeSequenceOperation {
+	return WholeSequenceOperation{
+		Before: WholeSequenceReceipt{
+			Path: path, Available: true,
+			SelectorState: WholeSequenceSelectorOn, EvidenceState: WholeSequenceEvidenceExecuted,
+			Tokens: 32, CommandBuffers: 1,
+		},
+		After: WholeSequenceReceipt{
+			Path: path, Available: true,
+			SelectorState: WholeSequenceSelectorOn, EvidenceState: WholeSequenceEvidenceExecuted,
+			Tokens: 1, CommandBuffers: 1, TerminalWaits: 1, TerminalReadbacks: 1,
+			Committed: true, CompletedWait: true,
+		},
+		CountsBefore: WholeSequenceHandoff{Mode: "AUTO"},
+		CountsAfter:  WholeSequenceHandoff{Mode: "AUTO", BlockAcceptedCalls: 1},
+		CacheBefore:  32, CacheAfter: 33,
+	}
+}
+
+// TestV41WholeSequenceOwnerRefusedByCapabilityNotReceipt drives the two distinct
+// predicates the whole-token witness gates on: a real deepseek_v41_text session
+// advertises NO whole-sequence capability (admission) and reports a typed V4.1
+// refusal (diagnosis), even when handed a well-formed neutral operation receipt.
+// Ownership admission is deliberately separate from receipt validation: the
+// validator only checks the receipt shape against a path the caller must already
+// own, so a plausible unrelated (Qwen/Metal) receipt cannot promote an
+// unsupported session, and a nil/unknown-session control is refused too.
+func TestV41WholeSequenceOwnerRefusedByCapabilityNotReceipt(t *testing.T) {
+	_, cfg := readDeepSeekV41Config(t)
+	m := &Model{Cfg: cfg}
+	if !m.Cfg.IsDeepSeekV41() {
+		t.Fatal("probe config is not recognized as V4.1")
+	}
+	s := &Session{M: m}
+
+	path, admissible := s.WholeSequenceCapability()
+	if admissible || path != "" {
+		t.Fatalf("V4.1 session advertised whole-sequence capability path=%q admissible=%t, want none", path, admissible)
+	}
+	err := s.WholeSequenceUnsupportedReason()
+	if !errors.Is(err, ErrV41WholeSequenceUnsupported) {
+		t.Fatalf("V4.1 refusal=%v want ErrV41WholeSequenceUnsupported", err)
+	}
+	var typed *UnsupportedV41WholeSequenceError
+	if !errors.As(err, &typed) || typed.Path != WholeSequencePath {
+		t.Fatalf("V4.1 refusal=%v typed=%#v, want a named refusal on %q", err, typed, WholeSequencePath)
+	}
+
+	// A plausible neutral receipt of the unrelated Qwen/Metal capability is not an
+	// ownership credential. Validated against the borrowed capability token it
+	// still passes, which proves the session's refusal above came from admission,
+	// not from receipt shape — the validator does not authenticate a model owner.
+	borrowed := neutralWholeTokenOperation(Qwen35MetalGDNSequenceForwardPath)
+	if err := ValidateWholeSequenceOperation("whole-token", Qwen35MetalGDNSequenceForwardPath, WholeSequenceEvidenceExecuted, borrowed); err != nil {
+		t.Fatalf("valid borrowed-capability receipt rejected: %v", err)
+	}
+	// Under the V4.1 session's own (empty) capability path the same operation is
+	// refused: an unsupported model cannot be promoted by a well-formed receipt.
+	if err := ValidateWholeSequenceOperation("whole-token", path, WholeSequenceEvidenceExecuted, borrowed); err == nil {
+		t.Fatal("accepted a whole-token operation under the V4.1 session's empty capability path")
+	}
+
+	// Nil and non-V4.1 controls: no V4.1 identity means no named refusal, so the
+	// refusal is gated on IsDeepSeekV41 and cannot leak onto another family.
+	if err := (*Session)(nil).WholeSequenceUnsupportedReason(); err != nil {
+		t.Fatalf("nil session refusal=%v want nil", err)
+	}
+	llama := &Session{M: &Model{Cfg: Config{ModelType: "llama", HiddenSize: 4, NumLayers: 1, NumHeads: 1, NumKVHeads: 1, HeadDim: 4}}}
+	if p, ok := llama.WholeSequenceCapability(); ok || p != "" {
+		t.Fatalf("non-V4.1 session advertised capability path=%q ok=%t, want none", p, ok)
+	}
+	if err := llama.WholeSequenceUnsupportedReason(); err != nil {
+		t.Fatalf("non-V4.1 refusal=%v want nil (refusal must be IsDeepSeekV41-gated)", err)
+	}
+}
+
+// TestWholeSequenceEvidenceRefusesMalformedNeutralReceipts mutates a valid
+// neutral whole-token operation one field at a time and requires
+// ValidateWholeSequenceOperation to refuse each, while the unmutated control
+// still passes. It exercises the real validation contract with no session and no
+// model named, so receipt validation and ownership admission stay independent.
+func TestWholeSequenceEvidenceRefusesMalformedNeutralReceipts(t *testing.T) {
+	path := Qwen35MetalGDNSequenceForwardPath
+	valid := neutralWholeTokenOperation(path)
+	if err := ValidateWholeSequenceOperation("whole-token", path, WholeSequenceEvidenceExecuted, valid); err != nil {
+		t.Fatalf("valid control rejected: %v", err)
+	}
+	mutations := map[string]func(WholeSequenceOperation) WholeSequenceOperation{
+		"stale receipt has no fresh token": func(op WholeSequenceOperation) WholeSequenceOperation {
+			op.After = op.Before
+			return op
+		},
+		"evidence token unavailable": func(op WholeSequenceOperation) WholeSequenceOperation {
+			op.After.EvidenceState = WholeSequenceEvidenceUnavailable
+			return op
+		},
+		"declared path differs from required token": func(op WholeSequenceOperation) WholeSequenceOperation {
+			op.After.Path = "some/other-backend-v1"
+			return op
+		},
+		"step did not advance the cache": func(op WholeSequenceOperation) WholeSequenceOperation {
+			op.CacheAfter = op.CacheBefore
+			return op
+		},
+		"resident accept advanced on whole-token": func(op WholeSequenceOperation) WholeSequenceOperation {
+			op.CountsAfter.ResidentAcceptedCalls = 1
+			return op
+		},
+		"block accept not advanced": func(op WholeSequenceOperation) WholeSequenceOperation {
+			op.CountsAfter.BlockAcceptedCalls = op.CountsBefore.BlockAcceptedCalls
+			return op
+		},
+		"no capability path": func(op WholeSequenceOperation) WholeSequenceOperation {
+			op.Before.Path, op.After.Path = "", ""
+			return op
+		},
+		"sink exceeds terminal waits": func(op WholeSequenceOperation) WholeSequenceOperation {
+			op.After.TerminalReadbacks = 2
+			return op
+		},
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateWholeSequenceOperation("whole-token", path, WholeSequenceEvidenceExecuted, mutate(valid)); err == nil {
+				t.Fatal("accepted malformed whole-token evidence")
+			}
+		})
+	}
+	if err := ValidateWholeSequenceOperation("bogus-route", path, WholeSequenceEvidenceExecuted, valid); err == nil {
+		t.Fatal("accepted an unknown whole-sequence route")
 	}
 }

@@ -50,14 +50,11 @@ import (
 // per-super-block stride into the IS/SS reduction buffers.
 const q2kGroupsPerBlock = 16
 
-// q2kReduceRow is the arch-dispatch seam for the Q2_K integer reduction. Unlike Q4_K/Q5_K/Q6_K
-// there is no SIMD Q2_K reducer yet (the amd64 AVX2/VNNI kernels cover those kinds only), so every
-// arch takes q2kReduceRowScalar. It is kept as a named indirection so a future AVX2/VNNI or NEON
-// file can override the hot loop without touching the portable reference, exactly as
-// q5kReduceRow/q6kReduceRow do.
-func q2kReduceRow(row []byte, nblk int, qx []int8, IS, SS []int32) {
-	q2kReduceRowScalar(row, nblk, qx, IS, SS)
-}
+// q2kReduceRow is the arch-dispatch seam for the Q2_K integer reduction; its definition now lives in
+// the arch files (quant_kquant_int8_q2k_amd64.go on amd64, quant_kquant_int8_q2k_noamd64.go
+// elsewhere), exactly as q5kReduceRow/q6kReduceRow do. The amd64 build routes to the AVX2/VNNI
+// kernel; every other arch takes q2kReduceRowScalar. This named indirection keeps the portable
+// reference (below) untouched by the hot loop.
 
 // q2kReduceRowScalar is the portable integer-reduction reference: for each of nblk super-blocks it
 // writes the 16 per-sub-block (I_s = Σ q2*qx, S_s = Σ qx) int32 pairs into IS/SS. The 2-bit code
