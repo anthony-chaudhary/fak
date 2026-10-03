@@ -65,6 +65,13 @@ type InKernelPlannerConfig struct {
 	// with it true, a B==1 fan-out is still bit-identical to serial (see the
 	// batchDecode field note in inkernel_planner.go).
 	BatchDecode bool
+	// IncrementalContext opts this planner into the composed system-context
+	// registry seam (inkernel_incremental.go): independently refreshable typed
+	// context sources whose changes drive incremental context invalidation. It is
+	// false by default, leaving the historical planner byte-for-byte inert (a nil
+	// registry is the no-op identity). Enabling it is a construction-time seam;
+	// sources are installed with SetIncrementalContext.
+	IncrementalContext bool
 }
 
 // NewInKernelPlannerWithConfig is the explicit configuration constructor for native planning.
@@ -95,6 +102,9 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		elideStaleReads:              cfg.ElideStaleReads,
 		deferColdTools:               cfg.DeferColdTools,
 		batchDecode:                  cfg.BatchDecode,
+	}
+	if cfg.IncrementalContext {
+		p.incrementalContext = EmptyIncrementalContext()
 	}
 	if backend == nil && metal {
 		m.PrepareMetalResidency(q4k)

@@ -8638,6 +8638,11 @@
           "category": "incidental",
           "reason": "Private post-decode completion guard that preserves fail-closed tool-call handling and assigns existing OVERSIZE or MALFORMED reason codes; it introduces no new gateway transport, execution engine, or admission authority.",
           "token": "markInKernelDroppedToolCalls"
+        },
+        {
+          "category": "incidental",
+          "reason": "Filename-derived token of the new internal/agent/inkernel_incremental.go port file; the file carries the composable system-context source/registry/snapshot seam and introduces no new gateway transport, engine dispatch, or admission authority.",
+          "token": "inkernelincremental"
         }
       ],
       "id": "gateway-engine",
@@ -8737,6 +8742,7 @@
         "inkernelbatch",
         "inkernelforcedtoolinstruction",
         "inkernelforcedtoolname",
+        "inkernelincremental",
         "inkernelresponseformatinstruction",
         "kernel32",
         "kernelSession",
@@ -10826,6 +10832,111 @@
           "category": "incidental",
           "reason": "Package-local output formatter moved with validation; context here is the existing test-run summary, not a new context plane.",
           "token": "writeValidateTestContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "direct port of the OpenCode system-context source type; introduces no new engine or transport authority",
+          "token": "SystemContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "contextKeyPattern"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "ValidContextKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "PackedContextSource"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "MakeContextSource"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "ContextGeneration"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "DuplicateContextKeyError"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "contextSource"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "MakeIncrementalContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "CombineIncrementalContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "InitializeIncrementalContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "ReconcileIncrementalContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "ReplaceIncrementalContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "ctxSnapshot"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "ctxMu"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "IncrementalContextGeneration"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "ReconcileIncrementalContextNow"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "ApplyIncrementalContextUpdate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "IncrementalContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "SetIncrementalContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
+          "token": "EmptyIncrementalContext"
         }
       ],
       "exclude": [
@@ -10834,11 +10945,14 @@
       "id": "context-ctx",
       "ignore": [
         "AffinityFromContext",
+        "ApplyIncrementalContextUpdate",
         "ApplyTraceContext",
         "COMPACTION_THRASH",
+        "CombineIncrementalContext",
         "CompactionCheckpointConflation",
         "CompactionContract",
         "CompactionRestoredTurns",
+        "ContextGeneration",
         "ContextKey",
         "ContextLimit",
         "ContextSeconds",
@@ -10846,24 +10960,38 @@
         "ContextTokenSeconds",
         "ContextTokensSaved",
         "ContextualID",
+        "DuplicateContextKeyError",
+        "EmptyIncrementalContext",
         "ExtractCompactionSummary",
         "FAK_COMPACTION_THRASH_STOP",
         "FeatureActivationTrackerFromContext",
         "FullContextInputTokens",
+        "IncrementalContext",
+        "IncrementalContextGeneration",
+        "InitializeIncrementalContext",
         "IsCopiedContext",
         "LookupSnapshotTieredContext",
+        "MakeContextSource",
+        "MakeIncrementalContext",
         "MaxContextTokensForBudget",
         "MechanismStaleContext",
         "MetricFactRecall",
         "NativeCompactionObservation",
+        "PackedContextSource",
+        "ReconcileIncrementalContext",
+        "ReconcileIncrementalContextNow",
         "RenderInvariantPrefix",
+        "ReplaceIncrementalContext",
         "RestoreCalls",
         "RetainedContextBytes",
         "RuntimeContextChanged",
         "ScopedContextInputTokens",
         "SearchRecall",
         "SensitiveContext",
+        "SetIncrementalContext",
+        "SystemContext",
         "TerminationContextLimit",
+        "ValidContextKey",
         "WithAffinity",
         "WithNativeCompactionObserver",
         "WithTraceContext",
@@ -10893,6 +11021,8 @@
         "consumeDecodedCtxViewEvent",
         "context",
         "contextBucket",
+        "contextKeyPattern",
+        "contextSource",
         "context_buckets",
         "context_cancelled",
         "context_changed",
@@ -10904,6 +11034,8 @@
         "ctx",
         "ctxAdviceNote",
         "ctxAdviceNoteOnce",
+        "ctxMu",
+        "ctxSnapshot",
         "ctxThrashConsecutiveRefills",
         "ctxsleep",
         "fak_fleet_repo_pulse_context_tokens_saved_total",

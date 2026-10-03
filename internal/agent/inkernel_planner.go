@@ -303,6 +303,16 @@ type InKernelPlanner struct {
 	// did not ask for it. Inert until the first claim-bearing warm. Guarded by mu.
 	warmClaimScope    radixkv.CacheIdentity
 	warmClaimScopeSet bool
+
+	// incrementalContext is the OPTIONAL composed set of independently refreshable
+	// system-context sources (inkernel_incremental.go). nil — the default and every
+	// planner that never calls SetIncrementalContext — leaves the historical planner
+	// byte-for-byte inert. ctxSnapshot is the durable comparison state advanced on each
+	// applied update; ctxMu guards both fields so a concurrent reconcile cannot race a
+	// snapshot advance.
+	incrementalContext *IncrementalContext
+	ctxSnapshot        ContextSnapshot
+	ctxMu              sync.Mutex
 }
 
 type inKernelOOMRetryClassStats struct {
@@ -769,6 +779,81 @@ func (p *InKernelPlanner) SetRestoreStash(stash func(trace, id, excerpt string, 
 		return
 	}
 	p.restoreStash = stash
+}
+
+// SetIncrementalContext installs the composed system-context registry for this planner
+// (inkernel_incremental.go). The durable comparison snapshot is deliberately left in
+// place: it is what lets a reconcile detect that a source has LEFT the registry (and
+// require a replacement) rather than treating the swap as a fresh, empty comparison. A
+// nil ctx is the inert identity, preserving the historical planner byte-for-byte.
+func (p *InKernelPlanner) SetIncrementalContext(ctx *IncrementalContext) {
+	if p == nil {
+		return
+	}
+	p.ctxMu.Lock()
+	defer p.ctxMu.Unlock()
+	p.incrementalContext = ctx
+}
+
+// IncrementalContextGeneration reports a fresh baseline generation for the installed
+// registry. The bool is false (and the generation zero) when no registry is set; the
+// error is *InitializationBlockedError when any source is temporarily unavailable.
+func (p *InKernelPlanner) IncrementalContextGeneration() (ContextGeneration, bool, error) {
+	if p == nil {
+		return ContextGeneration{}, false, nil
+	}
+	p.ctxMu.Lock()
+	ctx := p.incrementalContext
+	p.ctxMu.Unlock()
+	if ctx == nil {
+		return ContextGeneration{}, false, nil
+	}
+	generation, err := InitializeIncrementalContext(ctx)
+	return generation, true, err
+}
+
+// ReconcileIncrementalContextNow reconciles the installed registry against the
+// planner's stored snapshot. With no registry the result is Unchanged. On Updated or
+// ReplacementReady the stored snapshot ADVANCES (correct context invalidation); on
+// ReplacementBlocked it is left untouched so a later retry still sees the admitted
+// state.
+//
+// The caller must NOT mutate the returned ReconcileResult.Snapshot: on Unchanged it
+// aliases the planner's stored snapshot, and on Updated/ReplacementReady the planner
+// retains the same map it returns. Treat it as read-only comparison state.
+//
+// ctxMu is held across the source load/baseline/update/removed callbacks, so those
+// callbacks must NOT re-enter the planner (SetIncrementalContext,
+// IncrementalContextGeneration, or this method) on pain of deadlock.
+func (p *InKernelPlanner) ReconcileIncrementalContextNow() (ReconcileResult, error) {
+	if p == nil {
+		return ReconcileResult{Kind: ReconcileUnchanged}, nil
+	}
+	p.ctxMu.Lock()
+	defer p.ctxMu.Unlock()
+	if p.incrementalContext == nil {
+		return ReconcileResult{Kind: ReconcileUnchanged}, nil
+	}
+	res, err := ReconcileIncrementalContext(p.incrementalContext, p.ctxSnapshot)
+	if err != nil {
+		return ReconcileResult{}, err
+	}
+	switch res.Kind {
+	case ReconcileUpdated, ReconcileReplacementReady:
+		p.ctxSnapshot = res.Snapshot
+	}
+	return res, nil
+}
+
+// ApplyIncrementalContextUpdate reconciles the installed registry and returns the
+// model-visible incremental delta. invalidated is true exactly when a
+// replacement_ready occurred, signalling the caller must re-baseline resident context.
+func (p *InKernelPlanner) ApplyIncrementalContextUpdate() (string, bool, error) {
+	res, err := p.ReconcileIncrementalContextNow()
+	if err != nil {
+		return "", false, err
+	}
+	return res.Text, res.Kind == ReconcileReplacementReady, nil
 }
 
 // ApplyPromptShrink evaluates the configured or request-level prompt-shrink levers
