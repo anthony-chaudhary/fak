@@ -2112,11 +2112,21 @@ func (s *turnkeyServer) armHostMemoryBudget(limit uint64) {
 	})
 }
 
+// turnkeyREPLClient builds the HTTP client the interactive REPL uses for its
+// buffered native chat completions. It deliberately carries NO client-level
+// whole-request timeout: the request is already bound to ctx (the
+// signal-cancelled process context), so a valid native generation is not
+// cancelled by an arbitrary wall-clock ceiling — while Ctrl-C / SIGTERM still
+// terminates an in-flight request through that context. (#12926)
+func turnkeyREPLClient() *http.Client {
+	return &http.Client{}
+}
+
 func runTurnkeyREPL(ctx context.Context, in io.Reader, out io.Writer, baseURL string, profile macfit.TurnkeyProfile) error {
 	fmt.Fprintf(out, "\nInteractive chat on %s — Type prompt, press Enter. /quit or Ctrl-D to exit.\n", profile.Tier.ModelID)
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := turnkeyREPLClient()
 	turn := 0
 
 	promptUser := func() { fmt.Fprint(out, "you> ") }
