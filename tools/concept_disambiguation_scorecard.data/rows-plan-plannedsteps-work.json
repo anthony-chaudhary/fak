@@ -1,0 +1,20 @@
+{
+  "rows": [
+    {
+      "id": "x-plan-plannedstrategy",
+      "canonical": "PlannedSteps (issue-orchestrator wave plan)",
+      "family": "plan",
+      "kind": "metric",
+      "definition": "Exported count field on issueorchestrator's wave Plan recording the total step budget summed across the planned waves (the private debtlane campaign plan mirrors the same name).",
+      "distinction": "A planned-progress COUNT on a generated wave Plan - NOT the Plan that carries it, and NOT the resident-view Plan (planner) or the static explain Plan (memq).",
+      "distinct_from": ["plan-planner", "plan-memq"],
+      "aliases": [],
+      "grounding": "PlannedSteps",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
