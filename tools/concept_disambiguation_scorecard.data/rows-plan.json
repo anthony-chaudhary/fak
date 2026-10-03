@@ -95,6 +95,22 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "plan-buildstrixcandidatearchivefn",
+      "canonical": "buildStrixCandidateArchiveFn",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Package-level function VALUE bound to amdgpu.BuildStrixCandidateArchive in each validating package (internal/validate, internal/devcmd, cmd/fak); it is the test seam a probing harness swaps to replace the archive builder without touching the real builder.",
+      "distinction": "The swappable builder INDIRECTION (a package var holding a func value) - NOT the deterministic archive it produces (StrixCandidateArchive) and NOT candidate-planner's scored planner span.",
+      "distinct_from": ["plan-candidatearchive", "candidate-planner"],
+      "aliases": [],
+      "grounding": "buildStrixCandidateArchiveFn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }
