@@ -282,6 +282,20 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		argvOut = buildPiGuardLaunchArgv(tuiExecutable(), launch, argvOut)
 	}
 
+	// The generated provider advertises the placeholder apiKey "fak", which a
+	// keyless gateway ignores but a PROTECTED one rejects (401 invalid gateway key),
+	// so resolve the credential for the origin this launch actually selected — the
+	// /healthz probe above may have adopted the answering loopback address family —
+	// and hand it to the session-only extension below. A guarded launch is skipped:
+	// the guard's own in-process gateway authenticates it.
+	routerKey, rejectedKeySource := "", ""
+	if !launch.guarded {
+		routerKey, rejectedKeySource = piRouterCredential(launch.baseURL)
+		if rejectedKeySource != "" && !launch.quiet {
+			piReportRejectedKey(stderr, rejectedKeySource, launch.baseURL)
+		}
+	}
+
 	if launch.dryRun {
 		fmt.Fprintln(stderr, "fak pi: dry-run - not launching")
 		mode := "direct"
@@ -300,6 +314,15 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "  context     = resident target %d tokens (safe 50%% of %d served window, %s)\n", budget.ResidentTarget, budget.ServedWindow, budget.Provenance)
 		fmt.Fprintf(stderr, "  compaction  = reserve %d, keep %d (write=%t)\n", budget.OutputReserve, budget.KeepRecentTokens, *safeSettings)
 		fmt.Fprintln(stderr, "  provider-ext= -e <session-provider-extension> (installed and cleaned by the selected launch mode; no persistent config write)")
+		if !launch.guarded {
+			// Presence only: the resolved value never reaches argv, stdout, stderr, or
+			// any persistent Pi config.
+			if routerKey != "" {
+				fmt.Fprintln(stderr, "  gateway-key = resolved for the selected origin (session-only; value never printed)")
+			} else {
+				fmt.Fprintln(stderr, "  gateway-key = none resolved (keyless session)")
+			}
+		}
 		fmt.Fprintln(stderr, "  command     = "+strings.Join(argvOut, " "))
 		fmt.Fprintln(stdout, strings.Join(argvOut, " "))
 		return 0
@@ -309,9 +332,12 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		// Keep an ordinary launch free of persistent Pi config writes while still making the
 		// fak provider reachable on a fresh install. Pi loads this provider definition for this
 		// child only; explicit user extensions remain supported and follow it in argv order.
+		// The resolved router key rides in that 0600 session-only file and nowhere else —
+		// not argv, not the dry-run/print-env output, not ~/.pi/agent/models.json — and
+		// cleanupProvider removes the file when the child exits.
 		var cleanupProvider func()
 		var err error
-		argvOut, cleanupProvider, err = installPiLaunchProviderExtension(argvOut, launch.baseURL, launch.model, servedWindow, "")
+		argvOut, cleanupProvider, err = installPiLaunchProviderExtension(argvOut, launch.baseURL, launch.model, servedWindow, routerKey)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak pi: install session provider: %v\n", err)
 			return 1
@@ -356,6 +382,69 @@ func configuredPiProviderBaseURL(target string) string {
 		return ""
 	}
 	return strings.TrimSpace(cfg.Providers[projectassets.DefaultPiProviderID].BaseURL)
+}
+
+// piRouterCredential resolves the gateway credential for the origin a `fak pi` launch
+// actually selected, through the native auto-router path (resolveRouterAPIKey) — the same
+// resolution and origin scoping `fak chat` and `fak agent` auto-connect use. Every
+// returned candidate must pass the existing bounded HMAC challenge at the selected
+// endpoint before it reaches Pi, including the legacy workspace URL-match fallback.
+// This proves endpoint key possession, not authenticated process identity: a proof
+// can be relayed. Saved pairings also require the configured origin or its single
+// loopback-family fallback to match.
+//
+// The second result is the SOURCE label of a candidate that failed that proof — never the
+// value — so a rejected credential is legible in the default CLI output instead of surfacing
+// later as an opaque 401 from the child. It is "" when a key resolved, and also "" when
+// nothing was configured for this origin: a keyless launch stays keyless.
+func piRouterCredential(origin string) (key, rejectedSource string) {
+	key = resolveRouterAPIKey("", false, true, origin)
+	if key != "" {
+		// Legacy workspace configuration matches the URL but does not prove key
+		// possession. Verify every returned candidate before handing it to Pi.
+		if verifiedRouterCredential(origin, key) == "" {
+			return "", "router configuration"
+		}
+		return key, ""
+	}
+	if strings.TrimSpace(os.Getenv(guardRouterKeyEnv)) != "" {
+		return "", guardRouterKeyEnv
+	}
+	if piPairedOriginSelected(origin) {
+		return "", guardRouterPairedKeySource
+	}
+	return "", ""
+}
+
+// piPairedOriginSelected reports whether node.json's selected origin is the launch origin or
+// its single loopback-family fallback — the same origin match pairedNodeRouterAPIKey performs
+// before it proves a saved key. It is a local comparison (no proof round-trip), so a launch
+// that resolved no credential can still attribute the rejected candidate's source without a
+// second network call. A paired node with no key (or a template placeholder) is keyless, not
+// rejected, so it reports false.
+func piPairedOriginSelected(origin string) bool {
+	cfg, err := nodeReadCfg()
+	if err != nil || isTemplateCredential(strings.TrimSpace(cfg.Key)) {
+		return false
+	}
+	selected := strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(origin), "/"), "/v1")
+	configured := strings.TrimRight(strings.TrimSpace(cfg.URL), "/")
+	if selected == "" || configured == "" {
+		return false
+	}
+	if selected == configured {
+		return true
+	}
+	fallback, ok := fakclient.LoopbackFallbackURL(configured)
+	return ok && strings.TrimRight(fallback, "/") == selected
+}
+
+// piReportRejectedKey writes the bounded, secret-free diagnostic for a candidate credential
+// that did not prove possession at the selected origin. It names the source and the origin
+// only: no key material, in any form, is ever written.
+func piReportRejectedKey(stderr io.Writer, source, origin string) {
+	fmt.Fprintf(stderr, "fak pi: the %s gateway key did not prove possession at %s (unreachable origin, or a stale credential).\n", source, origin)
+	fmt.Fprintln(stderr, "  Launching without it; a protected gateway will reject the session. Re-pair with `fak node use`, or export a matching FAK_GATEWAY_KEY, then retry.")
 }
 
 // installPiLaunchProviderExtension gives a raw `fak pi` child a launch-local `fak`
