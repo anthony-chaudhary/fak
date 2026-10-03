@@ -131,6 +131,12 @@ type Slot struct {
 	KVCacheStationary bool          // Remains resident in UMA
 	KVCacheBytes      int64         // Allocated KV cache memory in bytes
 
+	// PrefixHits / PrefixMatchedTokens record whether this slot's admission
+	// reused a cached GDN recurrent boundary and how many prompt tokens it
+	// skipped re-folding.
+	PrefixHits          int
+	PrefixMatchedTokens int
+
 	// SubmissionSeq is the request's stable submission-order identity (M2 ordering key).
 	SubmissionSeq uint64
 	// PendingPrompt is the full prompt copy still being consumed by budgeted prefill;
@@ -206,30 +212,32 @@ func (s *Slot) snapshot() *Slot {
 	defer s.mu.Unlock()
 
 	cp := &Slot{
-		Index:             s.Index,
-		SessionID:         s.SessionID,
-		State:             s.State,
-		Request:           s.Request,
-		TargetTokens:      s.TargetTokens,
-		ExecutionDepth:    s.ExecutionDepth,
-		CurrentDepth:      s.CurrentDepth,
-		RecurrentPasses:   s.RecurrentPasses,
-		YieldCount:        s.YieldCount,
-		ResumeCount:       s.ResumeCount,
-		LastToken:         s.LastToken,
-		EvictionDuration:  s.EvictionDuration,
-		BytesSwapped:      s.BytesSwapped,
-		ReprefillTokens:   s.ReprefillTokens,
-		KVCacheStationary: s.KVCacheStationary,
-		KVCacheBytes:      s.KVCacheBytes,
-		SubmissionSeq:     s.SubmissionSeq,
-		PrefillPos:        s.PrefillPos,
-		sess:              s.sess,
-		tokenCh:           s.tokenCh,
-		doneCh:            s.doneCh,
-		err:               s.err,
-		AdmittedAt:        s.AdmittedAt,
-		CompletedAt:       s.CompletedAt,
+		Index:               s.Index,
+		SessionID:           s.SessionID,
+		State:               s.State,
+		Request:             s.Request,
+		TargetTokens:        s.TargetTokens,
+		ExecutionDepth:      s.ExecutionDepth,
+		CurrentDepth:        s.CurrentDepth,
+		RecurrentPasses:     s.RecurrentPasses,
+		YieldCount:          s.YieldCount,
+		ResumeCount:         s.ResumeCount,
+		LastToken:           s.LastToken,
+		EvictionDuration:    s.EvictionDuration,
+		BytesSwapped:        s.BytesSwapped,
+		ReprefillTokens:     s.ReprefillTokens,
+		KVCacheStationary:   s.KVCacheStationary,
+		KVCacheBytes:        s.KVCacheBytes,
+		SubmissionSeq:       s.SubmissionSeq,
+		PrefillPos:          s.PrefillPos,
+		PrefixHits:          s.PrefixHits,
+		PrefixMatchedTokens: s.PrefixMatchedTokens,
+		sess:                s.sess,
+		tokenCh:             s.tokenCh,
+		doneCh:              s.doneCh,
+		err:                 s.err,
+		AdmittedAt:          s.AdmittedAt,
+		CompletedAt:         s.CompletedAt,
 	}
 	if s.GeneratedTokens != nil {
 		cp.GeneratedTokens = append([]int(nil), s.GeneratedTokens...)
@@ -267,6 +275,8 @@ func (s *Slot) reset() {
 	s.SubmissionSeq = 0
 	s.PendingPrompt = nil
 	s.PrefillPos = 0
+	s.PrefixHits = 0
+	s.PrefixMatchedTokens = 0
 	s.sess = nil
 	s.tokenCh = nil
 	s.doneCh = nil
@@ -301,6 +311,16 @@ type ContinuousBatcherConfig struct {
 	// 0 (default) preserves the legacy eager-prefill, decode-only stepping behavior;
 	// > 0 enables a PREFILL arm for slots admitted with ChunkedPrefill.
 	PrefillBudget int
+
+	// DisableRecurrentPrefixReuse turns off GDN recurrent prefix reuse. By default
+	// (false) a hybrid model enables an extend-only RecurrentPrefixCache so a
+	// multi-turn conversation prefills only the new suffix instead of re-folding
+	// the whole prompt from token 0. Non-hybrid models never build the cache.
+	DisableRecurrentPrefixReuse bool
+
+	// RecurrentPrefixCapacity bounds retained conversation boundaries when reuse
+	// is enabled (0 → DefaultRecurrentPrefixCapacity).
+	RecurrentPrefixCapacity int
 }
 
 // DefaultContinuousBatcherConfig returns calibrated defaults for Strix Halo and Qwen3.8-14B.
@@ -347,6 +367,12 @@ type BatchStepResult struct {
 	// DecodeResidentUIDs is the stable-UID roster of resident decodable slots observed
 	// at the start of the step (M2 order: SubmissionSeq asc, tie-break SessionID).
 	DecodeResidentUIDs []uint64
+	// PrefixReuseTokens is the number of prompt tokens skipped by GDN recurrent
+	// prefix reuse observed since the previous step (0 when nothing reused).
+	PrefixReuseTokens int
+	// PrefixHits is the number of admissions observed since the previous step
+	// that reused a cached recurrent boundary.
+	PrefixHits int
 }
 
 // ContinuousBatcher manages dynamic iteration-level continuous batching for subagent turn loops.
@@ -362,6 +388,17 @@ type ContinuousBatcher struct {
 	seqCounter   uint64
 	uidSeq       uint64
 	closed       bool
+
+	// prefixCache is the extend-only GDN recurrent boundary cache. It is non-nil
+	// only for a hybrid model with reuse enabled (and not explicitly disabled).
+	prefixCache *RecurrentPrefixCache
+
+	// pendingPrefixHits / pendingPrefixReuseTokens are admissions observed since
+	// the last emitted step. They are incremented once at slot admission (when a
+	// cached recurrent boundary is reused) and captured-and-reset by the next
+	// step, so a reused slot resident for N steps is reported exactly once.
+	pendingPrefixHits        int
+	pendingPrefixReuseTokens int
 }
 
 // NewContinuousBatcher constructs a scheduler with the specified configuration.
@@ -410,13 +447,41 @@ func NewContinuousBatcher(cfg ...ContinuousBatcherConfig) (*ContinuousBatcher, e
 		}
 	}
 
-	return &ContinuousBatcher{
+	cb := &ContinuousBatcher{
 		cfg:          c,
 		slots:        slots,
 		sessionMap:   make(map[string]*Slot),
 		completedMap: make(map[string]*Slot),
 		waitingQueue: make([]*SubagentRequest, 0),
-	}, nil
+	}
+	if c.Model != nil && c.Model.Cfg.IsHybrid() && !c.DisableRecurrentPrefixReuse {
+		cb.prefixCache = NewRecurrentPrefixCache(c.RecurrentPrefixCapacity)
+	}
+	return cb, nil
+}
+
+// PrefixCacheStats returns the recurrent prefix-cache telemetry and whether the
+// cache is enabled for this batcher.
+func (cb *ContinuousBatcher) PrefixCacheStats() (RecurrentPrefixCacheStats, bool) {
+	cb.mu.Lock()
+	cache := cb.prefixCache
+	cb.mu.Unlock()
+	if cache == nil {
+		return RecurrentPrefixCacheStats{}, false
+	}
+	return cache.Stats(), true
+}
+
+// PrefixCacheLen returns the number of retained conversation boundaries, or 0
+// when the cache is disabled.
+func (cb *ContinuousBatcher) PrefixCacheLen() int {
+	cb.mu.Lock()
+	cache := cb.prefixCache
+	cb.mu.Unlock()
+	if cache == nil {
+		return 0
+	}
+	return cache.Len()
 }
 
 // Submit enqueues a subagent request into an available slot or waiting queue.
@@ -512,6 +577,42 @@ func (cb *ContinuousBatcher) initSlot(index int, req *SubagentRequest) *Slot {
 		doneCh:            make(chan struct{}),
 	}
 
+	// GDN recurrent prefix reuse (hybrid models only). model.PrefixSnapshot is the
+	// only safe reuse unit for a Gated DeltaNet fold: the linear recurrence is an
+	// irreversible fold over the whole prefix, so a whole-prefix boundary captured
+	// at the token position that produced it — and carrying the full linear state
+	// via KVCache.Clone → linear.clone() plus softmax KV — is the sole
+	// mathematically valid reuse unit. Lookup is a take: on a hit ownership of the
+	// snapshot transfers here and we prefill only req.PromptTokens[reused:].
+	var (
+		reused       int
+		restored     bool
+		restoredSess *model.Session
+	)
+	if cb.prefixCache != nil && cb.cfg.Model != nil && len(req.PromptTokens) > 0 {
+		if matched, snap, hit := cb.prefixCache.Lookup(req.SessionID, req.PromptTokens); hit {
+			// Reuse is intentionally host-only: a device session would need a
+			// matching Backend, or Restore refuses closed→miss.
+			sess := &model.Session{
+				M:     cb.cfg.Model,
+				Cache: model.NewKVCache(cb.cfg.Model.Cfg),
+			}
+			if err := snap.Restore(sess); err != nil {
+				// A failed restore is a miss, not a hit: release the snapshot and
+				// fall back to a full fresh-session prefill.
+				snap.Close()
+			} else {
+				reused = matched
+				restored = true
+				restoredSess = sess
+				// Once-only admission accounting: report this reuse on the next
+				// emitted step, not on every step the slot stays resident.
+				cb.pendingPrefixHits++
+				cb.pendingPrefixReuseTokens += reused
+			}
+		}
+	}
+
 	if cb.cfg.PrefillBudget > 0 && req.ChunkedPrefill {
 		// Budgeted chunked prefill: defer activation. The slot consumes its prompt
 		// copy in budget-sized chunks across PREFILL steps, then transitions to
@@ -527,10 +628,23 @@ func (cb *ContinuousBatcher) initSlot(index int, req *SubagentRequest) *Slot {
 		slot.PrefillPos = 0
 		slot.LastToken = 0
 		if cb.cfg.Model != nil {
-			slot.sess = &model.Session{
-				M:     cb.cfg.Model,
-				Cache: model.NewKVCache(cb.cfg.Model.Cfg),
+			if restored {
+				// The restored session already holds the recurrent fold for the
+				// first `reused` tokens; PendingPrompt stays the full prompt so the
+				// existing PREFILL arm consumes only the suffix via
+				// PendingPrompt[PrefillPos:...].
+				slot.sess = restoredSess
+				slot.PrefillPos = reused
+			} else {
+				slot.sess = &model.Session{
+					M:     cb.cfg.Model,
+					Cache: model.NewKVCache(cb.cfg.Model.Cfg),
+				}
 			}
+		}
+		if restored {
+			slot.PrefixHits = 1
+			slot.PrefixMatchedTokens = reused
 		}
 		cb.slots[index] = slot
 		cb.sessionMap[req.SessionID] = slot
@@ -538,17 +652,32 @@ func (cb *ContinuousBatcher) initSlot(index int, req *SubagentRequest) *Slot {
 	}
 
 	if cb.cfg.Model != nil {
-		sess := &model.Session{
-			M:     cb.cfg.Model,
-			Cache: model.NewKVCache(cb.cfg.Model.Cfg),
+		sess := restoredSess
+		if sess == nil {
+			sess = &model.Session{
+				M:     cb.cfg.Model,
+				Cache: model.NewKVCache(cb.cfg.Model.Cfg),
+			}
 		}
 		if len(req.PromptTokens) > 0 {
-			logits := sess.Prefill(req.PromptTokens)
-			slot.LastToken = argmax(logits)
+			if restored && reused >= len(req.PromptTokens) {
+				// Strict extend guarantees a remaining suffix, but guard the
+				// impossible case rather than call Prefill with an empty slice.
+				slot.LastToken = req.PromptTokens[len(req.PromptTokens)-1]
+			} else {
+				logits := sess.Prefill(req.PromptTokens[reused:])
+				slot.LastToken = argmax(logits)
+			}
 		} else {
 			slot.LastToken = 1
 		}
 		slot.sess = sess
+		if restored {
+			slot.PrefixHits = 1
+			slot.PrefixMatchedTokens = reused
+		}
+		// Store the boundary this prompt produced so a later turn can extend it.
+		cb.retainPrefixLocked(slot)
 	} else {
 		if len(req.PromptTokens) > 0 {
 			slot.LastToken = req.PromptTokens[len(req.PromptTokens)-1]
@@ -729,6 +858,13 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 	// initSlot applies the budgeted-prefill rule for ChunkedPrefill requests.
 	promotedIDs := cb.tryPromoteWaitingLocked()
 
+	// Capture and reset once-only admission accounting now that this step's
+	// promotions (which may reuse a cached boundary) are included.
+	prefixHits := cb.pendingPrefixHits
+	prefixReuseTokens := cb.pendingPrefixReuseTokens
+	cb.pendingPrefixHits = 0
+	cb.pendingPrefixReuseTokens = 0
+
 	// 2. Gather prefilling slots and the resident decodable roster, and count
 	// the other states in the same pass.
 	var prefilling []*Slot
@@ -827,6 +963,8 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 			PrefillTokens:        total,
 			DecodeTokens:         0,
 			DecodeResidentUIDs:   residentUIDs,
+			PrefixHits:           prefixHits,
+			PrefixReuseTokens:    prefixReuseTokens,
 		}, nil
 	}
 
@@ -979,6 +1117,8 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 		PrefillTokens:        0,
 		DecodeTokens:         activeCount,
 		DecodeResidentUIDs:   residentUIDs,
+		PrefixHits:           prefixHits,
+		PrefixReuseTokens:    prefixReuseTokens,
 	}
 
 	return result, nil
@@ -1000,6 +1140,41 @@ func (cb *ContinuousBatcher) finishPrefillLocked(slot *Slot, logits []float32) {
 		slot.LastToken = 42 + slot.Index*31
 	}
 	slot.State = SlotStateActiveDecode
+	// The recurrent boundary is only valid once the whole prompt has been
+	// folded, so retain it only when the slot has consumed its entire pending
+	// prompt. Using slot.PromptTokens (the stored full prompt) as the key is
+	// exact: the snapshot captures the fold over all of it.
+	if slot.PrefillPos >= len(slot.PendingPrompt) {
+		cb.retainPrefixLocked(slot)
+	}
+}
+
+// retainPrefixLocked stores the recurrent boundary a fully-consumed prompt
+// produced, so a later conversation turn can extend it. It is a no-op unless a
+// cache is enabled, a real model session exists, and the slot holds a non-empty
+// prompt. Ownership of the captured snapshot transfers to the cache; a refused
+// store is recovered by evicting the stale entry and re-capturing once, because
+// a stale held prefix (diverged prompt) would otherwise block all future
+// retention for this key and force every later turn to full-prefill.
+// Caller MUST hold cb.mu and slot.mu. The one eager-path call from initSlot runs
+// before the slot is published to cb.slots/sessionMap, so no other goroutine can
+// observe it.
+func (cb *ContinuousBatcher) retainPrefixLocked(slot *Slot) {
+	if cb.prefixCache == nil || cb.cfg.Model == nil || slot.sess == nil || len(slot.PromptTokens) == 0 {
+		return
+	}
+	snap, err := slot.sess.PrefixSnapshot()
+	if err != nil || snap == nil {
+		return
+	}
+	if err := cb.prefixCache.Store(slot.SessionID, slot.PromptTokens, snap); err != nil {
+		// Divergence liveness: the stale entry blocks retention for this key, so
+		// evict it and store a fresh boundary once more.
+		cb.prefixCache.Evict(slot.SessionID)
+		if fresh, ferr := slot.sess.PrefixSnapshot(); ferr == nil && fresh != nil {
+			_ = cb.prefixCache.Store(slot.SessionID, slot.PromptTokens, fresh)
+		}
+	}
 }
 
 // OperationalIntensity calculates effective compute-tile operational intensity (FLOPs/byte)
@@ -1321,6 +1496,10 @@ func (cb *ContinuousBatcher) Close() error {
 			close(slot.tokenCh)
 		}
 		slot.mu.Unlock()
+	}
+
+	if cb.prefixCache != nil {
+		cb.prefixCache.Clear()
 	}
 
 	return nil
