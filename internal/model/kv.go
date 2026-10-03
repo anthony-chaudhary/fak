@@ -1742,7 +1742,11 @@ func (s *Session) Step(id int) []float32 {
 }
 
 // Generate greedily decodes n tokens after the prompt and returns their ids.
+// An empty prompt produces no tokens and leaves the session unchanged.
 func (s *Session) Generate(prompt []int, n int) []int {
+	if len(prompt) == 0 {
+		return nil
+	}
 	defer s.BeginGPUKeepAlive()()
 	logits := s.Prefill(prompt)
 	out := make([]int, 0, n)
