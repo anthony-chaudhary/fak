@@ -183,7 +183,9 @@ func commandRunner(ctx context.Context, dir string, argv ...string) (string, int
 type Resolver struct {
 	run     Runner
 	execRun CommandRunner
-	dir     string
+	// realCommandExecution excludes injected command evidence from durable proof reuse.
+	realCommandExecution bool
+	dir                  string
 
 	// symptomTags are EXTRA build tags a caller supplies explicitly (#13243), unioned
 	// with the tags derived from the changed test files' //go:build constraints by
@@ -202,16 +204,18 @@ type Resolver struct {
 }
 
 // New is the real-git resolver, registered as "dos_verify".
-func New() *Resolver { return &Resolver{run: gitRunner, execRun: commandRunner} }
+func New() *Resolver {
+	return &Resolver{run: gitRunner, execRun: commandRunner, realCommandExecution: true}
+}
 
 // NewWithRunner injects a Runner + dir (tests, or an alternate evidence source).
 func NewWithRunner(r Runner, dir string) *Resolver {
-	return &Resolver{run: r, execRun: commandRunner, dir: dir}
+	return &Resolver{run: r, execRun: commandRunner, realCommandExecution: true, dir: dir}
 }
 
 // NewWithRunners injects both git and command runners. It is used by the
 // execution witness tests so red/green selector evidence can be driven without
-// shelling out to arbitrary commands.
+// shelling out to arbitrary commands. Injected command evidence is never cached.
 func NewWithRunners(git Runner, exec CommandRunner, dir string) *Resolver {
 	return &Resolver{run: git, execRun: exec, dir: dir}
 }

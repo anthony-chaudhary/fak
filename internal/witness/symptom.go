@@ -289,12 +289,45 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 	// can add a tag the derivation missed but never remove one a test file declares.
 	tags := mergeTags(resolveGoBuildTags(ctx, r.run, r.dir, commit, tests), r.symptomTags)
 
-	// GREEN at the fix: the changed test must pass at <ref> as committed.
+	// Materialize the candidate first, preserving the established verdict order:
+	// a bad candidate is reported before any parent preparation problem.
 	commitDir, cleanupCommit, err := v.scratchWorktree(ctx, commit)
 	if err != nil {
 		return abi.WitnessAbstain, "candidate scratch worktree failed"
 	}
 	defer cleanupCommit()
+	parentDir := ""
+	var cleanupParent func()
+	defer func() {
+		if cleanupParent != nil {
+			cleanupParent()
+		}
+	}()
+	prepareParent := func() string {
+		parentDir, cleanupParent, err = v.scratchWorktree(ctx, parent)
+		if err != nil {
+			return "parent scratch worktree failed"
+		}
+		if !overlayTestsAtRef(ctx, r.run, r.dir, commit, parentDir, tests) {
+			return "could not overlay changed tests onto parent"
+		}
+		return ""
+	}
+
+	proofKey, parentProblem := "", ""
+	cacheCandidate := r.realCommandExecution && len(selections) > 0 && len(pyTests) == 0 &&
+		symptomChangedTestsCheapCacheEligible(ctx, r.run, r.dir, commit, tests)
+	if cacheCandidate {
+		parentProblem = prepareParent()
+		if parentProblem == "" {
+			proofKey, _ = r.symptomProofCacheKey(ctx, commitDir, parentDir, selections, tags)
+		}
+		if proofKey != "" && r.symptomProofCacheConfirmed(ctx, proofKey) {
+			return abi.WitnessConfirmed, "reused confirmed selected symptom proof (parent failed; candidate passed)"
+		}
+	}
+
+	// GREEN at the fix: the changed test must pass at <ref> as committed.
 	if len(selections) > 0 {
 		for _, selection := range selections {
 			result := runSelectedGoTests(ctx, exec, commitDir, []string{selection.Package}, tags, exactTestSelectors(selection.Tests))
@@ -325,15 +358,13 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 		return abi.WitnessRefuted, "candidate changed-test package failed"
 	}
 
-	// RED at the parent: overlay each changed test file (its <ref> content) onto the parent
-	// worktree, then run it. It must FAIL — the test reproduces the bug against the old source.
-	parentDir, cleanupParent, err := v.scratchWorktree(ctx, parent)
-	if err != nil {
-		return abi.WitnessAbstain, "parent scratch worktree failed"
+	// RED at the parent: the changed tests are already overlaid onto the parent
+	// worktree. They must FAIL there — the test reproduces the old behavior.
+	if parentDir == "" {
+		parentProblem = prepareParent()
 	}
-	defer cleanupParent()
-	if !overlayTestsAtRef(ctx, r.run, r.dir, commit, parentDir, tests) {
-		return abi.WitnessAbstain, "could not overlay changed tests onto parent"
+	if parentProblem != "" {
+		return abi.WitnessAbstain, parentProblem
 	}
 	if len(selections) > 0 {
 		parentRed := false
@@ -365,6 +396,9 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 		}
 		if !parentRed {
 			return abi.WitnessRefuted, "selected symptom test passed at parent"
+		}
+		if proofKey != "" {
+			r.symptomProofCachePutConfirmed(ctx, proofKey)
 		}
 		return abi.WitnessConfirmed, "selected symptom test failed at parent and passed at candidate"
 	}
