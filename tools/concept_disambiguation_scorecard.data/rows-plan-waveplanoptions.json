@@ -1,0 +1,24 @@
+{
+  "rows": [
+    {
+      "id": "cov-plan-waveplanoptions",
+      "canonical": "WavePlanOptions (wave-generation plan config)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The configuration struct `WavePlanOptions` (internal/debtlane/wave.go and internal/issueorchestrator/wave.go) passed to each `PlanWaves` - wave size cap, max waves, target grade/points, excluded lanes, held-lane auto-detect, and graph override - that shapes how a wave plan is generated.",
+      "distinction": "The INPUT config that shapes wave generation - NOT the produced `WavePlan` campaign plan itself (its output) and NOT the umbrella `plan` domain.",
+      "distinct_from": [
+        "cov-debt-tail2-plan-waveplan"
+      ],
+      "aliases": [
+        "debtlane.WavePlanOptions"
+      ],
+      "grounding": "WavePlanOptions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
