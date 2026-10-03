@@ -1708,6 +1708,7 @@ func (s *Session) prefillTokenLoop(ids []int) []float32 {
 // sessions reuse their logits buffer; consume or copy the returned slice before the next
 // quantized Prefill/Step call on the same session.
 func (s *Session) Step(id int) []float32 {
+	defer s.BeginGPUKeepAlive()()
 	s.validateDeviceOnlyExecution("decode")
 	if s.M.Cfg.IsDeepSeekV41() {
 		return s.stepV41(id)
@@ -1742,6 +1743,7 @@ func (s *Session) Step(id int) []float32 {
 
 // Generate greedily decodes n tokens after the prompt and returns their ids.
 func (s *Session) Generate(prompt []int, n int) []int {
+	defer s.BeginGPUKeepAlive()()
 	logits := s.Prefill(prompt)
 	out := make([]int, 0, n)
 	for i := 0; i < n; i++ {
