@@ -240,6 +240,9 @@ type ControlIngress interface {
 // Config configures a gateway Server. The zero value is not valid — use New,
 // which fills defaults and validates against the registered ABI.
 type Config struct {
+	// WorkspaceAdmissionPermissive explicitly admits lease DEFAULT_DENY failures.
+	// Peer LEASE_HELD conflicts and kernel policy denials remain enforced.
+	WorkspaceAdmissionPermissive bool
 	// ControlIngress optionally supplies the operator control request handler.
 	// Nil leaves the control ingress disabled.
 	ControlIngress ControlIngress

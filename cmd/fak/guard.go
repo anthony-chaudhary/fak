@@ -94,6 +94,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	apiKeyEnv := fs.String("api-key-env", "", "env var holding the UPSTREAM API key. For --provider anthropic this is the explicit opt-IN to API billing (e.g. --api-key-env ANTHROPIC_API_KEY); the default is your Claude Pro/Max subscription via OAuth, even when ANTHROPIC_API_KEY is exported. For other providers the default forwards the client's own key (passthrough).")
 	anthropicOAuth := fs.Bool("anthropic-oauth", false, "force the Claude Pro/Max SUBSCRIPTION OAuth token upstream (sourced, in precedence order, from CLAUDE_CODE_OAUTH_TOKEN, then <claude-config>/.credentials.json, then <claude-config>/.oauth-token) sent as Authorization: Bearer + the oauth beta. This is ALREADY the default for --provider anthropic (even when ANTHROPIC_API_KEY is set); the flag forces it and fails loud if no token is found.")
 	oauthTokenEnv := fs.String("oauth-token-env", "CLAUDE_CODE_OAUTH_TOKEN", "env var to read the subscription OAuth token from first")
+	workspaceAdmissionPermissive := fs.Bool("workspace-admission-permissive", rwEnvBool("FAK_WORKSPACE_ADMISSION_PERMISSIVE"), "explicitly admit workspace lease DEFAULT_DENY failures with observable would_deny details; peer LEASE_HELD and kernel policy denies remain enforced (env: FAK_WORKSPACE_ADMISSION_PERMISSIVE)")
 	policyPath := fs.String("policy", "", "capability-floor manifest to enforce (default: the built-in guard floor; see --dump-policy)")
 	postureFlag := fs.String("posture", "", "adjudication posture: default_open|fail_closed|admit_and_log (default: default_open; overrides policy manifest posture; env: FAK_GUARD_POSTURE)")
 	selfModifyFlag := fs.String("self-modify", "", "self-modification mode: permissive|strict (default: permissive; overrides policy manifest self_modify_mode; env: FAK_GUARD_SELF_MODIFY)")
@@ -991,11 +992,12 @@ func cmdManageCommand(commandName string, argv []string) {
 	setGuardCompactionAnchorMode(*compactAnchorHead)
 
 	srv, err := gateway.New(gateway.Config{
-		EngineID: "mock",
-		Model:    gatewayModel,
-		BaseURL:  resolvedBase,
-		Provider: up,
-		APIKey:   apiKey,
+		WorkspaceAdmissionPermissive: *workspaceAdmissionPermissive,
+		EngineID:                     "mock",
+		Model:                        gatewayModel,
+		BaseURL:                      resolvedBase,
+		Provider:                     up,
+		APIKey:                       apiKey,
 		// The child is the only caller of a normal guard's loopback gateway, so surface
 		// the upstream's scrubbed, bounded 400 detail there. This turns an opaque fakc
 		// "check model/roles/ranges" failure into the provider's exact rejected field

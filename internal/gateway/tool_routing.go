@@ -143,7 +143,20 @@ func (s *Server) adjudicateWithSeq(ctx context.Context, tool, rawArgs string, re
 	}
 	if v.Kind == abi.VerdictAllow || v.Kind == abi.VerdictTransform {
 		if leaseVerdict, refused := s.adjudicateLeaseAdmission(ctx, tc.Tool, effectiveArgs, readOnly); refused {
-			wv = leaseVerdict
+			if s.workspaceAdmissionPermissive && leaseVerdict.Reason == abi.ReasonName(abi.ReasonDefaultDeny) {
+				// Preserve TRANSFORM so clients still apply the repaired arguments.
+				if wv.Detail == nil {
+					wv.Detail = make(map[string]string)
+				}
+				wv.Detail["kernel_by"] = wv.By
+				wv.By = "lease-admission-permissive"
+				wv.Detail["workspace_admission"] = "permissive"
+				wv.Detail["would_deny"] = leaseVerdict.Reason
+				wv.Detail["would_deny_by"] = leaseVerdict.By
+				wv.Detail["would_deny_claim"] = leaseVerdict.Detail["claim"]
+			} else {
+				wv = leaseVerdict
+			}
 		}
 	}
 	return wv, repaired, nil
@@ -446,6 +459,13 @@ func adjudicateWorkdir(args map[string]any, root string) (string, bool) {
 }
 
 func adjudicateWorkspacePath(root, workdir, target string) (string, bool) {
+	// Normalize both sides of Rel: host aliases such as macOS /var and
+	// /private/var must describe the same workspace boundary.
+	canonicalRoot, rootErr := canonicalExistingWorkspacePath(root)
+	if rootErr != nil {
+		return "", false
+	}
+	root = canonicalRoot
 	target = strings.TrimSpace(strings.Trim(target, `"'`))
 	if target == "" {
 		return "", false
@@ -539,14 +559,8 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 		return WireVerdict{}, nil, err
 	}
 	opTrace, opTool = tc.TraceID, tc.Tool
-	_, _, mutating, _ := adjudicateRawWriteTargets(tc.Tool, rawArgs, readOnly)
-	if mutating {
-		// DOS exposes an authoritative lease snapshot, but no operation that can
-		// hold that snapshot stable across an arbitrary tool execution. A peer
-		// could acquire a conflicting lane after a check and before dispatch.
-		// Proposal adjudication remains available; actual mutating syscalls fail
-		// closed until the execution boundary has an atomic DOS guard.
-		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, "atomic workspace lease guard is unavailable for mutating syscall"), nil, nil
+	if refusal, refused := s.strictInitialWorkspaceExecution(ctx, tc, readOnly); refused {
+		return refusal, nil, nil
 	}
 
 	if wv, env, handled, err := s.syscallNative(ctx, tc, readOnly); handled {
@@ -565,7 +579,7 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 	// dispatchEnsemble re-reads the same routing decision and submits N independent
 	// calls. The single-model PICK below is byte-for-byte the pre-#597 path.
 	if plan, ok := s.ensemblePlan(tc.Tool, readOnly, tc.Meta); ok {
-		wv, env, err = s.dispatchEnsemble(ctx, tc, plan)
+		wv, env, err = s.dispatchEnsembleWithReadOnly(ctx, tc, plan, readOnly)
 		if err != nil {
 			return wv, env, err
 		}
@@ -575,7 +589,11 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 		return wv, env, nil
 	}
 	lookupCtx, lookupReceipt := vdso.WithLookupReceipt(ctx)
-	r, v := s.k.Syscall(lookupCtx, tc)
+	r, v, admissionDetails, refusal := s.workspaceKernelSyscall(lookupCtx, tc, readOnly)
+	if refusal != nil {
+		return *refusal, nil, nil
+	}
+	defer func() { annotateWorkspaceExecution(&wv, admissionDetails) }()
 	if lookupReceipt.Matches(r) && v.Kind == abi.VerdictAllow && r.Status == abi.StatusOK && resultMeta(r)["admit"] != "quarantined" {
 		FeatureActivationTrackerFromContext(ctx).RecordActivation(FeatureVDSO, FeatureOutcomeUsed)
 	}
@@ -633,6 +651,78 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 	return wv, env, nil
 }
 
+// strictInitialWorkspaceExecution retains the pre-existing strict mutation fence.
+func (s *Server) strictInitialWorkspaceExecution(ctx context.Context, call *abi.ToolCall, readOnly bool) (WireVerdict, bool) {
+	_, _, mutating, _ := adjudicateRawWriteTargets(call.Tool, string(resolveBytes(ctx, call.Args)), readOnly)
+	if mutating && !s.workspaceAdmissionPermissive {
+		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, "atomic workspace lease guard is unavailable for mutating syscall"), true
+	}
+	return WireVerdict{}, false
+}
+
+// prepareWorkspaceExecution inspects the final call already bound by Submit (or
+// a native Decide that refuses transforms), without performing another fold.
+func (s *Server) prepareWorkspaceExecution(ctx context.Context, call *abi.ToolCall, readOnly bool) (map[string]string, WireVerdict, bool) {
+	rawArgs := string(resolveBytes(ctx, call.Args))
+	_, _, mutating, _ := adjudicateRawWriteTargets(call.Tool, rawArgs, readOnly)
+	if !mutating {
+		return nil, WireVerdict{}, false
+	}
+	atomicRefusal := leaseAdmissionRefusal(abi.ReasonDefaultDeny, "atomic workspace lease guard is unavailable for mutating syscall")
+	if !s.workspaceAdmissionPermissive {
+		return nil, atomicRefusal, true
+	}
+	details := map[string]string{
+		"workspace_admission":    "permissive",
+		"would_deny":             atomicRefusal.Reason,
+		"would_deny_by":          atomicRefusal.By,
+		"would_deny_claim":       atomicRefusal.Detail["claim"],
+		"atomic_workspace_guard": "unavailable",
+	}
+	if snapshot, refused := s.adjudicateLeaseAdmission(ctx, call.Tool, rawArgs, readOnly); refused {
+		if snapshot.Reason != abi.ReasonName(abi.ReasonDefaultDeny) {
+			return nil, snapshot, true
+		}
+		details["snapshot_would_deny"] = snapshot.Reason
+		details["snapshot_would_deny_claim"] = snapshot.Detail["claim"]
+	}
+	return details, WireVerdict{}, false
+}
+
+// workspaceKernelSyscall checks the very submission that Reap will dispatch.
+func (s *Server) workspaceKernelSyscall(ctx context.Context, call *abi.ToolCall, readOnly bool) (*abi.Result, abi.Verdict, map[string]string, *WireVerdict) {
+	handle, verdict := s.k.Submit(ctx, call)
+	var details map[string]string
+	if verdict.Kind == abi.VerdictAllow || verdict.Kind == abi.VerdictTransform || verdict.Kind == abi.VerdictDefer {
+		var refusal WireVerdict
+		var refused bool
+		details, refusal, refused = s.prepareWorkspaceExecution(ctx, call, readOnly)
+		if refused {
+			s.k.DiscardSubmission(handle)
+			return nil, verdict, nil, &refusal
+		}
+	}
+	result, err := s.k.Reap(ctx, handle)
+	if err != nil {
+		result = &abi.Result{Call: call, Status: abi.StatusError, Meta: map[string]string{"error": err.Error()}}
+	}
+	return result, verdict, details, nil
+}
+
+func annotateWorkspaceExecution(verdict *WireVerdict, details map[string]string) {
+	if len(details) == 0 || (verdict.Kind != "ALLOW" && verdict.Kind != "TRANSFORM") {
+		return
+	}
+	if verdict.Detail == nil {
+		verdict.Detail = make(map[string]string)
+	}
+	verdict.Detail["kernel_by"] = verdict.By
+	verdict.By = "lease-admission-permissive"
+	for key, value := range details {
+		verdict.Detail[key] = value
+	}
+}
+
 func isCapabilitiesTool(tool string) bool {
 	return tool == "fak_capabilities" ||
 		tool == "mcp__fak__fak_capabilities" ||
@@ -655,7 +745,7 @@ func nativeToolName(tool string) string {
 // syscallNative keeps gateway-owned tools on their native implementation even
 // when called through fak_syscall. The call and result cross the kernel floors,
 // but neither a model route nor a cached mock result can replace the operation.
-func (s *Server) syscallNative(ctx context.Context, tc *abi.ToolCall, readOnly bool) (WireVerdict, *ResultEnvelope, bool, error) {
+func (s *Server) syscallNative(ctx context.Context, tc *abi.ToolCall, readOnly bool) (wv WireVerdict, env *ResultEnvelope, handled bool, err error) {
 	tool := nativeToolName(tc.Tool)
 	if tool == "" {
 		return WireVerdict{}, nil, false, nil
@@ -669,9 +759,13 @@ func (s *Server) syscallNative(ctx context.Context, tc *abi.ToolCall, readOnly b
 		// execution requires a fresh affirmative admission of the actual arguments.
 		return renderVerdict(v, nil), nil, true, nil
 	}
+	admissionDetails, refusal, refused := s.prepareWorkspaceExecution(ctx, tc, readOnly)
+	if refused {
+		return refusal, nil, true, nil
+	}
+	defer func() { annotateWorkspaceExecution(&wv, admissionDetails) }()
 	args := resolveBytes(ctx, tc.Args)
 	var value any
-	var err error
 	switch tool {
 	case "fak_context_restore":
 		var req ContextRestoreRequest
@@ -706,7 +800,7 @@ func (s *Server) syscallNative(ctx context.Context, tc *abi.ToolCall, readOnly b
 	if abi.FoldRank(admitted.Kind) > abi.FoldRank(v.Kind) {
 		v = admitted
 	}
-	env := &ResultEnvelope{Status: statusName(r.Status), Content: string(resolveBytes(ctx, r.Payload)), Meta: r.Meta}
+	env = &ResultEnvelope{Status: statusName(r.Status), Content: string(resolveBytes(ctx, r.Payload)), Meta: r.Meta}
 	return renderVerdict(v, resultMeta(r)), env, true, nil
 }
 
@@ -736,9 +830,14 @@ func (s *Server) syscallNative(ctx context.Context, tc *abi.ToolCall, readOnly b
 // model for idempotent reads (the same bytes regardless of which engine), where an
 // ensemble adds nothing anyway.
 func (s *Server) dispatchEnsemble(ctx context.Context, base *abi.ToolCall, plan modelroute.Plan) (WireVerdict, *ResultEnvelope, error) {
+	return s.dispatchEnsembleWithReadOnly(ctx, base, plan, false)
+}
+
+func (s *Server) dispatchEnsembleWithReadOnly(ctx context.Context, base *abi.ToolCall, plan modelroute.Plan, readOnly bool) (WireVerdict, *ResultEnvelope, error) {
 	votes := make([]modelroute.Vote, 0, len(plan.Members))
 	var lastRefused abi.Verdict
 	refused := 0
+	var admissionDetails map[string]string
 	for _, mem := range plan.Members {
 		// Bind THIS member through the account roster before its own kernel call (#2528):
 		// each ensemble member resolves independently to its account-resolved EngineRoute,
@@ -754,7 +853,13 @@ func (s *Server) dispatchEnsemble(ctx context.Context, base *abi.ToolCall, plan 
 		if rerr != nil {
 			return WireVerdict{}, nil, rerr
 		}
-		r, v := s.k.Syscall(ctx, memberCall(base, route))
+		r, v, details, refusal := s.workspaceKernelSyscall(ctx, memberCall(base, route), readOnly)
+		if refusal != nil {
+			return *refusal, nil, nil
+		}
+		if len(details) != 0 {
+			admissionDetails = details
+		}
 		if r == nil || r.Status != abi.StatusOK {
 			lastRefused = v
 			refused++
@@ -793,7 +898,9 @@ func (s *Server) dispatchEnsemble(ctx context.Context, base *abi.ToolCall, plan 
 	if folded.Winner != "" {
 		meta["winner"] = folded.Winner
 	}
-	return WireVerdict{Kind: "ALLOW", By: "modelroute-ensemble"},
+	wv := WireVerdict{Kind: "ALLOW", By: "modelroute-ensemble"}
+	annotateWorkspaceExecution(&wv, admissionDetails)
+	return wv,
 		&ResultEnvelope{Status: "OK", Content: folded.Output, Meta: meta}, nil
 }
 

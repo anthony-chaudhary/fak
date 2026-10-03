@@ -111,6 +111,7 @@ func configureServeToolEngines() {
 // definition order, so the boot stages consume them without threading four dozen
 // locals through every call.
 type serveFlags struct {
+	workspaceAdmissionPermissive *bool
 	configPath                   *string
 	printEffectiveConfig         *bool
 	printFeatures                *bool
@@ -252,6 +253,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.printEffectiveConfig = fs.Bool("print-effective-config", false, "print supported effective serve configuration with value provenance, then exit without binding a listener")
 	sf.printFeatures = fs.Bool("print-features", false, "print the evaluated feature matrix and provenance before initialization, then exit without model I/O")
 	sf.addr = fs.String("addr", "127.0.0.1:8080", "HTTP listen address (OpenAI + fak + /mcp surface); ignored with --stdio")
+	sf.workspaceAdmissionPermissive = fs.Bool("workspace-admission-permissive", rwEnvBool("FAK_WORKSPACE_ADMISSION_PERMISSIVE"), "explicitly admit workspace lease DEFAULT_DENY failures with observable would_deny details; peer LEASE_HELD and kernel policy denies remain enforced (env: FAK_WORKSPACE_ADMISSION_PERMISSIVE)")
 	sf.stdio = fs.Bool("stdio", false, "serve MCP over stdin/stdout (newline-delimited JSON-RPC) instead of HTTP")
 	sf.provider = fs.String("provider", "openai", "upstream provider transcript wire: openai, anthropic, gemini, or xai")
 	sf.baseURL = fs.String("base-url", "", "upstream provider base URL for the /v1/chat/completions proxy (empty = offline mock planner)")
@@ -955,6 +957,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (*gateway.DurableControlIng
 	}
 
 	srv, err := gateway.New(gateway.Config{
+		WorkspaceAdmissionPermissive: *sf.workspaceAdmissionPermissive,
 		EngineID:                     *sf.engineID,
 		OTLPEndpoint:                 *sf.otlpEndpoint,
 		OrgAudit:                     orgAudit,

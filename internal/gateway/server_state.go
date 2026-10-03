@@ -366,9 +366,10 @@ type BudgetExhaustedFunc func(ctx context.Context, st SessionState, messages []a
 // Server is a configured, ready-to-serve gateway. Construct with New; serve with
 // Handler()/ListenAndServe (HTTP) or ServeStdio (MCP over stdin/stdout).
 type Server struct {
-	featureCatalog            atomic.Pointer[FeatureCatalog]
-	responsesContinuationOnce sync.Once
-	responsesContinuations    *responsesContinuationStore
+	workspaceAdmissionPermissive bool
+	featureCatalog               atomic.Pointer[FeatureCatalog]
+	responsesContinuationOnce    sync.Once
+	responsesContinuations       *responsesContinuationStore
 
 	nativeProgress  nativeProgressReplay
 	k               *kernel.Kernel
