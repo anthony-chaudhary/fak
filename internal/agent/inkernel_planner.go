@@ -45,14 +45,15 @@ import (
 // emit structured tool calls — the gateway's adjudication layer still runs on
 // whatever the caller proposed.
 type InKernelPlanner struct {
-	m                 *model.Model
-	tok               *tokenizer.Tokenizer
-	modelID           string
-	q4k               bool            // resident-Q4_K load: decode runs Session.Q4K (SDOT int8 GEMV)
-	quant             bool            // Q8_0 decode/prefill path (the served default); tests flip it to exercise the proven f32 reuse path
-	backend           compute.Backend // non-nil → decode runs through the device HAL (e.g. CUDA) instead of the CPU session
-	metal             bool            // Apple-Silicon metalgemm GPU forward on the CPU session (s.Metal); engaged ONLY when backend==nil (the CPU-session seam). No-op on non-Metal builds.
-	cpuOffloadExperts bool            // with a backend, keep MoE experts host-resident while dense/attention use the device
+	m                      *model.Model
+	tok                    *tokenizer.Tokenizer
+	modelID                string
+	q4k                    bool            // resident-Q4_K load: decode runs Session.Q4K (SDOT int8 GEMV)
+	quant                  bool            // Q8_0 decode/prefill path (the served default); tests flip it to exercise the proven f32 reuse path
+	backend                compute.Backend // non-nil → decode runs through the device HAL (e.g. CUDA) instead of the CPU session
+	metal                  bool            // Apple-Silicon metalgemm GPU forward on the CPU session (s.Metal); engaged ONLY when backend==nil (the CPU-session seam). No-op on non-Metal builds.
+	cpuOffloadExperts      bool            // with a backend, keep MoE experts host-resident while dense/attention use the device
+	requireDeviceExecution bool
 	// kvPrecision is the realized storage tier installed on every session this planner
 	// builds (model.KVPrecisionFP32 default; Q8_0 for the dense mixed layout). Fixed at
 	// construction from InKernelPlannerConfig.KVPrecision.
@@ -3194,7 +3195,7 @@ func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferen
 		Backend:                    backend,
 		ForwardPath:                forwardPath,
 		Q4K:                        p.q4k,
-		FallbackActive:             false,
+		FallbackActive:             measurement.hostFallbackObserved,
 		PrefillChunkTokens:         p.nativeInferencePrefillChunkTokens(),
 		NativeSelection:            nativeSelection,
 		NativeSelectionDigest:      nativeSelectionDigest,

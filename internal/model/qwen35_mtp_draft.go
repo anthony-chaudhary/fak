@@ -90,6 +90,7 @@ func newQwen35MTPDraftSession(target *Session, depth int, be compute.Backend) (*
 	if err != nil {
 		return nil, err
 	}
+	forward.draft.SetExecutionPolicy(target.executionPolicy)
 	if err := qwen35MTPPrepareTargetCapture(target); err != nil {
 		forward.Close()
 		return nil, err
@@ -466,6 +467,7 @@ func (d *Qwen35MTPDraftSession) recreateForward() error {
 		d.forward = nil
 		return err
 	}
+	forward.draft.SetExecutionPolicy(d.target.executionPolicy)
 	if d.vocabFilter != nil {
 		forward.SetDraftVocabFilter(d.vocabFilter)
 	}

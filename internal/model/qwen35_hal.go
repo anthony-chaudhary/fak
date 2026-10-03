@@ -23,6 +23,106 @@ type BackendForwardOperationError struct {
 	Cause   error
 }
 
+// ExecutionPolicy controls whether a Session may use legacy host correctness paths.
+type ExecutionPolicy uint8
+
+const (
+	ExecutionPolicyPortable ExecutionPolicy = iota
+	ExecutionPolicyDeviceOnly
+)
+
+// SetExecutionPolicy fixes the execution policy before a session begins inference.
+func (s *Session) SetExecutionPolicy(policy ExecutionPolicy) {
+	if s == nil {
+		return
+	}
+	s.executionPolicy = policy
+}
+
+// HostFallbackObserved reports a host fallback attempt under the strict production policy.
+func (s *Session) HostFallbackObserved() bool { return s != nil && s.hostFallbackObserved }
+
+// BackendSessionClosed reports whether fail-closed teardown retired this session.
+func (s *Session) BackendSessionClosed() bool { return s != nil && s.halClosed }
+
+func (s *Session) deviceOnlyForward() ForwardPathKind {
+	if s == nil || s.M == nil {
+		return ForwardAttnSeqGQA
+	}
+	cfg := s.M.Cfg
+	switch {
+	case cfg.usesMLAMoELayout():
+		return ForwardGLMDsaMLA
+	case cfg.isMiniMaxSparseAttn():
+		return ForwardMiniMax
+	case cfg.isGemma4():
+		return ForwardGemma4
+	case cfg.IsQwen35Hybrid():
+		return ForwardQwen35GDN
+	default:
+		return ForwardAttnSeqGQA
+	}
+}
+
+func (s *Session) refuseHostFallback(stage string) {
+	if s == nil || s.executionPolicy != ExecutionPolicyDeviceOnly {
+		return
+	}
+	s.hostFallbackObserved = true
+	backend := ""
+	if s.Backend != nil {
+		backend = s.Backend.Name()
+	}
+	err := &BackendForwardOperationError{
+		Backend: backend,
+		Forward: s.deviceOnlyForward(),
+		Path:    "device-only",
+		Layer:   -1,
+		Stage:   stage,
+		Cause:   fmt.Errorf("device-only execution policy forbids host model compute"),
+	}
+	s.halFailure = err
+	s.halClosed = true
+	s.Close()
+	panic(err)
+}
+
+// validateDeviceOnlyExecution rejects known host-compute branches before callers
+// acquire cacheGeometryMu, so fail-closed teardown cannot strand an entry lock.
+func (s *Session) validateDeviceOnlyExecution(stage string) {
+	if s == nil || s.executionPolicy != ExecutionPolicyDeviceOnly {
+		return
+	}
+	s.ensureOpenBackendSession()
+	if s.Backend == nil || !s.Backend.Caps().DeviceMemory {
+		s.refuseHostFallback(stage + ": backend does not prove device execution")
+	}
+	if s.M == nil {
+		s.refuseHostFallback(stage + ": missing model")
+	}
+	cfg := s.M.Cfg
+	n := s.denseGPULayers()
+	if n > 0 && n < cfg.NumLayers {
+		s.refuseHostFallback(stage + ": partial GPU layer placement")
+	}
+	if cfg.IsDeepSeekV41() || cfg.isMiniMaxSparseAttn() || cfg.isGemma4() {
+		s.refuseHostFallback(stage + ": architecture uses host model compute")
+	}
+	if cfg.IsQwen35Hybrid() {
+		if cfg.rotaryDim() != cfg.HeadDim {
+			_, partial := s.Backend.(qwen35PartialRoPEBackend)
+			if !partial || cfg.RopeScaling != "" || cfg.LongRope != nil {
+				s.refuseHostFallback(stage + ": Qwen partial RoPE lacks device kernel")
+			}
+		}
+		if cfg.AttnOutputGate {
+			if _, gated := s.Backend.(qwen35SigmoidGateBackend); !gated {
+				s.refuseHostFallback(stage + ": Qwen attention output gate lacks device kernel")
+			}
+		}
+	}
+}
+
 func (e *BackendForwardOperationError) Error() string {
 	return fmt.Sprintf(
 		"model: backend %q forward %q via %q failed closed at layer %d (%s): %v; session closed, no CPU retry",
@@ -896,6 +996,7 @@ func (s *Session) qwen35FullAttentionHAL(layer, pos int, residual compute.Tensor
 			q, kRope = partial.PartialRoPEQK(q, kRaw, pos, nH, nKV, hd, cfg.rotaryDim(), theta)
 			s.halKV.AppendKV(kvLayer, kRaw, kRope, v, pos)
 		} else {
+			s.refuseHostFallback("Qwen partial RoPE")
 			qHost := s.readQwen35FullAttention(layer, "partial-RoPE query read", q)
 			kHost := s.readQwen35FullAttention(layer, "partial-RoPE key read", kRaw)
 			cos, sin := ropeRowForLayer(cfg, layer, pos)
@@ -938,6 +1039,7 @@ func (s *Session) qwen35FullAttentionHAL(layer, pos int, residual compute.Tensor
 		if gated, ok := be.(qwen35SigmoidGateBackend); ok {
 			gated.SigmoidMulInPlace(attnOut, gate)
 		} else {
+			s.refuseHostFallback("Qwen attention output gate")
 			gateHost := s.readQwen35FullAttention(layer, "full-attention gate read", gate)
 			outHost := s.readQwen35FullAttention(layer, "full-attention output read", attnOut)
 			if len(gateHost) != len(outHost) {
@@ -957,6 +1059,7 @@ func (s *Session) qwen35FullAttentionHAL(layer, pos int, residual compute.Tensor
 }
 
 func (s *Session) qwen35QSASparseAttentionHAL(layer, kvLayer int, q compute.Tensor, grp int, scale float32) (compute.Tensor, error) {
+	s.refuseHostFallback("Qwen QSA sparse attention")
 	be, cfg := s.Backend, s.M.Cfg
 	hd, nH, nKV := cfg.HeadDim, cfg.NumHeads, cfg.NumKVHeads
 	w := nKV * hd

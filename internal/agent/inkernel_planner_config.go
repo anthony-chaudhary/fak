@@ -39,6 +39,7 @@ type InKernelPlannerConfig struct {
 	// (Kraw f32 + q8_0 K/V) the planner's compute.KVPrecisionQ8 tier charges.
 	KVPrecision               model.KVPrecision
 	CPUOffloadExperts         bool
+	RequireDeviceExecution    bool
 	QwenQ4KPrefillChunkTokens int
 	Qwen35MetalGDNSequence    bool
 	Q4KGateUpOutputSlab       bool
@@ -87,6 +88,7 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		backend:                      backend,
 		metal:                        metal,
 		cpuOffloadExperts:            cfg.CPUOffloadExperts,
+		requireDeviceExecution:       cfg.RequireDeviceExecution,
 		kvPrecision:                  cfg.KVPrecision,
 		contextTokens:                cfg.ContextTokens,
 		denseGPULayers:               cfg.DenseGPULayers,
@@ -176,6 +178,7 @@ func (p *InKernelPlanner) RuntimeConfig() InKernelPlannerConfig {
 		CPUCacheBytes:             cpuBytes,
 		KVPrecision:               p.kvPrecision,
 		CPUOffloadExperts:         p.cpuOffloadExperts,
+		RequireDeviceExecution:    p.requireDeviceExecution,
 		QwenQ4KPrefillChunkTokens: p.qwenQ4KPrefillChunkTokens,
 		Qwen35MetalGDNSequence:    p.qwen35MetalGDNSequence,
 		Q4KGateUpOutputSlab:       p.q4kGateUpOutputSlab,

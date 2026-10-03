@@ -137,9 +137,16 @@ func deviceKernelForExpertEncoding(m *Model, name string) expertEngine {
 // convention.
 func expertEngineForWeight(s *Session, name string) expertEngine {
 	if s == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory {
+		if s != nil {
+			s.refuseHostFallback("routed expert " + name)
+		}
 		return expertEngineHost
 	}
-	return deviceKernelForExpertEncoding(s.M, name)
+	engine := deviceKernelForExpertEncoding(s.M, name)
+	if engine == expertEngineHost {
+		s.refuseHostFallback("routed expert " + name)
+	}
+	return engine
 }
 
 // splitDeviceExpertInput runs the DEVICE engine for one routed expert's gate/up + SwiGLU when the

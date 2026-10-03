@@ -47,8 +47,29 @@ func DetectGFX1151(sysfsRoot string) (bool, string, error) {
 
 // DetectGFX1151WithDeviceName checks environment override, device name string, and DRM sysfs.
 func DetectGFX1151WithDeviceName(sysfsRoot, deviceName string) (bool, string, error) {
+	return detectGFX1151(sysfsRoot, deviceName, true)
+}
+
+// DetectPhysicalGFX1151 checks device identity without consulting the test/operator override.
+// Production admission uses this path so FAK_STRIX_GFX1151_OVERRIDE=0 cannot hide real Halo
+// silicon and re-enable a host-compute fallback.
+func DetectPhysicalGFX1151(sysfsRoot, deviceName string) (bool, string, error) {
+	detected, name, err := detectGFX1151(sysfsRoot, deviceName, false)
+	if err != nil || detected {
+		return detected, name, err
+	}
+	// The GPU may be absent from DRM precisely because its driver failed to bind.
+	// CPU identity still makes this a known Halo host, which must fail closed at
+	// accelerator admission instead of being misclassified as portable CPU hardware.
+	if cpuinfo, readErr := os.ReadFile("/proc/cpuinfo"); readErr == nil && IsStrixHaloArch(string(cpuinfo)) {
+		return true, CanonicalDeviceNameStrixHalo, nil
+	}
+	return false, "", nil
+}
+
+func detectGFX1151(sysfsRoot, deviceName string, allowOverride bool) (bool, string, error) {
 	// 1. Environment override (highest priority)
-	if override := os.Getenv("FAK_STRIX_GFX1151_OVERRIDE"); override != "" {
+	if override := os.Getenv("FAK_STRIX_GFX1151_OVERRIDE"); allowOverride && override != "" {
 		trimmed := strings.TrimSpace(override)
 		if trimmed == "1" || strings.EqualFold(trimmed, "true") {
 			return true, "AMD Ryzen AI Max+ 395 (GFX1151 override)", nil
@@ -65,7 +86,7 @@ func DetectGFX1151WithDeviceName(sysfsRoot, deviceName string) (bool, string, er
 
 	// 3. DRM sysfs detection
 	if sysfsRoot == "" {
-		if envPath := os.Getenv("FAK_DRM_SYSFS_PATH"); envPath != "" {
+		if envPath := os.Getenv("FAK_DRM_SYSFS_PATH"); allowOverride && envPath != "" {
 			sysfsRoot = envPath
 		} else {
 			sysfsRoot = DefaultDRMSysfsRoot

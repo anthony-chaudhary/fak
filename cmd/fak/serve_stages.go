@@ -62,7 +62,8 @@ type serveRuntime struct {
 	// reused by the load-time fit, so the context the auto-sizer derives and the admission that
 	// judges it are computed against the SAME probe. Nil means "not measured" (e.g. a
 	// SafeTensors directory) and the load re-probes as before.
-	fitBudget *serveFitBudget
+	fitBudget              *serveFitBudget
+	requireDeviceExecution bool
 
 	inKernelModel *fakmodel.Model
 	inKernelQ4K   bool
@@ -370,9 +371,27 @@ func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
 	// the load. Lookup (not Pick) keeps typos fail-loud rather than silently degrading to CPU.
 	chatBackend, err := resolveServeChatBackend(*sf.backendName)
 	if err != nil {
-		writeBackendUnavailableBail(os.Stderr, "fak serve", *sf.backendName)
+		var haloErr *haloGPURequiredError
+		var detectErr *haloHardwareDetectionError
+		if errors.As(err, &haloErr) {
+			fmt.Fprintln(os.Stderr, haloErr)
+		} else if errors.As(err, &detectErr) {
+			fmt.Fprintln(os.Stderr, detectErr)
+		} else {
+			writeBackendUnavailableBail(os.Stderr, "fak serve", *sf.backendName)
+		}
 		os.Exit(2)
 	}
+	halo, _, err := computestrix.DetectPhysicalGFX1151("", "")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fak serve: detect GFX1151 hardware:", err)
+		os.Exit(2)
+	}
+	if err := validateServeHaloCPUOffload(halo, *sf.cpuOffloadExperts, *sf.nCPUMoE, os.Getenv(agent.ExpertSpillEnv)); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	rt.requireDeviceExecution = halo
 	// A PQ2-only Bonsai artifact has a resident CPU ternary kernel but no
 	// model-wired Metal or compute-HAL PQ2 kernel yet. Select its CPU forward
 	// before publishing a backend receipt or reserving the Metal device.
@@ -389,6 +408,10 @@ func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
 		os.Exit(2)
 	}
 	if pq2Checkpoint && chatBackend != nil {
+		if halo {
+			fmt.Fprintf(os.Stderr, "fak serve: PQ2_0 checkpoint has no native %s kernel on Strix Halo; use a model with a supported GPU kernel\n", chatBackend.Name())
+			os.Exit(2)
+		}
 		fmt.Fprintf(os.Stderr, "fak serve: PQ2_0 checkpoint has no native %s kernel; use --backend cpu for packed CPU inference\n", chatBackend.Name())
 		os.Exit(2)
 	}
@@ -472,6 +495,29 @@ func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
 		compute.EnableCUDAGraph()
 	}
 	rt.chatBackend, rt.useMetal, rt.ep = chatBackend, useMetal, ep
+}
+
+// validateServeHaloCPUOffload refuses any effective expert placement that may execute
+// model math on the host. The explicit flag wins the ambient grade, matching applyServeNCPUMoE.
+func validateServeHaloCPUOffload(halo, cpuOffloadExperts bool, flagGrade, envGrade string) error {
+	if !halo {
+		return nil
+	}
+	if cpuOffloadExperts {
+		return &haloGPURequiredError{Reason: haloGPUReasonCPUExpertOffload, Detail: "--cpu-offload-experts enables host expert GEMMs"}
+	}
+	grade := strings.TrimSpace(flagGrade)
+	if grade == "" {
+		grade = strings.TrimSpace(envGrade)
+	}
+	n, set, err := agent.ParseExpertSpillGrade(grade)
+	if err != nil {
+		return fmt.Errorf("fak serve: Halo expert placement: %w", err)
+	}
+	if set && (n == agent.ExpertSpillAuto || n > 0) {
+		return &haloGPURequiredError{Reason: haloGPUReasonCPUExpertOffload, Detail: fmt.Sprintf("n-cpu-moe grade %q permits host expert GEMMs", grade)}
+	}
+	return nil
 }
 
 // resolveNativeContext reads only GGUF metadata and sizing estimates. It runs

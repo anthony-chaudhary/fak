@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	computestrix "github.com/anthony-chaudhary/fak/internal/compute/strix"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
@@ -156,6 +157,30 @@ type serveBackendSelection struct {
 	explicit bool
 }
 
+const (
+	haloGPUReasonNoDeviceBackend  = "no-device-backend"
+	haloGPUReasonCPUBackend       = "cpu-backend"
+	haloGPUReasonCPUExpertOffload = "cpu-expert-offload"
+)
+
+// haloGPURequiredError is the typed production refusal for a known GFX1151 host.
+// Reason is closed vocabulary so entry points and tests do not parse prose.
+type haloGPURequiredError struct {
+	Reason string
+	Detail string
+}
+
+type haloHardwareDetectionError struct{ Cause error }
+
+func (e *haloHardwareDetectionError) Error() string {
+	return fmt.Sprintf("fak serve: detect GFX1151 hardware: %v", e.Cause)
+}
+func (e *haloHardwareDetectionError) Unwrap() error { return e.Cause }
+
+func (e *haloGPURequiredError) Error() string {
+	return fmt.Sprintf("fak serve: GFX1151 requires device-only model execution (%s): %s", e.Reason, e.Detail)
+}
+
 // resolveServeBackendSelection applies the native backend policy without touching
 // process globals, so callers can prove it with an injected registry and GOOS.
 // An explicit --backend (including "auto") wins FAK_BACKEND. Linux and Windows
@@ -220,8 +245,34 @@ func lookupRegisteredServeBackend(name string) (compute.Backend, error) {
 }
 
 func resolveServeChatBackend(backendName string) (compute.Backend, error) {
-	selection, err := resolveServeBackendSelection(backendName, os.Getenv("FAK_BACKEND"), runtime.GOOS, lookupRegisteredServeBackend)
-	return selection.backend, err
+	halo, _, err := computestrix.DetectPhysicalGFX1151("", "")
+	if err != nil {
+		return nil, &haloHardwareDetectionError{Cause: err}
+	}
+	return resolveServeChatBackendForHost(backendName, os.Getenv("FAK_BACKEND"), runtime.GOOS, lookupRegisteredServeBackend, halo)
+}
+
+// resolveServeChatBackendForHost is the deterministic admission seam. Production passes
+// physical Halo evidence; tests inject the host fact and backend registry directly.
+func resolveServeChatBackendForHost(backendName, envValue, goos string, lookup serveBackendLookup, halo bool) (compute.Backend, error) {
+	selection, err := resolveServeBackendSelection(backendName, envValue, goos, lookup)
+	if err != nil {
+		return nil, err
+	}
+	if !halo {
+		return selection.backend, nil
+	}
+	if selection.name == serveBackendCPU || selection.backend == nil {
+		reason := haloGPUReasonNoDeviceBackend
+		if selection.name == serveBackendCPU && selection.explicit {
+			reason = haloGPUReasonCPUBackend
+		}
+		return nil, &haloGPURequiredError{Reason: reason, Detail: "initialize a supported accelerator backend; CPU execution is reserved for equivalence validation"}
+	}
+	if !selection.backend.Caps().DeviceMemory {
+		return nil, &haloGPURequiredError{Reason: haloGPUReasonNoDeviceBackend, Detail: fmt.Sprintf("backend %q does not prove non-host device residency", selection.backend.Name())}
+	}
+	return selection.backend, nil
 }
 
 // writeBackendUnavailableBail renders the BACKEND_UNAVAILABLE bail for a --backend

@@ -191,11 +191,16 @@ type dsaIndexKernel interface {
 // to the host because the device scores in f64 and uses the same total order.
 func (k backendKernel) indexSelect(indexQ, indexK, weights []float32, nKeys, nH, indexDim, queryPos, topK int, scale float32) ([]int, bool) {
 	be := k.s.Backend
+	if k.s.executionPolicy == ExecutionPolicyDeviceOnly && (be == nil || !be.Caps().DeviceMemory) {
+		k.s.refuseHostFallback("GLM-DSA index selection")
+	}
 	ib, ok := be.(compute.DSAIndexBackend)
 	if !ok {
+		k.s.refuseHostFallback("GLM-DSA index selection")
 		return nil, false
 	}
 	if nKeys <= 0 || topK <= 0 || len(indexQ) != nH*indexDim || len(indexK) != nKeys*indexDim || len(weights) != nH {
+		k.s.refuseHostFallback("GLM-DSA index selection arguments")
 		return nil, false
 	}
 	qt := uploadHostF32Class(be, []int{nH * indexDim}, indexQ, compute.MemoryActivation, "glm-dsa-index-query")

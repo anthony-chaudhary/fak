@@ -26,6 +26,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/allinone"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	computestrix "github.com/anthony-chaudhary/fak/internal/compute/strix"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
@@ -1152,6 +1153,10 @@ func newTurnkeyInKernelPlanner(model *fakmodel.Model, tok *tokenizer.Tokenizer, 
 	if err != nil {
 		panic(err)
 	}
+	halo, _, err := computestrix.DetectPhysicalGFX1151("", "")
+	if err != nil {
+		panic(&haloHardwareDetectionError{Cause: err})
+	}
 	// Turnkey fan-out admits concurrent requests but, without this, each ran its own
 	// prefill/decode forward serialized on the device mutex (#1590). Opt the turnkey
 	// planner into the existing continuous-batch decode coalescer so N concurrent
@@ -1163,9 +1168,10 @@ func newTurnkeyInKernelPlanner(model *fakmodel.Model, tok *tokenizer.Tokenizer, 
 		// `fak serve` compact a long transcript at the same point instead of one
 		// refusing at the window and the other shrinking. See
 		// agent.DeriveCompactHistoryBudget for why this is not the raw window.
-		CompactHistoryBudget: agent.DeriveCompactHistoryBudget(contextTokens, 0),
-		KVPrecision:          kvPrec,
-		BatchDecode:          true,
+		CompactHistoryBudget:   agent.DeriveCompactHistoryBudget(contextTokens, 0),
+		KVPrecision:            kvPrec,
+		BatchDecode:            true,
+		RequireDeviceExecution: halo,
 	})
 }
 

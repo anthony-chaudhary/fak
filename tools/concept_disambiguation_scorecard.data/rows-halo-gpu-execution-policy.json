@@ -1,0 +1,46 @@
+{
+  "rows": [
+    {
+      "id": "halo-gpu-execution-policy-device-only",
+      "canonical": "ExecutionPolicyDeviceOnly (model-session compute residency)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The internal/model session policy that admits inference only when the active compute backend has device memory and every architecture-specific operation needed by that session remains on the device; an attempted host-compute fallback records the observation, retires the session, and returns the typed backend-operation refusal.",
+      "distinction": "It governs where model arithmetic executes after a backend is selected, not the adjudicator Policy that authorizes agent tool calls and not ExpertTierPolicy, which moves expert weights between host cache tiers.",
+      "distinct_from": [
+        "policy-loaded",
+        "expert-tier-policy"
+      ],
+      "aliases": [
+        "executionpolicydeviceonly"
+      ],
+      "grounding": "ExecutionPolicyDeviceOnly",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "halo-gpu-set-execution-policy",
+      "canonical": "SetExecutionPolicy (model Session mutator)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The internal/model Session mutator that pins the compute-residency policy before inference and propagates that choice through prefix snapshots, cloned sessions, restored sessions, and retained MTP draft sessions.",
+      "distinction": "It configures one decoder session's model-compute residency contract; Adjudicator.SetPolicy instead replaces the process's live tool-authorization decision table.",
+      "distinct_from": [
+        "x-policy-capability-setpolicy",
+        "agent-with-policy-snapshot"
+      ],
+      "aliases": [
+        "setexecutionpolicy"
+      ],
+      "grounding": "SetExecutionPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

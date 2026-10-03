@@ -47,6 +47,9 @@ type inKernelPrefillSession interface {
 }
 
 func (p *InKernelPlanner) configureNativeSession(s *model.Session) {
+	if p.requireDeviceExecution {
+		s.SetExecutionPolicy(model.ExecutionPolicyDeviceOnly)
+	}
 	s.Quant = p.quant
 	// Realize the planner's KV storage tier before any prefill/decode append. The
 	// default (model.KVPrecisionFP32) is a no-op, so every existing planner is
@@ -341,6 +344,11 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		defer s.Close()
 	}
 	p.configureNativeSession(s)
+	if measurement != nil {
+		defer func() {
+			measurement.hostFallbackObserved = measurement.hostFallbackObserved || s.HostFallbackObserved()
+		}()
+	}
 	p.preReservePackedQ4KRequest(s, len(ids), maxNew)
 	qwen35MetalStateIdentityEnabled := false
 	if shouldEnableQwen35MetalStateIdentity(p, measurement, ids, matched, cachedLogits) {
@@ -926,6 +934,7 @@ type nativeInferenceMeasurement struct {
 	qwen35SequencePrefillRoute          *model.NativeSequencePrefillRouteReceipt
 	cudaImmutableWeightUploadsBefore    model.NativeCUDAImmutableWeightUploadCounters
 	cudaImmutableWeightUploadsAvailable bool
+	hostFallbackObserved                bool
 }
 
 func (m *nativeInferenceMeasurement) reset() {
@@ -941,6 +950,7 @@ func (m *nativeInferenceMeasurement) reset() {
 	m.qwen35MetalForwardSequence = model.Qwen35MetalForwardSequenceReceipt{}
 	m.qwen35MetalStateIdentity = nil
 	m.qwen35SequencePrefillRoute = nil
+	m.hostFallbackObserved = false
 }
 
 func (m *nativeInferenceMeasurement) record(logits []float32, token int) error {

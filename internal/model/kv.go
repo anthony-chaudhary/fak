@@ -52,8 +52,9 @@ type PrefixSnapshot struct {
 	Backend    compute.Backend
 	Tokens     int
 	// DenseGPULayers / GPULayers preserve layer placement across prefix snapshots.
-	DenseGPULayers int
-	GPULayers      int
+	DenseGPULayers  int
+	GPULayers       int
+	ExecutionPolicy ExecutionPolicy
 	// Native MTP consumes the exact pre-final-norm residual history. It is part of
 	// session state just as surely as KV: restoring one without the other can make
 	// a rejected draft visible to the next proposal even though attention rolled back.
@@ -154,7 +155,7 @@ func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
 		// halKV plus recurrent tensors.
 		tokens = s.halKV.Len()
 	}
-	out := &PrefixSnapshot{owner: s, epoch: s.cacheGeometryEpoch, Cache: s.Cache.Clone(), halLineage: s.halLineage.clone(0), Backend: s.Backend, Tokens: tokens, DenseGPULayers: s.DenseGPULayers, GPULayers: s.GPULayers}
+	out := &PrefixSnapshot{owner: s, epoch: s.cacheGeometryEpoch, Cache: s.Cache.Clone(), halLineage: s.halLineage.clone(0), Backend: s.Backend, Tokens: tokens, DenseGPULayers: s.DenseGPULayers, GPULayers: s.GPULayers, ExecutionPolicy: s.executionPolicy}
 	s.targetHiddenMu.RLock()
 	out.captureTargetHidden = s.captureTargetHidden
 	out.targetHidden = cloneTargetHidden(s.targetHidden)
@@ -211,7 +212,7 @@ func (p *PrefixSnapshot) Clone() (*PrefixSnapshot, error) {
 		return nil, nil
 	}
 	out := &PrefixSnapshot{
-		owner: p.owner, epoch: p.epoch, Cache: p.Cache.Clone(), halLineage: p.halLineage.clone(0), Backend: p.Backend, Tokens: p.Tokens,
+		owner: p.owner, epoch: p.epoch, Cache: p.Cache.Clone(), halLineage: p.halLineage.clone(0), Backend: p.Backend, Tokens: p.Tokens, ExecutionPolicy: p.ExecutionPolicy,
 		captureTargetHidden: p.captureTargetHidden,
 		targetHidden:        cloneTargetHidden(p.targetHidden),
 		targetHiddenTokens:  append([]int(nil), p.targetHiddenTokens...),
@@ -306,6 +307,9 @@ func (p *PrefixSnapshot) Restore(s *Session) error {
 	}
 	if s.GPULayers == 0 && p.GPULayers != 0 {
 		s.GPULayers = p.GPULayers
+	}
+	if p.ExecutionPolicy == ExecutionPolicyDeviceOnly {
+		s.executionPolicy = p.ExecutionPolicy
 	}
 	s.Cache = p.Cache
 	p.Cache = nil
@@ -650,8 +654,10 @@ type Session struct {
 	// halClosed makes Close idempotent and prevents an operation failure from falling
 	// through to the legacy CPU path on a later request. halFailure is the witnessed
 	// backend error re-raised by any attempted reuse of that failed session.
-	halClosed  bool
-	halFailure error
+	halClosed            bool
+	halFailure           error
+	executionPolicy      ExecutionPolicy
+	hostFallbackObserved bool
 
 	// glmDsaHeadNameLogged gates the one-time FAK_GLMDSA_DUMP head-resolution log (#996 LM-head probe).
 	glmDsaHeadNameLogged bool
@@ -915,7 +921,11 @@ func (s *Session) validateDenseGPULayers() (int, bool) {
 	if s.Cache == nil {
 		s.Cache = NewKVCache(cfg)
 	}
-	return n, n > 0 && n < cfg.NumLayers
+	isSplit := n > 0 && n < cfg.NumLayers
+	if isSplit {
+		s.refuseHostFallback("partial GPU layer placement")
+	}
+	return n, isSplit
 }
 
 func (s *Session) validatePackedQ2KEmbeddingGuards() {
@@ -1447,6 +1457,7 @@ func (s *Session) Prefill(ids []int) []float32 {
 	if len(ids) == 0 {
 		return nil
 	}
+	s.validateDeviceOnlyExecution("prefill")
 	if s.M.Cfg.IsDeepSeekV41() {
 		return s.prefillV41(ids)
 	}
@@ -1570,6 +1581,7 @@ func (s *Session) PrefillNoLogits(ids []int) {
 	if len(ids) == 0 {
 		return
 	}
+	s.validateDeviceOnlyExecution("prefill-no-logits")
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
 	s.validateDenseGPULayers()
@@ -1696,6 +1708,7 @@ func (s *Session) prefillTokenLoop(ids []int) []float32 {
 // sessions reuse their logits buffer; consume or copy the returned slice before the next
 // quantized Prefill/Step call on the same session.
 func (s *Session) Step(id int) []float32 {
+	s.validateDeviceOnlyExecution("decode")
 	if s.M.Cfg.IsDeepSeekV41() {
 		return s.stepV41(id)
 	}
