@@ -1,6 +1,7 @@
 package workerworktree
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -43,6 +44,24 @@ type PreparedLandReceipt struct {
 	Paths               []string                       `json:"paths"`
 	CandidatePaths      []string                       `json:"candidate_paths"`
 	Verification        ProspectiveVerificationBinding `json:"verification"`
+	Disambiguation      PreparedLandDisambiguation     `json:"disambiguation"`
+}
+
+// PreparedLandDisambiguation binds the prepared candidate to the exact three
+// Git trees and analyzer contract that produced its whole-tree verdict. Accept
+// can therefore prove that the prepared verdict is still applicable without
+// repeating the analyzer. The outer receipt hash covers every field.
+type PreparedLandDisambiguation struct {
+	Required               bool   `json:"required"`
+	Applicable             bool   `json:"applicable"`
+	RootTreeSHA            string `json:"root_tree_sha"`
+	WorktreeTreeSHA        string `json:"worktree_tree_sha"`
+	CandidateTreeSHA       string `json:"candidate_tree_sha"`
+	AnalyzerIdentity       string `json:"analyzer_identity"`
+	RootCacheIdentity      string `json:"root_cache_identity,omitempty"`
+	WorktreeCacheIdentity  string `json:"worktree_cache_identity,omitempty"`
+	CandidateCacheIdentity string `json:"candidate_cache_identity,omitempty"`
+	Verdict                string `json:"verdict"`
 }
 
 type PreparedLandExpectation struct {
@@ -135,6 +154,9 @@ func AcceptPreparedLand(root, wtPath string, expected PreparedLandExpectation, g
 	if rc, out := run(git, root, []string{"rev-parse", "--verify", receipt.RecoveryRef + "^{commit}"}); rc != 0 || strings.TrimSpace(out) != receipt.CandidateSHA {
 		return preparedMismatch("prepared recovery reference is unavailable", tail(out, 200))
 	}
+	if refusal := validatePreparedLandDisambiguation(root, wtPath, receipt, git); !refusal.OK {
+		return refusal
+	}
 	if refusal := revalidatePreparedLand(root, wtPath, receipt, cfg, git); !refusal.OK {
 		return refusal
 	}
@@ -202,12 +224,6 @@ func revalidatePreparedLand(root, wtPath string, receipt PreparedLandReceipt, cf
 	if rc, out := run(git, root, statusArgs); rc != 0 || strings.TrimSpace(out) != "" {
 		return preparedReprepare("shared checkout has overlapping local changes", tail(out, 200))
 	}
-	if disambiguationRelevant(receipt.CandidatePaths) {
-		witnesses, valid := verifyApplicableDisambiguation(root, wtPath, receipt.TreeSHA)
-		if !valid {
-			return preparedMismatch("prepared candidate no longer satisfies disambiguation", witnesses.compactDetail())
-		}
-	}
 	rc, diff := run(git, root, []string{"diff", "--binary", receipt.ParentSHA, receipt.CandidateSHA})
 	if rc != 0 {
 		return preparedMismatch("could not read prepared candidate diff", tail(diff, 200))
@@ -236,7 +252,162 @@ func revalidatePreparedLand(root, wtPath string, receipt PreparedLandReceipt, cf
 	return Result{OK: true}
 }
 
-func persistPreparedLand(root, targetRef, parentSHA, treeSHA, candidateSHA string, candidatePaths []string, recoveryRef string, capture *preparedLandCapture, git GitRunner) (PreparedLandReceipt, error) {
+const (
+	preparedDisambiguationVerified     = "verified"
+	preparedDisambiguationInapplicable = "verified-inapplicable"
+	preparedDisambiguationNotRequired  = "not-required"
+)
+
+func bindPreparedLandDisambiguation(root, wtPath, candidateTree string, paths []string, witnesses *DisambiguationWitnesses, git GitRunner) (PreparedLandDisambiguation, error) {
+	rootTree, err := preparedLandTreeSHA(root, "HEAD", git)
+	if err != nil {
+		return PreparedLandDisambiguation{}, fmt.Errorf("bind root disambiguation tree: %w", err)
+	}
+	worktreeTree, err := preparedLandTreeSHA(wtPath, "HEAD", git)
+	if err != nil {
+		return PreparedLandDisambiguation{}, fmt.Errorf("bind worker disambiguation tree: %w", err)
+	}
+	candidateTree, err = preparedLandTreeSHA(root, candidateTree, git)
+	if err != nil {
+		return PreparedLandDisambiguation{}, fmt.Errorf("bind candidate disambiguation tree: %w", err)
+	}
+	binding := PreparedLandDisambiguation{
+		Required:         disambiguationRelevant(paths),
+		RootTreeSHA:      rootTree,
+		WorktreeTreeSHA:  worktreeTree,
+		CandidateTreeSHA: candidateTree,
+		AnalyzerIdentity: preparedDisambiguationAnalyzerIdentity(),
+	}
+	if !binding.Required {
+		if witnesses != nil {
+			return PreparedLandDisambiguation{}, errors.New("unexpected disambiguation witness for an irrelevant candidate")
+		}
+		binding.Verdict = preparedDisambiguationNotRequired
+		return binding, nil
+	}
+	applicable, err := preparedDisambiguationApplicable(root, binding)
+	if err != nil {
+		return PreparedLandDisambiguation{}, fmt.Errorf("bind disambiguation applicability: %w", err)
+	}
+	if applicable != (witnesses != nil) {
+		return PreparedLandDisambiguation{}, errors.New("disambiguation applicability changed while preparing receipt")
+	}
+	if witnesses == nil {
+		binding.Verdict = preparedDisambiguationInapplicable
+		return binding, nil
+	}
+	binding.Applicable = true
+	binding.RootCacheIdentity = witnesses.Before.CacheIdentity
+	binding.WorktreeCacheIdentity = witnesses.Worktree.CacheIdentity
+	binding.CandidateCacheIdentity = witnesses.PostApply.CacheIdentity
+	if err := validatePreparedDisambiguationCacheIdentities(binding); err != nil {
+		return PreparedLandDisambiguation{}, err
+	}
+	binding.Verdict = preparedDisambiguationVerified
+	return binding, nil
+}
+
+func validatePreparedLandDisambiguation(root, wtPath string, receipt PreparedLandReceipt, git GitRunner) Result {
+	binding := receipt.Disambiguation
+	if binding.AnalyzerIdentity != preparedDisambiguationAnalyzerIdentity() ||
+		binding.CandidateTreeSHA != receipt.TreeSHA || binding.Required != disambiguationRelevant(receipt.CandidatePaths) {
+		return preparedMismatch("prepared disambiguation binding mismatch", "")
+	}
+	rootTree, err := preparedLandTreeSHA(root, "HEAD", git)
+	if err != nil {
+		return preparedReprepare("could not recheck prepared disambiguation root", err.Error())
+	}
+	worktreeTree, err := preparedLandTreeSHA(wtPath, "HEAD", git)
+	if err != nil {
+		return preparedReprepare("could not recheck prepared disambiguation worktree", err.Error())
+	}
+	if rootTree != binding.RootTreeSHA || worktreeTree != binding.WorktreeTreeSHA {
+		return preparedReprepare("prepared disambiguation input trees changed", "prepare again on the current root and worker trees")
+	}
+	if !binding.Required {
+		if binding.Applicable || binding.Verdict != preparedDisambiguationNotRequired || preparedDisambiguationHasCacheIdentity(binding) {
+			return preparedMismatch("prepared disambiguation binding mismatch", "irrelevant candidate carried an oracle verdict")
+		}
+		return Result{OK: true}
+	}
+	applicable, err := preparedDisambiguationApplicable(root, binding)
+	if err != nil {
+		return preparedReprepare("could not recheck prepared disambiguation applicability", err.Error())
+	}
+	if applicable != binding.Applicable {
+		return preparedMismatch("prepared disambiguation applicability mismatch", "")
+	}
+	if !binding.Applicable {
+		if binding.Verdict != preparedDisambiguationInapplicable || preparedDisambiguationHasCacheIdentity(binding) {
+			return preparedMismatch("prepared disambiguation binding mismatch", "inapplicable oracle carried a cache verdict")
+		}
+		return Result{OK: true}
+	}
+	if binding.Verdict != preparedDisambiguationVerified {
+		return preparedMismatch("prepared disambiguation verdict mismatch", "")
+	}
+	if err := validatePreparedDisambiguationCacheIdentities(binding); err != nil {
+		return preparedMismatch("prepared disambiguation cache binding mismatch", err.Error())
+	}
+	return Result{OK: true}
+}
+
+func preparedLandTreeSHA(repo, revision string, git GitRunner) (string, error) {
+	rc, out := run(git, repo, []string{"rev-parse", "--verify", strings.TrimSpace(revision) + "^{tree}"})
+	if rc != 0 {
+		return "", errors.New(tail(out, 200))
+	}
+	tree := strings.TrimSpace(out)
+	if raw, err := hex.DecodeString(tree); err != nil || (len(raw) != 20 && len(raw) != sha256.Size) {
+		return "", fmt.Errorf("invalid tree identity %q", tree)
+	}
+	return tree, nil
+}
+
+func preparedDisambiguationAnalyzerIdentity() string {
+	return digestStrings([]string{
+		disambiguationCacheSchema,
+		disambiguationAnalyzerConfig,
+		disambiguationAnalyzerVersion,
+		disambiguationAnalyzerContractPath,
+	})
+}
+
+func preparedDisambiguationHasCacheIdentity(binding PreparedLandDisambiguation) bool {
+	return binding.RootCacheIdentity != "" || binding.WorktreeCacheIdentity != "" || binding.CandidateCacheIdentity != ""
+}
+
+func validatePreparedDisambiguationCacheIdentities(binding PreparedLandDisambiguation) error {
+	want := []string{
+		disambiguationCacheKey(binding.RootTreeSHA),
+		disambiguationCacheKey(binding.WorktreeTreeSHA),
+		disambiguationCacheKey(binding.CandidateTreeSHA),
+	}
+	got := []string{binding.RootCacheIdentity, binding.WorktreeCacheIdentity, binding.CandidateCacheIdentity}
+	for i := range want {
+		if got[i] != want[i] {
+			return fmt.Errorf("view %d cache identity does not match its tree", i)
+		}
+	}
+	return nil
+}
+
+func preparedDisambiguationApplicable(root string, binding PreparedLandDisambiguation) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultDisambiguationTimeout)
+	defer cancel()
+	for _, tree := range []string{binding.RootTreeSHA, binding.WorktreeTreeSHA, binding.CandidateTreeSHA} {
+		present, err := hasDisambiguationContract(ctx, root, tree)
+		if err != nil {
+			return false, err
+		}
+		if present {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func persistPreparedLand(root, wtPath, targetRef, parentSHA, treeSHA, candidateSHA string, candidatePaths []string, recoveryRef string, disambiguation *DisambiguationWitnesses, capture *preparedLandCapture, git GitRunner) (PreparedLandReceipt, error) {
 	paths, err := normalizePreparedPaths(candidatePaths)
 	if err != nil {
 		return PreparedLandReceipt{}, fmt.Errorf("candidate paths: %w", err)
@@ -248,6 +419,10 @@ func persistPreparedLand(root, targetRef, parentSHA, treeSHA, candidateSHA strin
 	if err != nil {
 		return PreparedLandReceipt{}, err
 	}
+	disambiguationBinding, err := bindPreparedLandDisambiguation(root, wtPath, treeSHA, paths, disambiguation, git)
+	if err != nil {
+		return PreparedLandReceipt{}, err
+	}
 	receipt := PreparedLandReceipt{
 		Schema: PreparedLandSchema, GateContract: PreparedLandGateContract,
 		TargetRef: strings.TrimSpace(targetRef), ParentSHA: strings.TrimSpace(parentSHA),
@@ -255,7 +430,7 @@ func persistPreparedLand(root, targetRef, parentSHA, treeSHA, candidateSHA strin
 		PathsDigest:         digestStrings(capture.paths),
 		VerifyCommandDigest: digestStrings([]string{binding.Command}), TagsDigest: digestStrings(binding.Tags),
 		Verdict: "verified", RecoveryRef: strings.TrimSpace(recoveryRef),
-		Paths: capture.paths, CandidatePaths: paths, Verification: binding,
+		Paths: capture.paths, CandidatePaths: paths, Verification: binding, Disambiguation: disambiguationBinding,
 	}
 	receipt.ReceiptID, err = preparedReceiptID(receipt)
 	if err != nil {

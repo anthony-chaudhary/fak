@@ -1091,7 +1091,7 @@ func landIsolatedProspectivePrepared(root, wtPath, diff, msgFile string, paths [
 		}
 		finishRecovery()
 		if prepared != nil {
-			receipt, err := persistPreparedLand(root, branch, oldHEAD, treeSHA, newCommit, paths, recoveryRef, prepared, git)
+			receipt, err := persistPreparedLand(root, wtPath, branch, oldHEAD, treeSHA, newCommit, paths, recoveryRef, disambiguation, prepared, git)
 			if err != nil {
 				return isolatedLandReconciliationResult(wtPath, Result{Reason: "could not persist prepared landing receipt", Detail: err.Error(), RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt}), true
 			}
