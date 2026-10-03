@@ -1085,6 +1085,11 @@ func (p *InKernelPlanner) recordNativePhase(traceID string, phase NativePhase, a
 		return
 	}
 	obs := NativePhaseObservation{TraceID: traceID, Phase: phase, At: at, Elapsed: elapsed, Completed: completed}
+	p.storeNativePhaseObservation(obs, false)
+}
+
+func (p *InKernelPlanner) storeNativePhaseObservation(obs NativePhaseObservation, reset bool) {
+	traceID := obs.TraceID
 	p.nativePhaseMu.Lock()
 	defer p.nativePhaseMu.Unlock()
 	if p.nativePhaseLog == nil {
@@ -1099,9 +1104,77 @@ func (p *InKernelPlanner) recordNativePhase(traceID string, phase NativePhase, a
 				break
 			}
 		}
-		p.nativePhaseSeq = append(p.nativePhaseSeq, traceID)
 	}
+	p.touchNativePhaseLocked(traceID)
+	if !reset {
+		obs.FirstDraw = p.nativePhaseLog[traceID].FirstDraw
+	}
+	obs.UpdatedAt = time.Now()
 	p.nativePhaseLog[traceID] = obs
+}
+
+func (p *InKernelPlanner) touchNativePhaseLocked(traceID string) {
+	for i, key := range p.nativePhaseSeq {
+		if key == traceID {
+			p.nativePhaseSeq = append(p.nativePhaseSeq[:i], p.nativePhaseSeq[i+1:]...)
+			break
+		}
+	}
+	p.nativePhaseSeq = append(p.nativePhaseSeq, traceID)
+}
+
+func cloneNativePhaseObservation(obs NativePhaseObservation) NativePhaseObservation {
+	if obs.FirstDraw != nil {
+		draw := *obs.FirstDraw
+		if draw.TokenID != nil {
+			token := *draw.TokenID
+			draw.TokenID = &token
+		}
+		obs.FirstDraw = &draw
+	}
+	return obs
+}
+
+func (p *InKernelPlanner) beginNativeFirstDraw(traceID string, ceiling int) {
+	obs := NativePhaseObservation{TraceID: traceID, Phase: NativePhasePrefill, At: time.Now(),
+		FirstDraw: &NativeFirstDrawObservation{ResolvedOutputCeiling: ceiling, Classification: "not_drawn"}}
+	p.storeNativePhaseObservation(obs, true)
+}
+
+func (p *InKernelPlanner) recordNativeFirstDraw(traceID string, token int, stop bool) {
+	p.nativePhaseMu.Lock()
+	defer p.nativePhaseMu.Unlock()
+	obs, ok := p.nativePhaseLog[traceID]
+	if !ok || obs.FirstDraw == nil || obs.FirstDraw.Observed {
+		return
+	}
+	draw := *obs.FirstDraw
+	draw.Observed, draw.TokenID, draw.Classification = true, &token, "non_stop_token"
+	if token < 0 {
+		draw.Classification = "negative_token"
+	} else if stop {
+		draw.Classification = "stop_token"
+	}
+	obs.FirstDraw = &draw
+	obs.UpdatedAt = time.Now()
+	p.nativePhaseLog[traceID] = obs
+	p.touchNativePhaseLocked(traceID)
+}
+
+// LatestNativePhaseObservation reads the latest actual phase from the same
+// bounded ledger. Empty trace IDs remain valid exact keys in the original API.
+func (p *InKernelPlanner) LatestNativePhaseObservation() (NativePhaseObservation, bool) {
+	if p == nil {
+		return NativePhaseObservation{}, false
+	}
+	p.nativePhaseMu.Lock()
+	defer p.nativePhaseMu.Unlock()
+	for i := len(p.nativePhaseSeq) - 1; i >= 0; i-- {
+		if obs, ok := p.nativePhaseLog[p.nativePhaseSeq[i]]; ok {
+			return cloneNativePhaseObservation(obs), true
+		}
+	}
+	return NativePhaseObservation{}, false
 }
 
 // NativePhaseObservation reports the most recent native-phase observation recorded for traceID.
@@ -1115,7 +1188,7 @@ func (p *InKernelPlanner) NativePhaseObservation(traceID string) (NativePhaseObs
 	p.nativePhaseMu.Lock()
 	defer p.nativePhaseMu.Unlock()
 	obs, ok := p.nativePhaseLog[traceID]
-	return obs, ok
+	return cloneNativePhaseObservation(obs), ok
 }
 
 func (p *InKernelPlanner) InKernelOOMRetryStats() InKernelOOMRetryStats {

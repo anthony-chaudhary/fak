@@ -217,6 +217,23 @@ type NativePhaseObservation struct {
 	At        time.Time
 	Elapsed   time.Duration
 	Completed bool
+	FirstDraw *NativeFirstDrawObservation `json:"first_draw,omitempty"`
+	UpdatedAt time.Time
+}
+
+// NativeFirstDrawObservation describes the first sampled token, before stop
+// filtering. TokenID is absent when no draw occurred; token zero is valid.
+type NativeFirstDrawObservation struct {
+	ResolvedOutputCeiling int    `json:"resolved_output_ceiling"`
+	Observed              bool   `json:"observed"`
+	TokenID               *int   `json:"token_id,omitempty"`
+	Classification        string `json:"classification"`
+}
+
+// NativeLatestPhaseReporter exposes one actual latest native observation without
+// requiring a live harness session. Unsupported planners report unavailable.
+type NativeLatestPhaseReporter interface {
+	LatestNativePhaseObservation() (NativePhaseObservation, bool)
 }
 
 // NativePhaseReporter is implemented by local planners that observe native phase transitions.

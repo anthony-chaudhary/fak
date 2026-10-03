@@ -537,10 +537,11 @@ type debugAdmissionDecisionVars struct {
 // carries the closed-vocabulary token verbatim; Completed distinguishes a phase that ran to
 // its end from one still in flight (or cut short).
 type debugNativePhaseVars struct {
-	Phase      string `json:"phase"`
-	AtUnixNano int64  `json:"at_unix_nano,omitempty"`
-	ElapsedMs  int64  `json:"elapsed_ms,omitempty"`
-	Completed  bool   `json:"completed"`
+	Phase      string                            `json:"phase"`
+	AtUnixNano int64                             `json:"at_unix_nano,omitempty"`
+	ElapsedMs  int64                             `json:"elapsed_ms,omitempty"`
+	Completed  bool                              `json:"completed"`
+	FirstDraw  *agent.NativeFirstDrawObservation `json:"first_draw,omitempty"`
 }
 
 type debugCompactionVars struct {
@@ -1068,49 +1069,68 @@ func (s *Server) debugRequestAdmission(_ time.Time) *debugRequestAdmissionVars {
 		return nil
 	}
 
-	trace := s.mostRecentLiveTrace(context.Background())
-	if trace == "" {
-		return nil
+	rowFor := func(trace string, latest *agent.NativePhaseObservation) *debugRequestAdmissionVars {
+		out := &debugRequestAdmissionVars{TraceID: trace}
+		if ctl != nil {
+			if rec, ok := ctl.LastAdmissionDecision(trace); ok {
+				dec := &debugAdmissionDecisionVars{
+					TraceID:   rec.TraceID,
+					SessionID: rec.SessionID,
+					Tokens:    rec.Tokens,
+					Priority:  rec.Priority,
+					Verdict:   rec.Verdict,
+					Admitted:  rec.Admitted,
+					Budget:    rec.Budget,
+					Reason:    rec.Reason,
+				}
+				if !rec.At.IsZero() {
+					dec.AtUnixNano = rec.At.UnixNano()
+				}
+				out.Decision = dec
+			}
+		}
+		if reporter != nil || latest != nil {
+			var obs agent.NativePhaseObservation
+			ok := false
+			if reporter != nil {
+				obs, ok = reporter.NativePhaseObservation(trace)
+			}
+			if latest != nil {
+				obs, ok = *latest, true
+			}
+			if ok {
+				phase := &debugNativePhaseVars{
+					Phase:     obs.Phase.String(),
+					Completed: obs.Completed,
+					FirstDraw: obs.FirstDraw,
+				}
+				if !obs.At.IsZero() {
+					phase.AtUnixNano = obs.At.UnixNano()
+				}
+				if obs.Elapsed > 0 {
+					phase.ElapsedMs = obs.Elapsed.Milliseconds()
+				}
+				out.NativePhase = phase
+			}
+		}
+		return out
 	}
 
-	out := &debugRequestAdmissionVars{TraceID: trace}
-	if ctl != nil {
-		if rec, ok := ctl.LastAdmissionDecision(trace); ok {
-			dec := &debugAdmissionDecisionVars{
-				TraceID:   rec.TraceID,
-				SessionID: rec.SessionID,
-				Tokens:    rec.Tokens,
-				Priority:  rec.Priority,
-				Verdict:   rec.Verdict,
-				Admitted:  rec.Admitted,
-				Budget:    rec.Budget,
-				Reason:    rec.Reason,
-			}
-			if !rec.At.IsZero() {
-				dec.AtUnixNano = rec.At.UnixNano()
-			}
-			out.Decision = dec
+	trace := s.mostRecentLiveTrace(context.Background())
+	if trace != "" {
+		out := rowFor(trace, nil)
+		if out.Decision != nil || out.NativePhase != nil {
+			return out
 		}
 	}
-	if reporter != nil {
-		if obs, ok := reporter.NativePhaseObservation(trace); ok {
-			phase := &debugNativePhaseVars{
-				Phase:     obs.Phase.String(),
-				Completed: obs.Completed,
-			}
-			if !obs.At.IsZero() {
-				phase.AtUnixNano = obs.At.UnixNano()
-			}
-			if obs.Elapsed > 0 {
-				phase.ElapsedMs = obs.Elapsed.Milliseconds()
-			}
-			out.NativePhase = phase
+	// A live registry entry may have no record in this process. Fall back to
+	// the actual latest native observation, joining admission on its same trace.
+	if r, ok := s.planner.(agent.NativeLatestPhaseReporter); ok {
+		if obs, available := r.LatestNativePhaseObservation(); available {
+			return rowFor(obs.TraceID, &obs)
 		}
 	}
-	if out.Decision == nil && out.NativePhase == nil {
-		return nil
-	}
-	return out
+	return nil
 }
 
 // mostRecentLiveTrace returns the live session's trace id with the greatest Rev (the

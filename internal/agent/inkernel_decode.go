@@ -132,6 +132,11 @@ func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, 
 // it is sized to the logits vocab on first use and never persists across turns.
 func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, measurementOpt ...*nativeInferenceMeasurement) (gen, promptTok, cacheable, matched int, sourceTier radixkv.SnapshotTier, prefillS, decodeS float64, stopped bool, err error) {
 	p.qwen35MetalGDNExecuted.Store(false)
+	traceID := nativePhaseTraceID(ctx)
+	p.beginNativeFirstDraw(traceID, maxNew)
+	defer func() {
+		p.recordNativePhase(traceID, NativePhaseTerminal, time.Now(), 0, err == nil)
+	}()
 	var measurement *nativeInferenceMeasurement
 	if len(measurementOpt) > 0 {
 		measurement = measurementOpt[0]
@@ -583,6 +588,9 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		presPenalty: presPenalty,
 		maxNew:      maxNew,
 		measurement: measurement,
+		firstDraw: func(token int) {
+			p.recordNativeFirstDraw(traceID, token, stops[token])
+		},
 		samplerHook: p.cachePrimeSamplerHook,
 		emitHook:    p.cachePrimeEmitHook,
 	}
@@ -836,6 +844,7 @@ type decodeLane struct {
 	presPenalty float64
 	maxNew      int
 	measurement *nativeInferenceMeasurement
+	firstDraw   func(int)
 	// samplerHook / emitHook are the CW-03 (#13351) purpose-observation taps. They are
 	// nil on the served path (a literal no-op) and set only by a cache-prime caller's
 	// witness; decodeOne fires them at the exact sample and emit seams, so a prime that
@@ -1046,6 +1055,10 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 		ln.samplerHook()
 	}
 	next = sampleLogitsWithPenalty(ln.logits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng)
+	if ln.firstDraw != nil {
+		ln.firstDraw(next)
+		ln.firstDraw = nil
+	}
 	if next < 0 || ln.stops[next] {
 		ln.stopped, ln.done = true, true
 		return 0, false

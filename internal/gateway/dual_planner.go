@@ -106,6 +106,23 @@ func (d *DualPlanner) NativePhaseObservation(traceID string) (agent.NativePhaseO
 	return reporter.NativePhaseObservation(traceID)
 }
 
+func (d *DualPlanner) LatestNativePhaseObservation() (agent.NativePhaseObservation, bool) {
+	if d == nil {
+		return agent.NativePhaseObservation{}, false
+	}
+	var latest agent.NativePhaseObservation
+	found := false
+	for _, planner := range []agent.Planner{d.local, d.proxy} {
+		if reporter, ok := planner.(agent.NativeLatestPhaseReporter); ok {
+			if obs, available := reporter.LatestNativePhaseObservation(); available &&
+				(!found || obs.UpdatedAt.After(latest.UpdatedAt) || (obs.UpdatedAt.Equal(latest.UpdatedAt) && obs.TraceID > latest.TraceID)) {
+				latest, found = obs, true
+			}
+		}
+	}
+	return latest, found
+}
+
 // WalkPlanners traverses each direct child planner in the dual planner.
 func (d *DualPlanner) WalkPlanners(fn func(agent.Planner)) {
 	if d == nil {
