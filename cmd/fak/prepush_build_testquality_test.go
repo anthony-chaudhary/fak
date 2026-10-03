@@ -30,36 +30,43 @@ func setupTestQualitySeam(t *testing.T, code int) *[]string {
 	return &got
 }
 
+// fak-test:runtime medium est=2s lane=default
 func TestPrePushTestQualityGetsResolvedRootAndStaysAdvisory(t *testing.T) {
-	setupHappyPrepushSeams(t)
-	root := t.TempDir()
-	// 1 = the ratchet found NEW findings beyond the baseline floor: the case that most tempts a
-	// gate into refusing a push over unrelated test debt.
-	gotArgv := setupTestQualitySeam(t, 1)
+	for _, tc := range []struct {
+		name string
+		code int
+	}{{"findings", 1}, {"scanner_failure", 2}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPrepushReceiptTruthFixture(t, "classified")
+			root := f.root
+			gotArgv := setupTestQualitySeam(t, tc.code)
 
-	var out, errOut bytes.Buffer
-	code := runHooksPrePush(&out, &errOut, []string{"--root", root})
+			var out, errOut bytes.Buffer
+			code := runHooksPrePush(&out, &errOut, []string{"--root", root, "--base", f.base, "--tip", f.tip})
 
-	if want := []string{"--root", root}; !reflect.DeepEqual(*gotArgv, want) {
-		t.Fatalf("test-quality argv = %q, want %q — the resolved root must travel as a --root FLAG,\n"+
-			"not as a positional and not left to the process CWD", *gotArgv, want)
-	}
-	if code != 0 {
-		t.Fatalf("advisory test-quality growth changed the push decision: exit %d, want 0", code)
-	}
-	if !strings.Contains(errOut.String(), "WARNING: test-quality ratchet") {
-		t.Fatalf("non-zero test-quality code printed no advisory WARNING; stderr = %q", errOut.String())
+			if want := []string{"--root", root}; !reflect.DeepEqual(*gotArgv, want) {
+				t.Fatalf("test-quality argv = %q, want %q — the resolved root must travel as a --root FLAG,\n"+
+					"not as a positional and not left to the process CWD", *gotArgv, want)
+			}
+			if code != 0 {
+				t.Fatalf("advisory test-quality code %d changed the push decision: exit %d, want 0", tc.code, code)
+			}
+			if !strings.Contains(errOut.String(), "WARNING: test-quality ratchet") {
+				t.Fatalf("non-zero test-quality code printed no advisory WARNING; stderr = %q", errOut.String())
+			}
+		})
 	}
 }
 
 // A clean ratchet must stay silent — otherwise the WARNING is unconditional noise and stops
 // meaning anything on the run where it matters.
+// fak-test:runtime medium est=1s lane=default
 func TestPrePushTestQualityCleanIsQuiet(t *testing.T) {
-	setupHappyPrepushSeams(t)
+	f := newPrepushReceiptTruthFixture(t, "classified")
 	setupTestQualitySeam(t, 0)
 
 	var out, errOut bytes.Buffer
-	if code := runHooksPrePush(&out, &errOut, []string{"--root", t.TempDir()}); code != 0 {
+	if code := runHooksPrePush(&out, &errOut, []string{"--root", f.root, "--base", f.base, "--tip", f.tip}); code != 0 {
 		t.Fatalf("clean gate exited %d, want 0", code)
 	}
 	if strings.Contains(errOut.String(), "WARNING: test-quality ratchet") {

@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -325,7 +326,7 @@ type trunkBuildPhase struct {
 type trunkBuildResult struct {
 	Schema           string            `json:"schema"`           // fak.trunk_build.v1
 	Reason           string            `json:"reason,omitempty"` // "TRUNK_WOULD_NOT_COMPILE" | "" (empty when it builds/NOOP)
-	OK               bool              `json:"ok"`               // true iff the push may proceed on build grounds
+	OK               bool              `json:"ok"`               // build admission, then combined with immutable-range admission
 	Ref              string            `json:"ref"`              // resolved HEAD sha (the pushed tip)
 	Base             string            `json:"base"`             // the base ref the range was computed against
 	ChangedPackages  []string          `json:"changed_packages"`
@@ -334,9 +335,14 @@ type trunkBuildResult struct {
 	ElapsedMS        int64             `json:"elapsed_ms"`
 	Phases           []trunkBuildPhase `json:"phases,omitempty"`
 	Verdict          string            `json:"verdict"` // OK | NOOP | TRUNK_WOULD_NOT_COMPILE | TRUNK_ALREADY_RED | GATE_LATENCY_REGRESSION | COULD_NOT_RUN | SKIPPED_CONTENDED
+	BuildVerdict     string            `json:"build_verdict,omitempty"`
+	BuildReused      bool              `json:"build_reused,omitempty"`
+	ConceptAdmission string            `json:"concept_admission,omitempty"`
+	TestQuality      string            `json:"test_quality,omitempty"`
+	TestQualityScope string            `json:"test_quality_scope,omitempty"`
 	// Pre-existing-red tolerance (#3618). When the tip's cone fails to build, each failing
 	// package is re-built against the base trunk (origin/main) to attribute the break. BaseSha is
-	// the resolved base commit built against; PreExistingRed are packages red at BOTH tip and base
+	// always the immutable range base, including green/no-build paths; PreExistingRed are packages red at BOTH tip and base
 	// (a peer's already-published break — not this push); Regressions are packages that build at
 	// base but fail at the tip (introduced by this push). A failure with only PreExistingRed and no
 	// Regressions is TRUNK_ALREADY_RED (exit 0, push allowed): a clean delta must not be false-
@@ -347,23 +353,151 @@ type trunkBuildResult struct {
 }
 
 const (
-	prepushSuccessReuseTTL = 24 * time.Hour
-	prepushSuccessMaxFiles = 64
-	prepushGateContract    = "affected-importer-cone+concept-admission+test-quality/v1"
+	prepushSuccessReuseTTL    = 24 * time.Hour
+	prepushSuccessMaxFiles    = 64
+	prepushGateContract       = "immutable-range-affected-importer-build/v2"
+	prepushLegacyGateContract = "unqualified-legacy-build/v1"
 )
 
 type prepushSuccessReceipt struct {
-	Schema       string    `json:"schema"`
-	Tip          string    `json:"tip"`
-	GateContract string    `json:"gate_contract"`
-	CompletedAt  time.Time `json:"completed_at"`
+	Schema       string            `json:"schema"`
+	Tip          string            `json:"tip"`
+	GateContract string            `json:"gate_contract"`
+	CompletedAt  time.Time         `json:"completed_at"`
+	BaseSha      string            `json:"base_sha,omitempty"`
+	Environment  string            `json:"environment,omitempty"`
+	Result       *trunkBuildResult `json:"result,omitempty"`
 }
 
 var (
 	prepushSuccessReceiptMu sync.Mutex
 	prepushSuccessCommonDir = discoverGitCommonDir
 	prepushSuccessSleep     = time.Sleep
+	prepushExecutableOnce   sync.Once
+	prepushExecutableDigest string
 )
+
+// prepushBuildEnvironment fingerprints the checker executable, effective Go
+// settings and inherited environment. Only a digest is persisted. Reuse assumes
+// trusted, unchanged installed Go tools and module-cache contents during the TTL;
+// this is not a hermetic toolchain attestation. Mutable external inputs and CGO
+// are outside this receipt's envelope: they remain buildable without reuse.
+func prepushBuildEnvironment(root, tip string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := windowgate.CommandContext(ctx, "go", "env", "-json")
+	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
+	config, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	var values map[string]string
+	if json.Unmarshal(config, &values) != nil || !prepushReusableGoConfig(values) {
+		return ""
+	}
+	// go env derives this C-compiler field from a fresh Builder, including a
+	// random scratch prefix on every query. CGO is already excluded above, so
+	// that unused derived value must not invalidate an otherwise identical build.
+	delete(values, "GOGCCFLAGS")
+	config, err = json.Marshal(values)
+	if err != nil {
+		return ""
+	}
+	if work, err := gitOut(root, "show", tip+":go.work"); err == nil && strings.TrimSpace(work) != "" {
+		return ""
+	}
+	mod, err := gitOut(root, "show", tip+":go.mod")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(mod, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && fields[0] == "replace" {
+			return ""
+		}
+	}
+	prepushExecutableOnce.Do(func() {
+		path, err := os.Executable()
+		if err != nil {
+			return
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return
+		}
+		defer f.Close()
+		h := sha256.New()
+		if _, err := io.Copy(h, f); err == nil {
+			prepushExecutableDigest = fmt.Sprintf("%x", h.Sum(nil))
+		}
+	})
+	if prepushExecutableDigest == "" {
+		return ""
+	}
+	env := os.Environ()
+	sort.Strings(env)
+	h := sha256.New()
+	_, _ = fmt.Fprintf(h, "%s\x00%s\x00%s", prepushExecutableDigest, config, strings.Join(env, "\x00"))
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// Only flag forms whose inputs are the committed module and ordinary build
+// configuration qualify for reuse. Unknown forms still run normally, but cannot
+// reuse evidence: flags such as -modfile, -toolexec, -pgo=<file> and -pkgdir can
+// read mutable bytes outside the candidate without changing their path strings.
+func prepushReusableGoConfig(values map[string]string) bool {
+	if values["CGO_ENABLED"] != "0" || values["GO111MODULE"] == "off" || (values["GOWORK"] != "" && values["GOWORK"] != "off") {
+		return false
+	}
+	for _, flag := range strings.Fields(values["GOFLAGS"]) {
+		switch flag {
+		case "-trimpath", "-race", "-msan", "-asan", "-buildvcs=true", "-buildvcs=false", "-buildvcs=auto",
+			"-mod=mod", "-mod=readonly", "-mod=vendor", "-pgo=auto", "-pgo=off":
+			continue
+		}
+		if strings.HasPrefix(flag, "-p=") || strings.HasPrefix(flag, "-tags=") {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func reusablePrepushBuild(res trunkBuildResult) bool {
+	return res.OK && res.Ref != "" && res.BaseSha != "" && len(res.SelectedPackages) > 0 &&
+		(res.Verdict == "OK" || res.Verdict == "GATE_LATENCY_REGRESSION")
+}
+
+// loadPrepushBuild never upgrades tree-only commit evidence into range coverage.
+// Advisory checks are not in this receipt and must run even on a cache hit.
+func loadPrepushBuild(root, tip, base, environment string, now time.Time) (trunkBuildResult, bool) {
+	if base == "" || environment == "" {
+		return trunkBuildResult{}, false
+	}
+	b, err := os.ReadFile(prepushSuccessReceiptPath(root, tip))
+	if err != nil {
+		return trunkBuildResult{}, false
+	}
+	var receipt prepushSuccessReceipt
+	if json.Unmarshal(b, &receipt) != nil || receipt.Schema != "fak-prepush-success/3" ||
+		receipt.GateContract != prepushGateContract || receipt.Tip != tip || receipt.BaseSha != base ||
+		receipt.Environment != environment || receipt.Result == nil {
+		return trunkBuildResult{}, false
+	}
+	age := now.Sub(receipt.CompletedAt)
+	res := *receipt.Result
+	return res, age >= 0 && age <= prepushSuccessReuseTTL && reusablePrepushBuild(res) && res.Ref == tip && res.BaseSha == base
+}
+
+func recordPrepushBuild(root, environment string, res trunkBuildResult, now time.Time) {
+	if environment == "" || !reusablePrepushBuild(res) {
+		return
+	}
+	writePrepushSuccess(root, prepushSuccessReceipt{Schema: "fak-prepush-success/3", Tip: res.Ref,
+		GateContract: prepushGateContract, CompletedAt: now.UTC(), BaseSha: res.BaseSha,
+		Environment: environment, Result: &res}, now)
+}
 
 func prepushSuccessReceiptPath(root, tip string) string {
 	commonDir := prepushSuccessCommonDir(root)
@@ -385,7 +519,7 @@ func prepushSuccessReusable(root, tip string, now time.Time) bool {
 		return false
 	}
 	var receipt prepushSuccessReceipt
-	if json.Unmarshal(b, &receipt) != nil || receipt.Schema != "fak-prepush-success/2" || receipt.Tip != tip || receipt.GateContract != prepushGateContract {
+	if json.Unmarshal(b, &receipt) != nil || receipt.Schema != "fak-prepush-success/2" || receipt.Tip != tip || receipt.GateContract != prepushLegacyGateContract {
 		return false
 	}
 	age := now.Sub(receipt.CompletedAt)
@@ -427,8 +561,14 @@ func prunePrepushSuccessReceipts(dir string, now time.Time) {
 }
 
 func recordPrepushSuccess(root, tip string, now time.Time) {
-	path := prepushSuccessReceiptPath(root, tip)
-	if path == "" || tip == "" {
+	// Legacy producer: retained for commit-tree evidence, but without range and
+	// build coverage it is never accepted by loadPrepushBuild.
+	writePrepushSuccess(root, prepushSuccessReceipt{Schema: "fak-prepush-success/2", Tip: tip, GateContract: prepushLegacyGateContract, CompletedAt: now.UTC()}, now)
+}
+
+func writePrepushSuccess(root string, receipt prepushSuccessReceipt, now time.Time) {
+	path := prepushSuccessReceiptPath(root, receipt.Tip)
+	if path == "" || receipt.Tip == "" {
 		return
 	}
 	prepushSuccessReceiptMu.Lock()
@@ -437,7 +577,7 @@ func recordPrepushSuccess(root, tip string, now time.Time) {
 		return
 	}
 	prunePrepushSuccessReceipts(filepath.Dir(path), now)
-	b, err := json.Marshal(prepushSuccessReceipt{Schema: "fak-prepush-success/2", Tip: tip, GateContract: prepushGateContract, CompletedAt: now.UTC()})
+	b, err := json.Marshal(receipt)
 	if err != nil {
 		return
 	}
@@ -490,17 +630,21 @@ func prepushClaimPath(root, tip string) string {
 // returns owner=false only after independently reading the successful receipt written
 // by the owner; owner failure removes the claim and lets one waiter retry the gate.
 func claimPrepushTip(root, tip string, now func() time.Time) (owner bool, release func()) {
+	return claimPrepushTipWithReuse(root, tip, now, func() bool { return prepushSuccessReusable(root, tip, now()) })
+}
+
+func claimPrepushTipWithReuse(root, tip string, now func() time.Time, reusable func() bool) (owner bool, release func()) {
 	path := prepushClaimPath(root, tip)
 	if path == "" {
 		return true, func() {}
 	}
 	for {
-		if prepushSuccessReusable(root, tip, now()) {
+		if reusable() {
 			return false, func() {}
 		}
 		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 		if err == nil {
-			if prepushSuccessReusable(root, tip, now()) {
+			if reusable() {
 				_ = f.Close()
 				_ = os.Remove(path)
 				return false, func() {}
@@ -512,7 +656,7 @@ func claimPrepushTip(root, tip string, now func() time.Time) (owner bool, releas
 		if !os.IsExist(err) {
 			return true, func() {}
 		}
-		if prepushSuccessReusable(root, tip, now()) {
+		if reusable() {
 			return false, func() {}
 		}
 		if info, statErr := os.Stat(path); statErr == nil && now().Sub(info.ModTime()) > prepushClaimStaleAfter {
@@ -544,74 +688,131 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	resolvedTip := strings.TrimSpace(*tip)
-	if resolvedTip == "" {
-		resolvedTip, _ = prepushGitRevParse(r, "HEAD")
+	res := trunkBuildResult{Schema: "fak.trunk_build.v1", Verdict: "COULD_NOT_RUN", ConceptAdmission: "UNRUN"}
+	code := 2
+	tipRef := strings.TrimSpace(*tip)
+	if tipRef == "" {
+		tipRef = "HEAD"
 	}
-	if prepushSuccessReusable(r, resolvedTip, prepushNow()) {
-		fmt.Fprintf(stdout, "PREPUSH_REUSED tip=%s age<=%s\n", resolvedTip, prepushSuccessReuseTTL)
-		return 0
+	baseRef := strings.TrimSpace(*base)
+	if baseRef == "" {
+		baseRef = prepushResolveBase(r)
 	}
-	if tree, err := prepushTreeResolveFn(r, resolvedTip+"^{tree}"); err == nil && prepushTreeSuccessReusable(r, tree, prepushNow()) && prepushCommitPathsCoveredFn(r, resolvedTip) {
-		fmt.Fprintf(stdout, "PREPUSH_REUSED tip=%s tree=%s source=commit-build-check age<=%s\n", resolvedTip, tree, prepushSuccessReuseTTL)
-		now := prepushNow()
-		recordPrepushSuccess(r, resolvedTip, now)
-		committedbuildwitness.Record(r, resolvedTip, "pre-push", now)
-		return 0
+	res.Base = baseRef
+	var environment string
+	var err error
+	res.Ref, err = prepushRevParse(r, tipRef)
+	if err != nil || res.Ref == "" {
+		res.Detail = fmt.Sprintf("cannot resolve pushed tip %s: %v", tipRef, err)
+	} else if res.BaseSha, err = prepushRevParse(r, baseRef); err != nil || res.BaseSha == "" {
+		res.Detail = fmt.Sprintf("cannot resolve pushed base %s: %v", baseRef, err)
+	} else {
+		resolvedTip, resolvedBase := res.Ref, res.BaseSha
+		environment = prepushBuildEnvironment(r, resolvedTip)
+		reusable := func() bool {
+			cached, ok := loadPrepushBuild(r, resolvedTip, resolvedBase, environment, prepushNow())
+			// A coalescing waiter may outlive a toolchain/configuration change.
+			// Revalidate immediately before consuming a hit, not only before
+			// waiting or when deciding whether to write another receipt.
+			if ok {
+				current := prepushBuildEnvironment(r, resolvedTip)
+				if current != environment {
+					environment = current
+					cached, ok = loadPrepushBuild(r, resolvedTip, resolvedBase, environment, prepushNow())
+				}
+			}
+			if ok {
+				res = cached
+				res.BuildReused = true
+			}
+			return ok
+		}
+		owner, releaseClaim := claimPrepushTipWithReuse(r, resolvedTip, prepushNow, reusable)
+		defer releaseClaim()
+		if owner {
+			res, code = evaluatePrePushBuildAt(r, resolvedBase, resolvedTip, *budget, *advisory)
+		} else {
+			code = 0
+		}
+		res.Base = baseRef
 	}
-	owner, releaseClaim := claimPrepushTip(r, resolvedTip, prepushNow)
-	if !owner {
-		fmt.Fprintf(stdout, "PREPUSH_REUSED tip=%s coalesced=true\n", resolvedTip)
-		return 0
-	}
-	defer releaseClaim()
-	res, code := evaluatePrePushBuildAt(r, *base, resolvedTip, *budget, *advisory)
+	buildResult := res
+	res.BuildVerdict = buildResult.Verdict
 	// Repeat the earliest commit admission decision over immutable base..tip
-	// objects. This protects direct pushes and is the CI-consumed committed-diff seam.
+	// objects on every invocation, including build receipt hits. A build-only
+	// receipt never substitutes for range admission or a live-tree advisory scan.
 	if res.BaseSha != "" && res.Ref != "" {
-		if d, err := hooks.ReadRangeDiff(r, res.BaseSha, res.Ref); err == nil {
-			if findings, err := hooks.CheckConceptAdmission(d); err == nil && len(findings) > 0 {
+		d, admissionErr := hooks.ReadRangeDiff(r, res.BaseSha, res.Ref)
+		if admissionErr == nil {
+			var findings []hooks.Finding
+			findings, admissionErr = hooks.CheckConceptAdmission(d)
+			if admissionErr == nil && len(findings) > 0 {
 				for _, f := range findings {
 					fmt.Fprintf(stderr, "CONCEPT_ADMISSION %s:%d: %s\n", f.File, f.Line, f.Detail)
 				}
-				if code == 0 {
-					code = 1
-				}
+				code, res.OK = 1, false
 				res.Verdict = "CONCEPT_ADMISSION"
+				res.ConceptAdmission = "REFUSED"
 				res.Detail = findings[0].Detail
+			} else if admissionErr == nil {
+				res.ConceptAdmission = "PASSED"
+			}
+		}
+		if admissionErr != nil {
+			res.ConceptAdmission, res.OK = "COULD_NOT_RUN", false
+			fmt.Fprintf(stderr, "fak hooks pre-push: concept admission could not run: %v\n", admissionErr)
+			if code == 0 || code == 2 {
+				code, res.Verdict = 2, "COULD_NOT_RUN"
+				res.Detail = fmt.Sprintf("concept admission: %v", admissionErr)
 			}
 		}
 	}
 
+	// Best-effort fleet witness for a pre-existing trunk red this push was admitted over
+	// (#3618 TRUNK_ALREADY_RED): fold this clone onto the shared class so `fak trunk-red`
+	// shows the whole fleet stuck on ONE break instead of each clone re-discovering it. To
+	// stderr so --json stdout stays pure; fail-open, never changes the push decision.
+	if buildResult.Verdict == "TRUNK_ALREADY_RED" {
+		w := emitTrunkRedWitness(stderr, r, "pre-push", buildResult.BaseSha, buildResult.PreExistingRed, extractUndefinedSymbol(buildResult.Detail))
+		fmt.Fprint(stderr, trunkRedWitnessNote(w))
+	}
+	// Test-quality is advisory at the push seam: the baseline absorbs existing debt,
+	// and only growth is surfaced. Never turn scanner failure into an unrelated refusal.
+	tqCode := prepushTestQuality(io.Discard, stderr, []string{"--root", r})
+	res.TestQualityScope = "live-working-tree-advisory"
+	switch tqCode {
+	case 0:
+		res.TestQuality = "PASSED"
+	case 1:
+		res.TestQuality = "FINDINGS"
+	default:
+		res.TestQuality = "COULD_NOT_RUN"
+	}
+	if tqCode != 0 {
+		fmt.Fprintln(stderr, "fak hooks pre-push: WARNING: test-quality ratchet reported growth or could not run (advisory)")
+	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(res)
 	} else {
+		if res.BuildReused {
+			fmt.Fprintf(stdout, "PREPUSH_REUSED tip=%s base=%s coverage=build-only\n", res.Ref, res.BaseSha)
+		}
 		renderPrePushBuild(stdout, res)
-	}
-	// Best-effort fleet witness for a pre-existing trunk red this push was admitted over
-	// (#3618 TRUNK_ALREADY_RED): fold this clone onto the shared class so `fak trunk-red`
-	// shows the whole fleet stuck on ONE break instead of each clone re-discovering it. To
-	// stderr so --json stdout stays pure; fail-open, never changes the push decision.
-	if res.Verdict == "TRUNK_ALREADY_RED" {
-		w := emitTrunkRedWitness(stderr, r, "pre-push", res.BaseSha, res.PreExistingRed, extractUndefinedSymbol(res.Detail))
-		fmt.Fprint(stderr, trunkRedWitnessNote(w))
-	}
-	// Test-quality is advisory at the push seam: the baseline absorbs existing debt,
-	// and only growth is surfaced. Never turn scanner failure into an unrelated refusal.
-	if tqCode := prepushTestQuality(io.Discard, stderr, []string{"--root", r}); tqCode != 0 {
-		fmt.Fprintln(stderr, "fak hooks pre-push: WARNING: test-quality ratchet reported growth or could not run (advisory)")
+		fmt.Fprintf(stdout, "concept-admission: %s; test-quality: %s (%s)\n", res.ConceptAdmission, res.TestQuality, res.TestQualityScope)
 	}
 	if *report != "" {
 		if err := writeIndentedJSONFile(*report, res); err != nil {
 			fmt.Fprintf(stderr, "fak hooks pre-push: write report: %v\n", err)
 		}
 	}
-	if code == 0 {
+	if code == 0 && reusablePrepushBuild(buildResult) && environment != "" && environment == prepushBuildEnvironment(r, res.Ref) {
 		now := prepushNow()
-		recordPrepushSuccess(r, resolvedTip, now)
-		committedbuildwitness.Record(r, resolvedTip, "pre-push", now)
+		if !res.BuildReused {
+			recordPrepushBuild(r, environment, buildResult, now)
+			committedbuildwitness.Record(r, res.Ref, "pre-push", now)
+		}
 	}
 	return code
 }
@@ -646,8 +847,13 @@ func evaluatePrePushBuildAt(r, baseOverride, tipOverride string, budget time.Dur
 		base = prepushResolveBase(r)
 	}
 	res.Base = base
+	res.BaseSha, err = prepushRevParse(r, base)
+	if err != nil || strings.TrimSpace(res.BaseSha) == "" {
+		res.Verdict, res.Detail = "COULD_NOT_RUN", fmt.Sprintf("cannot resolve pushed base %s: %v", base, err)
+		return res, 2
+	}
 
-	changed, err := prepushChangedFiles(r, base, tip)
+	changed, err := prepushChangedFiles(r, res.BaseSha, tip)
 	if err != nil {
 		res.Verdict, res.Detail = "COULD_NOT_RUN", fmt.Sprintf("cannot diff %s...%s: %v", base, tip, err)
 		return res, 2
@@ -708,7 +914,7 @@ func evaluatePrePushBuildAt(r, baseOverride, tipOverride string, budget time.Dur
 		// red at BOTH the tip AND the base trunk is a peer's already-published break, not this
 		// delta (#3618). Only a package that builds at the base but fails at the tip is refused.
 		res.Detail = detail
-		return res, resolveTipBuildFailure(r, base, &res)
+		return res, resolveTipBuildFailure(r, res.BaseSha, &res)
 	}
 
 	res.OK = true
@@ -898,7 +1104,7 @@ func hasAnySuffix(s string, suffixes []string) bool {
 
 // prepushGitRevParse resolves ref to a full sha in repo r via the committed `gitOut` helper.
 func prepushGitRevParse(r, ref string) (string, error) {
-	out, err := gitOut(r, "rev-parse", ref)
+	out, err := gitOut(r, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
 	return strings.TrimSpace(out), err
 }
 

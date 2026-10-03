@@ -19,7 +19,7 @@ package witness
 //
 //	ancestor:<ref>  keyed on (sha(ref), sha(HEAD))      ancestry of fixed commits is immutable
 //	notests:<ref>   keyed on (sha(ref))                 a commit's file list is immutable
-//	symptom:<ref>   keyed on (sha(ref), exec-mode)      same, plus which rung was armed
+//	symptom:<ref>   keyed on (sha(ref), structural)     changed-test presence only
 //	grep:<pattern>  keyed on (pattern, sha(HEAD))       history reachable from a fixed tip
 //
 // path: / clean: / committed: read the WORKING TREE or the index — mutable state
@@ -239,8 +239,8 @@ func (c *VerdictCache) path(key string) string {
 // when the claim kind is not cacheable (or the cache is disabled, or an anchor does
 // not resolve). One `git rev-parse` call resolves every anchor SHA the key needs —
 // the whole price of a lookup — so a hit costs one O(1) plumbing call instead of
-// the rung it memoizes (a history walk, a commit diff, or the red-then-green
-// symptom execution).
+// the rung it memoizes (a history walk or commit diff). Execution-backed symptom
+// proofs use their closure-bound cache in symptom_proof_cache.go instead.
 func (r *Resolver) cacheKey(ctx context.Context, kind, arg string) (string, bool) {
 	if !cacheEnabled() {
 		return "", false
@@ -255,12 +255,14 @@ func (r *Resolver) cacheKey(ctx context.Context, kind, arg string) (string, bool
 		anchors = []string{arg + "^{commit}"}
 		parts = []string{kind}
 	case "symptom":
-		anchors = []string{arg + "^{commit}"}
+		// A commit SHA and mode do not bind the selected tests, dependency closure,
+		// tags, toolchain, or effective environment. The detailed execution path
+		// owns confirmed-proof reuse with those inputs in its key.
 		if SymptomExecEnabled() {
-			parts = []string{kind, "mode=exec"}
-		} else {
-			parts = []string{kind, "mode=struct"}
+			return "", false
 		}
+		anchors = []string{arg + "^{commit}"}
+		parts = []string{kind, "mode=struct"}
 	case "grep":
 		anchors = []string{"HEAD"}
 		parts = []string{kind, arg}

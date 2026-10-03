@@ -273,10 +273,11 @@ func TestCacheMutableClaimsNeverCached(t *testing.T) {
 	}
 }
 
-// TestCacheSymptomModeSplitsKey: the symptom verdict depends on which rung was armed
-// (structural vs red-then-green execution), so the mode is part of the key — arming
-// FAK_WITNESS_SYMPTOM must not hit a struct-mode entry.
-func TestCacheSymptomModeSplitsKey(t *testing.T) {
+// TestCacheSymptomExecutionBypassesLegacyVerdictKey: structural symptom verdicts
+// retain the immutable commit cache. Execution-enabled claims use the detailed
+// closure-bound proof cache instead, so they must not hit the legacy structural
+// entry keyed only by commit and mode.
+func TestCacheSymptomExecutionBypassesLegacyVerdictKey(t *testing.T) {
 	f := newCacheFakeGit(t)
 	f.showOut = "internal/gateway/gateway.go\n" // no _test.go touched -> structurally REFUTED
 	r := NewWithRunner(f.run, "")
@@ -289,6 +290,6 @@ func TestCacheSymptomModeSplitsKey(t *testing.T) {
 		t.Fatalf("exec-mode resolve = %v, want Refuted (still no test touched)", got)
 	}
 	if f.calls["show"] <= shows {
-		t.Fatalf("exec-mode resolve hit the struct-mode entry, want a distinct key and a re-run")
+		t.Fatalf("exec-mode resolve hit the legacy structural entry, want detailed-path re-evaluation")
 	}
 }

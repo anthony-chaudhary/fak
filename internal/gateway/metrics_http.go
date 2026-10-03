@@ -459,6 +459,10 @@ func routeForMetrics(path string) string {
 		"/v1/fak/syscall", "/v1/fak/adjudicate", "/v1/fak/admit",
 		"/v1/fak/changes", "/v1/fak/session/changes", "/v1/fak/revoke", "/v1/fak/policy/reload",
 		"/v1/fak/route/reload", "/v1/fak/trace/reset", "/v1/models", "/mcp", "/healthz", "/metrics",
+		// The engine introspection pair reads the same live state /metrics does,
+		// so they carry their own route label rather than being folded into
+		// "other" alongside genuinely uncatalogued paths.
+		"/props", "/slots",
 		"/debug/vars", "/v1/fak/observation", "/v1/fak/observation/requests", "/v1/fak/features/proof":
 		return path
 	default:

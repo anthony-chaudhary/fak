@@ -85,11 +85,15 @@ var specPathFor = map[string]string{
 	// Multi-node dev-server read plane (#2297).
 	"/v1/leases": "/v1/leases",
 	// Multi-node dev-server write plane (#2299): POST /v1/leases/{acquire,renew,release}.
-	"/v1/leases/":        "/v1/leases/{op}",
-	"/v1/sessions":       "/v1/sessions",
-	"/mcp":               "/mcp",
-	"/healthz":           "/healthz",
-	"/metrics":           "/metrics",
+	"/v1/leases/":  "/v1/leases/{op}",
+	"/v1/sessions": "/v1/sessions",
+	"/mcp":         "/mcp",
+	"/healthz":     "/healthz",
+	"/metrics":     "/metrics",
+	// Fak-native engine introspection, projected from the same live state
+	// /metrics renders (serving_props.go).
+	"/props":             "/props",
+	"/slots":             "/slots",
 	"/debug/vars":        "/debug/vars",
 	"/debug/guard-audit": "/debug/guard-audit",
 }
