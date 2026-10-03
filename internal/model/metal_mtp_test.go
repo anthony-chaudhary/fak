@@ -218,13 +218,23 @@ func TestMetalMTPDraftVerifyRollbackLoop(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = coord.Close() })
 
-		// Inject an adversarial drafter that always proposes divergent tokens
+		// Use target-valid mismatches: an invalid vocabulary token was never
+		// verified and therefore cannot contribute acceptance observations.
+		boundary := specSes.Prefill(prompt)
 		coord.SetDrafter(NewMTPProposalGeneratorWithFn(func(ctx context.Context, committed []int, maxDraft int) ([]int, error) {
-			// Propose tokens guaranteed to mismatch
-			return []int{99999, 99998, 99997, 99996}, nil
+			if len(boundary) != m.Cfg.VocabSize || m.Cfg.VocabSize < 2 {
+				t.Fatalf("target logits/vocabulary unavailable: %d/%d", len(boundary), m.Cfg.VocabSize)
+			}
+			winner := 0
+			for i := range boundary {
+				if boundary[i] > boundary[winner] {
+					winner = i
+				}
+			}
+			mismatch := (winner + 1) % m.Cfg.VocabSize
+			return []int{mismatch, mismatch, mismatch, mismatch}, nil
 		}))
 
-		boundary := specSes.Prefill(prompt)
 		committed := append([]int(nil), prompt...)
 
 		// Run 10 rounds; acceptance will be 0%, triggering smooth serial fallback

@@ -504,16 +504,29 @@ func (c *MetalMTPCoordinator) CheckSamplingTripwire(temperature float64, repeatP
 	return nil
 }
 
-// recordAcceptanceLocked updates rolling 32-token window and lifetime metrics under lock.
+// recordAcceptanceLocked updates the rolling tested-position window and lifetime
+// metrics under lock. Verification stops at the first rejection; later proposed
+// positions have no observed outcome and must not bias the fallback statistic.
+// The lifetime proposal and rollback counters still include the full draft.
 func (c *MetalMTPCoordinator) recordAcceptanceLocked(proposed, accepted int) {
+	c.recordObservedAcceptanceLocked(proposed, accepted, accepted, accepted < proposed)
+}
+
+// recordObservedAcceptanceLocked separates admitted lifetime accounting from
+// verification outcomes. Admission limits and tree exhaustion are not rejection.
+func (c *MetalMTPCoordinator) recordObservedAcceptanceLocked(proposed, accepted, verifiedAccepted int, rejected bool) {
 	c.totalProposed += proposed
 	c.totalAccepted += accepted
 	if accepted < proposed {
 		c.totalRollbacks += (proposed - accepted)
 	}
 
-	for i := 0; i < proposed; i++ {
-		isAcc := i < accepted
+	observed := verifiedAccepted
+	if rejected {
+		observed++
+	}
+	for i := 0; i < observed; i++ {
+		isAcc := i < verifiedAccepted
 		if len(c.windowOutcomes) < c.cfg.WindowSize {
 			c.windowOutcomes = append(c.windowOutcomes, isAcc)
 		} else {
@@ -535,7 +548,11 @@ func (c *MetalMTPCoordinator) recordAcceptanceLocked(proposed, accepted int) {
 }
 
 func (c *MetalMTPCoordinator) observeSpeculativeRoundLocked(start time.Time, proposed, accepted int) error {
-	c.recordAcceptanceLocked(proposed, accepted)
+	return c.observeObservedSpeculativeRoundLocked(start, proposed, accepted, accepted, accepted < proposed)
+}
+
+func (c *MetalMTPCoordinator) observeObservedSpeculativeRoundLocked(start time.Time, proposed, accepted, verifiedAccepted int, rejected bool) error {
+	c.recordObservedAcceptanceLocked(proposed, accepted, verifiedAccepted, rejected)
 	if c.governor == nil {
 		return nil
 	}
@@ -837,7 +854,7 @@ func (c *MetalMTPCoordinator) stepRoundImpl(ctx context.Context, committed []int
 	vocabSize := c.target.M.Cfg.VocabSize
 	for _, tok := range drafts {
 		if tok < 0 || (vocabSize > 0 && tok >= vocabSize) {
-			c.recordAcceptanceLocked(len(drafts), 0)
+			c.recordObservedAcceptanceLocked(len(drafts), 0, 0, false)
 			c.draftState.RecordDraft(draftTokens32)
 			_, _, _ = c.draftState.CommitDraft(0)
 			if c.checkpointMgr != nil && c.sessionID != "" {
@@ -1003,6 +1020,7 @@ func (c *MetalMTPCoordinator) stepRoundImpl(ctx context.Context, committed []int
 
 	// Bound the committed round to the caller's admission budget so target and
 	// Context-MMU state never include a token discarded by maxNew/EOS (#12344).
+	verifiedAccepted := len(accTokens)
 	accTokens, bonusTok = admitRoundPrefix(accTokens, bonusTok, budget, eos)
 	numAccepted := len(accTokens)
 
@@ -1032,7 +1050,7 @@ func (c *MetalMTPCoordinator) stepRoundImpl(ctx context.Context, committed []int
 	if bonusTok < 0 {
 		elapsed := time.Since(start)
 		c.totalGenerated += numAccepted
-		c.recordAcceptanceLocked(len(drafts), numAccepted)
+		c.recordObservedAcceptanceLocked(len(drafts), numAccepted, verifiedAccepted, verifiedAccepted < len(drafts))
 		if c.governor != nil {
 			obs := Qwen38AdaptiveStepObservation{
 				ProposedTokens: len(drafts),
@@ -1058,7 +1076,7 @@ func (c *MetalMTPCoordinator) stepRoundImpl(ctx context.Context, committed []int
 	c.totalGenerated += numAccepted + 1
 
 	// 10. Update rolling acceptance monitoring
-	c.recordAcceptanceLocked(len(drafts), numAccepted)
+	c.recordObservedAcceptanceLocked(len(drafts), numAccepted, verifiedAccepted, verifiedAccepted < len(drafts))
 
 	// 11. Update adaptive depth governor if connected
 	if c.governor != nil {
@@ -1143,7 +1161,7 @@ func (c *MetalMTPCoordinator) stepRoundQwen35P4Locked(start time.Time, target0 i
 			tx.receipt.AcceptedTokens = 0
 			tx.receipt.RejectedTokens = len(drafts)
 			c.recordTargetVerificationLocked(tx)
-			observeErr := c.observeSpeculativeRoundLocked(start, len(drafts), 0)
+			observeErr := c.observeObservedSpeculativeRoundLocked(start, len(drafts), 0, 0, false)
 			return nil, -1, nil, errors.Join(fmt.Errorf("model: record Context-MMU MTP draft: %w", recordErr), rollbackErr, abortErr, observeErr)
 		}
 	}
@@ -1159,7 +1177,7 @@ func (c *MetalMTPCoordinator) stepRoundQwen35P4Locked(start time.Time, target0 i
 		rollbackErr := rollbackDraft()
 		abortErr := tx.Abort()
 		c.recordTargetVerificationLocked(tx)
-		observeErr := c.observeSpeculativeRoundLocked(start, len(drafts), 0)
+		observeErr := c.observeObservedSpeculativeRoundLocked(start, len(drafts), 0, 0, false)
 		return nil, -1, nil, errors.Join(cause, rollbackErr, abortErr, observeErr)
 	}
 
@@ -1209,6 +1227,7 @@ func (c *MetalMTPCoordinator) stepRoundQwen35P4Locked(start time.Time, target0 i
 
 	// Bound the committed round to the caller's admission budget so target and
 	// Context-MMU state never include a token discarded by maxNew/EOS (#12344).
+	verifiedAccepted := len(accTokens)
 	accTokens, bonusTok = admitRoundPrefix(accTokens, bonusTok, budget, eos)
 	numAccepted := len(accTokens)
 	// Commit the external Context-MMU while the target transaction still owns
@@ -1233,14 +1252,14 @@ func (c *MetalMTPCoordinator) stepRoundQwen35P4Locked(start time.Time, target0 i
 			nextLogits = rows[numAccepted-1]
 		}
 		c.totalGenerated += numAccepted
-		if observeErr := c.observeSpeculativeRoundLocked(start, len(drafts), numAccepted); observeErr != nil {
+		if observeErr := c.observeObservedSpeculativeRoundLocked(start, len(drafts), numAccepted, verifiedAccepted, verifiedAccepted < len(drafts)); observeErr != nil {
 			return nil, -1, nil, observeErr
 		}
 		return accTokens, bonusTok, nextLogits, nil
 	}
 	nextLogits := c.target.Step(bonusTok)
 	c.totalGenerated += numAccepted + 1
-	if observeErr := c.observeSpeculativeRoundLocked(start, len(drafts), numAccepted); observeErr != nil {
+	if observeErr := c.observeObservedSpeculativeRoundLocked(start, len(drafts), numAccepted, verifiedAccepted, verifiedAccepted < len(drafts)); observeErr != nil {
 		return nil, -1, nil, observeErr
 	}
 	return accTokens, bonusTok, nextLogits, nil
@@ -1433,18 +1452,24 @@ func (c *MetalMTPCoordinator) stepRoundTreeLocked(start time.Time, target0 int, 
 	}
 
 	acceptedIndices := []int{matchRoot}
+	rejected := false
 	cur := matchRoot
 	pred := argmaxF32(rows[cur])
 
 	for {
 		nextChild := -1
+		hasCandidate := false
 		for _, childIdx := range tree.Nodes[cur].Children {
+			if childIdx >= 0 && childIdx < N {
+				hasCandidate = true
+			}
 			if childIdx >= 0 && childIdx < N && tree.Nodes[childIdx].Token == pred {
 				nextChild = childIdx
 				break
 			}
 		}
 		if nextChild == -1 {
+			rejected = hasCandidate
 			break
 		}
 		acceptedIndices = append(acceptedIndices, nextChild)
@@ -1480,7 +1505,7 @@ func (c *MetalMTPCoordinator) stepRoundTreeLocked(start time.Time, target0 int, 
 	if bonusTok < 0 {
 		elapsed := time.Since(start)
 		c.totalGenerated += numAccepted
-		c.recordAcceptanceLocked(N, numAccepted)
+		c.recordObservedAcceptanceLocked(N, numAccepted, len(acceptedIndices), rejected)
 		if c.governor != nil {
 			obs := Qwen38AdaptiveStepObservation{
 				ProposedTokens: N,
@@ -1499,7 +1524,7 @@ func (c *MetalMTPCoordinator) stepRoundTreeLocked(start time.Time, target0 int, 
 	elapsed := time.Since(start)
 	c.totalGenerated += numAccepted + 1
 
-	c.recordAcceptanceLocked(N, numAccepted)
+	c.recordObservedAcceptanceLocked(N, numAccepted, len(acceptedIndices), rejected)
 
 	if c.governor != nil {
 		obs := Qwen38AdaptiveStepObservation{
