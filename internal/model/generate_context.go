@@ -20,6 +20,7 @@ func (s *Session) GenerateContext(ctx context.Context, prompt []int, n int) ([]i
 	if err := s.refuseUnimplementedV4FlashAttention(); err != nil {
 		return nil, err
 	}
+	defer s.BeginGPUKeepAlive()()
 	logits := s.Prefill(prompt)
 	if err := ctx.Err(); err != nil {
 		return nil, err

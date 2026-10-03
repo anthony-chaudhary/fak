@@ -1507,6 +1507,13 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 }
 
 func init() {
+	beginSessionGPUKeepAlive = func(s *Session) func() {
+		if s == nil || (!s.MetalQ4K && !metalDecodeEnabled(s)) {
+			return func() {}
+		}
+		return metalgemm.BeginKeepAlive()
+	}
+
 	qwen35MetalForwardProjectionAdmission = qwen35MetalForwardProjectionError
 	newQwen35MetalGDNSequenceBackend = func() Qwen35GDNPreprojectedSequenceBackend {
 		return &metalQwen35GDNSequenceBackend{states: make(map[Qwen35GDNAuxState]*metalgemm.GDNState)}

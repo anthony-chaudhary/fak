@@ -508,6 +508,7 @@ func medDecodeReps(newSession func() *model.Session, prompt []int, reps, steps, 
 // stepDecode runs steps incremental Step() calls from the seed id, advancing the id
 // deterministically (argmax-free, value-irrelevant to cost), and returns the elapsed time.
 func stepDecode(s *model.Session, id, steps, vocab int) time.Duration {
+	defer s.BeginGPUKeepAlive()()
 	t := time.Now()
 	for i := 0; i < steps; i++ {
 		logits := s.Step(id)
@@ -682,6 +683,7 @@ func configureNativeProfileSession(s *model.Session, controls map[string]string)
 // route finalized inside the timed window, first-token, 63 steady steps), appending
 // the "prefill"/"first-token"/"steady-decode" phases; returns final logits + executed.
 func runNativeProfileForward(s *model.Session, vocab int, sequenceSelector string, phases []nativeperf.ProfilePhase) ([]float32, bool, []nativeperf.ProfilePhase, error) {
+	defer s.BeginGPUKeepAlive()()
 	prompt := lcgIDs(32, vocab)
 	t := time.Now()
 	logits := s.Prefill(prompt)
@@ -851,6 +853,7 @@ func runDecode(f *benchFlags, ck *benchckpt.Ledger, newSession func() *model.Ses
 		}
 	}, f)
 	report["decode"] = res
+	report["metal_keepalive"] = metalgemm.KeepAliveState()
 	fmt.Fprintf(os.Stderr, "[fak] decode: %.1f ms/tok (%.1f tok/s)%s\n", res.PerTokenMedMS, res.TokPerSec, resumedTag(reused))
 	if *f.phaseProfile && !reused {
 		s := newSession()
