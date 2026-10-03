@@ -77,12 +77,24 @@ const kvGroupPlanes = 3
 
 // KVLayerGroupOf classifies decoder layer l into its KV memory group. The order matters:
 // a recurrent linear-attention layer is checked first (it never has a token window), then a
-// configured sliding window, else full causal. A model with no windows and no linear layers
-// classifies every layer KVGroupFull — the uniform case, so a non-hybrid model's budget is
-// byte-for-byte the pre-grouping allocation.
+// per-layer compression schedule, then a configured sliding window, else full causal. A
+// model with no windows, no linear layers, and no schedule classifies every layer
+// KVGroupFull — the uniform case, so a non-hybrid model's budget is byte-for-byte the
+// pre-grouping allocation.
 func (c Config) KVLayerGroupOf(l int) KVLayerGroup {
 	if c.isLinearAttnLayer(l) {
 		return KVGroupRecurrent
+	}
+	// A per-layer compression schedule (DeepSeek-V4 Flash / V4.1) makes a layer retain
+	// compressed rows and indexer keys that windowForLayer() alone does not account for.
+	// This grouped plane does not model that state, so a compressed-schedule layer keeps
+	// the FULL-attention reservation instead of the window-only cap — classifying it
+	// sliding-window would silently drop the compressed history (#13617). The sibling
+	// header-sizing guard #13556 already bails on a declared schedule; keying off the same
+	// hasKVCompressionSchedule predicate here keeps the grouped residency arithmetic
+	// consistent with it, so no hybrid-KV sizing surface sizes a schedule window-only.
+	if c.hasKVCompressionSchedule() {
+		return KVGroupFull
 	}
 	if c.windowForLayer(l) > 0 {
 		return KVGroupSlidingWindow
