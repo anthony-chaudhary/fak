@@ -64,6 +64,8 @@ type Config struct {
 	// authoritative set; EOSTokenID keeps the first id for back-compat callers.
 	EOSTokenID  int   `json:"-"`
 	EOSTokenIDs []int `json:"-"`
+	// eosJSONDecoded preserves explicit zero/null across later JSON overlays.
+	eosJSONDecoded bool
 
 	// ---- Stage-2 mechanical arch axes (all default = Llama no-op) -------------------
 
@@ -392,12 +394,14 @@ func (r *RopeScaling) kind() string {
 // eosToken is the scalar-or-list shape of HF's eos_token_id field. config.json emits
 // it as a bare int (older models) or a list (Llama-3.x), so we accept both.
 type eosToken struct {
-	ids []int
+	ids     []int
+	present bool
 }
 
 // UnmarshalJSON decodes eos_token_id in either HF shape — a JSON list of ids (Llama-3.x)
 // or a bare scalar id (older models) — into the ids slice.
 func (e *eosToken) UnmarshalJSON(b []byte) error {
+	e.present = true
 	if len(b) == 0 || string(b) == "null" {
 		return nil
 	}
@@ -461,6 +465,7 @@ type configJSONHints struct {
 // HF under a nested rope_scaling object; the flat json tags above are what
 // export_oracle.py flattens them to, so a re-export carries them with zero code change.
 func (c *Config) UnmarshalJSON(b []byte) error {
+	eosInitiallyUnset := !c.eosJSONDecoded && c.EOSTokenID == 0 && len(c.EOSTokenIDs) == 0
 	c.GLM5Next = isExactGLM5NextConfig(b)
 	c.DeepSeekV41 = nil
 	aux := struct {
@@ -512,7 +517,11 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 		}
 	}
 	c.EOSTokenIDs = aux.EOS.ids
-	if len(c.EOSTokenIDs) > 0 {
+	// Default only an initially unset EOS. Later JSON overlays retain the scalar
+	// fallback while clearing the list, preserving the existing decode behavior.
+	if !aux.EOS.present && eosInitiallyUnset {
+		c.EOSTokenID = -1
+	} else if len(c.EOSTokenIDs) > 0 {
 		c.EOSTokenID = c.EOSTokenIDs[0]
 	}
 	if err := c.deriveConfigAxes(hints); err != nil {
@@ -523,6 +532,7 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	c.DeepSeekV41 = metadata
+	c.eosJSONDecoded = true
 	return nil
 }
 
