@@ -80,18 +80,24 @@ func TestMetalQwen35SequenceGraphUsesOneTerminalWait(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=0.1s
 func TestMetalQwen35SequenceGraphRefusesReuseAfterFinish(t *testing.T) {
 	metalOrSkip(t)
 	metalMu.Lock()
-	graph, err := beginMetalQwen35SequenceGraph()
-	if err == nil {
-		_, err = graph.finish()
+	graph, beginErr := beginMetalQwen35SequenceGraph()
+	if beginErr != nil {
+		metalMu.Unlock()
+		t.Fatalf("begin empty graph: %v", beginErr)
 	}
-	if err == nil {
-		err = graph.residual(nil, nil, 0)
-	}
+	_, finishErr := graph.finish()
+	// Finishing the empty graph has its own result. Reuse must actually be
+	// attempted even when finish reports that there were no encoders.
+	reuseErr := graph.residual(nil, nil, 0)
 	metalMu.Unlock()
-	if !errors.Is(err, errMetalOwnerTerminal) {
-		t.Fatalf("reuse error=%v want %v", err, errMetalOwnerTerminal)
+	if !errors.Is(finishErr, errMetalOwnerEmpty) {
+		t.Fatalf("empty finish error=%v want %v", finishErr, errMetalOwnerEmpty)
+	}
+	if !errors.Is(reuseErr, errMetalOwnerTerminal) {
+		t.Fatalf("actual reuse error=%v want %v", reuseErr, errMetalOwnerTerminal)
 	}
 }

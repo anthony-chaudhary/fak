@@ -16,18 +16,30 @@
 #include <metal_stdlib>
 using namespace metal;
 
-kernel void attention_f32(device const float* q [[buffer(0)]],
-                          device const float* K [[buffer(1)]],
-                          device const float* V [[buffer(2)]],
-                          device float* outp [[buffer(3)]],
-                          constant int& nPos [[buffer(4)]],
-                          constant int& nH [[buffer(5)]],
-                          constant int& nKV [[buffer(6)]],
-                          constant int& hd [[buffer(7)]],
-                          constant float& scale [[buffer(8)]],
-                          uint h [[threadgroup_position_in_grid]],
-                          uint tid [[thread_position_in_threadgroup]],
-                          uint tg_size [[threads_per_threadgroup]]) {
+// flash_attention_tiled_body — the tiled implementation shared by both entrypoints.
+//
+// fak#12817: MSL forbids calling a kernel from another function, so the tiled
+// implementation must be a device function. MSL also forbids declaring
+// threadgroup address-space variables inside a non-kernel function, and at
+// program scope (program scope must be `constant`). So the scratch is not
+// declared here at all: each kernel entrypoint below declares its own
+// `threadgroup` arrays and passes them in as `threadgroup float*` pointers.
+// `threadgroup float*` pointer parameters, which MSL permits on non-kernel
+// functions (only threadgroup *variable declarations* are kernel-only).
+void flash_attention_tiled_body(device const float* q,
+                                                device const float* K,
+                                                device const float* V,
+                                                device float* outp,
+                                                constant int& nPos,
+                                                constant int& nH,
+                                                constant int& nKV,
+                                                constant int& hd,
+                                                constant float& scale,
+                                                threadgroup float* qs,
+                                                threadgroup float* tg_sums,
+                                                uint h,
+                                                uint tid,
+                                                uint tg_size) {
     if ((int)h >= nH) return;
 
     int grp = nH / nKV;
@@ -37,14 +49,14 @@ kernel void attention_f32(device const float* q [[buffer(0)]],
     uint obase = h * (uint)hd;
 
     // Cache query row in threadgroup shared memory
-    threadgroup float qs[256];
     for (uint d = tid; d < (uint)hd; d += tg_size) {
         qs[d] = q[qbase + d];
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     // Reduction shared memory across SIMD groups (up to 256 threads / 8 SIMD groups)
-    threadgroup float tg_sums[8];
+    // tg_sums is passed in by the calling kernel (fak#12817: threadgroup address
+    // space cannot be declared inside a non-kernel function).
     uint simd_id = tid / 32;
     uint lane_id = tid % 32;
     uint num_simd = (tg_size + 31) / 32;
@@ -103,7 +115,27 @@ kernel void attention_f32(device const float* q [[buffer(0)]],
     }
 }
 
-// flash_attention_tiled_f32 — alias entrypoint for explicit threadgroup-tiled dispatch
+// attention_f32 — primary entrypoint; pipeline state is resolved by this name.
+kernel void attention_f32(device const float* q [[buffer(0)]],
+                          device const float* K [[buffer(1)]],
+                          device const float* V [[buffer(2)]],
+                          device float* outp [[buffer(3)]],
+                          constant int& nPos [[buffer(4)]],
+                          constant int& nH [[buffer(5)]],
+                          constant int& nKV [[buffer(6)]],
+                          constant int& hd [[buffer(7)]],
+                          constant float& scale [[buffer(8)]],
+                          uint h [[threadgroup_position_in_grid]],
+                          uint tid [[thread_position_in_threadgroup]],
+                          uint tg_size [[threads_per_threadgroup]]) {
+    // fak#12817: threadgroup scratch must be declared inside the kernel; the
+    // shared body receives it as pointers.
+    threadgroup float qs[256];
+    threadgroup float tg_sums[8];
+    flash_attention_tiled_body(q, K, V, outp, nPos, nH, nKV, hd, scale, qs, tg_sums, h, tid, tg_size);
+}
+
+// flash_attention_tiled_f32 — alias entrypoint for explicit threadgroup-tiled dispatch.
 kernel void flash_attention_tiled_f32(device const float* q [[buffer(0)]],
                                       device const float* K [[buffer(1)]],
                                       device const float* V [[buffer(2)]],
@@ -116,5 +148,7 @@ kernel void flash_attention_tiled_f32(device const float* q [[buffer(0)]],
                                       uint h [[threadgroup_position_in_grid]],
                                       uint tid [[thread_position_in_threadgroup]],
                                       uint tg_size [[threads_per_threadgroup]]) {
-    attention_f32(q, K, V, outp, nPos, nH, nKV, hd, scale, h, tid, tg_size);
+    threadgroup float qs[256];
+    threadgroup float tg_sums[8];
+    flash_attention_tiled_body(q, K, V, outp, nPos, nH, nKV, hd, scale, qs, tg_sums, h, tid, tg_size);
 }

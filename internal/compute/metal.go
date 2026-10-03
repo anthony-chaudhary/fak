@@ -88,11 +88,12 @@ func metalDeviceMemoryTotal() int64 {
 // metalBuf is a device-resident Buffer: an opaque id<MTLBuffer> handle + byte length.
 // Synchronous backend, so Ready() is always true (the async seam would flip this).
 type metalBuf struct {
-	ptr    unsafe.Pointer        // id<MTLBuffer> handle (shared storage on unified memory)
-	n      int                   // bytes
-	host   uintptr               // source host pointer if this came from a cached Upload (0 otherwise)
-	hostDt Dtype                 // source host dtype for cache keying
-	q2w    *metalgemm.Q2_0Weight // resident Q2_0 weight handle if uploaded as Q2_0
+	ptr      unsafe.Pointer        // id<MTLBuffer> handle (shared storage on unified memory)
+	n        int                   // bytes
+	host     uintptr               // source host pointer if this came from a cached Upload (0 otherwise)
+	hostKeep HostBuffer            // CUDA ownership pattern: keep pointer-keyed upload source alive until Free
+	hostDt   Dtype                 // source host dtype for cache keying
+	q2w      *metalgemm.Q2_0Weight // resident Q2_0 weight handle if uploaded as Q2_0
 }
 
 // Ready reports the buffer is materialized — always true on this synchronous backend.
@@ -255,6 +256,7 @@ func (c *metalBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site s
 	if len(f) > 0 {
 		C.fmetal_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
 		buf.host = hp
+		buf.hostKeep = hb
 		buf.hostDt = F32
 		metalUploadCache[metalUploadKey{hp: hp, dt: F32}] = out
 	}
@@ -305,10 +307,11 @@ func (c *metalBackend) uploadQ2Resident(t Tensor, hb HostBuffer) Tensor {
 		panic(fmt.Sprintf("compute: metal UploadQ2_0 failed for shape [%d,%d]", out, in))
 	}
 	buf := &metalBuf{
-		n:      out * in / 4,
-		host:   hp,
-		hostDt: Q2_0,
-		q2w:    q2w,
+		n:        out * in / 4,
+		host:     hp,
+		hostKeep: hb,
+		hostDt:   Q2_0,
+		q2w:      q2w,
 	}
 	res := makeTensor(c, Q2_0, RowMajor, append([]int(nil), t.Shape...), t.Quant, buf)
 	if hp != 0 {
@@ -359,6 +362,7 @@ func (c *metalBackend) Free(t Tensor) {
 		if db.q2w != nil {
 			db.q2w = nil
 		}
+		db.hostKeep = nil
 	}
 }
 
