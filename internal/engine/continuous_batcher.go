@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,6 +35,11 @@ const (
 	DefaultMaxSlots = 32
 	MinSlots        = 1
 	MaxSlots        = 32
+
+	// DefaultPrefillBudgetTokens is the default per-step prompt-token budget for
+	// budgeted chunked prefill. This is a fak-derived default (not the upstream
+	// 8192): a moderate budget keeps TTFT bounded without monopolizing a step.
+	DefaultPrefillBudgetTokens = 512
 )
 
 // SlotState captures the lifecycle phase of an individual continuous batching slot.
@@ -42,8 +48,20 @@ type SlotState string
 const (
 	SlotStateEmpty        SlotState = "empty"
 	SlotStateActiveDecode SlotState = "active_decode"
+	SlotStatePrefilling   SlotState = "prefilling"
 	SlotStateYieldedIO    SlotState = "yielded_io"
 	SlotStateFinished     SlotState = "finished"
+)
+
+// BatchPhase names which scheduler arm a step ran: a PREFILL step advances prompt
+// chunks for slots in SlotStatePrefilling; a DECODE step advances resident decodable
+// slots; IDLE is a step with neither. Prefill is attempted first each StepPhase.
+type BatchPhase string
+
+const (
+	PhaseIdle    BatchPhase = "idle"
+	PhasePrefill BatchPhase = "prefill"
+	PhaseDecode  BatchPhase = "decode"
 )
 
 var (
@@ -67,6 +85,15 @@ type SubagentRequest struct {
 	ExecutionDepth  int   // Recurrent execution depth multiplier (default 1 if <= 0)
 	RecurrentLoops  int   // Recurrent loops count (used if > ExecutionDepth)
 	KVBytesPerToken int64 // KV cache footprint in bytes per token (uses batcher default if <= 0)
+
+	// SubmissionSeq is the stable, monotonic submission-order identity assigned by
+	// the batcher in Submit (before any queueing decision). It is the M2 ordering key
+	// for decode residency, independent of Go map iteration and slot-index reuse.
+	SubmissionSeq uint64
+	// ChunkedPrefill asks the batcher to admit this request into SlotStatePrefilling
+	// (budgeted, resumable prompt chunks) rather than eagerly prefill+activate it.
+	// Only honored when ContinuousBatcherConfig.PrefillBudget > 0.
+	ChunkedPrefill bool
 }
 
 func (req *SubagentRequest) effectiveDepth() int {
@@ -103,6 +130,14 @@ type Slot struct {
 	ReprefillTokens   int           // 0 re-prefill tokens on resume
 	KVCacheStationary bool          // Remains resident in UMA
 	KVCacheBytes      int64         // Allocated KV cache memory in bytes
+
+	// SubmissionSeq is the request's stable submission-order identity (M2 ordering key).
+	SubmissionSeq uint64
+	// PendingPrompt is the full prompt copy still being consumed by budgeted prefill;
+	// it is nil for eager-active slots.
+	PendingPrompt []int
+	// PrefillPos is the count of PendingPrompt tokens already consumed by prefill.
+	PrefillPos int
 
 	sess        *model.Session
 	tokenCh     chan int
@@ -187,6 +222,8 @@ func (s *Slot) snapshot() *Slot {
 		ReprefillTokens:   s.ReprefillTokens,
 		KVCacheStationary: s.KVCacheStationary,
 		KVCacheBytes:      s.KVCacheBytes,
+		SubmissionSeq:     s.SubmissionSeq,
+		PrefillPos:        s.PrefillPos,
 		sess:              s.sess,
 		tokenCh:           s.tokenCh,
 		doneCh:            s.doneCh,
@@ -199,6 +236,9 @@ func (s *Slot) snapshot() *Slot {
 	}
 	if s.PromptTokens != nil {
 		cp.PromptTokens = append([]int(nil), s.PromptTokens...)
+	}
+	if s.PendingPrompt != nil {
+		cp.PendingPrompt = append([]int(nil), s.PendingPrompt...)
 	}
 	return cp
 }
@@ -224,6 +264,9 @@ func (s *Slot) reset() {
 	s.ReprefillTokens = 0
 	s.KVCacheStationary = false
 	s.KVCacheBytes = 0
+	s.SubmissionSeq = 0
+	s.PendingPrompt = nil
+	s.PrefillPos = 0
 	s.sess = nil
 	s.tokenCh = nil
 	s.doneCh = nil
@@ -253,6 +296,11 @@ type ContinuousBatcherConfig struct {
 
 	// KVBytesPerToken is the default KV cache footprint in bytes per token (default if <= 0 is 1024).
 	KVBytesPerToken int64
+
+	// PrefillBudget is the per-step prompt-token budget for budgeted chunked prefill.
+	// 0 (default) preserves the legacy eager-prefill, decode-only stepping behavior;
+	// > 0 enables a PREFILL arm for slots admitted with ChunkedPrefill.
+	PrefillBudget int
 }
 
 // DefaultContinuousBatcherConfig returns calibrated defaults for Strix Halo and Qwen3.8-14B.
@@ -289,6 +337,16 @@ type BatchStepResult struct {
 	PromotedSessionIDs   []string
 	KVCacheBytesUsed     int64
 	SlotDepths           map[string]int // Current execution depth per session ID
+
+	// Phase names which scheduler arm this step ran (idle/prefill/decode).
+	Phase BatchPhase
+	// PrefillTokens is the number of prompt tokens consumed this step (prefill arm).
+	PrefillTokens int
+	// DecodeTokens is the number of decode tokens produced this step (decode arm).
+	DecodeTokens int
+	// DecodeResidentUIDs is the stable-UID roster of resident decodable slots observed
+	// at the start of the step (M2 order: SubmissionSeq asc, tie-break SessionID).
+	DecodeResidentUIDs []uint64
 }
 
 // ContinuousBatcher manages dynamic iteration-level continuous batching for subagent turn loops.
@@ -302,6 +360,7 @@ type ContinuousBatcher struct {
 	iteration    uint64
 	totalTokens  int64
 	seqCounter   uint64
+	uidSeq       uint64
 	closed       bool
 }
 
@@ -396,6 +455,14 @@ func (cb *ContinuousBatcher) Submit(req *SubagentRequest) (string, error) {
 		}
 	}
 
+	// Assign the stable submission-order identity only once the request is known
+	// to be accepted (past the duplicate-session rejections) and before any
+	// queueing decision, so a rejected duplicate does not burn a sequence number
+	// while the decode-residency roster (M2) still orders by true submission time
+	// even for requests that wait behind capacity.
+	cb.uidSeq++
+	req.SubmissionSeq = cb.uidSeq
+
 	// Look for an available empty slot
 	emptyIdx := -1
 	for i, slot := range cb.slots {
@@ -439,9 +506,35 @@ func (cb *ContinuousBatcher) initSlot(index int, req *SubagentRequest) *Slot {
 		ReprefillTokens:   0,
 		KVCacheStationary: true,
 		KVCacheBytes:      reqKVBytes,
+		SubmissionSeq:     req.SubmissionSeq,
 		AdmittedAt:        time.Now(),
 		tokenCh:           make(chan int, req.TargetTokens+16),
 		doneCh:            make(chan struct{}),
+	}
+
+	if cb.cfg.PrefillBudget > 0 && req.ChunkedPrefill {
+		// Budgeted chunked prefill: defer activation. The slot consumes its prompt
+		// copy in budget-sized chunks across PREFILL steps, then transitions to
+		// SlotStateActiveDecode. Upstream mini-sglang prefill.py:65-151 treats an
+		// over-budget prompt as resumable chunks; the in-repo precedent is
+		// internal/modelengine/nativesched_prefill.go (PrefillNoLogits for
+		// intermediate chunks, Prefill for the final chunk). When a real model is
+		// configured the session is built here exactly as the eager branch does,
+		// and its KV cache is advanced in lockstep with PrefillPos so no consumed
+		// token is ever re-prefilled.
+		slot.State = SlotStatePrefilling
+		slot.PendingPrompt = append([]int(nil), req.PromptTokens...)
+		slot.PrefillPos = 0
+		slot.LastToken = 0
+		if cb.cfg.Model != nil {
+			slot.sess = &model.Session{
+				M:     cb.cfg.Model,
+				Cache: model.NewKVCache(cb.cfg.Model.Cfg),
+			}
+		}
+		cb.slots[index] = slot
+		cb.sessionMap[req.SessionID] = slot
+		return slot
 	}
 
 	if cb.cfg.Model != nil {
@@ -536,10 +629,89 @@ func (cb *ContinuousBatcher) ResumeSlot(sessionID string) error {
 	return nil
 }
 
-// Step performs an iteration-level step gathering all SlotStateActiveDecode slots
-// into an active iteration batch, generates tokens for all active slots simultaneously,
-// retires finished slots, and pulls queued requests into freed slots.
+// Step performs a decode-only iteration-level step: it gathers resident decodable
+// slots (stable-UID order), generates one token for each simultaneously, retires
+// finished slots, and pulls queued requests into freed slots. It is exactly
+// stepWithBudget(ctx, 0). The pre-existing Step observable behavior is preserved
+// except for two intentional refinements: the decode batch is ordered by stable
+// submission sequence, and it is filtered through slotDecodableLocked so a slot
+// already at its target is not advanced again.
 func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error) {
+	return cb.stepWithBudget(ctx, 0)
+}
+
+// StepPhase is the budgeted scheduler step: when the configured PrefillBudget is
+// positive and at least one slot is SlotStatePrefilling, it runs a PREFILL step
+// (consuming up to the budget of prompt tokens, FIFO by submission sequence);
+// otherwise it runs a DECODE step over the resident decodable slots. Prefill is
+// attempted first; decode only when prefill yields nothing.
+func (cb *ContinuousBatcher) StepPhase(ctx context.Context) (*BatchStepResult, error) {
+	return cb.stepWithBudget(ctx, cb.cfg.PrefillBudget)
+}
+
+// DecodeResident returns the M2 decode-residency roster: slots in
+// SlotStateActiveDecode that are still decodable, ordered by ascending stable
+// submission sequence (tie-break SessionID). The order is deterministic and
+// independent of Go map iteration or slot-index reuse.
+func (cb *ContinuousBatcher) DecodeResident() []*Slot {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	return cb.decodeResidentLocked()
+}
+
+// DecodeResidentUIDs returns the stable submission-sequence ids of DecodeResident,
+// in the same order. It is the ordering key a caller can pin deterministically.
+func (cb *ContinuousBatcher) DecodeResidentUIDs() []uint64 {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	resident := cb.decodeResidentLocked()
+	uids := make([]uint64, len(resident))
+	for i, slot := range resident {
+		uids[i] = slot.SubmissionSeq
+	}
+	return uids
+}
+
+// decodeResidentLocked gathers decodable SlotStateActiveDecode slots and sorts
+// them into stable-UID order. Caller MUST hold cb.mu.
+func (cb *ContinuousBatcher) decodeResidentLocked() []*Slot {
+	resident := make([]*Slot, 0, len(cb.slots))
+	for _, slot := range cb.slots {
+		slot.mu.Lock()
+		ok := slot.State == SlotStateActiveDecode && slotDecodableLocked(slot)
+		slot.mu.Unlock()
+		if ok {
+			resident = append(resident, slot)
+		}
+	}
+	sortSlotsByStableUID(resident)
+	return resident
+}
+
+// slotDecodableLocked reports whether an active-decode slot still has work under
+// the same completion rule Step uses: recurrent slots are bounded by
+// ExecutionDepth, ordinary slots by TargetTokens. Caller holds slot.mu.
+func slotDecodableLocked(slot *Slot) bool {
+	if slot.ExecutionDepth > 1 {
+		return slot.CurrentDepth < slot.ExecutionDepth
+	}
+	return len(slot.GeneratedTokens) < slot.TargetTokens
+}
+
+// sortSlotsByStableUID orders slots by SubmissionSeq ascending, tie-break
+// SessionID ascending, so the decode batch is deterministic.
+func sortSlotsByStableUID(slots []*Slot) {
+	sort.Slice(slots, func(i, j int) bool {
+		if slots[i].SubmissionSeq != slots[j].SubmissionSeq {
+			return slots[i].SubmissionSeq < slots[j].SubmissionSeq
+		}
+		return slots[i].SessionID < slots[j].SessionID
+	})
+}
+
+// stepWithBudget is the shared scheduler step. budget > 0 enables the PREFILL arm
+// for SlotStatePrefilling slots; budget == 0 is the decode-only legacy path.
+func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*BatchStepResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -553,11 +725,14 @@ func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error)
 
 	stepStart := time.Now()
 
-	// 1. Pull queued requests into any empty slots before gathering active batch
+	// 1. Pull queued requests into any empty slots before gathering batches.
+	// initSlot applies the budgeted-prefill rule for ChunkedPrefill requests.
 	promotedIDs := cb.tryPromoteWaitingLocked()
 
-	// 2. Gather active decode slots and count other states
-	var activeSlots []*Slot
+	// 2. Gather prefilling slots and the resident decodable roster, and count
+	// the other states in the same pass.
+	var prefilling []*Slot
+	resident := cb.decodeResidentLocked()
 	yieldedCount := 0
 	emptyCount := 0
 	finishedCount := 0
@@ -568,8 +743,8 @@ func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error)
 		slot.mu.Unlock()
 
 		switch st {
-		case SlotStateActiveDecode:
-			activeSlots = append(activeSlots, slot)
+		case SlotStatePrefilling:
+			prefilling = append(prefilling, slot)
 		case SlotStateYieldedIO:
 			yieldedCount++
 		case SlotStateFinished:
@@ -579,8 +754,84 @@ func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error)
 		}
 	}
 
-	// If no slots are active, advance iteration and return clean status
-	if len(activeSlots) == 0 {
+	// 3. PREFILL arm: attempted first, consumes up to budget prompt tokens FIFO.
+	if budget > 0 && len(prefilling) > 0 {
+		sortSlotsByStableUID(prefilling)
+		remaining := budget
+		total := 0
+		for _, slot := range prefilling {
+			if remaining <= 0 {
+				break
+			}
+			slot.mu.Lock()
+			pending := len(slot.PendingPrompt) - slot.PrefillPos
+			if pending <= 0 {
+				cb.finishPrefillLocked(slot, nil)
+				slot.mu.Unlock()
+				continue
+			}
+			chunk := remaining
+			if chunk > pending {
+				chunk = pending
+			}
+			// Capture the chunk of prompt consumed THIS step BEFORE advancing
+			// PrefillPos, so the model session's KV cache advances in lockstep
+			// with PrefillPos and no already-consumed token is ever re-prefilled.
+			// Upstream mini-sglang prefill.py:65-151 is a resumable chunked
+			// prefill; the in-repo precedent is
+			// internal/modelengine/nativesched_prefill.go:481-563.
+			var logits []float32
+			if slot.sess != nil {
+				chunkIDs := slot.PendingPrompt[slot.PrefillPos : slot.PrefillPos+chunk]
+				if slot.PrefillPos+chunk == len(slot.PendingPrompt) {
+					// Final chunk: its last-token distribution seeds decode.
+					logits = slot.sess.Prefill(chunkIDs)
+				} else {
+					// Intermediate chunk: grow KV only, discard logits.
+					slot.sess.PrefillNoLogits(chunkIDs)
+				}
+			}
+			slot.PrefillPos += chunk
+			remaining -= chunk
+			total += chunk
+			if slot.PrefillPos >= len(slot.PendingPrompt) {
+				cb.finishPrefillLocked(slot, logits)
+			}
+			slot.mu.Unlock()
+		}
+
+		cb.iteration++
+		residentUIDs := make([]uint64, len(resident))
+		for i, slot := range resident {
+			residentUIDs[i] = slot.SubmissionSeq
+		}
+		return &BatchStepResult{
+			Iteration:            cb.iteration,
+			ActiveSlots:          len(resident),
+			YieldedSlots:         yieldedCount,
+			FinishedSlots:        finishedCount,
+			EmptySlots:           emptyCount,
+			TotalSlots:           len(cb.slots),
+			GeneratedTokens:      make(map[string]int),
+			TokensGenerated:      0,
+			OperationalIntensity: cb.OperationalIntensity(len(resident)),
+			ArithmeticIntensity:  cb.OperationalIntensity(len(resident)),
+			AggregateThroughput:  cb.AggregateThroughput(len(resident)),
+			StepDuration:         time.Since(stepStart),
+			StallDuration:        0,
+			RetiredSessionIDs:    nil,
+			PromotedSessionIDs:   promotedIDs,
+			KVCacheBytesUsed:     cb.currentKVCacheBytesLocked(),
+			SlotDepths:           make(map[string]int),
+			Phase:                PhasePrefill,
+			PrefillTokens:        total,
+			DecodeTokens:         0,
+			DecodeResidentUIDs:   residentUIDs,
+		}, nil
+	}
+
+	// 4. DECODE arm. If nothing is resident, mirror the legacy empty path.
+	if len(resident) == 0 {
 		cb.iteration++
 		return &BatchStepResult{
 			Iteration:            cb.iteration,
@@ -600,15 +851,20 @@ func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error)
 			PromotedSessionIDs:   promotedIDs,
 			KVCacheBytesUsed:     cb.currentKVCacheBytesLocked(),
 			SlotDepths:           make(map[string]int),
+			Phase:                PhaseIdle,
+			PrefillTokens:        0,
+			DecodeTokens:         0,
+			DecodeResidentUIDs:   []uint64{},
 		}, nil
 	}
 
+	activeSlots := resident
 	activeCount := len(activeSlots)
 	tokensThisStep := make([]int, activeCount)
 	generatedTokens := make(map[string]int, activeCount)
 	slotDepths := make(map[string]int, activeCount)
 
-	// 3. Forward pass over all active slots simultaneously
+	// 5. Forward pass over the ordered resident slots simultaneously.
 	if cb.cfg.Model != nil {
 		if activeCount == 1 {
 			slot := activeSlots[0]
@@ -639,7 +895,7 @@ func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error)
 		}
 	}
 
-	// 4. Deliver tokens and mark completion
+	// 6. Deliver tokens and mark completion.
 	var newlyFinished []*Slot
 	for i, slot := range activeSlots {
 		tok := tokensThisStep[i]
@@ -674,7 +930,7 @@ func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error)
 		slot.mu.Unlock()
 	}
 
-	// 5. Retires slots that finish (SlotStateFinished) and pulls queued requests
+	// 7. Retire finished slots and pull queued requests into freed slots.
 	var retiredIDs []string
 	for _, slot := range newlyFinished {
 		retiredIDs = append(retiredIDs, slot.SessionID)
@@ -696,6 +952,11 @@ func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error)
 	opIntensity := cb.OperationalIntensity(activeCount)
 	aggTPS := cb.AggregateThroughput(activeCount)
 
+	residentUIDs := make([]uint64, len(resident))
+	for i, slot := range resident {
+		residentUIDs[i] = slot.SubmissionSeq
+	}
+
 	result := &BatchStepResult{
 		Iteration:            cb.iteration,
 		ActiveSlots:          activeCount,
@@ -714,9 +975,31 @@ func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error)
 		PromotedSessionIDs:   promotedIDs,
 		KVCacheBytesUsed:     cb.currentKVCacheBytesLocked(),
 		SlotDepths:           slotDepths,
+		Phase:                PhaseDecode,
+		PrefillTokens:        0,
+		DecodeTokens:         activeCount,
+		DecodeResidentUIDs:   residentUIDs,
 	}
 
 	return result, nil
+}
+
+// finishPrefillLocked completes a budgeted-prefill chunk: it promotes the slot to
+// SlotStateActiveDecode and sets the token decode starts from. On the model path the
+// caller passes the final chunk's logits and the argmax must be preserved (the prompt's
+// last token is the teacher-forced input, not the next-token prediction); on the
+// simulation path (sess == nil) the last prompt token is the seed exactly as before.
+// Caller MUST hold cb.mu AND slot.mu.
+func (cb *ContinuousBatcher) finishPrefillLocked(slot *Slot, logits []float32) {
+	switch {
+	case slot.sess != nil && len(logits) > 0:
+		slot.LastToken = argmax(logits)
+	case len(slot.PendingPrompt) > 0:
+		slot.LastToken = slot.PendingPrompt[len(slot.PendingPrompt)-1]
+	default:
+		slot.LastToken = 42 + slot.Index*31
+	}
+	slot.State = SlotStateActiveDecode
 }
 
 // OperationalIntensity calculates effective compute-tile operational intensity (FLOPs/byte)

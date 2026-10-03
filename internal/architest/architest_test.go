@@ -3047,6 +3047,7 @@ var engineDriverRole = map[string]map[string]string{
 	"codetools.write": {
 		"codetools": "bounded coding write engine",
 	},
+	"batcher":    {"engine": "the continuous-batching lifecycle driver wrapping ContinuousBatcher (mini-sglang port)"},
 	"dynamo":     {"engine": "the Dynamo EngineDriver adapter for ridden P/D serving pools"},
 	"inkernel":   {"modelengine": "the in-kernel Go model-fusion engine (dogfood default)"},
 	"fakread":    {"agent": "the read-only engine for fak_read gateway calls"},
