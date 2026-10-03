@@ -2,10 +2,8 @@ package gateway
 
 import (
 	"context"
-	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +21,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/pkg/deploykit/probe"
+	"github.com/anthony-chaudhary/fak/pkg/gatewayauth"
 	"github.com/anthony-chaudhary/fak/pkg/turncost"
 )
 
@@ -274,19 +273,11 @@ func (s *Server) handleControlDirectives(w http.ResponseWriter, r *http.Request)
 }
 
 // handleHealthWithAuthProof preserves the unauthenticated health response while
-// allowing a client that already holds the configured gateway key to authenticate
-// this process before sending that key as a bearer token. Invalid or absent
+// allowing a client that already holds the configured gateway key to prove
+// endpoint key possession before sending that key as a bearer token. Invalid or absent
 // challenges reveal nothing and leave /healthz byte-for-byte unchanged.
 func (s *Server) handleHealthWithAuthProof(w http.ResponseWriter, r *http.Request) {
-	if s.requireKey != "" {
-		encoded := r.Header.Get(healthAuthChallengeHeader)
-		if nonce, err := base64.StdEncoding.DecodeString(encoded); err == nil && len(nonce) == healthAuthNonceBytes {
-			mac := hmac.New(sha256.New, []byte(s.requireKey))
-			_, _ = mac.Write([]byte(healthAuthProofDomain))
-			_, _ = mac.Write(nonce)
-			w.Header().Set(healthAuthProofHeader, base64.StdEncoding.EncodeToString(mac.Sum(nil)))
-		}
-	}
+	gatewayauth.WriteHealthProof(w, r, s.requireKey)
 	s.handleHealth(w, r)
 }
 
