@@ -1,0 +1,956 @@
+{
+  "schema": "fak.mac-keepalive-rebench/v1",
+  "date": "2026-10-03",
+  "status": "SW_AND_LOCAL_HW_VERIFIED_DEFAULT_OFF",
+  "source": {
+    "schema": "fak.mac-rebench-source/v1",
+    "base_revision": "a3caf52953c5b771cd2653bff30c0e9d7f5e27be",
+    "candidate_binary_sha256": "ac2e1cae50fffe21cd5bfd4acfa10737b282cded7debf4945eeb4bb06eee80dc",
+    "tracked_diff_sha256": "540f6311f371589d91972642f97aebb1c14f619781f0464ec52f2d57caf7926e",
+    "source_path_hashes": {
+      "cmd/modelbench/main.go": "e9b6925d8c493f2c1f8dfaba4aa1bcd57765832ea68b84bcaa3b262efb479a2f",
+      "internal/model/generate_context.go": "33ea56c0390f91a907f1c33a49a308990b8b73d08a0fa3c6f0d00ebd021d9433",
+      "internal/model/kv.go": "bd3bcfcfc8546570384bfa7a9cc89aee1387cb03cc7d0972499590c7fb9f3ed7",
+      "internal/model/metal_prefill_hybrid.go": "abad0106380abb6e8090887e8969ee5b345c0ad43d9761d97cc208273bb735fa",
+      "internal/metalgemm/keepalive.go": "88b8c00ecdffebed04dff59824f4fdfa50a76529816f4811fbf9ad67e5620ed2",
+      "internal/metalgemm/keepalive_darwin.go": "519640a92a603aa1debd0af329f30a5a73824e8484986798dcbd65d68aeb19fa",
+      "internal/metalgemm/keepalive_darwin.m": "b2484b8f0553088b08c173cbc3123c65489c780de9891835e8846d63a77d9b99",
+      "internal/metalgemm/keepalive_darwin_test.go": "4094da936a5704d07cb7f56ae2611d81fb018b19780852ecb8ff15304641b3c6",
+      "internal/metalgemm/keepalive_test.go": "8f987fd0e4c335fa259daf5b84b8d356be8986f6d792f16935c685c2e115a71b",
+      "internal/model/gpu_keepalive.go": "357ae4a12477643772a8677b3108a26def96d0d634cde38fba2817461d456a9b",
+      "internal/model/gpu_keepalive_darwin_test.go": "31cffcdfe912fc0cdb44de011c880e7d0d0a2e52fd278184f026558c05207089"
+    },
+    "source_identity": "pulse2048 working tree hashes; HEAD alone does not identify candidate",
+    "machine": {
+      "model": "Mac15,7",
+      "chip": "Apple M3 Pro",
+      "memory_bytes": 38654705664
+    },
+    "landed_source_commit": "6d1a868f2eff1124a396579da5e3447275c66723",
+    "landed_source_path_hashes_verified": true,
+    "aggregate_source_sha256": "e831feb1295a8cff46c6da6021f2b0d5c31cd4f8f749801988441c9060798493",
+    "aggregate_source_encoding": "SHA-256 of source_path_hashes JSON with sorted keys and compact separators"
+  },
+  "judge": {
+    "verdict": "GREEN",
+    "context": "/root/mac_bench_recon",
+    "authored_implementation": false,
+    "authored_tests": false,
+    "source_path_hashes": {
+      "cmd/modelbench/main.go": "e9b6925d8c493f2c1f8dfaba4aa1bcd57765832ea68b84bcaa3b262efb479a2f",
+      "internal/model/generate_context.go": "33ea56c0390f91a907f1c33a49a308990b8b73d08a0fa3c6f0d00ebd021d9433",
+      "internal/model/kv.go": "bd3bcfcfc8546570384bfa7a9cc89aee1387cb03cc7d0972499590c7fb9f3ed7",
+      "internal/model/metal_prefill_hybrid.go": "abad0106380abb6e8090887e8969ee5b345c0ad43d9761d97cc208273bb735fa",
+      "internal/metalgemm/keepalive.go": "88b8c00ecdffebed04dff59824f4fdfa50a76529816f4811fbf9ad67e5620ed2",
+      "internal/metalgemm/keepalive_darwin.go": "519640a92a603aa1debd0af329f30a5a73824e8484986798dcbd65d68aeb19fa",
+      "internal/metalgemm/keepalive_darwin.m": "b2484b8f0553088b08c173cbc3123c65489c780de9891835e8846d63a77d9b99",
+      "internal/metalgemm/keepalive_darwin_test.go": "4094da936a5704d07cb7f56ae2611d81fb018b19780852ecb8ff15304641b3c6",
+      "internal/metalgemm/keepalive_test.go": "8f987fd0e4c335fa259daf5b84b8d356be8986f6d792f16935c685c2e115a71b",
+      "internal/model/gpu_keepalive.go": "357ae4a12477643772a8677b3108a26def96d0d634cde38fba2817461d456a9b",
+      "internal/model/gpu_keepalive_darwin_test.go": "31cffcdfe912fc0cdb44de011c880e7d0d0a2e52fd278184f026558c05207089"
+    },
+    "candidate_binary_sha256": "ac2e1cae50fffe21cd5bfd4acfa10737b282cded7debf4945eeb4bb06eee80dc",
+    "review": "finite2048 model-data-free polling; two-inflight bound; sticky typed failure; Q4 actual-route admission; nested idempotent cancellation/panic cleanup; defaultoff and auto power policy; MIT notice",
+    "runtime_witness": "both final ON receipts submit positive work with failed=false, iterations2048; both OFF receipts submitzero; physical parity and Q4 hook tests pass",
+    "limitations": [
+      "finite final buffers drain asynchronously",
+      "sharedhost contention prevents generalized causal gain claim",
+      "no energy/power cost qualification; defaultoff remains"
+    ]
+  },
+  "machine_observations": {
+    "sysctl_hw_model": "Mac15,7",
+    "sysctl_cpu_brand": "Apple M3 Pro",
+    "sysctl_hw_memsize": 38654705664,
+    "pressure_free_percent_before": 83,
+    "pressure_free_percent_after": 83,
+    "logical_cores_observed_modelbench": 12,
+    "q8_workers_observed_modelbench": 6,
+    "shared_host_load": "peer compilation/tests and unrelated background processes active; no process identities disclosed"
+  },
+  "model_sha256": "bd258782e35f7f458f8aced1adc053e6e92e89bc735ba3be89d38a06121dc517",
+  "runtime_environment": {
+    "FAK_GPU_LEASE_NOWAIT": "1",
+    "GOMAXPROCS": "unset",
+    "GOMEMLIMIT": "unset",
+    "FAK_WORKERS": "unset",
+    "FAK_BUDGET": "unset",
+    "FAK_METAL_KEEPALIVE": "per arm off/on"
+  },
+  "reproduction_arguments": [
+    "modelbench",
+    "-gguf",
+    "[MODEL_DIR]/Qwen3.5-0.8B-Q4_K_M.gguf",
+    "-q4k",
+    "-metal",
+    "-prefill-sizes",
+    "4",
+    "-prefill-reps",
+    "5",
+    "-decode-prompt",
+    "4",
+    "-decode-steps",
+    "32",
+    "-decode-reps",
+    "5",
+    "-out",
+    "[RUN_DIR]/<arm>.json"
+  ],
+  "gpu_admission": "native exclusive gpulease, no-wait each process; no holder after matrix",
+  "measurement": "end-to-end synchronized legacy MetalQ4K/Q8 hybrid; includes CPU Q8 minority; matched candidate binary ABBA",
+  "arms": [
+    {
+      "id": "pulse-1-off",
+      "policy": "off",
+      "exit_status": 0,
+      "load_average_before": [
+        27.17,
+        38.18,
+        44.69
+      ],
+      "raw_sha256": "c87d98721dfb67c44100e82e73014c9fd60b96cceb6797750acdf6a21d28a300",
+      "sanitized_sha256": "c9dc027e41c4333601ce473ef8baf772693939d9b81d9fff3a9bbe53e938db66",
+      "raw_native_report": {
+        "lineage": {
+          "lineage_schema": "fak-bench-lineage/1",
+          "app_version": "0.55.0",
+          "utc": "2026-10-03T16:23:40Z",
+          "git_commit": "a3caf52953c5b771cd2653bff30c0e9d7f5e27be",
+          "go_version": "go1.26.6",
+          "node": "Mac"
+        },
+        "benchmark_artifact": {
+          "schema": "fak-benchmark-artifact/1",
+          "run_id": "20261003t162340-modelbench-a3caf52953c5",
+          "timestamp": "2026-10-03T16:23:40Z",
+          "fak_commit": "a3caf52953c5b771cd2653bff30c0e9d7f5e27be",
+          "fak_version": "0.55.0",
+          "harness_version": "1.0.0",
+          "harness": {
+            "name": "modelbench",
+            "version": "1.0.0",
+            "build_flags": null
+          },
+          "machine": {
+            "hostname": "Mac",
+            "cpu": "arm64",
+            "gpu": "unknown",
+            "ram_gb": 0,
+            "os": "darwin",
+            "arch": "arm64"
+          },
+          "model": {
+            "name": "Qwen3.5-0.8B-Q4_K_M.gguf [gguf-q4k]",
+            "precision": "Q4_K/Q8 resident hybrid + MetalQ4K",
+            "source_commit": "unknown",
+            "source_url": "[HOME]/Models/qwen35-08b/Qwen3.5-0.8B-Q4_K_M.gguf (resident Q4_K)",
+            "hash": "unknown"
+          },
+          "dependency_versions": {
+            "arch": "arm64",
+            "cuda": "unknown",
+            "go": "go1.26.6",
+            "os": "darwin"
+          },
+          "build": {
+            "tags": null,
+            "goos": "darwin",
+            "goarch": "arm64",
+            "goflags": ""
+          },
+          "config": {
+            "hash": "unknown",
+            "parameters": {}
+          },
+          "results": {
+            "metrics": {
+              "load_ms": 1652.192791,
+              "quant_ms": 0
+            },
+            "units": {
+              "load_ms": "ms",
+              "quant_ms": "ms"
+            },
+            "baseline": {}
+          },
+          "invalidated": {
+            "is_invalid": false,
+            "reason": null,
+            "replacement_run_id": null
+          },
+          "witness": {
+            "test_path": "unknown",
+            "dos_verify_result": "CLAIM_UNWITNESSED",
+            "dos_commit_audit": "not_run",
+            "reproduction_command": "_scratch/mac-slotstream-keepalive/modelbench -gguf [HOME]/Models/qwen35-08b/Qwen3.5-0.8B-Q4_K_M.gguf -q4k -metal -prefill-sizes 4 -prefill-reps 5 -decode-prompt 4 -decode-steps 32 -decode-reps 5 -out [RUN_DIR]/pulse-1-off.json"
+          },
+          "lineage": {
+            "source_artifact": "unknown",
+            "baseline": "unknown"
+          }
+        },
+        "app_version": "0.55.0",
+        "backend": {
+          "registered_backends": [
+            "cpu-ref"
+          ],
+          "selected": "legacy"
+        },
+        "budget": "default(GOMAXPROCS)",
+        "decode": {
+          "prompt_tokens": 4,
+          "decode_steps": 32,
+          "reps": 5,
+          "per_token_median_ms": 117.334895,
+          "tok_per_sec": 8.522613839642503
+        },
+        "engine": "fak-in-kernel Metal Q4_K/Q8 hybrid (raw GGUF Q4_K majority through MetalQ4K; Q8 minority on CPU)",
+        "go_threads": "GOMAXPROCS=12, matmul workers=12, q8 decode workers=6 (FAK_WORKERS / FAK_BUDGET / -budget to pin)",
+        "lean": false,
+        "load_ms": 1652.192791,
+        "load_worker_control": {
+          "fak_gguf_load_workers": "",
+          "source": "unset",
+          "gomaxprocs": 12
+        },
+        "metal": true,
+        "metal_keepalive": {
+          "holders": 0,
+          "submitted_buffers": 0,
+          "in_flight": 0,
+          "failed": false,
+          "iterations": 2048,
+          "max_completed_gpu_ms": 0
+        },
+        "metal_q4k": true,
+        "model": "Qwen3.5-0.8B-Q4_K_M.gguf [gguf-q4k]",
+        "model_config": {
+          "architectures": null,
+          "head_dim": 256,
+          "hidden_size": 1024,
+          "index_head_dim": 0,
+          "index_n_heads": 0,
+          "index_topk": 0,
+          "indexer_types": null,
+          "intermediate_size": 3584,
+          "is_moe": false,
+          "kv_lora_rank": 0,
+          "max_position_embeddings": 262144,
+          "model_type": "qwen35",
+          "num_attention_heads": 8,
+          "num_experts_per_tok": 0,
+          "num_hidden_layers": 24,
+          "num_key_value_heads": 2,
+          "num_local_experts": 0,
+          "q_lora_rank": 0,
+          "qk_nope_head_dim": 0,
+          "qk_rope_head_dim": 0,
+          "v_head_dim": 0,
+          "vocab_size": 248320
+        },
+        "numa_replicas": "numa_replicas=disabled(reason=insufficient_host_nodes)",
+        "precision": "Q4_K/Q8 resident hybrid + MetalQ4K",
+        "prefill": [
+          {
+            "tokens": 4,
+            "reps": 5,
+            "median_ms": 429.253667,
+            "tok_per_sec": 9.318499310571994
+          }
+        ],
+        "q4k": true,
+        "q8_decode_budget": "default(GOMAXPROCS); q8_decode=darwin/arm64-half-cap",
+        "q8_decode_workers": 6,
+        "quant_ms": 0,
+        "quantized_at_load": true,
+        "resident": {
+          "q2_tensors": 0,
+          "q2_bytes": 0,
+          "q2_params": 0,
+          "q4k_tensors": 68,
+          "q4k_bytes": 131530752,
+          "q4k_params": 233832448,
+          "q8_tensors": 103,
+          "q8_bytes": 530915328,
+          "q8_params": 471924736,
+          "kquant_tensors": 16,
+          "kquant_bytes": 37847040,
+          "kquant_params": 46137344,
+          "q2k_embed_tensors": 0,
+          "q2k_embed_bytes": 0,
+          "q2k_embed_params": 0,
+          "pq2_embed_tensors": 0,
+          "pq2_embed_bytes": 0,
+          "pq2_embed_params": 0,
+          "q4k_embed_tensors": 0,
+          "q4k_embed_bytes": 0,
+          "q4k_embed_params": 0,
+          "f32_tensors": 134,
+          "f32_bytes": 1019112704,
+          "total_resident_bytes": 1719405824,
+          "decode_bytes_per_token": 700293120,
+          "decode_gib_per_token": 0.6521987915039062
+        },
+        "resident_summary": "resident: Q2_0=0 tensors/0.00MiB  Q4_K=68 tensors/125.43MiB  rawExpertQuant=16/36.09MiB  Q8=103/506.32MiB  f32=134/971.90MiB  total=1639.75MiB  decode=0.65GiB/tok",
+        "source": "[HOME]/Models/qwen35-08b/Qwen3.5-0.8B-Q4_K_M.gguf (resident Q4_K)",
+        "stream_q4k": false,
+        "workers": 12
+      },
+      "stderr": "fak: resident Q4_K progress counts collected GGUF tensors; Q8 packing and model finalization may continue after 100%\n[fak] prefill P=4: 429.3 ms (9.3 tok/s)\n[fak] decode: 117.3 ms/tok (8.5 tok/s)\nwrote [RUN_DIR]/pulse-1-off.json\n"
+    },
+    {
+      "id": "pulse-2-on",
+      "policy": "on",
+      "exit_status": 0,
+      "load_average_before": [
+        26.85,
+        36.61,
+        43.78
+      ],
+      "raw_sha256": "32bf8b291b40d64d3004367ba2f4d67e3d48147ea46123e9f75ae50a01d481da",
+      "sanitized_sha256": "1c106e6681209a456feed9494c912f5a39f3aac1ccde44f739b3196b6d489411",
+      "raw_native_report": {
+        "lineage": {
+          "lineage_schema": "fak-bench-lineage/1",
+          "app_version": "0.55.0",
+          "utc": "2026-10-03T16:24:13Z",
+          "git_commit": "a3caf52953c5b771cd2653bff30c0e9d7f5e27be",
+          "go_version": "go1.26.6",
+          "node": "Mac"
+        },
+        "benchmark_artifact": {
+          "schema": "fak-benchmark-artifact/1",
+          "run_id": "20261003t162413-modelbench-a3caf52953c5",
+          "timestamp": "2026-10-03T16:24:13Z",
+          "fak_commit": "a3caf52953c5b771cd2653bff30c0e9d7f5e27be",
+          "fak_version": "0.55.0",
+          "harness_version": "1.0.0",
+          "harness": {
+            "name": "modelbench",
+            "version": "1.0.0",
+            "build_flags": null
+          },
+          "machine": {
+            "hostname": "Mac",
+            "cpu": "arm64",
+            "gpu": "unknown",
+            "ram_gb": 0,
+            "os": "darwin",
+            "arch": "arm64"
+          },
+          "model": {
+            "name": "Qwen3.5-0.8B-Q4_K_M.gguf [gguf-q4k]",
+            "precision": "Q4_K/Q8 resident hybrid + MetalQ4K",
+            "source_commit": "unknown",
+            "source_url": "[HOME]/Models/qwen35-08b/Qwen3.5-0.8B-Q4_K_M.gguf (resident Q4_K)",
+            "hash": "unknown"
+          },
+          "dependency_versions": {
+            "arch": "arm64",
+            "cuda": "unknown",
+            "go": "go1.26.6",
+            "os": "darwin"
+          },
+          "build": {
+            "tags": null,
+            "goos": "darwin",
+            "goarch": "arm64",
+            "goflags": ""
+          },
+          "config": {
+            "hash": "unknown",
+            "parameters": {}
+          },
+          "results": {
+            "metrics": {
+              "load_ms": 1592.150458,
+              "quant_ms": 0
+            },
+            "units": {
+              "load_ms": "ms",
+              "quant_ms": "ms"
+            },
+            "baseline": {}
+          },
+          "invalidated": {
+            "is_invalid": false,
+            "reason": null,
+            "replacement_run_id": null
+          },
+          "witness": {
+            "test_path": "unknown",
+            "dos_verify_result": "CLAIM_UNWITNESSED",
+            "dos_commit_audit": "not_run",
+            "reproduction_command": "_scratch/mac-slotstream-keepalive/modelbench -gguf [HOME]/Models/qwen35-08b/Qwen3.5-0.8B-Q4_K_M.gguf -q4k -metal -prefill-sizes 4 -prefill-reps 5 -decode-prompt 4 -decode-steps 32 -decode-reps 5 -out [RUN_DIR]/pulse-2-on.json"
+          },
+          "lineage": {
+            "source_artifact": "unknown",
+            "baseline": "unknown"
+          }
+        },
+        "app_version": "0.55.0",
+        "backend": {
+          "registered_backends": [
+            "cpu-ref"
+          ],
+          "selected": "legacy"
+        },
+        "budget": "default(GOMAXPROCS)",
+        "decode": {
+          "prompt_tokens": 4,
+          "decode_steps": 32,
+          "reps": 5,
+          "per_token_median_ms": 50.468664,
+          "tok_per_sec": 19.814275250083895
+        },
+        "engine": "fak-in-kernel Metal Q4_K/Q8 hybrid (raw GGUF Q4_K majority through MetalQ4K; Q8 minority on CPU)",
+        "go_threads": "GOMAXPROCS=12, matmul workers=12, q8 decode workers=6 (FAK_WORKERS / FAK_BUDGET / -budget to pin)",
+        "lean": false,
+        "load_ms": 1592.150458,
+        "load_worker_control": {
+          "fak_gguf_load_workers": "",
+          "source": "unset",
+          "gomaxprocs": 12
+        },
+        "metal": true,
+        "metal_keepalive": {
+          "holders": 0,
+          "submitted_buffers": 22595,
+          "in_flight": 2,
+          "failed": false,
+          "iterations": 2048,
+          "max_completed_gpu_ms": 2.4903749999793945
+        },
+        "metal_q4k": true,
+        "model": "Qwen3.5-0.8B-Q4_K_M.gguf [gguf-q4k]",
+        "model_config": {
+          "architectures": null,
+          "head_dim": 256,
+          "hidden_size": 1024,
+          "index_head_dim": 0,
+          "index_n_heads": 0,
+          "index_topk": 0,
+          "indexer_types": null,
+          "intermediate_size": 3584,
+          "is_moe": false,
+          "kv_lora_rank": 0,
+          "max_position_embeddings": 262144,
+          "model_type": "qwen35",
+          "num_attention_heads": 8,
+          "num_experts_per_tok": 0,
+          "num_hidden_layers": 24,
+          "num_key_value_heads": 2,
+          "num_local_experts": 0,
+          "q_lora_rank": 0,
+          "qk_nope_head_dim": 0,
+          "qk_rope_head_dim": 0,
+          "v_head_dim": 0,
+          "vocab_size": 248320
+        },
+        "numa_replicas": "numa_replicas=disabled(reason=insufficient_host_nodes)",
+        "precision": "Q4_K/Q8 resident hybrid + MetalQ4K",
+        "prefill": [
+          {
+            "tokens": 4,
+            "reps": 5,
+            "median_ms": 534.646,
+            "tok_per_sec": 7.481585946588958
+          }
+        ],
+        "q4k": true,
+        "q8_decode_budget": "default(GOMAXPROCS); q8_decode=darwin/arm64-half-cap",
+        "q8_decode_workers": 6,
+        "quant_ms": 0,
+        "quantized_at_load": true,
+        "resident": {
+          "q2_tensors": 0,
+          "q2_bytes": 0,
+          "q2_params": 0,
+          "q4k_tensors": 68,
+          "q4k_bytes": 131530752,
+          "q4k_params": 233832448,
+          "q8_tensors": 103,
+          "q8_bytes": 530915328,
+          "q8_params": 471924736,
+          "kquant_tensors": 16,
+          "kquant_bytes": 37847040,
+          "kquant_params": 46137344,
+          "q2k_embed_tensors": 0,
+          "q2k_embed_bytes": 0,
+          "q2k_embed_params": 0,
+          "pq2_embed_tensors": 0,
+          "pq2_embed_bytes": 0,
+          "pq2_embed_params": 0,
+          "q4k_embed_tensors": 0,
+          "q4k_embed_bytes": 0,
+          "q4k_embed_params": 0,
+          "f32_tensors": 134,
+          "f32_bytes": 1019112704,
+          "total_resident_bytes": 1719405824,
+          "decode_bytes_per_token": 700293120,
+          "decode_gib_per_token": 0.6521987915039062
+        },
+        "resident_summary": "resident: Q2_0=0 tensors/0.00MiB  Q4_K=68 tensors/125.43MiB  rawExpertQuant=16/36.09MiB  Q8=103/506.32MiB  f32=134/971.90MiB  total=1639.75MiB  decode=0.65GiB/tok",
+        "source": "[HOME]/Models/qwen35-08b/Qwen3.5-0.8B-Q4_K_M.gguf (resident Q4_K)",
+        "stream_q4k": false,
+        "workers": 12
+      },
+      "stderr": "fak: resident Q4_K progress counts collected GGUF tensors; Q8 packing and model finalization may continue after 100%\n[fak] prefill P=4: 534.6 ms (7.5 tok/s)\n[fak] decode: 50.5 ms/tok (19.8 tok/s)\nwrote [RUN_DIR]/pulse-2-on.json\n"
+    },
+    {
+      "id": "pulse-3-on",
+      "policy": "on",
+      "exit_status": 0,
+      "load_average_before": [
+        27.15,
+        35.85,
+        43.23
+      ],
+      "raw_sha256": "012de9f25f9a2a37486c03f53f0857f85263eb34e0b5bc0213893c2c2e36f127",
+      "sanitized_sha256": "6b1fe0ac7da64b751f49eecf090319bc14567ec328f28202e659bea395d29ea1",
+      "raw_native_report": {
+        "lineage": {
+          "lineage_schema": "fak-bench-lineage/1",
+          "app_version": "0.55.0",
+          "utc": "2026-10-03T16:24:48Z",
+          "git_commit": "a3caf52953c5b771cd2653bff30c0e9d7f5e27be",
+          "go_version": "go1.26.6",
+          "node": "Mac"
+        },
+        "benchmark_artifact": {
+          "schema": "fak-benchmark-artifact/1",
+          "run_id": "20261003t162448-modelbench-a3caf52953c5",
+          "timestamp": "2026-10-03T16:24:48Z",
+          "fak_commit": "a3caf52953c5b771cd2653bff30c0e9d7f5e27be",
+          "fak_version": "0.55.0",
+          "harness_version": "1.0.0",
+          "harness": {
+            "name": "modelbench",
+            "version": "1.0.0",
+            "build_flags": null
+          },
+          "machine": {
+            "hostname": "Mac",
+            "cpu": "arm64",
+            "gpu": "unknown",
+            "ram_gb": 0,
+            "os": "darwin",
+            "arch": "arm64"
+          },
+          "model": {
+            "name": "Qwen3.5-0.8B-Q4_K_M.gguf [gguf-q4k]",
+            "precision": "Q4_K/Q8 resident hybrid + MetalQ4K",
+            "source_commit": "unknown",
+            "source_url": "[HOME]/Models/qwen35-08b/Qwen3.5-0.8B-Q4_K_M.gguf (resident Q4_K)",
+            "hash": "unknown"
+          },
+          "dependency_versions": {
+            "arch": "arm64",
+            "cuda": "unknown",
+            "go": "go1.26.6",
+            "os": "darwin"
+          },
+          "build": {
+            "tags": null,
+            "goos": "darwin",
+            "goarch": "arm64",
+            "goflags": ""
+          },
+          "config": {
+            "hash": "unknown",
+            "parameters": {}
+          },
+          "results": {
+            "metrics": {
+              "load_ms": 1605.841958,
+              "quant_ms": 0
+            },
+            "units": {
+              "load_ms": "ms",
+              "quant_ms": "ms"
+            },
+            "baseline": {}
+          },
+          "invalidated": {
+            "is_invalid": false,
+            "reason": null,
+            "replacement_run_id": null
+          },
+          "witness": {
+            "test_path": "unknown",
+            "dos_verify_result": "CLAIM_UNWITNESSED",
+            "dos_commit_audit": "not_run",
+            "reproduction_command": "_scratch/mac-slotstream-keepalive/modelbench -gguf [HOME]/Models/qwen35-08b/Qwen3.5-0.8B-Q4_K_M.gguf -q4k -metal -prefill-sizes 4 -prefill-reps 5 -decode-prompt 4 -decode-steps 32 -decode-reps 5 -out [RUN_DIR]/pulse-3-on.json"
+          },
+          "lineage": {
+            "source_artifact": "unknown",
+            "baseline": "unknown"
+          }
+        },
+        "app_version": "0.55.0",
+        "backend": {
+          "registered_backends": [
+            "cpu-ref"
+          ],
+          "selected": "legacy"
+        },
+        "budget": "default(GOMAXPROCS)",
+        "decode": {
+          "prompt_tokens": 4,
+          "decode_steps": 32,
+          "reps": 5,
+          "per_token_median_ms": 51.201915,
+          "tok_per_sec": 19.530519512795568
+        },
+        "engine": "fak-in-kernel Metal Q4_K/Q8 hybrid (raw GGUF Q4_K majority through MetalQ4K; Q8 minority on CPU)",
+        "go_threads": "GOMAXPROCS=12, matmul workers=12, q8 decode workers=6 (FAK_WORKERS / FAK_BUDGET / -budget to pin)",
+        "lean": false,
+        "load_ms": 1605.841958,
+        "load_worker_control": {
+          "fak_gguf_load_workers": "",
+          "source": "unset",
+          "gomaxprocs": 12
+        },
+        "metal": true,
+        "metal_keepalive": {
+          "holders": 0,
+          "submitted_buffers": 22936,
+          "in_flight": 2,
+          "failed": false,
+          "iterations": 2048,
+          "max_completed_gpu_ms": 3.01716666581342
+        },
+        "metal_q4k": true,
+        "model": "Qwen3.5-0.8B-Q4_K_M.gguf [gguf-q4k]",
+        "model_config": {
+          "architectures": null,
+          "head_dim": 256,
+          "hidden_size": 1024,
+          "index_head_dim": 0,
+          "index_n_heads": 0,
+          "index_topk": 0,
+          "indexer_types": null,
+          "intermediate_size": 3584,
+          "is_moe": false,
+          "kv_lora_rank": 0,
+          "max_position_embeddings": 262144,
+          "model_type": "qwen35",
+          "num_attention_heads": 8,
+          "num_experts_per_tok": 0,
+          "num_hidden_layers": 24,
+          "num_key_value_heads": 2,
+          "num_local_experts": 0,
+          "q_lora_rank": 0,
+          "qk_nope_head_dim": 0,
+          "qk_rope_head_dim": 0,
+          "v_head_dim": 0,
+          "vocab_size": 248320
+        },
+        "numa_replicas": "numa_replicas=disabled(reason=insufficient_host_nodes)",
+        "precision": "Q4_K/Q8 resident hybrid + MetalQ4K",
+        "prefill": [
+          {
+            "tokens": 4,
+            "reps": 5,
+            "median_ms": 371.07275,
+            "tok_per_sec": 10.779557377899616
+          }
+        ],
+        "q4k": true,
+        "q8_decode_budget": "default(GOMAXPROCS); q8_decode=darwin/arm64-half-cap",
+        "q8_decode_workers": 6,
+        "quant_ms": 0,
+        "quantized_at_load": true,
+        "resident": {
+          "q2_tensors": 0,
+          "q2_bytes": 0,
+          "q2_params": 0,
+          "q4k_tensors": 68,
+          "q4k_bytes": 131530752,
+          "q4k_params": 233832448,
+          "q8_tensors": 103,
+          "q8_bytes": 530915328,
+          "q8_params": 471924736,
+          "kquant_tensors": 16,
+          "kquant_bytes": 37847040,
+          "kquant_params": 46137344,
+          "q2k_embed_tensors": 0,
+          "q2k_embed_bytes": 0,
+          "q2k_embed_params": 0,
+          "pq2_embed_tensors": 0,
+          "pq2_embed_bytes": 0,
+          "pq2_embed_params": 0,
+          "q4k_embed_tensors": 0,
+          "q4k_embed_bytes": 0,
+          "q4k_embed_params": 0,
+          "f32_tensors": 134,
+          "f32_bytes": 1019112704,
+          "total_resident_bytes": 1719405824,
+          "decode_bytes_per_token": 700293120,
+          "decode_gib_per_token": 0.6521987915039062
+        },
+        "resident_summary": "resident: Q2_0=0 tensors/0.00MiB  Q4_K=68 tensors/125.43MiB  rawExpertQuant=16/36.09MiB  Q8=103/506.32MiB  f32=134/971.90MiB  total=1639.75MiB  decode=0.65GiB/tok",
+        "source": "[HOME]/Models/qwen35-08b/Qwen3.5-0.8B-Q4_K_M.gguf (resident Q4_K)",
+        "stream_q4k": false,
+        "workers": 12
+      },
+      "stderr": "fak: resident Q4_K progress counts collected GGUF tensors; Q8 packing and model finalization may continue after 100%\n[fak] prefill P=4: 371.1 ms (10.8 tok/s)\n[fak] decode: 51.2 ms/tok (19.5 tok/s)\nwrote [RUN_DIR]/pulse-3-on.json\n"
+    },
+    {
+      "id": "pulse-4-off",
+      "policy": "off",
+      "exit_status": 0,
+      "load_average_before": [
+        28.51,
+        35.35,
+        42.79
+      ],
+      "raw_sha256": "427cda7dd32572d1f1e61a254ff81f26aa616604ba365e910f848f4aebc95bb3",
+      "sanitized_sha256": "081e74e1b1c52efcf4d9290fb50bcf4edc46eaa6e6c01983164d3dc48f653069",
+      "raw_native_report": {
+        "lineage": {
+          "lineage_schema": "fak-bench-lineage/1",
+          "app_version": "0.55.0",
+          "utc": "2026-10-03T16:25:30Z",
+          "git_commit": "a3caf52953c5b771cd2653bff30c0e9d7f5e27be",
+          "go_version": "go1.26.6",
+          "node": "Mac"
+        },
+        "benchmark_artifact": {
+          "schema": "fak-benchmark-artifact/1",
+          "run_id": "20261003t162530-modelbench-a3caf52953c5",
+          "timestamp": "2026-10-03T16:25:30Z",
+          "fak_commit": "a3caf52953c5b771cd2653bff30c0e9d7f5e27be",
+          "fak_version": "0.55.0",
+          "harness_version": "1.0.0",
+          "harness": {
+            "name": "modelbench",
+            "version": "1.0.0",
+            "build_flags": null
+          },
+          "machine": {
+            "hostname": "Mac",
+            "cpu": "arm64",
+            "gpu": "unknown",
+            "ram_gb": 0,
+            "os": "darwin",
+            "arch": "arm64"
+          },
+          "model": {
+            "name": "Qwen3.5-0.8B-Q4_K_M.gguf [gguf-q4k]",
+            "precision": "Q4_K/Q8 resident hybrid + MetalQ4K",
+            "source_commit": "unknown",
+            "source_url": "[HOME]/Models/qwen35-08b/Qwen3.5-0.8B-Q4_K_M.gguf (resident Q4_K)",
+            "hash": "unknown"
+          },
+          "dependency_versions": {
+            "arch": "arm64",
+            "cuda": "unknown",
+            "go": "go1.26.6",
+            "os": "darwin"
+          },
+          "build": {
+            "tags": null,
+            "goos": "darwin",
+            "goarch": "arm64",
+            "goflags": ""
+          },
+          "config": {
+            "hash": "unknown",
+            "parameters": {}
+          },
+          "results": {
+            "metrics": {
+              "load_ms": 1846.419042,
+              "quant_ms": 0
+            },
+            "units": {
+              "load_ms": "ms",
+              "quant_ms": "ms"
+            },
+            "baseline": {}
+          },
+          "invalidated": {
+            "is_invalid": false,
+            "reason": null,
+            "replacement_run_id": null
+          },
+          "witness": {
+            "test_path": "unknown",
+            "dos_verify_result": "CLAIM_UNWITNESSED",
+            "dos_commit_audit": "not_run",
+            "reproduction_command": "_scratch/mac-slotstream-keepalive/modelbench -gguf [HOME]/Models/qwen35-08b/Qwen3.5-0.8B-Q4_K_M.gguf -q4k -metal -prefill-sizes 4 -prefill-reps 5 -decode-prompt 4 -decode-steps 32 -decode-reps 5 -out [RUN_DIR]/pulse-4-off.json"
+          },
+          "lineage": {
+            "source_artifact": "unknown",
+            "baseline": "unknown"
+          }
+        },
+        "app_version": "0.55.0",
+        "backend": {
+          "registered_backends": [
+            "cpu-ref"
+          ],
+          "selected": "legacy"
+        },
+        "budget": "default(GOMAXPROCS)",
+        "decode": {
+          "prompt_tokens": 4,
+          "decode_steps": 32,
+          "reps": 5,
+          "per_token_median_ms": 98.069242,
+          "tok_per_sec": 10.196877018790458
+        },
+        "engine": "fak-in-kernel Metal Q4_K/Q8 hybrid (raw GGUF Q4_K majority through MetalQ4K; Q8 minority on CPU)",
+        "go_threads": "GOMAXPROCS=12, matmul workers=12, q8 decode workers=6 (FAK_WORKERS / FAK_BUDGET / -budget to pin)",
+        "lean": false,
+        "load_ms": 1846.419042,
+        "load_worker_control": {
+          "fak_gguf_load_workers": "",
+          "source": "unset",
+          "gomaxprocs": 12
+        },
+        "metal": true,
+        "metal_keepalive": {
+          "holders": 0,
+          "submitted_buffers": 0,
+          "in_flight": 0,
+          "failed": false,
+          "iterations": 2048,
+          "max_completed_gpu_ms": 0
+        },
+        "metal_q4k": true,
+        "model": "Qwen3.5-0.8B-Q4_K_M.gguf [gguf-q4k]",
+        "model_config": {
+          "architectures": null,
+          "head_dim": 256,
+          "hidden_size": 1024,
+          "index_head_dim": 0,
+          "index_n_heads": 0,
+          "index_topk": 0,
+          "indexer_types": null,
+          "intermediate_size": 3584,
+          "is_moe": false,
+          "kv_lora_rank": 0,
+          "max_position_embeddings": 262144,
+          "model_type": "qwen35",
+          "num_attention_heads": 8,
+          "num_experts_per_tok": 0,
+          "num_hidden_layers": 24,
+          "num_key_value_heads": 2,
+          "num_local_experts": 0,
+          "q_lora_rank": 0,
+          "qk_nope_head_dim": 0,
+          "qk_rope_head_dim": 0,
+          "v_head_dim": 0,
+          "vocab_size": 248320
+        },
+        "numa_replicas": "numa_replicas=disabled(reason=insufficient_host_nodes)",
+        "precision": "Q4_K/Q8 resident hybrid + MetalQ4K",
+        "prefill": [
+          {
+            "tokens": 4,
+            "reps": 5,
+            "median_ms": 383.373542,
+            "tok_per_sec": 10.433688196458794
+          }
+        ],
+        "q4k": true,
+        "q8_decode_budget": "default(GOMAXPROCS); q8_decode=darwin/arm64-half-cap",
+        "q8_decode_workers": 6,
+        "quant_ms": 0,
+        "quantized_at_load": true,
+        "resident": {
+          "q2_tensors": 0,
+          "q2_bytes": 0,
+          "q2_params": 0,
+          "q4k_tensors": 68,
+          "q4k_bytes": 131530752,
+          "q4k_params": 233832448,
+          "q8_tensors": 103,
+          "q8_bytes": 530915328,
+          "q8_params": 471924736,
+          "kquant_tensors": 16,
+          "kquant_bytes": 37847040,
+          "kquant_params": 46137344,
+          "q2k_embed_tensors": 0,
+          "q2k_embed_bytes": 0,
+          "q2k_embed_params": 0,
+          "pq2_embed_tensors": 0,
+          "pq2_embed_bytes": 0,
+          "pq2_embed_params": 0,
+          "q4k_embed_tensors": 0,
+          "q4k_embed_bytes": 0,
+          "q4k_embed_params": 0,
+          "f32_tensors": 134,
+          "f32_bytes": 1019112704,
+          "total_resident_bytes": 1719405824,
+          "decode_bytes_per_token": 700293120,
+          "decode_gib_per_token": 0.6521987915039062
+        },
+        "resident_summary": "resident: Q2_0=0 tensors/0.00MiB  Q4_K=68 tensors/125.43MiB  rawExpertQuant=16/36.09MiB  Q8=103/506.32MiB  f32=134/971.90MiB  total=1639.75MiB  decode=0.65GiB/tok",
+        "source": "[HOME]/Models/qwen35-08b/Qwen3.5-0.8B-Q4_K_M.gguf (resident Q4_K)",
+        "stream_q4k": false,
+        "workers": 12
+      },
+      "stderr": "fak: resident Q4_K progress counts collected GGUF tensors; Q8 packing and model finalization may continue after 100%\n[fak] prefill P=4: 383.4 ms (10.4 tok/s)\n[fak] decode: 98.1 ms/tok (10.2 tok/s)\nwrote [RUN_DIR]/pulse-4-off.json\n"
+    }
+  ],
+  "summary": {
+    "off_decode_median_tok_per_sec": 9.359745429216481,
+    "on_decode_median_tok_per_sec": 19.67239738143973,
+    "observed_on_over_off_ratio": 2.1018090214325986,
+    "idle_gap_microbench": {
+      "200\u00b5s": {
+        "off_median_host_us": 357.229,
+        "on_median_host_us": 201.196,
+        "on_change_percent": -43.67870469642722
+      },
+      "5ms": {
+        "off_median_host_us": 570.054,
+        "on_median_host_us": 327.867,
+        "on_change_percent": -42.48492248102811
+      }
+    }
+  },
+  "checks": {
+    "tests": {
+      "raw_sha256": "73f9bfccc60db0e2e7a9ace5d403582f263002efc27e64c61f7cfbe64eadffcc",
+      "sanitized_text": "=== RUN   TestKeepAliveMetalOutputAndDrain\n--- PASS: TestKeepAliveMetalOutputAndDrain (0.07s)\n=== RUN   TestKeepAlivePowerPolicy\n=== RUN   TestKeepAlivePowerPolicy/default_off\n=== RUN   TestKeepAlivePowerPolicy/explicit_off\n=== RUN   TestKeepAlivePowerPolicy/unknown_policy_fails_closed\n=== RUN   TestKeepAlivePowerPolicy/explicit_on\n=== RUN   TestKeepAlivePowerPolicy/auto_unknown_power\n=== RUN   TestKeepAlivePowerPolicy/auto_AC\n=== RUN   TestKeepAlivePowerPolicy/auto_battery\n=== RUN   TestKeepAlivePowerPolicy/auto_low_power_AC\n=== RUN   TestKeepAlivePowerPolicy/auto_low_power_battery\n--- PASS: TestKeepAlivePowerPolicy (0.00s)\n    --- PASS: TestKeepAlivePowerPolicy/default_off (0.00s)\n    --- PASS: TestKeepAlivePowerPolicy/explicit_off (0.00s)\n    --- PASS: TestKeepAlivePowerPolicy/unknown_policy_fails_closed (0.00s)\n    --- PASS: TestKeepAlivePowerPolicy/explicit_on (0.00s)\n    --- PASS: TestKeepAlivePowerPolicy/auto_unknown_power (0.00s)\n    --- PASS: TestKeepAlivePowerPolicy/auto_AC (0.00s)\n    --- PASS: TestKeepAlivePowerPolicy/auto_battery (0.00s)\n    --- PASS: TestKeepAlivePowerPolicy/auto_low_power_AC (0.00s)\n    --- PASS: TestKeepAlivePowerPolicy/auto_low_power_battery (0.00s)\n=== RUN   TestKeepAliveLeaseLifecycle\n=== RUN   TestKeepAliveLeaseLifecycle/concurrent_duplicate_releases_remain_balanced\n=== RUN   TestKeepAliveLeaseLifecycle/nested_leases_stop_only_after_final_release\n=== RUN   TestKeepAliveLeaseLifecycle/failed_start_leaves_no_holder_or_stop_obligation\n=== RUN   TestKeepAliveLeaseLifecycle/deferred_cleanup_survives_panic\n--- PASS: TestKeepAliveLeaseLifecycle (0.00s)\n    --- PASS: TestKeepAliveLeaseLifecycle/concurrent_duplicate_releases_remain_balanced (0.00s)\n    --- PASS: TestKeepAliveLeaseLifecycle/nested_leases_stop_only_after_final_release (0.00s)\n    --- PASS: TestKeepAliveLeaseLifecycle/failed_start_leaves_no_holder_or_stop_obligation (0.00s)\n    --- PASS: TestKeepAliveLeaseLifecycle/deferred_cleanup_survives_panic (0.00s)\nPASS\nok  \tgithub.com/anthony-chaudhary/fak/internal/metalgemm\t0.195s\n=== RUN   TestSessionGPUKeepAliveQ4Reachability\n--- PASS: TestSessionGPUKeepAliveQ4Reachability (0.01s)\nPASS\nok  \tgithub.com/anthony-chaudhary/fak/internal/model\t0.510s\n",
+      "exit_status": 0
+    },
+    "microbench": {
+      "raw_sha256": "45afa53ab4f4e79a8c7d2fea2aef1d32270cbeedf11314ab2024b3977bef69d5",
+      "sanitized_text": "goos: darwin\ngoarch: arm64\npkg: github.com/anthony-chaudhary/fak/internal/metalgemm\ncpu: Apple M3 Pro\nBenchmarkKeepAliveIdleGap/gap=200\u00b5s/off-2          \t      20\t    496721 ns/op\t       256.4 gap-us/op\t        52.86 gpu-us/op\t       476.7 wait-us/op\nBenchmarkKeepAliveIdleGap/gap=200\u00b5s/off-2          \t      20\t    282246 ns/op\t       250.3 gap-us/op\t        47.24 gpu-us/op\t       266.3 wait-us/op\nBenchmarkKeepAliveIdleGap/gap=200\u00b5s/off-2          \t      20\t    357229 ns/op\t       261.9 gap-us/op\t       140.9 gpu-us/op\t       336.4 wait-us/op\nBenchmarkKeepAliveIdleGap/gap=200\u00b5s/on-2           \t      20\t    305377 ns/op\t       260.9 gap-us/op\t       127.8 gpu-us/op\t       288.2 wait-us/op\nBenchmarkKeepAliveIdleGap/gap=200\u00b5s/on-2           \t      20\t    201196 ns/op\t       260.1 gap-us/op\t        52.78 gpu-us/op\t       186.7 wait-us/op\nBenchmarkKeepAliveIdleGap/gap=200\u00b5s/on-2           \t      20\t    189477 ns/op\t       256.1 gap-us/op\t        34.07 gpu-us/op\t       170.7 wait-us/op\nBenchmarkKeepAliveIdleGap/gap=5ms/off-2            \t      20\t    586631 ns/op\t      5966 gap-us/op\t        94.56 gpu-us/op\t       532.8 wait-us/op\nBenchmarkKeepAliveIdleGap/gap=5ms/off-2            \t      20\t    556269 ns/op\t      5821 gap-us/op\t        23.75 gpu-us/op\t       498.8 wait-us/op\nBenchmarkKeepAliveIdleGap/gap=5ms/off-2            \t      20\t    570054 ns/op\t      5922 gap-us/op\t        41.23 gpu-us/op\t       504.1 wait-us/op\nBenchmarkKeepAliveIdleGap/gap=5ms/on-2             \t      20\t    354750 ns/op\t      5893 gap-us/op\t        64.26 gpu-us/op\t       313.2 wait-us/op\nBenchmarkKeepAliveIdleGap/gap=5ms/on-2             \t      20\t    327867 ns/op\t      5831 gap-us/op\t       111.1 gpu-us/op\t       295.1 wait-us/op\nBenchmarkKeepAliveIdleGap/gap=5ms/on-2             \t      20\t    147712 ns/op\t      5913 gap-us/op\t         9.869 gpu-us/op\t       128.2 wait-us/op\nPASS\nok  \tgithub.com/anthony-chaudhary/fak/internal/metalgemm\t1.011s\n",
+      "exit_status": 0
+    },
+    "vet": {
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sanitized_text": "",
+      "exit_status": 0
+    }
+  },
+  "superseded_runs": {
+    "initial_zero_submission": "excluded because Q4 hook was unreachable",
+    "longpulse_200000_failure": "excluded; typed MTLCommandBufferErrorDomain code1 Impacting Interactivity in diagnostic2; final2048 both ON healthy",
+    "raw_artifact_hashes": {
+      "diagnostic-1-on.json": "5dc69ea14088fd6f38bfa61397fd22d82ac5f39883d66c4f42f90505b78d3d80",
+      "candidate-1-off.json": "59c967829c9fc91a94da64c96dfabec897b963ea560c533316ba1b547c2ceef6",
+      "final-1-off.json": "fb33f6b5d1d076e014a760933cb37c288239a675d676b4364155ed9c133983fc",
+      "pulse-1-off.json": "c87d98721dfb67c44100e82e73014c9fd60b96cceb6797750acdf6a21d28a300",
+      "candidate-2-on.json": "fa855dc1838f7373aeadfbb76b2dc4df415299dd54eeeda2dc959b9d0a973148",
+      "baseline.provenance.json": "9c5fff56525a9477a3e2f20aa359f2aa5e549c8d6f342ac396baef6b4f0e2ff0",
+      "diagnostic-2-on.json": "32f049be3e4a16c8ee821e15af9df45b360ae805792513c64e960fb4729cd88b",
+      "baseline.json": "d4bbe53f501fa2befe53d1f8e678c7b6831c8a11d4a1d1555388e7fa42e3f110",
+      "final-3-on.json": "7cdf70a9331b28b26b7f7329db36898e511c60f8a05ec80eaf153d03938358df",
+      "pulse-2-on.json": "32bf8b291b40d64d3004367ba2f4d67e3d48147ea46123e9f75ae50a01d481da",
+      "final-4-off.json": "19b22cd825d06443442c62fe27d1bcdfb0703e5837a9232b64d5850889686f9f",
+      "base-normal.json": "8426645b9528a58b1a8873ecbcf737a606a7d9e4b8bcb8a18f09ec8c60452059",
+      "final-2-on.json": "3ef01b61f7f620bcb3d8441415f10487a56d79e1c3cb54209db7b43efebbedbf",
+      "pulse-4-off.json": "427cda7dd32572d1f1e61a254ff81f26aa616604ba365e910f848f4aebc95bb3",
+      "pulse-3-on.json": "012de9f25f9a2a37486c03f53f0857f85263eb34e0b5bc0213893c2c2e36f127"
+    }
+  },
+  "claims_limit": "Point-in-time observed ABBA ratio on this contended M3 Pro and 0.8B model only; no universal2x claim, no 27B qualification, no default enable or power-saving claim",
+  "landed_source_commit": "6d1a868f2eff1124a396579da5e3447275c66723"
+}
