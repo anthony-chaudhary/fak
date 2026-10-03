@@ -25,7 +25,8 @@
 // RETENTION: FAK_TOKEN_CACHE_MAX_BYTES and FAK_TOKEN_CACHE_MAX_ENTRIES bound immutable
 // entries; FAK_TOKEN_CACHE_TEMP_GRACE protects active atomic-write temporaries. Open
 // performs startup recovery and BuildTreeIndex coalesces one maintenance pass after a
-// batch, so sustained writers converge without scanning the directory for every Put.
+// batch. Put also limits each instance's additional writes between successful passes,
+// so an unfinished batch cannot keep growing through maintenance contention or errors.
 package tokencache
 
 import (
@@ -40,6 +41,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -144,6 +146,13 @@ type Cache struct {
 	version   string
 	commonDir string
 	dirty     atomic.Bool
+
+	// writeMu covers admission through rename, including concurrent Put calls on
+	// one instance. Get never takes it. Counters charge successful writes, even
+	// replacements, until this instance completes a within-budget retention pass.
+	writeMu             sync.Mutex
+	unmaintainedBytes   int64
+	unmaintainedEntries int
 }
 
 // New constructs a cache rooted at dir, tagging entries with version. A "" dir or ""
@@ -259,6 +268,16 @@ func (c *Cache) Get(src string) (keys []string, spans [][2]int, ok bool) {
 // Put memoizes the (keys, spans) for src, best-effort. Entries land via temp-file +
 // rename so a concurrent peer reads a whole JSON object or none. A write failure is
 // swallowed — the cache accelerates, it never gates.
+//
+// With fixed retention settings, each instance writes at most MaxBytes JSON bytes
+// and max(1, min(64, MaxEntries/16)) entries between construction or its successful
+// retention passes. Maintenance is attempted before exceeding min(8 MiB, MaxBytes/16)
+// bytes (at least one byte), or the entry allowance. One individually admissible
+// entry larger than that byte threshold may start an empty allowance. Oversized
+// entries are bypassed before temporary-file I/O; contention, partial maintenance
+// and errors cannot reset an exhausted allowance. This bounds additional retained
+// JSON writes by this instance, not pre-existing over-budget data, other instances,
+// live temporary files, filesystem blocks or serialization memory.
 func (c *Cache) Put(src string, keys []string, spans [][2]int) {
 	if c == nil || strings.TrimSpace(c.dir) == "" || strings.TrimSpace(c.version) == "" || len(keys) != len(spans) {
 		return
@@ -267,6 +286,23 @@ func (c *Cache) Put(src string, keys []string, spans [][2]int) {
 	b, err := json.Marshal(entry{Schema: entrySchema, Version: c.version, Digest: dig, Keys: keys, Spans: spans})
 	if err != nil {
 		return
+	}
+	opts := MaintenanceDefaults()
+	size := int64(len(b))
+	if size > opts.MaxBytes {
+		return
+	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	byteThreshold := min(int64(8<<20), max(int64(1), opts.MaxBytes/16))
+	entryThreshold := max(1, min(64, opts.MaxEntries/16))
+	// Subtraction avoids overflow, and admission occurs before the next write:
+	// a small pending entry plus one near-budget entry must not exceed MaxBytes.
+	if c.unmaintainedEntries >= entryThreshold ||
+		(c.unmaintainedBytes > 0 && (size > byteThreshold || c.unmaintainedBytes > byteThreshold-size)) {
+		if !c.resetWriteAllowance(c.maintain(opts, time.Now(), os.Remove)) {
+			return
+		}
 	}
 	if err := os.MkdirAll(c.dir, 0o755); err != nil {
 		return
@@ -284,6 +320,8 @@ func (c *Cache) Put(src string, keys []string, spans [][2]int) {
 	}
 	p := c.path(dig)
 	if err := os.Rename(name, p); err == nil {
+		c.unmaintainedBytes += size
+		c.unmaintainedEntries++
 		c.dirty.Store(true)
 		return
 	}
@@ -294,8 +332,22 @@ func (c *Cache) Put(src string, keys []string, spans [][2]int) {
 	if err := os.Rename(name, p); err != nil {
 		os.Remove(name)
 	} else {
+		c.unmaintainedBytes += size
+		c.unmaintainedEntries++
 		c.dirty.Store(true)
 	}
+}
+
+// resetWriteAllowance requires a completed, within-budget observation; partial
+// deletion or lock failure cannot authorize another burst of optional writes.
+// The caller holds writeMu so no same-instance write can escape the accounting.
+func (c *Cache) resetWriteAllowance(receipt MaintenanceReceipt) bool {
+	if !receipt.Complete || (receipt.Verdict != VerdictWithinLimits && receipt.Verdict != VerdictPruned) {
+		return false
+	}
+	c.unmaintainedBytes = 0
+	c.unmaintainedEntries = 0
+	return true
 }
 
 // MaintenanceDefaults resolves the documented retention settings. Invalid or
@@ -332,10 +384,16 @@ func Maintain(root string, opts MaintenanceOptions) MaintenanceReceipt {
 // error or receipt: cache maintenance accelerates and bounds disk use but never gates
 // tokenization. Operators use the package Maintain function for a receipt.
 func (c *Cache) Maintain() {
-	if c == nil || !c.dirty.Swap(false) {
+	if c == nil {
+		return
+	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	if !c.dirty.Swap(false) {
 		return
 	}
 	receipt := c.maintain(MaintenanceDefaults(), time.Now(), os.Remove)
+	c.resetWriteAllowance(receipt)
 	if receipt.Verdict == VerdictLockBusy || receipt.Verdict == VerdictPartial || receipt.Verdict == VerdictError {
 		c.dirty.Store(true)
 	}
