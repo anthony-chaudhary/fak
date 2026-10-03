@@ -97,7 +97,7 @@
                             "type":  "local"
                         }
             },
-    "model":  "hive-ai/deepseek-ai/DeepSeek-V4.1-Flash",
+    "model":  "fak-router/deepseek-ai/DeepSeek-V4.1-Flash",
     "permission":  {
                        "dos*":  "allow",
                        "dos_*":  "allow",
@@ -138,7 +138,50 @@
                                  "options":  {
                                                  "baseURL":  "http://127.0.0.1:8080/v1"
                                              }
-                             }
+                             },
+                     "fak-router":  {
+                                        "models":  {
+                                                       "deepseek-ai/DeepSeek-V4.1-Flash":  {
+                                                                                                  "limit":  {
+                                                                                                                "context":  1048576,
+                                                                                                                "output":  131072
+                                                                                                            },
+                                                                                                  "name":  "DeepSeek 4.1 Flash (via fak router)"
+                                                                                              },
+                                                       "space-bunny-free":  {
+                                                                                "limit":  {
+                                                                                              "context":  1048576,
+                                                                                              "output":  524288
+                                                                                          },
+                                                                                "name":  "Space Bunny Free (via fak router)"
+                                                                            }
+                                                   },
+                                        "name":  "FAK Router (routing mode)",
+                                        "npm":  "@ai-sdk/openai-compatible",
+                                        "options":  {
+                                                        "apiKey":  "fak-local",
+                                                        "baseURL":  "http://127.0.0.1:18101/v1",
+                                                        "timeout":  1800000
+                                                    }
+                                    },
+                     "hive-ai":  {
+                                     "models":  {
+                                                    "deepseek-ai/DeepSeek-V4.1-Flash":  {
+                                                                                               "limit":  {
+                                                                                                             "context":  1048576,
+                                                                                                             "output":  131072
+                                                                                                         },
+                                                                                               "name":  "DeepSeek 4.1 Flash (via fak router)"
+                                                                                           }
+                                                },
+                                     "name":  "Hive AI via fak router",
+                                     "npm":  "@ai-sdk/openai-compatible",
+                                     "options":  {
+                                                     "apiKey":  "fak-local",
+                                                     "baseURL":  "http://127.0.0.1:18101/v1",
+                                                     "timeout":  1800000
+                                                 }
+                                 }
                  },
     "share":  "disabled",
     "skills":  {
@@ -146,7 +189,7 @@
                                  ".agents/skills"
                              ]
                },
-    "small_model":  "hive-ai/deepseek-ai/DeepSeek-V4.1-Flash",
+    "small_model":  "fak-router/deepseek-ai/DeepSeek-V4.1-Flash",
     "snapshot":  false,
     "subagent_depth":  2
 }
