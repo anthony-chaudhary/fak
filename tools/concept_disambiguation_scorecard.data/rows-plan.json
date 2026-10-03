@@ -111,6 +111,22 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "plan-sessionresidency",
+      "canonical": "SessionResidencyPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The complete enforced resident footprint for a native serve - weights + aggregate per-session KV/recurrent state for the enforced simultaneous-session bound + per-cohort scratch - preserved with class breakdown so admission can refuse before a loader when weights fit but the full enrolled state envelope does not.",
+      "distinction": "A classed MEMORY-BUDGET envelope for admission (weights + MaxSessions * per-session state + cohort scratch) - NOT the planner's chosen resident view (Plan (planner)) and NOT memq's static pre-execution explain output (Plan (memq)).",
+      "distinct_from": ["plan-planner", "plan-memq"],
+      "aliases": [],
+      "grounding": "SessionResidencyPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }
