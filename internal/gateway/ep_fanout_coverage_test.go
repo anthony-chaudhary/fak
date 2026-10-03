@@ -276,8 +276,13 @@ var epFanoutExemptRoutes = map[string]string{
 	"/mcp":                      epExemptNoDecode,
 	"/healthz":                  epExemptNoDecode,
 	"/metrics":                  epExemptNoDecode,
-	"/debug/vars":               epExemptNoDecode,
-	"/debug/guard-audit":        epExemptNoDecode,
+	// The engine introspection pair reads the live admission counters and the
+	// KV-prefix tap; it reaches no planner and issues no generation, so there
+	// are no follower ranks to keep in step.
+	"/props":             epExemptNoDecode,
+	"/slots":             epExemptNoDecode,
+	"/debug/vars":        epExemptNoDecode,
+	"/debug/guard-audit": epExemptNoDecode,
 }
 
 // epFanoutCoveredPatterns is the set of routeTable() patterns epFanoutProbes exercises.

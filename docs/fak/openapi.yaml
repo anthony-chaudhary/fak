@@ -2500,6 +2500,63 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /props:
+    get:
+      tags: [Operational]
+      summary: Engine self-description (llama-server shaped)
+      description: >-
+        The fak gateway's own description of the engine it is serving, projected
+        from the same live state `GET /metrics` renders — never a second source
+        of truth. `total_slots` is the live admission running-set cap
+        (`AdmissionPolicy.MaxNumSeqs`), read from the controller that gates every
+        served turn, and is OMITTED when no admission controller is installed (a
+        pure-proxy gateway has no in-kernel running set to cap; an absent key
+        means "unreported", which is not the same claim as zero).
+        `default_generation_settings.n_ctx` is the loaded model's declared
+        context window — the same number `GET /v1/models` publishes as
+        `context_length` — and is omitted when the engine declared none.
+        `build_info` mirrors the live label set of `fak_gateway_build_info`.
+        `endpoint_slots` / `endpoint_metrics` are read off this process's own
+        route table, so the claim cannot drift from what is served. The `fak_*`
+        fields restate the same values under names a consumer that only knows
+        the llama-server shape cannot mistake for capability claims.
+      responses:
+        '200':
+          description: The engine self-description.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServingProps' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /slots:
+    get:
+      tags: [Operational]
+      summary: Resident KV-prefix accounting (llama-server shaped)
+      description: >-
+        The fak-native per-slot KV state, read from the same `cacheobs` tap the
+        `fak_gateway_kv_prefix_*` families render on `GET /metrics`. Exactly ONE
+        entry is returned, and that is an architectural fact rather than a
+        shortcut: fak's in-kernel path serves every session from a single
+        resident radix KV prefix, so there is no per-session slot allocation to
+        enumerate (a llama.cpp build with `--parallel N` reports N independent
+        per-slot contexts). The `n_prompt_tokens*` counters are
+        PROCESS-LIFETIME TOTALS over served in-kernel turns, not per-request
+        counters; `fak_scope` states this on the wire and `fak_source` names the
+        `fak_gateway_kv_prefix_*` family each mirrors, so every value is
+        auditable against the scrape. On a pure-proxy workload nothing feeds the
+        tap and each counter is a truthful zero.
+      responses:
+        '200':
+          description: The resident KV-prefix state.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ServingSlot' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /debug/vars:
     get:
       tags: [Operational]
@@ -3606,6 +3663,104 @@ components:
             ID (and local alias) in-kernel and other model IDs upstream; unknown
             denotes a nil or unrecognized planner. Independent of engine; a planner
             classification alone does not guarantee per-request quality or readiness.
+
+    ServingProps:
+      type: object
+      description: >-
+        The gateway's own description of the engine it serves, read from the same
+        live state GET /metrics renders.
+      properties:
+        total_slots:
+          type: integer
+          description: >-
+            The live admission running-set cap (AdmissionPolicy.MaxNumSeqs) — the
+            real bound on concurrently admitted requests. OMITTED when no
+            admission controller is installed, which is the pure-proxy shape.
+            NEVER a constant and never a fabricated zero.
+          example: 256
+        fak_total_slots_source: { type: string }
+        default_generation_settings:
+          type: object
+          description: >-
+            Engine generation defaults. `n_ctx` is the loaded model's declared
+            context window, the same number GET /v1/models publishes as
+            `context_length`; omitted when the engine declared none.
+          properties:
+            n_ctx: { type: integer, example: 32768 }
+        build_info:
+          type: string
+          description: >-
+            Mirrors the live label set of the `fak_gateway_build_info` metric:
+            version, dispatch engine, serving planner, model, vDSO.
+          example: "fak/0.1.0 engine=mock planner=inkernel model=qwen vdso=true"
+        model_alias: { type: string }
+        endpoint_slots:
+          type: boolean
+          description: Whether this process serves GET /slots, read off its own route table.
+        endpoint_metrics:
+          type: boolean
+          description: Whether this process serves GET /metrics, read off its own route table.
+        fak_schema: { type: string, example: "fak.props.v1" }
+        fak_planner:
+          type: string
+          enum: [mock, proxy, replica, inkernel, dual, unknown]
+        fak_engine: { type: string }
+        fak_running_requests:
+          type: integer
+          description: The live admission running count, the value behind fak_serving_num_requests_running.
+        fak_waiting_requests:
+          type: integer
+          description: The live admission waiting count, the value behind fak_serving_num_requests_waiting.
+        fak_prefix_cache_hit_rate:
+          type: number
+          description: >-
+            The realized KV-prefix hit rate (fak_serving_prefix_cache_hit_rate).
+            OMITTED until a turn has been observed, so an idle engine reports
+            nothing rather than a phantom 0.
+        fak_in_kernel_model:
+          type: boolean
+          description: >-
+            Whether a local in-kernel model is loaded. Lets a reader tell "nothing
+            can feed the counters here" apart from "in-kernel and idle".
+
+    ServingSlot:
+      type: object
+      description: >-
+        One resident KV state. fak's in-kernel path serves every session from a
+        SINGLE shared radix KV prefix, so exactly one of these is returned —
+        this is an architectural fact, not a truncated list.
+      properties:
+        id: { type: integer, example: 0 }
+        n_ctx: { type: integer, description: The loaded model's declared context window, when it declared one. }
+        is_processing:
+          type: boolean
+          description: Whether any in-kernel turn has been observed by the KV-prefix tap.
+        n_prompt_tokens:
+          type: integer
+          description: Process-lifetime prompt (prefill) tokens observed — fak_gateway_kv_prefix_prompt_tokens_total.
+        n_prompt_tokens_processed:
+          type: integer
+          description: The same prompt-token total; every observed prompt token was processed by the prefill path.
+        n_prompt_tokens_cache:
+          type: integer
+          description: >-
+            Prompt tokens served from the cached KV prefix (the RadixAttention
+            match) — fak_gateway_kv_prefix_reused_tokens_total. A REAL measured
+            reuse count, and a process-lifetime total rather than a per-request
+            counter.
+        fak_scope:
+          type: string
+          description: States on the wire that the counters are process-lifetime totals, not per-request counters.
+        fak_slot_model:
+          type: string
+          description: States fak's shared-prefix KV topology, so one entry is never read as one concurrent request.
+        fak_source:
+          type: object
+          additionalProperties: { type: string }
+          description: Maps each counter to the fak_gateway_kv_prefix_* /metrics family it mirrors.
+        fak_in_kernel_model: { type: boolean }
+        fak_kv_prefix_turns_total: { type: integer }
+        fak_kv_prefix_reuse_ratio: { type: number }
 
     DebugVarsResponse:
       type: object

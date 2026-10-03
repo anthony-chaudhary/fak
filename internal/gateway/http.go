@@ -241,6 +241,17 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/mcp", s.handleAuthenticatedMCPHTTP},
 		{"/healthz", s.handleHealthWithAuthProof},
 		{"/metrics", s.handleMetrics},
+		// Fak-native engine introspection, projected from the SAME live state
+		// /metrics renders (see serving_props.go): /props is the engine's
+		// self-description (admission running-set cap, loaded-model context
+		// window, build label, live running/waiting/hit-rate), /slots is the
+		// resident KV-prefix accounting. Registered beside /metrics because they
+		// are the same class of read-only observability surface and take the same
+		// read-scoped auth treatment (readScopedPath below), so a consumer that
+		// speaks only the llama-server shape can observe a Fak engine instead of
+		// reading a 404 as "no engine here".
+		{"/props", s.handleProps},
+		{"/slots", s.handleSlots},
 		{"/debug/vars", s.handleDebugVars},
 		{"/debug/guard-audit", handleGuardAuditDebug},
 	}
@@ -633,7 +644,13 @@ func requestFromLAN(r *http.Request) bool {
 // surface here widens both at once, which is the intent.
 func readScopedPath(r *http.Request) bool {
 	switch r.URL.Path {
-	case "/v1/fak/features/proof", "/metrics", "/debug/vars", "/v1/fak/observation", "/v1/fak/observation/requests", "/v1/fak/arms", "/v1/fak/arms/traffic":
+	case "/v1/fak/features/proof", "/metrics", "/debug/vars", "/v1/fak/observation", "/v1/fak/observation/requests", "/v1/fak/arms", "/v1/fak/arms/traffic",
+		// /props and /slots are the llama-server-shaped engine introspection
+		// pair, served from the same live state as /metrics and carrying the
+		// same class of information: counts, ratios, and build labels. They join
+		// /metrics here so the read-scoped floor cannot drift — an engine that
+		// admits /metrics must admit the introspection that explains it.
+		"/props", "/slots":
 		return true
 	}
 	return false
