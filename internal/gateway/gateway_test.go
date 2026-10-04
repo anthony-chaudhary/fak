@@ -1483,6 +1483,7 @@ func TestChatProxyOpenAICompatibleStreamModeStreamsAdjudicatedCalls(t *testing.T
 			{"type": "function", "function": map[string]any{"name": "transform_stream", "parameters": map[string]any{"type": "object"}}},
 		},
 		"stream": true,
+		"stream_options": map[string]any{"include_usage": true},
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -1544,6 +1545,10 @@ func TestChatProxyOpenAICompatibleStreamModeStreamsAdjudicatedCalls(t *testing.T
 	// Content streams incrementally; concatenating every content delta reproduces it.
 	var content strings.Builder
 	for _, c := range chunks {
+		if len(c.Choices) == 0 {
+			// The opted-in usage-only terminal frame has an empty choices array.
+			continue
+		}
 		content.WriteString(c.Choices[0].Delta.Content)
 	}
 	if got := content.String(); got != "checking" {
@@ -1554,6 +1559,9 @@ func TestChatProxyOpenAICompatibleStreamModeStreamsAdjudicatedCalls(t *testing.T
 	// rather than only the opening one.
 	var tools []ChatDeltaToolCall
 	for _, c := range chunks {
+		if len(c.Choices) == 0 {
+			continue
+		}
 		tools = append(tools, c.Choices[0].Delta.ToolCalls...)
 	}
 	if len(tools) != 2 {
@@ -1575,15 +1583,26 @@ func TestChatProxyOpenAICompatibleStreamModeStreamsAdjudicatedCalls(t *testing.T
 	if !sawAllow || !sawRepaired {
 		t.Fatalf("allow=%v repaired=%v tools=%+v", sawAllow, sawRepaired, tools)
 	}
-	final := chunks[len(chunks)-1]
-	if final.Choices[0].FinishReason == nil || *final.Choices[0].FinishReason != "tool_calls" {
-		t.Fatalf("final finish_reason = %+v, want tool_calls", final.Choices[0].FinishReason)
+	// The finish-bearing chunk carries finish_reason; the opted-in usage arrives in
+	// its own empty-choice terminal frame with the fak adjudications preserved on
+	// the finish chunk.
+	var finishChunk, usageChunk *ChatStreamResponse
+	for i := range chunks {
+		if len(chunks[i].Choices) > 0 && chunks[i].Choices[0].FinishReason != nil {
+			finishChunk = &chunks[i]
+		}
+		if len(chunks[i].Choices) == 0 && chunks[i].Usage != nil {
+			usageChunk = &chunks[i]
+		}
 	}
-	if final.Usage == nil || final.Usage.TotalTokens != 10 {
-		t.Fatalf("final usage = %+v, want total tokens 10", final.Usage)
+	if finishChunk == nil || *finishChunk.Choices[0].FinishReason != "tool_calls" {
+		t.Fatalf("finish chunk = %+v, want finish_reason tool_calls", finishChunk)
 	}
-	if final.Fak == nil || len(final.Fak.Adjudications) != 3 {
-		t.Fatalf("final fak adjudications = %+v, want 3", final.Fak)
+	if usageChunk == nil || usageChunk.Usage.TotalTokens != 10 {
+		t.Fatalf("usage chunk = %+v, want total tokens 10", usageChunk)
+	}
+	if finishChunk.Fak == nil || len(finishChunk.Fak.Adjudications) != 3 {
+		t.Fatalf("final fak adjudications = %+v, want 3", finishChunk.Fak)
 	}
 }
 

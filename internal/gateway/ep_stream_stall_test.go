@@ -262,10 +262,11 @@ func TestEPStreamingEmitsFirstSSEChunkBeforeCollectiveJoin(t *testing.T) {
 	t.Cleanup(release)
 
 	body, err := json.Marshal(map[string]any{
-		"model":      "test-model",
-		"messages":   []map[string]string{{"role": "user", "content": "decode across ranks"}},
-		"stream":     true,
-		"max_tokens": 16,
+		"model":          "test-model",
+		"messages":       []map[string]string{{"role": "user", "content": "decode across ranks"}},
+		"stream":         true,
+		"max_tokens":     16,
+		"stream_options": map[string]any{"include_usage": true},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -328,12 +329,16 @@ func TestEPStreamingEmitsFirstSSEChunkBeforeCollectiveJoin(t *testing.T) {
 		if chunk.Model != "test-model" {
 			t.Fatalf("chunk model = %q, want a constant %q across the stream", chunk.Model, "test-model")
 		}
+		if chunk.Usage != nil && chunk.Usage.TotalTokens == 10 {
+			sawUsage = true
+		}
+		if len(chunk.Choices) == 0 {
+			// The opted-in usage-only terminal frame has an empty choices array.
+			continue
+		}
 		content.WriteString(chunk.Choices[0].Delta.Content)
 		if chunk.Choices[0].FinishReason != nil {
 			finish = *chunk.Choices[0].FinishReason
-		}
-		if chunk.Usage != nil && chunk.Usage.TotalTokens == 10 {
-			sawUsage = true
 		}
 	}
 	if got := content.String(); got != planner.content {

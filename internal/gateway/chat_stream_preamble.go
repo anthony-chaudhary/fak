@@ -62,26 +62,39 @@ import (
 // text-completion wire shares (#5514); only the chunk shape below is chat's own.
 type chatStreamWriter struct {
 	sseStreamWriter
+	// includeUsage is the client's stream_options.include_usage opt-in, captured once
+	// at construction from the SAME req.DeclaredStreamUsage() reader the live emitter
+	// uses, so the two native emitters can never disagree. When true every non-usage
+	// chunk — including the opening role chunk — carries `usage:null`, and the turn is
+	// closed by exactly one usage-only chunk; when false the field is never written.
+	includeUsage bool
 }
 
 // newChatStreamWriter mints the stream identity (id + created) at REQUEST time rather
 // than at completion time, because the opening chunk now leaves before the turn
 // exists and every later chunk has to agree with it. model is the request model (see
-// the file comment on the #82 seam).
-func newChatStreamWriter(w http.ResponseWriter, model string) *chatStreamWriter {
-	return &chatStreamWriter{sseStreamWriter: newSSEStreamWriter(w, "chatcmpl-fak-", model)}
+// the file comment on the #82 seam). includeUsage is the client's stream_options
+// opt-in (see the field comment).
+func newChatStreamWriter(w http.ResponseWriter, model string, includeUsage bool) *chatStreamWriter {
+	return &chatStreamWriter{
+		sseStreamWriter: newSSEStreamWriter(w, "chatcmpl-fak-", model),
+		includeUsage:    includeUsage,
+	}
 }
 
 // chunk builds one OpenAI `chat.completion.chunk` carrying this stream's identity.
 // Index is 0 because the gateway normalizes every served turn to a single choice.
+// UsageEmitted marks a non-usage chunk of an opted-in stream so MarshalJSON renders
+// `usage:null`; a non-opted stream leaves it false and omits the field entirely.
 func (p *chatStreamWriter) chunk(d ChatDelta, finish *string, usage *agent.Usage) ChatStreamResponse {
 	return ChatStreamResponse{
-		ID:      p.id,
-		Object:  "chat.completion.chunk",
-		Created: p.created,
-		Model:   p.model,
-		Choices: []ChatStreamChoice{{Index: 0, Delta: d, FinishReason: finish}},
-		Usage:   usage,
+		ID:           p.id,
+		Object:       "chat.completion.chunk",
+		Created:      p.created,
+		Model:        p.model,
+		Choices:      []ChatStreamChoice{{Index: 0, Delta: d, FinishReason: finish}},
+		Usage:        usage,
+		UsageEmitted: p.includeUsage && usage == nil,
 	}
 }
 
@@ -100,8 +113,13 @@ func (p *chatStreamWriter) open() error {
 
 // writeChatCompletionStream emits the buffered, adjudicated turn onto an ALREADY-OPENED
 // chat SSE stream: the incremental content deltas, then the surviving tool calls in
-// their own delta, then the terminal finish/usage chunk and [DONE]. The opening role
-// chunk left in open(), before the decode — that split is the whole point of #5399.
+// their own delta, then the terminal finish chunk, the optional opted-in usage-only
+// chunk, and [DONE]. The opening role chunk left in open(), before the decode — that
+// split is the whole point of #5399.
+//
+// The client's stream_options.include_usage opt-in was captured on the writer at
+// construction, so every chunk carries the correct `usage:null` / omitted / usage
+// tri-state and the terminal usage-only frame is emitted only when requested.
 func writeChatCompletionStream(p *chatStreamWriter, resp ChatResponse) {
 	if err := p.open(); err != nil {
 		return
@@ -112,6 +130,8 @@ func writeChatCompletionStream(p *chatStreamWriter, resp ChatResponse) {
 	// SSE event per fragment, the way a real OpenAI stream delivers tokens — rather
 	// than collapsing the whole reply into a single delta. segmentContent preserves
 	// every byte, so concatenating the content deltas reproduces the reply exactly.
+	// Every non-usage chunk of an opted-in stream nulls `usage` (UsageEmitted); a
+	// non-opted stream sets nothing, so the field is omitted entirely.
 	for _, seg := range segmentContent(choice.Message.Content) {
 		if err := writeSSEData(p.w, p.chunk(ChatDelta{Content: seg}, nil, nil)); err != nil {
 			return
@@ -127,11 +147,22 @@ func writeChatCompletionStream(p *chatStreamWriter, resp ChatResponse) {
 		}
 	}
 
+	// The finish chunk never carries usage: when the option is off the usage field is
+	// omitted, and when it is on the field is null here and the object rides its own
+	// terminal frame below (the OpenAI stream_options.include_usage contract).
 	finish := choice.FinishReason
-	final := p.chunk(ChatDelta{}, &finish, &resp.Usage)
+	final := p.chunk(ChatDelta{}, &finish, nil)
 	final.Fak = resp.Fak
 	if err := writeSSEData(p.w, final); err != nil {
 		return
+	}
+	// Opted-in usage arrives in its OWN terminal frame with an EMPTY choices array,
+	// never attached to the finish-bearing choice — the same shape streamChatLive emits.
+	if p.includeUsage {
+		usage := resp.Usage
+		if err := writeSSEData(p.w, usageOnlyChunk(p.id, p.model, p.created, &usage)); err != nil {
+			return
+		}
 	}
 	writeSSEDone(p.w, p.flusher)
 }

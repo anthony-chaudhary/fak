@@ -52,9 +52,10 @@ func TestChatProxyStreamsUpstreamContentLive(t *testing.T) {
 	defer ts.Close()
 
 	reqBody, _ := json.Marshal(map[string]any{
-		"model":    "x:model",
-		"messages": []map[string]string{{"role": "user", "content": "are you there"}},
-		"stream":   true,
+		"model":          "x:model",
+		"messages":       []map[string]string{{"role": "user", "content": "are you there"}},
+		"stream":         true,
+		"stream_options": map[string]any{"include_usage": true},
 	})
 	httpResp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", bytes.NewReader(reqBody))
 	if err != nil {
@@ -89,12 +90,16 @@ func TestChatProxyStreamsUpstreamContentLive(t *testing.T) {
 	var finish string
 	var usage bool
 	for _, c := range chunks {
+		if c.Usage != nil && c.Usage.PromptTokens == 4 {
+			usage = true
+		}
+		if len(c.Choices) == 0 {
+			// The opted-in usage-only terminal frame carries an empty choices array.
+			continue
+		}
 		content.WriteString(c.Choices[0].Delta.Content)
 		if c.Choices[0].FinishReason != nil {
 			finish = *c.Choices[0].FinishReason
-		}
-		if c.Usage != nil && c.Usage.PromptTokens == 4 {
-			usage = true
 		}
 		if len(c.Choices[0].Delta.ToolCalls) != 0 {
 			t.Fatalf("unexpected tool call in a no-tools stream: %+v", c.Choices[0].Delta.ToolCalls)

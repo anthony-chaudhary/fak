@@ -419,6 +419,10 @@ type ChatRequest struct {
 	Regex                 json.RawMessage `json:"regex,omitempty"`
 	EBNF                  json.RawMessage `json:"ebnf,omitempty"`
 	Stream                bool            `json:"stream,omitempty"`
+	// StreamOptions is the OpenAI chat `stream_options` carrier. The gateway honors
+	// exactly one member, include_usage; arbitrary unknown options are NOT forwarded
+	// (this path is not a proxy pass-through). See DeclaredStreamUsage.
+	StreamOptions *ChatStreamOptions `json:"stream_options,omitempty"`
 	// FakDecodeTrace opts into the fak-native token-commit trace. The gateway
 	// accepts it only for a buffered request routed to a capable native planner.
 	FakDecodeTrace bool `json:"fak_decode_trace,omitempty"`
@@ -436,6 +440,26 @@ type FakRequestExt struct {
 	// InputTrigger is validated against the real message envelope before the
 	// gateway creates the immutable value used by request routing.
 	InputTrigger *inputtrigger.Explicit `json:"input_trigger,omitempty"`
+}
+
+// ChatStreamOptions is the typed OpenAI `stream_options` request carrier. Only
+// include_usage is modeled; the struct is deliberately narrow so an arbitrary
+// unknown option is never forwarded or silently honored (no proxy pass-through).
+type ChatStreamOptions struct {
+	// IncludeUsage mirrors OpenAI's stream_options.include_usage: when true the
+	// native chat SSE emits a dedicated terminal usage chunk with an EMPTY choices
+	// array and every earlier chunk carries `usage:null`; when omitted or false the
+	// usage field is absent and no usage-only chunk is emitted. The pointer carries
+	// the three-state distinction (absent / false / true) the wire contract needs.
+	IncludeUsage bool `json:"include_usage,omitempty"`
+}
+
+// DeclaredStreamUsage reports whether the client explicitly asked this streamed
+// chat response to carry token usage (stream_options.include_usage=true). It is the
+// single reader of the tri-state carrier, so the live and buffered native emitters
+// can never disagree about the opt-in.
+func (r ChatRequest) DeclaredStreamUsage() bool {
+	return r.StreamOptions != nil && r.StreamOptions.IncludeUsage
 }
 
 func (r ChatRequest) GuidedDecodeFields() map[string]json.RawMessage {
@@ -516,8 +540,51 @@ type ChatStreamResponse struct {
 	Created int64              `json:"created"`
 	Model   string             `json:"model"`
 	Choices []ChatStreamChoice `json:"choices"`
+	// Usage is the OpenAI streaming usage field, which is TRI-STATE:
+	//
+	//   - nil + UsageEmitted=false  → the key is OMITTED (option not requested)
+	//   - nil + UsageEmitted=true   → `"usage":null` (option requested, non-final chunk)
+	//   - non-nil                    → the usage object (the terminal usage-only chunk)
+	//
+	// A plain `*agent.Usage` with omitempty cannot express the middle state (nil
+	// omits, never nulls), so the wire shape is produced by MarshalJSON below.
+	Usage        *agent.Usage
+	UsageEmitted bool
+	Fak          *FakExt `json:"fak,omitempty"`
+}
+
+// chatStreamResponseNoUsage is a marshal-view of ChatStreamResponse that hoists the
+// tri-state Usage handling out of the concrete struct: a nil Usage with
+// UsageEmitted=true becomes an explicit JSON null, a nil Usage with
+// UsageEmitted=false is omitted, and a non-nil Usage is emitted verbatim.
+type chatStreamResponseNoUsage struct {
+	ID      string             `json:"id"`
+	Object  string             `json:"object"`
+	Created int64              `json:"created"`
+	Model   string             `json:"model"`
+	Choices []ChatStreamChoice `json:"choices"`
 	Usage   *agent.Usage       `json:"usage,omitempty"`
 	Fak     *FakExt            `json:"fak,omitempty"`
+}
+
+// MarshalJSON renders the streaming chunk with the OpenAI tri-state `usage` field:
+// an opted-in non-final chunk nulls the field (UsageEmitted), the terminal usage
+// chunk carries the object, and an un-opted stream omits the field entirely.
+func (c ChatStreamResponse) MarshalJSON() ([]byte, error) {
+	if c.UsageEmitted && c.Usage == nil {
+		type withNull struct {
+			chatStreamResponseNoUsage
+			Usage *agent.Usage `json:"usage"`
+		}
+		return json.Marshal(withNull{chatStreamResponseNoUsage: chatStreamResponseNoUsage{
+			ID: c.ID, Object: c.Object, Created: c.Created, Model: c.Model,
+			Choices: c.Choices, Fak: c.Fak,
+		}})
+	}
+	return json.Marshal(chatStreamResponseNoUsage{
+		ID: c.ID, Object: c.Object, Created: c.Created, Model: c.Model,
+		Choices: c.Choices, Usage: c.Usage, Fak: c.Fak,
+	})
 }
 
 // ChatStreamChoice is one streamed completion choice.
