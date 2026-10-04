@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // hotHost lays out a synthetic host: <root>/fak, <root>/tools/.bin/fak, <home>/bin/fak,
@@ -349,5 +350,79 @@ func TestPinSkewDetectsAnUnreviewedOrMovedScheduledBinary(t *testing.T) {
 	// to resolve, which is how a stale Go-bin copy ended up certifying evidence.
 	if skew, why := PinSkew(Pin{}, clean); !skew || !strings.Contains(why, "pinned no binary provenance") {
 		t.Errorf("an unpinned scheduled task must report skew; got skew=%v why=%q", skew, why)
+	}
+}
+
+func writeLocalProgramsBinary(t *testing.T, root, build string, mod time.Time) string {
+	t.Helper()
+	p := filepath.Join(root, "Programs", "fak", build, "bin", "fak"+binExt())
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(build), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(p, mod, mod); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func localProgramsRows(copies []HotCopy) []HotCopy {
+	var out []HotCopy
+	for _, c := range copies {
+		if c.Role == RoleLocalPrograms {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func TestRolesLocalProgramsPicksNewestInstallAndConvergesIt(t *testing.T) {
+	appData := t.TempDir()
+	base := time.Now().Add(-48 * time.Hour)
+	writeLocalProgramsBinary(t, appData, "aaaa1111-bbbb2222", base)
+	newest := writeLocalProgramsBinary(t, appData, "0000cccc-dddd3333", base.Add(time.Hour))
+	if err := os.MkdirAll(filepath.Join(appData, "Programs", "fak", "ffff9999-noexe", "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	copies := Roles(Host{LocalAppData: appData})
+	rows := localProgramsRows(copies)
+	if len(rows) != 1 {
+		t.Fatalf("localprograms rows = %d, want exactly 1: %+v", len(rows), copies)
+	}
+	if !rows[0].Present || !strings.EqualFold(rows[0].Path, newest) {
+		t.Fatalf("localprograms row = %+v, want present newest-mtime install %q", rows[0], newest)
+	}
+	if !Convergeable(RoleLocalPrograms) {
+		t.Fatal("RoleLocalPrograms must be convergeable so self-update refreshes it in place")
+	}
+	targets := ConvergeTargets(copies, "")
+	if len(targets) != 1 || !strings.EqualFold(targets[0], newest) {
+		t.Fatalf("ConvergeTargets = %v, want only %q", targets, newest)
+	}
+}
+
+func TestRolesLocalProgramsTieBreaksByDirectoryName(t *testing.T) {
+	appData := t.TempDir()
+	mod := time.Now().Add(-time.Hour).Truncate(time.Second)
+	writeLocalProgramsBinary(t, appData, "1111aaaa-2222bbbb", mod)
+	want := writeLocalProgramsBinary(t, appData, "9999aaaa-2222bbbb", mod)
+	rows := localProgramsRows(Roles(Host{LocalAppData: appData}))
+	if len(rows) != 1 || !strings.EqualFold(rows[0].Path, want) {
+		t.Fatalf("localprograms rows = %+v, want %q", rows, want)
+	}
+}
+
+func TestRolesLocalProgramsAbsentWithoutInstallTree(t *testing.T) {
+	for name, appData := range map[string]string{
+		"unset":        "",
+		"missing tree": t.TempDir(),
+		"nonexistent":  filepath.Join(t.TempDir(), "gone"),
+	} {
+		if rows := localProgramsRows(Roles(Host{LocalAppData: appData})); len(rows) != 0 {
+			t.Errorf("%s: localprograms rows = %+v, want none", name, rows)
+		}
 	}
 }

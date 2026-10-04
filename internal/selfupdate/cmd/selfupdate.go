@@ -383,7 +383,13 @@ func selfUpdateFetchOrigin(ctx context.Context, runner selfinstall.Runner, repoR
 func selfUpdateHost(repoRoot string) selfinstall.Host {
 	exe, _ := os.Executable()
 	home, _ := os.UserHomeDir()
-	return selfinstall.Host{RepoRoot: repoRoot, Home: home, Scheduled: exe}
+	h := selfinstall.Host{RepoRoot: repoRoot, Home: home, Scheduled: exe}
+	// Derived from home, not the LOCALAPPDATA variable, so a run that isolates the home dir can
+	// never reach the real per-user install.
+	if runtime.GOOS == "windows" && home != "" {
+		h.LocalAppData = filepath.Join(home, "AppData", "Local")
+	}
+	return h
 }
 
 // selfUpdateProbe reads one deployed binary's VCS provenance from its path. This includes our

@@ -55,15 +55,22 @@ const (
 	// RoleScheduled is the binary a scheduled task pinned at REGISTRATION time and re-executes
 	// every tick. It is frozen at whatever was on disk that day unless something converges it.
 	RoleScheduled Role = "scheduled"
+	// RoleLocalPrograms is the newest <LocalAppData>/Programs/fak/<build>/bin/fak[.exe]: a
+	// per-user Windows install that prepends itself to the user PATH. Nothing else rebuilds it,
+	// so once installed it shadows every fresher copy unless self-update converges it in place.
+	RoleLocalPrograms Role = "localprograms"
 )
 
-// Host roots the role table. Every path is derived from these three inputs and nothing else —
+// Host roots the role table. Every path is derived from these inputs and nothing else —
 // in particular never from `exec.LookPath("fak")`, so "which binary is role X?" has one answer
 // that does not depend on the environment a tick happened to inherit.
 type Host struct {
 	RepoRoot  string // the checkout (RoleGate, RoleWorker)
 	Home      string // the user home dir (RolePath, RoleGoBin)
 	Scheduled string // the invoking/scheduled binary, usually os.Executable() (RoleScheduled)
+	// LocalAppData is the per-user Windows app-data root (RoleLocalPrograms). Callers set it only
+	// on Windows, so the role is absent elsewhere.
+	LocalAppData string
 }
 
 // HotCopy is one role's canonical path plus what the file at that path actually is. A copy that
@@ -100,6 +107,7 @@ func Roles(h Host) []HotCopy {
 		{RolePath, under(h.Home, "bin", exe)},
 		{RoleGoBin, under(h.Home, "go", "bin", exe)},
 		{RoleScheduled, strings.TrimSpace(h.Scheduled)},
+		{RoleLocalPrograms, newestLocalProgramsBinary(h.LocalAppData, exe)},
 	}
 	out := make([]HotCopy, 0, len(plan))
 	for _, p := range plan {
@@ -302,7 +310,7 @@ func (a Audit) Lines() []string {
 // the durable fix, since converging it would only paper over the next hand-build.
 func Convergeable(r Role) bool {
 	switch r {
-	case RoleWorker, RolePath, RoleGoBin, RoleScheduled:
+	case RoleWorker, RolePath, RoleGoBin, RoleScheduled, RoleLocalPrograms:
 		return true
 	default:
 		return false
@@ -460,6 +468,38 @@ func under(base string, parts ...string) string {
 		return ""
 	}
 	return filepath.Join(append([]string{base}, parts...)...)
+}
+
+// newestLocalProgramsBinary picks the <root>/Programs/fak/*/bin/<exe> with the newest mtime,
+// breaking ties by the greater directory name so the choice is deterministic. Each install lands
+// in its own build-named directory and the latest one is the one an installer put on PATH, so the
+// newest is the live shadowing copy. A missing tree yields "" and therefore no role row.
+func newestLocalProgramsBinary(root, exe string) string {
+	base := under(root, "Programs", "fak")
+	if base == "" {
+		return ""
+	}
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return ""
+	}
+	best, bestName := "", ""
+	var bestMod int64
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		p := filepath.Join(base, e.Name(), "bin", exe)
+		st, serr := os.Stat(p)
+		if serr != nil || st.IsDir() {
+			continue
+		}
+		mod := st.ModTime().UnixNano()
+		if best == "" || mod > bestMod || (mod == bestMod && e.Name() > bestName) {
+			best, bestName, bestMod = p, e.Name(), mod
+		}
+	}
+	return best
 }
 
 func binExt() string {
