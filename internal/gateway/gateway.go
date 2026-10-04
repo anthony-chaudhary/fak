@@ -808,6 +808,14 @@ func newEngineCacheClient(cfg Config) (*enginecache.Client, error) {
 	}, nil
 }
 
+// HasProxyUpstream reports whether the gateway will select an upstream planner.
+// It shares the planner's endpoint collection rules; provider validation remains
+// part of planner construction.
+func HasProxyUpstream(cfg Config) (bool, error) {
+	urls, err := proxyBaseURLs(cfg)
+	return len(urls) != 0, err
+}
+
 func proxyBaseURLs(cfg Config) ([]string, error) {
 	urls := make([]string, 0, 1+len(cfg.ReplicaBaseURLs))
 	if base := strings.TrimSpace(cfg.BaseURL); base != "" {

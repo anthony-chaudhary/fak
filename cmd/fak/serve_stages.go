@@ -365,7 +365,69 @@ func runServePolicyCheck(policyPath string) {
 // resolveCompute resolves the decode compute plane before any weights load: the
 // optional device --backend, the Apple-Silicon Metal seam, the expert-/tensor-
 // parallel rank plan with its device-collective gate, and the CUDA-graph flip.
+// proxyOnlyCompute separates upstream planning from this process's model execution.
+// A local source or an explicit compute choice keeps the existing device admission.
+func (rt *serveRuntime) proxyOnlyCompute(sf *serveFlags, getenv func(string) string) (bool, error) {
+	if rt == nil || sf == nil || getenv == nil || sf.baseURL == nil || sf.ggufPath == nil || sf.tokPath == nil || sf.engineID == nil {
+		return false, errors.New("serve: proxy compute selection lacks parsed flags")
+	}
+	proxy, err := gateway.HasProxyUpstream(gateway.Config{BaseURL: *sf.baseURL, ReplicaBaseURLs: sf.replicaBaseURLs.Values()})
+	if err != nil || !proxy {
+		return false, err
+	}
+	if *sf.ggufPath != "" || *sf.tokPath != "" || rt.inKernelModel != nil || rt.inKernelTok != nil || rt.chatBackend != nil || rt.useMetal || rt.requireDeviceExecution || rt.ep.sharded || strings.TrimSpace(*sf.engineID) != "mock" {
+		return false, nil
+	}
+	for _, name := range []string{
+		"backend", "metal", "gpu-layers", "native-gpu-layers", "cpu-offload-experts", "n-cpu-moe",
+		"expert-parallel", "tensor-parallel", "cuda-graph", "native-context-tokens", "native-admission-token-budget",
+		"native-compact-history-budget", nativeQwenQ4KPrefillChunkFlag, "native-qwen35-metal-gdn-sequence",
+		"native-q4k-gateup-slab", "kv-precision", "native-prefix-profile", "vulkan-q4k-profile", "vulkan-stage-q4k",
+	} {
+		if sf.isExplicitFlag(name) {
+			return false, nil
+		}
+	}
+	for _, name := range []string{"FAK_BACKEND", "FAK_METAL", agent.ExpertSpillEnv, "FAK_EP_RANK", "FAK_EP_COORD_ADDR", "FAK_CUDA_GRAPH", "FAK_UP_KV_PRECISION"} {
+		if strings.TrimSpace(getenv(name)) != "" {
+			return false, nil
+		}
+	}
+	// Parsed values may also come from the config file rather than explicit flags.
+	if sf.backendName == nil || sf.metal == nil || sf.cpuOffloadExperts == nil || sf.nCPUMoE == nil || sf.expertParallel == nil || sf.tensorParallel == nil || sf.cudaGraph == nil || sf.nativeContextTokens == nil || sf.nativeGPULayers == nil {
+		return false, errors.New("serve: proxy compute selection lacks compute flags")
+	}
+	if strings.TrimSpace(*sf.backendName) != "" || *sf.metal || *sf.cpuOffloadExperts || strings.TrimSpace(*sf.nCPUMoE) != "" || *sf.expertParallel != 1 || *sf.tensorParallel != 1 || *sf.cudaGraph || *sf.nativeContextTokens != 0 || *sf.nativeGPULayers != 0 {
+		return false, nil
+	}
+	controls := []*bool{sf.nativeQwen35MetalGDNSequence, sf.nativeQ4KGateUpOutputSlab, sf.vulkanQ4KProfile, sf.vulkanStageQ4K}
+	for _, value := range controls {
+		if value == nil {
+			return false, errors.New("serve: proxy compute selection lacks native controls")
+		}
+		if *value {
+			return false, nil
+		}
+	}
+	if sf.kvPrecision == nil || sf.nativePrefixProfile == nil || sf.nativeQwenQ4KPrefillChunk == nil || sf.nativeCompactHistoryBudget == nil || sf.nativeAdmissionTokenBudget == nil {
+		return false, errors.New("serve: proxy compute selection lacks native limits")
+	}
+	if strings.TrimSpace(*sf.kvPrecision) != "" || strings.TrimSpace(*sf.nativePrefixProfile) != "" || *sf.nativeQwenQ4KPrefillChunk != defaultNativeQwenQ4KPrefillChunk || *sf.nativeCompactHistoryBudget != 0 || *sf.nativeAdmissionTokenBudget != gateway.DefaultAdmissionPolicy().TokenBudget {
+		return false, nil
+	}
+	return true, nil
+}
+
 func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
+	proxyOnly, err := rt.proxyOnlyCompute(sf, os.Getenv)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fak serve:", err)
+		os.Exit(2)
+	}
+	if proxyOnly {
+		rt.addStartupMessage(newServeStartupMessage("serve", "compute-backend", "info", "upstream planner owns model execution"))
+		return
+	}
 	// Resolve the optional in-kernel chat decode backend BEFORE eager model loading, so
 	// a known device can refuse an oversize GGUF from its header instead of OOMing during
 	// the load. Lookup (not Pick) keeps typos fail-loud rather than silently degrading to CPU.
