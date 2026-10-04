@@ -1,6 +1,10 @@
 package model
 
-import "sync/atomic"
+import (
+	"sync/atomic"
+
+	"github.com/anthony-chaudhary/fak/internal/model/ffn"
+)
 
 // moe_host_batch.go — lever 2: batch the GLM MoE host-expert dispatch.
 //
@@ -178,10 +182,13 @@ func batchedExpertDelta(cfg Config, picks []routePick, gate, up []*q4kTensor, do
 	q4kBatchRows(gate, xn, MI, gOut)
 	q4kBatchRows(up, xn, MI, uOut)
 	swig := make([][]float32, K)
+	activate := func(v float32) float32 { return act(v, cfg) }
 	for i := 0; i < K; i++ {
 		g, u := gOut[i], uOut[i]
-		for j := 0; j < MI; j++ {
-			g[j] = act(g[j], cfg) * u[j]
+		// gOut rows are always MI = cfg.expertIntermediate() > 0 wide, so ApplyInPlace
+		// admits every row; a pass-through error here is a programming fault, not input.
+		if err := ffn.ApplyInPlace(g, u, activate); err != nil {
+			panic(err)
 		}
 		swig[i] = g
 	}
