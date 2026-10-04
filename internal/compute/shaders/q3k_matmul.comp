@@ -1,0 +1,114 @@
+#version 450
+
+// q3k_matmul.comp - portable GGML Q3_K matrix multiplication.
+//
+// Y[P,outDim] = X[P,inDim] * W[outDim,inDim]^T. W remains in the checkpoint's
+// packed Q3_K representation: every 256 weights occupy 110 bytes (32 high-bit
+// mask bytes, 64 packed 2-bit low-code bytes, 12 packed 6-bit sub-scale bytes,
+// and a 2-byte f16 super-scale d). This mirrors compute.q3kDequantSuperBlock
+// (internal/compute/quant_q3k.go), which is itself byte-for-byte
+// model.q3kDequantSuperBlock / llama.cpp dequantize_row_q3_K: per 128-weight
+// half, w = d*(scale-32)*code, with code = (low 2-bit) - 4 when the hmask bit
+// is clear.
+//
+// Q3_K is the encoding the published DeepSeek V4.1 Flash Q2_K artifact stores
+// its ffn_down_exps routed-expert slabs in (fak#13149), so this kernel is the
+// device arm the streamed-expert seam needs to stay device-only (fak#13677).
+layout(local_size_x = 64) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer Q3K { uint raw[]; };
+layout(std430, set = 0, binding = 1) readonly buffer X   { float x[]; };
+layout(std430, set = 0, binding = 2) writeonly buffer Y  { float y[]; };
+
+layout(push_constant) uniform PC {
+    int outDim;
+    int inDim;
+    int tokens;
+} pc;
+
+uint byteAt(uint offset) {
+    uint word = raw[offset >> 2u];
+    return (word >> ((offset & 3u) * 8u)) & 255u;
+}
+
+// leU32 reads a little-endian u32 at an arbitrary byte offset. The 12 scale
+// bytes are only 1-byte aligned inside the 110-byte super-block, so a plain
+// raw[] word load would fault on an unaligned index; assemble from bytes.
+uint leU32(uint offset) {
+    return byteAt(offset) | (byteAt(offset + 1u) << 8u) |
+           (byteAt(offset + 2u) << 16u) | (byteAt(offset + 3u) << 24u);
+}
+
+float halfAt(uint offset) {
+    uint bits = byteAt(offset) | (byteAt(offset + 1u) << 8u);
+    return unpackHalf2x16(bits).x;
+}
+
+// unpackQ3KScales expands the 12 packed 6-bit sub-scale bytes into 16 signed
+// 6-bit scales, byte-for-byte unpackQ3KScales (quant_q3k.go).
+void unpackQ3KScales(uint sc, out int scales[16]) {
+    uint aux0 = leU32(sc);
+    uint aux1 = leU32(sc + 4u);
+    uint aux2 = leU32(sc + 8u);
+    uint tmp = aux2;
+    uint words[4];
+    words[0] = (aux0 & 0x0f0f0f0fu) | (((tmp)        & 0x03030303u) << 4u);
+    words[1] = (aux1 & 0x0f0f0f0fu) | (((tmp >> 2u)  & 0x03030303u) << 4u);
+    words[2] = ((aux0 >> 4u) & 0x0f0f0f0fu) | (((tmp >> 4u) & 0x03030303u) << 4u);
+    words[3] = ((aux1 >> 4u) & 0x0f0f0f0fu) | (((tmp >> 6u) & 0x03030303u) << 4u);
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
+            uint b = (words[i] >> uint(8 * j)) & 0xffu;
+            // Reinterpret the byte as int8 so a scale-32 comparison matches the
+            // Go decoder's int8(scales[is]) - 32 range.
+            scales[i * 4 + j] = (b >= 128u) ? int(b) - 256 : int(b);
+        }
+    }
+}
+
+void main() {
+    uint globalIndex = gl_GlobalInvocationID.x;
+    uint outDim = uint(pc.outDim);
+    uint row = globalIndex % outDim;
+    uint token = globalIndex / outDim;
+    if (token >= uint(pc.tokens)) return;
+
+    uint blocks = uint(pc.inDim) / 256u;
+    float sum = 0.0;
+    for (uint sb = 0u; sb < blocks; ++sb) {
+        uint base = (row * blocks + sb) * 110u;
+        float d = halfAt(base + 108u);
+        uint hmBase = base;        // 32 high-bit mask bytes
+        uint qBase  = base + 32u;  // 64 packed 2-bit low-code bytes
+        uint scBase = base + 96u;  // 12 packed 6-bit sub-scale bytes
+        uint xBlock = token * uint(pc.inDim) + sb * 256u;
+
+        int scales[16];
+        unpackQ3KScales(scBase, scales);
+
+        uint qi = 0u;
+        int si = 0;
+        uint m = 1u;
+        for (uint n = 0u; n < 256u; n += 128u) {
+            uint shift = 0u;
+            for (uint j = 0u; j < 4u; ++j) {
+                float dl0 = d * float(scales[si] - 32); si++;
+                for (uint l = 0u; l < 16u; ++l) {
+                    int code = int((byteAt(qBase + qi + l) >> shift) & 3u);
+                    if ((byteAt(hmBase + l) & m) == 0u) code -= 4;
+                    sum += dl0 * float(code) * x[xBlock + n + j * 32u + l];
+                }
+                float dl1 = d * float(scales[si] - 32); si++;
+                for (uint l = 0u; l < 16u; ++l) {
+                    int code = int((byteAt(qBase + qi + 16u + l) >> shift) & 3u);
+                    if ((byteAt(hmBase + 16u + l) & m) == 0u) code -= 4;
+                    sum += dl1 * float(code) * x[xBlock + n + j * 32u + 16u + l];
+                }
+                shift += 2u;
+                m <<= 1u;
+            }
+            qi += 32u;
+        }
+    }
+    y[token * outDim + row] = sum;
+}

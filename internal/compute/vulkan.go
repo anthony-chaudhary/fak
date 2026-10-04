@@ -981,6 +981,12 @@ func (v *vulkanBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, what 
 		}
 		return v.uploadQ5KLocked(t)
 	}
+	if t.Dtype == Q3_K {
+		if as != Q3_K {
+			panic("compute: vulkan packed Q3_K upload requires as=Q3_K")
+		}
+		return v.uploadQ3KLocked(t)
+	}
 	if t.Dtype == Q2_K {
 		return v.uploadQ2KLocked(t)
 	}
@@ -1106,6 +1112,34 @@ func (v *vulkanBackend) uploadQ2KLocked(t Tensor) Tensor {
 		C.fvk_h2d(buf.ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
 	}
 	return makeTensor(v, Q2_K, RowMajor, append([]int(nil), t.Shape...), t.Quant, buf)
+}
+
+func (v *vulkanBackend) uploadQ3KLocked(t Tensor) Tensor {
+	hb, ok := t.buf.(HostBuffer)
+	if !ok || len(t.Shape) != 2 || t.Shape[0] <= 0 || t.Shape[1] <= 0 || t.Shape[1]%q3kSuper != 0 {
+		panic("compute: vulkan Q3_K upload requires host raw bytes and [out,in] with positive in divisible by 256")
+	}
+	if C.fvk_have_q3k_matmul() == 0 {
+		panic("compute: vulkan Q3_K upload requested but the loaded shader bundle lacks q3k_matmul")
+	}
+	raw := i8AsBytes(hb.I8())
+	payloadBytes, residentBytes := vulkanQ3KByteSizes(t.Shape[0], t.Shape[1])
+	if len(raw) != payloadBytes {
+		panic("compute: vulkan Q3_K raw byte length does not match shape")
+	}
+	// A 110-byte Q3_K super-block is only two-byte aligned, so pad the allocation tail
+	// until the final descriptor-visible u32 load stays inside the buffer range.
+	resident := raw
+	if residentBytes != payloadBytes {
+		resident = make([]byte, residentBytes)
+		copy(resident, raw)
+	}
+	buf := v.dallocWeightFor(residentBytes, "Q3_K weight buffer "+shapeText(t.Shape))
+	buf.logicalN = payloadBytes
+	if residentBytes > 0 {
+		C.fvk_h2d(buf.ptr, unsafe.Pointer(&resident[0]), C.size_t(residentBytes))
+	}
+	return makeTensor(v, Q3_K, RowMajor, append([]int(nil), t.Shape...), t.Quant, buf)
 }
 func (v *vulkanBackend) uploadQ8Locked(shape []int, codes []int8, scales []float32, block int) Tensor {
 	if !v.haveQ8 {
@@ -1390,6 +1424,12 @@ func (v *vulkanBackend) SupportsQ5KMatMul() bool {
 	return v != nil && C.fvk_have_q5k_matmul() != 0
 }
 
+// SupportsQ3KMatMul reports whether the loaded bundle contains the optional packed
+// Q3_K projection pipeline. Callers can reject admission before allocating.
+func (v *vulkanBackend) SupportsQ3KMatMul() bool {
+	return v != nil && C.fvk_have_q3k_matmul() != 0
+}
+
 func (v *vulkanBackend) VulkanDebugBatchActive() bool {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -1631,13 +1671,88 @@ func (v *vulkanBackend) q5kMatMulLocked(w, x, y Tensor, P int) {
 	C.fvk_q5k_matmul_f32(wb.ptr, v.vp(x), v.vp(y), C.int(out), C.int(in), C.int(P))
 }
 
+const vulkanQ3KMaxIndex = uint64(1<<32 - 1)
+const vulkanQ3KMaxCInt = uint64(1<<31 - 1)
+
+// vulkanQ3KByteSizes returns the packed payload byte length (110 per 256-weight super-block)
+// and the 4-byte-padded resident size the device buffer must hold so every shader u32 load
+// stays inside the descriptor range. Q3_K super-blocks are only two-byte aligned.
+func vulkanQ3KByteSizes(out, in int) (payload, resident int) {
+	if out <= 0 || in <= 0 || in%q3kSuper != 0 {
+		panic("compute: vulkan Q3_K requires positive [out,in] with in divisible by 256")
+	}
+	if uint64(out) > vulkanQ3KMaxCInt || uint64(in) > vulkanQ3KMaxCInt {
+		panic("compute: vulkan Q3_K dimensions exceed the C int ABI")
+	}
+	blocksPerRow := uint64(in / q3kSuper)
+	if uint64(out) > (vulkanQ3KMaxIndex/q3kSuperBlock)/blocksPerRow {
+		panic("compute: vulkan Q3_K packed weight exceeds uint32 shader byte indexing")
+	}
+	blocks := uint64(out) * blocksPerRow
+	payload64 := blocks * q3kSuperBlock
+	resident64 := (payload64 + 3) &^ 3
+	if resident64 > vulkanQ3KMaxIndex {
+		panic("compute: vulkan Q3_K padded weight exceeds uint32 shader byte indexing")
+	}
+	return int(payload64), int(resident64)
+}
+
+func (v *vulkanBackend) validateQ3KMatMulInputs(w, x Tensor, P int) (out, in int) {
+	if C.fvk_have_q3k_matmul() == 0 {
+		panic("compute: vulkan Q3_K matmul requested but the loaded shader bundle lacks q3k_matmul")
+	}
+	if w.Dtype != Q3_K || x.Dtype != F32 || len(w.Shape) != 2 {
+		panic("compute: vulkan Q3_K matmul requires a 2D Q3_K weight and F32 input")
+	}
+	if w.Backend() != Backend(v) || x.Backend() != Backend(v) || !w.Ready() || !x.Ready() {
+		panic("compute: vulkan Q3_K matmul requires ready tensors owned by this backend")
+	}
+	if _, ok := w.buf.(*vulkanBuf); !ok {
+		panic("compute: vulkan Q3_K weight lacks a Vulkan buffer")
+	}
+	if _, ok := x.buf.(*vulkanBuf); !ok {
+		panic("compute: vulkan Q3_K input lacks a Vulkan buffer")
+	}
+	out, in = w.Shape[0], w.Shape[1]
+	payloadBytes, _ := vulkanQ3KByteSizes(out, in)
+	wb := w.buf.(*vulkanBuf)
+	if wb.logicalN != payloadBytes {
+		panic("compute: vulkan Q3_K resident payload does not match weight shape")
+	}
+	if P <= 0 || uint64(P) > vulkanQ3KMaxIndex/uint64(in) ||
+		uint64(P) > vulkanQ3KMaxIndex/uint64(out) {
+		panic("compute: vulkan Q3_K activation or output exceeds uint32 shader indexing")
+	}
+	if uint64(P) > vulkanQ3KMaxCInt {
+		panic("compute: vulkan Q3_K token count exceeds the C int ABI")
+	}
+	yElements := uint64(P) * uint64(out)
+	dispatchGroups := (yElements + 63) / 64
+	if maxGroups := uint64(C.fvk_max_compute_work_group_count_x()); maxGroups == 0 || dispatchGroups > maxGroups {
+		panic("compute: vulkan Q3_K dispatch exceeds maxComputeWorkGroupCount[0]")
+	}
+	if x.Numel() != int(uint64(P)*uint64(in)) {
+		panic("compute: vulkan Q3_K input shape does not match P*in")
+	}
+	return out, in
+}
+
+func (v *vulkanBackend) q3kMatMulLocked(w, x, y Tensor, P int) {
+	out, in := v.validateQ3KMatMulInputs(w, x, P)
+	if y.Dtype != F32 || y.Backend() != Backend(v) || !y.Ready() || y.Numel() != P*out {
+		panic("compute: vulkan Q3_K output is not a ready P*out F32 Vulkan tensor")
+	}
+	wb := w.buf.(*vulkanBuf)
+	C.fvk_q3k_matmul_f32(wb.ptr, v.vp(x), v.vp(y), C.int(out), C.int(in), C.int(P))
+}
+
 // SupportsDeviceWeightDtype reports the exact dtype set vulkanBackend.MatMul has a case
-// for. It must match that switch: F32, Q8_0, Q4_K, Q6_K, Q5_K and Q2_K are handled;
+// for. It must match that switch: F32, Q8_0, Q4_K, Q6_K, Q5_K, Q3_K and Q2_K are handled;
 // every other dtype falls to the switch's panic default, so they are reported false here
 // (a caller probing this seam gets a clean decline instead of a device panic).
 func (v *vulkanBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
 	switch dt {
-	case F32, Q8_0, Q4_K, Q6_K, Q5_K, Q2_K:
+	case F32, Q8_0, Q4_K, Q6_K, Q5_K, Q3_K, Q2_K:
 		return true
 	default:
 		return false
@@ -1653,6 +1768,9 @@ func (v *vulkanBackend) MatMul(w, x Tensor) Tensor {
 	if w.Dtype == Q5_K {
 		v.validateQ5KMatMulInputs(w, x, 1)
 	}
+	if w.Dtype == Q3_K {
+		v.validateQ3KMatMulInputs(w, x, 1)
+	}
 	out, in := w.Shape[0], w.Shape[1]
 	y, _ := v.devTr([]int{out}, F32)
 	switch w.Dtype {
@@ -1666,6 +1784,8 @@ func (v *vulkanBackend) MatMul(w, x Tensor) Tensor {
 		v.q6kMatMulLocked(w, x, y, 1)
 	case Q5_K:
 		v.q5kMatMulLocked(w, x, y, 1)
+	case Q3_K:
+		v.q3kMatMulLocked(w, x, y, 1)
 	case Q2_K:
 		if v.strixWave32DecodeGEMVRequested() {
 			// Roofline decode path: the gfx1151 Wave32 Q2_K GEMV is requested explicitly.
@@ -1828,7 +1948,7 @@ func (v *vulkanBackend) RMSNormMatMulArgmax(w, x, normWeight Tensor, eps float32
 }
 
 // BatchedMatMul computes the prefill GEMM Y = X @ Wᵀ over P input rows, dispatching the
-// F32, Q8_0, Q4_K, Q6_K, Q5_K, or Q2_K shader by the weight's dtype.
+// F32, Q8_0, Q4_K, Q6_K, Q5_K, Q3_K, or Q2_K shader by the weight's dtype.
 func (v *vulkanBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -1837,6 +1957,9 @@ func (v *vulkanBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	}
 	if w.Dtype == Q5_K {
 		v.validateQ5KMatMulInputs(w, X, P)
+	}
+	if w.Dtype == Q3_K {
+		v.validateQ3KMatMulInputs(w, X, P)
 	}
 	out, in := w.Shape[0], w.Shape[1]
 	if P <= 0 || in <= 0 || X.Numel() != P*in {
@@ -1859,6 +1982,8 @@ func (v *vulkanBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		v.q6kMatMulLocked(w, X, y, P)
 	case Q5_K:
 		v.q5kMatMulLocked(w, X, y, P)
+	case Q3_K:
+		v.q3kMatMulLocked(w, X, y, P)
 	case Q2_K:
 		v.q2kMatMulLocked(w, X, y, out, in, P)
 	default:
