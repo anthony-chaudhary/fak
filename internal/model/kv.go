@@ -845,6 +845,9 @@ type Session struct {
 	// allocate O(n²) score bytes over an n-token generation — pure GC-pressure relief, no
 	// arithmetic change (TestDecodeStepAllocationStaysBounded guards the bound).
 	decodeScores []float32
+	// decodeSplitK is attnDecodeStep's partial/merge scratch, reused across layers
+	// and steps like decodeScores (#13693).
+	decodeSplitK splitKDecodeScratch
 	v4Expert     v4LiveExpertRuntime
 	// v4ExpertOwner is the (Model, Backend)-scoped owner this session attached to for its V4
 	// routed-expert runtime (fak#13479). Session.Close DETACHES without freeing resident pages;
@@ -1356,52 +1359,22 @@ func (s *Session) blockStep(l, qpos int, x, cos, sin []float32, mat matKernel) [
 		// when W<0. Keyed off pos[] so it stays correct after an Evict compaction.
 		lo := windowLoStep(s.Cache.pos, nPos, qpos, cfg.windowForLayer(l))
 		attnOut := make([]float32, nH*hd)
-		// One reused scores scratch for all heads this step (lo/nPos are head-independent);
-		// grow() keeps amortized total allocation O(n) instead of the O(n²) a per-head make
-		// would cost. Fully overwritten per head below, so reuse is bit-identical.
-		s.decodeScores = grow(s.decodeScores, nPos-lo)
 		t = s.phaseStart()
-		// q8 tier reads dequantize each attended row into this scratch; the f32 tier
-		// reads the row slice directly (dequantRowInto is then a plain copy). One
-		// scratch row per layer, reused across heads — the accumulation order and every
-		// f32 byte are unchanged.
-		var kRowScratch, vRowScratch []float32
-		if s.Cache.quantized() {
-			kRowScratch = make([]float32, w)
-			vRowScratch = make([]float32, w)
+		// Parallel decode attend (#13693): units are kv-head groups (each K/V row read,
+		// and on q8 dequantized, once per group), split over the KV span with an LSE
+		// merge once the span is long enough. Short spans and the ALiBi/observer
+		// layers run the exact per-group path, bit-identical to the serial loop.
+		var sinks []float32
+		if name := layerName(l, "self_attn.sinks"); m.has(name) {
+			sinks = m.tensor(name)
 		}
-		for h := 0; h < nH; h++ {
-			kvh := h / grp
-			qh := q[h*hd : (h+1)*hd]
-			scores := s.decodeScores
-			for j := lo; j < nPos; j++ {
-				var kh []float32
-				if s.Cache.quantized() {
-					s.Cache.decodeRowInto(l, j, true, kRowScratch)
-					kh = kRowScratch[kvh*hd : (kvh+1)*hd]
-				} else {
-					kh = s.Cache.K[l][j*w+kvh*hd : j*w+(kvh+1)*hd]
-				}
-				scores[j-lo] = dot(qh, kh)*scale + cfg.alibiScoreBias(h, j, nPos)
-			}
-			softcapInPlace(scores, attnCap)
-			m.softmaxAttentionScores(l, h, scores)
-			if m.attnObs != nil { // #852: emit the post-softmax row (copy-out, math untouched)
-				emitAttnRow(m.attnObs, l, qpos, h, lo, scores)
-			}
-			out := attnOut[h*hd : (h+1)*hd]
-			for j := lo; j < nPos; j++ {
-				var vh []float32
-				if s.Cache.quantized() {
-					s.Cache.decodeRowInto(l, j, false, vRowScratch)
-					vh = vRowScratch[kvh*hd : (kvh+1)*hd]
-				} else {
-					vh = s.Cache.V[l][j*w+kvh*hd : j*w+(kvh+1)*hd]
-				}
-				wj := scores[j-lo]
-				saxpy(out, vh, wj)
-			}
-		}
+		s.decodeScores = attnDecodeStep(attnOut, q, s.decodeScores, newDecodeKVRows(s.Cache, l, w, hd), decodeAttnStepArgs{
+			l: l, lo: lo, nPos: nPos, qpos: qpos,
+			nH: nH, hd: hd, grp: grp,
+			scale: scale, softcap: attnCap,
+			cfg: &cfg, sinks: sinks, obs: m.attnObs,
+			nw: currentWorkerCount(),
+		}, &s.decodeSplitK)
 		s.phaseEnd("full_attn_decode", t)
 		if cfg.AttnOutputGate {
 			t = s.phaseStart()
