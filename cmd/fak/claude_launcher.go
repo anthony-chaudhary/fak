@@ -136,16 +136,21 @@ func runClaude(stdout, stderr io.Writer, argv []string) int {
 	dangerouslySkipPermissions := fs.Bool("dangerously-skip-permissions", true, "pass --dangerously-skip-permissions to Claude Code")
 	quiet := fs.Bool("quiet", false, "suppress launcher status messages")
 	noProbe := fs.Bool("no-probe", false, "skip preflight health probe of fak serve backend")
+	noRouter := fs.Bool("no-router", false, "do not prefer the live fak router; use the direct --gateway-url/--base-url/default backend")
 
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: fak claude [launcher flags] [-- <claude args...>]")
 		fmt.Fprintln(stderr, "       fak claude config [--write] [--addr ADDR] [--model MODEL]")
 		fmt.Fprintln(stderr, "")
-		fmt.Fprintln(stderr, "First-class support for Claude Code as harness with fak serve on Mac as backend.")
-		fmt.Fprintln(stderr, "Runs Claude Code directly against the native Anthropic /v1/messages server without guard.")
+		fmt.Fprintln(stderr, "First-class support for Claude Code as harness. When no backend is named")
+		fmt.Fprintln(stderr, "explicitly and a fak router is live (FAK_ROUTER_URL, else")
+		fmt.Fprintln(stderr, "http://127.0.0.1:18101), the launcher starts a private loopback front door")
+		fmt.Fprintln(stderr, "to that router and serves its current model; otherwise it uses the local")
+		fmt.Fprintln(stderr, "fak serve backend (Mac Metal) as before. Pass --no-router to opt out.")
 		fmt.Fprintln(stderr, "")
 		fmt.Fprintln(stderr, "examples:")
-		fmt.Fprintln(stderr, "  fak claude                                    # interactive session on local Mac fak serve")
+		fmt.Fprintln(stderr, "  fak claude                                    # live router, else local fak serve")
+		fmt.Fprintln(stderr, "  fak claude --no-router                        # direct local backend only")
 		fmt.Fprintln(stderr, "  fak claude --dry-run                          # preview environment and command")
 		fmt.Fprintln(stderr, "  fak claude --print-env                        # print shell export lines")
 		fmt.Fprintln(stderr, "  fak claude --probe \"Reply with: pong\"         # headless JSON probe turn")
@@ -178,7 +183,54 @@ func runClaude(stdout, stderr io.Writer, argv []string) int {
 	var statusInfo *claudeStatusReport
 	var probeErr error
 
-	if !*noProbe && !*printEnv {
+	// Live-router default. When the operator names no backend (no --gateway-url/
+	// --base-url and no FAK_MAC_GATEWAY), and a fak router is live, serve Claude
+	// Code through a private loopback front door to that router and use its
+	// current model. This keeps the launcher on the router's model (e.g.
+	// DeepSeek) instead of the stale hardcoded 8080 / qwen38:27b-q4 placeholder.
+	// --no-router opts out; --guard is a direct-backend mode and is left alone.
+	var routerFrontDoor *claudeFrontDoor
+	useLiveRouter := false
+	if !*noRouter && !*guard && !*printEnv && !flagSet(fs, "gateway-url") && !flagSet(fs, "base-url") && !flagSet(fs, "addr") {
+		if strings.TrimSpace(os.Getenv("FAK_MAC_GATEWAY")) == "" {
+			routerOrigin := claudeRouterOrigin("")
+			rc := &http.Client{Timeout: 2 * time.Second}
+			if liveModel, live := claudeRouterLive(routerOrigin, 2*time.Second); live {
+				useLiveRouter = true
+				if effectiveModel == "" {
+					effectiveModel = claudeRouterModel(rc, routerOrigin)
+				}
+				if effectiveModel == "" {
+					effectiveModel = liveModel
+				}
+				if effectiveModel == "" {
+					effectiveModel = defaultClaudeModel()
+				}
+				if !*dryRun {
+					fakBin, binErr := claudeFakBinary()
+					if binErr != nil {
+						fmt.Fprintf(stderr, "fak claude: %v\n", binErr)
+						return 1
+					}
+					fd, err := startClaudeFrontDoor(context.Background(), fakBin, routerOrigin, effectiveModel, stderr)
+					if err != nil {
+						fmt.Fprintf(stderr, "fak claude: live-router front door failed: %v\n", err)
+						return 1
+					}
+					routerFrontDoor = fd
+					defer routerFrontDoor.Stop()
+					effectiveServer = fd.origin
+					effectiveKey = fd.token
+				} else {
+					// dry-run: preview the loopback origin without binding.
+					effectiveServer = "http://127.0.0.1:<free>"
+					effectiveKey = "<per-launch front-door bearer>"
+				}
+			}
+		}
+	}
+
+	if !useLiveRouter && !*noProbe && !*printEnv {
 		statusInfo, probeErr = claudeStatusFetcher(effectiveServer, 2*time.Second)
 	}
 
@@ -230,7 +282,11 @@ func runClaude(stdout, stderr io.Writer, argv []string) int {
 		} else {
 			fmt.Fprintf(stderr, "  harness     = claude (direct; pass --guard for kernel adjudication)\n")
 		}
-		fmt.Fprintf(stderr, "  backend     = fak serve on Mac (/v1/messages)\n")
+		if useLiveRouter {
+			fmt.Fprintf(stderr, "  backend     = live fak router via loopback front door (/v1/messages -> %s)\n", claudeRouterOrigin(""))
+		} else {
+			fmt.Fprintf(stderr, "  backend     = fak serve on Mac (/v1/messages)\n")
+		}
 		fmt.Fprintln(stderr, "  environment =")
 		for _, k := range []string{
 			"ANTHROPIC_BASE_URL",

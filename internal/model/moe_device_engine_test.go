@@ -24,9 +24,13 @@ import (
 // The engine is witnessed through the REAL production seam: s.glmDsaMatKernel() builds the
 // splitKernel the live forward threads (moe_offload.go:glmDsaMatKernel), not a hand-built kernel.
 
-// TestDeviceKernelForExpertEncoding pins the per-encoding predicate: the split consults it rather
-// than assuming host-CPU compute for every routed expert (AC #1).
-func TestDeviceKernelForExpertEncoding(t *testing.T) {
+// TestExpertEngineDeviceKernelForExpertEncoding pins the per-encoding predicate: the split consults
+// it rather than assuming host-CPU compute for every routed expert (AC #1), and it must admit every
+// encoding the device seam (expertInputDeviceWeight) can execute — resident Q4_K, a resident
+// HAL-capable k-quant (the V4.1 Q2_K slate), and the checkpoint tier — while refusing a kind with no
+// device kernel. The name carries `ExpertEngine` so the issue's declared witness pattern
+// (`-run 'MoEOffload|DeviceGateUp|ExpertEngine'`) executes it instead of matching nothing.
+func TestExpertEngineDeviceKernelForExpertEncoding(t *testing.T) {
 	const H = 256
 	m := NewSyntheticMoE(expertHALTestConfig(H))
 
@@ -35,8 +39,11 @@ func TestDeviceKernelForExpertEncoding(t *testing.T) {
 		expertName(0, 0, "gate_proj.weight"): &q4kTensor{out: H, in: H, raw: routedExpertRawQ4K(t, H, H, 901), nblk: 1},
 		expertName(0, 0, "up_proj.weight"):   &q4kTensor{out: H, in: H, raw: routedExpertRawQ4K(t, H, H, 902), nblk: 1},
 	}
-	// A Q6_K down projection: NO device kernel yet (fak#13129), so it must answer host.
+	// A resident Q2_K slate (the DeepSeek-V4.1 mission artifact's encoding) plus a Q6_K
+	// projection: both descriptors are HAL-capable and the Vulkan MatMul serves the dtype, so
+	// both must answer device — the predicate must not key on m.q4kw alone.
 	m.kqw = map[string]*kQuantTensor{
+		expertName(0, 1, "gate_proj.weight"): q2kFixtureTensor(H, H, 905),
 		expertName(0, 0, "down_proj.weight"): expertHALQ6KTensor(H, H, 903),
 	}
 
@@ -47,7 +54,8 @@ func TestDeviceKernelForExpertEncoding(t *testing.T) {
 	}{
 		{"Q4_K gate has a device kernel", expertName(0, 0, "gate_proj.weight"), expertEngineDevice},
 		{"Q4_K up has a device kernel", expertName(0, 0, "up_proj.weight"), expertEngineDevice},
-		{"Q6_K down has no device kernel yet (fak#13129)", expertName(0, 0, "down_proj.weight"), expertEngineHost},
+		{"resident Q2_K gate has a device kernel (the V4.1 mission encoding)", expertName(0, 1, "gate_proj.weight"), expertEngineDevice},
+		{"resident Q6_K down has a device kernel (fak#13129 landed)", expertName(0, 0, "down_proj.weight"), expertEngineDevice},
 		{"an absent expert weight answers host", expertName(0, 7, "gate_proj.weight"), expertEngineHost},
 	}
 	for _, c := range cases {
@@ -57,12 +65,24 @@ func TestDeviceKernelForExpertEncoding(t *testing.T) {
 	}
 
 	// The predicate keys on the encoding the model actually carries: a nil model or a model with no
-	// resident Q4_K store answers host rather than panicking.
+	// resident store answers host rather than panicking.
 	if got := deviceKernelForExpertEncoding(nil, expertName(0, 0, "gate_proj.weight")); got != expertEngineHost {
 		t.Errorf("nil model = %v, want expertEngineHost", got)
 	}
 	if got := deviceKernelForExpertEncoding(&Model{Cfg: m.Cfg}, expertName(0, 0, "gate_proj.weight")); got != expertEngineHost {
 		t.Errorf("model with nil q4kw = %v, want expertEngineHost", got)
+	}
+
+	// NEGATIVE CONTROL: widening the predicate to m.kqw must NOT admit a kind with no HAL
+	// descriptor. Q3_K is non-HAL (quant_registry.go), so a resident Q3_K projection answers
+	// host even though it is present in m.kqw — the fail-closed contract is preserved.
+	mNonHAL := NewSyntheticMoE(expertHALTestConfig(H))
+	mNonHAL.q4kw = nil
+	mNonHAL.kqw = map[string]*kQuantTensor{
+		expertName(0, 0, "gate_proj.weight"): q3kFixtureTensor(H, H),
+	}
+	if got := deviceKernelForExpertEncoding(mNonHAL, expertName(0, 0, "gate_proj.weight")); got != expertEngineHost {
+		t.Errorf("non-HAL Q3_K resident gate = %v, want expertEngineHost (predicate must not bless a kind with no device kernel)", got)
 	}
 
 	// The ADMISSION wrapper additionally requires a device-capable session. Without a backend, even a

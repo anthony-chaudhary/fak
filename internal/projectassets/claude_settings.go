@@ -8,8 +8,10 @@ import (
 	"strings"
 )
 
-// DefaultClaudeBaseURL is the standard local gateway address used by fak serve for Claude Code.
-// Claude Code appends /v1/messages, so this URL excludes any /v1 suffix.
+// DefaultClaudeBaseURL is the fallback local gateway address for Claude Code
+// when no live fak router answers. Claude Code appends /v1/messages, so this URL
+// excludes any /v1 suffix. A live router (FAK_ROUTER_URL, else the supervised
+// 127.0.0.1:18101) is preferred by `fak claude` over this placeholder.
 const DefaultClaudeBaseURL = "http://127.0.0.1:8080"
 
 // DefaultClaudeModelID is the default served model identifier for local inference on Apple Silicon Mac.
