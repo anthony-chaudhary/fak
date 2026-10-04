@@ -1433,12 +1433,11 @@ func (s *Server) existingSessionPlanner(trace string) *agent.SessionPlanner {
 // that produced no tokens is not a generation); the error is returned untouched so
 // the caller's existing error handling is unchanged.
 func (s *Server) complete(ctx context.Context, trace string, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (comp *agent.Completion, err error) {
-	// Bind authenticated request identity to in-kernel prefix-cache visibility.
-	// Empty principal preserves legacy single-user reuse; authenticated prefixes
-	// enter tenant-private storage and cannot shape another tenant's hit timing.
-	if principal := principalFromContext(ctx); principal != "" {
-		ctx = agent.WithPrefixCacheIdentity(ctx, principal, "")
-	}
+	// Bind authenticated request identity to in-kernel prefix-cache visibility via the
+	// one helper every planner path (buffered and streaming) shares, so a principal's
+	// streamed and buffered turns resolve to the same cache scope. Empty principal
+	// preserves legacy single-user reuse.
+	ctx = plannerTurnContext(ctx, nil)
 	defer func() {
 		if r := recover(); r != nil {
 			if evictErr, ok := recoverRecurrentEvictUnsupported(r); ok {
@@ -1487,6 +1486,7 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 		}
 	}
 	s.metrics.observeInferenceUsageServed(s.chatServingLocality(ctx, sample.Model), comp.Usage, comp.FinishReason, dur)
+	s.observePrefixReuseTurn(ctx, fullHistory, comp)
 	s.observePlannerRequestMemory()
 	// The served turn has mutated the KV cache; relieve HBM pressure by demoting a hot span to
 	// the colder tier instead of dropping it (#1073, the live serve-path call site for the

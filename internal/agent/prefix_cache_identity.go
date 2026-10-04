@@ -20,6 +20,12 @@ func WithPrefixCacheIdentity(ctx context.Context, tenant, agent string) context.
 	return context.WithValue(ctx, prefixCacheIdentityKey{}, owner)
 }
 
+// PrefixCacheIdentityFromContext reports the cache owner bound to ctx — the scope the
+// in-kernel planner resolves for this call. ok is false for legacy unscoped traffic.
+func PrefixCacheIdentityFromContext(ctx context.Context) (radixkv.CacheIdentity, bool) {
+	return prefixCacheIdentityFromContext(ctx)
+}
+
 func prefixCacheIdentityFromContext(ctx context.Context) (radixkv.CacheIdentity, bool) {
 	if ctx == nil {
 		return radixkv.CacheIdentity{}, false

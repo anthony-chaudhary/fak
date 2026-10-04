@@ -73,6 +73,8 @@ func (s *Server) beginServedRequest(w http.ResponseWriter, r *http.Request) (con
 	// enumerates — the join the /debug/vars request_admission block needs (#13120
 	// reachability). No-op on an empty trace.
 	ctx = agent.WithRequestTraceID(ctx, trace)
+	// Carry the harness launch session id for prefix-reuse attribution on every wire.
+	ctx = withPrefixReuseSession(ctx, harnessSessionID(r))
 	if r != nil {
 		spec := parseAgentSpecFromRequest(r, trace)
 		ctx = carrierWithSpec(ctx, spec)

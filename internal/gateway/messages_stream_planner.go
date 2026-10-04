@@ -160,12 +160,14 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 			}
 		}
 	}()
-	comp, err := sp.CompleteStream(r.Context(), guard.write, messages, req.Tools, opts...)
+	turnCtx := plannerTurnContext(r.Context(), r)
+	comp, err := sp.CompleteStream(turnCtx, guard.write, messages, req.Tools, opts...)
 	close(stopPing)
 	<-pingDone
 	if err != nil {
 		return s.streamPlannerUpstreamError(w, err, started, reqTrace, began, sendLocked, closeText)
 	}
+	s.observePrefixReuseTurn(turnCtx, messages, comp)
 	lease.SettleUsage(comp.Usage) // settle the token-rate window with real usage (#2019)
 	s.accountStreamedTurn(r.Context(), sessionTurn, comp, req.Messages, began, req.Model)
 

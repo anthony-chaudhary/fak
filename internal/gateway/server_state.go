@@ -366,6 +366,9 @@ type BudgetExhaustedFunc func(ctx context.Context, st SessionState, messages []a
 // Server is a configured, ready-to-serve gateway. Construct with New; serve with
 // Handler()/ListenAndServe (HTTP) or ServeStdio (MCP over stdin/stdout).
 type Server struct {
+	// prefixReuse attributes in-kernel prefix reuse to same- vs cross-session origin
+	// (prefix_reuse_attribution.go). Zero value is ready.
+	prefixReuse                  prefixReuseAttribution
 	workspaceAdmissionPermissive bool
 	featureCatalog               atomic.Pointer[FeatureCatalog]
 	responsesContinuationOnce    sync.Once

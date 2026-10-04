@@ -311,6 +311,7 @@ func (s *Server) renderMetrics() string {
 	}
 	writeBlobMetrics(&b)
 	writeKVPrefixMetrics(&b)
+	s.writePrefixReuseAttributionMetrics(&b)
 	kvStats, kvOK := s.kvMemoryStatsOnce()
 	s.writeKVMemoryMetricsWithStats(&b, kvStats, kvOK)
 	s.writeRequestMemoryMetrics(&b)

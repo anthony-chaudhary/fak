@@ -494,8 +494,12 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	defer lease.Release()
 
 	began := time.Now()
-	comp, err := sp.CompleteStream(ctx, utf8Fragments.write, req.Messages, req.Tools, chatRouteOpts(ctx, opts)...)
+	turnCtx := plannerTurnContext(ctx, nil)
+	comp, err := sp.CompleteStream(turnCtx, utf8Fragments.write, req.Messages, req.Tools, chatRouteOpts(ctx, opts)...)
 	stopHB()
+	if err == nil {
+		s.observePrefixReuseTurn(turnCtx, req.Messages, comp)
+	}
 	s.recordBufferedTurnCost(sessionTurn, comp, began)
 	if comp != nil {
 		// CompleteStream may return after the response was committed. The declared

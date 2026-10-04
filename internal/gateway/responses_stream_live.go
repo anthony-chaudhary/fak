@@ -251,7 +251,11 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	guard := newLiftGuard(emitContent)
 	fragments := newUTF8FragmentBuffer(guard.write)
 
-	comp, err := sp.CompleteStream(ctx, fragments.write, turn.messages, turn.tools, turn.sampleOpts...)
+	turnCtx := plannerTurnContext(ctx, nil)
+	comp, err := sp.CompleteStream(turnCtx, fragments.write, turn.messages, turn.tools, turn.sampleOpts...)
+	if err == nil {
+		s.observePrefixReuseTurn(turnCtx, turn.messages, comp)
+	}
 	if err != nil {
 		s.renderTurnDebugError(reqTrace, "openai_responses", err, time.Since(began))
 		if !started {
