@@ -777,9 +777,9 @@ func (m *Model) metalQ6KUploadAllowedLocked(qt *kQuantTensor) bool {
 		deviceTotal = int64(total)
 	}
 	if metalgemm.Q6KCanAlias(qt.raw, qt.out, qt.in) {
-		return q6kAliasFits(m.ResidentReport().TotalResidentBytes, deviceTotal) == nil
+		return q6kAliasFits(m.residentStoreReport().TotalResidentBytes, deviceTotal) == nil
 	}
-	return q6kUploadFits(m.ResidentReport().TotalResidentBytes, int64(len(qt.raw)), deviceTotal)
+	return q6kUploadFits(m.residentStoreReport().TotalResidentBytes, int64(len(qt.raw)), deviceTotal)
 }
 
 // q6kRuntimeNames returns the model's Q6_K band as a deterministic, sorted name list: every
@@ -814,7 +814,7 @@ func (m *Model) promoteMetalQ6Residency() error {
 		metalQ6Exact[m] = &metalQ6ExactState{}
 		return nil
 	}
-	r := m.ResidentReport()
+	r := m.residentStoreReport()
 	deviceTotal := int64(0)
 	if total, ok := metalgemm.DeviceMemoryTotal(); ok {
 		deviceTotal = int64(total)
@@ -915,7 +915,7 @@ func (m *Model) metalQ8UploadAllowed() bool {
 	if v, ok := metalQ8Budget[m]; ok {
 		return v
 	}
-	r := m.ResidentReport()
+	r := m.residentStoreReport()
 	deviceTotal := int64(0)
 	if total, ok := metalgemm.DeviceMemoryTotal(); ok {
 		deviceTotal = int64(total)
@@ -976,7 +976,7 @@ func (m *Model) promoteMetalQ8Residency() error {
 	if state, ok := metalQ8Exact[m]; ok {
 		return state.err
 	}
-	r := m.ResidentReport()
+	r := m.residentStoreReport()
 	deviceTotal := int64(0)
 	if total, ok := metalgemm.DeviceMemoryTotal(); ok {
 		deviceTotal = int64(total)
@@ -1144,6 +1144,21 @@ func (m *Model) metalQ6KWeights() (int, bool) {
 	return len(names), true
 }
 
+// metalQ6KHeadResident reports whether the resident Q6_K head tensor has a live Metal handle,
+// i.e. kQuantMatRowsIntoDispatch will run the head as the Metal Q6_K GEMV rather than the CPU
+// fallback. It only reads the published handle tables; it never uploads.
+func (m *Model) metalQ6KHeadResident(name string) bool {
+	if m == nil || !metalgemm.Available() {
+		return false
+	}
+	metalQ4KMu.Lock()
+	defer metalQ4KMu.Unlock()
+	if tbl := metalQ6KW[m]; tbl != nil && tbl[name] != nil {
+		return true
+	}
+	return false
+}
+
 // q4kM5Disabled is the config-surface opt-out for the widened-panel wide-tile candidate.
 // It is a seam rather than an environment read: a kernel-selection posture is behavior,
 // not a credential, so it lives on the config surface (internal/envconfiglint's
@@ -1194,7 +1209,14 @@ func (m *Model) metalQ4KWeights() map[string]bool {
 	cfg := m.Cfg
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
-		for _, name := range denseProjectionNames(lp) {
+		names := denseProjectionNames(lp)
+		if cfg.isLinearAttnLayer(l) {
+			// fak#13567: qwen35 GDN in_proj rows may be held native Q4_K after a raw row
+			// reorder; bulk-upload them too so their first prefill use pays no lazy H2D.
+			names = append(names, lp("linear_attn.in_proj_qkv.weight"), lp("linear_attn.in_proj_z.weight"),
+				lp("linear_attn.in_proj_b.weight"), lp("linear_attn.in_proj_a.weight"))
+		}
+		for _, name := range names {
 			qt := m.q4kw[name]
 			if qt == nil {
 				continue // Q8 minority — not a q4_k-resident projection

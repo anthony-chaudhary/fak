@@ -939,19 +939,30 @@ func (t *Tree) snapshotVictim(exclude *node) *node {
 	if prep, ok := strat.(TreePreparer); ok {
 		prep.PrepareTree(t)
 	}
+	// Deepest-first: a snapshot is a victim candidate only when no descendant holds an
+	// evictable snapshot. An ancestor snapshot (e.g. a shared system/tools boundary)
+	// restores every sibling below it, while a deeper per-request snapshot serves only
+	// its own continuation, so the ancestor must outlive its descendants. Recurrent
+	// state cannot be truncated, so a lost ancestor cannot be rebuilt from a leaf.
+	// Among candidates the configured strategy picks as before.
 	var victim *node
-	var walk func(*node)
-	walk = func(n *node) {
-		if n != exclude && n.refs == 0 && !n.IsComputing() && n.snapshot != nil {
+	var walk func(*node) bool
+	walk = func(n *node) bool {
+		below := false
+		for _, child := range n.children {
+			if walk(child) {
+				below = true
+			}
+		}
+		evictable := n != exclude && n.refs == 0 && !n.IsComputing() && n.snapshot != nil
+		if evictable && !below {
 			if victim == nil || strat.Priority(n).less(strat.Priority(victim)) {
 				victim = n
 			}
 		}
-		for _, child := range n.children {
-			walk(child)
-		}
+		return below || evictable
 	}
-	t.forEachRoot(walk)
+	t.forEachRoot(func(n *node) { walk(n) })
 	return victim
 }
 

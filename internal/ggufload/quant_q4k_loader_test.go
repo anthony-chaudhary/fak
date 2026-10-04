@@ -291,6 +291,9 @@ func buildQwen35GGUFFixture(t *testing.T, arch string, dim, vocab int, embType, 
 	if embType == TensorQ4_K {
 		embBlkBytes = blockQ4KBytes
 	}
+	if embType == TensorQ6_K {
+		embBlkBytes = blockQ6KBytes
+	}
 	if embType == TensorF32 {
 		embBlkBytes = 4
 	}
@@ -361,6 +364,13 @@ func buildQwen35GGUFFixture(t *testing.T, arch string, dim, vocab int, embType, 
 		for i := 0; i < len(embPayload); i += blockQ2KBytes {
 			binary.LittleEndian.PutUint16(embPayload[i+80:], 0x3C00) // d = 1.0
 			binary.LittleEndian.PutUint16(embPayload[i+82:], 0)      // min = 0
+		}
+	} else if embType == TensorQ6_K {
+		for i := range embPayload {
+			embPayload[i] = byte((i*31 + 7) % 256)
+		}
+		for i := 0; i < len(embPayload); i += blockQ6KBytes {
+			binary.LittleEndian.PutUint16(embPayload[i+blockQ6KBytes-2:], 0x2C00) // d = 0.0625
 		}
 	} else if embType == TensorQ4_K && vocab > 1 {
 		rowBytes := (dim / 256) * blockQ4KBytes

@@ -1,0 +1,80 @@
+{
+  "rows": [
+    {
+      "id": "gateway-engine-inkernel-shared-prefix-boundary-from-context",
+      "canonical": "inKernelSharedPrefixBoundaryFromContext (shared system/tools boundary hint)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "internal/agent/inkernel_shared_prefix_boundary.go: reads the request-context token offset where the rendered leading system/tools block ends, set by Complete after preparePrompt, so prefill can admit a complete snapshot there for sibling fan-out requests on recurrent hybrids.",
+      "distinction": "A per-request snapshot-placement HINT read from context - NOT the radix structural match (cacheable) and NOT the adaptive divergence/grid checkpoint (inKernelAdaptiveSnapshotCheckpoint).",
+      "distinct_from": [
+        "gateway-engine-inkernel-adaptive-snapshot-checkpoint"
+      ],
+      "aliases": [
+        "withInKernelSharedPrefixBoundary"
+      ],
+      "grounding": "inKernelSharedPrefixBoundaryFromContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gateway-engine-inkernel-prefill-checkpoints",
+      "canonical": "inKernelPrefillCheckpoints (prefill snapshot offsets)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "internal/agent/inkernel_shared_prefix_boundary.go: returns the ascending, de-duplicated prompt offsets (shared boundary plus adaptive checkpoint) strictly between the restored prefix and the prompt end at which prefill admits complete snapshots.",
+      "distinction": "The ordered SET of offsets for one prefill - NOT inKernelAdaptiveSnapshotCheckpoint (the single divergence/grid offset it includes).",
+      "distinct_from": [
+        "gateway-engine-inkernel-adaptive-snapshot-checkpoint"
+      ],
+      "aliases": [],
+      "grounding": "inKernelPrefillCheckpoints",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gateway-engine-inkernel-adaptive-snapshot-checkpoint",
+      "canonical": "inKernelAdaptiveSnapshotCheckpoint (divergence/grid checkpoint)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "internal/agent/inkernel_decode.go: the single snapshot offset at the structural divergence point when it lies inside the prompt, else the deepest 64-token grid boundary strictly before the prompt end.",
+      "distinction": "ONE offset derived from the radix match - NOT the shared system/tools boundary hint and NOT the full prompt snapshot.",
+      "distinct_from": [
+        "gateway-engine-inkernel-prefill-checkpoints"
+      ],
+      "aliases": [
+        "inKernelSnapshotCheckpoint"
+      ],
+      "grounding": "inKernelAdaptiveSnapshotCheckpoint",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gateway-engine-inkernel-host-snapshot-reuse",
+      "canonical": "inKernelHostSnapshotReuse (host recurrent snapshot predicate)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "internal/agent/inkernel_host_snapshot_reuse.go: true on the host-session (no compute.Backend) seam for a Qwen3.5 recurrent hybrid or a qualified V4.1 host route, where a complete PrefixSnapshot is the only restorable prefix boundary.",
+      "distinction": "A route PREDICATE selecting the snapshot tier - NOT inKernelPlannerPrefixReuseSupported (whether prefix reuse is enabled at all).",
+      "distinct_from": [
+        "gateway-engine-inkernel-prefill-checkpoints"
+      ],
+      "aliases": [],
+      "grounding": "inKernelHostSnapshotReuse",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

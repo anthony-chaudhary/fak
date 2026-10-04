@@ -39,10 +39,15 @@ func (m *Model) q4kHeadName() string {
 }
 
 // kqHeadName resolves the LM head when it loaded as a resident k-quant (Q5_K/Q6_K) — the
-// q4_k_m untied lm_head lands in kqw under "lm_head.weight". Returns "" if no k-quant head.
+// q4_k_m untied lm_head lands in kqw under "lm_head.weight"; a tied Q6_K token table kept
+// packed by SetTiedQ6KEmbedding serves as the head under the embedding name (fak#13567).
+// Returns "" if no k-quant head.
 func (m *Model) kqHeadName() string {
 	if m.kqw != nil && m.kqw["lm_head.weight"] != nil {
 		return "lm_head.weight"
+	}
+	if m.tiedQ6KHead() != nil {
+		return tiedEmbeddingName
 	}
 	return ""
 }

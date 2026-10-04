@@ -34,7 +34,8 @@ func TestEstimateQ4KRemappedProjectionStorage(t *testing.T) {
 	if err := os.WriteFile(path, b.Bytes(), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	m, err := LoadModelQ4KProfileOptions(path, nil)
+	// The historical route (native rows forced off) requantizes both remapped projections to Q8.
+	m, err := LoadModelQ4KProfileOptions(path, nil, WithNativeLinearAttnRows(false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,12 +52,33 @@ func TestEstimateQ4KRemappedProjectionStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ws.Close() })
-	plan, err := ws.EstimateQ4KLoadMemoryPlan()
+	plan, err := ws.EstimateQ4KLoadMemoryPlan(WithNativeLinearAttnRows(false))
 	if err != nil {
 		t.Fatalf("loader-supported remapped projections must be estimable: %v", err)
 	}
 	if plan.Total() != want {
 		t.Fatalf("estimated=%d, want actual independently counted storage %d", plan.Total(), want)
+	}
+	// The default native-row route (fak#13567) keeps both remapped projections packed under
+	// their storage names; the estimate must follow the same remap.
+	native, err := LoadModelQ4KProfileOptions(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = native.CloseWeights() })
+	if !native.HasQ4K("model.layers.0.linear_attn.in_proj_qkv.weight") || !native.HasQ4K("model.layers.0.linear_attn.in_proj_z.weight") {
+		t.Fatal("native-row loader did not keep both remapped source projections as packed Q4_K")
+	}
+	const wantNative = 3 * packed
+	if r := native.ResidentReport(); r.Q4KTensors != 3 || r.TotalResidentBytes != wantNative {
+		t.Fatalf("native resident=%+v, want three packed Q4_K tensors, %d bytes", r, wantNative)
+	}
+	nativePlan, err := ws.EstimateQ4KLoadMemoryPlan()
+	if err != nil {
+		t.Fatalf("native-row remapped projections must be estimable: %v", err)
+	}
+	if nativePlan.Total() != wantNative {
+		t.Fatalf("native estimated=%d, want %d", nativePlan.Total(), wantNative)
 	}
 }
 

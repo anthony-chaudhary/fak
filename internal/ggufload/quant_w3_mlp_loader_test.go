@@ -169,8 +169,9 @@ func TestLoadW3MLPDefaultOffPreservesResidentIQ3(t *testing.T) {
 			t.Errorf("%s raw IQ3 payload changed during default-off load", name)
 		}
 	}
-	if !m.HasQ8("model.layers.3.self_attn.q_proj.weight") {
-		t.Fatal("normalize-sensitive attention route changed: q_proj is not Q8")
+	// fak#13567: the row-permuted Q4_K q_proj takes the native-row route (q4kw, not Q8).
+	if q := "model.layers.3.self_attn.q_proj.weight"; !m.HasQ4K(q) || m.HasQ8(q) {
+		t.Fatal("normalize-sensitive attention route changed: q_proj is not native-row Q4_K")
 	}
 }
 
@@ -200,8 +201,8 @@ func TestLoadW3MLPFlagOnRoutesExactlyDenseMLP(t *testing.T) {
 			t.Errorf("%s raw IQ3 payload changed during load", name)
 		}
 	}
-	if !m.HasQ8("model.layers.3.self_attn.q_proj.weight") {
-		t.Fatal("W3 selection changed attention route: q_proj is not Q8")
+	if q := "model.layers.3.self_attn.q_proj.weight"; !m.HasQ4K(q) || m.HasQ8(q) {
+		t.Fatal("W3 selection changed attention route: q_proj is not native-row Q4_K")
 	}
 }
 

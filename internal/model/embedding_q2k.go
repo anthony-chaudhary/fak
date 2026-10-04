@@ -10,8 +10,8 @@ import (
 // is attempted on a packed embedding table.
 var ErrPackedEmbeddingWholeTableRefused = errors.New("model: embedRows refused on packed embedding: whole-table expansion of packed store is not supported")
 
-// Q2KEmbedding is the compatibility name for a model-owned, immutable raw Q2_K
-// or Q4_K embedding table used for on-demand row gathering without full F32 expansion.
+// Q2KEmbedding is the compatibility name for a model-owned, immutable raw Q2_K,
+// Q4_K, PQ2_0 or tied Q6_K embedding table used for on-demand row gathering without full F32 expansion.
 type Q2KEmbedding struct {
 	raw    []byte
 	vocab  int
@@ -26,6 +26,9 @@ const (
 	packedEmbeddingQ2K packedEmbeddingFormat = iota + 1
 	packedEmbeddingQ4K
 	packedEmbeddingPQ2
+	// packedEmbeddingQ6K is a tied Q6_K token table whose bytes are shared with the
+	// resident kqw LM head (SetTiedQ6KEmbedding); it is never constructed by copy.
+	packedEmbeddingQ6K
 )
 
 // NewQ2KEmbedding constructs a validated Q2KEmbedding instance.
@@ -82,6 +85,9 @@ func (f packedEmbeddingFormat) blockBytes() int {
 	if f == packedEmbeddingQ4K {
 		return q4kBlockBytes
 	}
+	if f == packedEmbeddingQ6K {
+		return q6kBlockBytes
+	}
 	return q2kBlockBytes
 }
 
@@ -102,6 +108,9 @@ func (q *Q2KEmbedding) Format() string {
 	}
 	if q.format == packedEmbeddingPQ2 {
 		return "PQ2_0"
+	}
+	if q.format == packedEmbeddingQ6K {
+		return "Q6_K"
 	}
 	return "Q2_K"
 }
@@ -156,6 +165,8 @@ func (q *Q2KEmbedding) GatherRow(tokenID int, dst []float32, scale float32) erro
 			q4kDequantSuperBlock(row, blk)
 		case packedEmbeddingPQ2:
 			dequantQ2G128Block(row, blk)
+		case packedEmbeddingQ6K:
+			q6kDequantSuperBlock(row, blk)
 		default:
 			q2kDequantSuperBlock(row, blk)
 		}

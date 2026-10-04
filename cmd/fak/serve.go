@@ -1087,6 +1087,13 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 		return nil, err
 	}
 	srv.AddStartupMessages(startupMessages...)
+	// fak#13567: gateway.New built the in-kernel planner, which performs the Metal residency
+	// promotion; sample the LM-head route NOW so the operator sees the head decode will use
+	// (resident-layout was formatted before promotion).
+	if line := serveLMHeadReadyLine(rt.inKernelModel); line != "" {
+		fmt.Fprintln(os.Stderr, "fak serve: "+line)
+		srv.AddStartupMessages(serveStartupMessage("lm-head", "info", line))
+	}
 	srv.SetModelLoadProfile(rt.loadProfile)
 	if err := rt.configureServeArmLeases(sf, srv); err != nil {
 		if controlIngress != nil {

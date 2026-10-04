@@ -566,6 +566,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if sat := s.sessionSaturationNow(r.Context()); sat.Bounded {
 		health["session_saturation"] = sat
 	}
+	// fak#13567: resident weight bytes by store (incl. the tied Q6_K token table that
+	// serves both gather and LM head) plus the LIVE lm_head route. Observability only:
+	// it never flips ok, and a planner without a loaded model omits the key entirely.
+	if rep, ok := s.planner.(agent.WeightResidencyReporter); ok {
+		if wr, ok := rep.WeightResidency(); ok {
+			health["resident_weights"] = wr
+		}
+	}
 	// #3051 readiness-vs-liveness: this endpoint answers "can the model serve
 	// NOW", not "is the process alive". A body that reports ok:false — warmup
 	// pending, a degenerate startup decode, a recent served-completion failure,

@@ -23,7 +23,9 @@ import (
 
 // inKernelHostAdmissionCopies is how many retained prefix-cache copies of the request's
 // state one host-session turn can admit: the adaptive checkpoint snapshot, the full-prompt
-// clone, and the generated-continuation clone (inkernel_decode.go steps 2-4).
+// clone, and the generated-continuation clone (inkernel_decode.go steps 2-4). The
+// optional shared-prefix boundary snapshot is priced separately by its own length
+// (hostSharedBoundaryDemand).
 const inKernelHostAdmissionCopies = 3
 
 // inKernelHostReliefHalvings bounds the pressure-relief loop: the prefix cache is halved
@@ -97,6 +99,19 @@ func (p *InKernelPlanner) hostRequestDemand(promptTokens, maxNew int) (session, 
 	return session, retained, plan
 }
 
+// hostSharedBoundaryDemand prices the optional shared-prefix boundary snapshot
+// (inkernel_shared_prefix_boundary.go): one complete copy of a boundary-token prefix.
+func (p *InKernelPlanner) hostSharedBoundaryDemand(boundary int) int64 {
+	if boundary <= 0 || p == nil || p.m == nil {
+		return 0
+	}
+	cs := p.m.Cfg.ContextSizeConfigWithPrecision(computeKVPrecisionFor(p.kvPrecision))
+	if perCopy := compute.EstimateKVStoreBytes(cs.KV, boundary) + cs.SessionState.Total(); perCopy > 0 {
+		return perCopy
+	}
+	return 0
+}
+
 // hostPrefillPanelBytes is the live f32 peak of one host prefill panel at the MLP: the
 // residual, normed and down-projected rows (3 x hidden) plus the gate and up rows
 // (2 x intermediate) for each panel token. The generic runtime-extras term prices only a
@@ -142,6 +157,11 @@ func (p *InKernelPlanner) admitHostMemory(ctx context.Context, promptTokens, max
 		return ctx, noop, nil
 	}
 	session, retained, plan := p.hostRequestDemand(promptTokens, maxNew)
+	if retained > 0 {
+		// The shared system/tools boundary snapshot is one more retained copy, priced at
+		// its own (shorter) prefix length.
+		retained += p.hostSharedBoundaryDemand(inKernelSharedPrefixBoundaryFromContext(ctx))
+	}
 	if session <= 0 {
 		return ctx, noop, nil
 	}

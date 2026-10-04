@@ -155,6 +155,9 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 			return nil, err
 		}
 	}
+	if err := s.resolveTiedQ6KEmbedding(cfg, &loadOpts); err != nil {
+		return nil, err
+	}
 	byDType := map[string]uint64{}
 	hostDenseStreamed := uint64(0)
 	seen := map[string]bool{}
@@ -221,10 +224,13 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 		if err != nil {
 			return nil, err
 		}
-		packedEmbedding := info.Name == "token_embd.weight" && (loadOpts.residentQ2KEmbedding || loadOpts.residentQ4KEmbedding || loadOpts.residentPQ2Embedding)
+		packedEmbedding := info.Name == "token_embd.weight" && (loadOpts.residentQ2KEmbedding || loadOpts.residentQ4KEmbedding || loadOpts.residentPQ2Embedding || loadOpts.residentTiedQ6KEmbedding)
 		// The MTP loader preserves its closed Q4/Q6 matrix roles, including
 		// reordered q/k, independently of ordinary target residency options.
-		packedQ4 := info.Type == TensorQ4_K && (qwenMTP || model.ResidentQ4KEligible(cfg, canon))
+		// fak#13567: the native-row route keeps qwen35 row-permuted projections packed. It is
+		// the loader's own predicate (qwen35NativeRowResident), so the two cannot disagree.
+		nativeRows := !qwenMTP && qwen35NativeRowResident(cfg, canon, info.Type, shape, loadOpts)
+		packedQ4 := info.Type == TensorQ4_K && (qwenMTP || nativeRows || model.ResidentQ4KEligible(cfg, canon))
 		blockWeights, _, residentable := residentExpertBlockGeometry(info.Type)
 		// retainKQuant mirrors the loader's dense k-quant retention predicate in
 		// quant_q4k_loader.go byte-for-byte: blanket k-quant residency, the selective Q2_K
@@ -233,7 +239,7 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 		// loader retains the packed tensor.
 		retainKQuant := denseKQuantRetained(loadOpts, info.Type)
 		packedKQuant := info.Type != TensorQ4_K && residentable &&
-			((qwenMTP && info.Type == TensorQ6_K) || (info.Type == TensorPQ2_0 && prismPQ2ResidentEligible(cfg, canon, loadOpts.prismGDNVGrouped)) ||
+			((qwenMTP && info.Type == TensorQ6_K) || nativeRows || (info.Type == TensorPQ2_0 && prismPQ2ResidentEligible(cfg, canon, loadOpts.prismGDNVGrouped)) ||
 				(retainKQuant && model.ResidentKQuantEligible(cfg, canon)))
 		n, dtype := payload, ggufTensorDTypeLabel(info.Type)
 		switch {
@@ -277,9 +283,10 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 			continue
 		}
 		byDType[dtype] += n
-		// The default tied loader keeps F32 embedding rows for gathers and a
+		// The legacy tied loader keeps F32 embedding rows for gathers and a
 		// separate native-Q8 copy for the output head. Charge both allocations.
-		if cfg.TieWordEmbeddings && canon == "model.embed_tokens.weight" && len(shape) == 2 {
+		// A packed tied Q6_K table (fak#13567) is the head itself: charged once above.
+		if cfg.TieWordEmbeddings && canon == "model.embed_tokens.weight" && len(shape) == 2 && !packedEmbedding {
 			if shape[1]%32 != 0 {
 				return nil, fmt.Errorf("gguf: tied embedding has invalid Q8 reduction dimension")
 			}

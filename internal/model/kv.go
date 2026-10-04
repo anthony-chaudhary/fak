@@ -941,6 +941,19 @@ func (s *Session) validatePackedQ2KEmbeddingGuards() {
 	// Q4_K and Q2_K superblocks identically, so the UD-Q2_K_XL artifact (whose
 	// token_embd.weight is genuinely Q2_K, #11961) must be admitted here too rather
 	// than panicking at the Metal guard below.
+	if s.M.TiedQ6KEmbeddingShared() {
+		// The tied Q6_K table gathers rows on the host and its head runs through headResident ->
+		// headKQuant (Metal Q6_K GEMV when MetalQ4K, else the CPU Q6_K GEMV), so any host Q4K
+		// session shape is admitted, with or without the f32 Metal flag (rawdecode, modelbench and
+		// the native scheduler set MetalQ4K alone).
+		if !s.Q4K {
+			panic("model: tied Q6_K embedding head requires a Q4K session (resident k-quant head)")
+		}
+		if s.Backend == nil && !s.Q4 && !s.F16 && !s.GPTQ && s.PrecisionPolicy == nil &&
+			s.DenseGPULayers == 0 && s.GPULayers == 0 {
+			return
+		}
+	}
 	switch s.M.Q2KEmbedding.Format() {
 	case "Q4_K", "Q2_K":
 		if s.M.Cfg.IsQwen35Hybrid() && !s.M.Cfg.IsMoE() &&

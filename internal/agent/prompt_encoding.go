@@ -30,6 +30,10 @@ type preparedPrompt struct {
 	ids              []int
 	maxNew           int
 	nativeCompaction *NativeCompactionObservation
+	// sharedBoundary is the token length of the rendered system/tools block when it
+	// is an exact prefix of ids (0 otherwise). Prefill admits a complete snapshot
+	// there so sibling requests can restore it on a recurrent hybrid.
+	sharedBoundary int
 }
 
 // EncodePrompt applies the same request options, prompt shrink, renderer, and
@@ -86,7 +90,11 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 	if sp.MaxTokens != nil && *sp.MaxTokens > 0 {
 		maxNew = *sp.MaxTokens
 	}
-	return preparedPrompt{messages: messages, tools: tools, rendered: rendered, ids: ids, maxNew: maxNew, nativeCompaction: shrink.nativeCompaction}, nil
+	return preparedPrompt{
+		messages: messages, tools: tools, rendered: rendered, ids: ids, maxNew: maxNew,
+		nativeCompaction: shrink.nativeCompaction,
+		sharedBoundary:   p.sharedPrefixBoundaryTokens(rendered, ids),
+	}, nil
 }
 
 func inKernelPromptRendererID(cfg model.Config, sp SampleParams) string {
