@@ -668,10 +668,16 @@ func qwen35SharedExpert(m *Model, layer int, xn any, mat matKernel) []float32 {
 	}
 	g := mat.mul(gn, xn, I, H)
 	u := mat.mul(un, xn, I, H)
-	for i := 0; i < I; i++ {
-		g[i] = act(g[i], cfg) * u[i]
+	// Delegate the ordered gated activation (act(g)*u) and the single down
+	// projection to the shared ffn.Gated component (fak#13448); the caller keeps
+	// ownership of the gate/up projection kernel, the width fallback, and the
+	// post-down scalar sigmoid output gate below.
+	out, err := ffn.Gated(g, u, func(v float32) float32 { return act(v, cfg) }, func(activated []float32) ([]float32, error) {
+		return mat.mul(dn, mat.prep(activated), H, I), nil
+	})
+	if err != nil {
+		panic(err)
 	}
-	out := mat.mul(dn, mat.prep(g), H, I)
 	// Scalar sigmoid gate: shared_expert_gate is a hidden->1 projection.
 	gate := sigmoid(mat.mul(qwen35SharedExpertName(layer, "gate.weight"), xn, 1, H)[0])
 	for i := 0; i < H; i++ {

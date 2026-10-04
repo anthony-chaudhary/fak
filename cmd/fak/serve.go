@@ -371,7 +371,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.nativeAdmissionTokenBudget = fs.Int("native-admission-token-budget", gateway.DefaultAdmissionPolicy().TokenBudget, "with in-kernel model: cap admitted token footprint. Must be positive (when not explicitly set, follows the resolved native context; 8192 is the unresolved/no-local-model fallback)")
 	sf.nativeCodeWorkspace = fs.String("native-code-workspace", "", "override workspace root for kernel coding tools. Requires --native.")
 	sf.nativeCodeTools = fs.Bool("native-code-tools", true, "arm bounded kernel coding tools in current workspace. Default true; pass false to disable.")
-	fs.Var(&sf.nativeAllowBashCommands, "native-allow-bash-command", "with --native, grant one byte-exact command to the server-owned bounded Bash tool (repeatable; focused defaults and all other safety gates remain active)")
+	fs.Var(&sf.nativeAllowBashCommands, "native-allow-bash-command", "with --native, grant one byte-exact command to the server-owned bounded Bash tool. Repeatable; focused defaults and all other safety gates remain active.")
 	sf.nativeBashCommandTimeout = fs.Duration("native-bash-command-timeout", 2*time.Minute, "with --native, hard timeout for each server-owned bounded Bash command (positive, maximum 10m)")
 	sf.nativeSpeculate = fs.Bool("native-speculate", false, "enable effect-free coding speculation. Requires --native-code-workspace.")
 	sf.vdsoProxyFill = fs.Bool("vdso-proxy-fill", false, "warm vDSO from admitted inbound tool_result blocks. Off by default — sound only when the principal is named and writes that touch the same resource reach fak (a proxy-closed world), so it is an explicit operator opt-in. Scoped per-principal; never fills a Shareable or write-shaped tool.")
