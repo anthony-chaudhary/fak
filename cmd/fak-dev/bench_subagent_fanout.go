@@ -82,6 +82,40 @@ var CanonicalArms = []string{
 // CanonicalFanoutSweep returns the required subagent fan-out sweep values.
 var CanonicalFanoutSweep = []int{1, 4, 8, 16, 32}
 
+// Fanout sweep scope verdicts. Only FanoutSweepFull can satisfy the contract; a
+// smoke subset runs but is always non-compliant and labeled partial.
+const (
+	FanoutSweepFull         = "full"
+	FanoutSweepSmokeSubset  = "smoke_subset"
+	FanoutSweepNonCanonical = "non_canonical"
+)
+
+// Live request shapes. RequestShapeCompletion sends the shared prefix inside a
+// legacy /v1/completions prompt; RequestShapeChatSystem sends it as the system
+// message of a /v1/chat/completions request with the subagent task as the user
+// turn, the shape a coordinator uses when it fans out subagents.
+const (
+	RequestShapeCompletion = "completion"
+	RequestShapeChatSystem = "chat-system"
+)
+
+// Live dispatch schedules. ScheduleConcurrent launches all N subagents at once;
+// ScheduleParentFirst completes subagent 0 before launching the other N-1, so
+// the siblings can reuse a prefix the server has already materialized.
+const (
+	ScheduleConcurrent  = "concurrent"
+	ScheduleParentFirst = "parent-first"
+)
+
+var (
+	ErrFanoutRequestShape    = errors.New("unknown -request-shape")
+	ErrFanoutSchedule        = errors.New("unknown -schedule")
+	ErrFanoutDeclaredCtx     = errors.New("invalid -declared-per-slot-ctx")
+	ErrReuseCounterAbsent    = errors.New("no cache-reuse counter in /metrics")
+	ErrReuseCounterReset     = errors.New("cache-reuse counter went backwards between scrapes")
+	ErrReuseScrapeIncomplete = errors.New("cache-reuse counter missing from one of the two scrapes")
+)
+
 // ArmDescription maps arm identifier to human-readable description.
 var ArmDescription = map[string]string{
 	ArmNoReuse:  "Arm 1: No-reuse baseline (cache disabled)",
@@ -143,7 +177,17 @@ type FanoutArmResult struct {
 	// (PrefixHitRate > 0) on a shared-prefix arm but the server observed none.
 	// A run with any divergence must fail rather than publish an unfalsifiable
 	// reuse claim.
-	ReuseDivergence           bool              `json:"reuse_divergence,omitempty"`
+	ReuseDivergence bool `json:"reuse_divergence,omitempty"`
+	// ReuseScrape is the before/after counter witness behind ObservedReuseTokens,
+	// present only when both scrapes read the same counter family.
+	ReuseScrape *FanoutReuseScrape `json:"reuse_scrape,omitempty"`
+	// ObservedReuseMultiplier is offered prompt tokens over prompt tokens the
+	// server actually computed (offered / (offered - reused)), both from the
+	// scraped counter deltas. Zero means the denominator was not observed.
+	ObservedReuseMultiplier   float64           `json:"observed_reuse_multiplier"`
+	RequestShape              string            `json:"request_shape,omitempty"`
+	Schedule                  string            `json:"schedule,omitempty"`
+	RequestsIssued            int               `json:"requests_issued,omitempty"`
 	TTFT                      DistributionStats `json:"ttft"`
 	ITL                       ITLStats          `json:"itl"`
 	DecodeThroughputTokPerSec float64           `json:"decode_throughput_tok_per_sec"`
@@ -188,8 +232,18 @@ type FanoutServeCompleteness struct {
 	// CapacitySource names where ObservedPerSlotTokens came from, or why it is
 	// absent. It is the auditor's trail: "llama.cpp /props" is authoritative.
 	CapacitySource string `json:"capacity_source"`
-	// ControlArmServed is the single gate bit. True only when the observed
-	// per-slot capacity provably covers RequestedTotalTokens.
+	// DeclaredPerSlotTokens is the operator-declared per-slot capacity, used
+	// only when no /props surface reported one. It is never copied into
+	// ObservedPerSlotTokens.
+	DeclaredPerSlotTokens int `json:"declared_per_slot_tokens,omitempty"`
+	// CapacityDeclared is true when the admission rests on the declaration,
+	// not an observation.
+	CapacityDeclared bool `json:"capacity_declared"`
+	// PrimaryProbe records why the arm endpoint's own /props was unusable when
+	// capacity came from the upstream /props or a declaration.
+	PrimaryProbe string `json:"primary_probe,omitempty"`
+	// ControlArmServed is the single gate bit. True only when the observed (or
+	// explicitly declared) per-slot capacity covers RequestedTotalTokens.
 	ControlArmServed bool `json:"control_arm_served"`
 	// Refusal is one of FanoutServeRefusalVocabulary, empty exactly when served.
 	Refusal string `json:"refusal,omitempty"`
@@ -232,6 +286,10 @@ type servedPropsWire struct {
 	} `json:"default_generation_settings"`
 }
 
+const propsSlotCapacityField = "default_generation_settings.n_ctx"
+
+func (p servedPropsWire) perSlot() int { return p.DefaultGenerationSettings.NCtx }
+
 // ContractValidation records compliance against Issue #6036 and #12325 mandates.
 type ContractValidation struct {
 	Compliant                   bool     `json:"compliant"`
@@ -245,9 +303,14 @@ type ContractValidation struct {
 	PresentArms                 []string `json:"present_arms"`
 	FanoutSweepVerified         bool     `json:"fanout_sweep_verified"`
 	ObservedFanoutSweep         []int    `json:"observed_fanout_sweep"`
-	CapturedTTFTDistributions   bool     `json:"captured_ttft_distributions"`
-	CapturedITLJitter           bool     `json:"captured_itl_jitter"`
-	Violations                  []string `json:"violations,omitempty"`
+	// SweepScope is one of FanoutSweepFull, FanoutSweepSmokeSubset,
+	// FanoutSweepNonCanonical. Partial is true for a smoke subset: the run is
+	// admitted but can never be Compliant.
+	SweepScope                string   `json:"sweep_scope"`
+	Partial                   bool     `json:"partial"`
+	CapturedTTFTDistributions bool     `json:"captured_ttft_distributions"`
+	CapturedITLJitter         bool     `json:"captured_itl_jitter"`
+	Violations                []string `json:"violations,omitempty"`
 }
 
 // SubagentFanoutReceipt is the complete machine-readable benchmark receipt.
@@ -312,6 +375,30 @@ type FanoutBenchConfig struct {
 	// measurement); a positive value fails the run when the measured aggregate
 	// falls short (issue #13076).
 	MinUnifiedTPS float64
+	// UpstreamPropsURL is the base URL of the server behind a proxying gateway
+	// (e.g. the llama-server a fak gateway forwards to). Its /props is read when
+	// the arm endpoint's own /props cannot report per-slot capacity.
+	UpstreamPropsURL string
+	// DeclaredPerSlotCtx is the last-resort operator declaration of per-slot
+	// capacity, recorded as declared, never as observed. Zero disables it.
+	DeclaredPerSlotCtx int
+	RequestShape       string
+	Schedule           string
+}
+
+// FanoutReuseScrape is the counter witness for one live cell: the single
+// counter family read before and after the cell, and its delta.
+type FanoutReuseScrape struct {
+	Counter          string `json:"counter"`
+	Path             string `json:"path"`
+	Before           int64  `json:"before"`
+	After            int64  `json:"after"`
+	Delta            int64  `json:"delta"`
+	PromptCounter    string `json:"prompt_counter,omitempty"`
+	PromptTokenDelta int64  `json:"prompt_token_delta,omitempty"`
+	// OfferedTokens is the total prompt tokens the server saw in the cell,
+	// cached plus computed. Zero when no paired prompt counter was readable.
+	OfferedTokens int64 `json:"offered_tokens,omitempty"`
 }
 
 // runBenchSubagentFanout executes the apples-to-apples subagent fanout benchmark harness.
@@ -327,7 +414,7 @@ func runBenchSubagentFanout(stdout, stderr io.Writer, argv []string) int {
 
 	// Validate contract invariants.
 	validation := validateContractInvariants(cfg)
-	if cfg.VerifyContract && !validation.Compliant {
+	if cfg.VerifyContract && len(validation.Violations) > 0 {
 		fmt.Fprintf(stderr, "fak-dev bench-subagent-fanout: contract validation failed (Issue #%s):\n", ContractIssue6036)
 		for _, v := range validation.Violations {
 			fmt.Fprintf(stderr, "  - %s\n", v)
@@ -393,7 +480,7 @@ func runBenchSubagentFanout(stdout, stderr io.Writer, argv []string) int {
 		return code
 	}
 
-	if cfg.VerifyContract && !receipt.Contract.Compliant {
+	if cfg.VerifyContract && len(receipt.Contract.Violations) > 0 {
 		return 1
 	}
 	return 0
@@ -444,12 +531,30 @@ func parseFanoutFlags(stderr io.Writer, argv []string) (*FanoutBenchConfig, erro
 	outFile := fs.String("out", "", "path to write benchmark receipt JSON")
 	seed := fs.Int64("seed", 42, "PRNG seed for deterministic simulation")
 	minUnifiedTPS := fs.Float64("min-unified-tps", 0, "optional unified-throughput SLO floor (tokens/sec) across the whole sweep; 0 disables the gate (issue #13076)")
+	upstreamProps := fs.String("upstream-props-url", "", "base URL of the server behind a proxying gateway; its /props supplies per-slot capacity when the arm endpoint's /props cannot")
+	declaredCtx := fs.Int("declared-per-slot-ctx", 0, "last-resort per-slot context capacity, recorded as DECLARED (not observed) when no /props reports one; 0 disables")
+	shape := fs.String("request-shape", RequestShapeCompletion, "live request shape: completion (legacy /v1/completions prompt) or chat-system (shared prefix as the chat system message)")
+	schedule := fs.String("schedule", ScheduleConcurrent, "live dispatch schedule: concurrent (all N at once) or parent-first (subagent 0 completes before the other N-1 launch)")
 
 	if err := fs.Parse(argv); err != nil {
 		return nil, err
 	}
 	if *minUnifiedTPS < 0 {
 		return nil, fmt.Errorf("invalid -min-unified-tps %.3f: must be >= 0", *minUnifiedTPS)
+	}
+
+	if *declaredCtx < 0 {
+		return nil, fmt.Errorf("%w: %d must be >= 0", ErrFanoutDeclaredCtx, *declaredCtx)
+	}
+	switch *shape {
+	case RequestShapeCompletion, RequestShapeChatSystem:
+	default:
+		return nil, fmt.Errorf("%w %q", ErrFanoutRequestShape, *shape)
+	}
+	switch *schedule {
+	case ScheduleConcurrent, ScheduleParentFirst:
+	default:
+		return nil, fmt.Errorf("%w %q", ErrFanoutSchedule, *schedule)
 	}
 
 	fanouts, err := parseCommaInts(*fanoutStr)
@@ -496,6 +601,11 @@ func parseFanoutFlags(stderr io.Writer, argv []string) (*FanoutBenchConfig, erro
 		OutputFile:     *outFile,
 		Seed:           *seed,
 		MinUnifiedTPS:  *minUnifiedTPS,
+
+		UpstreamPropsURL:   *upstreamProps,
+		DeclaredPerSlotCtx: *declaredCtx,
+		RequestShape:       *shape,
+		Schedule:           *schedule,
 	}, nil
 }
 
@@ -569,20 +679,14 @@ func validateContractInvariants(cfg *FanoutBenchConfig) ContractValidation {
 		}
 	}
 
-	// 4. Enforce fanout sweep covers [1, 4, 8, 16, 32]
-	fanoutMap := make(map[int]bool)
-	for _, n := range cfg.FanoutSweep {
-		fanoutMap[n] = true
-	}
-	sweepVerified := true
-	for _, reqN := range CanonicalFanoutSweep {
-		if !fanoutMap[reqN] {
-			sweepVerified = false
-			violations = append(violations, fmt.Sprintf("mandatory fanout sweep value N=%d is missing", reqN))
-		}
-	}
+	// 4. The full contract sweep is exactly [1, 4, 8, 16, 32]. A subset of it is
+	// an admitted smoke run that can never be compliant; any other value is a
+	// violation.
+	scope, sweepViolations := classifyFanoutSweep(cfg.FanoutSweep)
+	violations = append(violations, sweepViolations...)
+	sweepVerified := scope == FanoutSweepFull
 
-	compliant := len(violations) == 0
+	compliant := len(violations) == 0 && sweepVerified
 
 	return ContractValidation{
 		Compliant:                   compliant,
@@ -596,6 +700,8 @@ func validateContractInvariants(cfg *FanoutBenchConfig) ContractValidation {
 		PresentArms:                 cfg.Arms,
 		FanoutSweepVerified:         sweepVerified,
 		ObservedFanoutSweep:         cfg.FanoutSweep,
+		SweepScope:                  scope,
+		Partial:                     scope == FanoutSweepSmokeSubset,
 		CapturedTTFTDistributions:   true,
 		CapturedITLJitter:           true,
 		Violations:                  violations,
@@ -613,11 +719,12 @@ type SubagentFanoutHarness struct {
 	ObserveReuse reuseObserver
 }
 
-// reuseObserver reads the cache-reuse tokens a live server actually served from
-// its telemetry surface, and names the source. A non-nil error means the
-// telemetry could not be read — the cell records an evidence gap rather than
+// reuseObserver scrapes a live server's cumulative counters by family name (the
+// Prometheus name with any `_total` suffix trimmed, all label series summed). The
+// cell scrapes before and after and uses the delta. A non-nil error means the
+// telemetry could not be read; the cell records an evidence gap rather than
 // inventing a value.
-type reuseObserver func(ctx context.Context, endpoint string) (reusedTokens int64, source string, err error)
+type reuseObserver func(ctx context.Context, endpoint string) (map[string]int64, error)
 
 // NewFanoutBenchmarkHarness creates a harness configured with the provided options.
 func NewFanoutBenchmarkHarness(cfg *FanoutBenchConfig) *SubagentFanoutHarness {
@@ -969,6 +1076,14 @@ func (h *SubagentFanoutHarness) executeLiveCell(ctx context.Context, arm string,
 	P := h.Config.PrefixTokens
 	S := h.Config.SuffixTokens
 	D := h.Config.DecodeTokens
+	shape := h.Config.RequestShape
+	if shape == "" {
+		shape = RequestShapeCompletion
+	}
+	schedule := h.Config.Schedule
+	if schedule == "" {
+		schedule = ScheduleConcurrent
+	}
 
 	// Declare the frozen workload geometry and verify the reference actually
 	// serves it before spending a single measured request. A control arm that
@@ -982,6 +1097,8 @@ func (h *SubagentFanoutHarness) executeLiveCell(ctx context.Context, arm string,
 		PrefixTokens:      P,
 		SuffixTokens:      S,
 		DecodeTokens:      D,
+		RequestShape:      shape,
+		Schedule:          schedule,
 		ServeCompleteness: completeness,
 	}
 	if cerr != nil {
@@ -991,6 +1108,12 @@ func (h *SubagentFanoutHarness) executeLiveCell(ctx context.Context, arm string,
 		res.Error = completeness.Detail
 		return res, cerr
 	}
+
+	obs := h.ObserveReuse
+	if obs == nil {
+		obs = defaultHTTPReuseObserver
+	}
+	before, beforeErr := obs(ctx, endpoint)
 
 	prefixPrompt := strings.Repeat("system instruction root coordinator master prompt ", P/8)
 	totalPromptTokens := int64(n) * int64(P+S)
@@ -1002,93 +1125,95 @@ func (h *SubagentFanoutHarness) executeLiveCell(ctx context.Context, arm string,
 		Timeout: 120 * time.Second,
 	}
 
-	startWall := time.Now()
+	var mu sync.Mutex
+	var errs []error
+	recordErr := func(err error) {
+		mu.Lock()
+		errs = append(errs, err)
+		mu.Unlock()
+	}
 
-	for t := 0; t < trials; t++ {
+	runSubagent := func(subIndex int) {
+		task := fmt.Sprintf("subagent task leaf %d specific instruction context tokens", subIndex)
+		path, reqBody := fanoutRequestBody(shape, h.Config.Model, prefixPrompt, task, D)
+		bodyBytes, _ := json.Marshal(reqBody)
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(endpoint, "/")+path, bytes.NewReader(bodyBytes))
+		if err != nil {
+			recordErr(err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		reqStart := time.Now()
+		resp, err := client.Do(req)
+		if err != nil {
+			recordErr(err)
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			recordErr(fmt.Errorf("HTTP status %d", resp.StatusCode))
+			return
+		}
+
+		reader := bufio.NewReader(resp.Body)
+		var prevTokenTime time.Time
+		firstToken := true
+
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				break
+			}
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "data: [DONE]") {
+				break
+			}
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+
+			now := time.Now()
+			if firstToken {
+				firstToken = false
+				ttftMs := now.Sub(reqStart).Seconds() * 1000.0
+				mu.Lock()
+				ttftSamples = append(ttftSamples, ttftMs)
+				mu.Unlock()
+			} else {
+				itlMs := now.Sub(prevTokenTime).Seconds() * 1000.0
+				mu.Lock()
+				itlSamples = append(itlSamples, itlMs)
+				mu.Unlock()
+			}
+			prevTokenTime = now
+		}
+	}
+
+	runWave := func(from, to int) {
 		var wg sync.WaitGroup
-		var mu sync.Mutex
-		errs := make([]error, 0)
-
-		for sub := 0; sub < n; sub++ {
+		for sub := from; sub < to; sub++ {
 			wg.Add(1)
 			go func(subIndex int) {
 				defer wg.Done()
-				subPrompt := fmt.Sprintf("%s\nsubagent task leaf %d specific instruction context tokens", prefixPrompt, subIndex)
-
-				reqBody := map[string]any{
-					"model":       h.Config.Model,
-					"prompt":      subPrompt,
-					"max_tokens":  D,
-					"stream":      true,
-					"temperature": 0.0,
-				}
-				bodyBytes, _ := json.Marshal(reqBody)
-
-				req, err := http.NewRequestWithContext(ctx, "POST", endpoint+"/v1/completions", bytes.NewReader(bodyBytes))
-				if err != nil {
-					mu.Lock()
-					errs = append(errs, err)
-					mu.Unlock()
-					return
-				}
-				req.Header.Set("Content-Type", "application/json")
-
-				reqStart := time.Now()
-				resp, err := client.Do(req)
-				if err != nil {
-					mu.Lock()
-					errs = append(errs, err)
-					mu.Unlock()
-					return
-				}
-				defer resp.Body.Close()
-
-				if resp.StatusCode != http.StatusOK {
-					mu.Lock()
-					errs = append(errs, fmt.Errorf("HTTP status %d", resp.StatusCode))
-					mu.Unlock()
-					return
-				}
-
-				reader := bufio.NewReader(resp.Body)
-				var firstTokenTime time.Time
-				var prevTokenTime time.Time
-				firstToken := true
-
-				for {
-					line, err := reader.ReadString('\n')
-					if err != nil {
-						break
-					}
-					line = strings.TrimSpace(line)
-					if strings.HasPrefix(line, "data: [DONE]") {
-						break
-					}
-					if !strings.HasPrefix(line, "data: ") {
-						continue
-					}
-
-					now := time.Now()
-					if firstToken {
-						firstToken = false
-						firstTokenTime = now
-						ttftMs := firstTokenTime.Sub(reqStart).Seconds() * 1000.0
-						mu.Lock()
-						ttftSamples = append(ttftSamples, ttftMs)
-						mu.Unlock()
-						prevTokenTime = now
-					} else {
-						itlMs := now.Sub(prevTokenTime).Seconds() * 1000.0
-						mu.Lock()
-						itlSamples = append(itlSamples, itlMs)
-						mu.Unlock()
-						prevTokenTime = now
-					}
-				}
+				runSubagent(subIndex)
 			}(sub)
 		}
 		wg.Wait()
+	}
 
+	startWall := time.Now()
+	requests := 0
+	for t := 0; t < trials; t++ {
+		if schedule == ScheduleParentFirst && n > 1 {
+			runWave(0, 1)
+			runWave(1, n)
+		} else {
+			runWave(0, n)
+		}
+		requests += n
 		if len(errs) > 0 {
 			return FanoutArmResult{}, fmt.Errorf("cell execution failed with %d errors (first: %v)", len(errs), errs[0])
 		}
@@ -1122,6 +1247,9 @@ func (h *SubagentFanoutHarness) executeLiveCell(ctx context.Context, arm string,
 		TotalPromptTokens:         totalPromptTokens,
 		ReusedTokens:              reusedTokens,
 		PrefixHitRate:             hitRate,
+		RequestShape:              shape,
+		Schedule:                  schedule,
+		RequestsIssued:            requests,
 		TTFT:                      ttftDist,
 		ITL:                       itlDist,
 		DecodeThroughputTokPerSec: throughput,
@@ -1131,113 +1259,21 @@ func (h *SubagentFanoutHarness) executeLiveCell(ctx context.Context, arm string,
 		OutputHash:                deterministicOutputHash(arm, n, P, S, D),
 		ServeCompleteness:         completeness,
 	}
-	// Read what the server actually reused (issue #13076). This is the measured
-	// twin of the analytic PrefixHitRate above; a read failure is recorded as an
-	// evidence gap, never fabricated.
-	h.observeCellReuse(ctx, arm, endpoint, &res)
+	// Read what the server actually reused during this cell (issue #13076):
+	// the delta of one counter family between the pre- and post-cell scrapes.
+	// A read failure is recorded as an evidence gap, never fabricated.
+	if beforeErr != nil {
+		applyCellReuse(&res, nil, beforeErr)
+		return res, nil
+	}
+	after, afterErr := obs(ctx, endpoint)
+	if afterErr != nil {
+		applyCellReuse(&res, nil, afterErr)
+		return res, nil
+	}
+	scrape, err := selectReuseDelta(before, after)
+	applyCellReuse(&res, scrape, err)
 	return res, nil
-}
-
-// defaultHTTPReuseObserver reads the server's Prometheus text exposition and sums
-// every counter whose name ends in the cache-reuse token suffix. It is the
-// production implementation of the reuseObserver seam (issue #13076): the live
-// fan-out cell reads what the server actually reused instead of recomputing
-// (n-1)*P arithmetic. It returns an error when /metrics is unreachable or carries
-// no matching counter, so the caller records an evidence gap rather than zero.
-func defaultHTTPReuseObserver(ctx context.Context, endpoint string) (int64, string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", endpoint+"/metrics", nil)
-	if err != nil {
-		return 0, FanoutReuseSourceUnobserved, err
-	}
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, FanoutReuseSourceUnobserved, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return 0, FanoutReuseSourceUnobserved, fmt.Errorf("GET /metrics: HTTP status %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return 0, FanoutReuseSourceUnobserved, err
-	}
-	total, found := parsePrometheusReuseTokens(string(body))
-	if !found {
-		return 0, FanoutReuseSourceUnobserved, fmt.Errorf("GET /metrics: no cache-reuse counter matching %q", reuseMetricSuffix)
-	}
-	return total, FanoutReuseSourcePrometheus, nil
-}
-
-// reuseMetricSuffix is the counter-name suffix the Prometheus reader sums. It
-// binds to the public cache-observability field spelling (internal/cacheobs
-// FieldReusedTokens = "reused_tokens"), so the harness reads the same metric the
-// gateway emits rather than a private re-spelling.
-const reuseMetricSuffix = "reused_tokens"
-
-// parsePrometheusReuseTokens sums every sample whose metric name ends in
-// reuseMetricSuffix (with or without the Prometheus `_total` counter suffix, so
-// both `..._reused_tokens` and `..._reused_tokens_total` bind), from a Prometheus
-// text exposition. It returns found=false when no matching sample is present, so
-// an absent metric is distinguishable from a measured zero.
-func parsePrometheusReuseTokens(body string) (int64, bool) {
-	var total int64
-	found := false
-	for _, line := range strings.Split(body, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		name := line
-		if i := strings.IndexAny(line, "{ \t"); i >= 0 {
-			name = line[:i]
-		}
-		name = strings.TrimSuffix(name, "_total")
-		if !strings.HasSuffix(name, reuseMetricSuffix) {
-			continue
-		}
-		// The value is the last whitespace-separated token on the line.
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		v, err := strconv.ParseFloat(fields[len(fields)-1], 64)
-		if err != nil {
-			continue
-		}
-		total += int64(v)
-		found = true
-	}
-	return total, found
-}
-
-// observeCellReuse reads server-side reuse for one live cell through the
-// injectable seam and folds it into the result: the measured counters, the
-// source tag, and the divergence verdict against the analytic estimate. A read
-// failure is an evidence gap (ObservedReuseTokens stays zero, source unobserved,
-// no divergence flag) — never a silent zero that reads as a measured result.
-func (h *SubagentFanoutHarness) observeCellReuse(ctx context.Context, arm, endpoint string, res *FanoutArmResult) {
-	obs := h.ObserveReuse
-	if obs == nil {
-		obs = defaultHTTPReuseObserver
-	}
-	reused, source, err := obs(ctx, endpoint)
-	if err != nil {
-		res.ReuseObservationSource = FanoutReuseSourceUnobserved
-		res.ObservedReuseTokens = 0
-		res.ObservedHitRate = 0
-		return
-	}
-	res.ReuseObservationSource = source
-	res.ObservedReuseTokens = reused
-	if res.TotalPromptTokens > 0 {
-		res.ObservedHitRate = float64(reused) / float64(res.TotalPromptTokens)
-	}
-	// Divergence: the analytic estimate claims shared-prefix reuse on a
-	// shared-prefix arm, but the server observed none.
-	if res.PrefixHitRate > 0 && reused == 0 {
-		res.ReuseDivergence = true
-	}
 }
 
 // verifyServedGeometry probes the reference server for the per-slot context
@@ -1248,12 +1284,12 @@ func (h *SubagentFanoutHarness) observeCellReuse(ctx context.Context, arm, endpo
 // DecodeTokens = D back, so one slot must hold P+S+D. llama.cpp partitions
 // -c/--ctx-size across --parallel sequences, so the served per-slot limit is the
 // /props default_generation_settings.n_ctx (verified: `-c 32768 --parallel 8`
-// reports n_ctx=4096). The observed limit is read from the running server; no
-// context flag is invented or assumed.
+// reports n_ctx=4096).
 //
-// A shortfall, or an unreadable/undeclared limit, returns a non-nil error and a
-// populated FanoutServeCompleteness carrying the structured refusal, so the cell
-// can never be counted as a measured/compared control arm.
+// Capacity sources, in order: the arm endpoint's own /props; the upstream
+// server's /props (-upstream-props-url) when the endpoint is a proxying
+// gateway; an operator declaration (-declared-per-slot-ctx), recorded as
+// declared and never as observed. With none of them the cell fails closed.
 func (h *SubagentFanoutHarness) verifyServedGeometry(ctx context.Context, arm, endpoint string, p, s, d int) (*FanoutServeCompleteness, error) {
 	promptTokens := p + s
 	requested := promptTokens + d
@@ -1272,38 +1308,38 @@ func (h *SubagentFanoutHarness) verifyServedGeometry(ctx context.Context, arm, e
 		return sc, errors.New(detail)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(endpoint, "/")+"/props", nil)
-	if err != nil {
-		return fail(FanoutServeRefuseProbeError, "llama.cpp /props (unbuildable request)",
-			fmt.Sprintf("serve-completeness probe: could not build /props request for %s: %v", arm, err), true)
-	}
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fail(FanoutServeRefuseProbeError, "llama.cpp /props (transport error)",
-			fmt.Sprintf("serve-completeness probe: /props unreachable for %s at %s: %v", arm, endpoint, err), true)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fail(FanoutServeRefuseCapacityUnobserved, fmt.Sprintf("llama.cpp /props (HTTP %d)", resp.StatusCode),
-			fmt.Sprintf("serve-completeness probe: %s /props returned HTTP %d; served per-slot capacity is UNOBSERVED, refusing to assume a default", arm, resp.StatusCode), true)
+	props, probe := probeServedProps(ctx, endpoint, "llama.cpp /props")
+	if probe.refusal != "" {
+		primary := probe
+		detail := primary.detail
+		if up := strings.TrimSpace(h.Config.UpstreamPropsURL); up != "" {
+			props, probe = probeServedProps(ctx, up, "upstream llama.cpp /props")
+			detail += "; " + probe.detail
+		}
+		if probe.refusal == "" {
+			sc.PrimaryProbe = primary.source
+		} else if declared := h.Config.DeclaredPerSlotCtx; declared > 0 {
+			sc.PrimaryProbe = primary.source
+			sc.DeclaredPerSlotTokens = declared
+			sc.CapacityDeclared = true
+			sc.CapacitySource = "declared -declared-per-slot-ctx (UNOBSERVED)"
+			if declared < requested {
+				return fail(FanoutServeRefusePromptOverflow, sc.CapacitySource,
+					fmt.Sprintf("serve-completeness probe: %s declared %d tokens/slot but the frozen geometry needs P+S+D=%d (P=%d S=%d D=%d); the cell fails closed",
+						arm, declared, requested, p, s, d), false)
+			}
+			sc.ControlArmServed = true
+			return sc, nil
+		} else {
+			return fail(primary.refusal, primary.source,
+				fmt.Sprintf("serve-completeness probe: %s %s; served per-slot capacity is UNOBSERVED, refusing to assume a default (set -upstream-props-url for a proxying gateway, or -declared-per-slot-ctx)", arm, detail), true)
+		}
 	}
 
-	var props servedPropsWire
-	if err := json.NewDecoder(resp.Body).Decode(&props); err != nil {
-		return fail(FanoutServeRefuseCapacityUnobserved, "llama.cpp /props (malformed JSON)",
-			fmt.Sprintf("serve-completeness probe: %s /props was not decodable: %v", arm, err), true)
-	}
-
-	perSlot := props.DefaultGenerationSettings.NCtx
+	perSlot := props.perSlot()
 	sc.ObservedPerSlotTokens = perSlot
 	sc.ObservedTotalSlots = props.TotalSlots
-	sc.CapacitySource = "llama.cpp /props default_generation_settings.n_ctx"
-
-	if perSlot <= 0 {
-		return fail(FanoutServeRefuseCapacityUnobserved, sc.CapacitySource,
-			fmt.Sprintf("serve-completeness probe: %s /props reported no n_ctx (per-slot capacity UNOBSERVED); the reference command must set -c/--ctx-size so that -c/--parallel >= P+S+D=%d", arm, requested), true)
-	}
+	sc.CapacitySource = probe.source
 
 	if perSlot < requested {
 		slotsNote := ""
@@ -1661,6 +1697,12 @@ func renderPrettyReceipt(w io.Writer, r *SubagentFanoutReceipt) {
 			res.ITL.JitterMs,
 			res.DecodeThroughputTokPerSec,
 		)
+		if res.ReuseObservationSource != "" {
+			fmt.Fprintf(w, "       %-26s | %s/%s: %s\n", "", res.RequestShape, res.Schedule, renderCellReuse(res))
+		}
+		if sc := res.ServeCompleteness; sc != nil && sc.CapacityDeclared {
+			fmt.Fprintf(w, "       %-26s | capacity DECLARED %d tokens/slot (unobserved; primary: %s)\n", "", sc.DeclaredPerSlotTokens, sc.PrimaryProbe)
+		}
 	}
 
 	fmt.Fprintln(w, strings.Repeat("=", 120))
@@ -1680,11 +1722,14 @@ func renderPrettyReceipt(w io.Writer, r *SubagentFanoutReceipt) {
 	if len(r.ReuseDivergenceArms) > 0 {
 		fmt.Fprintf(w, "REUSE DIVERGENCE (analytic reuse unobserved by server): %s\n", strings.Join(r.ReuseDivergenceArms, ", "))
 	}
-	fmt.Fprintf(w, "Issue #6036 Contract Audit: %s\n", contractStatusLabel(r.Contract.Compliant))
+	fmt.Fprintf(w, "Issue #6036 Contract Audit: %s\n", contractStatusLabel(r.Contract))
 	fmt.Fprintf(w, "  - All 4 Arms Present: %v\n", r.Contract.AllFourArmsPresent)
 	fmt.Fprintf(w, "  - Identical Weights & Quantization: %v (%s / %s)\n", r.Contract.IdenticalWeightsEnforced && r.Contract.IdenticalQuantization, r.Model, r.Quantization)
 	fmt.Fprintf(w, "  - Fixed Memory Fraction 0.85: %v (observed %.2f)\n", r.Contract.FixedMemoryFractionVerified, r.Contract.ObservedMemoryFraction)
-	fmt.Fprintf(w, "  - Fanout Sweep Verified [1,4,8,16,32]: %v\n", r.Contract.FanoutSweepVerified)
+	fmt.Fprintf(w, "  - Fanout Sweep Verified [1,4,8,16,32]: %v (scope %s)\n", r.Contract.FanoutSweepVerified, r.Contract.SweepScope)
+	if r.Contract.Partial {
+		fmt.Fprintln(w, "  - PARTIAL: smoke subset of the canonical sweep; not a full contract run")
+	}
 	fmt.Fprintf(w, "  - Captured TTFT (p50/p95/p99) & ITL Jitter: %v\n", r.Contract.CapturedTTFTDistributions && r.Contract.CapturedITLJitter)
 
 	if len(r.Contract.Violations) > 0 {
@@ -1696,8 +1741,24 @@ func renderPrettyReceipt(w io.Writer, r *SubagentFanoutReceipt) {
 	fmt.Fprintln(w, strings.Repeat("=", 120))
 }
 
-func contractStatusLabel(compliant bool) string {
-	if compliant {
+func renderCellReuse(res FanoutArmResult) string {
+	sc := res.ReuseScrape
+	if sc == nil {
+		return "observed reuse UNOBSERVED"
+	}
+	mult := "multiplier unobserved"
+	if res.ObservedReuseMultiplier > 0 {
+		mult = fmt.Sprintf("reuse multiplier %.2fx", res.ObservedReuseMultiplier)
+	}
+	return fmt.Sprintf("observed reuse %d tokens (%s delta %d->%d, offered %d, hit %.1f%%), %s",
+		sc.Delta, sc.Counter, sc.Before, sc.After, sc.OfferedTokens, res.ObservedHitRate*100.0, mult)
+}
+
+func contractStatusLabel(c ContractValidation) string {
+	if c.Partial && len(c.Violations) == 0 {
+		return "PARTIAL (smoke subset; not a full contract run)"
+	}
+	if c.Compliant {
 		return "PASS (Compliant)"
 	}
 	return "FAIL (Non-Compliant)"

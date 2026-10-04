@@ -762,7 +762,7 @@ func TestSubagentFanoutConcurrencyScaling(t *testing.T) {
 // /props with an adequate per-slot capacity, and a streaming /v1/completions.
 // The caller supplies the /metrics body (or metricsOK=false to 404 it) so the
 // observed-reuse read is exercised end to end.
-func fanoutLiveReuseFixture(t *testing.T, metricsBody string, metricsOK bool) (*httptest.Server, *int64) {
+func fanoutLiveReuseFixture(t *testing.T, metricsBody func(completions int64) string, metricsOK bool) (*httptest.Server, *int64) {
 	t.Helper()
 	var hits int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -775,8 +775,8 @@ func fanoutLiveReuseFixture(t *testing.T, metricsBody string, metricsOK bool) (*
 				return
 			}
 			w.Header().Set("Content-Type", "text/plain")
-			fmt.Fprint(w, metricsBody)
-		case "/v1/completions":
+			fmt.Fprint(w, metricsBody(atomic.LoadInt64(&hits)))
+		case "/v1/completions", "/v1/chat/completions":
 			atomic.AddInt64(&hits, 1)
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(http.StatusOK)
@@ -803,7 +803,10 @@ func fanoutLiveReuseFixture(t *testing.T, metricsBody string, metricsOK bool) (*
 // the SERVER reports, distinct from the analytic estimate, and reads it from the
 // Prometheus text exposition (issue #13076).
 func TestFanoutObservedReuseFromPrometheus(t *testing.T) {
-	metrics := "# HELP fak_gateway_kv_prefix_reused_tokens_total reused\n# TYPE fak_gateway_kv_prefix_reused_tokens_total counter\nfak_gateway_kv_prefix_reused_tokens_total 4096\n"
+	metrics := func(completions int64) string {
+		return "# HELP fak_gateway_kv_prefix_reused_tokens_total reused\n# TYPE fak_gateway_kv_prefix_reused_tokens_total counter\n" +
+			fmt.Sprintf("fak_gateway_kv_prefix_reused_tokens_total %d\n", 2048*completions)
+	}
 	srv, _ := fanoutLiveReuseFixture(t, metrics, true)
 
 	h := NewFanoutBenchmarkHarness(&FanoutBenchConfig{
@@ -853,7 +856,7 @@ func TestFanoutObservedReuseFromPrometheus(t *testing.T) {
 // non-zero rather than publishing an unfalsifiable reuse claim (issue #13076).
 func TestFanoutReuseDivergenceFailsRun(t *testing.T) {
 	// A well-formed /metrics that reports zero reused tokens.
-	srv, _ := fanoutLiveReuseFixture(t, "fak_gateway_kv_prefix_reused_tokens_total 0\n", true)
+	srv, _ := fanoutLiveReuseFixture(t, func(int64) string { return "fak_gateway_kv_prefix_reused_tokens_total 0\n" }, true)
 
 	var stdout, stderr bytes.Buffer
 	code := runBenchSubagentFanout(&stdout, &stderr, []string{
@@ -887,7 +890,7 @@ func TestFanoutReuseDivergenceFailsRun(t *testing.T) {
 // is recorded as an unobserved evidence gap, not a fabricated zero, and does not
 // by itself flag divergence (an unmeasured value is not a measured zero).
 func TestFanoutReuseObserverUnobservedIsEvidenceGap(t *testing.T) {
-	srv, _ := fanoutLiveReuseFixture(t, "", false) // /metrics 404s
+	srv, _ := fanoutLiveReuseFixture(t, func(int64) string { return "" }, false)
 
 	h := NewFanoutBenchmarkHarness(&FanoutBenchConfig{
 		Model:          "Qwen/Qwen2.5-Coder-7B-Instruct",
@@ -1029,42 +1032,6 @@ func TestFanoutGateExitCode(t *testing.T) {
 	t.Run("NilReceiptFails", func(t *testing.T) {
 		if got := fanoutGateExitCode(nil); got != 1 {
 			t.Errorf("a nil receipt must fail closed, got %d", got)
-		}
-	})
-}
-
-// TestParsePrometheusReuseTokens pins the reader: it sums matching counters,
-// ignores comments/HELP/TYPE lines, tolerates label sets, accepts both the bare
-// and `_total` counter spellings, and distinguishes an absent metric from a
-// measured zero.
-func TestParsePrometheusReuseTokens(t *testing.T) {
-	t.Run("SumsMatchingWithTotalSuffix", func(t *testing.T) {
-		body := "# HELP fak_gateway_kv_prefix_reused_tokens_total x\n" +
-			"# TYPE fak_gateway_kv_prefix_reused_tokens_total counter\n" +
-			"fak_gateway_kv_prefix_reused_tokens_total{arm=\"fak\"} 100\n" +
-			"fak_gateway_kv_prefix_reused_tokens_total{arm=\"other\"} 50\n" +
-			"unrelated_metric_total 9999\n"
-		got, found := parsePrometheusReuseTokens(body)
-		if !found || got != 150 {
-			t.Fatalf("got (%d, %v), want (150, true)", got, found)
-		}
-	})
-	t.Run("BareSuffixAlsoBinds", func(t *testing.T) {
-		got, found := parsePrometheusReuseTokens("fak_gateway_kv_prefix_reused_tokens 7\n")
-		if !found || got != 7 {
-			t.Fatalf("got (%d, %v), want (7, true)", got, found)
-		}
-	})
-	t.Run("MeasuredZeroIsFound", func(t *testing.T) {
-		got, found := parsePrometheusReuseTokens("fak_gateway_kv_prefix_reused_tokens_total 0\n")
-		if !found || got != 0 {
-			t.Fatalf("got (%d, %v), want (0, true)", got, found)
-		}
-	})
-	t.Run("AbsentIsNotFound", func(t *testing.T) {
-		got, found := parsePrometheusReuseTokens("some_other_metric 5\n")
-		if found || got != 0 {
-			t.Fatalf("got (%d, %v), want (0, false)", got, found)
 		}
 	})
 }
