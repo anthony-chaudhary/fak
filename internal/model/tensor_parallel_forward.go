@@ -1,6 +1,10 @@
 package model
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/anthony-chaudhary/fak/internal/model/ffn"
+)
 
 // tensor_parallel_forward.go — WIRING the tensor-parallel decomposition into the LIVE
 // forward path. tensor_parallel.go / tensor_parallel_attn.go proved the Megatron FFN and
@@ -365,8 +369,15 @@ func (m *Model) tpFFNLayerPartials(l int, xn [][]float32, plan TPPlan) ([][][]fl
 					u[i] += uBias[lo+i]
 				}
 			}
-			for i := 0; i < w; i++ {
-				g[i] = act(g[i], cfg) * u[i]
+			// The gated-row arithmetic act(g)*u is delegated to the shared
+			// ffn.ApplyInPlace component (fak#13451). It validates the same
+			// nonempty / equal-length / non-nil-activation contract and writes
+			// gate[i] = act(gate[i]) * u[i] in the same increasing-index order as
+			// the loop it replaces. Every shard width w == s.Width() is > 0 (a
+			// validated plan admits no empty shard), so the panic arm is a
+			// programming fault, not input.
+			if err := ffn.ApplyInPlace(g, u, func(v float32) float32 { return act(v, cfg) }); err != nil {
+				panic(err)
 			}
 			part[t] = matRows(downSlice, g, H, w)
 		}
