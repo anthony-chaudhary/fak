@@ -1,7 +1,21 @@
 package model
 
+import "github.com/anthony-chaudhary/fak/internal/model/ffn"
+
+// executeSwiGLU projects the gate and up panels, applies the gated activation and
+// down projection ordered by ffn.Gated, and returns the model-width result. The
+// projection loops and their reduction order, the default SiLU formula and the
+// missing-weight fallback (in ExecuteGLM5NextDenseMLP) are retained; only the
+// activate(gate)*up fusion and the single down projection are delegated.
 func executeSwiGLU(x, WAct, WUp, WDown []float32, inDim, interDim int) []float32 {
-	inter := make([]float32, interDim)
+	// ffn.ApplyInPlace refuses an empty gate row, so an empty intermediate width
+	// is projected directly to the zero vector the pre-refactor body produced.
+	if interDim == 0 {
+		return make([]float32, inDim)
+	}
+
+	gate := make([]float32, interDim)
+	up := make([]float32, interDim)
 	for i := 0; i < interDim; i++ {
 		var gSum, uSum float32
 		rowOff := i * inDim
@@ -10,17 +24,26 @@ func executeSwiGLU(x, WAct, WUp, WDown []float32, inDim, interDim int) []float32
 			gSum += WAct[rowOff+j] * xj
 			uSum += WUp[rowOff+j] * xj
 		}
-		inter[i] = silu(gSum) * uSum
+		gate[i] = gSum
+		up[i] = uSum
 	}
 
-	out := make([]float32, inDim)
-	for i := 0; i < inDim; i++ {
-		var sum float32
-		rowOff := i * interDim
-		for j := 0; j < interDim; j++ {
-			sum += WDown[rowOff+j] * inter[j]
+	down := func(activated []float32) ([]float32, error) {
+		out := make([]float32, inDim)
+		for i := 0; i < inDim; i++ {
+			var sum float32
+			rowOff := i * interDim
+			for j := 0; j < interDim; j++ {
+				sum += WDown[rowOff+j] * activated[j]
+			}
+			out[i] = sum
 		}
-		out[i] = sum
+		return out, nil
+	}
+
+	out, err := ffn.Gated(gate, up, silu, down)
+	if err != nil {
+		panic(err)
 	}
 	return out
 }
