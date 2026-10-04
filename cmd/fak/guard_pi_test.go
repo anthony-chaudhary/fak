@@ -362,6 +362,29 @@ func TestGuardIsPiMatchesProfileRegistry(t *testing.T) {
 	}
 }
 
+// TestGuardPiExtensionHelpNamesBothArms is the regression witness for #13475: the --pi-extension
+// help (rendered by the LIVE flag set, not a copy) must document BOTH provider arms the flag
+// installs, because the wire is chosen by the child's --provider and the previously-undocumented
+// fak (OpenAI-completions) arm is the routed default. It also proves the old self-contradictory
+// trailing sentence is gone. On the parent commit the help names only the anthropic arm, so this
+// test builds and fails there.
+func TestGuardPiExtensionHelpNamesBothArms(t *testing.T) {
+	help := runGuardHelp(t, "-h -all")
+	for _, want := range []string{
+		`pi.registerProvider("anthropic"`,
+		"Anthropic Messages",
+		"fak provider",
+		"OpenAI-completions",
+	} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("--pi-extension help omits %q:\n%s", want, help)
+		}
+	}
+	if strings.Contains(help, "already registered the fak provider yourself") {
+		t.Fatalf("--pi-extension help still carries the contradictory trailing sentence:\n%s", help)
+	}
+}
+
 // TestGuardPiBaseURLTrimsTrailingSlash proves the base URL handed to Pi is the bare origin with
 // any trailing slash trimmed — Pi appends /v1/messages itself, exactly like ANTHROPIC_BASE_URL.
 func TestGuardPiBaseURLTrimsTrailingSlash(t *testing.T) {
