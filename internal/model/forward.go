@@ -11,6 +11,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/codegraph"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model/norm"
+	"github.com/anthony-chaudhary/fak/internal/model/softmax"
 )
 
 // GraphInlineInstruction is one operation in the small callable model graph IR.
@@ -910,23 +911,11 @@ func dot(a, b []float32) float32 {
 	return s
 }
 
-func softmaxInPlace(s []float32) {
-	mx := s[0]
-	for _, v := range s {
-		if v > mx {
-			mx = v
-		}
-	}
-	var sum float32
-	for i, v := range s {
-		e := float32(math.Exp(float64(v - mx)))
-		s[i] = e
-		sum += e
-	}
-	for i := range s {
-		s[i] /= sum
-	}
-}
+// softmaxInPlace delegates to the shared softmax leaf. The arithmetic
+// (max subtraction, float32 exp/sum order, normalize pass) is owned by
+// internal/model/softmax; see softmax.InPlace. Retained as a thin adapter so
+// the attention call sites keep their existing name and in-place contract.
+func softmaxInPlace(s []float32) { softmax.InPlace(s) }
 
 func silu(z float32) float32 { return z / (1 + float32(math.Exp(float64(-z)))) }
 

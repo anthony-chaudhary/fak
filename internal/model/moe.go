@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/anthony-chaudhary/fak/internal/model/ffn"
+	"github.com/anthony-chaudhary/fak/internal/model/softmax"
 )
 
 // MoE (Mixture-of-Experts) FFN — the rank-7 structural axis of MODEL-ARCH-SEAM.
@@ -529,28 +530,12 @@ func routeTopKSoftmax(logits []float32, k int) []routePick {
 	return picks
 }
 
-// softmaxOf is the allocating softmax used by the router (the in-place
-// softmaxInPlace is for attention scores). Max-subtracted for numerical stability,
-// matching HF's F.softmax in f32.
-func softmaxOf(z []float32) []float32 {
-	out := make([]float32, len(z))
-	mx := z[0]
-	for _, v := range z {
-		if v > mx {
-			mx = v
-		}
-	}
-	var sum float32
-	for i, v := range z {
-		e := float32(math.Exp(float64(v - mx)))
-		out[i] = e
-		sum += e
-	}
-	for i := range out {
-		out[i] /= sum
-	}
-	return out
-}
+// softmaxOf delegates to the shared softmax leaf. It is the allocating half of
+// the leaf (softmax.InPlace is the in-place half), used by the router; the
+// arithmetic and the fresh-allocation contract are owned by
+// internal/model/softmax. Max-subtracted for numerical stability, matching
+// HF's F.softmax in f32.
+func softmaxOf(z []float32) []float32 { return softmax.Copy(z) }
 
 func sigmoid(z float32) float32 {
 	return 1 / (1 + float32(math.Exp(float64(-z))))
