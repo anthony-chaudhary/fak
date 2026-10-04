@@ -416,5 +416,5 @@ func validateWholeTokenReport(report wholeTokenReport) error {
 // Missing entries mean unset; a literal zero remains distinct in the report.
 func wholeTokenExecutionEnvironmentKeys() []string {
 	return []string{"FAK_METAL_STREAM_Q4K", "FAK_Q4K", nativeProfileSequenceSelector, nativeProfileDecodeHandoffControl,
-		"FAK_GGUF_MMAP", "FAK_QWEN35_WHOLE_TOKEN_DECODE", "FAK_QWEN35_WHOLE_TOKEN_GEMV", "FAK_QWEN35_WHOLE_TOKEN_GEMV_VEC", "FAK_QWEN35_WHOLE_TOKEN_POOL", "FAK_QWEN35_WHOLE_TOKEN_GDN_FUSED", "FAK_QWEN35_PERSISTENT_DECODE_DKV"}
+		"FAK_GGUF_MMAP", "FAK_QWEN35_WHOLE_TOKEN_DECODE", "FAK_QWEN35_WHOLE_TOKEN_GEMV", "FAK_QWEN35_WHOLE_TOKEN_GEMV_VEC", "FAK_Q4K_GEMV_KERNEL", "FAK_QWEN35_WHOLE_TOKEN_POOL", "FAK_QWEN35_WHOLE_TOKEN_GDN_FUSED", "FAK_QWEN35_PERSISTENT_DECODE_DKV"}
 }

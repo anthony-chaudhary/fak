@@ -62,13 +62,39 @@ func q4kQwen35HybridPrefillOK(cfg Config, promptLen int) bool {
 // Reusing the original gate at its threshold preserves every architecture and
 // diagnostic escape-hatch check before any cache or recurrent state is touched.
 func q4kQwen35HybridPrefillAtPositionOK(cfg Config, promptLen, base int) bool {
+	return q4kQwen35HybridPrefillAtPositionOKFor(cfg, promptLen, base, false)
+}
+
+// qwen35HybridMetalResidentMinPrompt is the fresh-prompt batched-prefill threshold on
+// the backend-nil resident-Q4_K Metal session (#13694). qwen35HybridQBatchMinPrompt (16)
+// is an amortization heuristic from the CPU qGemm8 path, not a correctness bound: the
+// batched body runs the conv1d scan against the (possibly empty) history row by row and
+// the GDN recurrence token by token, and the continuation path already admits every
+// P >= 1 (TestPrefillQwen35HybridQ4KAppendMatchesMonolithic). On Metal, P in 2..15 paid
+// one full forward per token — P weight streams and P command-buffer round-trips per
+// projection — where one batched dispatch per projection group streams each weight once,
+// so the Metal resident session batches from two tokens. P=1 keeps the token step.
+const qwen35HybridMetalResidentMinPrompt = 2
+
+// q4kQwen35HybridPrefillAtPositionOKFor is q4kQwen35HybridPrefillAtPositionOK with the
+// session's Metal residency threaded in: a fresh prompt on the Metal resident session
+// needs only qwen35HybridMetalResidentMinPrompt tokens; every other session keeps the
+// historical threshold. The architecture and diagnostic gate is evaluated at the
+// threshold so the length qualification above is the only thing that changes.
+func q4kQwen35HybridPrefillAtPositionOKFor(cfg Config, promptLen, base int, metalResident bool) bool {
 	if promptLen <= 0 || base < 0 {
 		return false
 	}
 	if base == 0 {
-		return q4kQwen35HybridPrefillOK(cfg, promptLen)
+		minFresh := qwen35HybridQBatchMinPrompt
+		if metalResident {
+			minFresh = qwen35HybridMetalResidentMinPrompt
+		}
+		if promptLen < minFresh {
+			return false
+		}
 	}
-	return q4kQwen35HybridPrefillOK(cfg, qwen35HybridQBatchMinPrompt)
+	return q4kQwen35HybridPrefillOK(cfg, max(promptLen, qwen35HybridQBatchMinPrompt))
 }
 
 // qwen35ResidentDecodeAutoDisable is the config-surface opt-out consulted by
@@ -92,7 +118,7 @@ func qwen35ResidentDecodeAutoDisabled() bool { return qwen35ResidentDecodeAutoDi
 // resident GDN sequence owner to reach the one-command-buffer fused linear-attention
 // decode block. It is deliberately exact: only the 64-layer Qwen3.8 hybrid whose full
 // no-copy Q8 projection band resolves, on the backend-nil resident-Q4_K Metal lane, at
-// a fresh prompt boundary. Every other case declines so the historical decode path is
+// a fresh or restored prompt boundary. Every other case declines so the historical decode path is
 // byte-identical. The route is ON by default (measured 0.4-0.9 -> 4.2-4.6 tok/s
 // decode on the M3 Pro, Qwen3.8-27B Q4_K_M, bit-identical pooled parity); declare
 // SetQwen35ResidentDecodeAuto(false) to force the historical path.
@@ -112,9 +138,8 @@ func (s *Session) qwen35ResidentDecodeAutoEligible() bool {
 	if s.qwen35HAL != nil && (s.qwen35HAL.sequenceAccepted || s.qwen35HAL.decodeAccepted) {
 		return false
 	}
-	if s.Cache.Len() != 0 {
-		return false // promotion requires a fresh prompt boundary
-	}
+	// A restored (non-fresh) prefix is admissible: Enable seeds the owners from
+	// the complete host linear-attention state, or declines without mutation.
 	if _, err := qwen38MetalQ8RuntimeNames(s.M.Cfg); err != nil {
 		return false // not the exact Qwen3.8 topology the fused block/owner is proven on
 	}
@@ -273,8 +298,12 @@ type qwen35MetalStateIdentityBinder interface {
 }
 
 // EnableQwen35MetalGDNPreprojectedSequence admits the opt-in owner before any
-// prompt state is mutated. Unsupported builds and non-fresh sessions refuse
-// explicitly instead of changing the requested path to host recurrence.
+// prompt state is mutated. A restored (non-fresh) session is admitted only when
+// its host linear-attention state is a complete prefix state; the freshly
+// allocated owners are then seeded from it so the sequence continues at
+// base=Cache.Len(). Unsupported builds and incomplete restored state refuse
+// explicitly (owners freed, host state untouched) instead of changing the
+// requested path to host recurrence.
 func (s *Session) EnableQwen35MetalGDNPreprojectedSequence() error {
 	path := Qwen35MetalGDNSequenceForwardPath
 	if s == nil || s.M == nil || !s.M.Cfg.IsQwen35Hybrid() {
@@ -286,8 +315,30 @@ func (s *Session) EnableQwen35MetalGDNPreprojectedSequence() error {
 	if s.Backend != nil || !s.Q4K || !s.MetalQ4K {
 		return &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "requires backend-nil resident-Q4_K Metal session"}
 	}
-	if s.Cache == nil || s.Cache.Len() != 0 {
-		return &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "requires a fresh session before prompt-state mutation"}
+	if s.Cache == nil {
+		return &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "requires a session cache before prompt-state mutation"}
+	}
+	if q := s.qwen35HAL; q != nil {
+		// A non-fresh session is admissible now, so the prior-owner states the old
+		// fresh-prompt check excluded must be refused explicitly. A recorded failure
+		// stays the audit authority (re-admission would clear it), and a live owner
+		// set (admitted sequence or promoted decode) holds state the host cache does
+		// not; neither may be replaced by a fresh seed.
+		switch {
+		case q.sequenceFailure != nil:
+			return &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "session carries a recorded resident GDN failure: " + q.sequenceFailure.Error()}
+		case q.decodeAccepted:
+			return &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "session already holds promoted resident GDN decode owners"}
+		case q.sequenceAccepted || q.sequenceBackend != nil:
+			return &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "session already owns sequence auxiliary state"}
+		}
+	}
+	var restored []qwen35GDNLayerSnapshot
+	if s.Cache.Len() != 0 {
+		var reason string
+		if restored, reason = s.qwen35HostGDNSeedSnapshots(); reason != "" {
+			return &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "restored prefix cannot seed resident owners: " + reason}
+		}
 	}
 	if newQwen35MetalGDNSequenceBackend == nil {
 		return &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "native Metal GDN sequence is unavailable in this build"}
@@ -301,7 +352,18 @@ func (s *Session) EnableQwen35MetalGDNPreprojectedSequence() error {
 	if !accepted && err == nil {
 		err = &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "native capability did not advertise the canonical sequence contract"}
 	}
-	return err
+	if err != nil || s.Cache.Len() == 0 {
+		return err
+	}
+	// Restored prefix: seed every freshly allocated (zero) owner from the host
+	// recurrent/convolution state before any prompt token runs. A seed failure
+	// releases the owners and leaves the host cache as the sole authority.
+	if seedErr := s.seedQwen35GDNOwnersFromHost(restored); seedErr != nil {
+		s.qwen35HAL.freeSequence()
+		s.qwen35HAL.sequenceAccepted = false
+		return &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "restored prefix GDN state could not seed resident owners: " + seedErr.Error()}
+	}
+	return nil
 }
 
 // FinalizeQwen35MetalGDNPreprojectedSequence performs the one explicit state
@@ -315,28 +377,19 @@ func (s *Session) FinalizeQwen35MetalGDNPreprojectedSequence() (bool, error) {
 	if q.sequenceFailure != nil {
 		return true, q.sequenceFailure
 	}
-	snapshotter, ok := q.sequenceBackend.(qwen35GDNSequenceSnapshotter)
-	if !ok {
-		return true, s.failQwen35GDNSequence(-1, "final state synchronization", fmt.Errorf("admitted backend cannot snapshot auxiliary state"))
-	}
 	cfg := s.M.Cfg
-	_, nV, kHd, vHd, _, _, convDim := cfg.linearAttnDims()
-	convElems := (cfg.LinearConvKernelDim - 1) * convDim
-	recurrentElems := nV * kHd * vHd
-	snapshots := make([]qwen35GDNLayerSnapshot, 0, len(q.sequenceLayers))
-	for layer, state := range q.sequenceLayers {
-		if !state.valid() {
-			continue
-		}
-		conv, recurrent, err := snapshotter.SnapshotQwen35GDNAuxState(state)
-		if err != nil {
-			return true, s.failQwen35GDNSequence(layer, "final state synchronization", err)
-		}
-		if len(conv) != convElems || len(recurrent) != recurrentElems {
-			return true, s.failQwen35GDNSequence(layer, "final state shape", fmt.Errorf("conv/recurrent elements=%d/%d, want %d/%d", len(conv), len(recurrent), convElems, recurrentElems))
-		}
-		snapshots = append(snapshots, qwen35GDNLayerSnapshot{layer: layer, conv: conv, recurrent: recurrent})
+	snapshots, failLayer, failStage, err := s.snapshotQwen35GDNOwners()
+	if err != nil {
+		return true, s.failQwen35GDNSequence(failLayer, failStage, err)
 	}
+	// Invariant: once the owners are read and validated, the host cache receives
+	// the finalized prompt state BEFORE anything below can fail. Every later
+	// failure therefore either records sequenceFailure (state identity) or leaves
+	// a correct host cache (promotion/seed failure frees the owners), so no exit
+	// -- including the auto route's discarded deferred Finalize -- leaves a stale
+	// host Cache.linear that a snapshot or bare clone could publish. A bare host KV
+	// clone at this boundary (prefix admission) carries the real recurrent state.
+	writeQwen35GDNSnapshotsToHost(cfg, s.Cache, snapshots)
 	var stateIdentity *Qwen35MetalStateIdentityReceipt
 	if s.qwen35MetalStateIdentity != nil {
 		if _, ok := q.sequenceBackend.(qwen35GDNStateSeeder); !ok {
@@ -355,29 +408,14 @@ func (s *Session) FinalizeQwen35MetalGDNPreprojectedSequence() (bool, error) {
 		}
 		stateIdentity = &receipt
 	}
+	// Promoted owners become the decode authority; a promotion failure releases
+	// them and the host cache written above is the sole, correct authority.
 	selected, err := s.promoteQwen35MetalGDNDecode(snapshots)
-	if err != nil || selected {
-		if err == nil && selected && stateIdentity != nil {
-			s.installQwen35MetalStateIdentityReceipt(*stateIdentity)
-		}
+	if err != nil {
 		return len(snapshots) > 0, err
 	}
-	// A backend that cannot seed decode owners retains the historical one-time
-	// snapshot path. Seed failures return above before this host cache mutates.
-	if s.Cache.linear == nil {
-		s.Cache.linear = newLinearAttnCache(cfg)
-	}
-	for _, snapshot := range snapshots {
-		state := s.Cache.linear.layer(cfg, snapshot.layer)
-		state.conv = make([][]float32, cfg.LinearConvKernelDim-1)
-		for row := range state.conv {
-			start := row * convDim
-			state.conv[row] = append([]float32(nil), snapshot.conv[start:start+convDim]...)
-		}
-		for head := range state.recurrent {
-			start := head * kHd * vHd
-			copy(state.recurrent[head], snapshot.recurrent[start:start+kHd*vHd])
-		}
+	if selected && stateIdentity != nil {
+		s.installQwen35MetalStateIdentityReceipt(*stateIdentity)
 	}
 	return len(snapshots) > 0, nil
 }
@@ -386,7 +424,7 @@ func (s *Session) FinalizeQwen35MetalGDNPreprojectedSequence() (bool, error) {
 // geometry returns before the resident implementation can mutate KV, convolution,
 // or recurrent state; the caller retains the historical token-loop behavior.
 func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float32, bool) {
-	if !q4kQwen35HybridPrefillAtPositionOK(s.M.Cfg, len(ids), s.Cache.Len()) {
+	if !q4kQwen35HybridPrefillAtPositionOKFor(s.M.Cfg, len(ids), s.Cache.Len(), s.qwen35HybridMetalResidentPrefill()) {
 		return nil, false
 	}
 	// Keystone decode lever (W1): the exact resident-Q4_K Qwen3.8 hybrid can run its
@@ -397,6 +435,13 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 	// silently decoded one grouped GEMV command buffer at a time. Admit the owner here,
 	// before any prompt state is mutated, and promote it after the prefill completes.
 	// Fail-open: any decline leaves the historical host-recurrence decode untouched.
+	// A promoted decode owner set is consulted only by single-token decode; the
+	// batched host walk below reads Cache.linear. Hand the live owner state back to
+	// the host first (fail closed if it cannot be read), so this prefill continues
+	// from the true recurrent state and the auto route may re-admit from it.
+	if err := s.demoteQwen35ResidentGDNDecodeToHost(); err != nil {
+		panic(err)
+	}
 	autoAdmitted := false
 	if s.qwen35ResidentDecodeAutoEligible() {
 		if err := s.EnableQwen35MetalGDNPreprojectedSequence(); err == nil {
@@ -404,6 +449,10 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 		}
 	}
 	if autoAdmitted {
+		// The error is not surfaced on this fail-open route, but it is never
+		// silent state loss: Finalize either records sequenceFailure (later
+		// snapshots and host syncs fail closed) or has already written the
+		// finalized owner state into the host cache before failing.
 		defer func() { _, _ = s.FinalizeQwen35MetalGDNPreprojectedSequence() }()
 	}
 	var hidden []float32
@@ -422,6 +471,13 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 			// qg_attn_online (O(head_dim) ordered online softmax) above 4096 context, so
 			// a long prompt stays on the batched panel rather than being forced through
 			// the CPU per-token loop. See TestProjectionGraphQwenOrderedLongContextAttention.
+			//
+			// The <32 remainder (every prompt under 32 tokens) deliberately stays on the
+			// host batched path: walking it on the whole-sequence device graph was measured
+			// on Qwen3.8-27B to stall past the 10 s command-buffer limit for a 12-token
+			// warmup prompt under memory pressure, failing closed with no host retry so the
+			// server never became ready (#13694). Widening the cover below the 32-token
+			// quantum needs its own measured admission.
 			const panelQuantum = 32
 			panelCover := (len(ids) / panelQuantum) * panelQuantum
 			if panelCover > 0 {

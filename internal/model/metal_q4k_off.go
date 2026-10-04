@@ -9,6 +9,7 @@ import "github.com/anthony-chaudhary/fak/internal/metalgemm"
 // builds stay pure-Go (s.MetalQ4K is simply ignored here).
 
 func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P int) []float32 {
+	s.observeQ4KPrefillGEMM(Q4KPrefillGEMMCPU)
 	return q4kGemm(qt, Xf, P)
 }
 

@@ -34,6 +34,8 @@
 #include <vector>
 #include <unordered_map>
 #include <atomic>
+#include <algorithm>
+#include <chrono>
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -242,7 +244,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -253,7 +255,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_MATMUL2: case K_MATMUL3: case K_Q8_MATMUL: case K_Q8_MATMUL_DECODE: case K_Q8_MATMUL2: case K_Q8_MATMUL3: case K_Q6K_MATMUL: case K_Q5K_MATMUL: case K_Q3K_MATMUL:
         return g_dp.otherMatmul;
     case K_RMSNORM: case K_RMSNORM_MATMUL: case K_RMSNORM_MATMUL2: case K_RMSNORM_MATMUL3:
-    case K_RMSNORM_MATMUL_ARGMAX_BLOCKS: case K_RMSNORM_Q8_MATMUL2: case K_RMSNORM_Q8_MATMUL3:
+    case K_RMSNORM_MATMUL_ARGMAX_BLOCKS: case K_RMSNORM_Q8_MATMUL2: case K_RMSNORM_Q8_MATMUL3: case K_RMSNORM_Q8_MATMUL2_COOP:
     case K_RMSNORM_Q4K_MATMUL2:
         return g_dp.otherNorm;
     case K_ROPE: case K_QWEN35_PARTIAL_ROPE_PANEL:
@@ -272,7 +274,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_QWEN35_GDN_VERIFY_TILED:
     case K_GLM_KDA_REREAD: case K_GLM_KDA_WAVE32:
         return g_dp.otherGDN;
-    case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q4K_MATMUL_COOPMAT: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_COUNT:
+    case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q4K_MATMUL_COOPMAT: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_Q2K_MATVEC: case K_COUNT:
         return g_dp.otherUnclassified;
     }
     return g_dp.otherUnclassified;
@@ -283,7 +285,7 @@ static inline void dpDispatch(const Kernel& k) {
     const KId id = static_cast<KId>(&k - g_kern);
     if (id == K_Q4K_MATMUL || id == K_Q4K_MATMUL_WAVE32 || id == K_Q4K_MATMUL_COOPMAT) {
         g_dp.q4k.fetch_add(1, std::memory_order_relaxed);
-    } else if (id == K_Q2K_MATMUL || id == K_RMSNORM_Q2K_MATMUL2) {
+    } else if (id == K_Q2K_MATMUL || id == K_RMSNORM_Q2K_MATMUL2 || id == K_Q2K_MATVEC) {
         g_dp.q2k.fetch_add(1, std::memory_order_relaxed);
     } else {
         g_dp.other.fetch_add(1, std::memory_order_relaxed);
@@ -322,6 +324,9 @@ int g_have_qwen35_gdn_q8_in_proj = 0;
 int g_have_glm_kda_wave32 = 0;
 // Wave32 cooperative Q4_K decode kernel (subgroup arithmetic + effective/required subgroup size 32).
 int g_have_q4k_wave32 = 0;
+// Single-token Q2_K matvec (q2k_matvec.spv); optional, default-on when the SPIR-V loads.
+int g_have_q2k_matvec = 0;
+int g_have_rmsnorm_q8_matmul2_coop = 0;
 bool g_q4k_wave32_required_subgroup = false;
 // Optional, default-off recurrent prefill variant. All access is serialized by
 // the Go Vulkan mutex, including debug mode/counter operations.
@@ -1076,9 +1081,133 @@ void recordDispatchBarrier(VkCommandBuffer cmd, int ordinal) {
     recordComputeBarrier(cmd);
 }
 
+// ---- GPU timestamp stage profile (FAK_VULKAN_TIMESTAMP_PROFILE=1, default off) ----------
+// Diagnostic only: a bottom-of-pipe timestamp is written at batch start and after every
+// recorded dispatch, so (with the recorder's inter-dispatch barriers) the delta between
+// consecutive timestamps is that dispatch's device time. Deltas are folded per
+// (kernel id, groupsX, groupsY) shape key and printed to stderr every
+// FAK_VULKAN_TIMESTAMP_PROFILE_EVERY batches (default 32). Unset, the recorder emits no
+// query commands and the recorded command stream is byte-identical to the unprofiled one.
+const char* const kKernelNames[K_COUNT] = {
+    "matmul", "matmul_add", "matmul_argmax", "matmul_argmax_blocks", "matmul2", "matmul3",
+    "rmsnorm", "rmsnorm_matmul", "rmsnorm_matmul2", "rmsnorm_matmul3", "rmsnorm_matmul_argmax_blocks",
+    "rope", "swiglu", "swiglu_matmul_add", "add", "add_bias", "attention", "argmax", "argmax_pairs",
+    "q8_matmul", "q8_matmul_decode", "q8_matmul2", "q8_matmul3", "rmsnorm_q8_matmul2", "rmsnorm_q8_matmul3",
+    "swiglu_q8_matmul_add", "qwen35_gdn_q8_in_proj", "qwen35_gdn_conv", "qwen35_gdn_recurrent",
+    "qwen35_gdn_prefill_tiled", "qwen35_gdn_prefill_norm", "qwen35_gdn_verify_tiled",
+    "glm_kda_reread", "glm_kda_wave32", "q4k_matmul", "q4k_matmul_wave32", "q4k_matmul_coopmat",
+    "q6k_matmul", "q5k_matmul", "q3k_matmul", "rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add", "q2k_matmul",
+    "rmsnorm_q2k_matmul2", "qwen35_split_qg_panel", "qwen35_partial_rope_panel",
+    "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
+};
+static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
+
+const bool g_tsOn = [] { const char* v = std::getenv("FAK_VULKAN_TIMESTAMP_PROFILE"); return v && v[0] == '1' && v[1] == '\0'; }();
+const uint32_t kTsMax = 8192;
+VkQueryPool g_tsPool = VK_NULL_HANDLE;
+bool g_tsUsable = false, g_tsInitTried = false;
+double g_tsPeriodNs = 1.0;
+uint64_t g_tsMask = ~0ull;
+uint32_t g_tsUsed = 0;
+struct TsSlot { uint32_t kid, gx, gy; };
+std::vector<TsSlot> g_tsSlots;
+struct TsAgg { uint64_t n = 0; double ns = 0; };
+std::unordered_map<uint64_t, TsAgg> g_tsAgg;
+uint64_t g_tsBatches = 0, g_tsOps = 0, g_tsTruncated = 0;
+double g_tsGpuNs = 0, g_tsWallNs = 0;
+std::chrono::steady_clock::time_point g_tsBatchStart;
+uint64_t g_tsEvery = [] { const char* v = std::getenv("FAK_VULKAN_TIMESTAMP_PROFILE_EVERY"); long n = v ? atol(v) : 0; return (uint64_t)(n > 0 ? n : 32); }();
+
+void tsInit() {
+    g_tsInitTried = true;
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(g_phys, &props);
+    uint32_t qn = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(g_phys, &qn, nullptr);
+    std::vector<VkQueueFamilyProperties> qfs(qn);
+    vkGetPhysicalDeviceQueueFamilyProperties(g_phys, &qn, qfs.data());
+    uint32_t bits = g_qfam < qn ? qfs[g_qfam].timestampValidBits : 0;
+    if (bits == 0 || props.limits.timestampPeriod <= 0) {
+        fprintf(stderr, "fak-vulkan ts-profile unavailable: timestampValidBits=%u period=%f\n", bits, props.limits.timestampPeriod);
+        return;
+    }
+    g_tsPeriodNs = props.limits.timestampPeriod;
+    g_tsMask = bits >= 64 ? ~0ull : ((1ull << bits) - 1);
+    VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+    qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    qi.queryCount = kTsMax;
+    if (vkCreateQueryPool(g_dev, &qi, nullptr, &g_tsPool) != VK_SUCCESS) {
+        g_tsPool = VK_NULL_HANDLE;
+        fprintf(stderr, "fak-vulkan ts-profile unavailable: vkCreateQueryPool failed\n");
+        return;
+    }
+    g_tsSlots.reserve(kTsMax);
+    g_tsUsable = true;
+}
+
+void tsBatchBegin(VkCommandBuffer cmd) {
+    if (!g_tsOn) return;
+    if (!g_tsInitTried) tsInit();
+    if (!g_tsUsable) return;
+    vkCmdResetQueryPool(cmd, g_tsPool, 0, kTsMax);
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g_tsPool, 0);
+    g_tsUsed = 1;
+    g_tsSlots.clear();
+    g_tsBatchStart = std::chrono::steady_clock::now();
+}
+
+void tsAfterDispatch(VkCommandBuffer cmd, uint32_t kid, uint32_t gx, uint32_t gy) {
+    if (!g_tsOn || !g_tsUsable) return;
+    if (g_tsUsed >= kTsMax) { ++g_tsTruncated; return; }
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g_tsPool, g_tsUsed);
+    g_tsSlots.push_back(TsSlot{kid, gx, gy});
+    ++g_tsUsed;
+}
+
+void tsReport() {
+    std::vector<std::pair<uint64_t, TsAgg>> rows(g_tsAgg.begin(), g_tsAgg.end());
+    std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.second.ns > b.second.ns; });
+    double perBatch = g_tsBatches ? 1.0 / (double)g_tsBatches : 0;
+    fprintf(stderr, "fak-vulkan ts-profile batches=%llu ops/batch=%.1f gpu_ms/batch=%.3f wall_ms/batch=%.3f truncated=%llu\n",
+        (unsigned long long)g_tsBatches, g_tsOps * perBatch, g_tsGpuNs * perBatch / 1e6, g_tsWallNs * perBatch / 1e6,
+        (unsigned long long)g_tsTruncated);
+    size_t shown = 0;
+    for (const auto& r : rows) {
+        if (shown++ >= 40) break;
+        uint32_t kid = (uint32_t)(r.first >> 48), gx = (uint32_t)((r.first >> 20) & 0xFFFFFFF), gy = (uint32_t)(r.first & 0xFFFFF);
+        fprintf(stderr, "fak-vulkan ts-stage kernel=%s groups=%ux%u calls/batch=%.2f ms/batch=%.3f us/call=%.2f share=%.1f%%\n",
+            kid < K_COUNT ? kKernelNames[kid] : "d2d_copy", gx, gy, r.second.n * perBatch, r.second.ns * perBatch / 1e6,
+            r.second.n ? r.second.ns / (double)r.second.n / 1e3 : 0, g_tsGpuNs > 0 ? 100.0 * r.second.ns / g_tsGpuNs : 0);
+    }
+}
+
+void tsBatchCollect() {
+    if (!g_tsOn || !g_tsUsable || g_tsUsed < 2) return;
+    std::vector<uint64_t> ts(g_tsUsed);
+    if (vkGetQueryPoolResults(g_dev, g_tsPool, 0, g_tsUsed, ts.size() * sizeof(uint64_t), ts.data(),
+            sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) != VK_SUCCESS) {
+        return;
+    }
+    double wall = (double)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - g_tsBatchStart).count();
+    for (uint32_t i = 1; i < g_tsUsed; ++i) {
+        uint64_t d = ((ts[i] - ts[i - 1]) & g_tsMask);
+        const TsSlot& s = g_tsSlots[i - 1];
+        uint64_t key = ((uint64_t)s.kid << 48) | ((uint64_t)(s.gx & 0xFFFFFFF) << 20) | (uint64_t)(s.gy & 0xFFFFF);
+        TsAgg& a = g_tsAgg[key];
+        a.n++;
+        a.ns += d * g_tsPeriodNs;
+    }
+    g_tsGpuNs += ((ts[g_tsUsed - 1] - ts[0]) & g_tsMask) * g_tsPeriodNs;
+    g_tsWallNs += wall;
+    g_tsOps += g_tsUsed - 1;
+    if ((++g_tsBatches % g_tsEvery) == 0) tsReport();
+    g_tsUsed = 0;
+}
+
 void batchBegin() {
 	if (g_batching) return;          // already recording — the model brackets each token
 	g_batchCmd = beginCmd();
+	tsBatchBegin(g_batchCmd);
 	g_batching = true;
 	g_batchOps = 0;
 	g_batchD2DCount = 0;
@@ -1096,6 +1225,7 @@ void batchFlush() {
     if (hadWork) {
         dp_inc(g_dp.batchSubmits);
         endSubmitWait(g_batchCmd);   // single submit + fence for the whole recorded chain
+        tsBatchCollect();
         if (!g_batchD2DValid ||
             !checkedCounterAdd(g_d2dCount, g_batchD2DCount) ||
             !checkedCounterAdd(g_d2dBytes, g_batchD2DBytes)) {
@@ -1303,6 +1433,7 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
         if (pcsize > 0) vkCmdPushConstants(g_batchCmd, k.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pcsize, pc);
         dpDispatch(k);
         vkCmdDispatch(g_batchCmd, groupsX, groupsY, 1);
+        tsAfterDispatch(g_batchCmd, (uint32_t)(&k - g_kern), groupsX, groupsY);
         g_batchSets.push_back(rec);
         ++g_batchOps;
         return true;
@@ -1900,6 +2031,13 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     buildKernel(g_kern[K_SWIGLU_Q4K_MATMUL_ADD], P("swiglu_q4k_matmul_add.spv"), 4, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_Q2K_MATMUL], P("q2k_matmul.spv"), 7, 4 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_RMSNORM_Q2K_MATMUL2], P("q2k_matmul.spv"), 7, 4 * sizeof(int) + sizeof(float));
+    // Optional single-token Q2_K matvec (same interface as q2k_matmul.spv). Absent SPIR-V or
+    // FAK_VULKAN_Q2K_MATVEC=0 keeps the original one-thread-per-row decode kernel.
+    {
+        const char* q2kmv = std::getenv("FAK_VULKAN_Q2K_MATVEC");
+        bool q2kmvOff = q2kmv && q2kmv[0] == '0' && q2kmv[1] == ' ';
+        g_have_q2k_matvec = (!q2kmvOff && buildKernel(g_kern[K_Q2K_MATVEC], P("q2k_matvec.spv"), 7, 4 * sizeof(int) + sizeof(float))) ? 1 : 0;
+    }
     if (!ok) return 8;
     // Q8 kernel is built only when the device advertised the int8/8-bit-storage features; its
     // SPIR-V uses them, so loading it without the enabled device feature would be invalid. If
@@ -1920,6 +2058,12 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         }
     }
     if (g_have_q8) {
+        // Cooperative (8 outputs x 32 lanes) gate/up kernel; bit-identical to the scalar one.
+        // Optional: absent SPIR-V or FAK_VULKAN_Q8_GATEUP_COOP=0 keeps rmsnorm_q8_matmul2.spv.
+        const char* coop = std::getenv("FAK_VULKAN_Q8_GATEUP_COOP");
+        bool coopOff = coop && coop[0] == '0' && coop[1] == ' ';
+        g_have_rmsnorm_q8_matmul2_coop = (!coopOff && buildKernel(g_kern[K_RMSNORM_Q8_MATMUL2_COOP],
+            P("rmsnorm_q8_matmul2_coop.spv"), 8, 4 * sizeof(int) + sizeof(float))) ? 1 : 0;
         g_have_qwen35_gdn_q8_in_proj = buildKernel(
             g_kern[K_QWEN35_GDN_Q8_IN_PROJ], P("qwen35_gdn_q8_in_proj.spv"),
             13, 5 * sizeof(int)) ? 1 : 0;
@@ -2120,6 +2264,20 @@ void fvk_debug_d2h_staging_failure_once(int enabled) {
     g_debugD2HStagingFailureOnce = enabled != 0;
 }
 
+// Test-only kernel selection for the decode matvec A/B (bit-parity) witnesses. Each call
+// selects the optimized kernel when enabled != 0 AND its pipeline was built, returns the
+// previous selection, and never changes which pipelines exist.
+int fvk_debug_select_q8_gateup_coop(int enabled) {
+    int prev = g_have_rmsnorm_q8_matmul2_coop;
+    g_have_rmsnorm_q8_matmul2_coop = (enabled && g_kern[K_RMSNORM_Q8_MATMUL2_COOP].pipe != VK_NULL_HANDLE) ? 1 : 0;
+    return prev;
+}
+int fvk_debug_select_q2k_matvec(int enabled) {
+    int prev = g_have_q2k_matvec;
+    g_have_q2k_matvec = (enabled && g_kern[K_Q2K_MATVEC].pipe != VK_NULL_HANDLE) ? 1 : 0;
+    return prev;
+}
+
 // device->device copies (RoPE's copy-then-rotate, the KV append) are RECORDED into the open
 // batch with a preceding barrier, so they stay ordered against the compute that produced the
 // source — no premature submit. Unbatched, they take the one-shot path.
@@ -2130,6 +2288,7 @@ void fvk_d2d_range(void* dst, size_t dst_off, const void* src, size_t src_off, s
         VkBufferCopy region{src_off, dst_off, bytes};
         dp_inc(g_dp.d2d);
         vkCmdCopyBuffer(g_batchCmd, B((void*)src)->buf, B(dst)->buf, 1, &region);
+        tsAfterDispatch(g_batchCmd, (uint32_t)K_COUNT, 0, 0);
         if (g_batchD2DCount == std::numeric_limits<uint64_t>::max() ||
             bytes > std::numeric_limits<uint64_t>::max() - g_batchD2DBytes) {
             g_batchD2DValid = false;
@@ -2554,6 +2713,10 @@ void fvk_rmsnorm_q8_matmul2_f32(const void* dW0codes, const void* dW0scale,
         B((void*)dX), B((void*)dNorm), B(dY0), B(dY1),
     };
     uint32_t totalOut = (uint32_t)(out0 + out1);
+    if (g_have_rmsnorm_q8_matmul2_coop && (totalOut + 7u) / 8u <= g_maxComputeWorkGroupCountX && P <= 65535) {
+        dispatch(g_kern[K_RMSNORM_Q8_MATMUL2_COOP], bufs, &pc, sizeof(pc), (totalOut + 7u) / 8u, (uint32_t)P);
+        return;
+    }
     uint32_t outGroups = (totalOut + 255u) / 256u;
     dispatch(g_kern[K_RMSNORM_Q8_MATMUL2], bufs, &pc, sizeof(pc), (uint32_t)P * outGroups);
 }
@@ -3190,6 +3353,8 @@ extern "C" void fvk_q3k_matmul_f32(const void* dQ3K, const void* dX, void* dY,
     dispatch(g_kern[K_Q3K_MATMUL], bufs, &pc, sizeof(pc),
              (uint32_t)(((size_t)out * (size_t)P + 63) / 64));
 }
+static const uint32_t kQ2KMatvecRows = 2; // must match ROWS in q2k_matvec.comp
+static inline uint32_t q2kMatvecGroups(int out) { return ((uint32_t)out + kQ2KMatvecRows - 1u) / kQ2KMatvecRows; }
 extern "C" void fvk_q2k_matmul_f32(const void* dQ2K, const void* dX, void* dY,
                           int out, int in, int P) {
     struct PC { int out, in, p, aux; float eps; } pc{out, in, P, 0, 0.0f};
@@ -3197,6 +3362,10 @@ extern "C" void fvk_q2k_matmul_f32(const void* dQ2K, const void* dX, void* dY,
         B((void*)dQ2K), B((void*)dX), B((void*)dX), B(dY),
         B((void*)dQ2K), B((void*)dX), B(dY),
     };
+    if (P == 1 && g_have_q2k_matvec) {
+        dispatch(g_kern[K_Q2K_MATVEC], bufs, &pc, sizeof(pc), q2kMatvecGroups(out));
+        return;
+    }
     dispatch(g_kern[K_Q2K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)(((size_t)out * P + 255) / 256));
 }
 extern "C" void fvk_swiglu_q2k_matmul_add_f32(const void* dQ2K, const void* dG,
@@ -3211,6 +3380,10 @@ extern "C" void fvk_swiglu_q2k_matmul_add_f32(const void* dQ2K, const void* dG,
         B((void*)dQ2K), B((void*)dG), B((void*)dU), B(dD),
         B((void*)dQ2K), B((void*)dG), B(dD),
     };
+    if (g_have_q2k_matvec) {
+        dispatch(g_kern[K_Q2K_MATVEC], bufs, &pc, sizeof(pc), q2kMatvecGroups(out));
+        return;
+    }
     dispatch(g_kern[K_Q2K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)(((size_t)out * P + 255) / 256));
 }
 extern "C" void fvk_rmsnorm_q2k_matmul2_f32(const void* dW0, const void* dW1,
@@ -3222,6 +3395,10 @@ extern "C" void fvk_rmsnorm_q2k_matmul2_f32(const void* dW0, const void* dW1,
         B((void*)dW0), B((void*)dX), B((void*)dX), B(dY0),
         B((void*)dW1), B((void*)dNorm), B(dY1),
     };
+    if (P == 1 && g_have_q2k_matvec) {
+        dispatch(g_kern[K_Q2K_MATVEC], bufs, &pc, sizeof(pc), q2kMatvecGroups(out0) + q2kMatvecGroups(out1));
+        return;
+    }
     uint32_t groups = ((uint32_t)(out0 + out1) + 255u) / 256u;
     dispatch(g_kern[K_RMSNORM_Q2K_MATMUL2], bufs, &pc, sizeof(pc), groups);
 }

@@ -346,6 +346,34 @@ func parFor(n, workers int, body func(lo, hi int)) {
 	parDispatchMu.Unlock()
 }
 
+// parElemThreshold is the elementwise-work cutoff for parForWork: total float element-ops
+// (items × elemsPerItem) below which a norm/rope/residual/swiglu/quantize fan-out runs inline
+// instead of through the parFor barrier. It is deliberately larger than parThreshold (which
+// counts multiply-adds of a matmul): an elementwise op does ~1 cheap op per element, so the
+// fork/join pays off only at a few hundred thousand elements. Evidence (#13694,
+// BenchmarkPrefillElementwiseSerialVsParFor, 12-core M-series under load avg ~110): serial
+// rmsnorm over 17×3584 = 0.35 ms vs 35.4 ms through parFor; a 17×18944 residual add 1.4 ms
+// serial vs 33.6 ms parFor — under CPU oversubscription a preempted pool worker holding a
+// chunk stalls the join for a scheduler quantum, so a short prompt's ~8 fan-outs × layers
+// cost seconds. 1<<19 keeps every short-prompt norm/rope/residual (P·H ≈ 61K at P=17), the
+// activation quantize and the P·I swiglu (322K at P=17 on 7B, ~1.4 ms serial) inline, while
+// large-P prefill (P≥~28 on 7B) stays on the pool, where an idle host still wins from splitting.
+const parElemThreshold = 1 << 19
+
+// parForWork is parFor with a small-work serial cutoff: when n*elemsPerItem is below
+// parElemThreshold it runs body(0,n) inline, otherwise it dispatches parFor(n, workers, body)
+// unchanged. Either branch visits every index exactly once with the same [lo,hi) contract, so
+// any per-index-independent body is bit-identical across the two — only scheduling changes.
+// parFor's own semantics are untouched; decode and large-P callers that want the pool for any
+// n keep calling parFor directly.
+func parForWork(n, workers, elemsPerItem int, body func(lo, hi int)) {
+	if n*elemsPerItem < parElemThreshold {
+		body(0, n)
+		return
+	}
+	parFor(n, workers, body)
+}
+
 // parForRange runs body over [0,n) exactly once per index, deciding serial-vs-parallel the
 // way every row-parallel quant kernel does: run inline when parallelism is disabled
 // (numWorkers <= 1) or the work estimate is below parThreshold (goroutine dispatch isn't

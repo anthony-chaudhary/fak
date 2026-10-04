@@ -137,6 +137,7 @@ func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, 
 // it is sized to the logits vocab on first use and never persists across turns.
 func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, measurementOpt ...*nativeInferenceMeasurement) (gen, promptTok, cacheable, matched int, sourceTier radixkv.SnapshotTier, prefillS, decodeS float64, stopped bool, err error) {
 	p.qwen35MetalGDNExecuted.Store(false)
+	p.prefillQ4KGEMM.Store("")
 	traceID := nativePhaseTraceID(ctx)
 	p.beginNativeFirstDraw(traceID, maxNew)
 	defer func() {
@@ -380,40 +381,59 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	if closeSession {
 		defer s.Close()
 	}
-	p.configureNativeSession(s)
 	if measurement != nil {
+		// Reads s at return, so it observes the session that actually ran even
+		// when the opt-in GDN route below replaced a declined restored session.
 		defer func() {
 			measurement.hostFallbackObserved = measurement.hostFallbackObserved || s.HostFallbackObserved()
 		}()
 	}
-	p.preReservePackedQ4KRequest(s, len(ids), maxNew)
 	qwen35MetalStateIdentityEnabled := false
-	if shouldEnableQwen35MetalStateIdentity(p, measurement, ids, matched, cachedLogits) {
-		if enableErr := s.EnableQwen35MetalStateIdentityReceipt(ids); enableErr != nil {
-			var unavailable *model.Qwen35MetalStateIdentityUnavailableError
-			if !errors.As(enableErr, &unavailable) {
-				err = enableErr
-				return
+	// At most two passes: the second runs only when the opt-in native GDN route
+	// declined a restored prefix and the request falls back to a fresh session.
+	for {
+		p.configureNativeSession(s)
+		p.preReservePackedQ4KRequest(s, len(ids), maxNew)
+		qwen35MetalStateIdentityEnabled = false
+		if shouldEnableQwen35MetalStateIdentity(p, measurement, ids, matched, cachedLogits) {
+			if enableErr := s.EnableQwen35MetalStateIdentityReceipt(ids); enableErr != nil {
+				var unavailable *model.Qwen35MetalStateIdentityUnavailableError
+				if !errors.As(enableErr, &unavailable) {
+					err = enableErr
+					return
+				}
+			} else {
+				qwen35MetalStateIdentityEnabled = true
+				defer s.ResetQwen35MetalStateIdentityReceipt()
 			}
-		} else {
-			qwen35MetalStateIdentityEnabled = true
-			defer s.ResetQwen35MetalStateIdentityReceipt()
 		}
-	}
-	if p.qwen35MetalGDNSequence && p.backend == nil && p.metal && p.q4k && p.m.Cfg.IsQwen35Hybrid() && cachedLogits == nil {
-		if matched != 0 {
-			err = &model.UnsupportedGDNPreprojectedSequenceError{
-				Path:   model.Qwen35MetalGDNSequenceForwardPath,
-				Reason: "native sequence requires a fresh prompt; restored host prefix state cannot initialize resident owners",
+		if p.qwen35MetalGDNSequence && p.backend == nil && p.metal && p.q4k && p.m.Cfg.IsQwen35Hybrid() && cachedLogits == nil {
+			// A restored prefix (matched > 0) is admitted at base=matched: Enable seeds
+			// the fresh resident owners from the restored host linear-attention state,
+			// or returns a typed UnsupportedGDNPreprojectedSequenceError (owners freed,
+			// host state untouched). The opt-in route never falls back to host
+			// recurrence; a declined restored prefix is instead discarded and the
+			// request retried as a cache miss on a fresh session.
+			if err = s.EnableQwen35MetalGDNPreprojectedSequence(); err != nil {
+				if !qwen35GDNSequenceRetryFresh(err, matched) {
+					return
+				}
+				err = nil
+				// Release the restored session now (Close is idempotent, so a
+				// deferred close already bound to it stays harmless) and start over
+				// at matched=0. cacheable keeps the structural lookup result.
+				s.Close()
+				s = p.m.NewSession()
+				defer s.Close()
+				matched, sourceTier = 0, radixkv.SnapshotTierMiss
+				skipExactDeviceL1Readmission = false
+				continue
 			}
-			return
+			// The historical CPU-session path otherwise has no close requirement. The
+			// candidate owns native state, so bind cleanup even when prefill panics.
+			defer s.Close()
 		}
-		if err = s.EnableQwen35MetalGDNPreprojectedSequence(); err != nil {
-			return
-		}
-		// The historical CPU-session path otherwise has no close requirement. The
-		// candidate owns native state, so bind cleanup even when prefill panics.
-		defer s.Close()
+		break
 	}
 
 	// 1b) RECORD this turn's cache decision (#1538, inkernel_turntax.go). This is the seam the
@@ -443,6 +463,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	logits := cachedLogits
 	if logits == nil {
 		tp := time.Now()
+		s.ResetQ4KPrefillGEMMObservation()
 		flightPrefilled := false
 		if p.cpuPrefixFlightEligible(reuse, matched) && s.Cache != nil && s.Cache.CanEvict() == nil {
 			var flightKV *model.KVCache
@@ -491,14 +512,11 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			}
 		}
 		prefillAt := matched
+		// The native sequence route restores off-grid checkpoints too: Enable seeds
+		// resident owners from the restored host state, and PrefixSnapshot reads the
+		// live owners into the checkpoint clone.
 		checkpointPrefix := cacheable
 		sharedBoundary := inKernelSharedPrefixBoundaryFromContext(ctx)
-		if p.qwen35MetalGDNSequence && p.backend == nil && p.metal && p.q4k && p.m.Cfg.IsQwen35Hybrid() {
-			// Native sequence admission requires a fresh prompt. Preserve its existing
-			// grid checkpoints instead of adding off-grid hits it cannot restore.
-			checkpointPrefix = (checkpointPrefix / inKernelSnapshotCheckpointTokens) * inKernelSnapshotCheckpointTokens
-			sharedBoundary = (sharedBoundary / inKernelSnapshotCheckpointTokens) * inKernelSnapshotCheckpointTokens
-		}
 		required := inKernelAdaptiveSnapshotCheckpoint(prefillAt, checkpointPrefix, len(ids))
 		snapshotSeam := p.backend != nil || inKernelHostSnapshotReuse(p)
 		if reuse && snapshotSeam {
@@ -534,6 +552,9 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		}
 		prefillS = time.Since(tp).Seconds()
 		enginestep.Default.ObservePhase(enginestep.PhasePrefill, time.Since(tp))
+		// Snapshot the Q4_K GEMM route this prefill observed before decode (an MTP
+		// verify panel can dispatch the same GEMM) so the summary line attributes it.
+		p.prefillQ4KGEMM.Store(s.Q4KPrefillGEMMObservation())
 	}
 	if err = ctx.Err(); err != nil {
 		return
@@ -948,6 +969,19 @@ func captureQwen35MetalForwardSequenceReceipt(p *InKernelPlanner, s *model.Sessi
 		return
 	}
 	measurement.qwen35MetalForwardSequence = status
+}
+
+// qwen35GDNSequenceRetryFresh reports whether a failed opt-in native GDN
+// sequence admission should discard the restored prefix and retry the request as
+// a cache miss on a fresh session. Only a typed decline of a restored prefix
+// (matched > 0) qualifies; a fresh-session decline or any other error still
+// fails the request explicitly, preserving the route's no-host-fallback rule.
+func qwen35GDNSequenceRetryFresh(err error, matched int) bool {
+	if err == nil || matched <= 0 {
+		return false
+	}
+	var unsupported *model.UnsupportedGDNPreprojectedSequenceError
+	return errors.As(err, &unsupported)
 }
 
 func shouldEnableQwen35MetalStateIdentity(p *InKernelPlanner, measurement *nativeInferenceMeasurement, ids []int, matched int, cachedLogits []float32) bool {
@@ -1393,6 +1427,12 @@ func (p *InKernelPlanner) admitGeneratedContinuation(ctx context.Context, s *mod
 		return
 	}
 	if s.Cache == nil || s.Cache.Len() != len(tokens) {
+		return
+	}
+	// Resident Qwen GDN decode owners advance the recurrent state without touching
+	// the host Cache.linear the bare clone below copies. Synchronize first; when
+	// the live state cannot be read, admit nothing rather than a stale prefix.
+	if err := s.SyncQwen35ResidentGDNStateToHost(); err != nil {
 		return
 	}
 	if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped && p.scopedTree != nil {

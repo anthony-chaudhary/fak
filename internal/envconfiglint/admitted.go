@@ -600,4 +600,11 @@ var admittedPostFreeze = []string{
 	// Relocates to: serving observability configuration.
 	"FAK_TURN_COST",
 	"FAK_TURN_COST_STREAM",
+
+	// internal/model/dense_decode_graph.go — kill switch (=0) for the default-on dense
+	// whole-token Q4_K Metal decode graph (fak#13599). A rollback / A-B lever for a new
+	// default execution path, read on the decode hot path like its grandfathered sibling
+	// FAK_QWEN35_WHOLE_TOKEN_DECODE. Not a credential.
+	// Relocates to: a decode-route field on the session/serve execution config.
+	"FAK_DENSE_Q4K_DECODE_GRAPH",
 }

@@ -21,15 +21,28 @@ int mg_init(void);
 
 // External helper from q4k.m for Q4_K inspection via command encoder interception
 int mg_issue8833_q4k_encode_gemv(void* command, int wid, void* x, void* y);
-void *mg_graph_encode_q6k_from(void *opaque, int wid, void *input, int elems);
+// Typed read of a resident Q6_K weight (unretained buffer, input/blocks/output); 0 when invalid.
+int mg_q6k_desc(int wid, void **buf, int *in, int *nblk, int *out);
 
 // External helpers from q8.m
 id<MTLBuffer> mg_q8_codes_buf(int wid);
 id<MTLBuffer> mg_q8_scales_buf(int wid);
 void mg_q8_dims(int wid, int* out, int* in, int* nblk);
 
-// Fallback GEMV if needed
-void mg_q6k_gemv(int wid, const float* x, float* y, void* event);
+// Fallback GEMV if needed: the DEFAULT-mode (MG_GEMV_MODE_DEFAULT = 0) P=1 Q6_K kernel, returning
+// the executed MG_GEMV_EXEC_* identity or 0.
+int mg_q6k_gemv_mode(int wid, const float* x, float* y, int mode, void* event);
+// Binds and dispatches the DEFAULT-mode P=1 Q6_K kernel (q6k_mul_mv unless legacy) on an open
+// encoder, so the fused down-projection follows the same process default as every other P=1 site.
+int mg_q6k_p1_encode_default(void *encoder, void *w, void *x, void *y, int nblk, int out);
+
+// gFusedQ6DownExec is the MG_GEMV_EXEC_* identity (1 legacy, 3 mul_mv; 0 = declined) of the last
+// mg_q4k_fused_mlp_q6down stage-2 down projection; gFusedQ6DownBranch is 1 for the single
+// command-buffer fused branch and 2 for the mg_q6k_gemv_mode fallback. Callers hold q4kExecutionMu.
+static int gFusedQ6DownExec = 0;
+static int gFusedQ6DownBranch = 0;
+int mg_fused_q6down_last_kernel(void) { return gFusedQ6DownExec; }
+int mg_fused_q6down_last_branch(void) { return gFusedQ6DownBranch; }
 
 @interface MGQ4KSpyEncoder : NSObject
 @property (nonatomic, strong) id<MTLBuffer> buf;
@@ -85,35 +98,18 @@ static int extract_q4k(int wid, id<MTLBuffer> *outBuf, NSUInteger *outOffset, in
     return 0;
 }
 
-typedef struct {
-    id<MTLCommandBuffer> cb;
-    id<MTLBuffer> xf, xq, xd;
-    NSMutableArray *results;
-    int P, in, encoders, committed, readbacks, buffers;
-    double gpu_ms, wait_ms;
-} FusedProjectionGraph;
-
+// extract_q6k reads a resident Q6_K weight's buffer and shape straight from q4k.m's registry.
+// It used to drive mg_graph_encode_q6k_from with a local look-alike graph struct whose layout no
+// longer matched MGProjectionGraph, so the extraction always declined and the fused down branch
+// below was unreachable; mg_q6k_desc is the typed accessor. `in` must match the weight's input.
 static int extract_q6k(int wid, int in, id<MTLBuffer> *outBuf, int *outNblk, int *outOut) {
-    MGQ4KSpyEncoder *enc = [[MGQ4KSpyEncoder alloc] init];
-    MGQ4KSpyCmdBuf *cmd = [[MGQ4KSpyCmdBuf alloc] init];
-    cmd.encoder = enc;
-
-    FusedProjectionGraph g;
-    memset((void*)&g, 0, sizeof(g));
-    g.P = 1;
-    g.in = in;
-    g.cb = (id<MTLCommandBuffer>)cmd;
-    id<MTLBuffer> dummy = [gDev newBufferWithLength:(NSUInteger)in * sizeof(float) options:MTLResourceStorageModeShared];
-    g.results = [NSMutableArray arrayWithObject:dummy];
-
-    void *res = mg_graph_encode_q6k_from(&g, wid, (__bridge void*)dummy, in);
-    if (res != NULL && enc.buf != nil) {
-        *outBuf = enc.buf;
-        *outNblk = enc.nblk;
-        *outOut = enc.out;
-        return 1;
-    }
-    return 0;
+    void *buf = NULL;
+    int wIn = 0, nblk = 0, out = 0;
+    if (!mg_q6k_desc(wid, &buf, &wIn, &nblk, &out) || buf == NULL || wIn != in || out <= 0) return 0;
+    *outBuf = (__bridge id<MTLBuffer>)buf;
+    *outNblk = nblk;
+    *outOut = out;
+    return 1;
 }
 
 static id<MTLComputePipelineState> psoQ4KFusedGemvSwiGLU = nil;
@@ -279,6 +275,8 @@ int mg_q8_fused_gemv_swiglu(int gate_wid, int up_wid, const float* x, const floa
 }
 
 int mg_q4k_fused_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, float* y) {
+    gFusedQ6DownExec = 0;
+    gFusedQ6DownBranch = 0;
     if (gate_wid < 0 || up_wid < 0 || down_wid < 0 || x == NULL || y == NULL) return 0;
     if (!gFusedSwiGLUReady || psoQ4KFusedGemvSwiGLU == nil) return 0;
 
@@ -321,25 +319,35 @@ int mg_q4k_fused_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float*
 
             // Stage 2: Q6_K Down projection GEMV: gFusedInterBuf -> gFusedYBuf
             id<MTLComputeCommandEncoder> e2 = [cb computeCommandEncoder];
-            [e2 setComputePipelineState:psoQ6KGemv];
-            [e2 setBuffer:dBuf offset:0 atIndex:0];
-            [e2 setBuffer:gFusedInterBuf offset:0 atIndex:1];
-            [e2 setBuffer:gFusedYBuf offset:0 atIndex:2];
-            [e2 setBytes:&dNblk length:sizeof(int) atIndex:3];
-            [e2 setBytes:&dOut length:sizeof(int) atIndex:4];
-            [e2 dispatchThreadgroups:MTLSizeMake((NSUInteger)dOut, 1, 1)
-                threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+            // The DEFAULT-mode P=1 Q6_K kernel (q6k_mul_mv unless legacy), shared with q4k.m so
+            // this site never diverges from the process default; this TU's own q6k_gemv PSO is
+            // only the last resort when q4k.m has no Q6_K P=1 pipeline.
+            int q6ex = mg_q6k_p1_encode_default((__bridge void*)e2, (__bridge void*)dBuf,
+                (__bridge void*)gFusedInterBuf, (__bridge void*)gFusedYBuf, dNblk, dOut);
+            if (q6ex == 0) {
+                [e2 setComputePipelineState:psoQ6KGemv];
+                [e2 setBuffer:dBuf offset:0 atIndex:0];
+                [e2 setBuffer:gFusedInterBuf offset:0 atIndex:1];
+                [e2 setBuffer:gFusedYBuf offset:0 atIndex:2];
+                [e2 setBytes:&dNblk length:sizeof(int) atIndex:3];
+                [e2 setBytes:&dOut length:sizeof(int) atIndex:4];
+                [e2 dispatchThreadgroups:MTLSizeMake((NSUInteger)dOut, 1, 1)
+                    threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+                q6ex = 1; // MG_GEMV_EXEC_SCALAR
+            }
             [e2 endEncoding];
 
             [cb commit];
             [cb waitUntilCompleted];
 
             memcpy(y, gFusedYBuf.contents, (size_t)yElems * sizeof(float));
+            gFusedQ6DownExec = q6ex;
+            gFusedQ6DownBranch = 1;
             return 1;
         }
 
         // Fallback if Q6_K down buffer extraction was declined: compute inter via fused swiglu,
-        // then dispatch mg_q6k_gemv (still eliminates gMlpGate and gMlpUp!).
+        // then dispatch mg_q6k_gemv_mode (still eliminates gMlpGate and gMlpUp!).
         fused_grow_scratch(inElems, interElems, 0);
         memcpy(gFusedXBuf.contents, x, (size_t)inElems * sizeof(float));
 
@@ -359,7 +367,10 @@ int mg_q4k_fused_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float*
         [cb commit];
         [cb waitUntilCompleted];
 
-        mg_q6k_gemv(down_wid, (const float*)gFusedInterBuf.contents, y, NULL);
+        int q6ex = mg_q6k_gemv_mode(down_wid, (const float*)gFusedInterBuf.contents, y, 0, NULL);
+        if (q6ex == 0) return 0; // nothing dispatched: y is unwritten
+        gFusedQ6DownExec = q6ex;
+        gFusedQ6DownBranch = 2;
         return 1;
     }
 }
@@ -477,6 +488,16 @@ func FusedDequantGEMVSwiGLUQ8(gate, up *Q8Weight, x, xd []float32, inter []float
 // y = down( silu(gate*x) * (up*x) )
 // dispatches the fused Gate+Up SwiGLU kernel directly followed by Down projection GEMV, skipping
 // the creation and DRAM write/read of gMlpGate and gMlpUp activation tensors.
+// fusedMLPQ6DownLast reports the executed P=1 kernel and branch (1 fused single command buffer,
+// 2 mg_q6k_gemv_mode fallback) of the last FusedMLPQ6DownFast / FusedMLPFast stage-2 down
+// projection; GEMVKernelNone and 0 when it declined. It is the witness that the fused down
+// projection follows the process-default P=1 kernel.
+func fusedMLPQ6DownLast() (GEMVKernel, int) {
+	q4kExecutionMu.Lock()
+	defer q4kExecutionMu.Unlock()
+	return GEMVKernel(C.mg_fused_q6down_last_kernel()), int(C.mg_fused_q6down_last_branch())
+}
+
 func FusedMLPQ6DownFast(gate, up *Q4KWeight, down *Q6KWeight, x, y []float32) bool {
 	if !Available() {
 		return false

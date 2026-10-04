@@ -105,6 +105,13 @@ func TestProjectionGraphFinishDeviceFaultReturnsStall(t *testing.T) {
 	}
 	g := graphStallFixture(t)
 	defer g.Free()
+	// The injected fault quarantines the graph; its terminal waiter drains on another goroutine.
+	// Wait for that drain so the next test's graph admission does not race the quarantine gate.
+	t.Cleanup(func() {
+		if !pollGraphUntil(5*time.Second, func() bool { return projectionGraphQuarantines.Load() == 0 }) {
+			t.Errorf("device-fault quarantine did not drain: %d", projectionGraphQuarantines.Load())
+		}
+	})
 	g.InjectDeviceFaultForTest()
 	receipt, err := g.Finish()
 	if err == nil {

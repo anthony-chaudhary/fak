@@ -430,6 +430,7 @@ func (c *KVCache) KVCacheResidentBytes() int64 {
 // row i block-by-block so Evict's survivor re-positioning lands the same packed bytes a
 // fresh append at the new position would have produced. row must be w elements.
 func (c *KVCache) rewriteKRow(l, i int, row []float32) {
+	c.bumpMutation()
 	w := c.kvStride()
 	if c.quantized() {
 		if l < 0 || l >= len(c.kQ8) {
@@ -449,6 +450,7 @@ func (c *KVCache) rewriteKRow(l, i int, row []float32) {
 
 // rewriteVRow overwrites layer l's cached V row i with row (the V twin of rewriteKRow).
 func (c *KVCache) rewriteVRow(l, i int, row []float32) {
+	c.bumpMutation()
 	w := c.kvStride()
 	if c.quantized() {
 		if l < 0 || l >= len(c.vQ8) {
@@ -527,6 +529,7 @@ func (c *KVCache) ConvertToPrecision(prec KVPrecision) {
 	if c == nil || prec == "" || prec == c.prec {
 		return
 	}
+	c.bumpMutation()
 	w := c.kvStride()
 	n := c.kvLen(0)
 	nLayers := c.cfg.NumLayers

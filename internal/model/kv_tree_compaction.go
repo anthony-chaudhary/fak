@@ -52,6 +52,7 @@ func PruneAndCompactTreeKV(cache *KVCache, prefixLen int, acceptedPath []int, tr
 		}
 	}
 
+	cache.bumpMutation()
 	for l := 0; l < cache.cfg.NumLayers; l++ {
 		for j, node := range acceptedPath {
 			dst, src := prefixLen+j, prefixLen+node

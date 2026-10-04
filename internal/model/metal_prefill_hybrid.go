@@ -219,6 +219,11 @@ func qwen35GraphProjection(g *metalgemm.ProjectionGraph, s *Session, name string
 		return g.EncodeQ4KFrom(w, input)
 	}
 	if qt := m.kqw[name]; qt != nil {
+		// kqw also carries Q5_K/Q3_K/Q2_K tensors; only Q6_K has a graph encoder, so
+		// any other kind must refuse rather than upload its bytes as Q6_K.
+		if qt.kind != kindQ6K {
+			return nil, fmt.Errorf("metalgemm: k-quant graph weight is not Q6_K: %s", name)
+		}
 		w := m.metalQ6KWeight(name, qt)
 		if w == nil {
 			return nil, fmt.Errorf("metalgemm: Q6_K graph weight unavailable: %s", name)
@@ -787,13 +792,19 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, i
 		return nil, Qwen35MetalForwardSequenceReceipt{}, true, err
 	}
 	defer g.Free()
-	// Route the graph's Q4_K projections through the process-selected candidate. The default is
-	// the scalar kernel; the widened panel regime (P>=64, #13041) requests the wide-tile
-	// cooperative-SMEM kernel only when the FAK_Q4K_M5 opt-in is on AND metalgemm's
-	// device/version-pinned crossover admits this box (an unwitnessed >=1.10x margin keeps the
-	// scalar identity). SetQ4KGEMMMode is fail-closed for an ineligible P or unavailable
-	// pipeline, so a false return simply leaves the graph on scalar; it never mutates state.
+	// Route the graph's Q4_K and Q6_K projections through the process-selected candidates. Since
+	// fak#13692 the default for P >= metalgemm.Q4KMulMMMinPrompt is the mul_mm port for
+	// both formats; with that default switched off the pre-#13692 selector applies (scalar, or the
+	// wide-tile M5 candidate where its device/version/P-band crossover admits this box). Both
+	// setters are fail-closed for an unavailable pipeline, so a false return simply leaves the
+	// graph on the scalar/naive kernel; it never mutates state.
 	_ = g.SetQ4KGEMMMode(metalgemm.Q4KGEMMModeForPrompt(P))
+	_ = g.SetQ6KGEMMMode(metalgemm.Q6KGEMMModeForPrompt(P))
+	// The graph reports the candidate it will encode for every Q4_K projection (scalar
+	// unless SetQ4KGEMMMode accepted the request), so the prefill observation names the
+	// kernel this panel's projections actually encode (#13694).
+	s.observeQ4KPrefillGEMM(q4kPrefillGEMMExecutionLabel(
+		metalgemm.Q4KGEMMIdentityForMode(P, g.Q4KGEMMMode(), metalgemm.Q4KGEMMNotExecuted).Requested))
 	if b.injectForwardPostSubmitFailure {
 		g.InjectPostSubmitFailureForTest()
 	}
@@ -1304,9 +1315,13 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 	// The whole-token graph is P=1: route every Q4_K/Q6_K/Q8 projection through the
 	// historical decode GEMV kernels instead of the prefill GEMM pipeline. At P=1 the
 	// GEMM's 64-wide token tile wastes 63/64 of its work and emits a small dispatch per
-	// output-row block. SetGEMVUseVectorized(1) selects q4k_gemv_vectorized; the scalar
-	// q4k_gemv remains the fallback. FAK_QWEN35_WHOLE_TOKEN_GEMV=0 restores the GEMM
-	// route for an A/B measurement.
+	// output-row block. By default Q4_K runs q4k_gemv_vectorized and Q6_K (which has no
+	// vectorized kernel) runs the process-default P=1 kernel, q6k_mul_mv (fak#13599).
+	// FAK_QWEN35_WHOLE_TOKEN_GEMV_VEC=0 puts Q4_K on the process default too (q4k_mul_mv);
+	// it does NOT select the scalar kernels. The legacy scalar q4k_gemv/q6k_gemv baseline
+	// is FAK_Q4K_GEMV_KERNEL=legacy (with VEC=0 for Q4_K), and the executed identities are
+	// recorded per graph (GraphReceipt.Q4KGEMVKernels/Q6KGEMVKernels). FAK_QWEN35_WHOLE_TOKEN_GEMV=0
+	// restores the GEMM route for an A/B measurement.
 	if os.Getenv("FAK_QWEN35_WHOLE_TOKEN_GEMV") != "0" {
 		g.SetGEMVDecode()
 		g.SetGEMVVectorized(os.Getenv("FAK_QWEN35_WHOLE_TOKEN_GEMV_VEC") != "0")

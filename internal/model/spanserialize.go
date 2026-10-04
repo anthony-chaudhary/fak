@@ -198,6 +198,7 @@ func (c *KVCache) RestoreSpan(payload []byte) (int, error) {
 	// Publish only after the complete replacement is ready.
 	c.K, c.Kraw, c.V, c.pos = newK, newKraw, newV, newPos
 	c.lineage = tokenLineage{ids: fullLineage}
+	c.bumpMutation()
 	return span.n, nil
 }
 

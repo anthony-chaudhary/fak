@@ -202,7 +202,11 @@ func TestProjectionGraphDeviceResultChainingSingleFence(t *testing.T) {
 		t.Fatalf("transfer bytes = upload %d readback %d, want %d/%d", receipt.HostUploadBytes, receipt.HostReadbackBytes, wantUpload, wantReadback)
 	}
 	firstHost := make([]float32, P*value)
-	first.GEMM(x, P, firstHost)
+	// The graph encodes its default (scalar) Q4_K kernel, so the host reference names that kernel
+	// explicitly instead of the production selector (mul_mm at P >= 8 since fak#13692).
+	if id := first.GEMMWithEventsMode(x, P, firstHost, nil, Q4KGEMMModeScalar); id.Executed != Q4KGEMMExecutedScalar {
+		t.Fatalf("scalar reference identity=%+v", id)
+	}
 	q, d := quantize(firstHost)
 	secondHost := make([]float32, P*intermediate)
 	second.GEMM(q, d, P, secondHost)
@@ -1481,8 +1485,8 @@ func TestProjectionGraphGDNLeaseReleasesOnFailureAndFree(t *testing.T) {
 
 // TestProjectionGraphGEMVP1RouteParity documents the numerical drift of the P=1 GEMV
 // projection route (SetGEMVDecode). At P=1 the GEMM pipeline computes a 64-wide token
-// tile with 63 dead columns; the GEMV route replaces it with the historical decode
-// kernel (q4k_gemv/q4k_gemv_vectorized). The reduction tree differs (simd_sum vs the
+// tile with 63 dead columns; the GEMV route replaces it with a decode GEMV kernel
+// (the default q4k_mul_mv, or q4k_gemv_vectorized on request). The reduction tree differs (simd_sum vs the
 // GEMM's serial per-token accumulation), so the outputs are Approx-equal, not bit-equal.
 // This test pins the tolerance and fails if a future change makes the route structurally
 // wrong (e.g. wrong dispatch geometry or a transposed weight).
@@ -1531,7 +1535,7 @@ func TestProjectionGraphGEMVP1RouteParity(t *testing.T) {
 		name             string
 		gemv, vectorized bool
 	}{
-		{name: "gemv-scalar", gemv: true},
+		{name: "gemv-default", gemv: true},
 		{name: "gemv-vectorized", gemv: true, vectorized: true},
 	} {
 		t.Run(probe.name, func(t *testing.T) {

@@ -591,6 +591,11 @@ func TestMetalQ4KGemmMM32SelectionAndParity(t *testing.T) {
 	}
 	defer metalgemm.ResetQ4K()
 	t.Cleanup(func() { metalgemm.SetGEMMUseMM(false) })
+	// This test pins the pre-fak#13692 selector (scalar / exact-P32 MM32 opt-in); the mul_mm
+	// default outranks it at P >= 8, so isolate with the kill switch and restore the ambient value.
+	priorMulMM := metalgemm.GEMMUseMulMM()
+	metalgemm.SetGEMMUseMulMM(false)
+	t.Cleanup(func() { metalgemm.SetGEMMUseMulMM(priorMulMM) })
 	const (
 		out = 256
 		in  = 512

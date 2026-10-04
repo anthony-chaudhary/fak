@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -66,6 +67,9 @@ var (
 	// on first prefill weight-upload (a cgo call needing the device) and is additionally gated by
 	// metalgemm's device/version-pinned crossover table at encode time.
 	q4kM5Once sync.Once
+	// kquantMulMMOnce applies the fak#13692 mul_mm config seam (SetKQuantMulMMOptIn) to metalgemm
+	// once, on first prefill weight-upload, alongside the MM32/M5 opt-ins.
+	kquantMulMMOnce sync.Once
 )
 
 type metalQ8ExactState struct {
@@ -98,8 +102,23 @@ func (s *Session) metalExecution(operation metalgemm.ExecutionOperation, call fu
 	if s.PhaseProfiler != nil {
 		s.PhaseProfiler.recordMetal(snapshot, err)
 	}
+	if qprofOn && err == nil {
+		qprofRecordMetal(snapshot.Events)
+	}
 	if err == nil {
 		s.observeQwen35MetalExecutionSnapshot(snapshot)
+	}
+}
+
+// qprofRecordMetal folds one observed call's command buffers into the FAK_QPROFILE GPU/wait
+// accumulators the prefill gemm bucket attributes against (fak#13692).
+func qprofRecordMetal(events []metalgemm.ExecutionEvent) {
+	for _, e := range events {
+		if e.TimingAvailable {
+			qprofAddMetal(e.GPUMilliseconds, e.WaitMilliseconds)
+		} else {
+			qprofAddMetal(0, e.WaitMilliseconds)
+		}
 	}
 }
 
@@ -119,10 +138,12 @@ func (s *Session) recordMetalFallback(route MetalFallbackRoute) {
 
 func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P int) []float32 {
 	if !s.MetalQ4K || !metalgemm.Available() {
+		s.observeQ4KPrefillGEMM(Q4KPrefillGEMMCPU)
 		return q4kGemm(qt, Xf, P)
 	}
 	Y := make([]float32, P*qt.out)
 	var stall error
+	var identity metalgemm.Q4KGEMMIdentity
 	if !s.M.withMetalQ4K(name, qt, func(w *metalgemm.Q4KWeight) {
 		if P == 1 {
 			s.metalExecution(metalgemm.ExecutionQ4KGEMV, func(observation *metalgemm.ExecutionObservation) {
@@ -131,7 +152,7 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 			return
 		}
 		s.metalExecution(metalgemm.ExecutionQ4KGEMM, func(observation *metalgemm.ExecutionObservation) {
-			_, stall = w.GEMMWithEventsModeErr(Xf, P, Y, observation, metalgemm.Q4KGEMMModeForPrompt(P))
+			identity, stall = w.GEMMWithEventsModeErr(Xf, P, Y, observation, metalgemm.Q4KGEMMModeForPrompt(P))
 		})
 	}) {
 		route := MetalFallbackQ4KGEMMCPU
@@ -142,6 +163,7 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 		if qt.lazy != nil && len(qt.raw) == 0 {
 			panic("model: lazy Q4_K Metal GEMM upload failed: " + name)
 		}
+		s.observeQ4KPrefillGEMM(Q4KPrefillGEMMCPU)
 		return q4kGemm(qt, Xf, P)
 	}
 	if metalgemm.IsMetalCommandBufferStall(stall) {
@@ -152,9 +174,52 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 			route = MetalFallbackQ4KGEMVPanelCPU
 		}
 		s.recordMetalFallback(route)
+		s.observeQ4KPrefillGEMM(Q4KPrefillGEMMCPU)
 		return q4kGemm(qt, Xf, P)
 	}
+	if P == 1 {
+		s.observeQ4KPrefillGEMM(q4kPrefillGEMMLabelGEMV)
+	} else {
+		s.observeQ4KPrefillGEMM(q4kPrefillGEMMIdentityLabel(identity))
+	}
 	return Y
+}
+
+// q4kPrefillGEMMLabelGEMV labels a one-row prefill panel served by the decode GEMV.
+const q4kPrefillGEMMLabelGEMV = "gemv"
+
+// q4kPrefillGEMMExecutionLabel names one typed metalgemm Q4_K GEMM execution for the
+// prefill observation. A newer execution this switch does not list takes metalgemm's own
+// name when the type provides one (fmt.Stringer), else its ordinal — never a known
+// kernel's label.
+func q4kPrefillGEMMExecutionLabel(e metalgemm.Q4KGEMMExecution) string {
+	switch e {
+	case metalgemm.Q4KGEMMNotExecuted:
+		return "not_executed"
+	case metalgemm.Q4KGEMMExecutedScalar:
+		return "scalar"
+	case metalgemm.Q4KGEMMExecutedMM32:
+		return "mm32"
+	case metalgemm.Q4KGEMMExecutedM5CooperativeSMEM:
+		return "m5"
+	}
+	if named, ok := any(e).(fmt.Stringer); ok {
+		if label := named.String(); label != "" && label != "unknown" {
+			return label
+		}
+	}
+	return "exec" + strconv.Itoa(int(e))
+}
+
+// q4kPrefillGEMMIdentityLabel renders the executed kernel, and the requested candidate
+// too when the fail-closed selector fell back (e.g. "scalar(req=mm32)"), so a sweep
+// point never credits a candidate that did not run.
+func q4kPrefillGEMMIdentityLabel(id metalgemm.Q4KGEMMIdentity) string {
+	executed := q4kPrefillGEMMExecutionLabel(id.Executed)
+	if id.Requested == id.Executed || id.Requested == metalgemm.Q4KGEMMNotExecuted {
+		return executed
+	}
+	return executed + "(req=" + q4kPrefillGEMMExecutionLabel(id.Requested) + ")"
 }
 
 // q4kGemmGroupDispatch groups Q4_K projections that share one f32 activation panel Xf[P, in].
@@ -194,6 +259,7 @@ func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]
 	}
 	var grouped [][]float32
 	var stall error
+	var groupIdentity metalgemm.Q4KGEMMIdentity
 	if P == 1 {
 		s.metalExecution(metalgemm.ExecutionQ4KGEMVGroup, func(observation *metalgemm.ExecutionObservation) {
 			grouped, stall = metalgemm.GEMVGroupWithEventsErr(ws, Xf, observation)
@@ -225,7 +291,7 @@ func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]
 					} else {
 						slab = slab[:need]
 					}
-					grouped, _, stall = metalgemm.GEMMGroupIntoWithEventsModeErr(ws, Xf, P, slab, observation, metalgemm.Q4KGEMMModeForPrompt(P))
+					grouped, groupIdentity, stall = metalgemm.GEMMGroupIntoWithEventsModeErr(ws, Xf, P, slab, observation, metalgemm.Q4KGEMMModeForPrompt(P))
 					if grouped != nil {
 						// Do not publish new backing into Session until the synchronous Metal call
 						// has completed and returned its aliases.
@@ -248,7 +314,7 @@ func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]
 			for _, w := range ws {
 				off += P * w.Out
 			}
-			grouped, _, stall = metalgemm.GEMMGroupIntoWithEventsModeErr(ws, Xf, P, make([]float32, off), observation, metalgemm.Q4KGEMMModeForPrompt(P))
+			grouped, groupIdentity, stall = metalgemm.GEMMGroupIntoWithEventsModeErr(ws, Xf, P, make([]float32, off), observation, metalgemm.Q4KGEMMModeForPrompt(P))
 		})
 		if metalgemm.IsMetalCommandBufferStall(stall) {
 			// Same wedged-GPU decline as the decode group above, on the batched prefill GEMM:
@@ -264,6 +330,11 @@ func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]
 		}
 		s.recordMetalFallback(route)
 		return nil
+	}
+	if P == 1 {
+		s.observeQ4KPrefillGEMM(q4kPrefillGEMMLabelGEMV)
+	} else {
+		s.observeQ4KPrefillGEMM(q4kPrefillGEMMIdentityLabel(groupIdentity))
 	}
 	out := make([][]float32, n)
 	for j, i := range pos {
@@ -1175,6 +1246,17 @@ func SetQ4KM5OptIn(on bool) { q4kM5Disabled = !on }
 // q4kM5OptIn reports the widened-panel wide-tile opt-in. Default (undeclared) is ON.
 func q4kM5OptIn() bool { return !q4kM5Disabled }
 
+// kquantMulMMDisabled is the config-surface opt-out for the fak#13692 simdgroup-MMA (llama.cpp mul_mm-shaped) Q4_K /
+// Q6_K prefill GEMM (CONFIG_NOT_ENV, like q4kM5Disabled). The declared default is ON: mul_mm is the
+// production kernel for P >= metalgemm.Q4KMulMMMinPrompt on every Apple family where it compiles.
+// SetKQuantMulMMOptIn(false) restores the pre-#13692 selector (scalar / FAK_Q4K_MM MM32 / M5
+// crossover, naive Q6_K) as the operator escape hatch for a mul_mm regression.
+var kquantMulMMDisabled bool
+
+// SetKQuantMulMMOptIn declares whether the fak#13692 mul_mm prefill kernels are opted in. It must
+// be declared before the first Metal prefill (it is applied once per process).
+func SetKQuantMulMMOptIn(on bool) { kquantMulMMDisabled = !on }
+
 // q4kMMOptIn resolves the FAK_Q4K_MM process opt-in for the exact-P32 MM32 candidate. Default OFF
 // (the sibling of q4kM5OptIn, but the MM32 variant has not yet earned a default-on receipt).
 func q4kMMOptIn() bool { return os.Getenv("FAK_Q4K_MM") == "1" }
@@ -1195,6 +1277,10 @@ func (m *Model) metalQ4KWeights() map[string]bool {
 	// on the M3 Pro), cosine 1.0 vs the CPU f32 reference. Default OFF (the scalar kernel stays the
 	// proven path) until the MMA variant earns auto-enable. Set once per process — cheap and
 	// idempotent on the metalgemm side.
+	// Since fak#13692 the mul_mm default outranks both the MM32 and the M5 candidates below; they
+	// only select a kernel when SetKQuantMulMMOptIn(false) turns the default off (or for P below
+	// metalgemm.Q4KMulMMMinPrompt).
+	kquantMulMMOnce.Do(func() { metalgemm.SetGEMMUseMulMM(!kquantMulMMDisabled) })
 	q4kMMOnce.Do(func() { metalgemm.SetGEMMUseMM(q4kMMOptIn()) })
 	// Default ON the wide-tile cooperative-SMEM candidate for the widened panel regime (P>=64,
 	// fak#13041). The sanctioned on-silicon M3 Pro receipt now pins a row in metalgemm's
@@ -1202,8 +1288,8 @@ func (m *Model) metalQ4KWeights() map[string]bool {
 	// scalar on-GPU ratio measured 1.57x at P=64 and 1.46x at P=128, every sample clearing the
 	// fak#9937 >=1.10x gate. The encode-time crossover gate is the real safety mechanism: on any
 	// device/OS with no pinned row q4kGEMMModeForPrompt still requests the scalar identity, so
-	// default-on is inert off the receipted box. Flip FAK_Q4K_M5=0 to force the scalar kernel
-	// explicitly. Set once per process (cheap, idempotent on the metalgemm side).
+	// default-on is inert off the receipted box. SetQ4KM5OptIn(false) (formerly FAK_Q4K_M5=0) forces
+	// the scalar kernel when the mul_mm default is also off. Set once per process (cheap, idempotent on the metalgemm side).
 	q4kM5Once.Do(func() { metalgemm.SetGEMMUseM5(q4kM5OptIn()) })
 	uploaded := map[string]bool{}
 	cfg := m.Cfg

@@ -141,8 +141,25 @@ type v41ForwardSnapshot struct {
 }
 
 // PrefixSnapshot captures an independently owned prefix. Qwen recurrent layers
-// share immutable device pairs until a branch first mutates that layer.
+// share immutable device pairs until a branch first mutates that layer. On a
+// backend-nil Qwen session whose resident GDN owners hold the live recurrent
+// state, the owners are read back into the snapshot's host cache.
 func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
+	return s.prefixSnapshot(true)
+}
+
+// PrefixSnapshotHostOnly captures the prefix exactly as PrefixSnapshot did before
+// resident GDN owner readback existed: the host Cache.linear is cloned as-is and
+// live resident owners are neither read nor consulted. It is for callers that
+// checkpoint and restore GDN state through their own transaction state (the P4
+// MTP speculative-round checkpoint), where a per-round device readback of every
+// owner would be pure overhead. Such a snapshot is NOT a publishable prefix of
+// an owner-backed session; use PrefixSnapshot for anything restored elsewhere.
+func (s *Session) PrefixSnapshotHostOnly() (*PrefixSnapshot, error) {
+	return s.prefixSnapshot(false)
+}
+
+func (s *Session) prefixSnapshot(readResidentGDN bool) (*PrefixSnapshot, error) {
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
 	if s == nil || s.Cache == nil {
@@ -183,7 +200,28 @@ func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
 			out.hasV41DeviceIdentity = true
 		}
 	}
+	if s.Backend == nil && !readResidentGDN {
+		return out, nil
+	}
 	if s.Backend == nil {
+		// A backend-nil Qwen session whose resident GDN owners (admitted sequence
+		// or promoted decode) hold the live recurrent state never advanced its host
+		// Cache.linear while they ran. Read the owners into the CLONE so the
+		// snapshot restores the true prefix state into any host session; the live
+		// owners stay authoritative and unchanged, so a following prefill or decode
+		// on this session continues from the same state. Fail closed rather than
+		// publish a stale prefix.
+		if s.qwen35GDNOwnersHoldLiveState() {
+			snapshots, layer, stage, err := s.snapshotQwen35GDNOwners()
+			if err != nil {
+				out.Close()
+				return nil, fmt.Errorf("model: prefix snapshot cannot read resident GDN layer %d (%s): %w", layer, stage, err)
+			}
+			writeQwen35GDNSnapshotsToHost(s.M.Cfg, out.Cache, snapshots)
+		} else if s.qwen35HAL != nil && s.qwen35HAL.sequenceFailure != nil {
+			out.Close()
+			return nil, fmt.Errorf("model: cannot snapshot prefix after resident GDN failure: %w", s.qwen35HAL.sequenceFailure)
+		}
 		return out, nil
 	}
 	if s.halKV == nil {
@@ -767,6 +805,9 @@ type Session struct {
 	// path. See metal_cb_accounting.go.
 	metalCommandBuffers      int
 	metalGraphCommandBuffers int
+	// denseDecode owns the dense whole-token Q4_K Metal decode graph's device KV mirror
+	// and receipt (dense_decode_graph.go); nil until a MetalQ4K token consults it.
+	denseDecode *denseDecodeGraphState
 
 	// Metal routes PREFILL's projection GEMMs through the Metal GPU backend
 	// (metal_prefill.go, built only under -tags fakmetal) to reach llama.cpp-Metal prefill
@@ -815,6 +856,10 @@ type Session struct {
 	// the host cache, distinct from a numerically correct host-append fallback.
 	q4kHybridPrefillDevicePanels int
 	q4kHybridPrefillDeviceRows   int
+	// q4kPrefillGEMMLabels is the per-prefill Q4_K GEMM route observation (#13694):
+	// the distinct kernels that served this session's Q4_K prefill projections since
+	// the last ResetQ4KPrefillGEMMObservation (q4k_prefill_gemm_observation.go).
+	q4kPrefillGEMMLabels []string
 	// q4kMLPOutputSlab is the optional, session-local host readback backing for one grouped Q4_K
 	// gate/up prefill result. Generation owns a Session serially, and each layer consumes gate/up
 	// before the next layer overwrites it. It is retained only inside the P<=512, 68 MiB envelope
@@ -1036,6 +1081,13 @@ func (s *Session) token(id, pos int) []float32 {
 		return s.tappedLogitsAt(pos, s.headQ4(s.tokenHiddenQ(id, pos)))
 	}
 	if s.Q4K {
+		// Dense whole-token decode graph (fak#13599): a dense PreNorm SwiGLU model on the
+		// Metal Q4_K path encodes the whole token, LM head included, into one command
+		// buffer and returns logits. Any decline leaves the cache untouched and falls
+		// through to the per-op blockStep path below.
+		if logits, ok := s.tryDenseQ4KMetalDecodeGraph(id, pos); ok {
+			return s.tappedLogitsAt(pos, logits)
+		}
 		// Resident Q4_K decode: block matmuls dispatch per name (raw q4_k majority + Q8
 		// minority); the LM head is whichever resident format it loaded as, so headResident
 		// picks q4k/q8/f32 rather than assuming Q8.
@@ -1516,6 +1568,7 @@ func (s *Session) Prefill(ids []int) []float32 {
 		if logits, used := s.tryPrefillQwen35HybridQ4K(ids, true); used {
 			return logits
 		}
+		s.observeQ4KPrefillGEMM(Q4KPrefillGEMMTokenLoop)
 		return s.headResident(s.tokenLoopHidden(s.tokenHiddenQ, ids))
 	}
 	if s.GPTQ {
@@ -1618,6 +1671,7 @@ func (s *Session) PrefillNoLogits(ids []int) {
 		if _, used := s.tryPrefillQwen35HybridQ4K(ids, false); used {
 			return
 		}
+		s.observeQ4KPrefillGEMM(Q4KPrefillGEMMTokenLoop)
 		for _, id := range ids {
 			s.tokenHiddenQ(id, s.Cache.Len())
 		}

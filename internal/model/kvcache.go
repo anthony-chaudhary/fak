@@ -31,6 +31,28 @@ type KVCache struct {
 	// They are nil on the f32 path; kQ8... fields are indexed by layer.
 	kQ8 []kvPackedRow
 	vQ8 []kvPackedRow
+
+	// mutGen counts every NON-append mutation of the token rows: Truncate, Evict's
+	// compaction and survivor re-RoPE, tree compaction, RestoreSpan and precision
+	// conversion. Appends never bump it, so a device mirror keyed on (this cache's
+	// identity, mutGen, mirrored row count) stays valid across appends and is
+	// invalidated in O(1) by anything that rewrites or removes rows it already holds.
+	mutGen uint64
+}
+
+// bumpMutation records a non-append row mutation (see mutGen).
+func (c *KVCache) bumpMutation() {
+	if c != nil {
+		c.mutGen++
+	}
+}
+
+// mutationGeneration reports the non-append mutation counter; 0 for a nil cache.
+func (c *KVCache) mutationGeneration() uint64 {
+	if c == nil {
+		return 0
+	}
+	return c.mutGen
 }
 
 // NewKVCache allocates an empty cache for a model. Kraw (pre-RoPE K) is kept so that
@@ -231,6 +253,7 @@ func (c *KVCache) evictGLMDsa(from, end int) int {
 // eviction paths; onMoved carries the one part that legitimately differs (the
 // per-cache-family re-derivation). Returns the count removed (end - from).
 func (c *KVCache) compactPositions(from, end int, onMoved func(i int)) int {
+	c.bumpMutation()
 	residentLen := len(c.pos)
 	c.lineage.evict(from, end, residentLen)
 	c.pos = append(c.pos[:from], c.pos[end:]...)
@@ -395,6 +418,7 @@ func (c *KVCache) Truncate(targetLen int) {
 	if c == nil || targetLen >= len(c.pos) || targetLen < 0 {
 		return
 	}
+	c.bumpMutation()
 	w := c.kvStride()
 	for l := 0; l < c.cfg.NumLayers; l++ {
 		if c.quantized() {
