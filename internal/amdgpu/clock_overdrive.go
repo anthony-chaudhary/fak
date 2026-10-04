@@ -14,6 +14,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 // SysfsPPODClkVoltage is the sysfs node exposing the (non-persistent) iGPU
@@ -31,6 +33,9 @@ type OverdriveCapResult struct {
 	Applied bool `json:"applied"`
 	// MaxCoreMHz is the applied overdrive maximum in MHz (0 when untouched).
 	MaxCoreMHz int `json:"max_core_mhz"`
+	// MinCoreMHz is the overdrive floor written before the maximum (0 when the
+	// OD_RANGE SCLK bound was unparseable and the floor write was skipped).
+	MinCoreMHz int `json:"min_core_mhz,omitempty"`
 	// Device is the DRM card directory the operation targeted ("" when untouched).
 	Device string `json:"device,omitempty"`
 	// Unchanged reports that the call was a deliberate no-op (auto/unset cap).
@@ -63,13 +68,27 @@ func (g *HardwareClockGovernor) RestoreOverdrive() (OverdriveCapResult, error) {
 }
 
 // applyOverdriveCap requires effectsMu.
+//
+// The floor is written before the maximum: DPM level "high" pins the SMU hard
+// minimum at peak SCLK and "manual" does not reset it, so a lone "s 1 <max>" is
+// rejected at commit (hard min > soft max) and the cap silently never applies.
+// The floor is the OD_RANGE SCLK lower bound clamped to maxMHz; when that bound
+// is unparseable the floor write is skipped rather than guessed. The kernel
+// accepts pp_od_clk_voltage edits only at DPM level "manual"; this path does not
+// set it, so the caller owns that precondition.
 func (g *HardwareClockGovernor) applyOverdriveCap(maxMHz int) (OverdriveCapResult, error) {
-	devDir, odFile, err := g.resolveOverdriveFile()
+	devDir, odFile, odData, err := g.resolveOverdriveFile()
 	if err != nil {
 		return OverdriveCapResult{}, err
 	}
 
-	// Bounded write: set the OD range maximum, then commit with a single byte.
+	floorMHz := 0
+	if lo, _, ok := parseODRangeSCLK(odData); ok {
+		floorMHz = min(lo, maxMHz)
+		if err := g.writeOverdrive(odFile, fmt.Sprintf("s 0 %d\n", floorMHz)); err != nil {
+			return OverdriveCapResult{}, fmt.Errorf("amdgpu: overdrive floor write failed at %s: %w", odFile, err)
+		}
+	}
 	if err := g.writeOverdrive(odFile, fmt.Sprintf("s 1 %d\n", maxMHz)); err != nil {
 		return OverdriveCapResult{}, fmt.Errorf("amdgpu: overdrive cap write failed at %s: %w", odFile, err)
 	}
@@ -79,13 +98,43 @@ func (g *HardwareClockGovernor) applyOverdriveCap(maxMHz int) (OverdriveCapResul
 	return OverdriveCapResult{
 		Applied:    true,
 		MaxCoreMHz: maxMHz,
+		MinCoreMHz: floorMHz,
 		Device:     filepath.Base(filepath.Dir(devDir)),
 	}, nil
 }
 
+// parseODRangeSCLK extracts the SCLK lower and upper bounds (MHz) from the
+// OD_RANGE section of pp_od_clk_voltage, accepting both the multi-line kernel
+// layout ("OD_RANGE:" then "SCLK: 600Mhz 2900Mhz") and a flattened single line.
+func parseODRangeSCLK(data []byte) (lo, hi int, ok bool) {
+	tokens := strings.Fields(string(data))
+	inRange := false
+	for i, tok := range tokens {
+		switch strings.ToUpper(tok) {
+		case "OD_RANGE:":
+			inRange = true
+		case "SCLK:":
+			if !inRange || i+2 >= len(tokens) {
+				continue
+			}
+			lo, loErr := parseMHzToken(tokens[i+1])
+			hi, hiErr := parseMHzToken(tokens[i+2])
+			if loErr != nil || hiErr != nil || lo <= 0 || lo > hi {
+				return 0, 0, false
+			}
+			return lo, hi, true
+		}
+	}
+	return 0, 0, false
+}
+
+func parseMHzToken(tok string) (int, error) {
+	return strconv.Atoi(strings.TrimSuffix(strings.ToLower(tok), "mhz"))
+}
+
 // restoreOverdrive requires effectsMu.
 func (g *HardwareClockGovernor) restoreOverdrive() (OverdriveCapResult, error) {
-	_, odFile, err := g.resolveOverdriveFile()
+	_, odFile, _, err := g.resolveOverdriveFile()
 	if err != nil {
 		if errors.Is(err, ErrOverdriveUnsupported) {
 			// A device that never exposed the range cannot need a restore.
@@ -106,16 +155,17 @@ func (g *HardwareClockGovernor) restoreOverdrive() (OverdriveCapResult, error) {
 // present and readable BEFORE any write. A missing or unreadable node fails
 // closed with ErrOverdriveUnsupported so the caller never performs a partial
 // write against an unsupported device.
-func (g *HardwareClockGovernor) resolveOverdriveFile() (devDir, odFile string, err error) {
+func (g *HardwareClockGovernor) resolveOverdriveFile() (devDir, odFile string, odData []byte, err error) {
 	devDir = g.resolveAMDDeviceDir()
 	if g.fileReader == nil {
-		return devDir, "", fmt.Errorf("%s: %w", devDir, ErrOverdriveUnsupported)
+		return devDir, "", nil, fmt.Errorf("%s: %w", devDir, ErrOverdriveUnsupported)
 	}
 	odFile = filepath.Join(devDir, SysfsPPODClkVoltage)
-	if _, rerr := g.fileReader(odFile); rerr != nil {
-		return devDir, odFile, fmt.Errorf("%s: %w", odFile, ErrOverdriveUnsupported)
+	odData, rerr := g.fileReader(odFile)
+	if rerr != nil {
+		return devDir, odFile, nil, fmt.Errorf("%s: %w", odFile, ErrOverdriveUnsupported)
 	}
-	return devDir, odFile, nil
+	return devDir, odFile, odData, nil
 }
 
 // writeOverdrive performs one injected write. Sharing the governor's fileWriter
