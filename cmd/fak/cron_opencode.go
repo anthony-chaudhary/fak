@@ -19,12 +19,14 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const (
@@ -580,8 +582,27 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 		}
 		c.Stderr = io.MultiWriter(stderrWriters...)
 
+		// The attempt owns its whole process tree through a KILL_ON_JOB_CLOSE
+		// Job Object on Windows (a no-op handle elsewhere). Closing it reaps every
+		// descendant, including an OpenCode grandchild started by a wrapper
+		// command, even after an intermediate parent exited and a parent-PID walk
+		// can no longer reach it. The handle also closes when this process dies,
+		// so a supervisor that kills only this PID still takes the tree.
+		var (
+			jobMu sync.Mutex
+			job   *windowgate.JobObject
+		)
+		closeJob := func() {
+			jobMu.Lock()
+			defer jobMu.Unlock()
+			if job != nil {
+				_ = job.Close()
+				job = nil
+			}
+		}
 		c.WaitDelay = 5 * time.Second
 		c.Cancel = func() error {
+			closeJob()
 			if c.Process != nil && c.Process.Pid > 0 {
 				cronRunKillTree(c.Process.Pid)
 			}
@@ -590,7 +611,11 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 
 		stopReason = "completed"
 		startTime = time.Now()
-		runErr = c.Start()
+		var startedJob *windowgate.JobObject
+		startedJob, runErr = windowgate.StartInNewJob(c)
+		jobMu.Lock()
+		job = startedJob
+		jobMu.Unlock()
 		if runErr == nil {
 			softTimer := time.NewTimer(effectiveTimeout)
 			waitDone := make(chan error, 1)
@@ -645,6 +670,7 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 		}
 		endedTime = time.Now()
 		cancel()
+		closeJob()
 
 		if opts.Stderr != nil {
 			switch stopReason {
