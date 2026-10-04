@@ -346,9 +346,21 @@ func ReadRangeDiff(root, base, tip string) (*StagedDiff, error) {
 	if strings.TrimSpace(base) == "" || strings.TrimSpace(tip) == "" {
 		return nil, ErrCouldNotRun
 	}
-	// Resolve both endpoints once: reject options, paths and non-commit objects,
-	// and keep subsequent diff/catalog reads stable if a named ref moves.
-	for _, ref := range []*string{&base, &tip} {
+	// A protocol-zero base is a new ref, so every tip file is an addition.
+	// Derive the empty tree in the repository's object format without writing
+	// an object; diff-tree --root on a descendant would miss ancestor content.
+	refs := []*string{&base, &tip}
+	if (len(base) == 40 || len(base) == 64) && strings.Trim(base, "0") == "" {
+		out, code, err := realRunner(context.Background(), root, "hash-object", "-t", "tree", "--stdin")
+		if err != nil || code != 0 || strings.TrimSpace(out) == "" {
+			return nil, ErrCouldNotRun
+		}
+		base = strings.TrimSpace(out)
+		refs = []*string{&tip}
+	}
+	// Resolve commit endpoints once: reject options, paths and non-commit
+	// objects, and keep later diff/catalog reads stable if a named ref moves.
+	for _, ref := range refs {
 		out, code, err := realRunner(context.Background(), root, "rev-parse", "--verify", "--end-of-options", *ref+"^{commit}")
 		if err != nil || code != 0 || strings.TrimSpace(out) == "" {
 			return nil, ErrCouldNotRun
