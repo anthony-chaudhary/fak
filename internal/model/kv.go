@@ -767,6 +767,9 @@ type Session struct {
 	// path. See metal_cb_accounting.go.
 	metalCommandBuffers      int
 	metalGraphCommandBuffers int
+	// denseDecode owns the dense whole-token Q4_K Metal decode graph's device KV mirror
+	// and receipt (dense_decode_graph.go); nil until a MetalQ4K token consults it.
+	denseDecode *denseDecodeGraphState
 
 	// Metal routes PREFILL's projection GEMMs through the Metal GPU backend
 	// (metal_prefill.go, built only under -tags fakmetal) to reach llama.cpp-Metal prefill
@@ -1036,6 +1039,13 @@ func (s *Session) token(id, pos int) []float32 {
 		return s.tappedLogitsAt(pos, s.headQ4(s.tokenHiddenQ(id, pos)))
 	}
 	if s.Q4K {
+		// Dense whole-token decode graph (fak#13599): a dense PreNorm SwiGLU model on the
+		// Metal Q4_K path encodes the whole token, LM head included, into one command
+		// buffer and returns logits. Any decline leaves the cache untouched and falls
+		// through to the per-op blockStep path below.
+		if logits, ok := s.tryDenseQ4KMetalDecodeGraph(id, pos); ok {
+			return s.tappedLogitsAt(pos, logits)
+		}
 		// Resident Q4_K decode: block matmuls dispatch per name (raw q4_k majority + Q8
 		// minority); the LM head is whichever resident format it loaded as, so headResident
 		// picks q4k/q8/f32 rather than assuming Q8.

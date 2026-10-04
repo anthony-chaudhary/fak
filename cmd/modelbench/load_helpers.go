@@ -170,6 +170,9 @@ type decodeResult struct {
 	Reps          int     `json:"reps"`
 	PerTokenMedMS float64 `json:"per_token_median_ms"`
 	TokPerSec     float64 `json:"tok_per_sec"`
+	// CommandBuffers is the decode receipt's Metal submission evidence; nil on a cell
+	// resumed from an older checkpoint that predates it.
+	CommandBuffers *decodeCommandBufferStats `json:"command_buffers,omitempty"`
 }
 
 type workloadDecodeResult struct {

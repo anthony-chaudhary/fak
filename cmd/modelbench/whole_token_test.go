@@ -559,7 +559,7 @@ func TestWholeTokenControlUsesConfiguredBlockCountAndRecordsSelector(t *testing.
 	for _, key := range wholeTokenExecutionEnvironmentKeys() {
 		keys[key] = true
 	}
-	for _, key := range []string{"FAK_QWEN35_WHOLE_TOKEN_DECODE", "FAK_QWEN35_WHOLE_TOKEN_GEMV", "FAK_QWEN35_WHOLE_TOKEN_GEMV_VEC", "FAK_QWEN35_WHOLE_TOKEN_POOL", "FAK_QWEN35_WHOLE_TOKEN_GDN_FUSED", "FAK_QWEN35_PERSISTENT_DECODE_DKV", "FAK_GGUF_MMAP"} {
+	for _, key := range []string{"FAK_QWEN35_WHOLE_TOKEN_DECODE", "FAK_QWEN35_WHOLE_TOKEN_GEMV", "FAK_QWEN35_WHOLE_TOKEN_GEMV_VEC", "FAK_Q4K_GEMV_KERNEL", "FAK_QWEN35_WHOLE_TOKEN_POOL", "FAK_QWEN35_WHOLE_TOKEN_GDN_FUSED", "FAK_QWEN35_PERSISTENT_DECODE_DKV", "FAK_GGUF_MMAP"} {
 		if !keys[key] {
 			t.Fatalf("unrecorded control %s", key)
 		}

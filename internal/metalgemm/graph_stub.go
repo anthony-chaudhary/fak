@@ -21,12 +21,21 @@ type GraphReceipt struct {
 	// Graph-tracked allocation evidence; unavailable on the portable stub.
 	AllocatedBuffers    int
 	RetainedBufferBytes uint64
+	// Executed P=1 GEMV kernels; always empty on the portable stub.
+	Q4KGEMVKernels, Q6KGEMVKernels GEMVKernelSet
 }
 type GraphResult struct{}
 type ProjectionGraph struct{}
 
 func BeginProjectionGraph([]float32, []int8, []float32, int, int) (*ProjectionGraph, error) {
 	return nil, errors.New("metalgemm: projection graph unavailable")
+}
+
+// AddBiasInPlace is the portable stub of the graph bias op. A ProjectionGraph can never
+// be constructed without the Metal graph, so this is only reachable through a nil or
+// zero receiver and always declines.
+func (g *ProjectionGraph) AddBiasInPlace(*GraphResult, []float32) error {
+	return errors.New("metalgemm: projection graph unavailable")
 }
 
 // DeviceKV is the portable stub for the device-resident KV triple (#13087). The
@@ -45,6 +54,15 @@ var errDeviceKVUnavailable = errors.New("metalgemm: device KV unavailable withou
 
 // NewDeviceKV always declines on the portable lane: there is no device allocator.
 func NewDeviceKV(layers, tokens, kvWidth int) *DeviceKV { return nil }
+
+// NewDeviceKVAttendOnly always declines on the portable lane.
+func NewDeviceKVAttendOnly(layers, tokens, kvWidth int) *DeviceKV { return nil }
+
+// DeviceKVResidentBytes is 0 on the portable lane: no pair can be allocated.
+func DeviceKVResidentBytes() int64 { return 0 }
+
+// ResidentBytes reports 0 for the stub (no allocation).
+func (d *DeviceKV) ResidentBytes() int64 { return 0 }
 
 // LayerStride reports 0 for the stub (no allocation).
 func (d *DeviceKV) LayerStride() int { return 0 }

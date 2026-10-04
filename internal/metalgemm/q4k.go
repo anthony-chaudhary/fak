@@ -12,6 +12,7 @@ package metalgemm
 
 /*
 #include <stdint.h>
+#include <stdlib.h>
 typedef struct {
     uintptr_t command_buffer;
     int committed;
@@ -39,6 +40,10 @@ int  mg_q6k_upload_nocopy(const unsigned char* raw, int out, int in);
 void mg_q6k_release(int wid);
 int  mg_q6k_live_count(void);
 void mg_q6k_gemv(int wid, const float* x, float* y, mg_execution_event* event);
+int  mg_q6k_gemv_mode(int wid, const float* x, float* y, int mode, mg_execution_event* event);
+int  mg_q4k_set_p1_kernel(int mulmv);
+int  mg_q4k_p1_kernel(void);
+int  mg_q4k_p1_kernel_env_value(const char *v);
 void mg_q6k_gemm(int wid, const float* X, int P, float* Y, mg_execution_event* event);
 void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, float* y, mg_execution_event* event);
 int  mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int* down_wids, int n, const float* x, float* Ycat, mg_execution_event* event);
@@ -80,14 +85,55 @@ var lastGEMMGPUMs atomic.Uint64
 // and nothing when unused.
 func LastGEMMGPUMs() float64 { return math.Float64frombits(lastGEMMGPUMs.Load()) }
 
-// SetGEMVUseVectorized selects the experimental vectorized P=1 Q4_K kernel. The scalar
-// q4k_gemv pipeline remains the default and is restored by passing false. Selection affects only
-// Q4KWeight.GEMV; grouped, batched, fused-MLP, and prefill dispatch retain their existing kernels.
+// SetGEMVUseVectorized selects the experimental vectorized P=1 Q4_K kernel for Q4KWeight.GEMV.
+// Passing false restores the process default P=1 kernel (q4k_mul_mv, or the scalar q4k_gemv under
+// FAK_Q4K_GEMV_KERNEL=legacy). Grouped, batched, fused-MLP, and prefill dispatch never take the
+// vectorized kernel; their P=1 GEMVs follow the process default.
 func SetGEMVUseVectorized(on bool) {
 	q4kUseVectorized.Store(on)
 }
 
 var q4kUseVectorized atomic.Bool
+
+// SetQ4KGEMVKernelDefault sets the process-default P=1 Q4_K/Q6_K GEMV family and returns the
+// previous one: GEMVKernelMulMv (the default, fak#13599) or GEMVKernelScalar (the legacy
+// q4k_gemv / q6k_gemv parity reference). Any other value is treated as GEMVKernelMulMv. Without
+// a call, the default is read once from FAK_Q4K_GEMV_KERNEL ("legacy" or "scalar", any case,
+// selects the legacy family; an unrecognized value keeps mul_mv and is logged once).
+// It affects every DEFAULT-mode P=1 dispatch: Q4KWeight/Q6KWeight.GEMV, grouped, batched,
+// fused-MLP stages, and ProjectionGraph P=1 routes that did not pin a kernel. It is a same-binary
+// A/B and parity seam; the returned family is the resolved previous setting.
+func SetQ4KGEMVKernelDefault(k GEMVKernel) GEMVKernel {
+	mulmv := C.int(1)
+	if k == GEMVKernelScalar {
+		mulmv = 0
+	}
+	if C.mg_q4k_set_p1_kernel(mulmv) != 0 {
+		return GEMVKernelMulMv
+	}
+	return GEMVKernelScalar
+}
+
+// Q4KGEMVKernelDefault reports the kernel a DEFAULT-mode P=1 Q4_K GEMV executes right now:
+// GEMVKernelMulMv, GEMVKernelScalar when legacy was selected or the optional mul_mv pipeline
+// failed to build, or GEMVKernelNone before any Q4_K/Q6_K weight initialized the pipelines.
+func Q4KGEMVKernelDefault() GEMVKernel { return GEMVKernel(C.mg_q4k_p1_kernel()) }
+
+// q4kGEMVKernelFromEnv reports the process-default family a FAK_Q4K_GEMV_KERNEL value selects
+// and whether the value was recognized; an unrecognized value keeps GEMVKernelMulMv (and the
+// native resolver logs it once). It is the parse seam for the env knob's witness.
+func q4kGEMVKernelFromEnv(v string) (GEMVKernel, bool) {
+	cv := C.CString(v)
+	defer C.free(unsafe.Pointer(cv))
+	switch C.mg_q4k_p1_kernel_env_value(cv) {
+	case 0:
+		return GEMVKernelScalar, true
+	case 1:
+		return GEMVKernelMulMv, true
+	default:
+		return GEMVKernelMulMv, false
+	}
+}
 
 func recordQ4KEvent(observation *ExecutionObservation, event *C.mg_execution_event) {
 	if event == nil {
@@ -122,23 +168,47 @@ func q4kStallFromReceipt(completedWait bool, waitMS float64, statusCode, errorCo
 	return commandBufferStallError(waitMS, statusCode, errorCode, "", op)
 }
 
-type q4kGEMVExecution int
+// q4kGEMVExecution is the executed P=1 kernel identity returned by mg_q4k_gemv /
+// mg_q6k_gemv_mode; it is the exported GEMVKernel so receipts print the same identity.
+type q4kGEMVExecution = GEMVKernel
 
 const (
-	q4kGEMVNotExecuted q4kGEMVExecution = iota
-	q4kGEMVExecutedScalar
-	q4kGEMVExecutedVectorized
+	q4kGEMVNotExecuted        = GEMVKernelNone
+	q4kGEMVExecutedScalar     = GEMVKernelScalar
+	q4kGEMVExecutedVectorized = GEMVKernelVectorized
+	q4kGEMVExecutedMulMv      = GEMVKernelMulMv
 )
 
+// q4kGEMVMode mirrors the native MG_GEMV_MODE_* request values in q4k.m.
 type q4kGEMVMode int
 
 const (
-	q4kGEMVModeScalar q4kGEMVMode = iota
+	// q4kGEMVModeDefault resolves to mul_mv unless the legacy family is selected or the
+	// optional mul_mv pipeline is unavailable, in which case it runs the scalar kernel.
+	q4kGEMVModeDefault q4kGEMVMode = iota
 	q4kGEMVModeVectorized
+	q4kGEMVModeMulMv
+	q4kGEMVModeScalar
 	// q4kGEMVModeVectorizedUnavailable exercises the native fail-closed branch without
 	// mutating the process-global Metal pipeline table. Production selection never emits it.
 	q4kGEMVModeVectorizedUnavailable = -1
 )
+
+// q4kGEMVModeFor maps an explicit kernel request to its native mode. GEMVKernelNone selects
+// the process default.
+func q4kGEMVModeFor(k GEMVKernel) (q4kGEMVMode, bool) {
+	switch k {
+	case GEMVKernelNone:
+		return q4kGEMVModeDefault, true
+	case GEMVKernelScalar:
+		return q4kGEMVModeScalar, true
+	case GEMVKernelVectorized:
+		return q4kGEMVModeVectorized, true
+	case GEMVKernelMulMv:
+		return q4kGEMVModeMulMv, true
+	}
+	return 0, false
+}
 
 // Q4KGEMMExecution identifies the exact Q4_K prefill kernel that reached Metal dispatch.
 // NotExecuted means selection declined before a command buffer was created or output was touched.
@@ -539,7 +609,7 @@ func (w *Q4KWeight) gemvWithEventsMode(x, y []float32, observation *ExecutionObs
 }
 
 func (w *Q4KWeight) gemvWithEvents(x, y []float32, observation *ExecutionObservation) q4kGEMVExecution {
-	mode := q4kGEMVModeScalar
+	mode := q4kGEMVModeDefault
 	if q4kUseVectorized.Load() {
 		mode = q4kGEMVModeVectorized
 	}
@@ -555,7 +625,7 @@ func (w *Q4KWeight) GEMVWithEvents(x, y []float32, observation *ExecutionObserva
 // package's typed MetalCommandBufferStallError instead of a silent zero result. The observation is
 // still recorded so the existing counters path is unchanged.
 func (w *Q4KWeight) GEMVWithEventsErr(x, y []float32, observation *ExecutionObservation) error {
-	mode := q4kGEMVModeScalar
+	mode := q4kGEMVModeDefault
 	if q4kUseVectorized.Load() {
 		mode = q4kGEMVModeVectorized
 	}
@@ -1027,19 +1097,26 @@ func LiveQ6KWeights() int {
 // GEMV computes y[Out] = W · x for one f32 activation row. It is the standalone decode/head
 // twin of the Q6_K GEMV already used inside FusedMLPQ6Down.
 func (w *Q6KWeight) GEMVWithEvents(x, y []float32, observation *ExecutionObservation) {
+	w.gemvWithEventsMode(x, y, observation, q4kGEMVModeDefault)
+}
+
+// gemvWithEventsMode runs the P=1 Q6_K GEMV with an explicit native mode and returns the kernel
+// that actually executed (GEMVKernelNone when selection declined or the weight is invalid).
+func (w *Q6KWeight) gemvWithEventsMode(x, y []float32, observation *ExecutionObservation, mode q4kGEMVMode) q4kGEMVExecution {
 	if w == nil {
-		return
+		return q4kGEMVNotExecuted
 	}
 	q6kRegistryMu.RLock()
 	defer q6kRegistryMu.RUnlock()
 	if !q6kWeightValidLocked(w) || len(x) < w.In || len(y) < w.Out {
-		return
+		return q4kGEMVNotExecuted
 	}
 	var event C.mg_execution_event
 	q4kExecutionMu.Lock()
-	C.mg_q6k_gemv(w.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])), &event)
+	executed := C.mg_q6k_gemv_mode(w.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])), C.int(mode), &event)
 	q4kExecutionMu.Unlock()
 	recordQ4KEvent(observation, &event)
+	return q4kGEMVExecution(executed)
 }
 
 func (w *Q6KWeight) GEMV(x, y []float32) { w.GEMVWithEvents(x, y, nil) }

@@ -219,6 +219,11 @@ func qwen35GraphProjection(g *metalgemm.ProjectionGraph, s *Session, name string
 		return g.EncodeQ4KFrom(w, input)
 	}
 	if qt := m.kqw[name]; qt != nil {
+		// kqw also carries Q5_K/Q3_K/Q2_K tensors; only Q6_K has a graph encoder, so
+		// any other kind must refuse rather than upload its bytes as Q6_K.
+		if qt.kind != kindQ6K {
+			return nil, fmt.Errorf("metalgemm: k-quant graph weight is not Q6_K: %s", name)
+		}
 		w := m.metalQ6KWeight(name, qt)
 		if w == nil {
 			return nil, fmt.Errorf("metalgemm: Q6_K graph weight unavailable: %s", name)
@@ -1304,9 +1309,13 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 	// The whole-token graph is P=1: route every Q4_K/Q6_K/Q8 projection through the
 	// historical decode GEMV kernels instead of the prefill GEMM pipeline. At P=1 the
 	// GEMM's 64-wide token tile wastes 63/64 of its work and emits a small dispatch per
-	// output-row block. SetGEMVUseVectorized(1) selects q4k_gemv_vectorized; the scalar
-	// q4k_gemv remains the fallback. FAK_QWEN35_WHOLE_TOKEN_GEMV=0 restores the GEMM
-	// route for an A/B measurement.
+	// output-row block. By default Q4_K runs q4k_gemv_vectorized and Q6_K (which has no
+	// vectorized kernel) runs the process-default P=1 kernel, q6k_mul_mv (fak#13599).
+	// FAK_QWEN35_WHOLE_TOKEN_GEMV_VEC=0 puts Q4_K on the process default too (q4k_mul_mv);
+	// it does NOT select the scalar kernels. The legacy scalar q4k_gemv/q6k_gemv baseline
+	// is FAK_Q4K_GEMV_KERNEL=legacy (with VEC=0 for Q4_K), and the executed identities are
+	// recorded per graph (GraphReceipt.Q4KGEMVKernels/Q6KGEMVKernels). FAK_QWEN35_WHOLE_TOKEN_GEMV=0
+	// restores the GEMM route for an A/B measurement.
 	if os.Getenv("FAK_QWEN35_WHOLE_TOKEN_GEMV") != "0" {
 		g.SetGEMVDecode()
 		g.SetGEMVVectorized(os.Getenv("FAK_QWEN35_WHOLE_TOKEN_GEMV_VEC") != "0")

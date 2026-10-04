@@ -40,6 +40,8 @@ void mg_graph_test_release_terminal(void *gate);
 void *mg_graph_xf_buffer(void *graph);
 void *mg_graph_upload(void *graph, const float *src, int n);
 int mg_graph_set_gemv_vectorized(void *graph, int mode);
+int mg_graph_set_gemv_kernel(void *graph, int mode);
+int mg_graph_gemv_executed(void *graph, int q6);
 int mg_graph_set_gemv_p1(void *graph, int mode);
 int mg_graph_set_mm_mode(void *graph, int mode);
 int mg_graph_mm_mode(void *graph);
@@ -49,6 +51,8 @@ void *mg_qwen35_graph_kv_alloc(int elems);
 void mg_qwen35_graph_kv_free(void *kv);
 int mg_qwen35_graph_kv_upload(void *kv, const float *src, int elems);
 int mg_qwen35_graph_kv_download(void *kv, float *dst, int elems);
+int mg_qwen35_graph_kv_upload_at(void *kv, long off, const float *src, long elems);
+int mg_qwen35_graph_kv_download_at(void *kv, long off, float *dst, long elems);
 int mg_qwen35_graph_attention_dkv(void *graph, void *q, void *k, void *v, void *gate,
     const float *qnorm, const float *knorm, const float *cosv, const float *sinv,
     void *kv_kraw, void *kv_kpost, void *kv_v, int kv_off,
@@ -73,6 +77,7 @@ int mg_qwen35_graph_attention_dkv_q8(void *graph, void *q, void *k, void *v, voi
     void **out, void **kraw, void **kpost, void **vcurrent, void **kc, void **ks, void **vc, void **vs);
 void *mg_qwen35_graph_norm(void *graph, void *input, const float *weight, int rows, int width, float eps, int gain1p, int last_only);
 int mg_qwen35_graph_add(void *graph, void *x, void *y, int n);
+int mg_qwen35_graph_bias(void *graph, void *x, const float *bias, int rows, int width);
 int mg_qwen35_graph_swiglu(void *graph, void *gate, void *up, int n);
 int mg_qwen35_graph_split(void *graph, void *src, int qwidth, int hd, void **q, void **gate);
 int mg_qwen35_graph_attention(void *graph, void *q, void *k, void *v, void *gate,
@@ -95,6 +100,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -130,6 +137,10 @@ type GraphReceipt struct {
 	// and weights are outside this scope. The snapshot survives errors and teardown.
 	AllocatedBuffers    int
 	RetainedBufferBytes uint64
+	// Q4KGEMVKernels and Q6KGEMVKernels are the P=1 GEMV kernels this graph actually encoded
+	// on its SetGEMVDecode route (empty for the GEMM route), so a receipt shows whether the
+	// mul_mv default or the legacy parity kernel ran.
+	Q4KGEMVKernels, Q6KGEMVKernels GEMVKernelSet
 }
 
 type GraphResult struct {
@@ -163,11 +174,42 @@ type Qwen35GraphAttentionResult struct {
 // Each of the three sides reserves LayerStride = tokens*NumKVHeads*HeadDim floats
 // per layer; layer l's rows begin at l*LayerStride. Close frees all three device
 // buffers. Side 0 is KRaw (pre-norm key), side 1 is KPost (attention prefix) and
-// side 2 is V (raw value).
+// side 2 is V (raw value). A pair from NewDeviceKVAttendOnly has no KRaw side: the
+// attention reads only KPost and V, so a caller whose host cache keeps KRaw (the
+// dense decode graph) does not pay a third, never-read device side.
+//
+// Every pair counts toward DeviceKVResidentBytes until it is freed, and a pair that
+// becomes unreachable without Close is freed by a runtime cleanup, so a dropped
+// owner (a Session never Closed) cannot pin device memory for the process lifetime.
 type DeviceKV struct {
 	kraw, kpost, v unsafe.Pointer
 	elems          int // per-side capacity in floats
 	layerStride    int // floats per layer per side
+	bytes          int64
+	cleanup        runtime.Cleanup
+}
+
+// deviceKVResident is the process-wide byte count of live DeviceKV sides, so a
+// caller can budget a new mirror against the device working set.
+var deviceKVResident atomic.Int64
+
+// DeviceKVResidentBytes reports the device bytes held by every live DeviceKV.
+func DeviceKVResidentBytes() int64 { return deviceKVResident.Load() }
+
+// deviceKVBuffers is the cleanup's copy of a pair's native handles. It holds only C
+// pointers, never the *DeviceKV, so it does not keep the pair reachable.
+type deviceKVBuffers struct {
+	kraw, kpost, v unsafe.Pointer
+	bytes          int64
+}
+
+func (b deviceKVBuffers) free() {
+	for _, p := range []unsafe.Pointer{b.kraw, b.kpost, b.v} {
+		if p != nil {
+			C.mg_qwen35_graph_kv_free(p)
+		}
+	}
+	deviceKVResident.Add(-b.bytes)
 }
 
 // NewDeviceKV allocates a persistent device KV triple sized for tokens tokens
@@ -175,6 +217,17 @@ type DeviceKV struct {
 // floats per token. Returns nil when any device allocation or the geometry is
 // unavailable, which the caller treats as a decline (fail-open to the host walk).
 func NewDeviceKV(layers, tokens, kvWidth int) *DeviceKV {
+	return newDeviceKV(layers, tokens, kvWidth, true)
+}
+
+// NewDeviceKVAttendOnly is NewDeviceKV without the KRaw side: the attention entry
+// still appends and reads KPost/V on the device, while KRaw stays a per-panel graph
+// result the caller reads back. Side 0 uploads and downloads are refused.
+func NewDeviceKVAttendOnly(layers, tokens, kvWidth int) *DeviceKV {
+	return newDeviceKV(layers, tokens, kvWidth, false)
+}
+
+func newDeviceKV(layers, tokens, kvWidth int, withRaw bool) *DeviceKV {
 	if layers <= 0 || tokens <= 0 || kvWidth <= 0 || tokens > int(^uint(0)>>1)/kvWidth {
 		return nil
 	}
@@ -183,22 +236,40 @@ func NewDeviceKV(layers, tokens, kvWidth int) *DeviceKV {
 		return nil
 	}
 	elems := layers * layerStride
-	kraw := C.mg_qwen35_graph_kv_alloc(C.int(elems))
-	if kraw == nil {
+	// The native allocator, the device-KV offsets and the attention entry carry element
+	// counts as C int: a side wider than that would silently truncate, so decline it.
+	if elems > math.MaxInt32 {
 		return nil
 	}
-	kpost := C.mg_qwen35_graph_kv_alloc(C.int(elems))
-	if kpost == nil {
-		C.mg_qwen35_graph_kv_free(kraw)
+	var bufs deviceKVBuffers
+	sides := int64(2)
+	if withRaw {
+		sides = 3
+		if bufs.kraw = C.mg_qwen35_graph_kv_alloc(C.int(elems)); bufs.kraw == nil {
+			return nil
+		}
+	}
+	if bufs.kpost = C.mg_qwen35_graph_kv_alloc(C.int(elems)); bufs.kpost == nil {
+		bufs.free()
 		return nil
 	}
-	v := C.mg_qwen35_graph_kv_alloc(C.int(elems))
-	if v == nil {
-		C.mg_qwen35_graph_kv_free(kraw)
-		C.mg_qwen35_graph_kv_free(kpost)
+	if bufs.v = C.mg_qwen35_graph_kv_alloc(C.int(elems)); bufs.v == nil {
+		bufs.free()
 		return nil
 	}
-	return &DeviceKV{kraw: kraw, kpost: kpost, v: v, elems: elems, layerStride: layerStride}
+	bufs.bytes = sides * int64(elems) * 4
+	deviceKVResident.Add(bufs.bytes)
+	d := &DeviceKV{kraw: bufs.kraw, kpost: bufs.kpost, v: bufs.v, elems: elems, layerStride: layerStride, bytes: bufs.bytes}
+	d.cleanup = runtime.AddCleanup(d, deviceKVBuffers.free, bufs)
+	return d
+}
+
+// ResidentBytes reports the device bytes this pair holds (0 once closed).
+func (d *DeviceKV) ResidentBytes() int64 {
+	if d == nil {
+		return 0
+	}
+	return d.bytes
 }
 
 // LayerStride reports the per-layer float width per side the pair was sized for,
@@ -211,11 +282,14 @@ func (d *DeviceKV) LayerStride() int {
 }
 
 func (d *DeviceKV) side(side int) (unsafe.Pointer, error) {
-	if d == nil || d.kraw == nil || d.kpost == nil || d.v == nil {
+	if d == nil || d.kpost == nil || d.v == nil {
 		return nil, errors.New("metalgemm: device KV is not allocated")
 	}
 	switch side {
 	case 0:
+		if d.kraw == nil {
+			return nil, errors.New("metalgemm: device KV has no KRaw side (attend-only pair)")
+		}
 		return d.kraw, nil
 	case 1:
 		return d.kpost, nil
@@ -246,18 +320,14 @@ func (d *DeviceKV) UploadRegion(side, off int, src []float32) error {
 	if off < 0 || off+len(src) > d.elems {
 		return errors.New("metalgemm: device KV upload exceeds capacity")
 	}
-	// The native uploader copies to the buffer start, so upload the whole
-	// [0, off+len) region: stage the existing device bytes below `off` first, then
-	// the caller's rows, then write once. Device bytes below `off` are either a
-	// previously seeded prefix or zero, so preserving them is required.
-	staging := make([]float32, off+len(src))
-	if off > 0 {
-		if C.mg_qwen35_graph_kv_download(buf, (*C.float)(unsafe.Pointer(&staging[0])), C.int(off)) == 0 {
-			return errors.New("metalgemm: device KV upload read-back failed")
-		}
-	}
-	copy(staging[off:], src)
-	if C.mg_qwen35_graph_kv_upload(buf, (*C.float)(unsafe.Pointer(&staging[0])), C.int(len(staging))) == 0 {
+	// Offset-addressed copy: only [off, off+len) is written, so seeding layer l at
+	// l*LayerStride() (or catching up one row) costs O(len), not O(off+len).
+	ok := C.mg_qwen35_graph_kv_upload_at(buf, C.long(off), (*C.float)(unsafe.Pointer(&src[0])), C.long(len(src))) != 0
+	// The pair's cleanup frees these buffers once d is unreachable; keep d alive
+	// across the native copy so a caller dropping its last reference mid-call
+	// cannot free the MTLBuffer under the memcpy.
+	runtime.KeepAlive(d)
+	if !ok {
 		return errors.New("metalgemm: device KV upload failed")
 	}
 	return nil
@@ -286,35 +356,28 @@ func (d *DeviceKV) DownloadRegion(side, off int, dst []float32) error {
 	if off < 0 || off+len(dst) > d.elems {
 		return errors.New("metalgemm: device KV download exceeds capacity")
 	}
-	// The native downloader copies from the buffer start, so read the layer slice
-	// into a staging buffer sized to its end offset, then take the tail. This
-	// allocates per layer but only once per walk.
-	staging := make([]float32, off+len(dst))
-	if C.mg_qwen35_graph_kv_download(buf, (*C.float)(unsafe.Pointer(&staging[0])), C.int(len(staging))) == 0 {
+	// Offset-addressed copy of exactly [off, off+len): no staging of the rows below.
+	ok := C.mg_qwen35_graph_kv_download_at(buf, C.long(off), (*C.float)(unsafe.Pointer(&dst[0])), C.long(len(dst))) != 0
+	// The pair's cleanup frees these buffers once d is unreachable; keep d alive
+	// across the native copy so a caller dropping its last reference mid-call
+	// cannot free the MTLBuffer under the memcpy.
+	runtime.KeepAlive(d)
+	if !ok {
 		return errors.New("metalgemm: device KV download failed")
 	}
-	copy(dst, staging[off:])
 	return nil
 }
 
 // Close frees the device KV triple. Safe to call twice.
 func (d *DeviceKV) Close() {
-	if d == nil {
+	if d == nil || (d.kraw == nil && d.kpost == nil && d.v == nil) {
 		return
 	}
-	if d.kraw != nil {
-		C.mg_qwen35_graph_kv_free(d.kraw)
-		d.kraw = nil
-	}
-	if d.kpost != nil {
-		C.mg_qwen35_graph_kv_free(d.kpost)
-		d.kpost = nil
-	}
-	if d.v != nil {
-		C.mg_qwen35_graph_kv_free(d.v)
-		d.v = nil
-	}
-	d.elems, d.layerStride = 0, 0
+	// Stop the unreachability cleanup first: it owns the same handles.
+	d.cleanup.Stop()
+	deviceKVBuffers{kraw: d.kraw, kpost: d.kpost, v: d.v, bytes: d.bytes}.free()
+	d.kraw, d.kpost, d.v = nil, nil, nil
+	d.elems, d.layerStride, d.bytes = 0, 0, 0
 }
 
 // PromptPanelMaxTokens is the widest prompt panel the Qwen3.8 whole-forward graph
@@ -761,9 +824,11 @@ func (g *ProjectionGraph) SetGEMVDecode() bool {
 }
 
 // SetGEMVVectorized selects the P=1 kernel variant used when SetGEMVDecode is active:
-// true routes single-token Q4_K projections through q4k_gemv_vectorized, false through
-// the scalar q4k_gemv. It must be called before the first encode and is inert for P!=1.
-// Returns false when the requested vectorized pipeline is unavailable (fail-closed).
+// true routes single-token Q4_K projections through q4k_gemv_vectorized (Q6_K, which has no
+// vectorized kernel, keeps the default), false through the process default P=1 kernel
+// (q4k_mul_mv, or the scalar q4k_gemv under FAK_Q4K_GEMV_KERNEL=legacy). It must be called
+// before the first encode and is inert for P!=1. Returns false when the requested vectorized
+// pipeline is unavailable (fail-closed).
 func (g *ProjectionGraph) SetGEMVVectorized(mode bool) bool {
 	if g == nil || g.ptr == nil || g.finished || g.freed || g.encoders != 0 {
 		return false
@@ -773,6 +838,22 @@ func (g *ProjectionGraph) SetGEMVVectorized(mode bool) bool {
 		m = 1
 	}
 	return C.mg_graph_set_gemv_vectorized(g.ptr, m) != 0
+}
+
+// SetGEMVKernel pins the P=1 kernel used when SetGEMVDecode is active: GEMVKernelNone is the
+// process default, GEMVKernelScalar the legacy q4k_gemv/q6k_gemv parity reference,
+// GEMVKernelVectorized q4k_gemv_vectorized (Q6_K keeps the default), and GEMVKernelMulMv the
+// llama.cpp-shaped q4k_mul_mv/q6k_mul_mv. It must be called before the first encode and is inert
+// for P!=1. An explicit kernel whose pipeline is unavailable returns false (fail-closed).
+func (g *ProjectionGraph) SetGEMVKernel(k GEMVKernel) bool {
+	if g == nil || g.ptr == nil || g.finished || g.freed || g.encoders != 0 {
+		return false
+	}
+	mode, ok := q4kGEMVModeFor(k)
+	if !ok {
+		return false
+	}
+	return C.mg_graph_set_gemv_kernel(g.ptr, C.int(mode)) != 0
 }
 
 func (g *ProjectionGraph) add(ptr unsafe.Pointer, out int) (*GraphResult, error) {
@@ -976,6 +1057,11 @@ func (g *ProjectionGraph) LastRMSNorm(input *GraphResult, weight []float32, eps 
 }
 
 func (g *ProjectionGraph) AddInPlace(dst, src *GraphResult) error {
+	// A committed graph's command buffer can no longer take encoders; refuse instead
+	// of tripping a Metal assertion on a finished MTLCommandBuffer.
+	if err := g.open(); err != nil {
+		return err
+	}
 	if dst == nil || src == nil || dst.graph != g || src.graph != g || dst.ptr == nil || src.ptr == nil || dst.p != src.p || dst.out != src.out || dst.p != g.p || dst.p <= 0 {
 		return errors.New("metalgemm: invalid Qwen residual operands")
 	}
@@ -987,6 +1073,9 @@ func (g *ProjectionGraph) AddInPlace(dst, src *GraphResult) error {
 }
 
 func (g *ProjectionGraph) SwiGLUInPlace(gate, up *GraphResult) error {
+	if err := g.open(); err != nil {
+		return err
+	}
 	if gate == nil || up == nil || gate.graph != g || up.graph != g || gate.ptr == nil || up.ptr == nil || gate.p != g.p || up.p != g.p || gate.p <= 0 || gate.out != up.out {
 		return errors.New("metalgemm: invalid Qwen SwiGLU operands")
 	}
@@ -994,6 +1083,25 @@ func (g *ProjectionGraph) SwiGLUInPlace(gate, up *GraphResult) error {
 		return errors.New("metalgemm: Qwen SwiGLU encode failed")
 	}
 	g.encoders++
+	return nil
+}
+
+// AddBiasInPlace adds a host bias vector to every row of dst in place
+// (dst[r*width+i] += bias[i]), the projection bias of dense Qwen2/Llama-family
+// attention and MLP layers. The bias is staged once per call like the norm weights,
+// so its bytes count toward HostUploadBytes; it encodes one compute encoder.
+func (g *ProjectionGraph) AddBiasInPlace(dst *GraphResult, bias []float32) error {
+	if err := g.open(); err != nil {
+		return err
+	}
+	if dst == nil || dst.graph != g || dst.ptr == nil || dst.released || dst.p != g.p || dst.p <= 0 || dst.out <= 0 || len(bias) != dst.out {
+		return errors.New("metalgemm: invalid graph bias operands")
+	}
+	if C.mg_qwen35_graph_bias(g.ptr, dst.ptr, (*C.float)(unsafe.Pointer(&bias[0])), C.int(dst.p), C.int(dst.out)) == 0 {
+		return errors.New("metalgemm: graph bias encode failed")
+	}
+	g.encoders++
+	g.hostUploadBytes += uint64(len(bias)) * 4
 	return nil
 }
 
@@ -1015,6 +1123,35 @@ func (g *ProjectionGraph) SplitGatedQ(input *GraphResult, qwidth, hd int) (q, ga
 	return &GraphResult{ptr: qp, out: qwidth, p: g.p, graph: g}, &GraphResult{ptr: gp, out: qwidth, p: g.p, graph: g}, nil
 }
 
+// qwenAttentionInputs validates the attention operands. gate may be nil: that is the
+// ungated epilogue (dense Llama/Qwen2 attention), where the output is the softmax-weighted
+// V sum with no sigmoid gate. A non-nil gate must be an owned qwidth-wide panel and
+// keeps the historical gated epilogue unchanged.
+func (g *ProjectionGraph) qwenAttentionInputs(q, k, v, gate *GraphResult, qwidth, kvwidth int) error {
+	for _, check := range []struct {
+		r *GraphResult
+		w int
+	}{{q, qwidth}, {k, kvwidth}, {v, kvwidth}} {
+		if err := g.qwenInput(check.r, g.p, check.w); err != nil {
+			return err
+		}
+	}
+	if gate != nil {
+		return g.qwenInput(gate, g.p, qwidth)
+	}
+	return nil
+}
+
+// ptrOrNil is the native gate pointer: nil selects the ungated attention epilogue.
+func (r *GraphResult) ptrOrNil() unsafe.Pointer {
+	if r == nil {
+		return nil
+	}
+	return r.ptr
+}
+
+// FullAttention encodes ordered-panel full attention against a host KV prefix. A nil
+// gate runs the ungated epilogue; a non-nil gate applies out/(1+exp(-gate)).
 func (g *ProjectionGraph) FullAttention(q, k, v, gate *GraphResult, qnorm, knorm, cosv, sinv, prefixK, prefixV []float32, base, nH, nKV, hd, rotary int, scale, qkEps float32, gain1p, qkNorm bool) (Qwen35GraphAttentionResult, error) {
 	if g == nil {
 		return Qwen35GraphAttentionResult{}, errGraphTerminal
@@ -1023,13 +1160,8 @@ func (g *ProjectionGraph) FullAttention(q, k, v, gate *GraphResult, qnorm, knorm
 		return Qwen35GraphAttentionResult{}, fmt.Errorf("metalgemm: Qwen full-attention panel P=%d outside witnessed set [1,%d]", g.p, PromptPanelMaxTokens)
 	}
 	qwidth, kvwidth := nH*hd, nKV*hd
-	for _, check := range []struct {
-		r *GraphResult
-		w int
-	}{{q, qwidth}, {gate, qwidth}, {k, kvwidth}, {v, kvwidth}} {
-		if err := g.qwenInput(check.r, g.p, check.w); err != nil {
-			return Qwen35GraphAttentionResult{}, err
-		}
+	if err := g.qwenAttentionInputs(q, k, v, gate, qwidth, kvwidth); err != nil {
+		return Qwen35GraphAttentionResult{}, err
 	}
 	qNormShapeOK := len(qnorm) == hd || len(qnorm) == qwidth
 	kNormShapeOK := len(knorm) == hd || len(knorm) == kvwidth
@@ -1050,7 +1182,7 @@ func (g *ProjectionGraph) FullAttention(q, k, v, gate *GraphResult, qnorm, knorm
 		qkn = 1
 	}
 	var outp, krawp, kpostp, vcurp unsafe.Pointer
-	if C.mg_qwen35_graph_attention(g.ptr, q.ptr, k.ptr, v.ptr, gate.ptr,
+	if C.mg_qwen35_graph_attention(g.ptr, q.ptr, k.ptr, v.ptr, gate.ptrOrNil(),
 		(*C.float)(unsafe.Pointer(&qnorm[0])), (*C.float)(unsafe.Pointer(&knorm[0])),
 		(*C.float)(unsafe.Pointer(&cosv[0])), (*C.float)(unsafe.Pointer(&sinv[0])), pk, pv,
 		C.int(base), C.int(nH), C.int(nKV), C.int(hd), C.int(rotary), C.float(scale), C.float(qkEps), gain, qkn, C.int(len(qnorm)), C.int(len(knorm)),
@@ -1078,11 +1210,14 @@ func (g *ProjectionGraph) FullAttention(q, k, v, gate *GraphResult, qnorm, knorm
 //
 // A nil or under-sized pair, or any native decline, returns an error and encodes
 // nothing observable beyond its own graph; the caller falls back to the host walk.
+// A nil gate runs the ungated epilogue (see FullAttention).
 func (g *ProjectionGraph) FullAttentionDevice(q, k, v, gate *GraphResult, kv *DeviceKV, layer int, qnorm, knorm, cosv, sinv []float32, base, nH, nKV, hd, rotary int, scale, qkEps float32, gain1p, qkNorm bool) (Qwen35GraphAttentionResult, error) {
 	if g == nil {
 		return Qwen35GraphAttentionResult{}, errGraphTerminal
 	}
-	if kv == nil || kv.kraw == nil || kv.kpost == nil || kv.v == nil || layer < 0 {
+	// kv.kraw may be nil (NewDeviceKVAttendOnly): the native entry then skips the KRaw
+	// append, and the panel's KRaw stays readable as the returned graph result.
+	if kv == nil || kv.kpost == nil || kv.v == nil || layer < 0 {
 		return Qwen35GraphAttentionResult{}, errors.New("metalgemm: device KV is not allocated")
 	}
 	if !qwenOrderedPanel(g.p) {
@@ -1093,17 +1228,15 @@ func (g *ProjectionGraph) FullAttentionDevice(q, k, v, gate *GraphResult, kv *De
 	}
 	kvwidth := nKV * hd
 	kvOff := layer * kv.layerStride
-	if kvOff < 0 || kvOff+kv.layerStride > kv.elems || base > kv.layerStride/kvwidth {
+	// The panel writes rows [base, base+P) of this layer's slice. Admitting
+	// base+P > capacity would spill into the NEXT layer's row 0 (the native check is
+	// against the whole buffer, not the slice), so refuse it here.
+	if kvOff < 0 || kvOff+kv.layerStride > kv.elems || base < 0 || base+g.p > kv.layerStride/kvwidth {
 		return Qwen35GraphAttentionResult{}, errors.New("metalgemm: device KV layer slice out of range")
 	}
 	qwidth := nH * hd
-	for _, check := range []struct {
-		r *GraphResult
-		w int
-	}{{q, qwidth}, {gate, qwidth}, {k, kvwidth}, {v, kvwidth}} {
-		if err := g.qwenInput(check.r, g.p, check.w); err != nil {
-			return Qwen35GraphAttentionResult{}, err
-		}
+	if err := g.qwenAttentionInputs(q, k, v, gate, qwidth, kvwidth); err != nil {
+		return Qwen35GraphAttentionResult{}, err
 	}
 	qNormShapeOK := len(qnorm) == hd || len(qnorm) == qwidth
 	kNormShapeOK := len(knorm) == hd || len(knorm) == kvwidth
@@ -1119,11 +1252,15 @@ func (g *ProjectionGraph) FullAttentionDevice(q, k, v, gate *GraphResult, kv *De
 		qkn = 1
 	}
 	var outp, krawp, kpostp, vcurp unsafe.Pointer
-	if C.mg_qwen35_graph_attention_dkv(g.ptr, q.ptr, k.ptr, v.ptr, gate.ptr,
+	dkvOK := C.mg_qwen35_graph_attention_dkv(g.ptr, q.ptr, k.ptr, v.ptr, gate.ptrOrNil(),
 		(*C.float)(unsafe.Pointer(&qnorm[0])), (*C.float)(unsafe.Pointer(&knorm[0])),
 		(*C.float)(unsafe.Pointer(&cosv[0])), (*C.float)(unsafe.Pointer(&sinv[0])), kv.kraw, kv.kpost, kv.v, C.int(kvOff),
 		C.int(base), C.int(nH), C.int(nKV), C.int(hd), C.int(rotary), C.float(scale), C.float(qkEps), gain, qkn, C.int(len(qnorm)), C.int(len(knorm)),
-		&outp, &krawp, &kpostp, &vcurp) == 0 {
+		&outp, &krawp, &kpostp, &vcurp) != 0
+	// kv's cleanup must not free the device pair while the native call binds it
+	// (the committed command buffer retains it from then on).
+	runtime.KeepAlive(kv)
+	if !dkvOK {
 		return Qwen35GraphAttentionResult{}, errors.New("metalgemm: Qwen full-attention device-KV encode failed")
 	}
 	// Native full attention owns Q/K normalization, current-K/V append, and
@@ -1568,8 +1705,10 @@ func (g *ProjectionGraph) Finish() (GraphReceipt, error) {
 	if g.injectDeviceFault {
 		inject = 2
 	}
+	q4kKernels := GEMVKernelSet(C.mg_graph_gemv_executed(g.ptr, 0))
+	q6kKernels := GEMVKernelSet(C.mg_graph_gemv_executed(g.ptr, 1))
 	ok := C.mg_graph_finish(g.ptr, &r, inject) != 0
-	receipt := GraphReceipt{Committed: r.committed != 0, CompletedWait: r.completed_wait != 0, TimingAvailable: r.timing_available != 0, Encoders: int(r.encoders), HostReadbacks: int(r.host_readbacks), HostUploadBytes: g.hostUploadBytes, AllocatedBuffers: int(r.allocated_buffers), RetainedBufferBytes: uint64(r.retained_buffer_bytes), GPUMilliseconds: float64(r.gpu_milliseconds), WaitMilliseconds: float64(r.wait_milliseconds)}
+	receipt := GraphReceipt{Committed: r.committed != 0, CompletedWait: r.completed_wait != 0, TimingAvailable: r.timing_available != 0, Encoders: int(r.encoders), HostReadbacks: int(r.host_readbacks), HostUploadBytes: g.hostUploadBytes, AllocatedBuffers: int(r.allocated_buffers), RetainedBufferBytes: uint64(r.retained_buffer_bytes), GPUMilliseconds: float64(r.gpu_milliseconds), WaitMilliseconds: float64(r.wait_milliseconds), Q4KGEMVKernels: q4kKernels, Q6KGEMVKernels: q6kKernels}
 	if !ok && receipt.Committed && !receipt.CompletedWait {
 		g.quarantineCommittedGraph()
 		return receipt, commandBufferStallError(receipt.WaitMilliseconds, int(r.status_code), int(r.error_code), cString(&r.error_text[0]), "graph finish")

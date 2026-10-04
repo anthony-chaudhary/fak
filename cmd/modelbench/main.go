@@ -494,15 +494,50 @@ func timePrefillReps(newSession func() *model.Session, ids []int, reps int) floa
 // after timing), seeding each rep's first token via seedID(r), and returns the median
 // per-token time in ms over steps decode steps.
 func medDecodeReps(newSession func() *model.Session, prompt []int, reps, steps, vocab int, seedID func(r int) int) float64 {
+	med, _ := medDecodeRepsCounted(newSession, prompt, reps, steps, vocab, seedID)
+	return med
+}
+
+// decodeCommandBufferStats is the decode receipt's Metal submission evidence (#13599):
+// command buffers committed per decoded token (graph + per-op dispatch seams, prefill
+// excluded) and how many decoded tokens the dense whole-token graph accepted.
+type decodeCommandBufferStats struct {
+	CommandBuffersPerToken float64 `json:"command_buffers_per_token"`
+	GraphCommandBuffers    int     `json:"graph_command_buffers"`
+	DispatchCommandBuffers int     `json:"dispatch_command_buffers"`
+	DenseGraphAccepted     uint64  `json:"dense_graph_accepted_tokens"`
+	DenseGraphDeclined     uint64  `json:"dense_graph_declined_tokens"`
+	DenseGraphDecline      string  `json:"dense_graph_last_decline,omitempty"`
+}
+
+// medDecodeRepsCounted is medDecodeReps plus the command-buffer receipt summed over every
+// rep's decode steps; the counters are reset after prefill so only decode is counted.
+func medDecodeRepsCounted(newSession func() *model.Session, prompt []int, reps, steps, vocab int, seedID func(r int) int) (float64, decodeCommandBufferStats) {
 	perTok := make([]time.Duration, 0, reps)
+	var cb decodeCommandBufferStats
+	tokens := 0
 	for r := 0; r < reps; r++ {
 		s := newSession()
 		s.Prefill(prompt)
+		s.ResetMetalCommandBuffers()
+		before := s.DenseQ4KDecodeGraphReceipt()
 		id := seedID(r)
 		perTok = append(perTok, stepDecode(s, id, steps, vocab)/time.Duration(steps))
+		after := s.DenseQ4KDecodeGraphReceipt()
+		cb.GraphCommandBuffers += s.MetalGraphCommandBuffers()
+		cb.DispatchCommandBuffers += s.MetalDispatchCommandBuffers()
+		cb.DenseGraphAccepted += after.AcceptedTokens - before.AcceptedTokens
+		cb.DenseGraphDeclined += after.DeclinedTokens - before.DeclinedTokens
+		if after.DeclineReason != "" {
+			cb.DenseGraphDecline = after.DeclineReason
+		}
+		tokens += steps
 		s.Close()
 	}
-	return medianMS(perTok)
+	if tokens > 0 {
+		cb.CommandBuffersPerToken = float64(cb.GraphCommandBuffers+cb.DispatchCommandBuffers) / float64(tokens)
+	}
+	return medianMS(perTok), cb
 }
 
 // stepDecode runs steps incremental Step() calls from the seed id, advancing the id
@@ -844,17 +879,21 @@ func runPrefill(f *benchFlags, ck *benchckpt.Ledger, newSession func() *model.Se
 func runDecode(f *benchFlags, ck *benchckpt.Ledger, newSession func() *model.Session, vocab int, report, phaseReport map[string]any) {
 	prompt := lcgIDs(*f.decodePrompt, vocab)
 	res, reused := checkpointCell(ck, "decode", func() decodeResult {
-		med := medDecodeReps(newSession, prompt, *f.decodeReps, *f.decodeSteps, vocab, func(r int) int {
+		med, cb := medDecodeRepsCounted(newSession, prompt, *f.decodeReps, *f.decodeSteps, vocab, func(r int) int {
 			return int(uint64(r*131+7) % uint64(vocab))
 		})
 		return decodeResult{
 			PromptTokens: *f.decodePrompt, DecodeSteps: *f.decodeSteps, Reps: *f.decodeReps,
-			PerTokenMedMS: med, TokPerSec: 1.0 / (med / 1e3),
+			PerTokenMedMS: med, TokPerSec: 1.0 / (med / 1e3), CommandBuffers: &cb,
 		}
 	}, f)
 	report["decode"] = res
 	report["metal_keepalive"] = metalgemm.KeepAliveState()
 	fmt.Fprintf(os.Stderr, "[fak] decode: %.1f ms/tok (%.1f tok/s)%s\n", res.PerTokenMedMS, res.TokPerSec, resumedTag(reused))
+	if cb := res.CommandBuffers; cb != nil {
+		fmt.Fprintf(os.Stderr, "[fak] decode command buffers: %.2f/token (graph %d, dispatch %d); dense graph accepted %d declined %d %s\n",
+			cb.CommandBuffersPerToken, cb.GraphCommandBuffers, cb.DispatchCommandBuffers, cb.DenseGraphAccepted, cb.DenseGraphDeclined, cb.DenseGraphDecline)
+	}
 	if *f.phaseProfile && !reused {
 		s := newSession()
 		s.Prefill(prompt)

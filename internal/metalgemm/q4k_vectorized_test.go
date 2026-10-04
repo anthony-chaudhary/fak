@@ -102,9 +102,10 @@ func TestQ4KVectorizedP1Candidate(t *testing.T) {
 
 	control := make([]float32, out)
 	candidate := make([]float32, out)
+	// DEFAULT is q4k_mul_mv since fak#13599, so the scalar control is requested explicitly.
 	SetGEMVUseVectorized(false)
 	controlObservation := NewExecutionObservation(ExecutionQ4KGEMV)
-	if executed := w.gemvWithEvents(x, control, controlObservation); executed != q4kGEMVExecutedScalar {
+	if executed := w.gemvWithEventsMode(x, control, controlObservation, q4kGEMVModeScalar); executed != q4kGEMVExecutedScalar {
 		t.Fatalf("scalar selector executed status = %d, want %d", executed, q4kGEMVExecutedScalar)
 	}
 	requireCompletedExecution(t, controlObservation, ExecutionQ4KGEMV)
@@ -160,10 +161,13 @@ func TestQ4KVectorizedP1Candidate(t *testing.T) {
 	controlTimes := make([]time.Duration, 0, rounds)
 	candidateTimes := make([]time.Duration, 0, rounds)
 	measure := func(vectorized bool) time.Duration {
-		SetGEMVUseVectorized(vectorized)
+		mode := q4kGEMVModeScalar
+		if vectorized {
+			mode = q4kGEMVModeVectorized
+		}
 		start := time.Now()
 		for i := 0; i < callsPerRound; i++ {
-			w.GEMV(x, candidate)
+			w.gemvWithEventsMode(x, candidate, nil, mode)
 		}
 		return time.Since(start) / callsPerRound
 	}

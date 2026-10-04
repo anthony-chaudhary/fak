@@ -1,0 +1,68 @@
+{
+  "rows": [
+    {
+      "id": "gateway-engine-gemvkernelset",
+      "canonical": "GEMVKernelSet (P=1 GEMV kernel selector and receipt)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "internal/metalgemm/gemv_kernel.go: the bit set naming which single-token (P=1) Metal GEMV kernels a dispatch or ProjectionGraph executed - GEMVKernelScalar (legacy q4k_gemv/q6k_gemv, one lane per 256-weight super-block), GEMVKernelVectorized (the opt-in float4 unpack), GEMVKernelMulMv (the llama.cpp-shaped q4k_mul_mv/q6k_mul_mv default) or GEMVKernelNone. GEMVKernel is the process default selected once from FAK_Q4K_GEMV_KERNEL (legacy restores the scalar parity reference); GraphReceipt.Q4KGEMVKernels/Q6KGEMVKernels report the executed set.",
+      "distinction": "It selects and records the P=1 projection KERNEL for Q4_K/Q6_K weights only - NOT q8DecodeKernel (the Q8 whole-token decode witness), NOT glmDsaMatKernel (the GLM-DSA compute selector) and NOT KernelCheck (the dispatchtick preflight).",
+      "distinct_from": ["gateway-engine-q8decodekernel", "x2-gateway-engine-glmdsamatkernel", "gateway-engine-kernelcheck"],
+      "aliases": ["GEMVKernel", "GEMVKernelNone", "GEMVKernelScalar", "GEMVKernelVectorized", "GEMVKernelMulMv", "FAK_Q4K_GEMV_KERNEL", "Q4KGEMVKernels", "Q6KGEMVKernels"],
+      "grounding": "GEMVKernelSet",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "attention-fullattentiondevice",
+      "canonical": "FullAttentionDevice (graph attention over a persistent device KV)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "internal/metalgemm/graph.go: the ProjectionGraph full-attention op whose KV prefix lives in a caller-owned DeviceKV that persists across graphs; it applies optional QK-norm and rotate-half RoPE, appends the panel's K/V rows on the device, and attends (gated, or ungated when gate is nil). The dense whole-token Q4_K decode and the Qwen3.5 hybrid route use it so no host prefix is uploaded per token.",
+      "distinction": "It is the DEVICE-KV graph attention op - NOT qwen35FullAttentionHAL (the resident Qwen3.5 full-attention HAL step) and NOT FullAttentionInterval (which hybrid layers are full attention).",
+      "distinct_from": ["halo-mtp-attention-qwen35fullattentionhal", "x-attention-fullattention"],
+      "aliases": ["FullAttentionDevice"],
+      "grounding": "FullAttentionDevice",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "attention-hasqsasparseattn",
+      "canonical": "HasQSASparseAttn (QSA sparse-attention config predicate)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "internal/model Config predicate reporting that the checkpoint declares the QSA sparse-attention layout; routes that only reproduce dense full attention (for example the dense whole-token Q4_K decode admission) decline when it is true.",
+      "distinction": "It is the QSA layout predicate - NOT isMiniMaxSparseAttn (the MiniMax sparse path) and NOT cudaDsaSparseAttnCosineMin (the CUDA GLM-DSA accuracy gate).",
+      "distinct_from": ["x-attention-isminimaxsparseattn", "x-attention-cudadsasparseattncosinemin"],
+      "aliases": ["HasQSASparseAttn"],
+      "grounding": "HasQSASparseAttn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guard-gate-silugatedmlp",
+      "canonical": "siluGatedMLP (SwiGLU MLP config predicate)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "internal/model/moe.go predicate: the model's dense MLP is a SiLU-gated (SwiGLU) block, down(silu(gate(x)) * up(x)); fused Metal MLP paths and the dense whole-token Q4_K decode admission require it.",
+      "distinction": "It is the FFN-activation predicate - NOT mlp.gate_proj (the gate projection weight), NOT gate_up_proj (the fused gate+up weight) and NOT a guard/egress gate such as StrictGatedSinks.",
+      "distinct_from": ["mlp-gate-proj", "gate-up-proj", "strict-gated-sinks"],
+      "aliases": ["siluGatedMLP"],
+      "grounding": "siluGatedMLP",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

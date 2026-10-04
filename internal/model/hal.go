@@ -96,6 +96,7 @@ func (s *Session) Close() {
 		// Sequence auxiliary state can be owned by a native capability even when
 		// Backend is nil, so its teardown is outside the compute-HAL branch.
 		s.closeQwen35HALState()
+		s.closeDenseDecodeGraph()
 		if s.Backend != nil {
 			s.halClosed = true
 			if b, ok := s.Backend.(batchBackend); ok {
