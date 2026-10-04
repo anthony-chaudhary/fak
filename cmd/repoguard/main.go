@@ -40,17 +40,19 @@ func main() {
 	asJSON := flag.Bool("json", false, "machine-readable output for --check / --summary")
 	summary := flag.Bool("summary", false, "read the decision journal and show the accumulated guard value")
 	recentN := flag.Int("recent", 10, "how many recent findings to list under --summary")
+	sleepThreshold := flag.String("sleep-threshold-s", "", "FOREGROUND_SLEEP threshold in seconds; a positive integer overrides the 120s default (else the default)")
 	flag.Parse()
+	threshold := parseSleepThreshold(*sleepThreshold)
 
 	switch {
 	case *selftest:
 		os.Exit(runSelftest(os.Stdout))
 	case *hook:
-		os.Exit(runHookMode(os.Stdin, os.Stdout, os.Stderr, *mode))
+		os.Exit(runHookMode(os.Stdin, os.Stdout, os.Stderr, *mode, threshold))
 	case *summary:
 		os.Exit(runSummary(*workspace, *recentN, *asJSON, os.Stdout))
 	case *check != "":
-		os.Exit(runCheck(*check, *workspace, *asJSON, os.Stdout))
+		os.Exit(runCheck(*check, *workspace, *asJSON, os.Stdout, threshold))
 	default:
 		flag.Usage()
 		os.Exit(0)
@@ -88,16 +90,21 @@ func resolveMode(flagMode string) string {
 	return "enforce"
 }
 
-// runHook is runHookMode with no --mode flag (env or the "enforce" default).
+// runHook is runHookMode with no --mode flag (env or the "enforce" default) and no
+// explicit sleep threshold (the default).
 func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
-	return runHookMode(stdin, stdout, stderr, "")
+	return runHookMode(stdin, stdout, stderr, "", 0)
 }
 
 // runHookMode parses a PreToolUse payload and emits a deny decision on a
 // violation. Fail-open on any error (defense-in-depth must never wedge the
 // fleet). Always returns 0 — a deny is signalled through the JSON decision on
 // stdout, not the exit code. Mirrors repo_guard.run_hook.
-func runHookMode(stdin io.Reader, stdout, stderr io.Writer, flagMode string) int {
+//
+// sleepThresholdS is the explicit FOREGROUND_SLEEP threshold in seconds; <= 0
+// delegates to the guard default. It is a caller-supplied input, never ambient
+// process state.
+func runHookMode(stdin io.Reader, stdout, stderr io.Writer, flagMode string, sleepThresholdS float64) int {
 	mode := resolveMode(flagMode)
 	if mode == "off" {
 		return 0
@@ -128,7 +135,7 @@ func runHookMode(stdin io.Reader, stdout, stderr io.Writer, flagMode string) int
 	hints := repoguard.Hints{
 		LiveMonitorIDs:   liveMonitorIDsForRead(payload, workspaceRoot, stderr),
 		LeafDeclarations: leafDeclarationsForWrite(payload, workspaceRoot),
-		SleepThresholdS:  sleepThresholdFromEnv(),
+		SleepThresholdS:  sleepThresholdS,
 	}
 	violations := repoguard.EvaluateWithHints(payload.ToolName, payload.ToolInput, workspaceRoot, safeRoots, hints)
 	if len(violations) == 0 {
@@ -242,11 +249,12 @@ func severityOverridesFromEnv() map[string]repoguard.Severity {
 	return repoguard.ParseSeverityOverrides(os.Getenv("FAK_REPO_GUARD_SEVERITY"))
 }
 
-// sleepThresholdFromEnv reads FAK_SLEEP_THRESHOLD_S: a positive integer
-// overrides the FOREGROUND_SLEEP threshold; empty, non-numeric, or <= 0 yields 0
-// (the default) — a guard knob never fails closed on a typo.
-func sleepThresholdFromEnv() float64 {
-	v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("FAK_SLEEP_THRESHOLD_S")))
+// parseSleepThreshold parses the explicit --sleep-threshold-s command input: a
+// positive integer overrides the FOREGROUND_SLEEP threshold in seconds; empty,
+// non-numeric, or <= 0 yields 0 (the guard default) — a guard knob never fails
+// closed on a typo.
+func parseSleepThreshold(raw string) float64 {
+	v, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || v <= 0 {
 		return 0
 	}
@@ -319,12 +327,14 @@ func hookReadPath(input map[string]any) string {
 
 // runCheck classifies a single Bash command and reports. Mirrors the --check arm
 // of repo_guard.main: exit 1 iff there is at least one out-of-tree violation.
-func runCheck(command, workspace string, asJSON bool, stdout io.Writer) int {
+// sleepThresholdS is the explicit FOREGROUND_SLEEP threshold in seconds (<= 0
+// delegates to the guard default), never ambient process state.
+func runCheck(command, workspace string, asJSON bool, stdout io.Writer, sleepThresholdS float64) int {
 	ws := repoguard.FindRepoRoot(orCwd(workspace))
 	safeRoots := repoguard.SafeRootsForWorkspace(ws)
 	violations := repoguard.ClassifyCommand(command, ws, safeRoots)
 	violations = append(violations, repoguard.ClassifyInteractive(command)...)
-	violations = append(violations, repoguard.ClassifySleepWaitThreshold(command, sleepThresholdFromEnv())...)
+	violations = append(violations, repoguard.ClassifySleepWaitThreshold(command, sleepThresholdS)...)
 	violations = append(violations, repoguard.ClassifyForegroundNetworkLoop(command)...)
 	violations = append(violations, repoguard.ClassifyForegroundPowerShellInventory(command)...)
 	if violations == nil {
