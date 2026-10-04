@@ -202,7 +202,11 @@ func TestProjectionGraphDeviceResultChainingSingleFence(t *testing.T) {
 		t.Fatalf("transfer bytes = upload %d readback %d, want %d/%d", receipt.HostUploadBytes, receipt.HostReadbackBytes, wantUpload, wantReadback)
 	}
 	firstHost := make([]float32, P*value)
-	first.GEMM(x, P, firstHost)
+	// The graph encodes its default (scalar) Q4_K kernel, so the host reference names that kernel
+	// explicitly instead of the production selector (mul_mm at P >= 8 since fak#13692).
+	if id := first.GEMMWithEventsMode(x, P, firstHost, nil, Q4KGEMMModeScalar); id.Executed != Q4KGEMMExecutedScalar {
+		t.Fatalf("scalar reference identity=%+v", id)
+	}
 	q, d := quantize(firstHost)
 	secondHost := make([]float32, P*intermediate)
 	second.GEMM(q, d, P, secondHost)

@@ -42,6 +42,11 @@ func TestQ4KM5ProductionSeamDefaultsToWideTile(t *testing.T) {
 	// calls SetGEMMUseM5(true) on FAK_Q4K_M5-unset. Restore whatever the ambient process had.
 	priorM5 := q4kUseM5.Swap(true)
 	defer q4kUseM5.Store(priorM5)
+	// This seam pins the pre-fak#13692 selector (M5 crossover vs scalar); the mul_mm default
+	// outranks it, so isolate with the kill switch and restore the ambient setting.
+	priorMulMM := GEMMUseMulMM()
+	SetGEMMUseMulMM(false)
+	defer SetGEMMUseMulMM(priorMulMM)
 
 	P := PromptPanelMaxTokens // 128: the production panel width (P>=64 wide-tile envelope)
 	g, err := BeginProjectionGraph(make([]float32, P*in), nil, nil, P, in)
@@ -71,7 +76,7 @@ func TestQ4KM5ProductionSeamDefaultsToWideTile(t *testing.T) {
 		if mode != Q4KGEMMModeScalar {
 			t.Fatalf("unadmitted device: Q4KGEMMModeForPrompt(%d)=%v, want scalar", P, mode)
 		}
-		t.Logf("device %q is not the receipted M3 Pro/macOS 26 box; default-on is inert as designed", DeviceName())
+		t.Logf("device %q / OS %q has no admitting crossover row; default-on is inert as designed", DeviceName(), OSVersion())
 	}
 }
 
@@ -142,15 +147,31 @@ func TestQ4KM5CooperativeSMEMCandidateMatchesIndependentCPUOracle(t *testing.T) 
 // the typed requested identity stays scalar. It is pure Go (no Metal work), so it runs on any
 // host and pins the gate itself rather than a magic literal.
 func TestQ4KM5CrossoverGatesPanelRegime(t *testing.T) {
-	// Exactly one row is pinned: the on-silicon Apple M3 Pro / macOS 26 receipt from
-	// TestQ4KCrossoverReceiptCandidateVsScalar. A second row would be an unpinned device reaching
-	// mode 2, and zero rows would mean the gate never opened despite the measured margin.
-	if n := Q4KM5CrossoverRowCount(); n != 1 {
-		t.Fatalf("production crossover table has %d rows; exactly one on-silicon M3 Pro row is pinned", n)
+	// Exactly two rows are pinned, both from on-silicon Apple M3 Pro receipts of
+	// TestQ4KCrossoverReceiptCandidateVsScalar: macOS 26 (fak#13133) and macOS 27 (fak#13692), each
+	// over the measured band [64,128]. A further row would be an unpinned device/OS reaching mode
+	// 2, and a missing row would mean the gate never opened despite the measured margin.
+	if n := Q4KM5CrossoverRowCount(); n != 2 {
+		t.Fatalf("production crossover table has %d rows; exactly the macOS 26 and 27 M3 Pro rows are pinned", n)
+	}
+	pinnedOS := map[string]bool{}
+	for _, row := range q4kM5CrossoverTable {
+		if row.Family != "Apple M3 Pro" || row.MinP != 64 || row.MaxP != 128 || row.MinRatio < 1.10 || row.Witness == "" {
+			t.Fatalf("unexpected production crossover row %+v", row)
+		}
+		pinnedOS[row.OSVersion] = true
+	}
+	if !pinnedOS["26"] || !pinnedOS["27"] {
+		t.Fatalf("production crossover rows pin OS majors %v, want exactly 26 and 27", pinnedOS)
 	}
 	if Q4KM5CrossoverMinimumRatio < 1.10 {
 		t.Fatalf("crossover gate=%g, want >= 1.10", Q4KM5CrossoverMinimumRatio)
 	}
+	// This test pins the pre-fak#13692 M5 selector; the mul_mm default outranks it, so isolate
+	// with the kill switch and restore the ambient setting.
+	priorMulMM := GEMMUseMulMM()
+	SetGEMMUseMulMM(false)
+	defer SetGEMMUseMulMM(priorMulMM)
 	// q4kGEMMModeForPrompt must never reach mode 2 without the SetGEMMUseM5 opt-in, even for
 	// P>=64 on a device the pinned table admits.
 	// Isolate M5 policy from MM32's separate small-panel selector.
@@ -167,19 +188,37 @@ func TestQ4KM5CrossoverGatesPanelRegime(t *testing.T) {
 	const device, osVersion = "Apple M3 Pro", "26.6.2"
 	// Pin the measured endpoints independently of the live host. The encode-time selector
 	// must also match the actual OS; a matching device on an unreceipted OS stays scalar.
-	for _, P := range []int{64, 128} {
-		if !Q4KM5CrossoverPredicate(device, osVersion, P) {
-			t.Fatalf("pinned production row did not admit its measured P=%d endpoint", P)
+	for _, osv := range []string{osVersion, "27.0"} {
+		for _, P := range []int{64, 128} {
+			if !Q4KM5CrossoverPredicate(device, osv, P) {
+				t.Fatalf("pinned production row did not admit its measured P=%d endpoint on OS %s", P, osv)
+			}
+		}
+		if Q4KM5CrossoverPredicate(device, osv, 256) {
+			t.Fatalf("production table admitted unmeasured P=256 on OS %s", osv)
 		}
 	}
+	if Q4KM5CrossoverPredicate(device, "25.4.0", 64) || Q4KM5CrossoverPredicate(device, "28.0", 64) {
+		t.Fatal("production table admitted an unreceipted macOS major")
+	}
 	liveDevice, liveOS := DeviceName(), OSVersion()
+	// admittingOS is the set of OS majors the table in effect pins (the production table pins 26
+	// and 27; the synthetic withPinnedCrossoverRow blocks below pin only 26). Every admitting row
+	// in this test has the same device and measured band [64,128]; the live expectation is kept
+	// independent of the production predicate under test.
+	productionOS := []string{"26", "27"}
+	admittingOS := productionOS
 	assertLiveSelector := func(P int) {
 		t.Helper()
 		wantMode, wantRequested := Q4KGEMMModeScalar, Q4KGEMMExecutedScalar
-		// Both admitting rows in this test have this fixed identity and measured band.
-		// Keep the live expectation independent of the production predicate under test.
+		osAdmitted := false
+		for _, major := range admittingOS {
+			if strings.HasPrefix(liveOS, major) {
+				osAdmitted = true
+			}
+		}
 		if Available() && q4kUseM5.Load() && strings.HasPrefix(liveDevice, device) &&
-			strings.HasPrefix(liveOS, "26") && P >= 64 && P <= 128 {
+			osAdmitted && P >= 64 && P <= 128 {
 			wantMode, wantRequested = Q4KGEMMModeM5CooperativeSMEM, Q4KGEMMExecutedM5CooperativeSMEM
 		}
 		got := q4kGEMMModeForPrompt(P)
@@ -195,6 +234,8 @@ func TestQ4KM5CrossoverGatesPanelRegime(t *testing.T) {
 		assertLiveSelector(P)
 	}
 	q4kUseM5.Store(false)
+	// The synthetic rows below pin only macOS 26, so a live macOS 27 host must stay scalar there.
+	admittingOS = []string{"26"}
 	// A row below the >=1.10x gate must NOT admit mode 2.
 	withPinnedCrossoverRow(t, q4kM5CrossoverRow{Family: device, OSVersion: "26", MinP: 64, MaxP: 128, MinRatio: 1.09, Witness: "witness://below-gate"}, func() {
 		if Q4KM5CrossoverPredicate(device, osVersion, 64) {

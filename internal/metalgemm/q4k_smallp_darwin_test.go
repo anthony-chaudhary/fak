@@ -50,6 +50,11 @@ func TestQ4KSmallPSelectorModeForPrompt(t *testing.T) {
 		q4kUseMM.Store(priorMM)
 		q4kUseM5.Store(priorM5)
 	}()
+	// fak#13692: mul_mm outranks small-P from P >= 8, so this fak#13694 small-P selector contract
+	// is pinned with the mul_mm kill switch and the ambient setting restored.
+	priorMulMM := GEMMUseMulMM()
+	SetGEMMUseMulMM(false)
+	defer SetGEMMUseMulMM(priorMulMM)
 	q4kUseSmallP.Store(true)
 	for P, want := range map[int]Q4KGEMMMode{
 		1: Q4KGEMMModeScalar, 2: Q4KGEMMModeSmallPGEMV, 16: Q4KGEMMModeSmallPGEMV,
@@ -94,6 +99,11 @@ func TestQ4KSmallPGemvParity(t *testing.T) {
 	defer ResetQ4K()
 	prior := q4kUseSmallP.Swap(true)
 	defer q4kUseSmallP.Store(prior)
+	// fak#13692: mul_mm outranks small-P from P >= 8, so this fak#13694 small-P selector contract
+	// is pinned with the mul_mm kill switch and the ambient setting restored.
+	priorMulMM := GEMMUseMulMM()
+	SetGEMMUseMulMM(false)
+	defer SetGEMMUseMulMM(priorMulMM)
 	smallP := Q4KGEMMIdentity{Requested: Q4KGEMMExecutedSmallPGEMV, Executed: Q4KGEMMExecutedSmallPGEMV}
 	scalar := Q4KGEMMIdentity{Requested: Q4KGEMMExecutedScalar, Executed: Q4KGEMMExecutedScalar}
 	for _, shape := range q4kSmallPShapes {
@@ -165,6 +175,11 @@ func TestQ4KSmallPGemvGroupAndGraphParity(t *testing.T) {
 	defer ResetQ4K()
 	prior := q4kUseSmallP.Swap(true)
 	defer q4kUseSmallP.Store(prior)
+	// fak#13692: mul_mm outranks small-P from P >= 8, so this fak#13694 small-P selector contract
+	// is pinned with the mul_mm kill switch and the ambient setting restored.
+	priorMulMM := GEMMUseMulMM()
+	SetGEMMUseMulMM(false)
+	defer SetGEMMUseMulMM(priorMulMM)
 	const P, in = 9, 2560
 	smallP := Q4KGEMMIdentity{Requested: Q4KGEMMExecutedSmallPGEMV, Executed: Q4KGEMMExecutedSmallPGEMV}
 	ws := make([]*Q4KWeight, 0, len(q4kSmallPShapes))
@@ -288,6 +303,11 @@ func TestQ6KSmallPGemvParity(t *testing.T) {
 	defer ResetQ4K()
 	prior := q4kUseSmallP.Swap(true)
 	defer q4kUseSmallP.Store(prior)
+	// fak#13692: mul_mm outranks small-P from P >= 8, so this fak#13694 small-P selector contract
+	// is pinned with the mul_mm kill switch and the ambient setting restored.
+	priorMulMM := GEMMUseMulMM()
+	SetGEMMUseMulMM(false)
+	defer SetGEMMUseMulMM(priorMulMM)
 	shapes := []struct {
 		name    string
 		out, in int

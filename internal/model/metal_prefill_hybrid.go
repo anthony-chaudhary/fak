@@ -792,13 +792,14 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, i
 		return nil, Qwen35MetalForwardSequenceReceipt{}, true, err
 	}
 	defer g.Free()
-	// Route the graph's Q4_K projections through the process-selected candidate. The default is
-	// the scalar kernel; the widened panel regime (P>=64, #13041) requests the wide-tile
-	// cooperative-SMEM kernel only when the FAK_Q4K_M5 opt-in is on AND metalgemm's
-	// device/version-pinned crossover admits this box (an unwitnessed >=1.10x margin keeps the
-	// scalar identity). SetQ4KGEMMMode is fail-closed for an ineligible P or unavailable
-	// pipeline, so a false return simply leaves the graph on scalar; it never mutates state.
+	// Route the graph's Q4_K and Q6_K projections through the process-selected candidates. Since
+	// fak#13692 the default for P >= metalgemm.Q4KMulMMMinPrompt is the mul_mm port for
+	// both formats; with that default switched off the pre-#13692 selector applies (scalar, or the
+	// wide-tile M5 candidate where its device/version/P-band crossover admits this box). Both
+	// setters are fail-closed for an unavailable pipeline, so a false return simply leaves the
+	// graph on the scalar/naive kernel; it never mutates state.
 	_ = g.SetQ4KGEMMMode(metalgemm.Q4KGEMMModeForPrompt(P))
+	_ = g.SetQ6KGEMMMode(metalgemm.Q6KGEMMModeForPrompt(P))
 	// The graph reports the candidate it will encode for every Q4_K projection (scalar
 	// unless SetQ4KGEMMMode accepted the request), so the prefill observation names the
 	// kernel this panel's projections actually encode (#13694).

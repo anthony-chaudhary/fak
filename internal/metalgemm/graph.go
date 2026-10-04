@@ -45,6 +45,8 @@ int mg_graph_gemv_executed(void *graph, int q6);
 int mg_graph_set_gemv_p1(void *graph, int mode);
 int mg_graph_set_mm_mode(void *graph, int mode);
 int mg_graph_mm_mode(void *graph);
+int mg_graph_set_q6k_mode(void *graph, int mode);
+int mg_graph_q6k_mode(void *graph);
 int mg_graph_set_buffer_pool(void *graph, int depth);
 void mg_graph_recycle_result(void *graph, void *result);
 void *mg_qwen35_graph_kv_alloc(int elems);
@@ -892,10 +894,50 @@ func (g *ProjectionGraph) SetQ4KGEMMMode(mode Q4KGEMMMode) bool {
 		m = 2
 	case Q4KGEMMModeSmallPGEMV:
 		m = 3
+	case Q4KGEMMModeMulMM:
+		m = 4
 	default:
 		return false
 	}
 	return C.mg_graph_set_mm_mode(g.ptr, m) != 0
+}
+
+// SetQ6KGEMMMode selects the Q6_K projection kernel every EncodeQ6K / EncodeQ6KFrom in this graph
+// dispatches above the small-P band: Q4KGEMMModeScalar keeps the naive q6k_gemm (the default) and
+// Q4KGEMMModeMulMM selects the fak#13692 q6k_mul_mm. Q4KGEMMModeSmallPGEMV is accepted only when
+// the graph's Q4_K mode already routes the 2<=P<=20 band through the small-P GEMV, which then also
+// carries its Q6_K projections (fak#13694). It must be called before the first encode and is
+// fail-closed: an unavailable pipeline or any other mode returns false and keeps the naive kernel.
+// P=1 graphs that opted into the GEMV route are unaffected.
+func (g *ProjectionGraph) SetQ6KGEMMMode(mode Q4KGEMMMode) bool {
+	if g == nil || g.ptr == nil || g.finished || g.freed || g.encoders != 0 {
+		return false
+	}
+	switch mode {
+	case Q4KGEMMModeScalar:
+		return C.mg_graph_set_q6k_mode(g.ptr, 0) != 0
+	case Q4KGEMMModeMulMM:
+		return C.mg_graph_set_q6k_mode(g.ptr, 1) != 0
+	case Q4KGEMMModeSmallPGEMV:
+		return g.Q4KGEMMMode() == Q4KGEMMModeSmallPGEMV
+	case Q4KGEMMModeMM32, Q4KGEMMModeM5CooperativeSMEM, Q4KGEMMModeMM32Unavailable,
+		Q4KGEMMModeM5CooperativeSMEMUnavailable, Q4KGEMMModeSmallPGEMVUnavailable, Q4KGEMMModeMulMMUnavailable:
+		return false
+	default:
+		return false
+	}
+}
+
+// Q6KGEMMMode reports the Q6_K projection kernel this graph will encode above the small-P band
+// (Q4KGEMMModeScalar for the naive q6k_gemm, or Q4KGEMMModeMulMM).
+func (g *ProjectionGraph) Q6KGEMMMode() Q4KGEMMMode {
+	if g == nil || g.ptr == nil || g.finished || g.freed {
+		return Q4KGEMMModeScalar
+	}
+	if C.mg_graph_q6k_mode(g.ptr) == 1 {
+		return Q4KGEMMModeMulMM
+	}
+	return Q4KGEMMModeScalar
 }
 
 // Q4KGEMMMode reports the Q4_K projection candidate this graph will request (scalar by
@@ -910,6 +952,8 @@ func (g *ProjectionGraph) Q4KGEMMMode() Q4KGEMMMode {
 		return Q4KGEMMModeM5CooperativeSMEM
 	case 3:
 		return Q4KGEMMModeSmallPGEMV
+	case 4:
+		return Q4KGEMMModeMulMM
 	default:
 		return Q4KGEMMModeScalar
 	}

@@ -1,0 +1,89 @@
+{
+  "schema": "fak.metalgemm.q4k_m5_crossover_banded/v1",
+  "contract_issue": "13133",
+  "paired_harness": "fak#13089 paired baseline/candidate receipt discipline",
+  "generated_at": "2026-10-04T22:44:41Z",
+  "evidence_kind": "HW_WITNESSED",
+  "measurement": "fresh",
+  "provenance": "",
+  "device_name": "Apple M3 Pro",
+  "os_version": "27.0",
+  "source_commit": "37e7d7293+fak#13692",
+  "source_test": "TestQ4KCrossoverReceiptCandidateVsScalar",
+  "geometry_out": 4096,
+  "geometry_in": 4096,
+  "metric": "on_gpu_ms",
+  "repeats": 7,
+  "gate_margin": 1.1,
+  "bands": [
+    {
+      "min_p": 64,
+      "max_p": 128,
+      "measured_ratios": {
+        "128": 1.1571657539802755,
+        "64": 1.1947112931892756
+      },
+      "measured_floor": 1.1571657539802755,
+      "scalar_gpu_ms": {
+        "128": 2.676958334632218,
+        "64": 1.4457500074058771
+      },
+      "candidate_gpu_ms": {
+        "128": 2.3133750073611736,
+        "64": 1.2101250031264499
+      },
+      "samples": {
+        "128": {
+          "scalar_gpu_ms": [
+            2.675458337762393,
+            2.702291661989875,
+            2.6625416649039835,
+            2.662791666807607,
+            2.676958334632218,
+            2.689291664864868,
+            2.7076249971287325
+          ],
+          "candidate_gpu_ms": [
+            2.312124997843057,
+            2.347624991671182,
+            2.304458335856907,
+            2.309499992406927,
+            2.3133750073611736,
+            2.3312500125030056,
+            2.316500002052635
+          ]
+        },
+        "64": {
+          "scalar_gpu_ms": [
+            2.1632916759699583,
+            1.4457500074058771,
+            1.4603750023525208,
+            1.4520833356073126,
+            1.4373749872902408,
+            1.4361249923240393,
+            1.4252499968279153
+          ],
+          "candidate_gpu_ms": [
+            1.7492916667833924,
+            1.2298750079935417,
+            1.2101250031264499,
+            1.2081250024493784,
+            1.2062083260389045,
+            1.2109999952372164,
+            1.1997083347523585
+          ]
+        }
+      }
+    }
+  ],
+  "notes": [
+    "candidate/scalar ratio is scalar_gpu_ms / candidate_gpu_ms; \u003e1 means the wide tile is faster",
+    "on_gpu_ms is the cb.GPUEndTime-cb.GPUStartTime window and excludes the host round-trip",
+    "the band's measured floor is the row's MinRatio; the P band, not the ratio, changes routing",
+    "fak#13692: the scalar arm is q4k_gemm as shipped with fak#13692 (single 2D dispatch, padded xbuf); the band is the longest run from P=64 clearing the gate",
+    "outside the band: P=256 ratio=1.0885 scalar_gpu_ms=4.8684 candidate_gpu_ms=4.4725 scalar_samples=[4.884249996393919 4.868416668614373 4.882875000475906 4.88737499108538 4.846916664973833 4.862625006353483 4.867916664807126] candidate_samples=[4.472458342206664 4.4913333404110745 4.522583330981433 4.662500010454096 4.463041666895151 4.393875002278946 4.390625006635673]",
+    "outside the band: P=512 ratio=1.0509 scalar_gpu_ms=9.4557 candidate_gpu_ms=8.9978 scalar_samples=[9.343791665742174 9.369458319270052 9.711708320537582 9.52750000578817 9.455749997869134 9.459708337089978 9.37737499771174] candidate_samples=[8.788541657850146 8.806666664895602 8.997833327157423 9.06224999926053 9.115999986534007 9.23237499955576 8.88262499938719]",
+    "outside the band: P=1024 ratio=1.0427 scalar_gpu_ms=18.5355 candidate_gpu_ms=17.7766 scalar_samples=[18.515625008149073 18.53549999941606 18.572500004665926 18.5230416682316 18.58804166840855 18.50883333827369 18.554416674305685] candidate_samples=[17.600708320969716 17.764375006663613 17.85741666390095 17.77662499807775 17.789250006899238 17.663624996202998 17.823666668846272]",
+    "outside the band: P=2048 ratio=1.0263 scalar_gpu_ms=36.9794 candidate_gpu_ms=36.0324 scalar_samples=[37.79950000171084 37.06537499965634 36.947125001461245 36.94425000867341 36.9793749996461 36.957624994101934 37.39225000026636] candidate_samples=[36.03241666860413 35.491375005221926 35.35449999617413 36.06700000818819 35.793125003692694 36.07037499023136 36.562458335538395]"
+  ]
+}

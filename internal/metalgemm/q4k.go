@@ -44,7 +44,8 @@ int  mg_q6k_gemv_mode(int wid, const float* x, float* y, int mode, mg_execution_
 int  mg_q4k_set_p1_kernel(int mulmv);
 int  mg_q4k_p1_kernel(void);
 int  mg_q4k_p1_kernel_env_value(const char *v);
-int  mg_q6k_gemm(int wid, const float* X, int P, float* Y, int mode, mg_execution_event* event);
+int  mg_q6k_gemm(int wid, const float* X, int P, float* Y, int mode, double* out_gpu_ms, mg_execution_event* event);
+int  mg_kquant_mulmm_ready(void);
 void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, float* y, mg_execution_event* event);
 int  mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int* down_wids, int n, const float* x, float* Ycat, mg_execution_event* event);
 int  mg_q4k_gemm(int wid, const float* X, int P, float* Y, int mm_mode, double* out_gpu_ms, mg_execution_event* event);
@@ -223,6 +224,8 @@ const (
 	// (fak#13694): ceil(P/8) evenly split q4k_gemv_multi dispatches that stream each weight row
 	// once per chunk instead of staging a mostly idle 64-token GEMM tile.
 	Q4KGEMMExecutedSmallPGEMV
+	// Q4KGEMMExecutedMulMM is the fak#13692 llama.cpp mul_mm-shaped q4k_mul_mm.
+	Q4KGEMMExecutedMulMM
 )
 
 // String names the executed kernel for logs and receipts.
@@ -263,12 +266,16 @@ const (
 	// band, or when the multi-token pipelines are unavailable, the scalar kernel executes and the
 	// identity reports executed scalar (fail-closed to the proven kernel, never NotExecuted).
 	Q4KGEMMModeSmallPGEMV
+	// Q4KGEMMModeMulMM is the fak#13692 simdgroup-MMA prefill kernel (half-staged weights, 64x32
+	// tile, one dispatch). It is the production default above the small-P band.
+	Q4KGEMMModeMulMM
 	Q4KGEMMModeMM32Unavailable              = -1
 	Q4KGEMMModeM5CooperativeSMEMUnavailable = -2
 	// Q4KGEMMModeSmallPGEMVUnavailable is the deterministic witness for the small-P fallback: it
 	// requests the small-P route but the native side treats its pipelines as missing, so the
 	// scalar kernel executes. Production selection never emits it.
 	Q4KGEMMModeSmallPGEMVUnavailable = -3
+	Q4KGEMMModeMulMMUnavailable      = -4
 )
 
 // String names the requested candidate for logs and receipts.
@@ -282,14 +289,55 @@ func (m Q4KGEMMMode) String() string {
 		return "m5-cooperative-smem"
 	case Q4KGEMMModeSmallPGEMV:
 		return "smallp-gemv"
+	case Q4KGEMMModeMulMM:
+		return "mulmm"
 	case Q4KGEMMModeMM32Unavailable:
 		return "mm32-unavailable"
 	case Q4KGEMMModeM5CooperativeSMEMUnavailable:
 		return "m5-cooperative-smem-unavailable"
 	case Q4KGEMMModeSmallPGEMVUnavailable:
 		return "smallp-gemv-unavailable"
+	case Q4KGEMMModeMulMMUnavailable:
+		return "mulmm-unavailable"
 	}
 	return "unknown"
+}
+
+// Q4KMulMMMinPrompt / Q6KMulMMMinPrompt are the smallest prompt lengths the production selector
+// routes to the fak#13692 mul_mm kernels, from the on-GPU receipt
+// docs/benchmarks/receipts/metalgemm-kquant-mulmm-m3pro-macos27.json (TestKQuantMulMMReceiptVsScalar):
+// at every P >= the floor the Qwen2.5-7B per-layer projection time on mul_mm clears the fak#9937
+// 1.10x gate against the best pre-#13692 kernel for that P (small-P GEMV inside its band, else
+// scalar/naive). Q4_K mul_mm is 3-4.5x the scalar kernel already at P=8. For Q6_K the small v_proj
+// alone stays faster on the naive/small-P kernels until P~20, but down_proj dominates the layer
+// (1.63 ms vs 5.2-12.8 ms at P=8..20), so the per-layer floor is also 8. P=1 never reaches the
+// GEMM path (the model routes it to the decode GEMV).
+const (
+	Q4KMulMMMinPrompt = 8
+	Q6KMulMMMinPrompt = 8
+)
+
+// q4kMulMMDisabled is the process-local kill switch for the mul_mm default (SetGEMMUseMulMM).
+var q4kMulMMDisabled atomic.Bool
+
+// kquantMulMMReady caches mg_kquant_mulmm_ready (bit 0 Q4_K, bit 1 Q6_K) once the library is up,
+// so the per-projection selector never pays a cgo call after the first successful probe.
+var kquantMulMMReady struct {
+	once sync.Once
+	bits int
+}
+
+func kquantMulMMBits() int {
+	if !Available() {
+		return 0
+	}
+	kquantMulMMReady.once.Do(func() { kquantMulMMReady.bits = int(C.mg_kquant_mulmm_ready()) })
+	return kquantMulMMReady.bits
+}
+
+// q4kMulMMSelected reports whether the production selector routes a P-token Q4_K panel to mul_mm.
+func q4kMulMMSelected(P int) bool {
+	return P >= Q4KMulMMMinPrompt && !q4kMulMMDisabled.Load() && kquantMulMMBits()&1 != 0
 }
 
 var q4kUseMM atomic.Bool
@@ -342,6 +390,14 @@ type q4kM5CrossoverRow struct {
 var q4kM5CrossoverTable = []q4kM5CrossoverRow{
 	{Family: "Apple M3 Pro", OSVersion: "26", MinP: 64, MaxP: 128, MinRatio: 1.31,
 		Witness: "docs/benchmarks/receipts/q4k-m5-crossover-banded-m3pro.json (TestQ4KCrossoverReceiptCandidateVsScalar @97cae3629)"},
+	// fak#13692: the macOS 26 row never matched macOS 27, so every prompt fell through to scalar.
+	// Re-measured on macOS 27.0 against the single-dispatch scalar kernel over P in
+	// {64..2048}: 1.20-1.22x @64, 1.149-1.182x @128 across six loaded-host runs, then 1.02-1.09x
+	// @256..2048, so the admitted band stays [64,128] and MinRatio is the lowest observed floor
+	// rounded down. With the fak#13692 mul_mm default on, this row only routes when
+	// SetGEMMUseMulMM(false).
+	{Family: "Apple M3 Pro", OSVersion: "27", MinP: 64, MaxP: 128, MinRatio: 1.14,
+		Witness: "docs/benchmarks/receipts/q4k-m5-crossover-banded-m3pro-macos27.json (TestQ4KCrossoverReceiptCandidateVsScalar, fak#13692)"},
 }
 
 // q4kRowCoversPrompt reports whether row's [MinP,MaxP] band includes an inclusive prompt length P.
@@ -387,6 +443,19 @@ func q4kM5CrossoverAt(deviceName, osVersion string, P int) bool {
 const q4kM5CrossoverMargin = 1.10
 
 func q4kGEMMModeForPrompt(P int) Q4KGEMMMode {
+	// fak#13692: the mul_mm port is the default from Q4KMulMMMinPrompt up. It outranks the
+	// small-P GEMV inside the overlap (on-GPU, Qwen2.5-7B shapes, P=8..20: gate/up 1.02 ms vs
+	// 1.65-4.23 ms, down 1.47 vs 1.69-4.27 ms) and the older MM32/M5 candidates, which remain
+	// reachable only with SetGEMMUseMulMM(false).
+	if q4kMulMMSelected(P) {
+		return Q4KGEMMModeMulMM
+	}
+	// Short prompts below the mul_mm floor (2<=P<=7 by default; 2<=P<=20 with mul_mm off,
+	// fak#13694) take the batched multi-token GEMV, which streams each weight row once per
+	// <=8-token chunk; a GEMM tile is mostly padding there.
+	if q4kSmallPEligible(P) {
+		return Q4KGEMMModeSmallPGEMV
+	}
 	// Exact-P32 keeps its shape-bounded MM32 candidate under FAK_Q4K_MM.
 	if P == 32 && q4kUseMM.Load() {
 		return Q4KGEMMModeMM32
@@ -399,12 +468,6 @@ func q4kGEMMModeForPrompt(P int) Q4KGEMMMode {
 	// scalar.
 	if P >= 64 && q4kUseM5.Load() && q4kM5CrossoverAdmits(P) {
 		return Q4KGEMMModeM5CooperativeSMEM
-	}
-	// Short prompts (2<=P<=20, fak#13694) leave ~90% of the scalar kernel's 64-token tile idle;
-	// the batched multi-token GEMV streams each weight row once per <=8-token chunk instead.
-	// Default ON; FAK_Q4K_SMALLP=0 (or SetGEMMUseSmallP(false)) restores the scalar kernel.
-	if q4kSmallPEligible(P) {
-		return Q4KGEMMModeSmallPGEMV
 	}
 	return Q4KGEMMModeScalar
 }
@@ -425,6 +488,8 @@ func q4kM5CrossoverAdmits(P int) bool {
 
 func q4kGEMMRequestedExecution(P int, mode Q4KGEMMMode) Q4KGEMMExecution {
 	switch mode {
+	case Q4KGEMMModeMulMM, Q4KGEMMModeMulMMUnavailable:
+		return Q4KGEMMExecutedMulMM
 	case Q4KGEMMModeM5CooperativeSMEM, Q4KGEMMModeM5CooperativeSMEMUnavailable:
 		return Q4KGEMMExecutedM5CooperativeSMEM
 	case Q4KGEMMModeMM32, Q4KGEMMModeMM32Unavailable:
@@ -1188,14 +1253,29 @@ func (w *Q6KWeight) GEMV(x, y []float32) { w.GEMVWithEvents(x, y, nil) }
 // back to the CPU batched k-quant loop during hybrid Qwen prefill. A 2<=P<=20 prompt takes the
 // small-P multi-token GEMV under the same selector and opt-out as Q4_K (fak#13694).
 func (w *Q6KWeight) GEMMWithEvents(X []float32, P int, Y []float32, observation *ExecutionObservation) {
-	w.GEMMWithEventsMode(X, P, Y, observation, q4kGEMMModeForPrompt(P))
+	w.GEMMWithEventsMode(X, P, Y, observation, Q6KGEMMModeForPrompt(P))
+}
+
+// Q6KGEMMModeForPrompt is the production Q6_K selector: the fak#13692 q6k_mul_mm for
+// P >= Q6KMulMMMinPrompt unless SetGEMMUseMulMM(false) or the pipeline is unavailable, then the
+// shared small-P GEMV band (fak#13694), otherwise q6k_gemm.
+func Q6KGEMMModeForPrompt(P int) Q4KGEMMMode {
+	if P >= Q6KMulMMMinPrompt && !q4kMulMMDisabled.Load() && kquantMulMMBits()&2 != 0 {
+		return Q4KGEMMModeMulMM
+	}
+	if q4kSmallPEligible(P) {
+		return Q4KGEMMModeSmallPGEMV
+	}
+	return Q4KGEMMModeScalar
 }
 
 // GEMMWithEventsMode is GEMMWithEvents with an explicit candidate and the executed kernel as the
-// result. Only the small-P modes change the Q6_K kernel: Q4KGEMMModeSmallPGEMV executes the
-// multi-token GEMV for 2<=P<=20 when its optional pipelines exist; every other mode, P, or a
-// missing pipeline (Q4KGEMMModeSmallPGEMVUnavailable is the deterministic witness) executes
-// q6k_gemm, reported as Q4KGEMMExecutedScalar. NotExecuted means no command buffer completed.
+// result. Q4KGEMMModeSmallPGEMV executes the multi-token GEMV for 2<=P<=20 when its optional
+// pipelines exist (Q4KGEMMModeSmallPGEMVUnavailable is that fallback's deterministic witness);
+// Q4KGEMMModeMulMM executes the fak#13692 q6k_mul_mm, and Q4KGEMMModeMulMMUnavailable is its
+// fail-closed witness (NotExecuted, Y untouched). Every other mode executes q6k_gemm, reported as
+// Q4KGEMMExecutedScalar. NotExecuted means no command buffer completed. On success the on-GPU
+// window is published to LastGEMMGPUMs.
 func (w *Q6KWeight) GEMMWithEventsMode(X []float32, P int, Y []float32, observation *ExecutionObservation, mode Q4KGEMMMode) Q4KGEMMExecution {
 	if w == nil {
 		return Q4KGEMMNotExecuted
@@ -1205,12 +1285,16 @@ func (w *Q6KWeight) GEMMWithEventsMode(X []float32, P int, Y []float32, observat
 	if !q6kWeightValidLocked(w) || P <= 0 || len(X) < P*w.In || len(Y) < P*w.Out {
 		return Q4KGEMMNotExecuted
 	}
+	var gpuMs C.double
 	var event C.mg_execution_event
 	q4kExecutionMu.Lock()
 	executed := Q4KGEMMExecution(C.mg_q6k_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P),
-		(*C.float)(unsafe.Pointer(&Y[0])), C.int(mode), &event))
+		(*C.float)(unsafe.Pointer(&Y[0])), C.int(mode), &gpuMs, &event))
 	q4kExecutionMu.Unlock()
 	recordQ4KEvent(observation, &event)
+	if executed != Q4KGEMMNotExecuted {
+		lastGEMMGPUMs.Store(math.Float64bits(float64(gpuMs)))
+	}
 	return executed
 }
 
@@ -1519,6 +1603,14 @@ func SetGEMMUseMM(on bool) {
 func SetGEMMUseM5(on bool) {
 	q4kUseM5.Store(on)
 }
+
+// SetGEMMUseMulMM is the process-local switch for the fak#13692 mul_mm default (Q4_K and Q6_K).
+// true (the default) routes P >= Q4KMulMMMinPrompt to mul_mm wherever the pipelines compiled;
+// false restores the pre-#13692 selector (scalar / MM32 / M5 crossover, naive Q6_K).
+func SetGEMMUseMulMM(on bool) { q4kMulMMDisabled.Store(!on) }
+
+// GEMMUseMulMM reports whether the mul_mm default is enabled (it does not probe the pipelines).
+func GEMMUseMulMM() bool { return !q4kMulMMDisabled.Load() }
 
 // GEMMUseM5 reports whether the wide-tile opt-in is on. It does not consult the crossover table.
 func GEMMUseM5() bool { return q4kUseM5.Load() }

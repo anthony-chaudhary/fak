@@ -493,18 +493,24 @@ Q4K_MULTI_KERNEL(8)
 // tiles are only BM*32 + BN*32 floats (8 KB) — small enough for high occupancy — while each thread
 // holds a TM*TN register accumulator and reuses every staged value TM or TN times via the
 // outer-product inner loop (the standard register-blocked GEMM that lifts FLOP utilization).
+// fak#13692: the token axis is grid.y, so a whole GEMM is ONE dispatch instead of one dispatch per
+// 64-token tile (a k/v projection with out=512 used to put only 8 threadgroups per dispatch on an
+// 18-core GPU). xbuf rows are padded to Q4K_XLD=33 floats: the old [tok][32] layout made the 16 tc
+// lanes of a simdgroup read addresses 128 floats apart, i.e. the same threadgroup bank.
+#define Q4K_XLD 33
 kernel void q4k_gemm(device const uchar* W [[buffer(0)]],
                      device const float* X [[buffer(1)]],
                      device float*       Y [[buffer(2)]],
                      constant int&    nblk [[buffer(3)]],
                      constant int&     out [[buffer(4)]],
                      constant int&       P [[buffer(5)]],
-                     constant int&      t0 [[buffer(6)]],
-                     constant int&      nt [[buffer(7)]],
-                     uint ob  [[threadgroup_position_in_grid]],
+                     uint2 tg  [[threadgroup_position_in_grid]],
                      uint lid [[thread_index_in_threadgroup]]) {
-    threadgroup float wbuf[Q4K_BM * 32]; // BM weight rows × one 32-wide sub-block
-    threadgroup float xbuf[Q4K_BN * 32]; // BN token activations × one 32-wide sub-block
+    threadgroup float wbuf[Q4K_BM * 32];      // BM weight rows × one 32-wide sub-block
+    threadgroup float xbuf[Q4K_BN * Q4K_XLD]; // BN token activations × one 32-wide sub-block (padded)
+    uint ob = tg.x;
+    int t0 = (int)tg.y * Q4K_BN;
+    int nt = min(Q4K_BN, P - t0);
     int in = nblk * 256;
     int o0 = (int)ob * Q4K_BM;           // first output row this threadgroup owns
     int tr = (int)lid / Q4K_TGX;         // thread-row block 0..TGY-1
@@ -535,14 +541,14 @@ kernel void q4k_gemm(device const uchar* W [[buffer(0)]],
             // Stage sub-block sb's 32 activations for the BN tokens into xbuf[tok*32 + k].
             for (int idx = (int)lid; idx < Q4K_BN * 32; idx += Q4K_TG) {
                 int tk = idx >> 5, k = idx & 31;
-                xbuf[idx] = (tk < nt) ? X[(long)(t0 + tk) * in + (long)sblk * 256 + sb * 32 + k] : 0.0f;
+                xbuf[tk * Q4K_XLD + k] = (tk < nt) ? X[(long)(t0 + tk) * in + (long)sblk * 256 + sb * 32 + k] : 0.0f;
             }
             threadgroup_barrier(mem_flags::mem_threadgroup);
             // Outer-product accumulate: each thread's TM×TN micro-tile over the 32-wide sub-block.
             for (int k = 0; k < 32; k++) {
                 float wreg[Q4K_TM], xreg[Q4K_TN];
                 for (int i = 0; i < Q4K_TM; i++) wreg[i] = wbuf[(tr * Q4K_TM + i) * 32 + k];
-                for (int j = 0; j < Q4K_TN; j++) xreg[j] = xbuf[(tc * Q4K_TN + j) * 32 + k];
+                for (int j = 0; j < Q4K_TN; j++) xreg[j] = xbuf[(tc * Q4K_TN + j) * Q4K_XLD + k];
                 for (int i = 0; i < Q4K_TM; i++)
                     for (int j = 0; j < Q4K_TN; j++) acc[i][j] += wreg[i] * xreg[j];
             }
@@ -574,13 +580,14 @@ kernel void q4k_gemm_mm32(device const uchar* W [[buffer(0)]],
                           constant int&    nblk [[buffer(3)]],
                           constant int&     out [[buffer(4)]],
                           constant int&       P [[buffer(5)]],
-                          constant int&      t0 [[buffer(6)]],
-                          constant int&      nt [[buffer(7)]],
-                          uint ob   [[threadgroup_position_in_grid]],
+                          uint2 tg  [[threadgroup_position_in_grid]],
                           uint lid  [[thread_index_in_threadgroup]],
                           uint sgid [[simdgroup_index_in_threadgroup]]) {
     threadgroup float wbuf[Q4K_BM * 32]; // BM weight rows x one 32-wide sub-block, row-major [row][k] ld=32
     threadgroup float xbuf[32 * Q4K_MM32_BN]; // one sub-block x 32 tokens, K-major [k][tok]
+    uint ob = tg.x;
+    int t0 = (int)tg.y * Q4K_MM32_BN;
+    int nt = min(Q4K_MM32_BN, P - t0);
     int in = nblk * 256;
     int o0 = (int)ob * Q4K_BM;           // first output row this threadgroup owns
     // This simdgroup's position in the 4x2 grid -> its 16-row x 16-col output region.
@@ -671,13 +678,14 @@ kernel void q4k_gemm_m5_cooperative_smem(device const uchar* W [[buffer(0)]],
                           constant int&    nblk [[buffer(3)]],
                           constant int&     out [[buffer(4)]],
                           constant int&       P [[buffer(5)]],
-                          constant int&      t0 [[buffer(6)]],
-                          constant int&      nt [[buffer(7)]],
-                          uint ob   [[threadgroup_position_in_grid]],
+                          uint2 tg  [[threadgroup_position_in_grid]],
                           uint lid  [[thread_index_in_threadgroup]],
                           uint sgid [[simdgroup_index_in_threadgroup]]) {
     threadgroup float wbuf[Q4K_BM * 32]; // BM weight rows x one 32-wide sub-block, row-major [row][k] ld=32
     threadgroup float xbuf[32 * Q4K_M5_BN]; // one sub-block x 32 tokens, K-major [k][tok]
+    uint ob = tg.x;
+    int t0 = (int)tg.y * Q4K_M5_BN;
+    int nt = min(Q4K_M5_BN, P - t0);
     int in = nblk * 256;
     int o0 = (int)ob * Q4K_BM;           // first output row this threadgroup owns
     // This simdgroup's position in the 4x2 grid -> its 16-row x 16-col output region.
@@ -745,6 +753,166 @@ kernel void q4k_gemm_m5_cooperative_smem(device const uchar* W [[buffer(0)]],
         int tcol = c;
         if (orow < out && tcol < nt) Y[(long)(t0 + tcol) * out + orow] = cbuf[idx];
     }
+}
+
+// ---- mul_mm port (fak#13692) ----
+// q4k_mul_mm / q6k_mul_mm adapt the tile and staging topology of llama.cpp's ggml-metal mul_mm kernel template
+// (ggml-metal.metal, MIT; Copyright (c) 2023-2026 The ggml authors) to FAK's resident raw
+// Q4_K / Q6_K rows and f32 token-major activations. What differs from the earlier FAK simdgroup
+// candidates (q4k_gemm_mm32 / q4k_gemm_m5_cooperative_smem, measured 1.31-1.44x over scalar):
+//
+//   • Each thread dequantizes one 16-weight chunk per 32-wide K step and decodes that chunk's
+//     super-block scale ONCE, instead of re-decoding d/dmin/scale_min for every staged element.
+//   • Weights are staged as HALF in threadgroup memory already laid out as 8x8 simdgroup tiles
+//     ([kblock][rowblock][k][row]); activations stay f32 ([kblock][token][k]); the MMA multiplies
+//     simdgroup_float8x8 (tokens x k) by simdgroup_half8x8 (k x rows) into f32 accumulators.
+//   • The output tile is 64 rows x 32 tokens over 4 simdgroups (128 threads), each simdgroup
+//     owning 32 rows x 16 tokens = eight 8x8 accumulators, with one barrier pair per 32-wide K step.
+//   • One dispatch covers the whole GEMM: tokens on grid.x, rows on grid.y.
+//
+// The result is token-major Y[t*out + o], the same contract as q4k_gemm. Weights are rounded to
+// half before the MMA (as upstream does), so parity is cosine-tight rather than bit-close to the
+// f32 scalar kernel; activations and accumulation stay f32.
+#define MM_BM 64   // output rows per threadgroup
+#define MM_BN 32   // tokens per threadgroup
+#define MM_BK 32   // K step
+#define MM_TPR 2   // threads per weight row (each dequantizes one 16-weight chunk)
+#define MM_TPC 4   // threads per token column (each loads 8 activations)
+#define MM_TG 128  // 4 simdgroups
+
+// q4k_dequant_chunk16 decodes weights [il*16, il*16+16) of one 144-B Q4_K super-block.
+// Chunk il lives in 64-weight group il>>2; within the group, chunks 0/1 are the low nibbles of
+// bytes 0-15/16-31 (sub-block 2g) and chunks 2/3 the high nibbles (sub-block 2g+1).
+inline void q4k_dequant_chunk16(device const uchar* blk, short il, thread half4x4& reg) {
+    float d  = (float)(*(device const half*)(blk + 0));
+    float dm = (float)(*(device const half*)(blk + 2));
+    device const uchar* q = blk + 16 + (il >> 2) * 32 + 16 * (il & 1);
+    float2 sm = q4k_scale_min((il >> 2) * 2 + ((il >> 1) & 1), blk + 4);
+    float dl = d * sm.x, ml = dm * sm.y;
+    bool hi = (il & 2) != 0;
+    for (short i = 0; i < 16; i++) {
+        uchar b = q[i];
+        float nib = hi ? (float)(b >> 4) : (float)(b & 0x0f);
+        reg[i / 4][i % 4] = (half)(dl * nib - ml);
+    }
+}
+
+// q6k_dequant_chunk16 decodes weights [il*16, il*16+16) of one 210-B Q6_K super-block, the
+// chunked twin of q6k_block_dot: half h=il>>3 (128 weights), quarter qq=(il>>1)&3 selects the
+// ql nibble / qh bit pair, and the SIGNED scale index is 8h + 2qq + (il&1).
+inline void q6k_dequant_chunk16(device const uchar* blk, short il, thread half4x4& reg) {
+    float d = (float)(*(device const half*)(blk + 208));
+    short h = il >> 3;
+    short qq = (il >> 1) & 3;
+    short l0 = (il & 1) * 16;
+    float ds = d * (float)((device const char*)(blk + 192))[8 * h + 2 * qq + (il & 1)];
+    device const uchar* ql = blk + 64 * h + 32 * (qq & 1) + l0;
+    device const uchar* qh = blk + 128 + 32 * h + l0;
+    short shift = 2 * qq;
+    bool hi = qq >= 2;
+    for (short i = 0; i < 16; i++) {
+        uchar b = ql[i];
+        int nib = hi ? (int)(b >> 4) : (int)(b & 0x0f);
+        int code = (nib | (((int)(qh[i] >> shift) & 3) << 4)) - 32;
+        reg[i / 4][i % 4] = (half)(ds * (float)code);
+    }
+}
+
+template <int BLOCK_BYTES, int KIND>
+inline void kquant_mul_mm(device const uchar* W, device const float* X, device float* Y,
+                          int nblk, int out, int P, threadgroup float* shmem,
+                          uint2 tg, ushort tiitg, ushort sgitg) {
+    threadgroup half*  sa = (threadgroup half*)shmem;      // 64 rows x 32 k (half)  = 4 KB
+    threadgroup float* sb = shmem + MM_BM * MM_BK / 2;     // 32 tokens x 32 k (f32) = 4 KB
+    const int r1 = (int)tg.x;  // token tile
+    const int r0 = (int)tg.y;  // row tile
+    const int in = nblk * 256;
+    const short n_rows = (short)min(out - r0 * MM_BM, MM_BM);
+    const short n_cols = (short)min(P - r1 * MM_BN, MM_BN);
+    // Edge tiles clamp loads to the last live row/token; the duplicated lanes are never stored.
+    const short thread_row = min((short)(tiitg / MM_TPR), (short)(n_rows - 1));
+    const short thread_col = min((short)(tiitg / MM_TPC), (short)(n_cols - 1));
+
+    simdgroup_half8x8  ma[4];
+    simdgroup_float8x8 mb[2];
+    simdgroup_float8x8 mc[8];
+    for (short i = 0; i < 8; i++) mc[i] = make_filled_simdgroup_matrix<float, 8>(0.0f);
+
+    short il = (short)(tiitg % MM_TPR);
+    device const uchar* x = W + (long)(r0 * MM_BM + thread_row) * nblk * BLOCK_BYTES;
+    device const float* y = X + (long)(r1 * MM_BN + thread_col) * in + 8 * (tiitg % MM_TPC);
+
+    for (int loop_k = 0; loop_k < in; loop_k += MM_BK) {
+        half4x4 temp_a;
+        if (KIND == 0) {
+            q4k_dequant_chunk16(x, il, temp_a);
+        } else {
+            q6k_dequant_chunk16(x, il, temp_a);
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        for (short i = 0; i < 16; i++) {
+            sa[64 * ((tiitg / MM_TPR / 8) + (tiitg % MM_TPR) * 16 + (i / 8) * 8)
+               + (tiitg / MM_TPR) % 8 + (i & 7) * 8] = temp_a[i / 4][i % 4];
+        }
+        *(threadgroup float2x4*)(sb + (tiitg % MM_TPC) * 8 * 32 + 8 * (tiitg / MM_TPC)) = *((device const float2x4*)y);
+        il = (il + 2 < 16) ? il + 2 : il % 2;
+        x = (il < 2) ? x + BLOCK_BYTES : x;
+        y += MM_BK;
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+
+        threadgroup const half*  lsma = sa + 4 * 64 * (sgitg % 2);
+        threadgroup const float* lsmb = sb + 2 * 64 * (sgitg / 2);
+        for (short ik = 0; ik < MM_BK / 8; ik++) {
+            for (short i = 0; i < 4; i++) simdgroup_load(ma[i], lsma + 64 * i);
+            simdgroup_barrier(mem_flags::mem_none);
+            for (short i = 0; i < 2; i++) simdgroup_load(mb[i], lsmb + 64 * i);
+            lsma += MM_BM / 8 * 64;
+            lsmb += MM_BN / 8 * 64;
+            for (short i = 0; i < 8; i++) simdgroup_multiply_accumulate(mc[i], mb[i / 4], ma[i % 4], mc[i]);
+        }
+    }
+
+    if ((r0 + 1) * MM_BM <= out && (r1 + 1) * MM_BN <= P) {
+        device float* C = Y + (MM_BM * r0 + 32 * (sgitg & 1)) + (long)(MM_BN * r1 + 16 * (sgitg >> 1)) * out;
+        for (short i = 0; i < 8; i++) simdgroup_store(mc[i], C + 8 * (i % 4) + 8 * (long)out * (i / 4), (ulong)out);
+    } else {
+        // Partial tile: park the 32x64 [token][row] tile in threadgroup memory, then copy only the
+        // live rows/tokens out so nothing is written past `out` or `P`.
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        threadgroup float* temp = shmem + 32 * (sgitg & 1) + (16 * (sgitg >> 1)) * MM_BM;
+        for (short i = 0; i < 8; i++) simdgroup_store(mc[i], temp + 8 * (i % 4) + 8 * MM_BM * (i / 4), MM_BM);
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        for (int idx = (int)tiitg; idx < MM_BN * MM_BM; idx += MM_TG) {
+            int t = idx / MM_BM, r = idx % MM_BM;
+            if (t < n_cols && r < n_rows) Y[(long)(r1 * MM_BN + t) * out + r0 * MM_BM + r] = shmem[t * MM_BM + r];
+        }
+    }
+}
+
+kernel void q4k_mul_mm(device const uchar* W [[buffer(0)]],
+                       device const float* X [[buffer(1)]],
+                       device float*       Y [[buffer(2)]],
+                       constant int&    nblk [[buffer(3)]],
+                       constant int&     out [[buffer(4)]],
+                       constant int&       P [[buffer(5)]],
+                       uint2 tg      [[threadgroup_position_in_grid]],
+                       ushort tiitg  [[thread_index_in_threadgroup]],
+                       ushort sgitg  [[simdgroup_index_in_threadgroup]]) {
+    threadgroup float shmem[MM_BM * MM_BN];
+    kquant_mul_mm<144, 0>(W, X, Y, nblk, out, P, shmem, tg, tiitg, sgitg);
+}
+
+kernel void q6k_mul_mm(device const uchar* W [[buffer(0)]],
+                       device const float* X [[buffer(1)]],
+                       device float*       Y [[buffer(2)]],
+                       constant int&    nblk [[buffer(3)]],
+                       constant int&     out [[buffer(4)]],
+                       constant int&       P [[buffer(5)]],
+                       uint2 tg      [[threadgroup_position_in_grid]],
+                       ushort tiitg  [[thread_index_in_threadgroup]],
+                       ushort sgitg  [[simdgroup_index_in_threadgroup]]) {
+    threadgroup float shmem[MM_BM * MM_BN];
+    kquant_mul_mm<210, 1>(W, X, Y, nblk, out, P, shmem, tg, tiitg, sgitg);
 }
 
 // q4k_swiglu: out[i] = silu(gate[i]) * up[i], the SwiGLU elementwise for the fused decode MLP. Run
@@ -1037,7 +1205,11 @@ kernel void graph_quantize_q8(device const float* X [[buffer(0)]],
 }
 )MSL";
 
-static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemvVectorized, psoQ4KGemvMulti[7], psoQ6KGemvMulti[7], psoQ4KGemm, psoQ4KGemmMM32, psoQ4KGemmM5CooperativeSMEM, psoQ4KSwiGLU, psoQ6KGemv, psoQ6KGemm, psoGraphQuantizeQ8;
+static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemvVectorized, psoQ4KGemvMulti[7], psoQ6KGemvMulti[7], psoQ4KGemm, psoQ4KGemmMM32, psoQ4KGemmM5CooperativeSMEM, psoQ4KMulMM, psoQ4KSwiGLU, psoQ6KGemv, psoQ6KGemm, psoQ6KMulMM, psoGraphQuantizeQ8;
+// fak#13692 mul_mm ports share the Go Q4KGEMMMode / Q4KGEMMExecution numbering.
+#define MG_GEMM_MODE_MULMM 4
+#define MG_GEMM_MODE_MULMM_UNAVAILABLE (-4)
+#define MG_GEMM_EXECUTED_MULMM 5
 // Optional llama.cpp-shaped P=1 GEMVs (fak#13599). A nil PSO keeps every default P=1 dispatch on
 // the legacy one-simdgroup-per-row q4k_gemv / q6k_gemv kernels.
 static id<MTLComputePipelineState> psoQ4KMulMv, psoQ6KMulMv;
@@ -1216,10 +1388,19 @@ int mg_q6k_p1_encode_default(void *encoder, void *w, void *x, void *y, int nblk,
 // requested-but-unavailable MM32 candidate returns nil before scratch allocation, command-buffer
 // creation, dispatch, timing publication, or caller-output mutation. mode<0 is the deterministic
 // unavailable-candidate witness; production sends only 0/1.
+//
+// mm_mode MG_GEMM_MODE_MULMM (4) is the llama.cpp mul_mm-shaped q4k_mul_mm (fak#13692): any P>=1,
+// executed identity MG_GEMM_EXECUTED_MULMM (5).
 static id<MTLComputePipelineState> q4k_gemm_pso(int P, int mm_mode, int* executed, int* token_tile) {
     *executed = 0;
     *token_tile = 64;
     if (mm_mode < 0) return nil;
+    if (mm_mode == MG_GEMM_MODE_MULMM) {
+        if (P < 1 || psoQ4KMulMM == nil) return nil;
+        *executed = MG_GEMM_EXECUTED_MULMM;
+        *token_tile = 32;
+        return psoQ4KMulMM;
+    }
     if (mm_mode == 2) {
         if (P < 64 || psoQ4KGemmM5CooperativeSMEM == nil) return nil;
         *executed = 3;
@@ -1313,6 +1494,10 @@ static int q4k_init(void) {
     // Experimental and optional: no production selector requests this PSO until an M5 crossover
     // table is backed by a sanctioned fak-native receipt.
     psoQ4KGemmM5CooperativeSMEM = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemm_m5_cooperative_smem"] error:&err];
+    // fak#13692 mul_mm ports. Optional at init so a device without simdgroup_matrix keeps the
+    // scalar/naive pipelines; the Go selector only requests them when mg_kquant_mulmm_ready says so.
+    psoQ4KMulMM = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_mul_mm"] error:&err];
+    psoQ6KMulMM = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q6k_mul_mm"] error:&err];
     psoQ4KSwiGLU = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_swiglu"] error:&err];
     psoQ6KGemv = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q6k_gemv"] error:&err];
     psoQ6KGemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q6k_gemm"] error:&err];
@@ -1336,6 +1521,72 @@ static int q4k_init(void) {
         !psoQ6KGemv || !psoQ6KGemm || !psoGraphQuantizeQ8) { NSLog(@"q4k: pipeline build failed: %@", err); return 0; }
     gQ4KReady = 1;
     return 1;
+}
+
+// mg_kquant_mulmm_ready reports which fak#13692 mul_mm pipelines compiled: bit 0 = q4k_mul_mm,
+// bit 1 = q6k_mul_mm. 0 when the Q4_K library itself is unavailable.
+int mg_kquant_mulmm_ready(void) {
+    if (!q4k_init()) return 0;
+    return (psoQ4KMulMM != nil ? 1 : 0) | (psoQ6KMulMM != nil ? 2 : 0);
+}
+
+// q4k_encode_gemm encodes ONE Q4_K prefill GEMM as a single dispatch into an open encoder. Every
+// candidate puts the token axis on the grid (fak#13692), so no host loop over token tiles remains:
+// mul_mm (executed MG_GEMM_EXECUTED_MULMM) is tokens-on-x / rows-on-y with 128 threads; the
+// scalar/MM32/M5 kernels are rows-on-x / tokens-on-y with 256 threads.
+static void q4k_encode_gemm(id<MTLComputeCommandEncoder> e, id<MTLComputePipelineState> pso, int executed, int BN,
+                            id<MTLBuffer> wbuf, NSUInteger woff, id<MTLBuffer> xb, id<MTLBuffer> yb, NSUInteger yoff,
+                            int nblk, int out, int P) {
+    [e setComputePipelineState:pso];
+    [e setBuffer:wbuf offset:woff atIndex:0];
+    [e setBuffer:xb offset:0 atIndex:1];
+    [e setBuffer:yb offset:yoff atIndex:2];
+    [e setBytes:&nblk length:sizeof(int) atIndex:3];
+    [e setBytes:&out  length:sizeof(int) atIndex:4];
+    [e setBytes:&P    length:sizeof(int) atIndex:5];
+    if (executed == MG_GEMM_EXECUTED_MULMM) {
+        [e dispatchThreadgroups:MTLSizeMake((NSUInteger)((P + 31) / 32), (NSUInteger)((out + 63) / 64), 1)
+            threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+    } else {
+        [e dispatchThreadgroups:MTLSizeMake((NSUInteger)((out + 63) / 64), (NSUInteger)((P + BN - 1) / BN), 1)
+            threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+    }
+}
+
+// q6k_gemm_pso selects the Q6_K prefill GEMM kernel from the shared Go Q4KGEMMMode numbering:
+// MG_GEMM_MODE_MULMM requests q6k_mul_mm (executed MG_GEMM_EXECUTED_MULMM) and its unavailable
+// witness MG_GEMM_MODE_MULMM_UNAVAILABLE (or a missing pipeline) returns nil before any command
+// buffer or output is touched; every other mode keeps the naive q6k_gemm (executed 1).
+static id<MTLComputePipelineState> q6k_gemm_pso(int mode, int* executed) {
+    *executed = 0;
+    if (mode == MG_GEMM_MODE_MULMM_UNAVAILABLE) return nil;
+    if (mode == MG_GEMM_MODE_MULMM) {
+        if (psoQ6KMulMM == nil) return nil;
+        *executed = MG_GEMM_EXECUTED_MULMM;
+        return psoQ6KMulMM;
+    }
+    if (psoQ6KGemm == nil) return nil;
+    *executed = 1;
+    return psoQ6KGemm;
+}
+
+// q6k_encode_gemm encodes ONE Q6_K prefill GEMM as a single dispatch into an open encoder.
+static void q6k_encode_gemm(id<MTLComputeCommandEncoder> e, id<MTLComputePipelineState> pso, int executed,
+                            id<MTLBuffer> wbuf, id<MTLBuffer> xb, id<MTLBuffer> yb, int nblk, int out, int P) {
+    [e setComputePipelineState:pso];
+    [e setBuffer:wbuf offset:0 atIndex:0];
+    [e setBuffer:xb offset:0 atIndex:1];
+    [e setBuffer:yb offset:0 atIndex:2];
+    [e setBytes:&nblk length:sizeof(int) atIndex:3];
+    [e setBytes:&out  length:sizeof(int) atIndex:4];
+    [e setBytes:&P    length:sizeof(int) atIndex:5];
+    if (executed == MG_GEMM_EXECUTED_MULMM) {
+        [e dispatchThreadgroups:MTLSizeMake((NSUInteger)((P + 31) / 32), (NSUInteger)((out + 63) / 64), 1)
+            threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+    } else {
+        [e dispatchThreadgroups:MTLSizeMake((NSUInteger)out, (NSUInteger)P, 1)
+            threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+    }
 }
 
 typedef struct {
@@ -1619,14 +1870,19 @@ void mg_q6k_gemv(int wid, const float* x, float* y, mg_execution_event* event) {
 // q4_k_m down_proj can stay on Metal instead of using the host kQuantMatRowsIntoBatch loop.
 // mode is the Go Q4KGEMMMode: 3 requests the 2<=P<=20 small-P multi-token GEMV (fak#13694), -3
 // its unavailable witness; any other value, a P outside the band, or a missing q6k_gemv_multiN
-// pipeline runs q6k_gemm. Returns the executed kernel (1 q6k_gemm, 4 small-P GEMV) or 0 when
-// nothing completed (invalid handle or a bounded-wait timeout; Y untouched).
-int mg_q6k_gemm(int wid, const float* X, int P, float* Y, int mode, mg_execution_event* event) {
+// pipeline runs q6k_gemm. Mode 4 requests the fak#13692 q6k_mul_mm and -4 is its fail-closed
+// unavailable witness (returns 0 before any command buffer). Returns the executed kernel (1 q6k_gemm,
+// 4 small-P GEMV, 5 q6k_mul_mm) or 0 when nothing completed (invalid handle, an unavailable
+// requested kernel, or a bounded-wait timeout; Y untouched). out_gpu_ms is nullable.
+int mg_q6k_gemm(int wid, const float* X, int P, float* Y, int mode, double* out_gpu_ms, mg_execution_event* event) {
     mg_execution_event_reset(event);
     if (!q6k_valid(wid) || P <= 0) return 0;
     int smallp = mg_smallp_route(P, &mode, 1);
     @autoreleasepool {
         Q6KW W = gQ6[wid - MG_Q6_BASE];
+        int executed = smallp ? MG_GEMM_EXECUTED_SMALLP : 0;
+        id<MTLComputePipelineState> pso = smallp ? nil : q6k_gemm_pso(mode, &executed);
+        if (!smallp && pso == nil) return 0;
         q4k_grow_scratch((long)P * W.in, (long)P * W.out);
         id<MTLBuffer> xb = gQXBuf, yb = gQYBuf;
         memcpy(xb.contents, X, (size_t)P * W.in * 4);
@@ -1638,23 +1894,15 @@ int mg_q6k_gemm(int wid, const float* X, int P, float* Y, int mode, mg_execution
         if (smallp) {
             mg_smallp_encode(e, 1, (__bridge id<MTLBuffer>)W.buf, 0, xb, 0, yb, 0, W.nblk, W.out, W.in, P);
         } else {
-            [e setComputePipelineState:psoQ6KGemm];
-            [e setBuffer:(__bridge id<MTLBuffer>)W.buf offset:0 atIndex:0];
-            [e setBuffer:xb offset:0 atIndex:1];
-            [e setBuffer:yb offset:0 atIndex:2];
-            [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
-            [e setBytes:&W.out  length:sizeof(int) atIndex:4];
-            [e setBytes:&P      length:sizeof(int) atIndex:5];
-            [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, (NSUInteger)P, 1)
-                threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+            q6k_encode_gemm(e, pso, executed, (__bridge id<MTLBuffer>)W.buf, xb, yb, W.nblk, W.out, P);
         }
         [e endEncoding];
         int completed = mg_q4k_commit_bounded(cb, event);
-
         if (!completed) return 0; // bounded timeout: the buffer never completed, so Y is unwritten
+        if (out_gpu_ms) *out_gpu_ms = (cb.GPUEndTime - cb.GPUStartTime) * 1000.0;
         memcpy(Y, yb.contents, (size_t)P * W.out * 4);
         mg_execution_event_readback(event);
-        return smallp ? MG_GEMM_EXECUTED_SMALLP : 1;
+        return executed;
     }
 }
 
@@ -2228,13 +2476,8 @@ int mg_q4k_gemm(int wid, const float* X, int P, float* Y, int mm_mode, double* o
         id<MTLBuffer> yb = gQYBuf;
         memcpy(xb.contents, X, (size_t)P * W.in * 4);
 
-        // 2D tile: each threadgroup owns a BM×BN output block (BM rows × BN tokens), staging both
-        // the weight rows and the token activations into threadgroup memory once per super-block
-        // (issue #1085). Grid.x = ceil(out/BM) row-blocks; the token axis is tiled into BN-wide
-        // dispatches, all in ONE command buffer so launch overhead is paid once for the whole GEMM.
-        const int BM = 64;  // output rows per threadgroup; must match Q4K_BM in the MSL source
-        const int TG = 256; // threads per threadgroup (TGX*TGY); must match Q4K_TG in the MSL source
-        int rowBlocks = (W.out + BM - 1) / BM;
+        // One dispatch for the whole GEMM (fak#13692): the token axis is on the grid, so launch
+        // overhead and the per-tile encoder state are paid once, in ONE command buffer.
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
         mg_execution_event_command_buffer(event, cb);
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
@@ -2243,21 +2486,7 @@ int mg_q4k_gemm(int wid, const float* X, int P, float* Y, int mm_mode, double* o
             mg_smallp_encode(e, 0, wbuf, W.offset, xb, 0, yb, 0, W.nblk, W.out, W.in, P);
             executed = MG_GEMM_EXECUTED_SMALLP;
         } else {
-            [e setComputePipelineState:pso];
-            [e setBuffer:wbuf offset:W.offset atIndex:0];
-            [e setBuffer:xb   offset:0 atIndex:1];
-            [e setBuffer:yb   offset:0 atIndex:2];
-            [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
-            [e setBytes:&W.out  length:sizeof(int) atIndex:4];
-            [e setBytes:&P      length:sizeof(int) atIndex:5];
-            for (int t0 = 0; t0 < P; t0 += BN) {
-                int nt = P - t0;
-                if (nt > BN) nt = BN;
-                [e setBytes:&t0 length:sizeof(int) atIndex:6];
-                [e setBytes:&nt length:sizeof(int) atIndex:7];
-                [e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks, 1, 1)
-                    threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG, 1, 1)];
-            }
+            q4k_encode_gemm(e, pso, executed, BN, wbuf, W.offset, xb, yb, 0, W.nblk, W.out, P);
         }
         [e endEncoding];
         int completed = mg_q4k_commit_bounded(cb, event);
@@ -2299,11 +2528,8 @@ int mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat
         id<MTLBuffer> yb = gQYBuf;
         memcpy(xb.contents, X, (size_t)P * in * 4); // shared activation panel for every group member
 
-        // 2D tile identical to mg_q4k_gemm: BM output rows × BN token-tile per threadgroup, all in
-        // ONE command buffer. The BN token loop is issued per weight; the grid's row axis is the
-        // weight's own out. Every dispatch reads the shared xb and writes into the weight's Y slot.
-        const int BM = 64;  // must match Q4K_BM in the MSL source
-        const int TG = 256; // must match Q4K_TG (TGX*TGY) in the MSL source
+        // One single-dispatch GEMM per weight (fak#13692), all in ONE command buffer. Every
+        // dispatch reads the shared xb and writes into the weight's own Y slot.
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
         mg_execution_event_command_buffer(event, cb);
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
@@ -2317,24 +2543,10 @@ int mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat
             }
             executed = MG_GEMM_EXECUTED_SMALLP;
         } else {
-            [e setComputePipelineState:pso];
-            [e setBuffer:xb offset:0 atIndex:1]; // shared X for the whole group
-            [e setBytes:&P length:sizeof(int) atIndex:5];
             for (int i = 0; i < n; i++) {
                 Q4KW Wi = gQ4[wids[i]];
-                int rowBlocks = (Wi.out + BM - 1) / BM;
-                [e setBuffer:(__bridge id<MTLBuffer>)Wi.buf offset:Wi.offset atIndex:0];
-                [e setBuffer:yb offset:(NSUInteger)((long)yoff[i] * 4) atIndex:2];
-                [e setBytes:&Wi.nblk length:sizeof(int) atIndex:3];
-                [e setBytes:&Wi.out  length:sizeof(int) atIndex:4];
-                for (int t0 = 0; t0 < P; t0 += BN) {
-                    int nt = P - t0;
-                    if (nt > BN) nt = BN;
-                    [e setBytes:&t0 length:sizeof(int) atIndex:6];
-                    [e setBytes:&nt length:sizeof(int) atIndex:7];
-                    [e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks, 1, 1)
-                        threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG, 1, 1)];
-                }
+                q4k_encode_gemm(e, pso, executed, BN, (__bridge id<MTLBuffer>)Wi.buf, Wi.offset, xb, yb,
+                                (NSUInteger)((long)yoff[i] * 4), Wi.nblk, Wi.out, P);
             }
         }
         [e endEncoding];
@@ -2396,7 +2608,8 @@ typedef struct {
     int graph_gemv_mode;       // P=1 graph projections: MG_GEMV_MODE_* (0 default = mul_mv unless legacy)
     int graph_q4k_gemv_exec;   // bitmask of executed P=1 Q4_K kernels: bit MG_GEMV_EXEC_*
     int graph_q6k_gemv_exec;   // bitmask of executed P=1 Q6_K kernels: bit MG_GEMV_EXEC_*
-    int graph_mm_mode;         // projection candidate: 0 scalar, 2 wide-tile cooperative-SMEM, 3 small-P GEMV
+    int graph_mm_mode;         // projection candidate: 0 scalar, 2 wide-tile cooperative-SMEM, 3 small-P GEMV, 4 mul_mm
+    int graph_q6k_mode;        // Q6_K projection kernel above the small-P band: 0 naive q6k_gemm, 1 q6k_mul_mm
     int graph_buf_pool;        // per-shape recycle depth; 0 disables the pool
     double gpu_ms, wait_ms;
 } MGProjectionGraph;
@@ -2488,7 +2701,28 @@ int mg_graph_set_mm_mode(void *opaque, int mode) {
         g->graph_mm_mode = MG_GEMM_MODE_SMALLP;
         return 1;
     }
+    if (mode == MG_GEMM_MODE_MULMM) {
+        if (psoQ4KMulMM == nil) return 0;
+        g->graph_mm_mode = MG_GEMM_MODE_MULMM;
+        return 1;
+    }
     return 0;
+}
+
+// mg_graph_set_q6k_mode selects the Q6_K projection kernel this graph encodes: 0 the naive
+// q6k_gemm, 1 the fak#13692 q6k_mul_mm. Fail-closed like mg_graph_set_mm_mode: refused after the
+// first encode or when the pipeline is unavailable. The P=1 GEMV route is unaffected.
+int mg_graph_set_q6k_mode(void *opaque, int mode) {
+    MGProjectionGraph *g = opaque;
+    if (!g || g->committed || g->encoders != 0) return 0;
+    if (mode == 0) { g->graph_q6k_mode = 0; return 1; }
+    if (mode == 1 && psoQ6KMulMM != nil) { g->graph_q6k_mode = 1; return 1; }
+    return 0;
+}
+
+int mg_graph_q6k_mode(void *opaque) {
+    MGProjectionGraph *g = opaque;
+    return g ? g->graph_q6k_mode : 0;
 }
 
 // mg_graph_mm_mode reports the Q4_K projection candidate the graph will request (0 scalar, 2
@@ -2647,8 +2881,8 @@ static void *mg_graph_encode_q4k_input(MGProjectionGraph *g, int wid, id<MTLBuff
         [e endEncoding]; return (__bridge void*)y;
     }
     int executed=0, BN=64; id<MTLComputePipelineState> pso=q4k_gemm_pso(g->P,mode,&executed,&BN); if(!pso)return NULL;
-    const int BM=64,TG=256; int rowBlocks=(w->out+BM-1)/BM;
-    id<MTLComputeCommandEncoder> e=[g->cb computeCommandEncoder]; [e setComputePipelineState:pso]; [e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:w->offset atIndex:0]; [e setBuffer:x offset:0 atIndex:1]; [e setBuffer:y offset:0 atIndex:2]; [e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5]; for(int t0=0;t0<g->P;t0+=BN){int nt=g->P-t0;if(nt>BN)nt=BN;[e setBytes:&t0 length:sizeof(int) atIndex:6];[e setBytes:&nt length:sizeof(int) atIndex:7];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG,1,1)];}[e endEncoding]; return (__bridge void*)y;
+    id<MTLComputeCommandEncoder> e=[g->cb computeCommandEncoder]; if(!e)return NULL;
+    q4k_encode_gemm(e,pso,executed,BN,(__bridge id<MTLBuffer>)w->buf,w->offset,x,y,0,w->nblk,w->out,g->P); [e endEncoding]; return (__bridge void*)y;
 }
 void *mg_graph_encode_q4k(void *opaque, int wid) {
     MGProjectionGraph *g=opaque; if (!g || g->committed || !g->xf || wid<0 || wid>=gNQ4 || gQ4[wid].in!=g->in) return NULL;
@@ -2670,7 +2904,9 @@ static void *mg_graph_encode_q6k_input(MGProjectionGraph *g, int wid, id<MTLBuff
         mg_smallp_encode(e,1,(__bridge id<MTLBuffer>)w->buf,0,x,0,y,0,w->nblk,w->out,w->in,g->P);
         [e endEncoding]; return (__bridge void*)y;
     }
-    id<MTLComputeCommandEncoder>e=[g->cb computeCommandEncoder];[e setComputePipelineState:psoQ6KGemm];[e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:0 atIndex:0];[e setBuffer:x offset:0 atIndex:1];[e setBuffer:y offset:0 atIndex:2];[e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)w->out,(NSUInteger)g->P,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];[e endEncoding];return (__bridge void*)y;
+    int executed=0; id<MTLComputePipelineState> pso=q6k_gemm_pso(g->graph_q6k_mode?MG_GEMM_MODE_MULMM:0,&executed); if(!pso)return NULL;
+    id<MTLComputeCommandEncoder>e=[g->cb computeCommandEncoder];if(!e)return NULL;
+    q6k_encode_gemm(e,pso,executed,(__bridge id<MTLBuffer>)w->buf,x,y,w->nblk,w->out,g->P);[e endEncoding];return (__bridge void*)y;
 }
 void *mg_graph_encode_q6k(void *opaque, int wid) {
     MGProjectionGraph *g=opaque; int i=wid-MG_Q6_BASE; if(!g||g->committed||!g->xf||!q6k_valid(wid)||gQ6[i].in!=g->in)return NULL;

@@ -67,6 +67,9 @@ var (
 	// on first prefill weight-upload (a cgo call needing the device) and is additionally gated by
 	// metalgemm's device/version-pinned crossover table at encode time.
 	q4kM5Once sync.Once
+	// kquantMulMMOnce applies the fak#13692 mul_mm config seam (SetKQuantMulMMOptIn) to metalgemm
+	// once, on first prefill weight-upload, alongside the MM32/M5 opt-ins.
+	kquantMulMMOnce sync.Once
 )
 
 type metalQ8ExactState struct {
@@ -99,8 +102,23 @@ func (s *Session) metalExecution(operation metalgemm.ExecutionOperation, call fu
 	if s.PhaseProfiler != nil {
 		s.PhaseProfiler.recordMetal(snapshot, err)
 	}
+	if qprofOn && err == nil {
+		qprofRecordMetal(snapshot.Events)
+	}
 	if err == nil {
 		s.observeQwen35MetalExecutionSnapshot(snapshot)
+	}
+}
+
+// qprofRecordMetal folds one observed call's command buffers into the FAK_QPROFILE GPU/wait
+// accumulators the prefill gemm bucket attributes against (fak#13692).
+func qprofRecordMetal(events []metalgemm.ExecutionEvent) {
+	for _, e := range events {
+		if e.TimingAvailable {
+			qprofAddMetal(e.GPUMilliseconds, e.WaitMilliseconds)
+		} else {
+			qprofAddMetal(0, e.WaitMilliseconds)
+		}
 	}
 }
 
@@ -1228,6 +1246,17 @@ func SetQ4KM5OptIn(on bool) { q4kM5Disabled = !on }
 // q4kM5OptIn reports the widened-panel wide-tile opt-in. Default (undeclared) is ON.
 func q4kM5OptIn() bool { return !q4kM5Disabled }
 
+// kquantMulMMDisabled is the config-surface opt-out for the fak#13692 simdgroup-MMA (llama.cpp mul_mm-shaped) Q4_K /
+// Q6_K prefill GEMM (CONFIG_NOT_ENV, like q4kM5Disabled). The declared default is ON: mul_mm is the
+// production kernel for P >= metalgemm.Q4KMulMMMinPrompt on every Apple family where it compiles.
+// SetKQuantMulMMOptIn(false) restores the pre-#13692 selector (scalar / FAK_Q4K_MM MM32 / M5
+// crossover, naive Q6_K) as the operator escape hatch for a mul_mm regression.
+var kquantMulMMDisabled bool
+
+// SetKQuantMulMMOptIn declares whether the fak#13692 mul_mm prefill kernels are opted in. It must
+// be declared before the first Metal prefill (it is applied once per process).
+func SetKQuantMulMMOptIn(on bool) { kquantMulMMDisabled = !on }
+
 // q4kMMOptIn resolves the FAK_Q4K_MM process opt-in for the exact-P32 MM32 candidate. Default OFF
 // (the sibling of q4kM5OptIn, but the MM32 variant has not yet earned a default-on receipt).
 func q4kMMOptIn() bool { return os.Getenv("FAK_Q4K_MM") == "1" }
@@ -1248,6 +1277,10 @@ func (m *Model) metalQ4KWeights() map[string]bool {
 	// on the M3 Pro), cosine 1.0 vs the CPU f32 reference. Default OFF (the scalar kernel stays the
 	// proven path) until the MMA variant earns auto-enable. Set once per process — cheap and
 	// idempotent on the metalgemm side.
+	// Since fak#13692 the mul_mm default outranks both the MM32 and the M5 candidates below; they
+	// only select a kernel when SetKQuantMulMMOptIn(false) turns the default off (or for P below
+	// metalgemm.Q4KMulMMMinPrompt).
+	kquantMulMMOnce.Do(func() { metalgemm.SetGEMMUseMulMM(!kquantMulMMDisabled) })
 	q4kMMOnce.Do(func() { metalgemm.SetGEMMUseMM(q4kMMOptIn()) })
 	// Default ON the wide-tile cooperative-SMEM candidate for the widened panel regime (P>=64,
 	// fak#13041). The sanctioned on-silicon M3 Pro receipt now pins a row in metalgemm's
@@ -1255,8 +1288,8 @@ func (m *Model) metalQ4KWeights() map[string]bool {
 	// scalar on-GPU ratio measured 1.57x at P=64 and 1.46x at P=128, every sample clearing the
 	// fak#9937 >=1.10x gate. The encode-time crossover gate is the real safety mechanism: on any
 	// device/OS with no pinned row q4kGEMMModeForPrompt still requests the scalar identity, so
-	// default-on is inert off the receipted box. Flip FAK_Q4K_M5=0 to force the scalar kernel
-	// explicitly. Set once per process (cheap, idempotent on the metalgemm side).
+	// default-on is inert off the receipted box. SetQ4KM5OptIn(false) (formerly FAK_Q4K_M5=0) forces
+	// the scalar kernel when the mul_mm default is also off. Set once per process (cheap, idempotent on the metalgemm side).
 	q4kM5Once.Do(func() { metalgemm.SetGEMMUseM5(q4kM5OptIn()) })
 	uploaded := map[string]bool{}
 	cfg := m.Cfg
