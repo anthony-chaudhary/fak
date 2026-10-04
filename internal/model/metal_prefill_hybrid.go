@@ -370,10 +370,11 @@ func qwen35MetalMTPPanelAdmission(s *Session, ids []int) (*metalQwen35GDNSequenc
 		s.qwen35HAL.decodePath != Qwen35MetalGDNDecodeForwardPath || s.activeTap() != nil {
 		return nil, qwen35MetalMTPHead{}, false
 	}
-	// The MTP panel embeds its draft rows through embedRows(), which refuses whole-table
-	// expansion of a packed (Q2_K/Q4_K) store. Decline so the verifier downgrades instead
-	// of panicking on a packed-embedding model.
-	if m := s.M; m != nil && m.Q2KEmbedding != nil {
+	// The panel embeds its draft rows through embedRowsInto (packed-aware row gather). The
+	// Q2_K/Q4_K packed stores keep their established decline (the untied 27B envelope); a tied
+	// Q6_K table (fak#13567) is admitted because its head resolves through kqHeadName to the
+	// same shared Q6_K tensor (resolveQwen35MetalMTPHead), so no whole-table expansion occurs.
+	if m := s.M; m != nil && m.Q2KEmbedding != nil && !m.TiedQ6KEmbeddingShared() {
 		return nil, qwen35MetalMTPHead{}, false
 	}
 	if qwen35MetalMTPPanelGeometryError(s.M.Cfg) != nil || s.Cache.Len()+len(ids) > 4096 {

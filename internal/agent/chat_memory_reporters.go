@@ -241,3 +241,36 @@ type NativeLatestPhaseReporter interface {
 type NativePhaseReporter interface {
 	NativePhaseObservation(traceID string) (NativePhaseObservation, bool)
 }
+
+// WeightResidency is a gateway-neutral snapshot of the resident WEIGHT bytes a local
+// planner's model holds, split by resident store (fak#13567). It mirrors
+// model.ResidentReport without making gateway depend on model types. Byte fields are
+// resident host bytes; the packed embedding stores are reported per format so a tied
+// Q6_K token table (one copy serving gather AND head) is distinguishable from the
+// legacy tied two-copy layout (TiedEmbedF32Bytes + TiedHeadQ8Bytes, both non-zero).
+type WeightResidency struct {
+	TotalResidentBytes  int64   `json:"total_resident_bytes"`
+	F32Bytes            int64   `json:"f32_bytes"`
+	Q8Bytes             int64   `json:"q8_bytes"`
+	Q4KBytes            int64   `json:"q4k_bytes"`
+	KQuantBytes         int64   `json:"kquant_bytes"`
+	Q2Bytes             int64   `json:"q2_bytes"`
+	Q2KEmbedBytes       int64   `json:"q2k_embed_bytes"`
+	PQ2EmbedBytes       int64   `json:"pq2_embed_bytes"`
+	Q4KEmbedBytes       int64   `json:"q4k_embed_bytes"`
+	Q6KEmbedBytes       int64   `json:"q6k_embed_bytes"`
+	TiedEmbedF32Bytes   int64   `json:"tied_embed_f32_bytes"`
+	TiedHeadQ8Bytes     int64   `json:"tied_head_q8_bytes"`
+	DecodeBytesPerToken int64   `json:"decode_bytes_per_token"`
+	DecodeGiBPerToken   float64 `json:"decode_gib_per_token"`
+	// LMHead is the LIVE head route (metal-q6k, cpu-q6k, cpu-q8, ...). It is re-read on
+	// every report because a later Metal residency promotion can move the head.
+	LMHead string `json:"lm_head"`
+}
+
+// WeightResidencyReporter is implemented by local planners that hold a loaded model and
+// can report its resident weight bytes. ok=false (or a planner that does not implement
+// it — proxy/mock) means the surface omits the block rather than publishing fake zeros.
+type WeightResidencyReporter interface {
+	WeightResidency() (WeightResidency, bool)
+}

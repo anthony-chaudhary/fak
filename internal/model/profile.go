@@ -139,6 +139,10 @@ const (
 	MetalFallbackFusedMLPDispatch       MetalFallbackRoute = "fused-mlp-caller-dispatch"
 	MetalFallbackFusedMLPQ6DownDispatch MetalFallbackRoute = "fused-mlp-q6down-caller-dispatch"
 	MetalFallbackFusedMLPBatchDispatch  MetalFallbackRoute = "fused-mlp-q6down-batch-caller-dispatch"
+	// MetalFallbackDensePrefillGraphHost: an admitted dense resident-Q4_K prefill layer graph
+	// declined (encode refusal, stall, quarantine) and the rest of that prefill panel ran on
+	// the per-projection host route; a later panel of a long prompt retries the graph.
+	MetalFallbackDensePrefillGraphHost MetalFallbackRoute = "dense-prefill-graph-host"
 )
 
 // metalFallbackRouteOrder is the stable slot order for the live per-route counter vector
@@ -161,10 +165,11 @@ var metalFallbackRouteOrder = [...]MetalFallbackRoute{
 	MetalFallbackFusedMLPDispatch,
 	MetalFallbackFusedMLPQ6DownDispatch,
 	MetalFallbackFusedMLPBatchDispatch,
+	MetalFallbackDensePrefillGraphHost,
 }
 
 // metalFallbackRouteIndex returns the stable vector slot for route, or ok=false when the route
-// has no dedicated slot. It is a small linear scan over 15 entries, off the hot path.
+// has no dedicated slot. It is a small linear scan over 16 entries, off the hot path.
 func metalFallbackRouteIndex(route MetalFallbackRoute) (int, bool) {
 	for i, r := range metalFallbackRouteOrder {
 		if r == route {
@@ -341,6 +346,10 @@ func metalFallbackTemplate(route MetalFallbackRoute) (MetalFallbackEvent, bool) 
 		return dispatch(metalgemm.ExecutionQ4KFusedMLPQ6Down), true
 	case MetalFallbackFusedMLPBatchDispatch:
 		return dispatch(metalgemm.ExecutionQ4KFusedMLPQ6DownBatch), true
+	case MetalFallbackDensePrefillGraphHost:
+		// The declined layer graph's work is re-dispatched per projection on the Metal host
+		// route (still Metal, not CPU), so it is a caller-dispatch decline like the groups.
+		return dispatch(metalgemm.ExecutionQ4KGEMMGroup), true
 	default:
 		return MetalFallbackEvent{}, false
 	}

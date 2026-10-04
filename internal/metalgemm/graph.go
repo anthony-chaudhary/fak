@@ -38,6 +38,7 @@ int mg_graph_live_buffers(void);
 void *mg_graph_test_hold_terminal(void *graph, int wait_limit_ms);
 void mg_graph_test_release_terminal(void *gate);
 void *mg_graph_xf_buffer(void *graph);
+void *mg_graph_upload(void *graph, const float *src, int n);
 int mg_graph_set_gemv_vectorized(void *graph, int mode);
 int mg_graph_set_gemv_p1(void *graph, int mode);
 int mg_graph_set_mm_mode(void *graph, int mode);
@@ -700,6 +701,25 @@ func (g *ProjectionGraph) Input(width int) (*GraphResult, error) {
 		return nil, errors.New("metalgemm: graph has no f32 input")
 	}
 	return &GraphResult{ptr: C.mg_graph_xf_buffer(g.ptr), out: width, p: g.p, graph: g}, nil
+}
+
+// Upload copies a second host f32 panel of P rows x width into the graph before commit and
+// returns it as a graph-owned result, so one command buffer can consume two host activations
+// (the dense prefill uploads the residual stream as the begin panel and the host attention
+// output here). The copy is host memcpy into shared memory; it adds no encoder.
+func (g *ProjectionGraph) Upload(src []float32, width int) (*GraphResult, error) {
+	if err := g.open(); err != nil {
+		return nil, err
+	}
+	if width <= 0 || len(src) != g.p*width {
+		return nil, fmt.Errorf("metalgemm: invalid graph upload P=%d width=%d len=%d", g.p, width, len(src))
+	}
+	ptr := C.mg_graph_upload(g.ptr, (*C.float)(unsafe.Pointer(&src[0])), C.int(len(src)))
+	if ptr == nil {
+		return nil, errors.New("metalgemm: graph upload failed")
+	}
+	g.hostUploadBytes += uint64(len(src)) * 4
+	return &GraphResult{ptr: ptr, out: width, p: g.p, graph: g}, nil
 }
 
 // SetBufferPool enables the graph's per-shape idle-buffer recycle pool with the given

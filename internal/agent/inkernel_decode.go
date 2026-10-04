@@ -89,7 +89,7 @@ func (p *InKernelPlanner) configureNativeSession(s *model.Session) {
 
 func packedQ4KRequestReserveSupported(p *InKernelPlanner, s *model.Session) bool {
 	if p == nil || p.m == nil || s == nil || s.M == nil || s.Cache == nil ||
-		s.M.Q2KEmbedding == nil || s.M.Q2KEmbedding.Format() != "Q4_K" {
+		s.M.Q2KEmbedding == nil || (s.M.Q2KEmbedding.Format() != "Q4_K" && s.M.Q2KEmbedding.Format() != "Q6_K") {
 		return false
 	}
 	return s.M.Cfg.IsQwen35Hybrid() && !s.M.Cfg.IsMoE() &&
@@ -492,12 +492,14 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		}
 		prefillAt := matched
 		checkpointPrefix := cacheable
+		sharedBoundary := inKernelSharedPrefixBoundaryFromContext(ctx)
 		if p.qwen35MetalGDNSequence && p.backend == nil && p.metal && p.q4k && p.m.Cfg.IsQwen35Hybrid() {
 			// Native sequence admission requires a fresh prompt. Preserve its existing
 			// grid checkpoints instead of adding off-grid hits it cannot restore.
 			checkpointPrefix = (checkpointPrefix / inKernelSnapshotCheckpointTokens) * inKernelSnapshotCheckpointTokens
+			sharedBoundary = (sharedBoundary / inKernelSnapshotCheckpointTokens) * inKernelSnapshotCheckpointTokens
 		}
-		checkpoint := inKernelAdaptiveSnapshotCheckpoint(prefillAt, checkpointPrefix, len(ids))
+		required := inKernelAdaptiveSnapshotCheckpoint(prefillAt, checkpointPrefix, len(ids))
 		snapshotSeam := p.backend != nil || inKernelHostSnapshotReuse(p)
 		if reuse && snapshotSeam {
 			tierLabel := string(sourceTier)
@@ -505,25 +507,24 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 				tierLabel = "miss"
 			}
 			// One line per non-exact snapshot-seam turn, beside inkernel_chat: which tier
-			// served the restored prefix and where this turn's single checkpoint lands.
-			log.Printf("inkernel_prefix_lookup prompt=%dtok cacheable=%dtok reused=%dtok legacy_m=%d snapshot_m=%d snapshot_consulted=%t tier=%s checkpoint=%d checkpoint_planned=%t",
-				len(ids), cacheable, matched, lookupLegacyM, lookupSnapshotM, lookupSnapshotConsulted, tierLabel, checkpoint, admit && checkpoint > prefillAt)
+			// served the restored prefix and where this turn's required checkpoint lands.
+			log.Printf("inkernel_prefix_lookup prompt=%dtok cacheable=%dtok reused=%dtok legacy_m=%d snapshot_m=%d snapshot_consulted=%t tier=%s checkpoint=%d checkpoint_planned=%t shared_boundary=%d",
+				len(ids), cacheable, matched, lookupLegacyM, lookupSnapshotM, lookupSnapshotConsulted, tierLabel, required, admit && required > prefillAt, sharedBoundary)
 		}
-		if admit && snapshotSeam && checkpoint > prefillAt {
-			logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:checkpoint], measurement)
-			if err != nil {
-				return
+		if admit && snapshotSeam {
+			// Shared system/tools boundary first, then the adaptive divergence/grid
+			// checkpoint: each is a complete snapshot of an exact token prefix, so the
+			// first child of a fan-out restores the parent's shared block.
+			for _, checkpoint := range inKernelPrefillCheckpoints(prefillAt, checkpointPrefix, sharedBoundary, len(ids)) {
+				logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:checkpoint], measurement)
+				if err != nil {
+					return
+				}
+				if err = p.admitPrefillCheckpoint(ctx, s, ids[:checkpoint], logits, checkpoint != required); err != nil {
+					return
+				}
+				prefillAt = checkpoint
 			}
-			var checkpointSnapshot *model.PrefixSnapshot
-			checkpointSnapshot, err = s.PrefixSnapshot()
-			if err != nil {
-				return
-			}
-			if err = p.admitPrefixSnapshot(ctx, ids[:checkpoint], checkpointSnapshot, logits); err != nil {
-				checkpointSnapshot.Close()
-				return
-			}
-			prefillAt = checkpoint
 		}
 		if !flightPrefilled && prefillAt < len(ids) {
 			logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:], measurement)
@@ -1327,6 +1328,25 @@ func inKernelAdaptiveSnapshotCheckpoint(matched, cacheable, promptTokens int) in
 		return cacheable
 	}
 	return grid
+}
+
+// admitPrefillCheckpoint snapshots s (positioned at the end of prefix) and admits
+// it. optional marks the shared-prefix boundary snapshot, an opportunistic extra:
+// when the snapshot byte budget refuses it the request proceeds without it instead
+// of failing, while the historical divergence/grid checkpoint keeps its contract.
+func (p *InKernelPlanner) admitPrefillCheckpoint(ctx context.Context, s *model.Session, prefix []int, logits []float32, optional bool) error {
+	snap, err := s.PrefixSnapshot()
+	if err != nil {
+		return err
+	}
+	if err := p.admitPrefixSnapshot(ctx, prefix, snap, logits); err != nil {
+		snap.Close()
+		if optional && errors.Is(err, radixkv.ErrSnapshotByteBudget) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // admitPrefixSnapshot transfers snapshot ownership to the same scoped/unscoped tree

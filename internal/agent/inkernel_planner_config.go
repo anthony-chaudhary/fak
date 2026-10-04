@@ -111,6 +111,9 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 	if backend == nil && metal {
 		m.PrepareMetalResidency(q4k)
 	}
+	// fak#13567: snapshot the resident byte split now, before any request can decode, so a
+	// /healthz probe never walks the store maps concurrently with decode-time store writes.
+	p.WeightResidency()
 	// The GRADED expert spill (#5612, inkernel_expert_spill.go) is OFF unless the operator asks:
 	// FAK_N_CPU_MOE=auto sizes it against the measured device budget, FAK_N_CPU_MOE=<N> states it.
 	// Unset — every serve today — nothing is resolved and the placement stays exactly what

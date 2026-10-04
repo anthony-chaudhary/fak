@@ -105,8 +105,10 @@ type pendingTensor struct {
 	residentType     TensorType // which resident raw-quant store, when resident
 	canonicalMTPQ4K  bool       // already-reordered canonical MTP q/k; use the narrow model entry point
 	canonicalMTPFCQ8 bool       // exact canonical MTP fusion projection; preserve source Q8_0
+	canonicalRows    bool       // qwen35 raw K-quant rows already permuted into canonical order (fak#13567)
 	q2kEmbed         bool       // true -> model.NewQ2KEmbedding(raw) -> builder.SetQ2KEmbedding
 	q4kEmbed         bool       // true -> model.NewQ4KEmbedding(raw) -> builder.SetQ2KEmbedding
+	tiedQ6KEmbed     bool       // true -> builder.SetTiedQ6KEmbedding(raw): one copy for gather + tied head
 	lazyQ4K          bool
 	lazyKQuant       bool // non-Q4_K dense k-quant held as a bounded range (loader's lazyKQuantTensorWork; #13201)
 	sourceInfo       TensorInfo

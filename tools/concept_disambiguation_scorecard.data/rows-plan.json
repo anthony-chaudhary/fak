@@ -159,6 +159,22 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "plan-plannerturncontext",
+      "canonical": "PlannerTurnContext (gateway request binding)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The single context binding the gateway applies before every planner call (buffered Complete and streaming CompleteStream): it binds the authenticated principal to the in-kernel prefix-cache identity at tenant scope and carries the harness session id for prefix-reuse attribution.",
+      "distinction": "The per-turn CONTEXT PREAMBLE that stamps cache identity and session id before a planner call - NOT Plan (planner)'s chosen resident view and NOT Plan (memq)'s static pre-execution explain output.",
+      "distinct_from": ["plan-planner", "plan-memq"],
+      "aliases": [],
+      "grounding": "plannerTurnContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }

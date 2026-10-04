@@ -70,13 +70,19 @@ type q4kLoadOptions struct {
 	residentQ2KEmbedding bool
 	residentQ4KEmbedding bool
 	residentPQ2Embedding bool // enabled by Prism PQ2 metadata
-	streamedExperts      bool
-	streamedExpertBytes  int64
-	streamedDenseQ4K     bool
-	streamedDenseBytes   int64
-	streamedDenseBounded bool
-	retainMTP            bool
-	prismGDNVGrouped     bool // checkpoint metadata, not a caller option
+	// tiedQ6KEmbeddingMode is the caller override; residentTiedQ6KEmbedding is the resolved
+	// per-checkpoint decision (resolveTiedQ6KEmbedding, fak#13567).
+	tiedQ6KEmbeddingMode     tiedQ6KEmbeddingMode
+	residentTiedQ6KEmbedding bool
+	streamedExperts          bool
+	streamedExpertBytes      int64
+	streamedDenseQ4K         bool
+	streamedDenseBytes       int64
+	streamedDenseBounded     bool
+	retainMTP                bool
+	prismGDNVGrouped         bool // checkpoint metadata, not a caller option
+	// nativeRowsOff disables the fak#13567 native-row route (qwen35NativeRowResident).
+	nativeRowsOff bool
 }
 
 // Q4KLoadOption configures the direct-resident-Q4_K GGUF load path.
@@ -91,6 +97,16 @@ func WithMTPRetention(enabled bool) Q4KLoadOption {
 
 func (o *q4kLoadOptions) setMTPRetention(enabled bool) {
 	o.retainMTP = enabled
+}
+
+// WithNativeLinearAttnRows controls the Qwen3.5-family native-row residency (fak#13567): the
+// GDN in_proj_qkv/z/a/b and self_attn q/k projections, whose GGUF-to-model transform is a pure
+// output-row permutation, keep their Q4_K (q4kw) / Q6_K (kqw) bytes after a lossless raw row
+// reorder instead of being requantized to Q8. The default (enabled) is automatic: it applies only
+// where qwen35NativeRowResident admits a tensor, never to the exact 64-layer Qwen3.8 runtime whose
+// Metal decode requires those weights as Q8. Pass false to force the historical Q8 route.
+func WithNativeLinearAttnRows(enabled bool) Q4KLoadOption {
+	return func(o *q4kLoadOptions) { o.nativeRowsOff = !enabled }
 }
 
 // WithQ2KEmbeddingResident controls whether eligible Q2_K token embedding tables stay in
@@ -588,6 +604,9 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 			return nil, err
 		}
 	}
+	if err := s.resolveTiedQ6KEmbedding(cfg, &loadOpts); err != nil {
+		return nil, err
+	}
 	// R5/#5616: under WithStreamedExperts the fused routed-expert slabs are described from the
 	// tensor directory (no payload IO) and left on disk; `streamed` is the read-only set of GGUF
 	// tensor names the tier took ownership of, which the per-tensor workers consult to skip
@@ -881,6 +900,14 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 			if err := builder.AddCanonicalMTPFCQ8(pt.name, pt.shape, pt.raw); err != nil {
 				return err
 			}
+		case pt.canonicalRows:
+			add := builder.AddCanonicalRowNormalizedQ4K
+			if pt.residentType == TensorQ6_K {
+				add = builder.AddCanonicalRowNormalizedQ6K
+			}
+			if err := add(pt.name, pt.shape, pt.raw); err != nil {
+				return err
+			}
 		case pt.q2kEmbed:
 			var embed *model.Q2KEmbedding
 			var err error
@@ -893,6 +920,10 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 				return err
 			}
 			if err := builder.SetQ2KEmbedding(embed); err != nil {
+				return err
+			}
+		case pt.tiedQ6KEmbed:
+			if err := builder.SetTiedQ6KEmbedding(pt.shape, pt.raw); err != nil {
 				return err
 			}
 		case pt.q4kEmbed:
@@ -1262,6 +1293,15 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 		tw.pending = []pendingTensor{{q2kEmbed: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
 		return tw
 	}
+	if loadOpts.residentTiedQ6KEmbedding && info.Name == "token_embd.weight" {
+		shape, raw, ok := s.shapeAndBytesOrFail(info, &tw)
+		if !ok {
+			return tw
+		}
+		tw.acctType, tw.acctExpert, tw.acctBytes, tw.acctTensors, tw.acctResident = info.Type.String(), false, tensorOnDiskBytes(info), 1, true
+		tw.pending = []pendingTensor{{tiedQ6KEmbed: true, name: canon, shape: shape, raw: raw}}
+		return tw
+	}
 	if loadOpts.residentQ4KEmbedding && info.Name == "token_embd.weight" {
 		shape, raw, ok := s.shapeAndBytesOrFail(info, &tw)
 		if !ok {
@@ -1314,6 +1354,18 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 	}
 	if info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon) {
 		tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
+		tw.acctResident = true
+		return tw
+	}
+	// fak#13567: a qwen35 projection whose canonical transform only permutes output rows keeps
+	// its native Q4_K/Q6_K bytes, reordered row-by-row, instead of dequant -> normalize -> Q8.
+	if qwen35NativeRowResident(cfg, canon, info.Type, shape, loadOpts) {
+		normalized, err := normalizeQwen35NativeRows(canon, shape, raw, cfg)
+		if err != nil {
+			tw.err = err
+			return tw
+		}
+		tw.pending = []pendingTensor{{resident: true, canonicalRows: true, residentType: info.Type, name: canon, shape: shape, raw: normalized}}
 		tw.acctResident = true
 		return tw
 	}

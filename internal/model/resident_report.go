@@ -37,8 +37,22 @@ type ResidentReport struct {
 	Q4KEmbedTensors int   `json:"q4k_embed_tensors"`
 	Q4KEmbedBytes   int64 `json:"q4k_embed_bytes"`
 	Q4KEmbedParams  int64 `json:"q4k_embed_params"`
-	F32Tensors      int   `json:"f32_tensors"` // small f32 manifest tensors (norms, embed, biases)
-	F32Bytes        int64 `json:"f32_bytes"`   // their resident bytes
+	// Q6KEmbed* is a tied Q6_K token table stored ONCE (fak#13567): the same bytes serve the
+	// row gather and the LM head, so they are counted here and NOT again under KQuant*.
+	// Because the tied head streams the whole table every token, these bytes ARE part of
+	// DecodeBytesPerToken (unlike the gather-only packed embeds above).
+	Q6KEmbedTensors int   `json:"q6k_embed_tensors"`
+	Q6KEmbedBytes   int64 `json:"q6k_embed_bytes"`
+	Q6KEmbedParams  int64 `json:"q6k_embed_params"`
+	// TiedEmbedF32Bytes / TiedHeadQ8Bytes isolate the legacy tied two-copy layout (an f32
+	// gather table plus a native-Q8 head for model.embed_tokens.weight). They are subsets of
+	// F32Bytes / Q8Bytes, reported so a regression to that layout is visible as non-zero.
+	TiedEmbedF32Bytes int64 `json:"tied_embed_f32_bytes"`
+	TiedHeadQ8Bytes   int64 `json:"tied_head_q8_bytes"`
+	// LMHead is the head route (LMHeadRoute): e.g. metal-q6k, cpu-q6k, cpu-q8.
+	LMHead     string `json:"lm_head"`
+	F32Tensors int    `json:"f32_tensors"` // small f32 manifest tensors (norms, embed, biases)
+	F32Bytes   int64  `json:"f32_bytes"`   // their resident bytes
 
 	TotalResidentBytes int64 `json:"total_resident_bytes"` // q2 + q4k + q8 + kquant + packed embeds + f32
 	// DecodeBytesPerToken is the weight-byte stream one batch=1 decode step walks: every
@@ -58,6 +72,15 @@ type ResidentReport struct {
 // sensitive q/k + linear-attention projections, plus any Q6_K tensors), which is exactly
 // the split that makes decode-bandwidth competitive with llama.cpp's q4_k_m.
 func (m *Model) ResidentReport() *ResidentReport {
+	r := m.residentStoreReport()
+	r.LMHead = m.LMHeadRoute()
+	return r
+}
+
+// residentStoreReport is ResidentReport without the LM-head route. The route probes the Metal
+// handle tables under metalQ4KMu, so the Metal admission paths that already hold that lock
+// (and only need byte totals) must use this form.
+func (m *Model) residentStoreReport() *ResidentReport {
 	r := &ResidentReport{}
 	for _, qt := range m.q2w {
 		r.Q2Tensors++
@@ -77,13 +100,23 @@ func (m *Model) ResidentReport() *ResidentReport {
 		// Params count logical weights even when the checkpoint payload is lazy.
 		r.Q4KParams += int64(bytes / q4kBlockBytes * qkK)
 	}
-	for _, qt := range m.q8w {
+	tiedQ6K := m.tiedQ6KHead()
+	// q8w is filled lazily by decode (quantizeOnDemand, under q8Mu): never iterate it unlocked.
+	q8Mu.RLock()
+	defer q8Mu.RUnlock()
+	for name, qt := range m.q8w {
+		if name == tiedEmbeddingName && m.Cfg.TieWordEmbeddings {
+			r.TiedHeadQ8Bytes = int64(len(qt.q)) + int64(len(qt.d))*4
+		}
 		r.Q8Tensors++
 		// q8Tensor resident bytes: out*in int8 codes + out*nblk f32 scales.
 		r.Q8Bytes += int64(len(qt.q)) + int64(len(qt.d))*4
 		r.Q8Params += int64(qt.out) * int64(qt.in)
 	}
 	for _, qt := range m.kqw {
+		if qt == tiedQ6K {
+			continue // counted once as Q6KEmbed*
+		}
 		r.KQuantTensors++
 		r.KQuantBytes += int64(len(qt.raw))
 		r.KQuantParams += int64(len(qt.raw) / qt.kind.blockBytes() * qt.kind.blockWeights())
@@ -94,6 +127,10 @@ func (m *Model) ResidentReport() *ResidentReport {
 			r.Q4KEmbedTensors = 1
 			r.Q4KEmbedBytes = int64(m.Q2KEmbedding.Bytes())
 			r.Q4KEmbedParams = int64(m.Q2KEmbedding.Vocab()) * int64(m.Q2KEmbedding.Hidden())
+		case "Q6_K":
+			r.Q6KEmbedTensors = 1
+			r.Q6KEmbedBytes = int64(m.Q2KEmbedding.Bytes())
+			r.Q6KEmbedParams = int64(m.Q2KEmbedding.Vocab()) * int64(m.Q2KEmbedding.Hidden())
 		case "PQ2_0":
 			r.PQ2EmbedTensors = 1
 			r.PQ2EmbedBytes = int64(m.Q2KEmbedding.Bytes())
@@ -104,16 +141,19 @@ func (m *Model) ResidentReport() *ResidentReport {
 			r.Q2KEmbedParams = int64(m.Q2KEmbedding.Vocab()) * int64(m.Q2KEmbedding.Hidden())
 		}
 	}
-	for _, meta := range m.manifest {
+	for name, meta := range m.manifest {
+		if name == tiedEmbeddingName && m.Cfg.TieWordEmbeddings {
+			r.TiedEmbedF32Bytes = int64(meta.Nbytes)
+		}
 		r.F32Tensors++
 		r.F32Bytes += int64(meta.Nbytes)
 	}
-	r.TotalResidentBytes = r.Q2Bytes + r.Q4KBytes + r.Q8Bytes + r.KQuantBytes + r.Q2KEmbedBytes + r.PQ2EmbedBytes + r.Q4KEmbedBytes + r.F32Bytes
+	r.TotalResidentBytes = r.Q2Bytes + r.Q4KBytes + r.Q8Bytes + r.KQuantBytes + r.Q2KEmbedBytes + r.PQ2EmbedBytes + r.Q4KEmbedBytes + r.Q6KEmbedBytes + r.F32Bytes
 	// The matmul weights read per decode token = all of q2w + q4kw + q8w + kqw (the LM head is in
 	// one of them; every projection + MLP weight streams once). This is the decode bandwidth.
 	// Embedding is a row-gather (hidden·4 B), not a full stream, so it is excluded; norms
 	// are negligible. f32 here is small-tensor-only and not on the matmul stream.
-	r.DecodeBytesPerToken = r.Q2Bytes + r.Q4KBytes + r.Q8Bytes + r.KQuantBytes
+	r.DecodeBytesPerToken = r.Q2Bytes + r.Q4KBytes + r.Q8Bytes + r.KQuantBytes + r.Q6KEmbedBytes
 	r.DecodeGiBPerToken = float64(r.DecodeBytesPerToken) / (1 << 30)
 	return r
 }
@@ -164,10 +204,16 @@ func (m *Model) MoEResidentWeightBytes() (replicated, expert int64, ok bool) {
 	for name, qt := range m.q2w {
 		add(name, int64(len(qt.raw))+int64(len(qt.q))+int64(len(qt.d))*4)
 	}
+	q8Mu.RLock()
 	for name, qt := range m.q8w {
 		add(name, int64(len(qt.q))+int64(len(qt.d))*4)
 	}
+	q8Mu.RUnlock()
+	tiedQ6K := m.tiedQ6KHead()
 	for name, qt := range m.kqw {
+		if qt == tiedQ6K {
+			continue // shared with Q2KEmbedding below; count once
+		}
 		add(name, int64(len(qt.raw)))
 	}
 	if m.Q2KEmbedding != nil {
@@ -204,6 +250,11 @@ func FormatResidentReport(r *ResidentReport) string {
 		embedStr = "  PQ2_0_embed=" + itoa(r.PQ2EmbedTensors) + "/" + fmtFloat(mib(r.PQ2EmbedBytes)) + "MiB"
 	} else if r.Q4KEmbedTensors > 0 {
 		embedStr = "  Q4_K_embed=" + itoa(r.Q4KEmbedTensors) + "/" + fmtFloat(mib(r.Q4KEmbedBytes)) + "MiB"
+	} else if r.Q6KEmbedTensors > 0 {
+		embedStr = "  Q6_K_tied_embed=" + itoa(r.Q6KEmbedTensors) + "/" + fmtFloat(mib(r.Q6KEmbedBytes)) + "MiB"
+	}
+	if r.LMHead != "" {
+		embedStr += "  lm_head=" + r.LMHead
 	}
 	return "resident: Q2_0=" + itoa(r.Q2Tensors) + " tensors/" + fmtFloat(mib(r.Q2Bytes)) + "MiB" +
 		"  Q4_K=" + itoa(r.Q4KTensors) + " tensors/" + fmtFloat(mib(r.Q4KBytes)) + "MiB" +
