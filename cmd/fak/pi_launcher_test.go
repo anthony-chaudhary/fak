@@ -947,6 +947,7 @@ func TestInstallPiLaunchProviderExtensionRendersAPIKeyEnvReference(t *testing.T)
 		"qwen38:27b-q4",
 		80000,
 		"$FAK_OPS_TEST_KEY",
+		"",
 	)
 	if err != nil {
 		t.Fatal(err)

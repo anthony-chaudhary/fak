@@ -215,6 +215,10 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 			directBase = strings.TrimRight(resolved, "/") + "/v1"
 		}
 		config, err := projectassets.GenerateOpenCodeConfig(directBase, launch.model)
+		if err == nil {
+			// Launch-scoped X-Fak-Session-Id via the provider's options.headers.
+			config, err = openCodeConfigWithSessionHeader(config, "fak", newLaunchSessionID("opencode"))
+		}
 		if err != nil {
 			fmt.Fprintf(stderr, "fak opencode: session config: %v\n", err)
 			return 1

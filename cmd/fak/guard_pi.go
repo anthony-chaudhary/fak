@@ -319,7 +319,7 @@ func guardPiTSLiteral(value any) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			parts = append(parts, key+": "+encoded)
+			parts = append(parts, guardPiTSKey(key)+": "+encoded)
 		}
 		return "{ " + strings.Join(parts, ", ") + " }", nil
 	case []any:
@@ -338,6 +338,22 @@ func guardPiTSLiteral(value any) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported generated Pi config value %T", value)
 	}
+}
+
+// guardPiTSKey renders an object key: bare when it is a plain identifier (the historical
+// output), JSON-quoted otherwise so a header name such as X-Fak-Session-Id stays valid TS.
+func guardPiTSKey(key string) string {
+	for i, r := range key {
+		if r == '_' || r == '$' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (i > 0 && r >= '0' && r <= '9') {
+			continue
+		}
+		encoded, _ := json.Marshal(key)
+		return string(encoded)
+	}
+	if key == "" {
+		return `""`
+	}
+	return key
 }
 
 // appendPiExtensionArg inserts `-e <path>` immediately after the pi executable — before any

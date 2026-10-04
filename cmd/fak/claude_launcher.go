@@ -268,6 +268,11 @@ func runClaude(stdout, stderr io.Writer, argv []string) int {
 
 	argvOut := buildClaudeLaunchArgv(launch)
 	envMap := buildClaudeLaunchEnvMap(launch)
+	// Launch-scoped session id via Claude Code's ANTHROPIC_CUSTOM_HEADERS so fak serve can
+	// attribute this launch's subagent prefix reuse (launch_session.go).
+	if id := newLaunchSessionID("claude"); id != "" {
+		envMap["ANTHROPIC_CUSTOM_HEADERS"] = claudeCustomHeadersWithSession(os.Getenv("ANTHROPIC_CUSTOM_HEADERS"), id)
+	}
 	envList := mergeEnv(os.Environ(), envMap)
 	if launch.guard {
 		argvOut = buildClaudeGuardLaunchArgv(tuiExecutable(), launch, argvOut)
