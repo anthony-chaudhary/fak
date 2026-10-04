@@ -121,3 +121,6 @@ func liveMetalWeightCounts() (q6k, q8 int) { return 0, 0 }
 // recordMetalFallback is unreachable in the pure-Go build (no Metal route can decline); it
 // exists so the shared prefill code compiles.
 func (s *Session) recordMetalFallback(route MetalFallbackRoute) {}
+
+// metalQ6KHeadResident is always false without the Metal build: the head runs on the CPU.
+func (m *Model) metalQ6KHeadResident(name string) bool { return false }

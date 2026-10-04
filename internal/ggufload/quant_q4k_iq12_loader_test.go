@@ -121,8 +121,9 @@ func TestLoadQ2XLConstituentsStayResidentVerbatim(t *testing.T) {
 			t.Errorf("%s resident payload changed during load", name)
 		}
 	}
-	if !m.HasQ8("model.layers.5.self_attn.q_proj.weight") {
-		t.Fatal("normalize-sensitive Q4_K attention tensor did not follow the established Q8 route")
+	// fak#13567: a row-permuted Q4_K attention tensor keeps native width after a raw row reorder.
+	if q := "model.layers.5.self_attn.q_proj.weight"; !m.HasQ4K(q) || m.HasQ8(q) {
+		t.Fatal("row-permuted Q4_K attention tensor did not follow the native-row route")
 	}
 }
 

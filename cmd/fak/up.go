@@ -1571,7 +1571,7 @@ func (s *turnkeyServer) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	// truthful about readiness — "warming_up" until the boot warmup gate
 	// completes, "stopping" once shutdown began, otherwise "ok".
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	body := map[string]any{
 		"ok":             isReady,
 		"status":         state,
 		"ready":          isReady,
@@ -1584,7 +1584,15 @@ func (s *turnkeyServer) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		"live_residency": s.liveResidencyReport(),
 		"agent_warm":     s.agentWarm.agentWarmBlock(),
 		"sessions":       s.capacityStats(),
-	})
+	}
+	// fak#13567: resident weight bytes by store + the LIVE lm_head route, the same shape the
+	// gateway /healthz reports. Absent (not zero) when no native model is loaded.
+	if s.native != nil {
+		if wr := residentWeightsLiveView(s.native.Model, s.native.Startup.Resident); wr != nil {
+			body["resident_weights"] = wr
+		}
+	}
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 // liveResidencyReport reads the LIVE Metal/CPU routing state at request time (#12875) instead of
@@ -1609,6 +1617,8 @@ func (s *turnkeyServer) liveResidencyReport() map[string]any {
 		"startup_q8_weights":       s.native.Startup.MetalLiveQ8Weights,
 		"startup_q6_weights":       s.native.Startup.MetalLiveQ6Weights,
 		"metal_q8_residency_error": s.native.Startup.MetalQ8ResidencyError,
+		// Re-read per probe: a later Metal Q6_K promotion moves the head (fak#13567).
+		"lm_head": s.native.Model.LMHeadRoute(),
 	}
 }
 

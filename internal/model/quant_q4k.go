@@ -828,7 +828,10 @@ func (m *Model) Q4KShape(name string) (out, in int) {
 // this predicate existed to fix). Identity matmul weights (FFN gate/up/down, self_attn
 // v_proj/o_proj, expert FFN, lm_head) are safe to hold raw. The loader still gates on GGUF
 // type == Q4_K, so a Q6_K weight that is name-eligible (attn_qkv, ffn_down, the lm_head) is
-// routed to Q8 by the type check, not Q4_K.
+// routed to Q8 by the type check, not Q4_K. The qwen35 tensors whose transform is a pure
+// output-row permutation can still be held raw after the loader reorders whole rows; that
+// route goes through AddCanonicalRowNormalizedQ4K/Q6K (Qwen35RowNormalizedProjection), never
+// through this identity gate.
 func ResidentQ4KEligible(cfg Config, canon string) bool {
 	name, keep := quantSourceTensorName(cfg, canon)
 	if !keep || !isQuantWeight(name) {

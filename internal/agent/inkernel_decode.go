@@ -89,7 +89,7 @@ func (p *InKernelPlanner) configureNativeSession(s *model.Session) {
 
 func packedQ4KRequestReserveSupported(p *InKernelPlanner, s *model.Session) bool {
 	if p == nil || p.m == nil || s == nil || s.M == nil || s.Cache == nil ||
-		s.M.Q2KEmbedding == nil || s.M.Q2KEmbedding.Format() != "Q4_K" {
+		s.M.Q2KEmbedding == nil || (s.M.Q2KEmbedding.Format() != "Q4_K" && s.M.Q2KEmbedding.Format() != "Q6_K") {
 		return false
 	}
 	return s.M.Cfg.IsQwen35Hybrid() && !s.M.Cfg.IsMoE() &&

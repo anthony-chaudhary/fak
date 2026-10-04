@@ -86,10 +86,12 @@ type InKernelPlanner struct {
 	q4kGateUpOutputSlab          bool
 	denseGPULayers               int
 	qwen35MetalGDNExecuted       atomic.Bool
-	compactHistoryBudget         int
-	elideStaleReads              bool
-	deferColdTools               bool
-	restoreStash                 func(trace, id, excerpt string, body []byte)
+	// weightResidency memoizes the resident-weight byte split for /healthz (fak#13567).
+	weightResidency      inKernelWeightResidencyCache
+	compactHistoryBudget int
+	elideStaleReads      bool
+	deferColdTools       bool
+	restoreStash         func(trace, id, excerpt string, body []byte)
 	// tree is the process-scoped RadixAttention prefix cache (internal/radixkv): the
 	// multi-thousand-token static system+tool-schema prefix is prefilled once and the
 	// next turn REUSES its KV, prefilling only the divergent suffix — the candidate-#13
