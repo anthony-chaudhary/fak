@@ -191,6 +191,22 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "covg-plan-plannedissues",
+      "canonical": "PlannedIssues (issue-orchestrator wave-plan count)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Plan.PlannedIssues (internal/issueorchestrator/issueorchestrator.go) is the count of analyzed issues admitted into a concurrent-safe wave plan as the campaign expands its horizon wave by wave.",
+      "distinction": "The wave-plan ADMISSION COUNT of issues committed to a campaign horizon, distinct from PlannedSteps (that same plan's admitted step budget) and from the ctxplanner Candidate (a scored context span). A plan-cardinality field, not a budget or a span.",
+      "distinct_from": ["x-plan-plannedstrategy", "candidate-planner"],
+      "aliases": ["planned_issues", "planned issue count"],
+      "grounding": "PlannedIssues",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }
