@@ -331,6 +331,7 @@ func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 
 		}
 	}
 	g, residentInput := q4kExpertInputHAL(func() *Session { sk, _ := mat.(sessionQ4KKernel); return sk.s }(), gn, un, xn, I, H)
+	var out []float32
 	if !residentInput {
 		// gate+up share the same activation xn, so dispatch them as ONE group: a Q4_K session kernel
 		// quantizes xn once and runs both output sets under a single goroutine barrier (the same
@@ -341,11 +342,21 @@ func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 
 		g, u = gu[0], gu[1]
 		m.addBiasIfPresent(g, expertName(layer, expert, "gate_proj.bias"))
 		m.addBiasIfPresent(u, expertName(layer, expert, "up_proj.bias"))
-		for i := 0; i < I; i++ {
-			g[i] = act(g[i], cfg) * u[i]
+		// Delegate the ordered host gating and the single down projection to the shared
+		// ffn.Gated component (fak#13449), as denseSwiGLU and qwen35SharedExpert already do.
+		// The gate/up projection kernel, the bias order, and the residentInput arm above are
+		// untouched; Gated fuses act(g)*u in increasing index order (ffn.ApplyInPlace) and
+		// projects the activated row through the same host mat.mul once.
+		fused, err := ffn.Gated(g, u, func(v float32) float32 { return act(v, cfg) }, func(activated []float32) ([]float32, error) {
+			return mat.mul(dn, mat.prep(activated), H, I), nil
+		})
+		if err != nil {
+			panic(err)
 		}
+		out = fused
+	} else {
+		out = mat.mul(dn, mat.prep(g), H, I)
 	}
-	out := mat.mul(dn, mat.prep(g), H, I)
 	m.addBiasIfPresent(out, expertName(layer, expert, "down_proj.bias"))
 	return out
 }
