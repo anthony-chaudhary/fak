@@ -20,8 +20,9 @@ func TestInKernelPrefillCheckpointsOrdersAndDedupes(t *testing.T) {
 	}{
 		{"cold no boundary falls back to grid", 0, 0, 0, 150, []int{128}},
 		{"boundary before grid", 0, 0, 40, 150, []int{40, 128}},
-		{"boundary after divergence", 0, 30, 40, 150, []int{30, 40}},
-		{"boundary equals divergence", 0, 40, 40, 150, []int{40}},
+		{"boundary after divergence", 0, 80, 100, 150, []int{80, 100}},
+		{"boundary equals divergence", 0, 80, 80, 150, []int{80}},
+		{"near-grid divergence defers to grid", 0, 30, 40, 150, []int{40, 128}},
 		{"boundary already restored", 40, 40, 40, 150, []int{128}},
 		{"boundary at prompt end left to full admission", 0, 0, 150, 150, []int{128}},
 		{"short prompt boundary only", 0, 0, 20, 50, []int{20}},
