@@ -210,6 +210,13 @@ func NewV41EngramRowCache(src V41EngramRowSource, opts V41EngramRowCacheOptions)
 	if opts.BudgetBytes < int64(opts.RowBytes) {
 		return nil, fmt.Errorf("model: V41 Engram budget %d smaller than one row %d", opts.BudgetBytes, opts.RowBytes)
 	}
+	// The declared row width must equal the source's actual width: the cache slices
+	// reads with opts.RowBytes as its stride, so a mismatch would misalign every row.
+	// Refuse by structure before allocating the inner cache or issuing any ReadRows.
+	// This is checked after the budget rule so a too-small budget keeps precedence.
+	if src.RowBytes() != opts.RowBytes {
+		return nil, fmt.Errorf("model: V41 Engram row bytes %d does not match source row bytes %d", opts.RowBytes, src.RowBytes())
+	}
 	if opts.PrefetchWindow < opts.PrefetchRows {
 		opts.PrefetchWindow = opts.PrefetchRows
 	}

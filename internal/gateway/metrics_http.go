@@ -174,7 +174,7 @@ func (s *Server) withMetrics(next http.Handler) http.Handler {
 		// watcher polls /v1/fak/observation/requests on a cadence, and its own
 		// 24/7 row would drown the served traffic it exists to inspect and
 		// dominate fak_gateway_inflight_max_age_seconds (metrics_render.go).
-		if route != "/metrics" && route != "/v1/fak/observation" && route != "/v1/fak/observation/requests" && route != "/v1/fak/features/proof" {
+		if route != "/metrics" && route != "/v1/fak/observation" && route != "/v1/fak/observation/requests" && route != "/v1/fak/observation/engine" && route != "/v1/fak/features/proof" {
 			liveID := s.metrics.beginInflight(route, start)
 			defer s.metrics.endInflight(liveID)
 			// The live registry id rides the request context so the per-request
@@ -463,7 +463,7 @@ func routeForMetrics(path string) string {
 		// so they carry their own route label rather than being folded into
 		// "other" alongside genuinely uncatalogued paths.
 		"/props", "/slots",
-		"/debug/vars", "/v1/fak/observation", "/v1/fak/observation/requests", "/v1/fak/features/proof":
+		"/debug/vars", "/v1/fak/observation", "/v1/fak/observation/requests", "/v1/fak/observation/engine", "/v1/fak/features/proof":
 		return path
 	default:
 		if strings.HasPrefix(path, "/v1/fak/") {

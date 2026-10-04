@@ -274,18 +274,44 @@ func (m *Model) v41EngramInject(l int, x [][]float32, streams [][][]float32, ful
 	dim := stage.headDim
 	cols := stage.columns
 	hc := stage.hc
-	if dim != H {
-		// The reduced fixture uses EngramHeadDim == H so the concatenated row
-		// width and the projection remain self-consistent; a mismatch is refused
-		// rather than silently projected against the wrong geometry.
+	// The projection is rectangular in general: the concatenated Engram row
+	// width dim is independent of the hidden width H, so a D != H declaration is
+	// admitted and projected rather than refused. Validate the declared geometry
+	// first, and reject any product that would overflow int before lengths,
+	// allocation, indexing, or mutation are attempted.
+	if dim < 1 || dim > 256 || H <= 0 {
 		return v41StageErr(v41StageEngram, l,
-			fmt.Errorf("%w: Engram head dim %d != hidden %d", ErrV41NativeUnsupported, dim, H))
+			fmt.Errorf("%w: Engram geometry head dim %d outside [1,256] or hidden %d not positive", ErrV41NativeUnsupported, dim, H))
+	}
+	if cols <= 0 {
+		return v41StageErr(v41StageEngram, l,
+			fmt.Errorf("%w: Engram geometry columns %d must be positive", ErrV41NativeUnsupported, cols))
+	}
+	rowCells, ok := checkedMulInt(cols, dim)
+	if !ok {
+		return v41StageErr(v41StageEngram, l,
+			fmt.Errorf("%w: Engram row geometry %d cols x %d dim overflows", ErrV41NativeUnsupported, cols, dim))
+	}
+	normCells, ok := checkedMulInt(hc, H)
+	if !ok {
+		return v41StageErr(v41StageEngram, l,
+			fmt.Errorf("%w: Engram norm geometry %d streams x %d hidden overflows", ErrV41NativeUnsupported, hc, H))
+	}
+	streamWidth, ok := checkedMulInt(hc+1, H)
+	if !ok {
+		return v41StageErr(v41StageEngram, l,
+			fmt.Errorf("%w: Engram projection width %d streams x %d hidden overflows", ErrV41NativeUnsupported, hc+1, H))
+	}
+	kvCells, ok := checkedMulInt(rowCells, streamWidth)
+	if !ok {
+		return v41StageErr(v41StageEngram, l,
+			fmt.Errorf("%w: Engram projection geometry %d x %d overflows", ErrV41NativeUnsupported, rowCells, streamWidth))
 	}
 
 	wKV := m.tensor(layerName(l, "engram_kv.weight"))
 	qNorm := m.tensor(layerName(l, "engram_q_norm.weight"))
 	kNorm := m.tensor(layerName(l, "engram_k_norm.weight"))
-	if len(wKV) != cols*dim*(hc+1)*H || len(qNorm) != hc*H || len(kNorm) != hc*H {
+	if len(wKV) != kvCells || len(qNorm) != normCells || len(kNorm) != normCells {
 		return v41StageErr(v41StageEngram, l,
 			fmt.Errorf("%w: Engram mixing tensors are absent or mis-shaped at layer %d", ErrV41NativeUnsupported, l))
 	}

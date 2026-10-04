@@ -387,3 +387,282 @@ func TestV41EngramFullPersistentStreams(t *testing.T) {
 		t.Fatal("full-path Engram injection did not change the logits; the v41Layer/forwardV41 call site is a no-op")
 	}
 }
+
+// v41RectangularEngramModel builds a full-geometry V4.1 model (H=64, NumLayers=1)
+// whose single in-range layer 0 declares Engram with an EngramHeadDim (dim) that
+// DIFFERS from HiddenSize (H). The packed-row source is unchanged (still 264 bytes
+// per row), so the concatenated row width is cols*dim while the projection output
+// is (hc+1)*H: a genuinely rectangular projection. The pre-fix production path
+// refused any dim != H before projecting; this fixture drives the accepted path.
+func v41RectangularEngramModel(t *testing.T, dim int) (*Model, V41EngramLayout) {
+	t.Helper()
+	cfg := v41FullGeometryConfig(t)
+	cfg.OGroups = 1
+	cfg.DeepSeekV41.EngramLayerIDs = []int{0}
+	cfg.DeepSeekV41.EngramNumEmbeddings = []int{48}
+	cfg.DeepSeekV41.EngramMaxNgramSize = 4
+	cfg.DeepSeekV41.EngramNHeads = 8
+	cfg.DeepSeekV41.EngramHeadDim = dim
+
+	H := cfg.HiddenSize
+	I := cfg.MoEIntermediateSize
+	qHeadDim := cfg.NumHeads * cfg.HeadDim
+	oDim := cfg.OLoraRank * cfg.OGroups
+	cols := (cfg.DeepSeekV41.EngramMaxNgramSize - 1) * cfg.DeepSeekV41.EngramNHeads
+
+	type ts = synthTensor
+	tensors := []ts{
+		{"model.embed_tokens.weight", []int{cfg.VocabSize, H}},
+		{"lm_head.weight", []int{cfg.VocabSize, H}},
+		{"model.norm.weight", []int{H}},
+		{layerName(0, "attn_norm.weight"), []int{H}},
+		{layerName(0, "ffn_norm.weight"), []int{H}},
+		{layerName(0, "mhc.mixes.weight"), []int{4 * H, v41MHCMixWidth}},
+		{layerName(0, "mhc.base"), []int{v41MHCMixWidth}},
+		{layerName(0, "mhc.scale"), []int{3}},
+		{layerName(0, "attn.wq_a.weight"), []int{cfg.QLoraRank, H}},
+		{layerName(0, "attn.wq_a_norm.weight"), []int{cfg.QLoraRank}},
+		{layerName(0, "attn.wq_b.weight"), []int{qHeadDim, cfg.QLoraRank}},
+		{layerName(0, "attn.wkv.weight"), []int{v41KVLoraRank, H}},
+		{layerName(0, "attn.kv_norm.weight"), []int{v41KVLoraRank}},
+		{layerName(0, "attn.wo_a.weight"), []int{cfg.OLoraRank, qHeadDim}},
+		{layerName(0, "attn.wo_b.weight"), []int{H, oDim}},
+		{layerName(0, "attn.sink"), []int{cfg.NumHeads}},
+		{layerName(0, "ffn.gate.weight"), []int{cfg.NumExperts, H}},
+		{layerName(0, "ffn.gate.e_score_correction_bias"), []int{cfg.NumExperts}},
+		{layerName(0, "ffn.shared_experts.w1.weight"), []int{I, H}},
+		{layerName(0, "ffn.shared_experts.w3.weight"), []int{I, H}},
+		{layerName(0, "ffn.shared_experts.w2.weight"), []int{H, I}},
+		{layerName(0, "engram_kv.weight"), []int{cols * dim, (4 + 1) * H}},
+		{layerName(0, "engram_q_norm.weight"), []int{4 * H}},
+		{layerName(0, "engram_k_norm.weight"), []int{4 * H}},
+	}
+	for e := 0; e < cfg.NumExperts; e++ {
+		stem := "ffn.experts." + itoa(e)
+		tensors = append(tensors,
+			ts{layerName(0, stem+".w1.weight"), []int{I, H}},
+			ts{layerName(0, stem+".w3.weight"), []int{I, H}},
+			ts{layerName(0, stem+".w2.weight"), []int{H, I}},
+		)
+	}
+
+	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
+		switch {
+		case name == "model.norm.weight" || hasSuffix(name, "attn_norm.weight") ||
+			hasSuffix(name, "ffn_norm.weight") || hasSuffix(name, "attn.wq_a_norm.weight") ||
+			hasSuffix(name, "attn.kv_norm.weight"):
+			return 1.0
+		case hasSuffix(name, "mhc.scale"):
+			return 1.0
+		case hasSuffix(name, "mhc.base"):
+			return 0.0
+		case hasSuffix(name, "attn.sink"):
+			return 0.25 * next()
+		default:
+			return synthMatmulFill(name, next)
+		}
+	})
+	m := &Model{Cfg: cfg, manifest: man, raw: raw}
+
+	layout := v41EngramTestLayout(cfg)
+	src := &v41EngramMemorySource{
+		packed: v41EngramTestPackedRows(int(layout.Rows[0])),
+		rows:   int(layout.Rows[0]),
+	}
+	if err := m.wireV41Engram(layout, []V41EngramRowSource{src}, int64(V41EngramPackedRowBytes)*4); err != nil {
+		t.Fatalf("wire rectangular Engram stage: %v", err)
+	}
+	return m, layout
+}
+
+// v41OracleRectangularEngramUpdates independently transcribes the rectangular
+// Engram schedule WITHOUT calling v41EngramInject: hash -> gather -> dequant ->
+// project -> per-stream gate -> single-stream write-back. It mirrors
+// v41OracleFullEngramUpdates but takes dim (EngramHeadDim) independently of H, so
+// it is an independent oracle for D != H. Returns expected values as
+// [position][stream][dim-hidden].
+func v41OracleRectangularEngramUpdates(t *testing.T, m *Model, layout V41EngramLayout, l int, streams [][][]float32, ids []int, eps float32) [][][]float32 {
+	t.Helper()
+	cfg := m.Cfg
+	H := cfg.HiddenSize
+	dim := cfg.DeepSeekV41.EngramHeadDim
+	hc := 4
+	cols := (layout.MaxNgramSize - 1) * layout.HeadsPerNgram
+
+	stage := m.v41EngramStageFor()
+	if stage == nil {
+		t.Fatal("oracle: Engram stage not wired")
+	}
+	hash, err := NewV41EngramHashState(layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allRows, err := hash.Hash(ids, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	layers := len(layout.Rows)
+	cacheIdx := stage.cacheIndex(l)
+	layerRows := make([]uint32, 0, len(ids)*cols)
+	for tt := range ids {
+		base := tt*layers*cols + cacheIdx*cols
+		layerRows = append(layerRows, allRows[base:base+cols]...)
+	}
+	gathered, err := GatherV41EngramRows([]*V41EngramRowCache{stage.caches[cacheIdx]}, layerRows, cols)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wKV := cpuOracleTensor(t, m, layerName(l, "engram_kv.weight"))
+	qNorm := cpuOracleTensor(t, m, layerName(l, "engram_q_norm.weight"))
+	kNorm := cpuOracleTensor(t, m, layerName(l, "engram_k_norm.weight"))
+
+	want := make([][][]float32, len(ids))
+	for tt := range ids {
+		rowVec := make([]float32, cols*dim)
+		for c := 0; c < cols; c++ {
+			copy(rowVec[c*dim:], v41OracleEngramDequant(t, gathered[tt*cols+c], dim))
+		}
+		projected := cpuOracleMatVec(wKV, rowVec, (hc+1)*H, cols*dim)
+		value := make([]float32, H)
+		for i := 0; i < H; i++ {
+			value[i] = v41OracleBF16(projected[hc*H+i])
+		}
+		want[tt] = make([][]float32, hc)
+		for s := 0; s < hc; s++ {
+			h := streams[tt][s]
+			key := make([]float32, H)
+			var h2, k2, dot float64
+			for i := 0; i < H; i++ {
+				key[i] = v41OracleBF16(projected[s*H+i])
+				hh := float64(h[i])
+				kk := float64(key[i])
+				h2 += hh * hh
+				k2 += kk * kk
+				dot += hh * float64(qNorm[s*H+i]) * float64(kNorm[s*H+i]) * kk
+			}
+			dot *= 1 / math.Sqrt(h2/float64(H)+float64(eps))
+			dot *= 1 / math.Sqrt(k2/float64(H)+float64(eps))
+			dot *= 1 / math.Sqrt(float64(H))
+			gate := 1 / (1 + math.Exp(-math.Copysign(math.Sqrt(math.Max(math.Abs(dot), 1e-6)), dot)))
+			row := make([]float32, H)
+			for i := 0; i < H; i++ {
+				row[i] = h[i] + float32(v41OracleBF16(float32(gate)*value[i]))
+			}
+			want[tt][s] = row
+		}
+	}
+	return want
+}
+
+// TestV41EngramRectangularGeometryContract is the rectangular-geometry acceptance
+// witness. It drives the production Engram injector on a D != H fixture and checks
+// every stream against an independent scalar oracle, that x stays synchronized with
+// stream 0, and that malformed geometry (nonpositive/oversized D, nonpositive H,
+// nonpositive columns, an overflowing product) fails closed with
+// ErrV41NativeUnsupported before any stream is mutated. On the pre-fix parent the
+// D != H call is refused outright, so the oracle-match section fails.
+func TestV41EngramRectangularGeometryContract(t *testing.T) {
+	const dim = 32 // EngramHeadDim; deliberately != HiddenSize (64)
+	m, layout := v41RectangularEngramModel(t, dim)
+	cfg := m.Cfg
+	H := cfg.HiddenSize
+	hc := 4
+	eps := float32(cfg.RMSNormEps)
+	ids := []int{1, 3, 5}
+
+	if cfg.DeepSeekV41.EngramHeadDim == H {
+		t.Fatalf("fixture is not rectangular: EngramHeadDim=%d == HiddenSize=%d", dim, H)
+	}
+
+	x, streams := v41FullEngramAsymmetricStreams(ids, H)
+	before := make([][][]float32, len(streams))
+	for tt := range streams {
+		before[tt] = make([][]float32, hc)
+		for s := 0; s < hc; s++ {
+			before[tt][s] = append([]float32(nil), streams[tt][s]...)
+		}
+	}
+
+	want := v41OracleRectangularEngramUpdates(t, m, layout, 0, streams, ids, eps)
+
+	if err := m.v41EngramInject(0, x, streams, true, ids, eps); err != nil {
+		t.Fatalf("v41EngramInject(rectangular D=%d H=%d) error = %v, want nil", dim, H, err)
+	}
+
+	// (1) Every stream row matches the independent rectangular oracle.
+	for tt := range ids {
+		for s := 0; s < hc; s++ {
+			for i := 0; i < H; i++ {
+				if d := math.Abs(float64(streams[tt][s][i] - want[tt][s][i])); d > cpuOracleTol {
+					t.Fatalf("rect streams[%d][%d][%d] = %v, want %v (|delta| = %.3e > tol %.0e)",
+						tt, s, i, streams[tt][s][i], want[tt][s][i], d, cpuOracleTol)
+				}
+			}
+		}
+	}
+
+	// (2) x[t] stays synchronized with stream 0 after the call.
+	for tt := range ids {
+		for i := 0; i < H; i++ {
+			if x[tt][i] != streams[tt][0][i] {
+				t.Fatalf("x[%d][%d] = %v, want stream 0 value %v", tt, i, x[tt][i], streams[tt][0][i])
+			}
+		}
+	}
+
+	// (3) Non-vacuity: streams 1..3 each moved from their pre-call values.
+	for tt := range ids {
+		for s := 1; s < hc; s++ {
+			moved := false
+			for i := 0; i < H; i++ {
+				if streams[tt][s][i] != before[tt][s][i] {
+					moved = true
+					break
+				}
+			}
+			if !moved {
+				t.Fatalf("rect streams[%d][%d] is unchanged after injection; stream %d ignored", tt, s, s)
+			}
+		}
+	}
+
+	// (4) Invalid geometry fails closed before any mutation.
+	cases := []struct {
+		name   string
+		mutate func(*Model)
+	}{
+		{"nonpositive_dim", func(bad *Model) { bad.v41EngramStageFor().headDim = 0 }},
+		{"oversized_dim", func(bad *Model) { bad.v41EngramStageFor().headDim = 257 }},
+		{"nonpositive_hidden", func(bad *Model) { bad.Cfg.HiddenSize = 0 }},
+		{"nonpositive_columns", func(bad *Model) { bad.v41EngramStageFor().columns = 0 }},
+		{"overflowing_product", func(bad *Model) { bad.v41EngramStageFor().columns = math.MaxInt / 2 }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bad, _ := v41RectangularEngramModel(t, dim)
+			tc.mutate(bad)
+			bx, bstreams := v41FullEngramAsymmetricStreams(ids, H)
+			snapshot := make([][][]float32, len(bstreams))
+			for tt := range bstreams {
+				snapshot[tt] = make([][]float32, hc)
+				for s := 0; s < hc; s++ {
+					snapshot[tt][s] = append([]float32(nil), bstreams[tt][s]...)
+				}
+			}
+			err := bad.v41EngramInject(0, bx, bstreams, true, ids, eps)
+			if !errors.Is(err, ErrV41NativeUnsupported) {
+				t.Fatalf("%s: v41EngramInject error = %v, want ErrV41NativeUnsupported", tc.name, err)
+			}
+			for tt := range bstreams {
+				for s := 0; s < hc; s++ {
+					for i := 0; i < H; i++ {
+						if bstreams[tt][s][i] != snapshot[tt][s][i] {
+							t.Fatalf("%s: stream[%d][%d][%d] mutated on a refused call", tc.name, tt, s, i)
+						}
+					}
+				}
+			}
+		})
+	}
+}

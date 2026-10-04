@@ -33,6 +33,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
+	"github.com/anthony-chaudhary/fak/internal/enginestep"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
@@ -2831,6 +2832,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			panic(r)
 		}
 	}()
+	defer enginestep.Default.RequestStart()()
 	if p.qwenQ4KPrefillChunkTarget() && p.qwenQ4KPrefillChunkConfigErr != nil {
 		return nil, p.qwenQ4KPrefillChunkConfigErr
 	}
@@ -2954,7 +2956,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		// serialized critical section. Both calls are nil-safe no-ops unless a
 		// caller opted into a concurrency profile.
 		phase := p.concurrencyProfile.admit()
+		deviceWait := time.Now()
 		p.devMu.Lock()
+		enginestep.Default.ObservePhase(enginestep.PhaseDeviceWait, time.Since(deviceWait))
 		p.concurrencyProfile.forwardEnter(phase, true)
 		defer func() {
 			p.concurrencyProfile.forwardExit(phase)
