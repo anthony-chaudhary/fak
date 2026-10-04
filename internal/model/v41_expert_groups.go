@@ -216,7 +216,7 @@ func (m *Model) v41ContractRoutedGrouped(l int, x [][]float32, perTokenPicks [][
 			// nil state) therefore keeps the pre-#13511 grouped path byte-for-byte.
 			if !tripleReady {
 				var err error
-				w1, w3, w2, err = m.v41ExpertTripleInto(l, stem, scratch)
+				w1, w3, w2, err = m.v41ExpertTripleInto(l, stem, scratch, false)
 				if err != nil {
 					return err
 				}

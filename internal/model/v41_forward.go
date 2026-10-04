@@ -1658,7 +1658,23 @@ func expertWeightF32Into(w expertWeight, dst []float32) ([]float32, error) {
 // (v41ExpertF32Into). Every read the contraction issues is therefore accounted
 // for as either a tier fault or a residency hit, and the phase's
 // ResidentHitFraction reflects the #13296 cache's real contribution.
-func (m *Model) v41ExpertTripleInto(l int, stem string, scratch *v41ProjScratch) (w1, w3, w2 []float32, err error) {
+//
+// retain decides whether the materialized triple is COPIED back into the
+// layer-scoped cache. It exists because retention is load-bearing only on the
+// TOKEN-MAJOR stream, where a repeated expert across the token dimension is
+// re-read and the cache serves it. The EXPERT-MAJOR grouped contraction (#13304,
+// v41ContractRoutedGrouped) materializes each expert's triple exactly ONCE for
+// the whole panel and never re-reads it -- the already-landed #13294 witness
+// (v41_prefill_expert_union_test.go) states the layer cache "records zero hits on
+// this path" -- so retaining a triple there is a dead f32 copy of the entire
+// activated working set on the prefill first-token path. A grouped caller passes
+// retain=false. The read side is unchanged: a cache GET still happens either way
+// and still notes its ResidentHit, so the decode/step callers (retain=true) keep
+// the historical byte-for-byte behavior. A false retain is fail-SAFE: if a future
+// caller ever re-read the same expert within one layer, the miss path re-resolves
+// the identical bytes (v41ExpertF32Into), so the only consequence is a missed
+// optimization, never a wrong value.
+func (m *Model) v41ExpertTripleInto(l int, stem string, scratch *v41ProjScratch, retain bool) (w1, w3, w2 []float32, err error) {
 	leaves := [3]string{".w1.weight", ".w3.weight", ".w2.weight"}
 	for i, leaf := range leaves {
 		name := layerName(l, stem+leaf)
@@ -1710,7 +1726,13 @@ func (m *Model) v41ExpertTripleInto(l int, stem string, scratch *v41ProjScratch)
 	// token that routes this expert is a RAM hit. Copies are required because the
 	// scratch exp1/exp3/exp2 buffers are reused for the NEXT expert; the caller's
 	// w1/w3/w2 keep pointing at the live scratch, never at the retained copies.
-	m.v41CacheExpertTriple(l, stem, scratch, w1, w3, w2)
+	// The expert-major grouped caller passes retain=false: it materializes each
+	// expert once and never re-reads it, so the copy would be dead (see the
+	// function doc comment).
+	if retain {
+		m.v41CacheExpertTriple(l, stem, scratch, w1, w3, w2)
+		v41NoteExpertTripleRetention()
+	}
 	return w1, w3, w2, nil
 }
 
@@ -2621,7 +2643,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 						continue
 					}
 				}
-				w1, w3, w2, err := m.v41ExpertTripleInto(l, stem, scratch)
+				w1, w3, w2, err := m.v41ExpertTripleInto(l, stem, scratch, true)
 				if err != nil {
 					return err
 				}
@@ -2733,6 +2755,37 @@ func enableV41SwiGLUWitness() {
 // v41SwiGLUDispatches reports how many large routed-expert contractions ran on the
 // row-parallel kernel since enableV41SwiGLUWitness.
 func v41SwiGLUDispatches() int64 { return atomic.LoadInt64(&v41SwiGLUParallelCalls) }
+
+// v41ExpertTripleRetentions counts how many expert triples v41ExpertTripleInto
+// copied back into the layer-scoped cache while the test-only retention witness is
+// enabled. Production pays zero: the counter is touched only when
+// v41RetentionWitnessOn is true, mirroring the v41SwiGLUWitnessOn idiom above.
+// The grouped expert-major prefill (#13304) must retain ZERO triples (it re-reads
+// none), while the token-major stream retains one per distinct materialization --
+// which is why the witness distinguishes the two arms (fak#13697).
+var (
+	v41ExpertTripleRetentions int64
+	v41RetentionWitnessOn     bool
+)
+
+// enableV41RetentionWitness turns the triple-retention witness ON for a test and
+// zeroes the counter. Production never calls it.
+func enableV41RetentionWitness() {
+	v41RetentionWitnessOn = true
+	atomic.StoreInt64(&v41ExpertTripleRetentions, 0)
+}
+
+// v41Retentions reports how many expert triples were copied into the layer cache
+// since enableV41RetentionWitness.
+func v41Retentions() int64 { return atomic.LoadInt64(&v41ExpertTripleRetentions) }
+
+// v41NoteExpertTripleRetention records one triple retention under the test-only
+// witness. Inert in production.
+func v41NoteExpertTripleRetention() {
+	if v41RetentionWitnessOn {
+		atomic.AddInt64(&v41ExpertTripleRetentions, 1)
+	}
+}
 
 // v41SwiGLU is the V4.1 routed-expert contraction: down(silu(clamp(w1 x)) *
 // clamp(w3 x)). It is the package-level serial form, and it stays the reference

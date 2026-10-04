@@ -340,7 +340,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	routed := make([]float32, H)
 	for _, pick := range picks {
 		stem := "ffn.experts." + itoa(pick.expert)
-		w1, w3, w2, err := m.v41ExpertTripleInto(l, stem, scratch)
+		w1, w3, w2, err := m.v41ExpertTripleInto(l, stem, scratch, true)
 		if err != nil {
 			return err
 		}
@@ -705,7 +705,7 @@ func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, 
 	routed := make([]float32, H)
 	for _, pick := range picks {
 		stem := "ffn.experts." + itoa(pick.expert)
-		w1, w3, w2, err := m.v41ExpertTripleInto(l, stem, scratch)
+		w1, w3, w2, err := m.v41ExpertTripleInto(l, stem, scratch, true)
 		if err != nil {
 			return err
 		}
