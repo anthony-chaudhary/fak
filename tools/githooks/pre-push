@@ -46,6 +46,17 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 # Capture Git's standard update rows before any child can consume stdin. Build
 # evidence below is bound to each immutable local SHA actually being pushed.
 push_updates="$(cat)"
+# Focused structural admission needs complete, exact Git protocol rows. Refuse
+# malformed input before any child can inspect only a valid prefix of the push.
+if [ "${FLEET_BUILD_GUARD:-block}" = "off" ] && [ "${FLEET_ALLOW_BUILD_BREAK:-0}" != "1" ] && [ -n "$push_updates" ]; then
+	if ! printf '%s\n' "$push_updates" | awk '
+		function oid(s) { return (length(s) == 40 || length(s) == 64) && s !~ /[^0-9a-fA-F]/ }
+		NF != 4 || !oid($2) || !oid($4) || length($2) != length($4) { exit 1 }
+	'; then
+		echo "PREPUSH_UPDATE_INVALID (blocked): expected exact old/new object update rows." >&2
+		exit 1
+	fi
+fi
 pushed_tips="$(printf '%s\n' "$push_updates" | awk 'NF >= 4 && $2 !~ /^0+$/ { print $2 }' | sort -u)"
 
 # Only gate pushes of the trunk itself; a topic branch / tag push is not the shared
@@ -69,6 +80,16 @@ fi
 
 if [ "$trunk_push" -ne 1 ]; then
 	exit 0
+fi
+
+# Require the native verifier before unrelated rungs can choose a go-run
+# fallback. Deletion-only updates have no pushed content to verify.
+if [ "${FLEET_BUILD_GUARD:-block}" = "off" ] && [ "${FLEET_ALLOW_BUILD_BREAK:-0}" != "1" ] &&
+	{ [ -n "$pushed_tips" ] || [ -z "$push_updates" ]; }; then
+	if ! command -v fak >/dev/null 2>&1; then
+		echo "PREPUSH_STRUCTURE (blocked): native fak is required for compilation-off admission." >&2
+		exit 1
+	fi
 fi
 
 # GitHub Actions structural gate (#5986). This rung is intentionally independent of
@@ -204,11 +225,44 @@ fi
 # Mode (env FLEET_BUILD_GUARD):  block (default) | warn | off
 #   warn   allow the push, print the build error + how to fix it   (exit 0)  — explicit advisory override
 #   block  refuse the push until the pushed tip compiles           (exit 1)
-#   off    do nothing
+#   off    skip compilation but require immutable import and concept admission
 # Escape:  FLEET_ALLOW_BUILD_BREAK=1 git push   always allows.
 # Default is BLOCK for a positively witnessed red pushed tree. Infrastructure/UNKNOWN failures remain fail-open below.
 # Fail-open by design: if `fak`/`go` is unavailable or the gate could-not-run, the push is allowed.
 build_mode="${FLEET_BUILD_GUARD:-block}"
+
+# Explicit compile-off remains a structural admission path. An unavailable native
+# checker cannot silently remove those checks, and compiling a fallback verifier
+# would defeat the requested mode. Keep each old/new pair, including duplicate
+# tips against different bases; a deletion has no content to inspect.
+if [ "$build_mode" = "off" ] && [ "${FLEET_ALLOW_BUILD_BREAK:-0}" != "1" ]; then
+	focused_updates="$(printf '%s\n' "$push_updates" | awk 'NF == 4 && $2 !~ /^0+$/ { print $4 ":" $2 }')"
+	[ -z "$push_updates" ] && focused_updates=":HEAD" # manual invocation only
+	for focused_update in $focused_updates; do
+		focused_base="${focused_update%%:*}"
+		focused_tip="${focused_update#*:}"
+		if ! command -v fak >/dev/null 2>&1; then
+			echo "PREPUSH_STRUCTURE (blocked): native fak is required for compilation-off admission." >&2
+			exit 1
+		fi
+		iw_out="$(fak hooks import-witness --root "$root" --rev "$focused_tip" 2>&1)"
+		iw_status=$?
+		if [ "$iw_status" -ne 0 ]; then
+			echo "$iw_out" >&2
+			echo "PREPUSH_STRUCTURE (blocked): exact-tip import witness refused or could not run." >&2
+			exit 1
+		fi
+		set -- --root "$root" --tip "$focused_tip" --skip-build
+		[ -n "$focused_base" ] && set -- "$@" --base "$focused_base"
+		focused_out="$(fak hooks pre-push "$@" 2>&1)"
+		focused_status=$?
+		echo "$focused_out" >&2
+		if [ "$focused_status" -ne 0 ]; then
+			echo "PREPUSH_STRUCTURE (blocked): immutable-range admission refused or could not run." >&2
+			exit 1
+		fi
+	done
+fi
 
 # Import-witness pre-rung (#1325)  --  reason: IMPORT_OF_UNCOMMITTED_PACKAGE
 #

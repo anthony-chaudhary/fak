@@ -11,8 +11,10 @@ package tokencache
 //	B cold — BuildTreeIndex through an empty cache (every distinct file a miss + Put).
 //	B warm — BuildTreeIndex through the warmed cache (the cross-invocation case).
 //
-// The DETERMINISTIC facts gate the test: the warm run must hit on every file (net-true
-// hit-rate 100%) and its index must be byte-identical to the uncached one. The cache is
+// The DETERMINISTIC facts gate the test: within an explicit finite full-working-set
+// fixture budget, the warm run must hit on every file (hit-rate 100%) and its index
+// must be byte-identical to the uncached one. This does not assume the production
+// defaults retain the whole tree; measured byte and entry fit is reported separately. The cache is
 // content-addressed, so byte-identical tracked files share one entry: in the cold run
 // only those duplicates may hit, and the cache holds one entry per distinct content. The
 // WALL-CLOCK numbers are logged as the provenance-labeled witness (WITNESSED — fak
@@ -42,6 +44,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -53,6 +56,10 @@ import (
 // dogfoodMinFiles keeps the witness honest: a tree far smaller than the real (16k+)
 // tracked files (a sparse or foreign checkout) measures nothing worth citing.
 const dogfoodMinFiles = 1000
+
+// dogfoodMaxBytes gives the full-resident fixture a finite envelope. If the actual
+// serialized working set outgrows it, the residency assertions must fail visibly.
+const dogfoodMaxBytes int64 = 8 << 30
 
 // countingWindowCache wraps a WindowCache and counts gets/hits/puts, so the hit rate
 // is measured at the seam BuildTreeIndex actually consults — not inferred.
@@ -75,6 +82,12 @@ func (c *countingWindowCache) Get(src string) ([]string, [][2]int, bool) {
 func (c *countingWindowCache) Put(src string, keys []string, spans [][2]int) {
 	c.puts++
 	c.inner.Put(src, keys, spans)
+}
+
+func (c *countingWindowCache) Maintain() {
+	if maintainer, ok := c.inner.(interface{ Maintain() }); ok {
+		maintainer.Maintain()
+	}
 }
 
 // TestDogfoodRealTreeNetTrue is the #5137 witness: real tree, cold vs warm, hit rate
@@ -106,13 +119,19 @@ func TestDogfoodRealTreeNetTrue(t *testing.T) {
 	// cold run the first copy misses and Puts and every later copy hits that entry.
 	distinct := len(contents)
 	duplicates := len(tree) - distinct
+	// Full residency is the cache-effectiveness condition being measured, not a
+	// promise of the smaller production defaults. Keep Put and final retention
+	// active under finite test-only ceilings; measure serialized fit after cold.
+	t.Setenv(MaxBytesEnv, strconv.FormatInt(dogfoodMaxBytes, 10))
+	t.Setenv(MaxEntriesEnv, strconv.Itoa(distinct))
 
 	// Bound peak RSS: a real-tree index is several GB, and the default GOGC=100 lets the
 	// heap reach twice the live set. The deterministic assertions do not depend on it.
 	defer debug.SetGCPercent(debug.SetGCPercent(dogfoodGCPercent))
 
 	// Cache dir: a fresh temp dir, so cold really is cold and no peer's shared entries
-	// (nor the prune budget) can contaminate either arm. Placement under the real
+	// can contaminate either arm. Retention uses the explicit fixture envelope above.
+	// Placement under the real
 	// git-common-dir is already gate-tested; its cost is measured separately below.
 	cacheDir := t.TempDir()
 	version := clonescan.TokenizerVersion()
@@ -140,11 +159,16 @@ func TestDogfoodRealTreeNetTrue(t *testing.T) {
 		coldDur = time.Since(start)
 	}
 	runtime.GC()
+	entries, cacheBytes := dirEntriesAndBytes(t, cacheDir)
+	t.Logf("cold serialized cache: %d entries / %d bytes; fixture ceilings %d entries / %d bytes", entries, cacheBytes, distinct, dogfoodMaxBytes)
+	if entries != distinct || cacheBytes > dogfoodMaxBytes {
+		t.Fatalf("cold cache holds %d entries / %d bytes, want all %d distinct contents within %d bytes", entries, cacheBytes, distinct, dogfoodMaxBytes)
+	}
 	if cold.gets != len(tree) {
 		t.Fatalf("cold run consulted the cache %d times, want once per file (%d)", cold.gets, len(tree))
 	}
 	if cold.hits != duplicates {
-		t.Fatalf("cold run had %d hits in a fresh cache dir, want %d (only byte-identical duplicates of an earlier file may hit)", cold.hits, duplicates)
+		t.Fatalf("cold run had %d hits in a fresh cache dir, want %d (only byte-identical duplicates of an earlier file may hit); retained %d entries / %d bytes within fixture ceilings %d / %d", cold.hits, duplicates, entries, cacheBytes, distinct, dogfoodMaxBytes)
 	}
 	if cold.puts != distinct {
 		t.Fatalf("cold run put %d entries, want one per distinct file content (%d)", cold.puts, distinct)
@@ -178,7 +202,7 @@ func TestDogfoodRealTreeNetTrue(t *testing.T) {
 	resolveStart := time.Now()
 	_, resolvedOK := commonDir(root)
 	resolveDur := time.Since(resolveStart)
-	entries, cacheBytes := dirEntriesAndBytes(t, cacheDir)
+	entries, cacheBytes = dirEntriesAndBytes(t, cacheDir)
 	if entries != distinct {
 		t.Fatalf("cache dir holds %d entries, want one per distinct file content (%d)", entries, distinct)
 	}
@@ -195,7 +219,8 @@ func TestDogfoodRealTreeNetTrue(t *testing.T) {
 	t.Logf("  B  cold       %v (put overhead %+v)", coldDur, coldDur-uncachedDur)
 	t.Logf("  B  warm       %v (speedup %.2fx, hit rate %.1f%% [%d/%d])", warmDur, speedup, hitRate, warm.hits, warm.gets)
 	t.Logf("  costs: git-common-dir resolve %v (ok=%v), cache disk %d entries / %.1f MB read per warm run", resolveDur, resolvedOK, entries, float64(cacheBytes)/(1<<20))
-	t.Logf("  budget fit: tree needs %.1f MB vs default budget %.1f MB (fits=%v; over-budget means the Open-time prune evicts the working set)", float64(cacheBytes)/(1<<20), float64(defaultMaxBytes)/(1<<20), cacheBytes <= defaultMaxBytes)
+	t.Logf("  fixture budget: %d entries / %.1f MiB; measured full working set %d entries / %.1f MiB", distinct, float64(dogfoodMaxBytes)/(1<<20), entries, float64(cacheBytes)/(1<<20))
+	t.Logf("  production-default fit: bytes=%v (%.1f MiB budget), entries=%v (%d budget); an over-budget working set may be evicted during Put, Open, or final maintenance", cacheBytes <= defaultMaxBytes, float64(defaultMaxBytes)/(1<<20), entries <= defaultMaxEntries, defaultMaxEntries)
 	t.Logf("  verdict: %s (warm+resolve %v vs uncached %v)", verdict, warmTotal, uncachedDur)
 }
 

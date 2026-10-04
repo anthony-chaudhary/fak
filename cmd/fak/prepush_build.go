@@ -676,6 +676,7 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 	tip := fs.String("tip", "", "exact local object SHA supplied by pre-push stdin (default: HEAD for manual invocation)")
 	budget := fs.Duration("budget", 60*time.Second, "report GATE_LATENCY_REGRESSION if the build exceeds this (still exits 0 when green)")
 	report := fs.String("report", "", "write the JSON result to this path in addition to stdout")
+	skipBuild := fs.Bool("skip-build", false, "run immutable-range concept admission without compilation, build receipts or the live test-quality advisory")
 	advisory := fs.Bool("advisory", false, "advisory mode (FLEET_BUILD_GUARD=warn): single-flight the build — skip with SKIPPED_CONTENDED when a peer build is already running on this host, rather than run a redundant concurrent full build (skip == push allowed)")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -704,8 +705,17 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 	res.Ref, err = prepushRevParse(r, tipRef)
 	if err != nil || res.Ref == "" {
 		res.Detail = fmt.Sprintf("cannot resolve pushed tip %s: %v", tipRef, err)
+	} else if *skipBuild && (len(baseRef) == 40 || len(baseRef) == 64) && strings.Trim(baseRef, "0") == "" {
+		// Git's explicit zero old object means a genuinely new ref. Preserve
+		// that provenance for the range reader; never substitute another ref.
+		res.BaseSha = baseRef
+		res.OK, res.Verdict, code = true, "SKIPPED_EXPLICIT", 0
 	} else if res.BaseSha, err = prepushRevParse(r, baseRef); err != nil || res.BaseSha == "" {
 		res.Detail = fmt.Sprintf("cannot resolve pushed base %s: %v", baseRef, err)
+	} else if *skipBuild {
+		// Keep this before environment probes, receipt lookup and build claims:
+		// focused admission neither consumes nor produces build evidence.
+		res.OK, res.Verdict, code = true, "SKIPPED_EXPLICIT", 0
 	} else {
 		resolvedTip, resolvedBase := res.Ref, res.BaseSha
 		environment = prepushBuildEnvironment(r, resolvedTip)
@@ -778,18 +788,22 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 	}
 	// Test-quality is advisory at the push seam: the baseline absorbs existing debt,
 	// and only growth is surfaced. Never turn scanner failure into an unrelated refusal.
-	tqCode := prepushTestQuality(io.Discard, stderr, []string{"--root", r})
 	res.TestQualityScope = "live-working-tree-advisory"
-	switch tqCode {
-	case 0:
-		res.TestQuality = "PASSED"
-	case 1:
-		res.TestQuality = "FINDINGS"
-	default:
-		res.TestQuality = "COULD_NOT_RUN"
-	}
-	if tqCode != 0 {
-		fmt.Fprintln(stderr, "fak hooks pre-push: WARNING: test-quality ratchet reported growth or could not run (advisory)")
+	if *skipBuild {
+		res.TestQuality = "SKIPPED_EXPLICIT"
+	} else {
+		tqCode := prepushTestQuality(io.Discard, stderr, []string{"--root", r})
+		switch tqCode {
+		case 0:
+			res.TestQuality = "PASSED"
+		case 1:
+			res.TestQuality = "FINDINGS"
+		default:
+			res.TestQuality = "COULD_NOT_RUN"
+		}
+		if tqCode != 0 {
+			fmt.Fprintln(stderr, "fak hooks pre-push: WARNING: test-quality ratchet reported growth or could not run (advisory)")
+		}
 	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
@@ -807,7 +821,7 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak hooks pre-push: write report: %v\n", err)
 		}
 	}
-	if code == 0 && reusablePrepushBuild(buildResult) && environment != "" && environment == prepushBuildEnvironment(r, res.Ref) {
+	if !*skipBuild && code == 0 && reusablePrepushBuild(buildResult) && environment != "" && environment == prepushBuildEnvironment(r, res.Ref) {
 		now := prepushNow()
 		if !res.BuildReused {
 			recordPrepushBuild(r, environment, buildResult, now)
@@ -1290,6 +1304,8 @@ func renderPrePushBuild(w io.Writer, res trunkBuildResult) {
 	case "GATE_LATENCY_REGRESSION":
 		fmt.Fprintf(w, "trunk-build-gate OK (slow) — pushed tip %s builds but took %dms over budget (%d package(s))\n",
 			short(res.Ref), res.ElapsedMS, len(res.SelectedPackages))
+	case "SKIPPED_EXPLICIT":
+		fmt.Fprintln(w, "trunk-build-gate: SKIPPED_EXPLICIT — compilation and build evidence explicitly omitted")
 	case "SKIPPED_CONTENDED":
 		fmt.Fprintln(w, "trunk-build-gate: SKIPPED_CONTENDED — a peer build is already running on this host; redundant advisory build skipped (push allowed)")
 	case "COULD_NOT_RUN":
