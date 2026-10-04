@@ -3,6 +3,8 @@ package model
 import (
 	"fmt"
 	"math"
+
+	"github.com/anthony-chaudhary/fak/internal/model/ffn"
 )
 
 const (
@@ -153,8 +155,11 @@ func v41SharedExpertAdd(routed, shared []float32, cfg v41RouterConfig) ([]float3
 		}
 	}
 	out := make([]float32, len(routed))
-	for i := range routed {
-		out[i] = routed[i] + shared[i]
+	copy(out, routed)
+	if err := ffn.AddScaled(out, shared, 1); err != nil {
+		return nil, &v4RouteError{Field: "shared_add", Reason: err.Error()}
+	}
+	for i := range out {
 		if !finite32(out[i]) {
 			return nil, &v4RouteError{Field: "shared_add", Reason: fmt.Sprintf("non-finite result at %d", i)}
 		}

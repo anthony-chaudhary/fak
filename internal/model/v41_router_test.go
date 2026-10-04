@@ -384,3 +384,116 @@ func TestV41RouterInvalidInputsFailExplicitly(t *testing.T) {
 		v41WantClosed(t, err, "sum <= 0")
 	})
 }
+
+// v41OracleSharedAdd independently performs the routed-plus-shared combine the
+// wrapper advertises: out[i] = routed[i] + shared[i] in increasing index order,
+// written from scratch here so the expected bits do not depend on ffn.AddScaled.
+func v41OracleSharedAdd(routed, shared []float32) []float32 {
+	out := make([]float32, len(routed))
+	for i := range routed {
+		out[i] = routed[i] + shared[i]
+	}
+	return out
+}
+
+// TestV41SharedExpertAddScaledParity pins bit-for-bit equality between the
+// migrated wrapper (which delegates its accumulation to ffn.AddScaled) and an
+// independent original-arithmetic oracle, plus the signed-zero, single-output-
+// allocation, input-ownership and error-order invariants the migration must
+// preserve. It exercises the real v41SharedExpertAdd adapter its V4.1 forward and
+// live-expert callers use, not a helper in isolation.
+func TestV41SharedExpertAddScaledParity(t *testing.T) {
+	cfg := v41TestCfg()
+
+	t.Run("bits match original loop", func(t *testing.T) {
+		routed := []float32{1.5, -2.25, 0.125, 3.0e30, -1e-30, 0, -0, 42, -7.75, 1e-45}
+		shared := []float32{-0.5, 4.5, -0.125, 3.0e30, 1e-30, -0, 0, -42, -0.25, -1e-45}
+		got, err := v41SharedExpertAdd(routed, shared, cfg)
+		if err != nil {
+			t.Fatalf("shared add: %v", err)
+		}
+		want := v41OracleSharedAdd(routed, shared)
+		if len(got) != len(want) {
+			t.Fatalf("len=%d want=%d", len(got), len(want))
+		}
+		for i := range want {
+			if math.Float32bits(got[i]) != math.Float32bits(want[i]) {
+				t.Fatalf("out[%d] bits=%#08x want=%#08x (got=%v want=%v)",
+					i, math.Float32bits(got[i]), math.Float32bits(want[i]), got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("signed zero preserved", func(t *testing.T) {
+		negZero := float32(math.Copysign(0, -1))
+		posZero := float32(0)
+		got, err := v41SharedExpertAdd([]float32{negZero, posZero}, []float32{negZero, negZero}, cfg)
+		if err != nil {
+			t.Fatalf("shared add: %v", err)
+		}
+		if math.Float32bits(got[0]) != math.Float32bits(negZero) {
+			t.Fatalf("(-0)+(-0) bits=%#08x want=-0=%#08x", math.Float32bits(got[0]), math.Float32bits(negZero))
+		}
+		if math.Float32bits(got[1]) != math.Float32bits(posZero) {
+			t.Fatalf("(+0)+(-0) bits=%#08x want=+0=%#08x", math.Float32bits(got[1]), math.Float32bits(posZero))
+		}
+	})
+
+	t.Run("inputs unchanged and one fresh allocation", func(t *testing.T) {
+		routed := []float32{1, 2, 3, 4, 5, 6, 7, 8}
+		shared := []float32{8, 7, 6, 5, 4, 3, 2, 1}
+		routedCopy := append([]float32(nil), routed...)
+		sharedCopy := append([]float32(nil), shared...)
+		got, err := v41SharedExpertAdd(routed, shared, cfg)
+		if err != nil {
+			t.Fatalf("shared add: %v", err)
+		}
+		for i := range routed {
+			if math.Float32bits(routed[i]) != math.Float32bits(routedCopy[i]) {
+				t.Fatalf("routed mutated at %d: %v want %v", i, routed[i], routedCopy[i])
+			}
+			if math.Float32bits(shared[i]) != math.Float32bits(sharedCopy[i]) {
+				t.Fatalf("shared mutated at %d: %v want %v", i, shared[i], sharedCopy[i])
+			}
+		}
+		// A fresh backing array: mutating the output must not alias an input.
+		got[0] = -12345
+		if routed[0] != routedCopy[0] || shared[0] != sharedCopy[0] {
+			t.Fatal("output aliases an input operand")
+		}
+
+		allocs := testing.AllocsPerRun(50, func() {
+			_, _ = v41SharedExpertAdd(routed, shared, cfg)
+		})
+		if allocs != 1 {
+			t.Fatalf("shared add allocations=%v want 1", allocs)
+		}
+	})
+
+	t.Run("error order and first non-finite result", func(t *testing.T) {
+		nan := float32(math.NaN())
+		inf := float32(math.Inf(1))
+
+		// Input validation runs before any accumulation: routed is checked at
+		// each index before shared, so a NaN in routed wins at the same index.
+		_, err := v41SharedExpertAdd([]float32{nan, 1}, []float32{inf, 1}, cfg)
+		var typed *v4RouteError
+		if !errors.As(err, &typed) {
+			t.Fatalf("err=%T %v want *v4RouteError", err, err)
+		}
+		if typed.Field != "routed" || typed.Reason != "non-finite value at 0" {
+			t.Fatalf("field=%q reason=%q want routed at 0", typed.Field, typed.Reason)
+		}
+
+		// First non-finite *result* is reported in increasing index order by the
+		// post-accumulation scan, after ffn.AddScaled has run.
+		big := float32(math.MaxFloat32)
+		_, err = v41SharedExpertAdd([]float32{1, big, 1}, []float32{1, big, 1}, cfg)
+		if !errors.As(err, &typed) {
+			t.Fatalf("err=%T %v want *v4RouteError", err, err)
+		}
+		if typed.Field != "shared_add" || typed.Reason != "non-finite result at 1" {
+			t.Fatalf("field=%q reason=%q want shared_add at 1", typed.Field, typed.Reason)
+		}
+	})
+}
