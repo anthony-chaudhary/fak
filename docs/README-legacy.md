@@ -6,7 +6,8 @@ description: "Narrower-audience and deep-dive sections that once lived on fak's 
 # fak — front-page overflow (moved off README.md)
 
 These sections used to live on the front page. They were moved here on
-2026-06-28 (and a second batch on 2026-07-01, when the front page was halved)
+2026-06-28 (a second batch on 2026-07-01, when the front page was halved, and a
+third on 2026-10-03, at the end of this page)
 to keep `README.md` focused on what the lowest-common-denominator reader needs
 first — performance and cost, the no-key demo, and the one-command wrap.
 Nothing here is deprecated; it is narrower-audience or deep-dive material that
@@ -278,6 +279,76 @@ Shipping is continuous but path-scoped. Preview the exact subject and files with
 the gate is green. Each pushed commit should be a self-building snapshot; do not rely on a
 later commit in the same push to repair a broken intermediate. No side branch, no
 `git add -A`, no force-push.
+
+## Batch 3 — moved off the front page on 2026-10-03
+
+The 2026-10-03 refresh halved the front page again (152 → ~80 lines) by moving
+its oldest sections here. They are unchanged in substance; only links were
+re-rooted for this directory.
+
+### Why run coding agents on fak
+
+- **Reuse the work behind each turn:** Compatible prefix/KV caching avoids
+  rebuilding shared instructions and context. The product target is automatic
+  reuse across turns and compatible agents, with correct invalidation and isolation.
+- **Accelerate generation automatically:** Native kernels, memory sizing,
+  quantization, and speculative decoding are parts of one local workflow. The
+  milestone requires qualified defaults; current MTP decoding requires explicit
+  selection. See the [implementation snapshot](local-agent-milestone.md#current-implementation-is-narrower-than-the-milestone).
+- **Real-time multi-agent visibility:** Inspect live cross-agent reuse rates,
+  per-subagent token breakdowns, and savings sparklines in your terminal overlay
+  (`fak info` / `fak guard`) as subagents execute concurrently.
+- **Keep reusable state close to compute:** Device-resident caching and direct GPU
+  storage paths aim to cut paging and copy overhead; GPU residency and physical
+  NVMe-to-GPU DMA are separate claims, qualified in the [claim ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
+- **Run on your own hardware:** Native backends target Apple Silicon (fak-native
+  Metal), AMD and Strix Halo (bundled Vulkan), and NVIDIA
+  (`ghcr.io/anthony-chaudhary/fak:cuda-latest` with `--gpus all`), each with its own
+  support envelope; external engines are explicit references only
+  ([native inference goal](native-inference-goal.md)).
+- **Default-deny capability floor:** Every tool call is verified against a
+  capability floor before execution; subagents get their own narrower floor, and a
+  circuit breaker stops an agent stuck retrying a failing tool. Drop-in wrappers
+  protect existing agents like Claude Code, Codex, OpenCode, and Cursor with zero rewrites.
+
+### Configure agent profiles
+
+Built-in work and output profiles cut token waste and resist unnecessary dependencies:
+
+```bash
+fak agent profiles
+fak guard --output-profile caveman:medium --work-profile ponytail:high -- codex \
+  "Remove the duplicate cache without adding a dependency."
+```
+
+Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium` for
+concise responses. See [work profiles](work-profiles.md),
+[response profiles](response-profiles.md), or the [harness guide](harness-init.md)
+to build a named agent on the runtime.
+
+### Inspect the subagent benchmark
+
+```bash
+fak bench subagent --concurrency=4
+```
+
+Check its engine, regime, and receipt before treating output as hardware evidence;
+it does not replace a real coding-task acceptance witness.
+
+### Commercial serving
+
+We run one repetitive repo workload (test-candidate generation, codebase Q&A, or doc
+maintenance) on a managed, metered inference route and prove it against your baseline
+and acceptance criteria in a fixed-fee two-week pilot before ongoing metered operation.
+Inference quality is [SW-VERIFIED] at raw-compute parity; production readiness is not yet
+claimed. To start, open an issue describing your workload (channel=oss).
+
+### Withdrawn front-page speed line
+
+Until 2026-10-03 the front page led with a Qwen3.8-27B M3 Pro full-run decode rate
+at near-parity with llama.cpp. That credit was retracted on 2026-09-27
+(`RETRACTED_PERFORMANCE_CREDIT`) and is not repeated here; the row and its
+remeasure criteria live in the [Qwen result index](benchmarks/QWEN-PERFORMANCE-INDEX.md).
 
 ---
 
