@@ -33,11 +33,7 @@ func TestBuildCUDAScriptNormalizesCRLFArchitectureManifest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(computeDir, "cuda_arch.txt"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	bashScriptPath := filepath.ToSlash(scriptPath)
-	if runtime.GOOS == "windows" && strings.Contains(strings.ToLower(bash), `\windows\system32\bash.exe`) {
-		volume := filepath.VolumeName(scriptPath)
-		bashScriptPath = "/mnt/" + strings.ToLower(strings.TrimSuffix(volume, ":")) + filepath.ToSlash(strings.TrimPrefix(scriptPath, volume))
-	}
+	bashScriptPath := toPOSIXPath(scriptPath, bash)
 	goBin := filepath.Join(t.TempDir(), "bin")
 	if err := os.MkdirAll(goBin, 0o755); err != nil {
 		t.Fatal(err)
@@ -45,11 +41,7 @@ func TestBuildCUDAScriptNormalizesCRLFArchitectureManifest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(goBin, "go"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	bashGoBin := filepath.ToSlash(goBin)
-	if runtime.GOOS == "windows" && strings.Contains(strings.ToLower(bash), `\windows\system32\bash.exe`) {
-		volume := filepath.VolumeName(goBin)
-		bashGoBin = "/mnt/" + strings.ToLower(strings.TrimSuffix(volume, ":")) + filepath.ToSlash(strings.TrimPrefix(goBin, volume))
-	}
+	bashGoBin := toPOSIXPath(goBin, bash)
 	quotedGoBin := "'" + strings.ReplaceAll(bashGoBin, "'", `'"'"'`) + "'"
 	quotedScriptPath := "'" + strings.ReplaceAll(bashScriptPath, "'", `'"'"'`) + "'"
 	quotedStubPath := "'" + strings.ReplaceAll(strings.TrimSuffix(bashGoBin, "/")+"/go", "'", `'"'"'`) + "'"
@@ -74,6 +66,45 @@ func TestBuildCUDAScriptNormalizesCRLFArchitectureManifest(t *testing.T) {
 	}
 	if !strings.Contains(out, "unsupported CUDA arch 'sm_999'") {
 		t.Fatalf("unknown architecture did not fail at the exact membership check:\n%s", out)
+	}
+}
+
+// toPOSIXPath renders a Windows host path in the form the resolved bash expects.
+// Git-for-Windows (MSYS) bash translates "C:\dir" as "/c/dir" and splits PATH on
+// ':' — a retained "C:/dir" is read as two entries ("C" and "/dir") and every stub
+// lookup inside the script fails with exit 127. WSL bash instead mounts the same
+// path as "/mnt/c/dir". A non-Windows host only needs the slash normalization.
+func toPOSIXPath(path, bash string) string {
+	slash := filepath.ToSlash(path)
+	if runtime.GOOS != "windows" {
+		return slash
+	}
+	volume := filepath.VolumeName(path)
+	if volume == "" {
+		return slash
+	}
+	drive := strings.ToLower(strings.TrimSuffix(volume, ":"))
+	rest := strings.TrimPrefix(slash, volume)
+	if strings.Contains(strings.ToLower(bash), `\windows\system32\bash.exe`) {
+		return "/mnt/" + drive + rest // WSL bash.
+	}
+	return "/" + drive + rest // Git-for-Windows (MSYS) bash.
+}
+
+// TestToPOSIXPathTranslatesWindowsDrive pins the drive-letter translation that
+// makes the stub PATH and script path resolvable under both WSL and Git-for-Windows
+// bash. Git bash MUST get a "C:/dir" -> "/c/dir" form; a retained drive colon makes
+// bash split the PATH at the colon and lose the stub, which is the exit-127 defect.
+func TestToPOSIXPathTranslatesWindowsDrive(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("drive-letter translation is a Windows-host concern")
+	}
+	const winPath = `C:\tmp\bin`
+	if got, want := toPOSIXPath(winPath, `C:\Program Files\Git\bin\bash.exe`), "/c/tmp/bin"; got != want {
+		t.Fatalf("MSYS translation = %q, want %q", got, want)
+	}
+	if got, want := toPOSIXPath(winPath, `C:\Windows\System32\bash.exe`), "/mnt/c/tmp/bin"; got != want {
+		t.Fatalf("WSL translation = %q, want %q", got, want)
 	}
 }
 
