@@ -665,6 +665,27 @@ func (r *StrixValidationReceipt) AllParityEvents() []StrixParityEvent {
 	return events
 }
 
+// creditSubkernel is the only subkernel CreditEligible credits.
+const creditSubkernel = "argmax"
+
+// CreditSubkernelSelectors is the default validation selection: exactly the
+// subkernel set CreditEligible credits, so a run without --subkernels can earn credit.
+var CreditSubkernelSelectors = []string{creditSubkernel}
+
+// ValidationSubkernelSelection resolves a --subkernels argument: empty selects
+// CreditSubkernelSelectors, "all" the broad DefaultCreditableSubkernelSelectors
+// (valid but non-credit), anything else the comma-separated list as given.
+func ValidationSubkernelSelection(arg string) []string {
+	switch arg {
+	case "":
+		return append([]string(nil), CreditSubkernelSelectors...)
+	case "all":
+		return append([]string(nil), DefaultCreditableSubkernelSelectors...)
+	default:
+		return strings.Split(arg, ",")
+	}
+}
+
 // CreditEligible reports whether the receipt qualifies for physical Strix Halo parity credit.
 // Historical v1 receipts and host contracts are non-credit. Current physical validation credit
 // is deliberately narrower than general v2 validity: exactly one argmax subkernel and no ablations.
@@ -680,7 +701,7 @@ func (r *StrixValidationReceipt) CreditEligible() bool {
 	}
 	if r.SelectedCount != 1 || r.ExecutedCount != 1 ||
 		r.SelectedSubkernels != 1 || r.ExecutedSubkernels != 1 ||
-		len(r.Subkernels) != 1 || r.Subkernels[0].Name != "argmax" {
+		len(r.Subkernels) != 1 || r.Subkernels[0].Name != creditSubkernel {
 		return false
 	}
 	if r.SelectedAblations != 0 || r.ExecutedAblations != 0 || len(r.Ablations) != 0 {
