@@ -818,6 +818,10 @@ type Session struct {
 	// the host cache, distinct from a numerically correct host-append fallback.
 	q4kHybridPrefillDevicePanels int
 	q4kHybridPrefillDeviceRows   int
+	// q4kPrefillGEMMLabels is the per-prefill Q4_K GEMM route observation (#13694):
+	// the distinct kernels that served this session's Q4_K prefill projections since
+	// the last ResetQ4KPrefillGEMMObservation (q4k_prefill_gemm_observation.go).
+	q4kPrefillGEMMLabels []string
 	// q4kMLPOutputSlab is the optional, session-local host readback backing for one grouped Q4_K
 	// gate/up prefill result. Generation owns a Session serially, and each layer consumes gate/up
 	// before the next layer overwrites it. It is retained only inside the P<=512, 68 MiB envelope
@@ -1526,6 +1530,7 @@ func (s *Session) Prefill(ids []int) []float32 {
 		if logits, used := s.tryPrefillQwen35HybridQ4K(ids, true); used {
 			return logits
 		}
+		s.observeQ4KPrefillGEMM(Q4KPrefillGEMMTokenLoop)
 		return s.headResident(s.tokenLoopHidden(s.tokenHiddenQ, ids))
 	}
 	if s.GPTQ {
@@ -1628,6 +1633,7 @@ func (s *Session) PrefillNoLogits(ids []int) {
 		if _, used := s.tryPrefillQwen35HybridQ4K(ids, false); used {
 			return
 		}
+		s.observeQ4KPrefillGEMM(Q4KPrefillGEMMTokenLoop)
 		for _, id := range ids {
 			s.tokenHiddenQ(id, s.Cache.Len())
 		}

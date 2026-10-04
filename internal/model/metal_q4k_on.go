@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -119,10 +120,12 @@ func (s *Session) recordMetalFallback(route MetalFallbackRoute) {
 
 func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P int) []float32 {
 	if !s.MetalQ4K || !metalgemm.Available() {
+		s.observeQ4KPrefillGEMM(Q4KPrefillGEMMCPU)
 		return q4kGemm(qt, Xf, P)
 	}
 	Y := make([]float32, P*qt.out)
 	var stall error
+	var identity metalgemm.Q4KGEMMIdentity
 	if !s.M.withMetalQ4K(name, qt, func(w *metalgemm.Q4KWeight) {
 		if P == 1 {
 			s.metalExecution(metalgemm.ExecutionQ4KGEMV, func(observation *metalgemm.ExecutionObservation) {
@@ -131,7 +134,7 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 			return
 		}
 		s.metalExecution(metalgemm.ExecutionQ4KGEMM, func(observation *metalgemm.ExecutionObservation) {
-			_, stall = w.GEMMWithEventsModeErr(Xf, P, Y, observation, metalgemm.Q4KGEMMModeForPrompt(P))
+			identity, stall = w.GEMMWithEventsModeErr(Xf, P, Y, observation, metalgemm.Q4KGEMMModeForPrompt(P))
 		})
 	}) {
 		route := MetalFallbackQ4KGEMMCPU
@@ -142,6 +145,7 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 		if qt.lazy != nil && len(qt.raw) == 0 {
 			panic("model: lazy Q4_K Metal GEMM upload failed: " + name)
 		}
+		s.observeQ4KPrefillGEMM(Q4KPrefillGEMMCPU)
 		return q4kGemm(qt, Xf, P)
 	}
 	if metalgemm.IsMetalCommandBufferStall(stall) {
@@ -152,9 +156,52 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 			route = MetalFallbackQ4KGEMVPanelCPU
 		}
 		s.recordMetalFallback(route)
+		s.observeQ4KPrefillGEMM(Q4KPrefillGEMMCPU)
 		return q4kGemm(qt, Xf, P)
 	}
+	if P == 1 {
+		s.observeQ4KPrefillGEMM(q4kPrefillGEMMLabelGEMV)
+	} else {
+		s.observeQ4KPrefillGEMM(q4kPrefillGEMMIdentityLabel(identity))
+	}
 	return Y
+}
+
+// q4kPrefillGEMMLabelGEMV labels a one-row prefill panel served by the decode GEMV.
+const q4kPrefillGEMMLabelGEMV = "gemv"
+
+// q4kPrefillGEMMExecutionLabel names one typed metalgemm Q4_K GEMM execution for the
+// prefill observation. A newer execution this switch does not list takes metalgemm's own
+// name when the type provides one (fmt.Stringer), else its ordinal — never a known
+// kernel's label.
+func q4kPrefillGEMMExecutionLabel(e metalgemm.Q4KGEMMExecution) string {
+	switch e {
+	case metalgemm.Q4KGEMMNotExecuted:
+		return "not_executed"
+	case metalgemm.Q4KGEMMExecutedScalar:
+		return "scalar"
+	case metalgemm.Q4KGEMMExecutedMM32:
+		return "mm32"
+	case metalgemm.Q4KGEMMExecutedM5CooperativeSMEM:
+		return "m5"
+	}
+	if named, ok := any(e).(fmt.Stringer); ok {
+		if label := named.String(); label != "" && label != "unknown" {
+			return label
+		}
+	}
+	return "exec" + strconv.Itoa(int(e))
+}
+
+// q4kPrefillGEMMIdentityLabel renders the executed kernel, and the requested candidate
+// too when the fail-closed selector fell back (e.g. "scalar(req=mm32)"), so a sweep
+// point never credits a candidate that did not run.
+func q4kPrefillGEMMIdentityLabel(id metalgemm.Q4KGEMMIdentity) string {
+	executed := q4kPrefillGEMMExecutionLabel(id.Executed)
+	if id.Requested == id.Executed || id.Requested == metalgemm.Q4KGEMMNotExecuted {
+		return executed
+	}
+	return executed + "(req=" + q4kPrefillGEMMExecutionLabel(id.Requested) + ")"
 }
 
 // q4kGemmGroupDispatch groups Q4_K projections that share one f32 activation panel Xf[P, in].
@@ -194,6 +241,7 @@ func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]
 	}
 	var grouped [][]float32
 	var stall error
+	var groupIdentity metalgemm.Q4KGEMMIdentity
 	if P == 1 {
 		s.metalExecution(metalgemm.ExecutionQ4KGEMVGroup, func(observation *metalgemm.ExecutionObservation) {
 			grouped, stall = metalgemm.GEMVGroupWithEventsErr(ws, Xf, observation)
@@ -225,7 +273,7 @@ func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]
 					} else {
 						slab = slab[:need]
 					}
-					grouped, _, stall = metalgemm.GEMMGroupIntoWithEventsModeErr(ws, Xf, P, slab, observation, metalgemm.Q4KGEMMModeForPrompt(P))
+					grouped, groupIdentity, stall = metalgemm.GEMMGroupIntoWithEventsModeErr(ws, Xf, P, slab, observation, metalgemm.Q4KGEMMModeForPrompt(P))
 					if grouped != nil {
 						// Do not publish new backing into Session until the synchronous Metal call
 						// has completed and returned its aliases.
@@ -248,7 +296,7 @@ func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]
 			for _, w := range ws {
 				off += P * w.Out
 			}
-			grouped, _, stall = metalgemm.GEMMGroupIntoWithEventsModeErr(ws, Xf, P, make([]float32, off), observation, metalgemm.Q4KGEMMModeForPrompt(P))
+			grouped, groupIdentity, stall = metalgemm.GEMMGroupIntoWithEventsModeErr(ws, Xf, P, make([]float32, off), observation, metalgemm.Q4KGEMMModeForPrompt(P))
 		})
 		if metalgemm.IsMetalCommandBufferStall(stall) {
 			// Same wedged-GPU decline as the decode group above, on the batched prefill GEMM:
@@ -264,6 +312,11 @@ func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]
 		}
 		s.recordMetalFallback(route)
 		return nil
+	}
+	if P == 1 {
+		s.observeQ4KPrefillGEMM(q4kPrefillGEMMLabelGEMV)
+	} else {
+		s.observeQ4KPrefillGEMM(q4kPrefillGEMMIdentityLabel(groupIdentity))
 	}
 	out := make([][]float32, n)
 	for j, i := range pos {

@@ -875,6 +875,11 @@ func (g *ProjectionGraph) add(ptr unsafe.Pointer, out int) (*GraphResult, error)
 // NOT consult the device/version crossover; the production selector
 // (q4kGEMMModeForPrompt) only reaches mode 2 after that pin admits it, so an unwitnessed
 // margin can never be requested here.
+//
+// Q4KGEMMModeSmallPGEMV (fak#13694) routes a 2<=P<=20 graph's Q4_K projections — and its Q6_K
+// projections when the optional q6k_gemv_multiN pipelines exist — through the batched
+// multi-token GEMV. It is likewise refused (false, scalar kept) for a P outside that band or
+// when the Q4_K multi-token pipelines are unavailable.
 func (g *ProjectionGraph) SetQ4KGEMMMode(mode Q4KGEMMMode) bool {
 	if g == nil || g.ptr == nil || g.finished || g.freed || g.encoders != 0 {
 		return false
@@ -885,6 +890,8 @@ func (g *ProjectionGraph) SetQ4KGEMMMode(mode Q4KGEMMMode) bool {
 		m = 0
 	case Q4KGEMMModeM5CooperativeSMEM:
 		m = 2
+	case Q4KGEMMModeSmallPGEMV:
+		m = 3
 	default:
 		return false
 	}
@@ -901,6 +908,8 @@ func (g *ProjectionGraph) Q4KGEMMMode() Q4KGEMMMode {
 	switch intof := int(C.mg_graph_mm_mode(g.ptr)); intof {
 	case 2:
 		return Q4KGEMMModeM5CooperativeSMEM
+	case 3:
+		return Q4KGEMMModeSmallPGEMV
 	default:
 		return Q4KGEMMModeScalar
 	}

@@ -44,7 +44,7 @@ int  mg_q6k_gemv_mode(int wid, const float* x, float* y, int mode, mg_execution_
 int  mg_q4k_set_p1_kernel(int mulmv);
 int  mg_q4k_p1_kernel(void);
 int  mg_q4k_p1_kernel_env_value(const char *v);
-void mg_q6k_gemm(int wid, const float* X, int P, float* Y, mg_execution_event* event);
+int  mg_q6k_gemm(int wid, const float* X, int P, float* Y, int mode, mg_execution_event* event);
 void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, float* y, mg_execution_event* event);
 int  mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int* down_wids, int n, const float* x, float* Ycat, mg_execution_event* event);
 int  mg_q4k_gemm(int wid, const float* X, int P, float* Y, int mm_mode, double* out_gpu_ms, mg_execution_event* event);
@@ -219,7 +219,28 @@ const (
 	Q4KGEMMExecutedScalar
 	Q4KGEMMExecutedMM32
 	Q4KGEMMExecutedM5CooperativeSMEM
+	// Q4KGEMMExecutedSmallPGEMV is the small-prompt (2<=P<=20) batched multi-token GEMV route
+	// (fak#13694): ceil(P/8) evenly split q4k_gemv_multi dispatches that stream each weight row
+	// once per chunk instead of staging a mostly idle 64-token GEMM tile.
+	Q4KGEMMExecutedSmallPGEMV
 )
+
+// String names the executed kernel for logs and receipts.
+func (e Q4KGEMMExecution) String() string {
+	switch e {
+	case Q4KGEMMNotExecuted:
+		return "none"
+	case Q4KGEMMExecutedScalar:
+		return "scalar"
+	case Q4KGEMMExecutedMM32:
+		return "mm32"
+	case Q4KGEMMExecutedM5CooperativeSMEM:
+		return "m5-cooperative-smem"
+	case Q4KGEMMExecutedSmallPGEMV:
+		return "smallp-gemv"
+	}
+	return "unknown"
+}
 
 // Q4KGEMMIdentity binds the candidate selected for this shape to the kernel that actually
 // reached Metal dispatch. Credit MM32 only when both fields are Q4KGEMMExecutedMM32; an
@@ -238,9 +259,38 @@ const (
 	Q4KGEMMModeScalar Q4KGEMMMode = iota
 	Q4KGEMMModeMM32
 	Q4KGEMMModeM5CooperativeSMEM
+	// Q4KGEMMModeSmallPGEMV requests the 2<=P<=20 batched multi-token GEMV route. Outside that
+	// band, or when the multi-token pipelines are unavailable, the scalar kernel executes and the
+	// identity reports executed scalar (fail-closed to the proven kernel, never NotExecuted).
+	Q4KGEMMModeSmallPGEMV
 	Q4KGEMMModeMM32Unavailable              = -1
 	Q4KGEMMModeM5CooperativeSMEMUnavailable = -2
+	// Q4KGEMMModeSmallPGEMVUnavailable is the deterministic witness for the small-P fallback: it
+	// requests the small-P route but the native side treats its pipelines as missing, so the
+	// scalar kernel executes. Production selection never emits it.
+	Q4KGEMMModeSmallPGEMVUnavailable = -3
 )
+
+// String names the requested candidate for logs and receipts.
+func (m Q4KGEMMMode) String() string {
+	switch m {
+	case Q4KGEMMModeScalar:
+		return "scalar"
+	case Q4KGEMMModeMM32:
+		return "mm32"
+	case Q4KGEMMModeM5CooperativeSMEM:
+		return "m5-cooperative-smem"
+	case Q4KGEMMModeSmallPGEMV:
+		return "smallp-gemv"
+	case Q4KGEMMModeMM32Unavailable:
+		return "mm32-unavailable"
+	case Q4KGEMMModeM5CooperativeSMEMUnavailable:
+		return "m5-cooperative-smem-unavailable"
+	case Q4KGEMMModeSmallPGEMVUnavailable:
+		return "smallp-gemv-unavailable"
+	}
+	return "unknown"
+}
 
 var q4kUseMM atomic.Bool
 
@@ -350,6 +400,12 @@ func q4kGEMMModeForPrompt(P int) Q4KGEMMMode {
 	if P >= 64 && q4kUseM5.Load() && q4kM5CrossoverAdmits(P) {
 		return Q4KGEMMModeM5CooperativeSMEM
 	}
+	// Short prompts (2<=P<=20, fak#13694) leave ~90% of the scalar kernel's 64-token tile idle;
+	// the batched multi-token GEMV streams each weight row once per <=8-token chunk instead.
+	// Default ON; FAK_Q4K_SMALLP=0 (or SetGEMMUseSmallP(false)) restores the scalar kernel.
+	if q4kSmallPEligible(P) {
+		return Q4KGEMMModeSmallPGEMV
+	}
 	return Q4KGEMMModeScalar
 }
 
@@ -374,6 +430,10 @@ func q4kGEMMRequestedExecution(P int, mode Q4KGEMMMode) Q4KGEMMExecution {
 	case Q4KGEMMModeMM32, Q4KGEMMModeMM32Unavailable:
 		if P == 32 {
 			return Q4KGEMMExecutedMM32
+		}
+	case Q4KGEMMModeSmallPGEMV, Q4KGEMMModeSmallPGEMVUnavailable:
+		if q4kSmallPPromptInBand(P) {
+			return Q4KGEMMExecutedSmallPGEMV
 		}
 	}
 	return Q4KGEMMExecutedScalar
@@ -400,7 +460,8 @@ func Q4KGEMMRequestedExecution(P int) Q4KGEMMExecution {
 
 // Q4KGEMMModeForPrompt returns the production candidate for a prompt of P tokens under the current
 // process opt-ins AND the live device/version/P-band-pinned crossover. It is the exported selector
-// the model-side graph encode uses: scalar by default, exact-P32 MM32 under FAK_Q4K_MM, and the
+// the model-side graph encode uses: the small-P multi-token GEMV for 2<=P<=20 (default on,
+// FAK_Q4K_SMALLP=0 opts out; fak#13694), scalar otherwise, exact-P32 MM32 under FAK_Q4K_MM, and the
 // wide-tile cooperative-SMEM candidate only for P>=64 when FAK_Q4K_M5 is on AND the pinned
 // crossover admits this device/OS at THIS P (a measured band must cover P; an unmeasured prompt
 // length stays scalar). It creates no Metal work and mutates no state; callers pass the result to
@@ -1124,21 +1185,33 @@ func (w *Q6KWeight) GEMV(x, y []float32) { w.GEMVWithEvents(x, y, nil) }
 // GEMM computes Y[P, Out] = X[P, In] · Wᵀ for a resident Q6_K matrix. It is the prefill twin of
 // the Q6_K GEMV used by the mixed Q4_K/Q6_K fused decode MLP. The kernel keeps the Q6_K bytes on
 // the GPU and only moves the f32 activation panel/result, so q4_k_m dense down_proj no longer falls
-// back to the CPU batched k-quant loop during hybrid Qwen prefill.
+// back to the CPU batched k-quant loop during hybrid Qwen prefill. A 2<=P<=20 prompt takes the
+// small-P multi-token GEMV under the same selector and opt-out as Q4_K (fak#13694).
 func (w *Q6KWeight) GEMMWithEvents(X []float32, P int, Y []float32, observation *ExecutionObservation) {
+	w.GEMMWithEventsMode(X, P, Y, observation, q4kGEMMModeForPrompt(P))
+}
+
+// GEMMWithEventsMode is GEMMWithEvents with an explicit candidate and the executed kernel as the
+// result. Only the small-P modes change the Q6_K kernel: Q4KGEMMModeSmallPGEMV executes the
+// multi-token GEMV for 2<=P<=20 when its optional pipelines exist; every other mode, P, or a
+// missing pipeline (Q4KGEMMModeSmallPGEMVUnavailable is the deterministic witness) executes
+// q6k_gemm, reported as Q4KGEMMExecutedScalar. NotExecuted means no command buffer completed.
+func (w *Q6KWeight) GEMMWithEventsMode(X []float32, P int, Y []float32, observation *ExecutionObservation, mode Q4KGEMMMode) Q4KGEMMExecution {
 	if w == nil {
-		return
+		return Q4KGEMMNotExecuted
 	}
 	q6kRegistryMu.RLock()
 	defer q6kRegistryMu.RUnlock()
 	if !q6kWeightValidLocked(w) || P <= 0 || len(X) < P*w.In || len(Y) < P*w.Out {
-		return
+		return Q4KGEMMNotExecuted
 	}
 	var event C.mg_execution_event
 	q4kExecutionMu.Lock()
-	C.mg_q6k_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P), (*C.float)(unsafe.Pointer(&Y[0])), &event)
+	executed := Q4KGEMMExecution(C.mg_q6k_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P),
+		(*C.float)(unsafe.Pointer(&Y[0])), C.int(mode), &event))
 	q4kExecutionMu.Unlock()
 	recordQ4KEvent(observation, &event)
+	return executed
 }
 
 func (w *Q6KWeight) GEMM(X []float32, P int, Y []float32) { w.GEMMWithEvents(X, P, Y, nil) }

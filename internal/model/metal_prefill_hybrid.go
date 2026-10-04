@@ -799,6 +799,11 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, i
 	// scalar identity). SetQ4KGEMMMode is fail-closed for an ineligible P or unavailable
 	// pipeline, so a false return simply leaves the graph on scalar; it never mutates state.
 	_ = g.SetQ4KGEMMMode(metalgemm.Q4KGEMMModeForPrompt(P))
+	// The graph reports the candidate it will encode for every Q4_K projection (scalar
+	// unless SetQ4KGEMMMode accepted the request), so the prefill observation names the
+	// kernel this panel's projections actually encode (#13694).
+	s.observeQ4KPrefillGEMM(q4kPrefillGEMMExecutionLabel(
+		metalgemm.Q4KGEMMIdentityForMode(P, g.Q4KGEMMMode(), metalgemm.Q4KGEMMNotExecuted).Requested))
 	if b.injectForwardPostSubmitFailure {
 		g.InjectPostSubmitFailureForTest()
 	}

@@ -62,13 +62,39 @@ func q4kQwen35HybridPrefillOK(cfg Config, promptLen int) bool {
 // Reusing the original gate at its threshold preserves every architecture and
 // diagnostic escape-hatch check before any cache or recurrent state is touched.
 func q4kQwen35HybridPrefillAtPositionOK(cfg Config, promptLen, base int) bool {
+	return q4kQwen35HybridPrefillAtPositionOKFor(cfg, promptLen, base, false)
+}
+
+// qwen35HybridMetalResidentMinPrompt is the fresh-prompt batched-prefill threshold on
+// the backend-nil resident-Q4_K Metal session (#13694). qwen35HybridQBatchMinPrompt (16)
+// is an amortization heuristic from the CPU qGemm8 path, not a correctness bound: the
+// batched body runs the conv1d scan against the (possibly empty) history row by row and
+// the GDN recurrence token by token, and the continuation path already admits every
+// P >= 1 (TestPrefillQwen35HybridQ4KAppendMatchesMonolithic). On Metal, P in 2..15 paid
+// one full forward per token — P weight streams and P command-buffer round-trips per
+// projection — where one batched dispatch per projection group streams each weight once,
+// so the Metal resident session batches from two tokens. P=1 keeps the token step.
+const qwen35HybridMetalResidentMinPrompt = 2
+
+// q4kQwen35HybridPrefillAtPositionOKFor is q4kQwen35HybridPrefillAtPositionOK with the
+// session's Metal residency threaded in: a fresh prompt on the Metal resident session
+// needs only qwen35HybridMetalResidentMinPrompt tokens; every other session keeps the
+// historical threshold. The architecture and diagnostic gate is evaluated at the
+// threshold so the length qualification above is the only thing that changes.
+func q4kQwen35HybridPrefillAtPositionOKFor(cfg Config, promptLen, base int, metalResident bool) bool {
 	if promptLen <= 0 || base < 0 {
 		return false
 	}
 	if base == 0 {
-		return q4kQwen35HybridPrefillOK(cfg, promptLen)
+		minFresh := qwen35HybridQBatchMinPrompt
+		if metalResident {
+			minFresh = qwen35HybridMetalResidentMinPrompt
+		}
+		if promptLen < minFresh {
+			return false
+		}
 	}
-	return q4kQwen35HybridPrefillOK(cfg, qwen35HybridQBatchMinPrompt)
+	return q4kQwen35HybridPrefillOK(cfg, max(promptLen, qwen35HybridQBatchMinPrompt))
 }
 
 // qwen35ResidentDecodeAutoDisable is the config-surface opt-out consulted by
@@ -386,7 +412,7 @@ func (s *Session) FinalizeQwen35MetalGDNPreprojectedSequence() (bool, error) {
 // geometry returns before the resident implementation can mutate KV, convolution,
 // or recurrent state; the caller retains the historical token-loop behavior.
 func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float32, bool) {
-	if !q4kQwen35HybridPrefillAtPositionOK(s.M.Cfg, len(ids), s.Cache.Len()) {
+	if !q4kQwen35HybridPrefillAtPositionOKFor(s.M.Cfg, len(ids), s.Cache.Len(), s.qwen35HybridMetalResidentPrefill()) {
 		return nil, false
 	}
 	// Keystone decode lever (W1): the exact resident-Q4_K Qwen3.8 hybrid can run its
@@ -422,6 +448,13 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 			// qg_attn_online (O(head_dim) ordered online softmax) above 4096 context, so
 			// a long prompt stays on the batched panel rather than being forced through
 			// the CPU per-token loop. See TestProjectionGraphQwenOrderedLongContextAttention.
+			//
+			// The <32 remainder (every prompt under 32 tokens) deliberately stays on the
+			// host batched path: walking it on the whole-sequence device graph was measured
+			// on Qwen3.8-27B to stall past the 10 s command-buffer limit for a 12-token
+			// warmup prompt under memory pressure, failing closed with no host retry so the
+			// server never became ready (#13694). Widening the cover below the 32-token
+			// quantum needs its own measured admission.
 			const panelQuantum = 32
 			panelCover := (len(ids) / panelQuantum) * panelQuantum
 			if panelCover > 0 {

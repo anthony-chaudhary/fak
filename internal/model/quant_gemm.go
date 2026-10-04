@@ -112,6 +112,12 @@ func quantizeBatchPanel(X []float32, P, width int) *q8Panel {
 	return qp
 }
 
+// q8PanelBuildHook, when non-nil, observes every activation-panel quantization (P rows of
+// `width`). Test-only seam: it lets a test count how many panels a prefill actually builds
+// (the lazy-panel contract in prefill_q4k.go) without perturbing the quantized bytes. Nil in
+// production, so the cost is one predictable branch per panel.
+var q8PanelBuildHook func(P, width int)
+
 // quantizeBatchPanelInto quantizes into an EXISTING panel, growing its buffers only when
 // they are too small. Prefill builds four activation panels per layer (q/k/v share one,
 // then o, gate/up, down) consumed sequentially, so a single reused scratch panel serves all
@@ -121,6 +127,9 @@ func quantizeBatchPanel(X []float32, P, width int) *q8Panel {
 func quantizeBatchPanelInto(qp *q8Panel, X []float32, P, width int) {
 	if width%qBlk != 0 {
 		panic("model: Q8_0 activation width not a multiple of 32")
+	}
+	if q8PanelBuildHook != nil {
+		q8PanelBuildHook(P, width)
 	}
 	q8RememberAccelPanel(qp, X[:P*width])
 	nblk := width / qBlk
@@ -135,7 +144,9 @@ func quantizeBatchPanelInto(qp *q8Panel, X []float32, P, width int) {
 		qp.d = qp.d[:P*nblk]
 	}
 	qp.P, qp.in, qp.nblk = P, width, nblk
-	parFor(P, currentWorkerCount(), func(lo, hi int) {
+	// parForWork: a short-prompt panel (e.g. 17×3584) quantizes faster inline than through
+	// the parFor barrier (#13694); rows are independent, so the codes are bit-identical.
+	parForWork(P, currentWorkerCount(), width, func(lo, hi int) {
 		for t := lo; t < hi; t++ {
 			// quantizeRowQ8 is the AVX-512 kernel (scalar fallback off-512), bit-identical
 			// to the per-block math this loop used to inline — see quant_quantize.go.

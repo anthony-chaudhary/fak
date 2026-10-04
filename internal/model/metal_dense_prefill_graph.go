@@ -98,6 +98,11 @@ func (s *Session) denseQ4KGraphSegment(prev int, attn []float32, next int, X []f
 	// Fail-closed: a mode the graph cannot honor (e.g. MM32 at P=32) leaves it on the scalar
 	// kernel, which is the host route's kernel for every P but 32.
 	g.SetQ4KGEMMMode(metalgemm.Q4KGEMMModeForPrompt(P))
+	// Name the kernel this segment's Q4_K projections encode (small-P GEMV for 2<=P<=20 when
+	// the pipelines are ready, else scalar/M5) so the dense graph route still reports gemm=
+	// on the inkernel_chat line, like the hybrid graph and per-projection paths (#13694).
+	s.observeQ4KPrefillGEMM(q4kPrefillGEMMExecutionLabel(
+		metalgemm.Q4KGEMMIdentityForMode(P, g.Q4KGEMMMode(), metalgemm.Q4KGEMMNotExecuted).Requested))
 	x, err := g.Input(H)
 	if err != nil {
 		return nil, nil, nil, receipt, false

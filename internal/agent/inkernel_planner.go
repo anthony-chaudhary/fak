@@ -92,6 +92,12 @@ type InKernelPlanner struct {
 	elideStaleReads      bool
 	deferColdTools       bool
 	restoreStash         func(trace, id, excerpt string, body []byte)
+
+	// prefillQ4KGEMM is the last request's observed Q4_K prefill GEMM route
+	// (model.Session.Q4KPrefillGEMMObservation), reported as gemm= on the
+	// inkernel_chat summary line (#13694). It holds a string; empty means unobserved.
+	prefillQ4KGEMM atomic.Value
+
 	// tree is the process-scoped RadixAttention prefix cache (internal/radixkv): the
 	// multi-thousand-token static system+tool-schema prefix is prefilled once and the
 	// next turn REUSES its KV, prefilling only the divergent suffix — the candidate-#13
@@ -3508,8 +3514,21 @@ func nativeDecodeRate(gen int, decodeS float64) (float64, bool) {
 
 func (p *InKernelPlanner) logExecutionSummary(q8kern, q8fusedMark string, promptTok, cacheable, matched, computed int, prefillS, prefTPS float64, generated int, decodeS, decTPS float64) {
 	backend, forwardPath := p.executionIdentity()
-	log.Printf("inkernel_chat model=%s backend=%s forward_path=%s q4k=%v q8dec=%s%s/%dw prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s%s",
-		p.modelID, backend, forwardPath, p.q4k, q8kern, q8fusedMark, model.Q8DecodeWorkers(), promptTok, cacheable, matched, computed, prefillS, prefTPS, generated, decodeS, decTPS, p.v41FaultAttributionClause())
+	log.Printf("inkernel_chat model=%s backend=%s forward_path=%s q4k=%v q8dec=%s%s/%dw prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s%s gemm=%s",
+		p.modelID, backend, forwardPath, p.q4k, q8kern, q8fusedMark, model.Q8DecodeWorkers(), promptTok, cacheable, matched, computed, prefillS, prefTPS, generated, decodeS, decTPS, p.v41FaultAttributionClause(), p.prefillQ4KGEMMLabel())
+}
+
+// prefillQ4KGEMMLabel is the gemm= value of the execution summary: the Q4_K prefill GEMM
+// route(s) the request's prefill observed (scalar, a newer small-P/MM32/M5 identity, cpu,
+// gemv, token_loop, or "+"-joined when mixed), or model.Q4KPrefillGEMMNone when no prefill
+// ran or nothing was observed. Appended last so every existing key keeps its position.
+func (p *InKernelPlanner) prefillQ4KGEMMLabel() string {
+	if p != nil {
+		if label, _ := p.prefillQ4KGEMM.Load().(string); label != "" {
+			return label
+		}
+	}
+	return model.Q4KPrefillGEMMNone
 }
 
 // v41ExpertFaultAttributioner is the optional read seam a V4.1 model exposes

@@ -927,6 +927,93 @@ kernel void q6k_gemm(device const uchar* W [[buffer(0)]],
     if (lid == 0) Y[(long)t * out + o] = acc;
 }
 
+// q6k_gemv_multi is the Q6_K twin of q4k_gemv_multi for the 2<=P<=20 small-P prefill route
+// (fak#13694): q4_k_m GGUFs keep ffn_down / attn_v in Q6_K, and q6k_gemm runs one SIMD group per
+// (row, token), re-decoding every super-block P times. Here each SIMD group carries four output
+// rows, each 8-lane subgroup splits one row's 210-B super-blocks, and every decoded weight is
+// applied to all N tokens of the chunk (X token-major [N][in], Y token-major [N][out]) before it
+// is discarded. Per-token accumulation follows q6k_block_dot's element order.
+template <int N>
+inline void q6k_gemv_multi_impl(device const uchar* W,
+                                device const float* X,
+                                device float* Y,
+                                constant int& nblk,
+                                constant int& out,
+                                uint tg,
+                                uint lane,
+                                uint sg) {
+    const uint tx = lane & 7;
+    const uint o = tg * 8 + sg * 4 + lane / 8;
+    const bool valid = o < (uint)out;
+    const long xstride = (long)nblk * 256;
+    float acc[N];
+    for (int k = 0; k < N; k++) acc[k] = 0.0f;
+
+    if (valid) {
+        device const uchar* row = W + (long)o * nblk * 210;
+        for (int b = (int)tx; b < nblk; b += 8) {
+            device const uchar* blk = row + (long)b * 210;
+            device const uchar* ql = blk + 0;
+            device const uchar* qh = blk + 128;
+            device const char*  sc = (device const char*)(blk + 192); // SIGNED int8 scales
+            float d = (float)(*(device const half*)(blk + 208));
+            const long xbase = (long)b * 256;
+            int qlOff = 0, qhOff = 0, scOff = 0;
+            for (int n = 0; n < 256; n += 128) {
+                for (int is = 0; is < 2; is++) {
+                    float ds1 = d * (float)sc[scOff + is + 0];
+                    float ds2 = d * (float)sc[scOff + is + 2];
+                    float ds3 = d * (float)sc[scOff + is + 4];
+                    float ds4 = d * (float)sc[scOff + is + 6];
+                    for (int li = 0; li < 16; li++) {
+                        int l = is * 16 + li;
+                        float w1 = ds1 * (float)((int)((ql[qlOff + l +  0] & 0x0f) | (((qh[qhOff + l] >> 0) & 3) << 4)) - 32);
+                        float w2 = ds2 * (float)((int)((ql[qlOff + l + 32] & 0x0f) | (((qh[qhOff + l] >> 2) & 3) << 4)) - 32);
+                        float w3 = ds3 * (float)((int)((ql[qlOff + l +  0] >> 4)   | (((qh[qhOff + l] >> 4) & 3) << 4)) - 32);
+                        float w4 = ds4 * (float)((int)((ql[qlOff + l + 32] >> 4)   | (((qh[qhOff + l] >> 6) & 3) << 4)) - 32);
+                        const long xi = xbase + n + l;
+                        for (int k = 0; k < N; k++) {
+                            device const float* xs = X + k * xstride + xi;
+                            acc[k] += w1 * xs[0];
+                            acc[k] += w2 * xs[32];
+                            acc[k] += w3 * xs[64];
+                            acc[k] += w4 * xs[96];
+                        }
+                    }
+                }
+                qlOff += 64;
+                qhOff += 32;
+                scOff += 8;
+            }
+        }
+    }
+
+    for (int k = 0; k < N; k++) acc[k] = q4k_sum8(acc[k]);
+    if (tx == 0 && valid) {
+        for (int k = 0; k < N; k++) Y[k * (long)out + o] = acc[k];
+    }
+}
+
+#define Q6K_MULTI_KERNEL(N) \
+kernel void q6k_gemv_multi##N(device const uchar* W [[buffer(0)]], \
+                               device const float* X [[buffer(1)]], \
+                               device float* Y [[buffer(2)]], \
+                               constant int& nblk [[buffer(3)]], \
+                               constant int& out [[buffer(4)]], \
+                               uint tg [[threadgroup_position_in_grid]], \
+                               uint lane [[thread_index_in_simdgroup]], \
+                               uint sg [[simdgroup_index_in_threadgroup]]) { \
+    q6k_gemv_multi_impl<N>(W, X, Y, nblk, out, tg, lane, sg); \
+}
+
+Q6K_MULTI_KERNEL(2)
+Q6K_MULTI_KERNEL(3)
+Q6K_MULTI_KERNEL(4)
+Q6K_MULTI_KERNEL(5)
+Q6K_MULTI_KERNEL(6)
+Q6K_MULTI_KERNEL(7)
+Q6K_MULTI_KERNEL(8)
+
 // Exact Q8_0 activation quantization for a graph-resident f32 panel. One 32-lane
 // threadgroup owns one block, matching model.quantizeRowQ8scalar's amax/127 and
 // round-half-away-from-zero contract. The resulting codes/scales remain owned by
@@ -950,7 +1037,7 @@ kernel void graph_quantize_q8(device const float* X [[buffer(0)]],
 }
 )MSL";
 
-static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemvVectorized, psoQ4KGemvMulti[7], psoQ4KGemm, psoQ4KGemmMM32, psoQ4KGemmM5CooperativeSMEM, psoQ4KSwiGLU, psoQ6KGemv, psoQ6KGemm, psoGraphQuantizeQ8;
+static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemvVectorized, psoQ4KGemvMulti[7], psoQ6KGemvMulti[7], psoQ4KGemm, psoQ4KGemmMM32, psoQ4KGemmM5CooperativeSMEM, psoQ4KSwiGLU, psoQ6KGemv, psoQ6KGemm, psoGraphQuantizeQ8;
 // Optional llama.cpp-shaped P=1 GEMVs (fak#13599). A nil PSO keeps every default P=1 dispatch on
 // the legacy one-simdgroup-per-row q4k_gemv / q6k_gemv kernels.
 static id<MTLComputePipelineState> psoQ4KMulMv, psoQ6KMulMv;
@@ -1150,6 +1237,63 @@ static id<MTLComputePipelineState> q4k_gemm_pso(int P, int mm_mode, int* execute
     return psoQ4KGemmMM32;
 }
 
+// ---- small-P batched multi-token GEMV route (fak#13694) ----
+// A 2<=P<=20 prompt leaves ~90% of q4k_gemm's 64-token tile idle (P=6 keeps 2 of 16 thread-columns
+// busy), so a short prompt paid ~6.5x one decode step per projection. Mode 3 instead encodes
+// ceil(P/8) multi-token GEMV dispatches (q4k_gemv_multiN / q6k_gemv_multiN, N=2..8) that stream
+// each weight row once per chunk. The split is even (9 -> 5+4, 11 -> 6+5, 16 -> 8+8, 20 -> 7+7+6) so every chunk
+// is 2..8 tokens, and each chunk binds X/Y at its token offset into the SAME token-major [P,in] /
+// [P,out] panels the GEMM uses, all in one encoder. Mode -3 is the deterministic unavailable
+// witness. Unlike MM32/M5, small-P never fails to NotExecuted: outside the band or without the
+// multi pipelines the proven scalar kernel executes and is reported as executed.
+#define MG_GEMM_MODE_SMALLP 3
+#define MG_GEMM_MODE_SMALLP_UNAVAILABLE (-3)
+#define MG_GEMM_EXECUTED_SMALLP 4
+#define MG_SMALLP_MIN_P 2
+#define MG_SMALLP_MAX_P 20
+#define MG_SMALLP_CHUNK 8
+
+static int mg_smallp_pipelines_ready(int q6) {
+    for (int i = 0; i < 7; i++) {
+        if ((q6 ? psoQ6KGemvMulti[i] : psoQ4KGemvMulti[i]) == nil) return 0;
+    }
+    return 1;
+}
+
+// mg_smallp_route resolves a requested small-P mode for a P-token panel. It returns 1 when the
+// multi-token route will execute. Otherwise it rewrites *mode to 0 so the caller's scalar kernel
+// selection runs (fail-closed to the proven kernel). Non-small-P modes pass through untouched.
+static int mg_smallp_route(int P, int* mode, int q6) {
+    if (*mode != MG_GEMM_MODE_SMALLP && *mode != MG_GEMM_MODE_SMALLP_UNAVAILABLE) return 0;
+    int ok = *mode == MG_GEMM_MODE_SMALLP && P >= MG_SMALLP_MIN_P && P <= MG_SMALLP_MAX_P &&
+             mg_smallp_pipelines_ready(q6);
+    if (!ok) *mode = 0;
+    return ok;
+}
+
+// mg_smallp_encode encodes the even ceil(P/8) chunk split of one weight's small-P GEMV into an
+// open encoder: W at woff, the [P,in] activation panel at xoff and the [P,out] result at yoff
+// (bytes). Argument bindings persist across the per-chunk pipeline switch.
+static void mg_smallp_encode(id<MTLComputeCommandEncoder> e, int q6, id<MTLBuffer> wbuf, NSUInteger woff,
+                             id<MTLBuffer> xb, NSUInteger xoff, id<MTLBuffer> yb, NSUInteger yoff,
+                             int nblk, int out, int in, int P) {
+    int chunks = (P + MG_SMALLP_CHUNK - 1) / MG_SMALLP_CHUNK;
+    int base = P / chunks, rem = P % chunks;
+    [e setBuffer:wbuf offset:woff atIndex:0];
+    [e setBytes:&nblk length:sizeof(int) atIndex:3];
+    [e setBytes:&out  length:sizeof(int) atIndex:4];
+    int t0 = 0;
+    for (int c = 0; c < chunks; c++) {
+        int n = base + (c < rem ? 1 : 0);
+        [e setComputePipelineState:(q6 ? psoQ6KGemvMulti[n - 2] : psoQ4KGemvMulti[n - 2])];
+        [e setBuffer:xb offset:xoff + (NSUInteger)t0 * (NSUInteger)in  * 4 atIndex:1];
+        [e setBuffer:yb offset:yoff + (NSUInteger)t0 * (NSUInteger)out * 4 atIndex:2];
+        [e dispatchThreadgroups:MTLSizeMake((NSUInteger)(out + 7) / 8, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+        t0 += n;
+    }
+}
+
 static int q4k_init(void) {
     if (gQ4KReady) return 1;
     if (gDev == nil) return 0;
@@ -1172,6 +1316,11 @@ static int q4k_init(void) {
     psoQ4KSwiGLU = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_swiglu"] error:&err];
     psoQ6KGemv = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q6k_gemv"] error:&err];
     psoQ6KGemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q6k_gemm"] error:&err];
+    // q6k_gemv_multiN (small-P, fak#13694) is optional: a missing pipeline keeps q6k_gemm.
+    for (int n = 2; n <= 8; n++) {
+        NSString *name = [NSString stringWithFormat:@"q6k_gemv_multi%d", n];
+        psoQ6KGemvMulti[n - 2] = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:name] error:&err];
+    }
     psoGraphQuantizeQ8 = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"graph_quantize_q8"] error:&err];
     // q4k_mul_mv / q6k_mul_mv are optional (fak#13599): a nil PSO keeps DEFAULT-mode P=1 GEMVs on
     // the required legacy kernels, and only an explicit mul_mv request fails closed. A separate
@@ -1468,9 +1617,14 @@ void mg_q6k_gemv(int wid, const float* x, float* y, mg_execution_event* event) {
 // mg_q6k_gemm computes Y[P,out] = X[P,in] * W[wid]^T for a resident Q6_K weight in one command
 // buffer. This is the prefill counterpart to q6k_gemv / mg_q4k_mlp_q6down's stage 3: dense
 // q4_k_m down_proj can stay on Metal instead of using the host kQuantMatRowsIntoBatch loop.
-void mg_q6k_gemm(int wid, const float* X, int P, float* Y, mg_execution_event* event) {
+// mode is the Go Q4KGEMMMode: 3 requests the 2<=P<=20 small-P multi-token GEMV (fak#13694), -3
+// its unavailable witness; any other value, a P outside the band, or a missing q6k_gemv_multiN
+// pipeline runs q6k_gemm. Returns the executed kernel (1 q6k_gemm, 4 small-P GEMV) or 0 when
+// nothing completed (invalid handle or a bounded-wait timeout; Y untouched).
+int mg_q6k_gemm(int wid, const float* X, int P, float* Y, int mode, mg_execution_event* event) {
     mg_execution_event_reset(event);
-    if (!q6k_valid(wid) || P <= 0) return;
+    if (!q6k_valid(wid) || P <= 0) return 0;
+    int smallp = mg_smallp_route(P, &mode, 1);
     @autoreleasepool {
         Q6KW W = gQ6[wid - MG_Q6_BASE];
         q4k_grow_scratch((long)P * W.in, (long)P * W.out);
@@ -1481,22 +1635,26 @@ void mg_q6k_gemm(int wid, const float* X, int P, float* Y, mg_execution_event* e
         mg_execution_event_command_buffer(event, cb);
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
         mg_execution_event_encoder(event, e);
-        [e setComputePipelineState:psoQ6KGemm];
-        [e setBuffer:(__bridge id<MTLBuffer>)W.buf offset:0 atIndex:0];
-        [e setBuffer:xb offset:0 atIndex:1];
-        [e setBuffer:yb offset:0 atIndex:2];
-        [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
-        [e setBytes:&W.out  length:sizeof(int) atIndex:4];
-        [e setBytes:&P      length:sizeof(int) atIndex:5];
-        [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, (NSUInteger)P, 1)
-            threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+        if (smallp) {
+            mg_smallp_encode(e, 1, (__bridge id<MTLBuffer>)W.buf, 0, xb, 0, yb, 0, W.nblk, W.out, W.in, P);
+        } else {
+            [e setComputePipelineState:psoQ6KGemm];
+            [e setBuffer:(__bridge id<MTLBuffer>)W.buf offset:0 atIndex:0];
+            [e setBuffer:xb offset:0 atIndex:1];
+            [e setBuffer:yb offset:0 atIndex:2];
+            [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
+            [e setBytes:&W.out  length:sizeof(int) atIndex:4];
+            [e setBytes:&P      length:sizeof(int) atIndex:5];
+            [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, (NSUInteger)P, 1)
+                threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+        }
         [e endEncoding];
         int completed = mg_q4k_commit_bounded(cb, event);
 
-        if (completed) {
-            memcpy(Y, yb.contents, (size_t)P * W.out * 4);
-            mg_execution_event_readback(event);
-        }
+        if (!completed) return 0; // bounded timeout: the buffer never completed, so Y is unwritten
+        memcpy(Y, yb.contents, (size_t)P * W.out * 4);
+        mg_execution_event_readback(event);
+        return smallp ? MG_GEMM_EXECUTED_SMALLP : 1;
     }
 }
 
@@ -2061,8 +2219,9 @@ int mg_q4k_gemm(int wid, const float* X, int P, float* Y, int mm_mode, double* o
         Q4KW W = gQ4[wid];
         int executed = 0;
         int BN = 64;
-        id<MTLComputePipelineState> pso = q4k_gemm_pso(P, mm_mode, &executed, &BN);
-        if (pso == nil) return 0;
+        int smallp = mg_smallp_route(P, &mm_mode, 0);
+        id<MTLComputePipelineState> pso = smallp ? nil : q4k_gemm_pso(P, mm_mode, &executed, &BN);
+        if (!smallp && pso == nil) return 0;
         q4k_grow_scratch((long)P * W.in, (long)P * W.out);
         id<MTLBuffer> wbuf = (__bridge id<MTLBuffer>)W.buf;
         id<MTLBuffer> xb = gQXBuf;
@@ -2080,20 +2239,25 @@ int mg_q4k_gemm(int wid, const float* X, int P, float* Y, int mm_mode, double* o
         mg_execution_event_command_buffer(event, cb);
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
         mg_execution_event_encoder(event, e);
-        [e setComputePipelineState:pso];
-        [e setBuffer:wbuf offset:W.offset atIndex:0];
-        [e setBuffer:xb   offset:0 atIndex:1];
-        [e setBuffer:yb   offset:0 atIndex:2];
-        [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
-        [e setBytes:&W.out  length:sizeof(int) atIndex:4];
-        [e setBytes:&P      length:sizeof(int) atIndex:5];
-        for (int t0 = 0; t0 < P; t0 += BN) {
-            int nt = P - t0;
-            if (nt > BN) nt = BN;
-            [e setBytes:&t0 length:sizeof(int) atIndex:6];
-            [e setBytes:&nt length:sizeof(int) atIndex:7];
-            [e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks, 1, 1)
-                threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG, 1, 1)];
+        if (smallp) {
+            mg_smallp_encode(e, 0, wbuf, W.offset, xb, 0, yb, 0, W.nblk, W.out, W.in, P);
+            executed = MG_GEMM_EXECUTED_SMALLP;
+        } else {
+            [e setComputePipelineState:pso];
+            [e setBuffer:wbuf offset:W.offset atIndex:0];
+            [e setBuffer:xb   offset:0 atIndex:1];
+            [e setBuffer:yb   offset:0 atIndex:2];
+            [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
+            [e setBytes:&W.out  length:sizeof(int) atIndex:4];
+            [e setBytes:&P      length:sizeof(int) atIndex:5];
+            for (int t0 = 0; t0 < P; t0 += BN) {
+                int nt = P - t0;
+                if (nt > BN) nt = BN;
+                [e setBytes:&t0 length:sizeof(int) atIndex:6];
+                [e setBytes:&nt length:sizeof(int) atIndex:7];
+                [e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks, 1, 1)
+                    threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG, 1, 1)];
+            }
         }
         [e endEncoding];
         int completed = mg_q4k_commit_bounded(cb, event);
@@ -2125,8 +2289,9 @@ int mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat
     @autoreleasepool {
         int executed = 0;
         int BN = 64;
-        id<MTLComputePipelineState> pso = q4k_gemm_pso(P, mm_mode, &executed, &BN);
-        if (pso == nil) return 0;
+        int smallp = mg_smallp_route(P, &mm_mode, 0);
+        id<MTLComputePipelineState> pso = smallp ? nil : q4k_gemm_pso(P, mm_mode, &executed, &BN);
+        if (!smallp && pso == nil) return 0;
         int in = gQ4[wids[0]].in;
         long ytot = (long)yoff[n];
         q4k_grow_scratch((long)P * in, ytot);
@@ -2143,23 +2308,33 @@ int mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat
         mg_execution_event_command_buffer(event, cb);
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
         mg_execution_event_encoder(event, e);
-        [e setComputePipelineState:pso];
-        [e setBuffer:xb offset:0 atIndex:1]; // shared X for the whole group
-        [e setBytes:&P length:sizeof(int) atIndex:5];
-        for (int i = 0; i < n; i++) {
-            Q4KW Wi = gQ4[wids[i]];
-            int rowBlocks = (Wi.out + BM - 1) / BM;
-            [e setBuffer:(__bridge id<MTLBuffer>)Wi.buf offset:Wi.offset atIndex:0];
-            [e setBuffer:yb offset:(NSUInteger)((long)yoff[i] * 4) atIndex:2];
-            [e setBytes:&Wi.nblk length:sizeof(int) atIndex:3];
-            [e setBytes:&Wi.out  length:sizeof(int) atIndex:4];
-            for (int t0 = 0; t0 < P; t0 += BN) {
-                int nt = P - t0;
-                if (nt > BN) nt = BN;
-                [e setBytes:&t0 length:sizeof(int) atIndex:6];
-                [e setBytes:&nt length:sizeof(int) atIndex:7];
-                [e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks, 1, 1)
-                    threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG, 1, 1)];
+        if (smallp) {
+            // Small-P: each member streams its rows once per <=8-token chunk of the shared panel.
+            for (int i = 0; i < n; i++) {
+                Q4KW Wi = gQ4[wids[i]];
+                mg_smallp_encode(e, 0, (__bridge id<MTLBuffer>)Wi.buf, Wi.offset, xb, 0,
+                                 yb, (NSUInteger)((long)yoff[i] * 4), Wi.nblk, Wi.out, in, P);
+            }
+            executed = MG_GEMM_EXECUTED_SMALLP;
+        } else {
+            [e setComputePipelineState:pso];
+            [e setBuffer:xb offset:0 atIndex:1]; // shared X for the whole group
+            [e setBytes:&P length:sizeof(int) atIndex:5];
+            for (int i = 0; i < n; i++) {
+                Q4KW Wi = gQ4[wids[i]];
+                int rowBlocks = (Wi.out + BM - 1) / BM;
+                [e setBuffer:(__bridge id<MTLBuffer>)Wi.buf offset:Wi.offset atIndex:0];
+                [e setBuffer:yb offset:(NSUInteger)((long)yoff[i] * 4) atIndex:2];
+                [e setBytes:&Wi.nblk length:sizeof(int) atIndex:3];
+                [e setBytes:&Wi.out  length:sizeof(int) atIndex:4];
+                for (int t0 = 0; t0 < P; t0 += BN) {
+                    int nt = P - t0;
+                    if (nt > BN) nt = BN;
+                    [e setBytes:&t0 length:sizeof(int) atIndex:6];
+                    [e setBytes:&nt length:sizeof(int) atIndex:7];
+                    [e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks, 1, 1)
+                        threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG, 1, 1)];
+                }
             }
         }
         [e endEncoding];
@@ -2221,7 +2396,7 @@ typedef struct {
     int graph_gemv_mode;       // P=1 graph projections: MG_GEMV_MODE_* (0 default = mul_mv unless legacy)
     int graph_q4k_gemv_exec;   // bitmask of executed P=1 Q4_K kernels: bit MG_GEMV_EXEC_*
     int graph_q6k_gemv_exec;   // bitmask of executed P=1 Q6_K kernels: bit MG_GEMV_EXEC_*
-    int graph_mm_mode;         // Q4_K projection candidate: 0 scalar, 2 wide-tile cooperative-SMEM
+    int graph_mm_mode;         // projection candidate: 0 scalar, 2 wide-tile cooperative-SMEM, 3 small-P GEMV
     int graph_buf_pool;        // per-shape recycle depth; 0 disables the pool
     double gpu_ms, wait_ms;
 } MGProjectionGraph;
@@ -2301,6 +2476,16 @@ int mg_graph_set_mm_mode(void *opaque, int mode) {
     if (mode == 2) {
         if (g->P < 64 || psoQ4KGemmM5CooperativeSMEM == nil) return 0;
         g->graph_mm_mode = 2;
+        return 1;
+    }
+    // Mode 3 is the 2<=P<=20 small-P multi-token GEMV route (fak#13694). It is refused for a P
+    // outside the band or without the Q4_K multi pipelines, so the graph keeps the scalar kernel.
+    // An accepted graph also routes its Q6_K projections through q6k_gemv_multiN when those
+    // optional pipelines exist (otherwise q6k_gemm).
+    if (mode == MG_GEMM_MODE_SMALLP) {
+        int m = mode;
+        if (!mg_smallp_route(g->P, &m, 0)) return 0;
+        g->graph_mm_mode = MG_GEMM_MODE_SMALLP;
         return 1;
     }
     return 0;
@@ -2446,34 +2631,54 @@ static id<MTLBuffer> mg_graph_q6k_gemv(MGProjectionGraph *g, id<MTLBuffer> x, in
     g->graph_q6k_gemv_exec |= 1 << executed;
     return y;
 }
+// mg_graph_encode_q4k_input encodes one Q4_K projection of the [P,in] panel x into a new graph
+// result. Route through the graph's requested candidate: graph_mm_mode defaults to 0 (scalar); the
+// Go production selector sets 2 for the widened panel regime only when the device/version-pinned
+// crossover admits it, and 3 for a 2<=P<=20 prompt (small-P multi-token GEMV). A mode-2 graph whose
+// pipeline/P guard fails here returns NULL and the Go caller declines fail-open before any state
+// mutation; mode 3 was validated by mg_graph_set_mm_mode.
+static void *mg_graph_encode_q4k_input(MGProjectionGraph *g, int wid, id<MTLBuffer> x) {
+    if (g->graph_gemv_p1 && g->P == 1) { id<MTLBuffer> y=mg_graph_q4k_gemv(g,x,wid); return y?(__bridge void*)y:NULL; }
+    Q4KW *w=&gQ4[wid]; id<MTLBuffer> y=(__bridge id<MTLBuffer>)mg_graph_result(g,(NSUInteger)g->P*(NSUInteger)w->out); if(!y)return NULL;
+    int mode=g->graph_mm_mode;
+    if (mg_smallp_route(g->P,&mode,0)) {
+        id<MTLComputeCommandEncoder> e=[g->cb computeCommandEncoder]; if(!e)return NULL;
+        mg_smallp_encode(e,0,(__bridge id<MTLBuffer>)w->buf,w->offset,x,0,y,0,w->nblk,w->out,w->in,g->P);
+        [e endEncoding]; return (__bridge void*)y;
+    }
+    int executed=0, BN=64; id<MTLComputePipelineState> pso=q4k_gemm_pso(g->P,mode,&executed,&BN); if(!pso)return NULL;
+    const int BM=64,TG=256; int rowBlocks=(w->out+BM-1)/BM;
+    id<MTLComputeCommandEncoder> e=[g->cb computeCommandEncoder]; [e setComputePipelineState:pso]; [e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:w->offset atIndex:0]; [e setBuffer:x offset:0 atIndex:1]; [e setBuffer:y offset:0 atIndex:2]; [e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5]; for(int t0=0;t0<g->P;t0+=BN){int nt=g->P-t0;if(nt>BN)nt=BN;[e setBytes:&t0 length:sizeof(int) atIndex:6];[e setBytes:&nt length:sizeof(int) atIndex:7];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG,1,1)];}[e endEncoding]; return (__bridge void*)y;
+}
 void *mg_graph_encode_q4k(void *opaque, int wid) {
     MGProjectionGraph *g=opaque; if (!g || g->committed || !g->xf || wid<0 || wid>=gNQ4 || gQ4[wid].in!=g->in) return NULL;
-    if (g->graph_gemv_p1 && g->P == 1) { id<MTLBuffer> y=mg_graph_q4k_gemv(g,g->xf,wid); return y?(__bridge void*)y:NULL; }
-    Q4KW *w=&gQ4[wid]; id<MTLBuffer> y=(__bridge id<MTLBuffer>)mg_graph_result(g,(NSUInteger)g->P*(NSUInteger)w->out); if(!y)return NULL;
-    // Route through the graph's requested candidate. graph_mm_mode defaults to 0 (scalar); the Go
-    // production selector sets 2 for the widened panel regime only when the device/version-pinned
-    // crossover admits it. A mode-2 graph whose pipeline/P guard fails here returns NULL and the Go
-    // caller declines fail-open before any state mutation.
-    int executed=0, BN=64; id<MTLComputePipelineState> pso=q4k_gemm_pso(g->P,g->graph_mm_mode,&executed,&BN); if(!pso)return NULL;
-    const int BM=64,TG=256; int rowBlocks=(w->out+BM-1)/BM;
-    id<MTLComputeCommandEncoder> e=[g->cb computeCommandEncoder]; [e setComputePipelineState:pso]; [e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:w->offset atIndex:0]; [e setBuffer:g->xf offset:0 atIndex:1]; [e setBuffer:y offset:0 atIndex:2]; [e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5]; for(int t0=0;t0<g->P;t0+=BN){int nt=g->P-t0;if(nt>BN)nt=BN;[e setBytes:&t0 length:sizeof(int) atIndex:6];[e setBytes:&nt length:sizeof(int) atIndex:7];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG,1,1)];}[e endEncoding]; return (__bridge void*)y;
+    return mg_graph_encode_q4k_input(g,wid,g->xf);
 }
 void *mg_graph_encode_q4k_from(void *opaque,int wid,void*input,int elems) {
     MGProjectionGraph*g=opaque;id<MTLBuffer>x=(__bridge id<MTLBuffer>)input;if(!g||g->committed||!x||wid<0||wid>=gNQ4||gQ4[wid].in*g->P!=elems||![g->results containsObject:x])return NULL;
-    if (g->graph_gemv_p1 && g->P == 1) { id<MTLBuffer> y=mg_graph_q4k_gemv(g,x,wid); return y?(__bridge void*)y:NULL; }
-    Q4KW*w=&gQ4[wid];id<MTLBuffer>y=(__bridge id<MTLBuffer>)mg_graph_result(g,(NSUInteger)g->P*(NSUInteger)w->out);if(!y)return NULL;
-    int executed=0,BN=64;id<MTLComputePipelineState>pso=q4k_gemm_pso(g->P,g->graph_mm_mode,&executed,&BN);if(!pso)return NULL;const int BM=64,TG=256;int rowBlocks=(w->out+BM-1)/BM;
-    id<MTLComputeCommandEncoder>e=[g->cb computeCommandEncoder];[e setComputePipelineState:pso];[e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:w->offset atIndex:0];[e setBuffer:x offset:0 atIndex:1];[e setBuffer:y offset:0 atIndex:2];[e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5];for(int t0=0;t0<g->P;t0+=BN){int nt=g->P-t0;if(nt>BN)nt=BN;[e setBytes:&t0 length:sizeof(int) atIndex:6];[e setBytes:&nt length:sizeof(int) atIndex:7];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG,1,1)];}[e endEncoding];return (__bridge void*)y;
+    return mg_graph_encode_q4k_input(g,wid,x);
+}
+// mg_graph_encode_q6k_input is the Q6_K twin of mg_graph_encode_q4k_input. A small-P graph (mode
+// 3) streams each Q6_K row once per <=8-token chunk via q6k_gemv_multiN when those optional
+// pipelines exist; every other graph (and a missing pipeline) keeps q6k_gemm.
+static void *mg_graph_encode_q6k_input(MGProjectionGraph *g, int wid, id<MTLBuffer> x) {
+    if (g->graph_gemv_p1 && g->P == 1) { id<MTLBuffer> y=mg_graph_q6k_gemv(g,x,wid); return y?(__bridge void*)y:NULL; }
+    Q6KW *w=&gQ6[wid-MG_Q6_BASE]; id<MTLBuffer> y=(__bridge id<MTLBuffer>)mg_graph_result(g,(NSUInteger)g->P*(NSUInteger)w->out);if(!y)return NULL;
+    int mode=g->graph_mm_mode;
+    if (mg_smallp_route(g->P,&mode,1)) {
+        id<MTLComputeCommandEncoder> e=[g->cb computeCommandEncoder]; if(!e)return NULL;
+        mg_smallp_encode(e,1,(__bridge id<MTLBuffer>)w->buf,0,x,0,y,0,w->nblk,w->out,w->in,g->P);
+        [e endEncoding]; return (__bridge void*)y;
+    }
+    id<MTLComputeCommandEncoder>e=[g->cb computeCommandEncoder];[e setComputePipelineState:psoQ6KGemm];[e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:0 atIndex:0];[e setBuffer:x offset:0 atIndex:1];[e setBuffer:y offset:0 atIndex:2];[e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)w->out,(NSUInteger)g->P,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];[e endEncoding];return (__bridge void*)y;
 }
 void *mg_graph_encode_q6k(void *opaque, int wid) {
     MGProjectionGraph *g=opaque; int i=wid-MG_Q6_BASE; if(!g||g->committed||!g->xf||!q6k_valid(wid)||gQ6[i].in!=g->in)return NULL;
-    if (g->graph_gemv_p1 && g->P == 1) { id<MTLBuffer> y=mg_graph_q6k_gemv(g,g->xf,wid); return y?(__bridge void*)y:NULL; }
-    Q6KW *w=&gQ6[i]; id<MTLBuffer> y=(__bridge id<MTLBuffer>)mg_graph_result(g,(NSUInteger)g->P*(NSUInteger)w->out);if(!y)return NULL; id<MTLComputeCommandEncoder>e=[g->cb computeCommandEncoder];[e setComputePipelineState:psoQ6KGemm];[e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:0 atIndex:0];[e setBuffer:g->xf offset:0 atIndex:1];[e setBuffer:y offset:0 atIndex:2];[e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)w->out,(NSUInteger)g->P,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];[e endEncoding];return (__bridge void*)y;
+    return mg_graph_encode_q6k_input(g,wid,g->xf);
 }
 void *mg_graph_encode_q6k_from(void *opaque,int wid,void*input,int elems) {
     MGProjectionGraph*g=opaque;int i=wid-MG_Q6_BASE;id<MTLBuffer>x=(__bridge id<MTLBuffer>)input;if(!g||g->committed||!x||!q6k_valid(wid)||gQ6[i].in*g->P!=elems||![g->results containsObject:x])return NULL;
-    if (g->graph_gemv_p1 && g->P == 1) { id<MTLBuffer> y=mg_graph_q6k_gemv(g,x,wid); return y?(__bridge void*)y:NULL; }
-    Q6KW*w=&gQ6[i];id<MTLBuffer>y=(__bridge id<MTLBuffer>)mg_graph_result(g,(NSUInteger)g->P*(NSUInteger)w->out);if(!y)return NULL;id<MTLComputeCommandEncoder>e=[g->cb computeCommandEncoder];[e setComputePipelineState:psoQ6KGemm];[e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:0 atIndex:0];[e setBuffer:x offset:0 atIndex:1];[e setBuffer:y offset:0 atIndex:2];[e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)w->out,(NSUInteger)g->P,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];[e endEncoding];return (__bridge void*)y;
+    return mg_graph_encode_q6k_input(g,wid,x);
 }
 extern void *mg_q8_graph_encode(void *graph, int wid);
 extern void *mg_q8_graph_encode_from(void *graph, int wid, void *q, void *d, int elems);

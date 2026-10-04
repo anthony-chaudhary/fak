@@ -164,3 +164,34 @@ func TestInKernelExecutionLogNamesQwen35MetalPath(t *testing.T) {
 		}
 	}
 }
+
+// TestInKernelExecutionLogAppendsPrefillGEMM pins the #13694 attribution key: the summary
+// line ends with gemm=<observed Q4_K prefill route>, "none" before any prefill observed one,
+// and every pre-existing key keeps its position ahead of it.
+// fak-test:runtime fast est=10ms lane=default
+func TestInKernelExecutionLogAppendsPrefillGEMM(t *testing.T) {
+	m := model.NewSynthetic(model.Config{LayerTypes: []string{"linear_attention"}})
+	p := &InKernelPlanner{m: m, modelID: "Qwen3.8-4B-Q4_K_M", metal: true, q4k: true}
+	var buf bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(old) })
+	for _, tc := range []struct{ stored, want string }{
+		{"", "gemm=" + model.Q4KPrefillGEMMNone},
+		{"scalar", "gemm=scalar"},
+		{"scalar(req=mm32)+cpu", "gemm=scalar(req=mm32)+cpu"},
+	} {
+		buf.Reset()
+		if tc.stored != "" {
+			p.prefillQ4KGEMM.Store(tc.stored)
+		}
+		p.logExecutionSummary("neon", "", 12, 0, 0, 12, 0.9, 13.3, 1, 0, 0)
+		got := strings.TrimSpace(buf.String())
+		if !strings.HasSuffix(got, " "+tc.want) {
+			t.Fatalf("execution log %q does not end with %q", got, tc.want)
+		}
+		if i, j := strings.Index(got, "forward_path=metal/qwen35-hybrid-session-v1"), strings.Index(got, " decode="); i < 0 || j < i {
+			t.Fatalf("execution log %q reordered the existing keys", got)
+		}
+	}
+}

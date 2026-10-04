@@ -137,6 +137,7 @@ func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, 
 // it is sized to the logits vocab on first use and never persists across turns.
 func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, measurementOpt ...*nativeInferenceMeasurement) (gen, promptTok, cacheable, matched int, sourceTier radixkv.SnapshotTier, prefillS, decodeS float64, stopped bool, err error) {
 	p.qwen35MetalGDNExecuted.Store(false)
+	p.prefillQ4KGEMM.Store("")
 	traceID := nativePhaseTraceID(ctx)
 	p.beginNativeFirstDraw(traceID, maxNew)
 	defer func() {
@@ -443,6 +444,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	logits := cachedLogits
 	if logits == nil {
 		tp := time.Now()
+		s.ResetQ4KPrefillGEMMObservation()
 		flightPrefilled := false
 		if p.cpuPrefixFlightEligible(reuse, matched) && s.Cache != nil && s.Cache.CanEvict() == nil {
 			var flightKV *model.KVCache
@@ -534,6 +536,9 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		}
 		prefillS = time.Since(tp).Seconds()
 		enginestep.Default.ObservePhase(enginestep.PhasePrefill, time.Since(tp))
+		// Snapshot the Q4_K GEMM route this prefill observed before decode (an MTP
+		// verify panel can dispatch the same GEMM) so the summary line attributes it.
+		p.prefillQ4KGEMM.Store(s.Q4KPrefillGEMMObservation())
 	}
 	if err = ctx.Err(); err != nil {
 		return

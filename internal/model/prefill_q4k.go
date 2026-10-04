@@ -231,7 +231,7 @@ func (s *Session) prefillBatchedQ4KPanel(ids []int, useGraph bool) []float32 {
 		// bias-aware blockStep. The learned input_layernorm.bias must ride along; rmsnormCfg
 		// hard-passes nil.
 		Xn := normPanel
-		parFor(P, dispatchWorkers, func(lo, hi int) {
+		parForWork(P, dispatchWorkers, H, func(lo, hi int) {
 			wIn := m.tensor(lp("input_layernorm.weight"))
 			bIn := m.tensorOptional(lp("input_layernorm.bias"))
 			for t := lo; t < hi; t++ {
@@ -256,14 +256,14 @@ func (s *Session) prefillBatchedQ4KPanel(ids []int, useGraph bool) []float32 {
 		for t := 0; t < P; t++ {
 			m.addBiasIfPresent(O[t*H:(t+1)*H], lp("self_attn.o_proj.bias"))
 		}
-		parFor(len(X), dispatchWorkers, func(lo, hi int) {
+		parForWork(len(X), dispatchWorkers, 1, func(lo, hi int) {
 			for i := lo; i < hi; i++ {
 				X[i] += O[i]
 			}
 		})
 
 		Xn2 := normPanel
-		parFor(P, dispatchWorkers, func(lo, hi int) {
+		parForWork(P, dispatchWorkers, H, func(lo, hi int) {
 			wPost := m.tensor(lp("post_attention_layernorm.weight"))
 			bPost := m.tensorOptional(lp("post_attention_layernorm.bias"))
 			for t := lo; t < hi; t++ {
@@ -281,7 +281,7 @@ func (s *Session) prefillBatchedQ4KPanel(ids []int, useGraph bool) []float32 {
 			m.addBiasIfPresent(G[t*I:(t+1)*I], lp("mlp.gate_proj.bias"))
 			m.addBiasIfPresent(U[t*I:(t+1)*I], lp("mlp.up_proj.bias"))
 		}
-		parFor(len(G), dispatchWorkers, func(lo, hi int) {
+		parForWork(len(G), dispatchWorkers, 1, func(lo, hi int) {
 			for i := lo; i < hi; i++ {
 				G[i] = act(G[i], cfg) * U[i]
 			}
@@ -290,7 +290,7 @@ func (s *Session) prefillBatchedQ4KPanel(ids []int, useGraph bool) []float32 {
 		for t := 0; t < P; t++ {
 			m.addBiasIfPresent(Down[t*H:(t+1)*H], lp("mlp.down_proj.bias"))
 		}
-		parFor(len(X), dispatchWorkers, func(lo, hi int) {
+		parForWork(len(X), dispatchWorkers, 1, func(lo, hi int) {
 			for i := lo; i < hi; i++ {
 				X[i] += Down[i]
 			}
@@ -335,7 +335,7 @@ func (s *Session) prefillBatchedQ4KPanel(ids []int, useGraph bool) []float32 {
 		// Stash raw (pre-RoPE, post-qk-norm) K straight into the cache, THEN RoPE K in place —
 		// same bytes the per-token path's Kraw captures, no extra alloc+copy per layer.
 		s.Cache.Kraw[l] = append(s.Cache.Kraw[l], K...)
-		parFor(P, dispatchWorkers, func(lo, hi int) {
+		parForWork(P, dispatchWorkers, (nH+nKV)*hd, func(lo, hi int) {
 			for t := lo; t < hi; t++ {
 				ropeRowQKInto(Q[t*nH*hd:(t+1)*nH*hd], K[t*w:(t+1)*w], cosP[t], sinP[t], hd, nH, nKV)
 			}
