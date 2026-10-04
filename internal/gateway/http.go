@@ -784,6 +784,8 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if routedModel != "" {
 		req.Model = routedModel
 	}
+	// Request-invariant system+tools head so parent and subagent requests share a prefix-KV hit.
+	req.Messages, req.Tools = normalizeHarnessPrefix(req.Messages, req.Tools)
 	r, ok = s.prepareChatRoute(w, r, req.Model)
 	if !ok {
 		return

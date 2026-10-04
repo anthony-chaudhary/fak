@@ -111,7 +111,7 @@ func DecodeAnthropicMessagesRequest(raw []byte) (*AnthropicMessagesRequest, erro
 		TopK:          in.TopK,
 		StopSequences: in.StopSequences,
 		Stream:        in.Stream,
-		System:        parseAnthropicText(in.System),
+		System:        parseAnthropicSystem(in.System),
 		Raw:           raw,
 	}
 	if in.Temperature != nil {
@@ -466,6 +466,52 @@ func parseAnthropicText(raw json.RawMessage) string {
 	if err := json.Unmarshal(raw, &blocks); err != nil {
 		return ""
 	}
+	return foldAnthropicBlocks(blocks)
+}
+
+// AnthropicBillingHeaderPrefix opens the client-attribution text block Claude Code
+// prepends to every request's `system` array, e.g.
+// `x-anthropic-billing-header: cc_version=2.1.37.a1b; cc_entrypoint=cli; cch=0f3e2;`.
+// Its cc_version suffix / cch fields vary per request (parent vs subagent), and it sits
+// at byte 0 of the system prompt, so folding it into the rendered prompt defeats every
+// cross-request prefix-KV hit. It is billing metadata for Anthropic's edge, meaningless
+// to a local model.
+const AnthropicBillingHeaderPrefix = "x-anthropic-billing-header:"
+
+// IsAnthropicBillingHeaderText reports whether s is exactly one billing-header line:
+// it begins with AnthropicBillingHeaderPrefix (after surrounding whitespace) and spans
+// a single line. A block carrying any further prose is NOT matched, so a real
+// instruction is never dropped.
+func IsAnthropicBillingHeaderText(s string) bool {
+	t := strings.TrimSpace(s)
+	return strings.HasPrefix(t, AnthropicBillingHeaderPrefix) && !strings.ContainsRune(t, '\n')
+}
+
+// parseAnthropicSystem folds the `system` field like parseAnthropicText, except that a
+// standalone text block holding only the Claude Code billing header is dropped from the
+// decoded prompt (req.Raw is untouched, so a byte-faithful Anthropic passthrough still
+// forwards it). A bare-string system is folded verbatim.
+func parseAnthropicSystem(raw json.RawMessage) string {
+	t := skipSpace(raw)
+	if len(t) == 0 || t[0] != '[' {
+		return parseAnthropicText(raw)
+	}
+	var blocks []anthropicInboundBlock
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		return ""
+	}
+	kept := blocks[:0]
+	for _, blk := range blocks {
+		if (blk.Type == "" || blk.Type == "text") && IsAnthropicBillingHeaderText(blk.Text) {
+			continue
+		}
+		kept = append(kept, blk)
+	}
+	return foldAnthropicBlocks(kept)
+}
+
+// foldAnthropicBlocks joins decoded content blocks into one string (see parseAnthropicText).
+func foldAnthropicBlocks(blocks []anthropicInboundBlock) string {
 	var b strings.Builder
 	for _, blk := range blocks {
 		if blk.Text != "" {

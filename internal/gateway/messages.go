@@ -193,6 +193,8 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	if s.refuseNativeModelMismatch(w, r, req.Model, "") {
 		return
 	}
+	// Request-invariant system+tools head so parent and subagent requests share a prefix-KV hit.
+	s.normalizeAnthropicHarnessPrefix(r, req)
 	ctx := r.Context()
 	reqTrace := s.traceFor(r.Header.Get("X-Trace-Id"))
 	appendSessionLedger(reqTrace, "user_message", turnLedgerSummary(req))
