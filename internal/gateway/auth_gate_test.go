@@ -207,3 +207,64 @@ func TestAuthGateAllowLAN(t *testing.T) {
 		t.Errorf("WAN caller with valid token = %d, want 200 OK", recWANAuthed.Code)
 	}
 }
+
+func TestAuthGateProxiedRequestLosesPeerExemptions(t *testing.T) {
+	s, err := New(Config{
+		EngineID:   "mock",
+		Model:      "m",
+		Provider:   "openai",
+		RequireKey: "secret-key-123",
+		AllowLAN:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name       string
+		path       string
+		peer       string
+		header     string
+		key        string
+		wantAuthed bool
+	}{
+		{"loopback LAN no proxy exempt", "/v1/models", "127.0.0.1:5000", "", "", true},
+		{"LAN no proxy exempt", "/v1/models", "192.168.1.100:5000", "", "", true},
+		{"loopback CF tunnel no key", "/v1/models", "127.0.0.1:5000", "CF-Connecting-IP", "", false},
+		{"loopback CF tunnel with key", "/v1/models", "127.0.0.1:5000", "CF-Connecting-IP", "secret-key-123", true},
+		{"LAN X-Real-IP no key", "/v1/models", "192.168.1.100:5000", "X-Real-IP", "", false},
+		{"loopback root via Forwarded", "/", "127.0.0.1:5000", "Forwarded", "", false},
+		{"loopback metrics via XFF no key", "/metrics", "127.0.0.1:5000", "X-Forwarded-For", "", false},
+		{"loopback metrics via XFF with key", "/metrics", "127.0.0.1:5000", "X-Forwarded-For", "secret-key-123", true},
+		{"healthz via CF tunnel exempt", "/healthz", "127.0.0.1:5000", "CF-Ray", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req.RemoteAddr = tc.peer
+			if tc.header != "" {
+				req.Header.Set(tc.header, "203.0.113.8")
+			}
+			if tc.key != "" {
+				req.Header.Set("Authorization", "Bearer "+tc.key)
+			}
+			rec := httptest.NewRecorder()
+			s.Handler().ServeHTTP(rec, req)
+			if got := rec.Code != http.StatusUnauthorized; got != tc.wantAuthed {
+				t.Fatalf("status = %d, wantAuthed = %v", rec.Code, tc.wantAuthed)
+			}
+		})
+	}
+}
+
+func TestRequestViaProxy(t *testing.T) {
+	for _, h := range proxyHeaders {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set(h, "x")
+		if !requestViaProxy(req) {
+			t.Errorf("requestViaProxy with %s = false, want true", h)
+		}
+	}
+	if requestViaProxy(httptest.NewRequest(http.MethodGet, "/", nil)) {
+		t.Error("requestViaProxy without forwarding headers = true, want false")
+	}
+}

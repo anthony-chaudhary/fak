@@ -34,6 +34,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/snapshot"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
+	"github.com/anthony-chaudhary/fak/pkg/deploykit/coherence"
 )
 
 type repeatedStringFlag []string
@@ -234,6 +235,7 @@ type serveFlags struct {
 	applianceObservability       *bool
 	maxTotalTokens               *int
 	maxBatchPrefillTokens        *int
+	readinessCoherence           *int
 	fs                           *flag.FlagSet
 	explicit                     map[string]bool
 }
@@ -248,6 +250,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.fs = fs
 	sf.maxTotalTokens = fs.Int("max-total-tokens", 0, "upper bound on a request's total tokens (prompt + max_new_tokens). Must not exceed admission token budget.")
 	sf.maxBatchPrefillTokens = fs.Int("max-batch-prefill-tokens", 0, "upper bound on batch prefill tokens (alias / companion to max-total-tokens)")
+	sf.readinessCoherence = fs.Int("readiness-coherence", coherence.DefaultCount, "hold readiness until a temperature-0 'count 1..N' probe answers correctly (binary/shader skew); 0 disables")
 	sf.configPath = fs.String("config", "", "load reviewable deployment defaults from fak.toml (explicit flags override; no implicit ambient lookup)")
 	sf.applianceObservability = fs.Bool("appliance-observability", false, "activate appliance Grafana dashboard catalog profile (fak-strix-*) and default routing to fak-strix-index")
 	sf.printEffectiveConfig = fs.Bool("print-effective-config", false, "print supported effective serve configuration with value provenance, then exit without binding a listener")

@@ -1181,6 +1181,12 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 		agentWarmArmed := installServeAgentWarm(rt.srv, *sf.nativeCodeWorkspace, os.Stderr)
 		defer rt.releaseServeAgentWarm()
 		rt.srv.ArmWarmupGate()
+		// Known-answer coherence probe: a binary/SPIR-V skew decodes fluent noise at
+		// full speed with /healthz ok; RunWarmup now holds readiness until the model
+		// can count. --readiness-coherence=0 disables.
+		if sf.readinessCoherence != nil {
+			rt.srv.ArmCoherenceProbe(*sf.readinessCoherence)
+		}
 		go func() {
 			runServeBackendWarmup(ctx, rt.srv.RunWarmup, os.Stderr)
 			if agentWarmArmed {

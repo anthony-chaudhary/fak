@@ -593,6 +593,9 @@ func (s *Server) authExempt(r *http.Request) bool {
 	if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 		return true
 	}
+	if requestViaProxy(r) {
+		return false
+	}
 	if s.allowLAN && requestFromLAN(r) {
 		return true
 	}
@@ -611,6 +614,25 @@ func (s *Server) authExempt(r *http.Request) bool {
 		}
 		prefix = "/" + strings.Trim(prefix, "/")
 		if r.URL.Path == prefix || strings.HasPrefix(r.URL.Path, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+var proxyHeaders = []string{
+	"CF-Connecting-IP", "CF-Ray", "CF-Visitor",
+	"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto",
+	"X-Real-IP", "Forwarded", "True-Client-IP",
+}
+
+// requestViaProxy reports whether the request carries a forwarding/edge header,
+// meaning an on-box proxy (e.g. cloudflared) may be relaying an off-box caller.
+// These headers are client-spoofable, but presence can only REMOVE a peer-address
+// exemption, so it fails closed.
+func requestViaProxy(r *http.Request) bool {
+	for _, h := range proxyHeaders {
+		if _, ok := r.Header[http.CanonicalHeaderKey(h)]; ok {
 			return true
 		}
 	}
@@ -739,6 +761,14 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !validateChatRequestIngress(w, req) {
 		return
 	}
+	// Deadline-aware admission: refuse work that cannot finish before the
+	// client's declared deadline, and bind that deadline to the request
+	// context so generation stops when it passes (deadline_admission.go).
+	r, releaseDeadline, ok := s.admitClientDeadline(w, r, turnCostBegan, estimateMessageContentTokens(req.Messages), req.MaxTokens)
+	if !ok {
+		return
+	}
+	defer releaseDeadline()
 	// Stamp the causal input on the untouched wire envelope before admission
 	// transforms, request routing, planner selection, or model execution.
 	inputTriggerRoute, routedModel, err := s.admitAndRouteChatInputTriggerWithContext(r.Context(), req)
@@ -754,6 +784,8 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if routedModel != "" {
 		req.Model = routedModel
 	}
+	// Request-invariant system+tools head so parent and subagent requests share a prefix-KV hit.
+	req.Messages, req.Tools = normalizeHarnessPrefix(req.Messages, req.Tools)
 	r, ok = s.prepareChatRoute(w, r, req.Model)
 	if !ok {
 		return
