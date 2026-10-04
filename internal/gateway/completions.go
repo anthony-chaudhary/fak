@@ -69,6 +69,9 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if s.refuseNativeModelMismatch(w, r, req.Model, "") {
+		return
+	}
 	if !releaseEPFanout(r) {
 		return
 	}

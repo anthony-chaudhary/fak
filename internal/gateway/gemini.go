@@ -158,6 +158,9 @@ func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
+	if s.refuseNativeModelMismatch(w, r, model, "") {
+		return
+	}
 	if !releaseEPFanout(r) {
 		return
 	}

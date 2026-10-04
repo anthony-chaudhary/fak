@@ -436,10 +436,9 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 		finish = "stop"
 	}
 
-	respModel := comp.Model
-	if respModel == "" {
-		respModel = reqModel
-	}
+	// response.created already announced reqModel, so the terminal frame keeps it
+	// (constant-model SSE, #5399) even when the planner reports its served name.
+	respModel := s.responseModel(comp.Model, reqModel, reqModel, "#5399")
 	// Open the stream even for an empty turn so the client always gets a
 	// well-formed created → completed sequence.
 	start()
