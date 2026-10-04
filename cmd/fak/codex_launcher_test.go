@@ -1070,8 +1070,12 @@ func TestRunCodexDryRunRetainsCommandDetails(t *testing.T) {
 	}
 }
 
-func TestCodexLauncherSynchronizesProjectAssets(t *testing.T) {
-	ws := t.TempDir()
+// codexLauncherAssetFixture materializes a minimal project-assets manifest with
+// a canonical skill that has no generated adapter yet, so a launch must not
+// create it and only an explicit writer may.
+func codexLauncherAssetFixture(t *testing.T) (ws, skillMD string) {
+	t.Helper()
+	ws = t.TempDir()
 	manifestDir := filepath.Join(ws, ".claude")
 	if err := os.MkdirAll(filepath.Join(ws, ".claude", "skills", "codexskill"), 0755); err != nil {
 		t.Fatal(err)
@@ -1110,7 +1114,7 @@ func TestCodexLauncherSynchronizesProjectAssets(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(manifestDir, "project-assets.json"), []byte(manifestJSON), 0644); err != nil {
 		t.Fatal(err)
 	}
-	skillMD := "---\nname: codexskill\ndescription: Codex test skill\n---\n# Codex\n"
+	skillMD = "---\nname: codexskill\ndescription: Codex test skill\n---\n# Codex\n"
 	if err := os.WriteFile(filepath.Join(ws, ".claude", "skills", "codexskill", "SKILL.md"), []byte(skillMD), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -1120,8 +1124,17 @@ func TestCodexLauncherSynchronizesProjectAssets(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, ".claude", "goal-prompts", "base.md"), []byte("prompt\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	return ws, skillMD
+}
 
-	adapterPath := filepath.Join(ws, ".agents", "skills", "codexskill", "SKILL.md")
+func codexLauncherAdapterPath(ws string) string {
+	return filepath.Join(ws, ".agents", "skills", "codexskill", "SKILL.md")
+}
+
+func TestCodexLauncherDoesNotSynchronizeProjectAssets(t *testing.T) {
+	ws, skillMD := codexLauncherAssetFixture(t)
+	adapterPath := codexLauncherAdapterPath(ws)
+	canonicalPath := filepath.Join(ws, ".claude", "skills", "codexskill", "SKILL.md")
 	if _, err := os.Stat(adapterPath); !os.IsNotExist(err) {
 		t.Fatalf("expected adapter to not exist before launch")
 	}
@@ -1143,8 +1156,36 @@ func TestCodexLauncherSynchronizesProjectAssets(t *testing.T) {
 	if !ran {
 		t.Fatal("expected codexLaunchRun to be called")
 	}
+	if _, err := os.Stat(adapterPath); !os.IsNotExist(err) {
+		t.Fatalf("ordinary launch must not materialize project adapter assets; stat err = %v", err)
+	}
+	if b, err := os.ReadFile(canonicalPath); err != nil || string(b) != skillMD {
+		t.Fatalf("canonical skill changed on launch: err=%v content=%q", err, b)
+	}
+}
+
+func TestCodexLauncherProjectAssetsRequireExplicitWrite(t *testing.T) {
+	ws, _ := codexLauncherAssetFixture(t)
+	adapterPath := codexLauncherAdapterPath(ws)
+
+	origRun := codexLaunchRun
+	codexLaunchRun = func(stdout, stderr io.Writer, argv, env []string) int { return 0 }
+	t.Cleanup(func() { codexLaunchRun = origRun })
+
+	t.Chdir(ws)
+	var out, errb bytes.Buffer
+	if rc := runCodex(&out, &errb, []string{"--guard", "--split", "off", "--loop-gate", "off", "--quiet", "--", "exec", "do task"}); rc != 0 {
+		t.Fatalf("runCodex returned %d, stderr: %s", rc, errb.String())
+	}
+	if _, err := os.Stat(adapterPath); !os.IsNotExist(err) {
+		t.Fatalf("launch wrote project assets before any explicit write; stat err = %v", err)
+	}
+
+	if _, err := projectassets.Build(ws, true); err != nil {
+		t.Fatalf("explicit project-assets write failed: %v", err)
+	}
 	if _, err := os.Stat(adapterPath); err != nil {
-		t.Fatalf("expected adapter to be synchronized, got error: %v", err)
+		t.Fatalf("explicit write did not materialize the adapter: %v", err)
 	}
 }
 

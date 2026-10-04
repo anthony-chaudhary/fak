@@ -253,7 +253,10 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 
-	if _, err := projectassets.Ensure(".", true); err != nil && !launch.quiet {
+	// Read project assets for launch policy only; an ordinary launch must not
+	// materialize or update repository adapter assets. Explicit writers remain
+	// `fak project-assets sync` and the Codex/OpenCode config verbs.
+	if _, err := projectassets.Build(".", false); err != nil && !launch.quiet {
 		fmt.Fprintf(stderr, "fak codex: warning: %v\n", err)
 	}
 

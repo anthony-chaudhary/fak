@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/projectassets"
 )
 
 func TestOpenCodeLauncherGuardChoice(t *testing.T) {
@@ -285,8 +287,11 @@ func TestOpencodeLauncherSplitValidation(t *testing.T) {
 	}
 }
 
-func TestOpencodeLauncherSynchronizesProjectAssets(t *testing.T) {
-	ws := t.TempDir()
+// opencodeLauncherAssetFixture materializes a minimal project-assets manifest
+// with a canonical skill that has no generated adapter yet.
+func opencodeLauncherAssetFixture(t *testing.T) (ws, skillMD string) {
+	t.Helper()
+	ws = t.TempDir()
 	manifestDir := filepath.Join(ws, ".claude")
 	if err := os.MkdirAll(filepath.Join(ws, ".claude", "skills", "openskill"), 0755); err != nil {
 		t.Fatal(err)
@@ -325,7 +330,7 @@ func TestOpencodeLauncherSynchronizesProjectAssets(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(manifestDir, "project-assets.json"), []byte(manifestJSON), 0644); err != nil {
 		t.Fatal(err)
 	}
-	skillMD := "---\nname: openskill\ndescription: OpenCode test skill\n---\n# Open\n"
+	skillMD = "---\nname: openskill\ndescription: OpenCode test skill\n---\n# Open\n"
 	if err := os.WriteFile(filepath.Join(ws, ".claude", "skills", "openskill", "SKILL.md"), []byte(skillMD), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -338,8 +343,17 @@ func TestOpencodeLauncherSynchronizesProjectAssets(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "opencode.json"), []byte(`{"snapshot": false}`), 0644); err != nil {
 		t.Fatal(err)
 	}
+	return ws, skillMD
+}
 
-	adapterPath := filepath.Join(ws, ".agents", "skills", "openskill", "SKILL.md")
+func opencodeLauncherAdapterPath(ws string) string {
+	return filepath.Join(ws, ".agents", "skills", "openskill", "SKILL.md")
+}
+
+func TestOpencodeLauncherDoesNotSynchronizeProjectAssets(t *testing.T) {
+	ws, skillMD := opencodeLauncherAssetFixture(t)
+	adapterPath := opencodeLauncherAdapterPath(ws)
+	canonicalPath := filepath.Join(ws, ".claude", "skills", "openskill", "SKILL.md")
 	if _, err := os.Stat(adapterPath); !os.IsNotExist(err) {
 		t.Fatalf("expected adapter to not exist before launch")
 	}
@@ -354,9 +368,7 @@ func TestOpencodeLauncherSynchronizesProjectAssets(t *testing.T) {
 
 	t.Chdir(ws)
 	var stdout, stderr bytes.Buffer
-	// Project-asset synchronization is part of the guarded launch; since
-	// f856f7b0d2 (#13485) a bare `fak opencode` launches OpenCode directly and
-	// leaves the workspace untouched, so the guard is requested explicitly.
+	// Project assets are read, never written, on a guarded launch.
 	code := runOpencode(&stdout, &stderr, []string{"--guard", "--quiet"})
 	if code != 0 {
 		t.Fatalf("runOpencode failed with code %d, stderr: %s", code, stderr.String())
@@ -364,8 +376,36 @@ func TestOpencodeLauncherSynchronizesProjectAssets(t *testing.T) {
 	if !ran {
 		t.Fatal("expected opencodeLaunchRun to be called")
 	}
+	if _, err := os.Stat(adapterPath); !os.IsNotExist(err) {
+		t.Fatalf("guarded launch must not materialize project adapter assets; stat err = %v", err)
+	}
+	if b, err := os.ReadFile(canonicalPath); err != nil || string(b) != skillMD {
+		t.Fatalf("canonical skill changed on launch: err=%v content=%q", err, b)
+	}
+}
+
+func TestOpenCodeLauncherProjectAssetsRequireExplicitWrite(t *testing.T) {
+	ws, _ := opencodeLauncherAssetFixture(t)
+	adapterPath := opencodeLauncherAdapterPath(ws)
+
+	origRun := opencodeLaunchRun
+	opencodeLaunchRun = func(stdout, stderr io.Writer, argv, env []string) int { return 0 }
+	t.Cleanup(func() { opencodeLaunchRun = origRun })
+
+	t.Chdir(ws)
+	var stdout, stderr bytes.Buffer
+	if code := runOpencode(&stdout, &stderr, []string{"--guard", "--quiet"}); code != 0 {
+		t.Fatalf("runOpencode failed with code %d, stderr: %s", code, stderr.String())
+	}
+	if _, err := os.Stat(adapterPath); !os.IsNotExist(err) {
+		t.Fatalf("launch wrote project assets before any explicit write; stat err = %v", err)
+	}
+
+	if _, err := projectassets.Build(ws, true); err != nil {
+		t.Fatalf("explicit project-assets write failed: %v", err)
+	}
 	if _, err := os.Stat(adapterPath); err != nil {
-		t.Fatalf("expected adapter to be synchronized, got error: %v", err)
+		t.Fatalf("explicit write did not materialize the adapter: %v", err)
 	}
 }
 

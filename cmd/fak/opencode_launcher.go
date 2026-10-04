@@ -236,7 +236,10 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if launch.guard {
-		if _, err := projectassets.Ensure(".", true); err != nil && !launch.quiet {
+		// Read project assets for launch policy only; a guarded launch must not
+		// materialize or update repository adapter assets. Explicit writers remain
+		// `fak project-assets sync` and the OpenCode config verbs.
+		if _, err := projectassets.Build(".", false); err != nil && !launch.quiet {
 			fmt.Fprintf(stderr, "fak opencode: warning: %v\n", err)
 		}
 	}
