@@ -1,6 +1,10 @@
 package model
 
-import "math"
+import (
+	"math"
+
+	"github.com/anthony-chaudhary/fak/internal/model/ffn"
+)
 
 // arch.go — the Stage-2 mechanical-axis hooks (MODEL-ARCH-SEAM.md §2b class-1).
 //
@@ -227,13 +231,26 @@ func (m *Model) addBiasIfPresent(y []float32, name string) {
 // addBiasIfPresent is a no-op when the tensor is absent, so a bias-free checkpoint (Llama,
 // SmolLM2, Qwen2/3, Gemma, Mistral — every f32 CPU numeric oracle in the suite) is
 // byte-for-byte unchanged. proj_bias_batched_lanes_test.go is the witness.
+//
+// The activation*up fusion is delegated to ffn.ApplyInPlace after the per-row bias add.
+// The delegation is numerically identical: ApplyInPlace validates the same nonempty /
+// equal-length / non-nil-activation contract and writes gate[i] = act(gate[i]) * up[i] in
+// the same increasing-index order as the loop it replaces. A zero-row panel (N==0) is a
+// no-op in both forms.
 func (m *Model) fuseGatedMLPPanels(lp func(string) string, G, U []float32, N, I int, cfg Config) {
+	// A zero-row (or zero-width) panel is a no-op, exactly as the pre-refactor
+	// activation loop was: ApplyInPlace refuses an empty row, so it must not be
+	// reached for an empty panel.
+	if len(G) == 0 {
+		return
+	}
 	for row := 0; row < N; row++ {
 		m.addBiasIfPresent(G[row*I:(row+1)*I], lp("mlp.gate_proj.bias"))
 		m.addBiasIfPresent(U[row*I:(row+1)*I], lp("mlp.up_proj.bias"))
 	}
-	for i := range G {
-		G[i] = act(G[i], cfg) * U[i]
+	activate := func(v float32) float32 { return act(v, cfg) }
+	if err := ffn.ApplyInPlace(G, U, activate); err != nil {
+		panic(err)
 	}
 }
 

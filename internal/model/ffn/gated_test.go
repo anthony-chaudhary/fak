@@ -2,6 +2,7 @@ package ffn
 
 import (
 	"errors"
+	"math"
 	"reflect"
 	"slices"
 	"strings"
@@ -119,6 +120,96 @@ func TestGatedSuccessAllocations(t *testing.T) {
 }
 
 var gatedBenchmarkSink []float32
+
+// TestApplyInPlaceContract pins the projection-free half of Gated: ApplyInPlace must
+// validate its full contract BEFORE the first mutation, fuse activate(gate)*up in
+// increasing index order, leave up read-only, and agree bit-for-bit with the inline
+//
+//	gate[i] = activate(gate[i]) * up[i] loop it replaces.
+func TestApplyInPlaceContract(t *testing.T) {
+	t.Run("validates before mutation", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			gate     []float32
+			up       []float32
+			activate Activation
+			wantText string
+		}{
+			{name: "empty", gate: []float32{}, up: []float32{}, activate: func(x float32) float32 { return x }, wantText: "nonempty"},
+			{name: "length mismatch", gate: []float32{1, 2}, up: []float32{3}, activate: func(x float32) float32 { return x }, wantText: "length"},
+			{name: "nil activation", gate: []float32{1}, up: []float32{2}, wantText: "activation"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				gateBefore := append([]float32(nil), tt.gate...)
+				upBefore := append([]float32(nil), tt.up...)
+				activationCalls := 0
+				activate := tt.activate
+				if activate != nil {
+					activate = func(x float32) float32 {
+						activationCalls++
+						return tt.activate(x)
+					}
+				}
+				err := ApplyInPlace(tt.gate, tt.up, activate)
+				if err == nil || !strings.Contains(strings.ToLower(err.Error()), tt.wantText) {
+					t.Fatalf("ApplyInPlace error = %v, want meaningful text containing %q", err, tt.wantText)
+				}
+				if activationCalls != 0 {
+					t.Fatalf("activation ran before validation: %d calls", activationCalls)
+				}
+				if !slices.Equal(tt.gate, gateBefore) || !slices.Equal(tt.up, upBefore) {
+					t.Fatalf("validation mutated inputs: gate=%v up=%v", tt.gate, tt.up)
+				}
+			})
+		}
+	})
+
+	t.Run("fuses in order and matches the inline loop", func(t *testing.T) {
+		gate := []float32{3, -2, 0.5, 17}
+		up := []float32{4, 5, -6, -0.25}
+		want := make([]float32, len(gate))
+		for i := range want {
+			// Independent reference: the exact expression the production loop ran.
+			want[i] = (gate[i] + 1) * up[i]
+		}
+		upBefore := append([]float32(nil), up...)
+		var seen []float32
+		if err := ApplyInPlace(gate, up, func(x float32) float32 {
+			seen = append(seen, x)
+			return x + 1
+		}); err != nil {
+			t.Fatalf("ApplyInPlace: %v", err)
+		}
+		if !slices.Equal(seen, []float32{3, -2, 0.5, 17}) {
+			t.Fatalf("activation order = %v", seen)
+		}
+		for i := range gate {
+			if math.Float32bits(gate[i]) != math.Float32bits(want[i]) {
+				t.Fatalf("gate[%d] bits=%#x want=%#x", i, math.Float32bits(gate[i]), math.Float32bits(want[i]))
+			}
+		}
+		if !slices.Equal(up, upBefore) {
+			t.Fatalf("up mutated: %v", up)
+		}
+	})
+
+	t.Run("zero allocations on success", func(t *testing.T) {
+		seed := []float32{1, 2, 3, 4}
+		gate := make([]float32, len(seed))
+		up := []float32{5, 6, 7, 8}
+		activate := Activation(func(x float32) float32 { return x * x })
+		allocs := testing.AllocsPerRun(1000, func() {
+			copy(gate, seed)
+			if err := ApplyInPlace(gate, up, activate); err != nil {
+				panic(err)
+			}
+		})
+		if allocs != 0 {
+			t.Fatalf("successful ApplyInPlace allocations = %v, want 0", allocs)
+		}
+	})
+}
 
 func BenchmarkGatedMatchedInline(b *testing.B) {
 	const width = 4096
