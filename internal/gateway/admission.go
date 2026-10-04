@@ -65,6 +65,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/enginestep"
 	"github.com/anthony-chaudhary/fak/internal/kvbudget"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/pkg/turncost"
@@ -1039,6 +1040,7 @@ func (c *AdmissionController) Acquire(ctx context.Context, req SeqRequest) (*Adm
 		req.SessionID = baseTraceID(req.TraceID)
 	}
 	req.TraceID = c.admissionTraceID(req.TraceID)
+	waitStart := time.Now()
 
 	c.mu.Lock()
 	if req.Trust.Deny {
@@ -1062,6 +1064,7 @@ func (c *AdmissionController) Acquire(ctx context.Context, req SeqRequest) (*Adm
 		c.admitLocked(req)
 		c.recordDecisionLocked(req, VerdictAdmitted, "", "")
 		c.mu.Unlock()
+		enginestep.Default.ObservePhase(enginestep.PhaseAdmissionWait, time.Since(waitStart))
 		return &AdmissionLease{ctl: c, traceID: req.TraceID}, nil
 	}
 	if c.policy.MaxWaiting > 0 && len(c.waiting) >= c.policy.MaxWaiting {
@@ -1089,12 +1092,14 @@ func (c *AdmissionController) Acquire(ctx context.Context, req SeqRequest) (*Adm
 	select {
 	case <-ready:
 		c.recordGrantLocked(req)
+		enginestep.Default.ObservePhase(enginestep.PhaseAdmissionWait, time.Since(waitStart))
 		return &AdmissionLease{ctl: c, traceID: req.TraceID}, nil
 	default:
 	}
 	select {
 	case <-ready:
 		c.recordGrantLocked(req)
+		enginestep.Default.ObservePhase(enginestep.PhaseAdmissionWait, time.Since(waitStart))
 		return &AdmissionLease{ctl: c, traceID: req.TraceID}, nil
 	case <-ctx.Done():
 		c.cancelAdmission(req.TraceID)

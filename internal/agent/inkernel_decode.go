@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/enginestep"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
@@ -171,6 +172,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	closeSession := false
 	var cachedLogits []float32
 	skipExactDeviceL1Readmission := false
+	lookupStart := time.Now()
 	if reuse {
 		owner, scoped := prefixCacheIdentityFromContext(ctx)
 		scopedLookup := scoped && p.scopedTree != nil
@@ -330,6 +332,8 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		skipExactDeviceL1Readmission = ((!scopedLookup) || (scopedLookup && (sourceScope == radixkv.ScopeTenant || sourceScope == radixkv.ScopeAgent))) &&
 			matchedSnapshot != nil &&
 			matched == len(ids) && cachedLogits != nil && sourceTier == radixkv.SnapshotTierDeviceL1
+		enginestep.Default.ObservePhase(enginestep.PhasePrefixLookup, time.Since(lookupStart))
+		enginestep.Default.ObservePrefixMatched(matched)
 	}
 	if s == nil {
 		matched = 0
@@ -484,6 +488,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			}
 		}
 		prefillS = time.Since(tp).Seconds()
+		enginestep.Default.ObservePhase(enginestep.PhasePrefill, time.Since(tp))
 	}
 	if err = ctx.Err(); err != nil {
 		return
@@ -507,6 +512,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// 3) Snapshot the full-prompt KV (before decode mutates s.Cache) and cache it under a
 	// fresh Lookup→Insert→Done. The snapshot covers the FULL ids prefix, so it is a valid
 	// leaf kv no matter how much a concurrent turn may have inserted since step 1.
+	admitStart := time.Now()
 	if admit {
 		if p.backend != nil {
 			if !skipExactDeviceL1Readmission {
@@ -552,6 +558,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 				p.mu.Unlock()
 			}
 		}
+		enginestep.Default.ObservePhase(enginestep.PhasePrefixAdmit, time.Since(admitStart))
 	}
 
 	// 3b) CW-03 (#13351): cache-POPULATE purpose exits HERE — after full-state admission,
@@ -625,6 +632,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		err = coalescedErr
 	}
 	decodeS = time.Since(td).Seconds()
+	enginestep.Default.ObservePhase(enginestep.PhaseDecode, time.Since(td))
 	if err == nil && ctx.Err() == nil && len(ln.forwarded) > 0 {
 		// Output has already been emitted successfully. Snapshot/admission is a
 		// best-effort acceleration for the next turn and must not turn that response
@@ -666,7 +674,9 @@ func (p *InKernelPlanner) prefillDivergentSuffix(ctx context.Context, s inKernel
 	}
 	chunkTokens := p.effectiveQwenQ4KPrefillChunkTokens()
 	if !p.qwenQ4KPrefillChunkTarget() || len(ids) <= chunkTokens {
+		chunkStart := time.Now()
 		logits := s.Prefill(ids)
+		enginestep.Default.ObservePrefillChunk(len(ids), time.Since(chunkStart))
 		recordQwen35SequencePrefillRoute(measurement, s, len(ids))
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -675,14 +685,18 @@ func (p *InKernelPlanner) prefillDivergentSuffix(ctx context.Context, s inKernel
 	}
 	for len(ids) > chunkTokens {
 		chunk := ids[:chunkTokens]
+		chunkStart := time.Now()
 		s.PrefillNoLogits(chunk)
+		enginestep.Default.ObservePrefillChunk(len(chunk), time.Since(chunkStart))
 		recordQwen35SequencePrefillRoute(measurement, s, len(chunk))
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		ids = ids[chunkTokens:]
 	}
+	chunkStart := time.Now()
 	logits := s.Prefill(ids)
+	enginestep.Default.ObservePrefillChunk(len(ids), time.Since(chunkStart))
 	recordQwen35SequencePrefillRoute(measurement, s, len(ids))
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -1064,7 +1078,9 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 	if ln.samplerHook != nil {
 		ln.samplerHook()
 	}
+	sampleStart := time.Now()
 	next = sampleLogitsWithPenalty(ln.logits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng)
+	enginestep.Default.ObservePhase(enginestep.PhaseSample, time.Since(sampleStart))
 	if ln.firstDraw != nil {
 		ln.firstDraw(next)
 		ln.firstDraw = nil
@@ -1119,8 +1135,10 @@ func inKernelDecodeSerial(ctx context.Context, ln *decodeLane) {
 		if !advance {
 			return
 		}
+		stepStart := time.Now()
 		if ln.measurement == nil || ln.measurement.traceNow == nil {
 			ln.logits = ln.s.Step(next)
+			enginestep.Default.ObserveDecodeStep(enginestep.PathSerial, 1, time.Since(stepStart))
 			if ln.forwarded != nil {
 				ln.forwarded = append(ln.forwarded, next)
 			}
@@ -1128,6 +1146,7 @@ func inKernelDecodeSerial(ctx context.Context, ln *decodeLane) {
 		}
 		started := ln.measurement.traceNow()
 		ln.logits = ln.s.Step(next)
+		enginestep.Default.ObserveDecodeStep(enginestep.PathSerial, 1, time.Since(stepStart))
 		if ln.forwarded != nil {
 			ln.forwarded = append(ln.forwarded, next)
 		}
@@ -1195,12 +1214,14 @@ func inKernelDecodeLanesBatched(ctx context.Context, lanes []*decodeLane, m *mod
 		if forwardNow != nil {
 			forwardStarted = forwardNow()
 		}
+		stepStart := time.Now()
 		out, panels, macs, probed := runQwenSharedReceiptProbe(bs, ids, active)
 		if !probed {
 			out = bs.StepBatchActive(ids, active)
 			panels = bs.LastStepSharedPanels()
 			macs = bs.LastStepMACs()
 		}
+		enginestep.Default.ObserveDecodeStep(enginestep.PathBatched, activeLanes, time.Since(stepStart))
 		if forwardNow != nil {
 			duration := forwardNow().Sub(forwardStarted)
 			for i, isActive := range active {

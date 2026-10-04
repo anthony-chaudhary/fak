@@ -188,6 +188,10 @@ func (s *Server) routeTable() []gatewayRoute {
 		// family: one bounded snapshot of the live-request registry (id, route,
 		// start, elapsed). GET, read-only, payload-free (route + timing only).
 		{"/v1/fak/observation/requests", s.handleFakObservationRequests},
+		// /v1/fak/observation/engine is the per-step arm: the native
+		// continuous-batching loop's phase/decode-step/cohort summary plus a
+		// bounded ring of recent steps. GET, read-only, counts and timings only.
+		{"/v1/fak/observation/engine", s.handleFakObservationEngine},
 		{"/v1/fak/fleet", s.handleFakFleet},
 		// /v1/fak/tasks is the read-only process task-manager snapshot. Inert (404)
 		// unless a host installs a provider via SetTasksSnapshotProvider and the
@@ -635,7 +639,7 @@ func requestFromLAN(r *http.Request) bool {
 // surface here widens both at once, which is the intent.
 func readScopedPath(r *http.Request) bool {
 	switch r.URL.Path {
-	case "/v1/fak/features/proof", "/metrics", "/debug/vars", "/v1/fak/observation", "/v1/fak/observation/requests", "/v1/fak/arms", "/v1/fak/arms/traffic",
+	case "/v1/fak/features/proof", "/metrics", "/debug/vars", "/v1/fak/observation", "/v1/fak/observation/requests", "/v1/fak/observation/engine", "/v1/fak/arms", "/v1/fak/arms/traffic",
 		// /props and /slots are the llama-server-shaped engine introspection
 		// pair, served from the same live state as /metrics and carrying the
 		// same class of information: counts, ratios, and build labels. They join

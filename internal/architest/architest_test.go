@@ -74,6 +74,7 @@ var tier = map[string]int{
 	"resultstier":        1, // role-based artifact storage tiering (claim vs payload) and payload index minting (#11687, #11688).
 	"power":              1, // cross-platform OS power assertion and wake-lock management; stdlib-only, off the hot path.
 	"telemetry":          1, // live runtime telemetry aggregation and Prometheus exposition; stdlib-only, off the hot path.
+	"enginestep":         1, // bounded native serving-loop step recorder (phase/decode-step/cohort histograms + recent-step ring) rendered as fak_engine_*; stdlib-only, O(buckets) per observe.
 	"issuesolved":        3, // issue resolution and proof verification helper.
 	"rawdecode":          3, // standalone raw decode executor for Qwen models.
 

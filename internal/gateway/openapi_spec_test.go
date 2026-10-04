@@ -74,6 +74,7 @@ var specPathFor = map[string]string{
 	"/v1/fak/sessions":              "/v1/fak/sessions",
 	"/v1/fak/observation":           "/v1/fak/observation",
 	"/v1/fak/observation/requests":  "/v1/fak/observation/requests",
+	"/v1/fak/observation/engine":    "/v1/fak/observation/engine",
 	"/v1/fak/features/proof":        "/v1/fak/features/proof",
 	"/v1/fak/loops":                 "/v1/fak/loops",
 	"/v1/fak/tasks":                 "/v1/fak/tasks",

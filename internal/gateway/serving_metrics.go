@@ -163,6 +163,10 @@ func (m *gatewayMetrics) servingEmitterRows() []ServingMetricRow {
 }
 
 func (s *Server) writeServingMetricsWithStats(b *strings.Builder, inf inferenceSnapshot, kvStats agent.KVMemoryStats, kvOK bool) {
+	// fak_engine_*: the native continuous-batching cycle, step by step. It renders
+	// beside the vLLM-shaped serving family it explains, independent of whether
+	// that family has rows yet.
+	s.writeEngineStepMetrics(b)
 	if s == nil || b == nil || s.metrics == nil {
 		return
 	}

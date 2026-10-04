@@ -5,7 +5,9 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/enginestep"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
@@ -128,6 +130,7 @@ type inKernelCoalesceRequest struct {
 	receipt      InKernelBatchReceipt
 	closes       atomic.Uint32
 	receiptReady chan struct{}
+	enqueued     time.Time // coalescer arrival, for the cohort_wait phase
 }
 
 type inKernelCoalesceContextKey struct{}
@@ -146,9 +149,11 @@ func (p *InKernelPlanner) runCoalescedGenerate(ctx context.Context, run func(con
 		done:         make(chan struct{}),
 		drain:        make(chan struct{}, 1),
 		receiptReady: make(chan struct{}),
+		enqueued:     time.Now(),
 	}
 	p.coalesceMu.Lock()
 	p.coalesceReady = append(p.coalesceReady, req)
+	enginestep.Default.SetQueueDepth(len(p.coalesceReady))
 	leader := !p.coalesceRunning
 	if leader {
 		p.coalesceRunning = true
@@ -192,7 +197,11 @@ func (p *InKernelPlanner) drainCoalescedGenerates() {
 	}
 	cohort := append([]*inKernelCoalesceRequest(nil), p.coalesceReady[:n]...)
 	p.coalesceReady = p.coalesceReady[n:]
+	enginestep.Default.SetQueueDepth(len(p.coalesceReady))
 	p.coalesceMu.Unlock()
+	for _, req := range cohort {
+		enginestep.Default.ObservePhase(enginestep.PhaseCohortWait, time.Since(req.enqueued))
+	}
 	p.runDecodeCohort(cohort)
 
 	p.coalesceMu.Lock()
@@ -208,8 +217,10 @@ func (p *InKernelPlanner) drainCoalescedGenerates() {
 }
 
 func (p *InKernelPlanner) runDecodeCohort(cohort []*inKernelCoalesceRequest) {
+	deviceWait := time.Now()
 	p.devMu.Lock()
 	defer p.devMu.Unlock()
+	enginestep.Default.ObservePhase(enginestep.PhaseDeviceWait, time.Since(deviceWait))
 
 	lanes := make([]*decodeLane, 0, len(cohort))
 	prepared := make([]*inKernelCoalesceRequest, 0, len(cohort))
@@ -244,6 +255,7 @@ func (p *InKernelPlanner) runDecodeCohort(cohort []*inKernelCoalesceRequest) {
 				panic(r)
 			}
 		}()
+		enginestep.Default.ObserveCohort(len(lanes))
 		if p.coalesceBatchHook != nil {
 			p.coalesceBatchHook(len(lanes))
 		}

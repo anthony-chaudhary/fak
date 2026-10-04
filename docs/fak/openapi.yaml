@@ -1665,6 +1665,82 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /v1/fak/observation/engine:
+    get:
+      tags: [fak-native]
+      summary: Snapshot the native continuous-batching loop step by step
+      description: |
+        The per-step arm of the observation family: a bounded read of the
+        native serving loop's cycle — admission wait, device wait, cohort
+        wait, prefix lookup, prefill (per chunk), prefix admit, every decode
+        step (path, active lanes, duration), sampling, and the request end to
+        end — as the `fak_engine_*` families on `/metrics` describe it, plus a
+        ring of the most recent step records. `native` is false when the
+        planner is not the in-process engine (proxy/mock); the engine block is
+        then the idle recorder, not a measurement of the upstream.
+
+        Counts and timings only: no payloads, prompts, or token ids. Same
+        observability auth floor as `/v1/fak/observation/requests`.
+      parameters:
+        - name: n
+          in: query
+          description: Recent step records to include (default 32, max 512, 0 = none).
+          schema: { type: integer, minimum: 0 }
+        - name: kind
+          in: query
+          description: Filter recent records to one kind.
+          schema: { type: string, enum: [decode_step, prefill_chunk, cohort, phase] }
+        - name: format
+          in: query
+          description: "`compact` returns one text line (starts with `ENGINE`) instead of JSON."
+          schema: { type: string, enum: [compact] }
+      responses:
+        '200':
+          description: The versioned engine-step snapshot (zero counts while idle are data).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schema, planner, native, engine]
+                properties:
+                  schema: { type: string }
+                  planner: { type: string }
+                  native: { type: boolean }
+                  engine:
+                    type: object
+                    required: [schema, now_unix_nano, requests_active, coalesce_queue_depth, phases, decode, cohorts, recent]
+                    properties:
+                      schema: { type: string }
+                      now_unix_nano: { type: integer }
+                      last_step_unix_nano: { type: integer }
+                      requests_active: { type: integer }
+                      coalesce_queue_depth: { type: integer }
+                      phases: { type: object, additionalProperties: true }
+                      decode: { type: object, additionalProperties: true }
+                      cohorts: { type: object, additionalProperties: true }
+                      prefill_tokens: { type: integer }
+                      prefill_chunks: { type: integer }
+                      prefix_matched_tokens: { type: integer }
+                      recent:
+                        type: array
+                        items:
+                          type: object
+                          required: [seq, at_unix_nano, kind, duration_ns]
+                          properties:
+                            seq: { type: integer }
+                            at_unix_nano: { type: integer }
+                            kind: { type: string }
+                            phase: { type: string }
+                            path: { type: string }
+                            lanes: { type: integer }
+                            tokens: { type: integer }
+                            duration_ns: { type: integer }
+            text/plain:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /v1/fak/loops:
 
     get:
