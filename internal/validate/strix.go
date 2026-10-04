@@ -304,10 +304,7 @@ func executeStrixValidationPhase(
 	}
 
 	// Prepare validation options
-	skList := append([]string(nil), amdgpu.DefaultCreditableSubkernelSelectors...)
-	if subkernelsArg != "" && subkernelsArg != "all" {
-		skList = strings.Split(subkernelsArg, ",")
-	}
+	skList := amdgpu.ValidationSubkernelSelection(subkernelsArg)
 
 	runAblations := false
 	var abList []string
