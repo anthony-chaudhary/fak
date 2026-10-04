@@ -1302,7 +1302,14 @@ type InKernelCapacityError struct {
 	Class compute.MemoryClass
 	Scope compute.MemoryScope
 	Site  string
+	// Detail carries the typed cause when no byte figure exists (e.g. the runtime-extras
+	// estimator's missing bound), so the message never reports a misleading "needs 0 bytes".
+	Detail string
 }
+
+// inKernelRuntimeExtrasUnknownSite marks a refusal where the Qwen3.8 runtime-extras
+// estimator could not bound the request plan (no Want/Avail figures exist).
+const inKernelRuntimeExtrasUnknownSite = "runtime-extras-unknown"
 
 func (e *InKernelCapacityError) Error() string {
 	class := e.Class
@@ -1316,6 +1323,15 @@ func (e *InKernelCapacityError) Error() string {
 	subject := "GPU"
 	if scope == compute.MemoryScopeHost {
 		subject = "host-memory"
+	}
+	if e.Site == inKernelRuntimeExtrasUnknownSite {
+		// No byte figure exists here: the runtime-extras estimator could not bound the plan.
+		// Printing "plan needs 0 bytes, available budget is 0 bytes" hid the real cause.
+		reason := strings.TrimSpace(e.Detail)
+		if reason == "" {
+			reason = "runtime extras capacity unknown"
+		}
+		return fmt.Sprintf("in-kernel %s capacity precheck refused request (%s %s plan could not be bounded: %s; site=%s)", subject, scope, class, reason, e.Site)
 	}
 	return fmt.Sprintf("in-kernel %s capacity precheck refused request (%s %s plan needs %d bytes, available budget is %d bytes)", subject, scope, class, e.Want, e.Avail)
 }
@@ -3568,9 +3584,10 @@ func (p *InKernelPlanner) refuseOversizeRequest(promptTokens, maxNew int) error 
 		// lifetime). Refuse before allocation with a typed capacity-unknown error rather
 		// than trusting a silently cheap plan.
 		return &InKernelCapacityError{
-			Class: compute.MemoryUnknown,
-			Scope: compute.MemoryScopeDevice,
-			Site:  "runtime-extras-unknown",
+			Class:  compute.MemoryUnknown,
+			Scope:  compute.MemoryScopeDevice,
+			Site:   inKernelRuntimeExtrasUnknownSite,
+			Detail: extrasErr.Error(),
 		}
 	}
 	if len(plan) == 0 {
@@ -3858,8 +3875,17 @@ func (p *InKernelPlanner) qwen35RuntimeExtraDemands(plannedTokens int, retainMTP
 		return nil, nil
 	}
 	panelTokens := p.nativeInferencePrefillChunkTokens()
-	if panelTokens <= 0 {
+	if panelTokens <= 0 || plannedTokens <= 0 {
 		return nil, nil
+	}
+	// The configured chunk is a CEILING on the panel, not its width: a prompt no longer than
+	// the chunk prefills in ONE pass of len(prompt) rows (prefillDivergentSuffix), so the
+	// simultaneous live set is min(chunk, P) <= min(chunk, P+O). Without this clamp every
+	// request whose P+O is below the chunk (512 by default) — including the one-token serve
+	// warmup — trips the estimator's panel<=planned invariant and is refused as
+	// capacity-unknown, so a Qwen3.8 Vulkan serve never becomes ready.
+	if panelTokens > plannedTokens {
+		panelTokens = plannedTokens
 	}
 	cfg := compute.Qwen35RuntimeExtraConfig{
 		HiddenWidth:                    p.m.Cfg.HiddenSize,
