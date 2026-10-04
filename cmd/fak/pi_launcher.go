@@ -337,7 +337,7 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		// cleanupProvider removes the file when the child exits.
 		var cleanupProvider func()
 		var err error
-		argvOut, cleanupProvider, err = installPiLaunchProviderExtension(argvOut, launch.baseURL, launch.model, servedWindow, routerKey)
+		argvOut, cleanupProvider, err = installPiLaunchProviderExtension(argvOut, launch.baseURL, launch.model, servedWindow, routerKey, newLaunchSessionID("pi"))
 		if err != nil {
 			fmt.Fprintf(stderr, "fak pi: install session provider: %v\n", err)
 			return 1
@@ -450,13 +450,13 @@ func piReportRejectedKey(stderr io.Writer, source, origin string) {
 // installPiLaunchProviderExtension gives a raw `fak pi` child a launch-local `fak`
 // provider without touching ~/.pi/agent/models.json. Unlike the guarded Pi installer,
 // it does not reject user -e flags: raw Pi owns its extension policy.
-func installPiLaunchProviderExtension(command []string, baseURL, model string, servedWindow int, apiKey string) ([]string, func(), error) {
+func installPiLaunchProviderExtension(command []string, baseURL, model string, servedWindow int, apiKey, sessionID string) ([]string, func(), error) {
 	dir, err := guardSessionTempDir("pi")
 	if err != nil {
 		return command, func() {}, err
 	}
 	cleanup := func() { _ = os.RemoveAll(dir) }
-	source, err := piLaunchProviderExtensionSource(projectassets.NormalizePiBaseURL(baseURL), model, servedWindow, apiKey)
+	source, err := piLaunchProviderExtensionSource(projectassets.NormalizePiBaseURL(baseURL), model, servedWindow, apiKey, sessionID)
 	if err != nil {
 		cleanup()
 		return command, func() {}, err
@@ -469,7 +469,7 @@ func installPiLaunchProviderExtension(command []string, baseURL, model string, s
 	return appendPiExtensionArg(command, extPath), cleanup, nil
 }
 
-func piLaunchProviderExtensionSource(baseURL, model string, servedWindow int, apiKey string) (string, error) {
+func piLaunchProviderExtensionSource(baseURL, model string, servedWindow int, apiKey, sessionID string) (string, error) {
 	raw, err := projectassets.GeneratePiConfigForWindow(baseURL, model, servedWindow)
 	if err != nil {
 		return "", err
@@ -490,6 +490,14 @@ func piLaunchProviderExtensionSource(baseURL, model string, servedWindow int, ap
 			return "", fmt.Errorf("generated Pi provider %q is not an object", projectassets.DefaultPiProviderID)
 		}
 		providerMap["apiKey"] = key
+	}
+	if sessionID != "" {
+		providerMap, ok := provider.(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("generated Pi provider %q is not an object", projectassets.DefaultPiProviderID)
+		}
+		// Pi provider config forwards headers on every request: the launch-scoped session id.
+		withProviderSessionHeader(providerMap, sessionID)
 	}
 	literal, err := guardPiTSLiteral(provider)
 	if err != nil {

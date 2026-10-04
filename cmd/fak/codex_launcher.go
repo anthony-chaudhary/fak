@@ -31,6 +31,8 @@ import (
 // without fak guard ("raw" mode), providing first-class backend integration on Mac.
 
 type codexLaunchOptions struct {
+	// sessionID is the launch-scoped X-Fak-Session-Id sent on raw-mode provider requests.
+	sessionID       string
 	raw             bool
 	probePrompt     string
 	wireAPI         string
@@ -174,6 +176,7 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 		remoteServe:     *remoteServe,
 		model:           *model,
 		managedCache:    mcMode,
+		sessionID:       newLaunchSessionID("codex"),
 		auditPath:       *auditPath,
 		noAudit:         *noAudit,
 		quiet:           *quiet,
@@ -567,6 +570,7 @@ func buildCodexRawArgv(o codexLaunchOptions) ([]string, [][2]string) {
 		"-c", "model_providers." + id + ".wire_api=" + q(wire),
 		"-c", "model_providers." + id + ".env_key=" + q(envKey),
 	}
+	argv = append(argv, codexSessionHeaderArg(id, o.sessionID)...)
 
 	if o.approveForMe {
 		argv = append(argv, "-c", `approvals_reviewer="auto_review"`)
