@@ -1,11 +1,15 @@
 # fix(hooks): pass the public repository root to companion boundary checks
 
 <!-- fak-hooks-key: companion-boundary-public-root -->
+<!-- fak-cross-key: companion-boundary-public-root -->
+<!-- fak-public-issue: anthony-chaudhary/fak#12694 -->
 
 ```routing
 lane: developer-tooling
 paths: [".githooks/pre-commit", ".githooks/pre-commit.ps1"]
 expected_steps: 3
+public_issue: anthony-chaudhary/fak#12694
+cross_key: companion-boundary-public-root
 ```
 
 ## Working spine

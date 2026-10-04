@@ -1,4 +1,6 @@
 <!-- fak-ci-key: manual-runs-not-release-evidence -->
+<!-- fak-cross-key: manual-runs-not-release-evidence -->
+<!-- fak-public-issue: anthony-chaudhary/fak#12372 -->
 # fix(ci): prevent routed and pinned workflow runs from impersonating release CI
 
 ```routing
@@ -7,6 +9,8 @@ paths: [".github/workflows/ci.yml", ".github/workflows/ci-fast.yml"]
 expected_steps: 5
 priority: P0
 class: infra
+public_issue: anthony-chaudhary/fak#12372
+cross_key: manual-runs-not-release-evidence
 ```
 
 ## Parent context
