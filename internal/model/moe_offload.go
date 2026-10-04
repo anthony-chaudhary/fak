@@ -110,20 +110,39 @@ const (
 // to the host floor, so a resident expert on a device with a kernel for its encoding can execute on
 // the iGPU instead of the CPU.
 //
-// The predicate is deliberately NARROW and fail-closed:
-//   - Q4_K (m.q4kw[...] != nil) has a device kernel: the Q4_K gate/up MatMul + SwiGLU
-//     (q4kExpertInputHAL, moe_device_gateup.go) used by the resident device expert route.
-//   - Q5_K / Q6_K down projections have NO device kernel yet (fak#13129, filed separately), so they
-//     remain host. An encoding with no entry here answers expertEngineHost, which is byte-for-byte
-//     the pre-#13128 arm.
+// The predicate answers at the MODEL level: it reports whether the model carries a representation of
+// this projection that the device seam can execute. The session-level arm
+// (expertEngineForWeight) still requires a DeviceMemory backend, and the seam itself
+// (expertInputDeviceWeight, moe_device_gateup.go) declines fail-closed for any dtype the backend's
+// resident MatMul cannot serve — so this stays a pre-filter, never an execution promise.
 //
-// `name` is the canonical expert tensor name (expertName, moe.go); a nil model, a nil q4kw map, or a
-// weight with no resident Q4_K representation all answer expertEngineHost.
+// The three admitted encodings mirror exactly the tiers expertInputDeviceWeight resolves:
+//   - Q4_K (m.q4kw[name] != nil): the Q4_K gate/up MatMul + SwiGLU (q4kExpertInputHAL).
+//   - A resident k-quant whose descriptor is HAL-capable (m.kqw[name], SupportsHALKQuant): this is
+//     the DeepSeek-V4.1 Q2_K routed-expert slate, packed into m.kqw (hal.go resolveExpertWeight:
+//     the resident store is read second). Before this, the predicate keyed only on m.q4kw, so a
+//     Q2_K artifact — the mission's pinned encoding — always answered host even though the seam
+//     admits and executes it (moe_device_gateup_test.go TestExpertSwiGLUDeviceQ2KGateUpResident).
+//   - The R5/#5616 checkpoint tier (m.expertCheckpoint.staging): a streamed projection whose
+//     slice is faulted on demand, with a device dtype the seam stages like any resident.
+//
+// Everything else, including a weight the model simply does not carry, answers expertEngineHost —
+// byte-for-byte the pre-#13128 host arm. (The former "Q5_K/Q6_K down has no device kernel yet
+// (fak#13129)" note is stale: fak#13129 is CLOSED and the Q6_K/*_K down seam is exercised device-side
+// in moe_device_gateup_test.go.)
+//
+// `name` is the canonical expert tensor name (expertName, moe.go).
 func deviceKernelForExpertEncoding(m *Model, name string) expertEngine {
-	if m == nil || m.q4kw == nil {
+	if m == nil {
 		return expertEngineHost
 	}
 	if m.q4kw[name] != nil {
+		return expertEngineDevice
+	}
+	if qt := m.kqw[name]; qt != nil && SupportsHALKQuant(qt.kind) {
+		return expertEngineDevice
+	}
+	if ck, ok := m.expertCheckpoint.staging(name); ok && ck != nil && ck.dt != 0 {
 		return expertEngineDevice
 	}
 	return expertEngineHost
