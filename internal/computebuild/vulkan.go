@@ -69,6 +69,8 @@ var VulkanShaders = []string{
 	"qwen35_gdn_prefill_tiled",
 	"qwen35_gdn_prefill_norm",
 	"qwen35_gdn_verify_tiled",
+	"q2k_matvec",
+	"rmsnorm_q8_matmul2_coop",
 }
 
 func strictFileSHA256(path string) (string, int64, error) {
@@ -289,7 +291,7 @@ func CompareReceiptProvenance(a, b *ComputeBuildReceipt) error {
 	return nil
 }
 
-const vulkanV2ModuleCount = 50
+const vulkanV2ModuleCount = 52
 
 var unavailableVulkanV2Causality = []string{
 	"historical_source_cleanliness",

@@ -134,6 +134,8 @@ function Build-Shaders {
     $shaders += "qwen35_gdn_prefill_tiled"
     $shaders += "qwen35_gdn_prefill_norm"
     $shaders += "qwen35_gdn_verify_tiled"
+    $shaders += "q2k_matvec"
+    $shaders += "rmsnorm_q8_matmul2_coop"
     $shaders += "coopmat_wave32_wmma"
     $shaders += "q4k_matmul_wave32"
     $shaders += "q6k_matmul"

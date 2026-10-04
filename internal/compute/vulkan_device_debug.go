@@ -21,6 +21,8 @@ void fvk_debug_restore_fail_after_submits(int successful_submits);
 int fvk_phase_performance_query_available(void);
 int fvk_phase_counter_count(void);
 int fvk_phase_counter_describe(int index, char* name, size_t name_len, char* unit, size_t unit_len, int* scope);
+int fvk_debug_select_q8_gateup_coop(int enabled);
+int fvk_debug_select_q2k_matvec(int enabled);
 */
 import "C"
 import (
@@ -621,4 +623,28 @@ func (v *vulkanBackend) PhasePerformanceCounterDescriptors() ([]PhasePerformance
 		})
 	}
 	return descriptors, true
+}
+
+// vulkanDebugSelectQ8GateUpCoop selects the cooperative Q8 gate/up kernel (enabled and
+// built) or the one-thread-per-output kernel, returning the previous selection. Test-only:
+// it exists so the bit-parity witness can run both kernels in one process.
+func vulkanDebugSelectQ8GateUpCoop(enabled bool) bool {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return C.fvk_debug_select_q8_gateup_coop(boolToCInt(enabled)) != 0
+}
+
+// vulkanDebugSelectQ2KMatvec selects the single-token Q2_K matvec kernel (enabled and
+// built) or the original Q2_K decode kernel, returning the previous selection. Test-only.
+func vulkanDebugSelectQ2KMatvec(enabled bool) bool {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return C.fvk_debug_select_q2k_matvec(boolToCInt(enabled)) != 0
+}
+
+func boolToCInt(b bool) C.int {
+	if b {
+		return 1
+	}
+	return 0
 }

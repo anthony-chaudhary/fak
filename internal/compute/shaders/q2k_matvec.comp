@@ -1,0 +1,154 @@
+#version 450
+
+// q2k_matvec.comp - single-token (decode) GGML Q2_K matrix-vector product.
+//
+// Same bindings and push constants as q2k_matmul.comp, so the shim can swap the
+// pipeline for P == 1 without changing any caller. Modes, selected by auxOutDim:
+//    0: Y[outDim] = W0 * x
+//   -1: Y[outDim] += W0 * (silu(x) * u)            (SwiGLU down projection + residual)
+//   >0: Y = W0 * n, Y1 = W1 * n, n = RMSNorm(x) * normWeight  (gate/up pair)
+//
+// Work split: a 64-lane workgroup owns ROWS consecutive output rows. Sixteen lanes
+// cover one 256-weight superblock (each lane reads one 32-bit word of the packed
+// 2-bit quants, i.e. four weights at each of the four bit-planes), so four
+// superblocks are in flight per row per step and the 84-byte blocks of a row are
+// read with contiguous 32-bit loads. The activation slice is loaded once per step
+// and reused for every row of the workgroup. Partial sums are reduced in LDS.
+//
+// Q2_K superblock (256 weights, 84 bytes): scales[16], qs[64], d f16, dmin f16.
+// Weight w = h*128 + j*32 + s*16 + l (h,s in {0,1}, j in 0..3, l in 0..15) uses
+// quant byte qs[h*32 + s*16 + l] at bit shift 2*j and scale byte h*8 + 2*j + s.
+layout(local_size_x = 64) in;
+
+const uint ROWS = 2u;
+const uint LANES = 64u;
+
+layout(std430, set = 0, binding = 0) readonly buffer Q2K   { uint raw[]; };
+layout(std430, set = 0, binding = 1) readonly buffer X     { vec4 x4[]; };
+layout(std430, set = 0, binding = 2) readonly buffer U     { vec4 u4[]; };
+layout(std430, set = 0, binding = 3) buffer Y              { float y[]; };
+layout(std430, set = 0, binding = 4) readonly buffer W1buf { uint raw1[]; };
+layout(std430, set = 0, binding = 5) readonly buffer Nbuf  { vec4 norm4[]; };
+layout(std430, set = 0, binding = 6) writeonly buffer Y1buf { float y1[]; };
+
+layout(push_constant) uniform PC {
+    int outDim;
+    int inDim;
+    int tokens;
+    int auxOutDim;
+    float eps;
+} pc;
+
+shared float red[ROWS * LANES];
+
+float silu(float v) { return v / (1.0 + exp(-v)); }
+
+vec4 bytesOf(uint w) {
+    return vec4(float(w & 255u), float((w >> 8u) & 255u), float((w >> 16u) & 255u), float(w >> 24u));
+}
+
+void main() {
+    uint tid = gl_LocalInvocationID.x;
+    int mode = pc.auxOutDim > 0 ? 2 : (pc.auxOutDim < 0 ? 1 : 0);
+    uint rowGroups0 = (uint(pc.outDim) + ROWS - 1u) / ROWS;
+    bool second = mode == 2 && gl_WorkGroupID.x >= rowGroups0;
+    uint rowBase = (second ? gl_WorkGroupID.x - rowGroups0 : gl_WorkGroupID.x) * ROWS;
+    uint rowsOut = second ? uint(pc.auxOutDim) : uint(pc.outDim);
+    uint inDim = uint(pc.inDim);
+    uint nsb = inDim / 256u;
+    uint wordsPerRow = nsb * 21u; // 84 bytes per superblock
+
+    float inv = 1.0;
+    if (mode == 2) {
+        // Every workgroup recomputes the RMS of the (cached) activation row.
+        float local = 0.0;
+        for (uint i = tid; i < inDim / 4u; i += LANES) {
+            vec4 v = x4[i];
+            local += dot(v, v);
+        }
+        red[tid] = local;
+        barrier();
+        for (uint stride = LANES / 2u; stride > 0u; stride >>= 1u) {
+            if (tid < stride) red[tid] += red[tid + stride];
+            barrier();
+        }
+        inv = inversesqrt(red[0] / float(inDim) + pc.eps);
+        barrier();
+    }
+
+    uint t16 = tid & 15u;
+    uint h = t16 >> 3u;
+    uint s = (t16 >> 2u) & 1u;
+    uint lq = (t16 & 3u) * 4u;
+
+    float acc[ROWS];
+    for (uint r = 0u; r < ROWS; ++r) acc[r] = 0.0;
+
+    for (uint sb = tid >> 4u; sb < nsb; sb += LANES / 16u) {
+        // Activation slice for this lane: four vec4s, one per bit-plane j.
+        vec4 xv[4];
+        float xsum[4];
+        for (uint j = 0u; j < 4u; ++j) {
+            uint idx = (sb * 256u + h * 128u + j * 32u + s * 16u + lq) >> 2u;
+            vec4 v = x4[idx];
+            if (mode == 1) {
+                vec4 uu = u4[idx];
+                v = vec4(silu(v.x), silu(v.y), silu(v.z), silu(v.w)) * uu;
+            } else if (mode == 2) {
+                v = v * inv * norm4[idx];
+            }
+            xv[j] = v;
+            xsum[j] = v.x + v.y + v.z + v.w;
+        }
+        for (uint r = 0u; r < ROWS; ++r) {
+            uint row = rowBase + r;
+            if (row >= rowsOut) break;
+            uint base = row * wordsPerRow + sb * 21u;
+            uint q, sc0, sc1, dm;
+            if (second) {
+                q = raw1[base + 4u + t16];
+                sc0 = raw1[base + h * 2u];
+                sc1 = raw1[base + h * 2u + 1u];
+                dm = raw1[base + 20u];
+            } else {
+                q = raw[base + 4u + t16];
+                sc0 = raw[base + h * 2u];
+                sc1 = raw[base + h * 2u + 1u];
+                dm = raw[base + 20u];
+            }
+            vec2 dd = unpackHalf2x16(dm);
+            // scale bytes for j = 0..3: h*8 + {s, 2+s} live in sc0, h*8 + {4+s, 6+s} in sc1.
+            uint scj[4];
+            scj[0] = (sc0 >> (s * 8u)) & 255u;
+            scj[1] = (sc0 >> ((2u + s) * 8u)) & 255u;
+            scj[2] = (sc1 >> (s * 8u)) & 255u;
+            scj[3] = (sc1 >> ((2u + s) * 8u)) & 255u;
+            float sum = 0.0;
+            for (uint j = 0u; j < 4u; ++j) {
+                vec4 qv = bytesOf((q >> (2u * j)) & 0x03030303u);
+                float dl = dd.x * float(scj[j] & 15u);
+                float ml = dd.y * float(scj[j] >> 4u);
+                sum += dl * dot(qv, xv[j]) - ml * xsum[j];
+            }
+            acc[r] += sum;
+        }
+    }
+
+    for (uint r = 0u; r < ROWS; ++r) red[r * LANES + tid] = acc[r];
+    barrier();
+    for (uint stride = LANES / 2u; stride > 0u; stride >>= 1u) {
+        if (tid < stride) {
+            for (uint r = 0u; r < ROWS; ++r) red[r * LANES + tid] += red[r * LANES + tid + stride];
+        }
+        barrier();
+    }
+    if (tid < ROWS) {
+        uint row = rowBase + tid;
+        if (row < rowsOut) {
+            float v = red[tid * LANES];
+            if (mode == 1) y[row] += v;
+            else if (second) y1[row] = v;
+            else y[row] = v;
+        }
+    }
+}
