@@ -143,6 +143,22 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "candidate-fragment",
+      "canonical": "CandidateFragment (readmenext)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "readmenext's staged README-front-page change unit: one target section plus the candidate_content text, its retire_target, its witness provenance, and the laws checklist, carried from proposal to publication.",
+      "distinction": "readmenext's staged README change FRAGMENT - NOT Candidate (the planner's scored resident span) and NOT the StrixCandidateArchive (the deterministic hardware-validation source archive).",
+      "distinct_from": ["candidate-planner"],
+      "aliases": [],
+      "grounding": "CandidateFragment",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }
