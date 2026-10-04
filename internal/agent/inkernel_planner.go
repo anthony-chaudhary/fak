@@ -3109,7 +3109,10 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	if tb != nil && tb.Forced() {
 		content = StripReasoning(content)
 	}
+	// Model reports the artifact this planner actually decoded, so the gateway
+	// echoes the served model rather than whatever name the client sent.
 	comp = &Completion{
+		Model:         p.modelID,
 		Message:       Message{Role: "assistant", Content: content, ReasoningContent: reasoning},
 		FinishReason:  finishReason,
 		ProviderCache: &compReuseEntry,

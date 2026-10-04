@@ -322,6 +322,9 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if s.refuseNativeModelMismatch(w, r, reqModel, "") {
+		return
+	}
 	if !releaseEPFanout(r) {
 		return
 	}

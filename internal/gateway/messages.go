@@ -190,6 +190,9 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	if s.refuseNativeModelMismatch(w, r, req.Model, "") {
+		return
+	}
 	ctx := r.Context()
 	reqTrace := s.traceFor(r.Header.Get("X-Trace-Id"))
 	appendSessionLedger(reqTrace, "user_message", turnLedgerSummary(req))
