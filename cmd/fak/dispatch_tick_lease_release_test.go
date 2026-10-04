@@ -423,55 +423,71 @@ func TestDispatchSpawnFailureReleasesLaneLease(t *testing.T) {
 	})
 }
 
-// TestDispatchLeaseZeroGenerationIsLoadBearing is the anti-vacuity witness for the one
-// invariant the release path may not lose. leaseref.ReleaseFenced states it plainly:
-// "presenting a non-zero generation ADDITIONALLY requires it to match the live lease's" —
-// it skips the comparison entirely when either side is 0, leaving only the holder-string
-// check, and holders DO collide (a reused daemon presents the same host:pid, and one box
-// under one FAK_LEASE_OWNER presents one string for every tick). This case runs the
-// mutant directly: the SAME reclaimed lane that the guarded release refuses is FREED when
-// a zero-generation token reaches the fenced delete. Nothing here is a call shape the
-// product makes — dispatchLeaseFenceReleasable stands between every release site and this
-// outcome — it exists so a future edit that drops the generation cannot pass silently.
+// TestDispatchLeaseZeroGenerationIsLoadBearing pins both release fences when a reclaimed
+// lease reuses its holder string. Dispatch refuses an omitted generation before reaching
+// the store, and the store independently rejects it for a live positive-generation lease.
+// Neither refusal may free the reclaimed lane; the current token must still release it.
 func TestDispatchLeaseZeroGenerationIsLoadBearing(t *testing.T) {
-	reclaimed := func(t *testing.T) (string, string) {
+	root := initRegionTestRepo(t)
+	t.Setenv("FAK_LEASE_OWNER", "one-box-one-owner-string")
+	lease := acquireDispatchLaneLease(root, "resolve-gateway", "gateway", []string{"internal/gateway/**"}, 1800, "")
+	if acquired, _ := lease["acquired"].(bool); !acquired {
+		t.Fatalf("fixture could not acquire: %+v", lease)
+	}
+	holder := dispatchMapString(lease, "holder")
+	generation := dispatchLeaseGeneration(lease["generation"])
+	if holder == "" || generation <= 0 {
+		t.Fatalf("fixture must carry a holder and positive generation: %+v", lease)
+	}
+	// The janitor reclaim gives a different worker a newer epoch under the SAME holder.
+	// Holder matching alone cannot distinguish the original token from the current one.
+	reissued, v, err := leaseref.NewInDir(root).AcquireFenced(context.Background(), leaseref.Record{
+		ID: "resolve-gateway", Holder: holder,
+		TreeGlobs: []string{"internal/gateway/**"}, TTLSeconds: 1800,
+	}, time.Now().Add(2*time.Hour))
+	if err != nil || !v.OK {
+		t.Fatalf("reclaim setup: %+v %v", v, err)
+	}
+	if reissued.Holder != holder || reissued.Generation <= generation {
+		t.Fatalf("reclaim must preserve holder %q and advance generation %d, got %+v", holder, generation, reissued)
+	}
+	assertReclaimed := func(stage string) {
 		t.Helper()
-		root := initRegionTestRepo(t)
-		t.Setenv("FAK_LEASE_OWNER", "one-box-one-owner-string")
-		lease := acquireDispatchLaneLease(root, "resolve-gateway", "gateway", []string{"internal/gateway/**"}, 1800, "")
-		if acquired, _ := lease["acquired"].(bool); !acquired {
-			t.Fatalf("fixture could not acquire: %+v", lease)
+		live, ok := dispatchLiveLease(t, root)
+		if !ok || live.ID != reissued.ID || live.Holder != holder || live.Generation != reissued.Generation || live.Expired(time.Now()) {
+			t.Fatalf("%s: live lease = %+v ok=%v, want the same live reclaimed lease %+v", stage, live, ok, reissued)
 		}
-		// The janitor reclaim: a DIFFERENT live worker now owns the lane, at a bumped
-		// generation but — deliberately — under the identical holder string.
-		if _, v, err := leaseref.NewInDir(root).AcquireFenced(context.Background(), leaseref.Record{
-			ID: "resolve-gateway", Holder: dispatchMapString(lease, "holder"),
-			TreeGlobs: []string{"internal/gateway/**"}, TTLSeconds: 1800,
-		}, time.Now().Add(2*time.Hour)); err != nil || !v.OK {
-			t.Fatalf("reclaim setup: %+v %v", v, err)
-		}
-		return root, dispatchMapString(lease, "holder")
 	}
+	assertReclaimed("reclaim setup")
 
-	// The guard in place: refused, the peer keeps its lane.
-	root, holder := reclaimed(t)
+	if got := releaseInProcessLaneLease(root, lease); got != "stale_lease" {
+		t.Errorf("stale-generation dispatch release = %q, want stale_lease", got)
+	}
+	assertReclaimed("stale-generation dispatch release")
+
+	// Dispatch rejects an incomplete token without relying on the store's epoch check.
 	if got := releaseInProcessLaneLease(root, map[string]any{
-		"acquired": true, "id": "resolve-gateway", "holder": holder, "generation": int64(1),
-	}); got != "stale_lease" {
-		t.Fatalf("guarded release = %q, want stale_lease", got)
+		"acquired": true, "id": reissued.ID, "holder": holder,
+	}); got != "no_fence_token" {
+		t.Errorf("omitted-generation dispatch release = %q, want no_fence_token", got)
 	}
-	if _, ok := dispatchLiveLease(t, root); !ok {
-		t.Fatalf("the guarded release freed the reclaimer's lane")
-	}
+	assertReclaimed("omitted-generation dispatch release")
 
-	// The mutant: the same release with the generation dropped to zero frees the lane the
-	// peer now owns — two writers in one lane. This MUST keep failing to be a guard.
-	mutantRoot, mutantHolder := reclaimed(t)
-	if _, outcome := releaseLaneLeaseFenced(mutantRoot, "resolve-gateway", dispatchLeaseFence{Holder: mutantHolder}); outcome != "released" {
-		t.Fatalf("zero-generation release = %q; if this no longer frees a reclaimed lane the fence has a second line of defence and this test should be re-derived, not deleted", outcome)
+	// Bypass only dispatch's token floor to exercise the store-backed protection. The
+	// former permissive zero-generation check would release this same-holder live lease.
+	if released, outcome := releaseLaneLeaseFenced(root, reissued.ID, dispatchLeaseFence{Holder: holder}); released != "" || outcome != "stale_lease" {
+		t.Errorf("omitted-generation store-backed release = (%q, %q), want (\"\", \"stale_lease\")", released, outcome)
 	}
-	if _, ok := dispatchLiveLease(t, mutantRoot); ok {
-		t.Fatalf("zero-generation release left the lease standing; see above")
+	assertReclaimed("omitted-generation store-backed release")
+
+	// Anti-vacuity: refusing every release cannot satisfy the current-token control.
+	if got := releaseInProcessLaneLease(root, map[string]any{
+		"acquired": true, "id": reissued.ID, "holder": holder, "generation": reissued.Generation,
+	}); got != "released" {
+		t.Fatalf("current-generation dispatch release = %q, want released", got)
+	}
+	if live, ok := dispatchLiveLease(t, root); ok {
+		t.Fatalf("current-generation release left the reclaimed lease standing: %+v", live)
 	}
 }
 
@@ -513,10 +529,9 @@ func TestDispatchWorkerExitReleasesLease(t *testing.T) {
 	}
 }
 
-// TestDispatchLeaseFenceTokenStrength pins the token floor. ReleaseFenced skips its
-// generation comparison when either side is 0, so a zero-generation token degrades to a
-// holder-string match — and two ticks on one box share a holder string. Such a token
-// must never be written and never authorize a release.
+// TestDispatchLeaseFenceTokenStrength pins dispatch's token floor independently of the
+// store's live-generation check. Two ticks on one box can share a holder string, so an
+// incomplete token must never be written or authorize a dispatch release.
 func TestDispatchLeaseFenceTokenStrength(t *testing.T) {
 	if !dispatchLeaseFenceReleasable(dispatchLeaseFence{Holder: "owner-a", Generation: 1}) {
 		t.Fatalf("a holder + non-zero generation is the releasable token")
