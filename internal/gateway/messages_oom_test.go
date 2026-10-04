@@ -58,6 +58,23 @@ func TestUpstreamErrorStatus_InKernelCapacityPrecheckIsActionable(t *testing.T) 
 	}
 }
 
+// A runtime-extras-unknown refusal is not a byte-budget verdict: the client message must carry
+// the typed site token rather than an ambiguous zero-byte plan/budget pair.
+func TestUpstreamErrorStatus_RuntimeExtrasUnknownNamesSite(t *testing.T) {
+	status, code, msg := upstreamErrorStatus(&agent.InKernelCapacityError{
+		Class: compute.MemoryUnknown,
+		Scope: compute.MemoryScopeDevice,
+		Site:  agent.InKernelCapacitySiteRuntimeExtrasUnknown,
+		Cause: &compute.RuntimeExtraCapacityUnknownError{Missing: "prefill panel width"},
+	})
+	if status != http.StatusServiceUnavailable || code != "in_kernel_oom" {
+		t.Fatalf("runtime-extras-unknown = (%d, %q), want (503, in_kernel_oom)", status, code)
+	}
+	if !strings.Contains(msg, agent.InKernelCapacitySiteRuntimeExtrasUnknown) {
+		t.Fatalf("client message does not carry the %s site token: %q", agent.InKernelCapacitySiteRuntimeExtrasUnknown, msg)
+	}
+}
+
 // A genuine upstream error must NOT be misclassified as an in-kernel OOM, and its raw provider
 // body must never cross the trust boundary into the client message (#82/#346 invariant).
 func TestUpstreamErrorStatus_RealUpstreamErrorDoesNotLeakOrMisclassify(t *testing.T) {

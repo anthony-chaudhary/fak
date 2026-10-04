@@ -1326,6 +1326,13 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 	}
 	var capErr *agent.InKernelCapacityError
 	if errors.As(err, &capErr) {
+		if errors.Is(capErr, agent.ErrInKernelRuntimeExtrasUnknown) {
+			// Not a byte-budget verdict: Want/Avail are zero. Surface the agent's message, which
+			// names the runtime-extras-unknown site and the missing bound, instead of rendering
+			// an ambiguous "plan needs 0 bytes; available budget is 0 bytes".
+			return http.StatusServiceUnavailable, "in_kernel_oom",
+				capErr.Error() + "; the engine could not bound its runtime-extras memory for this request"
+		}
 		class := strings.TrimSpace(string(capErr.Class))
 		if class == "" || class == "unknown" {
 			class = "device"

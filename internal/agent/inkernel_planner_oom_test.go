@@ -541,3 +541,42 @@ func TestInKernelRefuseOversizeRequestGuardRunsBeforeExecution(t *testing.T) {
 		t.Fatalf("capacity error site = %q, want capacity-precheck", capErr.Site)
 	}
 }
+
+// TestInKernelRefuseOversizeRequestAdmitsShortRequestOnUnknownVulkanBudget covers the device
+// shape of the Strix Halo Vulkan readiness wedge: a backend reporting an UNKNOWN/zero budget
+// must neither refuse a short request (P+O below the prefill chunk) as runtime-extras-unknown
+// nor refuse a zero-token request, whose extras demand is exactly zero bytes.
+func TestInKernelRefuseOversizeRequestAdmitsShortRequestOnUnknownVulkanBudget(t *testing.T) {
+	p := qwen35RuntimeExtraPlanner(512)
+	p.backend = runtimeExtraBackend{Backend: compute.Default(), total: 0, free: 0, known: false}
+	for _, tc := range []struct{ prompt, out int }{{12, 1}, {4, 4}, {0, 0}} {
+		if err := p.refuseOversizeRequest(tc.prompt, tc.out); err != nil {
+			t.Fatalf("refuseOversizeRequest(%d,%d) on unknown budget = %v (runtime-extras-unknown=%v), want admitted",
+				tc.prompt, tc.out, err, errors.Is(err, ErrInKernelRuntimeExtrasUnknown))
+		}
+	}
+}
+
+// TestInKernelCapacityErrorRuntimeExtrasSiteIsTyped pins the closed contract of the
+// runtime-extras refusal: the site matches a sentinel via errors.Is (through wrapping), the
+// estimator's typed cause is reachable via errors.As, and a byte-budget refusal does not match.
+func TestInKernelCapacityErrorRuntimeExtrasSiteIsTyped(t *testing.T) {
+	cause := &compute.RuntimeExtraCapacityUnknownError{Missing: "prefill panel width"}
+	err := fmt.Errorf("wrapped: %w", &InKernelCapacityError{
+		Class: compute.MemoryUnknown,
+		Scope: compute.MemoryScopeDevice,
+		Site:  InKernelCapacitySiteRuntimeExtrasUnknown,
+		Cause: cause,
+	})
+	if !errors.Is(err, ErrInKernelRuntimeExtrasUnknown) {
+		t.Fatalf("errors.Is(%v, ErrInKernelRuntimeExtrasUnknown) = false", err)
+	}
+	var gotCause *compute.RuntimeExtraCapacityUnknownError
+	if !errors.As(err, &gotCause) || gotCause != cause {
+		t.Fatalf("errors.As cause = %v, want the estimator's typed error", gotCause)
+	}
+	budget := &InKernelCapacityError{Want: 10, Avail: 1, Site: "capacity-precheck"}
+	if errors.Is(budget, ErrInKernelRuntimeExtrasUnknown) {
+		t.Fatal("a byte-budget refusal must not match ErrInKernelRuntimeExtrasUnknown")
+	}
+}

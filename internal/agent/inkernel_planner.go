@@ -1305,11 +1305,32 @@ type InKernelCapacityError struct {
 	// Detail carries the typed cause when no byte figure exists (e.g. the runtime-extras
 	// estimator's missing bound), so the message never reports a misleading "needs 0 bytes".
 	Detail string
+	// Cause is the typed upstream reason when the refusal is not a byte-budget verdict
+	// (the *compute.RuntimeExtraCapacityUnknownError behind runtime-extras-unknown), so
+	// callers can errors.As the missing bound instead of parsing Detail.
+	Cause error
 }
 
 // inKernelRuntimeExtrasUnknownSite marks a refusal where the Qwen3.8 runtime-extras
 // estimator could not bound the request plan (no Want/Avail figures exist).
-const inKernelRuntimeExtrasUnknownSite = "runtime-extras-unknown"
+const inKernelRuntimeExtrasUnknownSite = InKernelCapacitySiteRuntimeExtrasUnknown
+
+// InKernelCapacitySiteRuntimeExtrasUnknown is the exported Site of a refusal raised because
+// a required runtime-extras bound could not be priced. Want/Avail carry no meaning there.
+const InKernelCapacitySiteRuntimeExtrasUnknown = "runtime-extras-unknown"
+
+// ErrInKernelRuntimeExtrasUnknown matches (errors.Is) any InKernelCapacityError whose Site is
+// InKernelCapacitySiteRuntimeExtrasUnknown: the closed contract for "the engine could not bound
+// its runtime extras", distinct from a known-too-small byte budget.
+var ErrInKernelRuntimeExtrasUnknown = errors.New("in-kernel runtime-extras capacity unknown")
+
+// Is reports whether target is ErrInKernelRuntimeExtrasUnknown and this refusal carries that site.
+func (e *InKernelCapacityError) Is(target error) bool {
+	return target == ErrInKernelRuntimeExtrasUnknown && e != nil && e.Site == InKernelCapacitySiteRuntimeExtrasUnknown
+}
+
+// Unwrap exposes the typed cause (if any) to errors.As.
+func (e *InKernelCapacityError) Unwrap() error { return e.Cause }
 
 func (e *InKernelCapacityError) Error() string {
 	class := e.Class
@@ -3591,6 +3612,7 @@ func (p *InKernelPlanner) refuseOversizeRequest(promptTokens, maxNew int) error 
 			Scope:  compute.MemoryScopeDevice,
 			Site:   inKernelRuntimeExtrasUnknownSite,
 			Detail: extrasErr.Error(),
+			Cause:  extrasErr,
 		}
 	}
 	if len(plan) == 0 {
