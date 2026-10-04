@@ -141,8 +141,25 @@ type v41ForwardSnapshot struct {
 }
 
 // PrefixSnapshot captures an independently owned prefix. Qwen recurrent layers
-// share immutable device pairs until a branch first mutates that layer.
+// share immutable device pairs until a branch first mutates that layer. On a
+// backend-nil Qwen session whose resident GDN owners hold the live recurrent
+// state, the owners are read back into the snapshot's host cache.
 func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
+	return s.prefixSnapshot(true)
+}
+
+// PrefixSnapshotHostOnly captures the prefix exactly as PrefixSnapshot did before
+// resident GDN owner readback existed: the host Cache.linear is cloned as-is and
+// live resident owners are neither read nor consulted. It is for callers that
+// checkpoint and restore GDN state through their own transaction state (the P4
+// MTP speculative-round checkpoint), where a per-round device readback of every
+// owner would be pure overhead. Such a snapshot is NOT a publishable prefix of
+// an owner-backed session; use PrefixSnapshot for anything restored elsewhere.
+func (s *Session) PrefixSnapshotHostOnly() (*PrefixSnapshot, error) {
+	return s.prefixSnapshot(false)
+}
+
+func (s *Session) prefixSnapshot(readResidentGDN bool) (*PrefixSnapshot, error) {
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
 	if s == nil || s.Cache == nil {
@@ -183,7 +200,28 @@ func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
 			out.hasV41DeviceIdentity = true
 		}
 	}
+	if s.Backend == nil && !readResidentGDN {
+		return out, nil
+	}
 	if s.Backend == nil {
+		// A backend-nil Qwen session whose resident GDN owners (admitted sequence
+		// or promoted decode) hold the live recurrent state never advanced its host
+		// Cache.linear while they ran. Read the owners into the CLONE so the
+		// snapshot restores the true prefix state into any host session; the live
+		// owners stay authoritative and unchanged, so a following prefill or decode
+		// on this session continues from the same state. Fail closed rather than
+		// publish a stale prefix.
+		if s.qwen35GDNOwnersHoldLiveState() {
+			snapshots, layer, stage, err := s.snapshotQwen35GDNOwners()
+			if err != nil {
+				out.Close()
+				return nil, fmt.Errorf("model: prefix snapshot cannot read resident GDN layer %d (%s): %w", layer, stage, err)
+			}
+			writeQwen35GDNSnapshotsToHost(s.M.Cfg, out.Cache, snapshots)
+		} else if s.qwen35HAL != nil && s.qwen35HAL.sequenceFailure != nil {
+			out.Close()
+			return nil, fmt.Errorf("model: cannot snapshot prefix after resident GDN failure: %w", s.qwen35HAL.sequenceFailure)
+		}
 		return out, nil
 	}
 	if s.halKV == nil {

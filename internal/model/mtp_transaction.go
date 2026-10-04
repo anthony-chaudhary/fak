@@ -316,7 +316,10 @@ func (tx *MTPTransaction) BeginRound() (*MTPCheckpoint, error) {
 	}
 
 	if tx.session != nil {
-		snap, err := tx.session.PrefixSnapshot()
+		// The round restores GDN recurrent/conv state through its own checkpoint
+		// (cp.recurrent/cp.conv above), so the target snapshot stays host-only:
+		// no per-round resident-owner readback on the speculative hot path.
+		snap, err := tx.session.PrefixSnapshotHostOnly()
 		if err != nil {
 			return nil, tx.downgradeLocked(MTPDowngradeExecutionFailed, fmt.Sprintf("prefix snapshot: %v", err))
 		}
