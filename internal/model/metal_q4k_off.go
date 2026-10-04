@@ -2,6 +2,8 @@
 
 package model
 
+import "github.com/anthony-chaudhary/fak/internal/metalgemm"
+
 // metal_q4k_off.go — the default (pure-Go) q4_k prefill GEMM dispatch: always the CPU
 // q4kGemm. The Metal q4_k path lives in metal_q4k_on.go on Apple Silicon+cgo, so non-Metal
 // builds stay pure-Go (s.MetalQ4K is simply ignored here).
@@ -19,6 +21,26 @@ func (s *Session) q8GemmDispatch(name string, qt *q8Tensor, Xq *q8Panel) []float
 // through q8GemmDispatch.
 func (s *Session) q8GemmGroupDispatch(names []string, Xq *q8Panel, P int) [][]float32 {
 	return nil
+}
+
+// q8GemmGroupDispatchDirect always declines in the pure-Go build (no Metal).
+func (s *Session) q8GemmGroupDispatchDirect(names []string, Xq *q8Panel, P int) [][]float32 {
+	return nil
+}
+
+// denseQ4KPrefillGraphMaxRows mirrors the Metal build's dense prefill graph panel bound; the
+// pure-Go build never admits the graph, so it only keeps prefillBatchedQ4K compiling.
+const denseQ4KPrefillGraphMaxRows = 1024
+
+// SetDenseQ4KPrefillGraph is a no-op in the pure-Go build (no Metal layer graph).
+func SetDenseQ4KPrefillGraph(on bool) {}
+
+// denseQ4KPrefillGraphEligible never admits the dense layer graph in the pure-Go build.
+func (s *Session) denseQ4KPrefillGraphEligible() bool { return false }
+
+// denseQ4KGraphSegment always declines in the pure-Go build; the caller runs the host route.
+func (s *Session) denseQ4KGraphSegment(prev int, attn []float32, next int, X []float32, P int) (q, k, v []float32, receipt metalgemm.GraphReceipt, ok bool) {
+	return nil, nil, nil, receipt, false
 }
 
 // kQuantGemmDispatch is the resident K-quant prefill twin; pure-Go builds always use the CPU batch
@@ -95,3 +117,7 @@ func (m *Model) MetalQ8ResidencyError() (error, bool) { return nil, false }
 // liveMetalWeightCounts is the pure-Go stub for the live device-resident weight counts (#12875):
 // no Metal device exists on this build, so both counts are honestly zero.
 func liveMetalWeightCounts() (q6k, q8 int) { return 0, 0 }
+
+// recordMetalFallback is unreachable in the pure-Go build (no Metal route can decline); it
+// exists so the shared prefill code compiles.
+func (s *Session) recordMetalFallback(route MetalFallbackRoute) {}

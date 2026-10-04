@@ -314,10 +314,20 @@ func (s *Session) q8GemmDispatch(name string, qt *q8Tensor, Xq *q8Panel) []float
 // of raw-Q4_K residency; grouping them pays one Metal command-buffer roundtrip instead of one per
 // projection. Non-Q8 names are left nil for the caller's existing fallback.
 func (s *Session) q8GemmGroupDispatch(names []string, Xq *q8Panel, P int) [][]float32 {
+	if os.Getenv("FAK_Q8_GEMM_GROUP") != "1" {
+		return nil
+	}
+	return s.q8GemmGroupDispatchDirect(names, Xq, P)
+}
+
+// q8GemmGroupDispatchDirect is q8GemmGroupDispatch without the FAK_Q8_GEMM_GROUP opt-in check. The
+// dense resident-Q4_K prefill host route uses it for its q+k pair (always Q8 in the q4k-hybrid
+// load, #13599 Step A); the hybrid pgroup keeps the env-gated entry until its own receipt.
+func (s *Session) q8GemmGroupDispatchDirect(names []string, Xq *q8Panel, P int) [][]float32 {
 	if s.M.prism != nil {
 		return nil // shared Q8 panel was quantized before per-weight rotation
 	}
-	if os.Getenv("FAK_Q8_GEMM_GROUP") != "1" || !s.MetalQ4K || !metalgemm.Available() || Xq == nil || P <= 0 {
+	if !s.MetalQ4K || !metalgemm.Available() || Xq == nil || P <= 0 {
 		return nil
 	}
 	n := len(names)

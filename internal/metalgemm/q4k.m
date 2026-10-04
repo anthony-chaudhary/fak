@@ -2100,4 +2100,9 @@ int mg_graph_prompt(void *opaque){MGProjectionGraph*g=opaque;return g?g->P:0;}
 int mg_graph_input(void *opaque){MGProjectionGraph*g=opaque;return g?g->in:0;}
 void *mg_graph_alloc_result(void *opaque,int n){MGProjectionGraph*g=opaque;return g?mg_graph_result(g,(NSUInteger)n):NULL;}
 void *mg_graph_alloc_buffer(void *opaque,int n){MGProjectionGraph*g=opaque;if(!g||g->committed||n<=0)return NULL;id<MTLBuffer>b=[gDev newBufferWithLength:(NSUInteger)n*sizeof(float) options:MTLResourceStorageModeShared];if(!b)return NULL;[g->results addObject:b];mg_graph_track_buffer(g,b);return (__bridge void*)b;}
+// mg_graph_upload copies a second host f32 panel into a graph-owned shared buffer before
+// commit, so a graph can consume two host activations (e.g. the dense prefill's residual X as
+// the begin panel plus the host attention output as an uploaded panel). It is a host memcpy
+// into StorageModeShared memory, not an encoder: Metal reads it when the command buffer runs.
+void *mg_graph_upload(void *opaque,const float *src,int n){MGProjectionGraph*g=opaque;if(!g||g->committed||!src||n<=0)return NULL;id<MTLBuffer>b=[gDev newBufferWithLength:(NSUInteger)n*sizeof(float) options:MTLResourceStorageModeShared];if(!b)return NULL;memcpy([b contents],src,(NSUInteger)n*sizeof(float));[g->results addObject:b];mg_graph_track_buffer(g,b);return (__bridge void*)b;}
 void mg_graph_note_encoder(void *opaque){MGProjectionGraph*g=opaque;if(g&&!g->committed)g->encoders++;}
