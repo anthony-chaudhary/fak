@@ -110,6 +110,27 @@ func (m *Model) ffnForLayer(layer int) ffnKind {
 	return moeFFN{}
 }
 
+// The shared model-local admission for the fused on-GPU gated-FFN fast path is the
+// conjunction of two allocation-free predicates: siluGatedMLP (the activation policy) and
+// biasFreeGatedMLP (the projection triple carries no bias). The dense, routed-expert (HAL
+// and Metal) and Qwen shared-expert adapters all express this same SiLU-only, bias-free
+// requirement; centralizing it keeps the policy consistent while each caller retains its
+// own backend/session gating, residency checks, kernel calls, fallback order and counters.
+//
+// They are two predicates rather than one because Go evaluates call arguments eagerly:
+// the activation policy is the FIRST conjunct at each call site, so on a GELU model the
+// bias-name arguments are never built and the original short-circuit (and its allocation
+// profile) is preserved exactly. Each caller keeps its own lookup order for the biases.
+
+// siluGatedMLP reports the plain-SiLU activation policy (neither GELU flag).
+func siluGatedMLP(cfg Config) bool { return !cfg.ActGeluTanh && !cfg.ActGeluErf }
+
+// biasFreeGatedMLP reports whether the gate/up/down projections carry no bias, probing
+// the three names in caller-supplied order and short-circuiting like the inline checks.
+func (m *Model) biasFreeGatedMLP(gateBias, upBias, downBias string) bool {
+	return !m.has(gateBias) && !m.has(upBias) && !m.has(downBias)
+}
+
 // denseSwiGLU is the verbatim dense FFN: g=gate(xn); u=up(xn); g=silu(g)*u;
 // delta=down(g). Identical kernel and loop order to the inline SwiGLU it replaces,
 // so the dense path stays bit-identical (the load-bearing no-op gate).
@@ -124,8 +145,7 @@ func (denseSwiGLU) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 	// the I-wide intermediate resident on the GPU (the per-token decode lever, #67). Falls through to
 	// the per-matmul path otherwise (bit-identical up to GPU float-order; pinned by the decode parity
 	// gate). _ = I keeps the dims referenced when this returns early.
-	if !cfg.ActGeluTanh && !cfg.ActGeluErf &&
-		!m.has(p("mlp.gate_proj.bias")) && !m.has(p("mlp.up_proj.bias")) && !m.has(p("mlp.down_proj.bias")) {
+	if siluGatedMLP(cfg) && m.biasFreeGatedMLP(p("mlp.gate_proj.bias"), p("mlp.up_proj.bias"), p("mlp.down_proj.bias")) {
 		if sk, ok := mat.(sessionQ4KKernel); ok {
 			if xf, ok2 := xn.([]float32); ok2 {
 				if out := sk.s.q4kFusedMLP(p("mlp.gate_proj.weight"), p("mlp.up_proj.weight"), p("mlp.down_proj.weight"), xf); out != nil {
@@ -229,10 +249,8 @@ func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 
 	// CUDA/device HAL route: keep all three expert projections and SwiGLU on the
 	// backend. The helper admits only bias-free SiLU experts whose gate/up/down
 	// weights all have an honest resident Q4_K or staged F16 k-quant representation.
-	if !cfg.ActGeluTanh && !cfg.ActGeluErf &&
-		!m.has(expertName(layer, expert, "gate_proj.bias")) &&
-		!m.has(expertName(layer, expert, "up_proj.bias")) &&
-		!m.has(expertName(layer, expert, "down_proj.bias")) {
+	if siluGatedMLP(cfg) &&
+		m.biasFreeGatedMLP(expertName(layer, expert, "gate_proj.bias"), expertName(layer, expert, "up_proj.bias"), expertName(layer, expert, "down_proj.bias")) {
 		// expertSwiGLUHAL itself gates on supportsRoutedExpertKQuant + halW, so a
 		// non-capable backend returns ok=false and falls through unchanged (#5111).
 		if sess != nil {
@@ -282,10 +300,8 @@ func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 
 	// per-token decode lever the dense MLP already uses (q4kFusedMLP, #67), now applied to each of
 	// the top-k routed experts (which are the FFN-dominant work on a Qwen3.6-27B q4_k serve). Falls
 	// through to the per-matmul mulGroup path otherwise, bit-identical up to GPU float-order.
-	if !cfg.ActGeluTanh && !cfg.ActGeluErf &&
-		!m.has(expertName(layer, expert, "gate_proj.bias")) &&
-		!m.has(expertName(layer, expert, "up_proj.bias")) &&
-		!m.has(expertName(layer, expert, "down_proj.bias")) {
+	if siluGatedMLP(cfg) &&
+		m.biasFreeGatedMLP(expertName(layer, expert, "gate_proj.bias"), expertName(layer, expert, "up_proj.bias"), expertName(layer, expert, "down_proj.bias")) {
 		if sk, ok := mat.(sessionQ4KKernel); ok {
 			if xf, ok2 := xn.([]float32); ok2 {
 				if out := sk.s.q4kFusedMLP(gn, un, dn, xf); out != nil {
@@ -636,10 +652,8 @@ func qwen35SharedExpert(m *Model, layer int, xn any, mat matKernel) []float32 {
 	gn := qwen35SharedExpertName(layer, "gate_proj.weight")
 	un := qwen35SharedExpertName(layer, "up_proj.weight")
 	dn := qwen35SharedExpertName(layer, "down_proj.weight")
-	if !cfg.ActGeluTanh && !cfg.ActGeluErf &&
-		!m.has(qwen35SharedExpertName(layer, "gate_proj.bias")) &&
-		!m.has(qwen35SharedExpertName(layer, "up_proj.bias")) &&
-		!m.has(qwen35SharedExpertName(layer, "down_proj.bias")) {
+	if siluGatedMLP(cfg) &&
+		m.biasFreeGatedMLP(qwen35SharedExpertName(layer, "gate_proj.bias"), qwen35SharedExpertName(layer, "up_proj.bias"), qwen35SharedExpertName(layer, "down_proj.bias")) {
 		if sk, ok := mat.(sessionQ4KKernel); ok {
 			if xf, ok2 := xn.([]float32); ok2 {
 				if out := sk.s.q4kFusedMLP(gn, un, dn, xf); out != nil {
