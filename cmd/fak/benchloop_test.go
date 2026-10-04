@@ -74,8 +74,8 @@ func TestWorkspaceOrRepoRoot(t *testing.T) {
 		t.Fatalf("empty workspace: got %q, want repo root %q", got, want)
 	}
 	abs := t.TempDir()
-	if got := workspaceOrRepoRoot(abs); got != abs {
-		t.Fatalf("absolute workspace: got %q, want %q", got, abs)
+	if got, want := filepath.Clean(workspaceOrRepoRoot(abs)), filepath.Clean(abs); got != want {
+		t.Fatalf("absolute workspace: got %q, want %q", got, want)
 	}
 	rel := filepath.Join("some", "rel")
 	got := workspaceOrRepoRoot(rel)
