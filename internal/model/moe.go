@@ -907,8 +907,14 @@ func glmSharedExperts(m *Model, layer int, xn any, mat matKernel) []float32 {
 	prefix := layerName(layer, "mlp.shared_experts.")
 	g := mat.mul(prefix+"gate_proj.weight", xn, I, H)
 	u := mat.mul(prefix+"up_proj.weight", xn, I, H)
-	for i := 0; i < I; i++ {
-		g[i] = act(g[i], cfg) * u[i]
+	// Delegate the ordered gated activation + down projection to the shared
+	// ffn.Gated component (fak#13447); the caller keeps ownership of the
+	// gate/up projection kernel and the prepared down input.
+	out, err := ffn.Gated(g, u, func(v float32) float32 { return act(v, cfg) }, func(activated []float32) ([]float32, error) {
+		return mat.mul(prefix+"down_proj.weight", mat.prep(activated), H, I), nil
+	})
+	if err != nil {
+		panic(err)
 	}
-	return mat.mul(prefix+"down_proj.weight", mat.prep(g), H, I)
+	return out
 }
