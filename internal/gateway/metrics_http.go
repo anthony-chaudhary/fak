@@ -92,7 +92,22 @@ func (r *statusRecorder) WriteHeader(status int) {
 		return
 	}
 	r.status = status
+	clearStreamWriteDeadline(r.ResponseWriter, status)
 	r.ResponseWriter.WriteHeader(status)
+}
+
+// clearStreamWriteDeadline lifts the http.Server WriteTimeout (90s by default for proxy
+// backends, FAK_HTTP_WRITE_TIMEOUT_S) for a successful SSE response. That deadline bounds
+// the WHOLE response, so a streamed turn queued behind sibling subagents on a busy
+// upstream was cut mid-stream (client RemoteDisconnected) even while bytes flowed.
+// Streams keep their own liveness bounds (heartbeats, progress deadlines); buffered
+// responses keep the server-wide deadline. Best effort: a writer without deadline
+// support is left unchanged.
+func clearStreamWriteDeadline(w http.ResponseWriter, status int) {
+	if status != http.StatusOK || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/event-stream") {
+		return
+	}
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 }
 
 // Write forwards the body to the wrapped ResponseWriter (defaulting the status to 200

@@ -446,6 +446,9 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 		if err != nil {
 			return nil, err
 		}
+		// llama-server slot affinity (llama_slot_affinity.go): pin a shared prefix to one
+		// slot so sibling subagents reuse the parent's KV. No-op for non-llama upstreams.
+		extraBody = p.withLlamaSlotAffinity(extraBody, safeMessages, tools)
 		reqBody, err = adapter.MarshalRequest(adapterRequest{
 			Model:                    modelID,
 			ServiceTier:              sp.ServiceTier,
