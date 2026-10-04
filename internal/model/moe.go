@@ -618,9 +618,9 @@ func (moeFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 			} else {
 				out = expertSwiGLU(m, layer, pk.expert, xn, mat)
 			}
-			for i := 0; i < H; i++ {
-				delta[i] += pk.weight * out[i]
-			}
+			// delta and out are both H-wide by construction, so the shared
+			// accumulation cannot fail; the reduction order is preserved.
+			_ = ffn.AddScaled(delta, out, pk.weight)
 		}
 	}
 	// Qwen3.5-MoE (Ornith-1.0-35B/397B) adds an always-on, sigmoid-GATED shared expert

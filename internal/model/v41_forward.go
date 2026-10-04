@@ -2637,9 +2637,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 						} else {
 							m.v41NoteExpertContraction()
 						}
-						for i := range routed {
-							routed[i] += pick.weight * y[i]
-						}
+						_ = ffn.AddScaled(routed, y, pick.weight)
 						continue
 					}
 				}
@@ -2658,9 +2656,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 				} else {
 					m.v41NoteExpertContraction()
 				}
-				for i := range routed {
-					routed[i] += pick.weight * y[i]
-				}
+				_ = ffn.AddScaled(routed, y, pick.weight)
 			}
 			routedByToken[t] = routed
 		}
