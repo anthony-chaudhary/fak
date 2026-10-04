@@ -44,9 +44,9 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	}
 	defer release()
 
-	// Build from a PRISTINE detached origin/main checkout, never the live (peer-dirty)
+	// Build from a PRISTINE detached selected-commit checkout, never the live (peer-dirty)
 	// tree: that gives a clean VCS stamp on the installed binary and guarantees we install
-	// exactly verified origin/main, not a build contaminated with peers' work-in-progress.
+	// exactly the verified selection, not a build contaminated with peers' work-in-progress.
 	ctx := context.Background()
 	var stopHeartbeat func()
 	reportSelfUpdateProgress(25, "cleaning stale self-update artifacts")
@@ -191,7 +191,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		}
 	} else {
 		if !isInteractiveProgressBar() {
-			fmt.Fprintf(selfUpdateProgress, "self-update: building and gating origin/main for %d target(s) …\n", 1+len(staleSiblings)+len(companionPaths))
+			fmt.Fprintf(selfUpdateProgress, "self-update: building and gating %s for %d target(s) …\n", headRev, 1+len(staleSiblings)+len(companionPaths))
 		}
 		attemptOptions := selfUpdateAttemptOptions(buildDir, installTarget, headRev)
 		cacheEntryPresent := selfUpdateCandidateCacheEntryPresent(attemptOptions.CacheDir)

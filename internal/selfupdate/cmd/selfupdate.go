@@ -72,7 +72,9 @@ func runBuildWorktreeGC(ctx context.Context, out io.Writer, repoRoot string, app
 func Run(argv []string) {
 	fs := flag.NewFlagSet("self-update", flag.ExitOnError)
 	verbFlagUsage(fs, "self-update") // #2232: overview verb -> deep help above the flag dump
-	check := fs.Bool("check", false, "report whether this binary is stale vs HEAD and exit (no build)")
+	check := fs.Bool("check", false, "report freshness against the selected source and exit (no fetch or build)")
+	sourceRef := fs.String("ref", "origin/main", "origin branch or tag to build (mutually exclusive with --revision)")
+	sourceRevision := fs.String("revision", "", "full 40-hex source commit to build (mutually exclusive with --ref)")
 	buildGC := fs.Bool("build-gc", false, "plan stale self-update build-worktree GC and exit (JSON; dry-run by default)")
 	applyBuildGC := fs.Bool("apply", false, "apply --build-gc removals after conservative revalidation")
 	manifestURL := fs.String("manifest-url", "", "opt in to signed conditional update selection from this HTTPS endpoint")
@@ -117,6 +119,12 @@ func Run(argv []string) {
 	setSelfUpdateVerbose(isVerbose)
 	beginSelfUpdateOutput(*jsonMode)
 	defer clearSelfUpdateProgressBar()
+	sourceOptions, sourceErr := selfUpdateSourceFlags(fs, *sourceRef, *sourceRevision, *installer, os.Getenv("FAK_SELF_UPDATE_INSTALLER"))
+	if sourceErr != nil {
+		fmt.Fprintln(os.Stderr, "self-update:", sourceErr)
+		emitSelfUpdateOutcome(outcomePrepareFailed, installTargetOr(*target), sourceErr.Error())
+		os.Exit(2)
+	}
 	if handleBuildGC(*root, *buildGC, *applyBuildGC, *check) {
 		return
 	}
@@ -168,36 +176,17 @@ func Run(argv []string) {
 		return
 	}
 
-	// Compare against origin/main, not local HEAD: on a permanently-dirty shared trunk the
-	// local tree is always ahead-or-behind with peer WIP, and origin/main is the verified
-	// line we actually want guards converged on.
+	// Selection never builds from the live peer-dirty checkout. Capture one immutable
+	// commit before comparison, audit, admission, or worktree preparation.
 	reportSelfUpdateProgress(10, "reading selected revision")
-	headRev := ""
-	if strings.TrimSpace(*manifestURL) != "" && manifestSelection.Disposition == "update" {
-		headRev = manifestSelection.TargetRevision
-		if manifestSelection.Artifact == nil {
-			selfUpdateFetchOrigin(context.Background(), selfinstall.RealRunner, repoRoot, *check)
-		}
-	} else {
-		selfUpdateFetchOrigin(context.Background(), selfinstall.RealRunner, repoRoot, *check)
-		headRev = repoRevOf(repoRoot, "origin/main")
-	}
-
-	if headRev != "" && !isFullGitCommit(headRev) {
-		if resolved := repoRevOf(repoRoot, headRev); isFullGitCommit(resolved) {
-			headRev = resolved
-		}
-	}
-	if !*check && (headRev == "" || !isFullGitCommit(headRev)) {
+	source, sourceErr := resolveSelfUpdateSource(context.Background(), selfinstall.RealRunner, repoRoot, sourceOptions, manifestSelection, *check)
+	if sourceErr != nil {
 		clearSelfUpdateProgressBar()
-		detail := fmt.Sprintf("cannot resolve target revision origin/main in repo %s", repoRoot)
-		if headRev != "" {
-			detail = fmt.Sprintf("selected revision %q in repo %s is not a full 40-hex commit", headRev, repoRoot)
-		}
-		fmt.Fprintln(os.Stderr, "self-update:", detail)
-		emitSelfUpdateOutcome(outcomePrepareFailed, installTargetOr(*target), detail)
+		fmt.Fprintln(os.Stderr, "self-update:", sourceErr)
+		emitSelfUpdateOutcome(outcomePrepareFailed, installTargetOr(*target), sourceErr.Error())
 		os.Exit(1)
 	}
+	headRev := source.Revision
 
 	// Whose freshness are we judging? When --target names a DIFFERENT binary (the scheduler
 	// case: a dev fak invokes self-update to converge the FLEET binary), read the TARGET's
@@ -219,14 +208,10 @@ func Run(argv []string) {
 	stamp = selfUpdateIdentityAwareStamp(installTargetOr(*target), stamp)
 	verdict := binstamp.Compare(stamp, headRev)
 
-	// Beyond the coarse Fresh/Stale/Unknown, classify the stamp by git ANCESTRY vs origin/main.
-	// This is what lets SELF mode tell a binary that is provably BEHIND (Skewed — worth
-	// rebuilding) apart from one that is merely AHEAD (a fresh local build not yet pushed):
-	// binstamp.Compare collapses BOTH into Stale, so the old `verdict == Stale` rule would
-	// rebuild origin/main straight OVER a newer dev binary. AssessStamp reuses the stamp we
-	// already resolved (the target's, in fleet mode) and the origin/main we just fetched.
-	reportSelfUpdateProgress(15, "comparing installed and origin/main revisions")
-	skew := versionskew.AssessStamp(context.Background(), selfinstall.RealRunner, repoRoot, "origin/main", stamp)
+	// Use the captured commit for ancestry too: re-reading a mutable ref here could
+	// authorize a downgrade using a different source than the one actually built.
+	reportSelfUpdateProgress(15, "comparing installed and selected revisions")
+	skew := versionskew.AssessStamp(context.Background(), selfinstall.RealRunner, repoRoot, headRev, stamp)
 
 	stampRev := stamp.Revision
 	selfUpdateReceiptOldRevision = stampRev
@@ -236,17 +221,13 @@ func Run(argv []string) {
 	} else if len(stampRev) > 12 {
 		stampRev = stampRev[:12]
 	}
-	head := headRev
-	if len(head) > 12 {
-		head = head[:12]
-	}
 	if !isInteractiveProgressBar() {
-		fmt.Fprintf(selfUpdateProgress, "%s: %s%s   origin/main: %s   => %s (skew: %s)\n",
-			subject, stampRev, dirtyMark(stamp.Dirty), head, verdict, skew.Verdict)
+		fmt.Fprintf(selfUpdateProgress, "%s: %s%s   source=%s revision=%s   => %s (skew: %s)\n",
+			subject, stampRev, dirtyMark(stamp.Dirty), source.Selector, headRev, verdict, skew.Verdict)
 	}
 
 	if *check {
-		runSelfUpdateCheck(repoRoot, headRev, *target, verdict, skew)
+		runSelfUpdateCheck(repoRoot, headRev, *target, source.Selector, verdict, skew)
 		return
 	}
 	// Decide whether to build (see selfUpdateShouldBuild for the SELF/FLEET asymmetry). An
@@ -264,7 +245,7 @@ func Run(argv []string) {
 	manifestSelectedUpdate := strings.TrimSpace(*manifestURL) != "" && manifestSelection.Disposition == "update"
 	proceed := manifestSelectedUpdate || selfUpdateShouldBuild(*force, fleetTarget, verdict, skew.Verdict) || companionStale
 	if !proceed {
-		reportSelfUpdateSkipped(fleetTarget, skew.Verdict, *target)
+		reportSelfUpdateSkipped(fleetTarget, skew.Verdict, *target, source.Selector)
 		return
 	}
 
@@ -328,26 +309,26 @@ func selectSelfUpdateManifest(manifestURL, manifestID, manifestStatePath, manife
 	return manifestSelection, true
 }
 
-func runSelfUpdateCheck(repoRoot, headRev, target string, verdict binstamp.Freshness, skew versionskew.Assessment) {
+func runSelfUpdateCheck(repoRoot, headRev, target, source string, verdict binstamp.Freshness, skew versionskew.Assessment) {
 	clearSelfUpdateProgressBar()
 	reportAsideFootprint(installTargetOr(target))
 	audit := selfUpdateAudit(repoRoot, headRev, installTargetOr(target))
 	printHotCopyAudit(audit)
-	emitSelfUpdateCheckOutcome(installTargetOr(target), fmt.Sprintf("%s/%s", verdict, skew.Verdict), verdict, audit.Partition())
+	emitSelfUpdateCheckOutcome(installTargetOr(target), fmt.Sprintf("%s/%s source=%s revision=%s", verdict, skew.Verdict, source, headRev), verdict, audit.Partition())
 }
 
-func reportSelfUpdateSkipped(fleetTarget bool, skewVerdict versionskew.Verdict, target string) {
+func reportSelfUpdateSkipped(fleetTarget bool, skewVerdict versionskew.Verdict, target, source string) {
 	clearSelfUpdateProgressBar()
 	emitSelfUpdateOutcome(selfUpdateSkipOutcome(fleetTarget, skewVerdict), installTargetOr(target), fmt.Sprintf("%s", skewVerdict))
 	switch {
 	case fleetTarget:
 		fmt.Fprintln(selfUpdateProgress, "self-update: target already current — nothing to do.")
 	case skewVerdict == versionskew.Ahead:
-		fmt.Fprintln(selfUpdateProgress, "self-update: running binary is AHEAD of origin/main (a local build not yet pushed) — not rebuilding (pass --force to build+gate+install origin/main anyway).")
+		fmt.Fprintf(selfUpdateProgress, "self-update: running binary is AHEAD of %s — not rebuilding (pass --force to build+gate+install the selected source anyway).\n", source)
 	case skewVerdict == versionskew.Fresh:
 		fmt.Fprintln(selfUpdateProgress, "self-update: already current — nothing to do.")
 	case skewVerdict == versionskew.Dirty, skewVerdict == versionskew.Unstamped, skewVerdict == versionskew.Diverged:
-		fmt.Fprintf(selfUpdateProgress, "self-update: running binary is %s vs origin/main — not auto-rebuilding a local/off-trunk build (pass --force to build+gate+install origin/main).\n", skewVerdict)
+		fmt.Fprintf(selfUpdateProgress, "self-update: running binary is %s vs %s — not auto-rebuilding a local/off-trunk build (pass --force to build+gate+install the selected source).\n", skewVerdict, source)
 	default:
 		fmt.Fprintln(selfUpdateProgress, "self-update: freshness unknown — not rebuilding (pass --force to build+gate+install anyway).")
 	}
@@ -470,7 +451,7 @@ func selfUpdateIdentityAwareCopies(copies []selfinstall.HotCopy, identityTarget 
 	return copies
 }
 
-// selfUpdateAudit grades every declared hot copy against origin/main. A clean copy whose bytes
+// selfUpdateAudit grades every declared hot copy against the selected commit. A clean copy whose bytes
 // exactly match the target's verified current artifact inherits its selected source revision;
 // dirty copies retain their embedded provenance and remain fail-closed.
 func selfUpdateAudit(repoRoot, headRev, identityTarget string) selfinstall.Audit {
