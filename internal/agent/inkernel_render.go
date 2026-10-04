@@ -99,6 +99,28 @@ func renderInKernelChatMLRequest(messages []Message, tools []ToolDef, cfg model.
 	return chat
 }
 
+const (
+	inKernelSharedBlockOpen = "<|im_start|>system\n"
+	inKernelSharedBlockEnd  = "<|im_end|>\n"
+)
+
+// inKernelSharedPrefixText returns the rendered leading system block — system text
+// plus the folded tool schema — which is the longest prefix every sibling request
+// with the same system prompt and tool list renders byte-identically. Both the
+// Ornith Qwen3.5 template (renderOrnithQwen35Transcript) and the generic ChatML
+// renderer (renderTranscriptTools) emit exactly one such block first, closed by
+// "<|im_end|>\n". It returns "" when the prompt has no leading system block.
+func inKernelSharedPrefixText(rendered string) string {
+	if !strings.HasPrefix(rendered, inKernelSharedBlockOpen) {
+		return ""
+	}
+	end := strings.Index(rendered[len(inKernelSharedBlockOpen):], inKernelSharedBlockEnd)
+	if end < 0 {
+		return ""
+	}
+	return rendered[:len(inKernelSharedBlockOpen)+end+len(inKernelSharedBlockEnd)]
+}
+
 // inKernelUsesOrnithQwen35Template selects the published Qwen3.5-family template
 // only when the checkpoint identifies that family as well as carrying hybrid layers.
 // IsQwen35Hybrid alone is intentionally insufficient: older callers and tests that

@@ -1779,6 +1779,10 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	var s *model.Session
 	var cachedLogits []float32
 	var matched, cacheable int
+	// structural is the longest token prefix visible in the tree (the divergence
+	// point), which may exceed the restorable `matched` on a recurrent hybrid. It only
+	// selects where prefill materializes a checkpoint; reporting keeps cacheable.
+	var structural int
 	var sourceTier radixkv.SnapshotTier
 	skipExactDeviceL1Readmission := false
 
@@ -1792,6 +1796,9 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		var sourceScope radixkv.ShareScope
 		if scopedLookup {
 			if p.backend != nil {
+				if visible, visErr := p.scopedTree.MatchLen(owner, ids); visErr == nil {
+					structural = visible
+				}
 				matchedSnapshot, cachedLogits, m, sourceScope, tier, err = p.scopedTree.LookupSnapshotTieredContext(ctx, owner, ids)
 			} else {
 				matchedKV, cachedLogits, m, _, err = p.scopedTree.Lookup(owner, ids)
@@ -1801,6 +1808,9 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 			if p.backend != nil {
 				b, snap, legacyMatched, lookupTier, lookupErr := p.tree.LookupSnapshotTieredContext(ctx, ids)
 				matchedSnapshot, m, err = snap, legacyMatched, lookupErr
+				if b != nil {
+					structural = b.Plen()
+				}
 				tier = lookupTier
 				if m >= len(ids) {
 					cachedLogits = b.Logits()
@@ -1919,18 +1929,22 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	if logits == nil {
 		tp := time.Now()
 		prefillAt := matched
-		checkpoint := inKernelSnapshotCheckpoint(prefillAt, len(ids))
-		if reuse && p.backend != nil && checkpoint > prefillAt {
-			logits = s.Prefill(ids[prefillAt:checkpoint])
-			checkpointSnapshot, snapshotErr := s.PrefixSnapshot()
-			if snapshotErr != nil {
-				return inKernelGenerateResult{}, snapshotErr
+		if reuse && p.backend != nil {
+			// Same checkpoint plan as the target-only path: the shared system/tools
+			// boundary plus the structural divergence point (falling back to the 64-token
+			// grid), so speculative/MTP fan-out children restore the parent's prefix.
+			if structural < matched {
+				structural = matched
 			}
-			if admitErr := p.admitPrefixSnapshot(ctx, ids[:checkpoint], checkpointSnapshot, logits); admitErr != nil {
-				checkpointSnapshot.Close()
-				return inKernelGenerateResult{}, admitErr
+			sharedBoundary := inKernelSharedPrefixBoundaryFromContext(ctx)
+			required := inKernelAdaptiveSnapshotCheckpoint(prefillAt, structural, len(ids))
+			for _, checkpoint := range inKernelPrefillCheckpoints(prefillAt, structural, sharedBoundary, len(ids)) {
+				logits = s.Prefill(ids[prefillAt:checkpoint])
+				if admitErr := p.admitPrefillCheckpoint(ctx, s, ids[:checkpoint], logits, checkpoint != required); admitErr != nil {
+					return inKernelGenerateResult{}, admitErr
+				}
+				prefillAt = checkpoint
 			}
-			prefillAt = checkpoint
 		}
 		if prefillAt < len(ids) {
 			rawLogits, err := p.prefillDivergentSuffix(ctx, s, ids[prefillAt:], measurementOpt...)
@@ -2892,6 +2906,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	}
 	messages, tools = prepared.messages, prepared.tools
 	chat, ids, maxNew := prepared.rendered, prepared.ids, prepared.maxNew
+	ctx = withInKernelSharedPrefixBoundary(ctx, prepared.sharedBoundary)
 	if err := p.refuseContextLength(len(ids), maxNew); err != nil {
 		return nil, err
 	}
