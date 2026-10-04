@@ -230,9 +230,16 @@ func (anthropicAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 				req.Messages = append(req.Messages, anthropicMessage{Role: "assistant", Content: blocks})
 			}
 		case RoleTool:
-			req.Messages = append(req.Messages, anthropicMessage{Role: "user", Content: []anthropicBlock{{
-				Type: "tool_result", ToolUseID: m.ToolCallID, Content: m.Content,
-			}}})
+			// A run of adjacent tool results is one logical turn (the several results of
+			// one assistant turn's parallel tool calls). Anthropic docs: splitting parallel
+			// tool results across separate user turns suppresses parallelism (#5797). Fold
+			// them into ONE user turn with N tool_result blocks, preserving run order.
+			block := anthropicBlock{Type: "tool_result", ToolUseID: m.ToolCallID, Content: m.Content}
+			if n := len(req.Messages); n > 0 && anthropicToolResultOnly(req.Messages[n-1].Content) {
+				req.Messages[n-1].Content = append(req.Messages[n-1].Content, block)
+			} else {
+				req.Messages = append(req.Messages, anthropicMessage{Role: "user", Content: []anthropicBlock{block}})
+			}
 		default:
 			if m.Content != "" {
 				req.Messages = append(req.Messages, anthropicMessage{Role: "user", Content: []anthropicBlock{{Type: "text", Text: m.Content}}})
@@ -240,6 +247,21 @@ func (anthropicAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 		}
 	}
 	return json.Marshal(req)
+}
+
+// anthropicToolResultOnly reports whether every block is a tool_result — i.e. the
+// message is a pure tool-result turn a subsequent tool result may join without
+// mixing a genuine user text turn into it.
+func anthropicToolResultOnly(blocks []anthropicBlock) bool {
+	if len(blocks) == 0 {
+		return false
+	}
+	for _, b := range blocks {
+		if b.Type != "tool_result" {
+			return false
+		}
+	}
+	return true
 }
 
 func anthropicTools(tools []ToolDef) []anthropicTool {

@@ -234,6 +234,11 @@ func openAIToolMessagesAsText(messages []Message) []Message {
 	}
 	out := make([]Message, 0, len(messages))
 	toolByID := make(map[string]string)
+	// prevToolText marks the last emitted message as a tool-response user turn this
+	// pass produced, so a run of adjacent RoleTool messages folds into it instead of
+	// stacking N single-block user turns (#5797: parallel tool results must stay one
+	// logical turn or provider parallelism degrades and the prompt cache bursts).
+	prevToolText := false
 	for _, m := range messages {
 		msg := m
 		switch msg.Role {
@@ -256,17 +261,29 @@ func openAIToolMessagesAsText(messages []Message) []Message {
 			msg.Content = content
 			msg.ToolCalls = nil
 			msg.FunctionCall = nil
+			prevToolText = false
 		case RoleTool:
 			name := strings.TrimSpace(msg.Name)
 			if name == "" && strings.TrimSpace(msg.ToolCallID) != "" {
 				name = toolByID[strings.TrimSpace(msg.ToolCallID)]
 			}
+			block := qwenToolResponseBlock(name, msg.Content)
+			if prevToolText {
+				// Join the run, preserving order, into the existing tool-result turn.
+				out[len(out)-1].Content += "\n" + block
+				continue
+			}
 			msg.Role = RoleUser
-			msg.Content = qwenToolResponseBlock(name, msg.Content)
+			msg.Content = block
 			msg.ToolCalls = nil
 			msg.FunctionCall = nil
 			msg.ToolCallID = ""
 			msg.Name = ""
+			prevToolText = true
+			out = append(out, msg)
+			continue
+		default:
+			prevToolText = false
 		}
 		out = append(out, msg)
 	}
@@ -1115,13 +1132,21 @@ func (geminiAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 				req.Contents = append(req.Contents, geminiContent{Role: "model", Parts: parts})
 			}
 		case RoleTool:
-			req.Contents = append(req.Contents, geminiContent{Role: "user", Parts: []geminiPart{{
-				FunctionResponse: &geminiFunctionResponse{
-					Name:     m.Name,
-					ID:       m.ToolCallID,
-					Response: responseObject(m.Content),
-				},
-			}}})
+			// A run of adjacent tool results is one logical turn (the several results of
+			// one assistant turn's parallel tool calls). Fold them into ONE user content
+			// with N functionResponse parts rather than N stacked user turns, so Gemini
+			// does not read the results as serialized turns that suppress parallelism
+			// (#5797). Run order is preserved.
+			part := geminiPart{FunctionResponse: &geminiFunctionResponse{
+				Name:     m.Name,
+				ID:       m.ToolCallID,
+				Response: responseObject(m.Content),
+			}}
+			if n := len(req.Contents); n > 0 && geminiFunctionResponseOnly(req.Contents[n-1]) {
+				req.Contents[n-1].Parts = append(req.Contents[n-1].Parts, part)
+			} else {
+				req.Contents = append(req.Contents, geminiContent{Role: "user", Parts: []geminiPart{part}})
+			}
 		default:
 			if m.Content != "" {
 				req.Contents = append(req.Contents, geminiContent{Role: "user", Parts: []geminiPart{{Text: m.Content}}})
@@ -1152,6 +1177,21 @@ func (geminiAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 		}
 	}
 	return json.Marshal(req)
+}
+
+// geminiFunctionResponseOnly reports whether every part is a functionResponse — i.e.
+// the content is a pure tool-result turn a subsequent result may join without mixing
+// an assistant turn or a genuine user text turn into it.
+func geminiFunctionResponseOnly(c geminiContent) bool {
+	if len(c.Parts) == 0 {
+		return false
+	}
+	for _, p := range c.Parts {
+		if p.FunctionResponse == nil {
+			return false
+		}
+	}
+	return true
 }
 
 func geminiAssistantParts(m Message) []geminiPart {
