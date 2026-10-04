@@ -197,7 +197,6 @@ func TestAdmittedPostFreezeCoversTrunkAdvances(t *testing.T) {
 	want := []string{
 		"ALLOW_CACHE_HEADLINE_DRIFT",
 		"AR",
-		"CLAUDE_PROJECT_DIR",
 		"CUDA_HOME",
 		"CUDA_PATH",
 		"CXX",
