@@ -4,7 +4,6 @@ import (
 	"math"
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestDoorbellSizeThresholdRouting verifies that collective dispatch correctly routes
@@ -170,8 +169,17 @@ func TestDoorbellSharedMemoryExchangeParity(t *testing.T) {
 	}
 }
 
-// TestDoorbellSub100usExchange demonstrates sub-100µs simulated collective exchange
-// for typical token decode vectors (4096 float32 elements = 16KB).
+// TestDoorbellSub100usExchange verifies the simulated doorbell exchange over a
+// typical token decode vector (4096 float32 elements = 16KB) is deterministic and
+// numerically correct across repeated exchanges.
+//
+// It deliberately does NOT gate on a fixed wall-clock threshold. The engine here
+// is an in-process, in-memory simulation: its per-iteration latency is dominated
+// by goroutine scheduling and host load, so a fixed sub-100us assertion made
+// ordinary package correctness depend on the scheduler and flaked (145.009us
+// observed at 644bd060; see #12729). Timing characterization, if wanted, lives in
+// BenchmarkDoorbellCollectiveExchange and is not a correctness gate. This is not
+// physical interconnect, GPU, USB4, Thunderbolt, or Halo evidence.
 func TestDoorbellSub100usExchange(t *testing.T) {
 	engine := NewDoorbellAllReduceEngine(2, TransportThunderbolt4, StorageModeSharedMetal)
 
@@ -187,27 +195,47 @@ func TestDoorbellSub100usExchange(t *testing.T) {
 	p1 := NewF32(engine, []int{decodeDim}, d1)
 
 	// Warmup
-	_, err := engine.DoorbellAllReduce([]Tensor{p0, p1})
-	if err != nil {
+	if _, err := engine.DoorbellAllReduce([]Tensor{p0, p1}); err != nil {
 		t.Fatalf("Warmup failed: %v", err)
 	}
 
-	// Measure 100 consecutive exchanges
+	// Repeated exchanges: the verdict is functional correctness, never latency.
 	iterations := 100
-	start := time.Now()
+	var last Tensor
 	for i := 0; i < iterations; i++ {
-		_, err := engine.DoorbellAllReduce([]Tensor{p0, p1})
+		out, err := engine.DoorbellAllReduce([]Tensor{p0, p1})
 		if err != nil {
 			t.Fatalf("Iteration %d failed: %v", i, err)
 		}
+		last = out
 	}
-	totalDuration := time.Since(start)
-	avgDuration := totalDuration / time.Duration(iterations)
 
-	t.Logf("Simulated collective exchange: %v per 16KB decode vector (target: < 100µs)", avgDuration)
+	// Rank-ordered element-wise sum, bit-for-bit.
+	got, ok := engine.Host(last)
+	if !ok || len(got) != decodeDim {
+		t.Fatalf("Host(result) = len %d, ok %v; want len %d", len(got), ok, decodeDim)
+	}
+	for i := 0; i < decodeDim; i++ {
+		want := d0[i] + d1[i]
+		if math.Float32bits(got[i]) != math.Float32bits(want) {
+			t.Fatalf("result[%d] = %v (0x%08x), want %v (0x%08x)",
+				i, got[i], math.Float32bits(got[i]), want, math.Float32bits(want))
+		}
+	}
 
-	if avgDuration >= 100*time.Microsecond {
-		t.Fatalf("Simulated collective exchange average latency %v exceeds sub-100µs threshold", avgDuration)
+	// The doorbell path must have recorded the complete payload and signaled
+	// arrival in each peer's inbound slot.
+	for _, pair := range [][2]int{{0, 1}, {1, 0}} {
+		buf := engine.Buffer(pair[0], pair[1])
+		if buf == nil {
+			t.Fatalf("Buffer %d->%d is nil", pair[0], pair[1])
+		}
+		if buf.Control.Count != uint32(decodeDim) {
+			t.Errorf("Buffer %d->%d count = %d, want %d", pair[0], pair[1], buf.Control.Count, decodeDim)
+		}
+		if buf.Control.ArrivalFlag == 0 {
+			t.Errorf("Buffer %d->%d arrival flag not signaled", pair[0], pair[1])
+		}
 	}
 }
 
