@@ -384,11 +384,17 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	id := "chatcmpl-fak-" + itoa(uint64(time.Now().UnixNano()))
 	created := time.Now().Unix()
 
+	includeUsage := req.DeclaredStreamUsage()
+
 	chunk := func(d ChatDelta, finish *string, usage *agent.Usage) ChatStreamResponse {
 		return ChatStreamResponse{
 			ID: id, Object: "chat.completion.chunk", Created: created, Model: reqModel,
 			Choices: []ChatStreamChoice{{Index: 0, Delta: d, FinishReason: finish}},
 			Usage:   usage,
+			// Every chunk of an opted-in stream nulls usage EXCEPT the terminal
+			// usage-only frame below, which passes the object. A non-opted stream
+			// never sets this, so its chunks omit the field entirely.
+			UsageEmitted: includeUsage && usage == nil,
 		}
 	}
 
@@ -668,15 +674,38 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		}
 	}
 	usage := comp.Usage
-	final := chunk(ChatDelta{}, &finish, &usage)
+	final := chunk(ChatDelta{}, &finish, nil)
 	if len(adjs) > 0 || len(resultAdmissions) > 0 || inputTriggerRoute != nil {
 		final.Fak = &FakExt{Adjudications: adjs, ResultAdmissions: resultAdmissions, InputTriggerRoute: inputTriggerRoute}
 	}
 	timePhase(sessionTurn.turnCost, turncost.PhaseStream, func() {
 		_ = writeSSEData(w, final)
 	})
+	// Opted-in usage arrives in its OWN terminal frame with an EMPTY choices array
+	// (the OpenAI stream_options.include_usage contract), never attached to the
+	// finish-bearing choice.
+	if includeUsage {
+		timePhase(sessionTurn.turnCost, turncost.PhaseStream, func() {
+			_ = writeSSEData(w, usageOnlyChunk(id, reqModel, created, &usage))
+		})
+	}
 	writeSSEDone(w, flusher)
 	return true
+}
+
+// usageOnlyChunk is the OpenAI stream_options.include_usage terminal frame: a
+// `chat.completion.chunk` whose ONLY payload is the usage block and whose choices
+// array is EMPTY. It is shared by the live and buffered native emitters so both
+// produce the identical usage-only shape.
+func usageOnlyChunk(id, model string, created int64, usage *agent.Usage) ChatStreamResponse {
+	return ChatStreamResponse{
+		ID:      id,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   model,
+		Choices: []ChatStreamChoice{},
+		Usage:   usage,
+	}
 }
 
 // writeSSEDone writes the terminal `data: [DONE]` sentinel and flushes, closing an

@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/codegraph"
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/model/norm"
 )
 
 // GraphInlineInstruction is one operation in the small callable model graph IR.
@@ -867,20 +868,12 @@ func addPostNormed(x, out [][]float32, n normWeights, eps float32, cfg Config, H
 
 // ---- primitive ops ---------------------------------------------------------
 
-// rmsnorm: x / sqrt(mean(x^2)+eps) * weight (Llama convention: plain weight). The scalar
-// in-order sum-of-squares is load-bearing for the f32 bit-exact rungs (R2/R14) — do not
-// reorder it here; the in-place quant twin rmsnormInto is the one that may use fdot.
+// rmsnorm: x / sqrt(mean(x^2)+eps) * weight (Llama convention: plain weight). The serial
+// float32 arithmetic lives in internal/model/norm.SerialRMSNorm; the model wrapper is kept
+// so callers and the f32 bit-exact rungs (R2/R14) keep their existing seam. The in-place
+// quant twin rmsnormInto (below) is the one that may use fdot.
 func rmsnorm(x, w []float32, eps float32) []float32 {
-	var ss float32
-	for _, v := range x {
-		ss += v * v
-	}
-	inv := float32(1.0 / math.Sqrt(float64(ss/float32(len(x))+eps)))
-	out := make([]float32, len(x))
-	for i, v := range x {
-		out[i] = v * inv * w[i]
-	}
-	return out
+	return norm.SerialRMSNorm(x, w, eps)
 }
 
 // rmsnormInto is the allocation-free RMSNorm used by the Q8 prefill path: it writes directly

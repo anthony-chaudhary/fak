@@ -61,8 +61,16 @@ func modeFlagBashPayload(t *testing.T, cwd, command string) string {
 
 func modeFlagRun(t *testing.T, payload, flagMode string) (int, string, string) {
 	t.Helper()
+	return modeFlagRunThreshold(t, payload, flagMode, 0)
+}
+
+// modeFlagRunThreshold is modeFlagRun with an explicit FOREGROUND_SLEEP threshold
+// in seconds (the typed --sleep-threshold-s input; <= 0 delegates to the guard
+// default).
+func modeFlagRunThreshold(t *testing.T, payload, flagMode string, sleepThresholdS float64) (int, string, string) {
+	t.Helper()
 	var out, errBuf bytes.Buffer
-	rc := runHookMode(strings.NewReader(payload), &out, &errBuf, flagMode)
+	rc := runHookMode(strings.NewReader(payload), &out, &errBuf, flagMode, sleepThresholdS)
 	return rc, out.String(), errBuf.String()
 }
 
@@ -358,24 +366,43 @@ func TestPythonSelftestParity(t *testing.T) {
 	}
 }
 
-// FAK_SLEEP_THRESHOLD_S is read in the command layer: a positive integer
-// overrides the 120 s FOREGROUND_SLEEP default; empty, non-numeric, or <= 0
-// falls back to the default (a typo never fails closed). Driven through
-// --mode warn so every finding lands on stderr, never as a deny.
-func TestHookSleepThresholdEnv(t *testing.T) {
+// parseSleepThreshold turns the explicit --sleep-threshold-s input into seconds:
+// a positive integer overrides the 120 s FOREGROUND_SLEEP default; empty,
+// non-numeric, or <= 0 falls back to the default (a typo never fails closed).
+func TestParseSleepThreshold(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   string
+		want float64
+	}{
+		{"positive", "60", 60},
+		{"padded", " 600 ", 600},
+		{"empty-default", "", 0},
+		{"non-numeric-default", "abc", 0},
+		{"negative-default", "-5", 0},
+		{"zero-default", "0", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseSleepThreshold(tc.in); got != tc.want {
+				t.Errorf("parseSleepThreshold(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// The ambient FAK_SLEEP_THRESHOLD_S name is retired from the command layer: it
+// must have NO effect on the hook verdict. Each row sets the env to a value that
+// WOULD change the verdict if it were still read, and asserts the default
+// (120 s) wins instead. Driven through --mode warn so findings land on stderr.
+func TestHookSleepThresholdEnvInert(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		env          string
 		command      string
-		wantAdvisory bool
+		wantAdvisory bool // under the 120 s default, with the env ignored
 	}{
-		{"env-60/sleep-90->advisory", "60", "sleep 90", true},
-		{"env-600/sleep-300->silent", "600", "sleep 300", false},
-		{"env-abc/sleep-300->advisory(default-120)", "abc", "sleep 300", true},
-		{"env-minus5/sleep-300->advisory(default-120)", "-5", "sleep 300", true},
-		{"env-zero/sleep-300->advisory(default-120)", "0", "sleep 300", true},
-		{"env-empty/sleep-300->advisory(default-120)", "", "sleep 300", true},
-		{"env-abc/sleep-90->silent(default-120)", "abc", "sleep 90", false},
+		{"env-60/sleep-90->silent(default-120)", "60", "sleep 90", false},
+		{"env-600/sleep-300->advisory(default-120)", "600", "sleep 300", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			modeFlagClearEnv(t)
@@ -390,34 +417,78 @@ func TestHookSleepThresholdEnv(t *testing.T) {
 			}
 			got := strings.Contains(errOut, repoguard.ReasonForegroundSleep)
 			if got != tc.wantAdvisory {
-				t.Errorf("FAK_SLEEP_THRESHOLD_S=%q %q: stderr = %q, want %s advisory = %v",
+				t.Errorf("FAK_SLEEP_THRESHOLD_S=%q %q: stderr = %q, want %s advisory = %v (env must be inert)",
 					tc.env, tc.command, errOut, repoguard.ReasonForegroundSleep, tc.wantAdvisory)
 			}
 		})
 	}
 }
 
-// --check reads the same knob as --hook.
-func TestCheckSleepThresholdEnv(t *testing.T) {
+// The explicit typed threshold input controls the FOREGROUND_SLEEP verdict; 0
+// delegates to the 120 s default. Driven through --mode warn.
+func TestHookSleepThresholdExplicit(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		threshold    float64
+		command      string
+		wantAdvisory bool
+	}{
+		{"60/sleep-90->advisory", 60, "sleep 90", true},
+		{"600/sleep-300->silent", 600, "sleep 300", false},
+		{"zero/sleep-300->advisory(default-120)", 0, "sleep 300", true},
+		{"zero/sleep-90->silent(default-120)", 0, "sleep 90", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			modeFlagClearEnv(t)
+			ws := modeFlagWorkspace(t)
+			rc, out, errOut := modeFlagRunThreshold(t, modeFlagBashPayload(t, ws, tc.command), "warn", tc.threshold)
+			if rc != 0 {
+				t.Fatalf("rc = %d, want 0", rc)
+			}
+			if strings.TrimSpace(out) != "" {
+				t.Errorf("stdout = %q, want empty (warn mode never denies)", out)
+			}
+			got := strings.Contains(errOut, repoguard.ReasonForegroundSleep)
+			if got != tc.wantAdvisory {
+				t.Errorf("threshold=%v %q: stderr = %q, want %s advisory = %v",
+					tc.threshold, tc.command, errOut, repoguard.ReasonForegroundSleep, tc.wantAdvisory)
+			}
+		})
+	}
+}
+
+// --check reads the same explicit typed threshold as --hook, and the retired
+// ambient name has no effect on it.
+func TestCheckSleepThresholdExplicit(t *testing.T) {
 	modeFlagClearEnv(t)
 	ws := modeFlagWorkspace(t)
 
-	t.Setenv("FAK_SLEEP_THRESHOLD_S", "60")
 	var out bytes.Buffer
-	if rc := runCheck("sleep 90", ws, false, &out); rc != 0 {
+	if rc := runCheck("sleep 90", ws, false, &out, 60); rc != 0 {
 		t.Fatalf("runCheck(sleep 90) rc = %d, want 0 (advisory-only)", rc)
 	}
 	if !strings.Contains(out.String(), repoguard.ReasonForegroundSleep) {
-		t.Errorf("FAK_SLEEP_THRESHOLD_S=60 --check \"sleep 90\" = %q, want a %s finding", out.String(), repoguard.ReasonForegroundSleep)
+		t.Errorf("threshold=60 --check \"sleep 90\" = %q, want a %s finding", out.String(), repoguard.ReasonForegroundSleep)
 	}
 
-	t.Setenv("FAK_SLEEP_THRESHOLD_S", "600")
 	out.Reset()
-	if rc := runCheck("sleep 300", ws, false, &out); rc != 0 {
+	if rc := runCheck("sleep 300", ws, false, &out, 600); rc != 0 {
 		t.Fatalf("runCheck(sleep 300) rc = %d, want 0", rc)
 	}
 	if strings.Contains(out.String(), repoguard.ReasonForegroundSleep) {
-		t.Errorf("FAK_SLEEP_THRESHOLD_S=600 --check \"sleep 300\" = %q, want no %s finding", out.String(), repoguard.ReasonForegroundSleep)
+		t.Errorf("threshold=600 --check \"sleep 300\" = %q, want no %s finding", out.String(), repoguard.ReasonForegroundSleep)
+	}
+
+	// The ambient name is inert: with the default threshold (0), a value that
+	// would have changed the verdict must not reach the classifier.
+	out.Reset()
+	t.Setenv("FAK_SLEEP_THRESHOLD_S", "600")
+	if rc := runCheck("sleep 300", ws, false, &out, 0); rc != 0 {
+		t.Fatalf("runCheck(sleep 300) rc = %d, want 0", rc)
+	}
+	if !strings.Contains(out.String(), repoguard.ReasonForegroundSleep) {
+		t.Errorf("--check with FAK_SLEEP_THRESHOLD_S=600 but threshold=0 = %q, want a %s finding (env must be inert)",
+			out.String(), repoguard.ReasonForegroundSleep)
 	}
 }
 

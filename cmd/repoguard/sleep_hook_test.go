@@ -57,7 +57,7 @@ func TestHookMixedViolationsStillDeny(t *testing.T) {
 
 func TestCheckWarnsOnAdvisoryOnly(t *testing.T) {
 	var out bytes.Buffer
-	rc := runCheck("sleep 300", wsTest, false, &out)
+	rc := runCheck("sleep 300", wsTest, false, &out, 0)
 	if rc != 0 {
 		t.Fatalf("runCheck(sleep 300) = %d, want 0 (advisory-only must pass)", rc)
 	}

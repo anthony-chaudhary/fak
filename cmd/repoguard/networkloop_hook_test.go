@@ -31,7 +31,7 @@ func TestHookBatchedGhCallStaysSilent(t *testing.T) {
 
 func TestCheckWarnsOnNetworkLoop(t *testing.T) {
 	var out bytes.Buffer
-	rc := runCheck("for n in 1 2 3; do gh issue view $n; done", wsTest, false, &out)
+	rc := runCheck("for n in 1 2 3; do gh issue view $n; done", wsTest, false, &out, 0)
 	if rc != 0 {
 		t.Fatalf("runCheck(network loop) = %d, want 0 (advisory-only must pass)", rc)
 	}

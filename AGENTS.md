@@ -78,36 +78,36 @@ final result.
 
 ## Scope discipline for smaller models: subdivide or abstain
 
-Smaller or resource-constrained models (such as local 7B/14B checkpoints, fast/flash models,
-or bounded worker subagents) achieve reliability by keeping work tightly focused and strictly verified.
+Smaller or resource-constrained models (local 7B/14B checkpoints, fast/flash models,
+bounded worker subagents) are reliable when work stays tightly focused and strictly verified.
 When operating as or delegating to smaller models, enforce scoping safeguards:
 
 1. **Subdivide into atomic units (S0/S1 leaves)**:
    - Restrict each task or dispatch packet to a single observable deliverable and exactly one witness command.
    - Limit the active write surface to 1–3 closely related files within a single package or lane.
    - Decompose multi-step tasks into sequential, verified phases: write the reproduction test first, commit the minimal implementation, and verify the targeted package.
-   - Complete and witness one step before advancing to the next; keep edits focused rather than attempting broad multi-subsystem sweeps in one turn.
+   - Complete and witness one step before advancing; avoid broad multi-subsystem sweeps in one turn.
 
 2. **Abstain from high-difficulty aspects (scoped fail-to-abstain)**:
    - Identify task aspects that demand deep architectural context or high-risk reasoning: concurrency invariants and lock ordering, frozen ABI modifications (`internal/abi`), low-level SIMD/CUDA kernel mechanics, cross-subsystem protocol migrations, and security policy gates.
-   - Scope abstention strictly to the bounded high-difficulty aspect; maintain momentum by executing all independent, safe, solvable sub-components (such as baseline reproduction tests, diagnostic witnesses, non-gated packages, or documentation) rather than abandoning the prompt.
-   - Emit a structured `ABSTAIN` verdict with a typed refusal token and exact boundary description for the escalated aspect alongside the landed partial evidence.
-   - Deliver the verified sub-component and cleanly escalate the isolated difficult aspect to a higher-capability model or human operator.
+   - Scope abstention to the bounded high-difficulty aspect; keep momentum on the independent, safe, solvable sub-components (reproduction tests, diagnostic witnesses, non-gated packages, docs) rather than abandoning the prompt.
+   - Emit a structured `ABSTAIN` verdict with a typed refusal token and exact boundary for the escalated aspect, alongside landed partial evidence.
+   - Deliver the verified sub-component; escalate the isolated difficult aspect to a higher-capability model or human operator.
 
 3. **Guard against fast/flash model sharp edges (Gemini 3.8 Flash & peers)**:
-   - **Curb token inflation and verbosity**: 3.8 Flash is designed to "work harder" and can output 2×–4× more tokens than other models per task. Enforce extreme conciseness (<3 lines commentary in CLI), eliminate conversational preambles/postambles, and keep explanations minimal.
-   - **Resist over-scaffolding ("happy-go-lucky" sprawl)**: Flash models are prone to generating unsolicited companion abstractions, multi-panel apps, or broad refactors for simple requests. Confine diffs strictly to the requested lines/files; do not introduce unasked scaffolding.
-   - **Beware thinking effort tradeoffs**: At low thinking effort, 3.8 Flash exhibits quality regressions (spatial/geometric flaws, shallow verification); at high effort, it burns large token budgets. Never trust low-effort intuition on complex logic—always verify against deterministic external tools (`go test`, `go vet`, `fak validate`).
-   - **Break interactive tool loops while persisting toward the goal**: In CLI/tool loops, Flash models can confabulate success or loop in repeat-failure cycles ("apologizes, then retries the exact same command"). Ground every claim in an observed tool receipt. When a tool call is denied or fails, halt repetition of the identical call or cycling argument variations; read the error or refusal receipt, query `fak recover <TOKEN>` for structured recovery, and pivot to an alternate sanctioned route or decomposed subtask. Persist through recoverable hurdles by adapting the approach rather than repeating failed calls or abandoning the objective.
+   - **Curb token inflation and verbosity**: 3.8 Flash can output 2×–4× more tokens than peers per task. Be extremely concise (<3 lines of CLI commentary), skip preambles/postambles, keep explanations minimal.
+   - **Resist over-scaffolding ("happy-go-lucky" sprawl)**: Flash models over-generate: unsolicited abstractions, multi-panel apps, broad refactors for simple requests. Confine diffs to the requested lines/files; add no unasked scaffolding.
+   - **Beware thinking effort tradeoffs**: Low effort yields quality regressions (spatial flaws, shallow verification); high effort burns budget. Never trust low-effort intuition on complex logic—verify with deterministic tools (`go test`, `go vet`, `fak validate`).
+   - **Break interactive tool loops while persisting toward the goal**: In tool loops, Flash models can confabulate success or repeat-failure cycles. Ground every claim in an observed tool receipt. When a call is denied or fails, stop repeating it; read the receipt, query `fak recover <TOKEN>` for structured recovery, and pivot to an alternate sanctioned route or a decomposed subtask. Adapt rather than repeat or abandon.
    - **Prefer specialized file tools over shell scripting**: Flash models experience higher failure rates on complex CLI/terminal pipelines (TerminalBench regressions). Prefer structured tools (`Read`, `Edit`, `Glob`, `Grep`) over complex piped bash commands.
    - **Anticipate safety false-positives**: Standard 3.8 Flash guardrails can trigger false refusals on legitimate security inspection, redaction, or policy code; frame technical security contexts neutrally or emit structured `ABSTAIN` rather than hallucinating workarounds.
-   - **Guard trailing model turns & nested tool schemas**: Gemini REST wire rejects payloads ending in a model turn with HTTP 400 (`Requests ending with a model turn are not supported`) and fails nested array parameters lacking explicit `items`. Enforce turn alternation (auto-inject continuation on trailing model turns), strip `$schema` and `additionalProperties`, and preserve cryptographic `thoughtSignature` tokens across multi-turn tool replays. Full analysis: [`docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md`](docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md).
+   - **Guard trailing model turns & nested tool schemas**: Gemini REST rejects a payload ending in a model turn (HTTP 400) and nested array params lacking `items`. Enforce turn alternation (auto-inject continuation), strip `$schema`/`additionalProperties`, and preserve `thoughtSignature` across replays. Full analysis: [`docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md`](docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md).
 
 4. **Calibrate test breadth (prevent reasoning model test over-engineering)**:
-   - Restrict test authoring to a single atomic reproduction or regression unit test demonstrating the defect or behavior change; prohibit sprawling 20-test suites when 1 witness suffices.
-   - Prevent token exhaustion and context pollution by targeting only the explicit requirement or failure mode instead of writing speculative matrix permutations or redundant assertion variations.
-   - Keep test execution deterministic, bounded, and fast-failing within the target package (`go test -v ./internal/<pkg>` and `go vet ./internal/<pkg>`).
-   - **Declare the wall-clock a new test adds to its suite.** The breadth rules above bound how many tests you write; this bounds what each one *costs*. Above a cost test, add a `// fak-test:runtime <class> est=<duration> [lane=<lane>]` marker directly above the test func, where `class` is `fast | medium | slow | integration` and `lane` is `default | short | optin | race`. The rule is why: `go test ./...` is bounded by the SLOWEST TEST BINARY, not the sum over binaries, so one undeclared multi-minute test is what an agent actually waits on. A new cost-shaped test with no marker is refused by the `fak-testruntime` gate in the companion checkout (`go -C ../fak-private run ./cmd/fak-testruntime check --staged --root .`), and a test whose package is in no suite module is refused as unreachable by any lane. Cheaper options first: make it `t.Parallel()` (the cost overlaps instead of adding), or move it to a `lane=short|optin|race` test no default lane runs. Record a deliberate cost rather than hiding it — `go run ./cmd/fak-testruntime --write-baseline` absorbs it, and `ceilings --write` raises a package budget with a rationale. Full contract: [`platform/testruntime/doc.go`](../fak-private/platform/testruntime/doc.go) and [TS-03](../fak-private/docs/tickets/claude-session-time-sinks/TS-03-slow-test-packages-wall-time.md).
+   - Restrict test authoring to one atomic reproduction or regression test demonstrating the defect or behavior change; no sprawling suites when one witness suffices.
+   - Target only the explicit requirement or failure mode, not speculative permutations or redundant assertion variations.
+   - Keep execution deterministic, bounded, and fast-failing within the package (`go test -v ./internal/<pkg>` and `go vet ./internal/<pkg>`).
+   - **Declare the wall-clock a new test adds to its suite.** A cost-shaped test carries `// fak-test:runtime <class> est=<duration> [lane=<lane>]` (`class` is `fast | medium | slow | integration`; `lane` is `default | short | optin | race`); a package in no suite module is unreachable by any lane. The rule is why: `go test ./...` is bounded by the slowest test binary, not the sum over binaries, so one undeclared multi-minute test is what an agent actually waits on, and the companion `fak-testruntime` gate refuses a cost-shaped test with no marker. Prefer `t.Parallel()` or a non-default lane, and record a deliberate cost rather than hiding it. Full contract: [`platform/testruntime/doc.go`](../fak-private/platform/testruntime/doc.go).
 
 ## First local-agent product milestone
 

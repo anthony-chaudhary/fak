@@ -887,7 +887,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// event + [DONE]; see chatStreamWriter.fail.
 	var stream *chatStreamWriter
 	if req.Stream {
-		stream = newChatStreamWriter(w, reqModel)
+		stream = newChatStreamWriter(w, reqModel, req.DeclaredStreamUsage())
 		if err := stream.open(); err != nil {
 			// The client is already gone; do not spend a decode on a socket nobody reads.
 			s.logf("gateway: client vanished before the streamed preamble landed: %v", err)

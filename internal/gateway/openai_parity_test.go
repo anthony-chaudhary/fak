@@ -343,10 +343,11 @@ func TestChatCompletionsStreamingEmitsIncrementalSSEChunks(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	body, _ := json.Marshal(ChatRequest{
-		Model:    "test-model",
-		Messages: []agent.Message{{Role: agent.RoleUser, Content: "go"}},
-		Stream:   true,
+	body, _ := json.Marshal(map[string]any{
+		"model":          "test-model",
+		"messages":       []map[string]string{{"role": "user", "content": "go"}},
+		"stream":         true,
+		"stream_options": map[string]any{"include_usage": true},
 	})
 	httpResp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", strings.NewReader(string(body)))
 	if err != nil {
@@ -388,7 +389,19 @@ func TestChatCompletionsStreamingEmitsIncrementalSSEChunks(t *testing.T) {
 	var reassembled strings.Builder
 	contentChunks := 0
 	var sawAllow bool
+	var finish string
+	var terminalUsage *agent.Usage
 	for _, c := range chunks {
+		if c.Usage != nil {
+			terminalUsage = c.Usage
+		}
+		if len(c.Choices) == 0 {
+			// The opted-in usage-only terminal frame carries an empty choices array.
+			continue
+		}
+		if c.Choices[0].FinishReason != nil {
+			finish = *c.Choices[0].FinishReason
+		}
 		if seg := c.Choices[0].Delta.Content; seg != "" {
 			reassembled.WriteString(seg)
 			contentChunks++
@@ -412,13 +425,17 @@ func TestChatCompletionsStreamingEmitsIncrementalSSEChunks(t *testing.T) {
 		t.Errorf("want content split across >=2 incremental chunks, got %d", contentChunks)
 	}
 
-	// The terminal chunk carries finish_reason + usage.
-	last := chunks[len(chunks)-1]
-	if last.Choices[0].FinishReason == nil || *last.Choices[0].FinishReason != "tool_calls" {
-		t.Errorf("terminal finish_reason = %v, want tool_calls", last.Choices[0].FinishReason)
+	// The finish-bearing chunk carries finish_reason; the opted-in usage arrives in
+	// its own empty-choice terminal frame.
+	if finish != "tool_calls" {
+		t.Errorf("terminal finish_reason = %q, want tool_calls", finish)
 	}
-	if last.Usage == nil || last.Usage.TotalTokens != 12 {
-		t.Errorf("terminal usage = %+v, want total 12", last.Usage)
+	if terminalUsage == nil || terminalUsage.TotalTokens != 12 {
+		t.Errorf("terminal usage = %+v, want total 12", terminalUsage)
+	}
+	usageChunk := chunks[len(chunks)-1]
+	if len(usageChunk.Choices) != 0 || usageChunk.Usage == nil {
+		t.Errorf("last chunk must be the empty-choice usage frame, got %+v", usageChunk)
 	}
 }
 
