@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -683,6 +685,78 @@ func TestLiftTextToolCalls_ExampleSuppression(t *testing.T) {
 			}
 			if m.Content != tc.wantContent {
 				t.Errorf("content = %q, want %q", m.Content, tc.wantContent)
+			}
+		})
+	}
+}
+
+// TestParseQwenFunctionToolCallParameterForms pins the Qwen3-coder/Ornith XML parameter
+// forms the wrapped <tool_call><function=...> parser accepts, including the small-distill
+// near-miss `<path>VALUE</parameter>` observed live from Qwen3.8-4B (which previously
+// lifted as read {} — a fabricated empty-args call). A non-empty body that cannot be
+// parsed must fail closed: no call is lifted and the content is preserved verbatim.
+func TestParseQwenFunctionToolCallParameterForms(t *testing.T) {
+	t.Parallel()
+	wrapFn := func(fn, body string) string {
+		return "<tool_call>\n<function=" + fn + ">\n" + body + "</function>\n</tool_call>"
+	}
+	wrap := func(body string) string { return wrapFn("read", body) }
+	cases := []struct {
+		name     string
+		content  string
+		wantArgs map[string]any // nil means: no call lifted, content untouched
+		wantFn   string         // empty means "read"
+	}{
+		{"canonical", wrap("<parameter=path>\ngo.mod\n</parameter>\n"), map[string]any{"path": "go.mod"}, ""},
+		{"distill_key_tag_parameter_closer", wrap("<path>platform/featureindex/repo_roots.go\n</parameter>\n"), map[string]any{"path": "platform/featureindex/repo_roots.go"}, ""},
+		{"key_tag_shorthand", wrap("<path>go.mod</path>\n"), map[string]any{"path": "go.mod"}, ""},
+		{"parameter_open_key_closer", wrap("<parameter=path>go.mod</path>\n"), map[string]any{"path": "go.mod"}, ""},
+		{"empty_body_zero_arg", wrap(""), map[string]any{}, ""},
+		{"multi_param_json_typed", wrap("<parameter=path>\ngo.mod\n</parameter>\n<parameter=offset>\n10\n</parameter>\n"), map[string]any{"path": "go.mod", "offset": float64(10)}, ""},
+		{"prose_body_fails_closed", wrap("please read go.mod\n"), nil, ""},
+		{"unclosed_parameter_fails_closed", wrap("<parameter=path>go.mod\n"), nil, ""},
+		{"canonical_value_contains_own_key_closer", wrapFn("write", "<parameter=path>a.xml</parameter><parameter=content><feed><content>x</content></feed></parameter>\n"), map[string]any{"path": "a.xml", "content": "<feed><content>x</content></feed>"}, "write"},
+		{"key_named_parameter_fails_closed", wrap("<parameter>v</parameter>\n"), nil, ""},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := LiftTextToolCalls(Message{Role: RoleAssistant, Content: tc.content})
+			if tc.wantArgs == nil {
+				for _, call := range got.ToolCalls {
+					if call.Function.Arguments == "{}" {
+						t.Fatalf("fabricated empty-args call %q from unparseable body", call.Function.Name)
+					}
+				}
+				if len(got.ToolCalls) != 0 {
+					t.Fatalf("tool calls = %d, want 0 for unparseable body; calls=%+v", len(got.ToolCalls), got.ToolCalls)
+				}
+				if got.Content != tc.content {
+					t.Fatalf("content modified: %q", got.Content)
+				}
+				return
+			}
+			if len(got.ToolCalls) != 1 {
+				t.Fatalf("tool calls = %d, want 1; content=%q", len(got.ToolCalls), got.Content)
+			}
+			call := got.ToolCalls[0]
+			wantFn := tc.wantFn
+			if wantFn == "" {
+				wantFn = "read"
+			}
+			if call.Function.Name != wantFn {
+				t.Fatalf("name = %q, want %s", call.Function.Name, wantFn)
+			}
+			var args map[string]any
+			if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+				t.Fatalf("arguments %q not JSON: %v", call.Function.Arguments, err)
+			}
+			if !reflect.DeepEqual(args, tc.wantArgs) {
+				t.Fatalf("arguments = %v, want %v", args, tc.wantArgs)
+			}
+			if strings.TrimSpace(got.Content) != "" {
+				t.Fatalf("lifted call remained in content: %q", got.Content)
 			}
 		})
 	}

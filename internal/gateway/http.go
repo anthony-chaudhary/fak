@@ -730,6 +730,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !decodeRequestBody(w, r, &req) {
 		return
 	}
+	normalizeChatMaxTokens(&req)
 	req.AffinityKey = extractAffinityKey(r, req.AffinityKey)
 	if !validateChatRequestIngress(w, req) {
 		return
@@ -1610,6 +1611,7 @@ func (s *Server) handleFakTokenize(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
 		return
 	}
+	normalizeChatMaxTokens(&req)
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		if err == nil {

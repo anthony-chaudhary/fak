@@ -244,30 +244,67 @@ func parseQwenFunctionToolCall(block string) (string, map[string]any, bool) {
 	body := block[nameEnd+1 : nameEnd+1+fnCloseRel]
 	args := map[string]any{}
 	for {
-		start := strings.Index(body, "<parameter=")
-		if start < 0 {
+		trimmed := strings.TrimSpace(body)
+		if trimmed == "" {
 			break
 		}
-		endRel := strings.Index(body[start:], ">")
-		if endRel < 0 {
+		key, value, rest, ok := nextQwenParameter(trimmed)
+		if !ok {
+			// Non-empty body we cannot parse: fail closed instead of fabricating {}.
 			return "", nil, false
-		}
-		end := start + endRel
-		key := strings.TrimSpace(body[start+len("<parameter=") : end])
-		valueEndRel := strings.Index(body[end+1:], "</parameter>")
-		if key == "" || valueEndRel < 0 {
-			return "", nil, false
-		}
-		valueEnd := end + 1 + valueEndRel
-		raw := strings.TrimSpace(body[end+1 : valueEnd])
-		var value any
-		if json.Unmarshal([]byte(raw), &value) != nil {
-			value = raw
 		}
 		args[key] = value
-		body = body[valueEnd+len("</parameter>"):]
+		body = rest
 	}
 	return name, args, true
+}
+
+// nextQwenParameter parses one argument from the front of body. Canonical form is
+// <parameter=KEY>VALUE</parameter>; small distills also emit the shorthand
+// <KEY>VALUE</parameter> or <KEY>VALUE</KEY>, which is accepted too.
+func nextQwenParameter(body string) (key string, value any, rest string, ok bool) {
+	if !strings.HasPrefix(body, "<") {
+		return "", nil, "", false
+	}
+	tagEnd := strings.Index(body, ">")
+	if tagEnd < 0 {
+		return "", nil, "", false
+	}
+	tag := strings.TrimSpace(body[1:tagEnd])
+	canonical := strings.HasPrefix(tag, "parameter=")
+	if canonical {
+		key = strings.TrimSpace(strings.TrimPrefix(tag, "parameter="))
+	} else {
+		key = tag
+	}
+	if key == "" || strings.ContainsAny(key, " /<=") || key == "function" || key == "tool_call" || key == "parameter" {
+		return "", nil, "", false
+	}
+	after := body[tagEnd+1:]
+	valueEnd, closeLen := -1, 0
+	if canonical {
+		// A canonical open closes on </parameter> so a value may itself contain
+		// </KEY> (XML/HTML content); </KEY> is only the fallback closer.
+		if i := strings.Index(after, "</parameter>"); i >= 0 {
+			valueEnd, closeLen = i, len("</parameter>")
+		} else if i := strings.Index(after, "</"+key+">"); i >= 0 {
+			valueEnd, closeLen = i, len("</"+key+">")
+		}
+	} else {
+		for _, c := range []string{"</parameter>", "</" + key + ">"} {
+			if i := strings.Index(after, c); i >= 0 && (valueEnd < 0 || i < valueEnd) {
+				valueEnd, closeLen = i, len(c)
+			}
+		}
+	}
+	if valueEnd < 0 {
+		return "", nil, "", false
+	}
+	raw := strings.TrimSpace(after[:valueEnd])
+	if json.Unmarshal([]byte(raw), &value) != nil {
+		value = raw
+	}
+	return key, value, after[valueEnd+closeLen:], true
 }
 
 func liftPayload(inner string) (ToolCall, bool) {

@@ -371,12 +371,17 @@ func rawArgs(m json.RawMessage) string {
 // tool-call set, then emitting a synthetic SSE stream. Raw upstream deltas are never
 // passed through before adjudication.
 type ChatRequest struct {
-	Model       string          `json:"model"`
-	Messages    []agent.Message `json:"messages"`
-	Tools       []agent.ToolDef `json:"tools,omitempty"`
-	MaxTokens   int             `json:"max_tokens,omitempty"`
-	Temperature *float64        `json:"temperature,omitempty"`
-	TopP        *float64        `json:"top_p,omitempty"`
+	Model     string          `json:"model"`
+	Messages  []agent.Message `json:"messages"`
+	Tools     []agent.ToolDef `json:"tools,omitempty"`
+	MaxTokens int             `json:"max_tokens,omitempty"`
+	// MaxCompletionTokens is the current OpenAI name for the output-token cap
+	// (max_tokens is its deprecated alias). Clients such as Pi send only this field;
+	// normalizeChatMaxTokens folds it into MaxTokens right after decode so every
+	// downstream reader sees one cap instead of silently falling to the planner default.
+	MaxCompletionTokens int      `json:"max_completion_tokens,omitempty"`
+	Temperature         *float64 `json:"temperature,omitempty"`
+	TopP                *float64 `json:"top_p,omitempty"`
 	// Stop is raw because the OpenAI wire allows EITHER a bare string OR an array of
 	// strings; decoding straight into []string would reject the common `"stop":"\n"`
 	// form. normalizeStop folds both shapes to a slice.
@@ -762,3 +767,13 @@ type ResultAdmission struct {
 // this thin shim stays because internal/gateway/gateway.go — a file outside this
 // change's scope — calls itoa directly, and keeping the name avoids touching it.
 func itoa(n uint64) string { return numfmt.Itoa(n) }
+
+// normalizeChatMaxTokens folds the OpenAI max_completion_tokens field into MaxTokens.
+// max_completion_tokens wins when both are present because max_tokens is the
+// deprecated alias; a negative value is carried through so validateSampling still
+// rejects it with a 400.
+func normalizeChatMaxTokens(req *ChatRequest) {
+	if req.MaxCompletionTokens != 0 {
+		req.MaxTokens = req.MaxCompletionTokens
+	}
+}
