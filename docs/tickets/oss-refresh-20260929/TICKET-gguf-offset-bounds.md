@@ -45,10 +45,19 @@ All unchecked criteria below must be satisfied through the real consuming entryp
 
 ## Definition of done
 
-- [ ] Reproduce the current gap through the real target entrypoint.
-- [ ] Implement the bounded change and independent edge-case regression.
-- [ ] The malformed aligned offset fixture fails on the old code and is rejected after the repair; MaxInt64 boundary cases and normal aligned offsets remain correct.
-- [ ] Verify `go test ./internal/ggufload -count=1`, public leak/boundary checks, and commit/land through the public native workflow.
+- [x] Reproduce the current gap through the real target entrypoint.
+- [x] Implement the bounded change and independent edge-case regression.
+- [x] The malformed aligned offset fixture fails on the old code and is rejected after the repair; MaxInt64 boundary cases and normal aligned offsets remain correct.
+- [x] Verify `go test ./internal/ggufload -count=1`, public leak/boundary checks, and commit/land through the public native workflow.
+
+Resolved by commit `3f2f32ff1455ef6bfb212a26d5f12ec838fef208`
+("fix(ggufload): reject overflowing tensor file offsets (fak ggufload)"), landed and
+pushed to `origin/main`. The pre-addition guard
+`tensors[i].Offset > uint64(math.MaxInt64)-data` replaces the wrap-prone
+`data+tensors[i].Offset > uint64(math.MaxInt64)` at
+`internal/ggufload/gguf_config.go:120`, with `TestReadTensorFileOffsetBounds`
+covering the wrap, MaxInt64-boundary, and normal-aligned cases. Witness:
+`go test ./internal/ggufload -count=1` → ok.
 
 ## Witness
 
