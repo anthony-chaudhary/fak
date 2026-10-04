@@ -106,6 +106,44 @@ func buildFakePiChild(t *testing.T) string {
 	return binary
 }
 
+// guardPiWireCycleBudget is the time allowance for one full guard lifecycle (child
+// turn plus gateway teardown) on a loaded host. The deadline is a multiple of it so
+// that host contention widens the budget instead of producing a false red.
+const guardPiWireCycleBudget = 30 * time.Second
+
+// guardPiWireSubtestDeadline derives the per-subtest deadline from the guard's own
+// crash-restart budget instead of pinning a flat 30s. Success and cancellation modes
+// run a single lifecycle; the failure subtest additionally walks the guard's whole
+// crash-restart loop, so its budget scales with the configured limit (default 3) and
+// stays comfortably above the one-cycle baseline.
+func guardPiWireSubtestDeadline(mode string) time.Duration {
+	cycles := 1
+	if mode == "failure" {
+		cycles += guardCrashRestartLimit()
+	}
+	return time.Duration(cycles) * guardPiWireCycleBudget
+}
+
+// TestGuardPiWireSubtestDeadlineExceedsCycleBudget is the deterministic witness for the
+// deadline derivation: the crash-restart "failure" mode must be granted strictly more
+// than one lifecycle budget, while the single-lifecycle modes keep the baseline. This
+// does not depend on the wire subtest passing, so it stays green under host contention.
+func TestGuardPiWireSubtestDeadlineExceedsCycleBudget(t *testing.T) {
+	for _, mode := range []string{"", "cancellation"} {
+		if got := guardPiWireSubtestDeadline(mode); got != guardPiWireCycleBudget {
+			t.Fatalf("mode %q deadline = %s, want one cycle %s", mode, got, guardPiWireCycleBudget)
+		}
+	}
+	failure := guardPiWireSubtestDeadline("failure")
+	if failure <= guardPiWireCycleBudget {
+		t.Fatalf("failure deadline = %s must exceed one cycle %s", failure, guardPiWireCycleBudget)
+	}
+	want := time.Duration(1+guardCrashRestartLimit()) * guardPiWireCycleBudget
+	if failure != want {
+		t.Fatalf("failure deadline = %s, want (1 + crash-restart limit) * cycle = %s", failure, want)
+	}
+}
+
 // TestGuardPiWire drives the real guard lifecycle around a deterministic Pi consumer. The
 // child structurally consumes the installed provider/model, sends a streamed tool-call turn
 // through the guard-owned gateway, and uses a sentinel only if the extension is ineffective.
@@ -166,7 +204,8 @@ func TestGuardPiWire(t *testing.T) {
 				args = append(args, "--max-duration", "400ms", "--soft-deadline-lead", "0", "--commit-grace-period", "0", "--child-stop-grace", "20ms")
 			}
 			args = append(args, "--", pi, "--provider", tc.childProvider, "--model", "fixture")
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			deadline := guardPiWireSubtestDeadline(tc.mode)
+			ctx, cancel := context.WithTimeout(context.Background(), deadline)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, os.Args[0])
 			cmd.Dir = workspace
@@ -178,9 +217,12 @@ func TestGuardPiWire(t *testing.T) {
 			)
 			var output bytes.Buffer
 			cmd.Stdout, cmd.Stderr = &output, &output
+			start := time.Now()
 			err := cmd.Run()
 			if ctx.Err() != nil {
-				t.Fatalf("guard lifecycle timed out: %v\n%s", ctx.Err(), output.String())
+				t.Fatalf("guard lifecycle timed out after %s (deadline %s, mode %s, crash restarts observed=%d): %v\n%s",
+					time.Since(start).Round(time.Millisecond), deadline, tc.mode,
+					strings.Count(output.String(), "harness crashed"), ctx.Err(), output.String())
 			}
 			if strings.HasSuffix(tc.name, "success") && err != nil {
 				t.Fatalf("guard success: %v\n%s", err, output.String())
