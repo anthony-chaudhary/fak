@@ -127,6 +127,22 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "plan-issuediag",
+      "canonical": "PlanDiagnostics (issueorchestrator)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The adaptive-discovery accounting block riding on an issueorchestrator campaign plan: scanned candidates, discovery-window size, window expansions, unplannable ratio, and advisory warnings about how the plan widened its horizon.",
+      "distinction": "The issueorchestrator campaign plan's discovery ACCOUNTING (how the plan window expanded) - NOT Plan (planner)'s chosen resident view, NOT Plan (memq)'s static pre-execution explain output, and NOT internal/compute's MatMulPlan.Diagnostics preparation/break-even run timings.",
+      "distinct_from": ["plan-planner", "plan-memq"],
+      "aliases": [],
+      "grounding": "PlanDiagnostics",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }
