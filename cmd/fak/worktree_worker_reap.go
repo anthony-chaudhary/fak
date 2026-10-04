@@ -382,6 +382,12 @@ func worktreeColdReapReportWithOptionsAndProbes(
 	if coldOpts.Concurrency <= 0 {
 		coldOpts.Concurrency = worktreeColdStatusConcurrency
 	}
+	// The repo root anchors each worktree's HEAD. Setting it lets the bulk classifier
+	// KEEP a clean detached worktree whose tip is reachable from no ref instead of
+	// reaping it and orphaning a unique commit (#13522).
+	if coldOpts.OwnerRoot == "" {
+		coldOpts.OwnerRoot = repoRoot
+	}
 	plan := workerworktree.ColdReapListWithOptions(repoRoot, nil, now, ageFloor, oracle, coldOpts)
 	return worktreeColdReapReportFromPlan(
 		repoRoot,
@@ -482,6 +488,10 @@ func worktreeColdReapReportFromPlan(
 					failureReason = "lease_live"
 				case unlanded != 0:
 					failureReason = "unlanded_work"
+				case !workerworktree.TipIsAnchored(nil, repoRoot, c.Path):
+					// The tip became unreachable between plan and apply; refuse the
+					// reap rather than orphan a unique commit (#13522).
+					failureReason = "unlanded_tip"
 				case applyProcessErr != nil:
 					failureReason = "process_probe_error"
 				case applyProcessLive:

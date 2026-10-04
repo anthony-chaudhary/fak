@@ -73,11 +73,19 @@ type ColdWorktree struct {
 	// worktree the earlier gates already kept, which is NOT a cleanliness claim —
 	// the probe is skipped there because its answer cannot change the verdict.
 	Unlanded int `json:"unlanded"`
-	// HeldByWork marks a worktree that passed BOTH the lease and age gates and was
-	// kept only because it still holds unlanded work. This is the set an operator
-	// must triage — land it or abandon it — and the set an --even-if-unlanded
-	// override promotes back to reapable.
+	// HeldByWork marks a worktree that passed the lease and age gates and was kept
+	// only because it still holds unlanded work OR its HEAD is an unlanded tip
+	// reachable from no ref. This is the set an operator must triage — land it or
+	// abandon it — and the set an --even-if-unlanded override promotes back to
+	// reapable. Reaping it destroys that work.
 	HeldByWork bool `json:"held_by_work,omitempty"`
+	// TipAnchored reports whether HEAD is reachable from a durable ref (a local
+	// branch, a remote-tracking branch, or a refs/fak preserving ref). It is only
+	// probed once the worktree is otherwise cold; a worktree kept by the lease or
+	// age gate carries the safe default true. False keeps an otherwise-cold
+	// worktree, because reaping a clean detached checkout whose HEAD is on no ref
+	// orphans a unique commit (#13522).
+	TipAnchored bool `json:"tip_anchored"`
 	// ReclaimBytes is the logical file-byte estimate for this worktree when it is
 	// eligible and the complete tree was readable. ReclaimBytesKnown distinguishes
 	// a measured empty tree from an estimate that could not be completed.
@@ -104,6 +112,14 @@ type ColdReapOptions struct {
 	Concurrency int
 	Size        func(path string) (int64, error)
 	Progress    func(ColdReapProgress)
+	// OwnerRoot is the repo whose refs anchor a worktree tip. It is empty for the
+	// compatibility entry points, which disable the tip-reachability gate; the
+	// production CLI sets it so a clean detached worktree whose HEAD is on no ref
+	// is KEPT instead of reaped (#13522).
+	OwnerRoot string
+	// TipAnchored, when non-nil, overrides the default TipIsAnchored reachability
+	// oracle for one worktree. Tests inject it instead of a real repo.
+	TipAnchored func(wtPath string) bool
 }
 
 // WorktreeAge returns how long ago the worktree directory was last modified — the age
@@ -164,6 +180,47 @@ func UnlandedCount(wtPath string, git GitRunner) int {
 	return n
 }
 
+// TipIsAnchored reports whether a worktree's HEAD commit is reachable from a durable
+// ref in the owner repo — a local branch, a remote-tracking branch, or a refs/fak
+// preserving ref. Prepare CREATES a worktree detached at the base SHA, so a worktree
+// whose only anchor is itself reads as cold under the lease/age/clean gates while
+// carrying commits on no ref; reaping it orphans those commits to the next gc (issue
+// #13522). This is the ORACLE for that fourth gate.
+//
+// FAIL-SAFE: a probe that cannot run, an empty HEAD, or an unresolvable commit reads
+// as NOT anchored, so an unreadable repo keeps the worktree rather than losing work.
+func TipIsAnchored(git GitRunner, ownerRoot, wtPath string) bool {
+	rc, out := run(git, wtPath, []string{"rev-parse", "HEAD"})
+	if rc != 0 {
+		return false
+	}
+	head := strings.TrimSpace(out)
+	if head == "" {
+		return false
+	}
+	rc, refs := run(git, ownerRoot, []string{"for-each-ref", "--contains", head, "--format=%(refname)", "refs/heads", "refs/remotes", "refs/fak"})
+	if rc != 0 {
+		return false
+	}
+	return strings.TrimSpace(refs) != ""
+}
+
+// tipGateEnabled reports whether the fourth (tip-reachability) gate should run for
+// this census. It is on only when the caller supplied an owner repo or an explicit
+// oracle, so the compatibility entry points keep their three-gate behavior.
+func tipGateEnabled(ownerRoot string, oracle func(string) bool) bool {
+	return ownerRoot != "" || oracle != nil
+}
+
+// tipAnchorOracle is the single reachability probe: the injected oracle wins when
+// present, otherwise the default TipIsAnchored reads the owner repo's refs.
+func tipAnchorOracle(git GitRunner, opts ColdReapOptions, wtPath string) bool {
+	if opts.TipAnchored != nil {
+		return opts.TipAnchored(wtPath)
+	}
+	return TipIsAnchored(git, opts.OwnerRoot, wtPath)
+}
+
 // coldEligible is the PURE reap decision for ONE worktree: cold iff its lane lease is
 // NOT live, it is at least ageFloor old, AND it carries no unlanded work. Returns the
 // verdict, whether it was kept SOLELY for unlanded work, and a human reason for the
@@ -172,6 +229,11 @@ func UnlandedCount(wtPath string, git GitRunner) int {
 // unlanded is the UnlandedCount reading: 0 means nothing uncommitted, a positive count
 // means real content, and -1 means the probe could not answer — which keeps the
 // worktree, since an unreadable tree is the case where a wrong reap is least recoverable.
+//
+// This is the three-gate decision. The tip-reachability gate is applied by callers as
+// an override AFTER this returns a cold verdict (see ColdReapListWithOptions), so a
+// clean detached worktree whose HEAD is on no ref is kept without widening this
+// signature.
 func coldEligible(leaseLive bool, age, ageFloor time.Duration, unlanded int) (eligible, heldByWork bool, reason string) {
 	if leaseLive {
 		return false, false, "kept: worker lane lease still live"
@@ -189,6 +251,14 @@ func coldEligible(leaseLive bool, age, ageFloor time.Duration, unlanded int) (el
 	}
 	return true, false, fmt.Sprintf("cold: lease dead, age %s past grace floor %s, working tree clean",
 		age.Round(time.Second), ageFloor.Round(time.Second))
+}
+
+// tipUnanchoredReason is the keep reason for the fourth gate: a worktree that is cold
+// under the lease/age/clean gates but whose HEAD is reachable from no durable ref.
+// Reaping it would orphan the only anchor of a unique commit (#13522).
+func tipUnanchoredReason(age time.Duration) string {
+	return fmt.Sprintf("kept: lease dead and age %s past floor, but its HEAD is an unlanded tip reachable from no ref — land it or preserve it (git update-ref refs/fak/preserved/<slug> <tip>) before reaping",
+		age.Round(time.Second))
 }
 
 // plural picks the singular or plural suffix for n, so a reason line reads as prose
@@ -280,14 +350,22 @@ func ColdReapListWithOptions(root string, git GitRunner, now time.Time, ageFloor
 				}
 				age := WorktreeAge(p, now)
 				unlanded := 0
+				tipAnchored := true
 				if !live && age >= ageFloor {
 					unlanded = UnlandedCount(p, git)
+					if unlanded == 0 && tipGateEnabled(opts.OwnerRoot, opts.TipAnchored) {
+						tipAnchored = tipAnchorOracle(git, opts, p)
+					}
 				}
 				eligible, heldByWork, reason := coldEligible(live, age, ageFloor, unlanded)
+				if eligible && !tipAnchored {
+					eligible, heldByWork = false, true
+					reason = tipUnanchoredReason(age)
+				}
 				item := ColdWorktree{
 					Path: p, AgeSec: int64(age / time.Second), LeaseLive: live,
 					Eligible: eligible, Reason: reason, Unlanded: unlanded,
-					HeldByWork: heldByWork,
+					HeldByWork: heldByWork, TipAnchored: tipAnchored,
 				}
 				if eligible {
 					if bytes, err := size(p); err == nil {

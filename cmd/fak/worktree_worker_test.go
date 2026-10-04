@@ -1249,6 +1249,130 @@ func TestWorktreeColdReapPlanEndToEnd(t *testing.T) {
 	}
 }
 
+// TestWorktreeColdReapKeepsUnanchoredTip is the #13522 end-to-end fence against a REAL
+// repo: two clean, dead-lease worktrees past the age floor. One sits at a landed commit
+// (its detached HEAD equals the base commit, reachable from main); the other carries an
+// unlanded commit reachable from no ref. The bulk classifier must reap the first and
+// KEEP the second, both at planning and at the apply revalidation seam.
+func TestWorktreeColdReapKeepsUnanchoredTip(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; skipped under -short")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	repo := t.TempDir()
+	wtRoot := t.TempDir()
+	gitEnv := append(os.Environ(),
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	git := func(args ...string) (string, error) {
+		c := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		c.Env = gitEnv
+		out, err := c.CombinedOutput()
+		return string(out), err
+	}
+	if _, err := git("init", "-q", "-b", "main"); err != nil {
+		if _, e2 := git("init", "-q"); e2 != nil {
+			t.Skipf("git init failed: %v", e2)
+		}
+		_, _ = git("symbolic-ref", "HEAD", "refs/heads/main")
+	}
+	_, _ = git("config", "user.email", "t@t")
+	_, _ = git("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(repo, "seed.txt"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git("add", "seed.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := git("commit", "-qm", "seed"); err != nil {
+		t.Skipf("seed commit failed: %s", out)
+	}
+
+	mk := func(lane, key string) string {
+		res := workerworktree.Prepare(repo, lane, key, "", wtRoot, nil)
+		if !res.OK {
+			t.Fatalf("prepare %s/%s: %+v", lane, key, res)
+		}
+		return res.Path
+	}
+	anchored := mk("docs", "aaa") // detached at the landed seed commit
+	orphan := mk("docs", "bbb")
+
+	// Advance orphan's detached HEAD to a commit reachable from no ref, leaving a
+	// clean working tree — exactly the shape that read as textbook cold and was reaped.
+	orphanGit := func(args ...string) (string, error) {
+		c := exec.Command("git", append([]string{"-C", orphan}, args...)...)
+		c.Env = gitEnv
+		out, err := c.CombinedOutput()
+		return string(out), err
+	}
+	if err := os.WriteFile(filepath.Join(orphan, "unlanded.txt"), []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := orphanGit("add", "unlanded.txt"); err != nil {
+		t.Fatalf("orphan add: %s %v", out, err)
+	}
+	if out, err := orphanGit("commit", "-qm", "unlanded work"); err != nil {
+		t.Fatalf("orphan commit: %s %v", out, err)
+	}
+
+	now := time.Now()
+	floor := 30 * time.Minute
+	back := now.Add(-2 * time.Hour)
+	for _, p := range []string{anchored, orphan} {
+		if err := os.Chtimes(p, back, back); err != nil {
+			t.Fatalf("age %s: %v", p, err)
+		}
+	}
+
+	// DRY-RUN: the landed-tip worktree is eligible; the unanchored one is kept.
+	norm := func(p string) string {
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			p = resolved
+		}
+		return filepath.ToSlash(filepath.Clean(p))
+	}
+	dry := worktreeColdReapReport(repo, false, floor, now, false)
+	if dry.WouldReap != 1 || dry.Reaped != 0 {
+		t.Fatalf("dry-run want would_reap=1 reaped=0, got %+v", dry)
+	}
+	seen := map[string]bool{}
+	for _, w := range dry.Worktrees {
+		switch norm(w.Path) {
+		case norm(anchored):
+			seen["anchored"] = true
+			if !w.Eligible {
+				t.Fatalf("landed-tip worktree must be eligible: %+v", w)
+			}
+		case norm(orphan):
+			seen["orphan"] = true
+			if w.Eligible || !w.HeldByWork {
+				t.Fatalf("unanchored-tip worktree must be kept as held-by-work: %+v", w)
+			}
+			if !strings.Contains(w.Reason, "unlanded tip") {
+				t.Fatalf("keep reason must name the unlanded tip: %q", w.Reason)
+			}
+		}
+	}
+	if !seen["anchored"] || !seen["orphan"] {
+		t.Fatalf("both worktrees must appear in the ledger, saw %v in %+v", seen, dry.Worktrees)
+	}
+
+	// APPLY: only the landed-tip worktree is reaped; the unanchored one survives.
+	got := worktreeColdReapReport(repo, true, floor, now, false)
+	if got.Reaped != 1 || got.WouldReap != 1 {
+		t.Fatalf("apply want reaped=1 would_reap=1, got %+v", got)
+	}
+	if _, err := os.Stat(anchored); !os.IsNotExist(err) {
+		t.Fatalf("apply must remove the landed-tip worktree, stat err=%v", err)
+	}
+	if _, err := os.Stat(orphan); err != nil {
+		t.Fatalf("apply must keep the unanchored-tip worktree: %v", err)
+	}
+}
+
 func newColdReapProbeFixture(t *testing.T) (repo, wt string, now time.Time, floor time.Duration) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -1359,6 +1483,57 @@ func TestWorktreeColdReapProcessBecomesLiveAtApply(t *testing.T) {
 	}
 	if len(got.Failures) != 1 || got.Failures[0].Reason != "process_live" {
 		t.Fatalf("want one process_live failure, got %+v", got.Failures)
+	}
+}
+
+// TestWorktreeColdReapUnanchoredTipBecomesUnreachableAtApply proves the destructive
+// revalidation seam repeats the #13522 tip check: the fixture's tip is anchored at
+// planning (so it is neither kept nor left unprobed), but a commit is added to the
+// clean detached worktree before apply, making its HEAD reachable from no ref. The
+// reap must be refused and must never reach the reap function.
+func TestWorktreeColdReapUnanchoredTipBecomesUnreachableAtApply(t *testing.T) {
+	repo, wt, now, floor := newColdReapProbeFixture(t)
+	var reapCalls []string
+	// The process snapshot runs AFTER planning and BEFORE the per-item apply
+	// revalidation. Use it as the flip: advance the clean detached HEAD to a commit
+	// reachable from no ref, so the tip is anchored at plan time but not at apply.
+	flip := func(paths []string) (map[string]bool, error) {
+		commit := exec.Command("git", "-C", wt,
+			"-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+			"commit", "-qm", "unanchored", "--allow-empty")
+		if out, err := commit.CombinedOutput(); err != nil {
+			t.Fatalf("could not add an unanchored commit: %v (%s)", err, out)
+		}
+		return map[string]bool{}, nil
+	}
+	got := worktreeColdReapReportWithProbes(
+		repo,
+		true,
+		floor,
+		now,
+		false,
+		flip,
+		func(string) (bool, error) { return false, nil },
+		func(_, path string) workerworktree.Result {
+			reapCalls = append(reapCalls, path)
+			return workerworktree.Result{OK: true, Path: path, Removed: true}
+		},
+	)
+
+	if got.WouldReap != 1 {
+		t.Fatalf("the anchored tip must plan as eligible: %+v", got)
+	}
+	if got.Reaped != 0 {
+		t.Fatalf("an apply-time reachability flip must not reap: %+v", got)
+	}
+	if len(reapCalls) != 0 {
+		t.Fatalf("an unanchored tip must not reach reap, calls=%v", reapCalls)
+	}
+	if len(got.Failures) != 1 || got.Failures[0].Reason != "unlanded_tip" {
+		t.Fatalf("want one unlanded_tip failure, got %+v", got.Failures)
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("refused reap must leave the worktree in place: %v", err)
 	}
 }
 
