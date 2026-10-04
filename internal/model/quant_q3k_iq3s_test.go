@@ -85,13 +85,18 @@ func TestQ3KIQ3SNativeReference(t *testing.T) {
 			}
 			// A backend advertising routed K-quants must decline formats whose packed
 			// device staging is unsupported, leaving actual execution on the native host.
-			be := &expertHALRecordingBackend{Backend: compute.Default(), uploads: map[compute.Dtype]int{}}
-			s.Backend = be
-			if _, used := s.expertSwiGLUHAL(name, name, name, x[:cols]); used {
-				t.Fatal("unsupported packed expert format admitted to device")
-			}
-			if len(be.uploads) != 0 || len(s.halW) != 0 {
-				t.Fatal("declined expert uploaded weights")
+			// Q3_K gained a device kernel in fak#13677, so its subtest exercises the
+			// admitted path above and only a genuinely non-HAL kind (IQ3_S here) still
+			// pins the decline.
+			if !SupportsHALKQuant(tc.kind) {
+				be := &expertHALRecordingBackend{Backend: compute.Default(), uploads: map[compute.Dtype]int{}}
+				s.Backend = be
+				if _, used := s.expertSwiGLUHAL(name, name, name, x[:cols]); used {
+					t.Fatal("unsupported packed expert format admitted to device")
+				}
+				if len(be.uploads) != 0 || len(s.halW) != 0 {
+					t.Fatal("declined expert uploaded weights")
+				}
 			}
 			assertSameF32(t, "capable backend host fallback", (backendKernel{s: s}).mul(name, x[:cols], rows, cols), want[:rows])
 			got, ok := m.KQuantRaw(name)

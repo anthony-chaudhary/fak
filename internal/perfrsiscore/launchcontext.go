@@ -210,16 +210,26 @@ func (c LaunchContext) Validate() error {
 	return nil
 }
 
-func DecodeLaunchContext(b []byte) (LaunchContext, error) {
-	var c LaunchContext
+// launchContextJSON is the plain decoding shape of LaunchContext. It exists so
+// the strict decoder can unmarshal without re-entering LaunchContext's own
+// UnmarshalJSON (which would recurse).
+type launchContextJSON LaunchContext
+
+// decodeLaunchContextStrict is the single strict decode used by both the
+// standalone DecodeLaunchContext and LaunchContext.UnmarshalJSON. It rejects
+// unknown fields, trailing JSON, a wrong schema, and a digest that does not
+// match the recomputed axis digest.
+func decodeLaunchContextStrict(b []byte) (LaunchContext, error) {
+	var decoded launchContextJSON
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&c); err != nil {
-		return c, fmt.Errorf("decode launch context: %w; fix: provide valid JSON conforming to %s", err, Schema)
+	if err := dec.Decode(&decoded); err != nil {
+		return LaunchContext(decoded), fmt.Errorf("decode launch context: %w; fix: provide valid JSON conforming to %s", err, Schema)
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return c, errors.New("decode launch context: trailing JSON value; fix: remove trailing JSON data after launch context object")
+		return LaunchContext(decoded), errors.New("decode launch context: trailing JSON value; fix: remove trailing JSON data after launch context object")
 	}
+	c := LaunchContext(decoded)
 	if c.Schema != Schema {
 		return c, fmt.Errorf("decode launch context: schema %q, want %q; fix: set schema to %s", c.Schema, Schema, Schema)
 	}
@@ -227,4 +237,22 @@ func DecodeLaunchContext(b []byte) (LaunchContext, error) {
 		return c, fmt.Errorf("decode launch context: digest %q does not match recomputed digest %q; fix: recompute the digest after changing axis values", c.Digest, c.ComputeDigest())
 	}
 	return c, nil
+}
+
+func DecodeLaunchContext(b []byte) (LaunchContext, error) {
+	return decodeLaunchContextStrict(b)
+}
+
+// UnmarshalJSON makes LaunchContext fail-closed wherever it is decoded through
+// the ordinary encoding/json path, notably the embedded
+// Improvement.LaunchContext on the scorecard evidence path. Without this, a
+// hand-written or stale digest is carried through unverified and still raises
+// attribution_quality, so the record would be digest-bound in name only.
+func (c *LaunchContext) UnmarshalJSON(b []byte) error {
+	decoded, err := decodeLaunchContextStrict(b)
+	if err != nil {
+		return err
+	}
+	*c = decoded
+	return nil
 }

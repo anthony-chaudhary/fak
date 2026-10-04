@@ -119,6 +119,24 @@ func resetDefaultQuantDescriptors() {
 			return compute.NewQ2K(compute.Default(), []int{out, in}, raw)
 		},
 	})
+	// Q3_K became HAL-capable when internal/compute gained a real device kernel
+	// (vulkan q3k_matmul + the compute.Q3_K resident-scatter upload) — fak#13677. The
+	// model descriptor only says "a HAL kernel exists somewhere"; the backend-level
+	// probe (compute.BackendSupportsDeviceWeightDtype) still gates a specific backend,
+	// so a build without the q3k_matmul shader declines cleanly at the seam rather
+	// than staging a weight this backend cannot multiply.
+	registerDefaultLocked(BaseQuantDescriptor{
+		QuantKind:     kindQ3K,
+		QuantName:     "Q3_K",
+		ComputeDtype:  compute.Q3_K,
+		Prefix:        "kquant-raw:",
+		HALSupported:  true,
+		BytesPerBlk:   q3kBlockBytes,
+		WeightsPerBlk: qkK,
+		HostTensorFn: func(out, in int, raw []byte) compute.Tensor {
+			return compute.NewQ3K(compute.Default(), []int{out, in}, raw)
+		},
+	})
 
 	nonHAL := []struct {
 		kind  kQuantKind
@@ -134,7 +152,6 @@ func resetDefaultQuantDescriptors() {
 		{kindIQ1M, "IQ1_M", 0},
 		{kindQ8_0, "Q8_0", compute.Q8_0},
 		{kindQ4_0, "Q4_0", 0},
-		{kindQ3K, "Q3_K", 0},
 		{kindIQ3S, "IQ3_S", compute.IQ3_S},
 	}
 	for _, item := range nonHAL {

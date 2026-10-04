@@ -242,7 +242,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -250,7 +250,7 @@ Kernel g_kern[K_COUNT];
 std::atomic<uint64_t>& dpOtherFamily(KId id) {
     switch (id) {
     case K_MATMUL: case K_MATMUL_ADD: case K_MATMUL_ARGMAX: case K_MATMUL_ARGMAX_BLOCKS:
-    case K_MATMUL2: case K_MATMUL3: case K_Q8_MATMUL: case K_Q8_MATMUL_DECODE: case K_Q8_MATMUL2: case K_Q8_MATMUL3: case K_Q6K_MATMUL: case K_Q5K_MATMUL:
+    case K_MATMUL2: case K_MATMUL3: case K_Q8_MATMUL: case K_Q8_MATMUL_DECODE: case K_Q8_MATMUL2: case K_Q8_MATMUL3: case K_Q6K_MATMUL: case K_Q5K_MATMUL: case K_Q3K_MATMUL:
         return g_dp.otherMatmul;
     case K_RMSNORM: case K_RMSNORM_MATMUL: case K_RMSNORM_MATMUL2: case K_RMSNORM_MATMUL3:
     case K_RMSNORM_MATMUL_ARGMAX_BLOCKS: case K_RMSNORM_Q8_MATMUL2: case K_RMSNORM_Q8_MATMUL3:
@@ -357,6 +357,7 @@ int g_have_q4k_coopmat = 0;
 // Portable packed Q6_K is optional so older SPIR-V bundles remain loadable.
 int g_have_q6k_matmul = 0;
 int g_have_q5k_matmul = 0;
+int g_have_q3k_matmul = 0;
 
 VkDescriptorPool g_descpool = VK_NULL_HANDLE;
 
@@ -1893,6 +1894,8 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
                                     3, 3 * sizeof(int)) ? 1 : 0;
     g_have_q5k_matmul = buildKernel(g_kern[K_Q5K_MATMUL], P("q5k_matmul.spv"),
                                     3, 3 * sizeof(int)) ? 1 : 0;
+    g_have_q3k_matmul = buildKernel(g_kern[K_Q3K_MATMUL], P("q3k_matmul.spv"),
+                                    3, 3 * sizeof(int)) ? 1 : 0;
     buildKernel(g_kern[K_RMSNORM_Q4K_MATMUL2], P("rmsnorm_q4k_matmul2.spv"), 6, 4 * sizeof(int) + sizeof(float));
     buildKernel(g_kern[K_SWIGLU_Q4K_MATMUL_ADD], P("swiglu_q4k_matmul_add.spv"), 4, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_Q2K_MATMUL], P("q2k_matmul.spv"), 7, 4 * sizeof(int) + sizeof(float));
@@ -2357,6 +2360,7 @@ int fvk_have_glm_kda_wave32(void) { return g_have_glm_kda_wave32; }
 int fvk_have_cooperative_matrix(void) { return g_have_coopmat; }
 int fvk_have_q6k_matmul(void) { return g_have_q6k_matmul; }
 int fvk_have_q5k_matmul(void) { return g_have_q5k_matmul; }
+int fvk_have_q3k_matmul(void) { return g_have_q3k_matmul; }
 uint32_t fvk_max_compute_work_group_count_x(void) { return g_maxComputeWorkGroupCountX; }
 uint64_t fvk_max_buffer_bytes(void) { return (uint64_t)g_maxBufferBytes; }
 uint64_t fvk_max_storage_buffer_range(void) { return (uint64_t)g_maxStorageBufferRange; }
@@ -3176,6 +3180,14 @@ extern "C" void fvk_q5k_matmul_f32(const void* dQ5K, const void* dX, void* dY,
     struct PC { int out, in, p; } pc{out, in, P};
     Buffer* bufs[3] = {B((void*)dQ5K), B((void*)dX), B(dY)};
     dispatch(g_kern[K_Q5K_MATMUL], bufs, &pc, sizeof(pc),
+             (uint32_t)(((size_t)out * (size_t)P + 63) / 64));
+}
+extern "C" void fvk_q3k_matmul_f32(const void* dQ3K, const void* dX, void* dY,
+                                    int out, int in, int P) {
+    if (!g_have_q3k_matmul || g_kern[K_Q3K_MATMUL].pipe == VK_NULL_HANDLE) return;
+    struct PC { int out, in, p; } pc{out, in, P};
+    Buffer* bufs[3] = {B((void*)dQ3K), B((void*)dX), B(dY)};
+    dispatch(g_kern[K_Q3K_MATMUL], bufs, &pc, sizeof(pc),
              (uint32_t)(((size_t)out * (size_t)P + 63) / 64));
 }
 extern "C" void fvk_q2k_matmul_f32(const void* dQ2K, const void* dX, void* dY,

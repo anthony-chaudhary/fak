@@ -64,6 +64,17 @@ func TestExpertEngineDeviceKernelForExpertEncoding(t *testing.T) {
 		}
 	}
 
+	// Q3_K gained a HAL descriptor + Vulkan device kernel in fak#13677, so the V4.1
+	// artifact's routed-expert DOWN encoding now answers device like its Q2_K gate/up.
+	mQ3K := NewSyntheticMoE(expertHALTestConfig(H))
+	mQ3K.q4kw = nil
+	mQ3K.kqw = map[string]*kQuantTensor{
+		expertName(0, 0, "down_proj.weight"): q3kFixtureTensor(H, H),
+	}
+	if got := deviceKernelForExpertEncoding(mQ3K, expertName(0, 0, "down_proj.weight")); got != expertEngineDevice {
+		t.Errorf("resident Q3_K down (fak#13677 kernel) = %v, want expertEngineDevice", got)
+	}
+
 	// The predicate keys on the encoding the model actually carries: a nil model or a model with no
 	// resident store answers host rather than panicking.
 	if got := deviceKernelForExpertEncoding(nil, expertName(0, 0, "gate_proj.weight")); got != expertEngineHost {
@@ -74,15 +85,16 @@ func TestExpertEngineDeviceKernelForExpertEncoding(t *testing.T) {
 	}
 
 	// NEGATIVE CONTROL: widening the predicate to m.kqw must NOT admit a kind with no HAL
-	// descriptor. Q3_K is non-HAL (quant_registry.go), so a resident Q3_K projection answers
-	// host even though it is present in m.kqw — the fail-closed contract is preserved.
+	// descriptor. IQ4_XS carries a registered descriptor but no HAL device kernel, so a
+	// resident IQ4_XS projection answers host — the fail-closed contract is preserved.
+	// (Q3_K served as this exemplar before fak#13677 gave it a Vulkan kernel.)
 	mNonHAL := NewSyntheticMoE(expertHALTestConfig(H))
 	mNonHAL.q4kw = nil
 	mNonHAL.kqw = map[string]*kQuantTensor{
-		expertName(0, 0, "gate_proj.weight"): q3kFixtureTensor(H, H),
+		expertName(0, 0, "gate_proj.weight"): iq4xsFixtureTensor(H, H),
 	}
 	if got := deviceKernelForExpertEncoding(mNonHAL, expertName(0, 0, "gate_proj.weight")); got != expertEngineHost {
-		t.Errorf("non-HAL Q3_K resident gate = %v, want expertEngineHost (predicate must not bless a kind with no device kernel)", got)
+		t.Errorf("non-HAL IQ4_XS resident gate = %v, want expertEngineHost (predicate must not bless a kind with no device kernel)", got)
 	}
 
 	// The ADMISSION wrapper additionally requires a device-capable session. Without a backend, even a

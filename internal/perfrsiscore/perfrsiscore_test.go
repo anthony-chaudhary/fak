@@ -829,6 +829,62 @@ func TestImprovementReceiptStrictJSON(t *testing.T) {
 	}
 }
 
+// TestImprovementRefusesTamperedLaunchContextDigest proves the embedded
+// launch context is validated on the scorecard evidence path rather than
+// trusted: a digest that does not match the axis values must fail Decode
+// instead of silently raising attribution_quality.
+func TestImprovementRefusesTamperedLaunchContextDigest(t *testing.T) {
+	complete := completeLaunchContext()
+	complete.Digest = complete.ComputeDigest()
+
+	// A valid, digest-bound context still decodes and scores.
+	valid := improvementEvidence(t)
+	valid.Improvement.LaunchContext = complete
+	b, err := json.Marshal(valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Decode(bytes.NewReader(b)); err != nil {
+		t.Fatalf("valid digest-bound launch context must decode: %v", err)
+	}
+
+	// A tampered digest must be refused, not carried through unverified.
+	tampered := improvementEvidence(t)
+	bad := *complete
+	bad.Digest = strings.Repeat("0", len(complete.Digest))
+	tampered.Improvement.LaunchContext = &bad
+	b, err = json.Marshal(tampered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Decode(bytes.NewReader(b)); err == nil || !strings.Contains(err.Error(), "digest") {
+		t.Fatalf("tampered launch-context digest must be refused with a digest error, got %v", err)
+	}
+}
+
+// TestImprovementLaunchContextStrictUnknownField proves the embedded context is
+// decoded with unknown-field rejection, so a forged extra axis cannot ride
+// along beside a valid digest.
+func TestImprovementLaunchContextStrictUnknownField(t *testing.T) {
+	complete := completeLaunchContext()
+	complete.Digest = complete.ComputeDigest()
+	e := improvementEvidence(t)
+	e.Improvement.LaunchContext = complete
+	b, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["improvement"].(map[string]any)["launch_context"].(map[string]any)["unexpected"] = true
+	b, _ = json.Marshal(raw)
+	if _, err := Decode(bytes.NewReader(b)); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("expected strict launch_context refusal, got %v", err)
+	}
+}
+
 func provenanceEvidence(t *testing.T) Evidence {
 	t.Helper()
 	e, err := Load("../../docs/_witnesses/issue-9782-performance-rsi-provenance.json")

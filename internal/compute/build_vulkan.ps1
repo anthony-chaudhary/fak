@@ -138,6 +138,7 @@ function Build-Shaders {
     $shaders += "q4k_matmul_wave32"
     $shaders += "q6k_matmul"
     $shaders += "q5k_matmul"
+    $shaders += "q3k_matmul"
     $shaders += "rmsnorm_q4k_matmul2"
     $shaders += "swiglu_q4k_matmul_add"
     foreach ($s in $shaders) {

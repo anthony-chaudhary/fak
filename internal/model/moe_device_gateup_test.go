@@ -231,10 +231,11 @@ func TestExpertSwiGLUDeviceDownStaysHostWithoutDeviceKernel(t *testing.T) {
 	t.Run("kind-without-device-kernel", func(t *testing.T) {
 		m, names := deviceDownExpertModel(t, kindQ6K, H, I)
 		// Replace the down weight with a kind whose descriptor exposes no HAL kernel.
-		if SupportsHALKQuant(kindQ3K) {
-			t.Fatalf("fixture assumption broken: %s advertises HAL support", kindQ3K)
+		// IQ4_XS replaced Q3_K as this exemplar when fak#13677 gave Q3_K a Vulkan kernel.
+		if SupportsHALKQuant(kindIQ4XS) {
+			t.Fatalf("fixture assumption broken: %s advertises HAL support", kindIQ4XS)
 		}
-		m.kqw[names[2]] = q3kFixtureTensor(I, H)
+		m.kqw[names[2]] = iq4xsFixtureTensor(I, H)
 		x := make([]float32, H)
 		for i := range x {
 			x[i] = float32((i%19)-9) / 64
@@ -363,7 +364,8 @@ func TestExpertSwiGLUDeviceQ2KGateUpResident(t *testing.T) {
 		name  string
 		downK kQuantKind
 	}{
-		{name: "q2k-down-declines", downK: kindQ3K},
+		{name: "non-hal-down-declines", downK: kindIQ4XS},
+		{name: "q3k-down-device", downK: kindQ3K},
 		{name: "q2k-down-device", downK: kindQ6K},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -378,15 +380,18 @@ func TestExpertSwiGLUDeviceQ2KGateUpResident(t *testing.T) {
 				expertName(0, 0, "down_proj.weight"),
 			}
 			// Resident Q2_K gate/up; a down projection of a kind the backend may or may
-			// not serve (Q3_K never; Q6_K does).
+			// not serve (IQ4_XS never; Q3_K and Q6_K do).
 			m.q4kw = map[string]*q4kTensor{}
 			m.kqw = map[string]*kQuantTensor{
 				names[0]: q2kFixtureTensor(I, H, 0x13357),
 				names[1]: q2kFixtureTensor(I, H, 0x13358),
 			}
-			if tc.downK == kindQ3K {
+			switch tc.downK {
+			case kindIQ4XS:
+				m.kqw[names[2]] = iq4xsFixtureTensor(H, I)
+			case kindQ3K:
 				m.kqw[names[2]] = q3kFixtureTensor(H, I)
-			} else {
+			default:
 				m.kqw[names[2]] = deviceDownKQuant(t, kindQ6K, H, I, 403)
 			}
 			for _, name := range names {
@@ -413,9 +418,9 @@ func TestExpertSwiGLUDeviceQ2KGateUpResident(t *testing.T) {
 			}()
 
 			// gate + up ran on the device; the down projection only when its kind has a
-			// backend kernel (Q6_K), never for Q3_K.
+			// backend kernel (Q3_K and Q6_K do; IQ4_XS never).
 			wantMatmuls := 2
-			if tc.downK == kindQ6K {
+			if tc.downK == kindQ6K || tc.downK == kindQ3K {
 				wantMatmuls = 3
 			}
 			if be.matmuls != wantMatmuls || be.swiglu != 1 {
@@ -431,9 +436,9 @@ func TestExpertSwiGLUDeviceQ2KGateUpResident(t *testing.T) {
 			if _, ok := s.halW["kquant-raw:"+names[1]]; !ok {
 				t.Fatalf("Q2_K up_proj not staged verbatim; halW holds %d entries", len(s.halW))
 			}
-			if tc.downK == kindQ3K {
+			if tc.downK == kindIQ4XS {
 				if _, ok := s.halW["kquant-raw:"+names[2]]; ok {
-					t.Fatal("Q3_K down with no device kernel was staged on the backend")
+					t.Fatal("IQ4_XS down with no device kernel was staged on the backend")
 				}
 			}
 			routedExpertParity(t, "incremental device Q2_K gate/up "+tc.name, got, want)
@@ -444,7 +449,8 @@ func TestExpertSwiGLUDeviceQ2KGateUpResident(t *testing.T) {
 // TestExpertSwiGLUDeviceQ2KGateUpCheckpointBacked is the fak#13357 checkpoint-backed
 // witness: gate/up live ONLY in the R5/#5616 checkpoint tier as Q2_K and must resolve,
 // stage through the same bounded path as a resident weight, and run gate MatMul + up
-// MatMul + SwiGLU on the device. The Q3_K down stays the caller's host responsibility.
+// MatMul + SwiGLU on the device. The resident Q3_K down also runs on the device now that
+// fak#13677 gave Q3_K a Vulkan kernel (the host Q3_K GEMV oracle below still matches).
 func TestExpertSwiGLUDeviceQ2KGateUpCheckpointBacked(t *testing.T) {
 	setQ4KSDOTForTest(false)
 	t.Cleanup(func() { setQ4KSDOTForTest(true) })
@@ -473,7 +479,7 @@ func TestExpertSwiGLUDeviceQ2KGateUpCheckpointBacked(t *testing.T) {
 	}
 	m.expertCheckpoint = tier
 	// gate/up are reachable ONLY through the tier; the Q3_K down stays resident so the
-	// host down projection still produces a signal.
+	// seam resolves it (device-side since fak#13677).
 	m.q4kw = map[string]*q4kTensor{}
 	m.kqw = map[string]*kQuantTensor{names[2]: q3kFixtureTensor(H, I)}
 	for _, name := range names {
@@ -516,9 +522,10 @@ func TestExpertSwiGLUDeviceQ2KGateUpCheckpointBacked(t *testing.T) {
 
 	got := expertSwiGLU(m, 0, 0, x, sessionQ4KKernel{s: s})
 
-	// gate + up ran on the device through the checkpoint tier; Q3_K down declined to host.
-	if be.matmuls != 2 || be.swiglu != 1 {
-		t.Fatalf("seam ops matmul=%d swiglu=%d, want 2/1 (checkpoint Q2_K gate/up on device)", be.matmuls, be.swiglu)
+	// gate + up ran on the device through the checkpoint tier; the resident Q3_K down
+	// also runs device-side now (fak#13677), so all three projections dispatch.
+	if be.matmuls != 3 || be.swiglu != 1 {
+		t.Fatalf("seam ops matmul=%d swiglu=%d, want 3/1 (checkpoint Q2_K gate/up + resident Q3_K down on device)", be.matmuls, be.swiglu)
 	}
 	if be.uploads[compute.Q2_K] < 2 {
 		t.Fatalf("checkpoint Q2_K uploads=%d, want one per gate/up projection", be.uploads[compute.Q2_K])
@@ -534,8 +541,8 @@ func TestExpertSwiGLUDeviceQ2KGateUpCheckpointBacked(t *testing.T) {
 	// A warm token reuses every staged weight: only the activation re-uploads.
 	q2Uploads := be.uploads[compute.Q2_K]
 	expertSwiGLU(m, 0, 0, x, sessionQ4KKernel{s: s})
-	if be.matmuls != 4 || be.swiglu != 2 {
-		t.Fatalf("warm-token device ops matmul=%d swiglu=%d, want 4/2", be.matmuls, be.swiglu)
+	if be.matmuls != 6 || be.swiglu != 2 {
+		t.Fatalf("warm-token device ops matmul=%d swiglu=%d, want 6/2", be.matmuls, be.swiglu)
 	}
 	if be.uploads[compute.Q2_K] != q2Uploads {
 		t.Fatalf("warm token re-uploaded the checkpoint Q2_K weights: %d -> %d", q2Uploads, be.uploads[compute.Q2_K])
@@ -575,7 +582,9 @@ func TestExpertSwiGLUDeviceQ2KGateUpDeclinesCleanly(t *testing.T) {
 
 	t.Run("q3k-gate-up-no-hal-descriptor", func(t *testing.T) {
 		m, names := buildModel()
-		m.kqw[names[0]] = q3kFixtureTensor(I, H)
+		// IQ4_XS stands in for "a resident kind with no HAL device kernel"; Q3_K held
+		// this role until fak#13677 gave it a Vulkan kernel.
+		m.kqw[names[0]] = iq4xsFixtureTensor(I, H)
 		x := make([]float32, H)
 		for i := range x {
 			x[i] = float32((i%19)-9) / 64
@@ -721,13 +730,13 @@ func (b *vulkanLikeSeamBackend) Caps() compute.Caps {
 
 func (b *vulkanLikeSeamBackend) SupportsRoutedExpertKQuant() bool { return false }
 
-// SupportsDeviceWeightDtype reports vulkan's real MatMul dtype set: Q4_K and Q6_K are
-// runnable, Q5_K is not. weightDtypes records every dtype probed so a test can assert the
-// seam consulted the predicate for the actual down dtype.
+// SupportsDeviceWeightDtype reports vulkan's real MatMul dtype set: Q4_K, Q6_K and the
+// fak#13677 Q3_K are runnable, Q5_K is not. weightDtypes records every dtype probed so a
+// test can assert the seam consulted the predicate for the actual down dtype.
 func (b *vulkanLikeSeamBackend) SupportsDeviceWeightDtype(dt compute.Dtype) bool {
 	b.weights = append(b.weights, dt)
 	switch dt {
-	case compute.F32, compute.Q8_0, compute.Q4_K, compute.Q6_K, compute.Q2_K:
+	case compute.F32, compute.Q8_0, compute.Q4_K, compute.Q6_K, compute.Q3_K, compute.Q2_K:
 		return true
 	default:
 		return false
@@ -748,4 +757,23 @@ func q3kFixtureTensor(out, in int) *kQuantTensor {
 		}
 	}
 	return &kQuantTensor{out: out, in: in, nblk: nblk, kind: kindQ3K, raw: raw}
+}
+
+// iq4xsFixtureTensor builds a resident IQ4_XS projection: a kind that has a registered
+// descriptor (so a7 resident store exists) but no HAL device kernel anywhere — the
+// non-HAL exemplar the fail-closed seam must decline. Q3_K was that exemplar until
+// fak#13677 gave it a Vulkan kernel; this fixture replaces it so the negative control
+// still pins "no device kernel for this encoding ⇒ host arm byte-for-byte". d is pinned
+// to 2^-6 so the host decode is finite and nonzero.
+func iq4xsFixtureTensor(out, in int) *kQuantTensor {
+	nblk := in / qkK
+	raw := make([]byte, out*nblk*iq4xsBlockBytes)
+	lcgBytes(raw, 0x13677)
+	for o := 0; o < out; o++ {
+		for b := 0; b < nblk; b++ {
+			blk := raw[(o*nblk+b)*iq4xsBlockBytes:]
+			binary.LittleEndian.PutUint16(blk[0:], 0x2800) // d = 2^-6
+		}
+	}
+	return &kQuantTensor{out: out, in: in, nblk: nblk, kind: kindIQ4XS, raw: raw}
 }

@@ -23,6 +23,27 @@ Pin and Unpin are digest-counted without owner identity. A duplicate release can
 
 LMCache proposed PR #5098, head dc0939588e3dac720b6fefe125d91d1c613f407e; lmcache/v1/cache_engine.py:941. Source: https://github.com/LMCache/LMCache/pull/5098. Observation 2026-09-29; upstream tracker states are dated. Apache-2.0 (vLLM/LMCache) or MIT (llama.cpp), ADAPT with source attribution retained. No source code is copied by this ticket. The cited upstream PR and revision are the source anchor; this is a bounded source assessment.
 
+## Consuming-path audit ΓÇö WATCH disposition
+
+Audited at public HEAD `e88f5cc194` (audit run 2026-10-04). Commands (whole public tree):
+
+```text
+rg -n "PagedStore" <public tree>
+rg -n "\.Pin\(|\.Unpin\(" <public tree>
+rg -n "StagePaged|GetPaged|DefaultPagedStore|RemovePaged|PagedStore" internal cmd pkg
+```
+
+Evidence ΓÇö `PagedStore.Pin`/`Unpin` (`internal/ctxmmu/paged_store.go:163`, `:179`) have NO production caller:
+
+- The only `PagedStore.Pin(`/`.Unpin(` calls in the module are in `internal/ctxmmu/paged_store_test.go` (the store's own tests; decline-drain and ownership-accounting fixtures). No non-test file calls either method.
+- `internal/ctxmmu/mmu.go` constructs the store (`mmu.go:130 NewPagedStore(...)`) and uses only `Stage`, `Get` and `Remove` through `stagePaged`/`unstagePaged`/`getStaged` (`mmu.go:218-263`). It never pins.
+- The exported wrappers in `paged_store.go:305-327` are `DefaultPagedStore`, `StagePagedRef`, `GetStagedPagedRef`, `ResetPagedStoreForTest` ΓÇö none touch `Pin`/`Unpin`.
+- The other `*.Pin(`/`.Unpin(` hits in the tree belong to distinct APIs (`pkg/managedharness` GenerationPin, `internal/xenginekv` lease, `cmd/fak` skill table, `internal/ctxmmu` `TouchPin`/quarantine reaper) and are unrelated to `PagedStore`.
+
+Conclusion: the digest-counted, owner-less `Pin`/`Unpin` concerned by LMCache #5098 has no production entrypoint that can reach it, so no consuming defect can be reproduced today. Disposition: **WATCH** ΓÇö no unused receipt machinery is added.
+
+Reactivation trigger: when a production caller begins pinning paged refs (first non-test `PagedStore.Pin` call site), the digest-keyed pin count becomes load-bearing; at that point a bounded implementation follow-up must thread an owner/generation identity so a duplicate `Unpin` cannot consume another owner's count, with an independent duplicate-release regression. That follow-up is out of this markdown-only audit's edit scope and is created only when a caller exists.
+
 ## Core through-line
 
 Trace PagedStore construction, its interfaces and all Pin/Unpin consumers at the claimed public revision. Record file:line evidence and an executable reachability witness when a production consumer exists. If no consumer exists, close as WATCH with a concrete future trigger; do not add unused receipt machinery. If a consuming defect is reproduced, record a follow-up implementation recommendation covering the actual caller and independent regression. Creation of that separately scoped ticket occurs after this audit, outside its markdown-only edit scope.
@@ -45,9 +66,9 @@ All unchecked criteria below must be satisfied through the real consuming entryp
 
 ## Definition of done
 
-- [ ] Audit the current public tree for PagedStore construction, interfaces, Pin/Unpin call sites and production entrypoint reachability; retain commands and file:line evidence in this specification.
-- [ ] Record WATCH if no consuming path exists, with a trigger when a real caller begins pinning; otherwise reproduce the actual caller failure and record a distinct implementation follow-up with the caller, required scope and acceptance. Register that follow-up after the audit.
-- [ ] Run `go test ./internal/ctxmmu -count=1`; retain a public signed commit containing the audit receipt. No runtime repair or hardware claim is required for this audit.
+- [x] Audit the current public tree for PagedStore construction, interfaces, Pin/Unpin call sites and production entrypoint reachability; retain commands and file:line evidence in this specification.
+- [x] Record WATCH if no consuming path exists, with a trigger when a real caller begins pinning; otherwise reproduce the actual caller failure and record a distinct implementation follow-up with the caller, required scope and acceptance. Register that follow-up after the audit.
+- [x] Run `go test ./internal/ctxmmu -count=1`; retain a public signed commit containing the audit receipt. No runtime repair or hardware claim is required for this audit.
 
 ## Witness
 
@@ -68,6 +89,8 @@ go test ./internal/ctxmmu -count=1
 ```
 
 Acceptance is a future repair gate; this study has not shipped the repair. An unexecuted future test must not be reported green.
+
+Result (2026-10-04, audited public HEAD `e88f5cc194`): `go test ./internal/ctxmmu -count=1` -> `ok github.com/anthony-chaudhary/fak/internal/ctxmmu 56.104s`. This is the audit's owning-package receipt; the `Pin`/`Unpin` production-reachability disposition remains WATCH and no runtime repair is claimed.
 
 ## Parent context
 

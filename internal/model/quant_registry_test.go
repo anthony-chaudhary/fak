@@ -31,7 +31,7 @@ func TestQuantRegistryBuiltinRegistration(t *testing.T) {
 		{kindIQ1S, "IQ1_S", 0, false, iq1sBlockBytes, qkK},
 		{kindIQ2S, "IQ2_S", 0, false, iq2sBlockBytes, qkK},
 		{kindIQ1M, "IQ1_M", 0, false, iq1mBlockBytes, qkK},
-		{kindQ3K, "Q3_K", 0, false, q3kBlockBytes, qkK},
+		{kindQ3K, "Q3_K", compute.Q3_K, true, q3kBlockBytes, qkK},
 		{kindIQ3S, "IQ3_S", compute.IQ3_S, false, iq3sBlockBytes, qkK},
 	}
 
