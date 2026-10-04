@@ -118,6 +118,25 @@ func (p *kvPackedRow) decodeRowInto(dst []float32, r int) {
 	}
 }
 
+// decodeRangeInto dequantizes elements [off, off+n) of row r into dst[:n] — one
+// head's slice of a K/V row. Each element uses the exact scale decodeRowInto would,
+// so the values are bit-identical to slicing a full-row decode; the decode
+// attention kernel uses it to dequantize a row once per kv-head group (#13693)
+// instead of the full row once per query head.
+func (p *kvPackedRow) decodeRangeInto(dst []float32, r, off, n int) {
+	if p == nil || p.width == 0 || off < 0 || off+n > p.width || len(dst) < n {
+		return
+	}
+	base := r*p.width + off
+	if base < 0 || base+n > len(p.codes) {
+		return
+	}
+	dst = dst[:n]
+	for i := 0; i < n; i++ {
+		dst[i] = float32(p.codes[base+i]) * p.scales[(base+i)/kvQ8_0GroupSize]
+	}
+}
+
 // encodeRowInto re-quantizes row and overwrites rows [i] in the packing. The scale
 // groups covering row i are replaced wholesale, so re-encoding a survivor after
 // Evict's re-RoPE yields the exact bytes a fresh append would have.
