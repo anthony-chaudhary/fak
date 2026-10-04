@@ -257,10 +257,15 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 		}
 	}
 
-	d := time.Since(start)
 	if compErr != nil {
-		return d, compErr
+		return time.Since(start), compErr
 	}
+	// The known-answer coherence probe runs BEFORE the gate releases, so there is
+	// no window in which a skewed binary/shader pair reports ready.
+	if err := s.runStartupCoherenceProbe(ctx, ceiling); err != nil {
+		return time.Since(start), err
+	}
+	d := time.Since(start)
 	s.MarkWarmupComplete(d)
 
 	if rep, ok := s.planner.(agent.KVMemoryReporter); ok {

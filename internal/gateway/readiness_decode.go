@@ -1,9 +1,15 @@
 package gateway
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/pkg/deploykit/coherence"
 )
 
 // readiness_decode.go is the #4247 output-coherence gate on the local-model
@@ -29,6 +35,11 @@ const (
 	decodeEmpty         degenerateKind = "empty"
 	decodePunctuation   degenerateKind = "punctuation_only"
 	decodeRepeatedToken degenerateKind = "repeated_single_token"
+	// decodeSequenceMissing is the known-answer verdict: the armed count probe
+	// (coherence.CountPrompt) decoded text that is not degenerate in shape but
+	// lacks the run 1..N. This is the binary/SPIR-V skew signature — fluent-looking
+	// noise at full speed — that the shape heuristics above cannot see.
+	decodeSequenceMissing degenerateKind = degenerateKind(coherence.SequenceMissing)
 
 	// repeatThreshold is the minimum unit count before an all-identical decode is
 	// judged degenerate. It keeps legitimately short benign output ("OK", "Hi",
@@ -116,6 +127,40 @@ type startupDecodeProbe struct {
 	probed bool
 	kind   degenerateKind
 	sample string // bounded snapshot of the decoded output, for the /healthz reason
+	count  int    // armed known-answer count probe N; 0 = not armed
+}
+
+// arm records the known-answer count probe N the host wants run at boot.
+// n<=0 disarms; n is clamped to coherence.MaxCount.
+func (p *startupDecodeProbe) arm(n int) {
+	if n > coherence.MaxCount {
+		n = coherence.MaxCount
+	}
+	if n < 0 {
+		n = 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.count = n
+}
+
+func (p *startupDecodeProbe) armedCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.count
+}
+
+// setCount records the verdict for the decoded answer to coherence.CountPrompt(n):
+// the shape classifier runs first (its kinds stay the most specific reason), then
+// the known-answer check.
+func (p *startupDecodeProbe) setCount(text string, n int) {
+	kind := classifyDecode(text)
+	if kind == decodeCoherent && coherence.Check(text, n) != coherence.Coherent {
+		kind = decodeSequenceMissing
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.probed, p.kind, p.sample = true, kind, boundedSample(text)
 }
 
 // set records the verdict for a decoded startup-probe output. A coherent decode
@@ -164,4 +209,67 @@ func (s *Server) SetStartupDecodeProbe(text string) {
 		return
 	}
 	s.startupDecode.set(text)
+}
+
+// ArmCoherenceProbe declares that RunWarmup must also run the deterministic
+// known-answer probe: a temperature-0 coherence.CountPrompt(n) decode whose
+// answer must contain the run 1..n. A failing answer qualifies /healthz (and so
+// /readyz) ok:false with degenerate_decode.kind "sequence_missing" until the
+// process restarts and re-probes. This is the readiness half of the binary/shader
+// skew defect: a fak binary loading a mismatched SPIR-V set binds, answers
+// /healthz ok and decodes at full speed — but cannot count. n<=0 disarms. Safe on
+// a nil Server and for concurrent use; a serve that never arms it is unaffected.
+func (s *Server) ArmCoherenceProbe(n int) {
+	if s == nil {
+		return
+	}
+	s.startupDecode.arm(n)
+}
+
+// runStartupCoherenceProbe runs the armed count probe through the planner,
+// bounded by ceiling (<=0 = unbounded) and ctx, and records the verdict. A
+// planner error or timeout is returned so RunWarmup leaves readiness pending; an
+// incoherent ANSWER is not an error — it is recorded and surfaced on /healthz.
+func (s *Server) runStartupCoherenceProbe(ctx context.Context, ceiling time.Duration) error {
+	n := s.startupDecode.armedCount()
+	if n <= 0 || s.planner == nil {
+		return nil
+	}
+	greedy := 0.0
+	msgs := []agent.Message{{Role: agent.RoleUser, Content: coherence.CountPrompt(n)}}
+	start := time.Now()
+	done := make(chan struct{})
+	var comp *agent.Completion
+	var compErr error
+	go func() {
+		comp, compErr = s.planner.Complete(ctx, msgs, nil,
+			agent.WithMaxTokens(coherence.MaxTokens(n)), agent.WithTemperature(&greedy))
+		close(done)
+	}()
+	var timeout <-chan time.Time
+	if ceiling > 0 {
+		timer := time.NewTimer(ceiling)
+		defer timer.Stop()
+		timeout = timer.C
+	}
+	select {
+	case <-done:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timeout:
+		return fmt.Errorf("%w: startup coherence probe did not answer after %s (ceiling %s) — readiness remains pending",
+			ErrWarmupTimeout, time.Since(start).Round(time.Millisecond), ceiling)
+	}
+	if compErr != nil {
+		return fmt.Errorf("startup coherence probe: %w", compErr)
+	}
+	text := ""
+	if comp != nil {
+		text = comp.Message.Content
+	}
+	s.startupDecode.setCount(text, n)
+	if kind, sample, bad := s.startupDecode.degenerate(); bad && s.logf != nil {
+		s.logf("[NOT READY] startup coherence probe failed kind=%s count=%d sample=%q — check binary/shader-set identity", kind, n, sample)
+	}
+	return nil
 }
