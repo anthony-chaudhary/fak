@@ -65,6 +65,24 @@ func TestEveryServeFlagIsShiftedIntoAHelpCategory(t *testing.T) {
 	}
 }
 
+func TestNewServeFlagsLandInTheirCategories(t *testing.T) {
+	categorized := make(map[string]string)
+	for _, category := range serveHelpCategories {
+		for _, name := range category.flags {
+			categorized[name] = category.name
+		}
+	}
+	for _, tc := range []struct{ flag, category string }{
+		{"arm-lease-store", "policy"},
+		{"native-allow-bash-command", "native"},
+		{"native-bash-command-timeout", "native"},
+	} {
+		if got := categorized[tc.flag]; got != tc.category {
+			t.Errorf("serve flag --%s categorized as %q, want %q", tc.flag, got, tc.category)
+		}
+	}
+}
+
 func TestServeHelpTopicForms(t *testing.T) {
 	for _, tc := range []struct {
 		argv  []string
