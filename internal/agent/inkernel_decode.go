@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"math/rand"
 	"os"
@@ -173,6 +174,10 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	var cachedLogits []float32
 	skipExactDeviceL1Readmission := false
 	lookupStart := time.Now()
+	// Per-lookup provenance for the inkernel_prefix_lookup line (#12742): the legacy
+	// KV-tree depth, the snapshot-tier depth, and whether the snapshot tier ran at all.
+	var lookupLegacyM, lookupSnapshotM int
+	lookupSnapshotConsulted := false
 	if reuse {
 		owner, scoped := prefixCacheIdentityFromContext(ctx)
 		scopedLookup := scoped && p.scopedTree != nil
@@ -188,6 +193,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			}
 			if p.backend != nil {
 				matchedSnapshot, cachedLogits, m, sourceScope, tier, err = p.scopedTree.LookupSnapshotTieredContext(ctx, owner, ids)
+				lookupSnapshotConsulted, lookupSnapshotM = true, m
 			} else {
 				matchedKV, cachedLogits, m, _, err = p.scopedTree.Lookup(owner, ids)
 				if err == nil && p.warmHandoffScopeMatches(owner) {
@@ -203,6 +209,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 						}
 					}
 				}
+				lookupLegacyM = m
 				if inKernelHostSnapshotReuse(p) && matchedKV == nil {
 					// Recurrent hybrid on the host-session (Metal) seam: a mid-edge
 					// split carries no KV because span eviction is unsupported, so the
@@ -210,8 +217,31 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 					// an adaptive block boundary. Consult that tier before falling open.
 					var snap *model.PrefixSnapshot
 					snap, cachedLogits, m, sourceScope, tier, err = p.scopedTree.LookupSnapshotTieredContext(ctx, owner, ids)
+					lookupSnapshotConsulted, lookupSnapshotM = true, m
 					if err == nil {
 						matchedSnapshot = snap
+					} else if snap != nil {
+						snap.Close()
+					}
+				} else if inKernelHostSnapshotReuse(p) && err == nil && m < len(ids) && cacheable > m {
+					// A KV-bearing match in one scope (an agent-private or fleet-promoted
+					// prefix, a warm handoff) can be shallower than a complete snapshot
+					// another scope admitted at a deeper checkpoint. Keep whichever
+					// restorable state is deeper (#12742). The tiered lookup materializes
+					// its best candidate, so it runs only when the cross-scope structural
+					// match (an upper bound on any snapshot depth) is deeper than the KV.
+					// A snapshot fault fails open to the KV already in hand unless the
+					// request itself was cancelled.
+					snap, snapLogits, snapM, snapScope, snapTier, snapErr := p.scopedTree.LookupSnapshotTieredContext(ctx, owner, ids)
+					lookupSnapshotConsulted = true
+					if snapErr == nil {
+						lookupSnapshotM = snapM
+					} else if ctxErr := ctx.Err(); ctxErr != nil {
+						err = ctxErr
+					}
+					if snapErr == nil && snap != nil && snapM > m {
+						matchedKV = nil
+						matchedSnapshot, cachedLogits, m, sourceScope, tier = snap, snapLogits, snapM, snapScope, snapTier
 					} else if snap != nil {
 						snap.Close()
 					}
@@ -222,6 +252,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			if p.backend != nil {
 				b, snap, legacyMatched, lookupTier, lookupErr := p.tree.LookupSnapshotTieredContext(ctx, ids)
 				matchedSnapshot, m, err = snap, legacyMatched, lookupErr
+				lookupSnapshotConsulted, lookupSnapshotM = true, legacyMatched
 				if b != nil {
 					cacheable = b.Plen()
 				}
@@ -233,6 +264,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			} else {
 				b, legacyMatched := p.tree.Lookup(ids)
 				m = legacyMatched
+				lookupLegacyM = legacyMatched
 				if b != nil {
 					cacheable = b.Plen()
 				}
@@ -258,6 +290,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 						p.tree.Done(site)
 					}
 					m = snapMatched
+					lookupSnapshotConsulted, lookupSnapshotM = true, snapMatched
 					if lookupErr == nil {
 						matchedSnapshot, cachedLogits, tier = snap, nil, lookupTier
 					} else if snap != nil {
@@ -465,7 +498,18 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			checkpointPrefix = (checkpointPrefix / inKernelSnapshotCheckpointTokens) * inKernelSnapshotCheckpointTokens
 		}
 		checkpoint := inKernelAdaptiveSnapshotCheckpoint(prefillAt, checkpointPrefix, len(ids))
-		if admit && (p.backend != nil || inKernelHostSnapshotReuse(p)) && checkpoint > prefillAt {
+		snapshotSeam := p.backend != nil || inKernelHostSnapshotReuse(p)
+		if reuse && snapshotSeam {
+			tierLabel := string(sourceTier)
+			if sourceTier == radixkv.SnapshotTierMiss {
+				tierLabel = "miss"
+			}
+			// One line per non-exact snapshot-seam turn, beside inkernel_chat: which tier
+			// served the restored prefix and where this turn's single checkpoint lands.
+			log.Printf("inkernel_prefix_lookup prompt=%dtok cacheable=%dtok reused=%dtok legacy_m=%d snapshot_m=%d snapshot_consulted=%t tier=%s checkpoint=%d checkpoint_planned=%t",
+				len(ids), cacheable, matched, lookupLegacyM, lookupSnapshotM, lookupSnapshotConsulted, tierLabel, checkpoint, admit && checkpoint > prefillAt)
+		}
+		if admit && snapshotSeam && checkpoint > prefillAt {
 			logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:checkpoint], measurement)
 			if err != nil {
 				return
@@ -1267,13 +1311,22 @@ func inKernelSnapshotCheckpoint(matched, promptTokens int) int {
 // snapshots cannot be synthesized by splitting a later leaf, so this repairs the
 // boundary for the next sibling while retaining the historical one-checkpoint
 // limit and strict-before-prompt fallback.
+//
+// The exact shared boundary earns the single checkpoint only when it is at least as
+// deep as the grid fallback or saves at least one block over the restored prefix. A
+// sub-block structural match (a chat-template header shared with an earlier request,
+// a warmup leaf) must not displace the deepest grid checkpoint: on the first request
+// of an agent loop that shallow boundary is the only one known, and spending the
+// checkpoint there left the second turn restoring 5 of 1922 shared tokens (#12742).
 // Adapted from oMLX's off-grid prefill-tail snapshots (Apache-2.0):
 // https://github.com/jundot/omlx/blob/8288884d9b4f6db7b547633a94d36794c6b1d52d/omlx/scheduler.py
 func inKernelAdaptiveSnapshotCheckpoint(matched, cacheable, promptTokens int) int {
-	if cacheable > matched && cacheable < promptTokens {
+	grid := inKernelSnapshotCheckpoint(matched, promptTokens)
+	if cacheable > matched && cacheable < promptTokens &&
+		(cacheable >= grid || cacheable-matched >= inKernelSnapshotCheckpointTokens) {
 		return cacheable
 	}
-	return inKernelSnapshotCheckpoint(matched, promptTokens)
+	return grid
 }
 
 // admitPrefixSnapshot transfers snapshot ownership to the same scoped/unscoped tree
