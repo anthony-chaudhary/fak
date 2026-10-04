@@ -761,6 +761,14 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !validateChatRequestIngress(w, req) {
 		return
 	}
+	// Deadline-aware admission: refuse work that cannot finish before the
+	// client's declared deadline, and bind that deadline to the request
+	// context so generation stops when it passes (deadline_admission.go).
+	r, releaseDeadline, ok := s.admitClientDeadline(w, r, turnCostBegan, estimateMessageContentTokens(req.Messages), req.MaxTokens)
+	if !ok {
+		return
+	}
+	defer releaseDeadline()
 	// Stamp the causal input on the untouched wire envelope before admission
 	// transforms, request routing, planner selection, or model execution.
 	inputTriggerRoute, routedModel, err := s.admitAndRouteChatInputTriggerWithContext(r.Context(), req)

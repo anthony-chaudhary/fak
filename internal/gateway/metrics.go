@@ -16,6 +16,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compactcohere"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
+	"github.com/anthony-chaudhary/fak/pkg/deadlineadmit"
 )
 
 var gatewayLatencyBuckets = []float64{
@@ -28,6 +29,11 @@ type gatewayMetrics struct {
 	start              time.Time
 	inflight           int64
 	featureProof       *FeatureProofCollector
+
+	// deadlineEst is the deadline-aware admission estimator (see
+	// deadline_admission.go); created lazily through deadlineEstimator.
+	deadlineOnce sync.Once
+	deadlineEst  *deadlineadmit.Estimator
 
 	mu         sync.Mutex
 	http       map[httpMetricKey]*latencyCounter

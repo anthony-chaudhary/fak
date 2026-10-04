@@ -926,6 +926,7 @@ func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok, c
 		}
 	}
 	m.inferenceMu.Unlock()
+	m.observeDeadlineTiming(promptTok, complTok, dur, ttft)
 }
 
 // recordCacheCreationTierSplit attributes `cacheCreateTok` cache-creation tokens to
