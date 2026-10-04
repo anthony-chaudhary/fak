@@ -8,6 +8,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelreg"
 )
 
 const (
@@ -116,6 +117,53 @@ func (s *Server) DisableMetalMTP() {
 			}
 		}
 	}
+}
+
+// refuseNativeModelMismatch writes a typed 400 model_mismatch and reports true
+// when the request would decode on a single local native engine under a model
+// name that is neither the served model nor the engine's own id. Without it a
+// router failover onto a native backend silently serves a different model under
+// the requested label. Proxy (#82 pass-through), dual (RoutesLocal), roster-bound
+// and route-manifest requests are never gated here; an omitted model stays allowed.
+func (s *Server) refuseNativeModelMismatch(w http.ResponseWriter, r *http.Request, requested, routedModel string) bool {
+	requested = strings.TrimSpace(requested)
+	if requested == "" || routedModel != "" || chatRouteFromContext(r.Context()) != nil {
+		return false
+	}
+	p := s.planner
+	if p == nil {
+		return false
+	}
+	if _, dual := p.(*DualPlanner); dual {
+		return false
+	}
+	_, encodes := p.(nativePromptEncoder)
+	traced, ok := p.(agent.NativeDecodeTracePlanner)
+	if !encodes && !(ok && traced.NativeDecodeTraceSupported()) {
+		return false
+	}
+	if sameServedModel(requested, s.model) || sameServedModel(requested, p.Model()) {
+		return false
+	}
+	writeErrCode(w, http.StatusBadRequest, "model_mismatch", "requested model does not match the loaded native model")
+	return true
+}
+
+// sameServedModel reports whether requested names the served model: equal
+// ignoring case (as DualPlanner.RoutesLocal matches), or two registry aliases
+// that resolve to the same artifact (qwen38:27b and qwen38:27b-q4 load the same
+// GGUF, and the Pi defaults send the latter to a server started with the former).
+func sameServedModel(requested, served string) bool {
+	requested = strings.ToLower(strings.TrimSpace(requested))
+	served = strings.ToLower(strings.TrimSpace(served))
+	if served == "" {
+		return false
+	}
+	if requested == served {
+		return true
+	}
+	ref, ok := modelreg.Catalog[requested]
+	return ok && ref == modelreg.Catalog[served]
 }
 
 // plannerForRequest returns the sub-planner serving reqModel, resolving DualPlanner routing if present.

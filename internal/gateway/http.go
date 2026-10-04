@@ -754,6 +754,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if s.refuseNativeModelMismatch(w, r, req.Model, routedModel) {
+		return
+	}
 	if !releaseEPFanout(r) {
 		return
 	}
