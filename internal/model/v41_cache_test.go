@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -240,6 +241,63 @@ func TestV41CachePrefetchBounded(t *testing.T) {
 	est := ec.Stats()
 	if est.ResidentBytes > budget {
 		t.Fatalf("expert ResidentBytes=%d exceeds BudgetBytes=%d", est.ResidentBytes, budget)
+	}
+}
+
+// TestV41EngramRowCacheWidthContract pins the bounded defect of fak#13671: the row
+// cache declared its own RowBytes without ever comparing it to the source's actual
+// width, so a cache could be constructed whose stride disagrees with the backing
+// table and every subsequent read would be misaligned. Construction must refuse the
+// mismatch (and a nonpositive source width) by structure, before allocating the inner
+// cache or issuing any ReadRows. Existing validation order is preserved: a budget too
+// small for one declared row is reported first, before the width comparison.
+func TestV41EngramRowCacheWidthContract(t *testing.T) {
+	const rowBytes = 16
+	cases := []struct {
+		name        string
+		srcRowBytes int
+		optsRow     int
+		budget      int64
+		wantErr     string // substring of the required error; "" means accepted
+	}{
+		{"matching width is accepted", rowBytes, rowBytes, rowBytes * 8, ""},
+		{"source narrower than declared", rowBytes, rowBytes + 1, rowBytes * 8, "does not match"},
+		{"source wider than declared", rowBytes, rowBytes - 1, rowBytes * 8, "does not match"},
+		{"nonpositive source width", 0, rowBytes, rowBytes * 8, "does not match"},
+		{"negative source width", -4, rowBytes, rowBytes * 8, "does not match"},
+		// Budget is checked before width, so a too-small budget error wins even when
+		// the widths also disagree.
+		{"budget precedence over mismatch", 8, rowBytes, 4, "budget"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := &v41CacheFakeEngram{rows: 64, rowBytes: tc.srcRowBytes}
+			c, err := NewV41EngramRowCache(src, V41EngramRowCacheOptions{
+				TableRows: 64, RowBytes: tc.optsRow, BudgetBytes: tc.budget,
+			})
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected refusal: %v", err)
+				}
+				if c == nil {
+					t.Fatal("accepted construction returned a nil cache")
+				}
+			} else {
+				if err == nil {
+					t.Fatalf("construction accepted mismatched geometry (src=%d declared=%d)", tc.srcRowBytes, tc.optsRow)
+				}
+				if c != nil {
+					t.Fatalf("refused construction returned a non-nil cache")
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error %q does not name %q", err.Error(), tc.wantErr)
+				}
+			}
+			// No construction path may read rows: invalid geometry never touches IO.
+			if src.reads != 0 {
+				t.Fatalf("construction performed %d row read(s)", src.reads)
+			}
+		})
 	}
 }
 
