@@ -45,10 +45,22 @@ All unchecked criteria below must be satisfied through the real consuming entryp
 
 ## Definition of done
 
-- [ ] Reproduce the current gap through the real target entrypoint.
-- [ ] Implement the bounded change and independent edge-case regression.
-- [ ] Two complete, unequal adversarial regimes produce distinct keys and hashes; normal stable identities remain deterministic; cache insertion and lookup consume the same versioned identity.
-- [ ] Verify `go test ./internal/radixkv -count=1`, public leak/boundary checks, and commit/land through the public native workflow.
+- [x] Reproduce the current gap through the real target entrypoint.
+- [x] Implement the bounded change and independent edge-case regression.
+- [x] Two complete, unequal adversarial regimes produce distinct keys and hashes; normal stable identities remain deterministic; cache insertion and lookup consume the same versioned identity.
+- [x] Verify `go test ./internal/radixkv -count=1`, public leak/boundary checks, and commit/land through the public native workflow.
+
+Resolved by commit `e9540090fcfc42b12bc3e224239f272d0d1444c4`
+("fix(radixkv): make decode regime keys injective (fak radixkv)"), landed and
+pushed to `origin/main`. `Regime.RegimeKey` now emits a versioned `v2;` key whose
+string-valued axes (`model`, `sha`, `dtype`, `quant`, `rope.type`) are each
+`strconv.Quote`d, so the formerly aliasing fixtures `ModelID="a;sha=b"`,
+`ModelSHA="c"` and `ModelID="a"`, `ModelSHA="b;sha=c"` produce distinct keys and
+hashes. `TestRegime_DelimiterAdversarialIdentityDoesNotAliasCache`
+(`internal/radixkv/regime_test.go:68`) reproduces the collision and then admits
+the left regime through `ScopedTree.AdmitPrivateRegime` and looks it up under the
+right regime, asserting a clean miss — the same versioned identity is consumed at
+both insertion and lookup. Witness: `go test ./internal/radixkv -count=1` → ok.
 
 ## Witness
 
