@@ -20,6 +20,10 @@ func main() {
 }
 
 func run(stdout, stderr io.Writer, args []string) int {
+	return runAt(stdout, stderr, args, time.Now().UTC())
+}
+
+func runAt(stdout, stderr io.Writer, args []string, now time.Time) int {
 	fs := flag.NewFlagSet("perfscout", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -92,7 +96,7 @@ func run(stdout, stderr io.Writer, args []string) int {
 		LimitPerQuery: *limit,
 		CohortCount:   *cohorts,
 		FixturePath:   *fixture,
-		Now:           time.Now().UTC(),
+		Now:           now.UTC(),
 	}
 
 	report, err := perfscout.Run(opts)

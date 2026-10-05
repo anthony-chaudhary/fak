@@ -15,6 +15,10 @@ import (
 
 // RunPerfScout executes the performance scout workflow for Qwen 3.8 and GLM 5.3 Flash OSS repos.
 func RunPerfScout(stdout, stderr io.Writer, argv []string) int {
+	return runPerfScoutAt(stdout, stderr, argv, time.Now().UTC())
+}
+
+func runPerfScoutAt(stdout, stderr io.Writer, argv []string, now time.Time) int {
 	fs := flag.NewFlagSet("perfscout", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -87,7 +91,7 @@ func RunPerfScout(stdout, stderr io.Writer, argv []string) int {
 		LimitPerQuery: *limit,
 		CohortCount:   *cohorts,
 		FixturePath:   *fixture,
-		Now:           time.Now().UTC(),
+		Now:           now.UTC(),
 	}
 
 	report, err := perfscout.Run(opts)
