@@ -310,7 +310,9 @@
       "distinction": "It serves a prefill panel, NOT one batched decode step across users (attnDecodeBatch).",
       "distinct_from": [
         "attended",
-        "issue9256-attention-prepare-prefill"
+        "issue9256-attention-prepare-prefill",
+        "prefillattention",
+        "attnprefilldispatch"
       ],
       "aliases": [],
       "grounding": "attnprefillinto",

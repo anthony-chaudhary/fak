@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "prefillattention",
+      "canonical": "PrefillAttention",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "metalgemm's device prefill attention: a tiled simdgroup-MMA causal GQA kernel that computes softmax(scale*q.k^T)v for a P-row prefill panel against the layer's whole f32 KV cache on the GPU, one threadgroup per 8 query rows and GQA group (fak#13695).",
+      "distinction": "attnPrefillInto is the host CPU loop and parity oracle for the same math; PrefillAttention is its GPU twin, and attnPrefillDispatch chooses between them.",
+      "distinct_from": [
+        "x-attention-attnprefillinto",
+        "attnprefilldispatch"
+      ],
+      "aliases": [],
+      "grounding": "PrefillAttention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

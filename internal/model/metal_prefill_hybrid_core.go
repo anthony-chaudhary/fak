@@ -383,7 +383,7 @@ func (s *Session) prefillQwen35FullAttnLayerMM(l int, Xn []float32, P, base int,
 	s.Cache.V[l] = append(s.Cache.V[l], V...)
 
 	attnOut := make([]float32, P*qWidth)
-	attnPrefillInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], P, base, nH, hd, w, grp, cfg.windowForLayer(l), l, scale, attnCap, fdot, s.M.attnObs)
+	s.attnPrefillDispatch(true, attnOut, Q, s.Cache.K[l], s.Cache.V[l], P, base, nH, hd, w, grp, cfg.windowForLayer(l), l, scale, attnCap, fdot, s.M.attnObs)
 	for i := range attnOut {
 		attnOut[i] *= sigmoidf(gate[i])
 	}

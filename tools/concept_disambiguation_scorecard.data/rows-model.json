@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "attnprefilldispatch",
+      "canonical": "attnPrefillDispatch",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The Session-level prefill attention route chooser: on a Metal prefill path it runs metalgemm.PrefillAttention and otherwise, or on any case the device kernel cannot reproduce exactly (observer, soft-cap, unsupported geometry, tiny panel, device failure), runs the host attnPrefillInto.",
+      "distinction": "It computes nothing itself: attnPrefillInto (host) and PrefillAttention (device) are the two kernels it routes between.",
+      "distinct_from": [
+        "x-attention-attnprefillinto",
+        "prefillattention"
+      ],
+      "aliases": [],
+      "grounding": "attnPrefillDispatch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

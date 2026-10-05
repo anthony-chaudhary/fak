@@ -1,6 +1,10 @@
 package model
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
+)
 
 // appendLayerKV appends this prefill panel's K/V rows to layer `layer` and returns
 // the layer's FULL cached K and V (all positions through and including the panel),
@@ -123,6 +127,29 @@ func attnPrefillInto(attnOut, Q, Kl, Vl []float32, P, base, nH, hd, w, grp, W, l
 		}(k)
 	}
 	wg.Wait()
+}
+
+// prefillAttnDeviceMinRows is the smallest panel the device prefill attention takes; below it
+// the host loop's P*nH work units finish before a command buffer would round-trip.
+const prefillAttnDeviceMinRows = 8
+
+// attnPrefillDispatch is attnPrefillInto with the fak#13695 device route. When device is true
+// (a Metal prefill path) it runs the tiled GQA prefill attention kernel on the GPU. The host loop
+// remains the route, and the parity oracle, whenever the kernel cannot reproduce it exactly: an
+// attention observer is attached, a Gemma score soft-cap is set, the head geometry has no
+// pipeline, or the panel is tiny. A device failure after admission records
+// MetalFallbackPrefillAttentionCPU and recomputes the layer on the host.
+func (s *Session) attnPrefillDispatch(device bool, attnOut, Q, Kl, Vl []float32, P, base, nH, hd, w, grp, W, layer int, scale, attnCap float32, scoreDot func(a, b []float32) float32, obs AttnObserver) {
+	if device && obs == nil && attnCap == 0 && W != 0 && P >= prefillAttnDeviceMinRows && hd > 0 && w%hd == 0 && grp > 0 {
+		nKV, kvLen := w/hd, base+P
+		if nKV*grp == nH && len(Kl) >= kvLen*w && len(Vl) >= kvLen*w && metalgemm.PrefillAttentionSupported(hd, nH, nKV) {
+			if _, err := metalgemm.PrefillAttention(attnOut, Q, Kl[:kvLen*w], Vl[:kvLen*w], P, kvLen, nH, nKV, hd, W, scale); err == nil {
+				return
+			}
+			s.recordMetalFallback(MetalFallbackPrefillAttentionCPU)
+		}
+	}
+	attnPrefillInto(attnOut, Q, Kl, Vl, P, base, nH, hd, w, grp, W, layer, scale, attnCap, scoreDot, obs)
 }
 
 // saxpy does out += a*x over the full length of out (== len(x)). Split into 8 independent

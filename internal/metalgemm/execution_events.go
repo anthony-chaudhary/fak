@@ -28,6 +28,7 @@ const (
 	ExecutionQ4KFusedMLP            ExecutionOperation = "q4_k-fused-mlp"
 	ExecutionQ4KFusedMLPQ6Down      ExecutionOperation = "q4_k-fused-mlp-q6_k-down"
 	ExecutionQ4KFusedMLPQ6DownBatch ExecutionOperation = "q4_k-fused-mlp-q6_k-down-batch"
+	ExecutionPrefillAttention       ExecutionOperation = "prefill-attention"
 )
 
 // ExecutionEventsUnavailableError reports that this build cannot observe Metal execution.
