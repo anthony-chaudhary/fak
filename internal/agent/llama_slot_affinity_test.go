@@ -40,7 +40,6 @@ func waitSlotsDiscovered(t *testing.T, base string, want int64) {
 //
 // fak-test:runtime fast est=300ms
 func TestLlamaSlotAffinityPinsSharedPrefixToOneSlot(t *testing.T) {
-	t.Setenv("FAK_LLAMA_SLOT_AFFINITY", "")
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/props" {
 			_, _ = w.Write([]byte(`{"total_slots":4}`))
@@ -81,7 +80,6 @@ func TestLlamaSlotAffinityPinsSharedPrefixToOneSlot(t *testing.T) {
 //
 // fak-test:runtime fast est=300ms
 func TestLlamaSlotAffinityOmittedForNonLlamaUpstream(t *testing.T) {
-	t.Setenv("FAK_LLAMA_SLOT_AFFINITY", "")
 	probed := make(chan struct{}, 4)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/props" {
@@ -103,5 +101,41 @@ func TestLlamaSlotAffinityOmittedForNonLlamaUpstream(t *testing.T) {
 	}
 	if body := slotTestBody(t, p, msgs, nil); body["id_slot"] != nil || body["cache_prompt"] != nil {
 		t.Fatalf("llama-only fields sent to a non-llama upstream: %s %s", body["id_slot"], body["cache_prompt"])
+	}
+}
+
+// TestLlamaSlotAffinityOffByDefaultNeverProbes: a planner that did not opt in sends no
+// /props request, so a generic OpenAI-compatible upstream (and every test fake that counts
+// requests or asserts the path) sees only the chat call.
+//
+// fak-test:runtime fast est=50ms
+func TestLlamaSlotAffinityOffByDefaultNeverProbes(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected upstream request %s %s", r.Method, r.URL.Path)
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(ts.Close)
+	p := &HTTPPlanner{Provider: ProviderOpenAI, BaseURL: ts.URL + "/v1", ModelID: "m"}
+	msgs := []Message{{Role: RoleSystem, Content: "s"}, {Role: RoleUser, Content: "u"}}
+	if body := slotTestBody(t, p, msgs, nil); body["id_slot"] != nil || body["cache_prompt"] != nil {
+		t.Fatalf("llama-only fields sent without opt-in: %s %s", body["id_slot"], body["cache_prompt"])
+	}
+	if _, started := llamaSlotRegistry.Load(p.BaseURL); started {
+		t.Fatal("slot discovery started for a planner that did not opt in")
+	}
+}
+
+// TestLlamaSlotAffinityIgnoresFakGatewayProps: a fak gateway answers /props with its
+// admission cap as total_slots, tagged fak_total_slots_source. That is not a llama-server
+// slot, so an opted-in planner pointed at a fak gateway never pins.
+//
+// fak-test:runtime fast est=50ms
+func TestLlamaSlotAffinityIgnoresFakGatewayProps(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"total_slots":4,"fak_total_slots_source":"gateway AdmissionPolicy.MaxNumSeqs"}`))
+	}))
+	t.Cleanup(ts.Close)
+	if got := probeLlamaTotalSlots(ts.URL+"/v1", ""); got != 0 {
+		t.Fatalf("fak gateway /props read as %d llama slots, want 0", got)
 	}
 }

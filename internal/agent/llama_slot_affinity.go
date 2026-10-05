@@ -6,7 +6,6 @@ import (
 	"hash/crc32"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,11 +21,17 @@ import (
 // cache_prompt:true reuses it. Measured on a Strix appliance: parent-first N=4 reuse went
 // from 1/4 to 4/4 children.
 //
+// Opt-in: only a planner with LlamaSlotAffinity set ever probes. The zero value — every
+// generic OpenAI-compatible client, hosted provider, and test fake upstream — sends no
+// extra /props request; `fak serve` sets it for its proxy upstream (--llama-slot-affinity).
+//
 // Safety: the hint is added ONLY after the upstream's /props answered with total_slots
 // (a llama-server fact). Until then — and for vLLM, SGLang, or hosted OpenAI, which never
-// answer it — the body is unchanged, because an unknown field can be rejected. Discovery
+// answer it — the body is unchanged, because an unknown field can be rejected. A fak
+// gateway also answers /props with total_slots (its admission cap, tagged
+// fak_total_slots_source); that answer is not a llama-server slot and is ignored. Discovery
 // runs in a background goroutine and never blocks a request. Keys the operator already set
-// through ExtraBody or guided decode win. FAK_LLAMA_SLOT_AFFINITY=0 disables it.
+// through ExtraBody or guided decode win.
 
 const (
 	llamaSlotProbeTimeout = 2 * time.Second
@@ -45,14 +50,6 @@ var llamaSlotRegistry sync.Map
 
 // llamaSlotHTTPClient is the bounded discovery client; tests may replace it.
 var llamaSlotHTTPClient = &http.Client{Timeout: llamaSlotProbeTimeout}
-
-func llamaSlotAffinityEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_LLAMA_SLOT_AFFINITY"))) {
-	case "0", "off", "false", "no":
-		return false
-	}
-	return true
-}
 
 // llamaPropsURL maps an OpenAI-compatible base (http://h:8080/v1) to llama-server's
 // root /props endpoint.
@@ -108,9 +105,13 @@ func probeLlamaTotalSlots(base, apiKey string) int {
 		return 0
 	}
 	var props struct {
-		TotalSlots int `json:"total_slots"`
+		TotalSlots     int    `json:"total_slots"`
+		FakSlotsSource string `json:"fak_total_slots_source"`
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&props) != nil {
+		return 0
+	}
+	if props.FakSlotsSource != "" {
 		return 0
 	}
 	return props.TotalSlots
@@ -136,10 +137,10 @@ func llamaPrefixSlot(messages []Message, tools []ToolDef, slots int64) int64 {
 }
 
 // withLlamaSlotAffinity returns extra with id_slot and cache_prompt added when the
-// upstream is a discovered llama-server; otherwise extra unchanged (and discovery kicked
-// off in the background).
+// planner opted in and the upstream is a discovered llama-server; otherwise extra
+// unchanged (an opted-in planner kicks discovery off in the background).
 func (p *HTTPPlanner) withLlamaSlotAffinity(extra json.RawMessage, messages []Message, tools []ToolDef) json.RawMessage {
-	if p == nil || p.Provider != ProviderOpenAI || strings.TrimSpace(p.BaseURL) == "" || !llamaSlotAffinityEnabled() {
+	if p == nil || !p.LlamaSlotAffinity || p.Provider != ProviderOpenAI || strings.TrimSpace(p.BaseURL) == "" {
 		return extra
 	}
 	st := llamaSlotStateFor(p.BaseURL)
