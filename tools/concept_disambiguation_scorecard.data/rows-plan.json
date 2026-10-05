@@ -175,6 +175,22 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "plan-evaluatecandidate",
+      "canonical": "EvaluateCandidate (candidate-adjudication verb)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The per-domain candidate-ADJUDICATION verb that scores one staged candidate against its baseline: strix's StrixCandidateRegistry.EvaluateCandidate turns an ablation arm into PROMOTED/NEUTRAL/REGRESSED, docfreshrsi's EvaluateCandidate measures one README fragment against an isolated base clone, and conceptbench's EvaluateCandidate applies a floor threshold.",
+      "distinction": "The verb that SCORES a staged candidate against a baseline - NOT the Candidate being scored (candidate-planner) and NOT the Strix hardware-validation source archive the builder stages (plan-candidatearchive).",
+      "distinct_from": ["candidate-planner", "plan-candidatearchive"],
+      "aliases": [],
+      "grounding": "EvaluateCandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }
