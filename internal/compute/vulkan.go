@@ -48,9 +48,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/anthony-chaudhary/fak/internal/compute/strix"
+	"github.com/anthony-chaudhary/fak/internal/computetrace"
 )
 
 var vulkanMu sync.Mutex
@@ -1763,9 +1765,33 @@ func (v *vulkanBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
 	}
 }
 
+// MatMul dispatches the decode GEMV on the device. The kernel-event emission
+// point lives here, not in the per-dtype q*kMatMulLocked helpers, because this
+// is the single function every weight dtype and every dispatch shape funnels
+// through: one event per MatMul, so a dispatch can never be double-counted, and
+// a kernel that ran is always reported.
+//
+// The device timing is resolved BEFORE the dispatch is recorded into the command
+// buffer, from the fail-closed performance-query surface only. This shim exposes
+// no per-dispatch performance-query counter read, so on today's devices the
+// honest verdict is the typed-unavailable marker — never a host-monotonic
+// number wearing a device timer domain.
 func (v *vulkanBackend) MatMul(w, x Tensor) Tensor {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
+	emitKernel := computetrace.Emitting()
+	var kernelStarted time.Time
+	var kernelTiming vulkanKernelTiming
+	if emitKernel {
+		kernelStarted = time.Now()
+		kernelTiming = vulkanKernelTimingFrom(ObservePhasePerformanceQuery(v), vulkanKernelPhase, nil)
+	}
+	defer func() {
+		if !emitKernel {
+			return
+		}
+		recordVulkanMatMulKernel(v.Name(), w, x, kernelStarted, kernelTiming)
+	}()
 	if w.Dtype == Q6_K {
 		v.validateQ6KMatMulInputs(w, x, 1)
 	}

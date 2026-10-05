@@ -141,7 +141,7 @@ func (kr *kernelRegistry) write(w io.Writer) {
 	}
 
 	helpType(w, MetricKernelSeconds,
-		"Duration of one observed kernel call in seconds, by bounded (kernel, backend, timer_domain). timer_domain names the clock the producer measured on (host_monotonic, cuda_event, metal_command_buffer).",
+		"Duration of one observed kernel call in seconds, by bounded (kernel, backend, timer_domain). timer_domain names the clock the producer measured on: host_monotonic (host reference), cuda_event (CUDA), metal_command_buffer (Metal), vulkan_performance_query (a device-measured RADV/Vulkan performance-query counter), vulkan_performance_query_unavailable (a Vulkan kernel that RAN but whose device timer could not be read — the count is real, the duration is not a measurement).",
 		"histogram")
 	for _, k := range keys {
 		kr.agg(k).seconds.write(w, MetricKernelSeconds, k.histogramLabels())
@@ -152,7 +152,7 @@ func (kr *kernelRegistry) write(w io.Writer) {
 		observed = 1
 	}
 	helpType(w, MetricKernelObserved,
-		"1 only when a kernel observer is genuinely attached AND fed at least one real kernel event; 0 means the sub-kernel producer is ABSENT, never that zero kernels ran. A device backend reports only while compute tracing is enabled, so 0 with no CPU-reference series is the expected reading on a device-only serve.",
+		"1 only when a kernel observer is genuinely attached AND fed at least one real kernel event; 0 means the sub-kernel producer is ABSENT, never that zero kernels ran. A device backend reports whenever a kernel observer is attached (CUDA, Metal and Vulkan), so on a device-only serve a wired-but-silent producer is what a 0 indicates; 0 with NO series at all means nothing is emitting.",
 		"gauge")
 	writeString(w, MetricKernelObserved+" "+strconv.Itoa(observed)+"\n")
 

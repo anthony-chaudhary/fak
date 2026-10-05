@@ -273,3 +273,20 @@ func Enabled() bool {
 	defer active.RUnlock()
 	return active.recorder != nil && active.recorder.Enabled()
 }
+
+// Emitting reports whether an Event would reach ANY sink: the artifact recorder
+// is enabled OR a process observer is attached. Enabled() is deliberately NOT
+// widened to cover the observer case — it also gates the bounded
+// activation-sample capture on the decode hot path
+// (internal/model/v41_activation_trace.go), which must stay opt-in behind the
+// `fak computetrace` recorder.
+//
+// Use Emitting() only at an emission point whose per-call work is a nil check
+// plus a struct copy (an event the producer already builds, or one whose
+// measurement it takes anyway). Use Enabled() for anything that captures
+// samples, tensors, or per-GEMM device timing.
+func Emitting() bool {
+	active.RLock()
+	defer active.RUnlock()
+	return (active.recorder != nil && active.recorder.Enabled()) || active.observer != nil
+}
