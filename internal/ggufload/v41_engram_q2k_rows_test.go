@@ -269,16 +269,20 @@ func TestV41EngramDiskRowSource(t *testing.T) {
 		stats.BytesRead, stats.UsefulBytes, stats.PageAmplification)
 
 	if stats.Hits < 1 {
-		t.Fatalf("stats.Hits = %d, want >= 1 (the repeated row 2 must be a cache hit)", stats.Hits)
+		t.Fatalf("stats.Hits = %d, want >= 1 (a retained or prefetched repeat must be a cache hit)", stats.Hits)
 	}
 	// Page amplification is bytes read from the source divided by useful bytes
-	// served to the caller; it is finite and >= 1 for any honest source (a source
-	// can never read fewer bytes than it serves).
+	// served to the caller. With demand retention (fak#13703) a hit serves a row
+	// without reading it, so useful served can EXCEED bytes read and the ratio can
+	// be below 1 (a resident hit is the whole point). Require only that it is the
+	// real recomputed ratio and strictly positive — never a vacuous constant.
 	if stats.PageAmplification <= 0 {
 		t.Fatalf("PageAmplification = %v, want > 0", stats.PageAmplification)
 	}
-	if stats.PageAmplification < 1 {
-		t.Fatalf("PageAmplification = %v, want >= 1 (bytes read / useful bytes)", stats.PageAmplification)
+	want := float64(stats.BytesRead) / float64(stats.UsefulBytes)
+	if diff := stats.PageAmplification - want; diff > 1e-9 || diff < -1e-9 {
+		t.Fatalf("PageAmplification = %v, want %v (BytesRead %d / UsefulBytes %d)",
+			stats.PageAmplification, want, stats.BytesRead, stats.UsefulBytes)
 	}
 }
 

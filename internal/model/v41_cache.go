@@ -249,6 +249,13 @@ func (c *V41EngramRowCache) Row(idx int) ([]byte, error) {
 	c.stats.BytesServed += int64(n)
 	c.stats.UsefulBytes += int64(n)
 
+	// Retain the row the caller just faulted so a revisit is a RAM hit, not another
+	// shard read (fak#13703). The inner cache owns a copy and admits the payload only
+	// within BudgetBytes, so this cannot grow residency beyond the declared bound; if
+	// the single row exceeds the whole budget, Put refuses and the row still returns.
+	// This is the demand-path counterpart to prefetch's look-ahead Put.
+	_ = c.inner.Put(0, idx, row)
+
 	if c.opts.PrefetchRows > 0 {
 		c.prefetch(idx)
 	}

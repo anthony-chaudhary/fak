@@ -333,3 +333,82 @@ func TestV41CacheGeometryFromConfig(t *testing.T) {
 		t.Fatal("out-of-range index returned nil error")
 	}
 }
+
+// TestV41EngramRowCacheDemandRetention pins the bounded defect of fak#13703: on a
+// demand miss the row cache reads the row, returns it, and never stores it, so a
+// second demand for the same row is another miss and another source read. The row
+// the caller just paid to fault must be retained in the bounded inner cache, so a
+// revisit is a RAM hit. Residency stays bounded by BudgetBytes; an evicted row is
+// re-faulted rather than served stale.
+func TestV41EngramRowCacheDemandRetention(t *testing.T) {
+	const rowBytes = 16
+
+	// (1) The demanded row is retained: a second Row(idx) is a hit with no new read.
+	t.Run("second demand is a hit", func(t *testing.T) {
+		src := &v41CacheFakeEngram{rows: 64, rowBytes: rowBytes}
+		c, err := NewV41EngramRowCache(src, V41EngramRowCacheOptions{
+			TableRows: 64, RowBytes: rowBytes, BudgetBytes: rowBytes * 8,
+		})
+		if err != nil {
+			t.Fatalf("NewV41EngramRowCache: %v", err)
+		}
+		if _, err := c.Row(0); err != nil {
+			t.Fatalf("Row(0) first: %v", err)
+		}
+		readsAfterFirst := src.reads
+		if readsAfterFirst != 1 {
+			t.Fatalf("first demand reads=%d want exactly 1", readsAfterFirst)
+		}
+		got, err := c.Row(0)
+		if err != nil {
+			t.Fatalf("Row(0) second: %v", err)
+		}
+		if len(got) != rowBytes || got[0] != 0 {
+			t.Fatalf("Row(0) second payload wrong: len=%d first=%d", len(got), got[0])
+		}
+		if src.reads != readsAfterFirst {
+			t.Fatalf("second demand re-read the source: reads=%d want %d", src.reads, readsAfterFirst)
+		}
+		st := c.Stats()
+		if st.Hits != 1 {
+			t.Fatalf("Hits=%d want 1 (second demand served from cache)", st.Hits)
+		}
+		if st.Misses != 1 {
+			t.Fatalf("Misses=%d want 1 (only the first demand faulted)", st.Misses)
+		}
+	})
+
+	// (2) Residency stays bounded; an evicted demanded row is re-faulted, not stale.
+	t.Run("evicted demand is re-faulted", func(t *testing.T) {
+		src := &v41CacheFakeEngram{rows: 64, rowBytes: rowBytes}
+		c, err := NewV41EngramRowCache(src, V41EngramRowCacheOptions{
+			TableRows: 64, RowBytes: rowBytes, BudgetBytes: rowBytes, // exactly one resident row
+		})
+		if err != nil {
+			t.Fatalf("NewV41EngramRowCache: %v", err)
+		}
+		// First demand faults row 0; the immediate revisit is a hit.
+		if _, err := c.Row(0); err != nil {
+			t.Fatalf("Row(0): %v", err)
+		}
+		if _, err := c.Row(0); err != nil {
+			t.Fatalf("Row(0) revisit: %v", err)
+		}
+		if src.reads != 1 {
+			t.Fatalf("reads=%d want 1 (revisit must be a hit)", src.reads)
+		}
+		// Row 1 fits only by evicting row 0; the subsequent revisit of 0 re-faults.
+		if _, err := c.Row(1); err != nil {
+			t.Fatalf("Row(1): %v", err)
+		}
+		if _, err := c.Row(0); err != nil {
+			t.Fatalf("Row(0) after eviction: %v", err)
+		}
+		if src.reads != 3 {
+			t.Fatalf("reads=%d want 3 (row 0 evicted then re-faulted)", src.reads)
+		}
+		if got := c.inner.Stats().ResidentEntries; got > 1 {
+			t.Fatalf("resident entries=%d exceed the 1-row budget", got)
+		}
+	})
+}
