@@ -118,6 +118,18 @@ func TestServerConstructionAttachesTheStepObservers(t *testing.T) {
 	if got := stepobs.Default.Snapshot().KernelEvents; got != before+1 {
 		t.Fatalf("kernel events after one compute-trace record = %d, want %d", got, before+1)
 	}
+
+	// The sub-planner half needs the same INVOKED proof, and it is the half that was
+	// unwitnessed. enginestep keeps its observer set private, so "an observer exists" is
+	// not observable from here — the honest oracle is the same call internal/agent's
+	// planner makes, on the same process recorder the planner feeds, moving the
+	// planner-step registry. (internal/agent/planner_stepobs_wiring_test.go drives the
+	// real InKernelPlanner.Complete that ends at this seam.)
+	seatBefore := stepobs.Default.Snapshot().PlannerEvents[string(stepobs.StepKindSeat)]
+	enginestep.Default.ObservePhase(enginestep.PhaseDeviceWait, time.Second)
+	if got := stepobs.Default.Snapshot().PlannerEvents[string(stepobs.StepKindSeat)]; got != seatBefore+1 {
+		t.Fatalf("seat legs after one device_wait on the process recorder = %d, want %d; gateway.New left the sub-planner seam unwired", got, seatBefore+1)
+	}
 }
 
 // TestComputeTraceObserverDoesNotChangeTraceSemantics pins that attaching an observer

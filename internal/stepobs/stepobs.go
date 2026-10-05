@@ -49,9 +49,22 @@ import (
 // StepKind classifies one planner-step leg. The vocabulary is CLOSED and identical to
 // metrics.MicroSpanKind — the span vocabulary already in the tree — so the planner-step
 // family labels read the same whether the leg came from a microagent span or from the
-// native serving loop. StepKindForMicroKind is the pin that keeps the two mirrors from
-// drifting; gateway holds the type-to-type bridge because metrics must not import this
-// package (metrics sits below agent, and agent reaches this package).
+// native serving loop. TestStepKindVocabularyTracksMicroSpanKind in internal/gateway is
+// the pin that keeps the two mirrors from drifting, in both directions; gateway holds the
+// type-to-type bridge because metrics must not import this package (metrics sits below
+// agent, and agent reaches this package).
+//
+// ONE PRODUCER PER KIND is the invariant, so a leg is never paid for twice and two
+// conventions never compete over what "one planner step" means:
+//
+//   - step, seat, admission are produced by internal/enginestep. Attach installs the phase
+//     projection below and internal/gateway installs the decode-step observer, so a real
+//     InKernelPlanner.Complete reaches this registry with no per-request plumbing.
+//   - tool, verdict are produced by a completed MicroSpanScope leg, whose store is
+//     per-instance. The only producer on the tree today is the opt-in `fak micro` host
+//     (cmd/fak/micro.go), so on a plain `fak serve` these two render an honest 0 beside a
+//     real step value. That is ABSENCE, not idle — every kind is always rendered, and
+//     fak_engine_planner_step_observed reports "some leg flowed", not "this leg flowed".
 type StepKind string
 
 const (
@@ -398,6 +411,17 @@ func (h *histogram) write(w io.Writer, name, labels string) {
 // The mapping is deliberately partial. Phases that are sub-legs of a step (prefix lookup,
 // prefix admit) and the whole-request envelope have no MicroSpanKind counterpart, so
 // they read on fak_engine_phase_seconds only.
+//
+// KNOWN, MEASURED, NOT YET RESOLVED: the three phases mapped here are three different
+// granularities under one kind label. On a four-token CPU-reference turn a single
+// InKernelPlanner.Complete folds prefill (one chunked prompt forward) + decode (one
+// request's WHOLE decode loop) + sample (one token, four times) into kind="step", while
+// internal/gateway's decode-step observer folds the four individual forwards into the
+// same label. A kind="step" quantile therefore mixes seconds with milliseconds. Making
+// kind="step" mean exactly one model turn is a metric-contract change to an already
+// rendered family and board, so it is deliberately NOT taken here; read kind="step" as
+// "a model-turn-shaped leg" and use fak_engine_phase_seconds{phase=...} plus
+// fak_engine_decode_step_seconds{path=...} for per-granularity latency.
 func StepKindForEnginePhase(p enginestep.Phase) (StepKind, bool) {
 	switch p {
 	case enginestep.PhasePrefill, enginestep.PhaseDecode, enginestep.PhaseSample:

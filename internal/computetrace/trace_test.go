@@ -50,6 +50,49 @@ func TestReadRejectsUnknownSchema(t *testing.T) {
 	}
 }
 
+// TestEmittingDoesNotWidenEnabled is the trap pin for the new Emitting predicate:
+// attaching a metrics observer must make Emitting() true WITHOUT making Enabled()
+// true, because Enabled() also gates the bounded activation-sample capture on the
+// decode hot path (internal/model/v41_activation_trace.go). Widening it would
+// silently switch on activation sampling for every device forward.
+func TestEmittingDoesNotWidenEnabled(t *testing.T) {
+	SetObserver(nil)
+	if Emitting() {
+		t.Fatal("Emitting() is true with neither a recorder nor an observer attached")
+	}
+
+	var seen int
+	SetObserver(func(Event) { seen++ })
+	if !Emitting() {
+		t.Fatal("Emitting() is false with an observer attached")
+	}
+	if Enabled() {
+		t.Fatal("Enabled() became true from an observer alone; the decode-hot-path activation-sample gate was widened")
+	}
+	Record(Event{Operation: "matmul", Phase: "kernel", Backend: "vulkan", TimerDomain: "vulkan_performance_query"})
+	if seen != 1 {
+		t.Fatalf("observer saw %d events; want exactly 1", seen)
+	}
+
+	SetObserver(nil)
+	if Emitting() {
+		t.Fatal("Emitting() is true after the observer was detached")
+	}
+
+	rec, disable := Enable(1, "run", "request")
+	defer disable()
+	if !Emitting() || !Enabled() {
+		t.Fatalf("Emitting()=%v Enabled()=%v with a recorder enabled; want both true", Emitting(), Enabled())
+	}
+	disable()
+	if Emitting() {
+		t.Fatal("Emitting() is true after the recorder was disabled and no observer is attached")
+	}
+	if len(rec.Artifact().Events) != 0 {
+		t.Fatal("the recorder retained an event after it was disabled")
+	}
+}
+
 func TestEventMetalFieldsJSONRoundTrip(t *testing.T) {
 	want := Event{Route: "metal_command_buffer", DeviceDurationNS: 1234, InputDType: "f32", WeightDType: "f16", OutputDType: "f32", BytesRead: 4096, BytesWritten: 1024, EstimatedFLOPs: 8192}
 	encoded, err := json.Marshal(want)
