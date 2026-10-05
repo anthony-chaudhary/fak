@@ -46,16 +46,30 @@ func init() {
 	if name == "go" {
 		forbidden("compile a fallback verifier")
 	}
-	prepushExtractTip = func(string, string) (string, error) { forbidden("archive"); return "", nil }
-	prepushListGraph = func(string) (map[string]string, map[string][]string, int, error) {
-		forbidden("list graph")
-		return nil, nil, 0, nil
+	normalBuild := os.Getenv("FAK_FOCUSED_PREPUSH_NORMAL_BUILD") == "1"
+	if normalBuild {
+		// Exercise the real hook and range admission with only compilation
+		// stubbed. No compiler or archive is needed for the protocol witness.
+		prepushExtractTip = func(string, string) (string, error) { return os.MkdirTemp("", "prepush-protocol-") }
+		prepushListGraph = func(string) (map[string]string, map[string][]string, int, error) {
+			return map[string]string{"internal/demo/demo.go": "./internal/demo"}, nil, 1, nil
+		}
+		prepushListTestOnly = func(string, []string) map[string]bool { return nil }
+		prepushBuild = func(string, []string) (string, bool) { return "", true }
+		prepushAcquireBuildSlot = func(bool) (bool, func()) { return true, func() {} }
+		prepushTestQuality = func(io.Writer, io.Writer, []string) int { return 0 }
+	} else {
+		prepushExtractTip = func(string, string) (string, error) { forbidden("archive"); return "", nil }
+		prepushListGraph = func(string) (map[string]string, map[string][]string, int, error) {
+			forbidden("list graph")
+			return nil, nil, 0, nil
+		}
+		prepushListTestOnly = func(string, []string) map[string]bool { forbidden("list test-only"); return nil }
+		prepushBuild = func(string, []string) (string, bool) { forbidden("build"); return "", false }
+		prepushAcquireBuildSlot = func(bool) (bool, func()) { forbidden("build slot"); return false, func() {} }
+		prepushSuccessCommonDir = func(string) string { forbidden("full-build receipt/claim"); return "" }
+		prepushTestQuality = func(io.Writer, io.Writer, []string) int { forbidden("live test-quality scan"); return 2 }
 	}
-	prepushListTestOnly = func(string, []string) map[string]bool { forbidden("list test-only"); return nil }
-	prepushBuild = func(string, []string) (string, bool) { forbidden("build"); return "", false }
-	prepushAcquireBuildSlot = func(bool) (bool, func()) { forbidden("build slot"); return false, func() {} }
-	prepushSuccessCommonDir = func(string) string { forbidden("full-build receipt/claim"); return "" }
-	prepushTestQuality = func(io.Writer, io.Writer, []string) int { forbidden("live test-quality scan"); return 2 }
 	args := os.Args[1:]
 	if len(args) >= 2 && args[0] == "hooks" {
 		switch args[1] {
@@ -67,6 +81,20 @@ func init() {
 	}
 	fmt.Fprintln(os.Stderr, "FOCUSED_UNEXPECTED_COMMAND", args)
 	os.Exit(92)
+}
+
+func prepushHookUnderTest(t *testing.T) string {
+	t.Helper()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Go tests run from their package directory, including committed archives.
+	hook := filepath.Clean(filepath.Join(cwd, "..", "..", "tools", "githooks", "pre-push"))
+	if info, err := os.Stat(hook); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("real hook unavailable at %s: %v", hook, err)
+	}
+	return hook
 }
 
 // fak-test:runtime medium est=8s lane=default
@@ -84,22 +112,7 @@ func TestPrepushFocusedBuildOffGuards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("real pre-push regression requires a POSIX shell: %v", err)
 	}
-	// Resolve the tested checkout, not runtime.Caller's possibly trimmed source
-	// name or the temporary Git fixture. Native landing builds use -trimpath.
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	rootOut, err := windowgate.CommandContext(ctx, "git", "-C", cwd, "rev-parse", "--show-toplevel").CombinedOutput()
-	if err != nil {
-		t.Fatalf("locate tested checkout: %v\n%s", err, rootOut)
-	}
-	hook := filepath.Join(strings.TrimSpace(string(rootOut)), "tools", "githooks", "pre-push")
-	if info, err := os.Stat(hook); err != nil || !info.Mode().IsRegular() {
-		t.Fatalf("real hook unavailable at %s: %v", hook, err)
-	}
+	hook := prepushHookUnderTest(t)
 	zero := strings.Repeat("0", len(f.base))
 	row := func(tip, base string) string { return "refs/heads/main " + tip + " refs/heads/main " + base + "\n" }
 	cases := []struct {
@@ -310,10 +323,24 @@ func (f focusedFixture) run(t *testing.T, executable string, args []string, inpu
 	if path == "" {
 		path = f.bin + string(os.PathListSeparator) + os.Getenv("PATH")
 	}
+	buildMode := "off"
+	if os.Getenv("FAK_FOCUSED_PREPUSH_NORMAL_BUILD") == "1" {
+		buildMode = "block"
+		cmd.Env = append(cmd.Env, "FAK_FOCUSED_PREPUSH_NORMAL_BUILD=1")
+	}
+	workflowMode, tierMode, popupMode, reviewMode := "off", "off", "off", "off"
+	if os.Getenv("FAK_FOCUSED_PREPUSH_ALL_CONTENT_GATES") == "1" {
+		workflowMode, tierMode, popupMode, reviewMode = "block", "block", "block", "block"
+	}
+	refpruneMode := "off"
+	if limit := os.Getenv("FAK_FOCUSED_PREPUSH_REFPRUNE_MAX"); limit != "" {
+		refpruneMode = "block"
+		cmd.Env = append(cmd.Env, "FLEET_REFPRUNE_MAX="+limit)
+	}
 	cmd.Env = append(cmd.Env, focusedHelperEnv+"=1", "FAK_FOCUSED_PREPUSH_TRACE="+trace,
 		"PATH="+path,
-		"FLEET_BUILD_GUARD=off", "FLEET_WORKFLOW_GUARD=off", "FLEET_TIER_GUARD=off",
-		"FLEET_POPUP_GUARD=off", "FLEET_REVIEW_GUARD=off", "FLEET_REFPRUNE_GUARD=off")
+		"FLEET_BUILD_GUARD="+buildMode, "FLEET_WORKFLOW_GUARD="+workflowMode, "FLEET_TIER_GUARD="+tierMode,
+		"FLEET_POPUP_GUARD="+popupMode, "FLEET_REVIEW_GUARD="+reviewMode, "FLEET_REFPRUNE_GUARD="+refpruneMode)
 	out, err := cmd.CombinedOutput()
 	code := 0
 	if err != nil {
@@ -374,4 +401,48 @@ func focusedCallCount(calls [][]string, command string, flagValues ...string) in
 		}
 	}
 	return count
+}
+
+// fak-test:runtime medium est=8s lane=default
+func TestPrepushNormalBuildUsesExactProtocolBases(t *testing.T) {
+	t.Setenv("FAK_FOCUSED_PREPUSH_NORMAL_BUILD", "1")
+	f := newFocusedFixture(t)
+	shell := gitHookShell(t)
+	hook := prepushHookUnderTest(t)
+	// A stale tracking ref must never replace either protocol base. Two
+	// destinations may send the same tip against different remote old objects.
+	f.git(t, "update-ref", "refs/remotes/origin/main", f.good)
+	row := func(base string) string { return "refs/heads/main " + f.good + " refs/heads/main " + base + "\n" }
+	zero := strings.Repeat("0", len(f.base))
+	out, code, calls := f.run(t, shell, []string{hook}, row(f.base)+row(f.introduced)+row(zero))
+	if code != 0 {
+		t.Fatalf("normal build code=%d\n%s", code, out)
+	}
+	for _, base := range []string{f.base, f.introduced, zero} {
+		if focusedCallCount(calls, "pre-push", "--base", base, "--tip", f.good) != 1 {
+			t.Fatalf("exact old:new pair missing or duplicated: base=%s calls=%v", base, calls)
+		}
+	}
+	out, code, calls = f.run(t, shell, []string{hook}, "refs/heads/main "+zero+" refs/heads/main "+f.good+"\n")
+	if code != 0 || focusedCallCount(calls, "pre-push") != 0 {
+		t.Fatalf("deletion compiled dirty HEAD: code=%d calls=%v\n%s", code, calls, out)
+	}
+}
+
+// fak-test:runtime medium est=2s lane=default
+func TestPrepushDeletionOnlySkipsAllContentGatesButRetainsRefPolicy(t *testing.T) {
+	t.Setenv("FAK_FOCUSED_PREPUSH_NORMAL_BUILD", "1")
+	t.Setenv("FAK_FOCUSED_PREPUSH_ALL_CONTENT_GATES", "1")
+	f := newFocusedFixture(t)
+	hook := prepushHookUnderTest(t)
+	row := "refs/heads/main " + strings.Repeat("0", len(f.badImport)) + " refs/heads/main " + f.badImport + "\n"
+	out, code, calls := f.run(t, gitHookShell(t), []string{hook}, row)
+	if code != 0 || len(calls) != 0 {
+		t.Fatalf("deletion ran content checks: code=%d calls=%v\n%s", code, calls, out)
+	}
+	t.Setenv("FAK_FOCUSED_PREPUSH_REFPRUNE_MAX", "0")
+	out, code, calls = f.run(t, gitHookShell(t), []string{hook}, row)
+	if code != 1 || len(calls) != 0 || !strings.Contains(out, "REF_PRUNE (blocked)") {
+		t.Fatalf("deletion lost ref policy: code=%d calls=%v\n%s", code, calls, out)
+	}
 }

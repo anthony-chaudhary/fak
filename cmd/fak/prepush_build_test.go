@@ -871,15 +871,15 @@ func TestClaimPrepushTipCoalescesOnIndependentSuccess(t *testing.T) {
 		prepushSuccessCommonDir, prepushSuccessSleep = oldCommonDir, oldSleep
 	})
 
-	owner, release := claimPrepushTip("repo", "same-tip", time.Now)
-	if !owner {
-		t.Fatal("first claimant was not owner")
+	owner, release, claimErr := claimPrepushTip("repo", "same-tip", time.Now)
+	if claimErr != nil || !owner {
+		t.Fatalf("first claimant was not owner: %v", claimErr)
 	}
 	defer release()
-	coalescedOwner, coalescedRelease := claimPrepushTip("repo", "same-tip", time.Now)
+	coalescedOwner, coalescedRelease, coalescedErr := claimPrepushTip("repo", "same-tip", time.Now)
 	coalescedRelease()
-	if coalescedOwner {
-		t.Fatal("same-tip waiter reran gate after witnessed success")
+	if coalescedErr != nil || coalescedOwner {
+		t.Fatalf("same-tip waiter reran gate after witnessed success: %v", coalescedErr)
 	}
 }
 
@@ -891,8 +891,11 @@ func TestPrepushClaimHelper(t *testing.T) {
 		return
 	}
 	root, tip := os.Getenv("GO_PREPUSH_CLAIM_ROOT"), os.Getenv("GO_PREPUSH_CLAIM_TIP")
-	owner, release := claimPrepushTip(root, tip, time.Now)
+	owner, release, claimErr := claimPrepushTip(root, tip, time.Now)
 	defer release()
+	if claimErr != nil {
+		t.Fatal(claimErr)
+	}
 	switch mode {
 	case "owner":
 		if !owner {
@@ -1438,5 +1441,47 @@ func TestPrepushReceiptTruthfulness(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.check(newPrepushReceiptTruthFixture(t, tc.treatment))
 		})
+	}
+}
+
+// fak-test:runtime fast est=20ms lane=default
+func TestPrepushClaimWaitPreservesOwnerAndReleasePreservesSuccessor(t *testing.T) {
+	commonDir := t.TempDir()
+	oldCommonDir, oldSleep := prepushSuccessCommonDir, prepushSuccessSleep
+	prepushSuccessCommonDir = func(string) string { return commonDir }
+	now := time.Now()
+	prepushSuccessSleep = func(time.Duration) { now = now.Add(prepushClaimWaitBudget) }
+	t.Cleanup(func() { prepushSuccessCommonDir, prepushSuccessSleep = oldCommonDir, oldSleep })
+	owner, release, err := claimPrepushTipWithReuse("repo", "tip", func() time.Time { return now }, func() bool { return false })
+	if err != nil || !owner {
+		t.Fatalf("owner: %v %v", owner, err)
+	}
+	defer release()
+	path := prepushClaimPath("repo", "tip")
+	// Even an apparently old claim is preserved: age is not owner death.
+	old := now.Add(-time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	owner, done, err := claimPrepushTipWithReuse("repo", "tip", func() time.Time { return now }, func() bool { return false })
+	done()
+	if owner || err == nil || !strings.Contains(err.Error(), "PREPUSH_WAIT_TIMEOUT") {
+		t.Fatalf("contended claim: owner=%v err=%v", owner, err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("waiter removed owner claim: %v", err)
+	}
+	// Simulate a legacy claimant replacing the path. The old open inode's
+	// release must preserve the successor, even after repeated release calls.
+	if err := os.Rename(path, path+".old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("successor\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	release()
+	if got, err := os.ReadFile(path); err != nil || string(got) != "successor\n" {
+		t.Fatalf("old release removed successor: %q %v", got, err)
 	}
 }

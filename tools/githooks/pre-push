@@ -48,7 +48,7 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 push_updates="$(cat)"
 # Focused structural admission needs complete, exact Git protocol rows. Refuse
 # malformed input before any child can inspect only a valid prefix of the push.
-if [ "${FLEET_BUILD_GUARD:-block}" = "off" ] && [ "${FLEET_ALLOW_BUILD_BREAK:-0}" != "1" ] && [ -n "$push_updates" ]; then
+if [ -n "$push_updates" ]; then
 	if ! printf '%s\n' "$push_updates" | awk '
 		function oid(s) { return (length(s) == 40 || length(s) == 64) && s !~ /[^0-9a-fA-F]/ }
 		NF != 4 || !oid($2) || !oid($4) || length($2) != length($4) { exit 1 }
@@ -174,6 +174,12 @@ if [ "$refprune_mode" != "off" ] && [ "${FLEET_ALLOW_REF_PRUNE:-0}" != "1" ]; th
 	fi
 fi
 
+# Deletion-only updates have no content to compile, lint, scan or review.
+# Keep the remote-ref policy above, then avoid judging unrelated live HEAD/WIP.
+if [ -n "$push_updates" ] && [ -z "$pushed_tips" ]; then
+	exit 0
+fi
+
 # The architest tier table must not drift between pushes. GitHub Actions can report
 # TestEveryPackageDeclaresTier red after a direct push, but the local push boundary is
 # the earliest in-repo place to refuse the same recurrence (#1145). Use `fak hygiene`
@@ -227,8 +233,8 @@ fi
 #   block  refuse the push until the pushed tip compiles           (exit 1)
 #   off    skip compilation but require immutable import and concept admission
 # Escape:  FLEET_ALLOW_BUILD_BREAK=1 git push   always allows.
-# Default is BLOCK for a positively witnessed red pushed tree. Infrastructure/UNKNOWN failures remain fail-open below.
-# Fail-open by design: if `fak`/`go` is unavailable or the gate could-not-run, the push is allowed.
+# Default BLOCK refuses both a red pushed tree and infrastructure/UNKNOWN failures.
+# Warn mode reports either failure without refusing the push.
 build_mode="${FLEET_BUILD_GUARD:-block}"
 
 # Explicit compile-off remains a structural admission path. An unavailable native
@@ -276,7 +282,7 @@ fi
 # without the subcommand (exit 2) or a clean tip (exit 0) just falls through to the full build.
 if [ "$build_mode" != "off" ] && [ "${FLEET_ALLOW_BUILD_BREAK:-0}" != "1" ]; then
 	tips="$pushed_tips"
-	[ -z "$tips" ] && tips="HEAD" # manual invocation compatibility
+	[ -z "$push_updates" ] && tips="HEAD" # manual invocation only
 	for pushed_tip in $tips; do
 		iw_status=0
 		if command -v fak >/dev/null 2>&1; then
@@ -313,14 +319,20 @@ if [ "$build_mode" != "off" ] && [ "${FLEET_ALLOW_BUILD_BREAK:-0}" != "1" ]; the
 	[ "$build_mode" = "warn" ] && build_adv="--advisory"
 	build_out=""
 	build_status=0
-	tips="$pushed_tips"
-	[ -z "$tips" ] && tips="HEAD" # manual invocation compatibility
-	for pushed_tip in $tips; do
+	# Range coverage and receipt reuse must bind to Git's actual remote-old,
+	# rather than a possibly stale origin/<branch>. Keep distinct old:new pairs.
+	build_updates="$(printf '%s\n' "$push_updates" | awk 'NF == 4 && $2 !~ /^0+$/ { print $4 ":" $2 }' | sort -u)"
+	[ -z "$push_updates" ] && build_updates=":HEAD" # manual invocation only
+	for build_update in $build_updates; do
+		build_base="${build_update%%:*}"
+		pushed_tip="${build_update#*:}"
+		# Native progress belongs on the operator stream while the checker runs;
+		# capture stdout verdicts only. Capturing stderr hid waits even on success.
 		if command -v fak >/dev/null 2>&1; then
-			one_out="$(fak hooks pre-push --root "$root" --tip "$pushed_tip" $build_adv 2>&1)"
+			one_out="$(fak hooks pre-push --root "$root" --base "$build_base" --tip "$pushed_tip" $build_adv)"
 			one_status=$?
 		elif command -v go >/dev/null 2>&1; then
-			one_out="$(cd "$root" && go run ./cmd/fak hooks pre-push --root "$root" --tip "$pushed_tip" $build_adv 2>&1)"
+			one_out="$(cd "$root" && go run ./cmd/fak hooks pre-push --root "$root" --base "$build_base" --tip "$pushed_tip" $build_adv)"
 			one_status=$?
 		else
 			one_out="neither 'fak' nor 'go' is on PATH"

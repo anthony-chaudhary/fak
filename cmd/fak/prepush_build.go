@@ -56,7 +56,7 @@ import (
 //     only `go test` exec is OS-blocked).
 //
 // This verb is a DETECTOR, mode-agnostic like `fak hygiene` behind the TIER_DECLARED rung:
-// exit 0 = clean/NOOP, 1 = TRUNK_WOULD_NOT_COMPILE, 2 = could-not-run (fail-open). The
+// exit 0 = clean/NOOP, 1 = TRUNK_WOULD_NOT_COMPILE, 2 = could-not-run (block mode refuses). The
 // tools/githooks/pre-push shell owns the FLEET_BUILD_GUARD block|warn|off mode and the
 // FLEET_ALLOW_BUILD_BREAK one-shot escape — one place, mirroring the other push-seam gates.
 // A slow-but-GREEN build is never a block: a build over FLEET_BUILD_BUDGET reports
@@ -616,7 +616,7 @@ func prepushTreeSuccessReusable(root, tree string, now time.Time) bool {
 	return strings.TrimSpace(tree) != "" && prepushSuccessReusable(root, "tree-"+tree, now)
 }
 
-const prepushClaimStaleAfter = 15 * time.Minute
+const prepushClaimWaitBudget = 30 * time.Second
 
 func prepushClaimPath(root, tip string) string {
 	commonDir := prepushSuccessCommonDir(root)
@@ -626,42 +626,70 @@ func prepushClaimPath(root, tip string) string {
 	return filepath.Join(commonDir, "fak-prepush-"+tip+".lock")
 }
 
-// claimPrepushTip coalesces cross-process checks for the same immutable tip. A waiter
-// returns owner=false only after independently reading the successful receipt written
-// by the owner; owner failure removes the claim and lets one waiter retry the gate.
-func claimPrepushTip(root, tip string, now func() time.Time) (owner bool, release func()) {
+// claimPrepushTip coalesces cross-process checks for the same immutable tip.
+// Contention is bounded and never reclaims a claim by age: a slow owner may still
+// be validating. Keep its file open until release so identity cannot be recycled.
+func claimPrepushTip(root, tip string, now func() time.Time) (bool, func(), error) {
 	return claimPrepushTipWithReuse(root, tip, now, func() bool { return prepushSuccessReusable(root, tip, now()) })
 }
 
-func claimPrepushTipWithReuse(root, tip string, now func() time.Time, reusable func() bool) (owner bool, release func()) {
+func claimPrepushTipWithReuse(root, tip string, now func() time.Time, reusable func() bool, onWait ...func(string)) (bool, func(), error) {
 	path := prepushClaimPath(root, tip)
+	noop := func() {}
 	if path == "" {
-		return true, func() {}
+		return true, noop, nil
 	}
+	deadline := now().Add(prepushClaimWaitBudget)
+	waitReported := false
 	for {
 		if reusable() {
-			return false, func() {}
+			return false, noop, nil
 		}
 		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 		if err == nil {
-			if reusable() {
-				_ = f.Close()
-				_ = os.Remove(path)
-				return false, func() {}
+			info, statErr := f.Stat()
+			var released sync.Once
+			release := func() {
+				released.Do(func() {
+					// Preserve a claim already replaced before this check. This
+					// is not atomic against external legacy age-based unlink;
+					// quiesce legacy verifiers before coordinated rollout.
+					if current, err := os.Stat(path); statErr == nil && err == nil && os.SameFile(info, current) {
+						_ = os.Remove(path)
+					}
+					_ = f.Close()
+				})
 			}
-			_, _ = fmt.Fprintf(f, "%d\n", os.Getpid())
-			_ = f.Close()
-			return true, func() { _ = os.Remove(path) }
+			if statErr != nil {
+				release()
+				return false, noop, fmt.Errorf("inspect pre-push claim: %w", statErr)
+			}
+			if reusable() {
+				release()
+				return false, noop, nil
+			}
+			if _, err := fmt.Fprintf(f, "%d\n", os.Getpid()); err != nil {
+				release()
+				return false, noop, fmt.Errorf("write pre-push claim: %w", err)
+			}
+			return true, release, nil
 		}
 		if !os.IsExist(err) {
-			return true, func() {}
+			return false, noop, fmt.Errorf("acquire pre-push claim: %w", err)
 		}
 		if reusable() {
-			return false, func() {}
+			return false, noop, nil
 		}
-		if info, statErr := os.Stat(path); statErr == nil && now().Sub(info.ModTime()) > prepushClaimStaleAfter {
-			_ = os.Remove(path)
-			continue
+		if !waitReported {
+			for _, report := range onWait {
+				if report != nil {
+					report(fmt.Sprintf("PREPUSH_WAITING: tip %s is being validated by another claimant; waiting up to %s on %s", tip, prepushClaimWaitBudget, path))
+				}
+			}
+			waitReported = true
+		}
+		if !now().Before(deadline) {
+			return false, noop, fmt.Errorf("PREPUSH_WAIT_TIMEOUT: waited %s for tip %s; claim preserved at %s; inspect its owner and retry after validation completes", prepushClaimWaitBudget, tip, path)
 		}
 		prepushSuccessSleep(100 * time.Millisecond)
 	}
@@ -684,7 +712,7 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 
 	r := resolveRoot(*root)
 	if r == "" {
-		// could-not-run: not in a repo (or git unavailable) → fail open so the shell allows.
+		// Could-not-run: block mode refuses; warn mode reports the skipped gate.
 		fmt.Fprintln(stderr, "fak hooks pre-push: not in a git repo (or git unavailable); build gate skipped")
 		return 2
 	}
@@ -705,11 +733,15 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 	res.Ref, err = prepushRevParse(r, tipRef)
 	if err != nil || res.Ref == "" {
 		res.Detail = fmt.Sprintf("cannot resolve pushed tip %s: %v", tipRef, err)
-	} else if *skipBuild && (len(baseRef) == 40 || len(baseRef) == 64) && strings.Trim(baseRef, "0") == "" {
+	} else if prepushNewRefBase(baseRef) {
 		// Git's explicit zero old object means a genuinely new ref. Preserve
 		// that provenance for the range reader; never substitute another ref.
 		res.BaseSha = baseRef
-		res.OK, res.Verdict, code = true, "SKIPPED_EXPLICIT", 0
+		if *skipBuild {
+			res.OK, res.Verdict, code = true, "SKIPPED_EXPLICIT", 0
+		} else {
+			res, code = evaluatePrePushBuildAt(r, baseRef, res.Ref, *budget, *advisory)
+		}
 	} else if res.BaseSha, err = prepushRevParse(r, baseRef); err != nil || res.BaseSha == "" {
 		res.Detail = fmt.Sprintf("cannot resolve pushed base %s: %v", baseRef, err)
 	} else if *skipBuild {
@@ -737,9 +769,11 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 			}
 			return ok
 		}
-		owner, releaseClaim := claimPrepushTipWithReuse(r, resolvedTip, prepushNow, reusable)
+		owner, releaseClaim, claimErr := claimPrepushTipWithReuse(r, resolvedTip, prepushNow, reusable, func(note string) { fmt.Fprintln(stderr, note) })
 		defer releaseClaim()
-		if owner {
+		if claimErr != nil {
+			res.Detail = claimErr.Error()
+		} else if owner {
 			res, code = evaluatePrePushBuildAt(r, resolvedBase, resolvedTip, *budget, *advisory)
 		} else {
 			code = 0
@@ -861,7 +895,11 @@ func evaluatePrePushBuildAt(r, baseOverride, tipOverride string, budget time.Dur
 		base = prepushResolveBase(r)
 	}
 	res.Base = base
-	res.BaseSha, err = prepushRevParse(r, base)
+	if prepushNewRefBase(base) {
+		res.BaseSha = base
+	} else {
+		res.BaseSha, err = prepushRevParse(r, base)
+	}
 	if err != nil || strings.TrimSpace(res.BaseSha) == "" {
 		res.Verdict, res.Detail = "COULD_NOT_RUN", fmt.Sprintf("cannot resolve pushed base %s: %v", base, err)
 		return res, 2
@@ -1086,8 +1124,17 @@ func gitChangedGoFilesRange(r, base, tip string) ([]string, error) {
 // push adds), reading COMMITTED bytes only — never the peer-dirty working tree. Passing no
 // suffixes returns every changed path. Shared by the .go-only prepush build gate and the
 // .ps1/.py/.go pre-push popup gate (#5145) so the range walk lives in exactly one place.
+func prepushNewRefBase(base string) bool {
+	return (len(base) == 40 || len(base) == 64) && strings.Trim(base, "0") == ""
+}
+
 func gitChangedFilesRange(r, base, tip string, suffixes ...string) ([]string, error) {
-	out, err := gitOut(r, "diff", "--name-only", base+"..."+tip)
+	args := []string{"diff", "--name-only", base + "..." + tip}
+	if prepushNewRefBase(base) {
+		// A new remote ref has no baseline; every tracked tip path is new.
+		args = []string{"ls-tree", "-r", "--name-only", tip}
+	}
+	out, err := gitOut(r, args...)
 	if err != nil {
 		return nil, err
 	}
