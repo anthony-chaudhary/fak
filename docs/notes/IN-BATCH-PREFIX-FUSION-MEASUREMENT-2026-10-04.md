@@ -70,6 +70,9 @@ Measured (in-process CPU, synthetic model, best-of-3..5, host-contention limited
 | 8, 1024, 32 | 1.06× |
 | 8, 2048, 32 | 0.76× |
 | 8, 512, 64 (hidden/layers varied) | 0.57–1.33× |
+| 4, 128, 64 | 1.74× |
+| 4, 128, 96 | 1.04× |
+| 4, 128, 128 | 0.98× |
 
 The ratio is **not stably 1.4×**; it straddles 1.0× and is dominated by measurement
 noise and the KV-clone copy cost rather than by a structural advantage. This is
