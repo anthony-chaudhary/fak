@@ -990,6 +990,9 @@ func (v *vulkanBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, what 
 	if t.Dtype == Q2_K {
 		return v.uploadQ2KLocked(t)
 	}
+	if isRawIQ(t.Dtype) {
+		return v.uploadRawIQLocked(t)
+	}
 	if t.Dtype == Q8_0 {
 		if t.Quant == nil {
 			panic("compute: vulkan Upload Q8 tensor missing QuantSpec")
@@ -1755,7 +1758,8 @@ func (v *vulkanBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
 	case F32, Q8_0, Q4_K, Q6_K, Q5_K, Q3_K, Q2_K:
 		return true
 	default:
-		return false
+		// Raw i-quants upload natively or expand to Q8_0 (vulkan_iq.go); MatMul handles both.
+		return isRawIQ(dt)
 	}
 }
 
@@ -1773,6 +1777,10 @@ func (v *vulkanBackend) MatMul(w, x Tensor) Tensor {
 	}
 	out, in := w.Shape[0], w.Shape[1]
 	y, _ := v.devTr([]int{out}, F32)
+	if isRawIQ(w.Dtype) {
+		v.iqMatVecLocked(w, x, y, out, in, 1)
+		return y
+	}
 	switch w.Dtype {
 	case F32:
 		C.fvk_matmul_f32(v.vp(w), v.vp(x), v.vp(y), C.int(out), C.int(in), 1)
@@ -1987,7 +1995,10 @@ func (v *vulkanBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	case Q2_K:
 		v.q2kMatMulLocked(w, X, y, out, in, P)
 	default:
-		panic("compute: vulkan BatchedMatMul unsupported weight dtype " + w.Dtype.String())
+		if !isRawIQ(w.Dtype) {
+			panic("compute: vulkan BatchedMatMul unsupported weight dtype " + w.Dtype.String())
+		}
+		v.iqMatVecLocked(w, X, y, out, in, P)
 	}
 	return y
 }
@@ -2057,6 +2068,9 @@ func (v *vulkanBackend) MatMul2(w0, w1, x Tensor) (Tensor, Tensor) {
 	}
 	y0, _ := v.devTr([]int{out0}, F32)
 	y1, _ := v.devTr([]int{out1}, F32)
+	if v.composeRawIQLocked([]Tensor{w0, w1}, x, []Tensor{y0, y1}, in) {
+		return y0, y1
+	}
 
 	if w0.Dtype == Q8_0 || w1.Dtype == Q8_0 {
 		if w0.Dtype != Q8_0 || w1.Dtype != Q8_0 {
@@ -2103,6 +2117,9 @@ func (v *vulkanBackend) MatMul3(wq, wk, wv, x Tensor) (Tensor, Tensor, Tensor) {
 	q, _ := v.devTr([]int{qOut}, F32)
 	k, _ := v.devTr([]int{kOut}, F32)
 	val, _ := v.devTr([]int{vOut}, F32)
+	if v.composeRawIQLocked([]Tensor{wq, wk, wv}, x, []Tensor{q, k, val}, in) {
+		return q, k, val
+	}
 	if wq.Dtype == Q8_0 || wk.Dtype == Q8_0 || wv.Dtype == Q8_0 {
 		if wq.Dtype != Q8_0 || wk.Dtype != Q8_0 || wv.Dtype != Q8_0 {
 			panic("compute: vulkan MatMul3 requires either all F32 or all Q8_0 weights")
@@ -2153,12 +2170,12 @@ func (v *vulkanBackend) RMSNormMatMul2(w0, w1, x, normWeight Tensor, eps float32
 	if P != 1 {
 		panic("compute: vulkan RMSNormMatMul2 is decode-only today")
 	}
-	if w0.Dtype == Q2_K || w1.Dtype == Q2_K {
+	if w0.Dtype == Q2_K || w1.Dtype == Q2_K || isRawIQ(w0.Dtype) || isRawIQ(w1.Dtype) {
 		// Refuse both operands before allocating or recording normalization. The
 		// presence of a Q2 kernel does not admit Q5/Q6 or other unsupported formats.
 		for _, w := range []Tensor{w0, w1} {
-			switch w.Dtype {
-			case F32, Q8_0, Q4_K, Q2_K:
+			switch {
+			case w.Dtype == F32, w.Dtype == Q8_0, w.Dtype == Q4_K, w.Dtype == Q2_K, isRawIQ(w.Dtype):
 			default:
 				panic("compute: vulkan RMSNormMatMul2 unsupported companion weight dtype " + w.Dtype.String())
 			}
@@ -2172,7 +2189,15 @@ func (v *vulkanBackend) RMSNormMatMul2(w0, w1, x, normWeight Tensor, eps float32
 		}
 		xn, _ := v.devTr([]int{in}, F32)
 		C.fvk_rmsnorm_f32(v.vp(x), v.vp(normWeight), v.vp(xn), C.int(P), C.int(in), C.float(eps))
+		if isRawIQ(w0.Dtype) && w1.Dtype == w0.Dtype {
+			v.iqMatVecPairLocked(w0, w1, xn, y0, y1, out0, out1, in)
+			return y0, y1
+		}
 		project := func(w, y Tensor, out int) {
+			if isRawIQ(w.Dtype) {
+				v.iqMatVecLocked(w, xn, y, out, in, P)
+				return
+			}
 			switch w.Dtype {
 			case Q2_K:
 				v.q2kMatMulLocked(w, xn, y, out, in, P)
@@ -2261,6 +2286,12 @@ func (v *vulkanBackend) RMSNormMatMul3(wq, wk, wv, x, normWeight Tensor, eps flo
 	q, _ := v.devTr([]int{qOut}, F32)
 	k, _ := v.devTr([]int{kOut}, F32)
 	val, _ := v.devTr([]int{vOut}, F32)
+	if isRawIQ(wq.Dtype) || isRawIQ(wk.Dtype) || isRawIQ(wv.Dtype) {
+		xn, _ := v.devTr([]int{in}, F32)
+		C.fvk_rmsnorm_f32(v.vp(x), v.vp(normWeight), v.vp(xn), C.int(P), C.int(in), C.float(eps))
+		v.composeRawIQLocked([]Tensor{wq, wk, wv}, xn, []Tensor{q, k, val}, in)
+		return q, k, val
+	}
 	if wq.Dtype == Q8_0 || wk.Dtype == Q8_0 || wv.Dtype == Q8_0 {
 		if wq.Dtype != Q8_0 || wk.Dtype != Q8_0 || wv.Dtype != Q8_0 {
 			panic("compute: vulkan RMSNormMatMul3 requires either all F32 or all Q8_0 weights")
@@ -2330,6 +2361,18 @@ func (v *vulkanBackend) SwiGLUMatMulAddInPlace(dst, w, gate, up Tensor) {
 	P := gate.Numel() / in
 	if dst.Numel() != P*out {
 		panic("compute: vulkan SwiGLUMatMulAddInPlace dst shape does not match projection output")
+	}
+	if isRawIQ(w.Dtype) {
+		sw, _ := v.devTr(append([]int(nil), gate.Shape...), F32)
+		C.fvk_swiglu_f32(v.vp(gate), v.vp(up), v.vp(sw), C.int(gate.Numel()))
+		if P == 1 {
+			v.iqMatVecAddLocked(w, sw, dst, out, in)
+			return
+		}
+		proj, _ := v.devTr([]int{P, out}, F32)
+		v.iqMatVecLocked(w, sw, proj, out, in, P)
+		C.fvk_add_f32(v.vp(dst), v.vp(proj), C.int(dst.Numel()))
+		return
 	}
 	switch w.Dtype {
 	case F32:

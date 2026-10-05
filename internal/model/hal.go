@@ -245,7 +245,14 @@ func (s *Session) useHALKQuantWeights() bool {
 // keeps a Vulkan bundle with a missing optional shader on the dequantized path.
 // Other resident k-quant formats retain their established admission behavior.
 func (s *Session) useHALKQuantWeight(qt *kQuantTensor) bool {
-	if !s.useHALKQuantWeights() || qt == nil || !SupportsHALKQuant(qt.kind) {
+	if !s.useHALKQuantWeights() || qt == nil {
+		return false
+	}
+	if dt, ok := rawIQDenseHALDtype(qt.kind); ok {
+		// Native i-quants (05f) stage only on a device backend that admits the raw dtype.
+		return s.Backend.Caps().DeviceMemory && compute.BackendSupportsDeviceWeightDtype(s.Backend, dt)
+	}
+	if !SupportsHALKQuant(qt.kind) {
 		return false
 	}
 	if qt.kind != kindQ6K {
@@ -321,7 +328,7 @@ func (s *Session) weightHALKQuant(name string, qt *kQuantTensor) compute.Tensor 
 		panic("model: weightHALKQuant requires backend and tensor: " + name)
 	}
 	desc, ok := LookupQuantDescriptor(qt.kind)
-	if !ok || !desc.SupportsHAL() {
+	if !ok || !(desc.SupportsHAL() || compute.IsRawIQ(desc.Dtype())) {
 		panic("model: unsupported resident expert k-quant: " + qt.kind.String())
 	}
 	host := func() compute.Tensor {
@@ -595,11 +602,41 @@ func (s *Session) matWeightHAL(name string) compute.Tensor {
 			return s.weightHALKQuant(name, qt)
 		}
 	}
+	if qt, ok := s.M.kqw[name]; ok {
+		if _, raw := rawIQDenseHALDtype(qt.kind); raw {
+			return s.weightHALRawIQExpanded(name, qt)
+		}
+	}
 
 	if s.useHALF16Weights() {
 		return s.weightHALF16(name)
 	}
 	return s.weightHAL(name)
+}
+
+// weightHALRawIQExpanded stages a packed native i-quant dense weight (05f) on a backend that
+// cannot take the raw dtype: the loader kept it packed (so it has no Q8/F32 copy), and this
+// expands it once at staging to Q8_0 (or F32 when the session does not stage Q8), the
+// representation the loader would otherwise have produced.
+func (s *Session) weightHALRawIQExpanded(name string, qt *kQuantTensor) compute.Tensor {
+	dt, _ := rawIQDenseHALDtype(qt.kind)
+	q8 := s.useHALQ8Weights()
+	key := "iqexp-f32:" + name
+	as := compute.F32
+	if q8 {
+		key, as = "iqexp-q8:"+name, compute.Q8_0
+	}
+	return s.weightHALStaged(key, func() compute.Tensor {
+		raw, err := qt.materializeRaw()
+		if err != nil {
+			panic("model: lazy " + qt.kind.String() + " read " + name + ": " + err.Error())
+		}
+		f := compute.DequantRawIQ(dt, qt.out, qt.in, raw)
+		if q8 {
+			return compute.QuantizeQ8(compute.Default(), []int{qt.out, qt.in}, f, qBlk)
+		}
+		return compute.NewF32(compute.Default(), []int{qt.out, qt.in}, f)
+	}, as)
 }
 
 func (s *Session) lmHeadHAL() compute.Tensor {

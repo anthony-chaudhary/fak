@@ -23,6 +23,7 @@ int fvk_phase_counter_count(void);
 int fvk_phase_counter_describe(int index, char* name, size_t name_len, char* unit, size_t unit_len, int* scope);
 int fvk_debug_select_q8_gateup_coop(int enabled);
 int fvk_debug_select_q2k_matvec(int enabled);
+int fvk_debug_select_iq_matvec(int fmt, int enabled);
 */
 import "C"
 import (
@@ -640,6 +641,20 @@ func vulkanDebugSelectQ2KMatvec(enabled bool) bool {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	return C.fvk_debug_select_q2k_matvec(boolToCInt(enabled)) != 0
+}
+
+// vulkanDebugSelectIQMatvec enables (when built) or disables the native matvec kernel for the
+// raw i-quant dtype dt, returning the previous selection. Disabled, a later Upload of that
+// dtype takes the Q8_0 expansion path exactly as under its FAK_VULKAN_<FMT>=0 kill switch;
+// already-uploaded native weights still require the kernel. Test-only.
+func vulkanDebugSelectIQMatvec(dt Dtype, enabled bool) bool {
+	f, ok := rawIQFormats[dt]
+	if !ok {
+		return false
+	}
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return C.fvk_debug_select_iq_matvec(C.int(f.vulkanID), boolToCInt(enabled)) != 0
 }
 
 func boolToCInt(b bool) C.int {

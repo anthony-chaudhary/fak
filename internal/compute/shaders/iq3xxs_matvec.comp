@@ -1,0 +1,187 @@
+#version 450
+
+// iq3xxs_matvec.comp - GGML IQ3_XXS matrix-vector product on the packed weights.
+//
+// Ported from ggml-vulkan (MIT, Copyright (c) 2023-2026 The ggml authors), pinned at
+// llama.cpp dff60048744f99cb0af68d02be2314456b3269dc:
+//   ggml/src/ggml-vulkan/vulkan-shaders/types.glsl:1538-1591   (iq3xxs_grid and its LDS copy)
+//   ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_iq3_xxs.comp:10-45 (grid/sign/scale decode)
+//
+// MIT License. Copyright (c) 2023-2026 The ggml authors.
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this
+// software and associated documentation files (the "Software"), to deal in the Software
+// without restriction, including without limitation the rights to use, copy, modify, merge,
+// publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+// to whom the Software is furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in all copies or
+// substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+// PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+// FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
+// The work split, bindings and push constants are fak's (q2k_matvec.comp), so the shim
+// selects the pipeline per weight dtype without changing callers.
+//
+// Modes, selected by auxOutDim (x is already normalized/activated by the caller):
+//    0: Y[t, :] = W0 * X[t, :]   for t in [0, tokens)  (tokens on dispatch Y)
+//   -1: Y[:]   += W0 * x                                (residual accumulate, tokens == 1)
+//   >0: Y = W0 * x, Y1 = W1 * x  (W1 has auxOutDim rows) (gate/up pair, tokens == 1)
+//
+// IQ3_XXS superblock (256 weights, 98 bytes): d f16, qs[64] grid indices, then 8 u32
+// sign/scale words. Sub-block ib32: aux = word, db = d * (0.5 + aux >> 28) * 0.5; group
+// l (8 weights) = iq3xxs_grid[qs[8*ib32 + 2l]] then [.. + 1] (4 magnitudes each) with sign
+// bits ksigns((aux >> 7l) & 127).
+//
+// Work split: a 64-lane workgroup owns ROWS consecutive rows at a time and strides over
+// row groups (the dispatch is capped, so the per-workgroup table setup is amortized).
+// Sixteen lanes cover one superblock: lane = 32-weight sub-block * 2 + half, each lane
+// owning 16 consecutive weights, so four superblocks are in flight per row per step. The
+// activation slice is loaded once per step and reused for every row. LDS reduction.
+layout(local_size_x = 64) in;
+
+const uint ROWS = 2u;
+const uint LANES = 64u;
+const uint BLOCK_BYTES = 98u;
+
+layout(std430, set = 0, binding = 0) readonly buffer W0buf { uint raw[]; };
+layout(std430, set = 0, binding = 1) readonly buffer X     { vec4 x4[]; };
+layout(std430, set = 0, binding = 2) readonly buffer U     { vec4 u4[]; };
+layout(std430, set = 0, binding = 3) buffer Y              { float y[]; };
+layout(std430, set = 0, binding = 4) readonly buffer W1buf { uint raw1[]; };
+layout(std430, set = 0, binding = 5) readonly buffer Nbuf  { vec4 norm4[]; };
+layout(std430, set = 0, binding = 6) writeonly buffer Y1buf { float y1[]; };
+
+layout(push_constant) uniform PC {
+    int outDim;
+    int inDim;
+    int tokens;
+    int auxOutDim;
+    float eps;
+} pc;
+
+shared float red[ROWS * LANES];
+
+// Byte-addressed reads of the packed stream (every IQ block size is even, so a 16-bit
+// field never straddles a 32-bit word).
+uint wword(bool s, uint i) { return s ? raw1[i] : raw[i]; }
+uint u8at(bool s, uint off) { return (wword(s, off >> 2u) >> ((off & 3u) << 3u)) & 255u; }
+uint u16at(bool s, uint off) { return (wword(s, off >> 2u) >> ((off & 2u) << 3u)) & 65535u; }
+uint u32at(bool s, uint off) { return u16at(s, off) | (u16at(s, off + 2u) << 16u); }
+float f16at(bool s, uint off) { return unpackHalf2x16(u16at(s, off)).x; }
+vec4 bytes4(uint w) {
+    return vec4(float(w & 255u), float((w >> 8u) & 255u), float((w >> 16u) & 255u), float(w >> 24u));
+}
+vec4 signs4(uint sg) {
+    return vec4((sg & 1u) != 0u ? -1.0 : 1.0, (sg & 2u) != 0u ? -1.0 : 1.0,
+                (sg & 4u) != 0u ? -1.0 : 1.0, (sg & 8u) != 0u ? -1.0 : 1.0);
+}
+// ksigns_iq2xs: 7 stored sign bits plus an even-parity eighth bit.
+uint ksigns(uint s7) { return s7 | ((uint(bitCount(s7)) & 1u) << 7u); }
+
+shared uint iq3xxs_grid[256];
+const uint iq3xxs_grid_const[256] = {
+    0x04040404, 0x04040414, 0x04040424, 0x04040c0c, 0x04040c1c, 0x04040c3e, 0x04041404, 0x04041414,
+    0x04041c0c, 0x04042414, 0x04043e1c, 0x04043e2c, 0x040c040c, 0x040c041c, 0x040c0c04, 0x040c0c14,
+    0x040c140c, 0x040c142c, 0x040c1c04, 0x040c1c14, 0x040c240c, 0x040c2c24, 0x040c3e04, 0x04140404,
+    0x04140414, 0x04140424, 0x04140c0c, 0x04141404, 0x04141414, 0x04141c0c, 0x04141c1c, 0x04141c3e,
+    0x04142c0c, 0x04142c3e, 0x04143e2c, 0x041c040c, 0x041c043e, 0x041c0c04, 0x041c0c14, 0x041c142c,
+    0x041c3e04, 0x04240c1c, 0x04241c3e, 0x04242424, 0x04242c3e, 0x04243e1c, 0x04243e2c, 0x042c040c,
+    0x042c043e, 0x042c1c14, 0x042c2c14, 0x04341c2c, 0x04343424, 0x043e0c04, 0x043e0c24, 0x043e0c34,
+    0x043e241c, 0x043e340c, 0x0c04040c, 0x0c04041c, 0x0c040c04, 0x0c040c14, 0x0c04140c, 0x0c04141c,
+    0x0c041c04, 0x0c041c14, 0x0c041c24, 0x0c04243e, 0x0c042c04, 0x0c0c0404, 0x0c0c0414, 0x0c0c0c0c,
+    0x0c0c1404, 0x0c0c1414, 0x0c14040c, 0x0c14041c, 0x0c140c04, 0x0c140c14, 0x0c14140c, 0x0c141c04,
+    0x0c143e14, 0x0c1c0404, 0x0c1c0414, 0x0c1c1404, 0x0c1c1c0c, 0x0c1c2434, 0x0c1c3434, 0x0c24040c,
+    0x0c24042c, 0x0c242c04, 0x0c2c1404, 0x0c2c1424, 0x0c2c2434, 0x0c2c3e0c, 0x0c34042c, 0x0c3e1414,
+    0x0c3e2404, 0x14040404, 0x14040414, 0x14040c0c, 0x14040c1c, 0x14041404, 0x14041414, 0x14041434,
+    0x14041c0c, 0x14042414, 0x140c040c, 0x140c041c, 0x140c042c, 0x140c0c04, 0x140c0c14, 0x140c140c,
+    0x140c1c04, 0x140c341c, 0x140c343e, 0x140c3e04, 0x14140404, 0x14140414, 0x14140c0c, 0x14140c3e,
+    0x14141404, 0x14141414, 0x14141c3e, 0x14142404, 0x14142c2c, 0x141c040c, 0x141c0c04, 0x141c0c24,
+    0x141c3e04, 0x141c3e24, 0x14241c2c, 0x14242c1c, 0x142c041c, 0x142c143e, 0x142c240c, 0x142c3e24,
+    0x143e040c, 0x143e041c, 0x143e0c34, 0x143e242c, 0x1c04040c, 0x1c040c04, 0x1c040c14, 0x1c04140c,
+    0x1c04141c, 0x1c042c04, 0x1c04342c, 0x1c043e14, 0x1c0c0404, 0x1c0c0414, 0x1c0c1404, 0x1c0c1c0c,
+    0x1c0c2424, 0x1c0c2434, 0x1c14040c, 0x1c14041c, 0x1c140c04, 0x1c14142c, 0x1c142c14, 0x1c143e14,
+    0x1c1c0c0c, 0x1c1c1c1c, 0x1c241c04, 0x1c24243e, 0x1c243e14, 0x1c2c0404, 0x1c2c0434, 0x1c2c1414,
+    0x1c2c2c2c, 0x1c340c24, 0x1c341c34, 0x1c34341c, 0x1c3e1c1c, 0x1c3e3404, 0x24040424, 0x24040c3e,
+    0x24041c2c, 0x24041c3e, 0x24042c1c, 0x24042c3e, 0x240c3e24, 0x24141404, 0x24141c3e, 0x24142404,
+    0x24143404, 0x24143434, 0x241c043e, 0x241c242c, 0x24240424, 0x24242c0c, 0x24243424, 0x242c142c,
+    0x242c241c, 0x242c3e04, 0x243e042c, 0x243e0c04, 0x243e0c14, 0x243e1c04, 0x2c040c14, 0x2c04240c,
+    0x2c043e04, 0x2c0c0404, 0x2c0c0434, 0x2c0c1434, 0x2c0c2c2c, 0x2c140c24, 0x2c141c14, 0x2c143e14,
+    0x2c1c0414, 0x2c1c2c1c, 0x2c240c04, 0x2c24141c, 0x2c24143e, 0x2c243e14, 0x2c2c0414, 0x2c2c1c0c,
+    0x2c342c04, 0x2c3e1424, 0x2c3e2414, 0x34041424, 0x34042424, 0x34042434, 0x34043424, 0x340c140c,
+    0x340c340c, 0x34140c3e, 0x34143424, 0x341c1c04, 0x341c1c34, 0x34242424, 0x342c042c, 0x342c2c14,
+    0x34341c1c, 0x343e041c, 0x343e140c, 0x3e04041c, 0x3e04042c, 0x3e04043e, 0x3e040c04, 0x3e041c14,
+    0x3e042c14, 0x3e0c1434, 0x3e0c2404, 0x3e140c14, 0x3e14242c, 0x3e142c14, 0x3e1c0404, 0x3e1c0c2c,
+    0x3e1c1c1c, 0x3e1c3404, 0x3e24140c, 0x3e24240c, 0x3e2c0404, 0x3e2c0414, 0x3e2c1424, 0x3e341c04,
+};
+
+float laneDot(bool s, uint b, uint ib32, uint hf, vec4 xv[4]) {
+    float d = f16at(s, b);
+    uint aux = u32at(s, b + 66u + 4u * ib32);
+    float db = d * (0.5 + float(aux >> 28u)) * 0.5;
+    float sum = 0.0;
+    for (uint k = 0u; k < 2u; ++k) {
+        uint l = 2u * hf + k;
+        uint sg = ksigns((aux >> (7u * l)) & 127u);
+        uint q2 = u16at(s, b + 2u + 8u * ib32 + 2u * l);
+        sum += dot(bytes4(iq3xxs_grid[q2 & 255u]) * signs4(sg), xv[2u * k]);
+        sum += dot(bytes4(iq3xxs_grid[q2 >> 8u]) * signs4(sg >> 4u), xv[2u * k + 1u]);
+    }
+    return db * sum;
+}
+
+void main() {
+    uint tid = gl_LocalInvocationID.x;
+    for (uint i = tid; i < 256u; i += LANES) iq3xxs_grid[i] = iq3xxs_grid_const[i];
+    barrier();
+
+    int mode = pc.auxOutDim > 0 ? 2 : (pc.auxOutDim < 0 ? 1 : 0);
+    uint tok = gl_WorkGroupID.y;
+    uint rg0 = (uint(pc.outDim) + ROWS - 1u) / ROWS;
+    uint rgTotal = rg0 + (mode == 2 ? (uint(pc.auxOutDim) + ROWS - 1u) / ROWS : 0u);
+    uint inDim = uint(pc.inDim);
+    uint nsb = inDim / 256u;
+    uint xBase = tok * (inDim >> 2u);
+    uint t16 = tid & 15u;
+    uint ib32 = t16 >> 1u;
+    uint hf = t16 & 1u;
+
+    for (uint rg = gl_WorkGroupID.x; rg < rgTotal; rg += gl_NumWorkGroups.x) {
+        bool second = rg >= rg0;
+        uint rowBase = (second ? rg - rg0 : rg) * ROWS;
+        uint rowsOut = second ? uint(pc.auxOutDim) : uint(pc.outDim);
+
+        float acc[ROWS];
+        for (uint r = 0u; r < ROWS; ++r) acc[r] = 0.0;
+        for (uint sb = tid >> 4u; sb < nsb; sb += LANES / 16u) {
+            vec4 xv[4];
+            uint xi = xBase + ((sb * 256u + ib32 * 32u + hf * 16u) >> 2u);
+            for (uint k = 0u; k < 4u; ++k) xv[k] = x4[xi + k];
+            for (uint r = 0u; r < ROWS; ++r) {
+                uint row = rowBase + r;
+                if (row >= rowsOut) break;
+                acc[r] += laneDot(second, (row * nsb + sb) * BLOCK_BYTES, ib32, hf, xv);
+            }
+        }
+
+        for (uint r = 0u; r < ROWS; ++r) red[r * LANES + tid] = acc[r];
+        barrier();
+        for (uint stride = LANES / 2u; stride > 0u; stride >>= 1u) {
+            if (tid < stride) {
+                for (uint r = 0u; r < ROWS; ++r) red[r * LANES + tid] += red[r * LANES + tid + stride];
+            }
+            barrier();
+        }
+        if (tid < ROWS) {
+            uint row = rowBase + tid;
+            if (row < rowsOut) {
+                float v = red[tid * LANES];
+                if (mode == 1) y[row] += v;
+                else if (second) y1[row] = v;
+                else y[tok * uint(pc.outDim) + row] = v;
+            }
+        }
+        barrier();
+    }
+}

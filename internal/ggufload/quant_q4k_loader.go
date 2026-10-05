@@ -21,6 +21,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
@@ -67,6 +68,7 @@ type q4kLoadOptions struct {
 	residentDenseKQuant  bool
 	residentDenseQ2K     bool
 	residentDenseQ6K     bool
+	residentDenseIQ      map[TensorType]bool // selective native i-quant arm (05f)
 	residentQ2KEmbedding bool
 	residentQ4KEmbedding bool
 	residentPQ2Embedding bool // enabled by Prism PQ2 metadata
@@ -140,6 +142,20 @@ func WithDenseQ2KResident(enabled bool) Q4KLoadOption {
 // dequant-to-Q8 round trip without stranding Q5_K/Q3_K/Q2_K/IQ formats on a dequant path.
 func WithDenseQ6KResident(enabled bool) Q4KLoadOption {
 	return func(o *q4kLoadOptions) { o.residentDenseQ6K = enabled }
+}
+
+// WithDenseIQResident retains eligible dense tensors of the given i-quant types even when
+// blanket dense k-quant residency is disabled, for a backend with native kernels for exactly
+// those formats (Vulkan iq*_matvec, ticket 05f). Other i-quants keep the dequant-to-Q8 path.
+func WithDenseIQResident(types ...TensorType) Q4KLoadOption {
+	return func(o *q4kLoadOptions) {
+		if o.residentDenseIQ == nil {
+			o.residentDenseIQ = map[TensorType]bool{}
+		}
+		for _, t := range types {
+			o.residentDenseIQ[t] = true
+		}
+	}
 }
 
 // WithExpertShard keeps only routed experts in [lo,hi) when splitting batched MoE expert GGUF
@@ -865,7 +881,8 @@ func lazyDenseKQuantBoundedEligible(cfg model.Config, t TensorType, canon string
 func denseKQuantRetained(o q4kLoadOptions, t TensorType) bool {
 	return o.residentDenseKQuant ||
 		(o.residentDenseQ2K && t == TensorQ2_K) ||
-		(o.residentDenseQ6K && t == TensorQ6_K)
+		(o.residentDenseQ6K && t == TensorQ6_K) ||
+		o.residentDenseIQ[t]
 }
 
 // applyLazyKQuantByType routes a lazyKQuant pending tensor to the matching per-type lazy builder
@@ -1394,4 +1411,31 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 	}
 	tw.pending = []pendingTensor{{resident: false, name: canon, shape: shape, f32: data}}
 	return tw
+}
+
+// nativeIQComputeDtypes maps GGUF i-quant tensor types to the compute raw i-quant dtype a
+// device backend may multiply in native format (ticket 05f).
+var nativeIQComputeDtypes = []struct {
+	t  TensorType
+	dt compute.Dtype
+}{
+	{TensorIQ4_XS, compute.IQ4_XS},
+	{TensorIQ3_XXS, compute.IQ3_XXS},
+	{TensorIQ2_S, compute.IQ2_S},
+	{TensorIQ3_S, compute.IQ3_S},
+	{TensorIQ2_XXS, compute.IQ2_XXS},
+	{TensorIQ2_XS, compute.IQ2_XS},
+	{TensorIQ1_S, compute.IQ1_S},
+}
+
+// NativeIQResidentTypes returns the i-quant tensor types whose compute raw dtype the backend
+// admits as a device weight (supports is typically compute.BackendSupportsDeviceWeightDtype).
+func NativeIQResidentTypes(supports func(compute.Dtype) bool) []TensorType {
+	var out []TensorType
+	for _, e := range nativeIQComputeDtypes {
+		if supports != nil && supports(e.dt) {
+			out = append(out, e.t)
+		}
+	}
+	return out
 }

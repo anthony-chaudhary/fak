@@ -900,6 +900,9 @@ func loadProductionModel(ctx context.Context, req Request) (loadedModel, string,
 		opts := []ggufload.Q4KLoadOption{ggufload.WithDenseKQuantResident(false)}
 		if req.BackendName == "vulkan" {
 			opts = append(opts, ggufload.WithDenseQ2KResident(true))
+			// Native Vulkan i-quant matvec formats (05f); a kill-switched or missing kernel
+			// expands the weight to Q8_0 at upload, so retaining them is always safe.
+			opts = append(opts, ggufload.WithDenseIQResident(ggufload.NativeIQResidentTypes(compute.IsRawIQ)...))
 			if q2kEmbeddingEligible(ws.File) {
 				opts = append(opts, ggufload.WithQ2KEmbeddingResident(true))
 			}

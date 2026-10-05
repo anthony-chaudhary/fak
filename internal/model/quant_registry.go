@@ -138,21 +138,45 @@ func resetDefaultQuantDescriptors() {
 		},
 	})
 
+	// Native i-quants with a compute raw dtype (ticket 05f). They are NOT generically
+	// HAL-capable (routed-expert and offload seams keep their host path); only the dense
+	// projection seam (useHALKQuantWeight) stages them, and only on a device backend whose
+	// weight-dtype probe admits the raw dtype.
+	for _, item := range []struct {
+		kind  kQuantKind
+		name  string
+		dtype compute.Dtype
+	}{
+		{kindIQ4XS, "IQ4_XS", compute.IQ4_XS},
+		{kindIQ3XXS, "IQ3_XXS", compute.IQ3_XXS},
+		{kindIQ2S, "IQ2_S", compute.IQ2_S},
+		{kindIQ3S, "IQ3_S", compute.IQ3_S},
+		{kindIQ2XXS, "IQ2_XXS", compute.IQ2_XXS},
+		{kindIQ2XS, "IQ2_XS", compute.IQ2_XS},
+		{kindIQ1S, "IQ1_S", compute.IQ1_S},
+	} {
+		dt := item.dtype
+		registerDefaultLocked(BaseQuantDescriptor{
+			QuantKind:     item.kind,
+			QuantName:     item.name,
+			ComputeDtype:  dt,
+			Prefix:        "kquant-raw:",
+			HALSupported:  false,
+			BytesPerBlk:   item.kind.blockBytes(),
+			WeightsPerBlk: item.kind.blockWeights(),
+			HostTensorFn: func(out, in int, raw []byte) compute.Tensor {
+				return compute.NewRawIQ(compute.Default(), dt, []int{out, in}, raw)
+			},
+		})
+	}
 	nonHAL := []struct {
 		kind  kQuantKind
 		name  string
 		dtype compute.Dtype
 	}{
-		{kindIQ3XXS, "IQ3_XXS", compute.IQ3_XXS},
-		{kindIQ4XS, "IQ4_XS", 0},
-		{kindIQ2XXS, "IQ2_XXS", compute.IQ2_XXS},
-		{kindIQ2XS, "IQ2_XS", 0},
-		{kindIQ1S, "IQ1_S", 0},
-		{kindIQ2S, "IQ2_S", 0},
 		{kindIQ1M, "IQ1_M", 0},
 		{kindQ8_0, "Q8_0", compute.Q8_0},
 		{kindQ4_0, "Q4_0", 0},
-		{kindIQ3S, "IQ3_S", compute.IQ3_S},
 	}
 	for _, item := range nonHAL {
 		registerDefaultLocked(BaseQuantDescriptor{
@@ -201,6 +225,16 @@ func LookupQuantDescriptorByName(name string) (QuantDescriptor, bool) {
 }
 
 // SupportsHALKQuant reports whether kind is registered and supports device HAL weight staging.
+// rawIQDenseHALDtype reports the compute raw dtype of a native i-quant kind (05f) whose
+// dense projections may stage on a backend admitting that dtype.
+func rawIQDenseHALDtype(kind kQuantKind) (compute.Dtype, bool) {
+	desc, ok := LookupQuantDescriptor(kind)
+	if !ok || !compute.IsRawIQ(desc.Dtype()) {
+		return 0, false
+	}
+	return desc.Dtype(), true
+}
+
 func SupportsHALKQuant(kind kQuantKind) bool {
 	desc, ok := LookupQuantDescriptor(kind)
 	return ok && desc.SupportsHAL()

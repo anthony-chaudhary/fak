@@ -279,6 +279,11 @@ void fvk_rmsnorm_q4k_matmul2_f32(const void *dW0, const void *dW1, const void *d
 void fvk_swiglu_q4k_matmul_add_f32(const void *dW, const void *dG, const void *dU,
                                    void *dD, int out, int in, int P);
 void fvk_q2k_matmul_f32(const void *dQ2K, const void *dX, void *dY, int out, int in, int P);
+/* Native IQ-quant matvec (ticket 05f); fmt is the fvk IQ format id (vulkan_iq.go).
+ * mode 0: Y[t] = W0 X[t] for t < tokens; mode 1: Y += W0 x; mode 2: Y = W0 x, Y1 = W1 x. */
+int fvk_iq_matvec_available(int fmt);
+void fvk_iq_matvec_f32(int fmt, const void *dW0, const void *dX, void *dY, const void *dW1, void *dY1,
+                       int out0, int out1, int in, int tokens, int mode);
 typedef struct fvk_dispatch_profile {
     uint64_t compute_dispatches;
     uint64_t q4k_matmul_dispatches;

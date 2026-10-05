@@ -45,6 +45,13 @@ func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
 	if serveNativeDenseQ6K(backend) {
 		opts = append(opts, ggufload.WithDenseQ6KResident(true))
 	}
+	// Native i-quant weights (05f) stay packed only for a device backend admitting the raw dtype.
+	if backend.Caps().DeviceMemory && backend.Caps().UploadDtype {
+		supports := func(dt compute.Dtype) bool { return compute.BackendSupportsDeviceWeightDtype(backend, dt) }
+		if types := ggufload.NativeIQResidentTypes(supports); len(types) > 0 {
+			opts = append(opts, ggufload.WithDenseIQResident(types...))
+		}
+	}
 	return opts
 }
 

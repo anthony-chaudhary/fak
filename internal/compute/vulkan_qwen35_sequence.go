@@ -271,6 +271,10 @@ func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRe
 			case Q4_K, Q2_K:
 				groups = (rows*int64(op.shape[0]) + 63) / 64
 			}
+			if isRawIQ(op.t.Dtype) {
+				// iq*_matvec: row groups on X, tokens on Y.
+				groups = (int64(op.shape[0]) + 1) / 2
+			}
 			if !qwen35VulkanSequenceDispatchLimit(groups, maxGroups) {
 				return bad("projection exceeds device Vulkan X workgroup limit")
 			}
@@ -317,7 +321,11 @@ func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRe
 					return bad("Q8 scales have insufficient resident capacity")
 				}
 			default:
-				return bad("unsupported matrix dtype")
+				blockBytes, ok := RawIQBlockBytes(op.t.Dtype)
+				if !ok || !v.iqNativeLocked(op.t.Dtype) || op.shape[1]%256 != 0 {
+					return bad("unsupported matrix dtype")
+				}
+				bytes = int64(n/256) * int64(blockBytes)
 			}
 		} else if op.t.Dtype != F32 {
 			return bad("non-matrix operand must be F32")
@@ -352,6 +360,10 @@ func (v *vulkanBackend) qwen35VulkanSequenceMatMulLocked(w, x Tensor, tokens int
 		v.q4kMatMulLocked(w, x, y, out, in, tokens)
 	case Q2_K:
 		v.q2kMatMulLocked(w, x, y, out, in, tokens)
+	default:
+		if isRawIQ(w.Dtype) {
+			v.iqMatVecLocked(w, x, y, out, in, tokens)
+		}
 	}
 	return y
 }

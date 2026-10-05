@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -11,6 +12,11 @@ import (
 func TestQuantRegistryBuiltinRegistration(t *testing.T) {
 	ResetDefaultQuantDescriptors()
 
+	// dtype/supportsHAL are the legacy expectations. A kind whose descriptor reports a
+	// native raw i-quant dtype (compute.IsRawIQ, ticket 05f) is instead held to the raw
+	// contract below, so the table stays green as further i-quants move over.
+	// mustBeRaw pins the kinds that have already moved.
+	mustBeRaw := map[kQuantKind]bool{kindIQ4XS: true, kindIQ3XXS: true}
 	tests := []struct {
 		kind         kQuantKind
 		name         string
@@ -47,11 +53,22 @@ func TestQuantRegistryBuiltinRegistration(t *testing.T) {
 		if desc.Name() != tc.name {
 			t.Errorf("%s: got Name %q, want %q", tc.name, desc.Name(), tc.name)
 		}
-		if desc.Dtype() != tc.dtype {
-			t.Errorf("%s: got Dtype %v, want %v", tc.name, desc.Dtype(), tc.dtype)
+		raw := compute.IsRawIQ(desc.Dtype())
+		if mustBeRaw[tc.kind] && !raw {
+			t.Errorf("%s: got Dtype %v, want its native raw i-quant dtype", tc.name, desc.Dtype())
 		}
-		if desc.SupportsHAL() != tc.supportsHAL {
-			t.Errorf("%s: got SupportsHAL %v, want %v", tc.name, desc.SupportsHAL(), tc.supportsHAL)
+		if raw {
+			assertRawIQDescriptor(t, tc.name, desc, tc.blockBytes)
+		} else {
+			if desc.Dtype() != tc.dtype {
+				t.Errorf("%s: got Dtype %v, want %v", tc.name, desc.Dtype(), tc.dtype)
+			}
+			if desc.SupportsHAL() != tc.supportsHAL {
+				t.Errorf("%s: got SupportsHAL %v, want %v", tc.name, desc.SupportsHAL(), tc.supportsHAL)
+			}
+			if SupportsHALKQuant(tc.kind) != tc.supportsHAL {
+				t.Errorf("%s: SupportsHALKQuant got %v, want %v", tc.name, SupportsHALKQuant(tc.kind), tc.supportsHAL)
+			}
 		}
 		if desc.BlockBytes() != tc.blockBytes {
 			t.Errorf("%s: got BlockBytes %d, want %d", tc.name, desc.BlockBytes(), tc.blockBytes)
@@ -62,9 +79,34 @@ func TestQuantRegistryBuiltinRegistration(t *testing.T) {
 		if desc.KeyPrefix() != "kquant-raw:" {
 			t.Errorf("%s: got KeyPrefix %q, want 'kquant-raw:'", tc.name, desc.KeyPrefix())
 		}
-		if SupportsHALKQuant(tc.kind) != tc.supportsHAL {
-			t.Errorf("%s: SupportsHALKQuant got %v, want %v", tc.name, SupportsHALKQuant(tc.kind), tc.supportsHAL)
-		}
+	}
+}
+
+// assertRawIQDescriptor holds a native raw i-quant descriptor to the 05f contract: it
+// reports its own format's compute raw dtype, stays off the HAL k-quant staging path
+// (dense-seam-only admission), agrees with compute on the block size, and builds a host
+// tensor of that dtype.
+func assertRawIQDescriptor(t *testing.T, name string, desc QuantDescriptor, blockBytes int) {
+	t.Helper()
+	dt := desc.Dtype()
+	if !strings.EqualFold(dt.String(), name) {
+		t.Errorf("%s: raw i-quant Dtype %v is not this kind's own format", name, dt)
+	}
+	if desc.SupportsHAL() {
+		t.Errorf("%s: raw i-quant descriptor reports SupportsHAL true, want false", name)
+	}
+	if SupportsHALKQuant(desc.Kind()) {
+		t.Errorf("%s: SupportsHALKQuant true for a raw i-quant kind, want false", name)
+	}
+	if bb, ok := compute.RawIQBlockBytes(dt); !ok || bb != blockBytes {
+		t.Errorf("%s: compute.RawIQBlockBytes(%v) = %d,%v; want %d,true", name, dt, bb, ok, blockBytes)
+	}
+	host := desc.NewHostTensor(2, 256, make([]byte, 2*blockBytes))
+	if host.Dtype != dt {
+		t.Errorf("%s: NewHostTensor dtype %v, want %v", name, host.Dtype, dt)
+	}
+	if len(host.Shape) != 2 || host.Shape[0] != 2 || host.Shape[1] != 256 {
+		t.Errorf("%s: NewHostTensor shape %v, want [2 256]", name, host.Shape)
 	}
 }
 
@@ -235,15 +277,32 @@ func TestWeightHALKQuantRegistryRefusal(t *testing.T) {
 		halW:    map[string]compute.Tensor{},
 	}
 
-	qtUnsupported := &kQuantTensor{out: 4, in: 256, nblk: 1, kind: kindIQ3XXS, raw: make([]byte, 100)}
+	// IQ1_M stays non-HAL and has no compute raw dtype, so weightHALKQuant must refuse
+	// it before staging anything. Guard the precondition so a later format move fails
+	// here loudly rather than silently testing an admitted kind.
+	const unsupported = kindIQ1M
+	desc, ok := LookupQuantDescriptor(unsupported)
+	if !ok {
+		t.Fatalf("%s descriptor not registered", unsupported)
+	}
+	if desc.SupportsHAL() || compute.IsRawIQ(desc.Dtype()) {
+		t.Fatalf("%s is now HAL-capable or raw i-quant (dtype %v); pick another refused kind", unsupported, desc.Dtype())
+	}
+	qtUnsupported := &kQuantTensor{out: 4, in: 256, nblk: 1, kind: unsupported, raw: make([]byte, 4*desc.BlockBytes())}
 	defer func() {
 		r := recover()
 		if r == nil {
 			t.Fatalf("expected panic on unsupported kind")
 		}
-		msg, ok := r.(string)
-		if !ok || msg != "model: unsupported resident expert k-quant: IQ3_XXS" {
-			t.Fatalf("unexpected panic message: %v", r)
+		if len(rec.uploads) != 0 {
+			t.Fatalf("refused kind recorded uploads %v, want none", rec.uploads)
+		}
+		if len(s.halW) != 0 {
+			t.Fatalf("refused kind cached %d HAL weights, want none", len(s.halW))
+		}
+		// No typed error exists for this refusal; only require that it names the kind.
+		if msg, ok := r.(string); !ok || !strings.Contains(msg, unsupported.String()) {
+			t.Fatalf("refusal panic does not name %s: %v", unsupported, r)
 		}
 	}()
 	s.weightHALKQuant("unsupported", qtUnsupported)

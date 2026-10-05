@@ -244,7 +244,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -253,6 +253,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     switch (id) {
     case K_MATMUL: case K_MATMUL_ADD: case K_MATMUL_ARGMAX: case K_MATMUL_ARGMAX_BLOCKS:
     case K_MATMUL2: case K_MATMUL3: case K_Q8_MATMUL: case K_Q8_MATMUL_DECODE: case K_Q8_MATMUL2: case K_Q8_MATMUL3: case K_Q6K_MATMUL: case K_Q5K_MATMUL: case K_Q3K_MATMUL:
+    case K_IQ4XS_MATVEC: case K_IQ1S_MATVEC: case K_IQ2XS_MATVEC: case K_IQ2XXS_MATVEC: case K_IQ3S_MATVEC: case K_IQ2S_MATVEC: case K_IQ3XXS_MATVEC:
         return g_dp.otherMatmul;
     case K_RMSNORM: case K_RMSNORM_MATMUL: case K_RMSNORM_MATMUL2: case K_RMSNORM_MATMUL3:
     case K_RMSNORM_MATMUL_ARGMAX_BLOCKS: case K_RMSNORM_Q8_MATMUL2: case K_RMSNORM_Q8_MATMUL3: case K_RMSNORM_Q8_MATMUL2_COOP:
@@ -327,6 +328,16 @@ int g_have_q4k_wave32 = 0;
 // Single-token Q2_K matvec (q2k_matvec.spv); optional, default-on when the SPIR-V loads.
 int g_have_q2k_matvec = 0;
 int g_have_rmsnorm_q8_matmul2_coop = 0;
+// Native IQ-quant matvec kernels (ticket 05f), indexed by the fvk IQ format id shared with
+// vulkan_iq.go. Each is optional: absent SPIR-V or its FAK_VULKAN_<FMT>=0 kill switch leaves
+// the format unavailable, and Upload then expands that weight to Q8_0 as before.
+enum { FVK_IQ4_XS = 0, FVK_IQ3_XXS = 1, FVK_IQ2_S = 2, FVK_IQ3_S = 3, FVK_IQ2_XXS = 4, FVK_IQ2_XS = 5, FVK_IQ1_S = 6, FVK_IQ_FORMATS };
+const KId kIQKernel[FVK_IQ_FORMATS] = {K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC};
+const char* const kIQSpv[FVK_IQ_FORMATS] = {"iq4xs_matvec.spv", "iq3xxs_matvec.spv", "iq2s_matvec.spv", "iq3s_matvec.spv", "iq2xxs_matvec.spv", "iq2xs_matvec.spv", "iq1s_matvec.spv"};
+const char* const kIQEnv[FVK_IQ_FORMATS] = {"FAK_VULKAN_IQ4XS", "FAK_VULKAN_IQ3XXS", "FAK_VULKAN_IQ2S", "FAK_VULKAN_IQ3S", "FAK_VULKAN_IQ2XXS", "FAK_VULKAN_IQ2XS", "FAK_VULKAN_IQ1S"};
+int g_have_iq[FVK_IQ_FORMATS] = {};
+const uint32_t kIQMatvecRows = 2; // must match ROWS in every iq*_matvec.comp shader
+const uint32_t kIQMatvecMaxGroups = 1024;
 bool g_q4k_wave32_required_subgroup = false;
 // Optional, default-off recurrent prefill variant. All access is serialized by
 // the Go Vulkan mutex, including debug mode/counter operations.
@@ -1099,6 +1110,7 @@ const char* const kKernelNames[K_COUNT] = {
     "q6k_matmul", "q5k_matmul", "q3k_matmul", "rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add", "q2k_matmul",
     "rmsnorm_q2k_matmul2", "qwen35_split_qg_panel", "qwen35_partial_rope_panel",
     "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
+    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -2035,8 +2047,13 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // FAK_VULKAN_Q2K_MATVEC=0 keeps the original one-thread-per-row decode kernel.
     {
         const char* q2kmv = std::getenv("FAK_VULKAN_Q2K_MATVEC");
-        bool q2kmvOff = q2kmv && q2kmv[0] == '0' && q2kmv[1] == ' ';
+        bool q2kmvOff = q2kmv && q2kmv[0] == '0' && q2kmv[1] == '\0';
         g_have_q2k_matvec = (!q2kmvOff && buildKernel(g_kern[K_Q2K_MATVEC], P("q2k_matvec.spv"), 7, 4 * sizeof(int) + sizeof(float))) ? 1 : 0;
+    }
+    for (int f = 0; f < FVK_IQ_FORMATS; ++f) {
+        const char* sw = std::getenv(kIQEnv[f]);
+        bool off = sw && sw[0] == '0' && sw[1] == '\0';
+        g_have_iq[f] = (!off && buildKernel(g_kern[kIQKernel[f]], P(kIQSpv[f]), 7, 4 * sizeof(int) + sizeof(float))) ? 1 : 0;
     }
     if (!ok) return 8;
     // Q8 kernel is built only when the device advertised the int8/8-bit-storage features; its
@@ -2061,7 +2078,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         // Cooperative (8 outputs x 32 lanes) gate/up kernel; bit-identical to the scalar one.
         // Optional: absent SPIR-V or FAK_VULKAN_Q8_GATEUP_COOP=0 keeps rmsnorm_q8_matmul2.spv.
         const char* coop = std::getenv("FAK_VULKAN_Q8_GATEUP_COOP");
-        bool coopOff = coop && coop[0] == '0' && coop[1] == ' ';
+        bool coopOff = coop && coop[0] == '0' && coop[1] == '\0';
         g_have_rmsnorm_q8_matmul2_coop = (!coopOff && buildKernel(g_kern[K_RMSNORM_Q8_MATMUL2_COOP],
             P("rmsnorm_q8_matmul2_coop.spv"), 8, 4 * sizeof(int) + sizeof(float))) ? 1 : 0;
         g_have_qwen35_gdn_q8_in_proj = buildKernel(
@@ -2270,6 +2287,12 @@ void fvk_debug_d2h_staging_failure_once(int enabled) {
 int fvk_debug_select_q8_gateup_coop(int enabled) {
     int prev = g_have_rmsnorm_q8_matmul2_coop;
     g_have_rmsnorm_q8_matmul2_coop = (enabled && g_kern[K_RMSNORM_Q8_MATMUL2_COOP].pipe != VK_NULL_HANDLE) ? 1 : 0;
+    return prev;
+}
+int fvk_debug_select_iq_matvec(int fmt, int enabled) {
+    if (fmt < 0 || fmt >= FVK_IQ_FORMATS) return 0;
+    int prev = g_have_iq[fmt];
+    g_have_iq[fmt] = (enabled && g_kern[kIQKernel[fmt]].pipe != VK_NULL_HANDLE) ? 1 : 0;
     return prev;
 }
 int fvk_debug_select_q2k_matvec(int enabled) {
@@ -3401,6 +3424,36 @@ extern "C" void fvk_rmsnorm_q2k_matmul2_f32(const void* dW0, const void* dW1,
     }
     uint32_t groups = ((uint32_t)(out0 + out1) + 255u) / 256u;
     dispatch(g_kern[K_RMSNORM_Q2K_MATMUL2], bufs, &pc, sizeof(pc), groups);
+}
+// Native IQ-quant matvec (iq*_matvec.spv). mode 0: Y[t] = W0 X[t] for t < tokens;
+// mode 1: Y += W0 x (tokens == 1); mode 2: Y = W0 x and Y1 = W1 x with W1 the same format
+// (tokens == 1). x is already normalized/activated by the caller.
+extern "C" int fvk_iq_matvec_available(int fmt) {
+    return (fmt >= 0 && fmt < FVK_IQ_FORMATS && g_have_iq[fmt]) ? 1 : 0;
+}
+extern "C" void fvk_iq_matvec_f32(int fmt, const void* dW0, const void* dX, void* dY,
+                                  const void* dW1, void* dY1,
+                                  int out0, int out1, int in, int tokens, int mode) {
+    if (!fvk_iq_matvec_available(fmt) || tokens < 1 || mode < 0 || mode > 2 || out0 <= 0 ||
+        in <= 0 || (in % 256) != 0 || (mode != 0 && tokens != 1) ||
+        (mode == 2 && (!dW1 || !dY1 || out1 <= 0))) {
+        fprintf(stderr, "fak-vulkan: invalid IQ matvec call fmt=%d mode=%d tokens=%d\n", fmt, mode, tokens);
+        abort();
+    }
+    int aux = mode == 2 ? out1 : (mode == 1 ? -1 : 0);
+    struct PC { int out, in, p, aux; float eps; } pc{out0, in, tokens, aux, 0.0f};
+    const void* w1 = mode == 2 ? dW1 : dW0;
+    void* y1 = mode == 2 ? dY1 : dY;
+    Buffer* bufs[7] = {
+        B((void*)dW0), B((void*)dX), B((void*)dX), B(dY),
+        B((void*)w1), B((void*)dX), B(y1),
+    };
+    uint32_t groups = ((uint32_t)out0 + kIQMatvecRows - 1u) / kIQMatvecRows;
+    if (mode == 2) groups += ((uint32_t)out1 + kIQMatvecRows - 1u) / kIQMatvecRows;
+    // The shaders stride over row groups, so a capped grid amortizes their per-workgroup
+    // codebook setup while still filling the device.
+    if (groups > kIQMatvecMaxGroups) groups = kIQMatvecMaxGroups;
+    dispatch(g_kern[kIQKernel[fmt]], bufs, &pc, sizeof(pc), groups, mode == 0 ? (uint32_t)tokens : 1u);
 }
 extern "C" void fvk_dispatch_profile_snapshot(fvk_dispatch_profile* out) {
     if (!out) return;

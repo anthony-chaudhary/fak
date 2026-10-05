@@ -95,10 +95,11 @@ type Shadowed struct {
 //	rank 2 — Q4_K   : 4-bit code class: q4_k's nibble codes. A shadow of a q4_k plane
 //	           I4     : from q8_0/i8 (or above) is an exactness upgrade; a q8_0 shadow
 //	           FP4    : of q4_k is NOT wider by bit width, so the classes are split here.
+//	           IQ4_XS
 //	rank 1 — Q2_0   : <=3-bit class: ternary/packed 2-bit and the i-quant 3-/2-bit
 //	           Q2_K   : codes. The narrowest band; every wider class exact-ifies one.
 //	           Q3_K
-//	           IQ3_XXS, IQ3_S, IQ2_XXS
+//	           IQ3_XXS, IQ3_S, IQ2_XXS, IQ1_S, IQ2_XS, IQ2_S
 //
 // It is a STRICT TOTAL ORDER, and crucially it is strictly DECREASING in real bit
 // width as the rank falls: no 4-bit code shares a rank with an 8-bit code, so a
@@ -119,9 +120,9 @@ func (d Dtype) widthRank() int {
 		return 4
 	case Q6_K, Q5_K:
 		return 3
-	case Q4_K, I4, FP4:
+	case Q4_K, I4, FP4, IQ4_XS:
 		return 2
-	case Q2_0, Q2_K, Q3_K, IQ3_XXS, IQ3_S, IQ2_XXS:
+	case Q2_0, Q2_K, Q3_K, IQ3_XXS, IQ3_S, IQ2_XXS, IQ1_S, IQ2_XS, IQ2_S:
 		return 1
 	default:
 		return 0

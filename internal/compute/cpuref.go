@@ -169,7 +169,7 @@ func (c *cpuBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
 	case F32, Q8_0, Q4_K, Q5_K, Q6_K, Q2_K, Q3_K, IQ2_XXS, Q2_0:
 		return true
 	default:
-		return false
+		return isRawIQ(dt)
 	}
 }
 
@@ -243,7 +243,16 @@ func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
 			y[o] = q2RowDot(raw[o*rowBytes:(o+1)*rowBytes], ws[o*nblk:o*nblk+nblk], xf, blk)
 		}
 	default:
-		panic("compute: cpu-ref MatMul unsupported weight dtype " + w.Dtype.String())
+		f, ok := rawIQFormats[w.Dtype]
+		if !ok {
+			panic("compute: cpu-ref MatMul unsupported weight dtype " + w.Dtype.String())
+		}
+		raw := i8AsBytes(w.buf.(HostBuffer).I8())
+		rowBytes := (in / rawIQSuper) * f.blockBytes
+		buf := make([]float32, rawIQSuper)
+		for o := 0; o < out; o++ {
+			y[o] = rawIQRowDot(f, raw[o*rowBytes:(o+1)*rowBytes], xf, buf)
+		}
 	}
 	return c.result([]int{out}, y)
 }
@@ -349,7 +358,19 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 			}
 		}
 	default:
-		panic("compute: cpu-ref BatchedMatMul unsupported weight dtype " + w.Dtype.String())
+		f, ok := rawIQFormats[w.Dtype]
+		if !ok {
+			panic("compute: cpu-ref BatchedMatMul unsupported weight dtype " + w.Dtype.String())
+		}
+		raw := i8AsBytes(w.buf.(HostBuffer).I8())
+		rowBytes := (in / rawIQSuper) * f.blockBytes
+		buf := make([]float32, rawIQSuper)
+		for o := 0; o < out; o++ {
+			row := raw[o*rowBytes : (o+1)*rowBytes]
+			for t := 0; t < P; t++ {
+				Y[t*out+o] = rawIQRowDot(f, row, Xf[t*in:t*in+in], buf)
+			}
+		}
 	}
 	return makeTensor(c, F32, RowMajor, []int{P, out}, nil, &hostBuf{f32: Y})
 }
