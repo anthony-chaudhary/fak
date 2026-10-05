@@ -1026,6 +1026,7 @@ front page.
 - [`docs/notes/CONCEPT-HOT-SWAPPABLE-SERVING-ARCHITECTURE-2026-09-03.md`](docs/notes/CONCEPT-HOT-SWAPPABLE-SERVING-ARCHITECTURE-2026-09-03.md) — Dynamic zero-downtime serving reconfiguration, monotonic epochs, and transient sweep APIs for autonomous RSI agents.
 - [`docs/notes/CONCEPT-NATIVE-HARNESS-DATABASE-AND-DATASLOT-LIFECYCLE-2026-09-03.md`](docs/notes/CONCEPT-NATIVE-HARNESS-DATABASE-AND-DATASLOT-LIFECYCLE-2026-09-03.md) — Internal session persistence, local database discovery, query, and migration safety in the native fak harness (#10646).
 - [`docs/notes/CONCEPT-STUDY-PERFORMANCE-OSS-PROCESS-FAILURES-2026-09-03.md`](docs/notes/CONCEPT-STUDY-PERFORMANCE-OSS-PROCESS-FAILURES-2026-09-03.md) — Forensic study of engineering process failures across high-commit OSS inference repositories (vLLM, llama.cpp, SGLang, TRT-LLM).
+- [`docs/notes/IN-BATCH-PREFIX-FUSION-MEASUREMENT-2026-10-04.md`](docs/notes/IN-BATCH-PREFIX-FUSION-MEASUREMENT-2026-10-04.md) — In-batch cold-prefix fusion (fak#1914): production reachability shipped, resident-chunked integration bounded as ABSTAIN (recurrent cache cannot truncate), and an honest head-to-head measurement of ~1.0x vs the tuned warm-cache next-best alternative (the 1.4x claim is refuted).
 
 ## Extended documentation index
 
