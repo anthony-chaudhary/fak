@@ -353,6 +353,12 @@ type Config struct {
 	//
 	// `fak serve` feeds this from --stream-soft-progress-timeout.
 	StreamSoftProgressTimeout time.Duration
+	// LlamaSlotAffinity opts every proxy planner into llama-server prefix slot pinning
+	// (agent.HTTPPlanner.LlamaSlotAffinity): an OpenAI-provider upstream is probed once at
+	// /props and, only if it reports llama-server total_slots, requests carry id_slot and
+	// cache_prompt. False (the zero value) never probes. `fak serve` feeds this from
+	// --llama-slot-affinity.
+	LlamaSlotAffinity bool
 	// FirstTokenWatchdog is the resolved buffered first-token watchdog window: how long a
 	// buffered planner call may run before it produces its completion (its first token)
 	// before the turn fails as a typed 504 upstream_stalled. ZERO (every caller that never

@@ -49,7 +49,7 @@ func TestLlamaSlotAffinityPinsSharedPrefixToOneSlot(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	t.Cleanup(ts.Close)
-	p := &HTTPPlanner{Provider: ProviderOpenAI, BaseURL: ts.URL + "/v1", ModelID: "m"}
+	p := &HTTPPlanner{Provider: ProviderOpenAI, BaseURL: ts.URL + "/v1", ModelID: "m", LlamaSlotAffinity: true}
 	tools := []ToolDef{{Type: "function", Function: ToolDefFunction{Name: "read_file"}}}
 	parent := []Message{{Role: RoleSystem, Content: "shared harness prompt"}, {Role: RoleUser, Content: "coordinate"}}
 	child := []Message{{Role: RoleSystem, Content: "shared harness prompt"}, {Role: RoleUser, Content: "subtask 3"}}
@@ -90,7 +90,7 @@ func TestLlamaSlotAffinityOmittedForNonLlamaUpstream(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	t.Cleanup(ts.Close)
-	p := &HTTPPlanner{Provider: ProviderOpenAI, BaseURL: ts.URL + "/v1", ModelID: "m"}
+	p := &HTTPPlanner{Provider: ProviderOpenAI, BaseURL: ts.URL + "/v1", ModelID: "m", LlamaSlotAffinity: true}
 	msgs := []Message{{Role: RoleSystem, Content: "s"}, {Role: RoleUser, Content: "u"}}
 	_ = slotTestBody(t, p, msgs, nil)
 	select {

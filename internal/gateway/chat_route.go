@@ -220,6 +220,7 @@ func (s *Server) bindChatRoute(ctx context.Context, requestedModel string) (*cha
 	locality := localityVendor
 	if target.Zone().SelfHosted() {
 		locality = localitySelfHosted
+		planner.LlamaSlotAffinity = s.llamaSlotAffinity
 	}
 	return &chatRouteBinding{
 		RequestedModel: requestedModel,

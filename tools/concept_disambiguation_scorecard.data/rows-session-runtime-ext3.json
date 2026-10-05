@@ -277,6 +277,64 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "x-session-runtime-llamaslotaffinity",
+      "canonical": "LlamaSlotAffinity (planner opt-in)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The HTTPPlanner / gateway Config opt-in (fed by `fak serve --llama-slot-affinity`) that lets an OpenAI-provider planner discover a llama-server upstream's total_slots via /props and pin requests sharing a system prompt and tool catalog to one slot; false sends no probe and leaves the body untouched.",
+      "distinction": "The per-planner SWITCH that permits slot pinning - not withLlamaSlotAffinity, the request-body rewrite it gates, and not id_slot, the llama-server wire field the rewrite emits.",
+      "distinct_from": [
+        "x-session-runtime-withllamaslotaffinity",
+        "x-session-runtime-idslot",
+        "slot"
+      ],
+      "aliases": [],
+      "grounding": "LlamaSlotAffinity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-withllamaslotaffinity",
+      "canonical": "withLlamaSlotAffinity (request rewrite)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The prepareUpstream step that, for an opted-in planner whose upstream has answered /props with llama-server total_slots, adds id_slot = crc32(stable prefix) % total_slots and cache_prompt=true to the outbound ExtraBody without overriding operator-set keys; otherwise returns the body unchanged and kicks off background discovery.",
+      "distinction": "The per-request BODY REWRITE - not LlamaSlotAffinity, the opt-in switch that gates it, and not id_slot, the single field it writes.",
+      "distinct_from": [
+        "x-session-runtime-llamaslotaffinity",
+        "x-session-runtime-idslot"
+      ],
+      "aliases": [],
+      "grounding": "withLlamaSlotAffinity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-idslot",
+      "canonical": "id_slot (llama-server request field)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The llama-server completion request field naming which server slot (KV cache) serves the request; fak sets it to crc32(shared prefix) % total_slots so sibling subagents reuse the parent's prefix KV.",
+      "distinction": "The upstream WIRE FIELD selecting a llama-server slot - not Slot, fak's own in-kernel serving slot, and not LlamaSlotAffinity, the opt-in that decides whether fak sends it.",
+      "distinct_from": [
+        "slot",
+        "x-session-runtime-llamaslotaffinity"
+      ],
+      "aliases": [],
+      "grounding": "id_slot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
-  ]
+]
 }

@@ -704,6 +704,11 @@ type HTTPPlanner struct {
 	SoftStallNotify      func(SoftProgressStall)
 	Client               *http.Client
 	QuarantineTranscript bool
+	// LlamaSlotAffinity opts this planner into llama-server prefix slot pinning
+	// (llama_slot_affinity.go): a background GET /props discovers total_slots and, once
+	// known, requests carry id_slot/cache_prompt. False (the zero value) sends no probe
+	// and leaves the body untouched, so generic OpenAI-compatible upstreams never see it.
+	LlamaSlotAffinity bool
 
 	// CoherenceShaper, when non-nil, is applied to the outbound messages just before
 	// the request is marshaled — the GLM52-HOSTED-CACHE-COHERENCE §A4 hook. The agent

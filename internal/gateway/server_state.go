@@ -1032,6 +1032,9 @@ type Server struct {
 	// the plan member string as the route (the pre-#2528 path). It is a validated value
 	// (New() calls Validate), so Resolve's dangling-ref/locality invariants hold.
 	roster *modelroute.Roster
+	// llamaSlotAffinity is Config.LlamaSlotAffinity, kept so a per-route chat planner to a
+	// self-hosted (llama-server-capable) account opts into slot pinning like the boot planner.
+	llamaSlotAffinity bool
 
 	// native, when true, routes a non-streaming /v1/messages turn through fak's OWN agent
 	// loop (agent.RunArm) — the native-harness keystone (#1316). nativeMaxTurns bounds the
