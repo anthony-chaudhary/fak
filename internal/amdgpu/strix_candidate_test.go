@@ -4,11 +4,125 @@ import (
 	"encoding/json"
 	"math"
 	"os"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
 )
+
+// TestStrixCandidateRegistry_StartsUncredited is the ticket witness: a freshly
+// constructed registry must contain no receipt-free PROMOTED rows; historical
+// constants remain reference-only.
+func TestStrixCandidateRegistry_StartsUncredited(t *testing.T) {
+	reg := NewStrixCandidateRegistry()
+	sb := reg.Scoreboard()
+	if len(sb) != 7 {
+		t.Fatalf("expected 7 reference rows, got %d", len(sb))
+	}
+	for _, c := range sb {
+		if c.Verdict == VerdictPromoted {
+			t.Errorf("fresh registry row %s is PROMOTED without trusted evidence: %s", c.CandidateID, c.Reason)
+		}
+		if c.Verdict != StrixCandidateVerdict("UNVERIFIED") {
+			t.Errorf("fresh registry row %s verdict = %q, want %q", c.CandidateID, c.Verdict, StrixCandidateVerdict("UNVERIFIED"))
+		}
+	}
+}
+
+// TestStrixCandidateRegistry_RejectsCallerBaselinePromotion is the ticket
+// witness: a caller-supplied inflated baseline cannot replace the pinned
+// denominator, and a receipt-free raw evaluation cannot award promotion.
+func TestStrixCandidateRegistry_RejectsCallerBaselinePromotion(t *testing.T) {
+	reg := NewStrixCandidateRegistry()
+
+	// The caller tries to inflate the baseline to 1_000_000µs with a 1µs
+	// candidate to mint an enormous speedup. The pinned baseline (451µs
+	// candidate / 75561µs baseline) must govern the recompute instead.
+	comp, err := reg.EvaluateCandidate(StrixAblationResult{
+		Dimension: "target",
+		Feature:   CandidateIDTargetQ4KGEMV,
+		BaselineArm: StrixArmResult{
+			Name:      "attacker_inflated_baseline",
+			LatencyUS: 1000000,
+		},
+		CandidateArm: StrixArmResult{
+			Name:      "vulkan_gpu_q4k",
+			LatencyUS: 1,
+		},
+		CosineParity: 0.999999,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if comp.BaselineLatencyUS != 75561 {
+		t.Errorf("caller baseline replaced the pinned denominator: got %d, want 75561", comp.BaselineLatencyUS)
+	}
+	if comp.Verdict == VerdictPromoted {
+		t.Errorf("receipt-free raw evaluation awarded promotion: %s", comp.Reason)
+	}
+	if comp.Verdict != StrixCandidateVerdict("UNVERIFIED") {
+		t.Errorf("got verdict %q, want %q", comp.Verdict, StrixCandidateVerdict("UNVERIFIED"))
+	}
+	if _, ok := reg.GetComparison(CandidateIDTargetQ4KGEMV); ok {
+		if promoted, _ := reg.GetComparison(CandidateIDTargetQ4KGEMV); promoted.Verdict == VerdictPromoted {
+			t.Error("scoreboard row became PROMOTED from a receipt-free evaluation")
+		}
+	}
+}
+
+// TestStrixCandidateRegistry_PromotesTrustedReceipt is the ticket witness: only
+// an authority-backed receipt, recomputed against the pinned baseline, may
+// transition a row to PROMOTED.
+func TestStrixCandidateRegistry_PromotesTrustedReceipt(t *testing.T) {
+	reg := NewStrixCandidateRegistry()
+
+	receipt := validStrixReceipt(t)
+	receipt.Ablations = []StrixAblationResult{
+		{
+			Dimension: "target",
+			Feature:   "cpu_vs_vulkan_gpu",
+			BaselineArm: StrixArmResult{
+				Name:      "attacker_inflated_baseline",
+				LatencyUS: 999999,
+				Samples:   1,
+			},
+			CandidateArm: StrixArmResult{
+				Name:      "vulkan_gpu_q4k",
+				LatencyUS: 400,
+				Samples:   1,
+			},
+			Speedup: 2500, LiftRatio: 2500, CosineParity: 0.999999, Verdict: "VERIFIED_LIFT", Evidence: validStrixExecutionEvidence(),
+		},
+	}
+	receipt.SelectedAblations = 1
+	receipt.ExecutedAblations = 1
+	receipt.Provenance.ExecutionManifestSHA256 = executionManifestDigest(receipt)
+	authorizeStrixReceiptForTest(t, receipt)
+	digest, err := receipt.ComputeDigest()
+	if err != nil {
+		t.Fatalf("ComputeDigest failed: %v", err)
+	}
+	receipt.Digest = digest
+
+	if err := receipt.Validate(); err != nil || !receipt.authenticatedPass() {
+		t.Fatalf("trusted receipt must validate and carry authority: %v", err)
+	}
+
+	comparisons, err := reg.EvaluateReceipt(receipt)
+	if err != nil || len(comparisons) != 1 {
+		t.Fatalf("trusted receipt evaluation failed: comparisons=%d err=%v", len(comparisons), err)
+	}
+	got := comparisons[0]
+	if got.Verdict != VerdictPromoted {
+		t.Fatalf("trusted receipt did not promote: verdict=%q reason=%s", got.Verdict, got.Reason)
+	}
+	// The recomputed speedup must use the pinned baseline, not the caller's.
+	if got.BaselineLatencyUS != 75561 {
+		t.Errorf("trusted promotion used caller baseline: got %d, want 75561", got.BaselineLatencyUS)
+	}
+	if after, ok := reg.GetComparison(CandidateIDTargetQ4KGEMV); !ok || after.Verdict != VerdictPromoted {
+		t.Fatalf("scoreboard not promoted from trusted receipt: %+v", after)
+	}
+}
 
 func TestNewStrixCandidateRegistry_CanonicalBaselines(t *testing.T) {
 	reg := NewStrixCandidateRegistry()
@@ -176,11 +290,13 @@ func TestScoreboard_InitialCanonicalState(t *testing.T) {
 		if sb[i].CandidateID != expID {
 			t.Errorf("scoreboard[%d].CandidateID = %q, want %q", i, sb[i].CandidateID, expID)
 		}
-		if sb[i].Verdict != VerdictPromoted {
-			t.Errorf("scoreboard[%d] %s verdict = %q, want %q", i, expID, sb[i].Verdict, VerdictPromoted)
+		// A freshly constructed registry carries no trusted evidence, so every
+		// historical row is reference-only: never PROMOTED.
+		if sb[i].Verdict != StrixCandidateVerdict("UNVERIFIED") {
+			t.Errorf("scoreboard[%d] %s verdict = %q, want %q", i, expID, sb[i].Verdict, StrixCandidateVerdict("UNVERIFIED"))
 		}
 		if sb[i].Speedup <= 1.0 {
-			t.Errorf("scoreboard[%d] %s speedup = %.2f, expected > 1.0", i, expID, sb[i].Speedup)
+			t.Errorf("scoreboard[%d] %s reference speedup = %.2f, expected > 1.0", i, expID, sb[i].Speedup)
 		}
 		if sb[i].CosineParity < DefaultMinParity {
 			t.Errorf("scoreboard[%d] %s parity = %.6f, expected >= %.6f", i, expID, sb[i].CosineParity, DefaultMinParity)
@@ -208,9 +324,11 @@ func TestScoreboard_InitialCanonicalState(t *testing.T) {
 	}
 }
 
-func TestEvaluateCandidate_Promoted(t *testing.T) {
+func TestEvaluateCandidate_RawPathUnverified(t *testing.T) {
 	reg := NewStrixCandidateRegistry()
 
+	// A receipt-free result whose metrics would otherwise pass thresholds is
+	// reference-only: the raw path can never award promotion.
 	result := StrixAblationResult{
 		Dimension: "target",
 		Feature:   CandidateIDTargetQ4KGEMV,
@@ -220,7 +338,7 @@ func TestEvaluateCandidate_Promoted(t *testing.T) {
 		},
 		CandidateArm: StrixArmResult{
 			Name:      "vulkan_gpu_q4k",
-			LatencyUS: 400, // Faster than previous 451µs
+			LatencyUS: 400, // Faster than the pinned 451µs candidate reference
 		},
 		CosineParity: 0.999999,
 	}
@@ -230,8 +348,8 @@ func TestEvaluateCandidate_Promoted(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if comp.Verdict != VerdictPromoted {
-		t.Errorf("got verdict %q, want %q (reason: %s)", comp.Verdict, VerdictPromoted, comp.Reason)
+	if comp.Verdict != StrixCandidateVerdict("UNVERIFIED") {
+		t.Errorf("got verdict %q, want %q (reason: %s)", comp.Verdict, StrixCandidateVerdict("UNVERIFIED"), comp.Reason)
 	}
 	if comp.Speedup < 180.0 {
 		t.Errorf("got speedup %.2f, want >= 180.0", comp.Speedup)
@@ -240,7 +358,7 @@ func TestEvaluateCandidate_Promoted(t *testing.T) {
 		t.Errorf("got latency delta %d, want %d", comp.LatencyDeltaUS, 400-75561)
 	}
 
-	// Verify scoreboard updated
+	// Verify scoreboard updated (as UNVERIFIED, never PROMOTED)
 	updated, ok := reg.GetComparison(CandidateIDTargetQ4KGEMV)
 	if !ok || updated == nil {
 		t.Fatal("expected comparison in scoreboard")
@@ -248,22 +366,22 @@ func TestEvaluateCandidate_Promoted(t *testing.T) {
 	if updated.CandidateLatencyUS != 400 {
 		t.Errorf("scoreboard candidate latency = %d, want 400", updated.CandidateLatencyUS)
 	}
+	if updated.Verdict != StrixCandidateVerdict("UNVERIFIED") {
+		t.Errorf("scoreboard verdict = %q, want %q", updated.Verdict, StrixCandidateVerdict("UNVERIFIED"))
+	}
 }
 
 func TestEvaluateCandidate_Neutral_WithinNoiseBand(t *testing.T) {
 	reg := NewStrixCandidateRegistry()
 
-	// Candidate speedup is 1.02 (within the neutral 5% noise band)
+	// Speedup is computed against the pinned baseline (75561µs). A candidate of
+	// 74080µs yields 1.0200x, inside the neutral [0.95, 1.05) noise band.
 	result := StrixAblationResult{
 		Dimension: "target",
 		Feature:   CandidateIDTargetQ4KGEMV,
-		BaselineArm: StrixArmResult{
-			Name:      "cpu_q4_reference",
-			LatencyUS: 1000,
-		},
 		CandidateArm: StrixArmResult{
 			Name:      "vulkan_gpu_q4k",
-			LatencyUS: 980, // speedup = 1000/980 = 1.0204x (< 1.05 threshold)
+			LatencyUS: 74080,
 		},
 		CosineParity: 0.999999,
 	}
@@ -284,17 +402,13 @@ func TestEvaluateCandidate_Neutral_WithinNoiseBand(t *testing.T) {
 func TestEvaluateCandidate_Neutral_HighNoise(t *testing.T) {
 	reg := NewStrixCandidateRegistry()
 
-	// High speedup (1.50x), good parity, but noise is 8% (> 5% max tolerance)
+	// 1.50x against the pinned topology baseline, with noise 8% (> 5% limit).
 	result := StrixAblationResult{
 		Dimension: "topology",
 		Feature:   CandidateIDTopologyNormMM,
-		BaselineArm: StrixArmResult{
-			Name:      "discrete_rmsnorm_then_matmul",
-			LatencyUS: 1500,
-		},
 		CandidateArm: StrixArmResult{
 			Name:      "fused_rmsnorm_matmul",
-			LatencyUS: 1000,
+			LatencyUS: 18850, // 28275/18850 = 1.50x
 		},
 		CosineParity: 0.999999,
 	}
@@ -315,17 +429,13 @@ func TestEvaluateCandidate_Neutral_HighNoise(t *testing.T) {
 func TestEvaluateCandidate_Regressed_Slower(t *testing.T) {
 	reg := NewStrixCandidateRegistry()
 
-	// Candidate takes longer than baseline (speedup 0.80x < 0.95 floor)
+	// 0.80x against the pinned baseline (75561µs): candidate 94451µs.
 	result := StrixAblationResult{
 		Dimension: "target",
 		Feature:   CandidateIDTargetQ4KGEMV,
-		BaselineArm: StrixArmResult{
-			Name:      "cpu_q4_reference",
-			LatencyUS: 1000,
-		},
 		CandidateArm: StrixArmResult{
 			Name:      "vulkan_gpu_q4k",
-			LatencyUS: 1250, // speedup = 0.80x
+			LatencyUS: 94451, // 75561/94451 = 0.80x
 		},
 		CosineParity: 0.999999,
 	}
@@ -426,21 +536,18 @@ func TestEvaluateCandidate_Regressed_NonPositiveLatency(t *testing.T) {
 func TestEvaluateCandidate_ThroughputAndCompressionCalculations(t *testing.T) {
 	reg := NewStrixCandidateRegistry()
 
+	// Metrics are computed against the registry-owned pinned baseline. For
+	// quant.q4k_vs_f32 the pinned baseline allocates 356515840 bytes.
 	result := StrixAblationResult{
 		Dimension: "quantization",
 		Feature:   CandidateIDQuantQ4KvsF32,
-		BaselineArm: StrixArmResult{
-			Name:           "f32_dense_weights",
-			LatencyUS:      1820,
-			ThroughputTokS: 50.0,
-			AllocatedBytes: 100000,
-		},
 		CandidateArm: StrixArmResult{
 			Name:           "q4k_super_blocks",
 			LatencyUS:      428,
 			ThroughputTokS: 150.0,
 			AllocatedBytes: 25000,
 		},
+		LiftRatio:    3.0,
 		CosineParity: 0.999999,
 	}
 
@@ -449,20 +556,23 @@ func TestEvaluateCandidate_ThroughputAndCompressionCalculations(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Throughput
-	if math.Abs(comp.ThroughputDelta-100.0) > 0.001 {
-		t.Errorf("got throughput delta %.2f, want 100.0", comp.ThroughputDelta)
+	// Compression ratio uses the pinned baseline bytes (356515840) over the
+	// candidate bytes (25000).
+	wantCompression := float64(356515840) / 25000.0
+	if math.Abs(comp.CompressionRatio-wantCompression) > 0.01 {
+		t.Errorf("got compression ratio %.2f, want %.2f", comp.CompressionRatio, wantCompression)
+	}
+	if comp.AllocatedBytesDelta != 25000-356515840 {
+		t.Errorf("got alloc delta %d, want %d", comp.AllocatedBytesDelta, 25000-356515840)
+	}
+
+	// The pinned baseline has no throughput reference, so lift falls back to the
+	// caller-provided ratio and the candidate throughput is preserved.
+	if math.Abs(comp.CandidateThroughputTokS-150.0) > 0.001 {
+		t.Errorf("got candidate throughput %.2f, want 150.0", comp.CandidateThroughputTokS)
 	}
 	if math.Abs(comp.LiftRatio-3.0) > 0.001 {
 		t.Errorf("got lift ratio %.2f, want 3.0", comp.LiftRatio)
-	}
-
-	// Memory
-	if comp.AllocatedBytesDelta != -75000 {
-		t.Errorf("got alloc delta %d, want -75000", comp.AllocatedBytesDelta)
-	}
-	if math.Abs(comp.CompressionRatio-4.0) > 0.001 {
-		t.Errorf("got compression ratio %.2f, want 4.0", comp.CompressionRatio)
 	}
 }
 
@@ -535,14 +645,21 @@ func TestEvaluateReceipt(t *testing.T) {
 		t.Fatalf("ablation receipt must be structurally valid and authenticated: %v", err)
 	}
 	if receipt.CreditEligible() {
-		t.Fatal("ablation-bearing receipt must not be credit eligible")
+		t.Fatal("ablation-bearing receipt must not be physical-credit eligible")
 	}
-	before := reg.Scoreboard()
-	if comparisons, err := reg.EvaluateReceipt(receipt); err == nil || len(comparisons) != 0 {
-		t.Fatalf("ineligible ablation receipt was evaluated: comparisons=%d err=%v", len(comparisons), err)
+	// Authority-backed ablation receipts are the trusted promotion path even
+	// though they are outside the narrower physical-credit envelope.
+	comparisons, err := reg.EvaluateReceipt(receipt)
+	if err != nil || len(comparisons) != 2 {
+		t.Fatalf("authority-backed ablation receipt was not evaluated: comparisons=%d err=%v", len(comparisons), err)
 	}
-	if after := reg.Scoreboard(); !reflect.DeepEqual(after, before) {
-		t.Fatalf("rejected receipt mutated scoreboard: before=%v after=%v", before, after)
+	for _, c := range comparisons {
+		if c.Verdict != VerdictPromoted {
+			t.Errorf("comparison %s verdict = %q, want %q (reason: %s)", c.CandidateID, c.Verdict, VerdictPromoted, c.Reason)
+		}
+	}
+	if after, ok := reg.GetComparison(CandidateIDTargetQ4KGEMV); !ok || after.Verdict != VerdictPromoted {
+		t.Fatalf("trusted receipt did not promote target.q4k_gemv: %+v", after)
 	}
 }
 
@@ -599,8 +716,8 @@ func TestRegisterBaseline_Custom(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if comp.Verdict != VerdictPromoted {
-		t.Errorf("got verdict %q, want PROMOTED", comp.Verdict)
+	if comp.Verdict != StrixCandidateVerdict("UNVERIFIED") {
+		t.Errorf("got verdict %q, want UNVERIFIED for a receipt-free raw evaluation", comp.Verdict)
 	}
 
 	// Test validation error on empty CandidateID
@@ -619,8 +736,8 @@ func TestFormatScoreboard(t *testing.T) {
 	if !strings.Contains(formatted, CandidateIDTargetQ4KGEMV) {
 		t.Errorf("expected table to contain %s", CandidateIDTargetQ4KGEMV)
 	}
-	if !strings.Contains(formatted, "PROMOTED") {
-		t.Error("expected table to contain PROMOTED")
+	if !strings.Contains(formatted, "UNVERIFIED") {
+		t.Error("expected table to contain UNVERIFIED reference rows")
 	}
 }
 

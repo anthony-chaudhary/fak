@@ -32,9 +32,10 @@ const (
 type StrixCandidateVerdict string
 
 const (
-	VerdictPromoted  StrixCandidateVerdict = "PROMOTED"  // Speedup >= threshold, parity >= 0.999900, noise <= 5%
-	VerdictNeutral   StrixCandidateVerdict = "NEUTRAL"   // Within noise band or noise too high
-	VerdictRegressed StrixCandidateVerdict = "REGRESSED" // Slower or parity violated
+	VerdictPromoted   StrixCandidateVerdict = "PROMOTED"   // Trusted receipt only: speedup >= threshold, parity >= 0.999900, noise <= 5%
+	VerdictNeutral    StrixCandidateVerdict = "NEUTRAL"    // Within noise band or noise too high
+	VerdictRegressed  StrixCandidateVerdict = "REGRESSED"  // Slower or parity violated
+	VerdictUnverified StrixCandidateVerdict = "UNVERIFIED" // Receipt-free/reference-only: never earns credit
 )
 
 // StrixCandidateBaseline represents a pinned reference baseline for a specific candidate optimization.
@@ -377,22 +378,21 @@ func (r *StrixCandidateRegistry) seedCanonicalBaselines() {
 		}
 
 		parity := canonicalParities[b.CandidateID]
-		initialResult := StrixAblationResult{
+		// Historical constants are reference metadata only. They seed the
+		// scoreboard as UNVERIFIED so a freshly constructed registry reports no
+		// wins before a trusted current receipt is evaluated; only trusted
+		// evidence may transition a row to PROMOTED.
+		comp, _ := r.evaluateCandidateInternal(&b, StrixAblationResult{
 			Dimension:    b.Dimension,
 			Feature:      b.Feature,
-			BaselineArm:  b.BaselineArm,
 			CandidateArm: b.PinnedCandidate,
-			Speedup:      b.ReferenceSpeedup(),
-			LiftRatio:    b.ReferenceSpeedup(),
 			CosineParity: parity,
-			Verdict:      "VERIFIED_LIFT",
-		}
-		comp, _ := r.evaluateCandidateInternal(&b, initialResult, candidateEvalConfig{
+		}, candidateEvalConfig{
 			noiseRatio:       0.0,
 			speedupThreshold: b.SpeedupThreshold,
 			minParity:        b.MinParity,
 			noiseBand:        b.NoiseBand,
-		})
+		}, false)
 		r.scoreboard[b.CandidateID] = comp
 	}
 }
@@ -488,7 +488,7 @@ func (r *StrixCandidateRegistry) EvaluateCandidateWithOptions(result StrixAblati
 		}
 	}
 
-	comp, err := r.evaluateCandidateInternal(baseline, result, cfg)
+	comp, err := r.evaluateCandidateInternal(baseline, result, cfg, false)
 	if err != nil {
 		return nil, err
 	}
@@ -498,8 +498,10 @@ func (r *StrixCandidateRegistry) EvaluateCandidateWithOptions(result StrixAblati
 }
 
 // EvaluateReceipt evaluates all ablations contained in a validation receipt against the registry.
-// It requires physical credit eligibility before any candidate evaluation. The
-// current argmax-only credit envelope admits no ablations or scoreboard writes.
+// It requires verifier-controlled execution authority (an authenticated pass) before any
+// candidate evaluation; a plain rehashed JSON document cannot award credit. This is the
+// only path that may transition a registry row to PROMOTED, and it always recomputes the
+// verdict against the registry-owned pinned baseline.
 func (r *StrixCandidateRegistry) EvaluateReceipt(receipt *StrixValidationReceipt) ([]StrixCandidateComparison, error) {
 	if receipt == nil {
 		return nil, fmt.Errorf("amdgpu: receipt is nil")
@@ -520,16 +522,41 @@ func (r *StrixCandidateRegistry) EvaluateReceipt(receipt *StrixValidationReceipt
 	if err := receipt.Validate(); err != nil {
 		return nil, fmt.Errorf("amdgpu: validation artifact invalid: %w", err)
 	}
-	if !receipt.CreditEligible() {
-		return nil, fmt.Errorf("amdgpu: validation artifact is not eligible for authenticated physical execution credit")
+	// Trust = verifier-controlled execution authority observed over the complete
+	// source/build/device/cleanup path, not a caller-recomputable digest.
+	if !receipt.authenticatedPass() {
+		return nil, fmt.Errorf("amdgpu: validation artifact lacks verifier-controlled execution authority")
 	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	var comparisons []StrixCandidateComparison
 	for _, ab := range receipt.Ablations {
-		comp, err := r.EvaluateCandidate(ab)
-		if err != nil {
+		baseline, ok := r.findBaselineLocked(ab.Feature, ab.Dimension, ab.CandidateArm.Name)
+		if !ok {
 			continue // Skip unindexed ablations
 		}
+		cfg := candidateEvalConfig{
+			noiseRatio:       0.0,
+			speedupThreshold: baseline.SpeedupThreshold,
+			minParity:        baseline.MinParity,
+			noiseBand:        baseline.NoiseBand,
+		}
+		if cfg.speedupThreshold <= 0 {
+			cfg.speedupThreshold = DefaultSpeedupThreshold
+		}
+		if cfg.minParity <= 0 {
+			cfg.minParity = DefaultMinParity
+		}
+		if cfg.noiseBand <= 0 {
+			cfg.noiseBand = DefaultNoiseBand
+		}
+		comp, err := r.evaluateCandidateInternal(baseline, ab, cfg, true)
+		if err != nil {
+			continue
+		}
+		r.scoreboard[baseline.CandidateID] = comp
 		comparisons = append(comparisons, *comp)
 	}
 	return comparisons, nil
@@ -651,15 +678,15 @@ func (r *StrixCandidateRegistry) evaluateCandidateInternal(
 	baseline *StrixCandidateBaseline,
 	result StrixAblationResult,
 	cfg candidateEvalConfig,
+	trusted bool,
 ) (*StrixCandidateComparison, error) {
 	candArm := result.CandidateArm
 	candLatency := candArm.LatencyUS
 
-	// If baseline arm is provided in result, prefer it; otherwise fall back to pinned baseline arm.
-	baseArm := result.BaselineArm
-	if baseArm.LatencyUS <= 0 {
-		baseArm = baseline.BaselineArm
-	}
+	// Credit is always recomputed against the registry-owned pinned baseline.
+	// A caller-supplied BaselineArm is reference metadata only and can never
+	// replace the denominator that determines the reward.
+	baseArm := baseline.BaselineArm
 	baseLatency := baseArm.LatencyUS
 
 	if candLatency <= 0 {
@@ -720,9 +747,10 @@ func (r *StrixCandidateRegistry) evaluateCandidateInternal(
 	cosineParity := result.CosineParity
 
 	// 5. Verdict classification:
-	// - PROMOTED: speedup >= threshold, parity >= 0.999900, noise <= 5%
+	// - PROMOTED: trusted receipt only, speedup >= threshold, parity >= 0.999900, noise <= 5%
 	// - NEUTRAL: within noise band [1.0 - noiseBand, threshold) or noise > 5%
 	// - REGRESSED: slower (speedup < 1.0 - noiseBand) or parity violated (< minParity)
+	// - UNVERIFIED: receipt-free/reference-only evidence, never earns credit
 	threshold := cfg.speedupThreshold
 	minParity := cfg.minParity
 	noiseBand := cfg.noiseBand
@@ -740,9 +768,14 @@ func (r *StrixCandidateRegistry) evaluateCandidateInternal(
 		reason = fmt.Sprintf("speedup %.2fx is slower than baseline (threshold floor %.2fx)",
 			speedup, 1.0-noiseBand)
 	} else if speedup >= threshold && noiseRatio <= noiseBand {
-		verdict = VerdictPromoted
-		reason = fmt.Sprintf("promoted: speedup %.2fx >= %.2fx, parity %.6f >= %.6f, noise %.1f%% <= %.1f%%",
-			speedup, threshold, cosineParity, minParity, noiseRatio*100, noiseBand*100)
+		if trusted {
+			verdict = VerdictPromoted
+			reason = fmt.Sprintf("promoted: speedup %.2fx >= %.2fx, parity %.6f >= %.6f, noise %.1f%% <= %.1f%%",
+				speedup, threshold, cosineParity, minParity, noiseRatio*100, noiseBand*100)
+		} else {
+			verdict = VerdictUnverified
+			reason = "unverified: receipt-free observation is reference-only and cannot earn promotion"
+		}
 	} else {
 		verdict = VerdictNeutral
 		if noiseRatio > noiseBand {
