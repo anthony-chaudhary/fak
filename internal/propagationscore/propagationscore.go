@@ -264,7 +264,13 @@ func declaredNote(c Convention) string {
 // the smoke test pins (zero on a fresh roster). Whether the pure core lives in an internal/
 // package is the pkg_split convention, not an integrity requirement -- so a card whose logic is
 // still inline in cmd/fak is a real member that reads as a pkg_split laggard, never a defect here.
-func kpiMemberIntegrity(probes []Probe) scorecard.KPI {
+func kpiMemberIntegrity(probes []Probe, rosterOwned bool) scorecard.KPI {
+	if !rosterOwned {
+		return scorecard.KPI{
+			Key: "member_integrity", Group: "roster", Score: 100,
+			Detail: fmt.Sprintf("not applicable: the workspace module is not %s, which owns the %d rostered cmd shells", RosterOwnerModule, len(probes)),
+		}
+	}
 	present := 0
 	var defects []string
 	for _, p := range probes {
@@ -346,6 +352,26 @@ func kpiRosterComplete(root string, family []Member) scorecard.KPI {
 	}
 }
 
+// RosterOwnerModule is the Go module whose cmd/fak tree the Family roster describes.
+const RosterOwnerModule = "github.com/anthony-chaudhary/fak"
+
+// workspaceModule returns the module path declared by root/go.mod, or "" when there is none.
+func workspaceModule(root string) string {
+	for _, line := range strings.Split(scorecard.SafeRead(filepath.Join(root, "go.mod")), "\n") {
+		if f := strings.Fields(line); len(f) >= 2 && f[0] == "module" {
+			return strings.Trim(f[1], `"`)
+		}
+	}
+	return ""
+}
+
+// RosterOwned reports whether root owns the Family roster. Only a workspace whose go.mod names a
+// different module is foreign; a missing go.mod keeps the roster in force so drift cannot hide.
+func RosterOwned(root string) bool {
+	mod := workspaceModule(root)
+	return mod == "" || mod == RosterOwnerModule
+}
+
 // Build reads the family, probes each convention, and folds the KPIs into the control-pane
 // payload via the shared kernel. root is the repo root.
 func Build(root string) scorecard.Payload {
@@ -357,7 +383,8 @@ func Build(root string) scorecard.Payload {
 		kpis = append(kpis, k)
 		gapCount += len(gaps)
 	}
-	kpis = append(kpis, kpiMemberIntegrity(probes), kpiRosterComplete(root, Family))
+	owned := RosterOwned(root)
+	kpis = append(kpis, kpiMemberIntegrity(probes, owned), kpiRosterComplete(root, Family))
 
 	debt := 0
 	for _, k := range kpis {
@@ -378,9 +405,10 @@ func Build(root string) scorecard.Payload {
 		NextAction:      next,
 		NextActionClean: next,
 		ExtraCorpus: map[string]any{
-			"members":     len(Family),
-			"conventions": len(Conventions),
-			"fanout_gaps": gapCount,
+			"members":      len(Family),
+			"conventions":  len(Conventions),
+			"fanout_gaps":  gapCount,
+			"roster_owned": owned,
 		},
 	})
 	p.Workspace = root

@@ -375,3 +375,45 @@ func repoRootForTest(t *testing.T) string {
 		dir = parent
 	}
 }
+
+// The roster names cmd shells that only the owner module carries. A foreign-module workspace
+// (the private companion) must not read every rostered shell as missing, while an owner-module
+// workspace missing those shells must still report each one as HARD roster debt.
+func TestRosterIntegrityAppliesOnlyToOwnerModule(t *testing.T) {
+	cases := []struct {
+		name      string
+		gomod     string
+		wantOwned bool
+		wantDebt  int
+	}{
+		{"owner module", "module " + RosterOwnerModule + "\n\ngo 1.24\n", true, len(Family)},
+		{"no go.mod", "", true, len(Family)},
+		{"foreign module", "module github.com/example/companion\n\ngo 1.24\n", false, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if tc.gomod != "" {
+				if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(tc.gomod), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := RosterOwned(root); got != tc.wantOwned {
+				t.Fatalf("RosterOwned = %v, want %v", got, tc.wantOwned)
+			}
+			p := Build(root)
+			defects := -1
+			for _, k := range p.KPIs {
+				if k.Key == "member_integrity" {
+					defects = len(k.Defects)
+				}
+			}
+			if defects != tc.wantDebt {
+				t.Fatalf("member_integrity defects = %d, want %d", defects, tc.wantDebt)
+			}
+			if p.Corpus["roster_owned"] != tc.wantOwned {
+				t.Fatalf("corpus roster_owned = %v, want %v", p.Corpus["roster_owned"], tc.wantOwned)
+			}
+		})
+	}
+}
