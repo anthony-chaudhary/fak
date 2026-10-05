@@ -143,6 +143,16 @@ type v41ForwardState struct {
 	// a non-device session, or a backend the shared operation declines) preserves
 	// the historical host triple byte-for-byte.
 	expertGateUp v41ExpertGateUpFunc
+
+	// expertDown is the OPTIONAL device down callback and the symmetric partner of
+	// expertGateUp. The session installs it only when the backend can run a routed
+	// expert's down projection on device for the resolved encoding (the shared
+	// q4kExpertDownDeviceWeight operation, bound in Session.v41State). When both
+	// callbacks are non-nil and handled, all three expert projections execute on the
+	// backend and no host expert GEMM remains — the requirement for the pinned Q2_K
+	// streamed route to satisfy the Halo GPU-only guard. A nil callback (or any
+	// decline) preserves the historical host f32 down contraction byte-for-byte.
+	expertDown v41ExpertDownFunc
 }
 
 // v41ExpertGateUpOutcome is the closed result vocabulary of one v41ExpertGateUpFunc
@@ -169,6 +179,34 @@ const (
 // the I-wide fused intermediate from device gate/up projections and the
 // configured SwiGLU activation, sized to the expert intermediate width.
 type v41ExpertGateUpFunc func(layer int, stem string, xn []float32) ([]float32, v41ExpertGateUpOutcome, error)
+
+// v41ExpertDownOutcome is the closed result vocabulary of one v41ExpertDownFunc
+// call. handled-success returns the H-wide expert output with the down projection
+// computed on the backend; declined leaves the caller on the historical host
+// f32 down contraction (hostExpertDown + matRows); handled-error is a SELECTED
+// execution failure and must surface, never be swallowed as a decline.
+type v41ExpertDownOutcome uint8
+
+const (
+	// v41DownDeclined: no device kernel resolved for this expert's down encoding,
+	// so the caller falls through to the host down contraction byte-for-byte.
+	v41DownDeclined v41ExpertDownOutcome = iota
+	// v41DownHandled: the down MatMul ran on the backend and the returned slice is
+	// the H-wide expert output.
+	v41DownHandled
+	// v41DownError: a selected device execution failed; it must remain visible.
+	v41DownError
+)
+
+// v41ExpertDownFunc is the optional device down-projection operation, the
+// symmetric partner of v41ExpertGateUpFunc (#13358/#13511 moved gate/up to the
+// device; without this the down projection — the last expert GEMM — still ran on
+// the host, so a streamed serve that fits only via host expert placement could
+// never satisfy the GPU-only guard, #13668/#13128). It receives the routed
+// expert's layer stem and the I-wide fused intermediate the gate/up seam
+// produced, and reports one of the closed v41ExpertDownOutcome values. On
+// v41DownHandled it returns the H-wide expert output computed on the backend.
+type v41ExpertDownFunc func(layer int, stem string, fused []float32) ([]float32, v41ExpertDownOutcome, error)
 
 // v41ProjScratch is the per-forward REUSED materialization target for the two
 // grouped output projections (attn.wo_a.weight / attn.wo_b.weight), which the
@@ -2003,7 +2041,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -2626,6 +2664,26 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 					case v41GateUpError:
 						return v41StageErr(v41StageMoE, l, gerr)
 					case v41GateUpHandled:
+						// #13704: offer the I-wide intermediate to the device down seam.
+						// When it handles, all three projections ran on the backend and no
+						// host expert GEMM remains; a decline keeps the historical host f32
+						// down contraction byte-for-byte.
+						if st.expertDown != nil {
+							yd, dOutcome, derr := st.expertDown(l, stem, h)
+							switch dOutcome {
+							case v41DownError:
+								return v41StageErr(v41StageMoE, l, derr)
+							case v41DownHandled:
+								contractOpen := m.v41NowNanos()
+								if contractOpen != 0 {
+									m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
+								} else {
+									m.v41NoteExpertContraction()
+								}
+								_ = ffn.AddScaled(routed, yd, pick.weight)
+								continue
+							}
+						}
 						w2, err := m.hostExpertDown(l, stem, scratch)
 						if err != nil {
 							return err
@@ -3067,6 +3125,7 @@ func (s *Session) v41State() *v41ForwardState {
 	if s.v41Forward == nil {
 		s.v41Forward = &v41ForwardState{
 			expertGateUp: s.v41ExpertGateUpFunc(),
+			expertDown:   s.v41ExpertDownFunc(),
 		}
 	}
 	return s.v41Forward
@@ -3095,6 +3154,30 @@ func (s *Session) v41ExpertGateUpFunc() v41ExpertGateUpFunc {
 			return nil, v41GateUpDeclined, nil
 		}
 		return out, v41GateUpHandled, nil
+	}
+}
+
+// v41ExpertDownFunc binds the shared device down operation onto the V4.1 session
+// backend, or returns nil when the session has no device backend that could
+// execute it. It resolves the down projection name from the routed expert stem
+// exactly as the host triple does, runs the shared q4kExpertDownHAL (which itself
+// admits only bias-free experts whose down weight has a device representation the
+// ACTUAL backend can serve), and maps its (out, ok) result onto the closed
+// outcome vocabulary. The helper's own admission is the gate: a non-device
+// backend, a biased projection, or an unservable dtype returns ok=false here as
+// v41DownDeclined, never a panic and never a silent host fallback.
+func (s *Session) v41ExpertDownFunc() v41ExpertDownFunc {
+	if s == nil || s.Backend == nil || s.M == nil || !s.Backend.Caps().DeviceMemory {
+		return nil
+	}
+	cfg := s.M.Cfg
+	return func(layer int, stem string, fused []float32) ([]float32, v41ExpertDownOutcome, error) {
+		downName := layerName(layer, stem+".w2.weight")
+		out, ok := q4kExpertDownHAL(s, downName, fused, cfg.MoEIntermediateSize, cfg.HiddenSize)
+		if !ok {
+			return nil, v41DownDeclined, nil
+		}
+		return out, v41DownHandled, nil
 	}
 }
 

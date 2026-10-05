@@ -404,25 +404,30 @@ func TestV41ExpertGroupsDeviceSeam(t *testing.T) {
 				t.Fatalf("device grouped %d-token prefill: %v", len(ids), err)
 			}
 
-			// (a) The grouped contraction offered EVERY routed row to the device seam: two
-			// MatMuls (gate, up) per (token, pick, layer), with fused SwiGLU at limit zero.
+			// (a) The grouped contraction offered EVERY routed row to the device seam:
+			// three MatMuls (gate, up, down) per (token, pick, layer) now that fak#13704
+			// added the device down seam, with fused SwiGLU at limit zero.
 			rows := len(ids) * m.Cfg.NumExpertsPerTok * m.Cfg.NumLayers
-			if be.matmuls != 2*rows {
-				t.Fatalf("device MatMul count = %d, want %d (gate+up per grouped row)", be.matmuls, 2*rows)
+			if be.matmuls != 3*rows {
+				t.Fatalf("device MatMul count = %d, want %d (gate+up+down per grouped row)", be.matmuls, 3*rows)
 			}
 			if limit == 0 && be.swiglu != rows {
 				t.Fatalf("zero-limit device SwiGLU count = %d, want %d (one fused SwiGLU per grouped row)", be.swiglu, rows)
 			}
 
-			// (b) The Q3_K down projection has no device kernel, so it must never be staged
-			// device-side: the down contraction stayed on the host.
+			// (b) The Q3_K down gained a Vulkan kernel in fak#13677, so with the fak#13704
+			// device down seam it is now staged device-side: no host expert GEMM remains.
+			stagedDown := 0
 			for l := 0; l < m.Cfg.NumLayers; l++ {
 				for e := 0; e < m.Cfg.NumExperts; e++ {
 					down := layerName(l, "ffn.experts."+itoa(e)+".w2.weight")
 					if _, staged := devSess.halW["kquant-raw:"+down]; staged {
-						t.Fatalf("Q3_K down %s was staged on the device; it has no HAL kernel and must stay on the host", down)
+						stagedDown++
 					}
 				}
+			}
+			if stagedDown == 0 {
+				t.Fatal("no Q3_K down projection was staged on the device; the fak#13704 grouped down seam did not fire")
 			}
 
 			// (c) Token-history parity: device gate/up + host down reproduces the host triple.

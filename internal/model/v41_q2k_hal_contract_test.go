@@ -59,11 +59,12 @@ func (b *v41HalSeamBackend) SwiGLU(g, u compute.Tensor) compute.Tensor {
 }
 
 // SupportsDeviceWeightDtype reports the resident device dtype set the one-Halo Vulkan
-// target serves for the #13357 slate: Q2_K gate/up are runnable, Q3_K down is NOT (the
-// descriptor has no HAL kernel), so the down projection stays on the host by design.
+// target serves: Q2_K gate/up AND the Q3_K down are both runnable since fak#13677 gave
+// Q3_K a Vulkan kernel, so all three projections of the pinned slate dispatch on device
+// (fak#13704 added the down seam).
 func (b *v41HalSeamBackend) SupportsDeviceWeightDtype(dt compute.Dtype) bool {
 	switch dt {
-	case compute.F32, compute.Q8_0, compute.Q4_K, compute.Q6_K, compute.Q2_K:
+	case compute.F32, compute.Q8_0, compute.Q4_K, compute.Q6_K, compute.Q2_K, compute.Q3_K:
 		return true
 	default:
 		return false
@@ -205,16 +206,17 @@ func v41DecodeHistory(t *testing.T, s *Session, ids []int) [][]float32 {
 	return out
 }
 
-// TestV41Q2KGateUpHALKeepsDownOnHost is the fak#13358 positive witness: a V4.1 session
-// whose routed experts carry a Q2_K gate/up slate on a device backend must run gate/up
-// on the device, retain fused device SwiGLU at limit zero, keep the Q3_K down
-// contraction on the host (Q3_K has no device kernel), and reproduce the historical host
-// triple's logits within tolerance. The device seam is the per-pick token-major
-// contraction, which is exactly the contraction a fresh session's first decode step runs
-// (seq == 1); a later step recomputes the whole history through the expert-major grouped
-// contraction, which is a separate #13304 path this leaf does not touch.
+// TestV41Q2KGateUpDownHALRunsDevice is the fak#13358/fak#13704 positive witness: a V4.1
+// session whose routed experts carry a Q2_K gate/up + Q3_K down slate on a device backend
+// must run gate/up on the device, retain fused device SwiGLU at limit zero, and — now that
+// fak#13677 gave Q3_K a Vulkan kernel and fak#13704 added the device down seam — run the
+// down projection on the device too, so no host expert GEMM remains. The result must
+// reproduce the historical host triple's logits within tolerance. The device seam is the
+// per-pick token-major contraction, which is exactly the contraction a fresh session's
+// first decode step runs (seq == 1); a later step recomputes the whole history through the
+// expert-major grouped contraction, which is a separate #13304 path this leaf does not touch.
 // fak-test:runtime medium est=30s lane=default
-func TestV41Q2KGateUpHALKeepsDownOnHost(t *testing.T) {
+func TestV41Q2KGateUpHALDeviceDown(t *testing.T) {
 	setQ4KSDOTForTest(false)
 	t.Cleanup(func() { setQ4KSDOTForTest(true) })
 
@@ -245,27 +247,33 @@ func TestV41Q2KGateUpHALKeepsDownOnHost(t *testing.T) {
 			got := v41DecodeHistory(t, devSess, []int{1})
 
 			// One decode Step (seq == 1) runs the token-major MoE contraction: NumExpertsPerTok
-			// routed picks, each running gate + up (two device MatMuls).
+			// routed picks, each running gate + up + down (fak#13704 added the device down seam),
+			// so three device MatMuls per pick.
 			picks := m.Cfg.NumExpertsPerTok * m.Cfg.NumLayers
-			if be.matmuls != 2*picks {
-				t.Fatalf("device MatMul count = %d, want %d (gate+up per routed pick)", be.matmuls, 2*picks)
+			if be.matmuls != 3*picks {
+				t.Fatalf("device MatMul count = %d, want %d (gate+up+down per routed pick)", be.matmuls, 3*picks)
 			}
 			if limit == 0 && be.swiglu != picks {
 				t.Fatalf("zero-limit device SwiGLU count = %d, want %d (one fused SwiGLU per routed pick)", be.swiglu, picks)
 			}
 
-			// The Q3_K down projection has no device kernel, so it must not have been staged as
-			// a device weight: the down contraction stayed on the host.
+			// The Q3_K down gained a Vulkan kernel in fak#13677, so with the fak#13704 device
+			// down seam every routed expert's down projection is staged device-side and no
+			// host expert GEMM remains.
+			stagedDown := 0
 			for l := 0; l < m.Cfg.NumLayers; l++ {
 				for e := 0; e < m.Cfg.NumExperts; e++ {
 					down := layerName(l, "ffn.experts."+itoa(e)+".w2.weight")
 					if _, staged := devSess.halW["kquant-raw:"+down]; staged {
-						t.Fatalf("Q3_K down %s was staged on the device; it has no HAL kernel and must stay on the host", down)
+						stagedDown++
 					}
 				}
 			}
+			if stagedDown == 0 {
+				t.Fatal("no Q3_K down projection was staged on the device; the fak#13704 down seam did not fire")
+			}
 
-			// Token-history parity: the device gate/up + host down reproduces the host triple.
+			// Token-history parity: the device gate/up/down reproduces the host triple.
 			if len(got) != len(want) {
 				t.Fatalf("device arm returned %d logit rows, want %d", len(got), len(want))
 			}
@@ -452,6 +460,97 @@ func TestV41Q2KGateUpHALRejectsSourcelessGateUp(t *testing.T) {
 	// staged a partial triple: no device MatMul/SwiGLU ran for it.
 	if be.matmuls != 0 || be.swiglu != 0 {
 		t.Fatalf("sourceless gate projection ran device ops matmul=%d swiglu=%d, want 0/0", be.matmuls, be.swiglu)
+	}
+}
+
+// TestV41ExpertDownDeviceSeamFires is the fak#13704 focused reproduction: on a device
+// backend that serves the pinned slate's dtypes (Q2_K gate/up + Q3_K down), the down
+// projection must run on the backend, staging the Q3_K down device-side, with output
+// matching the host triple. Before the leaf the down contraction ran on the host.
+// fak-test:runtime medium est=2s lane=default
+func TestV41ExpertDownDeviceSeamFires(t *testing.T) {
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+
+	m := v41MixedQuantExpertModel(t)
+	be := &v41HalSeamBackend{Backend: compute.Default()}
+	s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
+	if s.v41ExpertDownFunc() == nil {
+		t.Fatal("a DeviceMemory session did not bind the device down callback")
+	}
+	// A routed expert's Q3_K down must resolve and stage on the device.
+	down := layerName(0, "ffn.experts.0.w2.weight")
+	fused := make([]float32, m.Cfg.MoEIntermediateSize)
+	for i := range fused {
+		fused[i] = float32((i%13)-6) / 32
+	}
+	got, outcome, err := s.v41ExpertDownFunc()(0, "ffn.experts.0", fused)
+	if err != nil || outcome != v41DownHandled {
+		t.Fatalf("device down outcome=%v err=%v, want handled", outcome, err)
+	}
+	if len(got) != m.Cfg.HiddenSize {
+		t.Fatalf("device down returned width %d, want %d", len(got), m.Cfg.HiddenSize)
+	}
+	if _, staged := s.halW["kquant-raw:"+down]; !staged {
+		t.Fatalf("Q3_K down %s was not staged device-side", down)
+	}
+	// Host oracle over the same bytes.
+	w := m.kqw[down]
+	if w == nil {
+		t.Fatal("fixture lost the Q3_K down weight")
+	}
+	want := make([]float32, m.Cfg.HiddenSize)
+	kQuantMatRowsRange(w, fused, want, 0, m.Cfg.HiddenSize)
+	assertV41LogitsClose(t, got, want, "device Q3_K down vs host Q3_K down")
+}
+
+// TestV41ExpertDownDeviceSeamDeclinesWithoutKernel is the fak#13704 negative control: a
+// backend whose MatMul has no Q3_K case must decline the down seam, so the host arm runs
+// byte-for-byte and no Q3_K weight is staged on the device.
+// fak-test:runtime medium est=2s lane=default
+func TestV41ExpertDownDeviceSeamDeclinesWithoutKernel(t *testing.T) {
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+
+	m := v41MixedQuantExpertModel(t)
+	// A vulkan-like backend that serves Q2_K but NOT Q3_K (the pre-#13677 dtype set).
+	rec := &expertHALRecordingBackend{Backend: compute.Default(), uploads: map[compute.Dtype]int{}}
+	noQ3 := &noQ3KSeamBackend{expertHALRecordingBackend: rec}
+	s := &Session{M: m, Backend: noQ3, halW: map[string]compute.Tensor{}}
+	down := layerName(0, "ffn.experts.0.w2.weight")
+	fused := make([]float32, m.Cfg.MoEIntermediateSize)
+	for i := range fused {
+		fused[i] = float32((i%11)-5) / 24
+	}
+	if _, outcome, _ := s.v41ExpertDownFunc()(0, "ffn.experts.0", fused); outcome != v41DownDeclined {
+		t.Fatalf("down seam outcome=%v, want declined on a backend with no Q3_K MatMul", outcome)
+	}
+	if _, staged := s.halW["kquant-raw:"+down]; staged {
+		t.Fatalf("Q3_K down %s was staged on a backend with no Q3_K MatMul", down)
+	}
+}
+
+// noQ3KSeamBackend is a device backend that serves the pre-#13677 dtype set (no Q3_K), so
+// the fak#13704 down seam must decline and leave the host arm in place.
+type noQ3KSeamBackend struct {
+	*expertHALRecordingBackend
+}
+
+func (b *noQ3KSeamBackend) Caps() compute.Caps {
+	c := b.expertHALRecordingBackend.Backend.Caps()
+	c.UploadDtype = true
+	c.DeviceMemory = true
+	return c
+}
+
+func (b *noQ3KSeamBackend) SupportsRoutedExpertKQuant() bool { return false }
+
+func (b *noQ3KSeamBackend) SupportsDeviceWeightDtype(dt compute.Dtype) bool {
+	switch dt {
+	case compute.F32, compute.Q8_0, compute.Q4_K, compute.Q6_K, compute.Q2_K:
+		return true
+	default:
+		return false
 	}
 }
 

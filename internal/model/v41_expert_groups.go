@@ -195,6 +195,26 @@ func (m *Model) v41ContractRoutedGrouped(l int, x [][]float32, perTokenPicks [][
 				case v41GateUpError:
 					return v41StageErr(v41StageMoE, l, gerr)
 				case v41GateUpHandled:
+					// #13704: offer the I-wide intermediate to the device down seam
+					// first. On a handled result the down GEMM runs on the backend and
+					// no host expert GEMM remains; a decline (or a nil callback) keeps
+					// the historical host f32 down contraction byte-for-byte.
+					if st.expertDown != nil {
+						yd, dOutcome, derr := st.expertDown(l, stem, h)
+						switch dOutcome {
+						case v41DownError:
+							return v41StageErr(v41StageMoE, l, derr)
+						case v41DownHandled:
+							contractOpen := m.v41NowNanos()
+							if contractOpen != 0 {
+								m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
+							} else {
+								m.v41NoteExpertContraction()
+							}
+							unweighted[row.Token][row.Slot] = yd
+							continue
+						}
+					}
 					wd, err := m.hostExpertDown(l, stem, scratch)
 					if err != nil {
 						return err

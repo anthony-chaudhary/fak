@@ -87,16 +87,17 @@ func (s *Session) expertInputDeviceWeight(name string) (compute.Tensor, string, 
 
 // q4kExpertDownDeviceWeight resolves and stages one expert down projection for the device
 // seam. It uses the same resolution rule as the full expertSwiGLUHAL route
-// (resolveExpertWeight), so a resident Q4_K or Q5_K/Q6_K down weight both resolve. A
-// checkpoint-served (R5/#5616) weight resolves but has no resident bytes here: the
-// incremental seam has no ring staging, so it declines (checkpoint weights stay on the
-// full route).
+// (resolveExpertWeight), so a resident Q4_K or Q5_K/Q6_K down weight both resolve, and a
+// checkpoint-served (R5/#5616) streamed weight stages through the SAME bounded path the
+// gate/up seam uses (weightHALStagedBounded) — which is what lets the pinned V4.1 Q2_K's
+// checkpoint-backed Q3_K down run on the device rather than falling back to a host GEMM
+// (fak#13704).
 //
 // Admission is TWO-level and fail-closed. The MODEL descriptor check
 // (SupportsHALKQuant) says the kind has a HAL kernel somewhere; the BACKEND check
 // (compute.BackendSupportsDeviceWeightDtype on the resolved device dtype) says THIS
 // backend's MatMul actually has a kernel for it. Both must pass. A k-quant whose
-// descriptor has no HAL kernel (Q3_K), or a dtype the backend's MatMul switch has no
+// descriptor has no HAL kernel (IQ4_XS), or a dtype the backend's MatMul switch has no
 // case for (e.g. Q5_K on Vulkan), is a clean (compute.Tensor{},false) decline — never a
 // panic and never a host-expanded fallback.
 func (s *Session) q4kExpertDownDeviceWeight(downName string) (compute.Tensor, bool) {
@@ -120,7 +121,14 @@ func (s *Session) q4kExpertDownDeviceWeight(downName string) (compute.Tensor, bo
 		}
 		return s.weightHALKQuant(downName, w.kq), true
 	default:
-		return compute.Tensor{}, false
+		// A checkpoint-served projection stages through the SAME bounded path as a
+		// resident one (same key, same dtype, same byte accounting, R5/#5616), exactly
+		// as expertInputDeviceWeight does for gate/up, so a streamed-down expert can
+		// execute on the device.
+		if !compute.BackendSupportsDeviceWeightDtype(s.Backend, w.ck.dt) {
+			return compute.Tensor{}, false
+		}
+		return s.weightHALStagedBounded(w.ck.key, downName, w.ck.mk, w.ck.dt, w.ck.bytes), true
 	}
 }
 
@@ -210,6 +218,37 @@ func q4kExpertInputHALWithLimit(s *Session, gateName, upName string, xn any, int
 		panic("model: device expert gate/up returned wrong intermediate size")
 	}
 	return out, true
+}
+
+// q4kExpertDownHAL runs the routed expert's down projection on a device backend
+// over the I-wide fused intermediate the gate/up seam produced, returning the
+// H-wide expert output. It is the down-projection half of the incremental device
+// seam (#13704): gate/up already run device-side via q4kExpertInputHALWithLimit,
+// but the down GEMM stayed on the host, so a streamed serve that fits only with
+// host expert placement could never satisfy the GPU-only guard. No device
+// capability, a biased projection, an unresolvable weight, or a kind the backend
+// cannot serve is a clean (nil,false) decline, never a semantic fallback.
+func q4kExpertDownHAL(s *Session, downName string, fused []float32, intermediate, hidden int) ([]float32, bool) {
+	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
+		len(fused) != intermediate || intermediate <= 0 || hidden <= 0 {
+		return nil, false
+	}
+	if s.M.has(downName[:len(downName)-len("weight")] + "bias") {
+		return nil, false
+	}
+	downW, ok := s.q4kExpertDownDeviceWeight(downName)
+	if !ok {
+		return nil, false
+	}
+	xd := s.uploadHostF32([]int{intermediate}, fused, compute.MemoryActivation, "moe expert down activation")
+	defer s.Backend.Free(xd)
+	out := s.Backend.MatMul(downW, xd)
+	res := s.Backend.Read(out)
+	s.Backend.Free(out)
+	if len(res) != hidden {
+		panic("model: device expert down returned wrong hidden size")
+	}
+	return res, true
 }
 
 // q4kExpertGateUpDownHAL is the full incremental device seam: it resolves the down projection to a

@@ -549,6 +549,61 @@ func TestExpertSwiGLUDeviceQ2KGateUpCheckpointBacked(t *testing.T) {
 	}
 }
 
+// TestExpertDownDeviceWeightStagesCheckpointTier is the fak#13704 checkpoint-staging
+// witness: a down projection carried ONLY by the R5/#5616 streamed checkpoint tier must
+// resolve and stage on the device through the same bounded path gate/up uses, so the
+// pinned Q2_K's checkpoint-backed Q3_K down runs on the device instead of falling back to
+// a host GEMM. Before this leaf the helper declined every checkpoint weight.
+// fak-test:runtime fast est=50ms lane=default
+func TestExpertDownDeviceWeightStagesCheckpointTier(t *testing.T) {
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+
+	const H, I = 256, 256
+	cfg := expertHALTestConfig(H)
+	cfg.IntermediateSize = I
+	cfg.MoEIntermediateSize = I
+	m := NewSyntheticMoE(cfg)
+	names := [3]string{
+		expertName(0, 0, "gate_proj.weight"),
+		expertName(0, 0, "up_proj.weight"),
+		expertName(0, 0, "down_proj.weight"),
+	}
+	// The down lives ONLY in the checkpoint tier as a stageable Q3_K slab; delete the
+	// resident representation so resolution must go through the tier.
+	tier := NewExpertCheckpointTier(0)
+	down := q3kFixtureTensor(H, I)
+	if err := tier.AddShard(bytes.NewReader(down.raw), int64(len(down.raw)), []FusedExpertTensor{{
+		Name: "blk.0.ffn_down_exps.weight", Layer: 0, Proj: "down_proj",
+		Quant: ExpertCheckpointQ3K, Offset: 0, Experts: 1, Rows: H, Cols: I,
+	}}); err != nil {
+		t.Fatalf("AddShard over the Q3_K down slab: %v", err)
+	}
+	m.expertCheckpoint = tier
+	m.q4kw = map[string]*q4kTensor{}
+	m.kqw = map[string]*kQuantTensor{}
+	for _, name := range names {
+		delete(m.manifest, name)
+	}
+	if !m.expertCheckpoint.Has(names[2]) {
+		t.Fatal("fixture tier does not index the Q3_K down; the tier read cannot resolve")
+	}
+
+	rec := &expertHALRecordingBackend{Backend: compute.Default(), uploads: map[compute.Dtype]int{}}
+	be := &vulkanLikeSeamBackend{expertHALRecordingBackend: rec}
+	s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
+	gotW, ok := s.q4kExpertDownDeviceWeight(names[2])
+	if !ok {
+		t.Fatal("q4kExpertDownDeviceWeight declined a stageable checkpoint Q3_K down")
+	}
+	if gotW.Dtype != compute.Q3_K {
+		t.Fatalf("staged checkpoint down dtype = %v, want Q3_K", gotW.Dtype)
+	}
+	if _, staged := s.halW["kquant-raw:"+names[2]]; !staged {
+		t.Fatalf("checkpoint Q3_K down %s was not staged device-side", names[2])
+	}
+}
+
 // TestExpertSwiGLUDeviceQ2KGateUpDeclinesCleanly pins the fak#13357 fail-closed admission
 // negatives: a Q3_K gate/up (no HAL descriptor), a backend with no Q2_K MatMul case, a
 // GELU expert, and a biased projection all decline to the host path — never a panic and
