@@ -52,7 +52,7 @@ fak worktree <subcommand>
   worker <op>   Per-worker git worktree isolation (#3182). Ops:
       prepare --lane <l> --key <k> [--base-sha S] [--wt-root D]
               [--lease-id ID] [--owner-pid PID] [--capacity-reason WHY]
-              [--sandbox-compatible]
+              [--sandbox-compatible] [--preserve-existing]
                    Create ONE worker's DETACHED worktree pinned at trunk HEAD
                    (or --base-sha), stamped with owner PID, lease, and timestamp.
                    Above the advisory setpoint of 50, --capacity-reason records
@@ -201,11 +201,18 @@ type worktreePrepareOut struct {
 	Env               map[string]string               `json:"env,omitempty"`
 	Capacity          workerworktree.CapacityAdvisory `json:"capacity"`
 	SandboxCompatible bool                            `json:"sandbox_compatible,omitempty"`
+	PreserveExisting  bool                            `json:"preserve_existing,omitempty"`
 }
 
 func worktreeWorkerPrepare(argv []string) {
 	fs := flag.NewFlagSet("worktree worker prepare", flag.ExitOnError)
 	lane := fs.String("lane", "", "worker's lane (e.g. cmd, gateway) — a segment of the worktree dir name")
+	preserveExisting := fs.Bool("preserve-existing", false, "create a new unique worker without sweep, reuse, pool reset or cleanup; requires explicit owner, fenced lease, admitted paths and resource headroom")
+	leaseHolder := fs.String("lease-holder", "", "holder identity from the admitted fenced lease (preservation mode)")
+	reserveBytes := fs.Int64("reserve-bytes", 0, "caller resource policy disk reserve after checkout; required in preservation mode")
+	leaseGeneration := fs.Int64("lease-generation", 0, "generation from the admitted fenced lease (preservation mode)")
+	var admittedPaths repeatedString
+	fs.Var(&admittedPaths, "admitted-path", "concrete source path covered by the admitted lease (repeatable; preservation mode)")
 	key := fs.String("key", "", "worker's unique key (issue number, wave id, pid) — hashed into the dir name")
 	baseSHA := fs.String("base-sha", "", "commit to pin the detached worktree at (default: trunk HEAD)")
 	leaseID := fs.String("lease-id", "", "lease identity to retain in the owner stamp (default: FAK_LEASE_ID or resolve-<lane>)")
@@ -227,7 +234,23 @@ func worktreeWorkerPrepare(argv []string) {
 		os.Exit(1)
 	}
 
+	if *preserveExisting {
+		explicit := map[string]bool{}
+		fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+		if err := worktreePreservingCLIIdentity(explicit, *ownerPID, *leaseID, *sandboxCompatible); err != nil {
+			worktreeWorkerEmit(workerworktree.Result{OK: false, Code: "PRESERVATION_ADMISSION_REFUSED", Preserved: true, Reason: err.Error()})
+			os.Exit(1)
+		}
+	}
 	repoRoot := worktreeWorkerRoot(*root)
+	if *preserveExisting {
+		canonicalRoot, canonicalWorkers, err := workerworktree.CanonicalPreservingRoots(repoRoot, *wtRoot)
+		if err != nil {
+			worktreeWorkerEmit(workerworktree.Result{OK: false, Code: "PRESERVATION_TARGET_CONFLICT", Preserved: true, Reason: err.Error()})
+			os.Exit(1)
+		}
+		repoRoot, *wtRoot = canonicalRoot, canonicalWorkers
+	}
 	capacityCensus := workerworktree.CapacityCensusFor(repoRoot, nil)
 	owner := workerworktree.OwnerStamp{PID: *ownerPID, LeaseID: strings.TrimSpace(*leaseID), CreatedAt: time.Now().UTC()}
 	if owner.LeaseID == "" {
@@ -236,13 +259,35 @@ func worktreeWorkerPrepare(argv []string) {
 	if owner.LeaseID == "" && strings.TrimSpace(*lane) != "" {
 		owner.LeaseID = "resolve-" + strings.TrimSpace(*lane)
 	}
-	res := workerworktree.PrepareOwnedBounded(repoRoot, *lane, *key, strings.TrimSpace(*baseSHA), strings.TrimSpace(*wtRoot), owner, 2*time.Minute)
+	var res workerworktree.Result
+	var preservingGate workerworktree.PreservationGate
+	if *preserveExisting {
+		preservingGate = worktreePreservingGate(repoRoot, workerworktree.Path(*lane, *key, *wtRoot),
+			owner, *leaseHolder, *leaseGeneration, admittedPaths, *baseSHA, *reserveBytes)
+		res = workerworktree.PreparePreservingBounded(repoRoot, *lane, *key, *baseSHA, *wtRoot, owner, 2*time.Minute, preservingGate, workerworktree.PreservingIntent{Message: *message, Paths: paths, AdmittedPaths: admittedPaths})
+	} else {
+		res = workerworktree.PrepareOwnedBounded(repoRoot, *lane, *key, strings.TrimSpace(*baseSHA), strings.TrimSpace(*wtRoot), owner, 2*time.Minute)
+	}
 	prospectiveCount := len(capacityCensus.Paths)
 	if res.OK && !res.Reused {
 		prospectiveCount++
 	}
-	capacity := worktreeWorkerCapacityAdvisory(repoRoot, capacityCensus, prospectiveCount, *capacityReason, nil)
-	out := worktreePrepareOut{Result: res, Capacity: capacity, SandboxCompatible: *sandboxCompatible}
+	var capacity workerworktree.CapacityAdvisory
+	if *preserveExisting {
+		capacity = worktreePreservingCapacityAdvisory(capacityCensus, prospectiveCount, *capacityReason)
+	} else {
+		capacity = worktreeWorkerCapacityAdvisory(repoRoot, capacityCensus, prospectiveCount, *capacityReason, nil)
+	}
+	if *preserveExisting {
+		out := worktreePreservingResultOut(res, capacity, preservingGate, owner)
+		worktreeWorkerWriteCapacityHuman(os.Stderr, capacity)
+		worktreeWorkerEmit(out)
+		if !out.OK {
+			os.Exit(1)
+		}
+		return // No include/localization/SaveIntent postprocessing outside target lock.
+	}
+	out := worktreePrepareOut{Result: res, Capacity: capacity, SandboxCompatible: *sandboxCompatible, PreserveExisting: *preserveExisting}
 	if res.OK && res.Path != "" {
 		hasInclude := false
 		if fi, err := os.Stat(filepath.Join(repoRoot, ".worktreeinclude")); err == nil && !fi.IsDir() {

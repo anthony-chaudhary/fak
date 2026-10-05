@@ -413,3 +413,156 @@ Cleaning a peer's remote recovery ref additionally requires `--allow-peer`.
 | `gc` | Collect dead-owner, released-lease worktrees | Dry-run | `workerworktree.GCReport` |
 | `publish` | Publish scrubbed host lifecycle snapshot to remote | Dry-run | `SnapshotPublishResult` |
 | `recover` | Enumerate recovery candidates and clean up landed refs | Read-only | `worktreeWorkerRecoverOut` |
+
+## Preservation-only preparation (explicit opt-in)
+
+`fak worktree worker prepare --preserve-existing` creates only a new uniquely
+keyed detached Git worker. Default prepare behavior is unchanged. This mode
+uses native Git creation directly on every platform: it deliberately avoids
+Darwin block-clone and its pool/fallback lifecycle. It never calls the sweep,
+pool enumeration/acquisition, same-key reuse, reset, clean, force-reap, partial
+cleanup or Git prune. Existing checkouts, registrations and worker sidecars
+are retained. Existing or unreadable targets, dangling symlinks, registrations
+(including prunable ones), owner/pool/legacy `.idle`/intent/message sidecars and their `.tmp` siblings are conflicts.
+Choose a genuinely new admitted key; this mode does not automatically recover
+or discard a previous partial attempt.
+
+In addition to `--lane`, `--key` and the full `--base-sha`, callers must supply
+`--owner-pid` for the actual long-lived owner, `--lease-id`, `--lease-holder`,
+`--lease-generation`, one or more concrete `--admitted-path` source paths, and
+`--reserve-bytes` from the current resource policy. Obtain these lease values
+through normal ownership admission. Do not fabricate a lease, holder, generation
+or PID. An explicitly supplied empty `--lease-id` is refused before ambient or generated defaults. Preservation preparation only reads the lease and rechecks the native
+fence and path ownership; it does not acquire, renew, release or publish it.
+An unfenced legacy lease must migrate through the normal admission workflow.
+The owner must keep the admitted lease alive through prepare and later work.
+
+Admission, process liveness and disk headroom are rechecked around creation and
+before the ready receipt. Concrete paths must remain nonempty after normalization; `.` and wildcard/path traversal forms are refused. The exact full commit, clean checkout, index-lock
+absence, new registration and stamped owner/worker lease are verified. Unknown
+inventory, stale fencing, ownership mismatch, unreadable resources or
+insufficient space refuse without contraction. Disk admission estimates twice
+the pinned tracked blob bytes plus the explicit caller reserve. This estimate
+is not a disk quota or protection from unrelated concurrent writers. Fresh
+external resource admission (including memory pressure, build slots, applicable
+host policy and source ownership) remains mandatory. Worker count and
+`--capacity-reason` remain advisory telemetry; no new count limit is introduced.
+
+The mode skips `.worktreeinclude`, shared Git exclude edits and pool stamping;
+`--sandbox-compatible` is refused before preparation. It does not materialize
+source overlays. Necessary new-worker writes are the target lock, detached Git
+registration/checkout, owner sidecar and `lease.json`, plus optional new intent
+metadata when the existing `--message`/`--path` pair is supplied. All metadata is
+created exclusively at its final path with no replacement, temp-rename fallback
+or failure deletion. Pinned tracked `lease.json`/`lease.json.tmp` is refused.
+Intent paths must be a subset of concrete admitted paths; immutable intent and
+message publication happen inside the target lock, with no expansion or CLI
+postprocessing after lock release. `lease.json`
+may appear in raw Git status; native cleanup-status helpers already filter it.
+The success receipt has `preserve_existing: true` and the ordinary isolated Go
+environment. Build-directory creation and later validation remain separate.
+
+Failures leave surviving new directories, registrations and metadata untouched
+without emitting a ready receipt or environment. Git may remove its own failed
+addition; no promise is made that every partial directory/registration survives.
+The `preserved` failure field observes whether the target still exists, failing
+toward preservation when inspection is inconclusive. No automatic cleanup, index
+retry, no-checkout fallback or destructive recovery runs. Git itself can roll
+back its own failed add; qualification must prove that the supported Git
+version does not alter pre-existing registrations, including missing/prunable
+ones. Checkout-policy qualification supports only Git 2.45.0. Explicit false
+fsmonitor values are disabled; `submodule.active` is dormant only when the full
+pinned tree has no gitlinks or `.gitmodules`. Filter definitions are dormant only
+when every pinned path has a complete `filter: unspecified` attribute result.
+No filter or hook is executed during proof. Existing/unreadable post-checkout
+hooks, sparse checkout, conditional includes, existing context-specific worktree configuration,
+active or unknown attributes, unavailable sources and query warnings are refused.
+Config source bytes and complete tree/attribute results must agree before add,
+in the actual new checkout before status, and before publication. Context-dependent
+includes are refused before add instead of guessing the future administrative path.
+`extensions.worktreeConfig` may remain enabled for existing peers only when the
+qualified context has no `config.worktree`; the new context is checked again
+before status. Existing peers and their fsmonitor safeguards are never queried.
+Safeguards are not silently disabled. Hook/config changes by unrelated writers
+remain outside the lock contract and require an approved quiescent admission.
+The add explicitly sets `gc.worktreePruneExpire=never`, which requires
+platform/Git-version integration qualification rather than an assumption.
+Concurrent external deletion is outside the per-target lock contract; final
+readback refuses a lost registration and preserves whatever evidence remains.
+
+This capability requires independent review, scoped ownership and native
+qualification before deployment. A committed launcher does not authorize
+operational execution of an uncommitted patch. Bootstrap and publication must
+use the repository's approved committed-tool rollout; this proposal grants no
+permission to provision a worker, bypass admission, or execute a baseline.
+
+Preservation preparation canonicalizes repository and worker roots to one
+physical absolute identity before path inspection, locking, admission and Git
+creation. An explicit relative `--wt-root` resolves against the repository root;
+symlink aliases resolve to the same target and lock. Missing worker-root suffixes
+are retained only after their existing ancestor has been resolved; unreadable or
+dangling existing ancestors refuse. This closes the mismatch between process
+working-directory checks and Git's repository-relative worktree target.
+
+Preservation capacity telemetry uses only the registration census and the pure
+advisory classifier. It never invokes lifecycle/cleanliness probes or produces
+contraction recommendations, including above50 workers and after refusals.
+Default preparation retains its existing advisory behavior.
+
+After final registration readback, the primitive rechecks owner/lease/resource
+authority before success inside the target lock. The CLI also rechecks authority
+immediately before exporting a ready environment and emits a refusal if fencing
+has been lost. The resource gate ends with a native lease fence after disk/source
+queries. These are read-side checks, not an atomic lease reservation against
+arbitrary external writers; an approved quiescent admission and normal renewal
+remain required. No lifecycle query runs after the primitive publication fence.
+
+Preservation fixtures create isolated Git repositories directly without ordinary
+Prepare or mutable sweep/backend setup, and exclude system/global Git config.
+Full CLI fixtures cover actual missing-lease and insufficient-disk refusals,
+success above the advisory setpoint, peer-status isolation, aliases/relative
+roots and publication revocation. These fixtures must be executed through the
+approved bounded native qualification workflow before operational use; merely
+including them in this proposal is not a passing validation receipt.
+
+Admitted and intent paths must equal the existing fence's normalized pathname
+exactly. Leading/trailing whitespace (including Unicode whitespace), path
+aliases and every other fence-normalization change refuse; an internal space in
+an otherwise unchanged concrete filename remains valid. Thus ownership checks
+and immutable intent storage name the same source path.
+
+The peer-status sentinel fixture includes a positive control: after the CLI
+absence check, a real status probe must trigger the sentinel or the fixture
+fails. A separate full CLI publication fixture uses a native Go helper-process Git proxy solely
+inside the test process to CAS the actual isolated lease ref to a new holder and
+generation during CLI publication's resource query. It requires the real lease
+fence to refuse publication with no ready environment and verifies that the
+fixture ref changed. This is real-store integration-fixture coverage when run;
+mocked-gate unit fixtures do not establish that authority behavior. All of these
+fixtures remain unexecuted in the task-local proposal.
+
+The fsmonitor helper and Git proxy are named aliases of the already built Go
+test executable, dispatched before testing flag parsing by fixture-only init
+logic. They are hard-linked when possible, with an exclusive native binary-copy
+fallback, and never invoke a shell, `go run` or a nested compiler. Helper children
+have explicit deadlines. The fsmonitor writes the positive-control sentinel
+natively; the proxy delegates to the original absolute Git executable and CAS
+updates only the isolated fixture lease during publication's resource query.
+No executable shell helpers or policy exceptions are required.
+
+Preservation fixture subprocesses use an explicit environment allowlist rather
+than inherited Git, SSH, credential, proxy, trace or loader settings. Git is
+resolved to an absolute approved executable; each fixture supplies an empty
+template directory, private HOME/XDG roots, disabled global/system config and
+file-only transport. Only the deliberately configured native fsmonitor/proxy
+configuration and isolated peer index are added explicitly. Hostile-environment
+regressions cover config-write redirection and template-hook import using fresh
+temporary fixtures; they remain unexecuted until source qualification.
+
+Qualification must unset `FAK_WORKSPACE_ROOT` before invoking the launcher.
+The documentation helpers then resolve the extracted candidate from their test
+working directory, rather than an ambient shared checkout. Allocate an exclusive
+fresh TMPDIR namespace before the launcher, with TMP/TEMP bound to the same
+namespace, because committed-tree extraction may reap stale trees in os.TempDir.
+These environment changes apply to fixture/qualification isolation; production
+Git policy and the existing peer fsmonitor safeguard remain unchanged.
