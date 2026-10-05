@@ -48,6 +48,15 @@ func (s *NativeScheduler) InBatchPrefixDedupStats() InBatchPrefixDedupStats {
 	return s.inBatchDedupStats
 }
 
+// InBatchPrefixDedupArmed reports whether the coalescing path is armed on this
+// scheduler. The counters alone cannot distinguish an armed-but-idle scheduler from
+// one that was never armed, so an operator readback needs both.
+func (s *NativeScheduler) InBatchPrefixDedupArmed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.inBatchDedup
+}
+
 // prefixFlightGroup lazily creates the single per-scheduler flight group shared by every
 // concurrent admission. One group per scheduler is required for coalescing to fire.
 func (s *NativeScheduler) prefixFlightGroup() *radixkv.PrefixFlightGroup {

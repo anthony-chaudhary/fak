@@ -77,9 +77,15 @@ type Engine struct {
 	cfg                 model.Config
 	q4k                 bool // resident-Q4_K preload: Complete routes the dispatch decode through Session.Q4K
 	q4kGateUpOutputSlab bool
-	schedOnce           sync.Once
-	sched               *NativeScheduler
-	coupler             *WorkerCoupler
+	// inBatchDedup arms cross-agent in-flight coalescing of a shared cold prefill
+	// prefix (fak#1914). Set at boot alongside q4kGateUpOutputSlab and read once
+	// inside nativeScheduler, so a post-boot write cannot silently widen a live
+	// decision. Unset (or an unset FAK_NATIVE_IN_BATCH_PREFIX_DEDUP) keeps the
+	// historical per-lane prefill byte-for-byte.
+	inBatchDedup bool
+	schedOnce    sync.Once
+	sched        *NativeScheduler
+	coupler      *WorkerCoupler
 
 	// tok is the OPTIONAL NL tokenizer (nil = byte-level default). Set ONCE at boot via
 	// SetTokenizer, before the server accepts requests, then read-only on the dispatch
@@ -200,6 +206,55 @@ func (e *Engine) SetQ4KGateUpOutputSlab(enabled bool) {
 // SetQ4KGateUpOutputSlab configures the registered Default engine.
 func SetQ4KGateUpOutputSlab(enabled bool) { Default.SetQ4KGateUpOutputSlab(enabled) }
 
+// SetInBatchPrefixDedup arms cross-agent in-flight coalescing of a shared cold
+// prefill prefix (fak#1914): concurrent admissions whose prompts share a token
+// prefix run ONE shared prefill pass and the twins adopt the leader's KV instead
+// of each paying its own. Set it at boot, before the first Admit — like
+// q4kGateUpOutputSlab it is read once when nativeScheduler builds the scheduler,
+// so a post-boot write is ignored rather than widening a live decision. Default
+// is off, which leaves the historical per-lane prefill byte-for-byte.
+func (e *Engine) SetInBatchPrefixDedup(enabled bool) {
+	if e == nil {
+		return
+	}
+	e.inBatchDedup = enabled
+}
+
+// SetInBatchPrefixDedup arms in-batch cold-prefix coalescing on the registered
+// Default engine — the production in-kernel Engine.
+func SetInBatchPrefixDedup(enabled bool) { Default.SetInBatchPrefixDedup(enabled) }
+
+// InBatchPrefixDedupCounters reads the registered Default engine's live coalescing
+// counters (leaders, followers, coalesced prefills, exact and prefix reuses). All
+// zero both when the path is armed-but-idle and when it was never armed, so pair a
+// read with InBatchPrefixDedupArmed to tell the two apart.
+func InBatchPrefixDedupCounters() InBatchPrefixDedupStats {
+	return Default.InBatchPrefixDedupCounters()
+}
+
+// InBatchPrefixDedupArmed reports whether the registered Default engine's scheduler
+// actually has the coalescing path armed, i.e. whether FAK_NATIVE_IN_BATCH_PREFIX_DEDUP
+// or an explicit SetInBatchPrefixDedup reached Engine.nativeScheduler.
+func InBatchPrefixDedupArmed() bool { return Default.InBatchPrefixDedupArmed() }
+
+// InBatchPrefixDedupCounters reads this engine's live coalescing counters.
+func (e *Engine) InBatchPrefixDedupCounters() InBatchPrefixDedupStats {
+	if e == nil {
+		return InBatchPrefixDedupStats{}
+	}
+	return e.nativeScheduler().InBatchPrefixDedupStats()
+}
+
+// InBatchPrefixDedupArmed reports whether this engine's scheduler has the coalescing
+// path armed. It is the receipt an operator needs to tell "armed but idle" from
+// "never armed": the counters read all-zero in both cases.
+func (e *Engine) InBatchPrefixDedupArmed() bool {
+	if e == nil {
+		return false
+	}
+	return e.nativeScheduler().InBatchPrefixDedupArmed()
+}
+
 // SetTokenizer arms the in-kernel engine with a real NL tokenizer so the dispatch
 // path NL-tokenizes a call's arguments (instead of byte-tokenizing them) and
 // detokenizes the generated ids back to TEXT in the result payload. Call it at boot,
@@ -266,6 +321,13 @@ func (e *Engine) nativeScheduler() *NativeScheduler {
 		})
 		sched.SetQ4KGateUpOutputSlab(e.q4kGateUpOutputSlab)
 		sched.SetMaxRunning(nativeMaxRunningFromEnv())
+		// Arm cross-agent in-flight coalescing of a shared cold prefill prefix
+		// (fak#1914). Until this line existed the dedup switch had no production
+		// setter at all, so inBatchDedup stayed false in every real engine and the
+		// coalesced branch was unreachable from any serving entrypoint even though
+		// every mechanism test passed. Either surface (the boot field or the env)
+		// arms it; default off keeps the per-lane prefill unchanged.
+		sched.SetInBatchPrefixDedup(e.inBatchDedup || nativeInBatchPrefixDedupFromEnv())
 		// Arm the bounded, resumable prefill ceiling on the serving admission path.
 		// The mechanism (SetQwenPrefillMaxTokensPerIteration / qwenPrefillChunkBudget /
 		// advanceQwenPrefill) existed but was unreachable from production: only tests
@@ -377,6 +439,21 @@ func SetMaxRunning(n int) { Default.SetMaxRunning(n) }
 
 // KVPreemptionStats reads the package Default engine's live preemption state.
 func KVPreemptionStats() NativePreemptionStats { return Default.KVPreemptionStats() }
+
+// nativeInBatchPrefixDedupFromEnv resolves the production on-switch for cross-agent
+// in-flight cold-prefix coalescing (fak#1914) from FAK_NATIVE_IN_BATCH_PREFIX_DEDUP,
+// matching the FAK_NATIVE_* env surface the other scheduler controls already use. Only
+// an explicit affirmative token arms it; an unset, empty, or unrecognized value leaves
+// the historical per-lane prefill in place, so a typo degrades to today's behaviour
+// instead of silently widening what a serving process coalesces.
+func nativeInBatchPrefixDedupFromEnv() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_NATIVE_IN_BATCH_PREFIX_DEDUP"))) {
+	case "1", "on", "true", "yes", "enable", "enabled":
+		return true
+	default:
+		return false
+	}
+}
 
 func nativeMaxRunningFromEnv() int {
 	raw := os.Getenv("FAK_NATIVE_MAX_RUNNING")
