@@ -15,8 +15,16 @@ package metrics
 // fleet.
 //
 // Generation intent: gen/second-next architectural OPTION (#2031, part of #2002).
-// This is an observability primitive behind the explicit `fak micro` gate — nothing
-// in the default serve/guard/dispatch path constructs a MicroTracer.
+// The STORE stays behind the explicit `fak micro` gate — nothing in the default
+// serve/guard/dispatch path constructs a MicroTracer, and this change deliberately adds
+// none, because MicroTracer retains every span of every trace id for the life of its
+// process (see the invalidating assumption below) and unbounded retention is not a
+// serving default. The SINK, though, is not gated: the process SpanObserver these spans
+// reach is installed by internal/gateway on every `fak serve`, so fak_engine_planner_step_*
+// is fed on the serving path by the internal/enginestep projection instead (internal/stepobs,
+// ONE PRODUCER PER KIND records which seam owns which kind). The legs only a span can name
+// — tool and verdict — consequently render an honest 0 on a plain serve next to a real
+// step value; that is absence, not idle, and internal/stepobs names their producer.
 //   - Promotion evidence: the tracer multiplexes N concurrent agents' spans keyed by
 //     trace id and renders one agent's timeline in isolation (TestMicroTracer*), and
 //     round-trips through JSONL so a separate `fak micro trace` process can read a

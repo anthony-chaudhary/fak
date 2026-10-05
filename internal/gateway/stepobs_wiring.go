@@ -21,8 +21,15 @@ import (
 //     deliberately NOT modified: the fan-out lives in the trace package the backends
 //     already call.
 //   - enginestep phase/decode  — the native serving loop, next to where
-//     enginestep.Default is already fed.
-//   - metrics.MicroSpanScope   — the microagent host, one terminal leg at a time.
+//     enginestep.Default is already fed. This is the ONLY seam a serving request reaches,
+//     and it is what carries kind=step, kind=seat and kind=admission (internal/agent/
+//     planner_stepobs_wiring_test.go witnesses one real InKernelPlanner.Complete through
+//     it; internal/stepobs records the one-producer-per-kind authority).
+//   - metrics.MicroSpanScope   — the observer is installed here, but the tracer that
+//     records onto it is per-instance and still constructed only by the opt-in `fak micro`
+//     host (cmd/fak/micro.go). So kind=tool and kind=verdict render an honest 0 on a plain
+//     serve; installing the observer is the sink half and is deliberately not presented as
+//     a serving-path producer.
 //
 // The two bridges live HERE rather than in internal/stepobs on purpose: internal/metrics
 // sits below internal/agent, agent reaches stepobs, so stepobs importing metrics would
