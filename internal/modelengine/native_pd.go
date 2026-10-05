@@ -99,6 +99,13 @@ func (s *NativeScheduler) AdmitImported(ctx context.Context, c *abi.ToolCall, se
 		cancel()
 		return nil, errSchedClosed
 	}
+	// An imported lane is a first-class running-set citizen, so it takes the same stable
+	// admission identity as a locally admitted one. Without this every imported lane
+	// shares the zero key, which silently collapses decode-batch ordering (stepOnce sorts
+	// by seqNo) and preemption victim selection (mostRecentPreemptibleLaneLocked) back to
+	// arrival position on the native P/D decode path.
+	s.seqNo++
+	ln.seqNo = s.seqNo
 	s.waiting = append(s.waiting, ln)
 	s.mu.Unlock()
 

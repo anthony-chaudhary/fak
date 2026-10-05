@@ -17,6 +17,7 @@ package modelengine
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -890,7 +891,31 @@ func (s *NativeScheduler) stepSolo(ln *schedLane, iteration uint64) {
 // stepOnce emits one token per active lane, then advances every lane that is still
 // running with ONE shared StepBatch. A lane is retired (cancelled or done) before
 // the batch so it never enters StepBatch's id panel.
+//
+// Batch composition is ordered by the stable request UID (schedLane.seqNo), never by
+// mutable scheduler slice position: promotion appends to the running set, preemption
+// removes from the middle, and readmission appends an OLDER victim behind a lane
+// admitted after it, so slice order is not a function of the UID. If two ranks of a
+// tensor-parallel deployment observed different promotion or preemption history, they
+// would assign different requests to the same batch slot, MoE expert and route
+// selection would diverge across ranks, and a batched decode step would disagree with
+// itself. Ordering by the immutable admission identity makes every rank derive the same
+// slot assignment from the same running set, so churn cannot silently change it.
+//
+// Scope and honesty. seqNo is the scheduler-local monotonic admission counter, so this
+// invariant is "equal admission order implies equal batch order" — it removes churn as a
+// source of divergence and makes the assignment reproducible, but it does not by itself
+// join ranks that admit in different orders (there is no distributed multi-rank
+// admission plane in this scheduler today). Port of the stable-UID decode ordering
+// convention from sgl-project/mini-sglang at pinned revision
+// 9a91cfafe754aa85daee49998176275667eb58f2 (MIT), referenced at decode.py:32-35; the
+// upstream file is not vendored. Slot position only, and a correctness fix rather than a
+// speed one: the per-request token stream, KV accounting and the existing seqNo
+// preemption ordering are untouched, no latency, throughput or token-rate gain is
+// claimed, and StepBatch already guarantees per-user logits are bit-identical to a
+// serial Step, so ordering cannot change any lane's output.
 func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
+	sort.SliceStable(active, func(i, j int) bool { return active[i].seqNo < active[j].seqNo })
 	cont := make([]*schedLane, 0, len(active))
 	ids := make([]int, 0, len(active))
 	for _, ln := range active {
