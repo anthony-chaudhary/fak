@@ -75,28 +75,30 @@ type validateWSLCapabilityVerdict struct {
 }
 
 type validateResult struct {
-	Schema          string                         `json:"schema"`
-	Mode            string                         `json:"mode"`
-	Ref             string                         `json:"ref"`
-	Tip             string                         `json:"tip"`
-	Mine            []string                       `json:"mine"`
-	Tested          []string                       `json:"tested,omitempty"`
-	Runner          string                         `json:"runner,omitempty"`
-	TestRun         string                         `json:"test_run,omitempty"`
-	TestScope       string                         `json:"test_scope,omitempty"`
-	OK              bool                           `json:"ok"`
-	Partial         bool                           `json:"partial"`
-	TimedOut        bool                           `json:"timed_out"`
-	Reason          string                         `json:"reason,omitempty"`
-	TimeoutMS       int64                          `json:"timeout_ms"`
-	ElapsedMS       int64                          `json:"elapsed_ms"`
-	Phases          []validatePhase                `json:"phases"`
-	SkippedPhases   []string                       `json:"skipped_phases"`
-	Overlays        validateOverlayProgress        `json:"overlays"`
-	WSLPreflight    *validateWSLCapabilityVerdict  `json:"wsl_preflight,omitempty"`
-	StrixValidation *amdgpu.StrixValidationReceipt `json:"strix_validation,omitempty"`
-	Failures        []ciPreflightFailure           `json:"failures"`
-	SelectionAudit  *validateSelectionAudit        `json:"selection_audit,omitempty"`
+	TestEvents       *validateTestWitness `json:"test_events,omitempty"`
+	retainTestEvents bool
+	Schema           string                         `json:"schema"`
+	Mode             string                         `json:"mode"`
+	Ref              string                         `json:"ref"`
+	Tip              string                         `json:"tip"`
+	Mine             []string                       `json:"mine"`
+	Tested           []string                       `json:"tested,omitempty"`
+	Runner           string                         `json:"runner,omitempty"`
+	TestRun          string                         `json:"test_run,omitempty"`
+	TestScope        string                         `json:"test_scope,omitempty"`
+	OK               bool                           `json:"ok"`
+	Partial          bool                           `json:"partial"`
+	TimedOut         bool                           `json:"timed_out"`
+	Reason           string                         `json:"reason,omitempty"`
+	TimeoutMS        int64                          `json:"timeout_ms"`
+	ElapsedMS        int64                          `json:"elapsed_ms"`
+	Phases           []validatePhase                `json:"phases"`
+	SkippedPhases    []string                       `json:"skipped_phases"`
+	Overlays         validateOverlayProgress        `json:"overlays"`
+	WSLPreflight     *validateWSLCapabilityVerdict  `json:"wsl_preflight,omitempty"`
+	StrixValidation  *amdgpu.StrixValidationReceipt `json:"strix_validation,omitempty"`
+	Failures         []ciPreflightFailure           `json:"failures"`
+	SelectionAudit   *validateSelectionAudit        `json:"selection_audit,omitempty"`
 }
 
 type validateSelectionAudit struct {
@@ -188,6 +190,7 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 	testOnly := fs.Bool("test-only", false, "skip affected-package build/vet and run only affected tests in the isolated checkout")
 	wslTests := fs.Bool("wsl-tests", defaultValidateWSLTests(runtime.GOOS), "run isolated affected tests through WSL (default on Windows hosts)")
 	testRun := fs.String("test-run", "", "go test -run expression for isolated affected tests")
+	testEvents := fs.Bool("test-events", false, "retain private selected Go JSON test events and exact isolated source binding; requires --json, native GOWORK=off, no audit-selection")
 	auditSelection := fs.Bool("audit-selection", false, "compare affected tests with a full-suite truth run")
 	smoke := fs.Bool("smoke", false, "run real-world binary smoke tests against the freshly compiled fak binary in the isolated checkout")
 	strix := fs.Bool("strix", false, "execute physical device validation on AMD Strix Halo appliance")
@@ -213,6 +216,16 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak validate: --timeout must be greater than zero")
 		return 2
 	}
+	if *testEvents && (!*asJSON || *auditSelection || *wslTests || runtime.GOOS == "windows") {
+		fmt.Fprintln(stderr, "fak validate: --test-events requires --json and native tests; cannot be combined with --audit-selection or WSL")
+		return 2
+	}
+	if *testEvents {
+		if err := validateEventConfiguration(); err != nil {
+			fmt.Fprintln(stderr, "fak validate: "+err.Error())
+			return 2
+		}
+	}
 	mode := "full"
 	if *testOnly {
 		mode = "test-only"
@@ -221,7 +234,8 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 	res := validateResult{
-		Schema: "fak-validate/1", Mode: mode, Ref: *ref, Mine: requestedMinePaths(mine), OK: true,
+		retainTestEvents: *testEvents,
+		Schema:           "fak-validate/1", Mode: mode, Ref: *ref, Mine: requestedMinePaths(mine), OK: true,
 		TimeoutMS: timeout.Milliseconds(), Phases: []validatePhase{}, SkippedPhases: []string{},
 		Overlays: validateOverlayProgress{Checked: []string{}, Skipped: requestedMinePaths(mine)},
 		Failures: []ciPreflightFailure{},
@@ -310,6 +324,16 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 	}
 	if !*testOnly {
 		if code, timedOut := runValidateGofmtPhase(ctx, stdout, &res, &recorder, r, dir, paths, wslWorkspace, *asJSON); timedOut {
+			return code
+		}
+	}
+	if *testEvents {
+		phase = recorder.start("test_events_scope")
+		err = validateEventCandidateScope(ctx, dir)
+		if err != nil {
+			res.TestEvents = &validateTestWitness{Status: "unrun", ExitCode: -1, Reason: err.Error()}
+		}
+		if code, failed := finishValidateRequiredPhase(stdout, stderr, &res, &recorder, phase, "test_events_scope", err, *asJSON, fmt.Sprintf("fak validate: event source scope refused: %v", err)); failed {
 			return code
 		}
 	}
@@ -405,6 +429,9 @@ func runValidateBuildAndVet(ctx context.Context, stdout io.Writer, res *validate
 }
 
 func runValidateTestsPhase(ctx context.Context, stdout io.Writer, res *validateResult, recorder *validateRecorder, r, dir, tip, effectiveTestRun string, fileToPkg map[string]string, wslTests, wslWorkspace, auditSelection, asJSON bool) (affectedtests.TestObservation, int, bool) {
+	if res.retainTestEvents {
+		return runValidateEventTestsPhase(ctx, stdout, res, recorder, dir, tip, effectiveTestRun, fileToPkg, asJSON)
+	}
 	if len(res.Tested) == 0 {
 		recorder.skip("test", "no affected test-bearing package")
 		return affectedtests.TestObservation{Complete: true, Packages: []affectedtests.PackageObservation{}}, 0, false
