@@ -251,7 +251,7 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	guard := newLiftGuard(emitContent)
 	fragments := newUTF8FragmentBuffer(guard.write)
 
-	turnCtx := plannerTurnContext(ctx, nil)
+	turnCtx := plannerTurnContext(ctx, nil, turn.messages, s.contextEpoch)
 	comp, err := sp.CompleteStream(turnCtx, fragments.write, turn.messages, turn.tools, turn.sampleOpts...)
 	if err == nil {
 		s.observePrefixReuseTurn(turnCtx, turn.messages, comp)

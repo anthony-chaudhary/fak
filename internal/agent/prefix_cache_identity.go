@@ -13,7 +13,18 @@ type prefixCacheIdentityKey struct{}
 // Gateway transports should set tenant from their isolation principal. Agent may
 // be empty when the caller has tenant-level rather than worker-level identity.
 func WithPrefixCacheIdentity(ctx context.Context, tenant, agent string) context.Context {
-	owner := radixkv.CacheIdentity{Tenant: strings.TrimSpace(tenant), Agent: strings.TrimSpace(agent)}
+	return WithPrefixCacheIdentityEpoch(ctx, tenant, agent, "")
+}
+
+// WithPrefixCacheIdentityEpoch binds an authenticated cache owner plus the segment
+// that isolates one system-context epoch from its successor. Callers that do not track
+// an epoch pass the empty string and get the historical tenant/agent namespace.
+func WithPrefixCacheIdentityEpoch(ctx context.Context, tenant, agent, epoch string) context.Context {
+	owner := radixkv.CacheIdentity{
+		Tenant: strings.TrimSpace(tenant),
+		Agent:  strings.TrimSpace(agent),
+		Epoch:  strings.TrimSpace(epoch),
+	}
 	if owner.Tenant == "" {
 		return ctx
 	}

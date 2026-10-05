@@ -160,7 +160,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 			}
 		}
 	}()
-	turnCtx := plannerTurnContext(r.Context(), r)
+	turnCtx := plannerTurnContext(r.Context(), r, messages, s.contextEpoch)
 	comp, err := sp.CompleteStream(turnCtx, guard.write, messages, req.Tools, opts...)
 	close(stopPing)
 	<-pingDone

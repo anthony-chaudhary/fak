@@ -307,6 +307,7 @@ func New(cfg Config) (*Server, error) {
 		elideStaleReads:              cfg.ElideStaleReads,
 		provider:                     strings.TrimSpace(cfg.Provider),
 		prefixGuard:                  cfg.PrefixGuard || envEnabled("FAK_ABLATE_PREFIX_GUARD"),
+		contextEpoch:                 newContextEpochGate(envEnabled("FAK_ABLATE_CONTEXT_EPOCH")),
 		vcacheAnchor:                 cfg.VCacheAnchor || envEnabled("FAK_ABLATE_BP_PLAN"),
 		vcacheCalibration:            cloneVCacheRuntimeCalibration(cfg.VCacheCalibration),
 		toolFloorDenies:              cfg.ToolFloorDenies,
@@ -1439,7 +1440,7 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 	// one helper every planner path (buffered and streaming) shares, so a principal's
 	// streamed and buffered turns resolve to the same cache scope. Empty principal
 	// preserves legacy single-user reuse.
-	ctx = plannerTurnContext(ctx, nil)
+	ctx = plannerTurnContext(ctx, nil, messages, s.contextEpoch)
 	defer func() {
 		if r := recover(); r != nil {
 			if evictErr, ok := recoverRecurrentEvictUnsupported(r); ok {

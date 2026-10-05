@@ -75,16 +75,18 @@ func prefixReuseSessionFromContext(ctx context.Context) string {
 // plannerTurnContext is the ONE binding applied before every planner call — buffered
 // Complete and every streaming CompleteStream. It binds the authenticated principal to the
 // in-kernel prefix-cache identity at tenant scope (agent left empty so sibling agents of
-// one principal share prefixes) and carries the harness session id for attribution. r may
-// be nil when the caller's ctx already descends from beginServedRequest.
-func plannerTurnContext(ctx context.Context, r *http.Request) context.Context {
+// one principal share prefixes), carries the harness session id for attribution, and binds
+// the Context Epoch tag last so an epoch turn-over restamps the cache namespace for every
+// planner path at once. r may be nil when the caller's ctx already descends from
+// beginServedRequest.
+func plannerTurnContext(ctx context.Context, r *http.Request, messages []agent.Message, epoch *ContextEpochGate) context.Context {
 	if principal := principalFromContext(ctx); principal != "" {
 		ctx = agent.WithPrefixCacheIdentity(ctx, principal, "")
 	}
 	if prefixReuseSessionFromContext(ctx) == "" {
 		ctx = withPrefixReuseSession(ctx, harnessSessionID(r))
 	}
-	return ctx
+	return epoch.bind(ctx, messages)
 }
 
 // prefixReuseOrigin is the closed classification of one served in-kernel turn.

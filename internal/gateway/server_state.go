@@ -950,6 +950,12 @@ type Server struct {
 	// are never changed; off keeps the family at its emit-at-0 zeros.
 	prefixGuard bool
 
+	// contextEpoch mirrors FAK_ABLATE_CONTEXT_EPOCH: when true the served turn's
+	// Context Epoch is prepared per harness session and its revision segments the
+	// in-kernel prefix-cache namespace, so a prefix admitted under a superseded
+	// system-context baseline is unreachable. Default-off keeps the namespace unchanged.
+	contextEpoch *ContextEpochGate
+
 	// vcacheAnchor mirrors Config.VCacheAnchor: when true the Anthropic passthrough runs the M2
 	// star-anchor pre-flight rewrite (maybeAnchorAnthropicRaw) by DEFAULT — hoisting volatile
 	// system blocks behind a byte-stable cacheable anchor and placing a breakpoint the caller did

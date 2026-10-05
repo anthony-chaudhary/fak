@@ -500,7 +500,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	defer lease.Release()
 
 	began := time.Now()
-	turnCtx := plannerTurnContext(ctx, nil)
+	turnCtx := plannerTurnContext(ctx, nil, req.Messages, s.contextEpoch)
 	comp, err := sp.CompleteStream(turnCtx, utf8Fragments.write, req.Messages, req.Tools, chatRouteOpts(ctx, opts)...)
 	stopHB()
 	if err == nil {

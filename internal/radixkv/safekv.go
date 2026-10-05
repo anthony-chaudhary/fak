@@ -31,6 +31,10 @@ var (
 type CacheIdentity struct {
 	Tenant string
 	Agent  string
+	// Epoch segments the namespace by the caller's system-context epoch so a prefix
+	// admitted while one baseline was current is unreachable once a successor epoch
+	// supersedes it. Empty keeps the historical tenant/agent namespace byte-identical.
+	Epoch string
 }
 
 // ScopedTree adds private-by-default visibility and explicit promotion to Tree.
@@ -99,17 +103,28 @@ func (s *ScopedTree) MatchLen(owner CacheIdentity, tokens []int) (int, error) {
 func scopeNamespace(scope ShareScope, owner CacheIdentity) (string, error) {
 	tenant := strings.TrimSpace(owner.Tenant)
 	agent := strings.TrimSpace(owner.Agent)
+	// Fleet visibility is an explicit Promote event, not a per-session epoch scope, so
+	// it stays unsegmented: an epoch segment there would hide promoted prefixes from
+	// every fleet reader while admitting them from none.
+	epoch := ""
+	if scope != ScopeFleet {
+		epoch = strings.TrimSpace(owner.Epoch)
+	}
+	segment := ""
+	if epoch != "" {
+		segment = "/epoch/" + epoch
+	}
 	switch scope {
 	case ScopeAgent:
 		if tenant == "" || agent == "" {
 			return "", ErrCacheIdentity
 		}
-		return "private/tenant/" + tenant + "/agent/" + agent, nil
+		return "private/tenant/" + tenant + "/agent/" + agent + segment, nil
 	case ScopeTenant:
 		if tenant == "" {
 			return "", ErrCacheIdentity
 		}
-		return "private/tenant/" + tenant, nil
+		return "private/tenant/" + tenant + segment, nil
 	case ScopeFleet:
 		return "shared/fleet", nil
 	default:

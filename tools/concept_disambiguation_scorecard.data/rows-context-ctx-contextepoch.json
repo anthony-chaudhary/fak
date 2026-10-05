@@ -1,0 +1,20 @@
+{
+  "rows": [
+    {
+      "id": "context-epoch",
+      "canonical": "ContextEpoch",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ContextEpoch is the span during which one initially rendered System Context stays the immutable baseline for a session's provider cache. The gateway holds a bounded per-session store of that baseline, and every turn reconciles against it; the epoch ends, bumping a baseline sequence number, when the session compacts, the session identity moves, or an incompatible transition invalidates the rendering.",
+      "distinction": "ContextEpoch fixes WHEN a rendered system-context baseline may still be reused; it is not the rendered text itself (the baseline snapshot is its payload) and not the cache lookup itself (the epoch contributes one segment to the prefix-cache identity). It also does not own the cache budget, eviction, or reuse accounting, which remain cache-family concerns. ContextEpochGate is the default-off arming switch that decides whether an epoch exists for a turn at all, and FAK_ABLATE_CONTEXT_EPOCH is that gate's only activation environment variable.",
+      "distinct_from": ["ctxplan", "context-window", "x-plan-memoryplan"],
+      "aliases": ["contextepoch", "contextepochgate", "fakablatecontextepoch"],
+      "grounding": "ContextEpoch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "internal/gateway/context_epoch.go",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
