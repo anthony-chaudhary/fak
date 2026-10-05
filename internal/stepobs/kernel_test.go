@@ -245,3 +245,155 @@ func TestKernelLabelEscaping(t *testing.T) {
 		t.Fatalf("label was not escaped:\n%s", b.String())
 	}
 }
+
+// The counter has no timer_domain label: multiple accepted domains must sum
+// into one sample while every histogram member retains its own domain.
+func TestKernelCallsAggregateAcrossTimerDomains(t *testing.T) {
+	r := New()
+	var b strings.Builder
+	r.WritePrometheus(&b)
+	if got := promValue(t, b.String(), MetricKernelObserved); got != "0" {
+		t.Fatalf("observed before events = %s, want 0", got)
+	}
+	r.ObserveKernel(kernelEvent("mps_f32_matmul", "metal", "host_monotonic", time.Millisecond))
+	r.ObserveKernel(kernelEvent("mps_f32_matmul", "metal", "metal_command_buffer", 4*time.Millisecond))
+	r.ObserveKernel(kernelEvent("mps_f32_matmul", "metal", "host_monotonic", 2*time.Millisecond))
+	r.ObserveKernel(kernelEvent("mps_f32_matmul", "metal", "metal_command_buffer", 8*time.Millisecond))
+	r.ObserveKernel(kernelEvent("mps_f32_matmul", "metal", "metal_command_buffer", 16*time.Millisecond))
+	b.Reset()
+	r.WritePrometheus(&b)
+	render := b.String()
+	samples := promSamples(render, MetricKernelCalls)
+	want := MetricKernelCalls + `{kernel="mps_f32_matmul",backend="metal"} 5`
+	if len(samples) != 1 || samples[0] != want {
+		t.Fatalf("counter samples = %q, want exactly %q", samples, want)
+	}
+	for _, suffix := range []string{"_count", "_sum"} {
+		if got := len(promSamples(render, MetricKernelSeconds+suffix)); got != 2 {
+			t.Fatalf("histogram %s samples = %d, want 2", suffix, got)
+		}
+	}
+	if got := len(promSamples(render, MetricKernelSeconds+"_bucket")); got != 2*(len(secondsBuckets)+1) {
+		t.Fatalf("histogram bucket samples = %d, want %d", got, 2*(len(secondsBuckets)+1))
+	}
+	for _, tc := range []struct{ domain, count, sum string }{
+		{"host_monotonic", "2", "0.003"},
+		{"metal_command_buffer", "3", "0.028"},
+	} {
+		labels := `kernel="mps_f32_matmul",backend="metal",timer_domain="` + tc.domain + `"`
+		for _, check := range []struct{ sample, want string }{
+			{MetricKernelSeconds + "_count{" + labels + "}", tc.count},
+			{MetricKernelSeconds + "_sum{" + labels + "}", tc.sum},
+			{MetricKernelSeconds + "_bucket{" + labels + `,le="+Inf"}`, tc.count},
+		} {
+			if got := promValue(t, render, check.sample); got != check.want {
+				t.Fatalf("%s = %s, want %s", check.sample, got, check.want)
+			}
+		}
+		for _, bound := range secondsBuckets {
+			var wantCount uint64
+			durations := []time.Duration{time.Millisecond, 2 * time.Millisecond}
+			if tc.domain == "metal_command_buffer" {
+				durations = []time.Duration{4 * time.Millisecond, 8 * time.Millisecond, 16 * time.Millisecond}
+			}
+			for _, d := range durations {
+				if seconds(d) <= bound {
+					wantCount++
+				}
+			}
+			sample := MetricKernelSeconds + "_bucket{" + labels + `,le="` + formatFloat(bound) + `"}`
+			if got := promValue(t, render, sample); got != strconv.FormatUint(wantCount, 10) {
+				t.Fatalf("%s = %s, want %d", sample, got, wantCount)
+			}
+		}
+	}
+	snap := r.Snapshot()
+	if len(snap.KernelKeys) != 2 || snap.KernelEvents != 5 || snap.KernelKeysCapped || snap.KernelOverflow != 0 {
+		t.Fatalf("unexpected mixed-domain snapshot: %+v", snap)
+	}
+	for _, check := range []struct{ name, want string }{
+		{MetricKernelObserved, "1"}, {MetricKernelKeysCapped, "0"}, {MetricKernelEventOverflowTotal, "0"},
+	} {
+		if got := promValue(t, render, check.name); got != check.want {
+			t.Fatalf("%s = %s, want %s", check.name, got, check.want)
+		}
+	}
+}
+
+func TestKernelCounterPairsKeepFirstSeenOrder(t *testing.T) {
+	r := New()
+	for _, key := range []kernelKey{
+		{kernel: "z", backend: "metal", timerDomain: "host_monotonic"},
+		{kernel: "a", backend: "metal", timerDomain: "host_monotonic"},
+		{kernel: "z", backend: "metal", timerDomain: "metal_command_buffer"},
+		{kernel: "z", backend: "cpu", timerDomain: "host_monotonic"},
+	} {
+		r.ObserveKernel(kernelEvent(key.kernel, key.backend, key.timerDomain, time.Millisecond))
+	}
+	var b strings.Builder
+	r.WritePrometheus(&b)
+	got := promSamples(b.String(), MetricKernelCalls)
+	want := []string{
+		MetricKernelCalls + `{kernel="z",backend="metal"} 2`,
+		MetricKernelCalls + `{kernel="a",backend="metal"} 1`,
+		MetricKernelCalls + `{kernel="z",backend="cpu"} 1`,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("counter order = %q, want %q", got, want)
+	}
+}
+
+func TestKernelNewDomainOverflowsAtTripleCap(t *testing.T) {
+	r := New()
+	r.ObserveKernel(kernelEvent("mps_f32_matmul", "metal", "host_monotonic", time.Millisecond))
+	for i := 1; i < MaxKernelKeys; i++ {
+		r.ObserveKernel(kernelEvent("k"+strconv.Itoa(i), "cpu", "host_monotonic", time.Millisecond))
+	}
+	// A new domain of an existing pair is still a new triple and must overflow.
+	r.ObserveKernel(kernelEvent("mps_f32_matmul", "metal", "metal_command_buffer", 4*time.Millisecond))
+	// A previously accepted triple continues to accrue at the cap.
+	r.ObserveKernel(kernelEvent("mps_f32_matmul", "metal", "host_monotonic", 2*time.Millisecond))
+	r.ObserveKernel(kernelEvent("mps_f32_matmul", "metal", "metal_command_buffer", 8*time.Millisecond))
+	snap := r.Snapshot()
+	if len(snap.KernelKeys) != MaxKernelKeys+1 || snap.KernelEvents != uint64(MaxKernelKeys+3) || !snap.KernelKeysCapped || snap.KernelOverflow != 2 {
+		t.Fatalf("unexpected capped snapshot: %+v", snap)
+	}
+	var b strings.Builder
+	r.WritePrometheus(&b)
+	render := b.String()
+	counters := promSamples(render, MetricKernelCalls)
+	if len(counters) != MaxKernelKeys+1 {
+		t.Fatalf("counter samples = %d, want %d", len(counters), MaxKernelKeys+1)
+	}
+	if counters[0] != MetricKernelCalls+`{kernel="mps_f32_matmul",backend="metal"} 2` || counters[len(counters)-1] != MetricKernelCalls+`{kernel="overflow",backend="overflow"} 2` {
+		t.Fatalf("accepted or overflow counter/order changed: %q / %q", counters[0], counters[len(counters)-1])
+	}
+	for _, suffix := range []string{"_count", "_sum", "_bucket"} {
+		samples := promSamples(render, MetricKernelSeconds+suffix)
+		want := MaxKernelKeys + 1
+		if suffix == "_bucket" {
+			want *= len(secondsBuckets) + 1
+		}
+		if len(samples) != want {
+			t.Fatalf("histogram %s samples = %d, want %d", suffix, len(samples), want)
+		}
+		for _, sample := range samples {
+			if strings.Contains(sample, `timer_domain="metal_command_buffer"`) {
+				t.Fatalf("rejected domain was rendered: %s", sample)
+			}
+		}
+	}
+	for _, check := range []struct{ sample, want string }{
+		{MetricKernelSeconds + `_count{kernel="mps_f32_matmul",backend="metal",timer_domain="host_monotonic"}`, "2"},
+		{MetricKernelSeconds + `_sum{kernel="mps_f32_matmul",backend="metal",timer_domain="host_monotonic"}`, "0.003"},
+		{MetricKernelSeconds + `_bucket{kernel="mps_f32_matmul",backend="metal",timer_domain="host_monotonic",le="+Inf"}`, "2"},
+		{MetricKernelSeconds + `_count{kernel="overflow",backend="overflow",timer_domain="overflow"}`, "2"},
+		{MetricKernelSeconds + `_sum{kernel="overflow",backend="overflow",timer_domain="overflow"}`, "0.012"},
+		{MetricKernelSeconds + `_bucket{kernel="overflow",backend="overflow",timer_domain="overflow",le="+Inf"}`, "2"},
+		{MetricKernelObserved, "1"}, {MetricKernelKeysCapped, "1"}, {MetricKernelEventOverflowTotal, "2"},
+	} {
+		if got := promValue(t, render, check.sample); got != check.want {
+			t.Fatalf("%s = %s, want %s", check.sample, got, check.want)
+		}
+	}
+}

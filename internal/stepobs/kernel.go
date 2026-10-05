@@ -124,8 +124,20 @@ func (kr *kernelRegistry) write(w io.Writer) {
 	helpType(w, MetricKernelCalls,
 		"Kernel invocations observed by the sub-kernel trace seam, by bounded (kernel, backend) key. A missing (kernel, backend) pair means the producer never reported it, not that zero calls happened.",
 		"counter")
+	// Histograms retain timer-domain keys, but the counter contract has only
+	// kernel/backend labels. Sum those keys in first-seen pair order so each
+	// counter label set appears exactly once.
+	calls := make(map[kernelKey]uint64, len(keys))
+	counterKeys := make([]kernelKey, 0, len(keys))
 	for _, k := range keys {
-		writeString(w, MetricKernelCalls+"{"+k.counterLabels()+"} "+strconv.FormatUint(kr.agg(k).calls, 10)+"\n")
+		pair := kernelKey{kernel: k.kernel, backend: k.backend}
+		if _, seen := calls[pair]; !seen {
+			counterKeys = append(counterKeys, pair)
+		}
+		calls[pair] += kr.agg(k).calls
+	}
+	for _, k := range counterKeys {
+		writeString(w, MetricKernelCalls+"{"+k.counterLabels()+"} "+strconv.FormatUint(calls[k], 10)+"\n")
 	}
 
 	helpType(w, MetricKernelSeconds,
