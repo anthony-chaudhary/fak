@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -82,4 +84,25 @@ func TestResolveServeFirstTokenWatchdogPassesCPUBackend(t *testing.T) {
 			t.Fatalf("startup message = %+v, want source env", msg)
 		}
 	})
+}
+
+// TestServeSourceWiresFirstTokenWatchdogIntoGatewayNew is the drift guard on the link itself
+// (#13592): every case above calls resolveServeFirstTokenWatchdog directly, so all of them
+// would still pass if the gateway.New literal quietly stopped carrying it — the exact state
+// 04648cad0c left the resolver in (a Config field with no route). `fak serve-wiring --check`
+// reports this field DEAD_WIRED and TestServeWiringCheckPassesOnRealTree reds while serve.go
+// does not set it.
+func TestServeSourceWiresFirstTokenWatchdogIntoGatewayNew(t *testing.T) {
+	root := repoRootFromTest(t)
+	body, err := os.ReadFile(filepath.Join(root, "cmd", "fak", "serve.go"))
+	if err != nil {
+		t.Fatalf("read serve.go: %v", err)
+	}
+	src := string(body)
+	if !strings.Contains(src, "FirstTokenWatchdog:") || !strings.Contains(src, "rt.resolveServeFirstTokenWatchdog(sf)") {
+		t.Fatal("serve.go must set Config.FirstTokenWatchdog: rt.resolveServeFirstTokenWatchdog(sf) — without it the first-token watchdog resolver is dead and the gateway keeps the backend-blind 60s default")
+	}
+	if !serveConfigAssignments(src)["FirstTokenWatchdog"] {
+		t.Fatal("serve.go's gateway.New(gateway.Config{...}) literal must set FirstTokenWatchdog; without it the backend-aware resolver is unreachable")
+	}
 }

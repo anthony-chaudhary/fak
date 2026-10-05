@@ -989,6 +989,11 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 		Backend:                      rt.chatBackend,
 		CPUOffloadExperts:            *sf.cpuOffloadExperts,
 		Metal:                        rt.useMetal,
+		// Backend-aware buffered first-token window (#13592): resolveServeFirstTokenWatchdog
+		// resolves it against the chat backend/metal decision set above and records the
+		// window and its source as a startup message; without this line the resolver is
+		// dead code and the gateway keeps the backend-blind 60s default.
+		FirstTokenWatchdog:           rt.resolveServeFirstTokenWatchdog(sf),
 		SpeculativeMode:              *sf.speculative,
 		ExpertParallelRanks:          *sf.expertParallel,
 		RequireKey:                   rt.requireKey,
