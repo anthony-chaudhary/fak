@@ -102,6 +102,11 @@ type LMCTransferEvent struct {
 	// DSAPath marks that this transfer backed a DSA attention index, so a fault must
 	// escalate to quarantine (§1.2) rather than a plain residency fault.
 	DSAPath bool
+	// StoreAdmission carries the explicit, payload-free facts a lazy-offload APPEND
+	// event must assert before it may be stored (see StoreAdmissible). It is optional:
+	// nil preserves the legacy mapping exactly and is NEVER evidence that store safety
+	// was checked.
+	StoreAdmission *StoreAdmission
 }
 
 // FromLMCTransfer lowers an LMCache offload/restore event onto the kv_transfer plane
@@ -159,6 +164,16 @@ func FromLMCTransfer(ev LMCTransferEvent, opts ...Option) Entry {
 func LMCTransferVerdict(ev LMCTransferEvent) LookupVerdict {
 	if ev.SpanDigest == "" || ev.Kind.Direction() == "" {
 		return Miss(ReasonAbsent)
+	}
+	// A lazy-offload APPEND that supplies explicit admission facts must pass the
+	// pure store-admission gate before it can be stored. A refusal is a typed MISS
+	// (Reason* -> the shared vocabulary) so the append never creates residency that
+	// cannot later be evicted or retrieved. A nil StoreAdmission keeps the legacy
+	// mapping: the gate is opt-in and never assumed.
+	if ev.Kind == LMCAppend {
+		if refusal := StoreAdmissible(ev); !refusal.Allowed() {
+			return Miss(refusal.Reason())
+		}
 	}
 	e := FromLMCTransfer(ev)
 	if ev.Outcome == KVTransferFault && ev.DSAPath {
