@@ -1685,6 +1685,46 @@
           "category": "incidental",
           "reason": "pre-existing dequant-once attention entrypoint referenced by the execution-contract classifier doc; not a new concept",
           "token": "executevulkanattentionwithdequantonce"
+        },
+        {
+          "category": "incidental",
+          "reason": "Plumbing of the fak#13695 PrefillAttention device route (cgo entry, lock, capability probe, timing receipt, admission threshold, fallback route, or execution operation label); the concept itself is the positioned PrefillAttention row.",
+          "token": "mg_prefill_attn_supported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Plumbing of the fak#13695 PrefillAttention device route (cgo entry, lock, capability probe, timing receipt, admission threshold, fallback route, or execution operation label); the concept itself is the positioned PrefillAttention row.",
+          "token": "mg_prefill_attn"
+        },
+        {
+          "category": "incidental",
+          "reason": "Plumbing of the fak#13695 PrefillAttention device route (cgo entry, lock, capability probe, timing receipt, admission threshold, fallback route, or execution operation label); the concept itself is the positioned PrefillAttention row.",
+          "token": "prefillAttnMu"
+        },
+        {
+          "category": "incidental",
+          "reason": "Plumbing of the fak#13695 PrefillAttention device route (cgo entry, lock, capability probe, timing receipt, admission threshold, fallback route, or execution operation label); the concept itself is the positioned PrefillAttention row.",
+          "token": "PrefillAttentionSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Plumbing of the fak#13695 PrefillAttention device route (cgo entry, lock, capability probe, timing receipt, admission threshold, fallback route, or execution operation label); the concept itself is the positioned PrefillAttention row.",
+          "token": "PrefillAttentionTiming"
+        },
+        {
+          "category": "incidental",
+          "reason": "Plumbing of the fak#13695 PrefillAttention device route (cgo entry, lock, capability probe, timing receipt, admission threshold, fallback route, or execution operation label); the concept itself is the positioned PrefillAttention row.",
+          "token": "prefillAttnDeviceMinRows"
+        },
+        {
+          "category": "incidental",
+          "reason": "Plumbing of the fak#13695 PrefillAttention device route (cgo entry, lock, capability probe, timing receipt, admission threshold, fallback route, or execution operation label); the concept itself is the positioned PrefillAttention row.",
+          "token": "MetalFallbackPrefillAttentionCPU"
+        },
+        {
+          "category": "incidental",
+          "reason": "Plumbing of the fak#13695 PrefillAttention device route (cgo entry, lock, capability probe, timing receipt, admission threshold, fallback route, or execution operation label); the concept itself is the positioned PrefillAttention row.",
+          "token": "ExecutionPrefillAttention"
         }
       ],
       "id": "attention",
@@ -1692,6 +1732,10 @@
         "BuildTreeAttentionMask",
         "EstimatedAttention",
         "EstimatedAttentionSeconds",
+        "ExecutionPrefillAttention",
+        "MetalFallbackPrefillAttentionCPU",
+        "PrefillAttentionSupported",
+        "PrefillAttentionTiming",
         "TreeAttentionMask",
         "ValidateTreeAttentionMask",
         "attentions",
@@ -1699,6 +1743,10 @@
         "attnkvanorm",
         "estimated_attention_s",
         "executevulkanattentionwithdequantonce",
+        "mg_prefill_attn",
+        "mg_prefill_attn_supported",
+        "prefillAttnDeviceMinRows",
+        "prefillAttnMu",
         "qwenfullattentionlayers",
         "tattn"
       ],
@@ -12568,6 +12616,16 @@
           "category": "incidental",
           "reason": "compute.BackendSupportsDeviceWeightDtype is a backend CAPABILITY PROBE (does this backend's MatMul have a resident kernel for the dtype) used by the dense k-quant HAL staging seam (hal.go) and the MoE device gate/up seam (moe_device_gateup.go); it shares only the word 'Support' with the support-maturity family and names no maturity rung.",
           "token": "BackendSupportsDeviceWeightDtype"
+        },
+        {
+          "category": "incidental",
+          "reason": "Plumbing of the fak#13695 PrefillAttention device route (cgo entry, lock, capability probe, timing receipt, admission threshold, fallback route, or execution operation label); the concept itself is the positioned PrefillAttention row.",
+          "token": "mg_prefill_attn_supported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Plumbing of the fak#13695 PrefillAttention device route (cgo entry, lock, capability probe, timing receipt, admission threshold, fallback route, or execution operation label); the concept itself is the positioned PrefillAttention row.",
+          "token": "PrefillAttentionSupported"
         }
       ],
       "exclude": [
@@ -12648,6 +12706,7 @@
         "ParityUnknown",
         "ParityUnpublished",
         "ParseQuery",
+        "PrefillAttentionSupported",
         "ProviderSupport",
         "QUANTPROV_UNSUPPORTED_FORMAT",
         "QUANTPROV_UNSUPPORTED_QUANTIZER",
@@ -12751,6 +12810,7 @@
         "marshalWorkCoverageForTest",
         "maturityBaselineRunWitness",
         "maturityBaselineUsage",
+        "mg_prefill_attn_supported",
         "nativeFaultDomain",
         "nativeReasonMessageRoleUnsupported",
         "normalizeAchievedMaturity",

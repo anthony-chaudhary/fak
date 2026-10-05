@@ -769,3 +769,17 @@ SharedGoCacheEnv is the exported workerworktree Go constant whose value is FAK_S
 FAK_SHARED_GOCACHE is the environment-key spelling of the worker shared Go build-cache opt-in, also exposed to Go callers as SharedGoCacheEnv. WorktreeEnv reads an explicit caller-map value before the ambient environment; an explicit empty value disables ambient opt-in, and only a trimmed absolute non-NUL path selects the child GOCACHE.
 
 **Distinct from:** This is the external key spelling of the same control named by SharedGoCacheEnv, not a second cache. It is distinct from sharedCache, the requested directory value, and from the selected GOCACHE destination. The external cache remains operator-owned and GOTMPDIR remains worktree-local.
+
+
+### PrefillAttention
+
+metalgemm's device prefill attention: a tiled simdgroup-MMA causal GQA kernel that computes softmax(scale*q.k^T)v for a P-row prefill panel against the layer's whole f32 KV cache on the GPU, one threadgroup per 8 query rows and GQA group (fak#13695).
+
+**Distinct from:** attnPrefillInto is the host CPU loop and parity oracle for the same math; PrefillAttention is its GPU twin, and attnPrefillDispatch chooses between them.
+
+
+### attnPrefillDispatch
+
+The Session-level prefill attention route chooser: on a Metal prefill path it runs metalgemm.PrefillAttention and otherwise, or on any case the device kernel cannot reproduce exactly (observer, soft-cap, unsupported geometry, tiny panel, device failure), runs the host attnPrefillInto.
+
+**Distinct from:** It computes nothing itself: attnPrefillInto (host) and PrefillAttention (device) are the two kernels it routes between.

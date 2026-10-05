@@ -143,6 +143,9 @@ const (
 	// declined (encode refusal, stall, quarantine) and the rest of that prefill panel ran on
 	// the per-projection host route; a later panel of a long prompt retries the graph.
 	MetalFallbackDensePrefillGraphHost MetalFallbackRoute = "dense-prefill-graph-host"
+	// MetalFallbackPrefillAttentionCPU: the device prefill attention kernel (fak#13695) declined
+	// after admission (allocation or a bounded-wait stall) and the layer ran the host loop.
+	MetalFallbackPrefillAttentionCPU MetalFallbackRoute = "prefill-attn-cpu"
 )
 
 // metalFallbackRouteOrder is the stable slot order for the live per-route counter vector
@@ -166,10 +169,11 @@ var metalFallbackRouteOrder = [...]MetalFallbackRoute{
 	MetalFallbackFusedMLPQ6DownDispatch,
 	MetalFallbackFusedMLPBatchDispatch,
 	MetalFallbackDensePrefillGraphHost,
+	MetalFallbackPrefillAttentionCPU,
 }
 
 // metalFallbackRouteIndex returns the stable vector slot for route, or ok=false when the route
-// has no dedicated slot. It is a small linear scan over 16 entries, off the hot path.
+// has no dedicated slot. It is a small linear scan over 17 entries, off the hot path.
 func metalFallbackRouteIndex(route MetalFallbackRoute) (int, bool) {
 	for i, r := range metalFallbackRouteOrder {
 		if r == route {
@@ -350,6 +354,8 @@ func metalFallbackTemplate(route MetalFallbackRoute) (MetalFallbackEvent, bool) 
 		// The declined layer graph's work is re-dispatched per projection on the Metal host
 		// route (still Metal, not CPU), so it is a caller-dispatch decline like the groups.
 		return dispatch(metalgemm.ExecutionQ4KGEMMGroup), true
+	case MetalFallbackPrefillAttentionCPU:
+		return cpu(metalgemm.ExecutionPrefillAttention), true
 	default:
 		return MetalFallbackEvent{}, false
 	}

@@ -65,6 +65,7 @@ func TestMetalFallbackReceiptOrdersAndClassifiesEveryRoute(t *testing.T) {
 		MetalFallbackFusedMLPDispatch,
 		MetalFallbackFusedMLPQ6DownDispatch,
 		MetalFallbackFusedMLPBatchDispatch,
+		MetalFallbackPrefillAttentionCPU,
 	}
 	profiler := NewPhaseProfiler()
 	for _, route := range routes {
@@ -77,7 +78,7 @@ func TestMetalFallbackReceiptOrdersAndClassifiesEveryRoute(t *testing.T) {
 	if err := ValidateMetalFallbackReceipt(receipt); err != nil {
 		t.Fatalf("receipt did not read back: %v", err)
 	}
-	if len(receipt.Events) != len(routes) || receipt.PromisedCPUFallbacks != 8 {
+	if len(receipt.Events) != len(routes) || receipt.PromisedCPUFallbacks != 9 {
 		t.Fatalf("fallback receipt events=%d promised_cpu=%d", len(receipt.Events), receipt.PromisedCPUFallbacks)
 	}
 	for i, event := range receipt.Events {
