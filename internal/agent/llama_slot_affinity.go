@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"hash/crc32"
 	"io"
 	"net/http"
 	"strings"
@@ -12,14 +11,25 @@ import (
 	"time"
 )
 
-// llama_slot_affinity.go — prefix-affine slot pinning for llama-server upstreams.
+// llama_slot_affinity.go — advisory llama-server prompt-cache hint.
 //
-// llama-server keeps one KV cache per slot. Without a hint it assigns an idle slot, so N
-// subagents that share a parent's system prompt and tool catalog land on N different
-// slots and each re-prefills the shared prefix. Pinning id_slot = crc32(stable prefix) %
-// total_slots routes every request with the same prefix to the same slot, where
-// cache_prompt:true reuses it. Measured on a Strix appliance: parent-first N=4 reuse went
-// from 1/4 to 4/4 children.
+// The pin this hint replaced (id_slot = crc32(shared prefix) % total_slots) lost 3.00x fleet
+// throughput: [HW-WITNESSED] 2026-10-05 on a Strix Halo (strix1), four concurrent 128-token
+// requests aggregated 41.65 tok/s straight at the llama-server upstream versus 13.89 tok/s
+// through the fak front door, with a per-slot latency staircase of 7.37 -> 22.86 -> 29.85 ->
+// 36.86 s — every turn sharing a system prompt hashed onto one slot, and llama-server serves
+// one request per slot.
+//
+// The pin was originally introduced for the opposite trade (commit cbd40151e): with a
+// parent-first fan-out of N=4, prefix reuse went 1/4 -> 4/4 for the children and the slowest
+// child fell 62s -> 4s. Throughput beat that latency win here, so the pin is gone.
+//
+// Shipped behavior: the hint is advisory — it adds cache_prompt:true to a discovered
+// llama-server upstream and emits no id_slot, so the upstream's own slot selection applies and
+// concurrent same-prefix turns are not serialized. fak therefore no longer guarantees prefix
+// affinity, and slot choice is the upstream's. An operator who wants the old hard pin can
+// still set id_slot explicitly through ExtraBody. total_slots still gates the hint, and any
+// key the operator already set through ExtraBody or guided decode wins.
 //
 // Opt-in: only a planner with LlamaSlotAffinity set ever probes. The zero value — every
 // generic OpenAI-compatible client, hosted provider, and test fake upstream — sends no
@@ -117,29 +127,11 @@ func probeLlamaTotalSlots(base, apiKey string) int {
 	return props.TotalSlots
 }
 
-// llamaPrefixSlot hashes the stable request prefix — system/developer text plus the tool
-// catalog, after prompt-prefix stabilization — to a slot in [0, slots).
-func llamaPrefixSlot(messages []Message, tools []ToolDef, slots int64) int64 {
-	h := crc32.NewIEEE()
-	for _, m := range messages {
-		if m.Role != RoleSystem && m.Role != "developer" {
-			break
-		}
-		_, _ = h.Write([]byte(m.Content))
-		_, _ = h.Write([]byte{0})
-	}
-	if len(tools) > 0 {
-		if raw, err := json.Marshal(tools); err == nil {
-			_, _ = h.Write(raw)
-		}
-	}
-	return int64(h.Sum32()) % slots
-}
-
-// withLlamaSlotAffinity returns extra with id_slot and cache_prompt added when the
-// planner opted in and the upstream is a discovered llama-server; otherwise extra
-// unchanged (an opted-in planner kicks discovery off in the background).
-func (p *HTTPPlanner) withLlamaSlotAffinity(extra json.RawMessage, messages []Message, tools []ToolDef) json.RawMessage {
+// withLlamaSlotAffinity returns extra with cache_prompt:true added when the planner opted
+// in and the upstream is a discovered llama-server; otherwise extra unchanged (an opted-in
+// planner kicks discovery off in the background). It never writes id_slot, so slot choice
+// stays with the upstream and concurrent turns keep batching (see the file doc).
+func (p *HTTPPlanner) withLlamaSlotAffinity(extra json.RawMessage) json.RawMessage {
 	if p == nil || !p.LlamaSlotAffinity || p.Provider != ProviderOpenAI || strings.TrimSpace(p.BaseURL) == "" {
 		return extra
 	}
@@ -152,10 +144,6 @@ func (p *HTTPPlanner) withLlamaSlotAffinity(extra json.RawMessage, messages []Me
 	obj := map[string]json.RawMessage{}
 	if len(extra) > 0 && json.Unmarshal(extra, &obj) != nil {
 		return extra
-	}
-	if _, set := obj["id_slot"]; !set {
-		slot, _ := json.Marshal(llamaPrefixSlot(messages, tools, slots))
-		obj["id_slot"] = slot
 	}
 	if _, set := obj["cache_prompt"]; !set {
 		obj["cache_prompt"] = json.RawMessage("true")

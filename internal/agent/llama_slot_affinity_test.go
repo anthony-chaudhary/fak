@@ -33,13 +33,16 @@ func waitSlotsDiscovered(t *testing.T, base string, want int64) {
 	t.Fatalf("slot discovery for %s never reached %d", base, want)
 }
 
-// TestLlamaSlotAffinityPinsSharedPrefixToOneSlot: once the upstream /props reports
-// total_slots, every request sharing a system prompt + tool catalog carries the same
-// id_slot (= crc32(prefix) % slots) and cache_prompt:true, so sibling subagents reuse one
-// slot's KV. Before discovery the body is untouched (discovery never blocks a request).
+// TestLlamaSlotAffinityLeavesSlotSelectionToUpstream: once the upstream /props reports
+// total_slots, every request carries cache_prompt:true and NO id_slot — slot choice is the
+// upstream's, so concurrent same-prefix turns are not serialized ([HW-WITNESSED] 2026-10-05,
+// 41.65 vs 13.89 tok/s; see llama_slot_affinity.go). fak does not claim the upstream reuses a
+// prompt-matching slot: it simply stops pinning. Before discovery the body is untouched
+// (discovery never blocks a request). An operator-set id_slot in ExtraBody is the only
+// source of a pin and passes through untouched.
 //
 // fak-test:runtime fast est=300ms
-func TestLlamaSlotAffinityPinsSharedPrefixToOneSlot(t *testing.T) {
+func TestLlamaSlotAffinityLeavesSlotSelectionToUpstream(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/props" {
 			_, _ = w.Write([]byte(`{"total_slots":4}`))
@@ -60,12 +63,11 @@ func TestLlamaSlotAffinityPinsSharedPrefixToOneSlot(t *testing.T) {
 
 	a := slotTestBody(t, p, parent, tools)
 	b := slotTestBody(t, p, child, tools)
-	want, _ := json.Marshal(llamaPrefixSlot(parent, tools, 4))
-	if string(a["id_slot"]) != string(want) || string(b["id_slot"]) != string(want) {
-		t.Fatalf("id_slot parent=%s child=%s, want both %s", a["id_slot"], b["id_slot"], want)
+	if a["id_slot"] != nil || b["id_slot"] != nil {
+		t.Fatalf("planner emitted id_slot (parent=%s child=%s); a hard pin serializes concurrent turns on one llama.cpp slot", a["id_slot"], b["id_slot"])
 	}
-	if string(a["cache_prompt"]) != "true" {
-		t.Fatalf("cache_prompt=%s want true", a["cache_prompt"])
+	if string(a["cache_prompt"]) != "true" || string(b["cache_prompt"]) != "true" {
+		t.Fatalf("cache_prompt parent=%s child=%s, want true", a["cache_prompt"], b["cache_prompt"])
 	}
 
 	// An operator-set id_slot (ExtraBody) wins over the hint.
