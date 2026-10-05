@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/enginestep"
 	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
@@ -46,6 +47,12 @@ type BatchingEngineConfig struct {
 	// until a new request wakes it; 0 or negative disables the bound. It does not
 	// limit total work — progress resets the counter.
 	MaxSteps int
+
+	// recorder is the per-engine step recorder. Nil means enginestep.Default.
+	// Unexported so production callers cannot accidentally redirect the process
+	// recorder; in-package tests inject a private recorder instead of mutating
+	// enginestep.Default.
+	recorder *enginestep.Recorder
 }
 
 // DefaultBatchingEngineConfig returns the default batching driver configuration:
@@ -74,6 +81,12 @@ type BatchingEngine struct {
 	done      chan struct{}
 	wake      chan struct{}
 	closeOnce sync.Once
+
+	// recorder receives one observation per scheduler step and per admission.
+	// It defaults to enginestep.Default in NewBatchingEngine; a zero-value
+	// BatchingEngine leaves it nil and every Observe* call is a no-op (the
+	// enginestep methods all guard a nil receiver).
+	recorder *enginestep.Recorder
 }
 
 // NewBatchingEngine constructs the batching driver and starts its step loop.
@@ -94,6 +107,11 @@ func NewBatchingEngine(cfg ...BatchingEngineConfig) (*BatchingEngine, error) {
 		return nil, err
 	}
 
+	recorder := c.recorder
+	if recorder == nil {
+		recorder = enginestep.Default
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	e := &BatchingEngine{
 		cfg:      c,
@@ -103,6 +121,7 @@ func NewBatchingEngine(cfg ...BatchingEngineConfig) (*BatchingEngine, error) {
 		cancel:   cancel,
 		done:     make(chan struct{}),
 		wake:     make(chan struct{}, 1),
+		recorder: recorder,
 	}
 	go e.run()
 	return e, nil
@@ -156,14 +175,15 @@ func (e *BatchingEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.Engine
 
 	rctx, rcancel := context.WithCancel(ctx)
 	r := &batcherRequest{
-		sessionID: sessionID,
-		tool:      c.Tool,
-		engine:    EngineIDBatcher,
-		tokens:    make(chan abi.EngineToken, req.TargetTokens+16),
-		done:      make(chan struct{}),
-		ctx:       rctx,
-		cancel:    rcancel,
-		putCtx:    ctx,
+		sessionID:  sessionID,
+		tool:       c.Tool,
+		engine:     EngineIDBatcher,
+		tokens:     make(chan abi.EngineToken, req.TargetTokens+16),
+		done:       make(chan struct{}),
+		ctx:        rctx,
+		cancel:     rcancel,
+		putCtx:     ctx,
+		enqueuedAt: time.Now(),
 	}
 
 	e.mu.Lock()
@@ -180,6 +200,10 @@ func (e *BatchingEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.Engine
 		rcancel()
 		return nil, ErrBatcherClosed
 	}
+	// Instrumentation only: publish the waiting-queue depth and start the
+	// end-to-end request timer. A nil recorder is a no-op in both methods.
+	e.recorder.SetQueueDepth(e.cb.WaitingQueueLength())
+	r.recorderDone = e.recorder.RequestStart()
 	e.mu.Unlock()
 
 	e.signal()
@@ -220,6 +244,7 @@ func (e *BatchingEngine) run() {
 			continue
 		}
 
+		stepStart := time.Now()
 		res, err := e.cb.StepPhase(e.ctx)
 		if err != nil {
 			if e.ctx.Err() != nil {
@@ -231,6 +256,7 @@ func (e *BatchingEngine) run() {
 				return
 			}
 		}
+		e.observeStep(res, time.Since(stepStart))
 		e.pumpAll()
 
 		if res != nil && (res.PrefillTokens > 0 || res.DecodeTokens > 0 ||
@@ -259,6 +285,43 @@ func (e *BatchingEngine) run() {
 				return
 			case <-time.After(e.cfg.StepInterval):
 			}
+		}
+	}
+}
+
+// observeStep feeds one StepPhase result into the engine recorder. It is pure
+// instrumentation: no control flow, locking, ordering, or return value depends on
+// it, and every recorder method is a no-op on a nil recorder. Arm selection uses
+// res.Phase with the token counts as disambiguator, so a step that both prefills
+// and decodes is observed under both arms rather than dropped.
+func (e *BatchingEngine) observeStep(res *BatchStepResult, stepDur time.Duration) {
+	if res == nil {
+		return
+	}
+	if res.PrefillTokens > 0 || res.Phase == PhasePrefill {
+		e.recorder.ObservePrefillChunk(res.PrefillTokens, stepDur)
+		e.recorder.ObservePhase(enginestep.PhasePrefill, stepDur)
+	}
+	if res.DecodeTokens > 0 || res.Phase == PhaseDecode {
+		e.recorder.ObserveDecodeStep(enginestep.PathBatched, res.ActiveSlots, stepDur)
+	}
+	e.recorder.ObserveCohort(res.ActiveSlots)
+	if res.PrefixReuseTokens > 0 {
+		e.recorder.ObservePrefixMatched(res.PrefixReuseTokens)
+	}
+	// Admission wait is enqueue -> the step that promotes the request out of the
+	// waiting queue. A directly-admitted request never appears here.
+	for _, id := range res.PromotedSessionIDs {
+		e.mu.Lock()
+		r := e.requests[id]
+		var waited time.Duration
+		if r != nil && !r.enqueuedAt.IsZero() {
+			waited = time.Since(r.enqueuedAt)
+			r.enqueuedAt = time.Time{}
+		}
+		e.mu.Unlock()
+		if r != nil && waited > 0 {
+			e.recorder.ObservePhase(enginestep.PhaseAdmissionWait, waited)
 		}
 	}
 }
@@ -387,6 +450,11 @@ type batcherRequest struct {
 	// gen is appended only by the single scheduler goroutine; read only after done.
 	gen []int
 
+	// enqueuedAt is the Admit wall time; cleared once the promoting step records
+	// admission wait. recorderDone closes the end-to-end PhaseRequest timer.
+	enqueuedAt   time.Time
+	recorderDone func()
+
 	requestFinish
 }
 
@@ -409,6 +477,10 @@ func (r *batcherRequest) finished() bool {
 }
 
 func (r *batcherRequest) finish(res *abi.Result, err error) {
+	if r.recorderDone != nil {
+		r.recorderDone()
+		r.recorderDone = nil
+	}
 	r.requestFinish.complete(r.tokens, r.done, res, err)
 }
 

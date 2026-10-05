@@ -1,0 +1,127 @@
+package modelengine
+
+// enginestep_observation_test.go — instrumentation witness for the NATIVE scheduler.
+//
+// The native scheduler loop is the path that runs on real Strix hardware and feeds
+// no Prometheus metrics before this wiring. This test drives a REAL native iteration
+// (two lanes -> one shared StepBatch) against an INJECTED private enginestep.Recorder
+// and asserts the fak_engine_* families advanced. It probes only the recorder surface,
+// never implementation internals, and never mutates process-wide enginestep.Default.
+
+import (
+	"bytes"
+	"context"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/enginestep"
+	"github.com/anthony-chaudhary/fak/internal/model"
+)
+
+// promCount sums every `base_count` sample of histogram family `base` (any label
+// set). It fails the test if the family is absent.
+func promCount(t *testing.T, body, base string) float64 {
+	t.Helper()
+	var total float64
+	found := false
+	for _, line := range strings.Split(body, "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		field := line
+		if i := strings.IndexByte(line, ' '); i >= 0 {
+			field = line[:i]
+		}
+		name := field
+		if i := strings.IndexByte(name, '{'); i >= 0 {
+			name = name[:i]
+		}
+		if name != base+"_count" {
+			continue
+		}
+		i := strings.LastIndexByte(line, ' ')
+		if i < 0 {
+			t.Fatalf("malformed metric line %q", line)
+		}
+		v, err := strconv.ParseFloat(line[i+1:], 64)
+		if err != nil {
+			t.Fatalf("parse %q value: %v", base, err)
+		}
+		total += v
+		found = true
+	}
+	if !found {
+		t.Fatalf("metric family %q absent from Prometheus output", base)
+	}
+	return total
+}
+
+// promValue returns the trailing numeric value of the first line whose field is
+// exactly `name` (unlabelled). It fails the test if absent.
+func promValue(t *testing.T, body, name string) float64 {
+	t.Helper()
+	for _, line := range strings.Split(body, "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, name+" ") {
+			i := strings.LastIndexByte(line, ' ')
+			v, err := strconv.ParseFloat(line[i+1:], 64)
+			if err != nil {
+				t.Fatalf("parse %q value: %v", name, err)
+			}
+			return v
+		}
+	}
+	t.Fatalf("metric %q absent from Prometheus output", name)
+	return 0
+}
+
+// fak-test:runtime fast est=3s
+func TestNativeSchedulerRecordsStepObservations(t *testing.T) {
+	rec := enginestep.New(64)
+	s := NewNativeScheduler(model.NewSynthetic(SyntheticConfig()))
+	s.recorder = rec // inject a private recorder, not process-wide Default
+	defer s.Close()
+
+	ctx := context.Background()
+	calls := []*abi.ToolCall{
+		inlineCall("search_flights", `{"from":"SFO"}`),
+		inlineCall("list_all_airports", `{"region":"EU"}`),
+	}
+	for i, c := range calls {
+		req, err := s.Admit(ctx, c)
+		if err != nil {
+			t.Fatalf("Admit %d: %v", i, err)
+		}
+		for range req.Tokens() {
+		}
+		if _, err := req.Result(); err != nil {
+			t.Fatalf("Result %d: %v", i, err)
+		}
+	}
+
+	var buf bytes.Buffer
+	rec.WritePrometheus(&buf)
+	body := buf.String()
+
+	if got := promCount(t, body, enginestep.MetricCohortSize); got < 1 {
+		t.Fatalf("fak_engine_cohort_size_count = %v, want >= 1", got)
+	}
+	if got := promCount(t, body, enginestep.MetricDecodeStepSeconds); got < 1 {
+		t.Fatalf("fak_engine_decode_step_seconds_count = %v, want >= 1", got)
+	}
+	if got := promValue(t, body, enginestep.MetricLastStepTimestamp); got <= 0 {
+		t.Fatalf("fak_engine_last_step_timestamp_seconds = %v, want > 0", got)
+	}
+
+	snap := rec.Snapshot(0, "")
+	if snap.Cohorts.Steps < 1 {
+		t.Fatalf("snapshot cohorts = %d, want >= 1", snap.Cohorts.Steps)
+	}
+	if snap.LastStepUnixNano == 0 {
+		t.Fatal("snapshot last step timestamp is zero")
+	}
+}

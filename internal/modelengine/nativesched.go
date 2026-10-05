@@ -23,6 +23,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/enginestep"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
@@ -126,6 +127,14 @@ type NativeScheduler struct {
 	closeSession       func(*model.Session)
 	observeNativeEvent func(nativeSchedulerEvent)
 	beforeModelExecute func(nativeSchedulerEventKind, *schedLane)
+
+	// recorder receives the per-iteration native scheduler boundary (cohort size,
+	// decode step, prefill, queue depth) as fak_engine_* metrics. It defaults to
+	// enginestep.Default; a zero-value NativeScheduler leaves it nil and every
+	// Observe* call is a no-op (enginestep guards a nil receiver). It is unexported
+	// so production callers cannot redirect the process recorder; in-package tests
+	// inject a private recorder instead of mutating enginestep.Default.
+	recorder *enginestep.Recorder
 }
 
 // NativeSessionLifecycle identifies whether a scheduler-created model session is
@@ -291,6 +300,7 @@ func newNativeScheduler(m *model.Model, prepare schedPrepareFunc) *NativeSchedul
 		drainDonation: true,
 		coupler:       NewDefaultWorkerCoupler(),
 		closeSession:  func(sess *model.Session) { sess.Close() },
+		recorder:      enginestep.Default,
 	}
 	if m != nil && (m.Q4KCount() > 0 || m.Q2Count() > 0) {
 		s.qwenPrefillCap = &residentQ4KPrefillCapability{model: m}
@@ -734,8 +744,11 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 		}
 	}
 	closed = s.closed
+	waitingDepth := len(s.waiting)
 	idle = len(s.lanes) == 0 && len(s.waiting) == 0 && len(s.preempted) == 0
 	s.mu.Unlock()
+
+	s.recorder.SetQueueDepth(waitingDepth)
 
 	if idle {
 		return false, idle, closed
@@ -743,21 +756,38 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 	s.iteration++
 	iteration := s.iteration
 	if prefill != nil {
+		prefillStarted := s.now()
 		s.advanceQwenPrefill(prefill, iteration)
+		// PhasePrefill only: ObservePrefillChunk counts prompt tokens forwarded by
+		// prefill, and advanceQwenPrefill may resolve a KV prefix hit that skips
+		// tokens before the real chunk with no separate signal here. Reporting the
+		// cursor delta would bill cache hits as prefill; the prefix-match family is
+		// the honest owner of those tokens.
+		s.recorder.ObservePhase(enginestep.PhasePrefill, s.now().Sub(prefillStarted))
 		if !prefill.terminal && prefill.state == schedLaneDecode {
 			active = append(active, prefill)
 		}
 		if len(active) > 0 {
+			s.recorder.ObserveCohort(len(active))
+			stepStarted := s.now()
 			s.stepOnce(active, iteration)
+			s.recorder.ObserveDecodeStep(enginestep.PathBatched, len(active), s.now().Sub(stepStarted))
 		}
 	} else if solo != nil {
+		s.recorder.ObserveCohort(1)
+		stepStarted := s.now()
 		if donated {
 			s.stepOnce([]*schedLane{solo}, iteration)
+			s.recorder.ObserveDecodeStep(enginestep.PathSerial, 1, s.now().Sub(stepStarted))
 		} else {
 			s.stepSolo(solo, iteration)
+			s.recorder.ObserveDecodeStep(enginestep.PathSerial, 1, s.now().Sub(stepStarted))
 		}
 	} else {
+		s.recorder.ObserveCohort(len(active))
+		stepStarted := s.now()
 		s.stepOnce(active, iteration)
+		s.recorder.ObserveDecodeStep(enginestep.PathBatched, len(active), s.now().Sub(stepStarted))
 	}
 	if donated {
 		s.mu.Lock()

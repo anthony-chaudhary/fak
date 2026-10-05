@@ -72,9 +72,12 @@ func fakEngineBatchingAllowedMetrics() map[string]bool {
 	for _, m := range []string{
 		"fak_sched_running", "fak_sched_waiting", "fak_sched_tokens_in_use", "fak_sched_queued_tokens",
 		"fak_sched_admitted_total", "fak_sched_queued_total", "fak_sched_shed_total",
+		"fak_sched_preempt_total", "fak_sched_preempt_swap_total", "fak_sched_preempt_recompute_total",
 		"fak_serving_num_requests_running", "fak_serving_num_requests_waiting",
 		"fak_serving_kv_cache_usage_perc", "fak_serving_prefix_cache_hit_rate",
+		"fak_gateway_inference_requests_total",
 		"fak_gateway_inference_completion_tokens_total", "fak_gateway_inference_prompt_tokens_total",
+		"fak_gateway_kv_memory_evictions_total", "fak_gateway_kv_memory_resident_bytes",
 	} {
 		allowed[m] = true
 	}

@@ -2349,6 +2349,317 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "id": 38,
+      "type": "row",
+      "title": "Eviction: scheduler preemption, shedding, and KV pressure",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 86,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 39,
+      "type": "timeseries",
+      "title": "Preemptions/s by mode",
+      "description": "KV-block exhaustion: sequences preempted per second, split by swap-to-host vs. drop-and-recompute (fak_sched_preempt_total, _swap_total, _recompute_total).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 87,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(fak_sched_preempt_total{job=\"fak_gateway\",instance=~\"$instance\"}[$__rate_interval]) and on(job,instance) (up{job=\"fak_gateway\"} == 1))",
+          "legendFormat": "preempted total",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(fak_sched_preempt_swap_total{job=\"fak_gateway\",instance=~\"$instance\"}[$__rate_interval]) and on(job,instance) (up{job=\"fak_gateway\"} == 1))",
+          "legendFormat": "swap-to-host",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(fak_sched_preempt_recompute_total{job=\"fak_gateway\",instance=~\"$instance\"}[$__rate_interval]) and on(job,instance) (up{job=\"fak_gateway\"} == 1))",
+          "legendFormat": "drop-and-recompute",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 40,
+      "type": "timeseries",
+      "title": "Prefix-cache evictions/s by kind",
+      "description": "Radix KV prefix-cache evictions per second by cause: LRU pressure vs. policy/quarantine (fak_gateway_kv_memory_evictions_total{kind}; gateway-liveness joined).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 87,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind) (rate(fak_gateway_kv_memory_evictions_total{job=\"fak_gateway\",instance=~\"$instance\"}[$__rate_interval]) and on(job,instance) (up{job=\"fak_gateway\"} == 1))",
+          "legendFormat": "{{kind}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 41,
+      "type": "row",
+      "title": "Completion: requests finishing, by reason",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 95,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 42,
+      "type": "timeseries",
+      "title": "Completions/s by finish reason",
+      "description": "Requests finishing per second, split by finish_reason (fak_gateway_inference_requests_total; gateway-liveness joined).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 96,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (finish_reason) (rate(fak_gateway_inference_requests_total{job=\"fak_gateway\",instance=~\"$instance\"}[$__rate_interval]) and on(job,instance) (up{job=\"fak_gateway\"} == 1))",
+          "legendFormat": "{{finish_reason}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 43,
+      "type": "timeseries",
+      "title": "Resident KV bytes",
+      "description": "Gateway-level resident local KV-cache bytes derived from prefix positions and model KV geometry (fak_gateway_kv_memory_resident_bytes; gateway-liveness joined). This is the cache-edge residency, not a per-engine-step byte count: no enginestep family exposes per-step KV bytes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 96,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(fak_gateway_kv_memory_resident_bytes{job=\"fak_gateway\",instance=~\"$instance\"} and on(job,instance) (up{job=\"fak_gateway\"} == 1))",
+          "legendFormat": "resident KV bytes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     }
   ]
 }
