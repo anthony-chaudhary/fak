@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/enginestep"
+	"github.com/anthony-chaudhary/fak/internal/stepobs"
 )
 
 // engineStepsDefaultRecent is how many ring records /v1/fak/observation/engine
@@ -40,13 +41,15 @@ func (s *Server) nativeEngineServing() bool {
 }
 
 // writeEngineStepMetrics renders the fak_engine_* continuous-batching cycle
-// families when this server runs the native planner. A proxy/mock gateway emits
-// nothing rather than a phantom idle engine.
+// families when this server runs the native planner: the cycle itself
+// (enginestep), then its two sub-seams — every kernel call and every planner-step
+// leg (stepobs). A proxy/mock gateway emits nothing rather than a phantom idle engine.
 func (s *Server) writeEngineStepMetrics(b *strings.Builder) {
 	if b == nil || !s.nativeEngineServing() {
 		return
 	}
 	enginestep.Default.WritePrometheus(b)
+	stepobs.Default.WritePrometheus(b)
 }
 
 // handleFakObservationEngine serves GET /v1/fak/observation/engine: the bounded

@@ -5,6 +5,11 @@
 // When enabled, recorders strictly enforce an upper bound on retained events;
 // excess events are dropped with dropped counters incremented, protecting host
 // memory from unbounded growth.
+//
+// A separate, optional observer (SetObserver) is fanned out on every Record so a
+// metrics sink can read per-kernel timings without the compute backends importing a
+// metrics package, and without the trace artifact or its cost ever becoming
+// unconditional. With no observer attached Record is unchanged.
 package computetrace
 
 import (
@@ -201,6 +206,7 @@ var active struct {
 	sync.RWMutex
 	recorder     *Recorder
 	run, request string
+	observer     func(Event)
 }
 
 // Enable installs the process recorder. Calling the returned function disables it.
@@ -218,11 +224,39 @@ func Enable(limit int, run, request string) (*Recorder, func()) {
 	}
 }
 
-// Record adds an event only when tracing was explicitly enabled.
+// SetObserver installs the process observer: a sink fed EVERY Record call, whether or
+// not a recorder is enabled. This is the seam that lets per-kernel timings reach a
+// metric surface without any compute backend knowing a metrics package exists — the
+// fan-out lives here, in the trace package the backends already call.
+//
+// The observer is a metrics sink, not a second trace store: it must not retain the
+// event, any slice the event references, or the caller's tensors. Passing nil detaches
+// it and restores the pre-observer no-op. Enabled() is deliberately unaffected, so the
+// device backends keep gating their (more expensive) per-GEMM measurement on explicit
+// tracing rather than on a metrics observer happening to be attached.
+func SetObserver(fn func(Event)) {
+	active.Lock()
+	active.observer = fn
+	active.Unlock()
+}
+
+// Observed reports whether a process observer is attached.
+func Observed() bool {
+	active.RLock()
+	defer active.RUnlock()
+	return active.observer != nil
+}
+
+// Record fans one event out to the process observer, then adds it to the recorder when
+// tracing was explicitly enabled. The observer call is a nil check plus a struct copy
+// when unattached nothing at all, so the per-GEMM path stays allocation-free.
 func Record(e Event) {
 	active.RLock()
-	r, run, request := active.recorder, active.run, active.request
+	r, run, request, observe := active.recorder, active.run, active.request, active.observer
 	active.RUnlock()
+	if observe != nil {
+		observe(e)
+	}
 	if r == nil {
 		return
 	}

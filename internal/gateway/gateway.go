@@ -119,6 +119,12 @@ func New(cfg Config) (*Server, error) {
 	if err := validateToolDescriptors(); err != nil {
 		return nil, err
 	}
+	// Attach the sub-kernel + sub-planner step observers here, not in an init(): this is
+	// the single construction path every `fak serve` (and every embedder that serves
+	// /v1) goes through, so the fak_engine_kernel_* / fak_engine_planner_step_* families
+	// have a real producer the moment a server exists. A family whose writers are never
+	// attached renders a band that can never light up — the fak_sched_preempt_* defect.
+	attachStepObservation()
 	model := cfg.Model
 	if model == "" {
 		model = engineID

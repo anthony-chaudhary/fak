@@ -102,5 +102,64 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "stepobs-kernel-family-prefix",
+      "canonical": "fak_engine_kernel_*",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Prometheus family prefix for the sub-kernel seam: per-GEMM call counts, per-call durations, and the kernel presence and overflow bits, all rendered by internal/stepobs from computetrace events.",
+      "distinction": "Covers the KERNEL sub-seam only, inside one GEMM. The fak_engine_* phase families are the planner cycle (admission, prefill, decode, sample) and fak_engine_planner_step_* is the per-leg step seam, so a kernel series is never a phase.",
+      "distinct_from": [
+        "x2-gateway-engine-fakkernel"
+      ],
+      "aliases": [],
+      "grounding": "MetricKernelObserved",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "stepobs-planner-step-family-prefix",
+      "canonical": "fak_engine_planner_step_*",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Prometheus family prefix for the sub-planner step seam: per-leg durations and leg counts over the closed MicroSpanKind vocabulary, plus the planner presence bit, all rendered by internal/stepobs.",
+      "distinction": "Covers one LEG of a planner step. The fak_engine_* phase families time a whole request cycle and fak_engine_kernel_* times inside a GEMM, so this prefix sits between them and must not be summed with either.",
+      "distinct_from": [
+        "x2-gateway-engine-fakgatewayoperationdurationseconds",
+        "stepobs-metric-planner-step-seconds"
+      ],
+      "aliases": [],
+      "grounding": "MetricPlannerStepObserved",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "stepobs-kernel-registry",
+      "canonical": "kernelRegistry",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The bounded fold inside internal/stepobs that turns computetrace.Event values into per-(kernel, backend, timer_domain) call counters and histograms, capped at MaxKernelKeys with a single fixed overflow key.",
+      "distinction": "The KERNEL half of the stepobs Recorder, which also owns a planner-step half; internal/computetrace.Recorder is a separate trace ARTIFACT store with a ring bound and activation samples, not a metric aggregate.",
+      "distinct_from": [
+        "x2-gateway-engine-fakkernel",
+        "stepobs-observe-planner-step"
+      ],
+      "aliases": [],
+      "grounding": "kernelRegistry",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

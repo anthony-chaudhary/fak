@@ -126,5 +126,103 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "stepobs-metric-planner-step-seconds",
+      "canonical": "MetricPlannerStepSeconds",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Name of the fak_engine_planner_step_seconds histogram: the duration of one planner-step leg over the closed StepKind vocabulary.",
+      "distinction": "The PLANNER-LEG histogram. fak_engine_phase_seconds times a whole serving cycle and fak_engine_kernel_seconds times one GEMM, so this is the only one of the three whose label is a step KIND rather than a phase or a kernel.",
+      "distinct_from": [
+        "stepobs-planner-step-family-prefix",
+        "stepobs-metric-planner-step-events"
+      ],
+      "aliases": [],
+      "grounding": "MetricPlannerStepSeconds",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "stepobs-metric-planner-step-events",
+      "canonical": "MetricPlannerStepEvents",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Name of the fak_engine_planner_step_events_total counter: how many planner-step legs of each closed kind have been observed.",
+      "distinction": "The COUNT companion to the leg duration histogram. fak_engine_kernel_calls_total counts GEMM invocations, not planner legs, so a reader must not divide one series by the other.",
+      "distinct_from": [
+        "stepobs-metric-planner-step-seconds",
+        "stepobs-metric-planner-step-kind-overflow"
+      ],
+      "aliases": [],
+      "grounding": "MetricPlannerStepEvents",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "stepobs-metric-planner-step-kind-overflow",
+      "canonical": "MetricPlannerStepKindOverflowTotal",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Name of the fak_engine_planner_step_kind_overflow_total counter: planner-step legs dropped because their kind fell outside the closed StepKind vocabulary.",
+      "distinction": "The KIND-bound overflow for the planner seam. fak_engine_kernel_keys_capped and fak_engine_kernel_event_overflow_total bound the KERNEL label set by count; this bounds the planner label set by vocabulary, because the planner side is closed and never grows.",
+      "distinct_from": [
+        "stepobs-metric-planner-step-events"
+      ],
+      "aliases": [],
+      "grounding": "MetricPlannerStepKindOverflowTotal",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "stepobs-observe-planner-step",
+      "canonical": "ObservePlannerStep",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Recorder method that folds one planner-step leg of a closed StepKind and its duration into the planner-step registry, counting and dropping any out-of-vocabulary kind.",
+      "distinction": "The PLANNER ingress. ObserveKernel is the compute-side ingress, and ObserveEnginePhase is the typed adapter that projects a native serving phase onto the closed kind vocabulary; this method takes the kind already resolved.",
+      "distinct_from": [
+        "stepobs-kernel-registry",
+        "stepobs-planner-registry"
+      ],
+      "aliases": [],
+      "grounding": "ObservePlannerStep",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "stepobs-planner-registry",
+      "canonical": "plannerRegistry",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The closed-vocabulary fold inside internal/stepobs that turns planner-step legs into per-kind histograms and counters, dropping any kind outside the closed StepKind set.",
+      "distinction": "The PLANNER half of the stepobs Recorder, whose other half is the kernel registry; because its vocabulary is closed it pre-allocates every series, so a cold render emits all of them at a real zero instead of omitting them.",
+      "distinct_from": [
+        "stepobs-observe-planner-step"
+      ],
+      "aliases": [],
+      "grounding": "plannerRegistry",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

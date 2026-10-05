@@ -285,6 +285,39 @@ func (t *MicroTracer) Record(id string, span MicroSpan) {
 
 var nextMicroSpanID atomic.Uint64
 
+// SpanObserver is a process-level sink for one COMPLETED span leg. MicroTracer is a
+// PER-INSTANCE store (a tracer belongs to one host, and its lifetime is that host's),
+// so there is no tracer-global place to hang an aggregate off: the aggregate has to be
+// process-level and opt-in. This is that explicit seam — the alternative, reaching into
+// each tracer's trace map, would mean the metric surface reads a per-host structure it
+// does not own.
+//
+// The observer sees only TERMINAL legs (span_end), so a sink never double-counts the
+// start record, and it is a nil check when unset.
+type SpanObserver func(MicroSpanKind, time.Duration)
+
+var spanObserver struct {
+	sync.RWMutex
+	fn SpanObserver
+}
+
+// SetSpanObserver installs the process span observer. Passing nil detaches it.
+func SetSpanObserver(fn SpanObserver) {
+	spanObserver.Lock()
+	spanObserver.fn = fn
+	spanObserver.Unlock()
+}
+
+func observeSpanEnd(kind MicroSpanKind, d time.Duration) {
+	spanObserver.RLock()
+	fn := spanObserver.fn
+	spanObserver.RUnlock()
+	if fn == nil {
+		return
+	}
+	fn(kind, d)
+}
+
 // MicroSpanScope emits one start record immediately and one terminal record from
 // End. It adapts the paired-lifecycle contract from Modular SpanGuard
 // (Support/include/Support/SpanGuard.h@1c9fd2e0) to MicroTracer records.
@@ -344,6 +377,7 @@ func (s *MicroSpanScope) End() {
 		span.Event = MicroSpanEnd
 		span.Dur = dur
 		s.tracer.Record(s.traceID, span)
+		observeSpanEnd(span.Kind, dur)
 	})
 }
 

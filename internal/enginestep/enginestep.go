@@ -109,6 +109,50 @@ const DefaultRingSize = 512
 // Default is the process-wide recorder the serving loop feeds and the gateway renders.
 var Default = New(DefaultRingSize)
 
+// PhaseObserver is an optional second sink for one completed phase or decode step. It
+// exists so the SUB-PLANNER step timings this recorder already measures can also reach a
+// label-keyed metric surface, without this package importing one: the mapping from
+// Phase to whatever vocabulary a downstream consumer wants belongs to the consumer.
+type PhaseObserver func(Phase, time.Duration)
+
+// StepObserver is the same hook for one decode step, which the Phase vocabulary cannot
+// name (PhaseDecode is a request's WHOLE decode loop; one forward is the step).
+type StepObserver func(path string, lanes int, d time.Duration)
+
+var observers struct {
+	sync.RWMutex
+	phase PhaseObserver
+	step  StepObserver
+}
+
+// SetPhaseObserver installs the process phase observer. Passing nil detaches it. The
+// hook is a fan-out on a path that already holds the recorder lock's work, and it is a
+// nil check when unset, so the decode loop pays nothing until an observer exists.
+func SetPhaseObserver(fn PhaseObserver) {
+	observers.Lock()
+	observers.phase = fn
+	observers.Unlock()
+}
+
+// SetStepObserver installs the process decode-step observer. Passing nil detaches it.
+func SetStepObserver(fn StepObserver) {
+	observers.Lock()
+	observers.step = fn
+	observers.Unlock()
+}
+
+func phaseObservers() PhaseObserver {
+	observers.RLock()
+	defer observers.RUnlock()
+	return observers.phase
+}
+
+func stepObservers() StepObserver {
+	observers.RLock()
+	defer observers.RUnlock()
+	return observers.step
+}
+
 // StepRecord is one entry of the recent-step ring.
 type StepRecord struct {
 	Seq        uint64 `json:"seq"`
@@ -261,6 +305,12 @@ func (r *Recorder) ObservePhase(p Phase, d time.Duration) {
 	if r == nil {
 		return
 	}
+	// The observer is read BEFORE the recorder lock is taken so the fan-out never runs
+	// while this package's mutex is held — a downstream sink is not allowed to become
+	// part of the decode loop's lock ordering.
+	if fn := phaseObservers(); fn != nil {
+		fn(p, d)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	h, ok := r.phases[p]
@@ -279,6 +329,9 @@ func (r *Recorder) ObservePhase(p Phase, d time.Duration) {
 func (r *Recorder) ObserveDecodeStep(path string, lanes int, d time.Duration) {
 	if r == nil || lanes <= 0 {
 		return
+	}
+	if fn := stepObservers(); fn != nil {
+		fn(path, lanes, d)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

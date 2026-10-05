@@ -104,7 +104,8 @@
       "distinction": "It measures per-operation LATENCY, distinct from fak_gateway_operations_total which only counts adjudicated operations by verdict.",
       "distinct_from": [
         "fak_gateway_operations_total",
-        "gateway"
+        "gateway",
+        "stepobs-planner-step-family-prefix"
       ],
       "aliases": [
         "gatewaylatencybuckets"
@@ -207,7 +208,9 @@
       "distinction": "It is a TEST that the GCP plan wires the in-kernel model engine, distinct from fak_kernel_decisions_total (the rung-decision metric) and from the coordinator kernel itself.",
       "distinct_from": [
         "kernel",
-        "modelengine"
+        "modelengine",
+        "stepobs-kernel-family-prefix",
+        "stepobs-kernel-registry"
       ],
       "aliases": [],
       "grounding": "fakkernel",

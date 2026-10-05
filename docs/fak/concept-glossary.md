@@ -783,3 +783,59 @@ metalgemm's device prefill attention: a tiled simdgroup-MMA causal GQA kernel th
 The Session-level prefill attention route chooser: on a Metal prefill path it runs metalgemm.PrefillAttention and otherwise, or on any case the device kernel cannot reproduce exactly (observer, soft-cap, unsupported geometry, tiny panel, device failure), runs the host attnPrefillInto.
 
 **Distinct from:** It computes nothing itself: attnPrefillInto (host) and PrefillAttention (device) are the two kernels it routes between.
+
+
+### fak_engine_kernel_*
+
+Prometheus family prefix for the sub-kernel seam: per-GEMM call counts, per-call durations, and the kernel presence and overflow bits, all rendered by internal/stepobs from computetrace events.
+
+**Distinct from:** Covers the KERNEL sub-seam only, inside one GEMM. The fak_engine_* phase families are the planner cycle (admission, prefill, decode, sample) and fak_engine_planner_step_* is the per-leg step seam, so a kernel series is never a phase.
+
+
+### fak_engine_planner_step_*
+
+Prometheus family prefix for the sub-planner step seam: per-leg durations and leg counts over the closed MicroSpanKind vocabulary, plus the planner presence bit, all rendered by internal/stepobs.
+
+**Distinct from:** Covers one LEG of a planner step. The fak_engine_* phase families time a whole request cycle and fak_engine_kernel_* times inside a GEMM, so this prefix sits between them and must not be summed with either.
+
+
+### kernelRegistry
+
+The bounded fold inside internal/stepobs that turns computetrace.Event values into per-(kernel, backend, timer_domain) call counters and histograms, capped at MaxKernelKeys with a single fixed overflow key.
+
+**Distinct from:** The KERNEL half of the stepobs Recorder, which also owns a planner-step half; internal/computetrace.Recorder is a separate trace ARTIFACT store with a ring bound and activation samples, not a metric aggregate.
+
+
+### MetricPlannerStepSeconds
+
+Name of the fak_engine_planner_step_seconds histogram: the duration of one planner-step leg over the closed StepKind vocabulary.
+
+**Distinct from:** The PLANNER-LEG histogram. fak_engine_phase_seconds times a whole serving cycle and fak_engine_kernel_seconds times one GEMM, so this is the only one of the three whose label is a step KIND rather than a phase or a kernel.
+
+
+### MetricPlannerStepEvents
+
+Name of the fak_engine_planner_step_events_total counter: how many planner-step legs of each closed kind have been observed.
+
+**Distinct from:** The COUNT companion to the leg duration histogram. fak_engine_kernel_calls_total counts GEMM invocations, not planner legs, so a reader must not divide one series by the other.
+
+
+### MetricPlannerStepKindOverflowTotal
+
+Name of the fak_engine_planner_step_kind_overflow_total counter: planner-step legs dropped because their kind fell outside the closed StepKind vocabulary.
+
+**Distinct from:** The KIND-bound overflow for the planner seam. fak_engine_kernel_keys_capped and fak_engine_kernel_event_overflow_total bound the KERNEL label set by count; this bounds the planner label set by vocabulary, because the planner side is closed and never grows.
+
+
+### ObservePlannerStep
+
+Recorder method that folds one planner-step leg of a closed StepKind and its duration into the planner-step registry, counting and dropping any out-of-vocabulary kind.
+
+**Distinct from:** The PLANNER ingress. ObserveKernel is the compute-side ingress, and ObserveEnginePhase is the typed adapter that projects a native serving phase onto the closed kind vocabulary; this method takes the kind already resolved.
+
+
+### plannerRegistry
+
+The closed-vocabulary fold inside internal/stepobs that turns planner-step legs into per-kind histograms and counters, dropping any kind outside the closed StepKind set.
+
+**Distinct from:** The PLANNER half of the stepobs Recorder, whose other half is the kernel registry; because its vocabulary is closed it pre-allocates every series, so a cold render emits all of them at a real zero instead of omitting them.
