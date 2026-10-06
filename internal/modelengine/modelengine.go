@@ -523,6 +523,8 @@ func nativePreemptionPolicyFromEnvWithProbe(probe func() (uint64, bool), kvBytes
 		p.VictimRule = NativePreemptVictimMostRecent
 	case "cost-aware", "cost", "kvbm":
 		p.VictimRule = NativePreemptVictimCostAware
+	case "lowest-priority", "priority":
+		p.VictimRule = NativePreemptVictimLowestPriority
 	}
 	return p
 }

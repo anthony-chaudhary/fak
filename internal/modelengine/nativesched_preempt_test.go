@@ -493,6 +493,10 @@ func TestNativePreemptionPolicyFromEnv(t *testing.T) {
 	if p.Mode != NativePreemptRecompute || p.VictimRule != NativePreemptVictimCostAware || p.MaxBlocks != 7 || p.BlockTokens != 4 {
 		t.Fatalf("native preemption policy from env = %+v, want recompute max=7 block=4", p)
 	}
+	t.Setenv("FAK_NATIVE_KV_VICTIM_RULE", "lowest-priority")
+	if p := nativePreemptionPolicyFromEnv(); p.VictimRule != NativePreemptVictimLowestPriority {
+		t.Fatalf("victim rule from env lowest-priority = %v, want NativePreemptVictimLowestPriority", p.VictimRule)
+	}
 }
 
 func TestNativeKVBMHintsFromMeta(t *testing.T) {
