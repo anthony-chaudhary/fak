@@ -121,6 +121,11 @@ type ElasticBlockAllocator struct {
 	// Adapted from vLLM v1/core block-pool.py at revision
 	// 975dca5bb5db302077674cfa9afe851ee700ad73 (Apache-2.0).
 	recycledBlocks []int
+	// cachedBlocks is the FIFO reuse order for released blocks whose contents
+	// stay cached; cachedFree marks which free blocks it owns. Adapted from
+	// vLLM v1/core block-pool.py (lines 770-798) at the same revision.
+	cachedBlocks []int
+	cachedFree   map[int]bool
 	// Track allocated physical block IDs to ensure ownership and invariant verification.
 	allocatedBlocks map[int]bool
 
@@ -164,6 +169,7 @@ func NewElasticBlockAllocator(cfg ElasticBlockAllocatorConfig) (*ElasticBlockAll
 		pool:            pool,
 		freeBlocks:      freeMap,
 		allocatedBlocks: make(map[int]bool, cfg.InitialBlocks),
+		cachedFree:      make(map[int]bool),
 		sequences:       make(map[string]*sequenceState),
 		prefixReclaimer: cfg.PrefixReclaimer,
 		victimSelector:  cfg.VictimSelector,
@@ -262,7 +268,7 @@ func (a *ElasticBlockAllocator) UnregisterSequence(seqID string) ([]int, error) 
 	for blkID := range seq.blocks {
 		freed = append(freed, blkID)
 		delete(a.allocatedBlocks, blkID)
-		a.releaseBlockLocked(blkID)
+		a.releaseBlockLocked(blkID, false)
 	}
 	delete(a.sequences, seqID)
 
@@ -294,7 +300,7 @@ func (a *ElasticBlockAllocator) AllocBlock(seqID string) (int, error) {
 		last := len(a.recycledBlocks) - 1
 		candidate := a.recycledBlocks[last]
 		a.recycledBlocks = a.recycledBlocks[:last]
-		if a.freeBlocks[candidate] {
+		if a.freeBlocks[candidate] && !a.cachedFree[candidate] {
 			blkID = candidate
 			break
 		}
@@ -303,11 +309,27 @@ func (a *ElasticBlockAllocator) AllocBlock(seqID string) (int, error) {
 	// Blocks that have never been released retain deterministic lowest-ID order.
 	if blkID == -1 {
 		for id := range a.freeBlocks {
+			if a.cachedFree[id] {
+				continue
+			}
 			if blkID == -1 || id < blkID {
 				blkID = id
 			}
 		}
 	}
+
+	// Cached blocks are reused last, oldest release first.
+	for blkID == -1 && len(a.cachedBlocks) > 0 {
+		candidate := a.cachedBlocks[0]
+		a.cachedBlocks = a.cachedBlocks[1:]
+		if a.freeBlocks[candidate] && a.cachedFree[candidate] {
+			blkID = candidate
+		}
+	}
+	if blkID == -1 {
+		return -1, ErrAllocCapacityExceeded
+	}
+	delete(a.cachedFree, blkID)
 	delete(a.freeBlocks, blkID)
 	a.allocatedBlocks[blkID] = true
 	seq.blocks[blkID] = true
@@ -322,6 +344,16 @@ func (a *ElasticBlockAllocator) AllocBlock(seqID string) (int, error) {
 // FreeBlock returns an allocated block from a sequence back to the pool.
 // If the allocator is draining, freed blocks may be reclaimed to progress toward the target watermark.
 func (a *ElasticBlockAllocator) FreeBlock(seqID string, blkID int) error {
+	return a.freeBlock(seqID, blkID, false)
+}
+
+// ReleaseCachedBlock returns an allocated block whose contents remain cached.
+// It is reused only after every uncached and never-used block, oldest first.
+func (a *ElasticBlockAllocator) ReleaseCachedBlock(seqID string, blkID int) error {
+	return a.freeBlock(seqID, blkID, true)
+}
+
+func (a *ElasticBlockAllocator) freeBlock(seqID string, blkID int, cached bool) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -336,13 +368,13 @@ func (a *ElasticBlockAllocator) FreeBlock(seqID string, blkID int) error {
 	delete(seq.blocks, blkID)
 	delete(a.allocatedBlocks, blkID)
 
-	a.releaseBlockLocked(blkID)
+	a.releaseBlockLocked(blkID, cached)
 	a.checkDrainCompletionLocked()
 
 	return a.verifyInvariantLocked()
 }
 
-func (a *ElasticBlockAllocator) releaseBlockLocked(blkID int) {
+func (a *ElasticBlockAllocator) releaseBlockLocked(blkID int, cached bool) {
 	if a.state == StateDraining && a.currentTotal > a.targetBlocks {
 		// Progressive drain: retire the block completely from pool
 		a.pool.Release(blkID)
@@ -350,7 +382,12 @@ func (a *ElasticBlockAllocator) releaseBlockLocked(blkID int) {
 	} else {
 		// Recycle into the authoritative free set and record locality order.
 		a.freeBlocks[blkID] = true
-		a.recycledBlocks = append(a.recycledBlocks, blkID)
+		if cached {
+			a.cachedFree[blkID] = true
+			a.cachedBlocks = append(a.cachedBlocks, blkID)
+		} else {
+			a.recycledBlocks = append(a.recycledBlocks, blkID)
+		}
 	}
 }
 
@@ -441,6 +478,18 @@ func (a *ElasticBlockAllocator) reclaimFreeBlocksLocked() {
 		}
 	}
 	a.recycledBlocks = kept
+	for id := range a.cachedFree {
+		if !a.freeBlocks[id] {
+			delete(a.cachedFree, id)
+		}
+	}
+	keptCached := a.cachedBlocks[:0]
+	for _, id := range a.cachedBlocks {
+		if a.cachedFree[id] {
+			keptCached = append(keptCached, id)
+		}
+	}
+	a.cachedBlocks = keptCached
 }
 
 func (a *ElasticBlockAllocator) checkDrainCompletionLocked() {
@@ -505,7 +554,7 @@ func (a *ElasticBlockAllocator) ProgressDrain() (bool, error) {
 				// Preempt victim sequence: release all its blocks
 				for blkID := range seq.blocks {
 					delete(a.allocatedBlocks, blkID)
-					a.releaseBlockLocked(blkID)
+					a.releaseBlockLocked(blkID, false)
 				}
 				delete(a.sequences, victimID)
 				a.preemptedSequences++

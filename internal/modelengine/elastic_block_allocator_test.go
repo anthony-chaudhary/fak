@@ -1,6 +1,7 @@
 package modelengine
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -715,4 +716,58 @@ func TestElasticBlockAllocator_LIFOInvariantTransitions(t *testing.T) {
 			checkSurplus(fmt.Sprintf("preemption surplus allocation %d", i))
 		}
 	})
+}
+
+func TestElasticBlockAllocatorReusesCachedBlocksFIFOAfterUncachedLIFO(t *testing.T) {
+	alloc, err := NewElasticBlockAllocator(ElasticBlockAllocatorConfig{
+		InitialBlocks: 6,
+		ModelCfg:      testModelConfig(),
+		BlockTokens:   16,
+	})
+	if err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+	if err := alloc.RegisterSequence("seq", 0); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	first := make([]int, 4)
+	for i := range first {
+		if first[i], err = alloc.AllocBlock("seq"); err != nil {
+			t.Fatalf("alloc %d: %v", i, err)
+		}
+	}
+	for _, id := range first[:2] {
+		if err := alloc.FreeBlock("seq", id); err != nil {
+			t.Fatalf("free uncached %d: %v", id, err)
+		}
+	}
+	for _, id := range first[2:] {
+		if err := alloc.ReleaseCachedBlock("seq", id); err != nil {
+			t.Fatalf("release cached %d: %v", id, err)
+		}
+	}
+
+	var fresh []int
+	used := map[int]bool{first[0]: true, first[1]: true, first[2]: true, first[3]: true}
+	for id := 0; len(fresh) < 2; id++ {
+		if !used[id] {
+			fresh = append(fresh, id)
+		}
+	}
+	want := []int{first[1], first[0], fresh[0], fresh[1], first[2], first[3]}
+	for i, w := range want {
+		got, err := alloc.AllocBlock("seq")
+		if err != nil {
+			t.Fatalf("alloc %d: %v", i, err)
+		}
+		if got != w {
+			t.Fatalf("alloc %d = block %d, want %d (order %v)", i, got, w, want)
+		}
+		if err := alloc.VerifyInvariant(); err != nil {
+			t.Fatalf("invariant after alloc %d: %v", i, err)
+		}
+	}
+	if _, err := alloc.AllocBlock("seq"); !errors.Is(err, ErrAllocCapacityExceeded) {
+		t.Fatalf("alloc past capacity err = %v, want ErrAllocCapacityExceeded", err)
+	}
 }
