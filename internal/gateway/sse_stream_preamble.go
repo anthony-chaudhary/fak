@@ -91,12 +91,11 @@ func (p *sseStreamWriter) openWith(first any) error {
 // crosses this boundary. The error envelope is not a wire-shaped chunk, so both surfaces
 // report failures identically.
 func (p *sseStreamWriter) fail(status int, code, msg string) {
-	var codeVal any
-	if code != "" {
-		codeVal = code
-	}
-	_ = writeSSEData(p.w, map[string]any{
-		"error": map[string]any{"message": msg, "type": errType(status), "code": codeVal, "param": nil},
-	})
+	p.failFields(status, code, msg, nil)
+}
+
+// failFields is fail plus the typed extra error fields writeErrCodeFields carries.
+func (p *sseStreamWriter) failFields(status int, code, msg string, fields map[string]any) {
+	_ = writeSSEData(p.w, map[string]any{"error": errObject(status, code, msg, fields)})
 	writeSSEDone(p.w, p.flusher)
 }

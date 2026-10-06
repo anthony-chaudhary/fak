@@ -62,6 +62,12 @@ type inferenceSnapshot struct {
 	ttftHist latencySnapshot
 	tpotHist latencySnapshot
 	e2eHist  latencySnapshot
+	// regimeHists is the #5630 cache-regime cut of the three histograms above.
+	regimeHists map[string]regimeLatencySnapshot
+}
+
+type regimeLatencySnapshot struct {
+	ttft, tpot, e2e latencySnapshot
 }
 
 type compactionSnapshot struct {
@@ -149,7 +155,16 @@ func (m *gatewayMetrics) inferenceSnapshotData() inferenceSnapshot {
 		ttftHist:           histSnapshot(m.inferTTFTHist),
 		tpotHist:           histSnapshot(m.inferTPOTHist),
 		e2eHist:            histSnapshot(m.inferE2EHist),
+		regimeHists:        regimeHistSnapshot(m.inferRegimeHists),
 	}
+}
+
+func regimeHistSnapshot(src map[string]*regimeLatencyHists) map[string]regimeLatencySnapshot {
+	out := make(map[string]regimeLatencySnapshot, len(src))
+	for regime, h := range src {
+		out[regime] = regimeLatencySnapshot{ttft: histSnapshot(h.ttft), tpot: histSnapshot(h.tpot), e2e: histSnapshot(h.e2e)}
+	}
+	return out
 }
 
 // histSnapshot reads a latency histogram, tolerating a nil counter (a

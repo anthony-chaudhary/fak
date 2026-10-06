@@ -1091,6 +1091,9 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 	stopMetricsSnapshot := startGatewayUsageSnapshotLoop(ctx, rt.srv, *sf.metricsSnapshot, "serve", rt.t0)
 	defer stopMetricsSnapshot()
 
+	closePerfLedger := installServePerfLedger(rt.srv, *sf.perfLedger, os.Stderr)
+	defer closePerfLedger()
+
 	// #5600 (epic #5599): with --fleet-bus, this serve joins the fleet control bus as an
 	// INSTANCE — announcing presence and draining directives for the lifetime of ctx, so
 	// a single `fak fleet control send` reaches it along with every peer. Off (the

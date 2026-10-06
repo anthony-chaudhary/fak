@@ -627,6 +627,8 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 		cmdSpend(args)
 	case "budget":
 		cmdBudget(args)
+	case "perf":
+		cmdPerf(args)
 	case "sidecar":
 		cmdSidecar(args)
 	case "nightrun":

@@ -67,6 +67,17 @@ func newBgloopSupervisor(s *Server) *bgloop.Supervisor {
 		Interval: 0,
 		Tick:     s.runFleetHealthLoop,
 	})
+	// Per-model upstream context-window discovery for the /v1/models catalog
+	// (upstream_context_window.go). Registered only when a proxied llama-server-class
+	// upstream is opted into /props discovery, so other deployments keep their loop set.
+	if len(s.upstreamWindowTargets()) > 0 {
+		s.upstreamWindows = newUpstreamWindowCache()
+		_ = sup.Register(bgloop.Loop{
+			Name:     "upstream-context-window",
+			Interval: upstreamWindowLoopInterval,
+			Tick:     s.upstreamWindowTick,
+		})
+	}
 	return sup
 }
 

@@ -372,6 +372,7 @@ var verbTiers = map[string]VerbTier{
 	"opt":                           TierDev,
 	"orient":                        TierDev,
 	"pack":                          TierDev,
+	"perf":                          TierDev,
 	"perfscout":                     TierDev,
 	"pi":                            TierDev,
 	"plan-audit":                    TierDev,

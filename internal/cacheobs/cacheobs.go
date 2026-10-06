@@ -277,10 +277,10 @@ func (o *Observer) observeAttributedSource(labels Labels, promptTokens, cacheabl
 		lt.srcExternalTransfer = saturatingAddU64(lt.srcExternalTransfer, external)
 		lt.srcUnknown = saturatingAddU64(lt.srcUnknown, unknown)
 	}
-	switch {
-	case ratio >= FrozenFloor:
+	switch RegimeOf(ratio) {
+	case RegimeFrozen:
 		o.frozen = saturatingAddU64(o.frozen, 1)
-	case ratio < ColdCeil:
+	case RegimeCold:
 		o.cold = saturatingAddU64(o.cold, 1)
 	default:
 		o.partial = saturatingAddU64(o.partial, 1)

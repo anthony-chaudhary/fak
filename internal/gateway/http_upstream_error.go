@@ -34,10 +34,12 @@ func upstream4xxStatus(se *agent.UpstreamStatusError) (status int, code, msg str
 	// exceed_context_size_error, OpenAI's context_length_exceeded, vLLM's "maximum
 	// context length") is NOT a malformed request: the same prompt succeeds on a
 	// longer-window engine. Surface the in-kernel context_length_exceeded code so a
-	// router (fak-private platform/routing.Classify) fails over instead of treating it
-	// as a fatal payload rejection. The body is only MATCHED here, never echoed — the
-	// message is a fixed literal (#82/#346 no-leak invariant holds).
-	if se.Status == http.StatusBadRequest && isUpstreamContextOverflow(se.Body) {
+	// router fails over instead of treating it as a fatal payload rejection. The typed
+	// JSON code/type decide first, message text only as a fallback (parseUpstream400).
+	// The body is only CLASSIFIED here, never echoed — the message is a fixed literal
+	// (#82/#346 no-leak invariant holds); the typed token counts ride as separate
+	// envelope fields (upstreamErrorFields).
+	if se.Status == http.StatusBadRequest && parseUpstream400(se.Body).ContextOverflow {
 		return se.Status, "context_length_exceeded",
 			"upstream rejected the request: the prompt exceeds the upstream context window (HTTP 400); reduce the prompt or route to a longer-context engine"
 	}
@@ -133,7 +135,7 @@ func (s *Server) surfaceUpstreamStatus(w http.ResponseWriter, err error, note st
 		w.Header().Set("Retry-After", ra)
 	}
 	s.logf("gateway: %s: %v", note, err)
-	writeErrCode(w, status, code, msg)
+	writeErrCodeFields(w, status, code, msg, s.upstreamErrorFields(err, code))
 }
 
 // failClosedOnUnparsedToolCalls is the streamed tool-call CONFORMANCE rule, written once

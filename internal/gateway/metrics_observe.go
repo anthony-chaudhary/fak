@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 )
 
@@ -856,7 +857,7 @@ func (m *gatewayMetrics) observeInferenceServed(loc servingLocality, promptTok, 
 
 // observeInferenceServedTimed is observeInferenceTimed with the serving side.
 func (m *gatewayMetrics) observeInferenceServedTimed(loc servingLocality, promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration) {
-	m.observeInferenceTimed(promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, ttft)
+	m.observeInferenceTimedAt(loc, promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, ttft)
 	m.attributeServedTurn(loc, promptTok, complTok)
 }
 
@@ -899,13 +900,21 @@ func (m *gatewayMetrics) attributeServedTurn(loc servingLocality, promptTok, com
 // FULL inference wall-clock in both cases so the existing output_tokens_per_second and
 // the fleet-value agent-seconds denominator are byte-identical to before.
 func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration) {
+	m.observeInferenceTimedAt(localityUnknown, promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, ttft)
+}
+
+// observeInferenceTimedAt is the single fold every served turn reaches, so it is
+// also where the one per-request perf row is emitted.
+func (m *gatewayMetrics) observeInferenceTimedAt(loc servingLocality, promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration) {
 	if m == nil {
 		return
 	}
 	if finishReason == "" {
 		finishReason = "unknown"
 	}
+	m.recordPerf(loc, promptTok, complTok, cachedTok, finishReason, dur, ttft)
 	m.inferenceMu.Lock()
+	rh := m.regimeHistsLocked(cacheobs.RegimeForTokens(cachedTok, promptTok))
 	if m.inferReqs == nil {
 		m.inferReqs = map[string]uint64{}
 	}
@@ -932,6 +941,7 @@ func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok, c
 		m.inferDecodeSecs += dur.Seconds()
 		// e2e distribution: every served turn (buffered or streamed) lands here.
 		m.inferE2EHist.observe(dur.Seconds())
+		rh.e2e.observe(dur.Seconds())
 	}
 	// Split prefill from decode only when TTFT was actually observed and is sane
 	// (positive and within the total). A clamp guards against a clock skew producing
@@ -945,6 +955,7 @@ func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok, c
 		m.inferTTFTTurns++
 		// ttft distribution: only the streamed turns whose prefill boundary is observable.
 		m.inferTTFTHist.observe(pre.Seconds())
+		rh.ttft.observe(pre.Seconds())
 		if promptTok > 0 {
 			m.inferPrefillPromptTokens += uint64(promptTok)
 		}
@@ -955,10 +966,30 @@ func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok, c
 			// tpot (inter-token) distribution: mean per-output-token latency for this
 			// turn = decode wall-clock / generated tokens.
 			m.inferTPOTHist.observe(decodeSecs / float64(complTok))
+			rh.tpot.observe(decodeSecs / float64(complTok))
 		}
 	}
 	m.inferenceMu.Unlock()
 	m.observeDeadlineTiming(promptTok, complTok, dur, ttft)
+}
+
+// regimeLatencyHists is one cache regime's TTFT / TPOT / e2e histograms (#5630).
+type regimeLatencyHists struct {
+	ttft, tpot, e2e *latencyCounter
+}
+
+// regimeHistsLocked returns the regime's histogram triple, creating it on first use.
+// Callers hold inferenceMu. regime is always one of cacheobs.Regimes.
+func (m *gatewayMetrics) regimeHistsLocked(regime string) *regimeLatencyHists {
+	if m.inferRegimeHists == nil {
+		m.inferRegimeHists = make(map[string]*regimeLatencyHists, len(cacheobs.Regimes))
+	}
+	h := m.inferRegimeHists[regime]
+	if h == nil {
+		h = &regimeLatencyHists{ttft: newLatencyCounter(), tpot: newLatencyCounter(), e2e: newLatencyCounter()}
+		m.inferRegimeHists[regime] = h
+	}
+	return h
 }
 
 // recordCacheCreationTierSplit attributes `cacheCreateTok` cache-creation tokens to

@@ -1,0 +1,20 @@
+{
+  "rows": [
+    {
+      "id": "upstream-slot-window",
+      "canonical": "n_ctx",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "n_ctx is the per-slot context window a llama-server-class upstream reports: /props default_generation_settings.n_ctx, each /slots entry's n_ctx, and the n_ctx field of its exceed_context_size_error 400 body. It is the largest prompt plus output one request can use on that upstream.",
+      "distinction": "n_ctx is the UPSTREAM's per-request (per-slot) window, already divided across --parallel slots - NOT the whole --ctx-size, and NOT fak's own context window (the in-kernel model's budget). The proxy gateway reads it to advertise context_window on /v1/models and to type a context_length_exceeded error; it never sizes fak's own planning budget.",
+      "distinct_from": ["context-window"],
+      "aliases": ["nctx", "slotwindow", "upstreamwindowfor"],
+      "grounding": "nctx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "internal/gateway/upstream_context_window.go",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

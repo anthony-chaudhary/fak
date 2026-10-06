@@ -25,7 +25,7 @@ var serveHelpCategories = []serveHelpCategory{
 	{name: "policy", summary: "Policy, routing, plans, and invalidation.", flags: strings.Fields("workspace-admission-permissive policy profile policy-canary-turns policy-check plan-json vdso invalidation route-manifest route-accounts arm-lease-store")},
 	{name: "session", summary: "Session identity, persistence, and spend controls.", flags: strings.Fields("session-id session-state session-registry budget-webhook budget-warn-fraction spend-cap spend-scope-trace")},
 	{name: "native", summary: "Owned agent loop, coding tools, and speculation.", flags: strings.Fields("native native-qwen-q4k-prefill-chunk-tokens native-qwen35-metal-gdn-sequence native-q4k-gateup-slab native-prefix-profile native-max-turns native-admission-token-budget native-code-tools native-code-workspace native-speculate speculative vdso-proxy-fill native-allow-bash-command native-bash-command-timeout")},
-	{name: "observe", summary: "Notifications, metrics, debug stats, and dojo mode.", flags: strings.Fields("notify-native notify-webhook notify-slack otlp-traces-endpoint debug-stats metrics-snapshot dojo keep-awake appliance-observability")},
+	{name: "observe", summary: "Notifications, metrics, debug stats, and dojo mode.", flags: strings.Fields("notify-native notify-webhook notify-slack otlp-traces-endpoint debug-stats metrics-snapshot perf-ledger dojo keep-awake appliance-observability")},
 	{name: "fleet", summary: "Fleet control-bus membership and identity.", flags: strings.Fields("fleet-bus fleet-bus-dir fleet-bus-id fleet-bus-interval")},
 }
 

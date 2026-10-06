@@ -1741,6 +1741,85 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /v1/fak/perf/recent:
+    get:
+      tags: [fak-native]
+      summary: Read the last N served turns' per-request serving performance
+      description: |
+        One row per served model turn (TTFT, prefill and decode rates, end to
+        end latency, prompt-cache share) from a bounded in-memory ring of 1024
+        rows, seeded at startup from the durable perf ledger
+        (`.fak/nightrun/gateway-perf.jsonl`) so history survives a restart.
+        `ttft_ms` is absent when the first-token boundary was not observed
+        (a buffered turn); `prefill_tps`/`decode_tps` are present only when it
+        was. `prompt_tokens` is the uncached prompt, disjoint from
+        `cached_tokens`; `cache_hit_share` = cached / (prompt + cached).
+        Counts and timings only. Same observability auth floor as
+        `/v1/fak/observation/engine`.
+      parameters:
+        - name: n
+          in: query
+          description: Rows to fold (default 50, max 1024).
+          schema: { type: integer, minimum: 1 }
+        - name: format
+          in: query
+          description: "`compact` returns one text line (starts with `PERF`) instead of JSON."
+          schema: { type: string, enum: [json, compact] }
+      responses:
+        '200':
+          description: The versioned per-request perf report (oldest record first).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schema, window, summary, records]
+                properties:
+                  schema: { type: string }
+                  source: { type: string }
+                  window:
+                    type: object
+                    required: [requests, retained_cap, capped, dropped_writes]
+                    properties:
+                      requests: { type: integer }
+                      retained_cap: { type: integer }
+                      capped: { type: boolean }
+                      dropped_writes: { type: integer }
+                  summary:
+                    type: object
+                    required: [count, ttft_measured, cache_hit_share]
+                    properties:
+                      count: { type: integer }
+                      ttft_measured: { type: integer }
+                      ttft_p50_ms: { type: number }
+                      ttft_p99_ms: { type: number }
+                      prefill_tps_p50: { type: number }
+                      decode_tps_p50: { type: number }
+                      e2e_p50_ms: { type: number }
+                      e2e_p99_ms: { type: number }
+                      cache_hit_share: { type: number }
+                  records:
+                    type: array
+                    items:
+                      type: object
+                      required: [schema, unix_ms, prompt_tokens, completion_tokens, cached_tokens, e2e_ms]
+                      properties:
+                        schema: { type: string }
+                        unix_ms: { type: integer }
+                        finish_reason: { type: string }
+                        locality: { type: string, enum: [self_hosted, vendor, unknown] }
+                        prompt_tokens: { type: integer }
+                        completion_tokens: { type: integer }
+                        cached_tokens: { type: integer }
+                        e2e_ms: { type: number }
+                        ttft_ms: { type: number }
+                        prefill_tps: { type: number }
+                        decode_tps: { type: number }
+            text/plain:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /v1/fak/loops:
 
     get:
