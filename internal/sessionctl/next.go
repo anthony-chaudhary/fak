@@ -427,3 +427,51 @@ func RecordToolTerminalWakeNext(trace, payload string) {
 func ReadToolTerminalWakeNextRecords(trace string) []NextRecord {
 	return toolTerminalWakeNext.drain(trace)
 }
+
+var infraRepromptNext = newNextMailbox()
+
+// RecordInfraRepromptNext lowers one bounded infrastructure re-prompt onto the
+// shared interactive Next contract: a user splice that continues the same task
+// after a recoverable upstream failure.
+func RecordInfraRepromptNext(trace, payload string) {
+	trace = strings.TrimSpace(trace)
+	if trace == "" || payload == "" {
+		return
+	}
+	infraRepromptNext.file(trace, Move{
+		Kind: MoveContinue, Render: RenderUserSplice,
+		Session: SessionInteractive, Gate: "infra-reprompt",
+		Source: "agent-turn-boundary", Payload: payload,
+	}, ApplyResult{Applied: true})
+}
+
+// ReadInfraRepromptNextRecords returns and clears independently re-readable
+// infra re-prompt Next witnesses for trace.
+func ReadInfraRepromptNextRecords(trace string) []NextRecord { return infraRepromptNext.drain(trace) }
+
+var circuitBreakerNext = newNextMailbox()
+
+// RecordCircuitBreakerNext lowers one repeated-failure circuit-breaker system
+// message onto the shared Next contract. Guidance annotates the live loop as a
+// system directive; a trip halts it, so the same payload is recorded as a stop.
+func RecordCircuitBreakerNext(trace, payload string, halt bool) {
+	trace = strings.TrimSpace(trace)
+	if trace == "" || payload == "" {
+		return
+	}
+	move := Move{
+		Kind: MoveAnnotate, Render: RenderSystemDirective,
+		Session: SessionAutonomous, Gate: "circuit-breaker",
+		Source: "agent-turn-boundary", Payload: payload,
+	}
+	if halt {
+		move.Kind, move.Render = MoveHalt, RenderStop
+	}
+	circuitBreakerNext.file(trace, move, ApplyResult{Applied: true})
+}
+
+// ReadCircuitBreakerNextRecords returns and clears independently re-readable
+// circuit-breaker Next witnesses for trace.
+func ReadCircuitBreakerNextRecords(trace string) []NextRecord {
+	return circuitBreakerNext.drain(trace)
+}

@@ -310,3 +310,49 @@ func TestRecordGuardRecoveryNextReadbackAndNoop(t *testing.T) {
 		t.Fatalf("no-op records=%+v", got)
 	}
 }
+
+func TestRecordInfraRepromptNextReadbackAndNoop(t *testing.T) {
+	const trace = "infra-reprompt-trace"
+	ReadInfraRepromptNextRecords(trace)
+	payload := "[INFRA_REPROMPT] continue"
+	RecordInfraRepromptNext(trace, payload)
+	records := ReadInfraRepromptNextRecords(trace)
+	if len(records) != 1 {
+		t.Fatalf("records=%d want 1", len(records))
+	}
+	got := records[0]
+	if got.Move.Kind != MoveContinue || got.Move.Render != RenderUserSplice || got.Move.Session != SessionInteractive {
+		t.Fatalf("move=%+v", got.Move)
+	}
+	if got.Move.Gate != "infra-reprompt" || got.Move.Payload != payload || !got.Applied {
+		t.Fatalf("record=%+v", got)
+	}
+	RecordInfraRepromptNext("", payload)
+	RecordInfraRepromptNext(trace, "")
+	if got := ReadInfraRepromptNextRecords(trace); len(got) != 0 {
+		t.Fatalf("no-op records=%+v", got)
+	}
+}
+
+func TestRecordCircuitBreakerNextGuidanceAndHalt(t *testing.T) {
+	const trace = "circuit-breaker-trace"
+	ReadCircuitBreakerNextRecords(trace)
+	RecordCircuitBreakerNext(trace, "guidance", false)
+	RecordCircuitBreakerNext(trace, "tripped", true)
+	records := ReadCircuitBreakerNextRecords(trace)
+	if len(records) != 2 {
+		t.Fatalf("records=%d want 2", len(records))
+	}
+	guidance, trip := records[0].Move, records[1].Move
+	if guidance.Kind != MoveAnnotate || guidance.Render != RenderSystemDirective || guidance.Session != SessionAutonomous || guidance.Payload != "guidance" {
+		t.Fatalf("guidance=%+v", guidance)
+	}
+	if trip.Kind != MoveHalt || trip.Render != RenderStop || trip.Gate != "circuit-breaker" || trip.Payload != "tripped" {
+		t.Fatalf("trip=%+v", trip)
+	}
+	RecordCircuitBreakerNext("", "guidance", false)
+	RecordCircuitBreakerNext(trace, "", true)
+	if got := ReadCircuitBreakerNextRecords(trace); len(got) != 0 {
+		t.Fatalf("no-op records=%+v", got)
+	}
+}
