@@ -61,8 +61,11 @@ func TestKeepAliveMetalOutputAndDrain(t *testing.T) {
 	t.Setenv("FAK_METAL_KEEPALIVE", "on")
 	stop := BeginKeepAlive()
 	defer stop()
+	// BeginKeepAlive submits the initial native buffers before returning.
+	if state := KeepAliveState(); state.Holders != 1 || state.InFlight > 2 || state.Failed || state.SubmittedBuffers <= before.SubmittedBuffers {
+		t.Fatalf("bounded active keepalive not witnessed at start: %+v", state)
+	}
 	for range 4 {
-		time.Sleep(200 * time.Microsecond)
 		w.GEMV(x, got)
 		keepAliveAssertParity(t, got, want)
 		state := KeepAliveState()
@@ -71,16 +74,11 @@ func TestKeepAliveMetalOutputAndDrain(t *testing.T) {
 		}
 	}
 	stop()
-	deadline := time.Now().Add(time.Second)
-	for {
+	if !pollGraphUntil(time.Second, func() bool {
 		state := KeepAliveState()
-		if state.Holders == 0 && state.InFlight == 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("finite keepalive buffers did not drain: %+v", state)
-		}
-		time.Sleep(time.Millisecond)
+		return state.Holders == 0 && state.InFlight == 0
+	}) {
+		t.Fatalf("finite keepalive buffers did not drain: %+v", KeepAliveState())
 	}
 	w.GEMV(x, got)
 	keepAliveAssertParity(t, got, want)
