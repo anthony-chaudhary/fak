@@ -42,6 +42,7 @@
 package kvbudget
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -213,6 +214,38 @@ func MaxStreams(budgetGiB, perStreamGiB float64) int {
 		return 0
 	}
 	return int(math.Floor(budgetGiB / perStreamGiB))
+}
+
+// Sentinels DeriveMaxBlocks returns for an unsizeable pool.
+var (
+	ErrUtilizationOutOfRange = errors.New("kvbudget: utilization outside (0,1]")
+	ErrZeroBlockSize         = errors.New("kvbudget: zero bytes per block")
+	ErrNonKVExceedsBudget    = errors.New("kvbudget: non-KV bytes exceed the utilized budget")
+)
+
+// DeriveMaxBlocks sizes a paged KV pool from measured memory, adapting vLLM's
+// arithmetic (vllm/v1/worker/gpu_worker.py:621-625, vllm/v1/core/kv_cache_utils.py
+// @975dca5, Apache-2.0): available = floor(freeBytes*utilization) - nonKVBytes,
+// blocks = floor(available / bytesPerBlock).
+func DeriveMaxBlocks(freeBytes, nonKVBytes uint64, utilization float64, bytesPerBlock uint64) (int, error) {
+	if !(utilization > 0 && utilization <= 1) {
+		return 0, ErrUtilizationOutOfRange
+	}
+	if bytesPerBlock == 0 {
+		return 0, ErrZeroBlockSize
+	}
+	utilized := uint64(math.Floor(float64(freeBytes) * utilization))
+	if utilization == 1 {
+		utilized = freeBytes
+	}
+	if nonKVBytes > utilized {
+		return 0, ErrNonKVExceedsBudget
+	}
+	blocks := (utilized - nonKVBytes) / bytesPerBlock
+	if blocks > math.MaxInt {
+		return math.MaxInt, nil
+	}
+	return int(blocks), nil
 }
 
 // Budgets and headroom the triage doc §3.3 sizes against.

@@ -1,6 +1,7 @@
 package kvbudget
 
 import (
+	"errors"
 	"math"
 	"testing"
 )
@@ -273,4 +274,35 @@ func splitLines(s string) []string {
 		out = append(out, s[start:])
 	}
 	return out
+}
+
+func TestDeriveMaxBlocksFromFreeBytesAndUtilization(t *testing.T) {
+	cases := []struct {
+		name          string
+		free, nonKV   uint64
+		util          float64
+		bytesPerBlock uint64
+		want          int
+		wantErr       error
+	}{
+		{name: "full budget", free: 1 << 30, nonKV: 0, util: 1, bytesPerBlock: 1 << 20, want: 1024},
+		{name: "vllm default util with non-KV", free: 80 * GiB, nonKV: 20 * GiB, util: 0.9, bytesPerBlock: 2 << 20, want: 26624},
+		{name: "remainder floors", free: 1000, nonKV: 100, util: 0.5, bytesPerBlock: 300, want: 1},
+		{name: "zero utilization", free: GiB, util: 0, bytesPerBlock: 1, wantErr: ErrUtilizationOutOfRange},
+		{name: "utilization above one", free: GiB, util: 1.01, bytesPerBlock: 1, wantErr: ErrUtilizationOutOfRange},
+		{name: "NaN utilization", free: GiB, util: math.NaN(), bytesPerBlock: 1, wantErr: ErrUtilizationOutOfRange},
+		{name: "zero block size", free: GiB, util: 0.9, bytesPerBlock: 0, wantErr: ErrZeroBlockSize},
+		{name: "non-KV exceeds utilized", free: 1000, nonKV: 501, util: 0.5, bytesPerBlock: 1, wantErr: ErrNonKVExceedsBudget},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := DeriveMaxBlocks(tc.free, tc.nonKV, tc.util, tc.bytesPerBlock)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tc.wantErr)
+			}
+			if got != tc.want {
+				t.Fatalf("blocks = %d, want %d", got, tc.want)
+			}
+		})
+	}
 }
