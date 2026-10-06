@@ -117,6 +117,7 @@ func TestDevReuseSeparatesPortablePatternsFromFakInternals(t *testing.T) {
 		"validate":       DevReusePortable,
 		"release":        DevReuseMaintainer,
 		"index":          DevReuseMaintainer,
+		"perf":           DevReuseMaintainer,
 		"lab":            DevReuseLab,
 		"fleet-accounts": DevReuseLab,
 	} {
