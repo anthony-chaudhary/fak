@@ -106,17 +106,19 @@ func (m *Model) LMHeadRoute() string {
 		}
 		return "cpu-q6k"
 	}
-	if m.q2w[m.residentHeadName()] != nil {
+	// Health probes call this concurrently with decode, which may lazily fill q8w/q8head; read
+	// the Q8 store under q8Mu and never the lazily pinned q8head field. residentHeadName and
+	// headName both probe q8w, and cannot lock themselves (Quantize calls them under q8Mu.Lock).
+	q8Mu.RLock()
+	residentHead := m.residentHeadName()
+	_, hasQ8 := m.q8w[m.headName()]
+	q8Mu.RUnlock()
+	if m.q2w[residentHead] != nil {
 		return "cpu-q2"
 	}
 	if m.q4head != nil {
 		return "cpu-q4"
 	}
-	// Health probes call this concurrently with decode, which may lazily fill q8w/q8head; read
-	// the Q8 store under q8Mu and never the lazily pinned q8head field.
-	q8Mu.RLock()
-	_, hasQ8 := m.q8w[m.headName()]
-	q8Mu.RUnlock()
 	if hasQ8 {
 		return "cpu-q8"
 	}
