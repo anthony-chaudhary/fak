@@ -465,12 +465,9 @@ func TestDeviceKVResidentAccountingAndCleanup(t *testing.T) {
 			t.Fatal("NewDeviceKVAttendOnly")
 		}
 	}()
-	deadline := time.Now().Add(5 * time.Second)
-	for DeviceKVResidentBytes() != base {
-		if time.Now().After(deadline) {
-			t.Fatalf("dropped pair not reclaimed: resident %d, want %d", DeviceKVResidentBytes(), base)
-		}
-		runtime.GC()
-		time.Sleep(10 * time.Millisecond)
+	// GC makes the dropped owner eligible; its cleanup runs asynchronously.
+	runtime.GC()
+	if !pollGraphUntil(5*time.Second, func() bool { return DeviceKVResidentBytes() == base }) {
+		t.Fatalf("dropped pair not reclaimed: resident %d, want %d", DeviceKVResidentBytes(), base)
 	}
 }
