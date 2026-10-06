@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -456,6 +457,7 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 		tokens:             make(chan abi.EngineToken, 1),
 		done:               make(chan struct{}),
 		hint:               hint,
+		priority:           nativeLanePriorityFromMeta(c.Meta),
 	}
 
 	s.mu.Lock()
@@ -1198,6 +1200,12 @@ type schedLane struct {
 	terminal           bool
 	hint               dispatchtick.WaveHint
 	seqNo              int64
+	// priority is the request's scheduling priority, set once at admit from the call's
+	// Meta (see nativeLanePriorityFromMeta) and immutable afterwards. vLLM convention
+	// (vllm/v1/core/sched/scheduler.py:735-741@975dca5, Apache-2.0): a LOWER value is
+	// MORE important and the default is 0. Promotion order does not read it; the
+	// lowest-priority preemption victim rule does.
+	priority int
 
 	// Preemption state. A preempted lane is removed from the running set without closing
 	// its token stream; readmit restores sess/logits and the stream resumes.
@@ -1218,6 +1226,32 @@ type schedLane struct {
 }
 
 func (ln *schedLane) Tokens() <-chan abi.EngineToken { return ln.tokens }
+
+// Priority reports the scheduling priority the lane was admitted with (lower value =
+// more important, default 0). It is fixed at admit, so reading it needs no lock.
+func (ln *schedLane) Priority() int { return ln.priority }
+
+// nativeLanePriorityMetaKeys are the ToolCall.Meta keys a submitter may set to carry a
+// request priority into the native scheduler; the first present key wins.
+var nativeLanePriorityMetaKeys = []string{"priority", "sched.priority", "sched_priority"}
+
+// nativeLanePriorityFromMeta parses the submit-time request priority. Missing or
+// unparsable values default to 0 (vLLM's default priority); negative values are kept
+// because they are legitimately MORE important than the default.
+func nativeLanePriorityFromMeta(meta map[string]string) int {
+	for _, key := range nativeLanePriorityMetaKeys {
+		raw, ok := meta[key]
+		if !ok {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil {
+			return 0
+		}
+		return n
+	}
+	return 0
+}
 
 func (ln *schedLane) Result() (*abi.Result, error) {
 	<-ln.done
