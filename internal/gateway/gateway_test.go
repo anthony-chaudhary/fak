@@ -1482,7 +1482,7 @@ func TestChatProxyOpenAICompatibleStreamModeStreamsAdjudicatedCalls(t *testing.T
 			{"type": "function", "function": map[string]any{"name": "deny_stream", "parameters": map[string]any{"type": "object"}}},
 			{"type": "function", "function": map[string]any{"name": "transform_stream", "parameters": map[string]any{"type": "object"}}},
 		},
-		"stream": true,
+		"stream":         true,
 		"stream_options": map[string]any{"include_usage": true},
 	}
 	raw, err := json.Marshal(body)
