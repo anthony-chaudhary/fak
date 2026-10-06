@@ -85,7 +85,8 @@ func pushVerifiedCommit(ctx context.Context, run Runner, dir, trunk, sha string)
 // pushes only when opts.Push is set, by exact SHA refspec through pushVerifiedCommit, and maps
 // a rejected push to ReasonPushRejected (a value, never a force-push). When the push is rejected
 // due to safe disjoint divergence and !opts.DisableAutoReconcile, it attempts auto-reconciliation
-// through safesync (#12078).
+// through the shared safesync.AutoReconcileDisjoint heal (#12078), the same
+// path `fak sync push` uses.
 func applyVerifiedPush(ctx context.Context, run Runner, opts Options, trunk string, res Result) (Result, error) {
 	if opts.Push {
 		pushed, err := pushVerifiedCommit(ctx, run, opts.Dir, trunk, res.SHA)
@@ -93,37 +94,23 @@ func applyVerifiedPush(ctx context.Context, run Runner, opts Options, trunk stri
 			return res, err
 		}
 		if !pushed.Pushed {
-			isDisjoint := pushed.Reason == safesync.ReasonDivergedDisjoint ||
-				(pushed.Divergence == string(safesync.PushDiverged) && pushed.Reason == safesync.ReasonDivergedDisjoint)
-			if isDisjoint && !opts.DisableAutoReconcile {
+			if safesync.IsDisjointPushRefusal(pushed) && !opts.DisableAutoReconcile {
 				remote := gitConfigValue(ctx, run, opts.Dir, "branch."+trunk+".remote")
 				if remote == "" {
 					remote = "origin"
 				}
 				branch := branchFromMergeRef(gitConfigValue(ctx, run, opts.Dir, "branch."+trunk+".merge"), trunk)
-				pktOpts := safesync.PacketOptions{
-					Repo:    opts.Dir,
-					Remote:  remote,
-					Branch:  branch,
-					Runner:  safeSyncRunner(run),
-					Session: opts.SessionID,
-				}
-				pkt, pktErr := safesync.BuildReconciliationPacket(ctx, pktOpts)
-				if pktErr == nil && pkt != nil && pkt.Dispatchable &&
-					pkt.Disposition == safesync.DispositionSafeDisjoint {
-					execOpts := safesync.ExecuteOptions{
-						Repo:           opts.Dir,
-						Remote:         remote,
-						Branch:         branch,
-						Runner:         safeSyncRunner(run),
-						WriterLeaseTTL: safesync.DefaultWriterLeaseTTL,
-						Session:        opts.SessionID,
-					}
-					receipt, _ := safesync.ExecutePacket(ctx, pkt, execOpts)
-					if receipt != nil && receipt.Pushed {
-						res.Pushed = true
-						return res, nil
-					}
+				healed := safesync.AutoReconcileDisjoint(ctx, pushed, safesync.AutoReconcileOptions{
+					Repo:      opts.Dir,
+					Remote:    remote,
+					Branch:    branch,
+					Session:   opts.SessionID,
+					SourceSHA: res.SHA,
+					Runner:    safeSyncRunner(run),
+				})
+				if healed.Pushed {
+					res.Pushed = true
+					return res, nil
 				}
 			}
 			res.Reason = ReasonPushRejected
