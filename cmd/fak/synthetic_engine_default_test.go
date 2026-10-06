@@ -3,8 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -23,9 +27,7 @@ func TestDefaultSyscallEngineSelectionIsMock(t *testing.T) {
 	}
 
 	contracts := map[string]string{
-		"main.go":         `fs.String("engine", "mock",`,
-		"guard.go":        `EngineID: "mock",`,
-		"guard_replay.go": `EngineID:             "mock",`,
+		"main.go": `fs.String("engine", "mock",`,
 	}
 	for path, want := range contracts {
 		body, err := os.ReadFile(path)
@@ -35,6 +37,108 @@ func TestDefaultSyscallEngineSelectionIsMock(t *testing.T) {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("%s does not select the mock default", path)
 		}
+	}
+	for _, path := range []string{"guard.go", "guard_replay.go"} {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if !syscallEngineSourceSelectsMock(body) {
+			t.Errorf("%s must select one explicit literal mock engine in gateway.New(gateway.Config{...})", path)
+		}
+	}
+}
+
+// Inspect the gateway constructor argument so formatting and comment decoys cannot
+// establish the engine contract. Multiple constructors or EngineID fields are ambiguous.
+func syscallEngineSourceSelectsMock(source []byte) bool {
+	file, err := parser.ParseFile(token.NewFileSet(), "entrypoint.go", source, 0)
+	if err != nil {
+		return false
+	}
+	calls, valid := 0, true
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		constructor, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || constructor.Sel.Name != "New" {
+			return true
+		}
+		pkg, ok := constructor.X.(*ast.Ident)
+		if !ok || pkg.Name != "gateway" {
+			return true
+		}
+		calls++
+		if len(call.Args) != 1 {
+			valid = false
+			return true
+		}
+		config, ok := call.Args[0].(*ast.CompositeLit)
+		if !ok {
+			valid = false
+			return true
+		}
+		typ, ok := config.Type.(*ast.SelectorExpr)
+		if !ok || typ.Sel.Name != "Config" {
+			valid = false
+			return true
+		}
+		pkg, ok = typ.X.(*ast.Ident)
+		if !ok || pkg.Name != "gateway" {
+			valid = false
+			return true
+		}
+		fields := 0
+		for _, element := range config.Elts {
+			field, ok := element.(*ast.KeyValueExpr)
+			if !ok {
+				valid = false
+				continue
+			}
+			key, ok := field.Key.(*ast.Ident)
+			if !ok || key.Name != "EngineID" {
+				continue
+			}
+			fields++
+			value, ok := field.Value.(*ast.BasicLit)
+			if !ok || value.Kind != token.STRING {
+				valid = false
+				continue
+			}
+			engineID, err := strconv.Unquote(value.Value)
+			valid = valid && err == nil && engineID == "mock"
+		}
+		valid = valid && fields == 1
+		return true
+	})
+	return calls == 1 && valid
+}
+
+// fak-test:runtime fast est=10ms
+func TestSyscallEngineSourceContract(t *testing.T) {
+	for _, tc := range []struct {
+		name, source string
+		want         bool
+	}{
+		{"compact", `gateway.New(gateway.Config{EngineID:"mock"})`, true},
+		{"aligned", `gateway.New(gateway.Config{EngineID:                     "mock"})`, true},
+		{"tabbed", "gateway.New(gateway.Config{EngineID:\t\t\"mock\"})", true},
+		{"inkernel", `gateway.New(gateway.Config{EngineID:"inkernel"})`, false},
+		{"missing", `gateway.New(gateway.Config{})`, false},
+		{"nonliteral", `gateway.New(gateway.Config{EngineID:engineID})`, false},
+		{"comment-only", `gateway.New(gateway.Config{/* EngineID: "mock" */})`, false},
+		{"unpassed-config", `cfg := gateway.Config{EngineID:"mock"}; gateway.New(cfg)`, false},
+		{"duplicate-field", `gateway.New(gateway.Config{EngineID:"mock", EngineID:"mock"})`, false},
+		{"multiple-constructors", `gateway.New(gateway.Config{EngineID:"mock"}); gateway.New(gateway.Config{EngineID:"mock"})`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := []byte("package main\nfunc fixture() { " + tc.source + " }")
+			if got := syscallEngineSourceSelectsMock(source); got != tc.want {
+				t.Fatalf("source contract = %v, want %v for %s", got, tc.want, tc.source)
+			}
+		})
 	}
 }
 
