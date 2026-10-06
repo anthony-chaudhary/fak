@@ -23,12 +23,13 @@ func Analyze(name string, src []byte) ([]Finding, error) {
 		return nil, fmt.Errorf("parse %s: %w", name, err)
 	}
 	var out []Finding
+	timeName := timeImportName(file)
 	for _, d := range file.Decls {
 		fd, ok := d.(*ast.FuncDecl)
 		if !ok || fd.Body == nil || fd.Recv != nil || !isTestFunc(fd) {
 			continue
 		}
-		out = append(out, analyzeTestFunc(fset, name, fd)...)
+		out = append(out, analyzeTestFunc(fset, name, fd, timeName)...)
 	}
 	// A deterministic order is part of the ratchet: NewFindings calls the Nth
 	// finding of a key "new" once the count passes the floor, so which of two
@@ -43,13 +44,17 @@ func Analyze(name string, src []byte) ([]Finding, error) {
 }
 
 // analyzeTestFunc runs every rule over one test function.
-func analyzeTestFunc(fset *token.FileSet, file string, fd *ast.FuncDecl) []Finding {
+func analyzeTestFunc(fset *token.FileSet, file string, fd *ast.FuncDecl, timeName string) []Finding {
 	line := func(n ast.Node) int { return fset.Position(n.Pos()).Line }
+	vars := testVars(fd)
 	var out []Finding
 	out = append(out, noAssertion(file, fd, line)...)
 	out = append(out, selfComparisons(file, fd, line)...)
 	out = append(out, uncheckedErrors(fset, file, fd, line)...)
 	out = append(out, unreadExpectations(file, fd, line)...)
+	out = append(out, sleepSync(file, fd, timeName, line)...)
+	out = append(out, wallclockAsserts(file, fd, timeName, vars, line)...)
+	out = append(out, unconditionalSkips(file, fd, vars, line)...)
 	return out
 }
 
