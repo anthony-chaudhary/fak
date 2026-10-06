@@ -497,25 +497,37 @@ func (v *Qwen38SampledSpeculativeVerifier) EffectiveDistribution(pTarget, pDraft
 	return effective
 }
 
+var errQwen38EmptyLogits = errors.New("model: empty logits vector")
+
+func (v *Qwen38SampledSpeculativeVerifier) greedy() bool {
+	return v.config.Greedy || v.config.Temperature == 0
+}
+
+// qwen38GreedyArgmax returns the first index holding the maximum logit, the index the
+// greedy one-hot distribution places its mass on.
+func qwen38GreedyArgmax(logits []float32) int {
+	bestIdx := 0
+	bestVal := logits[0]
+	for i := 1; i < len(logits); i++ {
+		if logits[i] > bestVal {
+			bestVal = logits[i]
+			bestIdx = i
+		}
+	}
+	return bestIdx
+}
+
 // ApplySamplerToLogits converts raw logits into a normalized probability distribution
 // adhering to the configured temperature and Top-P filtering.
 func (v *Qwen38SampledSpeculativeVerifier) ApplySamplerToLogits(logits []float32) ([]float32, error) {
 	if len(logits) == 0 {
-		return nil, errors.New("model: empty logits vector")
+		return nil, errQwen38EmptyLogits
 	}
 
 	// Greedy mode: argmax gets probability 1.0, rest 0.0
-	if v.config.Greedy || v.config.Temperature == 0 {
+	if v.greedy() {
 		out := make([]float32, len(logits))
-		bestIdx := 0
-		bestVal := logits[0]
-		for i := 1; i < len(logits); i++ {
-			if logits[i] > bestVal {
-				bestVal = logits[i]
-				bestIdx = i
-			}
-		}
-		out[bestIdx] = 1.0
+		out[qwen38GreedyArgmax(logits)] = 1.0
 		return out, nil
 	}
 
@@ -717,12 +729,45 @@ func (v *Qwen38SampledSpeculativeVerifier) VerifyDraftSequence(
 	pTargets [][]float32,
 	pDrafts [][]float32,
 ) Qwen38SampledVerificationReceipt {
+	var pT0, pD0 []float32
+	if len(pTargets) > 0 {
+		pT0 = pTargets[0]
+	}
+	if len(pDrafts) > 0 {
+		pD0 = pDrafts[0]
+	}
+	verifyAt := func(i int) Qwen38SampledTokenResult {
+		var targetDist, draftDist []float32
+		if i < len(pTargets) {
+			targetDist = pTargets[i]
+		}
+		if i < len(pDrafts) {
+			draftDist = pDrafts[i]
+		}
+		return v.VerifyToken(draftTokens[i], targetDist, draftDist, -1)
+	}
+	bonusAt := func(row int, u float32) int {
+		return v.SampleFromDistribution(pTargets[row], u)
+	}
+	return v.verifyDraftSequence(draftTokens, len(pTargets), verifyAt, bonusAt, pT0, pD0)
+}
+
+// verifyDraftSequence is the shared receipt builder. verifyAt decides one position,
+// bonusAt samples the bonus token from target row `row` with uniform u, and pT0/pD0
+// are the first-position distributions the receipt metrics are computed over.
+func (v *Qwen38SampledSpeculativeVerifier) verifyDraftSequence(
+	draftTokens []int,
+	targets int,
+	verifyAt func(i int) Qwen38SampledTokenResult,
+	bonusAt func(row int, u float32) int,
+	pT0, pD0 []float32,
+) Qwen38SampledVerificationReceipt {
 	k := len(draftTokens)
 	initialSteps := v.prng.StepsConsumed()
 	tx := v.BeginTx()
 
 	mode := "sampled"
-	if v.config.Greedy || v.config.Temperature == 0 {
+	if v.greedy() {
 		mode = "greedy"
 	}
 
@@ -744,15 +789,7 @@ func (v *Qwen38SampledSpeculativeVerifier) VerifyDraftSequence(
 	distribution := make([]Qwen38MTPAcceptanceBucket, 0, k)
 
 	for i := 0; i < k; i++ {
-		var targetDist, draftDist []float32
-		if i < len(pTargets) {
-			targetDist = pTargets[i]
-		}
-		if i < len(pDrafts) {
-			draftDist = pDrafts[i]
-		}
-
-		ver := v.VerifyToken(draftTokens[i], targetDist, draftDist, -1)
+		ver := verifyAt(i)
 		alphas = append(alphas, ver.Alpha)
 
 		bucket := Qwen38MTPAcceptanceBucket{
@@ -777,12 +814,12 @@ func (v *Qwen38SampledSpeculativeVerifier) VerifyDraftSequence(
 
 	// If all accepted and bonus distribution is supplied, sample bonus token
 	if receipt.RejectedAt == -1 {
-		if len(pTargets) > k {
+		if targets > k {
 			uBonus := v.prng.NextFloat32()
-			receipt.BonusToken = v.SampleFromDistribution(pTargets[k], uBonus)
-		} else if len(pTargets) > 0 {
+			receipt.BonusToken = bonusAt(k, uBonus)
+		} else if targets > 0 {
 			uBonus := v.prng.NextFloat32()
-			receipt.BonusToken = v.SampleFromDistribution(pTargets[len(pTargets)-1], uBonus)
+			receipt.BonusToken = bonusAt(targets-1, uBonus)
 		}
 	}
 
@@ -797,14 +834,6 @@ func (v *Qwen38SampledSpeculativeVerifier) VerifyDraftSequence(
 		Distribution: distribution,
 	}
 
-	// Compute metrics across evaluated distributions
-	var pT0, pD0 []float32
-	if len(pTargets) > 0 {
-		pT0 = pTargets[0]
-	}
-	if len(pDrafts) > 0 {
-		pD0 = pDrafts[0]
-	}
 	receipt.Metrics = v.CalculateMetrics(pT0, pD0, alphas)
 
 	if accepted > 0 {
@@ -834,6 +863,9 @@ func (v *Qwen38SampledSpeculativeVerifier) VerifyDraftSequenceLogits(
 	draftTokens []int,
 	targetLogits, draftLogits [][]float32,
 ) (Qwen38SampledVerificationReceipt, error) {
+	if v.greedy() {
+		return v.verifyGreedyDraftSequenceLogits(draftTokens, targetLogits, draftLogits)
+	}
 	pTargets := make([][]float32, len(targetLogits))
 	for i, logits := range targetLogits {
 		dist, err := v.ApplySamplerToLogits(logits)
@@ -853,4 +885,47 @@ func (v *Qwen38SampledSpeculativeVerifier) VerifyDraftSequenceLogits(
 	}
 
 	return v.VerifyDraftSequence(draftTokens, pTargets, pDrafts), nil
+}
+
+// verifyGreedyDraftSequenceLogits is the greedy fast path: greedy verification reads only
+// each target row's argmax, so it never materializes a one-hot vocabulary vector per
+// position. Only the first-position distributions are built, for the receipt metrics,
+// keeping the receipt identical to VerifyDraftSequence over ApplySamplerToLogits rows.
+func (v *Qwen38SampledSpeculativeVerifier) verifyGreedyDraftSequenceLogits(
+	draftTokens []int,
+	targetLogits, draftLogits [][]float32,
+) (Qwen38SampledVerificationReceipt, error) {
+	targetArgmax := make([]int, len(targetLogits))
+	for i, logits := range targetLogits {
+		if len(logits) == 0 {
+			return Qwen38SampledVerificationReceipt{}, fmt.Errorf("model: target logits position %d: %w", i, errQwen38EmptyLogits)
+		}
+		targetArgmax[i] = qwen38GreedyArgmax(logits)
+	}
+	for i, logits := range draftLogits {
+		if len(logits) == 0 {
+			return Qwen38SampledVerificationReceipt{}, fmt.Errorf("model: draft logits position %d: %w", i, errQwen38EmptyLogits)
+		}
+	}
+
+	var pT0, pD0 []float32
+	if len(targetLogits) > 0 {
+		pT0, _ = v.ApplySamplerToLogits(targetLogits[0])
+	}
+	if len(draftLogits) > 0 {
+		pD0, _ = v.ApplySamplerToLogits(draftLogits[0])
+	}
+	verifyAt := func(i int) Qwen38SampledTokenResult {
+		target := 0
+		if i < len(targetArgmax) {
+			target = targetArgmax[i]
+		}
+		token := draftTokens[i]
+		if token == target {
+			return Qwen38SampledTokenResult{Accepted: true, DraftToken: token, ReplacementToken: -1, Alpha: 1.0}
+		}
+		return Qwen38SampledTokenResult{DraftToken: token, ReplacementToken: target, UniformSample: 1.0}
+	}
+	bonusAt := func(row int, _ float32) int { return targetArgmax[row] }
+	return v.verifyDraftSequence(draftTokens, len(targetLogits), verifyAt, bonusAt, pT0, pD0), nil
 }
