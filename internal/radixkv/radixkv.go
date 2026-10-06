@@ -1625,6 +1625,8 @@ type Stats struct {
 	Tokens                     int          // total cached tokens (Σ edge lengths) — the LRU-budget metric
 	PrefixTokens               int          // Σ node.plen over nodes holding a kv — TRUE resident KV positions
 	Nodes                      int          // non-root nodes
+	ProtectedTokens            int          `json:"protected_tokens"` // Σ edge tokens on the root path of every leased node
+	EvictableTokens            int          `json:"evictable_tokens"` // Tokens - ProtectedTokens
 	SnapshotBytes              int64        `json:"snapshot_bytes"`
 	MaxSnapshotBytes           int64        `json:"max_snapshot_bytes"`
 	HostSnapshotBytes          int64        `json:"host_snapshot_bytes"`
@@ -1852,8 +1854,9 @@ func (t *Tree) Stats() Stats {
 		LastAdmissionFrequency:      t.lastAdmissionFrequency,
 		LastAdmissionReason:         t.lastAdmissionReason,
 	}
-	var visit func(n *node)
-	visit = func(n *node) {
+	var visit func(n *node) bool
+	visit = func(n *node) bool {
+		leased := n.refs > 0
 		if n.parent != nil { // skip every namespace root (parent==nil); count real nodes once
 			s.Nodes++
 			s.Tokens += len(n.key)
@@ -1877,9 +1880,16 @@ func (t *Tree) Stats() Stats {
 			}
 		}
 		for _, c := range n.children {
-			visit(c)
+			if visit(c) {
+				leased = true
+			}
 		}
+		if leased && n.parent != nil {
+			s.ProtectedTokens += len(n.key)
+		}
+		return leased
 	}
-	t.forEachRoot(visit) // one Stats snapshot across every namespace's subtree
+	t.forEachRoot(func(r *node) { visit(r) }) // one Stats snapshot across every namespace's subtree
+	s.EvictableTokens = s.Tokens - s.ProtectedTokens
 	return s
 }
