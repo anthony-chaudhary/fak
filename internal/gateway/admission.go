@@ -86,6 +86,12 @@ type AdmissionPolicy struct {
 	// TokenBudget caps the sum of the running set's token footprints (the num-batched-tokens
 	// admission budget; until paged KV lands this is the whole budget). ≤0 disables it.
 	TokenBudget int
+	// PrefillTokenBudget caps the prompt tokens admitted in one Schedule round, independent
+	// of TokenBudget (TGI's prefill_budget beside its token_budget). A waiter whose prompt
+	// would push the round's admitted prompt tokens over it stays queued for a later round;
+	// the round's first admission always proceeds so an oversized prompt cannot starve.
+	// ≤0 disables it.
+	PrefillTokenBudget int
 	// TokenBudgetProvenance tracks the source of the token budget ("default", "measured", or "explicit").
 	TokenBudgetProvenance string
 	// MaxWaiting bounds the waiting queue. A request that cannot be admitted now is shed
@@ -170,6 +176,9 @@ type SeqRequest struct {
 	Trust     AdmissionTrust
 	CreatedAt time.Time
 	DecodeTTL time.Duration
+	// PromptTokens is the prefill share of Tokens, charged against PrefillTokenBudget.
+	// ≤0 charges all of Tokens.
+	PromptTokens int
 }
 
 // baseTraceID strips any "#..." suffix from traceID and trims space.
@@ -1175,11 +1184,16 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 			return c.waiting[i].req.TraceID < c.waiting[j].req.TraceID // deterministic final tiebreak
 		})
 		var admitted []SeqRequest
+		tickPrompt := 0
 		for _, e := range c.waiting {
 			check := c.batchBudgetStatusLocked(e.req)
 			if check.status >= batchBudgetExhausted {
 				break // head-of-line: do not let a lower-priority request skip a blocked one
 			}
+			if !c.prefillFitsLocked(tickPrompt, e.req) {
+				break
+			}
+			tickPrompt += e.req.promptTokens()
 			c.admitLocked(e.req)
 			c.queuedTokens -= e.req.Tokens
 			if e.ready != nil {
@@ -1200,6 +1214,7 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 	}
 
 	var admitted []SeqRequest
+	tickPrompt := 0
 	for len(c.waiting) > 0 {
 		var traceKeys []string
 		traceFirstReq := make(map[string]SeqRequest)
@@ -1262,6 +1277,10 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 		if check.status >= batchBudgetExhausted {
 			break
 		}
+		if !c.prefillFitsLocked(tickPrompt, e.req) {
+			break
+		}
+		tickPrompt += e.req.promptTokens()
 
 		c.admitLocked(e.req)
 		c.queuedTokens -= e.req.Tokens
@@ -1561,6 +1580,21 @@ func (c *AdmissionController) batchBudgetStatusLocked(req SeqRequest) batchBudge
 		running: len(c.running),
 		tokens:  c.tokens,
 	}, req, c.budgets)
+}
+
+func (r SeqRequest) promptTokens() int {
+	if r.PromptTokens > 0 {
+		return r.PromptTokens
+	}
+	return r.Tokens
+}
+
+// prefillFitsLocked adapts TGI's split batch check (prefill_tokens > prefill_budget,
+// backends/v3/src/queue.rs): tickPrompt is the prompt tokens already admitted this round.
+// Caller holds c.mu.
+func (c *AdmissionController) prefillFitsLocked(tickPrompt int, req SeqRequest) bool {
+	budget := c.policy.PrefillTokenBudget
+	return budget <= 0 || tickPrompt == 0 || tickPrompt+req.promptTokens() <= budget
 }
 
 // admitLocked moves a request into the running set and charges its tokens. Caller holds c.mu.

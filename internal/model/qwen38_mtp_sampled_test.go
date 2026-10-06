@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"math"
+	"reflect"
 	"testing"
 )
 
@@ -416,5 +417,93 @@ func TestQwen38MTP_Sampled_VerificationReceipt(t *testing.T) {
 	}
 	if receipt.Metrics.ExpectedAcceptanceRate <= 0 || receipt.Metrics.ExpectedAcceptanceRate > 1.0 {
 		t.Fatalf("expected valid acceptance rate in (0, 1], got %g", receipt.Metrics.ExpectedAcceptanceRate)
+	}
+}
+
+// TestQwen38MTPSampledGreedyAvoidsVocabMaterialization pins the greedy argmax fast path:
+// its receipt is identical to VerifyDraftSequence over ApplySamplerToLogits one-hot rows,
+// and its allocation count does not grow with the number of draft positions.
+func TestQwen38MTPSampledGreedyAvoidsVocabMaterialization(t *testing.T) {
+	const vocab = 512
+	row := func(top int) []float32 {
+		r := make([]float32, vocab)
+		for i := range r {
+			r[i] = float32(i%7) * 0.25
+		}
+		r[top] = 10
+		return r
+	}
+	rows := func(tops []int) [][]float32 {
+		out := make([][]float32, len(tops))
+		for i, top := range tops {
+			out[i] = row(top)
+		}
+		return out
+	}
+	newVerifier := func() *Qwen38SampledSpeculativeVerifier {
+		v, err := NewQwen38SampledSpeculativeVerifier(Qwen38SamplerConfig{Temperature: 0, Seed: 7, RollbackOnAbort: true})
+		if err != nil {
+			t.Fatalf("NewQwen38SampledSpeculativeVerifier: %v", err)
+		}
+		return v
+	}
+
+	cases := []struct {
+		name        string
+		drafts      []int
+		targetTops  []int
+		draftTops   []int
+		wantAccepts []int
+	}{
+		{"all-accepted-bonus", []int{3, 9, 4}, []int{3, 9, 4, 11}, []int{3, 9, 4}, []int{3, 9, 4}},
+		{"reject-mid", []int{3, 8, 4}, []int{3, 9, 4}, []int{3, 8, 4}, []int{3}},
+		{"reject-first", []int{5, 9}, []int{3, 9}, []int{5, 9}, []int{}},
+		{"short-targets", []int{3, 0, 2}, []int{3}, []int{3, 0, 2}, []int{3, 0}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			targets, drafts := rows(tc.targetTops), rows(tc.draftTops)
+			ref := newVerifier()
+			pT := make([][]float32, len(targets))
+			for i, r := range targets {
+				pT[i], _ = ref.ApplySamplerToLogits(r)
+			}
+			pD := make([][]float32, len(drafts))
+			for i, r := range drafts {
+				pD[i], _ = ref.ApplySamplerToLogits(r)
+			}
+			want := ref.VerifyDraftSequence(tc.drafts, pT, pD)
+
+			got, err := newVerifier().VerifyDraftSequenceLogits(tc.drafts, targets, drafts)
+			if err != nil {
+				t.Fatalf("VerifyDraftSequenceLogits: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("greedy receipt diverged:\n got %+v\nwant %+v", got, want)
+			}
+			if !reflect.DeepEqual(append([]int{}, got.AcceptedTokens...), tc.wantAccepts) {
+				t.Fatalf("accepted = %v, want %v", got.AcceptedTokens, tc.wantAccepts)
+			}
+		})
+	}
+
+	allocs := func(k int) float64 {
+		tops := make([]int, k+1)
+		for i := range tops {
+			tops[i] = (i * 13) % vocab
+		}
+		targets, drafts := rows(tops), rows(tops[:k])
+		v := newVerifier()
+		return testing.AllocsPerRun(10, func() {
+			if _, err := v.VerifyDraftSequenceLogits(tops[:k], targets, drafts); err != nil {
+				t.Fatalf("VerifyDraftSequenceLogits: %v", err)
+			}
+		})
+	}
+	// Both depths keep every per-call slice above the small-make stack threshold, so the
+	// counts compare like for like.
+	short, long := allocs(16), allocs(64)
+	if long > short {
+		t.Fatalf("greedy allocs grow with positions: k=64 %v > k=16 %v", long, short)
 	}
 }
