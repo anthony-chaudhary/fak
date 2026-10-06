@@ -17,6 +17,42 @@ package kvbudget
 // Everything here is a deterministic integer fold: no hardware, no wall clock,
 // no network. Block counts are KV blocks (tokens ÷ block size, rounded up).
 
+import (
+	"fmt"
+	"math"
+)
+
+// PoolTooSmallError reports that a KV pool cannot hold one request at the
+// configured max context, and names the largest context that does fit.
+// Adapted from vLLM's estimate_max_model_len sizing error
+// (vllm/v1/core/kv_cache_utils.py:872-909@975dca5, Apache-2.0).
+type PoolTooSmallError struct {
+	Requested      int
+	LargestFitting int
+}
+
+func (e *PoolTooSmallError) Error() string {
+	return fmt.Sprintf("kvbudget: KV pool too small for max context %d tokens; largest context that fits is %d tokens (lower max context or grow the pool)",
+		e.Requested, e.LargestFitting)
+}
+
+// CheckPoolFitsContext returns nil when blocks*blockTokens covers maxContext,
+// else a *PoolTooSmallError carrying the largest fitting context.
+func CheckPoolFitsContext(blocks, blockTokens, maxContext int) error {
+	largest := 0
+	if blocks > 0 && blockTokens > 0 {
+		if blocks > math.MaxInt/blockTokens {
+			largest = math.MaxInt
+		} else {
+			largest = blocks * blockTokens
+		}
+	}
+	if maxContext <= largest {
+		return nil
+	}
+	return &PoolTooSmallError{Requested: maxContext, LargestFitting: largest}
+}
+
 // Stream is one decode request measured for admission: its token span and the
 // blocks it already holds. Worst-case blocks-to-completion are derived from the
 // MAXIMUM length it can reach (PromptTokens + MaxNewTokens), not its current

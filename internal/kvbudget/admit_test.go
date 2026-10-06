@@ -1,6 +1,9 @@
 package kvbudget
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 // TestReserveBlocksWorstCase pins the worst-case block math: blocks are sized
 // against prompt+MaxNewTokens (the maximum length), rounded up per block, with
@@ -205,5 +208,39 @@ func TestAdmitSequenceGuarantee(t *testing.T) {
 	}
 	if r.Available() != 1 {
 		t.Errorf("final Available() = %d, want 1", r.Available())
+	}
+}
+
+func TestPoolTooSmallErrorNamesLargestFittingContext(t *testing.T) {
+	cases := []struct {
+		name                        string
+		blocks, blockTokens, maxCtx int
+		wantErr                     bool
+		wantLargest                 int
+	}{
+		{name: "fits with headroom", blocks: 10, blockTokens: 16, maxCtx: 100},
+		{name: "fits exactly", blocks: 10, blockTokens: 16, maxCtx: 160},
+		{name: "one token over", blocks: 10, blockTokens: 16, maxCtx: 161, wantErr: true, wantLargest: 160},
+		{name: "large context", blocks: 2048, blockTokens: 16, maxCtx: 131072, wantErr: true, wantLargest: 32768},
+		{name: "empty pool", blocks: 0, blockTokens: 16, maxCtx: 1, wantErr: true, wantLargest: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := CheckPoolFitsContext(tc.blocks, tc.blockTokens, tc.maxCtx)
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("err = %v, want nil", err)
+				}
+				return
+			}
+			var pe *PoolTooSmallError
+			if !errors.As(err, &pe) {
+				t.Fatalf("err = %v, want *PoolTooSmallError", err)
+			}
+			if pe.Requested != tc.maxCtx || pe.LargestFitting != tc.wantLargest {
+				t.Fatalf("got {Requested:%d LargestFitting:%d}, want {%d %d}",
+					pe.Requested, pe.LargestFitting, tc.maxCtx, tc.wantLargest)
+			}
+		})
 	}
 }
