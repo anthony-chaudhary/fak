@@ -827,3 +827,49 @@ func TestAdmissionScheduleOrdersEqualPriorityByDeadline(t *testing.T) {
 		t.Fatalf("priority-vs-deadline dequeue order = %v, want %v", got, want)
 	}
 }
+
+// TestAdmissionSplitPrefillAndTotalBudget pins the two-budget round check: with room in
+// the total token budget, a second waiter whose prompt would push the round's admitted
+// prompt tokens over PrefillTokenBudget stays queued until the next round; a zero prefill
+// budget admits both in one round.
+func TestAdmissionSplitPrefillAndTotalBudget(t *testing.T) {
+	round := func(prefill int) (first, second []SeqRequest) {
+		t.Helper()
+		c := NewAdmissionController(AdmissionPolicy{TokenBudget: 4096, PrefillTokenBudget: prefill, MaxWaiting: 16, AgingRounds: 1})
+		if v := c.Offer(SeqRequest{TraceID: "blocker", Tokens: 4096}); v != VerdictAdmitted {
+			t.Fatalf("blocker: verdict = %s, want admitted", v)
+		}
+		for _, id := range []string{"p1", "p2"} {
+			if v := c.Offer(SeqRequest{TraceID: id, Tokens: 1000, PromptTokens: 800}); v != VerdictQueued {
+				t.Fatalf("%s: verdict = %s, want queued", id, v)
+			}
+		}
+		if !c.Complete("blocker") {
+			t.Fatal("Complete(blocker) reported not-running")
+		}
+		return c.Schedule(), c.Schedule()
+	}
+	ids := func(rs []SeqRequest) []string {
+		out := []string{}
+		for _, r := range rs {
+			out = append(out, r.TraceID)
+		}
+		return out
+	}
+
+	first, second := round(1024)
+	if got := ids(first); !reflect.DeepEqual(got, []string{"p1"}) {
+		t.Fatalf("prefill budget 1024: first round admitted %v, want [p1]", got)
+	}
+	if got := ids(second); !reflect.DeepEqual(got, []string{"p2"}) {
+		t.Fatalf("prefill budget 1024: second round admitted %v, want [p2]", got)
+	}
+
+	first, second = round(0)
+	if got := ids(first); !reflect.DeepEqual(got, []string{"p1", "p2"}) {
+		t.Fatalf("prefill budget disabled: first round admitted %v, want [p1 p2]", got)
+	}
+	if len(second) != 0 {
+		t.Fatalf("prefill budget disabled: second round admitted %v, want none", ids(second))
+	}
+}
