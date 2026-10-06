@@ -62,6 +62,68 @@ type StreamingPlanner interface {
 // upstream failure.
 var ErrStreamingUnsupported = errors.New("agent: streaming not supported for this provider wire")
 
+// ErrUpstreamStreamError is the sentinel a streaming read returns when the upstream
+// (typically a routing proxy) reports a failure IN-BAND as an SSE `data:` frame carrying
+// an `error` object, e.g. {"error":{"code":"upstream_truncated",...}} followed by
+// `data: [DONE]`. Such a turn did not finish: treating the trailing [DONE] as a clean
+// end would report a truncated turn as finish=stop.
+var ErrUpstreamStreamError = errors.New("agent: upstream reported an in-band stream error")
+
+// UpstreamStreamError carries the in-band error frame's fields. Code is normalized to a
+// string whether the upstream sent it as a string or a number. Message is upstream text
+// for the OPERATOR LOG only. It unwraps to ErrUpstreamStreamError for errors.Is.
+type UpstreamStreamError struct {
+	Type    string
+	Code    string
+	Message string
+}
+
+// Error formats the in-band error as "planner: upstream stream error <code>: <message>".
+func (e *UpstreamStreamError) Error() string {
+	code := e.Code
+	if code == "" {
+		code = e.Type
+	}
+	return fmt.Sprintf("planner: upstream stream error %s: %s", code, e.Message)
+}
+
+// Unwrap returns ErrUpstreamStreamError for errors.Is.
+func (e *UpstreamStreamError) Unwrap() error { return ErrUpstreamStreamError }
+
+// parseStreamErrorFrame decodes a chunk's `error` member, accepting an object (with a
+// string or numeric code) or a bare string. It returns nil when the member is absent or null.
+func parseStreamErrorFrame(raw json.RawMessage) *UpstreamStreamError {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil
+	}
+	var msg string
+	if json.Unmarshal(raw, &msg) == nil {
+		return &UpstreamStreamError{Message: msg}
+	}
+	var obj struct {
+		Type    string          `json:"type"`
+		Code    json.RawMessage `json:"code"`
+		Message json.RawMessage `json:"message"`
+	}
+	if json.Unmarshal(raw, &obj) != nil {
+		return &UpstreamStreamError{Message: truncate(raw, 400)}
+	}
+	return &UpstreamStreamError{Type: obj.Type, Code: jsonScalarString(obj.Code), Message: jsonScalarString(obj.Message)}
+}
+
+func jsonScalarString(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	return truncate(raw, 400)
+}
+
 // upstreamCall is the fully-resolved input to one upstream round-trip — the shared
 // product of the buffered Complete and the streaming CompleteStream. Extracting it
 // guarantees both paths apply the SAME pre-send quarantine, coherence shaping,
@@ -549,6 +611,7 @@ type openAIStreamChunk struct {
 	} `json:"choices"`
 	Usage   *Usage          `json:"usage"`
 	Timings json.RawMessage `json:"timings,omitempty"`
+	Error   json.RawMessage `json:"error,omitempty"`
 }
 
 // CompleteStream performs one streamed chat-completions round-trip on the
@@ -788,6 +851,9 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		var chunk openAIStreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue // tolerate a keep-alive or non-JSON heartbeat line
+		}
+		if serr := parseStreamErrorFrame(chunk.Error); serr != nil {
+			return nil, serr
 		}
 		if openAIChunkAdvancesTurn(chunk) {
 			sr.noteProgress() // real content/tool/finish — the TURN moved, not just the socket
