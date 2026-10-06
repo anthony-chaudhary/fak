@@ -35,6 +35,11 @@ const (
 	// tailReadBytes bounds the startup seed / CLI read: RingCap rows at a
 	// generous ~1 KiB each, so a huge active file never costs more than this.
 	tailReadBytes = int64(RingCap) << 10
+
+	// MinPrefillRateTokens is the smallest uncached prompt whose TTFT is read as a
+	// prefill rate. Below it TTFT is the fixed admission/prefix-match floor, not
+	// prefill work: a 4-token warm hit at 140ms is not a 28 tok/s prefill.
+	MinPrefillRateTokens = 128
 )
 
 // Locality vocabulary mirrors the gateway's servingLocality; "" means the
@@ -48,6 +53,8 @@ const (
 // Record is one served turn. PromptTokens is the UNCACHED prompt (the tokens
 // actually prefilled), disjoint from CachedTokens. TTFTMS==0 means the first-token
 // boundary was not observed; PrefillTPS/DecodeTPS are present only when it was.
+// PrefillTPS needs at least MinPrefillRateTokens uncached tokens. DecodeTPS is the
+// inter-token rate after the first token: (completion-1) / (e2e-ttft).
 type Record struct {
 	Schema           string  `json:"schema"`
 	UnixMS           int64   `json:"unix_ms"`
@@ -86,11 +93,11 @@ func NewRecord(now time.Time, finishReason, locality string, promptTok, complTok
 		ttft = dur
 	}
 	rec.TTFTMS = roundTo(float64(ttft)/float64(time.Millisecond), 1000)
-	if rec.PromptTokens > 0 {
+	if rec.PromptTokens >= MinPrefillRateTokens {
 		rec.PrefillTPS = roundTo(float64(rec.PromptTokens)/ttft.Seconds(), 100)
 	}
-	if decode := dur - ttft; decode > 0 && rec.CompletionTokens > 0 {
-		rec.DecodeTPS = roundTo(float64(rec.CompletionTokens)/decode.Seconds(), 100)
+	if decode := dur - ttft; decode > 0 && rec.CompletionTokens > 1 {
+		rec.DecodeTPS = roundTo(float64(rec.CompletionTokens-1)/decode.Seconds(), 100)
 	}
 	return rec
 }

@@ -48,7 +48,7 @@ func TestPerfLedgerServedTurnEmitsOneRowAndSurvivesRestart(t *testing.T) {
 	srv.SetPerfLedger(w, seed, capped)
 
 	// The same fold a served turn reaches (messages_stream_passthrough.go).
-	srv.metrics.observeInferenceServedTimed(localitySelfHosted, 1000, 200, 500, 0, "end_turn", 5*time.Second, time.Second)
+	srv.metrics.observeInferenceServedTimed(localitySelfHosted, 1000, 201, 500, 0, "end_turn", 5*time.Second, time.Second)
 
 	if err := w.Close(); err != nil {
 		t.Fatalf("writer close: %v", err)
@@ -64,7 +64,7 @@ func TestPerfLedgerServedTurnEmitsOneRowAndSurvivesRestart(t *testing.T) {
 	if got.Schema != perfledger.Schema || got.Locality != perfledger.LocalitySelfHosted || got.FinishReason != "end_turn" {
 		t.Fatalf("row identity = %q/%q/%q", got.Schema, got.Locality, got.FinishReason)
 	}
-	if got.PromptTokens != 1000 || got.CompletionTokens != 200 || got.CachedTokens != 500 {
+	if got.PromptTokens != 1000 || got.CompletionTokens != 201 || got.CachedTokens != 500 {
 		t.Fatalf("row tokens = %d/%d/%d", got.PromptTokens, got.CompletionTokens, got.CachedTokens)
 	}
 	if got.E2EMS != 5000 || got.TTFTMS != 1000 || got.PrefillTPS != 1000 || got.DecodeTPS != 50 {

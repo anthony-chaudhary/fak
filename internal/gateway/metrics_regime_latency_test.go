@@ -16,7 +16,7 @@ func TestRegimeLatencyHistogramsReconcileWithUnlabeled(t *testing.T) {
 	}
 	// uncached prompt, completion, cached, cache-create, dur, ttft
 	m.observeInferenceTimed(100, 20, 0, 0, "stop", 2*time.Second, time.Second)                // cold
-	m.observeInferenceTimed(40, 20, 60, 0, "stop", time.Second, 300*time.Millisecond)         // partial
+	m.observeInferenceTimed(400, 20, 600, 0, "stop", time.Second, 300*time.Millisecond)       // partial
 	m.observeInferenceTimed(5, 20, 95, 0, "stop", 500*time.Millisecond, 20*time.Millisecond)  // frozen
 	m.observeInferenceTimed(0, 20, 100, 0, "stop", 400*time.Millisecond, 10*time.Millisecond) // frozen
 	m.observeInferenceTimed(0, 20, 0, 0, "stop", 300*time.Millisecond, 0)                     // unknown, buffered

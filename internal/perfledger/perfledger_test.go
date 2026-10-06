@@ -25,11 +25,11 @@ func jsonKeys(t *testing.T, v any) map[string]any {
 // fak-test:runtime fast est=10ms lane=default
 func TestNewRecordDerivesRatesWhenTTFTMeasured(t *testing.T) {
 	now := time.UnixMilli(1_700_000_000_000)
-	r := NewRecord(now, "stop", LocalitySelfHosted, 1000, 200, 500, 5*time.Second, time.Second)
+	r := NewRecord(now, "stop", LocalitySelfHosted, 1000, 201, 500, 5*time.Second, time.Second)
 	if r.Schema != Schema || r.UnixMS != 1_700_000_000_000 {
 		t.Fatalf("schema/unix_ms = %q/%d", r.Schema, r.UnixMS)
 	}
-	if r.PromptTokens != 1000 || r.CompletionTokens != 200 || r.CachedTokens != 500 {
+	if r.PromptTokens != 1000 || r.CompletionTokens != 201 || r.CachedTokens != 500 {
 		t.Fatalf("tokens = %d/%d/%d", r.PromptTokens, r.CompletionTokens, r.CachedTokens)
 	}
 	if r.E2EMS != 5000 || r.TTFTMS != 1000 {
@@ -39,7 +39,7 @@ func TestNewRecordDerivesRatesWhenTTFTMeasured(t *testing.T) {
 		t.Fatalf("prefill_tps = %v, want 1000 (1000 tok / 1s)", r.PrefillTPS)
 	}
 	if r.DecodeTPS != 50 {
-		t.Fatalf("decode_tps = %v, want 50 (200 tok / 4s)", r.DecodeTPS)
+		t.Fatalf("decode_tps = %v, want 50 (200 tokens after the first / 4s)", r.DecodeTPS)
 	}
 	m := jsonKeys(t, r)
 	for _, k := range []string{"schema", "unix_ms", "finish_reason", "locality", "prompt_tokens", "completion_tokens", "cached_tokens", "e2e_ms", "ttft_ms", "prefill_tps", "decode_tps"} {
@@ -82,6 +82,40 @@ func TestNewRecordClampsTTFTToDuration(t *testing.T) {
 	}
 	if r.DecodeTPS != 0 {
 		t.Fatalf("decode_tps = %v, want 0 when decode window is empty", r.DecodeTPS)
+	}
+}
+
+// Halo witness (strix2, llama-server behind fak serve): warm hits prefilled 4-53
+// uncached tokens in a 140-660ms TTFT floor and logged 9-100 "tok/s" next to a
+// real ~290 tok/s cold prefill, dragging prefill p50 to a third of the truth.
+//
+// fak-test:runtime fast est=10ms lane=default
+func TestNewRecordSkipsPrefillRateBelowMinTokens(t *testing.T) {
+	warm := NewRecord(time.Now(), "stop", "", 4, 41, 3209, 5*time.Second, 140*time.Millisecond)
+	if warm.TTFTMS != 140 {
+		t.Fatalf("ttft_ms = %v, want 140", warm.TTFTMS)
+	}
+	if warm.PrefillTPS != 0 {
+		t.Fatalf("prefill_tps = %v for a 4-token prefill, want omitted", warm.PrefillTPS)
+	}
+	if _, ok := jsonKeys(t, warm)["prefill_tps"]; ok {
+		t.Fatalf("warm record JSON carries prefill_tps")
+	}
+	cold := NewRecord(time.Now(), "stop", "", MinPrefillRateTokens, 2, 0, 2*time.Second, time.Second)
+	if cold.PrefillTPS != MinPrefillRateTokens {
+		t.Fatalf("prefill_tps = %v at the floor, want %d", cold.PrefillTPS, MinPrefillRateTokens)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestNewRecordDecodeRateExcludesFirstToken(t *testing.T) {
+	r := NewRecord(time.Now(), "stop", "", 200, 5, 0, 2*time.Second, time.Second)
+	if r.DecodeTPS != 4 {
+		t.Fatalf("decode_tps = %v, want 4 (4 tokens after the first / 1s)", r.DecodeTPS)
+	}
+	one := NewRecord(time.Now(), "stop", "", 200, 1, 0, 2*time.Second, time.Second)
+	if one.DecodeTPS != 0 {
+		t.Fatalf("decode_tps = %v for a single-token completion, want omitted", one.DecodeTPS)
 	}
 }
 
@@ -250,7 +284,7 @@ func TestSummarizeSplitsTTFTByCacheRegime(t *testing.T) {
 	now := time.UnixMilli(1_700_000_000_000)
 	recs := []Record{
 		NewRecord(now, "stop", LocalitySelfHosted, 100, 10, 0, 200*time.Millisecond, 100*time.Millisecond),
-		NewRecord(now, "stop", LocalitySelfHosted, 50, 10, 50, 150*time.Millisecond, 40*time.Millisecond),
+		NewRecord(now, "stop", LocalitySelfHosted, 500, 10, 500, 150*time.Millisecond, 40*time.Millisecond),
 		NewRecord(now, "stop", LocalitySelfHosted, 0, 10, 100, 60*time.Millisecond, 2*time.Millisecond),
 		NewRecord(now, "stop", LocalitySelfHosted, 0, 10, 0, 50*time.Millisecond, 0),
 	}
