@@ -2,6 +2,8 @@ package tb4bench
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,7 +149,7 @@ func TestFakHarnessSyntheticRun(t *testing.T) {
 	}
 
 	// Check journal hash is non-empty
-	if len(res.JournalHash) != 64 {
+	if len(res.JournalHash) != hex.EncodedLen(sha256.Size) {
 		t.Errorf("expected 64-char journal hash, got %q", res.JournalHash)
 	}
 }

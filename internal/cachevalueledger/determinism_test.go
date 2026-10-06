@@ -77,22 +77,22 @@ func TestDeterminismLedgerParsing(t *testing.T) {
 	}
 
 	// 3. Deterministic parsing across 50 iterations
-	fixture := fmt.Sprintf(
-		"%s\n%s\n"+
-			`{"schema":"fak-cache-value-ledger/1","date":"2026-08-31","session_type":"run","context":"single","unix_millis":1756650600000,"turns":1,"prompt_tokens":100,"reused_tokens":0,"rejected_tier_accesses":5}`+"\n"+
-			`{"schema":"fak-cache-value-ledger/1","date":"2026-08-31","session_type":"serve","context":"legacy","unix_millis":1756650601000,"turns":8,"prompt_tokens":800,"reused_tokens":600}`+"\n"+
-			`{invalid-json-line}`+"\n"+
-			`{"schema":"fak-cache-value-ledger/1","date":"2026-08-31","session_type":"serve","context":"high-rejected","unix_millis":1756650602000,"turns":4,"prompt_tokens":400,"reused_tokens":320,"rejected_tier_accesses":999999}`+"\n",
+	validLines := []string{
 		line1,
 		func() string {
 			l, _ := AppendLedgerLine(r1)
 			return l
 		}(),
-	)
+		`{"schema":"fak-cache-value-ledger/1","date":"2026-08-31","session_type":"run","context":"single","unix_millis":1756650600000,"turns":1,"prompt_tokens":100,"reused_tokens":0,"rejected_tier_accesses":5}`,
+		`{"schema":"fak-cache-value-ledger/1","date":"2026-08-31","session_type":"serve","context":"legacy","unix_millis":1756650601000,"turns":8,"prompt_tokens":800,"reused_tokens":600}`,
+		`{"schema":"fak-cache-value-ledger/1","date":"2026-08-31","session_type":"serve","context":"high-rejected","unix_millis":1756650602000,"turns":4,"prompt_tokens":400,"reused_tokens":320,"rejected_tier_accesses":999999}`,
+	}
+	fixture := fmt.Sprintf("%s\n%s\n%s\n%s\n{invalid-json-line}\n%s\n",
+		validLines[0], validLines[1], validLines[2], validLines[3], validLines[4])
 
 	refRows := ParseLedger(fixture)
-	if len(refRows) != 5 {
-		t.Fatalf("expected 5 parsed rows, got %d", len(refRows))
+	if len(refRows) != len(validLines) {
+		t.Fatalf("expected %d parsed rows, got %d", len(validLines), len(refRows))
 	}
 	refJSON, err := json.Marshal(refRows)
 	if err != nil {

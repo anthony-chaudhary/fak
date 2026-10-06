@@ -56,8 +56,8 @@ func TestPrefetchPLEUBatchRows(t *testing.T) {
 	rows := PrefetchPLEUBatchRows(tokens, cfg)
 
 	// 3 tokens * 4 heads = 12 unique rows
-	if len(rows) != 12 {
-		t.Fatalf("expected 12 rows, got %d", len(rows))
+	if want := len(tokens) * cfg.NumHeads; len(rows) != want {
+		t.Fatalf("expected %d rows, got %d", want, len(rows))
 	}
 }
 

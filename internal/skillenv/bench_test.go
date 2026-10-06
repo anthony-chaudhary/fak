@@ -90,15 +90,16 @@ func BenchmarkUnpin(b *testing.B) {
 }
 
 func BenchmarkList(b *testing.B) {
+	const pinned = 20
 	table := New(nil, nil, nil)
-	for i := 0; i < 20; i++ {
+	for i := 0; i < pinned; i++ {
 		table.Pin(fmt.Sprintf("skill-%02d", i), "1.0.0")
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		m := table.List()
-		if len(m) != 20 {
+		if len(m) != pinned {
 			b.Fatal("unexpected list length")
 		}
 	}

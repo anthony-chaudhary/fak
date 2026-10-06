@@ -8,32 +8,32 @@ import (
 	"testing"
 )
 
+var benchmarkFiles = map[string][]byte{
+	"INDEX.md":                     []byte("# Test Index\nSummary of results.\n"),
+	"perf.json":                    []byte(`{"latency_ms": 42.5, "throughput": 120.3}`),
+	"run_manifest.json":            []byte(`{"run_id": "r1", "timestamp": "2026-09-06T00:00:00Z"}`),
+	"eval_summary.json":            []byte(`{"pass": 98, "fail": 2}`),
+	"README.md":                    []byte("# Readme\nDocumentation of run.\n"),
+	"results.sha256":               []byte("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  INDEX.md\n"),
+	"queries.sql":                  []byte("SELECT * FROM metrics;\n"),
+	"driver.sh":                    []byte("#!/bin/bash\necho 'running'\n"),
+	"predictions_epoch1.json":      []byte(strings.Repeat("prediction: sample output token tensor ", 20)),
+	"logs/build.log":               []byte(strings.Repeat("INFO: step completed successfully\n", 30)),
+	"logs/pmon-gpu0.txt":           []byte("utilization.gpu [0 %], memory.used [1200 MiB]\n"),
+	"nested/times-001.json":        []byte(`[10.2, 10.4, 10.1, 10.5, 10.3]`),
+	"nested/data/measurements.csv": []byte("step,loss,lr\n1,0.5,1e-4\n2,0.4,1e-4\n3,0.3,1e-4\n"),
+	"artifacts/render.png":         []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"),
+	"unknown_artifact.bin":         []byte("\x00\x01\x02\x03\x04\x05"),
+	"models/network.onnx":          []byte("ONNX model binary placeholder bytes"),
+	".gitignore":                   []byte("*.tmp\n*.bak\n"),
+	".DS_Store":                    []byte("macOS metadata"),
+}
+
 func setupBenchmarkDir(b *testing.B) string {
 	b.Helper()
 	dir := b.TempDir()
 
-	files := map[string][]byte{
-		"INDEX.md":                     []byte("# Test Index\nSummary of results.\n"),
-		"perf.json":                    []byte(`{"latency_ms": 42.5, "throughput": 120.3}`),
-		"run_manifest.json":            []byte(`{"run_id": "r1", "timestamp": "2026-09-06T00:00:00Z"}`),
-		"eval_summary.json":            []byte(`{"pass": 98, "fail": 2}`),
-		"README.md":                    []byte("# Readme\nDocumentation of run.\n"),
-		"results.sha256":               []byte("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  INDEX.md\n"),
-		"queries.sql":                  []byte("SELECT * FROM metrics;\n"),
-		"driver.sh":                    []byte("#!/bin/bash\necho 'running'\n"),
-		"predictions_epoch1.json":      []byte(strings.Repeat("prediction: sample output token tensor ", 20)),
-		"logs/build.log":               []byte(strings.Repeat("INFO: step completed successfully\n", 30)),
-		"logs/pmon-gpu0.txt":           []byte("utilization.gpu [0 %], memory.used [1200 MiB]\n"),
-		"nested/times-001.json":        []byte(`[10.2, 10.4, 10.1, 10.5, 10.3]`),
-		"nested/data/measurements.csv": []byte("step,loss,lr\n1,0.5,1e-4\n2,0.4,1e-4\n3,0.3,1e-4\n"),
-		"artifacts/render.png":         []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"),
-		"unknown_artifact.bin":         []byte("\x00\x01\x02\x03\x04\x05"),
-		"models/network.onnx":          []byte("ONNX model binary placeholder bytes"),
-		".gitignore":                   []byte("*.tmp\n*.bak\n"),
-		".DS_Store":                    []byte("macOS metadata"),
-	}
-
-	for relPath, content := range files {
+	for relPath, content := range benchmarkFiles {
 		fullPath := filepath.Join(dir, filepath.FromSlash(relPath))
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 			b.Fatalf("failed to create directory for %s: %v", relPath, err)
@@ -253,6 +253,12 @@ func BenchmarkCanMigrate(b *testing.B) {
 func BenchmarkMintPayloadIndex(b *testing.B) {
 	dir := setupBenchmarkDir(b)
 	storeURI := "s3://results-archive/store"
+	wantPayload := 0
+	for relPath, content := range benchmarkFiles {
+		if tier, _ := TierOf(relPath); tier == TierPayload && len(content) > 0 {
+			wantPayload++
+		}
+	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -261,8 +267,8 @@ func BenchmarkMintPayloadIndex(b *testing.B) {
 		if err != nil {
 			b.Fatalf("MintPayloadIndex failed: %v", err)
 		}
-		if len(idx.Entries) != 6 {
-			b.Fatalf("expected 6 payload entries, got %d", len(idx.Entries))
+		if len(idx.Entries) != wantPayload {
+			b.Fatalf("expected %d payload entries, got %d", wantPayload, len(idx.Entries))
 		}
 		if census.ClaimFiles != 8 {
 			b.Fatalf("expected 8 claim files, got %d", census.ClaimFiles)

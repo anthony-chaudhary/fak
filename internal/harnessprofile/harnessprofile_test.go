@@ -153,6 +153,15 @@ func TestProfilesIsACopy(t *testing.T) {
 }
 
 func TestLookupFakHarnessProfile(t *testing.T) {
+	var builtin HarnessProfile
+	for _, bp := range Builtins() {
+		if bp.Name == "fak" {
+			builtin = bp
+		}
+	}
+	if !validAdapterVersion(builtin.AdapterVersion) {
+		t.Fatalf("builtin fak AdapterVersion = %q, want MAJOR.MINOR.PATCH", builtin.AdapterVersion)
+	}
 	for _, tc := range []struct {
 		cmd      string
 		wantName string
@@ -175,8 +184,8 @@ func TestLookupFakHarnessProfile(t *testing.T) {
 		if p.Wire != WireOpenAI {
 			t.Errorf("Lookup(%q).Wire = %q, want %q", tc.cmd, p.Wire, WireOpenAI)
 		}
-		if p.AdapterVersion != "1.0.0" {
-			t.Errorf("Lookup(%q).AdapterVersion = %q, want 1.0.0", tc.cmd, p.AdapterVersion)
+		if p.AdapterVersion != builtin.AdapterVersion {
+			t.Errorf("Lookup(%q).AdapterVersion = %q, want %q", tc.cmd, p.AdapterVersion, builtin.AdapterVersion)
 		}
 		if p.DefaultBaseURL != "https://api.openai.com/v1" {
 			t.Errorf("Lookup(%q).DefaultBaseURL = %q, want https://api.openai.com/v1", tc.cmd, p.DefaultBaseURL)

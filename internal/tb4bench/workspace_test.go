@@ -2,6 +2,8 @@ package tb4bench
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,7 +44,7 @@ func TestWorkspaceDiffSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to seed workspace: %v", err)
 	}
-	if len(initialDigest) != 64 {
+	if len(initialDigest) != hex.EncodedLen(sha256.Size) {
 		t.Fatalf("expected 64-char initial digest, got %q", initialDigest)
 	}
 

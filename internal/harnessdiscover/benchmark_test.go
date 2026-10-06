@@ -12,7 +12,7 @@ import (
 
 var benchResultSink Result
 
-func setupBenchmarkEnv(tb testing.TB) Options {
+func setupBenchmarkEnv(tb testing.TB) (Options, int) {
 	tb.Helper()
 	root := tb.TempDir()
 
@@ -21,7 +21,9 @@ func setupBenchmarkEnv(tb testing.TB) Options {
 		tb.Fatalf("generate ed25519 key: %v", err)
 	}
 
+	manifests := 0
 	writeManifest := func(relPath, scope, id string) []byte {
+		manifests++
 		raw := []byte(`{"schema":"fak.harness-selection/v1alpha1","layers":[{"id":"` + id + `","scope":"` + scope + `","capabilities":["` + id + `"]}]}`)
 		fullPath := filepath.Join(root, relPath)
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
@@ -113,14 +115,14 @@ func setupBenchmarkEnv(tb testing.TB) Options {
 		RegistryPath: regPath,
 		StartPath:    startDir,
 		Principal:    "dev@company.test",
-	}
+	}, manifests
 }
 
 // BenchmarkHarnessDiscover measures end-to-end harness discovery across all scopes
 // (company, team, person, repo, project) including cryptographic signature verification,
 // SHA-256 digest computation, directory climbing for repo manifests, and deterministic layer sorting.
 func BenchmarkHarnessDiscover(b *testing.B) {
-	opts := setupBenchmarkEnv(b)
+	opts, manifests := setupBenchmarkEnv(b)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -129,8 +131,8 @@ func BenchmarkHarnessDiscover(b *testing.B) {
 		if err != nil {
 			b.Fatalf("discover failed: %v", err)
 		}
-		if len(res.Candidates) != 5 {
-			b.Fatalf("expected 5 candidates, got %d", len(res.Candidates))
+		if len(res.Candidates) != manifests {
+			b.Fatalf("expected %d candidates, got %d", manifests, len(res.Candidates))
 		}
 		benchResultSink = res
 	}

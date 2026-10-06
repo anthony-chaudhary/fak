@@ -332,24 +332,21 @@ func TestSpeculativeContract_TreeProposalAndCausalMask(t *testing.T) {
 		// Node 2: Token 30, Parent 1, Depth 2
 		// Node 3: Token 31, Parent 1, Depth 2
 		// Node 4: Token 25, Parent 0, Depth 1
-		if len(tree.Nodes) != 5 {
-			t.Fatalf("expected 5 nodes, got %d", len(tree.Nodes))
+		wantNodes := []struct{ token, parent, depth int }{
+			{10, -1, 0},
+			{20, 0, 1},
+			{30, 1, 2},
+			{31, 1, 2},
+			{25, 0, 1},
+		}
+		if len(tree.Nodes) != len(wantNodes) {
+			t.Fatalf("expected %d nodes, got %d", len(wantNodes), len(tree.Nodes))
 		}
 
-		if tree.Nodes[0].Token != 10 || tree.Nodes[0].Parent != -1 || tree.Nodes[0].Depth != 0 {
-			t.Errorf("node 0 mismatch: %+v", tree.Nodes[0])
-		}
-		if tree.Nodes[1].Token != 20 || tree.Nodes[1].Parent != 0 || tree.Nodes[1].Depth != 1 {
-			t.Errorf("node 1 mismatch: %+v", tree.Nodes[1])
-		}
-		if tree.Nodes[2].Token != 30 || tree.Nodes[2].Parent != 1 || tree.Nodes[2].Depth != 2 {
-			t.Errorf("node 2 mismatch: %+v", tree.Nodes[2])
-		}
-		if tree.Nodes[3].Token != 31 || tree.Nodes[3].Parent != 1 || tree.Nodes[3].Depth != 2 {
-			t.Errorf("node 3 mismatch: %+v", tree.Nodes[3])
-		}
-		if tree.Nodes[4].Token != 25 || tree.Nodes[4].Parent != 0 || tree.Nodes[4].Depth != 1 {
-			t.Errorf("node 4 mismatch: %+v", tree.Nodes[4])
+		for i, w := range wantNodes {
+			if tree.Nodes[i].Token != w.token || tree.Nodes[i].Parent != w.parent || tree.Nodes[i].Depth != w.depth {
+				t.Errorf("node %d mismatch: %+v", i, tree.Nodes[i])
+			}
 		}
 
 		// Derive and verify causal attention mask
@@ -383,8 +380,8 @@ func TestSpeculativeContract_TreeProposalAndCausalMask(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error creating tree proposal: %v", err)
 		}
-		if len(proposal.Tokens) != 5 {
-			t.Fatalf("expected 5 proposal tokens, got %d", len(proposal.Tokens))
+		if len(proposal.Tokens) != len(wantNodes) {
+			t.Fatalf("expected %d proposal tokens, got %d", len(wantNodes), len(proposal.Tokens))
 		}
 	})
 

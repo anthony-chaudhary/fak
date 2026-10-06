@@ -16,6 +16,7 @@ func TestPQ2_0GGUFTag142LoadsGoldenBlock(t *testing.T) {
 	const (
 		name = "blk.0.ffn_up.weight"
 		tag  = TensorType(142)
+		cols = 128
 	)
 	raw := make([]byte, 34)
 	binary.LittleEndian.PutUint16(raw[:2], 0x3800) // f16 0.5
@@ -27,7 +28,7 @@ func TestPQ2_0GGUFTag142LoadsGoldenBlock(t *testing.T) {
 	writeMinimalHeader(&b, 1, 2)
 	writeKVString(&b, "general.architecture", "qwen35")
 	writeKVUint32(&b, "general.alignment", 32)
-	writeTensorInfoForTest(&b, name, []uint64{128, 1}, tag, 0)
+	writeTensorInfoForTest(&b, name, []uint64{cols, 1}, tag, 0)
 	padToAlignment(&b, 32)
 	b.Write(raw)
 	path := filepath.Join(t.TempDir(), "bonsai2-pq2-tag142.gguf")
@@ -55,8 +56,8 @@ func TestPQ2_0GGUFTag142LoadsGoldenBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TensorF32: %v", err)
 	}
-	if len(values) != 128 {
-		t.Fatalf("TensorF32 len = %d, want 128", len(values))
+	if len(values) != cols {
+		t.Fatalf("TensorF32 len = %d, want %d", len(values), cols)
 	}
 	want := []float32{-0.5, 0, 0.5, -0.5}
 	for i, v := range values {

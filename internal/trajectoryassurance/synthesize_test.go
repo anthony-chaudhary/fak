@@ -5,6 +5,10 @@ import (
 	"testing"
 )
 
+func gymStrataCount() int {
+	return len(gymMechanisms) * len(gymHarnesses) * len(gymReadbacks) * len(gymConstraints)
+}
+
 func generateEmpiricalTraces() []IndexedTrajectory {
 	var traces []IndexedTrajectory
 	traceID := 1
@@ -118,8 +122,8 @@ func TestKAnonymityFiltering(t *testing.T) {
 	if stats.ValidTraces != expectedValid {
 		t.Fatalf("ValidTraces = %d, want %d", stats.ValidTraces, expectedValid)
 	}
-	if len(corpus.PairedCases) != 32 {
-		t.Fatalf("corpus.PairedCases = %d, want 32", len(corpus.PairedCases))
+	if len(corpus.PairedCases) != gymStrataCount() {
+		t.Fatalf("corpus.PairedCases = %d, want %d", len(corpus.PairedCases), gymStrataCount())
 	}
 }
 
@@ -161,8 +165,8 @@ func TestSynthesizeCorpusFullCoverage(t *testing.T) {
 	if stats.K != 5 {
 		t.Fatalf("K = %d, want 5", stats.K)
 	}
-	if len(corpus.PairedCases) != 32 {
-		t.Fatalf("corpus.PairedCases = %d, want 32", len(corpus.PairedCases))
+	if len(corpus.PairedCases) != gymStrataCount() {
+		t.Fatalf("corpus.PairedCases = %d, want %d", len(corpus.PairedCases), gymStrataCount())
 	}
 }
 

@@ -35,7 +35,7 @@ func ValidateRuntimeDevSplitBaseline(data []byte) error {
 	if got.Schema != "fak-runtime-dev-split-baseline/1" {
 		return fmt.Errorf("invalid schema %q, want %q", got.Schema, "fak-runtime-dev-split-baseline/1")
 	}
-	if len(got.Commit) != 40 {
+	if len(got.Commit) != 40 { //boundarylint:ignore CHANGE_DETECTOR_TEST git SHA-1 commit hex width
 		return fmt.Errorf("invalid commit SHA %q: must be 40-character hex string", got.Commit)
 	}
 	if got.GoVersion == "" {

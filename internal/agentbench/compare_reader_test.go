@@ -16,6 +16,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agentbench/taskrun"
 )
 
+const comparisonFixturePairs = 5
+
 func TestCompareDirectoriesVerifiesFiveSharedC2Receipts(t *testing.T) {
 	baseline := writeComparisonArmFixture(t, "baseline", false, false, false, false, false, false)
 	candidate := writeComparisonArmFixture(t, "candidate", false, false, false, false, false, false)
@@ -27,7 +29,7 @@ func TestCompareDirectoriesVerifiesFiveSharedC2Receipts(t *testing.T) {
 	if got.Status != "NOISY_INCONCLUSIVE" || got.Comparison.Pairs != 5 {
 		t.Fatalf("five verified noisy pairs = %+v", got)
 	}
-	if len(got.BaselineObserved.Replicates) != 5 || len(got.CandidateObserved.Replicates) != 5 {
+	if len(got.BaselineObserved.Replicates) != comparisonFixturePairs || len(got.CandidateObserved.Replicates) != comparisonFixturePairs {
 		t.Fatalf("serialized observations lost paired evidence: %+v", got)
 	}
 	for i, observed := range got.BaselineObserved.Replicates {
@@ -50,7 +52,7 @@ func TestCompareDirectoriesVerifiesFiveSharedC2Receipts(t *testing.T) {
 		if got.Status != "INCONCLUSIVE" {
 			t.Fatalf("probe-only artifact promoted as shared-C2 steady: %+v", got)
 		}
-		if len(got.BaselineObserved.Replicates) != 5 || len(got.CandidateObserved.Replicates) != 5 {
+		if len(got.BaselineObserved.Replicates) != comparisonFixturePairs || len(got.CandidateObserved.Replicates) != comparisonFixturePairs {
 			t.Fatalf("inconclusive pair discarded verified observations before/after failure: %+v", got)
 		}
 		failed := got.CandidateObserved.Replicates[2]
@@ -99,7 +101,7 @@ func TestCompareDirectoriesVerifiesFiveSharedC2Receipts(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(got.CandidateObserved.Replicates) != 5 {
+		if len(got.CandidateObserved.Replicates) != comparisonFixturePairs {
 			t.Fatalf("missing optional bootstrap dropped otherwise verified observations: %+v", got)
 		}
 		for _, replicate := range got.CandidateObserved.Replicates {
@@ -135,9 +137,9 @@ func TestCompareDirectoriesVerifiesFiveSharedC2Receipts(t *testing.T) {
 func writeComparisonArmFixture(t *testing.T, armID string, probeOnly, unknownIdentity, failedTasks, contextMismatch, definitionMismatch, omitBootstrap bool) string {
 	t.Helper()
 	root := t.TempDir()
-	refs := make([]comparisonReplicateRef, 0, 5)
+	refs := make([]comparisonReplicateRef, 0, comparisonFixturePairs)
 	var toolContractDigest, taskWitnessDigest string
-	for pair := 1; pair <= 5; pair++ {
+	for pair := 1; pair <= comparisonFixturePairs; pair++ {
 		dir := filepath.Join(root, fmt.Sprintf("pair-%d", pair))
 		if err := os.MkdirAll(filepath.Join(dir, "tasks-c2"), 0700); err != nil {
 			t.Fatal(err)

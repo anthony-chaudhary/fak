@@ -694,6 +694,7 @@ func TestAcquireRejectsInvalidHashObjectIDBeforeUpdateRef(t *testing.T) {
 func TestStoreLiveBatchedCatFile(t *testing.T) {
 	g := newFakeGit()
 	now := time.Unix(2000000000, 0)
+	const activeRefs, expiredRefs, noidRefs = 70, 35, 10
 
 	// Populate 100+ synthetic lease refs:
 	// - 70 active lease records (future TTL)
@@ -703,7 +704,7 @@ func TestStoreLiveBatchedCatFile(t *testing.T) {
 	// - 5 missing refs (refs pointing to non-existent blob OIDs, proves missing is skipped)
 	// - 15 non-lease refs under the same refs/fak/locks/ prefix (session-, intent-, contract-)
 	// Total lock lease refs = 125.
-	for i := 0; i < 70; i++ {
+	for i := 0; i < activeRefs; i++ {
 		id := fmt.Sprintf("lease-active-%03d", i)
 		rec := Record{
 			ID:         id,
@@ -721,7 +722,7 @@ func TestStoreLiveBatchedCatFile(t *testing.T) {
 		g.refs[refPrefix+id] = oid
 	}
 
-	for i := 0; i < 35; i++ {
+	for i := 0; i < expiredRefs; i++ {
 		id := fmt.Sprintf("lease-expired-%03d", i)
 		rec := Record{
 			ID:         id,
@@ -739,7 +740,7 @@ func TestStoreLiveBatchedCatFile(t *testing.T) {
 		g.refs[refPrefix+id] = oid
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < noidRefs; i++ {
 		id := fmt.Sprintf("lease-noid-%03d", i)
 		b := []byte(fmt.Sprintf(`{"tree_globs":["internal/noid%d/**"],"holder":"node-c:worker-%d","acquired_unix":%d,"ttl_seconds":3600}`, i, i, now.Unix()))
 		oid := fmt.Sprintf("oid-noid-%03d", i)
@@ -814,11 +815,11 @@ func TestStoreLiveBatchedCatFile(t *testing.T) {
 	// 70 active + 10 noid (which are active and had ID populated) = 80 live
 	// 35 expired
 	// 5 corrupt skipped, 5 missing skipped, 15 non-lease refs excluded
-	if len(live) != 80 {
-		t.Fatalf("live count = %d, want 80", len(live))
+	if len(live) != activeRefs+noidRefs {
+		t.Fatalf("live count = %d, want %d", len(live), activeRefs+noidRefs)
 	}
-	if len(expired) != 35 {
-		t.Fatalf("expired count = %d, want 35", len(expired))
+	if len(expired) != expiredRefs {
+		t.Fatalf("expired count = %d, want %d", len(expired), expiredRefs)
 	}
 
 	// Verify that live records are sorted by ID
@@ -838,8 +839,8 @@ func TestStoreLiveBatchedCatFile(t *testing.T) {
 			}
 		}
 	}
-	if noidCount != 10 {
-		t.Fatalf("noid records found = %d, want 10", noidCount)
+	if noidCount != noidRefs {
+		t.Fatalf("noid records found = %d, want %d", noidCount, noidRefs)
 	}
 
 	// Verify parity with the per-ref fallback path
@@ -888,10 +889,10 @@ func TestStoreLiveBatchedCatFile(t *testing.T) {
 		}
 
 		var updateStdin strings.Builder
-		for i := 0; i < 70; i++ {
+		for i := 0; i < activeRefs; i++ {
 			fmt.Fprintf(&updateStdin, "create refs/fak/locks/lease-rg-active-%03d %s\n", i, sBlob)
 		}
-		for i := 0; i < 35; i++ {
+		for i := 0; i < expiredRefs; i++ {
 			fmt.Fprintf(&updateStdin, "create refs/fak/locks/lease-rg-expired-%03d %s\n", i, sExpBlob)
 		}
 		for i := 0; i < 5; i++ {
@@ -936,11 +937,11 @@ func TestStoreLiveBatchedCatFile(t *testing.T) {
 		if realForEach != 1 || realBatch != 1 || realPerRef != 0 || realProcCount != 2 {
 			t.Fatalf("real git process counts: for-each=%d, batch=%d, per-ref=%d, total=%d; want 1, 1, 0, 2", realForEach, realBatch, realPerRef, realProcCount)
 		}
-		if len(rgLive) != 70 {
-			t.Fatalf("real git live count = %d, want 70", len(rgLive))
+		if len(rgLive) != activeRefs {
+			t.Fatalf("real git live count = %d, want %d", len(rgLive), activeRefs)
 		}
-		if len(rgExpired) != 35 {
-			t.Fatalf("real git expired count = %d, want 35", len(rgExpired))
+		if len(rgExpired) != expiredRefs {
+			t.Fatalf("real git expired count = %d, want %d", len(rgExpired), expiredRefs)
 		}
 	})
 }

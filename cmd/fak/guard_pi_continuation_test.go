@@ -117,8 +117,11 @@ process.stdout.write(JSON.stringify(decisions));
 			if err := json.Unmarshal(out, &decisions); err != nil {
 				t.Fatalf("decode Pi decisions: %v: %s", err, out)
 			}
-			if len(decisions) != 81 {
-				t.Fatalf("got %d turn decisions, want 81", len(decisions))
+			// The script's last emitted turn is the 25th retryable refusal
+			// asserted below; nothing may follow it.
+			const lastDecision = 80
+			if len(decisions) != lastDecision+1 {
+				t.Fatalf("got %d turn decisions, want %d", len(decisions), lastDecision+1)
 			}
 			for _, i := range []int{1, 2, 3, 4, 5} {
 				d := decisions[i]
@@ -170,13 +173,13 @@ process.stdout.write(JSON.stringify(decisions));
 			if decisions[55].Continue || len(decisions[55].Entries) != 0 {
 				t.Errorf("retryable reset completion must settle: %+v", decisions[55])
 			}
-			for i := 56; i < 80; i++ {
+			for i := 56; i < lastDecision; i++ {
 				if !decisions[i].Continue || len(decisions[i].Entries) != 1 {
 					t.Errorf("retryable refusal %d must continue through sixth identical turn until total bound: %+v", i-55, decisions[i])
 				}
 			}
-			if decisions[80].Continue || len(decisions[80].Entries) != 0 {
-				t.Errorf("25th identical retryable refusal must settle at total bound: %+v", decisions[80])
+			if decisions[lastDecision].Continue || len(decisions[lastDecision].Entries) != 0 {
+				t.Errorf("25th identical retryable refusal must settle at total bound: %+v", decisions[lastDecision])
 			}
 		})
 	}

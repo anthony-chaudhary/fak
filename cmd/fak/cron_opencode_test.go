@@ -909,6 +909,8 @@ func TestCronOpenCodeExecFailureSurfacesRunErrWhenOutputEmpty(t *testing.T) {
 	}
 }
 
+const helperCrashBunVersion = "1.3.14"
+
 // TestCronOpenCodeCrashHelper is a deterministic stub child for the Bun-crash
 // retry tests (#1316). It is gated by FAK_CRON_CRASH_HELPER so it is inert in a
 // normal `go test` run, and it records its invocation count in a counter file so
@@ -930,8 +932,8 @@ func TestCronOpenCodeCrashHelper(t *testing.T) {
 	crash := func() {
 		fmt.Fprintln(os.Stderr, "panic(thread 11): Segmentation fault at address 0x0")
 		fmt.Fprintln(os.Stderr, "oh no: Bun has crashed. This indicates a bug in Bun, not your code.")
-		fmt.Fprintln(os.Stderr, "Bun v1.3.14 (baseline) Windows x64")
-		fmt.Fprintln(os.Stderr, "https://bun.report/1.3.14")
+		fmt.Fprintln(os.Stderr, "Bun v"+helperCrashBunVersion+" (baseline) Windows x64")
+		fmt.Fprintln(os.Stderr, "https://bun.report/"+helperCrashBunVersion)
 		os.Exit(3)
 	}
 	switch mode {

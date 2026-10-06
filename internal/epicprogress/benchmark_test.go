@@ -42,13 +42,15 @@ Related issues: #9999 (informational only, not a task row)
 // TestBenchmarkSanity ensures that all benchmarked fixtures and operations execute
 // cleanly with expected outputs during standard test execution.
 func TestBenchmarkSanity(t *testing.T) {
+	wantItems := strings.Count(sampleEpicBody, "\n- [")
+	wantChecked := strings.Count(sampleEpicBody, "\n- [x]")
 	items := ParseTaskList(sampleEpicBody)
-	if len(items) != 13 {
-		t.Fatalf("ParseTaskList returned %d items, want 13", len(items))
+	if len(items) != wantItems {
+		t.Fatalf("ParseTaskList returned %d items, want %d", len(items), wantItems)
 	}
 	total, checked := CountTaskList(sampleEpicBody)
-	if total != 13 || checked != 5 {
-		t.Fatalf("CountTaskList = %d checked / %d total, want 5/13", checked, total)
+	if total != wantItems || checked != wantChecked {
+		t.Fatalf("CountTaskList = %d checked / %d total, want %d/%d", checked, total, wantChecked, wantItems)
 	}
 
 	// Sanity check label runner
@@ -64,7 +66,7 @@ func TestBenchmarkSanity(t *testing.T) {
 	// Sanity check checklist runner
 	checklistRunner := makeBenchmarkChecklistRunner(sampleEpicBody)
 	cChecklist := Counts(checklistRunner.run, "", EpicSpec{Number: 5000, Title: "bench-checklist"})
-	if cChecklist.Err != "" || cChecklist.Source != SourceChecklistIssueState || cChecklist.Total != 13 {
+	if cChecklist.Err != "" || cChecklist.Source != SourceChecklistIssueState || cChecklist.Total != wantItems {
 		t.Fatalf("Counts(checklist) failed sanity check: %+v", cChecklist)
 	}
 }

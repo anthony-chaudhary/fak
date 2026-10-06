@@ -32,11 +32,11 @@ func TestBurnInEpochRunsRealReplayAndScenarioCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if corpus.Schema == "" || corpus.Revision != normal.Revision || len(corpus.Sessions) != 8 {
+	if corpus.Schema == "" || corpus.Revision != normal.Revision || len(corpus.Sessions) != burnInSessions {
 		t.Fatalf("burn corpus identity/sessions = %+v", corpus)
 	}
 	for _, session := range corpus.Sessions {
-		if len(session.Turns) != 32 || session.Turns[31].PromptTokens+session.Turns[31].OutputTokens > 32768 {
+		if len(session.Turns) != burnInTurnsPerSession || session.Turns[burnInTurnsPerSession-1].PromptTokens+session.Turns[31].OutputTokens > 32768 {
 			t.Fatalf("session %s is modulo-reused or exceeds 32K: turns=%d last=%+v", session.ID, len(session.Turns), session.Turns[len(session.Turns)-1])
 		}
 	}

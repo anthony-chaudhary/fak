@@ -584,26 +584,28 @@ func BenchmarkEvictAndAdmit(b *testing.B) {
 // causing batch eviction and handback during shrink followed by expansion.
 func BenchmarkSetBudget_ShrinkGrow(b *testing.B) {
 	const count = 10
+	const modelBytes = 100
+	const kept = count / 2
 	models := make([]*model.Model, count)
 	ids := make([]polymodel.ModelID, count)
 	for i := 0; i < count; i++ {
 		models[i] = model.NewSynthetic(tinyCfg())
 		ids[i] = polymodel.ModelID("bench-resize-" + strconv.Itoa(i))
 	}
-	r := New(count * 100)
+	r := New(count * modelBytes)
 	for i := 0; i < count; i++ {
-		if _, err := r.Admit(ids[i], models[i], 100, "fam", "", false); err != nil {
+		if _, err := r.Admit(ids[i], models[i], modelBytes, "fam", "", false); err != nil {
 			b.Fatalf("seed admit: %v", err)
 		}
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		evicted, err := r.SetBudget(500)
-		if err != nil || len(evicted) != 5 {
+		evicted, err := r.SetBudget(kept * modelBytes)
+		if err != nil || len(evicted) != count-kept {
 			b.Fatalf("shrink: %v, evicted: %d", err, len(evicted))
 		}
-		if _, err := r.SetBudget(1000); err != nil {
+		if _, err := r.SetBudget(count * modelBytes); err != nil {
 			b.Fatalf("grow: %v", err)
 		}
 		for _, e := range evicted {

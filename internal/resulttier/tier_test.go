@@ -37,8 +37,8 @@ func TestDefaultTierAssignment(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Slice failed for limit %d: %v", lim, err)
 		}
-		if len(sliced) != 5 {
-			t.Fatalf("expected Slice to return 5 items for limit %d, got %d", lim, len(sliced))
+		if len(sliced) != int(DefaultTier) {
+			t.Fatalf("expected Slice to return %d items for limit %d, got %d", DefaultTier, lim, len(sliced))
 		}
 		if cont.Tier != 5 {
 			t.Fatalf("expected Slice continuation Tier 5, got %d", cont.Tier)
@@ -177,8 +177,8 @@ func TestSliceGeneric(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(page1) != 5 {
-		t.Fatalf("expected 5 items, got %d", len(page1))
+	if len(page1) != int(DefaultTier) {
+		t.Fatalf("expected %d items, got %d", DefaultTier, len(page1))
 	}
 	for i, v := range page1 {
 		if v != i {
@@ -194,8 +194,8 @@ func TestSliceGeneric(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(page2) != 5 {
-		t.Fatalf("expected 5 items, got %d", len(page2))
+	if len(page2) != int(DefaultTier) {
+		t.Fatalf("expected %d items, got %d", DefaultTier, len(page2))
 	}
 	for i, v := range page2 {
 		if v != i+5 {
@@ -222,12 +222,13 @@ func TestSliceGeneric(t *testing.T) {
 	}
 
 	// Pagination using explicit Offset
-	offPage, offCont, err := Slice(items, PaginationRequest{Offset: 5, Limit: 5})
+	const offLimit = 5
+	offPage, offCont, err := Slice(items, PaginationRequest{Offset: 5, Limit: offLimit})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(offPage) != 5 {
-		t.Fatalf("expected 5 items, got %d", len(offPage))
+	if len(offPage) != offLimit {
+		t.Fatalf("expected %d items, got %d", offLimit, len(offPage))
 	}
 	for i, v := range offPage {
 		if v != i+5 {

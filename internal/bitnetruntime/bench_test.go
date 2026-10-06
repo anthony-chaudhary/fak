@@ -6,11 +6,12 @@ import (
 )
 
 func BenchmarkParseReport(b *testing.B) {
-	raw := []byte("version: 2026.08\nbitnet.cpp: 1.0.0\nkernels: i2_s,tl1,tl2\n")
+	const fixtureVersion = "1.0.0"
+	raw := []byte("version: 2026.08\nbitnet.cpp: " + fixtureVersion + "\nkernels: i2_s,tl1,tl2\n")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		rt, reason := ParseReport(raw)
-		if reason != "" || rt.Version != "1.0.0" {
+		if reason != "" || rt.Version != fixtureVersion {
 			b.Fatalf("unexpected parse failure: reason=%v, rt=%+v", reason, rt)
 		}
 	}

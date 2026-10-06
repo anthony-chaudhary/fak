@@ -181,7 +181,7 @@ func TestProbeRouterAuthProofFreshSuccessAndReplayFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		encoded := r.Header.Get(routerAuthChallengeHeader)
 		nonce, err := base64.StdEncoding.DecodeString(encoded)
-		if err != nil || len(nonce) != 32 {
+		if err != nil || len(nonce) != 32 { //boundarylint:ignore CHANGE_DETECTOR_TEST router auth challenge nonce is a fixed 32-byte protocol width
 			http.Error(w, "invalid challenge", http.StatusBadRequest)
 			return
 		}

@@ -102,12 +102,10 @@ func TestMacBenchQwen38ServingCurveDefaultsAndSchema(t *testing.T) {
 	if rep.Suite != macbench.SuiteAll {
 		t.Fatalf("suite = %q, want %q", rep.Suite, macbench.SuiteAll)
 	}
-	// Check default decode tokens: 16, 32, 64, 128, 256, 512 (6 rows)
-	// Check default prefill tokens: 128, 512, 2048, 4096 (4 rows)
-	// Check default concurrency: 2 (1 agg + 2 streams = 3 rows)
-	// Total = 13 rows
-	if len(rep.Rows) != 13 {
-		t.Fatalf("total rows = %d, want 13", len(rep.Rows))
+	def := macbench.DefaultOptions()
+	wantRows := len(def.DecodeTokens) + len(def.PrefillTokens) + 1 + def.Concurrency
+	if len(rep.Rows) != wantRows {
+		t.Fatalf("total rows = %d, want %d", len(rep.Rows), wantRows)
 	}
 }
 
@@ -657,7 +655,7 @@ func TestMacBenchValidateComparisonNodeMacOSA(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if !result.Valid || len(result.PacketSHA256) != 64 {
+	if !result.Valid || len(result.PacketSHA256) != 2*sha256.Size {
 		t.Fatalf("unexpected validation result: %+v", result)
 	}
 }
@@ -994,7 +992,7 @@ func TestMacBenchValidateAgenticComparison_CLI(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 		t.Fatalf("decode validation: %v\n%s", err, stdout.String())
 	}
-	if result.Schema != "fak.macbench.agentic-comparison.validation.v1" || !result.Valid || len(result.PacketSHA256) != 64 || result.SpeedupRatio < 4.0 {
+	if result.Schema != "fak.macbench.agentic-comparison.validation.v1" || !result.Valid || len(result.PacketSHA256) != 2*sha256.Size || result.SpeedupRatio < 4.0 {
 		t.Fatalf("unexpected validation result: %+v", result)
 	}
 
@@ -1393,7 +1391,7 @@ func TestMacBenchValidateAgenticMTP_OnDisk(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
 		t.Fatalf("unmarshal validation json: %v\nstdout: %s", err, stdout.String())
 	}
-	if res.Schema != macbench.AgenticMTPValidationSchema || !res.Valid || len(res.PacketSHA256) != 64 {
+	if res.Schema != macbench.AgenticMTPValidationSchema || !res.Valid || len(res.PacketSHA256) != 2*sha256.Size {
 		t.Fatalf("unexpected validation result: %+v", res)
 	}
 	if res.AggregateDecodeTokS < 300.0 {

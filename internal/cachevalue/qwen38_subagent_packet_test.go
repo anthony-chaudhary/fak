@@ -17,7 +17,7 @@ func TestValidatePacket_ValidFixturePassesAllGates(t *testing.T) {
 	}
 
 	digest := HashPacket(pkt)
-	if len(digest) != 64 {
+	if len(digest) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex width
 		t.Fatalf("expected 64-char sha256 digest, got %q (len %d)", digest, len(digest))
 	}
 	if pkt.Digest != digest {

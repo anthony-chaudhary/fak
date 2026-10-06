@@ -279,8 +279,14 @@ func TestFakPackRoundtrip(t *testing.T) {
 	if !strings.HasPrefix(res.ManifestDigest, "sha256:") {
 		t.Fatalf("bad manifest digest: %s", res.ManifestDigest)
 	}
-	if len(res.Layers) != 5 {
-		t.Fatalf("expected 5 layers (lock, policy, assets, binaries, model), got %d", len(res.Layers))
+	wantAfterLock := []string{MediaTypeFloor, MediaTypeAssets, MediaTypeBinaries, MediaTypeModel}
+	if len(res.Layers) != 1+len(wantAfterLock) {
+		t.Fatalf("expected %d layers (lock, policy, assets, binaries, model), got %d", 1+len(wantAfterLock), len(res.Layers))
+	}
+	for i, want := range wantAfterLock {
+		if got := res.Layers[1+i].MediaType; got != want {
+			t.Fatalf("layer %d media type = %q, want %q", 1+i, got, want)
+		}
 	}
 	if res.TotalSize <= 0 {
 		t.Fatalf("expected positive total size, got %d", res.TotalSize)
@@ -465,8 +471,8 @@ func TestFakPackInspect(t *testing.T) {
 	if inspectRes.LockSummary.ID != createRes.LockID {
 		t.Fatalf("expected lock ID %s, got %s", createRes.LockID, inspectRes.LockSummary.ID)
 	}
-	if len(inspectRes.Layers) != 5 {
-		t.Fatalf("expected 5 layers, got %d", len(inspectRes.Layers))
+	if len(inspectRes.Layers) != len(createRes.Layers) {
+		t.Fatalf("expected %d layers, got %d", len(createRes.Layers), len(inspectRes.Layers))
 	}
 	if inspectRes.TotalSize <= 0 {
 		t.Fatalf("expected positive total size, got %d", inspectRes.TotalSize)

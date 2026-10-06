@@ -26,7 +26,7 @@ func TestGuardRouterUsesPairedNodeKey(t *testing.T) {
 			return
 		}
 		nonce, err := base64.StdEncoding.DecodeString(r.Header.Get(routerAuthChallengeHeader))
-		if err != nil || len(nonce) != 32 {
+		if err != nil || len(nonce) != 32 { //boundarylint:ignore CHANGE_DETECTOR_TEST router auth challenge nonce is a fixed 32-byte protocol width
 			http.Error(w, "missing challenge", http.StatusBadRequest)
 			return
 		}

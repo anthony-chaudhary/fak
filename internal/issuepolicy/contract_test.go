@@ -976,10 +976,6 @@ func TestContract_Dependencies(t *testing.T) {
 		t.Fatalf("dispatchability = %q, want %q", review.Dispatchability, Dispatchable)
 	}
 
-	if len(review.Dependencies) != 5 {
-		t.Fatalf("dependencies count = %d, want 5: %+v", len(review.Dependencies), review.Dependencies)
-	}
-
 	expectedDeps := []struct {
 		rel      string
 		issue    int
@@ -990,6 +986,9 @@ func TestContract_Dependencies(t *testing.T) {
 		{RelPromotionRequires, 1772, false},
 		{"after", 1780, true},
 		{"related", 1790, false},
+	}
+	if len(review.Dependencies) != len(expectedDeps) {
+		t.Fatalf("dependencies count = %d, want %d: %+v", len(review.Dependencies), len(expectedDeps), review.Dependencies)
 	}
 	for i, exp := range expectedDeps {
 		got := review.Dependencies[i]

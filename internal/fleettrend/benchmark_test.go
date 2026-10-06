@@ -187,7 +187,8 @@ func BenchmarkTailFold(b *testing.B) {
 	dir := b.TempDir()
 	path := filepath.Join(dir, "history.jsonl")
 
-	for i := 0; i < 20; i++ {
+	const numRows = 20
+	for i := 0; i < numRows; i++ {
 		metrics := map[string]float64{
 			"usable":   float64(5 + i%3),
 			"live":     float64(2 + i%2),
@@ -208,8 +209,8 @@ func BenchmarkTailFold(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		rows := Tail(path, 24)
-		if len(rows) != 20 {
-			b.Fatalf("expected 20 rows, got %d", len(rows))
+		if len(rows) != numRows {
+			b.Fatalf("expected %d rows, got %d", numRows, len(rows))
 		}
 	}
 }

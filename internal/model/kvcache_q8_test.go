@@ -180,12 +180,13 @@ func TestQ8KVCacheCloneTruncateReserve(t *testing.T) {
 		t.Fatalf("Reserve did not grow packed capacity: cap=%d", cap(c.kQ8[0].codes))
 	}
 
-	c.Truncate(5)
-	if c.kvLen(0) != 5 {
-		t.Fatalf("Truncate left %d positions, want 5", c.kvLen(0))
+	const keep = 5
+	c.Truncate(keep)
+	if c.kvLen(0) != keep {
+		t.Fatalf("Truncate left %d positions, want %d", c.kvLen(0), keep)
 	}
-	if len(c.pos) != 5 {
-		t.Fatalf("Truncate left %d pos, want 5", len(c.pos))
+	if len(c.pos) != keep {
+		t.Fatalf("Truncate left %d pos, want %d", len(c.pos), keep)
 	}
 	// Truncate is a pure slice-header cut: the surviving codes are unchanged.
 	if c.kQ8[0].codes[0] == 0 && c.kQ8[0].scales[0] == 0 {

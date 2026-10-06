@@ -142,14 +142,15 @@ func TestBenchmarkFixtureSanity(t *testing.T) {
 			len(res.Recover), res.OrphanedCount, res.UnwitnessedCount)
 	}
 
-	homoComplete := Plan(Input{NowUnix: testNow, Runs: generateHomogeneousRuns(20, testNow, DispComplete)})
-	if homoComplete.CompleteCount != 20 || len(homoComplete.Recover) != 0 {
-		t.Fatalf("expected 20 complete, got %+v", homoComplete)
+	const homoRuns = 20
+	homoComplete := Plan(Input{NowUnix: testNow, Runs: generateHomogeneousRuns(homoRuns, testNow, DispComplete)})
+	if homoComplete.CompleteCount != homoRuns || len(homoComplete.Recover) != 0 {
+		t.Fatalf("expected %d complete, got %+v", homoRuns, homoComplete)
 	}
 
-	homoOrphan := Plan(Input{NowUnix: testNow, Runs: generateHomogeneousRuns(20, testNow, DispOrphaned)})
-	if homoOrphan.OrphanedCount != 20 || len(homoOrphan.Recover) != 20 {
-		t.Fatalf("expected 20 orphaned, got %+v", homoOrphan)
+	homoOrphan := Plan(Input{NowUnix: testNow, Runs: generateHomogeneousRuns(homoRuns, testNow, DispOrphaned)})
+	if homoOrphan.OrphanedCount != homoRuns || len(homoOrphan.Recover) != homoRuns {
+		t.Fatalf("expected %d orphaned, got %+v", homoRuns, homoOrphan)
 	}
 }
 
@@ -171,7 +172,7 @@ func BenchmarkPlan(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			res := Plan(batch10)
-			if len(res.Runs) != 10 {
+			if len(res.Runs) != len(batch10.Runs) {
 				b.Fatal("unexpected run count")
 			}
 		}
@@ -182,7 +183,7 @@ func BenchmarkPlan(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			res := Plan(batch50)
-			if len(res.Runs) != 50 {
+			if len(res.Runs) != len(batch50.Runs) {
 				b.Fatal("unexpected run count")
 			}
 		}
@@ -193,7 +194,7 @@ func BenchmarkPlan(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			res := Plan(batch200)
-			if len(res.Runs) != 200 {
+			if len(res.Runs) != len(batch200.Runs) {
 				b.Fatal("unexpected run count")
 			}
 		}
@@ -204,7 +205,7 @@ func BenchmarkPlan(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			res := Plan(batch1000)
-			if len(res.Runs) != 1000 {
+			if len(res.Runs) != len(batch1000.Runs) {
 				b.Fatal("unexpected run count")
 			}
 		}
@@ -312,7 +313,7 @@ func BenchmarkProbeAndPlanPipeline(b *testing.B) {
 			probed[j] = r.ApplyProbe(verdict)
 		}
 		res := Plan(Input{NowUnix: benchNow, StaleSeconds: stale, Runs: probed})
-		if len(res.Runs) != 50 {
+		if len(res.Runs) != len(baseRuns) {
 			b.Fatal("unexpected pipeline result size")
 		}
 	}
@@ -329,7 +330,7 @@ func BenchmarkPlanParallel(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			res := Plan(in)
-			if len(res.Runs) != 50 {
+			if len(res.Runs) != len(in.Runs) {
 				b.Fatal("unexpected run count in parallel execution")
 			}
 		}

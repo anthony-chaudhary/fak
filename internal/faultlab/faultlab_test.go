@@ -123,7 +123,7 @@ func TestInjectTruncation(t *testing.T) {
 	if !errors.Is(err, ErrTruncated) {
 		t.Fatalf("expected ErrTruncated, got %v", err)
 	}
-	if len(res) != 10 {
+	if len(res) != len(data)/2 {
 		t.Fatalf("expected 10 bytes truncated, got %d (%s)", len(res), string(res))
 	}
 
@@ -136,7 +136,7 @@ func TestInjectTruncation(t *testing.T) {
 	if !errors.Is(err, ErrTruncated) {
 		t.Fatalf("expected ErrTruncated, got %v", err)
 	}
-	if len(res) != 5 || string(res) != "12345" {
+	if len(res) != ruleBytes.TruncateBytes || string(res) != "12345" {
 		t.Fatalf("expected '12345', got %q", string(res))
 	}
 
@@ -149,8 +149,8 @@ func TestInjectTruncation(t *testing.T) {
 	if !errors.Is(err, ErrTruncated) {
 		t.Fatalf("expected ErrTruncated, got %v", err)
 	}
-	if len(res) != 5 {
-		t.Fatalf("expected 5 bytes, got %d", len(res))
+	if want := int(float64(len(data)) * ruleRatio.TruncateRatio); len(res) != want {
+		t.Fatalf("expected %d bytes, got %d", want, len(res))
 	}
 
 	// 4. CustomPayload override
@@ -175,8 +175,8 @@ func TestTruncateDataEdgeCases(t *testing.T) {
 
 	// maxBytes > len
 	data := []byte("short")
-	if res := TruncateData(data, 0, 100); len(res) != 5 {
-		t.Fatalf("expected len 5, got %d", len(res))
+	if res := TruncateData(data, 0, 100); len(res) != len(data) {
+		t.Fatalf("expected len %d, got %d", len(data), len(res))
 	}
 
 	// Single byte

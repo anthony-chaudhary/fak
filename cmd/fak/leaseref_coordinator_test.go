@@ -66,7 +66,7 @@ func serveCoordinatorAuthProof(t *testing.T, w http.ResponseWriter, r *http.Requ
 		return true
 	}
 	nonce, err := base64.StdEncoding.DecodeString(r.Header.Get("X-Fak-Auth-Challenge"))
-	if err != nil || len(nonce) != 32 {
+	if err != nil || len(nonce) != 32 { //boundarylint:ignore CHANGE_DETECTOR_TEST router auth challenge nonce is a fixed 32-byte protocol width
 		http.Error(w, "bad challenge", http.StatusBadRequest)
 		return true
 	}

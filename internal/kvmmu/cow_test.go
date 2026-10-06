@@ -140,8 +140,8 @@ func TestKVMMU_CopyOnWriteOnBranchMutation(t *testing.T) {
 		}
 
 		// Verify branch 1 received private pages
-		if len(b1.PageIDs) != 5 {
-			t.Fatalf("b1 expected 5 pages, got %d", len(b1.PageIDs))
+		if want := (len(rootTokens) + len(draftTokens) + PageTokens - 1) / PageTokens; len(b1.PageIDs) != want {
+			t.Fatalf("b1 expected %d pages, got %d", want, len(b1.PageIDs))
 		}
 		if b1.PageIDs[3] == sharedPage3ID {
 			t.Fatalf("b1 page 3 should have been replaced via COW, but matches old shared ID %d", sharedPage3ID)
@@ -212,8 +212,8 @@ func TestKVMMU_CopyOnWriteOnBranchMutation(t *testing.T) {
 			t.Fatalf("b1.AppendTokens failed: %v", err)
 		}
 
-		if len(b1.PageIDs) != 5 {
-			t.Fatalf("b1 expected 5 pages, got %d", len(b1.PageIDs))
+		if want := (len(rootTokens) + len(draftTokens) + PageTokens - 1) / PageTokens; len(b1.PageIDs) != want {
+			t.Fatalf("b1 expected %d pages, got %d", want, len(b1.PageIDs))
 		}
 		b1Page4 := pool.Page(b1.PageIDs[4])
 		if b1Page4.RefCount.Load() != 1 {

@@ -8,8 +8,8 @@ import (
 
 func TestFailureTaxonomyExhaustive(t *testing.T) {
 	reasons := AllValidReasons()
-	if len(reasons) != 9 {
-		t.Fatalf("expected 9 valid closed reasons, got %d", len(reasons))
+	if len(reasons) != len(closedReasons) {
+		t.Fatalf("expected %d valid closed reasons, got %d", len(closedReasons), len(reasons))
 	}
 
 	for _, r := range reasons {

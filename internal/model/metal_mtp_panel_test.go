@@ -98,12 +98,12 @@ func TestMetalMTPCoordinatorDispatchesProductionP4Panel(t *testing.T) {
 			wantLinear := linearQwen35Layers(m.Cfg)
 			if panel == nil || !panel.Committed || !panel.CompletedWait || panel.Q6KDownProjectionOperations != m.Cfg.NumLayers || panel.Q6KHeadOperations != 1 ||
 				panel.CheckpointLayers != wantLinear || len(panel.GDNCheckpointLayers) != wantLinear ||
-				len(panel.GDNCheckpointLineageSHA256) != wantLinear || len(panel.GDNCheckpointBindingSHA256) != 64 ||
-				len(panel.StateSHA256) != 64 || len(panel.TransactionSHA256) != 64 {
+				len(panel.GDNCheckpointLineageSHA256) != wantLinear || len(panel.GDNCheckpointBindingSHA256) != 64 || //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex digest width
+				len(panel.StateSHA256) != 64 || len(panel.TransactionSHA256) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex digest width
 				t.Fatalf("production P4 panel operation/state receipt=%+v", panel)
 			}
 			for i, lineageIdentity := range panel.GDNCheckpointLineageSHA256 {
-				if len(lineageIdentity) != 64 {
+				if len(lineageIdentity) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex digest width
 					t.Fatalf("r=%d GDN checkpoint layer=%d lineage=%q", acceptedCount, panel.GDNCheckpointLayers[i], lineageIdentity)
 				}
 			}
@@ -162,7 +162,7 @@ func TestMetalMTPPanelTransactionDigestSeparatesCheckpointLineageFromExternalGDN
 			t.Fatalf("checkpoint lineage was not transitively bound into transaction: %+v", receipt)
 		}
 		for _, identity := range receipt.GDNCheckpointLineageSHA256 {
-			if len(identity) != 64 {
+			if len(identity) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex digest width
 				t.Fatalf("checkpoint lineage identity=%q in receipt %+v", identity, receipt)
 			}
 		}
@@ -339,7 +339,7 @@ func TestMetalMTPCoordinatorP4FailureAndTripwireRestoreWithoutEscape(t *testing.
 		}
 		assertMetalMTPCoordinatorRestored(t, target, before, beforeHidden, beforeTokens)
 		receipt, ok := coord.LastTargetVerificationReceipt()
-		if !ok || receipt.Panel == nil || len(receipt.Panel.TransactionSHA256) != 64 {
+		if !ok || receipt.Panel == nil || len(receipt.Panel.TransactionSHA256) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex digest width
 			t.Fatalf("MMU failure omitted live panel transaction receipt: %+v", receipt)
 		}
 		stats := coord.Stats()

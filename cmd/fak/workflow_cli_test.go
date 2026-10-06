@@ -47,11 +47,12 @@ func TestWorkflowCLIExecutePassing(t *testing.T) {
 	if state.Status != agent.WorkflowCompleted {
 		t.Fatalf("expected state status %q, got %q", agent.WorkflowCompleted, state.Status)
 	}
-	if state.CurrentPhase != 6 {
-		t.Fatalf("expected CurrentPhase 6, got %d", state.CurrentPhase)
+	wantPhases := len(agent.NewFleetWaveWorkflow().Phases)
+	if state.CurrentPhase != wantPhases {
+		t.Fatalf("expected CurrentPhase %d, got %d", wantPhases, state.CurrentPhase)
 	}
-	if len(state.Receipts) != 6 {
-		t.Fatalf("expected 6 receipts, got %d", len(state.Receipts))
+	if len(state.Receipts) != wantPhases {
+		t.Fatalf("expected %d receipts, got %d", wantPhases, len(state.Receipts))
 	}
 
 	outStr := outBuf.String()

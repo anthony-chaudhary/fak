@@ -144,7 +144,7 @@ func assertNativeCompactionObservation(t *testing.T, got NativeCompactionObserva
 		"pre-prefix": got.PrePrefixSHA256, "post-prefix": got.PostPrefixSHA256,
 		"pre-suffix": got.PreSuffixSHA256, "post-suffix": got.PostSuffixSHA256,
 	} {
-		if len(hash) != 64 {
+		if len(hash) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex width
 			t.Fatalf("%s hash length = %d, want 64", name, len(hash))
 		}
 	}

@@ -59,12 +59,13 @@ func BenchmarkLedgerRead(b *testing.B) {
 }
 
 func BenchmarkLastProbeByAccount(b *testing.B) {
+	const accounts = 20
 	for _, records := range []int{50, 250, 1000} {
 		b.Run(fmt.Sprintf("%d_records", records), func(b *testing.B) {
 			rd := b.TempDir()
 			var buf strings.Builder
 			for i := 0; i < records; i++ {
-				buf.WriteString(fmt.Sprintf(`{"ts":"2026-08-14T12:00:00Z","account":"seat-%02d","status":"OK"}`+"\n", i%20))
+				buf.WriteString(fmt.Sprintf(`{"ts":"2026-08-14T12:00:00Z","account":"seat-%02d","status":"OK"}`+"\n", i%accounts))
 			}
 			if err := os.MkdirAll(rd, 0o755); err != nil {
 				b.Fatal(err)
@@ -77,8 +78,8 @@ func BenchmarkLastProbeByAccount(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				latest := LastProbeByAccount(rd)
-				if len(latest) != 20 {
-					b.Fatalf("got %d accounts, want 20", len(latest))
+				if len(latest) != accounts {
+					b.Fatalf("got %d accounts, want %d", len(latest), accounts)
 				}
 			}
 		})

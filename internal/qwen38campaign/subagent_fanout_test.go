@@ -65,8 +65,8 @@ func TestSubagentFanoutMatrix(t *testing.T) {
 				if receipt.Config.Scenario != sc {
 					t.Errorf("scenario = %q, want %q", receipt.Config.Scenario, sc)
 				}
-				if len(receipt.Runs) != 5 {
-					t.Errorf("runs count = %d, want 5", len(receipt.Runs))
+				if len(receipt.Runs) != cfg.Runs {
+					t.Errorf("runs count = %d, want %d", len(receipt.Runs), cfg.Runs)
 				}
 
 				// Verify tokens/sec and duration are strictly positive

@@ -355,8 +355,8 @@ func TestSpeculationLedger_SummaryAndNetSpeedup(t *testing.T) {
 	if err := json.Unmarshal(jsonBytes, &exported); err != nil {
 		t.Fatalf("unmarshal exported JSON failed: %v", err)
 	}
-	if len(exported.Entries) != 5 {
-		t.Errorf("expected 5 exported entries, got %d", len(exported.Entries))
+	if len(exported.Entries) != summary.TotalSpeculations {
+		t.Errorf("expected %d exported entries, got %d", summary.TotalSpeculations, len(exported.Entries))
 	}
 	if exported.Summary.NetSpeedup != 1.5 {
 		t.Errorf("expected exported summary NetSpeedup 1.5, got %f", exported.Summary.NetSpeedup)

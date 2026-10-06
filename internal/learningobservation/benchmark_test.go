@@ -132,7 +132,8 @@ func BenchmarkStoreTrace(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	for w := 0; w < 10; w++ {
+	const witnesses = 10
+	for w := 0; w < witnesses; w++ {
 		wit, _, err := s.Add(KindWitness, fmt.Sprintf("wit://%d", w), fmt.Sprintf("witness %d", w), "")
 		if err != nil {
 			b.Fatal(err)
@@ -154,7 +155,7 @@ func BenchmarkStoreTrace(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		records, edges, err := s.Trace(cand.ID)
-		if err != nil || len(records) != 21 || len(edges) != 20 {
+		if err != nil || len(records) != 1+2*witnesses || len(edges) != 2*witnesses {
 			b.Fatalf("trace failed: records=%d edges=%d err=%v", len(records), len(edges), err)
 		}
 	}

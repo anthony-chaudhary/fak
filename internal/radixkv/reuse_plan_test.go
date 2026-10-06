@@ -92,8 +92,14 @@ func TestReusePlan_WithAddressedCandidates(t *testing.T) {
 	// 3: [50, 60) Compute cost 10
 	// 4: [60, 80) SelectiveRepair (L3) cost 8, CandidateID: "cand-remote-1"
 	// 5: [80, 100) Compute cost 20
-	if len(plan.Spans) != 6 {
-		t.Fatalf("expected 6 spans, got %d: %+v", len(plan.Spans), plan.Spans)
+	wantBounds := [][2]int{{0, 20}, {20, 30}, {30, 50}, {50, 60}, {60, 80}, {80, 100}}
+	if len(plan.Spans) != len(wantBounds) {
+		t.Fatalf("expected %d spans, got %d: %+v", len(wantBounds), len(plan.Spans), plan.Spans)
+	}
+	for i, want := range wantBounds {
+		if got := plan.Spans[i]; got.Start != want[0] || got.End != want[1] {
+			t.Errorf("span %d = [%d, %d), want [%d, %d)", i, got.Start, got.End, want[0], want[1])
+		}
 	}
 
 	if plan.DirectTokens != 40 {

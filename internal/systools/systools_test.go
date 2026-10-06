@@ -226,9 +226,10 @@ func TestFetchWebByteCapTruncation(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	const defaultCap = 100
 	ts, err := New(Config{
 		AllowPrivateIPs:      true,
-		DefaultMaxFetchBytes: 100,
+		DefaultMaxFetchBytes: defaultCap,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -247,11 +248,11 @@ func TestFetchWebByteCapTruncation(t *testing.T) {
 	if res["truncated"] != true {
 		t.Errorf("truncated = %v, want true", res["truncated"])
 	}
-	if res["bytes"] != float64(100) {
-		t.Errorf("bytes = %v, want 100", res["bytes"])
+	if res["bytes"] != float64(defaultCap) {
+		t.Errorf("bytes = %v, want %d", res["bytes"], defaultCap)
 	}
-	if len(res["content"].(string)) != 100 {
-		t.Errorf("content len = %d, want 100", len(res["content"].(string)))
+	if len(res["content"].(string)) != defaultCap {
+		t.Errorf("content len = %d, want %d", len(res["content"].(string)), defaultCap)
 	}
 
 	// 2. Explicit max_bytes parameter

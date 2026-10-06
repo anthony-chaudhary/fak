@@ -632,7 +632,8 @@ func TestV4FlashOracleFixtureValues(t *testing.T) {
 // changes both the chosen experts and the normalized weights.
 func TestV4FlashOracleRouteNonVacuous(t *testing.T) {
 	logits := oracleV4FlashFill(256, 20260913, 2.0)
-	idx, w := oracleV4FlashScoredRoute(logits, 6, 1.5)
+	const topK = 6
+	idx, w := oracleV4FlashScoredRoute(logits, topK, 1.5)
 
 	var sum float64
 	for _, v := range w {
@@ -644,8 +645,8 @@ func TestV4FlashOracleRouteNonVacuous(t *testing.T) {
 	if math.Abs(sum-1.5) > cpuOracleTol {
 		t.Fatalf("weight sum = %v, want 1.5", sum)
 	}
-	if len(idx) != 6 {
-		t.Fatalf("got %d indices, want 6", len(idx))
+	if len(idx) != topK {
+		t.Fatalf("got %d indices, want %d", len(idx), topK)
 	}
 	for i := 1; i < len(idx); i++ {
 		if oracleV4FlashScore(logits[idx[i-1]]) < oracleV4FlashScore(logits[idx[i]]) {
@@ -887,7 +888,7 @@ func TestV4FlashOracleOProjGroupSplit(t *testing.T) {
 // transcribed literal matches the production table by position.
 func TestV4FlashOracleCompressSchedule(t *testing.T) {
 	sched := oracleV4FlashCompressSchedule()
-	if len(sched) != 46 {
+	if len(sched) != 46 { //boundarylint:ignore CHANGE_DETECTOR_TEST V4 Flash published schedule length: 43 decoder + 3 MTP layers
 		t.Fatalf("schedule length = %d, want 46", len(sched))
 	}
 	if sched[0] != 0 || sched[1] != 0 {

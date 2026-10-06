@@ -10,10 +10,6 @@ import (
 
 func TestTrustViolationSubtypesClosedAndNormalized(t *testing.T) {
 	subtypes := Subtypes()
-	if len(subtypes) != 5 {
-		t.Fatalf("expected 5 subtypes, got %d", len(subtypes))
-	}
-
 	expected := []TrustViolationSubtype{
 		SubtypeInjectionQuarantine,
 		SubtypeIFCSink,
@@ -21,6 +17,10 @@ func TestTrustViolationSubtypesClosedAndNormalized(t *testing.T) {
 		SubtypeResidencyMismatch,
 		SubtypeGeneric,
 	}
+	if len(subtypes) != len(expected) {
+		t.Fatalf("expected %d subtypes, got %d", len(expected), len(subtypes))
+	}
+
 	for i, exp := range expected {
 		if subtypes[i] != exp {
 			t.Errorf("subtype[%d] = %q, want %q", i, subtypes[i], exp)
@@ -388,8 +388,8 @@ func TestTrustViolationMetricLabelEmission(t *testing.T) {
 	if families[0].Type != OpenMetricCounter {
 		t.Errorf("family type = %q, want counter", families[0].Type)
 	}
-	if len(families[0].Samples) != 5 {
-		t.Errorf("expected 5 samples, got %d", len(families[0].Samples))
+	if len(families[0].Samples) != len(expectedLines) {
+		t.Errorf("expected %d samples, got %d", len(expectedLines), len(families[0].Samples))
 	}
 
 	// Render through RenderOpenMetricsText to verify spec compliance.

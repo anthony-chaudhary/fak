@@ -702,25 +702,26 @@ func TestFakRead_PagedRefImmediatelyRestorableWithBounds(t *testing.T) {
 
 	// Restore bounded slice with Offset: 0, Limit: 1000:
 	// assert len(slice1.Bytes) == 1000, slice1.HasMore == true, slice1.NextOffset == 1000, slice1.Bytes == originalContent[:1000].
+	const restoreLimit = 1000
 	slice1, err := srv.ResolveRestorableContext("", ContextRestoreRequest{
 		ID:      ref,
 		TraceID: traceID,
 		Offset:  0,
-		Limit:   1000,
+		Limit:   restoreLimit,
 	})
 	if err != nil {
 		t.Fatalf("restore slice1: %v", err)
 	}
-	if len(slice1.Bytes) != 1000 {
-		t.Fatalf("len(slice1.Bytes) = %d, want 1000", len(slice1.Bytes))
+	if len(slice1.Bytes) != restoreLimit {
+		t.Fatalf("len(slice1.Bytes) = %d, want %d", len(slice1.Bytes), restoreLimit)
 	}
 	if !slice1.HasMore {
 		t.Fatal("slice1.HasMore = false, want true")
 	}
-	if slice1.NextOffset != 1000 {
-		t.Fatalf("slice1.NextOffset = %d, want 1000", slice1.NextOffset)
+	if slice1.NextOffset != restoreLimit {
+		t.Fatalf("slice1.NextOffset = %d, want %d", slice1.NextOffset, restoreLimit)
 	}
-	if slice1.Bytes != originalContent[:1000] {
+	if slice1.Bytes != originalContent[:restoreLimit] {
 		t.Fatalf("slice1.Bytes does not match originalContent[:1000]")
 	}
 	if slice1.ContinuationToken == "" {
@@ -733,12 +734,12 @@ func TestFakRead_PagedRefImmediatelyRestorableWithBounds(t *testing.T) {
 		ID:                ref,
 		TraceID:           traceID,
 		ContinuationToken: slice1.ContinuationToken,
-		Limit:             1000,
+		Limit:             restoreLimit,
 	})
 	if err != nil {
 		t.Fatalf("restore slice2: %v", err)
 	}
-	if slice2.Bytes != originalContent[1000:2000] {
+	if slice2.Bytes != originalContent[restoreLimit:2*restoreLimit] {
 		t.Fatalf("slice2.Bytes does not match originalContent[1000:2000]")
 	}
 

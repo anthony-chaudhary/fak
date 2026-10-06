@@ -456,11 +456,11 @@ func TestGLM5NextLayer3_MoERoutingWitness(t *testing.T) {
 	RunGLM5Next4LayerCadenceBlock(x, state, hiddenSize)
 
 	route := state.Diagnostics.Route
-	if len(route.ExpertIndices) != 8 {
-		t.Fatalf("expected 8 selected experts, got %d", len(route.ExpertIndices))
+	if len(route.ExpertIndices) != state.MoETopK {
+		t.Fatalf("expected %d selected experts, got %d", state.MoETopK, len(route.ExpertIndices))
 	}
-	if len(route.Weights) != 8 {
-		t.Fatalf("expected 8 expert weights, got %d", len(route.Weights))
+	if len(route.Weights) != state.MoETopK {
+		t.Fatalf("expected %d expert weights, got %d", state.MoETopK, len(route.Weights))
 	}
 
 	seen := make(map[int]bool, 8)
@@ -489,8 +489,8 @@ func TestGLM5NextLayer3_MoERoutingWitness(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected LayerRoutes[3] to be recorded")
 	}
-	if len(layerRoute.ExpertIndices) != 8 {
-		t.Fatalf("expected 8 experts in LayerRoutes[3], got %d", len(layerRoute.ExpertIndices))
+	if len(layerRoute.ExpertIndices) != state.MoETopK {
+		t.Fatalf("expected %d experts in LayerRoutes[3], got %d", state.MoETopK, len(layerRoute.ExpertIndices))
 	}
 
 	// Verify custom router matrix directs highest score to specified expert
@@ -584,8 +584,8 @@ func TestGLM5NextMultiCycleCadence_8Layers(t *testing.T) {
 		if !ok {
 			t.Fatalf("layer %d: expected MoE MLP route recorded, got none", l)
 		}
-		if len(route.ExpertIndices) != 8 {
-			t.Fatalf("layer %d: expected 8 expert indices, got %d", l, len(route.ExpertIndices))
+		if len(route.ExpertIndices) != state.MoETopK {
+			t.Fatalf("layer %d: expected %d expert indices, got %d", l, state.MoETopK, len(route.ExpertIndices))
 		}
 		var sumW float32
 		for _, w := range route.Weights {

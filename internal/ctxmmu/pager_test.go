@@ -98,7 +98,7 @@ func TestLazyTensorGather_UBatchPrefetchWILLNEED(t *testing.T) {
 
 	advisor.mu.Lock()
 	defer advisor.mu.Unlock()
-	if len(advisor.willneedCalls) != 12 {
+	if len(advisor.willneedCalls) != len(ubatch)*opts.NumHeads {
 		t.Fatalf("expected 12 WILLNEED calls, got %d", len(advisor.willneedCalls))
 	}
 

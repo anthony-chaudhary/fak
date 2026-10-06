@@ -22,10 +22,12 @@ func TestSearchSingleflightGrep(t *testing.T) {
 
 	// Seed files: 10 files, 5 with matches, 5 without
 	const matchToken = "COALESCE_TEST_NEEDLE"
+	wantMatches := 0
 	for i := 0; i < 10; i++ {
 		content := fmt.Sprintf("file %d content\n", i)
 		if i%2 == 0 {
 			content += fmt.Sprintf("hit: %s found here\n", matchToken)
+			wantMatches++
 		}
 		mustWrite(t, filepath.Join(dir, fmt.Sprintf("sub/file_%02d.txt", i)), content)
 	}
@@ -84,12 +86,12 @@ func TestSearchSingleflightGrep(t *testing.T) {
 		if r.data["pattern"] != matchToken {
 			t.Fatalf("goroutine %d pattern = %v, want %s", i, r.data["pattern"], matchToken)
 		}
-		if r.data["match_count"] != float64(5) {
-			t.Fatalf("goroutine %d match_count = %v, want 5", i, r.data["match_count"])
+		if r.data["match_count"] != float64(wantMatches) {
+			t.Fatalf("goroutine %d match_count = %v, want %d", i, r.data["match_count"], wantMatches)
 		}
 		matches, ok := r.data["matches"].([]any)
-		if !ok || len(matches) != 5 {
-			t.Fatalf("goroutine %d len(matches) = %d, want 5", i, len(matches))
+		if !ok || len(matches) != wantMatches {
+			t.Fatalf("goroutine %d len(matches) = %d, want %d", i, len(matches), wantMatches)
 		}
 
 		coalesced, ok := r.data["coalesced"].(bool)

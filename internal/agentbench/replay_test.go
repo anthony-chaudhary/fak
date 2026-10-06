@@ -172,8 +172,8 @@ func TestAgentBenchPrefixStability(t *testing.T) {
 		t.Fatalf("RunCLI code = %d; stderr: %s", code, stderr.String())
 	}
 	requests := upstream.Requests()
-	if len(requests) != 16 {
-		t.Fatalf("requests = %d, want 16", len(requests))
+	if len(requests) != quickRequestCount {
+		t.Fatalf("requests = %d, want %d", len(requests), quickRequestCount)
 	}
 
 	for _, request := range requests {
@@ -343,8 +343,8 @@ func TestAgentBenchHonestUnknowns(t *testing.T) {
 			t.Fatalf("event %d fabricates zero token usage for an unknown observation: %v", i, event)
 		}
 	}
-	if len(usageByIdentity) != 16 {
-		t.Fatalf("requests with explicit usage authority = %d, want 16", len(usageByIdentity))
+	if len(usageByIdentity) != quickRequestCount {
+		t.Fatalf("requests with explicit usage authority = %d, want %d", len(usageByIdentity), quickRequestCount)
 	}
 	known, unknown := 0, 0
 	for _, state := range usageByIdentity {
@@ -699,8 +699,8 @@ func agentBenchScoredTerminalEvents(events []map[string]any) []map[string]any {
 
 func assertAgentBenchTerminalMatrix(t *testing.T, terminals []map[string]any) map[agentBenchIdentity]int {
 	t.Helper()
-	if len(terminals) != 16 {
-		t.Fatalf("scored request terminal events = %d, want 16 (lifecycle log may contain additional non-terminal events)", len(terminals))
+	if len(terminals) != quickRequestCount {
+		t.Fatalf("scored request terminal events = %d, want %d (lifecycle log may contain additional non-terminal events)", len(terminals), quickRequestCount)
 	}
 	seen := make(map[agentBenchIdentity]int, 16)
 	for i, event := range terminals {
@@ -710,8 +710,8 @@ func assertAgentBenchTerminalMatrix(t *testing.T, terminals []map[string]any) ma
 		}
 		seen[identity]++
 	}
-	if len(seen) != 16 {
-		t.Fatalf("unique terminal condition/session/turn identities = %d, want 16: %v", len(seen), seen)
+	if len(seen) != quickRequestCount {
+		t.Fatalf("unique terminal condition/session/turn identities = %d, want %d: %v", len(seen), quickRequestCount, seen)
 	}
 	for identity, count := range seen {
 		if count != 1 {
@@ -807,8 +807,8 @@ func assertAgentBenchLifecycleMatrix(t *testing.T, events []map[string]any, phas
 			want[identity] = true
 		}
 	}
-	if len(want) != 16 {
-		t.Fatalf("terminal identity set = %d, want 16 before lifecycle audit", len(want))
+	if len(want) != quickRequestCount {
+		t.Fatalf("terminal identity set = %d, want %d before lifecycle audit", len(want), quickRequestCount)
 	}
 	seen := make(map[string]map[agentBenchIdentity]bool, len(phases))
 	for _, phase := range phases {
@@ -850,8 +850,8 @@ func assertAgentBenchRungEventOrder(t *testing.T, events []map[string]any) {
 		for _, phase := range agentBenchLifecyclePhases(event) {
 			if phase == "dispatch" && identity.Condition == "C2" {
 				c2Seen = true
-				if len(c1Ended) != 8 {
-					t.Fatalf("C2 dispatch %+v occurred after only %d/8 C1 terminal outcomes", identity, len(c1Ended))
+				if len(c1Ended) != quickRequestCount/2 {
+					t.Fatalf("C2 dispatch %+v occurred after only %d/%d C1 terminal outcomes", identity, len(c1Ended), quickRequestCount/2)
 				}
 			}
 		}
@@ -1116,8 +1116,8 @@ func agentBenchNormField(name string) string {
 
 func assertAgentBenchFrozenRung(t *testing.T, requests []agentBenchCapturedRequest, condition string) {
 	t.Helper()
-	if len(requests) != 8 {
-		t.Fatalf("%s captured requests = %d, want 8", condition, len(requests))
+	if len(requests) != quickRequestCount/2 {
+		t.Fatalf("%s captured requests = %d, want %d", condition, len(requests), quickRequestCount/2)
 	}
 	ordered := append([]agentBenchCapturedRequest(nil), requests...)
 	sort.SliceStable(ordered, func(i, j int) bool { return len(ordered[i].Messages) < len(ordered[j].Messages) })

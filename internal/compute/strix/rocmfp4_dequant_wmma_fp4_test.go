@@ -112,8 +112,8 @@ func TestROCmFP4InRegisterDequantWMMAWitness(t *testing.T) {
 		if err != nil {
 			t.Fatalf("DequantizeInRegister(FP4): %v", err)
 		}
-		if len(got) != 32 {
-			t.Fatalf("in-register dequant len = %d, want 32", len(got))
+		if len(got) != 2*len(packed) {
+			t.Fatalf("in-register dequant len = %d, want %d", len(got), 2*len(packed))
 		}
 
 		want := make([]float32, 32)

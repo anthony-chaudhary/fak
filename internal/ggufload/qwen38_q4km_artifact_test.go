@@ -126,8 +126,8 @@ func TestQwen38Q4KMArtifactContract(t *testing.T) {
 	if !cfg.IsQwen35Hybrid() {
 		t.Fatalf("IsQwen35Hybrid = false; layer_types = %v", cfg.LayerTypes)
 	}
-	if len(cfg.LayerTypes) != 64 {
-		t.Fatalf("LayerTypes length = %d, want 64 (target depth, MTP block excluded)", len(cfg.LayerTypes))
+	if len(cfg.LayerTypes) != cfg.NumLayers {
+		t.Fatalf("LayerTypes length = %d, want %d (target depth, MTP block excluded)", len(cfg.LayerTypes), cfg.NumLayers)
 	}
 	if cfg.FullAttentionInterval != 4 {
 		t.Fatalf("FullAttentionInterval = %d, want 4", cfg.FullAttentionInterval)

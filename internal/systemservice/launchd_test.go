@@ -1094,17 +1094,18 @@ func TestParseLaunchctlPrintLiveWitness(t *testing.T) {
 func TestParseLaunchctlPrintReviewRegressions(t *testing.T) {
 	// launchctl prints data descriptors without a trailing newline, so a
 	// block's "}" lands at the end of a content line (networkserviceproxy).
+	inlineProps := []string{"supports transactions", "supports pressured exit", "system service", "exponential throttling", "tle system"}
 	inlineClose := "gui/501/com.apple.networkserviceproxy = {\n\tstate = running\n\tpid = 812\n" +
 		"\tevent triggers = {\n\t\tnew-handles => {\n\t\t\tdescriptor = {\n\t\t\t\t\"aux-data\" => {\n" +
 		"\t\t\t\t\t\"NSPServerAuxilaryData\" => \t\t\t\t\t\"NSPProxyAgentManagerAuxilaryData\" => \t\t\t\t}\n" +
 		"\t\t\t\t\"handles-array\" => [\n\t\t\t\t\t2 = {\n\t\t\t\t\t\t\"key-material\" => \t\t\t\t\t}\n" +
 		"\t\t\t\t]\n\t\t\t}\n\t\t}\n\t}\n" +
-		"\tproperties = supports transactions | supports pressured exit | system service | exponential throttling | tle system\n}\n"
+		"\tproperties = " + strings.Join(inlineProps, " | ") + "\n}\n"
 	st, err := ParseLaunchctlPrint(inlineClose)
 	if err != nil {
 		t.Fatalf("inline close: %v", err)
 	}
-	if len(st.Properties) != 5 || st.State != "running" || st.PID != 812 {
+	if len(st.Properties) != len(inlineProps) || st.State != "running" || st.PID != 812 {
 		t.Fatalf("inline close: properties=%q state=%q pid=%d", st.Properties, st.State, st.PID)
 	}
 

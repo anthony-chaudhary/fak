@@ -1,6 +1,8 @@
 package skillenv
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
@@ -201,8 +203,8 @@ func TestSandbox_MemoryCapFailClosed(t *testing.T) {
 // refused, and gate is wired into Sandbox.Admit.
 func TestABIAdmission_FailClosed(t *testing.T) {
 	want := ComputePluginABIDigest()
-	if len(want) != 64 { // sha256 hex
-		t.Fatalf("digest length = %d, want 64", len(want))
+	if len(want) != hex.EncodedLen(sha256.Size) {
+		t.Fatalf("digest length = %d, want %d", len(want), hex.EncodedLen(sha256.Size))
 	}
 	if err := VerifyPluginABI(want); err != nil {
 		t.Fatalf("verifier refused matching digest: %v", err)

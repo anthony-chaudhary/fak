@@ -299,7 +299,8 @@ func BenchmarkNextInRotation(b *testing.B) {
 }
 
 func BenchmarkLoginReport(b *testing.B) {
-	fleet := benchFleetRegistry(50)
+	const seats = 50
+	fleet := benchFleetRegistry(seats)
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 	cd := &CooldownStore{entries: map[string]CooldownEntry{}}
 	for i := 0; i < 10; i++ {
@@ -311,8 +312,8 @@ func BenchmarkLoginReport(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			rep := fleet.LoginReport()
-			if len(rep.Seats) != 50 {
-				b.Fatalf("got %d seats, want 50", len(rep.Seats))
+			if len(rep.Seats) != seats {
+				b.Fatalf("got %d seats, want %d", len(rep.Seats), seats)
 			}
 		}
 	})
@@ -322,8 +323,8 @@ func BenchmarkLoginReport(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			rep := fleet.LoginReportAt(cd, now)
-			if len(rep.Seats) != 50 {
-				b.Fatalf("got %d seats, want 50", len(rep.Seats))
+			if len(rep.Seats) != seats {
+				b.Fatalf("got %d seats, want %d", len(rep.Seats), seats)
 			}
 		}
 	})
@@ -383,7 +384,8 @@ func BenchmarkCooldownStore(b *testing.B) {
 
 	b.Run("Active_100Entries", func(b *testing.B) {
 		store := &CooldownStore{entries: map[string]CooldownEntry{}}
-		for i := 0; i < 100; i++ {
+		const activeEntries = 100
+		for i := 0; i < activeEntries; i++ {
 			acct := fmt.Sprintf("acct-%03d", i)
 			store.Cool(acct, CooldownUsageLimit, "limit", now, now.Add(time.Hour))
 		}
@@ -391,8 +393,8 @@ func BenchmarkCooldownStore(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			entries := store.Active(now)
-			if len(entries) != 100 {
-				b.Fatalf("got %d active, want 100", len(entries))
+			if len(entries) != activeEntries {
+				b.Fatalf("got %d active, want %d", len(entries), activeEntries)
 			}
 		}
 	})
@@ -512,7 +514,8 @@ func BenchmarkResetParsing(b *testing.B) {
 }
 
 func BenchmarkRegistryJSON(b *testing.B) {
-	fleet := benchFleetRegistry(50)
+	const seats = 50
+	fleet := benchFleetRegistry(seats)
 	raw := fleet.JSON()
 
 	b.Run("Marshal_50Seats", func(b *testing.B) {
@@ -533,7 +536,7 @@ func BenchmarkRegistryJSON(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			reg, err := ParseRegistry(raw)
-			if err != nil || len(reg.Homes) != 50 {
+			if err != nil || len(reg.Homes) != seats {
 				b.Fatal(err)
 			}
 		}

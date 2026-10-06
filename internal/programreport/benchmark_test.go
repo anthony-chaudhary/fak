@@ -54,8 +54,9 @@ func BenchmarkReportGeneration(b *testing.B) {
 // BenchmarkStatusAggregation measures parsing, projection, and serialization of
 // durable JSONL ledger history across a multi-tick window.
 func BenchmarkStatusAggregation(b *testing.B) {
+	const ledgerRows = 50
 	var builder strings.Builder
-	for i := 0; i < 50; i++ {
+	for i := 0; i < ledgerRows; i++ {
 		row := LedgerRow{
 			Schema:       LedgerSchema,
 			Date:         fmt.Sprintf("2026-08-%02d", (i%30)+1),
@@ -89,8 +90,8 @@ func BenchmarkStatusAggregation(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		rows := ParseLedger(rawLedger)
-		if len(rows) != 50 {
-			b.Fatalf("expected 50 rows, got %d", len(rows))
+		if len(rows) != ledgerRows {
+			b.Fatalf("expected %d rows, got %d", ledgerRows, len(rows))
 		}
 		currentRow := RowFromReport(report)
 		line, err := AppendLedgerLine(currentRow)

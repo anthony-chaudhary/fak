@@ -3,6 +3,8 @@ package microagent_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -247,8 +249,8 @@ func TestHibernationWatermarksHighAndPreThawLow(t *testing.T) {
 	if hibState.ID != targetID {
 		t.Fatalf("HibernatedState.ID = %q, want %q", hibState.ID, targetID)
 	}
-	if len(hibState.Hash) != 64 {
-		t.Fatalf("HibernatedState.Hash length = %d, want 64", len(hibState.Hash))
+	if len(hibState.Hash) != hex.EncodedLen(sha256.Size) {
+		t.Fatalf("HibernatedState.Hash length = %d, want %d", len(hibState.Hash), hex.EncodedLen(sha256.Size))
 	}
 	if len(hibState.Data) == 0 {
 		t.Fatal("HibernatedState.Data must not be empty")
@@ -437,8 +439,8 @@ func TestHibernationCompactAnthropicHistory(t *testing.T) {
 	}
 
 	handle := handles[0]
-	if len(handle) != 64 {
-		t.Fatalf("restore handle %q is not 64 hex characters", handle)
+	if len(handle) != hex.EncodedLen(sha256.Size) {
+		t.Fatalf("restore handle %q is not %d hex characters", handle, hex.EncodedLen(sha256.Size))
 	}
 	t.Logf("Restore handle successfully generated: %s", handle)
 

@@ -198,8 +198,9 @@ func TestROCmBackendDSAIndexSelectHostExact(t *testing.T) {
 
 func TestROCmBackendKVCloneEvict(t *testing.T) {
 	b, ref := rocmRequired(t), Default()
-	kv := b.NewKV(KVConfig{NumLayers: 1, NumKVHeads: 1, HeadDim: 4, RopeTheta: 10000})
-	kr := ref.NewKV(KVConfig{NumLayers: 1, NumKVHeads: 1, HeadDim: 4, RopeTheta: 10000})
+	kvCfg := KVConfig{NumLayers: 1, NumKVHeads: 1, HeadDim: 4, RopeTheta: 10000}
+	kv := b.NewKV(kvCfg)
+	kr := ref.NewKV(kvCfg)
 	defer kv.(interface{ Free() }).Free()
 	for p := 0; p < 3; p++ {
 		raw := rocmResident(b, []int{4}, []float32{float32(p), 1, 2, 3})
@@ -231,7 +232,7 @@ func TestROCmBackendKVCloneEvict(t *testing.T) {
 	if h, ok := b.Host(copy.KeysView(0)); ok || h != nil {
 		t.Fatal("KV view became host-addressable")
 	}
-	if len(b.Read(copy.ValuesView(0))) != 12 {
+	if len(b.Read(copy.ValuesView(0))) != copy.Len()*kvCfg.NumKVHeads*kvCfg.HeadDim {
 		t.Fatal("clone changed after source eviction")
 	}
 }

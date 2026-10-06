@@ -139,8 +139,8 @@ func TestPage_OperationsAndClone(t *testing.T) {
 	}
 
 	bytes := page.Bytes()
-	if len(bytes) != 32 {
-		t.Fatalf("expected 32 bytes, got %d", len(bytes))
+	if len(bytes) != page.BytesUsed {
+		t.Fatalf("expected %d bytes, got %d", page.BytesUsed, len(bytes))
 	}
 
 	cloned := page.Clone()

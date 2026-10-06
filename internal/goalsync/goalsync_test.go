@@ -1,6 +1,8 @@
 package goalsync
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -77,7 +79,7 @@ func TestDiscoverSourceAndTarget(t *testing.T) {
 		if a.Kind != kind {
 			t.Errorf("artifact %s has kind %s, want %s", a.RelPath, a.Kind, kind)
 		}
-		if len(a.Hash) != 64 {
+		if len(a.Hash) != hex.EncodedLen(sha256.Size) {
 			t.Errorf("artifact %s has invalid hash %q", a.RelPath, a.Hash)
 		}
 		if a.Size <= 0 {

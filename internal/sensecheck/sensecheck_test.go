@@ -304,16 +304,19 @@ func BenchmarkCheckLogMultiSegment(b *testing.B) {
 }
 
 func BenchmarkLogSegments(b *testing.B) {
-	raw := "para 1: line one\nline two\n\n" +
-		"para 2: second segment\nwith more text\n\n" +
-		"para 3: third paragraph here\n\n" +
-		"para 4: fourth paragraph here\n\n" +
-		"para 5: final paragraph\n"
+	paras := []string{
+		"para 1: line one\nline two",
+		"para 2: second segment\nwith more text",
+		"para 3: third paragraph here",
+		"para 4: fourth paragraph here",
+		"para 5: final paragraph",
+	}
+	raw := strings.Join(paras, "\n\n") + "\n"
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		segs := LogSegments(raw)
-		if len(segs) != 5 {
+		if len(segs) != len(paras) {
 			b.Fatalf("unexpected segment count: %d", len(segs))
 		}
 		benchSegsSink = segs

@@ -199,7 +199,7 @@ func TestAnthropicMessagesAPI_QwenToolStreaming(t *testing.T) {
 		t.Fatalf("parse SSE stream: %v", err)
 	}
 
-	if len(events) != 9 {
+	if len(events) != 9 { //boundarylint:ignore CHANGE_DETECTOR_TEST Messages SSE protocol: start, 3 events per text and tool_use block, message_delta, stop
 		t.Fatalf("got %d SSE events, want 9. Events: %+v", len(events), events)
 	}
 

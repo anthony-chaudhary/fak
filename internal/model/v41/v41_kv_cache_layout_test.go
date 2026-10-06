@@ -110,7 +110,7 @@ func TestV41KVCacheRowRoundTripFP8(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(record) != 528 {
+	if len(record) != 528 { //boundarylint:ignore CHANGE_DETECTOR_TEST V4.1 fp8 KV record byte size fixed by the cache format spec
 		t.Fatalf("fp8 record = %d bytes, want 528", len(record))
 	}
 
@@ -149,7 +149,7 @@ func TestV41KVCacheRowRoundTripFP4(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(record) != 288 {
+	if len(record) != 288 { //boundarylint:ignore CHANGE_DETECTOR_TEST V4.1 fp4 KV record byte size fixed by the cache format spec
 		t.Fatalf("fp4 record = %d bytes, want 288", len(record))
 	}
 

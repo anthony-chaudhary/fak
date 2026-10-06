@@ -78,7 +78,8 @@ func BenchmarkMemStore_Pop(b *testing.B) {
 func BenchmarkMemStore_CellsSnapshot(b *testing.B) {
 	m := NewMemStore()
 	ctx := context.Background()
-	for i := 0; i < 200; i++ {
+	const snapshotCells = 200
+	for i := 0; i < snapshotCells; i++ {
 		m.Add("agent", "reasoning", DurabilitySession, []byte(fmt.Sprintf("reasoning trace %d", i)), false)
 	}
 
@@ -86,7 +87,7 @@ func BenchmarkMemStore_CellsSnapshot(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		cells, err := m.Cells(ctx)
-		if err != nil || len(cells) != 200 {
+		if err != nil || len(cells) != snapshotCells {
 			b.Fatalf("Cells failed: %v", err)
 		}
 	}

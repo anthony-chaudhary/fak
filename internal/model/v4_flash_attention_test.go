@@ -231,7 +231,7 @@ func TestV4FlashPrefillStepSeamBypassesFailClosedGuard(t *testing.T) {
 	// it (no "refuseUnimplementedV4FlashAttention" call site in kv.go). Pin the
 	// structural facts in-package: the real 0731 geometry is compressed-dominated,
 	// so the guard WOULD fire on the published schedule, yet Prefill/Step skip it.
-	if len(deepSeekV4FlashCompressRatios) != 46 {
+	if len(deepSeekV4FlashCompressRatios) != 46 { //boundarylint:ignore CHANGE_DETECTOR_TEST V4 Flash published schedule length: 43 decoder + 3 MTP layers
 		t.Fatalf("deepSeekV4FlashCompressRatios length = %d, want 46", len(deepSeekV4FlashCompressRatios))
 	}
 	compressed := 0

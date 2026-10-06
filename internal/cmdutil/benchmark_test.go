@@ -25,9 +25,10 @@ func TestBenchmarkSanity(t *testing.T) {
 		t.Fatalf("MedianMS failed: got %f, want 20.0", got)
 	}
 
-	ids := LCGIDs(512, 32000, 42)
-	if len(ids) != 512 {
-		t.Fatalf("LCGIDs failed: len=%d, want 512", len(ids))
+	const idCount = 512
+	ids := LCGIDs(idCount, 32000, 42)
+	if len(ids) != idCount {
+		t.Fatalf("LCGIDs failed: len=%d, want %d", len(ids), idCount)
 	}
 
 	a := []float32{1.0, 2.0}

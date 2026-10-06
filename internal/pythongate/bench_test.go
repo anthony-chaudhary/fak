@@ -39,9 +39,10 @@ func BenchmarkOffensesAgainst_Clean(b *testing.B) {
 // when unauthorized (new) Python tools are discovered in the tree.
 func BenchmarkOffensesAgainst_WithOffenses(b *testing.B) {
 	allowed := baselineSet()
-	tracked := make([]string, 0, len(grandfathered)+30)
+	const newTools = 30
+	tracked := make([]string, 0, len(grandfathered)+newTools)
 	tracked = append(tracked, grandfathered...)
-	for i := 0; i < 30; i++ {
+	for i := 0; i < newTools; i++ {
 		tracked = append(tracked, fmt.Sprintf("tools/unauthorized_script_%03d.py", i))
 	}
 
@@ -49,8 +50,8 @@ func BenchmarkOffensesAgainst_WithOffenses(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		offenses := offensesAgainst(tracked, allowed)
-		if len(offenses) != 30 {
-			b.Fatalf("expected 30 offenses, got %d", len(offenses))
+		if len(offenses) != newTools {
+			b.Fatalf("expected %d offenses, got %d", newTools, len(offenses))
 		}
 	}
 }
@@ -68,8 +69,8 @@ func BenchmarkOffensesAgainst_AllOffenses(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		offenses := offensesAgainst(tracked, allowed)
-		if len(offenses) != 100 {
-			b.Fatalf("expected 100 offenses, got %d", len(offenses))
+		if len(offenses) != len(tracked) {
+			b.Fatalf("expected %d offenses, got %d", len(tracked), len(offenses))
 		}
 	}
 }

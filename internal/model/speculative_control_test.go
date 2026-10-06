@@ -435,10 +435,11 @@ func TestSpeculativeControl_PreallocatedBuffers(t *testing.T) {
 	}
 
 	// Update depth to 7
-	_ = ctrl.SetDepth(7)
+	depth := 7
+	_ = ctrl.SetDepth(depth)
 	slice = ctrl.ActiveDraftSlice()
-	if len(slice) != 7 || cap(slice) != kMax {
-		t.Fatalf("ActiveDraftSlice length=%d cap=%d, want len=7 cap=%d", len(slice), cap(slice), kMax)
+	if len(slice) != depth || cap(slice) != kMax {
+		t.Fatalf("ActiveDraftSlice length=%d cap=%d, want len=%d cap=%d", len(slice), cap(slice), depth, kMax)
 	}
 
 	// Slices point to same underlying array (no reallocation)

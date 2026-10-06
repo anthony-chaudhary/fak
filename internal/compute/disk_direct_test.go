@@ -79,9 +79,10 @@ func TestAlignedBlockBufferAllocationAndAlignment(t *testing.T) {
 			}
 
 			if size >= 16 {
-				sub := buf.SubBlock(4, 12)
-				if len(sub) != 8 {
-					t.Fatalf("expected SubBlock len 8, got %d", len(sub))
+				lo, hi := 4, 12
+				sub := buf.SubBlock(lo, hi)
+				if len(sub) != hi-lo {
+					t.Fatalf("expected SubBlock len %d, got %d", hi-lo, len(sub))
 				}
 			}
 

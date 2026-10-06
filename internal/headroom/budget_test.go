@@ -325,8 +325,8 @@ func TestClampResultLines(t *testing.T) {
 			t.Fatal("expected 12 lines to be clamped under 10 max items")
 		}
 		// 10 items kept + 1 elision notice = 11 lines
-		if len(clamped) != 11 {
-			t.Fatalf("len(clamped) = %d, want 11", len(clamped))
+		if len(clamped) != BudgetHealthy.MaxItems+1 {
+			t.Fatalf("len(clamped) = %d, want %d", len(clamped), BudgetHealthy.MaxItems+1)
 		}
 		if clamped[0] != "file1.go" || clamped[9] != "file10.go" {
 			t.Errorf("unexpected kept lines: %v", clamped[:10])

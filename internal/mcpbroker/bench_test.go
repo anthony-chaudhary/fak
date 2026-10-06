@@ -108,7 +108,8 @@ func BenchmarkBroker_ListTools(b *testing.B) {
 	broker := NewBroker()
 	defer broker.Close()
 
-	for i := 0; i < 32; i++ {
+	const toolCount = 32
+	for i := 0; i < toolCount; i++ {
 		_ = broker.RegisterTool(ToolRegistration{
 			Name:        fmt.Sprintf("tool_%02d", i),
 			Description: "Benchmark tool registration",
@@ -120,7 +121,7 @@ func BenchmarkBroker_ListTools(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		tools := broker.ListTools()
-		if len(tools) != 32 {
+		if len(tools) != toolCount {
 			b.Fatalf("unexpected tools count: %d", len(tools))
 		}
 	}

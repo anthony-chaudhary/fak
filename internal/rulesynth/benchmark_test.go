@@ -254,8 +254,9 @@ func BenchmarkHarvester_Emit_FilterNonDecide(b *testing.B) {
 
 // BenchmarkNearMissCorpus_Snapshot measures thread-safe extraction of captured corpus rows.
 func BenchmarkNearMissCorpus_Snapshot(b *testing.B) {
+	const seeded = 50
 	corpus := NewNearMissCorpus()
-	for i := 0; i < 50; i++ {
+	for i := 0; i < seeded; i++ {
 		corpus.add(NearMiss{
 			Call: Call{
 				Tool:    "Bash",
@@ -270,8 +271,8 @@ func BenchmarkNearMissCorpus_Snapshot(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		rows := corpus.Rows()
-		if len(rows) != 50 {
-			b.Fatalf("expected 50 rows, got %d", len(rows))
+		if len(rows) != seeded {
+			b.Fatalf("expected %d rows, got %d", seeded, len(rows))
 		}
 	}
 }

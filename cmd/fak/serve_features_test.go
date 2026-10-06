@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"net/http"
 	"os"
@@ -45,8 +48,8 @@ func TestServeFeaturesFlag(t *testing.T) {
 		if err := json.Unmarshal(out, &catalog); err != nil {
 			t.Fatalf("stdout is not one feature catalog: %v\n%s", err, out)
 		}
-		if catalog.Schema != gateway.FeatureSchema || len(catalog.Features) != 42 {
-			t.Fatalf("catalog schema/count = %q/%d, want %q/42", catalog.Schema, len(catalog.Features), gateway.FeatureSchema)
+		if want := knownServeFeatureCount(t); catalog.Schema != gateway.FeatureSchema || len(catalog.Features) != want {
+			t.Fatalf("catalog schema/count = %q/%d, want %q/%d", catalog.Schema, len(catalog.Features), gateway.FeatureSchema, want)
 		}
 		status := featureStatusByID(t, catalog)
 		if got := status[gateway.FeatureNativeModel]; got.State != gateway.FeatureConfiguredStandby || got.Provenance != gateway.FeatureCLIFlag {
@@ -196,8 +199,8 @@ func TestEvaluateServeFeaturesPrebootAndRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(preboot.Features) != 42 {
-		t.Fatalf("preboot feature count = %d, want 42", len(preboot.Features))
+	if want := knownServeFeatureCount(t); len(preboot.Features) != want {
+		t.Fatalf("preboot feature count = %d, want every known serve feature (%d)", len(preboot.Features), want)
 	}
 	pre := featureStatusByID(t, preboot)
 	checks := map[gateway.ServeFeature]struct {
@@ -362,4 +365,32 @@ func readLiveFeatureCatalog(t *testing.T, url string, timeout time.Duration) gat
 	}
 	t.Fatalf("serve did not publish feature catalog at %s", url)
 	return gateway.FeatureCatalog{}
+}
+
+// knownServeFeatureCount counts the features gateway.knownServeFeature accepts, the
+// source of truth a complete serve feature catalog must cover.
+func knownServeFeatureCount(t *testing.T) int {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join("..", "..", "internal", "gateway", "features.go"), nil, 0)
+	if err != nil {
+		t.Fatalf("parse gateway features: %v", err)
+	}
+	n := 0
+	ast.Inspect(file, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "knownServeFeature" {
+			return true
+		}
+		ast.Inspect(fn.Body, func(inner ast.Node) bool {
+			if clause, ok := inner.(*ast.CaseClause); ok {
+				n += len(clause.List)
+			}
+			return true
+		})
+		return false
+	})
+	if n == 0 {
+		t.Fatal("gateway.knownServeFeature lists no features")
+	}
+	return n
 }

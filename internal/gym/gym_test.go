@@ -36,7 +36,8 @@ func TestGymSubTenMillisecondReset(t *testing.T) {
 	defer arena.Destroy()
 
 	// 2. Simulate agent generating 1,000 files and writing data inside the gym
-	for i := 0; i < 1000; i++ {
+	const generated = 1000
+	for i := 0; i < generated; i++ {
 		fname := fmt.Sprintf("agent_generated_file_%04d.txt", i)
 		fpath := filepath.Join(arena.Path(), fname)
 		payload := fmt.Sprintf("agent-generated-payload-content-block-%04d", i)
@@ -50,8 +51,8 @@ func TestGymSubTenMillisecondReset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed reading arena directory: %v", err)
 	}
-	if len(arenaEntries) != 1001 {
-		t.Fatalf("expected 1001 entries in arena (1 anchor + 1000 created), found %d", len(arenaEntries))
+	if len(arenaEntries) != generated+1 {
+		t.Fatalf("expected %d entries in arena (1 anchor + %d created), found %d", generated+1, generated, len(arenaEntries))
 	}
 
 	// 3. Measure time to Reset()

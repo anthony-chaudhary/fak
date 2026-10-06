@@ -78,8 +78,8 @@ func TestAMDGPUDirect_RDMAQueuePairPool_MultipathStriping(t *testing.T) {
 	if comp.ChunkCount != expectedChunks {
 		t.Errorf("ChunkCount = %d, want %d", comp.ChunkCount, expectedChunks)
 	}
-	if len(comp.RailsUsed) != 8 {
-		t.Errorf("RailsUsed count = %d, want 8 (all 8 rails)", len(comp.RailsUsed))
+	if len(comp.RailsUsed) != len(cfg.HCADevices) {
+		t.Errorf("RailsUsed count = %d, want %d (all rails)", len(comp.RailsUsed), len(cfg.HCADevices))
 	}
 
 	// 2. Verify zero out-of-order completions and full data integrity
@@ -186,7 +186,7 @@ func TestAMDGPUDirect_RDMAQueuePairPool_MultipathStriping(t *testing.T) {
 func TestAMDGPUDirect_RDMAQueuePairPool_PoolAllocation(t *testing.T) {
 	hal := NewAMDGPUDirectHAL(AMDGPUDirectConfig{})
 	devices := DiscoverHCADevices()
-	if len(devices) != 8 {
+	if len(devices) != 8 { //boundarylint:ignore CHANGE_DETECTOR_TEST simulated fabric is a fixed 8-rail MI300X node topology
 		t.Fatalf("expected 8 discovered HCAs, got %d", len(devices))
 	}
 
@@ -227,8 +227,8 @@ func TestAMDGPUDirect_RDMAQueuePairPool_PoolAllocation(t *testing.T) {
 		NUMANode: 0,
 	}
 	localRails := pool.GetRailsForNode(gpuNode0)
-	if len(localRails) != 8 {
-		t.Fatalf("expected 8 rails, got %d", len(localRails))
+	if len(localRails) != len(devices) {
+		t.Fatalf("expected %d rails, got %d", len(devices), len(localRails))
 	}
 	// First 2 rails must be NUMA 0 local
 	if localRails[0].Device.NUMANode != 0 || localRails[1].Device.NUMANode != 0 {

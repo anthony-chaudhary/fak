@@ -2,8 +2,10 @@ package strix
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"debug/elf"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -79,8 +81,8 @@ func TestStrixHSACO_LaunchPathValidated(t *testing.T) {
 		if proof.Mach != EFAMDGPUMachGFX1151 {
 			t.Fatalf("mach 0x%x != gfx1151 0x%x", proof.Mach, EFAMDGPUMachGFX1151)
 		}
-		if len(proof.SHA256) != 64 {
-			t.Fatalf("code-object digest must be 64 hex chars, got %d (%q)", len(proof.SHA256), proof.SHA256)
+		if len(proof.SHA256) != hex.EncodedLen(sha256.Size) {
+			t.Fatalf("code-object digest must be %d hex chars, got %d (%q)", hex.EncodedLen(sha256.Size), len(proof.SHA256), proof.SHA256)
 		}
 		if proof.KernelSymbol != "strix_q2k_decode_gemv" {
 			t.Fatalf("kernel symbol %q not carried into the proof", proof.KernelSymbol)
