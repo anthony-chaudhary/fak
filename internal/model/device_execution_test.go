@@ -244,7 +244,7 @@ func TestDeviceOnlyV41PublicEntriesRefuseHostArchitecture(t *testing.T) {
 			}
 			s := &Session{
 				M: m, Cache: NewKVCache(m.Cfg), Backend: be,
-				halW: map[string]compute.Tensor{},
+				halW:           map[string]compute.Tensor{},
 				DenseGPULayers: m.Cfg.NumLayers, GPULayers: m.Cfg.NumLayers,
 			}
 			t.Cleanup(s.Close)
