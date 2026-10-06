@@ -599,3 +599,68 @@ func TestContinuousBatcher_ClosePreservesBufferedToken(t *testing.T) {
 		t.Fatal("tokenCh still open after Close(); Close() failed to close the channel")
 	}
 }
+
+// TestStepPhaseBoundsDecodeStarvationByWaitingServedRatio pins the TGI-style
+// waiting_served_ratio / max_waiting_tokens refill gate and its zero-config
+// prefill-first default.
+func TestStepPhaseBoundsDecodeStarvationByWaitingServedRatio(t *testing.T) {
+	t.Parallel()
+	run := func(t *testing.T, ratio float64, maxWait, steps int) []BatchPhase {
+		t.Helper()
+		cfg := DefaultContinuousBatcherConfig()
+		cfg.MaxSlots = 8
+		cfg.PrefillBudget = 2
+		cfg.WaitingServedRatio = ratio
+		cfg.MaxWaitingDecodeSteps = maxWait
+		cb, err := NewContinuousBatcher(cfg)
+		if err != nil {
+			t.Fatalf("NewContinuousBatcher: %v", err)
+		}
+		t.Cleanup(func() { _ = cb.Close() })
+		for i := 0; i < 4; i++ {
+			if _, err := cb.Submit(&SubagentRequest{SessionID: fmt.Sprintf("dec-%d", i), PromptTokens: []int{i + 1}, TargetTokens: 100}); err != nil {
+				t.Fatalf("Submit decoder %d: %v", i, err)
+			}
+		}
+		if _, err := cb.Submit(&SubagentRequest{SessionID: "waiting", PromptTokens: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, TargetTokens: 1, ChunkedPrefill: true}); err != nil {
+			t.Fatalf("Submit waiting: %v", err)
+		}
+		phases := make([]BatchPhase, 0, steps)
+		for i := 0; i < steps; i++ {
+			res, err := cb.StepPhase(context.Background())
+			if err != nil {
+				t.Fatalf("StepPhase %d: %v", i, err)
+			}
+			if res.Phase == PhasePrefill && res.PrefillTokens != 2 {
+				t.Fatalf("step %d PrefillTokens = %d, want 2", i, res.PrefillTokens)
+			}
+			phases = append(phases, res.Phase)
+		}
+		return phases
+	}
+	equal := func(got, want []BatchPhase) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}
+	D, P := PhaseDecode, PhasePrefill
+
+	// ratio 1.0, 4 decoding vs 1 prefilling: decode until the counter forces exactly one prefill.
+	if got, want := run(t, 1.0, 3, 8), []BatchPhase{D, D, D, P, D, D, D, P}; !equal(got, want) {
+		t.Fatalf("bounded phases = %v, want %v", got, want)
+	}
+	// Zero config reproduces prefill-first: 12 prompt tokens / budget 2 = 6 prefill steps.
+	if got, want := run(t, 0, 0, 7), []BatchPhase{P, P, P, P, P, P, D}; !equal(got, want) {
+		t.Fatalf("zero-config phases = %v, want %v", got, want)
+	}
+	// Enough waiting slots satisfies the ratio without waiting on the counter.
+	if got, want := run(t, 0.25, 100, 2), []BatchPhase{P, P}; !equal(got, want) {
+		t.Fatalf("ratio-satisfied phases = %v, want %v", got, want)
+	}
+}

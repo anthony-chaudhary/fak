@@ -321,6 +321,11 @@ type ContinuousBatcherConfig struct {
 	// RecurrentPrefixCapacity bounds retained conversation boundaries when reuse
 	// is enabled (0 → DefaultRecurrentPrefixCapacity).
 	RecurrentPrefixCapacity int
+
+	// With decode resident, StepPhase prefills only if prefilling >= floor(WaitingServedRatio*
+	// decoding) or MaxWaitingDecodeSteps decodes ran since the last prefill; zeros: prefill-first.
+	WaitingServedRatio    float64
+	MaxWaitingDecodeSteps int
 }
 
 // DefaultContinuousBatcherConfig returns calibrated defaults for Strix Halo and Qwen3.8-14B.
@@ -399,6 +404,7 @@ type ContinuousBatcher struct {
 	// step, so a reused slot resident for N steps is reported exactly once.
 	pendingPrefixHits        int
 	pendingPrefixReuseTokens int
+	decodeSinceRefill        int // decode steps since the last prefill step
 }
 
 // NewContinuousBatcher constructs a scheduler with the specified configuration.
@@ -762,11 +768,9 @@ func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error)
 	return cb.stepWithBudget(ctx, 0)
 }
 
-// StepPhase is the budgeted scheduler step: when the configured PrefillBudget is
-// positive and at least one slot is SlotStatePrefilling, it runs a PREFILL step
-// (consuming up to the budget of prompt tokens, FIFO by submission sequence);
-// otherwise it runs a DECODE step over the resident decodable slots. Prefill is
-// attempted first; decode only when prefill yields nothing.
+// StepPhase is the budgeted scheduler step: a PREFILL step (up to PrefillBudget
+// prompt tokens, FIFO) when a slot is prefilling and the decode-starvation bound
+// allows it; otherwise a DECODE step over the resident decodable slots.
 func (cb *ContinuousBatcher) StepPhase(ctx context.Context) (*BatchStepResult, error) {
 	return cb.stepWithBudget(ctx, cb.cfg.PrefillBudget)
 }
@@ -883,8 +887,12 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 		}
 	}
 
-	// 3. PREFILL arm: attempted first, consumes up to budget prompt tokens FIFO.
-	if budget > 0 && len(prefilling) > 0 {
+	// 3. PREFILL arm, consuming up to budget prompt tokens FIFO. The refill gate
+	// adapts TGI backends/v3/src/backend.rs:186-195@b4adbf2 (Apache-2.0).
+	refillDue := len(resident) == 0 || cb.decodeSinceRefill >= cb.cfg.MaxWaitingDecodeSteps ||
+		len(prefilling) >= int(cb.cfg.WaitingServedRatio*float64(len(resident)))
+	if budget > 0 && len(prefilling) > 0 && refillDue {
+		cb.decodeSinceRefill = 0
 		sortSlotsByStableUID(prefilling)
 		remaining := budget
 		total := 0
@@ -978,6 +986,7 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 		}, nil
 	}
 
+	cb.decodeSinceRefill++
 	activeSlots := resident
 	activeCount := len(activeSlots)
 	tokensThisStep := make([]int, activeCount)
@@ -1033,14 +1042,7 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 		default:
 		}
 
-		isFinished := false
-		if slot.ExecutionDepth > 1 {
-			isFinished = slot.CurrentDepth >= slot.ExecutionDepth
-		} else {
-			isFinished = len(slot.GeneratedTokens) >= slot.TargetTokens
-		}
-
-		if isFinished {
+		if !slotDecodableLocked(slot) {
 			slot.State = SlotStateFinished
 			slot.CompletedAt = time.Now()
 			close(slot.doneCh)
@@ -1077,7 +1079,7 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 		residentUIDs[i] = slot.SubmissionSeq
 	}
 
-	result := &BatchStepResult{
+	return &BatchStepResult{
 		Iteration:            cb.iteration,
 		ActiveSlots:          activeCount,
 		YieldedSlots:         yieldedCount,
@@ -1100,9 +1102,7 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 		DecodeResidentUIDs:   residentUIDs,
 		PrefixHits:           prefixHits,
 		PrefixReuseTokens:    prefixReuseTokens,
-	}
-
-	return result, nil
+	}, nil
 }
 
 // finishPrefillLocked completes a budgeted-prefill chunk: it promotes the slot to
