@@ -390,7 +390,7 @@ func kQuantMatRowsIntoWorkers(qt *kQuantTensor, x, y []float32, workers int) {
 			qv := quantizeVecQ8(x)
 			_ = qt.numaPool.Dispatch(qt.out, func(nodeID, lo, hi int) {
 				raw := qt.rawForNode(nodeID)
-				ranger := q5kMatRowsRangeInt8Raw
+				var ranger func([]byte, *kQuantTensor, q8Vec, []float32, int, int)
 				switch qt.kind {
 				case kindQ6K:
 					ranger = q6kMatRowsRangeInt8Raw
@@ -398,6 +398,8 @@ func kQuantMatRowsIntoWorkers(qt *kQuantTensor, x, y []float32, workers int) {
 					ranger = q2kMatRowsRangeInt8Raw
 				case kindQ8_0, kindQ4_0:
 					ranger = ciqMatRowsRangeInt8Raw
+				default: // kindQ5K
+					ranger = q5kMatRowsRangeInt8Raw
 				}
 				ranger(raw, qt, qv, y, lo, hi)
 			})

@@ -241,6 +241,8 @@ func (e Q4KGEMMExecution) String() string {
 		return "m5-cooperative-smem"
 	case Q4KGEMMExecutedSmallPGEMV:
 		return "smallp-gemv"
+	case Q4KGEMMExecutedMulMM:
+		return "mulmm"
 	}
 	return "unknown"
 }
