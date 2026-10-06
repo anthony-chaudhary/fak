@@ -193,12 +193,30 @@ func Scan(opts Options) (Report, error) {
 		extra, expandedFindings = discoverExpandedSurfaces(absRoot)
 		for i := range extra {
 			extra[i].Repo = targetRepo
+			// Expanded-surface lanes are built with only principal/health set;
+			// run the same recompute as package lanes so they carry an interest
+			// band, a next action, and their production-grade denominator share
+			// (otherwise their debt is counted in totals but absent from the grade).
+			recomputeLane(&extra[i])
 			allLanes = append(allLanes, extra[i])
 		}
 	}
 
 	if len(opts.Facts) == 0 && len(cpMap) == 0 {
 		cpMap = MapProductionCriticalPaths(absRoot, opts.Graph)
+	}
+
+	if len(opts.Facts) == 0 && opts.ChurnDays > 0 {
+		churnPrivRoot := ""
+		if targetRepo == "both" {
+			churnPrivRoot = resolvePrivateRoot(absRoot, opts.PrivateRoot)
+		}
+		attachRepoChurn(allLanes, func(repo string) string {
+			if repo == "fak-private" && churnPrivRoot != "" {
+				return churnPrivRoot
+			}
+			return absRoot
+		}, opts.ChurnDays)
 	}
 
 	// Calculate overall production grade over ALL discovered units of work

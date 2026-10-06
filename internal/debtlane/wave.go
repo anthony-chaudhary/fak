@@ -179,6 +179,10 @@ func PlanWaves(report Report, opts WavePlanOptions) WavePlan {
 				return iPerf
 			}
 		}
+		// Churn-weighted debt: equals TotalDebt when no churn data is attached.
+		if pi, pj := PriorityScore(candidates[i]), PriorityScore(candidates[j]); pi != pj {
+			return pi > pj
+		}
 		if candidates[i].TotalDebt != candidates[j].TotalDebt {
 			return candidates[i].TotalDebt > candidates[j].TotalDebt
 		}
@@ -193,14 +197,18 @@ func PlanWaves(report Report, opts WavePlanOptions) WavePlan {
 
 	var serialWaves []Wave
 	var parallelWaves []Wave
+	// Head rank of each wave = candidate rank of its first (highest-priority)
+	// lane; used to order serial singletons among parallel waves by priority.
+	var serialRanks, parallelRanks []int
 
-	for _, c := range candidates {
+	for rank, c := range candidates {
 		if isSerialSingleton(c) {
 			sw := Wave{
 				Safety: WaveSafetySerialSingleton,
 				Lanes:  []DebtLane{c},
 			}
 			serialWaves = append(serialWaves, sw)
+			serialRanks = append(serialRanks, rank)
 			continue
 		}
 
@@ -235,11 +243,11 @@ func PlanWaves(report Report, opts WavePlanOptions) WavePlan {
 				Lanes:  []DebtLane{c},
 			}
 			parallelWaves = append(parallelWaves, newW)
+			parallelRanks = append(parallelRanks, rank)
 		}
 	}
 
-	// Disjoint parallel cohorts first (high volume / rapid lift), then serial core singletons.
-	allWaves := append(parallelWaves, serialWaves...)
+	allWaves := orderWavesByHeadRank(parallelWaves, parallelRanks, serialWaves, serialRanks)
 
 	var targetPct float64
 	var hasTargetGrade bool
@@ -399,6 +407,25 @@ func ParseTargetGrade(s string) (float64, bool) {
 		return val, true
 	}
 	return 0, false
+}
+
+// orderWavesByHeadRank merges parallel and serial-singleton waves in order of
+// the priority rank of each wave's head lane. Serial core singletons used to be
+// appended after every parallel wave, so under --max-waves the highest-debt
+// core lanes (critical interest band) were never planned at all.
+func orderWavesByHeadRank(parallel []Wave, parallelRanks []int, serial []Wave, serialRanks []int) []Wave {
+	out := make([]Wave, 0, len(parallel)+len(serial))
+	i, j := 0, 0
+	for i < len(parallel) || j < len(serial) {
+		if j >= len(serial) || (i < len(parallel) && parallelRanks[i] <= serialRanks[j]) {
+			out = append(out, parallel[i])
+			i++
+			continue
+		}
+		out = append(out, serial[j])
+		j++
+	}
+	return out
 }
 
 func isSerialSingleton(l DebtLane) bool {
@@ -1004,15 +1031,16 @@ func RenderWaves(plan WavePlan, pg ProductionGrade) string {
 		))
 
 		tw := tabwriter.NewWriter(&b, 2, 4, 2, ' ', 0)
-		fmt.Fprintln(tw, "  SLOT\tLANE\tDIRECTORY\tCRITICALITY\tGAP\tDEBT\tNEXT ACTION")
+		fmt.Fprintln(tw, "  SLOT\tLANE\tDIRECTORY\tCRITICALITY\tGAP\tDEBT\tCHURN\tNEXT ACTION")
 		for j, l := range w.Lanes {
-			fmt.Fprintf(tw, "  Worker %d\t%s\t%s\t%s\t%.1f\t%.1f\t%s\n",
+			fmt.Fprintf(tw, "  Worker %d\t%s\t%s\t%s\t%.1f\t%.1f\t%d\t%s\n",
 				j+1,
 				l.Lane,
 				strings.ReplaceAll(l.UnitOfWork, "\\", "/"),
 				l.Criticality,
 				l.MaturityGap,
 				l.TotalDebt,
+				l.RecentCommits,
 				truncProse(l.NextAction, 55),
 			)
 		}

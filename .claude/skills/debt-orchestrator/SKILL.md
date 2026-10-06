@@ -127,6 +127,7 @@ Use filtering flags to target specific debt areas:
 - `--criticality core,enabling`: focus on performance-critical infrastructure.
 - `--query <text>`: filter across lane name, unit of work, companion, or health issue tokens (`unbenchmarked`, `unproven_runtime`, `missing_tests`, `modularity_deficit`).
 - `--cross-index`: display dual-repo companions, inbound blast radius, and DOS trees.
+- `--churn-days N` (default 30; `0` disables): weight wave priority by commits touching each lane in the last N days of `git log` (factor 1 + 0.5·log2(1+commits), capped 3x; bulk commits >200 files ignored). Shown as the `CHURN` column and `recent_commits` in JSON.
 
 ---
 
