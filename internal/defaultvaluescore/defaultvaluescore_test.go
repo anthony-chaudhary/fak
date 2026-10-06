@@ -124,11 +124,15 @@ func TestValueFlag_TransportFlagIsOutOfScope(t *testing.T) {
 
 func TestOptInGateReviewDateBoundsOmissionHarm(t *testing.T) {
 	flags := ParseFlags(`fs.Bool("vdso-proxy-fill", false, "value cache speedup")`, FlagSources[0])
-	before := kpiValueFlagDefaultOn(flags, time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC))
+	reviewBy, err := time.Parse("2006-01-02", offWithReason["vdso-proxy-fill"].reviewBy)
+	if err != nil {
+		t.Fatalf("vdso-proxy-fill review date: %v", err)
+	}
+	before := kpiValueFlagDefaultOn(flags, reviewBy.AddDate(0, 0, -1))
 	if len(before.Defects) != 0 {
 		t.Fatalf("current reviewed gate should be inside the window: %v", before.Defects)
 	}
-	after := kpiValueFlagDefaultOn(flags, time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC))
+	after := kpiValueFlagDefaultOn(flags, reviewBy.AddDate(0, 0, 1))
 	if len(after.Defects) != 1 || !strings.Contains(after.Defects[0], "OPT_IN_REVIEW_DUE") {
 		t.Fatalf("stale gate must expose omission harm as typed debt: %v", after.Defects)
 	}
@@ -148,8 +152,16 @@ func TestBuildAsOfReportsAgenticDefaultWindow(t *testing.T) {
 	if got := p.Corpus["reviewed_opt_in_flags"]; got != len(offWithReason) {
 		t.Fatalf("reviewed_opt_in_flags = %v, want %d", got, len(offWithReason))
 	}
-	if got := p.Corpus["next_default_review"]; got != "2026-10-01" {
-		t.Fatalf("next_default_review = %v, want 2026-10-01", got)
+	want := ""
+	for _, registry := range []map[string]reviewedDefaultDecision{offWithReason, onWithReason} {
+		for _, gate := range registry {
+			if want == "" || gate.reviewBy < want {
+				want = gate.reviewBy
+			}
+		}
+	}
+	if got := p.Corpus["next_default_review"]; got != want {
+		t.Fatalf("next_default_review = %v, want earliest registry review %s", got, want)
 	}
 	if !strings.Contains(p.Finding, "agentic default window") {
 		t.Fatalf("finding must spell out the monitored boundary, got %q", p.Finding)

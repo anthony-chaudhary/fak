@@ -119,7 +119,7 @@ var offWithReason = map[string]reviewedDefaultDecision{
 	},
 	"vdso-proxy-fill": {
 		reason:   "changes cross-turn cache residency and requires a named principal plus writes routed through fak",
-		reviewBy: "2026-10-01",
+		reviewBy: "2026-11-01",
 	},
 	"compact-solvency-floor": {
 		reason:   "only the launcher knows model window minus output reserve; a gateway guess is harmful in both directions",
