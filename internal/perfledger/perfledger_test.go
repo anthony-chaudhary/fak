@@ -244,3 +244,38 @@ func TestReadTailBoundedKeepsNewestOldestFirst(t *testing.T) {
 		}
 	}
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestSummarizeSplitsTTFTByCacheRegime(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	recs := []Record{
+		NewRecord(now, "stop", LocalitySelfHosted, 100, 10, 0, 200*time.Millisecond, 100*time.Millisecond),
+		NewRecord(now, "stop", LocalitySelfHosted, 50, 10, 50, 150*time.Millisecond, 40*time.Millisecond),
+		NewRecord(now, "stop", LocalitySelfHosted, 0, 10, 100, 60*time.Millisecond, 2*time.Millisecond),
+		NewRecord(now, "stop", LocalitySelfHosted, 0, 10, 0, 50*time.Millisecond, 0),
+	}
+	if recs[0].CacheRegime != "cold" || recs[1].CacheRegime != "partial" || recs[2].CacheRegime != "frozen" || recs[3].CacheRegime != "unknown" {
+		t.Fatalf("regimes = %q/%q/%q/%q", recs[0].CacheRegime, recs[1].CacheRegime, recs[2].CacheRegime, recs[3].CacheRegime)
+	}
+	legacy := recs[0]
+	legacy.CacheRegime = ""
+	s := Summarize([]Record{legacy, recs[1], recs[2], recs[3]})
+	want := map[string]RegimeSummary{
+		"cold":    {Count: 1, TTFTMeasured: 1, TTFTP50MS: 100, TTFTP99MS: 100, E2EP50MS: 200},
+		"partial": {Count: 1, TTFTMeasured: 1, TTFTP50MS: 40, TTFTP99MS: 40, E2EP50MS: 150},
+		"frozen":  {Count: 1, TTFTMeasured: 1, TTFTP50MS: 2, TTFTP99MS: 2, E2EP50MS: 60},
+		"unknown": {Count: 1, E2EP50MS: 50},
+	}
+	if len(s.ByRegime) != len(want) {
+		t.Fatalf("by_regime = %+v", s.ByRegime)
+	}
+	for k, w := range want {
+		if s.ByRegime[k] != w {
+			t.Fatalf("by_regime[%s] = %+v, want %+v", k, s.ByRegime[k], w)
+		}
+	}
+	line := RenderCompact(BuildReport([]Record{legacy, recs[1], recs[2]}, 0, false, 0))
+	if !strings.Contains(line, "ttft p50 by regime: frozen=2ms(n=1) partial=40ms(n=1) cold=100ms(n=1)") {
+		t.Fatalf("compact line missing regime split: %s", line)
+	}
+}

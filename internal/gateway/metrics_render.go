@@ -1214,7 +1214,36 @@ func (m *gatewayMetrics) writeInferenceMetrics(b *strings.Builder) inferenceSnap
 	writeHistogram(b, "fak_gateway_inference_tpot_seconds", "", snap.tpotHist)
 	writeHelpType(b, "fak_gateway_inference_e2e_seconds", "Whole model-turn wall-clock distribution, over EVERY served turn (buffered or streamed). fak analogue of vLLM e2e_request_latency_seconds.", "histogram")
 	writeHistogram(b, "fak_gateway_inference_e2e_seconds", "", snap.e2eHist)
+	writeRegimeLatencyHistograms(b, snap.regimeHists)
 	return snap
+}
+
+// writeRegimeLatencyHistograms renders the #5630 cache-regime cut of the three latency
+// histograms as sibling families, so the unlabeled families keep their exact shape for
+// existing scrapers while the regime rows of each family sum to its unlabeled total.
+// Cardinality is fixed: 4 regimes x 3 families. A family is omitted until a turn lands.
+func writeRegimeLatencyHistograms(b *strings.Builder, rows map[string]regimeLatencySnapshot) {
+	if len(rows) == 0 {
+		return
+	}
+	families := []struct {
+		name, help string
+		pick       func(regimeLatencySnapshot) latencySnapshot
+	}{
+		{"fak_gateway_inference_ttft_by_regime_seconds", "fak_gateway_inference_ttft_seconds cut by the turn's prompt-cache regime (cached / (cached + uncached) prompt tokens: frozen >= 0.90, partial 0.10-0.90, cold < 0.10, unknown = no prompt tokens observed). Same regime vocabulary as fak_gateway_kv_prefix_turns_by_regime_total; regime rows sum to the unlabeled family. Bounded at 4 regimes. Answers what a warm prefix buys in TTFT: compare histogram_quantile over regime=\"frozen\" vs regime=\"cold\".", func(r regimeLatencySnapshot) latencySnapshot { return r.ttft }},
+		{"fak_gateway_inference_tpot_by_regime_seconds", "fak_gateway_inference_tpot_seconds cut by the turn's prompt-cache regime (see fak_gateway_inference_ttft_by_regime_seconds). Regime rows sum to the unlabeled family. Bounded at 4 regimes.", func(r regimeLatencySnapshot) latencySnapshot { return r.tpot }},
+		{"fak_gateway_inference_e2e_by_regime_seconds", "fak_gateway_inference_e2e_seconds cut by the turn's prompt-cache regime (see fak_gateway_inference_ttft_by_regime_seconds). Regime rows sum to the unlabeled family. Bounded at 4 regimes.", func(r regimeLatencySnapshot) latencySnapshot { return r.e2e }},
+	}
+	for _, fam := range families {
+		writeHelpType(b, fam.name, fam.help, "histogram")
+		for _, regime := range cacheobs.Regimes {
+			row, ok := rows[regime]
+			if !ok {
+				continue
+			}
+			writeHistogram(b, fam.name, `regime="`+regime+`"`, fam.pick(row))
+		}
+	}
 }
 
 // writeFleetValueMetrics renders the hero-axis KPIs the live gateway can derive from

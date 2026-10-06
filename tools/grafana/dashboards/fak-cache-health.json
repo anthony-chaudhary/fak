@@ -1239,6 +1239,89 @@
           "refId": "B"
         }
       ]
+    },
+    {
+      "type": "row",
+      "title": "Latency by regime \u2014 what the cache buys (#5630)",
+      "id": 176,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 55
+      },
+      "panels": []
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "title": "TTFT p95 by cache regime",
+      "description": "fak_gateway_inference_ttft_by_regime_seconds: streamed-turn TTFT p95 per prompt-cache regime (frozen >= 0.90 cached, partial, cold < 0.10). The cold-to-frozen gap is what a warm prefix buys on live traffic; frozen drifting up toward cold means the cache stopped paying even while the regime counters above look healthy. Regime rows sum to fak_gateway_inference_ttft_seconds.",
+      "type": "timeseries",
+      "id": 177,
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "axisPlacement": "auto",
+            "spanNulls": true,
+            "pointSize": 5,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "unit": "s",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, regime) (rate(fak_gateway_inference_ttft_by_regime_seconds_bucket{regime=~\"frozen|partial|cold\"}[5m])))",
+          "legendFormat": "{{regime}}",
+          "refId": "A"
+        }
+      ]
     }
   ]
 }
