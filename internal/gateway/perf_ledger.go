@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/perfledger"
 )
 
@@ -26,14 +27,40 @@ func (loc servingLocality) perfLabel() string {
 	}
 }
 
+// perfDetail is what a served turn knows beyond its token/latency axes: the model
+// that served it and, on a native turn, its own engine decode anatomy.
+type perfDetail struct {
+	model  string
+	engine *perfledger.Engine
+}
+
+// perfDetailFromCompletion lifts the planner-reported model and native decode
+// summary off a Completion. A non-native completion yields no engine anatomy.
+func perfDetailFromCompletion(comp *agent.Completion) perfDetail {
+	if comp == nil {
+		return perfDetail{}
+	}
+	d := perfDetail{model: comp.Model}
+	if nd := comp.NativeDecode; nd != nil {
+		e := &perfledger.Engine{Path: nd.Path, CohortSize: nd.CohortSize}
+		if sp := nd.Speculative; sp != nil {
+			e.SpecRounds, e.SpecDraftTokens, e.SpecAcceptedTokens = sp.Rounds, sp.DraftTokens, sp.AcceptedTokens
+		}
+		d.engine = e
+	}
+	return d
+}
+
 // recordPerf folds one served turn into the bounded ring and hands it to the
 // durable sink. Offer is a non-blocking channel send, so the served turn never
 // waits on disk.
-func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, cachedTok int, finishReason string, dur, ttft time.Duration) {
+func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, cachedTok int, finishReason string, dur, ttft time.Duration, detail perfDetail) {
 	if m == nil {
 		return
 	}
 	rec := perfledger.NewRecord(time.Now(), finishReason, loc.perfLabel(), promptTok, complTok, cachedTok, dur, ttft)
+	rec.Model = detail.model
+	rec.Engine = detail.engine
 	m.perfMu.Lock()
 	m.appendPerfLocked(rec)
 	m.perfMu.Unlock()

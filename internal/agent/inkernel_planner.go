@@ -1413,6 +1413,9 @@ type inKernelGenerateResult struct {
 	stopped           bool
 	batchReceipt      InKernelBatchReceipt
 	vulkanMTP         *VulkanMTPExecution
+	// spec is this request's own verified draft rounds (zero off the speculative
+	// paths); enginestep.Default only holds the process-wide sum.
+	spec SpeculativeDecodeTally
 }
 
 // VulkanMTPExecution is the request-local execution receipt for the resident
@@ -2273,6 +2276,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		decodeS:    decodeS,
 		stopped:    stopped,
 		vulkanMTP:  mtpExecution,
+		spec:       round.tally,
 	}, err
 }
 
@@ -2284,10 +2288,12 @@ type speculativeRoundObservation struct {
 	proposed, accepted int
 	genAtOpen          int
 	active             bool
+	// tally accumulates every closed round of the request; open never resets it.
+	tally SpeculativeDecodeTally
 }
 
 func (r *speculativeRoundObservation) open(start time.Time, proposed, accepted, gen int) {
-	*r = speculativeRoundObservation{start: start, proposed: proposed, accepted: accepted, genAtOpen: gen, active: true}
+	r.start, r.proposed, r.accepted, r.genAtOpen, r.active = start, proposed, accepted, gen, true
 }
 
 func (r *speculativeRoundObservation) close(gen int) {
@@ -2295,6 +2301,9 @@ func (r *speculativeRoundObservation) close(gen int) {
 		return
 	}
 	r.active = false
+	r.tally.Rounds++
+	r.tally.DraftTokens += r.proposed
+	r.tally.AcceptedTokens += r.accepted
 	enginestep.Default.ObserveSpeculativeRound(r.proposed, r.accepted, gen-r.genAtOpen, time.Since(r.start))
 }
 
@@ -2632,6 +2641,7 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 		prefillS:   prefillS,
 		decodeS:    decodeS,
 		stopped:    stopped,
+		spec:       round.tally,
 	}, err
 }
 
@@ -3222,6 +3232,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		Usage:         Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen, PromptTokensDetails: &UsageTokenDetails{CachedTokens: matched}},
 		VulkanMTP:     genRes.vulkanMTP,
 		Timings:       NewTimings(promptTok, matched, gen, prefillS, decodeS),
+		NativeDecode:  newNativeDecodeSummary(genRes),
 	}
 	if sp.NativeInferenceReceipt {
 		accounting := p.nativeCacheAccountingFor(nativeCacheAccountingFacts{
