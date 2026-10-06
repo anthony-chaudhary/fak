@@ -14,7 +14,11 @@ import (
 
 var runStrixKnownHostsBrokerChild = amdgpu.RunStrixKnownHostsBrokerChild
 
-func main() { os.Exit(run(os.Stdout, os.Stderr, os.Args[1:])) }
+func main() {
+	code := run(os.Stdout, os.Stderr, os.Args[1:])
+	recordFakDevUsage(os.Args[1:], code)
+	os.Exit(code)
+}
 
 func run(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) > 0 && argv[0] == amdgpu.StrixKnownHostsOperand {

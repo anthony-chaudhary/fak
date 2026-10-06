@@ -760,8 +760,11 @@ func cleanupPartialPrepare(root, path string, git GitRunner) {
 		return
 	}
 	_, _ = run(git, root, []string{"worktree", "remove", "--force", path})
-	_, _ = run(git, root, []string{"worktree", "prune"})
-
+	// Never broad-prune while an unverifiable foreign-platform registration is
+	// present: it could remove that registration's shared admin dir (#11813).
+	if !hasForeignPlatformRegistration(commonGitDirFor(root)) {
+		_, _ = run(git, root, []string{"worktree", "prune"})
+	}
 }
 
 func isGitWorktreeBackend(backend IsolationBackend) bool {
@@ -1136,10 +1139,12 @@ func ForceReap(root, wtPath string, git GitRunner) Result {
 		// are marked read-only. Remove them directly and prune.
 		_ = safeRemoveAll(wtPath)
 		if _, statErr := os.Stat(wtPath); os.IsNotExist(statErr) {
-			run(git, root, []string{"worktree", "prune", "--expire", "now"})
+			if !hasForeignPlatformRegistration(commonGitDirFor(root)) {
+				run(git, root, []string{"worktree", "prune", "--expire", "now"})
+			}
 			removed = true
 		}
-	} else {
+	} else if !hasForeignPlatformRegistration(commonGitDirFor(root)) {
 		run(git, root, []string{"worktree", "prune"})
 	}
 	res := Result{OK: removed, Path: wtPath, Removed: removed}

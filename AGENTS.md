@@ -376,6 +376,8 @@ therefore we suck..."*, state *"the next step to get better performance is X"*).
 - **Ground turn endings and handoffs in forward movement**: Keep summaries, issue updates, and
   handoffs oriented toward actionable progress. Always conclude with the concrete next experiment,
   test, or patch that advances the work.
+- There is no blocked state: name the next action (spawn / queue / route around / wait / hand off), never a terminal block.
+  Checked by `fak headless-lint --next-action`.
 
 ## Version everything: cite `module@rev`, not just a bare SHA
 

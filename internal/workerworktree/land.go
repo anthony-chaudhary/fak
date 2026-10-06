@@ -912,6 +912,10 @@ func landIsolatedProspectivePrepared(root, wtPath, diff, msgFile string, paths [
 	var disambiguation *DisambiguationWitnesses
 	var lastCommit string
 	var lastBase string
+	// lastVerifiedBase is the trunk the most recent GREEN prospective verdict described,
+	// so the next attempt's reuse decision compares against a base it can actually name.
+	var lastVerifiedBase string
+	var previousVerdictGreen bool
 	// One verify checkout serves every attempt; close covers every return below.
 	cand := newTopologyCandidateSession(root, git)
 	defer cand.close()
@@ -1045,7 +1049,15 @@ func landIsolatedProspectivePrepared(root, wtPath, diff, msgFile string, paths [
 		}
 		lastCommit = newCommit
 		lastBase = oldHEAD
-		if prospectiveVerify != nil {
+		// A lost CAS re-seeds this attempt onto a MOVED trunk, so the candidate is a
+		// different program than the one a prior verdict described. Re-running the
+		// verifier is only avoidable when the trunk delta provably leaves the
+		// verification's declared dependency closure untouched — and only for a verdict
+		// that was already GREEN. Anything else re-verifies: a moved base alone is never
+		// grounds to skip a check, and an undeclared closure proves no disjointness.
+		reuseVerdict := prospectiveVerify != nil && attempt > 1 && previousVerdictGreen &&
+			prospectiveVerdictStillApplies(git, root, lastVerifiedBase, oldHEAD, cfg.verifyClosure)
+		if prospectiveVerify != nil && !reuseVerdict {
 			finishVerify := beginLandPhase(tracker, "prospective-commit-verification", attempt)
 			prospectiveRan := false
 			prospectiveResult := Result{}
@@ -1074,6 +1086,13 @@ func landIsolatedProspectivePrepared(root, wtPath, diff, msgFile string, paths [
 					Detail: detail,
 				}), true
 			}
+			lastVerifiedBase = oldHEAD
+			previousVerdictGreen = prospectiveResult.OK && prospectiveRan
+			if reuseVerdict {
+				tracker.setCache("prospective-verdict-reused", true)
+			}
+		} else if reuseVerdict {
+			tracker.setCache("prospective-verdict-reused", true)
 		}
 		// Name the off-branch commit before trunk CAS. A process crash from here on
 		// leaves an observable, GC-safe recovery candidate instead of a dangling SHA.
@@ -1488,4 +1507,34 @@ func stripWorktreeWIPFences(wtPath string, paths []string) {
 		}
 		return nil
 	})
+}
+
+// prospectiveVerdictStillApplies reports whether a GREEN prospective verdict taken
+// against verifiedBase still describes a candidate re-seeded onto newBase. It is true
+// only when a closure is declared AND the trunk delta between the two bases is readable
+// AND touches no path inside that closure; every other case re-verifies.
+func prospectiveVerdictStillApplies(git GitRunner, root, verifiedBase, newBase string, closure []string) bool {
+	verifiedBase, newBase = strings.TrimSpace(verifiedBase), strings.TrimSpace(newBase)
+	if len(closure) == 0 || verifiedBase == "" || newBase == "" {
+		return false
+	}
+	if verifiedBase == newBase {
+		return true
+	}
+	rc, out := run(git, root, []string{"diff-tree", "-r", "--name-only", "--no-commit-id", verifiedBase, newBase})
+	if rc != 0 {
+		return false
+	}
+	for _, line := range strings.Split(out, "\n") {
+		changed := normalizeFenceGlob(line)
+		if changed == "" {
+			continue
+		}
+		for _, glob := range closure {
+			if matchFenceGlob(normalizeFenceGlob(glob), changed) {
+				return false
+			}
+		}
+	}
+	return true
 }

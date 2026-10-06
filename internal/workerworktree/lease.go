@@ -136,6 +136,10 @@ type DeadWorktreeSweepReport struct {
 	Unlocked  int      `json:"unlocked"`
 	Paths     []string `json:"paths,omitempty"`
 	PruneErr  string   `json:"prune_err,omitempty"`
+	// PruneSkippedForeign records that the sweep earned a targeted removal but
+	// withheld the repository-wide trailing prune because a foreign-platform
+	// registration was present (#11813, #11814).
+	PruneSkippedForeign bool `json:"prune_skipped_foreign,omitempty"`
 }
 
 // DeadOwnerReapGrace is how long a worktree whose recorded owner PID is dead
@@ -240,23 +244,8 @@ func SweepDeadWorktrees(root, wtRoot string, git GitRunner) DeadWorktreeSweepRep
 		cleanupGit = BoundedGitRunner(ctx)
 	}
 
-	gitCommon := filepath.Join(root, ".git")
-	if fi, err := os.Stat(gitCommon); err == nil && !fi.IsDir() {
-		if data, err := os.ReadFile(gitCommon); err == nil {
-			s := strings.TrimSpace(string(data))
-			if strings.HasPrefix(s, "gitdir: ") {
-				gd := strings.TrimPrefix(s, "gitdir: ")
-				if !filepath.IsAbs(gd) {
-					gd = filepath.Join(root, gd)
-				}
-				if filepath.Base(filepath.Dir(gd)) == "worktrees" {
-					gitCommon = filepath.Dir(filepath.Dir(gd))
-				} else {
-					gitCommon = gd
-				}
-			}
-		}
-	}
+	gitCommon := commonGitDirFor(root)
+	foreignPresent := hasForeignPlatformRegistration(gitCommon)
 
 	worktreesDir := filepath.Join(gitCommon, "worktrees")
 	if entries, err := os.ReadDir(worktreesDir); err == nil {
@@ -348,13 +337,70 @@ func SweepDeadWorktrees(root, wtRoot string, git GitRunner) DeadWorktreeSweepRep
 		}
 	}
 
-	if report.Pruned > 0 {
+	if report.Pruned > 0 && !foreignPresent {
 		if rc, out := run(cleanupGit, root, []string{"worktree", "prune", "--expire", "now"}); rc != 0 {
 			report.PruneErr = strings.TrimSpace(out)
 		}
+	} else if report.Pruned > 0 && foreignPresent {
+		// A foreign-platform registration (e.g. a live WSL /tmp checkout) cannot be
+		// stat-ed locally, so a repository-wide prune may silently remove its shared
+		// admin directory even though this sweep's own targeted removal did not
+		// select it (#11813, #11814). The targeted per-registration cleanup above
+		// already removed the registrations this sweep earned; skipping the broad
+		// prune preserves every unselected registration.
+		report.PruneSkippedForeign = true
 	}
 
 	return report
+}
+
+// commonGitDirFor resolves the shared git administration directory for root,
+// following a `.git` file that points at a linked worktree's admin dir.
+func commonGitDirFor(root string) string {
+	gitCommon := filepath.Join(root, ".git")
+	if fi, err := os.Stat(gitCommon); err == nil && !fi.IsDir() {
+		if data, err := os.ReadFile(gitCommon); err == nil {
+			s := strings.TrimSpace(string(data))
+			if strings.HasPrefix(s, "gitdir: ") {
+				gd := strings.TrimPrefix(s, "gitdir: ")
+				if !filepath.IsAbs(gd) {
+					gd = filepath.Join(root, gd)
+				}
+				if filepath.Base(filepath.Dir(gd)) == "worktrees" {
+					gitCommon = filepath.Dir(filepath.Dir(gd))
+				} else {
+					gitCommon = gd
+				}
+			}
+		}
+	}
+	return gitCommon
+}
+
+// hasForeignPlatformRegistration reports whether any worker-worktree admin
+// registration under gitCommon names a foreign-OS path that cannot be verified
+// locally. When one is present, a repository-wide `git worktree prune` is unsafe
+// because it may remove the foreign registration's shared admin directory.
+func hasForeignPlatformRegistration(gitCommon string) bool {
+	entries, err := os.ReadDir(filepath.Join(gitCommon, "worktrees"))
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !IsWorkerWorktree(entry.Name()) {
+			continue
+		}
+		adminDir := filepath.Join(gitCommon, "worktrees", entry.Name())
+		content, err := os.ReadFile(filepath.Join(adminDir, "gitdir"))
+		if err != nil {
+			continue
+		}
+		rawGitdir := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(content)), "gitdir: "))
+		if isForeignPlatformRegistration(rawGitdir, filepath.Dir(rawGitdir)) {
+			return true
+		}
+	}
+	return false
 }
 
 func sweepDeadWorktrees(root, wtRoot string, git GitRunner) {
