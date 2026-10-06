@@ -43,6 +43,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/format"
 	"go/parser"
@@ -281,6 +282,12 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 	if len(pkgs) > 0 && len(selections) == 0 {
 		return abi.WitnessAbstain, selectionDetail
 	}
+	predicted := fixOnlyTestReferences(ctx, r.run, r.dir, commit, parent, tests)
+	if len(pyTests) == 0 {
+		if detail, doomed := staticParentUnbuildable(ctx, r.run, r.dir, commit, selections, predicted); doomed {
+			return abi.WitnessAbstain, detail
+		}
+	}
 
 	// The build constraints the changed test files declare (#13243). A device-tagged test
 	// (`//go:build vulkan`, `metal`, `cuda`, …) is excluded from a bare `go test`, so without
@@ -367,9 +374,14 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 		return abi.WitnessAbstain, parentProblem
 	}
 	if len(selections) > 0 {
-		parentRed := false
+		parentRed, excluded, ran := false, 0, 0
 		for _, selection := range selections {
-			result := runSelectedGoTests(ctx, exec, parentDir, []string{selection.Package}, tags, exactTestSelectors(selection.Tests))
+			result, dropped := r.runParentSelection(ctx, exec, parentDir, commit, parent, selection, tests, tags, predicted)
+			excluded += dropped
+			if result.allExcluded {
+				continue
+			}
+			ran++
 			switch {
 			case result.timedOut:
 				return abi.WitnessAbstain, "parent selected symptom test timed out"
@@ -394,11 +406,17 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 				parentRed = true
 			}
 		}
+		if ran == 0 && len(pyTests) == 0 {
+			return abi.WitnessAbstain, "parent selected symptom test did not build"
+		}
 		if !parentRed {
 			return abi.WitnessRefuted, "selected symptom test passed at parent"
 		}
 		if proofKey != "" {
 			r.symptomProofCachePutConfirmed(ctx, proofKey)
+		}
+		if excluded > 0 {
+			return abi.WitnessConfirmed, fmt.Sprintf("selected symptom test failed at parent and passed at candidate (%d parent-unbuildable changed test file(s) excluded at parent)", excluded)
 		}
 		return abi.WitnessConfirmed, "selected symptom test failed at parent and passed at candidate"
 	}
@@ -717,6 +735,8 @@ type selectedGoTestResult struct {
 	passed, matched, selectedFailed bool
 	buildFailure, timedOut          bool
 	runErr                          error
+	buildOutput                     string
+	allExcluded                     bool
 }
 
 // runSelectedGoTests executes only the requested names and proves every selector
@@ -764,10 +784,14 @@ func runSelectedGoTests(ctx context.Context, run CommandRunner, dir string, pkgs
 	}
 	for _, matched := range seen {
 		if !matched {
-			return selectedGoTestResult{
+			result := selectedGoTestResult{
 				passed: code == 0, buildFailure: code != 0 && isGoBuildFailure(out),
 				timedOut: strings.Contains(out, "panic: test timed out"),
 			}
+			if result.buildFailure {
+				result.buildOutput = out
+			}
+			return result
 		}
 	}
 	selectedFailed := false
@@ -781,6 +805,152 @@ func runSelectedGoTests(ctx context.Context, run CommandRunner, dir string, pkgs
 		passed: code == 0, matched: true, selectedFailed: selectedFailed,
 		timedOut: strings.Contains(out, "panic: test timed out"),
 	}
+}
+
+// runParentSelection runs one selection against the parent. A changed test file
+// that names a fix-introduced API cannot compile there, and because Go builds a
+// test package as one unit it used to sink every sibling witness with it. Files
+// predicted unbuildable, and files the compiler then blames, are restored to
+// their parent version and their tests leave the parent run. Excluded tests are
+// never counted as red (#12058); at least one remaining selected test must fail.
+func (r *Resolver) runParentSelection(ctx context.Context, exec CommandRunner, parentDir, commit, parent string, selection symptomSelection, tests, tags []string, predicted map[string][]string) (selectedGoTestResult, int) {
+	git := r.run
+	if git == nil {
+		git = gitRunner
+	}
+	var pkgTests []string
+	for _, rel := range tests {
+		rel = strings.ReplaceAll(strings.TrimSpace(rel), "\\", "/")
+		if strings.HasSuffix(rel, "_test.go") && goTestPackage(rel) == selection.Package {
+			pkgTests = append(pkgTests, rel)
+		}
+	}
+	names := selection.Tests
+	dropped := map[string]bool{}
+	drop := func(files []string) bool {
+		excluded := map[string]bool{}
+		for _, rel := range files {
+			if !restoreTestAtParent(ctx, git, r.dir, parent, parentDir, rel) {
+				return false
+			}
+			dropped[rel] = true
+			for name := range candidateTestNames(ctx, git, r.dir, commit, rel) {
+				excluded[name] = true
+			}
+		}
+		kept := make([]string, 0, len(names))
+		for _, name := range names {
+			if !excluded[name] {
+				kept = append(kept, name)
+			}
+		}
+		names = kept
+		return len(names) > 0
+	}
+	var initial []string
+	for _, rel := range pkgTests {
+		if len(predicted[rel]) > 0 {
+			initial = append(initial, rel)
+		}
+	}
+	if len(initial) > 0 && !drop(initial) {
+		return selectedGoTestResult{allExcluded: true}, len(dropped)
+	}
+	for {
+		result := runSelectedGoTests(ctx, exec, parentDir, []string{selection.Package}, tags, exactTestSelectors(names))
+		if !result.buildFailure || result.timedOut || result.runErr != nil {
+			return result, len(dropped)
+		}
+		var blamed []string
+		for _, rel := range pkgTests {
+			if !dropped[rel] && compileErrorNamesFile(result.buildOutput, path.Base(rel)) {
+				blamed = append(blamed, rel)
+			}
+		}
+		if len(blamed) == 0 {
+			return result, len(dropped)
+		}
+		if !drop(blamed) {
+			return selectedGoTestResult{allExcluded: true}, len(dropped)
+		}
+	}
+}
+
+// candidateTestNames lists the top-level Test/Example names a changed test file
+// declares at the candidate.
+func candidateTestNames(ctx context.Context, git Runner, repoDir, commit, rel string) map[string]string {
+	source, code, err := git(ctx, repoDir, "show", commit+":"+rel)
+	if err != nil || code != 0 {
+		return nil
+	}
+	funcs, err := topLevelGoTests(source)
+	if err != nil {
+		return nil
+	}
+	return funcs
+}
+
+// staticParentUnbuildable reports the fix-only names when every selected Go
+// test lives in a changed file predicted not to compile at the parent, so the
+// witness can abstain before paying for two scratch checkouts and compiles.
+func staticParentUnbuildable(ctx context.Context, git Runner, repoDir, commit string, selections []symptomSelection, predicted map[string][]string) (string, bool) {
+	if len(selections) == 0 || len(predicted) == 0 {
+		return "", false
+	}
+	if git == nil {
+		git = gitRunner
+	}
+	doomed := map[string]map[string]bool{}
+	nameSet := map[string]bool{}
+	for rel, names := range predicted {
+		pkg := goTestPackage(rel)
+		if doomed[pkg] == nil {
+			doomed[pkg] = map[string]bool{}
+		}
+		for test := range candidateTestNames(ctx, git, repoDir, commit, rel) {
+			doomed[pkg][test] = true
+		}
+		for _, name := range names {
+			nameSet[name] = true
+		}
+	}
+	for _, selection := range selections {
+		for _, test := range selection.Tests {
+			if !doomed[selection.Package][test] {
+				return "", false
+			}
+		}
+	}
+	names := make([]string, 0, len(nameSet))
+	for name := range nameSet {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if len(names) > 8 {
+		names = append(names[:8], "...")
+	}
+	return "parent selected symptom test did not build: every selected test names fix-introduced " + strings.Join(names, ", ") + "; add a regression that drives the bug through API the parent already has", true
+}
+
+// compileErrorNamesFile reports whether go build output carries a compiler
+// position (`name:line:`) for the file with this base name.
+func compileErrorNamesFile(out, base string) bool {
+	return regexp.MustCompile(`(?:^|[^\w.-])` + regexp.QuoteMeta(base) + `:\d+:`).MatchString(out)
+}
+
+// restoreTestAtParent puts a changed test file back to its parent content, or
+// removes it when the parent has no such file.
+func restoreTestAtParent(ctx context.Context, git Runner, repoDir, parent, parentDir, rel string) bool {
+	dst := filepath.Join(parentDir, filepath.FromSlash(rel))
+	content, code, err := git(ctx, repoDir, "show", parent+":"+rel)
+	if err != nil {
+		return false
+	}
+	if code != 0 {
+		err := os.Remove(dst)
+		return err == nil || errors.Is(err, os.ErrNotExist)
+	}
+	return os.WriteFile(dst, []byte(content), 0o644) == nil
 }
 
 // overlayTestsAtRef writes each changed test file's content AT <commit> into the corresponding
