@@ -568,6 +568,15 @@ concurrent = [
   "naivecontrol",
   "stepobs",
   "testgit",
+  # Leaves surfaced once public CI ran tests again (issueorchestrator/kv trees exist below).
+  "issueorchestrator",
+  "kv",
+  "amdgpuclock",
+  "fixproof",
+  "gatewayauth",
+  "pendingadmission",
+  "worktreecheck",
+  "perfledger",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -1816,6 +1825,12 @@ fakroot = ["internal/fakroot/**"]
 naivecontrol = ["internal/naivecontrol/**"]
 stepobs = ["internal/stepobs/**"]
 testgit = ["internal/testgit/**"]
+amdgpuclock = ["pkg/amdgpuclock/**"]
+fixproof = ["pkg/fixproof/**"]
+gatewayauth = ["pkg/gatewayauth/**"]
+pendingadmission = ["pkg/pendingadmission/**"]
+worktreecheck = ["pkg/worktreecheck/**"]
+perfledger = ["internal/perfledger/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
