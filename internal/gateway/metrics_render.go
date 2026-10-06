@@ -12,6 +12,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/blob"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
+	"github.com/anthony-chaudhary/fak/internal/engine"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
@@ -308,6 +309,12 @@ func (s *Server) renderMetrics() string {
 	if s.cacheStream != nil {
 		b.WriteString(s.cacheStream.Snapshot().Prometheus())
 	}
+	// Live-engine KV cache-event stream (fak_engine_cache_*): offload/restore/route/
+	// migrate hits, typed restore MISS/FAULT, and bytes/tokens moved across residency
+	// tiers, folded process-wide from every engine.CacheEventRecorder. Always rendered,
+	// with fak_engine_cache_events_observed=0 until a producer feeds it, so an unwired
+	// stream is visibly dark rather than silently absent.
+	b.WriteString(engine.DefaultCacheEvents.Snapshot().Prometheus())
 	writeBlobMetrics(&b)
 	writeKVPrefixMetrics(&b)
 	s.writePrefixReuseAttributionMetrics(&b)
