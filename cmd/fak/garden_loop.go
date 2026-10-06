@@ -632,7 +632,7 @@ func registerDarwinLaunchdAgent(stdout, stderr io.Writer, fakBin, root string, i
 		return 1
 	}
 
-	fmt.Fprintf(stdout, "wrote launchd agent to %s\n  to load: launchctl load -w %s\n", plistPath, plistPath)
+	fmt.Fprintf(stdout, "wrote launchd agent to %s\n  to load: launchctl bootstrap gui/$(id -u) %s\n", plistPath, plistPath)
 	return 0
 }
 

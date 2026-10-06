@@ -387,7 +387,7 @@ func cronRender(stdout io.Writer, target, label string, descs cronDescs, interva
 func cronRenderLaunchd(label string, interval time.Duration, args []string, workdir string, envMap map[string]string) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
-	fmt.Fprintf(&b, "<!-- Written by: fak cron emit (#765) — install: launchctl load -w %s.plist -->\n", label)
+	fmt.Fprintf(&b, "<!-- Written by: fak cron emit (#765) — install: launchctl bootstrap gui/$(id -u) %s.plist -->\n", label)
 	b.WriteString(`<plist version="1.0">` + "\n")
 	b.WriteString("  <dict>\n")
 	fmt.Fprintf(&b, "    <key>Label</key>\n    <string>%s</string>\n", cronXMLEscape(label))

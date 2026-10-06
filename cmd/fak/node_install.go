@@ -8,6 +8,7 @@ package main
 // node.go keeps the node.json client side (status/use/run/forget) and the helpers.
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -362,9 +363,14 @@ func nodeInstallDarwin(stdout, stderr io.Writer, in nodeInstallParams) int {
 	plistPath := filepath.Join(agentsDir, nodeGatewayLabel+".plist")
 
 	if uninstall {
-		_ = exec.Command("launchctl", "unload", "-w", plistPath).Run()
+		bootoutErr := newLaunchdAgent().Bootout(context.Background(), nodeGatewayLabel)
 		_ = os.Remove(plistPath)
 		_ = os.Remove(nodeInstallStatePath(cfgDir))
+		if bootoutErr != nil {
+			fmt.Fprintf(stderr, "fak node uninstall: %v\n", bootoutErr)
+			fmt.Fprintf(stdout, "[fak node] removed %s (service may still be loaded)\n", plistPath)
+			return 1
+		}
 		fmt.Fprintf(stdout, "[fak node] unloaded and removed %s\n", plistPath)
 		return 0
 	}
@@ -398,7 +404,11 @@ func nodeInstallDarwin(stdout, stderr io.Writer, in nodeInstallParams) int {
 
 	// Unload any existing unit before overwriting. One label per host: switching upstreams
 	// re-renders THIS unit rather than adding a second one (#5555).
-	_ = exec.Command("launchctl", "unload", "-w", plistPath).Run()
+	agent := newLaunchdAgent()
+	if err := agent.Bootout(context.Background(), nodeGatewayLabel); err != nil {
+		fmt.Fprintf(stderr, "fak node install: %v\n", err)
+		return 1
+	}
 
 	if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
 		fmt.Fprintf(stderr, "fak node install: write plist: %v\n", err)
@@ -420,8 +430,10 @@ func nodeInstallDarwin(stdout, stderr io.Writer, in nodeInstallParams) int {
 	}
 
 	// Load the unit.
-	if out, err := exec.Command("launchctl", "load", "-w", plistPath).CombinedOutput(); err != nil {
-		fmt.Fprintf(stderr, "fak node install: launchctl load: %v\n%s\n", err, out)
+	// bootstrap, not the legacy `load -w`: load can print "Load failed: 5" yet exit 0,
+	// leaving the plist on disk with nothing running.
+	if err := agent.Bootstrap(context.Background(), nodeGatewayLabel, plistPath, false); err != nil {
+		fmt.Fprintf(stderr, "fak node install: %v\n", err)
 		return 1
 	}
 	fmt.Fprintf(stdout, "[fak node] loaded %s\n", nodeGatewayLabel)
@@ -753,7 +765,7 @@ func nodeInstallWindows(stdout, stderr io.Writer, in nodeInstallParams) int {
 	localPort := in.localPort
 
 	// Stop any prior instance and confirm the port is free BEFORE (re)starting (#3) — the
-	// macOS path already `launchctl unload`s first; Windows did not, so a stale fak serve
+	// macOS path already boots out the launchd agent first; Windows did not, so a stale fak serve
 	// kept the port and answered the health probe, making install falsely report the OLD
 	// process healthy. End the task and wait for the port to free; if a foreign process still
 	// holds it, fail loudly rather than blessing whatever answers the probe.
