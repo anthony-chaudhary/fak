@@ -189,8 +189,9 @@ type openAIResponse struct {
 		Delta        *Message `json:"delta,omitempty"`
 		FinishReason string   `json:"finish_reason"`
 	} `json:"choices"`
-	Usage Usage     `json:"usage"`
-	Error *apiError `json:"error"`
+	Usage   Usage     `json:"usage"`
+	Timings *Timings  `json:"timings,omitempty"`
+	Error   *apiError `json:"error"`
 }
 
 // MarshalRequest encodes the canonical request as an OpenAI chat-completions body,
@@ -446,6 +447,7 @@ func (a openAIAdapter) parseResponseFields(raw []byte) (*Completion, error) {
 		Usage:        cr.Usage,
 		Model:        cr.Model,
 		ServiceTier:  parseServiceTier(a.Provider(), cr.ServiceTier),
+		Timings:      cr.Timings,
 	}, nil
 }
 

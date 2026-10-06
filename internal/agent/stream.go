@@ -547,7 +547,8 @@ type openAIStreamChunk struct {
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage *Usage `json:"usage"`
+	Usage   *Usage   `json:"usage"`
+	Timings *Timings `json:"timings,omitempty"`
 }
 
 // CompleteStream performs one streamed chat-completions round-trip on the
@@ -745,6 +746,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		rawBuf    bytes.Buffer // reconstructs the wire transcript for Completion.Raw
 		toolAcc   = map[int]*streamToolCallAcc{}
 		usage     Usage
+		timings   *Timings
 		model     string
 		finish    string
 	)
@@ -795,6 +797,9 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		}
 		if chunk.Usage != nil {
 			usage = *chunk.Usage
+		}
+		if chunk.Timings != nil {
+			timings = chunk.Timings
 		}
 		for _, ch := range chunk.Choices {
 			if ch.FinishReason != "" {
@@ -848,6 +853,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		Usage:        usage,
 		Model:        model,
 	})
+	comp.Timings = timings
 	attachProviderReportedCost(comp, rawBuf.Bytes())
 	p.attachProviderCacheTelemetry(comp, call.body, call.adapter.Provider())
 	comp.Raw = rawBuf.Bytes()
