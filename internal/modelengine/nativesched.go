@@ -458,6 +458,7 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 		done:               make(chan struct{}),
 		hint:               hint,
 		priority:           nativeLanePriorityFromMeta(c.Meta),
+		deadline:           nativeLaneDeadlineFromMeta(c.Meta),
 	}
 
 	s.mu.Lock()
@@ -733,7 +734,10 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 	s.dropCanceledPreemptedLocked()
 	s.readmitPreemptedLocked()
 	// 3. Promote waiting lanes into the running set, FIFO, up to maxRunning. A lane
-	// cancelled while it was still waiting is retired here rather than promoted.
+	// cancelled while it was still waiting is retired here rather than promoted. When
+	// any waiting lane carries a deadline the queue is first put in earliest-deadline-
+	// first order (no-deadline lanes after, FIFO); with no deadlines it is untouched.
+	s.orderWaitingByDeadlineLocked()
 	maxRun := s.effectiveMaxRunningLocked()
 	if s.promotionPicker != nil && len(s.waiting) > 1 {
 		slots := len(s.waiting)
@@ -1206,6 +1210,10 @@ type schedLane struct {
 	// MORE important and the default is 0. Promotion order does not read it; the
 	// lowest-priority preemption victim rule does.
 	priority int
+	// deadline is the request's absolute completion deadline, set once at admit from
+	// the call's Meta (see nativeLaneDeadlineFromMeta); zero means none. Waiting-lane
+	// promotion orders deadline lanes earliest-first ahead of no-deadline lanes.
+	deadline time.Time
 
 	// Preemption state. A preempted lane is removed from the running set without closing
 	// its token stream; readmit restores sess/logits and the stream resumes.
