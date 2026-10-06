@@ -182,10 +182,11 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       live-vs-expired against now, and emit the garden control-pane envelope
       (ok/verdict/reason) plus would_reap[] dry-run evidence: owner, lane, tree,
       age, the threshold that age was judged against, and the exact comparison
-      that selected the stale lease. A lease carrying NO TTL (--ttl 0, the
-      acquire default) cannot expire and so can never be reaped; those are
-      judged by AGE instead — never by the holder's pid, which names a
-      per-invocation CLI child and is dead even for a healthy lease — and
+      that selected the stale lease. A LEGACY lease carrying NO TTL (written
+      by an older binary; --ttl 0 now clamps to 3600s) is reapable only once
+      it is 7 days old; younger ones are judged by AGE instead — never by
+      the holder's pid, which names a per-invocation CLI child and is dead
+      even for a healthy lease — and
       reported under age_stale[] / age_stale_ids, whose remedy is a generation-
       fenced release by its holder or an explicit operator --force, not the reaper.
       Reaps NOTHING — verdict ACTION
@@ -543,8 +544,11 @@ func runLeaserefReap(stdout, stderr io.Writer, argv []string) int {
 // THE RESIDUAL, stated rather than hidden: internal/gardenbundle maps this member to ActReap,
 // so an ACTION driven only by age-stale ghosts still makes the garden tick run the reaper,
 // which will collect none of them and report reaping 0. The reason string says so in words.
-// Making them collectable is a lease-DELETING change to the reaper and is deliberately not
-// bundled with a read-only detector.
+// Making them collectable is a lease-DELETING change, so it lives in leaseref, not here:
+// since fak-private#3076 writes clamp ttl<=0 to leaseref.DefaultLeaseTTLSeconds and a legacy
+// ttl-0 record becomes TTL-expired once leaseref.LegacyNoTTLMaxAgeSeconds (7 days) old, so it
+// then lands in expired_ids / would_reap and the reaper collects it. This age rung still
+// covers the window between the 24 h floor and that 7-day bound.
 func runLeaserefAudit(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak leaseref audit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -593,7 +597,8 @@ func runLeaserefAudit(stdout, stderr io.Writer, argv []string) int {
 		// kept OUT of would_reap: `fak leaseref reap` provably cannot collect it (Reap
 		// deletes only Live's expired partition, which a ttl<=0 record can never enter),
 		// and a dry-run that promised a deletion the reaper will not perform would be a
-		// worse lie than the silence this rung replaces.
+		// worse lie than the silence this rung replaces. (Past the 7-day legacy bound the
+		// record is TTL-expired and takes the would_reap branch above instead.)
 		if s, _ := row["stale"].(bool); s {
 			ageStaleIDs = append(ageStaleIDs, r.ID)
 			ageStaleRows = append(ageStaleRows, row)
@@ -798,7 +803,7 @@ func runLeaserefAcquire(stdout, stderr io.Writer, argv []string) int {
 	id := fs.String("id", "", "lease id (one safe ref segment under refs/fak/locks/)")
 	holder := fs.String("holder", "", "holder identity (machine/session); required to fence a write")
 	session := fs.String("session", "", "owning session id (the descriptor at refs/fak/locks/session-<id>) for liveness classification")
-	ttl := fs.Int64("ttl", 0, "lease lifetime in seconds (0 = no expiry)")
+	ttl := fs.Int64("ttl", 0, "lease lifetime in seconds (0 = the 3600s default; a lease can no longer be written without expiry)")
 	announce := fs.String("announce", "", "public-safe lifecycle announcement: on, off, or offline")
 	announceIssue := fs.Int("announce-issue", 0, "coordination issue number for --announce=on")
 	announceRepo := fs.String("announce-repo", "", "owner/repo for --announce=on")

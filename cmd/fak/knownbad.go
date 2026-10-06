@@ -351,7 +351,7 @@ func runKnownBadClaim(stdout, stderr io.Writer, argv []string, nowUnix int64) in
 	fs.SetOutput(stderr)
 	by := fs.String("by", "", "claimant id (default: $FAK_AGENT_ID, else hostname)")
 	session := fs.String("session", "", "owning session id for lease-liveness reap (a dead claimant's lease is reaped by the session path)")
-	ttl := fs.Int64("ttl", 0, "claim lease lifetime in seconds (0 = no expiry)")
+	ttl := fs.Int64("ttl", 0, "claim lease lifetime in seconds (0 = the 3600s default; a lease can no longer be written without expiry)")
 	dir := fs.String("dir", "", "repo dir for the exclusive-lease store (default: git discovery from cwd)")
 	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+knownbad.DefaultLedgerRel+")")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")

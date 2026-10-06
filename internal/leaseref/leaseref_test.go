@@ -542,8 +542,11 @@ func TestListSkipsUnparseableBlob(t *testing.T) {
 func TestRecordExpired(t *testing.T) {
 	base := time.Unix(1000, 0)
 	noTTL := Record{AcquiredAt: 1000, TTLSeconds: 0}
-	if noTTL.Expired(base.Add(1e6 * time.Second)) {
-		t.Fatal("a zero TTL must never expire")
+	if noTTL.Expired(base.Add(time.Duration(LegacyNoTTLMaxAgeSeconds-1) * time.Second)) {
+		t.Fatal("a legacy zero TTL must not expire before LegacyNoTTLMaxAgeSeconds")
+	}
+	if !noTTL.Expired(base.Add(time.Duration(LegacyNoTTLMaxAgeSeconds) * time.Second)) {
+		t.Fatal("a legacy zero TTL must expire once LegacyNoTTLMaxAgeSeconds old")
 	}
 	r := Record{AcquiredAt: 1000, TTLSeconds: 60}
 	if r.Expired(time.Unix(1059, 0)) {

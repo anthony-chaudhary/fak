@@ -264,6 +264,10 @@ func (s *Store) AcquireFenced(ctx context.Context, rec Record, now time.Time) (R
 // whether ref already existed (the casWrite precondition), op is "acquire"/"renew" for the
 // contended message, and id names the lease in that message.
 func (s *Store) commitFenced(ctx context.Context, ref string, out Record, oldOID string, hasRef bool, op, id string) (Record, FenceVerdict, error) {
+	// The fenced acquire/renew write never mints a ttl<=0 lease: a fresh or transition
+	// acquire with no TTL, and a renew of a legacy ttl-0 record, both land bounded
+	// (ttl_floor.go, fak-private#3076).
+	out.TTLSeconds = normalizeLeaseTTL(out.TTLSeconds)
 	written, err := s.casWrite(ctx, ref, out, oldOID, hasRef)
 	if err != nil {
 		return Record{}, FenceVerdict{}, err

@@ -105,12 +105,17 @@ func liveExpire[T expirable](all []T, now time.Time, idOf func(T) string) (live 
 	return live, expired
 }
 
-// expired is the shared TTL check behind Record.Expired and IntentRecord.Expired: a
-// zero TTL never expires, otherwise the record lapses once now reaches
-// effectiveActiveAt+ttlSeconds.
+// expired is the shared TTL check behind Record.Expired and IntentRecord.Expired: the
+// record lapses once now reaches effectiveActiveAt+ttlSeconds. A LEGACY ttl<=0 record
+// (no longer writable, see ttl_floor.go) is judged by age instead: it lapses once
+// effectiveActiveAt is LegacyNoTTLMaxAgeSeconds in the past, and a record with no
+// activity stamp at all has no age and fails closed to not-expired.
 func expired(now time.Time, ttlSeconds, effectiveActiveAt int64) bool {
 	if ttlSeconds <= 0 {
-		return false
+		if effectiveActiveAt <= 0 {
+			return false
+		}
+		return now.Unix()-effectiveActiveAt >= LegacyNoTTLMaxAgeSeconds
 	}
 	return now.Unix() >= effectiveActiveAt+ttlSeconds
 }
