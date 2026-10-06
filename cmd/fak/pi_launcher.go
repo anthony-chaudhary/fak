@@ -80,6 +80,7 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: fak pi [launcher flags] [-- <pi args...>]")
 		fmt.Fprintln(stderr, "       fak pi config [--write] [--addr ADDR] [--model MODEL] [--path PATH]")
+		fmt.Fprintln(stderr, "       fak pi config --from-router [URL] [--write] [--path PATH] [--settings-path PATH]")
 		fmt.Fprintln(stderr, "")
 		fmt.Fprintln(stderr, "First-class support for Pi coding agent as harness with fak serve on Mac as backend.")
 		fmt.Fprintln(stderr, "Runs Pi directly against fak serve by default; pass --guard for session-scoped policy enforcement.")
@@ -90,6 +91,7 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "  fak pi --print-env                            # print shell export lines")
 		fmt.Fprintln(stderr, "  fak pi --probe \"Explain unified memory\"       # headless probe turn")
 		fmt.Fprintln(stderr, "  fak pi config --write                         # write ~/.pi/agent/models.json")
+		fmt.Fprintln(stderr, "  fak pi config --from-router                   # plan provider \"fak\" models from the router catalog")
 		fmt.Fprintln(stderr, "")
 		fs.PrintDefaults()
 	}
@@ -768,8 +770,13 @@ func runPiConfig(stdout, stderr io.Writer, argv []string) int {
 	write := fs.Bool("write", false, "write or update ~/.pi/agent/models.json (or --path) and the safe Pi compaction settings")
 	path := fs.String("path", "", "destination path or directory for models.json")
 	settingsPath := fs.String("settings-path", "", "destination path or directory for Pi's settings.json (default: ~/.pi/agent/settings.json)")
-	if !parseFlags(fs, argv) {
+	fromRouter := &piFromRouterFlag{}
+	fs.Var(fromRouter, "from-router", "set provider \"fak\" models from the router's GET /v1/models (optional URL; default: the configured provider baseUrl, else --addr). Prints a plan; --write applies it with a timestamped backup.")
+	if !parseFlags(fs, foldPiFromRouterArg(argv)) {
 		return 2
+	}
+	if fromRouter.set {
+		return runPiConfigFromRouter(stdout, stderr, fs, fromRouter.url, *addr, *path, *settingsPath, *write)
 	}
 	baseURL := projectassets.NormalizePiBaseURL(*addr)
 	// Per-model budget: the status line and the compaction block must agree with the

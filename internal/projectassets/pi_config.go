@@ -141,6 +141,13 @@ func piModelEntry(modelID, modelName string, budget PiContextBudget) map[string]
 	}
 }
 
+// PiModelEntry is the exported form of the `fak` provider model entry, so a catalog
+// sourced from a router writes the same entry shape the single-model writers do.
+func PiModelEntry(modelID string, budget PiContextBudget) map[string]interface{} {
+	modelID = NormalizePiModelID(modelID)
+	return piModelEntry(modelID, formatPiModelName(modelID), budget)
+}
+
 func formatPiModelName(modelID string) string {
 	switch strings.ToLower(modelID) {
 	case "qwen38:27b-q4", "qwen38:27b":
