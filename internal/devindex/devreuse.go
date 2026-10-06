@@ -259,6 +259,7 @@ var maintainerDevCommands = []string{
 	"opt",
 	"org",
 	"orient",
+	"perf",
 	"perfscout",
 	"pack",
 	"pi",
