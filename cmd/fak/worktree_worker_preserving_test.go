@@ -107,6 +107,23 @@ func preservingCLIGit(t *testing.T, root string, input string, args ...string) s
 	return strings.TrimSpace(string(out))
 }
 
+// Native CLI rows that reach checkout policy require its exact qualified Git.
+func requireQualifiedPreservingCLIGit(t *testing.T, cfg preservingNativeFixtureConfig) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, cfg.RealGit, "--version")
+	cmd.Dir = cfg.RepoRoot
+	cmd.Env = preservingNativeFixtureEnv(os.Environ(), cfg.RealGit, cfg.TemplateDir, "", false)
+	output, err := cmd.CombinedOutput()
+	if err != nil || ctx.Err() != nil {
+		t.Fatalf("qualified Git version probe %q: %v (context %v); output=%q", cfg.RealGit, err, ctx.Err(), output)
+	}
+	if string(output) != "git version 2.45.0\n" {
+		t.Skipf("qualified-git-2.45.0 prerequisite: native preserving CLI scenario requires exact Git 2.45.0; got %q", output)
+	}
+}
+
 // Exercise the actual CLI branch above50 through the test executable. Every
 // peer has an fsmonitor hook that would leave a sentinel if status were invoked.
 // No ordinary Prepare, pool or sweep setup is involved.
@@ -148,6 +165,10 @@ func TestWorktreePreservingFullCLILeaseDiskAndAdvisoryIsolation(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg := preservingNativeFixtureConfig{RealGit: realGit, RepoRoot: repo, FsmonitorMarker: marker, TemplateDir: t.TempDir()}
+			switch kind {
+			case "publication-revoked", "success", "hostile-environment-success":
+				requireQualifiedPreservingCLIGit(t, cfg)
+			}
 			cfgPath := filepath.Join(t.TempDir(), "native-helper.json")
 			writePreservingNativeFixtureConfig(t, cfgPath, cfg)
 			t.Setenv("FAK_PRESERVING_NATIVE_HELPER_CONFIG", cfgPath)
