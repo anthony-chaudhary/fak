@@ -96,6 +96,9 @@ type anthropicPassthrough struct {
 	// immediate stop) leaves it zero, so prefill is reported as "not measured" rather
 	// than as the full turn.
 	firstTokenAt time.Time
+	// itl records the wall gap between consecutive upstream content deltas — the
+	// real inter-token latency, not the per-turn TPOT mean (stream_itl.go).
+	itl streamITL
 
 	// --- warm-continue (replay-as-context) state, #3353 -------------------------
 	// asstText accumulates the assistant TEXT already relayed to the client this turn,
@@ -370,7 +373,9 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 		// First content delta of the turn = the model's first produced token, whether
 		// it lands in a relayed text block or a held tool_use block. Stamp the TTFT
 		// boundary here so prefill (prompt ingest) is separated from decode below.
-		p.markFirstToken(time.Now())
+		now := time.Now()
+		p.markFirstToken(now)
+		p.itl.mark(p.s.metrics, now)
 		if ta, held := p.toolBuf[d.Index]; held {
 			ta.args.WriteString(d.Delta.PartialJSON) // accumulate off-wire
 			return nil
@@ -614,6 +619,7 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 		// turns are attributed by the same rule as every other path, rather than being
 		// assumed vendor because the byte-preserving relay happens to talk to a vendor
 		// today.
+		p.itl.finish(s.metrics)
 		s.metrics.observeInferenceServedTimed(s.servedLocality(p.reqModel()), p.reqModel(), p.promptTok, p.complTok, p.cacheRead, p.cacheCreate, p.finishReason, dur, ttft)
 		if compacted {
 			s.metrics.recordCompactionCacheRead(p.cacheRead) // OBSERVED provider cache_read on a compacted streamed turn

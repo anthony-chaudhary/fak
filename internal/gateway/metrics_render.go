@@ -1217,8 +1217,12 @@ func (m *gatewayMetrics) writeInferenceMetrics(b *strings.Builder) inferenceSnap
 	// bringing the de facto serving-latency Prometheus SET to parity.
 	writeHelpType(b, "fak_gateway_inference_ttft_seconds", "Time-to-first-token (prefill: prompt ingest + first token) distribution, over the streamed turns whose prefill boundary was observable. The percentile view behind fak_gateway_inference_prefill_seconds_total's mean. fak analogue of vLLM time_to_first_token_seconds.", "histogram")
 	writeHistogram(b, "fak_gateway_inference_ttft_seconds", "", snap.ttftHist)
-	writeHelpType(b, "fak_gateway_inference_tpot_seconds", "Per-output-token (inter-token) latency distribution = decode wall-clock / generated tokens, per measured turn. The percentile view behind fak_gateway_inference_decode_tokens_per_second. fak analogue of vLLM inter_token_latency_seconds.", "histogram")
+	writeHelpType(b, "fak_gateway_inference_tpot_seconds", "Mean per-output-token latency distribution = decode wall-clock / generated tokens, one sample per measured turn. The percentile view behind fak_gateway_inference_decode_tokens_per_second. fak analogue of vLLM time_per_output_token_seconds; per-gap tails live on fak_gateway_inference_itl_seconds.", "histogram")
 	writeHistogram(b, "fak_gateway_inference_tpot_seconds", "", snap.tpotHist)
+	writeHelpType(b, "fak_gateway_inference_itl_seconds", "Inter-token latency distribution: one sample per wall gap between consecutive content deltas on a live streamed turn (buffered turns contribute none). Exposes decode stalls a per-turn mean hides. fak analogue of vLLM inter_token_latency_seconds.", "histogram")
+	writeHistogram(b, "fak_gateway_inference_itl_seconds", "", snap.itlHist)
+	writeHelpType(b, "fak_gateway_inference_max_itl_seconds", "Per-request worst inter-token gap on live streamed turns with at least two content deltas: the stall a client actually felt.", "histogram")
+	writeHistogram(b, "fak_gateway_inference_max_itl_seconds", "", snap.maxITLHist)
 	writeHelpType(b, "fak_gateway_inference_e2e_seconds", "Whole model-turn wall-clock distribution, over EVERY served turn (buffered or streamed). fak analogue of vLLM e2e_request_latency_seconds.", "histogram")
 	writeHistogram(b, "fak_gateway_inference_e2e_seconds", "", snap.e2eHist)
 	writeRegimeLatencyHistograms(b, snap.regimeHists)

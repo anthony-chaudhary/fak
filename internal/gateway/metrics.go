@@ -132,6 +132,13 @@ type gatewayMetrics struct {
 	// (#5630), booked from the same values in the same critical section, so the regime
 	// rows of each family sum exactly to the unlabeled histogram above.
 	inferRegimeHists map[string]*regimeLatencyHists
+	// itlMu guards the REAL inter-token-latency histograms fed per content delta by
+	// the live stream paths (stream_itl.go): every gap between consecutive emitted
+	// deltas, and each streamed request's worst gap. Separate from inferenceMu so the
+	// per-token observe never contends with the turn-completion fold.
+	itlMu           sync.Mutex
+	inferITLHist    *latencyCounter
+	inferMaxITLHist *latencyCounter
 
 	// reqMemoryMu guards cumulative in-kernel request-memory pressure observed after
 	// planner turns. The planner already exposes the most recent admission plan; these

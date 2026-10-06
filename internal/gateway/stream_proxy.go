@@ -441,6 +441,10 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	// fragment, so an upstream failure BEFORE any token still lets us return a real
 	// HTTP status (a 200 + SSE error is far worse for a client than a clean 502).
 	var started bool
+	// itl measures the wall gap between consecutive content deltas written to the
+	// client; its worst gap folds into the per-request max-ITL histogram on return.
+	var itl streamITL
+	defer itl.finish(s.metrics)
 	start := func() error {
 		if started {
 			return nil
@@ -461,6 +465,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 			return err
 		}
 		hb.recordStreamEvent(len(contentDelta))
+		itl.mark(s.metrics, time.Now()) // real per-gap ITL (stream_itl.go)
 		var werr error
 		timePhase(sessionTurn.turnCost, turncost.PhaseStream, func() {
 			werr = writeSSEData(w, chunk(ChatDelta{Content: contentDelta}, nil, nil))

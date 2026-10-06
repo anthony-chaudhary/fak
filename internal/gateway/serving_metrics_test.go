@@ -177,6 +177,7 @@ func TestNativeServingEmitterWritesSameSchema(t *testing.T) {
 	})
 	native.ObserveTTFT(200 * time.Millisecond)
 	native.ObserveTPOT(20 * time.Millisecond)
+	native.ObserveITL(18 * time.Millisecond)
 	native.SetGoodputRequestsPerSecond(3.5)
 	native.SetQueue(2, 5)
 	native.SetKVUtilization(0.81)
