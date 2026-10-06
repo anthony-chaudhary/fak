@@ -51,7 +51,7 @@ func preservingTestRunner(t *testing.T, calls *[]string) GitRunner {
 }
 
 func TestPreparePreservingCreatesExactNewWorkerWithoutCleanup(t *testing.T) {
-	f := newPreservingFixture(t)
+	f := newQualifiedPreservingFixture(t)
 	root := preservingTempDir(t)
 	var calls []string
 	checks := 0
@@ -74,7 +74,7 @@ func TestPreparePreservingCreatesExactNewWorkerWithoutCleanup(t *testing.T) {
 }
 
 func TestPreparePreservingKeepsDirtyUnknownAndIdleWorkers(t *testing.T) {
-	f := newPreservingFixture(t)
+	f := newQualifiedPreservingFixture(t)
 	root := preservingTempDir(t)
 	neighbors := []string{Path("cmd", "dirty", root), Path("cmd", "unknown", root), Path("cmd", "idle", root)}
 	before := map[string]string{}
@@ -131,7 +131,7 @@ func TestPreparePreservingKeepsDirtyUnknownAndIdleWorkers(t *testing.T) {
 func TestPreparePreservingRefusesExistingTargetAndSidecars(t *testing.T) {
 	for _, kind := range []string{"directory", "symlink", "owner", "pool", "idle", "intent", "message"} {
 		t.Run(kind, func(t *testing.T) {
-			f := newPreservingFixture(t)
+			f := newQualifiedPreservingFixture(t)
 			root := preservingTempDir(t)
 			target := Path("cmd", "collision", root)
 			var path string
@@ -188,7 +188,7 @@ func TestPreparePreservingRefusesExistingTargetAndSidecars(t *testing.T) {
 func TestPreparePreservingRefusesRegistrationAndUnreadableInventory(t *testing.T) {
 	for _, kind := range []string{"registration", "unreadable"} {
 		t.Run(kind, func(t *testing.T) {
-			f := newPreservingFixture(t)
+			f := newQualifiedPreservingFixture(t)
 			root := preservingTempDir(t)
 			target := Path("cmd", "new", root)
 			var calls []string
@@ -220,7 +220,7 @@ func TestPreparePreservingRefusesRegistrationAndUnreadableInventory(t *testing.T
 func TestPreparePreservingRetainsPartialAddAndReadinessFailure(t *testing.T) {
 	for _, kind := range []string{"index-failure", "timeout", "wrong-head"} {
 		t.Run(kind, func(t *testing.T) {
-			f := newPreservingFixture(t)
+			f := newQualifiedPreservingFixture(t)
 			root := preservingTempDir(t)
 			target := Path("cmd", "partial", root)
 			var calls []string
@@ -268,20 +268,26 @@ func TestPreparePreservingRetainsAdmissionAndTargetLockRefusals(t *testing.T) {
 	if refused.OK || refused.Code != "PRESERVATION_ADMISSION_REFUSED" || len(calls) != 0 {
 		t.Fatalf("admission=%+v calls=%v", refused, calls)
 	}
-	t.Setenv(PrepareLockWaitEnv, "1ms")
-	target := Path("cmd", "busy", root)
-	if err := withPrepareTargetLock(target, time.Millisecond, func() {
-		res := preparePreserving(context.Background(), f.repo, "cmd", "busy", f.base, root, owner, git, func(context.Context) error { return nil })
-		if res.OK || res.Code != PrepareCodeBusy || !res.Preserved {
-			t.Fatalf("lock refusal=%+v", res)
+	t.Run("target-lock", func(t *testing.T) {
+		f := newQualifiedPreservingFixture(t)
+		root := preservingTempDir(t)
+		var calls []string
+		git := preservingTestRunner(t, &calls)
+		t.Setenv(PrepareLockWaitEnv, "1ms")
+		target := Path("cmd", "busy", root)
+		if err := withPrepareTargetLock(target, time.Millisecond, func() {
+			res := preparePreserving(context.Background(), f.repo, "cmd", "busy", f.base, root, owner, git, func(context.Context) error { return nil })
+			if res.OK || res.Code != PrepareCodeBusy || !res.Preserved {
+				t.Fatalf("lock refusal=%+v", res)
+			}
+		}); err != nil {
+			t.Fatal(err)
 		}
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 }
 
 func TestPreparePreservingKeepsOldCleanRegistration(t *testing.T) {
-	f := newPreservingFixture(t)
+	f := newQualifiedPreservingFixture(t)
 	root := preservingTempDir(t)
 	neighbor := Path("cmd", "old-clean", root)
 	preservingFixtureGit(t, f.repo, "worktree", "add", "--detach", neighbor, f.base)
@@ -306,7 +312,7 @@ func TestPreparePreservingKeepsOldCleanRegistration(t *testing.T) {
 }
 
 func TestPreparePreservingRetainsWorkerOnMetadataFailure(t *testing.T) {
-	f := newPreservingFixture(t)
+	f := newQualifiedPreservingFixture(t)
 	root := preservingTempDir(t)
 	target := Path("cmd", "metadata-failure", root)
 	var calls []string
@@ -348,7 +354,7 @@ func TestPreparePreservingRefusesUnpinnedBaseAndMissingAdmission(t *testing.T) {
 }
 
 func TestPreparePreservingDoesNotTreatWorkerCountAsAdmissionLimit(t *testing.T) {
-	f := newPreservingFixture(t)
+	f := newQualifiedPreservingFixture(t)
 	root := preservingTempDir(t)
 	var calls []string
 	baseGit := preservingTestRunner(t, &calls)
@@ -386,7 +392,7 @@ func TestPreparePreservingPathsAndIntentCannotExpandAuthority(t *testing.T) {
 func TestPreparePreservingLeaseLossBeforeAndAfterMetadata(t *testing.T) {
 	for _, lossAt := range []int{2, 3, 4} {
 		t.Run(fmt.Sprint(lossAt), func(t *testing.T) {
-			f := newPreservingFixture(t)
+			f := newQualifiedPreservingFixture(t)
 			root := preservingTempDir(t)
 			var calls []string
 			count := 0
@@ -498,7 +504,7 @@ func TestPreparePreservingWriteFailuresKeepEvidence(t *testing.T) {
 }
 
 func TestPreparePreservingIntentPublicationStaysInsideTargetLock(t *testing.T) {
-	f := newPreservingFixture(t)
+	f := newQualifiedPreservingFixture(t)
 	root := preservingTempDir(t)
 	target := Path("cmd", "intent", root)
 	var calls []string
@@ -536,7 +542,7 @@ func TestPreparePreservingIntentPublicationStaysInsideTargetLock(t *testing.T) {
 }
 
 func TestPreparePreservingRefusesHooksAndUnknownCheckoutConfig(t *testing.T) {
-	f := newPreservingFixture(t)
+	f := newQualifiedPreservingFixture(t)
 	hook := filepath.Join(preservingTempDir(t), "post-checkout")
 	if err := os.Symlink("missing-hook", hook); err != nil {
 		t.Fatal(err)
@@ -589,6 +595,17 @@ func TestPreparePreservingRejectsTrackedLeaseMetadata(t *testing.T) {
 			t.Fatal("checkout after reserved tracked metadata")
 		}
 	}
+}
+
+// Native scenarios that must pass checkout policy need its exact qualified Git.
+// Keep newPreservingFixture ungated for refusals that happen before that policy.
+func newQualifiedPreservingFixture(t *testing.T) reapProofFixture {
+	t.Helper()
+	f := newPreservingFixture(t)
+	if version := preservingFixtureGit(t, f.repo, "--version"); version != "git version 2.45.0\n" {
+		t.Skipf("qualified-git-2.45.0 prerequisite: native preserving scenario requires exact Git 2.45.0; got %q", version)
+	}
+	return f
 }
 
 // Isolated repository setup deliberately does not call ordinary Prepare or
@@ -667,7 +684,7 @@ func preservingFixtureGit(t *testing.T, root string, args ...string) string {
 }
 
 func TestPreparePreservingCanonicalRelativeAndAliasRoots(t *testing.T) {
-	f := newPreservingFixture(t)
+	f := newQualifiedPreservingFixture(t)
 	alias := filepath.Join(preservingTempDir(t), "repo-alias")
 	if err := os.Symlink(f.repo, alias); err != nil {
 		t.Fatal(err)
@@ -694,7 +711,7 @@ func TestPreparePreservingCanonicalRelativeAndAliasRoots(t *testing.T) {
 }
 
 func TestPreparePreservingRevocationDuringFinalRegistrationReadback(t *testing.T) {
-	f := newPreservingFixture(t)
+	f := newQualifiedPreservingFixture(t)
 	root := preservingTempDir(t)
 	target := Path("cmd", "final-revocation", root)
 	var calls []string
@@ -844,7 +861,7 @@ func preservingLibraryHostileEnvironment(t *testing.T) (string, string) {
 
 func TestPreparePreservingFixtureHostileGitEnvironment(t *testing.T) {
 	config, before := preservingLibraryHostileEnvironment(t)
-	f := newPreservingFixture(t)
+	f := newQualifiedPreservingFixture(t)
 	var calls []string
 	res := preparePreserving(context.Background(), f.repo, "cmd", "hostile-environment", f.base, preservingTempDir(t), OwnerStamp{PID: os.Getpid(), LeaseID: "fixture-admitted"}, preservingTestRunner(t, &calls), func(context.Context) error { return nil })
 	if !res.OK {

@@ -295,7 +295,7 @@ func TestPreservingGitOutputRefusesSuccessfulReadWarnings(t *testing.T) {
 func TestPreparePreservingRechecksPolicyBeforeAddAndStatus(t *testing.T) {
 	for _, phase := range []string{"before-add", "new-context", "before-publication"} {
 		t.Run(phase, func(t *testing.T) {
-			f := newPreservingFixture(t)
+			f := newQualifiedPreservingFixture(t)
 			root := t.TempDir()
 			var calls []string
 			git := preservingTestRunner(t, &calls)
@@ -339,7 +339,7 @@ func TestPreparePreservingRechecksPolicyBeforeAddAndStatus(t *testing.T) {
 }
 
 func TestPreparePreservingQualifiesDormantPolicyWithoutExecutingFilters(t *testing.T) {
-	f := newPreservingFixture(t)
+	f := newQualifiedPreservingFixture(t)
 	for key, value := range map[string]string{"core.fsmonitor": "false", "submodule.active": ".", "filter.lfs.clean": "must-not-execute", "filter.lfs.smudge": "must-not-execute", "filter.lfs.process": "must-not-execute", "filter.lfs.required": "true"} {
 		preservingFixtureGit(t, f.repo, "config", key, value)
 	}
@@ -352,7 +352,7 @@ func TestPreparePreservingQualifiesDormantPolicyWithoutExecutingFilters(t *testi
 }
 
 func TestPreparePreservingRefusesAttributeDriftBeforeAdd(t *testing.T) {
-	f := newPreservingFixture(t)
+	f := newQualifiedPreservingFixture(t)
 	preservingFixtureGit(t, f.repo, "config", "filter.lfs.smudge", "must-not-execute")
 	var calls []string
 	git := preservingTestRunner(t, &calls)

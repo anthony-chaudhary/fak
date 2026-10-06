@@ -38,7 +38,7 @@ func TestPreservingAttributeFilterHelperProcess(t *testing.T) {
 }
 
 func TestPreservingNativeFixtureParentAndChildAttributeIdentity(t *testing.T) {
-	f := newPreservingFixture(t)
+	f := newQualifiedPreservingFixture(t)
 	home := preservingFixtureIdentity(t)
 	attributes := filepath.Join(home, "git", "attributes")
 	if err := os.MkdirAll(filepath.Dir(attributes), 0700); err != nil {
@@ -67,7 +67,7 @@ func TestPreservingNativeFixtureParentAndChildAttributeIdentity(t *testing.T) {
 func TestPreparePreservingNativePinnedAttributesRejectDirtyHiding(t *testing.T) {
 	for _, kind := range []string{"root", "nested", "macro"} {
 		t.Run(kind, func(t *testing.T) {
-			f := newPreservingFixture(t)
+			f := newQualifiedPreservingFixture(t)
 			attributePath, sourcePath := ".gitattributes", "target.txt"
 			committed := "target.txt filter=preserving-native\n"
 			switch kind {
