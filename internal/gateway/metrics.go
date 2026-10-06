@@ -15,6 +15,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/compactcohere"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
+	"github.com/anthony-chaudhary/fak/internal/perfledger"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 	"github.com/anthony-chaudhary/fak/pkg/deadlineadmit"
 )
@@ -455,6 +456,15 @@ type gatewayMetrics struct {
 	usageRecords        []UsageRecord
 	usageOrdinals       map[string]uint64
 	usageRecordsDropped bool
+
+	// perfMu guards the per-request serving-performance ring (perf_ledger.go):
+	// one perfledger.Record per served turn, drop-oldest at perfledger.RingCap,
+	// seeded from the durable ledger tail at startup. perfSink is the async
+	// durable writer; Offer never blocks the served turn.
+	perfMu             sync.Mutex
+	perfRecords        []perfledger.Record
+	perfRecordsDropped bool
+	perfSink           atomic.Pointer[perfledger.Writer]
 
 	// denyAllMu guards the deny-all stop family: a served turn whose EVERY proposed tool
 	// call the capability floor refused (kept==0). The wire MUST report such a turn as

@@ -358,6 +358,7 @@ var verbManifest = []Verb{
 	{Name: "provider-cost", Synopsis: "import, report, and reconcile provider cost ledgers against registered sessions", Lane: "cmd"},
 	{Name: "ps", Synopsis: "the read-only process table: one aligned row per live served session", Lane: "cmd", Doc: "docs/operator-control-plane.md"},
 	{Name: "public-scrub", Synopsis: "public-release safety audit over staged/range/tree/message content (the PUBLIC_LEAK gate family)", Lane: "cmd"},
+	{Name: "perf", Synopsis: "per-request serving perf: TTFT/prefill/decode/e2e quantiles and cache share from the durable ledger", Lane: "cmd"},
 	{Name: "performance-rsi-scorecard", Synopsis: "render the native performance RSI scorecard and evidence debt", Lane: "cmd"},
 	{Name: "pull", Synopsis: "alias for 'fak model pull': the Ollama-style run-by-name model download", Lane: "cmd"},
 	{Name: "qa-process-debt-dispatch", Synopsis: "qa-process scorecard -> backlog: file one deduped issue per HARD qa_process_debt gap (revert/coverage)", Lane: "cmd"},

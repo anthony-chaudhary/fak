@@ -249,6 +249,7 @@ var generatedVerbIndex = []generatedVerb{
 	{Name: "opt", Synopsis: "the optimization-fuser / RSI opt-target loop", Tier: "dev"},
 	{Name: "org", Synopsis: "inspect org-policy posture and which control channel owns each capability", Tier: "dev"},
 	{Name: "pack", Synopsis: "hermetic OCI bundle packaging and verification for harness collections", Tier: "dev"},
+	{Name: "perf", Synopsis: "per-request serving perf: TTFT/prefill/decode/e2e quantiles and cache share from the durable ledger", Tier: "dev"},
 	{Name: "performance-rsi-scorecard", Synopsis: "render the native performance RSI scorecard and evidence debt", Tier: "dev"},
 	{Name: "pi", Synopsis: "launch and manage Pi agent sessions through the guarded fak gateway", Tier: "dev"},
 	{Name: "policy", Synopsis: "the deployable capability floor: --dump | --check a policy manifest", Tier: "frontdoor"},

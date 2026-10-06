@@ -856,7 +856,7 @@ func (m *gatewayMetrics) observeInferenceServed(loc servingLocality, promptTok, 
 
 // observeInferenceServedTimed is observeInferenceTimed with the serving side.
 func (m *gatewayMetrics) observeInferenceServedTimed(loc servingLocality, promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration) {
-	m.observeInferenceTimed(promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, ttft)
+	m.observeInferenceTimedAt(loc, promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, ttft)
 	m.attributeServedTurn(loc, promptTok, complTok)
 }
 
@@ -899,12 +899,19 @@ func (m *gatewayMetrics) attributeServedTurn(loc servingLocality, promptTok, com
 // FULL inference wall-clock in both cases so the existing output_tokens_per_second and
 // the fleet-value agent-seconds denominator are byte-identical to before.
 func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration) {
+	m.observeInferenceTimedAt(localityUnknown, promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, ttft)
+}
+
+// observeInferenceTimedAt is the single fold every served turn reaches, so it is
+// also where the one per-request perf row is emitted.
+func (m *gatewayMetrics) observeInferenceTimedAt(loc servingLocality, promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration) {
 	if m == nil {
 		return
 	}
 	if finishReason == "" {
 		finishReason = "unknown"
 	}
+	m.recordPerf(loc, promptTok, complTok, cachedTok, finishReason, dur, ttft)
 	m.inferenceMu.Lock()
 	if m.inferReqs == nil {
 		m.inferReqs = map[string]uint64{}
