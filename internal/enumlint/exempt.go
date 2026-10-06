@@ -67,7 +67,6 @@ var exemptions = map[string]string{
 	"switch|internal/compute|KVPageOffloader.Stats":                                             "KV page offload stats tracks active memory tiers; intermediate staging and restoring states are reported in transit metrics.",
 	"switch|internal/compute|vulkanBackend.RMSNormMatMul2":                                      "RMSNormMatMul2 kernel only implements supported quantized matrix types; unsupported types fall back to decomposed operations.",
 	"switch|internal/compute|vulkanBackend.validateQwen35VulkanSequence":                        "Sequence validation checks specific quantized weights supported by the custom fused kernel.",
-	"switch|internal/compute|vulkanBackend.qwen35VulkanSequenceMatMulLocked":                    "Locked sequence matmul executes only supported quantized weight types; other types are handled by standard Vulkan backend.",
 	"switch|internal/conceptbench|EvaluateCandidate":                                            "Candidate evaluation tests synthetic candidate states; verified host architecture is handled by the physical harness.",
 	"literal|internal/conceptbench|Concepts":                                                    "Core concept scorecard tracks primary architectural boundaries; task retention is evaluated by the task-specific benchmark suite.",
 	"literal|internal/ctxmmu|TestVerifyPrefixWarmth_InvariantsAndEdgeCases":                     "Unit test fixture specifically tests eviction and page boundary edge cases for system and prompt page kinds.",
