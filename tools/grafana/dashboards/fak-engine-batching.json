@@ -4018,6 +4018,225 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "id": 66,
+      "type": "row",
+      "title": "vLLM parity: engine preemptions, prefix hit rate, iteration tokens",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 157,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 67,
+      "type": "timeseries",
+      "title": "Engine preemptions/s by reason",
+      "description": "Engine-step preemption counter (fak_engine_preemptions_total by reason: swap, recompute, gpudirect_swap), fed at the native scheduler's preempt site; mirrors vLLM vllm:num_preemptions_total.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 158,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (reason) (rate(fak_engine_preemptions_total{job=\"fak_gateway\",instance=~\"$instance\"}[$__rate_interval]) and on(job,instance) (up{job=\"fak_gateway\"} == 1))",
+          "legendFormat": "{{reason}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 68,
+      "type": "timeseries",
+      "title": "Prefix token hit rate (matched / queried)",
+      "description": "True prefix-cache token hit rate = fak_engine_prefix_matched_tokens_total / fak_engine_prefix_queried_tokens_total (queried counts every looked-up prompt token, hit or miss); mirrors vLLM prefix_cache_hits / prefix_cache_queries.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 158,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(fak_engine_prefix_matched_tokens_total{job=\"fak_gateway\",instance=~\"$instance\"}[$__rate_interval])) / sum(rate(fak_engine_prefix_queried_tokens_total{job=\"fak_gateway\",instance=~\"$instance\"}[$__rate_interval]) and on(job,instance) (up{job=\"fak_gateway\"} == 1))",
+          "legendFormat": "token hit rate",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 69,
+      "type": "timeseries",
+      "title": "Iteration tokens p50 / p99",
+      "description": "Tokens processed per engine step (decode lanes per decode step, chunk tokens per prefill chunk, drafts+1 per verify round) from fak_engine_iteration_tokens; mirrors vLLM vllm:iteration_tokens_total.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 158,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(fak_engine_iteration_tokens_bucket{job=\"fak_gateway\",instance=~\"$instance\"}[$__rate_interval]) and on(job,instance) (up{job=\"fak_gateway\"} == 1)))",
+          "legendFormat": "p50",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(fak_engine_iteration_tokens_bucket{job=\"fak_gateway\",instance=~\"$instance\"}[$__rate_interval]) and on(job,instance) (up{job=\"fak_gateway\"} == 1)))",
+          "legendFormat": "p99",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     }
   ]
 }

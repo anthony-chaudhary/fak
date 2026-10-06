@@ -149,7 +149,7 @@ func TestRecurrentPrefixReuseReportedWhenYieldedBeforeStep(t *testing.T) {
 		t.Fatal("yielded request remains decode resident or queued")
 	}
 
-	totalHits, totalReuse := 0, 0
+	totalHits, totalReuse, totalQueried := 0, 0, 0
 	for i := 0; i < 2; i++ {
 		hits, reused := 0, 0
 		if i == 0 {
@@ -158,6 +158,7 @@ func TestRecurrentPrefixReuseReportedWhenYieldedBeforeStep(t *testing.T) {
 		res := step(cb, PhaseIdle, hits, reused)
 		totalHits += res.PrefixHits
 		totalReuse += res.PrefixReuseTokens
+		totalQueried += res.PrefixQueriedTokens
 		if res.YieldedSlots != 1 || res.EmptySlots != 0 || res.KVCacheBytesUsed != kvBytes || cb.TotalTokensGenerated() != 1 {
 			t.Fatalf("idle changed yielded lifecycle or generation: %+v", res)
 		}
@@ -177,6 +178,7 @@ func TestRecurrentPrefixReuseReportedWhenYieldedBeforeStep(t *testing.T) {
 		res := step(cb, PhaseDecode, 0, 0)
 		totalHits += res.PrefixHits
 		totalReuse += res.PrefixReuseTokens
+		totalQueried += res.PrefixQueriedTokens
 		if res.DecodeResidentUIDs[0] != admitted.SubmissionSeq {
 			t.Fatal("resume changed request residency identity")
 		}
@@ -191,6 +193,12 @@ func TestRecurrentPrefixReuseReportedWhenYieldedBeforeStep(t *testing.T) {
 	res := step(cb, PhaseIdle, 0, 0)
 	totalHits += res.PrefixHits
 	totalReuse += res.PrefixReuseTokens
+	totalQueried += res.PrefixQueriedTokens
+	// The hit-rate denominator is reported once per admission lookup and bounds
+	// the matched tokens from above (vLLM prefix_cache_queries >= hits).
+	if totalQueried < totalReuse || totalQueried == 0 {
+		t.Fatalf("prefix queried tokens=%d, want >= reused %d and > 0", totalQueried, totalReuse)
+	}
 	if totalHits != 1 || totalReuse != 3 || cb.TotalTokensGenerated() != 3 || res.YieldedSlots != 0 || res.EmptySlots != 1 || res.KVCacheBytesUsed != 0 {
 		t.Fatalf("final accounting: hits=%d reused=%d generated=%d result=%+v", totalHits, totalReuse, cb.TotalTokensGenerated(), res)
 	}

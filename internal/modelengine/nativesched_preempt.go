@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/enginestep"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
 )
@@ -639,7 +640,21 @@ func (s *NativeScheduler) preemptLaneLocked(ln *schedLane) error {
 	}
 	ln.sess = nil
 	s.preempted = append(s.preempted, ln)
+	s.recorder.ObservePreemption(preemptionReason(mode))
 	return nil
+}
+
+// preemptionReason maps a native preemption mode onto the closed
+// fak_engine_preemptions_total reason vocabulary.
+func preemptionReason(mode NativePreemptionMode) string {
+	switch mode {
+	case NativePreemptRecompute:
+		return enginestep.PreemptRecompute
+	case NativePreemptGPUDirectSwap:
+		return enginestep.PreemptGPUDirectSwap
+	default:
+		return enginestep.PreemptSwap
+	}
 }
 
 func (s *NativeScheduler) recordQwenSwapUsage(direction, outcome, result string, bytes int) error {

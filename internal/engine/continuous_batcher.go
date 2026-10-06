@@ -378,6 +378,10 @@ type BatchStepResult struct {
 	// PrefixHits is the number of admissions observed since the previous step
 	// that reused a cached recurrent boundary.
 	PrefixHits int
+	// PrefixQueriedTokens is the number of prompt tokens looked up in the GDN
+	// recurrent prefix cache since the previous step, hit or miss; it is the
+	// denominator of the prefix hit rate (vLLM prefix_cache_queries).
+	PrefixQueriedTokens int
 }
 
 // ContinuousBatcher manages dynamic iteration-level continuous batching for subagent turn loops.
@@ -404,7 +408,10 @@ type ContinuousBatcher struct {
 	// step, so a reused slot resident for N steps is reported exactly once.
 	pendingPrefixHits        int
 	pendingPrefixReuseTokens int
-	decodeSinceRefill        int // decode steps since the last prefill step
+	// pendingPrefixQueriedTokens counts prompt tokens looked up (hit or miss)
+	// since the last emitted step, with the same capture-and-reset discipline.
+	pendingPrefixQueriedTokens int
+	decodeSinceRefill          int // decode steps since the last prefill step
 }
 
 // NewContinuousBatcher constructs a scheduler with the specified configuration.
@@ -589,6 +596,7 @@ func (cb *ContinuousBatcher) initSlot(index int, req *SubagentRequest) *Slot {
 		restoredSess *model.Session
 	)
 	if cb.prefixCache != nil && cb.cfg.Model != nil && len(req.PromptTokens) > 0 {
+		cb.pendingPrefixQueriedTokens += len(req.PromptTokens)
 		if matched, snap, hit := cb.prefixCache.Lookup(req.SessionID, req.PromptTokens); hit {
 			// Reuse is intentionally host-only: a device session would need a
 			// matching Backend, or Restore refuses closed→miss.
@@ -861,6 +869,8 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 	prefixReuseTokens := cb.pendingPrefixReuseTokens
 	cb.pendingPrefixHits = 0
 	cb.pendingPrefixReuseTokens = 0
+	prefixQueriedTokens := cb.pendingPrefixQueriedTokens
+	cb.pendingPrefixQueriedTokens = 0
 
 	// 2. Gather prefilling slots and the resident decodable roster, and count
 	// the other states in the same pass.
@@ -962,6 +972,7 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 			DecodeResidentUIDs:   residentUIDs,
 			PrefixHits:           prefixHits,
 			PrefixReuseTokens:    prefixReuseTokens,
+			PrefixQueriedTokens:  prefixQueriedTokens,
 		}, nil
 	}
 
@@ -969,20 +980,21 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 	if len(resident) == 0 {
 		cb.iteration++
 		return &BatchStepResult{
-			Iteration:          cb.iteration,
-			YieldedSlots:       yieldedCount,
-			FinishedSlots:      finishedCount,
-			EmptySlots:         emptyCount,
-			TotalSlots:         len(cb.slots),
-			GeneratedTokens:    make(map[string]int),
-			StepDuration:       time.Since(stepStart),
-			PromotedSessionIDs: promotedIDs,
-			KVCacheBytesUsed:   cb.currentKVCacheBytesLocked(),
-			SlotDepths:         make(map[string]int),
-			Phase:              PhaseIdle,
-			DecodeResidentUIDs: []uint64{},
-			PrefixHits:         prefixHits,
-			PrefixReuseTokens:  prefixReuseTokens,
+			Iteration:           cb.iteration,
+			YieldedSlots:        yieldedCount,
+			FinishedSlots:       finishedCount,
+			EmptySlots:          emptyCount,
+			TotalSlots:          len(cb.slots),
+			GeneratedTokens:     make(map[string]int),
+			StepDuration:        time.Since(stepStart),
+			PromotedSessionIDs:  promotedIDs,
+			KVCacheBytesUsed:    cb.currentKVCacheBytesLocked(),
+			SlotDepths:          make(map[string]int),
+			Phase:               PhaseIdle,
+			DecodeResidentUIDs:  []uint64{},
+			PrefixHits:          prefixHits,
+			PrefixReuseTokens:   prefixReuseTokens,
+			PrefixQueriedTokens: prefixQueriedTokens,
 		}, nil
 	}
 
@@ -1102,6 +1114,7 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 		DecodeResidentUIDs:   residentUIDs,
 		PrefixHits:           prefixHits,
 		PrefixReuseTokens:    prefixReuseTokens,
+		PrefixQueriedTokens:  prefixQueriedTokens,
 	}, nil
 }
 
