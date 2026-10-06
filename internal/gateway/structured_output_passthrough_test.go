@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -341,5 +342,98 @@ func TestChatRejectsMalformedJSONSchema422(t *testing.T) {
 	}
 	if *hits != len(passes) {
 		t.Fatalf("upstream hits = %d, want %d", *hits, len(passes))
+	}
+}
+
+// jsonSchemaRF wraps a raw schema in a json_schema response_format.
+func jsonSchemaRF(schema string) json.RawMessage {
+	return json.RawMessage(`{"type":"json_schema","json_schema":{"name":"x","schema":` + schema + `}}`)
+}
+
+// paddedStringSchema returns a valid {"type":"string","description":"..."} schema
+// of exactly n bytes.
+func paddedStringSchema(t *testing.T, n int) string {
+	t.Helper()
+	base := `{"type":"string","description":""}`
+	if n < len(base) {
+		t.Fatalf("n=%d below base %d", n, len(base))
+	}
+	return `{"type":"string","description":"` + strings.Repeat("a", n-len(base)) + `"}`
+}
+
+// nestedArraySchema returns a valid schema whose object/array nesting depth is
+// exactly depth: (depth-1) array levels wrapping a string leaf.
+func nestedArraySchema(depth int) string {
+	s := `{"type":"string"}`
+	for i := 1; i < depth; i++ {
+		s = `{"type":"array","items":` + s + `}`
+	}
+	return s
+}
+
+// TestChatRejectsOversizedJSONSchema422 pins oss-port-gateway-json-schema-size-cap
+// (ADAPT of TGI router/src/validation.rs:341-406@b4adbf2): the json_schema schema is
+// accepted exactly at the byte (64 KiB) and nesting-depth (32) caps, refused with 422
+// + a closed code at cap+1 before any upstream call, the caps are env-overridable,
+// and the cap never touches tool definitions.
+func TestChatRejectsOversizedJSONSchema422(t *testing.T) {
+	if got := jsonNestingDepth([]byte(nestedArraySchema(defaultJSONSchemaMaxDepth)), 1<<20); got != defaultJSONSchemaMaxDepth {
+		t.Fatalf("nestedArraySchema depth = %d, want %d", got, defaultJSONSchemaMaxDepth)
+	}
+	if got := jsonNestingDepth([]byte(`{"a":"{[{[\"}"}`), 99); got != 1 {
+		t.Fatalf("brackets inside strings counted: depth = %d, want 1", got)
+	}
+	gw, hits, gotRF := newStructuredOutputProxy(t)
+
+	atBytes := jsonSchemaRF(paddedStringSchema(t, defaultJSONSchemaMaxBytes))
+	if status, code := postResponseFormat(t, gw, atBytes); status != http.StatusOK {
+		t.Fatalf("schema at byte cap: status=%d code=%q, want 200", status, code)
+	}
+	if !jsonEqual(t, *gotRF, atBytes) {
+		t.Fatal("schema at byte cap not forwarded verbatim")
+	}
+	atDepth := jsonSchemaRF(nestedArraySchema(defaultJSONSchemaMaxDepth))
+	if status, code := postResponseFormat(t, gw, atDepth); status != http.StatusOK {
+		t.Fatalf("schema at depth cap: status=%d code=%q, want 200", status, code)
+	}
+	accepted := *hits
+
+	if status, code := postResponseFormat(t, gw, jsonSchemaRF(paddedStringSchema(t, defaultJSONSchemaMaxBytes+1))); status != http.StatusUnprocessableEntity || code != errCodeJSONSchemaTooLarge {
+		t.Fatalf("schema at byte cap+1: status=%d code=%q, want 422 %q", status, code, errCodeJSONSchemaTooLarge)
+	}
+	if status, code := postResponseFormat(t, gw, jsonSchemaRF(nestedArraySchema(defaultJSONSchemaMaxDepth+1))); status != http.StatusUnprocessableEntity || code != errCodeJSONSchemaTooDeep {
+		t.Fatalf("schema at depth cap+1: status=%d code=%q, want 422 %q", status, code, errCodeJSONSchemaTooDeep)
+	}
+	if *hits != accepted {
+		t.Fatalf("upstream hits grew %d -> %d on refused schemas", accepted, *hits)
+	}
+
+	// Env override tightens both caps.
+	t.Setenv("FAK_GATEWAY_JSON_SCHEMA_MAX_BYTES", "64")
+	t.Setenv("FAK_GATEWAY_JSON_SCHEMA_MAX_DEPTH", "3")
+	if status, _ := postResponseFormat(t, gw, jsonSchemaRF(paddedStringSchema(t, 64))); status != http.StatusOK {
+		t.Fatalf("override byte cap exact: status=%d, want 200", status)
+	}
+	if status, code := postResponseFormat(t, gw, jsonSchemaRF(paddedStringSchema(t, 65))); code != errCodeJSONSchemaTooLarge {
+		t.Fatalf("override byte cap+1: status=%d code=%q, want %q", status, code, errCodeJSONSchemaTooLarge)
+	}
+	t.Setenv("FAK_GATEWAY_JSON_SCHEMA_MAX_BYTES", "1024")
+	if status, _ := postResponseFormat(t, gw, jsonSchemaRF(nestedArraySchema(3))); status != http.StatusOK {
+		t.Fatalf("override depth cap exact: status=%d, want 200", status)
+	}
+	if status, code := postResponseFormat(t, gw, jsonSchemaRF(nestedArraySchema(4))); code != errCodeJSONSchemaTooDeep {
+		t.Fatalf("override depth cap+1: status=%d code=%q, want %q", status, code, errCodeJSONSchemaTooDeep)
+	}
+
+	// The cap is scoped to response_format: an oversized tool definition still passes.
+	bigParams := nestedArraySchema(10)
+	body := []byte(`{"model":"qwen3.6-27b","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"allow_read","description":"` + strings.Repeat("d", 200) + `","parameters":` + bigParams + `}}]}`)
+	resp, err := http.Post(gw+"/v1/chat/completions", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("oversized tool definition: status=%d, want 200 (cap must not apply to tools)", resp.StatusCode)
 	}
 }

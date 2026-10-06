@@ -999,7 +999,68 @@ const (
 	errCodeJSONSchemaNotObject       = "json_schema_not_object"
 	errCodeJSONSchemaMissingType     = "json_schema_missing_type"
 	errCodeJSONSchemaMissingProperty = "json_schema_missing_properties"
+	errCodeJSONSchemaTooLarge        = "json_schema_too_large"
+	errCodeJSONSchemaTooDeep         = "json_schema_too_deep"
 )
+
+// Structured-output schema caps (oss-port-gateway-json-schema-size-cap), ADAPTed
+// from TGI's size guard on grammar inputs (router/src/validation.rs:341-406@b4adbf2,
+// Apache-2.0). A ride engine compiles response_format.json_schema.schema into a
+// decoding FSM/grammar; an unbounded schema is a cheap way to burn upstream compile
+// time, so the gateway refuses it with 422 before forwarding. The cap applies ONLY to
+// the json_schema response_format's schema bytes (whitespace-trimmed, as sent) and
+// its object/array nesting depth ({} is depth 1) — never to tool definitions or other
+// request fields. Override with FAK_GATEWAY_JSON_SCHEMA_MAX_BYTES /
+// FAK_GATEWAY_JSON_SCHEMA_MAX_DEPTH (positive integers; anything else keeps the default).
+const (
+	defaultJSONSchemaMaxBytes = 64 << 10
+	defaultJSONSchemaMaxDepth = 32
+)
+
+func jsonSchemaCap(env string, def int) int {
+	if raw := strings.TrimSpace(os.Getenv(env)); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
+}
+
+// jsonNestingDepth returns the maximum object/array nesting depth of raw, scanning
+// bytes (string-aware) and stopping early once the depth exceeds limit. Malformed
+// JSON is left to the shape checks that follow.
+func jsonNestingDepth(raw []byte, limit int) int {
+	depth, maxDepth := 0, 0
+	inString, escaped := false, false
+	for _, c := range raw {
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{', '[':
+			depth++
+			if depth > maxDepth {
+				maxDepth = depth
+				if maxDepth > limit {
+					return maxDepth
+				}
+			}
+		case '}', ']':
+			depth--
+		}
+	}
+	return maxDepth
+}
 
 // validateResponseFormat checks an OpenAI `response_format` carrier. It returns
 // ("", "") when the request may proceed (absent, json_object, text, any other type
@@ -1034,6 +1095,12 @@ func validateResponseFormat(raw json.RawMessage) (code, msg string) {
 	schema := bytes.TrimSpace(js.Schema)
 	if len(schema) == 0 || bytes.Equal(schema, []byte("null")) {
 		return errCodeJSONSchemaMissing, "response_format.json_schema.schema is required when type is json_schema"
+	}
+	if maxBytes := jsonSchemaCap("FAK_GATEWAY_JSON_SCHEMA_MAX_BYTES", defaultJSONSchemaMaxBytes); len(schema) > maxBytes {
+		return errCodeJSONSchemaTooLarge, "response_format.json_schema.schema is " + strconv.Itoa(len(schema)) + " bytes; the cap is " + strconv.Itoa(maxBytes)
+	}
+	if maxDepth := jsonSchemaCap("FAK_GATEWAY_JSON_SCHEMA_MAX_DEPTH", defaultJSONSchemaMaxDepth); jsonNestingDepth(schema, maxDepth) > maxDepth {
+		return errCodeJSONSchemaTooDeep, "response_format.json_schema.schema nests deeper than the cap of " + strconv.Itoa(maxDepth)
 	}
 	var obj map[string]json.RawMessage
 	if schema[0] != '{' || json.Unmarshal(schema, &obj) != nil {
