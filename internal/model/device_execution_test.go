@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -196,4 +197,118 @@ func assertDeviceOnlyFallback(t *testing.T, s *Session, invoke func()) {
 		}
 	}()
 	invoke()
+}
+
+// The advertised device seam delegates to cpu-ref. This checks software admission,
+// including the portable control; it does not qualify physical device execution.
+// fak-test:runtime medium est=30s lane=default
+func TestDeviceOnlyV41PublicEntriesRefuseHostArchitecture(t *testing.T) {
+	ref := compute.Default()
+	if ref == nil || ref.Name() != "cpu-ref" || ref.Caps().DeviceMemory {
+		t.Fatal("V4.1 admission fixture requires the non-device cpu-ref backend")
+	}
+	// Reuse the existing block-aligned Q2_K gate/up + Q3_K down fixture once.
+	m := v41MixedQuantExpertModel(t)
+	m.Cfg.SwigluLimit = 0
+	t.Cleanup(func() {
+		if err := m.CloseWeights(); err != nil {
+			t.Errorf("CloseWeights: %v", err)
+		}
+	})
+
+	for _, tc := range []struct {
+		name   string
+		policy ExecutionPolicy
+		stage  string
+		invoke func(*Session) []float32
+	}{
+		{"Prefill", ExecutionPolicyDeviceOnly, "prefill", func(s *Session) []float32 {
+			return s.Prefill([]int{1})
+		}},
+		{"PrefillNoLogits", ExecutionPolicyDeviceOnly, "prefill-no-logits", func(s *Session) []float32 {
+			s.PrefillNoLogits([]int{1})
+			return nil
+		}},
+		{"Step", ExecutionPolicyDeviceOnly, "decode", func(s *Session) []float32 {
+			return s.Step(1)
+		}},
+		{"PortableStep", ExecutionPolicyPortable, "", func(s *Session) []float32 {
+			return s.Step(1)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			be := &v41HalSeamBackend{Backend: ref}
+			if !be.Caps().DeviceMemory || !be.Caps().UploadDtype ||
+				!be.SupportsDeviceWeightDtype(compute.Q2_K) || !be.SupportsDeviceWeightDtype(compute.Q3_K) {
+				t.Fatal("fixture must advertise device memory and both expert dtypes")
+			}
+			s := &Session{
+				M: m, Cache: NewKVCache(m.Cfg), Backend: be,
+				halW: map[string]compute.Tensor{},
+				DenseGPULayers: m.Cfg.NumLayers, GPULayers: m.Cfg.NumLayers,
+			}
+			t.Cleanup(s.Close)
+			s.SetExecutionPolicy(tc.policy)
+			st := s.v41State()
+			if st.expertGateUp == nil || st.expertDown == nil {
+				t.Fatal("fixture did not bind both expert callbacks")
+			}
+			gateUp, down := st.expertGateUp, st.expertDown
+			gateUpCalls, downCalls := 0, 0
+			st.expertGateUp = func(layer int, stem string, x []float32) ([]float32, v41ExpertGateUpOutcome, error) {
+				gateUpCalls++
+				return gateUp(layer, stem, x)
+			}
+			st.expertDown = func(layer int, stem string, x []float32) ([]float32, v41ExpertDownOutcome, error) {
+				downCalls++
+				return down(layer, stem, x)
+			}
+
+			var logits []float32
+			err := recoverError(func() { logits = tc.invoke(s) })
+			if tc.policy == ExecutionPolicyDeviceOnly {
+				var refused *BackendForwardOperationError
+				if !errors.As(err, &refused) {
+					t.Fatalf("public entry panic = %T %v, want architecture refusal", err, err)
+				}
+				if refused.Stage != tc.stage+": architecture uses host model compute" ||
+					refused.Path != "device-only" || refused.Backend != be.Name() || refused.Layer != -1 {
+					t.Fatalf("wrong admission boundary: %+v", refused)
+				}
+				if refused.Cause == nil || refused.Cause.Error() != "device-only execution policy forbids host model compute" {
+					t.Fatalf("wrong architecture refusal cause: %v", refused.Cause)
+				}
+				if !s.HostFallbackObserved() || !s.BackendSessionClosed() {
+					t.Fatalf("refusal fallback=%t closed=%t, want both true", s.HostFallbackObserved(), s.BackendSessionClosed())
+				}
+				if gateUpCalls != 0 || downCalls != 0 || be.matmuls != 0 || be.swiglu != 0 {
+					t.Fatalf("refusal ran expert work: callbacks=%d/%d matmul=%d swiglu=%d", gateUpCalls, downCalls, be.matmuls, be.swiglu)
+				}
+				if len(st.history) != 0 {
+					t.Fatalf("refused entry advanced history: %v", st.history)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("portable Step refused the same fixture: %v", err)
+			}
+			if s.HostFallbackObserved() || s.BackendSessionClosed() {
+				t.Fatalf("portable control fallback=%t closed=%t, want both false", s.HostFallbackObserved(), s.BackendSessionClosed())
+			}
+			if len(logits) != m.Cfg.VocabSize || len(st.history) != 1 || st.history[0] != 1 {
+				t.Fatalf("portable control logits=%d history=%v", len(logits), st.history)
+			}
+			for i, value := range logits {
+				if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+					t.Fatalf("portable logit[%d]=%g, want finite", i, value)
+				}
+			}
+			picks := m.Cfg.NumExpertsPerTok * m.Cfg.NumLayers
+			if gateUpCalls != picks || downCalls != picks || be.matmuls != 3*picks || be.swiglu != picks {
+				t.Fatalf("portable seam callbacks=%d/%d matmul=%d swiglu=%d, want %d/%d/%d/%d",
+					gateUpCalls, downCalls, be.matmuls, be.swiglu, picks, picks, 3*picks, picks)
+			}
+		})
+	}
 }
