@@ -254,10 +254,18 @@ func NewRepetitionPenaltySanitizer(frequencyPenalty, presencePenalty float64) *R
 // ApplyPenalty modifies logits according to the current generation counts.
 // logit[t] -= frequencyPenalty * count[t] + presencePenalty * (1 if count[t] > 0 else 0)
 func (s *RepetitionPenaltySanitizer) ApplyPenalty(logits []float32, counts []int32) []float32 {
-	if s == nil || (s.FrequencyPenalty == 0 && s.PresencePenalty == 0) || len(counts) == 0 {
+	return s.ApplyPenaltyInto(nil, logits, counts)
+}
+
+// ApplyPenaltyInto is ApplyPenalty writing the penalized copy into dst's backing array
+// (grown when short) so one scratch row can serve every verify row of a round. When no
+// penalty applies it returns logits itself, so a caller reusing the result as scratch must
+// first check penalizes.
+func (s *RepetitionPenaltySanitizer) ApplyPenaltyInto(dst, logits []float32, counts []int32) []float32 {
+	if !s.penalizes(counts) {
 		return logits
 	}
-	eff := append([]float32(nil), logits...)
+	eff := append(dst[:0], logits...)
 	for tok, c := range counts {
 		if tok >= len(eff) || c <= 0 {
 			continue
@@ -266,6 +274,10 @@ func (s *RepetitionPenaltySanitizer) ApplyPenalty(logits []float32, counts []int
 		eff[tok] -= float32(penalty)
 	}
 	return eff
+}
+
+func (s *RepetitionPenaltySanitizer) penalizes(counts []int32) bool {
+	return s != nil && (s.FrequencyPenalty != 0 || s.PresencePenalty != 0) && len(counts) > 0
 }
 
 // DetectDegenerateLoop checks if the suffix of history exhibits a periodic cyclic loop.
@@ -476,11 +488,14 @@ func ParallelVerifyKernel(
 		return VerificationResult{}, fmt.Errorf("model: parallel verify forward returned %d rows for %d draft tokens", len(rows), len(draft))
 	}
 
-	// Compute penalized argmax array: [0..K]
+	// Compute penalized argmax array: [0..K]. Each penalized row is consumed by argmax
+	// before the next is built, so one per-round scratch row serves all of them.
+	var penaltyScratch []float32
 	targetArgmax := make([]int, len(draft)+1)
 	penalizedLast := lastLogitsCopy
-	if sanitizer != nil && len(counts) > 0 {
-		penalizedLast = sanitizer.ApplyPenalty(lastLogitsCopy, counts)
+	if sanitizer.penalizes(counts) {
+		penaltyScratch = sanitizer.ApplyPenaltyInto(penaltyScratch, lastLogitsCopy, counts)
+		penalizedLast = penaltyScratch
 	}
 	targetArgmax[0] = argmaxF32(penalizedLast)
 
@@ -491,8 +506,9 @@ func ParallelVerifyKernel(
 			simCounts[targetArgmax[i]]++
 		}
 		penalizedRow := row
-		if sanitizer != nil && len(simCounts) > 0 {
-			penalizedRow = sanitizer.ApplyPenalty(row, simCounts)
+		if sanitizer.penalizes(simCounts) {
+			penaltyScratch = sanitizer.ApplyPenaltyInto(penaltyScratch, row, simCounts)
+			penalizedRow = penaltyScratch
 		}
 		targetArgmax[i+1] = argmaxF32(penalizedRow)
 	}

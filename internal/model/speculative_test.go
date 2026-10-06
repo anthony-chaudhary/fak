@@ -621,3 +621,79 @@ func TestRollbackResidentSuffixUsesResidentAuthority(t *testing.T) {
 		t.Fatalf("non-positive rollback changed state: %d, want 0", got)
 	}
 }
+
+// TestSpeculativePenaltyScratchReuseMatchesClone pins the per-round penalty scratch row:
+// ApplyPenaltyInto is bit-identical to the ApplyPenalty clone, the chain verify accepts the
+// same tokens as a clone-per-row penalized greedy reference, and the penalty costs one row
+// allocation per round instead of one per draft row.
+func TestSpeculativePenaltyScratchReuseMatchesClone(t *testing.T) {
+	sanitizer := NewRepetitionPenaltySanitizer(1.0, 0.5)
+	cfg := syntheticDecodeCfg()
+	m := NewSynthetic(cfg)
+	prompt := []int{1, 2, 3, 4}
+	counts := make([]int32, cfg.VocabSize)
+	for _, tok := range prompt {
+		counts[tok]++
+	}
+
+	src := []float32{4, 3, 2, 1, 0}
+	srcCounts := []int32{0, 2, 1, 0, 3}
+	dst := []float32{9, 9, 9, 9, 9, 9, 9, 9}
+	into := sanitizer.ApplyPenaltyInto(dst, src, srcCounts)
+	clone := sanitizer.ApplyPenalty(src, srcCounts)
+	if len(into) != len(clone) {
+		t.Fatalf("ApplyPenaltyInto len %d, want %d", len(into), len(clone))
+	}
+	for i := range clone {
+		if math.Float32bits(into[i]) != math.Float32bits(clone[i]) {
+			t.Fatalf("ApplyPenaltyInto[%d] = %v, want %v", i, into[i], clone[i])
+		}
+	}
+	if &into[0] != &dst[0] {
+		t.Fatalf("ApplyPenaltyInto did not reuse the scratch backing array")
+	}
+
+	ref := m.NewSession()
+	last := ref.Prefill(prompt)
+	sim := append([]int32(nil), counts...)
+	want := make([]int, 4)
+	want[0] = argmaxF32(sanitizer.ApplyPenalty(last, sim))
+	for i := 1; i < len(want); i++ {
+		sim[want[i-1]]++
+		want[i] = argmaxF32(sanitizer.ApplyPenalty(ref.Step(want[i-1]), sim))
+	}
+	draft := []int{want[0], want[1], want[2], (want[3] + 1) % cfg.VocabSize}
+
+	target := m.NewSession()
+	lastLogits := target.Prefill(prompt)
+	res, err := ParallelVerifyKernel(context.Background(), target, prompt, NewLinearProposal(draft, nil), lastLogits, sanitizer, counts)
+	if err != nil {
+		t.Fatalf("ParallelVerifyKernel: %v", err)
+	}
+	if !reflect.DeepEqual(res.AcceptedTokens, want[:3]) || res.CorrectionToken != want[3] {
+		t.Fatalf("verify = accepted %v correction %d, want %v correction %d", res.AcceptedTokens, res.CorrectionToken, want[:3], want[3])
+	}
+
+	rejected := 0
+	for rejected == argmaxF32(lastLogits) || rejected == want[0] {
+		rejected++
+	}
+	const k = 6
+	rejectAll := make([]int, k)
+	for i := range rejectAll {
+		rejectAll[i] = rejected
+	}
+	run := func(s *RepetitionPenaltySanitizer) float64 {
+		return testing.AllocsPerRun(5, func() {
+			sess := m.NewSession()
+			ll := sess.Prefill(prompt)
+			if _, err := ParallelVerifyKernel(context.Background(), sess, prompt, NewLinearProposal(rejectAll, nil), ll, s, counts); err != nil {
+				t.Fatalf("ParallelVerifyKernel: %v", err)
+			}
+		})
+	}
+	plain, penalized := run(nil), run(sanitizer)
+	if extra := penalized - plain; extra > 1 {
+		t.Fatalf("penalty allocs/round = %v over plain, want at most 1 scratch row (k=%d)", extra, k)
+	}
+}
