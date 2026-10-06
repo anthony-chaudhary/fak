@@ -3166,6 +3166,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		ProviderCache: &compReuseEntry,
 		Usage:         Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen, PromptTokensDetails: &UsageTokenDetails{CachedTokens: matched}},
 		VulkanMTP:     genRes.vulkanMTP,
+		Timings:       NewTimings(promptTok, matched, gen, prefillS, decodeS),
 	}
 	if sp.NativeInferenceReceipt {
 		accounting := p.nativeCacheAccountingFor(nativeCacheAccountingFacts{

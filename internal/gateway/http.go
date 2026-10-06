@@ -1151,6 +1151,7 @@ func (s *Server) buildChatResponse(comp *agent.Completion, asst agent.Message, f
 		Model:   respModel,
 		Choices: []ChatChoice{{Index: 0, Message: asst, FinishReason: finish}},
 		Usage:   comp.Usage,
+		Timings: comp.Timings,
 	}
 	redactions := wireRedactionsFrom(comp.PreSendRedactionRecords)
 	if len(adjs) > 0 || len(resultAdmissions) > 0 || len(redactions) > 0 || inputTriggerRoute != nil {

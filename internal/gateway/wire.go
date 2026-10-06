@@ -522,7 +522,10 @@ type ChatResponse struct {
 	Model   string       `json:"model"`
 	Choices []ChatChoice `json:"choices"`
 	Usage   agent.Usage  `json:"usage"`
-	Fak     *FakExt      `json:"fak,omitempty"`
+	// Timings is llama.cpp's per-request prefill/decode split, present only for a
+	// natively served turn.
+	Timings *agent.Timings `json:"timings,omitempty"`
+	Fak     *FakExt        `json:"fak,omitempty"`
 }
 
 // ChatStreamResponse is the OpenAI-compatible SSE chunk shape emitted when the

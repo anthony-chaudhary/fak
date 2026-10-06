@@ -1494,7 +1494,7 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 			opt(&sample)
 		}
 	}
-	s.metrics.observeInferenceUsageServed(s.chatServingLocality(ctx, sample.Model), comp.Usage, comp.FinishReason, dur)
+	s.metrics.observeCompletionServed(s.chatServingLocality(ctx, sample.Model), comp, dur)
 	s.observePrefixReuseTurn(ctx, fullHistory, comp)
 	s.observePlannerRequestMemory()
 	// The served turn has mutated the KV cache; relieve HBM pressure by demoting a hot span to

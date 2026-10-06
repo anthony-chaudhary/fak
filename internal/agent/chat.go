@@ -271,6 +271,48 @@ type Usage struct {
 	CompletionTokensDetails *UsageCompletionTokenDetails `json:"completion_tokens_details,omitempty"`
 }
 
+// Timings is llama.cpp server's per-request `timings` object, ported field for
+// field so llama.cpp-aware clients and agents read fak without an adapter.
+// CacheN is the prompt prefix served from the KV cache (not re-prefilled).
+type Timings struct {
+	CacheN              int     `json:"cache_n"`
+	PromptN             int     `json:"prompt_n"`
+	PromptMS            float64 `json:"prompt_ms"`
+	PromptPerTokenMS    float64 `json:"prompt_per_token_ms"`
+	PromptPerSecond     float64 `json:"prompt_per_second"`
+	PredictedN          int     `json:"predicted_n"`
+	PredictedMS         float64 `json:"predicted_ms"`
+	PredictedPerTokenMS float64 `json:"predicted_per_token_ms"`
+	PredictedPerSecond  float64 `json:"predicted_per_second"`
+}
+
+// NewTimings builds Timings from token counts and phase seconds. Like llama.cpp,
+// PromptN counts only the tokens actually prefilled (promptTokens - cachedTokens).
+func NewTimings(promptTokens, cachedTokens, predicted int, prefillS, decodeS float64) *Timings {
+	if cachedTokens < 0 {
+		cachedTokens = 0
+	}
+	if cachedTokens > promptTokens {
+		cachedTokens = promptTokens
+	}
+	t := &Timings{CacheN: cachedTokens, PromptN: promptTokens - cachedTokens, PredictedN: predicted}
+	if prefillS > 0 {
+		t.PromptMS = prefillS * 1e3
+		if t.PromptN > 0 {
+			t.PromptPerTokenMS = t.PromptMS / float64(t.PromptN)
+			t.PromptPerSecond = float64(t.PromptN) / prefillS
+		}
+	}
+	if decodeS > 0 {
+		t.PredictedMS = decodeS * 1e3
+		if predicted > 0 {
+			t.PredictedPerTokenMS = t.PredictedMS / float64(predicted)
+			t.PredictedPerSecond = float64(predicted) / decodeS
+		}
+	}
+	return t
+}
+
 // UsageTokenDetails carries provider-specific prompt/input token subcounters.
 type UsageTokenDetails struct {
 	CachedTokens int `json:"cached_tokens,omitempty"`
@@ -394,6 +436,11 @@ type Completion struct {
 	// it byte-exact) — the reversible-on-audit data a count alone cannot give. Nil on
 	// the default-inert and Anthropic-passthrough paths, exactly like the count.
 	PreSendRedactionRecords []TranscriptRedaction
+
+	// Timings is the per-request prefill/decode split a native planner measured,
+	// in llama.cpp server's `timings` shape. Nil when the planner cannot see the
+	// prefill boundary (a buffered remote provider).
+	Timings *Timings
 
 	// Model is the model id the UPSTREAM reported it served this completion with
 	// (the provider response's `model` field), or "" when the provider omitted it.

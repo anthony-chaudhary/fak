@@ -808,6 +808,38 @@ func (m *gatewayMetrics) observeInferenceUsageServed(loc servingLocality, usage 
 	)
 }
 
+// observeCompletionServed ingests a planner Completion. When the planner reported
+// Timings (a native in-kernel turn), the gateway-side TTFT is everything before
+// decode began — admission, prefill, first token — so the prefill/decode split,
+// TTFT and TPOT histograms fill on /v1/chat/completions, not only on the Anthropic
+// streaming passthrough. Without Timings the turn stays buffered (ttft=0).
+func (m *gatewayMetrics) observeCompletionServed(loc servingLocality, comp *agent.Completion, dur time.Duration) {
+	if comp == nil {
+		return
+	}
+	usage := comp.Usage
+	m.observeInferenceServedTimed(loc,
+		usage.UncachedPromptTokens(),
+		usage.CompletionTokens,
+		usage.CachedPromptTokens(),
+		usage.CacheCreationInputTokens,
+		comp.FinishReason,
+		dur,
+		completionTTFT(comp.Timings, dur),
+	)
+}
+
+func completionTTFT(t *agent.Timings, dur time.Duration) time.Duration {
+	if t == nil || dur <= 0 || (t.PromptMS <= 0 && t.PredictedMS <= 0) {
+		return 0
+	}
+	ttft := dur - time.Duration(t.PredictedMS*float64(time.Millisecond))
+	if ttft <= 0 {
+		return time.Duration(t.PromptMS * float64(time.Millisecond))
+	}
+	return ttft
+}
+
 // observeInferenceServed is observeInference plus WHO SERVED THE TURN — the
 // self-hosted attribution the durable usage row needs. loc is what servedLocality
 // resolved; localityUnknown counts the turn in the unsplit totals and in neither
