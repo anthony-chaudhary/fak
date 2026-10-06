@@ -409,6 +409,27 @@ func (s *Session) verifyForwardBatched(ids []int, pos []int, allow func(q, k int
 		cosP[q], sinP[q] = ropeRow(cfg, pos[q])
 	}
 
+	// The tree key set depends only on (q, mask), never on layer or head, so it is built
+	// once per call: allow is consulted P*P times instead of NumLayers*NumHeads*P*P.
+	var treeKeys [][]int
+	maxKeys := 0
+	if allow != nil {
+		treeKeys = make([][]int, P)
+		for q := 0; q < P; q++ {
+			keys := make([]int, 0, base+P)
+			for j := 0; j < base; j++ {
+				keys = append(keys, j)
+			}
+			for k := 0; k < P; k++ {
+				if allow(q, k) {
+					keys = append(keys, base+k)
+				}
+			}
+			treeKeys[q] = keys
+			maxKeys = max(maxKeys, len(keys))
+		}
+	}
+
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
 
@@ -470,20 +491,13 @@ func (s *Session) verifyForwardBatched(ids []int, pos []int, allow func(q, k int
 			// of each other, so two candidate continuations never attend to one another —
 			// the structural difference from the chain.
 			parFor(P, dispatchWorkers, func(lo, hi int) {
+				scratch := make([]float32, maxKeys)
 				for q := lo; q < hi; q++ {
+					keys := treeKeys[q]
 					for h := 0; h < nH; h++ {
 						kvh := h / grp
 						qh := Q[q*nH*hd+h*hd : q*nH*hd+(h+1)*hd]
-						keys := make([]int, 0, base+P)
-						for j := 0; j < base; j++ {
-							keys = append(keys, j)
-						}
-						for k := 0; k < P; k++ {
-							if allow(q, k) {
-								keys = append(keys, base+k)
-							}
-						}
-						scores := make([]float32, len(keys))
+						scores := scratch[:len(keys)]
 						for idx, j := range keys {
 							kh := Kl[j*w+kvh*hd : j*w+(kvh+1)*hd]
 							scores[idx] = dot(qh, kh) * scale

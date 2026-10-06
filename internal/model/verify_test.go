@@ -501,3 +501,60 @@ func qwen38HybridMTPEnabledSyntheticModelBench(b *testing.B) *Model {
 	}
 	return m
 }
+
+// TestVerifyForwardTreeHoistedKeySetMatchesSerial pins the hoisted tree key set: a causal
+// tree mask stays bit-identical to P sequential Steps, the mask is consulted once per (q, k)
+// rather than per layer x head, and the tree path allocates less than the chain path, which
+// still builds a fresh score slice per query x head x layer.
+func TestVerifyForwardTreeHoistedKeySetMatchesSerial(t *testing.T) {
+	m := NewSynthetic(cfgV(64, 4, 4, 2, 16, 128))
+	prompt := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
+	drafts := []int{13, 17, 4, 99, 200, 5, 42}
+	P := len(drafts)
+	causal := func(q, k int) bool { return k <= q }
+
+	ref := m.NewSession()
+	ref.Prefill(prompt)
+	refLogits := make([][]float32, P)
+	for j, d := range drafts {
+		refLogits[j] = ref.Step(d)
+	}
+
+	calls := 0
+	counted := func(q, k int) bool {
+		calls++
+		return causal(q, k)
+	}
+	tree := m.NewSession()
+	tree.Prefill(prompt)
+	got := tree.VerifyForward(drafts, nil, counted)
+	if len(got) != P {
+		t.Fatalf("tree VerifyForward returned %d rows, want %d", len(got), P)
+	}
+	for j := range refLogits {
+		if len(got[j]) != len(refLogits[j]) {
+			t.Fatalf("pos %d logit width %d != %d", j, len(got[j]), len(refLogits[j]))
+		}
+		for i := range refLogits[j] {
+			if math.Float32bits(got[j][i]) != math.Float32bits(refLogits[j][i]) {
+				t.Fatalf("pos %d logit[%d]: serial %v != tree %v", j, i, refLogits[j][i], got[j][i])
+			}
+		}
+	}
+	if calls != P*P {
+		t.Fatalf("allow consulted %d times, want %d (once per query/key pair)", calls, P*P)
+	}
+
+	run := func(allow func(q, k int) bool) func() {
+		return func() {
+			s := m.NewSession()
+			s.Prefill(prompt)
+			s.VerifyForward(drafts, nil, allow)
+		}
+	}
+	chainAllocs := testing.AllocsPerRun(5, run(nil))
+	treeAllocs := testing.AllocsPerRun(5, run(causal))
+	if treeAllocs >= chainAllocs {
+		t.Fatalf("tree allocs/run = %v, want fewer than chain %v", treeAllocs, chainAllocs)
+	}
+}
