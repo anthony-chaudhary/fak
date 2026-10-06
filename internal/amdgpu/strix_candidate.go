@@ -26,6 +26,10 @@ const (
 	DefaultMinParity        = 0.999900 // Minimum cosine parity against reference
 	DefaultNoiseBand        = 0.05     // 5% noise tolerance band (0.05)
 	DefaultSpeedupThreshold = 1.05     // Minimum speedup ratio for promotion (5% lift)
+	// MaxPinnedCandidateGain bounds how much faster a receipt's candidate arm may be
+	// than the registry-pinned candidate; beyond it the baseline must be re-pinned
+	// from a fresh measurement, because verifier authority alone must not promote it.
+	MaxPinnedCandidateGain = 10.0
 )
 
 // StrixCandidateVerdict represents the outcome classification of a candidate evaluation.
@@ -531,6 +535,14 @@ func (r *StrixCandidateRegistry) EvaluateReceipt(receipt *StrixValidationReceipt
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	for _, ab := range receipt.Ablations {
+		if baseline, ok := r.findBaselineLocked(ab.Feature, ab.Dimension, ab.CandidateArm.Name); ok {
+			if err := checkCandidatePlausible(baseline, ab); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	var comparisons []StrixCandidateComparison
 	for _, ab := range receipt.Ablations {
 		baseline, ok := r.findBaselineLocked(ab.Feature, ab.Dimension, ab.CandidateArm.Name)
@@ -560,6 +572,18 @@ func (r *StrixCandidateRegistry) EvaluateReceipt(receipt *StrixValidationReceipt
 		comparisons = append(comparisons, *comp)
 	}
 	return comparisons, nil
+}
+
+func checkCandidatePlausible(baseline *StrixCandidateBaseline, ab StrixAblationResult) error {
+	pinned := baseline.PinnedCandidate.LatencyUS
+	measured := ab.CandidateArm.LatencyUS
+	if pinned <= 0 || measured <= 0 {
+		return nil
+	}
+	if float64(pinned)/float64(measured) > MaxPinnedCandidateGain {
+		return fmt.Errorf("amdgpu: ablation %s candidate %dµs is more than %.0fx faster than pinned %dµs; re-pin the baseline from a fresh measurement before promotion", ab.Feature, measured, MaxPinnedCandidateGain, pinned)
+	}
+	return nil
 }
 
 // ValidateBenchmarkArtifact parses, verifies, and validates a benchmark artifact.
