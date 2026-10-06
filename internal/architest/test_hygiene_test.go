@@ -33,7 +33,9 @@ var hardcodedPortRe = regexp.MustCompile(`:(8080|50051|9090)\b`)
 // brittleSleepAllowlist records test sites where time.Sleep is intentionally used to simulate
 // execution duration or latency rather than for brittle goroutine synchronization (#11307).
 var brittleSleepAllowlist = map[string]string{
-	"internal/vdso/search_cache_test.go:183": "simulates cold engine execution duration for speedup calculation (#11492)",
+	"internal/vdso/search_cache_test.go:183":          "simulates cold engine execution duration for speedup calculation (#11492)",
+	"internal/metalgemm/keepalive_darwin_test.go:65":  "the idle gap between GEMVs is the condition the Metal keepalive exists to cover",
+	"internal/metalgemm/keepalive_darwin_test.go:119": "BenchmarkKeepAliveIdleGap records a host idle gap; the sleep is the measured input",
 }
 
 // scanTestHygiene inspects Go test AST for hardcoded port bindings and brittle synchronization sleeps.
