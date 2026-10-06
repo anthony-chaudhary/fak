@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/macfit"
 )
@@ -171,10 +170,4 @@ func writeTurnkeyBackpressure(w http.ResponseWriter, code string, maxSessions in
 		"type":    "rate_limit_error",
 		"code":    code,
 	}})
-}
-
-// capacityRetryDuration exposes the retry hint as a time.Duration for callers
-// that want to advertise it in a header computed elsewhere.
-func capacityRetryDuration() time.Duration {
-	return time.Duration(turnkeyBackpressureRetryAfter) * time.Second
 }
