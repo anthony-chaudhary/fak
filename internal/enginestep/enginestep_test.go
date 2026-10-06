@@ -333,3 +333,182 @@ func TestEngineStepNewClampsRingSize(t *testing.T) {
 		t.Fatalf("ring(0) recent = %+v, want one newest record", got)
 	}
 }
+
+// fak-test:runtime fast est=10ms lane=default
+func TestEngineStepSpeculativeIdleEmitsZeroFamilies(t *testing.T) {
+	r, _ := newFakeRecorder(8)
+	out := render(r)
+	for _, fam := range []string{MetricSpecRoundsTotal, MetricSpecDraftTokensTotal, MetricSpecAcceptedTokensTotal} {
+		if !strings.Contains(out, "# TYPE "+fam+" counter\n") || !strings.Contains(out, fam+" 0\n") {
+			t.Fatalf("idle render missing zero counter %s", fam)
+		}
+	}
+	for _, want := range []string{
+		"# TYPE " + MetricSpecAcceptedPerRound + " histogram\n",
+		MetricSpecAcceptedPerRound + "_count 0\n",
+		MetricDecodeTokensTotal + `{path="speculative"} 0` + "\n",
+		MetricDecodeStepSeconds + `_count{path="speculative"} 0` + "\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("idle render missing %q", want)
+		}
+	}
+	s := r.Snapshot(0, "")
+	if s.Speculative != nil {
+		t.Fatalf("idle speculative = %+v, want nil", s.Speculative)
+	}
+	raw, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["speculative"]; ok {
+		t.Fatalf("idle snapshot JSON carries speculative key: %s", raw)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestEngineStepSpeculativeRoundFoldsCountersSnapshotAndRing(t *testing.T) {
+	r, clk := newFakeRecorder(8)
+	r.ObserveSpeculativeRound(4, 3, 4, 2*time.Millisecond)
+	clk.advance(time.Second)
+	r.ObserveSpeculativeRound(4, 1, 2, 3*time.Millisecond)
+
+	s := r.Snapshot(10, "")
+	sp := s.Speculative
+	if sp == nil || sp.Rounds != 2 || sp.DraftTokens != 8 || sp.AcceptedTokens != 4 || sp.AcceptanceRate != 0.5 || sp.TokensPerRound != 3 {
+		t.Fatalf("speculative = %+v, want 2 rounds / 8 drafted / 4 accepted / rate 0.5 / 3 tok/round", sp)
+	}
+	if got := s.Decode[PathSpeculative]; got.Steps != 2 || got.Tokens != 6 || got.MaxLanes != 1 {
+		t.Fatalf("decode[speculative] = %+v, want 2 steps / 6 tokens / 1 lane", got)
+	}
+	if s.LastStepUnixNano != clk.t.UnixNano() {
+		t.Fatalf("last step = %d, want %d", s.LastStepUnixNano, clk.t.UnixNano())
+	}
+	if len(s.Recent) != 2 {
+		t.Fatalf("recent = %d, want 2", len(s.Recent))
+	}
+	want := []StepRecord{
+		{Kind: KindDecodeStep, Path: PathSpeculative, Lanes: 1, Tokens: 4, Proposed: 4, Accepted: 3, DurationNS: int64(2 * time.Millisecond)},
+		{Kind: KindDecodeStep, Path: PathSpeculative, Lanes: 1, Tokens: 2, Proposed: 4, Accepted: 1, DurationNS: int64(3 * time.Millisecond)},
+	}
+	for i, rec := range s.Recent {
+		w := want[i]
+		if rec.Kind != w.Kind || rec.Path != w.Path || rec.Lanes != w.Lanes || rec.Tokens != w.Tokens || rec.Proposed != w.Proposed || rec.Accepted != w.Accepted || rec.DurationNS != w.DurationNS {
+			t.Fatalf("recent[%d] = %+v, want %+v", i, rec, w)
+		}
+	}
+
+	raw, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct {
+		Speculative map[string]any   `json:"speculative"`
+		Recent      []map[string]any `json:"recent"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"rounds", "draft_tokens", "accepted_tokens", "acceptance_rate", "tokens_per_round"} {
+		if _, ok := m.Speculative[k]; !ok {
+			t.Fatalf("speculative JSON missing %q: %s", k, raw)
+		}
+	}
+	if len(m.Recent) != 2 || m.Recent[0]["proposed"] != float64(4) || m.Recent[0]["accepted"] != float64(3) {
+		t.Fatalf("recent JSON = %+v, want proposed/accepted keys", m.Recent)
+	}
+
+	out := render(r)
+	for _, w := range []string{
+		MetricSpecRoundsTotal + " 2\n",
+		MetricSpecDraftTokensTotal + " 8\n",
+		MetricSpecAcceptedTokensTotal + " 4\n",
+		MetricSpecAcceptedPerRound + `_bucket{le="0"} 0` + "\n",
+		MetricSpecAcceptedPerRound + `_bucket{le="1"} 1` + "\n",
+		MetricSpecAcceptedPerRound + `_bucket{le="3"} 2` + "\n",
+		MetricSpecAcceptedPerRound + "_sum 4\n",
+		MetricSpecAcceptedPerRound + "_count 2\n",
+		MetricDecodeTokensTotal + `{path="speculative"} 6` + "\n",
+		MetricDecodeStepSeconds + `_count{path="speculative"} 2` + "\n",
+		MetricDecodeStepLanes + `_sum{path="speculative"} 2` + "\n",
+	} {
+		if !strings.Contains(out, w) {
+			t.Fatalf("render missing %q\n%s", w, out)
+		}
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestEngineStepSpeculativeNoProposalIgnored(t *testing.T) {
+	r, _ := newFakeRecorder(8)
+	r.ObserveSpeculativeRound(0, 0, 1, time.Millisecond)
+	r.ObserveSpeculativeRound(-3, 2, 2, time.Millisecond)
+	s := r.Snapshot(10, "")
+	if s.Speculative != nil || len(s.Recent) != 0 || len(s.Decode) != 0 || s.LastStepUnixNano != 0 {
+		t.Fatalf("no-proposal rounds leaked: %+v", s)
+	}
+	if out := render(r); !strings.Contains(out, MetricSpecRoundsTotal+" 0\n") {
+		t.Fatalf("rounds counter moved on a no-proposal round")
+	}
+	var nilRec *Recorder
+	nilRec.ObserveSpeculativeRound(4, 2, 3, time.Millisecond)
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestEngineStepSpeculativeAcceptedClamped(t *testing.T) {
+	r, _ := newFakeRecorder(8)
+	r.ObserveSpeculativeRound(3, 9, 4, time.Millisecond)
+	r.ObserveSpeculativeRound(2, -5, 1, time.Millisecond)
+	s := r.Snapshot(10, "")
+	if sp := s.Speculative; sp == nil || sp.Rounds != 2 || sp.DraftTokens != 5 || sp.AcceptedTokens != 3 || sp.AcceptanceRate != 0.6 {
+		t.Fatalf("speculative = %+v, want accepted clamped to [0,proposed] (3/5)", sp)
+	}
+	if s.Recent[0].Accepted != 3 || s.Recent[1].Accepted != 0 {
+		t.Fatalf("recent accepted = %d,%d want 3,0", s.Recent[0].Accepted, s.Recent[1].Accepted)
+	}
+	out := render(r)
+	for _, w := range []string{
+		MetricSpecAcceptedTokensTotal + " 3\n",
+		MetricSpecAcceptedPerRound + `_bucket{le="0"} 1` + "\n",
+		MetricSpecAcceptedPerRound + "_sum 3\n",
+	} {
+		if !strings.Contains(out, w) {
+			t.Fatalf("render missing %q", w)
+		}
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestEngineStepSpeculativeCompactSegment(t *testing.T) {
+	r, _ := newFakeRecorder(8)
+	if line := r.Snapshot(0, "").Compact(); strings.Contains(line, " spec rounds=") {
+		t.Fatalf("idle compact carries spec segment: %q", line)
+	}
+	r.ObserveSpeculativeRound(4, 2, 3, time.Millisecond)
+	line := r.Snapshot(0, "").Compact()
+	if !strings.Contains(line, " spec rounds=1") || strings.Contains(line, "\n") {
+		t.Fatalf("compact = %q, want one line with spec rounds=1", line)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestEngineStepSpeculativeFiresStepObserver(t *testing.T) {
+	type call struct {
+		path  string
+		lanes int
+		d     time.Duration
+	}
+	var got []call
+	SetStepObserver(func(path string, lanes int, d time.Duration) { got = append(got, call{path, lanes, d}) })
+	t.Cleanup(func() { SetStepObserver(nil) })
+	r, _ := newFakeRecorder(8)
+	r.ObserveSpeculativeRound(0, 0, 1, time.Millisecond)
+	r.ObserveSpeculativeRound(4, 2, 3, 7*time.Millisecond)
+	if len(got) != 1 || got[0] != (call{PathSpeculative, 1, 7 * time.Millisecond}) {
+		t.Fatalf("observer calls = %+v, want one speculative/1/7ms", got)
+	}
+}

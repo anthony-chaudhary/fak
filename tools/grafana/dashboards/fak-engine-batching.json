@@ -2120,13 +2120,167 @@
       }
     },
     {
+      "id": 44,
+      "type": "timeseries",
+      "title": "Speculative acceptance and tokens per round",
+      "description": "Speculative decode: accepted / drafted tokens (vLLM SpecDecodingStats acceptance rate) and emitted tokens per verify round; tokens per round must exceed 1 for speculation to pay.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 77,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(fak_engine_spec_accepted_tokens_total{job=\"fak_gateway\",instance=~\"$instance\"}[$__rate_interval])) / sum(rate(fak_engine_spec_draft_tokens_total{job=\"fak_gateway\",instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "acceptance rate",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(fak_engine_decode_tokens_total{job=\"fak_gateway\",instance=~\"$instance\",path=\"speculative\"}[$__rate_interval])) / sum(rate(fak_engine_spec_rounds_total{job=\"fak_gateway\",instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "tokens per round",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 45,
+      "type": "timeseries",
+      "title": "Accepted draft tokens per round p50 / p99",
+      "description": "Speculative decode: distribution of draft tokens accepted per verify round.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 77,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(fak_engine_spec_accepted_per_round_bucket{job=\"fak_gateway\",instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p50",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(fak_engine_spec_accepted_per_round_bucket{job=\"fak_gateway\",instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p99",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "id": 34,
       "type": "row",
       "title": "End to end: request latency and where time goes",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 77,
+        "y": 85,
         "w": 24,
         "h": 1
       },
@@ -2143,7 +2297,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 78,
+        "y": 86,
         "w": 8,
         "h": 8
       },
@@ -2219,7 +2373,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 78,
+        "y": 86,
         "w": 10,
         "h": 8
       },
@@ -2284,7 +2438,7 @@
       },
       "gridPos": {
         "x": 18,
-        "y": 78,
+        "y": 86,
         "w": 6,
         "h": 8
       },
@@ -2357,7 +2511,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 86,
+        "y": 94,
         "w": 24,
         "h": 1
       },
@@ -2374,7 +2528,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 87,
+        "y": 95,
         "w": 12,
         "h": 8
       },
@@ -2462,7 +2616,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 87,
+        "y": 95,
         "w": 12,
         "h": 8
       },
@@ -2524,7 +2678,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 95,
+        "y": 103,
         "w": 24,
         "h": 1
       },
@@ -2541,7 +2695,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 96,
+        "y": 104,
         "w": 12,
         "h": 8
       },
@@ -2607,7 +2761,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 96,
+        "y": 104,
         "w": 12,
         "h": 8
       },

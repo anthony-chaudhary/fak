@@ -1928,6 +1928,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	}
 
 	p.recordTurnTax(promptTok, cacheable, matched)
+	enginestep.Default.ObservePrefixMatched(matched)
 
 	// Prefill divergent prompt tokens
 	logits := cachedLogits
@@ -1961,6 +1962,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 			logits = append([]float32(nil), rawLogits...)
 		}
 		prefillS = time.Since(tp).Seconds()
+		enginestep.Default.ObservePhase(enginestep.PhasePrefill, time.Since(tp))
 		p.recordNativePhase(nativePhaseTraceID(ctx), NativePhasePrefill, tp, time.Since(tp), true)
 	} else {
 		logits = append([]float32(nil), cachedLogits...)
@@ -2013,7 +2015,12 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		maxDraft = 4
 	}
 
+	// A verified round stays open through its bonus Step so the recorded round time is
+	// one whole draft-verify-advance cycle; it closes at the next iteration or after the loop.
+	var round speculativeRoundObservation
+
 	for gen < maxNew {
+		round.close(gen)
 		if err = ctx.Err(); err != nil {
 			break
 		}
@@ -2089,7 +2096,9 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 					break
 				}
 			}
+			stepStart := time.Now()
 			curLogits = s.Step(next)
+			enginestep.Default.ObserveDecodeStep(enginestep.PathSerial, 1, time.Since(stepStart))
 			continue
 		}
 
@@ -2099,11 +2108,13 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 			mtpExecution.ProposalRounds++
 			mtpExecution.ProposedTokens += len(proposal.Tokens)
 		}
+		roundStart := time.Now()
 		vRes, deviceReceipt, vErr := verifyGreedySpeculativeRoundObserved(ctx, s, committed, proposal, curLogits, eng.Sanitizer(), counts)
 		if vErr != nil {
 			err = vErr
 			break
 		}
+		round.open(roundStart, speculativeProposalSize(proposal), vRes.NumAccepted, gen)
 		if mtpExecution != nil {
 			mtpExecution.AcceptedTokens += vRes.NumAccepted
 			mtpExecution.RejectedTokens += len(proposal.Tokens) - vRes.NumAccepted
@@ -2247,7 +2258,9 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		curLogits = s.Step(bonus)
 	}
 
+	round.close(gen)
 	decodeS := time.Since(td).Seconds()
+	enginestep.Default.ObservePhase(enginestep.PhaseDecode, time.Since(td))
 	p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseDecode, td, time.Since(td), err == nil)
 	p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseTerminal, time.Now(), 0, err == nil)
 	return inKernelGenerateResult{
@@ -2261,6 +2274,35 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		stopped:    stopped,
 		vulkanMTP:  mtpExecution,
 	}, err
+}
+
+// speculativeRoundObservation carries one verified draft round to enginestep. The
+// round's emitted tokens are only known once its accept/bonus loop finishes, so
+// it is opened after verification and closed at the next round or decode exit.
+type speculativeRoundObservation struct {
+	start              time.Time
+	proposed, accepted int
+	genAtOpen          int
+	active             bool
+}
+
+func (r *speculativeRoundObservation) open(start time.Time, proposed, accepted, gen int) {
+	*r = speculativeRoundObservation{start: start, proposed: proposed, accepted: accepted, genAtOpen: gen, active: true}
+}
+
+func (r *speculativeRoundObservation) close(gen int) {
+	if !r.active {
+		return
+	}
+	r.active = false
+	enginestep.Default.ObserveSpeculativeRound(r.proposed, r.accepted, gen-r.genAtOpen, time.Since(r.start))
+}
+
+func speculativeProposalSize(p model.DraftProposal) int {
+	if len(p.Tokens) > 0 || p.Tree == nil {
+		return len(p.Tokens)
+	}
+	return len(p.Tree.Nodes)
 }
 
 func (p *InKernelPlanner) newSpeculativeSession() *model.Session {
@@ -2452,6 +2494,7 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 	p.configureNativeSession(s)
 
 	p.recordTurnTax(promptTok, cacheable, matched)
+	enginestep.Default.ObservePrefixMatched(matched)
 
 	// Prefill divergent prompt tokens
 	logits := cachedLogits
@@ -2468,6 +2511,7 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 			logits = append([]float32(nil), rawLogits...)
 		}
 		prefillS = time.Since(tp).Seconds()
+		enginestep.Default.ObservePhase(enginestep.PhasePrefill, time.Since(tp))
 		p.recordNativePhase(nativePhaseTraceID(ctx), NativePhasePrefill, tp, time.Since(tp), true)
 	} else {
 		logits = append([]float32(nil), cachedLogits...)
@@ -2515,16 +2559,25 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 	gen := 0
 	stopped := false
 	curLogits := logits
+	var round speculativeRoundObservation
 
 	for gen < maxNew {
+		round.close(gen)
 		if err = ctx.Err(); err != nil {
 			break
 		}
 
+		before := coord.Stats()
+		roundStart := time.Now()
 		accTokens, bonusTok, nextLogits, stepErr := coord.StepRound(ctx, committed, curLogits)
 		if stepErr != nil {
 			err = stepErr
 			break
+		}
+		if after := coord.Stats(); after.TotalProposed > before.TotalProposed {
+			round.open(roundStart, after.TotalProposed-before.TotalProposed, after.TotalAccepted-before.TotalAccepted, gen)
+		} else {
+			enginestep.Default.ObserveDecodeStep(enginestep.PathSerial, 1, time.Since(roundStart))
 		}
 
 		roundStopped := false
@@ -2565,7 +2618,9 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 		curLogits = nextLogits
 	}
 
+	round.close(gen)
 	decodeS := time.Since(td).Seconds()
+	enginestep.Default.ObservePhase(enginestep.PhaseDecode, time.Since(td))
 	p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseDecode, td, time.Since(td), err == nil)
 	p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseTerminal, time.Now(), 0, err == nil)
 	return inKernelGenerateResult{

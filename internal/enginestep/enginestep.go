@@ -12,7 +12,9 @@
 // ring of the most recent step records. Each Observe is O(buckets) integer work
 // under one short mutex, which is negligible against a millisecond-scale decode
 // forward. Metric vocabulary is adapted (not ported) from vLLM's v1 scheduler
-// stats (Apache-2.0): iteration tokens, running/waiting, per-phase request time.
+// stats (Apache-2.0): iteration tokens, running/waiting, per-phase request time;
+// the speculative families adapt vLLM's SpecDecodingStats (drafts, draft tokens,
+// accepted tokens).
 package enginestep
 
 import (
@@ -61,10 +63,13 @@ var Phases = []Phase{
 const (
 	PathSerial  = "serial"  // one lane advanced by Session.Step
 	PathBatched = "batched" // N lanes advanced by one BatchSession.StepBatchActive
+	// PathSpeculative is one draft-verify round: one target forward that commits
+	// the accepted draft prefix plus the bonus token.
+	PathSpeculative = "speculative"
 )
 
 // Paths is the closed decode-path vocabulary.
-var Paths = []string{PathSerial, PathBatched}
+var Paths = []string{PathSerial, PathBatched, PathSpeculative}
 
 // Record kinds in the recent-step ring.
 const (
@@ -88,6 +93,11 @@ const (
 	MetricPrefixMatchedTotal = "fak_engine_prefix_matched_tokens_total"
 	MetricRequestsActive     = "fak_engine_requests_active"
 	MetricLastStepTimestamp  = "fak_engine_last_step_timestamp_seconds"
+
+	MetricSpecRoundsTotal         = "fak_engine_spec_rounds_total"
+	MetricSpecDraftTokensTotal    = "fak_engine_spec_draft_tokens_total"
+	MetricSpecAcceptedTokensTotal = "fak_engine_spec_accepted_tokens_total"
+	MetricSpecAcceptedPerRound    = "fak_engine_spec_accepted_per_round"
 )
 
 // MetricFamilies lists every family WritePrometheus emits, in render order.
@@ -96,11 +106,14 @@ var MetricFamilies = []string{
 	MetricDecodeTokensTotal, MetricCohortSize, MetricCoalesceQueueDepth,
 	MetricPrefillTokensTotal, MetricPrefillChunksTotal, MetricPrefixMatchedTotal,
 	MetricRequestsActive, MetricLastStepTimestamp,
+	MetricSpecRoundsTotal, MetricSpecDraftTokensTotal, MetricSpecAcceptedTokensTotal,
+	MetricSpecAcceptedPerRound,
 }
 
 var (
 	secondsBuckets = []float64{0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60}
 	lanesBuckets   = []float64{1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64}
+	acceptBuckets  = []float64{0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16}
 )
 
 // DefaultRingSize is the number of recent step records Default keeps.
@@ -163,6 +176,9 @@ type StepRecord struct {
 	Lanes      int    `json:"lanes,omitempty"`
 	Tokens     int    `json:"tokens,omitempty"`
 	DurationNS int64  `json:"duration_ns"`
+	// Proposed and Accepted are set on speculative decode steps only.
+	Proposed int `json:"proposed,omitempty"`
+	Accepted int `json:"accepted,omitempty"`
 }
 
 type histogram struct {
@@ -243,13 +259,17 @@ type Recorder struct {
 	stepLanes    map[string]*histogram
 	decodeTokens map[string]uint64
 	cohortSize   *histogram
+	specAccepted *histogram
 
-	prefillTokens  uint64
-	prefillChunks  uint64
-	prefixMatched  uint64
-	queueDepth     int64
-	requestsActive int64
-	lastStep       time.Time
+	prefillTokens   uint64
+	prefillChunks   uint64
+	prefixMatched   uint64
+	specRounds      uint64
+	specDrafted     uint64
+	specAcceptedTok uint64
+	queueDepth      int64
+	requestsActive  int64
+	lastStep        time.Time
 
 	ring []StepRecord
 	next uint64 // sequence of the next record; ring index = (seq-1) % len(ring)
@@ -267,6 +287,7 @@ func New(ringSize int) *Recorder {
 		stepLanes:    make(map[string]*histogram, len(Paths)),
 		decodeTokens: make(map[string]uint64, len(Paths)),
 		cohortSize:   newHistogram(lanesBuckets),
+		specAccepted: newHistogram(acceptBuckets),
 		ring:         make([]StepRecord, ringSize),
 	}
 	for _, p := range Phases {
@@ -344,6 +365,32 @@ func (r *Recorder) ObserveDecodeStep(path string, lanes int, d time.Duration) {
 	r.decodeTokens[path] += uint64(lanes)
 	r.lastStep = r.now()
 	r.appendLocked(StepRecord{Kind: KindDecodeStep, Path: path, Lanes: lanes, Tokens: lanes, DurationNS: d.Nanoseconds(), AtUnixNano: r.lastStep.UnixNano()})
+}
+
+// ObserveSpeculativeRound records one draft-verify round on PathSpeculative:
+// `proposed` draft tokens were verified, `accepted` of them matched the target,
+// and `emitted` tokens (accepted prefix plus bonus, after stop/maxNew trimming)
+// reached the caller. A round with no proposal is a serial step, not a round.
+func (r *Recorder) ObserveSpeculativeRound(proposed, accepted, emitted int, d time.Duration) {
+	if r == nil || proposed <= 0 {
+		return
+	}
+	accepted = max(0, min(accepted, proposed))
+	emitted = max(0, emitted)
+	if fn := stepObservers(); fn != nil {
+		fn(PathSpeculative, 1, d)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stepSeconds[PathSpeculative].observe(d.Seconds())
+	r.stepLanes[PathSpeculative].observe(1)
+	r.decodeTokens[PathSpeculative] += uint64(emitted)
+	r.specRounds++
+	r.specDrafted += uint64(proposed)
+	r.specAcceptedTok += uint64(accepted)
+	r.specAccepted.observe(float64(accepted))
+	r.lastStep = r.now()
+	r.appendLocked(StepRecord{Kind: KindDecodeStep, Path: PathSpeculative, Lanes: 1, Tokens: emitted, Proposed: proposed, Accepted: accepted, DurationNS: d.Nanoseconds(), AtUnixNano: r.lastStep.UnixNano()})
 }
 
 // ObservePrefillChunk records one prefill forward over `tokens` prompt tokens.
@@ -435,6 +482,17 @@ type PathStat struct {
 	P99StepSeconds float64 `json:"p99_step_seconds"`
 }
 
+// SpecStat summarizes speculative draft-verify rounds. AcceptanceRate is
+// accepted/drafted; TokensPerRound is emitted tokens per target forward, the
+// number speculation must push above 1 to pay.
+type SpecStat struct {
+	Rounds         uint64  `json:"rounds"`
+	DraftTokens    uint64  `json:"draft_tokens"`
+	AcceptedTokens uint64  `json:"accepted_tokens"`
+	AcceptanceRate float64 `json:"acceptance_rate"`
+	TokensPerRound float64 `json:"tokens_per_round"`
+}
+
 // Snapshot is the bounded agent-facing view of the recorder.
 type Snapshot struct {
 	Schema             string               `json:"schema"`
@@ -445,6 +503,7 @@ type Snapshot struct {
 	Phases             map[string]PhaseStat `json:"phases"`
 	Decode             map[string]PathStat  `json:"decode"`
 	Cohorts            PathStat             `json:"cohorts"`
+	Speculative        *SpecStat            `json:"speculative,omitempty"`
 	PrefillTokens      uint64               `json:"prefill_tokens"`
 	PrefillChunks      uint64               `json:"prefill_chunks"`
 	PrefixMatched      uint64               `json:"prefix_matched_tokens"`
@@ -498,6 +557,15 @@ func (r *Recorder) Snapshot(recent int, kind string) Snapshot {
 		s.Cohorts = PathStat{Steps: c.count, MeanLanes: c.sum / float64(c.count), MaxLanes: c.max}
 	}
 	s.PrefillTokens, s.PrefillChunks, s.PrefixMatched = r.prefillTokens, r.prefillChunks, r.prefixMatched
+	if r.specRounds > 0 {
+		s.Speculative = &SpecStat{
+			Rounds:         r.specRounds,
+			DraftTokens:    r.specDrafted,
+			AcceptedTokens: r.specAcceptedTok,
+			AcceptanceRate: float64(r.specAcceptedTok) / float64(r.specDrafted),
+			TokensPerRound: float64(r.decodeTokens[PathSpeculative]) / float64(r.specRounds),
+		}
+	}
 	if recent == 0 || r.next == 0 {
 		return s
 	}
@@ -539,6 +607,9 @@ func (s Snapshot) Compact() string {
 	}
 	if s.Cohorts.Steps > 0 {
 		fmt.Fprintf(&b, " | cohorts=%d size~%.1f(max %.0f)", s.Cohorts.Steps, s.Cohorts.MeanLanes, s.Cohorts.MaxLanes)
+	}
+	if sp := s.Speculative; sp != nil {
+		fmt.Fprintf(&b, " | spec rounds=%d accept=%.0f%% (%d/%d) tok/round=%.2f", sp.Rounds, 100*sp.AcceptanceRate, sp.AcceptedTokens, sp.DraftTokens, sp.TokensPerRound)
 	}
 	if s.PrefillChunks > 0 || s.PrefixMatched > 0 {
 		fmt.Fprintf(&b, " | prefill tok=%d chunks=%d prefix_hit_tok=%d", s.PrefillTokens, s.PrefillChunks, s.PrefixMatched)
@@ -605,6 +676,14 @@ func (r *Recorder) WritePrometheus(w io.Writer) {
 		last = float64(r.lastStep.UnixNano()) / 1e9
 	}
 	fmt.Fprintf(w, "%s %s\n", MetricLastStepTimestamp, formatFloat(last))
+	helpType(w, MetricSpecRoundsTotal, "Speculative draft-verify rounds (target forwards that verified a draft).", "counter")
+	fmt.Fprintf(w, "%s %d\n", MetricSpecRoundsTotal, r.specRounds)
+	helpType(w, MetricSpecDraftTokensTotal, "Draft tokens proposed to speculative verification.", "counter")
+	fmt.Fprintf(w, "%s %d\n", MetricSpecDraftTokensTotal, r.specDrafted)
+	helpType(w, MetricSpecAcceptedTokensTotal, "Draft tokens accepted by speculative verification.", "counter")
+	fmt.Fprintf(w, "%s %d\n", MetricSpecAcceptedTokensTotal, r.specAcceptedTok)
+	helpType(w, MetricSpecAcceptedPerRound, "Draft tokens accepted per speculative verify round.", "histogram")
+	r.specAccepted.write(w, MetricSpecAcceptedPerRound, "")
 }
 
 func helpType(w io.Writer, name, help, typ string) {
