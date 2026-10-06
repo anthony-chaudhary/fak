@@ -65,9 +65,10 @@ type NativeScheduler struct {
 	// the pre-queue behaviour). A positive cap is the BARE structural admission knob the
 	// issue scopes ("the bare admit/evict loop and queues it sits on") — NOT a priority/
 	// fairness/KV-budget policy, which is the sibling issue's job.
-	maxRunning      int
-	promotionPicker PromotionPicker
-	sessionAffinity map[string]int
+	maxRunning       int
+	maxTokensPerStep int
+	promotionPicker  PromotionPicker
+	sessionAffinity  map[string]int
 	// maxObservedRunning is the high-water mark of the running set, written only by the
 	// run goroutine under mu. It lets a witness assert the waiting queue actually gated
 	// (peak == maxRunning) without racing on a live concurrency count.
@@ -562,6 +563,67 @@ func (s *NativeScheduler) effectiveMaxRunningLocked() int {
 	return s.maxRunning
 }
 
+// SetMaxTokensPerStep bounds the tokens one scheduler step may spend: every running
+// decode lane costs 1 and a prefilling lane costs its next prompt chunk. Waiting lanes
+// that do not fit the remaining budget are skipped, not blocking later lanes that do.
+// n<=0 disables the budget (the default; promotion is then gated by maxRunning only).
+func (s *NativeScheduler) SetMaxTokensPerStep(n int) {
+	s.mu.Lock()
+	s.maxTokensPerStep = n
+	s.mu.Unlock()
+	s.signal()
+}
+
+// laneStepTokens is a lane's per-step token cost under maxTokensPerStep.
+func laneStepTokens(ln *schedLane) int {
+	if ln.state != schedLanePrefilling {
+		return 1
+	}
+	chunk := len(ln.prompt) - ln.promptCursor
+	if ln.prefillChunkTokens > 0 && ln.prefillChunkTokens < chunk {
+		chunk = ln.prefillChunkTokens
+	}
+	if chunk < 1 {
+		return 1
+	}
+	return chunk
+}
+
+// promoteWaitingLocked moves waiting lanes into the running set in queue order, up to
+// maxRun and, when set, within maxTokensPerStep (vLLM v1 scheduler token_budget,
+// vllm/v1/core/sched/scheduler.py:569@975dca5, Apache-2.0). An empty running set always
+// admits its first live candidate so an oversized first chunk cannot stall the loop.
+func (s *NativeScheduler) promoteWaitingLocked(maxRun int) {
+	budget := 0
+	if s.maxTokensPerStep > 0 {
+		budget = s.maxTokensPerStep
+		for _, ln := range s.lanes {
+			budget -= laneStepTokens(ln)
+		}
+	}
+	kept := s.waiting[:0]
+	for _, ln := range s.waiting {
+		if ln.ctx.Err() != nil {
+			ln.finish(nil, ln.ctx.Err())
+			continue
+		}
+		if maxRun > 0 && len(s.lanes) >= maxRun {
+			kept = append(kept, ln)
+			continue
+		}
+		if s.maxTokensPerStep > 0 {
+			cost := laneStepTokens(ln)
+			if cost > budget && len(s.lanes) > 0 {
+				kept = append(kept, ln)
+				continue
+			}
+			budget -= cost
+		}
+		s.lanes = append(s.lanes, ln)
+	}
+	s.waiting = kept
+}
+
 // run is the single scheduler loop. Each iteration recomputes the running set: it
 // compacts retired lanes out, then promotes waiting lanes into the freed slots (FIFO,
 // up to maxRunning) — so the per-step batch geometry tracks admissions and completions
@@ -696,19 +758,7 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 		}
 		s.waiting = reordered
 	}
-	kept := s.waiting[:0]
-	for _, ln := range s.waiting {
-		if ln.ctx.Err() != nil {
-			ln.finish(nil, ln.ctx.Err())
-			continue
-		}
-		if maxRun > 0 && len(s.lanes) >= maxRun {
-			kept = append(kept, ln)
-			continue
-		}
-		s.lanes = append(s.lanes, ln)
-	}
-	s.waiting = kept
+	s.promoteWaitingLocked(maxRun)
 	if used := s.usedKVBlocksLocked(); used > s.maxObservedKVBlocks {
 		s.maxObservedKVBlocks = used
 	}

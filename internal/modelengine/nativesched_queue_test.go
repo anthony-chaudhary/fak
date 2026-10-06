@@ -87,3 +87,46 @@ func drainAllLanes(t *testing.T, m *model.Model, calls []*abi.ToolCall, maxRunni
 	wg.Wait()
 	return out, s.MaxObservedRunning()
 }
+
+func TestNativeSchedulerPromotionRespectsTokenBudget(t *testing.T) {
+	decode := func(seq int64) *schedLane {
+		return &schedLane{ctx: context.Background(), state: schedLaneDecode, seqNo: seq}
+	}
+	prefilling := func(seq int64, chunk int) *schedLane {
+		return &schedLane{
+			ctx: context.Background(), state: schedLanePrefilling, seqNo: seq,
+			prompt: make([]int, 64), prefillChunkTokens: chunk,
+		}
+	}
+	seqs := func(lanes []*schedLane) []int64 {
+		out := make([]int64, len(lanes))
+		for i, ln := range lanes {
+			out[i] = ln.seqNo
+		}
+		return out
+	}
+
+	for _, tc := range []struct {
+		name        string
+		budget      int
+		wantRunning []int64
+		wantWaiting []int64
+	}{
+		{name: "budget8", budget: 8, wantRunning: []int64{1, 2, 3, 5}, wantWaiting: []int64{4}},
+		{name: "disabled", budget: 0, wantRunning: []int64{1, 2, 3, 4, 5}, wantWaiting: []int64{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newNativeScheduler(nil, nil)
+			s.SetMaxTokensPerStep(tc.budget)
+			s.mu.Lock()
+			s.lanes = []*schedLane{decode(1), decode(2), decode(3)}
+			s.waiting = []*schedLane{prefilling(4, 6), prefilling(5, 4)}
+			s.promoteWaitingLocked(s.effectiveMaxRunningLocked())
+			running, waiting := seqs(s.lanes), seqs(s.waiting)
+			s.mu.Unlock()
+			if !reflect.DeepEqual(running, tc.wantRunning) || !reflect.DeepEqual(waiting, tc.wantWaiting) {
+				t.Fatalf("running=%v waiting=%v, want running=%v waiting=%v", running, waiting, tc.wantRunning, tc.wantWaiting)
+			}
+		})
+	}
+}
