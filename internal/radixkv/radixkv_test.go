@@ -500,3 +500,49 @@ func TestTree_EvictionHaltWhenSharedCapacitySufficient(t *testing.T) {
 		t.Errorf("seqs[4] should survive, matched %d/%d", m, len(seqs[4]))
 	}
 }
+
+// TestStatsProtectedEvictableTokensTrackLeases pins lease accounting in Stats: a lease on
+// a deep node protects every edge on its root path, release returns those tokens to the
+// evictable pool, eviction removes only evictable tokens, and protected+evictable always
+// equals the cached total.
+func TestStatsProtectedEvictableTokensTrackLeases(t *testing.T) {
+	tree := New(0)
+	pre := seq(1, 8)
+	a := cat(pre, seq(50, 4))
+	b := cat(pre, seq(70, 4))
+	check := func(step string, total, protected int) {
+		t.Helper()
+		st := tree.Stats()
+		if st.Tokens != total || st.ProtectedTokens != protected || st.EvictableTokens != total-protected {
+			t.Fatalf("%s: tokens=%d protected=%d evictable=%d, want %d/%d/%d",
+				step, st.Tokens, st.ProtectedTokens, st.EvictableTokens, total, protected, total-protected)
+		}
+		if st.ProtectedTokens+st.EvictableTokens != st.Tokens {
+			t.Fatalf("%s: protected+evictable=%d != tokens=%d", step, st.ProtectedTokens+st.EvictableTokens, st.Tokens)
+		}
+	}
+
+	check("empty", 0, 0)
+	_, la := servePure(tree, a)
+	check("insert a (leased)", 12, 12)
+	tree.Done(la)
+	check("release a", 12, 0)
+
+	_, lb := servePure(tree, b)
+	check("insert b splits the preamble (b leased)", 16, 12)
+	tree.Done(lb)
+	check("release b", 16, 0)
+
+	deep, matched := tree.Lookup(a)
+	if matched != len(a) {
+		t.Fatalf("lookup a matched %d, want %d", matched, len(a))
+	}
+	check("lease deep node a", 16, 12)
+
+	if freed := tree.EvictNode(lb); freed != 4 {
+		t.Fatalf("EvictNode(b) freed %d, want 4", freed)
+	}
+	check("evict b while a is leased", 12, 12)
+	tree.Done(deep)
+	check("release a after eviction", 12, 0)
+}
