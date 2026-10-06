@@ -202,7 +202,9 @@ func (s fleetMetricsSources) render(now time.Time) string {
 	w.gauge("fak_fleet_registration_registry_readable", "1 when the child-registration lineage ledger was read successfully; 0 means goal-level attribution is unavailable, not that the fleet has no goals.", boolGauge(registrationReadable))
 
 	w.gauge("fak_fleet_registry_readable", "1 when the durable session registry was read successfully; 0 when it could not be read (every live family then reads an honest zero, which is NOT the same as an empty fleet).", boolGauge(readable))
-	return w.String()
+	// The fak_cli_* CLI-invocation families (fleet_metrics_cli.go) ride the same
+	// scrape so the fak-cli-invocation-telemetry board reads one exporter.
+	return w.String() + renderFleetCLIUsageExposition(usageLogPath(), now)
 }
 
 // registrationInventory reads the execution lineage graph written before every guard /
