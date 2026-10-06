@@ -16,9 +16,12 @@ func TestMTPSweep(t *testing.T) {
 		t.Fatal("expected non-empty Points in MTPSweepReport")
 	}
 
-	// 4 values of K * 2 thresholds * 3 categories = 24 points
-	if len(report.Points) != 24 {
-		t.Errorf("expected 24 Points in MTPSweepReport, got %d", len(report.Points))
+	wantKs := []int{1, 2, 3, 4}
+	wantThresholds := []float64{0.50, 0.55}
+	wantCategories := []string{"Code", "JSON", "Logic"}
+	wantPoints := len(wantKs) * len(wantThresholds) * len(wantCategories)
+	if len(report.Points) != wantPoints {
+		t.Errorf("expected %d Points in MTPSweepReport, got %d", wantPoints, len(report.Points))
 	}
 
 	kCovered := make(map[int]bool)
@@ -37,7 +40,7 @@ func TestMTPSweep(t *testing.T) {
 			t.Errorf("point K=%d Category=%s: Speedup=%.3f, want > 0", p.K, p.Category, p.Speedup)
 		}
 	}
-	for _, k := range []int{1, 2, 3, 4} {
+	for _, k := range wantKs {
 		if !kCovered[k] {
 			t.Errorf("expected K=%d to be covered in Points", k)
 		}

@@ -40,17 +40,18 @@ func generateBenchJSONL(n int) []byte {
 }
 
 func TestBenchmarkFixtures(t *testing.T) {
-	corpus := generateBenchCorpus(100)
-	if len(corpus) != 100 {
-		t.Fatalf("expected 100 calls, got %d", len(corpus))
+	const n = 100
+	corpus := generateBenchCorpus(n)
+	if len(corpus) != n {
+		t.Fatalf("expected %d calls, got %d", n, len(corpus))
 	}
-	data := generateBenchJSONL(100)
+	data := generateBenchJSONL(n)
 	records, err := ReadCorpus(bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("ReadCorpus failed: %v", err)
 	}
-	if len(records) != 100 {
-		t.Fatalf("expected 100 records, got %d", len(records))
+	if len(records) != n {
+		t.Fatalf("expected %d records, got %d", n, len(records))
 	}
 }
 

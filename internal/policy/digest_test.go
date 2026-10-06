@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"os"
@@ -23,14 +24,14 @@ func TestInitialPolicyGenerationAndDigest(t *testing.T) {
 		t.Fatalf("initial Generation() = %d, want 1", got)
 	}
 	digest := p.ContentDigest()
-	if len(digest) != 64 {
+	if len(digest) != hex.EncodedLen(sha256.Size) {
 		t.Fatalf("ContentDigest() length = %d, want 64", len(digest))
 	}
 	decoded, err := hex.DecodeString(digest)
 	if err != nil {
 		t.Fatalf("ContentDigest() is not valid hex: %v", err)
 	}
-	if len(decoded) != 32 {
+	if len(decoded) != sha256.Size {
 		t.Fatalf("decoded digest length = %d, want 32", len(decoded))
 	}
 
@@ -64,7 +65,7 @@ func TestInitialPolicyGenerationAndDigest(t *testing.T) {
 		t.Fatalf("zero Policy Generation() = %d, want 1", got)
 	}
 	zeroDigest := pZero.ContentDigest()
-	if len(zeroDigest) != 64 {
+	if len(zeroDigest) != hex.EncodedLen(sha256.Size) {
 		t.Fatalf("zero Policy ContentDigest() length = %d, want 64", len(zeroDigest))
 	}
 	if _, err := hex.DecodeString(zeroDigest); err != nil {
@@ -111,7 +112,7 @@ func TestReloadNewContentIncrementsGenerationAndUpdatesDigest(t *testing.T) {
 		t.Fatalf("initial Generation() = %d, want 1", got)
 	}
 	digest1 := p.ContentDigest()
-	if len(digest1) != 64 {
+	if len(digest1) != hex.EncodedLen(sha256.Size) {
 		t.Fatalf("initial ContentDigest() length = %d, want 64", len(digest1))
 	}
 
@@ -122,7 +123,7 @@ func TestReloadNewContentIncrementsGenerationAndUpdatesDigest(t *testing.T) {
 		t.Fatalf("after reload Generation() = %d, want 2", got)
 	}
 	digest2 := p.ContentDigest()
-	if len(digest2) != 64 {
+	if len(digest2) != hex.EncodedLen(sha256.Size) {
 		t.Fatalf("after reload ContentDigest() length = %d, want 64", len(digest2))
 	}
 	if digest2 == digest1 {
@@ -193,7 +194,7 @@ func TestDeterministicDigestComputation(t *testing.T) {
 
 	// Repeat 50 times; must always produce identical string
 	first := ComputeContentDigest(sample)
-	if len(first) != 64 {
+	if len(first) != hex.EncodedLen(sha256.Size) {
 		t.Fatalf("digest length = %d, want 64", len(first))
 	}
 	for i := 0; i < 50; i++ {
@@ -227,7 +228,7 @@ func TestDeterministicDigestComputation(t *testing.T) {
 	}
 	mDigest1 := ComputeRulesetDigest(m)
 	mDigest2 := m.ContentDigest()
-	if len(mDigest1) != 64 || mDigest1 != mDigest2 {
+	if len(mDigest1) != hex.EncodedLen(sha256.Size) || mDigest1 != mDigest2 {
 		t.Fatalf("manifest digest mismatch: %s vs %s", mDigest1, mDigest2)
 	}
 }
@@ -301,7 +302,7 @@ func TestConcurrentPolicyAccess(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < iterations; j++ {
 				digest := p.ContentDigest()
-				if len(digest) != 64 {
+				if len(digest) != hex.EncodedLen(sha256.Size) {
 					t.Errorf("read digest invalid length: %d", len(digest))
 				}
 				gen := p.Generation()
@@ -309,7 +310,7 @@ func TestConcurrentPolicyAccess(t *testing.T) {
 					t.Errorf("read generation invalid: %d", gen)
 				}
 				s := p.Summary()
-				if len(s.ContentDigest) != 64 || s.Generation < 1 {
+				if len(s.ContentDigest) != hex.EncodedLen(sha256.Size) || s.Generation < 1 {
 					t.Errorf("read summary invalid: %+v", s)
 				}
 			}

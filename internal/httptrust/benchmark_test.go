@@ -115,6 +115,8 @@ func generateBenchmarkCertPEM(cn, org string, notAfter time.Time) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
 
+const benchPEMMultiCount = 5
+
 func init() {
 	benchSubjectsLarge = make([]string, 125)
 	for i := 0; i < 125; i++ {
@@ -124,7 +126,7 @@ func init() {
 	benchPEMSingle = generateBenchmarkCertPEM("Example Corp Root CA", "Example Corp", time.Now().Add(365*24*time.Hour))
 
 	var multiBuilder []byte
-	for i := 0; i < 5; i++ {
+	for i := 0; i < benchPEMMultiCount; i++ {
 		multiBuilder = append(multiBuilder, generateBenchmarkCertPEM(fmt.Sprintf("Chain CA %d", i), "Example Corp", time.Now().Add(365*24*time.Hour))...)
 	}
 	benchPEMMulti = multiBuilder
@@ -571,8 +573,8 @@ func TestBenchmarkOperationsSanity(t *testing.T) {
 
 	multiBundle := &Bundle{Path: "/etc/corp/chain.pem"}
 	describeBundle(multiBundle, benchPEMMulti)
-	if len(multiBundle.Subjects) != 5 {
-		t.Fatalf("describeBundle multi subjects len=%d, want 5", len(multiBundle.Subjects))
+	if len(multiBundle.Subjects) != benchPEMMultiCount {
+		t.Fatalf("describeBundle multi subjects len=%d, want %d", len(multiBundle.Subjects), benchPEMMultiCount)
 	}
 
 	tr := TransportForBundle(benchBundleWithPool)

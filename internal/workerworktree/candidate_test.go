@@ -143,8 +143,9 @@ func TestSweepTopologyCandidatesKeepsLiveAndYoungLegacy(t *testing.T) {
 			return time.Time{}, false
 		},
 	}
+	topologyCandidates := []string{live, exited, reused, unknownStart, legacyOld, legacyYoung}
 	dry := SweepTopologyCandidates(parent, parent, noGit, opts)
-	if dry.Mode != "dry-run" || dry.WouldReap != 3 || dry.Reaped != 0 || len(dry.Candidates) != 6 {
+	if dry.Mode != "dry-run" || dry.WouldReap != 3 || dry.Reaped != 0 || len(dry.Candidates) != len(topologyCandidates) {
 		t.Fatalf("dry-run plan wrong: %+v", dry)
 	}
 	for _, p := range []string{live, exited, reused, unknownStart, legacyOld, legacyYoung, unrelated} {

@@ -161,8 +161,8 @@ func TestMTPAcceptanceScoringAndRollback(t *testing.T) {
 	if resAll.RejectedAt != -1 {
 		t.Errorf("resAll.RejectedAt = %d, want -1", resAll.RejectedAt)
 	}
-	if len(resAll.NextTokens) != 5 || resAll.NextTokens[4] != 105 {
-		t.Errorf("resAll.NextTokens = %+v, want 5 tokens ending with 105", resAll.NextTokens)
+	if len(resAll.NextTokens) != len(targetAll) || resAll.NextTokens[4] != 105 {
+		t.Errorf("resAll.NextTokens = %+v, want %d tokens ending with 105", resAll.NextTokens, len(targetAll))
 	}
 
 	// Case 2: First 3 tokens accepted, 4th rejected (75% acceptance, 1 rollback)

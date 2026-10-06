@@ -208,7 +208,7 @@ func TestResponsesCompact_CASRestoreStubsCreated(t *testing.T) {
 			if !ok {
 				t.Fatalf("failed to parse stub: %q", m.Content)
 			}
-			if len(ref) != 64 {
+			if len(ref) != hex.EncodedLen(sha256.Size) {
 				t.Errorf("stub ref %q is not a 64-char sha256 hex digest", ref)
 			}
 			if turns != 1 {

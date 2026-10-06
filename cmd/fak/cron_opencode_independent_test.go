@@ -378,8 +378,8 @@ func TestCronOpenCodeIndependentBunVersionFromOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected harness error: %v", err)
 	}
-	if receipt.BunVersion != "1.3.14" {
-		t.Errorf("expected bun_version 1.3.14 extracted from crash banner, got %q", receipt.BunVersion)
+	if receipt.BunVersion != helperCrashBunVersion {
+		t.Errorf("expected bun_version %s extracted from crash banner, got %q", helperCrashBunVersion, receipt.BunVersion)
 	}
 }
 

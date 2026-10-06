@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/scratchquery"
 )
 
 // scratchQueryCLI runs the testable `fak scratch` core with explicit streams.
@@ -87,8 +89,8 @@ func TestRunScratchQueryPromotableAttachesDiagnosis(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
 		t.Fatalf("decode %q: %v", stdout, err)
 	}
-	if len(doc.Taxonomy) != 5 {
-		t.Fatalf("taxonomy = %#v, want 5 closed kinds", doc.Taxonomy)
+	if len(doc.Taxonomy) != len(scratchquery.CandidateKinds) {
+		t.Fatalf("taxonomy = %#v, want %d closed kinds", doc.Taxonomy, len(scratchquery.CandidateKinds))
 	}
 	if len(doc.Candidates) != 1 {
 		t.Fatalf("candidates = %#v, want the one flag artifact", doc.Candidates)

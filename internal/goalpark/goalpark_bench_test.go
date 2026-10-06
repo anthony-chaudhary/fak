@@ -261,7 +261,8 @@ func BenchmarkList(b *testing.B) {
 	dir := b.TempDir()
 	store := Store{Dir: dir}
 	now := time.Unix(1_800_000_000, 0)
-	for i := 0; i < 20; i++ {
+	const parked = 20
+	for i := 0; i < parked; i++ {
 		rec := Record{
 			Goal:        fmt.Sprintf("list-goal-%d", i),
 			Lane:        "guard",
@@ -283,8 +284,8 @@ func BenchmarkList(b *testing.B) {
 		if err != nil {
 			b.Fatalf("List: %v", err)
 		}
-		if len(records) != 20 {
-			b.Fatalf("expected 20 records, got %d", len(records))
+		if len(records) != parked {
+			b.Fatalf("expected %d records, got %d", parked, len(records))
 		}
 	}
 }

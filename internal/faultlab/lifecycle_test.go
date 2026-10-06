@@ -63,8 +63,8 @@ func TestFaultLifecycle_RuleTransitions(t *testing.T) {
 	if !errors.Is(err, ErrTruncated) {
 		t.Fatalf("expected ErrTruncated after re-enabling, got: %v", err)
 	}
-	if len(res) != 5 {
-		t.Fatalf("expected 5 bytes after re-enabling, got %d", len(res))
+	if len(res) != rule.TruncateBytes {
+		t.Fatalf("expected %d bytes after re-enabling, got %d", rule.TruncateBytes, len(res))
 	}
 
 	// 4. Remove rule -> clean passthrough permanently

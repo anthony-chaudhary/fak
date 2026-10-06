@@ -207,11 +207,12 @@ func TestQSASparseRowGather_ParityAndNumericalEquivalence(t *testing.T) {
 	if receipt.DynamicGatingBypassed {
 		t.Fatal("receipt.DynamicGatingBypassed must be false for 20,000 tokens")
 	}
-	if len(selectedBlocks) != 36 {
-		t.Fatalf("len(selectedBlocks) = %d, want 36 (32 top-k + 4 tail)", len(selectedBlocks))
+	wantBlocks := topKBlocks + tailBlocks
+	if len(selectedBlocks) != wantBlocks {
+		t.Fatalf("len(selectedBlocks) = %d, want %d (%d top-k + %d tail)", len(selectedBlocks), wantBlocks, topKBlocks, tailBlocks)
 	}
-	if receipt.SelectedBlocks != 36 {
-		t.Fatalf("receipt.SelectedBlocks = %d, want 36", receipt.SelectedBlocks)
+	if receipt.SelectedBlocks != wantBlocks {
+		t.Fatalf("receipt.SelectedBlocks = %d, want %d", receipt.SelectedBlocks, wantBlocks)
 	}
 
 	// Verify all tail blocks are selected

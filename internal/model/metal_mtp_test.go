@@ -261,12 +261,13 @@ func TestMetalMTPDraftVerifyRollbackLoop(t *testing.T) {
 		}
 
 		// Verify session continues generating normally even in fallback
-		outTokens, err := coord.Generate(ctx, prompt, 8)
+		const fallbackTokens = 8
+		outTokens, err := coord.Generate(ctx, prompt, fallbackTokens)
 		if err != nil {
 			t.Fatalf("Generate failed while in fallback: %v", err)
 		}
-		if len(outTokens) != 8 {
-			t.Fatalf("expected 8 tokens generated in fallback, got %d", len(outTokens))
+		if len(outTokens) != fallbackTokens {
+			t.Fatalf("expected %d tokens generated in fallback, got %d", fallbackTokens, len(outTokens))
 		}
 	})
 }

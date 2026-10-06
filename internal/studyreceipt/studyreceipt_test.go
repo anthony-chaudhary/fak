@@ -1,6 +1,8 @@
 package studyreceipt_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,7 +66,7 @@ func TestValidate_ValidReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected digest error: %v", err)
 	}
-	if !strings.HasPrefix(d, "sha256:") || len(d) != 71 {
+	if !strings.HasPrefix(d, "sha256:") || len(d) != len("sha256:")+hex.EncodedLen(sha256.Size) {
 		t.Fatalf("unexpected digest format: %s", d)
 	}
 

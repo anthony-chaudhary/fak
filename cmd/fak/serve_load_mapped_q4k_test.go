@@ -46,8 +46,8 @@ func mappedQ4KServeCPULogits(t *testing.T, m *fakmodel.Model) [][]float32 {
 	var out [][]float32
 	for _, token := range []int{2, 7, 3} {
 		logits := append([]float32(nil), s.Step(token)...)
-		if len(logits) != 16 {
-			t.Fatalf("full-fixture logits=%d, want vocab 16", len(logits))
+		if len(logits) != m.Cfg.VocabSize {
+			t.Fatalf("full-fixture logits=%d, want vocab %d", len(logits), m.Cfg.VocabSize)
 		}
 		var nonzero bool
 		for i, value := range logits {
@@ -99,6 +99,8 @@ type mappedQ4KServeHeapSnapshot struct {
 	HeapObjects       uint64 `json:"heap_objects"`
 	NumGC             uint32 `json:"num_gc"`
 }
+
+const maxLargeInUseAllocationStacks = 8
 
 type mappedQ4KServeHeapStack struct {
 	SampledInUseBytes   int64    `json:"sampled_in_use_bytes"`
@@ -157,7 +159,7 @@ func captureMappedQ4KServeHeapDiagnostic(t *testing.T, m *fakmodel.Model, first 
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].InUseBytes() > records[j].InUseBytes() })
 	for i := range records {
-		if records[i].InUseBytes() < 1<<20 || len(diagnostic.LargeInUseAllocationStacks) == 8 {
+		if records[i].InUseBytes() < 1<<20 || len(diagnostic.LargeInUseAllocationStacks) == maxLargeInUseAllocationStacks {
 			break
 		}
 		stack := mappedQ4KServeHeapStack{

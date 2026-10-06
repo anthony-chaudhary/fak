@@ -1,6 +1,8 @@
 package studydrift
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"reflect"
 	"strings"
 	"testing"
@@ -21,8 +23,8 @@ func TestDriftInvariantsDigestDeterministic(t *testing.T) {
 		t.Fatalf("DigestSource missing sha256: prefix: %s", d1)
 	}
 	hexPart := strings.TrimPrefix(d1, "sha256:")
-	if len(hexPart) != 64 {
-		t.Fatalf("DigestSource hex length = %d, want 64", len(hexPart))
+	if len(hexPart) != hex.EncodedLen(sha256.Size) {
+		t.Fatalf("DigestSource hex length = %d, want %d", len(hexPart), hex.EncodedLen(sha256.Size))
 	}
 	for _, r := range hexPart {
 		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {

@@ -3,17 +3,18 @@ package agentbench
 import "testing"
 
 func TestAgentBenchFivePairedComparison(t *testing.T) {
+	const pairs = 5
 	qualified := normalQualification{Qualified: true}
 	arm := func(id string, delta int64) ComparisonInput {
 		input := ComparisonInput{ArmID: id, ManifestDigest: "manifest", ModelID: "fixture-model", TokenizerID: "tokenizer", RendererID: "renderer", LoadDigest: "load", CachePreconditionDigest: "precondition", QualifiedConcurrency: 4}
-		for pair := 0; pair < 5; pair++ {
+		for pair := 0; pair < pairs; pair++ {
 			input.Replicates = append(input.Replicates, ComparisonReplicate{Pair: pair + 1, Seed: 0xA63E1001 + uint64(pair), Order: pair % 2, SharedC2: qualified, OwnCapacity: qualified, SharedC2TasksAccepted: true, OwnCapacityTasksAccepted: true, BootstrapMillis: 1000 + delta, MetricMillis: map[string]int64{"accepted_task_ms": 100 + delta}})
 		}
 		return input
 	}
 	a, b := arm("arm-a", 0), arm("arm-b", 20)
 	result, err := ComparePaired(a, b)
-	if err != nil || result.Status == "INCONCLUSIVE" || result.Pairs != 5 || len(result.ArmOrder) != 5 || result.MetricCohort != "shared-c2" || result.OwnQualifiedConcurrency["arm-a"] != 4 || result.OwnQualifiedConcurrency["arm-b"] != 4 {
+	if err != nil || result.Status == "INCONCLUSIVE" || result.Pairs != pairs || len(result.ArmOrder) != pairs || result.MetricCohort != "shared-c2" || result.OwnQualifiedConcurrency["arm-a"] != 4 || result.OwnQualifiedConcurrency["arm-b"] != 4 {
 		t.Fatalf("valid five-pair comparison = %+v err=%v", result, err)
 	}
 	metric, ok := result.Metrics["accepted_task_ms"]

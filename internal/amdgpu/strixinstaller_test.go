@@ -120,9 +120,18 @@ func TestGenerateStrixInstallerPackage_DualTP2(t *testing.T) {
 		t.Fatalf("unexpected error generating dual_tp2 package: %v", err)
 	}
 
-	// Dual TP2 mode should have 15 files (including scripts/setup-usb4-rdma.sh)
-	if len(pkg.Files) != 15 {
-		t.Errorf("got %d files in dual_tp2 package, want 15", len(pkg.Files))
+	singlePkg, err := GenerateStrixInstallerPackage(DefaultStrixInstallerConfig())
+	if err != nil {
+		t.Fatalf("unexpected error generating default package: %v", err)
+	}
+	// Dual TP2 mode carries every default file plus scripts/setup-usb4-rdma.sh.
+	if len(pkg.Files) != len(singlePkg.Files)+1 {
+		t.Errorf("got %d files in dual_tp2 package, want default %d + 1", len(pkg.Files), len(singlePkg.Files))
+	}
+	for file := range singlePkg.Files {
+		if _, ok := pkg.Files[file]; !ok {
+			t.Errorf("dual_tp2 package missing default file %q", file)
+		}
 	}
 
 	rdmaScript, ok := pkg.Files["scripts/setup-usb4-rdma.sh"]

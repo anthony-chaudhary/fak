@@ -55,7 +55,7 @@ func TestBurnControlsExerciseActualSemanticMaterial(t *testing.T) {
 		return true, nil
 	}})
 	_ = events.Close()
-	if receipt.Accepted != 24 || receipt.Completed != 24 || receipt.RejectedAfterCutoff != 0 || len(receipt.Requests) != 24 || len(receipt.Errors) != 0 {
+	if receipt.Accepted != 24 || receipt.Completed != 24 || receipt.RejectedAfterCutoff != 0 || len(receipt.Requests) != receipt.Accepted || len(receipt.Errors) != 0 {
 		t.Fatalf("control geometry=%+v", receipt)
 	}
 	if receipt.PhysicalOccupancyStatus != "UNKNOWN" || !validated || !receipt.SourceValidationPassed || receipt.SourceValidation.ChangedSHA256 != receipt.SourceValidation.RereadSHA256 {

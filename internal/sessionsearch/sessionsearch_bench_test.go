@@ -36,7 +36,7 @@ func sampleDocs(n int) []Doc {
 }
 
 func BenchmarkDocsFromJournal(b *testing.B) {
-	journalData := strings.Join([]string{
+	journalLines := []string{
 		`{"kind":"spawn","call_id":"c1","session":"interactive-42","tool":"slow_fetch","at_unix_ms":1700000000000,"deadline_ms":30000}`,
 		`{"kind":"kill","call_id":"c1","session":"interactive-42","reason":"TOOL_DEADLINE_EXCEEDED","at_unix_ms":1700000032000}`,
 		`{"kind":"spawn","call_id":"c2","session":"cron-nightly-1","tool":"bg_tail","at_unix_ms":1700000001000}`,
@@ -45,7 +45,8 @@ func BenchmarkDocsFromJournal(b *testing.B) {
 		`{"kind":"exit","call_id":"c3","status":"ok","at_unix_ms":1700000004000}`,
 		`{"kind":"spawn","call_id":"c4","session":"cron-cleanup","tool":"clean_temp","at_unix_ms":1700000005000}`,
 		`{"kind":"kill","call_id":"c4","session":"cron-cleanup","reason":"SIGKILL","at_unix_ms":1700000006000}`,
-	}, "\n")
+	}
+	journalData := strings.Join(journalLines, "\n")
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -55,7 +56,7 @@ func BenchmarkDocsFromJournal(b *testing.B) {
 		if err != nil {
 			b.Fatalf("DocsFromJournal failed: %v", err)
 		}
-		if len(docs) != 8 {
+		if len(docs) != len(journalLines) {
 			b.Fatalf("unexpected doc count: %d", len(docs))
 		}
 	}

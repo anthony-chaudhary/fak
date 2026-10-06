@@ -20,8 +20,10 @@ func (*metalLifetimeHost) Ready() bool      { return true }
 func (h *metalLifetimeHost) F32() []float32 { return h.values }
 func (*metalLifetimeHost) I8() []int8       { return nil }
 
+const metalLifetimeElems = 16
+
 func uploadEphemeralMetalWeight(be Backend, sequence int) (Tensor, <-chan struct{}) {
-	h := &metalLifetimeHost{values: make([]float32, 16), finalized: make(chan struct{})}
+	h := &metalLifetimeHost{values: make([]float32, metalLifetimeElems), finalized: make(chan struct{})}
 	for i := range h.values {
 		h.values[i] = float32(sequence*32+i) + 0.25
 	}
@@ -51,7 +53,7 @@ func TestMetalImmutableUploadRetainsEphemeralHostAcrossGC(t *testing.T) {
 		default:
 		}
 		got := be.Read(resident)
-		if len(got) != 16 {
+		if len(got) != metalLifetimeElems {
 			be.Free(resident)
 			t.Fatalf("upload %d: read length=%d", sequence, len(got))
 		}

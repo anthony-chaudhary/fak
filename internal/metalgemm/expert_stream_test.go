@@ -154,8 +154,8 @@ func TestExpertStream_Concurrency(t *testing.T) {
 	if res1.err != nil {
 		t.Fatalf("first batch failed: %v", res1.err)
 	}
-	if len(res1.leases) != 32 {
-		t.Fatalf("expected 32 leases, got %d", len(res1.leases))
+	if len(res1.leases) != len(first32) {
+		t.Fatalf("expected %d leases, got %d", len(first32), len(res1.leases))
 	}
 	ReleaseLeases(res1.leases)
 
@@ -164,8 +164,8 @@ func TestExpertStream_Concurrency(t *testing.T) {
 	if res2.err != nil {
 		t.Fatalf("second batch failed: %v", res2.err)
 	}
-	if len(res2.leases) != 16 {
-		t.Fatalf("expected 16 leases, got %d", len(res2.leases))
+	if len(res2.leases) != len(next16) {
+		t.Fatalf("expected %d leases, got %d", len(next16), len(res2.leases))
 	}
 	ReleaseLeases(res2.leases)
 
@@ -405,8 +405,8 @@ func TestExpertStream_DuplicateInBatch(t *testing.T) {
 	}
 	defer ReleaseLeases(leases)
 
-	if len(leases) != 5 {
-		t.Fatalf("expected 5 leases, got %d", len(leases))
+	if len(leases) != len(reqs) {
+		t.Fatalf("expected %d leases, got %d", len(reqs), len(leases))
 	}
 
 	// All expert 3 leases must point to the same physical slot.

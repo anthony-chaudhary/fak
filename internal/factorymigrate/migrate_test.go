@@ -40,23 +40,24 @@ func TestPlanMigration(t *testing.T) {
 	if plan.TotalPending != 100 {
 		t.Errorf("plan.TotalPending = %d, want 100", plan.TotalPending)
 	}
-	if len(plan.Waves) != 20 {
-		t.Errorf("len(plan.Waves) = %d, want 20", len(plan.Waves))
+	if want := (len(items) + plan.BatchSize - 1) / plan.BatchSize; len(plan.Waves) != want {
+		t.Errorf("len(plan.Waves) = %d, want %d", len(plan.Waves), want)
 	}
 	for i, wave := range plan.Waves {
-		if len(wave) != 5 {
-			t.Errorf("wave[%d] size = %d, want 5", i, len(wave))
+		if len(wave) != plan.BatchSize {
+			t.Errorf("wave[%d] size = %d, want %d", i, len(wave), plan.BatchSize)
 		}
 	}
 
 	// Custom batch size (12)
-	plan12 := PlanMigration(report, 12, "")
-	if plan12.BatchSize != 12 {
+	const customBatch = 12
+	plan12 := PlanMigration(report, customBatch, "")
+	if plan12.BatchSize != customBatch {
 		t.Errorf("plan12.BatchSize = %d, want 12", plan12.BatchSize)
 	}
 	// 100 / 12 = 8 waves of 12 + 1 wave of 4 = 9 waves
-	if len(plan12.Waves) != 9 {
-		t.Errorf("len(plan12.Waves) = %d, want 9", len(plan12.Waves))
+	if want := (len(items) + customBatch - 1) / customBatch; len(plan12.Waves) != want {
+		t.Errorf("len(plan12.Waves) = %d, want %d", len(plan12.Waves), want)
 	}
 	lastWave := plan12.Waves[len(plan12.Waves)-1]
 	if len(lastWave) != 4 {

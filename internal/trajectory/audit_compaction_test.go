@@ -36,9 +36,15 @@ func TestAuditCompactionReconstructsAndResetsExplicitContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	wantEvents := 0
+	for _, line := range lines {
+		if strings.Contains(line, `"type":"compacted"`) {
+			wantEvents++
+		}
+	}
 	events := result.Transcripts[0].CompactionEvents
-	if len(events) != 7 {
-		t.Fatalf("events = %d, want 7", len(events))
+	if len(events) != wantEvents {
+		t.Fatalf("events = %d, want %d", len(events), wantEvents)
 	}
 	for i, want := range [][2]int64{{7, 1}, {5, 2}} {
 		if events[i].BeforeBytes == nil || *events[i].BeforeBytes != want[0] || events[i].AfterBytes == nil || *events[i].AfterBytes != want[1] || events[i].RetainedRatio == nil || *events[i].RetainedRatio != float64(want[1])/float64(want[0]) {

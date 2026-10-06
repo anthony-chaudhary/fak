@@ -39,7 +39,8 @@ func BenchmarkParse(b *testing.B) {
 
 	b.Run("Filtered", func(b *testing.B) {
 		var sb strings.Builder
-		for i := 0; i < 100; i++ {
+		const total = 100
+		for i := 0; i < total; i++ {
 			sb.WriteString(fmt.Sprintf(`{"date":"2026-09-%02d","run_id":"RID-%04d","status":"OK","n":%d}`+"\n", (i%28)+1, i, i))
 		}
 		content := sb.String()
@@ -50,8 +51,8 @@ func BenchmarkParse(b *testing.B) {
 			rows := Parse[benchRow](content, func(r benchRow) bool {
 				return r.N%2 == 0
 			})
-			if len(rows) != 50 {
-				b.Fatalf("want 50, got %d", len(rows))
+			if len(rows) != total/2 {
+				b.Fatalf("want %d, got %d", total/2, len(rows))
 			}
 		}
 	})

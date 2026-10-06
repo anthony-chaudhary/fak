@@ -39,7 +39,7 @@ func BenchmarkConcat(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		res := Concat(part1, part2, part3)
-		if len(res) != 12 {
+		if len(res) != len(part1)+len(part2)+len(part3) {
 			b.Fatalf("unexpected len: %d", len(res))
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -142,10 +143,11 @@ func TestBenchEffort(t *testing.T) {
 	})
 
 	t.Run("CustomModelAndTurnScaling", func(t *testing.T) {
+		const wantTurns = 6
 		var stdout, stderr bytes.Buffer
 		exitCode := runBenchEffort(&stdout, &stderr, []string{
 			"--model", "gemini-2.5-flash",
-			"--turns", "6",
+			"--turns", strconv.Itoa(wantTurns),
 			"--mock",
 			"--json",
 		})
@@ -160,12 +162,12 @@ func TestBenchEffort(t *testing.T) {
 		if receipt.Model != "gemini-2.5-flash" {
 			t.Errorf("expected model 'gemini-2.5-flash', got %q", receipt.Model)
 		}
-		if receipt.Turns != 6 {
-			t.Errorf("expected 6 turns, got %d", receipt.Turns)
+		if receipt.Turns != wantTurns {
+			t.Errorf("expected %d turns, got %d", wantTurns, receipt.Turns)
 		}
 		dyn := receipt.Regimes["dynamic_intra_model"]
-		if len(dyn.Turns) != 6 {
-			t.Errorf("expected 6 turn records in dynamic regime, got %d", len(dyn.Turns))
+		if len(dyn.Turns) != wantTurns {
+			t.Errorf("expected %d turn records in dynamic regime, got %d", wantTurns, len(dyn.Turns))
 		}
 	})
 

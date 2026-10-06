@@ -129,7 +129,7 @@ func TestMetalMTPP4PanelSingleFenceTerminalPackAndDigest(t *testing.T) {
 			t.Fatalf("P4 row %d widths logits=%d hidden=%d", row, len(result.Logits[row]), len(result.RawHidden[row]))
 		}
 	}
-	if r.StateDigestDomain != Qwen35MetalMTPStateDigestDomain || len(r.StateSHA256) != 64 ||
+	if r.StateDigestDomain != Qwen35MetalMTPStateDigestDomain || len(r.StateSHA256) != 64 || //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex digest width
 		r.StateSHA256 != qwen35MetalMTPStateDigest(r.Base, draft, joinQwen35Rows(result.RawHidden, m.Cfg.HiddenSize), result.KV) {
 		t.Fatalf("P4 state digest domain=%q sha=%q", r.StateDigestDomain, r.StateSHA256)
 	}

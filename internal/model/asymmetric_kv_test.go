@@ -415,7 +415,7 @@ func TestAsymmetricKVBridgeConversion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DequantizeAsymmetricKV failed: %v", err)
 	}
-	if len(kOut) != 64 || len(vOut) != 64 {
+	if len(kOut) != len(kSrc) || len(vOut) != len(vSrc) {
 		t.Fatalf("unexpected dimensions: len(k)=%d, len(v)=%d", len(kOut), len(vOut))
 	}
 }

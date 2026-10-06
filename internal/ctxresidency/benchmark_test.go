@@ -70,10 +70,11 @@ func TestBenchmarkOperationsSanity(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. Query path sanity
-	c, mmu := buildBenchContext(10, 2)
+	const numSegments = 10
+	c, mmu := buildBenchContext(numSegments, 2)
 	snap := ctxresidency.Query(c, mmu)
-	if len(snap.Spans) != 10 {
-		t.Fatalf("expected 10 spans, got %d", len(snap.Spans))
+	if len(snap.Spans) != numSegments {
+		t.Fatalf("expected %d spans, got %d", numSegments, len(snap.Spans))
 	}
 	if snap.CommittedTokens == 0 || snap.ReclaimableTokens == 0 {
 		t.Fatalf("expected both committed and reclaimable tokens in mixed context: %+v", snap)

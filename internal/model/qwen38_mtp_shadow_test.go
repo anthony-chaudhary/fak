@@ -59,7 +59,8 @@ func TestQwen38MTP_ShadowConcurrentParity(t *testing.T) {
 	})
 
 	prompt := []int{3, 6, 9, 12}
-	tokens, receipt, err := runner.Run(prompt, 5)
+	const maxTokens = 5
+	tokens, receipt, err := runner.Run(prompt, maxTokens)
 	if err != nil {
 		t.Fatalf("concurrent Run failed: %v", err)
 	}
@@ -71,8 +72,8 @@ func TestQwen38MTP_ShadowConcurrentParity(t *testing.T) {
 	if receipt.DivergenceCount != 0 || receipt.TokenMatchRate != 1.0 {
 		t.Fatalf("concurrent run diverged: count=%d, rate=%g", receipt.DivergenceCount, receipt.TokenMatchRate)
 	}
-	if len(tokens) != 5 {
-		t.Fatalf("tokens len=%d, want 5", len(tokens))
+	if len(tokens) != maxTokens {
+		t.Fatalf("tokens len=%d, want %d", len(tokens), maxTokens)
 	}
 }
 

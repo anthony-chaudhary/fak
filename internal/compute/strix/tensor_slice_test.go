@@ -97,8 +97,8 @@ func TestTensorViewInPlaceSlicing(t *testing.T) {
 
 	// 5. Test FP16 slice viewing.
 	childFP16 := childView.Float16Slice()
-	if len(childFP16) != 2048 {
-		t.Errorf("expected 2048 fp16 elements, got %d", len(childFP16))
+	if len(childFP16) != childDesc.ByteLength/2 {
+		t.Errorf("expected %d fp16 elements, got %d", childDesc.ByteLength/2, len(childFP16))
 	}
 	// Verify word encoding (little endian: 0x55AA).
 	if childFP16[0] != 0x55AA {
@@ -164,6 +164,7 @@ func TestTensorViewInPlaceSlicing(t *testing.T) {
 	// 10. Concurrency race test across multiple goroutines.
 	const goroutines = 16
 	const iters = 200
+	const subLen = 1024
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
 
@@ -175,7 +176,7 @@ func TestTensorViewInPlaceSlicing(t *testing.T) {
 			offset = (offset / 16) * 16
 
 			for i := 0; i < iters; i++ {
-				sub, err := rootView.SubSlice(offset, 1024)
+				sub, err := rootView.SubSlice(offset, subLen)
 				if err != nil {
 					t.Errorf("concurrent SubSlice failed: %v", err)
 					return
@@ -185,7 +186,7 @@ func TestTensorViewInPlaceSlicing(t *testing.T) {
 					return
 				}
 				b := sub.ByteSlice()
-				if len(b) != 1024 {
+				if len(b) != subLen {
 					t.Errorf("unexpected byte slice length: %d", len(b))
 					return
 				}
@@ -202,6 +203,7 @@ func TestTensorView_GCLifetimeAnchoring(t *testing.T) {
 	var finalizerRan atomic.Bool
 
 	// Create view inside helper function to ensure local parent reference falls out of scope.
+	const childLen = 4096
 	createView := func() *TensorView {
 		buf, err := AllocateUMABuffer(64*1024, 64)
 		if err != nil {
@@ -218,7 +220,7 @@ func TestTensorView_GCLifetimeAnchoring(t *testing.T) {
 			t.Fatalf("AsTensorView failed: %v", err)
 		}
 
-		child, err := view.SubSlice(128, 4096)
+		child, err := view.SubSlice(128, childLen)
 		if err != nil {
 			t.Fatalf("view.SubSlice failed: %v", err)
 		}
@@ -241,8 +243,8 @@ func TestTensorView_GCLifetimeAnchoring(t *testing.T) {
 
 	// Verify childView is still valid and readable.
 	bytes := childView.ByteSlice()
-	if len(bytes) != 4096 {
-		t.Fatalf("expected 4096 bytes, got %d", len(bytes))
+	if len(bytes) != childLen {
+		t.Fatalf("expected %d bytes, got %d", childLen, len(bytes))
 	}
 	childView.KeepAlive()
 

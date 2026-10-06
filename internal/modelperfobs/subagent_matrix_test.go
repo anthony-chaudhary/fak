@@ -47,8 +47,9 @@ func TestRunSubagentFanoutMatrix_ConcurrencyMatrixExecution(t *testing.T) {
 	// 4. Shared-prefix forked (B=2)
 	// 5. Shared-prefix forked (B=4)
 	// 6. Shared-prefix forked (B=8)
-	if len(receipt.MatrixResults) != 6 {
-		t.Fatalf("expected 6 matrix scenario results, got %d", len(receipt.MatrixResults))
+	forkedConcurrencies := []int{1, 2, 4, 8}
+	if want := 2 + len(forkedConcurrencies); len(receipt.MatrixResults) != want {
+		t.Fatalf("expected %d matrix scenario results, got %d", want, len(receipt.MatrixResults))
 	}
 
 	scenarioMap := make(map[string]MatrixScenarioResult)
@@ -103,7 +104,6 @@ func TestRunSubagentFanoutMatrix_ConcurrencyMatrixExecution(t *testing.T) {
 	}
 
 	// 3. Shared-prefix forked subagents (B in {1, 2, 4, 8})
-	forkedConcurrencies := []int{1, 2, 4, 8}
 	var prevQueueLatency float64
 	var prevAchievedBW float64
 
@@ -216,6 +216,7 @@ func TestRunSubagentFanoutMatrix_StatisticalRigor(t *testing.T) {
 			Repetitions: 7, // 7 runs >= 5
 			Seed:        101,
 		}
+		repetitions := cfg.Repetitions
 
 		receipt, err := RunSubagentFanoutMatrix(cfg)
 		if err != nil {
@@ -223,11 +224,11 @@ func TestRunSubagentFanoutMatrix_StatisticalRigor(t *testing.T) {
 		}
 
 		for _, res := range receipt.MatrixResults {
-			if res.Repetitions != 7 {
-				t.Errorf("scenario %s repetitions = %d, want 7", res.Scenario, res.Repetitions)
+			if res.Repetitions != repetitions {
+				t.Errorf("scenario %s repetitions = %d, want %d", res.Scenario, res.Repetitions, repetitions)
 			}
-			if len(res.Runs) != 7 {
-				t.Errorf("scenario %s runs count = %d, want 7", res.Scenario, len(res.Runs))
+			if len(res.Runs) != repetitions {
+				t.Errorf("scenario %s runs count = %d, want %d", res.Scenario, len(res.Runs), repetitions)
 			}
 
 			// Invariance checks: Min <= P50 <= P95 <= Max

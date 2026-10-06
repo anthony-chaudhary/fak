@@ -385,7 +385,8 @@ func TestProposeWithOutcomeJournal(t *testing.T) {
 // TestSplitRecordsStratified witnesses deterministic stratified partitioning.
 func TestSplitRecordsStratified(t *testing.T) {
 	var records []OutcomeRecord
-	for i := 0; i < 10; i++ {
+	const models, perModel, trainPerModel = 2, 10, 7
+	for i := 0; i < perModel; i++ {
 		records = append(records, OutcomeRecord{
 			Key:   AspectRuleKey{Aspect: AspectToolCall, Rule: "rule1"},
 			Model: "model-a",
@@ -397,11 +398,11 @@ func TestSplitRecordsStratified(t *testing.T) {
 	}
 
 	train, heldOut := SplitRecords(records, 0.70)
-	if len(train) != 14 {
-		t.Errorf("train count: got %d, want 14 (7 per model)", len(train))
+	if len(train) != models*trainPerModel {
+		t.Errorf("train count: got %d, want %d (%d per model)", len(train), models*trainPerModel, trainPerModel)
 	}
-	if len(heldOut) != 6 {
-		t.Errorf("heldOut count: got %d, want 6 (3 per model)", len(heldOut))
+	if len(heldOut) != models*(perModel-trainPerModel) {
+		t.Errorf("heldOut count: got %d, want %d (%d per model)", len(heldOut), models*(perModel-trainPerModel), perModel-trainPerModel)
 	}
 
 	// Calling SplitRecords again on the exact same input yields the exact same split

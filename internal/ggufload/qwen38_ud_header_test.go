@@ -30,7 +30,7 @@ func TestQwen38UDQ2KXLPinnedHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	const wantHash = "1fe82fda85430cca654a156e9ec2915baf460752197013563b426db2581dcc0f"
-	if len(raw) != 10996640 || fmt.Sprintf("%x", sha256.Sum256(raw)) != wantHash {
+	if len(raw) != 10996640 || fmt.Sprintf("%x", sha256.Sum256(raw)) != wantHash { //boundarylint:ignore CHANGE_DETECTOR_TEST pinned header fixture byte size, paired with its sha256 identity
 		t.Fatalf("pinned header identity mismatch: bytes=%d sha256=%x", len(raw), sha256.Sum256(raw))
 	}
 	gg, err := Read(bytes.NewReader(raw))
@@ -47,8 +47,12 @@ func TestQwen38UDQ2KXLPinnedHeader(t *testing.T) {
 		TensorIQ2_XXS: 48, TensorIQ2_XS: 34, TensorIQ3_XXS: 112,
 		TensorIQ1_S: 20, TensorIQ3_S: 57, TensorIQ2_S: 67, TensorIQ4_XS: 19, TensorIQ1_M: 1,
 	}
-	if len(gg.Tensors) != 866 || !reflect.DeepEqual(counts, wantCounts) {
-		t.Fatalf("real tensor inventory = %v (%d tensors), want %v (866 tensors)", counts, len(gg.Tensors), wantCounts)
+	wantTotal := 0
+	for _, n := range wantCounts {
+		wantTotal += n
+	}
+	if len(gg.Tensors) != wantTotal || !reflect.DeepEqual(counts, wantCounts) {
+		t.Fatalf("real tensor inventory = %v (%d tensors), want %v (%d tensors)", counts, len(gg.Tensors), wantCounts, wantTotal)
 	}
 	quant := ClassifyTensorQuant(gg.Tensors)
 	const wantName = "mixed(IQ1_M+IQ1_S+IQ2_S+IQ2_XS+IQ2_XXS+IQ3_S+IQ3_XXS+IQ4_XS+Q2_K+Q3_K+Q4_K+Q5_K+Q6_K+Q8_0)"

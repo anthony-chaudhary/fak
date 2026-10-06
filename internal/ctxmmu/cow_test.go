@@ -225,8 +225,8 @@ func TestCOWPageTable_AppendTriggersCOW(t *testing.T) {
 
 	// Invariant 1: Parent tokens are 100% untouched and uncorrupted!
 	parentRead := parent.Tokens()
-	if len(parentRead) != 100 {
-		t.Fatalf("parent corrupted: expected 100 tokens, got %d", len(parentRead))
+	if len(parentRead) != len(parentTokens) {
+		t.Fatalf("parent corrupted: expected %d tokens, got %d", len(parentTokens), len(parentRead))
 	}
 	for i := 0; i < 100; i++ {
 		if parentRead[i] != parentTokens[i] {
@@ -242,8 +242,8 @@ func TestCOWPageTable_AppendTriggersCOW(t *testing.T) {
 
 	// Invariant 2: Child 1 tokens are prefix + child1Appended
 	child1Read := child1.Tokens()
-	if len(child1Read) != 103 {
-		t.Fatalf("child1 expected 103 tokens, got %d", len(child1Read))
+	if want := len(parentTokens) + len(child1Appended); len(child1Read) != want {
+		t.Fatalf("child1 expected %d tokens, got %d", want, len(child1Read))
 	}
 	for i := 0; i < 100; i++ {
 		if child1Read[i] != parentTokens[i] {
@@ -258,8 +258,8 @@ func TestCOWPageTable_AppendTriggersCOW(t *testing.T) {
 
 	// Invariant 3: Child 2 tokens are prefix + child2Appended
 	child2Read := child2.Tokens()
-	if len(child2Read) != 105 {
-		t.Fatalf("child2 expected 105 tokens, got %d", len(child2Read))
+	if want := len(parentTokens) + len(child2Appended); len(child2Read) != want {
+		t.Fatalf("child2 expected %d tokens, got %d", want, len(child2Read))
 	}
 	for i := 0; i < 100; i++ {
 		if child2Read[i] != parentTokens[i] {
@@ -837,8 +837,8 @@ func TestCOWTreeSpeculation_FullPromotion(t *testing.T) {
 		t.Fatalf("expected parent token count 108, got %d", parent.TokenCount)
 	}
 	readBack := parent.Tokens()
-	if len(readBack) != 108 {
-		t.Fatalf("expected 108 tokens read back, got %d", len(readBack))
+	if want := len(parentTokens) + len(draftTokens); len(readBack) != want {
+		t.Fatalf("expected %d tokens read back, got %d", want, len(readBack))
 	}
 	for i := 0; i < 100; i++ {
 		if readBack[i] != i+1 {
@@ -905,17 +905,18 @@ func TestCOWTreeSpeculation_PartialPromotion(t *testing.T) {
 
 	// Model verifier accepts only first 3 draft tokens (201, 202, 203).
 	// Total accepted tokens = 100 prefix + 3 accepted = 103 tokens.
-	if err := table.PromoteCandidate("cand-part", 103); err != nil {
+	const acceptedTokens = 103
+	if err := table.PromoteCandidate("cand-part", acceptedTokens); err != nil {
 		t.Fatalf("PromoteCandidate with partial acceptance failed: %v", err)
 	}
 
 	// Verify parent session has exactly 103 tokens
-	if parent.TokenCount != 103 {
+	if parent.TokenCount != acceptedTokens {
 		t.Fatalf("expected parent token count 103, got %d", parent.TokenCount)
 	}
 	readBack := parent.Tokens()
-	if len(readBack) != 103 {
-		t.Fatalf("expected 103 tokens read back, got %d", len(readBack))
+	if len(readBack) != acceptedTokens {
+		t.Fatalf("expected %d tokens read back, got %d", acceptedTokens, len(readBack))
 	}
 	for i := 0; i < 100; i++ {
 		if readBack[i] != i+1000 {
@@ -1027,8 +1028,8 @@ func TestCOWTreeSpeculation_ConcurrentSquashRace(t *testing.T) {
 
 			// Read tokens
 			toks := cand.Tokens()
-			if len(toks) != 258 {
-				errCh <- fmt.Errorf("len %s mismatch: got %d, want 258", candID, len(toks))
+			if want := len(prefixTokens) + 2; len(toks) != want {
+				errCh <- fmt.Errorf("len %s mismatch: got %d, want %d", candID, len(toks), want)
 				return
 			}
 

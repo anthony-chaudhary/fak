@@ -126,12 +126,13 @@ func TestTypesAndErrorClassification(t *testing.T) {
 
 func TestTopologyValidationAndFailureDomainSeparation(t *testing.T) {
 	t.Run("valid topology with distinct failure domains", func(t *testing.T) {
-		topo, err := servingsupervision.BuildDefaultTopology("prod", 3, 2*time.Second, 3)
+		const replicas = 3
+		topo, err := servingsupervision.BuildDefaultTopology("prod", replicas, 2*time.Second, 3)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(topo.Domains()) != 5 { // 1 controller + 1 proxy + 3 replicas
-			t.Fatalf("expected 5 domains, got %d", len(topo.Domains()))
+		if len(topo.Domains()) != 2+replicas { // 1 controller + 1 proxy + replicas
+			t.Fatalf("expected %d domains, got %d", 2+replicas, len(topo.Domains()))
 		}
 	})
 

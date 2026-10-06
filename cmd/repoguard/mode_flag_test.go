@@ -264,6 +264,46 @@ func countReason(vs []repoguard.Violation, reason string) int {
 // sleep_allow rows. Python's evaluate() only classified out-of-tree writes and
 // its sleep_findings() only FOREGROUND_SLEEP, while the Go Evaluate runs every
 // rung — so each row is checked against its own reason class, not a raw count.
+// pythonSelftestRowCounts counts the rows of each table in tools/repo_guard.py's
+// _selftest, the source of truth the Go port must stay in parity with.
+func pythonSelftestRowCounts(t *testing.T) map[string]int {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", "..", "tools", "repo_guard.py"))
+	if err != nil {
+		t.Fatalf("read Python original: %v", err)
+	}
+	counts := map[string]int{}
+	inSelftest := false
+	table := ""
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimRight(line, "\r")
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "def _selftest("):
+			inSelftest = true
+		case !inSelftest:
+		case strings.HasPrefix(line, "def "):
+			inSelftest = false
+		case table == "":
+			for _, name := range []string{"deny", "allow", "sleep_deny", "sleep_allow"} {
+				if strings.HasPrefix(trimmed, name+" = [") {
+					table = name
+				}
+			}
+		case trimmed == "]":
+			table = ""
+		case strings.HasPrefix(trimmed, "(\""):
+			counts[table]++
+		}
+	}
+	for _, name := range []string{"deny", "allow", "sleep_deny", "sleep_allow"} {
+		if counts[name] == 0 {
+			t.Fatalf("found no %s rows in tools/repo_guard.py _selftest", name)
+		}
+	}
+	return counts
+}
+
 func TestPythonSelftestParity(t *testing.T) {
 	const ws = "C:/Users/u/work/fak"
 	const home = "C:/Users/u"
@@ -330,10 +370,10 @@ func TestPythonSelftestParity(t *testing.T) {
 		{"PowerShell", pyCmd("Start-Sleep 5")},
 	}
 
-	// The Python table's own counts, so a dropped row is a loud failure.
-	if len(deny) != 13 || len(allow) != 17 || len(sleepDeny) != 7 || len(sleepAllow) != 7 {
-		t.Fatalf("ported table drifted from the Python original: deny=%d allow=%d sleep_deny=%d sleep_allow=%d, want 13/17/7/7",
-			len(deny), len(allow), len(sleepDeny), len(sleepAllow))
+	py := pythonSelftestRowCounts(t)
+	if len(deny) != py["deny"] || len(allow) != py["allow"] || len(sleepDeny) != py["sleep_deny"] || len(sleepAllow) != py["sleep_allow"] {
+		t.Fatalf("ported table drifted from the Python original: deny=%d allow=%d sleep_deny=%d sleep_allow=%d, want %d/%d/%d/%d",
+			len(deny), len(allow), len(sleepDeny), len(sleepAllow), py["deny"], py["allow"], py["sleep_deny"], py["sleep_allow"])
 	}
 
 	outOfTree := repoguard.Reason // OUT_OF_TREE_WRITE

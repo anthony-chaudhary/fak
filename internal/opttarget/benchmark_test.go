@@ -60,13 +60,14 @@ func BenchmarkValidate(b *testing.B) {
 // BenchmarkCandidates measures lowering an OptTarget's bounded candidate grammar
 // into rsiloop Candidate structs.
 func BenchmarkCandidates(b *testing.B) {
-	tgt := CacheSizeTarget([]int{2, 4, 6, 8, 12, 16, 24, 32})
+	sizes := []int{2, 4, 6, 8, 12, 16, 24, 32}
+	tgt := CacheSizeTarget(sizes)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		cs := tgt.candidates()
-		if len(cs) != 8 {
-			b.Fatalf("candidates len = %d, want 8", len(cs))
+		if len(cs) != len(sizes) {
+			b.Fatalf("candidates len = %d, want %d", len(cs), len(sizes))
 		}
 	}
 }

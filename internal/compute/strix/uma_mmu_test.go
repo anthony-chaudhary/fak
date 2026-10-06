@@ -235,9 +235,10 @@ func TestUMABuffer_InspectTokensInPlace_ZeroAlloc(t *testing.T) {
 	}
 	defer buf.Close()
 
+	const inspectTokens = 16
 	allocs := testing.AllocsPerRun(100, func() {
-		toks, err := buf.InspectTokensInPlace(0, 16)
-		if err != nil || len(toks) != 16 {
+		toks, err := buf.InspectTokensInPlace(0, inspectTokens)
+		if err != nil || len(toks) != inspectTokens {
 			t.Fail()
 		}
 	})

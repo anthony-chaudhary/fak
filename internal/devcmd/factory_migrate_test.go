@@ -89,9 +89,22 @@ func TestRunFactoryMigrate_List(t *testing.T) {
 		t.Fatalf("expected code 0 for list --cohort watchdogs, got %d", code)
 	}
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	// 1 header line + 20 watchdogs items = 21 lines
-	if len(lines) != 21 {
-		t.Errorf("expected 21 lines (header + 20 items), got %d lines", len(lines))
+
+	stdout.Reset()
+	stderr.Reset()
+	code = RunFactoryMigrate(&stdout, &stderr, []string{"list", "--cohort", "watchdogs", "--json"})
+	if code != 0 {
+		t.Fatalf("expected code 0 for list --cohort watchdogs --json, got %d", code)
+	}
+	var watchdogItems []factorymigrate.Item
+	if err := json.Unmarshal(stdout.Bytes(), &watchdogItems); err != nil {
+		t.Fatalf("failed to unmarshal watchdogs list JSON: %v", err)
+	}
+	if len(watchdogItems) == 0 {
+		t.Fatalf("expected watchdogs items, got 0")
+	}
+	if want := 1 + len(watchdogItems); len(lines) != want {
+		t.Errorf("expected %d lines (header + %d items), got %d lines", want, len(watchdogItems), len(lines))
 	}
 
 	// Test list --json

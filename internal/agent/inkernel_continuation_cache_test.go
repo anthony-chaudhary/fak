@@ -24,10 +24,11 @@ func TestInKernelContinuationCache(t *testing.T) {
 			cfg := tinyCfg()
 			p := reusePlanner(true, false, cfg)
 			p.batchDecode = batch
+			const coldTokens = 5
 			prompt := synthIDs(cfg.VocabSize, 18, 12716)
-			generated, matched := decode(p, prompt, 5)
-			if matched != 0 || len(generated) != 5 {
-				t.Fatalf("cold turn generated=%d matched=%d, want 5/0", len(generated), matched)
+			generated, matched := decode(p, prompt, coldTokens)
+			if matched != 0 || len(generated) != coldTokens {
+				t.Fatalf("cold turn generated=%d matched=%d, want %d/0", len(generated), matched, coldTokens)
 			}
 
 			evaluated := append(append([]int(nil), prompt...), generated[:len(generated)-1]...)
@@ -58,16 +59,17 @@ func TestInKernelContinuationCache(t *testing.T) {
 func TestInKernelContinuationCacheTwoTurnWorkReceipt(t *testing.T) {
 	cfg := tinyCfg()
 	prompt := synthIDs(cfg.VocabSize, 48, 12720)
+	const firstTurnTokens = 8
 	run := func(reuse bool) (matched, prefilled int, elapsed time.Duration) {
 		p := reusePlanner(reuse, false, cfg)
 		var first []int
 		started := time.Now()
 		_, _, _, _, _, _, _, _, err := p.generateReusedContextWithBias(
-			context.Background(), prompt, 8, 0, 0, 0, nil, 0, 0, map[int]bool{}, func(id int) bool {
+			context.Background(), prompt, firstTurnTokens, 0, 0, 0, nil, 0, 0, map[int]bool{}, func(id int) bool {
 				first = append(first, id)
 				return false
 			})
-		if err != nil || len(first) != 8 {
+		if err != nil || len(first) != firstTurnTokens {
 			t.Fatalf("first turn reuse=%v generated=%d err=%v", reuse, len(first), err)
 		}
 		turn2 := append(append([]int(nil), prompt...), first[:len(first)-1]...)
@@ -96,10 +98,11 @@ func TestInKernelContinuationCacheTwoTurnWorkReceipt(t *testing.T) {
 func TestInKernelContinuationCacheBoundaries(t *testing.T) {
 	cfg := tinyCfg()
 	prompt := synthIDs(cfg.VocabSize, 14, 12717)
+	const referenceTokens = 5
 	reference := reusePlanner(false, false, cfg)
-	generated, _ := decode(reference, prompt, 5)
-	if len(generated) != 5 {
-		t.Fatalf("reference generated %d tokens, want 5", len(generated))
+	generated, _ := decode(reference, prompt, referenceTokens)
+	if len(generated) != referenceTokens {
+		t.Fatalf("reference generated %d tokens, want %d", len(generated), referenceTokens)
 	}
 
 	t.Run("emit stop excludes terminal emitted token", func(t *testing.T) {

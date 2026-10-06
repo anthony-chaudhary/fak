@@ -245,8 +245,8 @@ func TestNativeSchedulerInBatchPrefixDedupShortPromptsDoNotCoalesce(t *testing.T
 	short := nativeSchedulerQwenPrompt(20) // < 32
 	divA := nativeSchedulerQwenPrompt(40)
 	divB := append(append([]int(nil), divA[:10]...), nativeSchedulerQwenPrompt(40)[10:]...) // share only 10
-	if len(divB) != 40 {
-		t.Fatalf("divergent fixture length = %d, want 40", len(divB))
+	if len(divB) != len(divA) {
+		t.Fatalf("divergent fixture length = %d, want %d", len(divB), len(divA))
 	}
 
 	prepare := prefixDedupPlainPrepare(map[string][]int{

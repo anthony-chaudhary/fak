@@ -781,12 +781,14 @@ func TestConcurrentForkAndAppendRace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterSession root failed: %v", err)
 	}
-	if err := root.AppendTokens(1, 2, 3, 4, 5, 6, 7, 8); err != nil {
+	rootTokens := []int32{1, 2, 3, 4, 5, 6, 7, 8}
+	if err := root.AppendTokens(rootTokens...); err != nil {
 		t.Fatalf("AppendTokens root failed: %v", err)
 	}
 
 	var wg sync.WaitGroup
 	const workers = 16
+	const appendsPerWorker = 5
 
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
@@ -800,7 +802,7 @@ func TestConcurrentForkAndAppendRace(t *testing.T) {
 			}
 
 			// Append tokens
-			for j := 0; j < 5; j++ {
+			for j := 0; j < appendsPerWorker; j++ {
 				tok := int32(workerID*1000 + j)
 				if err := child.AppendTokens(tok); err != nil {
 					t.Errorf("worker %d append failed: %v", workerID, err)
@@ -810,7 +812,7 @@ func TestConcurrentForkAndAppendRace(t *testing.T) {
 
 			// Read tokens
 			toks := child.ReadTokens()
-			if len(toks) != 13 {
+			if len(toks) != len(rootTokens)+appendsPerWorker {
 				t.Errorf("worker %d token count mismatch: %d", workerID, len(toks))
 			}
 

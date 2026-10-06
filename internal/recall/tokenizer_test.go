@@ -202,8 +202,8 @@ func TestTokenize_DeduplicationAndCapSafety(t *testing.T) {
 	t.Run("token cap safety on long CJK texts", func(t *testing.T) {
 		// 40 runes > maxTokenLen (32): full run omitted, bigrams emitted
 		runes40 := []rune("一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十")
-		if len(runes40) != 40 {
-			t.Fatalf("expected 40 runes, got %d", len(runes40))
+		if len(runes40) <= maxTokenLen {
+			t.Fatalf("fixture has %d runes, want > maxTokenLen %d", len(runes40), maxTokenLen)
 		}
 		got := Tokenize(string(runes40))
 

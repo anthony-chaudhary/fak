@@ -243,8 +243,8 @@ func TestBoundedAsymmetricForget(t *testing.T) {
 		dtHeads := []float32{0.1, -0.1}
 		fTokens := []float32{0.5, -0.5, 1.0, -1.0, 0.0, 0.0}
 		gotSeq := BoundedAsymmetricForget(aHeads, fTokens, dtHeads)
-		if len(gotSeq) != 6 {
-			t.Fatalf("expected 6 outputs, got %d", len(gotSeq))
+		if len(gotSeq) != len(fTokens) {
+			t.Fatalf("expected %d outputs, got %d", len(fTokens), len(gotSeq))
 		}
 		// Verify token 0 head 0 matches single elementwise
 		want0 := BoundedAsymmetricForget([]float32{aHeads[0]}, []float32{fTokens[0]}, []float32{dtHeads[0]})

@@ -38,14 +38,15 @@ func TestFormatGoalPrompt(t *testing.T) {
 
 	// 3. Exactly 4000 chars should pass
 	t.Run("boundary 4000 characters passes", func(t *testing.T) {
+		const limit = 4000
 		prefix := "/goal "
-		body := strings.Repeat("a", 4000-len(prefix))
+		body := strings.Repeat("a", limit-len(prefix))
 		res, err := FormatGoalPrompt(body)
 		if err != nil {
 			t.Fatalf("expected 4000 chars to succeed, got error: %v", err)
 		}
-		if len(res) != 4000 {
-			t.Fatalf("expected length 4000, got %d", len(res))
+		if len(res) != limit {
+			t.Fatalf("expected length %d, got %d", limit, len(res))
 		}
 	})
 

@@ -245,7 +245,7 @@ func BenchmarkRevalidate(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			res := Revalidate(rows10AllRefuse, liveAll)
-			if len(res.Active) != 10 || res.Cleared != 0 {
+			if len(res.Active) != len(rows10AllRefuse) || res.Cleared != 0 {
 				b.Fatalf("unexpected result: active=%d cleared=%d", len(res.Active), res.Cleared)
 			}
 		}
@@ -256,7 +256,7 @@ func BenchmarkRevalidate(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			res := Revalidate(rows10AllRefuse, liveNone)
-			if len(res.Superseded) != 10 || res.Cleared != 10 {
+			if len(res.Superseded) != len(rows10AllRefuse) || res.Cleared != len(rows10AllRefuse) {
 				b.Fatalf("unexpected result: superseded=%d cleared=%d", len(res.Superseded), res.Cleared)
 			}
 		}
@@ -289,7 +289,7 @@ func BenchmarkRevalidate(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			res := Revalidate(rows100Mixed, liveUnknown)
-			if res.Cleared != 0 || len(res.Active) != 100 {
+			if res.Cleared != 0 || len(res.Active) != len(rows100Mixed) {
 				b.Fatalf("unexpected unk live set clear: cleared=%d active=%d", res.Cleared, len(res.Active))
 			}
 		}

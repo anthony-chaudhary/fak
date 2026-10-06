@@ -199,7 +199,7 @@ func TestCaptureStrixLlamaC1ObservationBindsExactCompletionRequest(t *testing.T)
 	if err := json.Unmarshal(requestBody, &request); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(request.Prompt, packet.PromptTokenIDs) || len(request.Prompt) != 26 || request.NPredict != 128 || request.Temperature != 0 || request.TopK != 1 || request.TopP != 1 || request.Seed != 424242 || request.Stream || !request.IgnoreEOS || request.CachePrompt || !request.ReturnTokens || request.NProbs != 1 || request.PostSamplingProbs {
+	if !slices.Equal(request.Prompt, packet.PromptTokenIDs) || len(request.Prompt) != 26 || request.NPredict != 128 || request.Temperature != 0 || request.TopK != 1 || request.TopP != 1 || request.Seed != 424242 || request.Stream || !request.IgnoreEOS || request.CachePrompt || !request.ReturnTokens || request.NProbs != 1 || request.PostSamplingProbs { //boundarylint:ignore CHANGE_DETECTOR_TEST pinned c1 prompt packet width bound to the rendered-prompt sha256
 		t.Fatalf("completion request is not the exact pinned c1 envelope: %+v", request)
 	}
 	requestWire := buildStrixLlamaC1HTTPRequest(address, requestBody)
@@ -224,7 +224,7 @@ func TestCaptureStrixLlamaC1ObservationBindsExactCompletionRequest(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(parsed.Tokens) != 128 || parsed.Tokens[0] != 1000 || parsed.Tokens[127] != 1127 || len(tokenTexts) != 128 || tokenTexts[0] != "t1000" || len(tokenLogprobs) != 128 || tokenLogprobs[0] != -0.25 {
+	if len(parsed.Tokens) != qwen38quantrun.StrixComparisonOutputTokens || parsed.Tokens[0] != 1000 || parsed.Tokens[127] != 1127 || len(tokenTexts) != qwen38quantrun.StrixComparisonOutputTokens || tokenTexts[0] != "t1000" || len(tokenLogprobs) != qwen38quantrun.StrixComparisonOutputTokens || tokenLogprobs[0] != -0.25 {
 		t.Fatal("strict response parser did not preserve all 128 selected token rows")
 	}
 	if timings.PromptTokens != 26 || timings.PredictedTokens != 128 || timings.DecodeSteps != 127 || timings.PredictedMS != 635 || timings.PredictedPerTokenMS != 5 || timings.CacheTokens != 0 {

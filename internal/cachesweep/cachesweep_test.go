@@ -154,7 +154,7 @@ func TestTraceDigest(t *testing.T) {
 	}}
 	d1 := TraceDigest(base)
 	d2 := TraceDigest(base)
-	if d1 != d2 || len(d1) != 64 {
+	if d1 != d2 || len(d1) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex width
 		t.Fatalf("TraceDigest determinism failure: %q vs %q", d1, d2)
 	}
 

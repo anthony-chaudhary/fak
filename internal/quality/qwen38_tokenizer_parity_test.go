@@ -142,14 +142,14 @@ func loadQwen38TokenizerAndGT(t *testing.T) (*tokenizer.Tokenizer, *ggufload.GGM
 	if gt.Pre != "qwen35" {
 		t.Fatalf("gt.Pre = %q, want %q", gt.Pre, "qwen35")
 	}
-	if len(gt.Tokens) != 248320 {
+	if len(gt.Tokens) != 248320 { //boundarylint:ignore CHANGE_DETECTOR_TEST Qwen3.6 vocab size fixed by the sha256-pinned GGUF header fixture
 		t.Fatalf("len(gt.Tokens) = %d, want 248320", len(gt.Tokens))
 	}
-	if len(gt.Merges) != 247587 {
+	if len(gt.Merges) != 247587 { //boundarylint:ignore CHANGE_DETECTOR_TEST merge count fixed by the sha256-pinned GGUF header fixture
 		t.Fatalf("len(gt.Merges) = %d, want 247587", len(gt.Merges))
 	}
-	if len(gt.TokenTypes) != 248320 {
-		t.Fatalf("len(gt.TokenTypes) = %d, want 248320", len(gt.TokenTypes))
+	if len(gt.TokenTypes) != len(gt.Tokens) {
+		t.Fatalf("len(gt.TokenTypes) = %d, want %d", len(gt.TokenTypes), len(gt.Tokens))
 	}
 
 	tok, err := tokenizer.FromGGML(gt.Tokens, gt.Merges, gt.TokenTypes, gt.Pre)

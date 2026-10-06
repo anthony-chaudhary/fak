@@ -460,8 +460,9 @@ func TestControllerSupervisionScaleAndTopology(t *testing.T) {
 		if len(topo.KVFabrics) != 2 {
 			t.Fatalf("kv fabrics count = %d, want 2", len(topo.KVFabrics))
 		}
-		if len(topo.Domains()) != 7 {
-			t.Fatalf("total domains = %d, want 7", len(topo.Domains()))
+		declared := []servingsupervision.ServingDomainSpec{ctrlSpec, proxySpec, routerSpec, kvSpec0, kvSpec1, rep0Spec, rep1Spec}
+		if len(topo.Domains()) != len(declared) {
+			t.Fatalf("total domains = %d, want %d", len(topo.Domains()), len(declared))
 		}
 
 		desired := servingsupervision.DesiredServingState{

@@ -114,13 +114,14 @@ func TestSetPermutation(t *testing.T) {
 		}
 
 		basePtr := uintptr(0x7fff00000000) // 64-byte aligned base pointer
-		blocks, err := packer.GenerateContextLayout(basePtr, 8192)
+		const contextTokens = 8192
+		blocks, err := packer.GenerateContextLayout(basePtr, contextTokens)
 		if err != nil {
 			t.Fatalf("failed to generate context layout: %v", err)
 		}
 
-		if len(blocks) != 128 {
-			t.Fatalf("expected 128 blocks for 8,192 tokens, got %d", len(blocks))
+		if len(blocks) != contextTokens/cfg.TokensPerBlock {
+			t.Fatalf("expected %d blocks for %d tokens, got %d", contextTokens/cfg.TokensPerBlock, contextTokens, len(blocks))
 		}
 
 		nonAliasing, counts := packer.VerifyNonAliasing(blocks)

@@ -224,13 +224,14 @@ func BenchmarkReadTail(b *testing.B) {
 		},
 		Verdict: &abi.Verdict{Kind: abi.VerdictAllow, By: "rule"},
 	}
-	for i := 0; i < 50; i++ {
+	const emitsPerSegment = 50
+	for i := 0; i < emitsPerSegment; i++ {
 		j.Emit(ev)
 	}
 	if _, err := j.Cut(); err != nil {
 		b.Fatalf("Cut failed: %v", err)
 	}
-	for i := 0; i < 50; i++ {
+	for i := 0; i < emitsPerSegment; i++ {
 		j.Emit(ev)
 	}
 	if err := j.Close(); err != nil {
@@ -241,7 +242,7 @@ func BenchmarkReadTail(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		rows, om, err := ReadTail(path)
-		if err != nil || len(rows) != 51 || om.SealedSegments != 1 {
+		if err != nil || len(rows) != emitsPerSegment+1 || om.SealedSegments != 1 {
 			b.Fatalf("ReadTail failed: len=%d om=%+v err=%v", len(rows), om, err)
 		}
 	}

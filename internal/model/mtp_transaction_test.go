@@ -118,8 +118,8 @@ func TestMTPTransaction_CommitAccepted(t *testing.T) {
 	if state2.Position != 15 {
 		t.Errorf("state2.Position = %d, want 15 (13 + 2)", state2.Position)
 	}
-	if len(state2.KV) != 6 { // 4 previous + 2 accepted
-		t.Errorf("len(state2.KV) = %d, want 6", len(state2.KV))
+	if len(state2.KV) != len(state.KV)+accepted2 { // 4 previous + 2 accepted
+		t.Errorf("len(state2.KV) = %d, want %d", len(state2.KV), len(state.KV)+accepted2)
 	}
 
 	acc2 := tx.Accounting()

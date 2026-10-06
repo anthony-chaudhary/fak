@@ -30,12 +30,9 @@ func TestCachePolicyBenchAllArms(t *testing.T) {
 	stream := mustSyntheticStream(t, "zipf", 7, 4, 32, 2, 2000)
 	receipt := mustReplay(t, stream, 64)
 
-	if len(receipt.Rows) != 5 {
-		t.Fatalf("len(receipt.Rows) = %d, want 5", len(receipt.Rows))
-	}
 	wantArms := CachePolicyArms()
-	if len(wantArms) != len(receipt.Rows) {
-		t.Fatalf("len(CachePolicyArms()) = %d, want %d", len(wantArms), len(receipt.Rows))
+	if len(receipt.Rows) != len(wantArms) {
+		t.Fatalf("len(receipt.Rows) = %d, want %d", len(receipt.Rows), len(wantArms))
 	}
 	for i, want := range wantArms {
 		if receipt.Rows[i].Policy != want {

@@ -249,13 +249,14 @@ func f() (any, error) {
 		t.Errorf("expected Truncated to be true")
 	}
 
+	wantAll := strings.Count(src, "return nil, ")
 	// With maxMatches = 0 (unlimited)
 	unlimited, err := SearchTool(dir, "return nil, $ERR", nil, 0)
 	if err != nil {
 		t.Fatalf("unlimited search: %v", err)
 	}
-	if len(unlimited.Matches) != 5 || unlimited.Count != 5 {
-		t.Fatalf("expected 5 matches, got %d", len(unlimited.Matches))
+	if len(unlimited.Matches) != wantAll || unlimited.Count != wantAll {
+		t.Fatalf("expected %d matches, got %d", wantAll, len(unlimited.Matches))
 	}
 	if unlimited.Truncated {
 		t.Errorf("expected Truncated to be false")

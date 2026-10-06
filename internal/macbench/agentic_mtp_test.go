@@ -361,8 +361,8 @@ func TestRunAgenticMTP_OptionsValidation(t *testing.T) {
 	if packet.Summary.Concurrency != 24 {
 		t.Fatalf("expected concurrency 24, got %d", packet.Summary.Concurrency)
 	}
-	if len(raw.Streams) != 24 {
-		t.Fatalf("expected 24 raw streams, got %d", len(raw.Streams))
+	if len(raw.Streams) != opts.Concurrency {
+		t.Fatalf("expected %d raw streams, got %d", opts.Concurrency, len(raw.Streams))
 	}
 	if quality.Passed != true {
 		t.Fatal("expected quality passed")

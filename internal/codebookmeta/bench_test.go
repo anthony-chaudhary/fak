@@ -81,7 +81,7 @@ func BenchmarkCodebookDigest(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		d := CodebookDigest(cb)
-		if d.Algorithm != "sha256" || len(d.Value) != 64 {
+		if d.Algorithm != "sha256" || len(d.Value) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex width
 			b.Fatalf("CodebookDigest failed: %#v", d)
 		}
 	}

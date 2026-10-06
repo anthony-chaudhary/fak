@@ -32,7 +32,7 @@ func TestBenchmarkLightGapPortHarness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned unexpected error: %v", err)
 	}
-	if len(r.Swaps) != 5 {
-		t.Fatalf("expected 5 swaps, got %d", len(r.Swaps))
+	if want := len(Contract().Swaps); len(r.Swaps) != want {
+		t.Fatalf("expected %d swaps, got %d", want, len(r.Swaps))
 	}
 }

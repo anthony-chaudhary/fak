@@ -3,6 +3,8 @@ package amdgpu
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"errors"
 	"os"
 	"os/exec"
@@ -129,7 +131,7 @@ func TestStrixGitSnapshotAncestryUsesOnlyValidatedPrivateObjects(t *testing.T) {
 		verify := runGit(t, live, nil, "verify-pack", "-v", indices[0])
 		hasDelta := false
 		for _, line := range strings.Split(verify, "\n") {
-			if fields := strings.Fields(line); len(fields) >= 7 && len(fields[0]) == 40 {
+			if fields := strings.Fields(line); len(fields) >= 7 && len(fields[0]) == hex.EncodedLen(sha1.Size) {
 				hasDelta = true
 				break
 			}

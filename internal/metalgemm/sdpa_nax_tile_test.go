@@ -851,8 +851,22 @@ func TestMetalWideMSpeculativeVerification(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BuildTreeTopologyFromBranches failed: %v", err)
 		}
-		if len(branchTop.Parents) != 5 {
-			t.Fatalf("expected 5 deduplicated trie nodes, got %d", len(branchTop.Parents))
+		type trieEdge struct{ parent, tok int }
+		trieNodes := map[trieEdge]int{}
+		for _, branch := range branches {
+			parent := -1
+			for _, tok := range branch {
+				e := trieEdge{parent, tok}
+				id, ok := trieNodes[e]
+				if !ok {
+					id = len(trieNodes)
+					trieNodes[e] = id
+				}
+				parent = id
+			}
+		}
+		if len(branchTop.Parents) != len(trieNodes) {
+			t.Fatalf("expected %d deduplicated trie nodes, got %d", len(trieNodes), len(branchTop.Parents))
 		}
 		t.Logf("TreeTopology validated successfully: 5 nodes, depth %d, branching %d", branchTop.Depth, branchTop.BranchingFactor)
 	})

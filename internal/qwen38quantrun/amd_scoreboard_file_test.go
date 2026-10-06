@@ -84,8 +84,17 @@ func TestStrixHaloComparisonLedgerFailsClosedAndRendersIndex(t *testing.T) {
 	if ledger.Schema != "fak.benchmark.strix-halo-comparison-ladder/v1" || ledger.Status != "NO_COMPARABLE_LOCAL_RESULT" {
 		t.Fatalf("ledger identity = %q/%q", ledger.Schema, ledger.Status)
 	}
-	if len(ledger.Rows) != 9 || len(ledger.NegativeFixtures) != 7 {
-		t.Fatalf("ledger rows/negative fixtures = %d/%d, want 9/7", len(ledger.Rows), len(ledger.NegativeFixtures))
+	wantNegativeFixtureIDs := []string{
+		"reject-comparable-missing-quality",
+		"reject-comparable-missing-source-revision",
+		"reject-comparable-missing-artifact",
+		"reject-comparable-missing-workload",
+		"reject-comparable-missing-engine",
+		"reject-comparable-sparse-moe-as-dense",
+		"reject-comparable-corrupt-output",
+	}
+	if len(ledger.Rows) == 0 || len(ledger.NegativeFixtures) != len(wantNegativeFixtureIDs) {
+		t.Fatalf("ledger rows/negative fixtures = %d/%d, want >0/%d", len(ledger.Rows), len(ledger.NegativeFixtures), len(wantNegativeFixtureIDs))
 	}
 
 	required := stringSet(ledger.Contract.RequiredForComparable)
@@ -116,23 +125,15 @@ func TestStrixHaloComparisonLedgerFailsClosedAndRendersIndex(t *testing.T) {
 			t.Fatalf("negative fixture %q was accepted", fixture.ID)
 		}
 	}
-	for _, id := range []string{
-		"reject-comparable-missing-quality",
-		"reject-comparable-missing-source-revision",
-		"reject-comparable-missing-artifact",
-		"reject-comparable-missing-workload",
-		"reject-comparable-missing-engine",
-		"reject-comparable-sparse-moe-as-dense",
-		"reject-comparable-corrupt-output",
-	} {
+	for _, id := range wantNegativeFixtureIDs {
 		if !fixtureIDs[id] {
 			t.Errorf("missing negative fixture %q", id)
 		}
 	}
 
+	const tableHeader = "| Disposition | Source row | Frozen point | Why no ratio is emitted |\n|---|---|---:|---|\n"
 	var table strings.Builder
-	table.WriteString("| Disposition | Source row | Frozen point | Why no ratio is emitted |\n")
-	table.WriteString("|---|---|---:|---|\n")
+	table.WriteString(tableHeader)
 	for _, row := range ledger.Rows {
 		id := comparisonString(t, row, "id")
 		disposition := comparisonString(t, row, "disposition")
@@ -160,6 +161,16 @@ func TestStrixHaloComparisonLedgerFailsClosedAndRendersIndex(t *testing.T) {
 	normalizedIndex := strings.ReplaceAll(string(index), "\r\n", "\n")
 	if !strings.Contains(normalizedIndex, table.String()) {
 		t.Fatalf("Qwen performance index Strix table drifted from ledger:\n%s", table.String())
+	}
+	indexRows := 0
+	for _, line := range strings.Split(normalizedIndex[strings.Index(normalizedIndex, tableHeader)+len(tableHeader):], "\n") {
+		if !strings.HasPrefix(line, "| **") {
+			break
+		}
+		indexRows++
+	}
+	if indexRows != len(ledger.Rows) {
+		t.Fatalf("Qwen performance index Strix table has %d rows, ledger has %d", indexRows, len(ledger.Rows))
 	}
 }
 

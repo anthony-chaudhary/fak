@@ -210,7 +210,7 @@ func TestMetalQwen35P1PublishesTargetHidden(t *testing.T) {
 		captured.Close()
 		t.Fatalf("captured P32 encoders=%d, want %d", gotP32Receipt.Encoders, wantP32Receipt.Encoders)
 	}
-	if len(captured.targetHidden) != 32 || len(captured.targetHiddenTokens) != 32 {
+	if len(captured.targetHidden) != len(prompt) || len(captured.targetHiddenTokens) != len(prompt) {
 		captured.Close()
 		t.Fatalf("captured P32 rows=%d tokens=%d, want 32/32", len(captured.targetHidden), len(captured.targetHiddenTokens))
 	}
@@ -246,7 +246,7 @@ func TestMetalQwen35P1PublishesTargetHidden(t *testing.T) {
 		captured.Close()
 		t.Fatalf("captured P1 encoders=%d, want %d", gotP1Receipt.Encoders, wantP1Receipt.Encoders)
 	}
-	if captured.Cache.Len() != 33 || len(captured.targetHidden) != 33 || len(captured.targetHiddenTokens) != 33 {
+	if captured.Cache.Len() != len(prompt)+1 || len(captured.targetHidden) != len(prompt)+1 || len(captured.targetHiddenTokens) != len(prompt)+1 {
 		captured.Close()
 		t.Fatalf("captured cache=%d rows=%d tokens=%d, want 33/33/33", captured.Cache.Len(), len(captured.targetHidden), len(captured.targetHiddenTokens))
 	}

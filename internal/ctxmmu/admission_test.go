@@ -1,6 +1,8 @@
 package ctxmmu
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 	"unsafe"
@@ -90,7 +92,7 @@ func TestAdmitZeroCopyFastPath(t *testing.T) {
 	if rec.NodeRef != 0xdead || rec.Pages != 3 || rec.Tokens != 2 {
 		t.Fatalf("unexpected receipt: %+v", rec)
 	}
-	if len(rec.Digest) != 64 {
+	if len(rec.Digest) != hex.EncodedLen(sha256.Size) {
 		t.Fatalf("digest not sha256 hex: %q", rec.Digest)
 	}
 }

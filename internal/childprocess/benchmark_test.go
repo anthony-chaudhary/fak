@@ -245,16 +245,17 @@ func TestBenchmarkProcessTreeSanity(t *testing.T) {
 	if root == nil || root.PID != 1 {
 		t.Fatalf("expected root PID 1, got %+v", root)
 	}
+	built := pidCounter
 	flat := flattenTree(root)
-	if len(flat) != 7 {
-		t.Fatalf("expected 7 processes in 3-deep binary tree, got %d", len(flat))
+	if len(flat) != built {
+		t.Fatalf("expected %d processes in 3-deep binary tree, got %d", built, len(flat))
 	}
 	descendants := scanDescendants(flat, 1)
-	if len(descendants) != 6 {
-		t.Fatalf("expected 6 descendants, got %d", len(descendants))
+	if len(descendants) != built-1 {
+		t.Fatalf("expected %d descendants, got %d", built-1, len(descendants))
 	}
 	postOrder := collectTreePostOrder(root)
-	if len(postOrder) != 7 || postOrder[len(postOrder)-1] != 1 {
+	if len(postOrder) != built || postOrder[len(postOrder)-1] != 1 {
 		t.Fatalf("post-order must end at root PID 1, got %v", postOrder)
 	}
 }

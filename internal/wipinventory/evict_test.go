@@ -82,7 +82,7 @@ func TestEvictOrphansPreservesAndCleans(t *testing.T) {
 	if !strings.HasPrefix(qref.Ref, expectedPrefix) {
 		t.Errorf("ref %q does not have prefix %s", qref.Ref, expectedPrefix)
 	}
-	if len(qref.SHA) != 40 {
+	if len(qref.SHA) != 40 { //boundarylint:ignore CHANGE_DETECTOR_TEST git SHA-1 object id hex width
 		t.Errorf("expected 40-char SHA, got %q", qref.SHA)
 	}
 	if qref.Count != 2 {

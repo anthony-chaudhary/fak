@@ -124,7 +124,7 @@ func TestDerivePromptPacketGGUFIdentityPinnedQwen38Header(t *testing.T) {
 		t.Fatal(closeErr)
 	}
 	const headerSHA256 = "1fe82fda85430cca654a156e9ec2915baf460752197013563b426db2581dcc0f"
-	if len(raw) != 10996640 || fmt.Sprintf("%x", sha256.Sum256(raw)) != headerSHA256 {
+	if len(raw) != 10996640 || fmt.Sprintf("%x", sha256.Sum256(raw)) != headerSHA256 { //boundarylint:ignore CHANGE_DETECTOR_TEST byte length of the sha256-pinned GGUF header fixture
 		t.Fatalf("pinned canonicalizer fixture identity mismatch: bytes=%d sha256=%x", len(raw), sha256.Sum256(raw))
 	}
 	headerPath := filepath.Join(t.TempDir(), "qwen38-canonicalizer-fixture.gguf")

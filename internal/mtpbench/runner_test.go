@@ -192,7 +192,8 @@ func clearDraftProfile(p *MetalProfile) {
 
 func TestRunnerABBAAndPassMath(t *testing.T) {
 	p := &fakePrepared{cleanup: CleanupReceipt{RetainMTPRestored: true, ModelWeightsClosed: true, Q6LiveBefore: 3, Q6LiveAfter: 3}}
-	report, err := (Runner{Executor: fakeExecutor{p}}).Run(context.Background(), validConfig())
+	cfg := validConfig()
+	report, err := (Runner{Executor: fakeExecutor{p}}).Run(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +203,7 @@ func TestRunnerABBAAndPassMath(t *testing.T) {
 	if want := []string{CandidateArm, BaselineArm, BaselineArm, CandidateArm}; !slices.Equal(report.Schedule[:4], want) {
 		t.Fatalf("schedule=%v", report.Schedule[:4])
 	}
-	if len(report.Samples) != 40 || report.Arms[0].Samples != 20 || report.Arms[1].Rank != 1 {
+	if len(report.Samples) != 2*cfg.SamplesPerArm || report.Arms[0].Samples != cfg.SamplesPerArm || report.Arms[1].Rank != 1 {
 		t.Fatalf("samples/arms=%d %+v", len(report.Samples), report.Arms)
 	}
 }

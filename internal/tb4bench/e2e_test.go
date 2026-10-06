@@ -16,8 +16,9 @@ func TestEndToEndSyntheticSuite(t *testing.T) {
 		t.Fatalf("failed to load synthetic manifest: %v", err)
 	}
 
-	if len(suite.Tasks) != 5 {
-		t.Fatalf("expected 5 synthetic tasks, got %d", len(suite.Tasks))
+	const wantSyntheticTasks = 5
+	if len(suite.Tasks) != wantSyntheticTasks {
+		t.Fatalf("expected %d synthetic tasks, got %d", wantSyntheticTasks, len(suite.Tasks))
 	}
 
 	// 1. Generate and validate contract
@@ -165,8 +166,8 @@ func TestEndToEndSyntheticSuite(t *testing.T) {
 	}
 
 	// Verify solve rates
-	if report.ArmAMetrics.Official.SolvedTasks != 5 {
-		t.Errorf("expected Arm A to solve all 5 tasks, got %d", report.ArmAMetrics.Official.SolvedTasks)
+	if report.ArmAMetrics.Official.SolvedTasks != wantSyntheticTasks {
+		t.Errorf("expected Arm A to solve all %d tasks, got %d", wantSyntheticTasks, report.ArmAMetrics.Official.SolvedTasks)
 	}
 	if report.ArmBMetrics.Official.SolvedTasks != 3 {
 		t.Errorf("expected Arm B to solve 3 tasks, got %d", report.ArmBMetrics.Official.SolvedTasks)

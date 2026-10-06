@@ -163,8 +163,8 @@ func TestHashKDualSubtableGather160Dim(t *testing.T) {
 	}
 
 	singleGather := table.Gather(42, 0)
-	if len(singleGather) != 160 {
-		t.Fatalf("table.Gather returned %d dims, want 160", len(singleGather))
+	if len(singleGather) != fullDim {
+		t.Fatalf("table.Gather returned %d dims, want %d", len(singleGather), fullDim)
 	}
 
 	batch := table.GatherBatch([]uint64{10, 20})
@@ -181,8 +181,8 @@ func TestHashKDualSubtableGather160Dim(t *testing.T) {
 		fp8Table.Subtable1[int(slot1)*subDim+d] = byte(0xBB)
 	}
 	fp8Out := fp8Table.GatherBytes(7, 2)
-	if len(fp8Out) != 160 {
-		t.Fatalf("FP8 out len got %d, want 160", len(fp8Out))
+	if len(fp8Out) != fullDim {
+		t.Fatalf("FP8 out len got %d, want %d", len(fp8Out), fullDim)
 	}
 	for d := 0; d < subDim; d++ {
 		if fp8Out[d] != 0xAA {

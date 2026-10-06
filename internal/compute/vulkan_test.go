@@ -566,7 +566,7 @@ func TestVulkanRestoreBatchesImmutableResidencyGroups(t *testing.T) {
 	}
 	// The first source encodes the deterministic first post-restore token in its
 	// final word. Byte-exact readback proves the uploader did not reorder it.
-	if got := v.VulkanDebugReadRestoreBuffer(buffers[0]); len(got) != 12 || got[11] != 13 {
+	if got := v.VulkanDebugReadRestoreBuffer(buffers[0]); len(got) != len(sources[0].Bytes) || got[11] != 13 {
 		t.Fatalf("first post-restore token bytes = %v, want terminal byte 13", got)
 	}
 	v.VulkanDebugFreeRestoreBuffers(buffers)

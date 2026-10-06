@@ -213,12 +213,13 @@ func BenchmarkSplitNUL(b *testing.B) {
 // BenchmarkUniqueSorted measures deduplication and lexicographic sorting throughput.
 func BenchmarkUniqueSorted(b *testing.B) {
 	input := []string{"z.go", "a.go", "m.go", "a.go", "b.go", "m.go", "c.go"}
+	const duplicates = 2
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		unique := uniqueSorted(input)
-		if len(unique) != 5 {
-			b.Fatalf("expected 5 unique paths, got %d", len(unique))
+		if len(unique) != len(input)-duplicates {
+			b.Fatalf("expected %d unique paths, got %d", len(input)-duplicates, len(unique))
 		}
 	}
 }

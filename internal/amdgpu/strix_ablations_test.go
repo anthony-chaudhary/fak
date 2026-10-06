@@ -195,8 +195,8 @@ func TestAblationArms_RejectMissingOrFabricatedEvidence(t *testing.T) {
 		if err != nil {
 			t.Fatalf("RunStrixAblations unexpected error: %v", err)
 		}
-		if len(results) != 8 {
-			t.Fatalf("got %d ablation results, want 8", len(results))
+		if len(results) != len(strixAblationCatalog) {
+			t.Fatalf("got %d ablation results, want one per catalog arm (%d)", len(results), len(strixAblationCatalog))
 		}
 		for _, r := range results {
 			if r.Verdict != "REGRESSION" {

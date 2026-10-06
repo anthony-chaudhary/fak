@@ -508,10 +508,10 @@ func buildCompressionSeedCorpus() []compressionSeedCase {
 
 	// Content length exactly 47 bytes
 	cnt47 := `[{"type":"text","text":"{            }"}]` // len: 39 + 8 = 47
-	for len(cnt47) < 47 {
+	for len(cnt47) < minStructuredCompressionBytes-1 {
 		cnt47 = strings.Replace(cnt47, `"text":"{`, `"text":"{ `, 1)
 	}
-	if len(cnt47) == 47 {
+	if len(cnt47) == minStructuredCompressionBytes-1 {
 		seeds = append(seeds, compressionSeedCase{
 			name:            "savings_len_47_bytes",
 			result:          []byte(makeFuzzResult(cnt47, `{}`, "")),

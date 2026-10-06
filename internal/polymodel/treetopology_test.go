@@ -43,19 +43,29 @@ func TestGenerateLinearTree(t *testing.T) {
 	}
 }
 
+func fullTreeNodeCount(branch, depth int) int {
+	total, level := 1, 1
+	for d := 0; d < depth; d++ {
+		level *= branch
+		total += level
+	}
+	return total
+}
+
 func TestGenerateWideShallowTree(t *testing.T) {
 	// Defaults
 	defTree := GenerateWideShallowTree(0, 0)
 	// Default branch=4, depth=2 -> root(1) + 4 + 16 = 21 nodes
-	if len(defTree.Nodes) != 21 {
-		t.Fatalf("expected 21 nodes for default wide-shallow, got %d", len(defTree.Nodes))
+	if want := fullTreeNodeCount(4, 2); len(defTree.Nodes) != want {
+		t.Fatalf("expected %d nodes for default wide-shallow, got %d", want, len(defTree.Nodes))
 	}
 
 	// Custom
-	tree := GenerateWideShallowTree(3, 2)
+	branch, depth := 3, 2
+	tree := GenerateWideShallowTree(branch, depth)
 	// Root(1) + 3 + 9 = 13 nodes
-	if len(tree.Nodes) != 13 {
-		t.Fatalf("expected 13 nodes for branch=3, depth=2, got %d", len(tree.Nodes))
+	if want := fullTreeNodeCount(branch, depth); len(tree.Nodes) != want {
+		t.Fatalf("expected %d nodes for branch=%d, depth=%d, got %d", want, branch, depth, len(tree.Nodes))
 	}
 
 	panel, err := BuildTreePanel(tree)
@@ -71,15 +81,16 @@ func TestGenerateDeepNarrowTree(t *testing.T) {
 	// Defaults
 	defTree := GenerateDeepNarrowTree(0, 0)
 	// Default branch=2, depth=4 -> root(1) + 2 + 4 + 8 + 16 = 31 nodes
-	if len(defTree.Nodes) != 31 {
-		t.Fatalf("expected 31 nodes for default deep-narrow, got %d", len(defTree.Nodes))
+	if want := fullTreeNodeCount(2, 4); len(defTree.Nodes) != want {
+		t.Fatalf("expected %d nodes for default deep-narrow, got %d", want, len(defTree.Nodes))
 	}
 
 	// Custom
-	tree := GenerateDeepNarrowTree(1, 6)
+	branch, depth := 1, 6
+	tree := GenerateDeepNarrowTree(branch, depth)
 	// Root(1) + 6 = 7 nodes (linear chain)
-	if len(tree.Nodes) != 7 {
-		t.Fatalf("expected 7 nodes for branch=1, depth=6, got %d", len(tree.Nodes))
+	if want := fullTreeNodeCount(branch, depth); len(tree.Nodes) != want {
+		t.Fatalf("expected %d nodes for branch=%d, depth=%d, got %d", want, branch, depth, len(tree.Nodes))
 	}
 
 	panel, err := BuildTreePanel(tree)

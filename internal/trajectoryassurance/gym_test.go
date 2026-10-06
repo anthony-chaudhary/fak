@@ -47,8 +47,8 @@ func TestGymCorpusV2Promote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.PairedCases) != 32 {
-		t.Fatalf("expected 32 paired cases, got %d", len(c.PairedCases))
+	if len(c.PairedCases) != gymStrataCount() {
+		t.Fatalf("expected %d paired cases, got %d", gymStrataCount(), len(c.PairedCases))
 	}
 	if c.Provenance != "anonymized production empirical traces" {
 		t.Fatalf("unexpected provenance: %s", c.Provenance)

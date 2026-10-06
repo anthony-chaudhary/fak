@@ -1035,11 +1035,11 @@ func TestRichDashboardApplianceCatalog(t *testing.T) {
 
 	catalog := mApp.catalog()
 	expected := ApplianceDashboardCatalog()
-	if len(catalog) != 6 {
-		t.Fatalf("catalog len = %d, want 6", len(catalog))
+	if len(catalog) != len(expected) {
+		t.Fatalf("catalog len = %d, want %d", len(catalog), len(expected))
 	}
-	if len(mApp.links) != 6 {
-		t.Fatalf("mApp.links len = %d, want 6", len(mApp.links))
+	if len(mApp.links) != len(expected) {
+		t.Fatalf("mApp.links len = %d, want %d", len(mApp.links), len(expected))
 	}
 	if !reflect.DeepEqual(catalog, expected) {
 		t.Fatalf("catalog mismatch:\ngot:  %+v\nwant: %+v", catalog, expected)
@@ -1097,8 +1097,8 @@ func TestRichDashboardApplianceCatalog(t *testing.T) {
 	defer mDev.close()
 	mDev.state = "ready"
 
-	if len(mDev.catalog()) != 9 {
-		t.Fatalf("dev mode catalog len = %d, want 9", len(mDev.catalog()))
+	if len(mDev.catalog()) != len(richDashboardLinks) {
+		t.Fatalf("dev mode catalog len = %d, want %d", len(mDev.catalog()), len(richDashboardLinks))
 	}
 	if got := mDev.getDefaultUID(); got != "fak-gateway-observability" {
 		t.Fatalf("dev mode getDefaultUID = %q, want fak-gateway-observability", got)

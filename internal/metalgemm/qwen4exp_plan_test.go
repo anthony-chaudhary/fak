@@ -22,8 +22,8 @@ func TestQwen4ExpTopologyCompleteness(t *testing.T) {
 	if plan.FullAttentionInterval != 4 {
 		t.Errorf("FullAttentionInterval = %d, want 4", plan.FullAttentionInterval)
 	}
-	if len(plan.Layers) != 48 {
-		t.Fatalf("len(Layers) = %d, want 48", len(plan.Layers))
+	if len(plan.Layers) != plan.TotalLayers {
+		t.Fatalf("len(Layers) = %d, want %d", len(plan.Layers), plan.TotalLayers)
 	}
 
 	gdnCount := 0

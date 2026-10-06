@@ -106,8 +106,12 @@ func TestPrecisionScheduleRoleValidity(t *testing.T) {
 		RoleDraft,
 		RoleTarget,
 	}
-	if len(declared) != 11 {
-		t.Fatalf("declared role count = %d, want 11", len(declared))
+	distinct := map[Role]bool{}
+	for _, r := range declared {
+		distinct[r] = true
+	}
+	if len(distinct) != len(declared) {
+		t.Fatalf("declared role table has duplicates: %d distinct of %d", len(distinct), len(declared))
 	}
 	all := AllRoles()
 	if len(all) != len(declared) {

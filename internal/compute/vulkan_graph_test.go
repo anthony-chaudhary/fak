@@ -147,18 +147,19 @@ func TestVulkanGraphReuseAndSubmissionSavings(t *testing.T) {
 
 	// Qwen3.8 layer forward graph consists of 11 sequential operations:
 	// Norm -> QKV -> RoPE -> Attn -> OProj -> Residual -> Norm -> FFN GateUp -> SwiGLU -> Down -> Residual
-	if len(g.Nodes()) != 11 {
-		t.Fatalf("expected 11 nodes in Qwen3.8 layer graph, got %d", len(g.Nodes()))
+	const layerOps = 11
+	if len(g.Nodes()) != layerOps {
+		t.Fatalf("expected %d nodes in Qwen3.8 layer graph, got %d", layerOps, len(g.Nodes()))
 	}
 
-	if g.NaiveSubmits() != 11 {
-		t.Fatalf("expected 11 naive submissions, got %d", g.NaiveSubmits())
+	if g.NaiveSubmits() != layerOps {
+		t.Fatalf("expected %d naive submissions, got %d", layerOps, g.NaiveSubmits())
 	}
 	if g.Submissions() != 1 {
 		t.Fatalf("expected 1 batched submission, got %d", g.Submissions())
 	}
-	if g.SubmissionReduction() != 10 {
-		t.Fatalf("expected 10 submissions reduced per replay, got %d", g.SubmissionReduction())
+	if g.SubmissionReduction() != layerOps-1 {
+		t.Fatalf("expected %d submissions reduced per replay, got %d", layerOps-1, g.SubmissionReduction())
 	}
 
 	// Replay the graph 50 times (simulating 50 decode steps)
@@ -172,14 +173,14 @@ func TestVulkanGraphReuseAndSubmissionSavings(t *testing.T) {
 	if g.ReplayCount() != replays {
 		t.Fatalf("expected %d replays, got %d", replays, g.ReplayCount())
 	}
-	expectedSaved := replays * 10
+	expectedSaved := replays * (layerOps - 1)
 	if g.SubmissionsSaved() != expectedSaved {
 		t.Fatalf("expected %d submissions saved, got %d", expectedSaved, g.SubmissionsSaved())
 	}
 
 	// Device sync events should be present connecting dependent nodes
-	if g.DeviceSyncEvents() < 10 {
-		t.Fatalf("expected at least 10 device sync barriers, got %d", g.DeviceSyncEvents())
+	if g.DeviceSyncEvents() < layerOps-1 {
+		t.Fatalf("expected at least %d device sync barriers, got %d", layerOps-1, g.DeviceSyncEvents())
 	}
 }
 

@@ -571,7 +571,7 @@ func BenchmarkResolve(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		resolved, err := asm.Resolve(env)
-		if err != nil || len(resolved) != 5 {
+		if err != nil || len(resolved) != len(parts) {
 			b.Fatalf("Resolve failed: %v", err)
 		}
 	}

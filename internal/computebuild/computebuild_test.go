@@ -2,6 +2,7 @@ package computebuild
 
 import (
 	"context"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -16,10 +17,6 @@ import (
 )
 
 func TestVulkanShadersCompleteness(t *testing.T) {
-	if len(VulkanShaders) != 59 {
-		t.Fatalf("expected 59 Vulkan shaders, got %d", len(VulkanShaders))
-	}
-
 	seen := make(map[string]bool)
 	for _, s := range VulkanShaders {
 		if seen[s] {
@@ -44,6 +41,9 @@ func TestVulkanShadersCompleteness(t *testing.T) {
 		"rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add",
 		"qwen35_gdn_prefill_tiled", "qwen35_gdn_prefill_norm", "qwen35_gdn_verify_tiled",
 		"q2k_matvec", "rmsnorm_q8_matmul2_coop", "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec",
+	}
+	if len(VulkanShaders) != len(expectedShaders) {
+		t.Fatalf("expected %d Vulkan shaders, got %d", len(expectedShaders), len(VulkanShaders))
 	}
 
 	for i, exp := range expectedShaders {
@@ -116,8 +116,9 @@ func TestCUDAArchParsingAndGencode(t *testing.T) {
 		t.Fatalf("ParseCUDAArchMatrix empty arch failed: %v", err)
 	}
 	// 5 architectures + 1 highest compute PTX = 6 pairs = 12 flags
-	if len(gencode) != 12 {
-		t.Fatalf("expected 12 gencode arguments, got %d: %v", len(gencode), gencode)
+	wantGencode := 2 * (len(strings.Fields(sampleArchTxt)) + 1)
+	if len(gencode) != wantGencode {
+		t.Fatalf("expected %d gencode arguments, got %d: %v", wantGencode, len(gencode), gencode)
 	}
 	if !strings.Contains(buildArchs, "compute_120 PTX") {
 		t.Errorf("expected buildArchs to contain 'compute_120 PTX', got %q", buildArchs)
@@ -435,8 +436,8 @@ func TestReceiptGenerationAndFormatting(t *testing.T) {
 	if decoded.Outcome != "success" || decoded.ExitCode != 0 {
 		t.Errorf("outcome mismatch: outcome=%q, exit_code=%d", decoded.Outcome, decoded.ExitCode)
 	}
-	if len(decoded.Phases) != 5 {
-		t.Fatalf("expected 5 phases, got %d", len(decoded.Phases))
+	if len(decoded.Phases) != len(receipt.Phases) {
+		t.Fatalf("expected %d phases, got %d", len(receipt.Phases), len(decoded.Phases))
 	}
 	if decoded.Phases[0].Name != "toolchain_probe" || decoded.Phases[4].Name != "smoke" {
 		t.Errorf("unexpected phase names: first=%q last=%q", decoded.Phases[0].Name, decoded.Phases[4].Name)
@@ -945,6 +946,7 @@ func TestMergeToolchainOverridesPreservesDiscoveredDefaults(t *testing.T) {
 }
 
 func TestVulkanBinaryReceiptBindsReproducibleSourceToolsShadersAndBinary(t *testing.T) {
+	gitOIDHex, sha256Hex := hex.EncodedLen(sha1.Size), hex.EncodedLen(sha256.Size)
 	root, repo, tc := newVulkanFixture(t)
 	firstSource, err := prepareVulkanSource(context.Background(), repo, "")
 	if err != nil {
@@ -954,7 +956,7 @@ func TestVulkanBinaryReceiptBindsReproducibleSourceToolsShadersAndBinary(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if firstSource != secondSource || !firstSource.Clean || len(firstSource.GitCommit) != 40 || len(firstSource.GitTree) != 40 || len(firstSource.SourceArchiveSHA256) != 64 {
+	if firstSource != secondSource || !firstSource.Clean || len(firstSource.GitCommit) != gitOIDHex || len(firstSource.GitTree) != gitOIDHex || len(firstSource.SourceArchiveSHA256) != sha256Hex {
 		t.Fatalf("source provenance is not deterministic and complete: first=%+v second=%+v", firstSource, secondSource)
 	}
 	if _, err := prepareVulkanSource(context.Background(), repo, strings.Repeat("0", 40)); err == nil {
@@ -970,10 +972,14 @@ func TestVulkanBinaryReceiptBindsReproducibleSourceToolsShadersAndBinary(t *test
 		t.Fatal(err)
 	}
 	firstReceipt := readBuildReceipt(t, firstReceiptPath)
-	if firstReceipt.Schema != VulkanBuildReceiptSchema || firstReceipt.Artifact == nil || len(firstReceipt.Artifact.SHA256) != 64 || firstReceipt.Vulkan == nil {
+	wantTools, _, err := vulkanToolchainIdentity(tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstReceipt.Schema != VulkanBuildReceiptSchema || firstReceipt.Artifact == nil || len(firstReceipt.Artifact.SHA256) != sha256Hex || firstReceipt.Vulkan == nil {
 		t.Fatalf("incomplete first receipt: %+v", firstReceipt)
 	}
-	if firstReceipt.Vulkan.Source != firstSource || firstReceipt.Vulkan.SPIRVModuleCount != len(VulkanShaders) || len(firstReceipt.Vulkan.SPIRVBundleSHA256) != 64 || len(firstReceipt.Vulkan.Toolchain) != 5 || len(firstReceipt.Vulkan.ToolchainSHA256) != 64 || len(firstReceipt.Vulkan.BuildCommandSHA256) != 64 || len(firstReceipt.Vulkan.StableIdentitySHA256) != 64 {
+	if firstReceipt.Vulkan.Source != firstSource || firstReceipt.Vulkan.SPIRVModuleCount != len(VulkanShaders) || len(firstReceipt.Vulkan.SPIRVBundleSHA256) != sha256Hex || len(firstReceipt.Vulkan.Toolchain) != len(wantTools) || len(firstReceipt.Vulkan.ToolchainSHA256) != sha256Hex || len(firstReceipt.Vulkan.BuildCommandSHA256) != sha256Hex || len(firstReceipt.Vulkan.StableIdentitySHA256) != sha256Hex {
 		t.Fatalf("incomplete first provenance: %+v", firstReceipt.Vulkan)
 	}
 	if firstReceipt.Reproducibility == nil || firstReceipt.Reproducibility.Status != "baseline" {
@@ -990,7 +996,7 @@ func TestVulkanBinaryReceiptBindsReproducibleSourceToolsShadersAndBinary(t *test
 		t.Fatal(err)
 	}
 	secondReceipt := readBuildReceipt(t, secondReceiptPath)
-	if secondReceipt.Reproducibility == nil || secondReceipt.Reproducibility.Status != "match" || len(secondReceipt.Reproducibility.ComparedReceiptSHA256) != 64 {
+	if secondReceipt.Reproducibility == nil || secondReceipt.Reproducibility.Status != "match" || len(secondReceipt.Reproducibility.ComparedReceiptSHA256) != sha256Hex {
 		t.Fatalf("second reproducibility = %+v", secondReceipt.Reproducibility)
 	}
 	if secondReceipt.Vulkan == nil || secondReceipt.Vulkan.StableIdentitySHA256 != firstReceipt.Vulkan.StableIdentitySHA256 {

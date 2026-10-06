@@ -55,11 +55,12 @@ func TestHALROCmForwardMatchesNative(t *testing.T) {
 	if math.IsNaN(cos) || math.IsInf(cos, 0) || cos < 0.999 {
 		t.Fatalf("prefill cosine %.7f < 0.999", cos)
 	}
-	want := m.NewSession().Generate(prompt, 10)
+	const genTokens = 10
+	want := m.NewSession().Generate(prompt, genTokens)
 	gotSession := m.NewBackendSession(be)
 	defer gotSession.Close()
-	got := gotSession.Generate(prompt, 10)
-	if len(got) != 10 || len(want) != len(got) {
+	got := gotSession.Generate(prompt, genTokens)
+	if len(got) != genTokens || len(want) != len(got) {
 		t.Fatalf("token count native=%d rocm=%d", len(want), len(got))
 	}
 	for i := range want {

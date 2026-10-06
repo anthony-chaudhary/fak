@@ -422,7 +422,7 @@ func TestExpertHALMarkerAloneDoesNotAdmit(t *testing.T) {
 	s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
 
 	got := expertSwiGLU(m, 0, 0, x, sessionQ4KKernel{s: s})
-	if len(got) != 256 {
+	if len(got) != len(x) {
 		t.Fatalf("declined expert produced len=%d, want the host fallback result", len(got))
 	}
 	if rec.matmuls != 0 {
@@ -455,7 +455,7 @@ func TestExpertHALMixedOperandSupportDeclines(t *testing.T) {
 	s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
 
 	got := expertSwiGLU(m, 0, 0, x, sessionQ4KKernel{s: s})
-	if len(got) != 256 {
+	if len(got) != len(x) {
 		t.Fatalf("mixed-unsupported expert produced len=%d, want a full expert output", len(got))
 	}
 	if rec.uploads[compute.Q6_K] != 0 {
@@ -492,7 +492,7 @@ func TestExpertHALMalformedMetadataDeclines(t *testing.T) {
 		}()
 		got = expertSwiGLU(m, 0, 0, x, sessionQ4KKernel{s: s})
 	}()
-	if len(got) != 256 {
+	if len(got) != len(x) {
 		t.Fatalf("malformed-metadata expert produced len=%d, want a full expert output", len(got))
 	}
 	if _, ok := s.halW["kquant-raw:"+names[2]]; ok {

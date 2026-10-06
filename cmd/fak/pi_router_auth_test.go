@@ -52,7 +52,7 @@ func TestPiRouterAuthConsumesProtectedOriginCredential(t *testing.T) {
 				case "/healthz":
 					if tc.proof {
 						nonce, e := base64.StdEncoding.DecodeString(r.Header.Get(routerAuthChallengeHeader))
-						if e == nil && len(nonce) == 32 {
+						if e == nil && len(nonce) == 32 { //boundarylint:ignore CHANGE_DETECTOR_TEST router auth challenge nonce is a fixed 32-byte protocol width
 							mac := hmac.New(sha256.New, []byte(secret))
 							mac.Write([]byte(routerAuthProofDomain))
 							mac.Write(nonce)
