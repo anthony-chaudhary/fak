@@ -774,3 +774,56 @@ func TestAdmissionTokenBudgetMeasuredFromWarmupCapacity(t *testing.T) {
 		t.Fatalf("err %q does not contain expected remediation advice", err.Error())
 	}
 }
+
+// TestAdmissionScheduleOrdersEqualPriorityByDeadline pins the EDF tiebreak: within equal
+// effective priority the earliest deadline (CreatedAt+DecodeTTL) is admitted first, a
+// request with no deadline follows every deadline-carrying one, and no-deadline waiters
+// keep FIFO order. A strictly higher priority still beats an earlier deadline.
+func TestAdmissionScheduleOrdersEqualPriorityByDeadline(t *testing.T) {
+	t0 := time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC)
+	drain := func(c *AdmissionController, first string) []string {
+		t.Helper()
+		var order []string
+		running := first
+		for {
+			if !c.Complete(running) {
+				t.Fatalf("Complete(%s) reported not-running", running)
+			}
+			got := c.Schedule()
+			if len(got) == 0 {
+				return order
+			}
+			if len(got) != 1 {
+				t.Fatalf("Schedule admitted %d requests with a 1-seq cap, want 1", len(got))
+			}
+			running = got[0].TraceID
+			order = append(order, running)
+		}
+	}
+
+	c := NewAdmissionController(AdmissionPolicy{MaxNumSeqs: 1, MaxWaiting: 16, AgingRounds: 1_000_000})
+	c.SetClock(func() time.Time { return t0 })
+	c.Offer(SeqRequest{TraceID: "blocker", Priority: 0})
+	for _, r := range []SeqRequest{
+		{TraceID: "a-none", Priority: 3},
+		{TraceID: "b-late", Priority: 3, CreatedAt: t0, DecodeTTL: 30 * time.Second},
+		{TraceID: "c-none", Priority: 3},
+		{TraceID: "d-early", Priority: 3, CreatedAt: t0, DecodeTTL: 10 * time.Second},
+	} {
+		if v := c.Offer(r); v != VerdictQueued {
+			t.Fatalf("%s: verdict = %s, want queued", r.TraceID, v)
+		}
+	}
+	if got, want := drain(c, "blocker"), []string{"d-early", "b-late", "a-none", "c-none"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("equal-priority dequeue order = %v, want %v", got, want)
+	}
+
+	c = NewAdmissionController(AdmissionPolicy{MaxNumSeqs: 1, MaxWaiting: 16, AgingRounds: 1_000_000})
+	c.SetClock(func() time.Time { return t0 })
+	c.Offer(SeqRequest{TraceID: "blocker", Priority: 0})
+	c.Offer(SeqRequest{TraceID: "urgent-low", Priority: 4, CreatedAt: t0, DecodeTTL: time.Second})
+	c.Offer(SeqRequest{TraceID: "high", Priority: 1})
+	if got, want := drain(c, "blocker"), []string{"high", "urgent-low"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("priority-vs-deadline dequeue order = %v, want %v", got, want)
+	}
+}

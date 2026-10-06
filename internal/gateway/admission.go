@@ -1166,6 +1166,9 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 			if ei != ej {
 				return ei < ej // lower effective priority value served first
 			}
+			if before, decided := deadlineOrder(c.waiting[i].req, c.waiting[j].req); decided {
+				return before
+			}
 			if c.waiting[i].enqueuedRound != c.waiting[j].enqueuedRound {
 				return c.waiting[i].enqueuedRound < c.waiting[j].enqueuedRound // older waiter first
 			}
@@ -1568,6 +1571,33 @@ func (c *AdmissionController) admitLocked(req SeqRequest) {
 	c.running[req.TraceID] = req
 	c.tokens += req.Tokens
 	c.stats.Admitted++
+}
+
+// deadlineOrder is the EDF tiebreak within equal effective priority, adapted from
+// microsoft/vidur EDF request queue ordering: the earlier deadline (CreatedAt+DecodeTTL)
+// is served first and a request with no deadline sorts after every one that has one.
+// decided is false when neither carries a deadline or both deadlines are equal, so the
+// FIFO tiebreak stands.
+func deadlineOrder(a, b SeqRequest) (before, decided bool) {
+	da, okA := requestDeadline(a)
+	db, okB := requestDeadline(b)
+	switch {
+	case okA && okB:
+		if da.Equal(db) {
+			return false, false
+		}
+		return da.Before(db), true
+	case okA != okB:
+		return okA, true
+	}
+	return false, false
+}
+
+func requestDeadline(r SeqRequest) (time.Time, bool) {
+	if r.DecodeTTL <= 0 || r.CreatedAt.IsZero() {
+		return time.Time{}, false
+	}
+	return r.CreatedAt.Add(r.DecodeTTL), true
 }
 
 // effectivePriorityLocked is a waiting request's priority adjusted for how long it has
