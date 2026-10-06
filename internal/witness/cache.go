@@ -278,7 +278,11 @@ func (r *Resolver) cacheKey(ctx context.Context, kind, arg string) (string, bool
 // for this Resolver ("" memoized), degrading to uncached behavior.
 func (r *Resolver) verdictCache(ctx context.Context) (*VerdictCache, bool) {
 	r.cacheOnce.Do(func() {
-		out, code, err := r.run(ctx, r.dir, "rev-parse", "--git-common-dir")
+		run := r.run
+		if run == nil {
+			run = gitRunner
+		}
+		out, code, err := run(ctx, r.dir, "rev-parse", "--git-common-dir")
 		if err != nil || code != 0 {
 			return
 		}
