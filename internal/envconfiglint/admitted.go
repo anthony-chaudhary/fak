@@ -607,4 +607,140 @@ var admittedPostFreeze = []string{
 	// FAK_QWEN35_WHOLE_TOKEN_DECODE. Not a credential.
 	// Relocates to: a decode-route field on the session/serve execution config.
 	"FAK_DENSE_Q4K_DECODE_GRAPH",
+
+	// FOURTH OCCURRENCE (2026-10-06): public CI died at a stale-scorecard step for two days
+	// (fixed by 9fc438795f), so this ratchet ran nowhere while the 44 reads below landed. As in
+	// the earlier occurrences they are admitted by name, not absorbed into baseline.go, and none
+	// can relocate until the #2862 config surface exists. Each entry names its reader.
+
+	// cmd/fak/claude_launcher.go — preserves a caller's existing Claude Code custom headers
+	// while appending the launch-session header; a passthrough of the client's own setting.
+	// Relocates to: claude launcher config.
+	"ANTHROPIC_CUSTOM_HEADERS",
+
+	// cmd/metalprobe/metalcheck.go — records the build environment's cgo setting in the probe
+	// report. Read-only provenance, not behavior.
+	// Relocates to: a build-info field (debug.ReadBuildInfo) instead of the process env.
+	"CGO_ENABLED",
+
+	// cmd/fak/serve_memory_admission.go — opt-in state-envelope memory admission and the GPU
+	// wait bound for admission. Serving policy knobs.
+	// Relocates to: serve memory config.
+	"FAK_ADMISSION_STATE_ENVELOPE",
+	"FAK_GPU_WAIT_BOUND",
+
+	// cmd/fak/agent.go — pins the router origin the agent front door targets.
+	// Relocates to: an agent --router flag.
+	"FAK_AGENT_ROUTER_ORIGIN",
+
+	// internal/model/qwen35_prefill_q4k.go — stamps source revision and artifact digest onto a
+	// prefill receipt. Provenance labels, not credentials.
+	// Relocates to: receipt provenance config passed by the caller.
+	"FAK_ARTIFACT_SHA256",
+	"FAK_SOURCE_REVISION",
+
+	// internal/compute/strix/streamcopy.go — force/disable switches for the AVX-512 streaming
+	// copy path. Hardware capability overrides.
+	// Relocates to: strix compute capability config.
+	"FAK_AVX512_DISABLE",
+	"FAK_AVX512_FORCE",
+	"FAK_AVX512_STREAMING_DISABLE",
+	"FAK_AVX512_STREAMING_FORCE",
+
+	// cmd/fak/serve_model_load.go — env spelling of the --backend selector.
+	// Relocates to: the existing `fak serve --backend` flag.
+	"FAK_BACKEND",
+
+	// internal/model/batch_attn.go — split-K decode attention toggle.
+	// Relocates to: decode execution config.
+	"FAK_DECODE_SPLITK",
+
+	// internal/ggufload/expert_pagecache.go — expert page-cache toggle for MoE weight loading.
+	// Relocates to: loader config.
+	"FAK_EXPERT_PAGECACHE",
+
+	// internal/gateway/upstream_400_detail.go — opt-in exposure of scrubbed upstream 400 detail.
+	// Relocates to: gateway serve config.
+	"FAK_EXPOSE_UPSTREAM_ERROR_DETAIL",
+
+	// cmd/fak/guard_local.go and internal/projectassets/opencode_config.go — Halo host and
+	// model selectors for local guard backends and generated OpenCode config.
+	// Relocates to: guard/opencode backend config.
+	"FAK_HALO_HOST",
+	"FAK_HALO_MODEL",
+	"FAK_MODEL",
+
+	// internal/gateway/http.go — graceful HTTP drain timeout in seconds.
+	// Relocates to: gateway server config.
+	"FAK_HTTP_DRAIN_TIMEOUT_S",
+
+	// internal/agent/inkernel_planner_config.go — operator override for the in-kernel radix
+	// token budget.
+	// Relocates to: InKernelPlannerConfig, which already carries the default.
+	"FAK_INKERNEL_RADIX_BUDGET",
+
+	// cmd/fak/leaseref_coordinator_client.go — lease coordinator endpoint.
+	// Relocates to: lease coordinator config.
+	"FAK_LEASE_COORDINATOR_URL",
+
+	// internal/metalgemm/keepalive.go and q4k_smallp.go — Metal keepalive policy and Q4_K
+	// small-P kernel toggle.
+	// Relocates to: metal compute config.
+	"FAK_METAL_KEEPALIVE",
+	"FAK_Q4K_SMALLP",
+
+	// internal/modelengine/modelengine.go — in-batch prefix dedup toggle for native serving.
+	// Relocates to: modelengine batching config.
+	"FAK_NATIVE_IN_BATCH_PREFIX_DEDUP",
+
+	// cmd/fak/cron_opencode.go — OpenCode usage-ledger path override.
+	// Relocates to: cron opencode config.
+	"FAK_OPENCODE_USAGE_LEDGER",
+
+	// cmd/fak/pi_launcher.go — skill-pack directory override for Pi launches.
+	// Relocates to: pi launcher config.
+	"FAK_PI_SKILLS",
+
+	// internal/model/metal_prefill_hybrid.go — persistent device-KV decode toggle.
+	// Relocates to: decode execution config.
+	"FAK_QWEN35_PERSISTENT_DECODE_DKV",
+
+	// cmd/fak/claude_router.go — router URL and model selection for `fak claude` on the router.
+	// Relocates to: claude router launcher config.
+	"FAK_ROUTER_MODEL",
+	"FAK_ROUTER_URL",
+
+	// internal/agent/stream_stall.go — first-token/stream stall watchdog seconds.
+	// Relocates to: agent stream config.
+	"FAK_STREAM_STALL_TIMEOUT_S",
+
+	// cmd/fak/up.go, up_native.go, up_service.go, serve_model_fit.go — env spellings of `fak up`
+	// workspace, RSS ceiling, KV precision, loader-heap scavenge, and service label/state dir.
+	// Relocates to: the existing `fak up` flags and service config.
+	"FAK_UP_CODE_WORKSPACE",
+	"FAK_UP_KV_PRECISION",
+	"FAK_UP_MAX_RSS",
+	"FAK_UP_SCAVENGE_LOADER_HEAP",
+	"FAK_UP_SERVICE_LABEL",
+	"FAK_UP_SERVICE_STATE_DIR",
+
+	// internal/testgit/testgit.go, internal/validate/test_events.go,
+	// internal/harnessinit/offline_go.go — git/Go toolchain environment the tools inspect or
+	// isolate. These are the toolchains' own variables, not fak settings.
+	// Relocates to: nowhere; retire the entry if the reads are replaced by `go env` probes.
+	"GIT_CONFIG_GLOBAL",
+	"GOENV",
+	"GOMODCACHE",
+	"GOROOT",
+	"GOTOOLCHAIN",
+	"GOWORK",
+
+	// experiments/benchmark/runs/by-machine/modular-10078-live/capture.go — benchmark endpoint
+	// for a recorded live capture.
+	// Relocates to: a capture --endpoint flag.
+	"MODULAR_BENCH_ENDPOINT",
+
+	// cmd/fak/ops_schedule.go — explicit OpenCode executable path.
+	// Relocates to: ops schedule config.
+	"OPENCODE_BIN",
 }
