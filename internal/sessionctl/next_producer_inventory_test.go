@@ -73,9 +73,21 @@ func TestModelFacingSyntheticProducersHaveNextWitnesses(t *testing.T) {
 		{File: "internal/agent/anthropic_server.go", Role: "RoleSystem", Payload: "out.System"},
 		{File: "internal/agent/anthropic_server.go", Role: "RoleUser", Payload: "text.String()"},
 		{File: "internal/agent/gemini_server.go", Role: "RoleSystem", Payload: "out.System"},
+		// Warm-prefix descriptors re-encode the request's own instructions and resident
+		// blocks to find the stable token boundary; nothing is spliced into a session.
+		{File: "internal/agent/inkernel_warm.go", Role: "RoleSystem", Payload: "string(block)"},
+		{File: "internal/agent/inkernel_warm.go", Role: "RoleSystem", Payload: "string(w.Instructions)"},
+		{File: "internal/agent/warm_prefix.go", Role: "RoleSystem", Payload: "string(block)"},
+		{File: "internal/agent/warm_prefix.go", Role: "RoleSystem", Payload: "string(in.Instructions)"},
 		{File: "internal/agent/loop_wire.go", Role: "RoleSystem", Payload: "c.memoryDigest"},
 		{File: "internal/agent/loop_wire.go", Role: "RoleSystem", Payload: "c.seedSystemPrompt()"},
 		{File: "internal/agent/loop_wire.go", Role: "RoleUser", Payload: "task"},
+		// Qwen ChatML re-renders a client tool row as a user turn carrying the same bytes.
+		{File: "internal/gateway/anthropic_messages.go", Role: "agent.RoleUser", Payload: "respText"},
+		// Prompt ordering moves client-supplied instructions and volatile text; it adds none.
+		{File: "internal/gateway/prompt_order.go", Role: "agent.RoleSystem", Payload: "cleanedInstructions"},
+		{File: "internal/gateway/prompt_order.go", Role: "agent.RoleUser", Payload: "hoistedText"},
+		{File: "internal/gateway/prompt_order.go", Role: "agent.RoleUser", Payload: "volatileText"},
 		{File: "internal/gateway/responses.go", Role: "agent.RoleSystem", Payload: "instructions"},
 		{File: "internal/gateway/responses.go", Role: "agent.RoleUser", Payload: "s"},
 	}
@@ -109,6 +121,18 @@ func TestModelFacingSyntheticProducersHaveNextWitnesses(t *testing.T) {
 		{
 			Producer:    syntheticProducer{File: "internal/agent/loop_turn.go", Role: "RoleUser", Payload: "continuation"},
 			Authorities: []callAuthority{{File: "internal/agent/loop_turn.go", Call: "RecordStopWitnessNext"}},
+		},
+		{
+			Producer:    syntheticProducer{File: "internal/agent/loop_turn.go", Role: "RoleUser", Payload: "infraContinuation"},
+			Authorities: []callAuthority{{File: "internal/agent/loop_turn.go", Call: "RecordInfraRepromptNext"}},
+		},
+		{
+			Producer:    syntheticProducer{File: "internal/agent/loop_turn.go", Role: "RoleSystem", Payload: "guidanceMsg"},
+			Authorities: []callAuthority{{File: "internal/agent/loop_turn.go", Call: "RecordCircuitBreakerNext"}},
+		},
+		{
+			Producer:    syntheticProducer{File: "internal/agent/loop_turn.go", Role: "RoleSystem", Payload: "tripMsg"},
+			Authorities: []callAuthority{{File: "internal/agent/loop_turn.go", Call: "RecordCircuitBreakerNext"}},
 		},
 		{
 			Producer:    syntheticProducer{File: "internal/gateway/messages.go", Role: "agent.RoleUser", Payload: "prompt"},
