@@ -3,6 +3,7 @@ package gateway
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/resume"
@@ -28,6 +29,17 @@ func upstream4xxStatus(se *agent.UpstreamStatusError) (status int, code, msg str
 			fmt.Sprintf("upstream is at a usage/overage cap (HTTP %d): a rolling 5h/7d window hit its limit with overage disabled. "+
 				"The credential is VALID and RECOVERS on its own at the window reset — do NOT re-login (a fresh token hits the same cap). "+
 				"Wait for the reset (see the Retry-After response header), reduce usage, or ask the org admin to enable overage.", se.Status)
+	}
+	// A 400 whose body names a context-window overflow (llama-server's
+	// exceed_context_size_error, OpenAI's context_length_exceeded, vLLM's "maximum
+	// context length") is NOT a malformed request: the same prompt succeeds on a
+	// longer-window engine. Surface the in-kernel context_length_exceeded code so a
+	// router (fak-private platform/routing.Classify) fails over instead of treating it
+	// as a fatal payload rejection. The body is only MATCHED here, never echoed — the
+	// message is a fixed literal (#82/#346 no-leak invariant holds).
+	if se.Status == http.StatusBadRequest && isUpstreamContextOverflow(se.Body) {
+		return se.Status, "context_length_exceeded",
+			"upstream rejected the request: the prompt exceeds the upstream context window (HTTP 400); reduce the prompt or route to a longer-context engine"
 	}
 	switch se.Status {
 	case http.StatusBadRequest: // 400
@@ -82,6 +94,30 @@ func upstream4xxStatus(se *agent.UpstreamStatusError) (status int, code, msg str
 		return se.Status, "upstream_request_rejected",
 			fmt.Sprintf("upstream rejected the request (HTTP %d)", se.Status)
 	}
+}
+
+// upstreamContextOverflowSignatures are lowercase substrings that upstream engines put in
+// a 400 body when the prompt (plus max_tokens) does not fit their context window.
+var upstreamContextOverflowSignatures = []string{
+	"exceed_context_size_error",          // llama-server error type
+	"exceeds the available context size", // llama-server message
+	"context_length_exceeded",            // OpenAI-compatible code
+	"maximum context length",             // OpenAI / vLLM message
+}
+
+// isUpstreamContextOverflow reports whether an upstream error body names a context-window
+// overflow. Classification only: the caller never forwards the body.
+func isUpstreamContextOverflow(body string) bool {
+	if body == "" {
+		return false
+	}
+	lower := strings.ToLower(body)
+	for _, sig := range upstreamContextOverflowSignatures {
+		if strings.Contains(lower, sig) {
+			return true
+		}
+	}
+	return false
 }
 
 // surfaceUpstreamStatus writes an upstream failure straight through to a client that has
