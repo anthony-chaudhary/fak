@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
 
@@ -55,6 +56,7 @@ type Record struct {
 	PromptTokens     int     `json:"prompt_tokens"`
 	CompletionTokens int     `json:"completion_tokens"`
 	CachedTokens     int     `json:"cached_tokens"`
+	CacheRegime      string  `json:"cache_regime,omitempty"`
 	E2EMS            float64 `json:"e2e_ms"`
 	TTFTMS           float64 `json:"ttft_ms,omitempty"`
 	PrefillTPS       float64 `json:"prefill_tps,omitempty"`
@@ -73,6 +75,7 @@ func NewRecord(now time.Time, finishReason, locality string, promptTok, complTok
 		CompletionTokens: nonNeg(complTok),
 		CachedTokens:     nonNeg(cachedTok),
 	}
+	rec.CacheRegime = cacheobs.RegimeForTokens(rec.CachedTokens, rec.PromptTokens)
 	if dur > 0 {
 		rec.E2EMS = roundTo(float64(dur)/float64(time.Millisecond), 1000)
 	}
@@ -111,6 +114,17 @@ type Summary struct {
 	E2EP50MS      float64 `json:"e2e_p50_ms,omitempty"`
 	E2EP99MS      float64 `json:"e2e_p99_ms,omitempty"`
 	CacheHitShare float64 `json:"cache_hit_share"`
+	// ByRegime splits latency by prompt-cache regime (#5630) so warm vs cold TTFT is
+	// one read. Keys are cacheobs.Regimes; a regime with no rows is absent.
+	ByRegime map[string]RegimeSummary `json:"by_regime,omitempty"`
+}
+
+type RegimeSummary struct {
+	Count        int     `json:"count"`
+	TTFTMeasured int     `json:"ttft_measured"`
+	TTFTP50MS    float64 `json:"ttft_p50_ms,omitempty"`
+	TTFTP99MS    float64 `json:"ttft_p99_ms,omitempty"`
+	E2EP50MS     float64 `json:"e2e_p50_ms,omitempty"`
 }
 
 type Report struct {
@@ -148,7 +162,18 @@ func Summarize(recs []Record) Summary {
 	s := Summary{Count: len(recs)}
 	var ttft, prefill, decode, e2e []float64
 	var prompt, cached int64
+	regimeTTFT := map[string][]float64{}
+	regimeE2E := map[string][]float64{}
+	regimeCount := map[string]int{}
 	for _, r := range recs {
+		regime := r.regime()
+		regimeCount[regime]++
+		if r.TTFTMS > 0 {
+			regimeTTFT[regime] = append(regimeTTFT[regime], r.TTFTMS)
+		}
+		if r.E2EMS > 0 {
+			regimeE2E[regime] = append(regimeE2E[regime], r.E2EMS)
+		}
 		if r.TTFTMS > 0 {
 			ttft = append(ttft, r.TTFTMS)
 		}
@@ -174,7 +199,27 @@ func Summarize(recs []Record) Summary {
 	if total := prompt + cached; total > 0 {
 		s.CacheHitShare = roundTo(float64(cached)/float64(total), 10000)
 	}
+	for regime, n := range regimeCount {
+		if s.ByRegime == nil {
+			s.ByRegime = make(map[string]RegimeSummary, len(regimeCount))
+		}
+		s.ByRegime[regime] = RegimeSummary{
+			Count:        n,
+			TTFTMeasured: len(regimeTTFT[regime]),
+			TTFTP50MS:    quantile(regimeTTFT[regime], 0.50),
+			TTFTP99MS:    quantile(regimeTTFT[regime], 0.99),
+			E2EP50MS:     quantile(regimeE2E[regime], 0.50),
+		}
+	}
 	return s
+}
+
+// regime reads the stored regime, deriving it for rows written before the field existed.
+func (r Record) regime() string {
+	if r.CacheRegime != "" {
+		return r.CacheRegime
+	}
+	return cacheobs.RegimeForTokens(r.CachedTokens, r.PromptTokens)
 }
 
 // RenderCompact is the one-line agent read of a report.
@@ -190,6 +235,14 @@ func RenderCompact(rep Report) string {
 	fmt.Fprintf(&b, " | prefill p50=%s | decode p50=%s", fmtTPS(s.PrefillTPSP50), fmtTPS(s.DecodeTPSP50))
 	fmt.Fprintf(&b, " | e2e p50=%s p99=%s", fmtMS(s.E2EP50MS), fmtMS(s.E2EP99MS))
 	fmt.Fprintf(&b, " | cache=%.1f%%", s.CacheHitShare*100)
+	if len(s.ByRegime) > 0 {
+		b.WriteString(" | ttft p50 by regime:")
+		for _, regime := range cacheobs.Regimes {
+			if rs, ok := s.ByRegime[regime]; ok {
+				fmt.Fprintf(&b, " %s=%s(n=%d)", regime, fmtMS(rs.TTFTP50MS), rs.Count)
+			}
+		}
+	}
 	if rep.Window.Capped {
 		b.WriteString(" | capped")
 	}

@@ -129,6 +129,10 @@ type gatewayMetrics struct {
 	inferTTFTHist *latencyCounter
 	inferTPOTHist *latencyCounter
 	inferE2EHist  *latencyCounter
+	// inferRegimeHists cuts the same three distributions by the turn's cache regime
+	// (#5630), booked from the same values in the same critical section, so the regime
+	// rows of each family sum exactly to the unlabeled histogram above.
+	inferRegimeHists map[string]*regimeLatencyHists
 
 	// reqMemoryMu guards cumulative in-kernel request-memory pressure observed after
 	// planner turns. The planner already exposes the most recent admission plan; these

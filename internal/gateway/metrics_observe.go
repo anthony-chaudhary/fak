@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 )
 
@@ -913,6 +914,7 @@ func (m *gatewayMetrics) observeInferenceTimedAt(loc servingLocality, promptTok,
 	}
 	m.recordPerf(loc, promptTok, complTok, cachedTok, finishReason, dur, ttft)
 	m.inferenceMu.Lock()
+	rh := m.regimeHistsLocked(cacheobs.RegimeForTokens(cachedTok, promptTok))
 	if m.inferReqs == nil {
 		m.inferReqs = map[string]uint64{}
 	}
@@ -939,6 +941,7 @@ func (m *gatewayMetrics) observeInferenceTimedAt(loc servingLocality, promptTok,
 		m.inferDecodeSecs += dur.Seconds()
 		// e2e distribution: every served turn (buffered or streamed) lands here.
 		m.inferE2EHist.observe(dur.Seconds())
+		rh.e2e.observe(dur.Seconds())
 	}
 	// Split prefill from decode only when TTFT was actually observed and is sane
 	// (positive and within the total). A clamp guards against a clock skew producing
@@ -952,6 +955,7 @@ func (m *gatewayMetrics) observeInferenceTimedAt(loc servingLocality, promptTok,
 		m.inferTTFTTurns++
 		// ttft distribution: only the streamed turns whose prefill boundary is observable.
 		m.inferTTFTHist.observe(pre.Seconds())
+		rh.ttft.observe(pre.Seconds())
 		if promptTok > 0 {
 			m.inferPrefillPromptTokens += uint64(promptTok)
 		}
@@ -962,10 +966,30 @@ func (m *gatewayMetrics) observeInferenceTimedAt(loc servingLocality, promptTok,
 			// tpot (inter-token) distribution: mean per-output-token latency for this
 			// turn = decode wall-clock / generated tokens.
 			m.inferTPOTHist.observe(decodeSecs / float64(complTok))
+			rh.tpot.observe(decodeSecs / float64(complTok))
 		}
 	}
 	m.inferenceMu.Unlock()
 	m.observeDeadlineTiming(promptTok, complTok, dur, ttft)
+}
+
+// regimeLatencyHists is one cache regime's TTFT / TPOT / e2e histograms (#5630).
+type regimeLatencyHists struct {
+	ttft, tpot, e2e *latencyCounter
+}
+
+// regimeHistsLocked returns the regime's histogram triple, creating it on first use.
+// Callers hold inferenceMu. regime is always one of cacheobs.Regimes.
+func (m *gatewayMetrics) regimeHistsLocked(regime string) *regimeLatencyHists {
+	if m.inferRegimeHists == nil {
+		m.inferRegimeHists = make(map[string]*regimeLatencyHists, len(cacheobs.Regimes))
+	}
+	h := m.inferRegimeHists[regime]
+	if h == nil {
+		h = &regimeLatencyHists{ttft: newLatencyCounter(), tpot: newLatencyCounter(), e2e: newLatencyCounter()}
+		m.inferRegimeHists[regime] = h
+	}
+	return h
 }
 
 // recordCacheCreationTierSplit attributes `cacheCreateTok` cache-creation tokens to
