@@ -1041,6 +1041,9 @@ type Server struct {
 	// llamaSlotAffinity is Config.LlamaSlotAffinity, kept so a per-route chat planner to a
 	// self-hosted (llama-server-capable) account opts into slot pinning like the boot planner.
 	llamaSlotAffinity bool
+	// upstreamWindows caches each proxied model's upstream per-request context window,
+	// filled by the "upstream-context-window" loop; nil when nothing is probed.
+	upstreamWindows *upstreamWindowCache
 
 	// native, when true, routes a non-streaming /v1/messages turn through fak's OWN agent
 	// loop (agent.RunArm) — the native-harness keystone (#1316). nativeMaxTurns bounds the

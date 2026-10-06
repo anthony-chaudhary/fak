@@ -264,7 +264,7 @@ func New(cfg Config) (*Server, error) {
 		readBearer:                   cfg.ReadBearer,
 		policyRuntime:                cfg.PolicyRuntime,
 		keyset:                       newKeyset(cfg.KeyPrincipals),
-		exposeUpstreamErrorDetail:    cfg.ExposeUpstreamErrorDetail,
+		exposeUpstreamErrorDetail:    cfg.ExposeUpstreamErrorDetail || exposeUpstreamErrorDetailEnv(),
 		denialRecoveryOff:            cfg.DenialRecoveryOff,
 		upstreamBadRequestNotify:     cfg.UpstreamBadRequestNotify,
 		upstreamFailureObserver:      cfg.UpstreamFailureObserver,

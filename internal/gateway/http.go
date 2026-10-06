@@ -946,7 +946,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			// identical metric/observation side effects writeUpstreamErr would have run,
 			// and msg is the same client-facing string (never the upstream's raw body).
 			status, code, msg := s.plannerErrorStatus(err)
-			stream.fail(status, code, msg)
+			stream.failFields(status, code, msg, s.upstreamErrorFields(err, code))
 			return
 		}
 		s.writeUpstreamErr(w, err)
@@ -1564,7 +1564,7 @@ func (s *Server) writeUpstreamErr(w http.ResponseWriter, err error) {
 	if ra := upstreamRetryAfter(err); ra != "" {
 		w.Header().Set("Retry-After", ra)
 	}
-	writeErrCode(w, status, code, msg)
+	writeErrCodeFields(w, status, code, msg, s.upstreamErrorFields(err, code))
 }
 
 // upstreamRetryAfter returns the upstream's Retry-After header from a
@@ -1771,13 +1771,26 @@ func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
 // "upstream_unreachable") lets a client branch on the specific failure class
 // rather than guessing from the message text (#346).
 func writeErrCode(w http.ResponseWriter, status int, code, msg string) {
+	writeErrCodeFields(w, status, code, msg, nil)
+}
+
+// writeErrCodeFields is writeErrCode plus typed extra fields on the error object (e.g.
+// context_window on a context_length_exceeded). The four standard keys always win.
+func writeErrCodeFields(w http.ResponseWriter, status int, code, msg string, fields map[string]any) {
+	writeJSON(w, status, map[string]any{"error": errObject(status, code, msg, fields)})
+}
+
+func errObject(status int, code, msg string, fields map[string]any) map[string]any {
 	var codeVal any
 	if code != "" {
 		codeVal = code
 	}
-	writeJSON(w, status, map[string]any{
-		"error": map[string]any{"message": msg, "type": errType(status), "code": codeVal, "param": nil},
-	})
+	obj := make(map[string]any, 4+len(fields))
+	for k, v := range fields {
+		obj[k] = v
+	}
+	obj["message"], obj["type"], obj["code"], obj["param"] = msg, errType(status), codeVal, nil
+	return obj
 }
 
 func errType(status int) string {

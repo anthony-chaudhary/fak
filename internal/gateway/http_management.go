@@ -52,8 +52,18 @@ func modelCatalogRow(id, owner string, contextWindow int) map[string]any {
 	row := map[string]any{"id": id, "object": "model", "owned_by": owner}
 	if contextWindow > 0 {
 		row["context_length"] = contextWindow
+		row["context_window"] = contextWindow
 	}
 	return row
+}
+
+// catalogContextWindow is the window a catalog row advertises: the in-kernel model's
+// own window, else the proxied upstream's discovered per-request window, else 0 (omit).
+func (s *Server) catalogContextWindow(model string, planner agent.Planner) int {
+	if w := inKernelContextWindow(planner); w > 0 {
+		return w
+	}
+	return s.upstreamWindowFor(model)
 }
 
 func inKernelContextWindow(planner agent.Planner) int {
@@ -65,7 +75,7 @@ func inKernelContextWindow(planner agent.Planner) int {
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
-	data := []map[string]any{modelCatalogRow(s.model, "fak", inKernelContextWindow(s.planner))}
+	data := []map[string]any{modelCatalogRow(s.model, "fak", s.catalogContextWindow(s.model, s.planner))}
 	// Dual mode (local model alongside the API upstream): advertise the in-kernel
 	// model's id too, so an OpenAI-wire client can DISCOVER the local side instead of
 	// needing out-of-band knowledge of the alias.
@@ -86,11 +96,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			seen[id] = struct{}{}
-			data = append(data, map[string]any{
-				"id":       id,
-				"object":   "model",
-				"owned_by": "fak-route-accounts",
-			})
+			data = append(data, modelCatalogRow(id, "fak-route-accounts", s.upstreamWindowFor(id)))
 		}
 		// Roster declaration order is not an API contract. Stable ordering also makes
 		// equivalent roster files advertise byte-identical catalogs. No-roster output

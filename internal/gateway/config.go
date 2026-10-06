@@ -499,7 +499,10 @@ type Config struct {
 	// externally-exposed `fak serve` path never forwards an upstream body. guard sets
 	// it true ONLY when its listener is actually loopback-bound (guardLoopbackOnly);
 	// a guard pushed off-host with --addr keeps it false. Scoped to 400 today (the
-	// reported case); 401/403 stay generic — see the field's use site.
+	// reported case); 401/403 stay generic — see the field's use site. A host whose
+	// callers are its own router/agents may also opt in with
+	// FAK_EXPOSE_UPSTREAM_ERROR_DETAIL=1; the detail then also rides as the error
+	// object's upstream_message field.
 	ExposeUpstreamErrorDetail bool
 	// UpstreamBadRequestNotify receives the same scrubbed, bounded provider 400 detail
 	// exposed to a trusted local child, for persistence in an operator-side audit journal.
