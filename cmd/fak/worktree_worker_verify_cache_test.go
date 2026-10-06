@@ -42,7 +42,7 @@ func TestGoBuildVerifyEnvSharesUsableCallerCache(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			env := worktreeWorkerGoBuildVerifyEnv(tc.base, isolated, tc.userCache)
+			env := worktreeWorkerGoBuildVerifyEnv(tc.base, isolated, tc.userCache, noSharedGoCache, notInCheckout)
 			if got, _ := goBuildVerifyEnvValue(env, "GOTMPDIR"); got != isolated["GOTMPDIR"] {
 				t.Fatalf("GOTMPDIR = %q, want the worktree-local %q", got, isolated["GOTMPDIR"])
 			}

@@ -86,7 +86,7 @@ func worktreeWorkerGoBuildVerify(wtPath string) (bool, string) {
 	cmd := windowgate.Command("go", worktreeWorkerGoBuildVerifyArgs()...)
 	cmd.Dir = wtPath
 	windowgate.ConfigureBackgroundCommand(cmd)
-	cmd.Env = worktreeWorkerGoBuildVerifyEnv(os.Environ(), env, os.UserCacheDir)
+	cmd.Env = worktreeWorkerGoBuildVerifyEnv(os.Environ(), env, os.UserCacheDir, worktreeWorkerSharedGoCache, worktreeWorkerPathInCheckout)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return true, ""
@@ -116,7 +116,12 @@ func worktreeWorkerGoBuildVerifyArgs() []string {
 // whole module graph, which was most of the host's compile load. The isolated
 // cache remains the fallback when there is no usable shared cache: GOCACHE set
 // to off or a relative path, or unset with no user cache directory.
-func worktreeWorkerGoBuildVerifyEnv(base []string, isolated map[string]string, userCacheDir func() (string, error)) []string {
+//
+// An absolute GOCACHE inside a checkout is a worker or lane worktree's private
+// cache (WorktreeEnv's <wt>/.gocache) inherited by the land process; it starts
+// cold for every lane, so the verify uses the shared cache instead and keeps the
+// inherited one only when no shared cache resolves.
+func worktreeWorkerGoBuildVerifyEnv(base []string, isolated map[string]string, userCacheDir func() (string, error), sharedCache func(base []string) (string, bool), inCheckout func(path string) bool) []string {
 	env := append(append([]string(nil), base...), "GOTMPDIR="+isolated["GOTMPDIR"])
 	cache, set := goBuildVerifyEnvValue(base, "GOCACHE")
 	shared := set && cache != "off" && filepath.IsAbs(cache)
@@ -124,10 +129,62 @@ func worktreeWorkerGoBuildVerifyEnv(base []string, isolated map[string]string, u
 		_, err := userCacheDir()
 		shared = err == nil
 	}
+	if shared && set && cache != "" && inCheckout(cache) {
+		if dir, ok := sharedCache(base); ok {
+			return append(env, "GOCACHE="+dir)
+		}
+	}
 	if shared {
 		return env
 	}
 	return append(env, "GOCACHE="+isolated["GOCACHE"])
+}
+
+// worktreeWorkerSharedGoCache resolves the cache every land verify should
+// share: an absolute FAK_SHARED_GOCACHE, else the user's default `go env
+// GOCACHE` computed without the inherited per-lane GOCACHE.
+func worktreeWorkerSharedGoCache(base []string) (string, bool) {
+	if dir, ok := goBuildVerifyEnvValue(base, workerworktree.SharedGoCacheEnv); ok {
+		if dir = strings.TrimSpace(dir); filepath.IsAbs(dir) {
+			return dir, true
+		}
+	}
+	env := make([]string, 0, len(base))
+	for _, kv := range base {
+		if name, _, ok := strings.Cut(kv, "="); ok && strings.EqualFold(name, "GOCACHE") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	cmd := windowgate.Command("go", "env", "GOCACHE")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.Env = env
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+	dir := strings.TrimSpace(string(out))
+	if dir == "" || dir == "off" || !filepath.IsAbs(dir) {
+		return "", false
+	}
+	return dir, true
+}
+
+// worktreeWorkerPathInCheckout reports whether path lies inside a git working
+// tree: some ancestor directory holds a .git file (a linked worktree) or
+// directory.
+func worktreeWorkerPathInCheckout(path string) bool {
+	dir := filepath.Clean(path)
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+			return true
+		}
+	}
 }
 
 // goBuildVerifyEnvValue returns the last value of key in env, matching the key
