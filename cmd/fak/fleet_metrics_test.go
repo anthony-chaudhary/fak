@@ -17,6 +17,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
+	"github.com/anthony-chaudhary/fak/internal/guardsessions"
 	"github.com/anthony-chaudhary/fak/internal/providercost"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
@@ -410,6 +411,74 @@ func TestFleetMetricsUnreadableRegistryIsDistinguishableFromEmptyFleet(t *testin
 	// is present but unreadable/corrupt, which is the case that must not read as calm.
 	if !strings.Contains(got, "fak_fleet_registry_readable ") {
 		t.Fatalf("fak_fleet_registry_readable must always be present:\n%s", got)
+	}
+}
+
+// TestFleetMetricsFoldsGuardSessionIndexIntoLiveTier is the regression for the live tier
+// reading zero while the host was full of live `fak guard` / `fak serve --stdio` sessions.
+// The durable DESCRIPTOR registry is opt-in and empty for those launches; the live rows are
+// in the cross-process guard-session INDEX. The fold must admit only pid-live, non-tombstoned
+// rows, and must still skip dead/tombstoned ones so history cannot masquerade as liveness.
+func TestFleetMetricsFoldsGuardSessionIndexIntoLiveTier(t *testing.T) {
+	dir := t.TempDir()
+	regDir := filepath.Join(dir, "registry")
+	if err := os.MkdirAll(regDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	write := func(r guardsessions.Row) {
+		t.Helper()
+		b, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.OpenFile(guardsessions.IndexPath(regDir), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if _, err := f.Write(append(b, '\n')); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(guardsessions.Row{Schema: guardsessions.Schema, Handle: "g-live", TraceID: "guard", PID: 4242, StartedAt: now.Add(-time.Minute).Format(time.RFC3339)})
+	write(guardsessions.Row{Schema: guardsessions.Schema, Handle: "g-dead", TraceID: "guard", PID: 999999, StartedAt: now.Add(-time.Hour).Format(time.RFC3339)})
+	write(guardsessions.Row{Schema: guardsessions.Schema, Handle: "g-ended", TraceID: "guard", PID: 4242, StartedAt: now.Add(-time.Hour).Format(time.RFC3339), EndedAt: now.Add(-time.Minute).Format(time.RFC3339)})
+
+	oldAlive := fleetMetricsAlivePIDs
+	t.Cleanup(func() { fleetMetricsAlivePIDs = oldAlive })
+	fleetMetricsAlivePIDs = func() (map[int]bool, bool) { return map[int]bool{4242: true}, true }
+
+	src := fleetMetricsSources{
+		registryPath:     filepath.Join(dir, "no-descriptor-registry.json"),
+		guardRegistryDir: regDir,
+		staleWindow:      defaultSessionStaleWindow,
+		maxSessions:      defaultFleetMetricsMaxSessions,
+		stderr:           io.Discard,
+	}
+	inv, _, readable := src.liveInventory(now)
+	if !readable {
+		t.Fatal("guard index rows present: readable must be true")
+	}
+	if inv.Count != 1 {
+		t.Fatalf("live inventory count = %d, want 1 (only the pid-live, non-tombstoned row)", inv.Count)
+	}
+	if inv.Sessions[0].ID != "g-live" || inv.Sessions[0].LivenessClass != "live" {
+		t.Fatalf("folded row = %+v, want g-live/live", inv.Sessions[0])
+	}
+
+	got := src.render(now)
+	for _, want := range []string{
+		"fak_fleet_sessions 1",
+		`fak_fleet_sessions_by_liveness{liveness="live"} 1`,
+		`fak_fleet_session_info{session="g-live"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("exposition missing %q\n---\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, `session="g-dead"`) || strings.Contains(got, `session="g-ended"`) {
+		t.Fatalf("dead/tombstoned index rows leaked into the live tier:\n%s", got)
 	}
 }
 

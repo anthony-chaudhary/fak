@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/fleetmetrics"
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
+	"github.com/anthony-chaudhary/fak/internal/guardsessions"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -69,6 +70,7 @@ func runFleetMetrics(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak fleet metrics", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	registry := fs.String("registry", "", "durable session registry path (default: the same path `fak session ls --durable` reads)")
+	guardRegistry := fs.String("guard-registry-dir", "", "cross-process guard-session INDEX dir (guard_sessions.jsonl) whose live-pid rows fold into the LIVE tier; default is the same dir `fak guard` records to. Pass 'off' to disable.")
 	fleet := fs.Bool("fleet", false, "also fold peer nodes' C2 session refs (each fold runs a BOUNDED git fetch — raise the scrape interval)")
 	remote := fs.String("remote", "origin", "with --fleet, the git remote whose session refs are folded in")
 	stale := fs.Duration("stale", defaultSessionStaleWindow, "heartbeat window past which a running-family session reads STALLED")
@@ -96,8 +98,16 @@ func runFleetMetrics(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
+	guardDir := strings.TrimSpace(*guardRegistry)
+	if guardDir == "" {
+		guardDir = resolveSweepRegDir("")
+	} else if strings.EqualFold(guardDir, "off") {
+		guardDir = ""
+	}
+
 	src := fleetMetricsSources{
 		registryPath:          *registry,
+		guardRegistryDir:      guardDir,
 		fleet:                 *fleet,
 		remote:                *remote,
 		staleWindow:           *stale,
@@ -141,6 +151,7 @@ const defaultFleetMetricsMaxSessions = 200
 // exactly what `fak session ls --durable` would print for the same instant.
 type fleetMetricsSources struct {
 	registryPath          string
+	guardRegistryDir      string
 	fleet                 bool
 	remote                string
 	staleWindow           time.Duration
@@ -663,6 +674,18 @@ func (s fleetMetricsSources) liveInventory(now time.Time) (sessionInventory, map
 		local = nil
 	}
 
+	// The descriptor registry above is opt-in (only a --session-id / budgeted guard or a
+	// single-trace serve ever writes it), so on a host whose live agents are plain `fak
+	// guard` / `fak serve --stdio` launches it reads EMPTY. The cross-process guard-session
+	// INDEX is where those launches actually publish (one row per launch, pid-liveness
+	// checked) — it is the store the default `fak session ls` reads. Fold its still-alive
+	// rows into the SAME inventory so the live families describe the running fleet rather
+	// than a registry nothing populates.
+	guardRows, guardByID := s.guardLiveRows(now)
+	if len(guardRows) > 0 {
+		readable = true
+	}
+
 	var fleetDescs []leaseref.SessionDescriptor
 	if s.fleet {
 		remote := strings.TrimSpace(s.remote)
@@ -672,14 +695,113 @@ func (s fleetMetricsSources) liveInventory(now time.Time) (sessionInventory, map
 		fleetDescs = fleetSessionDescriptors(s.stderrOrDiscard(), leaseref.NewInDir(""), remote, now)
 	}
 
-	byID := make(map[string]session.Descriptor, len(local))
+	byID := make(map[string]session.Descriptor, len(local)+len(guardByID))
 	for _, d := range local {
 		id := sessionDescriptorID(d)
 		if id != "" {
 			byID[id] = d
 		}
 	}
-	return buildSessionInventory(local, fleetDescs, now, s.staleWindow, s.fleet), byID, readable
+	for id, d := range guardByID {
+		if _, ok := byID[id]; !ok {
+			byID[id] = d
+		}
+	}
+	inv := buildSessionInventory(local, fleetDescs, now, s.staleWindow, s.fleet)
+	return mergeGuardLiveRows(inv, guardRows), byID, readable
+}
+
+// fleetMetricsAlivePIDs is the pid-liveness seam for the guard-index fold. It defaults to
+// the same snapshot `fak session ls` uses; a test overrides it for a deterministic live set.
+var fleetMetricsAlivePIDs = sessionIndexAlivePIDs
+
+// guardLiveRows folds the cross-process guard-session INDEX into live inventory ROWS. A
+// row is admitted only when it is not clean-exit tombstoned AND its recorded pid is in the
+// live process set — "who is alive right now" is exactly a live pid, and the index's
+// append-only history (28k+ rows here) would otherwise drown the inventory in dead rows.
+//
+// A live pid IS the whole oracle this store carries: it has no heartbeat, so the folded
+// row is classified `live` off the pid (NOT run through inventoryLiveness, which would
+// read a heartbeat-less RUNNING row as STALLED) and its cache posture is `unknown` — the
+// honest answer for a store that never stamped a last-seen, rather than a fabricated warm.
+// An unreadable process table (aliveOK=false) is fail-open on the pid check, matching
+// `fak session ls`. The returned descriptors carry the pid for the _info label join.
+func (s fleetMetricsSources) guardLiveRows(now time.Time) ([]sessionInventoryRow, map[string]session.Descriptor) {
+	dir := strings.TrimSpace(s.guardRegistryDir)
+	if dir == "" {
+		return nil, nil
+	}
+	rows := guardsessions.Load(pathutil.ExpandTilde(dir))
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	alive, aliveOK := fleetMetricsAlivePIDs()
+	host := fleetHostLabel(sessionDurabilityHost())
+	out := make([]sessionInventoryRow, 0, len(rows))
+	byID := make(map[string]session.Descriptor, len(rows))
+	for _, r := range rows {
+		if strings.TrimSpace(r.EndedAt) != "" || r.PID <= 0 {
+			continue
+		}
+		if aliveOK && !alive[r.PID] {
+			continue
+		}
+		id := strings.TrimSpace(r.Handle)
+		if id == "" {
+			id = strings.TrimSpace(r.TraceID)
+		}
+		if id == "" {
+			continue
+		}
+		started, _ := time.Parse(time.RFC3339, strings.TrimSpace(r.StartedAt))
+		out = append(out, sessionInventoryRow{
+			ID:            id,
+			Host:          host,
+			PCBState:      "RUNNING",
+			LivenessClass: string(taskmgr.LivenessLive),
+			CachePosture:  "unknown",
+			AgeSeconds:    ageSecondsSince(started, now),
+			Source:        "local",
+		})
+		byID[id] = session.Descriptor{ID: id, Trace: strings.TrimSpace(r.TraceID), PID: r.PID, Host: host, PCBState: "RUNNING", CreatedAt: started}
+	}
+	return out, byID
+}
+
+// mergeGuardLiveRows folds the guard-index rows into an inventory built from the durable
+// registry, de-duplicating by id (a durable descriptor wins — it carries the heartbeat and
+// richer projection) and re-rolling the headline counts so fak_fleet_sessions and every
+// by-state/liveness/cache rollup stay consistent with the rows actually emitted.
+func mergeGuardLiveRows(inv sessionInventory, guard []sessionInventoryRow) sessionInventory {
+	if len(guard) == 0 {
+		return inv
+	}
+	seen := make(map[string]bool, len(inv.Sessions))
+	for _, r := range inv.Sessions {
+		seen[r.ID] = true
+	}
+	for _, r := range guard {
+		if seen[r.ID] {
+			continue
+		}
+		seen[r.ID] = true
+		inv.Sessions = append(inv.Sessions, r)
+		inv.Count++
+		inv.ByState[inventoryEffectiveStatus(r.PCBState, taskmgr.LivenessClass(r.LivenessClass))]++
+		switch r.CachePosture {
+		case "warm":
+			inv.Warm++
+		case "cold":
+			inv.Cold++
+		}
+	}
+	sort.Slice(inv.Sessions, func(i, j int) bool {
+		if inv.Sessions[i].Host != inv.Sessions[j].Host {
+			return inv.Sessions[i].Host < inv.Sessions[j].Host
+		}
+		return inv.Sessions[i].ID < inv.Sessions[j].ID
+	})
+	return inv
 }
 
 func (s fleetMetricsSources) stderrOrDiscard() io.Writer {
