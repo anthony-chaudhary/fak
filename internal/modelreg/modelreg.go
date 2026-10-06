@@ -20,6 +20,7 @@ package modelreg
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -247,7 +248,88 @@ func Load() (*Registry, error) {
 	for name, target := range user {
 		r.entries[name] = Entry{Name: name, Target: strings.TrimSpace(target), Source: "user"}
 	}
+	if err := r.validateChains(); err != nil {
+		return nil, fmt.Errorf("modelreg: %s: %w", path, err)
+	}
 	return r, nil
+}
+
+// maxAliasHops bounds alias → alias resolution: an alias may name another alias, and
+// resolution follows the chain until a concrete target, refusing more than this many
+// expansions.
+const maxAliasHops = 8
+
+var (
+	// ErrAliasCycle reports an alias chain that returns to an alias it already visited.
+	ErrAliasCycle = errors.New("modelreg: alias chain cycle")
+	// ErrAliasChainTooLong reports an alias chain needing more than maxAliasHops expansions.
+	ErrAliasChainTooLong = errors.New("modelreg: alias chain exceeds hop limit")
+)
+
+// ResolveAlias follows name through alias → alias links to the entry whose target is
+// not itself an alias, refusing a cycle or a chain longer than maxAliasHops. The
+// returned entry keeps the requested name; Target and Source come from the last hop.
+func (r *Registry) ResolveAlias(name string) (Entry, error) {
+	e, ok := r.lookup(name)
+	if !ok {
+		return Entry{}, fmt.Errorf("modelreg: unknown alias %q", name)
+	}
+	return r.followAlias(e)
+}
+
+func (r *Registry) followAlias(e Entry) (Entry, error) {
+	seen := map[string]bool{e.Name: true}
+	cur := e
+	for hops := 1; ; hops++ {
+		next, ok := r.lookup(cur.Target)
+		if !ok {
+			return Entry{Name: e.Name, Target: cur.Target, Source: cur.Source}, nil
+		}
+		if seen[next.Name] {
+			return Entry{}, fmt.Errorf("alias %q reaches %q again: %w", e.Name, next.Name, ErrAliasCycle)
+		}
+		if hops >= maxAliasHops {
+			return Entry{}, fmt.Errorf("alias %q: more than %d hops: %w", e.Name, maxAliasHops, ErrAliasChainTooLong)
+		}
+		seen[next.Name] = true
+		cur = next
+	}
+}
+
+// validateChains refuses a registry holding any alias chain that cycles or exceeds the
+// hop limit, checked in name order so the reported alias is deterministic.
+func (r *Registry) validateChains() error {
+	names := make([]string, 0, len(r.entries))
+	for name := range r.entries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if _, err := r.followAlias(r.entries[name]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Register adds or replaces a user alias after proving the resulting chain resolves;
+// a cycle or over-long chain is refused and the registry is left unchanged.
+func (r *Registry) Register(name, target string) error {
+	name, target = strings.TrimSpace(name), strings.TrimSpace(target)
+	if r == nil || name == "" || target == "" {
+		return fmt.Errorf("modelreg: register %q -> %q: registry, name and target are required", name, target)
+	}
+	prev, had := r.entries[name]
+	r.entries[name] = Entry{Name: name, Target: target, Source: "user"}
+	if err := r.validateChains(); err != nil {
+		if had {
+			r.entries[name] = prev
+		} else {
+			delete(r.entries, name)
+		}
+		return fmt.Errorf("modelreg: register %q: %w", name, err)
+	}
+	return nil
 }
 
 // cacheRoot returns the model cache root (<cache>/fak-models), honoring the same
@@ -269,7 +351,8 @@ func cacheRoot() string {
 //  2. a string that names an existing file on disk passes through untouched (a
 //     local .gguf path the user typed);
 //  3. a known alias expands to its target (dashes are normalized to colons to
-//     accept both "qwen2.5-1.5b" and "qwen2.5:1.5b");
+//     accept both "qwen2.5-1.5b" and "qwen2.5:1.5b"), following alias → alias links
+//     up to maxAliasHops;
 //  4. otherwise the input is returned unchanged so the caller's own loader can try
 //     it (and produce its own not-found error) — Resolve never invents a ref.
 //
@@ -287,7 +370,7 @@ func (r *Registry) Resolve(ref string) (string, bool) {
 		return ref, false
 	}
 	if e, ok := r.lookup(ref); ok {
-		return e.Target, true
+		return r.expandAlias(ref, e)
 	}
 	// Try normalizing dashes to colons for family:size aliases (#1115).
 	// The pattern is: <family>-<size> → <family>:<size>, where the dash to
@@ -295,12 +378,23 @@ func (r *Registry) Resolve(ref string) (string, bool) {
 	// contains a version component (e.g., "qwen2.5-coder-1.5b" has three dashes,
 	// and the size separator is the second one).
 	if e, ok := r.tryDashedAliases(ref); ok {
-		return e.Target, true
+		return r.expandAlias(ref, e)
 	}
 	if local, found := FindLocalModel(ref); found {
 		return local, true
 	}
 	return ref, false
+}
+
+// expandAlias follows e's alias chain to its concrete target. A chain that cannot
+// resolve (only reachable through an unvalidated registry) returns ref unchanged, so
+// Resolve still never invents a ref.
+func (r *Registry) expandAlias(ref string, e Entry) (string, bool) {
+	final, err := r.followAlias(e)
+	if err != nil {
+		return ref, false
+	}
+	return final.Target, true
 }
 
 // DefaultModelSearchDirs returns canonical directories where local models may be stored.

@@ -2,6 +2,8 @@ package modelreg
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -440,5 +442,66 @@ func TestModelReg70BAlias(t *testing.T) {
 				t.Fatalf("Resolve(macfit tier %s %q) = %q, want valid hf:// URI", tier.Name, tier.ModelID, got)
 			}
 		})
+	}
+}
+
+// TestResolveFollowsAliasChainAndRejectsCycle pins alias → alias resolution: a 3-hop
+// chain reaches the concrete model, single-hop aliases are unchanged, and a cycle or an
+// over-long chain is refused with a typed sentinel before it is ever stored.
+func TestResolveFollowsAliasChainAndRejectsCycle(t *testing.T) {
+	dir := withCacheRoot(t)
+	const model = "hf://me/chain/m.gguf"
+	writeRegistry(t, dir, map[string]string{"a": "b", "b": "c", "c": model, "d": "smollm2"})
+	r, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, expanded := r.Resolve("a"); !expanded || got != model {
+		t.Fatalf("Resolve(a) = (%q, %v); want (%q, true)", got, expanded, model)
+	}
+	if got, expanded := r.Resolve("d"); !expanded || got != Catalog["smollm2"] {
+		t.Fatalf("Resolve(d) = (%q, %v); want embedded smollm2 target", got, expanded)
+	}
+	if got, expanded := r.Resolve("c"); !expanded || got != model {
+		t.Fatalf("single-hop Resolve(c) = (%q, %v); want (%q, true)", got, expanded, model)
+	}
+	if got, expanded := r.Resolve("smollm2"); !expanded || got != Catalog["smollm2"] {
+		t.Fatalf("single-hop Resolve(smollm2) = (%q, %v); want embedded target", got, expanded)
+	}
+
+	if err := r.Register("x", "y"); err != nil {
+		t.Fatalf("Register(x->y): %v", err)
+	}
+	if err := r.Register("y", "x"); !errors.Is(err, ErrAliasCycle) {
+		t.Fatalf("Register(y->x) = %v; want ErrAliasCycle", err)
+	}
+	if got, expanded := r.Resolve("x"); !expanded || got != "y" {
+		t.Fatalf("after refused cycle Resolve(x) = (%q, %v); want (y, true): cycle must not be stored", got, expanded)
+	}
+	if _, err := r.ResolveAlias("y"); err == nil {
+		t.Fatalf("refused alias y was stored")
+	}
+
+	for i := 0; i < maxAliasHops-1; i++ {
+		if err := r.Register(fmt.Sprintf("h%d", i), fmt.Sprintf("h%d", i+1)); err != nil {
+			t.Fatalf("Register(h%d): %v", i, err)
+		}
+	}
+	if err := r.Register(fmt.Sprintf("h%d", maxAliasHops-1), model); err != nil {
+		t.Fatalf("Register(h%d): %v", maxAliasHops-1, err)
+	}
+	if got, expanded := r.Resolve("h0"); !expanded || got != model {
+		t.Fatalf("%d-hop Resolve(h0) = (%q, %v); want (%q, true)", maxAliasHops, got, expanded, model)
+	}
+	if err := r.Register("h-start", "h0"); !errors.Is(err, ErrAliasChainTooLong) {
+		t.Fatalf("Register(h-start) = %v; want ErrAliasChainTooLong", err)
+	}
+
+	writeRegistry(t, dir, map[string]string{"p": "q", "q": "p"})
+	if _, err := Load(); !errors.Is(err, ErrAliasCycle) {
+		t.Fatalf("Load with a 2-cycle = %v; want ErrAliasCycle", err)
+	}
+	if got, expanded := Resolve("smollm2"); !expanded || got != Catalog["smollm2"] {
+		t.Fatalf("package Resolve after refused registry = (%q, %v); want embedded target", got, expanded)
 	}
 }
