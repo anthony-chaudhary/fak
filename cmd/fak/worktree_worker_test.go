@@ -1978,9 +1978,14 @@ func TestWorkerLandSymptom(t *testing.T) {
 			"--root", repo,
 			"--worktree", worktree,
 			"--base-sha", base,
+			"--paths", "pkg/calc.go",
+			"--paths", "pkg/calc_test.go",
 		})
 		if res.OK || res.Code != "SYMPTOM_UNWITNESSED" || code == 0 {
 			t.Fatalf("expected rejection with SYMPTOM_UNWITNESSED, got res=%+v code=%d err=%s", res, code, errb.String())
+		}
+		if res.Detail != "SYMPTOM_OTHER: symptom witness was refuted: selected symptom test passed at parent" {
+			t.Fatalf("expected parent-pass symptom refutation, got detail=%q", res.Detail)
 		}
 	})
 
