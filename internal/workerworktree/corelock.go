@@ -91,6 +91,10 @@ type landConfig struct {
 	// branch. Empty means: resolve the root's symbolic-ref HEAD (backward
 	// compatible), i.e. land onto whatever branch the root checkout is on.
 	branchRef string
+	// verifyClosure declares the pathspec globs the prospective verification's verdict
+	// depends on. It is the ONLY input a bounded CAS retry may reuse a verdict on, and an
+	// empty closure means no disjointness was ever proven, so the verifier re-runs.
+	verifyClosure []string
 }
 
 // LandTrunkRefDefault is the trunk branch the stale-base ancestor check falls back
@@ -109,6 +113,16 @@ func WithLandBranch(ref string) LandOption {
 // backward compatibility.
 func WithLandTrunkRef(ref string) LandOption {
 	return WithLandBranch(ref)
+}
+
+// WithVerificationClosure declares the pathspec globs the prospective verification
+// depends on, so a bounded CAS retry that re-seeds onto a moved trunk can REUSE the
+// verification verdict when the trunk delta leaves that closure untouched instead of
+// re-running the verifier. Fail-closed in every direction: no closure, an unreadable
+// delta, or a delta touching the closure all re-verify, because a moved base alone is
+// never grounds to skip a check.
+func WithVerificationClosure(globs ...string) LandOption {
+	return func(c *landConfig) { c.verifyClosure = append([]string(nil), globs...) }
 }
 
 // WithLeasedGlobs configures the leased path globs for pathspec disjointness fencing.
