@@ -26,6 +26,7 @@ import (
 const (
 	nativePreemptVictimMostRecent = "most-recent"
 	nativePreemptVictimCostAware  = "cost-aware"
+	nativePreemptVictimLowestPrio = "lowest-priority"
 	nativeKVBMDefaultPinTTL       = time.Minute
 )
 
@@ -51,6 +52,12 @@ const (
 	// NativePreemptVictimMostRecent preserves the pre-#2239 behavior: preempt the newest
 	// running lane first.
 	NativePreemptVictimMostRecent NativePreemptionVictimRule = 0
+	// NativePreemptVictimLowestPriority is vLLM's priority-policy victim rule
+	// (vllm/v1/core/sched/scheduler.py:735-741@975dca5, Apache-2.0): preempt the running
+	// lane with the largest (priority, arrival) tuple, i.e. the least important priority
+	// (higher value = less important) tie-broken by the latest arrival (largest seqNo).
+	// It shares metric code 1 with the gateway preemptor's lowest-priority rule.
+	NativePreemptVictimLowestPriority NativePreemptionVictimRule = 1
 	// NativePreemptVictimCostAware uses compute.PickEvictionVictim over scheduler-local
 	// KVBM hints. Metric code 1 is already used by the gateway preemptor for
 	// lowest-priority, so native cost-aware is exported as 2.
@@ -61,6 +68,8 @@ func (r NativePreemptionVictimRule) String() string {
 	switch r {
 	case NativePreemptVictimCostAware:
 		return nativePreemptVictimCostAware
+	case NativePreemptVictimLowestPriority:
+		return nativePreemptVictimLowestPrio
 	default:
 		return nativePreemptVictimMostRecent
 	}
@@ -127,7 +136,7 @@ func (s *NativeScheduler) SetKVPreemptionPolicy(p NativePreemptionPolicy) {
 		p.Mode = NativePreemptSwap
 	}
 	switch p.VictimRule {
-	case NativePreemptVictimMostRecent, NativePreemptVictimCostAware:
+	case NativePreemptVictimMostRecent, NativePreemptVictimCostAware, NativePreemptVictimLowestPriority:
 	default:
 		p.VictimRule = NativePreemptVictimMostRecent
 	}
@@ -222,6 +231,8 @@ func nativePreemptVictimRuleCode(rule NativePreemptionVictimRule, reason string)
 	switch rule {
 	case NativePreemptVictimCostAware:
 		return int(NativePreemptVictimCostAware)
+	case NativePreemptVictimLowestPriority:
+		return int(NativePreemptVictimLowestPriority)
 	case NativePreemptVictimMostRecent:
 		return 0
 	}
@@ -230,6 +241,8 @@ func nativePreemptVictimRuleCode(rule NativePreemptionVictimRule, reason string)
 		return int(NativePreemptVictimMostRecent)
 	case nativePreemptVictimCostAware:
 		return int(NativePreemptVictimCostAware)
+	case nativePreemptVictimLowestPrio:
+		return int(NativePreemptVictimLowestPriority)
 	default:
 		return -1
 	}
@@ -447,9 +460,46 @@ func (s *NativeScheduler) preemptibleLaneLocked() int {
 	switch s.preemption.VictimRule {
 	case NativePreemptVictimCostAware:
 		return s.costAwarePreemptibleLaneLocked()
+	case NativePreemptVictimLowestPriority:
+		return s.lowestPriorityPreemptibleLaneLocked()
 	default:
 		return s.mostRecentPreemptibleLaneLocked()
 	}
+}
+
+// lowestPriorityPreemptibleLaneLocked ports vLLM's priority-policy victim selection,
+// max(running, key=(priority, arrival_time)): the preemptible lane with the largest
+// priority value (least important) wins, ties broken by the latest arrival (largest
+// seqNo), then by tool name for determinism. When every lane shares one priority this
+// degenerates to the most-recent rule, matching vLLM's FCFS pop of the newest request.
+func (s *NativeScheduler) lowestPriorityPreemptibleLaneLocked() int {
+	if len(s.lanes) <= 1 {
+		return -1
+	}
+	best := -1
+	for i, ln := range s.lanes {
+		if ln == nil || ln.terminal || ln.ctx.Err() != nil || ln.sess == nil {
+			continue
+		}
+		if best < 0 {
+			best = i
+			continue
+		}
+		b := s.lanes[best]
+		switch {
+		case ln.priority != b.priority:
+			if ln.priority > b.priority {
+				best = i
+			}
+		case ln.seqNo != b.seqNo:
+			if ln.seqNo > b.seqNo {
+				best = i
+			}
+		case ln.tool < b.tool:
+			best = i
+		}
+	}
+	return best
 }
 
 func (s *NativeScheduler) mostRecentPreemptibleLaneLocked() int {
