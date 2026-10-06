@@ -409,15 +409,12 @@ func (s *NativeScheduler) applyPrefixHitsLocked() {
 		if info == nil || info.applied {
 			continue
 		}
-		if info.fullHit {
-			info.applied = true
+		depth := installPrefixHitLocked(ln, info)
+		if info.fullHit && depth == len(ln.prompt) {
 			ln.promptCursor = len(ln.prompt)
 			ln.promptLen = len(ln.prompt)
 			ln.state = schedLaneDecode
 			ln.prefillChunkTokens = 0
-			if info.boundary != nil && info.boundary.KV() != nil && ln.sess != nil {
-				ln.sess.Cache = info.boundary.KV().Clone()
-			}
 			if info.boundary != nil && len(info.boundary.Logits()) > 0 {
 				ln.logits = copyF32(info.boundary.Logits())
 			} else if len(ln.logits) == 0 && ln.sess != nil && ln.sess.M != nil && len(ln.prompt) > 0 {
@@ -433,15 +430,26 @@ func (s *NativeScheduler) applyPrefixHitsLocked() {
 				Lane:      ln,
 				State:     schedLaneDecode,
 			})
-		} else if info.matched > 0 {
-			info.applied = true
-			ln.promptCursor = info.matched
-			ln.promptLen = info.matched
-			if info.boundary != nil && info.boundary.KV() != nil && ln.sess != nil {
-				ln.sess.Cache = info.boundary.KV().Clone()
-			}
+		} else if depth > 0 {
+			ln.promptCursor = depth
+			ln.promptLen = depth
 		}
 	}
+}
+
+// installPrefixHitLocked marks info applied, installs a clone of its boundary KV
+// into the lane session, and returns the prompt depth the lane may skip:
+// min(info.matched, installed KV length), or 0 (cold prefill) when no KV was
+// installed. The admitted match is a ceiling and is never grown later; adapted
+// from SGLang python/sglang/srt/disaggregation/decode_hicache_mixin.py:256@f2de51e2
+// (PR #41450, Apache-2.0).
+func installPrefixHitLocked(ln *schedLane, info *prefixHitInfo) int {
+	info.applied = true
+	if info.boundary == nil || info.boundary.KV() == nil || ln.sess == nil {
+		return 0
+	}
+	ln.sess.Cache = info.boundary.KV().Clone()
+	return min(info.matched, ln.sess.Cache.Len())
 }
 
 // prefillSafePreemptibleLaneLocked reuses the configured historical victim picker
@@ -504,15 +512,12 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 	if ln.promptCursor == 0 {
 		info := s.getPrefixHitInfo(ln)
 		if info != nil && !info.applied {
-			if info.fullHit {
-				info.applied = true
+			depth := installPrefixHitLocked(ln, info)
+			if info.fullHit && depth == len(ln.prompt) {
 				ln.promptCursor = len(ln.prompt)
 				ln.promptLen = len(ln.prompt)
 				ln.state = schedLaneDecode
 				ln.prefillChunkTokens = 0
-				if info.boundary != nil && info.boundary.KV() != nil && ln.sess != nil {
-					ln.sess.Cache = info.boundary.KV().Clone()
-				}
 				if info.boundary != nil && len(info.boundary.Logits()) > 0 {
 					ln.logits = copyF32(info.boundary.Logits())
 				} else if len(ln.logits) == 0 && ln.sess != nil && ln.sess.M != nil && len(ln.prompt) > 0 {
@@ -530,13 +535,9 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 					State:     schedLaneDecode,
 				})
 				return
-			} else if info.matched > 0 {
-				info.applied = true
-				ln.promptCursor = info.matched
-				ln.promptLen = info.matched
-				if info.boundary != nil && info.boundary.KV() != nil && ln.sess != nil {
-					ln.sess.Cache = info.boundary.KV().Clone()
-				}
+			} else if depth > 0 {
+				ln.promptCursor = depth
+				ln.promptLen = depth
 			}
 		}
 	}

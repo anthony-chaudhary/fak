@@ -1298,3 +1298,71 @@ func TestNativeSchedulerProductionArmingChunkParity(t *testing.T) {
 		}
 	})
 }
+
+// TestPrefixHitApplyClampsToSnapshottedDepth pins that an applied prefix hit
+// never advances the prompt cursor past the KV it actually installed.
+func TestPrefixHitApplyClampsToSnapshottedDepth(t *testing.T) {
+	m := nativeSchedulerPrefillModel(t)
+	prompt := nativeSchedulerQwenPrompt(48)
+
+	apply := func(t *testing.T, info *prefixHitInfo) *schedLane {
+		t.Helper()
+		s := &NativeScheduler{m: m}
+		t.Cleanup(func() {
+			nativePrefixStateMu.Lock()
+			delete(nativePrefixStates, s)
+			nativePrefixStateMu.Unlock()
+		})
+		sess := m.NewSession()
+		sess.Quant = true
+		sess.Q4K = true
+		t.Cleanup(sess.Close)
+		ln := &schedLane{sess: sess, prompt: prompt, state: schedLanePrefilling, prefillChunkTokens: nativeQwenPrefillMinChunkTokens}
+		s.getOrCreatePrefixState().laneLookups[ln] = info
+		s.lanes = []*schedLane{ln}
+		s.applyPrefixHitsLocked()
+		if !info.applied {
+			t.Fatal("prefix hit not marked applied")
+		}
+		return ln
+	}
+
+	t.Run("nil_boundary_partial_hit_stays_cold", func(t *testing.T) {
+		ln := apply(t, &prefixHitInfo{matched: 32})
+		if ln.promptCursor != 0 || ln.promptLen != 0 || ln.state != schedLanePrefilling {
+			t.Fatalf("cursor=%d promptLen=%d state=%d, want 0/0/PREFILLING", ln.promptCursor, ln.promptLen, ln.state)
+		}
+	})
+
+	t.Run("nil_boundary_full_hit_stays_cold", func(t *testing.T) {
+		ln := apply(t, &prefixHitInfo{matched: len(prompt), fullHit: true})
+		if ln.promptCursor != 0 || ln.state != schedLanePrefilling {
+			t.Fatalf("cursor=%d state=%d, want 0/PREFILLING", ln.promptCursor, ln.state)
+		}
+	})
+
+	t.Run("short_boundary_clamps_to_installed_kv", func(t *testing.T) {
+		const installed = 16
+		ctl := m.NewSession()
+		ctl.Quant = true
+		ctl.Q4K = true
+		ctl.PrefillNoLogits(prompt[:installed])
+		tree := radixkv.New(0)
+		root, _ := tree.Lookup(prompt[:32])
+		tree.Done(tree.InsertWithLogits(root, prompt[:32], ctl.Cache, nil))
+		ctl.Close()
+		boundary, matched := tree.Lookup(prompt)
+		if matched != 32 || boundary == nil {
+			t.Fatalf("seeded lookup matched=%d boundary=%v, want 32/non-nil", matched, boundary)
+		}
+		t.Cleanup(func() { tree.Done(boundary) })
+
+		ln := apply(t, &prefixHitInfo{matched: matched, boundary: boundary})
+		if ln.promptCursor != installed || ln.promptLen != installed {
+			t.Fatalf("cursor=%d promptLen=%d, want both %d (installed KV depth)", ln.promptCursor, ln.promptLen, installed)
+		}
+		if got := ln.sess.Cache.Len(); got != installed {
+			t.Fatalf("installed KV len = %d, want %d", got, installed)
+		}
+	})
+}
