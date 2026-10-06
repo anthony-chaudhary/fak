@@ -547,8 +547,8 @@ type openAIStreamChunk struct {
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage   *Usage   `json:"usage"`
-	Timings *Timings `json:"timings,omitempty"`
+	Usage   *Usage          `json:"usage"`
+	Timings json.RawMessage `json:"timings,omitempty"`
 }
 
 // CompleteStream performs one streamed chat-completions round-trip on the
@@ -798,8 +798,8 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		if chunk.Usage != nil {
 			usage = *chunk.Usage
 		}
-		if chunk.Timings != nil {
-			timings = chunk.Timings
+		if parsed := parseOptionalTimings(chunk.Timings); parsed != nil {
+			timings = parsed
 		}
 		for _, ch := range chunk.Choices {
 			if ch.FinishReason != "" {
