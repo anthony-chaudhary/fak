@@ -212,3 +212,30 @@ func TestModelNameReportsSyntheticVsPreloadedHonestly(t *testing.T) {
 		t.Fatalf("preloaded ModelName = %q, want \"smollm2-inkernel\"", got)
 	}
 }
+
+func TestNativePreemptionPolicyDefaultsMaxBlocksFromProbe(t *testing.T) {
+	t.Setenv("FAK_NATIVE_KV_BLOCK_TOKENS", "")
+	probe := func() (uint64, bool) { return 10 << 20, true }
+	const bytesPerToken = 1024 // 16-token blocks -> 16 KiB per block
+
+	t.Setenv("FAK_NATIVE_KV_MAX_BLOCKS", "")
+	if got := nativePreemptionPolicyFromEnvWithProbe(probe, bytesPerToken).MaxBlocks; got != 576 {
+		t.Fatalf("env unset + probe: MaxBlocks = %d, want 576", got)
+	}
+	unavailable := func() (uint64, bool) { return 0, false }
+	if got := nativePreemptionPolicyFromEnvWithProbe(unavailable, bytesPerToken).MaxBlocks; got != 0 {
+		t.Fatalf("env unset + probe unavailable: MaxBlocks = %d, want 0", got)
+	}
+	if got := nativePreemptionPolicyFromEnvWithProbe(nil, bytesPerToken).MaxBlocks; got != 0 {
+		t.Fatalf("env unset + nil probe: MaxBlocks = %d, want 0", got)
+	}
+
+	t.Setenv("FAK_NATIVE_KV_MAX_BLOCKS", "0")
+	if got := nativePreemptionPolicyFromEnvWithProbe(probe, bytesPerToken).MaxBlocks; got != 0 {
+		t.Fatalf("env=0 + probe: MaxBlocks = %d, want 0", got)
+	}
+	t.Setenv("FAK_NATIVE_KV_MAX_BLOCKS", "7")
+	if got := nativePreemptionPolicyFromEnvWithProbe(probe, bytesPerToken).MaxBlocks; got != 7 {
+		t.Fatalf("env=7 + probe: MaxBlocks = %d, want 7", got)
+	}
+}

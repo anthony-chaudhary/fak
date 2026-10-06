@@ -31,12 +31,14 @@ package modelengine
 
 import (
 	"context"
+	"math"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/kvbudget"
 	"github.com/anthony-chaudhary/fak/internal/model"
 
 	"github.com/anthony-chaudhary/fak/internal/refutil"
@@ -344,7 +346,7 @@ func (e *Engine) nativeScheduler() *NativeScheduler {
 			// (synchronous admission) instead of crashing a serving process.
 			_ = sched.SetQwenPrefillMaxTokensPerIteration(nativeServingPrefillTokensPerIteration)
 		}
-		if p := nativePreemptionPolicyFromEnv(); p.MaxBlocks > 0 {
+		if p := nativePreemptionPolicyFromEnvWithProbe(nativeKVFreeBytesProbe, nativeKVBytesPerToken(e.model().Cfg)); p.MaxBlocks > 0 {
 			sched.SetKVPreemptionPolicy(p)
 		}
 		if e.coupler != nil {
@@ -467,16 +469,47 @@ func nativeMaxRunningFromEnv() int {
 	return n
 }
 
+// nativeKVFreeBytesProbe reports the device bytes free for the paged KV pool.
+// Nil, or a false report, leaves MaxBlocks unsized so preemption stays off.
+var nativeKVFreeBytesProbe func() (uint64, bool)
+
+// nativeKVDefaultUtilization is vLLM's default gpu_memory_utilization
+// (vllm/v1/worker/gpu_worker.py:528-643@975dca5, Apache-2.0).
+const nativeKVDefaultUtilization = 0.9
+
+const nativeKVDefaultBlockTokens = 16
+
+func nativeKVBytesPerToken(cfg model.Config) uint64 {
+	return uint64(math.Ceil(cfg.KVCacheShape().KVBytesPerToken(kvbudget.F32)))
+}
+
 func nativePreemptionPolicyFromEnv() NativePreemptionPolicy {
+	return nativePreemptionPolicyFromEnvWithProbe(nil, 0)
+}
+
+// nativePreemptionPolicyFromEnvWithProbe sizes MaxBlocks from measured free
+// memory only when FAK_NATIVE_KV_MAX_BLOCKS is unset; an explicit value,
+// including 0, always wins.
+func nativePreemptionPolicyFromEnvWithProbe(probe func() (uint64, bool), kvBytesPerToken uint64) NativePreemptionPolicy {
 	p := NativePreemptionPolicy{Mode: NativePreemptSwap}
+	if raw := os.Getenv("FAK_NATIVE_KV_BLOCK_TOKENS"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			p.BlockTokens = n
+		}
+	}
 	if raw := os.Getenv("FAK_NATIVE_KV_MAX_BLOCKS"); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
 			p.MaxBlocks = n
 		}
-	}
-	if raw := os.Getenv("FAK_NATIVE_KV_BLOCK_TOKENS"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-			p.BlockTokens = n
+	} else if probe != nil {
+		if free, ok := probe(); ok {
+			blockTokens := p.BlockTokens
+			if blockTokens <= 0 {
+				blockTokens = nativeKVDefaultBlockTokens
+			}
+			if n, err := kvbudget.DeriveMaxBlocks(free, 0, nativeKVDefaultUtilization, uint64(blockTokens)*kvBytesPerToken); err == nil {
+				p.MaxBlocks = n
+			}
 		}
 	}
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_NATIVE_KV_PREEMPT_MODE"))) {
