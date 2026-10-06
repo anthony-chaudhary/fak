@@ -48,6 +48,14 @@ func TestCIQQ8_0Q4_0MatchesF32(t *testing.T) {
 			t.Cleanup(func() { kQuantSDOTForce = 0 })
 			got := kQuantMatRows(qt, x)
 
+			yb := [][]float32{make([]float32, qt.out)}
+			kQuantBatchRows([]*kQuantTensor{qt}, [][]float32{x}, qt.out, yb)
+			for o := range got {
+				if math.Float32bits(yb[0][o]) != math.Float32bits(got[o]) {
+					t.Fatalf("CIQ %s kQuantBatchRows row %d = %v, want kQuantMatRows %v", name, o, yb[0][o], got[o])
+				}
+			}
+
 			var dot, ng, nw float64
 			var maxRel float64
 			for o := 0; o < out; o++ {
