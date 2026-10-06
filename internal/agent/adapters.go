@@ -189,9 +189,9 @@ type openAIResponse struct {
 		Delta        *Message `json:"delta,omitempty"`
 		FinishReason string   `json:"finish_reason"`
 	} `json:"choices"`
-	Usage   Usage     `json:"usage"`
-	Timings *Timings  `json:"timings,omitempty"`
-	Error   *apiError `json:"error"`
+	Usage   Usage           `json:"usage"`
+	Timings json.RawMessage `json:"timings,omitempty"`
+	Error   *apiError       `json:"error"`
 }
 
 // MarshalRequest encodes the canonical request as an OpenAI chat-completions body,
@@ -447,8 +447,22 @@ func (a openAIAdapter) parseResponseFields(raw []byte) (*Completion, error) {
 		Usage:        cr.Usage,
 		Model:        cr.Model,
 		ServiceTier:  parseServiceTier(a.Provider(), cr.ServiceTier),
-		Timings:      cr.Timings,
+		Timings:      parseOptionalTimings(cr.Timings),
 	}, nil
+}
+
+// parseOptionalTimings keeps malformed provider metadata from rejecting a valid
+// completion or stream chunk. Discard the entire timing object on decode errors;
+// a partially decoded measurement must not become a reported timing.
+func parseOptionalTimings(raw json.RawMessage) *Timings {
+	if len(raw) == 0 {
+		return nil
+	}
+	var timings *Timings
+	if json.Unmarshal(raw, &timings) != nil {
+		return nil
+	}
+	return timings
 }
 
 func normalizeLegacyOpenAIFunctionCall(msg *Message, finish *string) {

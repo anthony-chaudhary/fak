@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -55,4 +56,71 @@ func TestProxiedLlamaServerStreamTimingsParsed(t *testing.T) {
 	if comp.Timings == nil || *comp.Timings != want {
 		t.Fatalf("stream Timings = %+v, want %+v", comp.Timings, want)
 	}
+}
+
+// fak-test:runtime fast est=100ms
+func TestProxiedMalformedTimingsPreserveCompletion(t *testing.T) {
+	raw := strings.Replace(llamaServerBody, `"predicted_ms":165.636`, `"predicted_ms":"invalid"`, 1)
+	check := func(t *testing.T, comp *Completion, err error, wantTimings *Timings) {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("completion rejected for optional timings: %v", err)
+		}
+		if comp == nil {
+			t.Fatal("completion is nil")
+		}
+		if comp.Message.Role != RoleAssistant || comp.Message.Content != "Hi" ||
+			comp.FinishReason != "length" || comp.Model != "Qwen3.8-27B-UD-Q2_K_XL" {
+			t.Errorf("completion fields lost: %+v", comp)
+		}
+		if comp.Usage.PromptTokens != 13 || comp.Usage.CompletionTokens != 4 ||
+			comp.Usage.TotalTokens != 17 || comp.Usage.PromptTokensDetails == nil ||
+			comp.Usage.PromptTokensDetails.CachedTokens != 0 {
+			t.Errorf("usage lost: %+v", comp.Usage)
+		}
+		if wantTimings == nil {
+			if comp.Timings != nil {
+				t.Errorf("malformed timings must be unmeasured, got %+v", comp.Timings)
+			}
+		} else if comp.Timings == nil || *comp.Timings != *wantTimings {
+			t.Errorf("prior valid timings lost: got %+v, want %+v", comp.Timings, wantTimings)
+		}
+	}
+
+	t.Run("buffered", func(t *testing.T) {
+		comp, err := openAIAdapter{}.ParseResponse([]byte(raw))
+		check(t, comp, err, nil)
+	})
+	t.Run("stream", func(t *testing.T) {
+		// Put content, usage and finish on the malformed-timings chunk: none may
+		// disappear when only its optional metadata fails to decode.
+		chunk := strings.Replace(raw, `"message":`, `"delta":`, 1)
+		chunk = strings.Replace(chunk, `"chat.completion"`, `"chat.completion.chunk"`, 1)
+		up, _ := sseServer(t, "data: "+chunk+"\n\ndata: [DONE]\n\n")
+		var got strings.Builder
+		comp, err := NewHTTPPlanner(up.URL+"/v1", "qwen", "").CompleteStream(context.Background(), func(s string) error {
+			got.WriteString(s)
+			return nil
+		}, []Message{{Role: RoleUser, Content: "hi"}}, nil)
+		check(t, comp, err, nil)
+		if got.String() != "Hi" {
+			t.Errorf("sink content = %q, want Hi", got.String())
+		}
+	})
+
+	t.Run("valid_then_malformed_stream", func(t *testing.T) {
+		valid := `{"choices":[],"timings":{"prompt_ms":250.368,"predicted_ms":165.636}}`
+		chunk := strings.Replace(raw, `"message":`, `"delta":`, 1)
+		chunk = strings.Replace(chunk, `"chat.completion"`, `"chat.completion.chunk"`, 1)
+		up, _ := sseServer(t, "data: "+valid+"\n\ndata: "+chunk+"\n\ndata: [DONE]\n\n")
+		var got strings.Builder
+		comp, err := NewHTTPPlanner(up.URL+"/v1", "qwen", "").CompleteStream(context.Background(), func(s string) error {
+			got.WriteString(s)
+			return nil
+		}, []Message{{Role: RoleUser, Content: "hi"}}, nil)
+		check(t, comp, err, &Timings{PromptMS: 250.368, PredictedMS: 165.636})
+		if got.String() != "Hi" {
+			t.Errorf("sink content = %q, want Hi", got.String())
+		}
+	})
 }
