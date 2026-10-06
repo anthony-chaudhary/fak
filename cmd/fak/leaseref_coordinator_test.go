@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
@@ -54,9 +55,15 @@ func runCoordinatorLeaseref(t *testing.T, args ...string) (int, string, string) 
 	return code, stdout.String(), stderr.String()
 }
 
-func serveCoordinatorAuthProof(w http.ResponseWriter, r *http.Request) bool {
-	if r.URL.Path != "/healthz" {
+func serveCoordinatorAuthProof(t *testing.T, w http.ResponseWriter, r *http.Request) bool {
+	t.Helper()
+	if r.URL.Path != "/healthz" && r.URL.Path != "/v1/fak/key-proof" {
 		return false
+	}
+	if r.Method != http.MethodGet || len(r.Header.Values("Authorization")) != 0 {
+		t.Errorf("proof request must be an unauthenticated GET: method=%s Authorization=%q", r.Method, r.Header.Values("Authorization"))
+		http.Error(w, "invalid proof request", http.StatusBadRequest)
+		return true
 	}
 	nonce, err := base64.StdEncoding.DecodeString(r.Header.Get("X-Fak-Auth-Challenge"))
 	if err != nil || len(nonce) != 32 {
@@ -71,6 +78,16 @@ func serveCoordinatorAuthProof(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+func requireCoordinatorLeaseWrite(t *testing.T, w http.ResponseWriter, r *http.Request, op string) bool {
+	t.Helper()
+	if r.Method != http.MethodPost || r.URL.Path != "/v1/leases/"+op || r.Header.Get("Authorization") != "Bearer "+coordinatorTestKey {
+		t.Errorf("expected authenticated lease POST for %s: method=%s path=%s Authorization=%q", op, r.Method, r.URL.Path, r.Header.Get("Authorization"))
+		http.Error(w, "invalid lease request", http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
 func TestLeaserefCoordinatorAcquireRenewReleaseUsesAuthenticatedAuthority(t *testing.T) {
 	type observed struct {
 		path string
@@ -78,7 +95,7 @@ func TestLeaserefCoordinatorAcquireRenewReleaseUsesAuthenticatedAuthority(t *tes
 	}
 	var calls []observed
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if serveCoordinatorAuthProof(w, r) {
+		if serveCoordinatorAuthProof(t, w, r) {
 			return
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer "+coordinatorTestKey {
@@ -164,16 +181,24 @@ func TestLeaserefCoordinatorRefusalAndServerErrorKeepDistinctExits(t *testing.T)
 		{"server error", http.StatusInternalServerError, `{"error":"unavailable"}`, 1, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			var leaseWrites atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if serveCoordinatorAuthProof(w, r) {
+				if serveCoordinatorAuthProof(t, w, r) {
 					return
 				}
+				if !requireCoordinatorLeaseWrite(t, w, r, "acquire") {
+					return
+				}
+				leaseWrites.Add(1)
 				w.WriteHeader(tc.status)
 				_, _ = w.Write([]byte(tc.body))
 			}))
 			defer server.Close()
 			configureLeaseCoordinator(t, server.URL)
 			code, stdout, _ := runCoordinatorLeaseref(t, "acquire", "--id", "coord-lane", "--holder", "worker-a", "--ttl", "300", "--tree", "cmd/fak/**")
+			if got := leaseWrites.Load(); got != 1 {
+				t.Fatalf("lease write calls=%d, want 1; proof setup failure must not satisfy the exit assertion", got)
+			}
 			if code != tc.wantExit || (tc.wantStdout != "" && !strings.Contains(stdout, tc.wantStdout)) {
 				t.Fatalf("exit=%d stdout=%q, want exit=%d containing %q", code, stdout, tc.wantExit, tc.wantStdout)
 			}
@@ -217,7 +242,7 @@ func TestLeaserefCoordinatorRejectsLocalOnlyForceAndFence(t *testing.T) {
 	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		serveCoordinatorAuthProof(w, r)
+		serveCoordinatorAuthProof(t, w, r)
 	}))
 	defer server.Close()
 	configureLeaseCoordinator(t, server.URL)
@@ -239,7 +264,7 @@ func TestLeaserefCoordinatorRejectsExplicitDirBeforeHTTP(t *testing.T) {
 	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		serveCoordinatorAuthProof(w, r)
+		serveCoordinatorAuthProof(t, w, r)
 	}))
 	defer server.Close()
 	configureLeaseCoordinator(t, server.URL)
@@ -302,16 +327,24 @@ func TestLeaserefCoordinatorRejectsMalformedAuthorityVerdicts(t *testing.T) {
 		{"oversize response", acquireArgs, encode(validAcquire) + strings.Repeat(" ", 70<<10)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			var leaseWrites atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if serveCoordinatorAuthProof(w, r) {
+				if serveCoordinatorAuthProof(t, w, r) {
 					return
 				}
+				if !requireCoordinatorLeaseWrite(t, w, r, tc.args[0]) {
+					return
+				}
+				leaseWrites.Add(1)
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(tc.body))
 			}))
 			defer server.Close()
 			configureLeaseCoordinator(t, server.URL)
 			code, stdout, stderr := runCoordinatorLeaseref(t, tc.args...)
+			if got := leaseWrites.Load(); got != 1 {
+				t.Fatalf("lease write calls=%d, want 1; proof setup failure must not satisfy the exit assertion", got)
+			}
 			if code != 1 {
 				t.Fatalf("malformed authority verdict accepted: exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 			}
