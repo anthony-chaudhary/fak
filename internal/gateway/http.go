@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -984,12 +985,89 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// Closed error-code vocabulary for front-door structured-output validation
+// (oss-port-gateway-json-schema-validate). ADAPTed from TGI's validation half
+// (huggingface/text-generation-inference router/src/validation.rs:341-406@b4adbf2,
+// Apache-2.0): a malformed json_schema response_format is refused with HTTP 422
+// before any upstream call, instead of being forwarded verbatim and failing (or
+// silently not constraining) inside the ride engine. fak does NOT compile the
+// schema to a grammar or meta-validate it against a JSON-Schema draft; it only
+// pins the shape the ride engines (vLLM/SGLang) need to constrain decoding.
+const (
+	errCodeInvalidResponseFormat     = "invalid_response_format"
+	errCodeJSONSchemaMissing         = "json_schema_missing"
+	errCodeJSONSchemaNotObject       = "json_schema_not_object"
+	errCodeJSONSchemaMissingType     = "json_schema_missing_type"
+	errCodeJSONSchemaMissingProperty = "json_schema_missing_properties"
+)
+
+// validateResponseFormat checks an OpenAI `response_format` carrier. It returns
+// ("", "") when the request may proceed (absent, json_object, text, any other type
+// the upstream owns, or a well-formed json_schema) and a closed code + message when
+// a json_schema response_format is malformed. The raw bytes are never rewritten:
+// a valid carrier is still forwarded verbatim.
+func validateResponseFormat(raw json.RawMessage) (code, msg string) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return "", ""
+	}
+	var rf struct {
+		Type       string          `json:"type"`
+		JSONSchema json.RawMessage `json:"json_schema"`
+	}
+	if err := json.Unmarshal(trimmed, &rf); err != nil {
+		return errCodeInvalidResponseFormat, "response_format must be a JSON object: " + err.Error()
+	}
+	if rf.Type != "json_schema" {
+		return "", ""
+	}
+	var js struct {
+		Schema json.RawMessage `json:"schema"`
+	}
+	inner := bytes.TrimSpace(rf.JSONSchema)
+	if len(inner) == 0 || bytes.Equal(inner, []byte("null")) {
+		return errCodeJSONSchemaMissing, "response_format.json_schema is required when type is json_schema"
+	}
+	if err := json.Unmarshal(inner, &js); err != nil {
+		return errCodeJSONSchemaNotObject, "response_format.json_schema must be a JSON object"
+	}
+	schema := bytes.TrimSpace(js.Schema)
+	if len(schema) == 0 || bytes.Equal(schema, []byte("null")) {
+		return errCodeJSONSchemaMissing, "response_format.json_schema.schema is required when type is json_schema"
+	}
+	var obj map[string]json.RawMessage
+	if schema[0] != '{' || json.Unmarshal(schema, &obj) != nil {
+		return errCodeJSONSchemaNotObject, "response_format.json_schema.schema must be a JSON object"
+	}
+	t, ok := obj["type"]
+	if !ok {
+		return errCodeJSONSchemaMissingType, "response_format.json_schema.schema must declare a \"type\""
+	}
+	var typ string
+	var typs []string
+	if json.Unmarshal(t, &typ) != nil || typ == "" {
+		if json.Unmarshal(t, &typs) != nil || len(typs) == 0 {
+			return errCodeJSONSchemaMissingType, "response_format.json_schema.schema \"type\" must be a non-empty string or array of strings"
+		}
+	}
+	if typ == "object" {
+		if _, ok := obj["properties"]; !ok {
+			return errCodeJSONSchemaMissingProperty, "response_format.json_schema.schema of type object must declare \"properties\""
+		}
+	}
+	return "", ""
+}
+
 func validateChatRequestIngress(w http.ResponseWriter, req ChatRequest) bool {
 	if len(req.Messages) == 0 {
 		writeErr(w, http.StatusBadRequest, "messages: field required")
 		return false
 	}
 	if rejectInvalidSampling(w, validateSampling(req)) {
+		return false
+	}
+	if code, msg := validateResponseFormat(req.ResponseFormat); code != "" {
+		writeErrCode(w, http.StatusUnprocessableEntity, code, msg)
 		return false
 	}
 	receiptRequested := req.Fak != nil && req.Fak.NativeInferenceReceipt

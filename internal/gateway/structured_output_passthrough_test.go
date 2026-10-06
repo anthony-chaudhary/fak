@@ -243,3 +243,103 @@ func jsonEqual(t *testing.T, a, b json.RawMessage) bool {
 	nb, _ := json.Marshal(bv)
 	return bytes.Equal(na, nb)
 }
+
+// newStructuredOutputProxy stands up a proxy-planner gateway in front of a counting
+// stand-in upstream, so a refusal test can prove no upstream call was made and a
+// pass-through test can capture the forwarded response_format bytes.
+func newStructuredOutputProxy(t *testing.T) (gatewayURL string, hits *int, gotRF *json.RawMessage) {
+	t.Helper()
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterAdjudicator(0, toolAdj{})
+	hits = new(int)
+	gotRF = new(json.RawMessage)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*hits++
+		var req struct {
+			ResponseFormat json.RawMessage `json:"response_format"`
+		}
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &req)
+		*gotRF = req.ResponseFormat
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-rf","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"{}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	t.Cleanup(upstream.Close)
+	srv, err := New(Config{EngineID: "test", Model: "qwen3.6-27b", BaseURL: upstream.URL + "/v1", Provider: "openai-compatible", VDSO: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return ts.URL, hits, gotRF
+}
+
+func postResponseFormat(t *testing.T, gatewayURL string, rf json.RawMessage) (int, string) {
+	t.Helper()
+	body := []byte(`{"model":"qwen3.6-27b","messages":[{"role":"user","content":"hi"}],"response_format":` + string(rf) + `}`)
+	resp, err := http.Post(gatewayURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	var env struct {
+		Error struct {
+			Code string `json:"code"`
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(raw, &env)
+	if resp.StatusCode == http.StatusUnprocessableEntity && env.Error.Type != "invalid_request_error" {
+		t.Fatalf("422 error type = %q, want invalid_request_error: %s", env.Error.Type, raw)
+	}
+	return resp.StatusCode, env.Error.Code
+}
+
+// TestChatRejectsMalformedJSONSchema422 pins oss-port-gateway-json-schema-validate
+// (ADAPT of TGI router/src/validation.rs:341-406@b4adbf2): a malformed json_schema
+// response_format is refused with 422 + a closed code BEFORE any upstream call, while
+// a valid json_schema and a json_object response_format still pass through verbatim.
+func TestChatRejectsMalformedJSONSchema422(t *testing.T) {
+	gw, hits, gotRF := newStructuredOutputProxy(t)
+	rejects := []struct {
+		name, rf, code string
+	}{
+		{"not an object", `"json_schema"`, errCodeInvalidResponseFormat},
+		{"missing json_schema", `{"type":"json_schema"}`, errCodeJSONSchemaMissing},
+		{"missing schema", `{"type":"json_schema","json_schema":{"name":"x"}}`, errCodeJSONSchemaMissing},
+		{"non-object schema", `{"type":"json_schema","json_schema":{"name":"x","schema":["object"]}}`, errCodeJSONSchemaNotObject},
+		{"string schema", `{"type":"json_schema","json_schema":{"name":"x","schema":"object"}}`, errCodeJSONSchemaNotObject},
+		{"schema without type", `{"type":"json_schema","json_schema":{"name":"x","schema":{"properties":{}}}}`, errCodeJSONSchemaMissingType},
+		{"object without properties", `{"type":"json_schema","json_schema":{"name":"x","schema":{"type":"object"}}}`, errCodeJSONSchemaMissingProperty},
+	}
+	for _, tc := range rejects {
+		status, code := postResponseFormat(t, gw, json.RawMessage(tc.rf))
+		if status != http.StatusUnprocessableEntity || code != tc.code {
+			t.Errorf("%s: status=%d code=%q, want 422 %q", tc.name, status, code, tc.code)
+		}
+	}
+	if *hits != 0 {
+		t.Fatalf("upstream hits = %d after malformed schemas, want 0 (refuse before forwarding)", *hits)
+	}
+	passes := []string{
+		`{"type":"json_schema","json_schema":{"name":"x","strict":true,"schema":{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}}}`,
+		`{"type":"json_schema","json_schema":{"name":"x","schema":{"type":"string"}}}`,
+		`{"type":"json_object"}`,
+	}
+	for i, rf := range passes {
+		status, code := postResponseFormat(t, gw, json.RawMessage(rf))
+		if status != http.StatusOK {
+			t.Fatalf("valid response_format %d: status=%d code=%q, want 200", i, status, code)
+		}
+		if !jsonEqual(t, *gotRF, json.RawMessage(rf)) {
+			t.Fatalf("valid response_format %d not forwarded verbatim: got %s want %s", i, *gotRF, rf)
+		}
+	}
+	if *hits != len(passes) {
+		t.Fatalf("upstream hits = %d, want %d", *hits, len(passes))
+	}
+}
