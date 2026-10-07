@@ -3851,9 +3851,25 @@
           "category": "incidental",
           "reason": "private helper lifted verbatim out of cmdManageCommand to keep guard.go under the god-file ceiling; not a new concept",
           "token": "installGuardLogvaultMetrics"
+        },
+        {
+          "category": "false-positive",
+          "reason": "GateUp denotes the routed expert mathematical gate and up projections. This default phase counter observes selected device callback invocations, including handled and error outcomes, and has no policy, authorization, or admission authority.",
+          "token": "IncrementalDeviceGateUpCalls"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Existing expert gate/up callback outcome for a selected mathematical projection failure; it preserves the compute cause and never adjudicates authorization or admission.",
+          "token": "v41GateUpError"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Existing expert gate/up callback outcome confirming a selected mathematical projection result; it never grants permission or controls a policy gate.",
+          "token": "v41GateUpHandled"
         }
       ],
       "exclude": [
+        "IncrementalDeviceGateUpCalls",
         "SafetyGatePass",
         "aggregat",
         "aggregateV2",
@@ -3866,7 +3882,9 @@
         "mitigat",
         "navigat",
         "negat",
-        "propagat"
+        "propagat",
+        "v41GateUpError",
+        "v41GateUpHandled"
       ],
       "id": "guard-gate",
       "ignore": [

@@ -1386,6 +1386,10 @@ func recoverDevicePanic(r any) (err error, handled bool) {
 		if errors.As(e, &operation) {
 			return e, true
 		}
+		var expertOperation *model.V41ExpertOperationError
+		if errors.As(e, &expertOperation) {
+			return e, true
+		}
 		var stall metalgemm.MetalCommandBufferStallError
 		if errors.As(e, &stall) {
 			return e, true
@@ -2509,7 +2513,7 @@ func formatV41FaultClause(fa model.V41ExpertFaultAttribution) string {
 		backend = "-"
 	}
 	return fmt.Sprintf(
-		" v41_faults prefill=[faults=%df/%.1ffpt faulted_bytes=%.1fMiB dequant=%.2fGiB] decode=[faults=%df/%.1ffpt faulted_bytes=%.1fMiB dequant=%.2fGiB] hit_fraction=%.2f elapsed prefill=[fault=%.3fs/%.3fmspt dequant=%.3fs/%.3fmspt contraction=%.3fs/%.3fmspt] decode=[fault=%.3fs/%.3fmspt dequant=%.3fs/%.3fmspt contraction=%.3fs/%.3fmspt] contraction_backend=%s",
+		" v41_faults prefill=[faults=%df/%.1ffpt faulted_bytes=%.1fMiB dequant=%.2fGiB] decode=[faults=%df/%.1ffpt faulted_bytes=%.1fMiB dequant=%.2fGiB] hit_fraction=%.2f elapsed prefill=[fault=%.3fs/%.3fmspt dequant=%.3fs/%.3fmspt contraction=%.3fs/%.3fmspt] decode=[fault=%.3fs/%.3fmspt dequant=%.3fs/%.3fmspt contraction=%.3fs/%.3fmspt] contraction_backend=%s incremental_device prefill=[gate_up=%d down=%d dispatch=%.3fs] decode=[gate_up=%d down=%d dispatch=%.3fs]",
 		pre.Faults, pre.FaultsPerToken, mib*float64(pre.FaultedBytes), float64(pre.DequantBytes)/(1<<30),
 		dec.Faults, dec.FaultsPerToken, mib*float64(dec.FaultedBytes), float64(dec.DequantBytes)/(1<<30),
 		hitFraction,
@@ -2519,7 +2523,9 @@ func formatV41FaultClause(fa model.V41ExpertFaultAttribution) string {
 		float64(dec.FaultDoorNanos)/1e9, dec.FaultNanosPerToken/1e6,
 		float64(dec.DequantNanos)/1e9, dec.DequantNanosPerToken/1e6,
 		float64(dec.ContractionNanos)/1e9, dec.ContractionNanosPerToken/1e6,
-		backend)
+		backend,
+		pre.IncrementalDeviceGateUpCalls, pre.IncrementalDeviceDownCalls, float64(pre.IncrementalDeviceDispatchNanos)/1e9,
+		dec.IncrementalDeviceGateUpCalls, dec.IncrementalDeviceDownCalls, float64(dec.IncrementalDeviceDispatchNanos)/1e9)
 }
 
 // executionIdentity makes the request log say which compute path actually produced

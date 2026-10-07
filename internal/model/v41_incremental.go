@@ -41,7 +41,10 @@ package model
 // the typed ErrV41ForwardStage; that refusal is surfaced, never bypassed (making
 // compressed layers step is a later leaf).
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // v41StepStats is the observable per-step counter block the shadow composition
 // returns. It carries ONLY single-row counters -- never prefix-sized state -- so
@@ -91,6 +94,10 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	if scratch == nil {
 		scratch = &v41ProjScratch{}
 	}
+	scratch.expertGateUp, scratch.expertDown = st.expertGateUp, st.expertDown
+	defer func() {
+		scratch.expertGateUp, scratch.expertDown = nil, nil
+	}()
 	if err := m.v41ForwardAdmitted(); err != nil {
 		return nil, stats, err
 	}
@@ -129,6 +136,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	// The shared source registry a role layer publishes into / resolves from. It
 	// is resolved lazily (a plain-layer session may never have built it) so a role
 	// step always sees the same store the full forward used.
+	previousRegistry := st.attn
 	registry, err := st.attentionState(cfg.HeadDim, 8)
 	if err != nil {
 		return nil, stats, v41StageErr(v41StageAttention, -1, err)
@@ -150,6 +158,9 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	stagedRow := make([][]float32, 0, cfg.NumLayers)
 	stagedInputs := make([][][]float32, 0, cfg.NumLayers)
 	stagedInputPos := make([][]int, 0, cfg.NumLayers)
+	stagedCopies := make([]int, 0, cfg.NumLayers)
+	stagedKV := make([]v41StepPublicationUndo, 0, cfg.NumLayers)
+	stagedIndex := make([]v41StepPublicationUndo, 0, cfg.NumLayers)
 	// The shared registry a role source publishes into is staged too: a fault in a
 	// LATER layer must not leave an earlier source's just-published row visible to
 	// a reader. Only the mutable publication/cursor surface is copied.
@@ -166,6 +177,9 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 			state.nextCompressRow = stagedCompress[i]
 			state.partialInputs = stagedInputs[i]
 			state.partialPositions = stagedInputPos[i]
+			state.retainedCopies = stagedCopies[i]
+			stagedKV[i].restore()
+			stagedIndex[i].restore()
 			if row := stagedRow[i]; row != nil && state.windowSize > 0 {
 				slot := stagedPos[i] % state.windowSize
 				if slot >= 0 && slot < len(state.window) && len(state.window[slot]) == len(row) {
@@ -180,8 +194,20 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 		registry.topk = registryTopK
 		registry.topkSet = registryTopKSet
 		registry.topkRatio = registryTopKRatio
+		st.attn = previousRegistry
 		stats.LayersRolledBack = len(stagedPos)
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			if cause, ok := r.(error); ok {
+				var operation *BackendForwardOperationError
+				if errors.As(cause, &operation) {
+					rollback()
+				}
+			}
+			panic(r)
+		}
+	}()
 
 	// roleSession reports whether any configured layer resolves to a non-plain
 	// role. A plain-only session keeps the historical post-step release of the
@@ -195,6 +221,9 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 		stagedCompress = append(stagedCompress, state.nextCompressRow)
 		stagedInputs = append(stagedInputs, cloneV41Rows(state.partialInputs))
 		stagedInputPos = append(stagedInputPos, append([]int(nil), state.partialPositions...))
+		stagedCopies = append(stagedCopies, state.retainedCopies)
+		stagedKV = append(stagedKV, stageV41StepPublication(state.kvPublications, state.kvPublishedEnd, l))
+		stagedIndex = append(stagedIndex, stageV41StepPublication(state.indexPublications, state.indexPublishedEnd, l))
 		// Capture the ring row Step will overwrite. pos != 0 (Step) writes
 		// window[nextWindowPos%windowSize]; pos == 0 (Prefill) cannot clobber a
 		// pre-existing row and gets a nil backup.
@@ -209,6 +238,10 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 		stats.LayerCalls++
 		if lerr := m.v41LayerStepWithRegistry(l, x, streams, pos, state, registry, scratch); lerr != nil {
 			rollback()
+			var operation *V41ExpertOperationError
+			if errors.As(lerr, &operation) {
+				panic(lerr)
+			}
 			return nil, stats, lerr
 		}
 	}
@@ -232,9 +265,42 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	return res, stats, nil
 }
 
+type v41StepPublicationUndo struct {
+	rows   map[v41AttentionPublicationKey][]float32
+	ends   map[int]int
+	key    v41AttentionPublicationKey
+	row    []float32
+	end    int
+	rowSet bool
+	endSet bool
+}
+
+func stageV41StepPublication(rows map[v41AttentionPublicationKey][]float32, ends map[int]int, layer int) v41StepPublicationUndo {
+	end, endSet := ends[layer]
+	key := v41AttentionPublicationKey{sourceLayer: layer, start: end, end: end + 1}
+	row, rowSet := rows[key]
+	return v41StepPublicationUndo{rows: rows, ends: ends, key: key, row: row, end: end, rowSet: rowSet, endSet: endSet}
+}
+
+func (s v41StepPublicationUndo) restore() {
+	if s.rowSet {
+		s.rows[s.key] = s.row
+	} else {
+		delete(s.rows, s.key)
+	}
+	if s.endSet {
+		s.ends[s.key.sourceLayer] = s.end
+	} else {
+		delete(s.ends, s.key.sourceLayer)
+	}
+}
+
 // cloneV41IntMap copies a small int-keyed map so a staged rollback snapshot
 // cannot alias live state.
 func cloneV41IntMap(m map[int]int) map[int]int {
+	if m == nil {
+		return nil
+	}
 	out := make(map[int]int, len(m))
 	for k, v := range m {
 		out[k] = v
