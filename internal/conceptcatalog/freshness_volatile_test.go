@@ -1,8 +1,11 @@
 package conceptcatalog
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -42,6 +45,23 @@ func volatileFixture(t *testing.T, mutate func(string) string) (root, generated 
 		}
 	}
 	return root, generated
+}
+
+var chartConceptCountRe = regexp.MustCompile(`(?m)^concept-disambiguation chart - (\d+) concepts - `)
+
+// chartConceptCount reads the catalog concept count the committed README's chart title
+// carries, so the fixtures mutate relative to the live catalog instead of pinning it.
+func chartConceptCount(t *testing.T, doc string) int {
+	t.Helper()
+	m := chartConceptCountRe.FindStringSubmatch(doc)
+	if m == nil {
+		t.Fatal("no chart title with a concept count in the committed README")
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
 
 func replaceLine(t *testing.T, doc, prefix, with string) string {
@@ -89,7 +109,7 @@ func TestFreshnessIgnoresVolatileWholeTreeCounts(t *testing.T) {
 		doc = replaceLine(t, doc, "| **Disambiguation-debt (drive to 0)** |", "| **Disambiguation-debt (drive to 0)** | **12345** (clarity 1 + coverage 12344) |")
 		doc = replaceLine(t, doc, "| **Confusable tokens positioned (covered / discovered)** |", "| **Confusable tokens positioned (covered / discovered)** | **1 / 99999** (0.0% of the discovered confusable space) |")
 		doc = replaceLine(t, doc, "| Legacy bounded score (saturates; not the driver) |", "| Legacy bounded score (saturates; not the driver) | 12.3/100 (grade F) |")
-		doc = replaceLine(t, doc, "concept-disambiguation chart - ", "concept-disambiguation chart - 2902 concepts - score 12.3/100 (grade F) - disambiguation-debt 12345")
+		doc = replaceLine(t, doc, "concept-disambiguation chart - ", fmt.Sprintf("concept-disambiguation chart - %d concepts - score 12.3/100 (grade F) - disambiguation-debt 12345", chartConceptCount(t, doc)))
 		doc = replaceLine(t, doc, "namespace coverage  [", "namespace coverage  [#...............................] 0.0%  (1/99999 confusable tokens positioned)")
 		return bumpFamilyRuns(doc)
 	})
@@ -120,7 +140,7 @@ func TestFreshnessStillFailsOnCatalogDrift(t *testing.T) {
 			return replaceLine(t, doc, "| distinctness | `defined` |", "| distinctness | `defined` | 90 | 3 | 3 undefined concept(s) |")
 		}},
 		{"catalog concept count", func(t *testing.T, doc string) string {
-			return replaceLine(t, doc, "concept-disambiguation chart - ", "concept-disambiguation chart - 2903 concepts - score 89.6/100 (grade B) - disambiguation-debt 541")
+			return replaceLine(t, doc, "concept-disambiguation chart - ", fmt.Sprintf("concept-disambiguation chart - %d concepts - score 89.6/100 (grade B) - disambiguation-debt 541", chartConceptCount(t, doc)+1))
 		}},
 		{"family set", func(t *testing.T, doc string) string {
 			return strings.Replace(doc, "| vfs | 0 | 0 | 0 |", "| vfs-renamed | 0 | 0 | 0 |", 1)
