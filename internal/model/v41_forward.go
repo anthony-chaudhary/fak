@@ -1824,6 +1824,11 @@ func (m *Model) v41CacheExpertTriple(l int, stem string, scratch *v41ProjScratch
 		if _, ok := scratch.v41LayerCacheGet(name); ok {
 			continue
 		}
+		// Cache hits must still refresh recency when retention is disabled.
+		// On a miss, avoid a copy that v41LayerCachePut would discard.
+		if scratch == nil || scratch.expertLayerCacheBytes <= 0 {
+			continue
+		}
 		cp := make([]float32, len(w))
 		copy(cp, w)
 		scratch.v41LayerCachePut(name, cp)
