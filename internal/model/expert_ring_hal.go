@@ -1,6 +1,13 @@
 package model
 
-import "github.com/anthony-chaudhary/fak/internal/compute"
+import (
+	"errors"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/polymodel"
+)
+
+var errUntrackedExpertResidency = errors.New("routed expert has permanent residency outside the declared ring budget")
 
 // expert_ring_hal.go — R0 of the activated-expert offload ladder (#5611, epic #5606,
 // docs/MOE-ACTIVATED-OFFLOAD-PLAN.md): put the bounded pagedRing UNDER the session weight HAL for
@@ -83,17 +90,23 @@ func (s *Session) routedExpertRing(name string) *pagedRing {
 // f32 expansion of it — Q4_K ~0.56 B/weight, so a ring sized for N f32 experts holds several times as
 // many quantized ones).
 //
-// Order of resolution: an already-permanent halW resident wins (a weight promoted before the ring
-// existed, or one the ring refused, is never staged twice); then the ring, if this is a routed expert
-// under a budget; then the unchanged permanent staging. The ring's refusal path — a single weight
-// larger than the whole budget (ErrTooLarge), or one that fits only by dropping a pinned resident
-// (ErrPinnedNoRoom) — leaves the ring untouched and falls back to permanent residency rather than
-// failing the forward: correctness never depends on the budget being generous. That fallback rebuilds
-// the host source (stage already Freed its upload), which is the honest cost of a misconfigured
-// budget and is rare by construction.
+// Portable sessions reuse permanent residency first and fall back to it on ring refusal.
+// Device-only sessions with a declared budget reject both ring refusal and permanent
+// routed-expert residency outside the ring; a zero budget retains full residency.
 func (s *Session) weightHALStagedBounded(key, name string, mk func() compute.Tensor, dtype compute.Dtype, weightBytes int64) compute.Tensor {
+	strict := s.executionPolicy == ExecutionPolicyDeviceOnly && s.ExpertRingBytes > 0 && isRoutedExpertWeight(name)
+	if strict {
+		s.ensureOpenBackendSession()
+	}
 	if s.halW != nil {
 		if t, ok := s.halW[key]; ok {
+			if strict {
+				cause := errUntrackedExpertResidency
+				if weightBytes > s.ExpertRingBytes {
+					cause = errors.Join(cause, polymodel.ErrTooLarge)
+				}
+				s.failExpertRing(s.expertRing, cause)
+			}
 			return t
 		}
 	}
@@ -117,8 +130,10 @@ func (s *Session) weightHALStagedBounded(key, name string, mk func() compute.Ten
 			// without running a pin-set at all.
 			r.observeTrace(layer, expert, weightBytes)
 		}
-		if t, ok := r.stage(key, mk, dtype, weightBytes, pinned); ok {
+		if t, err := r.stageWithError(key, mk, dtype, weightBytes, pinned); err == nil {
 			return t
+		} else if strict {
+			s.failExpertRing(r, err)
 		}
 	}
 	// A routed expert that is outside a ring or refused by its bound remains session-local:
@@ -137,6 +152,25 @@ func (s *Session) weightHALStagedBounded(key, name string, mk func() compute.Ten
 		return t
 	}
 	return s.weightHALStaged(key, mk, dtype)
+}
+
+func (s *Session) failExpertRing(r *pagedRing, cause error) {
+	backend := ""
+	if s.Backend != nil {
+		backend = s.Backend.Name()
+	}
+	err := &BackendForwardOperationError{
+		Backend: backend,
+		Forward: s.deviceOnlyForward(),
+		Path:    "expert-ring",
+		Layer:   -1,
+		Stage:   "routed expert residency",
+		Cause:   cause,
+	}
+	s.halFailure = err
+	s.cancelRingSpan(r)
+	s.Close()
+	panic(err)
 }
 
 // q4kResidentBytes / kQuantResidentBytes / q8ResidentBytes report the DEVICE-resident footprint of one
@@ -191,7 +225,7 @@ type ExpertRingStats struct {
 	Hits      int `json:"hits"`
 	Evictions int `json:"evictions"`
 	// Lookups is every staging request the ring received and Refusals the ones it could not admit
-	// (the caller then falls back to permanent halW residency — safe, but unbounded). They are the
+	// (portable callers fall back to permanent residency; device-only callers fail closed). They are the
 	// RECONCILIATION pair R6/#5617 reports against: Hits+PageIns+Refusals == Lookups is an identity
 	// counted on both sides independently, so an operator surface can prove it is reading the ring's
 	// own accounting rather than a parallel estimate. PageInBytes is the device bytes cold uploads

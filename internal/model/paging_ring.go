@@ -263,6 +263,11 @@ func (r *pagedRing) matMulStaged(name string, mk func() compute.Tensor, dtype co
 // The returned handle is valid only until the NEXT stage/matMul on the same ring may evict it. A
 // caller holding several handles at once must hold() each for the span it uses them (see hold).
 func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.Dtype, weightBytes int64, pinned bool) (compute.Tensor, bool) {
+	t, err := r.stageWithError(name, mk, dtype, weightBytes, pinned)
+	return t, err == nil
+}
+
+func (r *pagedRing) stageWithError(name string, mk func() compute.Tensor, dtype compute.Dtype, weightBytes int64, pinned bool) (compute.Tensor, error) {
 	id := polymodel.ModelID(name)
 	r.lookups++      // R6 reconciliation: booked before anything is decided, so it counts every exit
 	r.noteAccess(id) // policy bookkeeping (R4): recency clock always, decaying heat under a value-aware policy
@@ -283,7 +288,7 @@ func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.D
 		if !r.prefetching {
 			r.awaitStaged(id)
 		}
-		return wt, true
+		return wt, nil
 	}
 	// Miss: build + upload the weight, then admit it under the budget. Admit is all-or-nothing: on
 	// error the pool is unchanged, so page the just-uploaded handle straight back out and defer.
@@ -304,7 +309,7 @@ func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.D
 			// The fallback is safe (permanent halW residency) but unbounded, so it must be counted.
 			r.shared.noteRefusal()
 		}
-		return compute.Tensor{}, false
+		return compute.Tensor{}, err
 	}
 	r.pageIn++
 	r.pageInBytes += weightBytes
@@ -344,7 +349,7 @@ func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.D
 	if used := r.pool.Used(); used > r.peak {
 		r.peak = used
 	}
-	return wt, true
+	return wt, nil
 }
 
 func (r *pagedRing) noteDemandServe(id polymodel.ModelID) {

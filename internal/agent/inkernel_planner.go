@@ -1382,6 +1382,10 @@ func (e *InKernelCapacityError) Error() string {
 // a genuine bug (a nil deref, a non-device validation panic).
 func recoverDevicePanic(r any) (err error, handled bool) {
 	if e, ok := r.(error); ok {
+		var operation *model.BackendForwardOperationError
+		if errors.As(e, &operation) {
+			return e, true
+		}
 		var stall metalgemm.MetalCommandBufferStallError
 		if errors.As(e, &stall) {
 			return e, true
