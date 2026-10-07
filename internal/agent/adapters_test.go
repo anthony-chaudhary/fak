@@ -193,7 +193,8 @@ func (canonicalLookupAdmitter) Admit(ctx context.Context, c *abi.ToolCall, r *ab
 
 func TestPreSendTransformPagesOversizeToolResult(t *testing.T) {
 	oversize := strings.Repeat("safe tool output ", 400)
-	safe, qs := QuarantineOutboundMessages(adapterTestMessages(oversize))
+	// A later assistant turn makes the result history: the current turn's result is never paged.
+	safe, qs := QuarantineOutboundMessages(append(adapterTestMessages(oversize), Message{Role: RoleAssistant, Content: "done"}))
 	if len(qs) != 0 {
 		t.Fatalf("oversize benign transform should not record a quarantine, got %d", len(qs))
 	}

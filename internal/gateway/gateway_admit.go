@@ -11,6 +11,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
+	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
@@ -203,10 +204,12 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 	// feeds optional vDSO fill and, when a real kernel sequence was recorded, the journal
 	// call_seq on result-side quarantines.
 	callByID := make(map[string]agent.ToolCall)
-	for _, m := range messages {
+	lastAssistant := -1
+	for i, m := range messages {
 		if m.Role != agent.RoleAssistant {
 			continue
 		}
+		lastAssistant = i
 		for _, tcc := range m.ToolCalls {
 			if tcc.ID == "" {
 				continue
@@ -242,19 +245,27 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 		}
 		resultShape, shapeVerdict, shapeContent := resultContractAdmission(tool, tools, messages[i].Content)
 		resultDigest := guardrsi.ArgsDigest(messages[i].Content)
+		// The current turn's results (after the last assistant message) are what the model
+		// just asked for; paging them out only forces a re-request, so they are admitted
+		// whole. Older results page only when the request ctx has not suppressed paging.
+		admitCtx := ctx
+		if ctxmmu.OversizePagingSuppressedReason(ctx) == "" && i > lastAssistant {
+			admitCtx = ctxmmu.WithOversizePagingSuppressed(ctx, ctxmmu.PagingSuppressedTrailingResult)
+		}
+		pagingOff := ctxmmu.OversizePagingSuppressedReason(admitCtx) != ""
 		// Screen this result EXACTLY ONCE per (trace, origin call ID, content) (#2417). On first arrival
 		// the ledger runs the closure — the real result-side stack — and records the
 		// verdict; on a later replay of the same content it returns the recorded verdict
 		// without re-screening, so the kernel work, the vDSO fill, the proxy_admit metric,
 		// and the eviction/reset below all happen once per unique result, not once per turn.
-		rec, fresh := s.admitLedger.admit(traceID, messages[i].ToolCallID, resultDigest, func() (WireVerdict, string, bool) {
+		rec, fresh := s.admitLedger.admitPaging(traceID, messages[i].ToolCallID, resultDigest, pagingOff, func() (WireVerdict, string, bool) {
 			// Exhaustive result contracts are a pre-consumer boundary: a shape mutant
 			// is replaced before ordinary admission, cache fill, observers, or the
 			// upstream model can consume its values.
 			if shapeVerdict != nil {
 				return *shapeVerdict, shapeContent, true
 			}
-			wv, envlp, aerr := s.admitOpWithSeq(ctx, "proxy_admit", tool, messages[i].Content, "", traceID, originSeq)
+			wv, envlp, aerr := s.admitOpWithSeq(admitCtx, "proxy_admit", tool, messages[i].Content, "", traceID, originSeq)
 			if aerr != nil {
 				// A result we cannot even admit is held out fail-closed rather than
 				// forwarded raw to the model.

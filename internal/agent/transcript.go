@@ -28,23 +28,57 @@ type TranscriptQuarantine struct {
 // are already authored or accepted as prompt context, while tool results are the
 // untrusted cross-boundary bytes the client can still hold out before serialization.
 func QuarantineOutboundMessages(messages []Message) ([]Message, []TranscriptQuarantine) {
+	return quarantineOutboundMessages(messages, "")
+}
+
+// quarantineOutboundMessages is QuarantineOutboundMessages with an optional
+// oversize-paging suppression reason (ctxmmu.PagingSuppressed*) for the whole
+// transcript. Independently of it, results after the last assistant message — the
+// current turn's answers — are never paged out, and a nameless result is classified
+// under the tool its tool_call_id answers so its class threshold applies.
+func quarantineOutboundMessages(messages []Message, pagingSuppressed string) ([]Message, []TranscriptQuarantine) {
 	out := append([]Message(nil), messages...)
 	var qs []TranscriptQuarantine
-	ctx := context.Background()
+	ctx := ctxmmu.WithOversizePagingSuppressed(context.Background(), pagingSuppressed)
+	trailingCtx := ctx
+	if pagingSuppressed == "" {
+		trailingCtx = ctxmmu.WithOversizePagingSuppressed(ctx, ctxmmu.PagingSuppressedTrailingResult)
+	}
+	lastAssistant := -1
+	callNames := map[string]string{}
+	for i, m := range out {
+		if m.Role != RoleAssistant {
+			continue
+		}
+		lastAssistant = i
+		for _, tc := range m.ToolCalls {
+			if tc.ID != "" && tc.Function.Name != "" {
+				callNames[tc.ID] = tc.Function.Name
+			}
+		}
+	}
 	for i := range out {
 		if out[i].Role != RoleTool {
 			continue
 		}
+		name := out[i].Name
+		if name == "" {
+			name = callNames[out[i].ToolCallID]
+		}
+		admitCtx := ctx
+		if i > lastAssistant {
+			admitCtx = trailingCtx
+		}
 		body := []byte(out[i].Content)
-		call, res := abi.InlineResult(out[i].Name, body)
+		call, res := abi.InlineResult(name, body)
 		res.Payload.Taint = abi.TaintTainted
 		res.Payload.Scope = abi.ScopeAgent
-		v := admitOutbound(ctx, call, res)
+		v := admitOutbound(admitCtx, call, res)
 		switch v.Kind {
 		case abi.VerdictQuarantine:
 			q := TranscriptQuarantine{
 				Index:      i,
-				Tool:       out[i].Name,
+				Tool:       name,
 				ToolCallID: out[i].ToolCallID,
 				Reason:     abi.ReasonName(v.Reason),
 				Len:        len(body),

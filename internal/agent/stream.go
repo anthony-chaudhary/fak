@@ -468,7 +468,7 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 	safeMessages := messages
 	var quarantines []TranscriptQuarantine
 	if p.QuarantineTranscript {
-		safeMessages, quarantines = QuarantineOutboundMessages(messages)
+		safeMessages, quarantines = quarantineOutboundMessages(messages, applySampleOpts(opts...).OversizePagingSuppressed)
 	}
 	// §A4 coherence shaping: after the safety quarantine, give the coherence layer a
 	// chance to break the provider prefix when a world witness has been refuted. nil

@@ -412,7 +412,7 @@ func (m *MMU) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ver
 			r.Meta["quarantine_overridden"] = "true"
 			r.Meta["override_reason"] = justification
 			limit := m.oversizeThreshold(c, r)
-			if len(body) > limit {
+			if len(body) > limit && !m.oversizePagingSuppressed(ctx) {
 				if ptr, pok := m.pageToPointer(ctx, r.Payload, body, "override-oversize"); pok {
 					atomic.AddInt64(&m.paged, 1)
 					return abi.Verdict{
@@ -527,6 +527,10 @@ func (m *MMU) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ver
 	// instead of an opaque pointer and the original is pinned in CAS under the held
 	// ledger so a witness Clear + PageIn restores it byte-exact.
 	limit := m.oversizeThreshold(c, r)
+	if len(body) > limit && m.oversizePagingSuppressed(ctx) {
+		return abi.Verdict{Kind: abi.VerdictAllow, By: "ctxmmu",
+			Meta: map[string]string{DurabilityKey: class, "oversize_paging_suppressed": OversizePagingSuppressedReason(ctx)}}
+	}
 	if len(body) > limit {
 		if digestAdv.Digest != "" {
 			ptr, id, ok := m.digestToPointer(ctx, body, digestAdv.Digest, digestAdv.By)

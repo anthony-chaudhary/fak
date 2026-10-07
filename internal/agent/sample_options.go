@@ -336,6 +336,17 @@ func WithElideStaleReads(enabled bool) SampleOpt {
 	}
 }
 
+// WithOversizePagingSuppressed stops the pre-send transcript quarantine from paging
+// oversize-but-benign tool results out to pointer stubs for this request, recording
+// reason (a ctxmmu.PagingSuppressed* value). An empty reason is a no-op.
+func WithOversizePagingSuppressed(reason string) SampleOpt {
+	return func(sp *SampleParams) {
+		if reason != "" {
+			sp.OversizePagingSuppressed = reason
+		}
+	}
+}
+
 // WithDeferColdTools toggles per-request cold tool deferral.
 func WithDeferColdTools(enabled bool) SampleOpt {
 	return func(sp *SampleParams) {

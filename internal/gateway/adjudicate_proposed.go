@@ -1017,9 +1017,9 @@ func turnHasEffectCapableCall(calls []agent.ToolCall) bool {
 	return false
 }
 
+// isRestoreTool recognizes fak_context_restore under every client dialect spelling
+// NormalizeToolDialect decodes (functions., mcp__<server>__, mcp:<server>:, OpenCode's
+// fak_fak_ double prefix).
 func isRestoreTool(tool string) bool {
-	return tool == "fak_context_restore" ||
-		tool == "mcp__fak__fak_context_restore" ||
-		tool == "mcp__fak_guard__fak_context_restore" ||
-		tool == "functions.fak_context_restore"
+	return NormalizeToolName(tool) == "fak_context_restore"
 }

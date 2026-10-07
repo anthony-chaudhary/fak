@@ -335,6 +335,7 @@ func (s *Server) renderMetrics() string {
 	m.writeCompactionMetrics(&b)
 	writeLlamaSoftSlotMetrics(&b)
 	s.writeToolPageMetrics(&b) // #2440: ctxmmu tool-schema page catalog residency + dedup witnesses
+	writeCtxPagingMetrics(&b)
 	m.writeResetShadowMetrics(&b)
 	m.writeCacheBreakMetrics(&b) // #2916: per-session cache-break events + cold-rebuild token cost, by closed cause
 	m.writeDenyAllMetrics(&b)

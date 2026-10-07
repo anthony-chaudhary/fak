@@ -610,6 +610,10 @@ type SampleParams struct {
 	ElideStaleReads *bool
 	// DeferColdTools overrides the planner's configured cold tool deferral for this request.
 	DeferColdTools *bool
+	// OversizePagingSuppressed, when non-empty, is the ctxmmu.PagingSuppressed* reason the
+	// pre-send transcript quarantine must not page oversize-but-benign tool results out
+	// for THIS request (the client cannot restore a paged stub).
+	OversizePagingSuppressed string
 	// PerTokenStream overrides the FAK_STREAM_INKERNEL_PER_TOKEN gate for THIS
 	// CompleteStream call: true forces the live per-token decode seam, false forces
 	// the buffered one-post-hoc-delta projection. A nil pointer keeps the package

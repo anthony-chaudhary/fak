@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
@@ -137,6 +138,9 @@ func (s *Server) observeNativeChatRoute(ctx context.Context, traceID string, str
 // wire model or credential. Raw bodies belong to the original provider and model;
 // a bound turn is rebuilt through its target's native transcript adapter.
 func chatRouteOpts(ctx context.Context, opts []agent.SampleOpt) []agent.SampleOpt {
+	if reason := ctxmmu.OversizePagingSuppressedReason(ctx); reason != "" {
+		opts = append(append([]agent.SampleOpt(nil), opts...), agent.WithOversizePagingSuppressed(reason))
+	}
 	binding := chatRouteFromContext(ctx)
 	if binding == nil {
 		return opts

@@ -19,6 +19,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
+	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/pkg/deploykit/probe"
 	"github.com/anthony-chaudhary/fak/pkg/gatewayauth"
 	"github.com/anthony-chaudhary/fak/pkg/turncost"
@@ -840,6 +841,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		s.finishTurnCost(sessionTurn, reqTrace, reqModel, turnCostBegan)
 	}()
 	req.Messages = messages
+	// Oversize tool results page out to restore stubs only for a client that can call
+	// the restore tool; the decision rides ctx into both admission passes.
+	paging := resolveChatCtxPaging(r, req.Tools)
+	w.Header().Set(HeaderCtxPaging, paging.header)
+	ctx = ctxmmu.WithOversizePagingSuppressed(ctx, paging.suppressReason)
 	resultAdmissions, err := s.admitInboundResults(ctx, req.Messages, req.Tools, reqTrace)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "upstream cache invalidation failed")
@@ -1028,6 +1034,11 @@ func determineChatRestoreTool(tools []agent.ToolDef) (restoreToolName string, pr
 	for _, t := range tools {
 		if t.Function.Name == "fak_context_restore" {
 			return "fak_context_restore", true, false
+		}
+	}
+	for _, t := range tools {
+		if isRestoreTool(t.Function.Name) {
+			return t.Function.Name, true, false
 		}
 	}
 	for _, t := range tools {
