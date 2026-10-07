@@ -130,12 +130,6 @@ func jsonScalarString(raw json.RawMessage) string {
 // sampling resolution, request-model + credential pass-through, and (Anthropic)
 // raw-body passthrough, so a streamed request differs from a buffered one ONLY by the
 // `stream` flag in the body.
-func (c *upstreamCall) releaseSlot() {
-	if c != nil && c.slotRelease != nil {
-		c.slotRelease()
-	}
-}
-
 type upstreamCall struct {
 	adapter      TranscriptAdapter
 	url          string
@@ -168,6 +162,13 @@ type upstreamCall struct {
 	// turns an intermittent 401 into a self-healed turn. False everywhere else, so the
 	// static-key and passthrough paths are byte-for-byte unchanged.
 	authRefreshable bool
+}
+
+// releaseSlot frees the soft llama-server slot pin, if any. Safe on a nil call.
+func (c *upstreamCall) releaseSlot() {
+	if c != nil && c.slotRelease != nil {
+		c.slotRelease()
+	}
 }
 
 // Auth-refresh outcomes reported to HTTPPlanner.AuthRefreshNotify. A 401 on the rotating-

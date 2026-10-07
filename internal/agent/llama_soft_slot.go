@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"hash/fnv"
 	"io"
 	"net/http"
@@ -47,6 +48,15 @@ const (
 	SoftSlotPolicyLRU  = "lru"
 	SoftSlotPolicyWait = "wait"
 )
+
+// ValidateSoftSlotPolicy rejects a policy outside the closed vocabulary. Empty means lru.
+func ValidateSoftSlotPolicy(policy string) error {
+	switch policy {
+	case "", SoftSlotPolicyLRU, SoftSlotPolicyWait:
+		return nil
+	}
+	return fmt.Errorf("unknown llama soft slot policy %q (want %s or %s)", policy, SoftSlotPolicyLRU, SoftSlotPolicyWait)
+}
 
 // Soft slot outcomes, the closed vocabulary of LlamaSoftSlotCounts.
 const (
@@ -184,7 +194,9 @@ func (st *llamaSoftSlots) pick(base, apiKey, policy string, messages []Message, 
 	}
 	st.mu.Lock()
 	st.lastDemand = now
-	cold := st.snapAt.IsZero()
+	// A stale snapshot (the poller exits after llamaSlotsPollIdleStop without demand) is as
+	// good as none: re-read it, or the first turn after an idle spell would go unpinned.
+	cold := st.snapAt.IsZero() || now.Sub(st.snapAt) > llamaSlotsSnapshotMaxAge
 	st.startPollLocked(base, apiKey)
 	st.mu.Unlock()
 	if cold {

@@ -246,3 +246,43 @@ func TestLlamaSoftSlotWaitPolicyNeverMovesAConversation(t *testing.T) {
 		c.releaseSlot()
 	}
 }
+
+// After an idle spell the poller has exited and the last snapshot is older than
+// llamaSlotsSnapshotMaxAge. The next turn must re-read /slots and pin, not go unpinned
+// as unavailable forever.
+//
+// fak-test:runtime fast est=50ms lane=default
+func TestLlamaSoftSlotRereadsStaleSnapshotAfterIdle(t *testing.T) {
+	p := newSoftSlotPlanner(t, &fakeLlamaSlots{})
+	a1, c := softSlotTurn(t, p, conv("agent A"))
+	c.releaseSlot()
+	if a1 < 0 {
+		t.Fatalf("first turn not pinned")
+	}
+	st := llamaSoftSlotsFor(p.BaseURL)
+	st.mu.Lock()
+	st.snapAt = st.snapAt.Add(-40 * time.Second)
+	st.lastDemand = st.lastDemand.Add(-40 * time.Second)
+	st.mu.Unlock()
+	before := llamaSoftSlotCounts[SoftSlotUnavailable].Load()
+	a2, c := softSlotTurn(t, p, conv("agent A", "turn 2"))
+	c.releaseSlot()
+	if a2 != a1 {
+		t.Fatalf("turn after idle got slot %d, want %d from a re-read snapshot", a2, a1)
+	}
+	if llamaSoftSlotCounts[SoftSlotUnavailable].Load() != before {
+		t.Fatalf("turn after idle counted unavailable")
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestValidateSoftSlotPolicy(t *testing.T) {
+	for _, ok := range []string{"", SoftSlotPolicyLRU, SoftSlotPolicyWait} {
+		if err := ValidateSoftSlotPolicy(ok); err != nil {
+			t.Fatalf("policy %q rejected: %v", ok, err)
+		}
+	}
+	if err := ValidateSoftSlotPolicy("wiat"); err == nil || !strings.Contains(err.Error(), `"wiat"`) {
+		t.Fatalf("typo policy error = %v, want a rejection naming it", err)
+	}
+}

@@ -90,6 +90,9 @@ func New(cfg Config) (*Server, error) {
 	if !engineRegistered(engineID) {
 		return nil, fmt.Errorf("gateway: engine %q is not registered (have: %s)", engineID, strings.Join(abi.EngineIDs(), ", "))
 	}
+	if err := agent.ValidateSoftSlotPolicy(cfg.LlamaSoftSlotPolicy); err != nil {
+		return nil, fmt.Errorf("gateway: --llama-soft-slot-policy: %w", err)
+	}
 	// A misconfigured routing policy is a security boundary (it decides which model
 	// — local or remote — a tenant payload reaches), so validate it at New and fail
 	// loud rather than fall through to a silent default model at dispatch time.
