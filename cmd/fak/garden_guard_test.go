@@ -27,9 +27,20 @@ func newGardenGuardRoots(t *testing.T) gardenGuardRoots {
 			t.Fatal(err)
 		}
 	}
+	// os.TempDir reads TMP/TEMP on Windows and TMPDIR elsewhere.
 	t.Setenv("TMPDIR", r.tmpRoot)
+	t.Setenv("TMP", r.tmpRoot)
+	t.Setenv("TEMP", r.tmpRoot)
 	t.Setenv("GOTMPDIR", "")
 	return r
+}
+
+// setGardenGuardHome points os.UserHomeDir at home on every host:
+// it reads USERPROFILE on Windows and HOME elsewhere.
+func setGardenGuardHome(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 }
 
 func mkGardenGuardHome(t *testing.T, parent string) string {
@@ -38,7 +49,7 @@ func mkGardenGuardHome(t *testing.T, parent string) string {
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
+	setGardenGuardHome(t, home)
 	return home
 }
 
@@ -62,7 +73,7 @@ func TestGardenGuardAllowsHomeUnderTMPDIR(t *testing.T) {
 
 func TestGardenGuardAllowsHomeEqualToTMPDIR(t *testing.T) {
 	r := newGardenGuardRoots(t)
-	t.Setenv("HOME", r.tmpRoot)
+	setGardenGuardHome(t, r.tmpRoot)
 	if err := guardGardenTestRegister("linux"); err != nil {
 		t.Fatalf("guard with HOME == TMPDIR = %v, want nil", err)
 	}
@@ -106,7 +117,7 @@ func TestGardenGuardResolvesSymlinkedHome(t *testing.T) {
 	if err := os.Symlink(real, link); err != nil {
 		t.Skipf("symlink unsupported: %v", err)
 	}
-	t.Setenv("HOME", link)
+	setGardenGuardHome(t, link)
 	if err := guardGardenTestRegister("linux"); !errors.Is(err, errGardenTestRegisterLive) {
 		t.Fatalf("guard with HOME symlinked out of TMPDIR = %v, want errGardenTestRegisterLive", err)
 	}
