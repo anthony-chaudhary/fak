@@ -3,11 +3,13 @@ package gateway
 import (
 	"context"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/engine"
+	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
 
 // context_epoch_test.go — witness tests for the Context Epoch port
@@ -387,5 +389,72 @@ func TestContextEpochGateReusesGateOnRealServerPath(t *testing.T) {
 	plain := plannerTurnContext(ctx, nil, messages, unarmed.contextEpoch)
 	if tag := contextEpochTagFromContext(plain); tag != "" {
 		t.Fatalf("unarmed server's plannerTurnContext bound tag %q, want empty", tag)
+	}
+}
+
+// TestGatewayContextEpochCachePrefixIsolation is the TICKET-05 witness (fak#10702):
+// two epochs over one session against the real scoped radix namespace. Epoch 1 admits
+// a cached prefix; a same-epoch turn still hits it (an epoch fence, not a blanket cache
+// disable); an epoch turn-over that preserves the protected prefix VERBATIM (Session
+// movement / compaction reset, identical request bytes and identical content-free
+// digest) makes the epoch-1 prefix unreachable, so the refusal is attributable to the
+// epoch alone. The tag and the bound identity carry no prompt bytes.
+func TestGatewayContextEpochCachePrefixIsolation(t *testing.T) {
+	const secret = "SYSTEM-PROMPT-BYTES-MUST-NOT-LEAK"
+	gate := newContextEpochGate(true)
+	base := agent.WithPrefixCacheIdentity(withPrefixReuseSession(context.Background(), "sess-1"), "tenant-a", "")
+	messages := []agent.Message{{Role: agent.RoleSystem, Content: secret}, {Role: agent.RoleUser, Content: "hi"}}
+	raw := []byte(`{"system":[{"type":"text","text":"` + secret + `","cache_control":{"type":"ephemeral"}}],"messages":[]}`)
+	digest1 := inboundProtectedPrefixDigest(raw)
+	if digest1 == "" {
+		t.Fatalf("protected-prefix digest empty; the fixture must carry a cache_control anchor")
+	}
+
+	owner := func(ctx context.Context) radixkv.CacheIdentity {
+		t.Helper()
+		id, ok := agent.PrefixCacheIdentityFromContext(ctx)
+		if !ok || id.Epoch == "" {
+			t.Fatalf("bound identity %+v ok=%v, want a tenant identity carrying an epoch", id, ok)
+		}
+		if strings.Contains(id.Epoch, secret) || strings.Contains(contextEpochTagFromContext(ctx), secret) {
+			t.Fatalf("epoch tag %q carries prompt bytes; it must be content-free", id.Epoch)
+		}
+		return id
+	}
+
+	tree := radixkv.NewScoped(0)
+	tokens := []int{11, 12, 13, 14, 15, 16}
+	epoch1 := owner(gate.bind(base, messages))
+	if err := tree.AdmitPrivate(epoch1, tokens, nil, nil); err != nil {
+		t.Fatalf("admit epoch-1 prefix: %v", err)
+	}
+
+	// Same epoch, same bytes: the cached prefix is still served.
+	same := owner(gate.bind(base, messages))
+	if same.Epoch != epoch1.Epoch {
+		t.Fatalf("same-epoch turn tag = %q, want %q", same.Epoch, epoch1.Epoch)
+	}
+	if got, err := tree.MatchLen(same, tokens); err != nil || got != len(tokens) {
+		t.Fatalf("same-epoch MatchLen = %d (err %v), want full hit %d", got, err, len(tokens))
+	}
+
+	// The epoch invalidates its baseline (Session movement / completed compaction) while
+	// the harness forwards the protected prefix verbatim.
+	gate.store.Reset("sess-1")
+	if digest2 := inboundProtectedPrefixDigest(raw); digest2 != digest1 {
+		t.Fatalf("protected-prefix digest moved (%s -> %s); the refusal must be attributable to the epoch", digest1, digest2)
+	}
+	epoch2 := owner(gate.bind(base, messages))
+	if epoch2.Epoch == epoch1.Epoch {
+		t.Fatalf("epoch turn-over kept tag %q; the superseded prefix would stay reachable", epoch1.Epoch)
+	}
+	if got, err := tree.MatchLen(epoch2, tokens); err != nil || got != 0 {
+		t.Fatalf("epoch-2 MatchLen against the epoch-1 prefix = %d (err %v), want 0 (refused)", got, err)
+	}
+
+	// Default-off: the unarmed gate leaves the historical unsegmented namespace intact.
+	plain := newContextEpochGate(false).bind(base, messages)
+	if id, _ := agent.PrefixCacheIdentityFromContext(plain); id.Epoch != "" {
+		t.Fatalf("unarmed gate bound epoch %q, want the historical unsegmented identity", id.Epoch)
 	}
 }
