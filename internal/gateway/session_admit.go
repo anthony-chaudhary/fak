@@ -464,8 +464,11 @@ func (s *Server) debitServedSessionTurn(ctx context.Context, turn servedSessionT
 //
 // streamTTFT is the first content fragment the gateway watched arrive (0 when none
 // did); it fills TTFT for a proxied stream whose planner reports no Timings.
-func (s *Server) accountStreamedTurn(ctx context.Context, turn servedSessionTurn, comp *agent.Completion, messages []agent.Message, began time.Time, reqModel string, streamTTFT time.Duration) {
-	s.metrics.observeCompletionServedStream(s.chatServingLocality(ctx, reqModel), comp, time.Since(began), streamTTFT)
+//
+// lease is the turn's admission lease (nil-safe): its scheduler wait lands on the
+// per-request perf row as queue_ms.
+func (s *Server) accountStreamedTurn(ctx context.Context, turn servedSessionTurn, comp *agent.Completion, messages []agent.Message, began time.Time, reqModel string, streamTTFT time.Duration, lease *AdmissionLease) {
+	s.metrics.observeCompletionServedQueued(s.chatServingLocality(ctx, reqModel), comp, time.Since(began), streamTTFT, perfDetailFromCompletion(comp).withQueue(lease))
 	s.observePlannerRequestMemory()
 	s.debitServedSessionTurn(ctx, turn, comp.Usage, time.Since(began), messages)
 }

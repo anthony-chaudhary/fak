@@ -588,3 +588,64 @@ func TestSummarizeSplitsByCacheTierAndRestore(t *testing.T) {
 		})
 	}
 }
+
+// fak-test:runtime fast est=10ms lane=default
+func TestRecordQueueAndModelRoundTripAndOldRowsStillParse(t *testing.T) {
+	// A row written before queue_ms/model existed must still parse as schema v1.
+	old := `{"schema":"fak.gateway.perf-record.v1","unix_ms":1,"prompt_tokens":10,"completion_tokens":2,"cached_tokens":0,"e2e_ms":50,"ttft_ms":20}`
+	var r Record
+	if err := json.Unmarshal([]byte(old), &r); err != nil {
+		t.Fatalf("old row: %v", err)
+	}
+	if r.QueueMS != nil || r.Model != "" || r.TTFTMS != 20 {
+		t.Fatalf("old row decoded = %+v, want queue unknown, no model", r)
+	}
+	if m := jsonKeys(t, r); m["queue_ms"] != nil || m["model"] != nil {
+		t.Fatalf("old row re-encodes new keys: %v", m)
+	}
+
+	n := NewRecord(time.Now(), "stop", LocalitySelfHosted, 10, 2, 0, time.Second, 200*time.Millisecond).WithQueue(1500 * time.Microsecond)
+	n.Model = "qwen"
+	raw, _ := json.Marshal(n)
+	var back Record
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatalf("new row: %v", err)
+	}
+	if back.QueueMS == nil || *back.QueueMS != 1.5 || back.Model != "qwen" {
+		t.Fatalf("round trip = %+v, want queue 1.5ms model qwen", back)
+	}
+	// An immediate admit is a KNOWN zero wait, not an absent one.
+	zero := NewRecord(time.Now(), "stop", "", 1, 1, 0, time.Second, 0).WithQueue(0)
+	if m := jsonKeys(t, zero); m["queue_ms"] != float64(0) {
+		t.Fatalf("zero wait encoded as %v, want 0", m["queue_ms"])
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestSummarizeSplitsTTFTIntoQueueAndService(t *testing.T) {
+	q := func(ms float64) *float64 { return &ms }
+	recs := []Record{
+		{Schema: Schema, TTFTMS: 100, QueueMS: q(0)},
+		{Schema: Schema, TTFTMS: 200, QueueMS: q(300)},
+		{Schema: Schema, TTFTMS: 300, QueueMS: q(10)},
+		{Schema: Schema, QueueMS: q(900)}, // queue known, ttft unmeasured
+		{Schema: Schema, TTFTMS: 5000},    // no scheduler: excluded from the split
+	}
+	s := Summarize(recs)
+	if s.QueueMeasured != 4 || s.QueueP50MS != 10 || s.QueueP99MS != 900 {
+		t.Fatalf("queue = %d p50=%v p99=%v, want 4/10/900", s.QueueMeasured, s.QueueP50MS, s.QueueP99MS)
+	}
+	// client = queue+ttft over {100, 500, 310}; service = ttft over {100, 200, 300}.
+	if s.ClientTTFTP50MS != 310 || s.ServiceTTFTP50MS != 200 {
+		t.Fatalf("client/service p50 = %v/%v, want 310/200", s.ClientTTFTP50MS, s.ServiceTTFTP50MS)
+	}
+	line := RenderCompact(Report{Summary: s})
+	for _, want := range []string{"queue p50=10ms p99=900ms (measured 4/5)", "client_ttft p50=310ms service_ttft p50=200ms"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("compact line missing %q: %s", want, line)
+		}
+	}
+	if none := RenderCompact(Report{Summary: Summarize([]Record{{Schema: Schema, TTFTMS: 5}})}); strings.Contains(none, "queue") {
+		t.Fatalf("queue axis rendered with no queue data: %s", none)
+	}
+}

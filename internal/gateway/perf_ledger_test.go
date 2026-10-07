@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -199,5 +200,69 @@ func TestNewServerStampsPerfIdentity(t *testing.T) {
 	sb := srv.metrics.perfServedBy.Load()
 	if sb == nil || sb.Planner == "" || sb.Version == "" {
 		t.Fatalf("server perf identity = %+v, want planner and version resolved at New", sb)
+	}
+}
+
+// fak-test:runtime fast est=500ms lane=default
+//
+// TestPerfRowRecordsAdmissionQueueWait witnesses the queue-vs-service TTFT split on
+// the real buffered serving path: a request that waits behind a held scheduler slot
+// lands a perf row whose queue_ms is at least the wait, while an inert server (no scheduler) leaves queue_ms unknown.
+func TestPerfRowRecordsAdmissionQueueWait(t *testing.T) {
+	srv := newTestServer(t)
+	ctl := NewAdmissionController(AdmissionPolicy{MaxNumSeqs: 1, MaxWaiting: 2, AgingRounds: 1})
+	srv.SetAdmissionController(ctl)
+	srv.planner = stubPlanner{comp: &agent.Completion{
+		FinishReason: "stop",
+		Usage:        agent.Usage{PromptTokens: 100, CompletionTokens: 10},
+	}}
+
+	holder, err := ctl.Acquire(context.Background(), SeqRequest{TraceID: "holder", Tokens: 1})
+	if err != nil || holder == nil {
+		t.Fatalf("holder Acquire = (%v, %v)", holder, err)
+	}
+	msgs := []agent.Message{{Role: "user", Content: "hi"}}
+	done := make(chan error, 1)
+	go func() {
+		_, err := srv.completeServed(context.Background(), servedSessionTurn{traceID: "waiter", maxTokens: 1}, msgs, nil)
+		done <- err
+	}()
+	if !awaitAdmissionWaiting(ctl, 1, 2*time.Second) {
+		t.Fatalf("waiter never queued; stats=%+v", ctl.Stats())
+	}
+	const held = 40 * time.Millisecond
+	time.Sleep(held)
+	holder.Release()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("completeServed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("waiter never completed after release")
+	}
+
+	rep := srv.PerfReport(10)
+	if len(rep.Records) != 1 {
+		t.Fatalf("perf rows = %d, want 1: %+v", len(rep.Records), rep.Records)
+	}
+	row := rep.Records[0]
+	if row.QueueMS == nil || *row.QueueMS < float64(held/time.Millisecond) {
+		t.Fatalf("queue_ms = %v, want >= %dms (the admission wait)", row.QueueMS, held/time.Millisecond)
+	}
+	if rep.Summary.QueueMeasured != 1 || rep.Summary.QueueP50MS < float64(held/time.Millisecond) {
+		t.Fatalf("summary queue = %d/%v, want 1/>=%d", rep.Summary.QueueMeasured, rep.Summary.QueueP50MS, held/time.Millisecond)
+	}
+	if line := perfledger.RenderCompact(rep); !strings.Contains(line, "queue p50=") {
+		t.Fatalf("compact line missing queue axis: %s", line)
+	}
+
+	inert := newTestServer(t)
+	inert.planner = srv.planner
+	if _, err := inert.completeServed(context.Background(), servedSessionTurn{traceID: "inert", maxTokens: 1}, msgs, nil); err != nil {
+		t.Fatalf("inert completeServed: %v", err)
+	}
+	if rows := inert.PerfReport(10).Records; len(rows) != 1 || rows[0].QueueMS != nil {
+		t.Fatalf("inert rows = %+v, want one row with queue_ms unknown", rows)
 	}
 }

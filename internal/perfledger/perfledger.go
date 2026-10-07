@@ -92,6 +92,13 @@ type Record struct {
 	// (llama.cpp timings draft_n / draft_n_accepted); absent when it drafted nothing.
 	UpstreamSpecDraftTokens    int `json:"upstream_spec_draft_tokens,omitempty"`
 	UpstreamSpecAcceptedTokens int `json:"upstream_spec_accepted_tokens,omitempty"`
+	// QueueMS is the admission-scheduler wait before the turn's work started
+	// (additive v1 field: rows written before it existed still parse). It is nil
+	// when the turn did not pass a scheduler gate, and a non-nil 0 when it was
+	// admitted without waiting. The planner-side TTFT does NOT include it, so
+	// queue + TTFT is the client-visible time to first token and TTFT alone is
+	// the service (prefill) side.
+	QueueMS *float64 `json:"queue_ms,omitempty"`
 	Identity
 }
 
@@ -238,6 +245,17 @@ func NewRecord(now time.Time, finishReason, locality string, promptTok, complTok
 	return rec
 }
 
+// WithQueue stamps the admission wait onto a row. A negative wait is clamped to 0
+// (the turn was gated, so the axis is known, just not positive).
+func (r Record) WithQueue(wait time.Duration) Record {
+	if wait < 0 {
+		wait = 0
+	}
+	v := roundTo(float64(wait)/float64(time.Millisecond), 1000)
+	r.QueueMS = &v
+	return r
+}
+
 type Window struct {
 	Requests      int    `json:"requests"`
 	RetainedCap   int    `json:"retained_cap"`
@@ -263,6 +281,16 @@ type Summary struct {
 	// Errors counts failed turns (Record.Error set); ByError splits them by class.
 	Errors  int            `json:"errors"`
 	ByError map[string]int `json:"by_error,omitempty"`
+	// Queue axis: rows that passed the admission scheduler. QueueP50/P99 are
+	// nearest-rank over those rows; with queue_measured>0 an absent quantile
+	// means a measured 0ms wait. ClientTTFTP50MS is queue+TTFT and
+	// ServiceTTFTP50MS the TTFT alone, both over rows that measured BOTH axes, so
+	// the pair splits client-visible TTFT into waiting vs prefill.
+	QueueMeasured    int     `json:"queue_measured,omitempty"`
+	QueueP50MS       float64 `json:"queue_p50_ms,omitempty"`
+	QueueP99MS       float64 `json:"queue_p99_ms,omitempty"`
+	ClientTTFTP50MS  float64 `json:"client_ttft_p50_ms,omitempty"`
+	ServiceTTFTP50MS float64 `json:"service_ttft_p50_ms,omitempty"`
 	// ByRegime splits latency by prompt-cache regime (#5630) so warm vs cold TTFT is
 	// one read. Keys are cacheobs.Regimes; a regime with no rows is absent.
 	ByRegime map[string]RegimeSummary `json:"by_regime,omitempty"`
@@ -346,7 +374,7 @@ func BuildReport(recs []Record, n int, capped bool, droppedWrites uint64) Report
 // cached / (uncached + cached) prompt tokens.
 func Summarize(recs []Record) Summary {
 	s := Summary{}
-	var ttft, prefill, decode, e2e []float64
+	var ttft, prefill, decode, e2e, queue, clientTTFT, serviceTTFT []float64
 	var prompt, cached, prefillTok int64
 	var prefillMS float64
 	regimeTTFT := map[string][]float64{}
@@ -415,6 +443,13 @@ func Summarize(recs []Record) Summary {
 		if r.E2EMS > 0 {
 			e2e = append(e2e, r.E2EMS)
 		}
+		if r.QueueMS != nil {
+			queue = append(queue, *r.QueueMS)
+			if r.TTFTMS > 0 {
+				clientTTFT = append(clientTTFT, roundTo(*r.QueueMS+r.TTFTMS, 1000))
+				serviceTTFT = append(serviceTTFT, r.TTFTMS)
+			}
+		}
 		prompt += int64(r.PromptTokens)
 		cached += int64(r.CachedTokens)
 		if e := r.Engine; e != nil {
@@ -432,6 +467,11 @@ func Summarize(recs []Record) Summary {
 		s.SpecAcceptRate = roundTo(float64(s.SpecAcceptedTokens)/float64(s.SpecDraftTokens), 10000)
 	}
 	s.Identities = len(servedBy)
+	s.QueueMeasured = len(queue)
+	s.QueueP50MS = quantile(queue, 0.50)
+	s.QueueP99MS = quantile(queue, 0.99)
+	s.ClientTTFTP50MS = quantile(clientTTFT, 0.50)
+	s.ServiceTTFTP50MS = quantile(serviceTTFT, 0.50)
 	s.TTFTMeasured = len(ttft)
 	s.TTFTP50MS = quantile(ttft, 0.50)
 	s.TTFTP99MS = quantile(ttft, 0.99)
@@ -501,6 +541,12 @@ func RenderCompact(rep Report) string {
 		fmt.Fprintf(&b, " ttft p50=%s p99=%s (measured %d/%d)", fmtMS(s.TTFTP50MS), fmtMS(s.TTFTP99MS), s.TTFTMeasured, s.Count)
 	} else {
 		b.WriteString(" ttft n/a")
+	}
+	if s.QueueMeasured > 0 {
+		fmt.Fprintf(&b, " | queue p50=%s p99=%s (measured %d/%d)", fmtQueueMS(s.QueueP50MS), fmtQueueMS(s.QueueP99MS), s.QueueMeasured, s.Count)
+		if s.ClientTTFTP50MS > 0 {
+			fmt.Fprintf(&b, " client_ttft p50=%s service_ttft p50=%s", fmtMS(s.ClientTTFTP50MS), fmtMS(s.ServiceTTFTP50MS))
+		}
 	}
 	fmt.Fprintf(&b, " | prefill p50=%s weighted=%s | decode p50=%s", fmtTPS(s.PrefillTPSP50), fmtTPS(s.PrefillTPSWeighted), fmtTPS(s.DecodeTPSP50))
 	fmt.Fprintf(&b, " | e2e p50=%s p99=%s", fmtMS(s.E2EP50MS), fmtMS(s.E2EP99MS))
@@ -644,6 +690,18 @@ func fmtMS(v float64) string {
 		return fmt.Sprintf("%.2fs", v/1000)
 	}
 	return fmt.Sprintf("%.0fms", v)
+}
+
+// fmtQueueMS keeps a measured zero wait visible as 0ms (not n/a) and shows
+// sub-millisecond waits with precision.
+func fmtQueueMS(v float64) string {
+	switch {
+	case v <= 0:
+		return "0ms"
+	case v < 1:
+		return fmt.Sprintf("%.2fms", v)
+	}
+	return fmtMS(v)
 }
 
 func fmtTPS(v float64) string {
