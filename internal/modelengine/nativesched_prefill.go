@@ -97,6 +97,9 @@ type nativePrefixState struct {
 	stats         PrefixStats
 	holderLookups map[*model.Session]*prefixHitInfo
 	laneLookups   map[*schedLane]*prefixHitInfo
+	// chunkAlign is the deterministic-mode prefill chunk alignment A (0 = off);
+	// see SetQwenPrefillChunkAlign and qwenPrefillChunkEnd.
+	chunkAlign int
 }
 
 var (
@@ -311,6 +314,61 @@ func (s *NativeScheduler) SetQwenPrefillMaxTokensPerIteration(tokens int) error 
 	s.mu.Unlock()
 	s.signal()
 	return nil
+}
+
+// SetQwenPrefillChunkAlign configures deterministic-mode prefill chunk alignment.
+// With align > 0 every non-final bounded-prefill chunk ends on a multiple of align
+// measured from prompt position 0, so the chunk boundaries of a given prompt are a
+// function of the prompt and configuration alone (ADAPT of SGLang's deterministic
+// truncation_align_size, python/sglang/srt/managers/scheduler.py:1690-1722@00a9a81,
+// Apache-2.0). align <= 0 (the default) keeps the historical unaligned boundaries.
+// The per-iteration budget itself is unchanged; alignment only shortens a chunk.
+func (s *NativeScheduler) SetQwenPrefillChunkAlign(align int) {
+	if align < 0 {
+		align = 0
+	}
+	st := s.getOrCreatePrefixState()
+	if st == nil {
+		return
+	}
+	st.mu.Lock()
+	st.chunkAlign = align
+	st.mu.Unlock()
+}
+
+func (s *NativeScheduler) qwenPrefillChunkAlign() int {
+	st := s.getPrefixState()
+	if st == nil {
+		return 0
+	}
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	return st.chunkAlign
+}
+
+// qwenPrefillChunkEnd returns the exclusive end of the bounded prefill chunk that
+// starts at start. Without alignment it is min(start+budget, promptLen). With
+// align > 0 the budget end is rounded down to a multiple of align from position 0;
+// an aligned end that reaches the prompt end makes the chunk final. Alignment never
+// yields an end below align, never fails to advance, and never shrinks a fresh
+// first chunk below the resident panel minimum; in those cases the unaligned end
+// is kept.
+func qwenPrefillChunkEnd(start, budget, promptLen, align int) int {
+	end := start + budget
+	if align > 0 {
+		aligned := end / align * align
+		if aligned >= promptLen {
+			return promptLen
+		}
+		if aligned >= align && aligned > start &&
+			(start != 0 || aligned >= nativeQwenPrefillMinChunkTokens) {
+			return aligned
+		}
+	}
+	if end > promptLen {
+		end = promptLen
+	}
+	return end
 }
 
 func (s *NativeScheduler) qwenPrefillChunkBudget(prep schedPrepare, sess *model.Session, promptLen int) int {
@@ -555,10 +613,7 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 		s.mu.Unlock()
 		return
 	}
-	end := start + ln.prefillChunkTokens
-	if end > len(ln.prompt) {
-		end = len(ln.prompt)
-	}
+	end := qwenPrefillChunkEnd(start, ln.prefillChunkTokens, len(ln.prompt), s.qwenPrefillChunkAlign())
 	chunk := ln.prompt[start:end]
 	final := end == len(ln.prompt)
 	sess := ln.takeSessionForModelLocked()
