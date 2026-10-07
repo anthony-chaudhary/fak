@@ -1312,7 +1312,21 @@
           "category": "incidental",
           "reason": "Closed FeatureRewriteProof provenance label for the existing Anthropic structural verifier; it names protected JSON regions and does not introduce a cache.",
           "token": "cache_anchor_and_trailing_json"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Integer position selecting an already-wired per-layer Engram row cache; it introduces no cache identity, admission, retention, or eviction policy.",
+          "token": "cacheidx"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Integer position selecting an already-wired per-layer Engram row cache; it introduces no cache identity, admission, retention, or eviction policy.",
+          "token": "cacheindex"
         }
+      ],
+      "exclude": [
+        "cacheidx",
+        "cacheindex"
       ],
       "id": "cache",
       "ignore": [

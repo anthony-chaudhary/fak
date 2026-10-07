@@ -214,6 +214,28 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	// shared registry (st.attn = nil) byte-for-byte; a role session must RETAIN it
 	// so a reader layer can resolve a source's published rows on the next Step.
 	roleSession := m.v41RoleSchedule()
+	var engramStage *v41EngramStage
+	var engramRows []uint32
+	var engramFull bool
+	if cfg.DeepSeekV41 != nil {
+		for _, layer := range cfg.DeepSeekV41.EngramLayerIDs {
+			if layer < 0 || layer >= cfg.NumLayers {
+				continue
+			}
+			engramStage = m.v41EngramStageFor()
+			engramRows, err = m.v41IncrementalEngramRows(engramStage, st.history, id, layer)
+			if err != nil {
+				rollback()
+				return nil, stats, err
+			}
+			engramFull, err = v41ForwardGeometry(cfg)
+			if err != nil {
+				rollback()
+				return nil, stats, err
+			}
+			break
+		}
+	}
 
 	for l := 0; l < cfg.NumLayers; l++ {
 		state := st.layerState(l)
@@ -235,6 +257,41 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 			}
 		}
 		stagedRow = append(stagedRow, rowBackup)
+		if engramStage != nil {
+			declared := false
+			for _, layer := range cfg.DeepSeekV41.EngramLayerIDs {
+				declared = declared || layer == l
+			}
+			if cacheIdx := engramStage.cacheIndex(l); declared && cacheIdx >= 0 {
+				geometry, geometryErr := m.v41EngramInjectionGeometry(l, 1)
+				if geometryErr != nil {
+					rollback()
+					return nil, stats, geometryErr
+				}
+				base, ok := checkedMulInt(cacheIdx, geometry.cols)
+				if !ok || base < 0 || base > len(engramRows) || geometry.cols > len(engramRows)-base {
+					rollback()
+					return nil, stats, v41StageErr(v41StageEngram, l,
+						fmt.Errorf("%w: Engram current row identifiers do not cover layer %d", ErrV41NativeUnsupported, l))
+				}
+				opened := m.v41NowNanos()
+				rows, injectionErr := m.v41EngramInjectPrepared(l, [][]float32{x}, [][][]float32{streams}, engramFull, 1,
+					engramRows[base:base+geometry.cols], float32(cfg.RMSNormEps), geometry)
+				injections := 0
+				if injectionErr == nil {
+					injections = 1
+				}
+				var nanos int64
+				if opened != 0 {
+					nanos = m.v41NowNanos() - opened
+				}
+				m.v41NoteIncrementalEngram(injections, rows, 0, nanos)
+				if injectionErr != nil {
+					rollback()
+					return nil, stats, injectionErr
+				}
+			}
+		}
 		stats.LayerCalls++
 		if lerr := m.v41LayerStepWithRegistry(l, x, streams, pos, state, registry, scratch); lerr != nil {
 			rollback()

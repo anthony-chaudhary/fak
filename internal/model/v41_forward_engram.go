@@ -86,12 +86,13 @@ func v41BF16(x float32) float32 {
 // v41EngramStage is the model-attached Engram retrieval stage: a hash state plus
 // one bounded row cache per declared Engram layer, in the layout's layer order.
 type v41EngramStage struct {
-	layout   V41EngramLayout
-	caches   []*V41EngramRowCache
-	columns  int
-	headDim  int
-	hc       int
-	layerIDs []int
+	layout        V41EngramLayout
+	hashPrototype *V41EngramHashState
+	caches        []*V41EngramRowCache
+	columns       int
+	headDim       int
+	hc            int
+	layerIDs      []int
 	// rowBytes is the per-row width every wired source serves (264 packed or
 	// 1024 dequantized-f32). The forward dispatches row decode on it, so the
 	// packed and f32 dialects share one architecture-neutral stage.
@@ -169,8 +170,12 @@ func (m *Model) wireV41Engram(layout V41EngramLayout, srcs []V41EngramRowSource,
 		}
 		caches[i] = cache
 	}
+	hashPrototype, err := NewV41EngramHashState(layout)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrV41NativeUnsupported, err)
+	}
 	stage := &v41EngramStage{
-		layout: layout, caches: caches, columns: columns,
+		layout: hashPrototype.layout, hashPrototype: hashPrototype, caches: caches, columns: columns,
 		headDim: m.Cfg.DeepSeekV41.EngramHeadDim, hc: 4,
 		layerIDs: append([]int(nil), ids...), rowBytes: rowBytes,
 	}
@@ -259,14 +264,41 @@ func dequantV41EngramRow(row []byte, dim int) ([]float32, error) {
 // production transposition of the reference schedule and is called at the START
 // of v41Layer for declared Engram layers.
 func (m *Model) v41EngramInject(l int, x [][]float32, streams [][][]float32, full bool, seq []int, eps float32) error {
+	geometry, err := m.v41EngramInjectionGeometry(l, len(seq))
+	if err != nil {
+		return err
+	}
+	stage, cacheIdx := geometry.stage, geometry.cacheIdx
+	allRows, err := stage.hashPrototype.Clone().Hash(seq, nil)
+	if err != nil {
+		return v41StageErr(v41StageEngram, l, fmt.Errorf("%w: %w", ErrV41NativeUnsupported, err))
+	}
+	cols, layers := stage.columns, len(stage.layout.Rows)
+	layerRows := make([]uint32, 0, len(seq)*cols)
+	for t := range seq {
+		base := t*layers*cols + cacheIdx*cols
+		layerRows = append(layerRows, allRows[base:base+cols]...)
+	}
+	_, err = m.v41EngramInjectPrepared(l, x, streams, full, len(seq), layerRows, eps, geometry)
+	return err
+}
+
+type v41EngramGeometry struct {
+	stage             *v41EngramStage
+	cacheIdx          int
+	H, dim, cols, hc  int
+	wKV, qNorm, kNorm []float32
+}
+
+func (m *Model) v41EngramInjectionGeometry(l, positions int) (v41EngramGeometry, error) {
 	stage := m.v41EngramStageFor()
-	if stage == nil {
-		return v41StageErr(v41StageEngram, l,
+	if stage == nil || stage.hashPrototype == nil {
+		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
 			fmt.Errorf("%w: layer %d declares Engram but no row source is wired", ErrV41NativeUnsupported, l))
 	}
 	cacheIdx := stage.cacheIndex(l)
 	if cacheIdx < 0 {
-		return v41StageErr(v41StageEngram, l,
+		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
 			fmt.Errorf("%w: layer %d is not a declared Engram layer", ErrV41NativeUnsupported, l))
 	}
 	cfg := m.Cfg
@@ -280,31 +312,31 @@ func (m *Model) v41EngramInject(l int, x [][]float32, streams [][][]float32, ful
 	// first, and reject any product that would overflow int before lengths,
 	// allocation, indexing, or mutation are attempted.
 	if dim < 1 || dim > 256 || H <= 0 {
-		return v41StageErr(v41StageEngram, l,
+		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
 			fmt.Errorf("%w: Engram geometry head dim %d outside [1,256] or hidden %d not positive", ErrV41NativeUnsupported, dim, H))
 	}
 	if cols <= 0 {
-		return v41StageErr(v41StageEngram, l,
+		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
 			fmt.Errorf("%w: Engram geometry columns %d must be positive", ErrV41NativeUnsupported, cols))
 	}
 	rowCells, ok := checkedMulInt(cols, dim)
 	if !ok {
-		return v41StageErr(v41StageEngram, l,
+		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
 			fmt.Errorf("%w: Engram row geometry %d cols x %d dim overflows", ErrV41NativeUnsupported, cols, dim))
 	}
 	normCells, ok := checkedMulInt(hc, H)
 	if !ok {
-		return v41StageErr(v41StageEngram, l,
+		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
 			fmt.Errorf("%w: Engram norm geometry %d streams x %d hidden overflows", ErrV41NativeUnsupported, hc, H))
 	}
 	streamWidth, ok := checkedMulInt(hc+1, H)
 	if !ok {
-		return v41StageErr(v41StageEngram, l,
+		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
 			fmt.Errorf("%w: Engram projection width %d streams x %d hidden overflows", ErrV41NativeUnsupported, hc+1, H))
 	}
 	kvCells, ok := checkedMulInt(rowCells, streamWidth)
 	if !ok {
-		return v41StageErr(v41StageEngram, l,
+		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
 			fmt.Errorf("%w: Engram projection geometry %d x %d overflows", ErrV41NativeUnsupported, rowCells, streamWidth))
 	}
 
@@ -312,34 +344,31 @@ func (m *Model) v41EngramInject(l int, x [][]float32, streams [][][]float32, ful
 	qNorm := m.tensor(layerName(l, "engram_q_norm.weight"))
 	kNorm := m.tensor(layerName(l, "engram_k_norm.weight"))
 	if len(wKV) != kvCells || len(qNorm) != normCells || len(kNorm) != normCells {
-		return v41StageErr(v41StageEngram, l,
+		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
 			fmt.Errorf("%w: Engram mixing tensors are absent or mis-shaped at layer %d", ErrV41NativeUnsupported, l))
 	}
 
-	// Hash the full token sequence for this layer from a fresh state. The
-	// reduced forward recomputes the whole history each call, so a fresh hash
-	// (tails start DEAD) is exactly the sequence-start schedule.
-	hash, err := NewV41EngramHashState(stage.layout)
-	if err != nil {
-		return v41StageErr(v41StageEngram, l, fmt.Errorf("%w: %v", ErrV41NativeUnsupported, err))
+	if _, ok := checkedMulInt(positions, cols); positions < 0 || !ok {
+		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
+			fmt.Errorf("%w: Engram row identifiers %d positions x %d columns overflow", ErrV41NativeUnsupported, positions, cols))
 	}
-	allRows, err := hash.Hash(seq, nil)
-	if err != nil {
-		return v41StageErr(v41StageEngram, l, fmt.Errorf("%w: %v", ErrV41NativeUnsupported, err))
-	}
-	layers := len(stage.layout.Rows)
-	// Extract this layer's [token][col] rows in the order GatherV41EngramRows
-	// expects (one cache, columnsPerLayer == cols).
-	layerRows := make([]uint32, 0, len(seq)*cols)
-	for t := range seq {
-		base := t*layers*cols + cacheIdx*cols
-		layerRows = append(layerRows, allRows[base:base+cols]...)
+	return v41EngramGeometry{stage: stage, cacheIdx: cacheIdx, H: H, dim: dim, cols: cols, hc: hc, wKV: wKV, qNorm: qNorm, kNorm: kNorm}, nil
+}
+
+func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]float32, full bool, positions int, layerRows []uint32, eps float32, geometry v41EngramGeometry) (gatheredRows int, err error) {
+	stage, cacheIdx := geometry.stage, geometry.cacheIdx
+	H, dim, cols, hc := geometry.H, geometry.dim, geometry.cols, geometry.hc
+	wKV, qNorm, kNorm := geometry.wKV, geometry.qNorm, geometry.kNorm
+	if positions < 0 || len(layerRows) != positions*cols {
+		return gatheredRows, v41StageErr(v41StageEngram, l,
+			fmt.Errorf("%w: Engram row identifiers %d, want %d positions x %d columns", ErrV41NativeUnsupported, len(layerRows), positions, cols))
 	}
 	gathered, err := GatherV41EngramRows([]*V41EngramRowCache{stage.caches[cacheIdx]}, layerRows, cols)
 	if err != nil {
-		return v41StageErr(v41StageEngram, l, fmt.Errorf("%w: %v", ErrV41NativeUnsupported, err))
+		return gatheredRows, v41StageErr(v41StageEngram, l, fmt.Errorf("%w: %w", ErrV41NativeUnsupported, err))
 	}
 
+	gatheredRows = len(layerRows)
 	rowVec := make([]float32, cols*dim)
 	projected := make([]float32, (hc+1)*H)
 	// Fail closed on malformed full geometry before any stream is mutated: the
@@ -347,31 +376,31 @@ func (m *Model) v41EngramInject(l int, x [][]float32, streams [][][]float32, ful
 	// would otherwise panic instead of returning a typed error. The reduced path
 	// carries no persistent streams and is unaffected.
 	if full {
-		if len(streams) < len(seq) {
-			return v41StageErr(v41StageEngram, l,
+		if len(streams) < positions {
+			return gatheredRows, v41StageErr(v41StageEngram, l,
 				fmt.Errorf("%w: Engram full geometry has %d stream positions for %d tokens",
-					ErrV41NativeUnsupported, len(streams), len(seq)))
+					ErrV41NativeUnsupported, len(streams), positions))
 		}
-		for t := range seq {
+		for t := range positions {
 			if len(streams[t]) < hc {
-				return v41StageErr(v41StageEngram, l,
+				return gatheredRows, v41StageErr(v41StageEngram, l,
 					fmt.Errorf("%w: Engram full geometry position %d has %d streams, want >= %d",
 						ErrV41NativeUnsupported, t, len(streams[t]), hc))
 			}
 			for s := 0; s < hc; s++ {
 				if len(streams[t][s]) != H {
-					return v41StageErr(v41StageEngram, l,
+					return gatheredRows, v41StageErr(v41StageEngram, l,
 						fmt.Errorf("%w: Engram full geometry stream [%d][%d] has width %d, want %d",
 							ErrV41NativeUnsupported, t, s, len(streams[t][s]), H))
 				}
 			}
 		}
 	}
-	for t := range seq {
+	for t := range positions {
 		for c := 0; c < cols; c++ {
 			values, err := decodeV41EngramRow(gathered[t*cols+c], dim, stage.rowBytes)
 			if err != nil {
-				return v41StageErr(v41StageEngram, l, err)
+				return gatheredRows, v41StageErr(v41StageEngram, l, err)
 			}
 			copy(rowVec[c*dim:], values)
 		}
@@ -435,7 +464,7 @@ func (m *Model) v41EngramInject(l int, x [][]float32, streams [][][]float32, ful
 			}
 		}
 	}
-	return nil
+	return gatheredRows, nil
 }
 
 // V41EngramWarmDelta reports the cache-counter movement caused by one
@@ -584,3 +613,37 @@ func sqrtf(x float32) float32 { return float32(math.Sqrt(float64(x))) }
 func rsqrtf(x float32) float32 { return float32(1 / math.Sqrt(float64(x))) }
 
 func expf(x float32) float32 { return float32(math.Exp(float64(x))) }
+
+func (m *Model) v41IncrementalEngramRows(stage *v41EngramStage, history []int, id, layer int) (rows []uint32, err error) {
+	opened := m.v41NowNanos()
+	hashed := 0
+	defer func() {
+		var nanos int64
+		if opened != 0 {
+			nanos = m.v41NowNanos() - opened
+		}
+		m.v41NoteIncrementalEngram(0, 0, hashed, nanos)
+	}()
+	if stage == nil || stage.hashPrototype == nil {
+		return nil, v41StageErr(v41StageEngram, layer,
+			fmt.Errorf("%w: layer %d declares Engram but no row source is wired", ErrV41NativeUnsupported, layer))
+	}
+	if _, err := m.v41EngramInjectionGeometry(layer, 1); err != nil {
+		return nil, err
+	}
+	hash := stage.hashPrototype.Clone()
+	start := len(history) - len(hash.tail)
+	if start < 0 {
+		start = 0
+	}
+	if _, err := hash.Hash(history[start:], nil); err != nil {
+		return nil, v41StageErr(v41StageEngram, layer, fmt.Errorf("%w: %w", ErrV41NativeUnsupported, err))
+	}
+	hashed = len(history) - start
+	rows, err = hash.Hash([]int{id}, nil)
+	if err != nil {
+		return nil, v41StageErr(v41StageEngram, layer, fmt.Errorf("%w: %w", ErrV41NativeUnsupported, err))
+	}
+	hashed++
+	return rows, nil
+}
