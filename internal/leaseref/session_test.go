@@ -293,12 +293,16 @@ func TestListSessionsSkipsUnparseableBlob(t *testing.T) {
 	}
 }
 
-// TestSessionDescriptorExpired pins the TTL math against UpdatedAt (not AcquiredAt): a zero
-// TTL never expires, and the boundary is at UpdatedAt+TTL.
+// TestSessionDescriptorExpired pins the TTL math against UpdatedAt (not AcquiredAt): a
+// legacy zero TTL ages out at UpdatedAt+LegacyNoTTLMaxAgeSeconds (no longer forever), and
+// the boundary is at UpdatedAt+TTL.
 func TestSessionDescriptorExpired(t *testing.T) {
 	noTTL := SessionDescriptor{UpdatedAt: 1000, TTLSecs: 0}
-	if noTTL.Expired(time.Unix(1000+1e6, 0)) {
-		t.Fatal("a zero TTL must never expire")
+	if noTTL.Expired(time.Unix(1000+LegacyNoTTLMaxAgeSeconds-1, 0)) {
+		t.Fatal("a legacy zero TTL is live until LegacyNoTTLMaxAgeSeconds past UpdatedAt")
+	}
+	if !noTTL.Expired(time.Unix(1000+LegacyNoTTLMaxAgeSeconds, 0)) {
+		t.Fatal("a legacy zero TTL must age out at LegacyNoTTLMaxAgeSeconds")
 	}
 	d := SessionDescriptor{UpdatedAt: 1000, TTLSecs: 60}
 	if d.Expired(time.Unix(1059, 0)) {

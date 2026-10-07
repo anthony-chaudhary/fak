@@ -163,7 +163,9 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
   fak leaseref session-publish --session S [--host H] [--state RUNNING] [--ttl SEC] [--dir DIR]
       Publish/refresh a lightweight session descriptor at refs/fak/locks/session-S
       so leases acquired with --session S have a heartbeat for 'liveness'. This is
-      a side-ref update only, never a branch/HEAD mutation.
+      a side-ref update only, never a branch/HEAD mutation. --ttl defaults to 3600s
+      and a value <=0 is clamped to it: republish faster than the TTL to stay live.
+      A legacy ttl 0 descriptor ages out 7 days after its last publish.
 
   fak leaseref list [--json] [--dir DIR]
       List every record under refs/fak/locks/* (incl. expired), one per line with
@@ -398,7 +400,7 @@ func runLeaserefSessionPublish(stdout, stderr io.Writer, argv []string) int {
 	session := fs.String("session", "", "session id to publish under refs/fak/locks/session-<id>")
 	host := fs.String("host", "", "host/node label (default: os hostname)")
 	state := fs.String("state", "RUNNING", "session PCB state")
-	ttl := fs.Int64("ttl", 0, "descriptor lifetime in seconds (0 = no expiry)")
+	ttl := fs.Int64("ttl", leaseref.DefaultSessionTTLSeconds, "descriptor lifetime in seconds; <=0 is clamped to the 3600s default (a descriptor always expires unless republished)")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}

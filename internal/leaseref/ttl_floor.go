@@ -49,3 +49,26 @@ func normalizeLeaseTTL(ttl int64) int64 {
 	}
 	return ttl
 }
+
+// DefaultSessionTTLSeconds is the lifetime a SESSION DESCRIPTOR (refs/fak/locks/session-*)
+// gets when its publisher supplies no positive TTL. Session descriptors had the same
+// "ttl 0 = forever" hole as lock leases: `fak leaseref session-publish` defaulted --ttl to
+// 0, and SessionDescriptor.Expired short-circuited false for it, so a publisher that died
+// left a RUNNING descriptor that LiveSessions and the lease-liveness classifier read as
+// heartbeating forever (~20 such ghosts on the remote). The value is one hour, the same as
+// DefaultLeaseTTLSeconds: it sits comfortably above the session layer's established
+// staleness window (session.DefaultDescriptorTTL, 30 min, which the in-process guard
+// publisher already stamps on every republish), and it never lapses before a default
+// lock lease the session holds, so the liveness classifier cannot call a session dead
+// while its own default-TTL lease is still live. A legacy ttl<=0 descriptor ages out by
+// LegacyNoTTLMaxAgeSeconds past UpdatedAt, exactly like a legacy lease.
+const DefaultSessionTTLSeconds = DefaultLeaseTTLSeconds
+
+// normalizeSessionTTL returns ttl, or DefaultSessionTTLSeconds when ttl is not positive.
+// PublishSession routes every descriptor write through it.
+func normalizeSessionTTL(ttl int64) int64 {
+	if ttl <= 0 {
+		return DefaultSessionTTLSeconds
+	}
+	return ttl
+}

@@ -201,6 +201,11 @@ func ClassifyLiveness(rec Record, sessions map[string]SessionDescriptor, selfSes
 			"owning session %s published terminal pcb_state=STOPPED (updated_at_unix=%d) — positively dead, reclaimable",
 			rec.SessionID, d.UpdatedAt)
 	}
+	if d.Expired(now) && d.TTLSecs <= 0 {
+		return LivenessPeerDead, EvidenceHeartbeatLapsed, fmt.Sprintf(
+			"owning session %s is a legacy ttl_seconds=0 descriptor that stopped heartbeating: now_unix=%d >= updated_at_unix=%d + legacy max age %d — positively dead, reclaimable",
+			rec.SessionID, now.Unix(), d.UpdatedAt, LegacyNoTTLMaxAgeSeconds)
+	}
 	if d.Expired(now) {
 		return LivenessPeerDead, EvidenceHeartbeatLapsed, fmt.Sprintf(
 			"owning session %s stopped heartbeating: now_unix=%d >= updated_at_unix=%d + ttl_seconds=%d — positively dead, reclaimable",

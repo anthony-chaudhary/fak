@@ -53,7 +53,7 @@ type SessionDescriptor struct {
 	Host      string `json:"host"`        // the node this session is live on (machine identity, free-form)
 	PCBState  string `json:"pcb_state"`   // the session PCB run-state: RUNNING/THROTTLED/PAUSED/DRAINING/STOPPED
 	UpdatedAt int64  `json:"updated_at"`  // unix seconds of the last publish (register or transition)
-	TTLSecs   int64  `json:"ttl_seconds"` // lifetime in seconds; 0 means no expiry (an explicit Remove ends it)
+	TTLSecs   int64  `json:"ttl_seconds"` // lifetime in seconds; writes clamp <=0 to DefaultSessionTTLSeconds, a legacy 0 ages out (ttl_floor.go)
 	// AgentUUID is the STABLE Claude Code session UUID (the transcript id, e.g. the value of
 	// CLAUDE_CODE_SESSION_ID) this guard session runs under. The descriptor's own ID is the
 	// VOLATILE agent-claude-<pid>-<hash> trace id — its pid rotates across restarts — but a
@@ -67,15 +67,14 @@ type SessionDescriptor struct {
 }
 
 // Expired reports whether the descriptor is past its TTL at time now, measured from its
-// last UpdatedAt. A zero TTL never expires. A live session republishes on each PCB
-// transition, refreshing UpdatedAt, so a still-running session keeps its ref fresh; a
-// crashed node's descriptor lapses once TTL elapses past the last update and a reader
-// drops it from the LIVE view — bounded staleness, not a permanent ghost.
+// last UpdatedAt. A live session republishes on each PCB transition, refreshing
+// UpdatedAt, so a still-running session keeps its ref fresh; a crashed node's descriptor
+// lapses once TTL elapses past the last update and a reader drops it from the LIVE view —
+// bounded staleness, not a permanent ghost. A LEGACY zero TTL (no longer writable, see
+// PublishSession and ttl_floor.go) expires once UpdatedAt is LegacyNoTTLMaxAgeSeconds old;
+// an undated legacy descriptor (UpdatedAt <= 0) has no age and fails closed to live.
 func (d SessionDescriptor) Expired(now time.Time) bool {
-	if d.TTLSecs <= 0 {
-		return false
-	}
-	return now.Unix() >= d.UpdatedAt+d.TTLSecs
+	return expired(now, d.TTLSecs, d.UpdatedAt)
 }
 
 // Ref returns the full ref path this descriptor is stored at: refs/fak/locks/session-<id>.
@@ -93,7 +92,8 @@ func isSessionRef(ref string) bool {
 // behind both publish-on-register and update-on-transition: an unconditional set of the
 // side ref to the current descriptor blob (a ref is not history, so re-pointing it is not
 // a force-push). UpdatedAt defaults to now when unset so each republish refreshes the TTL
-// clock. It reuses Store.writeBlob + update-ref verbatim — the same plumbing, the same
+// clock, and a non-positive TTLSecs is clamped to DefaultSessionTTLSeconds so a
+// never-expiring descriptor can no longer be minted. It reuses Store.writeBlob + update-ref verbatim — the same plumbing, the same
 // "never touch a branch/HEAD, never force" safety as the lock-lease Acquire. Returns the
 // written ref on success.
 func (s *Store) PublishSession(ctx context.Context, d SessionDescriptor) (string, error) {
@@ -103,6 +103,7 @@ func (s *Store) PublishSession(ctx context.Context, d SessionDescriptor) (string
 	if d.UpdatedAt == 0 {
 		d.UpdatedAt = time.Now().Unix()
 	}
+	d.TTLSecs = normalizeSessionTTL(d.TTLSecs) // never mint a ttl<=0 descriptor
 	return s.putBlobRef(ctx, d.Ref(), d)
 }
 
