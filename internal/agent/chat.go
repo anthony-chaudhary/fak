@@ -284,6 +284,10 @@ type Timings struct {
 	PredictedMS         float64 `json:"predicted_ms"`
 	PredictedPerTokenMS float64 `json:"predicted_per_token_ms"`
 	PredictedPerSecond  float64 `json:"predicted_per_second"`
+	// DraftN / DraftNAccepted are llama.cpp's speculative-decoding pair, present
+	// only when the turn drafted tokens.
+	DraftN         int `json:"draft_n,omitempty"`
+	DraftNAccepted int `json:"draft_n_accepted,omitempty"`
 }
 
 // NewTimings builds Timings from token counts and phase seconds. Like llama.cpp,

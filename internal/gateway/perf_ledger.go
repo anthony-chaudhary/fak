@@ -32,6 +32,9 @@ func (loc servingLocality) perfLabel() string {
 type perfDetail struct {
 	model  string
 	engine *perfledger.Engine
+	// upstreamDraft / upstreamAccepted are a proxied upstream's own speculative
+	// counts from its llama.cpp-shaped timings.
+	upstreamDraft, upstreamAccepted int
 }
 
 // perfDetailFromCompletion lifts the planner-reported model and native decode
@@ -47,6 +50,9 @@ func perfDetailFromCompletion(comp *agent.Completion) perfDetail {
 			e.SpecRounds, e.SpecDraftTokens, e.SpecAcceptedTokens = sp.Rounds, sp.DraftTokens, sp.AcceptedTokens
 		}
 		d.engine = e
+	} else if t := comp.Timings; t != nil && t.DraftN > 0 {
+		d.upstreamDraft = t.DraftN
+		d.upstreamAccepted = min(max(t.DraftNAccepted, 0), t.DraftN)
 	}
 	return d
 }
@@ -61,6 +67,7 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 	rec := perfledger.NewRecord(time.Now(), finishReason, loc.perfLabel(), promptTok, complTok, cachedTok, dur, ttft)
 	rec.Model = detail.model
 	rec.Engine = detail.engine
+	rec.UpstreamSpecDraftTokens, rec.UpstreamSpecAcceptedTokens = detail.upstreamDraft, detail.upstreamAccepted
 	m.perfMu.Lock()
 	m.appendPerfLocked(rec)
 	m.perfMu.Unlock()

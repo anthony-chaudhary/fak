@@ -1752,8 +1752,11 @@ paths:
         (`.fak/nightrun/gateway-perf.jsonl`) so history survives a restart.
         `ttft_ms` is absent when the first-token boundary was not observed
         (a buffered turn); `prefill_tps`/`decode_tps` are present only when it
-        was. `prompt_tokens` is the uncached prompt, disjoint from
-        `cached_tokens`; `cache_hit_share` = cached / (prompt + cached).
+        was, and `prefill_tps` only for an uncached prompt of at least 128
+        tokens (a cache hit's fixed overhead is not prefill). `prompt_tokens` is the uncached prompt, disjoint from
+        `cached_tokens`; `cache_hit_share` = cached / (prompt + cached);
+        `prefill_tps_weighted` = total uncached prompt tokens / total TTFT over
+        the rows that carry `prefill_tps`.
         A streamed turn's `ttft_ms` is the planner's own prefill boundary
         when it reports one (the native engine), else the first content
         fragment the gateway watched arrive (a proxied stream). A native
@@ -1761,7 +1764,10 @@ paths:
         speculative), the coalesced cohort it rode, and its own
         speculative draft/accept counts; the summary folds those into
         `by_path` and `spec_accept_rate`. Proxied and mock turns carry no
-        `engine`. Counts and timings only. Same observability auth floor as
+        `engine`; a proxied llama.cpp upstream that drafted carries
+        `upstream_spec_draft_tokens`/`upstream_spec_accepted_tokens` (its
+        `draft_n`/`draft_n_accepted`), which also fold into `spec_accept_rate`.
+        Counts and timings only. Same observability auth floor as
         `/v1/fak/observation/engine`.
       parameters:
         - name: n
@@ -1800,6 +1806,7 @@ paths:
                       ttft_p50_ms: { type: number }
                       ttft_p99_ms: { type: number }
                       prefill_tps_p50: { type: number }
+                      prefill_tps_weighted: { type: number }
                       decode_tps_p50: { type: number }
                       e2e_p50_ms: { type: number }
                       e2e_p99_ms: { type: number }
@@ -1830,6 +1837,8 @@ paths:
                         prefill_tps: { type: number }
                         decode_tps: { type: number }
                         model: { type: string }
+                        upstream_spec_draft_tokens: { type: integer }
+                        upstream_spec_accepted_tokens: { type: integer }
                         engine:
                           type: object
                           required: [path]

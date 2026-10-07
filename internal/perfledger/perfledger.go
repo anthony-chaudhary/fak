@@ -35,6 +35,11 @@ const (
 	// tailReadBytes bounds the startup seed / CLI read: RingCap rows at a
 	// generous ~1 KiB each, so a huge active file never costs more than this.
 	tailReadBytes = int64(RingCap) << 10
+
+	// MinPrefillRateTokens is the smallest uncached prompt that yields a prefill
+	// rate. Below it TTFT is fixed overhead, not prefill: a cache hit re-feeding 4
+	// tokens in 150ms would read as a "27 tok/s" prefill and drag the median.
+	MinPrefillRateTokens = 128
 )
 
 // Locality vocabulary mirrors the gateway's servingLocality; "" means the
@@ -47,7 +52,8 @@ const (
 
 // Record is one served turn. PromptTokens is the UNCACHED prompt (the tokens
 // actually prefilled), disjoint from CachedTokens. TTFTMS==0 means the first-token
-// boundary was not observed; PrefillTPS/DecodeTPS are present only when it was.
+// boundary was not observed; PrefillTPS/DecodeTPS are present only when it was,
+// and PrefillTPS only for an uncached prompt of at least MinPrefillRateTokens.
 type Record struct {
 	Schema           string  `json:"schema"`
 	UnixMS           int64   `json:"unix_ms"`
@@ -66,6 +72,10 @@ type Record struct {
 	// Engine is the native engine's decode anatomy for this one request; absent
 	// on proxied and mock turns, which have no engine steps of their own.
 	Engine *Engine `json:"engine,omitempty"`
+	// UpstreamSpec* are a proxied upstream's own speculative-decoding counts
+	// (llama.cpp timings draft_n / draft_n_accepted); absent when it drafted nothing.
+	UpstreamSpecDraftTokens    int `json:"upstream_spec_draft_tokens,omitempty"`
+	UpstreamSpecAcceptedTokens int `json:"upstream_spec_accepted_tokens,omitempty"`
 }
 
 // Native decode paths (enginestep's closed path vocabulary).
@@ -113,7 +123,7 @@ func NewRecord(now time.Time, finishReason, locality string, promptTok, complTok
 		ttft = dur
 	}
 	rec.TTFTMS = roundTo(float64(ttft)/float64(time.Millisecond), 1000)
-	if rec.PromptTokens > 0 {
+	if rec.PromptTokens >= MinPrefillRateTokens {
 		rec.PrefillTPS = roundTo(float64(rec.PromptTokens)/ttft.Seconds(), 100)
 	}
 	if decode := dur - ttft; decode > 0 && rec.CompletionTokens > 0 {
@@ -137,10 +147,13 @@ type Summary struct {
 	TTFTP50MS     float64 `json:"ttft_p50_ms,omitempty"`
 	TTFTP99MS     float64 `json:"ttft_p99_ms,omitempty"`
 	PrefillTPSP50 float64 `json:"prefill_tps_p50,omitempty"`
-	DecodeTPSP50  float64 `json:"decode_tps_p50,omitempty"`
-	E2EP50MS      float64 `json:"e2e_p50_ms,omitempty"`
-	E2EP99MS      float64 `json:"e2e_p99_ms,omitempty"`
-	CacheHitShare float64 `json:"cache_hit_share"`
+	// PrefillTPSWeighted is total uncached prompt tokens over total TTFT across the
+	// rows that carry a prefill rate, so long prompts weigh by their tokens.
+	PrefillTPSWeighted float64 `json:"prefill_tps_weighted,omitempty"`
+	DecodeTPSP50       float64 `json:"decode_tps_p50,omitempty"`
+	E2EP50MS           float64 `json:"e2e_p50_ms,omitempty"`
+	E2EP99MS           float64 `json:"e2e_p99_ms,omitempty"`
+	CacheHitShare      float64 `json:"cache_hit_share"`
 	// ByRegime splits latency by prompt-cache regime (#5630) so warm vs cold TTFT is
 	// one read. Keys are cacheobs.Regimes; a regime with no rows is absent.
 	ByRegime map[string]RegimeSummary `json:"by_regime,omitempty"`
@@ -148,7 +161,8 @@ type Summary struct {
 	// ByPath splits them by decode path. Both are absent on a proxy-only window.
 	Native int            `json:"native,omitempty"`
 	ByPath map[string]int `json:"by_path,omitempty"`
-	// Spec* sum the window's speculative rounds; SpecAcceptRate is accepted/draft
+	// Spec* sum the window's speculative rounds (native engine rounds plus a
+	// proxied upstream's draft counts, which carry no round count); SpecAcceptRate is accepted/draft
 	// tokens (vLLM's draft acceptance rate) and is absent when nothing was drafted.
 	SpecRounds         int     `json:"spec_rounds,omitempty"`
 	SpecDraftTokens    int     `json:"spec_draft_tokens,omitempty"`
@@ -201,7 +215,8 @@ func BuildReport(recs []Record, n int, capped bool, droppedWrites uint64) Report
 func Summarize(recs []Record) Summary {
 	s := Summary{}
 	var ttft, prefill, decode, e2e []float64
-	var prompt, cached int64
+	var prompt, cached, prefillTok int64
+	var prefillMS float64
 	regimeTTFT := map[string][]float64{}
 	regimeE2E := map[string][]float64{}
 	regimeCount := map[string]int{}
@@ -222,8 +237,15 @@ func Summarize(recs []Record) Summary {
 		if r.TTFTMS > 0 {
 			ttft = append(ttft, r.TTFTMS)
 		}
-		if r.PrefillTPS > 0 {
+		// The token floor also filters rows written before NewRecord applied it.
+		if r.PrefillTPS > 0 && r.PromptTokens >= MinPrefillRateTokens {
 			prefill = append(prefill, r.PrefillTPS)
+			prefillTok += int64(r.PromptTokens)
+			prefillMS += r.TTFTMS
+		}
+		if r.UpstreamSpecDraftTokens > 0 {
+			s.SpecDraftTokens += r.UpstreamSpecDraftTokens
+			s.SpecAcceptedTokens += min(max(r.UpstreamSpecAcceptedTokens, 0), r.UpstreamSpecDraftTokens)
 		}
 		if r.DecodeTPS > 0 {
 			decode = append(decode, r.DecodeTPS)
@@ -251,6 +273,9 @@ func Summarize(recs []Record) Summary {
 	s.TTFTP50MS = quantile(ttft, 0.50)
 	s.TTFTP99MS = quantile(ttft, 0.99)
 	s.PrefillTPSP50 = quantile(prefill, 0.50)
+	if prefillMS > 0 {
+		s.PrefillTPSWeighted = roundTo(float64(prefillTok)/(prefillMS/1000), 100)
+	}
 	s.DecodeTPSP50 = quantile(decode, 0.50)
 	s.E2EP50MS = quantile(e2e, 0.50)
 	s.E2EP99MS = quantile(e2e, 0.99)
@@ -290,7 +315,7 @@ func RenderCompact(rep Report) string {
 	} else {
 		b.WriteString(" ttft n/a")
 	}
-	fmt.Fprintf(&b, " | prefill p50=%s | decode p50=%s", fmtTPS(s.PrefillTPSP50), fmtTPS(s.DecodeTPSP50))
+	fmt.Fprintf(&b, " | prefill p50=%s weighted=%s | decode p50=%s", fmtTPS(s.PrefillTPSP50), fmtTPS(s.PrefillTPSWeighted), fmtTPS(s.DecodeTPSP50))
 	fmt.Fprintf(&b, " | e2e p50=%s p99=%s", fmtMS(s.E2EP50MS), fmtMS(s.E2EP99MS))
 	fmt.Fprintf(&b, " | cache=%.1f%%", s.CacheHitShare*100)
 	if len(s.ByRegime) > 0 {
@@ -310,7 +335,11 @@ func RenderCompact(rep Report) string {
 		}
 	}
 	if s.SpecDraftTokens > 0 {
-		fmt.Fprintf(&b, " | spec accept=%.1f%% (%d/%d over %d rounds)", s.SpecAcceptRate*100, s.SpecAcceptedTokens, s.SpecDraftTokens, s.SpecRounds)
+		fmt.Fprintf(&b, " | spec accept=%.1f%% (%d/%d", s.SpecAcceptRate*100, s.SpecAcceptedTokens, s.SpecDraftTokens)
+		if s.SpecRounds > 0 {
+			fmt.Fprintf(&b, " over %d rounds", s.SpecRounds)
+		}
+		b.WriteString(")")
 	}
 	if rep.Window.Capped {
 		b.WriteString(" | capped")
