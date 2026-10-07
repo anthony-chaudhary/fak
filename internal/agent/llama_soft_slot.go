@@ -23,15 +23,20 @@ import (
 // id_slot is sent and llama-server's own choice applies. A busy slot is never named, so no
 // turn queues behind another.
 //
-// Idle is read from llama-server's GET /slots (is_processing) plus this process's own
-// in-flight pins, which cover the window before llama-server marks a just-sent request.
+// Idle is read from a background snapshot of llama-server's GET /slots (is_processing) plus
+// this process's own in-flight pins, which cover the window before llama-server marks a
+// just-sent request. llama-server answers /slots from its task loop, so the call can wait out
+// a whole prefill batch; polling it off the request path keeps that wait out of every turn.
 // llama-server does not report which slot served an unpinned request, so the conversation
 // map only learns from pins it made itself.
 
 const (
-	llamaSlotsReadTimeout   = 250 * time.Millisecond
-	llamaSoftSlotRetryAfter = time.Minute
-	llamaSoftSlotMaxConvs   = 4096
+	llamaSlotsColdReadTimeout = 250 * time.Millisecond
+	llamaSlotsPollTimeout     = 2 * time.Second
+	llamaSlotsPollInterval    = 200 * time.Millisecond
+	llamaSlotsSnapshotMaxAge  = 2 * time.Second
+	llamaSlotsPollIdleStop    = 30 * time.Second
+	llamaSoftSlotMaxConvs     = 4096
 )
 
 // Soft slot outcomes, the closed vocabulary of LlamaSoftSlotCounts.
@@ -39,7 +44,7 @@ const (
 	SoftSlotSticky      = "sticky"      // the conversation's own slot was idle and was pinned
 	SoftSlotAssigned    = "assigned"    // new (or displaced) conversation pinned to the LRU idle slot
 	SoftSlotBusy        = "busy"        // no idle slot; id_slot omitted, upstream chooses
-	SoftSlotUnavailable = "unavailable" // /slots unreadable; id_slot omitted
+	SoftSlotUnavailable = "unavailable" // no fresh /slots snapshot; id_slot omitted
 )
 
 // LlamaSoftSlotOutcomes lists the outcome vocabulary in render order.
@@ -69,12 +74,20 @@ type softConv struct {
 }
 
 type llamaSoftSlots struct {
-	mu         sync.Mutex
-	convs      map[uint64]softConv
-	slotOwner  map[int]uint64
-	slotUsed   map[int]time.Time
-	inflight   map[int]int
-	retryAfter time.Time
+	mu        sync.Mutex
+	convs     map[uint64]softConv
+	slotOwner map[int]uint64
+	slotUsed  map[int]time.Time
+	inflight  map[int]int
+	// released records when this process's last pin on a slot ended: a snapshot taken
+	// before that instant may show the slot busy with our own finished request.
+	released map[int]time.Time
+
+	snapIDs    []int
+	snapBusy   map[int]bool
+	snapAt     time.Time
+	polling    bool
+	lastDemand time.Time
 }
 
 var llamaSoftSlotRegistry sync.Map
@@ -88,6 +101,7 @@ func llamaSoftSlotsFor(base string) *llamaSoftSlots {
 		slotOwner: map[int]uint64{},
 		slotUsed:  map[int]time.Time{},
 		inflight:  map[int]int{},
+		released:  map[int]time.Time{},
 	})
 	return v.(*llamaSoftSlots)
 }
@@ -115,8 +129,8 @@ func conversationKey(messages []Message) (uint64, bool) {
 }
 
 // readLlamaBusySlots returns the slot ids llama-server reports as processing, and all ids.
-func readLlamaBusySlots(base, apiKey string) (ids []int, busy map[int]bool, ok bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), llamaSlotsReadTimeout)
+func readLlamaBusySlots(base, apiKey string, timeout time.Duration) (ids []int, busy map[int]bool, ok bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	base = strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(base), "/"), "/v1")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/slots", nil)
@@ -158,19 +172,29 @@ func (st *llamaSoftSlots) pick(base, apiKey string, messages []Message, now time
 		return -1, nil, ""
 	}
 	st.mu.Lock()
-	skip := now.Before(st.retryAfter)
+	st.lastDemand = now
+	cold := st.snapAt.IsZero()
+	st.startPollLocked(base, apiKey)
 	st.mu.Unlock()
-	if skip {
-		return -1, nil, SoftSlotUnavailable
+	if cold {
+		// One bounded synchronous read so the first turn after start can pin.
+		if ids, busy, ok := readLlamaBusySlots(base, apiKey, llamaSlotsColdReadTimeout); ok {
+			st.storeSnapshot(ids, busy, time.Now())
+		}
 	}
-	ids, busy, ok := readLlamaBusySlots(base, apiKey)
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if !ok {
-		st.retryAfter = now.Add(llamaSoftSlotRetryAfter)
+	if st.snapAt.IsZero() || now.Sub(st.snapAt) > llamaSlotsSnapshotMaxAge {
 		return -1, nil, SoftSlotUnavailable
 	}
-	idle := func(id int) bool { return !busy[id] && st.inflight[id] == 0 }
+	ids, busy, snapAt := st.snapIDs, st.snapBusy, st.snapAt
+	idle := func(id int) bool {
+		if st.inflight[id] > 0 {
+			return false
+		}
+		rel, ok := st.released[id]
+		return !busy[id] || (ok && !snapAt.After(rel))
+	}
 	outcome := SoftSlotAssigned
 	slot := -1
 	if c, had := st.convs[key]; had && idle(c.slot) && st.slotOwner[c.slot] == key {
@@ -204,10 +228,45 @@ func (st *llamaSoftSlots) pick(base, apiKey string, messages []Message, now time
 			if st.inflight[slot] > 0 {
 				st.inflight[slot]--
 			}
+			st.released[slot] = time.Now()
 			st.mu.Unlock()
 		})
 	}
 	return slot, release, outcome
+}
+
+func (st *llamaSoftSlots) storeSnapshot(ids []int, busy map[int]bool, at time.Time) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if at.After(st.snapAt) {
+		st.snapIDs, st.snapBusy, st.snapAt = ids, busy, at
+	}
+}
+
+// startPollLocked runs one background /slots poller per upstream while turns keep arriving;
+// it exits after llamaSlotsPollIdleStop without demand.
+func (st *llamaSoftSlots) startPollLocked(base, apiKey string) {
+	if st.polling {
+		return
+	}
+	st.polling = true
+	go func() {
+		t := time.NewTicker(llamaSlotsPollInterval)
+		defer t.Stop()
+		for range t.C {
+			st.mu.Lock()
+			if time.Since(st.lastDemand) > llamaSlotsPollIdleStop {
+				st.polling = false
+				st.mu.Unlock()
+				return
+			}
+			st.mu.Unlock()
+			taken := time.Now()
+			if ids, busy, ok := readLlamaBusySlots(base, apiKey, llamaSlotsPollTimeout); ok {
+				st.storeSnapshot(ids, busy, taken)
+			}
+		}
+	}()
 }
 
 func (st *llamaSoftSlots) trimLocked() {

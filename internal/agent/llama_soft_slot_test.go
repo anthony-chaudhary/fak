@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type fakeLlamaSlots struct {
@@ -23,6 +24,23 @@ func (f *fakeLlamaSlots) setBusy(ids ...int) {
 	for _, id := range ids {
 		f.busy[id] = true
 	}
+}
+
+// waitFreshSnapshot blocks until the background poller has read /slots after since.
+func waitFreshSnapshot(t *testing.T, p *HTTPPlanner, since time.Time) {
+	t.Helper()
+	st := llamaSoftSlotsFor(p.BaseURL)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		st.mu.Lock()
+		fresh := st.snapAt.After(since)
+		st.mu.Unlock()
+		if fresh {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("no /slots snapshot after %s", since)
 }
 
 func newSoftSlotPlanner(t *testing.T, f *fakeLlamaSlots) *HTTPPlanner {
@@ -105,7 +123,7 @@ func TestLlamaSoftSlotReturnsConversationToItsIdleSlot(t *testing.T) {
 	}
 }
 
-// fak-test:runtime fast est=100ms lane=default
+// fak-test:runtime fast est=600ms lane=default
 func TestLlamaSoftSlotNeverNamesABusySlot(t *testing.T) {
 	f := &fakeLlamaSlots{}
 	p := newSoftSlotPlanner(t, f)
@@ -113,6 +131,7 @@ func TestLlamaSoftSlotNeverNamesABusySlot(t *testing.T) {
 	c.releaseSlot()
 
 	f.setBusy(a1)
+	waitFreshSnapshot(t, p, time.Now())
 	a2, c := softSlotTurn(t, p, conv("agent A", "turn 2"))
 	c.releaseSlot()
 	if a2 == a1 || a2 < 0 {
@@ -120,6 +139,7 @@ func TestLlamaSoftSlotNeverNamesABusySlot(t *testing.T) {
 	}
 
 	f.setBusy(0, 1, 2, 3)
+	waitFreshSnapshot(t, p, time.Now())
 	if got, c := softSlotTurn(t, p, conv("agent A", "turn 3")); got != -1 {
 		c.releaseSlot()
 		t.Fatalf("every slot busy: id_slot %d sent, want omitted so no turn queues", got)
@@ -146,6 +166,9 @@ func TestLlamaSoftSlotLeavesBodyAloneWhenOffOrUnreadable(t *testing.T) {
 	if got, _ := softSlotTurn(t, p, conv("agent A")); got != -1 {
 		t.Fatalf("/slots unreadable: id_slot %d sent, want omitted", got)
 	}
+	if n := llamaSoftSlotCounts[SoftSlotUnavailable].Load(); n == 0 {
+		t.Fatalf("unreadable /slots not counted as unavailable")
+	}
 
 	p2 := newSoftSlotPlanner(t, &fakeLlamaSlots{})
 	p2.LlamaSoftSlot = false
@@ -170,5 +193,25 @@ func TestConversationKeyIgnoresLaterTurns(t *testing.T) {
 	}
 	if _, ok := conversationKey([]Message{{Role: RoleSystem, Content: "only system"}}); ok {
 		t.Fatalf("a transcript with no user turn has no conversation key")
+	}
+}
+
+// A snapshot taken while our own pinned turn was still running shows its slot busy; once
+// that pin is released the conversation must still go back to it, not be moved.
+//
+// fak-test:runtime fast est=50ms lane=default
+func TestLlamaSoftSlotIgnoresStaleBusyFromItsOwnFinishedPin(t *testing.T) {
+	p := newSoftSlotPlanner(t, &fakeLlamaSlots{})
+	a1, c := softSlotTurn(t, p, conv("agent A"))
+	st := llamaSoftSlotsFor(p.BaseURL)
+	st.mu.Lock()
+	st.snapBusy = map[int]bool{a1: true}
+	st.snapAt = time.Now()
+	st.mu.Unlock()
+	c.releaseSlot()
+	a2, c := softSlotTurn(t, p, conv("agent A", "turn 2"))
+	c.releaseSlot()
+	if a2 != a1 {
+		t.Fatalf("turn 2 moved %d -> %d on a snapshot that predates the release", a1, a2)
 	}
 }
