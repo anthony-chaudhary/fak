@@ -287,7 +287,7 @@ func validateWriterIsTerminal(w io.Writer) bool {
 }
 
 func validatePhaseOrder(testOnly, auditSelection, smoke bool) []string {
-	phases := []string{"resolve_root", "resolve_ref", "wsl_preflight", "normalize_mine", "extract_tip", "base_graph", "overlay"}
+	phases := []string{"resolve_root", "resolve_ref", "wsl_preflight", "normalize_mine", "extract_tip", "base_graph", "overlay", "git_identity"}
 	if !testOnly {
 		phases = append(phases, "gofmt")
 	}
