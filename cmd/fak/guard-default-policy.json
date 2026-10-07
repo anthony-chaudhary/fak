@@ -202,6 +202,7 @@
     "mcp__playwright__browser_press_key",
 
     "bash",
+    "powershell",
     "read",
     "write",
     "edit",
@@ -213,6 +214,7 @@
     "glob",
     "list",
     "ls",
+    "find",
     "webfetch",
     "fetch_web",
     "todowrite",

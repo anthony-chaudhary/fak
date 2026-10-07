@@ -39,6 +39,19 @@ var refusalNotes = []refusalNote{
 	{render: livelockInBandNote},
 }
 
+// RecoveryPivotAdmittedTool is the typed in-band recovery a DEFAULT_DENY
+// carries. A headless worker has no operator to consult, so the refusal names
+// the action the agent itself can take; widening the floor stays out-of-band.
+const RecoveryPivotAdmittedTool = "PIVOT_ADMITTED_TOOL"
+
+// RecoveryUseFileTools is the typed recovery for a DEFAULT_DENY from workspace
+// lease admission: the floor admitted the tool, but a shell command's write
+// footprint cannot be proven, so the agent moves the step onto the structured
+// file tools whose path argument is the footprint.
+const RecoveryUseFileTools = "USE_FILE_TOOLS"
+
+const leaseAdmissionBy = "lease-admission"
+
 // defaultDenyOperatorRemedy turns an otherwise bare DEFAULT_DENY token into
 // actionable agent-facing advisory text. Runnable operator shell commands (such
 // as fak guard allow) are strictly isolated from agent-visible context to prevent
@@ -49,7 +62,10 @@ func defaultDenyOperatorRemedy(a ToolAdjudication) string {
 		return ""
 	}
 	tool := refusalCommandTool(a.Tool)
-	return "for autonomous agents: tool not permitted by policy; consult operator to widen capability floor or pivot to permitted tools, decompose into S0/S1 leaves, land safe verified partial progress, or emit a structured ABSTAIN record. operator choice (outside this wrapped agent): consult operator to widen capability floor or pivot to permitted tools. Surface this choice to the operator instead of invoking it through the refused tool. If " + tool + " is a standard harness tool, update fak too; the built-in floor should cover it."
+	if a.Verdict.By == leaseAdmissionBy {
+		return "recovery=" + RecoveryUseFileTools + ": " + tool + " is on the capability floor, but workspace lease admission could not prove this call's write footprint. Use the read/list/search tools for inspection and the edit/write tools with an explicit path for workspace changes, or emit a structured ABSTAIN record citing DEFAULT_DENY by lease-admission. Permissive workspace admission is an out-of-band operator setting this session neither makes nor waits for."
+	}
+	return "recovery=" + RecoveryPivotAdmittedTool + ": " + tool + " is not on this session's capability floor. Redo the step with an admitted tool, decompose into S0/S1 leaves, land safe verified partial progress, or emit a structured ABSTAIN record citing DEFAULT_DENY; `fak recover DEFAULT_DENY` lists the steps. Widening the floor is an out-of-band operator change this session neither makes nor waits for."
 }
 
 // OperatorRemedyCommand returns the actionable out-of-band shell command for an operator
@@ -64,6 +80,9 @@ func OperatorRemedyCommand(a ToolAdjudication) string {
 		}
 	}
 	r := reasonOrKind(a.Verdict)
+	if r == "DEFAULT_DENY" && a.Verdict.By == leaseAdmissionBy {
+		return "FAK_WORKSPACE_ADMISSION_PERMISSIVE=1 (or --workspace-admission-permissive) on the gateway process"
+	}
 	if r == "DEFAULT_DENY" || r == "POLICY_BLOCK" {
 		tool := refusalCommandTool(a.Tool)
 		return "fak guard allow --ttl 15m " + tool
@@ -122,14 +141,16 @@ func SetOperatorRemedyHeaders(w http.ResponseWriter, adjs []ToolAdjudication) {
 	}
 }
 
+const sanitizedOperatorFloorChange = "consult operator to widen capability floor (out-of-band; in-session recovery=" + RecoveryPivotAdmittedTool + ")"
+
 var reExecutableSecurityCmd = regexp.MustCompile("`[^`]*\\bfak\\s+guard\\b[^`]*`")
 
 func stripExecutableSecurityCommands(s string) string {
 	if strings.Contains(s, "`") && strings.Contains(s, "fak guard") {
-		s = reExecutableSecurityCmd.ReplaceAllString(s, "consult operator to widen capability floor")
+		s = reExecutableSecurityCmd.ReplaceAllString(s, sanitizedOperatorFloorChange)
 	}
 	if strings.Contains(s, "fak guard allow") {
-		s = strings.ReplaceAll(s, "fak guard allow", "consult operator to widen capability floor")
+		s = strings.ReplaceAll(s, "fak guard allow", sanitizedOperatorFloorChange)
 	}
 	return s
 }
