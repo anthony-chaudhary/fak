@@ -20,10 +20,11 @@ const engineStepsSchema = "fak-observation-engine/1"
 // planner kind (so a proxy gateway reads as "not native", never as an idle
 // engine) and the enginestep snapshot.
 type engineStepsResponse struct {
-	Schema  string              `json:"schema"`
-	Planner string              `json:"planner"`
-	Native  bool                `json:"native"`
-	Engine  enginestep.Snapshot `json:"engine"`
+	Schema   string              `json:"schema"`
+	Planner  string              `json:"planner"`
+	Native   bool                `json:"native"`
+	Engine   enginestep.Snapshot `json:"engine"`
+	Substeps *stepobs.Snapshot   `json:"substeps"`
 }
 
 // nativeEngineServing reports whether /v1/* chat is answered by the in-process
@@ -83,19 +84,25 @@ func (s *Server) handleFakObservationEngine(w http.ResponseWriter, r *http.Reque
 	}
 	native := s.nativeEngineServing()
 	snap := enginestep.Default.Snapshot(n, kind)
+	var substeps *stepobs.Snapshot
+	if native {
+		observed := stepobs.Default.Snapshot()
+		substeps = &observed
+	}
 	if q.Get("format") == "compact" {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		if !native {
 			_, _ = w.Write([]byte("ENGINE not native (planner=" + plannerKind(s.planner) + ")\n"))
 			return
 		}
-		_, _ = w.Write([]byte(snap.Compact() + "\n"))
+		_, _ = w.Write([]byte(snap.Compact() + " | " + substeps.Compact() + "\n"))
 		return
 	}
 	writeJSON(w, http.StatusOK, engineStepsResponse{
-		Schema:  engineStepsSchema,
-		Planner: plannerKind(s.planner),
-		Native:  native,
-		Engine:  snap,
+		Schema:   engineStepsSchema,
+		Planner:  plannerKind(s.planner),
+		Native:   native,
+		Engine:   snap,
+		Substeps: substeps,
 	})
 }

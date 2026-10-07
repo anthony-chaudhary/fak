@@ -2,7 +2,10 @@ package model
 
 import (
 	"sync"
+	"time"
 	"unsafe"
+
+	"github.com/anthony-chaudhary/fak/internal/computetrace"
 )
 
 // quant.go — the Q8_0 quantized inference lane: close the raw-throughput gap to
@@ -249,12 +252,23 @@ func qMatRowsInto(qt *q8Tensor, qv q8Vec, y []float32) {
 }
 
 func qMatRowsRange(qt *q8Tensor, qv q8Vec, y []float32, lo, hi int) {
+	completed := false
+	if hi > lo && computetrace.Emitting() {
+		started := time.Now()
+		defer func() {
+			if completed {
+				computetrace.Record(computetrace.Event{Operation: "matmul", Phase: "kernel", Backend: "cpu-ref", Device: "host", Kernel: "q8_gemv_rows", StartedAt: started.UTC(), DurationNS: time.Since(started).Nanoseconds(), TimerDomain: "host_monotonic", Shapes: [][]int{{hi - lo, qt.in}}})
+			}
+		}()
+	}
 	if qMatRowsRangeFast(qt, qv, y, lo, hi) {
+		completed = true
 		return
 	}
 	for o := lo; o < hi; o++ {
 		y[o] = qdot8GEMV(qt.q[o*qt.in:o*qt.in+qt.in], qt.d[o*qt.nblk:o*qt.nblk+qt.nblk], qv, qt.nblk)
 	}
+	completed = true
 }
 
 // The batched prefill GEMM moved to quant_gemm.go (qGemm8 + the register-blocked tile
