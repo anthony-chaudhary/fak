@@ -761,6 +761,8 @@ type HTTPPlanner struct {
 	// (llama_soft_slot.go): id_slot names the conversation's last slot, or the least
 	// recently used idle one, only while that slot is idle; otherwise it is omitted.
 	LlamaSoftSlot bool
+	// LlamaSoftSlotPolicy is SoftSlotPolicyLRU (default, "") or SoftSlotPolicyWait.
+	LlamaSoftSlotPolicy string
 
 	// CoherenceShaper, when non-nil, is applied to the outbound messages just before
 	// the request is marshaled — the GLM52-HOSTED-CACHE-COHERENCE §A4 hook. The agent

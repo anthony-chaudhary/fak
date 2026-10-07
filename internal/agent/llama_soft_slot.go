@@ -39,9 +39,19 @@ const (
 	llamaSoftSlotMaxConvs     = 4096
 )
 
+// Soft slot policies. LRU moves a conversation whose own slot is busy to the least recently
+// used idle slot. Wait never moves a known conversation: it pins its own slot even when busy,
+// and llama-server hands a freed slot to a task pinned to it first. On strix2 (6 agents, 4
+// slots, private llama-server) LRU's moves cut warm-turn reuse from 99.3% to 82.8%.
+const (
+	SoftSlotPolicyLRU  = "lru"
+	SoftSlotPolicyWait = "wait"
+)
+
 // Soft slot outcomes, the closed vocabulary of LlamaSoftSlotCounts.
 const (
 	SoftSlotSticky      = "sticky"      // the conversation's own slot was idle and was pinned
+	SoftSlotWaited      = "waited"      // policy wait: the conversation's own slot was busy and was pinned anyway
 	SoftSlotAssigned    = "assigned"    // new (or displaced) conversation pinned to the LRU idle slot
 	SoftSlotBusy        = "busy"        // no idle slot; id_slot omitted, upstream chooses
 	SoftSlotUnavailable = "unavailable" // no fresh /slots snapshot; id_slot omitted
@@ -49,11 +59,12 @@ const (
 
 // LlamaSoftSlotOutcomes lists the outcome vocabulary in render order.
 func LlamaSoftSlotOutcomes() []string {
-	return []string{SoftSlotSticky, SoftSlotAssigned, SoftSlotBusy, SoftSlotUnavailable}
+	return []string{SoftSlotSticky, SoftSlotWaited, SoftSlotAssigned, SoftSlotBusy, SoftSlotUnavailable}
 }
 
 var llamaSoftSlotCounts = map[string]*atomic.Uint64{
 	SoftSlotSticky:      {},
+	SoftSlotWaited:      {},
 	SoftSlotAssigned:    {},
 	SoftSlotBusy:        {},
 	SoftSlotUnavailable: {},
@@ -166,7 +177,7 @@ func readLlamaBusySlots(base, apiKey string, timeout time.Duration) (ids []int, 
 
 // pick chooses the slot for one turn, or -1 to leave the choice to llama-server. A non-nil
 // release must be called when the upstream request ends.
-func (st *llamaSoftSlots) pick(base, apiKey string, messages []Message, now time.Time) (int, func(), string) {
+func (st *llamaSoftSlots) pick(base, apiKey, policy string, messages []Message, now time.Time) (int, func(), string) {
 	key, ok := conversationKey(messages)
 	if !ok {
 		return -1, nil, ""
@@ -197,9 +208,14 @@ func (st *llamaSoftSlots) pick(base, apiKey string, messages []Message, now time
 	}
 	outcome := SoftSlotAssigned
 	slot := -1
-	if c, had := st.convs[key]; had && idle(c.slot) && st.slotOwner[c.slot] == key {
+	c, had := st.convs[key]
+	owned := had && st.slotOwner[c.slot] == key
+	switch {
+	case owned && idle(c.slot):
 		slot, outcome = c.slot, SoftSlotSticky
-	} else {
+	case owned && policy == SoftSlotPolicyWait:
+		slot, outcome = c.slot, SoftSlotWaited
+	default:
 		for _, id := range ids {
 			if !idle(id) {
 				continue
@@ -301,7 +317,7 @@ func (p *HTTPPlanner) withLlamaSoftSlot(extra json.RawMessage, messages []Messag
 	if _, set := obj["id_slot"]; set {
 		return extra, nil
 	}
-	slot, release, outcome := llamaSoftSlotsFor(p.BaseURL).pick(p.BaseURL, p.effectiveAPIKey(), messages, time.Now())
+	slot, release, outcome := llamaSoftSlotsFor(p.BaseURL).pick(p.BaseURL, p.effectiveAPIKey(), p.LlamaSoftSlotPolicy, messages, time.Now())
 	if c, ok := llamaSoftSlotCounts[outcome]; ok {
 		c.Add(1)
 	}

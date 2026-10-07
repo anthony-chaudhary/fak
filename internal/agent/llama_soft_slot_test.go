@@ -215,3 +215,34 @@ func TestLlamaSoftSlotIgnoresStaleBusyFromItsOwnFinishedPin(t *testing.T) {
 		t.Fatalf("turn 2 moved %d -> %d on a snapshot that predates the release", a1, a2)
 	}
 }
+
+// Policy wait keeps a known conversation on its own slot even while that slot is busy,
+// where policy lru would move it into another conversation's slot and evict that KV.
+//
+// fak-test:runtime fast est=600ms lane=default
+func TestLlamaSoftSlotWaitPolicyNeverMovesAConversation(t *testing.T) {
+	f := &fakeLlamaSlots{}
+	p := newSoftSlotPlanner(t, f)
+	p.LlamaSoftSlotPolicy = SoftSlotPolicyWait
+	a1, c := softSlotTurn(t, p, conv("agent A"))
+	c.releaseSlot()
+
+	f.setBusy(a1)
+	waitFreshSnapshot(t, p, time.Now())
+	before := llamaSoftSlotCounts[SoftSlotWaited].Load()
+	a2, c := softSlotTurn(t, p, conv("agent A", "turn 2"))
+	c.releaseSlot()
+	if a2 != a1 {
+		t.Fatalf("wait policy moved A from busy slot %d to %d", a1, a2)
+	}
+	if llamaSoftSlotCounts[SoftSlotWaited].Load() != before+1 {
+		t.Fatalf("pin on a busy own slot not counted as waited")
+	}
+
+	if b, c := softSlotTurn(t, p, conv("agent B")); b == a1 || b < 0 {
+		c.releaseSlot()
+		t.Fatalf("new conversation B got slot %d; want an idle slot other than busy %d", b, a1)
+	} else {
+		c.releaseSlot()
+	}
+}

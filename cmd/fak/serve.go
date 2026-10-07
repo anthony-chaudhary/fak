@@ -128,6 +128,7 @@ type serveFlags struct {
 	streamSoftProgressTimeout    *time.Duration
 	llamaSlotAffinity            *bool
 	llamaSoftSlot                *bool
+	llamaSoftSlotPolicy          *string
 	engineCacheEngine            *string
 	engineCacheBaseURL           *string
 	engineCacheAdminKeyEnv       *string
@@ -286,6 +287,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.streamProgressTimeout = fs.Duration("stream-progress-timeout", agent.DefaultStreamProgressTimeout, "proxy mode: end a STREAMING upstream turn that has stayed warm this long without a single frame that advances it (#5486). Keepalive frames (a ping, an SSE comment, an empty-delta chunk) re-arm the inter-byte deadline but are NOT progress, so a generation wedged behind a live socket otherwise rides the 600s whole-request ceiling. DEFAULT-ON at agent.DefaultStreamProgressTimeout (300s), which sits above the worst prefill-to-first-token gap on a large cached prompt and above any extended-thinking pause (thinking streams content deltas, which do count as progress). Pass 0 to DISABLE the deadline — the escape hatch when a provider's prefill legitimately outlasts the window. A positive value outside [5s, 600s] is not honored as a real window: the default is used instead, so a typo never silently becomes a different deadline. Inert on the non-streaming path and on the offline mock planner.")
 	sf.llamaSlotAffinity = fs.Bool("llama-slot-affinity", true, "proxy mode: pin requests that share a system prompt and tool catalog to one llama-server slot (id_slot = crc32(prefix) % total_slots, cache_prompt=true) so sibling subagents reuse the parent's KV. The OpenAI-provider upstream is probed once in the background at /props; the hint is sent only after it reports llama-server total_slots, so vLLM, SGLang, hosted APIs, and a downstream fak gateway are left untouched. Pass false to disable.")
 	sf.llamaSoftSlot = fs.Bool("llama-soft-slot", false, "proxy mode: soft per-conversation llama-server slot choice. Each turn names its conversation's previous slot (id_slot) only while that slot is idle per GET /slots, a new conversation takes the least recently used idle slot, and with every slot busy id_slot is omitted so the upstream chooses. Unlike the old hard pin, no turn ever queues behind a busy slot. Needs a llama-server upstream that answers /props and /slots; anything else is left untouched.")
+	sf.llamaSoftSlotPolicy = fs.String("llama-soft-slot-policy", "lru", "with --llama-soft-slot: what a conversation does when its own slot is busy. lru = move to the least recently used idle slot; wait = stay pinned to its own slot (llama-server gives a freed slot to a task pinned to it first) and never move.")
 	sf.engineCacheEngine = fs.String("engine-cache-engine", "", "self-hosted upstream cache reset engine for quarantined provider-bound tool results: sglang|vllm (empty disables)")
 	sf.engineCacheBaseURL = fs.String("engine-cache-base-url", "", "serving-engine control/base URL for cache reset (default: --base-url when --engine-cache-engine is set)")
 	sf.engineCacheAdminKeyEnv = fs.String("engine-cache-admin-key-env", "", "env var holding the serving-engine admin API key for cache reset")
@@ -1089,6 +1091,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 		StreamSoftProgressTimeout: *sf.streamSoftProgressTimeout,
 		LlamaSlotAffinity:         *sf.llamaSlotAffinity,
 		LlamaSoftSlot:             *sf.llamaSoftSlot,
+		LlamaSoftSlotPolicy:       *sf.llamaSoftSlotPolicy,
 		RichDashboards: gateway.RichDashboardConfig{
 			ApplianceProfile: *sf.applianceObservability || rt.strixPreflight.Detected,
 		},

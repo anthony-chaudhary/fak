@@ -222,6 +222,7 @@ func (s *Server) bindChatRoute(ctx context.Context, requestedModel string) (*cha
 		locality = localitySelfHosted
 		planner.LlamaSlotAffinity = s.llamaSlotAffinity
 		planner.LlamaSoftSlot = s.llamaSoftSlot
+		planner.LlamaSoftSlotPolicy = s.llamaSoftPolicy
 	}
 	return &chatRouteBinding{
 		RequestedModel: requestedModel,
