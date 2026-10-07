@@ -3851,6 +3851,16 @@
           "category": "incidental",
           "reason": "private helper lifted verbatim out of cmdManageCommand to keep guard.go under the god-file ceiling; not a new concept",
           "token": "installGuardLogvaultMetrics"
+        },
+        {
+          "category": "incidental",
+          "reason": "env override name for the gateway's structured-output schema size/depth cap; a config knob spelling, not a distinct concept",
+          "token": "FAK_GATEWAY_JSON_SCHEMA_MAX_BYTES"
+        },
+        {
+          "category": "incidental",
+          "reason": "env override name for the gateway's structured-output schema size/depth cap; a config knob spelling, not a distinct concept",
+          "token": "FAK_GATEWAY_JSON_SCHEMA_MAX_DEPTH"
         }
       ],
       "exclude": [
@@ -3894,6 +3904,8 @@
         "EnvGated",
         "ExitGate",
         "FAK_CHILD_ATTEMPT_ID",
+        "FAK_GATEWAY_JSON_SCHEMA_MAX_BYTES",
+        "FAK_GATEWAY_JSON_SCHEMA_MAX_DEPTH",
         "FAK_GUARD_HANDOFF_BLOCK_CEILING",
         "FAK_GUARD_OPERATOR_QUESTION_MODE",
         "FAK_GUARD_REASONING_EFFORT",
@@ -8733,6 +8745,16 @@
           "category": "incidental",
           "reason": "Filename-derived token of the new internal/agent/inkernel_incremental.go port file; the file carries the composable system-context source/registry/snapshot seam and introduces no new gateway transport, engine dispatch, or admission authority.",
           "token": "inkernelincremental"
+        },
+        {
+          "category": "incidental",
+          "reason": "env override name for the gateway's structured-output schema size/depth cap; a config knob spelling, not a distinct concept",
+          "token": "FAK_GATEWAY_JSON_SCHEMA_MAX_BYTES"
+        },
+        {
+          "category": "incidental",
+          "reason": "env override name for the gateway's structured-output schema size/depth cap; a config knob spelling, not a distinct concept",
+          "token": "FAK_GATEWAY_JSON_SCHEMA_MAX_DEPTH"
         }
       ],
       "id": "gateway-engine",
@@ -8753,6 +8775,8 @@
         "EngineReductionPct",
         "EngineWebSearch",
         "EngineWrite",
+        "FAK_GATEWAY_JSON_SCHEMA_MAX_BYTES",
+        "FAK_GATEWAY_JSON_SCHEMA_MAX_DEPTH",
         "FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE",
         "FAK_INKERNEL_RADIX_HOST_L2_BYTES",
         "GatewaySeat",

@@ -280,6 +280,14 @@ func newStructuredOutputProxy(t *testing.T) (gatewayURL string, hits *int, gotRF
 
 func postResponseFormat(t *testing.T, gatewayURL string, rf json.RawMessage) (int, string) {
 	t.Helper()
+	status, code, _ := postResponseFormatFault(t, gatewayURL, rf)
+	return status, code
+}
+
+// postResponseFormatFault posts rf and returns the status plus the typed error code
+// and schema_path of a refusal (empty on success).
+func postResponseFormatFault(t *testing.T, gatewayURL string, rf json.RawMessage) (status int, code, schemaPath string) {
+	t.Helper()
 	body := []byte(`{"model":"qwen3.6-27b","messages":[{"role":"user","content":"hi"}],"response_format":` + string(rf) + `}`)
 	resp, err := http.Post(gatewayURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
 	if err != nil {
@@ -289,55 +297,88 @@ func postResponseFormat(t *testing.T, gatewayURL string, rf json.RawMessage) (in
 	raw, _ := io.ReadAll(resp.Body)
 	var env struct {
 		Error struct {
-			Code string `json:"code"`
-			Type string `json:"type"`
+			Code       string `json:"code"`
+			Type       string `json:"type"`
+			SchemaPath string `json:"schema_path"`
 		} `json:"error"`
 	}
 	_ = json.Unmarshal(raw, &env)
 	if resp.StatusCode == http.StatusUnprocessableEntity && env.Error.Type != "invalid_request_error" {
 		t.Fatalf("422 error type = %q, want invalid_request_error: %s", env.Error.Type, raw)
 	}
-	return resp.StatusCode, env.Error.Code
+	return resp.StatusCode, env.Error.Code, env.Error.SchemaPath
 }
 
 // TestChatRejectsMalformedJSONSchema422 pins oss-port-gateway-json-schema-validate
 // (ADAPT of TGI router/src/validation.rs:341-406@b4adbf2): a malformed json_schema
-// response_format is refused with 422 + a closed code BEFORE any upstream call, while
-// a valid json_schema and a json_object response_format still pass through verbatim.
+// response_format is refused with 422 + a closed code and schema_path BEFORE any
+// upstream call, while every valid JSON Schema shape clients send (no "type", open
+// objects, root anyOf/oneOf/allOf, root $ref + $defs/definitions, boolean schemas)
+// and json_object pass through verbatim.
 func TestChatRejectsMalformedJSONSchema422(t *testing.T) {
 	gw, hits, gotRF := newStructuredOutputProxy(t)
 	rejects := []struct {
-		name, rf, code string
+		name, rf, code, path string
 	}{
-		{"not an object", `"json_schema"`, errCodeInvalidResponseFormat},
-		{"missing json_schema", `{"type":"json_schema"}`, errCodeJSONSchemaMissing},
-		{"missing schema", `{"type":"json_schema","json_schema":{"name":"x"}}`, errCodeJSONSchemaMissing},
-		{"non-object schema", `{"type":"json_schema","json_schema":{"name":"x","schema":["object"]}}`, errCodeJSONSchemaNotObject},
-		{"string schema", `{"type":"json_schema","json_schema":{"name":"x","schema":"object"}}`, errCodeJSONSchemaNotObject},
-		{"schema without type", `{"type":"json_schema","json_schema":{"name":"x","schema":{"properties":{}}}}`, errCodeJSONSchemaMissingType},
-		{"object without properties", `{"type":"json_schema","json_schema":{"name":"x","schema":{"type":"object"}}}`, errCodeJSONSchemaMissingProperty},
+		{"response_format not an object", `"json_schema"`, errCodeInvalidResponseFormat, ""},
+		{"json_schema missing", `{"type":"json_schema"}`, errCodeJSONSchemaMissing, ""},
+		{"json_schema null", `{"type":"json_schema","json_schema":null}`, errCodeJSONSchemaMissing, ""},
+		{"json_schema not an object", `{"type":"json_schema","json_schema":"x"}`, errCodeJSONSchemaNotObject, ""},
+		{"schema missing", `{"type":"json_schema","json_schema":{"name":"x"}}`, errCodeJSONSchemaMissing, ""},
+		{"schema array", `{"type":"json_schema","json_schema":{"name":"x","schema":["object"]}}`, errCodeJSONSchemaNotObject, "#"},
+		{"schema string", `{"type":"json_schema","json_schema":{"name":"x","schema":"object"}}`, errCodeJSONSchemaNotObject, "#"},
+		{"schema number", `{"type":"json_schema","json_schema":{"name":"x","schema":1}}`, errCodeJSONSchemaNotObject, "#"},
+		{"type unknown name", `{"type":"json_schema","json_schema":{"name":"x","schema":{"type":"date"}}}`, errCodeJSONSchemaInvalidType, "#/type"},
+		{"type number", `{"type":"json_schema","json_schema":{"name":"x","schema":{"type":1}}}`, errCodeJSONSchemaInvalidType, "#/type"},
+		{"type empty string", `{"type":"json_schema","json_schema":{"name":"x","schema":{"type":""}}}`, errCodeJSONSchemaInvalidType, "#/type"},
+		{"type empty array", `{"type":"json_schema","json_schema":{"name":"x","schema":{"type":[]}}}`, errCodeJSONSchemaInvalidType, "#/type"},
+		{"type array with unknown", `{"type":"json_schema","json_schema":{"name":"x","schema":{"type":["string","date"]}}}`, errCodeJSONSchemaInvalidType, "#/type"},
+		{"nested property type unknown", `{"type":"json_schema","json_schema":{"name":"x","schema":{"type":"object","properties":{"a":{"type":"str"}}}}}`, errCodeJSONSchemaInvalidType, "#/properties/a/type"},
+		{"properties array", `{"type":"json_schema","json_schema":{"name":"x","schema":{"type":"object","properties":["a"]}}}`, errCodeJSONSchemaInvalidProps, "#/properties"},
+		{"properties string", `{"type":"json_schema","json_schema":{"name":"x","schema":{"properties":"a"}}}`, errCodeJSONSchemaInvalidProps, "#/properties"},
+		{"required string", `{"type":"json_schema","json_schema":{"name":"x","schema":{"type":"object","properties":{},"required":"a"}}}`, errCodeJSONSchemaInvalidRequired, "#/required"},
+		{"required non-string items", `{"type":"json_schema","json_schema":{"name":"x","schema":{"type":"object","properties":{},"required":[1]}}}`, errCodeJSONSchemaInvalidRequired, "#/required"},
+		{"required boolean", `{"type":"json_schema","json_schema":{"name":"x","schema":{"type":"object","properties":{"a":{"type":"string","required":true}}}}}`, errCodeJSONSchemaInvalidRequired, "#/properties/a/required"},
+		{"anyOf branch type unknown", `{"type":"json_schema","json_schema":{"name":"x","schema":{"anyOf":[{"type":"string"},{"type":"nope"}]}}}`, errCodeJSONSchemaInvalidType, "#/anyOf/1/type"},
+		{"$defs entry properties malformed", `{"type":"json_schema","json_schema":{"name":"x","schema":{"$ref":"#/$defs/a~1b","$defs":{"a/b":{"properties":1}}}}}`, errCodeJSONSchemaInvalidProps, "#/$defs/a~1b/properties"},
 	}
 	for _, tc := range rejects {
-		status, code := postResponseFormat(t, gw, json.RawMessage(tc.rf))
-		if status != http.StatusUnprocessableEntity || code != tc.code {
-			t.Errorf("%s: status=%d code=%q, want 422 %q", tc.name, status, code, tc.code)
+		status, code, path := postResponseFormatFault(t, gw, json.RawMessage(tc.rf))
+		if status != http.StatusUnprocessableEntity || code != tc.code || path != tc.path {
+			t.Errorf("%s: status=%d code=%q schema_path=%q, want 422 %q %q", tc.name, status, code, path, tc.code, tc.path)
 		}
 	}
 	if *hits != 0 {
 		t.Fatalf("upstream hits = %d after malformed schemas, want 0 (refuse before forwarding)", *hits)
 	}
-	passes := []string{
-		`{"type":"json_schema","json_schema":{"name":"x","strict":true,"schema":{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}}}`,
-		`{"type":"json_schema","json_schema":{"name":"x","schema":{"type":"string"}}}`,
-		`{"type":"json_object"}`,
+	passes := []struct{ name, rf string }{
+		{"strict object", `{"type":"json_schema","json_schema":{"name":"x","strict":true,"schema":{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}}}`},
+		{"string", `{"type":"json_schema","json_schema":{"name":"x","schema":{"type":"string"}}}`},
+		{"json_object", `{"type":"json_object"}`},
+		{"no type", `{"type":"json_schema","json_schema":{"name":"x","schema":{"properties":{"a":{}}}}}`},
+		{"no type enum only", `{"type":"json_schema","json_schema":{"name":"x","schema":{"enum":["a","b"]}}}`},
+		{"empty schema", `{"type":"json_schema","json_schema":{"name":"x","schema":{}}}`},
+		{"object without properties", `{"type":"json_schema","json_schema":{"name":"x","schema":{"type":"object"}}}`},
+		{"object additionalProperties only", `{"type":"json_schema","json_schema":{"name":"x","schema":{"type":"object","additionalProperties":{"type":"integer"}}}}`},
+		{"type array", `{"type":"json_schema","json_schema":{"name":"x","schema":{"type":["string","null"]}}}`},
+		{"root anyOf", `{"type":"json_schema","json_schema":{"name":"x","schema":{"anyOf":[{"type":"string"},{"type":"object","properties":{"a":{"type":"number"}}}]}}}`},
+		{"root oneOf", `{"type":"json_schema","json_schema":{"name":"x","schema":{"oneOf":[{"type":"integer"},{"type":"null"}]}}}`},
+		{"root allOf", `{"type":"json_schema","json_schema":{"name":"x","schema":{"allOf":[{"properties":{"a":{"type":"string"}}},{"required":["a"]}]}}}`},
+		{"root $ref $defs", `{"type":"json_schema","json_schema":{"name":"x","schema":{"$ref":"#/$defs/item","$defs":{"item":{"type":"object","properties":{"id":{"type":"integer"}}}}}}}`},
+		{"root $ref definitions", `{"type":"json_schema","json_schema":{"name":"x","schema":{"$ref":"#/definitions/item","definitions":{"item":{"type":"string"}}}}}`},
+		{"boolean schema true", `{"type":"json_schema","json_schema":{"name":"x","schema":true}}`},
+		{"boolean schema false", `{"type":"json_schema","json_schema":{"name":"x","schema":false}}`},
+		{"boolean subschemas", `{"type":"json_schema","json_schema":{"name":"x","schema":{"type":"object","properties":{"a":true,"b":false},"additionalProperties":false}}}`},
+		{"data keywords not walked", `{"type":"json_schema","json_schema":{"name":"x","schema":{"type":"object","properties":{"type":{"type":"string"},"properties":{"type":"string"}},"default":{"type":"bogus","properties":1},"const":{"required":"x"}}}}`},
 	}
-	for i, rf := range passes {
-		status, code := postResponseFormat(t, gw, json.RawMessage(rf))
+	for _, tc := range passes {
+		status, code, _ := postResponseFormatFault(t, gw, json.RawMessage(tc.rf))
 		if status != http.StatusOK {
-			t.Fatalf("valid response_format %d: status=%d code=%q, want 200", i, status, code)
+			t.Errorf("%s: status=%d code=%q, want 200", tc.name, status, code)
+			continue
 		}
-		if !jsonEqual(t, *gotRF, json.RawMessage(rf)) {
-			t.Fatalf("valid response_format %d not forwarded verbatim: got %s want %s", i, *gotRF, rf)
+		if !jsonEqual(t, *gotRF, json.RawMessage(tc.rf)) {
+			t.Errorf("%s: not forwarded verbatim: got %s want %s", tc.name, *gotRF, tc.rf)
 		}
 	}
 	if *hits != len(passes) {
