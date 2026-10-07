@@ -68,6 +68,12 @@ var ErrStreamingUnsupported = errors.New("agent: streaming not supported for thi
 // sampling resolution, request-model + credential pass-through, and (Anthropic)
 // raw-body passthrough, so a streamed request differs from a buffered one ONLY by the
 // `stream` flag in the body.
+func (c *upstreamCall) releaseSlot() {
+	if c != nil && c.slotRelease != nil {
+		c.slotRelease()
+	}
+}
+
 type upstreamCall struct {
 	adapter      TranscriptAdapter
 	url          string
@@ -88,6 +94,9 @@ type upstreamCall struct {
 	// concurrent turns on one planner never race, and it lets the soft no-progress
 	// diagnostic (#10638) report which retry attempt a silent turn fell on.
 	attemptsUsed int
+	// slotRelease frees the soft llama-server slot pin (llama_soft_slot.go) when the
+	// upstream request ends; nil when no slot was pinned.
+	slotRelease func()
 	// authRefreshable marks the pinned/rotating-credential path — no per-request
 	// UpstreamAPIKey (the transparent passthrough hop authenticates with the client's
 	// OWN key, which we must not second-guess) AND a live APIKeyFunc on the planner. On
@@ -381,7 +390,13 @@ func (c *upstreamCall) applyHeaders(req *http.Request) {
 // selects whether the marshaled body asks the provider to deliver an SSE token
 // stream (honored only by the OpenAI-compatible chat wire; other adapters ignore the
 // flag, so an unsupported-wire body is byte-for-byte the non-stream one).
-func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, stream bool, opts ...SampleOpt) (*upstreamCall, error) {
+func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, stream bool, opts ...SampleOpt) (_ *upstreamCall, retErr error) {
+	var slotRelease func()
+	defer func() {
+		if retErr != nil && slotRelease != nil {
+			slotRelease()
+		}
+	}()
 	adapter, err := p.transcriptAdapter()
 	if err != nil {
 		return nil, err
@@ -449,6 +464,7 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 		// Advisory llama-server hint (llama_slot_affinity.go): cache_prompt=true, no id_slot,
 		// so the upstream picks the slot. No-op for non-llama upstreams.
 		extraBody = p.withLlamaSlotAffinity(extraBody)
+		extraBody, slotRelease = p.withLlamaSoftSlot(extraBody, safeMessages)
 		reqBody, err = adapter.MarshalRequest(adapterRequest{
 			Model:                    modelID,
 			ServiceTier:              sp.ServiceTier,
@@ -507,6 +523,7 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 		cacheHint:         cacheHint,
 		responsesStreamed: forceResponsesStream,
 		authRefreshable:   authRefreshable,
+		slotRelease:       slotRelease,
 	}, nil
 }
 
@@ -702,6 +719,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	if err != nil {
 		return nil, err
 	}
+	defer call.releaseSlot()
 	// Retry a transient transport error OR a retryable status (429/503/529/…) with the
 	// SAME backoff+jitter+Retry-After policy as Complete — but ONLY here, before the first
 	// byte is streamed. A pre-stream failure has emitted nothing to the sink, so the retry

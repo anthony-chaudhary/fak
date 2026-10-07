@@ -359,6 +359,9 @@ type Config struct {
 	// cache_prompt. False (the zero value) never probes. `fak serve` feeds this from
 	// --llama-slot-affinity.
 	LlamaSlotAffinity bool
+	// LlamaSoftSlot opts every proxy planner into soft per-conversation llama-server slot
+	// choice (agent.HTTPPlanner.LlamaSoftSlot). `fak serve` sets it from --llama-soft-slot.
+	LlamaSoftSlot bool
 	// FirstTokenWatchdog is the resolved buffered first-token watchdog window: how long a
 	// buffered planner call may run before it produces its completion (its first token)
 	// before the turn fails as a typed 504 upstream_stalled. ZERO (every caller that never

@@ -338,6 +338,7 @@ func New(cfg Config) (*Server, error) {
 		route:                        newRouteLive(cfg.RouteManifest),
 		roster:                       cfg.RouteAccounts,
 		llamaSlotAffinity:            cfg.LlamaSlotAffinity,
+		llamaSoftSlot:                cfg.LlamaSoftSlot,
 		native:                       cfg.Native,
 		nativeMaxTurns:               nativeMaxTurnsOr(cfg.NativeMaxTurns),
 		nativeCodeCatalog:            nativeCodeCatalog,
@@ -989,6 +990,7 @@ func newConfiguredHTTPPlanner(cfg Config, model, dialURL string) (*agent.HTTPPla
 	// than hard), resolved by streamSoftProgressWindow at arm time.
 	p.StreamSoftProgressTimeout = cfg.StreamSoftProgressTimeout
 	p.LlamaSlotAffinity = cfg.LlamaSlotAffinity
+	p.LlamaSoftSlot = cfg.LlamaSoftSlot
 	wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver, cfg.UpstreamTransportErrorObserver, cfg.UpstreamFailureObserver)
 	return p, nil
 }

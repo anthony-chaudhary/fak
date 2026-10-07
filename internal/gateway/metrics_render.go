@@ -334,6 +334,7 @@ func (s *Server) renderMetrics() string {
 	s.writeInKernelPressureTrimMetrics(&b)
 	s.writeMoEResidencyMetrics(&b) // #5617: activated-expert residency for a serve that declared an expert budget
 	m.writeCompactionMetrics(&b)
+	writeLlamaSoftSlotMetrics(&b)
 	s.writeToolPageMetrics(&b) // #2440: ctxmmu tool-schema page catalog residency + dedup witnesses
 	m.writeResetShadowMetrics(&b)
 	m.writeCacheBreakMetrics(&b) // #2916: per-session cache-break events + cold-rebuild token cost, by closed cause
@@ -1324,6 +1325,18 @@ func (s *Server) writeToolPageMetrics(b *strings.Builder) {
 // missed for a reason fak does not control (cache TTL expiry, eviction, or the client moving its
 // own breakpoint). Reading the crater as "the splice broke the cache" is the conflation this
 // split exists to prevent.
+// writeLlamaSoftSlotMetrics publishes the soft llama-server slot decisions
+// (agent/llama_soft_slot.go). All zero unless --llama-soft-slot is on.
+func writeLlamaSoftSlotMetrics(b *strings.Builder) {
+	counts := agent.LlamaSoftSlotCounts()
+	writeHelpType(b, "fak_gateway_llama_soft_slot_total",
+		"WITNESSED (fak authored): soft per-conversation llama-server slot decisions by outcome ("+
+			strings.Join(agent.LlamaSoftSlotOutcomes(), "|")+"). sticky = the conversation's own slot was idle and pinned; assigned = pinned to the least recently used idle slot; busy = no idle slot, id_slot omitted; unavailable = /slots unreadable.", "counter")
+	for _, o := range agent.LlamaSoftSlotOutcomes() {
+		fmt.Fprintf(b, "fak_gateway_llama_soft_slot_total{outcome=%q} %d\n", o, counts[o])
+	}
+}
+
 func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 	snap := m.compactionSnapshotData()
 

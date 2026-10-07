@@ -757,6 +757,10 @@ type HTTPPlanner struct {
 	// upstream. False (the zero value) sends no probe and leaves the body untouched, so
 	// generic OpenAI-compatible upstreams never see it.
 	LlamaSlotAffinity bool
+	// LlamaSoftSlot opts this planner into soft per-conversation slot choice
+	// (llama_soft_slot.go): id_slot names the conversation's last slot, or the least
+	// recently used idle one, only while that slot is idle; otherwise it is omitted.
+	LlamaSoftSlot bool
 
 	// CoherenceShaper, when non-nil, is applied to the outbound messages just before
 	// the request is marshaled — the GLM52-HOSTED-CACHE-COHERENCE §A4 hook. The agent
@@ -1089,6 +1093,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 	if err != nil {
 		return nil, err
 	}
+	defer call.releaseSlot()
 	// Retry on a TRANSIENT transport error OR a retryable status (429 rate-limit,
 	// 5xx overload) with exponential backoff — the live-API-limit failure mode. A
 	// 4xx other than 429 is a request error and is NOT retried. A DETERMINISTIC

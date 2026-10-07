@@ -1,0 +1,174 @@
+package agent
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+)
+
+type fakeLlamaSlots struct {
+	mu      sync.Mutex
+	busy    map[int]bool
+	noSlots bool
+}
+
+func (f *fakeLlamaSlots) setBusy(ids ...int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.busy = map[int]bool{}
+	for _, id := range ids {
+		f.busy[id] = true
+	}
+}
+
+func newSoftSlotPlanner(t *testing.T, f *fakeLlamaSlots) *HTTPPlanner {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/props":
+			_, _ = w.Write([]byte(`{"total_slots":4}`))
+		case "/slots":
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if f.noSlots {
+				http.NotFound(w, r)
+				return
+			}
+			parts := make([]string, 4)
+			for i := range parts {
+				parts[i] = fmt.Sprintf(`{"id":%d,"is_processing":%v}`, i, f.busy[i])
+			}
+			_, _ = w.Write([]byte("[" + strings.Join(parts, ",") + "]"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(ts.Close)
+	p := &HTTPPlanner{Provider: ProviderOpenAI, BaseURL: ts.URL + "/v1", ModelID: "m", LlamaSlotAffinity: true, LlamaSoftSlot: true}
+	llamaSlotStateFor(p.BaseURL).slots.Store(4)
+	return p
+}
+
+// softSlotTurn prepares one request and returns its id_slot (-1 when omitted) and the call,
+// whose releaseSlot ends the turn.
+func softSlotTurn(t *testing.T, p *HTTPPlanner, msgs []Message) (int, *upstreamCall) {
+	t.Helper()
+	call, err := p.prepareUpstream(msgs, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(call.body, &body); err != nil {
+		t.Fatal(err)
+	}
+	raw, ok := body["id_slot"]
+	if !ok {
+		return -1, call
+	}
+	var id int
+	if err := json.Unmarshal(raw, &id); err != nil {
+		t.Fatal(err)
+	}
+	return id, call
+}
+
+func conv(user string, extra ...string) []Message {
+	msgs := []Message{{Role: RoleSystem, Content: "shared harness prompt"}, {Role: RoleUser, Content: user}}
+	for _, e := range extra {
+		msgs = append(msgs, Message{Role: RoleAssistant, Content: "ok"}, Message{Role: RoleUser, Content: e})
+	}
+	return msgs
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestLlamaSoftSlotReturnsConversationToItsIdleSlot(t *testing.T) {
+	f := &fakeLlamaSlots{}
+	p := newSoftSlotPlanner(t, f)
+
+	a1, c := softSlotTurn(t, p, conv("agent A"))
+	c.releaseSlot()
+	b1, c := softSlotTurn(t, p, conv("agent B"))
+	c.releaseSlot()
+	if a1 < 0 || b1 < 0 || a1 == b1 {
+		t.Fatalf("A=%d B=%d: two conversations sharing a system prompt must take distinct idle slots", a1, b1)
+	}
+	a2, c := softSlotTurn(t, p, conv("agent A", "turn 2"))
+	c.releaseSlot()
+	b2, c := softSlotTurn(t, p, conv("agent B", "turn 2"))
+	c.releaseSlot()
+	if a2 != a1 || b2 != b1 {
+		t.Fatalf("second turns went A %d->%d, B %d->%d; want each back on its own slot", a1, a2, b1, b2)
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestLlamaSoftSlotNeverNamesABusySlot(t *testing.T) {
+	f := &fakeLlamaSlots{}
+	p := newSoftSlotPlanner(t, f)
+	a1, c := softSlotTurn(t, p, conv("agent A"))
+	c.releaseSlot()
+
+	f.setBusy(a1)
+	a2, c := softSlotTurn(t, p, conv("agent A", "turn 2"))
+	c.releaseSlot()
+	if a2 == a1 || a2 < 0 {
+		t.Fatalf("A's slot %d is busy upstream; got id_slot %d, want another idle slot", a1, a2)
+	}
+
+	f.setBusy(0, 1, 2, 3)
+	if got, c := softSlotTurn(t, p, conv("agent A", "turn 3")); got != -1 {
+		c.releaseSlot()
+		t.Fatalf("every slot busy: id_slot %d sent, want omitted so no turn queues", got)
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestLlamaSoftSlotCountsItsOwnInflightPins(t *testing.T) {
+	f := &fakeLlamaSlots{}
+	p := newSoftSlotPlanner(t, f)
+	first, held := softSlotTurn(t, p, conv("agent A"))
+	second, c := softSlotTurn(t, p, conv("agent A", "parallel"))
+	c.releaseSlot()
+	held.releaseSlot()
+	if first < 0 || second == first {
+		t.Fatalf("concurrent turns pinned %d and %d; an in-flight pin must keep its slot busy before /slots shows it", first, second)
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestLlamaSoftSlotLeavesBodyAloneWhenOffOrUnreadable(t *testing.T) {
+	f := &fakeLlamaSlots{noSlots: true}
+	p := newSoftSlotPlanner(t, f)
+	if got, _ := softSlotTurn(t, p, conv("agent A")); got != -1 {
+		t.Fatalf("/slots unreadable: id_slot %d sent, want omitted", got)
+	}
+
+	p2 := newSoftSlotPlanner(t, &fakeLlamaSlots{})
+	p2.LlamaSoftSlot = false
+	if got, _ := softSlotTurn(t, p2, conv("agent A")); got != -1 {
+		t.Fatalf("soft slot off: id_slot %d sent", got)
+	}
+
+	p3 := newSoftSlotPlanner(t, &fakeLlamaSlots{})
+	p3.ExtraBody = json.RawMessage(`{"id_slot":3}`)
+	if got, _ := softSlotTurn(t, p3, conv("agent A")); got != 3 {
+		t.Fatalf("operator id_slot overridden: %d", got)
+	}
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestConversationKeyIgnoresLaterTurns(t *testing.T) {
+	k1, ok1 := conversationKey(conv("agent A"))
+	k2, ok2 := conversationKey(conv("agent A", "turn 2", "turn 3"))
+	k3, _ := conversationKey(conv("agent B"))
+	if !ok1 || !ok2 || k1 != k2 || k1 == k3 {
+		t.Fatalf("keys A1=%x A3=%x B=%x", k1, k2, k3)
+	}
+	if _, ok := conversationKey([]Message{{Role: RoleSystem, Content: "only system"}}); ok {
+		t.Fatalf("a transcript with no user turn has no conversation key")
+	}
+}
