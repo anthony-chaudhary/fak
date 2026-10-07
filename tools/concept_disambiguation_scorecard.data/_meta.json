@@ -3816,6 +3816,41 @@
           "category": "incidental",
           "reason": "Private schema-2 receipt label for the existing pre-push git-hook gate; explicitly marks unqualified legacy build evidence and does not authorize schema-3 immutable-range reuse.",
           "token": "prepushLegacyGateContract"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper lifted verbatim out of cmdManageCommand to keep guard.go under the god-file ceiling; not a new concept",
+          "token": "applyGuardDeadlineEnvOverrides"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper lifted verbatim out of cmdManageCommand to keep guard.go under the god-file ceiling; not a new concept",
+          "token": "guardResolveLocalAuto"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper lifted verbatim out of cmdManageCommand to keep guard.go under the god-file ceiling; not a new concept",
+          "token": "guardCheckRemoteServe"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper lifted verbatim out of cmdManageCommand to keep guard.go under the god-file ceiling; not a new concept",
+          "token": "validateGuardBudgetFlags"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper lifted verbatim out of cmdManageCommand to keep guard.go under the god-file ceiling; not a new concept",
+          "token": "guardBootStartupPhases"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper lifted verbatim out of cmdManageCommand to keep guard.go under the god-file ceiling; not a new concept",
+          "token": "startGuardResourceSampler"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper lifted verbatim out of cmdManageCommand to keep guard.go under the god-file ceiling; not a new concept",
+          "token": "installGuardLogvaultMetrics"
         }
       ],
       "exclude": [
@@ -3923,6 +3958,7 @@
         "allAggregates",
         "appendGuardCompactionWitnessTo",
         "appendGuardDisableUsage",
+        "applyGuardDeadlineEnvOverrides",
         "armbenchPonytailGates",
         "baseAggregates",
         "beginGuardProviderBoundary",
@@ -3992,6 +4028,8 @@
         "guardAllowDropExpired",
         "guardAllowExpiryStamp",
         "guardAllowPruneOrphanExpiry",
+        "guardBootStartupPhases",
+        "guardCheckRemoteServe",
         "guardClaudeCommandIndex",
         "guardCodexPowerShellCommand",
         "guardCodexSessionStartBinding",
@@ -4123,6 +4161,7 @@
         "guardReasoningPostureMultipliers",
         "guardRegistration",
         "guardRegistrations",
+        "guardResolveLocalAuto",
         "guardRuntime",
         "guardScope",
         "guardSelfTightenFloorNote",
@@ -4180,6 +4219,7 @@
         "hasAggregate",
         "injectGuardProfiles",
         "installGuardCodexSessionStartHookAt",
+        "installGuardLogvaultMetrics",
         "installguardmcpregistration",
         "latestGuardCompactionWitness",
         "launchGuardedCodexOrchestrationWorker",
@@ -4255,6 +4295,7 @@
         "stallscanSkewGuard",
         "startBoundGuardRegistration",
         "startGuardRegistration",
+        "startGuardResourceSampler",
         "summarizeGates",
         "summarizeguardstops",
         "sysToolGate",
@@ -4265,6 +4306,7 @@
         "transform_guard",
         "ungated",
         "unguarded",
+        "validateGuardBudgetFlags",
         "verifyGateCheckout",
         "wgate",
         "withGuardRegistrationEnv",
@@ -15256,6 +15298,16 @@
           "category": "incidental",
           "reason": "Concrete amdgpu return type reused by the extracted validator; the duplicate reference does not define a second archive or plan.",
           "token": "StrixCandidateArchive"
+        },
+        {
+          "category": "incidental",
+          "reason": "Strix promotion plausibility bound internal to candidate evaluation; not a new concept",
+          "token": "MaxPinnedCandidateGain"
+        },
+        {
+          "category": "incidental",
+          "reason": "Strix promotion plausibility bound internal to candidate evaluation; not a new concept",
+          "token": "checkCandidatePlausible"
         }
       ],
       "exclude": [
@@ -15314,6 +15366,7 @@
         "MSIXPlan",
         "MaintenanceSeconds",
         "MatMulCandidate",
+        "MaxPinnedCandidateGain",
         "MergePlan",
         "MixedQKVCandidate",
         "MotifCatalogPlanFanoutReconcile",
@@ -15405,6 +15458,7 @@
         "candidatecachedir",
         "candidatemean",
         "candidates",
+        "checkCandidatePlausible",
         "clonePlan",
         "compareCandidate",
         "componentPlan",
@@ -15461,8 +15515,8 @@
         "relationCandidates",
         "removeCandidate",
         "reportFromSessions",
-        "requestedExecutionPlan",
         "requestMemoryPlanWithExtras",
+        "requestedExecutionPlan",
         "rollbackCodexMarketplaceCandidate",
         "runAblatePlan",
         "runContinuitySyncPlan",
