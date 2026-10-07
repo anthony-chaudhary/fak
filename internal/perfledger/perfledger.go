@@ -76,7 +76,28 @@ type Record struct {
 	// (llama.cpp timings draft_n / draft_n_accepted); absent when it drafted nothing.
 	UpstreamSpecDraftTokens    int `json:"upstream_spec_draft_tokens,omitempty"`
 	UpstreamSpecAcceptedTokens int `json:"upstream_spec_accepted_tokens,omitempty"`
+	Identity
 }
+
+// Identity names the server that wrote a row, so a window spanning a planner
+// swap, a backend change, a host move or a fak upgrade is visible instead of
+// folded into one quantile. Empty fields are omitted; rows written before
+// Identity existed decode with every field empty.
+type Identity struct {
+	Planner string `json:"planner,omitempty"`
+	Backend string `json:"backend,omitempty"`
+	Host    string `json:"host,omitempty"`
+	Version string `json:"fak_version,omitempty"`
+}
+
+// ServedBy is the identity of one row including its model; it is what the
+// summary counts as distinct.
+type ServedBy struct {
+	Model string `json:"model,omitempty"`
+	Identity
+}
+
+func (r Record) servedBy() ServedBy { return ServedBy{Model: r.Model, Identity: r.Identity} }
 
 // Native decode paths (enginestep's closed path vocabulary).
 const (
@@ -171,6 +192,11 @@ type Summary struct {
 	// Probes counts liveness/probe turns (see Record.IsProbe) left out of every
 	// quantile, share, and regime above; Count is the served turns only.
 	Probes int `json:"probes,omitempty"`
+	// ServedBy is the newest row's model and server identity; Identities counts
+	// the distinct ones in the window, so >1 marks quantiles that mix models,
+	// planners, backends, hosts or builds.
+	ServedBy   *ServedBy `json:"served_by,omitempty"`
+	Identities int       `json:"identities,omitempty"`
 }
 
 type RegimeSummary struct {
@@ -220,12 +246,17 @@ func Summarize(recs []Record) Summary {
 	regimeTTFT := map[string][]float64{}
 	regimeE2E := map[string][]float64{}
 	regimeCount := map[string]int{}
+	servedBy := map[ServedBy]struct{}{}
 	for _, r := range recs {
 		if r.IsProbe() {
 			s.Probes++
 			continue
 		}
 		s.Count++
+		if sb := r.servedBy(); sb != (ServedBy{}) {
+			servedBy[sb] = struct{}{}
+			s.ServedBy = &sb
+		}
 		regime := r.regime()
 		regimeCount[regime]++
 		if r.TTFTMS > 0 {
@@ -269,6 +300,7 @@ func Summarize(recs []Record) Summary {
 	if s.SpecDraftTokens > 0 {
 		s.SpecAcceptRate = roundTo(float64(s.SpecAcceptedTokens)/float64(s.SpecDraftTokens), 10000)
 	}
+	s.Identities = len(servedBy)
 	s.TTFTMeasured = len(ttft)
 	s.TTFTP50MS = quantile(ttft, 0.50)
 	s.TTFTP99MS = quantile(ttft, 0.99)
@@ -341,6 +373,20 @@ func RenderCompact(rep Report) string {
 		}
 		b.WriteString(")")
 	}
+	if sb := s.ServedBy; sb != nil {
+		b.WriteString(" | served by")
+		writeField(&b, "model", sb.Model)
+		planner := sb.Planner
+		if sb.Backend != "" {
+			planner = strings.TrimPrefix(planner+"/"+sb.Backend, "/")
+		}
+		writeField(&b, "planner", planner)
+		writeField(&b, "host", sb.Host)
+		writeField(&b, "fak", sb.Version)
+		if s.Identities > 1 {
+			fmt.Fprintf(&b, " (window mixes %d)", s.Identities)
+		}
+	}
 	if rep.Window.Capped {
 		b.WriteString(" | capped")
 	}
@@ -394,6 +440,12 @@ func quantile(vals []float64, q float64) float64 {
 		idx = len(sorted) - 1
 	}
 	return sorted[idx]
+}
+
+func writeField(b *strings.Builder, key, val string) {
+	if val != "" {
+		fmt.Fprintf(b, " %s=%s", key, val)
+	}
 }
 
 func fmtMS(v float64) string {

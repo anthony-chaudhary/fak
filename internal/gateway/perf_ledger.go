@@ -2,11 +2,14 @@ package gateway
 
 import (
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/perfledger"
 )
 
@@ -57,6 +60,46 @@ func perfDetailFromCompletion(comp *agent.Completion) perfDetail {
 	return d
 }
 
+// perfIdentity is the server identity stamped on every perf row. Backend is
+// resolved only for a direct in-kernel planner; a proxy or dual planner leaves it
+// empty rather than naming a backend that may not have served the turn.
+func (s *Server) perfIdentity() perfledger.Identity {
+	id := perfledger.Identity{Planner: plannerKind(s.planner), Version: perfBuildVersion()}
+	if ikp, ok := s.planner.(*agent.InKernelPlanner); ok {
+		id.Backend, _ = ikp.ExecutionIdentity()
+	}
+	if host, err := os.Hostname(); err == nil {
+		id.Host = host
+	}
+	return id
+}
+
+// perfBuildVersion is the app version, with the VCS revision appended for an
+// unstamped dev build so two dev binaries on one host stay distinguishable.
+func perfBuildVersion() string {
+	v := appversion.Current()
+	if v != "dev" {
+		return v
+	}
+	st := binstamp.Self()
+	if len(st.Revision) < 12 {
+		return v
+	}
+	v += "+" + st.Revision[:12]
+	if st.Dirty {
+		v += "-dirty"
+	}
+	return v
+}
+
+// setPerfIdentity installs the identity every later row carries; defaultModel
+// fills a row whose turn reported no model of its own.
+func (m *gatewayMetrics) setPerfIdentity(defaultModel string, id perfledger.Identity) {
+	if m != nil {
+		m.perfServedBy.Store(&perfledger.ServedBy{Model: strings.TrimSpace(defaultModel), Identity: id})
+	}
+}
+
 // recordPerf folds one served turn into the bounded ring and hands it to the
 // durable sink. Offer is a non-blocking channel send, so the served turn never
 // waits on disk.
@@ -65,9 +108,15 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 		return
 	}
 	rec := perfledger.NewRecord(time.Now(), finishReason, loc.perfLabel(), promptTok, complTok, cachedTok, dur, ttft)
-	rec.Model = detail.model
+	rec.Model = strings.TrimSpace(detail.model)
 	rec.Engine = detail.engine
 	rec.UpstreamSpecDraftTokens, rec.UpstreamSpecAcceptedTokens = detail.upstreamDraft, detail.upstreamAccepted
+	if sb := m.perfServedBy.Load(); sb != nil {
+		rec.Identity = sb.Identity
+		if rec.Model == "" {
+			rec.Model = sb.Model
+		}
+	}
 	m.perfMu.Lock()
 	m.appendPerfLocked(rec)
 	m.perfMu.Unlock()

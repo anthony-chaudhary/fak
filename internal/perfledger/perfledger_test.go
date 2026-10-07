@@ -375,3 +375,57 @@ func TestSummarizeFoldsUpstreamSpecIntoAcceptRate(t *testing.T) {
 		t.Fatalf("compact line for an upstream-only window: %s", line)
 	}
 }
+
+// fak-test:runtime fast est=10ms lane=default
+func TestSummarizeCountsServedByAndKeepsNewest(t *testing.T) {
+	old := Identity{Planner: "inkernel", Backend: "cpu-ref", Host: "h1", Version: "1.0.0"}
+	cur := Identity{Planner: "inkernel", Backend: "vulkan", Host: "h1", Version: "1.1.0"}
+	recs := []Record{
+		{Schema: Schema, E2EMS: 10},
+		{Schema: Schema, E2EMS: 10, Model: "m", Identity: old},
+		{Schema: Schema, E2EMS: 10, Model: "m", Identity: cur},
+		{Schema: Schema, E2EMS: 10, Model: "m", Identity: cur},
+	}
+	s := Summarize(recs)
+	if s.Identities != 2 {
+		t.Fatalf("identities = %d, want 2 (unstamped row not counted)", s.Identities)
+	}
+	if want := (ServedBy{Model: "m", Identity: cur}); s.ServedBy == nil || *s.ServedBy != want {
+		t.Fatalf("newest served_by = %+v, want %+v", s.ServedBy, want)
+	}
+	line := RenderCompact(BuildReport(recs, 0, false, 0))
+	for _, want := range []string{"planner=inkernel/vulkan", "fak=1.1.0", "window mixes 2"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("compact line missing %q: %s", want, line)
+		}
+	}
+	if s := Summarize(recs[:1]); s.ServedBy != nil || s.Identities != 0 {
+		t.Fatalf("unstamped window served_by = %+v/%d, want nil/0", s.ServedBy, s.Identities)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestRecordIdentityRoundTripsFlat(t *testing.T) {
+	rec := Record{Schema: Schema, Model: "m", Engine: &Engine{Path: PathSerial}, Identity: Identity{Planner: "proxy", Host: "h", Version: "v"}}
+	raw, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var flat map[string]any
+	if err := json.Unmarshal(raw, &flat); err != nil {
+		t.Fatal(err)
+	}
+	if flat["model"] != "m" || flat["planner"] != "proxy" || flat["fak_version"] != "v" {
+		t.Fatalf("identity not flattened into the row: %s", raw)
+	}
+	if _, ok := flat["engine"].(map[string]any); !ok {
+		t.Fatalf("engine anatomy object lost beside identity: %s", raw)
+	}
+	if _, ok := flat["backend"]; ok {
+		t.Fatalf("empty backend serialized: %s", raw)
+	}
+	var back Record
+	if err := json.Unmarshal(raw, &back); err != nil || back.Identity != rec.Identity || back.Model != "m" {
+		t.Fatalf("round trip = %+v (%v)", back, err)
+	}
+}

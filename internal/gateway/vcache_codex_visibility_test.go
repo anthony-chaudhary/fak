@@ -21,7 +21,7 @@ func TestCodexCacheHitStaysDisjointInInfoCounters(t *testing.T) {
 		PromptTokensDetails: &agent.UsageTokenDetails{CachedTokens: 45_312},
 	}
 
-	m.observeInferenceUsageServed(localityVendor, u, "stop", time.Second)
+	m.observeInferenceUsageServed(localityVendor, "", u, "stop", time.Second)
 
 	sum := m.adjudicationSummary()
 	if sum.InputTokens != 1_487 || sum.CachedPromptTokens != 45_312 {

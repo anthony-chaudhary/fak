@@ -469,6 +469,7 @@ type gatewayMetrics struct {
 	perfRecords        []perfledger.Record
 	perfRecordsDropped bool
 	perfSink           atomic.Pointer[perfledger.Writer]
+	perfServedBy       atomic.Pointer[perfledger.ServedBy]
 
 	// denyAllMu guards the deny-all stop family: a served turn whose EVERY proposed tool
 	// call the capability floor refused (kept==0). The wire MUST report such a turn as
