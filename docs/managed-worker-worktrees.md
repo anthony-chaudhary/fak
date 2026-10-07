@@ -474,17 +474,38 @@ ones. Checkout-policy qualification supports only Git 2.45.0. Explicit false
 fsmonitor values are disabled; `submodule.active` is dormant only when the full
 pinned tree has no gitlinks or `.gitmodules`. Filter definitions are dormant only
 when every pinned path has a complete `filter: unspecified` attribute result.
-No filter or hook is executed during proof. Existing/unreadable post-checkout
-hooks, sparse checkout, conditional includes, existing context-specific worktree configuration,
-active or unknown attributes, unavailable sources and query warnings are refused.
-Config source bytes and complete tree/attribute results must agree before add,
-in the actual new checkout before status, and before publication. Context-dependent
-includes are refused before add instead of guessing the future administrative path.
-`extensions.worktreeConfig` may remain enabled for existing peers only when the
-qualified context has no `config.worktree`; the new context is checked again
-before status. Existing peers and their fsmonitor safeguards are never queried.
-Safeguards are not silently disabled. Hook/config changes by unrelated writers
-remain outside the lock contract and require an approved quiescent admission.
+No filter or hook is executed during proof. The creation hooks
+`reference-transaction`, `post-index-change` and `post-checkout` must be absent
+in the source and new checkout contexts; existing, unreadable or indirect hook
+paths refuse. The pinned tree must not be able to materialize a hook or its
+ancestor in the new checkout, including case-folded matches. With
+`core.hooksPath` set, its value and native-reported hook locations must be
+ASCII; an absolute location also requires an ASCII prospective target identity.
+Relative ASCII hooks may use Unicode source and target roots, but Unicode
+normalization aliases for configured hook identities are not qualified. Sparse
+checkout, conditional includes, active or unknown attributes, unavailable
+sources and query warnings are refused. Context-dependent includes are refused
+before add instead of guessing the future administrative path.
+
+With `extensions.worktreeConfig` enabled, the qualified context may have no
+`config.worktree`, or a directly resolved regular readable file containing
+exactly one `core.bare` record with the literal parsed value `false` and one
+nonempty ASCII `core.hooksPath` value without NUL, CR or LF. Extra entries,
+duplicate keys, includes and indirect sources refuse. Directly parsed records
+must match the records reported at that exact Git configuration origin. When
+present, Git must create a byte-identical, independent regular-file copy in the
+actual new administrative directory; hardlink aliases refuse. Only that proven
+child origin may map back to the admitted source origin. Every other origin,
+value and source byte remains bound.
+
+The source proof is rechecked before add. Both the original source and actual
+new checkout are rechecked before status and before publication; configuration
+bytes and complete tree/attribute results must still agree with admission.
+Existing peers and their fsmonitor safeguards are never queried or altered.
+No configuration, hook or credential rewrite is used to qualify this shape.
+Safeguards are not silently disabled. Repeated proof detects observed drift;
+it does not lock configuration or hook paths against unrelated writers between
+checks and Git execution. An approved quiescent admission remains required.
 The add explicitly sets `gc.worktreePruneExpire=never`, which requires
 platform/Git-version integration qualification rather than an assumption.
 Concurrent external deletion is outside the per-target lock contract; final
