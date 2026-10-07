@@ -6,7 +6,7 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1287<br>
+parsed files: 1289<br>
 rows: 1263<br>
 unverified rows: 0 / 1263<br>
 source-only rows absent from help: 1027
