@@ -522,6 +522,13 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		// turn is visible instead of a silent freeze. plannerErrorStatus below also bumps the
 		// upstream-error counter.
 		s.renderTurnDebugError(reqTrace, "openai_chat_completions", err, time.Since(began))
+		var failTTFT time.Duration
+		hb.mu.Lock()
+		if !hb.streamStart.IsZero() {
+			failTTFT = hb.streamStart.Sub(began)
+		}
+		hb.mu.Unlock()
+		s.recordFailedTurn(ctx, s.chatServingLocality(ctx, reqModel), err, began, failTTFT, started)
 		if !started {
 			// Nothing on the wire yet — surface a real HTTP error, exactly as the
 			// buffered path does, and own the response (the message is generic so the

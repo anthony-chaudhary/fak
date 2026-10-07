@@ -100,6 +100,9 @@ func TestPerfLedgerServedTurnEmitsOneRowAndSurvivesRestart(t *testing.T) {
 func TestPerfLedgerHTTPChatTurnRecordsExactlyOneRow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gateway-perf.jsonl")
 	srv := newTestServer(t)
+	// A mock turn can finish inside one tick of Windows' coarse wall clock, which
+	// measures e2e as exactly 0; hold the turn long enough to be observable.
+	srv.planner = perfDelayedPlanner{inner: srv.planner, d: 20 * time.Millisecond}
 	w := perfledger.OpenWriter(path, perfledger.DefaultMaxBytes)
 	srv.SetPerfLedger(w, nil, false)
 

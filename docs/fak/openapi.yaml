@@ -1754,6 +1754,10 @@ paths:
         (a buffered turn); `prefill_tps`/`decode_tps` are present only when it
         was. `prompt_tokens` is the uncached prompt, disjoint from
         `cached_tokens`; `cache_hit_share` = cached / (prompt + cached).
+        A turn that failed before completing (timeout, upstream error, client
+        cancel) still leaves one row with `finish_reason: error`, an `error`
+        class and the HTTP `status` the client got (200 when the failure came
+        after the stream was committed, 499 for a client cancel).
         Counts and timings only. Same observability auth floor as
         `/v1/fak/observation/engine`.
       parameters:
@@ -1797,6 +1801,10 @@ paths:
                       e2e_p50_ms: { type: number }
                       e2e_p99_ms: { type: number }
                       cache_hit_share: { type: number }
+                      errors: { type: integer }
+                      by_error:
+                        type: object
+                        additionalProperties: { type: integer }
                   records:
                     type: array
                     items:
@@ -1814,6 +1822,10 @@ paths:
                         ttft_ms: { type: number }
                         prefill_tps: { type: number }
                         decode_tps: { type: number }
+                        error:
+                          type: string
+                          enum: [client_canceled, first_token_timeout, stall, deadline, upstream_unreachable, upstream_status, upstream_error]
+                        status: { type: integer }
             text/plain:
               schema: { type: string }
         '400': { $ref: '#/components/responses/BadRequest' }

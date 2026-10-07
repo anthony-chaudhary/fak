@@ -258,6 +258,7 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	}
 	if err != nil {
 		s.renderTurnDebugError(reqTrace, "openai_responses", err, time.Since(began))
+		s.recordFailedTurn(ctx, s.chatServingLocality(ctx, reqModel), err, began, 0, started)
 		if !started {
 			// Nothing on the wire yet — surface a real HTTP error exactly as the
 			// buffered path does, and own the request. writeUpstreamErr folds the

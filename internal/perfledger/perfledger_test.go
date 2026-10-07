@@ -313,3 +313,40 @@ func TestSummarizeSplitsTTFTByCacheRegime(t *testing.T) {
 		t.Fatalf("compact line missing regime split: %s", line)
 	}
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestFailureRecordCountsInSummaryWithoutRates(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	recs := []Record{
+		NewRecord(now, "stop", LocalitySelfHosted, 500, 11, 0, 2*time.Second, time.Second),
+		NewFailureRecord(now, LocalitySelfHosted, ErrorFirstTokenTimeout, 504, 60*time.Second, 0),
+		NewFailureRecord(now, LocalitySelfHosted, ErrorStall, 200, 9*time.Second, 400*time.Millisecond),
+	}
+	f := recs[1]
+	if f.FinishReason != FinishReasonError || f.Error != ErrorFirstTokenTimeout || f.Status != 504 || f.CacheRegime != "unknown" {
+		t.Fatalf("failure row = %+v", f)
+	}
+	if f.E2EMS != 60000 || f.TTFTMS != 0 || f.PrefillTPS != 0 || f.DecodeTPS != 0 {
+		t.Fatalf("failure row timings = %+v", f)
+	}
+	if recs[2].TTFTMS != 400 {
+		t.Fatalf("mid-stream failure ttft = %v, want 400", recs[2].TTFTMS)
+	}
+	s := Summarize(recs)
+	if s.Errors != 2 || s.ByError[ErrorFirstTokenTimeout] != 1 || s.ByError[ErrorStall] != 1 {
+		t.Fatalf("errors = %d %v", s.Errors, s.ByError)
+	}
+	if s.E2EP99MS != 60000 {
+		t.Fatalf("e2e p99 = %v, want the timed-out turn's 60000", s.E2EP99MS)
+	}
+	if s.DecodeTPSP50 != 10 {
+		t.Fatalf("decode p50 = %v, want only the served row's 10", s.DecodeTPSP50)
+	}
+	line := RenderCompact(BuildReport(recs, 0, false, 0))
+	if !strings.Contains(line, "errors=2 first_token_timeout=1 stall=1") {
+		t.Fatalf("compact = %q", line)
+	}
+	if _, ok := jsonKeys(t, recs[0])["error"]; ok {
+		t.Fatalf("served row JSON carries error")
+	}
+}

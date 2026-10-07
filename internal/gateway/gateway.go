@@ -1541,6 +1541,7 @@ func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, mes
 	comp, err := s.completeWithFirstTokenWatchdog(ctx, turn.traceID, messages, tools, opts...)
 	s.recordBufferedTurnCost(turn, comp, plannerBegan)
 	if err != nil {
+		s.recordFailedTurn(ctx, s.chatServingLocality(ctx, sampleModelOf(opts)), err, plannerBegan, 0, false)
 		// Preserve request-local execution metadata on failures. Callers still
 		// receive the original error, while buffered/streaming HTTP paths can
 		// report an actual speculative route or typed downgrade in headers.
@@ -1551,6 +1552,16 @@ func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, mes
 	lease.SettleUsage(comp.Usage)
 	s.debitServedSessionTurn(ctx, turn, comp.Usage, time.Since(began), messages)
 	return comp, nil
+}
+
+func sampleModelOf(opts []agent.SampleOpt) string {
+	var sample agent.SampleParams
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&sample)
+		}
+	}
+	return sample.Model
 }
 
 // completeWithFirstTokenWatchdog runs the buffered planner call under a bounded FIRST-TOKEN

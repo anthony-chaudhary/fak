@@ -68,6 +68,50 @@ type Record struct {
 	TTFTMS           float64 `json:"ttft_ms,omitempty"`
 	PrefillTPS       float64 `json:"prefill_tps,omitempty"`
 	DecodeTPS        float64 `json:"decode_tps,omitempty"`
+	// Error is the failure class of a turn that did not complete (one of the Error*
+	// constants); empty on a served turn. Status is the HTTP status the client got:
+	// 200 when the failure came after the stream was committed, 499 for a client cancel.
+	Error  string `json:"error,omitempty"`
+	Status int    `json:"status,omitempty"`
+}
+
+// Failure classes for Record.Error.
+const (
+	ErrorClientCanceled      = "client_canceled"
+	ErrorFirstTokenTimeout   = "first_token_timeout"
+	ErrorStall               = "stall"
+	ErrorDeadline            = "deadline"
+	ErrorUpstreamUnreachable = "upstream_unreachable"
+	ErrorUpstreamStatus      = "upstream_status"
+	ErrorUpstream            = "upstream_error"
+
+	FinishReasonError = "error"
+)
+
+// NewFailureRecord builds the row for a turn that failed before completing. It
+// carries no token counts (the upstream reported none), so its cache regime is
+// unknown and it never contributes a rate. ttft>0 means the stream had already
+// produced its first token when it failed.
+func NewFailureRecord(now time.Time, locality, errClass string, status int, dur, ttft time.Duration) Record {
+	rec := Record{
+		Schema:       Schema,
+		UnixMS:       now.UnixMilli(),
+		FinishReason: FinishReasonError,
+		Locality:     locality,
+		CacheRegime:  cacheobs.RegimeUnknown,
+		Error:        errClass,
+		Status:       status,
+	}
+	if dur > 0 {
+		rec.E2EMS = roundTo(float64(dur)/float64(time.Millisecond), 1000)
+		if ttft > 0 {
+			if ttft > dur {
+				ttft = dur
+			}
+			rec.TTFTMS = roundTo(float64(ttft)/float64(time.Millisecond), 1000)
+		}
+	}
+	return rec
 }
 
 // NewRecord builds a row from the raw observation. ttft is clamped into
@@ -121,6 +165,9 @@ type Summary struct {
 	E2EP50MS      float64 `json:"e2e_p50_ms,omitempty"`
 	E2EP99MS      float64 `json:"e2e_p99_ms,omitempty"`
 	CacheHitShare float64 `json:"cache_hit_share"`
+	// Errors counts failed turns (Record.Error set); ByError splits them by class.
+	Errors  int            `json:"errors"`
+	ByError map[string]int `json:"by_error,omitempty"`
 	// ByRegime splits latency by prompt-cache regime (#5630) so warm vs cold TTFT is
 	// one read. Keys are cacheobs.Regimes; a regime with no rows is absent.
 	ByRegime map[string]RegimeSummary `json:"by_regime,omitempty"`
@@ -173,6 +220,13 @@ func Summarize(recs []Record) Summary {
 	regimeE2E := map[string][]float64{}
 	regimeCount := map[string]int{}
 	for _, r := range recs {
+		if r.Error != "" {
+			s.Errors++
+			if s.ByError == nil {
+				s.ByError = map[string]int{}
+			}
+			s.ByError[r.Error]++
+		}
 		regime := r.regime()
 		regimeCount[regime]++
 		if r.TTFTMS > 0 {
@@ -242,6 +296,17 @@ func RenderCompact(rep Report) string {
 	fmt.Fprintf(&b, " | prefill p50=%s | decode p50=%s", fmtTPS(s.PrefillTPSP50), fmtTPS(s.DecodeTPSP50))
 	fmt.Fprintf(&b, " | e2e p50=%s p99=%s", fmtMS(s.E2EP50MS), fmtMS(s.E2EP99MS))
 	fmt.Fprintf(&b, " | cache=%.1f%%", s.CacheHitShare*100)
+	if s.Errors > 0 {
+		classes := make([]string, 0, len(s.ByError))
+		for c := range s.ByError {
+			classes = append(classes, c)
+		}
+		sort.Strings(classes)
+		fmt.Fprintf(&b, " | errors=%d", s.Errors)
+		for _, c := range classes {
+			fmt.Fprintf(&b, " %s=%d", c, s.ByError[c])
+		}
+	}
 	if len(s.ByRegime) > 0 {
 		b.WriteString(" | ttft p50 by regime:")
 		for _, regime := range cacheobs.Regimes {

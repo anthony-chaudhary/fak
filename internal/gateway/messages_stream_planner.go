@@ -165,6 +165,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	close(stopPing)
 	<-pingDone
 	if err != nil {
+		s.recordFailedTurn(r.Context(), s.chatServingLocality(r.Context(), req.Model), err, began, 0, started)
 		return s.streamPlannerUpstreamError(w, err, started, reqTrace, began, sendLocked, closeText)
 	}
 	s.observePrefixReuseTurn(turnCtx, messages, comp)
