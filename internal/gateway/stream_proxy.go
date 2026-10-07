@@ -501,7 +501,8 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 
 	began := time.Now()
 	turnCtx := plannerTurnContext(ctx, nil, req.Messages, s.contextEpoch)
-	comp, err := sp.CompleteStream(turnCtx, utf8Fragments.write, req.Messages, req.Tools, chatRouteOpts(ctx, opts)...)
+	var firstDelta firstDeltaClock
+	comp, err := sp.CompleteStream(turnCtx, firstDelta.wrap(utf8Fragments.write), req.Messages, req.Tools, chatRouteOpts(ctx, opts)...)
 	stopHB()
 	if err == nil {
 		s.observePrefixReuseTurn(turnCtx, req.Messages, comp)
@@ -577,7 +578,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	// The turn finished. The buffered path records inference metrics inside
 	// s.complete; this path bypasses it, so account here.
 	lease.SettleUsage(comp.Usage) // settle the token-rate window with real usage (#2019)
-	s.accountStreamedTurn(ctx, sessionTurn, comp, req.Messages, began, reqModel)
+	s.accountStreamedTurn(ctx, sessionTurn, comp, req.Messages, began, reqModel, firstDelta.ttft(began))
 
 	// Tool-call conformance fail-closed (the rule itself lives in
 	// failClosedOnUnparsedToolCalls; the buffered counterpart is handleChatCompletions).

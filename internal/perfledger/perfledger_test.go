@@ -279,3 +279,43 @@ func TestSummarizeSplitsTTFTByCacheRegime(t *testing.T) {
 		t.Fatalf("compact line missing regime split: %s", line)
 	}
 }
+
+// fak-test:runtime fast est=10ms lane=default
+func TestSummarizeFoldsNativeEngineAnatomy(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	proxy := NewRecord(now, "stop", LocalityVendor, 100, 10, 0, 200*time.Millisecond, 50*time.Millisecond)
+	serial := NewRecord(now, "stop", LocalitySelfHosted, 100, 10, 0, 200*time.Millisecond, 50*time.Millisecond)
+	serial.Model, serial.Engine = "m", &Engine{Path: PathSerial}
+	batched := serial
+	batched.Engine = &Engine{Path: PathBatched, CohortSize: 4}
+	specA := serial
+	specA.Engine = &Engine{Path: PathSpeculative, SpecRounds: 3, SpecDraftTokens: 9, SpecAcceptedTokens: 6}
+	specB := serial
+	specB.Engine = &Engine{Path: PathSpeculative, SpecRounds: 1, SpecDraftTokens: 3, SpecAcceptedTokens: 3}
+
+	s := Summarize([]Record{proxy, serial, batched, specA, specB})
+	if s.Native != 4 || s.ByPath[PathSerial] != 1 || s.ByPath[PathBatched] != 1 || s.ByPath[PathSpeculative] != 2 {
+		t.Fatalf("native/by_path = %d/%v, want 4 split 1/1/2 (the proxy row is not native)", s.Native, s.ByPath)
+	}
+	if s.SpecRounds != 4 || s.SpecDraftTokens != 12 || s.SpecAcceptedTokens != 9 || s.SpecAcceptRate != 0.75 {
+		t.Fatalf("spec = %d/%d/%d rate %v, want 4/12/9 rate 0.75", s.SpecRounds, s.SpecDraftTokens, s.SpecAcceptedTokens, s.SpecAcceptRate)
+	}
+	line := RenderCompact(BuildReport([]Record{proxy, serial, batched, specA, specB}, 0, false, 0))
+	if !strings.Contains(line, "| path: serial=1 batched=1 speculative=2") || !strings.Contains(line, "| spec accept=75.0% (9/12 over 4 rounds)") {
+		t.Fatalf("compact line missing native anatomy: %s", line)
+	}
+
+	proxyOnly := Summarize([]Record{proxy})
+	keys := jsonKeys(t, proxyOnly)
+	for _, k := range []string{"native", "by_path", "spec_rounds", "spec_accept_rate"} {
+		if _, ok := keys[k]; ok {
+			t.Fatalf("proxy-only summary carries %q; native fields must be absent, not 0", k)
+		}
+	}
+	if line := RenderCompact(BuildReport([]Record{proxy}, 0, false, 0)); strings.Contains(line, "path:") || strings.Contains(line, "spec") {
+		t.Fatalf("proxy-only compact line carries native segments: %s", line)
+	}
+	if _, ok := jsonKeys(t, proxy)["engine"]; ok {
+		t.Fatal("proxy row serializes an engine object")
+	}
+}
