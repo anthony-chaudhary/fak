@@ -427,7 +427,7 @@ func TestVulkanQ2KSwiGLUMatMulAddSourceContract(t *testing.T) {
 			},
 		},
 		{
-			path: filepath.Join(repoRoot, "internal", "compute", "vulkan.go"),
+			path: filepath.Join(repoRoot, "internal", "compute", "vulkan_matmul_fused.go"),
 			clauses: []string{
 				"C.fvk_swiglu_q2k_matmul_add_f32",
 				"w.Dtype == Q2_K && P == 1",

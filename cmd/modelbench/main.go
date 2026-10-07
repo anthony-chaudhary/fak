@@ -38,7 +38,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/benchckpt"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
-	"github.com/anthony-chaudhary/fak/internal/macbench"
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -940,83 +939,6 @@ var (
 	macbenchMTPDryRun      = flag.Bool("macbench-mtp-dry-run", false, "validate 4-way Apple Silicon MTP runner configuration without executing adapters")
 	macbenchMTPDryRunAlt   = flag.Bool("mtp-comparison-dry-run", false, "alias for -macbench-mtp-dry-run")
 )
-
-func maybeRunMTPComparison(f *benchFlags) bool {
-	readbackPath := *macbenchMTPReadback
-	if readbackPath == "" {
-		readbackPath = *macbenchMTPReadbackAlt
-	}
-	if readbackPath != "" {
-		data, err := os.ReadFile(readbackPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "macbench mtp readback: read file: %v\n", err)
-			f.exit(1)
-		}
-		var packet macbench.MTPComparisonPacket
-		if err := json.Unmarshal(data, &packet); err != nil {
-			fmt.Fprintf(os.Stderr, "macbench mtp readback: decode packet: %v\n", err)
-			f.exit(1)
-		}
-		if err := macbench.ValidateMTPComparisonEvidence(packet, readbackPath); err != nil {
-			fmt.Fprintf(os.Stderr, "macbench mtp readback: invalid packet: %v\n", err)
-			f.exit(1)
-		}
-		fmt.Printf("VALID mtp_comparison_packet schema=%s campaign=%s host=%s fak_native_decode=%.2f tok/s\n",
-			packet.Schema, packet.CampaignID, packet.HostID, packet.Summary.FakNativeDecodeTokS)
-		return true
-	}
-
-	dryRun := *macbenchMTPDryRun || *macbenchMTPDryRunAlt
-	runMTP := *macbenchMTP || *macbenchMTPAlt || dryRun
-	if !runMTP {
-		return false
-	}
-
-	opts := macbench.DefaultMTPRunnerOptions()
-	opts.Adapters = macbench.DefaultMTPAdapters()
-
-	if dryRun {
-		if err := macbench.ValidateMTPRunnerEnvelope(opts); err != nil {
-			fmt.Fprintf(os.Stderr, "macbench mtp dry-run invalid: %v\n", err)
-			f.exit(1)
-		}
-		fmt.Printf("DRY_RUN_PLAN_VALID campaign=%s host=%s model=%s draft_depth=%d\n",
-			opts.CampaignID, opts.HostID, opts.Model.ID, opts.SpeculativeConfig.DraftDepth)
-		return true
-	}
-
-	runner := macbench.NewMTPRunner(opts)
-	packet, err := runner.Run(context.Background())
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "macbench mtp run: %v\n", err)
-		f.exit(1)
-	}
-
-	outPath := *macbenchMTPOut
-	if outPath == "" {
-		outPath = *macbenchMTPOutAlt
-	}
-	if outPath == "" && f.out != nil && *f.out != "" {
-		outPath = *f.out
-	}
-
-	b, err := json.MarshalIndent(packet, "", "  ")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "macbench mtp marshal: %v\n", err)
-		f.exit(1)
-	}
-
-	if outPath != "" {
-		if err := os.WriteFile(outPath, b, 0644); err != nil {
-			fmt.Fprintf(os.Stderr, "macbench mtp write %s: %v\n", outPath, err)
-			f.exit(1)
-		}
-		fmt.Printf("WROTE %s (%.2f tok/s sustained fak-native decode)\n", outPath, packet.Summary.FakNativeDecodeTokS)
-	} else {
-		fmt.Println(string(b))
-	}
-	return true
-}
 
 func main() {
 	f := parseFlags()
