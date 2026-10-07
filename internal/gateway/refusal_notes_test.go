@@ -41,7 +41,7 @@ func TestRefusalNotesLeadWithAllowedPathAndTrailReason(t *testing.T) {
 	}
 }
 
-func TestDefaultDenySurfacesBoundedLiveOperatorChoice(t *testing.T) {
+func TestDefaultDenyGivesAutonomousTypedRecovery(t *testing.T) {
 	adj := ToolAdjudication{
 		Tool:     "exec_command",
 		Admitted: false,
@@ -52,19 +52,15 @@ func TestDefaultDenySurfacesBoundedLiveOperatorChoice(t *testing.T) {
 		"adjudicationNote": adjudicationNote([]ToolAdjudication{adj}),
 		"deniedToolResult": deniedToolResult(adj),
 	} {
-		for _, want := range []string{
-			"operator choice (outside this wrapped agent)",
-			"tool not permitted by policy",
-			"consult operator to widen capability floor",
-			"standard harness tool",
-			"DEFAULT_DENY",
-		} {
+		for _, want := range []string{"recovery=PIVOT_ADMITTED_TOOL", "DEFAULT_DENY"} {
 			if !strings.Contains(got, want) {
-				t.Fatalf("%s missing %q:\n%s", name, want, got)
+				t.Fatalf("%s missing typed token %q:\n%s", name, want, got)
 			}
 		}
-		// Agent-visible text must never contain runnable fak guard allow commands (#11504)
+		// A headless worker cannot consult anyone, and runnable fak guard allow
+		// commands stay out of agent-visible text (#11504).
 		for _, forbid := range []string{
+			"consult operator",
 			"fak guard allow",
 			"`fak guard",
 		} {
@@ -89,6 +85,31 @@ func TestDefaultDenySurfacesBoundedLiveOperatorChoice(t *testing.T) {
 	unsafeCmd := OperatorRemedyCommand(unsafe)
 	if unsafeCmd != "fak guard allow --ttl 15m <tool>" {
 		t.Fatalf("OperatorRemedyCommand for unsafe tool mismatch: got %q, want %q", unsafeCmd, "fak guard allow --ttl 15m <tool>")
+	}
+}
+
+func TestLeaseAdmissionDefaultDenyGivesFileToolRecovery(t *testing.T) {
+	adj := ToolAdjudication{
+		Tool:     "bash",
+		Admitted: false,
+		Verdict:  WireVerdict{Kind: "DENY", Reason: "DEFAULT_DENY", By: "lease-admission", Disposition: "TERMINAL"},
+	}
+	for name, got := range map[string]string{
+		"denySummary":      denySummary([]ToolAdjudication{adj}),
+		"adjudicationNote": adjudicationNote([]ToolAdjudication{adj}),
+		"deniedToolResult": deniedToolResult(adj),
+	} {
+		if !strings.Contains(got, "recovery=USE_FILE_TOOLS") {
+			t.Fatalf("%s missing typed token recovery=USE_FILE_TOOLS:\n%s", name, got)
+		}
+		for _, forbid := range []string{"recovery=PIVOT_ADMITTED_TOOL", "consult operator", "fak guard allow"} {
+			if strings.Contains(got, forbid) {
+				t.Fatalf("%s contains %q:\n%s", name, forbid, got)
+			}
+		}
+	}
+	if cmd := OperatorRemedyCommand(adj); strings.Contains(cmd, "fak guard allow") {
+		t.Fatalf("lease-admission operator remedy widens the floor instead of admission: %q", cmd)
 	}
 }
 

@@ -2,6 +2,8 @@ package workerworktree
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,7 +18,7 @@ type preservingPolicyFixture struct {
 
 func newPreservingPolicyFixture(t *testing.T) *preservingPolicyFixture {
 	t.Helper()
-	root := t.TempDir()
+	root := preservingTempDir(t)
 	t.Setenv("HOME", root)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "xdg"))
 	config := filepath.Join(root, "policy.gitconfig")
@@ -69,7 +71,7 @@ func TestPreservingCheckoutPolicyQualifiesDisabledAndDormantSettings(t *testing.
 			f := newPreservingPolicyFixture(t)
 			f.values = "core.fsmonitor\n" + value + "\x00submodule.active\n.\x00filter.lfs.clean\nnever-execute-clean\x00filter.lfs.smudge\nnever-execute-smudge\x00filter.lfs.process\nnever-execute-process\x00filter.lfs.required\ntrue"
 			digest, err := preservingCheckoutPolicy(f.root, f.base, f.runner)
-			if err != nil || len(digest) != 64 {
+			if err != nil || len(digest) != hex.EncodedLen(sha256.Size) {
 				t.Fatalf("digest=%q err=%v", digest, err)
 			}
 			for _, call := range f.calls {
@@ -127,7 +129,7 @@ func TestPreservingCheckoutPolicyRequiresCompletePinnedAttributes(t *testing.T) 
 }
 
 func TestPreservingCheckoutPolicyRefusesUnknownConditionalAndMalformedPolicy(t *testing.T) {
-	for _, kind := range []string{"version", "version-warning", "fsmonitor", "bare-fsmonitor", "sparse", "conditional", "submodule", "filter-key", "filter-bool", "gitlink", "gitmodules", "duplicate-tree", "tree-warning", "config-warning", "config-access", "origin", "info-attributes", "global-attributes", "worktree-config", "hook", "tracked-hook", "hook-warning", "hook-escape"} {
+	for _, kind := range []string{"version", "version-warning", "fsmonitor", "bare-fsmonitor", "sparse", "conditional", "submodule", "filter-key", "filter-bool", "gitlink", "gitmodules", "duplicate-tree", "tree-warning", "config-warning", "config-access", "origin", "info-attributes", "global-attributes", "worktree-config-symlink", "hook", "tracked-hook", "hook-warning", "hook-escape"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newPreservingPolicyFixture(t)
 			f.values = "filter.lfs.smudge\nnever-execute\x00submodule.active\n."
@@ -158,10 +160,13 @@ func TestPreservingCheckoutPolicyRefusesUnknownConditionalAndMalformedPolicy(t *
 				f.tree += f.tree
 			case "tree-warning":
 				f.tree += "warning\n"
-			case "worktree-config":
+			case "worktree-config-symlink":
 				f.values += "\x00extensions.worktreeconfig\ntrue"
 			case "tracked-hook":
+				f.values += "\x00core.hookspath\nhooks"
 				f.tree += "100755 blob " + f.base + "\thooks/post-checkout\x00"
+			case "hook-escape":
+				f.values += "\x00core.hookspath\n../outside"
 			}
 			runner := func(root string, args []string) (int, string) {
 				rc, data := f.runner(root, args)
@@ -185,12 +190,18 @@ func TestPreservingCheckoutPolicyRefusesUnknownConditionalAndMalformedPolicy(t *
 					if kind == "hook-warning" && args[2] == "hooks/post-checkout" {
 						data += "warning\n"
 					}
-					if kind == "hook" && args[2] == "hooks/post-checkout" || kind == "info-attributes" && args[2] == "info/attributes" || kind == "worktree-config" && args[2] == "config.worktree" {
+					if kind == "hook" && args[2] == "hooks/post-checkout" || kind == "info-attributes" && args[2] == "info/attributes" || kind == "worktree-config-symlink" && args[2] == "config.worktree" {
 						path := strings.TrimSpace(data)
 						if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 							t.Fatal(err)
 						}
-						if err := os.WriteFile(path, nil, 0600); err != nil {
+						if kind == "worktree-config-symlink" {
+							// Direct safe config is now supported; an indirect
+							// source still cannot establish native-copy provenance.
+							if err := os.Symlink(f.config, path); err != nil {
+								t.Fatal(err)
+							}
+						} else if err := os.WriteFile(path, nil, 0600); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -246,10 +257,11 @@ func TestPreservingCheckoutPolicyBindsSourcesAndNewContext(t *testing.T) {
 }
 
 func TestPreservingCheckoutPolicyCoversEveryPathAcrossBatches(t *testing.T) {
+	const fixturePathCount = 300 // Two full 128-path batches plus a partial batch.
 	f := newPreservingPolicyFixture(t)
 	f.values = "filter.lfs.smudge\nnever-execute"
 	f.tree = ""
-	for i := 0; i < 300; i++ {
+	for i := 0; i < fixturePathCount; i++ {
 		f.tree += fmt.Sprintf("100644 blob %s\tpath-%03d.txt\x00", f.base, i)
 	}
 	seen := map[string]int{}
@@ -264,7 +276,7 @@ func TestPreservingCheckoutPolicyCoversEveryPathAcrossBatches(t *testing.T) {
 	if _, err := preservingCheckoutPolicy(f.root, f.base, runner); err != nil {
 		t.Fatal(err)
 	}
-	if len(seen) != 300 {
+	if len(seen) != fixturePathCount {
 		t.Fatalf("checked %d paths", len(seen))
 	}
 	for path, count := range seen {
@@ -296,30 +308,42 @@ func TestPreparePreservingRechecksPolicyBeforeAddAndStatus(t *testing.T) {
 	for _, phase := range []string{"before-add", "new-context", "before-publication"} {
 		t.Run(phase, func(t *testing.T) {
 			f := newQualifiedPreservingFixture(t)
-			root := t.TempDir()
+			root := preservingTempDir(t)
+			target := Path("cmd", "policy-drift", root)
 			var calls []string
 			git := preservingTestRunner(t, &calls)
-			configs := 0
+			inventorySeen, addSeen, statusSeen, injected := false, false, false, false
 			runner := func(dir string, args []string) (int, string) {
 				rc, data := git(dir, args)
-				if args[0] == "config" {
-					configs++
-					when := 2
-					if phase == "new-context" {
-						when = 3
+				joined := strings.Join(args, " ")
+				if dir == f.repo && joined == "worktree list --porcelain" {
+					inventorySeen = true
+				}
+				if strings.Contains(joined, "worktree add") {
+					addSeen = true
+				}
+				if dir == target && strings.HasPrefix(joined, "status ") {
+					statusSeen = true
+				}
+				// Bind injection to the lifecycle boundary under test, not to
+				// the number of provenance queries an implementation performs.
+				if joined == "config --null --show-origin --list" {
+					refuse := phase == "before-add" && dir == f.repo && inventorySeen && !addSeen
+					refuse = refuse || phase == "new-context" && dir == target && !statusSeen
+					if phase == "before-publication" && dir == target && statusSeen {
+						_, err := os.Lstat(OwnerStampPath(target))
+						refuse = err == nil
 					}
-					if phase == "before-publication" {
-						when = 4
-					}
-					if configs == when {
+					if refuse {
+						injected = true
 						return 128, "policy changed"
 					}
 				}
 				return rc, data
 			}
 			res := preparePreserving(context.Background(), f.repo, "cmd", "policy-drift", f.base, root, OwnerStamp{PID: os.Getpid(), LeaseID: "fixture-admission"}, runner, func(context.Context) error { return nil })
-			if res.OK || res.Code != "PRESERVATION_CONFIG_REFUSED" {
-				t.Fatalf("drift=%+v", res)
+			if !injected || res.OK || res.Code != "PRESERVATION_CONFIG_REFUSED" {
+				t.Fatalf("drift=%+v injected=%v", res, injected)
 			}
 			added, status := false, false
 			for _, call := range calls {

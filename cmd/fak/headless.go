@@ -45,6 +45,7 @@ func runHeadlessLint(stdout, stderr io.Writer, stdin io.Reader, argv []string) i
 		closing        = fs.Bool("closing", false, "run the RUN-LEVEL closing-shape fold: refuse a final summary whose last block is a trailing prose wall instead of scannable bullets")
 		issuesFiled    = fs.Int("issues-filed", 0, "with --leftovers: DEPRECATED self-report of how many gh issues the run filed during its lifetime; used only when --transcript is absent, and superseded by it")
 		transcriptPath = fs.String("transcript", "", "with --leftovers: count the issues the run filed from THIS session transcript's tool-use evidence (JSONL); authoritative over --issues-filed")
+		nextAction     = fs.Bool("next-action", false, "run the RUN-LEVEL stop-shape fold: refuse a final summary that stops in terminal-block grammar with no named next action")
 		override       = fs.Bool("override", false, `with --leftovers/--closing: the operator escape ("genuinely nothing left" / "this prose closer is deliberate") — forces clean`)
 	)
 	fs.Usage = func() { fmt.Fprint(stderr, headlessLintUsage) }
@@ -73,6 +74,11 @@ func runHeadlessLint(stdout, stderr io.Writer, stdin io.Reader, argv []string) i
 	// the other run-level question — does it CLOSE in a shape the operator can scan?
 	if *closing {
 		return runHeadlessClosing(stdout, stderr, text, *override, *asJSON)
+	}
+	// The stop-shape sibling (headless_next_action.go): does the summary STOP in a
+	// terminal block, or name the next action?
+	if *nextAction {
+		return runHeadlessNextAction(stdout, stderr, text, *asJSON)
 	}
 
 	rep := headlesslint.Scan(text)
@@ -262,6 +268,14 @@ usage:
   … | fak headless-lint [--json]
   fak headless-lint --leftovers [--transcript session.jsonl] [--issues-filed N] [--override] "…final summary…"
   fak headless-lint --closing [--override] [--json] "…final summary…"
+  fak headless-lint --next-action [--json] "…final summary…"
+
+run-level stop-shape fold (--next-action):
+  Enforces the AGENTS.md rule "There is no blocked state: name the next action
+  (spawn / queue / route around / wait / hand off), never a terminal block."
+  Refuses (exit 1, terminal_block) a final summary that says "blocked", "cannot
+  proceed", "stuck on" … and names no next action (a next-step phrase, a stated
+  intent, or a cited ticket). No --override: the grammar of the stop decides.
 
 run-level closing-shape fold (--closing):
   Enforces the AGENTS.md rule "Close operator-facing turns with scannable bullets,

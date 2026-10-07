@@ -2,6 +2,7 @@ package amdgpu
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -336,16 +337,26 @@ func TestHardwareClockGovernor(t *testing.T) {
 
 	// 6. Background Start and Stop
 	t.Run("BackgroundDaemon_StartAndStop", func(t *testing.T) {
-		gov := NewHardwareClockGovernor(
-			WithClockGovernorPlatform(PlatformAMD),
+		device, opts := clockGovernorAMDTestFixture(t)
+		opts = append(opts,
 			WithClockGovernorPollInterval(10*time.Millisecond),
+			// Keep lifecycle assertions independent of scheduler delays.
+			WithClockGovernorTimeFunc(func() time.Time {
+				return time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC)
+			}),
 		)
+		gov := NewHardwareClockGovernor(opts...)
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
 		if err := gov.Start(ctx); err != nil {
 			t.Fatalf("Start failed: %v", err)
 		}
+		t.Cleanup(func() {
+			if err := gov.Stop(); err != nil {
+				t.Errorf("Stop cleanup failed: %v", err)
+			}
+		})
 		// Second start fails
 		if err := gov.Start(ctx); err == nil {
 			t.Fatal("expected error on duplicate Start")
@@ -355,6 +366,19 @@ func TestHardwareClockGovernor(t *testing.T) {
 		if !gov.IsLocked() {
 			t.Fatal("expected locked after RecordActivity")
 		}
+		for name, want := range map[string]string{
+			SysfsDPMForcePerformanceLevel: "manual",
+			SysfsPPDpmSclk:                "2",
+			SysfsPPDpmMclk:                "2",
+		} {
+			data, err := os.ReadFile(filepath.Join(device, name))
+			if err != nil {
+				t.Fatalf("read fixture %s: %v", name, err)
+			}
+			if got := strings.TrimSpace(string(data)); got != want {
+				t.Errorf("fixture %s = %q, want %q after activity", name, got, want)
+			}
+		}
 
 		if err := gov.Stop(); err != nil {
 			t.Fatalf("Stop failed: %v", err)
@@ -362,7 +386,91 @@ func TestHardwareClockGovernor(t *testing.T) {
 		if gov.IsLocked() {
 			t.Fatal("expected unlocked after Stop")
 		}
+		data, err := os.ReadFile(filepath.Join(device, SysfsDPMForcePerformanceLevel))
+		if err != nil {
+			t.Fatalf("read fixture after Stop: %v", err)
+		}
+		if got := strings.TrimSpace(string(data)); got != "auto" {
+			t.Errorf("fixture DPM = %q, want auto after Stop", got)
+		}
 	})
+
+	t.Run("AMD_WriteErrorDoesNotLock", func(t *testing.T) {
+		device, opts := clockGovernorAMDTestFixture(t)
+		writeErr := errors.New("injected fixture write failure")
+		writes := 0
+		opts = append(opts, WithClockGovernorFileWriter(func(path string, _ []byte, _ os.FileMode) error {
+			writes++
+			if path != filepath.Join(device, SysfsDPMForcePerformanceLevel) {
+				t.Errorf("unexpected first write path: %s", path)
+			}
+			return writeErr
+		}))
+		gov := NewHardwareClockGovernor(opts...)
+		if err := gov.Lock(); !errors.Is(err, writeErr) {
+			t.Fatalf("Lock error = %v, want injected write failure", err)
+		}
+		if gov.IsLocked() || writes != 1 {
+			t.Fatalf("failed Lock: locked=%v writes=%d, want false and 1", gov.IsLocked(), writes)
+		}
+
+		// RecordActivity has no error return; failed I/O must still leave it unlocked.
+		gov.RecordActivity()
+		if gov.IsLocked() || writes != 2 {
+			t.Fatalf("failed activity lock: locked=%v writes=%d, want false and 2", gov.IsLocked(), writes)
+		}
+		data, err := os.ReadFile(filepath.Join(device, SysfsDPMForcePerformanceLevel))
+		if err != nil {
+			t.Fatalf("read fixture after failed write: %v", err)
+		}
+		if got := strings.TrimSpace(string(data)); got != "auto" {
+			t.Errorf("fixture DPM = %q, want unchanged auto after failed writes", got)
+		}
+	})
+}
+
+// clockGovernorAMDTestFixture confines the real AMD file path to temporary files.
+// Its I/O hooks reject unexpected paths before touching the filesystem.
+func clockGovernorAMDTestFixture(t *testing.T) (string, []HardwareClockGovernorOption) {
+	t.Helper()
+	root := t.TempDir()
+	device := filepath.Join(root, "card1", "device")
+	if err := os.MkdirAll(device, 0755); err != nil {
+		t.Fatalf("create DRM fixture: %v", err)
+	}
+	files := map[string]string{
+		SysfsDPMForcePerformanceLevel: "auto\n",
+		SysfsPPDpmSclk:                "0: 600Mhz\n1: 1100Mhz\n2: 2200Mhz *\n",
+		SysfsPPDpmMclk:                "0: 400Mhz\n1: 800Mhz\n2: 1000Mhz *\n",
+	}
+	for name, data := range files {
+		if err := os.WriteFile(filepath.Join(device, name), []byte(data), 0644); err != nil {
+			t.Fatalf("initialize DRM fixture %s: %v", name, err)
+		}
+	}
+	checkPath := func(path string) error {
+		if _, ok := files[filepath.Base(path)]; !ok || filepath.Dir(path) != device {
+			return fmt.Errorf("clock governor accessed outside DRM fixture: %s", path)
+		}
+		return nil
+	}
+	return device, []HardwareClockGovernorOption{
+		WithClockGovernorPlatform(PlatformAMD),
+		WithClockGovernorSysfsDRMRoot(root),
+		WithClockGovernorDeviceCards("card1", "card0"),
+		WithClockGovernorFileReader(func(path string) ([]byte, error) {
+			if err := checkPath(path); err != nil {
+				return nil, err
+			}
+			return os.ReadFile(path)
+		}),
+		WithClockGovernorFileWriter(func(path string, data []byte, perm os.FileMode) error {
+			if err := checkPath(path); err != nil {
+				return err
+			}
+			return os.WriteFile(path, data, perm)
+		}),
+	}
 }
 
 // cb11AssertReadersComplete releases and joins both goroutines before reporting

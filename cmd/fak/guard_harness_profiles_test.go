@@ -188,6 +188,21 @@ func firstClassHarnessFloorProfiles() []harnessFloorProfile {
 			},
 		},
 		{
+			Name: "Pi",
+			RequiredTools: []harnessToolProbe{
+				{"read", `{"path":"README.md"}`},
+				{"edit", `{"path":"notes.txt","edits":[{"oldText":"hello","newText":"world"}]}`},
+				{"write", `{"path":"notes.txt","content":"hello"}`},
+				{"grep", `{"pattern":"func"}`},
+				{"find", `{"pattern":"*.go"}`},
+				{"ls", `{"path":"."}`},
+			},
+			ShellAliases: []shellAliasSpec{
+				{Name: "bash", Benign: "go test ./...", Denies: posixDenies},
+				{Name: "powershell", Benign: "Get-ChildItem", Denies: powershellDenies},
+			},
+		},
+		{
 			Name: "MCP client",
 			RequiredTools: []harnessToolProbe{
 				{"ListMcpResourcesTool", `{}`},

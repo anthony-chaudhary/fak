@@ -365,13 +365,14 @@ root registrations after their processes exit. Clicking either table opens the r
 with the time range preserved; its selector unions live session IDs with the session IDs retained
 on durable run registrations.
 
-**Three projections, never blended** — the same honesty fence `fak info` renders:
+**Four projections, never blended** — the same honesty fence `fak info` renders:
 
 | Family | Tier | Source | Read it as |
 |---|---|---|---|
 | `fak_fleet_sessions*`, `fak_fleet_session_*` | **LIVE** | the durable session registry, via an oracle (PCB state, heartbeat freshness, resume's idle-vs-TTL posture) | *who is alive* — the same fold `fak session ls --durable` prints, so the dashboard and the CLI can never disagree |
 | `fak_fleet_run_*`, `fak_fleet_registered_runs*` | **DURABLE RUN HISTORY** | root records in the session-registration ledger | *what ran and how it ended* — launch/runtime/source are recorded, never inferred from process liveness |
 | `fak_fleet_usage_*` | **HISTORICAL USAGE** | the append-only gateway-usage ledger | *what it cost* — OBSERVED (provider-relayed) tokens, except `kv_prefix_*` which fak authored itself |
+| `fak_cli_*` | **CLI INVOCATIONS** | the local usage journal (`usage.jsonl`) both `fak` and `fak-dev` append one row to per run (the byte-bounded tail, no time cutoff, so the `_total` counters only grow) | *which verbs run, how often, how slow, which fail* — an OBSERVED process self-report, never a witness of downstream effect; `fak_cli_usage_log_readable` 0 means the journal could not be read. Board: `fak-cli-invocation-telemetry` |
 
 Three panels exist purely so the dashboard cannot lie to you:
 
@@ -410,7 +411,8 @@ fak serve           :8080/metrics    ──→  Prometheus :9091  ──→  Gra
 
 live session registry ─────┐
 run registration ledger ───┼→ fak fleet metrics :9098/metrics ──→ Prometheus ──→ Grafana
-gateway-usage.jsonl ────────┘     (namespace fak_fleet_)        (Run Operations → drill-down)
+gateway-usage.jsonl ────────┤     (namespaces fak_fleet_, fak_cli_) (Run Operations → drill-down)
+usage.jsonl (fak + fak-dev) ┘
 ```
 
 `render_prometheus` emits one HELP/TYPE per family with bounded cardinality

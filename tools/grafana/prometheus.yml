@@ -99,7 +99,14 @@ scrape_configs:
     # If you run the exporter with --fleet (folding peer nodes' C2 session refs), each
     # scrape runs a BOUNDED git fetch — raise scrape_interval and scrape_timeout to
     # match, or run a second exporter on another port for the peer view.
+    #
+    # scrape_timeout: the per-scrape fold (registry + usage ledger + the local
+    # CLI-invocation journal behind fak_cli_*) was measured at 8-21s warm, so the
+    # 10s Prometheus default marked a healthy exporter DOWN. 30s covers the fold
+    # and equals the 30s global scrape_interval; Prometheus rejects the whole file
+    # if timeout > interval, so raise both together.
     metrics_path: /metrics
+    scrape_timeout: 30s
     static_configs:
       - targets: ["host.docker.internal:9098"]
         labels:

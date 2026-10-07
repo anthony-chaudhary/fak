@@ -128,6 +128,12 @@ func classifyUpstream(status int, body []byte, h http.Header) UpstreamRemedy {
 	if streamRequired(body) {
 		return RemedyStreamRequired
 	}
+	// A chat-template render failure is a property of THIS request's message shape, so the
+	// identical resend fails identically: llama.cpp reports it as a bare 500, which would
+	// otherwise ride the transient arm for the whole retry budget.
+	if chatTemplateRejected(body) {
+		return RemedyTerminal
+	}
 	if retryableStatus(status) {
 		return RemedyBackoff
 	}
@@ -245,6 +251,20 @@ func modelNotEntitled(body []byte) bool {
 		"does not have access", // same, explicit
 		"not entitled",         // entitlement refusal
 		"not allowed to use",   // model/feature not on the plan
+	)
+}
+
+// chatTemplateRejected reports whether an upstream error body is a server-side chat-template
+// (Jinja) render failure — llama.cpp's
+// `{"error":{"code":500,"message":"...Jinja Exception: System message must be at the beginning."}}`
+// and the template's own raise_exception guards. The request is deterministic input to the
+// template, so no backoff, same-target probe, or alternate target serving the same template
+// can clear it.
+func chatTemplateRejected(body []byte) bool {
+	return bodyContainsAny(body,
+		"jinja exception",
+		"raise_exception",
+		"error while executing callexpression",
 	)
 }
 

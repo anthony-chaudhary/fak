@@ -76,15 +76,6 @@ func hasLine(body, line string) bool {
 	return false
 }
 
-func hasPrefixLine(body, prefix string) bool {
-	for _, got := range strings.Split(body, "\n") {
-		if strings.HasPrefix(got, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
 // TestServerConstructionAttachesTheStepObservers is the anti-fak_sched_preempt witness.
 // The defect this change fixes is a family that has writers and no PRODUCTION
 // attachment, so its board band can never light up. Presence of the recorder is not the

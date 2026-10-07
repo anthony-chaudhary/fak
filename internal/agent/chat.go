@@ -442,6 +442,11 @@ type Completion struct {
 	// prefill boundary (a buffered remote provider).
 	Timings *Timings
 
+	// NativeDecode is the in-kernel engine's per-request decode anatomy (which
+	// decode path ran, the cohort it rode, its own speculative rounds). Nil for
+	// any planner that is not the native engine.
+	NativeDecode *NativeDecodeSummary
+
 	// Model is the model id the UPSTREAM reported it served this completion with
 	// (the provider response's `model` field), or "" when the provider omitted it.
 	// The /v1/chat/completions proxy echoes this as the response `model` so a client

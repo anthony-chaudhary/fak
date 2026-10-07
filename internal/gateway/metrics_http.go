@@ -450,7 +450,13 @@ func requestTraceID(r *http.Request) string {
 	if r == nil {
 		return ""
 	}
-	return strings.TrimSpace(r.Header.Get(traceHeader))
+	if id := strings.TrimSpace(r.Header.Get(traceHeader)); id != "" {
+		return id
+	}
+	// X-Request-ID is the router-minted id (rt-<hex>); the engine accepts it as
+	// an alias so one request keys identically across router trace, engine
+	// snapshot, and the served_by join (telemetry map T3).
+	return strings.TrimSpace(r.Header.Get("X-Request-ID"))
 }
 
 func (s *Server) useHTTPTrace(w http.ResponseWriter, r *http.Request, preferred string) string {

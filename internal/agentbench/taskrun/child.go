@@ -7,16 +7,21 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/codetools"
 )
 
+// PlannerTurn records one planner request as a delta: PrefixMessages leading
+// messages repeat the previous turn's request and Messages holds the rest, so the
+// receipt grows with the transcript rather than with its square.
 type PlannerTurn struct {
-	Messages  []agent.Message  `json:"messages"`
-	ToolCalls []agent.ToolCall `json:"tool_calls,omitempty"`
-	Content   string           `json:"content,omitempty"`
+	PrefixMessages int              `json:"prefix_messages,omitempty"`
+	Messages       []agent.Message  `json:"messages"`
+	ToolCalls      []agent.ToolCall `json:"tool_calls,omitempty"`
+	Content        string           `json:"content,omitempty"`
 }
 
 type ChildReceipt struct {
@@ -36,6 +41,7 @@ type ChildReceipt struct {
 type recordingPlanner struct {
 	inner agent.Planner
 	turns []PlannerTurn
+	prev  []agent.Message
 }
 
 func (p *recordingPlanner) Model() string { return p.inner.Model() }
@@ -44,13 +50,23 @@ func (p *recordingPlanner) Complete(ctx context.Context, msgs []agent.Message, t
 		return nil, errors.New("agentbench planner call cap reached")
 	}
 	c, e := p.inner.Complete(ctx, msgs, tools, opts...)
-	t := PlannerTurn{Messages: append([]agent.Message(nil), msgs...)}
+	prefix := sharedMessagePrefix(p.prev, msgs)
+	t := PlannerTurn{PrefixMessages: prefix, Messages: append([]agent.Message(nil), msgs[prefix:]...)}
+	p.prev = append([]agent.Message(nil), msgs...)
 	if c != nil {
 		t.ToolCalls = append([]agent.ToolCall(nil), c.Message.ToolCalls...)
 		t.Content = c.Message.Content
 	}
 	p.turns = append(p.turns, t)
 	return c, e
+}
+
+func sharedMessagePrefix(prev, next []agent.Message) int {
+	n := 0
+	for n < len(prev) && n < len(next) && reflect.DeepEqual(prev[n], next[n]) {
+		n++
+	}
+	return n
 }
 
 func RunChild(ctx context.Context, configPath string, out io.Writer) error {
@@ -69,7 +85,7 @@ func RunChild(ctx context.Context, configPath string, out io.Writer) error {
 	p := &recordingPlanner{inner: agent.NewHTTPPlanner(cfg.Endpoint, cfg.Model, "")}
 	task := cfg.Prompt + "\n\nThe visible test below is immutable reference input outside the writable workspace:\n```go\n" + cfg.VisibleTest + "```\n\nAfter editing the target source, run the required test with the Bash tool using this byte-exact command:\n" + cfg.TestCommand
 	metrics, runErr := agent.RunArm(ctx, p, task, true, maxTaskTurns, nil, agent.WithToolCatalog(catalog))
-	r := ChildReceipt{Schema: "fak.agentbench.task-child.v1", Model: p.Model(), PlannerCalls: len(p.turns), Metrics: metrics, Turns: p.turns}
+	r := ChildReceipt{Schema: "fak.agentbench.task-child.v2", Model: p.Model(), PlannerCalls: len(p.turns), Metrics: metrics, Turns: p.turns}
 	for _, turn := range p.turns {
 		for _, call := range turn.ToolCalls {
 			switch call.Function.Name {

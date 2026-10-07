@@ -2840,6 +2840,79 @@ func TestSweepDeadWorktrees_ReapsLocalDeadRegistration(t *testing.T) {
 	}
 }
 
+// TestSweepDeadWorktreesMixedCrossOSRegistration proves that a sweep which
+// reaps an eligible local dead registration never issues a repository-wide
+// `git worktree prune` while a live foreign-platform registration is present, so
+// the foreign registration's shared admin directory survives byte-for-byte.
+func TestSweepDeadWorktreesMixedCrossOSRegistration(t *testing.T) {
+	root := t.TempDir()
+	wtRoot := t.TempDir()
+
+	// A live foreign-platform (WSL-style) registration whose checkout cannot be
+	// stat-ed from this OS namespace.
+	foreignName := "fak-worker-wt-mixed-foreign"
+	foreignAdmin := filepath.Join(root, ".git", "worktrees", foreignName)
+	if err := os.MkdirAll(foreignAdmin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	foreignGitdir := "/tmp/fak-sandbox-workers-01a0/fak-worker-wt-mixed-foreign/.git"
+	if runtime.GOOS != "windows" {
+		foreignGitdir = `C:\work\fak\_scratch\fak-worker-wt-mixed-foreign\gitdir`
+	}
+	if err := os.WriteFile(filepath.Join(foreignAdmin, "gitdir"), []byte(foreignGitdir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	foreignPayload := []byte("foreign admin payload that must survive byte-for-byte\n")
+	if err := os.WriteFile(filepath.Join(foreignAdmin, "HEAD"), foreignPayload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// An eligible dead local registration that the sweep must reap.
+	deadName := "fak-worker-wt-mixed-dead"
+	deadAdmin := filepath.Join(root, ".git", "worktrees", deadName)
+	if err := os.MkdirAll(deadAdmin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	deadGitdir := filepath.Join(root, "_scratch", "nonexistent-mixed", "gitdir")
+	if err := os.WriteFile(filepath.Join(deadAdmin, "gitdir"), []byte(deadGitdir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var calls [][]string
+	record := func(_ string, args []string) (int, string) {
+		calls = append(calls, append([]string{}, args...))
+		return 0, ""
+	}
+	report := SweepDeadWorktrees(root, wtRoot, record)
+
+	if report.Pruned != 1 {
+		t.Fatalf("expected exactly 1 local dead registration reaped, got %d (paths: %v)", report.Pruned, report.Paths)
+	}
+	if !report.PruneSkippedForeign {
+		t.Fatal("expected PruneSkippedForeign while a foreign registration was present")
+	}
+	for _, c := range calls {
+		if len(c) >= 2 && c[0] == "worktree" && c[1] == "prune" {
+			t.Fatalf("sweep issued a broad worktree prune while a foreign registration was present: %v", calls)
+		}
+	}
+	if _, err := os.Stat(deadAdmin); !os.IsNotExist(err) {
+		t.Fatalf("dead local admin dir %q was not reaped", deadAdmin)
+	}
+	gotPayload, err := os.ReadFile(filepath.Join(foreignAdmin, "HEAD"))
+	if err != nil {
+		t.Fatalf("foreign admin HEAD missing after sweep: %v", err)
+	}
+	if !bytes.Equal(gotPayload, foreignPayload) {
+		t.Fatalf("foreign admin payload changed: got %q want %q", gotPayload, foreignPayload)
+	}
+	if content, err := os.ReadFile(filepath.Join(foreignAdmin, "gitdir")); err != nil {
+		t.Fatalf("foreign admin gitdir missing after sweep: %v", err)
+	} else if strings.TrimSpace(string(content)) != foreignGitdir {
+		t.Fatalf("foreign admin gitdir content changed: got %q want %q", strings.TrimSpace(string(content)), foreignGitdir)
+	}
+}
+
 func TestIsWindowsAbsolutePath(t *testing.T) {
 	cases := []struct {
 		path string

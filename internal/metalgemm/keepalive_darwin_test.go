@@ -61,8 +61,11 @@ func TestKeepAliveMetalOutputAndDrain(t *testing.T) {
 	t.Setenv("FAK_METAL_KEEPALIVE", "on")
 	stop := BeginKeepAlive()
 	defer stop()
+	// BeginKeepAlive submits the initial native buffers before returning.
+	if state := KeepAliveState(); state.Holders != 1 || state.InFlight > 2 || state.Failed || state.SubmittedBuffers <= before.SubmittedBuffers {
+		t.Fatalf("bounded active keepalive not witnessed at start: %+v", state)
+	}
 	for range 4 {
-		time.Sleep(200 * time.Microsecond)
 		w.GEMV(x, got)
 		keepAliveAssertParity(t, got, want)
 		state := KeepAliveState()
@@ -71,24 +74,19 @@ func TestKeepAliveMetalOutputAndDrain(t *testing.T) {
 		}
 	}
 	stop()
-	deadline := time.Now().Add(time.Second)
-	for {
+	if !pollGraphUntil(time.Second, func() bool {
 		state := KeepAliveState()
-		if state.Holders == 0 && state.InFlight == 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("finite keepalive buffers did not drain: %+v", state)
-		}
-		time.Sleep(time.Millisecond)
+		return state.Holders == 0 && state.InFlight == 0
+	}) {
+		t.Fatalf("finite keepalive buffers did not drain: %+v", KeepAliveState())
 	}
 	w.GEMV(x, got)
 	keepAliveAssertParity(t, got, want)
 }
 
 // BenchmarkKeepAliveIdleGap measures host GEMV latency after an actual recorded host
-// sleep; gpu-us/op is only emitted when native command-buffer timestamps exist.
-// The gap is excluded from ns/op. macOS may round 200us sleeps up: gap-us/op records
+// idle wait; gpu-us/op is only emitted when native command-buffer timestamps exist.
+// The gap is excluded from ns/op. macOS may round 200us waits up: gap-us/op records
 // that observed delay rather than claiming the requested duration was achieved.
 // fak-test:runtime integration est=5s lane=optin
 func BenchmarkKeepAliveIdleGap(b *testing.B) {
@@ -116,11 +114,16 @@ func BenchmarkKeepAliveIdleGap(b *testing.B) {
 				var gpuMS, waitMS float64
 				var gpuCount int
 				var actualGap time.Duration
+				gapTimer := time.NewTimer(gap)
+				gapTimer.Stop()
+				defer gapTimer.Stop()
 				b.ResetTimer()
 				for range b.N {
 					b.StopTimer()
 					gapStart := time.Now()
-					time.Sleep(gap)
+					// The real idle gap is the benchmark stimulus, not synchronization.
+					gapTimer.Reset(gap)
+					<-gapTimer.C
 					actualGap += time.Since(gapStart)
 					observation := NewExecutionObservation(ExecutionQ4KGEMV)
 					b.StartTimer()

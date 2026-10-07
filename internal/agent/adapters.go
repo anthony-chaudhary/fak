@@ -203,7 +203,7 @@ func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 	if len(r.Tools) > 0 {
 		toolChoice = "auto"
 	}
-	messages := r.Messages
+	messages := foldLateSystemMessages(r.Messages)
 	if r.OpenAIToolMessagesAsText {
 		messages = openAIToolMessagesAsText(messages)
 	}
@@ -227,6 +227,64 @@ func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 		req.StreamOptions = &openAIStreamOptions{IncludeUsage: true}
 	}
 	return marshalWithExtraBody(req, r.ExtraBody)
+}
+
+// foldLateSystemMessages moves every system/developer message that follows the
+// first non-system message into a user turn. Qwen-family jinja chat templates
+// served by llama.cpp raise "System message must be at the beginning" (HTTP 500)
+// on a mid-conversation system message, and the agent loop splices those in as
+// steering directives. The leading system run is untouched, so the cacheable
+// prefix is stable, and a late directive is never placed between an assistant
+// tool call and its tool results.
+func foldLateSystemMessages(messages []Message) []Message {
+	head := 0
+	for head < len(messages) && isSystemRole(messages[head].Role) {
+		head++
+	}
+	late := false
+	for _, m := range messages[head:] {
+		if isSystemRole(m.Role) {
+			late = true
+			break
+		}
+	}
+	if !late {
+		return messages
+	}
+	out := make([]Message, 0, len(messages))
+	out = append(out, messages[:head]...)
+	var pending []string
+	for _, m := range messages[head:] {
+		if isSystemRole(m.Role) {
+			if strings.TrimSpace(m.Content) != "" {
+				pending = append(pending, "[system]\n"+m.Content)
+			}
+			continue
+		}
+		if len(pending) > 0 && m.Role != RoleTool {
+			text := strings.Join(pending, "\n\n")
+			pending = nil
+			if m.Role == RoleUser {
+				m.Content = joinNonEmpty(text, m.Content, "\n\n")
+			} else {
+				out = append(out, Message{Role: RoleUser, Content: text})
+			}
+		}
+		out = append(out, m)
+	}
+	if len(pending) > 0 {
+		text := strings.Join(pending, "\n\n")
+		if last := len(out) - 1; out[last].Role == RoleUser {
+			out[last].Content = joinNonEmpty(out[last].Content, text, "\n\n")
+		} else {
+			out = append(out, Message{Role: RoleUser, Content: text})
+		}
+	}
+	return out
+}
+
+func isSystemRole(role string) bool {
+	return role == RoleSystem || role == RoleDeveloper
 }
 
 func openAIToolMessagesAsText(messages []Message) []Message {

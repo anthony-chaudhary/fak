@@ -580,6 +580,8 @@ func cmdManageCommand(commandName string, argv []string) {
 	launchProvider, launchProviderAutodetected := launchPlan.resolveProvider(*provider)
 	if remoteBase != "" {
 		launchProviderAutodetected = false
+	} else if strings.TrimSpace(*baseURL) == "" && !localModel {
+		launchProvider, *model, launchProviderAutodetected = launchPlan.applyOpenCodeModelRoute(*provider, launchProvider, *model, launchProviderAutodetected)
 	}
 	posture := resolveGuardUpstreamPosture(guardUpstreamPostureInputs{
 		command:        command,

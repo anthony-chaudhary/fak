@@ -161,7 +161,8 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		}
 	}()
 	turnCtx := plannerTurnContext(r.Context(), r, messages, s.contextEpoch)
-	comp, err := sp.CompleteStream(turnCtx, guard.write, messages, req.Tools, opts...)
+	var firstDelta firstDeltaClock
+	comp, err := sp.CompleteStream(turnCtx, firstDelta.wrap(guard.write), messages, req.Tools, opts...)
 	close(stopPing)
 	<-pingDone
 	if err != nil {
@@ -170,7 +171,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	}
 	s.observePrefixReuseTurn(turnCtx, messages, comp)
 	lease.SettleUsage(comp.Usage) // settle the token-rate window with real usage (#2019)
-	s.accountStreamedTurn(r.Context(), sessionTurn, comp, req.Messages, began, req.Model)
+	s.accountStreamedTurn(r.Context(), sessionTurn, comp, req.Messages, began, req.Model, firstDelta.ttft(began))
 
 	// Tool-call conformance fail-closed (the rule itself lives in
 	// failClosedOnUnparsedToolCalls). Mid-stream this surface ends the turn in the

@@ -76,6 +76,51 @@ func (p guardLaunchPlan) resolveProvider(explicit string) (string, bool) {
 	return "anthropic", false
 }
 
+// openCodeModelPrefixWire maps the provider prefix of an OpenCode `--model
+// provider/id` onto the upstream wire guard proxies to.
+var openCodeModelPrefixWire = map[string]string{
+	"google":    string(harnessprofile.WireGemini),
+	"gemini":    string(harnessprofile.WireGemini),
+	"anthropic": string(harnessprofile.WireAnthropic),
+	"openai":    string(harnessprofile.WireOpenAI),
+	"xai":       "xai",
+}
+
+// openCodeModelRoute derives the upstream wire and the bare upstream model id
+// from an OpenCode child's --model/-m. A missing or unknown prefix is no route.
+func (p guardLaunchPlan) openCodeModelRoute() (provider, model string, ok bool) {
+	if p.baseName != "opencode" || len(p.semantic) < 2 {
+		return "", "", false
+	}
+	prefix, id, found := strings.Cut(strings.TrimSpace(extractModelFromCommand(p.semantic[1:])), "/")
+	id = strings.TrimSpace(id)
+	if !found || id == "" {
+		return "", "", false
+	}
+	provider, ok = openCodeModelPrefixWire[strings.ToLower(strings.TrimSpace(prefix))]
+	if !ok {
+		return "", "", false
+	}
+	return provider, id, true
+}
+
+// applyOpenCodeModelRoute is consulted only when the operator named no upstream
+// endpoint, so the provider's public API is the upstream: the model prefix then
+// picks that API, and the prefix is stripped because no public API accepts it.
+func (p guardLaunchPlan) applyOpenCodeModelRoute(explicit, provider, model string, autodetected bool) (string, string, bool) {
+	routeProvider, routeModel, ok := p.openCodeModelRoute()
+	if !ok {
+		return provider, model, autodetected
+	}
+	if strings.TrimSpace(explicit) == "" {
+		provider, autodetected = routeProvider, true
+	}
+	if provider == routeProvider && strings.TrimSpace(model) == "" {
+		model = routeModel
+	}
+	return provider, model, autodetected
+}
+
 func (p guardLaunchPlan) agentName() string {
 	if len(p.semantic) == 0 {
 		return ""

@@ -69,9 +69,32 @@ func preparePreserving(ctx context.Context, root, lane, key, baseSHA, wtRoot str
 	if rc != 0 || metadata != "" {
 		return refuse("PRESERVATION_TARGET_CONFLICT", "pinned source contains reserved worker metadata or cannot be inspected")
 	}
-	policy, err := preservingCheckoutPolicy(root, baseSHA, git)
+	policy, err := preservingCheckoutPolicyProof(root, target, baseSHA, git, nil)
 	if err != nil {
 		return refuse("PRESERVATION_CONFIG_REFUSED", err.Error())
+	}
+	var childPolicy *preservingCheckoutProof
+	recheckPolicy := func(child bool) error {
+		// The source remains authoritative after add. A changed original must
+		// not be hidden by an unchanged copy in the new checkout.
+		current, err := preservingCheckoutPolicyProof(root, target, baseSHA, git, nil)
+		if err != nil {
+			return err
+		}
+		if current != policy {
+			return fmt.Errorf("source checkout policy drifted from admitted proof")
+		}
+		if child {
+			current, err = preservingCheckoutPolicyProof(target, target, baseSHA, git, &policy)
+			if err != nil {
+				return err
+			}
+			if current.digest != policy.digest || childPolicy != nil && current != *childPolicy {
+				return fmt.Errorf("new-worktree checkout policy differs from admitted copy proof")
+			}
+			childPolicy = &current
+		}
+		return nil
 	}
 	wait := prepareLockWait()
 	if deadline, ok := ctx.Deadline(); ok {
@@ -129,10 +152,7 @@ func preparePreserving(ctx context.Context, root, lane, key, baseSHA, wtRoot str
 			res = refuse("PREPARE_NOT_READY", err.Error())
 			return
 		}
-		if current, err := preservingCheckoutPolicy(root, baseSHA, git); err != nil || current != policy {
-			if err == nil {
-				err = fmt.Errorf("checkout configuration or pinned attribute proof drifted")
-			}
+		if err := recheckPolicy(false); err != nil {
 			res = refuse("PRESERVATION_CONFIG_REFUSED", err.Error())
 			return
 		}
@@ -149,10 +169,7 @@ func preparePreserving(ctx context.Context, root, lane, key, baseSHA, wtRoot str
 			return
 		}
 		// Requalify the actual new-worktree context before status can run helpers.
-		if current, err := preservingCheckoutPolicy(target, baseSHA, git); err != nil || current != policy {
-			if err == nil {
-				err = fmt.Errorf("new-worktree checkout policy differs from admitted proof")
-			}
+		if err := recheckPolicy(true); err != nil {
 			res = refuse("PRESERVATION_CONFIG_REFUSED", err.Error())
 			return
 		}
@@ -204,10 +221,7 @@ func preparePreserving(ctx context.Context, root, lane, key, baseSHA, wtRoot str
 			res = refuse("PREPARE_NOT_READY", "new registration lost after stamping; partial state retained")
 			return
 		}
-		if current, err := preservingCheckoutPolicy(target, baseSHA, git); err != nil || current != policy {
-			if err == nil {
-				err = fmt.Errorf("checkout policy drifted before publication")
-			}
+		if err := recheckPolicy(true); err != nil {
 			res = refuse("PRESERVATION_CONFIG_REFUSED", err.Error())
 			return
 		}

@@ -1758,7 +1758,14 @@ paths:
         cancel) still leaves one row with `finish_reason: error`, an `error`
         class and the HTTP `status` the client got (200 when the failure came
         after the stream was committed, 499 for a client cancel).
-        Counts and timings only. Same observability auth floor as
+        A streamed turn's `ttft_ms` is the planner's own prefill boundary
+        when it reports one (the native engine), else the first content
+        fragment the gateway watched arrive (a proxied stream). A native
+        turn also carries `engine`: its decode path (serial, batched,
+        speculative), the coalesced cohort it rode, and its own
+        speculative draft/accept counts; the summary folds those into
+        `by_path` and `spec_accept_rate`. Proxied and mock turns carry no
+        `engine`. Counts and timings only. Same observability auth floor as
         `/v1/fak/observation/engine`.
       parameters:
         - name: n
@@ -1805,6 +1812,14 @@ paths:
                       by_error:
                         type: object
                         additionalProperties: { type: integer }
+                      native: { type: integer }
+                      by_path:
+                        type: object
+                        additionalProperties: { type: integer }
+                      spec_rounds: { type: integer }
+                      spec_draft_tokens: { type: integer }
+                      spec_accepted_tokens: { type: integer }
+                      spec_accept_rate: { type: number }
                   records:
                     type: array
                     items:
@@ -1826,6 +1841,16 @@ paths:
                           type: string
                           enum: [client_canceled, first_token_timeout, stall, deadline, upstream_unreachable, upstream_status, upstream_error]
                         status: { type: integer }
+                        model: { type: string }
+                        engine:
+                          type: object
+                          required: [path]
+                          properties:
+                            path: { type: string, enum: [serial, batched, speculative] }
+                            cohort_size: { type: integer }
+                            spec_rounds: { type: integer }
+                            spec_draft_tokens: { type: integer }
+                            spec_accepted_tokens: { type: integer }
             text/plain:
               schema: { type: string }
         '400': { $ref: '#/components/responses/BadRequest' }

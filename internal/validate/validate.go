@@ -322,6 +322,25 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 		fmt.Sprintf("fak validate: cannot overlay owned paths: %v", err)); failed {
 		return code
 	}
+	if !wslWorkspace {
+		// Prepare once for both native runners after overlays, so an explicit
+		// .git overlay is refused rather than replacing our private identity.
+		phase = recorder.start("git_identity")
+		err = prepareValidateGitIdentityWithin(ctx, r, dir, tip)
+		if code, timedOut := finishValidateContextPhase(stdout, &res, &recorder, phase, "git_identity", *asJSON); timedOut {
+			return code
+		}
+		if err != nil {
+			recordValidateFailure(&res, phase, "git_identity", err.Error(), err)
+			recorder.finish()
+			emitValidateResult(stdout, res, *asJSON)
+			// This is a failed required gate, not skipped infrastructure.
+			return 1
+		}
+		phase.finish(nil)
+	} else {
+		recorder.skip("git_identity", "WSL workspace identity prepared during extraction")
+	}
 	if !*testOnly {
 		if code, timedOut := runValidateGofmtPhase(ctx, stdout, &res, &recorder, r, dir, paths, wslWorkspace, *asJSON); timedOut {
 			return code
@@ -922,11 +941,6 @@ func runValidateTestsWithin(ctx context.Context, repo, dir, tip string, args []s
 	// The archive checkout is isolated from peer WIP. Windows defaults to WSL so test
 	// binaries execute under Linux rather than the host application-control boundary.
 	useWSL := runtime.GOOS == "windows" && wsl
-	if wsl {
-		if err := prepareValidateGitIdentityWithin(ctx, repo, dir, tip); err != nil {
-			return "prepare isolated Git identity: " + err.Error(), false
-		}
-	}
 	var cmd *exec.Cmd
 	if useWSL {
 		// Stream the isolated archive into WSL-native /tmp. A tar stream is cheaper
@@ -953,20 +967,63 @@ func runValidateTestsWithin(ctx context.Context, repo, dir, tip string, args []s
 	return detail, err == nil
 }
 
-// prepareValidateGitIdentity gives repository-aware tests the requested commit and its
-// tracked-file index without attaching the isolated checkout to the peer-dirty worktree.
-// The fetched object database travels with the archive into WSL and is removed with the
-// surrounding temporary checkout on every return path.
+// prepareValidateGitIdentityWithin gives repository-aware tests the requested
+// commit and its tracked-file index, with a private object database and detached
+// HEAD. Owned overlays remain worktree changes; they are never staged here.
+// It must only be called on the fresh export owned by this validation run.
 func prepareValidateGitIdentityWithin(ctx context.Context, repo, dir, tip string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Never follow a .git file/symlink or reinitialize an existing repository.
+	// The atomic mkdir also refuses a metadata path materialized by the export.
+	gitDir := filepath.Join(dir, ".git")
+	if err := os.Mkdir(gitDir, 0o700); err != nil {
+		return fmt.Errorf("create private Git directory: %w", err)
+	}
+	complete := false
+	defer func() {
+		if !complete {
+			_ = os.RemoveAll(gitDir)
+		}
+	}()
+	empty := filepath.Join(gitDir, "fak-empty")
+	if err := os.Mkdir(empty, 0o700); err != nil {
+		return err
+	}
+	// Use an absolute local source, never a remote name/URL or a path relative
+	// to the candidate. Neither fetch nor read-tree checks out source bytes.
+	repo, err := filepath.Abs(repo)
+	if err != nil {
+		return err
+	}
+	var env []string
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if !strings.HasPrefix(strings.ToUpper(key), "GIT_") {
+			env = append(env, entry)
+		}
+	}
+	env = append(env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM="+os.DevNull,
+		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_TERMINAL_PROMPT=0",
+		"GIT_ALLOW_PROTOCOL=file", "GIT_OPTIONAL_LOCKS=0")
+	// Git propagates -c overrides to its upload-pack child. In particular,
+	// disable a source repository's packObjectsHook as well as candidate hooks.
+	flags := []string{"-c", "core.hooksPath=" + empty, "-c", "uploadpack.packObjectsHook=",
+		"-c", "gc.auto=0", "-c", "maintenance.auto=false"}
 	commands := [][]string{
-		{"init", "--quiet"},
+		{"init", "--quiet", "--template=" + empty},
 		{"fetch", "--quiet", "--no-tags", "--depth=1", repo, tip},
 		{"read-tree", tip},
 		{"update-ref", "--no-deref", "HEAD", tip},
 	}
 	for _, args := range commands {
-		cmd := windowgate.CommandContext(ctx, "git", args...)
+		cmd := windowgate.CommandContext(ctx, "git", append(append([]string(nil), flags...), args...)...)
 		cmd.Dir = dir
+		cmd.Env = env
+		// Bound pipe draining after cancellation even if a Git descendant
+		// inherited stdout/stderr. This does not attest descendant teardown.
+		cmd.WaitDelay = 2 * time.Second
 		windowgate.ConfigureBackgroundCommand(cmd)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -977,6 +1034,7 @@ func prepareValidateGitIdentityWithin(ctx context.Context, repo, dir, tip string
 			return fmt.Errorf("git %s: %s", args[0], detail)
 		}
 	}
+	complete = true
 	return nil
 }
 

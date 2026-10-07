@@ -8,6 +8,21 @@ import (
 	"time"
 )
 
+func TestRequestTraceIDXRequestIDAlias(t *testing.T) {
+	// TICKET-03 leaf: engine accepts X-Request-ID (router-minted rt-<hex>) as the
+	// trace id when X-Trace-Id is absent, so one request keys identically across
+	// router trace, engine snapshot, and the served_by join.
+	r := httptest.NewRequest("GET", "/v1/messages", nil)
+	r.Header.Set("X-Request-ID", "rt-ab12cd")
+	if got := requestTraceID(r); got != "rt-ab12cd" {
+		t.Fatalf("requestTraceID = %q, want rt-ab12cd", got)
+	}
+	r.Header.Set(traceHeader, "gw-9")
+	if got := requestTraceID(r); got != "gw-9" {
+		t.Fatalf("X-Trace-Id must win over X-Request-ID, got %q", got)
+	}
+}
+
 func TestParseTraceparentStrictV00(t *testing.T) {
 	valid := "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
 	got, err := parseTraceparent(valid)

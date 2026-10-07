@@ -70,9 +70,9 @@ func DefaultPolicy() Policy {
 			// harness profiles gate against), so the programmatic floor and the on-disk
 			// floor cannot drift: every lowercase built-in the JSON admits is admitted
 			// here too. Extend BOTH together when the native loop grows a built-in.
-			"Bash": true, "bash": true, "BashOutput": true, "KillShell": true, "PowerShell": true,
+			"Bash": true, "bash": true, "BashOutput": true, "KillShell": true, "PowerShell": true, "powershell": true,
 			"Read": true, "read": true, "Edit": true, "edit": true, "Write": true, "write": true, "NotebookEdit": true,
-			"Glob": true, "glob": true, "Grep": true, "grep": true, "LS": true, "ls": true,
+			"Glob": true, "glob": true, "Grep": true, "grep": true, "LS": true, "ls": true, "find": true,
 			"multiedit": true, "patch": true, "apply_patch": true, "functions.apply_patch": true,
 			"TodoWrite": true, "todowrite": true, "todoread": true,
 			"Task": true, "task": true, "task_spawn": true, "task_wait": true, "task_status": true, "task_cancel": true,
