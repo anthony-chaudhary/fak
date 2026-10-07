@@ -6,7 +6,7 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1285<br>
+parsed files: 1287<br>
 rows: 1263<br>
 unverified rows: 0 / 1263<br>
 source-only rows absent from help: 1027
@@ -756,7 +756,7 @@ source-only rows absent from help: 1027
 | `fak nightrun score` |  | nightrunScore / internal/cachevalueledger, internal/nightrun | `case` arm of the dispatch switch in runNightrun() | NONE | — | **SOURCE ONLY** |
 | `fak node` | the compute-node registry (register/list nodes) | cmdNode | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak node forget` |  | nodeForget | `case` arm of the dispatch switch in runNode() | NONE | — | **SOURCE ONLY** |
-| `fak node install` |  | nodeInstall / internal/windowgate | `case` arm of the dispatch switch in runNode() | STRUCTURAL | `FAK_HTTP_WRITE_TIMEOUT_S`, `FAK_PLANNER_TIMEOUT_S` | **SOURCE ONLY** |
+| `fak node install` |  | nodeInstall / internal/accounts, internal/windowgate | `case` arm of the dispatch switch in runNode() | STRUCTURAL | `FAK_HTTP_WRITE_TIMEOUT_S`, `FAK_PLANNER_TIMEOUT_S` | **SOURCE ONLY** |
 | `fak node run` | launches a client command with its inference pointed at the configured node — the consumer that makes `fak node use` more than a print statement | nodeRun / internal/childprocess | `case` arm of the dispatch switch in runNode() | RUNTIME | — | **SOURCE ONLY** |
 | `fak node status` |  | nodeStatus / internal/windowgate | `case` arm of the dispatch switch in runNode() | RUNTIME | — | **SOURCE ONLY** |
 | `fak node use` |  | nodeUse | `case` arm of the dispatch switch in runNode() | NONE | — | **SOURCE ONLY** |

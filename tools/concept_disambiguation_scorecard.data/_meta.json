@@ -1312,6 +1312,56 @@
           "category": "incidental",
           "reason": "Closed FeatureRewriteProof provenance label for the existing Anthropic structural verifier; it names protected JSON regions and does not introduce a cache.",
           "token": "cache_anchor_and_trailing_json"
+        },
+        {
+          "category": "incidental",
+          "reason": "per-request perf-row label constant mirroring radixkv tiers; vocabulary value, not a new cache concept",
+          "token": "NativeCacheTierNone"
+        },
+        {
+          "category": "incidental",
+          "reason": "per-request restore outcome label on NativeDecodeSummary; vocabulary value, not a new cache concept",
+          "token": "NativeCacheRestoreHit"
+        },
+        {
+          "category": "incidental",
+          "reason": "per-request restore outcome label on NativeDecodeSummary; vocabulary value, not a new cache concept",
+          "token": "NativeCacheRestoreMiss"
+        },
+        {
+          "category": "incidental",
+          "reason": "per-request restore outcome label on NativeDecodeSummary; vocabulary value, not a new cache concept",
+          "token": "NativeCacheRestoreUnserved"
+        },
+        {
+          "category": "incidental",
+          "reason": "process-wide default instance of the existing KV cache-event stream; an accessor, not a new concept",
+          "token": "DefaultCacheEvents"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus metric-name prefix for the existing cache-event stream export; metric naming, not a concept",
+          "token": "fak_engine_cache_restore_"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus counter name for the existing cache-event stream; metric naming, not a concept",
+          "token": "fak_engine_cache_events_observed"
+        },
+        {
+          "category": "incidental",
+          "reason": "perf-row field carrying the per-request restore outcome; a ledger column, not a new cache concept",
+          "token": "CacheRestore"
+        },
+        {
+          "category": "incidental",
+          "reason": "doc reference to the agent NativeCacheRestore* label family on the perf row; not a new cache concept",
+          "token": "NativeCacheRestore"
+        },
+        {
+          "category": "incidental",
+          "reason": "local accumulator variable in perfledger.Summarize; not a concept",
+          "token": "tierCached"
         }
       ],
       "id": "cache",
@@ -1336,6 +1386,7 @@
         "CacheLookupMS",
         "CacheReadRate",
         "CacheResetDetected",
+        "CacheRestore",
         "CacheSourceResolution",
         "CacheSourceSelfTestReport",
         "CacheSourceSelfTestSchemaVersion",
@@ -1354,6 +1405,7 @@
         "CounterCacheEvictions",
         "CounterPrefixCacheHits",
         "DefaultCacheBytes",
+        "DefaultCacheEvents",
         "DefaultCacheStateAllowlist",
         "FAK_ORG_POLICY_CACHE_PATH",
         "FAK_TOKEN_CACHE",
@@ -1376,6 +1428,11 @@
         "KVCacheBytesAsymmetric",
         "ManagedProviderCache",
         "MaxCacheLoadWorkers",
+        "NativeCacheRestore",
+        "NativeCacheRestoreHit",
+        "NativeCacheRestoreMiss",
+        "NativeCacheRestoreUnserved",
+        "NativeCacheTierNone",
         "NewAsymmetricKVCache",
         "NewCacheStateAllowlist",
         "NewSlidingCacheMetrics",
@@ -1517,6 +1574,8 @@
         "dogfoodCacheWitnessMaxAge",
         "droppedcachedtokens",
         "evalBuildCacheCleanArgRule",
+        "fak_engine_cache_events_observed",
+        "fak_engine_cache_restore_",
         "fak_fleet_canonical_goal_cache_read_tokens_total",
         "fak_fleet_canonical_goal_cache_value_prompt_tokens_total",
         "fak_fleet_canonical_goal_cache_value_reuse_ratio",
@@ -1619,6 +1678,7 @@
         "shared_prefix_provider_cache_only",
         "strongMatrixCache",
         "summarizeTurnCache",
+        "tierCached",
         "tokencache",
         "turnCacheHistory",
         "turnCacheSample",
@@ -3851,6 +3911,21 @@
           "category": "incidental",
           "reason": "private helper lifted verbatim out of cmdManageCommand to keep guard.go under the god-file ceiling; not a new concept",
           "token": "installGuardLogvaultMetrics"
+        },
+        {
+          "category": "incidental",
+          "reason": "file-local serve startup bail helper for a missing upstream key; not a guard or gate primitive",
+          "token": "serveNoGatewayKeyBail"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus histogram name for inter-token latency; metric naming, not a guard or gate",
+          "token": "fak_gateway_inference_itl_seconds"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus gauge name for max inter-token latency; metric naming, not a guard or gate",
+          "token": "fak_gateway_inference_max_itl_seconds"
         }
       ],
       "exclude": [
@@ -3987,6 +4062,8 @@
         "explicit_retirement_gate",
         "exposureGated",
         "extensionFixtureCells",
+        "fak_gateway_inference_itl_seconds",
+        "fak_gateway_inference_max_itl_seconds",
         "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
         "fak_gateway_kv_prefix_tier_capacity_bytes",
         "fak_gateway_kv_prefix_tier_evictions_total",
@@ -4288,6 +4365,7 @@
         "selectorGateway",
         "selfUpdateGateRunner",
         "semanticGate",
+        "serveNoGatewayKeyBail",
         "setGuardCompactionAnchorMode",
         "setGuardCoreLockAll",
         "setq4kgateupoutputslab",
@@ -6399,6 +6477,16 @@
           "category": "incidental",
           "reason": "SHA-256 storage representation used only for constant-time comparison of the MCP session bearer; it is not a separately addressable credential or concept.",
           "token": "mcpsessionbearerdigest"
+        },
+        {
+          "category": "incidental",
+          "reason": "default lease TTL constant for leaseref session descriptors; a parameter value, not a new session concept",
+          "token": "DefaultSessionTTLSeconds"
+        },
+        {
+          "category": "incidental",
+          "reason": "file-local clamp helper for session descriptor TTL; not a new session concept",
+          "token": "normalizeSessionTTL"
         }
       ],
       "exclude": [
@@ -6418,6 +6506,7 @@
         "ConfigureSessionMove",
         "CoveredSessions",
         "DataSlotDescriptor",
+        "DefaultSessionTTLSeconds",
         "DiagnoseHistoryIndex",
         "ErrSessionNotFound",
         "EvaluateLifecycleSession",
@@ -6648,6 +6737,7 @@
         "modeled_from_observed_session_mean",
         "newMixedQKVSessionFromEnv",
         "normalizeProviderSessionBoundary",
+        "normalizeSessionTTL",
         "normalizedSessionHarness",
         "notifyGuardProviderSessionStart",
         "observedSchedulerResult",
@@ -8733,6 +8823,46 @@
           "category": "incidental",
           "reason": "Filename-derived token of the new internal/agent/inkernel_incremental.go port file; the file carries the composable system-context source/registry/snapshot seam and introduces no new gateway transport, engine dispatch, or admission authority.",
           "token": "inkernelincremental"
+        },
+        {
+          "category": "incidental",
+          "reason": "file-local serve startup bail helper for a missing upstream key; names no gateway or engine concept",
+          "token": "serveNoGatewayKeyBail"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus metric-name prefix for the existing cache-event stream export; metric naming, not a concept",
+          "token": "fak_engine_cache_restore_"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus counter name for the existing cache-event stream; metric naming, not a concept",
+          "token": "fak_engine_cache_events_observed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus counter name mirroring vLLM prefix_cache_queries; metric naming, not a concept",
+          "token": "fak_engine_prefix_queried_tokens_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus counter name mirroring vLLM num_preemptions_total; metric naming, not a concept",
+          "token": "fak_engine_preemptions_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus histogram name mirroring vLLM iteration_tokens_total; metric naming, not a concept",
+          "token": "fak_engine_iteration_tokens"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus histogram name for inter-token latency; metric naming, not a concept",
+          "token": "fak_gateway_inference_itl_seconds"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus gauge name for max inter-token latency; metric naming, not a concept",
+          "token": "fak_gateway_inference_max_itl_seconds"
         }
       ],
       "id": "gateway-engine",
@@ -8801,7 +8931,14 @@
         "engineering",
         "engineers",
         "fak_decode_trace",
+        "fak_engine_cache_events_observed",
+        "fak_engine_cache_restore_",
+        "fak_engine_iteration_tokens",
+        "fak_engine_preemptions_total",
+        "fak_engine_prefix_queried_tokens_total",
         "fak_gateway_compaction_thrash_sessions_total",
+        "fak_gateway_inference_itl_seconds",
+        "fak_gateway_inference_max_itl_seconds",
         "fak_gateway_kv_prefix_tier_capacity_bytes",
         "fak_gateway_kv_prefix_tier_evictions_total",
         "fak_gateway_kv_prefix_tier_hit_tokens_total",
@@ -8865,6 +9002,7 @@
         "revokeVDSOWitness",
         "routeEngineWithContext",
         "selectorGateway",
+        "serveNoGatewayKeyBail",
         "serviceOpsEngine",
         "shrinkWireInKernel",
         "webSearchEngine",
@@ -11027,6 +11165,21 @@
           "category": "incidental",
           "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
           "token": "EmptyIncrementalContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "context-threading variant of an existing gateway observer helper; Ctx is Go context.Context, not the context-window concept",
+          "token": "observeCompletionServedCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported context.Context value key for the perf queue wait; Go ctx plumbing, not the context-window concept",
+          "token": "perfQueueCtxKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "reads the perf queue wait from a Go context.Context; ctx plumbing, not the context-window concept",
+          "token": "withQueueFromContext"
         }
       ],
       "exclude": [
@@ -11160,9 +11313,11 @@
         "newTraceContext",
         "noteCompactionContract",
         "noteCtxValueTTL1hScope",
+        "observeCompletionServedCtx",
         "observeNativeCompaction",
         "outboundTraceContext",
         "outboundTraceContextKey",
+        "perfQueueCtxKey",
         "postCompactionPrefix",
         "postCtx",
         "preCompactionPrefix",
@@ -11190,6 +11345,7 @@
         "takeCompactionContract",
         "traceContext",
         "wctx",
+        "withQueueFromContext",
         "writeValidateTestContext"
       ],
       "known_tokens": [],
@@ -12668,6 +12824,11 @@
           "category": "incidental",
           "reason": "Plumbing of the fak#13695 PrefillAttention device route (cgo entry, lock, capability probe, timing receipt, admission threshold, fallback route, or execution operation label); the concept itself is the positioned PrefillAttention row.",
           "token": "PrefillAttentionSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "typed Keychain probe state value (platform has no Keychain); an enum member, not a support-maturity tier",
+          "token": "KeychainUnsupported"
         }
       ],
       "exclude": [
@@ -12717,6 +12878,7 @@
         "KVQUANT_SUPPORTED",
         "KVQUANT_UNKNOWN_SCHEME",
         "KVQUANT_UNSUPPORTED_TRANSITION",
+        "KeychainUnsupported",
         "LadderMaturity",
         "LimitSupport",
         "MISSING_ACHIEVED_MATURITY",
@@ -14121,6 +14283,11 @@
           "category": "incidental",
           "reason": "Existing validation phase wire label duplicated by the extracted CLI; it names test workspace creation, not a rendering or materialization subsystem.",
           "token": "test_materialize"
+        },
+        {
+          "category": "incidental",
+          "reason": "file-local helper rendering the garden launchd plist; not a reusable render/materialize concept",
+          "token": "gardenRenderDarwinPlist"
         }
       ],
       "id": "render-materialize",
@@ -14158,6 +14325,7 @@
         "RenderUserSplice",
         "StatusUnmaterialized",
         "formatTUIRenderStatus",
+        "gardenRenderDarwinPlist",
         "incumbentRenderInput",
         "incumbentRenderSchema",
         "incumbentRenderSpec",
@@ -16422,6 +16590,11 @@
           "category": "incidental",
           "reason": "local (path, mtime) candidate record shared by the codex-loop discovery helpers; not a new concept surface (#10405 dedup)",
           "token": "codexLoopSessionFile"
+        },
+        {
+          "category": "incidental",
+          "reason": "local boolean in the testquality timing scanner; not the agent loop concept",
+          "token": "inLoop"
         }
       ],
       "id": "loop",
@@ -16469,6 +16642,7 @@
         "fakloopledger",
         "faklooprunid",
         "findcodexlooparchivemanifest",
+        "inLoop",
         "isLoopbackFleetHost",
         "keepSuperloopAlive",
         "loopHealthAlert",
