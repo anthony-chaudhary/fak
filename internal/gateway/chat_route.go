@@ -120,13 +120,17 @@ func (s *Server) chatPlanner(ctx context.Context) agent.Planner {
 
 // observeNativeChatRoute attributes one completed bound native request using
 // its aggregate loop usage. Passthrough retains the historical native counters.
-func (s *Server) observeNativeChatRoute(ctx context.Context, traceID string, stream bool, usage agent.Usage, finishReason string, dur time.Duration) {
+func (s *Server) observeNativeChatRoute(ctx context.Context, traceID string, stream bool, usage agent.Usage, finishReason string, dur, ttft time.Duration) {
 	if binding := chatRouteFromContext(ctx); binding != nil {
-		s.metrics.observeInferenceUsageServed(binding.Locality, binding.Target.UpstreamModel, usage, finishReason, dur)
+		s.metrics.observeInferenceServedTimed(binding.Locality, binding.Target.UpstreamModel,
+			usage.UncachedPromptTokens(), usage.CompletionTokens, usage.CachedPromptTokens(),
+			usage.CacheCreationInputTokens, finishReason, dur, ttft)
 		s.logInferenceTurnForModel(traceID, "anthropic_messages_native", binding.Target.UpstreamModel, stream, usage, finishReason, dur, false, s.consumeDecodedCtxViewEvent(traceID))
 		return
 	}
-	s.logInferenceTurn(traceID, "anthropic_messages_native", false, usage, finishReason, dur, false)
+	s.metrics.recordPerf(s.chatServingLocality(ctx, s.model), usage.UncachedPromptTokens(),
+		usage.CompletionTokens, usage.CachedPromptTokens(), finishReason, dur, ttft, perfDetail{model: s.model})
+	s.logInferenceTurn(traceID, "anthropic_messages_native", stream, usage, finishReason, dur, false)
 }
 
 // chatRouteOpts is applied last so client options cannot override the account's

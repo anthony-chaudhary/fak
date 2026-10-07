@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -40,12 +41,30 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/codetools"
 	"github.com/anthony-chaudhary/fak/internal/grammar"
+	"github.com/anthony-chaudhary/fak/internal/perfledger"
 	"github.com/anthony-chaudhary/fak/internal/promptaudit"
 	"github.com/anthony-chaudhary/fak/internal/sessionledger"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
 
 var openNativeModelRequestLedger = sessionledger.OpenDefault
+
+type nativeStreamWriter struct {
+	http.ResponseWriter
+	err error
+}
+
+func (w *nativeStreamWriter) Write(p []byte) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	n, err := w.ResponseWriter.Write(p)
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
+	}
+	w.err = err
+	return n, err
+}
 
 // nativeMaxTurnsOr resolves the configured native loop turn cap, defaulting a
 // non-positive value to DefaultNativeMaxTurns.
@@ -95,7 +114,7 @@ func (s *Server) serveNativeMessages(w http.ResponseWriter, r *http.Request, req
 	s.observeNativeChatRoute(r.Context(), reqTrace, false, agent.Usage{
 		PromptTokens:     m.PromptTokens,
 		CompletionTokens: m.CompletionTokens,
-	}, stop, time.Since(began))
+	}, stop, time.Since(began), 0)
 
 	arm := m // copy so the response holds a stable address, not a loop-local
 	writeJSON(w, http.StatusOK, anthropicMessageResponse{
@@ -160,7 +179,8 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 	h.Set("Connection", "keep-alive")
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	send := anthropicSSESender(w, flusher)
+	streamWriter := &nativeStreamWriter{ResponseWriter: w}
+	send := anthropicSSESender(streamWriter, flusher)
 	sendProgress := func(ev agent.ProgressEvent) {
 		payload := map[string]any{"type": string(ev.Kind), "session": reqTrace, "turn": ev.Turn, "seq": ev.Seq}
 		for k, v := range map[string]string{"call_id": ev.CallID, "tool": ev.Tool, "verdict": ev.Verdict, "reason": ev.Reason, "taint": ev.Taint, "summary": ev.Summary} {
@@ -169,7 +189,7 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 			}
 		}
 		b, _ := json.Marshal(payload)
-		_, _ = fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", ev.Seq, ev.Kind, b)
+		_, _ = fmt.Fprintf(streamWriter, "id: %d\nevent: %s\ndata: %s\n\n", ev.Seq, ev.Kind, b)
 		flusher.Flush()
 	}
 	if cursorRaw != "" {
@@ -191,24 +211,10 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 	stopBuf := NewStopHoldbackBuffer(req.StopSequences)
 	textOpen := false
 	textIdx := -1
-	closeText := func() {
-		if !textOpen {
+	var ttft time.Duration
+	emitSafeText := func(text string) {
+		if text == "" {
 			return
-		}
-		if tail := stopBuf.Flush(); tail != "" {
-			send("content_block_delta", map[string]any{
-				"type": "content_block_delta", "index": textIdx,
-				"delta": map[string]any{"type": "text_delta", "text": tail},
-			})
-		}
-		send("content_block_stop", map[string]any{"type": "content_block_stop", "index": textIdx})
-		textOpen = false
-		textIdx = -1
-	}
-	emitText := func(text string) error {
-		safe := stopBuf.Append(text)
-		if safe == "" {
-			return nil
 		}
 		if !textOpen {
 			textIdx = outIdx
@@ -221,9 +227,24 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 		}
 		send("content_block_delta", map[string]any{
 			"type": "content_block_delta", "index": textIdx,
-			"delta": map[string]any{"type": "text_delta", "text": safe},
+			"delta": map[string]any{"type": "text_delta", "text": text},
 		})
-		return nil
+		if ttft == 0 && streamWriter.err == nil {
+			ttft = time.Since(began)
+		}
+	}
+	closeText := func() {
+		emitSafeText(stopBuf.Flush())
+		if !textOpen {
+			return
+		}
+		send("content_block_stop", map[string]any{"type": "content_block_stop", "index": textIdx})
+		textOpen = false
+		textIdx = -1
+	}
+	emitText := func(text string) error {
+		emitSafeText(stopBuf.Append(text))
+		return streamWriter.err
 	}
 
 	// Typed loop-progress → structured native SSE (#5148). Each witnessed lifecycle
@@ -237,6 +258,10 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 		sendProgress(ev)
 	}
 	m, err := s.runNativeArmStreamSeed(r.Context(), seed, reqTrace, emitText, onProgress)
+	if streamWriter.err != nil {
+		s.metrics.recordPerfFailure(s.chatServingLocality(r.Context(), req.Model), perfledger.ErrorClientWrite, http.StatusOK, time.Since(began), ttft)
+		return
+	}
 	if err != nil {
 		s.logf("gateway: native stream loop error (trace %s): %v", reqTrace, err)
 		closeText()
@@ -244,16 +269,23 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	closeText()
+	if streamWriter.err != nil {
+		s.metrics.recordPerfFailure(s.chatServingLocality(r.Context(), req.Model), perfledger.ErrorClientWrite, http.StatusOK, time.Since(began), ttft)
+		return
+	}
 
 	stop := agent.AnthropicStopReason(nativeFinishReason(m), false)
 	usage := anthropicUsage{InputTokens: m.PromptTokens, OutputTokens: m.CompletionTokens}
+	arm := m
+	sendAnthropicTerminalWithNativeArm(send, stop, usage, &arm)
+	if streamWriter.err != nil {
+		s.metrics.recordPerfFailure(s.chatServingLocality(r.Context(), req.Model), perfledger.ErrorClientWrite, http.StatusOK, time.Since(began), ttft)
+		return
+	}
 	s.observeNativeChatRoute(r.Context(), reqTrace, true, agent.Usage{
 		PromptTokens:     m.PromptTokens,
 		CompletionTokens: m.CompletionTokens,
-	}, stop, time.Since(began))
-
-	arm := m
-	sendAnthropicTerminalWithNativeArm(send, stop, usage, &arm)
+	}, stop, time.Since(began), ttft)
 }
 
 // runNativeArm drives agent.RunArm(fak=true) for one served request, wiring the

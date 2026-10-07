@@ -1874,7 +1874,7 @@ paths:
                         decode_tps: { type: number }
                         error:
                           type: string
-                          enum: [client_canceled, first_token_timeout, stall, deadline, upstream_unreachable, upstream_status, upstream_error, client_write_timeout]
+                          enum: [client_canceled, client_write, first_token_timeout, stall, deadline, upstream_unreachable, upstream_status, upstream_error, client_write_timeout]
                         status: { type: integer }
                         model: { type: string }
                         upstream_spec_draft_tokens: { type: integer }

@@ -131,6 +131,7 @@ type Engine struct {
 // Failure classes for Record.Error.
 const (
 	ErrorClientCanceled      = "client_canceled"
+	ErrorClientWrite         = "client_write"
 	ErrorFirstTokenTimeout   = "first_token_timeout"
 	ErrorStall               = "stall"
 	ErrorDeadline            = "deadline"
@@ -147,7 +148,7 @@ const (
 
 // ErrorClasses is the closed Record.Error vocabulary in render order.
 var ErrorClasses = []string{
-	ErrorClientCanceled, ErrorFirstTokenTimeout, ErrorStall, ErrorDeadline,
+	ErrorClientCanceled, ErrorClientWrite, ErrorFirstTokenTimeout, ErrorStall, ErrorDeadline,
 	ErrorUpstreamUnreachable, ErrorUpstreamStatus, ErrorUpstream, ErrorClientWriteTimeout,
 }
 
