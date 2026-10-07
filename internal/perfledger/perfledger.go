@@ -154,6 +154,9 @@ type Summary struct {
 	SpecDraftTokens    int     `json:"spec_draft_tokens,omitempty"`
 	SpecAcceptedTokens int     `json:"spec_accepted_tokens,omitempty"`
 	SpecAcceptRate     float64 `json:"spec_accept_rate,omitempty"`
+	// Probes counts liveness/probe turns (see Record.IsProbe) left out of every
+	// quantile, share, and regime above; Count is the served turns only.
+	Probes int `json:"probes,omitempty"`
 }
 
 type RegimeSummary struct {
@@ -196,13 +199,18 @@ func BuildReport(recs []Record, n int, capped bool, droppedWrites uint64) Report
 // Summarize folds rows into the quantile summary. cache_hit_share is
 // cached / (uncached + cached) prompt tokens.
 func Summarize(recs []Record) Summary {
-	s := Summary{Count: len(recs)}
+	s := Summary{}
 	var ttft, prefill, decode, e2e []float64
 	var prompt, cached int64
 	regimeTTFT := map[string][]float64{}
 	regimeE2E := map[string][]float64{}
 	regimeCount := map[string]int{}
 	for _, r := range recs {
+		if r.IsProbe() {
+			s.Probes++
+			continue
+		}
+		s.Count++
 		regime := r.regime()
 		regimeCount[regime]++
 		if r.TTFTMS > 0 {
