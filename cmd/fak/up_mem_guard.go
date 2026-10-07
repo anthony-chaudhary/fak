@@ -41,6 +41,17 @@ type memGuardGovernor struct {
 	// readRSS and now are seams; nil uses the real process RSS and clock.
 	readRSS func() uint64
 	now     func() time.Time
+	// onStop, when set, runs once with the breach before shutdown so the stop is durable.
+	onStop func(memGuardStopEvent)
+	fired  bool
+}
+
+// memGuardStopEvent describes the sample that tripped the guard.
+type memGuardStopEvent struct {
+	At      time.Time
+	RSS     uint64
+	Peak    uint64
+	Ceiling uint64
 }
 
 // defaultMemGuardInterval is how often the guard samples process RSS. Slow
@@ -131,16 +142,31 @@ func (g *memGuardGovernor) sample() {
 		return
 	}
 	g.closed = true
+	g.fired = true
 	overSince := g.overSince
 	peak := g.peak
 	limit := g.limit
 	shutdown := g.shutdown
 	logf := g.logf
+	onStop := g.onStop
 	g.mu.Unlock()
 	close(g.doneCh)
 	logf("fak up: process RSS stayed above the %s ceiling for %s (observed peak %s); stopping the resident server so its model residency and GPU lease are released and a fresh process restarts (--max-rss 0 disables this guard)",
 		formatBytes(limit), now.Sub(overSince).Round(time.Second), formatBytes(peak))
+	if onStop != nil {
+		onStop(memGuardStopEvent{At: now, RSS: rss, Peak: peak, Ceiling: limit})
+	}
 	shutdown()
+}
+
+// didFire reports whether a sustained breach stopped the server.
+func (g *memGuardGovernor) didFire() bool {
+	if g == nil {
+		return false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.fired
 }
 
 // close stops the governor without triggering a shutdown (an operator-initiated

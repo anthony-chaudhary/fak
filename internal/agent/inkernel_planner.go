@@ -1316,6 +1316,13 @@ type InKernelCapacityError struct {
 	// (the *compute.RuntimeExtraCapacityUnknownError behind runtime-extras-unknown), so
 	// callers can errors.As the missing bound instead of parsing Detail.
 	Cause error
+	// AvailSigned is the unclamped budget (ceiling - used - reserved) on the host-memory
+	// arm; negative means the resident footprint already exceeds the ceiling. Avail stays
+	// clamped at zero for existing callers.
+	AvailSigned int64
+	// Structural marks a host-memory refusal with no turn in flight and the resident
+	// footprint at or above the ceiling: waiting cannot free room, so it is not retryable.
+	Structural bool
 }
 
 // inKernelRuntimeExtrasUnknownSite marks a refusal where the Qwen3.8 runtime-extras
@@ -1360,6 +1367,9 @@ func (e *InKernelCapacityError) Error() string {
 			reason = "runtime extras capacity unknown"
 		}
 		return fmt.Sprintf("in-kernel %s capacity precheck refused request (%s %s plan could not be bounded: %s; site=%s)", subject, scope, class, reason, e.Site)
+	}
+	if e.AvailSigned < 0 {
+		return fmt.Sprintf("in-kernel %s capacity precheck refused request (%s %s plan needs %d bytes, available budget is %d bytes: resident usage exceeds the ceiling by %d bytes)", subject, scope, class, e.Want, e.AvailSigned, -e.AvailSigned)
 	}
 	return fmt.Sprintf("in-kernel %s capacity precheck refused request (%s %s plan needs %d bytes, available budget is %d bytes)", subject, scope, class, e.Want, e.Avail)
 }

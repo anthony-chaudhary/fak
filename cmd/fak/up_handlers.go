@@ -40,6 +40,9 @@ func (s *turnkeyServer) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		"agent_warm":     s.agentWarm.agentWarmBlock(),
 		"sessions":       s.capacityStats(),
 	}
+	if hb := s.hostBudgetBlock(); hb != nil {
+		body["host_budget"] = hb
+	}
 	// fak#13567: resident weight bytes by store + the LIVE lm_head route, the same shape the
 	// gateway /healthz reports. Absent (not zero) when no native model is loaded.
 	if s.native != nil {
@@ -189,7 +192,7 @@ func (s *turnkeyServer) handleCompletions(w http.ResponseWriter, r *http.Request
 		sampleOpts := turnkeyChatSampleOpts(chatReq, s.plan.ContextBudgetTokens)
 		comp, err := s.planner.Complete(turnkeyRequestContext(r.Context()), chatReq.Messages, nil, sampleOpts...)
 		if err != nil {
-			writeTurnkeyInferenceError(w, err)
+			s.writeInferenceError(w, err)
 			return
 		}
 		answer = comp.Message
@@ -290,10 +293,16 @@ func writeTurnkeyInferenceError(w http.ResponseWriter, err error) {
 	var oomErr *agent.InKernelOOMError
 	if errors.As(err, &capErr) || errors.As(err, &oomErr) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Retry-After", turnkeyCapacityRetryAfterSeconds)
+		hint := "; retry later, or reduce the prompt/context size or max_tokens"
+		if capErr != nil && capErr.Structural {
+			// The idle footprint already exceeds the ceiling: a retry cannot succeed.
+			hint = "; the --max-rss ceiling is below the server's idle footprint, so no request can be admitted until the ceiling is raised or the context reduced"
+		} else {
+			w.Header().Set("Retry-After", turnkeyCapacityRetryAfterSeconds)
+		}
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
-			"message": err.Error() + "; retry later, or reduce the prompt/context size or max_tokens",
+			"message": err.Error() + hint,
 			"type":    "server_error", "code": "in_kernel_oom",
 		}})
 		return

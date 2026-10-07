@@ -92,7 +92,7 @@ func (s *turnkeyServer) handleTokenize(w http.ResponseWriter, r *http.Request) {
 	}
 	encoding, err := encoder.EncodePrompt(r.Context(), req.Messages, req.Tools, turnkeyChatSampleOpts(req, s.plan.ContextBudgetTokens)...)
 	if err != nil {
-		writeTurnkeyInferenceError(w, err)
+		s.writeInferenceError(w, err)
 		return
 	}
 	if strings.TrimSpace(encoding.ModelID) != servedModel {

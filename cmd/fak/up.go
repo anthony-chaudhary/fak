@@ -503,6 +503,13 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	if id := guardShortBuildID(); id != "" {
 		ver += " (" + id + ")"
 	}
+	if err := server.checkMaxRSS(*maxRSS); err != nil {
+		fmt.Fprintf(stderr, "fak up: %v\n", err)
+		shutdownTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = server.Shutdown(shutdownTimeout)
+		cancel()
+		os.Exit(upExitStructural)
+	}
 	server.armGPUIdleExit(*gpuIdleExit)
 	server.armMemGuard(*maxRSS, *maxRSSSustain)
 	server.armHostMemoryBudget(*maxRSS)
@@ -519,10 +526,20 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 			// The bounded idle exit already ran the graceful shutdown and
 			// released the GPU lease; nothing further to unwind here.
 		}
+		exitIfMemGuardFired(server)
 		return
 	}
 
 	_ = runTurnkeyREPL(ctx, in, stdout, "http://"+server.Addr(), plan)
+	exitIfMemGuardFired(server)
+}
+
+// exitIfMemGuardFired turns a guard stop into a non-zero transient exit so a supervisor
+// sees a failure instead of a clean stop. The guard's stop already ran Shutdown.
+func exitIfMemGuardFired(server *turnkeyServer) {
+	if server.memGuardFired() {
+		os.Exit(upExitTransient)
+	}
 }
 
 func printTurnkeyReady(w io.Writer, ver, addr string, plan macfit.TurnkeyProfile) {
@@ -681,10 +698,14 @@ func (s *turnkeyServer) armMemGuard(limit uint64, sustain time.Duration) {
 	if s == nil || s.stop == nil || limit == 0 {
 		return
 	}
-	s.mu.Lock()
-	s.memGuard = newMemGuardGovernor(limit, defaultMemGuardInterval, sustain, processRSSBytes, s.stop, func(format string, args ...any) {
+	logf := func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, format+"\n", args...)
-	})
+	}
+	s.mu.Lock()
+	s.memGuard = newMemGuardGovernor(limit, defaultMemGuardInterval, sustain, processRSSBytes, s.stop, logf)
+	if s.memGuard != nil {
+		s.memGuard.onStop = func(ev memGuardStopEvent) { recordMemGuardStop(ev, logf) }
+	}
 	s.mu.Unlock()
 }
 
@@ -799,6 +820,10 @@ func (s *turnkeyServer) readiness() (ready bool, state string, reason string) {
 	s.mu.Unlock()
 	if stopping {
 		return false, "stopping", "server is stopping"
+	}
+	// An armed host budget with no room at idle declines every request: not admissible.
+	if s.admissionStarved() {
+		return false, readinessAdmissionStarved, readinessAdmissionStarved
 	}
 	return true, "ok", ""
 }
@@ -1113,7 +1138,7 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 		}
 		comp, err := s.planner.Complete(turnkeyRequestContext(r.Context()), req.Messages, req.Tools, sampleOpts...)
 		if err != nil {
-			writeTurnkeyInferenceError(w, err)
+			s.writeInferenceError(w, err)
 			return
 		}
 		if comp.ToolCallsDropped && len(comp.Message.ToolCalls) == 0 {
