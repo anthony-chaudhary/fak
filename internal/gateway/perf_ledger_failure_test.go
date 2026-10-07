@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -190,5 +193,67 @@ func TestPerfErrorClassClosedVocabulary(t *testing.T) {
 		if got := perfErrorClass(c.ctx, c.err); got != c.want {
 			t.Errorf("perfErrorClass(%v) = %q, want %q", c.err, got, c.want)
 		}
+		if !slices.Contains(perfledger.ErrorClasses, c.want) {
+			t.Errorf("class %q is outside perfledger.ErrorClasses", c.want)
+		}
+	}
+	if !slices.Contains(perfledger.ErrorClasses, perfledger.ErrorClientWriteTimeout) {
+		t.Errorf("client_write_timeout missing from perfledger.ErrorClasses")
+	}
+}
+
+// A buffered turn that outlives the server's WriteTimeout never reaches the client,
+// whether the planner succeeded or failed: its row must say so with no status.
+//
+// fak-test:runtime fast est=1s lane=default
+func TestPerfLedgerBufferedTurnPastWriteTimeout(t *testing.T) {
+	const wt = 100 * time.Millisecond
+	cases := []struct {
+		name    string
+		planner func(srv *Server) agent.Planner
+	}{
+		{"success", func(srv *Server) agent.Planner { return perfDelayedPlanner{inner: srv.planner, d: 3 * wt} }},
+		{"failure", func(*Server) agent.Planner {
+			return perfDelayedPlanner{inner: failingPlanner{err: &agent.UpstreamStatusError{Status: 500}}, d: 3 * wt}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServer(t)
+			srv.planner = tc.planner(srv)
+			ts := httptest.NewUnstartedServer(srv.Handler())
+			ts.Config.WriteTimeout = wt
+			srv.metrics.setHTTPWriteTimeout(wt)
+			ts.Start()
+			defer ts.Close()
+
+			if resp, err := postPerfChat(t, context.Background(), ts.URL, false); err == nil {
+				resp.Body.Close()
+				t.Fatalf("client got status %d past the write deadline, want a torn connection", resp.StatusCode)
+			}
+			recs := waitPerfRows(t, srv, 1)
+			if len(recs) != 1 {
+				t.Fatalf("perf rows = %d, want exactly 1: %+v", len(recs), recs)
+			}
+			got := recs[0]
+			if got.Error != perfledger.ErrorClientWriteTimeout || got.Status != 0 || got.FinishReason != perfledger.FinishReasonError {
+				t.Fatalf("row error/status/finish = %q/%d/%q, want %q/0/%q", got.Error, got.Status, got.FinishReason, perfledger.ErrorClientWriteTimeout, perfledger.FinishReasonError)
+			}
+			if got.E2EMS < float64(wt/time.Millisecond) {
+				t.Fatalf("e2e_ms = %v, want >= the %v write timeout", got.E2EMS, wt)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestPerfErrorClassesInOpenAPIEnum(t *testing.T) {
+	spec, err := os.ReadFile(openAPISpecPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "enum: [" + strings.Join(perfledger.ErrorClasses, ", ") + "]"
+	if !strings.Contains(string(spec), want) {
+		t.Fatalf("openapi perf record error enum drifted from perfledger.ErrorClasses; want %q", want)
 	}
 }

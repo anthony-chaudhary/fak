@@ -61,6 +61,11 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 		return
 	}
 	rec := perfledger.NewRecord(time.Now(), finishReason, loc.perfLabel(), promptTok, complTok, cachedTok, dur, ttft)
+	if ttft <= 0 && m.pastWriteDeadline(dur) {
+		// A buffered turn writes its body only after the planner returns; past the
+		// server's WriteTimeout that write is refused, so the client got nothing.
+		rec = perfledger.NewFailureRecord(time.Now(), loc.perfLabel(), perfledger.ErrorClientWriteTimeout, 0, dur, 0)
+	}
 	rec.Model = detail.model
 	rec.Engine = detail.engine
 	m.commitPerf(rec)
@@ -99,15 +104,39 @@ func (s *Server) recordFailedTurn(ctx context.Context, loc servingLocality, err 
 		// the client, the same first-token timeout the buffered watchdog reports.
 		class = perfledger.ErrorFirstTokenTimeout
 	}
+	elapsed := time.Since(began)
 	status := http.StatusOK
 	switch {
+	case !committed && s.metrics.pastWriteDeadline(elapsed):
+		// The error response would be written after the server's write deadline: the
+		// client saw no status, whatever the upstream failure was.
+		class, status = perfledger.ErrorClientWriteTimeout, 0
 	case committed:
 	case class == perfledger.ErrorClientCanceled:
 		status = statusClientClosedRequest
 	default:
 		status, _, _ = upstreamErrorStatus(err)
 	}
-	s.metrics.recordPerfFailure(loc, class, status, time.Since(began), ttft)
+	s.metrics.recordPerfFailure(loc, class, status, elapsed, ttft)
+}
+
+func (m *gatewayMetrics) setHTTPWriteTimeout(d time.Duration) {
+	if m != nil && d > 0 {
+		m.httpWriteTimeout.Store(int64(d))
+	}
+}
+
+// pastWriteDeadline reports that a turn which took dur (measured from the planner
+// call, so never longer than the handler) outlived the server's WriteTimeout, which
+// runs from the end of the request headers. Streams lift that deadline once their
+// SSE header is committed (clearStreamWriteDeadline); callers only ask for turns
+// that wrote nothing yet.
+func (m *gatewayMetrics) pastWriteDeadline(dur time.Duration) bool {
+	if m == nil {
+		return false
+	}
+	wt := time.Duration(m.httpWriteTimeout.Load())
+	return wt > 0 && dur > wt
 }
 
 // statusClientClosedRequest is the de-facto (nginx) status for a request the

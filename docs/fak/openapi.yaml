@@ -1757,7 +1757,9 @@ paths:
         A turn that failed before completing (timeout, upstream error, client
         cancel) still leaves one row with `finish_reason: error`, an `error`
         class and the HTTP `status` the client got (200 when the failure came
-        after the stream was committed, 499 for a client cancel).
+        after the stream was committed, 499 for a client cancel). A buffered
+        turn that outlived the server's write timeout is `client_write_timeout`
+        with no `status`: the client received nothing.
         A streamed turn's `ttft_ms` is the planner's own prefill boundary
         when it reports one (the native engine), else the first content
         fragment the gateway watched arrive (a proxied stream). A native
@@ -1839,7 +1841,7 @@ paths:
                         decode_tps: { type: number }
                         error:
                           type: string
-                          enum: [client_canceled, first_token_timeout, stall, deadline, upstream_unreachable, upstream_status, upstream_error]
+                          enum: [client_canceled, first_token_timeout, stall, deadline, upstream_unreachable, upstream_status, upstream_error, client_write_timeout]
                         status: { type: integer }
                         model: { type: string }
                         engine:

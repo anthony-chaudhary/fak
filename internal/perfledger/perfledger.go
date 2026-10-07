@@ -70,7 +70,8 @@ type Record struct {
 	DecodeTPS        float64 `json:"decode_tps,omitempty"`
 	// Error is the failure class of a turn that did not complete (one of the Error*
 	// constants); empty on a served turn. Status is the HTTP status the client got:
-	// 200 when the failure came after the stream was committed, 499 for a client cancel.
+	// 200 when the failure came after the stream was committed, 499 for a client cancel,
+	// absent (0) when the client got no status at all (client_write_timeout).
 	Error  string `json:"error,omitempty"`
 	Status int    `json:"status,omitempty"`
 	// Model is the model that served the turn, when the planner reported one.
@@ -111,9 +112,19 @@ const (
 	ErrorUpstreamUnreachable = "upstream_unreachable"
 	ErrorUpstreamStatus      = "upstream_status"
 	ErrorUpstream            = "upstream_error"
+	// ErrorClientWriteTimeout marks a buffered turn that outlived the http.Server
+	// WriteTimeout: the gateway finished (or failed) it, but the connection was already
+	// past its write deadline, so the client received no status and no body.
+	ErrorClientWriteTimeout = "client_write_timeout"
 
 	FinishReasonError = "error"
 )
+
+// ErrorClasses is the closed Record.Error vocabulary in render order.
+var ErrorClasses = []string{
+	ErrorClientCanceled, ErrorFirstTokenTimeout, ErrorStall, ErrorDeadline,
+	ErrorUpstreamUnreachable, ErrorUpstreamStatus, ErrorUpstream, ErrorClientWriteTimeout,
+}
 
 // NewFailureRecord builds the row for a turn that failed before completing. It
 // carries no token counts (the upstream reported none), so its cache regime is
