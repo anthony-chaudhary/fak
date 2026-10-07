@@ -1184,6 +1184,8 @@ func cmdBench(argv []string) {
 			os.Exit(runBenchSubagent(os.Stdout, os.Stderr, argv[1:]))
 		case "agent":
 			os.Exit(runBenchAgent(os.Stdout, os.Stderr, argv[1:]))
+		case "h2h":
+			os.Exit(runBenchH2H(os.Stdout, os.Stderr, argv[1:]))
 		}
 	}
 	fs := flag.NewFlagSet("bench", flag.ExitOnError)
