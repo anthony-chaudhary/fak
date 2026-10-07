@@ -88,9 +88,11 @@ func (s *Session) routedExpertRing(name string) *pagedRing {
 // under a budget; then the unchanged permanent staging. The ring's refusal path — a single weight
 // larger than the whole budget (ErrTooLarge), or one that fits only by dropping a pinned resident
 // (ErrPinnedNoRoom) — leaves the ring untouched and falls back to permanent residency rather than
-// failing the forward: correctness never depends on the budget being generous. That fallback rebuilds
-// the host source (stage already Freed its upload), which is the honest cost of a misconfigured
-// budget and is rare by construction.
+// failing the forward: correctness never depends on the budget being generous. An oversized miss is
+// refused before building or uploading its source, as is a miss the pool's current pinned/held
+// snapshot cannot admit. Other admission errors retain post-upload cleanup, so fallback rebuilds a
+// source only if staging already built it. Permanent fallback is not charged to the ring and can
+// exceed its budget.
 func (s *Session) weightHALStagedBounded(key, name string, mk func() compute.Tensor, dtype compute.Dtype, weightBytes int64) compute.Tensor {
 	if s.halW != nil {
 		if t, ok := s.halW[key]; ok {

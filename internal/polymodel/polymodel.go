@@ -100,6 +100,41 @@ func NewPool(budgetBytes int64) *Pool {
 
 func (p *Pool) tick() uint64 { p.clock++; return p.clock }
 
+// CheckAdmission reports the refusal Admit would return for the current pool
+// snapshot, without touching recency, selecting victims, or changing residency.
+// Negative sizes normalize to zero; an existing ID keeps its immutable descriptor.
+// Like the other Pool methods, callers must serialize access. A nil result is not
+// a reservation: callers must not cache it across mutations, and Admit rechecks it.
+func (p *Pool) CheckAdmission(m Model) error {
+	if m.ID == "" {
+		return ErrEmptyID
+	}
+	if m.WeightBytes < 0 {
+		m.WeightBytes = 0
+	}
+	if _, ok := p.models[m.ID]; ok {
+		return nil
+	}
+	if m.WeightBytes > p.budget {
+		return ErrTooLarge
+	}
+	// For a valid pool, 0 <= used <= budget and weight <= budget. This is the
+	// same feasibility expression as used+weight-budget, without a wrapping
+	// intermediate. The unpinned sum cannot exceed the pool's used bytes.
+	if need := m.WeightBytes - (p.budget - p.used); need > 0 {
+		var evictable int64
+		for _, e := range p.models {
+			if !e.m.Pinned {
+				evictable += e.m.WeightBytes
+			}
+		}
+		if evictable < need {
+			return ErrPinnedNoRoom
+		}
+	}
+	return nil
+}
+
 // Admit makes m resident, evicting the coldest UNPINNED models (LRU) as needed to
 // stay within budget, and returns the evicted IDs in eviction order. A model that
 // alone exceeds the budget returns ErrTooLarge; a model that would fit only if a
@@ -108,8 +143,8 @@ func (p *Pool) tick() uint64 { p.clock++; return p.clock }
 // an already-resident model is a Touch (the descriptor is immutable — Evict then
 // Admit to change WeightBytes/Pinned/Family).
 func (p *Pool) Admit(m Model) ([]ModelID, error) {
-	if m.ID == "" {
-		return nil, ErrEmptyID
+	if err := p.CheckAdmission(m); err != nil {
+		return nil, err
 	}
 	if m.WeightBytes < 0 {
 		m.WeightBytes = 0
@@ -118,24 +153,9 @@ func (p *Pool) Admit(m Model) ([]ModelID, error) {
 		e.used = p.tick()
 		return nil, nil
 	}
-	if m.WeightBytes > p.budget {
-		return nil, ErrTooLarge
-	}
-	// Feasibility check WITHOUT mutating: can the unpinned residents free enough?
-	if need := p.used + m.WeightBytes - p.budget; need > 0 {
-		var evictable int64
-		for _, e := range p.models {
-			if !e.m.Pinned {
-				evictable += e.m.WeightBytes
-			}
-		}
-		if evictable < need {
-			return nil, ErrPinnedNoRoom
-		}
-	}
 	// Evict coldest-unpinned-first until it fits (feasibility guaranteed a path).
 	var evicted []ModelID
-	for p.used+m.WeightBytes > p.budget {
+	for m.WeightBytes > p.budget-p.used {
 		victim := p.coldestUnpinned()
 		evicted = append(evicted, victim)
 		p.used -= p.models[victim].m.WeightBytes

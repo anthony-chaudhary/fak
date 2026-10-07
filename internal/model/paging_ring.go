@@ -60,7 +60,7 @@ type pagedRing struct {
 	evict  int // page-outs (LRU victims dropped during admit to stay within budget)
 
 	// lookups and refused are the RECONCILIATION pair (R6/#5617). lookups is incremented once at the
-	// top of stage(), before anything is decided; refused once on the only exit that returns no
+	// top of stage(), before anything is decided; refused once on each exit that returns no
 	// handle. Every stage call therefore ends in exactly one of hit / pageIn / refused, so
 	// `hit + pageIn + refused == lookups` is an identity an operator surface can CHECK rather than
 	// assume — the difference between reporting the ring's own accounting and reporting a parallel
@@ -181,7 +181,7 @@ func (r *pagedRing) dropResidency(id polymodel.ModelID) {
 
 // newPagedRing returns a ring over be with the given resident weight-byte budget. A nil backend
 // uses compute.Default() (the cpu-ref backend); a negative budget is clamped to 0 by polymodel
-// (every admit then pages straight back out), matching pagedKernel/NewPool.
+// matching pagedKernel/NewPool.
 func newPagedRing(be compute.Backend, budgetBytes int64) *pagedRing {
 	if be == nil {
 		be = compute.Default()
@@ -284,6 +284,30 @@ func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.D
 			r.awaitStaged(id)
 		}
 		return wt, true
+	}
+	// A miss larger than the entire budget cannot be admitted under any victim policy.
+	// Refuse before building its host source or allocating/uploading device storage: a
+	// post-upload refusal briefly allocates the very weight the budget excludes. Keep
+	// this after the hit path, whose resident descriptor is immutable. Caller fallback
+	// is unchanged; this is not a bound on permanent residency or fitting-miss transients.
+	if weightBytes > r.pool.Budget() {
+		r.refused++
+		if r.shared != nil {
+			r.shared.noteRefusal()
+		}
+		return compute.Tensor{}, false
+	}
+	// Reuse the pool's authoritative snapshot check rather than duplicating its
+	// pinned/held feasibility rule. Shared callers hold the existing owner lock;
+	// private rings are single-owner, and builders/backends must not reenter or
+	// mutate this pool. This is no reservation: the final Admit still rechecks.
+	// Other errors keep their existing post-upload cleanup/fallback behavior.
+	if r.pool.CheckAdmission(polymodel.Model{ID: id, WeightBytes: weightBytes, Pinned: pinned}) == polymodel.ErrPinnedNoRoom {
+		r.refused++
+		if r.shared != nil {
+			r.shared.noteRefusal()
+		}
+		return compute.Tensor{}, false
 	}
 	// Miss: build + upload the weight, then admit it under the budget. Admit is all-or-nothing: on
 	// error the pool is unchanged, so page the just-uploaded handle straight back out and defer.

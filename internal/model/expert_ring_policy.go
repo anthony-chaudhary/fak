@@ -191,7 +191,7 @@ func (r *pagedRing) evictForPolicy(weightBytes int64) {
 		return
 	}
 	budget := r.pool.Budget()
-	if weightBytes > budget || r.pool.Used()+weightBytes <= budget {
+	if weightBytes > budget || weightBytes <= budget-r.pool.Used() {
 		return
 	}
 	victims, ok := r.victimsByHeat(budget - weightBytes)
