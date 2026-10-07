@@ -114,7 +114,7 @@ func NewReservationStore(dir string) *ReservationStore {
 // being admitted as if the host were healthy.
 func normalizePressure(p Pressure) Pressure {
 	switch p {
-	case PressureNormal, PressureWarning, PressureCritical:
+	case PressureUnknown, PressureNormal, PressureWarning, PressureCritical:
 		return p
 	}
 	return PressureUnknown
