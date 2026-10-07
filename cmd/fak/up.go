@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -65,20 +64,22 @@ func printUpHelp(w io.Writer) {
 // while the set of names can never drift from the parser.
 func upHelpFlagLines() []string {
 	synopsis := map[string]string{
-		"addr":            "--addr <addr>               address to bind HTTP server (default: 127.0.0.1:8080)",
-		"mock":            "--mock                      enable mock completion responses for testing/offline",
-		"headless":        "--headless                  run server in foreground without interactive REPL",
-		"dry-run":         "--dry-run                   validate topology or profile hardware without running",
-		"json":            "--json                      emit plan in JSON format",
-		"memory-gib":      "--memory-gib <gib>          override detected unified memory in GiB",
-		"model":           "--model <tier>              override auto-selected model tier (e.g. 7B, 27B, 70B)",
-		"context":         "--context <tokens>          override auto-selected context budget tokens",
-		"kv-precision":    "--kv-precision <prec>       KV cache storage tier: f32 (default, exact) or q8_0 (~2x more context)",
-		"engine":          "--engine <engine>           model engine ID (default: inkernel; mock only with --mock)",
-		"gpu-idle-exit":   "--gpu-idle-exit <dur>       stop the resident server after this idle window so its GPU lease and model residency are released (0 keeps the process-lifetime holder)",
-		"max-rss":         "--max-rss <bytes>           stop the resident server when its own RSS stays above this many bytes for --max-rss-sustain, so unbounded growth cannot drive the host into swap exhaustion; 0 disables the guard (env FAK_UP_MAX_RSS)",
-		"max-rss-sustain": "--max-rss-sustain <dur>     how long RSS must stay above --max-rss before the guard stops the server, absorbing the model-load high-water mark",
-		"code-workspace":  "--code-workspace <dir>      workspace whose AGENTS.md seeds the startup agent KV-cache warm (default: FAK_UP_CODE_WORKSPACE, then the current directory)",
+		"addr":             "--addr <addr>               address to bind HTTP server (default: 127.0.0.1:8080)",
+		"mock":             "--mock                      enable mock completion responses for testing/offline",
+		"headless":         "--headless                  run server in foreground without interactive REPL",
+		"dry-run":          "--dry-run                   validate topology or profile hardware without running",
+		"json":             "--json                      emit plan in JSON format",
+		"memory-gib":       "--memory-gib <gib>          override detected unified memory in GiB",
+		"model":            "--model <tier>              override auto-selected model tier (e.g. 7B, 27B, 70B)",
+		"context":          "--context <tokens>          override auto-selected context budget tokens",
+		"kv-precision":     "--kv-precision <prec>       KV cache storage tier: f32 (default, exact) or q8_0 (~2x more context)",
+		"engine":           "--engine <engine>           model engine ID (default: inkernel; mock only with --mock)",
+		"gpu-idle-exit":    "--gpu-idle-exit <dur>       stop the resident server after this idle window so its GPU lease and model residency are released (0 keeps the process-lifetime holder)",
+		"max-rss":          "--max-rss <bytes|size|auto> stop the resident server when its own RSS stays above this ceiling for --max-rss-sustain, so unbounded growth cannot drive the host into swap exhaustion; bytes, a size like 30GiB, or auto (measured idle footprint + one session's KV + --max-rss-headroom); 0/unset disables the guard (env FAK_UP_MAX_RSS, same grammar; the flag wins)",
+		"max-rss-sustain":  "--max-rss-sustain <dur>     how long RSS must stay above --max-rss before the guard stops the server, absorbing the model-load high-water mark",
+		"max-rss-headroom": "--max-rss-headroom <pct>    margin above idle footprint + session KV for --max-rss auto and for raising a stale explicit ceiling (default 15; env FAK_UP_MAX_RSS_HEADROOM)",
+		"max-rss-strict":   "--max-rss-strict            refuse to start (exit 78) when an explicit --max-rss is at or below idle footprint + session KV, instead of raising it (env FAK_UP_MAX_RSS_STRICT=1)",
+		"code-workspace":   "--code-workspace <dir>      workspace whose AGENTS.md seeds the startup agent KV-cache warm (default: FAK_UP_CODE_WORKSPACE, then the current directory)",
 	}
 	return []string{
 		"  " + synopsis["addr"],
@@ -94,6 +95,8 @@ func upHelpFlagLines() []string {
 		"  " + synopsis["gpu-idle-exit"],
 		"  " + synopsis["max-rss"],
 		"  " + synopsis["max-rss-sustain"],
+		"  " + synopsis["max-rss-headroom"],
+		"  " + synopsis["max-rss-strict"],
 		"  " + synopsis["code-workspace"],
 	}
 }
@@ -342,8 +345,10 @@ type upFlagSet struct {
 	kvPrecision     *string
 	engineID        *string
 	gpuIdleExit     *time.Duration
-	maxRSS          *uint64
+	maxRSS          *string
 	maxRSSSustain   *time.Duration
+	maxRSSHeadroom  *float64
+	maxRSSStrict    *bool
 	codeWorkspace   *string
 }
 
@@ -361,8 +366,10 @@ func registerUpFlags(fs *flag.FlagSet) upFlagSet {
 		kvPrecision:     fs.String("kv-precision", "", "KV cache storage tier: f32 (default, exact) or q8_0 (dense mixed: f32 pre-RoPE K + q8_0 K/V; ~2x more context). Also settable via FAK_UP_KV_PRECISION."),
 		engineID:        fs.String("engine", "inkernel", "model engine ID (default inkernel; mock only with --mock)"),
 		gpuIdleExit:     fs.Duration("gpu-idle-exit", defaultGPUIdleExit, "stop the resident server after this idle window (no in-flight request) so its GPU lease and model residency are released for a queued peer (e.g. modelbench, #13135); 0 keeps the historical process-lifetime holder"),
-		maxRSS:          fs.Uint64("max-rss", 0, "stop the resident server when its own RSS stays above this many bytes for --max-rss-sustain, so an unbounded-growth process cannot drive the host into swap exhaustion (launchd KeepAlive then restarts a fresh process); 0 disables the guard (historical unbounded holder). Env: FAK_UP_MAX_RSS"),
+		maxRSS:          fs.String("max-rss", "", "stop the resident server when its own RSS stays above this ceiling for --max-rss-sustain, so an unbounded-growth process cannot drive the host into swap exhaustion (launchd KeepAlive then restarts a fresh process). Bytes, a size like 30GiB, or \"auto\" (measured idle footprint plus one session's KV plus --max-rss-headroom); 0 or unset disables the guard (historical unbounded holder). Env: FAK_UP_MAX_RSS (same grammar; the flag wins)"),
 		maxRSSSustain:   fs.Duration("max-rss-sustain", defaultMemGuardSustain, "how long RSS must stay above --max-rss before the guard stops the server; absorbs the model-load high-water"),
+		maxRSSHeadroom:  fs.Float64("max-rss-headroom", defaultMaxRSSHeadroomPct, "percent margin above idle footprint plus one session's KV, used by --max-rss auto and when raising a stale explicit ceiling. Env: FAK_UP_MAX_RSS_HEADROOM"),
+		maxRSSStrict:    fs.Bool("max-rss-strict", false, "refuse to start (exit 78) when an explicit --max-rss is at or below the idle footprint plus one session's KV, instead of raising it to the derived ceiling. Env: FAK_UP_MAX_RSS_STRICT=1"),
 		codeWorkspace:   fs.String("code-workspace", "", "workspace whose AGENTS.md seeds the startup agent KV-cache warm; empty defaults to FAK_UP_CODE_WORKSPACE then the current directory (turnkey parity with `fak serve --native-code-workspace`)"),
 	}
 }
@@ -374,7 +381,7 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	addr, mock, headless, dryRun, asJSON := upFlags.addr, upFlags.mock, upFlags.headless, upFlags.dryRun, upFlags.asJSON
 	memoryGiB, modelOverride, contextOverride := upFlags.memoryGiB, upFlags.modelOverride, upFlags.contextOverride
 	kvPrecision, engineID, gpuIdleExit := upFlags.kvPrecision, upFlags.engineID, upFlags.gpuIdleExit
-	maxRSS, maxRSSSustain := upFlags.maxRSS, upFlags.maxRSSSustain
+	maxRSSSustain := upFlags.maxRSSSustain
 	codeWorkspace := upFlags.codeWorkspace
 
 	if err := fs.Parse(argv); err != nil {
@@ -431,12 +438,10 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 		}
 	}
 
-	if *maxRSS == 0 {
-		if v := strings.TrimSpace(os.Getenv("FAK_UP_MAX_RSS")); v != "" {
-			if n, err := strconv.ParseUint(v, 10, 64); err == nil {
-				*maxRSS = n
-			}
-		}
+	maxRSSOpts, err := resolveUpMaxRSSOptions(upFlags, explicit, os.Getenv)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak up: %v\n", err)
+		os.Exit(2)
 	}
 	// The startup agent KV-cache warm resolves its workspace like the memory
 	// guard above: an explicit --code-workspace wins, otherwise FAK_UP_CODE_WORKSPACE,
@@ -503,16 +508,19 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	if id := guardShortBuildID(); id != "" {
 		ver += " (" + id + ")"
 	}
-	if err := server.checkMaxRSS(*maxRSS); err != nil {
+	maxRSSRes, err := server.resolveMaxRSS(maxRSSOpts)
+	if err != nil {
 		fmt.Fprintf(stderr, "fak up: %v\n", err)
 		shutdownTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = server.Shutdown(shutdownTimeout)
 		cancel()
 		os.Exit(upExitStructural)
 	}
+	logMaxRSSResolution(stderr, maxRSSRes, maxRSSOpts.headroomPct)
+	maxRSSCeiling := maxRSSRes.Ceiling
 	server.armGPUIdleExit(*gpuIdleExit)
-	server.armMemGuard(*maxRSS, *maxRSSSustain)
-	server.armHostMemoryBudget(*maxRSS)
+	server.armMemGuard(maxRSSCeiling, *maxRSSSustain)
+	server.armHostMemoryBudget(maxRSSCeiling)
 	printTurnkeyReady(stdout, ver, server.Addr(), plan)
 	printTurnkeyBackendStamp(stdout, server.metalDecision, metalResidencyStampFrom(server.liveResidencyReport()))
 	if *gpuIdleExit > 0 {

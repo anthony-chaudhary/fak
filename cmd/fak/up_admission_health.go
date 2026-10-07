@@ -29,11 +29,18 @@ type MaxRSSBelowResidentError struct {
 	Ceiling       uint64
 	ResidentBytes uint64
 	SessionKV     uint64
+	// Suggested is the derived ceiling (footprint + KV + headroom) that would admit a
+	// session; 0 when not computed.
+	Suggested uint64
 }
 
 func (e *MaxRSSBelowResidentError) Error() string {
-	return fmt.Sprintf("%v: ceiling %d bytes (%s) <= resident %d bytes (%s) + per-session KV %d bytes (%s); raise --max-rss or reduce --context",
+	msg := fmt.Sprintf("%v: ceiling %d bytes (%s) <= resident %d bytes (%s) + per-session KV %d bytes (%s); raise --max-rss or reduce --context",
 		ErrMaxRSSBelowResident, e.Ceiling, formatBytes(e.Ceiling), e.ResidentBytes, formatBytes(e.ResidentBytes), e.SessionKV, formatBytes(e.SessionKV))
+	if e.Suggested > 0 {
+		msg += fmt.Sprintf("; set --max-rss auto or at least %s (%d bytes)", formatBytes(e.Suggested), e.Suggested)
+	}
+	return msg
 }
 
 func (e *MaxRSSBelowResidentError) Is(target error) bool { return target == ErrMaxRSSBelowResident }
