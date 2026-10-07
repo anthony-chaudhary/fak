@@ -33,9 +33,20 @@
         > ~/Library/LaunchAgents/com.fak.serve-gateway.plist
       launchctl load -w ~/Library/LaunchAgents/com.fak.serve-gateway.plist
 
-  Set the upstream credential in your login environment (NOT in this template):
+  Store the upstream credential DURABLY in your login Keychain (NOT in this
+  template, and not via `launchctl setenv`, which is wiped on every reboot).
+  `-w` with no value makes `security` prompt for the key, so it never lands in
+  shell history:
 
-      launchctl setenv ANTHROPIC_API_KEY "sk-ant-..."
+      security add-generic-password -U -a "$USER" -s fak-ANTHROPIC_API_KEY -w
+
+  Then add `--api-key-env ANTHROPIC_API_KEY --require-upstream-key` to
+  ProgramArguments (commented out below; `fak node install` adds them for you
+  when the item exists): serve reads $ANTHROPIC_API_KEY when it is set,
+  otherwise that Keychain item (then Claude Code's own saved API key), and
+  refuses to start with a "no gateway key" error in launchd_serve.err instead
+  of serving upstream 401s. Without them the unit is a client-credential
+  passthrough (each client sends its own key).
 
   Tail it, or unload it, with:
 
@@ -65,6 +76,10 @@
       <string>__ADDR__</string>
       <string>--policy</string>
       <string>__REPO__/examples/dogfood-claude-policy.json</string>
+      <!-- Once the fak-ANTHROPIC_API_KEY Keychain item exists (see the header),
+           append the api-key-env ANTHROPIC_API_KEY and require-upstream-key
+           arguments here. Without them the gateway is a client-credential
+           passthrough. -->
     </array>
 
     <key>EnvironmentVariables</key>

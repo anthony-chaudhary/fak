@@ -3,7 +3,6 @@ package accounts
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,7 +23,7 @@ func stubKeychain(t *testing.T, items map[string]string) *int {
 		if v, ok := items[service]; ok {
 			return []byte(v), nil
 		}
-		return nil, errors.New("item not found")
+		return nil, ErrKeychainItemNotFound
 	}
 	resetClaudeKeychainCache()
 	t.Cleanup(func() {

@@ -78,6 +78,10 @@ type LoginObservation struct {
 	// seat — so a consumer of the --json surface can tell an org/API seat from an OAuth one.
 	CredKind  CredKind `json:"cred_kind,omitempty"`
 	APIKeyEnv string   `json:"api_key_env,omitempty"`
+	// KeychainState is the typed macOS Keychain fallback outcome behind a needs_login
+	// OAuth seat (fak-private#3063): missing, timeout (an unanswered securityd ACL
+	// prompt), error, no_token, or expired. Omitted when no keychain probe missed.
+	KeychainState KeychainState `json:"keychain_state,omitempty"`
 }
 
 // LoginSummary is the rollup over a LoginReport.
@@ -252,6 +256,9 @@ func (r Registry) loginObservation(h Home, si SeatIdentity, cd *CooldownStore, n
 		CredKind:     h.CredKind,
 		APIKeyEnv:    h.APIKeyEnv,
 	}
+	if status == LoginNeedsLogin && h.CredentialKind() == CredKindOAuth {
+		obs.KeychainState = h.Identity.Keychain.State
+	}
 	if obs.IdentityRole == "" && obs.CanServe && obs.Account == "" {
 		obs.IdentityRole = RoleNoLogin
 	}
@@ -296,7 +303,7 @@ func LoginReasonAction(status LoginStatus, h Home) (string, string) {
 			return "API key env var $" + h.APIKeyEnv + " is unset or empty",
 				"export $" + h.APIKeyEnv + " with this account's Anthropic API key (the registry keeps only the reference, never the secret)"
 		}
-		return "config directory exists but has no live credentials", "run /login for this CLAUDE_CONFIG_DIR or rehome the seat"
+		return needsLoginKeychainReasonAction(h.Identity.Keychain)
 	case LoginIdentityMismatch:
 		action := "log out and re-login this CLAUDE_CONFIG_DIR with the browser profile that belongs to this seat"
 		if h.ChromeProfile != "" {
@@ -307,6 +314,28 @@ func LoginReasonAction(status LoginStatus, h Home) (string, string) {
 		return "account recently hit a usage/rate limit", "wait for the cooldown window to elapse, or clear it once the account is free"
 	default:
 		return "", ""
+	}
+}
+
+// needsLoginKeychainReasonAction renders a needs_login OAuth seat's reason from the typed
+// keychain fallback outcome (fak-private#3063). A missing item, an expired credential,
+// or no probe at all keep the historical "/login" repair; a timeout or read error names
+// the keychain fault instead, because `/login` cannot fix an access prompt nobody
+// answered or a locked keychain.
+func needsLoginKeychainReasonAction(p KeychainProbe) (string, string) {
+	const base = "config directory exists but has no live credentials"
+	const relogin = "run /login for this CLAUDE_CONFIG_DIR or rehome the seat"
+	switch p.State {
+	case KeychainTimeout:
+		return base + "; " + p.Reason(),
+			"at the Mac, run `security find-generic-password -w -s \"" + p.Service + "\"` (or any fak keychain read) and click \"Always Allow\", then re-check; /login will not fix this"
+	case KeychainError:
+		return base + "; " + p.Reason(),
+			"check the login keychain is unlocked and readable (`security unlock-keychain`), then re-check; run /login only if the item is truly gone"
+	case KeychainMissing, KeychainNoToken, KeychainExpired:
+		return base + "; " + p.Reason(), relogin
+	default:
+		return base, relogin
 	}
 }
 
