@@ -10,8 +10,10 @@ import (
 
 // spawnUpServiceLapseWaker starts the `fak up off --for` waker as its own
 // session so it outlives the terminal (and a `go run`) that ran `off`. It
-// returns the waker pid; the waker logs to logPath.
+// returns the waker pid; the waker logs to logPath, which is size-bounded by
+// rotation to logPath.1 (readers use boundedlog.Segments).
 func spawnUpServiceLapseWaker(exe string, args []string, logPath string) (int, error) {
+	rotateUpServiceLapseLog(logPath, upServiceLapseLogMaxBytes)
 	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return 0, err

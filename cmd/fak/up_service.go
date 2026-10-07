@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/boundedlog"
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/processalive"
 	"github.com/anthony-chaudhary/fak/internal/servicespec"
@@ -864,6 +865,17 @@ func startUpServiceLapseWaker(t upServiceTarget, m *upDevOffMarker, deps upServi
 	args := []string{"up", "on", "--label", t.label, "--plist", t.plistPath,
 		"--lapse-token", m.Token, "--lapse-at", strconv.FormatInt(m.Until.Unix(), 10)}
 	return deps.spawnLapse(exe, args, filepath.Join(dir, t.label+".lapse.log"))
+}
+
+// upServiceLapseLogMaxBytes caps the `fak up off --for` waker log (16 MiB). Each
+// waker spawn appends to the same per-label log; past the cap it rotates to one .1
+// generation (internal/boundedlog) so repeated off/on cycles cannot grow it forever.
+const upServiceLapseLogMaxBytes = boundedlog.DefaultMaxBytes
+
+// rotateUpServiceLapseLog is the best-effort size bound the spawner applies before
+// it opens the log for append: a failed rotation never blocks the waker.
+func rotateUpServiceLapseLog(logPath string, maxBytes int64) {
+	_, _ = boundedlog.RotateIfOver(logPath, maxBytes)
 }
 
 func finishUpServiceVerb(stdout, stderr io.Writer, verb string, asJSON bool, st upServiceStatus, rc int) int {

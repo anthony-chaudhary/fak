@@ -385,7 +385,8 @@ func watchdogAutohealServicesForGOOS(goos string) []watchdogService {
 		return []watchdogService{
 			{ID: "fleet-dos-dispatch-watchdog", Manager: "launchd", Unit: "com.fleet.dispatch-supervisor", UnitPath: filepath.Join(launchAgents, "com.fleet.dispatch-supervisor.plist")},
 			{ID: "fak-dogfood-fleet", Manager: "launchd", Unit: "com.fak.dogfood-fleet", UnitPath: filepath.Join(launchAgents, "com.fak.dogfood-fleet.plist")},
-			{ID: "fleet-stale-work-garden", Manager: "launchd", Unit: "com.fleet.stale-work-garden", UnitPath: filepath.Join(launchAgents, "com.fleet.stale-work-garden.plist")},
+			// Emitted by `fak garden loop --register` (registerDarwinLaunchdAgent).
+			{ID: "fleet-stale-work-garden", Manager: "launchd", Unit: gardenLaunchdLabel, UnitPath: filepath.Join(launchAgents, gardenLaunchdLabel+".plist")},
 		}
 	case "linux":
 		return []watchdogService{

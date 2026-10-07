@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/boundedlog"
 )
 
 func TestSchemaAndLedgerRoundTrip(t *testing.T) {
@@ -64,5 +66,34 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if !cfg.OrphanReapEnabled {
 		t.Errorf("expected orphan reap enabled by default")
+	}
+}
+
+// fak-test:runtime fast est=50ms
+func TestLedgerQuerySpansRotatedSegment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ops-events.jsonl")
+	led, err := OpenLedger(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	led.maxBytes = 1 // every Record after the first rotates the previous file to .1
+	if err := led.Record(Event{ActionType: ActionStorageReclaim, Details: "older"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := led.Record(Event{ActionType: ActionProcessReap, Details: "newer"}); err != nil {
+		t.Fatal(err)
+	}
+	if segs := boundedlog.Segments(path); len(segs) != 2 {
+		t.Fatalf("segments = %v, want [.1, active]", segs)
+	}
+	events, err := led.QueryEvents(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[0].Details != "older" || events[1].Details != "newer" {
+		t.Fatalf("query must span .1 then active, oldest first: %+v", events)
+	}
+	if LedgerMaxBytes != 32<<20 {
+		t.Fatalf("ops audit ledger cap = %d, want 32 MiB", LedgerMaxBytes)
 	}
 }

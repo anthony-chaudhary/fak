@@ -84,6 +84,10 @@ func WriteLedgerLine(path string, exp Experiment) error {
 	if err != nil {
 		return err
 	}
+	// unbounded: the experiment registry is replayed as full history — list and the
+	// overlap check read every registration ever made — and it is a low-volume,
+	// operator-written registry under the repo tree, so rotating away the old
+	// generation would silently drop registered experiments.
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
