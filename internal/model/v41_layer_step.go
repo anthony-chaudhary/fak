@@ -46,6 +46,8 @@ package model
 import (
 	"errors"
 	"fmt"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // maxInt is used by the attention option builders below; it is defined in
@@ -982,7 +984,7 @@ func v41ExpertOperationErr(l int, stage string, cause error) error {
 	return &V41ExpertOperationError{Layer: l, Stage: stage, Cause: v41StageErr(v41StageMoE, l, cause)}
 }
 
-func (m *Model) v41IncrementalExpert(l int, stem string, xn []float32, scratch *v41ProjScratch) ([]float32, error) {
+func (m *Model) v41IncrementalExpert(l int, stem string, xn []float32, scratch *v41ProjScratch) (out []float32, resultErr error) {
 	cfg := m.Cfg
 	var dispatchOpen int64
 	var dispatchActive, gateUp bool
@@ -992,6 +994,17 @@ func (m *Model) v41IncrementalExpert(l int, stem string, xn []float32, scratch *
 				var operation *BackendForwardOperationError
 				if errors.As(cause, &operation) {
 					m.v41NoteIncrementalDeviceDispatch(gateUp, dispatchOpen)
+					panic(r)
+				}
+				var backendError *compute.BackendError
+				if errors.As(cause, &backendError) {
+					m.v41NoteIncrementalDeviceDispatch(gateUp, dispatchOpen)
+					stage := "down"
+					if gateUp {
+						stage = "gate/up"
+					}
+					out, resultErr = nil, v41ExpertOperationErr(l, stage, cause)
+					return
 				}
 			}
 			panic(r)

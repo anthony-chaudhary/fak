@@ -1316,9 +1316,76 @@ std::vector<char> readFile(const std::string& path) {
     return data;
 }
 
+bool swigluPushConstantABI(const std::vector<char>& code) {
+    if (code.size() < 5 * sizeof(uint32_t) || code.size() % sizeof(uint32_t) != 0) return false;
+    std::vector<uint32_t> words(code.size() / sizeof(uint32_t));
+    memcpy(words.data(), code.data(), code.size());
+    if (words[0] != 0x07230203 || words[3] == 0 || words[4] != 0) return false;
+    const uint32_t bound = words[3];
+    const uint32_t opTypeInt = 21, opTypeFloat = 22, opTypeStruct = 30, opTypePointer = 32;
+    const uint32_t opVariable = 59, opDecorate = 71, opMemberDecorate = 72;
+    const uint32_t pushConstant = 9, blockDecoration = 2, offsetDecoration = 35;
+    std::unordered_map<uint32_t, std::vector<uint32_t>> definitions;
+    std::unordered_map<uint32_t, bool> blocks;
+    std::unordered_map<uint64_t, uint32_t> offsets;
+    uint32_t pushPointer = 0;
+    size_t pushVariables = 0;
+    auto validID = [bound](uint32_t id) { return id != 0 && id < bound; };
+    for (size_t pos = 5; pos < words.size();) {
+        const uint32_t count = words[pos] >> 16;
+        const uint32_t op = words[pos] & 0xffff;
+        if (count == 0 || count > words.size() - pos) return false;
+        const uint32_t* instruction = words.data() + pos;
+        if (op == opTypeInt || op == opTypeFloat || op == opTypeStruct || op == opTypePointer || op == opVariable) {
+            if ((op == opTypeInt && count != 4) || (op == opTypeFloat && count != 3) ||
+                (op == opTypeStruct && count < 2) || (op == opTypePointer && count != 4) ||
+                (op == opVariable && count != 4 && count != 5)) return false;
+            const uint32_t id = instruction[op == opVariable ? 2 : 1];
+            if (!validID(id) || !definitions.emplace(id, std::vector<uint32_t>(instruction, instruction + count)).second) return false;
+            if (op == opTypeStruct) {
+                for (uint32_t member = 2; member < count; ++member) if (!validID(instruction[member])) return false;
+            } else if (op == opTypePointer) {
+                if (!validID(instruction[3])) return false;
+            } else if (op == opVariable) {
+                if (!validID(instruction[1])) return false;
+                if (instruction[3] == pushConstant) { pushPointer = instruction[1]; ++pushVariables; }
+            }
+        } else if (op == opDecorate) {
+            if (count < 3 || !validID(instruction[1])) return false;
+            if (instruction[2] == blockDecoration) {
+                if (count != 3 || !blocks.emplace(instruction[1], true).second) return false;
+            }
+        } else if (op == opMemberDecorate) {
+            if (count < 4 || !validID(instruction[1])) return false;
+            if (instruction[3] == offsetDecoration) {
+                const uint64_t key = (uint64_t(instruction[1]) << 32) | instruction[2];
+                if (count != 5 || !offsets.emplace(key, instruction[4]).second) return false;
+            }
+        }
+        pos += count;
+    }
+    if (pushVariables != 1) return false;
+    auto pointer = definitions.find(pushPointer);
+    if (pointer == definitions.end() || (pointer->second[0] & 0xffff) != opTypePointer || pointer->second[2] != pushConstant) return false;
+    const uint32_t structID = pointer->second[3];
+    auto structure = definitions.find(structID);
+    if (structure == definitions.end() || (structure->second[0] & 0xffff) != opTypeStruct || structure->second.size() != 4 || blocks.count(structID) != 1) return false;
+    auto integer = definitions.find(structure->second[2]);
+    auto floating = definitions.find(structure->second[3]);
+    if (integer == definitions.end() || (integer->second[0] & 0xffff) != opTypeInt || integer->second[2] != 32 || integer->second[3] != 1) return false;
+    if (floating == definitions.end() || (floating->second[0] & 0xffff) != opTypeFloat || floating->second[2] != 32) return false;
+    const uint64_t offsetKey = uint64_t(structID) << 32;
+    auto first = offsets.find(offsetKey), second = offsets.find(offsetKey | 1);
+    return first != offsets.end() && first->second == 0 && second != offsets.end() && second->second == 4;
+}
+
 bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsize, uint32_t subgroupSize = 0) {
     std::vector<char> code = readFile(spvPath);
     if (code.empty()) return false;
+    if (&k == &g_kern[K_SWIGLU] && !swigluPushConstantABI(code)) {
+        fprintf(stderr, "fak-vulkan: incompatible SwiGLU push-constant ABI in %s\n", spvPath.c_str());
+        return false;
+    }
     VkShaderModuleCreateInfo smi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
     smi.codeSize = code.size();
     smi.pCode = reinterpret_cast<const uint32_t*>(code.data());
@@ -1984,7 +2051,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     ok &= buildKernel(g_kern[K_RMSNORM_MATMUL3], P("rmsnorm_matmul3.spv"), 8, 5 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_RMSNORM_MATMUL_ARGMAX_BLOCKS], P("rmsnorm_matmul_argmax_blocks.spv"), 5, 2 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_ROPE],      P("rope.spv"),      1, 3 * sizeof(int) + sizeof(float));
-    ok &= buildKernel(g_kern[K_SWIGLU],    P("swiglu.spv"),    3, sizeof(int));
+    ok &= buildKernel(g_kern[K_SWIGLU],    P("swiglu.spv"),    3, sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_SWIGLU_MATMUL_ADD], P("swiglu_matmul_add.spv"), 4, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_ADD],       P("add.spv"),       2, sizeof(int));
     ok &= buildKernel(g_kern[K_ADD_BIAS],  P("add_bias.spv"),  2, 2 * sizeof(int));
@@ -2930,7 +2997,11 @@ void fvk_rope_f32(void* dX, int pos, int nHeads, int headDim, double theta) {
 }
 
 void fvk_swiglu_f32(const void* dG, const void* dU, void* dY, int n) {
-    struct { int n; } pc{n};
+    fvk_swiglu_limit_f32(dG, dU, dY, n, 0.0f);
+}
+
+void fvk_swiglu_limit_f32(const void* dG, const void* dU, void* dY, int n, float limit) {
+    struct { int n; float limit; } pc{n, limit};
     Buffer* bufs[3] = {B((void*)dG), B((void*)dU), B(dY)};
     dispatch(g_kern[K_SWIGLU], bufs, &pc, sizeof(pc), ((uint32_t)n + 255) / 256);
 }

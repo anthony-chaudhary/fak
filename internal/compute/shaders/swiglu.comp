@@ -7,11 +7,16 @@ layout(std430, binding = 0) readonly  buffer Gbuf { float G[]; };
 layout(std430, binding = 1) readonly  buffer Ubuf { float U[]; };
 layout(std430, binding = 2) writeonly buffer Ybuf { float Y[]; };
 
-layout(push_constant) uniform Push { int n; } pc;
+layout(push_constant) uniform Push { int n; float limit; } pc;
 
 void main() {
     uint i = gl_GlobalInvocationID.x;
     if (i >= uint(pc.n)) return;
     float g = G[i];
-    Y[i] = (g / (1.0 + exp(-g))) * U[i];
+    float u = U[i];
+    if (pc.limit > 0.0) {
+        g = min(g, pc.limit);
+        u = max(-pc.limit, min(u, pc.limit));
+    }
+    Y[i] = (g / (1.0 + exp(-g))) * u;
 }

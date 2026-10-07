@@ -2513,7 +2513,7 @@ func formatV41FaultClause(fa model.V41ExpertFaultAttribution) string {
 		backend = "-"
 	}
 	return fmt.Sprintf(
-		" v41_faults prefill=[faults=%df/%.1ffpt faulted_bytes=%.1fMiB dequant=%.2fGiB] decode=[faults=%df/%.1ffpt faulted_bytes=%.1fMiB dequant=%.2fGiB] hit_fraction=%.2f elapsed prefill=[fault=%.3fs/%.3fmspt dequant=%.3fs/%.3fmspt contraction=%.3fs/%.3fmspt] decode=[fault=%.3fs/%.3fmspt dequant=%.3fs/%.3fmspt contraction=%.3fs/%.3fmspt] contraction_backend=%s incremental_device prefill=[gate_up=%d down=%d dispatch=%.3fs] decode=[gate_up=%d down=%d dispatch=%.3fs] incremental_engram prefill=[injections=%d rows=%d hash_tokens=%d elapsed=%.3fs] decode=[injections=%d rows=%d hash_tokens=%d elapsed=%.3fs]",
+		" v41_faults prefill=[faults=%df/%.1ffpt faulted_bytes=%.1fMiB dequant=%.2fGiB] decode=[faults=%df/%.1ffpt faulted_bytes=%.1fMiB dequant=%.2fGiB] hit_fraction=%.2f elapsed prefill=[fault=%.3fs/%.3fmspt dequant=%.3fs/%.3fmspt contraction=%.3fs/%.3fmspt] decode=[fault=%.3fs/%.3fmspt dequant=%.3fs/%.3fmspt contraction=%.3fs/%.3fmspt] contraction_backend=%s incremental_device prefill=[gate_up=%d down=%d dispatch=%.3fs] decode=[gate_up=%d down=%d dispatch=%.3fs] incremental_engram prefill=[injections=%d rows=%d hash_tokens=%d elapsed=%.3fs] decode=[injections=%d rows=%d hash_tokens=%d elapsed=%.3fs] expert_activation prefill=[device=%d host=%d readback=%dB elapsed=%.3fs] decode=[device=%d host=%d readback=%dB elapsed=%.3fs]",
 		pre.Faults, pre.FaultsPerToken, mib*float64(pre.FaultedBytes), float64(pre.DequantBytes)/(1<<30),
 		dec.Faults, dec.FaultsPerToken, mib*float64(dec.FaultedBytes), float64(dec.DequantBytes)/(1<<30),
 		hitFraction,
@@ -2527,7 +2527,9 @@ func formatV41FaultClause(fa model.V41ExpertFaultAttribution) string {
 		pre.IncrementalDeviceGateUpCalls, pre.IncrementalDeviceDownCalls, float64(pre.IncrementalDeviceDispatchNanos)/1e9,
 		dec.IncrementalDeviceGateUpCalls, dec.IncrementalDeviceDownCalls, float64(dec.IncrementalDeviceDispatchNanos)/1e9,
 		pre.IncrementalEngramInjections, pre.IncrementalEngramRows, pre.IncrementalEngramHashTokens, float64(pre.IncrementalEngramNanos)/1e9,
-		dec.IncrementalEngramInjections, dec.IncrementalEngramRows, dec.IncrementalEngramHashTokens, float64(dec.IncrementalEngramNanos)/1e9)
+		dec.IncrementalEngramInjections, dec.IncrementalEngramRows, dec.IncrementalEngramHashTokens, float64(dec.IncrementalEngramNanos)/1e9,
+		pre.ExpertActivationDeviceCalls, pre.ExpertActivationHostCalls, pre.ExpertActivationReadbackBytes, float64(pre.ExpertActivationNanos)/1e9,
+		dec.ExpertActivationDeviceCalls, dec.ExpertActivationHostCalls, dec.ExpertActivationReadbackBytes, float64(dec.ExpertActivationNanos)/1e9)
 }
 
 // executionIdentity makes the request log say which compute path actually produced

@@ -37,12 +37,22 @@ and routed expert projections. Both activation paths need the configured clamp:
 `gate = min(gate, limit)`, `up = clamp(up, -limit, limit)`, then the existing
 `act(gate) * up`. A zero limit preserves the prior arithmetic. Negative gate
 values have no lower clamp. Accelerated experts keep compressed weights and
-gate/up matrix multiplies on the device. For a positive limit, the existing
-gate/up helper reads the two intermediate-width activation rows and applies the
-clamp and SiLU before the existing host down contraction. This adds one activation
-row read relative to the fused zero-limit route; no speedup is claimed. Zero-limit
-models retain fused device SwiGLU. This does not change device kernels or qualify
-the broader V4.1 model path; the existing qualification hold remains in force.
+gate/up matrix multiplies on the device. As of 2026-10-07, Vulkan's optional
+configured SwiGLU operation applies the positive finite clamp and SiLU on the
+device, reads one intermediate-width activation row, and feeds the existing
+device down projection. Backends without that operation retain the host
+activation fallback, which reads both gate and up rows. Nonpositive and NaN
+limits retain the legacy fused operation; positive infinity uses the host path.
+The default phase ledger and agent reader report activation device/host calls,
+readback bytes, and elapsed time.
+
+A physical Radeon 8060S test of a small routed-expert fixture witnesses 50%
+less activation readback, one-third less total expert readback, and matching
+decode and suffix-prefill outputs. This is a byte-transfer result, not a
+full-checkpoint serving or latency qualification. Vulkan rejects stale or
+malformed SwiGLU push-constant layouts at initialization; the legacy C entry
+point keeps its zero-limit arithmetic. The broader V4.1 qualification hold
+remains in force.
 
 Both changes serve existing native inference users without adding dependencies,
 persisted state, alternate selectors, or a separately maintained cache backend.

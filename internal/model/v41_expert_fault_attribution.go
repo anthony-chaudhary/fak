@@ -82,6 +82,10 @@ func (p V41ExpertPhase) String() string {
 // dequant, each pick by its contraction) but are summed into three independent
 // accumulators so a run can say which one dominates.
 type v41ExpertFaultPhaseLedger struct {
+	ExpertActivationDeviceCalls    int     `json:"expert_activation_device_calls"`
+	ExpertActivationHostCalls      int     `json:"expert_activation_host_calls"`
+	ExpertActivationReadbackBytes  int64   `json:"expert_activation_readback_bytes"`
+	ExpertActivationNanos          int64   `json:"expert_activation_nanos"`
 	IncrementalEngramInjections    int     `json:"incremental_engram_injections"`
 	IncrementalEngramRows          int     `json:"incremental_engram_rows"`
 	IncrementalEngramHashTokens    int     `json:"incremental_engram_hash_tokens"`
@@ -520,5 +524,26 @@ func (m *Model) v41NoteIncrementalEngram(injections, rows, hashTokens int, nanos
 	led.IncrementalEngramHashTokens += hashTokens
 	if nanos > 0 {
 		led.IncrementalEngramNanos += nanos
+	}
+}
+
+func (m *Model) v41NoteExpertActivation(device, host int, readbackBytes int64, opened int64) {
+	l := v41ExpertFaultLedgerOf(m, false)
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	led := l.ledgerLocked()
+	if led == nil {
+		return
+	}
+	led.ExpertActivationDeviceCalls += device
+	led.ExpertActivationHostCalls += host
+	led.ExpertActivationReadbackBytes += readbackBytes
+	if opened != 0 {
+		if elapsed := l.nowLocked() - opened; elapsed > 0 {
+			led.ExpertActivationNanos += elapsed
+		}
 	}
 }
