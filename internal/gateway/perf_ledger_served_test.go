@@ -164,6 +164,47 @@ func TestPerfLedgerServedSpeculativeTurnRecordsItsOwnRounds(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=2s lane=default
+func TestPerfLedgerServedNativeTurnsCarryCacheTier(t *testing.T) {
+	h := newPerfServedHarness(t, newPerfServedNativePlanner(t))
+	prompt := "a shared prefix long enough for the radix index to hold it across turns"
+	h.chat("native-synth", prompt, false)
+	h.chat("native-synth", prompt, false)
+
+	rep := h.recent()
+	if len(rep.Records) != 2 {
+		t.Fatalf("recent rows = %d, want 2: %+v", len(rep.Records), rep.Records)
+	}
+	for i, r := range rep.Records {
+		if r.CacheTier == "" || r.CacheRestore == "" {
+			t.Fatalf("row %d = %+v, want the planner's cache tier and restore outcome on the native row", i, r)
+		}
+		hit := r.CacheRestore == perfledger.RestoreHit
+		if hit != (r.CachedTokens > 0) || hit == (r.CacheTier == perfledger.TierNone) {
+			t.Errorf("row %d tier=%q restore=%q cached=%d: tier/restore disagree with the served cache tokens", i, r.CacheTier, r.CacheRestore, r.CachedTokens)
+		}
+	}
+	if first := rep.Records[0]; first.CacheRestore == perfledger.RestoreHit {
+		t.Errorf("first turn = %+v, want a cold restore (nothing cached yet)", first)
+	}
+	sum := 0
+	for _, ts := range rep.Summary.ByTier {
+		sum += ts.Count
+	}
+	if sum != 2 || rep.Summary.ByTier[perfledger.TierUnknown].Count != 0 {
+		t.Fatalf("by_tier = %+v, want both native rows tiered and none unknown", rep.Summary.ByTier)
+	}
+	if line := h.compact(); !strings.Contains(line, "tier served/ttft p50:") || !strings.Contains(line, "restore hit=") {
+		t.Fatalf("compact = %q, want the tier and restore segments", line)
+	}
+	if recs := h.durable(); len(recs) != 2 || recs[1].CacheTier != rep.Records[1].CacheTier {
+		t.Fatalf("durable rows = %+v, want the cache tier on disk", recs)
+	}
+	if second := rep.Records[1]; second.CacheTier != perfledger.TierDeviceL1 || second.CacheRestore != perfledger.RestoreHit || second.CachedTokens <= 0 {
+		t.Fatalf("second turn = %+v, want the shared prefix restored from device_l1", second)
+	}
+}
+
 func perfRound4(v float64) float64 { return float64(int64(v*10000+0.5)) / 10000 }
 
 // fak-test:runtime fast est=1s lane=default
@@ -209,6 +250,9 @@ func TestPerfLedgerServedProxyStreamMeasuresTTFT(t *testing.T) {
 	}
 	if streamed.TTFTMS < float64(prefill/time.Millisecond) || streamed.TTFTMS > streamed.E2EMS || streamed.DecodeTPS <= 0 {
 		t.Errorf("streamed proxy row = %+v, want ttft >= %v upstream prefill, <= e2e, with a decode rate", streamed, prefill)
+	}
+	if streamed.CacheTier != "" || streamed.CacheRestore != "" || rep.Summary.ByTier[perfledger.TierUnknown].Count != 2 {
+		t.Errorf("proxy rows tier=%q restore=%q by_tier=%+v, want no tier on the row and both booked unknown", streamed.CacheTier, streamed.CacheRestore, rep.Summary.ByTier)
 	}
 	if streamed.Model != "up-model" || streamed.Engine != nil || streamed.CachedTokens != 80 {
 		t.Errorf("streamed proxy row = %+v, want model=up-model, cached=80, no engine anatomy", streamed)

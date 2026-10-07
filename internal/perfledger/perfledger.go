@@ -56,18 +56,27 @@ const (
 // PrefillTPS needs at least MinPrefillRateTokens uncached tokens. DecodeTPS is the
 // inter-token rate after the first token: (completion-1) / (e2e-ttft).
 type Record struct {
-	Schema           string  `json:"schema"`
-	UnixMS           int64   `json:"unix_ms"`
-	FinishReason     string  `json:"finish_reason,omitempty"`
-	Locality         string  `json:"locality,omitempty"`
-	PromptTokens     int     `json:"prompt_tokens"`
-	CompletionTokens int     `json:"completion_tokens"`
-	CachedTokens     int     `json:"cached_tokens"`
-	CacheRegime      string  `json:"cache_regime,omitempty"`
-	E2EMS            float64 `json:"e2e_ms"`
-	TTFTMS           float64 `json:"ttft_ms,omitempty"`
-	PrefillTPS       float64 `json:"prefill_tps,omitempty"`
-	DecodeTPS        float64 `json:"decode_tps,omitempty"`
+	Schema           string `json:"schema"`
+	UnixMS           int64  `json:"unix_ms"`
+	FinishReason     string `json:"finish_reason,omitempty"`
+	Locality         string `json:"locality,omitempty"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	CachedTokens     int    `json:"cached_tokens"`
+	CacheRegime      string `json:"cache_regime,omitempty"`
+	// CacheTier is the KV-prefix tier the native engine restored this turn's
+	// cached prompt from (TierDeviceL1/TierHostL2/TierRemoteL3, TierNone when
+	// nothing was reused). Absent on proxied turns: the summary books those as
+	// TierUnknown, never imputed.
+	CacheTier string `json:"cache_tier,omitempty"`
+	// CacheRestore is the native restore outcome: RestoreHit, RestoreMiss, or
+	// RestoreUnserved (the lookup matched but no prefix was served). Absent on
+	// proxied turns.
+	CacheRestore string  `json:"cache_restore,omitempty"`
+	E2EMS        float64 `json:"e2e_ms"`
+	TTFTMS       float64 `json:"ttft_ms,omitempty"`
+	PrefillTPS   float64 `json:"prefill_tps,omitempty"`
+	DecodeTPS    float64 `json:"decode_tps,omitempty"`
 	// Error is the failure class of a turn that did not complete (one of the Error*
 	// constants); empty on a served turn. Status is the HTTP status the client got:
 	// 200 when the failure came after the stream was committed, 499 for a client cancel,
@@ -105,6 +114,25 @@ type ServedBy struct {
 }
 
 func (r Record) servedBy() ServedBy { return ServedBy{Model: r.Model, Identity: r.Identity} }
+
+// Cache tier vocabulary (radixkv.SnapshotTier plus none/unknown).
+const (
+	TierDeviceL1 = "device_l1"
+	TierHostL2   = "host_dram_l2"
+	TierRemoteL3 = "remote_http_l3"
+	TierNone     = "none"
+	TierUnknown  = "unknown"
+)
+
+// Tiers is the cache-tier vocabulary in render order.
+var Tiers = []string{TierDeviceL1, TierHostL2, TierRemoteL3, TierNone, TierUnknown}
+
+// Restore outcomes (agent.NativeCacheRestore*).
+const (
+	RestoreHit      = "hit"
+	RestoreMiss     = "miss"
+	RestoreUnserved = "unserved"
+)
 
 // Native decode paths (enginestep's closed path vocabulary).
 const (
@@ -238,6 +266,13 @@ type Summary struct {
 	// ByRegime splits latency by prompt-cache regime (#5630) so warm vs cold TTFT is
 	// one read. Keys are cacheobs.Regimes; a regime with no rows is absent.
 	ByRegime map[string]RegimeSummary `json:"by_regime,omitempty"`
+	// ByTier splits served turns by the cache tier their reused prompt came from
+	// (keys are Tiers; proxied turns land in TierUnknown). Absent on an empty window.
+	ByTier map[string]TierSummary `json:"by_tier,omitempty"`
+	// ByRestore counts native turns by restore outcome; RestoreUnserved is the
+	// restore-failure count (matched in the index, nothing served).
+	ByRestore       map[string]int `json:"by_restore,omitempty"`
+	RestoreUnserved int            `json:"restore_unserved,omitempty"`
 	// Native counts the rows the native engine served (rows carrying Engine);
 	// ByPath splits them by decode path. Both are absent on a proxy-only window.
 	Native int            `json:"native,omitempty"`
@@ -265,6 +300,17 @@ type RegimeSummary struct {
 	TTFTP50MS    float64 `json:"ttft_p50_ms,omitempty"`
 	TTFTP99MS    float64 `json:"ttft_p99_ms,omitempty"`
 	E2EP50MS     float64 `json:"e2e_p50_ms,omitempty"`
+}
+
+// TierSummary is one cache tier's slice of the window. PromptServedShare is the
+// tier's cached tokens over the WHOLE window's prompt (cached + uncached), so the
+// tiers' shares sum to Summary.CacheHitShare.
+type TierSummary struct {
+	Count             int     `json:"count"`
+	CachedTokens      int64   `json:"cached_tokens"`
+	PromptServedShare float64 `json:"prompt_served_share"`
+	TTFTMeasured      int     `json:"ttft_measured"`
+	TTFTP50MS         float64 `json:"ttft_p50_ms,omitempty"`
 }
 
 type Report struct {
@@ -307,6 +353,9 @@ func Summarize(recs []Record) Summary {
 	regimeE2E := map[string][]float64{}
 	regimeCount := map[string]int{}
 	servedBy := map[ServedBy]struct{}{}
+	tierTTFT := map[string][]float64{}
+	tierCount := map[string]int{}
+	tierCached := map[string]int64{}
 	for _, r := range recs {
 		if r.IsProbe() {
 			s.Probes++
@@ -328,6 +377,21 @@ func Summarize(recs []Record) Summary {
 		regimeCount[regime]++
 		if r.TTFTMS > 0 {
 			regimeTTFT[regime] = append(regimeTTFT[regime], r.TTFTMS)
+		}
+		tier := r.tier()
+		tierCount[tier]++
+		tierCached[tier] += int64(r.CachedTokens)
+		if r.TTFTMS > 0 {
+			tierTTFT[tier] = append(tierTTFT[tier], r.TTFTMS)
+		}
+		if r.CacheRestore != "" {
+			if s.ByRestore == nil {
+				s.ByRestore = map[string]int{}
+			}
+			s.ByRestore[r.CacheRestore]++
+			if r.CacheRestore == RestoreUnserved {
+				s.RestoreUnserved++
+			}
 		}
 		if r.E2EMS > 0 {
 			regimeE2E[regime] = append(regimeE2E[regime], r.E2EMS)
@@ -381,6 +445,21 @@ func Summarize(recs []Record) Summary {
 	if total := prompt + cached; total > 0 {
 		s.CacheHitShare = roundTo(float64(cached)/float64(total), 10000)
 	}
+	for tier, n := range tierCount {
+		if s.ByTier == nil {
+			s.ByTier = make(map[string]TierSummary, len(tierCount))
+		}
+		ts := TierSummary{
+			Count:        n,
+			CachedTokens: tierCached[tier],
+			TTFTMeasured: len(tierTTFT[tier]),
+			TTFTP50MS:    quantile(tierTTFT[tier], 0.50),
+		}
+		if total := prompt + cached; total > 0 {
+			ts.PromptServedShare = roundTo(float64(tierCached[tier])/float64(total), 10000)
+		}
+		s.ByTier[tier] = ts
+	}
 	for regime, n := range regimeCount {
 		if s.ByRegime == nil {
 			s.ByRegime = make(map[string]RegimeSummary, len(regimeCount))
@@ -402,6 +481,15 @@ func (r Record) regime() string {
 		return r.CacheRegime
 	}
 	return cacheobs.RegimeForTokens(r.CachedTokens, r.PromptTokens)
+}
+
+// tier is the row's cache tier; rows without one (proxied, or written before the
+// field existed) are TierUnknown.
+func (r Record) tier() string {
+	if r.CacheTier != "" {
+		return r.CacheTier
+	}
+	return TierUnknown
 }
 
 // RenderCompact is the one-line agent read of a report.
@@ -435,6 +523,17 @@ func RenderCompact(rep Report) string {
 				fmt.Fprintf(&b, " %s=%s(n=%d)", regime, fmtMS(rs.TTFTP50MS), rs.Count)
 			}
 		}
+	}
+	if hasKnownTier(s.ByTier) {
+		b.WriteString(" | tier served/ttft p50:")
+		for _, tier := range Tiers {
+			if ts, ok := s.ByTier[tier]; ok {
+				fmt.Fprintf(&b, " %s=%.1f%%/%s(n=%d)", tier, ts.PromptServedShare*100, fmtMS(ts.TTFTP50MS), ts.Count)
+			}
+		}
+	}
+	if len(s.ByRestore) > 0 {
+		fmt.Fprintf(&b, " | restore hit=%d miss=%d unserved=%d", s.ByRestore[RestoreHit], s.ByRestore[RestoreMiss], s.RestoreUnserved)
 	}
 	if s.Native > 0 {
 		b.WriteString(" | path:")
@@ -472,6 +571,17 @@ func RenderCompact(rep Report) string {
 		fmt.Fprintf(&b, " | dropped_writes=%d", rep.Window.DroppedWrites)
 	}
 	return b.String()
+}
+
+// hasKnownTier reports whether any row resolved a tier, so a proxy-only window
+// does not grow a tier segment that only says "unknown".
+func hasKnownTier(by map[string]TierSummary) bool {
+	for tier := range by {
+		if tier != TierUnknown {
+			return true
+		}
+	}
+	return false
 }
 
 // ReadTail returns at most RingCap valid rows from the end of the ledger at

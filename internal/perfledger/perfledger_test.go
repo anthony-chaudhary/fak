@@ -500,3 +500,91 @@ func TestRecordIdentityRoundTripsFlat(t *testing.T) {
 		t.Fatalf("round trip = %+v (%v)", back, err)
 	}
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestSummarizeSplitsByCacheTierAndRestore(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	row := func(prompt, cached int, ttft time.Duration, tier, restore string) Record {
+		r := NewRecord(now, "stop", LocalitySelfHosted, prompt, 10, cached, 500*time.Millisecond, ttft)
+		r.CacheTier, r.CacheRestore = tier, restore
+		return r
+	}
+	cases := []struct {
+		name         string
+		recs         []Record
+		wantTier     map[string]TierSummary
+		wantRestore  map[string]int
+		wantUnserved int
+		wantCompact  []string
+		wantNoTier   bool
+	}{
+		{
+			name: "every tier plus a proxied row",
+			recs: []Record{
+				row(100, 300, 20*time.Millisecond, TierDeviceL1, RestoreHit),
+				row(100, 300, 40*time.Millisecond, TierDeviceL1, RestoreHit),
+				row(200, 200, 80*time.Millisecond, TierHostL2, RestoreHit),
+				row(300, 100, 150*time.Millisecond, TierRemoteL3, RestoreHit),
+				row(400, 0, 200*time.Millisecond, TierNone, RestoreUnserved),
+				row(400, 0, 0, TierNone, RestoreMiss),
+				NewRecord(now, "stop", LocalityVendor, 200, 10, 300, 500*time.Millisecond, 0),
+			},
+			// window prompt = 1700 uncached + 1200 cached = 2900
+			wantTier: map[string]TierSummary{
+				TierDeviceL1: {Count: 2, CachedTokens: 600, PromptServedShare: 0.2069, TTFTMeasured: 2, TTFTP50MS: 20},
+				TierHostL2:   {Count: 1, CachedTokens: 200, PromptServedShare: 0.069, TTFTMeasured: 1, TTFTP50MS: 80},
+				TierRemoteL3: {Count: 1, CachedTokens: 100, PromptServedShare: 0.0345, TTFTMeasured: 1, TTFTP50MS: 150},
+				TierNone:     {Count: 2, TTFTMeasured: 1, TTFTP50MS: 200},
+				TierUnknown:  {Count: 1, CachedTokens: 300, PromptServedShare: 0.1034},
+			},
+			wantRestore:  map[string]int{RestoreHit: 4, RestoreMiss: 1, RestoreUnserved: 1},
+			wantUnserved: 1,
+			wantCompact: []string{
+				"tier served/ttft p50: device_l1=20.7%/20ms(n=2) host_dram_l2=6.9%/80ms(n=1) remote_http_l3=3.5%/150ms(n=1) none=0.0%/200ms(n=2) unknown=10.3%/n/a(n=1)",
+				"restore hit=4 miss=1 unserved=1",
+			},
+		},
+		{
+			name: "proxy-only window stays unknown and renders no tier segment",
+			recs: []Record{
+				NewRecord(now, "stop", LocalityVendor, 100, 10, 100, 500*time.Millisecond, 50*time.Millisecond),
+			},
+			wantTier:   map[string]TierSummary{TierUnknown: {Count: 1, CachedTokens: 100, PromptServedShare: 0.5, TTFTMeasured: 1, TTFTP50MS: 50}},
+			wantNoTier: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := Summarize(tc.recs)
+			if len(s.ByTier) != len(tc.wantTier) {
+				t.Fatalf("by_tier = %+v, want %+v", s.ByTier, tc.wantTier)
+			}
+			for k, w := range tc.wantTier {
+				if s.ByTier[k] != w {
+					t.Errorf("by_tier[%s] = %+v, want %+v", k, s.ByTier[k], w)
+				}
+			}
+			if len(s.ByRestore) != len(tc.wantRestore) || s.RestoreUnserved != tc.wantUnserved {
+				t.Fatalf("by_restore = %v unserved=%d, want %v/%d", s.ByRestore, s.RestoreUnserved, tc.wantRestore, tc.wantUnserved)
+			}
+			for k, w := range tc.wantRestore {
+				if s.ByRestore[k] != w {
+					t.Errorf("by_restore[%s] = %d, want %d", k, s.ByRestore[k], w)
+				}
+			}
+			line := RenderCompact(BuildReport(tc.recs, 0, false, 0))
+			for _, want := range tc.wantCompact {
+				if !strings.Contains(line, want) {
+					t.Errorf("compact = %s\nwant substring %q", line, want)
+				}
+			}
+			if tc.wantNoTier && (strings.Contains(line, "tier served") || strings.Contains(line, "restore ")) {
+				t.Errorf("compact = %s, want no tier/restore segment on a proxy-only window", line)
+			}
+			keys := jsonKeys(t, tc.recs[0])
+			if _, ok := keys["cache_tier"]; ok != (tc.recs[0].CacheTier != "") {
+				t.Errorf("cache_tier omitempty broken: %v", keys)
+			}
+		})
+	}
+}

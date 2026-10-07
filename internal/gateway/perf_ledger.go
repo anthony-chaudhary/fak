@@ -33,13 +33,15 @@ func (loc servingLocality) perfLabel() string {
 }
 
 // perfDetail is what a served turn knows beyond its token/latency axes: the model
-// that served it and, on a native turn, its own engine decode anatomy.
+// that served it and, on a native turn, its own engine decode anatomy plus the
+// cache tier its reused prompt was restored from and the restore outcome.
 type perfDetail struct {
 	model  string
 	engine *perfledger.Engine
 	// upstreamDraft / upstreamAccepted are a proxied upstream's own speculative
 	// counts from its llama.cpp-shaped timings.
 	upstreamDraft, upstreamAccepted int
+	cacheTier, cacheRestore         string
 }
 
 // perfDetailFromCompletion lifts the planner-reported model and native decode
@@ -55,6 +57,7 @@ func perfDetailFromCompletion(comp *agent.Completion) perfDetail {
 			e.SpecRounds, e.SpecDraftTokens, e.SpecAcceptedTokens = sp.Rounds, sp.DraftTokens, sp.AcceptedTokens
 		}
 		d.engine = e
+		d.cacheTier, d.cacheRestore = nd.CacheTier, nd.CacheRestore
 	} else if t := comp.Timings; t != nil && t.DraftN > 0 {
 		d.upstreamDraft = t.DraftN
 		d.upstreamAccepted = min(max(t.DraftNAccepted, 0), t.DraftN)
@@ -118,6 +121,8 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 	rec.Model = strings.TrimSpace(detail.model)
 	rec.Engine = detail.engine
 	rec.UpstreamSpecDraftTokens, rec.UpstreamSpecAcceptedTokens = detail.upstreamDraft, detail.upstreamAccepted
+	rec.CacheTier = detail.cacheTier
+	rec.CacheRestore = detail.cacheRestore
 	m.commitPerf(rec)
 }
 

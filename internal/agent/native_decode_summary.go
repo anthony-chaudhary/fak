@@ -1,5 +1,7 @@
 package agent
 
+import "github.com/anthony-chaudhary/fak/internal/radixkv"
+
 // Native decode paths, mirroring enginestep's closed path vocabulary so a
 // per-request row and the process-wide fak_engine_* families name the same thing.
 const (
@@ -28,6 +30,38 @@ type NativeDecodeSummary struct {
 	CohortSize int `json:"cohort_size,omitempty"`
 	// Speculative is set only when at least one verify round ran.
 	Speculative *SpeculativeDecodeTally `json:"speculative,omitempty"`
+	// CacheTier is the KV-prefix tier this request's reused prompt was restored
+	// from (radixkv.SnapshotTier: device_l1, host_dram_l2, remote_http_l3), or
+	// NativeCacheTierNone when nothing was reused. "" means a reuse happened but
+	// the planner did not resolve its tier; it is never imputed.
+	CacheTier string `json:"cache_tier,omitempty"`
+	// CacheRestore is this request's restore outcome: hit (some prefix served
+	// from cache), miss (the lookup matched nothing), or unserved (the lookup
+	// matched a prefix but none of it was served: a restore fault, an eviction
+	// race, or a servability gate fell back to full prefill).
+	CacheRestore string `json:"cache_restore,omitempty"`
+}
+
+// Native KV-prefix restore vocabulary carried on NativeDecodeSummary.
+const (
+	NativeCacheTierNone        = "none"
+	NativeCacheRestoreHit      = "hit"
+	NativeCacheRestoreMiss     = "miss"
+	NativeCacheRestoreUnserved = "unserved"
+)
+
+// nativeCacheRestore classifies one request's prefix-cache restore from its own
+// generate facts: matched (tokens served from cache), cacheable (tokens the
+// lookup matched before servability), and the tier the served prefix came from.
+func nativeCacheRestore(matched, cacheable int, tier radixkv.SnapshotTier) (tierLabel, outcome string) {
+	switch {
+	case matched > 0:
+		return string(tier), NativeCacheRestoreHit
+	case cacheable > 0:
+		return NativeCacheTierNone, NativeCacheRestoreUnserved
+	default:
+		return NativeCacheTierNone, NativeCacheRestoreMiss
+	}
 }
 
 func newNativeDecodeSummary(res inKernelGenerateResult) *NativeDecodeSummary {
@@ -43,5 +77,6 @@ func newNativeDecodeSummary(res inKernelGenerateResult) *NativeDecodeSummary {
 		sum.Speculative = &spec
 		sum.Path = NativeDecodePathSpeculative
 	}
+	sum.CacheTier, sum.CacheRestore = nativeCacheRestore(res.matched, res.cacheable, res.sourceTier)
 	return sum
 }
