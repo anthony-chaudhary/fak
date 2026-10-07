@@ -1757,6 +1757,12 @@ paths:
         `cached_tokens`; `cache_hit_share` = cached / (prompt + cached);
         `prefill_tps_weighted` = total uncached prompt tokens / total TTFT over
         the rows that carry `prefill_tps`.
+        A turn that failed before completing (timeout, upstream error, client
+        cancel) still leaves one row with `finish_reason: error`, an `error`
+        class and the HTTP `status` the client got (200 when the failure came
+        after the stream was committed, 499 for a client cancel). A buffered
+        turn that outlived the server's write timeout is `client_write_timeout`
+        with no `status`: the client received nothing.
         A streamed turn's `ttft_ms` is the planner's own prefill boundary
         when it reports one (the native engine), else the first content
         fragment the gateway watched arrive (a proxied stream). A native
@@ -1815,6 +1821,10 @@ paths:
                       e2e_p50_ms: { type: number }
                       e2e_p99_ms: { type: number }
                       cache_hit_share: { type: number }
+                      errors: { type: integer }
+                      by_error:
+                        type: object
+                        additionalProperties: { type: integer }
                       native: { type: integer }
                       by_path:
                         type: object
@@ -1849,6 +1859,10 @@ paths:
                         ttft_ms: { type: number }
                         prefill_tps: { type: number }
                         decode_tps: { type: number }
+                        error:
+                          type: string
+                          enum: [client_canceled, first_token_timeout, stall, deadline, upstream_unreachable, upstream_status, upstream_error, client_write_timeout]
+                        status: { type: integer }
                         model: { type: string }
                         upstream_spec_draft_tokens: { type: integer }
                         upstream_spec_accepted_tokens: { type: integer }

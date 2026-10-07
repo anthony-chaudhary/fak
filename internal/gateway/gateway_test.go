@@ -3091,3 +3091,22 @@ func TestGatewayReplicaBaseURLsSelectiveHedge(t *testing.T) {
 		t.Fatalf("hits=%d/%d receipt=%+v", slowHits.Load(), fastHits.Load(), receipt)
 	}
 }
+
+func TestGatewayRejectsUnknownSoftSlotPolicy(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterAdjudicator(0, toolAdj{})
+
+	_, err := New(Config{
+		EngineID:            "test",
+		Model:               "fleet-model",
+		BaseURL:             "http://127.0.0.1:1/v1",
+		Provider:            "openai",
+		LlamaSoftSlot:       true,
+		LlamaSoftSlotPolicy: "wiat",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--llama-soft-slot-policy") {
+		t.Fatalf("New with unknown soft slot policy error = %v, want a --llama-soft-slot-policy refusal", err)
+	}
+}

@@ -1041,6 +1041,8 @@ type Server struct {
 	// llamaSlotAffinity is Config.LlamaSlotAffinity, kept so a per-route chat planner to a
 	// self-hosted (llama-server-capable) account opts into slot pinning like the boot planner.
 	llamaSlotAffinity bool
+	llamaSoftSlot     bool
+	llamaSoftPolicy   string
 	// upstreamWindows caches each proxied model's upstream per-request context window,
 	// filled by the "upstream-context-window" loop; nil when nothing is probed.
 	upstreamWindows *upstreamWindowCache

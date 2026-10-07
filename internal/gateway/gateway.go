@@ -90,6 +90,9 @@ func New(cfg Config) (*Server, error) {
 	if !engineRegistered(engineID) {
 		return nil, fmt.Errorf("gateway: engine %q is not registered (have: %s)", engineID, strings.Join(abi.EngineIDs(), ", "))
 	}
+	if err := agent.ValidateSoftSlotPolicy(cfg.LlamaSoftSlotPolicy); err != nil {
+		return nil, fmt.Errorf("gateway: --llama-soft-slot-policy: %w", err)
+	}
 	// A misconfigured routing policy is a security boundary (it decides which model
 	// — local or remote — a tenant payload reaches), so validate it at New and fail
 	// loud rather than fall through to a silent default model at dispatch time.
@@ -338,6 +341,8 @@ func New(cfg Config) (*Server, error) {
 		route:                        newRouteLive(cfg.RouteManifest),
 		roster:                       cfg.RouteAccounts,
 		llamaSlotAffinity:            cfg.LlamaSlotAffinity,
+		llamaSoftSlot:                cfg.LlamaSoftSlot,
+		llamaSoftPolicy:              cfg.LlamaSoftSlotPolicy,
 		native:                       cfg.Native,
 		nativeMaxTurns:               nativeMaxTurnsOr(cfg.NativeMaxTurns),
 		nativeCodeCatalog:            nativeCodeCatalog,
@@ -990,6 +995,8 @@ func newConfiguredHTTPPlanner(cfg Config, model, dialURL string) (*agent.HTTPPla
 	// than hard), resolved by streamSoftProgressWindow at arm time.
 	p.StreamSoftProgressTimeout = cfg.StreamSoftProgressTimeout
 	p.LlamaSlotAffinity = cfg.LlamaSlotAffinity
+	p.LlamaSoftSlot = cfg.LlamaSoftSlot
+	p.LlamaSoftSlotPolicy = cfg.LlamaSoftSlotPolicy
 	wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver, cfg.UpstreamTransportErrorObserver, cfg.UpstreamFailureObserver)
 	return p, nil
 }
@@ -1542,6 +1549,7 @@ func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, mes
 	comp, err := s.completeWithFirstTokenWatchdog(ctx, turn.traceID, messages, tools, opts...)
 	s.recordBufferedTurnCost(turn, comp, plannerBegan)
 	if err != nil {
+		s.recordFailedTurn(ctx, s.chatServingLocality(ctx, sampleModelOf(opts)), err, plannerBegan, 0, false)
 		// Preserve request-local execution metadata on failures. Callers still
 		// receive the original error, while buffered/streaming HTTP paths can
 		// report an actual speculative route or typed downgrade in headers.
@@ -1552,6 +1560,16 @@ func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, mes
 	lease.SettleUsage(comp.Usage)
 	s.debitServedSessionTurn(ctx, turn, comp.Usage, time.Since(began), messages)
 	return comp, nil
+}
+
+func sampleModelOf(opts []agent.SampleOpt) string {
+	var sample agent.SampleParams
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&sample)
+		}
+	}
+	return sample.Model
 }
 
 // completeWithFirstTokenWatchdog runs the buffered planner call under a bounded FIRST-TOKEN

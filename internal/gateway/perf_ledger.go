@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"os"
 	"strconv"
@@ -108,9 +110,29 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 		return
 	}
 	rec := perfledger.NewRecord(time.Now(), finishReason, loc.perfLabel(), promptTok, complTok, cachedTok, dur, ttft)
+	if ttft <= 0 && m.pastWriteDeadline(dur) {
+		// A buffered turn writes its body only after the planner returns; past the
+		// server's WriteTimeout that write is refused, so the client got nothing.
+		rec = perfledger.NewFailureRecord(time.Now(), loc.perfLabel(), perfledger.ErrorClientWriteTimeout, 0, dur, 0)
+	}
 	rec.Model = strings.TrimSpace(detail.model)
 	rec.Engine = detail.engine
 	rec.UpstreamSpecDraftTokens, rec.UpstreamSpecAcceptedTokens = detail.upstreamDraft, detail.upstreamAccepted
+	m.commitPerf(rec)
+}
+
+// recordPerfFailure emits the perf row for a turn that failed before completing.
+// It deliberately leaves the fak_gateway_inference_* counters alone: a turn that
+// produced no tokens is not a generation, but its latency is still part of what
+// the client saw, so dropping it would hide the slow tail.
+func (m *gatewayMetrics) recordPerfFailure(loc servingLocality, errClass string, status int, dur, ttft time.Duration) {
+	if m == nil {
+		return
+	}
+	m.commitPerf(perfledger.NewFailureRecord(time.Now(), loc.perfLabel(), errClass, status, dur, ttft))
+}
+
+func (m *gatewayMetrics) commitPerf(rec perfledger.Record) {
 	if sb := m.perfServedBy.Load(); sb != nil {
 		rec.Identity = sb.Identity
 		if rec.Model == "" {
@@ -122,6 +144,84 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 	m.perfMu.Unlock()
 	if sink := m.perfSink.Load(); sink != nil {
 		sink.Offer(rec)
+	}
+}
+
+// recordFailedTurn records the perf row for a served turn whose planner call
+// failed. committed reports that response bytes were already on the wire, so the
+// client saw 200 and then an in-stream error.
+func (s *Server) recordFailedTurn(ctx context.Context, loc servingLocality, err error, began time.Time, ttft time.Duration, committed bool) {
+	if s == nil || s.metrics == nil || err == nil {
+		return
+	}
+	class := perfErrorClass(ctx, err)
+	if class == perfledger.ErrorStall && !committed && ttft <= 0 {
+		// A streamed upstream that went idle before the client saw any byte is, to
+		// the client, the same first-token timeout the buffered watchdog reports.
+		class = perfledger.ErrorFirstTokenTimeout
+	}
+	elapsed := time.Since(began)
+	status := http.StatusOK
+	switch {
+	case !committed && s.metrics.pastWriteDeadline(elapsed):
+		// The error response would be written after the server's write deadline: the
+		// client saw no status, whatever the upstream failure was.
+		class, status = perfledger.ErrorClientWriteTimeout, 0
+	case committed:
+	case class == perfledger.ErrorClientCanceled:
+		status = statusClientClosedRequest
+	default:
+		status, _, _ = upstreamErrorStatus(err)
+	}
+	s.metrics.recordPerfFailure(loc, class, status, elapsed, ttft)
+}
+
+func (m *gatewayMetrics) setHTTPWriteTimeout(d time.Duration) {
+	if m != nil && d > 0 {
+		m.httpWriteTimeout.Store(int64(d))
+	}
+}
+
+// pastWriteDeadline reports that a turn which took dur (measured from the planner
+// call, so never longer than the handler) outlived the server's WriteTimeout, which
+// runs from the end of the request headers. Streams lift that deadline once their
+// SSE header is committed (clearStreamWriteDeadline); callers only ask for turns
+// that wrote nothing yet.
+func (m *gatewayMetrics) pastWriteDeadline(dur time.Duration) bool {
+	if m == nil {
+		return false
+	}
+	wt := time.Duration(m.httpWriteTimeout.Load())
+	return wt > 0 && dur > wt
+}
+
+// statusClientClosedRequest is the de-facto (nginx) status for a request the
+// client abandoned before a response was written.
+const statusClientClosedRequest = 499
+
+func perfErrorClass(ctx context.Context, err error) string {
+	var stalled *agent.UpstreamStalledError
+	var unreachable *agent.UpstreamUnreachableError
+	var upstreamStatus *agent.UpstreamStatusError
+	// Typed upstream failures win over a canceled ctx: the gateway may cancel the
+	// turn's context itself while unwinding a stall, which is not a client cancel.
+	switch {
+	case errors.Is(err, context.Canceled):
+		return perfledger.ErrorClientCanceled
+	case agent.IsFirstTokenStall(err):
+		return perfledger.ErrorFirstTokenTimeout
+	case errors.As(err, &stalled):
+		return perfledger.ErrorStall
+	case errors.Is(err, context.DeadlineExceeded):
+		return perfledger.ErrorDeadline
+	case errors.As(err, &unreachable):
+		return perfledger.ErrorUpstreamUnreachable
+	case errors.As(err, &upstreamStatus):
+		return perfledger.ErrorUpstreamStatus
+	case ctx != nil && errors.Is(ctx.Err(), context.Canceled):
+		return perfledger.ErrorClientCanceled
+	default:
+		return perfledger.ErrorUpstream
 	}
 }
 

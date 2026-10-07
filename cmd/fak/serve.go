@@ -127,6 +127,8 @@ type serveFlags struct {
 	streamProgressTimeout        *time.Duration
 	streamSoftProgressTimeout    *time.Duration
 	llamaSlotAffinity            *bool
+	llamaSoftSlot                *bool
+	llamaSoftSlotPolicy          *string
 	engineCacheEngine            *string
 	engineCacheBaseURL           *string
 	engineCacheAdminKeyEnv       *string
@@ -284,6 +286,8 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.streamSoftProgressTimeout = fs.Duration("stream-soft-progress-timeout", 0, "proxy mode: SOFT no-progress DIAGNOSTIC deadline (#10638). When a STREAMING turn has not advanced for this long (same progress definition as --stream-progress-timeout), the gateway writes a content-free elapsed-since-progress / retry-attempt receipt and lets the turn KEEP RUNNING; --stream-progress-timeout remains the hard client-survivable ceiling that actually ends it. 0 (the default) derives the soft window from the hard one (hard/3), so the diagnostic always has lead time. A negative value disables the diagnostic. Enables the soft-stalls.jsonl receipt under the --stream-incident-dir path (FAK_STREAM_INCIDENT_DIR).")
 	sf.streamProgressTimeout = fs.Duration("stream-progress-timeout", agent.DefaultStreamProgressTimeout, "proxy mode: end a STREAMING upstream turn that has stayed warm this long without a single frame that advances it (#5486). Keepalive frames (a ping, an SSE comment, an empty-delta chunk) re-arm the inter-byte deadline but are NOT progress, so a generation wedged behind a live socket otherwise rides the 600s whole-request ceiling. DEFAULT-ON at agent.DefaultStreamProgressTimeout (300s), which sits above the worst prefill-to-first-token gap on a large cached prompt and above any extended-thinking pause (thinking streams content deltas, which do count as progress). Pass 0 to DISABLE the deadline — the escape hatch when a provider's prefill legitimately outlasts the window. A positive value outside [5s, 600s] is not honored as a real window: the default is used instead, so a typo never silently becomes a different deadline. Inert on the non-streaming path and on the offline mock planner.")
 	sf.llamaSlotAffinity = fs.Bool("llama-slot-affinity", true, "proxy mode: pin requests that share a system prompt and tool catalog to one llama-server slot (id_slot = crc32(prefix) % total_slots, cache_prompt=true) so sibling subagents reuse the parent's KV. The OpenAI-provider upstream is probed once in the background at /props; the hint is sent only after it reports llama-server total_slots, so vLLM, SGLang, hosted APIs, and a downstream fak gateway are left untouched. Pass false to disable.")
+	sf.llamaSoftSlot = fs.Bool("llama-soft-slot", false, "proxy mode: soft per-conversation llama-server slot choice. Each turn names its conversation's previous slot (id_slot) only while that slot is idle per GET /slots, a new conversation takes the least recently used idle slot, and with every slot busy id_slot is omitted so the upstream chooses. Unlike the old hard pin, no turn ever queues behind a busy slot. Needs a llama-server upstream that answers /props and /slots; anything else is left untouched.")
+	sf.llamaSoftSlotPolicy = fs.String("llama-soft-slot-policy", "lru", "with --llama-soft-slot: what a conversation does when its own slot is busy. lru = move to the least recently used idle slot; wait = stay pinned to its own slot (llama-server gives a freed slot to a task pinned to it first) and never move.")
 	sf.engineCacheEngine = fs.String("engine-cache-engine", "", "self-hosted upstream cache reset engine for quarantined provider-bound tool results: sglang|vllm (empty disables)")
 	sf.engineCacheBaseURL = fs.String("engine-cache-base-url", "", "serving-engine control/base URL for cache reset (default: --base-url when --engine-cache-engine is set)")
 	sf.engineCacheAdminKeyEnv = fs.String("engine-cache-admin-key-env", "", "env var holding the serving-engine admin API key for cache reset")
@@ -1086,6 +1090,8 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 		// uses the negative-off encoding, so no front-door translation is needed.
 		StreamSoftProgressTimeout: *sf.streamSoftProgressTimeout,
 		LlamaSlotAffinity:         *sf.llamaSlotAffinity,
+		LlamaSoftSlot:             *sf.llamaSoftSlot,
+		LlamaSoftSlotPolicy:       *sf.llamaSoftSlotPolicy,
 		RichDashboards: gateway.RichDashboardConfig{
 			ApplianceProfile: *sf.applianceObservability || rt.strixPreflight.Detected,
 		},

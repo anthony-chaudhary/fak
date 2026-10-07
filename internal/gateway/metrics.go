@@ -470,6 +470,10 @@ type gatewayMetrics struct {
 	perfRecordsDropped bool
 	perfSink           atomic.Pointer[perfledger.Writer]
 	perfServedBy       atomic.Pointer[perfledger.ServedBy]
+	// httpWriteTimeout is the serving http.Server's effective WriteTimeout (ns; 0 =
+	// none or not serving through Serve). A buffered turn that outlives it never
+	// reached the client, so its perf row is client_write_timeout.
+	httpWriteTimeout atomic.Int64
 
 	// denyAllMu guards the deny-all stop family: a served turn whose EVERY proposed tool
 	// call the capability floor refused (kept==0). The wire MUST report such a turn as

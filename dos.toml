@@ -344,7 +344,7 @@ concurrent = [
   # Deliberately NOT mirrored into [lanes].autopick (see the 2026-07-25 note).
   "generalizationdebt",
   "debtlane",
-  "gatewayusageledger", "ghexec", "ghspam", "glm52prefillsweep", "goalpark", "goalsync", "godsplitplan",
+  "gatewayusageledger", "perfledger", "ghexec", "ghspam", "glm52prefillsweep", "goalpark", "goalsync", "godsplitplan",
   "grafanapost", "growthgate", "guard", "guardaccuracy", "guardaudit", "guardcorpus",
   "guardrotate", "guardroute", "guardrsi", "guardsessions", "guardtrace", "guardvars",
   "guideddecode", "harnessres", "headlesslint", "heavinessscore", "hooks", "horizonrecovery",
@@ -1223,6 +1223,7 @@ gardenbundle = ["internal/gardenbundle/**"]
 generalizationdebt = ["internal/generalizationdebt/**"]
 debtlane = ["internal/debtlane/**"]
 gatewayusageledger = ["internal/gatewayusageledger/**"]
+perfledger = ["internal/perfledger/**"]
 ghexec = ["internal/ghexec/**"]
 ghspam = ["internal/ghspam/**"]
 glm52prefillsweep = ["internal/glm52prefillsweep/**"]

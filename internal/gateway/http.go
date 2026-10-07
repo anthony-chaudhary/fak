@@ -403,6 +403,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	// wraps the listener here so BOTH entry points get it (ListenAndServe's freshly
 	// bound socket AND a Serve caller that handed us its own listener). A non-TCP
 	// listener (e.g. a test net.Pipe) passes through untouched.
+	s.metrics.setHTTPWriteTimeout(hs.WriteTimeout)
 	errc := make(chan error, 1)
 	go func() { errc <- hs.Serve(nodelayListener(ln)) }()
 	// The boot timeline closes here: the listener is bound and the gateway is

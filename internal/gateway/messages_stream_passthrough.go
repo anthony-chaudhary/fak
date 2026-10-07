@@ -516,6 +516,11 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 			// the upstream-error counter — without this a mid-stream stall is a silent freeze.
 			s.metrics.observeUpstreamError(err)
 			s.renderTurnDebugError(reqTrace, "anthropic_messages", err, time.Since(began))
+			var failTTFT time.Duration
+			if !p.firstTokenAt.IsZero() {
+				failTTFT = p.firstTokenAt.Sub(began)
+			}
+			s.recordFailedTurn(r.Context(), s.servedLocality(p.reqModel()), err, began, failTTFT, true)
 			s.logf("gateway: upstream model error mid-stream (messages): %v", err)
 			// Carry the distinct error type to the client when we can classify it (a stall),
 			// so a harness sees "upstream_stalled" rather than an opaque api_error.
@@ -566,6 +571,7 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 			if p.wroteErrCause != nil {
 				s.metrics.observeUpstreamError(p.wroteErrCause)
 				s.renderTurnDebugError(reqTrace, "anthropic_messages", p.wroteErrCause, time.Since(began))
+				s.recordFailedTurn(r.Context(), s.servedLocality(p.reqModel()), p.wroteErrCause, began, 0, false)
 			}
 			return true
 		default:
@@ -587,6 +593,7 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 			// open — handled by the return false below.
 			var statusErr *agent.UpstreamStatusError
 			if errors.As(err, &statusErr) {
+				s.recordFailedTurn(r.Context(), s.servedLocality(p.reqModel()), err, began, 0, false)
 				s.surfaceUpstreamStatus(w, err, "upstream model error (messages passthrough; surfaced, not re-tried via buffered)")
 				return true
 			}
