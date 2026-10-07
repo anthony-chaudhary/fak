@@ -2,6 +2,8 @@ package modelengine
 
 import (
 	"container/heap"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -109,4 +111,72 @@ func (h *waitingDeadlineEntries) Pop() any {
 	entry.index = -1
 	*h = old[:last]
 	return entry
+}
+
+// drainOrdered pops every scheduled lane in ascending (deadline, schedule order),
+// appending them to dst and leaving the heap empty.
+func (h *waitingDeadlineHeap) drainOrdered(dst []*schedLane) []*schedLane {
+	for len(h.entries) > 0 {
+		entry := heap.Pop(&h.entries).(*waitingDeadlineEntry)
+		delete(h.byLane, entry.lane)
+		dst = append(dst, entry.lane)
+	}
+	return dst
+}
+
+// orderWaitingByDeadlineLocked puts the waiting queue in earliest-deadline-first order
+// when any waiting lane carries a deadline, adapted from microsoft/vidur's EDF request
+// queue (vidur/scheduler/request_queue/edf_request_queue.py:1@25e0082d, MIT). Lanes
+// with a deadline come first, ascending by deadline (FIFO among equal deadlines via the
+// heap's schedule sequence); lanes without one follow in their existing FIFO order.
+// With no deadlines the queue is left untouched, so default promotion stays FIFO.
+// Preempted lanes are not in this queue and keep their readmit-first precedence.
+// Callers hold s.mu.
+func (s *NativeScheduler) orderWaitingByDeadlineLocked() {
+	if len(s.waiting) < 2 {
+		return
+	}
+	var h *waitingDeadlineHeap
+	for _, ln := range s.waiting {
+		if ln.deadline.IsZero() {
+			continue
+		}
+		if h == nil {
+			h = newWaitingDeadlineHeap(nil)
+		}
+		h.schedule(ln, ln.deadline)
+	}
+	if h == nil {
+		return
+	}
+	ordered := h.drainOrdered(make([]*schedLane, 0, len(s.waiting)))
+	for _, ln := range s.waiting {
+		if ln.deadline.IsZero() {
+			ordered = append(ordered, ln)
+		}
+	}
+	copy(s.waiting, ordered)
+}
+
+// nativeLaneDeadlineMetaKeys are the ToolCall.Meta keys a submitter may set to carry an
+// absolute request deadline, as Unix epoch milliseconds, into the native scheduler; the
+// first present key wins.
+var nativeLaneDeadlineMetaKeys = []string{"deadline_unix_ms", "sched.deadline_unix_ms", "sched_deadline_unix_ms"}
+
+// nativeLaneDeadlineFromMeta parses the submit-time absolute deadline. Missing,
+// unparsable, or non-positive values mean no deadline (the zero time), so such a lane
+// keeps FIFO promotion behind every deadline-carrying lane.
+func nativeLaneDeadlineFromMeta(meta map[string]string) time.Time {
+	for _, key := range nativeLaneDeadlineMetaKeys {
+		raw, ok := meta[key]
+		if !ok {
+			continue
+		}
+		ms, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+		if err != nil || ms <= 0 {
+			return time.Time{}
+		}
+		return time.UnixMilli(ms)
+	}
+	return time.Time{}
 }

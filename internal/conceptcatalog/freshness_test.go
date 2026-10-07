@@ -335,7 +335,9 @@ func TestRegenerateFromGitTreeClearsTheFreshnessGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const marker = "Legacy bounded score (saturates; not the driver) |"
+	// A catalog fact, not a volatile whole-tree count: those are masked by freshness
+	// (fak-private#3072), so staling one would not make the fixture start stale.
+	const marker = "**Crystal-clear concepts (and climbing)** |"
 	mutated := strings.Replace(string(original), marker, marker+" stale", 1)
 	if mutated == string(original) {
 		t.Fatalf("fixture marker %q missing", marker)
@@ -414,13 +416,27 @@ func TestRegenerateFromGitTreeClearsTheFreshnessGate(t *testing.T) {
 		t.Fatalf("the printed cure %q did not clear the check; still stale: %v", before.Regenerate, after.StalePaths)
 	}
 
-	// The modes must genuinely differ, or this test would pass for the wrong reason.
-	worktree, err := CheckFresh(root)
+	// The modes must genuinely differ, or this test would pass for the wrong reason. The
+	// peer package moves only whole-tree counts, which the freshness verdict now masks
+	// (fak-private#3072), so the difference is witnessed on the raw generator bytes.
+	worktreeRender := filepath.Join(t.TempDir(), "worktree")
+	if err := generate(root, worktreeRender); err != nil {
+		t.Fatal(err)
+	}
+	dirty, err := os.ReadFile(filepath.Join(worktreeRender, "README.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if worktree.Fresh {
+	clean, err := os.ReadFile(readme)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if generatedBytesEqual(dirty, clean) {
 		t.Fatal("the unstaged peer package did not move the generator's answer, so this fixture cannot tell tree mode from worktree mode")
+	}
+	worktree, err := CheckFresh(root)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if worktree.Regenerate != RegenerateCommand {
 		t.Fatalf("worktree mode must keep the worktree cure, got %q", worktree.Regenerate)

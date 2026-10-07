@@ -1265,7 +1265,7 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 			opt(&sample)
 		}
 	}
-	s.metrics.observeCompletionServed(s.chatServingLocality(ctx, sample.Model), comp, dur)
+	s.metrics.observeCompletionServedCtx(ctx, s.chatServingLocality(ctx, sample.Model), comp, dur)
 	s.observePrefixReuseTurn(ctx, fullHistory, comp)
 	s.observePlannerRequestMemory()
 	// The served turn has mutated the KV cache; relieve HBM pressure by demoting a hot span to
@@ -1308,6 +1308,7 @@ func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, mes
 		return nil, err
 	}
 	defer lease.Release()
+	ctx = withPerfQueue(ctx, lease)
 	plannerBegan := time.Now()
 	comp, err := s.completeWithFirstTokenWatchdog(ctx, turn.traceID, messages, tools, opts...)
 	s.recordBufferedTurnCost(turn, comp, plannerBegan)

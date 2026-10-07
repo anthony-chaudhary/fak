@@ -77,9 +77,9 @@ func TestListSessionsBatchMatchesPerRefPath(t *testing.T) {
 	batch := NewWithStdinRunner(g.run, g.runStdin, "")
 
 	want := []SessionDescriptor{
-		{ID: "alpha", Host: "n1", PCBState: "RUNNING", UpdatedAt: 100, TTLSecs: 0},
+		{ID: "alpha", Host: "n1", PCBState: "RUNNING", UpdatedAt: 100, TTLSecs: 900},
 		{ID: "bravo", Host: "n2", PCBState: "PAUSED", UpdatedAt: 200, TTLSecs: 600, AgentUUID: "u-2"},
-		{ID: "charlie", Host: "n3", PCBState: "DRAINING", UpdatedAt: 300, TTLSecs: 0},
+		{ID: "charlie", Host: "n3", PCBState: "DRAINING", UpdatedAt: 300, TTLSecs: 1200},
 	}
 	for _, d := range want {
 		if _, err := batch.PublishSession(ctx(), d); err != nil {
@@ -258,9 +258,9 @@ func TestListSessionsBatchRealGit(t *testing.T) {
 	// actual `git cat-file --batch` plumbing (not the per-ref fallback).
 	s := NewWithStdinRunner(gitRunner, gitStdinRunner, dir)
 	want := []SessionDescriptor{
-		{ID: "alpha", Host: "n1", PCBState: "RUNNING", UpdatedAt: 100, TTLSecs: 0},
+		{ID: "alpha", Host: "n1", PCBState: "RUNNING", UpdatedAt: 100, TTLSecs: 900},
 		{ID: "bravo", Host: "n2", PCBState: "PAUSED", UpdatedAt: 200, TTLSecs: 600, AgentUUID: "1e21323a-b92d-4b43-a495-1e0c1d46f3ef"},
-		{ID: "charlie", Host: "n3", PCBState: "DRAINING", UpdatedAt: 300, TTLSecs: 0},
+		{ID: "charlie", Host: "n3", PCBState: "DRAINING", UpdatedAt: 300, TTLSecs: 1200},
 	}
 	for _, d := range want {
 		if _, err := s.PublishSession(ctx(), d); err != nil {

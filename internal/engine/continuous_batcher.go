@@ -378,6 +378,10 @@ type BatchStepResult struct {
 	// PrefixHits is the number of admissions observed since the previous step
 	// that reused a cached recurrent boundary.
 	PrefixHits int
+	// PrefixQueriedTokens is the number of prompt tokens looked up in the GDN
+	// recurrent prefix cache since the previous step, hit or miss; it is the
+	// denominator of the prefix hit rate (vLLM prefix_cache_queries).
+	PrefixQueriedTokens int
 }
 
 // ContinuousBatcher manages dynamic iteration-level continuous batching for subagent turn loops.
@@ -404,7 +408,10 @@ type ContinuousBatcher struct {
 	// step, so a reused slot resident for N steps is reported exactly once.
 	pendingPrefixHits        int
 	pendingPrefixReuseTokens int
-	decodeSinceRefill        int // decode steps since the last prefill step
+	// pendingPrefixQueriedTokens counts prompt tokens looked up (hit or miss)
+	// since the last emitted step, with the same capture-and-reset discipline.
+	pendingPrefixQueriedTokens int
+	decodeSinceRefill          int // decode steps since the last prefill step
 }
 
 // NewContinuousBatcher constructs a scheduler with the specified configuration.
@@ -589,6 +596,7 @@ func (cb *ContinuousBatcher) initSlot(index int, req *SubagentRequest) *Slot {
 		restoredSess *model.Session
 	)
 	if cb.prefixCache != nil && cb.cfg.Model != nil && len(req.PromptTokens) > 0 {
+		cb.pendingPrefixQueriedTokens += len(req.PromptTokens)
 		if matched, snap, hit := cb.prefixCache.Lookup(req.SessionID, req.PromptTokens); hit {
 			// Reuse is intentionally host-only: a device session would need a
 			// matching Backend, or Restore refuses closed→miss.
@@ -861,6 +869,8 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 	prefixReuseTokens := cb.pendingPrefixReuseTokens
 	cb.pendingPrefixHits = 0
 	cb.pendingPrefixReuseTokens = 0
+	prefixQueriedTokens := cb.pendingPrefixQueriedTokens
+	cb.pendingPrefixQueriedTokens = 0
 
 	// 2. Gather prefilling slots and the resident decodable roster, and count
 	// the other states in the same pass.
@@ -962,6 +972,7 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 			DecodeResidentUIDs:   residentUIDs,
 			PrefixHits:           prefixHits,
 			PrefixReuseTokens:    prefixReuseTokens,
+			PrefixQueriedTokens:  prefixQueriedTokens,
 		}, nil
 	}
 
@@ -969,20 +980,21 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 	if len(resident) == 0 {
 		cb.iteration++
 		return &BatchStepResult{
-			Iteration:          cb.iteration,
-			YieldedSlots:       yieldedCount,
-			FinishedSlots:      finishedCount,
-			EmptySlots:         emptyCount,
-			TotalSlots:         len(cb.slots),
-			GeneratedTokens:    make(map[string]int),
-			StepDuration:       time.Since(stepStart),
-			PromotedSessionIDs: promotedIDs,
-			KVCacheBytesUsed:   cb.currentKVCacheBytesLocked(),
-			SlotDepths:         make(map[string]int),
-			Phase:              PhaseIdle,
-			DecodeResidentUIDs: []uint64{},
-			PrefixHits:         prefixHits,
-			PrefixReuseTokens:  prefixReuseTokens,
+			Iteration:           cb.iteration,
+			YieldedSlots:        yieldedCount,
+			FinishedSlots:       finishedCount,
+			EmptySlots:          emptyCount,
+			TotalSlots:          len(cb.slots),
+			GeneratedTokens:     make(map[string]int),
+			StepDuration:        time.Since(stepStart),
+			PromotedSessionIDs:  promotedIDs,
+			KVCacheBytesUsed:    cb.currentKVCacheBytesLocked(),
+			SlotDepths:          make(map[string]int),
+			Phase:               PhaseIdle,
+			DecodeResidentUIDs:  []uint64{},
+			PrefixHits:          prefixHits,
+			PrefixReuseTokens:   prefixReuseTokens,
+			PrefixQueriedTokens: prefixQueriedTokens,
 		}, nil
 	}
 
@@ -1102,6 +1114,7 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 		DecodeResidentUIDs:   residentUIDs,
 		PrefixHits:           prefixHits,
 		PrefixReuseTokens:    prefixReuseTokens,
+		PrefixQueriedTokens:  prefixQueriedTokens,
 	}, nil
 }
 
@@ -1156,177 +1169,6 @@ func (cb *ContinuousBatcher) retainPrefixLocked(slot *Slot) {
 			_ = cb.prefixCache.Store(slot.SessionID, slot.PromptTokens, fresh)
 		}
 	}
-}
-
-// OperationalIntensity calculates effective compute-tile operational intensity (FLOPs/byte)
-// on AMD Strix Halo APU. For batch size B=1 (single-agent), decode is memory-bound at ~3.3 FLOPs/byte.
-// For B=8..32 concurrent subagents, continuous batching amortises weight streams and reuses
-// matrix tiles in LDS/L2 caches, maintaining operational intensity in the 50..150 FLOPs/byte band.
-func (cb *ContinuousBatcher) OperationalIntensity(activeBatchSize int) float64 {
-	if activeBatchSize <= 0 {
-		return 0.0
-	}
-	baseDRAMIntensity := float64(2*cb.cfg.ModelParams) / float64(cb.cfg.ModelWeightsBytes)
-	if activeBatchSize == 1 {
-		return baseDRAMIntensity
-	}
-
-	b := float64(activeBatchSize)
-	tileReuse := 2.25 - 0.02*b
-	if tileReuse < 1.4 {
-		tileReuse = 1.4
-	}
-	intensity := baseDRAMIntensity * b * tileReuse
-	if intensity < 50.0 && activeBatchSize >= 8 {
-		intensity = 50.0 + (b-8.0)*3.5
-	}
-	if intensity > 150.0 {
-		intensity = 150.0
-	}
-	return intensity
-}
-
-// ArithmeticIntensity is an alias for OperationalIntensity adhering to requirement naming.
-func (cb *ContinuousBatcher) ArithmeticIntensity(activeBatchSize int) float64 {
-	return cb.OperationalIntensity(activeBatchSize)
-}
-
-// AggregateThroughput calculates aggregate tokens per second across all active subagents
-// on AMD Strix Halo APU with 256-bit LPDDR5X-8533 memory.
-// While a single agent decodes at ~19 tok/s (memory-bandwidth bound), 8 subagents decode
-// with shared weight streaming, achieving > 80 tok/s aggregate throughput.
-func (cb *ContinuousBatcher) AggregateThroughput(activeBatchSize int) float64 {
-	if activeBatchSize <= 0 {
-		return 0.0
-	}
-	if activeBatchSize == 1 {
-		return cb.cfg.SingleAgentTokPerSec
-	}
-
-	weightStreamSec := float64(cb.cfg.ModelWeightsBytes) / (cb.cfg.MemoryBandwidthGBs * 1e9)
-	flopsTotal := float64(int64(activeBatchSize) * 2 * cb.cfg.ModelParams)
-	computeSec := flopsTotal / (cb.cfg.ComputePeakTFLOPs * 1e12)
-	totalStepSec := weightStreamSec + computeSec + cb.cfg.FixedOverheadSec
-
-	idealTPS := float64(activeBatchSize) / totalStepSec
-	sustainedEfficiency := 0.70
-	sustainedTPS := idealTPS * sustainedEfficiency
-
-	if activeBatchSize >= 8 && sustainedTPS < 85.0 {
-		sustainedTPS = 85.0 + float64(activeBatchSize-8)*5.0
-	}
-	return sustainedTPS
-}
-
-// ActiveSlotCount returns count of slots currently in SlotStateActiveDecode.
-func (cb *ContinuousBatcher) ActiveSlotCount() int {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-
-	count := 0
-	for _, s := range cb.slots {
-		s.mu.Lock()
-		if s.State == SlotStateActiveDecode {
-			count++
-		}
-		s.mu.Unlock()
-	}
-	return count
-}
-
-// YieldedSlotCount returns count of slots currently in SlotStateYieldedIO.
-func (cb *ContinuousBatcher) YieldedSlotCount() int {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-
-	count := 0
-	for _, s := range cb.slots {
-		s.mu.Lock()
-		if s.State == SlotStateYieldedIO {
-			count++
-		}
-		s.mu.Unlock()
-	}
-	return count
-}
-
-// FinishedSlotCount returns count of slots currently in SlotStateFinished.
-func (cb *ContinuousBatcher) FinishedSlotCount() int {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-
-	count := 0
-	for _, s := range cb.slots {
-		s.mu.Lock()
-		if s.State == SlotStateFinished {
-			count++
-		}
-		s.mu.Unlock()
-	}
-	return count
-}
-
-// EmptySlotCount returns count of slots currently in SlotStateEmpty.
-func (cb *ContinuousBatcher) EmptySlotCount() int {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-
-	count := 0
-	for _, s := range cb.slots {
-		s.mu.Lock()
-		if s.State == SlotStateEmpty {
-			count++
-		}
-		s.mu.Unlock()
-	}
-	return count
-}
-
-// WaitingQueueLength returns number of requests waiting for an open slot.
-func (cb *ContinuousBatcher) WaitingQueueLength() int {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-	return len(cb.waitingQueue)
-}
-
-// TotalTokensGenerated returns cumulative count of decode tokens produced.
-func (cb *ContinuousBatcher) TotalTokensGenerated() int64 {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-	return cb.totalTokens
-}
-
-// Iteration returns the current batch iteration step index.
-func (cb *ContinuousBatcher) Iteration() uint64 {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-	return cb.iteration
-}
-
-// GetSlot retrieves slot status for a session ID.
-func (cb *ContinuousBatcher) GetSlot(sessionID string) (*Slot, bool) {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-
-	if slot, ok := cb.sessionMap[sessionID]; ok {
-		return slot, true
-	}
-	if completed, ok := cb.completedMap[sessionID]; ok {
-		return completed, true
-	}
-	return nil, false
-}
-
-// Slots returns a snapshot of the slots slice.
-func (cb *ContinuousBatcher) Slots() []*Slot {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-
-	res := make([]*Slot, len(cb.slots))
-	for i, s := range cb.slots {
-		res[i] = s.snapshot()
-	}
-	return res
 }
 
 // Cancel cancels a subagent session and frees its slot.

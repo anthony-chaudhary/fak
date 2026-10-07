@@ -94,7 +94,7 @@ type Record struct {
 	TreeGlobs   []string `json:"tree_globs"`    // the repo-relative trees this lease covers
 	Holder      string   `json:"holder"`        // who holds it (machine/session identity, free-form)
 	AcquiredAt  int64    `json:"acquired_unix"` // unix seconds at acquisition (the current generation began)
-	TTLSeconds  int64    `json:"ttl_seconds"`   // lifetime in seconds; 0 means no expiry
+	TTLSeconds  int64    `json:"ttl_seconds"`   // lifetime in seconds; writes clamp <=0 to DefaultLeaseTTLSeconds, a legacy 0 ages out (ttl_floor.go)
 	Description string   `json:"description,omitempty"`
 	// Generation is the monotonic FENCING TOKEN (#906 §3.3 / #1182): it is bumped on every
 	// TRANSITION (a new holder reaping + reacquiring an expired lease) and NEVER on a
@@ -130,8 +130,9 @@ func (r Record) effectiveActiveAt() int64 {
 	return r.AcquiredAt
 }
 
-// Expired reports whether the lease is past its TTL at time now. A zero TTL never
-// expires. An expired record is REAPABLE by a peer — a crashed holder's lease is
+// Expired reports whether the lease is past its TTL at time now. A legacy zero TTL (no
+// longer writable, see ttl_floor.go) expires once the record is LegacyNoTTLMaxAgeSeconds
+// past its last activity. An expired record is REAPABLE by a peer — a crashed holder's lease is
 // bounded, not a permanent deadlock. (Reaping is itself a ref delete that converges
 // across clones the same way acquisition does.) The window is measured from the
 // renew-aware effectiveActiveAt, so a heartbeated lease stays live; a never-renewed
@@ -219,7 +220,8 @@ func validID(id string) bool { return refid.Valid(id) }
 // blob via `git hash-object -w` (through a temp file, since the Runner seam carries no
 // stdin) and points the ref at that blob via `git update-ref`. It is ADDITIVE to any
 // local flock — a same-host caller still holds its flock; this just makes the lease
-// visible cross-machine after a push. AcquiredAt defaults to now when unset.
+// visible cross-machine after a push. AcquiredAt defaults to now when unset, and a
+// non-positive TTLSeconds is clamped to DefaultLeaseTTLSeconds.
 //
 // It NEVER force-updates an existing ref blindly: update-ref without an <oldvalue> still
 // just sets the ref (a ref is not history, so this is not a force-push), but it does not
@@ -231,6 +233,7 @@ func (s *Store) Acquire(ctx context.Context, rec Record) (string, error) {
 	if rec.AcquiredAt == 0 {
 		rec.AcquiredAt = time.Now().Unix()
 	}
+	rec.TTLSeconds = normalizeLeaseTTL(rec.TTLSeconds) // never mint a ttl<=0 lease (fak-private#3076)
 	return s.putBlobRef(ctx, rec.Ref(), rec)
 }
 

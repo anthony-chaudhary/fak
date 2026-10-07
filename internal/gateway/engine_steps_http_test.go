@@ -75,8 +75,14 @@ func TestEngineStepMetricsRenderOnlyForNativePlanner(t *testing.T) {
 		"proxy": &agent.HTTPPlanner{BaseURL: "http://provider.invalid", ModelID: "proxy"},
 	} {
 		srv.planner = p
-		if out := srv.renderMetrics(); strings.Contains(out, "fak_engine_") {
-			t.Fatalf("%s planner /metrics carries a phantom fak_engine_* family", name)
+		// fak_engine_cache_* is exempt: it is the live-engine KV cache-event stream
+		// (engine.DefaultCacheEvents), fed by proxy adapters such as vLLM/SGLang and
+		// rendered on every serve with an explicit observed gauge, not the native
+		// continuous-batching cycle this test guards.
+		for _, line := range strings.Split(srv.renderMetrics(), "\n") {
+			if strings.Contains(line, "fak_engine_") && !strings.Contains(line, "fak_engine_cache_") {
+				t.Fatalf("%s planner /metrics carries a phantom fak_engine_* family: %s", name, line)
+			}
 		}
 	}
 }

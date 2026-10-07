@@ -59,11 +59,15 @@ type inferenceSnapshot struct {
 	measuredDecodeSecs float64
 	measuredComplTok   uint64
 	// Latency-distribution snapshots (see the inferTTFTHist/TPOT/E2E accumulators).
-	ttftHist latencySnapshot
-	tpotHist latencySnapshot
-	e2eHist  latencySnapshot
-	// regimeHists is the #5630 cache-regime cut of the three histograms above.
+	ttftHist    latencySnapshot
+	tpotHist    latencySnapshot
+	e2eHist     latencySnapshot
 	regimeHists map[string]regimeLatencySnapshot
+	// itlHist / maxITLHist are the REAL per-gap and per-request-worst inter-token
+	// latency distributions from live streams (stream_itl.go); empty when no
+	// request streamed at least two content deltas.
+	itlHist    latencySnapshot
+	maxITLHist latencySnapshot
 }
 
 type regimeLatencySnapshot struct {
@@ -133,6 +137,7 @@ type inKernelOOMSnapshot struct {
 }
 
 func (m *gatewayMetrics) inferenceSnapshotData() inferenceSnapshot {
+	itlHist, maxITLHist := m.itlSnapshot()
 	m.inferenceMu.Lock()
 	defer m.inferenceMu.Unlock()
 	reqs := make(map[string]uint64, len(m.inferReqs))
@@ -156,6 +161,8 @@ func (m *gatewayMetrics) inferenceSnapshotData() inferenceSnapshot {
 		tpotHist:           histSnapshot(m.inferTPOTHist),
 		e2eHist:            histSnapshot(m.inferE2EHist),
 		regimeHists:        regimeHistSnapshot(m.inferRegimeHists),
+		itlHist:            itlHist,
+		maxITLHist:         maxITLHist,
 	}
 }
 

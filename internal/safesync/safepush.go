@@ -97,6 +97,9 @@ type PushResult struct {
 	Detail     string       `json:"detail,omitempty"`
 	Worktree   *Worktree    `json:"worktree,omitempty"`
 	Velocity   PushVelocity `json:"velocity"`
+	// AutoReconcile is set by a caller (`fak sync push`) that routed a
+	// DIVERGED_DISJOINT refusal through AutoReconcileDisjoint; SafePush never sets it.
+	AutoReconcile *AutoReconcileOutcome `json:"auto_reconcile,omitempty"`
 }
 
 // PushVelocity is end-to-end, safety-qualified push timing. A numeric score is

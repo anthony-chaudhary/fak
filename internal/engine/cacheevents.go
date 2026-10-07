@@ -190,6 +190,17 @@ func NewCacheEventMetrics() *CacheEventMetrics {
 	return &CacheEventMetrics{byKey: map[cacheEventKey]*cacheEventAgg{}}
 }
 
+// DefaultCacheEvents is the process-global fold of EVERY CacheEventRecorder's
+// stream: each recorder keeps its own per-instance surface (adapters and tests read
+// that), and Record additionally folds the same published entry / suppression into
+// this one. It is what `fak serve` renders on /metrics, so a KV restore miss/fault
+// or an offload from any live adapter (vLLM/SGLang/llm-d/MLX event feeds, the
+// capacity/restore adapters, the kvmmu pressure-relief sweeper) reaches the scrape
+// by default without each construction site threading its recorder to the gateway.
+// Before this existed every recorder's counters were reachable only from tests, so
+// fak_engine_cache_restore_{miss,fault}_total never left the process.
+var DefaultCacheEvents = NewCacheEventMetrics()
+
 // observe folds one normalized entry + verdict into the counters.
 func (mx *CacheEventMetrics) observe(e cachemeta.Entry, v cachemeta.LookupVerdict) {
 	if mx == nil {
@@ -294,6 +305,15 @@ type CacheEventSnapshot struct {
 	StateBoundSuppressions    uint64
 }
 
+// Observed reports whether any cache event (published or suppressed) has reached
+// this surface. It backs fak_engine_cache_events_observed so an idle or unwired
+// stream renders present-but-dark (0) instead of reading as "zero misses" (A6
+// dead-sensor honesty).
+func (s CacheEventSnapshot) Observed() bool {
+	return s.Events > 0 || s.SuppressedDuplicateReplay > 0 || s.SuppressedReorderedReplay > 0 ||
+		s.SuppressedProducer > 0 || s.SuppressedRemove > 0 || s.UnknownEvents > 0
+}
+
 // CacheEventRow is one (direction, outcome, to_tier, memory_class) bucket.
 type CacheEventRow struct {
 	Direction   string
@@ -384,6 +404,8 @@ func CacheTierMemoryClass(t cachemeta.ResidencyTier) compute.MemoryClass {
 func (s CacheEventSnapshot) Prometheus() string {
 	var b strings.Builder
 	help := func(name, h, typ string) { cachemeta.WritePromHelp(&b, name, h, typ) }
+	help("fak_engine_cache_events_observed", "1 once any live-engine KV cache event (offload/restore/route/migrate, published or suppressed) has reached this stream, 0 while no producer has fed it. Read the *_total counters as real zeros only when this is 1.", "gauge")
+	b.WriteString("fak_engine_cache_events_observed " + boolGauge(s.Observed()) + "\n")
 	help("fak_engine_cache_events_total", "Live-engine KV cache events normalized into the cache-entry stream.", "counter")
 	b.WriteString("fak_engine_cache_events_total " + utoa(s.Events) + "\n")
 	help("fak_engine_cache_hits_total", "Cache events whose typed verdict was a HIT (serveable).", "counter")
@@ -545,8 +567,14 @@ func (r *CacheEventRecorder) Record(ev CacheEvent, opts ...cachemeta.Option) Cac
 		}
 		if published {
 			r.metrics.observe(entry, verdict)
+			if r.metrics != DefaultCacheEvents {
+				DefaultCacheEvents.observe(entry, verdict)
+			}
 		} else {
 			r.metrics.observeSuppression(suppression)
+			if r.metrics != DefaultCacheEvents {
+				DefaultCacheEvents.observeSuppression(suppression)
+			}
 		}
 		r.mu.Lock()
 		sink := r.sink

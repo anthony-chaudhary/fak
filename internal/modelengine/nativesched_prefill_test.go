@@ -1366,3 +1366,146 @@ func TestPrefixHitApplyClampsToSnapshottedDepth(t *testing.T) {
 		}
 	})
 }
+
+// TestSchedLaneTransitionRejectsIllegal pins the native scheduler lane FSM: every
+// declared legal edge is accepted, and terminal->decode plus decode->prefilling
+// (without passing through preemption) are refused with the typed error and leave
+// the lane unchanged.
+func TestSchedLaneTransitionRejectsIllegal(t *testing.T) {
+	phases := []schedLanePhase{schedPhaseWaiting, schedPhasePrefilling, schedPhaseDecode, schedPhasePreempted, schedPhaseTerminal}
+	legal := map[[2]schedLanePhase]bool{}
+	for from, tos := range schedLaneTransitions {
+		for to := range tos {
+			legal[[2]schedLanePhase{from, to}] = true
+		}
+	}
+	for _, edge := range [][2]schedLanePhase{
+		{schedPhaseWaiting, schedPhasePrefilling},
+		{schedPhaseWaiting, schedPhaseDecode},
+		{schedPhasePrefilling, schedPhaseDecode},
+		{schedPhasePrefilling, schedPhasePreempted},
+		{schedPhaseDecode, schedPhasePreempted},
+		{schedPhasePreempted, schedPhaseDecode},
+		{schedPhasePreempted, schedPhasePrefilling},
+		{schedPhaseDecode, schedPhaseTerminal},
+		{schedPhasePrefilling, schedPhaseTerminal},
+		{schedPhaseWaiting, schedPhaseTerminal},
+		{schedPhasePreempted, schedPhaseTerminal},
+	} {
+		if !legal[edge] {
+			t.Fatalf("edge %s->%s missing from transition table", edge[0], edge[1])
+		}
+	}
+	for _, from := range phases {
+		for _, to := range phases {
+			err := checkSchedLaneTransition(from, to)
+			if legal[[2]schedLanePhase{from, to}] {
+				if err != nil {
+					t.Fatalf("legal edge %s->%s rejected: %v", from, to, err)
+				}
+				continue
+			}
+			var typed *errSchedLaneIllegalTransition
+			if !errors.As(err, &typed) || typed.From != from || typed.To != to {
+				t.Fatalf("illegal edge %s->%s err=%v, want typed refusal", from, to, err)
+			}
+		}
+	}
+	for _, edge := range [][2]schedLanePhase{
+		{schedPhaseTerminal, schedPhaseDecode},
+		{schedPhaseDecode, schedPhasePrefilling},
+	} {
+		if legal[edge] {
+			t.Fatalf("edge %s->%s must be illegal", edge[0], edge[1])
+		}
+	}
+
+	s := &NativeScheduler{}
+	term := &schedLane{state: schedLanePrefilling, terminal: true}
+	if err := s.setLaneStateLocked(term, schedLaneDecode); err == nil || term.state != schedLanePrefilling {
+		t.Fatalf("terminal->decode err=%v state=%d, want refusal and unchanged", err, term.state)
+	}
+	dec := &schedLane{state: schedLaneDecode}
+	if err := s.setLaneStateLocked(dec, schedLanePrefilling); err == nil || dec.state != schedLaneDecode {
+		t.Fatalf("decode->prefilling err=%v state=%d, want refusal and unchanged", err, dec.state)
+	}
+	pre := &schedLane{state: schedLaneDecode}
+	s.preempted = []*schedLane{pre}
+	if err := s.setLaneStateLocked(pre, schedLanePrefilling); err != nil || pre.state != schedLanePrefilling {
+		t.Fatalf("preempted->prefilling err=%v state=%d, want accepted", err, pre.state)
+	}
+	pf := &schedLane{state: schedLanePrefilling}
+	if err := s.setLaneStateLocked(pf, schedLaneDecode); err != nil || pf.state != schedLaneDecode {
+		t.Fatalf("prefilling->decode err=%v state=%d, want accepted", err, pf.state)
+	}
+}
+
+// TestQwenPrefillChunkBoundariesAlignInDeterministicMode pins the deterministic-mode
+// chunk alignment (ADAPT of SGLang truncation_align_size,
+// python/sglang/srt/managers/scheduler.py:1690-1722@00a9a81, Apache-2.0): a
+// 100-token prompt with budget 40 and A=16 chunks at 32,64,96,100, while A=0 keeps
+// the historical 40,80,100 boundaries. The budget itself is unchanged.
+func TestQwenPrefillChunkBoundariesAlignInDeterministicMode(t *testing.T) {
+	const promptLen, budget = 100, 40
+	ends := func(align int) []int {
+		var out []int
+		for start := 0; start < promptLen; {
+			end := qwenPrefillChunkEnd(start, budget, promptLen, align)
+			if end <= start || end-start > budget {
+				t.Fatalf("align %d: chunk [%d,%d) does not advance within budget %d", align, start, end, budget)
+			}
+			out = append(out, end)
+			start = end
+		}
+		return out
+	}
+	if got, want := ends(16), []int{32, 64, 96, 100}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("A=16 chunk ends = %v, want %v", got, want)
+	}
+	if got, want := ends(0), []int{40, 80, 100}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("A=0 chunk ends = %v, want %v", got, want)
+	}
+	// Guards: never below A / never stalls / fresh chunk keeps the panel minimum.
+	if got := qwenPrefillChunkEnd(0, 20, 100, 32); got != 20 {
+		t.Fatalf("aligned end below A: got %d, want unaligned 20", got)
+	}
+	if got := qwenPrefillChunkEnd(0, 16, 100, 10); got != 16 {
+		t.Fatalf("fresh chunk shrunk below panel minimum: got %d, want 16", got)
+	}
+
+	t.Run("scheduler_boundaries", func(t *testing.T) {
+		prompt := nativeSchedulerQwenPrompt(promptLen)
+		for _, tc := range []struct {
+			align int
+			want  []int
+		}{{16, []int{32, 64, 96, 100}}, {0, []int{40, 80, 100}}} {
+			m := nativeSchedulerPrefillModel(t)
+			s := newNativeScheduler(m, nativeSchedulerPrefillPrepare(map[string][]int{"long": prompt}))
+			if err := s.SetQwenPrefillMaxTokensPerIteration(budget); err != nil {
+				t.Fatalf("SetQwenPrefillMaxTokensPerIteration: %v", err)
+			}
+			s.SetQwenPrefillChunkAlign(tc.align)
+			nativeSchedulerBeginManualDrain(t, s)
+			var got []int
+			s.observeNativeEvent = func(ev nativeSchedulerEvent) {
+				if ev.Kind == nativeSchedulerEventPrefill && ev.Lane != nil && ev.Lane.tool == "long" {
+					got = append(got, ev.ChunkStart+ev.ChunkLen)
+				}
+			}
+			req := nativeSchedulerAdmitLane(t, s, "long")
+			for i := 0; req.state != schedLaneDecode && i < 16; i++ {
+				nativeSchedulerDriveIteration(t, s)
+				nativeSchedulerDrainAvailable(req)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("A=%d scheduler chunk ends = %v, want %v", tc.align, got, tc.want)
+			}
+			req.Cancel()
+			for !req.terminal {
+				nativeSchedulerDriveIteration(t, s)
+				nativeSchedulerDrainAvailable(req)
+			}
+			nativeSchedulerEndManualDrain(s)
+		}
+	})
+}

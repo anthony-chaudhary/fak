@@ -65,8 +65,13 @@ sed -e "s#__FAK__#$(pwd)/tools/.bin/fak#" \
 sed -e "s#__PYTHON__#$(command -v python3)#" -e "s#__REPO__#$(pwd)#" \
     tools/com.fak.dogfood-fleet.plist  > ~/Library/LaunchAgents/com.fak.dogfood-fleet.plist
 
-# 2. Set the upstream credential in the login environment (NOT in the template).
-launchctl setenv ANTHROPIC_API_KEY "sk-ant-..."
+# 2. Store the upstream credential durably in the login Keychain (NOT in the
+#    template; `launchctl setenv` is wiped on reboot). `-w` with no value prompts
+#    for the key. Then add --api-key-env ANTHROPIC_API_KEY --require-upstream-key
+#    to the plist's ProgramArguments: the gateway reads this item when the env var
+#    is empty and refuses to start ("no gateway key") rather than serve upstream
+#    401s. (`fak node install` adds those flags itself when the item exists.)
+security add-generic-password -U -a "$USER" -s fak-ANTHROPIC_API_KEY -w
 
 # 3. Load both units (RunAtLoad fires the first tick immediately).
 #    caffeinate -is is now baked into the gateway plist — no separate keep-awake needed.

@@ -7,7 +7,10 @@ import (
 
 func TestAnalyzeMinimumFindingFamilies(t *testing.T) {
 	src := []byte(`package p
-import "testing"
+import ("testing"; "time")
+func TestSleep(t *testing.T) { time.Sleep(1); if false { t.Fatal("x") } }
+func TestClock(t *testing.T) { s := time.Now(); if time.Since(s) > 1 { t.Fatal("slow") } }
+func TestDead(t *testing.T) { t.Skip("never") }
 func TestEmpty(t *testing.T) { x := 1; _ = x }
 func TestSelf(t *testing.T) { got := 1; if got != got { t.Fatal("bad") } }
 func TestErr(t *testing.T) { _, err := f(); t.Log("ran") }

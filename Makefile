@@ -729,3 +729,12 @@ BASE ?= origin/main
 .PHONY: negframe-ratchet
 negframe-ratchet:
 	@go run ./cmd/fak score negframe --since $(BASE)
+
+# test-quality-ratchet: fail when the tree gains a bad-test candidate beyond the
+# counted floor in internal/testquality/baseline.txt (assert-nothing tests,
+# self-comparisons, unchecked errors, time.Sleep sync, wall-clock assertions,
+# unconditional skips). Tighten the floor after a fix with
+# `go run ./cmd/fak test-quality --write-baseline`.
+.PHONY: test-quality-ratchet
+test-quality-ratchet:
+	@go run ./cmd/fak test-quality

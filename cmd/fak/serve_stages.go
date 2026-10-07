@@ -865,10 +865,7 @@ func (rt *serveRuntime) releaseStrixKVBuffers() {
 // cold-resumes persisted session drive state (#629), and seeds the default trace's
 // budget and durability registration.
 func (rt *serveRuntime) resolveSessionPlane(sf *serveFlags) {
-	apiKey := ""
-	if *sf.apiKeyEnv != "" {
-		apiKey = os.Getenv(*sf.apiKeyEnv)
-	}
+	apiKey := resolveServeAPIKey(*sf.apiKeyEnv, *sf.requireUpstreamKey)
 	engineCacheAdminKey := resolveServeRequiredKey(*sf.engineCacheAdminKeyEnv, "engine-cache-admin-key-env",
 		"refusing to send cache-reset requests with no admin auth: the named admin-key variable is empty",
 		"the engine-cache admin secret, or omit the flag")

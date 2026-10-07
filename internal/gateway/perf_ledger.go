@@ -33,13 +33,53 @@ func (loc servingLocality) perfLabel() string {
 }
 
 // perfDetail is what a served turn knows beyond its token/latency axes: the model
-// that served it and, on a native turn, its own engine decode anatomy.
+// that served it and, on a native turn, its own engine decode anatomy plus the
+// cache tier its reused prompt was restored from and the restore outcome.
+//
+// queueWait/queueKnown are the admission-scheduler wait the request paid before
+// its planner call started; queueKnown=false means no scheduler gate (queue_ms
+// stays unknown), and queueKnown with a zero wait is a measured immediate admit.
 type perfDetail struct {
 	model  string
 	engine *perfledger.Engine
 	// upstreamDraft / upstreamAccepted are a proxied upstream's own speculative
 	// counts from its llama.cpp-shaped timings.
 	upstreamDraft, upstreamAccepted int
+	cacheTier, cacheRestore         string
+	queueWait                       time.Duration
+	queueKnown                      bool
+}
+
+// withQueue stamps an admission lease's scheduler wait onto the detail
+// (nil-safe: no lease or no scheduler leaves the queue axis unknown).
+func (d perfDetail) withQueue(lease *AdmissionLease) perfDetail {
+	if wait, ok := lease.QueueWait(); ok {
+		d.queueWait, d.queueKnown = wait, true
+	}
+	return d
+}
+
+type perfQueueCtxKey struct{}
+
+// withPerfQueue stamps the admission lease's wait onto ctx so the buffered
+// planner path (complete) can annotate its perf row without a signature change.
+func withPerfQueue(ctx context.Context, lease *AdmissionLease) context.Context {
+	wait, ok := lease.QueueWait()
+	if !ok {
+		return ctx
+	}
+	return context.WithValue(ctx, perfQueueCtxKey{}, wait)
+}
+
+// withQueueFromContext folds a wait stamped by withPerfQueue into the detail.
+func (d perfDetail) withQueueFromContext(ctx context.Context) perfDetail {
+	if ctx == nil {
+		return d
+	}
+	if wait, ok := ctx.Value(perfQueueCtxKey{}).(time.Duration); ok {
+		d.queueWait, d.queueKnown = wait, true
+	}
+	return d
 }
 
 // perfDetailFromCompletion lifts the planner-reported model and native decode
@@ -55,6 +95,7 @@ func perfDetailFromCompletion(comp *agent.Completion) perfDetail {
 			e.SpecRounds, e.SpecDraftTokens, e.SpecAcceptedTokens = sp.Rounds, sp.DraftTokens, sp.AcceptedTokens
 		}
 		d.engine = e
+		d.cacheTier, d.cacheRestore = nd.CacheTier, nd.CacheRestore
 	} else if t := comp.Timings; t != nil && t.DraftN > 0 {
 		d.upstreamDraft = t.DraftN
 		d.upstreamAccepted = min(max(t.DraftNAccepted, 0), t.DraftN)
@@ -118,6 +159,11 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 	rec.Model = strings.TrimSpace(detail.model)
 	rec.Engine = detail.engine
 	rec.UpstreamSpecDraftTokens, rec.UpstreamSpecAcceptedTokens = detail.upstreamDraft, detail.upstreamAccepted
+	rec.CacheTier = detail.cacheTier
+	rec.CacheRestore = detail.cacheRestore
+	if detail.queueKnown {
+		rec = rec.WithQueue(detail.queueWait)
+	}
 	m.commitPerf(rec)
 }
 

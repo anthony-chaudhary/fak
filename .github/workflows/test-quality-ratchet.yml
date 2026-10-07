@@ -1,0 +1,42 @@
+# test-quality-ratchet: the landing-time floor for Go test-quality debt
+# (internal/testquality + `fak test-quality`).
+#
+# WHAT IT GATES: it scans every git-tracked *_test.go for tests whose SHAPE lets
+# them pass with the code under test broken or makes them flaky (TESTQ_NO_ASSERTION,
+# TESTQ_SELF_COMPARISON, TESTQ_UNCHECKED_ERR, TESTQ_UNREAD_EXPECTATION,
+# TESTQ_SLEEP_SYNC, TESTQ_WALLCLOCK_ASSERT, TESTQ_UNCONDITIONAL_SKIP) and reds only
+# when a (code, file, test) key's count rises above the counted floor in
+# internal/testquality/baseline.txt. Pre-existing debt never reds it.
+#
+# POSTURE: advisory, like negframe-ratchet. Not a required status check; promote it
+# once it has run quiet on main for a while.
+name: test-quality-ratchet
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  test-quality-ratchet:
+    name: test-quality ratchet (no new bad-test candidates)
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: auto
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Ratchet — no new bad-test candidates beyond the floor
+        run: make test-quality-ratchet

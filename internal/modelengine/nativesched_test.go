@@ -354,3 +354,44 @@ func decodeUIDOrderLane(t *testing.T, s *NativeScheduler, prompt []int) *schedLa
 		putCtx: ctx,
 	}
 }
+
+// TestNativeSchedulerLaneCarriesSubmitPriority pins the borrowed vLLM per-request
+// priority attribute (vllm/v1/core/sched/scheduler.py:735-741@975dca5, Apache-2.0):
+// a priority submitted through ToolCall.Meta is visible on the admitted lane, and a
+// submission without one defaults to 0 (vLLM's default; lower value = more important).
+func TestNativeSchedulerLaneCarriesSubmitPriority(t *testing.T) {
+	s := NewNativeScheduler(model.NewSynthetic(SyntheticConfig()))
+	defer s.Close()
+	ctx := context.Background()
+
+	cases := []struct {
+		name string
+		meta map[string]string
+		want int
+	}{
+		{"default", nil, 0},
+		{"submitted", map[string]string{"priority": "2"}, 2},
+		{"more-important", map[string]string{"sched.priority": "-1"}, -1},
+		{"unparsable", map[string]string{"priority": "high"}, 0},
+	}
+	for _, tc := range cases {
+		call := inlineCall("prio_"+tc.name, `{"q":1}`)
+		call.Meta = tc.meta
+		req, err := s.Admit(ctx, call)
+		if err != nil {
+			t.Fatalf("%s: admit: %v", tc.name, err)
+		}
+		ln, ok := req.(*schedLane)
+		if !ok {
+			t.Fatalf("%s: admit returned %T, want *schedLane", tc.name, req)
+		}
+		if got := ln.Priority(); got != tc.want {
+			t.Fatalf("%s: lane priority = %d, want %d", tc.name, got, tc.want)
+		}
+		for range req.Tokens() {
+		}
+		if _, err := req.Result(); err != nil {
+			t.Fatalf("%s: result: %v", tc.name, err)
+		}
+	}
+}

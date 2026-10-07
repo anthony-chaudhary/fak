@@ -493,6 +493,10 @@ func TestNativePreemptionPolicyFromEnv(t *testing.T) {
 	if p.Mode != NativePreemptRecompute || p.VictimRule != NativePreemptVictimCostAware || p.MaxBlocks != 7 || p.BlockTokens != 4 {
 		t.Fatalf("native preemption policy from env = %+v, want recompute max=7 block=4", p)
 	}
+	t.Setenv("FAK_NATIVE_KV_VICTIM_RULE", "lowest-priority")
+	if p := nativePreemptionPolicyFromEnv(); p.VictimRule != NativePreemptVictimLowestPriority {
+		t.Fatalf("victim rule from env lowest-priority = %v, want NativePreemptVictimLowestPriority", p.VictimRule)
+	}
 }
 
 func TestNativeKVBMHintsFromMeta(t *testing.T) {
@@ -939,5 +943,70 @@ func TestNativePreemptSpillsBeforeDropWhenTierPriced(t *testing.T) {
 	if statsSpill.SwapPreemptions != 1 || statsSpill.SwapBytes == 0 {
 		t.Fatalf("tier-priced spill: swapPreemptions=%d swapBytes=%d, want 1/>0 (must spill-before-drop)",
 			statsSpill.SwapPreemptions, statsSpill.SwapBytes)
+	}
+}
+
+// TestNativePreemptVictimLowestPriorityLatestArrival pins the borrowed vLLM priority
+// victim rule max(running, key=(priority, arrival_time))
+// (vllm/v1/core/sched/scheduler.py:735-741@975dca5, Apache-2.0) and that the
+// MostRecent and CostAware choices over the same fixtures are unchanged.
+func TestNativePreemptVictimLowestPriorityLatestArrival(t *testing.T) {
+	type lane struct {
+		tool     string
+		priority int
+		seq      int64
+		hits     int
+	}
+	cases := []struct {
+		name                   string
+		lanes                  []lane
+		wantLowest, wantRecent int
+		wantCost               int
+	}{
+		{
+			// (p0,seq1),(p2,seq2),(p2,seq3): the least important priority ties at 2,
+			// so the latest arrival (seq3) is the victim.
+			name:       "tie-latest-arrival",
+			lanes:      []lane{{"a", 0, 1, 0}, {"b", 2, 2, 4}, {"c", 2, 3, 8}},
+			wantLowest: 2, wantRecent: 2, wantCost: 0,
+		},
+		{
+			// The least important lane is the OLDEST: priority dominates arrival.
+			name:       "priority-beats-arrival",
+			lanes:      []lane{{"low", 3, 1, 8}, {"mid", 0, 2, 0}, {"new", 0, 3, 4}},
+			wantLowest: 0, wantRecent: 2, wantCost: 1,
+		},
+	}
+	for _, tc := range cases {
+		build := func(rule NativePreemptionVictimRule) *NativeScheduler {
+			s := NewNativeScheduler(model.NewSynthetic(SyntheticConfig()))
+			s.SetKVPreemptionPolicy(NativePreemptionPolicy{
+				Mode: NativePreemptRecompute, VictimRule: rule, MaxBlocks: 2, BlockTokens: 10,
+			})
+			for _, l := range tc.lanes {
+				ln := nativePreemptTestLane(l.tool, l.seq, 10, l.hits, false)
+				ln.priority = l.priority
+				s.lanes = append(s.lanes, ln)
+			}
+			t.Cleanup(func() {
+				for _, ln := range s.lanes {
+					ln.cancel()
+				}
+			})
+			return s
+		}
+		if got := build(NativePreemptVictimLowestPriority).preemptibleLaneLocked(); got != tc.wantLowest {
+			t.Fatalf("%s: lowest-priority victim = %d, want %d", tc.name, got, tc.wantLowest)
+		}
+		if got := build(NativePreemptVictimMostRecent).preemptibleLaneLocked(); got != tc.wantRecent {
+			t.Fatalf("%s: most-recent victim = %d, want %d (unchanged)", tc.name, got, tc.wantRecent)
+		}
+		if got := build(NativePreemptVictimCostAware).preemptibleLaneLocked(); got != tc.wantCost {
+			t.Fatalf("%s: cost-aware victim = %d, want %d (unchanged)", tc.name, got, tc.wantCost)
+		}
+	}
+	if NativePreemptVictimLowestPriority.String() != nativePreemptVictimLowestPrio ||
+		nativePreemptVictimRuleCode(NativePreemptVictimLowestPriority, "") != 1 {
+		t.Fatalf("lowest-priority rule must report %q / metric code 1", nativePreemptVictimLowestPrio)
 	}
 }

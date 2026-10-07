@@ -73,6 +73,7 @@ type ServingMetricRow struct {
 	TTFT               ServingHistogram
 	TPOT               ServingHistogram
 	ITL                ServingHistogram
+	MaxITL             ServingHistogram
 	Goodput            ServingGauge
 	Running            ServingGauge
 	Waiting            ServingGauge
@@ -81,7 +82,7 @@ type ServingMetricRow struct {
 }
 
 func (r ServingMetricRow) present() bool {
-	return r.TTFT.Present() || r.TPOT.Present() || r.ITL.Present() ||
+	return r.TTFT.Present() || r.TPOT.Present() || r.ITL.Present() || r.MaxITL.Present() ||
 		r.Goodput.Set || r.Running.Set || r.Waiting.Set ||
 		r.KVUtilization.Set || r.PrefixCacheHitRate.Set
 }
@@ -187,8 +188,11 @@ func (s *Server) writeServingMetricsWithStats(b *strings.Builder, inf inferenceS
 		"Time per output token, normalized onto the fak serving schema. Name aligns with vLLM time_per_output_token_seconds; labels identify worker, engine, and model.",
 		rows, func(r ServingMetricRow) ServingHistogram { return r.TPOT })
 	writeServingHistogramFamily(b, "fak_serving_inter_token_latency_seconds",
-		"Inter-token latency, normalized onto the fak serving schema for engines that publish ITL separately from TPOT.",
+		"Inter-token latency: one sample per real gap between consecutive output-token emissions (native: content deltas on live streams; scrape: the engine's own ITL). Never aliased from TPOT. Name aligns with vLLM inter_token_latency_seconds.",
 		rows, func(r ServingMetricRow) ServingHistogram { return r.ITL })
+	writeServingHistogramFamily(b, "fak_serving_max_inter_token_latency_seconds",
+		"Per-request worst inter-token gap (the longest decode stall a streamed request saw), one sample per request with at least two output-token emissions.",
+		rows, func(r ServingMetricRow) ServingHistogram { return r.MaxITL })
 	writeServingGaugeFamily(b, "fak_serving_goodput_requests_per_second",
 		"Serving goodput in successful requests per second for the worker. Scrape emitters may derive this from upstream success-counter deltas; native emitters feed the same schema directly.",
 		rows, func(r ServingMetricRow) ServingGauge { return r.Goodput })
@@ -221,7 +225,17 @@ func (s *Server) nativeServingMetricRow(inf inferenceSnapshot, kvStats agent.KVM
 	}
 	if inf.tpotHist.count > 0 {
 		row.TPOT = servingHistogramFromLatencySnapshot(inf.tpotHist)
-		row.ITL = row.TPOT
+		ok = true
+	}
+	// ITL comes only from REAL per-gap observations on live streams. A per-turn
+	// TPOT mean is not an inter-token gap distribution, so buffered-only traffic
+	// leaves ITL absent rather than publishing a fabricated, tail-blind copy.
+	if inf.itlHist.count > 0 {
+		row.ITL = servingHistogramFromLatencySnapshot(inf.itlHist)
+		ok = true
+	}
+	if inf.maxITLHist.count > 0 {
+		row.MaxITL = servingHistogramFromLatencySnapshot(inf.maxITLHist)
 		ok = true
 	}
 	turns := inferenceTurnCount(inf)
@@ -324,6 +338,9 @@ func mergeServingMetricRow(dst *ServingMetricRow, src ServingMetricRow) {
 	}
 	if src.ITL.Present() {
 		dst.ITL = src.ITL
+	}
+	if src.MaxITL.Present() {
+		dst.MaxITL = src.MaxITL
 	}
 	if src.Goodput.Set {
 		dst.Goodput = src.Goodput
@@ -613,7 +630,6 @@ func (e *NativeServingMetricsEmitter) ObserveTPOT(d time.Duration) {
 	}
 	e.mu.Lock()
 	e.row.TPOT.observeSeconds(d.Seconds())
-	e.row.ITL.observeSeconds(d.Seconds())
 	e.mu.Unlock()
 }
 
@@ -623,6 +639,16 @@ func (e *NativeServingMetricsEmitter) ObserveITL(d time.Duration) {
 	}
 	e.mu.Lock()
 	e.row.ITL.observeSeconds(d.Seconds())
+	e.mu.Unlock()
+}
+
+// ObserveMaxITL records one request's worst inter-token gap.
+func (e *NativeServingMetricsEmitter) ObserveMaxITL(d time.Duration) {
+	if e == nil || d < 0 {
+		return
+	}
+	e.mu.Lock()
+	e.row.MaxITL.observeSeconds(d.Seconds())
 	e.mu.Unlock()
 }
 
@@ -769,6 +795,9 @@ func fillServingMetricRowGaps(dst *ServingMetricRow, src ServingMetricRow) {
 	}
 	if !dst.ITL.Present() && src.ITL.Present() {
 		dst.ITL = src.ITL
+	}
+	if !dst.MaxITL.Present() && src.MaxITL.Present() {
+		dst.MaxITL = src.MaxITL
 	}
 	if !dst.Goodput.Set && src.Goodput.Set {
 		dst.Goodput = src.Goodput

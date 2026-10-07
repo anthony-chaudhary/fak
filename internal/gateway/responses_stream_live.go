@@ -280,7 +280,7 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	// The turn finished. The buffered path folds inference metrics + the admission
 	// accounting into s.complete; this path bypasses it, so account here.
 	lease.SettleUsage(comp.Usage) // settle the token-rate window with real usage (#2019)
-	s.accountStreamedTurn(ctx, sessionTurn, comp, turn.messages, began, reqModel, firstDelta.ttft(began))
+	s.accountStreamedTurn(ctx, sessionTurn, comp, turn.messages, began, reqModel, firstDelta.ttft(began), lease)
 
 	// Tool-call conformance fail-closed (the buffered counterpart is
 	// handleResponses): the upstream announced tool_calls but none survived parsing

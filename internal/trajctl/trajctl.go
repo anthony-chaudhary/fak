@@ -156,6 +156,10 @@ func Append(path string, row Row) error {
 	if err != nil {
 		return err
 	}
+	// unbounded: the ledger is event-sourced — Fold replays every row to rebuild
+	// objective state (the last objective row wins), so size rotation that drops
+	// the old generation would silently lose live objectives. The fold-aware bound
+	// is Compact (retention.go: summary rows), which has no scheduled caller yet.
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return err

@@ -116,7 +116,7 @@ func compareGeneratedFreshness(root, generated string) (FreshnessResult, error) 
 			return result, fmt.Errorf("read generated %s: %w", art.Name, err)
 		}
 		actual, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(art.Tracked)))
-		if err != nil || !generatedBytesEqual(actual, expected) {
+		if err != nil || !freshEqual(art.Tracked, actual, expected) {
 			result.Fresh = false
 			result.StalePaths = append(result.StalePaths, art.Tracked)
 		}

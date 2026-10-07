@@ -8,6 +8,7 @@ package main
 // node.go keeps the node.json client side (status/use/run/forget) and the helpers.
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -229,6 +230,10 @@ const darwinPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
       {{- end}}
       <string>--addr</string><string>{{x .Addr}}</string>
       <string>--policy</string><string>{{x .PolicyPath}}</string>
+      {{- if .UpstreamKeyEnv}}
+      <string>--api-key-env</string><string>{{x .UpstreamKeyEnv}}</string>
+      <string>--require-upstream-key</string>
+      {{- end}}
       {{- if .RequireKeyEnv}}
       <string>--require-key-env</string>
       <string>{{x .RequireKeyEnv}}</string>
@@ -273,13 +278,19 @@ type nodeUnitData struct {
 	RequireKeyEnv, GatewayKey                            string
 	Provider, BaseURL, Model                             string
 	Env                                                  []nodeEnvVar
+	// UpstreamKeyEnv names the env var the launchd unit's serve reads its upstream key
+	// from (with the durable Keychain fallback, --require-upstream-key). nodeInstallDarwin
+	// sets it only for the Anthropic wire AND only when a durable key resolved at install
+	// time (nodeDarwinUpstreamKeyGuidance); empty keeps the passthrough unit. Rendered only
+	// into the macOS plist; it is a NAME, never a value.
+	UpstreamKeyEnv string
 }
 
 // nodeUnitDataFor assembles the renderer input from the resolved install params. Pure:
 // every value is already resolved by the caller, so a test can build the same input
 // without touching the filesystem, launchd, or the network.
 func nodeUnitDataFor(in nodeInstallParams, label, wrapperPath, fakBin, policyPath, logDir, gatewayKey, requireKeyEnv string) nodeUnitData {
-	return nodeUnitData{
+	d := nodeUnitData{
 		Label:         label,
 		WrapperPath:   wrapperPath,
 		FakBin:        fakBin,
@@ -293,6 +304,7 @@ func nodeUnitDataFor(in nodeInstallParams, label, wrapperPath, fakBin, policyPat
 		Model:         in.upstream.Model,
 		Env:           in.env,
 	}
+	return d
 }
 
 // nodeXMLEscape escapes a value for a plist <string> body. Applied to every interpolated
@@ -323,8 +335,9 @@ func nodeRenderWindowsRunner(d nodeUnitData) (string, error) {
 
 // nodeRenderUnit is the shared parse-and-execute behind the three renderers, carrying the
 // per-format escapers the templates call: `x` for plist XML, `sd` for a systemd quoted
-// Environment= value, and `cmdv` for a cmd.exe `set` value.
-func nodeRenderUnit(name, text string, d nodeUnitData) (string, error) {
+// Environment= value, and `cmdv` for a cmd.exe `set` value. d is the template's data
+// value (nodeUnitData for the gateway units; gardenUnitData for the stale-work garden).
+func nodeRenderUnit(name, text string, d any) (string, error) {
 	tmpl, err := template.New(name).Funcs(template.FuncMap{
 		"x":    nodeXMLEscape,
 		"sd":   nodeSystemdEscape,
@@ -362,9 +375,14 @@ func nodeInstallDarwin(stdout, stderr io.Writer, in nodeInstallParams) int {
 	plistPath := filepath.Join(agentsDir, nodeGatewayLabel+".plist")
 
 	if uninstall {
-		_ = exec.Command("launchctl", "unload", "-w", plistPath).Run()
+		bootoutErr := newLaunchdAgent().Bootout(context.Background(), nodeGatewayLabel)
 		_ = os.Remove(plistPath)
 		_ = os.Remove(nodeInstallStatePath(cfgDir))
+		if bootoutErr != nil {
+			fmt.Fprintf(stderr, "fak node uninstall: %v\n", bootoutErr)
+			fmt.Fprintf(stdout, "[fak node] removed %s (service may still be loaded)\n", plistPath)
+			return 1
+		}
 		fmt.Fprintf(stdout, "[fak node] unloaded and removed %s\n", plistPath)
 		return 0
 	}
@@ -390,7 +408,18 @@ func nodeInstallDarwin(stdout, stderr io.Writer, in nodeInstallParams) int {
 
 	// Render the plist (pure), then write it. Rendering before any launchctl call means a
 	// template failure never leaves a half-written unit behind an unloaded service.
-	plist, err := nodeRenderDarwinPlist(nodeUnitDataFor(in, nodeGatewayLabel, wrapperPath, fakBin, policyPath, logDir, gatewayKey, requireKeyEnv))
+	unit := nodeUnitDataFor(in, nodeGatewayLabel, wrapperPath, fakBin, policyPath, logDir, gatewayKey, requireKeyEnv)
+	// Upstream credential — ONLY for the Anthropic wire. A local-model unit has no use for
+	// it, and probing for an Anthropic credential on a host installed to talk to a local
+	// model is gratuitous credential spread (#5555). The key is NEVER written into the
+	// plist: when a durable copy resolves now, the unit names the env var and serve falls
+	// back to that copy after a reboot (`launchctl setenv` does not persist), refusing to
+	// start with "no gateway key" rather than serve upstream 401s (fak-private#3063).
+	if in.upstream.Provider == nodeDefaultProvider &&
+		nodeDarwinUpstreamKeyGuidance(stdout, stderr, os.Getenv("ANTHROPIC_API_KEY") != "", defaultServeUpstreamKeySources()) {
+		unit.UpstreamKeyEnv = "ANTHROPIC_API_KEY"
+	}
+	plist, err := nodeRenderDarwinPlist(unit)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak node install: render plist: %v\n", err)
 		return 1
@@ -398,30 +427,22 @@ func nodeInstallDarwin(stdout, stderr io.Writer, in nodeInstallParams) int {
 
 	// Unload any existing unit before overwriting. One label per host: switching upstreams
 	// re-renders THIS unit rather than adding a second one (#5555).
-	_ = exec.Command("launchctl", "unload", "-w", plistPath).Run()
+	agent := newLaunchdAgent()
+	if err := agent.Bootout(context.Background(), nodeGatewayLabel); err != nil {
+		fmt.Fprintf(stderr, "fak node install: %v\n", err)
+		return 1
+	}
 
 	if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
 		fmt.Fprintf(stderr, "fak node install: write plist: %v\n", err)
 		return 1
 	}
 
-	// Set ANTHROPIC_API_KEY in login env if provided — ONLY for the Anthropic wire. A
-	// local-model unit has no use for it, and pushing an Anthropic credential into the
-	// login environment of a host installed to talk to a local model is gratuitous
-	// credential spread (#5555).
-	if in.upstream.Provider == nodeDefaultProvider {
-		if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-			_ = exec.Command("launchctl", "setenv", "ANTHROPIC_API_KEY", key).Run()
-			fmt.Fprintf(stdout, "[fak node] set ANTHROPIC_API_KEY in login environment\n")
-		} else {
-			fmt.Fprintf(stderr, "[fak node] WARNING: ANTHROPIC_API_KEY not set — set it with:\n")
-			fmt.Fprintf(stderr, "           launchctl setenv ANTHROPIC_API_KEY \"sk-ant-...\"\n")
-		}
-	}
-
 	// Load the unit.
-	if out, err := exec.Command("launchctl", "load", "-w", plistPath).CombinedOutput(); err != nil {
-		fmt.Fprintf(stderr, "fak node install: launchctl load: %v\n%s\n", err, out)
+	// bootstrap, not the legacy `load -w`: load can print "Load failed: 5" yet exit 0,
+	// leaving the plist on disk with nothing running.
+	if err := agent.Bootstrap(context.Background(), nodeGatewayLabel, plistPath, false); err != nil {
+		fmt.Fprintf(stderr, "fak node install: %v\n", err)
 		return 1
 	}
 	fmt.Fprintf(stdout, "[fak node] loaded %s\n", nodeGatewayLabel)
@@ -432,6 +453,33 @@ func nodeInstallDarwin(stdout, stderr io.Writer, in nodeInstallParams) int {
 	// reuse the bearer key (#4). Written before the health wait so the record exists even if
 	// the gateway is slow to come up — then health-gate honestly and print the client lines.
 	return nodeInstallFinalize(stdout, stderr, in, gatewayKey, requireKeyEnv, logDir)
+}
+
+// nodeDarwinUpstreamKeyGuidance probes the DURABLE upstream-key sources the unit's serve
+// would fall back to after a reboot — the fak-owned Keychain item fak-ANTHROPIC_API_KEY,
+// then Claude Code's saved API key — and reports whether one resolved. Only then does
+// install arm `--api-key-env ANTHROPIC_API_KEY --require-upstream-key` (fail-fast on a
+// missing key); otherwise the unit keeps today's client-credential passthrough, so a
+// loopback install whose clients bring their own keys never crash-loops, and the operator
+// is told how to store the item and re-run install to enable fail-fast. src is the
+// injectable probe (fakes in tests); its getenv is ignored because an installer-shell
+// key does not survive a reboot. The key VALUE is never printed.
+func nodeDarwinUpstreamKeyGuidance(stdout, stderr io.Writer, envKeySet bool, src serveUpstreamKeySources) bool {
+	const env = "ANTHROPIC_API_KEY"
+	src.getenv = func(string) string { return "" }
+	key, source, misses := resolveServeUpstreamKey(env, true, src)
+	if key != "" {
+		fmt.Fprintf(stdout, "[fak node] upstream key: durable %s found (survives reboot) — unit runs --api-key-env %s --require-upstream-key\n", source, env)
+		return true
+	}
+	if envKeySet {
+		fmt.Fprintf(stderr, "[fak node] WARNING: %s is set only in this shell; it is NOT persisted for the gateway (and `launchctl setenv` would not survive a reboot).\n", env)
+	}
+	fmt.Fprintf(stderr, "[fak node] no durable upstream key (%s) — the unit stays in client-credential passthrough (each client sends its own key).\n", strings.Join(misses, "; "))
+	fmt.Fprintf(stderr, "           To give the gateway its own key and fail fast when it is missing, store it in the login Keychain\n")
+	fmt.Fprintf(stderr, "           (prompts for the key; never put it in the plist), then re-run `fak node install`:\n")
+	fmt.Fprintf(stderr, "           %s\n", serveUpstreamKeyStoreHint(env))
+	return false
 }
 
 // nodeInstallFinalize is the shared tail of every platform install path: it persists the
@@ -753,7 +801,7 @@ func nodeInstallWindows(stdout, stderr io.Writer, in nodeInstallParams) int {
 	localPort := in.localPort
 
 	// Stop any prior instance and confirm the port is free BEFORE (re)starting (#3) — the
-	// macOS path already `launchctl unload`s first; Windows did not, so a stale fak serve
+	// macOS path already boots out the launchd agent first; Windows did not, so a stale fak serve
 	// kept the port and answered the health probe, making install falsely report the OLD
 	// process healthy. End the task and wait for the port to free; if a foreign process still
 	// holds it, fail loudly rather than blessing whatever answers the probe.

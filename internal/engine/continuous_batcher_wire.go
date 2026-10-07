@@ -309,6 +309,7 @@ func (e *BatchingEngine) observeStep(res *BatchStepResult, stepDur time.Duration
 	if res.PrefixReuseTokens > 0 {
 		e.recorder.ObservePrefixMatched(res.PrefixReuseTokens)
 	}
+	e.recorder.ObservePrefixQueried(res.PrefixQueriedTokens)
 	// Admission wait is enqueue -> the step that promotes the request out of the
 	// waiting queue. A directly-admitted request never appears here.
 	for _, id := range res.PromotedSessionIDs {

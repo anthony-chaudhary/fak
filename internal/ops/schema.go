@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/boundedlog"
 )
 
 // EventSchemaV1 is the schema identifier for operations audit ledger entries.
@@ -65,10 +67,17 @@ func DefaultConfig() Config {
 	}
 }
 
+// LedgerMaxBytes caps the ops audit ledger's active file (32 MiB, the audit-type cap).
+// Past it Record rotates the file to one .1 generation (internal/boundedlog) and
+// QueryEvents reads both segments, so the windowed query spans the boundary. The
+// ledger is a since-window audit trail, not hash-chained or replayed as full history.
+const LedgerMaxBytes = boundedlog.AuditMaxBytes
+
 // Ledger provides thread-safe append-only persistence for ops events.
 type Ledger struct {
-	mu   sync.Mutex
-	path string
+	mu       sync.Mutex
+	path     string
+	maxBytes int64
 }
 
 // OpenLedger opens or creates an operations ledger file.
@@ -76,7 +85,7 @@ func OpenLedger(path string) (*Ledger, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	return &Ledger{path: path}, nil
+	return &Ledger{path: path, maxBytes: LedgerMaxBytes}, nil
 }
 
 // DefaultLedgerPath returns the standard ops event log path under the workspace or user cache.
@@ -103,6 +112,8 @@ func (l *Ledger) Record(ev Event) error {
 		ev.Timestamp = time.Now().UTC()
 	}
 
+	// Best-effort size bound: a failed rotation never fails the append.
+	_, _ = boundedlog.RotateIfOver(l.path, l.maxBytes)
 	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return err
@@ -119,26 +130,38 @@ func (l *Ledger) Record(ev Event) error {
 }
 
 // QueryEvents reads all events from the ledger matching the given since time window.
+// It reads the rotated .1 segment (if any) before the active file, so results stay in
+// append order across a rotation.
 func (l *Ledger) QueryEvents(since time.Duration) ([]Event, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-
-	f, err := os.Open(l.path)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
 
 	var cutoff time.Time
 	if since > 0 {
 		cutoff = time.Now().Add(-since)
 	}
 
-	dec := json.NewDecoder(f)
 	var events []Event
+	for _, seg := range boundedlog.Segments(l.path) {
+		var err error
+		if events, err = queryEventsFile(seg, cutoff, events); err != nil {
+			return events, err
+		}
+	}
+	return events, nil
+}
+
+func queryEventsFile(path string, cutoff time.Time, events []Event) ([]Event, error) {
+	f, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return events, nil
+	}
+	if err != nil {
+		return events, err
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(f)
 	for {
 		var ev Event
 		if err := dec.Decode(&ev); err != nil {

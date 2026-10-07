@@ -457,6 +457,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	}
 
 	p.recordTurnTax(promptTok, cacheable, matched)
+	enginestep.Default.ObservePrefixQueried(promptTok)
 	enginestep.Default.ObservePrefixMatched(matched)
 
 	// Prefill divergent prompt tokens
@@ -1029,6 +1030,7 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 	p.configureNativeSession(s)
 
 	p.recordTurnTax(promptTok, cacheable, matched)
+	enginestep.Default.ObservePrefixQueried(promptTok)
 	enginestep.Default.ObservePrefixMatched(matched)
 
 	// Prefill divergent prompt tokens

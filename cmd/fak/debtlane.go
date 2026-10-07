@@ -78,6 +78,7 @@ func runDebtLanesInternal(stdout, stderr io.Writer, flagSetName string, defaultP
 	noExpandedSurfaces := fs.Bool("no-expanded-surfaces", false, "disable expanded surfaces; scan package roots only")
 	surfaceFilter := fs.String("surface", "", "filter by surface class (internal, pkg, platform, cmd, tools, skills, workflows, examples, docs)")
 	coverageReceipt := fs.Bool("coverage", false, "display machine-readable coverage receipt summary")
+	churnDays := fs.Int("churn-days", debtlane.DefaultChurnDays, "weight wave priority by commits touching each lane in the last N days of git history (0 disables)")
 
 	if !parseFlags(fs, argv) {
 		return 2
@@ -114,6 +115,7 @@ func runDebtLanesInternal(stdout, stderr io.Writer, flagSetName string, defaultP
 		CriticalityFilter: *criticality,
 		MinGap:            *minGap,
 		TopN:              *topN,
+		ChurnDays:         *churnDays,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", flagSetName, err)

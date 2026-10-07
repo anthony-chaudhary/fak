@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/boundedlog"
 )
 
 // observer.go — the stratified ASYNC observer rung on the result-admission chain (#2434).
@@ -123,6 +125,7 @@ type observerStratum struct {
 	window     time.Duration
 
 	journalPath string
+	journalMax  int64 // active-file cap before rotation to .1 (boundedlog)
 	now         func() time.Time
 	logf        func(string, ...any)
 
@@ -138,6 +141,7 @@ func newObserverStratum(journalPath string, logf func(string, ...any)) *observer
 		failWindow:  defaultObserverFailWindow,
 		window:      defaultObserverWindow,
 		journalPath: journalPath,
+		journalMax:  observerJournalMaxBytes,
 		now:         time.Now,
 		logf:        logf,
 		lag:         newLatencyCounter(),
@@ -148,6 +152,12 @@ func newObserverStratum(journalPath string, logf func(string, ...any)) *observer
 // observerJournalPath is the HOOK_UNHEALTHY journal sink, mirroring reframeJournalPath: an
 // empty path (the default) keeps the journal disabled; a write failure is telemetry-only.
 func observerJournalPath() string { return os.Getenv("FAK_OBSERVER_JOURNAL") }
+
+// observerJournalMaxBytes caps the HOOK_UNHEALTHY journal's active file (16 MiB); past
+// it the journal rotates to one .1 generation (internal/boundedlog), so a flapping
+// observer on a long-lived gateway cannot grow the file without bound. Readers use
+// boundedlog.Segments.
+const observerJournalMaxBytes = boundedlog.DefaultMaxBytes
 
 // register adds an observer rung. A non-positive budget falls back to the default; a
 // non-positive sample rate means the observer never fires (registered but dormant).
@@ -321,6 +331,8 @@ func (st *observerStratum) journal(row observerHealthRow) {
 	if err != nil {
 		return
 	}
+	// Best-effort size bound: a failed rotation never costs the HOOK_UNHEALTHY row.
+	_, _ = boundedlog.RotateIfOver(st.journalPath, st.journalMax)
 	f, err := os.OpenFile(st.journalPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return

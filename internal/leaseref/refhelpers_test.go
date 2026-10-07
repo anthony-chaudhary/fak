@@ -46,8 +46,9 @@ func rhEq(got []string, want ...string) bool {
 
 // TestExpiredTTLBoundary pins the shared TTL primitive behind Record.Expired and
 // IntentRecord.Expired (both delegate to expired()). Two load-bearing rules:
-//   - a non-positive TTL never expires (a 0/absent TTL lease is held until explicitly
-//     released — the "forever" case the cascade path leans on), and
+//   - a non-positive TTL (legacy only: writes clamp it, ttl_floor.go) is judged by age:
+//     it lapses once effectiveActiveAt is LegacyNoTTLMaxAgeSeconds old, and
+//     not before, so a legacy ghost becomes reapable (fak-private#3076), and
 //   - a positive TTL lapses at the INCLUSIVE instant now >= effectiveActiveAt+ttl,
 //     not one second later.
 func TestExpiredTTLBoundary(t *testing.T) {
@@ -58,8 +59,9 @@ func TestExpiredTTLBoundary(t *testing.T) {
 		ttlSeconds int64
 		want       bool
 	}{
-		{"zero ttl never expires (far-future now)", activeAt + 1_000_000, 0, false},
-		{"negative ttl never expires", activeAt + 1_000_000, -5, false},
+		{"legacy zero ttl younger than the age bound is not expired", activeAt + LegacyNoTTLMaxAgeSeconds - 1, 0, false},
+		{"legacy zero ttl at the age bound is expired (inclusive)", activeAt + LegacyNoTTLMaxAgeSeconds, 0, true},
+		{"legacy negative ttl far past the age bound is expired", activeAt + 10*LegacyNoTTLMaxAgeSeconds, -5, true},
 		{"positive ttl: well before deadline", activeAt + 10, 60, false},
 		{"positive ttl: one second before deadline", activeAt + 59, 60, false},
 		{"positive ttl: exactly at deadline is expired (inclusive)", activeAt + 60, 60, true},

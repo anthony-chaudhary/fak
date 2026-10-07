@@ -19,14 +19,25 @@ const (
 	// CodeUnreadExpectation — a table-test row field named like an expectation that
 	// no code in the test ever reads.
 	CodeUnreadExpectation = "TESTQ_UNREAD_EXPECTATION"
+	// CodeSleepSync — a TestXxx that calls time.Sleep: it synchronises on a guessed
+	// wall-clock window, so it flakes under load and wastes time when idle.
+	CodeSleepSync = "TESTQ_SLEEP_SYNC"
+	// CodeWallclockAssert — a failure call guarded by measured elapsed wall-clock
+	// time (time.Since/time.Until): the verdict measures the machine's load.
+	CodeWallclockAssert = "TESTQ_WALLCLOCK_ASSERT"
+	// CodeUnconditionalSkip — an unguarded top-level t.Skip: the test never runs.
+	CodeUnconditionalSkip = "TESTQ_UNCONDITIONAL_SKIP"
 )
 
 // Codes is the closed set, in report order. The baseline parser rejects any code
 // outside it, so a renamed constant cannot leave orphaned floor rows behind that
 // silently absorb a real finding.
-var Codes = []string{CodeNoAssertion, CodeSelfComparison, CodeUncheckedErr, CodeUnreadExpectation}
+var Codes = []string{
+	CodeNoAssertion, CodeSelfComparison, CodeUncheckedErr, CodeUnreadExpectation,
+	CodeSleepSync, CodeWallclockAssert, CodeUnconditionalSkip,
+}
 
-// knownCode reports whether c is one of the four shipped codes.
+// knownCode reports whether c is one of the shipped codes.
 func knownCode(c string) bool {
 	for _, k := range Codes {
 		if k == c {

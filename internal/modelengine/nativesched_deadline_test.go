@@ -1,6 +1,7 @@
 package modelengine
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"testing"
@@ -143,4 +144,73 @@ func laneSeqs(lanes []*schedLane) string {
 		seqs[i] = lane.seqNo
 	}
 	return fmt.Sprint(seqs)
+}
+
+func TestNativeSchedulerPromotesEarliestDeadlineFirst(t *testing.T) {
+	base := time.Unix(1_800_000_000, 0)
+	lane := func(seq int64, deadline time.Time) *schedLane {
+		return &schedLane{ctx: context.Background(), state: schedLaneDecode, seqNo: seq, deadline: deadline}
+	}
+	promoteOrder := func(waiting []*schedLane) []int64 {
+		s := newNativeScheduler(nil, nil)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.waiting = waiting
+		var got []int64
+		for len(s.waiting) > 0 {
+			s.orderWaitingByDeadlineLocked()
+			s.promoteWaitingLocked(1)
+			if len(s.lanes) != 1 {
+				t.Fatalf("promoted %d lanes with maxRun=1", len(s.lanes))
+			}
+			got = append(got, s.lanes[0].seqNo)
+			s.lanes = s.lanes[:0]
+		}
+		return got
+	}
+
+	// Deadlines t+30, t+10, none, t+20 promote as 10, 20, 30, none.
+	got := promoteOrder([]*schedLane{
+		lane(1, base.Add(30*time.Second)),
+		lane(2, base.Add(10*time.Second)),
+		lane(3, time.Time{}),
+		lane(4, base.Add(20*time.Second)),
+	})
+	if want := []int64{2, 4, 1, 3}; !slices.Equal(got, want) {
+		t.Fatalf("EDF promotion order = %v, want %v", got, want)
+	}
+
+	// Equal deadlines stay FIFO, and no-deadline lanes keep FIFO among themselves.
+	got = promoteOrder([]*schedLane{
+		lane(1, time.Time{}),
+		lane(2, base.Add(5*time.Second)),
+		lane(3, time.Time{}),
+		lane(4, base.Add(5*time.Second)),
+	})
+	if want := []int64{2, 4, 1, 3}; !slices.Equal(got, want) {
+		t.Fatalf("tie promotion order = %v, want %v", got, want)
+	}
+
+	// No deadlines anywhere: default FIFO promotion is unchanged.
+	got = promoteOrder([]*schedLane{lane(3, time.Time{}), lane(1, time.Time{}), lane(2, time.Time{})})
+	if want := []int64{3, 1, 2}; !slices.Equal(got, want) {
+		t.Fatalf("no-deadline promotion order = %v, want FIFO %v", got, want)
+	}
+}
+
+func TestNativeLaneDeadlineFromMeta(t *testing.T) {
+	for _, tc := range []struct {
+		meta map[string]string
+		want time.Time
+	}{
+		{nil, time.Time{}},
+		{map[string]string{"deadline_unix_ms": "1800000000123"}, time.UnixMilli(1_800_000_000_123)},
+		{map[string]string{"sched.deadline_unix_ms": " 42 "}, time.UnixMilli(42)},
+		{map[string]string{"deadline_unix_ms": "soon"}, time.Time{}},
+		{map[string]string{"deadline_unix_ms": "-5"}, time.Time{}},
+	} {
+		if got := nativeLaneDeadlineFromMeta(tc.meta); !got.Equal(tc.want) {
+			t.Fatalf("nativeLaneDeadlineFromMeta(%v) = %v, want %v", tc.meta, got, tc.want)
+		}
+	}
 }

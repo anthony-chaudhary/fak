@@ -3,12 +3,12 @@ package main
 // leaseref_audit_age_test.go witnesses the audit's AGE rung for TTL-LESS leases — the
 // half of `age_threshold_seconds` the row had always advertised and never applied.
 //
-// WHAT WOULD BREAK WITHOUT IT. A lease taken with `fak leaseref acquire` carries ttl 0
-// ("no expiry") by default. leaseref.Record.Expired short-circuits false at ttl<=0, so
-// such a record never enters Live's expired partition, Reap (which deletes only what Live
-// called expired) can never collect it, and the audit reported it `stale=false,
-// TTL_LIVE` no matter how old it got. The lane it names is then refused for the life of
-// the repository with nothing anywhere reporting it.
+// WHAT WOULD BREAK WITHOUT IT. A lease taken with an older `fak leaseref acquire` carried
+// ttl 0 ("no expiry") by default. Writes now clamp ttl<=0 to leaseref.DefaultLeaseTTLSeconds
+// and a LEGACY ttl-0 record becomes TTL-expired (reapable) once
+// leaseref.LegacyNoTTLMaxAgeSeconds (7 days) old (fak-private#3076), but between the 24 h age
+// floor and that 7-day bound such a record is still un-expired: Reap cannot collect it yet,
+// and without this rung the audit reported it `stale=false, TTL_LIVE`.
 //
 // THE TRAP THESE TESTS ALSO PIN. The tempting staleness test — "is the holder's process
 // gone?" — is wrong here: the acquiring process is a per-invocation CLI child that dies
@@ -22,7 +22,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"os/exec"
 	"strings"
@@ -177,9 +176,12 @@ func TestLeaserefAuditRowTTLLeasesAreUnchanged(t *testing.T) {
 }
 
 // TestLeaserefAuditReportsAgeStaleGhostsEndToEnd drives the real verb over a t.TempDir()
-// git repo and asserts the envelope an operator (and `fak garden`) actually reads: the
-// ghost is counted on its own keys, kept OUT of would_reap because the reaper provably
-// cannot collect it, the verdict trips, and the reason names the remedy that works.
+// git repo and asserts the envelope an operator (and `fak garden`) actually reads: a
+// legacy ttl-0 ghost past the 24 h floor but under the 7-day legacy bound is counted on its
+// own keys and kept OUT of would_reap (the reaper cannot collect it yet), a ghost past the
+// 7-day bound IS in would_reap (the reaper now collects it), the verdict trips, and the
+// reason names the remedy that works. The legacy ttl-0 blobs are planted with raw git
+// plumbing because Acquire can no longer write one.
 func TestLeaserefAuditReportsAgeStaleGhostsEndToEnd(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
@@ -197,18 +199,17 @@ func TestLeaserefAuditReportsAgeStaleGhostsEndToEnd(t *testing.T) {
 		}
 	}
 
-	store := leaseref.NewInDir(dir)
-	ctx := context.Background()
 	now := time.Now().Unix()
-	// The ghost: no TTL, acquired nine days ago — unreapable and, before this rung,
-	// unreported. And a live neighbour with the same absent TTL, taken a minute ago.
+	// The ghost: no TTL, acquired three days ago — past the age floor, under the legacy
+	// bound, so not yet reapable. The ancient ghost: no TTL, nine days old — past the legacy
+	// bound, so TTL-expired and reapable. And a live neighbour with the same absent TTL,
+	// taken a minute ago.
 	for _, rec := range []leaseref.Record{
-		{ID: "ghost-lane", TreeGlobs: []string{"internal/ghost/**"}, Holder: "nodeA/sess-1", AcquiredAt: now - 9*24*60*60},
+		{ID: "ghost-lane", TreeGlobs: []string{"internal/ghost/**"}, Holder: "nodeA/sess-1", AcquiredAt: now - 3*24*60*60},
+		{ID: "ancient-lane", TreeGlobs: []string{"internal/ancient/**"}, Holder: "nodeC/sess-3", AcquiredAt: now - 9*24*60*60},
 		{ID: "fresh-lane", TreeGlobs: []string{"internal/fresh/**"}, Holder: "nodeB/sess-2", AcquiredAt: now - 60},
 	} {
-		if _, err := store.Acquire(ctx, rec); err != nil {
-			t.Fatalf("Acquire(%s): %v", rec.ID, err)
-		}
+		plantLegacyLeaseRef(t, dir, rec)
 	}
 
 	var out, errb bytes.Buffer
@@ -230,11 +231,11 @@ func TestLeaserefAuditReportsAgeStaleGhostsEndToEnd(t *testing.T) {
 		t.Fatalf("audit JSON unmarshal: %v\nout=%s", err, out.String())
 	}
 
-	// Neither lease can expire, so the TTL partition sees two live and nothing reapable —
-	// the load-bearing detail: without the age rung this envelope is entirely green.
-	if audit.LiveCount != 2 || audit.ExpiredCount != 0 || len(audit.WouldReap) != 0 {
-		t.Fatalf("TTL partition = %d live / %d expired / %d would_reap, want 2/0/0",
-			audit.LiveCount, audit.ExpiredCount, len(audit.WouldReap))
+	// Only the 9-day ghost crossed the legacy bound, so the TTL partition sees two live and
+	// exactly that one reapable — the 3-day ghost is visible only through the age rung.
+	if audit.LiveCount != 2 || audit.ExpiredCount != 1 || len(audit.WouldReap) != 1 || audit.WouldReap[0]["id"] != "ancient-lane" {
+		t.Fatalf("TTL partition = %d live / %d expired / would_reap=%v, want 2/1/[ancient-lane]",
+			audit.LiveCount, audit.ExpiredCount, audit.WouldReap)
 	}
 	if audit.AgeStaleN != 1 || len(audit.AgeStaleIDs) != 1 || audit.AgeStaleIDs[0] != "ghost-lane" {
 		t.Fatalf("age_stale = %d %v, want exactly [ghost-lane] — the fresh lease must not be swept up",
@@ -254,5 +255,28 @@ func TestLeaserefAuditReportsAgeStaleGhostsEndToEnd(t *testing.T) {
 	}
 	if !strings.Contains(audit.Reason, "`reap` cannot collect these") {
 		t.Fatalf("reason = %q, must not imply the reaper will collect a TTL-less lease", audit.Reason)
+	}
+}
+
+// plantLegacyLeaseRef writes rec verbatim (ttl_seconds 0 included) under
+// refs/fak/locks/<id> in dir with raw git plumbing, modelling a lease published by a binary
+// that predates the write-side TTL clamp.
+func plantLegacyLeaseRef(t *testing.T, dir string, rec leaseref.Record) {
+	t.Helper()
+	blob, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal %s: %v", rec.ID, err)
+	}
+	hash := exec.Command("git", "hash-object", "-w", "--stdin")
+	hash.Dir = dir
+	hash.Stdin = bytes.NewReader(blob)
+	oid, err := hash.Output()
+	if err != nil {
+		t.Fatalf("git hash-object %s: %v", rec.ID, err)
+	}
+	upd := exec.Command("git", "update-ref", rec.Ref(), strings.TrimSpace(string(oid)))
+	upd.Dir = dir
+	if out, err := upd.CombinedOutput(); err != nil {
+		t.Fatalf("git update-ref %s: %v\n%s", rec.ID, err, out)
 	}
 }

@@ -10,7 +10,6 @@ package gateway
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -18,6 +17,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/boundedlog"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 )
 
@@ -143,7 +143,7 @@ func TestObserver_AutoDisableAfterNFailures(t *testing.T) {
 	}
 
 	// The auto-disable wrote a HOOK_UNHEALTHY journal row naming the observer id.
-	raw, err := os.ReadFile(journal)
+	raw, err := boundedlog.ReadAll(journal)
 	if err != nil {
 		t.Fatalf("read journal: %v", err)
 	}
@@ -182,5 +182,27 @@ func TestObserver_MetricsExposedAtZero(t *testing.T) {
 		if !strings.Contains(scrape, want) {
 			t.Fatalf("/metrics missing %q", want)
 		}
+	}
+}
+
+// fak-test:runtime fast est=50ms
+func TestObserver_JournalRotationReadsSpanBothSegments(t *testing.T) {
+	journal := filepath.Join(t.TempDir(), "observer-health.jsonl")
+	st := newObserverStratum(journal, nil)
+	st.journalMax = 1 // every row after the first rotates the previous one to .1
+	st.journal(observerHealthRow{Event: "HOOK_UNHEALTHY", ObserverID: "older", Reason: "r"})
+	st.journal(observerHealthRow{Event: "HOOK_UNHEALTHY", ObserverID: "newer", Reason: "r"})
+
+	if segs := boundedlog.Segments(journal); len(segs) != 2 {
+		t.Fatalf("segments = %v, want [.1, active]", segs)
+	}
+	raw, err := boundedlog.ReadAll(journal)
+	if err != nil {
+		t.Fatalf("read journal: %v", err)
+	}
+	older := strings.Index(string(raw), `"observer_id":"older"`)
+	newer := strings.Index(string(raw), `"observer_id":"newer"`)
+	if older < 0 || newer < 0 || older > newer {
+		t.Fatalf("journal read must span .1 then active, oldest first:\n%s", raw)
 	}
 }

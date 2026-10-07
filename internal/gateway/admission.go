@@ -875,6 +875,21 @@ type AdmissionLease struct {
 	traceID  string
 	tokenRes *TokenReservation
 	once     sync.Once
+	// queueWait is how long Acquire held the request before granting the
+	// scheduler slot; gated says a scheduler slot was actually acquired, so a
+	// zero wait is a measured zero rather than "no scheduler".
+	queueWait time.Duration
+	gated     bool
+}
+
+// QueueWait reports the scheduler wait this lease's request paid before its work
+// started, and whether a scheduler slot was acquired at all (false for a nil lease
+// or a token-rate-only lease). Nil-safe.
+func (l *AdmissionLease) QueueWait() (time.Duration, bool) {
+	if l == nil || !l.gated {
+		return 0, false
+	}
+	return l.queueWait, true
 }
 
 // Grow tops up the lease's token footprint by additionalTokens (issue #5268, TGI anti-hog
@@ -1071,8 +1086,9 @@ func (c *AdmissionController) Acquire(ctx context.Context, req SeqRequest) (*Adm
 		c.admitLocked(req)
 		c.recordDecisionLocked(req, VerdictAdmitted, "", "")
 		c.mu.Unlock()
-		enginestep.Default.ObservePhase(enginestep.PhaseAdmissionWait, time.Since(waitStart))
-		return &AdmissionLease{ctl: c, traceID: req.TraceID}, nil
+		wait := time.Since(waitStart)
+		enginestep.Default.ObservePhase(enginestep.PhaseAdmissionWait, wait)
+		return &AdmissionLease{ctl: c, traceID: req.TraceID, queueWait: wait, gated: true}, nil
 	}
 	if c.policy.MaxWaiting > 0 && len(c.waiting) >= c.policy.MaxWaiting {
 		c.stats.Shed++
@@ -1099,15 +1115,17 @@ func (c *AdmissionController) Acquire(ctx context.Context, req SeqRequest) (*Adm
 	select {
 	case <-ready:
 		c.recordGrantLocked(req)
-		enginestep.Default.ObservePhase(enginestep.PhaseAdmissionWait, time.Since(waitStart))
-		return &AdmissionLease{ctl: c, traceID: req.TraceID}, nil
+		wait := time.Since(waitStart)
+		enginestep.Default.ObservePhase(enginestep.PhaseAdmissionWait, wait)
+		return &AdmissionLease{ctl: c, traceID: req.TraceID, queueWait: wait, gated: true}, nil
 	default:
 	}
 	select {
 	case <-ready:
 		c.recordGrantLocked(req)
-		enginestep.Default.ObservePhase(enginestep.PhaseAdmissionWait, time.Since(waitStart))
-		return &AdmissionLease{ctl: c, traceID: req.TraceID}, nil
+		wait := time.Since(waitStart)
+		enginestep.Default.ObservePhase(enginestep.PhaseAdmissionWait, wait)
+		return &AdmissionLease{ctl: c, traceID: req.TraceID, queueWait: wait, gated: true}, nil
 	case <-ctx.Done():
 		c.cancelAdmission(req.TraceID)
 		c.recordCancelLocked(req)

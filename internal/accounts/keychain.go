@@ -31,6 +31,9 @@ import (
 // (service, account) from the login Keychain. nil (every non-darwin build, and any test
 // that has not stubbed it) means "no keychain on this platform" — probes miss without
 // side effects. keychain_darwin.go's init wires the real `security` exec; tests stub it.
+// A failed read returns ErrKeychainItemNotFound / ErrKeychainTimeout (wrapped is fine) so
+// classifyKeychainErr can tell missing from timeout from any other error; an empty
+// account matches the service under any account.
 var claudeKeychainReadPassword func(service, account string) ([]byte, error)
 
 // ClaudeKeychainSupported reports whether this build can consult a keychain at all —
@@ -150,9 +153,10 @@ func parseClaudeKeychainCred(b []byte) (KeychainCred, bool) {
 const claudeKeychainCacheTTL = 5 * time.Second
 
 type claudeKeychainCacheEntry struct {
-	raw []byte
-	ok  bool
-	at  time.Time
+	raw    []byte
+	state  KeychainState
+	detail string
+	at     time.Time
 }
 
 var (
@@ -169,49 +173,89 @@ func resetClaudeKeychainCache() {
 	claudeKeychainCacheMu.Unlock()
 }
 
-// claudeKeychainRead probes ONE service name through the seam with the TTL cache in
-// front, returning the item's raw value. Hits and misses are both cached: a miss
-// re-execs `security` at most once per TTL, so registry reconciles that sweep many
+// claudeKeychainProbeService probes ONE (service, account) pair through the seam with the
+// TTL cache in front, returning the item's raw value and the typed outcome (fak-private#3063):
+// found, missing (no such item), timeout (the read sat past its deadline — on an
+// unattended box almost always a securityd ACL prompt nobody answered), error (any other
+// failure), or unsupported (no seam on this platform). Hits and misses are both cached:
+// a miss re-execs `security` at most once per TTL, so registry reconciles that sweep many
 // seats cannot storm the keychain. Interpretation (OAuth JSON vs raw API key) is the
 // caller's — the cache is shape-blind.
-func claudeKeychainRead(service string) ([]byte, bool) {
+func claudeKeychainProbeService(service, account string) ([]byte, KeychainState, string) {
 	read := claudeKeychainReadPassword
 	if read == nil {
-		return nil, false
+		return nil, KeychainUnsupported, ""
 	}
+	key := service + "\x00" + account
 	now := claudeKeychainCacheNow()
 	claudeKeychainCacheMu.Lock()
-	if e, hit := claudeKeychainCache[service]; hit && now.Sub(e.at) < claudeKeychainCacheTTL {
+	if e, hit := claudeKeychainCache[key]; hit && now.Sub(e.at) < claudeKeychainCacheTTL {
 		claudeKeychainCacheMu.Unlock()
-		return e.raw, e.ok
+		return e.raw, e.state, e.detail
 	}
 	claudeKeychainCacheMu.Unlock()
 
-	b, err := read(service, claudeKeychainAccount())
-	ok := err == nil
-	if !ok {
+	b, err := read(service, account)
+	state, detail := classifyKeychainErr(err)
+	if state != KeychainFound {
 		b = nil
 	}
 	claudeKeychainCacheMu.Lock()
-	claudeKeychainCache[service] = claudeKeychainCacheEntry{raw: b, ok: ok, at: now}
+	claudeKeychainCache[key] = claudeKeychainCacheEntry{raw: b, state: state, detail: detail, at: now}
 	claudeKeychainCacheMu.Unlock()
-	return b, ok
+	return b, state, detail
 }
 
-// ClaudeKeychainCred reads the Keychain OAuth credential for a config home: the
-// candidate services in order, first parseable hit wins. ok=false means no keychain on
-// this platform, no item, or a placeholder item with no token material —
-// indistinguishable on purpose (every caller treats them all as "this fallback has
-// nothing").
-func ClaudeKeychainCred(dir string) (KeychainCred, bool) {
+// claudeKeychainRead is the historical boolean view of claudeKeychainProbeService for the
+// Claude Code items (account = the sanitized $USER).
+func claudeKeychainRead(service string) ([]byte, bool) {
+	b, state, _ := claudeKeychainProbeService(service, claudeKeychainAccount())
+	return b, state == KeychainFound
+}
+
+// ClaudeKeychainCredProbe reads the Keychain OAuth credential for a config home: the
+// candidate services in order, first parseable hit wins. On a miss the probe names WHY
+// (missing / timeout / error / no_token / unsupported) instead of collapsing every
+// failure into one "no credential" answer (fak-private#3063).
+func ClaudeKeychainCredProbe(dir string) (KeychainCred, KeychainProbe) {
+	var agg KeychainProbe
+	agg.State = KeychainUnsupported
 	for _, service := range claudeKeychainServices(claudeKeychainServiceBase, dir) {
-		if b, ok := claudeKeychainRead(service); ok {
+		b, state, detail := claudeKeychainProbeService(service, claudeKeychainAccount())
+		if state == KeychainFound {
 			if cred, ok := parseClaudeKeychainCred(b); ok {
-				return cred, true
+				return cred, KeychainProbe{State: KeychainFound, Service: service}
 			}
+			state, detail = KeychainNoToken, "item present but carries no usable token"
 		}
+		agg = agg.worse(KeychainProbe{State: state, Service: service, Detail: detail})
 	}
-	return KeychainCred{}, false
+	return KeychainCred{}, agg.withOSVersion()
+}
+
+// ClaudeKeychainCred reads the Keychain OAuth credential for a config home. ok=false
+// means no keychain on this platform, no item, an unreadable item, or a placeholder item
+// with no token material; ClaudeKeychainCredProbe tells those apart.
+func ClaudeKeychainCred(dir string) (KeychainCred, bool) {
+	cred, probe := ClaudeKeychainCredProbe(dir)
+	return cred, probe.OK()
+}
+
+// ClaudeKeychainAPIKeyProbe is ClaudeKeychainAPIKey with the typed miss reason.
+func ClaudeKeychainAPIKeyProbe(dir string) (string, KeychainProbe) {
+	var agg KeychainProbe
+	agg.State = KeychainUnsupported
+	for _, service := range claudeKeychainServices(claudeKeychainAPIKeyBase, dir) {
+		b, state, detail := claudeKeychainProbeService(service, claudeKeychainAccount())
+		if state == KeychainFound {
+			if key, ok := keychainKeyShaped(b); ok {
+				return key, KeychainProbe{State: KeychainFound, Service: service}
+			}
+			state, detail = KeychainNoToken, "item present but its value is not shaped like an API key"
+		}
+		agg = agg.worse(KeychainProbe{State: state, Service: service, Detail: detail})
+	}
+	return "", agg.withOSVersion()
 }
 
 // ClaudeKeychainAPIKey reads the RAW Anthropic API key Claude Code saved at onboarding
@@ -223,18 +267,48 @@ func ClaudeKeychainCred(dir string) (KeychainCred, bool) {
 // mis-shaped value would turn a clean needs-login diagnosis into an opaque upstream
 // 401.
 func ClaudeKeychainAPIKey(dir string) (string, bool) {
-	for _, service := range claudeKeychainServices(claudeKeychainAPIKeyBase, dir) {
-		b, ok := claudeKeychainRead(service)
-		if !ok {
-			continue
-		}
-		key := strings.TrimSpace(string(b))
-		if key == "" || strings.HasPrefix(key, "{") || strings.ContainsAny(key, " \t\n\r") {
-			continue
-		}
-		return key, true
+	key, probe := ClaudeKeychainAPIKeyProbe(dir)
+	return key, probe.OK()
+}
+
+// keychainKeyShaped trims a raw keychain value and accepts it only when it looks like a
+// single-token secret (one line, no whitespace, not a JSON blob).
+func keychainKeyShaped(b []byte) (string, bool) {
+	key := strings.TrimSpace(string(b))
+	if key == "" || strings.HasPrefix(key, "{") || strings.ContainsAny(key, " \t\n\r") {
+		return "", false
 	}
-	return "", false
+	return key, true
+}
+
+// KeychainSecret reads a fak-owned generic-password item by SERVICE name alone (any
+// account), accepting only a key-shaped value. It is the durable store `fak serve
+// --require-upstream-key` falls back to when its --api-key-env variable is empty: a
+// login-Keychain item survives reboot, where `launchctl setenv` does not. The value is
+// never logged; the probe carries only the typed outcome.
+func KeychainSecret(service string) (string, KeychainProbe) {
+	b, state, detail := claudeKeychainProbeService(service, "")
+	if state == KeychainFound {
+		if key, ok := keychainKeyShaped(b); ok {
+			return key, KeychainProbe{State: KeychainFound, Service: service}
+		}
+		state, detail = KeychainNoToken, "item present but its value is not shaped like an API key"
+	}
+	return "", KeychainProbe{State: state, Service: service, Detail: detail}.withOSVersion()
+}
+
+// ClaudeKeychainHasCredsProbe is the login-posture answer with its typed reason: found
+// when the Keychain holds a live credential for this config home, expired when the
+// recorded expiry has passed, otherwise the probe's miss state.
+func ClaudeKeychainHasCredsProbe(dir string) KeychainProbe {
+	cred, probe := ClaudeKeychainCredProbe(dir)
+	if !probe.OK() {
+		return probe
+	}
+	if cred.ExpiresAt > 0 && !time.UnixMilli(cred.ExpiresAt).After(time.Now()) {
+		return KeychainProbe{State: KeychainExpired, Service: probe.Service, Detail: "recorded expiry has passed"}
+	}
+	return probe
 }
 
 // ClaudeKeychainHasCreds is the login-posture answer: does the Keychain hold a live
@@ -242,11 +316,7 @@ func ClaudeKeychainAPIKey(dir string) (string, bool) {
 // keychain-only Mac seat reads ready instead of needs_login. A positive recorded expiry
 // must still be in the future; ExpiresAt<=0 keeps Claude Code's non-expiring convention.
 func ClaudeKeychainHasCreds(dir string) bool {
-	cred, ok := ClaudeKeychainCred(dir)
-	if !ok {
-		return false
-	}
-	return cred.ExpiresAt <= 0 || time.UnixMilli(cred.ExpiresAt).After(time.Now())
+	return ClaudeKeychainHasCredsProbe(dir).OK()
 }
 
 // ClaudeKeychainAccessToken returns the Keychain access token when it is safe to SEND

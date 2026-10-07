@@ -34,6 +34,7 @@ var (
 	syncBuildReconciliationPacket = safesync.BuildReconciliationPacket
 	syncExecutePacket             = safesync.ExecutePacket
 	syncHeal                      = safesync.Heal
+	syncAutoReconcile             = safesync.AutoReconcileDisjoint
 	syncCaptureSource             = func(repo string) (string, error) { return gitOut(repo, "rev-parse", "HEAD") }
 )
 
@@ -78,6 +79,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	budget := fs.Duration("budget", budgetDefault, budgetHelp)
 	quarantineScratch := fs.Bool("quarantine-scratch", true, "shift-left untracked artifact isolation: safely isolate and restore untracked files colliding with incoming fast-forward additions (#10913)")
 	asJSON := fs.Bool("json", false, "emit the assessment as JSON")
+	noAutoReconcile := fs.Bool("no-auto-reconcile", false, "push: keep the DIVERGED_DISJOINT refusal instead of healing it through the verified reconciliation packet (the same heal `fak commit --push` runs)")
 	dryRun := fs.Bool("dry-run", false, "heal: inspect and report phantom deletions without modifying index or worktree")
 	resumeToken := fs.String("resume-token", "", "check: operation-bound token emitted by a blocked PUBLIC_LEAK preflight")
 	defaultDev := "main"
@@ -131,6 +133,9 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			MaxRetries:     *retries,
 			VelocityBudget: *budget,
 		})
+		if err == nil && safesync.IsDisjointPushRefusal(res) && !*noAutoReconcile {
+			res = syncAutoReconcilePush(context.Background(), res, repoPath, *remote, *branch, strings.TrimSpace(sourceSHA), *retries, *budget)
+		}
 		res = annotatePushWorktree(context.Background(), res, repoPath)
 		if err != nil {
 			if *asJSON {
@@ -467,7 +472,7 @@ func syncUsage(w io.Writer) {
   fak sync [check]   [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
                         [--recheck-path PATH ...] [--resume-token TOKEN]
   fak sync apply     [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
-  fak sync push      [--repo DIR] [--remote origin] [--branch B] [--retries N] [--budget 5s] [--json]
+  fak sync push      [--repo DIR] [--remote origin] [--branch B] [--retries N] [--budget 5s] [--no-auto-reconcile] [--json]
   fak sync drain     [--repo DIR] [--remote origin] [--branch B] [--queue-file F] [--budget D] [--json]
   fak sync reconcile [--repo DIR] [--remote origin] [--branch B] [--goal G] [--apply] [--fetch] [--json] [--emit-packet] [--execute]
   fak sync packet    [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
@@ -482,8 +487,10 @@ bypass or soften it. apply runs the fast-forward only when every path Git would 
 HEAD or already byte-identical to the remote-tracking version. push pushes the branch
 and retries a TRANSIENT non-fast-forward race (a peer landed between fetch and push,
 but HEAD already contains origin); on a genuine behind/diverged state it stops with a
-clear integrate-then-push next step. Its velocity evidence scores only a published
-safe push against the declared --budget; refusals/errors retain timing but are UNSCORED.
+clear integrate-then-push next step. A DIVERGED_DISJOINT refusal is healed through the
+same verified safe-disjoint reconciliation packet "fak commit --push" runs (merge,
+re-push, graph + peer-byte readback); --no-auto-reconcile keeps the refusal. Its
+velocity evidence scores only a published safe push against the declared --budget; refusals/errors retain timing but are UNSCORED.
 apply uses only git merge --ff-only
 --no-autostash --no-overwrite-ignore against the immutable SHA that check assessed;
 a last-moment worktree change is a refusal, never pre-cleaned. drain is the release valve for commits stranded by
@@ -700,6 +707,45 @@ func renderSyncPacket(w io.Writer, pkt *safesync.ReconciliationPacket) {
 	}
 }
 
+// syncAutoReconcilePush heals a DIVERGED_DISJOINT `fak sync push` refusal through the
+// shared safesync.AutoReconcileDisjoint path — the exact heal `fak commit --push` runs
+// (#12078) — so the two verbs reach the same outcome for the same divergence. Only a
+// dispatchable safe-disjoint packet executes; any other outcome keeps the original
+// refusal and appends why the heal declined.
+func syncAutoReconcilePush(ctx context.Context, res safesync.PushResult, repo, remote, branch, sourceSHA string, retries int, budget time.Duration) safesync.PushResult {
+	sess := firstNonEmpty(os.Getenv("CLAUDE_CODE_SESSION_ID"), os.Getenv("FAK_SESSION_ID"))
+	start := time.Now()
+	healed := syncAutoReconcile(ctx, res, safesync.AutoReconcileOptions{
+		Repo:               repo,
+		Remote:             remote,
+		Branch:             branch,
+		Session:            sess,
+		SourceSHA:          sourceSHA,
+		MaxPushRetries:     retries,
+		PushVelocityBudget: budget,
+		Build:              syncBuildReconciliationPacket,
+		Execute:            syncExecutePacket,
+	})
+	res.AutoReconcile = &healed
+	if healed.Pushed {
+		res.Pushed = true
+		res.Attempts++
+		res.Reason = ""
+		res.Detail = "auto-reconciled disjoint divergence via safe-disjoint merge, then pushed"
+		// Rescore end to end: the refused first push plus the heal that published.
+		elapsed := time.Duration(res.Velocity.ElapsedMS)*time.Millisecond + time.Since(start)
+		res.Velocity = safesync.ScorePushVelocity(res, elapsed, budget, nil)
+		if healed.Reason != "" {
+			res.Detail += " (" + healed.Reason + ": " + healed.Detail + ")"
+		}
+		return res
+	}
+	if healed.Reason != "" {
+		res.Detail += "; auto-reconcile declined (" + healed.Reason + ": " + healed.Detail + ")"
+	}
+	return res
+}
+
 // renderSyncPush is the human view of a SafePush outcome.
 func renderSyncPush(w io.Writer, res safesync.PushResult) {
 	if res.Pushed {
@@ -708,6 +754,9 @@ func renderSyncPush(w io.Writer, res safesync.PushResult) {
 			attempts = fmt.Sprintf("%d attempts", res.Attempts)
 		}
 		fmt.Fprintf(w, "pushed %s -> %s/%s (%s)\n", res.Branch, res.Remote, res.Branch, attempts)
+		if res.AutoReconcile != nil && res.AutoReconcile.Pushed {
+			fmt.Fprintf(w, "  %s\n", res.Detail)
+		}
 		renderSyncPushVelocity(w, res.Velocity)
 		renderWorktree(w, res.Worktree)
 		return

@@ -91,8 +91,18 @@ const (
 	MetricPrefillTokensTotal = "fak_engine_prefill_tokens_total"
 	MetricPrefillChunksTotal = "fak_engine_prefill_chunks_total"
 	MetricPrefixMatchedTotal = "fak_engine_prefix_matched_tokens_total"
-	MetricRequestsActive     = "fak_engine_requests_active"
-	MetricLastStepTimestamp  = "fak_engine_last_step_timestamp_seconds"
+	// MetricPrefixQueriedTotal is the hit-rate denominator: prompt tokens looked
+	// up in the prefix cache, hit or miss (vLLM prefix_cache_queries). Hit rate is
+	// prefix_matched / prefix_queried.
+	MetricPrefixQueriedTotal = "fak_engine_prefix_queried_tokens_total"
+	// MetricPreemptionsTotal counts running lanes preempted under KV pressure, by
+	// reason (swap / recompute / gpudirect_swap); vLLM vllm:num_preemptions_total.
+	MetricPreemptionsTotal = "fak_engine_preemptions_total"
+	// MetricIterationTokens is tokens processed per engine step: lanes for one
+	// decode step, chunk tokens for one prefill chunk; vLLM vllm:iteration_tokens_total.
+	MetricIterationTokens   = "fak_engine_iteration_tokens"
+	MetricRequestsActive    = "fak_engine_requests_active"
+	MetricLastStepTimestamp = "fak_engine_last_step_timestamp_seconds"
 
 	MetricSpecRoundsTotal         = "fak_engine_spec_rounds_total"
 	MetricSpecDraftTokensTotal    = "fak_engine_spec_draft_tokens_total"
@@ -105,6 +115,7 @@ var MetricFamilies = []string{
 	MetricPhaseSeconds, MetricDecodeStepSeconds, MetricDecodeStepLanes,
 	MetricDecodeTokensTotal, MetricCohortSize, MetricCoalesceQueueDepth,
 	MetricPrefillTokensTotal, MetricPrefillChunksTotal, MetricPrefixMatchedTotal,
+	MetricPrefixQueriedTotal, MetricPreemptionsTotal, MetricIterationTokens,
 	MetricRequestsActive, MetricLastStepTimestamp,
 	MetricSpecRoundsTotal, MetricSpecDraftTokensTotal, MetricSpecAcceptedTokensTotal,
 	MetricSpecAcceptedPerRound,
@@ -114,7 +125,20 @@ var (
 	secondsBuckets = []float64{0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60}
 	lanesBuckets   = []float64{1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64}
 	acceptBuckets  = []float64{0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16}
+	// iterTokBuckets mirror vLLM's iteration_tokens_total cudagraph-ish ladder,
+	// spanning one decode lane up to a large prefill chunk.
+	iterTokBuckets = []float64{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384}
 )
+
+// Preemption reasons (the closed label vocabulary of MetricPreemptionsTotal).
+const (
+	PreemptSwap          = "swap"
+	PreemptRecompute     = "recompute"
+	PreemptGPUDirectSwap = "gpudirect_swap"
+)
+
+// PreemptionReasons is the closed preemption reason vocabulary, in render order.
+var PreemptionReasons = []string{PreemptSwap, PreemptRecompute, PreemptGPUDirectSwap}
 
 // DefaultRingSize is the number of recent step records Default keeps.
 const DefaultRingSize = 512
@@ -260,10 +284,13 @@ type Recorder struct {
 	decodeTokens map[string]uint64
 	cohortSize   *histogram
 	specAccepted *histogram
+	iterTokens   *histogram
+	preemptions  map[string]uint64
 
 	prefillTokens   uint64
 	prefillChunks   uint64
 	prefixMatched   uint64
+	prefixQueried   uint64
 	specRounds      uint64
 	specDrafted     uint64
 	specAcceptedTok uint64
@@ -288,6 +315,8 @@ func New(ringSize int) *Recorder {
 		decodeTokens: make(map[string]uint64, len(Paths)),
 		cohortSize:   newHistogram(lanesBuckets),
 		specAccepted: newHistogram(acceptBuckets),
+		iterTokens:   newHistogram(iterTokBuckets),
+		preemptions:  make(map[string]uint64, len(PreemptionReasons)),
 		ring:         make([]StepRecord, ringSize),
 	}
 	for _, p := range Phases {
@@ -362,6 +391,7 @@ func (r *Recorder) ObserveDecodeStep(path string, lanes int, d time.Duration) {
 	}
 	hs.observe(d.Seconds())
 	r.stepLanes[path].observe(float64(lanes))
+	r.iterTokens.observe(float64(lanes))
 	r.decodeTokens[path] += uint64(lanes)
 	r.lastStep = r.now()
 	r.appendLocked(StepRecord{Kind: KindDecodeStep, Path: path, Lanes: lanes, Tokens: lanes, DurationNS: d.Nanoseconds(), AtUnixNano: r.lastStep.UnixNano()})
@@ -389,6 +419,8 @@ func (r *Recorder) ObserveSpeculativeRound(proposed, accepted, emitted int, d ti
 	r.specDrafted += uint64(proposed)
 	r.specAcceptedTok += uint64(accepted)
 	r.specAccepted.observe(float64(accepted))
+	// One verify forward processes the bonus position plus every draft token.
+	r.iterTokens.observe(float64(proposed + 1))
 	r.lastStep = r.now()
 	r.appendLocked(StepRecord{Kind: KindDecodeStep, Path: PathSpeculative, Lanes: 1, Tokens: emitted, Proposed: proposed, Accepted: accepted, DurationNS: d.Nanoseconds(), AtUnixNano: r.lastStep.UnixNano()})
 }
@@ -402,6 +434,7 @@ func (r *Recorder) ObservePrefillChunk(tokens int, d time.Duration) {
 	defer r.mu.Unlock()
 	r.prefillTokens += uint64(tokens)
 	r.prefillChunks++
+	r.iterTokens.observe(float64(tokens))
 	r.lastStep = r.now()
 	r.appendLocked(StepRecord{Kind: KindPrefillChunk, Tokens: tokens, DurationNS: d.Nanoseconds(), AtUnixNano: r.lastStep.UnixNano()})
 }
@@ -413,6 +446,40 @@ func (r *Recorder) ObservePrefixMatched(tokens int) {
 	}
 	r.mu.Lock()
 	r.prefixMatched += uint64(tokens)
+	r.mu.Unlock()
+}
+
+// ObservePrefixQueried records prompt tokens looked up in the KV prefix cache,
+// hit or miss. Call it beside ObservePrefixMatched with the looked-up prompt
+// length so matched/queried is the token hit rate.
+func (r *Recorder) ObservePrefixQueried(tokens int) {
+	if r == nil || tokens <= 0 {
+		return
+	}
+	r.mu.Lock()
+	r.prefixQueried += uint64(tokens)
+	r.mu.Unlock()
+}
+
+// ObservePreemption records one running lane preempted under KV pressure, by
+// reason (one of PreemptionReasons). Unknown reasons are dropped: the closed
+// vocabulary keeps the series set bounded.
+func (r *Recorder) ObservePreemption(reason string) {
+	if r == nil {
+		return
+	}
+	known := false
+	for _, k := range PreemptionReasons {
+		if k == reason {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return
+	}
+	r.mu.Lock()
+	r.preemptions[reason]++
 	r.mu.Unlock()
 }
 
@@ -493,6 +560,15 @@ type SpecStat struct {
 	TokensPerRound float64 `json:"tokens_per_round"`
 }
 
+// IterStat summarizes the per-step token histogram.
+type IterStat struct {
+	Count uint64  `json:"count"`
+	Mean  float64 `json:"mean"`
+	P50   float64 `json:"p50"`
+	P99   float64 `json:"p99"`
+	Max   float64 `json:"max"`
+}
+
 // Snapshot is the bounded agent-facing view of the recorder.
 type Snapshot struct {
 	Schema             string               `json:"schema"`
@@ -507,7 +583,13 @@ type Snapshot struct {
 	PrefillTokens      uint64               `json:"prefill_tokens"`
 	PrefillChunks      uint64               `json:"prefill_chunks"`
 	PrefixMatched      uint64               `json:"prefix_matched_tokens"`
-	Recent             []StepRecord         `json:"recent"`
+	PrefixQueried      uint64               `json:"prefix_queried_tokens"`
+	// PrefixHitRate is PrefixMatched/PrefixQueried (0 when nothing was queried).
+	PrefixHitRate float64           `json:"prefix_hit_rate"`
+	Preemptions   map[string]uint64 `json:"preemptions"`
+	// IterationTokens summarizes tokens processed per engine step (Count=steps).
+	IterationTokens IterStat     `json:"iteration_tokens"`
+	Recent          []StepRecord `json:"recent"`
 }
 
 // SnapshotSchema versions the Snapshot JSON shape.
@@ -526,7 +608,7 @@ func (r *Recorder) Snapshot(recent int, kind string) Snapshot {
 	if recent > MaxRecent {
 		recent = MaxRecent
 	}
-	s := Snapshot{Schema: SnapshotSchema, Phases: map[string]PhaseStat{}, Decode: map[string]PathStat{}, Recent: []StepRecord{}}
+	s := Snapshot{Schema: SnapshotSchema, Phases: map[string]PhaseStat{}, Decode: map[string]PathStat{}, Preemptions: map[string]uint64{}, Recent: []StepRecord{}}
 	if r == nil {
 		s.NowUnixNano = time.Now().UnixNano()
 		return s
@@ -557,6 +639,16 @@ func (r *Recorder) Snapshot(recent int, kind string) Snapshot {
 		s.Cohorts = PathStat{Steps: c.count, MeanLanes: c.sum / float64(c.count), MaxLanes: c.max}
 	}
 	s.PrefillTokens, s.PrefillChunks, s.PrefixMatched = r.prefillTokens, r.prefillChunks, r.prefixMatched
+	s.PrefixQueried = r.prefixQueried
+	if r.prefixQueried > 0 {
+		s.PrefixHitRate = float64(r.prefixMatched) / float64(r.prefixQueried)
+	}
+	for _, k := range PreemptionReasons {
+		s.Preemptions[k] = r.preemptions[k]
+	}
+	if h := r.iterTokens; h.count > 0 {
+		s.IterationTokens = IterStat{Count: h.count, Mean: h.sum / float64(h.count), P50: h.quantile(0.5), P99: h.quantile(0.99), Max: h.max}
+	}
 	if r.specRounds > 0 {
 		s.Speculative = &SpecStat{
 			Rounds:         r.specRounds,
@@ -611,8 +703,18 @@ func (s Snapshot) Compact() string {
 	if sp := s.Speculative; sp != nil {
 		fmt.Fprintf(&b, " | spec rounds=%d accept=%.0f%% (%d/%d) tok/round=%.2f", sp.Rounds, 100*sp.AcceptanceRate, sp.AcceptedTokens, sp.DraftTokens, sp.TokensPerRound)
 	}
-	if s.PrefillChunks > 0 || s.PrefixMatched > 0 {
-		fmt.Fprintf(&b, " | prefill tok=%d chunks=%d prefix_hit_tok=%d", s.PrefillTokens, s.PrefillChunks, s.PrefixMatched)
+	if s.PrefillChunks > 0 || s.PrefixMatched > 0 || s.PrefixQueried > 0 {
+		fmt.Fprintf(&b, " | prefill tok=%d chunks=%d prefix_hit_tok=%d/%d (%.0f%%)", s.PrefillTokens, s.PrefillChunks, s.PrefixMatched, s.PrefixQueried, 100*s.PrefixHitRate)
+	}
+	if it := s.IterationTokens; it.Count > 0 {
+		fmt.Fprintf(&b, " | iter_tok p50=%.0f p99=%.0f max=%.0f", it.P50, it.P99, it.Max)
+	}
+	var preempt uint64
+	for _, v := range s.Preemptions {
+		preempt += v
+	}
+	if preempt > 0 {
+		fmt.Fprintf(&b, " | preempt=%d (swap=%d recompute=%d gpudirect=%d)", preempt, s.Preemptions[PreemptSwap], s.Preemptions[PreemptRecompute], s.Preemptions[PreemptGPUDirectSwap])
 	}
 	var phases []string
 	for _, p := range Phases {
@@ -668,6 +770,14 @@ func (r *Recorder) WritePrometheus(w io.Writer) {
 	fmt.Fprintf(w, "%s %d\n", MetricPrefillChunksTotal, r.prefillChunks)
 	helpType(w, MetricPrefixMatchedTotal, "Prompt tokens served from the KV prefix cache instead of prefill.", "counter")
 	fmt.Fprintf(w, "%s %d\n", MetricPrefixMatchedTotal, r.prefixMatched)
+	helpType(w, MetricPrefixQueriedTotal, "Prompt tokens looked up in the KV prefix cache, hit or miss (hit-rate denominator).", "counter")
+	fmt.Fprintf(w, "%s %d\n", MetricPrefixQueriedTotal, r.prefixQueried)
+	helpType(w, MetricPreemptionsTotal, "Running lanes preempted under KV pressure, by reason (swap, recompute, gpudirect_swap).", "counter")
+	for _, k := range PreemptionReasons {
+		fmt.Fprintf(w, "%s{reason=%q} %d\n", MetricPreemptionsTotal, k, r.preemptions[k])
+	}
+	helpType(w, MetricIterationTokens, "Tokens processed per engine step (decode lanes per decode step, chunk tokens per prefill chunk).", "histogram")
+	r.iterTokens.write(w, MetricIterationTokens, "")
 	helpType(w, MetricRequestsActive, "Requests currently inside the native planner.", "gauge")
 	fmt.Fprintf(w, "%s %d\n", MetricRequestsActive, r.requestsActive)
 	helpType(w, MetricLastStepTimestamp, "Unix time of the last prefill chunk or decode step (0 = never stepped).", "gauge")

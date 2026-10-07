@@ -125,3 +125,27 @@ func TestNativeSchedulerRecordsStepObservations(t *testing.T) {
 		t.Fatal("snapshot last step timestamp is zero")
 	}
 }
+
+// TestNativeSchedulerPreemptionFeedsEngineStepRecorder witnesses the real preempt
+// site: a one-block KV budget forces a swap preemption, and the injected engine
+// recorder's fak_engine_preemptions_total{reason="swap"} advances.
+//
+// fak-test:runtime fast est=3s
+func TestNativeSchedulerPreemptionFeedsEngineStepRecorder(t *testing.T) {
+	for _, tc := range []struct {
+		mode   NativePreemptionMode
+		reason string
+	}{{NativePreemptSwap, enginestep.PreemptSwap}, {NativePreemptRecompute, enginestep.PreemptRecompute}} {
+		rec := enginestep.New(64)
+		s := NewNativeScheduler(model.NewSynthetic(SyntheticConfig()))
+		s.recorder = rec
+		s.SetKVPreemptionPolicy(NativePreemptionPolicy{Mode: tc.mode, MaxBlocks: 1, BlockTokens: 128})
+		_ = drainIssue31Requests(t, s, issue31Calls())
+		s.Close()
+		got := rec.Snapshot(0, "").Preemptions
+		want := s.KVPreemptionStats().Preemptions
+		if want < 1 || got[tc.reason] != uint64(want) {
+			t.Fatalf("mode %v: recorder preemptions=%v, scheduler stats=%d (want equal, >=1)", tc.mode, got, want)
+		}
+	}
+}

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -819,12 +820,24 @@ func (m *gatewayMetrics) observeCompletionServed(loc servingLocality, comp *agen
 	m.observeCompletionServedStream(loc, comp, dur, 0)
 }
 
+// observeCompletionServedCtx is observeCompletionServed carrying the admission
+// queue wait completeServed stamped on ctx (withPerfQueue) onto the perf row.
+func (m *gatewayMetrics) observeCompletionServedCtx(ctx context.Context, loc servingLocality, comp *agent.Completion, dur time.Duration) {
+	m.observeCompletionServedQueued(loc, comp, dur, 0, perfDetailFromCompletion(comp).withQueueFromContext(ctx))
+}
+
 // observeCompletionServedStream is observeCompletionServed for a streamed turn:
 // streamTTFT is the first content fragment the gateway itself watched arrive. The
 // planner's Timings stay authoritative when present (a native turn); a proxied
 // stream has none, so its watched first token is what fills TTFT instead of the
 // turn reading as buffered.
 func (m *gatewayMetrics) observeCompletionServedStream(loc servingLocality, comp *agent.Completion, dur, streamTTFT time.Duration) {
+	m.observeCompletionServedQueued(loc, comp, dur, streamTTFT, perfDetailFromCompletion(comp))
+}
+
+// observeCompletionServedQueued is the shared completion fold; detail carries the
+// perf-row-only annotations (model, engine anatomy, admission queue wait).
+func (m *gatewayMetrics) observeCompletionServedQueued(loc servingLocality, comp *agent.Completion, dur, streamTTFT time.Duration, detail perfDetail) {
 	if comp == nil {
 		return
 	}
@@ -841,7 +854,7 @@ func (m *gatewayMetrics) observeCompletionServedStream(loc servingLocality, comp
 		comp.FinishReason,
 		dur,
 		ttft,
-		perfDetailFromCompletion(comp),
+		detail,
 	)
 	m.attributeServedTurn(loc, usage.UncachedPromptTokens(), usage.CompletionTokens)
 }

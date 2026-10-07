@@ -60,6 +60,14 @@
 //	                           (want…/expect…/golden…) that no code in the test ever
 //	                           reads — the table documents an assertion it does not
 //	                           make.
+//	TESTQ_SLEEP_SYNC           a TestXxx that calls time.Sleep: it synchronises on a
+//	                           guessed wall-clock window instead of an event, so it
+//	                           flakes on a loaded runner and burns time on an idle one.
+//	TESTQ_WALLCLOCK_ASSERT     a t.Error/t.Fatal guarded by measured elapsed time
+//	                           (time.Since/time.Until): the verdict measures the
+//	                           machine's load, not the code under test.
+//	TESTQ_UNCONDITIONAL_SKIP   an unguarded top-level t.Skip: the test never runs on
+//	                           any machine yet still counts as a test.
 //
 // # Why it under-reports on purpose
 //

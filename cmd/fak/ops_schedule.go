@@ -548,8 +548,7 @@ Register-ScheduledTask -TaskName '%s' -Action $action -Trigger $trigger -Setting
 		if err := os.WriteFile(plistPath, []byte(plistContent), 0644); err != nil {
 			return err
 		}
-		_ = exec.CommandContext(ctx, "launchctl", "unload", plistPath).Run()
-		return exec.CommandContext(ctx, "launchctl", "load", "-w", plistPath).Run()
+		return newLaunchdAgent().Bootstrap(ctx, taskName, plistPath, false)
 
 	default:
 		return fmt.Errorf("unsupported scheduler target: %s", target)
@@ -579,12 +578,12 @@ func unregisterOpsTask(ctx context.Context, target, taskName string) error {
 		return nil
 
 	case "launchd":
+		bootoutErr := newLaunchdAgent().Bootout(ctx, taskName)
 		if home, err := os.UserHomeDir(); err == nil {
 			plistPath := filepath.Join(home, "Library", "LaunchAgents", taskName+".plist")
-			_ = exec.CommandContext(ctx, "launchctl", "unload", plistPath).Run()
 			_ = os.Remove(plistPath)
 		}
-		return nil
+		return bootoutErr
 
 	default:
 		return fmt.Errorf("unsupported scheduler target: %s", target)
@@ -759,7 +758,7 @@ func opsRenderSystemd(label, desc string, interval time.Duration, args []string)
 func opsRenderLaunchd(label string, interval time.Duration, args []string, repoRoot string) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
-	fmt.Fprintf(&b, "<!-- Written by: fak ops schedule — install: launchctl load -w %s.plist -->\n", label)
+	fmt.Fprintf(&b, "<!-- Written by: fak ops schedule — install: launchctl bootstrap gui/$(id -u) %s.plist -->\n", label)
 	b.WriteString(`<plist version="1.0">` + "\n")
 	b.WriteString("  <dict>\n")
 	fmt.Fprintf(&b, "    <key>Label</key>\n    <string>%s</string>\n", opsXMLEscape(label))

@@ -182,6 +182,7 @@ type DebtLane struct {
 	CriticalPath            *CriticalPathInfo   `json:"critical_path,omitempty"`   // Production critical-path reachability and provenance (#12361).
 	Findings                []string            `json:"findings,omitempty"`        // Summary messages for actionable findings on this lane.
 	FindingProvs            []FindingProvenance `json:"finding_provs,omitempty"`   // Provenance-rich typed debt findings.
+	RecentCommits           int                 `json:"recent_commits,omitempty"`  // Commits touching this unit in the churn window (git log); weights wave priority.
 }
 
 // IsPerformanceLane returns true if the lane represents a performance-critical path that requires proof freshness.
@@ -269,4 +270,7 @@ type Options struct {
 	Graph map[string]map[string]struct{}
 	// Clock allows deterministic timestamp injection in tests.
 	Clock func() time.Time
+	// ChurnDays is the git-history window (days) used to attach RecentCommits
+	// to each lane; 0 disables churn collection.
+	ChurnDays int
 }

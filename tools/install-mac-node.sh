@@ -188,14 +188,19 @@ else
   esac
 fi
 
-# --- upstream credential: persist in login env so launchd units inherit it ---
+# --- upstream credential: the durable home is the login Keychain ---
+# `launchctl setenv` is wiped on reboot, so it is only a this-session convenience. With
+# the Keychain item below, `fak serve --api-key-env ANTHROPIC_API_KEY
+# --require-upstream-key` reads it after a reboot and fails fast when it is missing
+# (fak-private#3063); `fak node install` arms those flags only when the item exists.
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   launchctl setenv ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
-  log "ANTHROPIC_API_KEY set in login environment (persists across unit restarts)"
-else
-  warn "ANTHROPIC_API_KEY is not set — the gateway cannot reach api.anthropic.com."
-  warn "Set it now and it will persist:"
-  warn "  launchctl setenv ANTHROPIC_API_KEY \"sk-ant-...\""
+  log "ANTHROPIC_API_KEY set in login environment (this session only; lost on reboot)"
+fi
+if ! /usr/bin/security find-generic-password -s fak-ANTHROPIC_API_KEY >/dev/null 2>&1; then
+  warn "No durable upstream key — the gateway can only pass through each client's own key."
+  warn "Store it in the login Keychain (prompts for the key):"
+  warn "  security add-generic-password -U -a \"\$USER\" -s fak-ANTHROPIC_API_KEY -w"
 fi
 
 # --- wait briefly for the gateway to become healthy ---

@@ -133,11 +133,11 @@ func TestLeaseReadPlaneIsGetOnly(t *testing.T) {
 
 func TestLeaseReadPlaneServesObservedLiveLeases(t *testing.T) {
 	refs := map[string]string{
-		"refs/fak/locks/gateway": `{"id":"gateway","tree_globs":["internal/gateway/**"],"holder":"nodeA/guard-1","acquired_unix":1000,"ttl_seconds":0,"generation":2,"session_id":"guard-1"}`,
+		"refs/fak/locks/gateway": `{"id":"gateway","tree_globs":["internal/gateway/**"],"holder":"nodeA/guard-1","acquired_unix":1000,"ttl_seconds":4000000000,"generation":2,"session_id":"guard-1"}`,
 		// An EXPIRED lease must be dropped from the live view (reapable, not blocking).
 		"refs/fak/locks/docs": `{"id":"docs","tree_globs":["docs/**"],"holder":"nodeB/guard-9","acquired_unix":100,"ttl_seconds":10}`,
 		// A session descriptor must never appear as a lock lease (the namespace split).
-		"refs/fak/locks/session-guard-1": `{"id":"guard-1","host":"nodeA","pcb_state":"RUNNING","updated_at":1000,"ttl_seconds":0}`,
+		"refs/fak/locks/session-guard-1": `{"id":"guard-1","host":"nodeA","pcb_state":"RUNNING","updated_at":1000,"ttl_seconds":4000000000}`,
 	}
 	installLeasePlane(t, leaseref.NewWithRunner(fakeLockRunner(refs), ""))
 	srv := newTestServer(t)
@@ -181,11 +181,13 @@ func TestLeaseReadPlaneServesObservedLiveLeases(t *testing.T) {
 
 func TestLeaseSessionsServePresenceAndLiveness(t *testing.T) {
 	refs := map[string]string{
-		// A lease whose owning session heartbeats (TTL 0 never expires) -> peer-live.
-		"refs/fak/locks/gateway":         `{"id":"gateway","tree_globs":["internal/gateway/**"],"holder":"nodeA/guard-1","acquired_unix":1000,"ttl_seconds":0,"generation":2,"session_id":"guard-1"}`,
-		"refs/fak/locks/session-guard-1": `{"id":"guard-1","host":"nodeA","pcb_state":"RUNNING","updated_at":1000,"ttl_seconds":0}`,
+		// A lease whose owning session heartbeats (far-future descriptor TTL) -> peer-live.
+		// Leases and descriptors carry a far-future TTL: a ttl-0 lease or session descriptor
+		// now ages out as legacy once 7 days old (fak-private#3076), and 1000 is decades past.
+		"refs/fak/locks/gateway":         `{"id":"gateway","tree_globs":["internal/gateway/**"],"holder":"nodeA/guard-1","acquired_unix":1000,"ttl_seconds":4000000000,"generation":2,"session_id":"guard-1"}`,
+		"refs/fak/locks/session-guard-1": `{"id":"guard-1","host":"nodeA","pcb_state":"RUNNING","updated_at":1000,"ttl_seconds":4000000000}`,
 		// A lease whose owning session's heartbeat lapsed -> positively dead, reclaimable.
-		"refs/fak/locks/docs":            `{"id":"docs","tree_globs":["docs/**"],"holder":"nodeB/guard-2","acquired_unix":1000,"ttl_seconds":0,"generation":1,"session_id":"guard-2"}`,
+		"refs/fak/locks/docs":            `{"id":"docs","tree_globs":["docs/**"],"holder":"nodeB/guard-2","acquired_unix":1000,"ttl_seconds":4000000000,"generation":1,"session_id":"guard-2"}`,
 		"refs/fak/locks/session-guard-2": `{"id":"guard-2","host":"nodeB","pcb_state":"RUNNING","updated_at":100,"ttl_seconds":10}`,
 	}
 	installLeasePlane(t, leaseref.NewWithRunner(fakeLockRunner(refs), ""))

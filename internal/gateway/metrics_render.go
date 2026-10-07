@@ -12,6 +12,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/blob"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
+	"github.com/anthony-chaudhary/fak/internal/engine"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
@@ -308,6 +309,12 @@ func (s *Server) renderMetrics() string {
 	if s.cacheStream != nil {
 		b.WriteString(s.cacheStream.Snapshot().Prometheus())
 	}
+	// Live-engine KV cache-event stream (fak_engine_cache_*): offload/restore/route/
+	// migrate hits, typed restore MISS/FAULT, and bytes/tokens moved across residency
+	// tiers, folded process-wide from every engine.CacheEventRecorder. Always rendered,
+	// with fak_engine_cache_events_observed=0 until a producer feeds it, so an unwired
+	// stream is visibly dark rather than silently absent.
+	b.WriteString(engine.DefaultCacheEvents.Snapshot().Prometheus())
 	writeBlobMetrics(&b)
 	writeKVPrefixMetrics(&b)
 	s.writePrefixReuseAttributionMetrics(&b)
@@ -1210,8 +1217,12 @@ func (m *gatewayMetrics) writeInferenceMetrics(b *strings.Builder) inferenceSnap
 	// bringing the de facto serving-latency Prometheus SET to parity.
 	writeHelpType(b, "fak_gateway_inference_ttft_seconds", "Time-to-first-token (prefill: prompt ingest + first token) distribution, over the streamed turns whose prefill boundary was observable. The percentile view behind fak_gateway_inference_prefill_seconds_total's mean. fak analogue of vLLM time_to_first_token_seconds.", "histogram")
 	writeHistogram(b, "fak_gateway_inference_ttft_seconds", "", snap.ttftHist)
-	writeHelpType(b, "fak_gateway_inference_tpot_seconds", "Per-output-token (inter-token) latency distribution = decode wall-clock / generated tokens, per measured turn. The percentile view behind fak_gateway_inference_decode_tokens_per_second. fak analogue of vLLM inter_token_latency_seconds.", "histogram")
+	writeHelpType(b, "fak_gateway_inference_tpot_seconds", "Mean per-output-token latency distribution = decode wall-clock / generated tokens, one sample per measured turn. The percentile view behind fak_gateway_inference_decode_tokens_per_second. fak analogue of vLLM time_per_output_token_seconds; per-gap tails live on fak_gateway_inference_itl_seconds.", "histogram")
 	writeHistogram(b, "fak_gateway_inference_tpot_seconds", "", snap.tpotHist)
+	writeHelpType(b, "fak_gateway_inference_itl_seconds", "Inter-token latency distribution: one sample per wall gap between consecutive content deltas on a live streamed turn (buffered turns contribute none). Exposes decode stalls a per-turn mean hides. fak analogue of vLLM inter_token_latency_seconds.", "histogram")
+	writeHistogram(b, "fak_gateway_inference_itl_seconds", "", snap.itlHist)
+	writeHelpType(b, "fak_gateway_inference_max_itl_seconds", "Per-request worst inter-token gap on live streamed turns with at least two content deltas: the stall a client actually felt.", "histogram")
+	writeHistogram(b, "fak_gateway_inference_max_itl_seconds", "", snap.maxITLHist)
 	writeHelpType(b, "fak_gateway_inference_e2e_seconds", "Whole model-turn wall-clock distribution, over EVERY served turn (buffered or streamed). fak analogue of vLLM e2e_request_latency_seconds.", "histogram")
 	writeHistogram(b, "fak_gateway_inference_e2e_seconds", "", snap.e2eHist)
 	writeRegimeLatencyHistograms(b, snap.regimeHists)

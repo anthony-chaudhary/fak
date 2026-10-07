@@ -98,6 +98,13 @@ type Identity struct {
 	// when no org/workspace UUID is known, so two seats on the same key env collapse.
 	// DeriveAPIKeyIdentity fills it; an OAuth seat leaves it empty.
 	APIKeyEnv string `json:"api_key_env,omitempty"`
+	// Keychain is the typed outcome of the macOS login-Keychain fallback probe when the
+	// disk held no credential (fak-private#3063): missing, timeout (an unanswered
+	// securityd ACL prompt), error, no_token, or expired. It is set ONLY when that probe
+	// ran on a keychain-capable build and did not find a live login, so a needs_login seat
+	// can say WHY instead of a blanket "run /login"; the zero value (State "") means "no
+	// keychain miss to report". Observed per probe, never persisted.
+	Keychain KeychainProbe `json:"-"`
 }
 
 // AccountKey is the identity a seat collapses onto for dedup: two seats with the same
@@ -1000,7 +1007,7 @@ func DeriveIdentity(dir string) Identity {
 		return id
 	}
 	id.Email, id.AccountUUID = stateIdentity(dir)
-	id.HasCreds = hasClaudeCredentials(dir)
+	id.HasCreds, id.Keychain = hasClaudeCredentialsProbe(dir)
 	id.TokenFP = tokenFingerprint(dir)
 	return id
 }
@@ -1017,10 +1024,25 @@ func DeriveIdentity(dir string) Identity {
 // without this fallback every healthy Mac seat read as needs_login. Non-darwin builds
 // have no keychain seam and keep the disk-only answer byte-for-byte.
 func hasClaudeCredentials(dir string) bool {
+	ok, _ := hasClaudeCredentialsProbe(dir)
+	return ok
+}
+
+// hasClaudeCredentialsProbe is hasClaudeCredentials plus the keychain fallback's typed
+// miss (the zero KeychainProbe when the disk answered, the keychain found a live login,
+// or this build has no keychain at all).
+func hasClaudeCredentialsProbe(dir string) (bool, KeychainProbe) {
 	if hasClaudeFileCredentials(dir) {
-		return true
+		return true, KeychainProbe{}
 	}
-	return ClaudeKeychainHasCreds(dir)
+	probe := ClaudeKeychainHasCredsProbe(dir)
+	if probe.OK() {
+		return true, KeychainProbe{}
+	}
+	if probe.State == KeychainUnsupported {
+		return false, KeychainProbe{}
+	}
+	return false, probe
 }
 
 func hasClaudeFileCredentials(dir string) bool {

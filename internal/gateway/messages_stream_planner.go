@@ -171,7 +171,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	}
 	s.observePrefixReuseTurn(turnCtx, messages, comp)
 	lease.SettleUsage(comp.Usage) // settle the token-rate window with real usage (#2019)
-	s.accountStreamedTurn(r.Context(), sessionTurn, comp, req.Messages, began, req.Model, firstDelta.ttft(began))
+	s.accountStreamedTurn(r.Context(), sessionTurn, comp, req.Messages, began, req.Model, firstDelta.ttft(began), lease)
 
 	// Tool-call conformance fail-closed (the rule itself lives in
 	// failClosedOnUnparsedToolCalls). Mid-stream this surface ends the turn in the

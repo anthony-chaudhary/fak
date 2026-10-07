@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/enginestep"
+	"github.com/anthony-chaudhary/fak/internal/stepobs"
 )
 
 // fakEngineBatchingPath is the hand-authored continuous-batching board (uid
@@ -69,6 +70,9 @@ func fakEngineBatchingAllowedMetrics() map[string]bool {
 	for _, m := range enginestep.MetricFamilies {
 		allowed[m] = true
 	}
+	for _, m := range stepobs.MetricFamilies {
+		allowed[m] = true
+	}
 	for _, m := range []string{
 		"fak_sched_running", "fak_sched_waiting", "fak_sched_tokens_in_use", "fak_sched_queued_tokens",
 		"fak_sched_admitted_total", "fak_sched_queued_total", "fak_sched_shed_total",
@@ -78,6 +82,15 @@ func fakEngineBatchingAllowedMetrics() map[string]bool {
 		"fak_gateway_inference_requests_total",
 		"fak_gateway_inference_completion_tokens_total", "fak_gateway_inference_prompt_tokens_total",
 		"fak_gateway_kv_memory_evictions_total", "fak_gateway_kv_memory_resident_bytes",
+		// Serving-latency SLO row.
+		"fak_gateway_inference_ttft_seconds", "fak_gateway_inference_tpot_seconds", "fak_gateway_inference_e2e_seconds",
+		"fak_gateway_inference_prefill_tokens_per_second", "fak_gateway_inference_decode_tokens_per_second",
+		// Live-engine KV cache-event stream (engine.DefaultCacheEvents).
+		"fak_engine_cache_events_observed", "fak_engine_cache_hits_total", "fak_engine_cache_misses_total",
+		"fak_engine_cache_faults_total", "fak_engine_cache_restore_miss_total", "fak_engine_cache_restore_fault_total",
+		"fak_engine_cache_bytes_moved_breakdown_total",
+		// OTLP span export.
+		"fak_otlp_spans_total", "fak_otlp_queue_depth",
 	} {
 		allowed[m] = true
 	}

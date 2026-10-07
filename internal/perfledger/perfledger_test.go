@@ -500,3 +500,152 @@ func TestRecordIdentityRoundTripsFlat(t *testing.T) {
 		t.Fatalf("round trip = %+v (%v)", back, err)
 	}
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestSummarizeSplitsByCacheTierAndRestore(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	row := func(prompt, cached int, ttft time.Duration, tier, restore string) Record {
+		r := NewRecord(now, "stop", LocalitySelfHosted, prompt, 10, cached, 500*time.Millisecond, ttft)
+		r.CacheTier, r.CacheRestore = tier, restore
+		return r
+	}
+	cases := []struct {
+		name         string
+		recs         []Record
+		wantTier     map[string]TierSummary
+		wantRestore  map[string]int
+		wantUnserved int
+		wantCompact  []string
+		wantNoTier   bool
+	}{
+		{
+			name: "every tier plus a proxied row",
+			recs: []Record{
+				row(100, 300, 20*time.Millisecond, TierDeviceL1, RestoreHit),
+				row(100, 300, 40*time.Millisecond, TierDeviceL1, RestoreHit),
+				row(200, 200, 80*time.Millisecond, TierHostL2, RestoreHit),
+				row(300, 100, 150*time.Millisecond, TierRemoteL3, RestoreHit),
+				row(400, 0, 200*time.Millisecond, TierNone, RestoreUnserved),
+				row(400, 0, 0, TierNone, RestoreMiss),
+				NewRecord(now, "stop", LocalityVendor, 200, 10, 300, 500*time.Millisecond, 0),
+			},
+			// window prompt = 1700 uncached + 1200 cached = 2900
+			wantTier: map[string]TierSummary{
+				TierDeviceL1: {Count: 2, CachedTokens: 600, PromptServedShare: 0.2069, TTFTMeasured: 2, TTFTP50MS: 20},
+				TierHostL2:   {Count: 1, CachedTokens: 200, PromptServedShare: 0.069, TTFTMeasured: 1, TTFTP50MS: 80},
+				TierRemoteL3: {Count: 1, CachedTokens: 100, PromptServedShare: 0.0345, TTFTMeasured: 1, TTFTP50MS: 150},
+				TierNone:     {Count: 2, TTFTMeasured: 1, TTFTP50MS: 200},
+				TierUnknown:  {Count: 1, CachedTokens: 300, PromptServedShare: 0.1034},
+			},
+			wantRestore:  map[string]int{RestoreHit: 4, RestoreMiss: 1, RestoreUnserved: 1},
+			wantUnserved: 1,
+			wantCompact: []string{
+				"tier served/ttft p50: device_l1=20.7%/20ms(n=2) host_dram_l2=6.9%/80ms(n=1) remote_http_l3=3.5%/150ms(n=1) none=0.0%/200ms(n=2) unknown=10.3%/n/a(n=1)",
+				"restore hit=4 miss=1 unserved=1",
+			},
+		},
+		{
+			name: "proxy-only window stays unknown and renders no tier segment",
+			recs: []Record{
+				NewRecord(now, "stop", LocalityVendor, 100, 10, 100, 500*time.Millisecond, 50*time.Millisecond),
+			},
+			wantTier:   map[string]TierSummary{TierUnknown: {Count: 1, CachedTokens: 100, PromptServedShare: 0.5, TTFTMeasured: 1, TTFTP50MS: 50}},
+			wantNoTier: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := Summarize(tc.recs)
+			if len(s.ByTier) != len(tc.wantTier) {
+				t.Fatalf("by_tier = %+v, want %+v", s.ByTier, tc.wantTier)
+			}
+			for k, w := range tc.wantTier {
+				if s.ByTier[k] != w {
+					t.Errorf("by_tier[%s] = %+v, want %+v", k, s.ByTier[k], w)
+				}
+			}
+			if len(s.ByRestore) != len(tc.wantRestore) || s.RestoreUnserved != tc.wantUnserved {
+				t.Fatalf("by_restore = %v unserved=%d, want %v/%d", s.ByRestore, s.RestoreUnserved, tc.wantRestore, tc.wantUnserved)
+			}
+			for k, w := range tc.wantRestore {
+				if s.ByRestore[k] != w {
+					t.Errorf("by_restore[%s] = %d, want %d", k, s.ByRestore[k], w)
+				}
+			}
+			line := RenderCompact(BuildReport(tc.recs, 0, false, 0))
+			for _, want := range tc.wantCompact {
+				if !strings.Contains(line, want) {
+					t.Errorf("compact = %s\nwant substring %q", line, want)
+				}
+			}
+			if tc.wantNoTier && (strings.Contains(line, "tier served") || strings.Contains(line, "restore ")) {
+				t.Errorf("compact = %s, want no tier/restore segment on a proxy-only window", line)
+			}
+			keys := jsonKeys(t, tc.recs[0])
+			if _, ok := keys["cache_tier"]; ok != (tc.recs[0].CacheTier != "") {
+				t.Errorf("cache_tier omitempty broken: %v", keys)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestRecordQueueAndModelRoundTripAndOldRowsStillParse(t *testing.T) {
+	// A row written before queue_ms/model existed must still parse as schema v1.
+	old := `{"schema":"fak.gateway.perf-record.v1","unix_ms":1,"prompt_tokens":10,"completion_tokens":2,"cached_tokens":0,"e2e_ms":50,"ttft_ms":20}`
+	var r Record
+	if err := json.Unmarshal([]byte(old), &r); err != nil {
+		t.Fatalf("old row: %v", err)
+	}
+	if r.QueueMS != nil || r.Model != "" || r.TTFTMS != 20 {
+		t.Fatalf("old row decoded = %+v, want queue unknown, no model", r)
+	}
+	if m := jsonKeys(t, r); m["queue_ms"] != nil || m["model"] != nil {
+		t.Fatalf("old row re-encodes new keys: %v", m)
+	}
+
+	n := NewRecord(time.Now(), "stop", LocalitySelfHosted, 10, 2, 0, time.Second, 200*time.Millisecond).WithQueue(1500 * time.Microsecond)
+	n.Model = "qwen"
+	raw, _ := json.Marshal(n)
+	var back Record
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatalf("new row: %v", err)
+	}
+	if back.QueueMS == nil || *back.QueueMS != 1.5 || back.Model != "qwen" {
+		t.Fatalf("round trip = %+v, want queue 1.5ms model qwen", back)
+	}
+	// An immediate admit is a KNOWN zero wait, not an absent one.
+	zero := NewRecord(time.Now(), "stop", "", 1, 1, 0, time.Second, 0).WithQueue(0)
+	if m := jsonKeys(t, zero); m["queue_ms"] != float64(0) {
+		t.Fatalf("zero wait encoded as %v, want 0", m["queue_ms"])
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestSummarizeSplitsTTFTIntoQueueAndService(t *testing.T) {
+	q := func(ms float64) *float64 { return &ms }
+	recs := []Record{
+		{Schema: Schema, TTFTMS: 100, QueueMS: q(0)},
+		{Schema: Schema, TTFTMS: 200, QueueMS: q(300)},
+		{Schema: Schema, TTFTMS: 300, QueueMS: q(10)},
+		{Schema: Schema, QueueMS: q(900)}, // queue known, ttft unmeasured
+		{Schema: Schema, TTFTMS: 5000},    // no scheduler: excluded from the split
+	}
+	s := Summarize(recs)
+	if s.QueueMeasured != 4 || s.QueueP50MS != 10 || s.QueueP99MS != 900 {
+		t.Fatalf("queue = %d p50=%v p99=%v, want 4/10/900", s.QueueMeasured, s.QueueP50MS, s.QueueP99MS)
+	}
+	// client = queue+ttft over {100, 500, 310}; service = ttft over {100, 200, 300}.
+	if s.ClientTTFTP50MS != 310 || s.ServiceTTFTP50MS != 200 {
+		t.Fatalf("client/service p50 = %v/%v, want 310/200", s.ClientTTFTP50MS, s.ServiceTTFTP50MS)
+	}
+	line := RenderCompact(Report{Summary: s})
+	for _, want := range []string{"queue p50=10ms p99=900ms (measured 4/5)", "client_ttft p50=310ms service_ttft p50=200ms"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("compact line missing %q: %s", want, line)
+		}
+	}
+	if none := RenderCompact(Report{Summary: Summarize([]Record{{Schema: Schema, TTFTMS: 5}})}); strings.Contains(none, "queue") {
+		t.Fatalf("queue axis rendered with no queue data: %s", none)
+	}
+}

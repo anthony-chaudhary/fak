@@ -367,6 +367,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			matchedSnapshot != nil &&
 			matched == len(ids) && cachedLogits != nil && sourceTier == radixkv.SnapshotTierDeviceL1
 		enginestep.Default.ObservePhase(enginestep.PhasePrefixLookup, time.Since(lookupStart))
+		enginestep.Default.ObservePrefixQueried(len(ids))
 		enginestep.Default.ObservePrefixMatched(matched)
 	}
 	if s == nil {

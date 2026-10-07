@@ -215,7 +215,15 @@ func CalculateProductionGrade(lanes []DebtLane) ProductionGrade {
 
 	for _, l := range lanes {
 		denominator += l.DenominatorContribution
-		realized += l.RealizedContribution
+		// A lane that overshoots its target ceiling is production-ready, not
+		// extra credit: clamp its realized points to its own denominator share
+		// so surplus maturity in one lane cannot mask debt in another (which
+		// previously drove the grade above 100%).
+		r := l.RealizedContribution
+		if r > l.DenominatorContribution {
+			r = l.DenominatorContribution
+		}
+		realized += r
 		if l.MaturityGap <= 0.05 {
 			ready++
 		} else {
