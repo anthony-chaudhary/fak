@@ -271,3 +271,29 @@ func TestPositionBalancedMedianIgnoresWhoRanSecond(t *testing.T) {
 		t.Fatalf("order luck graded as a result: losses=%+v wins=%+v cells=%+v", rep.Losses, rep.Wins, rep.Cells)
 	}
 }
+
+func TestEveryArmVisitsEveryPosition(t *testing.T) {
+	srv := httptest.NewServer(&fakeEngine{})
+	defer srv.Close()
+	var arms []Arm
+	for _, n := range []string{"fak-a", "fak-b", "llama"} {
+		a, _ := ParseArm(n + "=" + srv.URL + "/v1")
+		arms = append(arms, a)
+	}
+	rows, err := Run(context.Background(), Config{RunID: "o", Model: "m", Arms: arms, ColdSizes: []int{10}, Reps: 3, AnswerTokens: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]map[int]bool{}
+	for _, r := range rows {
+		if seen[r.Arm] == nil {
+			seen[r.Arm] = map[int]bool{}
+		}
+		seen[r.Arm][r.Pos] = true
+	}
+	for arm, pos := range seen {
+		if len(pos) != 3 {
+			t.Fatalf("%s only ran at positions %v", arm, pos)
+		}
+	}
+}

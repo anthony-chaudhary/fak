@@ -47,7 +47,7 @@ The comparison table in STRIX-HALO-BENCHMARK-RESULTS.md lists llama.cpp at about
 ## Next steps
 
 - Run the native arm on a box whose llama-server can be paused for the window, or cut the native load path's host-RAM peak so it fits beside one. Then add `--arm fak-native=http://127.0.0.1:<port>/v1` to the same command.
-- Check whether the ~400 ms "second conversation" penalty is llama-server swapping slot KV state. If it is, fak's gateway can win warm TTFT outright by keeping each conversation on its own slot.
+- Find the cause of the ~400 ms "not first" penalty on warm turns. It is not slot placement: a three-arm run (`strix3-20261007-softslot2`) put fak serve with `--llama-soft-slot` at 1857 ms against 1874 ms without it and 1875 ms for llama-server, a tie.
 - Pass llama-server `timings` and non-streaming `cached_tokens` through the fak gateway so cache and speculation data stays visible to agents.
 
 ## Reproduce

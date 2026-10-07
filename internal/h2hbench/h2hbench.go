@@ -321,12 +321,13 @@ func Run(ctx context.Context, cfg Config) ([]Row, error) {
 		}
 		return nil
 	}
+	// Rotate, don't reverse: with three or more arms a reversal pins the middle
+	// arm to the middle slot forever, and Pos matters (see Row.Pos).
 	order := func(rep int) []Arm {
-		arms := append([]Arm(nil), cfg.Arms...)
-		if rep%2 == 1 {
-			for i, j := 0, len(arms)-1; i < j; i, j = i+1, j-1 {
-				arms[i], arms[j] = arms[j], arms[i]
-			}
+		n := len(cfg.Arms)
+		arms := make([]Arm, n)
+		for i := range arms {
+			arms[i] = cfg.Arms[(i+rep)%n]
 		}
 		return arms
 	}
