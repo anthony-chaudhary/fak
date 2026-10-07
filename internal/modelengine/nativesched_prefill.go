@@ -411,9 +411,12 @@ func (s *NativeScheduler) applyPrefixHitsLocked() {
 		}
 		depth := installPrefixHitLocked(ln, info)
 		if info.fullHit && depth == len(ln.prompt) {
+			if err := s.setLaneStateLocked(ln, schedLaneDecode); err != nil {
+				ln.finish(nil, err)
+				continue
+			}
 			ln.promptCursor = len(ln.prompt)
 			ln.promptLen = len(ln.prompt)
-			ln.state = schedLaneDecode
 			ln.prefillChunkTokens = 0
 			if info.boundary != nil && len(info.boundary.Logits()) > 0 {
 				ln.logits = copyF32(info.boundary.Logits())
@@ -514,9 +517,13 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 		if info != nil && !info.applied {
 			depth := installPrefixHitLocked(ln, info)
 			if info.fullHit && depth == len(ln.prompt) {
+				if err := s.setLaneStateLocked(ln, schedLaneDecode); err != nil {
+					ln.finish(nil, err)
+					s.mu.Unlock()
+					return
+				}
 				ln.promptCursor = len(ln.prompt)
 				ln.promptLen = len(ln.prompt)
-				ln.state = schedLaneDecode
 				ln.prefillChunkTokens = 0
 				if info.boundary != nil && len(info.boundary.Logits()) > 0 {
 					ln.logits = copyF32(info.boundary.Logits())
@@ -599,8 +606,12 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 	// It reaches the full input length only as chunks become resident in KV.
 	ln.promptLen = end
 	if final {
+		if err := s.setLaneStateLocked(ln, schedLaneDecode); err != nil {
+			ln.finish(nil, err)
+			s.mu.Unlock()
+			return
+		}
 		ln.logits = logits
-		ln.state = schedLaneDecode
 		s.maybeInsertRadixKV(ln.prompt, ln.sess, logits)
 	}
 	s.mu.Unlock()

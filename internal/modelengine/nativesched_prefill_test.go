@@ -1366,3 +1366,76 @@ func TestPrefixHitApplyClampsToSnapshottedDepth(t *testing.T) {
 		}
 	})
 }
+
+// TestSchedLaneTransitionRejectsIllegal pins the native scheduler lane FSM: every
+// declared legal edge is accepted, and terminal->decode plus decode->prefilling
+// (without passing through preemption) are refused with the typed error and leave
+// the lane unchanged.
+func TestSchedLaneTransitionRejectsIllegal(t *testing.T) {
+	phases := []schedLanePhase{schedPhaseWaiting, schedPhasePrefilling, schedPhaseDecode, schedPhasePreempted, schedPhaseTerminal}
+	legal := map[[2]schedLanePhase]bool{}
+	for from, tos := range schedLaneTransitions {
+		for to := range tos {
+			legal[[2]schedLanePhase{from, to}] = true
+		}
+	}
+	for _, edge := range [][2]schedLanePhase{
+		{schedPhaseWaiting, schedPhasePrefilling},
+		{schedPhaseWaiting, schedPhaseDecode},
+		{schedPhasePrefilling, schedPhaseDecode},
+		{schedPhasePrefilling, schedPhasePreempted},
+		{schedPhaseDecode, schedPhasePreempted},
+		{schedPhasePreempted, schedPhaseDecode},
+		{schedPhasePreempted, schedPhasePrefilling},
+		{schedPhaseDecode, schedPhaseTerminal},
+		{schedPhasePrefilling, schedPhaseTerminal},
+		{schedPhaseWaiting, schedPhaseTerminal},
+		{schedPhasePreempted, schedPhaseTerminal},
+	} {
+		if !legal[edge] {
+			t.Fatalf("edge %s->%s missing from transition table", edge[0], edge[1])
+		}
+	}
+	for _, from := range phases {
+		for _, to := range phases {
+			err := checkSchedLaneTransition(from, to)
+			if legal[[2]schedLanePhase{from, to}] {
+				if err != nil {
+					t.Fatalf("legal edge %s->%s rejected: %v", from, to, err)
+				}
+				continue
+			}
+			var typed *errSchedLaneIllegalTransition
+			if !errors.As(err, &typed) || typed.From != from || typed.To != to {
+				t.Fatalf("illegal edge %s->%s err=%v, want typed refusal", from, to, err)
+			}
+		}
+	}
+	for _, edge := range [][2]schedLanePhase{
+		{schedPhaseTerminal, schedPhaseDecode},
+		{schedPhaseDecode, schedPhasePrefilling},
+	} {
+		if legal[edge] {
+			t.Fatalf("edge %s->%s must be illegal", edge[0], edge[1])
+		}
+	}
+
+	s := &NativeScheduler{}
+	term := &schedLane{state: schedLanePrefilling, terminal: true}
+	if err := s.setLaneStateLocked(term, schedLaneDecode); err == nil || term.state != schedLanePrefilling {
+		t.Fatalf("terminal->decode err=%v state=%d, want refusal and unchanged", err, term.state)
+	}
+	dec := &schedLane{state: schedLaneDecode}
+	if err := s.setLaneStateLocked(dec, schedLanePrefilling); err == nil || dec.state != schedLaneDecode {
+		t.Fatalf("decode->prefilling err=%v state=%d, want refusal and unchanged", err, dec.state)
+	}
+	pre := &schedLane{state: schedLaneDecode}
+	s.preempted = []*schedLane{pre}
+	if err := s.setLaneStateLocked(pre, schedLanePrefilling); err != nil || pre.state != schedLanePrefilling {
+		t.Fatalf("preempted->prefilling err=%v state=%d, want accepted", err, pre.state)
+	}
+	pf := &schedLane{state: schedLanePrefilling}
+	if err := s.setLaneStateLocked(pf, schedLaneDecode); err != nil || pf.state != schedLaneDecode {
+		t.Fatalf("prefilling->decode err=%v state=%d, want accepted", err, pf.state)
+	}
+}
