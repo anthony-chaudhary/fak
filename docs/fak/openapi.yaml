@@ -1752,8 +1752,11 @@ paths:
         (`.fak/nightrun/gateway-perf.jsonl`) so history survives a restart.
         `ttft_ms` is absent when the first-token boundary was not observed
         (a buffered turn); `prefill_tps`/`decode_tps` are present only when it
-        was. `prompt_tokens` is the uncached prompt, disjoint from
-        `cached_tokens`; `cache_hit_share` = cached / (prompt + cached).
+        was, and `prefill_tps` only for an uncached prompt of at least 128
+        tokens (a cache hit's fixed overhead is not prefill). `prompt_tokens` is the uncached prompt, disjoint from
+        `cached_tokens`; `cache_hit_share` = cached / (prompt + cached);
+        `prefill_tps_weighted` = total uncached prompt tokens / total TTFT over
+        the rows that carry `prefill_tps`.
         A turn that failed before completing (timeout, upstream error, client
         cancel) still leaves one row with `finish_reason: error`, an `error`
         class and the HTTP `status` the client got (200 when the failure came
@@ -1767,7 +1770,14 @@ paths:
         speculative), the coalesced cohort it rode, and its own
         speculative draft/accept counts; the summary folds those into
         `by_path` and `spec_accept_rate`. Proxied and mock turns carry no
-        `engine`. Counts and timings only. Same observability auth floor as
+        `engine`; a proxied llama.cpp upstream that drafted carries
+        `upstream_spec_draft_tokens`/`upstream_spec_accepted_tokens` (its
+        `draft_n`/`draft_n_accepted`), which also fold into `spec_accept_rate`.
+        Every row names the server that wrote it (`planner`,
+        `backend`, `host`, `fak_version`; `model` falls back to the server's
+        configured model when the turn reported none); `summary.identities`
+        > 1 means the window mixes models, planners, backends, hosts or
+        builds. Counts, timings and serving identity only. Same observability auth floor as
         `/v1/fak/observation/engine`.
       parameters:
         - name: n
@@ -1806,6 +1816,7 @@ paths:
                       ttft_p50_ms: { type: number }
                       ttft_p99_ms: { type: number }
                       prefill_tps_p50: { type: number }
+                      prefill_tps_weighted: { type: number }
                       decode_tps_p50: { type: number }
                       e2e_p50_ms: { type: number }
                       e2e_p99_ms: { type: number }
@@ -1822,6 +1833,15 @@ paths:
                       spec_draft_tokens: { type: integer }
                       spec_accepted_tokens: { type: integer }
                       spec_accept_rate: { type: number }
+                      identities: { type: integer }
+                      served_by:
+                        type: object
+                        properties:
+                          model: { type: string }
+                          planner: { type: string }
+                          backend: { type: string }
+                          host: { type: string }
+                          fak_version: { type: string }
                   records:
                     type: array
                     items:
@@ -1844,6 +1864,8 @@ paths:
                           enum: [client_canceled, first_token_timeout, stall, deadline, upstream_unreachable, upstream_status, upstream_error, client_write_timeout]
                         status: { type: integer }
                         model: { type: string }
+                        upstream_spec_draft_tokens: { type: integer }
+                        upstream_spec_accepted_tokens: { type: integer }
                         engine:
                           type: object
                           required: [path]
@@ -1853,6 +1875,10 @@ paths:
                             spec_rounds: { type: integer }
                             spec_draft_tokens: { type: integer }
                             spec_accepted_tokens: { type: integer }
+                        planner: { type: string }
+                        backend: { type: string }
+                        host: { type: string }
+                        fak_version: { type: string }
             text/plain:
               schema: { type: string }
         '400': { $ref: '#/components/responses/BadRequest' }

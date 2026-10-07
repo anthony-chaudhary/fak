@@ -122,7 +122,7 @@ func (s *Server) chatPlanner(ctx context.Context) agent.Planner {
 // its aggregate loop usage. Passthrough retains the historical native counters.
 func (s *Server) observeNativeChatRoute(ctx context.Context, traceID string, stream bool, usage agent.Usage, finishReason string, dur time.Duration) {
 	if binding := chatRouteFromContext(ctx); binding != nil {
-		s.metrics.observeInferenceUsageServed(binding.Locality, usage, finishReason, dur)
+		s.metrics.observeInferenceUsageServed(binding.Locality, binding.Target.UpstreamModel, usage, finishReason, dur)
 		s.logInferenceTurnForModel(traceID, "anthropic_messages_native", binding.Target.UpstreamModel, stream, usage, finishReason, dur, false, s.consumeDecodedCtxViewEvent(traceID))
 		return
 	}

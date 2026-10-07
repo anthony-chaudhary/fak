@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/perfledger"
 )
 
@@ -34,6 +37,9 @@ func (loc servingLocality) perfLabel() string {
 type perfDetail struct {
 	model  string
 	engine *perfledger.Engine
+	// upstreamDraft / upstreamAccepted are a proxied upstream's own speculative
+	// counts from its llama.cpp-shaped timings.
+	upstreamDraft, upstreamAccepted int
 }
 
 // perfDetailFromCompletion lifts the planner-reported model and native decode
@@ -49,8 +55,51 @@ func perfDetailFromCompletion(comp *agent.Completion) perfDetail {
 			e.SpecRounds, e.SpecDraftTokens, e.SpecAcceptedTokens = sp.Rounds, sp.DraftTokens, sp.AcceptedTokens
 		}
 		d.engine = e
+	} else if t := comp.Timings; t != nil && t.DraftN > 0 {
+		d.upstreamDraft = t.DraftN
+		d.upstreamAccepted = min(max(t.DraftNAccepted, 0), t.DraftN)
 	}
 	return d
+}
+
+// perfIdentity is the server identity stamped on every perf row. Backend is
+// resolved only for a direct in-kernel planner; a proxy or dual planner leaves it
+// empty rather than naming a backend that may not have served the turn.
+func (s *Server) perfIdentity() perfledger.Identity {
+	id := perfledger.Identity{Planner: plannerKind(s.planner), Version: perfBuildVersion()}
+	if ikp, ok := s.planner.(*agent.InKernelPlanner); ok {
+		id.Backend, _ = ikp.ExecutionIdentity()
+	}
+	if host, err := os.Hostname(); err == nil {
+		id.Host = host
+	}
+	return id
+}
+
+// perfBuildVersion is the app version, with the VCS revision appended for an
+// unstamped dev build so two dev binaries on one host stay distinguishable.
+func perfBuildVersion() string {
+	v := appversion.Current()
+	if v != "dev" {
+		return v
+	}
+	st := binstamp.Self()
+	if len(st.Revision) < 12 {
+		return v
+	}
+	v += "+" + st.Revision[:12]
+	if st.Dirty {
+		v += "-dirty"
+	}
+	return v
+}
+
+// setPerfIdentity installs the identity every later row carries; defaultModel
+// fills a row whose turn reported no model of its own.
+func (m *gatewayMetrics) setPerfIdentity(defaultModel string, id perfledger.Identity) {
+	if m != nil {
+		m.perfServedBy.Store(&perfledger.ServedBy{Model: strings.TrimSpace(defaultModel), Identity: id})
+	}
 }
 
 // recordPerf folds one served turn into the bounded ring and hands it to the
@@ -66,8 +115,9 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 		// server's WriteTimeout that write is refused, so the client got nothing.
 		rec = perfledger.NewFailureRecord(time.Now(), loc.perfLabel(), perfledger.ErrorClientWriteTimeout, 0, dur, 0)
 	}
-	rec.Model = detail.model
+	rec.Model = strings.TrimSpace(detail.model)
 	rec.Engine = detail.engine
+	rec.UpstreamSpecDraftTokens, rec.UpstreamSpecAcceptedTokens = detail.upstreamDraft, detail.upstreamAccepted
 	m.commitPerf(rec)
 }
 
@@ -83,6 +133,12 @@ func (m *gatewayMetrics) recordPerfFailure(loc servingLocality, errClass string,
 }
 
 func (m *gatewayMetrics) commitPerf(rec perfledger.Record) {
+	if sb := m.perfServedBy.Load(); sb != nil {
+		rec.Identity = sb.Identity
+		if rec.Model == "" {
+			rec.Model = sb.Model
+		}
+	}
 	m.perfMu.Lock()
 	m.appendPerfLocked(rec)
 	m.perfMu.Unlock()

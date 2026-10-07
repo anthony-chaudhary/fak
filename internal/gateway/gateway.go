@@ -476,6 +476,7 @@ func New(cfg Config) (*Server, error) {
 	if s.metalMTPCoord == nil {
 		s.metalMTPCoord = s.activeMetalMTPCoordinator()
 	}
+	s.metrics.setPerfIdentity(s.model, s.perfIdentity())
 
 	return s, nil
 }

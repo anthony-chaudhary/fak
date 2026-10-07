@@ -798,14 +798,15 @@ func (m *gatewayMetrics) observeInference(promptTok, complTok, cachedTok, cacheC
 // Anthropic input_tokens is already the uncached remainder. Normalize exactly here so
 // inferPromptTokens and inferCachedTokens remain disjoint without changing Usage,
 // response forwarding, context-window accounting, or the internal vcache row contract.
-func (m *gatewayMetrics) observeInferenceUsageServed(loc servingLocality, usage agent.Usage, finishReason string, dur time.Duration) {
-	m.observeInferenceServed(loc,
+func (m *gatewayMetrics) observeInferenceUsageServed(loc servingLocality, reqModel string, usage agent.Usage, finishReason string, dur time.Duration) {
+	m.observeInferenceServedTimed(loc, reqModel,
 		usage.UncachedPromptTokens(),
 		usage.CompletionTokens,
 		usage.CachedPromptTokens(),
 		usage.CacheCreationInputTokens,
 		finishReason,
 		dur,
+		0,
 	)
 }
 
@@ -867,12 +868,13 @@ func completionTTFT(t *agent.Timings, dur time.Duration) time.Duration {
 // keeps reporting an honest unknown instead of being silently defaulted into one
 // side by a zero argument.
 func (m *gatewayMetrics) observeInferenceServed(loc servingLocality, promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur time.Duration) {
-	m.observeInferenceServedTimed(loc, promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, 0)
+	m.observeInferenceServedTimed(loc, "", promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, 0)
 }
 
-// observeInferenceServedTimed is observeInferenceTimed with the serving side.
-func (m *gatewayMetrics) observeInferenceServedTimed(loc servingLocality, promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration) {
-	m.observeInferenceTimedAt(loc, promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, ttft)
+// observeInferenceServedTimed is observeInferenceTimed with the serving side and,
+// when the caller knows it, the model the turn was sent to.
+func (m *gatewayMetrics) observeInferenceServedTimed(loc servingLocality, reqModel string, promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration) {
+	m.observeInferenceTimedDetail(loc, promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, ttft, perfDetail{model: reqModel})
 	m.attributeServedTurn(loc, promptTok, complTok)
 }
 

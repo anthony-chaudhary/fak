@@ -614,7 +614,7 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 		// turns are attributed by the same rule as every other path, rather than being
 		// assumed vendor because the byte-preserving relay happens to talk to a vendor
 		// today.
-		s.metrics.observeInferenceServedTimed(s.servedLocality(p.reqModel()), p.promptTok, p.complTok, p.cacheRead, p.cacheCreate, p.finishReason, dur, ttft)
+		s.metrics.observeInferenceServedTimed(s.servedLocality(p.reqModel()), p.reqModel(), p.promptTok, p.complTok, p.cacheRead, p.cacheCreate, p.finishReason, dur, ttft)
 		if compacted {
 			s.metrics.recordCompactionCacheRead(p.cacheRead) // OBSERVED provider cache_read on a compacted streamed turn
 			s.observeResetHealth(reqTrace, p.promptTok, p.cacheRead, p.cacheCreate)

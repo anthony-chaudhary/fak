@@ -36,9 +36,9 @@ const (
 	// generous ~1 KiB each, so a huge active file never costs more than this.
 	tailReadBytes = int64(RingCap) << 10
 
-	// MinPrefillRateTokens is the smallest uncached prompt whose TTFT is read as a
-	// prefill rate. Below it TTFT is the fixed admission/prefix-match floor, not
-	// prefill work: a 4-token warm hit at 140ms is not a 28 tok/s prefill.
+	// MinPrefillRateTokens is the smallest uncached prompt that yields a prefill
+	// rate. Below it TTFT is fixed overhead, not prefill: a cache hit re-feeding 4
+	// tokens in 150ms would read as a "27 tok/s" prefill and drag the median.
 	MinPrefillRateTokens = 128
 )
 
@@ -79,7 +79,32 @@ type Record struct {
 	// Engine is the native engine's decode anatomy for this one request; absent
 	// on proxied and mock turns, which have no engine steps of their own.
 	Engine *Engine `json:"engine,omitempty"`
+	// UpstreamSpec* are a proxied upstream's own speculative-decoding counts
+	// (llama.cpp timings draft_n / draft_n_accepted); absent when it drafted nothing.
+	UpstreamSpecDraftTokens    int `json:"upstream_spec_draft_tokens,omitempty"`
+	UpstreamSpecAcceptedTokens int `json:"upstream_spec_accepted_tokens,omitempty"`
+	Identity
 }
+
+// Identity names the server that wrote a row, so a window spanning a planner
+// swap, a backend change, a host move or a fak upgrade is visible instead of
+// folded into one quantile. Empty fields are omitted; rows written before
+// Identity existed decode with every field empty.
+type Identity struct {
+	Planner string `json:"planner,omitempty"`
+	Backend string `json:"backend,omitempty"`
+	Host    string `json:"host,omitempty"`
+	Version string `json:"fak_version,omitempty"`
+}
+
+// ServedBy is the identity of one row including its model; it is what the
+// summary counts as distinct.
+type ServedBy struct {
+	Model string `json:"model,omitempty"`
+	Identity
+}
+
+func (r Record) servedBy() ServedBy { return ServedBy{Model: r.Model, Identity: r.Identity} }
 
 // Native decode paths (enginestep's closed path vocabulary).
 const (
@@ -199,10 +224,13 @@ type Summary struct {
 	TTFTP50MS     float64 `json:"ttft_p50_ms,omitempty"`
 	TTFTP99MS     float64 `json:"ttft_p99_ms,omitempty"`
 	PrefillTPSP50 float64 `json:"prefill_tps_p50,omitempty"`
-	DecodeTPSP50  float64 `json:"decode_tps_p50,omitempty"`
-	E2EP50MS      float64 `json:"e2e_p50_ms,omitempty"`
-	E2EP99MS      float64 `json:"e2e_p99_ms,omitempty"`
-	CacheHitShare float64 `json:"cache_hit_share"`
+	// PrefillTPSWeighted is total uncached prompt tokens over total TTFT across the
+	// rows that carry a prefill rate, so long prompts weigh by their tokens.
+	PrefillTPSWeighted float64 `json:"prefill_tps_weighted,omitempty"`
+	DecodeTPSP50       float64 `json:"decode_tps_p50,omitempty"`
+	E2EP50MS           float64 `json:"e2e_p50_ms,omitempty"`
+	E2EP99MS           float64 `json:"e2e_p99_ms,omitempty"`
+	CacheHitShare      float64 `json:"cache_hit_share"`
 	// Errors counts failed turns (Record.Error set); ByError splits them by class.
 	Errors  int            `json:"errors"`
 	ByError map[string]int `json:"by_error,omitempty"`
@@ -213,7 +241,8 @@ type Summary struct {
 	// ByPath splits them by decode path. Both are absent on a proxy-only window.
 	Native int            `json:"native,omitempty"`
 	ByPath map[string]int `json:"by_path,omitempty"`
-	// Spec* sum the window's speculative rounds; SpecAcceptRate is accepted/draft
+	// Spec* sum the window's speculative rounds (native engine rounds plus a
+	// proxied upstream's draft counts, which carry no round count); SpecAcceptRate is accepted/draft
 	// tokens (vLLM's draft acceptance rate) and is absent when nothing was drafted.
 	SpecRounds         int     `json:"spec_rounds,omitempty"`
 	SpecDraftTokens    int     `json:"spec_draft_tokens,omitempty"`
@@ -222,6 +251,11 @@ type Summary struct {
 	// Probes counts liveness/probe turns (see Record.IsProbe) left out of every
 	// quantile, share, and regime above; Count is the served turns only.
 	Probes int `json:"probes,omitempty"`
+	// ServedBy is the newest row's model and server identity; Identities counts
+	// the distinct ones in the window, so >1 marks quantiles that mix models,
+	// planners, backends, hosts or builds.
+	ServedBy   *ServedBy `json:"served_by,omitempty"`
+	Identities int       `json:"identities,omitempty"`
 }
 
 type RegimeSummary struct {
@@ -266,10 +300,12 @@ func BuildReport(recs []Record, n int, capped bool, droppedWrites uint64) Report
 func Summarize(recs []Record) Summary {
 	s := Summary{}
 	var ttft, prefill, decode, e2e []float64
-	var prompt, cached int64
+	var prompt, cached, prefillTok int64
+	var prefillMS float64
 	regimeTTFT := map[string][]float64{}
 	regimeE2E := map[string][]float64{}
 	regimeCount := map[string]int{}
+	servedBy := map[ServedBy]struct{}{}
 	for _, r := range recs {
 		if r.IsProbe() {
 			s.Probes++
@@ -283,6 +319,10 @@ func Summarize(recs []Record) Summary {
 			}
 			s.ByError[r.Error]++
 		}
+		if sb := r.servedBy(); sb != (ServedBy{}) {
+			servedBy[sb] = struct{}{}
+			s.ServedBy = &sb
+		}
 		regime := r.regime()
 		regimeCount[regime]++
 		if r.TTFTMS > 0 {
@@ -294,8 +334,15 @@ func Summarize(recs []Record) Summary {
 		if r.TTFTMS > 0 {
 			ttft = append(ttft, r.TTFTMS)
 		}
-		if r.PrefillTPS > 0 {
+		// The token floor also filters rows written before NewRecord applied it.
+		if r.PrefillTPS > 0 && r.PromptTokens >= MinPrefillRateTokens {
 			prefill = append(prefill, r.PrefillTPS)
+			prefillTok += int64(r.PromptTokens)
+			prefillMS += r.TTFTMS
+		}
+		if r.UpstreamSpecDraftTokens > 0 {
+			s.SpecDraftTokens += r.UpstreamSpecDraftTokens
+			s.SpecAcceptedTokens += min(max(r.UpstreamSpecAcceptedTokens, 0), r.UpstreamSpecDraftTokens)
 		}
 		if r.DecodeTPS > 0 {
 			decode = append(decode, r.DecodeTPS)
@@ -319,10 +366,14 @@ func Summarize(recs []Record) Summary {
 	if s.SpecDraftTokens > 0 {
 		s.SpecAcceptRate = roundTo(float64(s.SpecAcceptedTokens)/float64(s.SpecDraftTokens), 10000)
 	}
+	s.Identities = len(servedBy)
 	s.TTFTMeasured = len(ttft)
 	s.TTFTP50MS = quantile(ttft, 0.50)
 	s.TTFTP99MS = quantile(ttft, 0.99)
 	s.PrefillTPSP50 = quantile(prefill, 0.50)
+	if prefillMS > 0 {
+		s.PrefillTPSWeighted = roundTo(float64(prefillTok)/(prefillMS/1000), 100)
+	}
 	s.DecodeTPSP50 = quantile(decode, 0.50)
 	s.E2EP50MS = quantile(e2e, 0.50)
 	s.E2EP99MS = quantile(e2e, 0.99)
@@ -362,7 +413,7 @@ func RenderCompact(rep Report) string {
 	} else {
 		b.WriteString(" ttft n/a")
 	}
-	fmt.Fprintf(&b, " | prefill p50=%s | decode p50=%s", fmtTPS(s.PrefillTPSP50), fmtTPS(s.DecodeTPSP50))
+	fmt.Fprintf(&b, " | prefill p50=%s weighted=%s | decode p50=%s", fmtTPS(s.PrefillTPSP50), fmtTPS(s.PrefillTPSWeighted), fmtTPS(s.DecodeTPSP50))
 	fmt.Fprintf(&b, " | e2e p50=%s p99=%s", fmtMS(s.E2EP50MS), fmtMS(s.E2EP99MS))
 	fmt.Fprintf(&b, " | cache=%.1f%%", s.CacheHitShare*100)
 	if s.Errors > 0 {
@@ -393,7 +444,25 @@ func RenderCompact(rep Report) string {
 		}
 	}
 	if s.SpecDraftTokens > 0 {
-		fmt.Fprintf(&b, " | spec accept=%.1f%% (%d/%d over %d rounds)", s.SpecAcceptRate*100, s.SpecAcceptedTokens, s.SpecDraftTokens, s.SpecRounds)
+		fmt.Fprintf(&b, " | spec accept=%.1f%% (%d/%d", s.SpecAcceptRate*100, s.SpecAcceptedTokens, s.SpecDraftTokens)
+		if s.SpecRounds > 0 {
+			fmt.Fprintf(&b, " over %d rounds", s.SpecRounds)
+		}
+		b.WriteString(")")
+	}
+	if sb := s.ServedBy; sb != nil {
+		b.WriteString(" | served by")
+		writeField(&b, "model", sb.Model)
+		planner := sb.Planner
+		if sb.Backend != "" {
+			planner = strings.TrimPrefix(planner+"/"+sb.Backend, "/")
+		}
+		writeField(&b, "planner", planner)
+		writeField(&b, "host", sb.Host)
+		writeField(&b, "fak", sb.Version)
+		if s.Identities > 1 {
+			fmt.Fprintf(&b, " (window mixes %d)", s.Identities)
+		}
 	}
 	if rep.Window.Capped {
 		b.WriteString(" | capped")
@@ -448,6 +517,12 @@ func quantile(vals []float64, q float64) float64 {
 		idx = len(sorted) - 1
 	}
 	return sorted[idx]
+}
+
+func writeField(b *strings.Builder, key, val string) {
+	if val != "" {
+		fmt.Fprintf(b, " %s=%s", key, val)
+	}
 }
 
 func fmtMS(v float64) string {

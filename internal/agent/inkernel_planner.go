@@ -3670,6 +3670,12 @@ func formatV41FaultClause(fa model.V41ExpertFaultAttribution) string {
 // executionIdentity makes the request log say which compute path actually produced
 // the token. q8dec remains useful CPU implementation metadata, but it must not be
 // mistaken for a fallback when a device-backed Qwen3.6 session is selected.
+// ExecutionIdentity reports the compute backend and forward path this planner
+// serves on, the same pair the inkernel_chat summary line logs.
+func (p *InKernelPlanner) ExecutionIdentity() (backend, forwardPath string) {
+	return p.executionIdentity()
+}
+
 func (p *InKernelPlanner) executionIdentity() (backend, forwardPath string) {
 	backend, forwardPath = "cpu-ref", "cpu/reference"
 	if p == nil {

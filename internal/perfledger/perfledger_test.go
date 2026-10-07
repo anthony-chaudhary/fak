@@ -121,10 +121,10 @@ func TestNewRecordDecodeRateExcludesFirstToken(t *testing.T) {
 
 func fixedRecords() []Record {
 	return []Record{
-		{Schema: Schema, TTFTMS: 100, PrefillTPS: 10, DecodeTPS: 1, E2EMS: 1000, PromptTokens: 100, CachedTokens: 0},
-		{Schema: Schema, TTFTMS: 200, PrefillTPS: 20, DecodeTPS: 2, E2EMS: 2000, PromptTokens: 100, CachedTokens: 100},
-		{Schema: Schema, TTFTMS: 300, PrefillTPS: 30, DecodeTPS: 3, E2EMS: 3000, PromptTokens: 100, CachedTokens: 100},
-		{Schema: Schema, TTFTMS: 400, PrefillTPS: 40, DecodeTPS: 4, E2EMS: 4000, PromptTokens: 100, CachedTokens: 100},
+		{Schema: Schema, TTFTMS: 100, PrefillTPS: 10, DecodeTPS: 1, E2EMS: 1000, PromptTokens: 200, CachedTokens: 0},
+		{Schema: Schema, TTFTMS: 200, PrefillTPS: 20, DecodeTPS: 2, E2EMS: 2000, PromptTokens: 200, CachedTokens: 100},
+		{Schema: Schema, TTFTMS: 300, PrefillTPS: 30, DecodeTPS: 3, E2EMS: 3000, PromptTokens: 200, CachedTokens: 100},
+		{Schema: Schema, TTFTMS: 400, PrefillTPS: 40, DecodeTPS: 4, E2EMS: 4000, PromptTokens: 200, CachedTokens: 100},
 		{Schema: Schema, E2EMS: 5000, PromptTokens: 0, CachedTokens: 0},
 	}
 }
@@ -142,13 +142,17 @@ func TestSummarizeNearestRankOnFixedSet(t *testing.T) {
 	if s.PrefillTPSP50 != 20 || s.DecodeTPSP50 != 2 {
 		t.Fatalf("prefill/decode p50 = %v/%v, want 20/2", s.PrefillTPSP50, s.DecodeTPSP50)
 	}
+	// 4 x 200 uncached tokens over 100+200+300+400 ms of TTFT.
+	if s.PrefillTPSWeighted != 800 {
+		t.Fatalf("prefill_tps_weighted = %v, want 800", s.PrefillTPSWeighted)
+	}
 	// nearest-rank over [1000..5000]: p50 -> rank 3, p99 -> rank 5.
 	if s.E2EP50MS != 3000 || s.E2EP99MS != 5000 {
 		t.Fatalf("e2e p50/p99 = %v/%v, want 3000/5000", s.E2EP50MS, s.E2EP99MS)
 	}
-	// cached 300 / (uncached 400 + cached 300).
-	if s.CacheHitShare != 0.4286 {
-		t.Fatalf("cache_hit_share = %v, want 0.4286", s.CacheHitShare)
+	// cached 300 / (uncached 800 + cached 300).
+	if s.CacheHitShare != 0.2727 {
+		t.Fatalf("cache_hit_share = %v, want 0.2727", s.CacheHitShare)
 	}
 }
 
@@ -388,5 +392,111 @@ func TestSummarizeFoldsNativeEngineAnatomy(t *testing.T) {
 	}
 	if _, ok := jsonKeys(t, proxy)["engine"]; ok {
 		t.Fatal("proxy row serializes an engine object")
+	}
+}
+
+// A cache hit re-feeds a few tokens in fixed overhead; its "rate" is not prefill
+// and must not lower either prefill figure (live strix2: 4 tok/149ms read 27 tok/s).
+// fak-test:runtime fast est=5ms lane=default
+func TestCacheHitRowCannotLowerPrefill(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	cold := NewRecord(now, "stop", LocalitySelfHosted, 3537, 33, 0, 13278*time.Millisecond, 11490*time.Millisecond)
+	hit := NewRecord(now, "stop", LocalitySelfHosted, 4, 33, 3533, 1944*time.Millisecond, 149*time.Millisecond)
+	if _, ok := jsonKeys(t, hit)["prefill_tps"]; ok {
+		t.Fatalf("cache-hit row carries prefill_tps: %+v", hit)
+	}
+	base := Summarize([]Record{cold})
+	for _, recs := range [][]Record{
+		{cold, hit},
+		{cold, hit, hit, hit},
+		// A row written before the floor existed still carries its tiny-prompt rate.
+		{cold, {Schema: Schema, PromptTokens: 4, CachedTokens: 3533, TTFTMS: 149, PrefillTPS: 26.84, E2EMS: 1944}},
+	} {
+		s := Summarize(recs)
+		if s.PrefillTPSP50 < base.PrefillTPSP50 || s.PrefillTPSWeighted < base.PrefillTPSWeighted {
+			t.Fatalf("cache hits lowered prefill: p50 %v->%v weighted %v->%v", base.PrefillTPSP50, s.PrefillTPSP50, base.PrefillTPSWeighted, s.PrefillTPSWeighted)
+		}
+	}
+	if base.PrefillTPSWeighted < 300 {
+		t.Fatalf("cold prefill_tps_weighted = %v, want ~308", base.PrefillTPSWeighted)
+	}
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestSummarizeFoldsUpstreamSpecIntoAcceptRate(t *testing.T) {
+	native := Record{Schema: Schema, E2EMS: 10, Engine: &Engine{Path: PathSpeculative, SpecRounds: 5, SpecDraftTokens: 20, SpecAcceptedTokens: 15}}
+	upstream := Record{Schema: Schema, E2EMS: 10, UpstreamSpecDraftTokens: 30, UpstreamSpecAcceptedTokens: 20}
+	plain := Record{Schema: Schema, E2EMS: 10}
+	for _, k := range []string{"upstream_spec_draft_tokens", "upstream_spec_accepted_tokens"} {
+		if _, ok := jsonKeys(t, upstream)[k]; !ok {
+			t.Fatalf("upstream record JSON missing %q", k)
+		}
+		if _, ok := jsonKeys(t, plain)[k]; ok {
+			t.Fatalf("plain record JSON carries %q", k)
+		}
+	}
+	s := Summarize([]Record{native, upstream, plain})
+	if s.SpecDraftTokens != 50 || s.SpecAcceptedTokens != 35 || s.SpecAcceptRate != 0.7 || s.SpecRounds != 5 {
+		t.Fatalf("spec = %d/%d rate %v rounds %d, want 35/50 0.7 5", s.SpecAcceptedTokens, s.SpecDraftTokens, s.SpecAcceptRate, s.SpecRounds)
+	}
+	if s.Native != 1 {
+		t.Fatalf("native = %d, want 1 (an upstream draft is not a native row)", s.Native)
+	}
+	if line := RenderCompact(BuildReport([]Record{upstream}, 0, false, 0)); !strings.Contains(line, "spec accept=66.7% (20/30)") {
+		t.Fatalf("compact line for an upstream-only window: %s", line)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestSummarizeCountsServedByAndKeepsNewest(t *testing.T) {
+	old := Identity{Planner: "inkernel", Backend: "cpu-ref", Host: "h1", Version: "1.0.0"}
+	cur := Identity{Planner: "inkernel", Backend: "vulkan", Host: "h1", Version: "1.1.0"}
+	recs := []Record{
+		{Schema: Schema, E2EMS: 10},
+		{Schema: Schema, E2EMS: 10, Model: "m", Identity: old},
+		{Schema: Schema, E2EMS: 10, Model: "m", Identity: cur},
+		{Schema: Schema, E2EMS: 10, Model: "m", Identity: cur},
+	}
+	s := Summarize(recs)
+	if s.Identities != 2 {
+		t.Fatalf("identities = %d, want 2 (unstamped row not counted)", s.Identities)
+	}
+	if want := (ServedBy{Model: "m", Identity: cur}); s.ServedBy == nil || *s.ServedBy != want {
+		t.Fatalf("newest served_by = %+v, want %+v", s.ServedBy, want)
+	}
+	line := RenderCompact(BuildReport(recs, 0, false, 0))
+	for _, want := range []string{"planner=inkernel/vulkan", "fak=1.1.0", "window mixes 2"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("compact line missing %q: %s", want, line)
+		}
+	}
+	if s := Summarize(recs[:1]); s.ServedBy != nil || s.Identities != 0 {
+		t.Fatalf("unstamped window served_by = %+v/%d, want nil/0", s.ServedBy, s.Identities)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestRecordIdentityRoundTripsFlat(t *testing.T) {
+	rec := Record{Schema: Schema, Model: "m", Engine: &Engine{Path: PathSerial}, Identity: Identity{Planner: "proxy", Host: "h", Version: "v"}}
+	raw, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var flat map[string]any
+	if err := json.Unmarshal(raw, &flat); err != nil {
+		t.Fatal(err)
+	}
+	if flat["model"] != "m" || flat["planner"] != "proxy" || flat["fak_version"] != "v" {
+		t.Fatalf("identity not flattened into the row: %s", raw)
+	}
+	if _, ok := flat["engine"].(map[string]any); !ok {
+		t.Fatalf("engine anatomy object lost beside identity: %s", raw)
+	}
+	if _, ok := flat["backend"]; ok {
+		t.Fatalf("empty backend serialized: %s", raw)
+	}
+	var back Record
+	if err := json.Unmarshal(raw, &back); err != nil || back.Identity != rec.Identity || back.Model != "m" {
+		t.Fatalf("round trip = %+v (%v)", back, err)
 	}
 }
