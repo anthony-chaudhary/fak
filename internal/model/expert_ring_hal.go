@@ -63,10 +63,11 @@ var errUntrackedExpertResidency = errors.New("routed expert has permanent reside
 // makes every caller fall through to the unchanged unbounded halW path. The ring is built lazily on
 // the first routed-expert stage, so a session that never reaches an expert weight allocates nothing.
 func (s *Session) routedExpertRing(name string) *pagedRing {
-	if s == nil || s.ExpertRingBytes <= 0 || s.Backend == nil || s.halClosed {
+	if s == nil || !isRoutedExpertWeight(name) {
 		return nil
 	}
-	if !isRoutedExpertWeight(name) {
+	s.validateCheckpointDeviceRingBudget(name)
+	if s.ExpertRingBytes <= 0 || s.Backend == nil || s.halClosed {
 		return nil
 	}
 	if s.expertRing == nil {
@@ -83,6 +84,27 @@ func (s *Session) routedExpertRing(name string) *pagedRing {
 	return s.expertRing
 }
 
+func (s *Session) validateCheckpointDeviceRingBudget(name string) int64 {
+	if s == nil || s.M == nil {
+		return 0
+	}
+	declared := s.M.expertCheckpoint.DeviceRingBudget()
+	if declared <= 0 {
+		return 0
+	}
+	s.ensureOpenBackendSession()
+	if s.ExpertRingBytes != declared {
+		s.failExpertRing(s.expertRing, &ExpertCheckpointDeviceBudgetError{Tensor: name, Bytes: declared, Budget: s.ExpertRingBytes})
+	}
+	if s.expertRing != nil && s.expertRing.budget() != declared {
+		s.failExpertRing(s.expertRing, &ExpertCheckpointDeviceBudgetError{Tensor: name, Bytes: declared, Budget: s.expertRing.budget()})
+	}
+	if s.Backend == nil {
+		s.failExpertRing(s.expertRing, errUntrackedExpertResidency)
+	}
+	return declared
+}
+
 // weightHALStagedBounded is weightHALStaged plus the routed-expert residency bound. `key` is the
 // dtype-prefixed HAL cache key (so a Q4_K and a raw k-quant staging of the same tensor stay distinct
 // residents, exactly as in halW); `name` is the canonical tensor name the routed-expert predicate
@@ -90,11 +112,15 @@ func (s *Session) routedExpertRing(name string) *pagedRing {
 // f32 expansion of it — Q4_K ~0.56 B/weight, so a ring sized for N f32 experts holds several times as
 // many quantized ones).
 //
-// Portable sessions reuse permanent residency first and fall back to it on ring refusal.
-// Device-only sessions with a declared budget reject both ring refusal and permanent
-// routed-expert residency outside the ring; a zero budget retains full residency.
+// A positive checkpoint-tier budget rejects permanent routed-expert residency and ring refusal
+// under either execution policy. Device-only sessions also enforce their session-declared budget.
+// Portable sessions without a checkpoint-tier budget retain the permanent-residency fallback.
 func (s *Session) weightHALStagedBounded(key, name string, mk func() compute.Tensor, dtype compute.Dtype, weightBytes int64) compute.Tensor {
-	strict := s.executionPolicy == ExecutionPolicyDeviceOnly && s.ExpertRingBytes > 0 && isRoutedExpertWeight(name)
+	declared := int64(0)
+	if isRoutedExpertWeight(name) {
+		declared = s.validateCheckpointDeviceRingBudget(name)
+	}
+	strict := isRoutedExpertWeight(name) && (declared > 0 || s.executionPolicy == ExecutionPolicyDeviceOnly && s.ExpertRingBytes > 0)
 	if strict {
 		s.ensureOpenBackendSession()
 	}

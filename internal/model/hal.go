@@ -50,6 +50,7 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (*Session, error) {
 	if err := m.ValidateBackendForwardPath(be); err != nil {
 		return nil, err
 	}
+	deviceRingBudget := m.expertCheckpoint.DeviceRingBudget()
 	kv := newHALKVStore(be, m.Cfg)
 	if kv == nil {
 		panic("model: compute backend " + be.Name() + " does not provide KVStore")
@@ -70,6 +71,7 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (*Session, error) {
 		halW:             make(map[string]compute.Tensor),
 		borrowedHALW:     make(map[string]struct{}),
 		modelWeightsHeld: true,
+		ExpertRingBytes:  deviceRingBudget,
 	}
 	s.initMixedQKV()
 	if m.Cfg.IsQwen35Hybrid() {
