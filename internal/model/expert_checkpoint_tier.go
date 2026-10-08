@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -183,6 +184,8 @@ type expertCheckpointEntry struct {
 	cols   int
 	nblk   int
 	stride int64
+	group  string
+	proj   string
 }
 
 // halKey / dtype are the staging identity of this projection â€” the same dtype-prefixed key and
@@ -234,9 +237,10 @@ func (e expertCheckpointEntry) weight(name string, raw []byte) expertWeight {
 // value is not usable â€” construct it with NewExpertCheckpointTier â€” and a nil *ExpertCheckpointTier
 // is a valid "no tier", which is the default and which every method tolerates.
 type ExpertCheckpointTier struct {
-	mu     sync.Mutex
-	shards []*ggufExpertSource
-	index  map[string]expertCheckpointEntry
+	mu               sync.Mutex
+	shards           []*ggufExpertSource
+	index            map[string]expertCheckpointEntry
+	deviceRingBudget int64
 
 	// overlays holds the optional per-rank sparse row overlays, keyed by the fused tensor they
 	// band (#13030). It is nil until SetExpertSparseOverlay registers one, so an overlay-free tier
@@ -276,6 +280,103 @@ func NewExpertCheckpointTier(hostBytes int64) *ExpertCheckpointTier {
 		pool:  polymodel.NewPool(hostBytes),
 		host:  map[polymodel.ModelID]expertWeight{},
 	}
+}
+
+var ErrExpertCheckpointDeviceBudget = errors.New("model: checkpoint expert device ring budget refused")
+
+// ExpertCheckpointDeviceBudgetError identifies an undersized or sealed device budget.
+type ExpertCheckpointDeviceBudgetError struct {
+	Tensor string
+	Bytes  int64
+	Budget int64
+}
+
+func (e *ExpertCheckpointDeviceBudgetError) Error() string {
+	return fmt.Sprintf("%v: tensor %s, bytes %d, budget %d", ErrExpertCheckpointDeviceBudget, e.Tensor, e.Bytes, e.Budget)
+}
+
+func (e *ExpertCheckpointDeviceBudgetError) Unwrap() error {
+	return ErrExpertCheckpointDeviceBudget
+}
+
+// SetDeviceRingBudget declares a device ceiling independently of host retention. A positive
+// ceiling must fit every complete indexed expert and seals the index and budget without payload IO.
+func (t *ExpertCheckpointTier) SetDeviceRingBudget(bytes int64) error {
+	if t == nil || bytes < 0 {
+		return fmt.Errorf("%w: invalid device ring budget", ErrGGUFExpertMetadata)
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.deviceRingBudget > 0 {
+		if bytes == t.deviceRingBudget {
+			return nil
+		}
+		return &ExpertCheckpointDeviceBudgetError{Tensor: "sealed index", Bytes: t.deviceRingBudget, Budget: bytes}
+	}
+	if bytes == 0 {
+		return nil
+	}
+	tensor, required, err := t.maxExpertGroupBytesLocked()
+	if err != nil {
+		return err
+	}
+	if bytes < required {
+		return &ExpertCheckpointDeviceBudgetError{Tensor: tensor, Bytes: required, Budget: bytes}
+	}
+	t.deviceRingBudget = bytes
+	return nil
+}
+
+// DeviceRingBudget reports the declared device ceiling; zero preserves the existing session policy.
+func (t *ExpertCheckpointTier) DeviceRingBudget() int64 {
+	if t == nil {
+		return 0
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.deviceRingBudget
+}
+
+func (t *ExpertCheckpointTier) maxExpertGroupBytesLocked() (string, int64, error) {
+	type groupGeometry struct {
+		bytes       int64
+		projections uint8
+	}
+	groups := make(map[string]groupGeometry)
+	for name, entry := range t.index {
+		var projection uint8
+		switch entry.proj {
+		case "gate_proj":
+			projection = 1
+		case "up_proj":
+			projection = 2
+		case "down_proj":
+			projection = 4
+		default:
+			return "", 0, fmt.Errorf("%w: %s has unknown expert projection", ErrGGUFExpertMetadata, name)
+		}
+		group := groups[entry.group]
+		if entry.group == "" || entry.stride <= 0 || group.projections&projection != 0 || group.bytes > math.MaxInt64-entry.stride {
+			return "", 0, fmt.Errorf("%w: %s has invalid expert group geometry", ErrGGUFExpertMetadata, name)
+		}
+		group.bytes += entry.stride
+		group.projections |= projection
+		groups[entry.group] = group
+	}
+	if len(groups) == 0 {
+		return "", 0, fmt.Errorf("%w: empty expert index", ErrGGUFExpertMetadata)
+	}
+	var tensor string
+	var required int64
+	for name, group := range groups {
+		if group.projections != 7 {
+			return "", 0, fmt.Errorf("%w: %s has incomplete expert projections", ErrGGUFExpertMetadata, name)
+		}
+		if group.bytes > required || group.bytes == required && name < tensor {
+			tensor, required = name, group.bytes
+		}
+	}
+	return tensor, required, nil
 }
 
 // Has reports whether this tier indexes the named per-expert projection. It is an
@@ -341,6 +442,9 @@ func (t *ExpertCheckpointTier) AddShardData(r io.ReaderAt, size int64, data []by
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.deviceRingBudget > 0 {
+		return fmt.Errorf("%w: device ring budget seals expert index", ErrGGUFExpertMetadata)
+	}
 	shard := len(t.shards)
 	// Index every per-expert projection BEFORE publishing the shard, so a duplicate name aborts
 	// with the tier exactly as it was found rather than half-indexed.
@@ -359,6 +463,7 @@ func (t *ExpertCheckpointTier) AddShardData(r io.ReaderAt, size int64, data []by
 			staged[name] = expertCheckpointEntry{
 				shard: shard, fused: descs[i].Name, expert: e, quant: f.Quant,
 				rows: f.Rows, cols: f.Cols, nblk: f.Cols / blockWeights, stride: stride,
+				group: expertNameArch(f.Arch, f.Layer, e, "gate_proj.weight"), proj: f.Proj,
 			}
 		}
 	}
