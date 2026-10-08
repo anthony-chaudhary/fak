@@ -552,9 +552,8 @@ func probeChildProcessState(cmd *exec.Cmd) string {
 	if cmd == nil || cmd.Process == nil {
 		return "unknown"
 	}
-	if cmd.ProcessState != nil {
-		return "exited"
-	}
+	// Cancel can run concurrently with Wait, which owns ProcessState.
+	// Probe the PID here; final exit information is collected after Run.
 	pid := cmd.Process.Pid
 	if pid <= 0 {
 		return "unknown"
@@ -1051,10 +1050,7 @@ func executeOpsRun(ctx context.Context, stdout, stderr io.Writer, argv, env []st
 			rec.Error = cancelErr.Error()
 			rec.OSError = cancelErr.Error()
 		}
-		if cmd.ProcessState != nil {
-			exitCode := cmd.ProcessState.ExitCode()
-			rec.ExitCode = &exitCode
-		}
+		// Wait owns ProcessState; enrich the exit code after Run returns.
 
 		mu.Lock()
 		if len(lifecycle) < maxOpsRunLifecycleRecords {

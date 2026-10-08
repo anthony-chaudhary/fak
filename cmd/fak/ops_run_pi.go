@@ -235,10 +235,7 @@ func opsPiExecute(ctx context.Context, stdout, stderr io.Writer, argv, env []str
 			rec.Error = cancelErr.Error()
 			rec.OSError = cancelErr.Error()
 		}
-		if cmd.ProcessState != nil {
-			exitCode := cmd.ProcessState.ExitCode()
-			rec.ExitCode = &exitCode
-		}
+		// Wait owns ProcessState; enrich the exit code after Run returns.
 		mu.Lock()
 		if len(lifecycle) < maxOpsRunLifecycleRecords {
 			lifecycle = append(lifecycle, rec)
