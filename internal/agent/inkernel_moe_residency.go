@@ -109,6 +109,7 @@ type V41PhaseLifetimeSnapshot struct {
 	Prefill     V41PhaseSnapshot                   `json:"prefill"`
 	Decode      V41PhaseSnapshot                   `json:"decode"`
 	Projections V41ProjectionPhaseLifetimeSnapshot `json:"projections"`
+	Compressor  V41CompressorPhaseLifetimeSnapshot `json:"compressor"`
 }
 
 // V41PhaseSnapshot deliberately contains only fixed-shape numeric counters.
@@ -170,6 +171,21 @@ type V41ProjectionPhaseSnapshot struct {
 	EngramProjectionReadbackBytes         int64 `json:"engram_projection_readback_bytes"`
 	EngramProjectionNanos                 int64 `json:"engram_projection_nanos"`
 	EngramProjectionHostWeightF32Bytes    int64 `json:"engram_projection_host_weight_f32_bytes"`
+}
+
+type V41CompressorPhaseLifetimeSnapshot struct {
+	Prefill V41CompressorPhaseSnapshot `json:"prefill"`
+	Decode  V41CompressorPhaseSnapshot `json:"decode"`
+}
+
+type V41CompressorPhaseSnapshot struct {
+	CompressorProjectionDeviceCalls           int   `json:"compressor_projection_device_calls"`
+	CompressorProjectionHostCalls             int   `json:"compressor_projection_host_calls"`
+	CompressorProjectionDeviceRows            int   `json:"compressor_projection_device_rows"`
+	CompressorProjectionHostRows              int   `json:"compressor_projection_host_rows"`
+	CompressorProjectionActivationUploadBytes int64 `json:"compressor_projection_activation_upload_bytes"`
+	CompressorProjectionReadbackBytes         int64 `json:"compressor_projection_readback_bytes"`
+	CompressorProjectionNanos                 int64 `json:"compressor_projection_nanos"`
 }
 
 // HitRate is Hits/(Hits+PageIns) over the whole serve — the activated-set hit rate, weighted by
@@ -241,11 +257,15 @@ func (p *InKernelPlanner) foldV41PhasesLocked(at model.V41ExpertFaultAttribution
 		Prefill: v41ProjectionPhaseSnapshot(at.Prefill),
 		Decode:  v41ProjectionPhaseSnapshot(at.Decode),
 	}
-	if prefill == (V41PhaseSnapshot{}) && decode == (V41PhaseSnapshot{}) && projections == (V41ProjectionPhaseLifetimeSnapshot{}) {
+	compressor := V41CompressorPhaseLifetimeSnapshot{
+		Prefill: v41CompressorPhaseSnapshot(at.Prefill),
+		Decode:  v41CompressorPhaseSnapshot(at.Decode),
+	}
+	if prefill == (V41PhaseSnapshot{}) && decode == (V41PhaseSnapshot{}) && projections == (V41ProjectionPhaseLifetimeSnapshot{}) && compressor == (V41CompressorPhaseLifetimeSnapshot{}) {
 		return
 	}
 	p.moeResidency.V41Phases = &V41PhaseLifetimeSnapshot{
-		Scope: "model_lifetime", Prefill: prefill, Decode: decode, Projections: projections,
+		Scope: "model_lifetime", Prefill: prefill, Decode: decode, Projections: projections, Compressor: compressor,
 	}
 }
 
@@ -278,6 +298,18 @@ func v41PhaseSnapshot(in model.V41ExpertFaultAttributionPhase) V41PhaseSnapshot 
 		MHCProjectionNanos:                   in.MHCProjectionNanos,
 		MHCProjectionActivationUploadBytes:   in.MHCProjectionActivationUploadBytes,
 		MHCProjectionReadbackBytes:           in.MHCProjectionReadbackBytes,
+	}
+}
+
+func v41CompressorPhaseSnapshot(in model.V41ExpertFaultAttributionPhase) V41CompressorPhaseSnapshot {
+	return V41CompressorPhaseSnapshot{
+		CompressorProjectionDeviceCalls:           in.CompressorProjectionDeviceCalls,
+		CompressorProjectionHostCalls:             in.CompressorProjectionHostCalls,
+		CompressorProjectionDeviceRows:            in.CompressorProjectionDeviceRows,
+		CompressorProjectionHostRows:              in.CompressorProjectionHostRows,
+		CompressorProjectionActivationUploadBytes: in.CompressorProjectionActivationUploadBytes,
+		CompressorProjectionReadbackBytes:         in.CompressorProjectionReadbackBytes,
+		CompressorProjectionNanos:                 in.CompressorProjectionNanos,
 	}
 }
 

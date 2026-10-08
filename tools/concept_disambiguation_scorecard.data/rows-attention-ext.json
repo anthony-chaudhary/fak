@@ -9,7 +9,8 @@
       "distinction": "Unlike linear attention (Gated-DeltaNet), it computes an explicit O(n^2) softmax over key positions rather than a recurrent linear scan.",
       "distinct_from": [
         "linear-attn-cache",
-        "linear attention (Gated-DeltaNet)"
+        "linear attention (Gated-DeltaNet)",
+        "x-attention-v41attentionrolereader"
       ],
       "aliases": [
         "attn"

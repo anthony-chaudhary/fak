@@ -481,6 +481,7 @@ func (s *V41AttentionState) clone() *V41AttentionState {
 	out := &V41AttentionState{
 		windowSize:         s.windowSize,
 		headDim:            s.headDim,
+		indexHeadDim:       s.indexHeadDim,
 		ratioCap:           s.ratioCap,
 		nextWindowPos:      s.nextWindowPos,
 		nextCompressRow:    s.nextCompressRow,

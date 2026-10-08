@@ -129,9 +129,10 @@ type v41AttentionPublicationKey struct {
 // The state is bounded: window KV is a fixed 128-row ring and compressed rows
 // are appended only when the caller supplies a completed group.
 type V41AttentionState struct {
-	windowSize int
-	headDim    int
-	ratioCap   int
+	windowSize   int
+	headDim      int
+	indexHeadDim int
+	ratioCap     int
 
 	nextWindowPos      int
 	nextCompressRow    int
@@ -165,6 +166,13 @@ type V41AttentionState struct {
 	topkSet        bool
 }
 
+func (s *V41AttentionState) indexWidth() int {
+	if s.indexHeadDim > 0 {
+		return s.indexHeadDim
+	}
+	return s.headDim
+}
+
 // NewV41AttentionState validates the pinned geometry and returns empty state.
 // headDim is the KV latent width; ratioCap bounds any layer's compress ratio so
 // malformed updates are rejected before mutation.
@@ -178,6 +186,7 @@ func NewV41AttentionState(headDim, ratioCap int) (*V41AttentionState, error) {
 	s := &V41AttentionState{
 		windowSize:        v41WindowSize,
 		headDim:           headDim,
+		indexHeadDim:      headDim,
 		ratioCap:          ratioCap,
 		window:            make([][]float32, v41WindowSize),
 		kvPublications:    make(map[v41AttentionPublicationKey][]float32),
@@ -577,8 +586,8 @@ func (s *V41AttentionState) appendCompressorSourceIndex(
 	if err != nil {
 		return nil, nil, false, 0, 0, err
 	}
-	if len(indexKey) != s.headDim {
-		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source index key width %d, want %d", len(indexKey), s.headDim)
+	if len(indexKey) != s.indexWidth() {
+		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source index key width %d, want %d", len(indexKey), s.indexWidth())
 	}
 
 	// Stage the index publication and validate it BEFORE it is committed. The KV
@@ -853,8 +862,8 @@ func (s *V41AttentionState) validateUpdates(updates []V41AttentionStateUpdate) e
 			if ref.Ratio <= 0 {
 				return fmt.Errorf("model: V41 attention state update[%d] layer %d has ratio 0 but supplied an index key", i, ref.LayerID)
 			}
-			if len(up.IndexKey) != s.headDim {
-				return fmt.Errorf("model: V41 attention state update[%d] index key width %d, want %d", i, len(up.IndexKey), s.headDim)
+			if len(up.IndexKey) != s.indexWidth() {
+				return fmt.Errorf("model: V41 attention state update[%d] index key width %d, want %d", i, len(up.IndexKey), s.indexWidth())
 			}
 			if err := s.finiteRow(up.IndexKey, "index key"); err != nil {
 				return fmt.Errorf("model: V41 attention state update[%d]: %w", i, err)

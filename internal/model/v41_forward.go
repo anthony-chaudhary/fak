@@ -212,13 +212,16 @@ const (
 // v41DownHandled it returns the H-wide expert output computed on the backend.
 type v41ExpertDownFunc func(layer int, stem string, fused []float32) ([]float32, v41ExpertDownOutcome, error)
 
-func (st *v41ForwardState) attentionState(headDim, ratioCap int) (*V41AttentionState, error) {
+func (st *v41ForwardState) attentionState(headDim, ratioCap int, indexHeadDim ...int) (*V41AttentionState, error) {
 	if st.attn != nil {
 		return st.attn, nil
 	}
 	state, err := NewV41AttentionState(headDim, ratioCap)
 	if err != nil {
 		return nil, err
+	}
+	if len(indexHeadDim) > 0 && indexHeadDim[0] > 0 {
+		state.indexHeadDim = indexHeadDim[0]
 	}
 	st.attn = state
 	return state, nil
@@ -385,7 +388,9 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// role (#13480): a later incremental Step's reader resolves the source's
 		// published compressed rows from this registry, so it must survive the
 		// prefill. A plain-only session keeps the historical release byte-for-byte.
-		if !m.v41RoleSchedule() {
+		if m.v41RoleSchedule() {
+			st.attn = runState.attn
+		} else {
 			st.attn = nil
 		}
 		committed = true
@@ -401,6 +406,9 @@ func (m *Model) v41RoleSchedule() bool {
 	cfg := m.Cfg
 	roles := m.v41AttentionRolesCached()
 	for l := 0; l < cfg.NumLayers; l++ {
+		if v41CompressRatioAt(cfg, l) > 1 {
+			return true
+		}
 		if role, ok := roles[l]; ok && role != V41AttentionRolePerLayer {
 			return true
 		}
@@ -670,7 +678,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	}
 	var compressedKV [][]float32
 	if plan.Ratio > 1 {
-		compressed, err := m.v41CompressedRows(l, plan.Ratio, kvRows, preByPos)
+		compressed, err := m.v41CompressedRowsWithProjection(l, plan.Ratio, kvRows, preByPos, scratch.denseProjection)
 		if err != nil {
 			return err
 		}
@@ -680,7 +688,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	// compressed stream; a source layer publishes its own for later readers.
 	sharedKV := compressedKV
 	if plan.Role == V41AttentionRoleReader && plan.KVSourceLayer >= 0 && st != nil {
-		attn, err := st.attentionState(hd, 8)
+		attn, err := st.attentionState(hd, 8, cfg.IndexHeadDim)
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)
 		}
@@ -688,20 +696,29 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			sharedKV = rows
 		}
 	}
-	// The layer's own lightning-index selection for the newest position. A layer
-	// that is not an index source computes none (nil).
-	localIdx, err := m.v41IndexRows(l, qLatRows[seq-1], preByPos[seq-1], compressedKV)
-	if err != nil {
-		return err
-	}
-	// The per-position index list the compressed contraction consumes, flattened
-	// [seq][TopKWidth]. A layer that is itself the index source uses its local
-	// selection replicated across the causal positions it published it for; a
-	// reader layer reuses its source's published top-k selection; a layer with
-	// neither passes no list and the contraction falls back to the causal mask.
-	indexList, err := m.v41AttentionIndexList(plan, st, localIdx, hd, len(sharedKV), seq)
-	if err != nil {
-		return err
+	var indexList []int32
+	if plan.Ratio > 1 && indexSourceAt(cfg.DeepSeekV41, l) {
+		for t := 0; t < seq; t++ {
+			groups := min((t+1)/plan.Ratio, len(compressedKV))
+			localIdx, err := m.v41IndexRows(l, qLatRows[t], preByPos[t], compressedKV[:groups])
+			if err != nil {
+				return err
+			}
+			row, err := m.v41AttentionIndexList(plan, st, localIdx, hd, groups, 1)
+			if err != nil {
+				return err
+			}
+			indexList = append(indexList, row...)
+		}
+	} else {
+		localIdx, err := m.v41IndexRows(l, qLatRows[seq-1], preByPos[seq-1], compressedKV)
+		if err != nil {
+			return err
+		}
+		indexList, err = m.v41AttentionIndexList(plan, st, localIdx, hd, len(sharedKV), seq)
+		if err != nil {
+			return err
+		}
 	}
 
 	// V41AttentionState is the session-owned validation anchor for the projected
@@ -712,9 +729,25 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	// in the per-forward registry; retained session state contains only the
 	// configured window tail and incomplete compressor group.
 	if st != nil {
+		var indexKeys [][]float32
+		if plan.Ratio > 1 && indexSourceAt(cfg.DeepSeekV41, l) && len(compressedKV) > 0 {
+			weight := m.tensor(layerName(l, "indexer.wk.weight"))
+			norm := m.tensor(layerName(l, "indexer.k_norm.weight"))
+			indexKeys = make([][]float32, len(compressedKV))
+			for i, row := range compressedKV {
+				key := matRows(weight, row, cfg.IndexHeadDim, len(row))
+				if len(norm) == cfg.IndexHeadDim {
+					key = rmsnormCfg(key, norm, eps, cfg)
+				}
+				indexKeys[i] = key
+			}
+		}
 		layerState, err := NewV41AttentionState(hd, 8)
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)
+		}
+		if cfg.IndexHeadDim > 0 {
+			layerState.indexHeadDim = cfg.IndexHeadDim
 		}
 		// Seed the retained temporal state. For a compressed source layer the
 		// incomplete trailing group's PRE-ATTENTION carriers are passed through so
@@ -730,16 +763,24 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err := layerState.seedTemporalWithInputs(kvRows, seedInputs, plan.Ratio, cfg.windowForLayer(l)); err != nil {
 			return v41StageErr(v41StageAttention, l, err)
 		}
+		if plan.Ratio > 1 {
+			ownPlan := plan
+			ownPlan.KVSourceLayer = l
+			updates := m.v41AttentionSourceUpdates(ownPlan, compressedKV, qLatRows, indexKeys)
+			if err := layerState.publishUpdates(updates); err != nil {
+				return v41StageErr(v41StageAttention, l, err)
+			}
+		}
 		st.setLayerState(l, cfg.NumLayers, layerState)
 
-		registry, err := st.attentionState(hd, 8)
+		registry, err := st.attentionState(hd, 8, cfg.IndexHeadDim)
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)
 		}
 		// A declared source layer publishes its compressed rows and index keys so
 		// later readers can resolve them within this same forward pass (the
 		// V41AttentionState source-then-consumer ordering).
-		updates := m.v41AttentionSourceUpdates(plan, compressedKV, qLatRows)
+		updates := m.v41AttentionSourceUpdates(plan, compressedKV, qLatRows, indexKeys)
 		if len(updates) > 0 {
 			if err := registry.publishUpdates(updates); err != nil {
 				return v41StageErr(v41StageAttention, l, err)
@@ -769,7 +810,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// keeps the exact per-position causal sink contraction.
 		if plan.Ratio > 1 || (plan.Role == V41AttentionRoleReader && len(sharedKV) > 0 && len(sharedKV) < seq) {
 			opt := V41AttentionSharedKVOptions{
-				Layer: l, Ratio: maxInt(plan.Ratio, 1), Groups: len(sharedKV),
+				Layer: l, Ratio: maxInt(plan.Ratio, 1), QueryOffset: t, Groups: len(sharedKV),
 				HeadDim: hd, Heads: nH, Softmax: scale, Sink: sink,
 			}
 			if indexList != nil && len(indexList) >= (t+1)*plan.topKWidth() {

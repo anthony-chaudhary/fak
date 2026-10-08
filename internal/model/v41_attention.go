@@ -25,7 +25,10 @@ package model
 // ratio does not divide its KV stream, a reader layer that names no resolvable
 // source, and an unimplemented ratio all refuse before any output is produced.
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // V41AttentionRole classifies one layer's participation in the shared
 // KV/index schedule. Exactly one role applies per layer; readers reuse the
@@ -225,12 +228,16 @@ func indexSourceAt(d41 *DeepSeekV41Config, layer int) bool {
 //
 // It returns a [seq][groups] bool mask. A group beyond the stream is false.
 func v41CompressedCausalMask(seq, ratio, groups int) [][]bool {
+	return v41CompressedCausalMaskAt(seq, ratio, groups, 0)
+}
+
+func v41CompressedCausalMaskAt(seq, ratio, groups, offset int) [][]bool {
 	mask := make([][]bool, seq)
 	for t := 0; t < seq; t++ {
 		row := make([]bool, groups)
 		for g := 0; g < groups; g++ {
-			last := (g+1)*ratio - 1
-			row[g] = last <= t
+			position := offset + t
+			row[g] = position >= ratio-1 && g <= (position-(ratio-1))/ratio
 		}
 		mask[t] = row
 	}
@@ -244,19 +251,20 @@ func v41CompressedCausalMask(seq, ratio, groups int) [][]bool {
 // is the KV latent width (the compressed row width), Heads/Dim the query head
 // geometry, TopK the sink index-list width, Sink the per-head learnable sink.
 type V41AttentionSharedKVOptions struct {
-	Layer      int
-	Ratio      int
-	Groups     int
-	HeadDim    int
-	Heads      int
-	TopK       int
-	Softmax    float32
-	Sink       []float32
-	RopeDim    int
-	Inverse    func(ropeDim int, o []float32) error
-	Idx        []int32 // caller-supplied row selection (len seq*TopK); nil => causal
-	IndexTopK  int
-	SourceRows [][]float32 // resolved shared compressed KV stream (row-major [Groups][HeadDim])
+	Layer       int
+	Ratio       int
+	QueryOffset int
+	Groups      int
+	HeadDim     int
+	Heads       int
+	TopK        int
+	Softmax     float32
+	Sink        []float32
+	RopeDim     int
+	Inverse     func(ropeDim int, o []float32) error
+	Idx         []int32 // caller-supplied row selection (len seq*TopK); nil => causal
+	IndexTopK   int
+	SourceRows  [][]float32 // resolved shared compressed KV stream (row-major [Groups][HeadDim])
 }
 
 // V41AttentionCompressedForward contracts already-projected V4.1 query heads
@@ -346,7 +354,11 @@ func V41AttentionCompressedForward(q []float32, values [][]float32, opt V41Atten
 		}
 	}
 
-	mask := v41CompressedCausalMask(seq, opt.Ratio, opt.Groups)
+	if opt.QueryOffset < 0 || opt.QueryOffset > math.MaxInt-seq {
+		return nil, v41StageErr(v41StageAttention, opt.Layer,
+			fmt.Errorf("%w: compressed attention query offset %d overflows %d rows", ErrV41ForwardStage, opt.QueryOffset, seq))
+	}
+	mask := v41CompressedCausalMaskAt(seq, opt.Ratio, opt.Groups, opt.QueryOffset)
 	if opt.Idx != nil {
 		if opt.IndexTopK <= 0 {
 			return nil, v41StageErr(v41StageAttention, opt.Layer,
@@ -563,7 +575,7 @@ func (m *Model) v41AttentionIndexList(plan V41AttentionPlan, st *v41ForwardState
 	}
 
 	if isSource {
-		if localIdx == nil {
+		if localIdx == nil && !(plan.Ratio > 1 && groups == 0) {
 			return nil, nil
 		}
 		row, err := one(localIdx)
@@ -602,9 +614,9 @@ func (m *Model) v41AttentionIndexList(plan V41AttentionPlan, st *v41ForwardState
 	return flat, nil
 }
 
-// v41AttentionSourceUpdates builds the projection-free publication a source
+// v41AttentionSourceUpdates builds the publication a source
 // layer hands to the session state for later readers: its completed compressed
-// rows (Latent) and the matching index keys. A layer that is neither a KV
+// rows (Latent) and their projected index keys. A layer that is neither a KV
 // source nor an index source publishes nothing, so the reduced non-shared path
 // stays a no-op here.
 //
@@ -617,7 +629,14 @@ func (m *Model) v41AttentionIndexList(plan V41AttentionPlan, st *v41ForwardState
 //
 // The update carries every published row in increasing stack order, which the
 // state's validateUpdates requires; a caller therefore never reorders them.
-func (m *Model) v41AttentionSourceUpdates(plan V41AttentionPlan, compressedKV [][]float32, qLatRows [][]float32) []V41AttentionStateUpdate {
+func (m *Model) v41AttentionSourceUpdates(plan V41AttentionPlan, compressedKV [][]float32, qLatRows [][]float32, projectedKeys ...[][]float32) []V41AttentionStateUpdate {
+	var indexKeys [][]float32
+	if len(projectedKeys) > 0 {
+		indexKeys = projectedKeys[0]
+	}
+	if plan.Ratio > 1 && len(compressedKV) == 0 {
+		return nil
+	}
 	isKV := plan.KVSourceLayer == plan.Layer
 	isIndex := indexSourceAt(m.Cfg.DeepSeekV41, plan.Layer)
 	if !isKV && !isIndex {
@@ -649,15 +668,17 @@ func (m *Model) v41AttentionSourceUpdates(plan V41AttentionPlan, compressedKV []
 		return updates
 	}
 	updates := make([]V41AttentionStateUpdate, 0, len(compressedKV))
-	for _, row := range compressedKV {
+	for i, row := range compressedKV {
 		up := V41AttentionStateUpdate{Ref: ref}
 		if isKV {
 			up.Latent = append([]float32(nil), row...)
 		}
 		if isIndex {
-			// The index key for a completed group is the pooled row itself: the
-			// reference scores the shared index against the compressed cache row.
-			up.IndexKey = append([]float32(nil), row...)
+			key := row
+			if indexKeys != nil {
+				key = indexKeys[i]
+			}
+			up.IndexKey = append([]float32(nil), key...)
 		}
 		updates = append(updates, up)
 	}

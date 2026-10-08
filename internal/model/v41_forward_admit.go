@@ -252,14 +252,16 @@ func v41CompressorWidth(cfg Config) int { return cfg.HeadDim }
 // causal order. A non-compressed regime returns the input rows unchanged. It
 // fails closed on any malformed geometry rather than emitting a partial stream.
 func (m *Model) v41CompressedRows(l int, ratio int, kvRows [][]float32, inputs [][]float32) ([][]float32, error) {
+	return m.v41CompressedRowsWithProjection(l, ratio, kvRows, inputs, nil)
+}
+
+func (m *Model) v41CompressedRowsWithProjection(l int, ratio int, kvRows [][]float32, inputs [][]float32, project v41DenseProjectionFunc) ([][]float32, error) {
 	if ratio <= 1 {
 		return kvRows, nil
 	}
 	cfg := m.Cfg
 	width := v41CompressorWidth(cfg)
 	H := cfg.HiddenSize
-	wkv := m.tensor(layerName(l, "attn.compressor.wkv.weight"))
-	wgate := m.tensor(layerName(l, "attn.compressor.wgate.weight"))
 	normWeight := m.tensor(layerName(l, "attn.compressor.norm.weight"))
 	eps := float32(cfg.RMSNormEps)
 	pool, err := NewV41CompressorPool(ratio, width)
@@ -272,8 +274,14 @@ func (m *Model) v41CompressedRows(l int, ratio int, kvRows [][]float32, inputs [
 		if pos < len(inputs) {
 			in = inputs[pos]
 		}
-		kv := matRows(wkv, in, width, H)
-		score := matRows(wgate, in, width, H)
+		kv, err := m.v41ProjMatRowsWithProjection(l, "attn.compressor.wkv.weight", in, width, H, project)
+		if err != nil {
+			return nil, err
+		}
+		score, err := m.v41ProjMatRowsWithProjection(l, "attn.compressor.wgate.weight", in, width, H, project)
+		if err != nil {
+			return nil, err
+		}
 		pooled, emitted, err := pool.PushNormalized(pos, kv, score, normWeight, eps)
 		if err != nil {
 			return nil, v41StageErr(v41StageCompress, l, err)

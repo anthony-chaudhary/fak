@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "x-attention-v41attentionrolereader",
+      "canonical": "V41AttentionRoleReader (V4.1 shared-source consumer role)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The V4.1 decoder role assigned to a layer that consumes the nearest preceding declared KV source's published compressed rows. Its resolved plan also identifies the index source whose published selection it consumes unless the layer owns that index selection. A ratio-greater-than-one reader still advances its own compressor and private history while contracting the resolved shared KV stream.",
+      "distinction": "This value identifies ownership and reuse of published KV rows and index selections across decoder layers. Attention (softmax token-mixer) identifies the mathematical query-key softmax and value contraction operation; the reader role resolves its inputs rather than defining that operation.",
+      "distinct_from": [
+        "x-attention-attention"
+      ],
+      "aliases": [],
+      "grounding": "V41AttentionRoleReader",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

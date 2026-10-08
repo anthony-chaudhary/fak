@@ -557,15 +557,17 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	var sharedKV [][]float32
 	if plan.Ratio > 1 {
 		width := v41CompressorWidth(cfg)
-		wkv := m.tensor(layerName(l, "attn.compressor.wkv.weight"))
-		wgate := m.tensor(layerName(l, "attn.compressor.wgate.weight"))
 		normWeight := m.tensor(layerName(l, "attn.compressor.norm.weight"))
 		pool, perr := NewV41CompressorPool(plan.Ratio, width)
 		if perr != nil {
 			return v41StageErr(v41StageCompress, l, perr)
 		}
-		projectKV := func(in []float32) ([]float32, error) { return matRows(wkv, in, width, H), nil }
-		projectScore := func(in []float32) ([]float32, error) { return matRows(wgate, in, width, H), nil }
+		projectKV := func(in []float32) ([]float32, error) {
+			return m.v41ProjMatRowsWithProjection(l, "attn.compressor.wkv.weight", in, width, H, scratch.denseProjection)
+		}
+		projectScore := func(in []float32) ([]float32, error) {
+			return m.v41ProjMatRowsWithProjection(l, "attn.compressor.wgate.weight", in, width, H, scratch.denseProjection)
+		}
 		var indexPub bool
 		var projectIndex func([]float32) ([]float32, error)
 		if indexSourceAt(cfg.DeepSeekV41, l) {
@@ -603,25 +605,32 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 			// Mirror the completed group into the shared registry so a later
 			// reader resolves it. The layer's own publication already exists on
 			// its state; the registry entry is the cross-layer view.
-			ref := V41AttentionStateRef{LayerID: l, Ratio: plan.Ratio, IsKVSource: true, IsIndexSource: indexPub}
-			upd := V41AttentionStateUpdate{Ref: ref, Latent: latent}
+			ref := V41AttentionStateRef{LayerID: l, Ratio: plan.Ratio, IsKVSource: plan.KVSourceLayer == l, IsIndexSource: indexPub}
+			upd := V41AttentionStateUpdate{Ref: ref}
+			if ref.IsKVSource {
+				upd.Latent = latent
+			}
 			if indexPub {
 				upd.IndexKey = indexKey
 			}
-			if err := registry.publishUpdates([]V41AttentionStateUpdate{upd}); err != nil {
-				return v41StageErr(v41StageCompress, l, err)
+			if ref.IsKVSource || ref.IsIndexSource {
+				if err := registry.publishUpdates([]V41AttentionStateUpdate{upd}); err != nil {
+					return v41StageErr(v41StageCompress, l, err)
+				}
 			}
-			sharedKV = [][]float32{latent}
 			_ = start
 			_ = end
 		}
-		if indexPub && emitted {
-			// Publish the index source's per-position top-k so a later reader
-			// reuses it without recomputing the scoring path (mirrors v41Layer's
-			// index-source publication at seq == 1).
-			if err := m.v41RoleStepPublishTopK(registry, l, plan, qLat, collapsed, sharedKV); err != nil {
+		if indexPub {
+			rows, _ := layerState.KVSourceRows(l)
+			if err := m.v41RoleStepPublishTopK(registry, l, plan, qLat, collapsed, rows); err != nil {
 				return err
 			}
+		}
+		if plan.Role == V41AttentionRoleReader && plan.KVSourceLayer >= 0 {
+			sharedKV, _ = registry.KVSourceRows(plan.KVSourceLayer)
+		} else {
+			sharedKV, _ = layerState.KVSourceRows(l)
 		}
 		if len(sharedKV) == 0 {
 			// No completed group yet: the layer contracts nothing for this position,
@@ -647,11 +656,15 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 
 	// ---- compressed contraction over the shared rows (block-causal) ----
 	opt := V41AttentionSharedKVOptions{
-		Layer: l, Ratio: maxInt(plan.Ratio, 1), Groups: len(sharedKV),
+		Layer: l, Ratio: maxInt(plan.Ratio, 1), QueryOffset: pos, Groups: len(sharedKV),
 		HeadDim: hd, Heads: nH, Softmax: cfg.attnScale(), Sink: m.tensor(layerName(l, "attn.sink")),
 	}
 	if plan.TopKWidth > 0 {
-		idx, ierr := m.v41RoleStepIndex(registry, l, plan, qLat, collapsed, len(sharedKV))
+		indexState := registry
+		if indexSourceAt(cfg.DeepSeekV41, l) {
+			indexState = layerState
+		}
+		idx, ierr := m.v41RoleStepIndex(indexState, l, plan, qLat, collapsed, len(sharedKV))
 		if ierr != nil {
 			return ierr
 		}
@@ -790,15 +803,9 @@ func (m *Model) v41RoleStepNormalizeIndex(l int, plan V41AttentionPlan, row []in
 // v41Layer's index-source publication at seq == 1: one selection row for the
 // newest position, the causal superset across the stream.
 func (m *Model) v41RoleStepPublishTopK(state *V41AttentionState, l int, plan V41AttentionPlan, qLat, hidden []float32, sharedKV [][]float32) error {
-	if len(sharedKV) == 0 {
-		return nil
-	}
 	idx, err := m.v41IndexRows(l, qLat, hidden, sharedKV)
 	if err != nil {
 		return err
-	}
-	if idx == nil {
-		return nil
 	}
 	row, err := m.v41RoleStepNormalizeIndex(l, plan, idx, len(sharedKV))
 	if err != nil {
@@ -931,8 +938,8 @@ func (m *Model) v41IndexReaderStep(layer, sourceLayer, pos int, state *V41Attent
 			return nil, fmt.Errorf("%w: index reader layer %d position %d: publication set has a hole at row %d", ErrV41ForwardStage, layer, pos, i)
 		}
 	}
-	if len(row) != state.headDim {
-		return nil, fmt.Errorf("%w: index reader layer %d position %d: published row width %d, want %d", ErrV41ForwardStage, layer, pos, len(row), state.headDim)
+	if len(row) != state.indexWidth() {
+		return nil, fmt.Errorf("%w: index reader layer %d position %d: published row width %d, want %d", ErrV41ForwardStage, layer, pos, len(row), state.indexWidth())
 	}
 
 	// A pure read: return a copy so the caller cannot alias the publication.

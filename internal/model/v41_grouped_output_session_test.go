@@ -78,16 +78,21 @@ func TestV41GroupedOutputActualSessionRoutes(t *testing.T) {
 			b.deny = scenario.deny
 			s := v41DenseTestSession(t, m, b)
 			history := []int{1, 2, 3}
-			for index, ids := range [][]int{{1, 2, 3}, {4}, {5, 6}} {
+			batches := [][]int{{1, 2, 3}, {4}, {5, 6}}
+			if scenario.role {
+				batches = [][]int{{1, 2, 3}, {4}, {5}, {6, 7}}
+			}
+			for index, ids := range batches {
+				decode := index > 0 && len(ids) == 1
 				phase := "prefill"
-				if index == 1 {
+				if decode {
 					phase = "decode"
 				}
 				before := v41GroupedPhase(t, m, phase)
 				denseBefore := v41DenseTestPhase(t, m, phase)
 				from, attempts := len(b.grouped), b.matmulAttempts
 				var got []float32
-				if index == 1 {
+				if decode {
 					got = s.Step(ids[0])
 				} else {
 					got = s.Prefill(ids)
@@ -104,7 +109,12 @@ func TestV41GroupedOutputActualSessionRoutes(t *testing.T) {
 				if scenario.role && index > 0 {
 					ratio := m.Cfg.DeepSeekV41.CompressRatios[0]
 					priorTokens := len(history) - len(ids)
-					projectedRows = len(history)/ratio - priorTokens/ratio
+					projectedRows = 0
+					for row := range ids {
+						if priorTokens+row >= ratio-1 {
+							projectedRows++
+						}
+					}
 				}
 				v41GroupedCheckPhase(t, m, b, from, attempts, projectedRows, phase, before, scenario.deny)
 				named, _, _ := v41DenseTestOps(s, b.v41DenseTestBackend, 0)

@@ -860,3 +860,10 @@ The optional backend predicate reports whether the loaded Vulkan bundle has the 
 The optional backend predicate reports whether the loaded Vulkan bundle has the packed Q5_K matrix-multiply pipeline needed before device selection.
 
 **Distinct from:** It reports Q5_K pipeline availability; SupportsQ3KMatMul and SupportsQ6KMatMul report different packed dtypes, and none qualifies full-model execution.
+
+
+### V41AttentionRoleReader (V4.1 shared-source consumer role)
+
+The V4.1 decoder role assigned to a layer that consumes the nearest preceding declared KV source's published compressed rows. Its resolved plan also identifies the index source whose published selection it consumes unless the layer owns that index selection. A ratio-greater-than-one reader still advances its own compressor and private history while contracting the resolved shared KV stream.
+
+**Distinct from:** This value identifies ownership and reuse of published KV rows and index selections across decoder layers. Attention (softmax token-mixer) identifies the mathematical query-key softmax and value contraction operation; the reader role resolves its inputs rather than defining that operation.

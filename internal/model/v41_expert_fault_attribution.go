@@ -114,6 +114,14 @@ type v41ExpertFaultPhaseLedger struct {
 	GroupedOutputNanos                 int64 `json:"grouped_output_nanos"`
 	GroupedOutputHostWeightF32Bytes    int64 `json:"grouped_output_host_weight_f32_bytes"`
 
+	CompressorProjectionDeviceCalls           int   `json:"compressor_projection_device_calls"`
+	CompressorProjectionHostCalls             int   `json:"compressor_projection_host_calls"`
+	CompressorProjectionDeviceRows            int   `json:"compressor_projection_device_rows"`
+	CompressorProjectionHostRows              int   `json:"compressor_projection_host_rows"`
+	CompressorProjectionActivationUploadBytes int64 `json:"compressor_projection_activation_upload_bytes"`
+	CompressorProjectionReadbackBytes         int64 `json:"compressor_projection_readback_bytes"`
+	CompressorProjectionNanos                 int64 `json:"compressor_projection_nanos"`
+
 	DenseProjectionDeviceCalls           int     `json:"dense_projection_device_calls"`
 	DenseProjectionHostCalls             int     `json:"dense_projection_host_calls"`
 	DenseProjectionDeviceRows            int     `json:"dense_projection_device_rows"`
@@ -617,6 +625,30 @@ func (m *Model) v41NoteExpertActivation(device, host int, readbackBytes int64, o
 	if opened != 0 {
 		if elapsed := l.nowLocked() - opened; elapsed > 0 {
 			led.ExpertActivationNanos += elapsed
+		}
+	}
+}
+
+func (m *Model) v41NoteCompressorProjection(deviceCalls, hostCalls, deviceRows, hostRows int, upload, readback int64, opened int64) {
+	l := v41ExpertFaultLedgerOf(m, false)
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	led := l.ledgerLocked()
+	if led == nil {
+		return
+	}
+	led.CompressorProjectionDeviceCalls += deviceCalls
+	led.CompressorProjectionHostCalls += hostCalls
+	led.CompressorProjectionDeviceRows += deviceRows
+	led.CompressorProjectionHostRows += hostRows
+	led.CompressorProjectionActivationUploadBytes += upload
+	led.CompressorProjectionReadbackBytes += readback
+	if opened != 0 {
+		if elapsed := l.nowLocked() - opened; elapsed > 0 {
+			led.CompressorProjectionNanos += elapsed
 		}
 	}
 }

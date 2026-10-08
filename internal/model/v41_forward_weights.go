@@ -1090,11 +1090,18 @@ func (e *V41ProjectionOperationError) SelectedProjectionOperation() bool { retur
 
 var errV41ProjectionResult = fmt.Errorf("%w: invalid selected V4.1 projection result", ErrV41ForwardStage)
 
+func v41CompressorProjectionLeaf(leaf string) bool {
+	return leaf == "attn.compressor.wkv.weight" || leaf == "attn.compressor.wgate.weight"
+}
+
 func v41ProjectionOperationErr(l int, leaf string, cause error) error {
 	if cause == nil {
 		cause = errV41ProjectionResult
 	}
 	stage := v41StageAttention
+	if v41CompressorProjectionLeaf(leaf) {
+		stage = v41StageCompress
+	}
 	if l == -1 {
 		stage = v41StageHead
 	}
@@ -1107,6 +1114,10 @@ func v41ProjectionOperationErr(l int, leaf string, cause error) error {
 func (m *Model) v41ProjectionRows(l int, leaf string, panel []float32, out, in, rows int, project v41DenseProjectionFunc) ([]float32, error) {
 	name := layerName(l, leaf)
 	stage := v41StageAttention
+	compressor := v41CompressorProjectionLeaf(leaf)
+	if compressor {
+		stage = v41StageCompress
+	}
 	head := l == -1 && leaf == m.headName()
 	if head {
 		name = leaf
@@ -1148,6 +1159,8 @@ func (m *Model) v41ProjectionRows(l int, leaf string, panel []float32, out, in, 
 	defer func() {
 		if head {
 			m.v41NoteHeadProjection(0, 1, 0, succeeded, 0, 0, opened)
+		} else if compressor {
+			m.v41NoteCompressorProjection(0, 1, 0, succeeded, 0, 0, opened)
 		} else {
 			m.v41NoteDenseProjection(0, 1, 0, succeeded, 0, 0, opened)
 		}
@@ -1179,9 +1192,10 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 	}
 	return func(l int, leaf string, panel []float32, out, in, rows int) (result []float32, outcome v41DenseProjectionOutcome, cause error) {
 		head := l == -1 && leaf == s.M.headName()
+		compressor := v41CompressorProjectionLeaf(leaf)
 		if !head {
 			switch leaf {
-			case "attn.wq_a.weight", "attn.wq_b.weight", "attn.wkv.weight", "ffn.gate.weight", "ffn.shared_experts.w1.weight", "ffn.shared_experts.w3.weight", "ffn.shared_experts.w2.weight":
+			case "attn.compressor.wkv.weight", "attn.compressor.wgate.weight", "attn.wq_a.weight", "attn.wq_b.weight", "attn.wkv.weight", "ffn.gate.weight", "ffn.shared_experts.w1.weight", "ffn.shared_experts.w3.weight", "ffn.shared_experts.w2.weight":
 			default:
 				return nil, v41ProjectionDeclined, nil
 			}
@@ -1202,6 +1216,20 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 				}
 			}
 		}
+		if compressor {
+			n, ok := checkedMulInt(rows, in)
+			_, wok := checkedMulInt(out, in)
+			_, yok := checkedMulInt(rows, out)
+			wr, wc, present := s.M.residentShape(name)
+			if rows <= 0 || out <= 0 || in <= 0 || !ok || !wok || !yok || len(panel) != n || !present || wr != out || wc != in {
+				return nil, v41ProjectionError, s.v41CompressorCloseFailure(l, "payload", errV41ProjectionResult)
+			}
+			for _, v := range panel {
+				if !finite32(v) {
+					return nil, v41ProjectionError, s.v41CompressorCloseFailure(l, "payload", errV41ProjectionResult)
+				}
+			}
+		}
 		var stage func() compute.Tensor
 		dtype := compute.F32
 		switch {
@@ -1209,7 +1237,7 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 			stage = func() compute.Tensor { return s.weightHAL(name) }
 		case s.M.q8w[name] != nil:
 			dtype = compute.Q8_0
-			if head {
+			if head || compressor {
 				if in%qBlk != 0 {
 					return nil, v41ProjectionDeclined, nil
 				}
@@ -1217,7 +1245,7 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 			stage = func() compute.Tensor { return s.weightHALQ8(name, s.M.q8w[name]) }
 		case s.M.q4kw[name] != nil:
 			dtype = compute.Q4_K
-			if head {
+			if head || compressor {
 				q := s.M.q4kw[name]
 				if in%qkK != 0 || q.nblk != in/qkK {
 					return nil, v41ProjectionDeclined, nil
@@ -1231,7 +1259,7 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 				return nil, v41ProjectionDeclined, nil
 			}
 			dtype = desc.Dtype()
-			if head && (desc.BlockWeights() <= 0 || desc.BlockBytes() <= 0 || in%desc.BlockWeights() != 0 || qt.nblk != in/desc.BlockWeights()) {
+			if (head || compressor) && (desc.BlockWeights() <= 0 || desc.BlockBytes() <= 0 || in%desc.BlockWeights() != 0 || qt.nblk != in/desc.BlockWeights()) {
 				return nil, v41ProjectionDeclined, nil
 			}
 			stage = func() compute.Tensor { return s.weightHALKQuant(name, qt) }
@@ -1269,7 +1297,7 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 				return nil, v41ProjectionDeclined, nil
 			}
 		}
-		if head {
+		if head || compressor {
 			stage = func() compute.Tensor { return s.v41HeadWeightHAL(name, dtype, out, in) }
 		}
 		opened := s.M.v41NowNanos()
@@ -1278,12 +1306,17 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 		defer func() {
 			if head {
 				s.M.v41NoteHeadProjection(1, 0, successfulRows, 0, uploaded, readback, opened)
+			} else if compressor {
+				s.M.v41NoteCompressorProjection(1, 0, successfulRows, 0, uploaded, readback, opened)
 			} else {
 				s.M.v41NoteDenseProjection(1, 0, successfulRows, 0, uploaded, readback, opened)
 			}
 		}()
 		opStage := "weight upload"
 		closeFailure := func(err error) error {
+			if compressor {
+				return s.v41CompressorCloseFailure(l, opStage, err)
+			}
 			if !head {
 				return err
 			}
@@ -1292,7 +1325,9 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 		defer func() {
 			if r := recover(); r != nil {
 				if payload, ok := r.(v41HeadPayloadError); ok {
-					opStage = "payload"
+					if !compressor {
+						opStage = "payload"
+					}
 					result, outcome, cause = nil, v41ProjectionError, closeFailure(payload.cause)
 					return
 				}
@@ -1312,6 +1347,12 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 		}()
 		run := func() ([]float32, error) {
 			weight := stage()
+			if compressor && dtype == compute.Q4_K {
+				q := s.M.q4kw[name]
+				if q4kHostCopyReleasable(s, q, weight.Ready()) {
+					q.raw = nil
+				}
+			}
 			input := panel
 			if s.M.prism != nil && s.M.prism.weightWidth[name] != 0 {
 				input = make([]float32, len(panel))
@@ -1319,7 +1360,7 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 					copy(input[row*in:(row+1)*in], s.M.prismProjectInput(name, panel[row*in:(row+1)*in]))
 				}
 			}
-			if head {
+			if head || compressor {
 				for _, v := range input {
 					if !finite32(v) {
 						opStage = "payload"
@@ -1350,7 +1391,7 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 			if !ok || len(values) != want {
 				return nil, errV41ProjectionResult
 			}
-			if head {
+			if head || compressor {
 				for _, v := range values {
 					if !finite32(v) {
 						return nil, errV41ProjectionResult
@@ -1361,7 +1402,7 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 			for row := 0; row < rows; row++ {
 				s.M.loraApply(name, panel[row*in:(row+1)*in], values[row*out:(row+1)*out])
 			}
-			if head {
+			if head || compressor {
 				for _, v := range values {
 					if !finite32(v) {
 						return nil, errV41ProjectionResult
@@ -1456,6 +1497,13 @@ func (s *Session) v41HeadWeightHAL(name string, dtype compute.Dtype, out, in int
 			return desc.NewHostTensor(out, in, raw)
 		}, dtype, kQuantResidentBytes(q))
 	}
+}
+
+func (s *Session) v41CompressorCloseFailure(layer int, stage string, cause error) error {
+	closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-compressor-projection", Layer: layer, Stage: stage, Cause: cause}
+	s.halFailure = closed
+	s.Close()
+	return closed
 }
 
 func (s *Session) v41HeadCloseFailure(stage string, cause error) error {
