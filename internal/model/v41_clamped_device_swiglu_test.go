@@ -137,6 +137,7 @@ func TestV41ClampedDeviceSwiGLUSessionStepAndSuffix(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				s.v41State().denseProjection = nil
 				t.Cleanup(s.Close)
 				if len(s.Prefill([]int{1, 2, 3})) == 0 || !s.v41IncrementalEligible() {
 					t.Fatal("prefill did not seed incremental session")
@@ -317,6 +318,7 @@ func TestV41ClampedDeviceSwiGLUFailureFreesAndRetries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			s.v41State().denseProjection = nil
 			t.Cleanup(s.Close)
 			s.Prefill([]int{1, 2, 3})
 			b.live = map[compute.Buffer]bool{}

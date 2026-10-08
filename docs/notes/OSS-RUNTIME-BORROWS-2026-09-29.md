@@ -84,3 +84,43 @@ These are software correctness and avoided-work witnesses. They do not establish
 physical TTFT or throughput; off-grid device chunking can change floating-point
 reduction order. Hardware promotion requires a separately captured matched native
 device run.
+
+## V4.1 session dense projections
+
+The dense projection bridge reuses Fak's existing GLM DSA projection-panel and
+session HAL mechanisms for seven leaves: query down/up, KV, router gate, and
+shared-expert gate/up/down. Cold query panels, decode, and suffix prefill select
+device dispatch when the actual backend supports the resident dtype; unsupported
+representations retain the existing host path. Session ownership preserves
+installed callbacks and rebinds restored continuation data to its target session.
+Selected operation failures roll back continuation state without host retry.
+Prism transforms activation copies; LoRA consumes the original activation rows.
+
+The default phase ledger and bounded agent reader expose
+`dense_projection_device_calls`, `dense_projection_host_calls`,
+`dense_projection_device_rows`, `dense_projection_host_rows`,
+`dense_projection_activation_upload_bytes`, `dense_projection_readback_bytes`,
+and `dense_projection_nanos`. Calls record attempts, rows record completed
+projections, and bytes record successful activation uploads and returned
+readbacks. Weight staging remains outside the activation byte counters.
+
+On 2026-10-07, a physical Radeon 8060S RADV run of a small all-Q2_K seven-leaf
+fixture completed cold prefill (three tokens), decode (one token), and suffix
+prefill (two tokens). It observed 17/7/14 dense device calls and 21/7/14 completed
+rows, with zero dense host calls or rows. Phase deltas recorded
+21504/7168/14336 uploaded activation bytes and 18048/6016/12032 readback bytes;
+the default ledger matched the invoked operations. The maximum absolute logit
+difference against the matched whole-history CPU oracle was 2.563e-6. The
+existing physical activation ablation also retained its 50% readback reduction
+and identical logits. Build the current native Vulkan library and shader bundle
+first, then run the physical component witness from the public repository root:
+
+```text
+FAK_VULKAN_SPIRV="$PWD/internal/compute/spirv" FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_DISPATCH_PROFILE=1 go test -tags vulkan ./internal/model -run '^(TestV41DenseProjectionHalo|TestV41ClampedDeviceSwiGLUHalo)$' -count=1 -timeout=5m
+```
+
+These observations cover the reduced projection components. Grouped output
+projections and other host stages remain outside this bridge. The strict
+whole-V4.1 device guard remains unchanged; full-checkpoint serving, device prefix
+restoration, combined Engram execution, TTFT, and throughput require separate
+qualification. No latency or market-leadership claim follows from this fixture.

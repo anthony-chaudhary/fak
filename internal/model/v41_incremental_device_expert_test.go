@@ -70,6 +70,7 @@ func v41IncrementalExpertSession(t *testing.T, m *Model) (*Session, *v41HalSeamB
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.v41State().denseProjection = nil
 	t.Cleanup(s.Close)
 	if len(s.Prefill([]int{1, 2, 3})) == 0 || !s.v41IncrementalEligible() {
 		t.Fatal("fresh prefill did not seed an eligible session")

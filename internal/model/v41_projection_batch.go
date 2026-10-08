@@ -55,43 +55,39 @@ var v41PanelInvocationCount atomic.Int64
 // seq <= 1 and the unsupported-layout case (out/in that the resident store does
 // not admit for the batched read) stay on the scalar per-token path.
 func (m *Model) v41ProjPanel(l int, leaf string, panel []float32, out, in, seq int) ([]float32, error) {
-	name := layerName(l, leaf)
-	if !m.hasResidentWeight(name) {
-		return nil, v41StageErr(v41StageAttention, l,
-			fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
-	}
+	return m.v41ProjPanelWithProjection(l, leaf, panel, out, in, seq, nil)
+}
+func (m *Model) v41ProjPanelWithProjection(l int, leaf string, panel []float32, out, in, seq int, project v41DenseProjectionFunc) ([]float32, error) {
 	if seq <= 0 {
 		return nil, nil
 	}
-	if len(panel) != seq*in {
-		return nil, v41StageErr(v41StageAttention, l,
-			fmt.Errorf("%w: projection panel %s len %d, want seq*in %d", ErrV41ForwardStage, name, len(panel), seq*in))
+	inputN, ok := checkedMulInt(seq, in)
+	outputN, outputOK := checkedMulInt(seq, out)
+	_, weightOK := checkedMulInt(out, in)
+	if in <= 0 || out <= 0 || !ok || !outputOK || !weightOK || len(panel) != inputN {
+		return nil, v41StageErr(v41StageAttention, l, fmt.Errorf("%w: invalid projection panel dimensions", ErrV41ForwardStage))
 	}
-
-	y := make([]float32, seq*out)
-	// Decode (one row) is never charged a panel primitive: the scalar GEMV is
-	// the established decode path and the panel adds nothing at seq==1.
-	if seq == 1 {
-		row, err := m.v41ProjMatRows(l, leaf, panel, out, in)
+	name := layerName(l, leaf)
+	wr, wc, present := m.residentShape(name)
+	if !present || wr != out || wc != in {
+		return nil, v41StageErr(v41StageAttention, l, fmt.Errorf("%w: invalid resident projection shape for %s", ErrV41ForwardStage, name))
+	}
+	y := make([]float32, outputN)
+	for lo := 0; lo < seq; {
+		n := seq - lo
+		if n > v41ProjPanelRowChunk {
+			n = v41ProjPanelRowChunk
+		}
+		hi := lo + n
+		if n > 1 {
+			v41PanelInvocationCount.Add(1)
+		}
+		batch, err := m.v41ProjectionRows(l, leaf, panel[lo*in:hi*in], out, in, n, project)
 		if err != nil {
 			return nil, err
 		}
-		copy(y, row)
-		return y, nil
-	}
-
-	// Chunked batched panel: one residentMatMulBatch per row chunk. Weight-row
-	// reuse is preserved across every row of the chunk, and each output row is
-	// bit-identical to the scalar per-token read (residentMatMulBatch contract).
-	for lo := 0; lo < seq; lo += v41ProjPanelRowChunk {
-		hi := lo + v41ProjPanelRowChunk
-		if hi > seq {
-			hi = seq
-		}
-		n := hi - lo
-		v41PanelInvocationCount.Add(1)
-		batch := m.residentMatMulBatch(name, panel[lo*in:hi*in], out, in, n)
 		copy(y[lo*out:hi*out], batch)
+		lo = hi
 	}
 	return y, nil
 }

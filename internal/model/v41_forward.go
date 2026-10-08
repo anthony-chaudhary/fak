@@ -151,7 +151,9 @@ type v41ForwardState struct {
 	// backend and no host expert GEMM remains — the requirement for the pinned Q2_K
 	// streamed route to satisfy the Halo GPU-only guard. A nil callback (or any
 	// decline) preserves the historical host f32 down contraction byte-for-byte.
-	expertDown v41ExpertDownFunc
+	expertDown      v41ExpertDownFunc
+	denseProjection v41DenseProjectionFunc
+	callbackOwner   *Session
 }
 
 // v41ExpertGateUpOutcome is the closed result vocabulary of one v41ExpertGateUpFunc
@@ -275,7 +277,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, callbackOwner: st.callbackOwner}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -412,6 +414,11 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if scratch == nil {
 		scratch = &v41ProjScratch{}
 	}
+	scratch.denseProjection = nil
+	if st != nil {
+		scratch.denseProjection = st.denseProjection
+	}
+	defer func() { scratch.denseProjection = nil }()
 
 	// Engram injection happens at the START of the layer, into the residual,
 	// before attention and before attn_norm (ds41_graph_before_attention).
@@ -563,7 +570,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	for t := 0; t < seq; t++ {
 		copy(preFlat[t*H:(t+1)*H], preByPos[t])
 	}
-	qLatPanel, err := m.v41ProjPanel(l, "attn.wq_a.weight", preFlat, cfg.QLoraRank, H, seq)
+	qLatPanel, err := m.v41ProjPanelWithProjection(l, "attn.wq_a.weight", preFlat, cfg.QLoraRank, H, seq, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -588,7 +595,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// RMSNorm. Captured BEFORE the wq_b panel consumes it.
 		trace.record(l, t, v41TraceStageQLatent, qLat)
 	}
-	qPanel, err := m.v41ProjPanel(l, "attn.wq_b.weight", qLatPanel, nH*hd, cfg.QLoraRank, seq)
+	qPanel, err := m.v41ProjPanelWithProjection(l, "attn.wq_b.weight", qLatPanel, nH*hd, cfg.QLoraRank, seq, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -610,13 +617,13 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 				return v41StageErr(v41StageAttention, l,
 					fmt.Errorf("%w: attention head_dim %d exceeds full KV latent rank %d", ErrV41ForwardStage, hd, v41KVLoraRank))
 			}
-			kvFull, err := m.v41ProjMatRows(l, "attn.wkv.weight", c, v41KVLoraRank, H)
+			kvFull, err := m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", c, v41KVLoraRank, H, scratch.denseProjection)
 			if err != nil {
 				return err
 			}
 			kv = kvFull[:hd]
 		} else {
-			kv, err = m.v41ProjMatRows(l, "attn.wkv.weight", c, hd, H)
+			kv, err = m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", c, hd, H, scratch.denseProjection)
 			if err != nil {
 				return err
 			}
@@ -838,7 +845,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	perTokenPicks := make([][]routePick, seq)
 	for t := 0; t < seq; t++ {
 		xn := rmsnormCfg(x[t], ffnNorm, eps, cfg)
-		routerLogits, err := m.v41ProjMatRows(l, "ffn.gate.weight", xn, cfg.NumExperts, H)
+		routerLogits, err := m.v41ProjMatRowsWithProjection(l, "ffn.gate.weight", xn, cfg.NumExperts, H, scratch.denseProjection)
 		if err != nil {
 			return err
 		}
@@ -957,7 +964,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	for t := 0; t < seq; t++ {
 		xn := rmsnormCfg(x[t], ffnNorm, eps, cfg)
 		routed := routedByToken[t]
-		shared, err := m.v41SharedExpertSwiGLU(l, xn, cfg)
+		shared, err := m.v41SharedExpertSwiGLUWithProjection(l, xn, cfg, scratch.denseProjection)
 		if err != nil {
 			return err
 		}
@@ -1009,18 +1016,22 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 // expert adds no uncharged per-layer f32 expansion (#2150). Numerically identical
 // to v41SwiGLU over the same weights on the f32-manifest path.
 func (m *Model) v41SharedExpertSwiGLU(l int, xn []float32, cfg Config) ([]float32, error) {
+	return m.v41SharedExpertSwiGLUWithProjection(l, xn, cfg, nil)
+}
+
+func (m *Model) v41SharedExpertSwiGLUWithProjection(l int, xn []float32, cfg Config, project v41DenseProjectionFunc) ([]float32, error) {
 	I, H := cfg.MoEIntermediateSize, cfg.HiddenSize
-	h1, err := m.v41ProjMatRows(l, "ffn.shared_experts.w1.weight", xn, I, H)
+	h1, err := m.v41ProjMatRowsWithProjection(l, "ffn.shared_experts.w1.weight", xn, I, H, project)
 	if err != nil {
 		return nil, err
 	}
-	h3, err := m.v41ProjMatRows(l, "ffn.shared_experts.w3.weight", xn, I, H)
+	h3, err := m.v41ProjMatRowsWithProjection(l, "ffn.shared_experts.w3.weight", xn, I, H, project)
 	if err != nil {
 		return nil, err
 	}
 	clampSwiGLUProjections(h1, h3, float32(cfg.SwigluLimit))
 	return ffn.Gated(h1, h3, func(v float32) float32 { return act(v, cfg) }, func(activated []float32) ([]float32, error) {
-		return m.v41ProjMatRows(l, "ffn.shared_experts.w2.weight", activated, H, I)
+		return m.v41ProjMatRowsWithProjection(l, "ffn.shared_experts.w2.weight", activated, H, I, project)
 	})
 }
 
@@ -1223,7 +1234,7 @@ var v41PrefillStepProbe func()
 // suffix, so a failed suffix never partially advances the session and never
 // reports a cache hit. Only a non-stage error is fatal.
 func (s *Session) prefillV41Suffix(ids []int) []float32 {
-	st := s.v41Forward
+	st := s.v41State()
 	startLen := len(st.history)
 	var logits []float32
 	for i, id := range ids {
@@ -1324,7 +1335,7 @@ func (s *Session) stepV41(id int) []float32 {
 	s.M.v41SetExpertFaultPhase(V41PhaseDecode)
 	defer s.M.v41SetExpertFaultPhase(V41PhaseUnknown)
 	if s.v41IncrementalEligible() {
-		logits, _, err := s.M.forwardV41Step(id, s.v41Forward, &v41ProjScratch{})
+		logits, _, err := s.M.forwardV41Step(id, s.v41State(), &v41ProjScratch{})
 		if err == nil {
 			s.M.v41NoteExpertFaultToken(1)
 			if v41IncrementalStepProbe != nil {
@@ -1357,10 +1368,13 @@ func (s *Session) stepV41(id int) []float32 {
 // callback nil, preserving the historical host triple byte-for-byte.
 func (s *Session) v41State() *v41ForwardState {
 	if s.v41Forward == nil {
-		s.v41Forward = &v41ForwardState{
-			expertGateUp: s.v41ExpertGateUpFunc(),
-			expertDown:   s.v41ExpertDownFunc(),
-		}
+		s.v41Forward = &v41ForwardState{}
+	}
+	if s.v41Forward.callbackOwner != s {
+		s.v41Forward.expertGateUp = s.v41ExpertGateUpFunc()
+		s.v41Forward.expertDown = s.v41ExpertDownFunc()
+		s.v41Forward.denseProjection = s.v41DenseProjectionFunc()
+		s.v41Forward.callbackOwner = s
 	}
 	return s.v41Forward
 }

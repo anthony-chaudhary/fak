@@ -82,33 +82,40 @@ func (p V41ExpertPhase) String() string {
 // dequant, each pick by its contraction) but are summed into three independent
 // accumulators so a run can say which one dominates.
 type v41ExpertFaultPhaseLedger struct {
-	ExpertActivationDeviceCalls    int     `json:"expert_activation_device_calls"`
-	ExpertActivationHostCalls      int     `json:"expert_activation_host_calls"`
-	ExpertActivationReadbackBytes  int64   `json:"expert_activation_readback_bytes"`
-	ExpertActivationNanos          int64   `json:"expert_activation_nanos"`
-	IncrementalEngramInjections    int     `json:"incremental_engram_injections"`
-	IncrementalEngramRows          int     `json:"incremental_engram_rows"`
-	IncrementalEngramHashTokens    int     `json:"incremental_engram_hash_tokens"`
-	IncrementalEngramNanos         int64   `json:"incremental_engram_nanos"`
-	IncrementalDeviceGateUpCalls   int     `json:"incremental_device_gate_up_calls"`
-	IncrementalDeviceDownCalls     int     `json:"incremental_device_down_calls"`
-	IncrementalDeviceDispatchNanos int64   `json:"incremental_device_dispatch_nanos"`
-	Tokens                         int     `json:"tokens"`
-	Faults                         int     `json:"faults"`
-	FaultedBytes                   int64   `json:"faulted_bytes"`
-	DequantBytes                   int64   `json:"dequant_bytes"`
-	ResidentHits                   int     `json:"resident_hits"`
-	Contractions                   int     `json:"contractions"`
-	FaultDoorNanos                 int64   `json:"fault_nanos"`
-	DequantNanos                   int64   `json:"dequant_nanos"`
-	ContractionNanos               int64   `json:"contraction_nanos"`
-	FaultNanosPerToken             float64 `json:"fault_nanos_per_token"`
-	DequantNanosPerToken           float64 `json:"dequant_nanos_per_token"`
-	ContractionNanosPerToken       float64 `json:"contraction_nanos_per_token"`
-	FaultsPerToken                 float64 `json:"faults_per_token"`
-	FaultedBytesPerToken           float64 `json:"faulted_bytes_per_token"`
-	DequantBytesPerToken           float64 `json:"dequant_bytes_per_token"`
-	ResidentHitFraction            float64 `json:"resident_hit_fraction"`
+	DenseProjectionDeviceCalls           int     `json:"dense_projection_device_calls"`
+	DenseProjectionHostCalls             int     `json:"dense_projection_host_calls"`
+	DenseProjectionDeviceRows            int     `json:"dense_projection_device_rows"`
+	DenseProjectionHostRows              int     `json:"dense_projection_host_rows"`
+	DenseProjectionActivationUploadBytes int64   `json:"dense_projection_activation_upload_bytes"`
+	DenseProjectionReadbackBytes         int64   `json:"dense_projection_readback_bytes"`
+	DenseProjectionNanos                 int64   `json:"dense_projection_nanos"`
+	ExpertActivationDeviceCalls          int     `json:"expert_activation_device_calls"`
+	ExpertActivationHostCalls            int     `json:"expert_activation_host_calls"`
+	ExpertActivationReadbackBytes        int64   `json:"expert_activation_readback_bytes"`
+	ExpertActivationNanos                int64   `json:"expert_activation_nanos"`
+	IncrementalEngramInjections          int     `json:"incremental_engram_injections"`
+	IncrementalEngramRows                int     `json:"incremental_engram_rows"`
+	IncrementalEngramHashTokens          int     `json:"incremental_engram_hash_tokens"`
+	IncrementalEngramNanos               int64   `json:"incremental_engram_nanos"`
+	IncrementalDeviceGateUpCalls         int     `json:"incremental_device_gate_up_calls"`
+	IncrementalDeviceDownCalls           int     `json:"incremental_device_down_calls"`
+	IncrementalDeviceDispatchNanos       int64   `json:"incremental_device_dispatch_nanos"`
+	Tokens                               int     `json:"tokens"`
+	Faults                               int     `json:"faults"`
+	FaultedBytes                         int64   `json:"faulted_bytes"`
+	DequantBytes                         int64   `json:"dequant_bytes"`
+	ResidentHits                         int     `json:"resident_hits"`
+	Contractions                         int     `json:"contractions"`
+	FaultDoorNanos                       int64   `json:"fault_nanos"`
+	DequantNanos                         int64   `json:"dequant_nanos"`
+	ContractionNanos                     int64   `json:"contraction_nanos"`
+	FaultNanosPerToken                   float64 `json:"fault_nanos_per_token"`
+	DequantNanosPerToken                 float64 `json:"dequant_nanos_per_token"`
+	ContractionNanosPerToken             float64 `json:"contraction_nanos_per_token"`
+	FaultsPerToken                       float64 `json:"faults_per_token"`
+	FaultedBytesPerToken                 float64 `json:"faulted_bytes_per_token"`
+	DequantBytesPerToken                 float64 `json:"dequant_bytes_per_token"`
+	ResidentHitFraction                  float64 `json:"resident_hit_fraction"`
 	// ContractionBackend names the engine the contraction ran on ("host" or
 	// "vulkan"), observed from the model's selection at the last contraction —
 	// an identity, not a device receipt.
@@ -544,6 +551,30 @@ func (m *Model) v41NoteExpertActivation(device, host int, readbackBytes int64, o
 	if opened != 0 {
 		if elapsed := l.nowLocked() - opened; elapsed > 0 {
 			led.ExpertActivationNanos += elapsed
+		}
+	}
+}
+
+func (m *Model) v41NoteDenseProjection(deviceCalls, hostCalls, deviceRows, hostRows int, upload, readback int64, opened int64) {
+	l := v41ExpertFaultLedgerOf(m, false)
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	led := l.ledgerLocked()
+	if led == nil {
+		return
+	}
+	led.DenseProjectionDeviceCalls += deviceCalls
+	led.DenseProjectionHostCalls += hostCalls
+	led.DenseProjectionDeviceRows += deviceRows
+	led.DenseProjectionHostRows += hostRows
+	led.DenseProjectionActivationUploadBytes += upload
+	led.DenseProjectionReadbackBytes += readback
+	if opened != 0 {
+		if elapsed := l.nowLocked() - opened; elapsed > 0 {
+			led.DenseProjectionNanos += elapsed
 		}
 	}
 }

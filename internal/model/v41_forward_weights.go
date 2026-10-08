@@ -1,7 +1,11 @@
 package model
 
 import (
+	"errors"
 	"fmt"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"math"
 )
 
@@ -27,10 +31,11 @@ import (
 // 40-layer churn, with byte-identical arithmetic (the same f32 values land in
 // the same layout).
 type v41ProjScratch struct {
-	woA          []float32
-	woB          []float32
-	expertGateUp v41ExpertGateUpFunc
-	expertDown   v41ExpertDownFunc
+	woA             []float32
+	woB             []float32
+	expertGateUp    v41ExpertGateUpFunc
+	expertDown      v41ExpertDownFunc
+	denseProjection v41DenseProjectionFunc
 
 	// exp1/exp3/exp2 are the REUSED materialization targets for one routed
 	// expert's three projections (ffn.experts.<e>.w1/w3/w2.weight). They were
@@ -567,12 +572,11 @@ func (m *Model) v41ProjF32(l int, leaf string) ([]float32, error) {
 // residentMatRowsBase dispatches m.has(name) to matRows(m.tensor(name), ...),
 // exactly the pre-#2150 read.
 func (m *Model) v41ProjMatRows(l int, leaf string, x []float32, out, in int) ([]float32, error) {
-	name := layerName(l, leaf)
-	if !m.hasResidentWeight(name) {
-		return nil, v41StageErr(v41StageAttention, l,
-			fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
-	}
-	return m.residentMatRows(name, x, out, in), nil
+	return m.v41ProjMatRowsWithProjection(l, leaf, x, out, in, nil)
+}
+
+func (m *Model) v41ProjMatRowsWithProjection(l int, leaf string, x []float32, out, in int, project v41DenseProjectionFunc) ([]float32, error) {
+	return m.v41ProjectionRows(l, leaf, x, out, in, 1, project)
 }
 
 // hasResidentWeight reports whether a named matmul weight is resident in ANY
@@ -1052,4 +1056,194 @@ func v41MHCProjectFull(wMix []float32, streams [][]float32, H int, eps float32, 
 		mixes[m] = s * rsqrt
 	}
 	return mixes, nil
+}
+
+type v41DenseProjectionOutcome uint8
+
+const (
+	v41ProjectionDeclined v41DenseProjectionOutcome = iota
+	v41ProjectionHandled
+	v41ProjectionError
+)
+
+type v41DenseProjectionFunc func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error)
+
+type V41ProjectionOperationError struct {
+	Layer int
+	Leaf  string
+	Stage string
+	Cause error
+}
+
+func (e *V41ProjectionOperationError) Error() string {
+	return fmt.Sprintf("model: selected V4.1 projection %s failed at layer %d: %v", e.Leaf, e.Layer, e.Cause)
+}
+func (e *V41ProjectionOperationError) Unwrap() error                     { return e.Cause }
+func (e *V41ProjectionOperationError) SelectedProjectionOperation() bool { return true }
+
+var errV41ProjectionResult = fmt.Errorf("%w: invalid selected V4.1 projection result", ErrV41ForwardStage)
+
+func v41ProjectionOperationErr(l int, leaf string, cause error) error {
+	if cause == nil {
+		cause = errV41ProjectionResult
+	}
+	stage := v41StageAttention
+	if strings.HasPrefix(leaf, "ffn.") {
+		stage = v41StageMoE
+	}
+	return &V41ProjectionOperationError{Layer: l, Leaf: leaf, Stage: string(stage), Cause: v41StageErr(stage, l, cause)}
+}
+
+func (m *Model) v41ProjectionRows(l int, leaf string, panel []float32, out, in, rows int, project v41DenseProjectionFunc) ([]float32, error) {
+	name := layerName(l, leaf)
+	inputN, inputOK := checkedMulInt(rows, in)
+	outputN, outputOK := checkedMulInt(rows, out)
+	_, weightOK := checkedMulInt(out, in)
+	if rows <= 0 || out <= 0 || in <= 0 || !inputOK || !outputOK || !weightOK || len(panel) != inputN {
+		return nil, v41StageErr(v41StageAttention, l, fmt.Errorf("%w: invalid projection dimensions for %s", ErrV41ForwardStage, name))
+	}
+	wr, wc, present := m.residentShape(name)
+	if !present || wr != out || wc != in {
+		return nil, v41StageErr(v41StageAttention, l, fmt.Errorf("%w: invalid resident projection shape for %s", ErrV41ForwardStage, name))
+	}
+	if project != nil {
+		y, outcome, cause := project(l, leaf, panel, out, in, rows)
+		switch outcome {
+		case v41ProjectionHandled:
+			if cause != nil {
+				return nil, v41ProjectionOperationErr(l, leaf, cause)
+			}
+			if len(y) != outputN {
+				return nil, v41ProjectionOperationErr(l, leaf, errV41ProjectionResult)
+			}
+			return y, nil
+		case v41ProjectionError:
+			return nil, v41ProjectionOperationErr(l, leaf, cause)
+		case v41ProjectionDeclined:
+		default:
+			return nil, v41ProjectionOperationErr(l, leaf, errV41ProjectionResult)
+		}
+	}
+	opened := m.v41NowNanos()
+	succeeded := 0
+	defer func() { m.v41NoteDenseProjection(0, 1, 0, succeeded, 0, 0, opened) }()
+	var y []float32
+	if rows == 1 {
+		y = m.residentMatRows(name, panel, out, in)
+	} else if m.prism != nil && m.prism.weightWidth[name] != 0 {
+		y = make([]float32, outputN)
+		for row := 0; row < rows; row++ {
+			copy(y[row*out:(row+1)*out], m.residentMatRows(name, panel[row*in:(row+1)*in], out, in))
+		}
+	} else {
+		y = m.residentMatMulBatch(name, panel, out, in, rows)
+	}
+	succeeded = rows
+	return y, nil
+}
+
+func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
+	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory {
+		return nil
+	}
+	return func(l int, leaf string, panel []float32, out, in, rows int) (result []float32, outcome v41DenseProjectionOutcome, cause error) {
+		switch leaf {
+		case "attn.wq_a.weight", "attn.wq_b.weight", "attn.wkv.weight", "ffn.gate.weight", "ffn.shared_experts.w1.weight", "ffn.shared_experts.w3.weight", "ffn.shared_experts.w2.weight":
+		default:
+			return nil, v41ProjectionDeclined, nil
+		}
+		name := layerName(l, leaf)
+		var stage func() compute.Tensor
+		dtype := compute.F32
+		switch {
+		case s.M.has(name):
+			stage = func() compute.Tensor { return s.weightHAL(name) }
+		case s.M.q8w[name] != nil:
+			dtype = compute.Q8_0
+			stage = func() compute.Tensor { return s.weightHALQ8(name, s.M.q8w[name]) }
+		case s.M.q4kw[name] != nil:
+			dtype = compute.Q4_K
+			stage = func() compute.Tensor { return s.weightHALQ4K(name, s.M.q4kw[name]) }
+		case s.M.kqw[name] != nil:
+			qt := s.M.kqw[name]
+			desc, ok := LookupQuantDescriptor(qt.kind)
+			if !ok || !desc.SupportsHAL() || (qt.kind == kindQ6K && !s.useHALKQuantWeight(qt)) {
+				return nil, v41ProjectionDeclined, nil
+			}
+			dtype = desc.Dtype()
+			stage = func() compute.Tensor { return s.weightHALKQuant(name, qt) }
+		default:
+			return nil, v41ProjectionDeclined, nil
+		}
+		if !compute.BackendSupportsDeviceWeightDtype(s.Backend, dtype) || (dtype != compute.F32 && !s.Backend.Caps().UploadDtype) {
+			return nil, v41ProjectionDeclined, nil
+		}
+		switch dtype {
+		case compute.Q3_K:
+			if native, ok := s.Backend.(interface{ SupportsQ3KMatMul() bool }); ok && !native.SupportsQ3KMatMul() {
+				return nil, v41ProjectionDeclined, nil
+			}
+		case compute.Q5_K:
+			if native, ok := s.Backend.(interface{ SupportsQ5KMatMul() bool }); ok && !native.SupportsQ5KMatMul() {
+				return nil, v41ProjectionDeclined, nil
+			}
+		case compute.Q6_K:
+			if native, ok := s.Backend.(interface{ SupportsQ6KMatMul() bool }); ok && !native.SupportsQ6KMatMul() {
+				return nil, v41ProjectionDeclined, nil
+			}
+		}
+		opened := s.M.v41NowNanos()
+		successfulRows := 0
+		var uploaded, readback int64
+		defer func() { s.M.v41NoteDenseProjection(1, 0, successfulRows, 0, uploaded, readback, opened) }()
+		defer func() {
+			if r := recover(); r != nil {
+				if err, ok := r.(error); ok {
+					var closed *BackendForwardOperationError
+					if errors.As(err, &closed) {
+						panic(r)
+					}
+					var backend *compute.BackendError
+					if errors.As(err, &backend) {
+						result, outcome, cause = nil, v41ProjectionError, err
+						return
+					}
+				}
+				panic(r)
+			}
+		}()
+		weight := stage()
+		input := panel
+		if s.M.prism != nil && s.M.prism.weightWidth[name] != 0 {
+			input = make([]float32, len(panel))
+			for row := 0; row < rows; row++ {
+				copy(input[row*in:(row+1)*in], s.M.prismProjectInput(name, panel[row*in:(row+1)*in]))
+			}
+		}
+		shape := []int{in}
+		if rows > 1 {
+			shape = []int{rows, in}
+		}
+		x := s.uploadHostF32(shape, input, compute.MemoryActivation, "V4.1 dense projection activation")
+		defer s.Backend.Free(x)
+		uploaded = int64(len(input)) * 4
+		var y compute.Tensor
+		if rows == 1 {
+			y = s.Backend.MatMul(weight, x)
+		} else {
+			y = s.Backend.BatchedMatMul(weight, x, rows)
+		}
+		defer s.Backend.Free(y)
+		result = s.Backend.Read(y)
+		readback = int64(len(result)) * 4
+		want, ok := checkedMulInt(rows, out)
+		if !ok || len(result) != want {
+			return nil, v41ProjectionError, errV41ProjectionResult
+		}
+		for row := 0; row < rows; row++ {
+			s.M.loraApply(name, panel[row*in:(row+1)*in], result[row*out:(row+1)*out])
+		}
+		successfulRows = rows
+		return result, v41ProjectionHandled, nil
+	}
 }

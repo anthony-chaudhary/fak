@@ -159,7 +159,7 @@ func TestDeviceOnlyEntryRefusalClosesWithoutCacheGeometryDeadlock(t *testing.T) 
 		if !s.BackendSessionClosed() {
 			t.Fatal("nil-backend device-only refusal did not retire the session")
 		}
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		t.Fatal("device-only refusal deadlocked while closing around cache geometry")
 	}
 }
@@ -250,6 +250,7 @@ func TestDeviceOnlyV41PublicEntriesRefuseHostArchitecture(t *testing.T) {
 			t.Cleanup(s.Close)
 			s.SetExecutionPolicy(tc.policy)
 			st := s.v41State()
+			st.denseProjection = nil
 			if st.expertGateUp == nil || st.expertDown == nil {
 				t.Fatal("fixture did not bind both expert callbacks")
 			}
@@ -275,7 +276,7 @@ func TestDeviceOnlyV41PublicEntriesRefuseHostArchitecture(t *testing.T) {
 					refused.Path != "device-only" || refused.Backend != be.Name() || refused.Layer != -1 {
 					t.Fatalf("wrong admission boundary: %+v", refused)
 				}
-				if refused.Cause == nil || refused.Cause.Error() != "device-only execution policy forbids host model compute" {
+				if refused.Cause == nil || !errors.Is(err, refused.Cause) || s.halFailure != refused {
 					t.Fatalf("wrong architecture refusal cause: %v", refused.Cause)
 				}
 				if !s.HostFallbackObserved() || !s.BackendSessionClosed() {

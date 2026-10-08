@@ -206,7 +206,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		return v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: attention qk_rope_head_dim must be a positive even value <= head_dim %d, got %d", ErrV41ForwardStage, hd, ropeDim))
 	}
-	qLat, err := m.v41ProjMatRows(l, "attn.wq_a.weight", collapsed, cfg.QLoraRank, H)
+	qLat, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_a.weight", collapsed, cfg.QLoraRank, H, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -218,7 +218,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		}
 		copy(qLat, rmsnormCfg(qLat, qNorm, eps, cfg))
 	}
-	q, err := m.v41ProjMatRows(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank)
+	q, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -228,13 +228,13 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 			return v41StageErr(v41StageAttention, l,
 				fmt.Errorf("%w: attention head_dim %d exceeds full KV latent rank %d", ErrV41ForwardStage, hd, v41KVLoraRank))
 		}
-		kvFull, err := m.v41ProjMatRows(l, "attn.wkv.weight", collapsed, v41KVLoraRank, H)
+		kvFull, err := m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", collapsed, v41KVLoraRank, H, scratch.denseProjection)
 		if err != nil {
 			return err
 		}
 		kv = kvFull[:hd]
 	} else {
-		kv, err = m.v41ProjMatRows(l, "attn.wkv.weight", collapsed, hd, H)
+		kv, err = m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", collapsed, hd, H, scratch.denseProjection)
 		if err != nil {
 			return err
 		}
@@ -338,7 +338,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		return err
 	}
 	ffnX := rmsnormCfg(x, ffnNorm, eps, cfg)
-	routerLogits, err := m.v41ProjMatRows(l, "ffn.gate.weight", ffnX, cfg.NumExperts, H)
+	routerLogits, err := m.v41ProjMatRowsWithProjection(l, "ffn.gate.weight", ffnX, cfg.NumExperts, H, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -357,7 +357,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 			routed[i] += pick.weight * y[i]
 		}
 	}
-	shared, err := m.v41SharedExpertSwiGLU(l, ffnX, cfg)
+	shared, err := m.v41SharedExpertSwiGLUWithProjection(l, ffnX, cfg, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -515,7 +515,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		return v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: attention qk_rope_head_dim must be a positive even value <= head_dim %d, got %d", ErrV41ForwardStage, hd, ropeDim))
 	}
-	qLat, err := m.v41ProjMatRows(l, "attn.wq_a.weight", collapsed, cfg.QLoraRank, H)
+	qLat, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_a.weight", collapsed, cfg.QLoraRank, H, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -525,7 +525,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 			fmt.Errorf("%w: q-lora norm has %d values, want %d", ErrV41ForwardStage, len(qNorm), cfg.QLoraRank))
 	}
 	copy(qLat, rmsnormCfg(qLat, qNorm, eps, cfg))
-	q, err := m.v41ProjMatRows(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank)
+	q, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -533,7 +533,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		return v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: attention head_dim %d exceeds full KV latent rank %d", ErrV41ForwardStage, hd, v41KVLoraRank))
 	}
-	kvFull, err := m.v41ProjMatRows(l, "attn.wkv.weight", collapsed, v41KVLoraRank, H)
+	kvFull, err := m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", collapsed, v41KVLoraRank, H, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -693,7 +693,7 @@ func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, 
 	if err != nil {
 		return err
 	}
-	routerLogits, err := m.v41ProjMatRows(l, "ffn.gate.weight", ffnX, cfg.NumExperts, H)
+	routerLogits, err := m.v41ProjMatRowsWithProjection(l, "ffn.gate.weight", ffnX, cfg.NumExperts, H, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -713,7 +713,7 @@ func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, 
 			routed[i] += pick.weight * y[i]
 		}
 	}
-	shared, err := m.v41SharedExpertSwiGLU(l, ffnX, cfg)
+	shared, err := m.v41SharedExpertSwiGLUWithProjection(l, ffnX, cfg, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
