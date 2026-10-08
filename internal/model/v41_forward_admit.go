@@ -145,15 +145,14 @@ func (m *Model) v41EngramForwardAdmitted() error {
 			return v41StageErr(v41StageEngram, layer,
 				fmt.Errorf("%w: layer %d declares Engram but no packed-row source is wired", ErrV41NativeUnsupported, layer))
 		}
-		cols := stage.columns
-		H := m.Cfg.HiddenSize
-		if err := m.v41AdmitShape(layerName(layer, "engram_kv.weight"), v41StageEngram, layer, cols*stage.headDim, (stage.hc+1)*H); err != nil {
+		_, _, normCells, err := m.v41EngramProjectionDimensions(layer, stage)
+		if err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(layer, "engram_q_norm.weight"), v41StageEngram, layer, stage.hc*H); err != nil {
+		if err := m.v41AdmitShape(layerName(layer, "engram_q_norm.weight"), v41StageEngram, layer, normCells); err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(layer, "engram_k_norm.weight"), v41StageEngram, layer, stage.hc*H); err != nil {
+		if err := m.v41AdmitShape(layerName(layer, "engram_k_norm.weight"), v41StageEngram, layer, normCells); err != nil {
 			return err
 		}
 	}

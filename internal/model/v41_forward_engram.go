@@ -264,10 +264,15 @@ func dequantV41EngramRow(row []byte, dim int) ([]float32, error) {
 // production transposition of the reference schedule and is called at the START
 // of v41Layer for declared Engram layers.
 func (m *Model) v41EngramInject(l int, x [][]float32, streams [][][]float32, full bool, seq []int, eps float32) error {
+	return m.v41EngramInjectWithProjection(l, x, streams, full, seq, eps, nil)
+}
+
+func (m *Model) v41EngramInjectWithProjection(l int, x [][]float32, streams [][][]float32, full bool, seq []int, eps float32, project v41EngramProjectionFunc) error {
 	geometry, err := m.v41EngramInjectionGeometry(l, len(seq))
 	if err != nil {
 		return err
 	}
+	geometry.project = project
 	stage, cacheIdx := geometry.stage, geometry.cacheIdx
 	allRows, err := stage.hashPrototype.Clone().Hash(seq, nil)
 	if err != nil {
@@ -284,10 +289,11 @@ func (m *Model) v41EngramInject(l int, x [][]float32, streams [][][]float32, ful
 }
 
 type v41EngramGeometry struct {
-	stage             *v41EngramStage
-	cacheIdx          int
-	H, dim, cols, hc  int
-	wKV, qNorm, kNorm []float32
+	stage            *v41EngramStage
+	cacheIdx         int
+	H, dim, cols, hc int
+	qNorm, kNorm     []float32
+	project          v41EngramProjectionFunc
 }
 
 func (m *Model) v41EngramInjectionGeometry(l, positions int) (v41EngramGeometry, error) {
@@ -306,59 +312,29 @@ func (m *Model) v41EngramInjectionGeometry(l, positions int) (v41EngramGeometry,
 	dim := stage.headDim
 	cols := stage.columns
 	hc := stage.hc
-	// The projection is rectangular in general: the concatenated Engram row
-	// width dim is independent of the hidden width H, so a D != H declaration is
-	// admitted and projected rather than refused. Validate the declared geometry
-	// first, and reject any product that would overflow int before lengths,
-	// allocation, indexing, or mutation are attempted.
-	if dim < 1 || dim > 256 || H <= 0 {
-		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
-			fmt.Errorf("%w: Engram geometry head dim %d outside [1,256] or hidden %d not positive", ErrV41NativeUnsupported, dim, H))
-	}
-	if cols <= 0 {
-		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
-			fmt.Errorf("%w: Engram geometry columns %d must be positive", ErrV41NativeUnsupported, cols))
-	}
-	rowCells, ok := checkedMulInt(cols, dim)
-	if !ok {
-		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
-			fmt.Errorf("%w: Engram row geometry %d cols x %d dim overflows", ErrV41NativeUnsupported, cols, dim))
-	}
-	normCells, ok := checkedMulInt(hc, H)
-	if !ok {
-		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
-			fmt.Errorf("%w: Engram norm geometry %d streams x %d hidden overflows", ErrV41NativeUnsupported, hc, H))
-	}
-	streamWidth, ok := checkedMulInt(hc+1, H)
-	if !ok {
-		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
-			fmt.Errorf("%w: Engram projection width %d streams x %d hidden overflows", ErrV41NativeUnsupported, hc+1, H))
-	}
-	kvCells, ok := checkedMulInt(rowCells, streamWidth)
-	if !ok {
-		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
-			fmt.Errorf("%w: Engram projection geometry %d x %d overflows", ErrV41NativeUnsupported, rowCells, streamWidth))
-	}
 
-	wKV := m.tensor(layerName(l, "engram_kv.weight"))
+	_, _, normCells, err := m.v41EngramProjectionDimensions(l, stage)
+	if err != nil {
+		return v41EngramGeometry{}, err
+	}
 	qNorm := m.tensor(layerName(l, "engram_q_norm.weight"))
 	kNorm := m.tensor(layerName(l, "engram_k_norm.weight"))
-	if len(wKV) != kvCells || len(qNorm) != normCells || len(kNorm) != normCells {
-		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
-			fmt.Errorf("%w: Engram mixing tensors are absent or mis-shaped at layer %d", ErrV41NativeUnsupported, l))
+	if len(qNorm) != normCells || len(kNorm) != normCells {
+		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l, fmt.Errorf("%w: Engram mixing norms are absent or mis-shaped at layer %d", ErrV41NativeUnsupported, l))
 	}
 
 	if _, ok := checkedMulInt(positions, cols); positions < 0 || !ok {
 		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
 			fmt.Errorf("%w: Engram row identifiers %d positions x %d columns overflow", ErrV41NativeUnsupported, positions, cols))
 	}
-	return v41EngramGeometry{stage: stage, cacheIdx: cacheIdx, H: H, dim: dim, cols: cols, hc: hc, wKV: wKV, qNorm: qNorm, kNorm: kNorm}, nil
+	return v41EngramGeometry{stage: stage, cacheIdx: cacheIdx, H: H, dim: dim, cols: cols, hc: hc, qNorm: qNorm, kNorm: kNorm}, nil
 }
 
 func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]float32, full bool, positions int, layerRows []uint32, eps float32, geometry v41EngramGeometry) (gatheredRows int, err error) {
 	stage, cacheIdx := geometry.stage, geometry.cacheIdx
 	H, dim, cols, hc := geometry.H, geometry.dim, geometry.cols, geometry.hc
-	wKV, qNorm, kNorm := geometry.wKV, geometry.qNorm, geometry.kNorm
+	qNorm, kNorm := geometry.qNorm, geometry.kNorm
+	project := m.v41EngramProjector(l, (hc+1)*H, cols*dim, geometry.project)
 	if positions < 0 || len(layerRows) != positions*cols {
 		return gatheredRows, v41StageErr(v41StageEngram, l,
 			fmt.Errorf("%w: Engram row identifiers %d, want %d positions x %d columns", ErrV41NativeUnsupported, len(layerRows), positions, cols))
@@ -370,7 +346,7 @@ func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]floa
 
 	gatheredRows = len(layerRows)
 	rowVec := make([]float32, cols*dim)
-	projected := make([]float32, (hc+1)*H)
+
 	// Fail closed on malformed full geometry before any stream is mutated: the
 	// full path indexes streams[t][s] directly, so a short position or stream
 	// would otherwise panic instead of returning a typed error. The reduced path
@@ -407,7 +383,10 @@ func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]floa
 		// Project the COLS*DIM concatenation through engram_kv.weight
 		// [COLS*DIM, (N_HC+1)*H]: output stream s is the key for HC stream s and
 		// stream N_HC is the single shared value.
-		copy(projected, matRows(wKV, rowVec, (hc+1)*H, cols*dim))
+		projected, projectionErr := project(rowVec)
+		if projectionErr != nil {
+			return gatheredRows, projectionErr
+		}
 		value := make([]float32, H)
 		for i := 0; i < H; i++ {
 			value[i] = v41BF16(projected[hc*H+i])

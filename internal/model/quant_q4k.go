@@ -869,6 +869,9 @@ func (b *QuantBuilder) residentQuantTarget(canon string, shape []int) (name stri
 	if !keep || !isQuantWeight(name) || len(shape) != 2 {
 		return "", false, nil
 	}
+	if b.m.Cfg.IsDeepSeekV41() && strings.HasPrefix(name, "model.layers.") && strings.HasSuffix(name, ".engram_kv.weight") && b.m.hasResidentWeight(name) {
+		return "", false, fmt.Errorf("model: duplicate tensor %s", name)
+	}
 	if strings.HasSuffix(name, suffixQKVProj) || strings.HasSuffix(name, suffixGateUpProj) {
 		return "", false, nil
 	}

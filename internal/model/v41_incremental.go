@@ -263,6 +263,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 			}
 			if cacheIdx := engramStage.cacheIndex(l); declared && cacheIdx >= 0 {
 				geometry, geometryErr := m.v41EngramInjectionGeometry(l, 1)
+				geometry.project = st.engramProjection
 				if geometryErr != nil {
 					rollback()
 					return nil, stats, geometryErr
@@ -287,6 +288,10 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 				m.v41NoteIncrementalEngram(injections, rows, 0, nanos)
 				if injectionErr != nil {
 					rollback()
+					var projection *V41ProjectionOperationError
+					if errors.As(injectionErr, &projection) {
+						panic(injectionErr)
+					}
 					return nil, stats, injectionErr
 				}
 			}

@@ -169,3 +169,69 @@ FAK_VULKAN_SPIRV="$PWD/internal/compute/spirv" FAK_VULKAN_REQUIRE_DEVICE=1 FAK_V
 This is a reduced component byte-volume and parity observation. It does not prove
 full-checkpoint serving, overall latency or throughput improvement, combined
 Engram execution, or market leadership. The strict whole-V4.1 device guard remains.
+
+
+## V4.1 packed Engram projection
+
+Fak extends its existing Engram port of [ds4 at
+`bd66c402070042bf0a79ad6ece8242de4c93680c`](https://github.com/antirez/ds4/blob/bd66c402070042bf0a79ad6ece8242de4c93680c/metal/dsv41.metal#L85).
+That project is MIT licensed. The raw projection and per-HC BF16 gating order
+remain unchanged. The new bridge reuses native packed-weight validation,
+immutable Session weight staging, and the existing HAL matrix API. It applies
+neither Prism nor LoRA to the raw Engram mixing tensors. Unsupported backends
+retain the existing host path; selected operation failures propagate without a
+host retry and restore continuation state.
+
+Model ingress now resolves the three GGUF Engram mixing names into their forward
+names and retains supported packed KV weights through ordinary quantized loading.
+Packed tables keep their original namespace. Both the standard rectangular
+weight shape and the established fixture orientation address the same
+output-major bytes without transposition. Attachment preserves existing flat
+forward settings when initializing nested Engram metadata. A complete reduced
+GGUF load through the default backend Session passes cold prefill, Step, and
+suffix prefill; this witness uses the ordinary loader rather than transplanted
+weights or configuration.
+
+The default prefill/decode phase JSON includes nine `engram_projection_*` fields:
+`device_calls`, `host_calls`, `device_rows`, `host_rows`, `matmul_calls`,
+`activation_upload_bytes`, `readback_bytes`, `nanos`, and
+`host_weight_f32_bytes`. The bounded agent reader includes an
+`engram_projection` clause for both phases. Calls include selected attempts;
+rows count completed projections. Transfer bytes describe successful activation
+uploads and output reads, excluding immutable weight staging. Host weight bytes
+count actual returned float payloads, including partial failure results, rather
+than estimated allocations. These observations are separate from dense and
+grouped projection counters and require no collection flag.
+
+On 2026-10-08 UTC, source `53386da5f33e3cac1ebcf9c42052ae252ce7b734`
+passed the physical Radeon 8060S RADV Engram component test with all seven ordinary
+dense projections and grouped output enabled. The synthetic HC4 payload has
+hidden width 256 and a Q2_K KV projection of shape `[1280,6144]`. Its immutable
+packed KV device buffer was staged once and reused through continuation.
+
+| Phase | Tokens | Engram matrix calls / completed rows | Activation upload / readback bytes | Actual host-control float weight bytes | Device-path host float weight bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Cold prefill | 3 | 3 / 3 | 73728 / 15360 | 31457280 | 0 |
+| Decode | 1 | 1 / 1 | 24576 / 5120 | 31457280 | 0 |
+| Suffix prefill | 2 | 2 / 2 | 49152 / 10240 | 62914560 | 0 |
+
+Whole host float weight materialization fell by 100% in each phase. The default
+nine-field ledger matched the actual API observations, finite logit cosine was
+at least 0.9999999999999529, maximum logit difference was 5.0664e-7, and greedy
+outputs matched in all three phases. The dense, grouped, and clamped activation
+physical tests also passed in the same serial run.
+
+Build the native Vulkan library and shader bundle before this command from the
+public repository root:
+
+```text
+FAK_VULKAN_SPIRV="$PWD/internal/compute/spirv" FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_DISPATCH_PROFILE=1 go test -tags vulkan ./internal/model -run '^(TestV41EngramProjectionVulkan|TestV41GroupedOutputVulkan|TestV41DenseProjectionHalo|TestV41ClampedDeviceSwiGLUHalo)$' -count=1 -timeout=5m
+```
+
+This single physical correctness run establishes reduced component execution,
+materialization byte volume, and output parity. It does not qualify a complete
+Flash checkpoint, overall TTFT/prefill/decode speed, or market leadership.
+The official-checkpoint and whole-architecture device-only guards remain intact.
+Full-suite qualification is pending; three older expert component fixtures
+reproduce unchanged aggregate counter failures on the parent and have a separate
+native measurement-repair ticket, `v41-expert-component-counter-isolation`.

@@ -82,6 +82,16 @@ func (p V41ExpertPhase) String() string {
 // dequant, each pick by its contraction) but are summed into three independent
 // accumulators so a run can say which one dominates.
 type v41ExpertFaultPhaseLedger struct {
+	EngramProjectionDeviceCalls           int   `json:"engram_projection_device_calls"`
+	EngramProjectionHostCalls             int   `json:"engram_projection_host_calls"`
+	EngramProjectionDeviceRows            int   `json:"engram_projection_device_rows"`
+	EngramProjectionHostRows              int   `json:"engram_projection_host_rows"`
+	EngramProjectionMatMulCalls           int   `json:"engram_projection_matmul_calls"`
+	EngramProjectionActivationUploadBytes int64 `json:"engram_projection_activation_upload_bytes"`
+	EngramProjectionReadbackBytes         int64 `json:"engram_projection_readback_bytes"`
+	EngramProjectionNanos                 int64 `json:"engram_projection_nanos"`
+	EngramProjectionHostWeightF32Bytes    int64 `json:"engram_projection_host_weight_f32_bytes"`
+
 	GroupedOutputDeviceCalls           int   `json:"grouped_output_device_calls"`
 	GroupedOutputHostCalls             int   `json:"grouped_output_host_calls"`
 	GroupedOutputDeviceRows            int   `json:"grouped_output_device_rows"`
@@ -611,6 +621,32 @@ func (m *Model) v41NoteGroupedOutput(deviceCalls, hostCalls, deviceRows, hostRow
 	if opened != 0 {
 		if elapsed := l.nowLocked() - opened; elapsed > 0 {
 			led.GroupedOutputNanos += elapsed
+		}
+	}
+}
+
+func (m *Model) v41NoteEngramProjection(deviceCalls, hostCalls, deviceRows, hostRows, matmulCalls int, upload, readback, hostBytes, opened int64) {
+	l := v41ExpertFaultLedgerOf(m, false)
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	led := l.ledgerLocked()
+	if led == nil {
+		return
+	}
+	led.EngramProjectionDeviceCalls += deviceCalls
+	led.EngramProjectionHostCalls += hostCalls
+	led.EngramProjectionDeviceRows += deviceRows
+	led.EngramProjectionHostRows += hostRows
+	led.EngramProjectionMatMulCalls += matmulCalls
+	led.EngramProjectionActivationUploadBytes += upload
+	led.EngramProjectionReadbackBytes += readback
+	led.EngramProjectionHostWeightF32Bytes += hostBytes
+	if opened != 0 {
+		if elapsed := l.nowLocked() - opened; elapsed > 0 {
+			led.EngramProjectionNanos += elapsed
 		}
 	}
 }

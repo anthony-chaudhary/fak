@@ -81,7 +81,8 @@ func isQuantWeight(name string) bool {
 		// as a quantized matmul; without this arm the Q2_K block fell through to the
 		// eager f32 dequant and was charged whole, not held in the resident k-quant store.
 		strings.HasSuffix(name, ".mhc.mixes.weight"),
-		strings.HasSuffix(name, ".mhc.ffn_mixes.weight"):
+		strings.HasSuffix(name, ".mhc.ffn_mixes.weight"),
+		strings.HasSuffix(name, ".engram_kv.weight"):
 		return true
 	}
 	return name == "lm_head.weight"
@@ -336,6 +337,10 @@ func (b *QuantBuilder) AddF32Tensor(name string, shape []int, data []float32) er
 	}
 	if b.built {
 		return fmt.Errorf("model: QuantBuilder already built")
+	}
+	resolved := v41SourceTensorName(b.m.Cfg, name)
+	if b.m.Cfg.IsDeepSeekV41() && strings.HasPrefix(resolved, "model.layers.") && (strings.HasSuffix(resolved, ".engram_kv.weight") || strings.HasSuffix(resolved, ".engram_q_norm.weight") || strings.HasSuffix(resolved, ".engram_k_norm.weight")) && b.m.hasResidentWeight(resolved) {
+		return fmt.Errorf("model: duplicate tensor %s", resolved)
 	}
 	b.started = true
 	elems, err := tensorShapeElems(name, shape)
@@ -675,7 +680,28 @@ func quantSourceTensorName(cfg Config, name string) (string, bool) {
 	return quantSourceTensorNameWithRetention(cfg, name, RetainMTP)
 }
 
+func v41SourceTensorName(cfg Config, name string) string {
+	if !cfg.IsDeepSeekV41() || !strings.HasPrefix(name, "model.engram.") {
+		return name
+	}
+	rest := strings.TrimPrefix(name, "model.engram.")
+	layerText, leaf, ok := strings.Cut(rest, ".")
+	if !ok {
+		return name
+	}
+	layer, err := strconv.Atoi(layerText)
+	if err != nil || layer < 0 {
+		return name
+	}
+	switch leaf {
+	case "engram_kv.weight", "engram_q_norm.weight", "engram_k_norm.weight":
+		return layerName(layer, leaf)
+	}
+	return name
+}
+
 func quantSourceTensorNameWithRetention(cfg Config, name string, retainMTP bool) (string, bool) {
+	name = v41SourceTensorName(cfg, name)
 	// GLM-family (glm_moe_dsa) and MiniMax-M3 checkpoints carry a multimodal vision
 	// encoder and an MTP head the quantized text forward never reads; drop them at the
 	// source-name gate exactly as skipLoadTensor does for the f32 path. The Qwen3.5

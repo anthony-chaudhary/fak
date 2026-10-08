@@ -84,7 +84,19 @@ func (m *Model) AttachV41Engram(spec V41EngramAttachSpec, layout V41EngramLayout
 	// Populate the config axes wireV41Engram reads. The GGUF identity reaches
 	// this seam with DeepSeekV41 == nil, so create it rather than refuse.
 	if m.Cfg.DeepSeekV41 == nil {
-		m.Cfg.DeepSeekV41 = &DeepSeekV41Config{}
+		d41 := &DeepSeekV41Config{
+			CompressRatios:         append([]int(nil), m.Cfg.CompressRatios...),
+			HCMult:                 m.Cfg.HCMult,
+			HCSinkhornIters:        m.Cfg.HCSinkhornIters,
+			HCEps:                  m.Cfg.HCEps,
+			CandidateSourceLayerID: -1,
+		}
+		for layer, kind := range m.Cfg.IndexerTypes {
+			if kind == "full" {
+				d41.IndexSourceLayerIDs = append(d41.IndexSourceLayerIDs, layer)
+			}
+		}
+		m.Cfg.DeepSeekV41 = d41
 	}
 	d41 := m.Cfg.DeepSeekV41
 	d41.EngramLayerIDs = append([]int(nil), spec.LayerIDs...)

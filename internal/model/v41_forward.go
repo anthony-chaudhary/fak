@@ -151,10 +151,11 @@ type v41ForwardState struct {
 	// backend and no host expert GEMM remains — the requirement for the pinned Q2_K
 	// streamed route to satisfy the Halo GPU-only guard. A nil callback (or any
 	// decline) preserves the historical host f32 down contraction byte-for-byte.
-	expertDown      v41ExpertDownFunc
-	denseProjection v41DenseProjectionFunc
-	groupedOutput   v41GroupedOutputFunc
-	callbackOwner   *Session
+	expertDown       v41ExpertDownFunc
+	denseProjection  v41DenseProjectionFunc
+	groupedOutput    v41GroupedOutputFunc
+	engramProjection v41EngramProjectionFunc
+	callbackOwner    *Session
 }
 
 // v41ExpertGateUpOutcome is the closed result vocabulary of one v41ExpertGateUpFunc
@@ -278,7 +279,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, callbackOwner: st.callbackOwner}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -428,7 +429,11 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if cfg.DeepSeekV41 != nil {
 		for _, eng := range cfg.DeepSeekV41.EngramLayerIDs {
 			if eng == l {
-				if err := m.v41EngramInject(l, x, streams, full, tokens, eps); err != nil {
+				var project v41EngramProjectionFunc
+				if st != nil {
+					project = st.engramProjection
+				}
+				if err := m.v41EngramInjectWithProjection(l, x, streams, full, tokens, eps, project); err != nil {
 					return err
 				}
 				break
@@ -1356,6 +1361,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.expertDown = s.v41ExpertDownFunc()
 		s.v41Forward.denseProjection = s.v41DenseProjectionFunc()
 		s.v41Forward.groupedOutput = s.v41GroupedOutputFunc()
+		s.v41Forward.engramProjection = s.v41EngramProjectionFunc()
 		s.v41Forward.callbackOwner = s
 	}
 	return s.v41Forward

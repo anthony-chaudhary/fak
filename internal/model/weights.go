@@ -513,6 +513,7 @@ func NewFromF32Tensors(cfg Config, tensors []NamedTensorF32) (*Model, error) {
 	var raw []byte
 	off := 0
 	for _, t := range tensors {
+		t.Name = v41SourceTensorName(cfg, t.Name)
 		if t.Name == "" {
 			return nil, fmt.Errorf("model: empty tensor name")
 		}
