@@ -444,13 +444,15 @@ type debugKVMemoryVars struct {
 	L3RestoreFaults       int     `json:"l3_restore_faults,omitempty"`
 }
 
-// debugMoEResidencyVars is the activated-expert residency block. Unlike the Prometheus family,
-// which leaves ratios to PromQL, this one carries the derived rates precomputed: /debug/vars is
-// read by a human answering "is the budget I declared the right size", and making them divide
-// page-in bytes by forwarded tokens in their head is how that question goes unanswered.
+// debugMoEResidencyVars is the activated-expert residency block. Ring-derived rates are
+// precomputed for readers, while Checkpoint can independently report the latest model-lifetime
+// source counters when no request-scoped ring is enabled.
 type debugMoEResidencyVars struct {
 	Requests int64 `json:"requests"`
 	Tokens   int64 `json:"tokens"`
+	// Checkpoint is the latest cumulative model-lifetime checkpoint-tier
+	// snapshot. It remains useful when no request-scoped expert ring is enabled.
+	Checkpoint *agent.CheckpointResidencySnapshot `json:"checkpoint,omitempty"`
 
 	Lookups     int64 `json:"lookups"`
 	Hits        int64 `json:"hits"`
@@ -1304,23 +1306,22 @@ func debugStableCompactionAttempts(in map[string]uint64) map[string]uint64 {
 	return out
 }
 
-// debugMoEResidency renders a serve's activated-expert residency, or nil when there is nothing to
-// render — a proxy planner (no reporter) or a local one whose operator declared no expert budget,
-// so no session ever built a ring. Both are ordinary configurations, and reporting them as a block
-// of zeros would claim a measurement nobody took.
+// debugMoEResidency renders ring residency, checkpoint residency, or both. It returns nil only for
+// a planner with no reporter or when neither source has produced a measurement.
 func debugMoEResidency(p agent.Planner) *debugMoEResidencyVars {
 	reporter, ok := p.(agent.MoEResidencyReporter)
 	if !ok {
 		return nil
 	}
 	l := reporter.MoEResidencyStats()
-	if l.Requests == 0 {
+	if l.Requests == 0 && l.Checkpoint == nil {
 		return nil
 	}
 	last := l.Last
 	out := &debugMoEResidencyVars{
 		Requests:               l.Requests,
 		Tokens:                 l.Tokens,
+		Checkpoint:             l.Checkpoint,
 		Lookups:                l.Lookups,
 		Hits:                   l.Hits,
 		PageIns:                l.PageIns,

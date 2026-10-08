@@ -36,9 +36,9 @@ import (
 // giving the planner a model-scoped ring (the SharedExpertRing R7/#5618 already built at
 // (model, device) scope) instead of a guess that one would help.
 
-// MoEResidencyLedger is a serve's activated-expert residency across every request that engaged a
-// routed-expert ring. Requests==0 means no request ever engaged one — either no operator declared a
-// budget (the default) or the model has no routed experts — and every other field is then 0.
+// MoEResidencyLedger is a serve's activated-expert residency. Requests and Tokens frame only
+// requests that engaged a routed-expert ring; Checkpoint independently carries the latest
+// model-lifetime checkpoint-tier snapshot and may be present when Requests is zero.
 type MoEResidencyLedger struct {
 	// Requests is how many completed requests contributed, and Tokens how many tokens those
 	// requests actually forwarded through the model (prompt tokens not served from the prefix cache,
@@ -72,10 +72,32 @@ type MoEResidencyLedger struct {
 	// silently wrong dashboard, and is the reason the per-request report computes those checks from
 	// independent increments instead of restating one.
 	ReconciliationFailures int64 `json:"reconciliation_failures"`
+	// Checkpoint is the latest model-lifetime checkpoint-tier snapshot. Unlike the
+	// request-scoped ring counters above, these cumulative source counters are
+	// replaced on each observation rather than summed across requests.
+	Checkpoint *CheckpointResidencySnapshot `json:"checkpoint,omitempty"`
 	// Last is the most recent request's full report, kept whole. The aggregate answers "what is this
 	// serve costing"; Last answers "what did one request actually do", including the placement basis
 	// and drift, which do not sum across requests in any meaningful way.
 	Last model.MoEResidencyReport `json:"last,omitempty"`
+}
+
+// CheckpointResidencySnapshot is the bounded, non-sensitive checkpoint-tier
+// state exposed by the planner. It deliberately excludes source paths and the
+// checkpoint tier's last raw error.
+type CheckpointResidencySnapshot struct {
+	Scope            string `json:"scope"`
+	Reads            int    `json:"reads"`
+	Hits             int    `json:"hits"`
+	BytesRead        int64  `json:"bytes_read"`
+	Evictions        int    `json:"evictions"`
+	Failures         int    `json:"failures"`
+	BudgetBytes      int64  `json:"budget_bytes"`
+	ResidentBytes    int64  `json:"resident_bytes"`
+	PeakBytes        int64  `json:"peak_bytes"`
+	ResidentCount    int    `json:"resident_count"`
+	OverlayRows      int    `json:"overlay_rows"`
+	OverlayBytesRead int64  `json:"overlay_bytes_read"`
 }
 
 // HitRate is Hits/(Hits+PageIns) over the whole serve — the activated-set hit rate, weighted by
@@ -119,9 +141,8 @@ func (l MoEResidencyLedger) PeakBudgetUsed() float64 {
 
 // noteMoEResidency folds one finished request's residency into the planner ledger. It must be
 // called while the session is still alive — on the device path the caller's `defer s.Close()` takes
-// the ring with it — and it is a no-op for a session that never engaged one, which is the default
-// and every serve whose operator declared no expert budget. So a serve that is not using the ladder
-// pays one nil check and one struct read per request.
+// the ring with it. It is a no-op only when the session has neither a ring nor a checkpoint tier;
+// checkpoint-only sessions retain the latest cumulative source snapshot.
 //
 // tokens is the count actually FORWARDED, which the caller computes; a request that served its
 // whole prompt from the prefix cache and generated nothing contributes a ring read and no tokens,
@@ -130,36 +151,64 @@ func (p *InKernelPlanner) noteMoEResidency(s *model.Session, tokens int64) {
 	if p == nil || s == nil {
 		return
 	}
-	p.foldMoEResidency(s.MoEResidency(model.MoEResidencyOptions{Tokens: tokens}), tokens)
+	// Serialize the model-lifetime source snapshot with its publication. Without
+	// this span, an older overlapping request could capture first, stall, and then
+	// overwrite a newer cumulative checkpoint snapshot after it was published.
+	p.moeMu.Lock()
+	defer p.moeMu.Unlock()
+	p.foldMoEResidencyLocked(s.MoEResidency(model.MoEResidencyOptions{Tokens: tokens}), tokens)
 }
 
 // foldMoEResidency is the accumulation itself, split from the session read so the arithmetic is
 // witnessable against hand-built reports — a ledger that summed wrong would otherwise only be
 // catchable by driving a real ring and reasoning backwards from the total.
 func (p *InKernelPlanner) foldMoEResidency(rep model.MoEResidencyReport, tokens int64) {
-	if !rep.Ring.Enabled {
-		return // no ring on this session: nothing was bounded, so there is nothing to report
-	}
-	if tokens < 0 {
-		tokens = 0
-	}
 	p.moeMu.Lock()
 	defer p.moeMu.Unlock()
-	l := &p.moeResidency
-	l.Requests++
-	l.Tokens += tokens
-	l.Lookups += int64(rep.Ring.Lookups)
-	l.Hits += int64(rep.Ring.Hits)
-	l.PageIns += int64(rep.Ring.PageIns)
-	l.Evictions += int64(rep.Ring.Evictions)
-	l.Refusals += int64(rep.Ring.Refusals)
-	l.PageInBytes += rep.Ring.PageInBytes
-	l.BudgetBytes = rep.Ring.BudgetBytes
-	if rep.Ring.PeakBytes > l.PeakBytes {
-		l.PeakBytes = rep.Ring.PeakBytes
+	p.foldMoEResidencyLocked(rep, tokens)
+}
+
+func (p *InKernelPlanner) foldMoEResidencyLocked(rep model.MoEResidencyReport, tokens int64) {
+	if !rep.Ring.Enabled && !rep.Checkpoint.Enabled {
+		return
 	}
-	if !rep.Reconciliation.OK {
-		l.ReconciliationFailures++
+	l := &p.moeResidency
+	if rep.Ring.Enabled {
+		if tokens < 0 {
+			tokens = 0
+		}
+		l.Requests++
+		l.Tokens += tokens
+		l.Lookups += int64(rep.Ring.Lookups)
+		l.Hits += int64(rep.Ring.Hits)
+		l.PageIns += int64(rep.Ring.PageIns)
+		l.Evictions += int64(rep.Ring.Evictions)
+		l.Refusals += int64(rep.Ring.Refusals)
+		l.PageInBytes += rep.Ring.PageInBytes
+		l.BudgetBytes = rep.Ring.BudgetBytes
+		if rep.Ring.PeakBytes > l.PeakBytes {
+			l.PeakBytes = rep.Ring.PeakBytes
+		}
+		if !rep.Reconciliation.OK {
+			l.ReconciliationFailures++
+		}
+	}
+	if rep.Checkpoint.Enabled {
+		ck := rep.Checkpoint
+		l.Checkpoint = &CheckpointResidencySnapshot{
+			Scope:            "model_lifetime",
+			Reads:            ck.Reads,
+			Hits:             ck.Hits,
+			BytesRead:        ck.BytesRead,
+			Evictions:        ck.Evictions,
+			Failures:         ck.Failures,
+			BudgetBytes:      ck.BudgetBytes,
+			ResidentBytes:    ck.ResidentBytes,
+			PeakBytes:        ck.PeakBytes,
+			ResidentCount:    ck.ResidentCount,
+			OverlayRows:      ck.OverlayRows,
+			OverlayBytesRead: ck.OverlayBytesRead,
+		}
 	}
 	l.Last = rep
 }
@@ -174,7 +223,12 @@ func (p *InKernelPlanner) MoEResidencyStats() MoEResidencyLedger {
 	}
 	p.moeMu.Lock()
 	defer p.moeMu.Unlock()
-	return p.moeResidency
+	out := p.moeResidency
+	if out.Checkpoint != nil {
+		checkpoint := *out.Checkpoint
+		out.Checkpoint = &checkpoint
+	}
+	return out
 }
 
 // moeResidencyState is the planner-side storage, embedded rather than declared inline in the
