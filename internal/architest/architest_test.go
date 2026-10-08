@@ -887,6 +887,7 @@ var tier = map[string]int{
 	"testgit":        1,
 	"fakroot":        1,
 	"stepobs":        2,
+	"h2hbench":       1, // off-path engine head-to-head benchmark; stdlib-only, imports nothing internal.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -1575,6 +1576,7 @@ var chatEndpointRole = map[string]string{
 	"openaiadapter":     "the inbound authenticated app-migration compatibility server (not a live planner)",
 	"chatrelay":         "the off-path Slack bridge client to a served in-kernel model (not a live planner)",
 	"webbench":          "the off-path serving-parity benchmark client (not a live planner)",
+	"h2hbench":          "the off-path engine head-to-head streaming benchmark client against explicitly selected OpenAI-compatible serving arms (not a live planner)",
 	"guardtrace":        "the off-path trace-replay upstream fake (OpenAI/Anthropic provider replay, not a live planner)",
 	"frontierswe":       "the off-path FrontierSWE co-resident env adapter/smoke witness against fak serve (not a live planner)",
 	"macbench":          "the off-path Mac gateway serving-parity benchmark client against fak serve (not a live planner)",
