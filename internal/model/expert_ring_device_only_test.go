@@ -75,7 +75,7 @@ func TestDeviceOnlyExpertRingSharedRefusalReleasesOnlyFailedMember(t *testing.T)
 	if !failed.BackendSessionClosed() {
 		t.Fatal("shared refusal left failed member open")
 	}
-	if be.frees != beforeFrees+1 || be.uploads != beforeUploads+1 {
+	if be.frees != beforeFrees || be.uploads != beforeUploads {
 		t.Fatal("shared refusal freed a retained peer handle or staged a permanent escape")
 	}
 	spanReady := make(chan func(), 1)
@@ -112,7 +112,7 @@ func TestDeviceOnlyExpertRingSharedRefusalReleasesOnlyFailedMember(t *testing.T)
 	case <-time.After(2 * time.Second):
 		t.Fatal("peer span release did not restore shared stats access")
 	}
-	if be.uploads != beforeUploads+1 || be.frees != beforeFrees+1 {
+	if be.uploads != beforeUploads || be.frees != beforeFrees {
 		t.Fatal("peer could not reuse its surviving handle after refusal")
 	}
 	failed.Close()
