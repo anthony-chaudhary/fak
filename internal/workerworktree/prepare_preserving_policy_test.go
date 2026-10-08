@@ -286,13 +286,14 @@ func TestPreservingCheckoutPolicyCoversEveryPathAcrossBatches(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=10ms lane=default
 func TestPreservingGitOutputRefusesSuccessfulReadWarnings(t *testing.T) {
 	for _, args := range [][]string{{"config", "--null", "--list"}, {"check-attr", "-z"}, {"ls-tree", "-z"}, {"rev-parse", "--git-path", "hooks/post-checkout"}, {"status", "--porcelain"}} {
 		if code, data := preservingGitOutput(args, 0, "valid-output", "warning"); code == 0 || !strings.Contains(data, "warning") {
 			t.Fatalf("warning hidden: %d %q", code, data)
 		}
 	}
-	args := []string{"-c", "gc.worktreePruneExpire=never", "-c", "core.longpaths=true", "worktree", "add", "--detach", "target", "base"}
+	args := []string{"-c", "gc.worktreePruneExpire=never", "-c", "core.longpaths=true", "worktree", "add", "--quiet", "--detach", "target", "base"}
 	if code, _ := preservingGitOutput(args, 0, "", "Preparing worktree (detached HEAD abcdef0)\n"); code != 0 {
 		t.Fatal("ordinary add progress refused")
 	}
@@ -301,6 +302,29 @@ func TestPreservingGitOutputRefusesSuccessfulReadWarnings(t *testing.T) {
 	}
 	if code, data := preservingGitOutput(args, 128, "partial", "failure"); code != 128 || data != "partialfailure" {
 		t.Fatal("failed add evidence lost")
+	}
+}
+
+// fak-test:runtime medium est=2s lane=git-isolated
+func TestPreparePreservingUsesQuietNativeWorktreeAdd(t *testing.T) {
+	f := newQualifiedPreservingFixture(t)
+	var calls []string
+	res := preparePreserving(context.Background(), f.repo, "cmd", "quiet-native-add", f.base, preservingTempDir(t), OwnerStamp{PID: os.Getpid(), LeaseID: "fixture-admission"}, preservingTestRunner(t, &calls), func(context.Context) error { return nil })
+	if !res.OK {
+		t.Fatalf("quiet native add refused: code=%s", res.Code)
+	}
+	want := "-c gc.worktreePruneExpire=never -c core.longpaths=true worktree add --quiet --detach"
+	adds := 0
+	for _, call := range calls {
+		if strings.Contains(call, "worktree add") {
+			adds++
+			if !strings.HasPrefix(call, want) {
+				t.Fatalf("native add argv=%q", call)
+			}
+		}
+	}
+	if adds != 1 {
+		t.Fatalf("native add calls=%d", adds)
 	}
 }
 

@@ -52,7 +52,7 @@ func preservingGitOutput(args []string, code int, stdout, stderr string) (int, s
 		return code, stdout + stderr
 	}
 	// Add's ordinary progress is written to stderr. Read queries may not hide it.
-	add := len(args) == 9 && args[0] == "-c" && args[1] == "gc.worktreePruneExpire=never" && args[2] == "-c" && args[3] == "core.longpaths=true" && args[4] == "worktree" && args[5] == "add" && args[6] == "--detach"
+	add := len(args) == 10 && args[0] == "-c" && args[1] == "gc.worktreePruneExpire=never" && args[2] == "-c" && args[3] == "core.longpaths=true" && args[4] == "worktree" && args[5] == "add" && args[6] == "--quiet" && args[7] == "--detach"
 	progress := false
 	if add && strings.HasPrefix(stderr, "Preparing worktree (detached HEAD ") && strings.HasSuffix(stderr, ")\n") && strings.Count(stderr, "\n") == 1 {
 		identity := strings.TrimSuffix(strings.TrimPrefix(stderr, "Preparing worktree (detached HEAD "), ")\n")

@@ -159,7 +159,7 @@ func preparePreserving(ctx context.Context, root, lane, key, baseSHA, wtRoot str
 		attempted = true
 		// No force, pool, index-failure retry or no-checkout fallback. Disable
 		// expiration-based Git administrative pruning during add as well.
-		rc, detail := run(git, root, []string{"-c", "gc.worktreePruneExpire=never", "-c", "core.longpaths=true", "worktree", "add", "--detach", target, baseSHA})
+		rc, detail := run(git, root, []string{"-c", "gc.worktreePruneExpire=never", "-c", "core.longpaths=true", "worktree", "add", "--quiet", "--detach", target, baseSHA})
 		if rc != 0 {
 			code := "PREPARE_NOT_READY"
 			if rc == ReapTimeoutExitCode || ctx.Err() != nil {
