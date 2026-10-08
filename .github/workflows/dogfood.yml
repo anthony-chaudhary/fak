@@ -81,6 +81,7 @@ jobs:
       # Scorecard ACTION/debt does NOT fail the packet — its probe's allowed exits cover
       # the debt code — so this preserves the local pass semantics.
       - name: recent-feature dogfood gate (--json; required probes must pass)
+        shell: bash
         run: |
           python tools/recent_feature_dogfood.py \
             --out-dir .fak/recent-feature-dogfood/ci \
