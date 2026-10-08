@@ -199,6 +199,58 @@ func assertDeviceOnlyFallback(t *testing.T, s *Session, invoke func()) {
 	invoke()
 }
 
+type v41PolicyExpertRole struct{ stem, leaf string }
+
+type v41PolicyExpertBackend struct {
+	*v41HalSeamBackend
+	session            *Session
+	outputs            map[compute.Buffer]v41PolicyExpertRole
+	outputCounts       map[string]int
+	expertSwiGLU       int
+	invalidSwiGLURoles bool
+}
+
+func (b *v41PolicyExpertBackend) expertRole(weight compute.Buffer) (v41PolicyExpertRole, bool) {
+	for layer := 0; layer < b.session.M.Cfg.NumLayers; layer++ {
+		for expert := 0; expert < b.session.M.Cfg.NumExperts; expert++ {
+			stem := layerName(layer, "ffn.experts."+itoa(expert))
+			for _, leaf := range []string{"w1.weight", "w3.weight", "w2.weight"} {
+				if tensor, ok := b.session.halW["kquant-raw:"+stem+"."+leaf]; ok && tensor.Buf() == weight {
+					return v41PolicyExpertRole{stem, leaf}, true
+				}
+			}
+		}
+	}
+	return v41PolicyExpertRole{}, false
+}
+
+func (b *v41PolicyExpertBackend) MatMul(w, x compute.Tensor) compute.Tensor {
+	y := b.v41HalSeamBackend.MatMul(w, x)
+	if role, ok := b.expertRole(w.Buf()); ok {
+		b.outputs[y.Buf()] = role
+		b.outputCounts[role.leaf]++
+	}
+	return y
+}
+
+func (b *v41PolicyExpertBackend) SwiGLU(g, u compute.Tensor) compute.Tensor {
+	gate, gateOK := b.outputs[g.Buf()]
+	up, upOK := b.outputs[u.Buf()]
+	if gateOK || upOK {
+		if !gateOK || !upOK || gate.leaf != "w1.weight" || up.leaf != "w3.weight" || gate.stem != up.stem {
+			b.invalidSwiGLURoles = true
+		} else {
+			b.expertSwiGLU++
+		}
+	}
+	return b.v41HalSeamBackend.SwiGLU(g, u)
+}
+
+func (b *v41PolicyExpertBackend) Free(x compute.Tensor) {
+	delete(b.outputs, x.Buf())
+	b.v41HalSeamBackend.Free(x)
+}
+
 // The advertised device seam delegates to cpu-ref. This checks software admission,
 // including the portable control; it does not qualify physical device execution.
 // fak-test:runtime medium est=30s lane=default
@@ -237,7 +289,7 @@ func TestDeviceOnlyV41PublicEntriesRefuseHostArchitecture(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			be := &v41HalSeamBackend{Backend: ref}
+			be := &v41PolicyExpertBackend{v41HalSeamBackend: &v41HalSeamBackend{Backend: ref}, outputs: map[compute.Buffer]v41PolicyExpertRole{}, outputCounts: map[string]int{}}
 			if !be.Caps().DeviceMemory || !be.Caps().UploadDtype ||
 				!be.SupportsDeviceWeightDtype(compute.Q2_K) || !be.SupportsDeviceWeightDtype(compute.Q3_K) {
 				t.Fatal("fixture must advertise device memory and both expert dtypes")
@@ -248,10 +300,9 @@ func TestDeviceOnlyV41PublicEntriesRefuseHostArchitecture(t *testing.T) {
 				DenseGPULayers: m.Cfg.NumLayers, GPULayers: m.Cfg.NumLayers,
 			}
 			t.Cleanup(s.Close)
+			be.session = s
 			s.SetExecutionPolicy(tc.policy)
 			st := s.v41State()
-			st.denseProjection = nil
-			st.groupedOutput = nil
 			if st.expertGateUp == nil || st.expertDown == nil {
 				t.Fatal("fixture did not bind both expert callbacks")
 			}
@@ -267,6 +318,8 @@ func TestDeviceOnlyV41PublicEntriesRefuseHostArchitecture(t *testing.T) {
 			}
 
 			var logits []float32
+			cacheEntriesBefore := len(s.halW)
+			denseBefore, groupedBefore, mhcBefore := v41DenseTestPhase(t, m, "decode"), v41GroupedPhase(t, m, "decode"), v41MHCProjPhase(t, m, "decode")
 			err := recoverError(func() { logits = tc.invoke(s) })
 			if tc.policy == ExecutionPolicyDeviceOnly {
 				var refused *BackendForwardOperationError
@@ -289,6 +342,9 @@ func TestDeviceOnlyV41PublicEntriesRefuseHostArchitecture(t *testing.T) {
 				if len(st.history) != 0 {
 					t.Fatalf("refused entry advanced history: %v", st.history)
 				}
+				if len(s.halW) != cacheEntriesBefore {
+					t.Fatal("strict architecture refusal changed Session weight cache")
+				}
 				return
 			}
 
@@ -307,9 +363,20 @@ func TestDeviceOnlyV41PublicEntriesRefuseHostArchitecture(t *testing.T) {
 				}
 			}
 			picks := m.Cfg.NumExpertsPerTok * m.Cfg.NumLayers
-			if gateUpCalls != picks || downCalls != picks || be.matmuls != 3*picks || be.swiglu != picks {
+			expertMatMuls := v41HalSeamExpertMatMuls(t, s, be.v41HalSeamBackend, picks)
+			if gateUpCalls != picks || downCalls != picks || expertMatMuls != 3*picks || be.expertSwiGLU != picks || be.invalidSwiGLURoles {
 				t.Fatalf("portable seam callbacks=%d/%d matmul=%d swiglu=%d, want %d/%d/%d/%d",
-					gateUpCalls, downCalls, be.matmuls, be.swiglu, picks, picks, 3*picks, picks)
+					gateUpCalls, downCalls, expertMatMuls, be.expertSwiGLU, picks, picks, 3*picks, picks)
+			}
+			for _, leaf := range []string{"w1.weight", "w3.weight", "w2.weight"} {
+				if be.outputCounts[leaf] != picks {
+					t.Errorf("actual expert %s output-buffer count=%d want %d", leaf, be.outputCounts[leaf], picks)
+				}
+			}
+			v41HalSeamDefaultProjectionRows(t, m, "decode", 1, denseBefore, groupedBefore)
+			mhc := v41DenseTestDelta(v41MHCProjPhase(t, m, "decode"), mhcBefore)
+			if mhc["mhc_projection_device_rows"] != float64(m.Cfg.NumLayers) || mhc["mhc_projection_host_rows"] != 0 || mhc["mhc_projection_host_weight_f32_bytes"] != 0 {
+				t.Errorf("public portable Step lost default mHC composition=%v", mhc)
 			}
 		})
 	}
