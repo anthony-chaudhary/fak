@@ -7921,6 +7921,11 @@
           "category": "incidental",
           "reason": "Pre-existing gateway feature-proof token (internal/gateway/feature_proof.go FeatureRewriteWitness/RecordRewrite); not introduced by #13317 and unrelated to its native batch header scope.",
           "token": "writewitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire value of the existing hardware-witnessed evidence rung on the SSD restart receipt; it is not a separate proof concept.",
+          "token": "HW_WITNESSED"
         }
       ],
       "id": "witness-proof",
@@ -7942,6 +7947,7 @@
         "GATED_UNWITNESSED",
         "GoldDigest",
         "GradedVerdictUnwitnessed",
+        "HW_WITNESSED",
         "HonestyClaimUnwitnessed",
         "HonestyDoneNotWitnessed",
         "HonestyWrongWitness",
@@ -8771,6 +8777,11 @@
           "category": "incidental",
           "reason": "Filename-derived token of the new internal/agent/inkernel_incremental.go port file; the file carries the composable system-context source/registry/snapshot seam and introduces no new gateway transport, engine dispatch, or admission authority.",
           "token": "inkernelincremental"
+        },
+        {
+          "category": "incidental",
+          "reason": "Serialized engine identity value for the existing fak-native Vulkan execution path; it is receipt data, not a distinct gateway engine.",
+          "token": "fak-strix-engine"
         }
       ],
       "id": "gateway-engine",
@@ -8838,6 +8849,7 @@
         "engineered",
         "engineering",
         "engineers",
+        "fak-strix-engine",
         "fak_decode_trace",
         "fak_gateway_compaction_thrash_sessions_total",
         "fak_gateway_kv_prefix_tier_capacity_bytes",
@@ -11065,6 +11077,11 @@
           "category": "incidental",
           "reason": "Direct port of OpenCode SystemContext source/registry/snapshot: an implementation name of the existing composable-context concept (agent package), reusing context-ctx rather than introducing a new engine, transport, or admission authority.",
           "token": "EmptyIncrementalContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Function-local cancellation context for bounded cleanup after the existing SSD restart operation; it introduces no context lifecycle concept.",
+          "token": "cleanupCtx"
         }
       ],
       "exclude": [
@@ -11132,6 +11149,7 @@
         "cctx",
         "cellContext",
         "chatRouteContextKey",
+        "cleanupCtx",
         "codexWorkflowDefaultContext",
         "collectDogfoodKernelValue",
         "compactionContractFrom",
@@ -15351,6 +15369,31 @@
           "category": "incidental",
           "reason": "Private helper capturing the bounded warm-prefix disk candidate; implementation detail of existing SSD warm-prefix persistence, not a distinct planning concept.",
           "token": "captureWarmDiskCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Injected cleanup callback field for the existing resolved Strix candidate lifecycle; it adds no candidate or plan concept.",
+          "token": "cleanupStrixCandidateFn"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private cleanup helper for a freshly materialized resolved Strix candidate; it implements the existing candidate lifecycle.",
+          "token": "cleanupStrixCandidateFresh"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private transport struct carrying the already-selected committed Strix source candidate into validation; it is not a new planning abstraction.",
+          "token": "resolvedStrixCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private staging receipt for the existing Strix candidate execution path; it does not define a new candidate choice or plan.",
+          "token": "stagedStrixCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private validation helper for bytes of the already-selected candidate archive; it adds no candidate or plan concept.",
+          "token": "validateCandidateArchiveBytes"
         }
       ],
       "exclude": [
@@ -15503,6 +15546,8 @@
         "candidates",
         "captureWarmDiskCandidate",
         "checkCandidatePlausible",
+        "cleanupStrixCandidateFn",
+        "cleanupStrixCandidateFresh",
         "clonePlan",
         "compareCandidate",
         "componentPlan",
@@ -15561,6 +15606,7 @@
         "reportFromSessions",
         "requestMemoryPlanWithExtras",
         "requestedExecutionPlan",
+        "resolvedStrixCandidate",
         "rollbackCodexMarketplaceCandidate",
         "runAblatePlan",
         "runContinuitySyncPlan",
@@ -15582,6 +15628,8 @@
         "servenativeplannerconfig",
         "setSelfUpdateCandidateCacheDisposition",
         "stablePlanID",
+        "stagedStrixCandidate",
+        "validateCandidateArchiveBytes",
         "validateGroupedPlan",
         "walkHTTPPlanners",
         "watchdogCandidates",

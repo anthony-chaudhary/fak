@@ -291,6 +291,7 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 	host := fs.String("host", "", "target Strix Halo host")
 	subkernels := fs.String("subkernels", "all", "sub-kernels to test")
 	ablate := fs.String("ablate", "all", "ablation arms to run")
+	nativeSSDRestart := fs.Bool("native-ssd-restart", false, "run the source-bound native Vulkan SSD restart witness")
 	asJSON := fs.Bool("json", false, "emit receipt as JSON")
 	evidenceOnly := fs.Bool("evidence-only", false, "accept valid source-bound physical evidence without granting promotion credit")
 	timeoutSec := fs.Int("timeout", 45, "total timeout in seconds")
@@ -309,6 +310,16 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 		if *asJSON {
 			emitFailReceipt(stdout, *host, *gitTip, "", argv, err)
 		}
+		return 1
+	}
+	explicitWork := false
+	fs.Visit(func(f *flag.Flag) {
+		if (f.Name == "subkernels" && *subkernels != "none" && *subkernels != "") || (f.Name == "ablate" && *ablate != "none" && *ablate != "") {
+			explicitWork = true
+		}
+	})
+	if *nativeSSDRestart && explicitWork {
+		fmt.Fprintln(stderr, "amd-strix-validate: --native-ssd-restart cannot be combined with subkernel or ablation work")
 		return 1
 	}
 	if *timeoutSec <= 0 {
@@ -333,6 +344,11 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 	controllerAuthority, ok := requireStrixControllerAuthority(ctx, stderr, "amd-strix-validate", candidate.root)
 	if !ok {
 		return 1
+	}
+	if *nativeSSDRestart {
+		code := runAMDStrixSSDRestart(ctx, stdout, stderr, *host, candidate, "fak-dev amd-strix-validate "+strings.Join(argv, " "), time.Duration(*timeoutSec)*time.Second, time.Duration(*admissionTimeoutSec)*time.Second, *asJSON)
+		_ = controllerAuthority
+		return code
 	}
 
 	runSK := *subkernels != "none" && *subkernels != ""

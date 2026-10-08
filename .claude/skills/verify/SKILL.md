@@ -60,6 +60,24 @@ Mocks hide integration bugs (Hermes' rule). Whenever touching CLI, runtime, or s
 - **Dogfood Launcher Witness**: Run `bash scripts/dogfood-claude_test.sh` to verify process supervision and fail-fast deadlines.
 - **Attestation Trailer**: Add `Smoke-verified: <command>` or `E2E-verified: <command>` in commit or test files to satisfy the `E2E_OVER_MOCKS` boundary hook.
 
+## Native Vulkan SSD process restart
+
+Use the dedicated native validator selection for physical restart evidence:
+
+```text
+fak-dev amd-strix-validate --native-ssd-restart --committed-only --candidate-dir <clean-published-checkout> --host <pinned-target> --timeout 900 --admission-timeout 30 --json
+```
+
+Run a current stamped Linux controller; Windows controllers retain their typed
+WSL recovery. This selection builds an isolated, source-bound `agent.test`,
+requires Vulkan device execution, and checks two fresh processes, disk restore,
+exact transfers, tokens and complete logit digests. It uses the existing exclusive
+device lock and cleanup. Do not combine it with subkernel or ablation work.
+Respect any independently held target lease before invoking it. Only a passing
+persisted receipt with acquisition, release and cleanup proves this restart;
+CPU tests and tagged compilation remain software checks. This receipt does not
+qualify a separate deployment or agent-trajectory campaign.
+
 ## Step 2 - Grade The Binding
 
 Fold the run into exactly one claim, the same grader the dispatch-tick witness
