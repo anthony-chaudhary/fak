@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **599** (clarity 0 + coverage 599) |
-| **Crystal-clear concepts (and climbing)** | **1169** crystal of 2903 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3022 / 3621** (83.5% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **0** of 219 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **84** of 4146 indexed names |
+| **Crystal-clear concepts (and climbing)** | **1172** crystal of 2906 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3025 / 3624** (83.5% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **0** of 222 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **84** of 4149 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 89.3/100 (grade B) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2903 concepts - score 89.3/100 (grade B) - disambiguation-debt 599
+concept-disambiguation chart - 2906 concepts - score 89.3/100 (grade B) - disambiguation-debt 599
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ###################......... 1169
+  * crystal       ###################......... 1172
   o defined       ############################ 1734
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -40,7 +40,7 @@ clarity ladder (count of concepts, best -> fog):
 
 clarity mix by family (each cell = one concept):
   attention        *******************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (87 concept(s); 19 crystal)
-  cache            **********************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (286 concept(s); 106 crystal)
+  cache            ***********************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (287 concept(s); 107 crystal)
   context-ctx      *********************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (238 concept(s); 81 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         **********************************ooooooooooooooooooooo (55 concept(s); 34 crystal)
@@ -56,7 +56,7 @@ clarity mix by family (each cell = one concept):
   render-materialize *******************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (199 concept(s); 43 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
   session-runtime  *******************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (253 concept(s); 91 crystal)
-  support-maturity *******************************************oooooooooooooooooooooo (65 concept(s); 43 crystal)
+  support-maturity *********************************************oooooooooooooooooooooo (67 concept(s); 45 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    ***********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (163 concept(s); 83 crystal)
@@ -64,14 +64,14 @@ clarity mix by family (each cell = one concept):
 coverage by family (positioned / discovered):
   plan             #######################..... 465/570
   session-runtime  #######################..... 283/350
-  cache            #######################..... 328/392
+  cache            #######################..... 329/393
   gateway-engine   #######################..... 226/280
   context-ctx      ########################.... 257/304
   policy-capability ########################.... 221/260
   attention        ####################........ 92/126
   guard-gate       ##########################.. 510/544
   pool             ###############............. 40/74
-  support-maturity ####################........ 73/101
+  support-maturity ####################........ 75/103
   render-materialize #########################... 216/243
   witness-proof    ########################.... 166/192
   evict            ####################........ 56/79
@@ -84,15 +84,15 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 83.5%  (3022/3621 confusable tokens positioned)
+namespace coverage  [###########################.....] 83.5%  (3025/3624 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
-  mutual       ############################ 219
+  mutual       ############################ 222
   one-sided    ............................ 0
   undrawn      ............................ 0
-  pairs separated   [################################] 219/219
+  pairs separated   [################################] 222/222
 
-name index: 4146 lookup name(s) -> 2903 concept(s), 84 ambiguous
+name index: 4149 lookup name(s) -> 2906 concept(s), 84 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -114,11 +114,11 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 219 |
-| **Separated from each other (drive to all)** | **219 / 219** (219 mutual, 0 one-sided) |
+| Confusable name-pairs discovered | 222 |
+| **Separated from each other (drive to all)** | **222 / 222** (222 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2058 / 5230 |
+| Boundaries drawn (mutual / total) | 2066 / 5238 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4146 over 2903 concepts |
+| Lookup names indexed | 4149 over 2906 concepts |
 | Lookup names landing on several concepts | 84 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2903 |
+| Concepts carrying a contrast set | 2906 |
 
 ## The concepts (best verdict first)
 
@@ -261,6 +261,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | concept | cache | **managed-cache restart plan** - The managed-cache restart plan (internal/resume) is the OTHER sense of the phrase: Plan prices restarting a dormant rate-limit-crashed session (RESUME_FULL vs CUT, with RESET always priced) against the projected provider-cache posture, and Diagnose detects which transcripts need one - turning a blind cold re-prefill into a restart with the cache managed. |
 | * | crystal | symbol | cache | **FAK_RESUME_CACHE_AFFINITY** - Env-var name carrying the transcript-UUID-derived relaunch cache-affinity route onto a resumed claude --resume child, so the warm provider cache route survives the OS relaunch (#4140/#5189). |
 | * | crystal | symbol | cache | **MedianCacheReadFraction** - Median share of post-compaction window input tokens served as provider cache reads (cached_input_tokens / input_tokens), rolled up per regrowth cohort in the #4768 compact-audit aggregate. |
+| * | crystal | symbol | cache | **cachedImmutableWeight (borrowed device weight staging)** - Session.cachedImmutableWeight reuses a session handle or borrows a model-owned immutable device weight and stages it only on a miss. |
 | * | crystal | symbol | context-ctx | **requestCtx** - The cancellable context scoped to one agentbench inference request, used to stop that request without ending the enclosing benchmark run. |
 | * | crystal | symbol | context-ctx | **CompactionJoinKey** - The event-join coordinate a compaction fire shares with the provider usage record for the turn it rewrote, so the fire's provider-side re-warm counters can be PROVEN against one usage row instead of pasted in by caller convention. The zero value is UNSTAMPED: a sample assembled without turn context, which the join passes through verbatim rather than counting as a failed join. |
 | * | crystal | symbol | context-ctx | **CompactionJoinResult** - The outcome of attempting to bind one compaction fire to the provider usage record sharing its CompactionJoinKey: the joined sample plus whether the binding was PROVEN, left unstamped, or withdrawn because no single usage row matched. It reports the provenance of the provider counters, so an unproven join withdraws them rather than letting an unmatched number stand as evidence. |
@@ -1211,6 +1212,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | concept | support-maturity | **correctness** - Correctness is the property that the implementation's behavior matches its stated contract or oracle for the case being judged. |
 | * | crystal | concept | support-maturity | **parity** - Parity is a same-workload comparison against a named peer, baseline, or oracle, reporting match, lead, or trailing behavior under the stated conditions. |
 | * | crystal | concept | support-maturity | **maturity** - Maturity is the readiness level of a supported capability after considering implementation completeness, evidence breadth, correctness witnesses, parity results, guardrails, and operating posture. |
+| * | crystal | symbol | support-maturity | **SupportsQ3KMatMul (packed Q3_K pipeline availability)** - The optional backend predicate reports whether the loaded Vulkan bundle has the packed Q3_K matrix-multiply pipeline needed before device selection. |
+| * | crystal | symbol | support-maturity | **SupportsQ5KMatMul (packed Q5_K pipeline availability)** - The optional backend predicate reports whether the loaded Vulkan bundle has the packed Q5_K matrix-multiply pipeline needed before device selection. |
 | * | crystal | concept | trajectory-control | **trajectory control (trajctl)** - The LIVE forward-progress control plane over declared objectives (internal/trajctl, epic #2533): anything you want to progress gets a named objective and a witnessed score curve, and steering reads curves, never points |
 | * | crystal | symbol | trajectory-control | **ScoreRow** - One scored observation of one objective: normalized value, the scorer method+version that produced it, a witness rung, and an evidence pointer, appended to the fak-trajctl/1 JSONL ledger |
 | * | crystal | concept | trajectory-control | **witness rung (W0-W3)** - The evidence-strength ladder every ScoreRow carries: W3 deterministic evidence (witnessed commit, green suite), W2 transcript-derived heuristic, W1 structured judge verdict, W0 self-report (recorded, never load-bearing); the read-time audit (witnessStrength) demotes a dangling W3 row to W0 |
@@ -3181,17 +3184,17 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3172/5230 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2903 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3172/5238 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2906 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
 | separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
-| separation | `pair_separated` | 100 | 0 | all 219 confusable name-pair(s) are separated |
+| separation | `pair_separated` | 100 | 0 | all 222 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4146 lookup name(s) resolves - 84 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4149 lookup name(s) resolves - 84 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3200,14 +3203,14 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---:|---:|---:|
 | plan | 465 | 570 | 105 |
 | session-runtime | 283 | 350 | 67 |
-| cache | 328 | 392 | 64 |
+| cache | 329 | 393 | 64 |
 | gateway-engine | 226 | 280 | 54 |
 | context-ctx | 257 | 304 | 47 |
 | policy-capability | 221 | 260 | 39 |
 | attention | 92 | 126 | 34 |
 | guard-gate | 510 | 544 | 34 |
 | pool | 40 | 74 | 34 |
-| support-maturity | 73 | 101 | 28 |
+| support-maturity | 75 | 103 | 28 |
 | render-materialize | 216 | 243 | 27 |
 | witness-proof | 166 | 192 | 26 |
 | evict | 56 | 79 | 23 |

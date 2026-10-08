@@ -145,16 +145,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	scratch.mhc = wMix
 	mixBase := m.tensor(layerName(l, "mhc.base"))
 	mixScale := m.tensor(layerName(l, "mhc.scale"))
-	woA, err := m.v41ProjF32Into(l, "attn.wo_a.weight", scratch.woA)
-	if err != nil {
-		return err
-	}
-	scratch.woA = woA
-	woB, err := m.v41ProjF32Into(l, "attn.wo_b.weight", scratch.woB)
-	if err != nil {
-		return err
-	}
-	scratch.woB = woB
+	projectOutput := m.v41GroupedOutputProjector(l, nH, hd, cfg.OGroups, cfg.OLoraRank, H, scratch)
 	for _, leaf := range []string{
 		"attn.wq_a.weight", "attn.wq_b.weight", "attn.wkv.weight",
 		"ffn.gate.weight",
@@ -327,7 +318,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
 	}
-	attnOut, err := V41GroupedOutputProjection(o, woA, woB, 1, 1, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
+	attnOut, err := projectOutput(o)
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
 	}
@@ -474,16 +465,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	scratch.mhc = wMix
 	mixBase := m.tensor(layerName(l, "mhc.base"))
 	mixScale := m.tensor(layerName(l, "mhc.scale"))
-	woA, err := m.v41ProjF32Into(l, "attn.wo_a.weight", scratch.woA)
-	if err != nil {
-		return err
-	}
-	scratch.woA = woA
-	woB, err := m.v41ProjF32Into(l, "attn.wo_b.weight", scratch.woB)
-	if err != nil {
-		return err
-	}
-	scratch.woB = woB
+	projectOutput := m.v41GroupedOutputProjector(l, nH, hd, cfg.OGroups, cfg.OLoraRank, H, scratch)
 
 	// ---- mHC coefficient split (one position), byte-identical to the plain branch ----
 	mhcFlat, mhcTransposed, mhcOK := m.v41MHCWeightLayout(l)
@@ -669,7 +651,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
 	}
-	attnProjected, err := V41GroupedOutputProjection(o, woA, woB, 1, 1, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
+	attnProjected, err := projectOutput(o)
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
 	}

@@ -416,6 +416,7 @@ func TestV41DenseProjectionRestoreTargetOwnership(t *testing.T) {
 	if err := snap.Restore(target); err != nil {
 		t.Fatal(err)
 	}
+	target.v41State().groupedOutput = nil
 	source.Close()
 	before := len(shared.ops)
 	got := target.Step(4)

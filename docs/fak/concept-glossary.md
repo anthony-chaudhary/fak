@@ -839,3 +839,24 @@ Recorder method that folds one planner-step leg of a closed StepKind and its dur
 The closed-vocabulary fold inside internal/stepobs that turns planner-step legs into per-kind histograms and counters, dropping any kind outside the closed StepKind set.
 
 **Distinct from:** The PLANNER half of the stepobs Recorder, whose other half is the kernel registry; because its vocabulary is closed it pre-allocates every series, so a cold render emits all of them at a real zero instead of omitting them.
+
+
+### cachedImmutableWeight (borrowed device weight staging)
+
+Session.cachedImmutableWeight reuses a session handle or borrows a model-owned immutable device weight and stages it only on a miss.
+
+**Distinct from:** It reuses immutable model weights whose borrowed handles survive Session.Close until Model.CloseWeights; KV cache stores mutable per-token attention state.
+
+
+### SupportsQ3KMatMul (packed Q3_K pipeline availability)
+
+The optional backend predicate reports whether the loaded Vulkan bundle has the packed Q3_K matrix-multiply pipeline needed before device selection.
+
+**Distinct from:** It reports Q3_K pipeline availability; SupportsQ6KMatMul reports a different packed dtype, and neither predicate qualifies full-model execution.
+
+
+### SupportsQ5KMatMul (packed Q5_K pipeline availability)
+
+The optional backend predicate reports whether the loaded Vulkan bundle has the packed Q5_K matrix-multiply pipeline needed before device selection.
+
+**Distinct from:** It reports Q5_K pipeline availability; SupportsQ3KMatMul and SupportsQ6KMatMul report different packed dtypes, and none qualifies full-model execution.

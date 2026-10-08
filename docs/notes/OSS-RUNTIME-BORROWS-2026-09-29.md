@@ -119,8 +119,53 @@ first, then run the physical component witness from the public repository root:
 FAK_VULKAN_SPIRV="$PWD/internal/compute/spirv" FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_DISPATCH_PROFILE=1 go test -tags vulkan ./internal/model -run '^(TestV41DenseProjectionHalo|TestV41ClampedDeviceSwiGLUHalo)$' -count=1 -timeout=5m
 ```
 
-These observations cover the reduced projection components. Grouped output
-projections and other host stages remain outside this bridge. The strict
+These observations cover the reduced projection components. The grouped output
+bridge below extends device selection; other host stages remain. The strict
 whole-V4.1 device guard remains unchanged; full-checkpoint serving, device prefix
 restoration, combined Engram execution, TTFT, and throughput require separate
 qualification. No latency or market-leadership claim follows from this fixture.
+
+## V4.1 grouped attention output
+
+Fak adapts the group-preserving output algebra in [oMLX V4.1 language.py,
+lines 348–350](https://github.com/jundot/omlx/blob/3f2d07e8dff257119329e0a2e9821df81182f05d/omlx/patches/deepseek_v41/language.py#L348)
+at `3f2d07e8dff257119329e0a2e9821df81182f05d`; the DeepSeek subtree is MIT,
+Copyright (c) 2023 DeepSeek. Each attention group selects a contiguous compressed
+`wo_a` slice, projects that group's activation, and contributes its ordered rank
+row to `wo_b`. The intermediate rank join remains on the host. Immutable packed
+weights reuse the existing model cache. The bridge validates both siblings before
+selection and retains the original host path for unsupported backend dtypes.
+Selected failures propagate without host retry and roll back continuation state.
+The raw grouped algebra retains its existing adapter semantics.
+
+Nine default phase fields and the bounded agent reader expose grouped device/host
+calls and completed rows, matrix operation attempts, activation upload/readback
+bytes, elapsed nanoseconds, and actual host float weight materialization bytes.
+Cold host materialization is charged once per layer; incremental steps charge
+actual returned blocks. Activation counters exclude weight staging.
+
+On 2026-10-07 (2026-10-08 UTC), source
+`794065b83f8e08a427dc17821f54d716847928ae` passed the physical Radeon 8060S RADV
+component witness using a reduced all-Q2_K payload (eight groups, 64 heads,
+head dimension 32, rank 32, hidden width 256). All seven ordinary dense projections
+and grouped output were enabled together. Cold prefill of three tokens, one decode
+token, and suffix prefill of two tokens observed 27/9/18 grouped matrix calls,
+3/1/2 completed grouped rows, and zero grouped host calls. Default activation
+upload bytes were 27648/9216/18432 and readback bytes were 6144/2048/4096.
+Against the actual CPU-session control, whole host float weight materialization
+fell from 524288/524288/1048576 bytes to zero, a 100% reduction for these grouped
+weights. Compressed device weight buffers were reused through continuation.
+Maximum logit difference was 6.557e-7, cosine exceeded 0.9999999999999, and greedy
+outputs matched. The preceding dense projection and clamped activation physical
+witnesses also passed in the same serial run.
+
+Build the native Vulkan library and shader bundle before this command from the
+public repository root:
+
+```text
+FAK_VULKAN_SPIRV="$PWD/internal/compute/spirv" FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_DISPATCH_PROFILE=1 go test -tags vulkan ./internal/model -run '^(TestV41GroupedOutputVulkan|TestV41DenseProjectionHalo|TestV41ClampedDeviceSwiGLUHalo)$' -count=1 -timeout=5m
+```
+
+This is a reduced component byte-volume and parity observation. It does not prove
+full-checkpoint serving, overall latency or throughput improvement, combined
+Engram execution, or market leadership. The strict whole-V4.1 device guard remains.

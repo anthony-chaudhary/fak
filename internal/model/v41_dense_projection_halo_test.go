@@ -65,6 +65,7 @@ func TestV41DenseProjectionHalo(t *testing.T) {
 	b := newV41DenseTestBackend()
 	b.Backend = be
 	s := v41DenseTestSession(t, m, b)
+	s.v41State().groupedOutput = nil
 	history := []int{1, 2, 3}
 	for index, ids := range [][]int{{1, 2, 3}, {4}, {5, 6}} {
 		phase := "prefill"

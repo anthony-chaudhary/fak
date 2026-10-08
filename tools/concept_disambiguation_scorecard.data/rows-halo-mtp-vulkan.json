@@ -28,7 +28,9 @@
       "definition": "The compute-backend predicate that reports whether the loaded Vulkan bundle contains a usable native packed Q6_K-to-F32 matrix-multiply pipeline before the retained MTP route allocates resident tensors.",
       "distinction": "It reports availability of one optional compute kernel in the active backend; KVPrefixReuseSupported instead reports whether an architecture's KV cache completely represents a reusable session prefix.",
       "distinct_from": [
-        "kvprefixreusesupported"
+        "kvprefixreusesupported",
+        "v41-grouped-supports-q3k-matmul",
+        "v41-grouped-supports-q5k-matmul"
       ],
       "aliases": [
         "SupportsQ6KMatMul"

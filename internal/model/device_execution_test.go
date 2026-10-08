@@ -251,6 +251,7 @@ func TestDeviceOnlyV41PublicEntriesRefuseHostArchitecture(t *testing.T) {
 			s.SetExecutionPolicy(tc.policy)
 			st := s.v41State()
 			st.denseProjection = nil
+			st.groupedOutput = nil
 			if st.expertGateUp == nil || st.expertDown == nil {
 				t.Fatal("fixture did not bind both expert callbacks")
 			}

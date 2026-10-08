@@ -96,9 +96,11 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	}
 	scratch.expertGateUp, scratch.expertDown = st.expertGateUp, st.expertDown
 	scratch.denseProjection = st.denseProjection
+	scratch.groupedOutput = st.groupedOutput
 	defer func() {
 		scratch.expertGateUp, scratch.expertDown = nil, nil
 		scratch.denseProjection = nil
+		scratch.groupedOutput = nil
 	}()
 	if err := m.v41ForwardAdmitted(); err != nil {
 		return nil, stats, err
@@ -201,12 +203,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	}
 	defer func() {
 		if r := recover(); r != nil {
-			if cause, ok := r.(error); ok {
-				var operation *BackendForwardOperationError
-				if errors.As(cause, &operation) {
-					rollback()
-				}
-			}
+			rollback()
 			panic(r)
 		}
 	}()

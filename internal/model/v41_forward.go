@@ -153,6 +153,7 @@ type v41ForwardState struct {
 	// decline) preserves the historical host f32 down contraction byte-for-byte.
 	expertDown      v41ExpertDownFunc
 	denseProjection v41DenseProjectionFunc
+	groupedOutput   v41GroupedOutputFunc
 	callbackOwner   *Session
 }
 
@@ -277,7 +278,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, callbackOwner: st.callbackOwner}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -415,10 +416,12 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch = &v41ProjScratch{}
 	}
 	scratch.denseProjection = nil
+	scratch.groupedOutput = nil
 	if st != nil {
 		scratch.denseProjection = st.denseProjection
+		scratch.groupedOutput = st.groupedOutput
 	}
-	defer func() { scratch.denseProjection = nil }()
+	defer func() { scratch.denseProjection = nil; scratch.groupedOutput = nil }()
 
 	// Engram injection happens at the START of the layer, into the residual,
 	// before attention and before attn_norm (ds41_graph_before_attention).
@@ -446,29 +449,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.mhc = wMix
 	mixBase := m.tensor(layerName(l, "mhc.base"))
 	mixScale := m.tensor(layerName(l, "mhc.scale"))
-	// Attention + shared-expert projections are read residency-completely: a
-	// quantized serve keeps them in a resident k-quant store (isQuantWeight admits
-	// every .attn.wq_a/.attn.wq_b/.attn.wkv/.attn.wo_a/.attn.wo_b and the shared
-	// ffn.shared_experts leaves), so a manifest-only m.tensor read panics on a
-	// weight admission (residentShape) already admitted (#13276). Each read fails
-	// closed with a typed error naming the tensor when absent from every store.
-	// The two grouped output projections (attn.wo_a / attn.wo_b) are consumed by
-	// V41GroupedOutputProjection as whole f32 blocks, so the streaming matRows
-	// twin does not apply. They are read INTO a forward-scoped reused scratch
-	// instead of a fresh whole-tensor allocation per layer: the f32 values and
-	// layout are byte-identical to the previous v41ProjF32 read, but the peak
-	// resident contribution is bounded to one layer instead of the accumulated
-	// 40-layer churn that OOM-killed the warmup (#13288).
-	woA, err := m.v41ProjF32Into(l, "attn.wo_a.weight", scratch.woA)
-	if err != nil {
-		return err
-	}
-	scratch.woA = woA
-	woB, err := m.v41ProjF32Into(l, "attn.wo_b.weight", scratch.woB)
-	if err != nil {
-		return err
-	}
-	scratch.woB = woB
+	projectOutput := m.v41GroupedOutputProjector(l, nH, hd, cfg.OGroups, cfg.OLoraRank, H, scratch)
 	// The remaining per-layer projections are applied only through matRows, so
 	// they read through the streaming-safe v41ProjMatRows at their use site
 	// instead of materializing a whole f32 block here (#2150). Fail closed NOW,
@@ -790,7 +771,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			if err != nil {
 				return err
 			}
-			projected, err := V41GroupedOutputProjection(o, woA, woB, 1, 1, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
+			projected, err := projectOutput(o)
 			if err != nil {
 				return v41StageErr(v41StageAttention, l, err)
 			}
@@ -819,7 +800,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)
 		}
-		projected, err := V41GroupedOutputProjection(o, woA, woB, 1, 1, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
+		projected, err := projectOutput(o)
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)
 		}
@@ -1374,6 +1355,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.expertGateUp = s.v41ExpertGateUpFunc()
 		s.v41Forward.expertDown = s.v41ExpertDownFunc()
 		s.v41Forward.denseProjection = s.v41DenseProjectionFunc()
+		s.v41Forward.groupedOutput = s.v41GroupedOutputFunc()
 		s.v41Forward.callbackOwner = s
 	}
 	return s.v41Forward

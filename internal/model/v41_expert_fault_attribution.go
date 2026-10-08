@@ -82,6 +82,16 @@ func (p V41ExpertPhase) String() string {
 // dequant, each pick by its contraction) but are summed into three independent
 // accumulators so a run can say which one dominates.
 type v41ExpertFaultPhaseLedger struct {
+	GroupedOutputDeviceCalls           int   `json:"grouped_output_device_calls"`
+	GroupedOutputHostCalls             int   `json:"grouped_output_host_calls"`
+	GroupedOutputDeviceRows            int   `json:"grouped_output_device_rows"`
+	GroupedOutputHostRows              int   `json:"grouped_output_host_rows"`
+	GroupedOutputMatMulCalls           int   `json:"grouped_output_matmul_calls"`
+	GroupedOutputActivationUploadBytes int64 `json:"grouped_output_activation_upload_bytes"`
+	GroupedOutputReadbackBytes         int64 `json:"grouped_output_readback_bytes"`
+	GroupedOutputNanos                 int64 `json:"grouped_output_nanos"`
+	GroupedOutputHostWeightF32Bytes    int64 `json:"grouped_output_host_weight_f32_bytes"`
+
 	DenseProjectionDeviceCalls           int     `json:"dense_projection_device_calls"`
 	DenseProjectionHostCalls             int     `json:"dense_projection_host_calls"`
 	DenseProjectionDeviceRows            int     `json:"dense_projection_device_rows"`
@@ -575,6 +585,32 @@ func (m *Model) v41NoteDenseProjection(deviceCalls, hostCalls, deviceRows, hostR
 	if opened != 0 {
 		if elapsed := l.nowLocked() - opened; elapsed > 0 {
 			led.DenseProjectionNanos += elapsed
+		}
+	}
+}
+
+func (m *Model) v41NoteGroupedOutput(deviceCalls, hostCalls, deviceRows, hostRows, matmulCalls int, upload, readback, hostBytes, opened int64) {
+	l := v41ExpertFaultLedgerOf(m, false)
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	led := l.ledgerLocked()
+	if led == nil {
+		return
+	}
+	led.GroupedOutputDeviceCalls += deviceCalls
+	led.GroupedOutputHostCalls += hostCalls
+	led.GroupedOutputDeviceRows += deviceRows
+	led.GroupedOutputHostRows += hostRows
+	led.GroupedOutputMatMulCalls += matmulCalls
+	led.GroupedOutputActivationUploadBytes += upload
+	led.GroupedOutputReadbackBytes += readback
+	led.GroupedOutputHostWeightF32Bytes += hostBytes
+	if opened != 0 {
+		if elapsed := l.nowLocked() - opened; elapsed > 0 {
+			led.GroupedOutputNanos += elapsed
 		}
 	}
 }

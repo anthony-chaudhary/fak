@@ -130,6 +130,7 @@ func TestV41ClampedDeviceSwiGLUHalo(t *testing.T) {
 			t.Fatal(err)
 		}
 		s.v41State().denseProjection = nil
+		s.v41State().groupedOutput = nil
 		defer s.Close()
 		if len(s.Prefill([]int{1, 2, 3})) == 0 || !s.v41IncrementalEligible() {
 			t.Fatal("physical session did not seed incremental state")
