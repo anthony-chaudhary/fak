@@ -112,7 +112,9 @@ func TestObservationEngineSubstepsDefaultCPURequest(t *testing.T) {
 	var count uint64
 	for _, k := range s.KernelLatency {
 		count += k.Count
-		if !k.Measured || k.TimerDomain != "host_monotonic" || k.Count == 0 || k.TotalSeconds <= 0 || k.MeanSeconds <= 0 || k.MaxSeconds <= 0 || k.P50Seconds > k.P95Seconds || k.P95Seconds > k.MaxSeconds {
+		// A completed kernel may quantize to zero on Windows; count and Measured
+		// prove observation without fabricating a minimum duration.
+		if !k.Measured || k.TimerDomain != "host_monotonic" || k.Count == 0 || k.TotalSeconds < 0 || k.MeanSeconds < 0 || k.P50Seconds < 0 || k.P95Seconds < 0 || k.MaxSeconds < 0 || k.P50Seconds > k.P95Seconds || k.P95Seconds > k.MaxSeconds {
 			t.Fatal("CPU kernel timing or attribution invalid")
 		}
 		labels := `{kernel="` + k.Kernel + `",backend="` + k.Backend + `",timer_domain="` + k.TimerDomain + `"}`

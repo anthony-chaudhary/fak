@@ -33,17 +33,20 @@ const SystemPrompt = "You are an agent assistant. Use the provided tools to comp
 // ArmMetrics is one arm's witnessed outcome. The counts are kernel-measured on the
 // fak arm (k.Counters()) and harness-measured on the baseline arm.
 type ArmMetrics struct {
-	Arm              string `json:"arm"`
-	Turns            int    `json:"turns"`        // model round-trips (the headline)
-	ToolCalls        int    `json:"tool_calls"`   // total tool calls emitted
-	ToolErrors       int    `json:"tool_errors"`  // calls the tool rejected (drive retry turns)
-	Repairs          int    `json:"repairs"`      // in-syscall grammar repairs (fak only)
-	VDSOHits         int    `json:"vdso_hits"`    // duplicate read-only calls served locally (fak only)
-	Denies           int    `json:"denies"`       // calls refused by the adjudicator (fak only)
-	Quarantines      int    `json:"quarantines"`  // poisoned results held out of context (fak only)
-	EngineCalls      int    `json:"engine_calls"` // tool dispatches that actually executed
-	PromptTokens     int    `json:"prompt_tokens"`
-	CompletionTokens int    `json:"completion_tokens"`
+	Arm                  string   `json:"arm"`
+	Turns                int      `json:"turns"`        // model round-trips (the headline)
+	ToolCalls            int      `json:"tool_calls"`   // total tool calls emitted
+	ToolErrors           int      `json:"tool_errors"`  // calls the tool rejected (drive retry turns)
+	Repairs              int      `json:"repairs"`      // in-syscall grammar repairs (fak only)
+	VDSOHits             int      `json:"vdso_hits"`    // duplicate read-only calls served locally (fak only)
+	Denies               int      `json:"denies"`       // calls refused by the adjudicator (fak only)
+	Quarantines          int      `json:"quarantines"`  // poisoned results held out of context (fak only)
+	EngineCalls          int      `json:"engine_calls"` // tool dispatches that actually executed
+	PromptTokens         int      `json:"prompt_tokens"`
+	UncachedPromptTokens int      `json:"uncached_prompt_tokens"`
+	CompletionTokens     int      `json:"completion_tokens"`
+	CachedTokens         int      `json:"cached_tokens"`
+	NativeTimings        *Timings `json:"native_timings,omitempty"`
 
 	InjectionInContext  bool   `json:"injection_in_context"` // a tool result with an injection reached the model
 	DestructiveExecuted bool   `json:"destructive_executed"` // a denied/destructive tool actually ran

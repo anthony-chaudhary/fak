@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -31,6 +32,39 @@ func isEmitterRegistered(e abi.Emitter) bool {
 		}
 	}
 	return false
+}
+
+func accumulateArmCompletionMetrics(metrics *ArmMetrics, comp *Completion) {
+	if metrics == nil || comp == nil {
+		return
+	}
+	metrics.PromptTokens += comp.Usage.PromptTokens
+	metrics.UncachedPromptTokens += comp.Usage.UncachedPromptTokens()
+	metrics.CompletionTokens += comp.Usage.CompletionTokens
+	if cached := comp.Usage.CachedPromptTokens(); cached > 0 {
+		metrics.CachedTokens += cached
+	}
+	if comp.NativeDecode == nil || comp.Timings == nil {
+		return
+	}
+	t := comp.Timings
+	validPrefill := t.PromptN >= 0 && t.CacheN >= 0 && t.PromptMS > 0 && !math.IsNaN(t.PromptMS) && !math.IsInf(t.PromptMS, 0)
+	validDecode := t.PredictedN >= 0 && t.PredictedMS > 0 && !math.IsNaN(t.PredictedMS) && !math.IsInf(t.PredictedMS, 0)
+	if !validPrefill && !validDecode {
+		return
+	}
+	if metrics.NativeTimings == nil {
+		metrics.NativeTimings = &Timings{}
+	}
+	if validPrefill {
+		metrics.NativeTimings.PromptN += t.PromptN
+		metrics.NativeTimings.PromptMS += t.PromptMS
+		metrics.NativeTimings.CacheN += t.CacheN
+	}
+	if validDecode {
+		metrics.NativeTimings.PredictedN += t.PredictedN
+		metrics.NativeTimings.PredictedMS += t.PredictedMS
+	}
 }
 
 // armRunner owns the mutable state shared by the phases of one arm's turn loop.
@@ -217,8 +251,7 @@ func (r *armRunner) runSynthesisTurn(ctx context.Context, turn int) error {
 		return fmt.Errorf("synthesis turn: nil completion")
 	}
 	r.metrics.Turns++
-	r.metrics.PromptTokens += comp.Usage.PromptTokens
-	r.metrics.CompletionTokens += comp.Usage.CompletionTokens
+	accumulateArmCompletionMetrics(r.metrics, comp)
 	if r.cfg != nil {
 		r.cfg.debitTurn(comp.Usage)
 	}
@@ -474,8 +507,7 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 		return Message{}, action, herr
 	}
 	r.metrics.Turns++
-	r.metrics.PromptTokens += comp.Usage.PromptTokens
-	r.metrics.CompletionTokens += comp.Usage.CompletionTokens
+	accumulateArmCompletionMetrics(r.metrics, comp)
 	r.cfg.debitTurn(comp.Usage)
 	asst := comp.Message
 	asst.Role = RoleAssistant

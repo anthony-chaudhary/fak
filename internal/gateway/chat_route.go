@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
+	"github.com/anthony-chaudhary/fak/internal/perfledger"
 )
 
 // chatRouteBinding belongs to one request. RequestedModel retains the public
@@ -121,16 +122,24 @@ func (s *Server) chatPlanner(ctx context.Context) agent.Planner {
 
 // observeNativeChatRoute attributes one completed bound native request using
 // its aggregate loop usage. Passthrough retains the historical native counters.
-func (s *Server) observeNativeChatRoute(ctx context.Context, traceID string, stream bool, usage agent.Usage, finishReason string, dur, ttft time.Duration) {
+
+func (s *Server) observeNativeChatRoute(ctx context.Context, traceID string, stream bool, usage agent.Usage, timings *agent.Timings, finishReason string, dur, ttft time.Duration) {
+	detail := perfDetail{nativeLoop: true}
+	if timings != nil {
+		detail.nativeTiming = perfledger.NewNativeTiming(timings.PromptN, timings.PredictedN, timings.PromptMS, timings.PredictedMS)
+	}
 	if binding := chatRouteFromContext(ctx); binding != nil {
-		s.metrics.observeInferenceServedTimed(binding.Locality, binding.Target.UpstreamModel,
+		detail.model = binding.Target.UpstreamModel
+		s.metrics.observeInferenceTimedDetail(binding.Locality,
 			usage.UncachedPromptTokens(), usage.CompletionTokens, usage.CachedPromptTokens(),
-			usage.CacheCreationInputTokens, finishReason, dur, ttft)
+			usage.CacheCreationInputTokens, finishReason, dur, ttft, detail)
+		s.metrics.attributeServedTurn(binding.Locality, usage.UncachedPromptTokens(), usage.CompletionTokens)
 		s.logInferenceTurnForModel(traceID, "anthropic_messages_native", binding.Target.UpstreamModel, stream, usage, finishReason, dur, false, s.consumeDecodedCtxViewEvent(traceID))
 		return
 	}
+	detail.model = s.model
 	s.metrics.recordPerf(s.chatServingLocality(ctx, s.model), usage.UncachedPromptTokens(),
-		usage.CompletionTokens, usage.CachedPromptTokens(), finishReason, dur, ttft, perfDetail{model: s.model})
+		usage.CompletionTokens, usage.CachedPromptTokens(), finishReason, dur, ttft, detail)
 	s.logInferenceTurn(traceID, "anthropic_messages_native", stream, usage, finishReason, dur, false)
 }
 

@@ -56,18 +56,19 @@ const (
 // PrefillTPS needs at least MinPrefillRateTokens uncached tokens. DecodeTPS is the
 // inter-token rate after the first token: (completion-1) / (e2e-ttft).
 type Record struct {
-	Schema           string  `json:"schema"`
-	UnixMS           int64   `json:"unix_ms"`
-	FinishReason     string  `json:"finish_reason,omitempty"`
-	Locality         string  `json:"locality,omitempty"`
-	PromptTokens     int     `json:"prompt_tokens"`
-	CompletionTokens int     `json:"completion_tokens"`
-	CachedTokens     int     `json:"cached_tokens"`
-	CacheRegime      string  `json:"cache_regime,omitempty"`
-	E2EMS            float64 `json:"e2e_ms"`
-	TTFTMS           float64 `json:"ttft_ms,omitempty"`
-	PrefillTPS       float64 `json:"prefill_tps,omitempty"`
-	DecodeTPS        float64 `json:"decode_tps,omitempty"`
+	Schema           string        `json:"schema"`
+	UnixMS           int64         `json:"unix_ms"`
+	FinishReason     string        `json:"finish_reason,omitempty"`
+	Locality         string        `json:"locality,omitempty"`
+	PromptTokens     int           `json:"prompt_tokens"`
+	CompletionTokens int           `json:"completion_tokens"`
+	CachedTokens     int           `json:"cached_tokens"`
+	CacheRegime      string        `json:"cache_regime,omitempty"`
+	E2EMS            float64       `json:"e2e_ms"`
+	TTFTMS           float64       `json:"ttft_ms,omitempty"`
+	PrefillTPS       float64       `json:"prefill_tps,omitempty"`
+	DecodeTPS        float64       `json:"decode_tps,omitempty"`
+	NativeTiming     *NativeTiming `json:"native_timing,omitempty"`
 	// Error is the failure class of a turn that did not complete (one of the Error*
 	// constants); empty on a served turn. Status is the HTTP status the client got:
 	// 200 when the failure came after the stream was committed, 499 for a client cancel,
@@ -126,6 +127,59 @@ type Engine struct {
 	SpecRounds         int    `json:"spec_rounds,omitempty"`
 	SpecDraftTokens    int    `json:"spec_draft_tokens,omitempty"`
 	SpecAcceptedTokens int    `json:"spec_accepted_tokens,omitempty"`
+}
+
+// NativeTiming is the engine-measured phase split for a native request. It is
+// independent of client TTFT and request wall time, which can include agent-loop
+// tool turns. A zero phase is unknown and omitted.
+type NativeTiming struct {
+	PrefillMS     float64 `json:"prefill_ms,omitempty"`
+	DecodeMS      float64 `json:"decode_ms,omitempty"`
+	PrefillTokens int     `json:"prefill_tokens,omitempty"`
+	DecodeTokens  int     `json:"decode_tokens,omitempty"`
+	PrefillTPS    float64 `json:"prefill_tps,omitempty"`
+	DecodeTPS     float64 `json:"decode_tps,omitempty"`
+}
+
+// NewNativeTiming keeps only finite, positive engine-authored phases. Missing
+// phases remain unknown rather than becoming zero-duration measurements.
+func NewNativeTiming(prefillTokens, decodeTokens int, prefillMS, decodeMS float64) *NativeTiming {
+	n := &NativeTiming{}
+	if ms, rate, ok := measuredNativePhase(prefillTokens, prefillMS); ok {
+		n.PrefillMS = ms
+		n.PrefillTokens = prefillTokens
+		n.PrefillTPS = rate
+	}
+	if ms, rate, ok := measuredNativePhase(decodeTokens, decodeMS); ok {
+		n.DecodeMS = ms
+		n.DecodeTokens = decodeTokens
+		n.DecodeTPS = rate
+	}
+	if n.PrefillMS == 0 && n.DecodeMS == 0 {
+		return nil
+	}
+	return n
+}
+
+func measuredNativePhase(tokens int, ms float64) (float64, float64, bool) {
+	// Native durations originate as time.Duration; reject values outside that
+	// representable domain when reading persisted rows back from JSONL.
+	const maxNativePhaseMS = 9.223372036854775e12
+	if tokens < 0 || ms <= 0 || ms > maxNativePhaseMS || math.IsNaN(ms) || math.IsInf(ms, 0) {
+		return 0, 0, false
+	}
+	ms = roundTo(ms, 1000)
+	if ms <= 0 || math.IsNaN(ms) || math.IsInf(ms, 0) {
+		return 0, 0, false
+	}
+	if tokens == 0 {
+		return ms, 0, true
+	}
+	rate := roundTo(float64(tokens)/(ms/1000), 100)
+	if rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+		return ms, 0, true
+	}
+	return ms, rate, true
 }
 
 // Failure classes for Record.Error.
@@ -227,11 +281,12 @@ type Summary struct {
 	PrefillTPSP50 float64 `json:"prefill_tps_p50,omitempty"`
 	// PrefillTPSWeighted is total uncached prompt tokens over total TTFT across the
 	// rows that carry a prefill rate, so long prompts weigh by their tokens.
-	PrefillTPSWeighted float64 `json:"prefill_tps_weighted,omitempty"`
-	DecodeTPSP50       float64 `json:"decode_tps_p50,omitempty"`
-	E2EP50MS           float64 `json:"e2e_p50_ms,omitempty"`
-	E2EP99MS           float64 `json:"e2e_p99_ms,omitempty"`
-	CacheHitShare      float64 `json:"cache_hit_share"`
+	PrefillTPSWeighted float64              `json:"prefill_tps_weighted,omitempty"`
+	DecodeTPSP50       float64              `json:"decode_tps_p50,omitempty"`
+	E2EP50MS           float64              `json:"e2e_p50_ms,omitempty"`
+	E2EP99MS           float64              `json:"e2e_p99_ms,omitempty"`
+	CacheHitShare      float64              `json:"cache_hit_share"`
+	NativeTiming       *NativeTimingSummary `json:"native_timing,omitempty"`
 	// Errors counts failed turns (Record.Error set); ByError splits them by class.
 	Errors  int            `json:"errors"`
 	ByError map[string]int `json:"by_error,omitempty"`
@@ -257,6 +312,18 @@ type Summary struct {
 	// planners, backends, hosts or builds.
 	ServedBy   *ServedBy `json:"served_by,omitempty"`
 	Identities int       `json:"identities,omitempty"`
+}
+
+type NativeTimingSummary struct {
+	Count              int     `json:"count"`
+	PrefillMeasured    int     `json:"prefill_measured"`
+	DecodeMeasured     int     `json:"decode_measured"`
+	PrefillP50MS       float64 `json:"prefill_p50_ms,omitempty"`
+	DecodeP50MS        float64 `json:"decode_p50_ms,omitempty"`
+	PrefillTPSP50      float64 `json:"prefill_tps_p50,omitempty"`
+	DecodeTPSP50       float64 `json:"decode_tps_p50,omitempty"`
+	PrefillTPSWeighted float64 `json:"prefill_tps_weighted,omitempty"`
+	DecodeTPSWeighted  float64 `json:"decode_tps_weighted,omitempty"`
 }
 
 type RegimeSummary struct {
@@ -303,6 +370,10 @@ func Summarize(recs []Record) Summary {
 	var ttft, prefill, decode, e2e []float64
 	var prompt, cached, prefillTok int64
 	var prefillMS float64
+	var nativePrefillMS, nativeDecodeMS, nativePrefillTPS, nativeDecodeTPS []float64
+	var nativePrefillTokens, nativeDecodeTokens int64
+	var nativePrefillTotalMS, nativeDecodeTotalMS float64
+	nativePrefillWeighted, nativeDecodeWeighted := true, true
 	regimeTTFT := map[string][]float64{}
 	regimeE2E := map[string][]float64{}
 	regimeCount := map[string]int{}
@@ -353,6 +424,49 @@ func Summarize(recs []Record) Summary {
 		}
 		prompt += int64(r.PromptTokens)
 		cached += int64(r.CachedTokens)
+		if stored := r.NativeTiming; stored != nil {
+			n := NewNativeTiming(stored.PrefillTokens, stored.DecodeTokens, stored.PrefillMS, stored.DecodeMS)
+			if n != nil {
+				if s.NativeTiming == nil {
+					s.NativeTiming = &NativeTimingSummary{}
+				}
+				s.NativeTiming.Count++
+				if n.PrefillMS > 0 {
+					s.NativeTiming.PrefillMeasured++
+					nativePrefillMS = append(nativePrefillMS, n.PrefillMS)
+					if total := nativePrefillTotalMS + n.PrefillMS; math.IsInf(total, 0) || math.IsNaN(total) {
+						nativePrefillWeighted = false
+					} else {
+						nativePrefillTotalMS = total
+					}
+					if total, ok := addNativeTokens(nativePrefillTokens, n.PrefillTokens); ok {
+						nativePrefillTokens = total
+					} else {
+						nativePrefillWeighted = false
+					}
+					if n.PrefillTPS > 0 {
+						nativePrefillTPS = append(nativePrefillTPS, n.PrefillTPS)
+					}
+				}
+				if n.DecodeMS > 0 {
+					s.NativeTiming.DecodeMeasured++
+					nativeDecodeMS = append(nativeDecodeMS, n.DecodeMS)
+					if total := nativeDecodeTotalMS + n.DecodeMS; math.IsInf(total, 0) || math.IsNaN(total) {
+						nativeDecodeWeighted = false
+					} else {
+						nativeDecodeTotalMS = total
+					}
+					if total, ok := addNativeTokens(nativeDecodeTokens, n.DecodeTokens); ok {
+						nativeDecodeTokens = total
+					} else {
+						nativeDecodeWeighted = false
+					}
+					if n.DecodeTPS > 0 {
+						nativeDecodeTPS = append(nativeDecodeTPS, n.DecodeTPS)
+					}
+				}
+			}
+		}
 		if e := r.Engine; e != nil {
 			s.Native++
 			if s.ByPath == nil {
@@ -381,6 +495,18 @@ func Summarize(recs []Record) Summary {
 	if total := prompt + cached; total > 0 {
 		s.CacheHitShare = roundTo(float64(cached)/float64(total), 10000)
 	}
+	if n := s.NativeTiming; n != nil {
+		n.PrefillP50MS = quantile(nativePrefillMS, 0.50)
+		n.DecodeP50MS = quantile(nativeDecodeMS, 0.50)
+		n.PrefillTPSP50 = quantile(nativePrefillTPS, 0.50)
+		n.DecodeTPSP50 = quantile(nativeDecodeTPS, 0.50)
+		if nativePrefillWeighted && nativePrefillTotalMS > 0 && nativePrefillTokens > 0 {
+			n.PrefillTPSWeighted = roundTo(float64(nativePrefillTokens)/(nativePrefillTotalMS/1000), 100)
+		}
+		if nativeDecodeWeighted && nativeDecodeTotalMS > 0 && nativeDecodeTokens > 0 {
+			n.DecodeTPSWeighted = roundTo(float64(nativeDecodeTokens)/(nativeDecodeTotalMS/1000), 100)
+		}
+	}
 	for regime, n := range regimeCount {
 		if s.ByRegime == nil {
 			s.ByRegime = make(map[string]RegimeSummary, len(regimeCount))
@@ -394,6 +520,14 @@ func Summarize(recs []Record) Summary {
 		}
 	}
 	return s
+}
+
+func addNativeTokens(total int64, value int) (int64, bool) {
+	const maxInt64 = int64(^uint64(0) >> 1)
+	if value < 0 || int64(value) > maxInt64-total {
+		return total, false
+	}
+	return total + int64(value), true
 }
 
 // regime reads the stored regime, deriving it for rows written before the field existed.
@@ -417,6 +551,11 @@ func RenderCompact(rep Report) string {
 	fmt.Fprintf(&b, " | prefill p50=%s weighted=%s | decode p50=%s", fmtTPS(s.PrefillTPSP50), fmtTPS(s.PrefillTPSWeighted), fmtTPS(s.DecodeTPSP50))
 	fmt.Fprintf(&b, " | e2e p50=%s p99=%s", fmtMS(s.E2EP50MS), fmtMS(s.E2EP99MS))
 	fmt.Fprintf(&b, " | cache=%.1f%%", s.CacheHitShare*100)
+	if n := s.NativeTiming; n != nil {
+		fmt.Fprintf(&b, " | native phases=%d prefill p50=%s/%s weighted=%s (measured %d/%d) decode p50=%s/%s weighted=%s (measured %d/%d)",
+			n.Count, fmtMS(n.PrefillP50MS), fmtTPS(n.PrefillTPSP50), fmtTPS(n.PrefillTPSWeighted), n.PrefillMeasured, n.Count,
+			fmtMS(n.DecodeP50MS), fmtTPS(n.DecodeTPSP50), fmtTPS(n.DecodeTPSWeighted), n.DecodeMeasured, n.Count)
+	}
 	if s.Errors > 0 {
 		classes := make([]string, 0, len(s.ByError))
 		for c := range s.ByError {

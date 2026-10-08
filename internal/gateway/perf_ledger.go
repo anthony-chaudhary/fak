@@ -35,8 +35,10 @@ func (loc servingLocality) perfLabel() string {
 // perfDetail is what a served turn knows beyond its token/latency axes: the model
 // that served it and, on a native turn, its own engine decode anatomy.
 type perfDetail struct {
-	model  string
-	engine *perfledger.Engine
+	model        string
+	engine       *perfledger.Engine
+	nativeTiming *perfledger.NativeTiming
+	nativeLoop   bool
 	// upstreamDraft / upstreamAccepted are a proxied upstream's own speculative
 	// counts from its llama.cpp-shaped timings.
 	upstreamDraft, upstreamAccepted int
@@ -55,6 +57,9 @@ func perfDetailFromCompletion(comp *agent.Completion) perfDetail {
 			e.SpecRounds, e.SpecDraftTokens, e.SpecAcceptedTokens = sp.Rounds, sp.DraftTokens, sp.AcceptedTokens
 		}
 		d.engine = e
+		if t := comp.Timings; t != nil {
+			d.nativeTiming = perfledger.NewNativeTiming(t.PromptN, t.PredictedN, t.PromptMS, t.PredictedMS)
+		}
 	} else if t := comp.Timings; t != nil && t.DraftN > 0 {
 		d.upstreamDraft = t.DraftN
 		d.upstreamAccepted = min(max(t.DraftNAccepted, 0), t.DraftN)
@@ -110,6 +115,11 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 		return
 	}
 	rec := perfledger.NewRecord(time.Now(), finishReason, loc.perfLabel(), promptTok, complTok, cachedTok, dur, ttft)
+	if detail.nativeLoop {
+		// An owned loop's client TTFT can span model/tool/model turns. Preserve it
+		// as client latency, but do not present it as an engine phase estimate.
+		rec.PrefillTPS, rec.DecodeTPS = 0, 0
+	}
 	if ttft <= 0 && m.pastWriteDeadline(dur) {
 		// A buffered turn writes its body only after the planner returns; past the
 		// server's WriteTimeout that write is refused, so the client got nothing.
@@ -117,6 +127,7 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 	}
 	rec.Model = strings.TrimSpace(detail.model)
 	rec.Engine = detail.engine
+	rec.NativeTiming = detail.nativeTiming
 	rec.UpstreamSpecDraftTokens, rec.UpstreamSpecAcceptedTokens = detail.upstreamDraft, detail.upstreamAccepted
 	m.commitPerf(rec)
 }

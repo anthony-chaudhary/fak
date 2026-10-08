@@ -112,9 +112,10 @@ func (s *Server) serveNativeMessages(w http.ResponseWriter, r *http.Request, req
 	usage := anthropicUsage{InputTokens: m.PromptTokens, OutputTokens: m.CompletionTokens}
 
 	s.observeNativeChatRoute(r.Context(), reqTrace, false, agent.Usage{
-		PromptTokens:     m.PromptTokens,
-		CompletionTokens: m.CompletionTokens,
-	}, stop, time.Since(began), 0)
+		PromptTokens:         m.UncachedPromptTokens,
+		CompletionTokens:     m.CompletionTokens,
+		CacheReadInputTokens: m.CachedTokens,
+	}, m.NativeTimings, stop, time.Since(began), 0)
 
 	arm := m // copy so the response holds a stable address, not a loop-local
 	writeJSON(w, http.StatusOK, anthropicMessageResponse{
@@ -283,9 +284,10 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.observeNativeChatRoute(r.Context(), reqTrace, true, agent.Usage{
-		PromptTokens:     m.PromptTokens,
-		CompletionTokens: m.CompletionTokens,
-	}, stop, time.Since(began), ttft)
+		PromptTokens:         m.UncachedPromptTokens,
+		CompletionTokens:     m.CompletionTokens,
+		CacheReadInputTokens: m.CachedTokens,
+	}, m.NativeTimings, stop, time.Since(began), ttft)
 }
 
 // runNativeArm drives agent.RunArm(fak=true) for one served request, wiring the
