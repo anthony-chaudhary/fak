@@ -105,9 +105,10 @@ type CheckpointResidencySnapshot struct {
 
 // V41PhaseLifetimeSnapshot is the bounded model-lifetime view of V4.1 work.
 type V41PhaseLifetimeSnapshot struct {
-	Scope   string           `json:"scope"`
-	Prefill V41PhaseSnapshot `json:"prefill"`
-	Decode  V41PhaseSnapshot `json:"decode"`
+	Scope       string                             `json:"scope"`
+	Prefill     V41PhaseSnapshot                   `json:"prefill"`
+	Decode      V41PhaseSnapshot                   `json:"decode"`
+	Projections V41ProjectionPhaseLifetimeSnapshot `json:"projections"`
 }
 
 // V41PhaseSnapshot deliberately contains only fixed-shape numeric counters.
@@ -143,6 +144,32 @@ type V41PhaseSnapshot struct {
 	MHCProjectionNanos                   int64 `json:"mhc_projection_nanos"`
 	MHCProjectionActivationUploadBytes   int64 `json:"mhc_projection_activation_upload_bytes"`
 	MHCProjectionReadbackBytes           int64 `json:"mhc_projection_readback_bytes"`
+}
+
+// V41ProjectionPhaseLifetimeSnapshot attributes projection work by forward phase.
+type V41ProjectionPhaseLifetimeSnapshot struct {
+	Prefill V41ProjectionPhaseSnapshot `json:"prefill"`
+	Decode  V41ProjectionPhaseSnapshot `json:"decode"`
+}
+
+// V41ProjectionPhaseSnapshot is the fixed numeric view of head and Engram work.
+type V41ProjectionPhaseSnapshot struct {
+	HeadProjectionDeviceCalls             int   `json:"head_projection_device_calls"`
+	HeadProjectionHostCalls               int   `json:"head_projection_host_calls"`
+	HeadProjectionDeviceRows              int   `json:"head_projection_device_rows"`
+	HeadProjectionHostRows                int   `json:"head_projection_host_rows"`
+	HeadProjectionActivationUploadBytes   int64 `json:"head_projection_activation_upload_bytes"`
+	HeadProjectionReadbackBytes           int64 `json:"head_projection_readback_bytes"`
+	HeadProjectionNanos                   int64 `json:"head_projection_nanos"`
+	EngramProjectionDeviceCalls           int   `json:"engram_projection_device_calls"`
+	EngramProjectionHostCalls             int   `json:"engram_projection_host_calls"`
+	EngramProjectionDeviceRows            int   `json:"engram_projection_device_rows"`
+	EngramProjectionHostRows              int   `json:"engram_projection_host_rows"`
+	EngramProjectionMatMulCalls           int   `json:"engram_projection_matmul_calls"`
+	EngramProjectionActivationUploadBytes int64 `json:"engram_projection_activation_upload_bytes"`
+	EngramProjectionReadbackBytes         int64 `json:"engram_projection_readback_bytes"`
+	EngramProjectionNanos                 int64 `json:"engram_projection_nanos"`
+	EngramProjectionHostWeightF32Bytes    int64 `json:"engram_projection_host_weight_f32_bytes"`
 }
 
 // HitRate is Hits/(Hits+PageIns) over the whole serve — the activated-set hit rate, weighted by
@@ -210,11 +237,15 @@ func (p *InKernelPlanner) noteMoEResidency(s *model.Session, tokens int64) {
 func (p *InKernelPlanner) foldV41PhasesLocked(at model.V41ExpertFaultAttribution) {
 	prefill := v41PhaseSnapshot(at.Prefill)
 	decode := v41PhaseSnapshot(at.Decode)
-	if prefill == (V41PhaseSnapshot{}) && decode == (V41PhaseSnapshot{}) {
+	projections := V41ProjectionPhaseLifetimeSnapshot{
+		Prefill: v41ProjectionPhaseSnapshot(at.Prefill),
+		Decode:  v41ProjectionPhaseSnapshot(at.Decode),
+	}
+	if prefill == (V41PhaseSnapshot{}) && decode == (V41PhaseSnapshot{}) && projections == (V41ProjectionPhaseLifetimeSnapshot{}) {
 		return
 	}
 	p.moeResidency.V41Phases = &V41PhaseLifetimeSnapshot{
-		Scope: "model_lifetime", Prefill: prefill, Decode: decode,
+		Scope: "model_lifetime", Prefill: prefill, Decode: decode, Projections: projections,
 	}
 }
 
@@ -247,6 +278,27 @@ func v41PhaseSnapshot(in model.V41ExpertFaultAttributionPhase) V41PhaseSnapshot 
 		MHCProjectionNanos:                   in.MHCProjectionNanos,
 		MHCProjectionActivationUploadBytes:   in.MHCProjectionActivationUploadBytes,
 		MHCProjectionReadbackBytes:           in.MHCProjectionReadbackBytes,
+	}
+}
+
+func v41ProjectionPhaseSnapshot(in model.V41ExpertFaultAttributionPhase) V41ProjectionPhaseSnapshot {
+	return V41ProjectionPhaseSnapshot{
+		HeadProjectionDeviceCalls:             in.HeadProjectionDeviceCalls,
+		HeadProjectionHostCalls:               in.HeadProjectionHostCalls,
+		HeadProjectionDeviceRows:              in.HeadProjectionDeviceRows,
+		HeadProjectionHostRows:                in.HeadProjectionHostRows,
+		HeadProjectionActivationUploadBytes:   in.HeadProjectionActivationUploadBytes,
+		HeadProjectionReadbackBytes:           in.HeadProjectionReadbackBytes,
+		HeadProjectionNanos:                   in.HeadProjectionNanos,
+		EngramProjectionDeviceCalls:           in.EngramProjectionDeviceCalls,
+		EngramProjectionHostCalls:             in.EngramProjectionHostCalls,
+		EngramProjectionDeviceRows:            in.EngramProjectionDeviceRows,
+		EngramProjectionHostRows:              in.EngramProjectionHostRows,
+		EngramProjectionMatMulCalls:           in.EngramProjectionMatMulCalls,
+		EngramProjectionActivationUploadBytes: in.EngramProjectionActivationUploadBytes,
+		EngramProjectionReadbackBytes:         in.EngramProjectionReadbackBytes,
+		EngramProjectionNanos:                 in.EngramProjectionNanos,
+		EngramProjectionHostWeightF32Bytes:    in.EngramProjectionHostWeightF32Bytes,
 	}
 }
 
