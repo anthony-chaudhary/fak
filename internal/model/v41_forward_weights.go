@@ -1095,6 +1095,9 @@ func v41ProjectionOperationErr(l int, leaf string, cause error) error {
 		cause = errV41ProjectionResult
 	}
 	stage := v41StageAttention
+	if l == -1 {
+		stage = v41StageHead
+	}
 	if strings.HasPrefix(leaf, "ffn.") {
 		stage = v41StageMoE
 	}
@@ -1103,15 +1106,24 @@ func v41ProjectionOperationErr(l int, leaf string, cause error) error {
 
 func (m *Model) v41ProjectionRows(l int, leaf string, panel []float32, out, in, rows int, project v41DenseProjectionFunc) ([]float32, error) {
 	name := layerName(l, leaf)
+	stage := v41StageAttention
+	head := l == -1 && leaf == m.headName()
+	if head {
+		name = leaf
+		stage = v41StageHead
+	}
 	inputN, inputOK := checkedMulInt(rows, in)
 	outputN, outputOK := checkedMulInt(rows, out)
 	_, weightOK := checkedMulInt(out, in)
 	if rows <= 0 || out <= 0 || in <= 0 || !inputOK || !outputOK || !weightOK || len(panel) != inputN {
-		return nil, v41StageErr(v41StageAttention, l, fmt.Errorf("%w: invalid projection dimensions for %s", ErrV41ForwardStage, name))
+		return nil, v41StageErr(stage, l, fmt.Errorf("%w: invalid projection dimensions for %s", ErrV41ForwardStage, name))
 	}
 	wr, wc, present := m.residentShape(name)
+	if head {
+		wr, wc, present = m.v41HeadWeightShape(name)
+	}
 	if !present || wr != out || wc != in {
-		return nil, v41StageErr(v41StageAttention, l, fmt.Errorf("%w: invalid resident projection shape for %s", ErrV41ForwardStage, name))
+		return nil, v41StageErr(stage, l, fmt.Errorf("%w: invalid resident projection shape for %s", ErrV41ForwardStage, name))
 	}
 	if project != nil {
 		y, outcome, cause := project(l, leaf, panel, out, in, rows)
@@ -1133,9 +1145,21 @@ func (m *Model) v41ProjectionRows(l int, leaf string, panel []float32, out, in, 
 	}
 	opened := m.v41NowNanos()
 	succeeded := 0
-	defer func() { m.v41NoteDenseProjection(0, 1, 0, succeeded, 0, 0, opened) }()
+	defer func() {
+		if head {
+			m.v41NoteHeadProjection(0, 1, 0, succeeded, 0, 0, opened)
+		} else {
+			m.v41NoteDenseProjection(0, 1, 0, succeeded, 0, 0, opened)
+		}
+	}()
 	var y []float32
-	if rows == 1 {
+	if head && m.v41PackedHead(name) != nil {
+		var err error
+		y, err = m.v41PackedHeadRows(name, panel, out, in, rows)
+		if err != nil {
+			return nil, v41StageErr(v41StageHead, -1, err)
+		}
+	} else if rows == 1 {
 		y = m.residentMatRows(name, panel, out, in)
 	} else if m.prism != nil && m.prism.weightWidth[name] != 0 {
 		y = make([]float32, outputN)
@@ -1154,12 +1178,30 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 		return nil
 	}
 	return func(l int, leaf string, panel []float32, out, in, rows int) (result []float32, outcome v41DenseProjectionOutcome, cause error) {
-		switch leaf {
-		case "attn.wq_a.weight", "attn.wq_b.weight", "attn.wkv.weight", "ffn.gate.weight", "ffn.shared_experts.w1.weight", "ffn.shared_experts.w3.weight", "ffn.shared_experts.w2.weight":
-		default:
-			return nil, v41ProjectionDeclined, nil
+		head := l == -1 && leaf == s.M.headName()
+		if !head {
+			switch leaf {
+			case "attn.wq_a.weight", "attn.wq_b.weight", "attn.wkv.weight", "ffn.gate.weight", "ffn.shared_experts.w1.weight", "ffn.shared_experts.w3.weight", "ffn.shared_experts.w2.weight":
+			default:
+				return nil, v41ProjectionDeclined, nil
+			}
 		}
 		name := layerName(l, leaf)
+		if head {
+			name = leaf
+			n, ok := checkedMulInt(rows, in)
+			_, wok := checkedMulInt(out, in)
+			_, yok := checkedMulInt(rows, out)
+			wr, wc, present := s.M.v41HeadWeightShape(name)
+			if rows <= 0 || out <= 0 || in <= 0 || !ok || !wok || !yok || len(panel) != n || !present || wr != out || wc != in {
+				return nil, v41ProjectionError, s.v41HeadCloseFailure("payload", errV41ProjectionResult)
+			}
+			for _, v := range panel {
+				if !finite32(v) {
+					return nil, v41ProjectionError, s.v41HeadCloseFailure("payload", errV41ProjectionResult)
+				}
+			}
+		}
 		var stage func() compute.Tensor
 		dtype := compute.F32
 		switch {
@@ -1167,18 +1209,46 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 			stage = func() compute.Tensor { return s.weightHAL(name) }
 		case s.M.q8w[name] != nil:
 			dtype = compute.Q8_0
+			if head {
+				if in%qBlk != 0 {
+					return nil, v41ProjectionDeclined, nil
+				}
+			}
 			stage = func() compute.Tensor { return s.weightHALQ8(name, s.M.q8w[name]) }
 		case s.M.q4kw[name] != nil:
 			dtype = compute.Q4_K
+			if head {
+				q := s.M.q4kw[name]
+				if in%qkK != 0 || q.nblk != in/qkK {
+					return nil, v41ProjectionDeclined, nil
+				}
+			}
 			stage = func() compute.Tensor { return s.weightHALQ4K(name, s.M.q4kw[name]) }
 		case s.M.kqw[name] != nil:
 			qt := s.M.kqw[name]
 			desc, ok := LookupQuantDescriptor(qt.kind)
-			if !ok || !desc.SupportsHAL() || (qt.kind == kindQ6K && !s.useHALKQuantWeight(qt)) {
+			if !ok || !desc.SupportsHAL() || (!head && qt.kind == kindQ6K && !s.useHALKQuantWeight(qt)) {
 				return nil, v41ProjectionDeclined, nil
 			}
 			dtype = desc.Dtype()
+			if head && (desc.BlockWeights() <= 0 || desc.BlockBytes() <= 0 || in%desc.BlockWeights() != 0 || qt.nblk != in/desc.BlockWeights()) {
+				return nil, v41ProjectionDeclined, nil
+			}
 			stage = func() compute.Tensor { return s.weightHALKQuant(name, qt) }
+
+		case head && s.M.v41PackedHead(name) != nil:
+			q := s.M.v41PackedHead(name)
+			if q.prism != nil || in%qkK != 0 {
+				return nil, v41ProjectionDeclined, nil
+			}
+			switch q.format {
+			case packedEmbeddingQ2K:
+				dtype = compute.Q2_K
+			case packedEmbeddingQ4K:
+				dtype = compute.Q4_K
+			default:
+				return nil, v41ProjectionDeclined, nil
+			}
 		default:
 			return nil, v41ProjectionDeclined, nil
 		}
@@ -1199,12 +1269,33 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 				return nil, v41ProjectionDeclined, nil
 			}
 		}
+		if head {
+			stage = func() compute.Tensor { return s.v41HeadWeightHAL(name, dtype, out, in) }
+		}
 		opened := s.M.v41NowNanos()
 		successfulRows := 0
 		var uploaded, readback int64
-		defer func() { s.M.v41NoteDenseProjection(1, 0, successfulRows, 0, uploaded, readback, opened) }()
+		defer func() {
+			if head {
+				s.M.v41NoteHeadProjection(1, 0, successfulRows, 0, uploaded, readback, opened)
+			} else {
+				s.M.v41NoteDenseProjection(1, 0, successfulRows, 0, uploaded, readback, opened)
+			}
+		}()
+		opStage := "weight upload"
+		closeFailure := func(err error) error {
+			if !head {
+				return err
+			}
+			return s.v41HeadCloseFailure(opStage, err)
+		}
 		defer func() {
 			if r := recover(); r != nil {
+				if payload, ok := r.(v41HeadPayloadError); ok {
+					opStage = "payload"
+					result, outcome, cause = nil, v41ProjectionError, closeFailure(payload.cause)
+					return
+				}
 				if err, ok := r.(error); ok {
 					var closed *BackendForwardOperationError
 					if errors.As(err, &closed) {
@@ -1212,45 +1303,215 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 					}
 					var backend *compute.BackendError
 					if errors.As(err, &backend) {
-						result, outcome, cause = nil, v41ProjectionError, err
+						result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
 						return
 					}
 				}
 				panic(r)
 			}
 		}()
-		weight := stage()
-		input := panel
-		if s.M.prism != nil && s.M.prism.weightWidth[name] != 0 {
-			input = make([]float32, len(panel))
-			for row := 0; row < rows; row++ {
-				copy(input[row*in:(row+1)*in], s.M.prismProjectInput(name, panel[row*in:(row+1)*in]))
+		run := func() ([]float32, error) {
+			weight := stage()
+			input := panel
+			if s.M.prism != nil && s.M.prism.weightWidth[name] != 0 {
+				input = make([]float32, len(panel))
+				for row := 0; row < rows; row++ {
+					copy(input[row*in:(row+1)*in], s.M.prismProjectInput(name, panel[row*in:(row+1)*in]))
+				}
 			}
+			if head {
+				for _, v := range input {
+					if !finite32(v) {
+						opStage = "payload"
+						return nil, errV41ProjectionResult
+					}
+				}
+			}
+			shape := []int{in}
+			if rows > 1 {
+				shape = []int{rows, in}
+			}
+			opStage = "activation upload"
+			x := s.uploadHostF32(shape, input, compute.MemoryActivation, "V4.1 dense projection activation")
+			defer s.Backend.Free(x)
+			uploaded = int64(len(input)) * 4
+			opStage = "matmul"
+			var y compute.Tensor
+			if rows == 1 {
+				y = s.Backend.MatMul(weight, x)
+			} else {
+				y = s.Backend.BatchedMatMul(weight, x, rows)
+			}
+			defer s.Backend.Free(y)
+			opStage = "readback"
+			values := s.Backend.Read(y)
+			readback = int64(len(values)) * 4
+			want, ok := checkedMulInt(rows, out)
+			if !ok || len(values) != want {
+				return nil, errV41ProjectionResult
+			}
+			if head {
+				for _, v := range values {
+					if !finite32(v) {
+						return nil, errV41ProjectionResult
+					}
+				}
+			}
+			opStage = "lora"
+			for row := 0; row < rows; row++ {
+				s.M.loraApply(name, panel[row*in:(row+1)*in], values[row*out:(row+1)*out])
+			}
+			if head {
+				for _, v := range values {
+					if !finite32(v) {
+						return nil, errV41ProjectionResult
+					}
+				}
+			}
+			return values, nil
 		}
-		shape := []int{in}
-		if rows > 1 {
-			shape = []int{rows, in}
-		}
-		x := s.uploadHostF32(shape, input, compute.MemoryActivation, "V4.1 dense projection activation")
-		defer s.Backend.Free(x)
-		uploaded = int64(len(input)) * 4
-		var y compute.Tensor
-		if rows == 1 {
-			y = s.Backend.MatMul(weight, x)
-		} else {
-			y = s.Backend.BatchedMatMul(weight, x, rows)
-		}
-		defer s.Backend.Free(y)
-		result = s.Backend.Read(y)
-		readback = int64(len(result)) * 4
-		want, ok := checkedMulInt(rows, out)
-		if !ok || len(result) != want {
-			return nil, v41ProjectionError, errV41ProjectionResult
-		}
-		for row := 0; row < rows; row++ {
-			s.M.loraApply(name, panel[row*in:(row+1)*in], result[row*out:(row+1)*out])
+		var err error
+		result, err = run()
+		if err != nil {
+			return nil, v41ProjectionError, closeFailure(err)
 		}
 		successfulRows = rows
 		return result, v41ProjectionHandled, nil
 	}
+}
+
+type v41HeadPayloadError struct{ cause error }
+
+func (s *Session) v41HeadWeightHAL(name string, dtype compute.Dtype, out, in int) compute.Tensor {
+	fail := func(err error) { panic(v41HeadPayloadError{cause: err}) }
+	elems, ok := checkedMulInt(out, in)
+	if !ok {
+		fail(errV41ProjectionResult)
+	}
+
+	if q := s.M.v41PackedHead(name); q != nil {
+		key := "v41-head-packed:" + q.Format() + ":" + name
+		return s.weightHALStagedBounded(key, name, func() compute.Tensor {
+			expected, valid := checkedMulInt(elems/qkK, q.format.blockBytes())
+			if !valid || q.vocab != out || q.hidden != in || in%qkK != 0 || len(q.raw) != expected {
+				fail(errV41ProjectionResult)
+			}
+			switch q.format {
+			case packedEmbeddingQ2K:
+				if dtype != compute.Q2_K {
+					fail(errV41ProjectionResult)
+				}
+				return compute.NewQ2K(compute.Default(), []int{out, in}, q.raw)
+			case packedEmbeddingQ4K:
+				if dtype != compute.Q4_K {
+					fail(errV41ProjectionResult)
+				}
+				return compute.NewQ4K(compute.Default(), []int{out, in}, q.raw)
+			default:
+				fail(errV41ProjectionResult)
+				return compute.Tensor{}
+			}
+		}, dtype, int64(len(q.raw)))
+	}
+	switch dtype {
+	case compute.F32:
+		if len(s.M.tensor(name)) != elems {
+			fail(errV41ProjectionResult)
+		}
+		return s.weightHAL(name)
+	case compute.Q8_0:
+		q := s.M.q8w[name]
+		if q == nil || q.nblk != in/qBlk || len(q.q) != elems || len(q.d) != elems/qBlk {
+			fail(errV41ProjectionResult)
+		}
+		return s.weightHALQ8(name, q)
+	case compute.Q4_K:
+		q := s.M.q4kw[name]
+		return s.weightHALStagedBounded("q4k:"+name, name, func() compute.Tensor {
+			raw, err := q.materializeRaw()
+			if err != nil {
+				fail(err)
+			}
+			expected, valid := checkedMulInt(elems/qkK, q4kBlockBytes)
+			if !valid || len(raw) != expected {
+				fail(errV41ProjectionResult)
+			}
+			return compute.NewQ4K(compute.Default(), []int{out, in}, raw)
+		}, dtype, q4kResidentBytes(q))
+	default:
+		q := s.M.kqw[name]
+		desc, valid := LookupQuantDescriptor(q.kind)
+		if !valid {
+			fail(errV41ProjectionResult)
+		}
+		return s.weightHALStagedBounded(desc.KeyPrefix()+name, name, func() compute.Tensor {
+			raw, err := q.materializeRaw()
+			if err != nil {
+				fail(err)
+			}
+			expected, valid := checkedMulInt(elems/desc.BlockWeights(), desc.BlockBytes())
+			if !valid || len(raw) != expected {
+				fail(errV41ProjectionResult)
+			}
+			return desc.NewHostTensor(out, in, raw)
+		}, dtype, kQuantResidentBytes(q))
+	}
+}
+
+func (s *Session) v41HeadCloseFailure(stage string, cause error) error {
+	closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-head-projection", Layer: -1, Stage: stage, Cause: cause}
+	s.halFailure = closed
+	s.Close()
+	return closed
+}
+
+func (m *Model) v41PackedHead(name string) *Q2KEmbedding {
+	if name != "model.embed_tokens.weight" {
+		return nil
+	}
+	if m.hasResidentWeight(name) {
+		return nil
+	}
+	return m.Q2KEmbedding
+}
+
+func (m *Model) v41HeadWeightShape(name string) (out, in int, ok bool) {
+	if out, in, ok = m.residentShape(name); ok {
+		return
+	}
+	if q := m.v41PackedHead(name); q != nil {
+		return q.vocab, q.hidden, true
+	}
+	return 0, 0, false
+}
+
+func (m *Model) v41PackedHeadRows(name string, panel []float32, out, in, rows int) ([]float32, error) {
+	q := m.v41PackedHead(name)
+	if q == nil || out != q.vocab || in != q.hidden || in <= 0 || in%q.format.blockWeights() != 0 {
+		return nil, errV41ProjectionResult
+	}
+	blocks, ok := checkedMulInt(out, in/q.format.blockWeights())
+	expected, bytesOK := checkedMulInt(blocks, q.format.blockBytes())
+	n, outputOK := checkedMulInt(rows, out)
+	if !ok || !bytesOK || !outputOK || len(q.raw) != expected {
+		return nil, errV41ProjectionResult
+	}
+	y := make([]float32, n)
+	weightRow := make([]float32, in)
+	for row := 0; row < rows; row++ {
+		original := panel[row*in : (row+1)*in]
+		x := m.prismProjectInput(name, original)
+		for token := 0; token < out; token++ {
+			if err := q.GatherRow(token, weightRow, 1); err != nil {
+				return nil, err
+			}
+			var sum float32
+			for i, w := range weightRow {
+				sum += w * x[i]
+			}
+			y[row*out+token] = sum
+		}
+		m.loraApply(name, original, y[row*out:(row+1)*out])
+	}
+	return y, nil
 }

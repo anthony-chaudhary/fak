@@ -119,13 +119,10 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	pos := len(st.history)
 
 	// Embed the token into a fresh hidden row.
-	embed := m.tensor("model.embed_tokens.weight")
-	if len(embed) < cfg.VocabSize*H {
-		return nil, stats, v41StageErr(v41StageEmbedding, -1,
-			fmt.Errorf("%w: embedding table has %d values, want %d", ErrV41ForwardStage, len(embed), cfg.VocabSize*H))
+	x, embedErr := m.v41EmbeddingPanel([]int{id})
+	if embedErr != nil {
+		return nil, stats, embedErr
 	}
-	x := append([]float32(nil), embed[id*H:(id+1)*H]...)
-	scaleEmbedInPlace(x, cfg)
 
 	// The four persistent mHC streams: stream 0 is the live hidden row, streams
 	// 1..3 are the persistent zero residuals a full forward initializes them to.
@@ -312,9 +309,13 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 
 	// Head runs BEFORE any commit; a head fault rolls back exactly like a layer
 	// fault (truncate/restore, no clone).
-	res, herr := m.v41Head(x)
+	res, herr := m.v41HeadWithProjection(x, scratch.denseProjection)
 	if herr != nil {
 		rollback()
+		var projection *V41ProjectionOperationError
+		if errors.As(herr, &projection) {
+			panic(herr)
+		}
 		return nil, stats, herr
 	}
 

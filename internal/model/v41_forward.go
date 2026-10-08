@@ -309,15 +309,13 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	}
 
 	// ---- embedding ----
-	embed := m.tensor("model.embed_tokens.weight")
-	if len(embed) < cfg.VocabSize*H {
-		return nil, v41StageErr(v41StageEmbedding, -1,
-			fmt.Errorf("%w: embedding table has %d values, want %d", ErrV41ForwardStage, len(embed), cfg.VocabSize*H))
+	embedded, err := m.v41EmbeddingPanel(seq)
+	if err != nil {
+		return nil, err
 	}
 	x := make([][]float32, len(seq))
-	for t, id := range seq {
-		x[t] = append([]float32(nil), embed[id*H:(id+1)*H]...)
-		scaleEmbedInPlace(x[t], cfg)
+	for t := range seq {
+		x[t] = embedded[t*H : (t+1)*H : (t+1)*H]
 	}
 
 	// Persistent mHC streams, one four-stream set per position. On the full path
@@ -368,9 +366,13 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		act.Hidden = append(act.Hidden, flatten(x))
 	}
 
+	var headProjection v41DenseProjectionFunc
+	if runState != nil {
+		headProjection = runState.denseProjection
+	}
 	act.Logits = make([][]float32, len(seq))
 	for t := 0; t < len(seq); t++ {
-		logits, err := m.v41Head(x[t])
+		logits, err := m.v41HeadWithProjection(x[t], headProjection)
 		if err != nil {
 			return nil, err
 		}
@@ -1139,12 +1141,13 @@ func v41SwiGLUParallel(w1, w3, w2, xn []float32, I, H int, cfg Config) []float32
 	return y
 }
 
-// v41Head runs the final norm and LM head for one hidden vector. The final norm
-// itself is applied inside m.logitsFromHidden (forward.go), which is the single
-// shared tail Model.Forward and the parallel twins also end at; this wrapper only
-// asserts the final-norm weight is present and the hidden width is admitted, so a
-// missing norm weight fails closed before the shared tail runs.
+// v41Head retains the host final norm and resident LM head for callers without
+// a session-owned projection callback.
 func (m *Model) v41Head(x []float32) ([]float32, error) {
+	return m.v41HeadWithProjection(x, nil)
+}
+
+func (m *Model) v41HeadWithProjection(x []float32, project v41DenseProjectionFunc) ([]float32, error) {
 	if !m.has("model.norm.weight") {
 		return nil, v41StageErr(v41StageFinalNorm, -1,
 			fmt.Errorf("%w: missing model.norm.weight", ErrV41ForwardStage))
@@ -1157,7 +1160,20 @@ func (m *Model) v41Head(x []float32) ([]float32, error) {
 		return nil, v41StageErr(v41StageHead, -1,
 			fmt.Errorf("%w: no lm_head.weight and no tied embedding", ErrV41ForwardStage))
 	}
-	return m.logitsFromHidden(x), nil
+	xf := m.finalNorm(x)
+	if project == nil {
+		for _, v := range xf {
+			if !finite32(v) {
+				return nil, v41StageErr(v41StageHead, -1, errV41ProjectionResult)
+			}
+		}
+	}
+	logits, err := m.v41ProjectionRows(-1, m.headName(), xf, m.Cfg.VocabSize, m.Cfg.HiddenSize, 1, project)
+	if err != nil {
+		return nil, err
+	}
+	logitScaleInPlace(logits, m.Cfg)
+	return logits, nil
 }
 
 // ---- session entry points --------------------------------------------------
@@ -1182,6 +1198,7 @@ func (m *Model) v41Head(x []float32) ([]float32, error) {
 // the physical `fed6a6a37` rung's 0.1 tok/s prefill is exactly the case this
 // turns from a 492 s wedge into a named, pre-emptive "no".
 func (s *Session) prefillV41(ids []int) []float32 {
+	s.ensureOpenBackendSession()
 	if err := s.M.v41ForwardAdmitted(); err != nil {
 		panic(err)
 	}
@@ -1323,6 +1340,7 @@ func (s *Session) v41IncrementalEligible() bool {
 // per-step work the assembly actually pays (the incremental seam on a prepared
 // state, the whole-history recompute on the fallback).
 func (s *Session) stepV41(id int) []float32 {
+	s.ensureOpenBackendSession()
 	if err := s.M.v41ForwardAdmitted(); err != nil {
 		panic(err)
 	}
@@ -1431,4 +1449,40 @@ func lastLogits(act *Activations) []float32 {
 		return nil
 	}
 	return act.Logits[len(act.Logits)-1]
+}
+
+func (m *Model) v41EmbeddingPanel(ids []int) ([]float32, error) {
+	cfg := m.Cfg
+	H := cfg.HiddenSize
+	count, ok := checkedMulInt(len(ids), H)
+	if !ok || H <= 0 {
+		return nil, v41StageErr(v41StageEmbedding, -1, errV41ProjectionResult)
+	}
+	var panel []float32
+	if m.has("model.embed_tokens.weight") {
+		embed := m.tensor("model.embed_tokens.weight")
+		expected, valid := checkedMulInt(cfg.VocabSize, H)
+		if !valid || len(embed) < expected {
+			return nil, v41StageErr(v41StageEmbedding, -1, fmt.Errorf("%w: invalid embedding table length", ErrV41ForwardStage))
+		}
+		panel = make([]float32, count)
+		for t, id := range ids {
+			copy(panel[t*H:(t+1)*H], embed[id*H:(id+1)*H])
+		}
+	} else if m.Q2KEmbedding != nil {
+		var err error
+		panel, err = m.Q2KEmbedding.GatherRows(ids, 1)
+		if err != nil {
+			return nil, v41StageErr(v41StageEmbedding, -1, err)
+		}
+		if len(panel) != count {
+			return nil, v41StageErr(v41StageEmbedding, -1, errV41ProjectionResult)
+		}
+	} else {
+		return nil, v41StageErr(v41StageEmbedding, -1, fmt.Errorf("%w: missing model.embed_tokens.weight", ErrV41ForwardStage))
+	}
+	for t := range ids {
+		scaleEmbedInPlace(panel[t*H:(t+1)*H], cfg)
+	}
+	return panel, nil
 }

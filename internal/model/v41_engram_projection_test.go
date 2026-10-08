@@ -276,7 +276,8 @@ func TestV41EngramProjectionLateSelectedFailure(t *testing.T) {
 			t.Parallel()
 			m := v41EngProjFixture(t, "F32", false)
 			b := newV41EngProjBackend(m)
-			s := v41EngProjSession(t, m, b)
+			api := &v41EngramClosedRecorder{v41EngProjBackend: b}
+			s := v41EngProjSession(t, m, api)
 			s.Prefill([]int{1, 2, 3})
 			before := captureV41ForwardSnapshot(s.v41Forward)
 			ledgerBefore := v41EngProjPhase(t, m, "decode")
@@ -287,6 +288,7 @@ func TestV41EngramProjectionLateSelectedFailure(t *testing.T) {
 			if site == "unknown" {
 				b.site, b.cause = "matmul", unknown
 			}
+			var closedFailure *BackendForwardOperationError
 			var recovered any
 			func() { defer func() { recovered = recover() }(); s.Step(4) }()
 			if !b.failed {
@@ -298,6 +300,10 @@ func TestV41EngramProjectionLateSelectedFailure(t *testing.T) {
 				}
 			} else {
 				err, ok := recovered.(error)
+				if !ok || !errors.As(err, &closedFailure) || !s.BackendSessionClosed() {
+					t.Error("selected typed failure did not retain a closed Session/error identity")
+				}
+
 				var selected *BackendForwardOperationError
 				if !ok || !errors.As(err, &selected) || !errors.Is(err, ErrV41ForwardStage) {
 					t.Errorf("Engram selected failure lacks typed forward error/cause: %T %v", recovered, recovered)
@@ -317,6 +323,29 @@ func TestV41EngramProjectionLateSelectedFailure(t *testing.T) {
 			delta := v41DenseTestDelta(v41EngProjPhase(t, m, "decode"), ledgerBefore)
 			if delta["engram_projection_device_calls"] != 2 || delta["engram_projection_device_rows"] != 1 || delta["engram_projection_host_calls"] != 0 || delta["engram_projection_host_rows"] != 0 || delta["engram_projection_host_weight_f32_bytes"] != 0 || delta["engram_projection_matmul_calls"] != 2 {
 				t.Errorf("late Engram failure attempted/completed accounting=%v", delta)
+			}
+
+			if site != "unknown" {
+				callsBefore := api.calls
+				stateBefore := captureV41ForwardSnapshot(s.v41Forward)
+				dataBefore := v41EngProjPhase(t, m, "decode")
+				var repeated any
+				func() { defer func() { repeated = recover() }(); s.Step(4) }()
+				var closed *BackendForwardOperationError
+				err, ok := repeated.(error)
+				if !ok || !errors.As(err, &closed) || closed != closedFailure || !errors.Is(err, ErrV41ForwardStage) {
+					t.Error("closed public entry changed selected failure identity/cause")
+				}
+				if api.calls != callsBefore {
+					t.Error("closed public entry invoked backend API")
+				}
+				if !reflect.DeepEqual(stateBefore, captureV41ForwardSnapshot(s.v41Forward)) || !reflect.DeepEqual(dataBefore, v41EngProjPhase(t, m, "decode")) {
+					t.Error("closed public entry changed retained state or projection attribution")
+				}
+				if len(b.live) != 0 {
+					t.Error("closed public entry changed transient buffer cleanup")
+				}
+				return
 			}
 			b.decodeFault, b.site, b.cause, b.failed = false, "", nil, false
 			oracle := v41EngProjFixture(t, "F32", false).NewSession()
@@ -615,3 +644,26 @@ func TestV41EngramProjectionSourceNamesAndCollision(t *testing.T) {
 		t.Error("V4.1 adapter affected another architecture")
 	}
 }
+
+type v41EngramClosedRecorder struct {
+	*v41EngProjBackend
+	calls [4]int
+}
+
+func (b *v41EngramClosedRecorder) Upload(x compute.Tensor, dt compute.Dtype) compute.Tensor {
+	b.calls[0]++
+	return b.v41EngProjBackend.Upload(x, dt)
+}
+func (b *v41EngramClosedRecorder) MatMul(w, x compute.Tensor) compute.Tensor {
+	b.calls[1]++
+	return b.v41EngProjBackend.MatMul(w, x)
+}
+func (b *v41EngramClosedRecorder) BatchedMatMul(w, x compute.Tensor, rows int) compute.Tensor {
+	b.calls[1]++
+	return b.v41EngProjBackend.BatchedMatMul(w, x, rows)
+}
+func (b *v41EngramClosedRecorder) Read(x compute.Tensor) []float32 {
+	b.calls[2]++
+	return b.v41EngProjBackend.Read(x)
+}
+func (b *v41EngramClosedRecorder) Free(x compute.Tensor) { b.calls[3]++; b.v41EngProjBackend.Free(x) }

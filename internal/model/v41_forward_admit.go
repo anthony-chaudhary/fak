@@ -475,7 +475,7 @@ func (m *Model) v41ForwardAdmitted() error {
 		return v41StageErr(v41StageHead, -1,
 			fmt.Errorf("%w: no lm_head.weight and no tied embedding", ErrV41ForwardStage))
 	}
-	if err := m.v41AdmitShape("lm_head.weight", v41StageHead, -1, cfg.VocabSize, cfg.HiddenSize); err != nil {
+	if err := m.v41AdmitShape(m.headName(), v41StageHead, -1, cfg.VocabSize, cfg.HiddenSize); err != nil {
 		return err
 	}
 	if _, err := v41RouterConfigFullGeometry(cfg); err != nil {
@@ -678,6 +678,9 @@ func (m *Model) v41AdmitGroupedWoA(l int) error {
 func (m *Model) v41AdmitShape(name string, stage v41ForwardStage, layer int, want ...int) error {
 	if len(want) == 2 {
 		out, in, ok := m.residentShape(name)
+		if name == "model.embed_tokens.weight" {
+			out, in, ok = m.v41HeadWeightShape(name)
+		}
 		if !ok {
 			// A routed expert the R5 streamed-experts tier holds is by design
 			// ABSENT from every resident store (manifest/q8w/q4w/q4kw/kqw/q2w/

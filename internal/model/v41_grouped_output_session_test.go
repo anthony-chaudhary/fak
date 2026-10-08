@@ -249,7 +249,8 @@ func TestV41GroupedOutputLateFailureAtomic(t *testing.T) {
 			t.Parallel()
 			m := v41GroupedFixture(t, "F32", false, false)
 			b := newV41GroupedBackend(t, m)
-			s := v41DenseTestSession(t, m, b)
+			api := &v41GroupedClosedRecorder{v41GroupedBackend: b}
+			s := v41DenseTestSession(t, m, api)
 			s.Prefill([]int{1, 2, 3})
 			b.live = map[compute.Buffer]bool{}
 			before := captureV41ForwardSnapshot(s.v41Forward)
@@ -261,6 +262,7 @@ func TestV41GroupedOutputLateFailureAtomic(t *testing.T) {
 			if site == "unknown" {
 				b.fault, b.cause = "matmul", unknown
 			}
+			var closedFailure *BackendForwardOperationError
 			var recovered any
 			func() { defer func() { recovered = recover() }(); s.Step(4) }()
 			if !b.failing {
@@ -272,6 +274,10 @@ func TestV41GroupedOutputLateFailureAtomic(t *testing.T) {
 				}
 			} else {
 				err, ok := recovered.(error)
+				if !ok || !errors.As(err, &closedFailure) || !s.BackendSessionClosed() {
+					t.Error("selected typed failure did not retain a closed Session/error identity")
+				}
+
 				var typed *BackendForwardOperationError
 				if !ok || !errors.As(err, &typed) || !errors.Is(err, ErrV41ForwardStage) {
 					t.Errorf("grouped failure lacks typed operation error/cause: %T %v", recovered, recovered)
@@ -306,6 +312,29 @@ func TestV41GroupedOutputLateFailureAtomic(t *testing.T) {
 			}
 			if delta["grouped_output_activation_upload_bytes"] != float64(upload) || delta["grouped_output_readback_bytes"] != float64(read) {
 				t.Errorf("late failure transfer accounting=%v actual upload=%d read=%d", delta, upload, read)
+			}
+
+			if site != "unknown" {
+				callsBefore := api.calls
+				stateBefore := captureV41ForwardSnapshot(s.v41Forward)
+				dataBefore := v41GroupedPhase(t, m, "decode")
+				var repeated any
+				func() { defer func() { repeated = recover() }(); s.Step(4) }()
+				var closed *BackendForwardOperationError
+				err, ok := repeated.(error)
+				if !ok || !errors.As(err, &closed) || closed != closedFailure || !errors.Is(err, ErrV41ForwardStage) {
+					t.Error("closed public entry changed selected failure identity/cause")
+				}
+				if api.calls != callsBefore {
+					t.Error("closed public entry invoked backend API")
+				}
+				if !reflect.DeepEqual(stateBefore, captureV41ForwardSnapshot(s.v41Forward)) || !reflect.DeepEqual(dataBefore, v41GroupedPhase(t, m, "decode")) {
+					t.Error("closed public entry changed retained state or projection attribution")
+				}
+				if len(b.live) != 0 {
+					t.Error("closed public entry changed transient buffer cleanup")
+				}
+				return
 			}
 			b.fault, b.cause, b.failing = "", nil, false
 			v41GroupedParity(t, s.Step(4), lastLogits(v41GroupedFixture(t, "F32", false, false).Forward([]int{1, 2, 3, 4})), 1e-5)
@@ -577,3 +606,26 @@ func TestV41GroupedOutputPackedNonfiniteBeforeAnyGroupedAPI(t *testing.T) {
 		}
 	}
 }
+
+type v41GroupedClosedRecorder struct {
+	*v41GroupedBackend
+	calls [4]int
+}
+
+func (b *v41GroupedClosedRecorder) Upload(x compute.Tensor, dt compute.Dtype) compute.Tensor {
+	b.calls[0]++
+	return b.v41GroupedBackend.Upload(x, dt)
+}
+func (b *v41GroupedClosedRecorder) MatMul(w, x compute.Tensor) compute.Tensor {
+	b.calls[1]++
+	return b.v41GroupedBackend.MatMul(w, x)
+}
+func (b *v41GroupedClosedRecorder) BatchedMatMul(w, x compute.Tensor, rows int) compute.Tensor {
+	b.calls[1]++
+	return b.v41GroupedBackend.BatchedMatMul(w, x, rows)
+}
+func (b *v41GroupedClosedRecorder) Read(x compute.Tensor) []float32 {
+	b.calls[2]++
+	return b.v41GroupedBackend.Read(x)
+}
+func (b *v41GroupedClosedRecorder) Free(x compute.Tensor) { b.calls[3]++; b.v41GroupedBackend.Free(x) }

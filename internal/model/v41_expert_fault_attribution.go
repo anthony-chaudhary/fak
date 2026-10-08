@@ -121,6 +121,13 @@ type v41ExpertFaultPhaseLedger struct {
 	DenseProjectionActivationUploadBytes int64   `json:"dense_projection_activation_upload_bytes"`
 	DenseProjectionReadbackBytes         int64   `json:"dense_projection_readback_bytes"`
 	DenseProjectionNanos                 int64   `json:"dense_projection_nanos"`
+	HeadProjectionDeviceCalls            int     `json:"head_projection_device_calls"`
+	HeadProjectionHostCalls              int     `json:"head_projection_host_calls"`
+	HeadProjectionDeviceRows             int     `json:"head_projection_device_rows"`
+	HeadProjectionHostRows               int     `json:"head_projection_host_rows"`
+	HeadProjectionActivationUploadBytes  int64   `json:"head_projection_activation_upload_bytes"`
+	HeadProjectionReadbackBytes          int64   `json:"head_projection_readback_bytes"`
+	HeadProjectionNanos                  int64   `json:"head_projection_nanos"`
 	ExpertActivationDeviceCalls          int     `json:"expert_activation_device_calls"`
 	ExpertActivationHostCalls            int     `json:"expert_activation_host_calls"`
 	ExpertActivationReadbackBytes        int64   `json:"expert_activation_readback_bytes"`
@@ -634,6 +641,30 @@ func (m *Model) v41NoteDenseProjection(deviceCalls, hostCalls, deviceRows, hostR
 	if opened != 0 {
 		if elapsed := l.nowLocked() - opened; elapsed > 0 {
 			led.DenseProjectionNanos += elapsed
+		}
+	}
+}
+
+func (m *Model) v41NoteHeadProjection(deviceCalls, hostCalls, deviceRows, hostRows int, upload, readback int64, opened int64) {
+	l := v41ExpertFaultLedgerOf(m, false)
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	led := l.ledgerLocked()
+	if led == nil {
+		return
+	}
+	led.HeadProjectionDeviceCalls += deviceCalls
+	led.HeadProjectionHostCalls += hostCalls
+	led.HeadProjectionDeviceRows += deviceRows
+	led.HeadProjectionHostRows += hostRows
+	led.HeadProjectionActivationUploadBytes += upload
+	led.HeadProjectionReadbackBytes += readback
+	if opened != 0 {
+		if elapsed := l.nowLocked() - opened; elapsed > 0 {
+			led.HeadProjectionNanos += elapsed
 		}
 	}
 }
