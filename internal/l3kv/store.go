@@ -7,9 +7,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
+	"time"
 )
 
 // Store is the durable residency tier a demoted KV span lands in. It is keyed by
@@ -79,7 +83,20 @@ var (
 // Writes commit via a temp file + fsync + atomic rename, the same durability point
 // internal/blobfs uses — an interrupted write leaves only a temp file, never a half
 // record under a valid key.
-type diskStore struct{ dir string }
+type DiskStore struct {
+	dir string
+	mu  sync.Mutex
+}
+
+type diskStore = DiskStore
+
+// RecordBytes returns the exact on-disk bytes needed for a payload.
+func RecordBytes(payloadBytes int64) int64 { return payloadBytes + int64(recordHeaderLen) }
+
+// NewDiskStore opens the crash-safe local disk store rooted at dir. The returned
+// store is safe to reopen after process restart and supports bounded pruning of
+// completed records through Prune.
+func NewDiskStore(dir string) (*DiskStore, error) { return newDiskStore(dir) }
 
 func newDiskStore(dir string) (*diskStore, error) {
 	if dir == "" {
@@ -88,7 +105,7 @@ func newDiskStore(dir string) (*diskStore, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("l3kv: create store dir %s: %w", dir, err)
 	}
-	return &diskStore{dir: dir}, nil
+	return &DiskStore{dir: dir}, nil
 }
 
 // validKey guards the on-disk filename: a span digest is a lowercase/uppercase hex
@@ -111,6 +128,8 @@ func validKey(key string) bool {
 func (s *diskStore) path(key string) string { return filepath.Join(s.dir, key) }
 
 func (s *diskStore) Put(ctx context.Context, key string, payload []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -129,18 +148,62 @@ func (s *diskStore) Put(ctx context.Context, key string, payload []byte) error {
 }
 
 func (s *diskStore) Get(ctx context.Context, key string) ([]byte, bool, error) {
+	return s.get(ctx, key, 0)
+}
+
+// GetBounded is Get with a hard payload allocation ceiling. It rejects an
+// oversized record before allocation and uses a limited reader so a concurrent
+// file growth cannot bypass the stat check.
+func (s *DiskStore) GetBounded(ctx context.Context, key string, maxPayloadBytes int64) ([]byte, bool, error) {
+	return s.get(ctx, key, maxPayloadBytes)
+}
+
+func (s *DiskStore) get(ctx context.Context, key string, maxPayloadBytes int64) ([]byte, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
 	if !validKey(key) {
 		return nil, false, fmt.Errorf("l3kv: invalid span key %q", key)
 	}
-	b, err := os.ReadFile(s.path(key))
+	f, err := os.Open(s.path(key))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, false, nil // clean MISS: never staged / reaped
 		}
 		return nil, false, err // FAULT: I/O error
+	}
+	defer f.Close()
+	if maxPayloadBytes > 0 {
+		info, statErr := f.Stat()
+		if statErr != nil {
+			return nil, false, statErr
+		}
+		if info.Size() > maxPayloadBytes+int64(recordHeaderLen) {
+			return nil, false, fmt.Errorf("l3kv: record for %s exceeds %d-byte payload limit", key, maxPayloadBytes)
+		}
+	}
+	limit := int64(-1)
+	if maxPayloadBytes > 0 {
+		limit = maxPayloadBytes + int64(recordHeaderLen) + 1
+	}
+	var reader io.Reader = f
+	if limit > 0 {
+		reader = io.LimitReader(f, limit)
+	}
+	b, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, false, err
+	}
+	if maxPayloadBytes > 0 && int64(len(b)) > maxPayloadBytes+int64(recordHeaderLen) {
+		return nil, false, fmt.Errorf("l3kv: record for %s grew beyond %d-byte payload limit", key, maxPayloadBytes)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
 	}
 	if len(b) < recordHeaderLen {
 		return nil, false, fmt.Errorf("l3kv: truncated record for %s (%d bytes < %d-byte header)", key, len(b), recordHeaderLen)
@@ -157,6 +220,87 @@ func (s *diskStore) Get(ctx context.Context, key string) ([]byte, bool, error) {
 		return nil, false, fmt.Errorf("l3kv: integrity check failed for %s (corrupt or tampered)", key)
 	}
 	return payload, true, nil
+}
+
+// Prune removes the oldest valid record files until both positive bounds are
+// satisfied. A zero bound disables that axis. keepKey, when valid, is never
+// removed by this pass so a just-committed warm remains available for restart.
+func (s *DiskStore) Prune(maxEntries int, maxBytes int64, keepKey string) error {
+	return s.PruneContext(context.Background(), maxEntries, maxBytes, keepKey)
+}
+
+// PruneContext bounds retained records oldest-first and observes cancellation.
+func (s *DiskStore) PruneContext(ctx context.Context, maxEntries int, maxBytes int64, keepKey string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if s == nil {
+		return fmt.Errorf("l3kv: prune nil disk store")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return fmt.Errorf("l3kv: read store dir %s: %w", s.dir, err)
+	}
+	type record struct {
+		name string
+		size int64
+		mod  int64
+	}
+	var records []record
+	var total int64
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if strings.HasPrefix(entry.Name(), ".l3kv-") && !entry.IsDir() {
+			if info, infoErr := entry.Info(); infoErr == nil && time.Since(info.ModTime()) > 24*time.Hour {
+				if removeErr := os.Remove(s.path(entry.Name())); removeErr != nil && !os.IsNotExist(removeErr) {
+					return fmt.Errorf("l3kv: prune stale temp %s: %w", entry.Name(), removeErr)
+				}
+			}
+			continue
+		}
+		if entry.IsDir() || !validKey(entry.Name()) {
+			continue
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			return fmt.Errorf("l3kv: stat record %s: %w", entry.Name(), infoErr)
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		records = append(records, record{name: entry.Name(), size: info.Size(), mod: info.ModTime().UnixNano()})
+		total += info.Size()
+	}
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].mod == records[j].mod {
+			return records[i].name < records[j].name
+		}
+		return records[i].mod < records[j].mod
+	})
+	remaining := len(records)
+	for _, record := range records {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		overEntries := maxEntries > 0 && remaining > maxEntries
+		overBytes := maxBytes > 0 && total > maxBytes
+		if !overEntries && !overBytes {
+			break
+		}
+		if record.name == keepKey {
+			continue
+		}
+		if err := os.Remove(s.path(record.name)); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("l3kv: prune record %s: %w", record.name, err)
+		}
+		total -= record.size
+		remaining--
+	}
+	return nil
 }
 
 // atomicWrite writes b to final via a temp file that is fsync'd and atomically

@@ -15346,6 +15346,11 @@
           "category": "incidental",
           "reason": "Strix promotion plausibility bound internal to candidate evaluation; not a new concept",
           "token": "checkCandidatePlausible"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper capturing the bounded warm-prefix disk candidate; implementation detail of existing SSD warm-prefix persistence, not a distinct planning concept.",
+          "token": "captureWarmDiskCandidate"
         }
       ],
       "exclude": [
@@ -15496,6 +15501,7 @@
         "candidatecachedir",
         "candidatemean",
         "candidates",
+        "captureWarmDiskCandidate",
         "checkCandidatePlausible",
         "clonePlan",
         "compareCandidate",

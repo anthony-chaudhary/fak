@@ -41,7 +41,8 @@ import (
 
 // EnvSpec is the opt-in environment variable. Unset/empty leaves the in-process
 // default KV backend live (byte-identical to today); set to a directory path to
-// enable the durable disk-backed L3 residency tier rooted there.
+// enable the durable disk-backed L3 residency tier rooted there. "off" explicitly
+// disables the legacy raw-span backend; native restart snapshots use their per-user default.
 const EnvSpec = "FAK_L3_KVBACKEND"
 
 const (
@@ -59,7 +60,8 @@ var (
 // production instance shared by the ABI backend and native prefix snapshots, so
 // two independent manifest maps can never race over the same directory.
 func ConfiguredRemoteStore() (Store, bool, error) {
-	if strings.TrimSpace(os.Getenv(EnvSpec)) == "" || strings.TrimSpace(os.Getenv(EnvRemoteURL)) == "" {
+	spec := strings.TrimSpace(os.Getenv(EnvSpec))
+	if spec == "" || strings.EqualFold(spec, "off") || strings.TrimSpace(os.Getenv(EnvRemoteURL)) == "" {
 		return nil, false, nil
 	}
 	if configuredErr != nil {
@@ -240,8 +242,8 @@ func Factory(store Store) abi.KVBackendFactory {
 // in-process default live (fail-closed to the default — a broken tier is never
 // registered).
 func init() {
-	dir := os.Getenv(EnvSpec)
-	if dir == "" {
+	dir := strings.TrimSpace(os.Getenv(EnvSpec))
+	if dir == "" || strings.EqualFold(dir, "off") {
 		return
 	}
 	// The L3 tier stages spans to an OFF-BOX content pool when FAK_BLOB_HTTP_URL is

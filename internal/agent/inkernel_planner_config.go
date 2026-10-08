@@ -27,6 +27,9 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 // InKernelPlannerConfig carries settings that must be fixed at planner construction.
 // Empty/zero fields preserve NewInKernelPlanner's historical defaults.
 type InKernelPlannerConfig struct {
+	// WarmDiskModelIdentity binds restart snapshots to the loaded weight artifact.
+	// Empty declines persistence because a display model ID is not a weight identity.
+	WarmDiskModelIdentity string
 	// ContextTokens caps the total prompt plus planned decode positions accepted by
 	// this planner. Zero uses the model's declared context window; when both are
 	// known, the smaller bound wins.
@@ -104,6 +107,7 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		elideStaleReads:              cfg.ElideStaleReads,
 		deferColdTools:               cfg.DeferColdTools,
 		batchDecode:                  cfg.BatchDecode,
+		warmDiskModelIdentity:        strings.TrimSpace(cfg.WarmDiskModelIdentity),
 	}
 	if cfg.IncrementalContext {
 		p.incrementalContext = EmptyIncrementalContext()
@@ -177,6 +181,7 @@ func (p *InKernelPlanner) RuntimeConfig() InKernelPlannerConfig {
 		cpuBytes = p.tree.CPUCacheByteBudget()
 	}
 	return InKernelPlannerConfig{
+		WarmDiskModelIdentity:     p.warmDiskModelIdentity,
 		ContextTokens:             p.contextTokens,
 		CPUCacheBytes:             cpuBytes,
 		KVPrecision:               p.kvPrecision,

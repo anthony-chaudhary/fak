@@ -279,6 +279,7 @@ func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string
 		retainMTP = turnkeyMTPCatalogHasLiveRecordFor(mtpCatalog, time.Now(), device)
 	}
 	var artifactBefore os.FileInfo
+	artifactStamp := stampModelArtifact(modelPath)
 	if info, statErr := os.Stat(modelPath); statErr == nil {
 		artifactBefore = info
 	}
@@ -344,6 +345,9 @@ func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string
 	}
 
 	planner := deps.newPlanner(model, tok, modelID, q4k, backend, metal, contextTokens)
+	if planner != nil {
+		planner.SetWarmDiskModelDigest(artifactStamp.identityAfterLoad(modelPath))
+	}
 	// Qualification needs the built planner's fixed settings and admission state,
 	// so it runs after planner construction, from live startup facts only.
 	facts := turnkeyMTPRuntimeFacts{

@@ -612,11 +612,17 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 					return
 				}
 			} else if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped && p.scopedTree != nil {
+				if cachePopulate {
+					p.captureWarmDiskCandidate(ctx, s, ids, logits)
+				}
 				if admitErr := p.scopedTree.AdmitPrivate(owner, ids, s.Cache, logits); admitErr != nil {
 					err = admitErr
 					return
 				}
 			} else {
+				if cachePopulate {
+					p.captureWarmDiskCandidate(ctx, s, ids, logits)
+				}
 				p.mu.Lock()
 				b, m := p.tree.Lookup(ids)
 				leaf := p.tree.InsertCloneWithLogits(b, ids[m:], s.Cache, logits)

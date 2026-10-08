@@ -965,6 +965,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 	if !keysetOK {
 		os.Exit(2)
 	}
+	nativePlannerConfig.WarmDiskModelIdentity = rt.warmDiskModelIdentity
 	controlHandler, controlIngress, err := openServeControlIngress(*sf.stdio, rt.requireKey, keyPrincipals, os.Getenv)
 	if err != nil {
 		return nil, err
