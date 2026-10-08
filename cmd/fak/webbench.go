@@ -619,6 +619,8 @@ func printServingSummary(w *os.File, rep *webbench.ServingParityReport, out stri
 		} else {
 			fmt.Fprintf(w, " prefix-hit=%s", tr.Stats.PrefixCacheHitRate.Status)
 		}
+		fmt.Fprint(w, " ")
+		writeServingMeasurementEvidence(w, &tr.Stats)
 		fmt.Fprintln(w)
 	}
 }
@@ -630,10 +632,18 @@ func printServingSweepSummary(w *os.File, rep *webbench.ServingSweepReport, out 
 	for _, track := range rep.Tracks {
 		fmt.Fprintf(w, "  %-16s %-12s valid=%d", track.Track, track.Status, track.ValidPoints)
 		if track.Peak != nil {
-			fmt.Fprintf(w, " peak=c%d/%.3f tok/s", track.Peak.Concurrency, track.Peak.ThroughputTokens)
+			peakStats := servingSweepSelectionStats(rep, track.Track, track.Peak.Concurrency)
+			fmt.Fprintf(w, " peak=c%d/%s", track.Peak.Concurrency, formatServingThroughput(peakStats))
+			fmt.Fprint(w, " peak-evidence=[")
+			writeServingMeasurementEvidence(w, peakStats)
+			fmt.Fprint(w, "]")
 		}
 		if track.SLAKnee != nil {
-			fmt.Fprintf(w, " sla-knee=c%d/%.3f tok/s", track.SLAKnee.Concurrency, track.SLAKnee.ThroughputTokens)
+			slaStats := servingSweepSelectionStats(rep, track.Track, track.SLAKnee.Concurrency)
+			fmt.Fprintf(w, " sla-knee=c%d/%s", track.SLAKnee.Concurrency, formatServingThroughput(slaStats))
+			fmt.Fprint(w, " sla-evidence=[")
+			writeServingMeasurementEvidence(w, slaStats)
+			fmt.Fprint(w, "]")
 		} else {
 			fmt.Fprintf(w, " sla-knee=%s", track.SLAStatus)
 		}

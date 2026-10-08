@@ -268,17 +268,24 @@ type ServingSample struct {
 }
 
 type ServingStats struct {
-	Requests           int            `json:"requests"`
-	OK                 int            `json:"ok"`
-	Failed             int            `json:"failed"`
-	TTFTMillis         QuantileMetric `json:"ttft_ms"`
-	ITLMillis          QuantileMetric `json:"itl_ms"`
-	TPOTMillis         QuantileMetric `json:"tpot_ms"`
-	EndToEndMillis     QuantileMetric `json:"end_to_end_ms"`
-	ThroughputTokensS  ScalarMetric   `json:"throughput_tok_s"`
-	GoodputRPS         ScalarMetric   `json:"goodput_rps"`
-	PrefixCacheHitRate ScalarMetric   `json:"prefix_cache_hit_rate"`
-	TokenCountBasis    string         `json:"token_count_basis"`
+	Requests                       int            `json:"requests"`
+	OK                             int            `json:"ok"`
+	Failed                         int            `json:"failed"`
+	TTFTMillis                     QuantileMetric `json:"ttft_ms"`
+	ITLMillis                      QuantileMetric `json:"itl_ms"`
+	TPOTMillis                     QuantileMetric `json:"tpot_ms"`
+	EndToEndMillis                 QuantileMetric `json:"end_to_end_ms"`
+	ThroughputTokensS              ScalarMetric   `json:"throughput_tok_s"`
+	GoodputRPS                     ScalarMetric   `json:"goodput_rps"`
+	GoodputTokensS                 ScalarMetric   `json:"goodput_tok_s"`
+	PrefixCacheHitRate             ScalarMetric   `json:"prefix_cache_hit_rate"`
+	TokenCountBasis                string         `json:"token_count_basis"`
+	WallSeconds                    *float64       `json:"wall_seconds,omitempty"`
+	GoodputSLOSeconds              *float64       `json:"goodput_slo_seconds,omitempty"`
+	SuccessfulOutputTokensExact    *int64         `json:"successful_output_tokens_exact,omitempty"`
+	SLOSuccessfulOutputTokensExact *int64         `json:"slo_successful_output_tokens_exact,omitempty"`
+	ObservedMaxInFlight            *int           `json:"observed_max_in_flight,omitempty"`
+	ObservedInFlightBasis          string         `json:"observed_in_flight_basis,omitempty"`
 }
 
 type QuantileMetric struct {
@@ -404,11 +411,12 @@ func measureTrack(ctx context.Context, cfg ServingParityConfig, tc ServingTrackC
 	}
 
 	start := time.Now()
-	samples := runSamples(ctx, cfg.Client, tc, model, cfg.Workload, cfg.Concurrency, cfg.Timeout)
+	samples, observedMaxInFlight := runSamples(ctx, cfg.Client, tc, model, cfg.Workload, cfg.Concurrency, cfg.Timeout)
 	wall := time.Since(start)
 	res.Samples = samples
 	res.Status = "measured"
 	res.Stats = FoldServingSamples(samples, wall.Seconds(), cfg.SLO)
+	setServingOverlapEvidence(&res.Stats, observedMaxInFlight)
 	res.Stats.PrefixCacheHitRate = FetchPrefixCacheHitRate(ctx, cfg.Client, tc.MetricsURL)
 	return res, nil
 }
@@ -421,12 +429,13 @@ func emptyServingStats(reason string) ServingStats {
 		EndToEndMillis:     notMeasuredQuantile("ms", reason),
 		ThroughputTokensS:  notMeasuredScalar("stream_content_events/s", reason),
 		GoodputRPS:         notMeasuredScalar("requests/s", reason),
+		GoodputTokensS:     notMeasuredScalar("usage.completion_tokens/s", reason),
 		PrefixCacheHitRate: notMeasuredScalar("ratio", reason),
 		TokenCountBasis:    "stream_content_events",
 	}
 }
 
-func runSamples(ctx context.Context, client *http.Client, tc ServingTrackConfig, model string, workload []ServingRequest, concurrency int, timeout time.Duration) []ServingSample {
+func runSamples(ctx context.Context, client *http.Client, tc ServingTrackConfig, model string, workload []ServingRequest, concurrency int, timeout time.Duration) ([]ServingSample, *int) {
 	type job struct {
 		index int
 		req   ServingRequest
@@ -439,13 +448,14 @@ func runSamples(ctx context.Context, client *http.Client, tc ServingTrackConfig,
 	}
 	out := make([]ServingSample, len(workload))
 	jobs := make(chan job)
+	overlap := &servingInFlightTracker{}
 	var wg sync.WaitGroup
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				out[j.index] = MeasureSSERequest(ctx, client, tc, model, j.req, timeout)
+				out[j.index] = measureSSERequest(ctx, client, tc, model, j.req, timeout, overlap)
 			}
 		}()
 	}
@@ -454,10 +464,15 @@ func runSamples(ctx context.Context, client *http.Client, tc ServingTrackConfig,
 	}
 	close(jobs)
 	wg.Wait()
-	return out
+	max := overlap.maxObserved()
+	return out, &max
 }
 
 func MeasureSSERequest(ctx context.Context, client *http.Client, tc ServingTrackConfig, model string, req ServingRequest, timeout time.Duration) ServingSample {
+	return measureSSERequest(ctx, client, tc, model, req, timeout, nil)
+}
+
+func measureSSERequest(ctx context.Context, client *http.Client, tc ServingTrackConfig, model string, req ServingRequest, timeout time.Duration, overlap *servingInFlightTracker) ServingSample {
 	sample := ServingSample{
 		ID:                   req.ID,
 		Status:               "fail",
@@ -507,6 +522,8 @@ func MeasureSSERequest(ctx context.Context, client *http.Client, tc ServingTrack
 		}
 	}
 
+	finishOverlap := overlap.begin()
+	defer finishOverlap()
 	start := time.Now()
 	resp, err := client.Do(httpReq)
 	if err != nil {
@@ -748,7 +765,7 @@ func FoldServingSamples(samples []ServingSample, wallSeconds float64, slo time.D
 		if s.Status == "ok" {
 			stats.OK++
 			e2e = append(e2e, s.EndToEndMillis)
-			if slo > 0 && time.Duration(s.EndToEndMillis*float64(time.Millisecond)) <= slo {
+			if servingWithinSLO(s.EndToEndMillis, slo) {
 				good++
 			}
 			if s.TTFTMillis != nil {
@@ -765,6 +782,7 @@ func FoldServingSamples(samples []ServingSample, wallSeconds float64, slo time.D
 		}
 	}
 	stats.TokenCountBasis = servingStatsTokenBasis(tokenBases)
+	setServingExactEvidence(&stats, samples, wallSeconds, slo)
 	stats.TTFTMillis = quantiles(ttft, "ms", "no streaming first-token measurements")
 	stats.ITLMillis = quantiles(itl, "ms", "no inter-token measurements")
 	stats.TPOTMillis = quantiles(tpot, "ms", "no TPOT measurements")
@@ -773,13 +791,25 @@ func FoldServingSamples(samples []ServingSample, wallSeconds float64, slo time.D
 	if stats.TokenCountBasis != "mixed" {
 		throughputUnit = stats.TokenCountBasis + "/s"
 	}
-	if wallSeconds > 0 && tokens > 0 {
-		stats.ThroughputTokensS = measuredScalar(float64(tokens)/wallSeconds, throughputUnit, "")
+	if servingFinitePositive(wallSeconds) && tokens > 0 {
+		rate := float64(tokens) / wallSeconds
+		if servingFiniteNonnegative(rate) {
+			stats.ThroughputTokensS = measuredScalar(rate, throughputUnit, "")
+		} else {
+			stats.ThroughputTokensS = notMeasuredScalar(throughputUnit, "derived token throughput is not finite")
+		}
 	} else {
 		stats.ThroughputTokensS = notMeasuredScalar(throughputUnit, "no output tokens measured")
 	}
-	if wallSeconds > 0 && stats.OK > 0 {
-		stats.GoodputRPS = measuredScalar(float64(good)/wallSeconds, "requests/s", "")
+	if slo <= 0 {
+		stats.GoodputRPS = notMeasuredScalar("requests/s", "no positive end-to-end SLO configured")
+	} else if servingFinitePositive(wallSeconds) && stats.OK > 0 {
+		rate := float64(good) / wallSeconds
+		if servingFiniteNonnegative(rate) {
+			stats.GoodputRPS = measuredScalar(rate, "requests/s", "")
+		} else {
+			stats.GoodputRPS = notMeasuredScalar("requests/s", "derived request goodput is not finite")
+		}
 	} else {
 		stats.GoodputRPS = notMeasuredScalar("requests/s", "no successful requests measured")
 	}
