@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -586,12 +587,13 @@ func TestGuardChildResourceHeadroomDebounceAndRecovery(t *testing.T) {
 		stop := make(chan struct{})
 		defer close(stop)
 
-		var yieldCalled bool
-		var yieldPIDs []int
+		yielded := make(chan []int, 1)
 		oldYield := guardYieldMemory
 		guardYieldMemory = func(pids ...int) {
-			yieldCalled = true
-			yieldPIDs = append(yieldPIDs, pids...)
+			select {
+			case yielded <- append([]int(nil), pids...):
+			default:
+			}
 		}
 		t.Cleanup(func() { guardYieldMemory = oldYield })
 
@@ -625,11 +627,13 @@ func TestGuardChildResourceHeadroomDebounceAndRecovery(t *testing.T) {
 		default:
 		}
 
-		if !yieldCalled {
+		select {
+		case yieldPIDs := <-yielded:
+			if len(yieldPIDs) == 0 || yieldPIDs[0] != 42 {
+				t.Fatalf("expected YieldMemory to receive rootPID 42, got %v", yieldPIDs)
+			}
+		default:
 			t.Fatal("expected procguard.YieldMemory to be invoked on headroom refusal")
-		}
-		if len(yieldPIDs) == 0 || yieldPIDs[0] != 42 {
-			t.Fatalf("expected YieldMemory to receive rootPID 42, got %v", yieldPIDs)
 		}
 
 		// Wait for event after debounce window expires
@@ -744,16 +748,22 @@ func TestGuardChildResourceHeadroomDebounceAndRecovery(t *testing.T) {
 		stop := make(chan struct{})
 		defer close(stop)
 
-		var suspendedPIDs []int
-		var resumedPIDs []int
+		suspendedPIDs := make(chan int, 1)
+		resumedPIDs := make(chan int, 1)
 		oldSuspend := guardSuspendProcess
 		oldResume := guardResumeProcess
 		guardSuspendProcess = func(pid int) error {
-			suspendedPIDs = append(suspendedPIDs, pid)
+			select {
+			case suspendedPIDs <- pid:
+			default:
+			}
 			return nil
 		}
 		guardResumeProcess = func(pid int) error {
-			resumedPIDs = append(resumedPIDs, pid)
+			select {
+			case resumedPIDs <- pid:
+			default:
+			}
 			return nil
 		}
 		t.Cleanup(func() {
@@ -788,20 +798,22 @@ func TestGuardChildResourceHeadroomDebounceAndRecovery(t *testing.T) {
 			}, true, ""
 		})
 
-		// Wait for both suspension and resumption to occur
-		deadline := time.Now().Add(1 * time.Second)
-		for time.Now().Before(deadline) {
-			if len(suspendedPIDs) > 0 && len(resumedPIDs) > 0 {
-				break
+		// Channel observations synchronize with the monitor's callbacks.
+		for _, call := range []struct {
+			name string
+			pids <-chan int
+		}{
+			{"guardSuspendProcess", suspendedPIDs},
+			{"guardResumeProcess", resumedPIDs},
+		} {
+			select {
+			case pid := <-call.pids:
+				if pid != 42 {
+					t.Fatalf("expected %s to be called with PID 42, got %d", call.name, pid)
+				}
+			case <-time.After(time.Second):
+				t.Fatalf("timed out waiting for %s", call.name)
 			}
-			time.Sleep(10 * time.Millisecond)
-		}
-
-		if len(suspendedPIDs) == 0 || suspendedPIDs[0] != 42 {
-			t.Fatalf("expected guardSuspendProcess to be called with PID 42, got %v", suspendedPIDs)
-		}
-		if len(resumedPIDs) == 0 || resumedPIDs[0] != 42 {
-			t.Fatalf("expected guardResumeProcess to be called with PID 42, got %v", resumedPIDs)
 		}
 
 		select {
@@ -873,6 +885,113 @@ func TestGuardChildResourceHeadroomDebounceAndRecovery(t *testing.T) {
 	})
 }
 
+// fak-test:runtime fast est=100ms lane=default
+func TestGuardChildResourceMonitorCapturesProcessHooks(t *testing.T) {
+	oldYield, oldSuspend, oldResume := guardYieldMemory, guardSuspendProcess, guardResumeProcess
+	stop := make(chan struct{})
+	release := make(chan struct{})
+	type call struct {
+		pid         int
+		replacement bool
+	}
+	suspended, yielded, resumed := make(chan call, 1), make(chan call, 1), make(chan call, 1)
+	resumeObserved := false
+	t.Cleanup(func() {
+		select {
+		case <-stop:
+		default:
+			close(stop)
+		}
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+		if !resumeObserved {
+			select {
+			case <-resumed:
+				resumeObserved = true
+			case <-time.After(2 * time.Second):
+				// Keep mock hooks installed if a live monitor cannot be ruled out.
+				// Restoring real hooks here would make the unpatched red test unsafe.
+				t.Error("monitor did not resume; leaving mock process hooks installed")
+				return
+			}
+		}
+		guardYieldMemory, guardSuspendProcess, guardResumeProcess = oldYield, oldSuspend, oldResume
+	})
+
+	observe := func(ch chan<- call, pid int, replacement bool) {
+		select {
+		case ch <- call{pid: pid, replacement: replacement}:
+		default:
+		}
+	}
+	guardSuspendProcess = func(pid int) error { observe(suspended, pid, false); return nil }
+	guardYieldMemory = func(pids ...int) {
+		for _, pid := range pids {
+			observe(yielded, pid, false)
+		}
+	}
+	guardResumeProcess = func(pid int) error { observe(resumed, pid, false); return nil }
+
+	events := startGuardChildResourceMonitorWithCollector(42, "trace-hook-snapshot", "test-agent", guardResourcePolicy{
+		PollInterval:      time.Millisecond,
+		Metric:            procguard.MemoryMetricCommit,
+		MaxTreeBytes:      1000,
+		MinSystemHeadroom: 100,
+		HeadroomDebounce:  time.Hour,
+		Stop:              stop,
+	}, func(pid int) (procguard.MemorySnapshot, bool, string) {
+		<-release
+		return procguard.MemorySnapshot{
+			Metric:      procguard.MemoryMetricCommit,
+			RootPID:     42,
+			TreeBytes:   10,
+			SystemBytes: 950,
+			SystemLimit: 1000,
+			Processes:   []procguard.MemoryProcess{{PID: 42, Bytes: 10}},
+		}, true, ""
+	})
+
+	// Replace every package hook while collection is gated. This monitor must
+	// retain its original callbacks, including the resume deferred until exit.
+	guardSuspendProcess = func(pid int) error { observe(suspended, pid, true); return nil }
+	guardYieldMemory = func(pids ...int) {
+		for _, pid := range pids {
+			observe(yielded, pid, true)
+		}
+	}
+	guardResumeProcess = func(pid int) error { observe(resumed, pid, true); return nil }
+	close(release)
+
+	waitCall := func(name string, ch <-chan call) {
+		t.Helper()
+		select {
+		case got := <-ch:
+			if ch == resumed {
+				resumeObserved = true
+			}
+			if got.pid != 42 || got.replacement {
+				// Complete the stop/resume handshake even when the original
+				// implementation selects a replacement hook.
+				t.Errorf("%s used wrong hook or PID: %+v", name, got)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for %s", name)
+		}
+	}
+	waitCall("suspend", suspended)
+	waitCall("yield", yielded)
+	close(stop)
+	waitCall("deferred resume", resumed)
+	select {
+	case event := <-events:
+		t.Fatalf("unexpected resource event while stopping during debounce: %+v", event)
+	default:
+	}
+}
+
 func TestGuardHeadroomDebounceConfiguration(t *testing.T) {
 	oldConfig := guardResourceConfigured
 	t.Cleanup(func() { setGuardResourceConfig(oldConfig) })
@@ -920,10 +1039,10 @@ func TestGuardChildResourceDynamicReasoningPostureDebouncing(t *testing.T) {
 		stop := make(chan struct{})
 		defer close(stop)
 
-		var yieldCalled bool
+		var yieldCalled atomic.Bool
 		oldYield := guardYieldMemory
 		guardYieldMemory = func(pids ...int) {
-			yieldCalled = true
+			yieldCalled.Store(true)
 		}
 		t.Cleanup(func() { guardYieldMemory = oldYield })
 
@@ -967,7 +1086,7 @@ func TestGuardChildResourceDynamicReasoningPostureDebouncing(t *testing.T) {
 			// Absorbed successfully!
 		}
 
-		if !yieldCalled {
+		if !yieldCalled.Load() {
 			t.Fatal("expected guardYieldMemory to be called during transient spike")
 		}
 	})

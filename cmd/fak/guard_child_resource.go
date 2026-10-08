@@ -588,6 +588,9 @@ func startGuardChildResourceMonitorWithCollectors(rootPID int, traceID, agent st
 	recordGuardChildResourceUsage(traceID, agent, rootPID, policy)
 	out := make(chan guardChildWaitEvent, 1)
 	debounceWindow := policy.effectiveHeadroomDebounce()
+	// Hooks belong to this monitor, including its deferred resumption. Tests may
+	// restore the package hooks after requesting stop but before cleanup runs.
+	yieldMemory, suspendProcess, resumeProcess := guardYieldMemory, guardSuspendProcess, guardResumeProcess
 	go func() {
 		ticker := time.NewTicker(policy.PollInterval)
 		defer ticker.Stop()
@@ -598,7 +601,7 @@ func startGuardChildResourceMonitorWithCollectors(rootPID int, traceID, agent st
 		var childSuspended bool
 		defer func() {
 			if childSuspended {
-				_ = guardResumeProcess(rootPID)
+				_ = resumeProcess(rootPID)
 			}
 		}()
 		for {
@@ -669,7 +672,7 @@ func startGuardChildResourceMonitorWithCollectors(rootPID int, traceID, agent st
 			}
 			if !decision.Stop {
 				if childSuspended {
-					_ = guardResumeProcess(rootPID)
+					_ = resumeProcess(rootPID)
 					childSuspended = false
 				}
 				headroomFirstSeen = time.Time{}
@@ -677,10 +680,10 @@ func startGuardChildResourceMonitorWithCollectors(rootPID int, traceID, agent st
 			}
 			if decision.Reason == procguard.SystemCommitHeadroomReason {
 				if !childSuspended {
-					_ = guardSuspendProcess(rootPID)
+					_ = suspendProcess(rootPID)
 					childSuspended = true
 				}
-				guardYieldMemory(rootPID)
+				yieldMemory(rootPID)
 				now := time.Now()
 				if headroomFirstSeen.IsZero() {
 					headroomFirstSeen = now
