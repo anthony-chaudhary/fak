@@ -38,6 +38,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
+	"github.com/anthony-chaudhary/fak/pkg/gatewayauth"
 )
 
 // ---------------------------------------------------------------------------
@@ -656,25 +657,37 @@ func indRegisteredRoutes(t *testing.T) map[string]string {
 				// ({"pattern", s.handler}, not {pattern: ..., handler: ...}),
 				// so each element is itself a CompositeLit. Accept the keyed
 				// form too so a reformat cannot silently disarms this oracle.
-				var patternLit *ast.BasicLit
+				var patternExpr ast.Expr
 				var handlerExpr ast.Expr
 				switch e := elt.(type) {
 				case *ast.CompositeLit:
 					if len(e.Elts) == 2 {
-						patternLit, _ = e.Elts[0].(*ast.BasicLit)
+						patternExpr = e.Elts[0]
 						handlerExpr = e.Elts[1]
 					}
 				case *ast.KeyValueExpr:
-					patternLit, _ = e.Key.(*ast.BasicLit)
+					patternExpr = e.Key
 					handlerExpr = e.Value
 				default:
 					continue
 				}
-				if patternLit == nil || patternLit.Kind != token.STRING {
-					continue
-				}
-				pattern, err := strconv.Unquote(patternLit.Value)
-				if err != nil {
+				var pattern string
+				switch e := patternExpr.(type) {
+				case *ast.BasicLit:
+					if e.Kind != token.STRING {
+						continue
+					}
+					pattern, err = strconv.Unquote(e.Value)
+					if err != nil {
+						continue
+					}
+				case *ast.SelectorExpr:
+					pkg, ok := e.X.(*ast.Ident)
+					if !ok || pkg.Name != "gatewayauth" || e.Sel.Name != "KeyProofPath" {
+						continue
+					}
+					pattern = gatewayauth.KeyProofPath
+				default:
 					continue
 				}
 				handler := "<not-a-method-value>"
