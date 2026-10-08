@@ -576,6 +576,13 @@ concurrent = [
   "gatewayauth",
   "pendingadmission",
   "worktreecheck",
+  "benchingest",
+  "breathgate",
+  "cluster",
+  "customizationindex",
+  "observability",
+  "readmenext",
+  "reflexagent",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -843,7 +850,7 @@ capindexgw = ["internal/capindexgw/**"]
 compute = ["internal/compute/**"]
 cluster = ["internal/cluster/**"]
 cdb = ["internal/cdb/**"]
-ctxmmu = ["internal/ctxmmu/**"]
+ctxmmu = ["internal/ctxmmu/**", "pkg/ctxmmu/**"]
 engine = ["internal/engine/**"]
 gateway = ["internal/gateway/**"]
 # --- Sub-lanes for `internal/gateway` (2026-09-21 census: 270 non-test files, 1 package) --
@@ -1171,7 +1178,7 @@ covmatrix = ["internal/covmatrix/**"]
 ctxknobs = ["internal/ctxknobs/**"]
 ctxplans = ["internal/ctxplans/**"]
 dataslot = ["internal/dataslot/**"]
-deadlineadmit = ["internal/deadlineadmit/**"]
+deadlineadmit = ["internal/deadlineadmit/**", "pkg/deadlineadmit/**"]
 deepseekbench = ["internal/deepseekbench/**"]
 deepseekv4kv = ["internal/deepseekv4kv/**"]
 deepseekv4moe = ["internal/deepseekv4moe/**"]

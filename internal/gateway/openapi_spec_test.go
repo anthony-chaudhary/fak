@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/pkg/gatewayauth"
 )
 
 // specPathFor maps each ServeMux registration pattern in routeTable() to the
@@ -87,11 +89,12 @@ var specPathFor = map[string]string{
 	// Multi-node dev-server read plane (#2297).
 	"/v1/leases": "/v1/leases",
 	// Multi-node dev-server write plane (#2299): POST /v1/leases/{acquire,renew,release}.
-	"/v1/leases/":  "/v1/leases/{op}",
-	"/v1/sessions": "/v1/sessions",
-	"/mcp":         "/mcp",
-	"/healthz":     "/healthz",
-	"/metrics":     "/metrics",
+	"/v1/leases/":            "/v1/leases/{op}",
+	"/v1/sessions":           "/v1/sessions",
+	"/mcp":                   "/mcp",
+	gatewayauth.KeyProofPath: gatewayauth.KeyProofPath,
+	"/healthz":               "/healthz",
+	"/metrics":               "/metrics",
 	// Fak-native engine introspection, projected from the same live state
 	// /metrics renders (serving_props.go).
 	"/props":             "/props",
@@ -409,4 +412,27 @@ func specHasPathKey(spec, path string) bool {
 		}
 	}
 	return false
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestKeyProofOpenAPIContract(t *testing.T) {
+	raw, err := os.ReadFile(filepath.FromSlash(openAPISpecPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := string(raw)
+	marker := "\n  " + gatewayauth.KeyProofPath + ":\n"
+	start := strings.Index(spec, marker)
+	if start < 0 {
+		t.Fatal("key-proof OpenAPI path missing")
+	}
+	section := spec[start+len(marker):]
+	if end := strings.Index(section, "\n  /healthz:"); end >= 0 {
+		section = section[:end]
+	}
+	for _, required := range []string{"get:", "security: []", "X-Fak-Auth-Challenge", "X-Fak-Auth-Proof", "32-byte", "fak-health-v1", "no-store", "'200':", "'400':", "'405':", "'503':", "Allow:", "GET", "relay", "Keyset-only"} {
+		if !strings.Contains(section, required) {
+			t.Errorf("key-proof OpenAPI contract missing %q", required)
+		}
+	}
 }

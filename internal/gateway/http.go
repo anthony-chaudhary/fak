@@ -246,6 +246,7 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/v1/sessions", s.handleLeaseSessions},
 		// MCP-over-HTTP, operational endpoints.
 		{"/mcp", s.handleAuthenticatedMCPHTTP},
+		{gatewayauth.KeyProofPath, s.handleKeyProof},
 		{"/healthz", s.handleHealthWithAuthProof},
 		{"/metrics", s.handleMetrics},
 		// Fak-native engine introspection, projected from the SAME live state
@@ -278,6 +279,10 @@ func (s *Server) handleControlDirectives(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.controlIngress.ServeHTTP(w, r)
+}
+
+func (s *Server) handleKeyProof(w http.ResponseWriter, r *http.Request) {
+	gatewayauth.ServeKeyProof(w, r, s.requireKey)
 }
 
 // handleHealthWithAuthProof preserves the unauthenticated health response while
@@ -594,6 +599,9 @@ func (s *Server) authExempt(r *http.Request) bool {
 	// before it can submit or read a provisional control directive.
 	if isControlDirectivePath(r.URL.Path) {
 		return false
+	}
+	if r.URL.Path == gatewayauth.KeyProofPath {
+		return true
 	}
 	if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 		return true

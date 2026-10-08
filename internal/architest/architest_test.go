@@ -885,6 +885,8 @@ var tier = map[string]int{
 	"radixpager":     4, // ctxmmu pager adapter over radixkv(4) and model; imported only by pkg/ctxmmu.
 	"naivecontrol":   2,
 	"testgit":        1,
+	"fakroot":        1,
+	"stepobs":        2,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

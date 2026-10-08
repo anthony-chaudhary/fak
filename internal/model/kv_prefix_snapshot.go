@@ -362,6 +362,7 @@ func (p *PrefixSnapshot) Restore(s *Session) error {
 	if p.v41 != nil {
 		if p.v41.hadState {
 			s.v41Forward = p.v41.restore()
+			s.v41State()
 		} else {
 			s.v41Forward = nil
 		}
@@ -454,8 +455,8 @@ func (n *v41ForwardSnapshot) clone() *v41ForwardSnapshot {
 // restore builds a fresh v41ForwardState that takes ownership of the snapshot's
 // deep-owned rows. It never aliases the snapshot: the history is copied and the
 // layer slice is handed over, then the snapshot's references are cleared by the
-// caller. expertGateUp is left nil so the restored session rebinds it on first
-// use through Session.v41State.
+// caller. Session callbacks are left nil for the destination session to bind
+// through Session.v41State, eagerly in PrefixSnapshot.Restore or on first use.
 func (n *v41ForwardSnapshot) restore() *v41ForwardState {
 	if n == nil {
 		return nil

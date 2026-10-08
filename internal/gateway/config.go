@@ -466,7 +466,9 @@ type Config struct {
 	// serve is gated until the device NCCL CollectiveBackend lands — serve rejects N>1 until then.
 	ExpertParallelRanks int
 	// RequireKey, if non-empty, is the bearer token the gateway REQUIRES on every
-	// request (except /healthz). Empty => no auth (drop-in compatible, loopback).
+	// protected runtime request. Health/readiness and the exact key-proof route
+	// are auth-exempt; scoped discovery/observability exemptions are defined by
+	// authExempt. Empty => no single-key auth (KeyPrincipals may still require auth).
 	RequireKey string
 	// AllowLAN, when true, exempts callers originating from private/local network
 	// addresses (RFC 1918 IPv4, link-local IPv4/IPv6, unique-local IPv6, and loopback)

@@ -48,7 +48,9 @@ servers:
 
 # ---------------------------------------------------------------------------
 # Security. Auth is OFF by default (drop-in, loopback). When the operator sets a
-# secret via `--require-key-env <ENV>`, EVERY route except /healthz requires it.
+# secret via `--require-key-env <ENV>`, protected runtime routes require it.
+# Health/readiness and exact /v1/fak/key-proof are auth-exempt; scoped discovery
+# and observability exemptions are defined by gateway authExempt.
 # Both schemes compare against the SAME single secret in constant time. A bare
 # `Authorization` value with no `Bearer ` prefix is rejected.
 # ---------------------------------------------------------------------------
@@ -2705,11 +2707,62 @@ paths:
   # -------------------------------------------------------------------------
   # Operational endpoints
   # -------------------------------------------------------------------------
+  /v1/fak/key-proof:
+    get:
+      tags: [Operational]
+      summary: Prove configured key possession before sending credentials
+      description: >-
+        Exact auth-exempt GET route, independent of readiness. Send a fresh
+        32-byte nonce encoded as standard base64 in X-Fak-Auth-Challenge without
+        Authorization. X-Fak-Auth-Proof is standard base64 of HMAC-SHA256 under
+        the configured RequireKey over UTF-8 "fak-health-v1" followed by a zero
+        byte and the decoded nonce. A successful response has an empty body.
+        Clients must verify the proof in constant time before sending credentials.
+        Proof can be relayed and establishes key possession, not process identity.
+        Invalid challenges emit no proof. Keyset-only deployments without a
+        single RequireKey return 503; no principal key is selected for proof.
+        All responses use Cache-Control no-store. Other methods return 405 with
+        Allow GET and no proof. Client legacy health fallback is permitted only
+        for unsupported-route statuses 404, 405, or 501, never authentication errors.
+      security: []
+      parameters:
+        - name: X-Fak-Auth-Challenge
+          in: header
+          required: true
+          description: Fresh standard-base64 nonce decoding to exactly 32 bytes.
+          schema: { type: string, format: byte }
+      responses:
+        '200':
+          description: Key-possession proof; empty response body.
+          headers:
+            X-Fak-Auth-Proof:
+              description: Standard-base64 HMAC-SHA256 for this challenge.
+              schema: { type: string, format: byte }
+            Cache-Control:
+              schema: { type: string, enum: [no-store] }
+        '400':
+          description: Missing, invalid-base64, or wrong-size challenge; no proof.
+          headers:
+            Cache-Control:
+              schema: { type: string, enum: [no-store] }
+        '405':
+          description: Method is not GET; no proof.
+          headers:
+            Allow:
+              schema: { type: string, enum: [GET] }
+            Cache-Control:
+              schema: { type: string, enum: [no-store] }
+        '503':
+          description: No single configured RequireKey; no proof.
+          headers:
+            Cache-Control:
+              schema: { type: string, enum: [no-store] }
+
   /healthz:
     get:
       tags: [Operational]
       summary: Liveness check (auth-exempt)
-      description: The ONLY auth-exempt route, so a load balancer can probe an authenticated gateway. Method is not enforced; GET is canonical.
+      description: Auth-exempt liveness route for load balancer probes. Method is not enforced; GET is canonical. Key possession can be checked independently of readiness at /v1/fak/key-proof.
       security: []
       responses:
         '200':

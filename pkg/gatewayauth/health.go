@@ -27,3 +27,30 @@ func WriteHealthProof(w http.ResponseWriter, r *http.Request, key string) {
 		}
 	}
 }
+
+// ServeKeyProof serves only the dedicated pre-authentication GET proof route.
+// It uses the existing health challenge/HMAC without evaluating readiness or
+// accepting credentials. Proof establishes key possession, not process identity.
+func ServeKeyProof(w http.ResponseWriter, r *http.Request, key string) {
+	w.Header().Del("X-Fak-Auth-Proof")
+	w.Header().Set("Cache-Control", "no-store")
+	if r.URL.Path != KeyProofPath {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "key proof requires GET", http.StatusMethodNotAllowed)
+		return
+	}
+	if key == "" {
+		http.Error(w, "key proof unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	WriteHealthProof(w, r, key)
+	if w.Header().Get("X-Fak-Auth-Proof") == "" {
+		http.Error(w, "invalid key proof challenge", http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}

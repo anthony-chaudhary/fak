@@ -47,6 +47,31 @@ func (r laneRoster) declared(lane string) bool {
 	return false
 }
 
+// leafCoverageProblem resolves authored whole-package ownership, rather than
+// assuming that the owner lane has the package's basename. Coverage requires
+// exactly one owner of the exact base/leaf/** root and a real roster declaration;
+// a tree-table key alone, a sentinel file or a narrower subtree is not coverage.
+func (r laneRoster) leafCoverageProblem(base, leaf string) string {
+	var owners []string
+	for lane, globs := range r.trees {
+		if treeCoversLeaf(globs, base, leaf) {
+			owners = append(owners, lane)
+		}
+	}
+	sort.Strings(owners)
+	root := base + "/" + leaf + "/**"
+	if len(owners) == 0 {
+		return "no [lanes.trees] owner of " + root
+	}
+	if len(owners) != 1 {
+		return "multiple [lanes.trees] owners of " + root + ": " + strings.Join(owners, ", ")
+	}
+	if !r.declared(owners[0]) {
+		return "tree owner " + owners[0] + " has no [lanes] declaration"
+	}
+	return ""
+}
+
 // stripTOMLComment drops a trailing `#` comment, ignoring a `#` inside a quoted string.
 // dos.toml comments routinely carry issue refs ("# #5059: ..."), so the scan has to be
 // quote-aware rather than cutting at the first byte.
@@ -145,11 +170,12 @@ func readLaneRoster(t *testing.T) laneRoster {
 	return r
 }
 
-// TestEveryLeafDeclaresLane is the coverage half: every internal/<leaf> package on disk has
-// BOTH a [lanes] declaration (concurrent or exclusive) and a [lanes.trees] entry rooted at
-// its own subtree. An undeclared leaf is not a missing label — it is an empty tree, and an
-// empty tree conservatively overlaps every live lease (laneadmit.Decide), so it drops the
-// fleet's parallel width to one for as long as anyone works on it.
+// TestEveryLeafDeclaresLane is the coverage half: every internal/<leaf> and pkg/<leaf>
+// package on disk has one authored [lanes.trees] owner of its whole package root,
+// declared concurrent or exclusive. An owner may intentionally cover several packages;
+// its lane name need not equal each package's basename. Missing ownership is an
+// empty-tree hazard: an empty tree conservatively overlaps every live lease
+// (laneadmit.Decide), dropping the fleet's parallel width while the worker runs.
 //
 // FLEET-SAFETY SCOPING (#2088, the same contract TestEveryPackageDeclaresTier uses):
 // architest runs on EVERY push to the shared trunk, so a naive "any undeclared leaf fails"
@@ -179,51 +205,43 @@ func TestEveryLeafDeclaresLane(t *testing.T) {
 		}
 	}
 
-	var missing, missingLeaves []string
+	var missing, missingRoots []string
 	for _, tgt := range targets {
-		var why []string
-		if !roster.declared(tgt.leaf) {
-			why = append(why, "no [lanes] declaration")
-		}
-		if !treeCoversLeaf(roster.trees[tgt.leaf], tgt.leaf) {
-			why = append(why, "no [lanes.trees] entry rooted at "+tgt.base+"/"+tgt.leaf+"/")
-		}
-		if len(why) == 0 {
+		why := roster.leafCoverageProblem(tgt.base, tgt.leaf)
+		if why == "" {
 			continue
 		}
-		detail := tgt.base + "/" + tgt.leaf + ": " + strings.Join(why, " and ")
+		detail := tgt.base + "/" + tgt.leaf + ": " + why
 		if undeclaredLeafVerdict(scoped, touched[tgt.leaf]) {
 			t.Logf("advisory: %s, but this push's commits do not touch it (a peer's leaf, or "+
 				"pre-existing trunk debt). Its owner should declare it with:\n  %s\n"+
-				"This push is not blocked for it.", detail, laneDeclarationFix(tgt.leaf))
+				"This push is not blocked for it.", detail, laneDeclarationFix(tgt.base+"/"+tgt.leaf))
 			continue
 		}
 		missing = append(missing, detail)
-		missingLeaves = append(missingLeaves, tgt.leaf)
+		missingRoots = append(missingRoots, tgt.base+"/"+tgt.leaf)
 	}
 	if len(missing) == 0 {
 		return
 	}
 	sort.Strings(missing)
-	sort.Strings(missingLeaves)
-	t.Errorf("%d leaf/leaves have no lane of their own:\n  %s\n"+
+	sort.Strings(missingRoots)
+	t.Errorf("%d leaf/leaves have no unique declared lane owner:\n  %s\n"+
 		"An undeclared leaf is NOT a cosmetic gap. laneadmit.Decide falls back to the lane's "+
 		"declared tree when a request carries none, and an empty tree conservatively overlaps "+
 		"EVERYTHING — so a worker on an undeclared leaf collides with every live lease and the "+
 		"fleet's concurrency drops to one until it finishes. dos.toml's header states the "+
-		"invariant: ONE LANE PER LEAF.\nFix — add both halves to dos.toml, e.g. for %q:\n%s",
-		len(missing), strings.Join(missing, "\n  "), missingLeaves[0], laneDeclarationFix(missingLeaves[0]))
+		"invariant: ONE LANE PER LEAF, including authored composite owners.\nFix ownership for %q:\n%s",
+		len(missing), strings.Join(missing, "\n  "), missingRoots[0], laneDeclarationFix(missingRoots[0]))
 }
 
-// treeCoversLeaf reports whether a lane's declared globs actually root at the leaf's own
-// subtree. A lane declared with someone else's glob is the same empty-tree hazard wearing
-// a name, so the entry has to point at internal/<leaf>/ or pkg/<leaf>/.
-func treeCoversLeaf(globs []string, leaf string) bool {
-	wantInternal := "internal/" + leaf + "/"
-	wantPkg := "pkg/" + leaf + "/"
+// treeCoversLeaf requires the exact whole-package root in its actual namespace.
+// A similarly named package in the other namespace, a subdirectory, file glob,
+// or broad catch-all does not establish this package's ownership.
+func treeCoversLeaf(globs []string, base, leaf string) bool {
+	want := base + "/" + leaf + "/**"
 	for _, g := range globs {
-		trimmed := strings.TrimSpace(g)
-		if strings.HasPrefix(trimmed, wantInternal) || strings.HasPrefix(trimmed, wantPkg) {
+		if strings.TrimSpace(g) == want {
 			return true
 		}
 	}
@@ -392,12 +410,10 @@ func duplicateLanes(lanes []string) []string {
 	return dups
 }
 
-func laneDeclarationFix(leaf string) string {
-	return "  [lanes].concurrent  += \"" + leaf + "\"\n" +
-		"  [lanes.trees]        " + leaf + " = [\"internal/" + leaf + "/**\"]\n" +
-		"  (or let `fak new-leaf " + leaf + "` write both at the `# new-leaf:` markers). " +
-		"Keep the tree at the leaf's own prefix so leaf trees stay pairwise disjoint, and " +
-		"declare the lane EXACTLY ONCE."
+func laneDeclarationFix(packageRoot string) string {
+	return "  Assign \"" + packageRoot + "/**\" to exactly one concurrent or exclusive lane in dos.toml.\n" +
+		"  Preserve an existing authored composite owner; do not add a competing package-named lane.\n" +
+		"  Keep leaf trees pairwise disjoint and declare each lane EXACTLY ONCE."
 }
 
 // TestLaneCoverageRulesRejectTheRegression proves the two gates above actually FIRE — a
@@ -405,22 +421,26 @@ func laneDeclarationFix(leaf string) string {
 // that can never fail. These are the pure rules, exercised on synthetic input.
 func TestLaneCoverageRulesRejectTheRegression(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		globs []string
-		leaf  string
-		want  bool
+		name       string
+		globs      []string
+		base, leaf string
+		want       bool
 	}{
-		{"own subtree", []string{"internal/agent/**"}, "agent", true},
-		{"pkg subtree", []string{"pkg/fakclient/**"}, "fakclient", true},
-		{"one of several", []string{"experiments/**", "internal/experiments/**"}, "experiments", true},
-		{"no entry at all", nil, "agent", false},
-		{"someone else's tree", []string{"internal/agenttopo/**"}, "agent", false},
-		{"someone else's pkg tree", []string{"pkg/fakclientextra/**"}, "fakclient", false},
-		{"prefix is not a path boundary", []string{"internal/agentdojo/**"}, "agent", false},
-		{"repo-wide glob does not claim a leaf", []string{"**/*"}, "agent", false},
+		{"own subtree", []string{"internal/agent/**"}, "internal", "agent", true},
+		{"pkg subtree", []string{"pkg/fakclient/**"}, "pkg", "fakclient", true},
+		{"one of several", []string{"experiments/**", "internal/experiments/**"}, "internal", "experiments", true},
+		{"wrong package namespace", []string{"pkg/agent/**"}, "internal", "agent", false},
+		{"subdirectory is not whole-package coverage", []string{"internal/agent/nested/**"}, "internal", "agent", false},
+		{"file glob is not whole-package coverage", []string{"internal/agent/*.go"}, "internal", "agent", false},
+		{"sentinel file is not whole-package coverage", []string{"internal/agent/_lane_ownership.go"}, "internal", "agent", false},
+		{"no entry at all", nil, "internal", "agent", false},
+		{"someone else's tree", []string{"internal/agenttopo/**"}, "internal", "agent", false},
+		{"someone else's pkg tree", []string{"pkg/fakclientextra/**"}, "pkg", "fakclient", false},
+		{"prefix is not a path boundary", []string{"internal/agentdojo/**"}, "internal", "agent", false},
+		{"repo-wide glob does not claim a leaf", []string{"**/*"}, "internal", "agent", false},
 	} {
-		if got := treeCoversLeaf(tc.globs, tc.leaf); got != tc.want {
-			t.Errorf("treeCoversLeaf(%q, %q) = %v, want %v (%s)", tc.globs, tc.leaf, got, tc.want, tc.name)
+		if got := treeCoversLeaf(tc.globs, tc.base, tc.leaf); got != tc.want {
+			t.Errorf("treeCoversLeaf(%q, %q, %q) = %v, want %v (%s)", tc.globs, tc.base, tc.leaf, got, tc.want, tc.name)
 		}
 	}
 	for _, tc := range []struct {
@@ -480,6 +500,42 @@ func TestLaneCoverageRulesRejectTheRegression(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=1ms lane=default
+func TestLaneCoverageUsesDeclaredPackageRootOwner(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		base       string
+		concurrent []string
+		exclusive  []string
+		trees      map[string][]string
+		want       string
+	}{
+		{"composite owner", "internal", []string{"composite"}, nil,
+			map[string][]string{"composite": {"internal/composite/**", "internal/alpha/**"}}, ""},
+		{"exclusive composite owner in pkg", "pkg", nil, []string{"composite"},
+			map[string][]string{"composite": {"pkg/alpha/**"}}, ""},
+		{"basename declaration does not declare authored owner", "internal", []string{"alpha"}, nil,
+			map[string][]string{"composite": {"internal/alpha/**"}}, "tree owner composite has no [lanes] declaration"},
+		{"missing ownership", "internal", []string{"alpha"}, nil, nil,
+			"no [lanes.trees] owner of internal/alpha/**"},
+		{"catch-all is not ownership", "internal", []string{"composite"}, nil,
+			map[string][]string{"composite": {"internal/**", "**/*"}}, "no [lanes.trees] owner of internal/alpha/**"},
+		{"multiple declared owners", "internal", []string{"peer", "composite"}, nil,
+			map[string][]string{"peer": {"internal/alpha/**"}, "composite": {"internal/alpha/**"}},
+			"multiple [lanes.trees] owners of internal/alpha/**: composite, peer"},
+		{"undeclared competing owner is still ambiguous", "internal", []string{"composite"}, nil,
+			map[string][]string{"peer": {"internal/alpha/**"}, "composite": {"internal/alpha/**"}},
+			"multiple [lanes.trees] owners of internal/alpha/**: composite, peer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			roster := laneRoster{concurrent: tc.concurrent, exclusive: tc.exclusive, trees: tc.trees}
+			if got := roster.leafCoverageProblem(tc.base, "alpha"); got != tc.want {
+				t.Fatalf("leaf coverage = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSyntheticUndeclaredPackageFiresLaneGate(t *testing.T) {
 	roster := laneRoster{
 		concurrent: []string{"gateway", "fakclient"},
@@ -503,15 +559,9 @@ func TestSyntheticUndeclaredPackageFiresLaneGate(t *testing.T) {
 
 	var missing []string
 	for _, tgt := range targets {
-		var why []string
-		if !roster.declared(tgt.leaf) {
-			why = append(why, "no [lanes] declaration")
-		}
-		if !treeCoversLeaf(roster.trees[tgt.leaf], tgt.leaf) {
-			why = append(why, "no [lanes.trees] entry rooted at "+tgt.base+"/"+tgt.leaf+"/")
-		}
-		if len(why) > 0 {
-			missing = append(missing, tgt.base+"/"+tgt.leaf+": "+strings.Join(why, " and "))
+		why := roster.leafCoverageProblem(tgt.base, tgt.leaf)
+		if why != "" {
+			missing = append(missing, tgt.base+"/"+tgt.leaf+": "+why)
 		}
 	}
 
@@ -520,9 +570,9 @@ func TestSyntheticUndeclaredPackageFiresLaneGate(t *testing.T) {
 	}
 
 	wantMissing := []string{
-		"internal/mockinternalgap: no [lanes] declaration and no [lanes.trees] entry rooted at internal/mockinternalgap/",
-		"pkg/mockpkggap: no [lanes] declaration and no [lanes.trees] entry rooted at pkg/mockpkggap/",
-		"pkg/notree: no [lanes.trees] entry rooted at pkg/notree/",
+		"internal/mockinternalgap: no [lanes.trees] owner of internal/mockinternalgap/**",
+		"pkg/mockpkggap: no [lanes.trees] owner of pkg/mockpkggap/**",
+		"pkg/notree: no [lanes.trees] owner of pkg/notree/**",
 	}
 	for i, want := range wantMissing {
 		if missing[i] != want {

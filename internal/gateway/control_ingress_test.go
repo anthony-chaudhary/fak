@@ -6,6 +6,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/engine"
 )
 
 const (
@@ -28,6 +31,8 @@ func (h *recordingControlIngress) ServeHTTP(w http.ResponseWriter, r *http.Reque
 
 func newControlIngressServer(t *testing.T, ingress ControlIngress, requireKey string, keyPrincipals map[string]string, allowLAN bool) *Server {
 	t.Helper()
+	// Sibling tests reset the ABI registry; declare this fixture's engine dependency.
+	abi.RegisterEngine("mock", engine.MockEngine)
 	srv, err := New(Config{
 		EngineID:       "mock",
 		Model:          "m",

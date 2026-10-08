@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -883,7 +884,16 @@ func TestStrixValidationBenchmarkArtifact(t *testing.T) {
 
 	// 5. Synthetic benchmark artifact verification with deterministic failure matrix
 	t.Run("synthetic_artifact_digest_mismatch", func(t *testing.T) {
-		receipt := validStrixReceipt(t)
+		// A serialized artifact retains digest integrity, not private verifier authority.
+		data, err := json.Marshal(validStrixReceipt(t))
+		if err != nil {
+			t.Fatalf("marshal synthetic receipt: %v", err)
+		}
+		var decoded StrixValidationReceipt
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			t.Fatalf("unmarshal synthetic receipt: %v", err)
+		}
+		receipt := &decoded
 		digest, err := receipt.ComputeDigest()
 		if err != nil {
 			t.Fatalf("ComputeDigest failed: %v", err)
@@ -894,9 +904,20 @@ func TestStrixValidationBenchmarkArtifact(t *testing.T) {
 		if err := receipt.Validate(); err != nil {
 			t.Fatalf("synthetic receipt should validate: %v", err)
 		}
+		if receipt.authority.validFor(receipt) || receipt.authenticatedPass() {
+			t.Fatal("serialized synthetic receipt retained verifier authority")
+		}
+		if receipt.CreditEligible() {
+			t.Fatal("serialized synthetic receipt earned physical credit")
+		}
 		reg := NewStrixCandidateRegistry()
-		if _, err := reg.EvaluateReceipt(receipt); err == nil {
-			t.Fatal("EvaluateReceipt accepted an ineligible synthetic ablation receipt")
+		before := reg.Scoreboard()
+		comparisons, err := reg.EvaluateReceipt(receipt)
+		if err == nil || len(comparisons) != 0 {
+			t.Fatalf("synthetic receipt must be rejected without comparisons: comparisons=%d err=%v", len(comparisons), err)
+		}
+		if after := reg.Scoreboard(); !reflect.DeepEqual(after, before) {
+			t.Fatalf("synthetic receipt mutated scoreboard: before=%v after=%v", before, after)
 		}
 
 		// Tampered digest fails closed
