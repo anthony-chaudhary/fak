@@ -146,6 +146,16 @@ type V41AttentionPlan struct {
 // has width 0, so callers can test it before slicing an index list.
 func (p V41AttentionPlan) topKWidth() int { return p.TopKWidth }
 
+// kvGroupSize is the token span represented by each consumed KV row.
+// A reader's private compressor ratio does not define its source's row span.
+func (p V41AttentionPlan) kvGroupSize(cfg Config) int {
+	ratio := p.Ratio
+	if p.Role == V41AttentionRoleReader && p.KVSourceLayer >= 0 {
+		ratio = v41CompressRatioAt(cfg, p.KVSourceLayer)
+	}
+	return maxInt(ratio, 1)
+}
+
 // v41AttentionPlanFor resolves one layer's plan from the config and the declared
 // source sets. It returns an error for a malformed schedule (a compressed ratio
 // outside the representable set) rather than silently downgrading the layer.
@@ -245,8 +255,8 @@ func v41CompressedCausalMaskAt(seq, ratio, groups, offset int) [][]bool {
 }
 
 // V41AttentionSharedKVOptions carries the already-resolved inputs for one
-// layer's compressed/shared contraction. Ratios are the declared compress
-// ratio; Groups is the number of completed compressed rows; SourceRows is the
+// layer's compressed/shared contraction. Ratio is the consumed KV row's token
+// group width; Groups is the number of completed rows; SourceRows is the
 // resolved shared KV stream (nil when the layer pools its own input). HeadDim
 // is the KV latent width (the compressed row width), Heads/Dim the query head
 // geometry, TopK the sink index-list width, Sink the per-head learnable sink.

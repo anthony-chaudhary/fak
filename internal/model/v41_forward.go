@@ -803,7 +803,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// keeps the exact per-position causal sink contraction.
 		if plan.Ratio > 1 || (plan.Role == V41AttentionRoleReader && len(sharedKV) > 0 && len(sharedKV) < seq) {
 			opt := V41AttentionSharedKVOptions{
-				Layer: l, Ratio: maxInt(plan.Ratio, 1), QueryOffset: t, Groups: len(sharedKV),
+				Layer: l, Ratio: plan.kvGroupSize(cfg), QueryOffset: t, Groups: len(sharedKV),
 				HeadDim: hd, Heads: nH, Softmax: scale, Sink: sink,
 			}
 			if indexList != nil && len(indexList) >= (t+1)*plan.topKWidth() {

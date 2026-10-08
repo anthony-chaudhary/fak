@@ -671,7 +671,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 
 	// ---- compressed contraction over the shared rows (block-causal) ----
 	opt := V41AttentionSharedKVOptions{
-		Layer: l, Ratio: maxInt(plan.Ratio, 1), QueryOffset: pos, Groups: len(sharedKV),
+		Layer: l, Ratio: plan.kvGroupSize(cfg), QueryOffset: pos, Groups: len(sharedKV),
 		HeadDim: hd, Heads: nH, Softmax: cfg.attnScale(), Sink: m.tensor(layerName(l, "attn.sink")),
 	}
 	if plan.TopKWidth > 0 {
