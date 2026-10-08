@@ -7,15 +7,15 @@ import (
 )
 
 func TestPromotableTaxonomyIsClosed(t *testing.T) {
-	if len(CandidateKinds) != 5 {
-		t.Fatalf("CandidateKinds = %#v, want 5", CandidateKinds)
-	}
 	want := map[CandidateKind]bool{
 		KindUnfinishedSpine:    true,
 		KindBlocked:            true,
 		KindDiscoveredEdgeCase: true,
 		KindDeferredCaveat:     true,
 		KindNextCheckableStep:  true,
+	}
+	if len(CandidateKinds) != len(want) {
+		t.Fatalf("CandidateKinds = %#v, want %d", CandidateKinds, len(want))
 	}
 	for _, k := range CandidateKinds {
 		if !want[k] {

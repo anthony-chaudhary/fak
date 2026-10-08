@@ -1271,7 +1271,7 @@ func TestProjectionGraphGDNCheckpointStateIdentityLifecycleAndMutation(t *testin
 		t.Fatalf("checkpoint-only terminal receipt=%+v err=%v", receipt, err)
 	}
 	identity, err := checkpoint.StateIdentity()
-	if err != nil || len(identity) != 64 {
+	if err != nil || len(identity) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex digest width
 		t.Fatalf("completed checkpoint identity=%q err=%v", identity, err)
 	}
 	identityAgain, err := checkpoint.StateIdentity()
@@ -1314,7 +1314,7 @@ func TestProjectionGraphGDNCheckpointStateIdentityLifecycleAndMutation(t *testin
 		t.Fatalf("changed-state checkpoint receipt=%+v err=%v", receipt, err)
 	}
 	changedIdentity, err := changedCheckpoint.StateIdentity()
-	if err != nil || len(changedIdentity) != 64 {
+	if err != nil || len(changedIdentity) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex digest width
 		t.Fatalf("changed-state checkpoint identity=%q err=%v", changedIdentity, err)
 	}
 	if changedIdentity == identity {

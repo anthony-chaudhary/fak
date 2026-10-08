@@ -189,10 +189,11 @@ func TestMCPToolsListBootstrapCeilingAndSchemaSize(t *testing.T) {
 	}
 
 	// Also test that with mcpToolCeiling = 10 and disableMCPDefer = true, it clamps to at most 10 tools
+	const ceiling = 10
 	srvCeiling := newTestServerWithConfig(t, Config{
 		EngineID:        "test",
 		DisableMCPDefer: true,
-		MCPToolCeiling:  10,
+		MCPToolCeiling:  ceiling,
 	})
 	resCeiling, rerrCeiling := srvCeiling.handleMethod(context.Background(), "tools/list", nil)
 	if rerrCeiling != nil {
@@ -200,10 +201,10 @@ func TestMCPToolsListBootstrapCeilingAndSchemaSize(t *testing.T) {
 	}
 	respMapCeiling := resCeiling.(map[string]any)
 	ceilingTools := respMapCeiling["tools"].([]map[string]any)
-	if len(ceilingTools) > 10 {
+	if len(ceilingTools) > ceiling {
 		t.Fatalf("expected at most 10 tools with mcpToolCeiling=10, got %d", len(ceilingTools))
 	}
-	if len(ceilingTools) != 10 {
+	if len(ceilingTools) != ceiling {
 		t.Fatalf("expected exactly 10 tools clamped by ceiling, got %d", len(ceilingTools))
 	}
 	meta := respMapCeiling["_meta"].(map[string]any)

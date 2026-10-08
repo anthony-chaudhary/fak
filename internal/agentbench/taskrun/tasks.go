@@ -280,6 +280,9 @@ func runOne(parent context.Context, opts Options, f taskfixture.Fixture) (tr Tas
 	var cr ChildReceipt
 	if decodeErr := json.NewDecoder(bytes.NewReader(out)).Decode(&cr); decodeErr != nil {
 		tr.Error = "decode child receipt: " + decodeErr.Error()
+		if len(out) >= maxChildOut {
+			tr.Error += fmt.Sprintf(" (child output truncated at the %d-byte cap)", maxChildOut)
+		}
 		return tr
 	}
 	tr.PlannerCalls, tr.Inspected, tr.Edited, tr.TestSucceeded, tr.DeniedAttempts = cr.PlannerCalls, cr.Inspected, cr.Edited, cr.TestSucceeded, cr.DeniedAttempts

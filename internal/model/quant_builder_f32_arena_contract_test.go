@@ -206,7 +206,7 @@ func TestQuantBuilderF32ArenaTiedQ8Numerics(t *testing.T) {
 		t.Fatalf("tied head resolved to %s", m.headName())
 	}
 	qt := m.q8w[m.headName()]
-	if qt == nil || qt.out != 2 || qt.in != 32 || len(qt.q) != 64 || len(qt.d) != 2 {
+	if qt == nil || qt.out != 2 || qt.in != 32 || len(qt.q) != qt.out*qt.in || len(qt.d) != 2 {
 		t.Fatal("tied Q8 head geometry changed")
 	}
 	for i, code := range qt.q {
@@ -254,8 +254,9 @@ func TestQuantBuilderF32ArenaAliasesAndPartialError(t *testing.T) {
 	quantArenaTensor(t, m, "model.layers.0.mlp.gate.bias", 0, []int{2}, quantArenaBytes(router))
 	quantArenaTensor(t, m, "model.layers.0.mlp.experts.1.gate_proj.bias", 8, []int{3}, quantArenaBytes(preexisting))
 	quantArenaTensor(t, m, "model.layers.0.mlp.experts.0.gate_proj.bias", 20, []int{3}, quantArenaBytes([]float32{1, 2, 3}))
-	quantArenaTensor(t, m, "model.layers.0.mlp.experts.0.up_proj.bias", 32, []int{3}, quantArenaBytes([]float32{10, 20, 30}))
-	if len(m.raw) != 44 || m.has("model.layers.0.mlp.router.bias") || m.has("model.layers.0.mlp.experts.1.up_proj.bias") {
+	upOffset, upBias := 32, quantArenaBytes([]float32{10, 20, 30})
+	quantArenaTensor(t, m, "model.layers.0.mlp.experts.0.up_proj.bias", upOffset, []int{3}, upBias)
+	if len(m.raw) != upOffset+len(upBias) || m.has("model.layers.0.mlp.router.bias") || m.has("model.layers.0.mlp.experts.1.up_proj.bias") {
 		t.Fatal("alias handling or partial-error append boundary changed")
 	}
 	quantArenaExactStorage(t, b, m)

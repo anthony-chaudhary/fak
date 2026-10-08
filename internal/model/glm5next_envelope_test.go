@@ -34,8 +34,14 @@ func TestGLM5NextOperatingEnvelope(t *testing.T) {
 		t.Fatalf("expected 34 KDA and 11 DSA layers, got %d and %d",
 			env.KDARecurrentLayers, env.DSASparseLayers)
 	}
-	if len(env.Stages) != 5 {
-		t.Fatalf("expected 5 staged context tiers, got %d", len(env.Stages))
+	wantStageTokens := []int{4096, 32768, 131072, 262144, 1048576}
+	if len(env.Stages) != len(wantStageTokens) {
+		t.Fatalf("expected %d staged context tiers, got %d", len(wantStageTokens), len(env.Stages))
+	}
+	for i, want := range wantStageTokens {
+		if env.Stages[i].ContextTokens != want {
+			t.Fatalf("stage %d context tokens: %d, want %d", i, env.Stages[i].ContextTokens, want)
+		}
 	}
 
 	// 1. Stage checks

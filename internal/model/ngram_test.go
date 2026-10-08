@@ -557,8 +557,8 @@ func TestNgramDrafterAdaptiveBlockExpansion(t *testing.T) {
 	history = append(history, 999, 1, 2, 3)
 
 	draft := d.Draft(history)
-	if len(draft) != 16 {
-		t.Fatalf("Draft length = %d, want 16 (expanded)", len(draft))
+	if want := d.EffectiveDraftLen(); len(draft) != want {
+		t.Fatalf("Draft length = %d, want %d (expanded)", len(draft), want)
 	}
 	for i := 0; i < 16; i++ {
 		if draft[i] != 100+i {

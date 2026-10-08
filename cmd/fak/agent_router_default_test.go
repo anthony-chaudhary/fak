@@ -271,7 +271,7 @@ func TestAgentEndpointResolverUsesPairedNode(t *testing.T) {
 		}
 		if challenge := r.Header.Get(routerAuthChallengeHeader); challenge != "" {
 			nonce, err := base64.StdEncoding.DecodeString(challenge)
-			if err != nil || len(nonce) != 32 {
+			if err != nil || len(nonce) != 32 { //boundarylint:ignore CHANGE_DETECTOR_TEST router auth challenge nonce is a fixed 32-byte protocol width
 				http.Error(w, "invalid challenge", http.StatusBadRequest)
 				return
 			}
@@ -374,7 +374,7 @@ func TestAgentPairedNodeKeyOnLoopbackFamilyFallback(t *testing.T) {
 		}
 		if challenge := r.Header.Get(routerAuthChallengeHeader); challenge != "" {
 			nonce, err := base64.StdEncoding.DecodeString(challenge)
-			if err != nil || len(nonce) != 32 {
+			if err != nil || len(nonce) != 32 { //boundarylint:ignore CHANGE_DETECTOR_TEST router auth challenge nonce is a fixed 32-byte protocol width
 				http.Error(w, "invalid challenge", http.StatusBadRequest)
 				return
 			}
@@ -449,7 +449,7 @@ func TestAgentPairedNodeRejectsRedirectedProof(t *testing.T) {
 		}
 		if challenge := r.Header.Get(routerAuthChallengeHeader); challenge != "" {
 			nonce, err := base64.StdEncoding.DecodeString(challenge)
-			if err != nil || len(nonce) != 32 {
+			if err != nil || len(nonce) != 32 { //boundarylint:ignore CHANGE_DETECTOR_TEST router auth challenge nonce is a fixed 32-byte protocol width
 				http.Error(w, "invalid challenge", http.StatusBadRequest)
 				return
 			}

@@ -76,15 +76,16 @@ func TestPressureTrackerReset(t *testing.T) {
 	tracker.recordAllocOp(1)
 
 	// Reset with different class count
-	tracker.reset(5)
-	if tracker.numClasses != 5 {
-		t.Errorf("numClasses: got %d, want 5", tracker.numClasses)
+	const resetClasses = 5
+	tracker.reset(resetClasses)
+	if tracker.numClasses != resetClasses {
+		t.Errorf("numClasses: got %d, want %d", tracker.numClasses, resetClasses)
 	}
-	if len(tracker.classEvictions) != 5 {
-		t.Errorf("evictions len: got %d, want 5", len(tracker.classEvictions))
+	if len(tracker.classEvictions) != resetClasses {
+		t.Errorf("evictions len: got %d, want %d", len(tracker.classEvictions), resetClasses)
 	}
 	// All counters should be zero
-	for i := 0; i < 5; i++ {
+	for i := 0; i < resetClasses; i++ {
 		if tracker.classEvictions[i] != 0 {
 			t.Errorf("class %d evictions not zero after reset", i)
 		}

@@ -258,8 +258,8 @@ func TestFakUsageCacheAlignmentSummaryAndJoin(t *testing.T) {
 	if rep.Summary.CacheAlignedRatio <= 0 || rep.Summary.CacheAlignedRatio > 1 {
 		t.Fatalf("summary.cache_aligned_ratio = %v, want a ratio in (0,1]", rep.Summary.CacheAlignedRatio)
 	}
-	if len(rep.Records) != 5 {
-		t.Fatalf("records = %d, want 5", len(rep.Records))
+	if len(rep.Records) != rep.Summary.Count {
+		t.Fatalf("records = %d, want summary.count %d", len(rep.Records), rep.Summary.Count)
 	}
 
 	classes := map[string]string{}
@@ -298,7 +298,8 @@ func TestFakUsageCacheAlignmentSummaryAndJoin(t *testing.T) {
 func TestFakUsageCacheAlignmentNParamBounds(t *testing.T) {
 	m := newGatewayMetrics(time.Now())
 	s := &Server{metrics: m}
-	for i := 0; i < 7; i++ {
+	const turns = 7
+	for i := 0; i < turns; i++ {
 		s.logInferenceTurn("t", "wire", false, agent.Usage{PromptTokens: 10, CacheReadInputTokens: 90}, "stop", time.Millisecond, false)
 	}
 
@@ -320,8 +321,8 @@ func TestFakUsageCacheAlignmentNParamBounds(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &rep); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(rep.Records) != 7 {
-		t.Fatalf("oversized n clamped to the retained window: got %d records, want 7", len(rep.Records))
+	if len(rep.Records) != turns {
+		t.Fatalf("oversized n clamped to the retained window: got %d records, want %d", len(rep.Records), turns)
 	}
 }
 

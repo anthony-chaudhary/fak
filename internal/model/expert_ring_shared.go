@@ -125,8 +125,14 @@ type SharedExpertRing struct {
 	// span boundary and read only by the ledger hooks that run inside it. It is how a pagedRing
 	// method — which knows nothing about sessions — attributes a demand to an agent.
 	inSpan string
+	span   *expertRingSpan
 
 	ledger sharedRingLedger
+}
+
+type expertRingSpan struct {
+	session   *Session
+	cancelled bool
 }
 
 // sharedRingLedger is the cross-agent coalescing account. Every field is guarded by
@@ -430,20 +436,49 @@ func (s *Session) ringEnter(r *pagedRing) func() {
 		return func() {}
 	}
 	if s.ringDepth > 0 {
+		span := r.shared.span
 		s.ringDepth++
-		return func() { s.ringDepth-- }
+		return func() {
+			if !span.cancelled {
+				s.ringDepth--
+			}
+		}
 	}
 	sh := r.shared
 	sh.mu.Lock()
 	sh.inSpan = s.ringAgent
+	span := &expertRingSpan{session: s}
+	sh.span = span
 	s.ringDepth = 1
 	return func() {
+		if span.cancelled {
+			return
+		}
 		s.ringDepth--
 		if s.ringDepth == 0 {
 			sh.inSpan = ""
+			sh.span = nil
 			sh.mu.Unlock()
 		}
 	}
+}
+
+// cancelRingSpan retires this session's nested spans before fail-closed teardown
+// reacquires the shared mutex. Old exit closures must not touch a subsequent span.
+func (s *Session) cancelRingSpan(r *pagedRing) {
+	if s == nil || r == nil || r.shared == nil || s.ringDepth == 0 {
+		return
+	}
+	sh := r.shared
+	span := sh.span
+	if span == nil || span.session != s {
+		return
+	}
+	span.cancelled = true
+	s.ringDepth = 0
+	sh.inSpan = ""
+	sh.span = nil
+	sh.mu.Unlock()
 }
 
 // noteRefusal books a staging the budget could not admit. It is deliberately NOT subtracted from

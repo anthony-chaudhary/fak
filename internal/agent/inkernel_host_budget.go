@@ -5,6 +5,7 @@ import (
 	"log"
 	"runtime"
 	"runtime/debug"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -37,6 +38,61 @@ type hostMemoryBudget struct {
 	ceiling  int64
 	used     func() (int64, bool)
 	reserved int64 // bytes admitted to in-flight requests and not yet released
+
+	declined      int64
+	lastDeclineAt time.Time
+}
+
+// HostMemoryBudgetStats is a read-only snapshot of the armed host-memory admission
+// budget. AvailSigned is ceiling - used - reserved and is NOT clamped: a negative value
+// is the shortfall. Structural is true when no turn is in flight and the resident
+// footprint alone already meets or exceeds the ceiling, so no release can make room.
+type HostMemoryBudgetStats struct {
+	Armed         bool
+	UsedKnown     bool
+	Ceiling       int64
+	Used          int64
+	Reserved      int64
+	AvailSigned   int64
+	DeclinedTotal int64
+	LastDeclineAt time.Time
+	Structural    bool
+}
+
+// HostMemoryBudgetStats snapshots the armed host budget. An unarmed planner returns the
+// zero value (Armed=false); an unknown usage probe returns UsedKnown=false.
+func (p *InKernelPlanner) HostMemoryBudgetStats() HostMemoryBudgetStats {
+	if p == nil {
+		return HostMemoryBudgetStats{}
+	}
+	p.hostBudgetMu.Lock()
+	defer p.hostBudgetMu.Unlock()
+	b := p.hostBudget
+	if b == nil {
+		return HostMemoryBudgetStats{}
+	}
+	st := HostMemoryBudgetStats{
+		Armed:         true,
+		Ceiling:       b.ceiling,
+		Reserved:      b.reserved,
+		DeclinedTotal: b.declined,
+		LastDeclineAt: b.lastDeclineAt,
+	}
+	used, ok := b.used()
+	if !ok || used < 0 {
+		return st
+	}
+	st.UsedKnown = true
+	st.Used = used
+	st.AvailSigned = b.ceiling - used - b.reserved
+	st.Structural = b.structural(used)
+	return st
+}
+
+// structural reports whether the idle resident footprint alone exhausts the ceiling.
+// The caller holds hostBudgetMu.
+func (b *hostMemoryBudget) structural(used int64) bool {
+	return b.reserved == 0 && b.ceiling-used <= 0
 }
 
 // inKernelSkipPrefixAdmissionKey marks a request whose working set fits the host ceiling
@@ -204,14 +260,19 @@ func (p *InKernelPlanner) admitHostMemory(ctx context.Context, promptTokens, max
 		log.Printf("inkernel_chat host-memory model=%s action=skip-prefix-admission session_bytes=%d retained_bytes=%d avail_bytes=%d ceiling_bytes=%d",
 			p.modelID, session, retained, avail, b.ceiling)
 	default:
-		log.Printf("inkernel_chat host-memory model=%s action=decline session_bytes=%d avail_bytes=%d ceiling_bytes=%d reserved_bytes=%d",
-			p.modelID, session, avail, b.ceiling, b.reserved)
+		b.declined++
+		b.lastDeclineAt = time.Now()
+		structural := b.reserved == 0 && avail <= 0
+		log.Printf("inkernel_chat host-memory model=%s action=decline session_bytes=%d avail_bytes=%d ceiling_bytes=%d reserved_bytes=%d structural=%t declined_total=%d",
+			p.modelID, session, avail, b.ceiling, b.reserved, structural, b.declined)
 		return ctx, noop, &InKernelCapacityError{
-			Want:  session,
-			Avail: max(avail, 0),
-			Class: primaryDemandClass(plan, compute.MemoryScopeDevice),
-			Scope: compute.MemoryScopeHost,
-			Site:  "host-memory-precheck",
+			Want:        session,
+			Avail:       max(avail, 0),
+			AvailSigned: avail,
+			Structural:  structural,
+			Class:       primaryDemandClass(plan, compute.MemoryScopeDevice),
+			Scope:       compute.MemoryScopeHost,
+			Site:        "host-memory-precheck",
 		}
 	}
 	b.reserved += want

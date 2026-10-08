@@ -127,21 +127,22 @@ func makeMockPage(startNum, count int) []byte {
 }
 
 func TestLiveIngest_DynamicSoftPaging(t *testing.T) {
+	const pageSize = 5
 	pageCalls := 0
 	mockFetcher := func(ctx context.Context, repo string, query string, perPage int, page int) ([]byte, bool, error) {
 		pageCalls++
 		if page == 1 {
-			return makeMockPage(1, 5), false, nil
+			return makeMockPage(1, pageSize), false, nil
 		}
 		if page == 2 {
-			return makeMockPage(6, 5), false, nil
+			return makeMockPage(pageSize+1, pageSize), false, nil
 		}
 		return []byte("[]"), false, nil
 	}
 
 	// Requesting TargetIssues: 4. Page 1 returns 5 issues >= 4, so it should stop at page 1.
 	opts := LiveIngestOptions{
-		PageSize:     5,
+		PageSize:     pageSize,
 		TargetIssues: 4,
 		PageFetcher:  mockFetcher,
 	}
@@ -151,8 +152,8 @@ func TestLiveIngest_DynamicSoftPaging(t *testing.T) {
 		t.Fatalf("FetchLiveIssues: %v", err)
 	}
 
-	if len(issues) != 5 {
-		t.Errorf("expected 5 issues from page 1, got %d", len(issues))
+	if len(issues) != pageSize {
+		t.Errorf("expected %d issues from page 1, got %d", pageSize, len(issues))
 	}
 	if pageCalls != 1 {
 		t.Errorf("expected dynamic soft-paging to stop after page 1, called %d times", pageCalls)

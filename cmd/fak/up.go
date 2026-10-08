@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -14,8 +13,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -31,7 +28,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
 	"github.com/anthony-chaudhary/fak/internal/macfit"
-	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -68,20 +64,22 @@ func printUpHelp(w io.Writer) {
 // while the set of names can never drift from the parser.
 func upHelpFlagLines() []string {
 	synopsis := map[string]string{
-		"addr":            "--addr <addr>               address to bind HTTP server (default: 127.0.0.1:8080)",
-		"mock":            "--mock                      enable mock completion responses for testing/offline",
-		"headless":        "--headless                  run server in foreground without interactive REPL",
-		"dry-run":         "--dry-run                   validate topology or profile hardware without running",
-		"json":            "--json                      emit plan in JSON format",
-		"memory-gib":      "--memory-gib <gib>          override detected unified memory in GiB",
-		"model":           "--model <tier>              override auto-selected model tier (e.g. 7B, 27B, 70B)",
-		"context":         "--context <tokens>          override auto-selected context budget tokens",
-		"kv-precision":    "--kv-precision <prec>       KV cache storage tier: f32 (default, exact) or q8_0 (~2x more context)",
-		"engine":          "--engine <engine>           model engine ID (default: inkernel; mock only with --mock)",
-		"gpu-idle-exit":   "--gpu-idle-exit <dur>       stop the resident server after this idle window so its GPU lease and model residency are released (0 keeps the process-lifetime holder)",
-		"max-rss":         "--max-rss <bytes>           stop the resident server when its own RSS stays above this many bytes for --max-rss-sustain, so unbounded growth cannot drive the host into swap exhaustion; 0 disables the guard (env FAK_UP_MAX_RSS)",
-		"max-rss-sustain": "--max-rss-sustain <dur>     how long RSS must stay above --max-rss before the guard stops the server, absorbing the model-load high-water mark",
-		"code-workspace":  "--code-workspace <dir>      workspace whose AGENTS.md seeds the startup agent KV-cache warm (default: FAK_UP_CODE_WORKSPACE, then the current directory)",
+		"addr":             "--addr <addr>               address to bind HTTP server (default: 127.0.0.1:8080)",
+		"mock":             "--mock                      enable mock completion responses for testing/offline",
+		"headless":         "--headless                  run server in foreground without interactive REPL",
+		"dry-run":          "--dry-run                   validate topology or profile hardware without running",
+		"json":             "--json                      emit plan in JSON format",
+		"memory-gib":       "--memory-gib <gib>          override detected unified memory in GiB",
+		"model":            "--model <tier>              override auto-selected model tier (e.g. 7B, 27B, 70B)",
+		"context":          "--context <tokens>          override auto-selected context budget tokens",
+		"kv-precision":     "--kv-precision <prec>       KV cache storage tier: f32 (default, exact) or q8_0 (~2x more context)",
+		"engine":           "--engine <engine>           model engine ID (default: inkernel; mock only with --mock)",
+		"gpu-idle-exit":    "--gpu-idle-exit <dur>       stop the resident server after this idle window so its GPU lease and model residency are released (0 keeps the process-lifetime holder)",
+		"max-rss":          "--max-rss <bytes|size|auto> stop the resident server when its own RSS stays above this ceiling for --max-rss-sustain, so unbounded growth cannot drive the host into swap exhaustion; bytes, a size like 30GiB, or auto (measured idle footprint + one session's KV + --max-rss-headroom); 0/unset disables the guard (env FAK_UP_MAX_RSS, same grammar; the flag wins)",
+		"max-rss-sustain":  "--max-rss-sustain <dur>     how long RSS must stay above --max-rss before the guard stops the server, absorbing the model-load high-water mark",
+		"max-rss-headroom": "--max-rss-headroom <pct>    margin above idle footprint + session KV for --max-rss auto and for raising a stale explicit ceiling (default 15; env FAK_UP_MAX_RSS_HEADROOM)",
+		"max-rss-strict":   "--max-rss-strict            refuse to start (exit 78) when an explicit --max-rss is at or below idle footprint + session KV, instead of raising it (env FAK_UP_MAX_RSS_STRICT=1)",
+		"code-workspace":   "--code-workspace <dir>      workspace whose AGENTS.md seeds the startup agent KV-cache warm (default: FAK_UP_CODE_WORKSPACE, then the current directory)",
 	}
 	return []string{
 		"  " + synopsis["addr"],
@@ -97,6 +95,8 @@ func upHelpFlagLines() []string {
 		"  " + synopsis["gpu-idle-exit"],
 		"  " + synopsis["max-rss"],
 		"  " + synopsis["max-rss-sustain"],
+		"  " + synopsis["max-rss-headroom"],
+		"  " + synopsis["max-rss-strict"],
 		"  " + synopsis["code-workspace"],
 	}
 }
@@ -345,8 +345,10 @@ type upFlagSet struct {
 	kvPrecision     *string
 	engineID        *string
 	gpuIdleExit     *time.Duration
-	maxRSS          *uint64
+	maxRSS          *string
 	maxRSSSustain   *time.Duration
+	maxRSSHeadroom  *float64
+	maxRSSStrict    *bool
 	codeWorkspace   *string
 }
 
@@ -364,8 +366,10 @@ func registerUpFlags(fs *flag.FlagSet) upFlagSet {
 		kvPrecision:     fs.String("kv-precision", "", "KV cache storage tier: f32 (default, exact) or q8_0 (dense mixed: f32 pre-RoPE K + q8_0 K/V; ~2x more context). Also settable via FAK_UP_KV_PRECISION."),
 		engineID:        fs.String("engine", "inkernel", "model engine ID (default inkernel; mock only with --mock)"),
 		gpuIdleExit:     fs.Duration("gpu-idle-exit", defaultGPUIdleExit, "stop the resident server after this idle window (no in-flight request) so its GPU lease and model residency are released for a queued peer (e.g. modelbench, #13135); 0 keeps the historical process-lifetime holder"),
-		maxRSS:          fs.Uint64("max-rss", 0, "stop the resident server when its own RSS stays above this many bytes for --max-rss-sustain, so an unbounded-growth process cannot drive the host into swap exhaustion (launchd KeepAlive then restarts a fresh process); 0 disables the guard (historical unbounded holder). Env: FAK_UP_MAX_RSS"),
+		maxRSS:          fs.String("max-rss", "", "stop the resident server when its own RSS stays above this ceiling for --max-rss-sustain, so an unbounded-growth process cannot drive the host into swap exhaustion (launchd KeepAlive then restarts a fresh process). Bytes, a size like 30GiB, or \"auto\" (measured idle footprint plus one session's KV plus --max-rss-headroom); 0 or unset disables the guard (historical unbounded holder). Env: FAK_UP_MAX_RSS (same grammar; the flag wins)"),
 		maxRSSSustain:   fs.Duration("max-rss-sustain", defaultMemGuardSustain, "how long RSS must stay above --max-rss before the guard stops the server; absorbs the model-load high-water"),
+		maxRSSHeadroom:  fs.Float64("max-rss-headroom", defaultMaxRSSHeadroomPct, "percent margin above idle footprint plus one session's KV, used by --max-rss auto and when raising a stale explicit ceiling. Env: FAK_UP_MAX_RSS_HEADROOM"),
+		maxRSSStrict:    fs.Bool("max-rss-strict", false, "refuse to start (exit 78) when an explicit --max-rss is at or below the idle footprint plus one session's KV, instead of raising it to the derived ceiling. Env: FAK_UP_MAX_RSS_STRICT=1"),
 		codeWorkspace:   fs.String("code-workspace", "", "workspace whose AGENTS.md seeds the startup agent KV-cache warm; empty defaults to FAK_UP_CODE_WORKSPACE then the current directory (turnkey parity with `fak serve --native-code-workspace`)"),
 	}
 }
@@ -377,7 +381,7 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	addr, mock, headless, dryRun, asJSON := upFlags.addr, upFlags.mock, upFlags.headless, upFlags.dryRun, upFlags.asJSON
 	memoryGiB, modelOverride, contextOverride := upFlags.memoryGiB, upFlags.modelOverride, upFlags.contextOverride
 	kvPrecision, engineID, gpuIdleExit := upFlags.kvPrecision, upFlags.engineID, upFlags.gpuIdleExit
-	maxRSS, maxRSSSustain := upFlags.maxRSS, upFlags.maxRSSSustain
+	maxRSSSustain := upFlags.maxRSSSustain
 	codeWorkspace := upFlags.codeWorkspace
 
 	if err := fs.Parse(argv); err != nil {
@@ -434,12 +438,10 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 		}
 	}
 
-	if *maxRSS == 0 {
-		if v := strings.TrimSpace(os.Getenv("FAK_UP_MAX_RSS")); v != "" {
-			if n, err := strconv.ParseUint(v, 10, 64); err == nil {
-				*maxRSS = n
-			}
-		}
+	maxRSSOpts, err := resolveUpMaxRSSOptions(upFlags, explicit, os.Getenv)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak up: %v\n", err)
+		os.Exit(2)
 	}
 	// The startup agent KV-cache warm resolves its workspace like the memory
 	// guard above: an explicit --code-workspace wins, otherwise FAK_UP_CODE_WORKSPACE,
@@ -506,9 +508,19 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	if id := guardShortBuildID(); id != "" {
 		ver += " (" + id + ")"
 	}
+	maxRSSRes, err := server.resolveMaxRSS(maxRSSOpts)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak up: %v\n", err)
+		shutdownTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = server.Shutdown(shutdownTimeout)
+		cancel()
+		os.Exit(upExitStructural)
+	}
+	logMaxRSSResolution(stderr, maxRSSRes, maxRSSOpts.headroomPct)
+	maxRSSCeiling := maxRSSRes.Ceiling
 	server.armGPUIdleExit(*gpuIdleExit)
-	server.armMemGuard(*maxRSS, *maxRSSSustain)
-	server.armHostMemoryBudget(*maxRSS)
+	server.armMemGuard(maxRSSCeiling, *maxRSSSustain)
+	server.armHostMemoryBudget(maxRSSCeiling)
 	printTurnkeyReady(stdout, ver, server.Addr(), plan)
 	printTurnkeyBackendStamp(stdout, server.metalDecision, metalResidencyStampFrom(server.liveResidencyReport()))
 	if *gpuIdleExit > 0 {
@@ -522,10 +534,20 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 			// The bounded idle exit already ran the graceful shutdown and
 			// released the GPU lease; nothing further to unwind here.
 		}
+		exitIfMemGuardFired(server)
 		return
 	}
 
 	_ = runTurnkeyREPL(ctx, in, stdout, "http://"+server.Addr(), plan)
+	exitIfMemGuardFired(server)
+}
+
+// exitIfMemGuardFired turns a guard stop into a non-zero transient exit so a supervisor
+// sees a failure instead of a clean stop. The guard's stop already ran Shutdown.
+func exitIfMemGuardFired(server *turnkeyServer) {
+	if server.memGuardFired() {
+		os.Exit(upExitTransient)
+	}
 }
 
 func printTurnkeyReady(w io.Writer, ver, addr string, plan macfit.TurnkeyProfile) {
@@ -658,341 +680,6 @@ func (g *readinessGate) readyState() (state string, isReady bool) {
 	return "ok", true
 }
 
-// turnkeyAgentWarmGate is the turnkey (package-main) equivalent of the gateway's
-// agent-warm readiness gate (internal/gateway/readiness_warmup.go, CW-07 #13333).
-// The turnkey `fak up` path owns its own readinessGate rather than embedding a
-// gateway.Server, so it needs the same second-half gate here: the #3051 warmup
-// answers "is the backend LOADED?", while this answers "is a warm PREFIX resident
-// and reusable?". A configured profile is admitted ONLY against a live receipt
-// (matching identity, restored to the stable boundary); a cold/partial/mismatched
-// warm DEGRADES with a closed reason. The zero value is unconfigured (silent), so
-// a bare &turnkeyServer{} stays ready — existing tests that construct one remain
-// byte-for-byte unaffected. Guarded by its own mutex; safe on a nil receiver.
-type turnkeyAgentWarmGate struct {
-	mu         sync.Mutex
-	configured bool
-	spec       agent.WarmPrefixSpec
-	status     string
-	reason     string
-	receipt    *agent.WarmReceipt
-}
-
-// configure installs a derived descriptor and moves the gate to pending.
-// Reconfiguring clears any prior receipt, so a generation change can never reuse
-// the previous profile's warm readiness.
-func (g *turnkeyAgentWarmGate) configure(spec agent.WarmPrefixSpec) {
-	if g == nil {
-		return
-	}
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.configured = true
-	g.spec = spec
-	g.status = gateway.AgentWarmPending
-	g.reason = ""
-	g.receipt = nil
-}
-
-// observe records a native warm attempt and adjudicates readiness from the
-// receipt, never from the attempt's mere completion. A receipt that is not Ready,
-// whose identity does not match, or whose restored prefix does not reach the
-// stable boundary is DEGRADED with a closed reason; unsupported is reported
-// independently and never holds readiness.
-func (g *turnkeyAgentWarmGate) observe(receipt agent.WarmReceipt, unsupported bool, err error) {
-	if g == nil {
-		return
-	}
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if !g.configured {
-		g.status = gateway.AgentWarmUnconfigured
-		g.receipt = nil
-		return
-	}
-	g.receipt = nil
-	switch {
-	case unsupported:
-		g.status = gateway.AgentWarmUnsupported
-		g.reason = "unsupported"
-		return
-	case err != nil:
-		g.status = gateway.AgentWarmDegraded
-		g.reason = receipt.Reason
-		if g.reason == "" {
-			g.reason = "warm_error"
-		}
-		return
-	}
-	switch {
-	case receipt.Identity == "" || receipt.Identity != g.spec.Identity:
-		g.status = gateway.AgentWarmDegraded
-		g.reason = "identity_mismatch"
-		return
-	case !receipt.Ready:
-		g.status = gateway.AgentWarmDegraded
-		g.reason = receipt.Reason
-		if g.reason == "" {
-			g.reason = "not_ready"
-		}
-		return
-	case receipt.RestoredTokens < receipt.RequestedTokens || receipt.RestoredTokens <= 0:
-		g.status = gateway.AgentWarmDegraded
-		g.reason = "partial_restore"
-		return
-	case receipt.Status != agent.WarmStatusReady:
-		g.status = gateway.AgentWarmDegraded
-		g.reason = "status_not_ready"
-		return
-	}
-	g.status = gateway.AgentWarmReady
-	g.reason = ""
-	r := receipt
-	g.receipt = &r
-}
-
-// admit reports whether readiness must be HELD for a configured agent-warm
-// profile, with the closed blocking status/reason. A pending or degraded gate
-// blocks; an unconfigured/unsupported/ready gate does not.
-func (g *turnkeyAgentWarmGate) admit() (blocked bool, status, reason string) {
-	if g == nil {
-		return false, gateway.AgentWarmUnconfigured, ""
-	}
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	switch g.status {
-	case gateway.AgentWarmPending, gateway.AgentWarmDegraded:
-		return true, g.status, g.reason
-	default:
-		return false, g.status, g.reason
-	}
-}
-
-// agentWarmBlock returns the read-only /healthz projection of the gate, or nil
-// when no profile was ever configured (the key is then absent, never a
-// fabricated status).
-func (g *turnkeyAgentWarmGate) agentWarmBlock() map[string]any {
-	if g == nil {
-		return nil
-	}
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if !g.configured {
-		return nil
-	}
-	block := map[string]any{"status": g.status}
-	if g.reason != "" {
-		block["reason"] = g.reason
-	}
-	if g.receipt != nil {
-		block["identity"] = g.receipt.Identity
-		block["restored_tokens"] = g.receipt.RestoredTokens
-	}
-	return block
-}
-
-func (g *turnkeyAgentWarmGate) configuration() (agent.WarmPrefixSpec, bool) {
-	if g == nil {
-		return agent.WarmPrefixSpec{}, false
-	}
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.spec, g.configured
-}
-
-// turnkeyAgentWarmWorkspaceTenant is the cache scope the turnkey-owned agent warm
-// is bounded to; a local turnkey serve owns exactly one tenant on the appliance.
-const turnkeyAgentWarmWorkspaceTenant = "turnkey-local"
-
-// turnkeyRequestContext binds the turnkey-owned prefix-cache identity to a request
-// context (CW-18, #13328). The turnkey path owns exactly one tenant on the
-// appliance, and CW-09 (#13332) materializes its startup warm under that tenant's
-// SCOPED cache tree. Without this binding a real turnkey request reaches the
-// planner UNSCOPED: its lookup consults the shared tree, never sees the warmed
-// prefix, and pays a full prefill the warm promised to avoid. Binding the same
-// tenant on both the warm ctx and the demand ctx makes the demand lookup consult
-// the scoped tree the warm restored into. A tenant-free context preserves the
-// legacy single-user namespace.
-func turnkeyRequestContext(ctx context.Context) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return agent.WithPrefixCacheIdentity(ctx, turnkeyAgentWarmWorkspaceTenant, "")
-}
-
-// resolveUpAgentWarmWorkspace resolves the workspace whose AGENTS.md seeds the
-// turnkey startup agent warm: an explicit --code-workspace wins, otherwise
-// FAK_UP_CODE_WORKSPACE, otherwise the current directory. It mirrors
-// resolveNativeCodeWorkspace (serve parity) so the two entrypoints agree.
-func resolveUpAgentWarmWorkspace(configured string) string {
-	if workspace := strings.TrimSpace(configured); workspace != "" {
-		return workspace
-	}
-	if workspace := strings.TrimSpace(os.Getenv("FAK_UP_CODE_WORKSPACE")); workspace != "" {
-		return workspace
-	}
-	workspace, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	return workspace
-}
-
-// turnkeyAgentWarmInputsInstaller is the narrow seam the turnkey startup path
-// uses to hand the warmer the REAL stable inputs (workspace instructions +
-// ordered tool schemas) its later WarmPrefix re-encodes. *agent.InKernelPlanner
-// satisfies it.
-type turnkeyAgentWarmInputsInstaller interface {
-	SetWarmPrefixInputs(agent.WarmPrefixInputs)
-}
-
-// turnkeyAgentWarmReleaser is the shutdown-owner hook the turnkey lifecycle
-// invokes exactly once when it installed a startup agent warm. A planner with no
-// startup warm is left untouched.
-type turnkeyAgentWarmReleaser interface {
-	ReleaseStartupWarm()
-}
-
-// turnkeyAgentWarmWarmer is the narrow derive/materialize seam the turnkey warm
-// path calls. *agent.InKernelPlanner satisfies it.
-type turnkeyAgentWarmWarmer interface {
-	DeriveWarmPrefix(tenant, agent string, in agent.WarmPrefixInputs) (agent.WarmPrefixSpec, error)
-	WarmPrefix(ctx context.Context, spec agent.WarmPrefixSpec) (agent.WarmReceipt, error)
-}
-
-// installTurnkeyAgentWarm installs the effective agent KV-cache warm profile on
-// the turnkey server BEFORE readiness is bound (CW-09, #13332). It resolves the
-// workspace instruction snapshot (AGENTS.md) and the ordered kernel coding-tool
-// catalog — the SAME bytes/order the forward path resolves — hands them to the
-// warmer via SetWarmPrefixInputs (the warmer re-encodes the boundary from them),
-// then derives and installs the profile on the turnkey agent-warm gate.
-//
-// It installs but does NOT execute the warm: the profile is armed before
-// readiness (agent_warm_pending from the first probe) and the caller materializes
-// it (runTurnkeyAgentWarmup) on the serve's existing background startup path.
-//
-// It is deliberately fail-open for readiness: a workspace with no readable
-// instruction snapshot, or a planner that cannot derive a bounded descriptor, is
-// reported and left UNCONFIGURED so readiness is never held on a profile that
-// cannot be realized and no synthetic warm is invented. It returns true only when
-// a warm profile was actually installed. Never fatal: a warm is an optimization.
-func installTurnkeyAgentWarm(ts *turnkeyServer, workspace string, log io.Writer) bool {
-	if ts == nil {
-		return false
-	}
-	return installTurnkeyAgentWarmForPlanner(ts.planner, ts.agentWarm, workspace, log)
-}
-
-// installTurnkeyAgentWarmForPlanner is the planner+gate half of the turnkey
-// install, split out so the server can arm the profile BEFORE the turnkeyServer
-// value exists (readiness must be held from the first probe). It returns true
-// only when a bounded profile was actually installed on the gate.
-func installTurnkeyAgentWarmForPlanner(planner agent.Planner, gate *turnkeyAgentWarmGate, workspace string, log io.Writer) bool {
-	if planner == nil || gate == nil {
-		return false
-	}
-	installer, ok := planner.(turnkeyAgentWarmInputsInstaller)
-	if !ok {
-		return false
-	}
-	workspace = strings.TrimSpace(workspace)
-	if workspace == "" {
-		if log != nil {
-			fmt.Fprintf(log, "fak up: agent cache warm unconfigured (no workspace resolved)\n")
-		}
-		return false
-	}
-	instructions, err := os.ReadFile(filepath.Join(workspace, "AGENTS.md"))
-	if err != nil || len(instructions) == 0 {
-		// No effective agent instruction snapshot: the warm cannot be bounded to a
-		// real, identity-bearing prefix. Leave the gate unconfigured — readiness is
-		// not held and no synthetic profile is invented.
-		if log != nil {
-			fmt.Fprintf(log, "fak up: agent cache warm unconfigured (no readable AGENTS.md under %q): %v\n", workspace, err)
-		}
-		return false
-	}
-	inputs := agent.WarmPrefixInputs{
-		Instructions: instructions,
-		Tools:        agent.ToolCatalog(),
-	}
-	installer.SetWarmPrefixInputs(inputs)
-	spec, err := deriveTurnkeyAgentWarmPrefix(planner, inputs)
-	if err != nil {
-		// The planner could not derive a bounded descriptor (nil/unconfigured
-		// planner, missing model/tokenizer identity). The gate is left unconfigured
-		// so readiness is unaffected.
-		if log != nil {
-			fmt.Fprintf(log, "fak up: agent cache warm unavailable: %v\n", err)
-		}
-		return false
-	}
-	gate.configure(spec)
-	if log != nil {
-		fmt.Fprintf(log, "fak up: agent cache warm armed identity=%s (materialized on the background startup path)\n", spec.Identity)
-	}
-	return true
-}
-
-// deriveTurnkeyAgentWarmPrefix derives the warm descriptor through the planner's
-// warmer seam, so the gate binds the receipt against exactly the descriptor the
-// later WarmPrefix targets. The turnkey path installs the gate itself (it owns the
-// readinessGate), so it derives here rather than through a gateway.Server.
-func deriveTurnkeyAgentWarmPrefix(planner agent.Planner, in agent.WarmPrefixInputs) (agent.WarmPrefixSpec, error) {
-	warmer, ok := planner.(turnkeyAgentWarmWarmer)
-	if !ok {
-		return agent.WarmPrefixSpec{}, gateway.ErrAgentWarmUnconfigured
-	}
-	spec, err := warmer.DeriveWarmPrefix(turnkeyAgentWarmWorkspaceTenant, "", in)
-	if err != nil {
-		return agent.WarmPrefixSpec{}, err
-	}
-	if !spec.Bounded() {
-		return agent.WarmPrefixSpec{}, gateway.ErrAgentWarmUnconfigured
-	}
-	return spec, nil
-}
-
-// runTurnkeyAgentWarmup materializes the profile configured by
-// installTurnkeyAgentWarm through the planner's warmer and adjudicates readiness
-// from the returned receipt. It is the execution half (CW-09): the host calls it
-// at boot alongside the #3051 backend warmup. A planner that is not a warmer, or
-// a gate never configured, is an explicit no-op.
-func (ts *turnkeyServer) runTurnkeyAgentWarmup(ctx context.Context) {
-	if ts == nil || ts.planner == nil {
-		return
-	}
-	warmer, ok := ts.planner.(turnkeyAgentWarmWarmer)
-	if !ok {
-		ts.agentWarm.observe(agent.WarmReceipt{}, true, gateway.ErrAgentWarmUnconfigured)
-		return
-	}
-	spec, configured := ts.agentWarm.configuration()
-	if !configured {
-		return
-	}
-	// CW-18 (#13328): materialize the warm under the SAME turnkey tenant the demand
-	// path binds, so the prime admits into the scoped tree the readback consults
-	// (an unscoped prime would admit to the shared tree and read back as a miss).
-	receipt, err := warmer.WarmPrefix(turnkeyRequestContext(ctx), spec)
-	unsupported := errors.Is(err, agent.ErrWarmPrefixUnsupported)
-	ts.agentWarm.observe(receipt, unsupported, err)
-}
-
-// releaseTurnkeyAgentWarm releases the planner's startup warm ownership exactly
-// once. It is the shutdown half: Close, Shutdown, and the bounded idle/stop path
-// all converge here, and the planner's own Release is idempotent. A planner
-// without the seam is never touched.
-func (ts *turnkeyServer) releaseTurnkeyAgentWarm() {
-	if ts == nil {
-		return
-	}
-	ts.agentWarmReleaseOnce.Do(func() {
-		if releaser, ok := ts.planner.(turnkeyAgentWarmReleaser); ok {
-			releaser.ReleaseStartupWarm()
-		}
-	})
-}
-
 func (s *turnkeyServer) Addr() string {
 	return s.boundAddr
 }
@@ -1019,10 +706,14 @@ func (s *turnkeyServer) armMemGuard(limit uint64, sustain time.Duration) {
 	if s == nil || s.stop == nil || limit == 0 {
 		return
 	}
-	s.mu.Lock()
-	s.memGuard = newMemGuardGovernor(limit, defaultMemGuardInterval, sustain, processRSSBytes, s.stop, func(format string, args ...any) {
+	logf := func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, format+"\n", args...)
-	})
+	}
+	s.mu.Lock()
+	s.memGuard = newMemGuardGovernor(limit, defaultMemGuardInterval, sustain, processRSSBytes, s.stop, logf)
+	if s.memGuard != nil {
+		s.memGuard.onStop = func(ev memGuardStopEvent) { recordMemGuardStop(ev, logf) }
+	}
 	s.mu.Unlock()
 }
 
@@ -1138,6 +829,10 @@ func (s *turnkeyServer) readiness() (ready bool, state string, reason string) {
 	if stopping {
 		return false, "stopping", "server is stopping"
 	}
+	// An armed host budget with no room at idle declines every request: not admissible.
+	if s.admissionStarved() {
+		return false, readinessAdmissionStarved, readinessAdmissionStarved
+	}
 	return true, "ok", ""
 }
 
@@ -1173,218 +868,6 @@ func newTurnkeyInKernelPlanner(model *fakmodel.Model, tok *tokenizer.Tokenizer, 
 		BatchDecode:            true,
 		RequireDeviceExecution: halo,
 	})
-}
-
-// resolveUpKVPrecision resolves the realized KV storage tier for `fak up`. Precedence:
-// an explicit flag value wins; otherwise FAK_UP_KV_PRECISION; otherwise f32 (the exact
-// default). It pins the resolved value back into FAK_UP_KV_PRECISION so the native
-// loader dep path and the per-request planner cannot drift. Unknown tokens refuse
-// rather than silently falling back, so a typo never buys a lossy cache unnoticed.
-func resolveUpKVPrecision(flagValue string) (fakmodel.KVPrecision, error) {
-	raw := strings.TrimSpace(flagValue)
-	if raw == "" {
-		raw = strings.TrimSpace(os.Getenv("FAK_UP_KV_PRECISION"))
-	}
-	if raw == "" {
-		return fakmodel.KVPrecisionFP32, nil
-	}
-	prec, err := fakmodel.ParseKVPrecision(raw)
-	if err != nil {
-		return "", err
-	}
-	_ = os.Setenv("FAK_UP_KV_PRECISION", string(prec))
-	return prec, nil
-}
-
-// turnkeyStableFitBudget builds the loader admission budget the turnkey path pins
-// for a host whose total unified memory is memoryBytes. It is deliberately STABLE:
-// the base is the physical total and the headroom is macfit's documented 20% OS/
-// other-app reserve, so the number does not move with the instantaneous free-memory
-// reading. That is the fix for a fresh-boot/cold-cache box spuriously refusing a
-// context the reserve-based envelope admits. memoryBytes==0 (an unknown host, e.g. a
-// unit-test profile) yields nil, preserving the historical live probe.
-func turnkeyStableFitBudget(memoryBytes uint64) *serveFitBudget {
-	if memoryBytes == 0 {
-		return nil
-	}
-	return &serveFitBudget{Base: int64(memoryBytes), Headroom: macfit.DefaultMinHeadroomRatio}
-}
-
-func turnkeyContextTokens(tokens uint64) (int, error) {
-	maxInt := uint64(^uint(0) >> 1)
-	if tokens > maxInt {
-		return 0, fmt.Errorf("turnkey context budget %d exceeds the platform integer limit %d", tokens, maxInt)
-	}
-	return int(tokens), nil
-}
-
-// turnkeyCanonicalQuantAlias maps a macfit tier's declared quant to the embedded
-// catalog alias that unambiguously names that exact quant. Turnkey tier selection
-// resolves to these aliases, NOT to a bare family alias like "qwen38:27b": the bare
-// alias is user-shadowable via registry.json, so a user overlay could silently
-// re-bind the 27B tier to a different quant (witnessed: a UD-Q2_K_XL overlay
-// shadowed "qwen38:27b" while the tier budget still assumed 16 GiB Q4_K_M). The
-// quant-qualified alias is not in the user overlay and always names Q4_K_M.
-//
-// Each alias MUST exist in modelreg.Catalog (see TestTurnkeyTierAliasesAreUnshadowed).
-func turnkeyCanonicalQuantAlias(tierName string) string {
-	switch strings.ToUpper(strings.TrimSpace(tierName)) {
-	case "70B":
-		return "qwen38:70b-q4_k_m"
-	case "27B":
-		return "qwen38:27b-q4_k_m"
-	case "7B":
-		return "qwen3.8-7b-q4_k_m"
-	case "3B":
-		return "qwen3.8-3b-q4_k_m"
-	}
-	return ""
-}
-
-func resolveTurnkeyModelRef(ref string) string {
-	trimmed := strings.TrimSpace(ref)
-	if trimmed == "" {
-		return turnkeyCanonicalQuantAlias("27B")
-	}
-	if hfhub.IsURI(trimmed) {
-		return trimmed
-	}
-	if _, err := os.Stat(trimmed); err == nil {
-		return trimmed
-	}
-	switch strings.ToLower(trimmed) {
-	case "70b", "qwen3.8-70b-q4_k_m", "qwen3.8-70b", "qwen38-70b", "qwen38:70b", "qwen38:70b-q4_k_m":
-		return turnkeyCanonicalQuantAlias("70B")
-	case "27b", "qwen3.8-27b-q4_k_m", "qwen3.8-27b", "qwen38-27b", "qwen38:27b", "qwen38:27b-q4_k_m":
-		return turnkeyCanonicalQuantAlias("27B")
-	case "7b", "qwen3.8-7b-q4_k_m", "qwen3.8-7b":
-		return "qwen2.5:7b"
-	case "3b", "qwen3.8-3b-q4_k_m", "qwen3.8-3b":
-		return "qwen2.5-coder:3b"
-	}
-	return trimmed
-}
-
-// artifactDescriptor is the concrete model artifact a turnkey model ref resolves
-// to, reduced to the two facts a tier-consistency gate needs: the quantization it
-// names and its on-disk byte size. It is a plain value so the gate is a pure,
-// network-free function unit-testable with a fabricated descriptor.
-type artifactDescriptor struct {
-	Ref       string // alias, hf:// URI, or local path as resolved
-	Filename  string // basename of the artifact when known
-	Quant     string // quant inferred from Filename (e.g. "Q4_K_M"); "" if unknown
-	SizeBytes uint64 // on-disk size when known; 0 when unknown
-	Explicit  bool   // operator typed a concrete path/hf:// URI (opinionated input)
-}
-
-// turnkeyTierSizeTolerance is how far a resolved artifact's byte size may sit from
-// the tier's declared WeightBytes before it is treated as a different artifact. A
-// lower bound catches a smaller quant masquerading as the tier default (e.g. a
-// 9.3 GiB 2-bit file under a 16 GiB Q4_K_M tier); the upper bound catches a larger
-// quant. Both are generous because file-size accounting varies slightly, but a
-// full quant rung apart (Q2 vs Q4 ~= 0.58x) is far outside the band.
-const turnkeyTierSizeTolerance = 0.25
-
-// inferQuantFromFilename extracts a quantization token from a GGUF artifact name
-// (e.g. "Qwen3.8-27B-Q4_K_M.gguf" -> "Q4_K_M", "...UD-Q2_K_XL.gguf" -> "Q2_K"). It
-// normalizes the underscore/dash spelling to the K-quant form and returns "" when
-// no recognizable quant token is present, so callers only fail on a real signal.
-func inferQuantFromFilename(name string) string {
-	base := strings.ToUpper(strings.TrimSuffix(filepath.Base(name), ".gguf"))
-	base = strings.ReplaceAll(base, "_", "-")
-	for _, q := range []string{"IQ1-S", "IQ1-M", "IQ2-XXS", "IQ2-XS", "IQ2-S", "IQ3-XXS", "IQ3-XS", "IQ3-S", "IQ4-XS", "IQ4-NL"} {
-		if strings.Contains(base, q) {
-			return strings.ReplaceAll(q, "-", "_")
-		}
-	}
-	for _, q := range []string{"BF16", "F16", "F32", "FP8", "FP16"} {
-		if strings.Contains(base, q) {
-			return q
-		}
-	}
-	for _, digits := range []string{"2", "3", "4", "5", "6", "8"} {
-		stem := "Q" + digits
-		idx := strings.Index(base, stem)
-		if idx < 0 {
-			continue
-		}
-		tail := base[idx:]
-		var b strings.Builder
-		b.WriteString(stem)
-		for _, part := range strings.Split(tail, "-")[1:] {
-			switch part {
-			case "K", "M", "S", "L", "XL", "XS", "XXS", "NL":
-				b.WriteString("_" + part)
-			default:
-				goto done
-			}
-		}
-	done:
-		return b.String()
-	}
-	return ""
-}
-
-// validateTurnkeyArtifact fails loud when the artifact a turnkey ref resolves to
-// clearly contradicts the selected macfit tier's declared quant/size. An explicit
-// operator-supplied full path or hf:// URI is an opinionated override and always
-// passes through. An alias, by contrast, must be tier-consistent - it is the
-// turnkey surface, so a mismatch means the alias was mis-bound (e.g. a user
-// registry.json overlay shadowing the tier default with a 2-bit artifact).
-func validateTurnkeyArtifact(tier macfit.ModelTier, art artifactDescriptor) error {
-	if art.Explicit {
-		return nil
-	}
-	if art.Quant != "" && tier.QuantTier != "" && !strings.EqualFold(art.Quant, tier.QuantTier) {
-		return fmt.Errorf("turnkey model %q (alias %q) declares quant %s but tier %s requires %s; refusing to load a mismatched artifact (use an explicit .gguf path or hf:// URI to override)",
-			art.Filename, art.Ref, art.Quant, tier.Name, tier.QuantTier)
-	}
-	if art.SizeBytes > 0 && tier.WeightBytes > 0 {
-		expected := float64(tier.WeightBytes)
-		actual := float64(art.SizeBytes)
-		if actual < expected*(1-turnkeyTierSizeTolerance) || actual > expected*(1+turnkeyTierSizeTolerance) {
-			return fmt.Errorf("turnkey model %q (alias %q) is %.2f GiB but tier %s budgets %.2f GiB for %s; refusing to load a mismatched artifact (use an explicit .gguf path or hf:// URI to override)",
-				art.Filename, art.Ref, actual/float64(macfit.GiB), tier.Name, expected/float64(macfit.GiB), tier.QuantTier)
-		}
-	}
-	return nil
-}
-
-// turnkeyRefIsExplicit reports whether the operator supplied a concrete model
-// reference (an hf:// URI or an existing file) rather than a friendly tier alias.
-// Explicit input is an opinionated override, so the tier-consistency gate passes it
-// through; only alias-resolved turnkey refs are held to the tier's declared quant.
-func turnkeyRefIsExplicit(ref string) bool {
-	trimmed := strings.TrimSpace(ref)
-	if trimmed == "" || strings.EqualFold(trimmed, "default") {
-		return false
-	}
-	if hfhub.IsURI(trimmed) {
-		return true
-	}
-	if _, err := os.Stat(pathutil.ExpandTilde(trimmed)); err == nil {
-		return true
-	}
-	return false
-}
-
-// describeTurnkeyArtifact derives an artifact descriptor from a resolved model ref.
-// explicit marks a concrete path/URI the operator typed directly (vs a tier alias),
-// which the consistency gate treats as an opinionated override.
-func describeTurnkeyArtifact(ref string, explicit bool) artifactDescriptor {
-	art := artifactDescriptor{Ref: ref, Explicit: explicit}
-	if hfhub.IsURI(ref) {
-		if parsed, err := hfhub.ParseURI(ref); err == nil && parsed.File != "" {
-			art.Filename = filepath.Base(parsed.File)
-		}
-	} else {
-		art.Filename = filepath.Base(ref)
-	}
-	art.Quant = inferQuantFromFilename(art.Filename)
-	if fi, err := os.Stat(pathutil.ExpandTilde(ref)); err == nil && !fi.IsDir() {
-		art.SizeBytes = uint64(fi.Size())
-	}
-	return art
 }
 
 func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr string, mock bool, custom ...*agent.InKernelPlanner) (*turnkeyServer, error) {
@@ -1559,116 +1042,6 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	return ts, nil
 }
 
-func (s *turnkeyServer) handleHealthz(w http.ResponseWriter, r *http.Request) {
-	isReady, state, _ := s.readiness()
-	var nativeStartup *turnkeyNativeStartup
-	if s.native != nil {
-		nativeStartup = &s.native.Startup
-	}
-	w.Header().Set("Content-Type", "application/json")
-	// Liveness is preserved for a live-but-not-ready process: /healthz answers
-	// 200 while the process can still respond, but the body's status must be
-	// truthful about readiness — "warming_up" until the boot warmup gate
-	// completes, "stopping" once shutdown began, otherwise "ok".
-	w.WriteHeader(http.StatusOK)
-	body := map[string]any{
-		"ok":             isReady,
-		"status":         state,
-		"ready":          isReady,
-		"mode":           "turnkey",
-		"engine":         s.engineID,
-		"tier":           s.plan.Tier.Name,
-		"model":          s.plan.Tier.ModelID,
-		"headroom_ratio": s.plan.HeadroomRatio,
-		"native_startup": nativeStartup,
-		"live_residency": s.liveResidencyReport(),
-		"agent_warm":     s.agentWarm.agentWarmBlock(),
-		"sessions":       s.capacityStats(),
-	}
-	// fak#13567: resident weight bytes by store + the LIVE lm_head route, the same shape the
-	// gateway /healthz reports. Absent (not zero) when no native model is loaded.
-	if s.native != nil {
-		if wr := residentWeightsLiveView(s.native.Model, s.native.Startup.Resident); wr != nil {
-			body["resident_weights"] = wr
-		}
-	}
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-// liveResidencyReport reads the LIVE Metal/CPU routing state at request time (#12875) instead of
-// replaying the snapshot frozen into native.Startup at load. The frozen `native_startup` stays for
-// backward compatibility; this block is the truthful answer to "did decode run on Metal on this
-// run?". It re-samples device-resident weight counts (a lazy later upload is now visible) and
-// reports the model's process-wide promised-CPU-fallback tally, which survives the per-request
-// session churn. It returns nil when no native model is loaded (mock/custom-server paths), so the
-// key is absent rather than a fabricated zero.
-func (s *turnkeyServer) liveResidencyReport() map[string]any {
-	if s.native == nil || s.native.Model == nil {
-		return nil
-	}
-	q6k, q8 := s.native.Model.RefreshMetalResidency()
-	fallbacks := s.native.Model.MetalFallbackSnapshot()
-	return map[string]any{
-		"metal_live_q8_weights":    q8,
-		"metal_live_q6_weights":    q6k,
-		"promised_cpu_fallbacks":   fallbacks.Total,
-		"fallbacks_observed":       fallbacks.Observed,
-		"fallbacks_by_route":       fallbacks.ByRoute,
-		"startup_q8_weights":       s.native.Startup.MetalLiveQ8Weights,
-		"startup_q6_weights":       s.native.Startup.MetalLiveQ6Weights,
-		"metal_q8_residency_error": s.native.Startup.MetalQ8ResidencyError,
-		// Re-read per probe: a later Metal Q6_K promotion moves the head (fak#13567).
-		"lm_head": s.native.Model.LMHeadRoute(),
-	}
-}
-
-func (s *turnkeyServer) handleReadyz(w http.ResponseWriter, r *http.Request) {
-	isReady, state, reason := s.readiness()
-	w.Header().Set("Content-Type", "application/json")
-	if !isReady {
-		w.Header().Set("Retry-After", "1")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"status": state,
-			"ready":  false,
-			"reason": reason,
-		})
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status": "ready",
-		"ready":  true,
-		"mode":   "turnkey",
-	})
-}
-
-func (s *turnkeyServer) handleModels(w http.ResponseWriter, r *http.Request) {
-	row := map[string]any{
-		"id":         s.plan.Tier.ModelID,
-		"object":     "model",
-		"created":    time.Now().Unix(),
-		"owned_by":   "fak",
-		"permission": []any{},
-	}
-	if contextWindow := turnkeyPlannerContextWindow(s.planner); contextWindow > 0 {
-		row["context_length"] = contextWindow
-		row["context_window"] = contextWindow
-		row["max_output_tokens"] = turnkeyMaxOutputTokens(uint64(contextWindow))
-	}
-	if turnkeyPromptEncodingAvailable(s) {
-		row["fak_capabilities"] = map[string]any{
-			"prompt_tokenization": map[string]any{"endpoint": "/v1/fak/tokenize"},
-		}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"object": "list",
-		"data":   []map[string]any{row},
-	})
-}
-
 func turnkeyPlannerContextWindow(planner agent.Planner) int {
 	if contextual, ok := planner.(interface{ ContextWindow() int }); ok {
 		return contextual.ContextWindow()
@@ -1718,138 +1091,6 @@ func turnkeyNormalizePrompt(raw json.RawMessage) string {
 		return strings.Join(many, "\n")
 	}
 	return ""
-}
-
-// handleCompletions serves the LEGACY text-completion wire the turnkey server
-// previously omitted: it wraps the request prompt as a single user message and reuses
-// the same planner path as the chat route, then emits `text_completion` frames (bare
-// `text`, never a chat delta). This is the surface vLLM, SGLang, llama.cpp-server,
-// and the subagent fan-out harness all speak.
-func (s *turnkeyServer) handleCompletions(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	switch s.admitChatRequest() {
-	case admissionGranted:
-		// admitted
-	case admissionAtCapacity:
-		writeTurnkeyBackpressure(w, "server_at_capacity", s.capacity().MaxSessions)
-		return
-	default:
-		http.Error(w, "server stopping", http.StatusServiceUnavailable)
-		return
-	}
-	defer s.endChatRequest()
-
-	var req turnkeyCompletionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	prompt := turnkeyNormalizePrompt(req.Prompt)
-	if strings.TrimSpace(prompt) == "" {
-		http.Error(w, "prompt: field required", http.StatusBadRequest)
-		return
-	}
-	if req.MaxTokens < 0 {
-		http.Error(w, "max_tokens: must be a positive integer", http.StatusBadRequest)
-		return
-	}
-
-	chatReq := gateway.ChatRequest{
-		Model:       req.Model,
-		Messages:    []agent.Message{{Role: agent.RoleUser, Content: prompt}},
-		MaxTokens:   req.MaxTokens,
-		Temperature: req.Temperature,
-		TopP:        req.TopP,
-		Stream:      req.Stream,
-	}
-	modelID := s.plan.Tier.ModelID
-	if chatReq.Model != "" {
-		modelID = chatReq.Model
-	}
-
-	if chatReq.Stream && !s.mock {
-		if sp, ok := s.planner.(agent.StreamingPlanner); ok && sp.StreamingSupported() {
-			s.handleCompletionsStream(w, r, chatReq, modelID, sp)
-			return
-		}
-	}
-
-	finishReason := "stop"
-	answer := agent.Message{Role: agent.RoleAssistant}
-	var usage agent.Usage
-
-	if !s.mock && s.planner != nil {
-		sampleOpts := turnkeyChatSampleOpts(chatReq, s.plan.ContextBudgetTokens)
-		comp, err := s.planner.Complete(turnkeyRequestContext(r.Context()), chatReq.Messages, nil, sampleOpts...)
-		if err != nil {
-			writeTurnkeyInferenceError(w, err)
-			return
-		}
-		answer = comp.Message
-		usage = comp.Usage
-		if comp.FinishReason != "" {
-			finishReason = comp.FinishReason
-		}
-	} else {
-		answer.Content = fmt.Sprintf("Turnkey %s completion on Apple Silicon. Processed: %s", s.plan.Tier.Name, prompt)
-	}
-	if usage.CompletionTokens == 0 && answer.Content != "" {
-		usage.CompletionTokens = len(strings.Fields(answer.Content))
-		if usage.CompletionTokens == 0 {
-			usage.CompletionTokens = 1
-		}
-		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
-	}
-	atomic.AddInt64(&s.requestCount, 1)
-	atomic.AddInt64(&s.totalTokens, int64(usage.CompletionTokens))
-	created := time.Now().Unix()
-	cmplID := fmt.Sprintf("cmpl-fak-%d", time.Now().UnixNano())
-
-	if chatReq.Stream {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.WriteHeader(http.StatusOK)
-		flusher, _ := w.(http.Flusher)
-		sendChunk := func(text string, finish *string) {
-			chunk := map[string]any{
-				"id": cmplID, "object": "text_completion", "created": created, "model": modelID,
-				"choices": []map[string]any{{"index": 0, "text": text, "finish_reason": finish}},
-			}
-			if finish != nil {
-				chunk["usage"] = usage
-			}
-			raw, _ := json.Marshal(chunk)
-			_, _ = fmt.Fprintf(w, "data: %s\n\n", raw)
-			if flusher != nil {
-				flusher.Flush()
-			}
-		}
-		if answer.Content != "" {
-			sendChunk(answer.Content, nil)
-		}
-		stop := finishReason
-		sendChunk("", &stop)
-		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
-		if flusher != nil {
-			flusher.Flush()
-		}
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(gateway.CompletionResponse{
-		ID:      cmplID,
-		Object:  "text_completion",
-		Created: created,
-		Model:   modelID,
-		Choices: []gateway.CompletionChoice{{Index: 0, Text: answer.Content, FinishReason: &finishReason}},
-		Usage:   usage,
-	})
 }
 
 func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -1905,7 +1146,7 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 		}
 		comp, err := s.planner.Complete(turnkeyRequestContext(r.Context()), req.Messages, req.Tools, sampleOpts...)
 		if err != nil {
-			writeTurnkeyInferenceError(w, err)
+			s.writeInferenceError(w, err)
 			return
 		}
 		if comp.ToolCallsDropped && len(comp.Message.ToolCalls) == 0 {
@@ -2050,55 +1291,6 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 	}
 	_ = json.NewEncoder(w).Encode(resp)
 }
-
-func writeTurnkeyInferenceError(w http.ResponseWriter, err error) {
-	var contextErr *agent.InKernelContextLengthError
-	if errors.As(err, &contextErr) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
-			"message": contextErr.Error(), "type": "invalid_request_error", "code": "context_length_exceeded",
-		}})
-		return
-	}
-	// A native Metal command-buffer wait that exceeded its bound is a local,
-	// retryable resource stall — not a generic server fault. Surface it as 503
-	// with a distinct code so a client can retry or shed load instead of
-	// treating it as an opaque 500. The observation seam may wrap the typed
-	// error, so errors.As (not a type assertion) recovers it.
-	var stall metalgemm.MetalCommandBufferStallError
-	if errors.As(err, &stall) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
-			"message": fmt.Sprintf("Metal command buffer stall during %s: waited %.3fms at/over %.3fms limit",
-				stall.Operation, stall.WaitedMilliseconds, stall.LimitMilliseconds),
-			"type": "server_error", "code": "metal_command_buffer_stalled",
-		}})
-		return
-	}
-	// An in-kernel capacity refusal (the #13267 host-memory arm or the device precheck)
-	// or a recovered device OOM is a local, retryable resource condition: the request was
-	// declined before it could grow the resident server into a jetsam kill. Surface it as
-	// 503 + Retry-After with the same in_kernel_oom code the gateway uses, not an opaque 500.
-	var capErr *agent.InKernelCapacityError
-	var oomErr *agent.InKernelOOMError
-	if errors.As(err, &capErr) || errors.As(err, &oomErr) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Retry-After", turnkeyCapacityRetryAfterSeconds)
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
-			"message": err.Error() + "; retry later, or reduce the prompt/context size or max_tokens",
-			"type":    "server_error", "code": "in_kernel_oom",
-		}})
-		return
-	}
-	http.Error(w, fmt.Sprintf("inference error: %v", err), http.StatusInternalServerError)
-}
-
-// turnkeyCapacityRetryAfterSeconds is the Retry-After hint on an in-kernel capacity
-// refusal: long enough for an in-flight turn to finish and release its reservation.
-const turnkeyCapacityRetryAfterSeconds = "5"
 
 // armHostMemoryBudget hands the --max-rss ceiling to the in-kernel planner (#13267) so
 // the host-session (Metal) seam prices every request against it BEFORE allocating, and

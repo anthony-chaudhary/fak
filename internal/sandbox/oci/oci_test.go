@@ -49,8 +49,8 @@ func TestOCIBundleGeneration(t *testing.T) {
 	}
 
 	// 1. ociVersion
-	if ociSpec.OCIVersion != "1.0.2" {
-		t.Errorf("OCIVersion = %q, want '1.0.2'", ociSpec.OCIVersion)
+	if ociSpec.OCIVersion != SpecVersion {
+		t.Errorf("OCIVersion = %q, want %q", ociSpec.OCIVersion, SpecVersion)
 	}
 
 	// 2. Root

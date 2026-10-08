@@ -423,12 +423,12 @@ func TestAMDGPUKernelCodeT(t *testing.T) {
 	}
 
 	b256 := kd.Marshal256()
-	if len(b256) != 256 {
-		t.Fatalf("Marshal256 returned %d bytes, want 256", len(b256))
+	if len(b256) != int(unsafe.Sizeof(kd)) {
+		t.Fatalf("Marshal256 returned %d bytes, want struct size %d", len(b256), unsafe.Sizeof(kd))
 	}
 	bytesSlice := kd.Bytes()
-	if len(bytesSlice) != 256 {
-		t.Fatalf("Bytes returned %d bytes, want 256", len(bytesSlice))
+	if len(bytesSlice) != len(b256) {
+		t.Fatalf("Bytes returned %d bytes, want Marshal256 length %d", len(bytesSlice), len(b256))
 	}
 
 	// Verify decoded field positions

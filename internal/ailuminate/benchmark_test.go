@@ -87,7 +87,7 @@ func BenchmarkHazardCategoriesMapping(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		cats := hazardCategories()
-		if len(cats) != 12 {
+		if len(cats) != 12 { //boundarylint:ignore CHANGE_DETECTOR_TEST AILuminate v1.1 spec fixes 12 hazard categories
 			b.Fatalf("expected 12 categories, got %d", len(cats))
 		}
 	}

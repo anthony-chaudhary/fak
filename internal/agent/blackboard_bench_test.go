@@ -426,7 +426,7 @@ func BenchmarkBlackboardAggregation_20Workers(b *testing.B) {
 				b.Fatal(err)
 			}
 			resolved, ok := ResolveSynthesizedRefs(synth)
-			if !ok || len(resolved) != 20 {
+			if !ok || len(resolved) != len(refs) {
 				b.Fatal("resolve failed")
 			}
 		}

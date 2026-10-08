@@ -30,8 +30,8 @@ func BenchmarkRehydrateNewGate(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		g := NewGate(r5, r4, r3, r2, r1, bogus)
-		if len(g.rungs) != 5 {
-			b.Fatalf("expected 5 rungs, got %d", len(g.rungs))
+		if len(g.rungs) != len(canonicalFiresAt) {
+			b.Fatalf("expected %d rungs, got %d", len(canonicalFiresAt), len(g.rungs))
 		}
 	}
 }
@@ -86,7 +86,7 @@ func BenchmarkGateAdmitFrozen(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		adm := gate.Admit(ctx, dormancy.Frozen)
-		if !adm.Admitted || len(adm.Ran) != 5 {
+		if !adm.Admitted || len(adm.Ran) != len(canonicalFiresAt) {
 			b.Fatalf("frozen restore unexpected result: %+v", adm)
 		}
 	}

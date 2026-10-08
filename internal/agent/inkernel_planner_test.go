@@ -531,16 +531,17 @@ func TestInKernelPlannerSpeculativeVerification(t *testing.T) {
 	}
 
 	// 4. Test repetition penalty sanitization in speculative planner
+	const penaltyMaxNew = 6
 	var penaltyTokens []int
-	_, err = specPlanner.generateReusedRecovering(ctx, prompt, 6, 0, 0, 0, nil, 1.0, 0.5, nil, func(tok int) bool {
+	_, err = specPlanner.generateReusedRecovering(ctx, prompt, penaltyMaxNew, 0, 0, 0, nil, 1.0, 0.5, nil, func(tok int) bool {
 		penaltyTokens = append(penaltyTokens, tok)
 		return false
 	})
 	if err != nil {
 		t.Fatalf("speculative generate with penalty: %v", err)
 	}
-	if len(penaltyTokens) != 6 {
-		t.Fatalf("penalty tokens len = %d, want 6", len(penaltyTokens))
+	if len(penaltyTokens) != penaltyMaxNew {
+		t.Fatalf("penalty tokens len = %d, want %d", len(penaltyTokens), penaltyMaxNew)
 	}
 }
 

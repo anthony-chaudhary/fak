@@ -728,24 +728,25 @@ func TestSyntheticTreeTransplantBatchCheckout(t *testing.T) {
 		t.Fatalf("expected non-empty newCommitSHA")
 	}
 
+	const batchSize = 100
 	// Verify batching: 250 files with batch size 100 => 3 batches (100, 100, 50)
 	if len(checkoutBatches) != 3 {
 		t.Fatalf("expected 3 checkout batches, got %d", len(checkoutBatches))
 	}
-	if len(checkoutBatches[0]) != 100 {
-		t.Errorf("batch 0 len = %d, want 100", len(checkoutBatches[0]))
+	if len(checkoutBatches[0]) != batchSize {
+		t.Errorf("batch 0 len = %d, want %d", len(checkoutBatches[0]), batchSize)
 	}
-	if len(checkoutBatches[1]) != 100 {
-		t.Errorf("batch 1 len = %d, want 100", len(checkoutBatches[1]))
+	if len(checkoutBatches[1]) != batchSize {
+		t.Errorf("batch 1 len = %d, want %d", len(checkoutBatches[1]), batchSize)
 	}
-	if len(checkoutBatches[2]) != 50 {
-		t.Errorf("batch 2 len = %d, want 50", len(checkoutBatches[2]))
+	if len(checkoutBatches[2]) != totalFiles-2*batchSize {
+		t.Errorf("batch 2 len = %d, want %d", len(checkoutBatches[2]), totalFiles-2*batchSize)
 	}
 
 	// Verify each batch does not exceed batch size 100
 	for idx, batch := range checkoutBatches {
-		if len(batch) > 100 {
-			t.Errorf("batch %d exceeded max batch size 100: got %d", idx, len(batch))
+		if len(batch) > batchSize {
+			t.Errorf("batch %d exceeded max batch size %d: got %d", idx, batchSize, len(batch))
 		}
 	}
 

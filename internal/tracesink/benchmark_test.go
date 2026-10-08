@@ -17,13 +17,14 @@ func TestTraceSinkWriteAndFlush(t *testing.T) {
 		},
 	}
 
-	for i := 0; i < 10; i++ {
+	const n = 10
+	for i := 0; i < n; i++ {
 		sink.Emit(ev)
 	}
 
 	tr := sink.Trace()
-	if len(tr.Calls) != 10 {
-		t.Fatalf("calls = %d, want 10", len(tr.Calls))
+	if len(tr.Calls) != n {
+		t.Fatalf("calls = %d, want %d", len(tr.Calls), n)
 	}
 	if !sink.Complete() {
 		t.Fatal("expected sink to be complete")

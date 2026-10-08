@@ -204,9 +204,32 @@ func (r *Recorder) Attached() bool {
 	return r.attached
 }
 
+// LatencyStat summarizes a fixed-bucket histogram; quantiles are bucket upper bounds.
+type LatencyStat struct {
+	Count        uint64  `json:"count"`
+	TotalSeconds float64 `json:"total_seconds"`
+	MeanSeconds  float64 `json:"mean_seconds"`
+	P50Seconds   float64 `json:"p50_seconds"`
+	P95Seconds   float64 `json:"p95_seconds"`
+	MaxSeconds   float64 `json:"max_seconds"`
+}
+
+// KernelStat preserves the producer's timer domain and distinguishes folded overflow.
+type KernelStat struct {
+	Kernel      string `json:"kernel"`
+	Backend     string `json:"backend"`
+	TimerDomain string `json:"timer_domain"`
+	Overflow    bool   `json:"overflow"`
+	Measured    bool   `json:"measured"`
+	LatencyStat
+}
+
 // Snapshot is the bounded, agent-facing summary of both registries.
 type Snapshot struct {
-	Schema string `json:"schema"`
+	Schema           string                 `json:"schema"`
+	RecorderAttached bool                   `json:"recorder_attached"`
+	KernelLatency    []KernelStat           `json:"kernel_latency"`
+	PlannerLatency   map[string]LatencyStat `json:"planner_step_latency"`
 
 	KernelObserved      bool              `json:"kernel_observed"`
 	KernelEvents        uint64            `json:"kernel_events"`
@@ -223,26 +246,53 @@ const SnapshotSchema = "fak-step-observations/1"
 
 // Snapshot returns the summary without exposing live histogram internals.
 func (r *Recorder) Snapshot() Snapshot {
-	s := Snapshot{Schema: SnapshotSchema, PlannerEvents: map[string]uint64{}}
+	s := Snapshot{Schema: SnapshotSchema, KernelLatency: []KernelStat{}, PlannerEvents: map[string]uint64{}, PlannerLatency: map[string]LatencyStat{}}
 	if r == nil {
 		return s
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	s.RecorderAttached = r.attached
 	s.KernelObserved = r.kernel.events > 0
 	s.KernelEvents = r.kernel.events
-	s.KernelKeys = make([]string, 0, len(r.kernel.series()))
-	for _, k := range r.kernel.series() {
+	s.KernelKeys = make([]string, 0, len(r.kernel.keys)+1)
+	for _, k := range r.kernel.keys {
 		s.KernelKeys = append(s.KernelKeys, k.render())
+		s.KernelLatency = append(s.KernelLatency, kernelStat(k, r.kernel.byKey[k], false))
+	}
+	if r.kernel.overflowAgg != nil {
+		s.KernelKeys = append(s.KernelKeys, kernelOverflowKey.render())
+		s.KernelLatency = append(s.KernelLatency, kernelStat(kernelOverflowKey, r.kernel.overflowAgg, true))
 	}
 	s.KernelKeysCapped = r.kernel.capped()
 	s.KernelOverflow = r.kernel.overflowEvents
 	s.PlannerObserved = r.planner.events > 0
 	for _, k := range StepKinds {
 		s.PlannerEvents[string(k)] = r.planner.eventsByKind[k]
+		s.PlannerLatency[string(k)] = latencyStat(r.planner.seconds[k])
 	}
 	s.PlannerKindOverflow = r.planner.kindOverflow
 	return s
+}
+
+func latencyStat(h *histogram) LatencyStat {
+	if h == nil || h.count == 0 {
+		return LatencyStat{}
+	}
+	return LatencyStat{Count: h.count, TotalSeconds: h.sum, MeanSeconds: h.sum / float64(h.count), P50Seconds: h.quantile(0.5), P95Seconds: h.quantile(0.95), MaxSeconds: h.max}
+}
+
+func kernelStat(k kernelKey, agg *kernelAgg, overflow bool) KernelStat {
+	measured := false
+	switch k.timerDomain {
+	case "host_monotonic", "cuda_event", "metal_command_buffer", "vulkan_performance_query":
+		measured = !overflow
+	}
+	latency := latencyStat(agg.seconds)
+	if !measured {
+		latency = LatencyStat{Count: latency.Count}
+	}
+	return KernelStat{Kernel: k.kernel, Backend: k.backend, TimerDomain: k.timerDomain, Overflow: overflow, Measured: measured, LatencyStat: latency}
 }
 
 // Compact renders the snapshot as one bounded operator line.
@@ -259,6 +309,16 @@ func (s Snapshot) Compact() string {
 	if s.KernelKeysCapped {
 		b.WriteString(" capped=1")
 	}
+	var top *KernelStat
+	for i := range s.KernelLatency {
+		k := &s.KernelLatency[i]
+		if k.Measured && k.Count > 0 && (top == nil || k.TotalSeconds > top.TotalSeconds) {
+			top = k
+		}
+	}
+	if top != nil {
+		b.WriteString(" top_kernel=" + strconv.Quote(top.Kernel) + " backend=" + strconv.Quote(top.Backend) + " timer_domain=" + strconv.Quote(top.TimerDomain) + " mean_ms=" + milliseconds(top.MeanSeconds) + " max_ms=" + milliseconds(top.MaxSeconds))
+	}
 	if s.PlannerObserved {
 		var kinds []string
 		for _, k := range StepKinds {
@@ -267,10 +327,19 @@ func (s Snapshot) Compact() string {
 			}
 		}
 		b.WriteString(" | STEP observed " + strings.Join(kinds, " "))
+		for _, kind := range []StepKind{StepKindAdmission, StepKindSeat} {
+			if timing := s.PlannerLatency[string(kind)]; timing.Count > 0 {
+				b.WriteString(" " + string(kind) + "_mean_ms=" + milliseconds(timing.MeanSeconds) + " " + string(kind) + "_p95_ms=" + milliseconds(timing.P95Seconds))
+			}
+		}
 	} else {
 		b.WriteString(" | STEP absent")
 	}
 	return b.String()
+}
+
+func milliseconds(seconds float64) string {
+	return strconv.FormatFloat(seconds*1000, 'f', 3, 64)
 }
 
 // WritePrometheus renders the fak_engine_kernel_* and fak_engine_planner_step_* families

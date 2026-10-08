@@ -48,7 +48,7 @@ func TestPerfLedgerServedTurnEmitsOneRowAndSurvivesRestart(t *testing.T) {
 	srv.SetPerfLedger(w, seed, capped)
 
 	// The same fold a served turn reaches (messages_stream_passthrough.go).
-	srv.metrics.observeInferenceServedTimed(localitySelfHosted, 1000, 200, 500, 0, "end_turn", 5*time.Second, time.Second)
+	srv.metrics.observeInferenceServedTimed(localitySelfHosted, "", 1000, 201, 500, 0, "end_turn", 5*time.Second, time.Second)
 
 	if err := w.Close(); err != nil {
 		t.Fatalf("writer close: %v", err)
@@ -64,7 +64,7 @@ func TestPerfLedgerServedTurnEmitsOneRowAndSurvivesRestart(t *testing.T) {
 	if got.Schema != perfledger.Schema || got.Locality != perfledger.LocalitySelfHosted || got.FinishReason != "end_turn" {
 		t.Fatalf("row identity = %q/%q/%q", got.Schema, got.Locality, got.FinishReason)
 	}
-	if got.PromptTokens != 1000 || got.CompletionTokens != 200 || got.CachedTokens != 500 {
+	if got.PromptTokens != 1000 || got.CompletionTokens != 201 || got.CachedTokens != 500 {
 		t.Fatalf("row tokens = %d/%d/%d", got.PromptTokens, got.CompletionTokens, got.CachedTokens)
 	}
 	if got.E2EMS != 5000 || got.TTFTMS != 1000 || got.PrefillTPS != 1000 || got.DecodeTPS != 50 {
@@ -100,6 +100,9 @@ func TestPerfLedgerServedTurnEmitsOneRowAndSurvivesRestart(t *testing.T) {
 func TestPerfLedgerHTTPChatTurnRecordsExactlyOneRow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gateway-perf.jsonl")
 	srv := newTestServer(t)
+	// A mock turn can finish inside one tick of Windows' coarse wall clock, which
+	// measures e2e as exactly 0; hold the turn long enough to be observable.
+	srv.planner = perfDelayedPlanner{inner: srv.planner, d: 20 * time.Millisecond}
 	w := perfledger.OpenWriter(path, perfledger.DefaultMaxBytes)
 	srv.SetPerfLedger(w, nil, false)
 
@@ -151,7 +154,7 @@ func TestPerfLedgerRingCapsAndSeedPrecedesLive(t *testing.T) {
 		seed[i] = perfledger.Record{Schema: perfledger.Schema, UnixMS: int64(i), E2EMS: 1}
 	}
 	srv.SetPerfLedger(nil, seed, false)
-	srv.metrics.observeInferenceServedTimed(localityVendor, 10, 1, 0, 0, "stop", time.Second, 0)
+	srv.metrics.observeInferenceServedTimed(localityVendor, "", 10, 1, 0, 0, "stop", time.Second, 0)
 
 	rep := srv.PerfReport(perfledger.RingCap)
 	if rep.Window.Requests != perfledger.RingCap || !rep.Window.Capped {
@@ -163,5 +166,38 @@ func TestPerfLedgerRingCapsAndSeedPrecedesLive(t *testing.T) {
 	last := rep.Records[len(rep.Records)-1]
 	if last.Locality != perfledger.LocalityVendor || last.TTFTMS != 0 {
 		t.Fatalf("newest row = %+v, want the live vendor turn with ttft unmeasured", last)
+	}
+}
+
+// fak-test:runtime fast est=500ms lane=default
+func TestPerfLedgerRowCarriesServingIdentity(t *testing.T) {
+	srv := newTestServer(t)
+	srv.metrics.setPerfIdentity("default-model", perfledger.Identity{Planner: "inkernel", Backend: "cpu-ref", Host: "h", Version: "v"})
+
+	srv.metrics.observeInferenceServedTimed(localitySelfHosted, "routed-model", 10, 5, 0, 0, "stop", time.Second, 100*time.Millisecond)
+	srv.metrics.observeInferenceServedTimed(localitySelfHosted, "", 10, 5, 0, 0, "stop", time.Second, 100*time.Millisecond)
+
+	rep := decodePerfReport(t, getPerfRecent(t, srv, "n=10"))
+	if len(rep.Records) != 2 {
+		t.Fatalf("records = %d, want 2", len(rep.Records))
+	}
+	want := perfledger.Identity{Planner: "inkernel", Backend: "cpu-ref", Host: "h", Version: "v"}
+	if got := rep.Records[0]; got.Model != "routed-model" || got.Identity != want {
+		t.Fatalf("routed row = %q %+v", got.Model, got.Identity)
+	}
+	if got := rep.Records[1].Model; got != "default-model" {
+		t.Fatalf("unrouted row model = %q, want server default", got)
+	}
+	if rep.Summary.Identities != 2 || rep.Summary.ServedBy == nil || rep.Summary.ServedBy.Model != "default-model" {
+		t.Fatalf("summary served_by = %+v (%d), want newest default-model (2)", rep.Summary.ServedBy, rep.Summary.Identities)
+	}
+}
+
+// fak-test:runtime fast est=500ms lane=default
+func TestNewServerStampsPerfIdentity(t *testing.T) {
+	srv := newTestServer(t)
+	sb := srv.metrics.perfServedBy.Load()
+	if sb == nil || sb.Planner == "" || sb.Version == "" {
+		t.Fatalf("server perf identity = %+v, want planner and version resolved at New", sb)
 	}
 }

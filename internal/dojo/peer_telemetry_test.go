@@ -4,6 +4,16 @@ import (
 	"testing"
 )
 
+func peerSearchCellCount() int {
+	n := 0
+	for k := range registered {
+		if k.Lever == "peer-search" {
+			n++
+		}
+	}
+	return n
+}
+
 func TestDojo_PeerContextCalibrationAndConversionFunnel(t *testing.T) {
 	// 1. Clean run: Level0=100, Level1=40, Level2=10, AvoidedToolTokens=5000, PeerQueryTokens=2000
 	cleanLedger := PeerSearchTelemetryLedger{
@@ -36,8 +46,8 @@ func TestDojo_PeerContextCalibrationAndConversionFunnel(t *testing.T) {
 	}
 
 	cleanInputs := PeerSearchEpisodes(cleanLedger)
-	if len(cleanInputs) != 9 {
-		t.Fatalf("expected 9 episodes, got %d", len(cleanInputs))
+	if len(cleanInputs) != peerSearchCellCount() {
+		t.Fatalf("expected %d episodes, got %d", peerSearchCellCount(), len(cleanInputs))
 	}
 
 	if !cleanInputs[0].Outcome.Measured || cleanInputs[0].Outcome.Realized != wantCR01 {
@@ -86,8 +96,8 @@ func TestDojo_PeerContextCalibrationAndConversionFunnel(t *testing.T) {
 	}
 
 	leakInputs := PeerSearchEpisodes(leakLedger)
-	if len(leakInputs) != 9 {
-		t.Fatalf("expected 9 episodes, got %d", len(leakInputs))
+	if len(leakInputs) != peerSearchCellCount() {
+		t.Fatalf("expected %d episodes, got %d", peerSearchCellCount(), len(leakInputs))
 	}
 
 	// Verify token savings outcome is penalized to failure (0.0)
@@ -141,8 +151,8 @@ func TestDojo_PeerContextCalibrationAndConversionFunnel(t *testing.T) {
 func TestPeerSearchEpisodes_Unrecorded(t *testing.T) {
 	unrec := PeerSearchTelemetryLedger{Recorded: false}
 	inputs := PeerSearchEpisodes(unrec)
-	if len(inputs) != 9 {
-		t.Fatalf("expected 9 inputs, got %d", len(inputs))
+	if len(inputs) != peerSearchCellCount() {
+		t.Fatalf("expected %d inputs, got %d", peerSearchCellCount(), len(inputs))
 	}
 	for i, in := range inputs {
 		if in.Outcome.Measured {
@@ -353,8 +363,8 @@ func TestPeerSearchEpisodes_TaintLeaksSampleSizingAndRealizedCount(t *testing.T)
 				Recorded:      tc.recorded,
 			}
 			episodes := PeerSearchEpisodes(ledger)
-			if len(episodes) != 9 {
-				t.Fatalf("expected 9 episodes, got %d", len(episodes))
+			if len(episodes) != peerSearchCellCount() {
+				t.Fatalf("expected %d episodes, got %d", peerSearchCellCount(), len(episodes))
 			}
 
 			// Check taint_leak_rate (index 3)
@@ -510,8 +520,8 @@ func TestPeerSearchParameterTuningLevers(t *testing.T) {
 	}
 
 	episodes := activeLedger.Episodes()
-	if len(episodes) != 9 {
-		t.Fatalf("expected 9 episodes from activeLedger, got %d", len(episodes))
+	if len(episodes) != peerSearchCellCount() {
+		t.Fatalf("expected %d episodes from activeLedger, got %d", peerSearchCellCount(), len(episodes))
 	}
 
 	// Episode 5: excerpt_budget_tokens

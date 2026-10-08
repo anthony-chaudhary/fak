@@ -233,7 +233,7 @@ func TestSubmitTimeoutNoStaleResult(t *testing.T) {
 				if !found {
 					continue // timeout or evicted, ok
 				}
-				if len(got) != 64 {
+				if len(got) != len(val) {
 					crossContaminated[g]++
 					continue
 				}

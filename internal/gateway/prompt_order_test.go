@@ -32,7 +32,7 @@ func TestDeterministicPromptCanonicalizer_FourTierOrdering(t *testing.T) {
 
 	outMsgs, sortedTools, stats := c.CanonicalizePromptMessages(messages, tools)
 
-	if len(outMsgs) != 6 {
+	if len(outMsgs) != len(messages) {
 		t.Fatalf("expected 6 messages, got %d", len(outMsgs))
 	}
 	if len(sortedTools) != 1 {
@@ -165,7 +165,7 @@ func TestDeterministicPromptCanonicalizer_CacheBreakpointPrefixBoundary(t *testi
 
 	outMsgs, _, stats := c.CanonicalizePromptMessages(messages, nil)
 
-	if len(outMsgs) != 6 {
+	if len(outMsgs) != len(messages) {
 		t.Fatalf("expected 6 messages, got %d", len(outMsgs))
 	}
 
@@ -355,7 +355,7 @@ func TestDeterministicPromptCanonicalizer_ConcurrentRace(t *testing.T) {
 
 			// Run CanonicalizePromptMessages
 			outMsgs, sortedTools, stats := c.CanonicalizePromptMessages(messages, tools)
-			if len(outMsgs) != 5 {
+			if len(outMsgs) != len(messages) {
 				t.Errorf("goroutine %d: outMsgs len = %d, want 5", iter, len(outMsgs))
 			}
 			if len(sortedTools) != 3 {
@@ -370,7 +370,7 @@ func TestDeterministicPromptCanonicalizer_ConcurrentRace(t *testing.T) {
 
 			// Run CanonicalizePromptOrder
 			ordered := CanonicalizePromptOrder(messages)
-			if len(ordered) != 5 {
+			if len(ordered) != len(messages) {
 				t.Errorf("goroutine %d: ordered len = %d, want 5", iter, len(ordered))
 			}
 		}(i)
@@ -610,7 +610,7 @@ func TestPromptOrdering_Tiers1Through5(t *testing.T) {
 
 	outMsgs, sortedTools, stats := c.CanonicalizePromptMessages(messages, tools)
 
-	if len(outMsgs) != 6 {
+	if len(outMsgs) != len(messages) {
 		t.Fatalf("expected 6 messages, got %d", len(outMsgs))
 	}
 	if len(sortedTools) != 1 {

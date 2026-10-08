@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -30,6 +31,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
@@ -441,7 +443,58 @@ var gardenLoopRegisterOS = func(stdout, stderr io.Writer, fakBin, root string, i
 	}
 }
 
+// errGardenTestRegisterLive refuses OS-scheduler registration from a test
+// binary that would reach the live host scheduler or the operator's real home:
+// a leaked unit keeps firing long after the test exits.
+var errGardenTestRegisterLive = errors.New("garden loop: test registration would touch the live host scheduler")
+
+// guardGardenTestRegister is a no-op outside a test binary. Under test it
+// refuses schtasks (a live command) and a unit write under a home outside the
+// temp roots t.TempDir can use (os.TempDir, or GOTMPDIR when set).
+func guardGardenTestRegister(goos string) error {
+	if !testing.Testing() {
+		return nil
+	}
+	if goos == "windows" {
+		return fmt.Errorf("%w: schtasks is a live command", errGardenTestRegisterLive)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("%w: %v", errGardenTestRegisterLive, err)
+	}
+	roots := []string{os.TempDir()}
+	if d := strings.TrimSpace(os.Getenv("GOTMPDIR")); d != "" {
+		roots = append(roots, d)
+	}
+	for _, root := range roots {
+		if pathUnderDir(home, root) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: home %s is outside the temp dir", errGardenTestRegisterLive, home)
+}
+
+func pathUnderDir(path, dir string) bool {
+	path, dir = resolveGuardPath(path), resolveGuardPath(dir)
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+func resolveGuardPath(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
+}
+
 func registerWindowsTaskScheduler(stdout, stderr io.Writer, fakBin, root string, interval time.Duration, live bool) int {
+	if err := guardGardenTestRegister("windows"); err != nil {
+		fmt.Fprintf(stderr, "fak garden loop: %v\n", err)
+		return 1
+	}
 	liveArg := ""
 	if live {
 		liveArg = " --live"
@@ -479,6 +532,10 @@ func registerWindowsTaskScheduler(stdout, stderr io.Writer, fakBin, root string,
 }
 
 func registerLinuxSystemdTimer(stdout, stderr io.Writer, fakBin, root string, interval time.Duration, live bool) int {
+	if err := guardGardenTestRegister("linux"); err != nil {
+		fmt.Fprintf(stderr, "fak garden loop: %v\n", err)
+		return 1
+	}
 	home, _ := os.UserHomeDir()
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
 	if err := os.MkdirAll(unitDir, 0o755); err != nil {
@@ -530,6 +587,10 @@ WantedBy=timers.target
 }
 
 func registerDarwinLaunchdAgent(stdout, stderr io.Writer, fakBin, root string, interval time.Duration, live bool) int {
+	if err := guardGardenTestRegister("darwin"); err != nil {
+		fmt.Fprintf(stderr, "fak garden loop: %v\n", err)
+		return 1
+	}
 	home, _ := os.UserHomeDir()
 	agentsDir := filepath.Join(home, "Library", "LaunchAgents")
 	if err := os.MkdirAll(agentsDir, 0o755); err != nil {

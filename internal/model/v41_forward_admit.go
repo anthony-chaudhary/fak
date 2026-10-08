@@ -1,0 +1,724 @@
+package model
+
+import (
+	"fmt"
+	"math"
+)
+
+// v41KVLoraRankReduced is the reduced-model KV latent width. The published V4.1
+// KV latent (v41KVLoraRank = 512) is a checkpoint constant the text Config does
+// not carry; the reduced assembly deliberately uses HeadDim so the reduced test
+// fixture stays tiny and self-consistent. It is not a claim about the official
+// checkpoint geometry.
+func v41KVLoraRankReduced(cfg Config) int { return cfg.HeadDim }
+
+// v41ForwardGeometry reports whether cfg declares the published full V4.1
+// geometry (true) or the reduced test fixture (false). It FAILS CLOSED: when the
+// parsed DeepSeekV41.Attention envelope is populated (a published/parsed config)
+// and the config is not a coherently narrowed reduced fixture, the full geometry
+// is REQUIRED and any mismatch is a typed ErrV41ForwardStage -- the assembly
+// never silently falls back to the reduced stand-in. A lone-axis drift (a mutated
+// head width while the decoder stack stays at the published envelope) is refused.
+//
+// The discriminator is the Attention envelope's HeadDim plus the flat layer
+// count: a reduced fixture narrows both the decoder stack and the head width
+// (NumLayers 40 -> 1, HeadDim 512 -> 32). A config with no DeepSeekV41 metadata or
+// an empty envelope is classified by its own flat HeadDim: 512 (v41KVLoraRank)
+// means full, anything else (the reduced fixture's 32) means reduced.
+func v41ForwardGeometry(cfg Config) (bool, error) {
+	m := cfg.DeepSeekV41
+	if m == nil || m.Attention.HeadDim == 0 {
+		return cfg.HeadDim == v41KVLoraRank, nil
+	}
+	attn := m.Attention
+	// A parsed/published config derives its Attention envelope from the SAME flat
+	// geometry, so a genuine published config always agrees with its envelope on
+	// every decoder axis. Two situations can disagree:
+	//
+	//   * The reduced fixture reuses the retained published metadata pointer but
+	//     narrows the flat decoder stack (NumLayers 40 -> 1) AND the head width
+	//     (HeadDim 512 -> 32) -- a deliberate, coherent narrowing. That config is a
+	//     fixture and is classified by its flat head width.
+	//   * A corrupted full config drifts a single axis (typically the head width)
+	//     while leaving the rest of the decoder stack at the published envelope.
+	//     That is NOT a deliberate reduction and FAILS CLOSED: a full-intended
+	//     config must never silently run the reduced stand-in geometry.
+	//
+	// The two are distinguished by whether the flat decoder stack itself was
+	// narrowed below the envelope. Requiring BOTH a non-published head width and a
+	// narrowed layer count keeps the reduced fixture admitted while refusing a
+	// lone-axis drift.
+	if attn.HeadDim != cfg.HeadDim {
+		reducedFixture := cfg.HeadDim != v41KVLoraRank && cfg.NumLayers < attn.NumLayers
+		if !reducedFixture {
+			return false, v41StageErr(v41StageAttention, -1,
+				fmt.Errorf("%w: published V4.1 attention envelope declares head_dim=%d but config has %d and the decoder stack is not a narrowed fixture (layers %d vs %d)",
+					ErrV41ForwardStage, attn.HeadDim, cfg.HeadDim, cfg.NumLayers, attn.NumLayers))
+		}
+		return cfg.HeadDim == v41KVLoraRank, nil
+	}
+	// Authoritative (self-consistent) envelope: the full published geometry is
+	// REQUIRED. Any mismatch on a decoder axis is a typed fail-closed error -- the
+	// assembly never falls back to the reduced stand-in.
+	type axis struct {
+		name      string
+		got, want int
+	}
+	for _, a := range []axis{
+		{"head_dim", cfg.HeadDim, v41KVLoraRank},
+		{"num_hidden_layers", cfg.NumLayers, attn.NumLayers},
+		{"hidden_size", cfg.HiddenSize, attn.HiddenSize},
+		{"num_attention_heads", cfg.NumHeads, attn.NumHeads},
+		{"num_key_value_heads", cfg.NumKVHeads, attn.NumKVHeads},
+	} {
+		if a.got != a.want {
+			return false, v41StageErr(v41StageAttention, -1,
+				fmt.Errorf("%w: published V4.1 attention envelope declares %s=%d but config has %d", ErrV41ForwardStage, a.name, a.want, a.got))
+		}
+	}
+	return true, nil
+}
+
+// v41ForwardKVLatentRank resolves the attn.wkv output width for an admitted
+// config: the published v41KVLoraRank (512) on the full path, the tiny HeadDim
+// stand-in on the reduced fixture. It returns v41ForwardGeometry's error rather
+// than defaulting to the reduced width, so a config whose published envelope is
+// inconsistent can never be admitted against a reduced stand-in shape.
+func v41ForwardKVLatentRank(cfg Config) (int, error) {
+	full, err := v41ForwardGeometry(cfg)
+	if err != nil {
+		return 0, err
+	}
+	if full {
+		return v41KVLoraRank, nil
+	}
+	return v41KVLoraRankReduced(cfg), nil
+}
+
+// v41MHCMixWidth is the mHC coefficient-vector width for hc=4: (2+hc)*hc.
+const v41MHCMixWidth = 24
+
+// v41RouterConfigFullGeometry is the real-path routed+shared geometry. It routes
+// through v41RouterConfigFromConfig so the forward only admits the published
+// 384/top-6/1-shared/1.5-scale envelope; any other axis is refused here rather
+// than silently running a different MoE geometry. The router admission error is
+// wrapped into the typed ErrV41ForwardStage so a config missing (or carrying a
+// non-published) full-geometry axis fails closed at the forward stage boundary.
+func v41RouterConfigFullGeometry(cfg Config) (v41RouterConfig, error) {
+	rc, err := v41RouterConfigFromConfig(cfg)
+	if err != nil {
+		return v41RouterConfig{}, v41StageErr(v41StageMoE, -1,
+			fmt.Errorf("%w: published router envelope rejected: %w", ErrV41ForwardStage, err))
+	}
+	return rc, nil
+}
+
+// v41EngramForwardAdmitted fails closed when the config declares an Engram layer
+// that lies WITHIN the model's decoder stack but the model's Engram stage is not
+// fully wired for it. As of #13007 the reduced text assembly DOES execute
+// packaged-row Engram retrieval (v41_forward_engram.go): a declared in-range
+// Engram layer is admitted only when it has a wired row source and the three
+// mixing tensors (engram_kv.weight, engram_q_norm.weight, engram_k_norm.weight).
+// Otherwise the assembly would emit logits for a model it did not fully run, so
+// the layer is refused with an error wrapping ErrV41NativeUnsupported — the same
+// native-forward-unavailable class the #12967 weightless fence uses, because the
+// Engram stage cannot execute without its packed-row source. Declared Engram
+// layers outside [0,NumLayers) are unreachable by this forward and stay admitted,
+// which keeps the reduced oracle fixture (NumLayers=1, EngramLayerIDs [1,14])
+// runnable.
+//
+// Method receiver (not a bare Config) is required because admission must see
+// whether THIS model carries the packed-row stage; v41ForwardAdmitted calls it
+// after the embedding/manifest checks so a weightless model still fails at the
+// embedding fence with ErrV41NativeUnsupported first.
+func (m *Model) v41EngramForwardAdmitted() error {
+	d41 := m.Cfg.DeepSeekV41
+	if d41 == nil {
+		return nil
+	}
+	for _, layer := range d41.EngramLayerIDs {
+		if layer < 0 || layer >= m.Cfg.NumLayers {
+			continue
+		}
+		stage := m.v41EngramStageFor()
+		if stage == nil || stage.cacheIndex(layer) < 0 {
+			return v41StageErr(v41StageEngram, layer,
+				fmt.Errorf("%w: layer %d declares Engram but no packed-row source is wired", ErrV41NativeUnsupported, layer))
+		}
+		cols := stage.columns
+		H := m.Cfg.HiddenSize
+		if err := m.v41AdmitShape(layerName(layer, "engram_kv.weight"), v41StageEngram, layer, cols*stage.headDim, (stage.hc+1)*H); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "engram_q_norm.weight"), v41StageEngram, layer, stage.hc*H); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "engram_k_norm.weight"), v41StageEngram, layer, stage.hc*H); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// v41CompressIndexForwardAdmitted fails closed when the config declares a
+// CED/CSA2 compressor regime or a lightning-indexer source that lies WITHIN the
+// model's decoder stack. The reduced text assembly executes neither stage (their
+// packed-row / compressed-stream inputs cannot be materialized weight-free — see
+// the scope note at the top of this file), so silently dropping a declared
+// in-range compressor/indexer layer would emit reduced logits for a model the
+// assembly never ran. Declarations that only touch out-of-range layers stay
+// admitted, which keeps the reduced oracle fixture runnable: it derives from the
+// published 40-layer config but narrows NumLayers to 1, so every CompressRatios
+// entry above index 0 and every index source ({2,8,...}) is unreachable. Executing
+// the real compressor/indexer stages is #13006's remaining integration work; until
+// then this is the fail-closed boundary.
+//
+// Two malformed-schedule arms are also refused here: a negative ratio (invalid
+// geometry, never a compressed layer) and a schedule shorter than the decoder
+// stack (an uncovered layer with no declared regime). Both must fail closed, not
+// fall through to the uncompressed regime.
+func (m *Model) v41CompressIndexForwardAdmitted() error {
+	d41 := m.Cfg.DeepSeekV41
+	if d41 == nil {
+		return nil
+	}
+	cfg := m.Cfg
+	// Every layer in the model's decoder stack must declare a regime. A schedule
+	// shorter than the stack leaves the uncovered layers with no declared
+	// compression regime, which must fail closed rather than being silently read as
+	// ratio 0.
+	if len(d41.CompressRatios) < cfg.NumLayers {
+		return v41StageErr(v41StageCompress, len(d41.CompressRatios),
+			fmt.Errorf("%w: compression schedule declares %d ratios but the model has %d layers", ErrV41ForwardStage, len(d41.CompressRatios), cfg.NumLayers))
+	}
+	H := cfg.HiddenSize
+	for layer := 0; layer < cfg.NumLayers; layer++ {
+		// Ratio 0 and 1 are the uncompressed regimes. A ratio > 1 declares a
+		// compressed layer whose compressor must be wired; a negative ratio is
+		// malformed geometry that must fail closed rather than being silently
+		// treated as uncompressed.
+		ratio := d41.CompressRatios[layer]
+		switch {
+		case ratio < 0:
+			return v41StageErr(v41StageCompress, layer,
+				fmt.Errorf("%w: layer %d declares malformed compressor ratio %d", ErrV41ForwardStage, layer, ratio))
+		case ratio > 1:
+			width := v41CompressorWidth(cfg)
+			if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wkv.weight"), v41StageCompress, layer, width, H); err != nil {
+				return err
+			}
+			if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wgate.weight"), v41StageCompress, layer, width, H); err != nil {
+				return err
+			}
+			if err := m.v41AdmitShape(layerName(layer, "attn.compressor.norm.weight"), v41StageCompress, layer, width); err != nil {
+				return err
+			}
+		}
+	}
+	indexHeads := cfg.IndexNHeads
+	indexDim := cfg.IndexHeadDim
+	for _, layer := range d41.IndexSourceLayerIDs {
+		if layer < 0 || layer >= cfg.NumLayers {
+			continue
+		}
+		if indexHeads <= 0 || indexDim <= 0 {
+			return v41StageErr(v41StageIndexer, layer,
+				fmt.Errorf("%w: layer %d declares a lightning-indexer source but the indexer geometry (nHeads=%d headDim=%d) is not declared", ErrV41ForwardStage, layer, indexHeads, indexDim))
+		}
+		wq := indexHeads * indexDim
+		if err := m.v41AdmitShape(layerName(layer, "indexer.wq_b.weight"), v41StageIndexer, layer, wq, cfg.QLoraRank); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "indexer.wk.weight"), v41StageIndexer, layer, indexDim, v41CompressorWidth(cfg)); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "indexer.k_norm.weight"), v41StageIndexer, layer, indexDim); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "indexer.weights_proj.weight"), v41StageIndexer, layer, indexHeads, H); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// v41CompressorWidth is the compressor latent width. The published V4.1
+// compressor pools to the KV latent width; the reduced text assembly does not
+// carry that checkpoint constant on the text Config, so it pools at HeadDim,
+// matching v41KVLoraRankReduced. It is not a claim about the official geometry.
+func v41CompressorWidth(cfg Config) int { return cfg.HeadDim }
+
+// v41CompressedRows pools the per-position projected KV rows of one layer
+// through the CED/CSA2 compressor. It returns the emitted compressed rows in
+// causal order. A non-compressed regime returns the input rows unchanged. It
+// fails closed on any malformed geometry rather than emitting a partial stream.
+func (m *Model) v41CompressedRows(l int, ratio int, kvRows [][]float32, inputs [][]float32) ([][]float32, error) {
+	if ratio <= 1 {
+		return kvRows, nil
+	}
+	cfg := m.Cfg
+	width := v41CompressorWidth(cfg)
+	H := cfg.HiddenSize
+	wkv := m.tensor(layerName(l, "attn.compressor.wkv.weight"))
+	wgate := m.tensor(layerName(l, "attn.compressor.wgate.weight"))
+	normWeight := m.tensor(layerName(l, "attn.compressor.norm.weight"))
+	eps := float32(cfg.RMSNormEps)
+	pool, err := NewV41CompressorPool(ratio, width)
+	if err != nil {
+		return nil, v41StageErr(v41StageCompress, l, err)
+	}
+	var out [][]float32
+	for pos := range inputs {
+		var in []float32
+		if pos < len(inputs) {
+			in = inputs[pos]
+		}
+		kv := matRows(wkv, in, width, H)
+		score := matRows(wgate, in, width, H)
+		pooled, emitted, err := pool.PushNormalized(pos, kv, score, normWeight, eps)
+		if err != nil {
+			return nil, v41StageErr(v41StageCompress, l, err)
+		}
+		if emitted {
+			out = append(out, pooled)
+		}
+	}
+	return out, nil
+}
+
+// v41IndexRows scores a projected index query against the compressed keys and
+// returns the selected compressed row IDs for one layer. It returns nil when the
+// layer declares no index source. Candidate blocks are selected when the layer is
+// the declared candidate source, so the selection reads a blocked pool rather
+// than the full compressed set.
+func (m *Model) v41IndexRows(l int, qLat []float32, hidden []float32, keys [][]float32) ([]int32, error) {
+	d41 := m.Cfg.DeepSeekV41
+	if d41 == nil {
+		return nil, nil
+	}
+	isSource := false
+	for _, src := range d41.IndexSourceLayerIDs {
+		if src == l {
+			isSource = true
+			break
+		}
+	}
+	if !isSource {
+		return nil, nil
+	}
+	cfg := m.Cfg
+	nHeads, headDim := cfg.IndexNHeads, cfg.IndexHeadDim
+	if nHeads <= 0 || headDim <= 0 {
+		return nil, v41StageErr(v41StageIndexer, l,
+			fmt.Errorf("%w: indexer geometry nHeads=%d headDim=%d is not declared", ErrV41ForwardStage, nHeads, headDim))
+	}
+	wqB := m.tensor(layerName(l, "indexer.wq_b.weight"))
+	wk := m.tensor(layerName(l, "indexer.wk.weight"))
+	kNorm := m.tensor(layerName(l, "indexer.k_norm.weight"))
+	wProj := m.tensor(layerName(l, "indexer.weights_proj.weight"))
+	compressLen := len(keys)
+	q := matRows(wqB, qLat, nHeads*headDim, cfg.QLoraRank)
+	flatKeys := make([]float32, 0, compressLen*headDim)
+	for _, row := range keys {
+		projected := matRows(wk, row, headDim, len(row))
+		if len(kNorm) == headDim {
+			projected = rmsnormCfg(projected, kNorm, float32(cfg.RMSNormEps), cfg)
+		}
+		flatKeys = append(flatKeys, projected...)
+	}
+	weights := matRows(wProj, hidden, nHeads, cfg.HiddenSize)
+	for h := 0; h < nHeads; h++ {
+		weights[h] *= cfg.attnScale() * float32(1.0/math.Sqrt(float64(nHeads)))
+	}
+	topKBlocks, blockSize := 0, 0
+	if d41.CandidateSourceLayerID == l {
+		topKBlocks, blockSize = d41.CandidateTopKBlocks, d41.CandidateBlockSize
+	}
+	pub, err := NewV41IndexerPublication(l, q, flatKeys, weights, nHeads, headDim, compressLen, topKBlocks, blockSize, cfg.IndexTopK, 0)
+	if err != nil {
+		return nil, v41StageErr(v41StageIndexer, l, err)
+	}
+	return pub.Rows(), nil
+}
+
+// v41KVSourceForwardAdmitted fails closed when the config declares a shared-KV
+// source layer that lies WITHIN the model's decoder stack but whose shared state
+// the reduced assembly cannot actually publish. As of #12896 the assembly DOES
+// execute the shared KV/index schedule (v41_attention.go): a declared source
+// pools its projected KV input through the CED/CSA2 compressor and publishes the
+// rows, and a later reader resolves them. A source is therefore admitted only
+// when it declares a compressed regime (ratio > 1, so the compressor runs) and
+// carries the compressor tensors its pooling reads; a source at ratio <= 1 has
+// no pooled stream to publish, so it is refused rather than silently running a
+// per-layer KV cache where the official model reuses a source layer's state.
+// Declarations that only touch out-of-range layers stay admitted, which keeps the
+// reduced oracle fixture runnable: it derives from the published 40-layer config
+// but narrows NumLayers to 1, so every kv source ({2,8,14,20}) is unreachable.
+func (m *Model) v41KVSourceForwardAdmitted() error {
+	d41 := m.Cfg.DeepSeekV41
+	if d41 == nil {
+		return nil
+	}
+	cfg := m.Cfg
+	for _, layer := range d41.KVSourceLayerIDs {
+		if layer < 0 || layer >= cfg.NumLayers {
+			continue
+		}
+		if !v41AttentionRatioImplemented(v41CompressRatioAt(cfg, layer)) {
+			return v41StageErr(v41StageCompress, layer,
+				fmt.Errorf("%w: layer %d declares a shared-KV source but its compress ratio %d is not an implemented variant", ErrV41ForwardStage, layer, v41CompressRatioAt(cfg, layer)))
+		}
+		if v41CompressRatioAt(cfg, layer) <= 1 {
+			return v41StageErr(v41StageAttention, layer,
+				fmt.Errorf("%w: layer %d declares a shared-KV source but has no compressed regime to publish", ErrV41ForwardStage, layer))
+		}
+		H := cfg.HiddenSize
+		width := v41CompressorWidth(cfg)
+		if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wkv.weight"), v41StageCompress, layer, width, H); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wgate.weight"), v41StageCompress, layer, width, H); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "attn.compressor.norm.weight"), v41StageCompress, layer, width); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// v41CandidateSourceForwardAdmitted fails closed when the config declares a
+// candidate-source layer that lies WITHIN the model's decoder stack. The reduced
+// text assembly runs its own full per-layer attention contraction and never
+// executes the CED/CSA2 blocked-candidate selection the lightning indexer reads
+// (the reference's candidate_source_layer_id / candidate_topk_blocks /
+// candidate_block_size schedule), so silently running an in-range candidate source
+// would emit logits from an unblocked attention path where the official model
+// selects a sparse candidate pool first. Declarations that only touch out-of-range
+// layers stay admitted, which keeps the reduced oracle fixture runnable: it derives
+// from the published 40-layer config but narrows NumLayers to 1, so the candidate
+// source (20) is unreachable. Executing the real candidate selection is the
+// CED/CSA2 attention leaf's remaining work; until then this is the fail-closed
+// boundary.
+func v41CandidateSourceForwardAdmitted(cfg Config) error {
+	m := cfg.DeepSeekV41
+	if m == nil {
+		return nil
+	}
+	layer := m.CandidateSourceLayerID
+	if layer >= 0 && layer < cfg.NumLayers {
+		return v41StageErr(v41StageIndexer, layer,
+			fmt.Errorf("%w: layer %d declares a candidate source but the reduced forward does not execute the CED/CSA2 blocked-candidate selection", ErrV41ForwardStage, layer))
+	}
+	return nil
+}
+
+// v41HCMultForwardAdmitted fails closed when the config declares an mHC
+// hyperconnection multiplicity other than 4. The reduced text assembly hardcodes
+// the four-stream geometry (v41MHCSplit called with hc=4, four identical stand-in
+// streams, and the width-24 mix projection v41MHCMixWidth), so it executes only
+// the published hc_mult=4 layout. A config declaring a different multiplicity
+// would otherwise run the four-stream hyperconnection for a model the assembly
+// never ran -- a silent omission contrary to the fail-closed invariant. The
+// published artifact and every reduced fixture declare hc_mult=4, so the reduced
+// oracle forward stays admitted; executing a non-4 multiplicity is the mHC
+// geometry leaf's remaining work.
+func v41HCMultForwardAdmitted(cfg Config) error {
+	m := cfg.DeepSeekV41
+	if m == nil {
+		return nil
+	}
+	if m.HCMult != 4 {
+		return v41StageErr(v41StageMHC, -1,
+			fmt.Errorf("%w: config declares mHC multiplicity %d but the reduced forward only executes the four-stream hc_mult=4 geometry", ErrV41ForwardStage, m.HCMult))
+	}
+	return nil
+}
+
+// v41ForwardAdmitted returns nil only when this is an admitted V4.1 config with
+// every required stage's weights present and shape-consistent. It is the gate
+// both Model.Forward and Session.Prefill/Step run before the assembly. A
+// weightless model fails at the embedding stage with an error wrapping
+// ErrV41NativeUnsupported (the #12967 fence contract); a loaded model missing a
+// stage fails with an error wrapping ErrV41ForwardStage.
+func (m *Model) v41ForwardAdmitted() error {
+	if m == nil {
+		return v41StageErr(v41StageEmbedding, -1, fmt.Errorf("%w: nil model", ErrV41NativeUnsupported))
+	}
+	if !m.Cfg.IsDeepSeekV41() {
+		return v41StageErr(v41StageEmbedding, -1,
+			fmt.Errorf("%w: config is not DeepSeek V4.1", ErrV41ForwardStage))
+	}
+	if len(m.manifest) == 0 {
+		return v41StageErr(v41StageEmbedding, -1,
+			fmt.Errorf("%w: reduced weights absent", ErrV41NativeUnsupported))
+	}
+	cfg := m.Cfg
+	// Geometry discrimination fails closed: a parsed/published config whose flat
+	// axes disagree with its Attention envelope is refused here rather than
+	// silently assembled against the reduced stand-in geometry.
+	if _, err := v41ForwardGeometry(cfg); err != nil {
+		return err
+	}
+	// kvLatentRank is resolved through the same fail-closed discriminator, so an
+	// inconsistent published envelope can never be admitted at the reduced shape.
+	kvLatentRank, err := v41ForwardKVLatentRank(cfg)
+	if err != nil {
+		return err
+	}
+	if err := m.v41AdmitShape("model.embed_tokens.weight", v41StageEmbedding, -1, cfg.VocabSize, cfg.HiddenSize); err != nil {
+		return err
+	}
+	if err := m.v41AdmitShape("model.norm.weight", v41StageFinalNorm, -1, cfg.HiddenSize); err != nil {
+		return err
+	}
+	if !m.hasWeight("lm_head.weight") && !m.hasWeight("model.embed_tokens.weight") {
+		return v41StageErr(v41StageHead, -1,
+			fmt.Errorf("%w: no lm_head.weight and no tied embedding", ErrV41ForwardStage))
+	}
+	if err := m.v41AdmitShape("lm_head.weight", v41StageHead, -1, cfg.VocabSize, cfg.HiddenSize); err != nil {
+		return err
+	}
+	if _, err := v41RouterConfigFullGeometry(cfg); err != nil {
+		return err
+	}
+	if err := m.v41EngramForwardAdmitted(); err != nil {
+		return err
+	}
+	if err := m.v41CompressIndexForwardAdmitted(); err != nil {
+		return err
+	}
+	if err := m.v41KVSourceForwardAdmitted(); err != nil {
+		return err
+	}
+	if err := v41CandidateSourceForwardAdmitted(cfg); err != nil {
+		return err
+	}
+	if err := v41HCMultForwardAdmitted(cfg); err != nil {
+		return err
+	}
+	if err := v41AttentionGeometryForwardAdmitted(cfg); err != nil {
+		return err
+	}
+	H, hd, nH := cfg.HiddenSize, cfg.HeadDim, cfg.NumHeads
+	qHeadDim := nH * hd
+	oDim := cfg.OLoraRank * cfg.OGroups
+	I := cfg.MoEIntermediateSize
+	// full selects the artifact geometry over the reduced fixture. The V4.1 Q/KV
+	// latent norms are an artifact-only stage, so their admission is gated on it.
+	full, err := v41ForwardGeometry(cfg)
+	if err != nil {
+		return err
+	}
+	for l := 0; l < cfg.NumLayers; l++ {
+		if err := m.v41AdmitShape(layerName(l, "attn_norm.weight"), v41StageLayer, l, H); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(l, "ffn_norm.weight"), v41StageLayer, l, H); err != nil {
+			return err
+		}
+		if err := m.v41AdmitMHC(l); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(l, "attn.wq_a.weight"), v41StageAttention, l, cfg.QLoraRank, H); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(l, "attn.wq_b.weight"), v41StageAttention, l, qHeadDim, cfg.QLoraRank); err != nil {
+			return err
+		}
+		// Q/KV latent norms (reference Attention: self.q_norm = RMSNorm(q_lora_rank)
+		// and self.kv_norm = RMSNorm(head_dim)). They are admitted and applied ONLY
+		// on the full path: the reduced fixture's pre-#13009 arithmetic has no such
+		// stage and must stay byte-identical, so a reduced config neither requires
+		// nor reads these leaves. See v41Layer's application site (#13290).
+		if full {
+			if err := m.v41AdmitShape(layerName(l, "attn.wq_a_norm.weight"), v41StageAttention, l, cfg.QLoraRank); err != nil {
+				return err
+			}
+			if err := m.v41AdmitShape(layerName(l, "attn.kv_norm.weight"), v41StageAttention, l, kvLatentRank); err != nil {
+				return err
+			}
+		}
+		if err := m.v41AdmitShape(layerName(l, "attn.wkv.weight"), v41StageAttention, l, kvLatentRank, H); err != nil {
+			return err
+		}
+		// wo_a is the leaf's group-major [Groups, OLoRARank, HeadsPerGroup*HeadDim]
+		// tensor, so its total is OLoRARank*NumHeads*HeadDim; wo_b is
+		// [H, Groups*OLoRARank]. The artifact stores the group-major form while
+		// the reduced fixture declares the equivalent flat form, so admit either
+		// declaration (see v41AdmitGroupedWoA; the #13264 seam).
+		if err := m.v41AdmitGroupedWoA(l); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(l, "attn.wo_b.weight"), v41StageAttention, l, H, oDim); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(l, "attn.sink"), v41StageAttention, l, nH); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(l, "ffn.gate.weight"), v41StageMoE, l, cfg.NumExperts, H); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(l, "ffn.gate.e_score_correction_bias"), v41StageMoE, l, cfg.NumExperts); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(l, "ffn.shared_experts.w1.weight"), v41StageMoE, l, I, H); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(l, "ffn.shared_experts.w3.weight"), v41StageMoE, l, I, H); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(l, "ffn.shared_experts.w2.weight"), v41StageMoE, l, H, I); err != nil {
+			return err
+		}
+		for e := 0; e < cfg.NumExperts; e++ {
+			stem := "ffn.experts." + itoa(e)
+			if err := m.v41AdmitShape(layerName(l, stem+".w1.weight"), v41StageMoE, l, I, H); err != nil {
+				return err
+			}
+			if err := m.v41AdmitShape(layerName(l, stem+".w3.weight"), v41StageMoE, l, I, H); err != nil {
+				return err
+			}
+			if err := m.v41AdmitShape(layerName(l, stem+".w2.weight"), v41StageMoE, l, H, I); err != nil {
+				return err
+			}
+		}
+	}
+	_ = hd
+	return nil
+}
+
+// v41AdmitMHC admits a layer's mHC coefficient block in either the reduced
+// fixture's legacy [mixWidth, H] geometry or the published artifact's flattened
+// four-stream geometry. The reference (inference/model.py mHC) projects the
+// width-4H flattened residual through hc_attn_fn; the staged vcruz Q2_K artifact
+// stores that projection as [4H, 24] (input-major), while the forward consumes it
+// logically as [24, 4H] (coefficient-major). Both the logical [mixWidth, 4H]
+// orientation and the stored [4H, mixWidth] transpose are admitted here so a real
+// artifact load reaches the forward instead of refusing at admission; every other
+// shape (including the reduced [mixWidth, H]) still falls through to the named
+// two-axis shape guard and fails closed. The base/scale vectors are unchanged.
+func (m *Model) v41AdmitMHC(l int) error {
+	H := m.Cfg.HiddenSize
+	name := layerName(l, "mhc.mixes.weight")
+	out, in, ok := m.residentShape(name)
+	if !ok {
+		return v41StageErr(v41StageMHC, l, fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+	}
+	switch {
+	case out == v41MHCMixWidth && (in == H || in == 4*H):
+		// logical [mixWidth, in]
+	case in == v41MHCMixWidth && out == 4*H:
+		// stored artifact transpose [4H, mixWidth]
+	default:
+		return v41StageErr(v41StageMHC, l,
+			fmt.Errorf("%w: tensor %s shape [%d %d], want [%d %d], [%d %d] or [%d %d]",
+				ErrV41ForwardStage, name, out, in, v41MHCMixWidth, H, v41MHCMixWidth, 4*H, 4*H, v41MHCMixWidth))
+	}
+	if err := m.v41AdmitShape(layerName(l, "mhc.base"), v41StageMHC, l, v41MHCMixWidth); err != nil {
+		return err
+	}
+	if err := m.v41AdmitShape(layerName(l, "mhc.scale"), v41StageMHC, l, 3); err != nil {
+		return err
+	}
+	return nil
+}
+
+// v41AdmitGroupedWoA admits a layer's attn.wo_a.weight in either declaration of
+// the same weight. The forward consumes it through V41GroupedOutputProjection,
+// which reads the group-major [Groups, OLoRARank, HeadsPerGroup*HeadDim] tensor
+// the published artifact's attn_output_a.weight stores. The reduced fixture
+// declares the equivalent flat [OLoraRank, NumHeads*HeadDim] two-axis form.
+// The two forms carry the SAME element count
+// (OGroups*OLoraRank*HeadsPerGroup*HeadDim == OLoraRank*NumHeads*HeadDim) but
+// assign different numbers to the two axes, so a single v41AdmitShape row cannot
+// admit both: demanding the flat form refused the real artifact by name before
+// the grouped projection ever ran (the #13264 seam), and demanding the grouped
+// form would refuse the reduced fixture.
+//
+// Both declarations are admitted here. Any other shape - including a grouped
+// form whose axes are individually consistent but whose total disagrees, and the
+// artifact's [OGroups*OLoraRank, HeadsPerGroup*HeadDim] with a non-divisible
+// head count - falls through to the named two-axis shape guard and fails closed,
+// so the no-silent-mis-shape property is retained. Presence is resolved
+// residency-completely by residentShape, so a resident-store wo_a is admitted at
+// its real geometry on either arm.
+func (m *Model) v41AdmitGroupedWoA(l int) error {
+	name := layerName(l, "attn.wo_a.weight")
+	cfg := m.Cfg
+	out, in, ok := m.residentShape(name)
+	if !ok {
+		return v41StageErr(v41StageAttention, l, fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+	}
+	flatRows, flatCols := cfg.OLoraRank, cfg.NumHeads*cfg.HeadDim
+	groupedRows := cfg.OGroups * cfg.OLoraRank
+	groupedHeadsPerGroup := 0
+	if cfg.OGroups > 0 && cfg.NumHeads%cfg.OGroups == 0 {
+		groupedHeadsPerGroup = cfg.NumHeads / cfg.OGroups
+	}
+	groupedCols := groupedHeadsPerGroup * cfg.HeadDim
+	switch {
+	case out == flatRows && in == flatCols:
+		return nil
+	case groupedHeadsPerGroup > 0 && out == groupedRows && in == groupedCols:
+		return nil
+	default:
+		return v41StageErr(v41StageAttention, l,
+			fmt.Errorf("%w: tensor %s shape [%d %d], want [%d %d] (flat) or [%d %d] (grouped)",
+				ErrV41ForwardStage, name, out, in, flatRows, flatCols, groupedRows, groupedCols))
+	}
+}
+
+// v41AdmitShape asserts a named tensor is present with the expected shape.
+// Presence + shape are resolved residency-completely (residentShape), so a
+// weight that a quantized serve keeps in a resident store (kqw/q4kw/q8w/...)
+// rather than the f32 manifest is admitted at its real [out, in] geometry
+// instead of being refused as "missing". The fail-closed property is retained:
+// a tensor absent from every store still refuses by name, and a resident tensor
+// whose geometry disagrees with the expected shape still refuses.
+func (m *Model) v41AdmitShape(name string, stage v41ForwardStage, layer int, want ...int) error {
+	if len(want) == 2 {
+		out, in, ok := m.residentShape(name)
+		if !ok {
+			// A routed expert the R5 streamed-experts tier holds is by design
+			// ABSENT from every resident store (manifest/q8w/q4w/q4kw/kqw/q2w/
+			// gptqw), because the whole point of the tier is to fault one expert's
+			// stride out of a fused checkpoint slab only when it is routed. So a
+			// resident-store miss falls through to the tier's index, a
+			// presence-only check (no IO, no fault), before refusing by name.
+			//
+			// The descriptor geometry is deliberately NOT re-checked here: the tier
+			// entry carries the fused tensor's declared rows/cols, but the
+			// per-expert shape is the loader's already-validated [out,in] declaration
+			// (FusedExpertTensor.Rows/Cols), and the forward's own read of the
+			// projection is the authority on shape use. A tier that carries the name
+			// at a disagreeing geometry is therefore admitted at presence, and any
+			// real disagreement surfaces at the forward's shape use rather than
+			// being silently accepted as a different tensor.
+			if m.expertCheckpoint.Has(name) {
+				return nil
+			}
+			return v41StageErr(stage, layer, fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+		}
+		if out != want[0] || in != want[1] {
+			return v41StageErr(stage, layer,
+				fmt.Errorf("%w: tensor %s shape [%d %d], want %v", ErrV41ForwardStage, name, out, in, want))
+		}
+		return nil
+	}
+	meta, ok := m.manifest[name]
+	if !ok {
+		return v41StageErr(stage, layer, fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+	}
+	if len(meta.Shape) != len(want) {
+		return v41StageErr(stage, layer,
+			fmt.Errorf("%w: tensor %s rank %d, want %d", ErrV41ForwardStage, name, len(meta.Shape), len(want)))
+	}
+	for i := range want {
+		if meta.Shape[i] != want[i] {
+			return v41StageErr(stage, layer,
+				fmt.Errorf("%w: tensor %s shape %v, want %v", ErrV41ForwardStage, name, meta.Shape, want))
+		}
+	}
+	return nil
+}

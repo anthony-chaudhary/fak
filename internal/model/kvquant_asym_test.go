@@ -243,10 +243,10 @@ func TestKVQuantAsymTurbo4LloydMaxNonLinear(t *testing.T) {
 
 	// 1. Centroid optimality and threshold verification.
 	t.Run("CentroidOptimalityAndThresholds", func(t *testing.T) {
-		if len(Turbo4LloydMaxCodebook) != 16 {
+		if len(Turbo4LloydMaxCodebook) != 16 { //boundarylint:ignore CHANGE_DETECTOR_TEST 4-bit codebook fixed-size [16] array
 			t.Fatalf("codebook len = %d, want 16", len(Turbo4LloydMaxCodebook))
 		}
-		if len(Turbo4Thresholds) != 15 {
+		if len(Turbo4Thresholds) != 15 { //boundarylint:ignore CHANGE_DETECTOR_TEST 4-bit codebook fixed-size [15] thresholds array
 			t.Fatalf("thresholds len = %d, want 15", len(Turbo4Thresholds))
 		}
 

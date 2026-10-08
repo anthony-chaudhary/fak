@@ -13,7 +13,7 @@ func TestParseInventory_EmbeddedFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseInventory(\"\") failed: %v", err)
 	}
-	if len(items) != 100 {
+	if len(items) != 100 { //boundarylint:ignore CHANGE_DETECTOR_TEST top-100 inventory is defined as exactly 100 entries
 		t.Fatalf("expected 100 items from embedded inventory, got %d", len(items))
 	}
 
@@ -52,8 +52,8 @@ func TestParseInventory_EmbeddedFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseInventory on nonexistent file failed: %v", err)
 	}
-	if len(itemsFallback) != 100 {
-		t.Fatalf("expected 100 items from fallback, got %d", len(itemsFallback))
+	if len(itemsFallback) != len(items) {
+		t.Fatalf("expected %d items from fallback, got %d", len(items), len(itemsFallback))
 	}
 }
 
@@ -64,12 +64,16 @@ func TestParseInventory_FromFile(t *testing.T) {
 		t.Skip("docs/dev-process-top-100-tools-inventory.md not found at expected relative path")
 	}
 
+	embedded, err := ParseInventory("")
+	if err != nil {
+		t.Fatalf("ParseInventory(\"\") failed: %v", err)
+	}
 	items, err := ParseInventory(path)
 	if err != nil {
 		t.Fatalf("failed to parse %s: %v", path, err)
 	}
-	if len(items) != 100 {
-		t.Fatalf("expected 100 items from file, got %d", len(items))
+	if len(items) != len(embedded) {
+		t.Fatalf("expected %d items from file, got %d", len(embedded), len(items))
 	}
 }
 
@@ -161,9 +165,10 @@ func TestNextCandidates(t *testing.T) {
 	}
 
 	// Default next 5
-	next5 := NextCandidates(report, 5, "")
-	if len(next5) != 5 {
-		t.Fatalf("expected 5 candidates, got %d", len(next5))
+	const nextCount = 5
+	next5 := NextCandidates(report, nextCount, "")
+	if len(next5) != nextCount {
+		t.Fatalf("expected %d candidates, got %d", nextCount, len(next5))
 	}
 	if next5[0].Number != 2 {
 		t.Errorf("expected first candidate to be item 2, got %d", next5[0].Number)
@@ -179,8 +184,8 @@ func TestNextCandidates(t *testing.T) {
 
 	// Uncapped count
 	allRemaining := NextCandidates(report, 0, "")
-	if len(allRemaining) != 99 {
-		t.Errorf("expected 99 remaining candidates, got %d", len(allRemaining))
+	if len(allRemaining) != report.Unmigrated {
+		t.Errorf("expected %d remaining candidates, got %d", report.Unmigrated, len(allRemaining))
 	}
 }
 

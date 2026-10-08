@@ -591,8 +591,8 @@ func TestROCmFP4Block32DequantizeVector(t *testing.T) {
 // vector register strides (32 elements, 18 packed bytes).
 func TestROCmFP4Block32SIMDAlignment(t *testing.T) {
 	var blk Block32ROCmFP4
-	if len(blk.Data) != 16 {
-		t.Fatalf("Block32ROCmFP4 Data length %d != 16 bytes", len(blk.Data))
+	if len(blk.Data) != ROCmFP4BlockSize/2 {
+		t.Fatalf("Block32ROCmFP4 Data length %d != %d bytes", len(blk.Data), ROCmFP4BlockSize/2)
 	}
 	if ROCmFP4BlockSize != 32 {
 		t.Fatalf("ROCmFP4BlockSize %d != 32", ROCmFP4BlockSize)

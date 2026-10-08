@@ -179,7 +179,7 @@ func (s *turnkeyServer) handleCompletionsStream(w http.ResponseWriter, r *http.R
 	comp, err := sp.CompleteStream(turnkeyRequestContext(r.Context()), stream.contentDelta, req.Messages, req.Tools, opts...)
 	if err != nil {
 		if !stream.started {
-			writeTurnkeyInferenceError(w, err)
+			s.writeInferenceError(w, err)
 		} else if !errors.Is(err, context.Canceled) && r.Context().Err() == nil {
 			stream.fail("inference error", "inference_error")
 		}
@@ -253,7 +253,7 @@ func (s *turnkeyServer) handleChatCompletionsStream(w http.ResponseWriter, r *ht
 	comp, err := sp.CompleteStream(turnkeyRequestContext(r.Context()), stream.contentDelta, req.Messages, req.Tools, opts...)
 	if err != nil {
 		if !stream.started {
-			writeTurnkeyInferenceError(w, err)
+			s.writeInferenceError(w, err)
 		} else if !errors.Is(err, context.Canceled) && r.Context().Err() == nil {
 			stream.fail("inference error", "inference_error")
 		}

@@ -287,8 +287,8 @@ func TestEnvDrivenSourcesAutoRegister(t *testing.T) {
 	}
 
 	srcs := EnvSourcesFrom(lookup, repo)
-	if len(srcs) != 7 {
-		t.Fatalf("EnvSourcesFrom returned %d sources, want 7", len(srcs))
+	if len(srcs) != len(envMap) {
+		t.Fatalf("EnvSourcesFrom returned %d sources, want %d", len(srcs), len(envMap))
 	}
 
 	byID := map[string]Source{}

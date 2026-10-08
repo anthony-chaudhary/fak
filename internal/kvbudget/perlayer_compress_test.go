@@ -58,8 +58,8 @@ func handCeil(a, b int) int { return (a + b - 1) / b }
 func TestV4FlashScheduleCounts(t *testing.T) {
 	s := v4FlashTestShape()
 	r := s.PerLayer.CompressRatio
-	if len(r) != 43 {
-		t.Fatalf("len(CompressRatio) = %d, want 43", len(r))
+	if len(r) != v4FlashTestLayers {
+		t.Fatalf("len(CompressRatio) = %d, want %d", len(r), v4FlashTestLayers)
 	}
 	counts := map[int]int{}
 	for l, ratio := range r {

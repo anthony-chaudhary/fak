@@ -798,14 +798,15 @@ func (m *gatewayMetrics) observeInference(promptTok, complTok, cachedTok, cacheC
 // Anthropic input_tokens is already the uncached remainder. Normalize exactly here so
 // inferPromptTokens and inferCachedTokens remain disjoint without changing Usage,
 // response forwarding, context-window accounting, or the internal vcache row contract.
-func (m *gatewayMetrics) observeInferenceUsageServed(loc servingLocality, usage agent.Usage, finishReason string, dur time.Duration) {
-	m.observeInferenceServed(loc,
+func (m *gatewayMetrics) observeInferenceUsageServed(loc servingLocality, reqModel string, usage agent.Usage, finishReason string, dur time.Duration) {
+	m.observeInferenceServedTimed(loc, reqModel,
 		usage.UncachedPromptTokens(),
 		usage.CompletionTokens,
 		usage.CachedPromptTokens(),
 		usage.CacheCreationInputTokens,
 		finishReason,
 		dur,
+		0,
 	)
 }
 
@@ -815,19 +816,34 @@ func (m *gatewayMetrics) observeInferenceUsageServed(loc servingLocality, usage 
 // TTFT and TPOT histograms fill on /v1/chat/completions, not only on the Anthropic
 // streaming passthrough. Without Timings the turn stays buffered (ttft=0).
 func (m *gatewayMetrics) observeCompletionServed(loc servingLocality, comp *agent.Completion, dur time.Duration) {
+	m.observeCompletionServedStream(loc, comp, dur, 0)
+}
+
+// observeCompletionServedStream is observeCompletionServed for a streamed turn:
+// streamTTFT is the first content fragment the gateway itself watched arrive. The
+// planner's Timings stay authoritative when present (a native turn); a proxied
+// stream has none, so its watched first token is what fills TTFT instead of the
+// turn reading as buffered.
+func (m *gatewayMetrics) observeCompletionServedStream(loc servingLocality, comp *agent.Completion, dur, streamTTFT time.Duration) {
 	if comp == nil {
 		return
 	}
 	usage := comp.Usage
-	m.observeInferenceServedTimed(loc,
+	ttft := completionTTFT(comp.Timings, dur)
+	if ttft <= 0 && streamTTFT > 0 && streamTTFT <= dur {
+		ttft = streamTTFT
+	}
+	m.observeInferenceTimedDetail(loc,
 		usage.UncachedPromptTokens(),
 		usage.CompletionTokens,
 		usage.CachedPromptTokens(),
 		usage.CacheCreationInputTokens,
 		comp.FinishReason,
 		dur,
-		completionTTFT(comp.Timings, dur),
+		ttft,
+		perfDetailFromCompletion(comp),
 	)
+	m.attributeServedTurn(loc, usage.UncachedPromptTokens(), usage.CompletionTokens)
 }
 
 func completionTTFT(t *agent.Timings, dur time.Duration) time.Duration {
@@ -852,12 +868,13 @@ func completionTTFT(t *agent.Timings, dur time.Duration) time.Duration {
 // keeps reporting an honest unknown instead of being silently defaulted into one
 // side by a zero argument.
 func (m *gatewayMetrics) observeInferenceServed(loc servingLocality, promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur time.Duration) {
-	m.observeInferenceServedTimed(loc, promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, 0)
+	m.observeInferenceServedTimed(loc, "", promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, 0)
 }
 
-// observeInferenceServedTimed is observeInferenceTimed with the serving side.
-func (m *gatewayMetrics) observeInferenceServedTimed(loc servingLocality, promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration) {
-	m.observeInferenceTimedAt(loc, promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, ttft)
+// observeInferenceServedTimed is observeInferenceTimed with the serving side and,
+// when the caller knows it, the model the turn was sent to.
+func (m *gatewayMetrics) observeInferenceServedTimed(loc servingLocality, reqModel string, promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration) {
+	m.observeInferenceTimedDetail(loc, promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, ttft, perfDetail{model: reqModel})
 	m.attributeServedTurn(loc, promptTok, complTok)
 }
 
@@ -906,13 +923,19 @@ func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok, c
 // observeInferenceTimedAt is the single fold every served turn reaches, so it is
 // also where the one per-request perf row is emitted.
 func (m *gatewayMetrics) observeInferenceTimedAt(loc servingLocality, promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration) {
+	m.observeInferenceTimedDetail(loc, promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, ttft, perfDetail{})
+}
+
+// observeInferenceTimedDetail is observeInferenceTimedAt carrying the served
+// model and native engine anatomy onto the per-request perf row.
+func (m *gatewayMetrics) observeInferenceTimedDetail(loc servingLocality, promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration, detail perfDetail) {
 	if m == nil {
 		return
 	}
 	if finishReason == "" {
 		finishReason = "unknown"
 	}
-	m.recordPerf(loc, promptTok, complTok, cachedTok, finishReason, dur, ttft)
+	m.recordPerf(loc, promptTok, complTok, cachedTok, finishReason, dur, ttft, detail)
 	m.inferenceMu.Lock()
 	rh := m.regimeHistsLocked(cacheobs.RegimeForTokens(cachedTok, promptTok))
 	if m.inferReqs == nil {

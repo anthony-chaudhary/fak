@@ -85,8 +85,8 @@ func TestGDNPrefixCache_ExactPrefixExtensionHits(t *testing.T) {
 	if !hit3 {
 		t.Fatalf("expected hit on prefix extension prompt3")
 	}
-	if len(got3.TokenIDs) != 7 {
-		t.Fatalf("got3 held tokens = %d, want 7", len(got3.TokenIDs))
+	if len(got3.TokenIDs) != len(prompt2) {
+		t.Fatalf("got3 held tokens = %d, want %d", len(got3.TokenIDs), len(prompt2))
 	}
 
 	stats := cache.Stats()

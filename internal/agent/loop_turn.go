@@ -156,7 +156,9 @@ func (r *armRunner) run(ctx context.Context, maxTurns int) error {
 			r.repromptRemaining--
 			r.metrics.InfraReprompts++
 			r.cfg.emitProgress(ProgressEvent{Kind: ProgressInfraReprompt, Turn: turn + 1, Reason: r.lastInfraReason})
-			r.messages = append(r.messages, Message{Role: RoleUser, Content: infraContinuationText(r.lastInfraReason)})
+			infraContinuation := infraContinuationText(r.lastInfraReason)
+			r.messages = append(r.messages, Message{Role: RoleUser, Content: infraContinuation})
+			sessionctl.RecordInfraRepromptNext(r.cfg.trace, infraContinuation)
 			r.speculation.resolve(ctx, nil, r.metrics)
 			r.lastInfraClass = infraTerminal
 			r.lastInfraWrapped = nil
@@ -1139,6 +1141,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 				}
 				tripMsg := fmt.Sprintf("[CIRCUIT BREAKER TRIPPED]: Tool %q repeatedly failed or was refused with reason %q (%d consecutive occurrences). Halting turn loop early to prevent quota exhaustion.", lastTool, lastReason, r.consecutiveSameIssue)
 				r.messages = append(r.messages, Message{Role: RoleSystem, Content: tripMsg})
+				sessionctl.RecordCircuitBreakerNext(r.cfg.trace, tripMsg, true)
 				r.cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
 				r.speculation.disarm()
 				r.finalizeFak()
@@ -1146,6 +1149,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			} else if r.consecutiveSameIssue >= 2 {
 				guidanceMsg := fmt.Sprintf("[CIRCUIT BREAKER GUIDANCE]: Tool %q repeatedly failed or was refused with reason %q (%d consecutive occurrences). Do NOT repeat identical arguments or apologize without changing course. Adapt your arguments, choose an alternative tool, or report why the task cannot proceed.", lastTool, lastReason, r.consecutiveSameIssue)
 				r.messages = append(r.messages, Message{Role: RoleSystem, Content: guidanceMsg})
+				sessionctl.RecordCircuitBreakerNext(r.cfg.trace, guidanceMsg, false)
 			}
 		} else {
 			r.consecutiveSameIssue = 0

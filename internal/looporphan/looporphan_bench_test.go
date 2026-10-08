@@ -68,25 +68,26 @@ func makeSyntheticCmdlineCensus(count int, groupsCount int) []Supervisor {
 }
 
 func TestBenchmarkFixtures(t *testing.T) {
-	c1 := makeSyntheticCensus(50, 5)
-	if len(c1) != 50 {
-		t.Fatalf("expected 50 supervisors, got %d", len(c1))
+	const n1, n2 = 50, 30
+	c1 := makeSyntheticCensus(n1, 5)
+	if len(c1) != n1 {
+		t.Fatalf("expected %d supervisors, got %d", n1, len(c1))
 	}
 	rep1 := Plan(c1, DefaultConfig())
-	if len(rep1.Verdicts) != 50 {
-		t.Fatalf("expected 50 verdicts, got %d", len(rep1.Verdicts))
+	if len(rep1.Verdicts) != len(c1) {
+		t.Fatalf("expected %d verdicts, got %d", len(c1), len(rep1.Verdicts))
 	}
 	if rep1.Keep == 0 || rep1.Reap == 0 {
 		t.Fatalf("expected non-zero keep (%d) and reap (%d)", rep1.Keep, rep1.Reap)
 	}
 
-	c2 := makeSyntheticCmdlineCensus(30, 3)
-	if len(c2) != 30 {
-		t.Fatalf("expected 30 supervisors, got %d", len(c2))
+	c2 := makeSyntheticCmdlineCensus(n2, 3)
+	if len(c2) != n2 {
+		t.Fatalf("expected %d supervisors, got %d", n2, len(c2))
 	}
 	rep2 := Plan(c2, DefaultConfig())
-	if len(rep2.Verdicts) != 30 {
-		t.Fatalf("expected 30 verdicts, got %d", len(rep2.Verdicts))
+	if len(rep2.Verdicts) != len(c2) {
+		t.Fatalf("expected %d verdicts, got %d", len(c2), len(rep2.Verdicts))
 	}
 }
 
@@ -96,8 +97,8 @@ func TestPlanAllocationBudget(t *testing.T) {
 
 	allocs := testing.AllocsPerRun(100, func() {
 		rep := Plan(census, cfg)
-		if len(rep.Verdicts) != 50 {
-			t.Fatalf("expected 50 verdicts, got %d", len(rep.Verdicts))
+		if len(rep.Verdicts) != len(census) {
+			t.Fatalf("expected %d verdicts, got %d", len(census), len(rep.Verdicts))
 		}
 	})
 
@@ -150,8 +151,8 @@ func BenchmarkPlan_RealisticWorkstation(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		rep := Plan(census, cfg)
-		if len(rep.Verdicts) != 15 {
-			b.Fatalf("expected 15 verdicts, got %d", len(rep.Verdicts))
+		if len(rep.Verdicts) != len(census) {
+			b.Fatalf("expected %d verdicts, got %d", len(census), len(rep.Verdicts))
 		}
 		benchReportSink = rep
 	}

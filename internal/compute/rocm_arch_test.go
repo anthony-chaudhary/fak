@@ -615,8 +615,8 @@ func TestROCm_Ticket12081_Wave32WMMA_ShaderAndPipeline(t *testing.T) {
 		t.Errorf("pc.Size() = %d, want 32", pc.Size())
 	}
 	encoded := pc.Encode()
-	if len(encoded) != 32 {
-		t.Errorf("len(encoded) = %d, want 32", len(encoded))
+	if len(encoded) != pc.Size() {
+		t.Errorf("len(encoded) = %d, want %d", len(encoded), pc.Size())
 	}
 	if err := pc.Validate(); err != nil {
 		t.Errorf("pc.Validate() error: %v", err)

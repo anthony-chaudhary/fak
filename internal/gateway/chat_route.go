@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
@@ -120,19 +121,26 @@ func (s *Server) chatPlanner(ctx context.Context) agent.Planner {
 
 // observeNativeChatRoute attributes one completed bound native request using
 // its aggregate loop usage. Passthrough retains the historical native counters.
-func (s *Server) observeNativeChatRoute(ctx context.Context, traceID string, stream bool, usage agent.Usage, finishReason string, dur time.Duration) {
+func (s *Server) observeNativeChatRoute(ctx context.Context, traceID string, stream bool, usage agent.Usage, finishReason string, dur, ttft time.Duration) {
 	if binding := chatRouteFromContext(ctx); binding != nil {
-		s.metrics.observeInferenceUsageServed(binding.Locality, usage, finishReason, dur)
+		s.metrics.observeInferenceServedTimed(binding.Locality, binding.Target.UpstreamModel,
+			usage.UncachedPromptTokens(), usage.CompletionTokens, usage.CachedPromptTokens(),
+			usage.CacheCreationInputTokens, finishReason, dur, ttft)
 		s.logInferenceTurnForModel(traceID, "anthropic_messages_native", binding.Target.UpstreamModel, stream, usage, finishReason, dur, false, s.consumeDecodedCtxViewEvent(traceID))
 		return
 	}
-	s.logInferenceTurn(traceID, "anthropic_messages_native", false, usage, finishReason, dur, false)
+	s.metrics.recordPerf(s.chatServingLocality(ctx, s.model), usage.UncachedPromptTokens(),
+		usage.CompletionTokens, usage.CachedPromptTokens(), finishReason, dur, ttft, perfDetail{model: s.model})
+	s.logInferenceTurn(traceID, "anthropic_messages_native", stream, usage, finishReason, dur, false)
 }
 
 // chatRouteOpts is applied last so client options cannot override the account's
 // wire model or credential. Raw bodies belong to the original provider and model;
 // a bound turn is rebuilt through its target's native transcript adapter.
 func chatRouteOpts(ctx context.Context, opts []agent.SampleOpt) []agent.SampleOpt {
+	if reason := ctxmmu.OversizePagingSuppressedReason(ctx); reason != "" {
+		opts = append(append([]agent.SampleOpt(nil), opts...), agent.WithOversizePagingSuppressed(reason))
+	}
 	binding := chatRouteFromContext(ctx)
 	if binding == nil {
 		return opts
@@ -221,6 +229,8 @@ func (s *Server) bindChatRoute(ctx context.Context, requestedModel string) (*cha
 	if target.Zone().SelfHosted() {
 		locality = localitySelfHosted
 		planner.LlamaSlotAffinity = s.llamaSlotAffinity
+		planner.LlamaSoftSlot = s.llamaSoftSlot
+		planner.LlamaSoftSlotPolicy = s.llamaSoftPolicy
 	}
 	return &chatRouteBinding{
 		RequestedModel: requestedModel,

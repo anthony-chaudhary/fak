@@ -8,8 +8,17 @@ import (
 
 func TestTop20GotchasCountAndIntegrity(t *testing.T) {
 	gotchas := Top20Gotchas()
-	if len(gotchas) != 21 {
-		t.Fatalf("expected exactly 21 gotchas, got %d", len(gotchas))
+	if len(gotchas) == 0 {
+		t.Fatal("gotcha catalog is empty")
+	}
+	findings := AuditHostGotchas(GotchaProbeEnvironment{}).Findings
+	if len(findings) != len(gotchas) {
+		t.Fatalf("audit produced %d findings for %d catalog gotchas; want one per gotcha", len(findings), len(gotchas))
+	}
+	for i, f := range findings {
+		if f.Gotcha.ID != gotchas[i].ID {
+			t.Errorf("finding %d audits %q, want catalog gotcha %q", i, f.Gotcha.ID, gotchas[i].ID)
+		}
 	}
 
 	seenIDs := make(map[string]bool)
@@ -191,8 +200,8 @@ func TestAuditHostGotchas_ZeroAndBoundaryEnvironment(t *testing.T) {
 	if report == nil {
 		t.Fatal("expected non-nil report for zero environment")
 	}
-	if len(report.Findings) != 21 {
-		t.Fatalf("expected 21 findings for zero environment, got %d", len(report.Findings))
+	if want := len(Top20Gotchas()); len(report.Findings) != want {
+		t.Fatalf("expected %d findings (one per catalog gotcha) for zero environment, got %d", want, len(report.Findings))
 	}
 
 	summary := report.Summary()
@@ -1121,8 +1130,14 @@ func TestAuditHostGotchas_NonStrixHostFiltering(t *testing.T) {
 
 func TestBuildHostProbeEnvironmentWithMockFS(t *testing.T) {
 	// Issues #11246, #11247, #11248, #11250: Host probing using mock filesystem
+	const (
+		wantKernel     = "6.17.0-35-generic"
+		wantDebMesa    = "25.3.1"
+		wantDpkgMesa   = "26.0.2"
+		wantPacmanMesa = "25.2.0"
+	)
 	mockFS := NewMockFS()
-	mockFS.files["/proc/version"] = []byte("Linux version 6.17.0-35-generic (buildd@lcy02-amd64-010) (gcc version 13.2.0) #35-Ubuntu SMP\n")
+	mockFS.files["/proc/version"] = []byte("Linux version " + wantKernel + " (buildd@lcy02-amd64-010) (gcc version 13.2.0) #35-Ubuntu SMP\n")
 	mockFS.files["/proc/cmdline"] = []byte("BOOT_IMAGE=/vmlinuz root=/dev/nvme0n1p2 amdgpu.lockup_timeout=-1 ttm.pages_limit=31457280\n")
 	mockFS.files["/proc/cpuinfo"] = []byte("model name: AMD Ryzen AI MAX+ 395 w/ Radeon 8060S\nflags: avx512f invlpgb\n")
 	mockFS.files["/proc/meminfo"] = []byte("MemTotal:      134217728 kB\n")
@@ -1131,14 +1146,14 @@ func TestBuildHostProbeEnvironmentWithMockFS(t *testing.T) {
 	mockFS.files["/sys/module/ttm/parameters/pages_limit"] = []byte("31457280\n")
 	mockFS.files["/sys/class/drm/card0/device/mem_info_vram_total"] = []byte("2147483648\n")
 	mockFS.files["/sys/class/drm/card0/device/power_dpm_force_performance_level"] = []byte("high\n")
-	mockFS.files["/usr/share/doc/mesa-vulkan-drivers/changelog.Debian.gz"] = []byte("mesa (25.3.1-1ubuntu1) noble; urgency=medium\n")
+	mockFS.files["/usr/share/doc/mesa-vulkan-drivers/changelog.Debian.gz"] = []byte("mesa (" + wantDebMesa + "-1ubuntu1) noble; urgency=medium\n")
 	mockFS.files["/.dockerenv"] = []byte("")
 	mockFS.files["/usr/bin/ollama"] = []byte("")
 	mockFS.files["/proc/1234/cmdline"] = []byte("ollama\x00serve\x00")
 
 	env := BuildHostProbeEnvironmentWithFS(mockFS)
-	if env.KernelVersion != "6.17.0-35-generic" {
-		t.Errorf("expected KernelVersion '6.17.0-35-generic', got %q", env.KernelVersion)
+	if env.KernelVersion != wantKernel {
+		t.Errorf("expected KernelVersion %q, got %q", wantKernel, env.KernelVersion)
 	}
 	if env.DistroID != "fedora" {
 		t.Errorf("expected DistroID 'fedora', got %q", env.DistroID)
@@ -1146,8 +1161,8 @@ func TestBuildHostProbeEnvironmentWithMockFS(t *testing.T) {
 	if env.SysfsVRAMTotalBytes != 2147483648 {
 		t.Errorf("expected SysfsVRAMTotalBytes 2147483648, got %d", env.SysfsVRAMTotalBytes)
 	}
-	if env.MesaVersion != "25.3.1" {
-		t.Errorf("expected MesaVersion '25.3.1', got %q", env.MesaVersion)
+	if env.MesaVersion != wantDebMesa {
+		t.Errorf("expected MesaVersion %q, got %q", wantDebMesa, env.MesaVersion)
 	}
 	if !env.IsContainer {
 		t.Errorf("expected IsContainer=true")
@@ -1179,19 +1194,19 @@ func TestBuildHostProbeEnvironmentWithMockFS(t *testing.T) {
 	// Test Mesa version probing via dpkg status
 	mockDpkgFS := NewMockFS()
 	mockDpkgFS.files["/proc/version"] = []byte("Linux version 6.17.0 (test@build) #1 SMP\n")
-	mockDpkgFS.files["/var/lib/dpkg/status"] = []byte("Package: libgl1-mesa-dri\nStatus: install ok installed\nVersion: 26.0.2-1ubuntu1\n\nPackage: bash\nVersion: 5.2-1\n")
+	mockDpkgFS.files["/var/lib/dpkg/status"] = []byte("Package: libgl1-mesa-dri\nStatus: install ok installed\nVersion: " + wantDpkgMesa + "-1ubuntu1\n\nPackage: bash\nVersion: 5.2-1\n")
 	envDpkg := BuildHostProbeEnvironmentWithFS(mockDpkgFS)
-	if envDpkg.MesaVersion != "26.0.2" {
-		t.Errorf("expected MesaVersion '26.0.2' from dpkg status, got %q", envDpkg.MesaVersion)
+	if envDpkg.MesaVersion != wantDpkgMesa {
+		t.Errorf("expected MesaVersion %q from dpkg status, got %q", wantDpkgMesa, envDpkg.MesaVersion)
 	}
 
 	// Test Mesa version probing via pacman desc
 	mockPacmanFS := NewMockFS()
 	mockPacmanFS.files["/proc/version"] = []byte("Linux version 6.17.0 (test@build) #1 SMP\n")
-	mockPacmanFS.files["/var/lib/pacman/local/mesa-25.2.0-1/desc"] = []byte("%NAME%\nmesa\n\n%VERSION%\n25.2.0-1\n")
+	mockPacmanFS.files["/var/lib/pacman/local/mesa-"+wantPacmanMesa+"-1/desc"] = []byte("%NAME%\nmesa\n\n%VERSION%\n" + wantPacmanMesa + "-1\n")
 	envPacman := BuildHostProbeEnvironmentWithFS(mockPacmanFS)
-	if envPacman.MesaVersion != "25.2.0" {
-		t.Errorf("expected MesaVersion '25.2.0' from pacman desc, got %q", envPacman.MesaVersion)
+	if envPacman.MesaVersion != wantPacmanMesa {
+		t.Errorf("expected MesaVersion %q from pacman desc, got %q", wantPacmanMesa, envPacman.MesaVersion)
 	}
 }
 
@@ -1299,7 +1314,7 @@ func TestAuditHostGotchas_ReadOnlySysfs(t *testing.T) {
 	if rep == nil {
 		t.Fatal("expected non-nil report for empty/read-only sysfs")
 	}
-	if len(rep.Findings) != 21 {
-		t.Errorf("expected 21 findings, got %d", len(rep.Findings))
+	if want := len(Top20Gotchas()); len(rep.Findings) != want {
+		t.Errorf("expected %d findings (one per catalog gotcha), got %d", want, len(rep.Findings))
 	}
 }

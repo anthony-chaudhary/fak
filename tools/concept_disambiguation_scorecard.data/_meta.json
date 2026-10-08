@@ -1312,7 +1312,21 @@
           "category": "incidental",
           "reason": "Closed FeatureRewriteProof provenance label for the existing Anthropic structural verifier; it names protected JSON regions and does not introduce a cache.",
           "token": "cache_anchor_and_trailing_json"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Integer position selecting an already-wired per-layer Engram row cache; it introduces no cache identity, admission, retention, or eviction policy.",
+          "token": "cacheidx"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Integer position selecting an already-wired per-layer Engram row cache; it introduces no cache identity, admission, retention, or eviction policy.",
+          "token": "cacheindex"
         }
+      ],
+      "exclude": [
+        "cacheidx",
+        "cacheindex"
       ],
       "id": "cache",
       "ignore": [
@@ -3816,9 +3830,60 @@
           "category": "incidental",
           "reason": "Private schema-2 receipt label for the existing pre-push git-hook gate; explicitly marks unqualified legacy build evidence and does not authorize schema-3 immutable-range reuse.",
           "token": "prepushLegacyGateContract"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper lifted verbatim out of cmdManageCommand to keep guard.go under the god-file ceiling; not a new concept",
+          "token": "applyGuardDeadlineEnvOverrides"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper lifted verbatim out of cmdManageCommand to keep guard.go under the god-file ceiling; not a new concept",
+          "token": "guardResolveLocalAuto"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper lifted verbatim out of cmdManageCommand to keep guard.go under the god-file ceiling; not a new concept",
+          "token": "guardCheckRemoteServe"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper lifted verbatim out of cmdManageCommand to keep guard.go under the god-file ceiling; not a new concept",
+          "token": "validateGuardBudgetFlags"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper lifted verbatim out of cmdManageCommand to keep guard.go under the god-file ceiling; not a new concept",
+          "token": "guardBootStartupPhases"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper lifted verbatim out of cmdManageCommand to keep guard.go under the god-file ceiling; not a new concept",
+          "token": "startGuardResourceSampler"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper lifted verbatim out of cmdManageCommand to keep guard.go under the god-file ceiling; not a new concept",
+          "token": "installGuardLogvaultMetrics"
+        },
+        {
+          "category": "false-positive",
+          "reason": "GateUp denotes the routed expert mathematical gate and up projections. This default phase counter observes selected device callback invocations, including handled and error outcomes, and has no policy, authorization, or admission authority.",
+          "token": "IncrementalDeviceGateUpCalls"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Existing expert gate/up callback outcome for a selected mathematical projection failure; it preserves the compute cause and never adjudicates authorization or admission.",
+          "token": "v41GateUpError"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Existing expert gate/up callback outcome confirming a selected mathematical projection result; it never grants permission or controls a policy gate.",
+          "token": "v41GateUpHandled"
         }
       ],
       "exclude": [
+        "IncrementalDeviceGateUpCalls",
         "SafetyGatePass",
         "aggregat",
         "aggregateV2",
@@ -3831,7 +3896,9 @@
         "mitigat",
         "navigat",
         "negat",
-        "propagat"
+        "propagat",
+        "v41GateUpError",
+        "v41GateUpHandled"
       ],
       "id": "guard-gate",
       "ignore": [
@@ -3923,6 +3990,7 @@
         "allAggregates",
         "appendGuardCompactionWitnessTo",
         "appendGuardDisableUsage",
+        "applyGuardDeadlineEnvOverrides",
         "armbenchPonytailGates",
         "baseAggregates",
         "beginGuardProviderBoundary",
@@ -3992,6 +4060,8 @@
         "guardAllowDropExpired",
         "guardAllowExpiryStamp",
         "guardAllowPruneOrphanExpiry",
+        "guardBootStartupPhases",
+        "guardCheckRemoteServe",
         "guardClaudeCommandIndex",
         "guardCodexPowerShellCommand",
         "guardCodexSessionStartBinding",
@@ -4123,6 +4193,7 @@
         "guardReasoningPostureMultipliers",
         "guardRegistration",
         "guardRegistrations",
+        "guardResolveLocalAuto",
         "guardRuntime",
         "guardScope",
         "guardSelfTightenFloorNote",
@@ -4180,6 +4251,7 @@
         "hasAggregate",
         "injectGuardProfiles",
         "installGuardCodexSessionStartHookAt",
+        "installGuardLogvaultMetrics",
         "installguardmcpregistration",
         "latestGuardCompactionWitness",
         "launchGuardedCodexOrchestrationWorker",
@@ -4255,6 +4327,7 @@
         "stallscanSkewGuard",
         "startBoundGuardRegistration",
         "startGuardRegistration",
+        "startGuardResourceSampler",
         "summarizeGates",
         "summarizeguardstops",
         "sysToolGate",
@@ -4265,6 +4338,7 @@
         "transform_guard",
         "ungated",
         "unguarded",
+        "validateGuardBudgetFlags",
         "verifyGateCheckout",
         "wgate",
         "withGuardRegistrationEnv",
@@ -15256,6 +15330,16 @@
           "category": "incidental",
           "reason": "Concrete amdgpu return type reused by the extracted validator; the duplicate reference does not define a second archive or plan.",
           "token": "StrixCandidateArchive"
+        },
+        {
+          "category": "incidental",
+          "reason": "Strix promotion plausibility bound internal to candidate evaluation; not a new concept",
+          "token": "MaxPinnedCandidateGain"
+        },
+        {
+          "category": "incidental",
+          "reason": "Strix promotion plausibility bound internal to candidate evaluation; not a new concept",
+          "token": "checkCandidatePlausible"
         }
       ],
       "exclude": [
@@ -15314,6 +15398,7 @@
         "MSIXPlan",
         "MaintenanceSeconds",
         "MatMulCandidate",
+        "MaxPinnedCandidateGain",
         "MergePlan",
         "MixedQKVCandidate",
         "MotifCatalogPlanFanoutReconcile",
@@ -15405,6 +15490,7 @@
         "candidatecachedir",
         "candidatemean",
         "candidates",
+        "checkCandidatePlausible",
         "clonePlan",
         "compareCandidate",
         "componentPlan",
@@ -15461,8 +15547,8 @@
         "relationCandidates",
         "removeCandidate",
         "reportFromSessions",
-        "requestedExecutionPlan",
         "requestMemoryPlanWithExtras",
+        "requestedExecutionPlan",
         "rollbackCodexMarketplaceCandidate",
         "runAblatePlan",
         "runContinuitySyncPlan",

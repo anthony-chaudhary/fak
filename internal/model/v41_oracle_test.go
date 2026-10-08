@@ -677,7 +677,7 @@ func TestDeepSeekV41OracleMHCCombOrientation(t *testing.T) {
 
 func TestDeepSeekV41OracleCompressSchedule(t *testing.T) {
 	sched := oracleV41CompressSchedule()
-	if len(sched) != 43 {
+	if len(sched) != 43 { //boundarylint:ignore CHANGE_DETECTOR_TEST V4.1 published schedule length: 40 decoder + 3 nextn layers
 		t.Fatalf("schedule length = %d, want 43", len(sched))
 	}
 	if sched[0] != 0 || sched[1] != 0 {

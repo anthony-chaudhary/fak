@@ -179,6 +179,7 @@ void fvk_rope_f32(void *dX, int pos, int nHeads, int headDim, double theta);
 
 /* SwiGLU: y = silu(g) * u, elementwise, length n. */
 void fvk_swiglu_f32(const void *dG, const void *dU, void *dY, int n);
+void fvk_swiglu_limit_f32(const void *dG, const void *dU, void *dY, int n, float limit);
 /* dY[P,out] += (silu(g[P,in]) * u[P,in]) @ W[out,in]^T. */
 void fvk_swiglu_matmul_add_f32(const void *dW, const void *dG, const void *dU,
                                void *dY, int out, int in, int P);

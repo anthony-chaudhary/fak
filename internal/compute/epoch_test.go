@@ -1,6 +1,8 @@
 package compute
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -83,8 +85,8 @@ func TestHardwareEpochFingerprintDeterminism(t *testing.T) {
 	if d1 == "" {
 		t.Fatal("expected non-empty digest")
 	}
-	if len(d1) != 64 {
-		t.Fatalf("expected 64-character sha256 hex digest, got len=%d: %q", len(d1), d1)
+	if len(d1) != hex.EncodedLen(sha256.Size) {
+		t.Fatalf("expected %d-character sha256 hex digest, got len=%d: %q", hex.EncodedLen(sha256.Size), len(d1), d1)
 	}
 	if d1 != d2 {
 		t.Fatalf("identical fingerprints produced differing digests: %q vs %q", d1, d2)
@@ -422,7 +424,8 @@ func TestEpochTrackerProbeFunc(t *testing.T) {
 		t.Fatalf("expected probe error %v, got %v", probeErr, err)
 	}
 
-	upgradedFp := sampleFingerprint("cuda", "550.54")
+	const upgradedDriver = "550.54"
+	upgradedFp := sampleFingerprint("cuda", upgradedDriver)
 	tracker.SetProbeFunc(func() (HardwareEpochFingerprint, error) {
 		return upgradedFp, nil
 	})
@@ -431,8 +434,8 @@ func TestEpochTrackerProbeFunc(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected invalidation error: %v", err)
 	}
-	if nextEpoch.Fingerprint.DriverVersion != "550.54" {
-		t.Fatalf("driver version = %q, want 550.54", nextEpoch.Fingerprint.DriverVersion)
+	if nextEpoch.Fingerprint.DriverVersion != upgradedDriver {
+		t.Fatalf("driver version = %q, want %q", nextEpoch.Fingerprint.DriverVersion, upgradedDriver)
 	}
 	if nextEpoch.Digest != upgradedFp.Digest() {
 		t.Fatalf("next digest = %q, want %q", nextEpoch.Digest, upgradedFp.Digest())

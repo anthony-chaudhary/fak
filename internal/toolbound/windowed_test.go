@@ -12,6 +12,11 @@ import (
 	"unicode/utf8"
 )
 
+const (
+	fixtureLines  = 1000
+	fixtureWindow = 100
+)
+
 func createTestFile(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -28,19 +33,19 @@ func createTestFile(t *testing.T, dir, name, content string) string {
 func TestWindowedFile1000Lines(t *testing.T) {
 	dir := t.TempDir()
 	var sb strings.Builder
-	for i := 1; i <= 1000; i++ {
+	for i := 1; i <= fixtureLines; i++ {
 		fmt.Fprintf(&sb, "line %d\n", i)
 	}
 	filePath := createTestFile(t, dir, "thousand.txt", sb.String())
 
-	w := NewWindowedFileReader(100)
+	w := NewWindowedFileReader(fixtureWindow)
 
-	lines, err := w.Open(filePath, 1, 100)
+	lines, err := w.Open(filePath, 1, fixtureWindow)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
 
-	if len(lines) != 100 {
+	if len(lines) != fixtureWindow {
 		t.Fatalf("expected 100 lines, got %d", len(lines))
 	}
 
@@ -61,7 +66,7 @@ func TestWindowedFile1000Lines(t *testing.T) {
 	if w.WindowSize != 100 {
 		t.Errorf("expected WindowSize 100, got %d", w.WindowSize)
 	}
-	if len(w.Lines) != 1000 {
+	if len(w.Lines) != fixtureLines {
 		t.Errorf("expected 1000 Lines, got %d", len(w.Lines))
 	}
 	if w.TotalLines != 1000 {
@@ -76,7 +81,7 @@ func TestWindowedFile1000Lines(t *testing.T) {
 
 	// Verify GetWindow matches without cursor mutation
 	activeWindow := w.GetWindow()
-	if len(activeWindow) != 100 {
+	if len(activeWindow) != fixtureWindow {
 		t.Fatalf("expected GetWindow to return 100 lines, got %d", len(activeWindow))
 	}
 	if activeWindow[0] != lines[0] || activeWindow[99] != lines[99] {
@@ -96,12 +101,12 @@ func TestWindowedFileScrollDown(t *testing.T) {
 	}
 	filePath := createTestFile(t, dir, "scroll.txt", sb.String())
 
-	w := NewWindowedFileReader(100)
-	lines, err := w.Open(filePath, 1, 100)
+	w := NewWindowedFileReader(fixtureWindow)
+	lines, err := w.Open(filePath, 1, fixtureWindow)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
-	if len(lines) != 100 || w.CurrentLine != 1 {
+	if len(lines) != fixtureWindow || w.CurrentLine != 1 {
 		t.Fatalf("initial state invalid")
 	}
 
@@ -113,7 +118,7 @@ func TestWindowedFileScrollDown(t *testing.T) {
 	if w.CurrentLine != 51 {
 		t.Errorf("expected CurrentLine 51, got %d", w.CurrentLine)
 	}
-	if len(lines) != 100 {
+	if len(lines) != fixtureWindow {
 		t.Fatalf("expected 100 lines, got %d", len(lines))
 	}
 	if lines[0] != "51: line 51" || lines[99] != "150: line 150" {
@@ -178,8 +183,8 @@ func TestWindowedFileScrollUp(t *testing.T) {
 	}
 	filePath := createTestFile(t, dir, "scrollup.txt", sb.String())
 
-	w := NewWindowedFileReader(100)
-	_, err := w.Open(filePath, 1000, 100)
+	w := NewWindowedFileReader(fixtureWindow)
+	_, err := w.Open(filePath, 1000, fixtureWindow)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -195,7 +200,7 @@ func TestWindowedFileScrollUp(t *testing.T) {
 	if w.CurrentLine != 900 {
 		t.Errorf("expected CurrentLine 900, got %d", w.CurrentLine)
 	}
-	if len(lines) != 100 {
+	if len(lines) != fixtureWindow {
 		t.Fatalf("expected 100 lines, got %d", len(lines))
 	}
 	if lines[0] != "900: line 900" || lines[99] != "999: line 999" {
@@ -234,7 +239,7 @@ func TestWindowedFileScrollUp(t *testing.T) {
 	if w.CurrentLine != 1 {
 		t.Errorf("expected CurrentLine clamped to 1, got %d", w.CurrentLine)
 	}
-	if len(lines) != 100 {
+	if len(lines) != fixtureWindow {
 		t.Fatalf("expected 100 lines, got %d", len(lines))
 	}
 	if lines[0] != "1: line 1" || lines[99] != "100: line 100" {
@@ -263,8 +268,8 @@ func TestWindowedFileGoto(t *testing.T) {
 	}
 	filePath := createTestFile(t, dir, "goto.txt", sb.String())
 
-	w := NewWindowedFileReader(100)
-	_, err := w.Open(filePath, 1, 100)
+	w := NewWindowedFileReader(fixtureWindow)
+	_, err := w.Open(filePath, 1, fixtureWindow)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -277,7 +282,7 @@ func TestWindowedFileGoto(t *testing.T) {
 	if w.CurrentLine != 500 {
 		t.Errorf("expected CurrentLine 500, got %d", w.CurrentLine)
 	}
-	if len(lines) != 100 {
+	if len(lines) != fixtureWindow {
 		t.Fatalf("expected 100 lines, got %d", len(lines))
 	}
 	if lines[0] != "500: line 500" || lines[99] != "599: line 599" {

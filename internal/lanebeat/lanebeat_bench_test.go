@@ -28,9 +28,10 @@ func makeSyntheticLeases(count int, lanesCount int) []Lease {
 }
 
 func TestBenchmarkFixtures(t *testing.T) {
-	leases := makeSyntheticLeases(10, 2)
-	if len(leases) != 10 {
-		t.Fatalf("expected 10 leases, got %d", len(leases))
+	const leaseCount = 10
+	leases := makeSyntheticLeases(leaseCount, 2)
+	if len(leases) != leaseCount {
+		t.Fatalf("expected %d leases, got %d", leaseCount, len(leases))
 	}
 }
 

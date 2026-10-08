@@ -63,6 +63,33 @@ func (v *vulkanBackend) SwiGLU(gate, up Tensor) Tensor {
 	return y
 }
 
+func (v *vulkanBackend) SwiGLUWithLimit(gate, up Tensor, limit float32) Tensor {
+	if limit <= 0 || math.IsNaN(float64(limit)) || math.IsInf(float64(limit), 0) {
+		panic("compute: Vulkan limited SwiGLU requires a finite positive limit")
+	}
+	if gate.Backend() != v || up.Backend() != v || gate.Dtype != F32 || up.Dtype != F32 || len(gate.Shape) != len(up.Shape) || gate.Numel() <= 0 {
+		panic("compute: Vulkan limited SwiGLU requires matching owned F32 tensors")
+	}
+	for i := range gate.Shape {
+		if gate.Shape[i] != up.Shape[i] {
+			panic("compute: Vulkan limited SwiGLU shapes differ")
+		}
+	}
+	vulkanMu.Lock()
+	var y Tensor
+	completed := false
+	defer func() {
+		vulkanMu.Unlock()
+		if !completed && y.Buf() != nil {
+			v.Free(y)
+		}
+	}()
+	y, _ = v.devTr(append([]int(nil), gate.Shape...), F32)
+	C.fvk_swiglu_limit_f32(v.vp(gate), v.vp(up), v.vp(y), C.int(gate.Numel()), C.float(limit))
+	completed = true
+	return y
+}
+
 // AddInPlace adds src into dst elementwise (dst += src) on the device — the residual add.
 func (v *vulkanBackend) AddInPlace(dst, src Tensor) {
 	vulkanMu.Lock()

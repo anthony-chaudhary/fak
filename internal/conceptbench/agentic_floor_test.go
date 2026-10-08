@@ -227,8 +227,8 @@ func TestEvaluateMacCandidates(t *testing.T) {
 	if rep.Schema != FloorReportSchema {
 		t.Errorf("rep.Schema = %q, want %q", rep.Schema, FloorReportSchema)
 	}
-	if len(rep.Candidates) != 6 {
-		t.Fatalf("len(Candidates) = %d, want 6", len(rep.Candidates))
+	if want := len(CalibratedMacCandidates()); len(rep.Candidates) != want {
+		t.Fatalf("len(Candidates) = %d, want %d", len(rep.Candidates), want)
 	}
 
 	byModel := map[string]CandidateScore{}

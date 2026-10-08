@@ -1,6 +1,8 @@
 package compute
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"sync"
 	"testing"
 	"time"
@@ -31,8 +33,8 @@ func TestPrewarmEffectiveConfig_Digest(t *testing.T) {
 	d1 := base.Digest()
 	d2 := base.Digest()
 
-	if len(d1) != 64 {
-		t.Fatalf("expected 64-character hex digest, got %d chars: %s", len(d1), d1)
+	if len(d1) != hex.EncodedLen(sha256.Size) {
+		t.Fatalf("expected %d-character hex digest, got %d chars: %s", hex.EncodedLen(sha256.Size), len(d1), d1)
 	}
 	if d1 != d2 {
 		t.Fatalf("digest is not deterministic: %s != %s", d1, d2)

@@ -9,14 +9,24 @@ import (
 	"testing"
 )
 
+var canonicalCandidateOrder = []string{
+	CandidateIDTargetQ4KGEMV,
+	CandidateIDTopologyNormMM,
+	CandidateIDQuantQ4KvsF32,
+	CandidateIDResidencyDevLoc,
+	CandidateIDLayoutF16Contig,
+	CandidateIDPrefillSequence,
+	CandidateIDDecodeResident,
+}
+
 // TestStrixCandidateRegistry_StartsUncredited is the ticket witness: a freshly
 // constructed registry must contain no receipt-free PROMOTED rows; historical
 // constants remain reference-only.
 func TestStrixCandidateRegistry_StartsUncredited(t *testing.T) {
 	reg := NewStrixCandidateRegistry()
 	sb := reg.Scoreboard()
-	if len(sb) != 7 {
-		t.Fatalf("expected 7 reference rows, got %d", len(sb))
+	if len(sb) != len(canonicalCandidateOrder) {
+		t.Fatalf("expected %d reference rows (one per canonical candidate), got %d", len(canonicalCandidateOrder), len(sb))
 	}
 	for _, c := range sb {
 		if c.Verdict == VerdictPromoted {
@@ -272,19 +282,11 @@ func TestScoreboard_InitialCanonicalState(t *testing.T) {
 	reg := NewStrixCandidateRegistry()
 	sb := reg.Scoreboard()
 
-	if len(sb) != 7 {
-		t.Fatalf("expected 7 canonical items in scoreboard, got %d", len(sb))
+	if len(sb) != len(canonicalCandidateOrder) {
+		t.Fatalf("expected %d canonical items in scoreboard, got %d", len(canonicalCandidateOrder), len(sb))
 	}
 
-	expectedOrder := []string{
-		CandidateIDTargetQ4KGEMV,
-		CandidateIDTopologyNormMM,
-		CandidateIDQuantQ4KvsF32,
-		CandidateIDResidencyDevLoc,
-		CandidateIDLayoutF16Contig,
-		CandidateIDPrefillSequence,
-		CandidateIDDecodeResident,
-	}
+	expectedOrder := canonicalCandidateOrder
 
 	for i, expID := range expectedOrder {
 		if sb[i].CandidateID != expID {

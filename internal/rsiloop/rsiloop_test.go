@@ -504,12 +504,14 @@ func TestTransientMeasureErrorRecoversWithoutTrippingBreaker(t *testing.T) {
 	// row 2: c2 attempt 1 (transient error, unmeasured evidence, breaker 0)
 	// row 3: c2 attempt 2 (measured gain, kept, breaker 0)
 	// row 4: c3 attempt 1 (measured gain, kept, breaker 0)
-	if len(res.Rows) != 5 {
-		t.Fatalf("len(res.Rows)=%d, want 5 (retaining all error attempts as unmeasured evidence)", len(res.Rows))
+	retryRows := []int{0, 2}
+	keptRows := []int{1, 3, 4}
+	if len(res.Rows) != len(retryRows)+len(keptRows) {
+		t.Fatalf("len(res.Rows)=%d, want %d (retaining all error attempts as unmeasured evidence)", len(res.Rows), len(retryRows)+len(keptRows))
 	}
 
 	// Check unmeasured error evidence rows.
-	for _, idx := range []int{0, 2} {
+	for _, idx := range retryRows {
 		r := res.Rows[idx]
 		if r.Decision != "RETRY" {
 			t.Errorf("row %d: decision=%s, want RETRY", idx, r.Decision)
@@ -529,7 +531,7 @@ func TestTransientMeasureErrorRecoversWithoutTrippingBreaker(t *testing.T) {
 	}
 
 	// Check kept rows.
-	for _, idx := range []int{1, 3, 4} {
+	for _, idx := range keptRows {
 		r := res.Rows[idx]
 		if !r.Measured {
 			t.Errorf("row %d: measured=false, want true", idx)
@@ -1098,8 +1100,8 @@ func TestRunObserved_TransientRetryBackoffAndObserverSuppression(t *testing.T) {
 		// c1: 2 RETRY rows + 1 KEEP row = 3
 		// c2: 2 RETRY rows + 1 REVERT row = 3
 		// Total res.Rows = 6
-		if len(res.Rows) != 6 {
-			t.Fatalf("len(res.Rows) = %d, want 6", len(res.Rows))
+		if wantRows := len(wantSleeps) + 2; len(res.Rows) != wantRows {
+			t.Fatalf("len(res.Rows) = %d, want %d (one RETRY row per sleep + one terminal row per candidate)", len(res.Rows), wantRows)
 		}
 
 		// But observedRows must have ONLY terminal rows (exactly 2, one per cycle):

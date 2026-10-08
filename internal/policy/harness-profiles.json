@@ -35,6 +35,7 @@
     { "name": "Bash",               "inherits": ["posix_shell"] },
     { "name": "PowerShell",         "inherits": ["windows_shell"] },
     { "name": "bash",               "inherits": ["posix_shell"] },
+    { "name": "powershell",         "inherits": ["windows_shell"] },
     { "name": "shell_command",      "inherits": ["posix_shell", "windows_shell"] },
     { "name": "functions.shell_command", "inherits": ["posix_shell", "windows_shell"] },
     { "name": "exec_command",       "arg": "cmd", "inherits": ["posix_shell", "windows_shell"] }
@@ -92,6 +93,12 @@
         "bash", "read", "write", "edit", "multiedit", "patch", "apply_patch",
         "functions.apply_patch", "grep", "glob", "list", "ls", "webfetch",
         "todowrite", "todoread", "task", "skill", "lsp"
+      ]
+    },
+    {
+      "name": "pi",
+      "required_tools": [
+        "read", "bash", "powershell", "edit", "write", "grep", "find", "ls"
       ]
     },
     {

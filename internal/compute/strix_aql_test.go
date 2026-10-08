@@ -105,7 +105,7 @@ func TestStrixAQL_PacketCreationAndSerialization(t *testing.T) {
 
 	// Serialize
 	raw := pkt.Serialize()
-	if len(raw) != 64 {
+	if len(raw) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST HSA AQL kernel dispatch packet is 64 bytes by spec
 		t.Fatalf("expected 64 bytes, got %d", len(raw))
 	}
 
@@ -188,7 +188,7 @@ func TestStrixAQL_PM4CommandBuffer_DispatchDirect(t *testing.T) {
 	cb.EmitDispatchDirect(1024, 2, 1, 0x00000001)
 
 	dwords := cb.Dwords()
-	if len(dwords) != 5 {
+	if len(dwords) != 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST PM4 PKT3_DISPATCH_DIRECT is header + 4 payload DWORDs by spec
 		t.Fatalf("expected 5 DWORDs, got %d", len(dwords))
 	}
 
@@ -259,7 +259,7 @@ func TestStrixAQL_PM4CommandBuffer_AcquireMem_MALLFlush(t *testing.T) {
 	cb.EmitAcquireMem(flags)
 
 	dwords := cb.Dwords()
-	if len(dwords) != 7 {
+	if len(dwords) != 7 { //boundarylint:ignore CHANGE_DETECTOR_TEST PM4 PKT3_ACQUIRE_MEM is header + 6 payload DWORDs by spec
 		t.Fatalf("expected 7 DWORDs, got %d", len(dwords))
 	}
 
@@ -292,7 +292,7 @@ func TestStrixAQL_PM4CommandBuffer_ReleaseMem(t *testing.T) {
 	cb.EmitReleaseMem(event, dataSel, addr, data)
 
 	dwords := cb.Dwords()
-	if len(dwords) != 8 {
+	if len(dwords) != 8 { //boundarylint:ignore CHANGE_DETECTOR_TEST PM4 PKT3_RELEASE_MEM is header + 7 payload DWORDs by spec
 		t.Fatalf("expected 8 DWORDs, got %d", len(dwords))
 	}
 

@@ -252,12 +252,14 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	fragments := newUTF8FragmentBuffer(guard.write)
 
 	turnCtx := plannerTurnContext(ctx, nil, turn.messages, s.contextEpoch)
-	comp, err := sp.CompleteStream(turnCtx, fragments.write, turn.messages, turn.tools, turn.sampleOpts...)
+	var firstDelta firstDeltaClock
+	comp, err := sp.CompleteStream(turnCtx, firstDelta.wrap(fragments.write), turn.messages, turn.tools, turn.sampleOpts...)
 	if err == nil {
 		s.observePrefixReuseTurn(turnCtx, turn.messages, comp)
 	}
 	if err != nil {
 		s.renderTurnDebugError(reqTrace, "openai_responses", err, time.Since(began))
+		s.recordFailedTurn(ctx, s.chatServingLocality(ctx, reqModel), err, began, 0, started)
 		if !started {
 			// Nothing on the wire yet — surface a real HTTP error exactly as the
 			// buffered path does, and own the request. writeUpstreamErr folds the
@@ -278,7 +280,7 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	// The turn finished. The buffered path folds inference metrics + the admission
 	// accounting into s.complete; this path bypasses it, so account here.
 	lease.SettleUsage(comp.Usage) // settle the token-rate window with real usage (#2019)
-	s.accountStreamedTurn(ctx, sessionTurn, comp, turn.messages, began, reqModel)
+	s.accountStreamedTurn(ctx, sessionTurn, comp, turn.messages, began, reqModel, firstDelta.ttft(began))
 
 	// Tool-call conformance fail-closed (the buffered counterpart is
 	// handleResponses): the upstream announced tool_calls but none survived parsing

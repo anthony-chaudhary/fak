@@ -91,8 +91,8 @@ func TestROCmFP4_PackUnpackRoundtrip(t *testing.T) {
 		}
 
 		unpacked := UnpackFP4Block32(block)
-		if len(unpacked) != 32 {
-			t.Fatalf("unpacked length = %d, want 32", len(unpacked))
+		if len(unpacked) != len(src) {
+			t.Fatalf("unpacked length = %d, want %d", len(unpacked), len(src))
 		}
 
 		for i := 0; i < 32; i++ {

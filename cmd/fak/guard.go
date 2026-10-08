@@ -29,7 +29,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessres"
 	"github.com/anthony-chaudhary/fak/internal/headroom"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
-	"github.com/anthony-chaudhary/fak/internal/logvault"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -286,21 +285,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	if hasGuardBudgetEnvelope && !guardSetFlags["max-duration"] && guardBudgetEnvelope.WallClockLimit() > 0 {
 		maxDurationLimit = guardBudgetEnvelope.WallClockLimit()
 	}
-	if env := strings.TrimSpace(os.Getenv("FAK_GUARD_SOFT_DEADLINE_LEAD")); env != "" {
-		if d, err := time.ParseDuration(env); err == nil {
-			*softDeadlineLead = d
-		}
-	}
-	if env := strings.TrimSpace(os.Getenv("FAK_GUARD_COMMIT_GRACE_PERIOD")); env != "" {
-		if d, err := time.ParseDuration(env); err == nil {
-			*commitGracePeriod = d
-		}
-	}
-	if env := strings.TrimSpace(os.Getenv("FAK_GUARD_CHILD_STOP_GRACE")); env != "" {
-		if d, err := time.ParseDuration(env); err == nil {
-			*childStopGrace = d
-		}
-	}
+	applyGuardDeadlineEnvOverrides(softDeadlineLead, commitGracePeriod, childStopGrace)
 	deadlineCfg := normalizeGuardDeadlineSettings(maxDurationLimit, *softDeadlineLead, *commitGracePeriod, *childStopGrace)
 
 	// --split-dry-run is a pure PREVIEW: render the resolved 80/20 split plan and exit BEFORE
@@ -505,68 +490,9 @@ func cmdManageCommand(commandName string, argv []string) {
 	// is the model id a client asks for to reach the local side in alongside mode.
 	localAlias := strings.TrimSpace(*ggufPath)
 
-	// --local: auto-detect a running local OpenAI-compatible server (Ollama/LM Studio/
-	// Qwen3.6 dogfood/llama.cpp) and wire the upstream to it. This is a PROXY path (the server
-	// is external), so on detection we set provider=openai + base-URL=<detected>/v1 exactly
-	// as if the user had typed those flags, and the standard resolution flow below handles it.
-	// Precedence:
-	//   - --gguf wins (it is the no-server in-kernel path); --local is then a no-op.
-	//   - --base-url / --remote-serve conflict (the detected server IS the upstream).
-	//   - nothing detected + no --gguf -> fail loud with how to start a server.
-	if *localAuto && !localModel {
-		if strings.TrimSpace(*baseURL) != "" || remoteBase != "" {
-			fmt.Fprintln(os.Stderr, "fak guard: --local auto-detects the upstream server, so it is mutually exclusive with --base-url / --remote-serve — pass only one")
-			os.Exit(2)
-		}
-		tLocal := time.Now()
-		detBase, detModel, detLabel, found := guardDetectLocalBackend()
-		localDetectDur = time.Since(tLocal)
-		if !found {
-			fmt.Fprintln(os.Stderr, guardLocalNothingDetectedMessage())
-			os.Exit(2)
-		}
-		*provider, *baseURL = "openai", detBase
-		if strings.TrimSpace(*model) == "" {
-			*model = detModel
-		}
-		extraApplied, extraAlreadySet, _, extraErr := guardApplyLocalProviderExtraBody(detLabel, *model, os.Getenv, os.Setenv)
-		if extraErr != nil {
-			fmt.Fprintf(os.Stderr, "fak guard: --local could not apply Qwen3.6 provider tuning: %v\n", extraErr)
-			os.Exit(2)
-		}
-		if !*quiet {
-			fmt.Fprintln(os.Stderr, guardLocalDetectedBanner(detLabel, detBase, detModel))
-			switch {
-			case extraApplied:
-				fmt.Fprintln(os.Stderr, "-> local tuning: Qwen3.6 provider extra body enabled (top_k=20, preserve_thinking=true)")
-			case extraAlreadySet:
-				fmt.Fprintln(os.Stderr, "-> local tuning: using existing FAK_PROVIDER_EXTRA_BODY_JSON")
-			}
-		}
-	} else if *localAuto && localModel && !*quiet {
-		fmt.Fprintln(os.Stderr, "fak guard: --gguf is set, so --local is ignored (the in-kernel model is the upstream)")
-	}
+	localDetectDur = guardResolveLocalAuto(*localAuto, localModel, *quiet, remoteBase, provider, baseURL, model)
 
-	if remoteBase != "" {
-		if strings.TrimSpace(*baseURL) != "" && strings.TrimSpace(*baseURL) != remoteBase {
-			fmt.Fprintf(os.Stderr, "fak guard: --remote-serve and --base-url disagree (%s vs %s) — pass only one\n", remoteBase, strings.TrimSpace(*baseURL))
-			os.Exit(2)
-		}
-		if p := strings.ToLower(strings.TrimSpace(*provider)); p == "anthropic" {
-			fmt.Fprintln(os.Stderr, "fak guard: --remote-serve uses the OpenAI-compatible wire fak serve exposes; drop --provider anthropic")
-			os.Exit(2)
-		}
-		// Preflight: a remote serve that is not answering is the most common failure here
-		// (box not started, wrong port). Fail loud with the next step, mirroring the
-		// exec.LookPath check above, rather than binding a gateway that 502s on first call.
-		tRemote := time.Now()
-		preflightErr := guardPreflightRemoteServe(remoteBase)
-		remotePreflightDur = time.Since(tRemote)
-		if preflightErr != nil {
-			fmt.Fprintf(os.Stderr, "fak guard: --remote-serve %s is not reachable: %v\n  start it on the box with `fak serve --gguf <weights> --backend cuda --addr 0.0.0.0:8080`, or check the host/port.\n", remoteBase, preflightErr)
-			os.Exit(2)
-		}
-	}
+	remotePreflightDur = guardCheckRemoteServe(remoteBase, *baseURL, *provider)
 
 	// 3. Resolve the upstream wire + credential posture: LOCAL-ONLY (--gguf without
 	//    --alongside, where fak IS the upstream and there is no credential at all) vs the
@@ -580,6 +506,8 @@ func cmdManageCommand(commandName string, argv []string) {
 	launchProvider, launchProviderAutodetected := launchPlan.resolveProvider(*provider)
 	if remoteBase != "" {
 		launchProviderAutodetected = false
+	} else if strings.TrimSpace(*baseURL) == "" && !localModel {
+		launchProvider, *model, launchProviderAutodetected = launchPlan.applyOpenCodeModelRoute(*provider, launchProvider, *model, launchProviderAutodetected)
 	}
 	posture := resolveGuardUpstreamPosture(guardUpstreamPostureInputs{
 		command:        command,
@@ -684,33 +612,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		fmt.Fprintf(os.Stderr, "fak guard: --require-key-env %s is set but empty — refusing to start a gateway with NO authentication (set it or drop the flag)\n", *requireKeyEnv)
 		os.Exit(2)
 	}
-	if *contextBudgetTokens < 0 {
-		fmt.Fprintln(os.Stderr, "fak guard: --context-budget-tokens must be non-negative")
-		os.Exit(2)
-	}
-	if *resetOnBudget && contextBudgetLimit <= 0 {
-		fmt.Fprintln(os.Stderr, "fak guard: --reset-on-budget requires --context-budget-tokens N")
-		os.Exit(2)
-	}
-	if *restartOnBudget && contextBudgetLimit <= 0 {
-		fmt.Fprintln(os.Stderr, "fak guard: --restart-on-budget requires --context-budget-tokens N")
-		os.Exit(2)
-	}
-	if *restartLimit < 0 {
-		fmt.Fprintln(os.Stderr, "fak guard: --restart-limit must be non-negative")
-		os.Exit(2)
-	}
-	// Same wording serve refuses a non-positive --native-admission-token-budget with:
-	// a typo must fail loud at launch, never silently boot a seat whose scheduler
-	// budget was not the one the operator declared.
-	if *nativeAdmissionTokenBudget <= 0 {
-		fmt.Fprintf(os.Stderr, "fak guard: --native-admission-token-budget must be positive (got %d)\n", *nativeAdmissionTokenBudget)
-		os.Exit(2)
-	}
-	if maxDurationLimit < 0 {
-		fmt.Fprintln(os.Stderr, "fak guard: --max-duration must be non-negative")
-		os.Exit(2)
-	}
+	validateGuardBudgetFlags(*contextBudgetTokens, contextBudgetLimit, *resetOnBudget, *restartOnBudget, *restartLimit, *nativeAdmissionTokenBudget, maxDurationLimit)
 	// Session durability (the file-backed registry restore + the git-backed leaseref
 	// publish) is only useful for RESUME/DISPATCH of THIS session later — a plain
 	// attended `fak guard -- claude` never reads it back. So GATE the whole block on an
@@ -945,25 +847,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	// internal/gateway/startup.go): flag-parse and policy-load always fire; the rest are
 	// zero-and-omitted when their flag wasn't used, so a plain `fak guard -- claude` launch
 	// reports a short, honest phase list rather than a wall of zero-duration rows.
-	startupPhases := []gateway.StartupPhase{
-		{Name: "flag-parse", Dur: parseDur},
-		{Name: "policy-load", Dur: policyDur},
-	}
-	if localDetectDur > 0 {
-		startupPhases = append(startupPhases, gateway.StartupPhase{Name: "local-detect", Dur: localDetectDur})
-	}
-	if remotePreflightDur > 0 {
-		startupPhases = append(startupPhases, gateway.StartupPhase{Name: "remote-serve-preflight", Dur: remotePreflightDur})
-	}
-	startupPhases = append(startupPhases, gateway.StartupPhase{Name: "upstream-resolve", Dur: upstreamResolveDur})
-	startupPhases = append(startupPhases, gateway.StartupPhase{Name: "path-lookup", Dur: pathLookupDur})
-	if loadPhase.Name != "" {
-		startupPhases = append(startupPhases, loadPhase)
-	}
-	if tokenizerLoadDur > 0 {
-		startupPhases = append(startupPhases, gateway.StartupPhase{Name: "tokenizer-load", Dur: tokenizerLoadDur})
-	}
-	startupPhases = append(startupPhases, gateway.StartupPhase{Name: "listener-bind", Dur: listenDur})
+	startupPhases := guardBootStartupPhases(parseDur, policyDur, localDetectDur, remotePreflightDur, upstreamResolveDur, pathLookupDur, loadPhase, tokenizerLoadDur, listenDur)
 	gatewayModel := guardCodexGatewayModelForProfile(launchPlan.harnessProfile(), *model, up)
 
 	wireErrors := &guardWireErrorGauge{}
@@ -1219,57 +1103,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	// is ready and before the agent takes the terminal. The wrapped child (the agent half)
 	// is folded from its exit state in finishGuardChildAndReport. nil when disabled, which
 	// every downstream call tolerates.
-	var resSampler *harnessres.Sampler
-	if *resourceStats {
-		resSampler = harnessres.New()
-		// Feed the kernel half's network axis from the listener counter installed at bind
-		// time (#2049). Set BEFORE Start so the first sample already carries it.
-		if netCounter != nil {
-			resSampler.SetNetworkProvider(func() (rx, tx uint64, ok bool) {
-				rx, tx = netCounter.Bytes()
-				return rx, tx, true
-			})
-		}
-		// Feed the GPU/accelerator VRAM axis when a model runs IN-KERNEL (--gguf/--backend):
-		// the harness's hardware footprint then includes the device. The default proxy path
-		// has no local GPU, so the provider reports ok=false and the axis stays honestly n/a
-		// (#2052). VRAM PREFERS the same compute HAL the serve capacity checks use (the
-		// in-kernel backend's own device handle); it falls back to nvidia-smi only on a host
-		// where the handle cannot report — the fail-soft fallback the issue names.
-		if chatBackend != nil {
-			resSampler.SetGPUProvider(func() (used, total uint64, ok bool) {
-				t, free, known := compute.DeviceMemoryInfo(chatBackend)
-				var smi []compute.GPUStat
-				if !known || t <= 0 {
-					smi, _ = compute.SystemGPUStats() // fail-soft; nil → axis stays n/a
-				}
-				return compute.HarnessGPUVRAM(t, free, known, smi)
-			})
-			// Feed the GPU utilization axis. The in-kernel device-handle seam
-			// (DeviceMemoryInfo) reports memory only — there is no utilization on it — so
-			// this is the accelerator fallback the issue names: per-device VRAM+util folded
-			// to the busiest device's percent. Fail-soft (no probe / timeout /
-			// unparseable → ok=false), so the util axis stays honestly n/a rather than a
-			// fabricated 0 on a host that lacks the tool (#2052, #11319).
-			resSampler.SetGPUUtilProvider(func() (pct float64, ok bool) {
-				stats, present := compute.SystemGPUStats()
-				if !present {
-					return 0, false
-				}
-				_, _, util, aok := compute.AggregateGPUStats(stats)
-				return util, aok
-			})
-		}
-		resSampler.Start(guardResourceSampleInterval)
-		// Expose the live harness resource snapshot on the gateway's /metrics as the
-		// fak_harness_* family, so a running session's CPU/mem/IO is scrapeable — not
-		// only printed at exit (epic #2044 / #2047). Pull-only: rendered per scrape.
-		srv.SetHarnessMetricsProvider(func() string { return resSampler.Snapshot().PrometheusText() })
-		// Structured twin of the /metrics harness family, on /debug/vars, so the live `fak
-		// info` pane can show the kernel CPU/RSS/IO the exit summary prints instead of only
-		// scraping Prometheus text. Same pull sampler, converted to the gateway's shape.
-		srv.SetSessionHarnessProvider(func() gateway.SessionHarness { return guardHarnessToSession(resSampler.Snapshot()) })
-	}
+	resSampler := startGuardResourceSampler(*resourceStats, netCounter, chatBackend, srv)
 
 	// Vault observability (#2455): expose the three fak_logvault_* gauges on the
 	// gateway's /metrics when a capture vault exists on this box, so an operator can
@@ -1278,18 +1112,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	// value is WITNESSED (folded from logvault's own hash-chained manifest + a
 	// bounded mirror re-hash); pull-only, rendered per scrape. Wired only when a
 	// vault manifest is present so boxes without a vault emit no phantom family.
-	if vaultDir := resolveLogvaultDir(repoRoot()); vaultDir != "" {
-		if _, statErr := os.Stat(filepath.Join(vaultDir, logvault.ManifestName)); statErr == nil {
-			lv := &logvault.Vault{Dir: vaultDir}
-			srv.SetLogvaultMetricsProvider(func() string {
-				text, err := lv.MetricsText(logvaultMetricsVerifySample, time.Now().UnixNano())
-				if err != nil {
-					return "" // unreadable manifest: emit nothing rather than a broken family
-				}
-				return text
-			})
-		}
-	}
+	installGuardLogvaultMetrics(srv)
 
 	// Deferred session durability (#1833): only now — after the gateway is bound and
 	// ready, off the critical path to the agent exec — do the git-spawning setup for an

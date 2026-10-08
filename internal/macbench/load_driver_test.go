@@ -110,11 +110,11 @@ func TestLoadDriver_ConcurrentStreams24(t *testing.T) {
 	if result.Summary.Concurrency != 24 {
 		t.Fatalf("expected summary concurrency 24, got %d", result.Summary.Concurrency)
 	}
-	if len(result.Streams) != 24 {
-		t.Fatalf("expected 24 streams, got %d", len(result.Streams))
+	if len(result.Streams) != opts.Concurrency {
+		t.Fatalf("expected %d streams, got %d", opts.Concurrency, len(result.Streams))
 	}
-	if len(result.RawSamples.Streams) != 24 {
-		t.Fatalf("expected 24 raw stream samples, got %d", len(result.RawSamples.Streams))
+	if len(result.RawSamples.Streams) != opts.Concurrency {
+		t.Fatalf("expected %d raw stream samples, got %d", opts.Concurrency, len(result.RawSamples.Streams))
 	}
 
 	// Verify peak concurrency proved concurrent in-flight streams
@@ -208,8 +208,8 @@ func TestLoadDriver_DurationLoop(t *testing.T) {
 	if reqCount < 24 {
 		t.Fatalf("expected at least 24 requests in duration loop, got %d", reqCount)
 	}
-	if len(result.Streams) != 24 {
-		t.Fatalf("expected 24 streams, got %d", len(result.Streams))
+	if len(result.Streams) != opts.Concurrency {
+		t.Fatalf("expected %d streams, got %d", opts.Concurrency, len(result.Streams))
 	}
 }
 

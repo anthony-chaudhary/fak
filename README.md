@@ -24,6 +24,9 @@ and the [claims ledger](CLAIMS.md) for what is real and what is not.
   exists; the earlier near-parity figure was withdrawn on 2026-09-27 pending remeasurement.
 - NVIDIA H100: fak measured 111.94 decode tok/s; llama.cpp is still about 3× faster there.
 
+llama.cpp is an explicit external reference for comparison only; fak never selects it
+as a fallback ([native inference goal](docs/native-inference-goal.md)).
+
 **Pick your path:** run a local agent → [Try fak](#try-fak) · guard an agent you
 already use → [`fak guard`](#governance-for-external-agents-fak-guard) · check the
 evidence → [benchmarks](docs/benchmarks/README.md) and [claims](CLAIMS.md).

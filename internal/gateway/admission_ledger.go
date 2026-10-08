@@ -27,6 +27,11 @@ type admissionRecord struct {
 	content  string      // the model-facing content to forward on replay (paged-out on a hold)
 	rewrote  bool        // the screen paged the bytes out (QUARANTINE/TRANSFORM) — apply content on replay
 	failNote bool        // the exit-143 recovery note has already been surfaced for this result
+	// pagingOff records that the screen ran with oversize paging suppressed (the client
+	// could not restore a stub, or the result was the current turn's). A replay under the
+	// other paging mode re-screens an ALLOW/TRANSFORM so a page-out is neither resurrected
+	// for a client that cannot restore it nor withheld once the result is no longer new.
+	pagingOff bool
 }
 
 // admissionLedger keys result admission to content, per trace. A zero value is ready
@@ -77,15 +82,32 @@ func (l *admissionLedger) traceLocked(trace string) map[admissionKey]*admissionR
 // never races; a rare concurrent same-trace turn may screen twice, which is idempotent
 // (same content → same verdict) and no worse than the pre-ledger re-screen-every-turn.
 func (l *admissionLedger) admit(trace, callID, digest string, screen func() (WireVerdict, string, bool)) (*admissionRecord, bool) {
+	return l.admitPaging(trace, callID, digest, false, screen)
+}
+
+// replayable reports whether a screened record can be replayed under pagingOff. Only an
+// ALLOW/TRANSFORM can differ by paging mode; a quarantine or refusal is mode-independent.
+func (rec *admissionRecord) replayable(pagingOff bool) bool {
+	if rec.pagingOff == pagingOff {
+		return true
+	}
+	return rec.verdict.Kind != "ALLOW" && rec.verdict.Kind != "TRANSFORM"
+}
+
+// admitPaging is admit with the oversize-paging mode the screen runs under. A record
+// screened under the other mode is re-screened and replaced, still reported fresh=false
+// so the first-arrival eviction/reset never fires twice for the same result.
+func (l *admissionLedger) admitPaging(trace, callID, digest string, pagingOff bool, screen func() (WireVerdict, string, bool)) (*admissionRecord, bool) {
 	key := admissionKey{callID: callID, digest: digest}
 	if l == nil || trace == "" {
 		v, c, rw := screen()
-		return &admissionRecord{screened: true, verdict: v, content: c, rewrote: rw}, true
+		return &admissionRecord{screened: true, verdict: v, content: c, rewrote: rw, pagingOff: pagingOff}, true
 	}
 	l.mu.Lock()
-	if rec := l.traceLocked(trace)[key]; rec != nil && rec.screened {
+	prior := l.traceLocked(trace)[key]
+	if prior != nil && prior.screened && prior.replayable(pagingOff) {
 		l.mu.Unlock()
-		return rec, false
+		return prior, false
 	}
 	l.mu.Unlock()
 
@@ -95,9 +117,14 @@ func (l *admissionLedger) admit(trace, callID, digest string, screen func() (Wir
 	defer l.mu.Unlock()
 	seen := l.traceLocked(trace)
 	if rec := seen[key]; rec != nil && rec.screened {
-		// A peer screened the same call result while we were unlocked. Keep the first
-		// record and treat ours as a replay so we do not double the eviction/reset.
-		return rec, false
+		if rec.replayable(pagingOff) {
+			// A peer screened the same call result while we were unlocked. Keep the first
+			// record and treat ours as a replay so we do not double the eviction/reset.
+			return rec, false
+		}
+		next := &admissionRecord{screened: true, verdict: v, content: c, rewrote: rw, failNote: rec.failNote, pagingOff: pagingOff}
+		seen[key] = next
+		return next, false
 	}
 	rec := seen[key]
 	if rec == nil {
@@ -107,7 +134,7 @@ func (l *admissionLedger) admit(trace, callID, digest string, screen func() (Wir
 		}
 		seen[key] = rec
 	}
-	rec.screened, rec.verdict, rec.content, rec.rewrote = true, v, c, rw
+	rec.screened, rec.verdict, rec.content, rec.rewrote, rec.pagingOff = true, v, c, rw, pagingOff
 	return rec, true
 }
 

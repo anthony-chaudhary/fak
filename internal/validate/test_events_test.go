@@ -3,6 +3,8 @@ package validate
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -49,7 +51,7 @@ func TestValidateEventDecoderRetainsPassSkipAndHelperIdentities(t *testing.T) {
 {"Action":"pass","Package":"p"}
 `
 	events, tests, err := decodeValidateTestEvents([]byte(raw), []string{"p"})
-	if err != nil || len(events) != 8 || len(tests) != 3 {
+	if err != nil || len(events) != strings.Count(raw, "\n") || len(tests) != 3 {
 		t.Fatalf("events=%v tests=%v err=%v", events, tests, err)
 	}
 	if tests[1].Action != "skip" || tests[1].Test != "TestSkip" || tests[2].Test != "TestFixtureHelper" || !strings.Contains(string(events[3]), "explicit skip reason") {
@@ -97,7 +99,7 @@ func TestValidateCandidateFingerprintBindsCopiedBytesBeforeTests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.SHA256) != 64 || len(got.GoExecutableSHA256) != 64 || len(got.Files) != 2 {
+	if len(got.SHA256) != hex.EncodedLen(sha256.Size) || len(got.GoExecutableSHA256) != hex.EncodedLen(sha256.Size) || len(got.Files) != 2 {
 		t.Fatalf("fingerprint=%+v", got)
 	}
 	old := got.SHA256

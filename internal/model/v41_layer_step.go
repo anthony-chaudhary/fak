@@ -43,7 +43,12 @@ package model
 // Session.Step is deliberately NOT switched here (leaf 10 owns activation); this
 // file adds the seam and its parity witness only.
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
+)
 
 // maxInt is used by the attention option builders below; it is defined in
 // v41_forward.go for the full-sequence path and reused here so the two call
@@ -106,10 +111,14 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	// below stays byte-for-byte the plain-layer arithmetic: silently running the
 	// window contraction for a role layer would emit logits from a schedule the
 	// checkpoint never declared. The role step still receives the layer's own
-	// retained state (its compressor group cursor) and returns the same typed
-	// ErrV41ForwardStage on any refusal, so a failed step leaves state untouched.
+	// retained state (its compressor group cursor). Success advances its logical
+	// append cursor without adding a row to the plain window.
 	if plan.Role != V41AttentionRolePerLayer || plan.Ratio > 1 {
-		return m.v41LayerStepRole(l, plan, x, streams, pos, layerState, registry, scratch)
+		if err := m.v41LayerStepRole(l, plan, x, streams, pos, layerState, registry, scratch); err != nil {
+			return err
+		}
+		layerState.nextWindowPos = pos + 1
+		return nil
 	}
 	// Append-only: the step position must be the next retained position. This
 	// refuses a caller that skipped or replayed history instead of silently
@@ -197,7 +206,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		return v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: attention qk_rope_head_dim must be a positive even value <= head_dim %d, got %d", ErrV41ForwardStage, hd, ropeDim))
 	}
-	qLat, err := m.v41ProjMatRows(l, "attn.wq_a.weight", collapsed, cfg.QLoraRank, H)
+	qLat, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_a.weight", collapsed, cfg.QLoraRank, H, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -209,7 +218,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		}
 		copy(qLat, rmsnormCfg(qLat, qNorm, eps, cfg))
 	}
-	q, err := m.v41ProjMatRows(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank)
+	q, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -219,13 +228,13 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 			return v41StageErr(v41StageAttention, l,
 				fmt.Errorf("%w: attention head_dim %d exceeds full KV latent rank %d", ErrV41ForwardStage, hd, v41KVLoraRank))
 		}
-		kvFull, err := m.v41ProjMatRows(l, "attn.wkv.weight", collapsed, v41KVLoraRank, H)
+		kvFull, err := m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", collapsed, v41KVLoraRank, H, scratch.denseProjection)
 		if err != nil {
 			return err
 		}
 		kv = kvFull[:hd]
 	} else {
-		kv, err = m.v41ProjMatRows(l, "attn.wkv.weight", collapsed, hd, H)
+		kv, err = m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", collapsed, hd, H, scratch.denseProjection)
 		if err != nil {
 			return err
 		}
@@ -329,7 +338,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		return err
 	}
 	ffnX := rmsnormCfg(x, ffnNorm, eps, cfg)
-	routerLogits, err := m.v41ProjMatRows(l, "ffn.gate.weight", ffnX, cfg.NumExperts, H)
+	routerLogits, err := m.v41ProjMatRowsWithProjection(l, "ffn.gate.weight", ffnX, cfg.NumExperts, H, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -340,22 +349,15 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	routed := make([]float32, H)
 	for _, pick := range picks {
 		stem := "ffn.experts." + itoa(pick.expert)
-		w1, w3, w2, err := m.v41ExpertTripleInto(l, stem, scratch, true)
+		y, err := m.v41IncrementalExpert(l, stem, ffnX, scratch)
 		if err != nil {
 			return err
-		}
-		contractOpen := m.v41NowNanos()
-		y := v41SwiGLU(w1, w3, w2, ffnX, cfg.MoEIntermediateSize, H, cfg)
-		if contractOpen != 0 {
-			m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
-		} else {
-			m.v41NoteExpertContraction()
 		}
 		for i := range routed {
 			routed[i] += pick.weight * y[i]
 		}
 	}
-	shared, err := m.v41SharedExpertSwiGLU(l, ffnX, cfg)
+	shared, err := m.v41SharedExpertSwiGLUWithProjection(l, ffnX, cfg, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -421,11 +423,9 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 //     KVSourceRows and reuses the source's published top-k exactly as v41Layer's
 //     reader branch does.
 //
-// The retained stream is the shared state's, not this layer's window ring, so the
-// step never touches the per-layer window cursor. The step is append-only and
-// atomic: a typed ErrV41ForwardStage from the shared append leaves the compressor
-// group, the publication registries and the layer's retained state unchanged, and
-// only a fully successful step commits the mHC streams and the new hidden row.
+// This function leaves the per-layer window ring and logical append cursor
+// unchanged. Its wrapper advances the logical cursor after success; the outer
+// composition restores compressor and publication state on failure.
 func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, streams [][]float32, pos int, layerState, registry *V41AttentionState, scratch *v41ProjScratch) error {
 	cfg := m.Cfg
 	if len(x) != cfg.HiddenSize {
@@ -515,7 +515,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		return v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: attention qk_rope_head_dim must be a positive even value <= head_dim %d, got %d", ErrV41ForwardStage, hd, ropeDim))
 	}
-	qLat, err := m.v41ProjMatRows(l, "attn.wq_a.weight", collapsed, cfg.QLoraRank, H)
+	qLat, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_a.weight", collapsed, cfg.QLoraRank, H, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -525,7 +525,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 			fmt.Errorf("%w: q-lora norm has %d values, want %d", ErrV41ForwardStage, len(qNorm), cfg.QLoraRank))
 	}
 	copy(qLat, rmsnormCfg(qLat, qNorm, eps, cfg))
-	q, err := m.v41ProjMatRows(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank)
+	q, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -533,7 +533,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		return v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: attention head_dim %d exceeds full KV latent rank %d", ErrV41ForwardStage, hd, v41KVLoraRank))
 	}
-	kvFull, err := m.v41ProjMatRows(l, "attn.wkv.weight", collapsed, v41KVLoraRank, H)
+	kvFull, err := m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", collapsed, v41KVLoraRank, H, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -693,7 +693,7 @@ func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, 
 	if err != nil {
 		return err
 	}
-	routerLogits, err := m.v41ProjMatRows(l, "ffn.gate.weight", ffnX, cfg.NumExperts, H)
+	routerLogits, err := m.v41ProjMatRowsWithProjection(l, "ffn.gate.weight", ffnX, cfg.NumExperts, H, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -705,22 +705,15 @@ func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, 
 	routed := make([]float32, H)
 	for _, pick := range picks {
 		stem := "ffn.experts." + itoa(pick.expert)
-		w1, w3, w2, err := m.v41ExpertTripleInto(l, stem, scratch, true)
+		y, err := m.v41IncrementalExpert(l, stem, ffnX, scratch)
 		if err != nil {
 			return err
-		}
-		contractOpen := m.v41NowNanos()
-		y := v41SwiGLU(w1, w3, w2, ffnX, cfg.MoEIntermediateSize, H, cfg)
-		if contractOpen != 0 {
-			m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
-		} else {
-			m.v41NoteExpertContraction()
 		}
 		for i := range routed {
 			routed[i] += pick.weight * y[i]
 		}
 	}
-	shared, err := m.v41SharedExpertSwiGLU(l, ffnX, cfg)
+	shared, err := m.v41SharedExpertSwiGLUWithProjection(l, ffnX, cfg, scratch.denseProjection)
 	if err != nil {
 		return err
 	}
@@ -966,4 +959,125 @@ func hcEpsOrDefault(cfg Config) float32 {
 		return float32(cfg.DeepSeekV41.HCEps)
 	}
 	return float32(1e-6)
+}
+
+var errV41ExpertResult = errors.New("model: invalid selected V4.1 expert result")
+
+type V41ExpertOperationError struct {
+	Layer int
+	Stage string
+	Cause error
+}
+
+func (e *V41ExpertOperationError) Error() string {
+	return fmt.Sprintf("model: selected V4.1 expert operation %s failed at layer %d: %v", e.Stage, e.Layer, e.Cause)
+}
+
+func (e *V41ExpertOperationError) Unwrap() error { return e.Cause }
+
+func (e *V41ExpertOperationError) SelectedExpertOperation() bool { return true }
+
+func v41ExpertOperationErr(l int, stage string, cause error) error {
+	if cause == nil {
+		cause = errV41ExpertResult
+	}
+	return &V41ExpertOperationError{Layer: l, Stage: stage, Cause: v41StageErr(v41StageMoE, l, cause)}
+}
+
+func (m *Model) v41IncrementalExpert(l int, stem string, xn []float32, scratch *v41ProjScratch) (out []float32, resultErr error) {
+	cfg := m.Cfg
+	var dispatchOpen int64
+	var dispatchActive, gateUp bool
+	defer func() {
+		if r := recover(); r != nil {
+			if cause, ok := r.(error); ok && dispatchActive {
+				var operation *BackendForwardOperationError
+				if errors.As(cause, &operation) {
+					m.v41NoteIncrementalDeviceDispatch(gateUp, dispatchOpen)
+					panic(r)
+				}
+				var backendError *compute.BackendError
+				if errors.As(cause, &backendError) {
+					m.v41NoteIncrementalDeviceDispatch(gateUp, dispatchOpen)
+					stage := "down"
+					if gateUp {
+						stage = "gate/up"
+					}
+					out, resultErr = nil, v41ExpertOperationErr(l, stage, cause)
+					return
+				}
+			}
+			panic(r)
+		}
+	}()
+	if scratch.expertGateUp != nil {
+		dispatchOpen, dispatchActive, gateUp = m.v41NowNanos(), true, true
+		h, outcome, err := scratch.expertGateUp(l, stem, xn)
+		dispatchActive = false
+		if outcome == v41GateUpHandled || outcome == v41GateUpError {
+			m.v41NoteIncrementalDeviceDispatch(true, dispatchOpen)
+		}
+		switch outcome {
+		case v41GateUpError:
+			return nil, v41ExpertOperationErr(l, "gate/up", err)
+		case v41GateUpHandled:
+			if err != nil {
+				return nil, v41ExpertOperationErr(l, "gate/up", err)
+			}
+			if len(h) != cfg.MoEIntermediateSize {
+				return nil, v41ExpertOperationErr(l, "gate/up", fmt.Errorf("%w: intermediate width %d, want %d", errV41ExpertResult, len(h), cfg.MoEIntermediateSize))
+			}
+			if scratch.expertDown != nil {
+				dispatchOpen, dispatchActive, gateUp = m.v41NowNanos(), true, false
+				y, downOutcome, downErr := scratch.expertDown(l, stem, h)
+				dispatchActive = false
+				if downOutcome == v41DownHandled || downOutcome == v41DownError {
+					m.v41NoteIncrementalDeviceDispatch(false, dispatchOpen)
+				}
+				switch downOutcome {
+				case v41DownError:
+					return nil, v41ExpertOperationErr(l, "down", downErr)
+				case v41DownHandled:
+					if downErr != nil {
+						return nil, v41ExpertOperationErr(l, "down", downErr)
+					}
+					if len(y) != cfg.HiddenSize {
+						return nil, v41ExpertOperationErr(l, "down", fmt.Errorf("%w: output width %d, want %d", errV41ExpertResult, len(y), cfg.HiddenSize))
+					}
+					m.v41NoteExpertContraction()
+					return y, nil
+				case v41DownDeclined:
+				default:
+					return nil, v41ExpertOperationErr(l, "down", errV41ExpertResult)
+				}
+			}
+			w2, err := m.hostExpertDown(l, stem, scratch)
+			if err != nil {
+				return nil, err
+			}
+			contractOpen := m.v41NowNanos()
+			y := matRows(w2, h, cfg.HiddenSize, cfg.MoEIntermediateSize)
+			if contractOpen != 0 {
+				m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
+			} else {
+				m.v41NoteExpertContraction()
+			}
+			return y, nil
+		case v41GateUpDeclined:
+		default:
+			return nil, v41ExpertOperationErr(l, "gate/up", errV41ExpertResult)
+		}
+	}
+	w1, w3, w2, err := m.v41ExpertTripleInto(l, stem, scratch, true)
+	if err != nil {
+		return nil, err
+	}
+	contractOpen := m.v41NowNanos()
+	y := v41SwiGLU(w1, w3, w2, xn, cfg.MoEIntermediateSize, cfg.HiddenSize, cfg)
+	if contractOpen != 0 {
+		m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
+	} else {
+		m.v41NoteExpertContraction()
+	}
+	return y, nil
 }

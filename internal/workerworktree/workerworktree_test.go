@@ -1926,7 +1926,7 @@ func TestLandShortBasePrefixMatchesPreparedIntent(t *testing.T) {
 	mustGit(t, root, "add", "owned.txt")
 	mustGit(t, root, "commit", "-q", "-m", "base")
 	intentBase := strings.TrimSpace(mustGit(t, root, "rev-parse", "HEAD"))
-	if len(intentBase) != 40 {
+	if len(intentBase) != 40 { //boundarylint:ignore CHANGE_DETECTOR_TEST git SHA-1 object id hex width
 		t.Fatalf("fixture: expected a full 40-hex intent base, got %q", intentBase)
 	}
 

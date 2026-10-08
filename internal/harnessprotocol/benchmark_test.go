@@ -35,6 +35,7 @@ func sampleEvents(n int) []harnesskit.Envelope {
 }
 
 func BenchmarkHarnessProtocol(b *testing.B) {
+	const appended = 7
 	secret := []byte("bench-hmac-secret-run-6789")
 	ctx := context.Background()
 	b.ReportAllocs()
@@ -58,17 +59,17 @@ func BenchmarkHarnessProtocol(b *testing.B) {
 		c := p.Cursor()
 		benchCursorSink = c
 
-		replayed, nextCursor, err := p.Resume(ctx, harnesskit.Cursor{}, 7)
+		replayed, nextCursor, err := p.Resume(ctx, harnesskit.Cursor{}, appended)
 		if err != nil {
 			b.Fatalf("Resume failed: %v", err)
 		}
-		if len(replayed) != 7 || nextCursor.Sequence != 7 {
+		if len(replayed) != appended || nextCursor.Sequence != appended {
 			b.Fatalf("unexpected resume output: count=%d seq=%d", len(replayed), nextCursor.Sequence)
 		}
 		benchEnvelopesSink = replayed
 
 		redacted := Redact(replayed, false)
-		if len(redacted) != 7 {
+		if len(redacted) != len(replayed) {
 			b.Fatalf("unexpected redacted count: %d", len(redacted))
 		}
 

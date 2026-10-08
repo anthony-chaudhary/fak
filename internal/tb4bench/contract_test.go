@@ -1,6 +1,8 @@
 package tb4bench
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"path/filepath"
 	"testing"
 )
@@ -26,8 +28,8 @@ func TestContractSchemaValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to compute contract digest: %v", err)
 	}
-	if len(digest) != 64 {
-		t.Errorf("expected 64-char hex digest, got %d chars", len(digest))
+	if len(digest) != hex.EncodedLen(sha256.Size) {
+		t.Errorf("expected %d-char hex digest, got %d chars", hex.EncodedLen(sha256.Size), len(digest))
 	}
 
 	// Test strict determinism violation: temperature != 0.0

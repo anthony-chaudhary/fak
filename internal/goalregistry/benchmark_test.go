@@ -74,7 +74,8 @@ func BenchmarkGoalRegistryShow(b *testing.B) {
 	if err != nil {
 		b.Fatalf("setup goal failed: %v", err)
 	}
-	for i := 0; i < 5; i++ {
+	const bindingCount = 5
+	for i := 0; i < bindingCount; i++ {
 		if _, err := store.Bind(goal.GoalID, fmt.Sprintf("ns-%d", i), "id-1", "", p); err != nil {
 			b.Fatalf("setup binding failed: %v", err)
 		}
@@ -87,7 +88,7 @@ func BenchmarkGoalRegistryShow(b *testing.B) {
 		if err != nil {
 			b.Fatalf("show failed: %v", err)
 		}
-		if g.GoalID != goal.GoalID || len(bindings) != 5 {
+		if g.GoalID != goal.GoalID || len(bindings) != bindingCount {
 			b.Fatalf("unexpected show result")
 		}
 	}
@@ -143,7 +144,8 @@ func BenchmarkGoalRegistryLoad(b *testing.B) {
 	}
 	p := Provenance{Actor: "benchmark-runner", Authority: "automated-test"}
 
-	for i := 0; i < 20; i++ {
+	const preloaded = 20
+	for i := 0; i < preloaded; i++ {
 		g, err := store.Create(fmt.Sprintf("Preloaded goal %d", i), "State dataset", p, nil)
 		if err != nil {
 			b.Fatalf("preload create failed: %v", err)
@@ -160,7 +162,7 @@ func BenchmarkGoalRegistryLoad(b *testing.B) {
 		if err != nil {
 			b.Fatalf("load failed: %v", err)
 		}
-		if len(reg.Goals) != 20 || len(reg.Bindings) != 20 {
+		if len(reg.Goals) != preloaded || len(reg.Bindings) != preloaded {
 			b.Fatalf("unexpected registry size: %d goals, %d bindings", len(reg.Goals), len(reg.Bindings))
 		}
 	}

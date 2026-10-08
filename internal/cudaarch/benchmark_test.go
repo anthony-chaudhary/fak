@@ -118,7 +118,7 @@ func BenchmarkParseArchitectures(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			benchSinkArches, benchSinkErrors = ParseArchitectures(archText)
-			if len(benchSinkErrors) != 0 || len(benchSinkArches) != 5 {
+			if len(benchSinkErrors) != 0 || len(benchSinkArches) != strings.Count(archText, "\n") {
 				b.Fatalf("unexpected parse result: %v, %v", benchSinkArches, benchSinkErrors)
 			}
 		}

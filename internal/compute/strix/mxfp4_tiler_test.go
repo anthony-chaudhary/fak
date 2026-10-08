@@ -97,8 +97,9 @@ func testExactSizing(t *testing.T) {
 		t.Fatalf("PackTokenFrame failed: %v", err)
 	}
 	raw := frame.RawBytes()
-	if len(raw) != 1088 {
-		t.Fatalf("expected serialized frame length 1088, got %d", len(raw))
+	wantFrame := (KeyBlocksPerToken + ValueBlocksPerToken) * (MicroBlockPayloadBytes + MicroBlockScaleBytes)
+	if len(raw) != wantFrame {
+		t.Fatalf("expected serialized frame length %d, got %d", wantFrame, len(raw))
 	}
 }
 

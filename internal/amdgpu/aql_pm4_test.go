@@ -26,8 +26,8 @@ func TestAQLPacketSizesAndAlignment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MarshalBinary failed: %v", err)
 	}
-	if len(kBytes) != 64 {
-		t.Fatalf("serialized AQLKernelDispatchPacket = %d bytes; want 64", len(kBytes))
+	if len(kBytes) != AQLPacketSize {
+		t.Fatalf("serialized AQLKernelDispatchPacket = %d bytes; want %d", len(kBytes), AQLPacketSize)
 	}
 
 	bandPkt := AQLBarrierAndPacket{}
@@ -35,8 +35,8 @@ func TestAQLPacketSizesAndAlignment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MarshalBinary failed: %v", err)
 	}
-	if len(bandBytes) != 64 {
-		t.Fatalf("serialized AQLBarrierAndPacket = %d bytes; want 64", len(bandBytes))
+	if len(bandBytes) != AQLPacketSize {
+		t.Fatalf("serialized AQLBarrierAndPacket = %d bytes; want %d", len(bandBytes), AQLPacketSize)
 	}
 
 	borPkt := AQLBarrierOrPacket{}
@@ -44,8 +44,8 @@ func TestAQLPacketSizesAndAlignment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MarshalBinary failed: %v", err)
 	}
-	if len(borBytes) != 64 {
-		t.Fatalf("serialized AQLBarrierOrPacket = %d bytes; want 64", len(borBytes))
+	if len(borBytes) != AQLPacketSize {
+		t.Fatalf("serialized AQLBarrierOrPacket = %d bytes; want %d", len(borBytes), AQLPacketSize)
 	}
 }
 
@@ -146,8 +146,8 @@ func TestAQLKernelDispatchSerializationRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MarshalBinary failed: %v", err)
 	}
-	if len(raw) != 64 {
-		t.Fatalf("raw packet length = %d; want 64", len(raw))
+	if len(raw) != AQLPacketSize {
+		t.Fatalf("raw packet length = %d; want %d", len(raw), AQLPacketSize)
 	}
 
 	var decoded AQLKernelDispatchPacket

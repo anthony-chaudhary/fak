@@ -14,7 +14,7 @@ func TestHashEventsFixedWidth(t *testing.T) {
 	// Nil and empty event slices must yield exactly 16 hex chars (no slice panic).
 	for _, evs := range [][]traceEvent{nil, {}, {{Turn: 1, Arm: "fak", Tool: "t"}}} {
 		h := hashEvents(evs)
-		if len(h) != 16 {
+		if len(h) != 16 { //boundarylint:ignore CHANGE_DETECTOR_TEST 64-bit fnv1a hex width
 			t.Fatalf("hashEvents len=%d, want 16 (events=%v, hash=%q)", len(h), evs, h)
 		}
 	}
@@ -26,7 +26,7 @@ func TestHashEventsFixedWidth(t *testing.T) {
 		raw := fmt.Sprintf("%x", fnv1a(b))
 		if len(raw) < 16 {
 			h := hashEvents([]traceEvent{{Note: fmt.Sprintf("padprobe-%d", i)}})
-			if len(h) != 16 {
+			if len(h) != 16 { //boundarylint:ignore CHANGE_DETECTOR_TEST 64-bit fnv1a hex width
 				t.Fatalf("leading-zero case len=%d, want 16 (raw=%q padded=%q)", len(h), raw, h)
 			}
 			if h != fmt.Sprintf("%016x", fnv1a(b)) {

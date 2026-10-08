@@ -413,7 +413,7 @@ func TestRunTurnkeyUpArmHostMemoryBudgetAfterMemGuard(t *testing.T) {
 	if memGuard[0].arg0 == "" || hostBudget[0].arg0 != memGuard[0].arg0 {
 		t.Fatalf("armHostMemoryBudget(%s) is not fed the same --max-rss value as armMemGuard(%s)", hostBudget[0].arg0, memGuard[0].arg0)
 	}
-	if memGuard[0].arg0 != "*maxRSS" {
-		t.Fatalf("armMemGuard first arg = %s, want *maxRSS", memGuard[0].arg0)
+	if memGuard[0].arg0 != "maxRSSCeiling" {
+		t.Fatalf("armMemGuard first arg = %s, want maxRSSCeiling (the resolved --max-rss ceiling)", memGuard[0].arg0)
 	}
 }

@@ -6,10 +6,10 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1271<br>
-rows: 1262<br>
-unverified rows: 0 / 1262<br>
-source-only rows absent from help: 1026
+parsed files: 1285<br>
+rows: 1263<br>
+unverified rows: 0 / 1263<br>
+source-only rows absent from help: 1027
 
 ## Surface table
 
@@ -790,10 +790,11 @@ source-only rows absent from help: 1026
 | `fak pack inspect` |  | runPackInspect / internal/fakpack | `case` arm of the dispatch switch in runPack() | NONE | — | **SOURCE ONLY** |
 | `fak pack sign` |  | runPackSign / internal/ociartifact | `case` arm of the dispatch switch in runPack() | NONE | — | **SOURCE ONLY** |
 | `fak pack verify` |  | runPackVerify / internal/fakpack, internal/ociartifact | `case` arm of the dispatch switch in runPack() | NONE | — | **SOURCE ONLY** |
+| `fak perf` | per-request serving perf: TTFT/prefill/decode/e2e quantiles and cache share from the durable ledger | cmdPerf / internal/perfledger | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak performance-rsi-scorecard` | render the native performance RSI scorecard and evidence debt | cmdPerformanceRSIScorecard / internal/perfrsiscore | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak performance-rsi-scorecard compose` |  | runPerformanceRSICompose / internal/perfrsiscore | `if` arm of the dispatch in runPerformanceRSIScorecard() | NONE | — | **SOURCE ONLY** |
 | `fak pi` | launch and manage Pi agent sessions through the guarded fak gateway | cmdPi / internal/projectassets | `case` arm of the dispatch switch in dispatchCoreVerbA() | RUNTIME | — | yes |
-| `fak pi config` |  | runPiConfig / internal/projectassets | `if` arm of the dispatch in runPi() | NONE | — | yes |
+| `fak pi config` |  | runPiConfig / internal/projectassets | `if` arm of the dispatch in runPi() | RUNTIME | — | yes |
 | `fak policy` | the deployable capability floor: --dump \| --check a policy manifest | cmdPolicy / internal/adjudicator, internal/appversion, internal/policy | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | yes |
 | `fak policy land-rule` |  | runPolicyLandRule / internal/policy | `if` arm of the dispatch in cmdPolicy() | RUNTIME | — | **SOURCE ONLY** |
 | `fak popularization-tickets` | emit the concept-popularization ticket set as JSON, lane TSV, or issue-body files | cmdPopularizationTickets / internal/popularizationtickets | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |

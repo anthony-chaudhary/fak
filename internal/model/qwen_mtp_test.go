@@ -121,8 +121,8 @@ func TestMTPHeadIsolationAndInjection(t *testing.T) {
 
 	// Inject MTP head into sanitized trunk
 	merged := InjectMTPHead(sanitizedTrunk, head)
-	if len(merged) != 6 {
-		t.Fatalf("merged weights len = %d, want 6", len(merged))
+	if len(merged) != len(weights) {
+		t.Fatalf("merged weights len = %d, want %d", len(merged), len(weights))
 	}
 	// Verify trunk norm remains 1.0
 	if merged["model.norm.weight"][0] != 1.0 {

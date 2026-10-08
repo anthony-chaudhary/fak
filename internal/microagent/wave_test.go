@@ -242,12 +242,13 @@ func TestRunWaveOneCallFanOut(t *testing.T) {
 	active, peak := &atomic.Int64{}, &atomic.Int64{}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	admitted, results, err := RunWave(ctx, waveStubPlanner{}, Config{}, WaveConfig{Workers: 16, Queue: 256}, newWaveEnrollments(256, active, peak))
+	const agents = 256
+	admitted, results, err := RunWave(ctx, waveStubPlanner{}, Config{}, WaveConfig{Workers: 16, Queue: agents}, newWaveEnrollments(agents, active, peak))
 	if err != nil {
 		t.Fatalf("RunWave: %v", err)
 	}
-	if Admitted(admitted) != 256 || len(results) != 256 {
-		t.Fatalf("admitted=%d results=%d, want 256/256", Admitted(admitted), len(results))
+	if Admitted(admitted) != agents || len(results) != agents {
+		t.Fatalf("admitted=%d results=%d, want %d/%d", Admitted(admitted), len(results), agents, agents)
 	}
 	for _, r := range results {
 		if !r.Done || r.Err != nil {

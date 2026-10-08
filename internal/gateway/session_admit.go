@@ -461,8 +461,11 @@ func (s *Server) debitServedSessionTurn(ctx context.Context, turn servedSessionT
 // on, which is why the attribution it produces cannot disagree with the side that
 // actually served the turn. Deliberately not the model the response reported: a
 // local decode may not echo one back, and an empty id would then be read as vendor.
-func (s *Server) accountStreamedTurn(ctx context.Context, turn servedSessionTurn, comp *agent.Completion, messages []agent.Message, began time.Time, reqModel string) {
-	s.metrics.observeCompletionServed(s.chatServingLocality(ctx, reqModel), comp, time.Since(began))
+//
+// streamTTFT is the first content fragment the gateway watched arrive (0 when none
+// did); it fills TTFT for a proxied stream whose planner reports no Timings.
+func (s *Server) accountStreamedTurn(ctx context.Context, turn servedSessionTurn, comp *agent.Completion, messages []agent.Message, began time.Time, reqModel string, streamTTFT time.Duration) {
+	s.metrics.observeCompletionServedStream(s.chatServingLocality(ctx, reqModel), comp, time.Since(began), streamTTFT)
 	s.observePlannerRequestMemory()
 	s.debitServedSessionTurn(ctx, turn, comp.Usage, time.Since(began), messages)
 }

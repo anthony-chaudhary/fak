@@ -172,7 +172,7 @@ func TestLoadProfileMemorySamplesBoundedRetentionPreservesOverallMax(t *testing.
 		p.Tick(1)
 	}
 	profile := p.Snapshot("q4k", "fixture.gguf", 1)
-	if call != 300 || profile.MemorySamplesObserved != 300 || profile.MemorySamplesDropped != 44 || len(profile.MemorySamples) != 256 {
+	if call != 300 || profile.MemorySamplesObserved != 300 || profile.MemorySamplesDropped != 44 || len(profile.MemorySamples) != maxLoadMemorySamples {
 		t.Fatalf("retention = probes %d observed %d dropped %d retained %d", call, profile.MemorySamplesObserved, profile.MemorySamplesDropped, len(profile.MemorySamples))
 	}
 	if profile.MemorySamples[254].TensorOrdinal != 255 || profile.MemorySamples[255].TensorOrdinal != 300 {

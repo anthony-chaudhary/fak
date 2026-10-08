@@ -344,7 +344,7 @@ concurrent = [
   # Deliberately NOT mirrored into [lanes].autopick (see the 2026-07-25 note).
   "generalizationdebt",
   "debtlane",
-  "gatewayusageledger", "ghexec", "ghspam", "glm52prefillsweep", "goalpark", "goalsync", "godsplitplan",
+  "gatewayusageledger", "perfledger", "ghexec", "ghspam", "glm52prefillsweep", "goalpark", "goalsync", "godsplitplan",
   "grafanapost", "growthgate", "guard", "guardaccuracy", "guardaudit", "guardcorpus",
   "guardrotate", "guardroute", "guardrsi", "guardsessions", "guardtrace", "guardvars",
   "guideddecode", "harnessres", "headlesslint", "heavinessscore", "hooks", "horizonrecovery",
@@ -568,6 +568,14 @@ concurrent = [
   "naivecontrol",
   "stepobs",
   "testgit",
+  # Leaves surfaced once public CI ran tests again (issueorchestrator/kv trees exist below).
+  "issueorchestrator",
+  "kv",
+  "amdgpuclock",
+  "fixproof",
+  "gatewayauth",
+  "pendingadmission",
+  "worktreecheck",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -1223,6 +1231,7 @@ gardenbundle = ["internal/gardenbundle/**"]
 generalizationdebt = ["internal/generalizationdebt/**"]
 debtlane = ["internal/debtlane/**"]
 gatewayusageledger = ["internal/gatewayusageledger/**"]
+perfledger = ["internal/perfledger/**"]
 ghexec = ["internal/ghexec/**"]
 ghspam = ["internal/ghspam/**"]
 glm52prefillsweep = ["internal/glm52prefillsweep/**"]
@@ -1815,6 +1824,11 @@ fakroot = ["internal/fakroot/**"]
 naivecontrol = ["internal/naivecontrol/**"]
 stepobs = ["internal/stepobs/**"]
 testgit = ["internal/testgit/**"]
+amdgpuclock = ["pkg/amdgpuclock/**"]
+fixproof = ["pkg/fixproof/**"]
+gatewayauth = ["pkg/gatewayauth/**"]
+pendingadmission = ["pkg/pendingadmission/**"]
+worktreecheck = ["pkg/worktreecheck/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose

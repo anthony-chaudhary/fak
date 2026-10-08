@@ -13,8 +13,9 @@ import (
 
 func TestCodexCompactHookConfigAndTrustHash(t *testing.T) {
 	args := guardCodexCompactConfigArgs()
-	if len(args) != 6 {
-		t.Fatalf("guardCodexCompactConfigArgs len = %d, want 6", len(args))
+	wantKeys := []string{"hooks.PreCompact=", "hooks.PostCompact=", "hooks.state="}
+	if len(args) != 2*len(wantKeys) {
+		t.Fatalf("guardCodexCompactConfigArgs len = %d, want %d", len(args), 2*len(wantKeys))
 	}
 
 	preCompactArg := ""

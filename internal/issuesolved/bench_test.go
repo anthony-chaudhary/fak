@@ -175,8 +175,8 @@ func BenchmarkCollectIssuesFromGh(b *testing.B) {
 		if err != nil {
 			b.Fatalf("collectIssuesFromGh failed: %v", err)
 		}
-		if len(items) != 50 {
-			b.Fatalf("expected 50 items, got %d", len(items))
+		if len(items) != len(wires) {
+			b.Fatalf("expected %d items, got %d", len(wires), len(items))
 		}
 	}
 }

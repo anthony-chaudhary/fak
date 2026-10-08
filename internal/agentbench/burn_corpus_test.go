@@ -13,6 +13,11 @@ import (
 	"testing"
 )
 
+const (
+	burnInSessions        = 8
+	burnInTurnsPerSession = 32
+)
+
 func TestBurnInCorpusUsesFourDisjointCausalAreas(t *testing.T) {
 	repo := normalCorpusRepo(t, true)
 	addBurnCorpusMaterial(t, repo)
@@ -25,7 +30,7 @@ func TestBurnInCorpusUsesFourDisjointCausalAreas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if encoder.finalCalls != 8*32 || encoder.measurementCalls == 0 {
+	if encoder.finalCalls != burnInSessions*burnInTurnsPerSession || encoder.measurementCalls == 0 {
 		t.Fatalf("reference encodes final/area-fit=%d/%d want 256 plus explicit stable-template area measurements", encoder.finalCalls, encoder.measurementCalls)
 	}
 	if len(corpus.Areas) != 4 {
@@ -58,8 +63,8 @@ func TestBurnInCorpusUsesFourDisjointCausalAreas(t *testing.T) {
 		}
 	}
 	for _, session := range corpus.Sessions {
-		if len(session.Turns) != 32 || len(session.AreaTransitions) != 4 {
-			t.Fatalf("session %s turns/transitions=%d/%d want 32/4", session.ID, len(session.Turns), len(session.AreaTransitions))
+		if len(session.Turns) != burnInTurnsPerSession || len(session.AreaTransitions) != 4 {
+			t.Fatalf("session %s turns/transitions=%d/%d want %d/4", session.ID, len(session.Turns), len(session.AreaTransitions), burnInTurnsPerSession)
 		}
 		for i, want := range []string{"A", "B", "C", "D"} {
 			transition := session.AreaTransitions[i]

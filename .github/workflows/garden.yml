@@ -39,6 +39,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 permissions:
   contents: read
+  issues: read
 
 jobs:
   garden:
@@ -46,6 +47,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GOTOOLCHAIN: auto
+      # The flow-metrics scorecard reads live issue state with `gh issue list`;
+      # without a token gh exits 4 and the card reports no debt integer.
+      GH_TOKEN: ${{ github.token }}
     defaults:
       run:
         working-directory: .

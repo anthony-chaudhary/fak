@@ -104,12 +104,14 @@ func TestEpisodeDerive_SequenceClassifier_StepTransitions(t *testing.T) {
 		{10, "test", "go test ./...", false, ctxmmu.EpisodeVerify, true, ctxmmu.EpisodeMutate, ctxmmu.EpisodeVerify},
 	}
 
+	wantTransitions := 0
 	for _, s := range steps {
 		ep, trans := classifier.Step(s.tool, s.input, s.isError, s.turnSeq)
 		if ep != s.wantEpisode {
 			t.Fatalf("turn %d: got episode %s, want %s", s.turnSeq, ep, s.wantEpisode)
 		}
 		if s.wantTransition {
+			wantTransitions++
 			if trans == nil {
 				t.Fatalf("turn %d: expected transition from %s to %s, got nil", s.turnSeq, s.from, s.to)
 			}
@@ -128,8 +130,8 @@ func TestEpisodeDerive_SequenceClassifier_StepTransitions(t *testing.T) {
 	}
 
 	transitions := classifier.Transitions()
-	if len(transitions) != 5 {
-		t.Fatalf("expected 5 transitions, got %d", len(transitions))
+	if len(transitions) != wantTransitions {
+		t.Fatalf("expected %d transitions, got %d", wantTransitions, len(transitions))
 	}
 }
 

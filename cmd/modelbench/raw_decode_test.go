@@ -320,8 +320,9 @@ func TestRawDecodeSynthetic(t *testing.T) {
 	setRawDecodeExecutableProvenanceForTest(t, rawDecodeExecutableProvenance{}, errors.New("unavailable"))
 	defer setRawDecodeTestFlags(true, "1,2,3", 256, false, false)()
 
+	const decodeSteps = 5
 	m := model.NewSynthetic(syntheticTestConfig())
-	f := testRawDecodeFlags(5, 2)
+	f := testRawDecodeFlags(decodeSteps, 2)
 
 	report, err := executeRawDecode(f, m, "synthetic-test", 12.5, 0, nil, nil)
 	if err != nil {
@@ -353,8 +354,8 @@ func TestRawDecodeSynthetic(t *testing.T) {
 	}
 
 	effectiveIDs, ok := report["effective_ids"].([]int)
-	if !ok || len(effectiveIDs) != 8 {
-		t.Fatalf("expected 8 effective_ids, got %v", report["effective_ids"])
+	if !ok || len(effectiveIDs) != len(promptIDs)+decodeSteps {
+		t.Fatalf("expected %d effective_ids, got %v", len(promptIDs)+decodeSteps, report["effective_ids"])
 	}
 	wantEffective := append([]int{1, 2, 3, prefillOutputID}, stepTokens...)
 	if !reflect.DeepEqual(effectiveIDs, wantEffective) {
@@ -378,14 +379,21 @@ func TestRawDecodeSynthetic(t *testing.T) {
 		}
 	}
 
+	wantHostStages := []string{"session_setup", "prefill", "first_sample", "decode", "teardown"}
 	hostStages, ok := report["host_stages"].([]map[string]any)
-	if !ok || len(hostStages) != 5 {
-		t.Errorf("expected 5 host stages, got %v", report["host_stages"])
+	if !ok || len(hostStages) != len(wantHostStages) {
+		t.Errorf("expected %d host stages, got %v", len(wantHostStages), report["host_stages"])
+	} else {
+		for i, want := range wantHostStages {
+			if hostStages[i]["stage"] != want {
+				t.Errorf("host_stages[%d] = %v, want %q", i, hostStages[i]["stage"], want)
+			}
+		}
 	}
 
 	steps, ok := report["steps"].([]rawStepInfo)
-	if !ok || len(steps) != 5 {
-		t.Errorf("expected 5 steps recorded, got %v", report["steps"])
+	if !ok || len(steps) != decodeSteps {
+		t.Errorf("expected %d steps recorded, got %v", decodeSteps, report["steps"])
 	}
 	if _, ok := report["margin_summary"].(map[string]any); !ok {
 		t.Errorf("missing margin_summary")
@@ -401,7 +409,7 @@ func TestRawDecodeSynthetic(t *testing.T) {
 	if attempt.Observed.Model.Name != "" || attempt.Observed.Model.Quantization != "" {
 		t.Fatalf("caller-supplied model identity escaped into physical evidence: %+v", attempt.Observed.Model)
 	}
-	if !reflect.DeepEqual(attempt.Observed.PromptTokenIDs, []int32{1, 2, 3}) || len(attempt.Observed.OutputTokenIDs) != 5 {
+	if !reflect.DeepEqual(attempt.Observed.PromptTokenIDs, []int32{1, 2, 3}) || len(attempt.Observed.OutputTokenIDs) != decodeSteps {
 		t.Fatalf("observed token identity was not preserved: prompt=%v output=%v", attempt.Observed.PromptTokenIDs, attempt.Observed.OutputTokenIDs)
 	}
 	if attempt.Observed.Engine.Name != "" || attempt.Observed.Engine.Backend != "" || attempt.Observed.Engine.FallbackCount != nil {

@@ -235,11 +235,12 @@ func TestIncrementalStopScannerBoundedWindow(t *testing.T) {
 	}
 
 	// No false fire while the accumulator is shorter than the stop.
-	s = newIncrementalStopScanner(9, []string{"STOPTOKEN"})
+	const longStop = "STOPTOKEN"
+	s = newIncrementalStopScanner(len(longStop), []string{longStop})
 	if s.appendPiece("abc") {
 		t.Fatalf("short accumulator must not fire (len(str) <= total guard)")
 	}
-	if len(s.tail) == 9 {
+	if len(s.tail) == len(longStop) {
 		// window may be partially filled below maxStop; that alone must not fire.
 
 	}

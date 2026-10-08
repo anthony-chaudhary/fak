@@ -257,8 +257,8 @@ func TestGemvWave32LaneLoadModel(t *testing.T) {
 	if !CoalescedBurstAligned(m.BaseOffset) {
 		t.Fatalf("canonical wavefront base offset %d must be 128-byte burst-aligned", m.BaseOffset)
 	}
-	if len(m.Loads) != 32 {
-		t.Fatalf("lane model has %d loads, want 32", len(m.Loads))
+	if len(m.Loads) != m.Lanes {
+		t.Fatalf("lane model has %d loads, want %d", len(m.Loads), m.Lanes)
 	}
 	for i, l := range m.Loads {
 		if l.ByteOffset != i*16 {

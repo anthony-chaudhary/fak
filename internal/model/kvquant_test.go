@@ -1000,10 +1000,10 @@ func TestKVQuantTurboQuantConstantsAndCodebook(t *testing.T) {
 		t.Fatalf("KVQuantTurbo4BlockSize = %d, want 32", KVQuantTurbo4BlockSize)
 	}
 
-	if len(Turbo4LloydMaxCodebook) != 16 {
+	if len(Turbo4LloydMaxCodebook) != 16 { //boundarylint:ignore CHANGE_DETECTOR_TEST 4-bit codebook fixed-size [16] array
 		t.Fatalf("len(Turbo4LloydMaxCodebook) = %d, want 16", len(Turbo4LloydMaxCodebook))
 	}
-	if len(Turbo4Thresholds) != 15 {
+	if len(Turbo4Thresholds) != 15 { //boundarylint:ignore CHANGE_DETECTOR_TEST 4-bit codebook fixed-size [15] thresholds array
 		t.Fatalf("len(Turbo4Thresholds) = %d, want 15", len(Turbo4Thresholds))
 	}
 

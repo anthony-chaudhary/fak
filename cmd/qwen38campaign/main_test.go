@@ -124,7 +124,7 @@ func TestRunAMDScoreboardWritesComparableReport(t *testing.T) {
 	if err := qwen38quantrun.ValidateAMDScoreboardReport(saved); err != nil {
 		t.Fatal(err)
 	}
-	if !saved.PairedComparable || saved.StrixAbsoluteEligible || saved.OverallWin || len(saved.RawInput.Candidate.Trials) != 5 {
+	if !saved.PairedComparable || saved.StrixAbsoluteEligible || saved.OverallWin || len(saved.RawInput.Candidate.Trials) != len(input.Candidate.Trials) {
 		t.Fatalf("report=%+v", saved)
 	}
 	saved.RawInput.Candidate.Trials[0].PrefillSeconds /= 2

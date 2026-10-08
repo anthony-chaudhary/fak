@@ -28,10 +28,6 @@ func TestMCPArmDisarmCatalog(t *testing.T) {
 	}
 	defer DisarmMCPTools()
 
-	if len(cat) != 9 {
-		t.Fatalf("ArmMCPTools() returned %d tools, want 9", len(cat))
-	}
-
 	expected := map[string]bool{
 		"fak_read":         false,
 		"fak_tools_search": false,
@@ -43,6 +39,10 @@ func TestMCPArmDisarmCatalog(t *testing.T) {
 		"sandbox_write":    false,
 		"sandbox_reset":    false,
 	}
+	if len(cat) != len(expected) {
+		t.Fatalf("ArmMCPTools() returned %d tools, want %d", len(cat), len(expected))
+	}
+
 	for _, tool := range cat {
 		if _, ok := expected[tool.Function.Name]; ok {
 			expected[tool.Function.Name] = true
@@ -55,8 +55,8 @@ func TestMCPArmDisarmCatalog(t *testing.T) {
 	}
 
 	armedCat := MCPToolCatalog()
-	if len(armedCat) != 9 {
-		t.Fatalf("MCPToolCatalog() when armed returned %d tools, want 9", len(armedCat))
+	if len(armedCat) != len(expected) {
+		t.Fatalf("MCPToolCatalog() when armed returned %d tools, want %d", len(armedCat), len(expected))
 	}
 
 	allowed := mcpToolAllow()

@@ -38,8 +38,32 @@ func writeTestText(t *testing.T, root, rel, content string) {
 func TestGuardMCPStatus_LiveTreeClean(t *testing.T) {
 	root := repoRoot(t)
 	checks := runGuardMCPStatusAudit(root)
-	if len(checks) != 13 {
-		t.Fatalf("expected 13 checks, got %d", len(checks))
+	wantChecks := []string{
+		"status packet present",
+		"guard default tests present",
+		"mcp stdio adjudication",
+		"structured git gate git_add",
+		"structured git gate git_commit",
+		"structured git gate git_push",
+		"historical codex/dos actionability",
+		"claude code historical replay",
+		"claude code live pilot",
+		"codex mcp live pilot",
+		"openai agents adapter proof",
+		"openai hosted live prereqs",
+		"openai hosted live pilot",
+	}
+	if len(checks) != len(wantChecks) {
+		t.Fatalf("expected %d checks, got %d", len(wantChecks), len(checks))
+	}
+	seen := make(map[string]int, len(checks))
+	for _, c := range checks {
+		seen[c.name]++
+	}
+	for _, name := range wantChecks {
+		if seen[name] != 1 {
+			t.Errorf("check %q emitted %d times, want exactly once", name, seen[name])
+		}
 	}
 	for _, c := range checks {
 		if !c.passed {

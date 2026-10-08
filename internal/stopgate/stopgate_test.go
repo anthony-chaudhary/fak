@@ -1,6 +1,8 @@
 package stopgate
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"testing"
@@ -781,8 +783,8 @@ func TestCircuitBreakerMD5ToolSignatureTracking(t *testing.T) {
 		if sig1 != sig3 {
 			t.Fatalf("whitespace produced different signatures: sig1=%s, sig3=%s", sig1, sig3)
 		}
-		if len(sig1) != 32 {
-			t.Fatalf("MD5 signature must be 32 hex chars, got len %d (%s)", len(sig1), sig1)
+		if len(sig1) != hex.EncodedLen(md5.Size) {
+			t.Fatalf("MD5 signature must be %d hex chars, got len %d (%s)", hex.EncodedLen(md5.Size), len(sig1), sig1)
 		}
 
 		// Different tools produce different signatures

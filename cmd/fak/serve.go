@@ -1,15 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -32,7 +29,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/macobs"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/session"
-	"github.com/anthony-chaudhary/fak/internal/snapshot"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
 	"github.com/anthony-chaudhary/fak/pkg/deploykit/coherence"
 )
@@ -127,6 +123,8 @@ type serveFlags struct {
 	streamProgressTimeout        *time.Duration
 	streamSoftProgressTimeout    *time.Duration
 	llamaSlotAffinity            *bool
+	llamaSoftSlot                *bool
+	llamaSoftSlotPolicy          *string
 	engineCacheEngine            *string
 	engineCacheBaseURL           *string
 	engineCacheAdminKeyEnv       *string
@@ -284,6 +282,8 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.streamSoftProgressTimeout = fs.Duration("stream-soft-progress-timeout", 0, "proxy mode: SOFT no-progress DIAGNOSTIC deadline (#10638). When a STREAMING turn has not advanced for this long (same progress definition as --stream-progress-timeout), the gateway writes a content-free elapsed-since-progress / retry-attempt receipt and lets the turn KEEP RUNNING; --stream-progress-timeout remains the hard client-survivable ceiling that actually ends it. 0 (the default) derives the soft window from the hard one (hard/3), so the diagnostic always has lead time. A negative value disables the diagnostic. Enables the soft-stalls.jsonl receipt under the --stream-incident-dir path (FAK_STREAM_INCIDENT_DIR).")
 	sf.streamProgressTimeout = fs.Duration("stream-progress-timeout", agent.DefaultStreamProgressTimeout, "proxy mode: end a STREAMING upstream turn that has stayed warm this long without a single frame that advances it (#5486). Keepalive frames (a ping, an SSE comment, an empty-delta chunk) re-arm the inter-byte deadline but are NOT progress, so a generation wedged behind a live socket otherwise rides the 600s whole-request ceiling. DEFAULT-ON at agent.DefaultStreamProgressTimeout (300s), which sits above the worst prefill-to-first-token gap on a large cached prompt and above any extended-thinking pause (thinking streams content deltas, which do count as progress). Pass 0 to DISABLE the deadline — the escape hatch when a provider's prefill legitimately outlasts the window. A positive value outside [5s, 600s] is not honored as a real window: the default is used instead, so a typo never silently becomes a different deadline. Inert on the non-streaming path and on the offline mock planner.")
 	sf.llamaSlotAffinity = fs.Bool("llama-slot-affinity", true, "proxy mode: pin requests that share a system prompt and tool catalog to one llama-server slot (id_slot = crc32(prefix) % total_slots, cache_prompt=true) so sibling subagents reuse the parent's KV. The OpenAI-provider upstream is probed once in the background at /props; the hint is sent only after it reports llama-server total_slots, so vLLM, SGLang, hosted APIs, and a downstream fak gateway are left untouched. Pass false to disable.")
+	sf.llamaSoftSlot = fs.Bool("llama-soft-slot", false, "proxy mode: soft per-conversation llama-server slot choice. Each turn names its conversation's previous slot (id_slot) only while that slot is idle per GET /slots, a new conversation takes the least recently used idle slot, and with every slot busy id_slot is omitted so the upstream chooses. Unlike the old hard pin, no turn ever queues behind a busy slot. Needs a llama-server upstream that answers /props and /slots; anything else is left untouched.")
+	sf.llamaSoftSlotPolicy = fs.String("llama-soft-slot-policy", "lru", "with --llama-soft-slot: what a conversation does when its own slot is busy. lru = move to the least recently used idle slot; wait = stay pinned to its own slot (llama-server gives a freed slot to a task pinned to it first) and never move.")
 	sf.engineCacheEngine = fs.String("engine-cache-engine", "", "self-hosted upstream cache reset engine for quarantined provider-bound tool results: sglang|vllm (empty disables)")
 	sf.engineCacheBaseURL = fs.String("engine-cache-base-url", "", "serving-engine control/base URL for cache reset (default: --base-url when --engine-cache-engine is set)")
 	sf.engineCacheAdminKeyEnv = fs.String("engine-cache-admin-key-env", "", "env var holding the serving-engine admin API key for cache reset")
@@ -1086,6 +1086,8 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 		// uses the negative-off encoding, so no front-door translation is needed.
 		StreamSoftProgressTimeout: *sf.streamSoftProgressTimeout,
 		LlamaSlotAffinity:         *sf.llamaSlotAffinity,
+		LlamaSoftSlot:             *sf.llamaSoftSlot,
+		LlamaSoftSlotPolicy:       *sf.llamaSoftSlotPolicy,
 		RichDashboards: gateway.RichDashboardConfig{
 			ApplianceProfile: *sf.applianceObservability || rt.strixPreflight.Detected,
 		},
@@ -1169,221 +1171,6 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 	rt.srv = srv
 	armSetupComplete = true
 	return controlIngress, nil
-}
-
-const (
-	serveControlIngressJournalEnv = "FAK_CONTROL_INGRESS_JOURNAL"
-	serveControlDirectivePath     = "/v1/fak/control/directives"
-	serveControlIngressBodyLimit  = int64(1 << 20)
-	windowsJournalProvisionReason = "WINDOWS_CONTROL_JOURNAL_NOT_PREPROVISIONED"
-)
-
-// openServeControlIngress provisions and opens the production control journal before
-// the listener can bind. The HTTP control surface stays unavailable when no credential
-// door exists; a bearer/keyset authenticates a caller but is not evidence of human origin.
-func openServeControlIngress(stdio bool, requiredKey string, keyPrincipals map[string]string, env func(string) string) (gateway.ControlIngress, *gateway.DurableControlIngress, error) {
-	if stdio || (strings.TrimSpace(requiredKey) == "" && len(keyPrincipals) == 0) {
-		return nil, nil, nil
-	}
-	path := ""
-	if env != nil {
-		path = strings.TrimSpace(env(serveControlIngressJournalEnv))
-	}
-	if path == "" {
-		return nil, nil, nil
-	}
-	if err := provisionServeControlJournal(path); err != nil {
-		return nil, nil, err
-	}
-	durable, err := gateway.OpenDurableControlIngress(gateway.DurableControlIngressOptions{
-		JournalPath: path,
-		Deliver:     serveControlDirectiveDeliver,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("open durable journal %q: %w", path, err)
-	}
-	return &serveControlIngress{durable: durable}, durable, nil
-}
-
-var serveControlDirectiveDeliver = deliverServeControlDirective
-
-// provisionServeControlJournal creates the dedicated journal with private permissions
-// and syncs both file and parent directory before OpenDurableControlIngress recovers it.
-// Windows cannot establish first-create directory-entry durability through Go's portable
-// file API, so it fails closed unless deployment already provisioned the regular file.
-func provisionServeControlJournal(path string) error {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return errors.New("journal path is empty")
-	}
-	dir := filepath.Dir(path)
-	pathInfo, pathErr := os.Lstat(path)
-	if runtime.GOOS == "windows" && errors.Is(pathErr, fs.ErrNotExist) {
-		return fmt.Errorf("%s: journal %q must be durably provisioned as a regular file before fak serve starts", windowsJournalProvisionReason, path)
-	}
-	if pathErr != nil && !errors.Is(pathErr, fs.ErrNotExist) {
-		return fmt.Errorf("inspect journal path %q: %w", path, pathErr)
-	}
-	dirInfo, dirErr := os.Lstat(dir)
-	dirCreated := false
-	if errors.Is(dirErr, fs.ErrNotExist) {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return fmt.Errorf("create journal directory %q: %w", dir, err)
-		}
-		dirCreated = true
-		dirInfo, dirErr = os.Lstat(dir)
-	}
-	if dirErr != nil {
-		return fmt.Errorf("inspect journal directory %q: %w", dir, dirErr)
-	}
-	if dirInfo.Mode()&os.ModeSymlink != 0 || !dirInfo.IsDir() {
-		return fmt.Errorf("journal directory %q must be a non-symlink directory", dir)
-	}
-	// Change permissions only on the dedicated directory this call created. An
-	// operator-supplied existing parent may contain unrelated state and must never
-	// be chmodded as a side effect of enabling control ingress.
-	if dirCreated {
-		if err := os.Chmod(dir, 0o700); err != nil {
-			return fmt.Errorf("restrict new journal directory %q: %w", dir, err)
-		}
-	}
-	if pathErr == nil {
-		if pathInfo.Mode()&os.ModeSymlink != 0 || !pathInfo.Mode().IsRegular() {
-			return fmt.Errorf("journal %q must be a regular non-symlink file", path)
-		}
-	}
-	openFlags := os.O_RDWR
-	fileCreated := errors.Is(pathErr, fs.ErrNotExist)
-	if fileCreated {
-		openFlags |= os.O_CREATE | os.O_EXCL
-	}
-	f, err := os.OpenFile(path, openFlags, 0o600)
-	if err != nil {
-		return fmt.Errorf("provision journal %q: %w", path, err)
-	}
-	closeWith := func(base error) error {
-		if closeErr := f.Close(); base == nil && closeErr != nil {
-			return closeErr
-		}
-		return base
-	}
-	info, err := f.Stat()
-	if err != nil {
-		return fmt.Errorf("stat journal %q: %w", path, closeWith(err))
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("journal %q is not a regular file: %w", path, closeWith(fs.ErrInvalid))
-	}
-	boundInfo, err := os.Lstat(path)
-	if err != nil {
-		return fmt.Errorf("recheck journal path %q: %w", path, closeWith(err))
-	}
-	if boundInfo.Mode()&os.ModeSymlink != 0 || !boundInfo.Mode().IsRegular() || !os.SameFile(info, boundInfo) {
-		return fmt.Errorf("journal path %q changed or resolves through a symlink: %w", path, closeWith(fs.ErrInvalid))
-	}
-	// Unix mode bits express the required private file posture. Chmod is allowed
-	// only for the inode this call created with O_EXCL. Existing files are verified,
-	// never changed, so an alias cannot make bootstrap chmod unrelated state.
-	// Windows ACLs are part of external pre-provisioning; chmod there would neither
-	// prove that ACL nor justify mutating a preexisting file.
-	if runtime.GOOS != "windows" {
-		if fileCreated {
-			if err := f.Chmod(0o600); err != nil {
-				return fmt.Errorf("restrict new journal %q: %w", path, closeWith(err))
-			}
-		} else if info.Mode().Perm() != 0o600 {
-			return fmt.Errorf("preexisting journal %q has mode %04o, want 0600", path, info.Mode().Perm())
-		}
-	}
-	if err := f.Sync(); err != nil {
-		return fmt.Errorf("sync journal %q: %w", path, closeWith(err))
-	}
-	if err := closeWith(nil); err != nil {
-		return fmt.Errorf("close journal %q: %w", path, err)
-	}
-	// Windows reached this point only for a file that existed before bootstrap;
-	// no directory entry was created here. The file flush above is sufficient for
-	// its current bytes, while the deployment owns proof of the older entry's
-	// durability. Do not turn an unsupported directory Sync into a false witness.
-	if runtime.GOOS == "windows" {
-		return nil
-	}
-	parent, err := os.Open(dir)
-	if err != nil {
-		return fmt.Errorf("open journal directory %q for sync: %w", dir, err)
-	}
-	syncErr := parent.Sync()
-	closeErr := parent.Close()
-	if syncErr != nil {
-		return fmt.Errorf("sync journal directory %q: %w", dir, syncErr)
-	}
-	if closeErr != nil {
-		return fmt.Errorf("close journal directory %q: %w", dir, closeErr)
-	}
-	return nil
-}
-
-// deliverServeControlDirective uses the same durable ControlSession write as the
-// existing management endpoint. Only cancel has proven semantics here: it transitions
-// the target to Terminating, which closes the table's level-triggered terminate signal.
-func deliverServeControlDirective(ctx context.Context, directive gateway.ControlDirective) error {
-	if directive.Action != "cancel" {
-		return fmt.Errorf("control action %q is unsupported by fak serve", directive.Action)
-	}
-	_, ok, err := controlSession(ctx, directive.Target, "run", gateway.SessionControlRequest{
-		Run:    "terminating",
-		Reason: session.ReasonTerminated,
-	})
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("cancel target %q refused the terminating transition", directive.Target)
-	}
-	return nil
-}
-
-// serveControlIngress rejects actions whose production delivery semantics are not yet
-// proven before they enter the durable accepted journal. Malformed requests still flow
-// to the canonical ingress parser and retain its exact validation contract.
-type serveControlIngress struct {
-	durable *gateway.DurableControlIngress
-}
-
-func (s *serveControlIngress) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost && r.URL.Path == serveControlDirectivePath {
-		prefix, err := io.ReadAll(io.LimitReader(r.Body, serveControlIngressBodyLimit+1))
-		if err == nil {
-			if int64(len(prefix)) > serveControlIngressBodyLimit {
-				r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(prefix), r.Body))
-			} else {
-				r.Body = io.NopCloser(bytes.NewReader(prefix))
-				dec := json.NewDecoder(bytes.NewReader(prefix))
-				dec.DisallowUnknownFields()
-				var directive gateway.ControlDirective
-				var trailing any
-				if dec.Decode(&directive) == nil && dec.Decode(&trailing) == io.EOF && directive.Action != "cancel" && isKnownServeControlAction(directive.Action) {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusServiceUnavailable)
-					_ = json.NewEncoder(w).Encode(gateway.ControlReceipt{
-						ID: directive.ID, Target: directive.Target, Action: directive.Action,
-						Generation: directive.Generation, State: "unavailable", Reason: "unsupported_action",
-					})
-					return
-				}
-			}
-		}
-	}
-	s.durable.ServeHTTP(w, r)
-}
-
-func isKnownServeControlAction(action string) bool {
-	switch action {
-	case "pause", "resume", "steer", "reprioritize", "redirect", "stop":
-		return true
-	default:
-		return false
-	}
 }
 
 // persistCacheValueObservations writes the post-session cache-value ledger row (tagged
@@ -1629,66 +1416,4 @@ func startGatewayUsageSnapshotLoop(ctx context.Context, srv *gateway.Server, int
 		}
 	}()
 	return cancel
-}
-
-// restoreServeSessions re-attaches the persisted DRIVE state of every session (the COLD
-// resume of #629) from a fleet-snapshot file a prior `fak serve` wrote on shutdown. It is
-// the load-time inverse of dumpServeSessions: each session re-attaches at the budget /
-// priority / run-state / pace it held — a STOPPED session reloads STOPPED with its reason
-// (session.Table.Restore is the one write that re-establishes a terminal record), never
-// silently resurrected as RUNNING. An empty path is off (no-op). A missing file is a clean
-// first boot (not an error). A PRESENT-but-corrupt file fails loud — a tampered/truncated
-// drive record is worse than none, the same fail-closed posture the policy/route loaders
-// take, and the snapshot envelope's own sha256 body digest is what catches the tamper. This
-// is the process-restart half the design note SESSION-CONTROL-STATE-AS-FIRST-CLASS §5
-// named; it is DISTINCT from the live Paused→Running resume the control verbs already do.
-func restoreServeSessions(tbl *session.Table, path string) error {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return nil
-	}
-	snap, err := snapshot.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // first boot — nothing persisted yet
-		}
-		return fmt.Errorf("--session-state %s: %w", path, err)
-	}
-	n, err := snap.RestoreFleet(tbl)
-	if err != nil {
-		return fmt.Errorf("--session-state %s: %w", path, err)
-	}
-	if n > 0 {
-		fmt.Fprintf(os.Stderr, "fak: cold resume (#629) — re-attached %d session(s) drive state from %s\n", n, path)
-	}
-	return nil
-}
-
-// dumpServeSessions writes the live DRIVE table to path as an integrity-checked fleet
-// snapshot so the NEXT `fak serve` cold-resumes it (#629). An empty path is off (no-op).
-// Best-effort on a clean shutdown: a write failure is logged, never fatal — a failed dump
-// must not turn a graceful stop into a crash (worst case the next boot starts at defaults,
-// exactly today's behavior). A hard kill skips the dump; the last clean shutdown's file
-// stands. An empty table writes an empty (still valid) snapshot.
-func dumpServeSessions(tbl *session.Table, path string) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "fak: create session-state parent for %s failed: %v\n", path, err)
-		return
-	}
-	snap, err := snapshot.DumpFleet("serve", tbl, 0)
-	if err == nil {
-		var b []byte
-		if b, err = snap.Encode(); err == nil {
-			err = os.WriteFile(path, b, 0o644)
-		}
-	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fak: persist session state to %s failed: %v\n", path, err)
-		return
-	}
-	fmt.Fprintf(os.Stderr, "fak: persisted live session drive state → %s (#629)\n", path)
 }

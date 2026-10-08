@@ -44,7 +44,7 @@ func TestAgentBenchNormal184Replay(t *testing.T) {
 			controls[cell.Name] = true
 		}
 	}
-	if phaseRequests["probe"] != 64 || phaseRequests["steady"] != 96 || phaseRequests["controls"] != 24 || len(controls) != 6 {
+	if phaseRequests["probe"] != 64 || phaseRequests["steady"] != 96 || phaseRequests["controls"] != 24 || len(controls) != len(normalControls) {
 		t.Fatalf("normal schedule geometry = %#v controls=%d, want 64/96/24 and six controls", phaseRequests, len(controls))
 	}
 	for _, concurrency := range []int{1, 2, 4, 8} {

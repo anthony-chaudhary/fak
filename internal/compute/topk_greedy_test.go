@@ -279,8 +279,8 @@ func TestTop2LogitsPacketSerialization(t *testing.T) {
 	}
 
 	wire := pkt.MarshalBinary()
-	if len(wire) != 24 {
-		t.Fatalf("wire length = %d, want 24", len(wire))
+	if len(wire) != Top2LogitsPacketSize {
+		t.Fatalf("wire length = %d, want %d", len(wire), Top2LogitsPacketSize)
 	}
 
 	recovered := UnmarshalTop2LogitsPacket(wire)

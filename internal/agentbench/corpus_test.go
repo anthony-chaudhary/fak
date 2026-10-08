@@ -36,7 +36,7 @@ func TestNormalCorpusExactReferenceEnvelope(t *testing.T) {
 	areaCounts := map[string]int{}
 	seenSessions := map[string]bool{}
 	for _, session := range corpus.Sessions {
-		if session.ID == "" || seenSessions[session.ID] || len(session.Turns) != 12 {
+		if session.ID == "" || seenSessions[session.ID] || len(session.Turns) != len(normalHistoryTargets) {
 			t.Fatalf("invalid session identity/turn count: %+v", session)
 		}
 		seenSessions[session.ID] = true
@@ -51,7 +51,7 @@ func TestNormalCorpusExactReferenceEnvelope(t *testing.T) {
 				t.Fatalf("session %s turn %d exceeds exact envelope: %+v", session.ID, i+1, turn)
 			}
 			for _, digest := range turn.LayerDigests {
-				if len(digest) != 64 {
+				if len(digest) != hex.EncodedLen(sha256.Size) {
 					t.Fatalf("invalid layer digest %q", digest)
 				}
 			}

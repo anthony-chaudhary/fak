@@ -103,7 +103,9 @@ func TestFeatureProofCacheAndConcurrentRetention(t *testing.T) {
 			t.Errorf("accepted capacity %d", capacity)
 		}
 	}
-	c, err := NewFeatureProofCollector(8)
+	const ringCap = 8
+	const concurrentServes = 32
+	c, err := NewFeatureProofCollector(ringCap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +127,7 @@ func TestFeatureProofCacheAndConcurrentRetention(t *testing.T) {
 		t.Fatalf("cache proof leaked inputs or fabricated timing: %s", encoded)
 	}
 	var wg sync.WaitGroup
-	for i := 0; i < 32; i++ {
+	for i := 0; i < concurrentServes; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -137,11 +139,11 @@ func TestFeatureProofCacheAndConcurrentRetention(t *testing.T) {
 	}
 	wg.Wait()
 	snapshot := c.Snapshot()
-	if len(snapshot.Receipts) != 8 || snapshot.EvictedReceipts != 25 {
+	if len(snapshot.Receipts) != ringCap || snapshot.EvictedReceipts != 1+concurrentServes-ringCap {
 		t.Fatalf("concurrent bounded ring=%d evicted=%d", len(snapshot.Receipts), snapshot.EvictedReceipts)
 	}
 	for _, counter := range snapshot.Counters {
-		if counter.Feature == FeatureVDSO && counter.Outcome == FeatureProofVerified && counter.Count != 33 {
+		if counter.Feature == FeatureVDSO && counter.Outcome == FeatureProofVerified && counter.Count != 1+concurrentServes {
 			t.Errorf("concurrent hits=%d", counter.Count)
 		}
 	}

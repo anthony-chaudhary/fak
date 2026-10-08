@@ -484,12 +484,12 @@ func TestWorkflowBuiltinFleetWave(t *testing.T) {
 		t.Fatal("expected fleet-wave workflow to be registered")
 	}
 
-	if len(wf.Phases) != 6 {
-		t.Fatalf("expected 6 phases (0..5), got %d", len(wf.Phases))
-	}
-
 	expectedNames := []string{"Gate", "Price", "Receipt", "Launch", "Monitor", "Harvest"}
 	expectedIDs := []string{"gate", "price", "receipt", "launch", "monitor", "harvest"}
+
+	if len(wf.Phases) != len(expectedNames) {
+		t.Fatalf("expected %d phases, got %d", len(expectedNames), len(wf.Phases))
+	}
 
 	for i, p := range wf.Phases {
 		if p.Index != i {
@@ -515,8 +515,8 @@ func TestWorkflowBuiltinFleetWave(t *testing.T) {
 	if state.CurrentPhase != 6 {
 		t.Fatalf("fleet-wave CurrentPhase want 6, got %d", state.CurrentPhase)
 	}
-	if len(state.Receipts) != 6 {
-		t.Fatalf("fleet-wave Receipts want 6, got %d", len(state.Receipts))
+	if len(state.Receipts) != len(expectedNames) {
+		t.Fatalf("fleet-wave Receipts want %d, got %d", len(expectedNames), len(state.Receipts))
 	}
 
 	// Verify all data markers set by actions

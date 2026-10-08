@@ -231,8 +231,8 @@ func TestQwen38MTPMetalWeightAdmission(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load safetensors: %v", err)
 			}
-			if len(qwen35MTPRequiredTensors) != 15 {
-				t.Fatalf("expected 15 MTP required tensors, got %d", len(qwen35MTPRequiredTensors))
+			if len(qwen35MTPRequiredTensors) != len(shapes) {
+				t.Fatalf("expected %d MTP required tensors, got %d", len(shapes), len(qwen35MTPRequiredTensors))
 			}
 			for _, name := range qwen35MTPRequiredTensors {
 				meta, ok := m.manifest[name]

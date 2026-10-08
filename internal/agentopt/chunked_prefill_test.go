@@ -15,10 +15,11 @@ func TestChunkedPrefillScheduling(t *testing.T) {
 	interleaver := NewChunkedInterleaver(cfg)
 
 	// Two active agent decode streams generating 20 tokens each.
-	if err := interleaver.AddDecode("agent-decode-1", 20); err != nil {
+	const decodeTokens = 20
+	if err := interleaver.AddDecode("agent-decode-1", decodeTokens); err != nil {
 		t.Fatalf("failed to add decode 1: %v", err)
 	}
-	if err := interleaver.AddDecode("agent-decode-2", 20); err != nil {
+	if err := interleaver.AddDecode("agent-decode-2", decodeTokens); err != nil {
 		t.Fatalf("failed to add decode 2: %v", err)
 	}
 
@@ -87,7 +88,7 @@ func TestChunkedPrefillScheduling(t *testing.T) {
 		}
 
 		// While decodes are active (first 20 steps), both decodes must be scheduled in EVERY step
-		if stepCount <= 20 {
+		if stepCount <= decodeTokens {
 			if !batch.HasDecode("agent-decode-1") {
 				t.Fatalf("step %d: agent-decode-1 was starved by prefill load", stepCount)
 			}
@@ -103,8 +104,8 @@ func TestChunkedPrefillScheduling(t *testing.T) {
 
 	// Verification 4: Decode pacing and bounded decode latency
 	intervals1 := interleaver.DecodeIntervals("agent-decode-1")
-	if len(intervals1) != 19 {
-		t.Fatalf("expected 19 decode intervals for 20 tokens, got %d", len(intervals1))
+	if len(intervals1) != decodeTokens-1 {
+		t.Fatalf("expected %d decode intervals for %d tokens, got %d", decodeTokens-1, decodeTokens, len(intervals1))
 	}
 	for i, iv := range intervals1 {
 		if iv != 1 {
@@ -113,8 +114,8 @@ func TestChunkedPrefillScheduling(t *testing.T) {
 	}
 
 	intervals2 := interleaver.DecodeIntervals("agent-decode-2")
-	if len(intervals2) != 19 {
-		t.Fatalf("expected 19 decode intervals for 20 tokens, got %d", len(intervals2))
+	if len(intervals2) != decodeTokens-1 {
+		t.Fatalf("expected %d decode intervals for %d tokens, got %d", decodeTokens-1, decodeTokens, len(intervals2))
 	}
 	for i, iv := range intervals2 {
 		if iv != 1 {

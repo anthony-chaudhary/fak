@@ -16,8 +16,8 @@ func TestBlockVerificationSweep(t *testing.T) {
 	}
 
 	// Points cover K=1..32 exactly.
-	if len(report.Points) != 32 {
-		t.Fatalf("expected 32 points, got %d", len(report.Points))
+	if want := cfg.KMax - cfg.KMin + 1; len(report.Points) != want {
+		t.Fatalf("expected %d points, got %d", want, len(report.Points))
 	}
 	for i, pt := range report.Points {
 		wantK := i + 1

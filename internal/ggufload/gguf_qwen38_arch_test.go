@@ -17,6 +17,8 @@ import (
 // UnsupportedArchError (#934). The metadata-key prefix stays the file's own spelling
 // (e.g. "qwen3.8."), while ModelType and the hybrid gate normalize.
 
+const synthQwen38BlockCount = 8
+
 // synthQwen38Meta builds a minimal synthetic metadata map scaled down, keyed on the
 // file's own arch prefix (e.g. "qwen3.8.") to verify that metadata reads use the raw
 // prefix while recognition normalizes the arch string.
@@ -26,7 +28,7 @@ func synthQwen38Meta(arch string) map[string]Value {
 		"general.architecture":                 {Type: TypeString, Value: arch},
 		p + "context_length":                   {Type: TypeUint64, Value: uint64(16)},
 		p + "embedding_length":                 {Type: TypeUint64, Value: uint64(32)},
-		p + "block_count":                      {Type: TypeUint64, Value: uint64(8)},
+		p + "block_count":                      {Type: TypeUint64, Value: uint64(synthQwen38BlockCount)},
 		p + "feed_forward_length":              {Type: TypeUint64, Value: uint64(64)},
 		p + "attention.head_count":             {Type: TypeUint64, Value: uint64(4)},
 		p + "attention.head_count_kv":          {Type: TypeUint64, Value: uint64(2)},
@@ -72,8 +74,8 @@ func TestQwen38ConfigDerivesQwen35Hybrid(t *testing.T) {
 	if !cfg.IsQwen35Hybrid() {
 		t.Fatalf("IsQwen35Hybrid = false; layer_types = %v (hybrid schedule did not derive)", cfg.LayerTypes)
 	}
-	if len(cfg.LayerTypes) != 8 {
-		t.Fatalf("LayerTypes = %v, want 8 entries", cfg.LayerTypes)
+	if len(cfg.LayerTypes) != synthQwen38BlockCount {
+		t.Fatalf("LayerTypes = %v, want %d entries", cfg.LayerTypes, synthQwen38BlockCount)
 	}
 	for l, got := range cfg.LayerTypes {
 		want := "linear_attention"

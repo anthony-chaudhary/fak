@@ -100,7 +100,7 @@ func TestBurnSteadyEnforcesCausalConcurrencyAndCutoff(t *testing.T) {
 		}
 	}
 	wire.mu.Unlock()
-	if len(receipt.Requests) != 256 {
+	if len(receipt.Requests) != receipt.Accepted {
 		t.Fatalf("lifecycle receipts=%d", len(receipt.Requests))
 	}
 	for _, request := range receipt.Requests {

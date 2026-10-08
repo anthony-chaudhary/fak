@@ -32,6 +32,8 @@ import (
 //     real Q4_K batched routed-expert blob whose per-expert byte pattern
 //     survives the merge byte-for-byte (still packed, never dequantized).
 
+const ds41BlockCount = 40
+
 // ds41Meta is the real V4.1-Flash header geometry, keyed under the RAW arch
 // prefix the test passes in (proving Config reads the file's own "<arch>." keys
 // while recognition normalizes the arch string).
@@ -41,7 +43,7 @@ func ds41Meta(arch string) map[string]Value {
 		"general.architecture": {Type: TypeString, Value: arch},
 
 		p + "embedding_length":                 {Type: TypeUint64, Value: uint64(5120)},
-		p + "block_count":                      {Type: TypeUint64, Value: uint64(40)},
+		p + "block_count":                      {Type: TypeUint64, Value: uint64(ds41BlockCount)},
 		p + "attention.head_count":             {Type: TypeUint64, Value: uint64(128)},
 		p + "attention.head_count_kv":          {Type: TypeUint64, Value: uint64(128)},
 		p + "feed_forward_length":              {Type: TypeUint64, Value: uint64(18432)},
@@ -169,10 +171,11 @@ func TestDeepSeek41GGUFReadsDS4EngramMetadata(t *testing.T) {
 		primes[i] = 16000057 + uint64(i)
 	}
 	meta["deepseek41.engram.primes"] = intArrayValue(TypeUint32, primes)
-	meta["deepseek41.engram.multipliers"] = intArrayValue(TypeUint64, []uint64{
+	wantMultipliers := []uint64{
 		35184372088831, 35184372088829, 35184372088827, 35184372088825,
 		35184372088823, 35184372088821, 35184372088819, 35184372088817,
-	})
+	}
+	meta["deepseek41.engram.multipliers"] = intArrayValue(TypeUint64, wantMultipliers)
 	// Conflicting provisional keys prove that presence, including a valid zero
 	// pad ID, never lets the legacy namespace override converter output.
 	meta["deepseek41.engram_layer_ids"] = intArrayValue(TypeUint32, []uint64{2})
@@ -191,7 +194,7 @@ func TestDeepSeek41GGUFReadsDS4EngramMetadata(t *testing.T) {
 	multipliers, multipliersOK := deepSeek41EngramField[[]uint64](eng, "Multipliers")
 	if eng == nil || !encodingOK || encoding != "e4m3_e8m0_32_row264" || eng.MaxNgramSize != 4 || eng.NHeads != 8 ||
 		len(eng.LayerIDs) != 2 || len(eng.NumEmbeddings) != 2 || !tokenMapOK || len(tokenMap) != 3 ||
-		!primesOK || len(primesGot) != 48 || !multipliersOK || len(multipliers) != 8 || multipliers[0] != 35184372088831 ||
+		!primesOK || len(primesGot) != len(primes) || !multipliersOK || len(multipliers) != len(wantMultipliers) || multipliers[0] != 35184372088831 ||
 		eng.PadTokenID != 0 || eng.CompressedVocabSize != 99092 {
 		t.Fatalf("ds4 Engram metadata not retained: %+v", eng)
 	}
@@ -839,8 +842,8 @@ func TestDeepSeek41GGUFReadsVcruzEngramMetadata(t *testing.T) {
 	if len(eng.TokenMap) != 3 || eng.TokenMap[0] != 7 {
 		t.Errorf("Engram.TokenMap = %v, want [7 8 9]", eng.TokenMap)
 	}
-	if len(eng.Primes) != 48 {
-		t.Errorf("Engram.Primes has %d entries, want 48", len(eng.Primes))
+	if wantPrimes := len(eng.LayerIDs) * (eng.MaxNgramSize - 1) * eng.NHeads; len(eng.Primes) != wantPrimes {
+		t.Errorf("Engram.Primes has %d entries, want %d", len(eng.Primes), wantPrimes)
 	}
 	if len(eng.Multipliers) != 2 || eng.Multipliers[0] != 35184372088831 {
 		t.Errorf("Engram.Multipliers = %v, want the 47-bit odd constants", eng.Multipliers)
@@ -1288,8 +1291,8 @@ func TestDeepSeek41GGUFIndexerScheduleDerivedFromTensors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Config: %v", err)
 	}
-	if len(cfg.IndexerTypes) != 40 {
-		t.Fatalf("len(cfg.IndexerTypes) = %d, want 40 (block_count)", len(cfg.IndexerTypes))
+	if len(cfg.IndexerTypes) != ds41BlockCount {
+		t.Fatalf("len(cfg.IndexerTypes) = %d, want %d (block_count)", len(cfg.IndexerTypes), ds41BlockCount)
 	}
 	full := map[int]bool{2: true, 8: true}
 	for l := 0; l < 40; l++ {
@@ -1331,8 +1334,8 @@ func TestDeepSeek41GGUFIndexerScheduleHonorsMetadataKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Config: %v", err)
 	}
-	if len(cfg.IndexerTypes) != 40 {
-		t.Fatalf("len(cfg.IndexerTypes) = %d, want 40", len(cfg.IndexerTypes))
+	if len(cfg.IndexerTypes) != len(explicit) {
+		t.Fatalf("len(cfg.IndexerTypes) = %d, want %d", len(cfg.IndexerTypes), len(explicit))
 	}
 	if cfg.IndexerTypes[5] != "full" {
 		t.Errorf("cfg.IndexerTypes[5] = %q, want %q (metadata key must win over tensor presence)", cfg.IndexerTypes[5], "full")
