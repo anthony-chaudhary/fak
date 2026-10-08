@@ -1034,7 +1034,18 @@ func (m *gatewayMetrics) observeInferenceTimedDetail(loc servingLocality, prompt
 		}
 	}
 	m.inferenceMu.Unlock()
-	m.observeDeadlineTiming(promptTok, complTok, dur, ttft)
+	residentPromptTok := 0
+	for _, tokens := range []int{promptTok, cachedTok, cacheCreateTok} {
+		if tokens <= 0 {
+			continue
+		}
+		if residentPromptTok > math.MaxInt-tokens {
+			residentPromptTok = math.MaxInt
+			break
+		}
+		residentPromptTok += tokens
+	}
+	m.observeDeadlineTiming(residentPromptTok, complTok, dur, ttft)
 }
 
 // regimeLatencyHists is one cache regime's TTFT / TPOT / e2e histograms (#5630).
