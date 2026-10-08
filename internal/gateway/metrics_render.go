@@ -316,6 +316,7 @@ func (s *Server) renderMetrics() string {
 	s.writeRequestMemoryMetrics(&b)
 	m.writeRequestMemoryAggregateMetrics(&b)
 	inf := m.writeInferenceMetrics(&b)
+	m.writeNativeExecutionMetrics(&b)
 	s.writeServingMetricsWithStats(&b, inf, kvStats, kvOK)
 	m.writeHarnessMetrics(&b)  // fak_harness_* — the guard harness's own CPU/mem/IO (epic #2044)
 	m.writeLogvaultMetrics(&b) // fak_logvault_* — vault last-capture age/footprint/verify mismatches (#2455)
@@ -374,6 +375,25 @@ func (s *Server) renderMetrics() string {
 	s.writeModelLoadMetrics(&b)
 	s.writeTelemetryAndAuditMetrics(&b)
 	return b.String()
+}
+
+func (m *gatewayMetrics) writeNativeExecutionMetrics(b *strings.Builder) {
+	rows := m.nativeExecutionSnapshot()
+	writeHelpType(b, "fak_native_execution_requests_total", "Completed ordinary native executions carrying authoritative request-local decode and timing observations, by bounded decode path.", "counter")
+	writeHelpType(b, "fak_native_execution_phase_seconds_total", "Cumulative planner-authored native execution time, by bounded decode path and phase.", "counter")
+	writeHelpType(b, "fak_native_execution_tokens_total", "Cumulative planner-authored native token counts, by bounded decode path and kind; prompt means uncached prefilled tokens.", "counter")
+	for _, path := range []string{agent.NativeDecodePathSerial, agent.NativeDecodePathBatched, agent.NativeDecodePathSpeculative} {
+		stats, ok := rows[path]
+		if !ok {
+			continue
+		}
+		fmt.Fprintf(b, "fak_native_execution_requests_total{path=%q} %d\n", path, stats.requests)
+		fmt.Fprintf(b, "fak_native_execution_phase_seconds_total{path=%q,phase=%q} %s\n", path, "prefill", promFloat(stats.prefillSeconds))
+		fmt.Fprintf(b, "fak_native_execution_phase_seconds_total{path=%q,phase=%q} %s\n", path, "decode", promFloat(stats.decodeSeconds))
+		fmt.Fprintf(b, "fak_native_execution_tokens_total{path=%q,kind=%q} %d\n", path, "prompt", stats.promptTokens)
+		fmt.Fprintf(b, "fak_native_execution_tokens_total{path=%q,kind=%q} %d\n", path, "generated", stats.generatedTokens)
+		fmt.Fprintf(b, "fak_native_execution_tokens_total{path=%q,kind=%q} %d\n", path, "cached", stats.cachedTokens)
+	}
 }
 
 func (s *Server) writeRequestMemoryMetrics(b *strings.Builder) {

@@ -295,8 +295,9 @@ type Summary struct {
 	ByRegime map[string]RegimeSummary `json:"by_regime,omitempty"`
 	// Native counts the rows the native engine served (rows carrying Engine);
 	// ByPath splits them by decode path. Both are absent on a proxy-only window.
-	Native int            `json:"native,omitempty"`
-	ByPath map[string]int `json:"by_path,omitempty"`
+	Native      int                    `json:"native,omitempty"`
+	ByPath      map[string]int         `json:"by_path,omitempty"`
+	ByPathStats map[string]PathSummary `json:"by_path_stats,omitempty"`
 	// Spec* sum the window's speculative rounds (native engine rounds plus a
 	// proxied upstream's draft counts, which carry no round count); SpecAcceptRate is accepted/draft
 	// tokens (vLLM's draft acceptance rate) and is absent when nothing was drafted.
@@ -312,6 +313,17 @@ type Summary struct {
 	// planners, backends, hosts or builds.
 	ServedBy   *ServedBy `json:"served_by,omitempty"`
 	Identities int       `json:"identities,omitempty"`
+}
+
+type PathSummary struct {
+	Count              int     `json:"count"`
+	PrefillMeasured    int     `json:"prefill_measured"`
+	DecodeMeasured     int     `json:"decode_measured"`
+	PrefillTPSP50      float64 `json:"prefill_tps_p50,omitempty"`
+	PrefillTPSWeighted float64 `json:"prefill_tps_weighted,omitempty"`
+	DecodeTPSP50       float64 `json:"decode_tps_p50,omitempty"`
+	DecodeTPSWeighted  float64 `json:"decode_tps_weighted,omitempty"`
+	CacheHitShare      float64 `json:"cache_hit_share"`
 }
 
 type NativeTimingSummary struct {
@@ -519,7 +531,55 @@ func Summarize(recs []Record) Summary {
 			E2EP50MS:     quantile(regimeE2E[regime], 0.50),
 		}
 	}
+	s.ByPathStats = summarizeNativePaths(recs)
 	return s
+}
+
+func summarizeNativePaths(recs []Record) map[string]PathSummary {
+	groups := make(map[string][]Record, len(Paths))
+	for _, r := range recs {
+		if r.IsProbe() || r.Engine == nil {
+			continue
+		}
+		for _, p := range Paths {
+			if r.Engine.Path == p {
+				r.Engine = nil
+				groups[p] = append(groups[p], r)
+				break
+			}
+		}
+	}
+	if len(groups) == 0 {
+		return nil
+	}
+	out := make(map[string]PathSummary, len(groups))
+	for p, rows := range groups {
+		// Clearing Engine above reuses the phase fold without recursively grouping it.
+		s := Summarize(rows)
+		row := PathSummary{Count: s.Count}
+		if n := s.NativeTiming; n != nil {
+			row.PrefillMeasured = n.PrefillMeasured
+			row.DecodeMeasured = n.DecodeMeasured
+			row.PrefillTPSP50 = n.PrefillTPSP50
+			row.PrefillTPSWeighted = n.PrefillTPSWeighted
+			row.DecodeTPSP50 = n.DecodeTPSP50
+			row.DecodeTPSWeighted = n.DecodeTPSWeighted
+		}
+		var prompt, cached int64
+		valid := true
+		for _, r := range rows {
+			var ok bool
+			prompt, ok = addNativeTokens(prompt, r.PromptTokens)
+			valid = valid && ok
+			cached, ok = addNativeTokens(cached, r.CachedTokens)
+			valid = valid && ok
+		}
+		if valid && (prompt > 0 || cached > 0) {
+			row.CacheHitShare = roundTo(float64(cached)/(float64(prompt)+float64(cached)), 10000)
+		}
+		out[p] = row
+	}
+	return out
 }
 
 func addNativeTokens(total int64, value int) (int64, bool) {
@@ -580,6 +640,11 @@ func RenderCompact(rep Report) string {
 		for _, p := range Paths {
 			if n := s.ByPath[p]; n > 0 {
 				fmt.Fprintf(&b, " %s=%d", p, n)
+			}
+		}
+		for _, p := range Paths {
+			if row, ok := s.ByPathStats[p]; ok {
+				fmt.Fprintf(&b, " | %s native n=%d prefill p50=%s weighted=%s (measured %d/%d) decode p50=%s weighted=%s (measured %d/%d) cache=%.1f%%", p, row.Count, fmtTPS(row.PrefillTPSP50), fmtTPS(row.PrefillTPSWeighted), row.PrefillMeasured, row.Count, fmtTPS(row.DecodeTPSP50), fmtTPS(row.DecodeTPSWeighted), row.DecodeMeasured, row.Count, row.CacheHitShare*100)
 			}
 		}
 	}

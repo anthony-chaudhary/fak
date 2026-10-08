@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -47,9 +49,14 @@ func newPerfServedHarness(t *testing.T, planner agent.Planner) *perfServedHarnes
 	return &perfServedHarness{t: t, srv: srv, ts: ts, w: w, path: path}
 }
 
-func (h *perfServedHarness) chat(model, content string, stream bool) {
+func (h *perfServedHarness) chat(model, content string, stream bool) []byte {
 	h.t.Helper()
 	body := fmt.Sprintf(`{"model":%q,"stream":%t,"max_tokens":6,"messages":[{"role":"user","content":%q}]}`, model, stream, content)
+	return h.chatBody(body)
+}
+
+func (h *perfServedHarness) chatBody(body string) []byte {
+	h.t.Helper()
 	resp, err := http.Post(h.ts.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
 	if err != nil {
 		h.t.Fatal(err)
@@ -57,8 +64,9 @@ func (h *perfServedHarness) chat(model, content string, stream bool) {
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		h.t.Fatalf("chat stream=%t: status %d: %s", stream, resp.StatusCode, raw)
+		h.t.Fatalf("chat status %d: %s", resp.StatusCode, raw)
 	}
+	return raw
 }
 
 func (h *perfServedHarness) recent() perfledger.Report {
@@ -107,13 +115,54 @@ func newPerfServedNativePlanner(t *testing.T) *agent.InKernelPlanner {
 // fak-test:runtime fast est=2s lane=default
 func TestPerfLedgerServedNativeTurnsCarryEngineAnatomy(t *testing.T) {
 	h := newPerfServedHarness(t, newPerfServedNativePlanner(t))
-	h.chat("native-synth", "buffered native turn", false)
-	h.chat("native-synth", "streamed native turn", true)
+	buffered := h.chat("native-synth", "buffered native turn", false)
+	streamed := h.chat("native-synth", "streamed native turn", true)
+	for shape, body := range map[string][]byte{"buffered": buffered, "streamed": streamed} {
+		for _, field := range []string{"native_inference_receipt", "token_ids", "token_logprobs"} {
+			if strings.Contains(string(body), field) {
+				t.Fatalf("default %s response exposed opt-in field %q: %s", shape, field, body)
+			}
+		}
+	}
+	strict := h.chatBody(`{"model":"native-synth","messages":[{"role":"user","content":"strict native turn"}],"max_tokens":6,"temperature":0,"fak":{"native_inference_receipt":true}}`)
+	var strictResponse ChatResponse
+	if err := json.Unmarshal(strict, &strictResponse); err != nil {
+		t.Fatalf("decode strict receipt response: %v", err)
+	}
+	if strictResponse.Fak == nil || strictResponse.Fak.NativeInferenceReceipt == nil {
+		t.Fatalf("explicit response omitted strict native receipt: %s", strict)
+	}
+	strictReceipt := strictResponse.Fak.NativeInferenceReceipt
+	if len(strictReceipt.TokenIDs) == 0 || len(strictReceipt.TokenIDs) > 6 || len(strictReceipt.TokenLogprobs) != len(strictReceipt.TokenIDs) || strictResponse.Usage.CompletionTokens != len(strictReceipt.TokenIDs) {
+		t.Fatalf("strict receipt token ids/logprobs/usage=%d/%d/%d, want consistent bounded entries", len(strictReceipt.TokenIDs), len(strictReceipt.TokenLogprobs), strictResponse.Usage.CompletionTokens)
+	}
+	for name, seconds := range map[string]float64{"prefill": strictReceipt.PrefillSeconds, "ttft": strictReceipt.TTFTSeconds, "decode": strictReceipt.DecodeSeconds} {
+		if seconds < 0 || math.IsNaN(seconds) || math.IsInf(seconds, 0) {
+			t.Fatalf("strict receipt %s_seconds=%v, want finite non-negative", name, seconds)
+		}
+	}
+	if strictReceipt.Model != "native-synth" || strictReceipt.Engine != "inkernel" || strictReceipt.Planner != "inkernel" || strictReceipt.Owner != "fak" || strictReceipt.FallbackActive {
+		t.Fatalf("strict receipt execution identity=%+v, want native-synth inkernel without fallback", strictReceipt)
+	}
 
 	rep := h.recent()
-	if rep.Source != "live" || len(rep.Records) != 2 {
-		t.Fatalf("recent = source %q rows %d, want live/2: %+v", rep.Source, len(rep.Records), rep)
+	if rep.Source != "live" || len(rep.Records) != 3 {
+		t.Fatalf("recent = source %q rows %d, want live/3: %+v", rep.Source, len(rep.Records), rep)
 	}
+	phaseMeasured := func(row int, name string, ms float64, tokens int, rate float64) bool {
+		t.Helper()
+		if ms == 0 {
+			if tokens != 0 || rate != 0 {
+				t.Fatalf("row %d unknown %s phase retained tokens/rate: ms=%v tokens=%d rate=%v", row, name, ms, tokens, rate)
+			}
+			return false
+		}
+		if ms < 0 || math.IsNaN(ms) || math.IsInf(ms, 0) || tokens < 0 || math.IsNaN(rate) || math.IsInf(rate, 0) || (tokens > 0 && rate <= 0) {
+			t.Fatalf("row %d measured %s phase is invalid: ms=%v tokens=%d rate=%v", row, name, ms, tokens, rate)
+		}
+		return true
+	}
+	wantPrefillMeasured, wantDecodeMeasured, wantTTFTMeasured := 0, 0, 0
 	for i, r := range rep.Records {
 		if r.Model != "native-synth" {
 			t.Errorf("row %d model = %q, want native-synth", i, r.Model)
@@ -121,18 +170,123 @@ func TestPerfLedgerServedNativeTurnsCarryEngineAnatomy(t *testing.T) {
 		if r.Engine == nil || r.Engine.Path != perfledger.PathSerial {
 			t.Errorf("row %d engine = %+v, want path=serial", i, r.Engine)
 		}
-		if r.CompletionTokens <= 0 || r.E2EMS <= 0 || r.TTFTMS <= 0 || r.TTFTMS > r.E2EMS {
-			t.Errorf("row %d axes = %+v, want completion>0 and 0<ttft<=e2e", i, r)
+		prefillMeasured, decodeMeasured := false, false
+		if timing := r.NativeTiming; timing != nil {
+			prefillMeasured = phaseMeasured(i, "prefill", timing.PrefillMS, timing.PrefillTokens, timing.PrefillTPS)
+			decodeMeasured = phaseMeasured(i, "decode", timing.DecodeMS, timing.DecodeTokens, timing.DecodeTPS)
+		}
+		if prefillMeasured {
+			wantPrefillMeasured++
+		}
+		if decodeMeasured {
+			wantDecodeMeasured++
+		}
+		timingJSON, err := json.Marshal(r.NativeTiming)
+		if err != nil {
+			t.Fatalf("marshal row %d native timing: %v", i, err)
+		}
+		for phase, measured := range map[string]bool{"prefill": prefillMeasured, "decode": decodeMeasured} {
+			if measured {
+				if !strings.Contains(string(timingJSON), `"`+phase+`_ms"`) {
+					t.Fatalf("row %d measured %s phase omitted duration: %s", i, phase, timingJSON)
+				}
+				continue
+			}
+			for _, suffix := range []string{"_ms", "_tokens", "_tps"} {
+				field := phase + suffix
+				if strings.Contains(string(timingJSON), field) {
+					t.Fatalf("row %d unknown %s phase emitted %s: %s", i, phase, field, timingJSON)
+				}
+			}
+		}
+		if r.CompletionTokens <= 0 || r.E2EMS <= 0 || math.IsNaN(r.E2EMS) || math.IsInf(r.E2EMS, 0) || r.TTFTMS < 0 || r.TTFTMS > r.E2EMS || math.IsNaN(r.TTFTMS) || math.IsInf(r.TTFTMS, 0) {
+			t.Errorf("row %d axes = %+v, want completion/e2e positive and finite 0<=ttft<=e2e", i, r)
+		}
+		if i < 2 && r.TTFTMS <= 0 {
+			t.Errorf("ordinary row %d axes = %+v, want measured positive TTFT", i, r)
+		}
+		if r.TTFTMS > 0 {
+			wantTTFTMeasured++
 		}
 	}
-	if rep.Summary.Native != 2 || rep.Summary.ByPath[perfledger.PathSerial] != 2 || rep.Summary.TTFTMeasured != 2 {
-		t.Fatalf("summary = %+v, want native=2 serial=2 ttft_measured=2", rep.Summary)
+	if wantTTFTMeasured < 2 {
+		t.Fatalf("ordinary cohort lost measured TTFT: measured=%d", wantTTFTMeasured)
 	}
-	if line := h.compact(); !strings.Contains(line, "path: serial=2") {
-		t.Fatalf("compact = %q, want the decode-path split", line)
+	strictTimingJSON, err := json.Marshal(rep.Records[2].NativeTiming)
+	if err != nil {
+		t.Fatalf("marshal strict row timing: %v", err)
 	}
-	if recs := h.durable(); len(recs) != 2 || recs[0].Engine == nil || recs[1].Model != "native-synth" {
-		t.Fatalf("durable rows = %+v, want both native rows with engine anatomy on disk", recs)
+	wantStrictTiming := perfledger.NewNativeTiming(rep.Records[2].PromptTokens, rep.Records[2].CompletionTokens, strictReceipt.PrefillSeconds*1000, strictReceipt.DecodeSeconds*1000)
+	wantStrictTimingJSON, err := json.Marshal(wantStrictTiming)
+	if err != nil {
+		t.Fatalf("marshal receipt-derived strict timing: %v", err)
+	}
+	if string(strictTimingJSON) != string(wantStrictTimingJSON) {
+		t.Fatalf("strict row timing=%s, want receipt-derived timing=%s", strictTimingJSON, wantStrictTimingJSON)
+	}
+	if rep.Summary.Native != 3 || rep.Summary.ByPath[perfledger.PathSerial] != 3 || rep.Summary.TTFTMeasured != wantTTFTMeasured {
+		t.Fatalf("summary = %+v, want native=3 serial=3 ttft_measured=%d", rep.Summary, wantTTFTMeasured)
+	}
+	path := rep.Summary.ByPathStats[perfledger.PathSerial]
+	if path.Count != 3 || path.PrefillMeasured != wantPrefillMeasured || path.DecodeMeasured != wantDecodeMeasured || path.PrefillTPSWeighted <= 0 || path.DecodeTPSWeighted <= 0 {
+		t.Fatalf("live serial path summary = %+v, want measured prefill/decode=%d/%d", path, wantPrefillMeasured, wantDecodeMeasured)
+	}
+	metrics := h.srv.renderMetrics()
+	sample := func(series string) float64 {
+		t.Helper()
+		for _, line := range strings.Split(metrics, "\n") {
+			if strings.HasPrefix(line, series+" ") {
+				fields := strings.Fields(line)
+				value, err := strconv.ParseFloat(fields[len(fields)-1], 64)
+				if err != nil {
+					t.Fatalf("parse metric %s: %v", series, err)
+				}
+				return value
+			}
+		}
+		t.Fatalf("missing metric %s", series)
+		return 0
+	}
+	requestSeries := `fak_native_execution_requests_total{path="serial"}`
+	if got := sample(requestSeries); got != 3 || strings.Count(metrics, "fak_native_execution_requests_total{") != 1 {
+		t.Fatalf("native execution bookings=%v rows=%d, want exactly three serial bookings", got, strings.Count(metrics, "fak_native_execution_requests_total{"))
+	}
+	for _, series := range []string{
+		`fak_native_execution_phase_seconds_total{path="serial",phase="prefill"}`,
+		`fak_native_execution_phase_seconds_total{path="serial",phase="decode"}`,
+		`fak_native_execution_tokens_total{path="serial",kind="prompt"}`,
+		`fak_native_execution_tokens_total{path="serial",kind="generated"}`,
+	} {
+		value := sample(series)
+		if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+			t.Fatalf("native execution metric %s=%v, want finite positive", series, value)
+		}
+	}
+	strictSeries := `fak_native_receipt_requests_total{engine="inkernel",backend="other",forward_path="other",evidence_class="measured"}`
+	if got := sample(strictSeries); got != 1 || strings.Count(metrics, "fak_native_receipt_requests_total{") != 1 {
+		t.Fatalf("strict receipt bookings=%v rows=%d, want exactly one strict booking", got, strings.Count(metrics, "fak_native_receipt_requests_total{"))
+	}
+	line := h.compact()
+	for _, token := range []string{"path: serial=3", "serial native n=3", "prefill p50=", "decode p50=", fmt.Sprintf("(measured %d/3)", wantPrefillMeasured), fmt.Sprintf("(measured %d/3)", wantDecodeMeasured)} {
+		if !strings.Contains(line, token) {
+			t.Fatalf("compact = %q, want native path token %q", line, token)
+		}
+	}
+	recs := h.durable()
+	if len(recs) != 3 || recs[0].Engine == nil || recs[1].Model != "native-synth" {
+		t.Fatalf("durable rows = %+v, want all three native rows with engine anatomy on disk", recs)
+	}
+	durableStrictTimingJSON, err := json.Marshal(recs[2].NativeTiming)
+	if err != nil || string(durableStrictTimingJSON) != string(strictTimingJSON) {
+		t.Fatalf("durable strict timing=%s err=%v, want live timing=%s", durableStrictTimingJSON, err, strictTimingJSON)
+	}
+	offline := perfledger.BuildReport(recs, len(recs), false, 0)
+	if offline.Summary.TTFTMeasured != wantTTFTMeasured {
+		t.Fatalf("durable TTFT measured=%d, want live count %d", offline.Summary.TTFTMeasured, wantTTFTMeasured)
+	}
+	offlinePath := offline.Summary.ByPathStats[perfledger.PathSerial]
+	if offlinePath.Count != 3 || offlinePath.PrefillMeasured != wantPrefillMeasured || offlinePath.DecodeMeasured != wantDecodeMeasured || offlinePath.PrefillTPSWeighted <= 0 || offlinePath.DecodeTPSWeighted <= 0 {
+		t.Fatalf("durable serial path summary = %+v, want measured prefill/decode=%d/%d", offlinePath, wantPrefillMeasured, wantDecodeMeasured)
 	}
 }
 

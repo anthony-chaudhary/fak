@@ -132,6 +132,11 @@ type gatewayMetrics struct {
 	// (#5630), booked from the same values in the same critical section, so the regime
 	// rows of each family sum exactly to the unlabeled histogram above.
 	inferRegimeHists map[string]*regimeLatencyHists
+	// nativeExecutions is the ordinary-request native diagnostic fold. A row is
+	// admitted only when the completion carries both the request-local native
+	// decode marker and planner-authored timings; provider timings alone never
+	// enter this map. It shares inferenceMu with the surrounding inference fold.
+	nativeExecutions map[string]nativeExecutionStats
 
 	// reqMemoryMu guards cumulative in-kernel request-memory pressure observed after
 	// planner turns. The planner already exposes the most recent admission plan; these
@@ -624,6 +629,15 @@ type latencyCounter struct {
 	buckets []uint64
 }
 
+type nativeExecutionStats struct {
+	requests        uint64
+	prefillSeconds  float64
+	decodeSeconds   float64
+	promptTokens    uint64
+	generatedTokens uint64
+	cachedTokens    uint64
+}
+
 func newGatewayMetrics(now time.Time) *gatewayMetrics {
 	proof, _ := NewFeatureProofCollector(DefaultFeatureProofCapacity)
 	return &gatewayMetrics{
@@ -653,7 +667,21 @@ func newGatewayMetrics(now time.Time) *gatewayMetrics {
 		inferTTFTHist:            newLatencyCounter(),
 		inferTPOTHist:            newLatencyCounter(),
 		inferE2EHist:             newLatencyCounter(),
+		nativeExecutions:         map[string]nativeExecutionStats{},
 	}
+}
+
+func (m *gatewayMetrics) nativeExecutionSnapshot() map[string]nativeExecutionStats {
+	if m == nil {
+		return nil
+	}
+	m.inferenceMu.Lock()
+	defer m.inferenceMu.Unlock()
+	out := make(map[string]nativeExecutionStats, len(m.nativeExecutions))
+	for path, stats := range m.nativeExecutions {
+		out[path] = stats
+	}
+	return out
 }
 
 // upstreamErrorKind classifies a planner/proxy error into the coarse KIND label the
