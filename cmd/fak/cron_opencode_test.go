@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -304,25 +305,18 @@ func TestCronOpenCodeTimeout(t *testing.T) {
 	}
 }
 
+// fak-test:runtime integration est=5s lane=default
 func TestCronOpenCodeProgressExtendsSilenceTimeoutButHonorsHardCeiling(t *testing.T) {
-	if mode := os.Getenv("FAK_CRON_PROGRESS_HELPER"); mode != "" {
-		switch mode {
-		case "progress":
-			for i := 0; i < 7; i++ {
-				fmt.Fprintf(os.Stdout, "progress-%d\n", i)
-				time.Sleep(100 * time.Millisecond)
-			}
-		case "stalled":
-			time.Sleep(3 * time.Second)
-		case "hard-ceiling":
-			for i := 0; i < 50; i++ {
-				fmt.Fprintf(os.Stdout, "progress-%d\n", i)
-				time.Sleep(100 * time.Millisecond)
-			}
-		default:
-			t.Fatalf("unknown helper mode %q", mode)
-		}
-		return
+	// Build once, outside the timed attempts. The standalone output fixture has
+	// no product code; the parent still tests the real CLI under -race without
+	// charging the full test binary's startup or race-runtime exit sleep as silence.
+	helper := filepath.Join(t.TempDir(), "cron-progress-helper")
+	if runtime.GOOS == "windows" {
+		helper += ".exe"
+	}
+	build := exec.Command("go", "build", "-race=false", "-o", helper, filepath.Join("testdata", "cron_progress_helper.go"))
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build cron progress helper: %v\n%s", err, output)
 	}
 
 	type receiptTelemetry struct {
@@ -335,7 +329,6 @@ func TestCronOpenCodeProgressExtendsSilenceTimeoutButHonorsHardCeiling(t *testin
 	}
 	run := func(t *testing.T, mode string, hardTimeout time.Duration) (receiptTelemetry, time.Duration) {
 		t.Helper()
-		t.Setenv("FAK_CRON_PROGRESS_HELPER", mode)
 		var stdout, stderr bytes.Buffer
 		started := time.Now()
 		code := runCronOpenCode(&stdout, &stderr, []string{
@@ -344,7 +337,7 @@ func TestCronOpenCodeProgressExtendsSilenceTimeoutButHonorsHardCeiling(t *testin
 			"--timeout", "250ms",
 			"--hard-timeout", hardTimeout.String(),
 			"--",
-			os.Args[0], "-test.run=^TestCronOpenCodeProgressExtendsSilenceTimeoutButHonorsHardCeiling$",
+			helper, mode,
 		})
 		if code == 2 {
 			t.Fatalf("cron opencode CLI rejected progress timeout contract: %s", stderr.String())
