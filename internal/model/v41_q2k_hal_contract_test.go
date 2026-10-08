@@ -37,8 +37,9 @@ import (
 // incremental q4kExpertInputHAL seam is the one reached.
 type v41HalSeamBackend struct {
 	compute.Backend
-	matmuls int
-	swiglu  int
+	matmuls       int
+	swiglu        int
+	matmulWeights []compute.Buffer
 }
 
 func (b *v41HalSeamBackend) Caps() compute.Caps {
@@ -50,7 +51,72 @@ func (b *v41HalSeamBackend) Caps() compute.Caps {
 
 func (b *v41HalSeamBackend) MatMul(w, x compute.Tensor) compute.Tensor {
 	b.matmuls++
+	b.matmulWeights = append(b.matmulWeights, w.Buf())
 	return b.Backend.MatMul(w, x)
+}
+
+func v41HalSeamExpertMatMuls(t *testing.T, s *Session, b *v41HalSeamBackend, rows int) int {
+	t.Helper()
+	experts := map[compute.Buffer]string{}
+	known := map[compute.Buffer]bool{}
+	for _, weight := range s.halW {
+		known[weight.Buf()] = true
+	}
+	for layer := 0; layer < s.M.Cfg.NumLayers; layer++ {
+		for expert := 0; expert < s.M.Cfg.NumExperts; expert++ {
+			for _, leaf := range []string{"w1.weight", "w3.weight", "w2.weight"} {
+				name := layerName(layer, "ffn.experts."+itoa(expert)+"."+leaf)
+				if weight, ok := s.halW["kquant-raw:"+name]; ok {
+					wantDtype := compute.Q2_K
+					if leaf == "w2.weight" {
+						wantDtype = compute.Q3_K
+					}
+					if weight.Dtype != wantDtype {
+						t.Errorf("actual expert leaf %s staged dtype=%v want %v", leaf, weight.Dtype, wantDtype)
+					}
+					if _, duplicate := experts[weight.Buf()]; duplicate {
+						t.Fatal("expert projections share an ambiguous recorded weight identity")
+					}
+					experts[weight.Buf()] = leaf
+				}
+			}
+		}
+	}
+	counts := map[string]int{}
+	ordinary := 0
+	for _, weight := range b.matmulWeights {
+		if leaf, ok := experts[weight]; ok {
+			counts[leaf]++
+		} else {
+			if !known[weight] {
+				t.Fatal("recorded MatMul weight has no Session-owned identity")
+			}
+			ordinary++
+		}
+	}
+	if len(b.matmulWeights) != b.matmuls {
+		t.Error("aggregate MatMul attempts differ from actual weight records")
+	}
+	if ordinary == 0 {
+		t.Error("default composed projection operations were not recorded")
+	}
+	total := 0
+	for _, leaf := range []string{"w1.weight", "w3.weight", "w2.weight"} {
+		if counts[leaf] != rows {
+			t.Errorf("actual expert %s MatMul count=%d want %d", leaf, counts[leaf], rows)
+		}
+		total += counts[leaf]
+	}
+	return total
+}
+
+func v41HalSeamDefaultProjectionRows(t *testing.T, m *Model, phase string, tokens int, denseBefore, groupedBefore map[string]float64) {
+	t.Helper()
+	dense := v41DenseTestDelta(v41DenseTestPhase(t, m, phase), denseBefore)
+	grouped := v41DenseTestDelta(v41GroupedPhase(t, m, phase), groupedBefore)
+	if dense["dense_projection_device_rows"] != float64(7*tokens*m.Cfg.NumLayers) || dense["dense_projection_host_rows"] != 0 || grouped["grouped_output_device_rows"] != float64(tokens*m.Cfg.NumLayers) || grouped["grouped_output_host_rows"] != 0 {
+		t.Errorf("expert component %s invocation lost default projection composition dense=%v grouped=%v", phase, dense, grouped)
+	}
 }
 
 func (b *v41HalSeamBackend) SwiGLU(g, u compute.Tensor) compute.Tensor {
@@ -244,14 +310,18 @@ func TestV41Q2KGateUpHALDeviceDown(t *testing.T) {
 			if devSess.v41ExpertGateUpFunc() == nil {
 				t.Fatal("a DeviceMemory session did not bind the device gate/up callback")
 			}
+			denseBefore, groupedBefore := v41DenseTestPhase(t, m, "decode"), v41GroupedPhase(t, m, "decode")
+			m.v41SetExpertFaultPhase(V41PhaseDecode)
 			got := v41DecodeHistory(t, devSess, []int{1})
+			m.v41SetExpertFaultPhase(V41PhaseUnknown)
+			v41HalSeamDefaultProjectionRows(t, m, "decode", 1, denseBefore, groupedBefore)
 
 			// One decode Step (seq == 1) runs the token-major MoE contraction: NumExpertsPerTok
 			// routed picks, each running gate + up + down (fak#13704 added the device down seam),
 			// so three device MatMuls per pick.
 			picks := m.Cfg.NumExpertsPerTok * m.Cfg.NumLayers
-			if be.matmuls != 3*picks {
-				t.Fatalf("device MatMul count = %d, want %d (gate+up+down per routed pick)", be.matmuls, 3*picks)
+			if expertMatMuls := v41HalSeamExpertMatMuls(t, devSess, be, picks); expertMatMuls != 3*picks {
+				t.Fatalf("device expert MatMul count = %d, want %d (gate+up+down per routed pick)", expertMatMuls, 3*picks)
 			}
 			if limit == 0 && be.swiglu != picks {
 				t.Fatalf("zero-limit device SwiGLU count = %d, want %d (one fused SwiGLU per routed pick)", be.swiglu, picks)

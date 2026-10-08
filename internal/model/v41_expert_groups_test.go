@@ -399,17 +399,21 @@ func TestV41ExpertGroupsDeviceSeam(t *testing.T) {
 			if devState.expertGateUp == nil {
 				t.Fatal("a DeviceMemory session did not bind the device gate/up callback")
 			}
+			denseBefore, groupedBefore := v41DenseTestPhase(t, m, "prefill"), v41GroupedPhase(t, m, "prefill")
+			m.v41SetExpertFaultPhase(V41PhasePrefill)
 			devAct, err := m.forwardV41(ids, devState)
+			m.v41SetExpertFaultPhase(V41PhaseUnknown)
 			if err != nil {
 				t.Fatalf("device grouped %d-token prefill: %v", len(ids), err)
 			}
+			v41HalSeamDefaultProjectionRows(t, m, "prefill", len(ids), denseBefore, groupedBefore)
 
 			// (a) The grouped contraction offered EVERY routed row to the device seam:
 			// three MatMuls (gate, up, down) per (token, pick, layer) now that fak#13704
 			// added the device down seam, with fused SwiGLU at limit zero.
 			rows := len(ids) * m.Cfg.NumExpertsPerTok * m.Cfg.NumLayers
-			if be.matmuls != 3*rows {
-				t.Fatalf("device MatMul count = %d, want %d (gate+up+down per grouped row)", be.matmuls, 3*rows)
+			if expertMatMuls := v41HalSeamExpertMatMuls(t, devSess, be, rows); expertMatMuls != 3*rows {
+				t.Fatalf("device expert MatMul count = %d, want %d (gate+up+down per grouped row)", expertMatMuls, 3*rows)
 			}
 			if limit == 0 && be.swiglu != rows {
 				t.Fatalf("zero-limit device SwiGLU count = %d, want %d (one fused SwiGLU per grouped row)", be.swiglu, rows)
