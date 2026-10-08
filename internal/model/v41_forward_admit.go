@@ -2,7 +2,6 @@ package model
 
 import (
 	"fmt"
-	"math"
 )
 
 // v41KVLoraRankReduced is the reduced-model KV latent width. The published V4.1
@@ -299,53 +298,14 @@ func (m *Model) v41CompressedRowsWithProjection(l int, ratio int, kvRows [][]flo
 // the declared candidate source, so the selection reads a blocked pool rather
 // than the full compressed set.
 func (m *Model) v41IndexRows(l int, qLat []float32, hidden []float32, keys [][]float32) ([]int32, error) {
-	d41 := m.Cfg.DeepSeekV41
-	if d41 == nil {
+	if !indexSourceAt(m.Cfg.DeepSeekV41, l) {
 		return nil, nil
 	}
-	isSource := false
-	for _, src := range d41.IndexSourceLayerIDs {
-		if src == l {
-			isSource = true
-			break
-		}
-	}
-	if !isSource {
-		return nil, nil
-	}
-	cfg := m.Cfg
-	nHeads, headDim := cfg.IndexNHeads, cfg.IndexHeadDim
-	if nHeads <= 0 || headDim <= 0 {
-		return nil, v41StageErr(v41StageIndexer, l,
-			fmt.Errorf("%w: indexer geometry nHeads=%d headDim=%d is not declared", ErrV41ForwardStage, nHeads, headDim))
-	}
-	wqB := m.tensor(layerName(l, "indexer.wq_b.weight"))
-	wk := m.tensor(layerName(l, "indexer.wk.weight"))
-	kNorm := m.tensor(layerName(l, "indexer.k_norm.weight"))
-	wProj := m.tensor(layerName(l, "indexer.weights_proj.weight"))
-	compressLen := len(keys)
-	q := matRows(wqB, qLat, nHeads*headDim, cfg.QLoraRank)
-	flatKeys := make([]float32, 0, compressLen*headDim)
-	for _, row := range keys {
-		projected := matRows(wk, row, headDim, len(row))
-		if len(kNorm) == headDim {
-			projected = rmsnormCfg(projected, kNorm, float32(cfg.RMSNormEps), cfg)
-		}
-		flatKeys = append(flatKeys, projected...)
-	}
-	weights := matRows(wProj, hidden, nHeads, cfg.HiddenSize)
-	for h := 0; h < nHeads; h++ {
-		weights[h] *= cfg.attnScale() * float32(1.0/math.Sqrt(float64(nHeads)))
-	}
-	topKBlocks, blockSize := 0, 0
-	if d41.CandidateSourceLayerID == l {
-		topKBlocks, blockSize = d41.CandidateTopKBlocks, d41.CandidateBlockSize
-	}
-	pub, err := NewV41IndexerPublication(l, q, flatKeys, weights, nHeads, headDim, compressLen, topKBlocks, blockSize, cfg.IndexTopK, 0)
+	projected, err := m.v41IndexKeys(l, keys, nil)
 	if err != nil {
-		return nil, v41StageErr(v41StageIndexer, l, err)
+		return nil, err
 	}
-	return pub.Rows(), nil
+	return m.v41IndexRowsProjected(l, qLat, hidden, projected, nil)
 }
 
 // v41KVSourceForwardAdmitted fails closed when the config declares a shared-KV

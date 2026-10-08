@@ -555,6 +555,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	// registry only. This mirrors v41Layer's source-then-consumer ordering (#12896)
 	// at seq == 1.
 	var sharedKV [][]float32
+	var sourceIdx []int32
 	if plan.Ratio > 1 {
 		width := v41CompressorWidth(cfg)
 		normWeight := m.tensor(layerName(l, "attn.compressor.norm.weight"))
@@ -571,7 +572,6 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		var indexPub bool
 		var projectIndex func([]float32) ([]float32, error)
 		if indexSourceAt(cfg.DeepSeekV41, l) {
-			wproj := m.tensor(layerName(l, "indexer.wk.weight"))
 			kNorm := m.tensor(layerName(l, "indexer.k_norm.weight"))
 			indexDim := cfg.IndexHeadDim
 			if indexDim <= 0 {
@@ -580,7 +580,10 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 			}
 			indexPub = true
 			projectIndex = func(row []float32) ([]float32, error) {
-				projected := matRows(wproj, row, indexDim, len(row))
+				projected, err := m.v41ProjMatRowsWithProjection(l, "indexer.wk.weight", row, indexDim, len(row), scratch.denseProjection)
+				if err != nil {
+					return nil, err
+				}
 				if len(kNorm) == indexDim {
 					projected = rmsnormCfg(projected, kNorm, eps, cfg)
 				}
@@ -622,8 +625,20 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 			_ = end
 		}
 		if indexPub {
-			rows, _ := layerState.KVSourceRows(l)
-			if err := m.v41RoleStepPublishTopK(registry, l, plan, qLat, collapsed, rows); err != nil {
+			keys, ok := layerState.IndexKeys(l)
+			rows, rowsOK := layerState.KVSourceRows(l)
+			if len(rows) != len(keys) || (rowsOK && !ok) {
+				return v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: own index history is incomplete", ErrV41ForwardStage))
+			}
+			sourceIdx, err = m.v41IndexRowsProjected(l, qLat, collapsed, keys, scratch.denseProjection)
+			if err != nil {
+				return err
+			}
+			row, err := m.v41RoleStepNormalizeIndex(l, plan, sourceIdx, len(keys))
+			if err != nil {
+				return err
+			}
+			if err := registry.PublishTopK(plan.Ratio, [][]int32{row}); err != nil {
 				return err
 			}
 		}
@@ -664,7 +679,13 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		if indexSourceAt(cfg.DeepSeekV41, l) {
 			indexState = layerState
 		}
-		idx, ierr := m.v41RoleStepIndex(indexState, l, plan, qLat, collapsed, len(sharedKV))
+		var idx []int32
+		var ierr error
+		if indexSourceAt(cfg.DeepSeekV41, l) {
+			idx, ierr = m.v41RoleStepNormalizeIndex(l, plan, sourceIdx, len(sharedKV))
+		} else {
+			idx, ierr = m.v41RoleStepIndex(indexState, l, plan, qLat, collapsed, len(sharedKV))
+		}
 		if ierr != nil {
 			return ierr
 		}

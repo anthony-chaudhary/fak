@@ -114,6 +114,15 @@ type v41ExpertFaultPhaseLedger struct {
 	GroupedOutputNanos                 int64 `json:"grouped_output_nanos"`
 	GroupedOutputHostWeightF32Bytes    int64 `json:"grouped_output_host_weight_f32_bytes"`
 
+	IndexerProjectionDeviceCalls              int   `json:"indexer_projection_device_calls"`
+	IndexerProjectionHostCalls                int   `json:"indexer_projection_host_calls"`
+	IndexerProjectionDeviceRows               int   `json:"indexer_projection_device_rows"`
+	IndexerProjectionHostRows                 int   `json:"indexer_projection_host_rows"`
+	IndexerProjectionActivationUploadBytes    int64 `json:"indexer_projection_activation_upload_bytes"`
+	IndexerProjectionReadbackBytes            int64 `json:"indexer_projection_readback_bytes"`
+	IndexerProjectionNanos                    int64 `json:"indexer_projection_nanos"`
+	IndexerScoringCalls                       int   `json:"indexer_scoring_calls"`
+	IndexerScoringNanos                       int64 `json:"indexer_scoring_nanos"`
 	CompressorProjectionDeviceCalls           int   `json:"compressor_projection_device_calls"`
 	CompressorProjectionHostCalls             int   `json:"compressor_projection_host_calls"`
 	CompressorProjectionDeviceRows            int   `json:"compressor_projection_device_rows"`
@@ -649,6 +658,48 @@ func (m *Model) v41NoteCompressorProjection(deviceCalls, hostCalls, deviceRows, 
 	if opened != 0 {
 		if elapsed := l.nowLocked() - opened; elapsed > 0 {
 			led.CompressorProjectionNanos += elapsed
+		}
+	}
+}
+func (m *Model) v41NoteIndexerProjection(deviceCalls, hostCalls, deviceRows, hostRows int, upload, readback int64, opened int64) {
+	l := v41ExpertFaultLedgerOf(m, false)
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	led := l.ledgerLocked()
+	if led == nil {
+		return
+	}
+	led.IndexerProjectionDeviceCalls += deviceCalls
+	led.IndexerProjectionHostCalls += hostCalls
+	led.IndexerProjectionDeviceRows += deviceRows
+	led.IndexerProjectionHostRows += hostRows
+	led.IndexerProjectionActivationUploadBytes += upload
+	led.IndexerProjectionReadbackBytes += readback
+	if opened != 0 {
+		if elapsed := l.nowLocked() - opened; elapsed > 0 {
+			led.IndexerProjectionNanos += elapsed
+		}
+	}
+}
+
+func (m *Model) v41NoteIndexerScoring(opened int64) {
+	l := v41ExpertFaultLedgerOf(m, false)
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	led := l.ledgerLocked()
+	if led == nil {
+		return
+	}
+	led.IndexerScoringCalls++
+	if opened != 0 {
+		if elapsed := l.nowLocked() - opened; elapsed > 0 {
+			led.IndexerScoringNanos += elapsed
 		}
 	}
 }

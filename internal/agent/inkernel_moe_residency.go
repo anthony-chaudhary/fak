@@ -110,6 +110,7 @@ type V41PhaseLifetimeSnapshot struct {
 	Decode      V41PhaseSnapshot                   `json:"decode"`
 	Projections V41ProjectionPhaseLifetimeSnapshot `json:"projections"`
 	Compressor  V41CompressorPhaseLifetimeSnapshot `json:"compressor"`
+	Indexer     V41IndexerPhaseLifetimeSnapshot    `json:"indexer"`
 }
 
 // V41PhaseSnapshot deliberately contains only fixed-shape numeric counters.
@@ -188,6 +189,37 @@ type V41CompressorPhaseSnapshot struct {
 	CompressorProjectionNanos                 int64 `json:"compressor_projection_nanos"`
 }
 
+type V41IndexerPhaseLifetimeSnapshot struct {
+	Prefill V41IndexerPhaseSnapshot `json:"prefill"`
+	Decode  V41IndexerPhaseSnapshot `json:"decode"`
+}
+
+type V41IndexerPhaseSnapshot struct {
+	IndexerProjectionDeviceCalls           int   `json:"indexer_projection_device_calls"`
+	IndexerProjectionHostCalls             int   `json:"indexer_projection_host_calls"`
+	IndexerProjectionDeviceRows            int   `json:"indexer_projection_device_rows"`
+	IndexerProjectionHostRows              int   `json:"indexer_projection_host_rows"`
+	IndexerProjectionActivationUploadBytes int64 `json:"indexer_projection_activation_upload_bytes"`
+	IndexerProjectionReadbackBytes         int64 `json:"indexer_projection_readback_bytes"`
+	IndexerProjectionNanos                 int64 `json:"indexer_projection_nanos"`
+	IndexerScoringCalls                    int   `json:"indexer_scoring_calls"`
+	IndexerScoringNanos                    int64 `json:"indexer_scoring_nanos"`
+}
+
+func v41IndexerPhaseSnapshot(in model.V41ExpertFaultAttributionPhase) V41IndexerPhaseSnapshot {
+	return V41IndexerPhaseSnapshot{
+		IndexerProjectionDeviceCalls:           in.IndexerProjectionDeviceCalls,
+		IndexerProjectionHostCalls:             in.IndexerProjectionHostCalls,
+		IndexerProjectionDeviceRows:            in.IndexerProjectionDeviceRows,
+		IndexerProjectionHostRows:              in.IndexerProjectionHostRows,
+		IndexerProjectionActivationUploadBytes: in.IndexerProjectionActivationUploadBytes,
+		IndexerProjectionReadbackBytes:         in.IndexerProjectionReadbackBytes,
+		IndexerProjectionNanos:                 in.IndexerProjectionNanos,
+		IndexerScoringCalls:                    in.IndexerScoringCalls,
+		IndexerScoringNanos:                    in.IndexerScoringNanos,
+	}
+}
+
 // HitRate is Hits/(Hits+PageIns) over the whole serve — the activated-set hit rate, weighted by
 // staging volume rather than by request count. It answers 0 when no staging ever happened, which
 // reads as "not measured" and not as "everything missed".
@@ -261,11 +293,12 @@ func (p *InKernelPlanner) foldV41PhasesLocked(at model.V41ExpertFaultAttribution
 		Prefill: v41CompressorPhaseSnapshot(at.Prefill),
 		Decode:  v41CompressorPhaseSnapshot(at.Decode),
 	}
-	if prefill == (V41PhaseSnapshot{}) && decode == (V41PhaseSnapshot{}) && projections == (V41ProjectionPhaseLifetimeSnapshot{}) && compressor == (V41CompressorPhaseLifetimeSnapshot{}) {
+	indexer := V41IndexerPhaseLifetimeSnapshot{Prefill: v41IndexerPhaseSnapshot(at.Prefill), Decode: v41IndexerPhaseSnapshot(at.Decode)}
+	if prefill == (V41PhaseSnapshot{}) && decode == (V41PhaseSnapshot{}) && projections == (V41ProjectionPhaseLifetimeSnapshot{}) && compressor == (V41CompressorPhaseLifetimeSnapshot{}) && indexer == (V41IndexerPhaseLifetimeSnapshot{}) {
 		return
 	}
 	p.moeResidency.V41Phases = &V41PhaseLifetimeSnapshot{
-		Scope: "model_lifetime", Prefill: prefill, Decode: decode, Projections: projections, Compressor: compressor,
+		Scope: "model_lifetime", Prefill: prefill, Decode: decode, Projections: projections, Compressor: compressor, Indexer: indexer,
 	}
 }
 

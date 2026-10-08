@@ -696,11 +696,18 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			sharedKV = rows
 		}
 	}
+	var indexKeys [][]float32
+	if indexSourceAt(cfg.DeepSeekV41, l) {
+		indexKeys, err = m.v41IndexKeys(l, compressedKV, scratch.denseProjection)
+		if err != nil {
+			return err
+		}
+	}
 	var indexList []int32
 	if plan.Ratio > 1 && indexSourceAt(cfg.DeepSeekV41, l) {
 		for t := 0; t < seq; t++ {
 			groups := min((t+1)/plan.Ratio, len(compressedKV))
-			localIdx, err := m.v41IndexRows(l, qLatRows[t], preByPos[t], compressedKV[:groups])
+			localIdx, err := m.v41IndexRowsProjected(l, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection)
 			if err != nil {
 				return err
 			}
@@ -711,7 +718,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			indexList = append(indexList, row...)
 		}
 	} else {
-		localIdx, err := m.v41IndexRows(l, qLatRows[seq-1], preByPos[seq-1], compressedKV)
+		localIdx, err := m.v41IndexRowsProjected(l, qLatRows[seq-1], preByPos[seq-1], indexKeys, scratch.denseProjection)
 		if err != nil {
 			return err
 		}
@@ -729,19 +736,6 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	// in the per-forward registry; retained session state contains only the
 	// configured window tail and incomplete compressor group.
 	if st != nil {
-		var indexKeys [][]float32
-		if plan.Ratio > 1 && indexSourceAt(cfg.DeepSeekV41, l) && len(compressedKV) > 0 {
-			weight := m.tensor(layerName(l, "indexer.wk.weight"))
-			norm := m.tensor(layerName(l, "indexer.k_norm.weight"))
-			indexKeys = make([][]float32, len(compressedKV))
-			for i, row := range compressedKV {
-				key := matRows(weight, row, cfg.IndexHeadDim, len(row))
-				if len(norm) == cfg.IndexHeadDim {
-					key = rmsnormCfg(key, norm, eps, cfg)
-				}
-				indexKeys[i] = key
-			}
-		}
 		layerState, err := NewV41AttentionState(hd, 8)
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)
