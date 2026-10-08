@@ -24,18 +24,24 @@ type v41DenseTestOp struct {
 // without claiming a physical device. Dtype promises govern admission explicitly.
 type v41DenseTestBackend struct {
 	compute.Backend
-	ops            []v41DenseTestOp
-	uploads, reads map[compute.Buffer]int
-	live           map[compute.Buffer]bool
-	deny           bool
-	fail           any
-	failSite       string
-	beforeFailure  func()
-	malformed      bool
+	ops              []v41DenseTestOp
+	uploads, reads   map[compute.Buffer]int
+	live             map[compute.Buffer]bool
+	deny             bool
+	fail             any
+	failSite         string
+	beforeFailure    func()
+	malformed        bool
+	faultWeight      compute.Buffer
+	faultOutputs     map[compute.Buffer]bool
+	faultUpload      func() bool
+	armUploadWeight  compute.Buffer
+	armUploadOutputs map[compute.Buffer]bool
+	uploadArmed      bool
 }
 
 func newV41DenseTestBackend() *v41DenseTestBackend {
-	return &v41DenseTestBackend{Backend: compute.Default(), uploads: map[compute.Buffer]int{}, reads: map[compute.Buffer]int{}, live: map[compute.Buffer]bool{}}
+	return &v41DenseTestBackend{Backend: compute.Default(), uploads: map[compute.Buffer]int{}, reads: map[compute.Buffer]int{}, live: map[compute.Buffer]bool{}, faultOutputs: map[compute.Buffer]bool{}, armUploadOutputs: map[compute.Buffer]bool{}}
 }
 func (b *v41DenseTestBackend) Caps() compute.Caps {
 	c := b.Backend.Caps()
@@ -47,7 +53,7 @@ func (b *v41DenseTestBackend) SupportsDeviceWeightDtype(dt compute.Dtype) bool {
 	return !b.deny && compute.BackendSupportsDeviceWeightDtype(b.Backend, dt)
 }
 func (b *v41DenseTestBackend) Upload(x compute.Tensor, dt compute.Dtype) compute.Tensor {
-	if b.fail != nil && b.failSite == "upload" && len(x.Shape) == 1 {
+	if b.fail != nil && b.failSite == "upload" && len(x.Shape) == 1 && (b.faultUpload == nil || b.faultUpload()) {
 		panic(b.fail)
 	}
 	out := b.Backend.Upload(x, dt)
@@ -64,41 +70,61 @@ func (b *v41DenseTestBackend) Upload(x compute.Tensor, dt compute.Dtype) compute
 	return out
 }
 func (b *v41DenseTestBackend) MatMul(w, x compute.Tensor) compute.Tensor {
-	if b.fail != nil && b.failSite == "matmul" {
+	if b.fail != nil && b.failSite == "matmul" && (b.faultWeight == nil || b.faultWeight == w.Buf()) {
 		if b.beforeFailure != nil {
 			b.beforeFailure()
 		}
 		panic(b.fail)
 	}
 	out := b.Backend.MatMul(w, x)
+	if b.faultWeight != nil && b.faultWeight == w.Buf() {
+		b.faultOutputs[out.Buf()] = true
+	}
+	if b.armUploadWeight != nil && b.armUploadWeight == w.Buf() {
+		b.armUploadOutputs[out.Buf()] = true
+	}
 	b.ops = append(b.ops, v41DenseTestOp{w.Buf(), x.Buf(), out.Buf(), 1, w.Shape[1], w.Shape[0], false})
 	b.live[x.Buf()], b.live[out.Buf()] = true, true
 	return out
 }
 func (b *v41DenseTestBackend) BatchedMatMul(w, x compute.Tensor, rows int) compute.Tensor {
-	if b.fail != nil && b.failSite == "matmul" {
+	if b.fail != nil && b.failSite == "matmul" && (b.faultWeight == nil || b.faultWeight == w.Buf()) {
 		if b.beforeFailure != nil {
 			b.beforeFailure()
 		}
 		panic(b.fail)
 	}
 	out := b.Backend.BatchedMatMul(w, x, rows)
+	if b.faultWeight != nil && b.faultWeight == w.Buf() {
+		b.faultOutputs[out.Buf()] = true
+	}
+	if b.armUploadWeight != nil && b.armUploadWeight == w.Buf() {
+		b.armUploadOutputs[out.Buf()] = true
+	}
 	b.ops = append(b.ops, v41DenseTestOp{w.Buf(), x.Buf(), out.Buf(), rows, w.Shape[1], w.Shape[0], true})
 	b.live[x.Buf()], b.live[out.Buf()] = true, true
 	return out
 }
 func (b *v41DenseTestBackend) Read(x compute.Tensor) []float32 {
-	if b.fail != nil && b.failSite == "read" {
+	if b.fail != nil && b.failSite == "read" && (b.faultWeight == nil || b.faultOutputs[x.Buf()]) {
 		panic(b.fail)
 	}
 	values := b.Backend.Read(x)
-	if b.malformed {
+	if b.armUploadOutputs[x.Buf()] {
+		b.uploadArmed = true
+	}
+	if b.malformed && (b.faultWeight == nil || b.faultOutputs[x.Buf()]) {
 		values = append(append([]float32(nil), values...), 0)
 	}
 	b.reads[x.Buf()] = 4 * len(values)
 	return values
 }
-func (b *v41DenseTestBackend) Free(x compute.Tensor) { delete(b.live, x.Buf()); b.Backend.Free(x) }
+func (b *v41DenseTestBackend) Free(x compute.Tensor) {
+	delete(b.live, x.Buf())
+	delete(b.faultOutputs, x.Buf())
+	delete(b.armUploadOutputs, x.Buf())
+	b.Backend.Free(x)
+}
 
 func v41DenseTestPhase(t *testing.T, m *Model, phase string) map[string]float64 {
 	t.Helper()
@@ -350,6 +376,33 @@ func TestV41DenseProjectionSelectedFailureRollbackAndRetry(t *testing.T) {
 			b.live = map[compute.Buffer]bool{}
 			before := captureV41ForwardSnapshot(s.v41Forward)
 			phaseBefore := v41DenseTestPhase(t, m, "decode")
+			mhcBefore := v41MHCProjPhase(t, m, "decode")
+			for key, weight := range s.halW {
+				if strings.HasSuffix(key, layerName(0, "attn.wq_a.weight")) {
+					if b.faultWeight != nil {
+						t.Fatal("ambiguous first dense cached weight")
+					}
+					b.faultWeight = weight.Buf()
+				}
+				if strings.HasPrefix(key, "v41-mhc:"+layerName(0, "mhc.mixes.weight")+":") {
+					if b.armUploadWeight != nil {
+						t.Fatal("ambiguous preceding mHC cached weight")
+					}
+					b.armUploadWeight = weight.Buf()
+				}
+			}
+			if b.faultWeight == nil {
+				t.Fatal("first dense component cache identity missing")
+			}
+			if b.armUploadWeight == nil {
+				t.Fatal("preceding mHC component cache identity missing")
+			}
+			// Upload has no weight operand: the observed mHC result arms the following first dense wq_a activation in the default Step order.
+			b.faultUpload = func() bool {
+				armed := b.uploadArmed
+				b.uploadArmed = false
+				return armed
+			}
 			if site == "malformed" {
 				b.malformed = true
 			} else {
@@ -374,6 +427,10 @@ func TestV41DenseProjectionSelectedFailureRollbackAndRetry(t *testing.T) {
 				t.Errorf("failed dense projection leaked %d transient buffers", len(b.live))
 			}
 			delta := v41DenseTestDelta(v41DenseTestPhase(t, m, "decode"), phaseBefore)
+			mhc := v41DenseTestDelta(v41MHCProjPhase(t, m, "decode"), mhcBefore)
+			if mhc["mhc_projection_device_rows"] != 1 || mhc["mhc_projection_host_rows"] != 0 {
+				t.Errorf("default mHC preceding dense fault was not completed: %v", mhc)
+			}
 			if delta["dense_projection_device_calls"] != 1 || delta["dense_projection_device_rows"] != 0 || delta["dense_projection_host_calls"] != 0 || delta["dense_projection_host_rows"] != 0 || delta["dense_projection_nanos"] <= 0 {
 				t.Errorf("failed projection attempt accounting=%v", delta)
 			}
@@ -394,6 +451,7 @@ func TestV41DenseProjectionSelectedFailureRollbackAndRetry(t *testing.T) {
 				}
 			}
 			b.fail, b.failSite, b.malformed = nil, "", false
+			b.faultUpload = nil
 			got := s.Step(4)
 			oracle := v41DenseTestFixture(t, false, false)
 			v41DenseTestParity(t, got, lastLogits(oracle.Forward([]int{1, 2, 3, 4})))
@@ -416,13 +474,21 @@ func TestV41DenseProjectionRestoreTargetOwnership(t *testing.T) {
 	if err := snap.Restore(target); err != nil {
 		t.Fatal(err)
 	}
-	target.v41State().groupedOutput = nil
 	source.Close()
 	before := len(shared.ops)
+	mhcBefore, groupBefore := v41MHCProjPhase(t, m, "decode"), v41GroupedPhase(t, m, "decode")
 	got := target.Step(4)
 	named, _, _ := v41DenseTestOps(target, shared, before)
-	if len(shared.ops)-before != 7 {
+	denseCalls := 0
+	for _, ops := range named {
+		denseCalls += len(ops)
+	}
+	if denseCalls != 7 {
 		t.Error("restored projection callback did not execute target session")
+	}
+	mhc, group := v41DenseTestDelta(v41MHCProjPhase(t, m, "decode"), mhcBefore), v41DenseTestDelta(v41GroupedPhase(t, m, "decode"), groupBefore)
+	if mhc["mhc_projection_device_rows"] != 1 || group["grouped_output_device_rows"] != 1 {
+		t.Errorf("restored default mHC/grouped composition missing: %v/%v", mhc, group)
 	}
 	for _, leaf := range v41DenseTestLeaves {
 		if len(named[leaf]) != 1 {
@@ -490,6 +556,17 @@ func TestV41DenseProjectionClosedAndUnknownPanicPriority(t *testing.T) {
 			s := v41DenseTestSession(t, m, b)
 			s.Prefill([]int{1, 2, 3})
 			unknown := struct{ value int }{17}
+			for key, weight := range s.halW {
+				if strings.HasSuffix(key, layerName(0, "attn.wq_a.weight")) {
+					if b.faultWeight != nil {
+						t.Fatal("ambiguous first dense cached weight")
+					}
+					b.faultWeight = weight.Buf()
+				}
+			}
+			if b.faultWeight == nil {
+				t.Fatal("first dense component cache identity missing")
+			}
 			var expected any = unknown
 			if closed {
 				expected = &BackendForwardOperationError{Backend: "test-device", Cause: ErrV41ForwardStage}

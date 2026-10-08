@@ -138,11 +138,6 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
 	ffnNorm := m.tensor(layerName(l, "ffn_norm.weight"))
-	wMix, err := m.v41MHCMixF32Into(l, scratch.mhc)
-	if err != nil {
-		return err
-	}
-	scratch.mhc = wMix
 	mixBase := m.tensor(layerName(l, "mhc.base"))
 	mixScale := m.tensor(layerName(l, "mhc.scale"))
 	projectOutput := m.v41GroupedOutputProjector(l, nH, hd, cfg.OGroups, cfg.OLoraRank, H, scratch)
@@ -167,13 +162,24 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 			fmt.Errorf("%w: mHC mix weight holds no admitted geometry", ErrV41ForwardStage))
 	}
 	xn := rmsnormCfg(x, attnNorm, eps, cfg)
-	var mixes []float32
+	input := xn
 	if mhcFlat {
-		if mixes, err = v41MHCProjectFull(wMix, streams, H, eps, mhcTransposed); err != nil {
-			return v41StageErr(v41StageMHC, l, err)
+		width, ok := checkedMulInt(4, H)
+		if !ok || len(streams) != 4 {
+			return v41StageErr(v41StageMHC, l, errV41ProjectionResult)
 		}
-	} else {
-		mixes = matRows(wMix, xn, v41MHCMixWidth, H)
+		input = make([]float32, 0, width)
+		for _, stream := range streams {
+			if len(stream) != H {
+				return v41StageErr(v41StageMHC, l, errV41ProjectionResult)
+			}
+			input = append(input, stream...)
+		}
+	}
+	projectMHC := m.v41MHCProjector(l, H, eps, mhcFlat, mhcTransposed, scratch)
+	mixes, err := projectMHC(input)
+	if err != nil {
+		return err
 	}
 	mix, err := v41MHCSplit(mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg))
 	if err != nil {
@@ -458,11 +464,6 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	}
 
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
-	wMix, err := m.v41MHCMixF32Into(l, scratch.mhc)
-	if err != nil {
-		return err
-	}
-	scratch.mhc = wMix
 	mixBase := m.tensor(layerName(l, "mhc.base"))
 	mixScale := m.tensor(layerName(l, "mhc.scale"))
 	projectOutput := m.v41GroupedOutputProjector(l, nH, hd, cfg.OGroups, cfg.OLoraRank, H, scratch)
@@ -474,13 +475,24 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 			fmt.Errorf("%w: mHC mix weight holds no admitted geometry", ErrV41ForwardStage))
 	}
 	xn := rmsnormCfg(x, attnNorm, eps, cfg)
-	var mixes []float32
+	input := xn
 	if mhcFlat {
-		if mixes, err = v41MHCProjectFull(wMix, streams, H, eps, mhcTransposed); err != nil {
-			return v41StageErr(v41StageMHC, l, err)
+		width, ok := checkedMulInt(4, H)
+		if !ok || len(streams) != 4 {
+			return v41StageErr(v41StageMHC, l, errV41ProjectionResult)
 		}
-	} else {
-		mixes = matRows(wMix, xn, v41MHCMixWidth, H)
+		input = make([]float32, 0, width)
+		for _, stream := range streams {
+			if len(stream) != H {
+				return v41StageErr(v41StageMHC, l, errV41ProjectionResult)
+			}
+			input = append(input, stream...)
+		}
+	}
+	projectMHC := m.v41MHCProjector(l, H, eps, mhcFlat, mhcTransposed, scratch)
+	mixes, err := projectMHC(input)
+	if err != nil {
+		return err
 	}
 	mix, err := v41MHCSplit(mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg))
 	if err != nil {

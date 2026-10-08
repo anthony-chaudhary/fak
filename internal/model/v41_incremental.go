@@ -97,10 +97,12 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	scratch.expertGateUp, scratch.expertDown = st.expertGateUp, st.expertDown
 	scratch.denseProjection = st.denseProjection
 	scratch.groupedOutput = st.groupedOutput
+	scratch.mhcProjection = st.mhcProjection
 	defer func() {
 		scratch.expertGateUp, scratch.expertDown = nil, nil
 		scratch.denseProjection = nil
 		scratch.groupedOutput = nil
+		scratch.mhcProjection = nil
 	}()
 	if err := m.v41ForwardAdmitted(); err != nil {
 		return nil, stats, err

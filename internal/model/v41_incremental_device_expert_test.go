@@ -70,13 +70,66 @@ func v41IncrementalExpertSession(t *testing.T, m *Model) (*Session, *v41HalSeamB
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.v41State().denseProjection = nil
-	s.v41State().groupedOutput = nil
 	t.Cleanup(s.Close)
 	if len(s.Prefill([]int{1, 2, 3})) == 0 || !s.v41IncrementalEligible() {
 		t.Fatal("fresh prefill did not seed an eligible session")
 	}
 	return s, b
+}
+
+func v41IncrementalExpertMatMuls(t *testing.T, s *Session, b *v41HalSeamBackend, start, rows int) int {
+	t.Helper()
+	experts := map[compute.Buffer]string{}
+	known := map[compute.Buffer]bool{}
+	for _, weight := range s.halW {
+		known[weight.Buf()] = true
+	}
+	for layer := 0; layer < s.M.Cfg.NumLayers; layer++ {
+		for expert := 0; expert < s.M.Cfg.NumExperts; expert++ {
+			for _, leaf := range []string{"w1.weight", "w3.weight", "w2.weight"} {
+				name := layerName(layer, "ffn.experts."+itoa(expert)+"."+leaf)
+				resolved, ok := s.resolveExpertWeight(name)
+				if !ok {
+					continue
+				}
+				if weight, ok := s.halW[resolved.halKey()]; ok {
+					if _, duplicate := experts[weight.Buf()]; duplicate {
+						t.Fatal("expert projections share an ambiguous recorded weight identity")
+					}
+					experts[weight.Buf()] = leaf
+				}
+			}
+		}
+	}
+	if len(b.matmulWeights) != b.matmuls {
+		t.Fatal("aggregate MatMul attempts differ from actual weight records")
+	}
+	if start < 0 || start > len(b.matmulWeights) {
+		t.Fatal("expert MatMul interval is outside the recorded operations")
+	}
+	counts := map[string]int{}
+	ordinary := 0
+	for _, weight := range b.matmulWeights[start:] {
+		if leaf, ok := experts[weight]; ok {
+			counts[leaf]++
+		} else {
+			if !known[weight] {
+				t.Fatal("recorded MatMul weight has no Session-owned identity")
+			}
+			ordinary++
+		}
+	}
+	if ordinary == 0 {
+		t.Error("default composed projection operations were not recorded")
+	}
+	total := 0
+	for _, leaf := range []string{"w1.weight", "w3.weight", "w2.weight"} {
+		if counts[leaf] != rows {
+			t.Errorf("actual incremental expert %s MatMul count=%d want %d", leaf, counts[leaf], rows)
+		}
+		total += counts[leaf]
+	}
+	return total
 }
 
 func v41IncrementalExpertPhase(t *testing.T, m *Model, phase string) map[string]float64 {
@@ -124,7 +177,7 @@ func TestV41IncrementalDeviceExpertSessionRoutes(t *testing.T) {
 				s, b := v41IncrementalExpertSession(t, m)
 				snapshot := captureV41ForwardSnapshot(s.v41Forward)
 				scratchState := &v41ForwardState{history: snapshot.history, layers: snapshot.layers, attn: snapshot.attn, expertGateUp: s.v41Forward.expertGateUp, expertDown: s.v41Forward.expertDown}
-				before := b.matmuls
+				before := len(b.matmulWeights)
 				phase := "decode"
 				ids := []int{4}
 				var got []float32
@@ -136,7 +189,7 @@ func TestV41IncrementalDeviceExpertSessionRoutes(t *testing.T) {
 					got = s.Step(4)
 				}
 				rows := len(ids) * m.Cfg.NumExpertsPerTok * m.Cfg.NumLayers
-				if n := b.matmuls - before; n != 3*rows {
+				if n := v41IncrementalExpertMatMuls(t, s, b, before, rows); n != 3*rows {
 					t.Errorf("actual session route executed %d expert MatMuls, want %d", n, 3*rows)
 				}
 				oracle := v41IncrementalExpertFixture(t, role, false).Forward(append([]int{1, 2, 3}, ids...))
@@ -148,9 +201,9 @@ func TestV41IncrementalDeviceExpertSessionRoutes(t *testing.T) {
 				if p["incremental_device_dispatch_nanos"] <= 0 {
 					t.Error("incremental callback dispatch elapsed absent")
 				}
-				continuedBefore := b.matmuls
+				continuedBefore := len(b.matmulWeights)
 				continued := s.Step(6)
-				if b.matmuls-continuedBefore != 3*m.Cfg.NumExpertsPerTok*m.Cfg.NumLayers {
+				if rows := m.Cfg.NumExpertsPerTok * m.Cfg.NumLayers; v41IncrementalExpertMatMuls(t, s, b, continuedBefore, rows) != 3*rows {
 					t.Error("subsequent Step recomputed history or bypassed expert callbacks")
 				}
 				history := append(append([]int{1, 2, 3}, ids...), 6)
@@ -174,9 +227,10 @@ func TestV41IncrementalDeviceExpertStreamedAttribution(t *testing.T) {
 	t.Parallel()
 	m := v41IncrementalExpertFixture(t, false, true)
 	s, b := v41IncrementalExpertSession(t, m)
-	before := b.matmuls
+	before := len(b.matmulWeights)
 	got := s.Step(4)
-	if len(got) == 0 || b.matmuls-before != 3*m.Cfg.NumExpertsPerTok {
+	rows := m.Cfg.NumExpertsPerTok * m.Cfg.NumLayers
+	if n := v41IncrementalExpertMatMuls(t, s, b, before, rows); len(got) == 0 || n != 3*rows {
 		t.Error("streamed Step bypassed installed expert callbacks")
 	}
 	p := v41IncrementalExpertPhase(t, m, "decode")
@@ -267,10 +321,11 @@ func TestV41IncrementalDeviceExpertSessionOwnership(t *testing.T) {
 	m := v41IncrementalExpertFixture(t, false, false)
 	a, ba := v41IncrementalExpertSession(t, m)
 	b, bb := v41IncrementalExpertSession(t, m)
-	na, nb := ba.matmuls, bb.matmuls
+	na, nb := ba.matmuls, len(bb.matmulWeights)
 	snapshot := captureV41ForwardSnapshot(a.v41Forward)
 	got := b.Step(4)
-	if ba.matmuls != na || bb.matmuls-nb != 3*m.Cfg.NumExpertsPerTok {
+	rows := m.Cfg.NumExpertsPerTok * m.Cfg.NumLayers
+	if n := v41IncrementalExpertMatMuls(t, b, bb, nb, rows); ba.matmuls != na || n != 3*rows {
 		t.Error("fresh session dispatched through stale peer backend")
 	}
 	if !reflect.DeepEqual(snapshot, captureV41ForwardSnapshot(a.v41Forward)) {

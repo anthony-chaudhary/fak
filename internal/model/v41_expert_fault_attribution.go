@@ -82,6 +82,16 @@ func (p V41ExpertPhase) String() string {
 // dequant, each pick by its contraction) but are summed into three independent
 // accumulators so a run can say which one dominates.
 type v41ExpertFaultPhaseLedger struct {
+	MHCProjectionDeviceCalls           int   `json:"mhc_projection_device_calls"`
+	MHCProjectionHostCalls             int   `json:"mhc_projection_host_calls"`
+	MHCProjectionDeviceRows            int   `json:"mhc_projection_device_rows"`
+	MHCProjectionHostRows              int   `json:"mhc_projection_host_rows"`
+	MHCProjectionMatMulCalls           int   `json:"mhc_projection_matmul_calls"`
+	MHCProjectionActivationUploadBytes int64 `json:"mhc_projection_activation_upload_bytes"`
+	MHCProjectionReadbackBytes         int64 `json:"mhc_projection_readback_bytes"`
+	MHCProjectionNanos                 int64 `json:"mhc_projection_nanos"`
+	MHCProjectionHostWeightF32Bytes    int64 `json:"mhc_projection_host_weight_f32_bytes"`
+
 	EngramProjectionDeviceCalls           int   `json:"engram_projection_device_calls"`
 	EngramProjectionHostCalls             int   `json:"engram_projection_host_calls"`
 	EngramProjectionDeviceRows            int   `json:"engram_projection_device_rows"`
@@ -647,6 +657,32 @@ func (m *Model) v41NoteEngramProjection(deviceCalls, hostCalls, deviceRows, host
 	if opened != 0 {
 		if elapsed := l.nowLocked() - opened; elapsed > 0 {
 			led.EngramProjectionNanos += elapsed
+		}
+	}
+}
+
+func (m *Model) v41NoteMHCProjection(deviceCalls, hostCalls, deviceRows, hostRows, matmulCalls int, upload, readback, hostBytes, opened int64) {
+	l := v41ExpertFaultLedgerOf(m, false)
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	led := l.ledgerLocked()
+	if led == nil {
+		return
+	}
+	led.MHCProjectionDeviceCalls += deviceCalls
+	led.MHCProjectionHostCalls += hostCalls
+	led.MHCProjectionDeviceRows += deviceRows
+	led.MHCProjectionHostRows += hostRows
+	led.MHCProjectionMatMulCalls += matmulCalls
+	led.MHCProjectionActivationUploadBytes += upload
+	led.MHCProjectionReadbackBytes += readback
+	led.MHCProjectionHostWeightF32Bytes += hostBytes
+	if opened != 0 {
+		if elapsed := l.nowLocked() - opened; elapsed > 0 {
+			led.MHCProjectionNanos += elapsed
 		}
 	}
 }

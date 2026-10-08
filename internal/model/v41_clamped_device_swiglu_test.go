@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -19,10 +20,35 @@ type v41ClampedReadBackend struct {
 	matmulAttempts, failMatmulAt int
 	live                         map[compute.Buffer]bool
 	failRead                     bool
+	session                      *Session
+	roles                        map[compute.Buffer]string
 }
 
 func newV41ClampedReadBackend() *v41ClampedReadBackend {
-	return &v41ClampedReadBackend{v41HalSeamBackend: &v41HalSeamBackend{Backend: compute.Default()}, live: map[compute.Buffer]bool{}}
+	return &v41ClampedReadBackend{v41HalSeamBackend: &v41HalSeamBackend{Backend: compute.Default()}, live: map[compute.Buffer]bool{}, roles: map[compute.Buffer]string{}}
+}
+
+func (b *v41ClampedReadBackend) expertWeightRole(w compute.Tensor) string {
+	if b.session == nil {
+		return ""
+	}
+	for name, weight := range b.session.halW {
+		if !strings.HasPrefix(name, "kquant-raw:") || !strings.Contains(name, ".ffn.experts.") || weight.Buf() != w.Buf() {
+			continue
+		}
+		for _, leaf := range []string{"w1.weight", "w3.weight", "w2.weight"} {
+			if strings.HasSuffix(name, "."+leaf) {
+				return leaf
+			}
+		}
+	}
+	return ""
+}
+
+func (b *v41ClampedReadBackend) recordActivation(g, u, out compute.Tensor) {
+	if b.roles[g.Buf()] == "w1.weight" && b.roles[u.Buf()] == "w3.weight" {
+		b.roles[out.Buf()] = "activation"
+	}
 }
 func (b *v41ClampedReadBackend) Upload(x compute.Tensor, dt compute.Dtype) compute.Tensor {
 	out := b.Backend.Upload(x, dt)
@@ -32,31 +58,44 @@ func (b *v41ClampedReadBackend) Upload(x compute.Tensor, dt compute.Dtype) compu
 	return out
 }
 func (b *v41ClampedReadBackend) MatMul(w, x compute.Tensor) compute.Tensor {
-	b.matmulAttempts++
-	if b.matmulAttempts == b.failMatmulAt {
-		panic(&compute.BackendError{Backend: "test-device", Class: compute.VulkanClassExecutionFailed, Site: "MatMul", Err: compute.ErrVulkanExecutionFailed})
+	role := b.expertWeightRole(w)
+	if role == "w1.weight" || role == "w3.weight" {
+		b.matmulAttempts++
+		if b.matmulAttempts == b.failMatmulAt {
+			panic(&compute.BackendError{Backend: "test-device", Class: compute.VulkanClassExecutionFailed, Site: "MatMul", Err: compute.ErrVulkanExecutionFailed})
+		}
 	}
 	out := b.v41HalSeamBackend.MatMul(w, x)
 	b.live[out.Buf()] = true
+	if role != "" {
+		b.roles[out.Buf()] = role
+	}
 	return out
 }
 func (b *v41ClampedReadBackend) Read(x compute.Tensor) []float32 {
-	b.readAttempts++
-	if b.failRead || b.readAttempts == b.failReadAt {
-		panic(&compute.BackendError{Backend: "test-device", Class: compute.VulkanClassExecutionFailed, Site: "Read", Err: compute.ErrVulkanExecutionFailed})
+	role := b.roles[x.Buf()]
+	if role == "w1.weight" || role == "w3.weight" || role == "activation" {
+		b.readAttempts++
+		if b.failRead || b.readAttempts == b.failReadAt {
+			panic(&compute.BackendError{Backend: "test-device", Class: compute.VulkanClassExecutionFailed, Site: "Read", Err: compute.ErrVulkanExecutionFailed})
+		}
 	}
 	out := b.Backend.Read(x)
-	b.reads++
-	b.readBytes += 4 * len(out)
+	if role != "" {
+		b.reads++
+		b.readBytes += 4 * len(out)
+	}
 	return out
 }
 func (b *v41ClampedReadBackend) Free(x compute.Tensor) {
 	delete(b.live, x.Buf())
+	delete(b.roles, x.Buf())
 	b.Backend.Free(x)
 }
 func (b *v41ClampedReadBackend) SwiGLU(g, u compute.Tensor) compute.Tensor {
 	out := b.v41HalSeamBackend.SwiGLU(g, u)
 	b.live[out.Buf()] = true
+	b.recordActivation(g, u, out)
 	return out
 }
 
@@ -83,6 +122,7 @@ func (b *v41ClampedLimitBackend) SwiGLUWithLimit(g, u compute.Tensor, limit floa
 	}
 	out := compute.NewF32(b, []int{len(values)}, values)
 	b.live[out.Buf()] = true
+	b.recordActivation(g, u, out)
 	return out
 }
 
@@ -137,8 +177,7 @@ func TestV41ClampedDeviceSwiGLUSessionStepAndSuffix(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				s.v41State().denseProjection = nil
-				s.v41State().groupedOutput = nil
+				b.session = s
 				t.Cleanup(s.Close)
 				if len(s.Prefill([]int{1, 2, 3})) == 0 || !s.v41IncrementalEligible() {
 					t.Fatal("prefill did not seed incremental session")
@@ -259,6 +298,7 @@ func TestV41ClampedDeviceSwiGLUWidth2048AndLegacyFallback(t *testing.T) {
 				be = limited
 			}
 			s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
+			recorder.session = s
 			got, outcome, err := s.v41ExpertGateUpFunc()(0, "ffn.experts.0", x)
 			if err != nil || outcome != v41GateUpHandled {
 				t.Fatalf("callback outcome=%v error=%v", outcome, err)
@@ -290,6 +330,7 @@ func TestV41ClampedDeviceSwiGLUWidth2048AndLegacyFallback(t *testing.T) {
 		m.Cfg.SwigluLimit = limit
 		b := &v41ClampedLimitBackend{v41ClampedReadBackend: newV41ClampedReadBackend()}
 		s := &Session{M: m, Backend: b, halW: map[string]compute.Tensor{}}
+		b.session = s
 		_, outcome, err := s.v41ExpertGateUpFunc()(0, "ffn.experts.0", make([]float32, H))
 		wantSwiGLU, wantReads := 1, 1
 		if math.IsInf(limit, 1) {
@@ -319,8 +360,7 @@ func TestV41ClampedDeviceSwiGLUFailureFreesAndRetries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s.v41State().denseProjection = nil
-			s.v41State().groupedOutput = nil
+			b.session = s
 			t.Cleanup(s.Close)
 			s.Prefill([]int{1, 2, 3})
 			b.live = map[compute.Buffer]bool{}

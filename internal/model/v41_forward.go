@@ -155,6 +155,7 @@ type v41ForwardState struct {
 	denseProjection  v41DenseProjectionFunc
 	groupedOutput    v41GroupedOutputFunc
 	engramProjection v41EngramProjectionFunc
+	mhcProjection    v41MHCProjectionFunc
 	callbackOwner    *Session
 }
 
@@ -279,7 +280,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, callbackOwner: st.callbackOwner}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -418,11 +419,13 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	}
 	scratch.denseProjection = nil
 	scratch.groupedOutput = nil
+	scratch.mhcProjection = nil
 	if st != nil {
 		scratch.denseProjection = st.denseProjection
 		scratch.groupedOutput = st.groupedOutput
+		scratch.mhcProjection = st.mhcProjection
 	}
-	defer func() { scratch.denseProjection = nil; scratch.groupedOutput = nil }()
+	defer func() { scratch.denseProjection = nil; scratch.groupedOutput = nil; scratch.mhcProjection = nil }()
 
 	// Engram injection happens at the START of the layer, into the residual,
 	// before attention and before attn_norm (ds41_graph_before_attention).
@@ -443,15 +446,6 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
 	ffnNorm := m.tensor(layerName(l, "ffn_norm.weight"))
-	// mhc.mixes.weight is the last whole-tensor f32 materializer in the forward.
-	// It is read once per layer and consumed read-only, so it reads into the
-	// forward-scoped scratch rather than allocating a fresh block per layer
-	// (#13288 companion seam). Values are byte-identical.
-	wMix, err := m.v41MHCMixF32Into(l, scratch.mhc)
-	if err != nil {
-		return err
-	}
-	scratch.mhc = wMix
 	mixBase := m.tensor(layerName(l, "mhc.base"))
 	mixScale := m.tensor(layerName(l, "mhc.scale"))
 	projectOutput := m.v41GroupedOutputProjector(l, nH, hd, cfg.OGroups, cfg.OLoraRank, H, scratch)
@@ -492,6 +486,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		return v41StageErr(v41StageMHC, l,
 			fmt.Errorf("%w: mHC mix weight holds no admitted geometry", ErrV41ForwardStage))
 	}
+	projectMHC := m.v41MHCProjector(l, H, eps, mhcFlat, mhcTransposed, scratch)
 	hcByPos := make([]v41MHCMix, seq)
 	preByPos := make([][]float32, seq)
 	for t := 0; t < seq; t++ {
@@ -500,14 +495,23 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// persistent streams through the flattened 4H residual with one shared RMS.
 		// xn is retained for the reduced pre-collapse stand-in below either way.
 		xn := rmsnormCfg(x[t], attnNorm, eps, cfg)
-		var mixes []float32
+		input := xn
 		if mhcFlat {
-			var err error
-			if mixes, err = v41MHCProjectFull(wMix, streams[t], H, eps, mhcTransposed); err != nil {
-				return v41StageErr(v41StageMHC, l, err)
+			width, ok := checkedMulInt(4, H)
+			if !ok || len(streams[t]) != 4 {
+				return v41StageErr(v41StageMHC, l, errV41ProjectionResult)
 			}
-		} else {
-			mixes = matRows(wMix, xn, v41MHCMixWidth, H)
+			input = make([]float32, 0, width)
+			for _, stream := range streams[t] {
+				if len(stream) != H {
+					return v41StageErr(v41StageMHC, l, errV41ProjectionResult)
+				}
+				input = append(input, stream...)
+			}
+		}
+		mixes, err := projectMHC(input)
+		if err != nil {
+			return err
 		}
 		mix, err := v41MHCSplit(mixes, mixScale, mixBase, 4, hcIters, hcEps)
 		if err != nil {
@@ -1362,6 +1366,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.denseProjection = s.v41DenseProjectionFunc()
 		s.v41Forward.groupedOutput = s.v41GroupedOutputFunc()
 		s.v41Forward.engramProjection = s.v41EngramProjectionFunc()
+		s.v41Forward.mhcProjection = s.v41MHCProjectionFunc()
 		s.v41Forward.callbackOwner = s
 	}
 	return s.v41Forward
