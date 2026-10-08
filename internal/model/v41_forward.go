@@ -776,7 +776,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 				opt.IndexTopK = plan.topKWidth()
 				opt.TopK = plan.topKWidth()
 			}
+			attentionOpened := m.v41NowNanos()
 			o, err := V41AttentionCompressedForward(qHeads[t], sharedKV, opt)
+			m.v41NoteAttentionContraction(attentionOpened)
 			if err != nil {
 				return err
 			}
@@ -803,9 +805,11 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		for _, k := range keys {
 			flatKV = append(flatKV, kvRows[k]...)
 		}
+		attentionOpened := m.v41NowNanos()
 		o, err := V41SparseAttentionSink(qHeads[t], flatKV, sink, idx, V41SparseAttentionSinkOptions{
 			B: 1, M: 1, Heads: nH, HeadDim: hd, TopK: rows + 1, N: rows, Softmax: scale,
 		})
+		m.v41NoteAttentionContraction(attentionOpened)
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)
 		}

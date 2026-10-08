@@ -38,7 +38,7 @@ import (
 
 // MoEResidencyLedger is a serve's activated-expert residency. Requests and Tokens frame only
 // requests that engaged a routed-expert ring; Checkpoint independently carries the latest
-// model-lifetime checkpoint-tier snapshot and may be present when Requests is zero.
+// model-lifetime checkpoint-tier snapshot and phase attribution may be present when Requests is zero.
 type MoEResidencyLedger struct {
 	// Requests is how many completed requests contributed, and Tokens how many tokens those
 	// requests actually forwarded through the model (prompt tokens not served from the prefix cache,
@@ -76,6 +76,9 @@ type MoEResidencyLedger struct {
 	// request-scoped ring counters above, these cumulative source counters are
 	// replaced on each observation rather than summed across requests.
 	Checkpoint *CheckpointResidencySnapshot `json:"checkpoint,omitempty"`
+	// V41Phases is the latest model-lifetime V4.1 phase attribution. These
+	// cumulative source counters are replaced, never added per request.
+	V41Phases *V41PhaseLifetimeSnapshot `json:"v41_phases,omitempty"`
 	// Last is the most recent request's full report, kept whole. The aggregate answers "what is this
 	// serve costing"; Last answers "what did one request actually do", including the placement basis
 	// and drift, which do not sum across requests in any meaningful way.
@@ -98,6 +101,48 @@ type CheckpointResidencySnapshot struct {
 	ResidentCount    int    `json:"resident_count"`
 	OverlayRows      int    `json:"overlay_rows"`
 	OverlayBytesRead int64  `json:"overlay_bytes_read"`
+}
+
+// V41PhaseLifetimeSnapshot is the bounded model-lifetime view of V4.1 work.
+type V41PhaseLifetimeSnapshot struct {
+	Scope   string           `json:"scope"`
+	Prefill V41PhaseSnapshot `json:"prefill"`
+	Decode  V41PhaseSnapshot `json:"decode"`
+}
+
+// V41PhaseSnapshot deliberately contains only fixed-shape numeric counters.
+type V41PhaseSnapshot struct {
+	Tokens                               int   `json:"tokens"`
+	AttentionContractionCalls            int   `json:"attention_contraction_calls"`
+	AttentionContractionNanos            int64 `json:"attention_contraction_nanos"`
+	Faults                               int   `json:"faults"`
+	FaultedBytes                         int64 `json:"faulted_bytes"`
+	FaultNanos                           int64 `json:"fault_nanos"`
+	DequantBytes                         int64 `json:"dequant_bytes"`
+	DequantNanos                         int64 `json:"dequant_nanos"`
+	Contractions                         int   `json:"contractions"`
+	ContractionNanos                     int64 `json:"contraction_nanos"`
+	DenseProjectionDeviceCalls           int   `json:"dense_projection_device_calls"`
+	DenseProjectionHostCalls             int   `json:"dense_projection_host_calls"`
+	DenseProjectionNanos                 int64 `json:"dense_projection_nanos"`
+	DenseProjectionActivationUploadBytes int64 `json:"dense_projection_activation_upload_bytes"`
+	DenseProjectionReadbackBytes         int64 `json:"dense_projection_readback_bytes"`
+	GroupedOutputDeviceCalls             int   `json:"grouped_output_device_calls"`
+	GroupedOutputHostCalls               int   `json:"grouped_output_host_calls"`
+	GroupedOutputNanos                   int64 `json:"grouped_output_nanos"`
+	GroupedOutputActivationUploadBytes   int64 `json:"grouped_output_activation_upload_bytes"`
+	GroupedOutputReadbackBytes           int64 `json:"grouped_output_readback_bytes"`
+	ExpertActivationDeviceCalls          int   `json:"expert_activation_device_calls"`
+	ExpertActivationHostCalls            int   `json:"expert_activation_host_calls"`
+	ExpertActivationNanos                int64 `json:"expert_activation_nanos"`
+	ExpertActivationReadbackBytes        int64 `json:"expert_activation_readback_bytes"`
+	IncrementalEngramInjections          int   `json:"incremental_engram_injections"`
+	IncrementalEngramNanos               int64 `json:"incremental_engram_nanos"`
+	MHCProjectionDeviceCalls             int   `json:"mhc_projection_device_calls"`
+	MHCProjectionHostCalls               int   `json:"mhc_projection_host_calls"`
+	MHCProjectionNanos                   int64 `json:"mhc_projection_nanos"`
+	MHCProjectionActivationUploadBytes   int64 `json:"mhc_projection_activation_upload_bytes"`
+	MHCProjectionReadbackBytes           int64 `json:"mhc_projection_readback_bytes"`
 }
 
 // HitRate is Hits/(Hits+PageIns) over the whole serve — the activated-set hit rate, weighted by
@@ -157,6 +202,52 @@ func (p *InKernelPlanner) noteMoEResidency(s *model.Session, tokens int64) {
 	p.moeMu.Lock()
 	defer p.moeMu.Unlock()
 	p.foldMoEResidencyLocked(s.MoEResidency(model.MoEResidencyOptions{Tokens: tokens}), tokens)
+	if s.M != nil {
+		p.foldV41PhasesLocked(s.M.V41ExpertFaultAttribution())
+	}
+}
+
+func (p *InKernelPlanner) foldV41PhasesLocked(at model.V41ExpertFaultAttribution) {
+	prefill := v41PhaseSnapshot(at.Prefill)
+	decode := v41PhaseSnapshot(at.Decode)
+	if prefill == (V41PhaseSnapshot{}) && decode == (V41PhaseSnapshot{}) {
+		return
+	}
+	p.moeResidency.V41Phases = &V41PhaseLifetimeSnapshot{
+		Scope: "model_lifetime", Prefill: prefill, Decode: decode,
+	}
+}
+
+func v41PhaseSnapshot(in model.V41ExpertFaultAttributionPhase) V41PhaseSnapshot {
+	return V41PhaseSnapshot{
+		Tokens:                    in.Tokens,
+		AttentionContractionCalls: in.AttentionContractionCalls,
+		AttentionContractionNanos: in.AttentionContractionNanos,
+		Faults:                    in.Faults, FaultedBytes: in.FaultedBytes, FaultNanos: in.FaultDoorNanos,
+		DequantBytes: in.DequantBytes, DequantNanos: in.DequantNanos,
+		Contractions: in.Contractions, ContractionNanos: in.ContractionNanos,
+		DenseProjectionDeviceCalls:           in.DenseProjectionDeviceCalls,
+		DenseProjectionHostCalls:             in.DenseProjectionHostCalls,
+		DenseProjectionNanos:                 in.DenseProjectionNanos,
+		DenseProjectionActivationUploadBytes: in.DenseProjectionActivationUploadBytes,
+		DenseProjectionReadbackBytes:         in.DenseProjectionReadbackBytes,
+		GroupedOutputDeviceCalls:             in.GroupedOutputDeviceCalls,
+		GroupedOutputHostCalls:               in.GroupedOutputHostCalls,
+		GroupedOutputNanos:                   in.GroupedOutputNanos,
+		GroupedOutputActivationUploadBytes:   in.GroupedOutputActivationUploadBytes,
+		GroupedOutputReadbackBytes:           in.GroupedOutputReadbackBytes,
+		ExpertActivationDeviceCalls:          in.ExpertActivationDeviceCalls,
+		ExpertActivationHostCalls:            in.ExpertActivationHostCalls,
+		ExpertActivationNanos:                in.ExpertActivationNanos,
+		ExpertActivationReadbackBytes:        in.ExpertActivationReadbackBytes,
+		IncrementalEngramInjections:          in.IncrementalEngramInjections,
+		IncrementalEngramNanos:               in.IncrementalEngramNanos,
+		MHCProjectionDeviceCalls:             in.MHCProjectionDeviceCalls,
+		MHCProjectionHostCalls:               in.MHCProjectionHostCalls,
+		MHCProjectionNanos:                   in.MHCProjectionNanos,
+		MHCProjectionActivationUploadBytes:   in.MHCProjectionActivationUploadBytes,
+		MHCProjectionReadbackBytes:           in.MHCProjectionReadbackBytes,
+	}
 }
 
 // foldMoEResidency is the accumulation itself, split from the session read so the arithmetic is
@@ -227,6 +318,10 @@ func (p *InKernelPlanner) MoEResidencyStats() MoEResidencyLedger {
 	if out.Checkpoint != nil {
 		checkpoint := *out.Checkpoint
 		out.Checkpoint = &checkpoint
+	}
+	if out.V41Phases != nil {
+		phases := *out.V41Phases
+		out.V41Phases = &phases
 	}
 	return out
 }

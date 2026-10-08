@@ -2,7 +2,6 @@ package model
 
 import (
 	"sync"
-	"time"
 )
 
 // v41_expert_fault_attribution.go — phase-scoped (prefill vs decode) routed-expert
@@ -82,6 +81,9 @@ func (p V41ExpertPhase) String() string {
 // dequant, each pick by its contraction) but are summed into three independent
 // accumulators so a run can say which one dominates.
 type v41ExpertFaultPhaseLedger struct {
+	AttentionContractionCalls int   `json:"attention_contraction_calls"`
+	AttentionContractionNanos int64 `json:"attention_contraction_nanos"`
+
 	MHCProjectionDeviceCalls           int   `json:"mhc_projection_device_calls"`
 	MHCProjectionHostCalls             int   `json:"mhc_projection_host_calls"`
 	MHCProjectionDeviceRows            int   `json:"mhc_projection_device_rows"`
@@ -152,6 +154,10 @@ type v41ExpertFaultPhaseLedger struct {
 	ContractionBackend string `json:"contraction_backend"`
 }
 
+// V41ExpertFaultAttributionPhase names the phase value for bounded consumers
+// without exposing the mutable ledger itself.
+type V41ExpertFaultAttributionPhase = v41ExpertFaultPhaseLedger
+
 // V41ExpertFaultAttribution is the model-level snapshot served to the agent
 // planner's execution-summary log: prefill and decode ledgers are INDEPENDENT
 // running totals over the model's lifetime (the serve resets per request), so
@@ -176,9 +182,8 @@ type v41ExpertFaultLedger struct {
 	pre   v41ExpertFaultPhaseLedger
 	dec   v41ExpertFaultPhaseLedger
 
-	// nowNanos reads a monotonic clock in nanoseconds; nil means time.Now. It
-	// is the seam a deterministic test drives so the measured durations are
-	// exact instead of wall-clock noise.
+	// nowNanos reads a monotonic clock in nanoseconds. Nil selects elapsed
+	// process time from v41ExpertFaultClockEpoch; tests inject exact readings.
 	nowNanos func() int64
 	// backend names the contraction engine the last contraction observed
 	// ("host" default, "vulkan" when selected); see ContractionBackend.
@@ -273,13 +278,13 @@ func (l *v41ExpertFaultLedger) ledgerLocked() *v41ExpertFaultPhaseLedger {
 }
 
 // nowLocked reads the ledger's monotonic clock (nanoseconds). The caller must
-// hold l.mu. A nil seam reads time.Now, so the default path needs no
-// installation and the instrument is inert when never consulted.
+// hold l.mu. A nil seam uses the platform's monotonic process clock. Its +1
+// timestamp offset preserves zero as the no-ledger sentinel from v41NowNanos.
 func (l *v41ExpertFaultLedger) nowLocked() int64 {
 	if l.nowNanos != nil {
 		return l.nowNanos()
 	}
-	return time.Now().UnixNano()
+	return defaultV41ExpertClockNanos()
 }
 
 // noteFaultDoor records one tier fault door's wall-clock cost under the CURRENT
@@ -313,6 +318,24 @@ func (l *v41ExpertFaultLedger) noteContraction(nanos int64) {
 		led.ContractionNanos += nanos
 	}
 	led.ContractionBackend = l.backendNameLocked()
+}
+
+func (l *v41ExpertFaultLedger) noteAttentionContraction(opened int64) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	led := l.ledgerLocked()
+	if led == nil {
+		return
+	}
+	led.AttentionContractionCalls++
+	if opened != 0 {
+		if elapsed := l.nowLocked() - opened; elapsed > 0 {
+			led.AttentionContractionNanos += elapsed
+		}
+	}
 }
 
 // noteDuration is the shared guard/route for a single timed boundary. Negative
@@ -455,9 +478,10 @@ func (m *Model) V41ExpertFaultAttribution() V41ExpertFaultAttribution {
 const v41ContractionBackendHost = "host"
 
 // v41SetExpertTimeClock installs the monotonic clock (nanoseconds) the phase
-// ledger reads to time the fault/dequant/contraction boundaries. nil restores
-// time.Now. It creates the model's ledger on first use (like setPhase), so a
-// test can install the clock before any phase is set. nil-model safe.
+// ledger reads to time the fault/dequant/contraction boundaries. Nil restores
+// the monotonic process-elapsed default. It creates the model's ledger on first
+// use (like setPhase), so a test can install the clock before any phase is set.
+// Nil-model safe.
 func (m *Model) v41SetExpertTimeClock(now func() int64) {
 	l := v41ExpertFaultLedgerOf(m, true)
 	if l == nil {
@@ -468,10 +492,9 @@ func (m *Model) v41SetExpertTimeClock(now func() int64) {
 	l.nowNanos = now
 }
 
-// v41NowNanos reads the model's installed clock (nil => time.Now), so a caller
-// times a boundary with the same clock the ledger accumulates into. It is
-// inert (returns 0) when the model has no live ledger, so the default path
-// measures nothing.
+// v41NowNanos reads the model's installed clock, defaulting to monotonic process
+// elapsed time. Callers use the same clock for both boundary readings. It
+// returns 0 when the model has no live ledger, leaving that path inert.
 func (m *Model) v41NowNanos() int64 {
 	l := v41ExpertFaultLedgerOf(m, false)
 	if l == nil {
@@ -520,6 +543,12 @@ func (m *Model) v41NoteExpertContraction() {
 // wall-clock cost under the currently-set phase. nil-safe.
 func (m *Model) v41NoteExpertContractionNanos(nanos int64) {
 	v41ExpertFaultLedgerOf(m, false).noteContraction(nanos)
+}
+
+// v41NoteAttentionContraction records one attempted plain or compressed
+// attention contraction and its non-negative elapsed time in the active phase.
+func (m *Model) v41NoteAttentionContraction(opened int64) {
+	v41ExpertFaultLedgerOf(m, false).noteAttentionContraction(opened)
 }
 
 func (m *Model) v41NoteIncrementalDeviceDispatch(gateUp bool, opened int64) {

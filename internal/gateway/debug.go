@@ -453,6 +453,7 @@ type debugMoEResidencyVars struct {
 	// Checkpoint is the latest cumulative model-lifetime checkpoint-tier
 	// snapshot. It remains useful when no request-scoped expert ring is enabled.
 	Checkpoint *agent.CheckpointResidencySnapshot `json:"checkpoint,omitempty"`
+	V41Phases  *agent.V41PhaseLifetimeSnapshot    `json:"v41_phases,omitempty"`
 
 	Lookups     int64 `json:"lookups"`
 	Hits        int64 `json:"hits"`
@@ -1314,7 +1315,7 @@ func debugMoEResidency(p agent.Planner) *debugMoEResidencyVars {
 		return nil
 	}
 	l := reporter.MoEResidencyStats()
-	if l.Requests == 0 && l.Checkpoint == nil {
+	if l.Requests == 0 && l.Checkpoint == nil && l.V41Phases == nil {
 		return nil
 	}
 	last := l.Last
@@ -1322,6 +1323,7 @@ func debugMoEResidency(p agent.Planner) *debugMoEResidencyVars {
 		Requests:               l.Requests,
 		Tokens:                 l.Tokens,
 		Checkpoint:             l.Checkpoint,
+		V41Phases:              l.V41Phases,
 		Lookups:                l.Lookups,
 		Hits:                   l.Hits,
 		PageIns:                l.PageIns,

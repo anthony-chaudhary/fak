@@ -1739,6 +1739,11 @@
           "category": "incidental",
           "reason": "Plumbing of the fak#13695 PrefillAttention device route (cgo entry, lock, capability probe, timing receipt, admission threshold, fallback route, or execution operation label); the concept itself is the positioned PrefillAttention row.",
           "token": "ExecutionPrefillAttention"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported recorder for the existing V4.1 attention phase counters; it introduces no separate attention algorithm or placement contract.",
+          "token": "v41NoteAttentionContraction"
         }
       ],
       "id": "attention",
@@ -1762,7 +1767,8 @@
         "prefillAttnDeviceMinRows",
         "prefillAttnMu",
         "qwenfullattentionlayers",
-        "tattn"
+        "tattn",
+        "v41NoteAttentionContraction"
       ],
       "known_tokens": [],
       "min_files": 3,
