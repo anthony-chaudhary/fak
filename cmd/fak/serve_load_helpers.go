@@ -71,11 +71,53 @@ func serveNativeDenseQ6K(backend compute.Backend) bool {
 	return true
 }
 
+func serveArtifactNativeKQuant(backend compute.Backend, artifact ggufload.ArtifactQuant) bool {
+	if backend == nil || os.Getenv("FAK_Q4K") == "0" ||
+		!backend.Caps().DeviceMemory || !backend.Caps().UploadDtype {
+		return false
+	}
+	var q2, q3, q6 bool
+	switch artifact.Name {
+	case "Q2_K":
+		q2 = true
+	case "Q3_K":
+		q3 = true
+	case "Q6_K":
+		q6 = true
+	case "mixed(Q2_K+Q3_K)":
+		q2, q3 = true, true
+	case "mixed(Q2_K+Q6_K)":
+		q2, q6 = true, true
+	case "mixed(Q3_K+Q6_K)":
+		q3, q6 = true, true
+	case "mixed(Q2_K+Q3_K+Q6_K)":
+		q2, q3, q6 = true, true, true
+	default:
+		return false
+	}
+	if q2 {
+		native, ok := backend.(q2kCapableBackend)
+		if !ok || !native.SupportsQ2K() || !compute.BackendSupportsDeviceWeightDtype(backend, compute.Q2_K) {
+			return false
+		}
+	}
+	if q3 {
+		native, ok := backend.(interface{ SupportsQ3KMatMul() bool })
+		if !ok || !native.SupportsQ3KMatMul() || !compute.BackendSupportsDeviceWeightDtype(backend, compute.Q3_K) {
+			return false
+		}
+	}
+	return !q6 || serveNativeDenseQ6K(backend)
+}
+
 // serveResidentQ4KLoadOptions keeps loader and admission storage selection on
 // the same backend/artifact predicates. Sharding and streaming remain explicit
 // additions owned by their respective load paths.
 func serveResidentQ4KLoadOptions(backend compute.Backend, ggufPath string, residentQ4K bool, artifact ggufload.ArtifactQuant) []ggufload.Q4KLoadOption {
 	opts := serveDenseKQuantOptions(backend)
+	if residentQ4K && serveArtifactNativeKQuant(backend, artifact) {
+		opts = append(opts, ggufload.WithDenseKQuantResident(true))
+	}
 	if serveQwen38Q4KEmbeddingResident(backend, ggufPath, residentQ4K) {
 		opts = append(opts, ggufload.WithQ4KEmbeddingResident(true))
 	} else if serveQwen38Q2KEmbeddingResident(backend, ggufPath, residentQ4K) {
@@ -112,7 +154,7 @@ func serveArtifactResidentQ4K(backend compute.Backend, artifact ggufload.Artifac
 		// checkpoint on a non-Metal host.
 		return backend == nil && os.Getenv("FAK_Q4K") != "0"
 	}
-	return (artifact.Q4KResident || artifact.Recipe == "UD-Q2_K_XL") && serveDeviceResidentQ4K(backend)
+	return (artifact.Q4KResident || artifact.Recipe == "UD-Q2_K_XL" || serveArtifactNativeKQuant(backend, artifact)) && serveDeviceResidentQ4K(backend)
 }
 
 func servePQ2Artifact(artifact ggufload.ArtifactQuant) bool { return artifact.Name == "PQ2_0" }
@@ -272,9 +314,14 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		return m, false, profile, gateway.StartupPhase{Name: "model-load", Dur: loadDur}
 	}
 	ggufPath := modelPath
-	artifactQuant, err := ggufload.ClassifyArtifactQuant(ggufPath)
+	artifactSource, err := ggufload.OpenWeights(ggufPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fak serve: GGUF quant inventory:", err)
+		must(err)
+	}
+	artifactQuant := ggufload.ClassifyTensorQuant(artifactSource.File.Tensors)
+	if err := artifactSource.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, "fak serve: GGUF quant inventory close:", err)
 		must(err)
 	}
 	residentQ4K := serveArtifactResidentQ4K(backend, artifactQuant)
@@ -293,18 +340,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 	// WithExpertShard seam (the raw-super-block splitter filters the batched routed experts). The
 	// Q8/f32 arms have no shard seam, so a sharded serve that would land on one is REFUSED here â€”
 	// loading a full model on a rank sized only for its band would OOM or silently defeat the shard.
-	var q4kOpts []ggufload.Q4KLoadOption
-	// Device Q4_K sessions currently stage Q4_K and Q8 matrices, but not dense Q5_K/Q6_K/IQ
-	// tensors. Route those mixed-quant dense weights through the loader's dequant-to-Q8 arm;
-	// otherwise they are stranded in the host-only k-quant store and warmup cannot resolve them.
-	q4kOpts = append(q4kOpts, serveDenseKQuantOptions(backend)...)
-	if serveQwen38Q4KEmbeddingResident(backend, ggufPath, residentQ4K) {
-		q4kOpts = append(q4kOpts, ggufload.WithQ4KEmbeddingResident(true))
-	} else if serveQwen38Q2KEmbeddingResident(backend, ggufPath, residentQ4K) {
-		// The witnessed UD-Q2_K_XL token embedding is Q2_K; keeping it packed
-		// avoids the ~5.09 GB F32 expansion that breached the 36 GiB envelope.
-		q4kOpts = append(q4kOpts, ggufload.WithQ2KEmbeddingResident(true))
-	}
+	q4kOpts := serveResidentQ4KLoadOptions(backend, ggufPath, residentQ4K, artifactQuant)
 	if expertShard != nil {
 		q4kOpts = append(q4kOpts, ggufload.WithExpertShard(expertShard.Lo, expertShard.Hi))
 		must(serveShardSeamRefusal(backend, cpuOffloadExperts, cpuOffloadArm, serveShardSeamEnvQ4K() && artifactQuant.Q4KResident))
@@ -455,7 +491,11 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 			// non-offload device plan (EstimateLoadMemoryPlan, quant-aware), same helper the Q8 arm
 			// uses; only the loader differs. A backend without UploadDtype falls through to the Q8/
 			// f32 arms unchanged (the device Q4_K GEMM needs the quantized-upload seam).
-			loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", fmt.Sprintf("GGUF device load -> resident Q4_K on backend %q (raw super-blocks, dequant-fused GEMM, ~0.56 B/param vs Q8 ~1 B/param)", backend.Name())))
+			if serveArtifactNativeKQuant(backend, artifactQuant) {
+				loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", fmt.Sprintf("GGUF device load -> resident %s on backend %q (eligible native packed weights; canonical conversion fallback retained)", artifactQuant.Name, backend.Name())))
+			} else {
+				loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", fmt.Sprintf("GGUF device load -> resident Q4_K on backend %q (raw super-blocks, dequant-fused GEMM, ~0.56 B/param vs Q8 ~1 B/param)", backend.Name())))
+			}
 			var memPlan compute.MemoryPlan
 			var err error
 			if residentRanks > 1 {
