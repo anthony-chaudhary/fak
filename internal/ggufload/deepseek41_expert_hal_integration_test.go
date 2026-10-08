@@ -19,9 +19,9 @@ package ggufload
 //   - the loader attached a checkpoint tier and indexed exactly the E*3 routed
 //     projections (streamed, not resident);
 //   - on a backend that serves Q2_K but not Q3_K, gate MatMul + up MatMul +
-//     SwiGLU run ON THE DEVICE through the shared q4kExpertInputHAL seam, and the
-//     device MatMul count is exactly 2 per routed pick — NOT 3, so the Q3_K down
-//     contraction stayed on the host;
+//     SwiGLU run ON THE DEVICE through the shared q4kExpertInputHAL seam. Typed
+//     accounting distinguishes those expert calls from dense device MatMuls, and
+//     the Q3_K down contraction stays on the host;
 //   - the checkpoint tier actually FAULTED the activated experts (Reads grew);
 //   - the device arm reproduces the host arm's logits within the f32 reduction
 //     tolerance, so the streamed device seam is numerically the streamed host
@@ -51,7 +51,7 @@ type ds41HALRecordingBackend struct {
 	// true; the negative control leaves it false so the seam must decline while
 	// the wrapper still counts any op that (wrongly) runs.
 	deviceMemory bool
-	matmuls      int
+	matmuls      map[compute.Dtype]int
 	swiglu       int
 }
 
@@ -63,8 +63,19 @@ func (b *ds41HALRecordingBackend) Caps() compute.Caps {
 }
 
 func (b *ds41HALRecordingBackend) MatMul(w, x compute.Tensor) compute.Tensor {
-	b.matmuls++
+	if b.matmuls == nil {
+		b.matmuls = make(map[compute.Dtype]int)
+	}
+	b.matmuls[w.Dtype]++
 	return b.Backend.MatMul(w, x)
+}
+
+func (b *ds41HALRecordingBackend) matmulCount() int {
+	total := 0
+	for _, n := range b.matmuls {
+		total += n
+	}
+	return total
 }
 
 func (b *ds41HALRecordingBackend) SwiGLU(g, u compute.Tensor) compute.Tensor {
@@ -72,9 +83,9 @@ func (b *ds41HALRecordingBackend) SwiGLU(g, u compute.Tensor) compute.Tensor {
 	return b.Backend.SwiGLU(g, u)
 }
 
-// SupportsDeviceWeightDtype reports the dtype set the one-Halo Vulkan target
-// serves for this slate: Q2_K gate/up are runnable, Q3_K down is NOT (its
-// descriptor has no HAL kernel), so the down projection stays on the host.
+// SupportsDeviceWeightDtype deliberately declines Q3_K for this software
+// witness, regardless of broader production Vulkan support, so the mixed-slate
+// fallback remains observable: Q2_K gate/up run here and Q3_K down stays host-side.
 func (b *ds41HALRecordingBackend) SupportsDeviceWeightDtype(dt compute.Dtype) bool {
 	switch dt {
 	case compute.F32, compute.Q8_0, compute.Q4_K, compute.Q6_K, compute.Q2_K:
@@ -109,6 +120,7 @@ func ds41HALLoadStreamed(t *testing.T) *model.Model {
 // TestDeepSeek41MixedQuantExpertHALIntegration is the positive witness, named
 // exactly as the fak#13359 witness command (`go test ./internal/ggufload -run
 // TestDeepSeek41MixedQuantExpertHALIntegration`).
+// fak-test:runtime fast est=1s lane=default
 func TestDeepSeek41MixedQuantExpertHALIntegration(t *testing.T) {
 	m := ds41HALLoadStreamed(t)
 	cfg := m.Cfg
@@ -142,12 +154,24 @@ func TestDeepSeek41MixedQuantExpertHALIntegration(t *testing.T) {
 	got := devSess.Step(1)
 	afterDev := m.ExpertCheckpointStats()
 
-	// (b) The device seam fired: exactly two MatMuls (gate, up) + one SwiGLU per
-	// routed pick across the model's layers. Three MatMuls per pick would mean the
-	// Q3_K down was (wrongly) staged device-resident.
+	// (b) The device seam fired: exactly two Q2_K MatMuls (gate, up) + one
+	// SwiGLU per routed pick across the model's layers. This fixture makes Q2_K
+	// unique to routed gate/up weights, while dense weights reach the backend as
+	// F32 or Q8_0. Count the stages independently so dense HAL callbacks cannot
+	// inflate expert routing.
 	picks := cfg.NumExpertsPerTok * cfg.NumLayers
-	if be.matmuls != 2*picks {
-		t.Fatalf("device MatMul count = %d, want %d (gate+up per routed pick, never the Q3_K down)", be.matmuls, 2*picks)
+	if gotQ2 := be.matmuls[compute.Q2_K]; gotQ2 != 2*picks {
+		t.Fatalf("device Q2_K MatMul count = %d, want %d (gate+up per routed pick)", gotQ2, 2*picks)
+	}
+	if gotQ3 := be.matmuls[compute.Q3_K]; gotQ3 != 0 {
+		t.Fatalf("device Q3_K MatMul count = %d, want 0 (the test backend declines down projection)", gotQ3)
+	}
+	denseMatmuls := be.matmuls[compute.F32] + be.matmuls[compute.Q8_0]
+	if denseMatmuls == 0 {
+		t.Fatal("device dense MatMul count = 0, want F32/Q8_0 callbacks independently observed")
+	}
+	if gotTotal := be.matmulCount(); gotTotal != 2*picks+denseMatmuls {
+		t.Fatalf("device MatMul count = %d, want %d Q2_K expert + %d F32/Q8_0 dense and no other dtype", gotTotal, 2*picks, denseMatmuls)
 	}
 	if be.swiglu != picks {
 		t.Fatalf("device SwiGLU count = %d, want %d (one fused SwiGLU per routed pick)", be.swiglu, picks)
@@ -192,8 +216,8 @@ func TestDeepSeek41MixedQuantLoaderDeclinesWithoutDevice(t *testing.T) {
 
 	base := (&model.Session{M: m}).Step(1)
 	alt := nonDevice.Step(1)
-	if probe.matmuls != 0 || probe.swiglu != 0 {
-		t.Fatalf("non-device backend ran device ops matmul=%d swiglu=%d, want 0/0 (the seam must decline)", probe.matmuls, probe.swiglu)
+	if matmuls := probe.matmulCount(); matmuls != 0 || probe.swiglu != 0 {
+		t.Fatalf("non-device backend ran device ops matmul=%d swiglu=%d, want 0/0 (the seam must decline)", matmuls, probe.swiglu)
 	}
 	if len(base) != len(alt) {
 		t.Fatalf("non-device arm returned %d logits, want %d", len(alt), len(base))
