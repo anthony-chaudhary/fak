@@ -112,10 +112,15 @@ func TestObservationEngineSubstepsDefaultCPURequest(t *testing.T) {
 	var count uint64
 	for _, k := range s.KernelLatency {
 		count += k.Count
-		// A completed kernel may quantize to zero on Windows; count and Measured
-		// prove observation without fabricating a minimum duration.
-		if !k.Measured || k.TimerDomain != "host_monotonic" || k.Count == 0 || k.TotalSeconds < 0 || k.MeanSeconds < 0 || k.P50Seconds < 0 || k.P95Seconds < 0 || k.MaxSeconds < 0 || k.P50Seconds > k.P95Seconds || k.P95Seconds > k.MaxSeconds {
+		if k.TimerDomain != "host_monotonic" || k.Count == 0 || k.TotalSeconds < 0 || k.MeanSeconds < 0 || k.P50Seconds < 0 || k.P95Seconds < 0 || k.MaxSeconds < 0 || k.P50Seconds > k.P95Seconds || k.P95Seconds > k.MaxSeconds {
 			t.Fatal("CPU kernel timing or attribution invalid")
+		}
+		if k.Measured {
+			if k.TotalSeconds <= 0 || k.MeanSeconds <= 0 || k.MaxSeconds <= 0 {
+				t.Fatal("measured CPU kernel timing lacks positive arithmetic")
+			}
+		} else if k.TotalSeconds != 0 || k.MeanSeconds != 0 || k.P50Seconds != 0 || k.P95Seconds != 0 || k.MaxSeconds != 0 {
+			t.Fatal("count-only CPU kernel timing exposed zero-resolution arithmetic")
 		}
 		labels := `{kernel="` + k.Kernel + `",backend="` + k.Backend + `",timer_domain="` + k.TimerDomain + `"}`
 		if sample(stepobs.MetricKernelSeconds+"_count"+labels) != float64(k.Count) || math.Abs(sample(stepobs.MetricKernelSeconds+"_sum"+labels)-k.TotalSeconds) > 1e-9 {

@@ -289,6 +289,7 @@ func kernelStat(k kernelKey, agg *kernelAgg, overflow bool) KernelStat {
 		measured = !overflow
 	}
 	latency := latencyStat(agg.seconds)
+	measured = measured && latency.MaxSeconds > 0
 	if !measured {
 		latency = LatencyStat{Count: latency.Count}
 	}

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"math"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -833,6 +834,7 @@ func (m *gatewayMetrics) observeCompletionServedStream(loc servingLocality, comp
 	if ttft <= 0 && streamTTFT > 0 && streamTTFT <= dur {
 		ttft = streamTTFT
 	}
+	m.observeNativeExecution(comp)
 	m.observeInferenceTimedDetail(loc,
 		usage.UncachedPromptTokens(),
 		usage.CompletionTokens,
@@ -844,6 +846,45 @@ func (m *gatewayMetrics) observeCompletionServedStream(loc servingLocality, comp
 		perfDetailFromCompletion(comp),
 	)
 	m.attributeServedTurn(loc, usage.UncachedPromptTokens(), usage.CompletionTokens)
+}
+
+// observeNativeExecution folds the lightweight facts every completed native
+// request already authors. NativeDecode is the authoritative native marker;
+// Timings alone is insufficient because proxy planners may relay the same wire
+// shape. The strict token/logprob receipt is deliberately neither read nor
+// reconstructed here.
+func (m *gatewayMetrics) observeNativeExecution(comp *agent.Completion) {
+	if m == nil || comp == nil || comp.NativeDecode == nil || comp.Timings == nil {
+		return
+	}
+	path := comp.NativeDecode.Path
+	switch path {
+	case agent.NativeDecodePathSerial, agent.NativeDecodePathBatched, agent.NativeDecodePathSpeculative:
+	default:
+		return
+	}
+	t := comp.Timings
+	if t.PromptN < 0 || t.PredictedN < 0 || t.CacheN < 0 ||
+		!finiteNonnegativeMilliseconds(t.PromptMS) || !finiteNonnegativeMilliseconds(t.PredictedMS) {
+		return
+	}
+	m.inferenceMu.Lock()
+	stats := m.nativeExecutions[path]
+	stats.requests++
+	stats.prefillSeconds += t.PromptMS / 1000
+	stats.decodeSeconds += t.PredictedMS / 1000
+	stats.promptTokens += uint64(t.PromptN)
+	stats.generatedTokens += uint64(t.PredictedN)
+	stats.cachedTokens += uint64(t.CacheN)
+	if m.nativeExecutions == nil {
+		m.nativeExecutions = map[string]nativeExecutionStats{}
+	}
+	m.nativeExecutions[path] = stats
+	m.inferenceMu.Unlock()
+}
+
+func finiteNonnegativeMilliseconds(v float64) bool {
+	return v >= 0 && !math.IsNaN(v) && !math.IsInf(v, 0)
 }
 
 func completionTTFT(t *agent.Timings, dur time.Duration) time.Duration {
