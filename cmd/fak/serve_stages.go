@@ -65,13 +65,14 @@ type serveRuntime struct {
 	fitBudget              *serveFitBudget
 	requireDeviceExecution bool
 
-	inKernelModel *fakmodel.Model
-	inKernelQ4K   bool
-	loadProfile   *gateway.ModelLoadProfile
-	epGroup       *fakmodel.DistComm
-	epRole        epDecodeRole
-	epCoord       *fakmodel.EPDecodeCoordinator
-	inKernelTok   *tokenizer.Tokenizer
+	inKernelModel         *fakmodel.Model
+	inKernelQ4K           bool
+	loadProfile           *gateway.ModelLoadProfile
+	epGroup               *fakmodel.DistComm
+	epRole                epDecodeRole
+	epCoord               *fakmodel.EPDecodeCoordinator
+	inKernelTok           *tokenizer.Tokenizer
+	warmDiskModelIdentity string
 
 	apiKey              string
 	engineCacheAdminKey string
@@ -694,6 +695,7 @@ func resolveServeNativeContextDirectory(dir string, requested int) (serveNativeC
 // group and wires the rank-local forward; the dialed group lands on rt.epGroup and
 // is closed by cmdServe's deferred closeEPGroup.
 func (rt *serveRuntime) loadModel(sf *serveFlags) {
+	artifactStamp := stampModelArtifact(*sf.ggufPath)
 	// This header-only forward gate precedes expert-shard derivation and
 	// loadServeInKernelModel, which owns memory planning and tensor payload reads.
 	// The graded expert spill is an OPERATOR grade, so it is validated at the terminal's expense,
@@ -835,6 +837,7 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 		rt.startupPhases = append(rt.startupPhases, gateway.StartupPhase{Name: "tokenizer-load", Dur: 0})
 	}
 	rt.inKernelModel, rt.inKernelQ4K, rt.loadProfile, rt.inKernelTok = inKernelModel, inKernelQ4K, loadProfile, inKernelTok
+	rt.warmDiskModelIdentity = artifactStamp.identityAfterLoad(*sf.ggufPath)
 }
 
 // closeEPGroup closes the expert-parallel process group if loadModel dialed one;

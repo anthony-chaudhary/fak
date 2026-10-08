@@ -547,6 +547,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			aw["restored_tokens"] = receipt.RestoredTokens
 			aw["requested_tokens"] = receipt.RequestedTokens
 			aw["source_tier"] = string(receipt.SourceTier)
+			aw["prefilled_tokens"] = receipt.PrefilledTokens
+			if receipt.Disk != nil {
+				aw["disk"] = receipt.Disk
+			}
 		}
 		health["agent_warm"] = aw
 	}

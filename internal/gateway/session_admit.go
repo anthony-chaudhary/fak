@@ -75,6 +75,13 @@ func (s *Server) beginServedRequest(w http.ResponseWriter, r *http.Request) (con
 	ctx = agent.WithRequestTraceID(ctx, trace)
 	// Carry the harness launch session id for prefix-reuse attribution on every wire.
 	ctx = withPrefixReuseSession(ctx, harnessSessionID(r))
+	if principalFromContext(ctx) == "" {
+		if _, scoped := agent.PrefixCacheIdentityFromContext(ctx); !scoped && s != nil {
+			if spec, configured := s.agentWarm.configuration(); configured {
+				ctx = agent.WithPrefixCacheIdentity(ctx, spec.Scope.Tenant, spec.Scope.Agent)
+			}
+		}
+	}
 	if r != nil {
 		spec := parseAgentSpecFromRequest(r, trace)
 		ctx = carrierWithSpec(ctx, spec)

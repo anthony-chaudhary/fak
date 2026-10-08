@@ -277,6 +277,17 @@ type InKernelPlanner struct {
 	// carrier refuses a warm closed rather than guessing the boundary. Guarded by mu
 	// alongside every other planner-owned warm field.
 	warmInputs *warmInputsCarrier
+	// warmDisk fixes the local restart-cache policy and loaded artifact identity.
+	// Empty config selects the bounded per-user default; an empty model digest
+	// declines persistence because a filename is not a model-byte identity.
+	warmDiskConfig         WarmDiskConfig
+	warmDiskModelIdentity  string
+	warmDiskCapture        bool
+	warmDiskCaptureBudget  int64
+	warmDiskCaptured       *model.PrefixSnapshot
+	warmDiskCapturedTokens []int
+	warmDiskCapturedLogits []float32
+	warmDiskCapturedScope  radixkv.CacheIdentity
 
 	// auxWarm / auxWarmSet carry the OPTIONAL auxiliary-cache warming config (CW-12,
 	// #13340): the recorded expert profile, the V4.1 Engram prefix and the startup

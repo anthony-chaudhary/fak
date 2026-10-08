@@ -410,6 +410,10 @@ type AgentWarmWarmer interface {
 	WarmPrefix(ctx context.Context, spec agent.WarmPrefixSpec) (agent.WarmReceipt, error)
 }
 
+type agentWarmInputInstaller interface {
+	SetWarmPrefixInputs(agent.WarmPrefixInputs)
+}
+
 // agentWarmGate is the agent-warm readiness state machine. It mirrors warmupGate's
 // shape (own mutex, value receipt) but its admission rule is the stronger
 // live-receipt rule: a configured profile is ready only when a matching, restored,
@@ -572,6 +576,9 @@ func (s *Server) SetAgentWarmProfile(spec AgentWarmProfile) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if installer, ok := s.planner.(agentWarmInputInstaller); ok {
+		installer.SetWarmPrefixInputs(spec.Inputs)
+	}
 	s.agentWarm.configure(desc, spec.RequireLiveClaim)
 	return desc.Identity, nil
 }
@@ -599,6 +606,7 @@ func (s *Server) RunAgentWarmup(ctx context.Context) (agent.WarmReceipt, error) 
 	if !configured {
 		return agent.WarmReceipt{}, ErrAgentWarmUnconfigured
 	}
+	ctx = agent.WithPrefixCacheIdentity(ctx, spec.Scope.Tenant, spec.Scope.Agent)
 	receipt, err := warmer.WarmPrefix(ctx, spec)
 	unsupported := errors.Is(err, agent.ErrWarmPrefixUnsupported)
 	s.agentWarm.observe(receipt, unsupported, err)

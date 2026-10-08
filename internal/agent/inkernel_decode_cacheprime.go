@@ -49,6 +49,10 @@ type CachePrimeReceipt struct {
 	Tokens int
 	// PromptTokens is the prompt length the prime was asked to materialize.
 	PromptTokens int
+	// ReusedTokens is the prefix the production generation path actually accepted.
+	ReusedTokens int
+	// PrefilledTokens is the prompt suffix the production path computed.
+	PrefilledTokens int
 }
 
 // Usable reports whether this receipt describes a restorable warm. It is the AND of the
@@ -68,16 +72,22 @@ func (r CachePrimeReceipt) Usable() bool {
 // result's own `matched` is the prefix served BEFORE this prime (normally 0) and is not
 // the materialization outcome; the read-back is.
 func (p *InKernelPlanner) primeCacheStateOnce(ctx context.Context, ids []int) (int, error) {
+	resident, _, err := p.primeCacheStateMeasured(ctx, ids)
+	return resident, err
+}
+
+func (p *InKernelPlanner) primeCacheStateMeasured(ctx context.Context, ids []int) (resident, reused int, err error) {
 	p.cachePopulate = true
 	defer func() { p.cachePopulate = false }()
-	if _, _, _, _, _, _, _, _, err := p.generateReusedContextWithBias(
-		ctx, ids, 0, 0, 0, 0, nil, 0, 0, map[int]bool{}, nil); err != nil {
-		return 0, err
+	_, _, _, reused, _, _, _, _, err = p.generateReusedContextWithBias(
+		ctx, ids, 0, 0, 0, 0, nil, 0, 0, map[int]bool{}, nil)
+	if err != nil {
+		return 0, reused, err
 	}
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return 0, reused, err
 	}
-	return p.cachedPrefixLen(ids), nil
+	return p.cachedPrefixLen(ids), reused, nil
 }
 
 // PrimeCacheState materializes the KV/expert state for ids without generating a token.
@@ -99,12 +109,16 @@ func (p *InKernelPlanner) PrimeCacheState(ctx context.Context, ids []int) (Cache
 	if len(ids) == 0 || p.tree == nil || !inKernelPlannerPrefixReuseSupported(p.m, p.backend) {
 		return CachePrimeReceipt{Reason: cachePrimeReasonUnsupported, PromptTokens: len(ids)}, ErrCachePrimeUnsupported
 	}
-	matched, err := p.primeCacheStateOnce(ctx, ids)
+	matched, reused, err := p.primeCacheStateMeasured(ctx, ids)
+	prefilled := len(ids) - reused
+	if prefilled < 0 {
+		prefilled = 0
+	}
 	if err != nil {
-		return CachePrimeReceipt{Reason: cachePrimeReasonCold, PromptTokens: len(ids)}, err
+		return CachePrimeReceipt{Reason: cachePrimeReasonCold, PromptTokens: len(ids), ReusedTokens: reused, PrefilledTokens: prefilled}, err
 	}
 	if matched < len(ids) {
-		return CachePrimeReceipt{Admitted: false, Reason: cachePrimeReasonCold, Tokens: matched, PromptTokens: len(ids)}, nil
+		return CachePrimeReceipt{Admitted: false, Reason: cachePrimeReasonCold, Tokens: matched, PromptTokens: len(ids), ReusedTokens: reused, PrefilledTokens: prefilled}, nil
 	}
-	return CachePrimeReceipt{Admitted: true, Reason: cachePrimeReasonAdmitted, Tokens: matched, PromptTokens: len(ids)}, nil
+	return CachePrimeReceipt{Admitted: true, Reason: cachePrimeReasonAdmitted, Tokens: matched, PromptTokens: len(ids), ReusedTokens: reused, PrefilledTokens: prefilled}, nil
 }

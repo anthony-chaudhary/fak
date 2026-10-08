@@ -100,11 +100,17 @@ type WarmReceipt struct {
 	// scope — the number a next request could actually reuse. It is the count that decides
 	// Ready.
 	RestoredTokens int `json:"restored_tokens"`
+	// PrefilledTokens is the stable-prefix suffix the startup prime had to compute
+	// after disk/in-memory lookup. A full restart restore reports zero.
+	PrefilledTokens int `json:"prefilled_tokens"`
 
 	// SourceTier names where the restored state was read from (device_l1 | host_dram_l2 |
-	// remote_http_l3), or empty on a miss. It is the truthful tier attribution, never an
+	// local_ssd_l3 | remote_http_l3), or empty on a miss. It is truthful attribution, never an
 	// optimistic default.
 	SourceTier radixkv.SnapshotTier `json:"source_tier,omitempty"`
+	// Disk reports the optional local restart-cache attempt. It is always bounded
+	// and carries no prompt or model bytes.
+	Disk *WarmDiskReceipt `json:"disk,omitempty"`
 
 	// ZeroGenerated records that warming generated no token. It is always true; it is
 	// carried explicitly so a receipt reader cannot mistake a populate for a served turn.
@@ -365,7 +371,23 @@ func (p *InKernelPlanner) WarmPrefix(ctx context.Context, spec WarmPrefixSpec) (
 		return finishWarm(receipt, started), nil
 	}
 
+	// A verified local restart image is admitted through the same tree the normal
+	// prime consults. PrimeCacheState still runs, proving the restored entry is usable;
+	// on a miss or fault it naturally performs the historical cold prefill.
+	receipt.Disk = p.restoreWarmPrefixDisk(ctx, spec, tokens)
+	if warmDiskCaptureEligible(receipt.Disk) {
+		p.beginWarmDiskCapture(receipt.Disk.BudgetBytes)
+		defer p.endWarmDiskCapture()
+	}
+
 	prime, err := p.PrimeCacheState(ctx, tokens)
+	receipt.PrefilledTokens = prime.PrefilledTokens
+	if receipt.Disk != nil && receipt.Disk.Outcome == WarmDiskOutcomeRestored && prime.ReusedTokens != len(tokens) {
+		receipt.Disk.Outcome = WarmDiskOutcomeFault
+		receipt.Disk.Reason = "restore_not_reused"
+		receipt.Disk.RestoreOutcome = WarmDiskOutcomeFault
+		receipt.Disk.RestoreReason = "restore_not_reused"
+	}
 	if err != nil {
 		receipt.Status = WarmStatusCold
 		receipt.Reason = "prime_failed"
@@ -385,10 +407,16 @@ func (p *InKernelPlanner) WarmPrefix(ctx context.Context, spec WarmPrefixSpec) (
 		receipt.Reason = "partial_restore"
 		return finishWarm(receipt, started), nil
 	}
+	if receipt.Disk != nil && receipt.Disk.Outcome == WarmDiskOutcomeRestored && prime.ReusedTokens == len(tokens) {
+		receipt.SourceTier = WarmDiskSnapshotTier
+	}
 
 	receipt.Ready = true
 	receipt.Status = WarmStatusReady
 	receipt.Reason = ""
+	if receipt.Disk == nil || receipt.Disk.Outcome != WarmDiskOutcomeRestored {
+		receipt.Disk = p.persistWarmPrefixDisk(ctx, spec, tokens, receipt.Disk)
+	}
 	// CW-06 (#13341): bind the restored prefix to a FINITE residency claim, so the warm
 	// survives the gap before the first real request instead of being the first LRU
 	// victim. This runs BEFORE the readiness latch: a configured claim that cannot be
@@ -889,6 +917,7 @@ func (p *InKernelPlanner) warmRestoreReadback(scope radixkv.CacheIdentity, token
 	// A real restore requires a live payload: the tiered snapshot when the runtime keeps
 	// one, else the node's own KV cache. A match with neither is a structural hit only.
 	if snap != nil {
+		snap.Close()
 		return matched, tier, true
 	}
 	if node != nil && node.KV() != nil {
@@ -909,6 +938,7 @@ func (p *InKernelPlanner) warmScopedReadback(scopedTree *radixkv.ScopedTree, sco
 		return 0, radixkv.SnapshotTierMiss, false
 	}
 	if snap != nil {
+		snap.Close()
 		return matched, tier, true
 	}
 	// Scoped trees may hold a bare KVCache (AdmitPrivate) rather than a snapshot; probe

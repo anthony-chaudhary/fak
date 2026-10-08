@@ -142,6 +142,10 @@ func (g *turnkeyAgentWarmGate) agentWarmBlock() map[string]any {
 	if g.receipt != nil {
 		block["identity"] = g.receipt.Identity
 		block["restored_tokens"] = g.receipt.RestoredTokens
+		block["prefilled_tokens"] = g.receipt.PrefilledTokens
+		if g.receipt.Disk != nil {
+			block["disk"] = g.receipt.Disk
+		}
 	}
 	return block
 }
