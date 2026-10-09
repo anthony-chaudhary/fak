@@ -18,7 +18,7 @@ import (
 
 // VulkanShaders is a compatibility snapshot of the current shader registry.
 // Builds and identity verification use immutable registry accessors instead.
-var VulkanShaders = CurrentVulkanShaderRegistryV4()
+var VulkanShaders = CurrentVulkanShaderRegistryV5()
 
 func strictFileSHA256(path string) (string, int64, error) {
 	f, err := os.Open(path)
@@ -214,6 +214,12 @@ func ComputeSPIRVBundleSHA256(spvDir string) (string, error) {
 func CompareReceiptProvenance(a, b *ComputeBuildReceipt) error {
 	if a == nil || b == nil {
 		return fmt.Errorf("receipt cannot be nil")
+	}
+	if a.Schema == VulkanBuildReceiptSchemaV5 || b.Schema == VulkanBuildReceiptSchemaV5 {
+		if a.Schema != b.Schema {
+			return fmt.Errorf("Vulkan receipt schema mismatch")
+		}
+		return compareVulkanReceiptProvenanceV5(a, b)
 	}
 	if a.Schema == VulkanBuildReceiptSchemaV4 || b.Schema == VulkanBuildReceiptSchemaV4 {
 		if a.Schema != b.Schema {
@@ -1098,7 +1104,7 @@ func BuildShaders(ctx context.Context, tc *Toolchain, repoRoot string, stdout io
 	}
 
 	compiledCount := 0
-	for _, s := range CurrentVulkanShaderRegistryV4() {
+	for _, s := range CurrentVulkanShaderRegistryV5() {
 		src := filepath.Join(shaderSrc, s+".comp")
 		dst := filepath.Join(spvOut, s+".spv")
 
@@ -1256,7 +1262,7 @@ func RunVulkan(ctx context.Context, cfg *VulkanConfig) (retErr error) {
 
 	tracker := newReceiptTracker("vulkan", cfg.Command, cfg.ReceiptPath)
 	if cfg.Command == "binary" {
-		tracker.receipt.Schema = VulkanBuildReceiptSchemaV4
+		tracker.receipt.Schema = VulkanBuildReceiptSchemaV5
 	}
 	cfg.Receipt = tracker.receipt
 	defer func() {
@@ -1425,23 +1431,25 @@ func RunVulkan(ctx context.Context, cfg *VulkanConfig) (retErr error) {
 			return err
 		}
 		if err := tracker.recordPhase("provenance", func() error {
-			artifact, provenance, err := finalizeVulkanBinary(cfg, source, outBinPath, toolIdentities, toolchainSHA)
+			artifact, provenance, archive, score, err := finalizeVulkanBinaryV5(cfg, source, outBinPath, toolIdentities, toolchainSHA)
 			if err != nil {
 				return err
 			}
 			tracker.receipt.Artifact = artifact
 			tracker.receipt.Vulkan = provenance
-			registry, err := currentVulkanRegistryV4Identity()
+			registry, err := currentVulkanRegistryV5Identity()
 			if err != nil {
 				return err
 			}
 			tracker.receipt.VulkanRegistry = &registry
+			tracker.receipt.VulkanNativeArchive = archive
+			tracker.receipt.VulkanIndexerScore = score
 			return nil
 		}); err != nil {
 			return err
 		}
 		if err := tracker.recordPhase("reproducibility", func() error {
-			rep, err := compareVulkanBuildReceiptV4(cfg.CompareReceiptPath, tracker.receipt.Artifact, tracker.receipt.Vulkan, tracker.receipt.VulkanRegistry)
+			rep, err := compareVulkanBuildReceiptV5(cfg.CompareReceiptPath, tracker.receipt.Artifact, tracker.receipt.Vulkan, tracker.receipt.VulkanRegistry, tracker.receipt.VulkanNativeArchive, tracker.receipt.VulkanIndexerScore)
 			tracker.receipt.Reproducibility = rep
 			return err
 		}); err != nil {

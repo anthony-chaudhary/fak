@@ -300,6 +300,35 @@ int fvk_v41_shared_attention_f32(const void *dQ, const void *dSharedKV,
                                  int heads, int headDim, int selectedRows,
                                  int mode, int hasSink, float scale);
 
+/* V4.1 scalar-order indexer score. Four exact F32 storage bindings:
+ * Q[heads,headDim], keys[rows,headDim], weights[heads], scores[rows]. Inputs
+ * are caller-validated finite and immutable; output must not alias any input.
+ * Push ABI is int32 rows, heads, headDim, offsets 0/4/8. Runtime admission needs
+ * core Vulkan 1.2 binary32 denorm/signed-zero-Inf-NaN/RTE properties and matching
+ * SPIR-V execution modes plus scalar NoContraction proof. Query failure or
+ * unknown proof is unsupported, with a nonempty unavailable reason.
+ * rows=0 accepts null key/output handles and validates live Q/weight extents
+ * without allocation or dispatch. Nonempty return 0 is provisional until the
+ * checked batch fence/readback completes; errors have the RoPE status meanings.
+ * Arithmetic-produced Inf/NaN remain scores; downstream selection owns policy.
+ * Integration requires the separate V5/complete62 source-bound build receipt;
+ * this does not reinterpret frozen V4/complete61 and fvk_init verifies no receipt. */
+int fvk_have_v41_indexer_score(void);
+const char *fvk_v41_indexer_score_unavailable_reason(void);
+int fvk_v41_indexer_score_f32(const void *dQ, const void *dKeys,
+                              const void *dWeights, void *dScores,
+                              int rows, int heads, int headDim);
+
+/* Qualification is not integrated: production have remains false. A separately
+ * built test archive may expose only these physical-witness symbols; no runtime
+ * environment flag enables them or changes the production capability result. */
+#ifdef FAK_V41_INDEXER_SCORE_WITNESS
+int fvk_v41_indexer_score_witness_ready(void);
+int fvk_v41_indexer_score_witness_f32(const void *dQ, const void *dKeys,
+                                      const void *dWeights, void *dScores,
+                                      int rows, int heads, int headDim);
+#endif
+
 /* SwiGLU: y = silu(g) * u, elementwise, length n. */
 void fvk_swiglu_f32(const void *dG, const void *dU, void *dY, int n);
 void fvk_swiglu_limit_f32(const void *dG, const void *dU, void *dY, int n, float limit);

@@ -749,7 +749,7 @@ func buildFakeVulkanTool(t *testing.T, root string) string {
 	if runtime.GOOS == "windows" {
 		binary += ".exe"
 	}
-	writeFixtureFile(t, source, `package main
+	writeFixtureFile(t, source, strings.ReplaceAll(`package main
 
 import (
 	"os"
@@ -782,11 +782,15 @@ func main() {
 	if err := os.MkdirAll(filepath.Dir(out), 0755); err != nil {
 		os.Exit(3)
 	}
-	if err := os.WriteFile(out, []byte("fak-fixture-output\n"), 0644); err != nil {
+	body := []byte("fak-fixture-output\n")
+	if filepath.Base(out) == "v41_indexer_score.spv" {
+		body = []byte(__V5_SPIRV__)
+	}
+	if err := os.WriteFile(out, body, 0644); err != nil {
 		os.Exit(4)
 	}
 }
-`)
+`, "__V5_SPIRV__", fmt.Sprintf("%q", string(vulkanV5StructuralFixture()))))
 	cmd := exec.Command("go", "build", "-o", binary, source)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build fake Vulkan tool: %v\n%s", err, out)
@@ -806,6 +810,7 @@ func newVulkanFixture(t *testing.T) (string, string, *Toolchain) {
 		writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "shaders", shader+".comp"), "#version 450\n")
 		writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "spirv", shader+".spv"), "fak-fixture-output\n")
 	}
+	writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "spirv", "v41_indexer_score.spv"), string(vulkanV5StructuralFixture()))
 	writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "vulkan_shim.o"), "fak-fixture-output\n")
 	writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "libfakvulkan.a"), "fak-fixture-output\n")
 	runFixtureGit(t, root, "init", "-q", repo)
@@ -832,7 +837,7 @@ func readBuildReceipt(t *testing.T, path string) ComputeBuildReceipt {
 	if err != nil {
 		t.Fatal(err)
 	}
-	receipt, err := decodeStrictVulkanReceiptV4(b)
+	receipt, err := decodeStrictVulkanReceiptV5(b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -858,7 +863,7 @@ func TestVulkanBinaryDirtySourceRefusesBeforeBuildTool(t *testing.T) {
 		t.Fatal("build tool executed before dirty-source refusal")
 	}
 	receipt := readBuildReceipt(t, receiptPath)
-	if receipt.Schema != VulkanBuildReceiptSchemaV4 || receipt.Outcome != "failed" {
+	if receipt.Schema != VulkanBuildReceiptSchemaV5 || receipt.Outcome != "failed" {
 		t.Fatalf("receipt = %+v", receipt)
 	}
 	if len(receipt.Phases) != 1 || receipt.Phases[0].Name != "source_preflight" {
@@ -976,7 +981,7 @@ func TestVulkanBinaryReceiptBindsReproducibleSourceToolsShadersAndBinary(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if firstReceipt.Schema != VulkanBuildReceiptSchemaV4 || firstReceipt.Artifact == nil || len(firstReceipt.Artifact.SHA256) != sha256Hex || firstReceipt.Vulkan == nil || firstReceipt.VulkanRegistry == nil || firstReceipt.VulkanRegistry.ID != VulkanShaderRegistryV4ID || firstReceipt.VulkanRegistry.ModuleCount != vulkanV4ModuleCount {
+	if firstReceipt.Schema != VulkanBuildReceiptSchemaV5 || firstReceipt.Artifact == nil || len(firstReceipt.Artifact.SHA256) != sha256Hex || firstReceipt.Vulkan == nil || firstReceipt.VulkanRegistry == nil || firstReceipt.VulkanRegistry.ID != VulkanShaderRegistryV5ID || firstReceipt.VulkanRegistry.ModuleCount != vulkanV5ModuleCount {
 		t.Fatalf("incomplete first receipt: %+v", firstReceipt)
 	}
 	if firstReceipt.Vulkan.Source != firstSource || firstReceipt.Vulkan.SPIRVModuleCount != len(VulkanShaders) || len(firstReceipt.Vulkan.SPIRVBundleSHA256) != sha256Hex || len(firstReceipt.Vulkan.Toolchain) != len(wantTools) || len(firstReceipt.Vulkan.ToolchainSHA256) != sha256Hex || len(firstReceipt.Vulkan.BuildCommandSHA256) != sha256Hex || len(firstReceipt.Vulkan.StableIdentitySHA256) != sha256Hex {
@@ -1010,13 +1015,13 @@ func TestVulkanBinaryReceiptBindsReproducibleSourceToolsShadersAndBinary(t *test
 	mismatchArtifact := *firstReceipt.Artifact
 	mismatchBaseline.Artifact = &mismatchArtifact
 	mismatchBaseline.Artifact.SHA256 = strings.Repeat("0", 64)
-	// V4 validates the envelope before comparing independently built output.
+	// V5 validates the envelope before comparing independently built output.
 	// Keep this prior identity self-consistent so the witness reaches mismatch.
 	mismatchProvenance := *firstReceipt.Vulkan
 	mismatchBaseline.Vulkan = &mismatchProvenance
-	mismatchBaseline.Vulkan.StableIdentitySHA256, err = vulkanStableIdentityV4SHA(mismatchProvenance.Source,
+	mismatchBaseline.Vulkan.StableIdentitySHA256, err = vulkanStableIdentityV5SHA(mismatchProvenance.Source,
 		mismatchProvenance.SPIRVBundleSHA256, mismatchProvenance.SPIRVModuleCount,
-		mismatchProvenance.ToolchainSHA256, mismatchProvenance.BuildCommandSHA256, mismatchArtifact.SHA256)
+		mismatchProvenance.ToolchainSHA256, mismatchProvenance.BuildCommandSHA256, mismatchArtifact.SHA256, *firstReceipt.VulkanNativeArchive, *firstReceipt.VulkanIndexerScore)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1041,7 +1046,7 @@ func TestVulkanBinaryReceiptBindsReproducibleSourceToolsShadersAndBinary(t *test
 	if err := os.Remove(filepath.Join(repo, "internal", "compute", "spirv", VulkanShaders[0]+".spv")); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := hashCurrentSPIRVBundleV4(filepath.Join(repo, "internal", "compute", "spirv")); err == nil || !strings.Contains(err.Error(), "incomplete") {
+	if _, _, _, err := hashCurrentSPIRVBundleV5(filepath.Join(repo, "internal", "compute", "spirv")); err == nil || !strings.Contains(err.Error(), "incomplete") {
 		t.Fatalf("missing SPIR-V module error = %v", err)
 	}
 }

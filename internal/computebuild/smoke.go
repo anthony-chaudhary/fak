@@ -175,6 +175,8 @@ func (t *receiptTracker) fail(err error, exitCode int) {
 	t.receipt.Artifact = nil
 	t.receipt.Vulkan = nil
 	t.receipt.VulkanRegistry = nil
+	t.receipt.VulkanNativeArchive = nil
+	t.receipt.VulkanIndexerScore = nil
 	if t.receipt.Reproducibility != nil && t.receipt.Reproducibility.Status != "mismatch" && t.receipt.Reproducibility.Status != "invalid" {
 		t.receipt.Reproducibility = nil
 	}

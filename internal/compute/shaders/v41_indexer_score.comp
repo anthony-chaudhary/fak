@@ -1,0 +1,44 @@
+#version 450
+#extension GL_EXT_spirv_intrinsics : require
+
+// Khronos GLSL_EXT_spirv_intrinsics and SPV_KHR_float_controls. Each mode
+// explicitly applies to binary32; precise alone does not establish these modes.
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4464], 4459, 32);
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4466], 4461, 32);
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4467], 4462, 32);
+layout(local_size_x = 1) in;
+
+layout(std430, binding = 0) readonly buffer QBuf { float Q[]; };
+layout(std430, binding = 1) readonly buffer KeyBuf { float Keys[]; };
+layout(std430, binding = 2) readonly buffer WeightBuf { float Weights[]; };
+layout(std430, binding = 3) writeonly buffer ScoreBuf { float Scores[]; };
+
+layout(push_constant) uniform Push {
+    int rows;
+    int heads;
+    int headDim;
+} pc;
+
+// One invocation owns one row. The loops preserve dimension/head order, with
+// separate binary32 products and sums. Overflow is not clamped or rejected;
+// downstream selection retains ownership of the existing NaN/infinity policy.
+void main() {
+    uint row = gl_GlobalInvocationID.x;
+    if (row >= uint(pc.rows)) return;
+    uint keyBase = row * uint(pc.headDim);
+    precise float score = 0.0;
+    for (int h = 0; h < pc.heads; ++h) {
+        uint queryBase = uint(h) * uint(pc.headDim);
+        precise float dot = 0.0;
+        for (int d = 0; d < pc.headDim; ++d) {
+            precise float product = Q[queryBase + uint(d)] * Keys[keyBase + uint(d)];
+            precise float nextDot = dot + product;
+            dot = nextDot;
+        }
+        if (dot < 0.0) dot = 0.0;
+        precise float weighted = dot * Weights[h];
+        precise float nextScore = score + weighted;
+        score = nextScore;
+    }
+    Scores[row] = score;
+}

@@ -153,6 +153,8 @@ function Build-Shaders {
     $shaders += "q4k_matmul_coopmat"
     $shaders += "v41_tail_rope_qk"
     $shaders += "v41_shared_attention"
+    # Coupled V5/complete62 migration; never accept this bundle as frozen V4/61.
+    $shaders += "v41_indexer_score"
     foreach ($s in $shaders) {
         $src = Join-Path $shaderSrc "$s.comp"
         $dst = Join-Path $spvOut "$s.spv"

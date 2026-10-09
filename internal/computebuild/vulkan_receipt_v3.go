@@ -27,6 +27,9 @@ func buildReceiptWireValue(receipt *ComputeBuildReceipt) any {
 	if receipt == nil {
 		return (*computeBuildReceiptV2Wire)(nil)
 	}
+	if receipt.Schema == VulkanBuildReceiptSchemaV5 {
+		return vulkanBuildReceiptV5Wire{computeBuildReceiptV2Wire: computeBuildReceiptV2Wire(*receipt), ShaderRegistry: receipt.VulkanRegistry, NativeArchive: receipt.VulkanNativeArchive, IndexerScore: receipt.VulkanIndexerScore}
+	}
 	if receipt.Schema == VulkanBuildReceiptSchemaV4 {
 		return vulkanBuildReceiptV4Wire{computeBuildReceiptV2Wire: computeBuildReceiptV2Wire(*receipt), ShaderRegistry: receipt.VulkanRegistry}
 	}
@@ -37,7 +40,7 @@ func buildReceiptWireValue(receipt *ComputeBuildReceipt) any {
 }
 
 // MarshalJSON preserves historical wire fields and emits the explicit registry
-// for V3 and V4, including when nested in an identity-verification result.
+// for V3, V4, and V5, including when nested in an identity-verification result.
 func (receipt ComputeBuildReceipt) MarshalJSON() ([]byte, error) {
 	var out bytes.Buffer
 	enc := json.NewEncoder(&out)
@@ -123,7 +126,7 @@ func compareVulkanReceiptProvenanceV3(a, b *ComputeBuildReceipt) error {
 // VerifyVulkanBinaryReceiptIdentityForSchema selects a trusted envelope policy.
 // The expected schema comes from the caller, never from untrusted receipt JSON.
 // V2 remains a historical identity proof, not support for legacy runtime bundles.
-// V3 and V4 are explicit pre-launch qualification APIs; native initialization does not
+// Successor APIs provide explicit pre-launch identity proof; native initialization does not
 // call it and its presence is not automatic runtime receipt enforcement.
 func VerifyVulkanBinaryReceiptIdentityForSchema(ctx context.Context, expectedSchema string, evidence VulkanBinaryReceiptEvidence) (*VulkanBinaryReceiptIdentityVerification, error) {
 	switch expectedSchema {
@@ -133,6 +136,8 @@ func VerifyVulkanBinaryReceiptIdentityForSchema(ctx context.Context, expectedSch
 		return verifyVulkanBinaryReceiptV3Identity(ctx, evidence)
 	case VulkanBuildReceiptSchemaV4:
 		return verifyVulkanBinaryReceiptV4Identity(ctx, evidence)
+	case VulkanBuildReceiptSchemaV5:
+		return verifyVulkanBinaryReceiptV5Identity(ctx, evidence)
 	default:
 		return nil, fmt.Errorf("unsupported trusted Vulkan receipt schema %q", expectedSchema)
 	}

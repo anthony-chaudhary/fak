@@ -88,6 +88,8 @@ const (
 	VulkanBuildReceiptSchemaV3 = "fak.vulkan-build-receipt.v3"
 	// VulkanBuildReceiptSchemaV4 binds the trusted 61-module shared-attention registry.
 	VulkanBuildReceiptSchemaV4 = "fak.vulkan-build-receipt.v4"
+	// VulkanBuildReceiptSchemaV5 binds exact62, the native archive, and score float controls.
+	VulkanBuildReceiptSchemaV5 = "fak.vulkan-build-receipt.v5"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"
@@ -191,7 +193,9 @@ type ComputeBuildReceipt struct {
 	Smoke               *SmokeResult           `json:"smoke,omitempty"`
 	Vulkan              *VulkanBuildProvenance `json:"vulkan,omitempty"`
 	Reproducibility     *BuildReproducibility  `json:"reproducibility,omitempty"`
-	// In-memory only: WriteReceiptAtomic uses the explicit V3 or V4 wire envelope.
+	// In-memory only: WriteReceiptAtomic uses the explicit successor wire envelope.
 	// Keeping this out of the common JSON type preserves V2 unknown-field rejection.
-	VulkanRegistry *VulkanShaderRegistryIdentity `json:"-"`
+	VulkanRegistry      *VulkanShaderRegistryIdentity `json:"-"`
+	VulkanNativeArchive *BuildArtifact                `json:"-"`
+	VulkanIndexerScore  *VulkanIndexerScoreContract   `json:"-"`
 }

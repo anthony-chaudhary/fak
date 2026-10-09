@@ -106,7 +106,7 @@ func TestVulkanReceiptV3CurrentRegistryBoundary(t *testing.T) {
 		for _, match := range regexp.MustCompile(`"([a-z0-9_]+)"`).FindAllStringSubmatch(block, -1) {
 			windows = append(windows, match[1])
 		}
-		if err := validateCurrentVulkanRegistryV4(windows); err != nil {
+		if err := validateCurrentVulkanRegistryV5(windows); err != nil {
 			t.Fatalf("Windows and native Go current registry differ: %v", err)
 		}
 	})
