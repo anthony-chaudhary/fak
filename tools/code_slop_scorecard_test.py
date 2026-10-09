@@ -1551,6 +1551,85 @@ def test_git_tracked_source_paths_discovers_untracked_and_excludes_scratch():
         assert s_rels == ["internal/model/arch.s", "internal/model/new.s"]
 
 
+def test_duplication_owner_caches_preserve_outputs_and_bound_work():
+    # In-memory performance regression: no wall-clock threshold or corpus scan.
+    cached_spans, cached_owner = cs._function_spans, cs._owning_function
+    assert callable(getattr(cached_spans, "cache_info", None))
+    assert callable(getattr(cached_owner, "cache_info", None))
+    raw_spans, raw_owner = cached_spans.__wrapped__, cached_owner.__wrapped__
+    assert cached_spans.cache_info().maxsize == 128
+    assert cached_owner.cache_info().maxsize == 512
+    source = "package fixture\n" + "".join(_dup_block(n) for n in ("one", "two", "three"))
+    sites = [("fixture.go", source.count("\n", 0, start) + 2,
+              source.count("\n", 0, end))
+             for start, end, _, _ in raw_spans(source)]
+    files = {"fixture.go": source}
+    cross_files = {name + ".go": "package fixture\n" + _dup_block("sum")
+                   for name in ("a", "b", "c")}
+    counts = {"owner": 0, "parser": 0}
+
+    def count_spans(text):
+        counts["parser"] += 1
+        return raw_spans(text)
+
+    def count_owner(text, start, end):
+        counts["owner"] += 1
+        return raw_owner(text, start, end)
+
+    try:
+        cs._function_spans, cs._owning_function = count_spans, count_owner
+        expected = cs._dup_survivor_groups(files, [sites])
+        assert counts == {"owner": 6, "parser": 6}, counts
+        expected_kpi = cs.kpi_duplication(cross_files)
+    finally:
+        cs._function_spans, cs._owning_function = cached_spans, cached_owner
+
+    try:
+        cached_spans.cache_clear()
+        cached_owner.cache_clear()
+        assert cs._dup_survivor_groups(files, [sites]) == expected
+        assert cached_owner.cache_info().misses == 3
+        assert cached_owner.cache_info().hits == 3
+        assert cached_spans.cache_info().misses == 1
+        assert cached_spans.cache_info().hits == 2
+        assert cs.kpi_duplication(cross_files) == expected_kpi
+        assert expected_kpi["subcategories"]["extractable"] == 1
+
+        # The same source position with new bytes must compute a new owner.
+        start, end = sites[0][1:]
+        original = cached_owner(source, start, end)
+        changed = source.replace("v * 2", "v * 99", 1)
+        revised = cached_owner(changed, start, end)
+        assert revised != original
+        assert revised == raw_owner(changed, start, end)
+
+        # Bounds count entries, not bytes. Eviction must only cost recomputation.
+        cached_spans.cache_clear()
+        snippets = [f"package p\nfunc item{i}() int {{ return {i} }}\n"
+                    for i in range(129)]
+        first = cached_spans(snippets[0])
+        for snippet in snippets[1:]:
+            cached_spans(snippet)
+        info = cached_spans.cache_info()
+        assert info.currsize == info.maxsize == 128 and info.misses == 129
+        assert cached_spans(snippets[0]) == first == raw_spans(snippets[0])
+        assert cached_spans.cache_info().misses == 130
+
+        cached_owner.cache_clear()
+        snippets = [f"package p\nfunc item{i}() int {{ return {i} }}\n"
+                    for i in range(513)]
+        first = cached_owner(snippets[0], 2, 2)
+        for snippet in snippets[1:]:
+            cached_owner(snippet, 2, 2)
+        info = cached_owner.cache_info()
+        assert info.currsize == info.maxsize == 512 and info.misses == 513
+        assert cached_owner(snippets[0], 2, 2) == first == raw_owner(snippets[0], 2, 2)
+        assert cached_owner.cache_info().misses == 514
+    finally:
+        cached_spans.cache_clear()
+        cached_owner.cache_clear()
+
+
 def main() -> int:
     tests = sorted((n, f) for n, f in globals().items()
                    if n.startswith("test_") and callable(f))

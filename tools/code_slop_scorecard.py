@@ -72,6 +72,7 @@ import os
 import re
 import subprocess
 import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -519,6 +520,7 @@ def go_tokens(text: str, *, normalize_idents: bool = True) -> list[tuple[str, in
 
 
 
+@lru_cache(maxsize=128)
 def _function_spans(text: str) -> list[tuple[int, int, str, str]]:
     """Return lexical Go function spans as (start, end, signature, body).
 
@@ -590,6 +592,7 @@ def _function_spans(text: str) -> list[tuple[int, int, str, str]]:
     return out
 
 
+@lru_cache(maxsize=512)
 def _owning_function(text: str, start_line: int, end_line: int):
     starts = [0] + [m.end() for m in re.finditer("\n", text)]
     start = starts[max(0, start_line - 1)]
