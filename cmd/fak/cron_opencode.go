@@ -71,6 +71,11 @@ type OpenCodeRunReceipt struct {
 	DurationMS int64   `json:"duration_ms"`
 	WitnessRef *string `json:"witness_ref"` // explicitly null (pointer without omitempty)
 
+	// Job names the scheduled routine the run belongs to, so an outcome row is
+	// attributable without a slot join against the fak-cron-fire/1 row. Additive
+	// + omitempty: a run with no --job stays byte-identical.
+	Job string `json:"job,omitempty"`
+
 	StartError    string `json:"start_error,omitempty"`    // bounded tail of child output when the session never started
 	StartupFailed bool   `json:"startup_failed,omitempty"` // true iff exit != 0 AND SessionID == ""
 
@@ -307,6 +312,7 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 		}
 		return OpenCodeRunReceipt{
 			Schema:     cronOpenCodeRunSchema,
+			Job:        opts.Job,
 			RunID:      runID,
 			ExitCode:   2,
 			Outcome:    "failed",
@@ -326,6 +332,7 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 				}
 				return OpenCodeRunReceipt{
 					Schema:     cronOpenCodeRunSchema,
+					Job:        opts.Job,
 					RunID:      runID,
 					ExitCode:   2,
 					Outcome:    "failed",
@@ -345,6 +352,7 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 			nowStr := checkTime.UTC().Format(time.RFC3339)
 			receipt := OpenCodeRunReceipt{
 				Schema:     cronOpenCodeRunSchema,
+				Job:        opts.Job,
 				RunID:      runID,
 				SessionID:  "",
 				ExitCode:   0,
@@ -375,6 +383,7 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 		if !ok {
 			return OpenCodeRunReceipt{
 				Schema:     cronOpenCodeRunSchema,
+				Job:        opts.Job,
 				RunID:      runID,
 				ExitCode:   2,
 				Outcome:    "failed",
@@ -389,6 +398,7 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 			}
 			return OpenCodeRunReceipt{
 				Schema:     cronOpenCodeRunSchema,
+				Job:        opts.Job,
 				RunID:      runID,
 				ExitCode:   2,
 				Outcome:    "failed",
@@ -408,6 +418,7 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 			}
 			return OpenCodeRunReceipt{
 				Schema:     cronOpenCodeRunSchema,
+				Job:        opts.Job,
 				RunID:      runID,
 				ExitCode:   2,
 				Outcome:    "failed",
@@ -430,6 +441,7 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 				nowStr := fireAt.UTC().Format(time.RFC3339)
 				receipt := OpenCodeRunReceipt{
 					Schema:     cronOpenCodeRunSchema,
+					Job:        opts.Job,
 					RunID:      runID,
 					SessionID:  "",
 					ExitCode:   cronExitDeduped,
@@ -463,6 +475,7 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 			}
 			return OpenCodeRunReceipt{
 				Schema:     cronOpenCodeRunSchema,
+				Job:        opts.Job,
 				RunID:      runID,
 				ExitCode:   2,
 				Outcome:    "failed",
@@ -494,6 +507,7 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 			}
 			return OpenCodeRunReceipt{
 				Schema:        cronOpenCodeRunSchema,
+				Job:           opts.Job,
 				RunID:         runID,
 				ExitCode:      2,
 				Outcome:       "failed",
@@ -707,6 +721,7 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 
 	receipt := OpenCodeRunReceipt{
 		Schema:            cronOpenCodeRunSchema,
+		Job:               opts.Job,
 		RunID:             runID,
 		SessionID:         sessionID,
 		ExitCode:          exitCode,
