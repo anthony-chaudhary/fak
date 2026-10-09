@@ -33,6 +33,9 @@ func estimateServeNativeHostLoadPeak(ggufPath string, _ bool, opts []ggufload.Q4
 		return ggufload.HostLoadPeak{}, err
 	}
 	defer ws.Close()
+	if e := ggufload.ApplyQ4KLoadOptions(opts); e.StreamedExpertDeviceRing > 0 && e.StreamedDenseBounded {
+		return ws.EstimateStreamedExpertHostLoadPeak(opts...)
+	}
 	return ws.EstimateQ4KHostLoadPeak(false, opts...)
 }
 
