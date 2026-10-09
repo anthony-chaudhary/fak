@@ -16,12 +16,17 @@ package gateway
 // THE SINGLE SOURCE OF TRUTH. Every number below is read from the exact state
 // `/metrics` renders, and nothing is cached, derived, or second-guessed:
 //
-//   - total_slots  <- AdmissionPolicy.MaxNumSeqs, the live running-set cap the
-//     admission controller gates every served turn against (admission.go).
-//     This is the REAL concurrent-request ceiling on the in-kernel serve path,
-//     not BatchPolicy.MaxBatch: batchsched.go states in its own HONEST FENCE
-//     header that the composition policy is NOT wired into the live serve path,
-//     so reporting it as an engine slot capacity would be a fabricated claim.
+//   - total_slots  <- AdmissionPolicy.MaxNumSeqs, the sequence-count cap the
+//     admission controller checks (admission.go). It is an upper bound, not the
+//     effective concurrency: the binding gate is the token budget below, which
+//     admits requests only while the sum of their footprints (prompt chars/4 +
+//     min(max_tokens, prealloc ceiling)) fits. BatchPolicy.MaxBatch is not used
+//     either: batchsched.go states in its HONEST FENCE header that the
+//     composition policy is NOT wired into the live serve path.
+//   - admission_token_budget / _source / admission_prealloc_tokens <-
+//     AdmissionPolicy.TokenBudget, TokenBudgetProvenance(), and the effective
+//     PreallocCeiling: the bound that actually limits concurrent admissions
+//     (TestNativeAdmissionConcurrencyUnderShippingPolicy).
 //   - default_generation_settings.n_ctx <- inKernelContextWindow(s.planner),
 //     the loaded model's declared context window — byte-identical to the
 //     context_length /v1/models already publishes (http_management.go).
@@ -99,14 +104,22 @@ type servingPropsGenerationSettings struct {
 // /metrics without trusting this handler. None of them is load-bearing for a
 // capability verdict.
 type servingPropsWire struct {
-	// TotalSlots is the live admission running-set cap (MaxNumSeqs). OMITTED
-	// when no admission controller is installed, which is the pure-proxy shape:
-	// there is no in-kernel running set to cap, so there is no slot count to
-	// report and a 0 would read as "an engine with zero slots".
+	// TotalSlots is the admission sequence-count cap (MaxNumSeqs), an upper
+	// bound rather than the effective concurrency; AdmissionTokenBudget is the
+	// binding bound. OMITTED when no admission controller is installed, which
+	// is the pure-proxy shape: a 0 would read as "an engine with zero slots".
 	TotalSlots *int `json:"total_slots,omitempty"`
-	// TotalSlotsSource names the field the cap was read from, so a reader knows
-	// a declared slot count is a real admission bound rather than a constant.
+	// TotalSlotsSource names the field the cap was read from.
 	TotalSlotsSource string `json:"fak_total_slots_source,omitempty"`
+
+	// AdmissionTokenBudget is the admission token budget: requests are admitted
+	// only while the sum of their footprints fits within it, so it, not
+	// total_slots, bounds native concurrency. AdmissionPreallocTokens is the
+	// per-request generation-token reservation ceiling inside each footprint.
+	// All three are OMITTED when no admission controller is installed.
+	AdmissionTokenBudget       *int   `json:"admission_token_budget,omitempty"`
+	AdmissionTokenBudgetSource string `json:"admission_token_budget_source,omitempty"`
+	AdmissionPreallocTokens    *int   `json:"admission_prealloc_tokens,omitempty"`
 
 	DefaultGenerationSettings servingPropsGenerationSettings `json:"default_generation_settings"`
 
@@ -207,13 +220,20 @@ func (s *Server) servingProps() servingPropsWire {
 	admission := s.admissionCtl
 	s.admissionMu.RUnlock()
 	if admission != nil {
+		policy := admission.Policy()
 		// MaxNumSeqs <= 0 DISABLES the seq cap (admission.go), so a
 		// non-positive value means "uncapped" — genuinely no bound to report.
-		if maxSeqs := admission.Policy().MaxNumSeqs; maxSeqs > 0 {
+		if maxSeqs := policy.MaxNumSeqs; maxSeqs > 0 {
 			total := maxSeqs
 			out.TotalSlots = &total
-			out.TotalSlotsSource = "gateway AdmissionPolicy.MaxNumSeqs (live admission running-set cap)"
+			out.TotalSlotsSource = "gateway AdmissionPolicy.MaxNumSeqs (sequence-count cap, not the effective concurrency; admission_token_budget is the binding bound)"
 		}
+		if budget := policy.TokenBudget; budget > 0 {
+			out.AdmissionTokenBudget = &budget
+			out.AdmissionTokenBudgetSource = admission.TokenBudgetProvenance()
+		}
+		prealloc := policy.preallocCeiling()
+		out.AdmissionPreallocTokens = &prealloc
 		st := admission.Stats()
 		running, waiting := int(st.Running), int(st.Waiting)
 		out.RunningRequests = &running

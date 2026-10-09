@@ -329,3 +329,49 @@ func readAndCloseBody(t *testing.T, resp *http.Response) []byte {
 	}
 	return body
 }
+
+// TestServingPropsAdmissionTokenBudget pins the three admission budget keys to
+// values the test chose, and their absence on the pure-proxy shape: the token
+// budget, not total_slots, is what bounds native concurrency.
+func TestServingPropsAdmissionTokenBudget(t *testing.T) {
+	budgetKeys := []string{"admission_token_budget", "admission_token_budget_source", "admission_prealloc_tokens"}
+
+	t.Run("no_admission_controller_omits_budget", func(t *testing.T) {
+		_, body := servingPropsGet(t, &Server{})
+		fields := propsKeys(t, body)
+		for _, key := range budgetKeys {
+			if raw, ok := fields[key]; ok {
+				t.Errorf("%s = %s, want the key ABSENT without an admission controller", key, raw)
+			}
+		}
+	})
+
+	for _, tt := range []struct {
+		name         string
+		policy       AdmissionPolicy
+		budget       int
+		provenance   string
+		wantPrealloc int
+	}{
+		{name: "measured_budget_custom_prealloc", policy: AdmissionPolicy{MaxNumSeqs: 256, PreallocCeiling: 512}, budget: 12345, provenance: "measured", wantPrealloc: 512},
+		{name: "explicit_budget_default_prealloc", policy: AdmissionPolicy{MaxNumSeqs: 256}, budget: 8192, provenance: "explicit", wantPrealloc: DefaultPreallocCeiling},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctl := NewAdmissionController(tt.policy)
+			ctl.SetTokenBudgetWithProvenance(tt.budget, tt.provenance)
+			_, body := servingPropsGet(t, &Server{admissionCtl: ctl})
+			fields := propsKeys(t, body)
+
+			if got := requireJSONNumber(t, fields, "admission_token_budget"); int(got) != tt.budget {
+				t.Errorf("admission_token_budget = %v, want %d", got, tt.budget)
+			}
+			var src string
+			if err := json.Unmarshal(fields["admission_token_budget_source"], &src); err != nil || src != tt.provenance {
+				t.Errorf("admission_token_budget_source = %s, want %q", fields["admission_token_budget_source"], tt.provenance)
+			}
+			if got := requireJSONNumber(t, fields, "admission_prealloc_tokens"); int(got) != tt.wantPrealloc {
+				t.Errorf("admission_prealloc_tokens = %v, want %d", got, tt.wantPrealloc)
+			}
+		})
+	}
+}

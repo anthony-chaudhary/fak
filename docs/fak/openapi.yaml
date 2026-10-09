@@ -4029,12 +4029,31 @@ components:
         total_slots:
           type: integer
           description: >-
-            The live admission running-set cap (AdmissionPolicy.MaxNumSeqs) — the
-            real bound on concurrently admitted requests. OMITTED when no
-            admission controller is installed, which is the pure-proxy shape.
-            NEVER a constant and never a fabricated zero.
+            The admission sequence-count cap (AdmissionPolicy.MaxNumSeqs). An
+            upper bound, not the effective concurrency: admission_token_budget is
+            the binding bound. OMITTED when no admission controller is installed,
+            which is the pure-proxy shape. NEVER a constant and never a
+            fabricated zero.
           example: 256
         fak_total_slots_source: { type: string }
+        admission_token_budget:
+          type: integer
+          description: >-
+            The admission token budget (AdmissionPolicy.TokenBudget). Requests are
+            admitted only while the sum of their footprints (prompt chars/4 +
+            min(max_tokens, admission_prealloc_tokens)) fits, so this, not
+            total_slots, bounds native concurrency. OMITTED when no admission
+            controller is installed or the budget is non-positive.
+          example: 8192
+        admission_token_budget_source:
+          type: string
+          description: Provenance of admission_token_budget ("default", "measured", or "explicit").
+        admission_prealloc_tokens:
+          type: integer
+          description: >-
+            The per-request ceiling on generation tokens reserved at admission.
+            OMITTED when no admission controller is installed.
+          example: 2048
         default_generation_settings:
           type: object
           description: >-

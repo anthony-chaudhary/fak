@@ -19,8 +19,10 @@ type ServingConfig struct {
 	SpeculativeAcceptanceThreshold float64 `json:"speculative_acceptance_threshold"`
 
 	// Tier 1: Algorithmic & Scheduling Policies
-	MaxBatchTokens     uint32 `json:"max_batch_tokens"`
-	MaxModelLen        uint32 `json:"max_model_len"`
+	MaxBatchTokens uint32 `json:"max_batch_tokens"`
+	MaxModelLen    uint32 `json:"max_model_len"`
+	// MaxNumSeqs is not applied to the gateway AdmissionController (it has no
+	// setter for it); native concurrency is bounded by the admission token budget.
 	MaxNumSeqs         uint32 `json:"max_num_seqs"`
 	PriorityStrategy   string `json:"priority_strategy,omitempty"`
 	PreemptionStrategy string `json:"preemption_strategy,omitempty"`
