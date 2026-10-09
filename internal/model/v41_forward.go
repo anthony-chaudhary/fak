@@ -160,6 +160,7 @@ type v41ForwardState struct {
 	queryNorm        v41QueryNormFunc
 	kvNorm           v41KVNormFunc
 	ffnNorm          v41FFNNormFunc
+	compressorNorm   v41CompressorNormFunc
 	sharedActivation v41SharedActivationFunc
 	tailRoPE         v41TailRoPEFunc
 	sharedAttention  v41SharedAttentionFunc
@@ -290,7 +291,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, callbackOwner: st.callbackOwner}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -442,6 +443,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.queryNorm = nil
 	scratch.kvNorm = nil
 	scratch.ffnNorm = nil
+	scratch.compressorNorm = nil
 	scratch.sharedActivation = nil
 	scratch.tailRoPE = nil
 	scratch.sharedAttention = nil
@@ -452,6 +454,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.queryNorm = st.queryNorm
 		scratch.kvNorm = st.kvNorm
 		scratch.ffnNorm = st.ffnNorm
+		scratch.compressorNorm = st.compressorNorm
 		scratch.sharedActivation = st.sharedActivation
 		scratch.tailRoPE = st.tailRoPE
 		scratch.sharedAttention = st.sharedAttention
@@ -463,6 +466,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.queryNorm = nil
 		scratch.kvNorm = nil
 		scratch.ffnNorm = nil
+		scratch.compressorNorm = nil
 		scratch.sharedActivation = nil
 		scratch.tailRoPE = nil
 		scratch.sharedAttention = nil
@@ -701,7 +705,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	}
 	var compressedKV [][]float32
 	if plan.Ratio > 1 {
-		compressed, err := m.v41CompressedRowsWithProjection(l, plan.Ratio, kvRows, preByPos, scratch.denseProjection)
+		compressed, err := m.v41CompressedRowsWithOperations(l, plan.Ratio, kvRows, preByPos, scratch.denseProjection, scratch.compressorNorm)
 		if err != nil {
 			return err
 		}
@@ -1351,6 +1355,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.queryNorm = s.v41QueryNormFunc()
 		s.v41Forward.kvNorm = s.v41KVNormFunc()
 		s.v41Forward.ffnNorm = s.v41FFNNormFunc()
+		s.v41Forward.compressorNorm = s.v41CompressorNormFunc()
 		s.v41Forward.sharedActivation = s.v41SharedActivationFunc()
 		s.v41Forward.tailRoPE = s.v41TailRoPEFunc()
 		s.v41Forward.sharedAttention = s.v41SharedAttentionFunc()

@@ -255,6 +255,10 @@ func (m *Model) v41CompressedRows(l int, ratio int, kvRows [][]float32, inputs [
 }
 
 func (m *Model) v41CompressedRowsWithProjection(l int, ratio int, kvRows [][]float32, inputs [][]float32, project v41DenseProjectionFunc) ([][]float32, error) {
+	return m.v41CompressedRowsWithOperations(l, ratio, kvRows, inputs, project, nil)
+}
+
+func (m *Model) v41CompressedRowsWithOperations(l int, ratio int, kvRows [][]float32, inputs [][]float32, project v41DenseProjectionFunc, normalize v41CompressorNormFunc) ([][]float32, error) {
 	if ratio <= 1 {
 		return kvRows, nil
 	}
@@ -266,6 +270,11 @@ func (m *Model) v41CompressedRowsWithProjection(l int, ratio int, kvRows [][]flo
 	pool, err := NewV41CompressorPool(ratio, width)
 	if err != nil {
 		return nil, v41StageErr(v41StageCompress, l, err)
+	}
+	if normalize != nil {
+		pool.normalize = func(pooled, gain []float32, eps float32) ([]float32, error) {
+			return normalize(l, pooled, gain, eps)
+		}
 	}
 	var out [][]float32
 	for pos := range inputs {

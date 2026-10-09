@@ -551,6 +551,11 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		if perr != nil {
 			return v41StageErr(v41StageCompress, l, perr)
 		}
+		if normalize := scratch.compressorNorm; normalize != nil {
+			pool.normalize = func(pooled, gain []float32, eps float32) ([]float32, error) {
+				return normalize(l, pooled, gain, eps)
+			}
+		}
 		projectKV := func(in []float32) ([]float32, error) {
 			return m.v41ProjMatRowsWithProjection(l, "attn.compressor.wkv.weight", in, width, H, scratch.denseProjection)
 		}

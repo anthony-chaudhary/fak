@@ -101,6 +101,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	scratch.queryNorm = st.queryNorm
 	scratch.kvNorm = st.kvNorm
 	scratch.ffnNorm = st.ffnNorm
+	scratch.compressorNorm = st.compressorNorm
 	scratch.sharedActivation = st.sharedActivation
 	scratch.tailRoPE = st.tailRoPE
 	scratch.sharedAttention = st.sharedAttention
@@ -112,6 +113,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 		scratch.queryNorm = nil
 		scratch.kvNorm = nil
 		scratch.ffnNorm = nil
+		scratch.compressorNorm = nil
 		scratch.sharedActivation = nil
 		scratch.tailRoPE = nil
 		scratch.sharedAttention = nil

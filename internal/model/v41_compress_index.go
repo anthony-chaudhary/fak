@@ -36,6 +36,10 @@ type V41CompressorPool struct {
 	filled  int
 	kv      []float32
 	scores  []float32
+
+	// normalize is session-bound only on ephemeral producer pools. Retained
+	// attention state and prefix snapshots contain data, never this callback.
+	normalize func(pooled, gain []float32, eps float32) ([]float32, error)
 }
 
 // NewV41CompressorPool builds a pooling state for a ratio and latent width.
@@ -85,6 +89,10 @@ func (c *V41CompressorPool) PushNormalized(pos int, projectedKV, projectedScore,
 	pooled, emitted, err := c.Push(pos, projectedKV, projectedScore)
 	if err != nil || !emitted {
 		return nil, emitted, err
+	}
+	if c.normalize != nil {
+		normalized, err := c.normalize(pooled, normWeight, eps)
+		return normalized, true, err
 	}
 	var meanSquare float32
 	for i := range pooled {
