@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -91,11 +92,11 @@ func TestV41IndexerProjectionBorrowedKVFirstDivergenceDiagnostic(t *testing.T) {
 		var hostInput, hostRaw []float32
 		callback := reflect.ValueOf(&state.denseProjection).Elem()
 		callback.Set(reflect.MakeFunc(callback.Type(), func(args []reflect.Value) []reflect.Value {
-			if int(args[0].Int()) == 1 && args[1].String() == "indexer.wk.weight" {
+			if int(args[0].Int()) == 0 && args[1].String() == "indexer.wk.weight" {
 				input := args[2].Interface().([]float32)
 				out, in, rows := int(args[3].Int()), int(args[4].Int()), int(args[5].Int())
 				hostInput = append(hostInput, input...)
-				weight := probeModel.tensor(layerName(1, "indexer.wk.weight"))
+				weight := probeModel.tensor(layerName(0, "indexer.wk.weight"))
 				for row := 0; row < rows; row++ {
 					for dst := 0; dst < out; dst++ {
 						sum := float64(0)
@@ -111,19 +112,19 @@ func TestV41IndexerProjectionBorrowedKVFirstDivergenceDiagnostic(t *testing.T) {
 		if _, err := probeModel.forwardV41(history, state); err != nil {
 			t.Fatal(err)
 		}
-		weight := v41CompressorTestWeight(t, s, 1, "indexer.wk.weight")
+		weight := v41CompressorTestWeight(t, s, 0, "indexer.wk.weight")
 		var selectedInput, selectedRaw []float32
 		for _, product := range b.products[weight] {
 			selectedInput = append(selectedInput, product.input...)
 			selectedRaw = append(selectedRaw, product.output...)
 		}
 		if len(hostInput) == 0 {
-			t.Fatal("host forward diagnostic did not observe own wk input")
+			t.Fatal("host forward diagnostic did not observe KV-owner wk input")
 		}
 		inputDiff := maxDiff(selectedInput, hostInput)
 		rawDiff := maxDiff(selectedRaw, hostRaw)
-		keys, _ := s.v41Forward.attn.IndexKeys(1)
-		wantKeys, _ := cold.v41Forward.attn.IndexKeys(1)
+		keys, _ := s.v41Forward.attn.IndexKeys(0)
+		wantKeys, _ := cold.v41Forward.attn.IndexKeys(0)
 		keyDiff := maxDiff(flatten(keys), flatten(wantKeys))
 		maxRow, maxCol := 0, 0
 		for row := range keys {
@@ -134,7 +135,7 @@ func TestV41IndexerProjectionBorrowedKVFirstDivergenceDiagnostic(t *testing.T) {
 			}
 		}
 		t.Logf("diagnostic control segment=%d positions=%d own-input-maxdiff=%g raw-wk-maxdiff=%g final-key-maxdiff=%g key-row=%d key-col=%d scalar-cold-Session-logits-maxdiff=%g", segment, len(history), inputDiff, rawDiff, keyDiff, maxRow, maxCol, logitDiff)
-		if m.Cfg.RMSNormEps != coldModel.Cfg.RMSNormEps || !reflect.DeepEqual(m.tensor(layerName(1, "indexer.k_norm.weight")), coldModel.tensor(layerName(1, "indexer.k_norm.weight"))) {
+		if m.Cfg.RMSNormEps != coldModel.Cfg.RMSNormEps || !reflect.DeepEqual(m.tensor(layerName(0, "indexer.k_norm.weight")), coldModel.tensor(layerName(0, "indexer.k_norm.weight"))) {
 			t.Fatal("fixture indexer normalization weights or EPS disagree")
 		}
 		cold.Close()
@@ -175,14 +176,14 @@ func TestV41IndexerProjectionBorrowedKVSameBackendKeyParity(t *testing.T) {
 		})
 		coldHAL := v41DenseTestSession(t, coldHALModel, newV41CompressorTestBackend())
 		coldHAL.Prefill(history)
-		keys, ok := s.v41Forward.attn.IndexKeys(1)
-		wantKeys, wantOK := coldHAL.v41Forward.attn.IndexKeys(1)
+		keys, ok := s.v41Forward.attn.IndexKeys(0)
+		wantKeys, wantOK := coldHAL.v41Forward.attn.IndexKeys(0)
 		if !ok || !wantOK || len(keys) != len(history)/2 || len(wantKeys) != len(keys) {
-			t.Fatalf("same-backend own key history absent at segment %d", segment)
+			t.Fatalf("same-backend KV-owner key history absent at segment %d", segment)
 		}
 		for row := range keys {
 			t.Run(itoa(segment)+"/"+itoa(row), func(t *testing.T) {
-				v41CompressorTestFiniteParity(t, keys[row], wantKeys[row], "borrowed KV retained vs independent cold same recording-HAL own key")
+				v41CompressorTestFiniteParity(t, keys[row], wantKeys[row], "borrowed KV retained vs independent cold same recording-HAL shared key")
 			})
 		}
 		v41IndexerTestColdSelection(t, s, history, fixture)
@@ -523,7 +524,7 @@ func TestV41IndexerProjectionOwnIndexSourceWithBorrowedKV(t *testing.T) {
 		})
 		coldHAL := v41DenseTestSession(t, coldHALModel, newV41CompressorTestBackend())
 		coldHAL.Prefill(history)
-		for layer := 0; layer < 2; layer++ {
+		for _, layer := range []int{0} {
 			keys, ok := s.v41Forward.attn.IndexKeys(layer)
 			want, wantOK := coldHAL.v41Forward.attn.IndexKeys(layer)
 			if !ok || !wantOK || len(keys) != len(history)/2 || len(want) != len(keys) {
@@ -543,10 +544,13 @@ func TestV41IndexerProjectionOwnIndexSourceWithBorrowedKV(t *testing.T) {
 				t.Fatalf("own index layer%d replayed historical key rows", layer)
 			}
 		}
-		left, _ := s.v41Forward.attn.IndexKeys(0)
-		right, _ := s.v41Forward.attn.IndexKeys(1)
-		if reflect.DeepEqual(left, right) {
-			t.Fatal("own index source fixture aliases nearest KV source history")
+		if keys, ok := s.v41Forward.attn.IndexKeys(1); ok || len(keys) != 0 {
+			t.Fatal("index-only reader published private keys instead of querying the KV owner's keys")
+		}
+		for key := range s.halW {
+			if strings.HasSuffix(key, layerName(1, "indexer.wk.weight")) {
+				t.Fatal("index-only reader staged a private key projection")
+			}
 		}
 		cold.Close()
 		coldHAL.Close()

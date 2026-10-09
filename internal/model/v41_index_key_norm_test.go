@@ -259,9 +259,6 @@ func TestV41IndexKeyNormSourceReaderLifecycle(t *testing.T) {
 				t.Fatal("selected/control index callbacks not isolated")
 			}
 			producers := 1
-			if mode == "own-index-source" {
-				producers = 2
-			}
 			check := func(tokens int) {
 				t.Helper()
 				calls := producers * (tokens / 2)
@@ -279,6 +276,9 @@ func TestV41IndexKeyNormSourceReaderLifecycle(t *testing.T) {
 					t.Fatal("reader renormalized borrowed keys or skipped own source keys")
 				}
 				v41CompressorNormAssertPublications(t, s.v41Forward, host.v41Forward)
+				if keys, ok := s.v41Forward.attn.IndexKeys(1); ok || len(keys) != 0 {
+					t.Fatal("index-only reader published private normalized keys")
+				}
 				for layer := 0; layer < producers; layer++ {
 					keys, ok := s.v41Forward.attn.IndexKeys(layer)
 					want, wantOK := host.v41Forward.attn.IndexKeys(layer)
@@ -342,6 +342,7 @@ func TestV41IndexKeyNormSelectedRollback(t *testing.T) {
 		t.Run(site, func(t *testing.T) {
 			m := v41IndexerTestFixture(t)
 			m.Cfg.DeepSeekV41.IndexSourceLayerIDs = []int{0, 1}
+			m.Cfg.DeepSeekV41.KVSourceLayerIDs = []int{0, 1}
 			s, b := v41IndexKeyNormTestSession(t, m)
 			s.Prefill([]int{1, 2, 3})
 			before, norms := captureV41ForwardSnapshot(s.v41Forward), len(b.records)

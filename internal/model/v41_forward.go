@@ -301,6 +301,10 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 			}
 		}()
 	}
+	// A stateless cold forward still needs a transient cross-layer source registry.
+	if runState == nil && m.v41RoleSchedule() {
+		runState = &v41ForwardState{}
+	}
 	if len(seq) == 0 {
 		if st != nil {
 			committed = true
@@ -697,8 +701,8 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 
 	// ---- CED/CSA2 compressor + lightning indexer stages (#13006, #12896) ----
 	//
-	// A layer declaring CompressRatios[l] > 1 pools its per-position projected KV
-	// rows through the CED/CSA2 compressor (v41CompressedRows), and a layer
+	// A compressed producer pools its pre-attention inputs through the compressor;
+	// shared readers consume that publication without private compression. A layer
 	// declaring an in-range index source scores its projected index query against
 	// those compressed keys and selects rows (v41IndexRows). Both stages execute
 	// here and fail closed with a typed *V41ForwardError on malformed geometry; a
@@ -715,28 +719,30 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if err != nil {
 		return err
 	}
+	ownsCompressed := v41OwnsCompressedRows(plan)
 	var compressedKV [][]float32
-	if plan.Ratio > 1 {
+	if ownsCompressed {
 		compressed, err := m.v41CompressedRowsWithOperations(l, plan.Ratio, kvRows, preByPos, scratch.denseProjection, scratch.compressorNorm)
 		if err != nil {
 			return err
 		}
 		compressedKV = compressed
 	}
-	// A reader layer whose KV source precedes it consumes the source's published
-	// compressed stream; a source layer publishes its own for later readers.
 	sharedKV := compressedKV
-	if plan.Role == V41AttentionRoleReader && plan.KVSourceLayer >= 0 && st != nil {
-		attn, err := st.attentionState(hd, 8, cfg.IndexHeadDim)
+	var indexKeys [][]float32
+	if plan.Role == V41AttentionRoleReader {
+		if st == nil {
+			return v41StageErr(v41StageAttention, l, fmt.Errorf("%w: shared reader requires source state", ErrV41ForwardStage))
+		}
+		registry, err := st.attentionState(hd, 8, cfg.IndexHeadDim)
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)
 		}
-		if rows, ok := attn.KVSourceRows(plan.KVSourceLayer); ok && len(rows) > 0 {
-			sharedKV = rows
+		sharedKV, indexKeys, err = m.v41CompressedReaderRows(plan, registry, seq)
+		if err != nil {
+			return err
 		}
-	}
-	var indexKeys [][]float32
-	if indexSourceAt(cfg.DeepSeekV41, l) {
+	} else if ownsCompressed && indexSourceAt(cfg.DeepSeekV41, l) {
 		indexKeys, err = m.v41IndexKeysWithOperations(l, compressedKV, scratch.denseProjection, scratch.indexKeyNorm)
 		if err != nil {
 			return err
@@ -756,7 +762,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	var indexList []int32
 	if plan.Ratio > 1 && indexSourceAt(cfg.DeepSeekV41, l) {
 		for t := 0; t < seq; t++ {
-			groups := min((t+1)/plan.Ratio, len(compressedKV))
+			groups := min((t+1)/plan.kvGroupSize(cfg), len(indexKeys))
 			localIdx, err := m.v41IndexRowsWithOperations(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth)
 			if err != nil {
 				return err
@@ -799,15 +805,17 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// without replaying the projected latents; a non-compressed layer passes
 		// none and keeps the historical seed byte-for-byte.
 		var seedInputs [][]float32
-		if plan.Ratio > 1 {
+		seedRatio := 0
+		if ownsCompressed {
+			seedRatio = plan.Ratio
 			if partial := len(preByPos) % plan.Ratio; partial > 0 {
 				seedInputs = preByPos[len(preByPos)-partial:]
 			}
 		}
-		if err := layerState.seedTemporalWithInputs(kvRows, seedInputs, plan.Ratio, cfg.windowForLayer(l)); err != nil {
+		if err := layerState.seedTemporalWithInputs(kvRows, seedInputs, seedRatio, cfg.windowForLayer(l)); err != nil {
 			return v41StageErr(v41StageAttention, l, err)
 		}
-		if plan.Ratio > 1 {
+		if ownsCompressed {
 			ownPlan := plan
 			ownPlan.KVSourceLayer = l
 			updates := m.v41AttentionSourceUpdates(ownPlan, compressedKV, qLatRows, indexKeys)

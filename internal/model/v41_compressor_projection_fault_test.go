@@ -24,7 +24,7 @@ func TestV41CompressorProjectionSelectedFailureClosesAndRollsBack(t *testing.T) 
 	for _, leaf := range v41CompressorTestLeaves {
 		for _, site := range []string{"upload", "matmul", "read", "malformed", "nonfinite"} {
 			t.Run(leaf+"/"+site, func(t *testing.T) {
-				m := v41CompressorTestFixture(t)
+				m := v41CompressorProducerTestFixture(t)
 				b := newV41CompressorTestBackend()
 				s := v41DenseTestSession(t, m, b)
 				s.Prefill([]int{1, 2, 3})
@@ -32,7 +32,7 @@ func TestV41CompressorProjectionSelectedFailureClosesAndRollsBack(t *testing.T) 
 				injectedUpload := false
 				if site == "upload" {
 					probeBackend := newV41CompressorTestBackend()
-					probe := v41DenseTestSession(t, v41CompressorTestFixture(t), probeBackend)
+					probe := v41DenseTestSession(t, v41CompressorProducerTestFixture(t), probeBackend)
 					probe.Prefill([]int{1, 2, 3})
 					from, firstUpload := len(probeBackend.ops), len(probeBackend.activationBufs)
 					probe.Step(4)
@@ -93,7 +93,7 @@ func TestV41CompressorProjectionSelectedFailureClosesAndRollsBack(t *testing.T) 
 					t.Fatal("selected compressor failure lost backend cause identity")
 				}
 				if !reflect.DeepEqual(before, captureV41ForwardSnapshot(s.v41Forward)) {
-					t.Fatal("late reader compressor failure changed whole Session retained state")
+					t.Fatal("late producer compressor failure changed whole Session retained state")
 				}
 				if len(b.live) != 0 {
 					t.Fatal("selected compressor failure leaked transient buffers")
@@ -127,7 +127,7 @@ func TestV41CompressorProjectionUnknownAndClosedPanicIdentity(t *testing.T) {
 	t.Parallel()
 	for _, closed := range []bool{false, true} {
 		t.Run(itoa(boolToIntV41Expert(closed)), func(t *testing.T) {
-			m := v41CompressorTestFixture(t)
+			m := v41CompressorProducerTestFixture(t)
 			b := newV41CompressorTestBackend()
 			s := v41DenseTestSession(t, m, b)
 			s.Prefill([]int{1, 2, 3})
@@ -208,7 +208,7 @@ func TestV41CompressorProjectionQuantHotCacheAndRelease(t *testing.T) {
 			// The two dot orders budget 2*in rounding steps plus scale/min operations for eight Q4 subgroups.
 			const unitRoundoff = 1.0 / (1 << 24)
 			gamma := float64(2*in+32) * unitRoundoff / (1 - float64(2*in+32)*unitRoundoff)
-			m := v41CompressorTestFixture(t)
+			m := v41CompressorProducerTestFixture(t)
 			m.Cfg.HiddenSize = in
 			delete(m.manifest, name)
 			m.q4kw = map[string]*q4kTensor{name: weight}
@@ -287,7 +287,7 @@ func TestV41CompressorProjectionSelectedQuantStagingFailure(t *testing.T) {
 			const out, in = 512, 256
 			leaf := v41CompressorTestLeaves[0]
 			name := layerName(0, leaf)
-			m := v41CompressorTestFixture(t)
+			m := v41CompressorProducerTestFixture(t)
 			m.Cfg.HiddenSize = in
 			delete(m.manifest, name)
 			cause := errors.New("independent compressor packed reader refusal")

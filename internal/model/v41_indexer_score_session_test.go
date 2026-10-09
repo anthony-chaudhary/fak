@@ -44,6 +44,9 @@ func TestV41IndexerScoreProjectedOperands(t *testing.T) {
 		t.Fatal(err)
 	}
 	once := append([]float32(nil), unrotated...)
+	for i := range once {
+		once[i] = v41CompressorNormRefCast(once[i])
+	}
 	if err := m.v41IndexRoPE(0, 7, once, cfg.IndexNHeads); err != nil {
 		t.Fatal(err)
 	}

@@ -28,7 +28,17 @@ func (m *Model) v41IndexKeysWithOperations(l int, rows [][]float32, project v41D
 		if err != nil {
 			return nil, err
 		}
+		// The reference's BF16 wk output is widened for RMSNorm arithmetic.
+		key, err = v41IndexBF16Copyback(l, "indexer.wk.weight", "projection", key)
+		if err != nil {
+			return nil, err
+		}
 		key, err = m.v41IndexKeyNorm(l, key, norm, float32(m.Cfg.RMSNormEps), normalize)
+		if err != nil {
+			return nil, err
+		}
+		// RMSNorm multiplies its learned gain in F32, then casts once.
+		key, err = v41IndexBF16Copyback(l, "indexer.k_norm.weight", "normalization", key)
 		if err != nil {
 			return nil, err
 		}
@@ -67,6 +77,12 @@ func (m *Model) v41IndexRowsWithOperations(l, pos int, qLat, hidden []float32, k
 	if err != nil {
 		return nil, err
 	}
+	// Both the BF16 linear and the reference's FP8 GEMM return BF16 in the
+	// pinned BF16 execution profile. This does not emulate FP8 input quantization.
+	q, err = v41IndexBF16Copyback(l, "indexer.wq_b.weight", "projection", q)
+	if err != nil {
+		return nil, err
+	}
 	if err := m.v41IndexRoPE(l, pos, q, nHeads); err != nil {
 		return nil, err
 	}
@@ -93,9 +109,9 @@ func (m *Model) v41IndexRowsWithOperations(l, pos int, qLat, hidden []float32, k
 // index key has been projected and normalized from the unrotated latent. The
 // position is the first absolute token of the completed group. Readers and
 // restored publications already contain this rotation and must not call it.
-// The normalized latent is widened BF16: the reference's in-place rotary
-// copyback rounds its tail back to BF16. Reference FP4 quantization and
-// index-key/query dtype boundaries remain separate work.
+// Normalized latent and index key are widened BF16: the reference's in-place
+// rotary copyback rounds their tails back to BF16. Reference FP4 quantization
+// remains separate work.
 func (m *Model) v41CompressedPublicationRoPE(l, pos int, latent, indexKey []float32) error {
 	cfg := m.Cfg
 	rd := cfg.QKRopeHeadDim
@@ -108,6 +124,11 @@ func (m *Model) v41CompressedPublicationRoPE(l, pos int, latent, indexKey []floa
 	cos, sin := v41RopeTableForLayer(cfg, l, pos)
 	if indexKey != nil {
 		applyRopeTailInterleaved(indexKey, cos, sin, rd)
+		tail, err := v41IndexBF16Copyback(l, "indexer.k_norm.weight", "rotary", indexKey[len(indexKey)-rd:])
+		if err != nil {
+			return err
+		}
+		copy(indexKey[len(indexKey)-rd:], tail)
 	}
 	applyRopeTailInterleaved(latent, cos, sin, rd)
 	for i := len(latent) - rd; i < len(latent); i++ {
@@ -125,7 +146,34 @@ func (m *Model) v41IndexRoPE(l, pos int, values []float32, heads int) error {
 	}
 	cos, sin := v41RopeTableForLayer(cfg, l, pos)
 	for h := 0; h < heads; h++ {
-		applyRopeTailInterleaved(values[h*dim:(h+1)*dim], cos, sin, rd)
+		head := values[h*dim : (h+1)*dim]
+		applyRopeTailInterleaved(head, cos, sin, rd)
+		tail, err := v41IndexBF16Copyback(l, "indexer.wq_b.weight", "rotary", head[dim-rd:])
+		if err != nil {
+			return err
+		}
+		copy(head[dim-rd:], tail)
 	}
 	return nil
+}
+
+// v41IndexBF16Copyback owns its result so a projection or norm callback's
+// storage is never changed by the dtype boundary. Validate before bit rounding:
+// a NaN payload can otherwise wrap into a finite value, and finite F32 can
+// overflow BF16. Neither failure can be repaired by replaying token history.
+func v41IndexBF16Copyback(l int, leaf, phase string, values []float32) ([]float32, error) {
+	out := make([]float32, len(values))
+	for i, value := range values {
+		if finite32(value) {
+			out[i] = v41RoundBF16(value)
+			if finite32(out[i]) {
+				continue
+			}
+		}
+		return nil, &V41ProjectionOperationError{
+			Layer: l, Leaf: leaf, Stage: string(v41StageIndexer),
+			Cause: v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: %s BF16 %s value[%d] is non-finite or overflows", ErrV41ForwardStage, leaf, phase, i)),
+		}
+	}
+	return out, nil
 }

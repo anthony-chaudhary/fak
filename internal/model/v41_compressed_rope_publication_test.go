@@ -75,7 +75,15 @@ func TestV41CompressedRotaryPublication(t *testing.T) {
 		check := func(st *v41ForwardState, r *records, groups int) {
 			t.Helper()
 			for layer := 0; layer < m.Cfg.NumLayers; layer++ {
-				own, ok := st.layerState(layer).KVSourceRows(layer)
+				state := st.layerState(layer)
+				own, ok := state.KVSourceRows(layer)
+				if layer != 0 {
+					key, keyOK := state.IndexKeys(layer)
+					if ok || keyOK || len(own) != 0 || len(key) != 0 || len(r.latent[layer]) != 0 || len(r.key[layer]) != 0 || len(state.partialInputs) != 0 || len(state.partialPositions) != 0 {
+						t.Fatal("reader retained or recomputed its own compressor/index history")
+					}
+					continue
+				}
 				if !ok || len(own) != groups || len(r.latent[layer]) != groups {
 					t.Fatal("own latent publication count differs from completed groups")
 				}
@@ -97,7 +105,11 @@ func TestV41CompressedRotaryPublication(t *testing.T) {
 				t.Fatal("owner and registry published different latent/key pairs")
 			}
 			for group := range ownK {
-				if !reflect.DeepEqual(ownK[group], rotate(r.key[0][group], group*2)) {
+				key := append([]float32(nil), r.key[0][group]...)
+				for i := range key {
+					key[i] = v41CompressorNormRefCast(key[i])
+				}
+				if !reflect.DeepEqual(ownK[group], rotateLatent(key, group*2)) {
 					t.Fatal("index key was not rotated after normalization at group-first position")
 				}
 			}

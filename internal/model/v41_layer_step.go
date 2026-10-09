@@ -118,6 +118,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 			return err
 		}
 		layerState.nextWindowPos = pos + 1
+		layerState.nextCompressRow = pos + 1
 		return nil
 	}
 	// Append-only: the step position must be the next retained position. This
@@ -543,9 +544,9 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	// rows into the registry so a later reader resolves them; a reader reads the
 	// registry only. This mirrors v41Layer's source-then-consumer ordering (#12896)
 	// at seq == 1.
-	var sharedKV [][]float32
+	var sharedKV, indexKeys [][]float32
 	var sourceIdx []int32
-	if plan.Ratio > 1 {
+	if v41OwnsCompressedRows(plan) {
 		width := v41CompressorWidth(cfg)
 		normWeight := m.tensor(layerName(l, "attn.compressor.norm.weight"))
 		pool, perr := NewV41CompressorPool(plan.Ratio, width)
@@ -566,19 +567,13 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		var indexPub bool
 		var projectIndex func([]float32) ([]float32, error)
 		if indexSourceAt(cfg.DeepSeekV41, l) {
-			kNorm := m.tensor(layerName(l, "indexer.k_norm.weight"))
-			indexDim := cfg.IndexHeadDim
-			if indexDim <= 0 {
-				return v41StageErr(v41StageIndexer, l,
-					fmt.Errorf("%w: indexer geometry headDim=%d is not declared", ErrV41ForwardStage, indexDim))
-			}
 			indexPub = true
 			projectIndex = func(row []float32) ([]float32, error) {
-				projected, err := m.v41ProjMatRowsWithProjection(l, "indexer.wk.weight", row, indexDim, len(row), scratch.denseProjection)
+				keys, err := m.v41IndexKeysWithOperations(l, [][]float32{row}, scratch.denseProjection, scratch.indexKeyNorm)
 				if err != nil {
 					return nil, err
 				}
-				return m.v41IndexKeyNorm(l, projected, kNorm, eps, scratch.indexKeyNorm)
+				return keys[0], nil
 			}
 		}
 		_, _, _, _, _, err = layerState.appendCompressorSourcePublication(
@@ -594,49 +589,37 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		if err != nil {
 			return v41StageErr(v41StageCompress, l, err)
 		}
+		sharedKV, _ = layerState.KVSourceRows(l)
 		if indexPub {
-			keys, ok := layerState.IndexKeys(l)
-			rows, rowsOK := layerState.KVSourceRows(l)
-			if len(rows) != len(keys) || (rowsOK && !ok) {
+			var ok bool
+			indexKeys, ok = layerState.IndexKeys(l)
+			if len(sharedKV) != len(indexKeys) || (len(sharedKV) > 0 && !ok) {
 				return v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: own index history is incomplete", ErrV41ForwardStage))
 			}
-			sourceIdx, err = m.v41IndexRowsWithOperations(l, pos, qLat, collapsed, keys, scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth)
-			if err != nil {
-				return err
-			}
-			row, err := m.v41RoleStepNormalizeIndex(l, plan, sourceIdx, len(keys))
-			if err != nil {
-				return err
-			}
-			if err := registry.PublishTopK(plan.Ratio, [][]int32{row}); err != nil {
-				return err
-			}
-		}
-		if plan.Role == V41AttentionRoleReader && plan.KVSourceLayer >= 0 {
-			sharedKV, _ = registry.KVSourceRows(plan.KVSourceLayer)
-		} else {
-			sharedKV, _ = layerState.KVSourceRows(l)
-		}
-		if len(sharedKV) == 0 {
-			// No completed group yet: the layer contracts nothing for this position,
-			// exactly as the full path's empty compressed stream does for an
-			// incomplete group. The compressor cursor has advanced; finish the
-			// MoE/mHC tail with a zero attention output so the position advances.
-			return m.v41LayerStepRoleFinish(l, x, streams, mix, make([]float32, H), scratch)
 		}
 	} else {
-		// Reader (or a ratio<=1 shared layer): resolve the nearest preceding
-		// source's completed compressed rows from the shared registry.
-		if plan.KVSourceLayer < 0 {
-			return v41StageErr(v41StageAttention, l,
-				fmt.Errorf("%w: layer %d role step resolves no shared KV source", ErrV41ForwardStage, l))
+		sharedKV, indexKeys, err = m.v41CompressedReaderRows(plan, registry, pos+1)
+		if err != nil {
+			return err
 		}
-		rows, ok := registry.KVSourceRows(plan.KVSourceLayer)
-		if !ok || len(rows) == 0 {
-			return v41StageErr(v41StageAttention, l,
-				fmt.Errorf("%w: layer %d role step reads source %d but no compressed rows are published", ErrV41ForwardStage, l, plan.KVSourceLayer))
+	}
+	if indexSourceAt(cfg.DeepSeekV41, l) {
+		sourceIdx, err = m.v41IndexRowsWithOperations(l, pos, qLat, collapsed, indexKeys, scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth)
+		if err != nil {
+			return err
 		}
-		sharedKV = rows
+		row, err := m.v41RoleStepNormalizeIndex(l, plan, sourceIdx, len(indexKeys))
+		if err != nil {
+			return err
+		}
+		if err := registry.PublishTopK(plan.Ratio, [][]int32{row}); err != nil {
+			return err
+		}
+	}
+	if len(sharedKV) == 0 {
+		// No group has completed. This existing compressed-only contraction has
+		// no values yet; window-plus-compressed composition remains separate work.
+		return m.v41LayerStepRoleFinish(l, x, streams, mix, make([]float32, H), scratch)
 	}
 
 	// ---- compressed contraction over the shared rows (block-causal) ----
@@ -645,16 +628,12 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		HeadDim: hd, Heads: nH, Softmax: cfg.attnScale(), Sink: m.tensor(layerName(l, "attn.sink")),
 	}
 	if plan.TopKWidth > 0 {
-		indexState := registry
-		if indexSourceAt(cfg.DeepSeekV41, l) {
-			indexState = layerState
-		}
 		var idx []int32
 		var ierr error
 		if indexSourceAt(cfg.DeepSeekV41, l) {
 			idx, ierr = m.v41RoleStepNormalizeIndex(l, plan, sourceIdx, len(sharedKV))
 		} else {
-			idx, ierr = m.v41RoleStepIndex(indexState, l, pos, plan, qLat, collapsed, len(sharedKV))
+			idx, ierr = m.v41RoleStepIndex(registry, l, pos, plan, qLat, collapsed, len(sharedKV))
 		}
 		if ierr != nil {
 			return ierr

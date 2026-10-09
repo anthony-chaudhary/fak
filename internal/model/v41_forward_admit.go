@@ -159,18 +159,11 @@ func (m *Model) v41EngramForwardAdmitted() error {
 	return nil
 }
 
-// v41CompressIndexForwardAdmitted fails closed when the config declares a
-// CED/CSA2 compressor regime or a lightning-indexer source that lies WITHIN the
-// model's decoder stack. The reduced text assembly executes neither stage (their
-// packed-row / compressed-stream inputs cannot be materialized weight-free — see
-// the scope note at the top of this file), so silently dropping a declared
-// in-range compressor/indexer layer would emit reduced logits for a model the
-// assembly never ran. Declarations that only touch out-of-range layers stay
-// admitted, which keeps the reduced oracle fixture runnable: it derives from the
-// published 40-layer config but narrows NumLayers to 1, so every CompressRatios
-// entry above index 0 and every index source ({2,8,...}) is unreachable. Executing
-// the real compressor/indexer stages is #13006's remaining integration work; until
-// then this is the fail-closed boundary.
+// v41CompressIndexForwardAdmitted checks only tensors a layer owns: compressed
+// producers need compressor weights, every index-query source needs its query
+// and head-weight projections, and only index-key producers need wk/k_norm.
+// Shared readers resolve already-published source rows. Ratio-one assembly stays
+// closed even though its standalone compressor helper is implemented.
 //
 // Two malformed-schedule arms are also refused here: a negative ratio (invalid
 // geometry, never a compressed layer) and a schedule shorter than the decoder
@@ -203,6 +196,7 @@ func (m *Model) v41CompressIndexForwardAdmitted() error {
 			fmt.Errorf("%w: compression schedule declares %d ratios but the model has %d layers", ErrV41ForwardStage, len(d41.CompressRatios), cfg.NumLayers))
 	}
 	H := cfg.HiddenSize
+	roles := v41AttentionRoles(cfg)
 	for layer := 0; layer < cfg.NumLayers; layer++ {
 		// Only ratio 0 is window-only. Ratio 1 requires the reference's separate
 		// compressed projection/cache plus window contraction; its standalone
@@ -217,6 +211,9 @@ func (m *Model) v41CompressIndexForwardAdmitted() error {
 			return v41StageErr(v41StageCompress, layer,
 				fmt.Errorf("%w: layer %d declares ratio-one compression but the ratio-one forward assembly is not implemented", ErrV41ForwardStage, layer))
 		case ratio > 1:
+			if roles[layer] == V41AttentionRoleReader {
+				continue // readers consume the source cache and own no compressor tensors
+			}
 			width := v41CompressorWidth(cfg)
 			if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wkv.weight"), v41StageCompress, layer, width, H); err != nil {
 				return err
@@ -250,11 +247,22 @@ func (m *Model) v41CompressIndexForwardAdmitted() error {
 		if err := m.v41AdmitShape(layerName(layer, "indexer.wq_b.weight"), v41StageIndexer, layer, wq, cfg.QLoraRank); err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(layer, "indexer.wk.weight"), v41StageIndexer, layer, indexDim, v41CompressorWidth(cfg)); err != nil {
+		plan, err := v41AttentionPlanFor(cfg, layer, roles)
+		if err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(layer, "indexer.k_norm.weight"), v41StageIndexer, layer, indexDim); err != nil {
-			return err
+		if plan.Role == V41AttentionRoleReader {
+			if !indexSourceAt(d41, plan.KVSourceLayer) {
+				return v41StageErr(v41StageIndexer, layer,
+					fmt.Errorf("%w: index-only layer %d requires keys owned by KV source %d", ErrV41ForwardStage, layer, plan.KVSourceLayer))
+			}
+		} else {
+			if err := m.v41AdmitShape(layerName(layer, "indexer.wk.weight"), v41StageIndexer, layer, indexDim, v41CompressorWidth(cfg)); err != nil {
+				return err
+			}
+			if err := m.v41AdmitShape(layerName(layer, "indexer.k_norm.weight"), v41StageIndexer, layer, indexDim); err != nil {
+				return err
+			}
 		}
 		if err := m.v41AdmitShape(layerName(layer, "indexer.weights_proj.weight"), v41StageIndexer, layer, indexHeads, H); err != nil {
 			return err
@@ -758,4 +766,36 @@ func (m *Model) v41AdmitShape(name string, stage v41ForwardStage, layer int, wan
 		}
 	}
 	return nil
+}
+
+// v41OwnsCompressedRows keeps the legacy self-contained PerLayer fixture path
+// while excluding shared readers. Only declared KV sources are producers in the
+// pinned full-model topology; the no-source fallback is not reference parity.
+func v41OwnsCompressedRows(plan V41AttentionPlan) bool {
+	return plan.Ratio > 1 && plan.Role != V41AttentionRoleReader
+}
+
+// v41CompressedReaderRows resolves publications by KV ownership, independently
+// of the most recent index-query source. Readers must never synthesize missing
+// source rows, project fresh index keys, or rotate borrowed publications again.
+func (m *Model) v41CompressedReaderRows(plan V41AttentionPlan, registry *V41AttentionState, positions int) ([][]float32, [][]float32, error) {
+	if registry == nil || plan.KVSourceLayer < 0 || positions < 0 {
+		return nil, nil, v41StageErr(v41StageAttention, plan.Layer,
+			fmt.Errorf("%w: layer %d has no shared KV source state", ErrV41ForwardStage, plan.Layer))
+	}
+	groups := positions / plan.kvGroupSize(m.Cfg)
+	rows, ok := registry.KVSourceRows(plan.KVSourceLayer)
+	if len(rows) != groups || (groups > 0 && !ok) {
+		return nil, nil, v41StageErr(v41StageAttention, plan.Layer,
+			fmt.Errorf("%w: layer %d requires %d completed rows from KV source %d, got %d", ErrV41ForwardStage, plan.Layer, groups, plan.KVSourceLayer, len(rows)))
+	}
+	var keys [][]float32
+	if indexSourceAt(m.Cfg.DeepSeekV41, plan.Layer) {
+		keys, ok = registry.IndexKeys(plan.KVSourceLayer)
+		if len(keys) != groups || (groups > 0 && !ok) {
+			return nil, nil, v41StageErr(v41StageIndexer, plan.Layer,
+				fmt.Errorf("%w: index-only layer %d requires %d keys from KV source %d, got %d", ErrV41ForwardStage, plan.Layer, groups, plan.KVSourceLayer, len(keys)))
+		}
+	}
+	return rows, keys, nil
 }
