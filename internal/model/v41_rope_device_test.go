@@ -209,11 +209,14 @@ func TestV41TailRoPEDeviceDispatch(t *testing.T) {
 			b := newV41TailRoPETestBackend()
 			s := &Session{M: &Model{}, Backend: b}
 			t.Cleanup(s.Close)
-			cfg := Config{RopeTheta: 10000, QKRopeHeadDim: rd, RopeScaling: "yarn", LongRope: &RopeScaling{Type: "yarn", AttentionFactor: 1.75}}
-			cos, sin := v41RopeTableForLayer(cfg, 0, 7)
+			// Arbitrary scaled tables remain part of the device operation's ABI.
+			// Generate this synthetic table through ordinary HF RoPE; the pinned
+			// V4.1 model itself uses unit-amplitude complex exponentials.
+			cfg := Config{HeadDim: rd, RopeTheta: 10000, RopeScaling: "yarn", LongRope: &RopeScaling{Type: "yarn", AttentionFactor: 1.75}}
+			cos, sin := ropeRowForLayer(cfg, 0, 7)
 			table := make([]float32, rd)
 			for j := 0; j < rd/2; j++ {
-				angle := float64(7) / math.Pow(10000, float64(2*j)/float64(rd))
+				angle := float64(7) * (1 / math.Pow(10000, float64(2*j)/float64(rd)))
 				table[2*j] = float32(math.Sin(angle)) * float32(1.75)
 				table[2*j+1] = float32(math.Cos(angle)) * float32(1.75)
 			}
@@ -313,9 +316,6 @@ func TestV41TailRoPEDeviceDispatch(t *testing.T) {
 			default:
 				m = v41IncrementalExpertFixture(t, true, false)
 			}
-			// An explicit test configuration, not an inference about a pinned GGUF.
-			m.Cfg.RopeScaling = "yarn"
-			m.Cfg.LongRope = &RopeScaling{Type: "yarn", AttentionFactor: 1.75}
 			s, b := newSession(t, m)
 			v41GroupedParity(t, s.Prefill([]int{1, 2}), lastLogits(m.Forward([]int{1, 2})), 1e-4)
 			if !s.v41IncrementalEligible() || len(b.calls) != 2*m.Cfg.NumLayers {

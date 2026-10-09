@@ -218,10 +218,11 @@ func v41OracleForward(t *testing.T, m *Model, ids []int) [][]float32 {
 			qLat := cpuOracleMatVec(wQA, c, cfg.QLoraRank, H)
 			q := cpuOracleMatVec(wQB, qLat, nH*hd, cfg.QLoraRank)
 			kv := cpuOracleMatVec(wKV, c, hd, H)
+			cos, sin := v41OracleRopeTable(t, cfg, l, tt)
 			for h := 0; h < nH; h++ {
-				cpuOracleRopeTailInterleaved(q[h*hd:(h+1)*hd], tt, hd, cfg.QKRopeHeadDim, cfg.RopeTheta)
+				v41OracleRopeTailInterleaved(q[h*hd:(h+1)*hd], cos, sin, cfg.QKRopeHeadDim)
 			}
-			cpuOracleRopeTailInterleaved(kv, tt, hd, cfg.QKRopeHeadDim, cfg.RopeTheta)
+			v41OracleRopeTailInterleaved(kv, cos, sin, cfg.QKRopeHeadDim)
 			qHeads[tt] = q
 			kvRows[tt] = kv
 		}
@@ -999,10 +1000,11 @@ func v41OracleEngramForward(t *testing.T, m *Model, layout V41EngramLayout, ids 
 			qLat := cpuOracleMatVec(wQA, c, cfg.QLoraRank, H)
 			q := cpuOracleMatVec(wQB, qLat, nH*hd, cfg.QLoraRank)
 			kv := cpuOracleMatVec(wKV, c, hd, H)
+			cos, sin := v41OracleRopeTable(t, cfg, l, tt)
 			for h := 0; h < nH; h++ {
-				cpuOracleRopeTailInterleaved(q[h*hd:(h+1)*hd], tt, hd, cfg.QKRopeHeadDim, cfg.RopeTheta)
+				v41OracleRopeTailInterleaved(q[h*hd:(h+1)*hd], cos, sin, cfg.QKRopeHeadDim)
 			}
-			cpuOracleRopeTailInterleaved(kv, tt, hd, cfg.QKRopeHeadDim, cfg.RopeTheta)
+			v41OracleRopeTailInterleaved(kv, cos, sin, cfg.QKRopeHeadDim)
 			qHeads[tt] = q
 			kvRows[tt] = kv
 		}

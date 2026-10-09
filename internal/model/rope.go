@@ -243,33 +243,59 @@ func applyRopeTailInterleaved(hv, cos, sin []float32, ropeDim int) {
 	}
 }
 
+// v41RopeThetaForLayer is shared by table construction and admission so an
+// active compressed regime cannot validate one base and rotate with another.
+func v41RopeThetaForLayer(cfg Config, layer int) float64 {
+	if v41CompressRatioAt(cfg, layer) > 0 {
+		return cfg.DeepSeekV41.CompressRopeTheta
+	}
+	return cfg.ropeThetaForLayer(layer)
+}
+
 // v41RopeTableForLayer builds the DeepSeek-V4.1 rotary table for one layer and
 // position. Unlike ropeRowForLayer (whose table width and denominator follow
 // cfg.rotaryDim()/invFreqDenom(), i.e. the full head width for a non-MLA
 // layout), this table is sized to QKRopeHeadDim: len(cos)==len(sin)==QKRopeHeadDim/2
-// with inv[j] = 1/theta^(2j/QKRopeHeadDim), exactly the reference
-// precompute_freqs_cis(self.rope_head_dim, ...). It is the only table
-// applyRopeTailInterleaved may consume. The layer-specific theta and the
-// ropeAttentionFactor scaling are preserved so a scaled variant stays consistent
-// with its own frequency build.
+// with inv[j] = 1/theta^(2j/QKRopeHeadDim) before YaRN. The pinned reference
+// DeepSeek-V4.1-Flash@dba1be0a40aa45a94ad051997016db3960a90277,
+// inference/model.py:369-389,680-696, selects compressed theta and YaRN for
+// EVERY nonzero compression ratio, including ratio 1. Ratio 0 uses base theta
+// without YaRN. Both regimes have UNIT amplitude; the generic HF YaRN
+// ropeAttentionFactor does not belong to this model's complex exponentials.
+// The host keeps its float64 frequency/trigonometry convention before the f32
+// table cast; this is not a bitwise PyTorch float32 table-parity claim.
 //
-// QKRopeHeadDim must be positive and even; callers validate that against the head
-// width and refuse with a typed error before calling. This builder assumes it.
+// QKRopeHeadDim must be positive and even and the selected theta finite and
+// positive; callers validate these and refuse with a typed error before calling.
 func v41RopeTableForLayer(cfg Config, layer, p int) (cos, sin []float32) {
 	n := cfg.QKRopeHeadDim / 2
-	theta := cfg.ropeThetaForLayer(layer)
-	scale := cfg.ropeAttentionFactor()
+	theta := v41RopeThetaForLayer(cfg, layer)
+	if v41CompressRatioAt(cfg, layer) > 0 {
+		if cfg.RopeScaling == "yarn" {
+			inv := make([]float64, n)
+			for j := range inv {
+				inv[j] = 1 / math.Pow(theta, float64(2*j)/float64(cfg.QKRopeHeadDim))
+			}
+			// Reuse the shared YaRN equation with the V4.1 rotary width and
+			// selected base, not the full attention head or a nested base override.
+			// Copy the parameter block/map so building a layer cannot mutate cfg.
+			rp := cfg.effectiveRopeParameters()
+			rp.RopeTheta = theta
+			rp.Truncate = nil // the reference always floors/ceils the correction range
+			cfg.HeadDim = cfg.QKRopeHeadDim
+			cfg.PartialRotaryFactor = 0
+			cfg.RopeTheta = theta
+			cfg.RopeParameters = RopeParameters{"default": rp}
+			applyRopeScaling(cfg, inv)
+			return ropeRowFromInv(inv, p)
+		}
+	}
 	cos = make([]float32, n)
 	sin = make([]float32, n)
 	for j := 0; j < n; j++ {
 		a := float64(p) / math.Pow(theta, float64(2*j)/float64(cfg.QKRopeHeadDim))
 		cv := float32(math.Cos(a))
 		sv := float32(math.Sin(a))
-		if scale != 0 && scale != 1 {
-			s := float32(scale)
-			cv *= s
-			sv *= s
-		}
 		cos[j] = cv
 		sin[j] = sv
 	}
