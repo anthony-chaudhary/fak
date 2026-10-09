@@ -323,8 +323,9 @@ func nodeRenderWindowsRunner(d nodeUnitData) (string, error) {
 
 // nodeRenderUnit is the shared parse-and-execute behind the three renderers, carrying the
 // per-format escapers the templates call: `x` for plist XML, `sd` for a systemd quoted
-// Environment= value, and `cmdv` for a cmd.exe `set` value.
-func nodeRenderUnit(name, text string, d nodeUnitData) (string, error) {
+// Environment= value, and `cmdv` for a cmd.exe `set` value. d is the template's data
+// value (nodeUnitData for the gateway units; gardenUnitData for the stale-work garden).
+func nodeRenderUnit(name, text string, d any) (string, error) {
 	tmpl, err := template.New(name).Funcs(template.FuncMap{
 		"x":    nodeXMLEscape,
 		"sd":   nodeSystemdEscape,

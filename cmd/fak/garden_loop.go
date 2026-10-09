@@ -587,6 +587,55 @@ WantedBy=timers.target
 	return 0
 }
 
+// gardenLaunchdLabel is the launchd label of the stale-work garden agent. It is the
+// unit watchdog-autoheal expects on darwin (watchdogAutohealServicesForGOOS), so the
+// emitter and the watchdog share one name.
+const gardenLaunchdLabel = "com.fleet.stale-work-garden"
+
+// gardenDarwinPlistTemplate is the stale-work garden launchd agent. It is rendered by
+// nodeRenderUnit, the same pure renderer (and `x` XML escaper) as the gateway plist, so
+// a repo path carrying `&` or `<` yields a plist launchd can parse.
+const gardenDarwinPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>{{x .Label}}</string>
+    <key>ProgramArguments</key>
+    <array>
+{{- range .Args}}
+      <string>{{x .}}</string>
+{{- end}}
+    </array>
+    <key>StartInterval</key>
+    <integer>{{.IntervalSecs}}</integer>
+    <key>RunAtLoad</key>
+    <true/>
+  </dict>
+</plist>
+`
+
+// gardenUnitData is the complete input to the garden launchd renderer.
+type gardenUnitData struct {
+	Label        string
+	Args         []string
+	IntervalSecs int64
+}
+
+// gardenRenderDarwinPlist renders the stale-work garden launchd agent. Pure: no file,
+// no launchctl, so the unit watchdog-autoheal expects can be pinned on any OS.
+func gardenRenderDarwinPlist(fakBin, root string, interval time.Duration, live bool) (string, error) {
+	args := []string{fakBin, "garden", "watchdog", "--repo", root}
+	if live {
+		args = append(args, "--live")
+	}
+	return nodeRenderUnit("garden-plist", gardenDarwinPlistTemplate, gardenUnitData{
+		Label:        gardenLaunchdLabel,
+		Args:         args,
+		IntervalSecs: int64(interval.Seconds()),
+	})
+}
+
 func registerDarwinLaunchdAgent(stdout, stderr io.Writer, fakBin, root string, interval time.Duration, live bool) int {
 	if err := guardGardenTestRegister("darwin"); err != nil {
 		fmt.Fprintf(stderr, "fak garden loop: %v\n", err)
@@ -599,35 +648,13 @@ func registerDarwinLaunchdAgent(stdout, stderr io.Writer, fakBin, root string, i
 		return 1
 	}
 
-	args := []string{fakBin, "garden", "watchdog", "--repo", root}
-	if live {
-		args = append(args, "--live")
+	plistContent, err := gardenRenderDarwinPlist(fakBin, root, interval, live)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak garden loop: render plist: %v\n", err)
+		return 1
 	}
 
-	argsXML := ""
-	for _, a := range args {
-		argsXML += fmt.Sprintf("      <string>%s</string>\n", nodeXMLEscape(a))
-	}
-
-	secs := int64(interval.Seconds())
-	plistContent := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-  <dict>
-    <key>Label</key>
-    <string>com.fleet.stale-work-garden</string>
-    <key>ProgramArguments</key>
-    <array>
-%s    </array>
-    <key>StartInterval</key>
-    <integer>%d</integer>
-    <key>RunAtLoad</key>
-    <true/>
-  </dict>
-</plist>
-`, argsXML, secs)
-
-	plistPath := filepath.Join(agentsDir, "com.fleet.stale-work-garden.plist")
+	plistPath := filepath.Join(agentsDir, gardenLaunchdLabel+".plist")
 	if err := os.WriteFile(plistPath, []byte(plistContent), 0o644); err != nil {
 		fmt.Fprintf(stderr, "fak garden loop: write %s: %v\n", plistPath, err)
 		return 1
