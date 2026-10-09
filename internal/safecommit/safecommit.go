@@ -1008,6 +1008,9 @@ func precommitGates(ctx context.Context, run Runner, opts Options, trunk string,
 		if len(attrRes.ReconciledPaths) > 0 {
 			res.ReconciledOwnership = attrRes.ReconciledPaths
 		}
+		if len(attrRes.MalformedPeerRefs) > 0 {
+			res.Detail = appendDetail(res.Detail, "PEER_WIP_MALFORMED_REF (skipped, not a commit): "+strings.Join(attrRes.MalformedPeerRefs, ", "))
+		}
 		if !attrRes.OK {
 			if mode == staleBaseWarn {
 				res.Detail = appendDetail(res.Detail, "PEER_WIP_COLLISION (warn): "+attrRes.Detail)

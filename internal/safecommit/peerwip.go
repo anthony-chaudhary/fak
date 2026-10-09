@@ -107,6 +107,9 @@ type PathAttributionResult struct {
 	ExpandedPaths   []string                  `json:"expanded_paths,omitempty"`
 	EffectivePaths  []string                  `json:"effective_paths,omitempty"`
 	ReconciledPaths []ReconciledPathOwnership `json:"reconciled_paths,omitempty"`
+	// MalformedPeerRefs names refs/fak/wip entries skipped because they do not
+	// point at a checkpoint commit; they carry no ownership evidence.
+	MalformedPeerRefs []string `json:"malformed_peer_refs,omitempty"`
 }
 
 // ValidatePathAttribution validates that requested paths (including directory pathspecs)
@@ -134,7 +137,13 @@ func ValidatePathAttribution(ctx context.Context, run Runner, dir string, reques
 
 // checkPathAttributionFromStatus checks whether dirty/staged/untracked paths under requested
 // directory pathspecs collide with peer WIP or untracked peer work.
-func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string, requestedPaths []string, statusOut string, opts PathAttributionOptions) (PathAttributionResult, error) {
+func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string, requestedPaths []string, statusOut string, opts PathAttributionOptions) (res PathAttributionResult, err error) {
+	var malformedRefs []string
+	defer func() {
+		if err == nil {
+			res.MalformedPeerRefs = malformedRefs
+		}
+	}()
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, peerWIPAttributionTimeout)
@@ -183,8 +192,7 @@ func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string,
 	var gitOwnerDetails map[string]gitPeerOwnerInfo
 	var gitOwners map[string]string
 	if len(opts.PeerWIP) == 0 && opts.PeerWIPChecker == nil && run != nil {
-		var err error
-		gitOwnerDetails, err = resolveGitPeerOwnerDetails(ctx, run, dir, changedPaths, sessionID)
+		gitOwnerDetails, malformedRefs, err = resolveGitPeerOwnerDetails(ctx, run, dir, changedPaths, sessionID)
 		if err != nil {
 			return PathAttributionResult{}, err
 		}
@@ -414,13 +422,17 @@ type gitPeerOwnerInfo struct {
 	Scope []string
 }
 
-func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, targetPaths []string, selfSession string) (map[string]gitPeerOwnerInfo, error) {
+// A ref at a blob/tree (git emits an empty contents:size for those) or a tag
+// is reported in malformed and skipped, so one bad ref cannot refuse every
+// commit repo-wide.
+func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, targetPaths []string, selfSession string) (map[string]gitPeerOwnerInfo, []string, error) {
+	var malformed []string
 	// Cross-check the length-framed metadata against a compact ordered manifest.
 	// This also detects successful output truncated at a whole-record boundary;
 	// concurrent ref updates refuse rather than combining different snapshots.
 	manifest, err := runPeerWIPLookup(ctx, run, dir, "for-each-ref", "--sort=refname", "--format=%(refname) %(objectname)", "refs/fak/wip")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	expected := strings.Split(strings.TrimSuffix(manifest, "\n"), "\n")
 	if manifest == "" {
@@ -428,7 +440,7 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 	}
 	out, err := runPeerWIPLookup(ctx, run, dir, "for-each-ref", "--sort=refname", peerWIPRefFormat, "refs/fak/wip")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	type checkpoint struct {
 		peer, oid string
@@ -441,41 +453,45 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 	record := 0
 	for out != "" {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		var fields [4]string
 		for i := range fields {
 			var ok bool
 			fields[i], out, ok = strings.Cut(out, "\x00")
 			if !ok {
-				return nil, fmt.Errorf("safecommit: incomplete peer WIP metadata")
+				return nil, nil, fmt.Errorf("safecommit: incomplete peer WIP metadata")
 			}
 		}
 		ref, oid, kind := fields[0], fields[1], fields[2]
-		size, err := strconv.Atoi(fields[3])
+		var size int
+		if fields[3] != "" || kind == "commit" {
+			size, err = strconv.Atoi(fields[3])
+		}
 		if err != nil || size < 0 || size > len(out) || !strings.HasPrefix(out[size:], "\x00\n") {
-			return nil, fmt.Errorf("safecommit: invalid peer WIP message frame")
+			return nil, nil, fmt.Errorf("safecommit: invalid peer WIP message frame")
 		}
 		msg := out[:size]
 		out = out[size+2:]
 		if !strings.HasPrefix(ref, "refs/fak/wip/") || ref <= previous || !peerWIPObjectID(oid) {
-			return nil, fmt.Errorf("safecommit: invalid peer WIP ref snapshot")
+			return nil, nil, fmt.Errorf("safecommit: invalid peer WIP ref snapshot")
 		}
 		if record >= len(expected) || expected[record] != ref+" "+oid {
-			return nil, fmt.Errorf("safecommit: incomplete or changed peer WIP snapshot")
+			return nil, nil, fmt.Errorf("safecommit: incomplete or changed peer WIP snapshot")
 		}
 		record++
 		previous = ref
 		peer := strings.TrimPrefix(ref, "refs/fak/wip/")
 		if peer == "" {
-			return nil, fmt.Errorf("safecommit: empty peer WIP owner")
+			return nil, nil, fmt.Errorf("safecommit: empty peer WIP owner")
 		}
 		// Exclude the ref, not its object: peers can point at the same commit as self.
 		if peer == selfSession {
 			continue
 		}
 		if kind != "commit" {
-			return nil, fmt.Errorf("safecommit: peer WIP %s is not a commit", ref)
+			malformed = append(malformed, ref+" ("+kind+")")
+			continue
 		}
 		stamp, _ := wipref.DecodeStamp(msg)
 		checkpoints = append(checkpoints, checkpoint{peer, oid, stamp.Scope})
@@ -485,21 +501,21 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 		}
 	}
 	if record != len(expected) {
-		return nil, fmt.Errorf("safecommit: incomplete peer WIP snapshot")
+		return nil, nil, fmt.Errorf("safecommit: incomplete peer WIP snapshot")
 	}
 	deltas := make(map[string]map[string]bool)
 	if len(objects) == 0 {
-		return make(map[string]gitPeerOwnerInfo), ctx.Err()
+		return make(map[string]gitPeerOwnerInfo), malformed, ctx.Err()
 	}
 	// A root commit is a no-delta terminator under log.showRoot=false. Appending
 	// it to every batch proves that even the final delta was received in full.
 	rootOut, err := runPeerWIPLookup(ctx, run, dir, "rev-list", "--max-parents=0", "--max-count=1", objects[0], "--")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	root := strings.TrimSpace(rootOut)
 	if !peerWIPObjectID(root) {
-		return nil, fmt.Errorf("safecommit: invalid peer WIP batch terminator")
+		return nil, nil, fmt.Errorf("safecommit: invalid peer WIP batch terminator")
 	}
 	deltas[root] = make(map[string]bool)
 	filtered := objects[:0]
@@ -524,7 +540,7 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 		}
 		raw, err := runPeerWIPLookup(ctx, run, dir, args...)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		want := make(map[string]bool, len(batch))
 		for _, oid := range batch {
@@ -534,24 +550,24 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 		terminated := false
 		for raw != "" {
 			if err := ctx.Err(); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			token, rest, ok := strings.Cut(raw, "\x00")
 			if !ok {
-				return nil, fmt.Errorf("safecommit: truncated peer WIP delta")
+				return nil, nil, fmt.Errorf("safecommit: truncated peer WIP delta")
 			}
 			raw = rest
 			token = strings.TrimPrefix(token, "\n")
 			if token == root {
 				if raw != "" {
-					return nil, fmt.Errorf("safecommit: invalid peer WIP batch terminator")
+					return nil, nil, fmt.Errorf("safecommit: invalid peer WIP batch terminator")
 				}
 				terminated = true
 				break
 			}
 			if want[token] {
 				if deltas[token] != nil {
-					return nil, fmt.Errorf("safecommit: duplicate peer WIP delta")
+					return nil, nil, fmt.Errorf("safecommit: duplicate peer WIP delta")
 				}
 				current = token
 				deltas[current] = make(map[string]bool)
@@ -560,21 +576,21 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 			// With rename detection disabled, every raw record has exactly one path.
 			fields := strings.Fields(token)
 			if current == "" || len(fields) != 5 || len(fields[0]) != 7 || fields[0][0] != ':' || len(fields[1]) != 6 || !peerWIPObjectID(fields[2]) || !peerWIPObjectID(fields[3]) || len(fields[4]) != 1 || !strings.Contains("ACDMTUXB", fields[4]) {
-				return nil, fmt.Errorf("safecommit: invalid peer WIP delta record")
+				return nil, nil, fmt.Errorf("safecommit: invalid peer WIP delta record")
 			}
 			path, rest, ok := strings.Cut(raw, "\x00")
 			if !ok || path == "" {
-				return nil, fmt.Errorf("safecommit: truncated peer WIP delta path")
+				return nil, nil, fmt.Errorf("safecommit: truncated peer WIP delta path")
 			}
 			raw = rest
 			deltas[current][path] = true
 		}
 		if !terminated {
-			return nil, fmt.Errorf("safecommit: truncated peer WIP batch")
+			return nil, nil, fmt.Errorf("safecommit: truncated peer WIP batch")
 		}
 		for _, oid := range batch {
 			if deltas[oid] == nil {
-				return nil, fmt.Errorf("safecommit: missing peer WIP delta %s", oid)
+				return nil, nil, fmt.Errorf("safecommit: missing peer WIP delta %s", oid)
 			}
 		}
 	}
@@ -582,7 +598,7 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 	for _, checkpoint := range checkpoints {
 		for _, path := range targetPaths {
 			if err := ctx.Err(); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if _, exists := ownerDetails[path]; !exists && (gitgate.CoveredByAnyTree(path, checkpoint.scope) || deltas[checkpoint.oid][path]) {
 				ownerDetails[path] = gitPeerOwnerInfo{
@@ -594,13 +610,13 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return ownerDetails, nil
+	return ownerDetails, malformed, nil
 }
 
 func resolveGitPeerOwners(ctx context.Context, run Runner, dir string, targetPaths []string, selfSession string) (map[string]string, error) {
-	details, err := resolveGitPeerOwnerDetails(ctx, run, dir, targetPaths, selfSession)
+	details, _, err := resolveGitPeerOwnerDetails(ctx, run, dir, targetPaths, selfSession)
 	if err != nil {
 		return nil, err
 	}

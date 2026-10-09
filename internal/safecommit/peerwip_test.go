@@ -690,3 +690,31 @@ func TestNarrowOwnershipReconciliation(t *testing.T) {
 		}
 	})
 }
+
+func TestPeerWIPNonCommitRefSkippedNotFatal(t *testing.T) {
+	blob, commit, root := strings.Repeat("4", 40), strings.Repeat("1", 40), strings.Repeat("2", 40)
+	blobRef, peerRef := "refs/fak/wip/a-blob-copy", "refs/fak/wip/peer-agent"
+	g := map[string]reply{
+		"status --porcelain -- corpus": {out: " M corpus/file.txt\n"},
+		"for-each-ref --sort=refname --format=%(refname) %(objectname) refs/fak/wip": {out: blobRef + " " + blob + "\n" + peerRef + " " + commit + "\n"},
+		// Real git output for a blob ref: empty contents:size and contents.
+		"for-each-ref --sort=refname --format=%(refname)%00%(objectname)%00%(objecttype)%00%(contents:size)%00%(contents)%00 refs/fak/wip": {
+			out: blobRef + "\x00" + blob + "\x00blob\x00\x00\x00\n" + peerRef + "\x00" + commit + "\x00commit\x000\x00\x00\n",
+		},
+		"rev-list --max-parents=0 --max-count=1 " + commit + " --": {out: root + "\n"},
+		"-c log.showRoot=false log --no-walk=unsorted --format=%H --raw -z --no-abbrev --no-renames --no-ext-diff --no-textconv --diff-merges=off -r " + commit + " " + root + " --always --sparse -- :(top,literal)corpus/file.txt": {
+			out: commit + "\x00\n:100644 100644 " + commit + " " + root + " M\x00corpus/file.txt\x00" + root + "\x00",
+		},
+	}
+	fg := &fakeGit{reply: g}
+	res, err := ValidatePathAttribution(context.Background(), fg.run, "/repo", []string{"corpus"}, PathAttributionOptions{SessionID: "self"})
+	if err != nil {
+		t.Fatalf("a blob ref under refs/fak/wip must not fail attribution: %v", err)
+	}
+	if len(res.MalformedPeerRefs) != 1 || res.MalformedPeerRefs[0] != blobRef+" (blob)" {
+		t.Fatalf("MalformedPeerRefs = %v, want [%s (blob)]", res.MalformedPeerRefs, blobRef)
+	}
+	if res.OK || res.Reason != ReasonPeerWIPCollision || len(res.PeerSessions) != 1 || res.PeerSessions[0] != "peer-agent" {
+		t.Fatalf("commit peer ref must still own its path: ok=%v reason=%q peers=%v", res.OK, res.Reason, res.PeerSessions)
+	}
+}
