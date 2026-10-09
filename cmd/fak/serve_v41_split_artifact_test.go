@@ -56,20 +56,29 @@ func TestServeV41PackedMeasuredSevenShardInventory(t *testing.T) {
 	}
 	types := []ggufload.TensorType{ggufload.TensorQ2_K, ggufload.TensorQ3_K, ggufload.TensorQ6_K, ggufload.TensorF32, ggufload.TensorBF16}
 	sizes := []int{84, 110, 210, 4, 2}
+	var total int
+	for _, row := range counts {
+		for _, n := range row {
+			total += n
+		}
+	}
 	dir := t.TempDir()
 	var first string
+	wantTensors := make(map[string]ggufload.TensorType, total)
 	for shard, row := range counts {
 		var tensors []v41PackedFixtureTensor
 		for typ, n := range row {
 			for i := 0; i < n; i++ {
-				tensors = append(tensors, v41PackedFixtureTensor{name: fmt.Sprintf("census.%d.%d.%d.weight", shard, typ, i), typ: types[typ], data: make([]byte, sizes[typ])})
+				name := fmt.Sprintf("census.%d.%d.%d.weight", shard, typ, i)
+				tensors = append(tensors, v41PackedFixtureTensor{name: name, typ: types[typ], data: make([]byte, sizes[typ])})
+				wantTensors[name] = types[typ]
 			}
 		}
-		path := filepath.Join(dir, fmt.Sprintf("census-000%02d-of-00007.gguf", shard+1))
+		path := filepath.Join(dir, fmt.Sprintf("census-%05d-of-%05d.gguf", shard+1, len(counts)))
 		if shard == 0 {
 			first = path
 		}
-		writeV41PackedFixture(t, path, tensors, shard, 7, 1046)
+		writeV41PackedFixture(t, path, tensors, shard, len(counts), total)
 		gg, err := ggufload.Open(path)
 		if err != nil {
 			t.Fatal(err)
@@ -89,8 +98,18 @@ func TestServeV41PackedMeasuredSevenShardInventory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ws.Close()
-	if len(ws.File.Tensors) != 1046 {
-		t.Fatalf("merged tensors=%d want=1046", len(ws.File.Tensors))
+	if len(ws.File.Tensors) != len(wantTensors) {
+		t.Fatalf("merged tensors=%d want fixture inventory=%d", len(ws.File.Tensors), len(wantTensors))
+	}
+	for _, tensor := range ws.File.Tensors {
+		want, ok := wantTensors[tensor.Name]
+		if !ok || tensor.Type != want {
+			t.Fatalf("merged tensor %q type=%s missing, duplicated, or changed from fixture type=%s", tensor.Name, tensor.Type, want)
+		}
+		delete(wantTensors, tensor.Name)
+	}
+	if len(wantTensors) != 0 {
+		t.Fatalf("merged inventory omitted fixture tensors: %v", wantTensors)
 	}
 	merged := ggufload.ClassifyTensorQuant(ws.File.Tensors)
 	if merged.Name != "mixed(Q2_K+Q3_K+Q6_K)" || merged.Inventory != "mixed(BF16+F32+Q2_K+Q3_K+Q6_K)" || merged.Recipe != "" || merged.Q4KResident {
