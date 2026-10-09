@@ -82,10 +82,10 @@ func TestV41SharedAttentionSession(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var m *Model
 			if role {
-				m = v41ReaderWidthFixture(t) // source ratio 2, reader ratio 0
+				m = v41ReaderWidthFixture(t) // source and reader both ratio 2
 			} else {
 				m = v41IncrementalPlainModel(t, 2)
-				m.Cfg.Window = []int{2}
+				m.Cfg.Window = []int{2, 2}
 			}
 			s, b := newSession(t, m)
 			host := m.NewSession()
@@ -110,10 +110,30 @@ func TestV41SharedAttentionSession(t *testing.T) {
 				}
 				rows := min(pos+1, 2)
 				if role {
-					rows = (pos + 1) / 2
-					o := request.compressed
-					if request.mode != compute.V41SharedAttentionCompressed || o.Layer != layer || o.QueryOffset != pos || o.Ratio != 2 || o.Groups != len(values) || o.HeadDim != m.Cfg.HeadDim || o.Heads != m.Cfg.NumHeads || o.Softmax != m.Cfg.attnScale() || o.TopK != 0 || o.IndexTopK != 0 || o.Idx != nil || o.Inverse != nil || o.RopeDim != 0 {
-						t.Fatalf("source-span/absolute-position options changed: layer=%d pos=%d opt=%+v", layer, pos, o)
+					window := pos + 1
+					if configured := m.Cfg.windowForLayer(layer); configured > 0 {
+						window = min(window, configured)
+					}
+					groups := max(2, pos+1) / 2 // cold payload also carries the future first group
+					rows = window + (pos+1)/2
+					o := request.plain
+					if request.mode != compute.V41SharedAttentionPlain || o.B != 1 || o.M != 1 || o.N != window+groups || o.TopK != window+groups || o.HeadDim != m.Cfg.HeadDim || o.Heads != m.Cfg.NumHeads || o.Softmax != m.Cfg.attnScale() || o.Inverse != nil || o.RopeDim != 0 {
+						t.Fatalf("combined source/window options changed: layer=%d pos=%d opt=%+v", layer, pos, o)
+					}
+					wantIdx := make([]int32, window+groups)
+					for i := range wantIdx {
+						wantIdx[i] = int32(i)
+						if i >= window && (i-window+1)*2 > pos+1 {
+							wantIdx[i] = -1
+						}
+					}
+					if !reflect.DeepEqual(request.idx, wantIdx) {
+						t.Fatalf("combined positional list=%v want=%v", request.idx, wantIdx)
+					}
+					for _, value := range request.kv[window*m.Cfg.HeadDim:] {
+						if math.Float32bits(value)&0xffff != 0 {
+							t.Fatal("published compressed row lost its BF16 boundary")
+						}
 					}
 				} else {
 					o := request.plain
@@ -143,13 +163,6 @@ func TestV41SharedAttentionSession(t *testing.T) {
 				for i := range values {
 					v41SharedAttentionSessionBits(t, "source input", request.values[i], values[i])
 				}
-				if rows == 0 {
-					if len(b.calls) != before {
-						t.Fatal("empty block-causal selection dispatched")
-					}
-					v41SharedAttentionSessionBits(t, "empty attention", out, make([]float32, m.Cfg.NumHeads*m.Cfg.HeadDim))
-					return out, nil
-				}
 				if len(b.calls) != before+1 {
 					t.Fatal("nonempty attention skipped or repeated device selection")
 				}
@@ -160,12 +173,9 @@ func TestV41SharedAttentionSession(t *testing.T) {
 				wantKV := kv
 				if role {
 					wantKV = nil
-					for _, row := range values[:rows] {
-						wantKV = append(wantKV, row...)
-						for _, value := range row {
-							if math.Float32bits(value)&0xffff != 0 {
-								t.Fatal("published compressed row lost its BF16 boundary")
-							}
+					for _, id := range request.idx {
+						if id >= 0 {
+							wantKV = append(wantKV, kv[int(id)*m.Cfg.HeadDim:(int(id)+1)*m.Cfg.HeadDim]...)
 						}
 					}
 				}
@@ -175,7 +185,7 @@ func TestV41SharedAttentionSession(t *testing.T) {
 
 			got := s.Prefill([]int{1, 2})
 			if calls := m.V41ExpertFaultAttribution().Prefill.AttentionContractionCalls; calls != 4 {
-				t.Fatalf("cold prefill attempted contractions=%d want=4, including empty selections", calls)
+				t.Fatalf("cold prefill attempted contractions=%d want=4, including windows before completed groups", calls)
 			}
 			v41SharedAttentionSessionNear(t, got, host.Prefill([]int{1, 2}))
 			if !s.v41IncrementalEligible() {
@@ -211,9 +221,10 @@ func TestV41SharedAttentionSession(t *testing.T) {
 			}
 			wantCalls := 10
 			if role {
-				wantCalls = 8 // both cold position-0 selections are empty
-				for i := 0; i < len(b.calls); i += 2 {
-					v41SharedAttentionSessionBits(t, "reader uses source rows", b.calls[i+1].kv, b.calls[i].kv)
+				for pos, pair := range [][2]int{{0, 2}, {1, 3}, {4, 5}, {6, 7}, {8, 9}} {
+					owner, reader := b.calls[pair[0]], b.calls[pair[1]]
+					compressed := (pos + 1) / 2 * m.Cfg.HeadDim
+					v41SharedAttentionSessionBits(t, "reader uses source rows", reader.kv[len(reader.kv)-compressed:], owner.kv[len(owner.kv)-compressed:])
 				}
 			}
 			if requests != 10 || len(b.calls) != wantCalls || b.uploads != 3*wantCalls || b.reads != wantCalls || len(b.allocations) != 0 {
@@ -229,18 +240,18 @@ func TestV41SharedAttentionSession(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// Empty retained state admits the internal position-0 composition, which
-		// must keep the existing no-completed-group early return before attention.
+		// Empty retained state still contracts its own first window row before
+		// any compressed group exists.
 		s.v41State().setLayerState(0, 1, state)
 		scratch := &v41ProjScratch{sharedAttention: s.v41State().sharedAttention}
 		got, stats, err := m.forwardV41Step(1, s.v41State(), scratch)
-		if err != nil || !stats.Committed || stats.LayerCalls != 1 || len(b.calls) != 0 || b.uploads != 0 || scratch.sharedAttention != nil {
-			t.Fatalf("incomplete group changed early-return/scratch semantics: stats=%+v err=%v", stats, err)
+		if err != nil || !stats.Committed || stats.LayerCalls != 1 || len(b.calls) != 1 || b.calls[0].rows != 1 || b.uploads != 3 || scratch.sharedAttention != nil {
+			t.Fatalf("incomplete group lost its window or scratch semantics: stats=%+v err=%v", stats, err)
 		}
 		v41SharedAttentionSessionNear(t, got, lastLogits(m.Forward([]int{1})))
 		v41SharedAttentionSessionNear(t, s.Step(2), lastLogits(m.Forward([]int{1, 2})))
-		if len(b.calls) != 1 || b.calls[0].rows != 1 || len(state.partialInputs) != 0 {
-			t.Fatal("first completed group was not selected exactly once")
+		if len(b.calls) != 2 || b.calls[1].rows != 3 || len(state.partialInputs) != 0 {
+			t.Fatal("first completed group did not join the two window rows exactly once")
 		}
 	})
 

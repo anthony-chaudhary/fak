@@ -105,21 +105,11 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		return v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: layer %d step requires retained decode state", ErrV41ForwardStage, l))
 	}
-	// A compressed / shared-source / reader role contracts the shared compressed
-	// stream rather than this layer's own per-position window. It is stepped by a
-	// separate one-position composition (#13480) so the per-layer window path
-	// below stays byte-for-byte the plain-layer arithmetic: silently running the
-	// window contraction for a role layer would emit logits from a schedule the
-	// checkpoint never declared. The role step still receives the layer's own
-	// retained state (its compressor group cursor). Success advances its logical
-	// append cursor without adding a row to the plain window.
+	// Role layers combine their own window with shared compressed rows. Their
+	// source append already advances the compressor cursor, so the role path
+	// commits the window itself without calling State.Step a second time.
 	if plan.Role != V41AttentionRolePerLayer || plan.Ratio > 1 {
-		if err := m.v41LayerStepRole(l, plan, x, streams, pos, layerState, registry, scratch); err != nil {
-			return err
-		}
-		layerState.nextWindowPos = pos + 1
-		layerState.nextCompressRow = pos + 1
-		return nil
+		return m.v41LayerStepRole(l, plan, x, streams, pos, layerState, registry, scratch)
 	}
 	// Append-only: the step position must be the next retained position. This
 	// refuses a caller that skipped or replayed history instead of silently
@@ -400,8 +390,8 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 }
 
 // v41LayerStepRole advances ONE position of a compressed / shared-source / reader
-// V4.1 layer through the retained compressed stream instead of the layer's own
-// per-position window (#13480). It is the role-aware counterpart of v41LayerStep:
+// V4.1 layer through its own retained window plus the shared compressed stream.
+// It is the role-aware counterpart of v41LayerStep:
 // the mHC split/pre-collapse, the query projection, the MoE block and the mHC
 // post are the SAME arithmetic v41LayerStep's plain branch runs for seq == 1, so
 // the only structural difference is the attention KV row set and its commit.
@@ -419,9 +409,8 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 //     KVSourceRows and reuses the source's published top-k exactly as v41Layer's
 //     reader branch does.
 //
-// This function leaves the per-layer window ring and logical append cursor
-// unchanged. Its wrapper advances the logical cursor after success; the outer
-// composition restores compressor and publication state on failure.
+// The window ring commits only after the layer arithmetic succeeds. The outer
+// composition restores window, compressor and publication state on failure.
 func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, streams [][]float32, pos int, layerState, registry *V41AttentionState, scratch *v41ProjScratch) error {
 	cfg := m.Cfg
 	if len(x) != cfg.HiddenSize {
@@ -449,6 +438,19 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		return v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: layer %d role step position %d is not the next retained position %d",
 				ErrV41ForwardStage, l, pos, layerState.nextWindowPos))
+	}
+	if pos < 0 || pos == int(^uint(0)>>1) || layerState.windowSize <= 0 ||
+		len(layerState.window) != layerState.windowSize || layerState.headDim != cfg.HeadDim ||
+		layerState.retainedWindowRows < 0 || layerState.retainedWindowRows > min(pos, layerState.windowSize) ||
+		len(layerState.window[pos%layerState.windowSize]) != cfg.HeadDim {
+		return v41StageErr(v41StageAttention, l, fmt.Errorf("%w: role window state has invalid geometry", ErrV41ForwardStage))
+	}
+	windowStart := 0
+	if window := cfg.windowForLayer(l); window > 0 {
+		windowStart = max(0, pos-window+1)
+	}
+	if windowStart < pos-layerState.retainedWindowRows {
+		return v41StageErr(v41StageAttention, l, fmt.Errorf("%w: role window is not fully retained", ErrV41ForwardStage))
 	}
 
 	H, hd, nH := cfg.HiddenSize, cfg.HeadDim, cfg.NumHeads
@@ -535,6 +537,11 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	if err := v41TailRoPEInPlace(l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE); err != nil {
 		return err
 	}
+	window := make([][]float32, 0, pos-windowStart+1)
+	for key := windowStart; key < pos; key++ {
+		window = append(window, layerState.window[key%layerState.windowSize])
+	}
+	window = append(window, kv)
 
 	// ---- shared compressed stream: source publishes, reader resolves ----
 	//
@@ -616,36 +623,34 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 			return err
 		}
 	}
-	if len(sharedKV) == 0 {
-		// No group has completed. This existing compressed-only contraction has
-		// no values yet; window-plus-compressed composition remains separate work.
-		return m.v41LayerStepRoleFinish(l, x, streams, mix, make([]float32, H), scratch)
-	}
-
-	// ---- compressed contraction over the shared rows (block-causal) ----
-	opt := V41AttentionSharedKVOptions{
-		Layer: l, Ratio: plan.kvGroupSize(cfg), QueryOffset: pos, Groups: len(sharedKV),
-		HeadDim: hd, Heads: nH, Softmax: cfg.attnScale(), Sink: m.tensor(layerName(l, "attn.sink")),
-	}
+	// Canonical compressed IDs remain unoffset until the common composer adds
+	// this layer's window width. Padding and repeated selections are preserved.
+	var ids []int32
 	if plan.TopKWidth > 0 {
-		var idx []int32
 		var ierr error
 		if indexSourceAt(cfg.DeepSeekV41, l) {
-			idx, ierr = m.v41RoleStepNormalizeIndex(l, plan, sourceIdx, len(sharedKV))
+			ids, ierr = m.v41RoleStepNormalizeIndex(l, plan, sourceIdx, len(sharedKV))
 		} else {
-			idx, ierr = m.v41RoleStepIndex(registry, l, pos, plan, qLat, collapsed, len(sharedKV))
+			ids, ierr = m.v41RoleStepIndex(registry, l, pos, plan, qLat, collapsed, len(sharedKV))
 		}
 		if ierr != nil {
 			return ierr
 		}
-		if idx != nil {
-			opt.Idx = idx
-			opt.IndexTopK = plan.TopKWidth
-			opt.TopK = plan.TopKWidth
+		if ids == nil {
+			ids, ierr = m.v41RoleStepNormalizeIndex(l, plan, nil, len(sharedKV))
+			if ierr != nil {
+				return ierr
+			}
+		}
+	}
+	if ids == nil {
+		ids = make([]int32, len(sharedKV))
+		for group := range ids {
+			ids[group] = int32(group)
 		}
 	}
 	attentionOpened := m.v41NowNanos()
-	o, err := v41AttentionCompressedForwardWithDevice(q, sharedKV, opt, scratch.sharedAttention)
+	o, err := v41CombinedAttention(l, pos, plan.kvGroupSize(cfg), nH, hd, q, m.tensor(layerName(l, "attn.sink")), window, sharedKV, ids, cfg.attnScale(), scratch.sharedAttention)
 	m.v41NoteAttentionContraction(attentionOpened)
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
@@ -656,15 +661,27 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		return v41StageErr(v41StageAttention, l, err)
 	}
 
-	return m.v41LayerStepRoleFinish(l, x, streams, mix, attnProjected, scratch)
+	if err := m.v41LayerStepRoleFinish(l, x, streams, mix, attnProjected, scratch); err != nil {
+		return err
+	}
+	// No error-returning operation remains. State.Step would advance an owner's
+	// already-committed compressor cursor twice. Retain this layer's own row,
+	// including on reader layers and before the first completed source group.
+	copy(layerState.window[pos%layerState.windowSize], kv)
+	layerState.nextWindowPos, layerState.nextCompressRow = pos+1, pos+1
+	retained := min(layerState.retainedWindowRows+1, layerState.windowSize)
+	if configured := cfg.windowForLayer(l); configured > 0 {
+		retained = min(retained, configured)
+	}
+	layerState.retainedCopies += retained - layerState.retainedWindowRows
+	layerState.retainedWindowRows = retained
+	return nil
 }
 
 // v41LayerStepRoleFinish runs the MoE block and the mHC post for one position and
 // commits the position's mHC streams and hidden row. It is shared by the source
-// (which may have no attention output yet) and the reader path so the tail after
-// attention is byte-identical to the plain branch's seq == 1 arithmetic. The
-// per-layer window cursor is deliberately NOT advanced here: the role path owns
-// the shared compressed stream, not this layer's window ring.
+// and reader paths so the tail after attention is byte-identical to the plain
+// branch's seq == 1 arithmetic. The caller commits its window after this returns.
 func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, mix v41MHCMix, attnOut []float32, scratch *v41ProjScratch) error {
 	cfg := m.Cfg
 	H := cfg.HiddenSize

@@ -857,26 +857,32 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scale := cfg.attnScale()
 	attnOut := make([][]float32, seq)
 	for t := 0; t < seq; t++ {
-		// A compressed/shared layer contracts the COMPRESSED KV stream directly:
-		// block-causal visibility over pooled group rows, with the lightning
-		// indexer's row selection when the layer published one. A per-layer layer
-		// keeps the exact per-position causal sink contraction.
-		if plan.Ratio > 1 || (plan.Role == V41AttentionRoleReader && len(sharedKV) > 0 && len(sharedKV) < seq) {
-			opt := V41AttentionSharedKVOptions{
-				Layer: l, Ratio: plan.kvGroupSize(cfg), QueryOffset: t, Groups: len(sharedKV),
-				HeadDim: hd, Heads: nH, Softmax: scale, Sink: sink,
+		// The reference concatenates this layer's window with selected source
+		// groups before ONE sink contraction, even before a group completes.
+		if plan.Ratio > 1 || plan.Role == V41AttentionRoleReader {
+			keys := v41PlainWindowKeys(t, cfg.windowForLayer(l))
+			window := make([][]float32, len(keys))
+			for i, key := range keys {
+				window[i] = kvRows[key]
 			}
-			if indexList != nil && len(indexList) >= (t+1)*plan.topKWidth() {
-				// The index source publishes one selection row per query position.
-				opt.Idx = indexList[t*plan.topKWidth() : (t+1)*plan.topKWidth()]
-				opt.IndexTopK = plan.topKWidth()
-				opt.TopK = plan.topKWidth()
+			var ids []int32
+			if indexList != nil {
+				width := plan.topKWidth()
+				if width <= 0 || len(indexList) != seq*width {
+					return v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: compressed selection does not cover every query", ErrV41ForwardStage))
+				}
+				ids = indexList[t*width : (t+1)*width]
+			} else {
+				ids = make([]int32, len(sharedKV))
+				for group := range ids {
+					ids[group] = int32(group)
+				}
 			}
 			attentionOpened := m.v41NowNanos()
-			o, err := v41AttentionCompressedForwardWithDevice(qHeads[t], sharedKV, opt, scratch.sharedAttention)
+			o, err := v41CombinedAttention(l, t, plan.kvGroupSize(cfg), nH, hd, qHeads[t], sink, window, sharedKV, ids, scale, scratch.sharedAttention)
 			m.v41NoteAttentionContraction(attentionOpened)
 			if err != nil {
-				return err
+				return v41StageErr(v41StageAttention, l, err)
 			}
 			v41InverseAttentionOutputInPlace(cfg, l, t, o, nH, hd)
 			projected, err := projectOutput(o)

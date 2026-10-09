@@ -182,6 +182,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	stagedInputs := make([][][]float32, 0, cfg.NumLayers)
 	stagedInputPos := make([][]int, 0, cfg.NumLayers)
 	stagedCopies := make([]int, 0, cfg.NumLayers)
+	stagedWindowRows := make([]int, 0, cfg.NumLayers)
 	stagedKV := make([]v41StepPublicationUndo, 0, cfg.NumLayers)
 	stagedIndex := make([]v41StepPublicationUndo, 0, cfg.NumLayers)
 	// The shared registry a role source publishes into is staged too: a fault in a
@@ -201,6 +202,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 			state.partialInputs = stagedInputs[i]
 			state.partialPositions = stagedInputPos[i]
 			state.retainedCopies = stagedCopies[i]
+			state.retainedWindowRows = stagedWindowRows[i]
 			stagedKV[i].restore()
 			stagedIndex[i].restore()
 			if row := stagedRow[i]; row != nil && state.windowSize > 0 {
@@ -262,13 +264,13 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 		stagedInputs = append(stagedInputs, cloneV41Rows(state.partialInputs))
 		stagedInputPos = append(stagedInputPos, append([]int(nil), state.partialPositions...))
 		stagedCopies = append(stagedCopies, state.retainedCopies)
+		stagedWindowRows = append(stagedWindowRows, state.retainedWindowRows)
 		stagedKV = append(stagedKV, stageV41StepPublication(state.kvPublications, state.kvPublishedEnd, l))
 		stagedIndex = append(stagedIndex, stageV41StepPublication(state.indexPublications, state.indexPublishedEnd, l))
-		// Capture the ring row Step will overwrite. pos != 0 (Step) writes
-		// window[nextWindowPos%windowSize]; pos == 0 (Prefill) cannot clobber a
-		// pre-existing row and gets a nil backup.
+		// Capture the ring slot even at position zero: an internal empty-state
+		// role step can commit its first window row before a later layer fails.
 		var rowBackup []float32
-		if pos != 0 && state.windowSize > 0 && len(state.window) > 0 {
+		if state.windowSize > 0 && len(state.window) > 0 {
 			slot := state.nextWindowPos % state.windowSize
 			if slot >= 0 && slot < len(state.window) {
 				rowBackup = append([]float32(nil), state.window[slot]...)

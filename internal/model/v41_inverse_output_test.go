@@ -77,7 +77,7 @@ func TestV41InverseAttentionOutput(t *testing.T) {
 					}
 					unrotated = append([]float32(nil), out...)
 					theta := float64(256)
-					if role && layer == 0 {
+					if role {
 						theta = 4096
 					}
 					expected = v41InverseOutputOracle(out, m.Cfg.NumHeads, m.Cfg.HeadDim, m.Cfg.QKRopeHeadDim, pos, theta)
