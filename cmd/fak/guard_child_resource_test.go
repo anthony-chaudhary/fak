@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/procguard"
@@ -661,45 +662,104 @@ func TestGuardChildResourceHeadroomDebounceAndRecovery(t *testing.T) {
 	})
 
 	t.Run("headroom recovery resets grace timer without interrupting child", func(t *testing.T) {
-		stop := make(chan struct{})
-		defer close(stop)
+		t.Setenv("FAK_CHILD_RESOURCE_USAGE_PATH", filepath.Join(t.TempDir(), "child-resource.jsonl"))
+		synctest.Test(t, func(t *testing.T) {
+			stop := make(chan struct{})
+			oldYield, oldSuspend, oldResume := guardYieldMemory, guardSuspendProcess, guardResumeProcess
+			defer func() {
+				close(stop)
+				synctest.Wait()
+				guardYieldMemory, guardSuspendProcess, guardResumeProcess = oldYield, oldSuspend, oldResume
+			}()
 
-		policy := guardResourcePolicy{
-			PollInterval:      10 * time.Millisecond,
-			Metric:            procguard.MemoryMetricCommit,
-			MaxTreeBytes:      1000,
-			MinSystemHeadroom: 100,
-			HeadroomDebounce:  60 * time.Millisecond,
-			Stop:              stop,
-		}
-
-		tickCount := 0
-		ch := startGuardChildResourceMonitorWithCollector(42, "trace-recovery", "test-agent", policy, func(pid int) (procguard.MemorySnapshot, bool, string) {
-			tickCount++
-			systemBytes := uint64(500) // healthy (500 headroom >= 100)
-			if tickCount <= 3 {
-				// ticks 1, 2, 3: deficit (50 headroom < 100)
-				systemBytes = 950
+			var suspendedPIDs, resumedPIDs []int
+			yields := 0
+			guardYieldMemory = func(pids ...int) {
+				if !slices.Equal(pids, []int{42}) {
+					t.Errorf("yield PIDs = %v, want [42]", pids)
+				}
+				yields++
 			}
-			return procguard.MemorySnapshot{
-				Metric:      procguard.MemoryMetricCommit,
-				RootPID:     42,
-				TreeBytes:   10,
-				SystemBytes: systemBytes,
-				SystemLimit: 1000,
-				Processes:   []procguard.MemoryProcess{{PID: 42, Bytes: 10}},
-			}, true, ""
+			guardSuspendProcess = func(pid int) error {
+				suspendedPIDs = append(suspendedPIDs, pid)
+				return nil
+			}
+			guardResumeProcess = func(pid int) error {
+				resumedPIDs = append(resumedPIDs, pid)
+				return nil
+			}
+
+			policy := guardResourcePolicy{
+				PollInterval:      10 * time.Millisecond,
+				Metric:            procguard.MemoryMetricCommit,
+				MaxTreeBytes:      1000,
+				MinSystemHeadroom: 100,
+				HeadroomDebounce:  60 * time.Millisecond,
+				Stop:              stop,
+			}
+
+			tickCount := 0
+			ch := startGuardChildResourceMonitorWithCollector(42, "trace-recovery", "test-agent", policy, func(pid int) (procguard.MemorySnapshot, bool, string) {
+				tickCount++
+				systemBytes := uint64(950)
+				if tickCount == 4 {
+					// Recover at 40ms, then begin a fresh deficit at 50ms.
+					systemBytes = 500
+				}
+				return procguard.MemorySnapshot{
+					Metric:      procguard.MemoryMetricCommit,
+					RootPID:     42,
+					TreeBytes:   10,
+					SystemBytes: systemBytes,
+					SystemLimit: 1000,
+					Processes:   []procguard.MemoryProcess{{PID: 42, Bytes: 10}},
+				}, true, ""
+			})
+
+			advance := func(d time.Duration) {
+				t.Helper()
+				time.Sleep(d)
+				synctest.Wait()
+			}
+			assertNoEvent := func(phase string) {
+				t.Helper()
+				select {
+				case ev := <-ch:
+					t.Fatalf("unexpected resource event %s: %+v", phase, ev)
+				default:
+				}
+			}
+
+			// Install the ticker before advancing virtual time. Wait also makes
+			// collector and hook observations safe to inspect without a race.
+			synctest.Wait()
+			advance(40 * time.Millisecond)
+			assertNoEvent("after recovery")
+			if tickCount != 4 || yields != 3 || !slices.Equal(suspendedPIDs, []int{42}) || !slices.Equal(resumedPIDs, []int{42}) {
+				t.Fatalf("recovery not observed: ticks=%d yields=%d suspended=%v resumed=%v", tickCount, yields, suspendedPIDs, resumedPIDs)
+			}
+
+			// The old deadline is 70ms; the renewed deficit must get its own
+			// full 60ms grace, ending at 110ms rather than inheriting that deadline.
+			advance(60 * time.Millisecond)
+			assertNoEvent("before renewed grace expires")
+			if tickCount != 10 || !slices.Equal(suspendedPIDs, []int{42, 42}) || !slices.Equal(resumedPIDs, []int{42}) {
+				t.Fatalf("renewed deficit not observed: ticks=%d suspended=%v resumed=%v", tickCount, suspendedPIDs, resumedPIDs)
+			}
+
+			advance(10 * time.Millisecond)
+			select {
+			case ev := <-ch:
+				if ev.Kind != guardChildResourceLimit || ev.Resource == nil || !ev.Resource.Stop || ev.Resource.Reason != procguard.SystemCommitHeadroomReason {
+					t.Fatalf("unexpected renewed-deficit event: %+v", ev)
+				}
+			default:
+				t.Fatal("expected resource event when renewed 60ms grace expires")
+			}
+			if !slices.Equal(resumedPIDs, []int{42, 42}) {
+				t.Fatalf("monitor did not resume on exit: %v", resumedPIDs)
+			}
 		})
-
-		// Wait 120ms (well beyond 60ms debounce window)
-		time.Sleep(120 * time.Millisecond)
-
-		select {
-		case ev := <-ch:
-			t.Fatalf("child was interrupted despite recovering: %+v", ev)
-		default:
-			// Child was not interrupted!
-		}
 	})
 
 	t.Run("child tree limit does not debounce", func(t *testing.T) {
