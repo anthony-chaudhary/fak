@@ -362,8 +362,7 @@ make the final line the next checkable step. A one-line “nothing left; pushed 
 Frame all diagnostics, performance measurements, benchmark reports, and investigation findings
 around **forward momentum rather than terminal conclusions**. When an approach underperforms,
 a benchmark trails baseline, or an experiment yields negative results, focus on forward action
-rather than passive, defeatist, or dead-end editorializing (e.g. rather than *"X didn't work ...
-therefore we suck..."*, state *"the next step to get better performance is X"*).
+rather than passive, defeatist, or dead-end editorializing.
 
 - **Action over self-judgment**: Treat unmet targets, performance gaps, or failed attempts as
   empirical data that eliminates a variable and sharpens the search space, not as an editorial
