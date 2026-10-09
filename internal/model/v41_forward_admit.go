@@ -252,9 +252,11 @@ func (m *Model) v41CompressIndexForwardAdmitted() error {
 func v41CompressorWidth(cfg Config) int { return cfg.HeadDim }
 
 // v41CompressedRows pools the per-position projected KV rows of one layer
-// through the CED/CSA2 compressor. It returns the emitted compressed rows in
-// causal order. A non-compressed regime returns the input rows unchanged. It
-// fails closed on any malformed geometry rather than emitting a partial stream.
+// through the CED/CSA2 compressor. Ratio one projects each carrier through wkv
+// and the existing BF16/learned-RMSNorm tail, with no gate or pooling. Ratio zero
+// returns the ordinary KV rows unchanged. This helper does not admit a shared
+// ratio-one source to the forward assembly; its ownership and cache integration
+// remain fenced by v41KVSourceForwardAdmitted.
 func (m *Model) v41CompressedRows(l int, ratio int, kvRows [][]float32, inputs [][]float32) ([][]float32, error) {
 	return m.v41CompressedRowsWithProjection(l, ratio, kvRows, inputs, nil)
 }
@@ -264,7 +266,7 @@ func (m *Model) v41CompressedRowsWithProjection(l int, ratio int, kvRows [][]flo
 }
 
 func (m *Model) v41CompressedRowsWithOperations(l int, ratio int, kvRows [][]float32, inputs [][]float32, project v41DenseProjectionFunc, normalize v41CompressorNormFunc) ([][]float32, error) {
-	if ratio <= 1 {
+	if ratio <= 0 {
 		return kvRows, nil
 	}
 	cfg := m.Cfg
@@ -291,9 +293,12 @@ func (m *Model) v41CompressedRowsWithOperations(l int, ratio int, kvRows [][]flo
 		if err != nil {
 			return nil, err
 		}
-		score, err := m.v41ProjMatRowsWithProjection(l, "attn.compressor.wgate.weight", in, width, H, project)
-		if err != nil {
-			return nil, err
+		var score []float32
+		if ratio > 1 {
+			score, err = m.v41ProjMatRowsWithProjection(l, "attn.compressor.wgate.weight", in, width, H, project)
+			if err != nil {
+				return nil, err
+			}
 		}
 		pooled, emitted, err := pool.PushNormalized(pos, kv, score, normWeight, eps)
 		if err != nil {

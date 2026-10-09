@@ -398,8 +398,8 @@ func TestV41CompressorNormPoolCompletion(t *testing.T) {
 	if err != nil || !emitted || calls != 1 || !reflect.DeepEqual(row, v41CompressorNormRefTail([]float32{2, 2}, gain, 1e-5, "")) {
 		t.Fatal("complete group did not normalize exactly once")
 	}
-	// The exported standalone ratio-one pool still enters its normalization
-	// tail, while production helper ratio <= 1 continues to bypass compression.
+	// The exported standalone ratio-one pool enters its normalization tail.
+	// Only ratio zero bypasses the production helper's compressor operations.
 	one, err := NewV41CompressorPool(1, 2)
 	if err != nil {
 		t.Fatal(err)
@@ -410,13 +410,11 @@ func TestV41CompressorNormPoolCompletion(t *testing.T) {
 	}
 	m := v41CompressorNormTinyModel(t, gain, 1e-5)
 	input := [][]float32{{1, 2}}
-	for _, ratio := range []int{0, 1} {
-		got, err := m.v41CompressedRowsWithOperations(0, ratio, input, input, nil, func(int, []float32, []float32, float32) ([]float32, error) {
-			t.Fatal("production bypass invoked compressor normalization")
-			return nil, nil
-		})
-		if err != nil || !reflect.DeepEqual(got, input) {
-			t.Fatal("production ratio bypass changed")
-		}
+	got, err := m.v41CompressedRowsWithOperations(0, 0, input, input, nil, func(int, []float32, []float32, float32) ([]float32, error) {
+		t.Fatal("production bypass invoked compressor normalization")
+		return nil, nil
+	})
+	if err != nil || !reflect.DeepEqual(got, input) {
+		t.Fatal("production ratio bypass changed")
 	}
 }
