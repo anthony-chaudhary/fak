@@ -8,9 +8,10 @@ package model
 //	panic: model: V4.1 forward stage attention layer=36:
 //	  model: V4.1 grouped output non-finite value element 0
 //
-// The layer-36 schedule resolves Ratio=1, is an index source, and its KV source
-// (layer 20) is ALSO ratio 1, so sharedKV stays nil and layer 36 executes the
-// PER-POSITION V41SparseAttentionSink path (witnessed structurally below). Both
+// The historical assembly treated ratio-one source 20 as producing no shared
+// KV and sent layer 36 through the per-position sink. Current admission refuses
+// that incomplete ratio-one assembly; the plan witness below proves topology
+// only. At the time of the failure, both
 // V41SparseAttentionSink and V41AttentionCompressedForward validated every
 // INPUT was finite but never guarded their OUTPUT: with HeadDim=512 a finite
 // per-element magnitude above ~8.15e17 overflows the 512-term `dot += q*kv`
@@ -40,10 +41,10 @@ func v41NonFiniteTestScale(headDim int) float32 {
 	return float32(1.0 / math.Sqrt(float64(headDim)))
 }
 
-// TestV41Layer36RealScheduleBranch witnesses the branch resolution that puts
-// layer 36 on the PER-POSITION sink path (not the compressed contraction), from
-// the actual published config. It is the structural precondition for the guard
-// regression: it fails loudly if role/source resolution drifts.
+// TestV41Layer36RealScheduleBranch witnesses the published layer-36 topology:
+// a ratio-one reader of KV source 20, with its own index selection. This is a
+// pure plan witness; forward admission refuses the unimplemented ratio-one
+// assembly before either attention contraction can execute.
 func TestV41Layer36RealScheduleBranch(t *testing.T) {
 	_, cfg := readDeepSeekV41Config(t)
 	roles := v41AttentionRoles(cfg)
@@ -64,18 +65,18 @@ func TestV41Layer36RealScheduleBranch(t *testing.T) {
 	if !indexSourceAt(cfg.DeepSeekV41, 36) {
 		t.Fatal("layer 36 must itself be an index source")
 	}
-	// The resolved source (20) is ALSO ratio 1, so it publishes no compressed
-	// Latent; sharedKV stays nil and the compressed branch is not selected.
+	// The source also declares ratio one. Its standalone projection helper does
+	// not establish the shared publication and window-composition assembly.
 	if srcRatio := v41CompressRatioAt(cfg, plan.KVSourceLayer); srcRatio != 1 {
-		t.Fatalf("layer %d ratio = %d; layer 36 reaches the sink path only if it is 1",
+		t.Fatalf("layer %d ratio = %d, want the published ratio-one source",
 			plan.KVSourceLayer, srcRatio)
 	}
-	t.Log("layer 36 executes the PER-POSITION V41SparseAttentionSink path (sharedKV nil), NOT V41AttentionCompressedForward")
+	t.Log("layer 36 resolves ratio-one source/reader topology; full forward assembly remains refused")
 }
 
 // TestV41AttentionCompressedNonFiniteGuard is the symmetric RED->GREEN witness
-// for the compressed contraction (the twin latent hole). Layer 36 does not take
-// this path, but the function carries the identical unguarded output.
+// for the standalone compressed contraction (the twin latent hole). It does
+// not qualify layer 36 for forward execution.
 func TestV41AttentionCompressedNonFiniteGuard(t *testing.T) {
 	const (
 		heads   = 64

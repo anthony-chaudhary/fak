@@ -222,7 +222,7 @@ func TestV41LayerStepRefusesNonPlainRoles(t *testing.T) {
 
 	// A reader layer (compressed regime following a declared source) must refuse.
 	m.Cfg.DeepSeekV41.KVSourceLayerIDs = []int{0}
-	m.Cfg.DeepSeekV41.CompressRatios = []int{0, 2, 0}
+	m.Cfg.DeepSeekV41.CompressRatios = []int{2, 2, 0}
 	m.Cfg.DeepSeekV41.IndexSourceLayerIDs = nil
 	roles := v41AttentionRoles(m.Cfg)
 	if roles[1] != V41AttentionRoleReader {

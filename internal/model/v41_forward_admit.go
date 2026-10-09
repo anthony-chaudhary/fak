@@ -179,6 +179,18 @@ func (m *Model) v41EngramForwardAdmitted() error {
 func (m *Model) v41CompressIndexForwardAdmitted() error {
 	d41 := m.Cfg.DeepSeekV41
 	if d41 == nil {
+		// The canonical GGUF identity may retain only the flat schedule before
+		// optional metadata attachment. That absence cannot turn active ratio one
+		// into window-only execution. Preserve all other nil-metadata behavior.
+		for layer, ratio := range m.Cfg.CompressRatios {
+			if layer >= m.Cfg.NumLayers {
+				break
+			}
+			if ratio == 1 {
+				return v41StageErr(v41StageCompress, layer,
+					fmt.Errorf("%w: layer %d declares ratio-one compression but the ratio-one forward assembly is not implemented", ErrV41ForwardStage, layer))
+			}
+		}
 		return nil
 	}
 	cfg := m.Cfg
@@ -192,15 +204,18 @@ func (m *Model) v41CompressIndexForwardAdmitted() error {
 	}
 	H := cfg.HiddenSize
 	for layer := 0; layer < cfg.NumLayers; layer++ {
-		// Ratio 0 and 1 are the uncompressed regimes. A ratio > 1 declares a
-		// compressed layer whose compressor must be wired; a negative ratio is
-		// malformed geometry that must fail closed rather than being silently
-		// treated as uncompressed.
+		// Only ratio 0 is window-only. Ratio 1 requires the reference's separate
+		// compressed projection/cache plus window contraction; its standalone
+		// helper does not yet implement that forward assembly. Refuse it regardless
+		// of source declarations or weight presence instead of executing plain KV.
 		ratio := d41.CompressRatios[layer]
 		switch {
 		case ratio < 0:
 			return v41StageErr(v41StageCompress, layer,
 				fmt.Errorf("%w: layer %d declares malformed compressor ratio %d", ErrV41ForwardStage, layer, ratio))
+		case ratio == 1:
+			return v41StageErr(v41StageCompress, layer,
+				fmt.Errorf("%w: layer %d declares ratio-one compression but the ratio-one forward assembly is not implemented", ErrV41ForwardStage, layer))
 		case ratio > 1:
 			width := v41CompressorWidth(cfg)
 			if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wkv.weight"), v41StageCompress, layer, width, H); err != nil {
@@ -219,6 +234,9 @@ func (m *Model) v41CompressIndexForwardAdmitted() error {
 	for _, layer := range d41.IndexSourceLayerIDs {
 		if layer < 0 || layer >= cfg.NumLayers {
 			continue
+		}
+		if d41.CompressRatios[layer] == 0 {
+			continue // window-only layers do not execute a declared indexer
 		}
 		if indexHeads <= 0 || indexDim <= 0 {
 			return v41StageErr(v41StageIndexer, layer,

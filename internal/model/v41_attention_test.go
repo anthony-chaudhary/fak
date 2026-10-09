@@ -17,6 +17,7 @@ package model
 import (
 	"errors"
 	"math"
+	"reflect"
 	"testing"
 )
 
@@ -213,7 +214,7 @@ func TestV41AttentionSharedSourceResolution(t *testing.T) {
 	t.Run("role schedule", func(t *testing.T) {
 		cfg := v41AttentionCompressedConfig(t)
 		cfg.NumLayers = 4
-		cfg.DeepSeekV41.CompressRatios = []int{2, 0, 0, 0}
+		cfg.DeepSeekV41.CompressRatios = []int{2, 2, 2, 2}
 		cfg.DeepSeekV41.KVSourceLayerIDs = []int{0}
 		cfg.DeepSeekV41.IndexSourceLayerIDs = []int{0}
 		roles := v41AttentionRoles(cfg)
@@ -230,7 +231,7 @@ func TestV41AttentionSharedSourceResolution(t *testing.T) {
 	t.Run("plan source resolution", func(t *testing.T) {
 		cfg := v41AttentionCompressedConfig(t)
 		cfg.NumLayers = 5
-		cfg.DeepSeekV41.CompressRatios = []int{2, 0, 2, 0, 0}
+		cfg.DeepSeekV41.CompressRatios = []int{2, 2, 2, 2, 2}
 		cfg.DeepSeekV41.KVSourceLayerIDs = []int{0, 2}
 		cfg.DeepSeekV41.IndexSourceLayerIDs = []int{0, 2}
 		roles := v41AttentionRoles(cfg)
@@ -279,6 +280,86 @@ func TestV41AttentionSharedSourceResolution(t *testing.T) {
 	})
 }
 
+// A zero-ratio layer never enters the reference's compressed branch. Shared
+// publications survive it unchanged for later nonzero-ratio readers.
+// fak-test:runtime fast est=5ms lane=default
+func TestV41AttentionRatioZeroIgnoresSharedState(t *testing.T) {
+	cfg := v41AttentionCompressedConfig(t)
+	cfg.NumLayers = 3
+	cfg.DeepSeekV41.CompressRatios = []int{2, 0, 2, 1}
+	cfg.DeepSeekV41.KVSourceLayerIDs = []int{0}
+	cfg.DeepSeekV41.IndexSourceLayerIDs = []int{0, 1} // layer 1 is dormant
+	cfg.DeepSeekV41.CandidateSourceLayerID = 0
+	cfg.DeepSeekV41.CandidateTopKBlocks = 2
+	cfg.DeepSeekV41.CandidateBlockSize = 1
+	roles := v41AttentionRoles(cfg)
+	if roles[0] != V41AttentionRoleKVSource || roles[1] != V41AttentionRolePerLayer || roles[2] != V41AttentionRoleReader {
+		t.Fatalf("source/window/reader roles = %v", roles)
+	}
+	// A stale role supplied by a caller must not revive compressed participation.
+	roles[1] = V41AttentionRoleReader
+	plain, err := v41AttentionPlanFor(cfg, 1, roles)
+	if err != nil || plain.Role != V41AttentionRolePerLayer || plain.KVSourceLayer != -1 || plain.IndexSourceLayer != -1 || plain.CandidateSource != -1 || plain.TopKWidth != 0 || plain.CandidateTopKBlock != 0 || plain.CandidateBlockSize != 0 {
+		t.Fatalf("window-only effective plan = %+v, %v", plain, err)
+	}
+	if indexSourceAt(cfg.DeepSeekV41, 1) {
+		t.Fatal("ratio-zero declaration became an active index source")
+	}
+	later, err := v41AttentionPlanFor(cfg, 2, roles)
+	if err != nil || later.Role != V41AttentionRoleReader || later.KVSourceLayer != 0 || later.IndexSourceLayer != 0 || later.CandidateSource != 0 || later.TopKWidth != 2 {
+		t.Fatalf("later reader lost the last active sources: %+v, %v", later, err)
+	}
+
+	const hd = 4
+	st, err := NewV41AttentionState(hd, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pooled := [][]float32{{1, 2, 3, 4}, {5, 6, 7, 8}}
+	updates := []V41AttentionStateUpdate{
+		{Ref: V41AttentionStateRef{LayerID: 0, Ratio: 2, IsKVSource: true}, Latent: pooled[0]},
+		{Ref: V41AttentionStateRef{LayerID: 0, Ratio: 2, IsKVSource: true}, Latent: pooled[1]},
+	}
+	if err := st.publishUpdates(updates); err != nil {
+		t.Fatal(err)
+	}
+	selection := [][]int32{{0, 1}, {1, 0}}
+	if err := st.PublishTopK(2, selection); err != nil {
+		t.Fatal(err)
+	}
+	candidates := []bool{true, false}
+	if err := st.PublishCandidates(2, candidates); err != nil {
+		t.Fatal(err)
+	}
+	m := &Model{Cfg: cfg}
+	// Even an explicitly stale list descriptor and invalid local IDs are ignored
+	// for ratio zero; they must neither be validated nor overwrite the registry.
+	stale := plain
+	stale.KVSourceLayer, stale.IndexSourceLayer, stale.CandidateSource, stale.TopKWidth = 0, 0, 0, 2
+	if rows, err := m.v41AttentionIndexList(stale, &v41ForwardState{attn: st}, []int32{99}, hd, 0, 2); err != nil || rows != nil {
+		t.Fatalf("ratio-zero layer read stale index data: %v, %v", rows, err)
+	}
+	if updates := m.v41AttentionSourceUpdates(stale, pooled, pooled); len(updates) != 0 {
+		t.Fatalf("ratio-zero layer published compressed state: %v", updates)
+	}
+	rows, ok := st.KVSourceRows(0)
+	if !ok || !reflect.DeepEqual(rows, pooled) {
+		t.Fatal("window-only layer changed the shared KV registry")
+	}
+	retained, ratio, ok := st.TopK()
+	if !ok || ratio != 2 || !reflect.DeepEqual(retained, selection) {
+		t.Fatal("window-only layer changed the shared top-k registry")
+	}
+	retainedCandidates, candidateRatio, ok := st.Candidates()
+	if !ok || candidateRatio != 2 || !reflect.DeepEqual(retainedCandidates, candidates) {
+		t.Fatal("window-only layer changed the shared candidate registry")
+	}
+	got, err := m.v41AttentionIndexList(later, &v41ForwardState{attn: st}, nil, hd, len(pooled), 2)
+	if err != nil || !reflect.DeepEqual(got, []int32{0, 1, 1, 0}) {
+		t.Fatalf("later reader did not reuse the surviving selection: %v, %v", got, err)
+	}
+}
+
 // TestV41AttentionUnimplementedRatioFailsClosed witnesses the fail-closed
 // discipline: a compress ratio the reduced assembly cannot represent as a V4.1
 // CED/CSA2 contraction must refuse with a typed error wrapping
@@ -286,7 +367,7 @@ func TestV41AttentionSharedSourceResolution(t *testing.T) {
 // to the generic per-layer Q/K/V attention.
 func TestV41AttentionUnimplementedRatioFailsClosed(t *testing.T) {
 	if !v41AttentionRatioImplemented(2) || !v41AttentionRatioImplemented(0) || !v41AttentionRatioImplemented(1) {
-		t.Fatal("the published V4.1 regimes 0/1/2 must be implemented")
+		t.Fatal("the plan/contraction primitives must represent the published ratios 0/1/2")
 	}
 	for _, ratio := range []int{3, 5, 100, 128, 4096} {
 		if v41AttentionRatioImplemented(ratio) {
@@ -349,7 +430,7 @@ func TestV41AttentionPrefillStepDeterministic(t *testing.T) {
 }
 
 // TestV41AttentionSourcePublishReaderReuse is the end-to-end witness for the
-// shared KV/index publication pair on a 3-layer schedule: layer 0 is a
+// shared KV/index publication pair on a 2-layer schedule: layer 0 is a
 // compressed source, layer 1 is a reader. It drives the exact seam functions
 // the forward runs — v41AttentionSourceUpdates (the source's publication) and
 // v41AttentionIndexList (the reader's reuse) — through a real
@@ -359,7 +440,7 @@ func TestV41AttentionPrefillStepDeterministic(t *testing.T) {
 func TestV41AttentionSourcePublishReaderReuse(t *testing.T) {
 	cfg := v41AttentionCompressedConfig(t)
 	cfg.NumLayers = 2
-	cfg.DeepSeekV41.CompressRatios = []int{2, 0}
+	cfg.DeepSeekV41.CompressRatios = []int{2, 2}
 	cfg.DeepSeekV41.KVSourceLayerIDs = []int{0}
 	cfg.DeepSeekV41.IndexSourceLayerIDs = []int{0}
 	// A model shell is enough: these seam functions read only cfg and the state.
