@@ -606,7 +606,7 @@ func registerDarwinLaunchdAgent(stdout, stderr io.Writer, fakBin, root string, i
 
 	argsXML := ""
 	for _, a := range args {
-		argsXML += fmt.Sprintf("      <string>%s</string>\n", a)
+		argsXML += fmt.Sprintf("      <string>%s</string>\n", nodeXMLEscape(a))
 	}
 
 	secs := int64(interval.Seconds())
