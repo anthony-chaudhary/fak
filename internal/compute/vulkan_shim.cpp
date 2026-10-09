@@ -268,7 +268,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -290,7 +290,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
         return g_dp.otherSwiGLU;
     case K_ADD: case K_ADD_BIAS:
         return g_dp.otherAdd;
-    case K_ATTENTION: case K_QWEN35_CAUSAL_ATTENTION_PANEL:
+    case K_ATTENTION: case K_QWEN35_CAUSAL_ATTENTION_PANEL: case K_V41_SHARED_ATTENTION:
         return g_dp.otherAttention;
     case K_ARGMAX: case K_ARGMAX_PAIRS:
         return g_dp.otherArgmax;
@@ -346,6 +346,7 @@ int g_have_q8 = 0;
 int g_have_qwen35_gdn_q8_in_proj = 0;
 // Mandatory in a current build; published only after complete initialization.
 int g_have_v41_tail_rope_qk = 0;
+int g_have_v41_shared_attention = 0;
 // Fixed-size GLM KDA kernels require an explicitly requested 32-lane subgroup.
 // A local size of 128 alone is not a Wave32 contract: RADV may otherwise choose Wave64.
 int g_have_glm_kda_wave32 = 0;
@@ -1190,7 +1191,7 @@ void recordDispatchBarrier(VkCommandBuffer cmd, int ordinal) {
 // (kernel id, groupsX, groupsY) shape key and printed to stderr every
 // FAK_VULKAN_TIMESTAMP_PROFILE_EVERY batches (default 32). Unset, the recorder emits no
 // query commands and the recorded command stream is byte-identical to the unprofiled one.
-const char* const kKernelNames[K_COUNT] = {
+const char* const kKernelNames[] = {
     "matmul", "matmul_add", "matmul_argmax", "matmul_argmax_blocks", "matmul2", "matmul3",
     "rmsnorm", "rmsnorm_matmul", "rmsnorm_matmul2", "rmsnorm_matmul3", "rmsnorm_matmul_argmax_blocks",
     "rope", "swiglu", "swiglu_matmul_add", "add", "add_bias", "attention", "argmax", "argmax_pairs",
@@ -1201,7 +1202,7 @@ const char* const kKernelNames[K_COUNT] = {
     "q6k_matmul", "q5k_matmul", "q3k_matmul", "rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add", "q2k_matmul",
     "rmsnorm_q2k_matmul2", "qwen35_split_qg_panel", "qwen35_partial_rope_panel",
     "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
-    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk",
+    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -1612,8 +1613,137 @@ bool v41TailRoPEABI(const std::vector<char>& code) {
     return seenBindings == 31;
 }
 
+// Narrow fixed attention ABI/NoContraction check, not a receipt verifier or
+// full SPIR-V semantic validator. The source-pinned V4 bundle is a separate gate.
+bool v41SharedAttentionABI(const std::vector<char>& code) {
+    if (code.size() < 20 || code.size() % 4 != 0) return false;
+    std::vector<uint32_t> w(code.size() / 4);
+    memcpy(w.data(), code.data(), code.size());
+    if (w[0] != 0x07230203 || w[3] == 0 || w[4] != 0) return false;
+    const uint32_t bound = w[3];
+    const uint32_t typeInt = 21, typeFloat = 22, typeRuntimeArray = 29;
+    const uint32_t typeStruct = 30, typePointer = 32, variable = 59;
+    const uint32_t block = 2, arrayStride = 6, binding = 33, descriptorSet = 34;
+    const uint32_t offset = 35, noContraction = 42, pushConstant = 9, storageBuffer = 12;
+    std::unordered_map<uint32_t, std::vector<uint32_t>> defs;
+    std::unordered_map<uint64_t, uint32_t> decorations, memberOffsets;
+    std::unordered_map<uint64_t, bool> memberAccess;
+    std::vector<uint32_t> buffers, floatResults, expImports;
+    uint32_t glslImport = 0;
+    size_t glslImportCount = 0;
+    uint32_t push = 0, entry = 0, localEntry = 0;
+    size_t pushCount = 0, entryCount = 0, localCount = 0;
+    auto validID = [bound](uint32_t id) { return id != 0 && id < bound; };
+    auto key = [](uint32_t id, uint32_t kind) { return (uint64_t(id) << 32) | kind; };
+    for (size_t p = 5; p < w.size();) {
+        const uint32_t count = w[p] >> 16, op = w[p] & 0xffff;
+        if (count == 0 || count > w.size() - p) return false;
+        const uint32_t* a = w.data() + p;
+        if (op == typeInt || op == typeFloat || op == typeRuntimeArray ||
+            op == typeStruct || op == typePointer || op == variable) {
+            if ((op == typeInt && count != 4) || (op == typeFloat && count != 3) ||
+                (op == typeRuntimeArray && count != 3) || (op == typeStruct && count < 2) ||
+                (op == typePointer && count != 4) || (op == variable && count != 4 && count != 5)) return false;
+            const uint32_t id = a[op == variable ? 2 : 1];
+            if (!validID(id) || !defs.emplace(id, std::vector<uint32_t>(a, a + count)).second) return false;
+            if (op == variable) {
+                if (!validID(a[1])) return false;
+                if (a[3] == pushConstant) { push = a[1]; ++pushCount; }
+                else if (a[3] == storageBuffer) buffers.push_back(id);
+                else if (a[3] == 0 || a[3] == 2) return false; // no alternate descriptor classes
+            }
+        } else if (op == 71) { // OpDecorate
+            if (count < 3 || !validID(a[1])) return false;
+            const uint32_t kind = a[2];
+            if (kind == 0 || kind == 40) return false; // RelaxedPrecision / FPFastMathMode
+            if (kind == block || kind == noContraction) {
+                if (count != 3 || !decorations.emplace(key(a[1], kind), 0).second) return false;
+            } else if (kind == arrayStride || kind == binding || kind == descriptorSet) {
+                if (count != 4 || !decorations.emplace(key(a[1], kind), a[3]).second) return false;
+            }
+        } else if (op == 72) { // OpMemberDecorate
+            if (count < 4 || !validID(a[1])) return false;
+            if (a[3] == offset) {
+                if (count != 5 || !memberOffsets.emplace(key(a[1], a[2]), a[4]).second) return false;
+            } else if (a[3] == 24 || a[3] == 25) { // NonWritable / NonReadable
+                if (count != 4 || a[2] != 0 || !memberAccess.emplace(key(a[1], a[3]), true).second) return false;
+            }
+        } else if (op == 15) { // one GLCompute entry, named main
+            if (count < 5 || a[1] != 5 || !validID(a[2]) || a[3] != 0x6e69616d || a[4] != 0) return false;
+            entry = a[2]; ++entryCount;
+        } else if (op == 16 && count >= 3 && a[2] == 17) { // LocalSize
+            if (count != 6 || a[3] != 1 || a[4] != 1 || a[5] != 1) return false;
+            localEntry = a[1]; ++localCount;
+        } else if (op == 129 || op == 131 || op == 133 || op == 136) { // scalar FAdd/FSub/FMul/FDiv
+            if (count != 5 || !validID(a[2])) return false;
+            floatResults.push_back(a[2]);
+        } else if (op == 11) { // one explicit GLSL.std.450 import
+            if (count != 6 || !validID(a[1]) || a[2] != 0x4c534c47 ||
+                a[3] != 0x6474732e || a[4] != 0x3035342e || a[5] != 0) return false;
+            glslImport = a[1]; ++glslImportCount;
+        } else if (op == 12) { // only Exp; never extended Fma or reductions
+            if (count != 6 || !validID(a[1]) || !validID(a[2]) || !validID(a[3]) ||
+                a[4] != 27 || !validID(a[5])) return false;
+            expImports.push_back(a[3]);
+        }
+        p += count;
+    }
+    auto definition = [&](uint32_t id, uint32_t op, size_t size) -> const std::vector<uint32_t>* {
+        auto it = defs.find(id);
+        return it != defs.end() && (it->second[0] & 0xffff) == op && it->second.size() == size ? &it->second : nullptr;
+    };
+    auto decorated = [&](uint32_t id, uint32_t kind, uint32_t value) {
+        auto it = decorations.find(key(id, kind));
+        return it != decorations.end() && it->second == value;
+    };
+    auto atOffset = [&](uint32_t id, uint32_t member, uint32_t value) {
+        auto it = memberOffsets.find(key(id, member));
+        return it != memberOffsets.end() && it->second == value;
+    };
+    if (entryCount != 1 || localCount != 1 || entry != localEntry || pushCount != 1 || buffers.size() != 5 || floatResults.size() < 6 ||
+        glslImportCount != 1 || expImports.empty()) return false;
+    for (uint32_t id : expImports) if (id != glslImport) return false;
+    for (uint32_t id : floatResults) if (!decorated(id, noContraction, 0)) return false;
+    const auto* pointer = definition(push, typePointer, 4);
+    if (!pointer || (*pointer)[2] != pushConstant) return false;
+    const uint32_t pushStruct = (*pointer)[3];
+    const auto* structure = definition(pushStruct, typeStruct, 8);
+    if (!structure || !decorated(pushStruct, block, 0)) return false;
+    for (uint32_t m = 0; m < 5; ++m) {
+        const auto* integer = definition((*structure)[m + 2], typeInt, 4);
+        if (!integer || (*integer)[2] != 32 || (*integer)[3] != 1 || !atOffset(pushStruct, m, m * 4)) return false;
+    }
+    const auto* scale = definition((*structure)[7], typeFloat, 3);
+    if (!scale || (*scale)[2] != 32 || !atOffset(pushStruct, 5, 20)) return false;
+    uint32_t seenBindings = 0;
+    for (uint32_t id : buffers) {
+        const auto* var = definition(id, variable, 4);
+        auto bind = decorations.find(key(id, binding));
+        if (!var || bind == decorations.end() || bind->second >= 5 || !decorated(id, descriptorSet, 0)) return false;
+        const uint32_t slot = bind->second, mask = 1u << slot;
+        if (seenBindings & mask) return false;
+        seenBindings |= mask;
+        const auto* ptr = definition((*var)[1], typePointer, 4);
+        if (!ptr || (*ptr)[2] != storageBuffer) return false;
+        const uint32_t structID = (*ptr)[3];
+        const auto* st = definition(structID, typeStruct, 3);
+        if (!st || !decorated(structID, block, 0) || !atOffset(structID, 0, 0)) return false;
+        const auto* array = definition((*st)[2], typeRuntimeArray, 3);
+        if (!array || !decorated((*st)[2], arrayStride, 4)) return false;
+        const auto* scalar = definition((*array)[2], slot == 4 ? typeInt : typeFloat, slot == 4 ? 4 : 3);
+        if (!scalar || (*scalar)[2] != 32 || (slot == 4 && (*scalar)[3] != 0)) return false;
+        const bool nonWritable = memberAccess.count(key(structID, 24)) != 0;
+        const bool nonReadable = memberAccess.count(key(structID, 25)) != 0;
+        // Q/KV/sink are read-only; output is read/write for slot-ordered
+        // accumulation; status is write-only and read back by the host.
+        if (nonWritable != (slot < 3) || nonReadable != (slot == 4)) return false;
+    }
+    return seenBindings == 31;
+}
+
 bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsize, uint32_t subgroupSize = 0) {
-    std::vector<char> code = &k == &g_kern[K_V41_TAIL_ROPE_QK] ? readV41TailRoPEModule(spvPath) : readFile(spvPath);
+    const bool fixedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_SHARED_ATTENTION];
+    std::vector<char> code = fixedV41 ? readV41TailRoPEModule(spvPath) : readFile(spvPath);
     if (code.empty()) return false;
     if (&k == &g_kern[K_SWIGLU] && !swigluPushConstantABI(code)) {
         fprintf(stderr, "fak-vulkan: incompatible SwiGLU push-constant ABI in %s\n", spvPath.c_str());
@@ -1622,6 +1752,11 @@ bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsiz
     if (&k == &g_kern[K_V41_TAIL_ROPE_QK] &&
         (nbuf != 5 || pcsize != 12 || !v41TailRoPEABI(code))) {
         fprintf(stderr, "fak-vulkan: incompatible V4.1 tail RoPE module in %s\n", spvPath.c_str());
+        return false;
+    }
+    if (&k == &g_kern[K_V41_SHARED_ATTENTION] &&
+        (nbuf != 5 || pcsize != 24 || !v41SharedAttentionABI(code))) {
+        fprintf(stderr, "fak-vulkan: incompatible V4.1 shared attention module in %s\n", spvPath.c_str());
         return false;
     }
     VkShaderModuleCreateInfo smi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
@@ -1668,7 +1803,7 @@ bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsiz
     return true;
 }
 
-DescriptorSetRecord acquireDescriptorSet(Kernel& k) {
+DescriptorSetRecord acquireDescriptorSet(Kernel& k, bool checkedV41 = false) {
     auto& bucket = g_descSetPool[k.dsl];
     if (!bucket.empty()) {
         DescriptorSetRecord rec = bucket.back();
@@ -1683,7 +1818,14 @@ DescriptorSetRecord acquireDescriptorSet(Kernel& k) {
     DescriptorSetRecord rec{};
     rec.layout = k.dsl;
     VkDescriptorSet ds = VK_NULL_HANDLE;
-    if (vkAllocateDescriptorSets(g_dev, &dsi, &ds) != VK_SUCCESS) {
+    const VkResult allocated = vkAllocateDescriptorSets(g_dev, &dsi, &ds);
+    if (allocated != VK_SUCCESS) {
+        if (checkedV41) {
+            g_submissionStatus = allocated < VK_SUCCESS ? allocated : VK_ERROR_UNKNOWN;
+            // Device loss may affect previously recorded/submitted work. Keep
+            // all owners, command buffers and pools quarantined for this process.
+            if (allocated == VK_ERROR_DEVICE_LOST) g_v41SubmissionPendingFailure = true;
+        }
         fprintf(stderr, "fak-vulkan: descriptor alloc failed\n");
         return rec;
     }
@@ -1698,7 +1840,7 @@ void recycleDescriptorSet(DescriptorSetRecord rec) {
 // dispatch: bind `bufs` (nbuf of them) + push constants, run groupsX*groupsY workgroups.
 bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1) {
     if (g_v41SubmissionPendingFailure) return false;
-    const bool checkedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK];
+    const bool checkedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_SHARED_ATTENTION];
     if (k.nbuf > MAX_DISPATCH_BUFS) {
         fprintf(stderr, "fak-vulkan: dispatch skipped; kernel has %d buffers, max %d\n",
                 k.nbuf, MAX_DISPATCH_BUFS);
@@ -1710,7 +1852,7 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
             return false;
         }
     }
-    DescriptorSetRecord rec = acquireDescriptorSet(k);
+    DescriptorSetRecord rec = acquireDescriptorSet(k, checkedV41);
     if (!rec.set) {
         return false;
     }
@@ -2064,6 +2206,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // the poisoned context and its loaded capability bound until process exit.
     if (g_v41SubmissionPendingFailure) return 9;
     g_have_v41_tail_rope_qk = 0;
+    g_have_v41_shared_attention = 0;
     g_have_qwen35_gdn_q8_in_proj = 0;
     g_have_q6k_matmul = 0;
     g_have_q5k_matmul = 0;
@@ -2330,6 +2473,9 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // A missing or incompatible V4.1 module is a broken current bundle, not
     // an optional capability miss. Receipt verification is a pre-launch gate.
     ok &= buildKernel(g_kern[K_V41_TAIL_ROPE_QK], P("v41_tail_rope_qk.spv"), 5, 3 * sizeof(int));
+    // Archive and complete61 shader bundle cut over and roll back together.
+    // Never silently substitute legacy59/60 when this required module fails.
+    ok &= buildKernel(g_kern[K_V41_SHARED_ATTENTION], P("v41_shared_attention.spv"), 5, 24);
     ok &= buildKernel(g_kern[K_SWIGLU],    P("swiglu.spv"),    3, sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_SWIGLU_MATMUL_ADD], P("swiglu_matmul_add.spv"), 4, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_ADD],       P("add.spv"),       2, sizeof(int));
@@ -2434,6 +2580,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
 
     g_ready = true;
     g_have_v41_tail_rope_qk = 1;
+    g_have_v41_shared_attention = 1;
     // One per-geometry device self-check, before the first forward and never
     // inside one. Its verdict is cached and read by the verify-width route.
     gdnVerifySelfCheck();
@@ -2629,6 +2776,44 @@ int fvk_d2h(void* h, const void* d, size_t bytes) {
     if (g_batching) batchFlush();
     if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
     return copyDeviceToHost(h, B((void*)d), bytes);
+}
+
+// V4.1 status/output readback deliberately avoids the generic aborting command
+// helpers. The shared staging allocation and transfer counters remain canonical.
+int fvk_v41_d2h(void* h, const void* d, size_t bytes) {
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (!g_ready || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return VK_ERROR_INITIALIZATION_FAILED;
+    Buffer* src = B(d);
+    if (!h || !src || src->buf == VK_NULL_HANDLE || src->mem == VK_NULL_HANDLE ||
+        bytes == 0 || bytes > src->bytes) return VK_ERROR_INITIALIZATION_FAILED;
+    if (g_batching) {
+        // A marked result may be read while another batch is open. Its host
+        // fence must still use the checked path, even if no V4.1 op was added.
+        g_batchHasV41 = true;
+        batchFlush();
+    }
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    int stagingStatus = VK_SUCCESS;
+    Buffer* stage = stagingBuffer(bytes, &stagingStatus);
+    if (!stage) {
+        if (stagingStatus == VK_ERROR_DEVICE_LOST) {
+            g_submissionStatus = VK_ERROR_DEVICE_LOST;
+            g_v41SubmissionPendingFailure = true;
+        }
+        return stagingStatus == VK_SUCCESS ? FVK_D2H_STAGING_ALLOCATION_FAILED : stagingStatus;
+    }
+    VkCommandBuffer cmd = v41BeginCmdChecked();
+    if (cmd == VK_NULL_HANDLE) return (int)g_submissionStatus;
+    recordComputeBarrier(cmd); // shader writes must be visible to transfer reads
+    VkBufferCopy region{0, 0, bytes};
+    vkCmdCopyBuffer(cmd, src->buf, stage->buf, 1, &region);
+    dpOneShot(g_dp.oneShotD2H);
+    if (!v41EndSubmitWaitChecked(cmd, true)) return (int)g_submissionStatus;
+    memcpy(h, g_stageMapped, bytes);
+    if (!checkedCounterAdd(g_d2hCount, 1) || !checkedCounterAdd(g_d2hBytes, bytes)) {
+        g_transferCountersValid = false;
+    }
+    return VK_SUCCESS;
 }
 
 void fvk_debug_d2h_staging_failure_once(int enabled) {
@@ -3391,6 +3576,60 @@ int fvk_v41_tail_rope_qk_f32(const void* dQ, const void* dKV,
     struct { int heads, headDim, rotaryDim; } pc{heads, headDim, rotaryDim};
     static_assert(sizeof(pc) == 12, "V4.1 tail RoPE push ABI must be three int32 values");
     if (!dispatch(g_kern[K_V41_TAIL_ROPE_QK], bufs, &pc, sizeof(pc), uint32_t(groups))) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
+int fvk_have_v41_shared_attention(void) {
+    return g_ready && g_have_v41_shared_attention && g_kern[K_V41_SHARED_ATTENTION].pipe != VK_NULL_HANDLE;
+}
+
+int fvk_v41_shared_attention_f32(const void* dQ, const void* dSharedKV,
+                                 const void* dSink, void* dOut, void* dStatus,
+                                 int heads, int headDim, int selectedRows,
+                                 int mode, int hasSink, float scale) {
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_shared_attention()) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (heads <= 0 || headDim <= 0 || selectedRows <= 0 ||
+        (mode != 0 && mode != 1) || (hasSink != 0 && hasSink != 1) ||
+        !std::isfinite(scale) || scale == 0.0f) return 2;
+    const uint64_t qCount = uint64_t(heads) * uint64_t(headDim);
+    const uint64_t kvCount = uint64_t(selectedRows) * uint64_t(headDim);
+    const uint64_t statusWords = uint64_t(heads) * 4u;
+    if (qCount > INT32_MAX || kvCount > INT32_MAX || statusWords > UINT32_MAX ||
+        uint64_t(heads) > g_maxComputeWorkGroupCountX) return 2;
+    Buffer* bufs[5] = {B(dQ), B(dSharedKV), B(dSink), B(dOut), B(dStatus)};
+    const uint64_t counts[5] = {qCount, kvCount, hasSink ? uint64_t(heads) : 1u, qCount, statusWords};
+    for (int i = 0; i < 5; ++i) {
+        if (!bufs[i] || bufs[i]->buf == VK_NULL_HANDLE || bufs[i]->mem == VK_NULL_HANDLE ||
+            counts[i] > std::numeric_limits<size_t>::max() / sizeof(uint32_t) ||
+            counts[i] * sizeof(uint32_t) != bufs[i]->bytes ||
+            bufs[i]->bytes > std::numeric_limits<VkDeviceSize>::max() - bufs[i]->memoryOffset) return 2;
+    }
+    auto aliases = [](const Buffer* a, const Buffer* b) {
+        return a == b || a->buf == b->buf ||
+            (a->mem == b->mem && a->memoryOffset < b->memoryOffset + b->bytes &&
+             b->memoryOffset < a->memoryOffset + a->bytes);
+    };
+    for (int out = 3; out <= 4; ++out) {
+        for (int i = 0; i < 5; ++i) if (i != out && aliases(bufs[out], bufs[i])) return 2;
+    }
+    struct Push {
+        int32_t heads, headDim, selectedRows, mode, hasSink;
+        float scale;
+    } pc{heads, headDim, selectedRows, mode, hasSink, scale};
+    static_assert(sizeof(int) == 4 && sizeof(float) == 4 && sizeof(Push) == 24,
+                  "V4.1 attention push ABI must be five int32 values and one float32");
+    static_assert(offsetof(Push, heads) == 0 && offsetof(Push, headDim) == 4 &&
+                  offsetof(Push, selectedRows) == 8 && offsetof(Push, mode) == 12 &&
+                  offsetof(Push, hasSink) == 16 && offsetof(Push, scale) == 20,
+                  "V4.1 attention push ABI member offsets must be fixed");
+    // One scalar invocation per head initializes all four status words, then
+    // owns that head's ordered first fault. There is no atomic winner race.
+    if (!dispatch(g_kern[K_V41_SHARED_ATTENTION], bufs, &pc, sizeof(pc), uint32_t(heads))) {
         return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
     }
     return (int)g_submissionStatus;

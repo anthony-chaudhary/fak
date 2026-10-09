@@ -61,6 +61,11 @@ void fvk_h2d(void *d, const void *h, size_t bytes);
  * status identifies an otherwise-unattributed staging allocation failure. */
 #define FVK_D2H_STAGING_ALLOCATION_FAILED 1
 int fvk_d2h(void *h, const void *d, size_t bytes);
+/* V4.1-only checked D2H: flushes any batch through the checked submit path,
+ * records a shader/transfer memory barrier, then checks allocation/begin/end/
+ * submit/wait. A failed submit or wait quarantines resources until process exit.
+ * Used for attention status and that operation's fresh device output only. */
+int fvk_v41_d2h(void *h, const void *d, size_t bytes);
 /* One-shot deterministic failure injection for backend tests. */
 void fvk_debug_d2h_staging_failure_once(int enabled);
 void fvk_d2d(void *dst, const void *src, size_t bytes);
@@ -253,12 +258,33 @@ void fvk_rope_f32(void *dX, int pos, int nHeads, int headDim, double theta);
  * negative VkResult of an observed submission failure. Pending batches still
  * require checked submission/readback. Handles must be live backend buffers.
  * New native builds require the dedicated module; absence/ABI failure refuses
- * initialization. Deploy only a coupled rebuilt archive and verified V3/60
+ * initialization. Deploy only a coupled rebuilt archive and verified V4/complete61
  * bundle. fvk_init itself does not verify the external build receipt. */
 int fvk_have_v41_tail_rope_qk(void);
 int fvk_v41_tail_rope_qk_f32(const void *dQ, const void *dKV,
                             void *dQOut, void *dKVOut, const void *dSinCos,
                             int heads, int headDim, int rotaryDim);
+
+/* Shared-latent sink attention for one query position. Five storage bindings:
+ * Q[heads,headDim], sharedKV[selectedRows,headDim], sink[heads] (or live [1]
+ * dummy when hasSink=0), out[heads,headDim], status[heads,4] uint32. All buffer
+ * extents must be exact; out/status are disjoint from each other and inputs.
+ * Push ABI: int32 heads, headDim, selectedRows, mode, hasSink; float32 scale.
+ * Modes: plain=0, compressed=1. Status fields: stage, selectedSlotPlusOne,
+ * elementPlusOne, offendingValueBits; stage 0 success, 1 score, 2 exp term,
+ * 3 denominator, 4 weight, 5 value accumulator, 6 output. Zero indices mean -1.
+ * Each head's record is initialized on dispatch. Positive return codes match
+ * tail RoPE above; negative returns preserve checked submission VkResult.
+ * Dispatch success is provisional until status and output are checked/read.
+ * The module is mandatory in the rebuilt V4/complete61 archive/bundle pair;
+ * absence/corruption/ABI mismatch fails initialization, with no legacy fallback.
+ * Source-pinned V4 receipt verification is an explicit pre-launch gate, not
+ * an automatic receipt check performed by fvk_init. */
+int fvk_have_v41_shared_attention(void);
+int fvk_v41_shared_attention_f32(const void *dQ, const void *dSharedKV,
+                                 const void *dSink, void *dOut, void *dStatus,
+                                 int heads, int headDim, int selectedRows,
+                                 int mode, int hasSink, float scale);
 
 /* SwiGLU: y = silu(g) * u, elementwise, length n. */
 void fvk_swiglu_f32(const void *dG, const void *dU, void *dY, int n);

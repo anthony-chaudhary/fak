@@ -91,6 +91,7 @@ func TestVulkanReceiptV3CurrentRegistryBoundary(t *testing.T) {
 			}
 		}
 	})
+	// Windows tracks the current builder; historical V3 acceptance above remains frozen.
 	t.Run("Windows exact registry parity", func(t *testing.T) {
 		raw, err := os.ReadFile(filepath.Join("..", "compute", "build_vulkan.ps1"))
 		if err != nil {
@@ -105,7 +106,7 @@ func TestVulkanReceiptV3CurrentRegistryBoundary(t *testing.T) {
 		for _, match := range regexp.MustCompile(`"([a-z0-9_]+)"`).FindAllStringSubmatch(block, -1) {
 			windows = append(windows, match[1])
 		}
-		if err := validateCurrentVulkanRegistry(windows); err != nil {
+		if err := validateCurrentVulkanRegistryV4(windows); err != nil {
 			t.Fatalf("Windows and native Go current registry differ: %v", err)
 		}
 	})
