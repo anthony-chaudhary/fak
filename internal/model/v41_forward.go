@@ -850,6 +850,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			if err != nil {
 				return err
 			}
+			v41InverseAttentionOutputInPlace(cfg, l, t, o, nH, hd)
 			projected, err := projectOutput(o)
 			if err != nil {
 				return v41StageErr(v41StageAttention, l, err)
@@ -881,6 +882,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)
 		}
+		v41InverseAttentionOutputInPlace(cfg, l, t, o, nH, hd)
 		projected, err := projectOutput(o)
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)

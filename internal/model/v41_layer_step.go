@@ -318,6 +318,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
 	}
+	v41InverseAttentionOutputInPlace(cfg, l, pos, o, nH, hd)
 	attnOut, err := projectOutput(o)
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
@@ -691,6 +692,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
 	}
+	v41InverseAttentionOutputInPlace(cfg, l, pos, o, nH, hd)
 	attnProjected, err := projectOutput(o)
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)

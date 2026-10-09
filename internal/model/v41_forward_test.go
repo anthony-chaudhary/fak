@@ -260,6 +260,7 @@ func v41OracleForward(t *testing.T, m *Model, ids []int) [][]float32 {
 					}
 				}
 			}
+			v41OracleInverseOutput(t, cfg, l, tt, o)
 			attnOut[tt] = v41OracleGroupedOutput(o, woA, woB, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
 		}
 
@@ -1042,6 +1043,7 @@ func v41OracleEngramForward(t *testing.T, m *Model, layout V41EngramLayout, ids 
 					}
 				}
 			}
+			v41OracleInverseOutput(t, cfg, l, tt, o)
 			attnOut[tt] = v41OracleGroupedOutput(o, woA, woB, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
 		}
 

@@ -317,6 +317,7 @@ func v41OracleForwardLatentNormHidden(t *testing.T, m *Model, ids []int, opts v4
 					}
 				}
 			}
+			v41OracleInverseOutput(t, cfg, l, tt, o)
 			attnOut[tt] = v41OracleGroupedOutput(o, woA, woB, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
 		}
 
@@ -438,6 +439,27 @@ func v41OracleRopeTable(t *testing.T, cfg Config, layer, p int) (cos, sin []floa
 		sin[j] = sv
 	}
 	return cos, sin
+}
+
+// v41OracleInverseOutput transcribes the conjugate complex multiply at pinned
+// model.py:781, after attention contraction and before the grouped projection.
+// It uses the independent table oracle and explicit inverse equations, never
+// the production inverse helper or a production rotation routine.
+func v41OracleInverseOutput(t *testing.T, cfg Config, layer, pos int, out []float32) {
+	t.Helper()
+	if len(out) != cfg.NumHeads*cfg.HeadDim {
+		t.Fatal("inverse oracle output width does not match query heads")
+	}
+	cos, sin := v41OracleRopeTable(t, cfg, layer, pos)
+	for head := 0; head < cfg.NumHeads; head++ {
+		tail := (head+1)*cfg.HeadDim - cfg.QKRopeHeadDim
+		for pair := 0; pair < cfg.QKRopeHeadDim/2; pair++ {
+			i := tail + 2*pair
+			a, b := out[i], out[i+1]
+			out[i] = float32(a*cos[pair]) + float32(b*sin[pair])
+			out[i+1] = float32(b*cos[pair]) - float32(a*sin[pair])
+		}
+	}
 }
 
 // v41OracleRopeTailInterleaved rotates only the last ropeDim components of hv in
