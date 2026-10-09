@@ -98,6 +98,22 @@ typedef struct fvk_buffer_backing_info {
  * calls. Indices are local to the current selected device, not persistent IDs. */
 int fvk_buffer_backing(const void *d, fvk_buffer_backing_info *out);
 
+/* Observe the one shim-global, persistently mapped ordinary H2D/D2H stage.
+ * Returns 1 for a coherent empty owner (buffer_bytes = 0) or a retained stage;
+ * returns 0 for uninitialized, inconsistent or unavailable ownership/backing.
+ * Both outputs are required; supplied outputs are cleared even on failure.
+ * buffer_bytes is the retained nominal buffer length, not a transfer length or
+ * VkDeviceMemory reservation. No handle or persistent allocation ID is exposed.
+ * The caller must serialize with all shim operations, including growth and init,
+ * using the same owner lock. Valid only within the current initialized device
+ * lifetime: no generation token validates an owner across shim reinitialization.
+ * This reads host metadata only; it performs no Vulkan call or owner mutation,
+ * does not flush a pending batch, and does not establish device quiescence.
+ * It excludes restore/Q4_K staging, scratch and pools, and proves neither device
+ * health nor disjoint physical memory pools. New callers require a rebuilt shim;
+ * the existing fvk_buffer_backing_info layout and entry points are unchanged. */
+int fvk_transfer_stage_backing(uint64_t *buffer_bytes, fvk_buffer_backing_info *out);
+
 /* y[P,out] = x[P,in] @ W[out,in]^T   (all row-major f32). */
 void fvk_matmul_f32(const void *dW, const void *dX, void *dY, int out, int in, int P);
 /* first argmax of x[1,in] @ W[out,in]^T without materializing the logits vector. */

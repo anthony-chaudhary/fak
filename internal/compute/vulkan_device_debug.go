@@ -546,6 +546,54 @@ func vulkanQ4KStageBufferBackingsLocked(ptr unsafe.Pointer, bufferBytes int64, r
 	return []VulkanQ4KStageBufferBacking{{BufferBytes: uint64(bufferBytes), Backing: backing}}, true
 }
 
+// VulkanTransferStageBufferBacking describes the shim-global ordinary H2D/D2H
+// stage shared by both transfer directions. BufferBytes is its retained nominal
+// buffer length, not the last transfer or VkDeviceMemory reservation. Backing has
+// Part "data" and Chunk -1. The record provides no persistent allocation identity.
+type VulkanTransferStageBufferBacking struct {
+	BufferBytes uint64
+	Backing     VulkanBufferBacking
+}
+
+// VulkanTransferStageBufferBackings observes zero or one retained ordinary
+// transfer stage under vulkanMu, the same lock as stage reuse and growth. This
+// owner belongs to the process-global shim's selected device, not to the receiver
+// or either transfer direction separately. Do not count it once per receiver.
+// A coherent absent stage in an initialized shim is known-empty; an unavailable
+// shim, inconsistent owner or missing backing returns nil, false.
+//
+// The observation requires the current initialized device lifetime. The shim has
+// no generation token to validate ownership across reinitialization. Presence
+// does not prove recent use, contents or device health, and pool trim does not
+// retire this stage. It excludes tensors, Q4_K homes/staging, restore staging,
+// KV, GDN/other scratch and reusable pools. Separate queries are not an atomic
+// whole-backend inventory. Nominal lengths and type/heap flags cannot establish
+// physical-pool disjointness, reserved bytes, headroom or future placement.
+//
+// The query performs no Vulkan allocation, transfer, device-work fence or owner
+// mutation. It does not flush pending batches or establish device quiescence;
+// its result can allocate Go memory. Call outside hot token loops.
+// The additive C accessor requires libfakvulkan rebuilt from matching sources.
+func (v *vulkanBackend) VulkanTransferStageBufferBackings() ([]VulkanTransferStageBufferBacking, bool) {
+	if v == nil {
+		return nil, false
+	}
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	var bufferBytes C.uint64_t
+	var info C.fvk_buffer_backing_info
+	if C.fvk_transfer_stage_backing(&bufferBytes, &info) == 0 {
+		return nil, false
+	}
+	if bufferBytes == 0 {
+		return []VulkanTransferStageBufferBacking{}, true
+	}
+	return []VulkanTransferStageBufferBacking{{
+		BufferBytes: uint64(bufferBytes),
+		Backing:     vulkanBufferBackingFromInfo(info, "data", -1),
+	}}, true
+}
+
 // vulkanBufferBackingLocked requires vulkanMu and a live, owned handle. The shim
 // cannot validate an arbitrary or retired pointer; ownership supplies that proof.
 func vulkanBufferBackingLocked(ptr unsafe.Pointer, part string, chunk int) (VulkanBufferBacking, bool) {
@@ -553,6 +601,10 @@ func vulkanBufferBackingLocked(ptr unsafe.Pointer, part string, chunk int) (Vulk
 	if ptr == nil || C.fvk_buffer_backing(ptr, &info) == 0 {
 		return VulkanBufferBacking{}, false
 	}
+	return vulkanBufferBackingFromInfo(info, part, chunk), true
+}
+
+func vulkanBufferBackingFromInfo(info C.fvk_buffer_backing_info, part string, chunk int) VulkanBufferBacking {
 	return VulkanBufferBacking{
 		Part: part, Chunk: chunk,
 		RequestedPropertyFlags: uint32(info.requested_property_flags),
@@ -562,7 +614,7 @@ func vulkanBufferBackingLocked(ptr unsafe.Pointer, part string, chunk int) (Vulk
 		HeapFlags:              uint32(info.heap_flags),
 		HostVisibleFallback:    info.host_visible_fallback != 0,
 		WeightArenaBound:       info.weight_arena_bound != 0,
-	}, true
+	}
 }
 
 // VulkanQ4KHomeBufferBacking describes one backend-owned Q4_K dispatch home copy.

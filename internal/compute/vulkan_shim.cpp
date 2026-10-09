@@ -2695,6 +2695,22 @@ int fvk_buffer_backing(const void* d, fvk_buffer_backing_info* out) {
     return 1;
 }
 
+int fvk_transfer_stage_backing(uint64_t* buffer_bytes, fvk_buffer_backing_info* out) {
+    if (buffer_bytes) *buffer_bytes = 0;
+    if (out) *out = {};
+    if (!buffer_bytes || !out || !g_ready || !g_dev) return 0;
+    if (!g_stage) return !g_stageMapped && g_stageCap == 0 ? 1 : 0;
+    if (!g_stageMapped || g_stageCap == 0 || g_stage->bytes != g_stageCap) return 0;
+
+    // Copy only after complete owner/backing validation. The caller's vulkanMu
+    // keeps stagingBuffer from retiring the private handle during this read.
+    fvk_buffer_backing_info backing{};
+    if (!fvk_buffer_backing(g_stage, &backing)) return 0;
+    *buffer_bytes = static_cast<uint64_t>(g_stageCap);
+    *out = backing;
+    return 1;
+}
+
 void fvk_trim_pool(void) {
     if (!g_dev) return;
     if (g_batching) batchFlush();
