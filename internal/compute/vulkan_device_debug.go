@@ -466,20 +466,11 @@ func (v *vulkanBackend) VulkanTensorBufferBackings(t Tensor) ([]VulkanBufferBack
 	}
 	var backings []VulkanBufferBacking
 	appendBacking := func(ptr unsafe.Pointer, part string, chunk int) bool {
-		var info C.fvk_buffer_backing_info
-		if ptr == nil || C.fvk_buffer_backing(ptr, &info) == 0 {
+		backing, ok := vulkanBufferBackingLocked(ptr, part, chunk)
+		if !ok {
 			return false
 		}
-		backings = append(backings, VulkanBufferBacking{
-			Part: part, Chunk: chunk,
-			RequestedPropertyFlags: uint32(info.requested_property_flags),
-			MemoryTypeIndex:        uint32(info.memory_type_index),
-			PropertyFlags:          uint32(info.property_flags),
-			HeapIndex:              uint32(info.heap_index),
-			HeapFlags:              uint32(info.heap_flags),
-			HostVisibleFallback:    info.host_visible_fallback != 0,
-			WeightArenaBound:       info.weight_arena_bound != 0,
-		})
+		backings = append(backings, backing)
 		return true
 	}
 	if len(b.q8Chunks) != 0 {
@@ -500,6 +491,86 @@ func (v *vulkanBackend) VulkanTensorBufferBackings(t Tensor) ([]VulkanBufferBack
 				return nil, false
 			}
 		}
+	}
+	return backings, true
+}
+
+// vulkanBufferBackingLocked requires vulkanMu and a live, owned handle. The shim
+// cannot validate an arbitrary or retired pointer; ownership supplies that proof.
+func vulkanBufferBackingLocked(ptr unsafe.Pointer, part string, chunk int) (VulkanBufferBacking, bool) {
+	var info C.fvk_buffer_backing_info
+	if ptr == nil || C.fvk_buffer_backing(ptr, &info) == 0 {
+		return VulkanBufferBacking{}, false
+	}
+	return VulkanBufferBacking{
+		Part: part, Chunk: chunk,
+		RequestedPropertyFlags: uint32(info.requested_property_flags),
+		MemoryTypeIndex:        uint32(info.memory_type_index),
+		PropertyFlags:          uint32(info.property_flags),
+		HeapIndex:              uint32(info.heap_index),
+		HeapFlags:              uint32(info.heap_flags),
+		HostVisibleFallback:    info.host_visible_fallback != 0,
+		WeightArenaBound:       info.weight_arena_bound != 0,
+	}, true
+}
+
+// VulkanQ4KHomeBufferBacking describes one backend-owned Q4_K dispatch home copy.
+// BufferBytes is its nominal buffer/copy length, not reserved VkDeviceMemory bytes.
+// Backing describes the home allocation itself, with Part "data" and Chunk -1.
+// Records have no persistent identity and must not be used to deduplicate memory.
+type VulkanQ4KHomeBufferBacking struct {
+	BufferBytes uint64
+	Backing     VulkanBufferBacking
+}
+
+// VulkanQ4KHomeBufferBackings observes all currently retained Q4_K home copies
+// under the same lock as their admission and retirement. Order is unspecified.
+// An empty cache returns an empty slice and true; an invalid owner record or
+// unavailable backing returns nil, false, never partial evidence.
+//
+// This is a backend-cache inventory, not a tensor-liveness or dispatch-use claim:
+// homes can outlive their source tensors, and the source keys are not dereferenced
+// or exported. It excludes Tensor.buf, shared staging, KV, scratch and pool storage.
+// Buffer lengths and type/heap flags do not prove allocation sizes, disjoint physical
+// pools, or capacity headroom. Arena and shared-heap deduplication remain unknown.
+// The query makes no Vulkan allocation, transfer, device-work fence or cache change;
+// constructing the result can allocate Go memory. Call outside hot token loops.
+func (v *vulkanBackend) VulkanQ4KHomeBufferBackings() ([]VulkanQ4KHomeBufferBacking, bool) {
+	if v == nil {
+		return nil, false
+	}
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return vulkanQ4KHomeBufferBackingsLocked(v.homes, v.homeBytes, vulkanBufferBackingLocked)
+}
+
+// The caller holds vulkanMu through every backing read so freeHomesLocked cannot
+// retire a handle in flight. The reader argument keeps enumeration testable without
+// passing synthetic handles to the C ABI or changing a process-global query hook.
+func vulkanQ4KHomeBufferBackingsLocked(homes map[vulkanQ4KHomeKey]vulkanQ4KHome, residentBytes int64, readBacking func(unsafe.Pointer, string, int) (VulkanBufferBacking, bool)) ([]VulkanQ4KHomeBufferBacking, bool) {
+	if residentBytes < 0 {
+		return nil, false
+	}
+	backings := make([]VulkanQ4KHomeBufferBacking, 0, len(homes))
+	seen := make(map[unsafe.Pointer]struct{}, len(homes))
+	var total int64
+	for key, home := range homes {
+		if key.src == nil || key.bytes <= 0 || home.ptr == nil || home.bytes != int64(key.bytes) || home.bytes > residentBytes-total {
+			return nil, false
+		}
+		if _, duplicate := seen[home.ptr]; duplicate {
+			return nil, false
+		}
+		seen[home.ptr] = struct{}{}
+		backing, ok := readBacking(home.ptr, "data", -1)
+		if !ok {
+			return nil, false
+		}
+		backings = append(backings, VulkanQ4KHomeBufferBacking{BufferBytes: uint64(home.bytes), Backing: backing})
+		total += home.bytes
+	}
+	if total != residentBytes {
+		return nil, false
 	}
 	return backings, true
 }
