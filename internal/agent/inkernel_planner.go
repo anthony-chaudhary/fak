@@ -1516,18 +1516,26 @@ func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []
 	return retryRes, retryErr
 }
 
+type inKernelObserverDeliveryContextKey struct{}
+
 // admitDeviceOOMRetry decides whether a failed first attempt may run once more, and
 // returns the error to surface when it may not. It is bounded (#13267): a cancelled
 // request, a coalesced lane that already crossed the shared decode pass (a replay would
 // fail closed with the fresh lane's nil error and book an empty completion as a
-// successful retry), and a non-OOM failure never retry; a retry is admitted only after
-// the idle pools were trimmed AND the request re-prices under the recovered capacity,
+// successful retry), an invoked decode observer, and a non-OOM failure never retry.
+// A retry is admitted only after idle pools were trimmed AND the request re-prices
+// under the recovered capacity,
 // otherwise it refuses typed instead of re-growing into the same wall.
 func (p *InKernelPlanner) admitDeviceOOMRetry(ctx context.Context, err error, promptTokens, maxNew int) (bool, error) {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return false, ctxErr
 	}
 	if req, ok := ctx.Value(inKernelCoalesceContextKey{}).(*inKernelCoalesceRequest); ok && req.decodePass.Load() > 0 {
+		return false, err
+	}
+	if delivered, _ := ctx.Value(inKernelObserverDeliveryContextKey{}).(*atomic.Bool); delivered != nil && delivered.Load() {
+		// Observer state and external output cannot be rewound by onRetry. Keep
+		// the original failure and do not trim or book a retry after delivery.
 		return false, err
 	}
 	if !p.prepareDeviceOOMRetry(err) {
@@ -1794,6 +1802,16 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		}
 	}
 	sp := applySampleOpts(opts...)
+	if observer := sp.DecodeTokenObserver; observer != nil {
+		delivered := &atomic.Bool{}
+		ctx = context.WithValue(ctx, inKernelObserverDeliveryContextKey{}, delivered)
+		sp.DecodeTokenObserver = func(piece, raw string) {
+			// Mark before calling out: an observer can mutate a stream projector,
+			// deliver output, or fail itself. None of those effects are rewindable.
+			delivered.Store(true)
+			observer(piece, raw)
+		}
+	}
 	if sp.NativeDecodeTokenIDs && !sp.DecodeTrace {
 		return nil, fmt.Errorf("native decode token IDs require a decode trace")
 	}

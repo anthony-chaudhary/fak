@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -624,4 +625,121 @@ func TestWarmCacheMeasurementSeparation(t *testing.T) {
 			t.Fatalf("absent accounting leaked into the wire receipt: %s", raw)
 		}
 	})
+}
+
+// observerOOMBackend retains the existing retry fixture's trim counters while
+// faulting either before observation or in the Step after a delivered token.
+type observerOOMBackend struct {
+	receiptOOMRetryBackend
+	shouldFail func() bool
+	fault      *compute.DeviceAllocError
+}
+
+func (b *observerOOMBackend) MatMul(w, x compute.Tensor) compute.Tensor {
+	if !b.failed && b.shouldFail() {
+		b.failed = true
+		panic(b.fault)
+	}
+	return b.Backend.MatMul(w, x)
+}
+
+// fak-test:runtime fast est=150ms lane=default
+func TestNativeOOMRetryStopsAfterObserverDelivery(t *testing.T) {
+	for _, mode := range []string{"observer-step", "stream-step", "observer-panic", "stream-panic", "stream-error", "hidden-stream", "before-observer", "buffered"} {
+		t.Run(mode, func(t *testing.T) {
+			tok := atomicThinkingTokenizer(t)
+			cfg := tinyConcurrencyConfig()
+			cfg.VocabSize = tok.Vocab()
+			m := model.NewSynthetic(cfg)
+			m.Quantize()
+			internalEmits, callbacks := 0, 0
+			fault := &compute.DeviceAllocError{Bytes: 4096, Site: "observer-delivery-test", Class: compute.MemoryScratchpad}
+			be := &observerOOMBackend{
+				receiptOOMRetryBackend: receiptOOMRetryBackend{Backend: compute.Default()},
+				shouldFail:             func() bool { return mode == "before-observer" || internalEmits > 0 },
+				fault:                  fault,
+			}
+			p := NewInKernelPlanner(m, tok, "observer-delivery", false, be, false)
+			p.cachePrimeEmitHook = func() { internalEmits++ }
+			body, _ := tok.Encode("x")
+			if mode == "hidden-stream" {
+				body, _ = tok.Encode(thinkOpen)
+			}
+			zero := 0.0
+			opts := []SampleOpt{WithMaxTokens(3), WithTemperature(&zero), WithLogitBias(map[int]float64{body[0]: 100})}
+			messages := []Message{{Role: RoleUser, Content: "retry"}}
+			sinkErr := errors.New("sink stopped")
+			var comp *Completion
+			var err error
+			if mode == "stream-step" || mode == "stream-panic" || mode == "stream-error" || mode == "hidden-stream" {
+				comp, err = p.CompleteStream(context.Background(), func(piece string) error {
+					callbacks++
+					if mode == "stream-panic" {
+						panic(fault)
+					}
+					if mode == "stream-error" {
+						return sinkErr
+					}
+					return nil
+				}, messages, nil, append(opts, WithPerTokenStream(true))...)
+			} else {
+				if mode != "buffered" {
+					opts = append(opts, WithDecodeTokenObserver(func(piece, raw string) {
+						if piece == "" {
+							return
+						}
+						callbacks++
+						if mode == "observer-panic" {
+							panic(fault)
+						}
+					}))
+				}
+				comp, err = p.Complete(context.Background(), messages, nil, opts...)
+			}
+			retryAllowed := mode == "before-observer" || mode == "buffered"
+			if retryAllowed {
+				if err != nil || comp == nil || comp.Usage.CompletionTokens != 3 || !be.failed || be.trimLarge != 1 || len(p.InKernelOOMRetryStats().Rows) != 1 {
+					t.Fatalf("safe retry changed: comp=%v err=%v failed=%v trim=%d stats=%+v", comp, err, be.failed, be.trimLarge, p.InKernelOOMRetryStats())
+				}
+				if mode == "before-observer" && callbacks != 3 {
+					t.Fatalf("pre-observer retry delivered %d callbacks, want 3", callbacks)
+				}
+				return
+			}
+			if mode == "stream-error" {
+				if err != sinkErr {
+					t.Fatalf("sink failure replaced: %v", err)
+				}
+			} else {
+				var oom *InKernelOOMError
+				if !errors.As(err, &oom) || oom.Site != fault.Site || oom.Bytes != fault.Bytes || oom.Class != fault.Class {
+					t.Fatalf("original typed OOM lost: %v", err)
+				}
+			}
+			wantCallbacks := 1
+			if mode == "hidden-stream" {
+				wantCallbacks = 0
+			}
+			if comp != nil || callbacks != wantCallbacks || internalEmits != 1 || be.recycled != 0 || be.trimmed != 0 || be.trimLarge != 0 || len(p.InKernelOOMRetryStats().Rows) != 0 {
+				t.Fatalf("observed request replayed/trimmed: comp=%v callbacks=%d internal=%d trim=%d/%d/%d stats=%+v", comp, callbacks, internalEmits, be.recycled, be.trimmed, be.trimLarge, p.InKernelOOMRetryStats())
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestObservedOOMRetryPreservesErrorAndCancellationPrecedence(t *testing.T) {
+	delivered := &atomic.Bool{}
+	delivered.Store(true)
+	ctx := context.WithValue(context.Background(), inKernelObserverDeliveryContextKey{}, delivered)
+	oom := &InKernelOOMError{Bytes: 4096, Site: "already-observed", Class: compute.MemoryScratchpad}
+	p := &InKernelPlanner{}
+	if retry, err := p.admitDeviceOOMRetry(ctx, oom, 0, 0); retry || err != error(oom) {
+		t.Fatalf("observed retry changed original error: retry=%v err=%v", retry, err)
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if retry, err := p.admitDeviceOOMRetry(canceled, oom, 0, 0); retry || err != context.Canceled {
+		t.Fatalf("cancellation precedence changed: retry=%v err=%v", retry, err)
+	}
 }
