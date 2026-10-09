@@ -362,13 +362,6 @@ func nativeAgentPostureName(posture adjudicator.Posture) (string, bool) {
 	}
 }
 
-// chatPlanner picks the planner the REPL drives: the offline mock (no upstream)
-// unless a --base-url is given, mirroring `fak agent` exactly so `fak chat`
-// runs with zero network by default.
-func chatPlanner(offline bool, baseURL, provider, model, apiKeyEnv, anthropicAuth string, codexAuth bool) agent.Planner {
-	return chatPlannerWithStderr(os.Stderr, offline, baseURL, provider, model, apiKeyEnv, anthropicAuth, codexAuth)
-}
-
 func chatPlannerWithStderr(stderr io.Writer, offline bool, baseURL, provider, model, apiKeyEnv, anthropicAuth string, codexAuth bool) agent.Planner {
 	return chatPlannerWithResolvedKey(stderr, offline, baseURL, provider, model, resolveRouterAPIKey(apiKeyEnv, true, false, baseURL), apiKeyEnv, anthropicAuth, codexAuth, true)
 }

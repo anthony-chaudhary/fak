@@ -219,29 +219,6 @@ type turnkeyAgentWarmWarmer interface {
 	WarmPrefix(ctx context.Context, spec agent.WarmPrefixSpec) (agent.WarmReceipt, error)
 }
 
-// installTurnkeyAgentWarm installs the effective agent KV-cache warm profile on
-// the turnkey server BEFORE readiness is bound (CW-09, #13332). It resolves the
-// workspace instruction snapshot (AGENTS.md) and the ordered kernel coding-tool
-// catalog — the SAME bytes/order the forward path resolves — hands them to the
-// warmer via SetWarmPrefixInputs (the warmer re-encodes the boundary from them),
-// then derives and installs the profile on the turnkey agent-warm gate.
-//
-// It installs but does NOT execute the warm: the profile is armed before
-// readiness (agent_warm_pending from the first probe) and the caller materializes
-// it (runTurnkeyAgentWarmup) on the serve's existing background startup path.
-//
-// It is deliberately fail-open for readiness: a workspace with no readable
-// instruction snapshot, or a planner that cannot derive a bounded descriptor, is
-// reported and left UNCONFIGURED so readiness is never held on a profile that
-// cannot be realized and no synthetic warm is invented. It returns true only when
-// a warm profile was actually installed. Never fatal: a warm is an optimization.
-func installTurnkeyAgentWarm(ts *turnkeyServer, workspace string, log io.Writer) bool {
-	if ts == nil {
-		return false
-	}
-	return installTurnkeyAgentWarmForPlanner(ts.planner, ts.agentWarm, workspace, log)
-}
-
 // installTurnkeyAgentWarmForPlanner is the planner+gate half of the turnkey
 // install, split out so the server can arm the profile BEFORE the turnkeyServer
 // value exists (readiness must be held from the first probe). It returns true

@@ -78,14 +78,6 @@ func recordGuardCrashRSITerminal(rec guardCrashRSITerminalRecord) {
 	}
 }
 
-func getGuardCrashRSITerminalRecords() []guardCrashRSITerminalRecord {
-	guardCrashRSITerminalMu.Lock()
-	defer guardCrashRSITerminalMu.Unlock()
-	out := make([]guardCrashRSITerminalRecord, len(guardCrashRSITerminalRecords))
-	copy(out, guardCrashRSITerminalRecords)
-	return out
-}
-
 func resetGuardCrashRSITerminalRecords() {
 	guardCrashRSITerminalMu.Lock()
 	defer guardCrashRSITerminalMu.Unlock()

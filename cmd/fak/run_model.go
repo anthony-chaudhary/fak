@@ -219,23 +219,6 @@ func runUnifiedRun(argv []string) {
 	}
 }
 
-// runChatModel is the `fak run <model> [prompt]` chat path — the daemon-less,
-// Ollama-style one-shot/REPL surface. It loads a model directly into fak's
-// in-kernel engine (the SAME loaders `fak serve --gguf` uses) and runs a chat
-// completion with no HTTP gateway and no provider:
-//
-//	fak run smollm2 "explain mmap in one line"   # one-shot: print the answer, exit
-//	fak run smollm2                              # REPL: read a line, answer, repeat
-//
-// The model ref is alias-aware (`smollm2` → its hf:// target), an hf:// URI is
-// downloaded on demand, and a local .gguf path loads directly. This is a plain
-// chat with no tools, so there is no tool-call adjudication in the loop — the value
-// here is the in-kernel engine (prefix reuse, quantized resident decode) in one
-// static binary with no server to stand up.
-func runChatModel(argv []string) {
-	runUnifiedRun(argv)
-}
-
 func executeChatModel(cfg chatModelConfig) {
 	if cfg.nativeFlags.prefillChunk != nil {
 		if err := validateNativeQwenQ4KPrefillChunk(*cfg.nativeFlags.prefillChunk); err != nil {

@@ -196,19 +196,6 @@ func guardPiBaseURL(gwURL string) string {
 	return strings.TrimRight(strings.TrimSpace(gwURL), "/")
 }
 
-// writeGuardPiExtension writes the session-scoped Pi extension that repoints the anthropic
-// provider at baseURL. Registering "anthropic" with only a baseUrl (no `models`) preserves
-// every Claude model Pi already knows and swaps only the endpoint. The URL is JSON-encoded into
-// the module so it is a safe, correctly-escaped TypeScript string literal.
-//
-// The file lives alone in a fresh per-session MkdirTemp dir and is written in full BEFORE the
-// child launches and reads it once at startup, so there is no concurrent reader to tear a
-// partial write — a plain 0600 write is sufficient (no temp+rename dance needed here).
-func writeGuardPiExtension(path, baseURL string) error {
-	data := []byte(guardPiExtensionSource(baseURL))
-	return os.WriteFile(path, data, 0o600)
-}
-
 // guardPiExtensionSource renders the extension module. The default-exported factory calls
 // pi.registerProvider("anthropic", { baseUrl }) — the override Pi flushes after the factory
 // returns (docs/extensions.md) — so the anthropic provider's endpoint becomes the gateway while

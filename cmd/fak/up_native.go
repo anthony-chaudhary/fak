@@ -238,12 +238,6 @@ func defaultResolveTurnkeyMTPStatus(result *turnkeyMTPQualificationResult, plann
 	return false, string(reason)
 }
 
-// loadTurnkeyNativeResources performs the native-only portion of fak up startup.
-// modelPath is already registry-resolved and fetched by the caller.
-func loadTurnkeyNativeResources(ctx context.Context, modelPath, modelID string, contextTokens int) (*turnkeyNativeResources, error) {
-	return loadTurnkeyNativeResourcesWith(ctx, modelPath, modelID, contextTokens, defaultTurnkeyNativeLoadDeps())
-}
-
 func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string, contextTokens int, deps turnkeyNativeLoadDeps) (*turnkeyNativeResources, error) {
 	var startup turnkeyNativeStartup
 	if deps.hostMemory != nil {
