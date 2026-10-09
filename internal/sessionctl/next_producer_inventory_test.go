@@ -202,29 +202,31 @@ func collectSyntheticProducers(name string, source []byte) ([]syntheticProducer,
 		if !ok || fun.Name != "append" {
 			return true
 		}
-		lit, ok := call.Args[1].(*ast.CompositeLit)
-		if !ok || !isMessageType(lit.Type) {
-			return true
-		}
-		var role, payload string
-		for _, elt := range lit.Elts {
-			kv, ok := elt.(*ast.KeyValueExpr)
-			if !ok {
+		for _, arg := range call.Args[1:] {
+			lit, ok := arg.(*ast.CompositeLit)
+			if !ok || !isMessageType(lit.Type) {
 				continue
 			}
-			key, ok := kv.Key.(*ast.Ident)
-			if !ok {
-				continue
+			var role, payload string
+			for _, elt := range lit.Elts {
+				kv, ok := elt.(*ast.KeyValueExpr)
+				if !ok {
+					continue
+				}
+				key, ok := kv.Key.(*ast.Ident)
+				if !ok {
+					continue
+				}
+				switch key.Name {
+				case "Role":
+					role = renderExpr(fset, kv.Value)
+				case "Content":
+					payload = renderExpr(fset, kv.Value)
+				}
 			}
-			switch key.Name {
-			case "Role":
-				role = renderExpr(fset, kv.Value)
-			case "Content":
-				payload = renderExpr(fset, kv.Value)
+			if strings.HasSuffix(role, "RoleUser") || strings.HasSuffix(role, "RoleSystem") {
+				out = append(out, syntheticProducer{File: name, Role: role, Payload: payload})
 			}
-		}
-		if strings.HasSuffix(role, "RoleUser") || strings.HasSuffix(role, "RoleSystem") {
-			out = append(out, syntheticProducer{File: name, Role: role, Payload: payload})
 		}
 		return true
 	})
@@ -293,5 +295,53 @@ func TestSyntheticProducerInventoryPreservesDuplicateMultiplicity(t *testing.T) 
 		if matches := reflect.DeepEqual(got, classified); matches != (count == len(classified)) {
 			t.Fatalf("%d identical appends: classified multiplicity is %d, inventory matches = %v", count, len(classified), matches)
 		}
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestSyntheticProducerInventoryCollectsEveryAppendArgument(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		source string
+		want   []syntheticProducer
+	}{
+		{
+			name: "identical values in one append",
+			source: `package p
+func f(messages []Message, text string) {
+	messages = append(messages, Message{Role: RoleUser, Content: text}, Message{Role: RoleUser, Content: text})
+}`,
+			want: []syntheticProducer{
+				{File: "surprise.go", Role: "RoleUser", Payload: "text"},
+				{File: "surprise.go", Role: "RoleUser", Payload: "text"},
+			},
+		},
+		{
+			name: "unclassified value after variable",
+			source: `package p
+func f(messages []Message, existing Message, surprise string) {
+	messages = append(messages, existing, Message{Role: RoleSystem, Content: surprise})
+}`,
+			want: []syntheticProducer{{File: "surprise.go", Role: "RoleSystem", Payload: "surprise"}},
+		},
+		{
+			name: "qualified value after ignored role",
+			source: `package p
+func f(messages []agent.Message, surprise string) {
+	messages = append(messages, agent.Message{Role: agent.RoleTool}, agent.Message{Role: agent.RoleUser, Content: surprise})
+}`,
+			want: []syntheticProducer{{File: "surprise.go", Role: "agent.RoleUser", Payload: "surprise"}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := collectSyntheticProducers("surprise.go", []byte(tc.source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("append argument escaped inventory: got %+v want %+v", got, tc.want)
+			}
+		})
 	}
 }
