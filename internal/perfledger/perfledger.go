@@ -84,6 +84,11 @@ type Record struct {
 	// (llama.cpp timings draft_n / draft_n_accepted); absent when it drafted nothing.
 	UpstreamSpecDraftTokens    int `json:"upstream_spec_draft_tokens,omitempty"`
 	UpstreamSpecAcceptedTokens int `json:"upstream_spec_accepted_tokens,omitempty"`
+	// Client is the calling harness class (see Clients), never a raw User-Agent;
+	// Synthetic marks a readiness canary or health probe the sender declared.
+	// Both are absent on rows written before they existed.
+	Client    string `json:"client,omitempty"`
+	Synthetic bool   `json:"synthetic,omitempty"`
 	Identity
 }
 
@@ -308,6 +313,9 @@ type Summary struct {
 	// Probes counts liveness/probe turns (see Record.IsProbe) left out of every
 	// quantile, share, and regime above; Count is the served turns only.
 	Probes int `json:"probes,omitempty"`
+	// ByClient splits the served turns by Record.Client; absent unless some row
+	// in the window carries a client.
+	ByClient map[string]ClientSummary `json:"by_client,omitempty"`
 	// ServedBy is the newest row's model and server identity; Identities counts
 	// the distinct ones in the window, so >1 marks quantiles that mix models,
 	// planners, backends, hosts or builds.
@@ -336,6 +344,14 @@ type NativeTimingSummary struct {
 	DecodeTPSP50       float64 `json:"decode_tps_p50,omitempty"`
 	PrefillTPSWeighted float64 `json:"prefill_tps_weighted,omitempty"`
 	DecodeTPSWeighted  float64 `json:"decode_tps_weighted,omitempty"`
+}
+
+// ClientSummary is one client's served turns: its prompt-cache hit share over
+// cached / (uncached + cached) prompt tokens and its turn count per cache regime.
+type ClientSummary struct {
+	Count         int            `json:"count"`
+	CacheHitShare float64        `json:"cache_hit_share"`
+	ByRegime      map[string]int `json:"by_regime,omitempty"`
 }
 
 type RegimeSummary struct {
@@ -390,6 +406,8 @@ func Summarize(recs []Record) Summary {
 	regimeE2E := map[string][]float64{}
 	regimeCount := map[string]int{}
 	servedBy := map[ServedBy]struct{}{}
+	clients := map[string]*clientFold{}
+	anyClient := false
 	for _, r := range recs {
 		if r.IsProbe() {
 			s.Probes++
@@ -409,6 +427,8 @@ func Summarize(recs []Record) Summary {
 		}
 		regime := r.regime()
 		regimeCount[regime]++
+		anyClient = anyClient || r.Client != ""
+		clients[r.clientKey()] = clients[r.clientKey()].add(r, regime)
 		if r.TTFTMS > 0 {
 			regimeTTFT[regime] = append(regimeTTFT[regime], r.TTFTMS)
 		}
@@ -531,8 +551,76 @@ func Summarize(recs []Record) Summary {
 			E2EP50MS:     quantile(regimeE2E[regime], 0.50),
 		}
 	}
+	if anyClient {
+		s.ByClient = make(map[string]ClientSummary, len(clients))
+		for c, f := range clients {
+			s.ByClient[c] = f.summary()
+		}
+	}
 	s.ByPathStats = summarizeNativePaths(recs)
 	return s
+}
+
+type clientFold struct {
+	count          int
+	prompt, cached int64
+	byRegime       map[string]int
+}
+
+func (f *clientFold) add(r Record, regime string) *clientFold {
+	if f == nil {
+		f = &clientFold{byRegime: map[string]int{}}
+	}
+	f.count++
+	f.prompt += int64(r.PromptTokens)
+	f.cached += int64(r.CachedTokens)
+	f.byRegime[regime]++
+	return f
+}
+
+func (f *clientFold) summary() ClientSummary {
+	cs := ClientSummary{Count: f.count, ByRegime: f.byRegime}
+	if total := f.prompt + f.cached; total > 0 {
+		cs.CacheHitShare = roundTo(float64(f.cached)/float64(total), 10000)
+	}
+	return cs
+}
+
+// clientKey folds a row with no recorded client under ClientUnknown.
+func (r Record) clientKey() string {
+	if r.Client == "" {
+		return ClientUnknown
+	}
+	return r.Client
+}
+
+// orderedClients is the window's clients by descending turn count, ties in
+// vocabulary order, so the compact line leads with the dominant harness.
+func orderedClients(by map[string]ClientSummary) []string {
+	rank := make(map[string]int, len(Clients))
+	for i, c := range Clients {
+		rank[c] = i
+	}
+	out := make([]string, 0, len(by))
+	for c := range by {
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := by[out[i]].Count, by[out[j]].Count
+		if a != b {
+			return a > b
+		}
+		ri, iok := rank[out[i]]
+		rj, jok := rank[out[j]]
+		if iok != jok {
+			return iok
+		}
+		if ri != rj {
+			return ri < rj
+		}
+		return out[i] < out[j]
+	})
+	return out
 }
 
 func summarizeNativePaths(recs []Record) map[string]PathSummary {
@@ -632,6 +720,25 @@ func RenderCompact(rep Report) string {
 		for _, regime := range cacheobs.Regimes {
 			if rs, ok := s.ByRegime[regime]; ok {
 				fmt.Fprintf(&b, " %s=%s(n=%d)", regime, fmtMS(rs.TTFTP50MS), rs.Count)
+			}
+		}
+	}
+	if s.Probes > 0 {
+		fmt.Fprintf(&b, " | probes=%d excluded", s.Probes)
+	}
+	if len(s.ByClient) > 0 {
+		b.WriteString(" | by client:")
+		for _, c := range orderedClients(s.ByClient) {
+			cs := s.ByClient[c]
+			fmt.Fprintf(&b, " %s=%d H=%.0f%%", c, cs.Count, cs.CacheHitShare*100)
+			var regimes []string
+			for _, regime := range cacheobs.Regimes {
+				if n := cs.ByRegime[regime]; n > 0 {
+					regimes = append(regimes, fmt.Sprintf("%s%d", regime[:1], n))
+				}
+			}
+			if len(regimes) > 0 {
+				b.WriteString("(" + strings.Join(regimes, "/") + ")")
 			}
 		}
 	}

@@ -1233,9 +1233,10 @@ func (m *gatewayMetrics) writeInferenceMetrics(b *strings.Builder) inferenceSnap
 	writeHistogram(b, "fak_gateway_inference_ttft_seconds", "", snap.ttftHist)
 	writeHelpType(b, "fak_gateway_inference_tpot_seconds", "Per-output-token (inter-token) latency distribution = decode wall-clock / generated tokens, per measured turn. The percentile view behind fak_gateway_inference_decode_tokens_per_second. fak analogue of vLLM inter_token_latency_seconds.", "histogram")
 	writeHistogram(b, "fak_gateway_inference_tpot_seconds", "", snap.tpotHist)
-	writeHelpType(b, "fak_gateway_inference_e2e_seconds", "Whole model-turn wall-clock distribution, over EVERY served turn (buffered or streamed). fak analogue of vLLM e2e_request_latency_seconds.", "histogram")
+	writeHelpType(b, "fak_gateway_inference_e2e_seconds", "Whole model-turn wall-clock distribution, over every served turn (buffered or streamed) except sender-marked synthetic turns (fak_gateway_inference_synthetic_turns_total). fak analogue of vLLM e2e_request_latency_seconds.", "histogram")
 	writeHistogram(b, "fak_gateway_inference_e2e_seconds", "", snap.e2eHist)
 	writeRegimeLatencyHistograms(b, snap.regimeHists)
+	writeCounter(b, "fak_gateway_inference_synthetic_turns_total", "Served turns the sender marked synthetic (X-Fak-Probe header or a fak-router-canary User-Agent: readiness canaries, health probes). Their tokens count in the inference token totals, but they are kept out of the ttft/tpot/e2e histograms and their by-regime cuts, so those distributions describe real traffic.", int64(snap.syntheticTurns))
 	return snap
 }
 

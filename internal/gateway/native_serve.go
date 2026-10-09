@@ -260,7 +260,7 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 	}
 	m, err := s.runNativeArmStreamSeed(r.Context(), seed, reqTrace, emitText, onProgress)
 	if streamWriter.err != nil {
-		s.metrics.recordPerfFailure(s.chatServingLocality(r.Context(), req.Model), perfledger.ErrorClientWrite, http.StatusOK, time.Since(began), ttft)
+		s.metrics.recordPerfFailure(perfSourceFrom(r.Context()), s.chatServingLocality(r.Context(), req.Model), perfledger.ErrorClientWrite, http.StatusOK, time.Since(began), ttft)
 		return
 	}
 	if err != nil {
@@ -271,7 +271,7 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 	}
 	closeText()
 	if streamWriter.err != nil {
-		s.metrics.recordPerfFailure(s.chatServingLocality(r.Context(), req.Model), perfledger.ErrorClientWrite, http.StatusOK, time.Since(began), ttft)
+		s.metrics.recordPerfFailure(perfSourceFrom(r.Context()), s.chatServingLocality(r.Context(), req.Model), perfledger.ErrorClientWrite, http.StatusOK, time.Since(began), ttft)
 		return
 	}
 
@@ -280,7 +280,7 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 	arm := m
 	sendAnthropicTerminalWithNativeArm(send, stop, usage, &arm)
 	if streamWriter.err != nil {
-		s.metrics.recordPerfFailure(s.chatServingLocality(r.Context(), req.Model), perfledger.ErrorClientWrite, http.StatusOK, time.Since(began), ttft)
+		s.metrics.recordPerfFailure(perfSourceFrom(r.Context()), s.chatServingLocality(r.Context(), req.Model), perfledger.ErrorClientWrite, http.StatusOK, time.Since(began), ttft)
 		return
 	}
 	s.observeNativeChatRoute(r.Context(), reqTrace, true, agent.Usage{

@@ -46,6 +46,7 @@ type inferenceSnapshot struct {
 	cachedTok      uint64
 	cacheCreateTok uint64
 	cachedHits     uint64
+	syntheticTurns uint64
 	decodeSecs     float64
 	// prefillSecs is the cumulative TTFT wall-clock over the ttftTurns that measured
 	// it; prefillPromptTok is the prompt-token sum over those same turns. ttftTurns is
@@ -146,6 +147,7 @@ func (m *gatewayMetrics) inferenceSnapshotData() inferenceSnapshot {
 		cachedTok:          m.inferCachedTokens,
 		cacheCreateTok:     m.inferCacheCreationTokens,
 		cachedHits:         m.inferCachedHits,
+		syntheticTurns:     m.inferSyntheticTurns,
 		decodeSecs:         m.inferDecodeSecs,
 		prefillSecs:        m.inferPrefillSecs,
 		ttftTurns:          m.inferTTFTTurns,

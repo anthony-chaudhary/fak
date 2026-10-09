@@ -124,7 +124,7 @@ func (s *Server) chatPlanner(ctx context.Context) agent.Planner {
 // its aggregate loop usage. Passthrough retains the historical native counters.
 
 func (s *Server) observeNativeChatRoute(ctx context.Context, traceID string, stream bool, usage agent.Usage, timings *agent.Timings, finishReason string, dur, ttft time.Duration) {
-	detail := perfDetail{nativeLoop: true}
+	detail := perfDetail{nativeLoop: true, src: perfSourceFrom(ctx)}
 	if timings != nil {
 		detail.nativeTiming = perfledger.NewNativeTiming(timings.PromptN, timings.PredictedN, timings.PromptMS, timings.PredictedMS)
 	}

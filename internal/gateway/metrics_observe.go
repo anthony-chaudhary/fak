@@ -826,6 +826,12 @@ func (m *gatewayMetrics) observeCompletionServed(loc servingLocality, comp *agen
 // stream has none, so its watched first token is what fills TTFT instead of the
 // turn reading as buffered.
 func (m *gatewayMetrics) observeCompletionServedStream(loc servingLocality, comp *agent.Completion, dur, streamTTFT time.Duration) {
+	m.observeCompletionServedStreamFrom(perfSource{}, loc, comp, dur, streamTTFT)
+}
+
+// observeCompletionServedStreamFrom is observeCompletionServedStream carrying
+// the request's client class and synthetic marker onto the perf row.
+func (m *gatewayMetrics) observeCompletionServedStreamFrom(src perfSource, loc servingLocality, comp *agent.Completion, dur, streamTTFT time.Duration) {
 	if comp == nil {
 		return
 	}
@@ -835,6 +841,8 @@ func (m *gatewayMetrics) observeCompletionServedStream(loc servingLocality, comp
 		ttft = streamTTFT
 	}
 	m.observeNativeExecution(comp)
+	detail := perfDetailFromCompletion(comp)
+	detail.src = src
 	m.observeInferenceTimedDetail(loc,
 		usage.UncachedPromptTokens(),
 		usage.CompletionTokens,
@@ -843,7 +851,7 @@ func (m *gatewayMetrics) observeCompletionServedStream(loc servingLocality, comp
 		comp.FinishReason,
 		dur,
 		ttft,
-		perfDetailFromCompletion(comp),
+		detail,
 	)
 	m.attributeServedTurn(loc, usage.UncachedPromptTokens(), usage.CompletionTokens)
 }
@@ -915,7 +923,13 @@ func (m *gatewayMetrics) observeInferenceServed(loc servingLocality, promptTok, 
 // observeInferenceServedTimed is observeInferenceTimed with the serving side and,
 // when the caller knows it, the model the turn was sent to.
 func (m *gatewayMetrics) observeInferenceServedTimed(loc servingLocality, reqModel string, promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration) {
-	m.observeInferenceTimedDetail(loc, promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, ttft, perfDetail{model: reqModel})
+	m.observeInferenceServedTimedFrom(perfSource{}, loc, reqModel, promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, ttft)
+}
+
+// observeInferenceServedTimedFrom is observeInferenceServedTimed carrying the
+// request's client class and synthetic marker onto the perf row.
+func (m *gatewayMetrics) observeInferenceServedTimedFrom(src perfSource, loc servingLocality, reqModel string, promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration) {
+	m.observeInferenceTimedDetail(loc, promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, ttft, perfDetail{model: reqModel, src: src})
 	m.attributeServedTurn(loc, promptTok, complTok)
 }
 
@@ -978,7 +992,15 @@ func (m *gatewayMetrics) observeInferenceTimedDetail(loc servingLocality, prompt
 	}
 	m.recordPerf(loc, promptTok, complTok, cachedTok, finishReason, dur, ttft, detail)
 	m.inferenceMu.Lock()
-	rh := m.regimeHistsLocked(cacheobs.RegimeForTokens(cachedTok, promptTok))
+	// A synthetic turn (readiness canary, health probe) is not served traffic: it
+	// keeps its token counts but stays out of the latency distributions and their
+	// per-regime turn counts, which it would otherwise swamp; it is counted apart.
+	var rh *regimeLatencyHists
+	if detail.src.synthetic {
+		m.inferSyntheticTurns++
+	} else {
+		rh = m.regimeHistsLocked(cacheobs.RegimeForTokens(cachedTok, promptTok))
+	}
 	if m.inferReqs == nil {
 		m.inferReqs = map[string]uint64{}
 	}
@@ -1003,9 +1025,11 @@ func (m *gatewayMetrics) observeInferenceTimedDetail(loc servingLocality, prompt
 	}
 	if dur > 0 {
 		m.inferDecodeSecs += dur.Seconds()
-		// e2e distribution: every served turn (buffered or streamed) lands here.
-		m.inferE2EHist.observe(dur.Seconds())
-		rh.e2e.observe(dur.Seconds())
+		// e2e distribution: every served non-synthetic turn lands here.
+		if rh != nil {
+			m.inferE2EHist.observe(dur.Seconds())
+			rh.e2e.observe(dur.Seconds())
+		}
 	}
 	// Split prefill from decode only when TTFT was actually observed and is sane
 	// (positive and within the total). A clamp guards against a clock skew producing
@@ -1018,8 +1042,10 @@ func (m *gatewayMetrics) observeInferenceTimedDetail(loc servingLocality, prompt
 		m.inferPrefillSecs += pre.Seconds()
 		m.inferTTFTTurns++
 		// ttft distribution: only the streamed turns whose prefill boundary is observable.
-		m.inferTTFTHist.observe(pre.Seconds())
-		rh.ttft.observe(pre.Seconds())
+		if rh != nil {
+			m.inferTTFTHist.observe(pre.Seconds())
+			rh.ttft.observe(pre.Seconds())
+		}
 		if promptTok > 0 {
 			m.inferPrefillPromptTokens += uint64(promptTok)
 		}
@@ -1029,8 +1055,10 @@ func (m *gatewayMetrics) observeInferenceTimedDetail(loc servingLocality, prompt
 			m.inferMeasuredComplTokens += uint64(complTok)
 			// tpot (inter-token) distribution: mean per-output-token latency for this
 			// turn = decode wall-clock / generated tokens.
-			m.inferTPOTHist.observe(decodeSecs / float64(complTok))
-			rh.tpot.observe(decodeSecs / float64(complTok))
+			if rh != nil {
+				m.inferTPOTHist.observe(decodeSecs / float64(complTok))
+				rh.tpot.observe(decodeSecs / float64(complTok))
+			}
 		}
 	}
 	m.inferenceMu.Unlock()

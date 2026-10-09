@@ -42,6 +42,40 @@ type perfDetail struct {
 	// upstreamDraft / upstreamAccepted are a proxied upstream's own speculative
 	// counts from its llama.cpp-shaped timings.
 	upstreamDraft, upstreamAccepted int
+	src                             perfSource
+}
+
+// perfSource is who sent a turn: the closed client class and whether the sender
+// marked it synthetic (a readiness canary or health probe).
+type perfSource struct {
+	client    string
+	synthetic bool
+}
+
+type perfSourceKey struct{}
+
+// perfSourceFromRequest classifies the request headers once at the HTTP edge.
+func perfSourceFromRequest(r *http.Request) perfSource {
+	client, synthetic := perfledger.ClassifyClient(r.Header.Get(perfledger.ProbeHeader), r.Header.Get(perfledger.ClientHeader), r.Header.Get("User-Agent"))
+	return perfSource{client: client, synthetic: synthetic}
+}
+
+func withPerfSource(ctx context.Context, src perfSource) context.Context {
+	return context.WithValue(ctx, perfSourceKey{}, src)
+}
+
+// perfSourceFrom is the request's source; a context that never crossed the HTTP
+// edge yields the zero source, which leaves the row's client unrecorded.
+func perfSourceFrom(ctx context.Context) perfSource {
+	if ctx == nil {
+		return perfSource{}
+	}
+	src, _ := ctx.Value(perfSourceKey{}).(perfSource)
+	return src
+}
+
+func (src perfSource) apply(rec *perfledger.Record) {
+	rec.Client, rec.Synthetic = src.client, src.synthetic
 }
 
 // perfDetailFromCompletion lifts the planner-reported model and native decode
@@ -129,6 +163,7 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 	rec.Engine = detail.engine
 	rec.NativeTiming = detail.nativeTiming
 	rec.UpstreamSpecDraftTokens, rec.UpstreamSpecAcceptedTokens = detail.upstreamDraft, detail.upstreamAccepted
+	detail.src.apply(&rec)
 	m.commitPerf(rec)
 }
 
@@ -136,11 +171,13 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 // It deliberately leaves the fak_gateway_inference_* counters alone: a turn that
 // produced no tokens is not a generation, but its latency is still part of what
 // the client saw, so dropping it would hide the slow tail.
-func (m *gatewayMetrics) recordPerfFailure(loc servingLocality, errClass string, status int, dur, ttft time.Duration) {
+func (m *gatewayMetrics) recordPerfFailure(src perfSource, loc servingLocality, errClass string, status int, dur, ttft time.Duration) {
 	if m == nil {
 		return
 	}
-	m.commitPerf(perfledger.NewFailureRecord(time.Now(), loc.perfLabel(), errClass, status, dur, ttft))
+	rec := perfledger.NewFailureRecord(time.Now(), loc.perfLabel(), errClass, status, dur, ttft)
+	src.apply(&rec)
+	m.commitPerf(rec)
 }
 
 func (m *gatewayMetrics) commitPerf(rec perfledger.Record) {
@@ -184,7 +221,7 @@ func (s *Server) recordFailedTurn(ctx context.Context, loc servingLocality, err 
 	default:
 		status, _, _ = upstreamErrorStatus(err)
 	}
-	s.metrics.recordPerfFailure(loc, class, status, elapsed, ttft)
+	s.metrics.recordPerfFailure(perfSourceFrom(ctx), loc, class, status, elapsed, ttft)
 }
 
 func (m *gatewayMetrics) setHTTPWriteTimeout(d time.Duration) {

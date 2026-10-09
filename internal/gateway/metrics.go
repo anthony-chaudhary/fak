@@ -65,6 +65,9 @@ type gatewayMetrics struct {
 	inferComplTokens  uint64
 	inferCachedTokens uint64
 	inferCachedHits   uint64 // served turns whose prompt got a provider cache READ (>0 cached tokens)
+	// inferSyntheticTurns counts sender-marked synthetic turns (readiness canaries)
+	// kept out of the latency histograms.
+	inferSyntheticTurns uint64
 	// The self-hosted split of the SAME volume the unsplit totals above accumulate,
 	// attributed by servedLocality at the observation (epic #5416). Both groups are
 	// strict subsets: a turn whose side could not be resolved lands in neither, so
