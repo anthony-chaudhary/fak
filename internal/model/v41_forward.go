@@ -161,6 +161,7 @@ type v41ForwardState struct {
 	kvNorm           v41KVNormFunc
 	ffnNorm          v41FFNNormFunc
 	sharedActivation v41SharedActivationFunc
+	tailRoPE         v41TailRoPEFunc
 	callbackOwner    *Session
 }
 
@@ -288,7 +289,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, sharedActivation: st.sharedActivation, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, callbackOwner: st.callbackOwner}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -441,6 +442,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.kvNorm = nil
 	scratch.ffnNorm = nil
 	scratch.sharedActivation = nil
+	scratch.tailRoPE = nil
 	if st != nil {
 		scratch.denseProjection = st.denseProjection
 		scratch.groupedOutput = st.groupedOutput
@@ -449,6 +451,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.kvNorm = st.kvNorm
 		scratch.ffnNorm = st.ffnNorm
 		scratch.sharedActivation = st.sharedActivation
+		scratch.tailRoPE = st.tailRoPE
 	}
 	defer func() {
 		scratch.denseProjection = nil
@@ -458,6 +461,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.kvNorm = nil
 		scratch.ffnNorm = nil
 		scratch.sharedActivation = nil
+		scratch.tailRoPE = nil
 	}()
 
 	// Engram injection happens at the START of the layer, into the residual,
@@ -663,10 +667,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// fault. Captured here because the RoPE just below rotates `kv` in place.
 		trace.record(l, t, v41TraceStageKVLatent, kv)
 		cos, sin := v41RopeTableForLayer(cfg, l, t)
-		for h := 0; h < nH; h++ {
-			applyRopeTailInterleaved(q[h*hd:(h+1)*hd], cos, sin, ropeDim)
+		if err := v41TailRoPEInPlace(l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE); err != nil {
+			return err
 		}
-		applyRopeTailInterleaved(kv, cos, sin, ropeDim)
 		qHeads[t] = q
 		kvRows[t] = kv
 		qLatRows[t] = qLat
@@ -1198,7 +1201,8 @@ func (s *Session) prefillV41Suffix(ids []int) []float32 {
 	for i, id := range ids {
 		got, _, err := s.M.forwardV41Step(id, st, &v41ProjScratch{})
 		if err != nil {
-			if !errors.Is(err, ErrV41ForwardStage) {
+			var selectedRoPE *V41TailRoPEOperationError
+			if errors.As(err, &selectedRoPE) || !errors.Is(err, ErrV41ForwardStage) {
 				panic(err)
 			}
 			// Roll the suffix back to the pre-call boundary and re-fold the
@@ -1302,7 +1306,8 @@ func (s *Session) stepV41(id int) []float32 {
 			}
 			return logits
 		}
-		if !errors.Is(err, ErrV41ForwardStage) {
+		var selectedRoPE *V41TailRoPEOperationError
+		if errors.As(err, &selectedRoPE) || !errors.Is(err, ErrV41ForwardStage) {
 			panic(err)
 		}
 		// A typed stage refusal the eligibility check could not foresee (e.g. the
@@ -1341,6 +1346,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.kvNorm = s.v41KVNormFunc()
 		s.v41Forward.ffnNorm = s.v41FFNNormFunc()
 		s.v41Forward.sharedActivation = s.v41SharedActivationFunc()
+		s.v41Forward.tailRoPE = s.v41TailRoPEFunc()
 		s.v41Forward.callbackOwner = s
 	}
 	return s.v41Forward

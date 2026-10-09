@@ -238,10 +238,9 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		}
 	}
 	cos, sin := v41RopeTableForLayer(cfg, l, pos)
-	for h := 0; h < nH; h++ {
-		applyRopeTailInterleaved(q[h*hd:(h+1)*hd], cos, sin, ropeDim)
+	if err := v41TailRoPEInPlace(l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE); err != nil {
+		return err
 	}
-	applyRopeTailInterleaved(kv, cos, sin, ropeDim)
 
 	// The ordered absolute key-row IDs this position attends under leaf 13's
 	// configured-window semantics, intersected with what the retained ring
@@ -531,10 +530,9 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		return err
 	}
 	cos, sin := v41RopeTableForLayer(cfg, l, pos)
-	for h := 0; h < nH; h++ {
-		applyRopeTailInterleaved(q[h*hd:(h+1)*hd], cos, sin, ropeDim)
+	if err := v41TailRoPEInPlace(l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE); err != nil {
+		return err
 	}
-	applyRopeTailInterleaved(kv, cos, sin, ropeDim)
 
 	// ---- shared compressed stream: source publishes, reader resolves ----
 	//

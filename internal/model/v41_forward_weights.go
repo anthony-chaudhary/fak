@@ -42,6 +42,7 @@ type v41ProjScratch struct {
 	kvNorm           v41KVNormFunc
 	ffnNorm          v41FFNNormFunc
 	sharedActivation v41SharedActivationFunc
+	tailRoPE         v41TailRoPEFunc
 
 	// exp1/exp3/exp2 are the REUSED materialization targets for one routed
 	// expert's three projections (ffn.experts.<e>.w1/w3/w2.weight). They were
