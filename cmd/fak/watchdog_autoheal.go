@@ -944,10 +944,13 @@ func probeLaunchd(ctx context.Context, run watchdogCommandRunner, label, plist s
 	return watchdogProbe{Installed: false, Alive: false, Detail: "launchd job not installed"}, nil
 }
 
+// restartLaunchd recovers a missing or stopped watchdog without stopping a running
+// instance. Never pass kickstart -k: a job can start after any probe, including
+// during bootstrap, and the healing lease does not exclude launchd or other users.
 func restartLaunchd(ctx context.Context, run watchdogCommandRunner, label, plist string) error {
 	target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
 	if _, err := run(ctx, "launchctl", "list", label); err == nil {
-		_, err = run(ctx, "launchctl", "kickstart", "-k", target)
+		_, err = run(ctx, "launchctl", "kickstart", target)
 		return err
 	}
 	if strings.TrimSpace(plist) == "" {
@@ -960,7 +963,7 @@ func restartLaunchd(ctx context.Context, run watchdogCommandRunner, label, plist
 	if err != nil {
 		return err
 	}
-	_, err = run(ctx, "launchctl", "kickstart", "-k", target)
+	_, err = run(ctx, "launchctl", "kickstart", target)
 	return err
 }
 

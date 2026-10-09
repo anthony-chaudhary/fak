@@ -12,6 +12,85 @@ import (
 	"time"
 )
 
+// fak-test:runtime fast est=10ms lane=default
+func TestRestartLaunchdPreservesConcurrentStart(t *testing.T) {
+	const label = "com.fleet.stale-work-garden"
+	domain := fmt.Sprintf("gui/%d", os.Getuid())
+	target := domain + "/" + label
+	for _, tc := range []struct {
+		name             string
+		loaded           bool
+		startsBeforeKick bool
+	}{
+		{name: "loaded stopped job", loaded: true},
+		{name: "starts after list", loaded: true, startsBeforeKick: true},
+		{name: "missing stopped job"},
+		{name: "starts during bootstrap", startsBeforeKick: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plist := filepath.Join(t.TempDir(), label+".plist")
+			if err := os.WriteFile(plist, []byte("fixture"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var calls [][]string
+			pid, kills := 0, 0
+			run := func(_ context.Context, name string, args ...string) (string, error) {
+				calls = append(calls, append([]string{name}, args...))
+				if name != "launchctl" || len(args) == 0 {
+					t.Fatalf("unexpected command: %s %q", name, args)
+				}
+				switch args[0] {
+				case "list":
+					if !tc.loaded {
+						return "service absent", errors.New("launchctl list failed")
+					}
+					// Simulate a concurrent start after observing a stopped job.
+					if tc.startsBeforeKick {
+						pid = 41
+					}
+				case "bootstrap":
+					// RunAtLoad/KeepAlive can start the job before bootstrap returns.
+					if tc.startsBeforeKick {
+						pid = 41
+					}
+				case "kickstart":
+					// Model the documented -k distinction, not a launchd execution.
+					for _, arg := range args[1:] {
+						if arg == "-k" && pid != 0 {
+							kills++
+							pid = 0
+						}
+					}
+					if pid == 0 {
+						pid = 42
+					}
+				default:
+					t.Fatalf("unexpected lifecycle command: %q", args)
+				}
+				return "", nil
+			}
+			if err := restartLaunchd(context.Background(), run, label, plist); err != nil {
+				t.Fatal(err)
+			}
+			wantPID := 42
+			if tc.startsBeforeKick {
+				wantPID = 41
+			}
+			if kills != 0 || pid != wantPID {
+				t.Fatalf("kills=%d, pid=%d; want no kills and pid=%d", kills, pid, wantPID)
+			}
+			wantCalls := [][]string{{"launchctl", "list", label}}
+			if !tc.loaded {
+				wantCalls = append(wantCalls, []string{"launchctl", "bootstrap", domain, plist})
+			}
+			wantCalls = append(wantCalls, []string{"launchctl", "kickstart", target})
+			if !reflect.DeepEqual(calls, wantCalls) {
+				t.Fatalf("commands=%q; want %q", calls, wantCalls)
+			}
+		})
+	}
+}
+
 // fak-test:runtime fast est=20ms lane=default
 func TestLaunchdObservationDoesNotHealUncertainState(t *testing.T) {
 	const label = "com.fleet.stale-work-garden"
