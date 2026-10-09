@@ -641,6 +641,50 @@ func vulkanQ4KStageBufferBackingsLocked(ptr unsafe.Pointer, bufferBytes int64, r
 	return []VulkanQ4KStageBufferBacking{{BufferBytes: uint64(bufferBytes), Backing: backing}}, true
 }
 
+// VulkanQ4KStageBufferReservations observes the zero or one retained backend-owned
+// shared Q4_K stage under the same lock as its growth and retirement. A nil handle
+// with zero retained bytes is known-empty; inconsistent ownership, a native length
+// mismatch or unavailable reservation metadata returns nil, false. A retained
+// stage is reported even when staging is disabled. Backing uses Part "data", Chunk -1.
+//
+// The owner must belong to the current initialized-device lifetime. The native
+// reader checks current device availability, but no generation validates an owner
+// across shim reinitialization. Known-empty describes only this Go owner; neither
+// it nor a retained record proves device health, dispatch use or physical residency.
+// ReservationBytes is the complete allocation request, repeated for shared IDs,
+// not a per-binding charge. IDs and memory indices are limited to that lifetime.
+//
+// This excludes tensors, Q4_K homes, ordinary H2D/D2H and restore stages, scratch
+// and pools. Separate observations are not an atomic whole-backend inventory or
+// proof of disjoint physical pools, capacity headroom or future placement.
+// It reads host metadata without Vulkan allocation/free, transfers, batch flushes,
+// device-work fences or owner/counter changes. Results can allocate Go memory;
+// call outside hot token loops with a matching rebuilt reservation-capable shim.
+func (v *vulkanBackend) VulkanQ4KStageBufferReservations() ([]VulkanBufferReservation, bool) {
+	if v == nil {
+		return nil, false
+	}
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return vulkanQ4KStageBufferReservationsLocked(v.q4kStagePtr, v.q4kStageBytes, vulkanBufferReservationLocked)
+}
+
+// The caller holds vulkanMu through the read. The injected reader is a complete
+// reservation observer, allowing owner controls to be tested without C handles.
+func vulkanQ4KStageBufferReservationsLocked(ptr unsafe.Pointer, bufferBytes int64, readReservation func(unsafe.Pointer, string, int) (VulkanBufferReservation, bool)) ([]VulkanBufferReservation, bool) {
+	if ptr == nil && bufferBytes == 0 {
+		return []VulkanBufferReservation{}, true
+	}
+	if ptr == nil || bufferBytes <= 0 {
+		return nil, false
+	}
+	reservation, ok := readReservation(ptr, "data", -1)
+	if !ok || reservation.BufferBytes != uint64(bufferBytes) {
+		return nil, false
+	}
+	return []VulkanBufferReservation{reservation}, true
+}
+
 // VulkanTransferStageBufferBacking describes the shim-global ordinary H2D/D2H
 // stage shared by both transfer directions. BufferBytes is its retained nominal
 // buffer length, not the last transfer or VkDeviceMemory reservation. Backing has
@@ -771,6 +815,65 @@ func vulkanQ4KHomeBufferBackingsLocked(homes map[vulkanQ4KHomeKey]vulkanQ4KHome,
 		return nil, false
 	}
 	return backings, true
+}
+
+// VulkanQ4KHomeBufferReservations observes all retained backend-owned Q4_K homes
+// under the same lock as admission and retirement. Order is unspecified. An empty
+// cache with zero owned bytes is known-empty; invalid ownership, a native length
+// mismatch or unavailable reservation metadata returns nil, false, never a partial
+// inventory. Backing uses Part "data", Chunk -1. Source keys are neither read as
+// native handles nor exported: homes can outlive their source tensors.
+//
+// Owners must belong to the current initialized-device lifetime. The native reader
+// checks current device availability, but cannot validate stale owners after shim
+// reinitialization. Known-empty describes the Go cache, not device health or release
+// of driver memory. ReservationBytes repeats the complete allocation request for
+// shared AllocationID values; equal IDs do not make distinct owned bindings invalid.
+// IDs and memory indices are meaningful only in that initialized-device lifetime.
+//
+// This excludes tensors, shared Q4_K/ordinary H2D/D2H/restore stages, scratch and
+// pools. Separate observations are not an atomic whole-backend inventory and prove
+// neither physical residency, disjoint physical pools, capacity headroom nor future
+// placement. This reads host metadata without Vulkan allocation/free, transfers,
+// batch flushes, device-work fences or owner/counter changes. Results can allocate
+// Go memory; call outside hot token loops with a matching reservation-capable shim.
+func (v *vulkanBackend) VulkanQ4KHomeBufferReservations() ([]VulkanBufferReservation, bool) {
+	if v == nil {
+		return nil, false
+	}
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return vulkanQ4KHomeBufferReservationsLocked(v.homes, v.homeBytes, vulkanBufferReservationLocked)
+}
+
+// The caller holds vulkanMu through every read so retirement cannot invalidate an
+// owned handle. Only home.ptr reaches the complete reservation reader, never key.src.
+func vulkanQ4KHomeBufferReservationsLocked(homes map[vulkanQ4KHomeKey]vulkanQ4KHome, residentBytes int64, readReservation func(unsafe.Pointer, string, int) (VulkanBufferReservation, bool)) ([]VulkanBufferReservation, bool) {
+	if residentBytes < 0 {
+		return nil, false
+	}
+	reservations := make([]VulkanBufferReservation, 0, len(homes))
+	seen := make(map[unsafe.Pointer]struct{}, len(homes))
+	var total int64
+	for key, home := range homes {
+		if key.src == nil || key.bytes <= 0 || home.ptr == nil || home.bytes != int64(key.bytes) || home.bytes > residentBytes-total {
+			return nil, false
+		}
+		if _, duplicate := seen[home.ptr]; duplicate {
+			return nil, false
+		}
+		seen[home.ptr] = struct{}{}
+		reservation, ok := readReservation(home.ptr, "data", -1)
+		if !ok || reservation.BufferBytes != uint64(home.bytes) {
+			return nil, false
+		}
+		reservations = append(reservations, reservation)
+		total += home.bytes
+	}
+	if total != residentBytes {
+		return nil, false
+	}
+	return reservations, true
 }
 
 func (v *vulkanBackend) VulkanDebugResidencyBudget() (budgetBytes, dlUsed int64, hostvisN int) {
