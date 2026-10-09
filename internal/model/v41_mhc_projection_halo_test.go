@@ -142,6 +142,10 @@ func TestV41MHCProjectionVulkan(t *testing.T) {
 			if m.Cfg.HiddenSize != 5120 || m.Cfg.NumExperts != 384 || m.Cfg.DeepSeekV41.HCMult != 4 {
 				t.Fatal("full synthetic mHC H/HC/expert geometry changed")
 			}
+			hc := m.Cfg.DeepSeekV41.HCMult
+			inputWidth := hc * m.Cfg.HiddenSize
+			// Each stream has a pre/post coefficient and a residual coefficient for every stream pair.
+			coefficientWidth := 2*hc + hc*hc
 			b, hostBackend := newV41MHCProjBackend(20480, false), newV41MHCProjBackend(20480, dtype == "Q2_K")
 			b.Backend, hostBackend.Backend = be, be
 			s, host := v41EngProjSession(t, m, b), v41EngProjSession(t, control, hostBackend)
@@ -193,7 +197,7 @@ func TestV41MHCProjectionVulkan(t *testing.T) {
 					rows += op.rows
 					upload += op.upload
 					read += op.read
-					if len(op.activation) != 20480 || len(op.result) != 24 {
+					if len(op.activation) != inputWidth || len(op.result) != coefficientWidth {
 						t.Fatal("full physical raw activation/result geometry changed")
 					}
 					var signal float64

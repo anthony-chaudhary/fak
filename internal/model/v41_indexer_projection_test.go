@@ -275,6 +275,9 @@ func v41IndexerTestOps(t *testing.T, s *Session, b *v41CompressorTestBackend, fr
 func TestV41IndexerProjectionActualSessionOncePerCompletedKey(t *testing.T) {
 	t.Parallel()
 	m := v41IndexerTestFixture(t)
+	if m.Cfg.IndexHeadDim <= 0 || m.Cfg.IndexHeadDim == v41KVLoraRank {
+		t.Fatal("indexer fixture must distinguish index width from the full KV latent width")
+	}
 	b := newV41CompressorTestBackend()
 	s := v41DenseTestSession(t, m, b)
 	var history []int
@@ -325,7 +328,7 @@ func TestV41IndexerProjectionActualSessionOncePerCompletedKey(t *testing.T) {
 			t.Fatal("index and KV streams lost completed group identity")
 		}
 		for row := range keys {
-			if len(keys[row]) != 128 || len(kv[row]) != 512 {
+			if len(keys[row]) != m.Cfg.IndexHeadDim || len(kv[row]) != v41KVLoraRank {
 				t.Fatal("index width confused with KV width")
 			}
 		}

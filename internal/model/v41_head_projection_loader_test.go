@@ -218,6 +218,9 @@ func TestV41HeadProjectionGGUFLoaderToDefaultSession(t *testing.T) {
 				if loaded.Cfg.HiddenSize != 256 || loaded.Cfg.DeepSeekV41 == nil || loaded.Cfg.DeepSeekV41.HCMult != 4 || len(loaded.Cfg.DeepSeekV41.EngramLayerIDs) != 1 || loaded.HasF32("lm_head.weight") {
 					t.Fatal("actual packed loader lost head/full-HC4/Engram representation")
 				}
+				if loaded.Cfg.VocabSize <= 0 || len(logical) != loaded.Cfg.VocabSize*loaded.Cfg.HiddenSize {
+					t.Fatal("loaded vocabulary does not match the independent packed head matrix")
+				}
 			}
 			b, hb := &headLoaderBackend{mhcLoaderBackend: newMHCLoaderBackend(nil, nil), head: packed}, &headLoaderBackend{mhcLoaderBackend: newMHCLoaderBackend(nil, nil), head: packed}
 			if tied {
@@ -299,7 +302,7 @@ func TestV41HeadProjectionGGUFLoaderToDefaultSession(t *testing.T) {
 						t.Errorf("actual default capability composition arm=%d dense_device=%d dense_host=%d ledger=%v", arm, denseDevice, denseHost, ledger)
 					}
 				}
-				if len(got) != 8 || len(want) != 8 {
+				if len(got) != m.Cfg.VocabSize || len(want) != control.Cfg.VocabSize {
 					t.Fatal("loaded head logit width invalid")
 				}
 				var diff, signal float64

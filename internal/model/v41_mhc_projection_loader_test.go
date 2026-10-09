@@ -264,6 +264,10 @@ func TestV41MHCProjectionGGUFLoaderToDefaultSession(t *testing.T) {
 			t.Fatal("ordinary GGUF load lost full HC4/active Engram geometry")
 		}
 	}
+	hc := m.Cfg.DeepSeekV41.HCMult
+	inputWidth := hc * m.Cfg.HiddenSize
+	// Each stream has a pre/post coefficient and a residual coefficient for every stream pair.
+	coefficientWidth := 2*hc + hc*hc
 	b, hostBackend := newMHCLoaderBackend(packed, engram), newMHCLoaderBackend(packed, engram)
 	hostBackend.declineQ2 = true
 	s, err := m.NewBackendSessionChecked(b)
@@ -307,7 +311,7 @@ func TestV41MHCProjectionGGUFLoaderToDefaultSession(t *testing.T) {
 		}
 		for _, op := range b.operations[from:] {
 			if op.component == "mhc" {
-				if len(op.activation) != 256 || len(op.result) != 24 || op.upload != 1024 || op.read != 96 {
+				if len(op.activation) != inputWidth || len(op.result) != coefficientWidth || op.upload != 1024 || op.read != 96 {
 					t.Fatal("loaded full HC4 mHC payload geometry incorrect")
 				}
 				var ss, signal float64

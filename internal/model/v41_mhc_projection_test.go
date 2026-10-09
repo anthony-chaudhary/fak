@@ -304,6 +304,12 @@ func TestV41MHCProjectionRawFullAndReduced(t *testing.T) {
 			t.Parallel()
 			m := v41MHCProjVariant(t, scenario.dtype, false, scenario.reduced, 2)
 			control := v41MHCProjVariant(t, scenario.dtype, scenario.dtype == "F32" && !scenario.reduced, scenario.reduced, 2)
+			if m.Cfg.DeepSeekV41 == nil || m.Cfg.DeepSeekV41.HCMult != 4 {
+				t.Fatal("raw mHC fixture lost HC4 geometry")
+			}
+			hc := m.Cfg.DeepSeekV41.HCMult
+			// Each stream has a pre/post coefficient and a residual coefficient for every stream pair.
+			coefficientWidth := 2*hc + hc*hc
 			in := 4 * m.Cfg.HiddenSize
 			if scenario.reduced {
 				in = m.Cfg.HiddenSize
@@ -351,8 +357,8 @@ func TestV41MHCProjectionRawFullAndReduced(t *testing.T) {
 					if index > 0 {
 						layer = j % 2
 					}
-					if len(op.activation) != in || len(op.result) != 24 {
-						t.Fatalf("observed raw payload width=%d/%d want %d/24", len(op.activation), len(op.result), in)
+					if len(op.activation) != in || len(op.result) != coefficientWidth {
+						t.Fatalf("observed raw payload width=%d/%d want %d/%d", len(op.activation), len(op.result), in, coefficientWidth)
 					}
 					var ss, signal float64
 					for _, v := range op.activation {
@@ -626,7 +632,8 @@ func TestV41MHCProjectionHostReturnedWeightSpanOnFailure(t *testing.T) {
 		}
 	}
 	coefficients, projectErr := v41MHCProjectFull(weights, streams, m.Cfg.HiddenSize, float32(m.Cfg.RMSNormEps), true)
-	if projectErr != nil || len(coefficients) != 24 {
+	// The input streams require pre/post vectors and a square residual-mixing matrix.
+	if projectErr != nil || len(coefficients) != 2*len(streams)+len(streams)*len(streams) {
 		t.Fatal("parent host raw projection did not complete its coefficient vector")
 	}
 	nonfinite := false

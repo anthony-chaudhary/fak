@@ -191,7 +191,7 @@ func TestCheckpointSessionNativeHALReuseRotationParity(t *testing.T) {
 	for step, expert := range []int{0, 0, 1, 0} {
 		beforeReads, beforeQ2, beforeQ3 := f.reads(), f.be.uploads[compute.Q2_K], f.be.uploads[compute.Q3_K]
 		got, want := checkpointSessionForward(t, s, expert), f.reference(expert, checkpointSessionInput())
-		if len(got) != len(want) || len(got) != 256 {
+		if len(got) != len(want) || len(got) != f.m.Cfg.HiddenSize {
 			t.Fatal("expert output shape mismatch")
 		}
 		nonzero := false

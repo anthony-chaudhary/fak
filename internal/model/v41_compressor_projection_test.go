@@ -486,6 +486,9 @@ func TestV41CompressorProjectionShortPrefixSourceReader(t *testing.T) {
 		}
 	}()
 	m, oracle := v41CompressorTestFixture(t), v41CompressorTestFixture(t)
+	if m.Cfg.IndexHeadDim <= 0 || m.Cfg.IndexHeadDim == m.Cfg.QLoraRank {
+		t.Fatal("source index fixture must distinguish index width from query rank")
+	}
 	b := newV41CompressorTestBackend()
 	s, host := v41DenseTestSession(t, m, b), oracle.NewSession()
 	t.Cleanup(host.Close)
@@ -547,7 +550,7 @@ func TestV41CompressorProjectionShortPrefixSourceReader(t *testing.T) {
 			t.Fatal("completed group KV/index publication differs from separate host Session")
 		}
 		for _, key := range keys {
-			if len(key) != 512 {
+			if len(key) != m.Cfg.IndexHeadDim {
 				t.Fatal("source index key used query rank instead of configured index width")
 			}
 		}
