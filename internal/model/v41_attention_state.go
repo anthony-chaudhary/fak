@@ -421,39 +421,65 @@ func (s *V41AttentionState) appendCompressorSource(
 	normWeight []float32,
 	eps float32,
 ) (latent []float32, emitted bool, start, end int, err error) {
+	latent, _, emitted, start, end, err = s.appendCompressorSourcePublication(
+		layer, ratio, pos, input, pool, projectKV, projectScore, normWeight, eps, v41CompressorPublication{})
+	return
+}
+
+// v41CompressorPublication belongs only to the current producer call. Completed
+// rows are finalized before either owner sees them; no callback enters a snapshot.
+type v41CompressorPublication struct {
+	projectIndex func([]float32) ([]float32, error)
+	finalize     func(start int, latent, indexKey []float32) error
+	registry     *V41AttentionState
+	ref          V41AttentionStateRef
+}
+
+// appendCompressorSourcePublication stages the normalized latent, its optional
+// index projection and both publication destinations before committing the group.
+func (s *V41AttentionState) appendCompressorSourcePublication(
+	layer, ratio, pos int,
+	input []float32,
+	pool *V41CompressorPool,
+	projectKV func([]float32) ([]float32, error),
+	projectScore func([]float32) ([]float32, error),
+	normWeight []float32,
+	eps float32,
+	publication v41CompressorPublication,
+) (latent, indexKey []float32, emitted bool, start, end int, err error) {
 	if s == nil {
-		return nil, false, 0, 0, fmt.Errorf("model: nil V41 attention state")
+		return nil, nil, false, 0, 0, fmt.Errorf("model: nil V41 attention state")
 	}
 	if layer < 0 {
-		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source layer %d is negative", layer)
+		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source layer %d is negative", layer)
 	}
 	if ratio <= 1 || ratio > s.ratioCap {
-		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source ratio %d outside (1,%d]", ratio, s.ratioCap)
+		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source ratio %d outside (1,%d]", ratio, s.ratioCap)
 	}
 	if pool == nil {
-		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source requires a pool")
+		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source requires a pool")
 	}
 	if pool.Width() != s.headDim {
-		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source pool width %d, want %d", pool.Width(), s.headDim)
+		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source pool width %d, want %d", pool.Width(), s.headDim)
 	}
 	if pos != s.nextCompressRow {
-		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source position %d is not the next input position %d", pos, s.nextCompressRow)
+		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source position %d is not the next input position %d", pos, s.nextCompressRow)
 	}
 	if len(s.partialInputs) != len(s.partialPositions) {
-		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source retained %d inputs but %d positions", len(s.partialInputs), len(s.partialPositions))
+		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source retained %d inputs but %d positions", len(s.partialInputs), len(s.partialPositions))
 	}
 	if len(s.partialInputs) >= ratio {
-		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source already retains %d rows, the full ratio %d", len(s.partialInputs), ratio)
+		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source already retains %d rows, the full ratio %d", len(s.partialInputs), ratio)
 	}
 	groupLo := pos - len(s.partialPositions)
 	if !positionsContiguous(s.partialPositions, groupLo) {
-		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source retained positions %v are not contiguous from %d", s.partialPositions, groupLo)
+		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source retained positions %v are not contiguous from %d", s.partialPositions, groupLo)
 	}
 	if err := finiteRow32(input, "compressor source input"); err != nil {
-		return nil, false, 0, 0, err
+		return nil, nil, false, 0, 0, err
 	}
 	if normWeight != nil && len(normWeight) != s.headDim {
-		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source norm width %d, want %d", len(normWeight), s.headDim)
+		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source norm width %d, want %d", len(normWeight), s.headDim)
 	}
 
 	// Incomplete group: append the one input and synthesize no output. At most
@@ -464,7 +490,7 @@ func (s *V41AttentionState) appendCompressorSource(
 		s.partialPositions = append(s.partialPositions, pos)
 		s.retainedCopies++
 		s.nextCompressRow = pos + 1
-		return nil, false, 0, 0, nil
+		return nil, nil, false, 0, 0, nil
 	}
 
 	// Group completes with this input. Build the contiguous group of INPUT rows
@@ -476,11 +502,11 @@ func (s *V41AttentionState) appendCompressorSource(
 	staged = append(staged, append([]float32(nil), input...))
 	stagedPos := append(append([]int(nil), s.partialPositions...), pos)
 	if len(staged) != ratio || stagedPos[0] != groupLo {
-		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source group is %d rows spanning [%d,%d], want %d from %d", len(staged), stagedPos[0], pos, ratio, groupLo)
+		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source group is %d rows spanning [%d,%d], want %d from %d", len(staged), stagedPos[0], pos, ratio, groupLo)
 	}
 	replay, err := NewV41CompressorPool(ratio, s.headDim)
 	if err != nil {
-		return nil, false, 0, 0, err
+		return nil, nil, false, 0, 0, err
 	}
 	// Replay owns only this completing group; inherit the selected tail without
 	// retaining a session callback in attention state or published rows.
@@ -490,11 +516,11 @@ func (s *V41AttentionState) appendCompressorSource(
 	for i, row := range staged {
 		kv, err := projectKV(row)
 		if err != nil {
-			return nil, false, 0, 0, err
+			return nil, nil, false, 0, 0, err
 		}
 		score, err := projectScore(row)
 		if err != nil {
-			return nil, false, 0, 0, err
+			return nil, nil, false, 0, 0, err
 		}
 		// A fresh pool is contiguity-checked from position 0, so the group is
 		// replayed with GROUP-RELATIVE positions 0..ratio-1, exactly as
@@ -503,14 +529,31 @@ func (s *V41AttentionState) appendCompressorSource(
 		// covered range [groupLo,pos] is preserved separately and returned.
 		out, emitted, err := replay.PushNormalized(i, kv, score, normWeight, eps)
 		if err != nil {
-			return nil, false, 0, 0, err
+			return nil, nil, false, 0, 0, err
 		}
 		if emitted {
 			pooled, didEmit = out, true
 		}
 	}
 	if !didEmit {
-		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source full group %d from %d emitted no latent", ratio, groupLo)
+		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source full group %d from %d emitted no latent", ratio, groupLo)
+	}
+
+	// The index projection consumes the normalized, RoPE-free latent. Finalize
+	// then rotates both fresh rows at the group's first absolute position.
+	if publication.projectIndex != nil {
+		indexKey, err = publication.projectIndex(pooled)
+		if err != nil {
+			return nil, nil, false, 0, 0, err
+		}
+		if len(indexKey) != s.indexWidth() {
+			return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source index key width %d, want %d", len(indexKey), s.indexWidth())
+		}
+	}
+	if publication.finalize != nil {
+		if err := publication.finalize(groupLo, pooled, indexKey); err != nil {
+			return nil, nil, false, 0, 0, err
+		}
 	}
 
 	// Build and validate the publication BEFORE mutating any state, so a
@@ -518,11 +561,33 @@ func (s *V41AttentionState) appendCompressorSource(
 	// nothing.
 	start, end = groupLo, pos+1
 	upd := V41AttentionStateUpdate{
-		Ref:    V41AttentionStateRef{LayerID: layer, Ratio: ratio, IsKVSource: true},
-		Latent: pooled,
+		Ref:      V41AttentionStateRef{LayerID: layer, Ratio: ratio, IsKVSource: true, IsIndexSource: publication.projectIndex != nil},
+		Latent:   pooled,
+		IndexKey: indexKey,
 	}
 	if err := s.validateUpdates([]V41AttentionStateUpdate{upd}); err != nil {
-		return nil, false, 0, 0, err
+		return nil, nil, false, 0, 0, err
+	}
+
+	var shared []V41AttentionStateUpdate
+	if publication.registry != nil {
+		ref := publication.ref
+		if publication.registry == s || ref.LayerID != layer || ref.Ratio != ratio || (ref.IsIndexSource && publication.projectIndex == nil) {
+			return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source publication ownership is inconsistent")
+		}
+		up := V41AttentionStateUpdate{Ref: ref}
+		if ref.IsKVSource {
+			up.Latent = pooled
+		}
+		if ref.IsIndexSource {
+			up.IndexKey = indexKey
+		}
+		if ref.IsKVSource || ref.IsIndexSource {
+			shared = []V41AttentionStateUpdate{up}
+			if err := publication.registry.validateUpdates(shared); err != nil {
+				return nil, nil, false, 0, 0, err
+			}
+		}
 	}
 
 	// Commit only after every validation and the whole group's pooling succeeded.
@@ -540,7 +605,10 @@ func (s *V41AttentionState) appendCompressorSource(
 	}
 	s.nextCompressRow = pos + 1
 	s.publish([]V41AttentionStateUpdate{upd})
-	return append([]float32(nil), pooled...), true, start, end, nil
+	if len(shared) > 0 {
+		publication.registry.publish(shared)
+	}
+	return append([]float32(nil), pooled...), append([]float32(nil), indexKey...), true, start, end, nil
 }
 
 // appendCompressorSourceIndex is appendCompressorSource PLUS the index-key
@@ -574,39 +642,9 @@ func (s *V41AttentionState) appendCompressorSourceIndex(
 	if projectIndex == nil {
 		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source index projection is nil")
 	}
-	// Reuse the KV-source leaf verbatim so the pooled row and the released
-	// retained state are bit-identical to appendCompressorSource. A failure here
-	// leaves both registries untouched.
-	latent, emitted, start, end, err = s.appendCompressorSource(
-		layer, ratio, pos, input, pool, projectKV, projectScore, normWeight, eps)
-	if err != nil || !emitted {
-		return latent, nil, emitted, start, end, err
-	}
-
-	// The index key is the projection of the POOLED row, so it is derived from the
-	// exact latent published above rather than re-pooled from the inputs.
-	indexKey, err = projectIndex(latent)
-	if err != nil {
-		return nil, nil, false, 0, 0, err
-	}
-	if len(indexKey) != s.indexWidth() {
-		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source index key width %d, want %d", len(indexKey), s.indexWidth())
-	}
-
-	// Stage the index publication and validate it BEFORE it is committed. The KV
-	// latent has already been published by appendCompressorSource, so a failure
-	// here must not be reported as a successful emit of a matched pair: surface
-	// the error and report emitted=false so the caller cannot treat a half-staged
-	// group as consumed.
-	idxUpd := V41AttentionStateUpdate{
-		Ref:      V41AttentionStateRef{LayerID: layer, Ratio: ratio, IsKVSource: true, IsIndexSource: true},
-		IndexKey: indexKey,
-	}
-	if verr := s.validateUpdates([]V41AttentionStateUpdate{idxUpd}); verr != nil {
-		return nil, nil, false, 0, 0, verr
-	}
-	s.publish([]V41AttentionStateUpdate{idxUpd})
-	return append([]float32(nil), latent...), append([]float32(nil), indexKey...), true, start, end, nil
+	return s.appendCompressorSourcePublication(
+		layer, ratio, pos, input, pool, projectKV, projectScore, normWeight, eps,
+		v41CompressorPublication{projectIndex: projectIndex})
 }
 
 // finiteRow32 validates one projected row's width-agnostic finiteness.

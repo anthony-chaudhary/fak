@@ -1354,7 +1354,7 @@ func TestV41CEDCSA2StagesIndependent(t *testing.T) {
 	cfg.DeepSeekV41.CompressRatios = []int{2}
 	cfg.DeepSeekV41.IndexSourceLayerIDs = []int{0}
 	cfg.IndexNHeads = 2
-	cfg.IndexHeadDim = 4
+	cfg.IndexHeadDim = cfg.QKRopeHeadDim
 	cfg.IndexTopK = 2
 	m.Cfg = cfg
 
@@ -1409,7 +1409,7 @@ func TestV41CEDCSA2StagesIndependent(t *testing.T) {
 		c2.DeepSeekV41.CompressRatios = []int{2}
 		c2.DeepSeekV41.IndexSourceLayerIDs = []int{0}
 		c2.IndexNHeads = 2
-		c2.IndexHeadDim = 4
+		c2.IndexHeadDim = c2.QKRopeHeadDim
 		c2.IndexTopK = 2
 		noW.Cfg = c2
 	}

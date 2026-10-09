@@ -734,11 +734,22 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			return err
 		}
 	}
+	// Both publications derive from the same RoPE-free normalized latent.
+	// Rotate only these fresh producer rows, never borrowed source rows.
+	for group, latent := range compressedKV {
+		var key []float32
+		if indexKeys != nil {
+			key = indexKeys[group]
+		}
+		if err := m.v41CompressedPublicationRoPE(l, group*plan.Ratio, latent, key); err != nil {
+			return err
+		}
+	}
 	var indexList []int32
 	if plan.Ratio > 1 && indexSourceAt(cfg.DeepSeekV41, l) {
 		for t := 0; t < seq; t++ {
 			groups := min((t+1)/plan.Ratio, len(compressedKV))
-			localIdx, err := m.v41IndexRowsProjected(l, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection)
+			localIdx, err := m.v41IndexRowsProjected(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection)
 			if err != nil {
 				return err
 			}
@@ -749,7 +760,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			indexList = append(indexList, row...)
 		}
 	} else {
-		localIdx, err := m.v41IndexRowsProjected(l, qLatRows[seq-1], preByPos[seq-1], indexKeys, scratch.denseProjection)
+		localIdx, err := m.v41IndexRowsProjected(l, seq-1, qLatRows[seq-1], preByPos[seq-1], indexKeys, scratch.denseProjection)
 		if err != nil {
 			return err
 		}
@@ -796,8 +807,6 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 				return v41StageErr(v41StageAttention, l, err)
 			}
 		}
-		st.setLayerState(l, cfg.NumLayers, layerState)
-
 		registry, err := st.attentionState(hd, 8, cfg.IndexHeadDim)
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)
@@ -811,6 +820,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 				return v41StageErr(v41StageAttention, l, err)
 			}
 		}
+		// No owner becomes visible until both its rows and the registry rows
+		// passed validation. Registry publication above has no partial-error path.
+		st.setLayerState(l, cfg.NumLayers, layerState)
 		// An index source publishes its own per-position top-k selection so a
 		// later reader layer can reuse it without recomputing the scoring path.
 		// The selection is the source's local index list, one row per published

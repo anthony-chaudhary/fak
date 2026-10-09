@@ -41,7 +41,7 @@ func v41AttentionCompressedConfig(t *testing.T) Config {
 	cfg.DeepSeekV41.KVSourceLayerIDs = []int{0}
 	cfg.DeepSeekV41.IndexSourceLayerIDs = []int{0}
 	cfg.IndexNHeads = 2
-	cfg.IndexHeadDim = 4
+	cfg.IndexHeadDim = cfg.QKRopeHeadDim
 	cfg.IndexTopK = 2
 	return cfg
 }

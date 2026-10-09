@@ -37,7 +37,7 @@ func (m *Model) v41IndexKeysWithOperations(l int, rows [][]float32, project v41D
 	return keys, nil
 }
 
-func (m *Model) v41IndexRowsProjected(l int, qLat, hidden []float32, keys [][]float32, project v41DenseProjectionFunc) ([]int32, error) {
+func (m *Model) v41IndexRowsProjected(l, pos int, qLat, hidden []float32, keys [][]float32, project v41DenseProjectionFunc) ([]int32, error) {
 	d41 := m.Cfg.DeepSeekV41
 	if !indexSourceAt(d41, l) {
 		return nil, nil
@@ -63,6 +63,9 @@ func (m *Model) v41IndexRowsProjected(l int, qLat, hidden []float32, keys [][]fl
 	if err != nil {
 		return nil, err
 	}
+	if err := m.v41IndexRoPE(l, pos, q, nHeads); err != nil {
+		return nil, err
+	}
 	weights, err := m.v41ProjMatRowsWithProjection(l, "indexer.weights_proj.weight", hidden, nHeads, cfg.HiddenSize, project)
 	if err != nil {
 		return nil, err
@@ -81,4 +84,41 @@ func (m *Model) v41IndexRowsProjected(l int, qLat, hidden []float32, keys [][]fl
 		return nil, v41StageErr(v41StageIndexer, l, err)
 	}
 	return pub.Rows(), nil
+}
+
+// v41CompressedPublicationRoPE runs only on a producer's fresh rows, after the
+// index key has been projected and normalized from the unrotated latent. The
+// position is the first absolute token of the completed group. Readers and
+// restored publications already contain this rotation and must not call it.
+// Existing BF16 normalization boundaries are unchanged; reference FP4
+// quantization and post-rotation dtype copyback remain separate work.
+func (m *Model) v41CompressedPublicationRoPE(l, pos int, latent, indexKey []float32) error {
+	cfg := m.Cfg
+	rd := cfg.QKRopeHeadDim
+	if pos < 0 || rd <= 0 || rd%2 != 0 || rd > cfg.HeadDim || len(latent) != cfg.HeadDim {
+		return v41StageErr(v41StageCompress, l, fmt.Errorf("%w: invalid compressed rotary geometry or position", ErrV41ForwardStage))
+	}
+	if indexKey != nil && (rd > cfg.IndexHeadDim || len(indexKey) != cfg.IndexHeadDim) {
+		return v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: index rotary width %d exceeds or disagrees with key width %d", ErrV41ForwardStage, rd, cfg.IndexHeadDim))
+	}
+	cos, sin := v41RopeTableForLayer(cfg, l, pos)
+	if indexKey != nil {
+		applyRopeTailInterleaved(indexKey, cos, sin, rd)
+	}
+	applyRopeTailInterleaved(latent, cos, sin, rd)
+	return nil
+}
+
+func (m *Model) v41IndexRoPE(l, pos int, values []float32, heads int) error {
+	cfg := m.Cfg
+	dim, rd := cfg.IndexHeadDim, cfg.QKRopeHeadDim
+	width, valid := checkedMulInt(heads, dim)
+	if pos < 0 || heads <= 0 || dim <= 0 || !valid || len(values) != width || rd <= 0 || rd%2 != 0 || rd > dim {
+		return v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: invalid index rotary geometry or position", ErrV41ForwardStage))
+	}
+	cos, sin := v41RopeTableForLayer(cfg, l, pos)
+	for h := 0; h < heads; h++ {
+		applyRopeTailInterleaved(values[h*dim:(h+1)*dim], cos, sin, rd)
+	}
+	return nil
 }
