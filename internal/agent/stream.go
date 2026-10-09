@@ -36,6 +36,24 @@ import (
 // to the pre-seam trunk. The interface below is unchanged by that switch.
 type StreamSink func(contentDelta string) error
 
+type streamHeldActivityKey struct{}
+
+// WithStreamHeldActivity attaches a callback CompleteStream invokes on every upstream
+// delta it HOLDS off the sink (tool-call fragments, reasoning). The payload stays held;
+// the caller learns only that the turn is advancing, so it can commit its response and
+// keep the socket warm while a long tool call is generated.
+func WithStreamHeldActivity(ctx context.Context, f func()) context.Context {
+	if f == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, streamHeldActivityKey{}, f)
+}
+
+func streamHeldActivity(ctx context.Context) func() {
+	f, _ := ctx.Value(streamHeldActivityKey{}).(func())
+	return f
+}
+
 // StreamingPlanner is the optional capability a Planner advertises when it can
 // stream the upstream completion token-by-token. It is a strict superset of Planner:
 // CompleteStream behaves exactly like Complete (same sampling, same quarantine, same
@@ -847,6 +865,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	// deadline above, hands the gateway an elapsed-since-progress + retry-attempt receipt, and
 	// leaves the stream RUNNING — a slow-but-alive turn still gets every chance to finish.
 	sr.armSoftProgress(p.streamSoftProgressWindow(progressWindow), func() int { return call.attemptsUsed }, p.SoftStallNotify)
+	held := streamHeldActivity(ctx)
 	sc := bufio.NewScanner(sr)
 	// A single SSE data line can carry a large tool-call argument fragment; raise the
 	// scanner ceiling well past the 64 KiB default so a big chunk is never truncated.
@@ -900,6 +919,9 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 			}
 			if ch.Delta.ReasoningContent != "" {
 				reasoning.WriteString(ch.Delta.ReasoningContent)
+			}
+			if held != nil && (ch.Delta.ReasoningContent != "" || len(ch.Delta.ToolCalls) > 0) {
+				held()
 			}
 			for _, tcd := range ch.Delta.ToolCalls {
 				acc := toolAcc[tcd.Index]

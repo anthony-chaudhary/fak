@@ -344,6 +344,10 @@ func (h *heartbeatConfig) emitHeartbeat(w http.ResponseWriter) bool {
 	return true
 }
 
+// heldKeepaliveEvery bounds the silence of a committed live stream while the model
+// decodes output the client cannot see yet (a tool call held for adjudication).
+const heldKeepaliveEvery = time.Second
+
 // streamChatLive serves POST /v1/chat/completions as a TRUE token stream: it
 // forwards each upstream CONTENT fragment to the client as an OpenAI SSE chunk the
 // instant the model emits it, so time-to-first-token tracks the model rather than the
@@ -453,6 +457,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		w.WriteHeader(http.StatusOK)
 		return writeSSEData(w, chunk(ChatDelta{Role: agent.RoleAssistant}, nil, nil))
 	}
+	var lastWrite time.Time
 	emitContent := func(contentDelta string) error {
 		if contentDelta == "" {
 			return nil
@@ -465,13 +470,47 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		timePhase(sessionTurn.turnCost, turncost.PhaseStream, func() {
 			werr = writeSSEData(w, chunk(ChatDelta{Content: contentDelta}, nil, nil))
 		})
+		lastWrite = time.Now()
 		return werr
 	}
+	// heldActivity runs for every upstream token the client cannot see yet (tool-call
+	// fragments and reasoning held for adjudication) and commits on the first content
+	// fragment, even one the lift-guard withholds. Once the model is decoding, a pre-token
+	// failure is no longer possible, so commit the
+	// 200 + role chunk; then keep the socket warm with an SSE comment so a long tool call
+	// is never a silent socket that a client or router stall watchdog cuts.
+	heldActivity := func() error {
+		if !started {
+			if err := start(); err != nil {
+				return err
+			}
+			hb.markStreamStart()
+			lastWrite = time.Now()
+			return nil
+		}
+		if time.Since(lastWrite) < heldKeepaliveEvery {
+			return nil
+		}
+		lastWrite = time.Now()
+		if _, err := fmt.Fprint(w, ": fak-held\n\n"); err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	}
+	heldCtx := agent.WithStreamHeldActivity(ctx, func() { _ = heldActivity() })
 	// The sink streams prose through the lift-guard so a text-form tool-call dialect a
 	// model buries in content never reaches the wire before adjudication. Whatever the
 	// guard withheld is reconciled against the buffered post-lift content below.
 	guard := newLiftGuard(emitContent)
-	utf8Fragments := newUTF8FragmentBuffer(guard.write)
+	utf8Fragments := newUTF8FragmentBuffer(func(s string) error {
+		if !started {
+			if err := heldActivity(); err != nil {
+				return err
+			}
+		}
+		return guard.write(s)
+	})
 	opts := []agent.SampleOpt{
 		agent.WithModel(req.Model),
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
@@ -500,7 +539,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	defer lease.Release()
 
 	began := time.Now()
-	turnCtx := plannerTurnContext(ctx, nil, req.Messages, s.contextEpoch)
+	turnCtx := plannerTurnContext(heldCtx, nil, req.Messages, s.contextEpoch)
 	var firstDelta firstDeltaClock
 	comp, err := sp.CompleteStream(turnCtx, firstDelta.wrap(utf8Fragments.write), req.Messages, req.Tools, chatRouteOpts(ctx, opts)...)
 	stopHB()
