@@ -148,7 +148,7 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	adoptedDetected := false
 
 	// Probe backend to verify reachability and auto-detect the served model + context window
-	detectedModel, reachable, detectedWindow, resolvedBaseURL, advertisedModels := probePiBackendWithCatalog(targetBaseURL, 1500*time.Millisecond)
+	detectedModel, reachable, _, resolvedBaseURL, advertisedModels, advertisedWindows := probePiBackendWithCatalog(targetBaseURL, 1500*time.Millisecond)
 	if reachable {
 		backendActive = true
 		// Adopt the origin that answered: a loopback literal can be refused while
@@ -189,16 +189,15 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
-	// Safe context budget: an explicit --window wins; otherwise the window the backend
-	// advertised; otherwise the default prior. PiSafeContextBudget derives the envelope once
-	// from that raw window (docs/long-context-defaults.md).
+	// Resolve one raw input for the selected model, not the /healthz local engine:
+	// explicit --window, then that model's advertised bound, then the registry/prior.
+	// Keep the existing per-model registry limits in PiModelContextBudget and pass the
+	// same input to the provider writers, compaction settings, and diagnostics.
 	servedWindow := *window
 	if servedWindow <= 0 {
-		servedWindow = detectedWindow
+		servedWindow = piAdvertisedModelWindow(targetModel, advertisedWindows)
 	}
-	// Per-model budget: a named model (e.g. DeepSeek-V4.1-Flash) resolves its own served
-	// window rather than inheriting whatever the backend advertised for the local engine.
-	budget := projectassets.PiModelContextBudget(targetModel, *window)
+	budget := projectassets.PiModelContextBudget(targetModel, servedWindow)
 
 	if *printEnv {
 		fmt.Fprintln(stdout, "# Environment configuration for Pi with fak serve backend on Mac")
@@ -368,6 +367,22 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	return piLaunchRun(stdout, stderr, argvOut, env)
+}
+
+// piAdvertisedModelWindow prefers an exact model id, then the same qualified/case
+// aliases accepted for a deliberate default. Ambiguous aliases use the smallest
+// positive bound; another model's window is never a fallback for a missing match.
+func piAdvertisedModelWindow(model string, windows map[string]int) int {
+	if window := windows[model]; window > 0 {
+		return window
+	}
+	window := 0
+	for id, candidate := range windows {
+		if candidate > 0 && projectassets.IsPiModelAdvertised(model, []string{id}) && (window == 0 || candidate < window) {
+			window = candidate
+		}
+	}
+	return window
 }
 
 // configuredPiProviderBaseURL returns the persisted Fak provider endpoint when
@@ -543,25 +558,25 @@ func probePiBackend(baseURL string, timeout time.Duration) (model string, ok boo
 // resident target from the real window instead of an assumed prior (see
 // projectassets.PiSafeContextBudget).
 func probePiBackendWithWindow(baseURL string, timeout time.Duration) (model string, ok bool, window int, resolvedBaseURL string) {
-	model, ok, window, resolved, _ := probePiBackendWithCatalog(baseURL, timeout)
+	model, ok, window, resolved, _, _ := probePiBackendWithCatalog(baseURL, timeout)
 	return model, ok, window, resolved
 }
 
 // probePiBackendWithCatalog is probePiBackendWithWindow plus the backend's advertised model
 // catalog from /v1/models, so the caller can tell a real, servable default from a stale
-// placeholder id (see projectassets.PiDefaultModelIsDeliberate). The catalog is collected from
-// whichever origin answered the probe.
-func probePiBackendWithCatalog(baseURL string, timeout time.Duration) (model string, ok bool, window int, resolvedBaseURL string, advertised []string) {
+// placeholder id (see projectassets.PiDefaultModelIsDeliberate) and size the selected model.
+// Model ids and positive per-model windows come from whichever origin answered the probe.
+func probePiBackendWithCatalog(baseURL string, timeout time.Duration) (model string, ok bool, window int, resolvedBaseURL string, advertised []string, windows map[string]int) {
 	client := &http.Client{Timeout: timeout}
-	if m, ok, w, ids := probePiBackendWindowFull(client, baseURL); ok {
-		return m, true, w, baseURL, ids
+	if m, ok, w, ids, windows := probePiBackendWindowFull(client, baseURL); ok {
+		return m, true, w, baseURL, ids, windows
 	}
 	if fallback, ok := fakclient.LoopbackFallbackURL(baseURL); ok {
-		if m, ok, w, ids := probePiBackendWindowFull(client, fallback); ok {
-			return m, true, w, fallback, ids
+		if m, ok, w, ids, windows := probePiBackendWindowFull(client, fallback); ok {
+			return m, true, w, fallback, ids, windows
 		}
 	}
-	return "", false, 0, baseURL, nil
+	return "", false, 0, baseURL, nil, nil
 }
 
 // probePiBackendOnce probes a single backend base URL for the served model id.
@@ -574,14 +589,14 @@ func probePiBackendOnce(client *http.Client, baseURL string) (string, bool) {
 // <base>/models for the served model id AND its advertised context_length (the window the safe
 // budget is derived from).
 func probePiBackendWindow(client *http.Client, baseURL string) (model string, ok bool, window int) {
-	model, ok, window, _ = probePiBackendWindowFull(client, baseURL)
+	model, ok, window, _, _ = probePiBackendWindowFull(client, baseURL)
 	return model, ok, window
 }
 
 // probePiBackendWindowFull is probePiBackendWindow plus every advertised model id in the
-// /v1/models catalog, so a caller can validate a configured default against what the
-// backend actually serves.
-func probePiBackendWindowFull(client *http.Client, baseURL string) (model string, ok bool, window int, advertised []string) {
+// /v1/models catalog and its positive per-model windows, so a caller can validate and
+// size a configured default against what the backend actually serves.
+func probePiBackendWindowFull(client *http.Client, baseURL string) (model string, ok bool, window int, advertised []string, windows map[string]int) {
 	healthy := false
 	healthURL := strings.TrimRight(strings.TrimSuffix(baseURL, "/v1"), "/") + "/healthz"
 	resp, err := client.Get(healthURL)
@@ -610,9 +625,13 @@ func probePiBackendWindowFull(client *http.Client, baseURL string) (model string
 			} `json:"data"`
 		}
 		if json.NewDecoder(mResp.Body).Decode(&catalog) == nil && len(catalog.Data) > 0 {
+			windows = make(map[string]int)
 			for _, row := range catalog.Data {
 				if row.ID != "" {
 					advertised = append(advertised, row.ID)
+					if row.ContextLength > 0 && (windows[row.ID] == 0 || row.ContextLength < windows[row.ID]) {
+						windows[row.ID] = row.ContextLength
+					}
 				}
 			}
 			if model == "" {
@@ -627,14 +646,14 @@ func probePiBackendWindowFull(client *http.Client, baseURL string) (model string
 			if window == 0 {
 				window = catalog.Data[0].ContextLength
 			}
-			return model, true, window, advertised
+			return model, true, window, advertised, windows
 		}
-		return model, healthy, 0, advertised
+		return model, healthy, 0, advertised, windows
 	}
 	if healthy {
-		return model, true, 0, advertised
+		return model, true, 0, advertised, windows
 	}
-	return "", false, 0, nil
+	return "", false, 0, nil, nil
 }
 
 func buildPiLaunchArgv(opts piLaunchOptions) []string {
