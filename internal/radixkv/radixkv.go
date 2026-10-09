@@ -1390,7 +1390,8 @@ func (t *Tree) IsNodePinned(n *node) bool {
 
 // SetNodeRetention sets a client-declared per-request KV retention descriptor on node n.
 // Validates the request (fails closed on out-of-range priority or negative TTL/admitted).
-// Priority >= 90 pins the node as Tier 0 (seg = 3, immune from eviction).
+// Priority >= 90 protects the node as Tier 0 only within its declared TTL window.
+// For these high priorities, RetainForever also pins the ancestor path, like PinPrefix.
 func (t *Tree) SetNodeRetention(n *node, req RetentionRequest) error {
 	if n == nil {
 		return errors.New("radixkv: nil node")
@@ -1402,8 +1403,13 @@ func (t *Tree) SetNodeRetention(n *node, req RetentionRequest) error {
 	n.retention = &retCopy
 	tier := TierFromRetentionPriority(req.Priority)
 	n.tier = tier
-	n.tierSet = true
-	if tier == Tier0PinnedRoot {
+	// A finite high-priority request must remain clock-governed: either a
+	// permanent tier marker or pinPath would make it immune after expiry.
+	// This preserves the TTL lifecycle of TensorRT-LLM's releaseBlock/refresh
+	// at f4c5c935aa891b0826f73936c4831236cb6ff836 (Apache-2.0; #5259), using
+	// Fak's existing logical expiry and probationary demotion semantics.
+	n.tierSet = tier != Tier0PinnedRoot || req.TTL == RetainForever
+	if tier == Tier0PinnedRoot && req.TTL == RetainForever {
 		t.pinPath(n)
 	} else {
 		n.pinned = false
