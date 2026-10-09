@@ -49,6 +49,22 @@ func WithTemperature(t *float64) SampleOpt {
 	}
 }
 
+// WithClientTemperature relays a client's temperature. A non-nil t sets it like
+// WithTemperature; a nil t (the client omitted it) leaves temperature off the
+// OpenAI-compatible wire, so the upstream engine's model default applies instead
+// of the planner's fixed 0. Greedy decoding the client never asked for locks
+// quantized local models into identical tool-call loops.
+func WithClientTemperature(t *float64) SampleOpt {
+	return func(sp *SampleParams) {
+		if t == nil {
+			sp.InheritUpstreamTemperature = true
+			return
+		}
+		v := *t
+		sp.Temperature = &v
+	}
+}
+
 // WithTopP sets the per-request nucleus-sampling cutoff. nil is a no-op.
 func WithTopP(p *float64) SampleOpt {
 	return func(sp *SampleParams) {

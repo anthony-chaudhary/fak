@@ -514,7 +514,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	opts := []agent.SampleOpt{
 		agent.WithModel(req.Model),
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
-		agent.WithTemperature(req.Temperature),
+		agent.WithClientTemperature(req.Temperature),
 		agent.WithTopP(req.TopP),
 		agent.WithStop(normalizeStop(req.Stop)),
 		// Structured-output passthrough (#907): the streamed wire forwards the same

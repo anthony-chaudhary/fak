@@ -562,6 +562,10 @@ type SampleParams struct {
 	TopP        *float64 // nucleus sampling (nil => unset on the wire)
 	TopK        *int     // top-k truncation (nil => unset; <=0 => no truncation)
 	Stop        []string // stop sequences (empty => unset on the wire)
+
+	// InheritUpstreamTemperature, with a nil Temperature, omits temperature from the
+	// OpenAI-compatible wire instead of sending the planner default.
+	InheritUpstreamTemperature bool
 	// ResponseFormat is the OpenAI structured-output carrier (the #560 guided-decode
 	// seam): the raw `response_format` object the client sent (a json_object or a
 	// json_schema spec). Empty => unset on the wire, byte-for-byte the pre-seam body.

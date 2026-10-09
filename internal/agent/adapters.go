@@ -72,6 +72,8 @@ type adapterRequest struct {
 	MaxTokens           int
 	TopP                *float64 // nil => omit from the wire (planner/provider default)
 	TopK                *int     // nil => omit; only the providers with a native top-k field carry it
+	FrequencyPenalty    *float64 // nil => omit; OpenAI-compatible chat wire only
+	PresencePenalty     *float64 // nil => omit; OpenAI-compatible chat wire only
 	Stop                []string // empty => omit from the wire
 	// ResponseFormat / LogitBias are the OpenAI structured/guided-decode carriers
 	// (#560). They ride on the wire ONLY where the provider has a native field
@@ -160,19 +162,21 @@ func (a openAIAdapter) Headers(apiKey string) map[string]string {
 }
 
 type openAIRequest struct {
-	ServiceTier    string               `json:"service_tier,omitempty"`
-	Model          string               `json:"model"`
-	Messages       []Message            `json:"messages"`
-	Tools          []ToolDef            `json:"tools,omitempty"`
-	ToolChoice     string               `json:"tool_choice,omitempty"`
-	Temperature    float64              `json:"temperature"`
-	MaxTokens      int                  `json:"max_tokens,omitempty"`
-	TopP           *float64             `json:"top_p,omitempty"`
-	Stop           []string             `json:"stop,omitempty"`
-	ResponseFormat json.RawMessage      `json:"response_format,omitempty"` // #560 structured/guided decode (OpenAI/xAI native)
-	LogitBias      map[int]float64      `json:"logit_bias,omitempty"`      // #560 per-token logit mask (OpenAI/xAI native)
-	Stream         bool                 `json:"stream,omitempty"`          // true => SSE token stream (StreamingPlanner)
-	StreamOptions  *openAIStreamOptions `json:"stream_options,omitempty"`
+	ServiceTier      string               `json:"service_tier,omitempty"`
+	Model            string               `json:"model"`
+	Messages         []Message            `json:"messages"`
+	Tools            []ToolDef            `json:"tools,omitempty"`
+	ToolChoice       string               `json:"tool_choice,omitempty"`
+	Temperature      *float64             `json:"temperature,omitempty"`
+	MaxTokens        int                  `json:"max_tokens,omitempty"`
+	TopP             *float64             `json:"top_p,omitempty"`
+	FrequencyPenalty *float64             `json:"frequency_penalty,omitempty"`
+	PresencePenalty  *float64             `json:"presence_penalty,omitempty"`
+	Stop             []string             `json:"stop,omitempty"`
+	ResponseFormat   json.RawMessage      `json:"response_format,omitempty"` // #560 structured/guided decode (OpenAI/xAI native)
+	LogitBias        map[int]float64      `json:"logit_bias,omitempty"`      // #560 per-token logit mask (OpenAI/xAI native)
+	Stream           bool                 `json:"stream,omitempty"`          // true => SSE token stream (StreamingPlanner)
+	StreamOptions    *openAIStreamOptions `json:"stream_options,omitempty"`
 }
 
 // openAIStreamOptions carries the OpenAI/vLLM/SGLang stream control that asks the
@@ -207,18 +211,24 @@ func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 	if r.OpenAIToolMessagesAsText {
 		messages = openAIToolMessagesAsText(messages)
 	}
+	var temp *float64
+	if !r.OmitTemperature {
+		temp = &r.Temperature
+	}
 	req := openAIRequest{
-		ServiceTier:    serviceTierWire(a.Provider(), r.ServiceTier),
-		Model:          r.Model,
-		Messages:       messages,
-		Tools:          openAICompatibleTools(r.Tools),
-		ToolChoice:     toolChoice,
-		Temperature:    r.Temperature,
-		MaxTokens:      r.MaxTokens,
-		TopP:           r.TopP,
-		Stop:           r.Stop,
-		ResponseFormat: r.ResponseFormat,
-		LogitBias:      r.LogitBias,
+		ServiceTier:      serviceTierWire(a.Provider(), r.ServiceTier),
+		Model:            r.Model,
+		Messages:         messages,
+		Tools:            openAICompatibleTools(r.Tools),
+		ToolChoice:       toolChoice,
+		Temperature:      temp,
+		MaxTokens:        r.MaxTokens,
+		TopP:             r.TopP,
+		FrequencyPenalty: penaltyUnlessExtra(r.FrequencyPenalty, r.ExtraBody, "frequency_penalty"),
+		PresencePenalty:  penaltyUnlessExtra(r.PresencePenalty, r.ExtraBody, "presence_penalty"),
+		Stop:             r.Stop,
+		ResponseFormat:   r.ResponseFormat,
+		LogitBias:        r.LogitBias,
 	}
 	if r.Stream {
 		// Ask for usage on the terminal chunk so a streamed turn still reports token
@@ -227,6 +237,21 @@ func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 		req.StreamOptions = &openAIStreamOptions{IncludeUsage: true}
 	}
 	return marshalWithExtraBody(req, r.ExtraBody)
+}
+
+// penaltyUnlessExtra keeps an operator ExtraBody penalty authoritative: a client
+// value for the same key would otherwise make marshalWithExtraBody refuse the turn.
+func penaltyUnlessExtra(v *float64, extra json.RawMessage, key string) *float64 {
+	if v == nil || len(extra) == 0 {
+		return v
+	}
+	var keys map[string]json.RawMessage
+	if json.Unmarshal(extra, &keys) == nil {
+		if _, ok := keys[key]; ok {
+			return nil
+		}
+	}
+	return v
 }
 
 // foldLateSystemMessages moves every system/developer message that follows the

@@ -922,7 +922,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	comp, err := s.completeServed(ctx, sessionTurn, req.Messages, req.Tools,
 		agent.WithModel(req.Model), // no-op when the client omitted model
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
-		agent.WithTemperature(req.Temperature),
+		agent.WithClientTemperature(req.Temperature),
 		agent.WithTopP(req.TopP),
 		agent.WithStop(normalizeStop(req.Stop)),
 		// Structured-output passthrough (#907): forward the client's response_format /
