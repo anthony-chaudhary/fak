@@ -50,6 +50,9 @@ type Config struct {
 	HiddenAct        string            `json:"hidden_act,omitempty"`
 	HiddenActivation string            `json:"hidden_activation,omitempty"`
 	TensorAliases    map[string]string `json:"tensor_aliases,omitempty"`
+	// QuantizationConfig retains checkpoint metadata for format-specific loader
+	// admission. It does not select a runtime kernel or a KV-cache format.
+	QuantizationConfig json.RawMessage `json:"quantization_config,omitempty"`
 
 	// ImageTokenID is the wrapper's image placeholder id (image_token_id) when
 	// the checkpoint is multimodal. Zero when absent. It is retained as a
