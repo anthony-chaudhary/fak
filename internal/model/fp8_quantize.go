@@ -41,7 +41,8 @@ var fp8BF16Lo = [128]byte{
 func fp8E4M3Lookup(b byte) float32 {
 	i := b & 0x7f
 	if i == 0x7f {
-		return fp8E4M3ToF32(b)
+		// Match mathx.DecodeE4M3's canonical NaN bits for either sign.
+		return float32(math.NaN())
 	}
 	return math.Float32frombits(uint32(fp8BF16Hi[i]|(b&0x80))<<24 | uint32(fp8BF16Lo[i])<<16)
 }

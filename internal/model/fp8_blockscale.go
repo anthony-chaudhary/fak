@@ -1,8 +1,6 @@
 package model
 
 import (
-	"github.com/anthony-chaudhary/fak/internal/mathx"
-
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -31,7 +29,7 @@ import (
 // fp8BlockDim x fp8BlockDim tile of the weight.
 const fp8BlockDim = 128
 
-func fp8E4M3ToF32(b byte) float32 { return mathx.DecodeE4M3(b) }
+func fp8E4M3ToF32(b byte) float32 { return fp8E4M3Lookup(b) }
 
 // FP8E4M3ToF32 exposes the E4M3 byte decode to the internal/model/v41 leaf
 // package without renaming the core symbol.

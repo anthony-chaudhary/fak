@@ -4,6 +4,8 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 // fak-test:runtime fast est=100ms lane=default
@@ -12,13 +14,13 @@ import (
 func TestFP8TiledQuantLoadMatchesExpanded(t *testing.T) {
 	t.Run("lookup", func(t *testing.T) {
 		for code := 0; code < 256; code++ {
-			got, want := fp8E4M3Lookup(byte(code)), fp8E4M3ToF32(byte(code))
-			if math.IsNaN(float64(want)) {
-				if !math.IsNaN(float64(got)) {
-					t.Fatalf("E4M3FN 0x%02x = %v, want NaN", code, got)
-				}
-			} else if math.Float32bits(got) != math.Float32bits(want) {
+			got, want := fp8E4M3ToF32(byte(code)), mathx.DecodeE4M3(byte(code))
+			// Compare NaN payloads and signed zero as well as finite values.
+			if math.Float32bits(got) != math.Float32bits(want) {
 				t.Fatalf("E4M3FN 0x%02x = %08x, want %08x", code, math.Float32bits(got), math.Float32bits(want))
+			}
+			if got := FP8E4M3ToF32(byte(code)); math.Float32bits(got) != math.Float32bits(want) {
+				t.Fatalf("exported E4M3FN 0x%02x = %08x, want %08x", code, math.Float32bits(got), math.Float32bits(want))
 			}
 		}
 	})
