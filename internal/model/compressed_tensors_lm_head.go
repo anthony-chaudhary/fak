@@ -45,50 +45,6 @@ func compressedHeadMetadataPresent(b json.RawMessage) bool {
 	return len(b) != 0 && !bytes.Equal(bytes.TrimSpace(b), []byte("null"))
 }
 
-// Configuration objects must not hide conflicting fields behind JSON's
-// last-key-wins map decoding. The shared safetensors header/index parser still
-// collapses duplicate JSON keys; rejection there is outside this loader slice.
-func compressedHeadUniqueKeys(raw []byte) error {
-	d := json.NewDecoder(bytes.NewReader(raw))
-	var value func() error
-	value = func() error {
-		token, err := d.Token()
-		if err != nil {
-			return err
-		}
-		switch token {
-		case json.Delim('{'):
-			seen := map[string]bool{}
-			for d.More() {
-				key, err := d.Token()
-				if err != nil {
-					return err
-				}
-				name, ok := key.(string)
-				if !ok || seen[name] {
-					return fmt.Errorf("duplicate or invalid field %v", key)
-				}
-				seen[name] = true
-				if err := value(); err != nil {
-					return err
-				}
-			}
-			_, err = d.Token()
-			return err
-		case json.Delim('['):
-			for d.More() {
-				if err := value(); err != nil {
-					return err
-				}
-			}
-			_, err = d.Token()
-			return err
-		}
-		return nil
-	}
-	return value()
-}
-
 // Use the upstream's name-only exact/dotted-suffix/re.match contract. In
 // particular the module-type target "Linear" cannot activate an LM head.
 func compressedHeadTargetMatches(target string) (bool, error) {
@@ -107,13 +63,10 @@ func compressedTensorsLMHeadEnabled(cfg Config) (bool, error) {
 	if !compressedHeadMetadataPresent(cfg.QuantizationConfig) {
 		return false, nil
 	}
-	if err := compressedHeadUniqueKeys(cfg.QuantizationConfig); err != nil {
-		return false, fmt.Errorf("safetensors: quantization_config: %w", err)
-	}
 	var method struct {
 		Method string `json:"quant_method"`
 	}
-	if err := json.Unmarshal(cfg.QuantizationConfig, &method); err != nil {
+	if err := unmarshalUniqueJSON(cfg.QuantizationConfig, &method); err != nil {
 		return false, fmt.Errorf("safetensors: quantization_config: %w", err)
 	}
 	if method.Method != "compressed-tensors" {
