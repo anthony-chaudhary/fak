@@ -70,6 +70,10 @@ func TestModelFacingSyntheticProducersHaveNextWitnesses(t *testing.T) {
 	// hand-maintained file list. Initial transcript literals and assistant/tool rows
 	// are not mid-session synthetic appends and therefore remain outside this ratchet.
 	requestAdapters := []syntheticProducer{
+		// Both late-system folding branches re-encode existing transcript directives;
+		// they do not introduce a new synthetic payload. Keep both occurrences counted.
+		{File: "internal/agent/adapters.go", Role: "RoleUser", Payload: "text"},
+		{File: "internal/agent/adapters.go", Role: "RoleUser", Payload: "text"},
 		{File: "internal/agent/anthropic_server.go", Role: "RoleSystem", Payload: "out.System"},
 		{File: "internal/agent/anthropic_server.go", Role: "RoleUser", Payload: "text.String()"},
 		{File: "internal/agent/gemini_server.go", Role: "RoleSystem", Payload: "out.System"},
@@ -264,4 +268,30 @@ func hasCall(source []byte, want string) bool {
 		return !found
 	})
 	return found
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestSyntheticProducerInventoryPreservesDuplicateMultiplicity(t *testing.T) {
+	t.Parallel()
+	producer := syntheticProducer{File: "internal/agent/adapters.go", Role: "RoleUser", Payload: "text"}
+	classified := []syntheticProducer{producer, producer}
+	for _, count := range []int{1, 2, 3} {
+		source := []byte("package p\nfunc f(out []Message, text string) {\n" +
+			strings.Repeat("out = append(out, Message{Role: RoleUser, Content: text})\n", count) + "}\n")
+		got, err := collectSyntheticProducers(producer.File, source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := make([]syntheticProducer, count)
+		for i := range want {
+			want[i] = producer
+		}
+		sortProducers(got)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("%d identical appends: got %+v want %+v", count, got, want)
+		}
+		if matches := reflect.DeepEqual(got, classified); matches != (count == len(classified)) {
+			t.Fatalf("%d identical appends: classified multiplicity is %d, inventory matches = %v", count, len(classified), matches)
+		}
+	}
 }
