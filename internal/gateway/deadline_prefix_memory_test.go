@@ -1,7 +1,9 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,8 +14,9 @@ import (
 	"github.com/anthony-chaudhary/fak/pkg/deadlineadmit"
 )
 
-// haloPiDeadlineServer primes the node estimator with the 2026-10-09 strix3
-// shape: 86 t/s prefill and 21 t/s decode, nothing else in flight.
+// haloPiDeadlineServer primes the node estimator with synthetic rates of
+// 86 t/s prefill and 21 t/s decode, nothing else in flight. This fixture is
+// an admission-policy control, not a hardware performance witness.
 func haloPiDeadlineServer(t *testing.T) *Server {
 	t.Helper()
 	srv := newTestServer(t)
@@ -51,7 +54,7 @@ func admitHaloTurn(t *testing.T, srv *Server, ctx context.Context, msgs []agent.
 
 // fak-test:justify why=regression when=changed:internal/gateway/**
 // fak-test:runtime fast est=50ms lane=default
-func TestDeadlineAdmissionAdmitsWarmMultiTurnPromptThisNodeServed(t *testing.T) {
+func TestDeadlineAdmissionDoesNotCreditReleasedHistory(t *testing.T) {
 	srv := haloPiDeadlineServer(t)
 	turn1, turn2 := haloPiTurns()
 
@@ -60,13 +63,21 @@ func TestDeadlineAdmissionAdmitsWarmMultiTurnPromptThisNodeServed(t *testing.T) 
 		t.Fatal("turn 1 without a declared budget was refused")
 	}
 	release()
-
-	rec, release, ok := admitHaloTurn(t, srv, context.Background(), turn2, "600")
-	if !ok {
-		t.Fatalf("warm turn 2 refused: status=%d %s=%q; want admission (48k of 50k tokens resident)",
-			rec.Code, deadlineadmit.HeaderReject, rec.Header().Get(deadlineadmit.HeaderReject))
+	if n := srv.metrics.deadlineEstimator().InFlight(); n != 0 {
+		t.Fatalf("in-flight after release = %d, want 0", n)
 	}
-	release()
+
+	// Admission and release establish no cache residency, even when the request
+	// context is still healthy. The extending turn must retain its cold estimate.
+	rec, release, ok := admitHaloTurn(t, srv, context.Background(), turn2, "600")
+	if release != nil {
+		defer release()
+	}
+	if ok || rec.Code != http.StatusServiceUnavailable ||
+		rec.Header().Get(deadlineadmit.HeaderReject) != string(deadlineadmit.ReasonDeadlineInfeasible) {
+		t.Fatalf("turn 2 after release: ok=%v status=%d reject=%q; want cold refusal %q",
+			ok, rec.Code, rec.Header().Get(deadlineadmit.HeaderReject), deadlineadmit.ReasonDeadlineInfeasible)
+	}
 }
 
 // fak-test:justify why=invariant when=changed:internal/gateway/**
@@ -85,7 +96,7 @@ func TestDeadlineAdmissionRefusesColdHugePrompt(t *testing.T) {
 
 // fak-test:justify why=invariant when=changed:internal/gateway/**
 // fak-test:runtime fast est=50ms lane=default
-func TestDeadlineAdmissionDoesNotRememberCanceledTurn(t *testing.T) {
+func TestDeadlineAdmissionDoesNotCreditCanceledHistory(t *testing.T) {
 	srv := haloPiDeadlineServer(t)
 	turn1, turn2 := haloPiTurns()
 
@@ -94,7 +105,7 @@ func TestDeadlineAdmissionDoesNotRememberCanceledTurn(t *testing.T) {
 	if !ok {
 		t.Fatal("turn 1 without a declared budget was refused")
 	}
-	cancel() // the client left before the turn finished: its prefix is not known resident
+	cancel()
 	release()
 
 	rec, _, ok := admitHaloTurn(t, srv, context.Background(), turn2, "600")
@@ -104,24 +115,86 @@ func TestDeadlineAdmissionDoesNotRememberCanceledTurn(t *testing.T) {
 	}
 }
 
-// fak-test:justify why=invariant when=changed:internal/gateway/**
-// fak-test:runtime fast est=10ms lane=default
-func TestDeadlinePrefixMemoryExpiresAndMatchesOnlyExactPrefixes(t *testing.T) {
+// fak-test:justify why=regression when=changed:internal/gateway/**
+// fak-test:runtime fast est=50ms lane=default
+func TestDeadlineAdmissionDoesNotCreditFailedHTTPRequest(t *testing.T) {
+	srv := haloPiDeadlineServer(t)
+	planner := &chatDecodeTraceCountingPlanner{native: false}
+	srv.planner = planner
 	turn1, turn2 := haloPiTurns()
-	mem := &deadlinePrefixMemory{entries: map[[32]byte]deadlinePrefixEntry{}}
-	now := time.Unix(1_800_000_000, 0)
-	chain1 := deadlinePrefixChain(turn1)
-	mem.remember(chain1[len(chain1)-1], 48_000, now)
 
-	if got := mem.residentTokens(deadlinePrefixChain(turn2), now.Add(time.Minute)); got != 48_000 {
-		t.Fatalf("resident tokens for an extending turn = %d, want 48000", got)
+	post := func(messages []agent.Message, trace bool, budget string) *httptest.ResponseRecorder {
+		t.Helper()
+		body, err := json.Marshal(ChatRequest{Messages: messages, FakDecodeTrace: trace})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		if budget != "" {
+			r.Header.Set(deadlineadmit.HeaderStainlessTimeout, budget)
+		}
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, r)
+		if err := r.Context().Err(); err != nil {
+			t.Fatalf("request context = %v, want healthy context", err)
+		}
+		return rec
 	}
-	edited := append([]agent.Message(nil), turn2...)
-	edited[1] = agent.Message{Role: "user", Content: "a different history"}
-	if got := mem.residentTokens(deadlinePrefixChain(edited), now.Add(time.Minute)); got != 0 {
-		t.Fatalf("resident tokens for a diverged history = %d, want 0", got)
+
+	// This request passes deadline admission without a budget, then fails before
+	// inference because its planner cannot supply a native decode trace.
+	rec := post(turn1, true, "")
+	if rec.Code != http.StatusBadRequest || planner.calls != 0 ||
+		!strings.Contains(rec.Body.String(), "fak_decode_trace requires a fak-native model route") {
+		t.Fatalf("failed request: status=%d planner calls=%d body=%s; want non-native trace refusal before inference",
+			rec.Code, planner.calls, rec.Body.String())
 	}
-	if got := mem.residentTokens(deadlinePrefixChain(turn2), now.Add(deadlinePrefixTTL+time.Second)); got != 0 {
-		t.Fatalf("resident tokens past the TTL = %d, want 0", got)
+	if n := srv.metrics.deadlineEstimator().InFlight(); n != 0 {
+		t.Fatalf("in-flight after failed request = %d, want 0", n)
+	}
+
+	rec = post(turn2, false, "600")
+	if rec.Code != http.StatusServiceUnavailable ||
+		rec.Header().Get(deadlineadmit.HeaderReject) != string(deadlineadmit.ReasonDeadlineInfeasible) ||
+		rec.Header().Get("Retry-After") == "" || planner.calls != 0 {
+		t.Fatalf("turn 2 after failed request: status=%d reject=%q retry=%q planner calls=%d; want cold 503 before inference",
+			rec.Code, rec.Header().Get(deadlineadmit.HeaderReject), rec.Header().Get("Retry-After"), planner.calls)
+	}
+}
+
+// fak-test:justify why=invariant when=changed:internal/gateway/**
+// fak-test:runtime fast est=50ms lane=default
+func TestDeadlineAdmissionPreservesExplicitCachedTokenCredit(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		cachedTok int
+		wantAdmit bool
+	}{
+		{name: "cold", cachedTok: 0, wantAdmit: false},
+		{name: "trusted-cache-input", cachedTok: 48_000, wantAdmit: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := haloPiDeadlineServer(t)
+			_, turn2 := haloPiTurns()
+			r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			r.Header.Set(deadlineadmit.HeaderStainlessTimeout, "600")
+			rec := httptest.NewRecorder()
+			// The caller explicitly supplies trusted credit for this API control;
+			// no physical cache or gateway history is claimed as residency proof.
+			_, release, ok := srv.admitClientDeadlineCached(rec, r, time.Now(), estimateMessageContentTokens(turn2), tc.cachedTok, 0)
+			if release != nil {
+				defer release()
+			}
+			if ok != tc.wantAdmit {
+				t.Fatalf("admit with cached=%d: ok=%v status=%d reject=%q; want %v",
+					tc.cachedTok, ok, rec.Code, rec.Header().Get(deadlineadmit.HeaderReject), tc.wantAdmit)
+			}
+			if !ok && (rec.Code != http.StatusServiceUnavailable ||
+				rec.Header().Get(deadlineadmit.HeaderReject) != string(deadlineadmit.ReasonDeadlineInfeasible)) {
+				t.Fatalf("cold direct admission: status=%d reject=%q; want typed 503",
+					rec.Code, rec.Header().Get(deadlineadmit.HeaderReject))
+			}
+		})
 	}
 }

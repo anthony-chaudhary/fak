@@ -34,10 +34,6 @@ type gatewayMetrics struct {
 	// deadline_admission.go); created lazily through deadlineEstimator.
 	deadlineOnce sync.Once
 	deadlineEst  *deadlineadmit.Estimator
-	// deadlinePrefix predicts the resident KV prefix of a new chat turn for
-	// deadline admission; created lazily through deadlinePrefixes.
-	deadlinePrefixOnce sync.Once
-	deadlinePrefix     *deadlinePrefixMemory
 
 	mu         sync.Mutex
 	http       map[httpMetricKey]*latencyCounter

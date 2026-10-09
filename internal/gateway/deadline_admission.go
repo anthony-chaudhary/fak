@@ -2,9 +2,7 @@ package gateway
 
 import (
 	"context"
-	"crypto/sha256"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -29,14 +27,11 @@ import (
 // A request with no declared budget is admitted unchanged, and a node that
 // has not measured any throughput yet admits everything.
 //
-// The estimate charges prefill only for the prompt this node is expected to
-// re-ingest. A multi-turn agent resends its whole history each turn, and the
-// prefix this node already served is still resident in its KV cache, so a
-// 50k-token turn with a 48k resident prefix prefills ~2k tokens, not 50k.
-// Both sides use that currency: observation measures the prefill rate over
-// the uncached tokens only, and admission predicts the resident prefix from
-// deadlinePrefixMemory. A prompt with no resident-prefix evidence is
-// estimated cold, which keeps the protection for genuinely huge cold prompts.
+// Observation measures prefill throughput over uncached tokens only. Admission
+// can discount tokens when the caller supplies current resident-prefix evidence.
+// The chat entrypoint has no such evidence, so it estimates the full prompt cold:
+// a previous request's history or successful return does not prove that its KV
+// state is still resident and compatible with the selected execution route.
 
 // deadlineEstimator returns the node-wide estimator, creating it on first use
 // so a directly constructed gatewayMetrics works too.
@@ -77,26 +72,13 @@ func (s *Server) admitClientDeadline(w http.ResponseWriter, r *http.Request, arr
 	return s.admitClientDeadlineCached(w, r, arrived, promptTok, 0, maxTokens)
 }
 
-// admitClientDeadlineMessages is admitClientDeadline for a chat request: it
-// predicts the resident KV prefix from the conversations this node recently
-// finished, and on a clean finish records this request's messages as resident
-// for the next turn.
+// admitClientDeadlineMessages estimates a chat request without cache credit.
+// TODO: Supply nonzero credit only from authoritative, route-bound cache
+// residency evidence that remains valid through execution, including eviction.
+// Until then, even genuinely warm long prompts may be refused by the cold estimate.
 func (s *Server) admitClientDeadlineMessages(w http.ResponseWriter, r *http.Request, arrived time.Time, messages []agent.Message, maxTokens int) (*http.Request, func(), bool) {
-	mem := s.metrics.deadlinePrefixes()
-	chain := deadlinePrefixChain(messages)
 	promptTok := estimateMessageContentTokens(messages)
-	cached := mem.residentTokens(chain, arrived)
-	r, release, ok := s.admitClientDeadlineCached(w, r, arrived, promptTok, cached, maxTokens)
-	if !ok {
-		return r, release, false
-	}
-	ctx := r.Context()
-	return r, func() {
-		if ctx.Err() == nil && len(chain) > 0 {
-			mem.remember(chain[len(chain)-1], promptTok, time.Now())
-		}
-		release()
-	}, true
+	return s.admitClientDeadlineCached(w, r, arrived, promptTok, 0, maxTokens)
 }
 
 func (s *Server) admitClientDeadlineCached(w http.ResponseWriter, r *http.Request, arrived time.Time, promptTok, cachedTok, maxTokens int) (*http.Request, func(), bool) {
@@ -119,95 +101,4 @@ func (s *Server) admitClientDeadlineCached(w http.ResponseWriter, r *http.Reques
 	}
 	ctx, cancel := context.WithDeadline(r.Context(), arrived.Add(budget))
 	return r.WithContext(ctx), func() { end(); cancel() }, true
-}
-
-// deadlinePrefixMemory remembers, per node, the message prefixes of chat
-// requests this node finished recently, so admission can predict how much of a
-// new turn's prompt is already resident in the KV cache. It is keyed by a
-// chained digest of the leading messages (role + content), so a hit means the
-// new request starts with exactly a conversation this node served. The memory
-// is bounded and entries expire, because an engine slot evicted by other
-// traffic stops being resident; a miss falls back to the cold estimate.
-type deadlinePrefixMemory struct {
-	mu      sync.Mutex
-	entries map[[sha256.Size]byte]deadlinePrefixEntry
-}
-
-type deadlinePrefixEntry struct {
-	tokens int
-	at     time.Time
-}
-
-const (
-	deadlinePrefixTTL        = 10 * time.Minute
-	deadlinePrefixMaxEntries = 1024
-)
-
-func (m *gatewayMetrics) deadlinePrefixes() *deadlinePrefixMemory {
-	if m == nil {
-		return nil
-	}
-	m.deadlinePrefixOnce.Do(func() {
-		m.deadlinePrefix = &deadlinePrefixMemory{entries: map[[sha256.Size]byte]deadlinePrefixEntry{}}
-	})
-	return m.deadlinePrefix
-}
-
-// deadlinePrefixChain returns one digest per leading-message prefix:
-// chain[i] identifies messages[0..i].
-func deadlinePrefixChain(messages []agent.Message) [][sha256.Size]byte {
-	chain := make([][sha256.Size]byte, len(messages))
-	var prev [sha256.Size]byte
-	for i, msg := range messages {
-		h := sha256.New()
-		h.Write(prev[:])
-		h.Write([]byte(msg.Role))
-		h.Write([]byte{0})
-		h.Write([]byte(msg.Content))
-		h.Sum(prev[:0])
-		chain[i] = prev
-	}
-	return chain
-}
-
-// residentTokens returns the token size of the longest remembered, unexpired
-// prefix of chain, or 0 when none is remembered.
-func (p *deadlinePrefixMemory) residentTokens(chain [][sha256.Size]byte, now time.Time) int {
-	if p == nil || len(chain) == 0 {
-		return 0
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for i := len(chain) - 1; i >= 0; i-- {
-		e, ok := p.entries[chain[i]]
-		if !ok {
-			continue
-		}
-		if now.Sub(e.at) > deadlinePrefixTTL {
-			delete(p.entries, chain[i])
-			continue
-		}
-		return e.tokens
-	}
-	return 0
-}
-
-func (p *deadlinePrefixMemory) remember(key [sha256.Size]byte, tokens int, now time.Time) {
-	if p == nil || tokens <= 0 {
-		return
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if _, ok := p.entries[key]; !ok && len(p.entries) >= deadlinePrefixMaxEntries {
-		var oldestKey [sha256.Size]byte
-		var oldest time.Time
-		first := true
-		for k, e := range p.entries {
-			if first || e.at.Before(oldest) {
-				oldestKey, oldest, first = k, e.at, false
-			}
-		}
-		delete(p.entries, oldestKey)
-	}
-	p.entries[key] = deadlinePrefixEntry{tokens: tokens, at: now}
 }
