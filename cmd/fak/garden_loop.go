@@ -448,9 +448,14 @@ var gardenLoopRegisterOS = func(stdout, stderr io.Writer, fakBin, root string, i
 // a leaked unit keeps firing long after the test exits.
 var errGardenTestRegisterLive = errors.New("garden loop: test registration would touch the live host scheduler")
 
+// gardenTestTempRoots supplies the temporary roots accepted by the test-only
+// registration guard. The test binary adds its Go-specific root at initialization,
+// keeping test-harness environment discovery out of the shipped configuration surface.
+var gardenTestTempRoots = func() []string { return []string{os.TempDir()} }
+
 // guardGardenTestRegister is a no-op outside a test binary. Under test it
 // refuses schtasks (a live command) and a unit write under a home outside the
-// temp roots t.TempDir can use (os.TempDir, or GOTMPDIR when set).
+// temporary roots supplied by the test harness.
 func guardGardenTestRegister(goos string) error {
 	if !testing.Testing() {
 		return nil
@@ -462,11 +467,7 @@ func guardGardenTestRegister(goos string) error {
 	if err != nil {
 		return fmt.Errorf("%w: %v", errGardenTestRegisterLive, err)
 	}
-	roots := []string{os.TempDir()}
-	if d := strings.TrimSpace(os.Getenv("GOTMPDIR")); d != "" {
-		roots = append(roots, d)
-	}
-	for _, root := range roots {
+	for _, root := range gardenTestTempRoots() {
 		if pathUnderDir(home, root) {
 			return nil
 		}

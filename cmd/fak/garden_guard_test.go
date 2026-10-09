@@ -5,9 +5,20 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func init() {
+	gardenTestTempRoots = func() []string {
+		roots := []string{os.TempDir()}
+		if d := strings.TrimSpace(os.Getenv("GOTMPDIR")); d != "" {
+			roots = append(roots, d)
+		}
+		return roots
+	}
+}
 
 type gardenGuardRoots struct {
 	base, tmpRoot, goTmp, outside string

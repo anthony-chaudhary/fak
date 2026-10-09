@@ -41,6 +41,12 @@ package envconfiglint
 // the scan cannot corroborate, so the lines are deleted below — but record what that costs:
 // the reads are now UNGATED, and nothing stops a new env read from being added behind either
 // helper. Re-add the entry, and prefer a literal call site, if a helper is ever inlined.
+//
+// FAK_UP_MAX_RSS has the same visibility debt: cmd/fak/up.go passes os.Getenv into
+// resolveUpMaxRSSOptions in up_max_rss_auto.go, which still reads the name through
+// its getenv parameter. Its entry is removed because the scanner cannot corroborate
+// it, not because it migrated to explicit configuration. The #13605/#13616 migration
+// remains outstanding; deleting this ledger entry does not retire that runtime input.
 var admittedPostFreeze = []string{
 	// cmd/fak/dispatch_tick_lease_beat.go — overrides os.Hostname() as the identity stamped on
 	// the DOS lane leases the dispatch tick beats, so two workers on one box can hold distinct
@@ -715,11 +721,10 @@ var admittedPostFreeze = []string{
 	"FAK_STREAM_STALL_TIMEOUT_S",
 
 	// cmd/fak/up.go, up_native.go, up_service.go, serve_model_fit.go — env spellings of `fak up`
-	// workspace, RSS ceiling, KV precision, loader-heap scavenge, and service label/state dir.
+	// workspace, KV precision, loader-heap scavenge, and service label/state dir.
 	// Relocates to: the existing `fak up` flags and service config.
 	"FAK_UP_CODE_WORKSPACE",
 	"FAK_UP_KV_PRECISION",
-	"FAK_UP_MAX_RSS",
 	"FAK_UP_SCAVENGE_LOADER_HEAP",
 	"FAK_UP_SERVICE_LABEL",
 	"FAK_UP_SERVICE_STATE_DIR",
