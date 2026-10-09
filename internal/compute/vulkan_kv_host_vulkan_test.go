@@ -231,7 +231,7 @@ func TestVulkanKVHostSnapshotContract(t *testing.T) {
 		}
 	})
 
-	t.Run("restore submission failure publishes nothing and frees allocations", func(t *testing.T) {
+	t.Run("pre-submit restore failure publishes nothing and poisons observation", func(t *testing.T) {
 		exe, err := os.Executable()
 		if err != nil {
 			t.Fatalf("resolve restore-fault test executable: %v", err)
@@ -257,11 +257,13 @@ func vulkanKVHostRestoreFailureContract(t *testing.T) {
 	v := vk(t)
 	cfg := KVConfig{NumLayers: 2, NumKVHeads: 1, HeadDim: 2, RopeTheta: 10000, Precision: KVPrecisionF32}
 	state := vulkanKVHostExpected(cfg, []int{2, 3}, []int{500, 600})
-	before, err := v.BackendExecutionSnapshot()
-	if err != nil {
-		t.Fatalf("restore failure allocation baseline: %v", err)
+	before, available, err := CaptureBackendExecutionSnapshot(v)
+	if err != nil || !available || !before.TransferCountersObserved || !before.DeviceAllocationObserved {
+		t.Fatalf("restore failure observation baseline: snapshot=%+v available=%t err=%v", before, available, err)
 	}
 
+	// This seam fails before queue submission, so abort can retire the fresh
+	// allocations safely. An uncertain submit/wait must retain its resources.
 	v.VulkanDebugSetRestoreFailureAfterSubmits(0)
 	defer v.VulkanDebugSetRestoreFailureAfterSubmits(-1)
 	restored, restoreErr := RestoreKVFromHost(v, state)
@@ -282,12 +284,11 @@ func vulkanKVHostRestoreFailureContract(t *testing.T) {
 	if v.VulkanDebugRestoreActive() {
 		t.Fatal("failed restore left the native restore transaction active")
 	}
-	after, err := v.BackendExecutionSnapshot()
-	if err != nil {
-		t.Fatalf("restore failure allocation result: %v", err)
-	}
-	if after.DeviceAllocationLiveBytes != before.DeviceAllocationLiveBytes {
-		t.Fatalf("failed restore retained device bytes: before=%d after=%d", before.DeviceAllocationLiveBytes, after.DeviceAllocationLiveBytes)
+	// Sticky device loss refuses physical observations even after a safe abort.
+	// An unavailable snapshot is not evidence of zero retained device bytes.
+	after, available, err := CaptureBackendExecutionSnapshot(v)
+	if err == nil || !strings.Contains(err.Error(), "Vulkan transfer counters are unavailable") || available || after != (BackendExecutionSnapshot{}) {
+		t.Fatalf("poisoned restore observation: snapshot=%+v available=%t err=%v, want unavailable with no partial snapshot", after, available, err)
 	}
 }
 
