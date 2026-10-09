@@ -144,10 +144,19 @@ likely to forget (a missing prototype or a missing binding):
 - [`.github/workflows/cuda-build.yml`](https://github.com/anthony-chaudhary/fak/blob/main/.github/workflows/cuda-build.yml) runs
   **automatically** on every CUDA-touching push/PR, on plain GitHub-hosted runners with **no
   GPU**: the ABI/header preflight, the pure-Go cgo-leak guard (the default build must stay
-  pure-Go), `go vet -tags cuda` (no toolkit), and — in an `nvidia/cuda:12.6.2-devel` container
-  — an `nvcc` compile of the kernels plus `go build -tags cuda` (which *links* against the
-  image's cudart/cublas stub libs but never *runs*, so no device is needed). This buys "a peer
-  can't break the kernels or the cgo seam unnoticed" for ~2 minutes on the rare CUDA PR.
+  pure-Go), `go vet -tags cuda` (no toolkit), and — in official NVIDIA NGC CUDA `-devel`
+  containers — an `nvcc` compile of the kernels plus `go build -tags cuda` (which *links*
+  against the image's cudart/cublas stub libs but never *runs*, so no device is needed).
+  The matrix keeps CUDA 12.6.2 for `sm_89` and CUDA 12.8.1 for `sm_100`/`sm_120`, all on
+  Ubuntu 22.04. Each image in the workflow is pinned by its multi-platform index digest.
+  On 2026-10-09, anonymous manifest reads from [NVIDIA NGC](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/cuda)
+  and NVIDIA's Docker Hub repository returned byte-identical indexes and `linux/amd64`
+  manifests for both tags. The NGC origin avoids the observed Docker Hub unauthenticated
+  pull-limit failure before checkout; it preserves the toolkits and every compile gate.
+  [NVIDIA lists both tags as unsupported](https://gitlab.com/nvidia/container-images/cuda/-/raw/master/doc/unsupported-tags.md).
+  Digest pinning fixes content selection, but does not guarantee registry availability or
+  remove existing image vulnerabilities. Full image pulls and compiler results still need
+  an exact-head CI witness; manifest equality alone does not prove those steps succeeded.
 - [`.github/workflows/windows-cuda.yml`](https://github.com/anthony-chaudhary/fak/blob/main/.github/workflows/windows-cuda.yml) is the
   **manual** GPU lane: a self-hosted Windows+CUDA runner that runs the signed-binary Approx
   gate. It needs a real GPU and a signing cert, so it is `workflow_dispatch` only.

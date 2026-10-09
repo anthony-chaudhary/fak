@@ -101,11 +101,11 @@ jobs:
       matrix:
         include:
           - arch: sm_89
-            image: nvidia/cuda:12.6.2-devel-ubuntu22.04
+            image: nvcr.io/nvidia/cuda:12.6.2-devel-ubuntu22.04@sha256:1c253f721b28b27c924677493c8ed45812c1b1a562bca828c144683b444e7298
           - arch: sm_100
-            image: nvidia/cuda:12.8.1-devel-ubuntu22.04
+            image: nvcr.io/nvidia/cuda:12.8.1-devel-ubuntu22.04@sha256:a99a1860ba8e2916e5c3e73b72ec4c4301653a84586e05bfc9a2aa2d58027e97
           - arch: sm_120
-            image: nvidia/cuda:12.8.1-devel-ubuntu22.04
+            image: nvcr.io/nvidia/cuda:12.8.1-devel-ubuntu22.04@sha256:a99a1860ba8e2916e5c3e73b72ec4c4301653a84586e05bfc9a2aa2d58027e97
     # -devel ships nvcc + cuBLAS headers + the cudart/cublas stub libs the cgo link needs (no
     # GPU). The image is pinned per-arch (above) and documented; keep the arch set consistent
     # with internal/compute/cuda_arch.txt (the authoritative set) and Dockerfile.cuda. The

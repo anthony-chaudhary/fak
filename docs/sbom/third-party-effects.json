@@ -223,22 +223,21 @@
     },
     {
       "class": "container_base",
-      "reference": "nvidia/cuda:12.6.2-devel-ubuntu22.04",
+      "reference": "nvcr.io/nvidia/cuda:12.6.2-devel-ubuntu22.04@sha256:1c253f721b28b27c924677493c8ed45812c1b1a562bca828c144683b444e7298",
       "consumer_domains": [
         ".github/workflows"
       ],
       "status": "used",
-      "pin": "unresolved",
-      "digest": "",
+      "pin": "immutable",
+      "digest": "sha256:1c253f721b28b27c924677493c8ed45812c1b1a562bca828c144683b444e7298",
       "license_record": "none",
       "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
-      "note": "CI job container for the cuda-build.yml sm_89 nvcc leg; 12.6 cannot emit the Blackwell targets, so those legs run on 12.8.1-devel."
+      "note": "CI job container for the cuda-build.yml sm_89 nvcc leg, pinned to the official NVIDIA NGC index verified byte-identical to Docker Hub on 2026-10-09. CUDA 12.6.2 devel and Ubuntu 22.04 are unchanged; NVIDIA lists this tag as unsupported."
     },
     {
       "class": "container_base",
       "reference": "nvidia/cuda:12.8.1-devel-ubuntu22.04",
       "consumer_domains": [
-        ".github/workflows",
         "Dockerfile.cuda"
       ],
       "status": "used",
@@ -246,7 +245,20 @@
       "digest": "",
       "license_record": "none",
       "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
-      "note": "Dockerfile.cuda build stage and the cuda-build.yml sm_100/sm_120 nvcc legs (compute_100/compute_120 need a 12.8 toolkit)."
+      "note": "Dockerfile.cuda build stage; compute_100/compute_120 need a 12.8 toolkit. The CI nvcc legs use the separately registered, digest-pinned NVIDIA NGC reference."
+    },
+    {
+      "class": "container_base",
+      "reference": "nvcr.io/nvidia/cuda:12.8.1-devel-ubuntu22.04@sha256:a99a1860ba8e2916e5c3e73b72ec4c4301653a84586e05bfc9a2aa2d58027e97",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "immutable",
+      "digest": "sha256:a99a1860ba8e2916e5c3e73b72ec4c4301653a84586e05bfc9a2aa2d58027e97",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "CI job container for the cuda-build.yml sm_100/sm_120 nvcc legs, pinned to the official NVIDIA NGC index verified byte-identical to Docker Hub on 2026-10-09. CUDA 12.8.1 devel and Ubuntu 22.04 are unchanged; NVIDIA lists this tag as unsupported."
     },
     {
       "class": "container_base",
