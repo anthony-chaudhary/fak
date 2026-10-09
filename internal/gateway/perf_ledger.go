@@ -42,7 +42,11 @@ type perfDetail struct {
 	// upstreamDraft / upstreamAccepted are a proxied upstream's own speculative
 	// counts from its llama.cpp-shaped timings.
 	upstreamDraft, upstreamAccepted int
-	src                             perfSource
+	// kvCacheN is the llama.cpp-shaped timings.cache_n: prompt tokens the
+	// serving engine reused from its KV cache. Deadline admission falls back
+	// to it when the usage block carries no cached-token counter.
+	kvCacheN int
+	src      perfSource
 }
 
 // perfSource is who sent a turn: the closed client class and whether the sender
@@ -85,6 +89,9 @@ func perfDetailFromCompletion(comp *agent.Completion) perfDetail {
 		return perfDetail{}
 	}
 	d := perfDetail{model: comp.Model}
+	if t := comp.Timings; t != nil && t.CacheN > 0 {
+		d.kvCacheN = t.CacheN
+	}
 	if nd := comp.NativeDecode; nd != nil {
 		e := &perfledger.Engine{Path: nd.Path, CohortSize: nd.CohortSize}
 		if sp := nd.Speculative; sp != nil {

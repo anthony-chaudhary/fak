@@ -1062,18 +1062,33 @@ func (m *gatewayMetrics) observeInferenceTimedDetail(loc servingLocality, prompt
 		}
 	}
 	m.inferenceMu.Unlock()
-	residentPromptTok := 0
-	for _, tokens := range []int{promptTok, cachedTok, cacheCreateTok} {
+	// Deadline currency: the full resident prompt, of which the cache-read part
+	// was not prefilled. A cache write was prefilled, so it counts as uncached.
+	// An OpenAI-shaped usage with no cached-token counter leaves the engine's
+	// timings.cache_n inside promptTok, so it is peeled back off here.
+	readTok := max(cachedTok, 0)
+	uncachedTok := saturatingTokenSum(promptTok, cacheCreateTok)
+	if readTok == 0 && detail.kvCacheN > 0 {
+		readTok = min(detail.kvCacheN, max(promptTok, 0))
+		uncachedTok = saturatingTokenSum(promptTok-readTok, cacheCreateTok)
+	}
+	residentPromptTok := saturatingTokenSum(uncachedTok, readTok)
+	m.observeDeadlineTiming(residentPromptTok, residentPromptTok-uncachedTok, complTok, dur, ttft)
+}
+
+// saturatingTokenSum adds the positive token counts, saturating at MaxInt.
+func saturatingTokenSum(counts ...int) int {
+	sum := 0
+	for _, tokens := range counts {
 		if tokens <= 0 {
 			continue
 		}
-		if residentPromptTok > math.MaxInt-tokens {
-			residentPromptTok = math.MaxInt
-			break
+		if sum > math.MaxInt-tokens {
+			return math.MaxInt
 		}
-		residentPromptTok += tokens
+		sum += tokens
 	}
-	m.observeDeadlineTiming(residentPromptTok, complTok, dur, ttft)
+	return sum
 }
 
 // regimeLatencyHists is one cache regime's TTFT / TPOT / e2e histograms (#5630).

@@ -777,7 +777,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// Deadline-aware admission: refuse work that cannot finish before the
 	// client's declared deadline, and bind that deadline to the request
 	// context so generation stops when it passes (deadline_admission.go).
-	r, releaseDeadline, ok := s.admitClientDeadline(w, r, turnCostBegan, estimateMessageContentTokens(req.Messages), req.MaxTokens)
+	r, releaseDeadline, ok := s.admitClientDeadlineMessages(w, r, turnCostBegan, req.Messages, req.MaxTokens)
 	if !ok {
 		return
 	}
