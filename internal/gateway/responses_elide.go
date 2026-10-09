@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
 const (
@@ -51,6 +52,9 @@ func (s *Server) maybeElideResponsesToolResults(trace string, messages []agent.M
 	if threshold <= 0 {
 		return messages
 	}
+	if line := s.elisionShedLine(); line > 0 && estimateMessageContentTokens(messages) < line {
+		return messages
+	}
 
 	var toolIndices []int
 	for i, m := range messages {
@@ -90,4 +94,22 @@ func (s *Server) maybeElideResponsesToolResults(trace string, messages []agent.M
 		return out
 	}
 	return messages
+}
+
+// elisionShedLine is the resident-token line below which tool-result elision stays off,
+// derived once from the raw served window through harnesskit.DeriveContextEnvelope. A
+// self-compacting client compacts at the envelope's CompactTrigger; this layer sheds only
+// once a request no longer leaves the envelope's output budget, so it never cuts a window
+// the client already sized and never rewrites a cached prefix the client would keep.
+// 0 (served window unknown) keeps the count-only behavior.
+func (s *Server) elisionShedLine() int {
+	window := s.catalogContextWindow(s.model, s.planner)
+	if window <= 0 {
+		return 0
+	}
+	env, err := harnesskit.DeriveContextEnvelope(harnesskit.ContextEnvelopeInput{ServedWindow: window, Source: harnesskit.WindowServed})
+	if err != nil {
+		return 0
+	}
+	return env.ContextWindow - env.OutputTokens
 }
