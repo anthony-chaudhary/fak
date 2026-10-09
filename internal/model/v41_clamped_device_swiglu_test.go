@@ -178,6 +178,9 @@ func TestV41ClampedDeviceSwiGLUSessionStepAndSuffix(t *testing.T) {
 					t.Fatal(err)
 				}
 				b.session = s
+				// Keep this routed-expert activation witness's transfer envelope
+				// separate from the shared-expert activation witness.
+				s.v41State().sharedActivation = nil
 				t.Cleanup(s.Close)
 				if len(s.Prefill([]int{1, 2, 3})) == 0 || !s.v41IncrementalEligible() {
 					t.Fatal("prefill did not seed incremental session")
@@ -361,6 +364,8 @@ func TestV41ClampedDeviceSwiGLUFailureFreesAndRetries(t *testing.T) {
 				t.Fatal(err)
 			}
 			b.session = s
+			// Fault injection and attribution in this test target routed experts.
+			s.v41State().sharedActivation = nil
 			t.Cleanup(s.Close)
 			s.Prefill([]int{1, 2, 3})
 			b.live = map[compute.Buffer]bool{}

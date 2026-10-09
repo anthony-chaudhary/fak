@@ -31,16 +31,17 @@ import (
 // 40-layer churn, with byte-identical arithmetic (the same f32 values land in
 // the same layout).
 type v41ProjScratch struct {
-	woA             []float32
-	woB             []float32
-	expertGateUp    v41ExpertGateUpFunc
-	expertDown      v41ExpertDownFunc
-	denseProjection v41DenseProjectionFunc
-	groupedOutput   v41GroupedOutputFunc
-	mhcProjection   v41MHCProjectionFunc
-	queryNorm       v41QueryNormFunc
-	kvNorm          v41KVNormFunc
-	ffnNorm         v41FFNNormFunc
+	woA              []float32
+	woB              []float32
+	expertGateUp     v41ExpertGateUpFunc
+	expertDown       v41ExpertDownFunc
+	denseProjection  v41DenseProjectionFunc
+	groupedOutput    v41GroupedOutputFunc
+	mhcProjection    v41MHCProjectionFunc
+	queryNorm        v41QueryNormFunc
+	kvNorm           v41KVNormFunc
+	ffnNorm          v41FFNNormFunc
+	sharedActivation v41SharedActivationFunc
 
 	// exp1/exp3/exp2 are the REUSED materialization targets for one routed
 	// expert's three projections (ffn.experts.<e>.w1/w3/w2.weight). They were

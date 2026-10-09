@@ -17,6 +17,10 @@ func (m *Model) v41SharedExpertSwiGLU(l int, xn []float32, cfg Config) ([]float3
 }
 
 func (m *Model) v41SharedExpertSwiGLUWithProjection(l int, xn []float32, cfg Config, project v41DenseProjectionFunc) ([]float32, error) {
+	return m.v41SharedExpertSwiGLUWithActivation(l, xn, cfg, project, nil)
+}
+
+func (m *Model) v41SharedExpertSwiGLUWithActivation(l int, xn []float32, cfg Config, project v41DenseProjectionFunc, activate v41SharedActivationFunc) ([]float32, error) {
 	I, H := cfg.MoEIntermediateSize, cfg.HiddenSize
 	h1, err := m.v41ProjMatRowsWithProjection(l, "ffn.shared_experts.w1.weight", xn, I, H, project)
 	if err != nil {
@@ -25,6 +29,32 @@ func (m *Model) v41SharedExpertSwiGLUWithProjection(l int, xn []float32, cfg Con
 	h3, err := m.v41ProjMatRowsWithProjection(l, "ffn.shared_experts.w3.weight", xn, I, H, project)
 	if err != nil {
 		return nil, err
+	}
+	if activate != nil && !cfg.ActGeluTanh && !cfg.ActGeluErf {
+		values, outcome, err := activate(l, h1, h3, float32(cfg.SwigluLimit))
+		switch outcome {
+		case v41ProjectionHandled:
+			if err == nil && len(values) != I {
+				err = errV41ProjectionResult
+			}
+			if err == nil {
+				for _, v := range values {
+					if !finite32(v) {
+						err = errV41ProjectionResult
+						break
+					}
+				}
+			}
+			if err != nil {
+				return nil, v41ProjectionOperationErr(l, "ffn.shared_experts.activation", err)
+			}
+			return m.v41ProjMatRowsWithProjection(l, "ffn.shared_experts.w2.weight", values, H, I, project)
+		case v41ProjectionError:
+			return nil, v41ProjectionOperationErr(l, "ffn.shared_experts.activation", err)
+		case v41ProjectionDeclined:
+		default:
+			return nil, v41ProjectionOperationErr(l, "ffn.shared_experts.activation", errV41ProjectionResult)
+		}
 	}
 	clampSwiGLUProjections(h1, h3, float32(cfg.SwigluLimit))
 	return ffn.Gated(h1, h3, func(v float32) float32 { return act(v, cfg) }, func(activated []float32) ([]float32, error) {

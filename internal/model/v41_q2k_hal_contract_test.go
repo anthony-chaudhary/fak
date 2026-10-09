@@ -310,6 +310,9 @@ func TestV41Q2KGateUpHALDeviceDown(t *testing.T) {
 			if devSess.v41ExpertGateUpFunc() == nil {
 				t.Fatal("a DeviceMemory session did not bind the device gate/up callback")
 			}
+			// This witness counts routed-only activation calls. The shared
+			// default callback has its own full-pipeline dispatch witness.
+			devSess.v41State().sharedActivation = nil
 			denseBefore, groupedBefore := v41DenseTestPhase(t, m, "decode"), v41GroupedPhase(t, m, "decode")
 			m.v41SetExpertFaultPhase(V41PhaseDecode)
 			got := v41DecodeHistory(t, devSess, []int{1})

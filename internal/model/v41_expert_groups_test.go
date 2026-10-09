@@ -396,6 +396,9 @@ func TestV41ExpertGroupsDeviceSeam(t *testing.T) {
 			be := &v41HalSeamBackend{Backend: compute.Default()}
 			devSess := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
 			devState := devSess.v41State()
+			// Isolate routed rows; shared activation is covered by the
+			// default-session shared activation witness, including limit zero.
+			devState.sharedActivation = nil
 			if devState.expertGateUp == nil {
 				t.Fatal("a DeviceMemory session did not bind the device gate/up callback")
 			}

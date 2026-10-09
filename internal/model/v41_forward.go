@@ -160,6 +160,7 @@ type v41ForwardState struct {
 	queryNorm        v41QueryNormFunc
 	kvNorm           v41KVNormFunc
 	ffnNorm          v41FFNNormFunc
+	sharedActivation v41SharedActivationFunc
 	callbackOwner    *Session
 }
 
@@ -287,7 +288,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, sharedActivation: st.sharedActivation, callbackOwner: st.callbackOwner}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -439,6 +440,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.queryNorm = nil
 	scratch.kvNorm = nil
 	scratch.ffnNorm = nil
+	scratch.sharedActivation = nil
 	if st != nil {
 		scratch.denseProjection = st.denseProjection
 		scratch.groupedOutput = st.groupedOutput
@@ -446,6 +448,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.queryNorm = st.queryNorm
 		scratch.kvNorm = st.kvNorm
 		scratch.ffnNorm = st.ffnNorm
+		scratch.sharedActivation = st.sharedActivation
 	}
 	defer func() {
 		scratch.denseProjection = nil
@@ -454,6 +457,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.queryNorm = nil
 		scratch.kvNorm = nil
 		scratch.ffnNorm = nil
+		scratch.sharedActivation = nil
 	}()
 
 	// Engram injection happens at the START of the layer, into the residual,
@@ -1015,7 +1019,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	for t := 0; t < seq; t++ {
 		xn := ffnInputs[t]
 		routed := routedByToken[t]
-		shared, err := m.v41SharedExpertSwiGLUWithProjection(l, xn, cfg, scratch.denseProjection)
+		shared, err := m.v41SharedExpertSwiGLUWithActivation(l, xn, cfg, scratch.denseProjection, scratch.sharedActivation)
 		if err != nil {
 			return err
 		}
@@ -1336,6 +1340,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.queryNorm = s.v41QueryNormFunc()
 		s.v41Forward.kvNorm = s.v41KVNormFunc()
 		s.v41Forward.ffnNorm = s.v41FFNNormFunc()
+		s.v41Forward.sharedActivation = s.v41SharedActivationFunc()
 		s.v41Forward.callbackOwner = s
 	}
 	return s.v41Forward

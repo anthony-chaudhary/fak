@@ -131,6 +131,8 @@ func TestV41ClampedDeviceSwiGLUHalo(t *testing.T) {
 		}
 		s.v41State().denseProjection = nil
 		s.v41State().groupedOutput = nil
+		// This physical witness isolates routed-expert activation transfers.
+		s.v41State().sharedActivation = nil
 		defer s.Close()
 		if len(s.Prefill([]int{1, 2, 3})) == 0 || !s.v41IncrementalEligible() {
 			t.Fatal("physical session did not seed incremental state")

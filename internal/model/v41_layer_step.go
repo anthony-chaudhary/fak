@@ -352,7 +352,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 			routed[i] += pick.weight * y[i]
 		}
 	}
-	shared, err := m.v41SharedExpertSwiGLUWithProjection(l, ffnX, cfg, scratch.denseProjection)
+	shared, err := m.v41SharedExpertSwiGLUWithActivation(l, ffnX, cfg, scratch.denseProjection, scratch.sharedActivation)
 	if err != nil {
 		return err
 	}
@@ -737,7 +737,7 @@ func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, 
 			routed[i] += pick.weight * y[i]
 		}
 	}
-	shared, err := m.v41SharedExpertSwiGLUWithProjection(l, ffnX, cfg, scratch.denseProjection)
+	shared, err := m.v41SharedExpertSwiGLUWithActivation(l, ffnX, cfg, scratch.denseProjection, scratch.sharedActivation)
 	if err != nil {
 		return err
 	}
