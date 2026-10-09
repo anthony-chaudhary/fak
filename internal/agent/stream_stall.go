@@ -238,6 +238,7 @@ type stallReader struct {
 	tripped bool   // a timer fired and closed rc — the next Read error is a stall
 	kind    string // which deadline fired: stallKindIdle, stallKindNoProgress, or stallKindMaxDuration
 	closed  bool   // rc has been closed (by Close or a timer) — close exactly once
+	sawByte bool   // the upstream delivered at least one body byte; before that, prefill is still running
 }
 
 // newStallReader wraps rc with an idle (inter-byte) deadline of window, a content
@@ -322,8 +323,21 @@ func (s *stallReader) stallCause() (string, time.Duration) {
 	case stallKindMaxDuration:
 		return stallKindMaxDuration, s.maxDurationWindow
 	default:
-		return stallKindIdle, s.window
+		return stallKindIdle, s.idleWindowLocked()
 	}
+}
+
+// idleWindowLocked is the idle deadline the next Read arms. Before the first body byte the
+// upstream may still be prefilling, and llama.cpp-style servers emit nothing during prefill:
+// a 45k-token prompt at ~150 tok/s is ~300s of legitimate silence, so the 60s inter-byte
+// window cancelled it and the retry repeated the prefill. Until a byte arrives the idle
+// deadline is therefore the (longer) content-progress window; after it, the inter-byte window.
+// Callers hold s.mu.
+func (s *stallReader) idleWindowLocked() time.Duration {
+	if !s.sawByte && s.progressWindow > s.window {
+		return s.progressWindow
+	}
+	return s.window
 }
 
 // armSoftProgress attaches the SOFT, NON-TERMINAL no-progress deadline (#10638): after
@@ -385,19 +399,23 @@ func (s *stallReader) softStrike(retryAttempt func() int) {
 // never re-armed by Read — it is the absolute budget ceiling.
 func (s *stallReader) Read(p []byte) (int, error) {
 	if s.timer != nil {
-		s.timer.Reset(s.window)
+		s.mu.Lock()
+		window := s.idleWindowLocked()
+		s.mu.Unlock()
+		s.timer.Reset(window)
 	}
 	n, err := s.rc.Read(p)
 	if s.timer != nil {
 		s.timer.Stop()
 	}
-	if err != nil {
-		s.mu.Lock()
-		tripped := s.tripped
-		s.mu.Unlock()
-		if tripped {
-			return n, ErrUpstreamStalled
-		}
+	s.mu.Lock()
+	if n > 0 {
+		s.sawByte = true
+	}
+	tripped := s.tripped
+	s.mu.Unlock()
+	if err != nil && tripped {
+		return n, ErrUpstreamStalled
 	}
 	return n, err
 }
