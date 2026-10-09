@@ -748,4 +748,11 @@ var admittedPostFreeze = []string{
 	// cmd/fak/ops_schedule.go — explicit OpenCode executable path.
 	// Relocates to: ops schedule config.
 	"OPENCODE_BIN",
+
+	// internal/gateway/response_format_carrier.go — byte and nesting-depth caps on the
+	// response_format.json_schema.schema the gateway forwards. Preserve PR #13718's
+	// sizing overrides, not credentials; literal call sites keep these reads gated.
+	// Relocates to: gateway Config fields set by `fak serve` flags.
+	"FAK_GATEWAY_JSON_SCHEMA_MAX_BYTES",
+	"FAK_GATEWAY_JSON_SCHEMA_MAX_DEPTH",
 }
