@@ -577,10 +577,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 				if err != nil {
 					return nil, err
 				}
-				if len(kNorm) == indexDim {
-					projected = rmsnormCfg(projected, kNorm, eps, cfg)
-				}
-				return projected, nil
+				return m.v41IndexKeyNorm(l, projected, kNorm, eps, scratch.indexKeyNorm)
 			}
 		}
 		var latent []float32

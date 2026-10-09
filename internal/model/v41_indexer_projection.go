@@ -10,6 +10,10 @@ func v41IndexerProjectionLeaf(leaf string) bool {
 }
 
 func (m *Model) v41IndexKeys(l int, rows [][]float32, project v41DenseProjectionFunc) ([][]float32, error) {
+	return m.v41IndexKeysWithOperations(l, rows, project, nil)
+}
+
+func (m *Model) v41IndexKeysWithOperations(l int, rows [][]float32, project v41DenseProjectionFunc, normalize v41IndexKeyNormFunc) ([][]float32, error) {
 	dim := m.Cfg.IndexHeadDim
 	if dim <= 0 {
 		return nil, v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: invalid index head width", ErrV41ForwardStage))
@@ -24,8 +28,9 @@ func (m *Model) v41IndexKeys(l int, rows [][]float32, project v41DenseProjection
 		if err != nil {
 			return nil, err
 		}
-		if len(norm) == dim {
-			key = rmsnormCfg(key, norm, float32(m.Cfg.RMSNormEps), m.Cfg)
+		key, err = m.v41IndexKeyNorm(l, key, norm, float32(m.Cfg.RMSNormEps), normalize)
+		if err != nil {
+			return nil, err
 		}
 		keys[i] = key
 	}

@@ -42,6 +42,7 @@ type v41ProjScratch struct {
 	kvNorm           v41KVNormFunc
 	ffnNorm          v41FFNNormFunc
 	compressorNorm   v41CompressorNormFunc
+	indexKeyNorm     v41IndexKeyNormFunc
 	sharedActivation v41SharedActivationFunc
 	tailRoPE         v41TailRoPEFunc
 	sharedAttention  v41SharedAttentionFunc
