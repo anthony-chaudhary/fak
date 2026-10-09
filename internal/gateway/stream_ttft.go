@@ -10,7 +10,7 @@ import (
 // firstDeltaClock stamps the arrival of a streamed turn's first non-empty content
 // fragment, straight off the planner's sink and ahead of the lift-guard and the
 // UTF-8 joiner, so it is the model's first token rather than the first byte the
-// guard released. A proxied provider stream reports no Timings, so without this
+// guard released. Most proxied provider streams report no Timings, so without this
 // stamp every streamed proxy turn reached the perf ledger and the TTFT histogram
 // as "ttft not measured" even though the gateway watched the first token arrive.
 type firstDeltaClock struct {

@@ -553,7 +553,11 @@ type ChatStreamResponse struct {
 	// omits, never nulls), so the wire shape is produced by MarshalJSON below.
 	Usage        *agent.Usage
 	UsageEmitted bool
-	Fak          *FakExt `json:"fak,omitempty"`
+	// Timings is the upstream engine's llama.cpp `timings` object (prefill/decode
+	// split, cache_n, speculative draft counters), set only on the stream's terminal
+	// chunk and only when the planner reported one; omitted otherwise.
+	Timings *agent.Timings `json:"timings,omitempty"`
+	Fak     *FakExt        `json:"fak,omitempty"`
 }
 
 // chatStreamResponseNoUsage is a marshal-view of ChatStreamResponse that hoists the
@@ -567,6 +571,7 @@ type chatStreamResponseNoUsage struct {
 	Model   string             `json:"model"`
 	Choices []ChatStreamChoice `json:"choices"`
 	Usage   *agent.Usage       `json:"usage,omitempty"`
+	Timings *agent.Timings     `json:"timings,omitempty"`
 	Fak     *FakExt            `json:"fak,omitempty"`
 }
 
@@ -581,12 +586,12 @@ func (c ChatStreamResponse) MarshalJSON() ([]byte, error) {
 		}
 		return json.Marshal(withNull{chatStreamResponseNoUsage: chatStreamResponseNoUsage{
 			ID: c.ID, Object: c.Object, Created: c.Created, Model: c.Model,
-			Choices: c.Choices, Fak: c.Fak,
+			Choices: c.Choices, Timings: c.Timings, Fak: c.Fak,
 		}})
 	}
 	return json.Marshal(chatStreamResponseNoUsage{
 		ID: c.ID, Object: c.Object, Created: c.Created, Model: c.Model,
-		Choices: c.Choices, Usage: c.Usage, Fak: c.Fak,
+		Choices: c.Choices, Usage: c.Usage, Timings: c.Timings, Fak: c.Fak,
 	})
 }
 

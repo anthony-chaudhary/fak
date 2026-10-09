@@ -725,6 +725,11 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	if len(adjs) > 0 || len(resultAdmissions) > 0 || inputTriggerRoute != nil {
 		final.Fak = &FakExt{Adjudications: adjs, ResultAdmissions: resultAdmissions, InputTriggerRoute: inputTriggerRoute}
 	}
+	// Upstream llama.cpp timings ride exactly one terminal chunk: the usage-only
+	// frame when the client opted in, else the finish chunk.
+	if !includeUsage {
+		final.Timings = comp.Timings
+	}
 	timePhase(sessionTurn.turnCost, turncost.PhaseStream, func() {
 		_ = writeSSEData(w, final)
 	})
@@ -733,7 +738,9 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	// finish-bearing choice.
 	if includeUsage {
 		timePhase(sessionTurn.turnCost, turncost.PhaseStream, func() {
-			_ = writeSSEData(w, usageOnlyChunk(id, reqModel, created, &usage))
+			usageChunk := usageOnlyChunk(id, reqModel, created, &usage)
+			usageChunk.Timings = comp.Timings
+			_ = writeSSEData(w, usageChunk)
 		})
 	}
 	writeSSEDone(w, flusher)

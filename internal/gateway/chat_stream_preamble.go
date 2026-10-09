@@ -153,6 +153,10 @@ func writeChatCompletionStream(p *chatStreamWriter, resp ChatResponse) {
 	finish := choice.FinishReason
 	final := p.chunk(ChatDelta{}, &finish, nil)
 	final.Fak = resp.Fak
+	// Upstream timings ride the terminal chunk, matching streamChatLive.
+	if !p.includeUsage {
+		final.Timings = resp.Timings
+	}
 	if err := writeSSEData(p.w, final); err != nil {
 		return
 	}
@@ -160,7 +164,9 @@ func writeChatCompletionStream(p *chatStreamWriter, resp ChatResponse) {
 	// never attached to the finish-bearing choice — the same shape streamChatLive emits.
 	if p.includeUsage {
 		usage := resp.Usage
-		if err := writeSSEData(p.w, usageOnlyChunk(p.id, p.model, p.created, &usage)); err != nil {
+		usageChunk := usageOnlyChunk(p.id, p.model, p.created, &usage)
+		usageChunk.Timings = resp.Timings
+		if err := writeSSEData(p.w, usageChunk); err != nil {
 			return
 		}
 	}
