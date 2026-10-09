@@ -79,7 +79,9 @@ func serveActivatedExpertRingPlacement(ws *ggufload.WeightSource, be compute.Bac
 	plan := appendServeGGUFDevicePlan(ws, be, weights, contextBudgetTokens, fit)
 	plan, err = refuseIfTooBigOnDevice(plan, nil, be, &fit)
 	if err != nil {
-		return serveActivatedExpertRing{}, false, err
+		// Admission can fail before the caller logs the selected placement. Keep the
+		// candidate byte split visible without returning an admitted ring or load options.
+		return serveActivatedExpertRing{}, false, fmt.Errorf("activated-expert device ring refused (dense base=%d bytes, ring=%d bytes): %w", f.DeviceBaseBytes, ring, err)
 	}
 	return serveActivatedExpertRing{Fit: f, RingBytes: ring, Plan: plan}, true, nil
 }

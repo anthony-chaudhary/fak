@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -47,13 +49,36 @@ func TestServeHaloGPUActivatedExpertsRingSelectedWhenFullPlanFitTooBig(t *testin
 	}
 }
 
+// fak-test:runtime fast est=10ms lane=default
 func TestServeHaloGPUActivatedExpertsRingRefusesBelowFloor(t *testing.T) {
 	ws := serveStreamedSynthWeightSource(t)
 	be := serveCapBackend{total: 4096, free: 4096, known: true}
-	_, ok, err := serveActivatedExpertRingPlacement(ws, be, true, serveRingFullPlanTooBig(), 0, serveFitBudget{Base: 4096})
+	ring, ok, err := serveActivatedExpertRingPlacement(ws, be, true, serveRingFullPlanTooBig(), 0, serveFitBudget{Base: 4096})
 	var fe *compute.FitError
 	if ok || !errors.As(err, &fe) || fe.Verdict != compute.FitTooBig {
 		t.Fatalf("below the activated floor: ok=%v err=%v, want typed FitTooBig", ok, err)
+	}
+	if ring.Plan != nil || ring.RingBytes != 0 || ring.Fit != (ggufload.ActivatedExpertFit{}) {
+		t.Fatalf("refusal returned an admitted placement: %+v", ring)
+	}
+	if fe.Scope != compute.MemoryScopeDevice || fe.Avail != 4096 || fe.Want <= fe.Avail {
+		t.Fatalf("refusal lost its device-fit evidence: %+v", fe)
+	}
+	var baseBytes, ringBytes int64
+	for _, d := range fe.Demands {
+		switch d.Detail {
+		case serveActivatedRingBaseDetail:
+			baseBytes += d.Bytes
+		case serveActivatedRingDetail:
+			ringBytes += d.Bytes
+		}
+	}
+	if baseBytes <= 0 || ringBytes <= 0 {
+		t.Fatalf("refusal lacks the candidate placement rows: %+v", fe.Demands)
+	}
+	want := fmt.Sprintf("activated-expert device ring refused (dense base=%d bytes, ring=%d bytes):", baseBytes, ringBytes)
+	if !strings.HasPrefix(err.Error(), want) {
+		t.Fatalf("refusal %q does not expose the candidate byte split %q", err, want)
 	}
 }
 
