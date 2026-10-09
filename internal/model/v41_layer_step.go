@@ -186,6 +186,12 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return v41StageErr(v41StageMHC, l, err)
 	}
+	if full {
+		collapsed, err = m.v41AttentionInputNorm(l, collapsed, eps)
+		if err != nil {
+			return err
+		}
+	}
 
 	// ---- attention for the one position ----
 	ropeDim := cfg.QKRopeHeadDim
@@ -502,6 +508,10 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	collapsed, err := v41MHCPre(streams, mix.pre)
 	if err != nil {
 		return v41StageErr(v41StageMHC, l, err)
+	}
+	collapsed, err = m.v41AttentionInputNorm(l, collapsed, eps)
+	if err != nil {
+		return err
 	}
 
 	// ---- attention query for the one position (mirrors v41Layer's full branch) ----

@@ -215,6 +215,7 @@ func v41OracleForwardLatentNormHidden(t *testing.T, m *Model, ids []int, opts v4
 	}
 
 	for l := 0; l < cfg.NumLayers; l++ {
+		attnNorm := tensor(layerName(l, "attn_norm.weight"))
 		ffnNorm := tensor(layerName(l, "ffn_norm.weight"))
 		wMix := tensor(layerName(l, "mhc.mixes.weight"))
 		mixBase := tensor(layerName(l, "mhc.base"))
@@ -241,7 +242,7 @@ func v41OracleForwardLatentNormHidden(t *testing.T, m *Model, ids []int, opts v4
 			p, po, c := oracleV41MHCKernel(mixes, toF64(mixScale), toF64(mixBase), 4, hcIters, hcEps)
 			hcPre[tt], hcPost[tt], hcComb[tt] = p, po, c
 			streams4 := [][]float64{toF64(streams[tt][0]), toF64(streams[tt][1]), toF64(streams[tt][2]), toF64(streams[tt][3])}
-			preByPos[tt] = toF32(oracleV41MHCPre(streams4, p))
+			preByPos[tt] = v41AttentionInputNormOracle(toF32(oracleV41MHCPre(streams4, p)), attnNorm, eps)
 		}
 
 		// ---- attention projections with the latent norms ----

@@ -88,9 +88,9 @@ func v41FullStepPatchedNorms(t *testing.T) *Model {
 // v41FullStepSeed builds layer 0's retained decode state from a prefix, mirroring
 // the FULL forward's per-position KV row: the row is projected from the mHC
 // PRE-COLLAPSE of the persistent streams `{x[pos], 0, 0, 0}`, through the
-// flattened projection, then the KV latent norm at the published width, then the
-// rope tail. An empty prefix yields a freshly constructed state (position 0's
-// step seeds it), matching the production append-only contract.
+// flattened projection, then BF16 attention input normalization, the KV latent
+// norm at the published width, and the rope tail. An empty prefix yields a freshly
+// constructed state (position 0's step seeds it), matching the append-only contract.
 func v41FullStepSeed(t *testing.T, m *Model, l int, prefix []int) *V41AttentionState {
 	t.Helper()
 	cfg := m.Cfg
@@ -143,6 +143,7 @@ func v41FullStepSeed(t *testing.T, m *Model, l int, prefix []int) *V41AttentionS
 		if err != nil {
 			t.Fatal(err)
 		}
+		collapsed = v41AttentionInputNormOracle(collapsed, m.tensor(layerName(l, "attn_norm.weight")), eps)
 		kvFull, err := m.v41ProjMatRows(l, "attn.wkv.weight", collapsed, v41KVLoraRank, H)
 		if err != nil {
 			t.Fatal(err)

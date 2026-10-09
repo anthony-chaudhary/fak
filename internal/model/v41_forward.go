@@ -592,6 +592,12 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return v41StageErr(v41StageMHC, l, err)
 		}
+		if full {
+			collapsed, err = m.v41AttentionInputNorm(l, collapsed, eps)
+			if err != nil {
+				return err
+			}
+		}
 		preByPos[t] = collapsed
 	}
 
@@ -1409,6 +1415,69 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.callbackOwner = s
 	}
 	return s.v41Forward
+}
+
+// v41AttentionInputNorm implements Block.forward's hc_pre -> attn_norm boundary.
+// hc_pre first copies its F32 sum to the BF16 residual dtype. RMSNorm then
+// widens to F32, normalizes, applies the learned gain, and copies back to BF16.
+// This owns its result: the raw collapse and persistent residual streams remain
+// untouched on success or failure. Only full-profile callers use this boundary.
+// It retains the host execution policy; no selected device operation is replayed.
+//
+// Adapted from DeepSeek-V4.1-Flash inference/model.py RMSNorm and Block.forward:
+// https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/blob/dba1be0a40aa45a94ad051997016db3960a90277/inference/model.py
+// Modification: explicit widened-BF16 boundaries and fail-closed validation in Go.
+// This preserves the reference operations, not GPU reduction-order bit identity.
+//
+// # MIT License
+//
+// # Copyright (c) 2023 DeepSeek
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+func (m *Model) v41AttentionInputNorm(layer int, collapsed []float32, eps float32) ([]float32, error) {
+	const leaf = "attn_norm.weight"
+	gain := m.tensor(layerName(layer, leaf))
+	if len(collapsed) != m.Cfg.HiddenSize || len(collapsed) == 0 || len(gain) != len(collapsed) || !finite32(eps) || eps <= 0 {
+		return nil, v41ProjectionOperationErr(layer, leaf, errV41ProjectionResult)
+	}
+	input := make([]float32, len(collapsed))
+	for i, value := range collapsed {
+		if !finite32(value) || !finite32(gain[i]) {
+			return nil, v41ProjectionOperationErr(layer, leaf, errV41ProjectionResult)
+		}
+		input[i] = v41RoundBF16(value)
+		if !finite32(input[i]) {
+			return nil, v41ProjectionOperationErr(layer, leaf, errV41ProjectionResult)
+		}
+	}
+	// RMSNorm's learned weight multiplies the already normalized F32 value.
+	values := rmsnorm(input, gain, eps)
+	for i, value := range values {
+		if !finite32(value) {
+			return nil, v41ProjectionOperationErr(layer, leaf, errV41ProjectionResult)
+		}
+		values[i] = v41RoundBF16(value)
+		if !finite32(values[i]) {
+			return nil, v41ProjectionOperationErr(layer, leaf, errV41ProjectionResult)
+		}
+	}
+	return values, nil
 }
 
 // A nil final-norm callback preserves the portable path. Once selected, an
