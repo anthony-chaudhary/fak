@@ -309,7 +309,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 
 	// Head runs BEFORE any commit; a head fault rolls back exactly like a layer
 	// fault (truncate/restore, no clone).
-	res, herr := m.v41HeadWithProjection(x, scratch.denseProjection)
+	res, herr := m.v41HeadWithFinalNorm(x, scratch.denseProjection, st.finalNorm)
 	if herr != nil {
 		rollback()
 		var projection *V41ProjectionOperationError

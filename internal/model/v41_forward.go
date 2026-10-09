@@ -47,6 +47,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model/ffn"
 )
 
@@ -155,6 +156,7 @@ type v41ForwardState struct {
 	groupedOutput    v41GroupedOutputFunc
 	engramProjection v41EngramProjectionFunc
 	mhcProjection    v41MHCProjectionFunc
+	finalNorm        v41FinalNormFunc
 	callbackOwner    *Session
 }
 
@@ -282,7 +284,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, finalNorm: st.finalNorm, callbackOwner: st.callbackOwner}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -369,12 +371,14 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	}
 
 	var headProjection v41DenseProjectionFunc
+	var finalNorm v41FinalNormFunc
 	if runState != nil {
 		headProjection = runState.denseProjection
+		finalNorm = runState.finalNorm
 	}
 	act.Logits = make([][]float32, len(seq))
 	for t := 0; t < len(seq); t++ {
-		logits, err := m.v41HeadWithProjection(x[t], headProjection)
+		logits, err := m.v41HeadWithFinalNorm(x[t], headProjection, finalNorm)
 		if err != nil {
 			return nil, err
 		}
@@ -1046,6 +1050,10 @@ func (m *Model) v41Head(x []float32) ([]float32, error) {
 }
 
 func (m *Model) v41HeadWithProjection(x []float32, project v41DenseProjectionFunc) ([]float32, error) {
+	return m.v41HeadWithFinalNorm(x, project, nil)
+}
+
+func (m *Model) v41HeadWithFinalNorm(x []float32, project v41DenseProjectionFunc, normalize v41FinalNormFunc) ([]float32, error) {
 	if !m.has("model.norm.weight") {
 		return nil, v41StageErr(v41StageFinalNorm, -1,
 			fmt.Errorf("%w: missing model.norm.weight", ErrV41ForwardStage))
@@ -1058,7 +1066,27 @@ func (m *Model) v41HeadWithProjection(x []float32, project v41DenseProjectionFun
 		return nil, v41StageErr(v41StageHead, -1,
 			fmt.Errorf("%w: no lm_head.weight and no tied embedding", ErrV41ForwardStage))
 	}
-	xf := m.finalNorm(x)
+	var xf []float32
+	if normalize == nil {
+		xf = m.finalNorm(x)
+	} else {
+		var err error
+		xf, err = normalize(x)
+		if err == nil && len(xf) != m.Cfg.HiddenSize {
+			err = errV41ProjectionResult
+		}
+		if err == nil {
+			for _, v := range xf {
+				if !finite32(v) {
+					err = errV41ProjectionResult
+					break
+				}
+			}
+		}
+		if err != nil {
+			return nil, &V41ProjectionOperationError{Layer: -1, Leaf: "model.norm.weight", Stage: string(v41StageFinalNorm), Cause: v41StageErr(v41StageFinalNorm, -1, err)}
+		}
+	}
 	if project == nil {
 		for _, v := range xf {
 			if !finite32(v) {
@@ -1287,9 +1315,111 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.groupedOutput = s.v41GroupedOutputFunc()
 		s.v41Forward.engramProjection = s.v41EngramProjectionFunc()
 		s.v41Forward.mhcProjection = s.v41MHCProjectionFunc()
+		s.v41Forward.finalNorm = s.v41FinalNormFunc()
 		s.v41Forward.callbackOwner = s
 	}
 	return s.v41Forward
+}
+
+// A nil final-norm callback preserves the portable path. Once selected, an
+// operation failure is fatal; it must never retry normalization on the host.
+type v41FinalNormFunc func([]float32) ([]float32, error)
+
+func (s *Session) v41FinalNormFunc() v41FinalNormFunc {
+	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
+		s.M.Cfg.LayerNorm || s.M.Cfg.NormGain1p || !compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.F32) {
+		return nil
+	}
+	if eps := float32(s.M.Cfg.RMSNormEps); !finite32(eps) || eps <= 0 {
+		return nil
+	}
+	return func(input []float32) (result []float32, cause error) {
+		s.ensureOpenBackendSession()
+		stage := "payload"
+		closeFailure := func(err error) error {
+			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-final-norm", Layer: -1, Stage: stage, Cause: err}
+			s.halFailure = closed
+			s.Close()
+			return closed
+		}
+		defer func() {
+			if r := recover(); r != nil {
+				if err, ok := r.(error); ok {
+					var closed *BackendForwardOperationError
+					if errors.As(err, &closed) {
+						panic(r)
+					}
+					var backend *compute.BackendError
+					if errors.As(err, &backend) {
+						result, cause = nil, closeFailure(err)
+						return
+					}
+				}
+				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+					if original, ok := r.(error); ok {
+						err = original
+					}
+					result, cause = nil, closeFailure(err)
+					return
+				}
+				// Some backends report plain errors. Preserve an unclassified
+				// panic's identity, but never leave its selected session reusable.
+				err, ok := r.(error)
+				if !ok {
+					err = fmt.Errorf("unclassified backend panic: %v", r)
+				}
+				closeFailure(err)
+				panic(r)
+			}
+		}()
+		width := s.M.Cfg.HiddenSize
+		eps := float32(s.M.Cfg.RMSNormEps)
+		meta, present := s.M.manifest["model.norm.weight"]
+		if width <= 0 || len(input) != width || !finite32(eps) || eps <= 0 ||
+			!present || len(meta.Shape) != 1 || meta.Shape[0] != width {
+			return nil, closeFailure(errV41ProjectionResult)
+		}
+		gain := s.M.tensor("model.norm.weight")
+		if len(gain) != width {
+			return nil, closeFailure(errV41ProjectionResult)
+		}
+		for i, v := range input {
+			if !finite32(v) || !finite32(gain[i]) {
+				return nil, closeFailure(errV41ProjectionResult)
+			}
+		}
+		run := func() ([]float32, error) {
+			stage = "weight upload"
+			weight := s.weightHAL("model.norm.weight")
+			stage = "activation upload"
+			x := s.uploadHostF32([]int{width}, input, compute.MemoryActivation, "V4.1 final norm activation")
+			defer s.Backend.Free(x)
+			stage = "rmsnorm"
+			y := s.Backend.RMSNorm(x, weight, eps)
+			defer s.Backend.Free(y)
+			if y.Buf() == nil || y.Dtype != compute.F32 || len(y.Shape) != 1 || y.Shape[0] != width {
+				return nil, errV41ProjectionResult
+			}
+			stage = "readback"
+			values := s.Backend.Read(y)
+			if len(values) != width {
+				return nil, errV41ProjectionResult
+			}
+			for _, v := range values {
+				if !finite32(v) {
+					return nil, errV41ProjectionResult
+				}
+			}
+			// Read may expose backend-owned host memory; retain the row before
+			// releasing the temporary output tensor.
+			return append([]float32(nil), values...), nil
+		}
+		result, cause = run()
+		if cause != nil {
+			return nil, closeFailure(cause)
+		}
+		return result, nil
+	}
 }
 
 // v41ExpertGateUpFunc binds the shared device gate/up operation (#13357) onto the
