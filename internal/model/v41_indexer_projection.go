@@ -74,8 +74,11 @@ func (m *Model) v41IndexRowsWithOperations(l, pos int, qLat, hidden []float32, k
 	if err != nil {
 		return nil, err
 	}
+	// Index scores use their own geometry, independent of attention overrides.
+	// Keep each inverse-square-root factor rounded to float32 before multiplying.
+	scale := float32(1/math.Sqrt(float64(dim))) * float32(1/math.Sqrt(float64(nHeads)))
 	for h := range weights {
-		weights[h] *= cfg.attnScale() * float32(1/math.Sqrt(float64(nHeads)))
+		weights[h] *= scale
 	}
 	topKBlocks, blockSize := 0, 0
 	if d41.CandidateSourceLayerID == l {

@@ -59,7 +59,7 @@ func TestV41IndexerScoreProjectedOperands(t *testing.T) {
 		t.Fatal(err)
 	}
 	for h := range weights {
-		weights[h] *= cfg.attnScale() * float32(1/math.Sqrt(float64(cfg.IndexNHeads)))
+		weights[h] *= float32(1/math.Sqrt(float64(cfg.IndexHeadDim))) * float32(1/math.Sqrt(float64(cfg.IndexNHeads)))
 	}
 	counts := map[string]int{}
 	project := func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
@@ -78,6 +78,59 @@ func TestV41IndexerScoreProjectedOperands(t *testing.T) {
 	v41ScoreTestBits(t, b.calls[0].q, once)
 	v41ScoreTestBits(t, b.calls[0].weights, weights)
 	v41ScoreTestBits(t, b.calls[0].keys, append(append([]float32(nil), keys[0]...), keys[1]...))
+}
+
+// The independent bit oracle pins the current float32 factor boundaries:
+// 128^-0.5 * 32^-0.5 is mathematically 1/64, but rounding each factor first
+// gives 0x3c7fffff. This does not claim reference BF16 weight-product parity.
+// The runtime estimate is unmeasured until an authorized execution witness.
+// fak-test:runtime fast est=10ms lane=default
+func TestV41IndexerScoreScaleUsesIndexGeometry(t *testing.T) {
+	t.Parallel()
+	base := Config{
+		HeadDim: 512, IndexHeadDim: 128, IndexNHeads: 32, IndexTopK: 1,
+		HiddenSize: 1, QLoraRank: 1, QKRopeHeadDim: 2,
+		DeepSeekV41: &DeepSeekV41Config{
+			CompressRatios: []int{2}, IndexSourceLayerIDs: []int{0},
+			CandidateSourceLayerID: -1, CompressRopeTheta: 10000,
+		},
+	}
+	manifest, raw := synthBuildRaw([]synthTensor{
+		{layerName(0, "indexer.wq_b.weight"), []int{128 * 32, 1}},
+		{layerName(0, "indexer.weights_proj.weight"), []int{32, 1}},
+	}, func(string, func() float32) float32 { return 1 })
+	for _, name := range []string{"unequal-head-widths", "attention-head-width", "attention-scalar-override", "longrope-attention-multiplier"} {
+		t.Run(name, func(t *testing.T) {
+			cfg := base
+			switch name {
+			case "attention-head-width":
+				cfg.HeadDim = 2048
+			case "attention-scalar-override":
+				cfg.QueryPreAttnScalar = 8
+			case "longrope-attention-multiplier":
+				cfg.LongRope = &RopeScaling{Type: "longrope", OriginalMaxPositionEmbeddings: 2}
+				cfg.MaxPositionEmbeddings = 8
+			}
+			m := &Model{Cfg: cfg, manifest: manifest, raw: raw}
+			calls := 0
+			score := func(layer int, q, keys, weights []float32, heads, dim, rows int) ([]float32, error) {
+				calls++
+				if layer != 0 || heads != 32 || dim != 128 || rows != 1 || len(weights) != 32 {
+					t.Fatalf("unexpected score geometry: layer=%d heads=%d dim=%d rows=%d weights=%d", layer, heads, dim, rows, len(weights))
+				}
+				for h, value := range weights {
+					if bits := math.Float32bits(value); bits != 0x3c7fffff {
+						t.Fatalf("head %d index weight bits=%08x, want 3c7fffff", h, bits)
+					}
+				}
+				return []float32{0}, nil
+			}
+			selected, err := m.v41IndexRowsWithOperations(0, 0, []float32{1}, []float32{1}, [][]float32{make([]float32, 128)}, nil, score, nil)
+			if err != nil || calls != 1 || !reflect.DeepEqual(selected, []int32{0}) {
+				t.Fatalf("score boundary not exercised once: selected=%v calls=%d err=%v", selected, calls, err)
+			}
+		})
+	}
 }
 
 // The recorder changes only the score producer. Scalar projections, RoPE,
