@@ -144,9 +144,8 @@ func (t *COWPageTable) allocBlockLockFree() *PageBlock {
 		blk.TokenCount = 0
 		blk.Tokens = blk.Tokens[:0]
 		blk.immutable = false
-		for i := range blk.Buffer {
-			blk.Buffer[i] = 0
-		}
+		// Keep full-buffer clearing a bulk operation under coverage instrumentation.
+		clear(blk.Buffer)
 		return blk
 	}
 
