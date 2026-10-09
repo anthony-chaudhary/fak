@@ -103,6 +103,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	scratch.ffnNorm = st.ffnNorm
 	scratch.sharedActivation = st.sharedActivation
 	scratch.tailRoPE = st.tailRoPE
+	scratch.sharedAttention = st.sharedAttention
 	defer func() {
 		scratch.expertGateUp, scratch.expertDown = nil, nil
 		scratch.denseProjection = nil
@@ -113,6 +114,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 		scratch.ffnNorm = nil
 		scratch.sharedActivation = nil
 		scratch.tailRoPE = nil
+		scratch.sharedAttention = nil
 	}()
 	if err := m.v41ForwardAdmitted(); err != nil {
 		return nil, stats, err
