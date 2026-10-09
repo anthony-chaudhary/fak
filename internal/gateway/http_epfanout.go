@@ -67,11 +67,17 @@ func (s *Server) startEPFanoutFollowers(w http.ResponseWriter, r *http.Request, 
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	var meta struct {
-		Stream bool `json:"stream"`
+		Stream         bool            `json:"stream"`
+		ResponseFormat json.RawMessage `json:"response_format"`
 	}
 	if err := json.Unmarshal(body, &meta); err != nil {
 		// Malformed bodies will be rejected by the normal decoder below.
 		return func() {}, true
+	}
+	// Chat can mirror to followers before ordinary ingress validation. Refuse a
+	// malformed structured-output carrier before any follower starts its decode.
+	if route == epRouteChatCompletions && rejectInvalidResponseFormatCarrier(w, meta.ResponseFormat) {
+		return nil, false
 	}
 	// A streaming request must still fan out: rank-local expert parallelism makes
 	// progress only if every rank runs the same forward pass, and each decode step is

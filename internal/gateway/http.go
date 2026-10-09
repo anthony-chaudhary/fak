@@ -1009,6 +1009,9 @@ func validateChatRequestIngress(w http.ResponseWriter, req ChatRequest) bool {
 	if rejectInvalidSampling(w, validateSampling(req)) {
 		return false
 	}
+	if rejectInvalidResponseFormatCarrier(w, req.ResponseFormat) {
+		return false
+	}
 	receiptRequested := req.Fak != nil && req.Fak.NativeInferenceReceipt
 	decodeTraceRequested := req.FakDecodeTrace
 	decodeTokenIDsRequested := req.Fak != nil && req.Fak.NativeDecodeTokenIDs
