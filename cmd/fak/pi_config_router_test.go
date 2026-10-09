@@ -560,6 +560,53 @@ func TestPiConfigFromRouterSharedCompaction(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=1s
+func TestPiRouterRetryEnabledPlan(t *testing.T) {
+	for _, tc := range []struct {
+		name, settings, enabled string
+		change                  bool
+	}{
+		{"disabled with matching numbers", `{"retry":{"enabled":false,"maxRetries":8,"baseDelayMs":4000,"maxAgentDelayMs":60000}}`, "false", true},
+		{"enabled with matching numbers", `{"retry":{"enabled":true,"maxRetries":8,"baseDelayMs":4000,"maxAgentDelayMs":60000}}`, "true", false},
+		{"missing retry", `{}`, "missing", true},
+		{"missing enabled", `{"retry":{"maxRetries":8,"baseDelayMs":4000,"maxAgentDelayMs":60000}}`, "missing", true},
+		{"null enabled", `{"retry":{"enabled":null}}`, "unknown", true},
+		{"string enabled", `{"retry":{"enabled":"false"}}`, "unknown", true},
+		{"null retry", `{"retry":null}`, "unknown", true},
+		{"non-object retry", `{"retry":false}`, "unknown", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			settingsPath := filepath.Join(dir, "settings.json")
+			if err := os.WriteFile(settingsPath, []byte(tc.settings), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			plan, err := buildPiRouterPlan([]piRouterRow{{ID: "model-a", Window: 131072}}, "http://127.0.0.1:9/v1", filepath.Join(dir, "models.json"), settingsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r := plan.Retry; r.Change != tc.change {
+				t.Fatalf("retry plan = %+v, want change %t", r, tc.change)
+			}
+			var out bytes.Buffer
+			printPiRouterPlan(&out, plan, 1, false)
+			want := "enabled " + tc.enabled + " -> true"
+			if !tc.change {
+				want = "matches the router retry policy (enabled true;"
+			}
+			if tc.name == "disabled with matching numbers" {
+				want += ", maxRetries 8 -> 8, baseDelayMs 4000 -> 4000, maxAgentDelayMs 60000 -> 60000"
+			}
+			if !strings.Contains(out.String(), want) || !strings.Contains(out.String(), "~300s total backoff, excluding request time") {
+				t.Fatalf("plan does not disclose retry state and backoff: %s", out.String())
+			}
+			if got, err := os.ReadFile(settingsPath); err != nil || string(got) != tc.settings {
+				t.Fatalf("preview changed settings: got=%s err=%v", got, err)
+			}
+		})
+	}
+}
+
 func TestPiConfigFromRouterWritesBoundedRetryPolicy(t *testing.T) {
 	pinPiRouterTestEnv(t, piRouterTestKey)
 	srv := newPiRouterFake(t, multiModelRouterRows())

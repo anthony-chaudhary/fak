@@ -129,6 +129,27 @@ fak pi config --write
 fak pi config --write --path ~/.pi/agent/models.json
 ```
 
+To synchronize the model catalog with a running router, preview the full plan first:
+
+```bash
+fak pi config --from-router
+fak pi config --from-router --write
+```
+
+With `--from-router --write`, fak owns and overwrites four agent-turn retry keys in
+Pi's `settings.json`: `retry.enabled=true`, `retry.maxRetries=8`,
+`retry.baseDelayMs=4000`, and `retry.maxAgentDelayMs=60000`. This re-enables retry
+even if you explicitly disabled it or already have the same numeric values. The
+plan shows the enabled-state change; an absent value is shown as `missing`, and a
+non-boolean value or non-object retry block as `unknown`. `retry.provider` and
+unrelated settings are preserved. If `defaultProvider` names a provider other
+than `fak`, the router path leaves settings unchanged.
+
+The eight delays sum to 300 seconds of backoff (4, 8, 16, 32, 60, 60, 60, 60
+seconds). Request execution time is additional; this is not an end-to-end timeout.
+The ordinary `fak pi config --write` path without `--from-router` does not set this
+retry policy.
+
 Or from `fak serve`:
 ```bash
 # Print models.json and exit:

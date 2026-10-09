@@ -401,9 +401,10 @@ type piRouterPlan struct {
 // the router provider: Pi's default budget ends a turn inside one saturated
 // router window.
 type piRouterRetryPlan struct {
-	Policy projectassets.PiRetryPolicy
-	From   projectassets.PiRetryPolicy
-	Change bool
+	Policy      projectassets.PiRetryPolicy
+	From        projectassets.PiRetryPolicy
+	FromEnabled string
+	Change      bool
 }
 
 func (p *piRouterPlan) configChanged() bool {
@@ -771,11 +772,27 @@ func planPiRouterDefault(settingsTarget string, plan *piRouterPlan) (piRouterDef
 	default:
 		def.Pick, def.Reason = piRouterDefaultModel(plan.Models), fmt.Sprintf("defaultModel %q is not served by the router", def.Model)
 	}
-	from, _ := projectassets.ReadPiRetryPolicy(raw)
+	from, enabled := projectassets.ReadPiRetryPolicy(raw)
+	// The reader supplies Pi's effective default for absent or invalid enabled
+	// values. Show what the file actually carries before overwriting it.
+	fromEnabled := "missing"
+	if retry, present := raw["retry"]; present {
+		if block, ok := retry.(map[string]interface{}); ok {
+			if value, present := block["enabled"]; present {
+				fromEnabled = "unknown"
+				if _, ok := value.(bool); ok {
+					fromEnabled = strconv.FormatBool(enabled)
+				}
+			}
+		} else {
+			fromEnabled = "unknown"
+		}
+	}
 	plan.Retry = piRouterRetryPlan{
-		Policy: projectassets.DefaultPiRouterRetryPolicy,
-		From:   from,
-		Change: !projectassets.PiRetryPolicyMatches(raw, projectassets.DefaultPiRouterRetryPolicy),
+		Policy:      projectassets.DefaultPiRouterRetryPolicy,
+		From:        from,
+		FromEnabled: fromEnabled,
+		Change:      !projectassets.PiRetryPolicyMatches(raw, projectassets.DefaultPiRouterRetryPolicy),
 	}
 	return def, planPiRouterCompaction(raw, plan, def), nil
 }
@@ -915,7 +932,7 @@ func runPiConfigFromRouter(stdout, stderr io.Writer, fs *flag.FlagSet, explicitU
 			fmt.Fprintf(stderr, "fak pi config: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(stdout, "fak pi config: wrote retry policy to %s (maxRetries: %d, baseDelayMs: %d, maxAgentDelayMs: %d)", rPath, r.Policy.MaxRetries, r.Policy.BaseDelayMs, r.Policy.MaxAgentDelayMs)
+		fmt.Fprintf(stdout, "fak pi config: wrote retry policy to %s (enabled: true, maxRetries: %d, baseDelayMs: %d, maxAgentDelayMs: %d)", rPath, r.Policy.MaxRetries, r.Policy.BaseDelayMs, r.Policy.MaxAgentDelayMs)
 		if settingsBackup != "" {
 			fmt.Fprintf(stdout, " (backup %s)", settingsBackup)
 		}
@@ -1006,9 +1023,9 @@ func printPiRouterPlan(w io.Writer, plan *piRouterPlan, advertised int, write bo
 			if write {
 				action = "applying"
 			}
-			fmt.Fprintf(w, "  retry %s: maxRetries %d -> %d, baseDelayMs %d -> %d, maxAgentDelayMs %d -> %d (~%ds backoff before a turn fails; %s)\n", d.SettingsPath, r.From.MaxRetries, r.Policy.MaxRetries, r.From.BaseDelayMs, r.Policy.BaseDelayMs, r.From.MaxAgentDelayMs, r.Policy.MaxAgentDelayMs, r.Policy.TotalDelayMs()/1000, action)
+			fmt.Fprintf(w, "  retry %s: enabled %s -> true, maxRetries %d -> %d, baseDelayMs %d -> %d, maxAgentDelayMs %d -> %d (~%ds total backoff, excluding request time; %s)\n", d.SettingsPath, r.FromEnabled, r.From.MaxRetries, r.Policy.MaxRetries, r.From.BaseDelayMs, r.Policy.BaseDelayMs, r.From.MaxAgentDelayMs, r.Policy.MaxAgentDelayMs, r.Policy.TotalDelayMs()/1000, action)
 		} else {
-			fmt.Fprintf(w, "  retry %s: matches the router retry policy (~%ds backoff)\n", d.SettingsPath, r.Policy.TotalDelayMs()/1000)
+			fmt.Fprintf(w, "  retry %s: matches the router retry policy (enabled true; ~%ds total backoff, excluding request time)\n", d.SettingsPath, r.Policy.TotalDelayMs()/1000)
 		}
 	}
 	for _, warn := range plan.Warnings {

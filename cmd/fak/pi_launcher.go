@@ -789,11 +789,11 @@ func runPiConfig(stdout, stderr io.Writer, argv []string) int {
 	addr := fs.String("addr", "127.0.0.1:8080", "fak serve gateway listen address")
 	model := fs.String("model", projectassets.DefaultPiModelID, "served model ID")
 	window := fs.Int("window", 0, "served model context window in tokens (default: the default prior). The written contextWindow is min(window, quality cap 163840); compaction reserve/keep come from the same envelope.")
-	write := fs.Bool("write", false, "write or update ~/.pi/agent/models.json (or --path) and the safe Pi compaction settings")
+	write := fs.Bool("write", false, "write or update ~/.pi/agent/models.json (or --path) and the safe Pi compaction settings; with --from-router, also overwrite the fak-owned retry settings")
 	path := fs.String("path", "", "destination path or directory for models.json")
 	settingsPath := fs.String("settings-path", "", "destination path or directory for Pi's settings.json (default: ~/.pi/agent/settings.json)")
 	fromRouter := &piFromRouterFlag{}
-	fs.Var(fromRouter, "from-router", "set provider \"fak\" models from the router's GET /v1/models (optional URL; default: the configured provider baseUrl, else --addr). Prints a plan; --write applies it with a timestamped backup.")
+	fs.Var(fromRouter, "from-router", "set provider \"fak\" models from the router's GET /v1/models (optional URL; default: the configured provider baseUrl, else --addr). Prints a plan; --write applies it with a timestamped backup and overwrites settings.json retry.enabled/maxRetries/baseDelayMs/maxAgentDelayMs with true/8/4000/60000, including re-enabling disabled retry (unless defaultProvider is a non-fak provider).")
 	if !parseFlags(fs, foldPiFromRouterArg(argv)) {
 		return 2
 	}
