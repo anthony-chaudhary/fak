@@ -9,17 +9,38 @@ import (
 	"time"
 )
 
+// Exercise the public wire vocabulary independently of the producer's StepKinds.
+var snapshotPlannerKinds = []StepKind{"step", "tool", "admission", "seat", "verdict"}
+
+func requireSnapshotPlannerDomain(t *testing.T, s Snapshot) {
+	t.Helper()
+	if len(s.PlannerLatency) != len(snapshotPlannerKinds) || len(s.PlannerEvents) != len(snapshotPlannerKinds) {
+		t.Fatalf("planner snapshot domain: latency=%v events=%v want kinds=%v", s.PlannerLatency, s.PlannerEvents, snapshotPlannerKinds)
+	}
+	for _, kind := range snapshotPlannerKinds {
+		latency, hasLatency := s.PlannerLatency[string(kind)]
+		events, hasEvents := s.PlannerEvents[string(kind)]
+		if !hasLatency || !hasEvents {
+			t.Fatalf("planner snapshot omits %q: latency=%t events=%t", kind, hasLatency, hasEvents)
+		}
+		if latency.Count != events {
+			t.Fatalf("planner %s latency count=%d differs from events=%d", kind, latency.Count, events)
+		}
+	}
+}
+
 // fak-test:runtime fast est=200ms lane=default
 func TestSnapshotLatencySummariesMatchPrometheus(t *testing.T) {
 	r := New()
 	for _, d := range []time.Duration{time.Millisecond, 3 * time.Millisecond, 6 * time.Millisecond} {
 		r.ObserveKernel(kernelEvent("reference", "cpu", "host_monotonic", d))
-		for _, kind := range StepKinds {
+		for _, kind := range snapshotPlannerKinds {
 			r.ObservePlannerStep(kind, d)
 		}
 	}
 	s := r.Snapshot()
-	if len(s.KernelLatency) != 1 || len(s.PlannerLatency) != 5 {
+	requireSnapshotPlannerDomain(t, s)
+	if len(s.KernelLatency) != 1 {
 		t.Fatalf("summary cardinality kernel=%d planner=%d", len(s.KernelLatency), len(s.PlannerLatency))
 	}
 	k := s.KernelLatency[0]
@@ -46,7 +67,7 @@ func TestSnapshotLatencySummariesMatchPrometheus(t *testing.T) {
 		}
 	}
 	check(k.LatencyStat, MetricKernelSeconds, `kernel="reference",backend="cpu",timer_domain="host_monotonic"`)
-	for _, kind := range StepKinds {
+	for _, kind := range snapshotPlannerKinds {
 		check(s.PlannerLatency[string(kind)], MetricPlannerStepSeconds, `kind="`+string(kind)+`"`)
 	}
 	raw, err := json.Marshal(s)
@@ -68,7 +89,8 @@ func TestSnapshotLatencySummariesMatchPrometheus(t *testing.T) {
 func TestSnapshotLatencyBoundedCopiedAndUnavailable(t *testing.T) {
 	r := New()
 	cold := r.Snapshot()
-	if cold.KernelObserved || cold.PlannerObserved || cold.RecorderAttached || len(cold.KernelLatency) != 0 || len(cold.PlannerLatency) != 5 {
+	requireSnapshotPlannerDomain(t, cold)
+	if cold.KernelObserved || cold.PlannerObserved || cold.RecorderAttached || len(cold.KernelLatency) != 0 {
 		t.Fatal("cold recorder claims a producer")
 	}
 	for i := 0; i < MaxKernelKeys; i++ {
@@ -79,7 +101,8 @@ func TestSnapshotLatencyBoundedCopiedAndUnavailable(t *testing.T) {
 	r.ObserveKernel(kernelEvent("unavailable-overflow", "vulkan", "vulkan_performance_query_unavailable", 0))
 	r.ObservePlannerStep(StepKind("invented"), time.Second)
 	s := r.Snapshot()
-	if len(s.KernelLatency) != MaxKernelKeys+1 || s.KernelOverflow != 3 || s.PlannerKindOverflow != 1 || len(s.PlannerLatency) != 5 {
+	requireSnapshotPlannerDomain(t, s)
+	if len(s.KernelLatency) != MaxKernelKeys+1 || s.KernelOverflow != 3 || s.PlannerKindOverflow != 1 {
 		t.Fatal("snapshot cardinality is unbounded or overflow lost")
 	}
 	last := s.KernelLatency[len(s.KernelLatency)-1]
@@ -91,6 +114,7 @@ func TestSnapshotLatencyBoundedCopiedAndUnavailable(t *testing.T) {
 	s.PlannerLatency["step"] = LatencyStat{Count: 999}
 	s.PlannerEvents["step"] = 999
 	again := r.Snapshot()
+	requireSnapshotPlannerDomain(t, again)
 	if again.KernelLatency[0].Kernel == "changed" || again.KernelKeys[0] == "changed" || again.PlannerLatency["step"].Count != 0 || again.PlannerEvents["step"] != 0 {
 		t.Fatal("snapshot aliases recorder storage")
 	}
