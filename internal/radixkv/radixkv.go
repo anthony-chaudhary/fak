@@ -934,6 +934,17 @@ func (t *Tree) makeSnapshotRoom(delta int64, exclude *node) bool {
 }
 
 func (t *Tree) snapshotVictim(exclude *node) *node {
+	return t.snapshotVictimSkipping(exclude, nil)
+}
+
+// snapshotVictimSkipping applies the same retention rules to real byte-pressure
+// eviction and the admission dry run. skipped snapshots have already been selected
+// by the dry run; their nodes remain attached, just as releaseHotSnapshot leaves them.
+// Priority-ordered per-tier reclaim follows NVIDIA/TensorRT-LLM, Apache-2.0,
+// cpp/tensorrt_llm/batch_manager/evictionPolicy.cpp at
+// f4c5c935aa891b0826f73936c4831236cb6ff836 (LRUEvictionPolicy::getFreeBlock/refresh).
+// This Go adaptation keeps Fak's existing pin, tier and logical-TTL contracts.
+func (t *Tree) snapshotVictimSkipping(exclude *node, skipped map[*node]bool) *node {
 	strat := t.evictionStrategy()
 	if prep, ok := strat.(TreePreparer); ok {
 		prep.PrepareTree(t)
@@ -945,6 +956,7 @@ func (t *Tree) snapshotVictim(exclude *node) *node {
 	// state cannot be truncated, so a lost ancestor cannot be rebuilt from a leaf.
 	// Among candidates the configured strategy picks as before.
 	var victim *node
+	var bestKey victimKey
 	var walk func(*node) bool
 	walk = func(n *node) bool {
 		below := false
@@ -953,10 +965,21 @@ func (t *Tree) snapshotVictim(exclude *node) *node {
 				below = true
 			}
 		}
-		evictable := n != exclude && n.refs == 0 && !n.IsComputing() && n.snapshot != nil
+		evictable := n != exclude && !skipped[n] && n.refs == 0 && !n.IsComputing() &&
+			n.snapshot != nil && !t.isNodePinnedOrImmune(n)
+		var key victimKey
+		if evictable {
+			key = strat.Priority(n)
+			if seg, ok := t.nodeTierSeg(n); ok {
+				key.seg = seg
+			}
+			evictable = key.seg < 3
+		}
 		if evictable && !below {
-			if victim == nil || strat.Priority(n).less(strat.Priority(victim)) {
-				victim = n
+			// Snapshot record generations are unique across namespaces and survive
+			// tier moves, giving exact priority ties a stable admission-order key.
+			if victim == nil || key.less(bestKey) || (key == bestKey && n.recordGen < victim.recordGen) {
+				victim, bestKey = n, key
 			}
 		}
 		return below || evictable

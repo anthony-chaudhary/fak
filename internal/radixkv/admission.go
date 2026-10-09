@@ -269,25 +269,7 @@ func (t *Tree) prospectiveSnapshotVictims(required int64, exclude *node) ([]comp
 	freed := int64(0)
 	var victims []compute.KVSpanStats
 	for freed < required {
-		var best *node
-		var bestKey victimKey
-		strategy := t.evictionStrategy()
-		if prep, ok := strategy.(TreePreparer); ok {
-			prep.PrepareTree(t)
-		}
-		var walk func(*node)
-		walk = func(n *node) {
-			if n != exclude && !selected[n] && n.refs == 0 && n.snapshot != nil {
-				key := strategy.Priority(n)
-				if best == nil || key.less(bestKey) {
-					best, bestKey = n, key
-				}
-			}
-			for _, child := range n.children {
-				walk(child)
-			}
-		}
-		t.forEachRoot(walk)
+		best := t.snapshotVictimSkipping(exclude, selected)
 		if best == nil {
 			return victims, false
 		}
