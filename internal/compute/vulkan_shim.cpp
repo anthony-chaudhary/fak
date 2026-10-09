@@ -85,7 +85,7 @@ uint32_t          g_maxComputeWorkGroupCountX = 0;
 VkDeviceSize      g_totalDeviceLocalMemory = 0;
 bool              g_haveMemoryBudget = false;
 bool              g_batching = false;
-// Only V4.1 submissions opt into checked command/fence calls. A failed submit
+// V4.1 and restore submissions opt into checked command/fence calls. A failed submit
 // or wait leaves resources quarantined for this process lifetime;
 // there is no native context-recovery/teardown API that could safely recycle them.
 bool              g_v41SubmissionPendingFailure = false;
@@ -240,9 +240,9 @@ Buffer* g_stage = nullptr;
 void*   g_stageMapped = nullptr;
 size_t  g_stageCap = 0;
 
-// Device-loss restore has a separate, strictly bounded staging lifetime. It is
-// never shared with ordinary H2D/D2H, and it is destroyed at the transaction
-// boundary so a recreated device cannot observe an old-context staging handle.
+// Restore uses a separate, strictly bounded staging allocation, never shared
+// with ordinary H2D/D2H. Cleanup destroys it only when no submission is uncertain;
+// otherwise it stays quarantined until process exit.
 struct RestoreTransaction {
     Buffer*        stage = nullptr;
     void*          mapped = nullptr;
@@ -1079,7 +1079,7 @@ bool v41EndSubmitWaitChecked(VkCommandBuffer cmd, bool submit) {
 }
 
 VkResult restoreBeginCommand() {
-    if (g_v41SubmissionPendingFailure) return g_submissionStatus;
+    if (g_submissionStatus != VK_SUCCESS) return g_submissionStatus;
     if (g_restore.cmd != VK_NULL_HANDLE) return VK_SUCCESS;
     VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     ai.commandPool = g_cmdpool;
@@ -2676,7 +2676,7 @@ void fvk_h2d(void* d, const void* h, size_t bytes) {
 // destination buffers and publishes them only after every submit succeeds.
 // Each submit reuses the same staging allocation only after its fence completes.
 int fvk_restore_begin(size_t max_bytes, size_t max_entries) {
-    if (g_v41SubmissionPendingFailure) return (int)g_submissionStatus;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
     if (!g_ready || !g_dev || !g_cmdpool || !g_submitFence || g_batching ||
         max_bytes < 4 || (max_bytes & 3) != 0 || max_entries == 0 ||
         g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) {
@@ -2701,7 +2701,7 @@ int fvk_restore_begin(size_t max_bytes, size_t max_entries) {
 }
 
 int fvk_restore_add(void* dst_handle, size_t dst_offset, const void* src, size_t bytes) {
-    if (g_v41SubmissionPendingFailure) return (int)g_submissionStatus;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
     Buffer* dst = B(dst_handle);
     if (!g_restore.stage || !g_restore.mapped || !dst || !src || bytes == 0 ||
         (dst_offset & 3) != 0 || (bytes & 3) != 0 ||
@@ -2723,7 +2723,7 @@ int fvk_restore_add(void* dst_handle, size_t dst_offset, const void* src, size_t
 }
 
 int fvk_restore_submit(void) {
-    if (g_v41SubmissionPendingFailure) return (int)g_submissionStatus;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
     if (!g_restore.stage || g_restore.cmd == VK_NULL_HANDLE || g_restore.entries == 0) return 7;
     if (g_restoreFailAfterSubmits >= 0 &&
         g_restore.successfulSubmits >= g_restoreFailAfterSubmits) {
@@ -2732,26 +2732,17 @@ int fvk_restore_submit(void) {
         return (int)VK_ERROR_DEVICE_LOST;
     }
     VkCommandBuffer cmd = g_restore.cmd;
-    VkResult r = vkEndCommandBuffer(cmd);
-    if (r == VK_SUCCESS) r = vkResetFences(g_dev, 1, &g_submitFence);
-    if (r == VK_SUCCESS) {
-        VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-        si.commandBufferCount = 1;
-        si.pCommandBuffers = &cmd;
-        r = vkQueueSubmit(g_queue, 1, &si, g_submitFence);
-    }
-    if (r == VK_SUCCESS) r = vkWaitForFences(g_dev, 1, &g_submitFence, VK_TRUE, UINT64_MAX);
-    vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
+    // The checked helper frees only commands known not to be pending. Keep all
+    // restore ownership and accounting intact if submit/wait completion is uncertain.
+    const bool completed = v41EndSubmitWaitChecked(cmd, true);
+    if (g_v41SubmissionPendingFailure) return (int)g_submissionStatus;
     g_restore.cmd = VK_NULL_HANDLE;
     size_t submittedBytes = g_restore.payloadBytes;
     size_t submittedEntries = g_restore.entries;
     g_restore.used = 0;
     g_restore.entries = 0;
     g_restore.payloadBytes = 0;
-    if (r != VK_SUCCESS) {
-        g_submissionStatus = r;
-        return (int)r;
-    }
+    if (!completed) return (int)g_submissionStatus;
     ++g_restore.successfulSubmits;
     if (!checkedCounterAdd(g_h2dCount, submittedEntries) ||
         !checkedCounterAdd(g_h2dBytes, submittedBytes)) {

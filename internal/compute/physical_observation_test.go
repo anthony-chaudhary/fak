@@ -88,11 +88,38 @@ func TestVulkanObservationWindowNativeAccountingStructure(t *testing.T) {
 	if strings.Index(d2h, "memcpy(host") > strings.Index(d2h, "checkedCounterAdd(g_d2hCount") {
 		t.Fatal("D2H counters must advance only after the host copy completes")
 	}
-	batch := sourceSection(t, source, "void batchFlush()", "// staging copy")
-	if strings.Index(batch, "endSubmitWait(g_batchCmd)") > strings.Index(batch, "checkedCounterAdd(g_d2dCount") {
-		t.Fatal("batched D2D counters must advance only after successful flush completion")
+	batch := sourceSection(t, source, "void batchFlush() {", "// staging copy")
+	checkedBatch := sourceSection(t, batch, "if (g_batchHasV41) {", "} else if (hadWork) {")
+	legacyBatch := sourceSection(t, batch, "} else if (hadWork) {", "} else {")
+	for _, path := range []struct {
+		name, source string
+		markers      []string
+	}{
+		{"checked", checkedBatch, []string{
+			"const bool completed = v41EndSubmitWaitChecked(g_batchCmd, hadWork);",
+			"if (g_v41SubmissionPendingFailure) return;",
+			"if (completed && hadWork && (!g_batchD2DValid ||",
+			"checkedCounterAdd(g_d2dCount", "checkedCounterAdd(g_d2dBytes",
+		}},
+		{"legacy", legacyBatch, []string{
+			"endSubmitWait(g_batchCmd);",
+			"checkedCounterAdd(g_d2dCount", "checkedCounterAdd(g_d2dBytes",
+		}},
+	} {
+		previous := -1
+		for _, marker := range path.markers {
+			at := strings.Index(path.source, marker)
+			if at < 0 || at <= previous {
+				t.Fatalf("%s batch completion/accounting marker missing or out of order: %q", path.name, marker)
+			}
+			previous = at
+		}
 	}
-	if strings.Index(restore, "if (r != VK_SUCCESS)") > strings.Index(restore, "checkedCounterAdd(g_h2dCount") ||
+	restoreChecked := strings.Index(restore, "const bool completed = v41EndSubmitWaitChecked(cmd, true);")
+	restoreFailed := strings.Index(restore, "if (!completed) return (int)g_submissionStatus;")
+	restoreCounted := strings.Index(restore, "checkedCounterAdd(g_h2dCount")
+	if restoreChecked < 0 || restoreFailed < 0 || restoreCounted < 0 ||
+		restoreChecked >= restoreFailed || restoreFailed >= restoreCounted ||
 		!strings.Contains(restore, "size_t submittedEntries = g_restore.entries;") {
 		t.Fatal("restore H2D counts and bytes must cover completed copy entries only")
 	}
