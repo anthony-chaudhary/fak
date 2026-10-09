@@ -3169,6 +3169,26 @@ int fvk_transfer_stage_backing(uint64_t* buffer_bytes, fvk_buffer_backing_info* 
     return 1;
 }
 
+int fvk_transfer_stage_reservation(fvk_buffer_reservation_info* out, fvk_buffer_backing_info* backing) {
+    if (out) *out = {};
+    if (backing) *backing = {};
+    if (!out || !backing) return 0;
+
+    uint64_t buffer_bytes = 0;
+    fvk_buffer_backing_info local_backing{};
+    if (!fvk_transfer_stage_backing(&buffer_bytes, &local_backing)) return 0;
+    if (buffer_bytes == 0) return 1;
+
+    // The same owner lock covers both reads. Publish neither record until the
+    // existing owner and reservation observers agree on the retained length.
+    fvk_buffer_reservation_info reservation{};
+    if (!fvk_buffer_reservation(g_stage, &reservation) ||
+        reservation.buffer_bytes != buffer_bytes) return 0;
+    *out = reservation;
+    *backing = local_backing;
+    return 1;
+}
+
 void fvk_trim_pool(void) {
     if (g_v41SubmissionPendingFailure) return;
     if (!g_dev) return;

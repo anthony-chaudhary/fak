@@ -146,6 +146,20 @@ int fvk_buffer_reservation(const void *d, fvk_buffer_reservation_info *out);
  * the existing fvk_buffer_backing_info layout and entry points are unchanged. */
 int fvk_transfer_stage_backing(uint64_t *buffer_bytes, fvk_buffer_backing_info *out);
 
+/* Observe the same shim-global ordinary transfer-stage owner with its complete
+ * allocation reservation. Both outputs are required and cleared on every call.
+ * Returns 1 with two zero records for a coherent initialized empty owner, or
+ * with both complete records for a retained stage; otherwise returns 0 with
+ * zero records. reservation_bytes is the full allocation request, not residency
+ * or a per-receiver charge; allocation_id is the existing opaque shim token.
+ * The same owner lock and current initialized-device lifetime precondition as
+ * fvk_transfer_stage_backing apply. Retained metadata remains observable after
+ * sticky submission failure, without proving device health or quiescence.
+ * Reads host metadata only, without Vulkan calls, allocation, transfer, flush,
+ * owner mutation or reinitialization validation. Existing record layouts and
+ * allocator policy are unchanged; callers require a matching rebuilt shim. */
+int fvk_transfer_stage_reservation(fvk_buffer_reservation_info *out, fvk_buffer_backing_info *backing);
+
 /* y[P,out] = x[P,in] @ W[out,in]^T   (all row-major f32). */
 void fvk_matmul_f32(const void *dW, const void *dX, void *dY, int out, int in, int P);
 /* first argmax of x[1,in] @ W[out,in]^T without materializing the logits vector. */

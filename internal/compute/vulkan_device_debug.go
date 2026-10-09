@@ -733,6 +733,66 @@ func (v *vulkanBackend) VulkanTransferStageBufferBackings() ([]VulkanTransferSta
 	}}, true
 }
 
+// VulkanTransferStageBufferReservations observes zero or one retained ordinary
+// H2D/D2H stage under vulkanMu. This is one shim-global owner shared by both
+// transfer directions and every nonnil receiver; do not count it per receiver.
+// A coherent absent stage in an initialized shim returns a nonnil empty slice,
+// true. Unavailable or inconsistent owner/reservation metadata returns nil, false.
+// A retained record uses Backing.Part "data" and Backing.Chunk -1.
+//
+// The current initialized-device lifetime is a precondition; no generation
+// validates ownership across reinitialization. Retained metadata remains visible
+// under sticky submission failure and proves neither health, quiescence, recent
+// use nor contents. Pool trim does not retire this stage. ReservationBytes is the
+// whole VkDeviceMemory allocation request, not physical residency, driver overhead
+// or a per-binding charge. IDs and memory indices are local to that lifetime.
+//
+// This excludes tensors, Q4_K homes/staging, restore staging, scratch and pools.
+// Separate queries are not an atomic whole-backend inventory or evidence of
+// disjoint physical pools, capacity headroom or future placement. The query reads
+// host metadata without Vulkan allocation/free, transfers, batch flushes, device
+// fences or owner/counter changes. Results may allocate Go memory; call outside
+// hot token loops with a matching rebuilt reservation-capable shim.
+func (v *vulkanBackend) VulkanTransferStageBufferReservations() ([]VulkanBufferReservation, bool) {
+	if v == nil {
+		return nil, false
+	}
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return vulkanTransferStageBufferReservationsLocked(func() (VulkanBufferReservation, bool) {
+		var info C.fvk_buffer_reservation_info
+		var backing C.fvk_buffer_backing_info
+		if C.fvk_transfer_stage_reservation(&info, &backing) == 0 {
+			return VulkanBufferReservation{}, false
+		}
+		return VulkanBufferReservation{
+			BufferBytes:      uint64(info.buffer_bytes),
+			ReservationBytes: uint64(info.reservation_bytes),
+			AllocationID:     uint64(info.allocation_id),
+			BindingOffset:    uint64(info.binding_offset),
+			Backing:          vulkanBufferBackingFromInfo(backing, "", 0),
+		}, true
+	})
+}
+
+// The caller holds vulkanMu across the complete native read and value conversion.
+// The reader returns unlabelled value metadata, including two zero native records
+// for known-empty. Injection tests result shaping without exposing a stage handle.
+func vulkanTransferStageBufferReservationsLocked(readReservation func() (VulkanBufferReservation, bool)) ([]VulkanBufferReservation, bool) {
+	reservation, ok := readReservation()
+	if !ok {
+		return nil, false
+	}
+	if reservation.BufferBytes == 0 {
+		if reservation != (VulkanBufferReservation{}) {
+			return nil, false
+		}
+		return []VulkanBufferReservation{}, true
+	}
+	reservation.Backing.Part, reservation.Backing.Chunk = "data", -1
+	return []VulkanBufferReservation{reservation}, true
+}
+
 // vulkanBufferBackingLocked requires vulkanMu and a live, owned handle. The shim
 // cannot validate an arbitrary or retired pointer; ownership supplies that proof.
 func vulkanBufferBackingLocked(ptr unsafe.Pointer, part string, chunk int) (VulkanBufferBacking, bool) {
