@@ -187,6 +187,10 @@ func v41RoundBF16(value float32) float32 {
 // exactly: per-head dot product, per-element ReLU, then the learned per-head
 // reduction applied to the rectified scores.
 //
+// Products and running sums are explicitly rounded to float32 in dimension and
+// head order. The conversions prevent fused multiply-add from discarding an
+// intermediate rounding, preserving the scalar F32 scoring contract.
+//
 // q is row-major [nHeads * headDim] for one query position. keys is row-major
 // [compressLen * headDim]. weights is the per-head reduction weight already
 // folded by the caller. The result is a fresh row-major [compressLen] score
@@ -231,14 +235,14 @@ func V41IndexerScore(q, keys, weights []float32, nHeads, headDim, compressLen in
 			queryBase := h * headDim
 			var dot float32
 			for d := 0; d < headDim; d++ {
-				dot += q[queryBase+d] * keys[keyBase+d]
+				dot = float32(dot + float32(q[queryBase+d]*keys[keyBase+d]))
 			}
 			// The reference rectifies before the learned head reduction:
 			//   index_score = (index_score.relu_() * weights.unsqueeze(-1)).sum(dim=2)
 			if dot < 0 {
 				dot = 0
 			}
-			acc += dot * weights[h]
+			acc = float32(acc + float32(dot*weights[h]))
 		}
 		score[t] = acc
 	}
