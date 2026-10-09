@@ -122,7 +122,7 @@ func GeneratePiConfigForWindow(baseURL, modelID string, servedWindow int) ([]byt
 // RESIDENT TARGET (at most half the served window), and maxTokens carries the output reserve, so
 // the single JSON object encodes both halves of the cap-vs-target split. See pi_context_budget.go.
 func piModelEntry(modelID, modelName string, budget PiContextBudget) map[string]interface{} {
-	return map[string]interface{}{
+	entry := map[string]interface{}{
 		"id":            modelID,
 		"name":          modelName,
 		"reasoning":     false,
@@ -139,6 +139,10 @@ func piModelEntry(modelID, modelName string, budget PiContextBudget) map[string]
 			piDeveloperRoleKey: false,
 		},
 	}
+	if sp := PiSamplingParams(modelID); sp != nil {
+		entry["samplingParams"] = sp
+	}
+	return entry
 }
 
 // PiModelEntry is the exported form of the `fak` provider model entry, so a catalog

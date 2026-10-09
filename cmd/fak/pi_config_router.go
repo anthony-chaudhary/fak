@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -356,6 +357,7 @@ type piRouterChange struct {
 	ToWindow     int
 	FromMaxToken int
 	ToMaxToken   int
+	Sampling     bool
 }
 
 type piRouterDefaultPlan struct {
@@ -551,6 +553,17 @@ func renderPiRouterConfig(plan *piRouterPlan, data []byte) error {
 		if err != nil {
 			return err
 		}
+		patched, sampled, err := patchPiModelSampling(patched, id, elemIndent+unit)
+		if err != nil {
+			return err
+		}
+		if sampled {
+			if change == nil {
+				change = &piRouterChange{FromWindow: plan.Budgets[id].ResidentTarget, ToWindow: plan.Budgets[id].ResidentTarget}
+				change.FromMaxToken, change.ToMaxToken = -1, -1
+			}
+			change.Sampling = true
+		}
 		if change != nil {
 			change.ID = id
 			plan.Changed = append(plan.Changed, *change)
@@ -658,6 +671,32 @@ func patchPiModelBudget(entry []byte, budget projectassets.PiContextBudget, memb
 		return entry, nil, nil
 	}
 	return out, change, nil
+}
+
+// patchPiModelSampling sets samplingParams to the fak-owned profile for a model
+// that has one, so a regeneration keeps it instead of leaving a hand edit as the
+// only owner. A model without a profile is left untouched.
+func patchPiModelSampling(entry []byte, id, memberIndent string) ([]byte, bool, error) {
+	want := projectassets.PiSamplingParams(id)
+	if want == nil {
+		return entry, false, nil
+	}
+	val, err := json.Marshal(want)
+	if err != nil {
+		return nil, false, err
+	}
+	span, has, err := jsonMemberSpan(entry, jsonSpan{0, len(entry)}, "samplingParams")
+	if err != nil {
+		return nil, false, err
+	}
+	if has {
+		var cur, canon map[string]interface{}
+		if json.Unmarshal(entry[span.start:span.end], &cur) == nil && json.Unmarshal(val, &canon) == nil && reflect.DeepEqual(cur, canon) {
+			return entry, false, nil
+		}
+		return jsonReplace(entry, span, val), true, nil
+	}
+	return jsonInsertMemberIndent(entry, jsonSpan{0, len(entry)}, "samplingParams", val, memberIndent), true, nil
 }
 
 func piJSONInt(raw []byte) (int, bool) {
@@ -827,6 +866,9 @@ func printPiRouterPlan(w io.Writer, plan *piRouterPlan, advertised int, write bo
 		line := fmt.Sprintf("  ~ change  %s  contextWindow %d -> %d", c.ID, c.FromWindow, c.ToWindow)
 		if c.FromMaxToken != c.ToMaxToken {
 			line += fmt.Sprintf(", maxTokens %d -> %d", c.FromMaxToken, c.ToMaxToken)
+		}
+		if c.Sampling {
+			line += ", samplingParams -> fak-owned profile"
 		}
 		fmt.Fprintln(w, line)
 	}
