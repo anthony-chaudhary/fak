@@ -53,6 +53,12 @@ func V41IndexerScore(q, keys, weights []float32, nHeads, headDim, compressLen in
 	if compressLen < 0 {
 		return nil, fmt.Errorf("model: v41 indexer score negative compress length %d", compressLen)
 	}
+	if nHeads > int(^uint(0)>>1)/headDim {
+		return nil, fmt.Errorf("model: v41 indexer score query geometry %d*%d overflows", nHeads, headDim)
+	}
+	if compressLen > int(^uint(0)>>1)/headDim {
+		return nil, fmt.Errorf("model: v41 indexer score key geometry %d*%d overflows", compressLen, headDim)
+	}
 	if len(weights) != nHeads {
 		return nil, fmt.Errorf("model: v41 indexer score weight length %d, want %d", len(weights), nHeads)
 	}
