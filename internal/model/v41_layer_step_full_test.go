@@ -148,7 +148,7 @@ func v41FullStepSeed(t *testing.T, m *Model, l int, prefix []int) *V41AttentionS
 		if err != nil {
 			t.Fatal(err)
 		}
-		kv := rmsnormCfg(append([]float32(nil), kvFull[:hd]...), kvNorm, eps, cfg)
+		kv := v41AttentionInputNormOracle(kvFull[:hd], kvNorm, eps)
 		cos, sin := v41RopeTableForLayer(cfg, l, pos)
 		applyRopeTailInterleaved(kv, cos, sin, cfg.QKRopeHeadDim)
 		rows[pos] = kv

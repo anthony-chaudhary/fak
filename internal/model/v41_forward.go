@@ -1495,8 +1495,9 @@ func (s *Session) v41FinalNormFunc() v41FinalNormFunc {
 }
 
 // Query normalization stays between wq_a and wq_b on full-profile models.
-// Portable sessions retain the original host arithmetic; a selected callback
-// has no decline outcome and cannot retry a failed device operation on the host.
+// The owner stages BF16 projection input and publishes BF16 normalized output;
+// the F32 host/callback arithmetic is unchanged. A selected callback has no
+// decline outcome and cannot retry a failed device operation on the host.
 type v41QueryNormFunc func(layer int, input []float32) ([]float32, error)
 
 func (s *Session) v41QueryNormFunc() v41QueryNormFunc {
@@ -1511,36 +1512,41 @@ func (s *Session) v41QueryNormFunc() v41QueryNormFunc {
 
 func (m *Model) v41QueryNormInPlace(layer int, input []float32, eps float32, normalize v41QueryNormFunc) error {
 	const leaf = "attn.wq_a_norm.weight"
+	if m.Cfg.QLoraRank <= 0 || len(input) != m.Cfg.QLoraRank {
+		return v41ProjectionOperationErr(layer, leaf, errV41ProjectionResult)
+	}
+	staged, err := v41LatentNormBF16Copy(layer, leaf, "projection", input)
+	if err != nil {
+		return err
+	}
+	var values []float32
 	if normalize == nil {
 		gain := m.tensor(layerName(layer, leaf))
 		if len(gain) != m.Cfg.QLoraRank {
 			return v41StageErr(v41StageAttention, layer,
 				fmt.Errorf("%w: q-lora norm has %d values, want %d", ErrV41ForwardStage, len(gain), m.Cfg.QLoraRank))
 		}
-		copy(input, rmsnormCfg(input, gain, eps, m.Cfg))
-		return nil
+		values = rmsnormCfg(staged, gain, eps, m.Cfg)
+	} else {
+		values, err = normalize(layer, staged)
 	}
-	values, err := normalize(layer, input)
 	if err == nil && len(values) != len(input) {
 		err = errV41ProjectionResult
-	}
-	if err == nil {
-		for _, v := range values {
-			if !finite32(v) {
-				err = errV41ProjectionResult
-				break
-			}
-		}
 	}
 	if err != nil {
 		return v41ProjectionOperationErr(layer, leaf, err)
 	}
-	copy(input, values)
+	rounded, err := v41LatentNormBF16Copy(layer, leaf, "normalization", values)
+	if err != nil {
+		return err
+	}
+	copy(input, rounded)
 	return nil
 }
 
 // Full-profile KV rows have the published latent width (512) and normalize
-// before tail RoPE. A selected device operation has no host-retry outcome.
+// before tail RoPE, with BF16 projection-input and normalized-output boundaries.
+// A selected device operation has no host-retry outcome.
 type v41KVNormFunc func(layer int, input []float32) ([]float32, error)
 
 func (s *Session) v41KVNormFunc() v41KVNormFunc {
@@ -1555,32 +1561,57 @@ func (s *Session) v41KVNormFunc() v41KVNormFunc {
 
 func (m *Model) v41KVNormInPlace(layer int, input []float32, eps float32, normalize v41KVNormFunc) error {
 	const leaf = "attn.kv_norm.weight"
+	if len(input) != v41KVLoraRank {
+		return v41ProjectionOperationErr(layer, leaf, errV41ProjectionResult)
+	}
+	staged, err := v41LatentNormBF16Copy(layer, leaf, "projection", input)
+	if err != nil {
+		return err
+	}
+	var values []float32
 	if normalize == nil {
 		gain := m.tensor(layerName(layer, leaf))
 		if len(gain) != v41KVLoraRank {
 			return v41StageErr(v41StageAttention, layer,
 				fmt.Errorf("%w: kv norm has %d values, want %d", ErrV41ForwardStage, len(gain), v41KVLoraRank))
 		}
-		copy(input, rmsnormCfg(input, gain, eps, m.Cfg))
-		return nil
+		values = rmsnormCfg(staged, gain, eps, m.Cfg)
+	} else {
+		values, err = normalize(layer, staged)
 	}
-	values, err := normalize(layer, input)
 	if err == nil && len(values) != len(input) {
 		err = errV41ProjectionResult
-	}
-	if err == nil {
-		for _, v := range values {
-			if !finite32(v) {
-				err = errV41ProjectionResult
-				break
-			}
-		}
 	}
 	if err != nil {
 		return v41ProjectionOperationErr(layer, leaf, err)
 	}
-	copy(input, values)
+	rounded, err := v41LatentNormBF16Copy(layer, leaf, "normalization", values)
+	if err != nil {
+		return err
+	}
+	copy(input, rounded)
 	return nil
+}
+
+// v41LatentNormBF16Copy implements the pinned model.py RMSNorm input/output
+// dtype boundaries around wq_a/wkv, whose reference GEMMs return BF16. The
+// reference source and MIT notice are retained above v41AttentionInputNorm.
+// The F32 RMSNorm callback ABI remains unchanged: neither its input nor a shared
+// result is rounded in place, and the caller only publishes after both copies
+// succeed. This does not emulate FP8 activation quantization or GPU reductions.
+func v41LatentNormBF16Copy(layer int, leaf, phase string, values []float32) ([]float32, error) {
+	out := make([]float32, len(values))
+	for i, value := range values {
+		if finite32(value) {
+			out[i] = v41RoundBF16(value)
+			if finite32(out[i]) {
+				continue
+			}
+		}
+		return nil, v41ProjectionOperationErr(layer, leaf,
+			fmt.Errorf("%w: BF16 %s value[%d] is non-finite or overflows", ErrV41ForwardStage, phase, i))
+	}
+	return out, nil
 }
 
 type v41RMSNormFunc func(name string, input []float32, width int, path string, layer int) ([]float32, error)

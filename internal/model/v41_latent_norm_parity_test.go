@@ -250,23 +250,23 @@ func v41OracleForwardLatentNormHidden(t *testing.T, m *Model, ids []int, opts v4
 		kvRows := make([][]float32, seq)
 		for tt := 0; tt < seq; tt++ {
 			c := preByPos[tt]
-			qLat := cpuOracleMatVec(wQA, c, cfg.QLoraRank, H)
+			qLat := v41LatentNormOracleBF16(cpuOracleMatVec(wQA, c, cfg.QLoraRank, H))
 			var q []float32
 			switch {
 			case opts.qAfterB:
 				// Wrong order: project first, then norm the up-projected query.
 				q = cpuOracleMatVec(wQB, qLat, nH*hd, cfg.QLoraRank)
-				q = cpuOracleRMSNorm(q, gainOrUnit(v41GainPad(qGain, nH*hd)), eps)
+				q = v41AttentionInputNormOracle(q, gainOrUnit(v41GainPad(qGain, nH*hd)), eps)
 			default:
 				if !opts.omitQ {
-					qLat = cpuOracleRMSNorm(qLat, gainOrUnit(qGain), eps)
+					qLat = v41AttentionInputNormOracle(qLat, gainOrUnit(qGain), eps)
 				}
 				q = cpuOracleMatVec(wQB, qLat, nH*hd, cfg.QLoraRank)
 			}
 			// kv = kv_norm(wkv(x)) at the published latent rank, sliced to hd.
-			kv := cpuOracleMatVec(wKV, c, v41KVLoraRank, H)
+			kv := v41LatentNormOracleBF16(cpuOracleMatVec(wKV, c, v41KVLoraRank, H))
 			if !opts.omitKV {
-				kv = cpuOracleRMSNorm(kv, gainOrUnit(kvGain), eps)
+				kv = v41AttentionInputNormOracle(kv, gainOrUnit(kvGain), eps)
 			}
 			kv = kv[:hd]
 			// Independently resolve the pinned layer regime: plain layers disable
