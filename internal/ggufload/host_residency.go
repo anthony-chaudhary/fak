@@ -81,7 +81,8 @@ func RefuseUnifiedHostResidencyIfTooBig(plan compute.MemoryPlan, be compute.Back
 	if !hostKnown {
 		hostTotal, hostFree, hostKnown = compute.HostSystemMemoryInfo()
 	}
-	return refuseUnifiedHostResidencyForReportedAperture(plan, devTotal, devFree, devKnown, hostTotal, hostFree, hostKnown, headroom)
+	carveout, carveoutKnown := compute.DedicatedVRAMCarveoutInfo(be)
+	return refuseUnifiedHostResidencyForReportedApertureCarveout(plan, devTotal, devFree, devKnown, hostTotal, hostFree, hostKnown, carveout, carveoutKnown, headroom)
 }
 
 // RefuseUnifiedHostResidencyIfTooBigForReportedHost is the injectable, exported twin of
@@ -133,6 +134,12 @@ func refuseUnifiedHostResidencyForReported(plan compute.MemoryPlan, total, free 
 // GRAND total is bounded against the physical pool (hostTotal = MemTotal), the ceiling the
 // kernel actually allocates from and OOM-kills on.
 func refuseUnifiedHostResidencyForReportedAperture(plan compute.MemoryPlan, deviceTotal, deviceFree int64, deviceKnown bool, hostTotal, hostFree int64, hostKnown bool, headroom float64) error {
+	return refuseUnifiedHostResidencyForReportedApertureCarveout(plan, deviceTotal, deviceFree, deviceKnown, hostTotal, hostFree, hostKnown, 0, false, headroom)
+}
+
+// refuseUnifiedHostResidencyForReportedApertureCarveout is the split-aware core with the host's
+// dedicated VRAM carve-out (fak#13668); an unknown carve-out is the MemTotal-only bound.
+func refuseUnifiedHostResidencyForReportedApertureCarveout(plan compute.MemoryPlan, deviceTotal, deviceFree int64, deviceKnown bool, hostTotal, hostFree int64, hostKnown bool, carveout int64, carveoutKnown bool, headroom float64) error {
 	if !hostKnown {
 		return nil
 	}
@@ -153,6 +160,9 @@ func refuseUnifiedHostResidencyForReportedAperture(plan compute.MemoryPlan, devi
 		// two windows are drawn from (fak#13280). The device and system windows are aperture
 		// windows over ONE pool, not disjoint carve-outs, so a plan that fits each window
 		// separately can still exceed the physical total at the kernel.
+		if carveoutKnown && carveout > 0 && !planHasHostOffload(plan) {
+			return refuseUnifiedHostResidencyPhysicalPoolWithCarveout(plan, hostTotal, carveout, headroom)
+		}
 		return refuseUnifiedHostResidencyPhysicalPool(plan, hostTotal, headroom)
 	}
 	return wrapUnifiedHostResidency(compute.RefuseMemoryPlanIfTooBigForReportedHost(plan, hostTotal, hostFree, hostKnown, headroom))
@@ -183,6 +193,51 @@ func refuseUnifiedHostResidencyPhysicalPool(plan compute.MemoryPlan, hostTotal i
 		})
 	}
 	return nil
+}
+
+// refuseUnifiedHostResidencyPhysicalPoolWithCarveout bounds the plan against a physical pool of
+// MemTotal PLUS a dedicated VRAM carve-out (fak#13668). A firmware UMA carve-out (strix3 at 96
+// GiB, MemTotal ~31 GiB) is physical DRAM the kernel never counts in MemTotal, so the
+// MemTotal-only pool refuses a device-resident plan that physically fits. Two conditions hold:
+// the grand total fits headroom(MemTotal + carve-out), and the host-scoped bytes plus any
+// device-scoped bytes ABOVE the carve-out (which spill into GTT, an aperture over system RAM)
+// fit headroom(MemTotal). Host-scoped bytes never draw on the carve-out.
+func refuseUnifiedHostResidencyPhysicalPoolWithCarveout(plan compute.MemoryPlan, hostTotal, carveout int64, headroom float64) error {
+	if hostTotal <= 0 {
+		return nil
+	}
+	if want, budget := plan.Total(), compute.BudgetAfterHeadroom(hostTotal+carveout, headroom); want > budget {
+		return wrapUnifiedHostResidency(&compute.FitError{
+			Verdict: compute.FitTooBig, Want: want, Avail: budget,
+			Demands: plan, Scope: compute.MemoryScopeHost,
+		})
+	}
+	host := hostScopedPlan(plan).Total()
+	spill := plan.Total() - host - carveout
+	if spill < 0 {
+		spill = 0
+	}
+	if want, budget := host+spill, compute.BudgetAfterHeadroom(hostTotal, headroom); want > budget {
+		return wrapUnifiedHostResidency(&compute.FitError{
+			Verdict: compute.FitTooBig, Want: want, Avail: budget,
+			Demands: plan, Scope: compute.MemoryScopeHost,
+		})
+	}
+	return nil
+}
+
+// planHasHostOffload reports a host-scoped offload row (a streamed or host-executed expert or
+// dense working set). The carve-out credit is withheld from such a plan: the #13280 OOM ran
+// that arm on strix3 with a 64 GiB carve-out and grew host anon RSS past MemTotal although
+// its device-scoped dense side fit the carve-out, so its device bytes cannot be trusted to
+// stay out of system RAM.
+func planHasHostOffload(plan compute.MemoryPlan) bool {
+	for _, d := range plan {
+		if d.Bytes > 0 && d.Class == compute.MemoryOffload && d.ScopeOrDefault() == compute.MemoryScopeHost {
+			return true
+		}
+	}
+	return false
 }
 
 // wrapUnifiedHostResidency adds the shared-pool provenance to a typed refusal so an operator

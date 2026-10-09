@@ -668,6 +668,10 @@ func (v *vulkanBackend) HostMemory() (total, free int64, known bool) {
 	return hostSystemMemory()
 }
 
+func (v *vulkanBackend) DedicatedVRAMCarveout() (int64, bool) {
+	return hostDedicatedVRAMCarveout()
+}
+
 func (v *vulkanBackend) BeginBatch() {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
