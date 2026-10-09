@@ -1,0 +1,105 @@
+#version 450
+layout(local_size_x = 1) in;
+
+// One invocation owns one head: scalar order is deliberate, not a reduction.
+layout(std430, binding = 0) readonly buffer QBuf { float Q[]; };
+layout(std430, binding = 1) readonly buffer KVBuf { float KV[]; };
+layout(std430, binding = 2) readonly buffer SinkBuf { float Sink[]; };
+layout(std430, binding = 3) buffer OutBuf { float Out[]; };
+layout(std430, binding = 4) writeonly buffer StatusBuf { uint Status[]; };
+
+layout(push_constant) uniform Push {
+    int heads;
+    int headDim;
+    int selectedRows;
+    int mode;
+    int hasSink;
+    float scale;
+} pc;
+
+bool finiteValue(float x) {
+    return !isnan(x) && !isinf(x);
+}
+
+void fault(uint head, uint stage, int slot, int element, float value) {
+    uint base = head * 4u;
+    Status[base] = stage;
+    Status[base + 1u] = uint(slot + 1);
+    Status[base + 2u] = uint(element + 1);
+    Status[base + 3u] = floatBitsToUint(value);
+}
+
+float scaledScore(uint head, int slot) {
+    uint qBase = head * uint(pc.headDim);
+    uint kvBase = uint(slot) * uint(pc.headDim);
+    precise float dot = 0.0;
+    for (int d = 0; d < pc.headDim; ++d) {
+        precise float product = Q[qBase + uint(d)] * KV[kvBase + uint(d)];
+        precise float nextDot = dot + product;
+        dot = nextDot;
+    }
+    precise float score = dot * pc.scale;
+    return score;
+}
+
+void main() {
+    uint head = gl_GlobalInvocationID.x;
+    if (head >= uint(pc.heads)) return;
+    uint statusBase = head * 4u;
+    Status[statusBase] = 0u;
+    Status[statusBase + 1u] = 0u;
+    Status[statusBase + 2u] = 0u;
+    Status[statusBase + 3u] = 0u;
+    uint outBase = head * uint(pc.headDim);
+    for (int d = 0; d < pc.headDim; ++d) Out[outBase + uint(d)] = 0.0;
+
+    // Plain and compressed intentionally have different finite-extreme behavior.
+    float seed = pc.mode == 0 ? uintBitsToFloat(0xff800000u) : uintBitsToFloat(0xff7fffffu);
+    float maximum = pc.hasSink != 0 ? Sink[head] : seed;
+    for (int slot = 0; slot < pc.selectedRows; ++slot) {
+        precise float score = scaledScore(head, slot);
+        if (!finiteValue(score)) { fault(head, 1u, slot, -1, score); return; }
+        if (score > maximum) maximum = score;
+    }
+    // Score validation precedes the compressed finite-sentinel skip.
+    if (maximum == seed) return;
+
+    precise float denominator = 0.0;
+    if (pc.hasSink != 0) {
+        precise float shift = Sink[head] - maximum;
+        precise float term = exp(shift);
+        if (!finiteValue(term)) { fault(head, 2u, -1, -1, term); return; }
+        denominator = term;
+    }
+    for (int slot = 0; slot < pc.selectedRows; ++slot) {
+        precise float score = scaledScore(head, slot);
+        // A finite extreme subtraction may become -Inf; exp(-Inf)=0 is valid.
+        precise float shift = score - maximum;
+        precise float term = exp(shift);
+        if (!finiteValue(term)) { fault(head, 2u, slot, -1, term); return; }
+        precise float nextDenominator = denominator + term;
+        denominator = nextDenominator;
+    }
+    if (!finiteValue(denominator)) { fault(head, 3u, -1, -1, denominator); return; }
+    if (denominator == 0.0) return;
+
+    for (int slot = 0; slot < pc.selectedRows; ++slot) {
+        precise float score = scaledScore(head, slot);
+        precise float shift = score - maximum;
+        precise float term = exp(shift);
+        if (!finiteValue(term)) { fault(head, 2u, slot, -1, term); return; }
+        precise float weight = term / denominator;
+        if (!finiteValue(weight)) { fault(head, 4u, slot, -1, weight); return; }
+        uint kvBase = uint(slot) * uint(pc.headDim);
+        for (int d = 0; d < pc.headDim; ++d) {
+            precise float product = weight * KV[kvBase + uint(d)];
+            precise float nextValue = Out[outBase + uint(d)] + product;
+            if (!finiteValue(nextValue)) { fault(head, 5u, slot, d, nextValue); return; }
+            Out[outBase + uint(d)] = nextValue;
+        }
+    }
+    for (int d = 0; d < pc.headDim; ++d) {
+        float value = Out[outBase + uint(d)];
+        if (!finiteValue(value)) { fault(head, 6u, -1, d, value); return; }
+    }
+}

@@ -311,9 +311,9 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	idx := v41PlainWindowIndexList(visibleKeys)
 	scale := cfg.attnScale()
 	attentionOpened := m.v41NowNanos()
-	o, err := V41SparseAttentionSink(q, flatKV, sink, idx, V41SparseAttentionSinkOptions{
+	o, err := v41SparseAttentionSinkWithDevice(l, q, flatKV, sink, idx, V41SparseAttentionSinkOptions{
 		B: 1, M: 1, Heads: nH, HeadDim: hd, TopK: len(visibleKeys) + 1, N: len(visibleKeys), Softmax: scale,
-	})
+	}, scratch.sharedAttention)
 	m.v41NoteAttentionContraction(attentionOpened)
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
@@ -684,7 +684,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		}
 	}
 	attentionOpened := m.v41NowNanos()
-	o, err := V41AttentionCompressedForward(q, sharedKV, opt)
+	o, err := v41AttentionCompressedForwardWithDevice(q, sharedKV, opt, scratch.sharedAttention)
 	m.v41NoteAttentionContraction(attentionOpened)
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)

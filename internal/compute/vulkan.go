@@ -342,6 +342,10 @@ type vulkanBuf struct {
 	q8Chunks            []vulkanQ8Chunk
 	budgetedWeightBytes int64
 	hostVisibleWeight   bool
+	// Only a fresh V4.1 attention output opts into checked D2H. The owner is
+	// never placed in freeTransient; native pool reuse creates a new Go wrapper
+	// with this flag clear. Arbitrary clones/derived tensors do not inherit it.
+	v41CheckedRead bool
 }
 
 // VulkanWeightArenaStats separates the expensive VkDeviceMemory allocation count from the
@@ -1264,7 +1268,12 @@ func (v *vulkanBackend) Read(t Tensor) []float32 {
 	return readF32Tensor(t, func(buf Buffer, out []float32) {
 		db := buf.(*vulkanBuf)
 		if len(out) > 0 {
-			status := int(C.fvk_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4)))
+			var status int
+			if db.v41CheckedRead {
+				status = int(C.fvk_v41_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4)))
+			} else {
+				status = int(C.fvk_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4)))
+			}
 			if status != 0 {
 				panic(vulkanReadError(status))
 			}

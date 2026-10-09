@@ -162,6 +162,7 @@ type v41ForwardState struct {
 	ffnNorm          v41FFNNormFunc
 	sharedActivation v41SharedActivationFunc
 	tailRoPE         v41TailRoPEFunc
+	sharedAttention  v41SharedAttentionFunc
 	callbackOwner    *Session
 }
 
@@ -289,7 +290,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, callbackOwner: st.callbackOwner}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -443,6 +444,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.ffnNorm = nil
 	scratch.sharedActivation = nil
 	scratch.tailRoPE = nil
+	scratch.sharedAttention = nil
 	if st != nil {
 		scratch.denseProjection = st.denseProjection
 		scratch.groupedOutput = st.groupedOutput
@@ -452,6 +454,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.ffnNorm = st.ffnNorm
 		scratch.sharedActivation = st.sharedActivation
 		scratch.tailRoPE = st.tailRoPE
+		scratch.sharedAttention = st.sharedAttention
 	}
 	defer func() {
 		scratch.denseProjection = nil
@@ -462,6 +465,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.ffnNorm = nil
 		scratch.sharedActivation = nil
 		scratch.tailRoPE = nil
+		scratch.sharedAttention = nil
 	}()
 
 	// Engram injection happens at the START of the layer, into the residual,
@@ -833,7 +837,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 				opt.TopK = plan.topKWidth()
 			}
 			attentionOpened := m.v41NowNanos()
-			o, err := V41AttentionCompressedForward(qHeads[t], sharedKV, opt)
+			o, err := v41AttentionCompressedForwardWithDevice(qHeads[t], sharedKV, opt, scratch.sharedAttention)
 			m.v41NoteAttentionContraction(attentionOpened)
 			if err != nil {
 				return err
@@ -862,9 +866,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			flatKV = append(flatKV, kvRows[k]...)
 		}
 		attentionOpened := m.v41NowNanos()
-		o, err := V41SparseAttentionSink(qHeads[t], flatKV, sink, idx, V41SparseAttentionSinkOptions{
+		o, err := v41SparseAttentionSinkWithDevice(l, qHeads[t], flatKV, sink, idx, V41SparseAttentionSinkOptions{
 			B: 1, M: 1, Heads: nH, HeadDim: hd, TopK: rows + 1, N: rows, Softmax: scale,
-		})
+		}, scratch.sharedAttention)
 		m.v41NoteAttentionContraction(attentionOpened)
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)
@@ -1189,11 +1193,11 @@ var v41PrefillStepProbe func()
 // nonempty session. Each step commits exactly one token and returns the last
 // token's logits, matching Prefill's single-last-row contract.
 //
-// Commit discipline mirrors Session.Step: a typed ErrV41ForwardStage refusal
-// (e.g. the retained cursor no longer matches the step position) leaves the
-// history untouched and falls back to the full-history route for the WHOLE
-// suffix, so a failed suffix never partially advances the session and never
-// reports a cache hit. Only a non-stage error is fatal.
+// Commit discipline mirrors Session.Step: a structural ErrV41ForwardStage
+// refusal (e.g. a retained cursor mismatch) retries the WHOLE suffix through
+// full history. A selected device failure is fatal even if it wraps that stage
+// sentinel, so it never authorizes host replay. The failing token is rolled
+// back; earlier successful suffix tokens retain their per-token commits.
 func (s *Session) prefillV41Suffix(ids []int) []float32 {
 	st := s.v41State()
 	startLen := len(st.history)
@@ -1202,7 +1206,8 @@ func (s *Session) prefillV41Suffix(ids []int) []float32 {
 		got, _, err := s.M.forwardV41Step(id, st, &v41ProjScratch{})
 		if err != nil {
 			var selectedRoPE *V41TailRoPEOperationError
-			if errors.As(err, &selectedRoPE) || !errors.Is(err, ErrV41ForwardStage) {
+			var selectedAttention *V41SharedAttentionOperationError
+			if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || !errors.Is(err, ErrV41ForwardStage) {
 				panic(err)
 			}
 			// Roll the suffix back to the pre-call boundary and re-fold the
@@ -1307,7 +1312,8 @@ func (s *Session) stepV41(id int) []float32 {
 			return logits
 		}
 		var selectedRoPE *V41TailRoPEOperationError
-		if errors.As(err, &selectedRoPE) || !errors.Is(err, ErrV41ForwardStage) {
+		var selectedAttention *V41SharedAttentionOperationError
+		if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || !errors.Is(err, ErrV41ForwardStage) {
 			panic(err)
 		}
 		// A typed stage refusal the eligibility check could not foresee (e.g. the
@@ -1347,6 +1353,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.ffnNorm = s.v41FFNNormFunc()
 		s.v41Forward.sharedActivation = s.v41SharedActivationFunc()
 		s.v41Forward.tailRoPE = s.v41TailRoPEFunc()
+		s.v41Forward.sharedAttention = s.v41SharedAttentionFunc()
 		s.v41Forward.callbackOwner = s
 	}
 	return s.v41Forward
