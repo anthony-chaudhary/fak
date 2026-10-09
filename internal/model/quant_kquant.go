@@ -589,7 +589,7 @@ func (m *Model) KQuantRaw(name string) ([]byte, bool) {
 	if qt == nil {
 		return nil, false
 	}
-	return qt.raw, true
+	return qt.residentRawSnapshot(), true
 }
 
 // ResidentKQuantEligible reports whether a canonical tensor name should be held as resident raw

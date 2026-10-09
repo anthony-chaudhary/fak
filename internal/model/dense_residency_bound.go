@@ -1,6 +1,9 @@
 package model
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
 // dense_residency_bound.go — the RUNTIME consumer for the declared bounded streamed-dense
 // working set (#13253). ggufload.WithStreamedDenseQ4KWorkingSet(hostBytes) declares that only
@@ -24,6 +27,9 @@ import "fmt"
 // Fail-closed: a materialization whose bytes would push retained past bound panics by name
 // (see kQuantTensor.ensureRawCPU) rather than silently exceeding the declared working set.
 type denseResidentLedger struct {
+	// mu serializes bounded CPU materialization through publication, so two
+	// cold tensors cannot each allocate against the same remaining budget.
+	mu       sync.Mutex
 	bound    int64
 	retained int64
 }
@@ -59,16 +65,27 @@ func (b *QuantBuilder) SetDenseResidentBound(bytes int64) {
 	b.m.denseResidentBoundBytes = bytes
 }
 
-// chargeRetained is the ledger-side admission check for one inbound materialization of
-// incoming bytes. A nil ledger (no bound declared) is a no-op and returns true. A ledger with
-// bound <= 0 is unbounded (also a no-op). Otherwise the charge is refused — and the caller
-// panics by name — when retained+incoming would exceed the declared bound; on admission the
-// running total is advanced by incoming. retained never exceeds bound across admitted charges.
-func (l *denseResidentLedger) chargeRetained(incoming int64) bool {
+// canRetainLocked checks descriptor bytes before allocation without consuming
+// budget. The subtraction avoids overflow at the exact remaining-byte boundary.
+// The caller holds mu; the bound is immutable after model construction.
+func (l *denseResidentLedger) canRetainLocked(incoming int64) bool {
 	if l == nil || l.bound <= 0 {
 		return true
 	}
-	if l.retained+incoming > l.bound {
+	return incoming >= 0 && l.retained >= 0 && l.retained <= l.bound && incoming <= l.bound-l.retained
+}
+
+// chargeRetainedLocked is the ledger-side admission check for one inbound materialization of
+// incoming bytes. A nil ledger (no bound declared) is a no-op and returns true. A ledger with
+// bound <= 0 is unbounded (also a no-op). Otherwise the charge is refused — and the caller
+// panics by name — when retained+incoming would exceed the declared bound; on admission the
+// running total is advanced by incoming. The caller holds mu until the tensor's
+// raw bytes are published; failed reads therefore neither charge nor publish.
+func (l *denseResidentLedger) chargeRetainedLocked(incoming int64) bool {
+	if l == nil || l.bound <= 0 {
+		return true
+	}
+	if !l.canRetainLocked(incoming) {
 		return false
 	}
 	l.retained += incoming

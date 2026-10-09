@@ -605,6 +605,7 @@ func TestAddLazyKQuantPerTypeExportsReachThePrimitive(t *testing.T) {
 // materialization into a fail-closed retention ceiling: the first payload fitting the bound
 // materializes and computes byte-identically to the resident tensor, and the next charge past
 // the bound panics by name instead of silently growing host anon-RSS.
+// fak-test:runtime fast est=5ms lane=default
 func TestLazyKQuantCPUGEMVHonorsDenseResidentBound(t *testing.T) {
 	kind := kindQ6K
 	payload := kQuantLazyLazyPayload(kind, 4, 256)
@@ -676,9 +677,10 @@ func TestLazyKQuantCPUGEMVHonorsDenseResidentBound(t *testing.T) {
 		}
 
 		// Second tensor shares the SAME ledger; its payload would double retained past bound.
+		secondReader := &chunkedProbeReaderAt{data: append([]byte(nil), payload...)}
 		second := &kQuantTensor{
 			out: 4, in: 256, nblk: 1, kind: kind,
-			lazy:       &LazyQ4KRange{Reader: &chunkedProbeReaderAt{data: append([]byte(nil), payload...)}, Bytes: len(payload)},
+			lazy:       &LazyQ4KRange{Reader: secondReader, Bytes: len(payload)},
 			denseBound: first.denseBound,
 		}
 		msg := recoverContains(func() { kQuantMatRows(second, x) })
@@ -692,11 +694,178 @@ func TestLazyKQuantCPUGEMVHonorsDenseResidentBound(t *testing.T) {
 		if len(second.raw) != 0 {
 			t.Fatalf("refused second materialization retained %d bytes, want none", len(second.raw))
 		}
+		if secondReader.reads != 0 {
+			t.Fatalf("refused tensor performed %d reads before budget refusal, want zero", secondReader.reads)
+		}
 		if first.denseBound.retained > first.denseBound.bound {
 			t.Fatalf("retained %d exceeded bound %d", first.denseBound.retained, first.denseBound.bound)
 		}
 		if first.denseBound.retained != payloadLen {
 			t.Fatalf("refused charge moved retained to %d, want it unchanged at %d", first.denseBound.retained, payloadLen)
+		}
+	})
+}
+
+type denseBoundPanicReaderAt struct{}
+
+func (denseBoundPanicReaderAt) ReadAt([]byte, int64) (int, error) { panic("fixture read panic") }
+
+// A one-byte deficit is refused from metadata even when adding the incoming
+// charge to retained would overflow int64. No large allocation is needed.
+// fak-test:runtime fast est=2ms lane=default
+func TestLazyKQuantDenseBoundPrechecksExactHeadroom(t *testing.T) {
+	payload := kQuantLazyLazyPayload(kindQ6K, 4, 256)
+	for _, bound := range []int64{int64(len(payload)), math.MaxInt64} {
+		retained := bound - int64(len(payload)) + 1
+		ledger := &denseResidentLedger{bound: bound, retained: retained}
+		reader := &chunkedProbeReaderAt{data: payload}
+		qt := &kQuantTensor{out: 4, in: 256, nblk: 1, kind: kindQ6K,
+			lazy: &LazyQ4KRange{Reader: reader, Bytes: len(payload)}, denseBound: ledger}
+		msg := recoverContains(func() { qt.ensureRawCPU("headroom witness") })
+		if !strings.Contains(msg, "dense resident bound") || reader.reads != 0 || len(qt.raw) != 0 || ledger.retained != retained {
+			t.Fatalf("bound=%d refusal=%q reads=%d raw=%d retained=%d, want pre-read refusal with unchanged ledger", bound, msg, reader.reads, len(qt.raw), ledger.retained)
+		}
+	}
+}
+
+// Failed materialization must leave the whole budget reusable and unlock it,
+// including when a reader panics rather than returning an error.
+// fak-test:runtime fast est=2ms lane=default
+func TestLazyKQuantDenseBoundReadFailureReleasesBudget(t *testing.T) {
+	payload := kQuantLazyLazyPayload(kindQ6K, 4, 256)
+	for name, reader := range map[string]io.ReaderAt{"error": failingReaderAt{}, "panic": denseBoundPanicReaderAt{}} {
+		t.Run(name, func(t *testing.T) {
+			ledger := &denseResidentLedger{bound: int64(len(payload))}
+			qt := &kQuantTensor{out: 4, in: 256, nblk: 1, kind: kindQ6K,
+				lazy: &LazyQ4KRange{Reader: reader, Bytes: len(payload)}, denseBound: ledger}
+			if msg := recoverContains(func() { qt.ensureRawCPU("failure witness") }); msg == "" {
+				t.Fatal("failed reader did not panic")
+			}
+			if !ledger.mu.TryLock() {
+				t.Fatal("failed materialization left the ledger locked")
+			}
+			retained, rawBytes := ledger.retained, len(qt.raw)
+			ledger.mu.Unlock()
+			if retained != 0 || rawBytes != 0 {
+				t.Fatalf("failed read retained=%d raw=%d, want neither charge nor publication", retained, rawBytes)
+			}
+			qt.lazy.Reader = bytes.NewReader(payload)
+			qt.ensureRawCPU("retry witness")
+			if ledger.retained != int64(len(payload)) || !bytes.Equal(qt.raw, payload) {
+				t.Fatalf("retry did not retain the exact payload once: retained=%d raw=%d", ledger.retained, len(qt.raw))
+			}
+		})
+	}
+}
+
+// Concurrent cold callers share one budget transaction: aliases materialize
+// once, and distinct tensors cannot both allocate against one remaining slot.
+// fak-test:runtime fast est=5ms lane=default
+func TestLazyKQuantDenseBoundConcurrentMaterialization(t *testing.T) {
+	payload := kQuantLazyLazyPayload(kindQ6K, 4, 256)
+	for _, sameTensor := range []bool{false, true} {
+		name := "distinct tensors"
+		if sameTensor {
+			name = "same tensor"
+		}
+		t.Run(name, func(t *testing.T) {
+			ledger := &denseResidentLedger{bound: int64(len(payload))}
+			readers := []*chunkedProbeReaderAt{{data: payload}, {data: payload}}
+			tensors := make([]*kQuantTensor, 2)
+			for i := range tensors {
+				tensors[i] = &kQuantTensor{out: 4, in: 256, nblk: 1, kind: kindQ6K,
+					lazy: &LazyQ4KRange{Reader: readers[i], Bytes: len(payload)}, denseBound: ledger}
+			}
+			if sameTensor {
+				tensors[1] = tensors[0]
+			}
+			start := make(chan struct{})
+			results := make(chan string, 2)
+			for _, qt := range tensors {
+				go func() {
+					<-start
+					results <- recoverContains(func() { qt.ensureRawCPU("concurrent witness") })
+				}()
+			}
+			close(start)
+			refused := 0
+			for range tensors {
+				if msg := <-results; msg != "" {
+					if !strings.Contains(msg, "dense resident bound") {
+						t.Fatalf("unexpected concurrent refusal: %s", msg)
+					}
+					refused++
+				}
+			}
+			wantRefused := 1
+			if sameTensor {
+				wantRefused = 0
+			}
+			if refused != wantRefused || readers[0].reads+readers[1].reads != 1 || ledger.retained != int64(len(payload)) {
+				t.Fatalf("refused=%d reads=%d retained=%d, want %d, 1, %d", refused, readers[0].reads+readers[1].reads, ledger.retained, wantRefused, len(payload))
+			}
+		})
+	}
+
+	t.Run("CPU publication and device reader", func(t *testing.T) {
+		ledger := &denseResidentLedger{bound: int64(len(payload))}
+		qt := &kQuantTensor{out: 4, in: 256, nblk: 1, kind: kindQ6K,
+			lazy: &LazyQ4KRange{Reader: bytes.NewReader(payload), Bytes: len(payload)}, denseBound: ledger}
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			qt.ensureRawCPU("CPU witness")
+		}()
+		go func() {
+			defer wg.Done()
+			raw, err := qt.materializeRaw()
+			if err != nil || !bytes.Equal(raw, payload) {
+				t.Errorf("device source bytes changed: error=%v len=%d", err, len(raw))
+			}
+		}()
+		wg.Wait()
+		if ledger.retained != int64(len(payload)) || !bytes.Equal(qt.raw, payload) {
+			t.Fatalf("concurrent reader changed CPU retention: retained=%d raw=%d", ledger.retained, len(qt.raw))
+		}
+	})
+
+	t.Run("CPU publication and resident observers", func(t *testing.T) {
+		ledger := &denseResidentLedger{bound: int64(len(payload))}
+		reader := &chunkedProbeReaderAt{data: payload}
+		qt := &kQuantTensor{out: 4, in: 256, nblk: 1, kind: kindQ6K,
+			lazy: &LazyQ4KRange{Reader: reader, Bytes: len(payload)}, denseBound: ledger}
+		const name = "model.layers.0.mlp.down_proj.weight"
+		m := &Model{kqw: map[string]*kQuantTensor{name: qt}}
+		if raw, ok := m.KQuantRaw(name); !ok || len(raw) != 0 || reader.reads != 0 {
+			t.Fatal("resident observation faulted an unpublished lazy payload")
+		}
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			qt.ensureRawCPU("observer witness")
+		}()
+		go func() {
+			defer wg.Done()
+			for range 8 {
+				raw, ok := m.KQuantRaw(name)
+				if !ok || len(raw) != 0 && !bytes.Equal(raw, payload) {
+					t.Error("resident getter returned a partial payload")
+				}
+				r := m.residentStoreReport()
+				if r.KQuantBytes != 0 && r.KQuantBytes != int64(len(payload)) || r.KQuantParams != r.KQuantBytes/int64(kindQ6K.blockBytes())*256 {
+					t.Errorf("resident report has inconsistent snapshot: %+v", r)
+				}
+				replicated, expert, _ := m.MoEResidentWeightBytes()
+				if expert != 0 || replicated != 0 && replicated != int64(len(payload)) {
+					t.Errorf("resident partition has partial payload: replicated=%d expert=%d", replicated, expert)
+				}
+			}
+		}()
+		wg.Wait()
+		if ledger.retained != int64(len(payload)) || reader.reads != 1 {
+			t.Fatalf("observers altered retention: retained=%d reads=%d", ledger.retained, reader.reads)
 		}
 	})
 }

@@ -828,11 +828,12 @@ func (m *Model) metalQ6KWeight(name string, qt *kQuantTensor) *metalgemm.Q6KWeig
 			}
 		}
 	}
-	if !m.metalQ6KUploadAllowedLocked(qt) {
+	raw := qt.residentRawSnapshot()
+	if !m.metalQ6KUploadAllowedLocked(qt, raw) {
 		tbl[name] = nil // cache the decline so a failed admission doesn't retry every token
 		return nil
 	}
-	w := metalgemm.UploadQ6KGoOwned(qt.raw, qt.out, qt.in)
+	w := metalgemm.UploadQ6KGoOwned(raw, qt.out, qt.in)
 	tbl[name] = w
 	return w
 }
@@ -842,15 +843,17 @@ func (m *Model) metalQ6KWeight(name string, qt *kQuantTensor) *metalgemm.Q6KWeig
 // activation/KV headroom (q6kAliasFits). A genuinely copied payload is judged by the additive
 // #1087 gate (q6kUploadFits) exactly as before. An unknown device budget declines the copy but a
 // provably-aligned alias still publishes — the alias cannot OOM the way a copy can.
-func (m *Model) metalQ6KUploadAllowedLocked(qt *kQuantTensor) bool {
+// raw is the same published snapshot the caller uploads; the dense ledger lock
+// has been released before residentStoreReport takes its own tensor snapshots.
+func (m *Model) metalQ6KUploadAllowedLocked(qt *kQuantTensor, raw []byte) bool {
 	deviceTotal := int64(0)
 	if total, ok := metalgemm.DeviceMemoryTotal(); ok {
 		deviceTotal = int64(total)
 	}
-	if metalgemm.Q6KCanAlias(qt.raw, qt.out, qt.in) {
+	if metalgemm.Q6KCanAlias(raw, qt.out, qt.in) {
 		return q6kAliasFits(m.residentStoreReport().TotalResidentBytes, deviceTotal) == nil
 	}
-	return q6kUploadFits(m.residentStoreReport().TotalResidentBytes, int64(len(qt.raw)), deviceTotal)
+	return q6kUploadFits(m.residentStoreReport().TotalResidentBytes, int64(len(raw)), deviceTotal)
 }
 
 // q6kRuntimeNames returns the model's Q6_K band as a deterministic, sorted name list: every
@@ -885,21 +888,24 @@ func (m *Model) promoteMetalQ6Residency() error {
 		metalQ6Exact[m] = &metalQ6ExactState{}
 		return nil
 	}
-	r := m.residentStoreReport()
 	deviceTotal := int64(0)
 	if total, ok := metalgemm.DeviceMemoryTotal(); ok {
 		deviceTotal = int64(total)
 	}
 	allAlias := true
 	var copyBytes int64
+	rawByName := make(map[string][]byte, len(names))
 	for _, name := range names {
 		qt := m.kqw[name]
-		if metalgemm.Q6KCanAlias(qt.raw, qt.out, qt.in) {
+		raw := qt.residentRawSnapshot()
+		rawByName[name] = raw
+		if metalgemm.Q6KCanAlias(raw, qt.out, qt.in) {
 			continue
 		}
 		allAlias = false
-		copyBytes += int64(len(qt.raw))
+		copyBytes += int64(len(raw))
 	}
+	r := m.residentStoreReport()
 	if allAlias {
 		if err := q6kAliasFits(r.TotalResidentBytes, deviceTotal); err != nil {
 			metalQ6Exact[m] = &metalQ6ExactState{err: err}
@@ -917,10 +923,11 @@ func (m *Model) promoteMetalQ6Residency() error {
 		if qt == nil || qt.kind != kindQ6K {
 			return nil, &MetalQ6ResidencyUnavailableError{Reason: "promised Q6_K projection is missing or wrong kind: " + name}
 		}
-		w := metalgemm.UploadQ6KGoOwned(qt.raw, qt.out, qt.in)
+		raw := rawByName[name]
+		w := metalgemm.UploadQ6KGoOwned(raw, qt.out, qt.in)
 		if w == nil {
 			return nil, &MetalQ6ResidencyUnavailableError{Reason: fmt.Sprintf(
-				"Q6_K Metal upload declined for %s: out=%d in=%d len(raw)=%d", name, qt.out, qt.in, len(qt.raw))}
+				"Q6_K Metal upload declined for %s: out=%d in=%d len(raw)=%d", name, qt.out, qt.in, len(raw))}
 		}
 		if allAlias && !w.NoCopy() {
 			w.Release()
@@ -969,7 +976,7 @@ func (m *Model) metalQ2KWeight(name string, qt *kQuantTensor) *metalgemm.Q2KWeig
 	if w, ok := tbl[name]; ok {
 		return w
 	}
-	w := metalgemm.UploadQ2K(qt.raw, qt.out, qt.in)
+	w := metalgemm.UploadQ2K(qt.residentRawSnapshot(), qt.out, qt.in)
 	tbl[name] = w
 	return w
 }
