@@ -571,6 +571,16 @@ func quantizeFP8BlockScaleTensorInto(
 	if err != nil {
 		return true, err
 	}
+	if canonical, direct := fp8DirectQ8Name(m.Cfg, name, weightEntry.Shape); direct {
+		qt, err := quantizeFP8BlockScaleQ8(name, weightEntry.Shape, weightBytes, scaleF32)
+		if err != nil {
+			return true, err
+		}
+		m.q8w[canonical] = qt
+		consumed[name] = true
+		consumed[scaleName] = true
+		return true, nil
+	}
 	fb, shape, err := decodeFP8BlockScaleTensor(name, weightEntry.Shape, weightBytes, scaleF32)
 	if err != nil {
 		return true, err

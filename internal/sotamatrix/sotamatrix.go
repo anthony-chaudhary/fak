@@ -234,6 +234,17 @@ var matrix = []Op{
 		Note:        "Bind to the container: never re-quantize at load, and never widen the resident form to f32 (~15x the footprint).",
 	},
 	{
+		Slug:        "cpu-fp8-tiled-quantize",
+		Title:       "CPU FP8 block-scale to Q8 tiled load conversion",
+		FileGlobs:   []string{"internal/model/fp8_quantize*.go", "internal/model/safetensors_quant.go"},
+		FakPath:     "internal/model/fp8_quantize.go (quantizeFP8BlockScaleQ8); internal/model/safetensors_quant.go (quantizeFP8BlockScaleTensorInto)",
+		SOTA:        "kvcache-ai/ktransformers@0c2912a5e25dc3459d728a59be2d8c7461ba64bd GemmKernel224FP8 lookup decode and bounded tile widening (Apache-2.0)",
+		PrimaryLink: "https://github.com/kvcache-ai/ktransformers/blob/0c2912a5e25dc3459d728a59be2d8c7461ba64bd/kt-kernel/operators/amx/la/amx_raw_kernels.hpp",
+		Route:       RouteBorrow,
+		Oracle:      "TestFP8TiledQuantLoadMatchesExpanded: all 256 E4M3FN codes against the existing decoder; loaded Q8 codes/scales bit-exact against decodeFP8BlockScale followed by quantizeQ8, including ragged scale tiles and canonical names",
+		Note:        "Source-only partial #5240; verification pending. Removes the FP8 whole-tensor decode temporary, keeps Q8 residency and existing accelerator preparation, and claims neither native FP8 GEMM nor measured throughput gains.",
+	},
+	{
 		Slug:  "cpu-quant-simd",
 		Title: "CPU K-quant / Q4_K / Q6_K SIMD dequant-GEMM",
 		// The biggest "from scratch" risk surface in the tree: the hand-written amd64/arm64/noasm
