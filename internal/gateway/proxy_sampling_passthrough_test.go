@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -16,7 +17,9 @@ import (
 // TestProxiedChatSamplingReachesUpstream pins what a proxied OpenAI chat turn puts on
 // the upstream wire. A client that omits temperature must not be served greedy
 // decoding the gateway invented: Halo llama.cpp upstreams then repeated identical
-// tool-call bundles. Explicit sampling and repetition penalties must arrive intact.
+// tool-call bundles. Explicit sampling and repetition penalties must arrive intact,
+// as must the llama.cpp/vLLM extensions top_k, min_p and chat_template_kwargs that
+// Halo Qwen's recommended sampling and enable_thinking ride on.
 func TestProxiedChatSamplingReachesUpstream(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -24,10 +27,12 @@ func TestProxiedChatSamplingReachesUpstream(t *testing.T) {
 		want   map[string]any
 		absent []string
 	}{
-		{name: "omitted", fields: ``, absent: []string{"temperature", "presence_penalty", "frequency_penalty"}},
+		{name: "omitted", fields: ``, absent: []string{"temperature", "presence_penalty", "frequency_penalty", "top_k", "min_p", "chat_template_kwargs"}},
 		{name: "explicit-zero", fields: `"temperature":0,`, want: map[string]any{"temperature": 0.0}},
 		{name: "explicit-sampling", fields: `"temperature":0.7,"top_p":0.8,"presence_penalty":1.5,"frequency_penalty":0.25,`,
 			want: map[string]any{"temperature": 0.7, "top_p": 0.8, "presence_penalty": 1.5, "frequency_penalty": 0.25}},
+		{name: "qwen-extensions", fields: `"top_k":20,"min_p":0.05,"chat_template_kwargs":{"enable_thinking":true},`,
+			want: map[string]any{"top_k": 20.0, "min_p": 0.05, "chat_template_kwargs": map[string]any{"enable_thinking": true}}},
 	}
 	for _, stream := range []bool{false, true} {
 		for _, tc := range cases {
@@ -82,7 +87,7 @@ func TestProxiedChatSamplingReachesUpstream(t *testing.T) {
 					}
 				}
 				for k, want := range tc.want {
-					if v, ok := got[k]; !ok || v != want {
+					if v, ok := got[k]; !ok || !reflect.DeepEqual(v, want) {
 						t.Errorf("upstream %s = %v (present=%t), want %v", k, v, ok, want)
 					}
 				}

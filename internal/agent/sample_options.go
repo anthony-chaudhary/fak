@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
@@ -83,6 +84,40 @@ func WithTopK(k *int) SampleOpt {
 		if k != nil {
 			v := *k
 			sp.TopK = &v
+		}
+	}
+}
+
+// WithChatWireTopK relays a client's OpenAI-chat top_k: it sets TopK like WithTopK
+// and also forwards it on the OpenAI-compatible chat wire, which llama.cpp and vLLM
+// accept. nil is a no-op.
+func WithChatWireTopK(k *int) SampleOpt {
+	return func(sp *SampleParams) {
+		if k != nil {
+			v := *k
+			sp.TopK = &v
+			sp.ChatWireTopK = true
+		}
+	}
+}
+
+// WithMinP sets the per-request min-p cutoff for the OpenAI-compatible chat wire.
+// nil is a no-op.
+func WithMinP(p *float64) SampleOpt {
+	return func(sp *SampleParams) {
+		if p != nil {
+			v := *p
+			sp.MinP = &v
+		}
+	}
+}
+
+// WithChatTemplateKwargs forwards a client's chat_template_kwargs object verbatim on
+// the OpenAI-compatible chat wire. Empty or JSON null is a no-op.
+func WithChatTemplateKwargs(raw json.RawMessage) SampleOpt {
+	return func(sp *SampleParams) {
+		if t := bytes.TrimSpace(raw); len(t) > 0 && !bytes.Equal(t, []byte("null")) {
+			sp.ChatTemplateKwargs = append(json.RawMessage(nil), t...)
 		}
 	}
 }

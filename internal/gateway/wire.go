@@ -402,10 +402,16 @@ type ChatRequest struct {
 	// reasoning model can break out of a non-terminating repetition loop the way an
 	// upstream ride engine already could. Absent => nil => unset (byte-for-byte the
 	// pre-#1705 sampler behavior).
-	FrequencyPenalty *float64        `json:"frequency_penalty,omitempty"`
-	PresencePenalty  *float64        `json:"presence_penalty,omitempty"`
-	ReasoningEffort  string          `json:"reasoning_effort,omitempty"`
-	ThinkingConfig   json.RawMessage `json:"thinking_config,omitempty"`
+	FrequencyPenalty *float64 `json:"frequency_penalty,omitempty"`
+	PresencePenalty  *float64 `json:"presence_penalty,omitempty"`
+	// TopK / MinP / ChatTemplateKwargs are the llama.cpp/vLLM chat extensions a
+	// proxied upstream honors (Qwen's recommended sampling, enable_thinking).
+	// Absent => unset on the upstream wire; chat_template_kwargs rides verbatim.
+	TopK               *int            `json:"top_k,omitempty"`
+	MinP               *float64        `json:"min_p,omitempty"`
+	ChatTemplateKwargs json.RawMessage `json:"chat_template_kwargs,omitempty"`
+	ReasoningEffort    string          `json:"reasoning_effort,omitempty"`
+	ThinkingConfig     json.RawMessage `json:"thinking_config,omitempty"`
 	// Guided* are provider-native guided-decode controls accepted by common
 	// OpenAI-compatible ride engines. They are not part of the core OpenAI request,
 	// so the gateway collects only these known keys and threads them through the

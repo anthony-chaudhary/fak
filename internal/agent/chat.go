@@ -591,6 +591,14 @@ type SampleParams struct {
 	// if that token has appeared at all this turn (count>0), independent of how many
 	// times — see sampleLogitsWithPenalty. nil is a no-op.
 	PresencePenalty *float64
+	// ChatWireTopK forwards TopK on the OpenAI-compatible chat wire, which has no
+	// native top_k; only a client that sent top_k on that wire sets it.
+	ChatWireTopK bool
+	// MinP is the llama.cpp/vLLM min-p cutoff (nil => unset on the chat wire).
+	MinP *float64
+	// ChatTemplateKwargs is the llama.cpp/vLLM chat_template_kwargs object, forwarded
+	// verbatim on the OpenAI-compatible chat wire (empty => unset).
+	ChatTemplateKwargs json.RawMessage
 	// NativeInferenceReceipt requests the strict native measurement envelope. It is
 	// false by default, preserving both planner work and response bytes.
 	NativeInferenceReceipt bool

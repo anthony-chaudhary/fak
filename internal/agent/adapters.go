@@ -74,6 +74,9 @@ type adapterRequest struct {
 	TopK                *int     // nil => omit; only the providers with a native top-k field carry it
 	FrequencyPenalty    *float64 // nil => omit; OpenAI-compatible chat wire only
 	PresencePenalty     *float64 // nil => omit; OpenAI-compatible chat wire only
+	ChatWireTopK        *int     // nil => omit; a client top_k relayed on the OpenAI-compatible chat wire
+	MinP                *float64 // nil => omit; OpenAI-compatible chat wire only
+	ChatTemplateKwargs  json.RawMessage
 	Stop                []string // empty => omit from the wire
 	// ResponseFormat / LogitBias are the OpenAI structured/guided-decode carriers
 	// (#560). They ride on the wire ONLY where the provider has a native field
@@ -162,21 +165,24 @@ func (a openAIAdapter) Headers(apiKey string) map[string]string {
 }
 
 type openAIRequest struct {
-	ServiceTier      string               `json:"service_tier,omitempty"`
-	Model            string               `json:"model"`
-	Messages         []Message            `json:"messages"`
-	Tools            []ToolDef            `json:"tools,omitempty"`
-	ToolChoice       string               `json:"tool_choice,omitempty"`
-	Temperature      *float64             `json:"temperature,omitempty"`
-	MaxTokens        int                  `json:"max_tokens,omitempty"`
-	TopP             *float64             `json:"top_p,omitempty"`
-	FrequencyPenalty *float64             `json:"frequency_penalty,omitempty"`
-	PresencePenalty  *float64             `json:"presence_penalty,omitempty"`
-	Stop             []string             `json:"stop,omitempty"`
-	ResponseFormat   json.RawMessage      `json:"response_format,omitempty"` // #560 structured/guided decode (OpenAI/xAI native)
-	LogitBias        map[int]float64      `json:"logit_bias,omitempty"`      // #560 per-token logit mask (OpenAI/xAI native)
-	Stream           bool                 `json:"stream,omitempty"`          // true => SSE token stream (StreamingPlanner)
-	StreamOptions    *openAIStreamOptions `json:"stream_options,omitempty"`
+	ServiceTier        string               `json:"service_tier,omitempty"`
+	Model              string               `json:"model"`
+	Messages           []Message            `json:"messages"`
+	Tools              []ToolDef            `json:"tools,omitempty"`
+	ToolChoice         string               `json:"tool_choice,omitempty"`
+	Temperature        *float64             `json:"temperature,omitempty"`
+	MaxTokens          int                  `json:"max_tokens,omitempty"`
+	TopP               *float64             `json:"top_p,omitempty"`
+	FrequencyPenalty   *float64             `json:"frequency_penalty,omitempty"`
+	PresencePenalty    *float64             `json:"presence_penalty,omitempty"`
+	TopK               *int                 `json:"top_k,omitempty"`
+	MinP               *float64             `json:"min_p,omitempty"`
+	ChatTemplateKwargs json.RawMessage      `json:"chat_template_kwargs,omitempty"` // llama.cpp/vLLM, verbatim
+	Stop               []string             `json:"stop,omitempty"`
+	ResponseFormat     json.RawMessage      `json:"response_format,omitempty"` // #560 structured/guided decode (OpenAI/xAI native)
+	LogitBias          map[int]float64      `json:"logit_bias,omitempty"`      // #560 per-token logit mask (OpenAI/xAI native)
+	Stream             bool                 `json:"stream,omitempty"`          // true => SSE token stream (StreamingPlanner)
+	StreamOptions      *openAIStreamOptions `json:"stream_options,omitempty"`
 }
 
 // openAIStreamOptions carries the OpenAI/vLLM/SGLang stream control that asks the
@@ -215,20 +221,24 @@ func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 	if !r.OmitTemperature {
 		temp = &r.Temperature
 	}
+	kwargs, extra := mergeChatTemplateKwargs(r.ChatTemplateKwargs, r.ExtraBody)
 	req := openAIRequest{
-		ServiceTier:      serviceTierWire(a.Provider(), r.ServiceTier),
-		Model:            r.Model,
-		Messages:         messages,
-		Tools:            openAICompatibleTools(r.Tools),
-		ToolChoice:       toolChoice,
-		Temperature:      temp,
-		MaxTokens:        r.MaxTokens,
-		TopP:             r.TopP,
-		FrequencyPenalty: penaltyUnlessExtra(r.FrequencyPenalty, r.ExtraBody, "frequency_penalty"),
-		PresencePenalty:  penaltyUnlessExtra(r.PresencePenalty, r.ExtraBody, "presence_penalty"),
-		Stop:             r.Stop,
-		ResponseFormat:   r.ResponseFormat,
-		LogitBias:        r.LogitBias,
+		ServiceTier:        serviceTierWire(a.Provider(), r.ServiceTier),
+		Model:              r.Model,
+		Messages:           messages,
+		Tools:              openAICompatibleTools(r.Tools),
+		ToolChoice:         toolChoice,
+		Temperature:        temp,
+		MaxTokens:          r.MaxTokens,
+		TopP:               r.TopP,
+		FrequencyPenalty:   unlessExtra(r.FrequencyPenalty, r.ExtraBody, "frequency_penalty"),
+		PresencePenalty:    unlessExtra(r.PresencePenalty, r.ExtraBody, "presence_penalty"),
+		TopK:               unlessExtra(r.ChatWireTopK, r.ExtraBody, "top_k"),
+		MinP:               unlessExtra(r.MinP, r.ExtraBody, "min_p"),
+		Stop:               r.Stop,
+		ResponseFormat:     r.ResponseFormat,
+		LogitBias:          r.LogitBias,
+		ChatTemplateKwargs: kwargs,
 	}
 	if r.Stream {
 		// Ask for usage on the terminal chunk so a streamed turn still reports token
@@ -236,12 +246,12 @@ func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 		req.Stream = true
 		req.StreamOptions = &openAIStreamOptions{IncludeUsage: true}
 	}
-	return marshalWithExtraBody(req, r.ExtraBody)
+	return marshalWithExtraBody(req, extra)
 }
 
-// penaltyUnlessExtra keeps an operator ExtraBody penalty authoritative: a client
+// unlessExtra keeps an operator ExtraBody sampling value authoritative: a client
 // value for the same key would otherwise make marshalWithExtraBody refuse the turn.
-func penaltyUnlessExtra(v *float64, extra json.RawMessage, key string) *float64 {
+func unlessExtra[T any](v *T, extra json.RawMessage, key string) *T {
 	if v == nil || len(extra) == 0 {
 		return v
 	}
@@ -252,6 +262,56 @@ func penaltyUnlessExtra(v *float64, extra json.RawMessage, key string) *float64 
 		}
 	}
 	return v
+}
+
+// chatWireTopK is the top_k the OpenAI-compatible chat wire carries: only one a
+// client sent on that wire, never a TopK aimed at a native-top_k provider.
+func chatWireTopK(sp SampleParams) *int {
+	if !sp.ChatWireTopK {
+		return nil
+	}
+	return sp.TopK
+}
+
+// mergeChatTemplateKwargs folds a client's chat_template_kwargs into an operator
+// ExtraBody one: operator keys win, client keys fill the rest, and the key leaves
+// the returned ExtraBody so marshalWithExtraBody does not refuse the duplicate.
+// A client value that is not an object yields to the operator's.
+func mergeChatTemplateKwargs(client, extra json.RawMessage) (json.RawMessage, json.RawMessage) {
+	if len(client) == 0 || len(extra) == 0 {
+		return client, extra
+	}
+	var keys map[string]json.RawMessage
+	if json.Unmarshal(extra, &keys) != nil {
+		return client, extra
+	}
+	op, ok := keys["chat_template_kwargs"]
+	if !ok {
+		return client, extra
+	}
+	var opObj, merged map[string]json.RawMessage
+	if json.Unmarshal(op, &opObj) != nil || json.Unmarshal(client, &merged) != nil {
+		return nil, extra
+	}
+	if merged == nil {
+		merged = map[string]json.RawMessage{}
+	}
+	for k, v := range opObj {
+		merged[k] = v
+	}
+	kwargs, err := json.Marshal(merged)
+	if err != nil {
+		return nil, extra
+	}
+	delete(keys, "chat_template_kwargs")
+	if len(keys) == 0 {
+		return kwargs, nil
+	}
+	rest, err := json.Marshal(keys)
+	if err != nil {
+		return nil, extra
+	}
+	return kwargs, rest
 }
 
 // foldLateSystemMessages moves every system/developer message that follows the

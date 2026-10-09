@@ -939,6 +939,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		// could. No-op when the client omitted them (nil pointer).
 		agent.WithFrequencyPenalty(req.FrequencyPenalty),
 		agent.WithPresencePenalty(req.PresencePenalty),
+		agent.WithChatWireTopK(req.TopK),
+		agent.WithMinP(req.MinP),
+		agent.WithChatTemplateKwargs(req.ChatTemplateKwargs),
 		agent.WithNativeInferenceReceipt(receiptRequested),
 		agent.WithDecodeTrace(decodeTraceRequested),
 		agent.WithNativeDecodeTokenIDs(decodeTokenIDsRequested),
