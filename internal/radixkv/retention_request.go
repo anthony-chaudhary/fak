@@ -158,25 +158,14 @@ func (r RetentionRequest) Validate() error {
 	return nil
 }
 
-// windowEnd returns the logical tick strictly after which the entry is past its TTL window,
-// plus whether the window is finite. A retainForever TTL has no finite end (ever == false).
-func (r RetentionRequest) windowEnd() (end int64, ever bool) {
-	if r.TTL == retainForever {
-		return 0, false
-	}
-	return r.Admitted + r.TTL, true
-}
-
 // Expired reports whether the entry is past its TTL window at the INJECTED logical clock now.
 // An entry is expired once the clock advances strictly beyond Admitted+TTL; a retainForever
 // entry is never expired on the window (only priority can reclaim it). Wall-clock-free: the
 // caller passes the logical time, so the verdict is deterministic and replayable.
 func (r RetentionRequest) Expired(now int64) bool {
-	end, ever := r.windowEnd()
-	if !ever {
-		return false
-	}
-	return now > end
+	// Validated admission ticks are nonnegative. Checking their order first
+	// makes the elapsed subtraction safe even when Admitted+TTL exceeds int64.
+	return r.TTL != retainForever && now > r.Admitted && now-r.Admitted > r.TTL
 }
 
 // RetentionEntry binds a stable identity to a RetentionRequest so a set of retained entries

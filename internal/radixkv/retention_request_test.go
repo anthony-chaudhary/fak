@@ -2,8 +2,48 @@ package radixkv
 
 import (
 	"errors"
+	"math"
 	"testing"
 )
+
+// fak-test:justify why=regression when=changed:internal/radixkv/retention_request.go
+// fak-test:runtime fast est=1ms lane=default
+func TestRetentionRequestWindowOverflow(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name               string
+		admitted, ttl, now int64
+		expired            bool
+	}{
+		{"wrapped_end_at_admission", math.MaxInt64 - 1, 2, math.MaxInt64 - 1, false},
+		{"wrapped_end_after_admission", math.MaxInt64 - 1, 2, math.MaxInt64, false},
+		{"both_fields_maximum", math.MaxInt64, math.MaxInt64, math.MaxInt64, false},
+		{"largest_finite_window", 0, math.MaxInt64, math.MaxInt64, false},
+		{"inclusive_endpoint", math.MaxInt64 - 2, 1, math.MaxInt64 - 1, false},
+		{"strictly_after_endpoint", math.MaxInt64 - 2, 1, math.MaxInt64, true},
+		{"before_admission", math.MaxInt64 - 1, 2, 0, false},
+		{"negative_clock", math.MaxInt64 - 1, 2, math.MinInt64, false},
+		{"forever", math.MaxInt64 - 1, RetainForever, math.MaxInt64, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := RetentionRequest{Priority: DefaultRetentionPriority, Admitted: tc.admitted, TTL: tc.ttl}
+			if err := req.Validate(); err != nil {
+				t.Fatalf("valid boundary descriptor rejected: %v", err)
+			}
+			if got := req.Expired(tc.now); got != tc.expired {
+				t.Fatalf("Expired(%d)=%v, want %v for %+v", tc.now, got, tc.expired, req)
+			}
+		})
+	}
+	// A wrapped end must not move a still-live entry into the reclaim partition.
+	verdict := ReclaimOrder([]RetentionEntry{
+		{ID: "live", RetentionRequest: RetentionRequest{Priority: MaxRetentionPriority, Admitted: math.MaxInt64 - 1, TTL: 2}},
+		{ID: "expired", RetentionRequest: RetentionRequest{Priority: DefaultRetentionPriority, Admitted: math.MaxInt64 - 2, TTL: 1}},
+	}, math.MaxInt64)
+	if !equalIDs(ids(verdict.Live), []string{"live"}) || !equalIDs(ids(verdict.Expired), []string{"expired"}) {
+		t.Fatalf("overflow changed reclaim partitions: live=%v expired=%v", ids(verdict.Live), ids(verdict.Expired))
+	}
+}
 
 // TestRetentionRequestReclaim is the #5259 witness: the pure client-declared per-request
 // retention core — a (priority, TTL-window) descriptor over an INJECTED logical clock — and
