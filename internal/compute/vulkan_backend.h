@@ -36,6 +36,9 @@ int fvk_init(char *name, int namelen, int *is_discrete, const char *spirv_dir);
 int fvk_device_identity(char *name, int namelen, uint32_t *vendor_id,
                         uint32_t *device_id, uint32_t *driver_version,
                         uint32_t *api_version);
+/* Selected VkPhysicalDeviceType, or OTHER (0) when unavailable. Metadata only:
+ * integrated=1, discrete=2, virtual=3, CPU=4. Used by physical qualification. */
+int fvk_device_type(void);
 
 /* Query the DRM render node of the initialized, selected physical device. Returns
  * 1 only for a supported Linux query with a valid major/minor pair; otherwise
@@ -241,6 +244,21 @@ void fvk_rmsnorm_matmul3_f32(const void *dWq, const void *dWk, const void *dWv,
 
 /* RoPE (HF non-interleaved rotate_half) on x[nHeads*headDim] at absolute position pos. */
 void fvk_rope_f32(void *dX, int pos, int nHeads, int headDim, double theta);
+
+/* One-position V4.1 tail-adjacent RoPE, with immutable F32 Q[heads,headDim],
+ * KV[headDim], and table[rotaryDim/2,2] packed [sin,cos]. The two full-sized
+ * outputs must not alias one another or any input. Prefix bits are copied.
+ * Returns 0 after recording/completing dispatch; 1 uninitialized, 2 invalid
+ * geometry/buffers/aliases, 3 unavailable pipeline, 4 failed dispatch, or the
+ * negative VkResult of an observed submission failure. Pending batches still
+ * require checked submission/readback. Handles must be live backend buffers.
+ * New native builds require the dedicated module; absence/ABI failure refuses
+ * initialization. Deploy only a coupled rebuilt archive and verified V3/60
+ * bundle. fvk_init itself does not verify the external build receipt. */
+int fvk_have_v41_tail_rope_qk(void);
+int fvk_v41_tail_rope_qk_f32(const void *dQ, const void *dKV,
+                            void *dQOut, void *dKVOut, const void *dSinCos,
+                            int heads, int headDim, int rotaryDim);
 
 /* SwiGLU: y = silu(g) * u, elementwise, length n. */
 void fvk_swiglu_f32(const void *dG, const void *dU, void *dY, int n);

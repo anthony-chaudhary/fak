@@ -16,69 +16,9 @@ import (
 	"strings"
 )
 
-// VulkanShaders contains the GLSL compute shaders compiled for the Vulkan backend,
-// exactly matching internal/compute/build_vulkan.ps1.
-var VulkanShaders = []string{
-	"matmul",
-	"matmul_add",
-	"matmul_argmax",
-	"matmul_argmax_blocks",
-	"matmul2",
-	"matmul3",
-	"rmsnorm",
-	"rmsnorm_matmul",
-	"rmsnorm_matmul2",
-	"rmsnorm_matmul3",
-	"rmsnorm_matmul_argmax_blocks",
-	"rope",
-	"swiglu",
-	"swiglu_matmul_add",
-	"add",
-	"add_bias",
-	"attention",
-	"argmax",
-	"argmax_pairs",
-	"q8_matmul",
-	"q8_matmul2",
-	"q8_matmul3",
-	"rmsnorm_q8_matmul2",
-	"rmsnorm_q8_matmul3",
-	"swiglu_q8_matmul_add",
-	"qwen35_gdn_q8_in_proj",
-	"qwen35_gdn_conv",
-	"qwen35_gdn_recurrent",
-	"q4k_matmul",
-	"q4k_matmul_wave32",
-	"q4k_matmul_coopmat",
-	"q6k_matmul",
-	"q5k_matmul",
-	"q3k_matmul",
-	"q2k_matmul",
-	"qwen35_split_qg_panel",
-	"qwen35_partial_rope_panel",
-	"qwen35_causal_attention_panel",
-	"sigmoid_mul",
-	"q8_matmul_decode",
-	"glm_kda_recurrent_reread",
-	"glm_kda_recurrent_wave32",
-	"flash_attn_dequant",
-	"qwen35_gdn_tiled_transpose",
-	"coopmat_wave32_wmma",
-	"rmsnorm_q4k_matmul2",
-	"swiglu_q4k_matmul_add",
-	"qwen35_gdn_prefill_tiled",
-	"qwen35_gdn_prefill_norm",
-	"qwen35_gdn_verify_tiled",
-	"q2k_matvec",
-	"rmsnorm_q8_matmul2_coop",
-	"iq4xs_matvec",
-	"iq3xxs_matvec",
-	"iq2s_matvec",
-	"iq3s_matvec",
-	"iq2xxs_matvec",
-	"iq2xs_matvec",
-	"iq1s_matvec",
-}
+// VulkanShaders is a compatibility snapshot of the current shader registry.
+// Builds and identity verification use immutable registry accessors instead.
+var VulkanShaders = CurrentVulkanShaderRegistry()
 
 func strictFileSHA256(path string) (string, int64, error) {
 	f, err := os.Open(path)
@@ -190,8 +130,8 @@ func hashSPIRVBundle(repoRoot string) (string, int, error) {
 	if err != nil {
 		return "", 0, fmt.Errorf("read SPIR-V bundle: %w", err)
 	}
-	expected := make(map[string]struct{}, len(VulkanShaders))
-	for _, name := range VulkanShaders {
+	expected := make(map[string]struct{}, len(historicalVulkanV2Shaders()))
+	for _, name := range historicalVulkanV2Shaders() {
 		expected[name+".spv"] = struct{}{}
 	}
 	observed := make([]string, 0, len(entries))
@@ -275,7 +215,16 @@ func CompareReceiptProvenance(a, b *ComputeBuildReceipt) error {
 	if a == nil || b == nil {
 		return fmt.Errorf("receipt cannot be nil")
 	}
+	if a.Schema == VulkanBuildReceiptSchemaV3 || b.Schema == VulkanBuildReceiptSchemaV3 {
+		if a.Schema != b.Schema {
+			return fmt.Errorf("Vulkan receipt schema mismatch")
+		}
+		return compareVulkanReceiptProvenanceV3(a, b)
+	}
 	if a.Vulkan != nil || b.Vulkan != nil {
+		if a.Schema != b.Schema {
+			return fmt.Errorf("Vulkan receipt schema mismatch")
+		}
 		if a.Vulkan == nil || b.Vulkan == nil || a.Artifact == nil || b.Artifact == nil {
 			return fmt.Errorf("Vulkan provenance presence mismatch")
 		}
@@ -1091,11 +1040,11 @@ func mergeToolchainOverrides(base, overrides *Toolchain) *Toolchain {
 }
 
 func finalizeVulkanBinary(cfg *VulkanConfig, source BuildSourceProvenance, outBinPath string, expectedTools []BuildToolIdentity, expectedToolchainSHA string) (*BuildArtifact, *VulkanBuildProvenance, error) {
-	binarySHA, binarySize, err := strictFileSHA256(outBinPath)
+	binarySHA, binarySize, err := stableRegularFileSHA256(outBinPath, "Vulkan output binary")
 	if err != nil {
 		return nil, nil, fmt.Errorf("hash Vulkan output binary: %w", err)
 	}
-	spirvSHA, spirvCount, err := hashSPIRVBundle(cfg.RepoRoot)
+	spirvSHA, spirvCount, err := hashCurrentSPIRVBundle(filepath.Join(cfg.RepoRoot, "internal", "compute", "spirv"))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1120,7 +1069,7 @@ func finalizeVulkanBinary(cfg *VulkanConfig, source BuildSourceProvenance, outBi
 		NormalizedBuildCommand: commands,
 		BuildCommandSHA256:     commandSHA,
 	}
-	stableSHA, err := vulkanStableIdentitySHA(source, spirvSHA, spirvCount, toolchainSHA, commandSHA, binarySHA)
+	stableSHA, err := vulkanStableIdentityV3SHA(source, spirvSHA, spirvCount, toolchainSHA, commandSHA, binarySHA)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1143,7 +1092,7 @@ func BuildShaders(ctx context.Context, tc *Toolchain, repoRoot string, stdout io
 	}
 
 	compiledCount := 0
-	for _, s := range VulkanShaders {
+	for _, s := range CurrentVulkanShaderRegistry() {
 		src := filepath.Join(shaderSrc, s+".comp")
 		dst := filepath.Join(spvOut, s+".spv")
 
@@ -1279,6 +1228,11 @@ func RunVulkan(ctx context.Context, cfg *VulkanConfig) (retErr error) {
 		}
 		cfg.RepoRoot = root
 	}
+	var err error
+	cfg.RepoRoot, err = filepath.Abs(cfg.RepoRoot)
+	if err != nil {
+		return fmt.Errorf("resolve Vulkan repository root: %w", err)
+	}
 	if cfg.PkgDir == "" {
 		cfg.PkgDir = filepath.Join(cfg.RepoRoot, "internal", "compute")
 	}
@@ -1296,7 +1250,7 @@ func RunVulkan(ctx context.Context, cfg *VulkanConfig) (retErr error) {
 
 	tracker := newReceiptTracker("vulkan", cfg.Command, cfg.ReceiptPath)
 	if cfg.Command == "binary" {
-		tracker.receipt.Schema = VulkanBuildReceiptSchema
+		tracker.receipt.Schema = VulkanBuildReceiptSchemaV3
 	}
 	cfg.Receipt = tracker.receipt
 	defer func() {
@@ -1471,12 +1425,17 @@ func RunVulkan(ctx context.Context, cfg *VulkanConfig) (retErr error) {
 			}
 			tracker.receipt.Artifact = artifact
 			tracker.receipt.Vulkan = provenance
+			registry, err := currentVulkanRegistryIdentity()
+			if err != nil {
+				return err
+			}
+			tracker.receipt.VulkanRegistry = &registry
 			return nil
 		}); err != nil {
 			return err
 		}
 		if err := tracker.recordPhase("reproducibility", func() error {
-			rep, err := compareVulkanBuildReceipt(cfg.CompareReceiptPath, tracker.receipt.Artifact, tracker.receipt.Vulkan)
+			rep, err := compareVulkanBuildReceiptV3(cfg.CompareReceiptPath, tracker.receipt.Artifact, tracker.receipt.Vulkan, tracker.receipt.VulkanRegistry)
 			tracker.receipt.Reproducibility = rep
 			return err
 		}); err != nil {

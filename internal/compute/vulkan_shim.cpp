@@ -85,6 +85,10 @@ uint32_t          g_maxComputeWorkGroupCountX = 0;
 VkDeviceSize      g_totalDeviceLocalMemory = 0;
 bool              g_haveMemoryBudget = false;
 bool              g_batching = false;
+// Only V4.1 submissions opt into checked command/fence calls. A failed submit
+// or wait leaves resources quarantined for this process lifetime;
+// there is no native context-recovery/teardown API that could safely recycle them.
+bool              g_v41SubmissionPendingFailure = false;
 void              batchBegin();
 void              batchFlush();
 VkResult          g_submissionStatus = VK_SUCCESS;
@@ -209,6 +213,7 @@ uint64_t g_weightArenaLiveBytes = 0;
 uint64_t g_weightArenaPeakReservedBytes = 0;
 
 void releaseWeightArena() {
+    if (g_v41SubmissionPendingFailure) return;
     for (const WeightArenaBlock& block : g_weightArena) {
         if (block.liveBuffers != 0) return;
     }
@@ -263,7 +268,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -278,7 +283,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_RMSNORM_MATMUL_ARGMAX_BLOCKS: case K_RMSNORM_Q8_MATMUL2: case K_RMSNORM_Q8_MATMUL3: case K_RMSNORM_Q8_MATMUL2_COOP:
     case K_RMSNORM_Q4K_MATMUL2:
         return g_dp.otherNorm;
-    case K_ROPE: case K_QWEN35_PARTIAL_ROPE_PANEL:
+    case K_ROPE: case K_QWEN35_PARTIAL_ROPE_PANEL: case K_V41_TAIL_ROPE_QK:
         return g_dp.otherRope;
     case K_SWIGLU: case K_SWIGLU_MATMUL_ADD: case K_SWIGLU_Q8_MATMUL_ADD: case K_SIGMOID_MUL:
     case K_SWIGLU_Q4K_MATMUL_ADD:
@@ -339,6 +344,8 @@ int g_have_q8 = 0;
 // The four-projection GDN specialization is optional even when generic Q8 is
 // available: an absent or rejected pipeline must preserve the composed path.
 int g_have_qwen35_gdn_q8_in_proj = 0;
+// Mandatory in a current build; published only after complete initialization.
+int g_have_v41_tail_rope_qk = 0;
 // Fixed-size GLM KDA kernels require an explicitly requested 32-lane subgroup.
 // A local size of 128 alone is not a Wave32 contract: RADV may otherwise choose Wave64.
 int g_have_glm_kda_wave32 = 0;
@@ -481,6 +488,7 @@ bool queryDeviceLocalMemoryBudget(VkDeviceSize* budget, VkDeviceSize* usage) {
 }
 
 void destroyBuffer(Buffer* b) {
+    if (g_v41SubmissionPendingFailure) return; // referenced scratch/arena may still be in flight
     if (!b) return;
     if (b->buf) vkDestroyBuffer(g_dev, b->buf, nullptr);
     if (b->weightArenaBound) {
@@ -567,6 +575,7 @@ size_t drainPool() {
 }
 
 Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlags usage) {
+    if (g_v41SubmissionPendingFailure) return nullptr;
     size_t reqBytes = bytes ? bytes : 1;
     if ((usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) &&
         g_maxBufferBytes > 0 && (VkDeviceSize)reqBytes > g_maxBufferBytes) {
@@ -674,6 +683,7 @@ VkDeviceSize alignArenaOffset(VkDeviceSize value, VkDeviceSize alignment) {
 }
 
 Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
+    if (g_v41SubmissionPendingFailure) return nullptr;
     size_t reqBytes = bytes ? bytes : 1;
     if (g_maxBufferBytes > 0 && (VkDeviceSize)reqBytes > g_maxBufferBytes) return nullptr;
 
@@ -1017,7 +1027,58 @@ void endSubmitWait(VkCommandBuffer cmd) {
     vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
 }
 
+VkCommandBuffer v41BeginCmdChecked() {
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    ai.commandPool = g_cmdpool;
+    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ai.commandBufferCount = 1;
+    VkResult r = vkAllocateCommandBuffers(g_dev, &ai, &cmd);
+    if (r != VK_SUCCESS) {
+        g_submissionStatus = r;
+        return VK_NULL_HANDLE;
+    }
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    r = vkBeginCommandBuffer(cmd, &bi);
+    if (r != VK_SUCCESS) {
+        if (cmd) vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
+        g_submissionStatus = r;
+        return VK_NULL_HANDLE;
+    }
+    return cmd;
+}
+
+bool v41EndSubmitWaitChecked(VkCommandBuffer cmd, bool submit) {
+    VkResult r = vkEndCommandBuffer(cmd);
+    if (r == VK_SUCCESS && submit) r = vkResetFences(g_dev, 1, &g_submitFence);
+    if (r == VK_SUCCESS && submit) {
+        VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        si.commandBufferCount = 1;
+        si.pCommandBuffers = &cmd;
+        r = vkQueueSubmit(g_queue, 1, &si, g_submitFence);
+        if (r != VK_SUCCESS) {
+            // In particular VK_ERROR_DEVICE_LOST is equivalent to successful
+            // submission for pending/in-use resource state. Treat every failed
+            // submit conservatively: no failure result is a quiescence proof.
+            g_v41SubmissionPendingFailure = true;
+        } else {
+            r = vkWaitForFences(g_dev, 1, &g_submitFence, VK_TRUE, UINT64_MAX);
+            if (r != VK_SUCCESS) g_v41SubmissionPendingFailure = true;
+        }
+    }
+    if (!g_v41SubmissionPendingFailure) vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
+    if (r != VK_SUCCESS) {
+        // Positive VkResult values (notably VK_TIMEOUT=2) must not collide with
+        // this entrypoint's positive geometry/capability statuses.
+        if (r > VK_SUCCESS) fprintf(stderr, "fak-vulkan: V4.1 incomplete submission VkResult=%d\n", int(r));
+        g_submissionStatus = r < VK_SUCCESS ? r : VK_ERROR_UNKNOWN;
+    }
+    return r == VK_SUCCESS;
+}
+
 VkResult restoreBeginCommand() {
+    if (g_v41SubmissionPendingFailure) return g_submissionStatus;
     if (g_restore.cmd != VK_NULL_HANDLE) return VK_SUCCESS;
     VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     ai.commandPool = g_cmdpool;
@@ -1039,6 +1100,7 @@ VkResult restoreBeginCommand() {
 }
 
 void restoreDiscardCommand() {
+    if (g_v41SubmissionPendingFailure) return;
     if (g_restore.cmd != VK_NULL_HANDLE) {
         (void)vkEndCommandBuffer(g_restore.cmd);
         vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &g_restore.cmd);
@@ -1050,6 +1112,7 @@ void restoreDiscardCommand() {
 }
 
 void restoreCleanup() {
+    if (g_v41SubmissionPendingFailure) return;
     restoreDiscardCommand();
     if (g_restore.stage) {
         if (g_restore.mapped) vkUnmapMemory(g_dev, g_restore.stage->mem);
@@ -1068,6 +1131,7 @@ VkCommandBuffer               g_batchCmd  = VK_NULL_HANDLE;
 std::vector<DescriptorSetRecord> g_batchSets;
 std::vector<Buffer*>          g_batchFreed;   // buffers freed mid-batch, recycled after submit
 int                           g_batchOps  = 0;
+bool                          g_batchHasV41 = false;
 uint64_t                      g_batchD2DCount = 0;
 uint64_t                      g_batchD2DBytes = 0;
 bool                          g_batchD2DValid = true;
@@ -1137,7 +1201,7 @@ const char* const kKernelNames[K_COUNT] = {
     "q6k_matmul", "q5k_matmul", "q3k_matmul", "rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add", "q2k_matmul",
     "rmsnorm_q2k_matmul2", "qwen35_split_qg_panel", "qwen35_partial_rope_panel",
     "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
-    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec",
+    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -1244,11 +1308,13 @@ void tsBatchCollect() {
 }
 
 void batchBegin() {
+	if (g_v41SubmissionPendingFailure) return;
 	if (g_batching) return;          // already recording — the model brackets each token
 	g_batchCmd = beginCmd();
 	tsBatchBegin(g_batchCmd);
 	g_batching = true;
 	g_batchOps = 0;
+	g_batchHasV41 = false;
 	g_batchD2DCount = 0;
 	g_batchD2DBytes = 0;
 	g_batchD2DValid = true;
@@ -1259,9 +1325,18 @@ void batchBegin() {
 }
 
 void batchFlush() {
+    if (g_v41SubmissionPendingFailure) return; // never retry an uncertain submit
     if (!g_batching) return;
     bool hadWork = g_batchOps > 0;
-    if (hadWork) {
+    if (g_batchHasV41) {
+        if (hadWork) dp_inc(g_dp.batchSubmits);
+        const bool completed = v41EndSubmitWaitChecked(g_batchCmd, hadWork);
+        if (g_v41SubmissionPendingFailure) return; // retain command, sets and parked buffers
+        if (completed && hadWork) tsBatchCollect();
+        if (completed && hadWork && (!g_batchD2DValid ||
+            !checkedCounterAdd(g_d2dCount, g_batchD2DCount) ||
+            !checkedCounterAdd(g_d2dBytes, g_batchD2DBytes))) g_transferCountersValid = false;
+    } else if (hadWork) {
         dp_inc(g_dp.batchSubmits);
         endSubmitWait(g_batchCmd);   // single submit + fence for the whole recorded chain
         tsBatchCollect();
@@ -1287,6 +1362,7 @@ void batchFlush() {
     // (endSubmitWait fenced), so every parked buffer is now safe to return to the pool.
 	g_batching = false;
 	g_batchOps = 0;
+	g_batchHasV41 = false;
 	g_batchD2DCount = 0;
 	g_batchD2DBytes = 0;
 	g_batchD2DValid = true;
@@ -1296,6 +1372,7 @@ void batchFlush() {
 
 // staging copy host<->device through one persistent HOST_VISIBLE scratch buffer.
 void copyHostToDevice(Buffer* dst, const void* host, size_t bytes) {
+    if (g_v41SubmissionPendingFailure) return;
     if (bytes == 0 || !dst || !host) return;
     Buffer* stage = stagingBuffer(bytes);
     if (!stage) return;
@@ -1311,6 +1388,7 @@ void copyHostToDevice(Buffer* dst, const void* host, size_t bytes) {
 }
 
 int copyDeviceToHost(void* host, Buffer* src, size_t bytes) {
+    if (g_v41SubmissionPendingFailure) return (int)g_submissionStatus;
     if (bytes == 0) return VK_SUCCESS;
     if (!host || !src) return VK_ERROR_INITIALIZATION_FAILED;
     if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
@@ -1406,11 +1484,144 @@ bool swigluPushConstantABI(const std::vector<char>& code) {
     return first != offsets.end() && first->second == 0 && second != offsets.end() && second->second == 4;
 }
 
+// This is a narrow ABI/NoContraction admission check, not a build-receipt or
+// full SPIR-V validator. The verified current bundle remains a pre-launch gate.
+std::vector<char> readV41TailRoPEModule(const std::string& path) {
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return {};
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return {}; }
+    const long size = ftell(f);
+    // This single small fixed kernel does not admit an unbounded allocation from
+    // a malformed module file. Ordinary kernel loading is deliberately untouched.
+    if (size < 20 || size > 1024 * 1024 || size % 4 != 0 || fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f); return {};
+    }
+    std::vector<char> code(static_cast<size_t>(size));
+    const bool complete = fread(code.data(), 1, code.size(), f) == code.size();
+    const bool closed = fclose(f) == 0;
+    return complete && closed ? code : std::vector<char>{};
+}
+
+bool v41TailRoPEABI(const std::vector<char>& code) {
+    if (code.size() < 20 || code.size() % 4 != 0) return false;
+    std::vector<uint32_t> w(code.size() / 4);
+    memcpy(w.data(), code.data(), code.size());
+    if (w[0] != 0x07230203 || w[3] == 0 || w[4] != 0) return false;
+    const uint32_t bound = w[3];
+    const uint32_t typeInt = 21, typeFloat = 22, typeRuntimeArray = 29;
+    const uint32_t typeStruct = 30, typePointer = 32, variable = 59;
+    const uint32_t block = 2, arrayStride = 6, binding = 33, descriptorSet = 34;
+    const uint32_t offset = 35, noContraction = 42, pushConstant = 9, storageBuffer = 12;
+    std::unordered_map<uint32_t, std::vector<uint32_t>> defs;
+    std::unordered_map<uint64_t, uint32_t> decorations, memberOffsets;
+    std::unordered_map<uint64_t, bool> memberAccess;
+    std::vector<uint32_t> buffers, floatResults;
+    uint32_t push = 0, entry = 0, localEntry = 0;
+    size_t pushCount = 0, entryCount = 0, localCount = 0;
+    auto validID = [bound](uint32_t id) { return id != 0 && id < bound; };
+    auto key = [](uint32_t id, uint32_t kind) { return (uint64_t(id) << 32) | kind; };
+    for (size_t p = 5; p < w.size();) {
+        const uint32_t count = w[p] >> 16, op = w[p] & 0xffff;
+        if (count == 0 || count > w.size() - p) return false;
+        const uint32_t* a = w.data() + p;
+        if (op == typeInt || op == typeFloat || op == typeRuntimeArray ||
+            op == typeStruct || op == typePointer || op == variable) {
+            if ((op == typeInt && count != 4) || (op == typeFloat && count != 3) ||
+                (op == typeRuntimeArray && count != 3) || (op == typeStruct && count < 2) ||
+                (op == typePointer && count != 4) || (op == variable && count != 4 && count != 5)) return false;
+            const uint32_t id = a[op == variable ? 2 : 1];
+            if (!validID(id) || !defs.emplace(id, std::vector<uint32_t>(a, a + count)).second) return false;
+            if (op == variable) {
+                if (!validID(a[1])) return false;
+                if (a[3] == pushConstant) { push = a[1]; ++pushCount; }
+                else if (a[3] == storageBuffer) buffers.push_back(id);
+                else if (a[3] == 0 || a[3] == 2) return false; // no alternate descriptor classes
+            }
+        } else if (op == 71) { // OpDecorate
+            if (count < 3 || !validID(a[1])) return false;
+            const uint32_t kind = a[2];
+            if (kind == block || kind == noContraction) {
+                if (count != 3 || !decorations.emplace(key(a[1], kind), 0).second) return false;
+            } else if (kind == arrayStride || kind == binding || kind == descriptorSet) {
+                if (count != 4 || !decorations.emplace(key(a[1], kind), a[3]).second) return false;
+            }
+        } else if (op == 72) { // OpMemberDecorate
+            if (count < 4 || !validID(a[1])) return false;
+            if (a[3] == offset) {
+                if (count != 5 || !memberOffsets.emplace(key(a[1], a[2]), a[4]).second) return false;
+            } else if (a[3] == 24 || a[3] == 25) { // NonWritable / NonReadable
+                if (count != 4 || a[2] != 0 || !memberAccess.emplace(key(a[1], a[3]), true).second) return false;
+            }
+        } else if (op == 15) { // one GLCompute entry, named main
+            if (count < 5 || a[1] != 5 || !validID(a[2]) || a[3] != 0x6e69616d || a[4] != 0) return false;
+            entry = a[2]; ++entryCount;
+        } else if (op == 16 && count >= 3 && a[2] == 17) { // LocalSize
+            if (count != 6 || a[3] != 256 || a[4] != 1 || a[5] != 1) return false;
+            localEntry = a[1]; ++localCount;
+        } else if (op == 129 || op == 131 || op == 133) { // FAdd / FSub / FMul
+            if (count != 5 || !validID(a[2])) return false;
+            floatResults.push_back(a[2]);
+        } else if (op == 12) { // no extended arithmetic, especially Fma/trig
+            return false;
+        }
+        p += count;
+    }
+    auto definition = [&](uint32_t id, uint32_t op, size_t size) -> const std::vector<uint32_t>* {
+        auto it = defs.find(id);
+        return it != defs.end() && (it->second[0] & 0xffff) == op && it->second.size() == size ? &it->second : nullptr;
+    };
+    auto decorated = [&](uint32_t id, uint32_t kind, uint32_t value) {
+        auto it = decorations.find(key(id, kind));
+        return it != decorations.end() && it->second == value;
+    };
+    auto atOffset = [&](uint32_t id, uint32_t member, uint32_t value) {
+        auto it = memberOffsets.find(key(id, member));
+        return it != memberOffsets.end() && it->second == value;
+    };
+    if (entryCount != 1 || localCount != 1 || entry != localEntry || pushCount != 1 || buffers.size() != 5 || floatResults.size() < 6) return false;
+    for (uint32_t id : floatResults) if (!decorated(id, noContraction, 0)) return false;
+    const auto* pointer = definition(push, typePointer, 4);
+    if (!pointer || (*pointer)[2] != pushConstant) return false;
+    const uint32_t pushStruct = (*pointer)[3];
+    const auto* structure = definition(pushStruct, typeStruct, 5);
+    if (!structure || !decorated(pushStruct, block, 0)) return false;
+    for (uint32_t m = 0; m < 3; ++m) {
+        const auto* integer = definition((*structure)[m + 2], typeInt, 4);
+        if (!integer || (*integer)[2] != 32 || (*integer)[3] != 1 || !atOffset(pushStruct, m, m * 4)) return false;
+    }
+    uint32_t seenBindings = 0;
+    for (uint32_t id : buffers) {
+        const auto* var = definition(id, variable, 4);
+        auto bind = decorations.find(key(id, binding));
+        if (!var || bind == decorations.end() || bind->second >= 5 || !decorated(id, descriptorSet, 0)) return false;
+        const uint32_t slot = bind->second, mask = 1u << slot;
+        if (seenBindings & mask) return false;
+        seenBindings |= mask;
+        const auto* ptr = definition((*var)[1], typePointer, 4);
+        if (!ptr || (*ptr)[2] != storageBuffer) return false;
+        const uint32_t structID = (*ptr)[3];
+        const auto* st = definition(structID, typeStruct, 3);
+        if (!st || !decorated(structID, block, 0) || !atOffset(structID, 0, 0)) return false;
+        const auto* array = definition((*st)[2], typeRuntimeArray, 3);
+        if (!array || !decorated((*st)[2], arrayStride, 4)) return false;
+        const auto* scalar = definition((*array)[2], slot == 4 ? typeFloat : typeInt, slot == 4 ? 3 : 4);
+        if (!scalar || (*scalar)[2] != 32 || (slot != 4 && (*scalar)[3] != 0)) return false;
+        const uint32_t access = slot == 2 || slot == 3 ? 25 : 24;
+        if (memberAccess.count(key(structID, access)) != 1) return false;
+    }
+    return seenBindings == 31;
+}
+
 bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsize, uint32_t subgroupSize = 0) {
-    std::vector<char> code = readFile(spvPath);
+    std::vector<char> code = &k == &g_kern[K_V41_TAIL_ROPE_QK] ? readV41TailRoPEModule(spvPath) : readFile(spvPath);
     if (code.empty()) return false;
     if (&k == &g_kern[K_SWIGLU] && !swigluPushConstantABI(code)) {
         fprintf(stderr, "fak-vulkan: incompatible SwiGLU push-constant ABI in %s\n", spvPath.c_str());
+        return false;
+    }
+    if (&k == &g_kern[K_V41_TAIL_ROPE_QK] &&
+        (nbuf != 5 || pcsize != 12 || !v41TailRoPEABI(code))) {
+        fprintf(stderr, "fak-vulkan: incompatible V4.1 tail RoPE module in %s\n", spvPath.c_str());
         return false;
     }
     VkShaderModuleCreateInfo smi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
@@ -1486,6 +1697,8 @@ void recycleDescriptorSet(DescriptorSetRecord rec) {
 
 // dispatch: bind `bufs` (nbuf of them) + push constants, run groupsX*groupsY workgroups.
 bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1) {
+    if (g_v41SubmissionPendingFailure) return false;
+    const bool checkedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK];
     if (k.nbuf > MAX_DISPATCH_BUFS) {
         fprintf(stderr, "fak-vulkan: dispatch skipped; kernel has %d buffers, max %d\n",
                 k.nbuf, MAX_DISPATCH_BUFS);
@@ -1529,6 +1742,8 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     }
 
     if (g_batching) {
+        if (g_batchCmd == VK_NULL_HANDLE) { recycleDescriptorSet(rec); return false; }
+        if (checkedV41) g_batchHasV41 = true;
         // RECORD into the open batch buffer: barrier against the prior op, then dispatch.
         // The descriptor set must outlive recording, so park it for post-submit free.
         // When the Go ledger armed exact hazards, it also queued this dispatch's sync
@@ -1546,13 +1761,19 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     }
 
     // Unbatched: one-shot submit + fence (the original per-op path).
-    VkCommandBuffer cmd = beginCmd();
+    VkCommandBuffer cmd = checkedV41 ? v41BeginCmdChecked() : beginCmd();
+    if (cmd == VK_NULL_HANDLE) { recycleDescriptorSet(rec); return false; }
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.pipe);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.layout, 0, 1, &rec.set, 0, nullptr);
     if (pcsize > 0) vkCmdPushConstants(cmd, k.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pcsize, pc);
     dpDispatch(k);
     vkCmdDispatch(cmd, groupsX, groupsY, 1);
     dpOneShot(g_dp.oneShotCompute);
+    if (checkedV41) {
+        const bool completed = v41EndSubmitWaitChecked(cmd, true);
+        if (!g_v41SubmissionPendingFailure) recycleDescriptorSet(rec);
+        return completed;
+    }
     endSubmitWait(cmd);
     recycleDescriptorSet(rec);
     return g_submissionStatus == VK_SUCCESS;
@@ -1839,6 +2060,10 @@ int fvk_device_drm_render_node(uint64_t* major, uint64_t* minor) {
 }
 
 int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
+    // A re-init is not a device teardown and cannot establish quiescence. Keep
+    // the poisoned context and its loaded capability bound until process exit.
+    if (g_v41SubmissionPendingFailure) return 9;
+    g_have_v41_tail_rope_qk = 0;
     g_have_qwen35_gdn_q8_in_proj = 0;
     g_have_q6k_matmul = 0;
     g_have_q5k_matmul = 0;
@@ -2102,6 +2327,9 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     ok &= buildKernel(g_kern[K_RMSNORM_MATMUL3], P("rmsnorm_matmul3.spv"), 8, 5 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_RMSNORM_MATMUL_ARGMAX_BLOCKS], P("rmsnorm_matmul_argmax_blocks.spv"), 5, 2 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_ROPE],      P("rope.spv"),      1, 3 * sizeof(int) + sizeof(float));
+    // A missing or incompatible V4.1 module is a broken current bundle, not
+    // an optional capability miss. Receipt verification is a pre-launch gate.
+    ok &= buildKernel(g_kern[K_V41_TAIL_ROPE_QK], P("v41_tail_rope_qk.spv"), 5, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_SWIGLU],    P("swiglu.spv"),    3, sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_SWIGLU_MATMUL_ADD], P("swiglu_matmul_add.spv"), 4, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_ADD],       P("add.spv"),       2, sizeof(int));
@@ -2205,6 +2433,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     }
 
     g_ready = true;
+    g_have_v41_tail_rope_qk = 1;
     // One per-geometry device self-check, before the first forward and never
     // inside one. Its verdict is cached and read by the verify-width route.
     gdnVerifySelfCheck();
@@ -2212,6 +2441,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
 }
 
 void* fvk_malloc(size_t bytes) {
+    if (g_v41SubmissionPendingFailure) return nullptr;
     if (bytes == 0) bytes = 4;
     auto it = g_pool.find(bytes);
     if (it != g_pool.end() && !it->second.empty()) {
@@ -2224,6 +2454,7 @@ void* fvk_malloc(size_t bytes) {
 }
 
 void* fvk_malloc_weight(size_t bytes, uint64_t max_arena_bytes) {
+    if (g_v41SubmissionPendingFailure) return nullptr;
     if (bytes == 0) bytes = 4;
     return allocWeightArenaBuffer(bytes, (VkDeviceSize)max_arena_bytes);
 }
@@ -2239,6 +2470,7 @@ void fvk_weight_arena_stats(uint64_t* memory_allocations, uint64_t* buffer_bindi
 }
 
 void* fvk_malloc_hostvis(size_t bytes) {
+    if (g_v41SubmissionPendingFailure) return nullptr;
     if (bytes == 0) bytes = 4;
     // Host-visible directly — the residency-budget path uses this for cold weights so they go
     // host-side by CHOICE, not by losing the device-local race. No pool: weights are immutable
@@ -2261,7 +2493,7 @@ void fvk_free(void* d) {
     // op (e.g. the KV grow copies old->new then frees old; the copy hasn't executed yet).
     // Park it and recycle only after the batch flushes, so it can't be handed back out and
     // rebound mid-batch.
-    if (g_batching) { g_batchFreed.push_back(b); return; }
+    if (g_batching || g_v41SubmissionPendingFailure) { g_batchFreed.push_back(b); return; }
     if (b->weightArenaBound) {
         destroyBuffer(b);
         clearDescriptorBindingCache();
@@ -2286,6 +2518,7 @@ void fvk_free(void* d) {
 // visible to subsequently-recorded ops, and the staging copy itself needs its own submit).
 // In practice weights upload BEFORE the per-token batch begins (cached), so this rarely flushes.
 void fvk_h2d(void* d, const void* h, size_t bytes) {
+    if (g_v41SubmissionPendingFailure) return;
     bool resumeBatch = g_batching;
     if (resumeBatch) batchFlush();
     copyHostToDevice(B(d), h, bytes);
@@ -2296,6 +2529,7 @@ void fvk_h2d(void* d, const void* h, size_t bytes) {
 // destination buffers and publishes them only after every submit succeeds.
 // Each submit reuses the same staging allocation only after its fence completes.
 int fvk_restore_begin(size_t max_bytes, size_t max_entries) {
+    if (g_v41SubmissionPendingFailure) return (int)g_submissionStatus;
     if (!g_ready || !g_dev || !g_cmdpool || !g_submitFence || g_batching ||
         max_bytes < 4 || (max_bytes & 3) != 0 || max_entries == 0 ||
         g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) {
@@ -2320,6 +2554,7 @@ int fvk_restore_begin(size_t max_bytes, size_t max_entries) {
 }
 
 int fvk_restore_add(void* dst_handle, size_t dst_offset, const void* src, size_t bytes) {
+    if (g_v41SubmissionPendingFailure) return (int)g_submissionStatus;
     Buffer* dst = B(dst_handle);
     if (!g_restore.stage || !g_restore.mapped || !dst || !src || bytes == 0 ||
         (dst_offset & 3) != 0 || (bytes & 3) != 0 ||
@@ -2341,6 +2576,7 @@ int fvk_restore_add(void* dst_handle, size_t dst_offset, const void* src, size_t
 }
 
 int fvk_restore_submit(void) {
+    if (g_v41SubmissionPendingFailure) return (int)g_submissionStatus;
     if (!g_restore.stage || g_restore.cmd == VK_NULL_HANDLE || g_restore.entries == 0) return 7;
     if (g_restoreFailAfterSubmits >= 0 &&
         g_restore.successfulSubmits >= g_restoreFailAfterSubmits) {
@@ -2423,6 +2659,7 @@ int fvk_debug_select_q2k_matvec(int enabled) {
 // batch with a preceding barrier, so they stay ordered against the compute that produced the
 // source — no premature submit. Unbatched, they take the one-shot path.
 void fvk_d2d_range(void* dst, size_t dst_off, const void* src, size_t src_off, size_t bytes) {
+    if (g_v41SubmissionPendingFailure) return;
     if (bytes == 0 || !dst || !src) return;
     if (g_batching) {
         if (g_batchOps > 0) recordDispatchBarrier(g_batchCmd, g_batchOps);
@@ -2652,7 +2889,8 @@ int fvk_phase_counter_describe(int index, char* name, size_t name_len,
 #endif
 }
 
-void fvk_sync(void) { if (g_dev) vkDeviceWaitIdle(g_dev); }
+void fvk_sync(void) {
+    if (g_v41SubmissionPendingFailure) return; if (g_dev) vkDeviceWaitIdle(g_dev); }
 
 int fvk_have_q8(void) { return g_have_q8; }
 int fvk_have_qwen35_gdn_q8_in_proj(void) { return g_have_qwen35_gdn_q8_in_proj; }
@@ -2756,6 +2994,7 @@ int fvk_transfer_stage_backing(uint64_t* buffer_bytes, fvk_buffer_backing_info* 
 }
 
 void fvk_trim_pool(void) {
+    if (g_v41SubmissionPendingFailure) return;
     if (!g_dev) return;
     if (g_batching) batchFlush();
     drainPool();
@@ -2765,6 +3004,7 @@ void fvk_trim_pool(void) {
 }
 
 void fvk_trim_pool_if_over(size_t max_buffers) {
+    if (g_v41SubmissionPendingFailure) return;
     if (!g_dev) return;
     if (g_poolCount > max_buffers) {
         if (g_batching) batchFlush();
@@ -3109,6 +3349,53 @@ void fvk_rope_f32(void* dX, int pos, int nHeads, int headDim, double theta) {
     dispatch(g_kern[K_ROPE], bufs, &pc, sizeof(pc), (total + 127) / 128);
 }
 
+int fvk_have_v41_tail_rope_qk(void) {
+    return g_ready && g_have_v41_tail_rope_qk && g_kern[K_V41_TAIL_ROPE_QK].pipe != VK_NULL_HANDLE;
+}
+
+int fvk_device_type(void) {
+    if (!g_ready || g_phys == VK_NULL_HANDLE) return int(VK_PHYSICAL_DEVICE_TYPE_OTHER);
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(g_phys, &properties);
+    return int(properties.deviceType);
+}
+
+int fvk_v41_tail_rope_qk_f32(const void* dQ, const void* dKV,
+                            void* dQOut, void* dKVOut, const void* dSinCos,
+                            int heads, int headDim, int rotaryDim) {
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_tail_rope_qk()) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (heads <= 0 || headDim <= 0 || rotaryDim <= 0 || rotaryDim > headDim || (rotaryDim & 1)) return 2;
+    const uint64_t qCount = uint64_t(heads) * uint64_t(headDim);
+    const uint64_t total = qCount + uint64_t(headDim);
+    const uint64_t groups = (total + 255u) / 256u;
+    if (total > UINT32_MAX || groups > g_maxComputeWorkGroupCountX) return 2;
+    Buffer* bufs[5] = {B(dQ), B(dKV), B(dQOut), B(dKVOut), B(dSinCos)};
+    const uint64_t counts[5] = {qCount, uint64_t(headDim), qCount, uint64_t(headDim), uint64_t(rotaryDim)};
+    for (int i = 0; i < 5; ++i) {
+        if (!bufs[i] || bufs[i]->buf == VK_NULL_HANDLE || bufs[i]->mem == VK_NULL_HANDLE ||
+            counts[i] > std::numeric_limits<size_t>::max() / sizeof(float) ||
+            counts[i] * sizeof(float) > bufs[i]->bytes ||
+            bufs[i]->bytes > std::numeric_limits<VkDeviceSize>::max() - bufs[i]->memoryOffset) return 2;
+    }
+    auto aliases = [](const Buffer* a, const Buffer* b) {
+        return a == b || a->buf == b->buf ||
+            (a->mem == b->mem && a->memoryOffset < b->memoryOffset + b->bytes &&
+             b->memoryOffset < a->memoryOffset + a->bytes);
+    };
+    for (int out = 2; out <= 3; ++out) {
+        for (int i = 0; i < 5; ++i) if (i != out && aliases(bufs[out], bufs[i])) return 2;
+    }
+    struct { int heads, headDim, rotaryDim; } pc{heads, headDim, rotaryDim};
+    static_assert(sizeof(pc) == 12, "V4.1 tail RoPE push ABI must be three int32 values");
+    if (!dispatch(g_kern[K_V41_TAIL_ROPE_QK], bufs, &pc, sizeof(pc), uint32_t(groups))) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
 void fvk_swiglu_f32(const void* dG, const void* dU, void* dY, int n) {
     fvk_swiglu_limit_f32(dG, dU, dY, n, 0.0f);
 }
@@ -3141,6 +3428,7 @@ void fvk_add_bias_f32(void* dDst, const void* dBias, int rows, int width) {
 
 void fvk_attention_f32(const void* dQ, const void* dK, const void* dV, void* dOut,
                        int nPos, int nH, int nKV, int hd, float scale) {
+    if (g_v41SubmissionPendingFailure) return;
     // Experimental, default-off selector for #12535. Exact "1" is the only
     // admitted value; every other value preserves the production control path.
     // The variable is read at each call so isolated test subprocesses can select

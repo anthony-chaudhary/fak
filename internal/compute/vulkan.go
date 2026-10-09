@@ -489,6 +489,7 @@ func (v *vulkanBackend) RetireRequestResources() {
 	// g_batchFreed parking. Complete the command buffer first: only then may an
 	// address be handed to the next request or token.
 	C.fvk_retire_request()
+	requireVulkanSubmissionHealthyLocked("RetireRequestResources")
 	for _, b := range v.transient {
 		if b.ptr != nil {
 			v.recycleTransientLocked(b)
@@ -775,6 +776,7 @@ func (v *vulkanBackend) dallocFor(nbytes int, what string) *vulkanBuf {
 }
 
 func (v *vulkanBackend) dallocForClass(nbytes int, class MemoryClass, what string) *vulkanBuf {
+	requireVulkanSubmissionHealthyLocked("dallocForClass")
 	v.checkResourceCap(nbytes, what)
 	p := C.fvk_malloc(C.size_t(nbytes))
 	if p == nil {
@@ -798,6 +800,7 @@ func (v *vulkanBackend) dallocHostVis(nbytes int) *vulkanBuf {
 }
 
 func (v *vulkanBackend) dallocHostVisFor(nbytes int, what string) *vulkanBuf {
+	requireVulkanSubmissionHealthyLocked("dallocHostVisFor")
 	v.checkResourceCap(nbytes, what)
 	p := C.fvk_malloc_hostvis(C.size_t(nbytes))
 	if p == nil {
@@ -814,6 +817,7 @@ func (v *vulkanBackend) dallocWeight(nbytes int) *vulkanBuf {
 }
 
 func (v *vulkanBackend) dallocWeightFor(nbytes int, what string) *vulkanBuf {
+	requireVulkanSubmissionHealthyLocked("dallocWeightFor")
 	if v.budgetBytes > 0 && v.dlUsed+int64(nbytes) > v.budgetBytes {
 		buf := v.dallocHostVisFor(nbytes, what)
 		v.accountWeightPlacement(buf, nbytes)
@@ -878,6 +882,7 @@ func (v *vulkanBackend) accountWeightPlacement(buf *vulkanBuf, nbytes int) {
 }
 
 func (v *vulkanBackend) dallocTransient(nbytes int) *vulkanBuf {
+	requireVulkanSubmissionHealthyLocked("dallocTransient")
 	if v.freeTransient != nil {
 		bucket := v.freeTransient[nbytes]
 		if len(bucket) > 0 {
@@ -894,6 +899,7 @@ func (v *vulkanBackend) dallocTransient(nbytes int) *vulkanBuf {
 }
 
 func (v *vulkanBackend) recycleTransientLocked(b *vulkanBuf) {
+	requireVulkanSubmissionHealthyLocked("recycleTransientLocked")
 	if b == nil || b.ptr == nil {
 		return
 	}
@@ -914,6 +920,7 @@ func (v *vulkanBackend) recycleTransientLocked(b *vulkanBuf) {
 }
 
 func (v *vulkanBackend) trimTransientLocked() {
+	requireVulkanSubmissionHealthyLocked("trimTransientLocked")
 	for _, bucket := range v.freeTransient {
 		for _, b := range bucket {
 			if b.ptr != nil {

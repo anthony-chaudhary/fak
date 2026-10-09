@@ -150,6 +150,8 @@ function Build-Shaders {
     $shaders += "q3k_matmul"
     $shaders += "rmsnorm_q4k_matmul2"
     $shaders += "swiglu_q4k_matmul_add"
+    $shaders += "q4k_matmul_coopmat"
+    $shaders += "v41_tail_rope_qk"
     foreach ($s in $shaders) {
         $src = Join-Path $shaderSrc "$s.comp"
         $dst = Join-Path $spvOut "$s.spv"

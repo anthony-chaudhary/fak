@@ -1,0 +1,51 @@
+#version 450
+layout(local_size_x = 256) in;
+
+// Integer storage preserves every prefix bit, including signed zero/NaN payloads.
+layout(std430, binding = 0) readonly buffer QBuf { uint Q[]; };
+layout(std430, binding = 1) readonly buffer KVBuf { uint KV[]; };
+layout(std430, binding = 2) writeonly buffer QOutBuf { uint QOut[]; };
+layout(std430, binding = 3) writeonly buffer KVOutBuf { uint KVOut[]; };
+layout(std430, binding = 4) readonly buffer SinCosBuf { float SinCos[]; };
+
+layout(push_constant) uniform Push {
+    int heads;
+    int headDim;
+    int rotaryDim;
+} pc;
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    uint qCount = uint(pc.heads) * uint(pc.headDim);
+    if (i >= qCount + uint(pc.headDim)) return;
+    bool isKV = i >= qCount;
+    uint index = isKV ? i - qCount : i;
+    uint dim = index % uint(pc.headDim);
+    uint tail = uint(pc.headDim - pc.rotaryDim);
+    if (dim < tail) {
+        if (isKV) KVOut[index] = KV[index];
+        else QOut[index] = Q[index];
+        return;
+    }
+    uint lane = dim - tail;
+    if ((lane & 1u) != 0u) return;
+
+    float a = uintBitsToFloat(isKV ? KV[index] : Q[index]);
+    float b = uintBitsToFloat(isKV ? KV[index + 1u] : Q[index + 1u]);
+    float s = SinCos[lane];
+    float c = SinCos[lane + 1u];
+    // Match separately rounded F32 CPU products; precise forbids contraction.
+    precise float ac = a * c;
+    precise float bs = b * s;
+    precise float bc = b * c;
+    precise float as = a * s;
+    precise float x = ac - bs;
+    precise float y = bc + as;
+    if (isKV) {
+        KVOut[index] = floatBitsToUint(x);
+        KVOut[index + 1u] = floatBitsToUint(y);
+    } else {
+        QOut[index] = floatBitsToUint(x);
+        QOut[index + 1u] = floatBitsToUint(y);
+    }
+}

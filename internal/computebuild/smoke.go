@@ -141,7 +141,7 @@ func WriteReceiptAtomic(path string, receipt *ComputeBuildReceipt) error {
 	enc := json.NewEncoder(tmpFile)
 	enc.SetIndent("", "  ")
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(receipt); err != nil {
+	if err := enc.Encode(buildReceiptWireValue(receipt)); err != nil {
 		_ = tmpFile.Close()
 		return fmt.Errorf("encoding receipt JSON: %w", err)
 	}
@@ -174,6 +174,7 @@ func (t *receiptTracker) fail(err error, exitCode int) {
 	// succeeds. A compiler crash must not leave a partially authoritative receipt.
 	t.receipt.Artifact = nil
 	t.receipt.Vulkan = nil
+	t.receipt.VulkanRegistry = nil
 	if t.receipt.Reproducibility != nil && t.receipt.Reproducibility.Status != "mismatch" && t.receipt.Reproducibility.Status != "invalid" {
 		t.receipt.Reproducibility = nil
 	}

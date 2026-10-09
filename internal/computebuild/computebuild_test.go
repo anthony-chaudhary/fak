@@ -40,7 +40,7 @@ func TestVulkanShadersCompleteness(t *testing.T) {
 		"flash_attn_dequant", "qwen35_gdn_tiled_transpose", "coopmat_wave32_wmma",
 		"rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add",
 		"qwen35_gdn_prefill_tiled", "qwen35_gdn_prefill_norm", "qwen35_gdn_verify_tiled",
-		"q2k_matvec", "rmsnorm_q8_matmul2_coop", "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec",
+		"q2k_matvec", "rmsnorm_q8_matmul2_coop", "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk",
 	}
 	if len(VulkanShaders) != len(expectedShaders) {
 		t.Fatalf("expected %d Vulkan shaders, got %d", len(expectedShaders), len(VulkanShaders))
@@ -832,8 +832,8 @@ func readBuildReceipt(t *testing.T, path string) ComputeBuildReceipt {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var receipt ComputeBuildReceipt
-	if err := json.Unmarshal(b, &receipt); err != nil {
+	receipt, err := decodeStrictVulkanReceiptV3(b)
+	if err != nil {
 		t.Fatal(err)
 	}
 	return receipt
@@ -858,7 +858,7 @@ func TestVulkanBinaryDirtySourceRefusesBeforeBuildTool(t *testing.T) {
 		t.Fatal("build tool executed before dirty-source refusal")
 	}
 	receipt := readBuildReceipt(t, receiptPath)
-	if receipt.Schema != VulkanBuildReceiptSchema || receipt.Outcome != "failed" {
+	if receipt.Schema != VulkanBuildReceiptSchemaV3 || receipt.Outcome != "failed" {
 		t.Fatalf("receipt = %+v", receipt)
 	}
 	if len(receipt.Phases) != 1 || receipt.Phases[0].Name != "source_preflight" {
@@ -976,7 +976,7 @@ func TestVulkanBinaryReceiptBindsReproducibleSourceToolsShadersAndBinary(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if firstReceipt.Schema != VulkanBuildReceiptSchema || firstReceipt.Artifact == nil || len(firstReceipt.Artifact.SHA256) != sha256Hex || firstReceipt.Vulkan == nil {
+	if firstReceipt.Schema != VulkanBuildReceiptSchemaV3 || firstReceipt.Artifact == nil || len(firstReceipt.Artifact.SHA256) != sha256Hex || firstReceipt.Vulkan == nil || firstReceipt.VulkanRegistry == nil || firstReceipt.VulkanRegistry.ID != VulkanShaderRegistryV3ID || firstReceipt.VulkanRegistry.ModuleCount != vulkanV3ModuleCount {
 		t.Fatalf("incomplete first receipt: %+v", firstReceipt)
 	}
 	if firstReceipt.Vulkan.Source != firstSource || firstReceipt.Vulkan.SPIRVModuleCount != len(VulkanShaders) || len(firstReceipt.Vulkan.SPIRVBundleSHA256) != sha256Hex || len(firstReceipt.Vulkan.Toolchain) != len(wantTools) || len(firstReceipt.Vulkan.ToolchainSHA256) != sha256Hex || len(firstReceipt.Vulkan.BuildCommandSHA256) != sha256Hex || len(firstReceipt.Vulkan.StableIdentitySHA256) != sha256Hex {
@@ -1031,7 +1031,7 @@ func TestVulkanBinaryReceiptBindsReproducibleSourceToolsShadersAndBinary(t *test
 	if err := os.Remove(filepath.Join(repo, "internal", "compute", "spirv", VulkanShaders[0]+".spv")); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := hashSPIRVBundle(repo); err == nil || !strings.Contains(err.Error(), "incomplete") {
+	if _, _, err := hashCurrentSPIRVBundle(filepath.Join(repo, "internal", "compute", "spirv")); err == nil || !strings.Contains(err.Error(), "incomplete") {
 		t.Fatalf("missing SPIR-V module error = %v", err)
 	}
 }
@@ -1069,7 +1069,7 @@ func newVulkanVerifierFixture(t *testing.T) vulkanVerifierFixture {
 	writeFixtureFile(t, filepath.Join(repo, "go.mod"), "module example.test/verifier\n\ngo 1.26\n")
 	writeFixtureFile(t, filepath.Join(repo, "cmd", "fak", "main.go"), "package main\nfunc main() {}\n")
 	spirvRoot := filepath.Join(repo, "internal", "compute", "spirv")
-	for _, shader := range VulkanShaders {
+	for _, shader := range historicalVulkanV2Shaders() {
 		writeFixtureFile(t, filepath.Join(spirvRoot, shader+".spv"), "spirv:"+shader+"\n")
 	}
 	toolPath := filepath.Join(repo, "tooling", "inert-tool")
@@ -1113,7 +1113,7 @@ func newVulkanVerifierFixture(t *testing.T) vulkanVerifierFixture {
 	evidence := VulkanBinaryReceiptEvidence{
 		ReceiptPath: receiptPath, SourceRoot: repo, GitExecutable: gitPath, ExpectedGitSHA256: gitSHA, ExpectedCommit: commit,
 		BinaryPath: binaryPath, ExpectedBinarySHA256: binarySHA, ExpectedBinarySize: binarySize,
-		SPIRVRoot: spirvRoot, ExpectedSPIRVModules: append([]string(nil), VulkanShaders...),
+		SPIRVRoot: spirvRoot, ExpectedSPIRVModules: historicalVulkanV2Shaders(),
 		Tools:     VulkanReceiptToolInputs{Go: toolPath, CC: toolPath, CXX: toolPath, AR: toolPath, GLSLC: toolPath, CxxRuntime: "-lstdc++", IsWindows: runtime.GOOS == "windows"},
 		BuildPlan: VulkanReceiptBuildPlan{PackageDir: filepath.Join(repo, "internal", "compute"), OutPackage: "./cmd/fak", Smoke: false},
 	}
