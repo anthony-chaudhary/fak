@@ -7,9 +7,23 @@ package compute
 */
 import "C"
 
-import "fmt"
-
 var _ V41IndexerScoreBackend = (*vulkanBackend)(nil)
+
+func (v *vulkanBackend) V41IndexerScoreAdmission() (bool, error) {
+	if v == nil {
+		return vulkanV41IndexerScoreAdmissionResult(3, false)
+	}
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	// Every native pending-quarantine transition records a nonzero sticky
+	// submission status before returning; neither state is reset in-process.
+	// Read the fault before capability under the same lock. In particular,
+	// production's deliberately false capability must not hide a shared fault.
+	if status := int(C.fvk_submission_status()); status != 0 {
+		return vulkanV41IndexerScoreAdmissionResult(status, false)
+	}
+	return vulkanV41IndexerScoreAdmissionResult(0, C.fvk_have_v41_indexer_score() != 0)
+}
 
 func (v *vulkanBackend) SupportsV41IndexerScore() bool {
 	if v == nil {
@@ -112,19 +126,4 @@ func (v *vulkanBackend) v41IndexerScoreWithNative(q, keys, weights Tensor, rows,
 // output-alias checks before recording commands.
 func v41IndexerScoreStatusLocked(q, keys, weights, out *vulkanBuf, rows, heads, headDim int) int {
 	return int(C.fvk_v41_indexer_score_f32(q.ptr, keys.ptr, weights.ptr, out.ptr, C.int(rows), C.int(heads), C.int(headDim)))
-}
-
-func vulkanV41IndexerScoreStatusError(status int, reason string) *BackendError {
-	class, cause := VulkanClassExecutionFailed, ErrVulkanExecutionFailed
-	switch {
-	case status == -4:
-		class, cause = VulkanClassDeviceLost, ErrVulkanDeviceLost
-	case status == -1 || status == -2:
-		class, cause = VulkanClassAllocationFailed, ErrVulkanAllocationFailed
-	case status < 0:
-		class, cause = VulkanClassSubmissionFailed, ErrVulkanSubmissionFailed
-	case status == 2:
-		class, cause = VulkanClassInvalidGeometry, ErrVulkanInvalidGeometry
-	}
-	return &BackendError{Backend: "vulkan", Site: "V41IndexerScore", Class: class, Err: cause, Message: fmt.Sprintf("dedicated indexer score failed closed (code %d): %s", status, reason)}
 }

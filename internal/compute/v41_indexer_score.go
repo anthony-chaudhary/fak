@@ -32,9 +32,48 @@ import (
 // separately reviewed qualification admission is integrated.
 type V41IndexerScoreBackend interface {
 	Backend
+	// V41IndexerScoreAdmission atomically distinguishes healthy capability
+	// absence (false, nil) from a backend fault (false, typed error). It only
+	// observes state: no upload, allocation, dispatch, flush, wait or recovery.
+	// Call before binding and at the actual score seam even when initial absence
+	// retained the host scorer. Every selected invocation, including rows==0,
+	// also rechecks. Any error must close the request without host replay.
+	// Only an initial false, nil result permits the unchanged host path;
+	// a later false, nil does not authorize a selected caller to switch paths.
+	// The snapshot is not a completion fence or a future-health guarantee.
+	V41IndexerScoreAdmission() (supported bool, err error)
+	// SupportsV41IndexerScore is a capability-only diagnostic. False cannot
+	// distinguish absent qualification from a sticky backend failure; callers
+	// deciding whether to use the host path must use admission instead.
 	SupportsV41IndexerScore() bool
 	V41IndexerScoreUnavailableReason() string
 	V41IndexerScore(q, keys, weights Tensor, rows, heads, headDim int) (Tensor, error)
+}
+
+// Keep admission and operation error classification identical. This pure
+// adapter is portable so fault precedence can be witnessed without a device.
+func vulkanV41IndexerScoreAdmissionResult(status int, supported bool) (bool, error) {
+	if status == 0 {
+		return supported, nil
+	}
+	err := vulkanV41IndexerScoreStatusError(status, "backend admission refused")
+	err.Site = "V41IndexerScoreAdmission"
+	return false, err
+}
+
+func vulkanV41IndexerScoreStatusError(status int, reason string) *BackendError {
+	class, cause := VulkanClassExecutionFailed, ErrVulkanExecutionFailed
+	switch {
+	case status == -4:
+		class, cause = VulkanClassDeviceLost, ErrVulkanDeviceLost
+	case status == -1 || status == -2:
+		class, cause = VulkanClassAllocationFailed, ErrVulkanAllocationFailed
+	case status < 0:
+		class, cause = VulkanClassSubmissionFailed, ErrVulkanSubmissionFailed
+	case status == 2:
+		class, cause = VulkanClassInvalidGeometry, ErrVulkanInvalidGeometry
+	}
+	return &BackendError{Backend: "vulkan", Site: "V41IndexerScore", Class: class, Err: cause, Message: fmt.Sprintf("dedicated indexer score failed closed (code %d): %s", status, reason)}
 }
 
 // validateV41IndexerScore checks all products before narrowing to the int32
