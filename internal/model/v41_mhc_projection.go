@@ -90,7 +90,8 @@ func (s *Session) v41MHCProjectionFunc() v41MHCProjectionFunc {
 		return nil
 	}
 	return func(l int, input []float32, H int, eps float32, full, transposed bool) (result []float32, outcome v41DenseProjectionOutcome, cause error) {
-		if transposed || H <= 0 || !finite32(eps) || eps <= 0 {
+		s.ensureOpenBackendSession()
+		if H <= 0 || !finite32(eps) || eps <= 0 {
 			return nil, v41ProjectionDeclined, nil
 		}
 		width := H
@@ -112,7 +113,16 @@ func (s *Session) v41MHCProjectionFunc() v41MHCProjectionFunc {
 		}
 		name := layerName(l, "mhc.mixes.weight")
 		out, in, present := s.M.residentShape(name)
-		if !present || out != v41MHCMixWidth || in != width {
+		if !present {
+			return nil, v41ProjectionDeclined, nil
+		}
+		if transposed {
+			// Only the full-profile resident F32 manifest is reoriented here.
+			// Packed transposes need a separate dtype/layout contract.
+			if !full || out != width || in != v41MHCMixWidth || !s.M.has(name) {
+				return nil, v41ProjectionDeclined, nil
+			}
+		} else if out != v41MHCMixWidth || in != width {
 			return nil, v41ProjectionDeclined, nil
 		}
 		w, supported, _ := s.v41GroupedWeight(name, width)
@@ -121,8 +131,8 @@ func (s *Session) v41MHCProjectionFunc() v41MHCProjectionFunc {
 		}
 		opened := s.M.v41NowNanos()
 		completed, calls := 0, 0
-		var upload, readback int64
-		defer func() { s.M.v41NoteMHCProjection(1, 0, completed, 0, calls, upload, readback, 0, opened) }()
+		var upload, readback, hostBytes int64
+		defer func() { s.M.v41NoteMHCProjection(1, 0, completed, 0, calls, upload, readback, hostBytes, opened) }()
 		stage := "payload"
 		closeFailure := func(err error) error {
 			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-mhc-projection", Layer: l, Stage: stage, Cause: err}
@@ -130,8 +140,15 @@ func (s *Session) v41MHCProjectionFunc() v41MHCProjectionFunc {
 			s.Close()
 			return closed
 		}
+		var payloadFailure error
 		defer func() {
 			if r := recover(); r != nil {
+				// getOrStage has released its cache lock before this boundary
+				// closes the session on a source-validation failure.
+				if payloadFailure != nil {
+					result, outcome, cause = nil, v41ProjectionError, closeFailure(payloadFailure)
+					return
+				}
 				if err, ok := r.(error); ok {
 					var closed *BackendForwardOperationError
 					if errors.As(err, &closed) {
@@ -143,20 +160,65 @@ func (s *Session) v41MHCProjectionFunc() v41MHCProjectionFunc {
 						return
 					}
 				}
+				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+					if original, ok := r.(error); ok {
+						err = original
+					}
+					result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
+					return
+				}
+				// Preserve unclassified panic identity, but never leave the
+				// selected session reusable after an unclassified device failure.
+				err, ok := r.(error)
+				if !ok {
+					err = fmt.Errorf("unclassified backend panic: %v", r)
+				}
+				closeFailure(err)
 				panic(r)
 			}
 		}()
-		key := fmt.Sprintf("v41-mhc:%s:%v:%d:%d:logical", name, w.dtype, v41MHCMixWidth, width)
-		var source compute.Tensor
-		if _, present := s.halW[key]; !present {
-			var err error
-			source, err = w.host(0, v41MHCMixWidth, width)
-			if err != nil {
-				return nil, v41ProjectionError, closeFailure(err)
-			}
+		layout := "logical"
+		if transposed {
+			layout = "transposed-f32"
 		}
-		stage = "weight upload"
-		weight := s.cachedImmutableWeight(key, key, func() compute.Tensor { return s.Backend.Upload(source, w.dtype) })
+		key := fmt.Sprintf("v41-mhc:%s:%v:%d:%d:%s", name, w.dtype, v41MHCMixWidth, width, layout)
+		// Reorient only on a cache miss, including the model-owned cache shared
+		// by restored/forked sessions. The host copy is bounded by 24*4H F32s.
+		weight := s.cachedImmutableWeight(key, key, func() compute.Tensor {
+			rows, cols := v41MHCMixWidth, width
+			if transposed {
+				rows, cols = width, v41MHCMixWidth
+				meta := s.M.manifest[name]
+				nbytes, ok := checkedMulInt(elems, 4)
+				if !ok || meta.Nbytes != nbytes || meta.Offset < 0 || meta.Offset > len(s.M.raw) || nbytes > len(s.M.raw)-meta.Offset {
+					payloadFailure = errV41ProjectionResult
+					panic(payloadFailure)
+				}
+			}
+			source, err := w.host(0, rows, cols)
+			if err != nil {
+				payloadFailure = err
+				panic(payloadFailure)
+			}
+			if transposed {
+				host, ok := source.Buf().(compute.HostBuffer)
+				if !ok || len(host.F32()) != elems {
+					payloadFailure = errV41ProjectionResult
+					panic(payloadFailure)
+				}
+				stored := host.F32()
+				logical := make([]float32, elems)
+				for out := 0; out < v41MHCMixWidth; out++ {
+					for in := 0; in < width; in++ {
+						logical[out*width+in] = stored[in*v41MHCMixWidth+out]
+					}
+				}
+				hostBytes = int64(elems) * 4
+				source = compute.NewF32(compute.Default(), []int{v41MHCMixWidth, width}, logical)
+			}
+			stage = "weight upload"
+			return s.Backend.Upload(source, w.dtype)
+		})
 		run := func() ([]float32, error) {
 			stage = "activation upload"
 			x := s.uploadHostF32([]int{width}, input, compute.MemoryActivation, "V4.1 mHC projection activation")
@@ -166,6 +228,9 @@ func (s *Session) v41MHCProjectionFunc() v41MHCProjectionFunc {
 			calls++
 			y := s.Backend.MatMul(weight, x)
 			defer s.Backend.Free(y)
+			if y.Buf() == nil || y.Dtype != compute.F32 || len(y.Shape) != 1 || y.Shape[0] != v41MHCMixWidth {
+				return nil, errV41ProjectionResult
+			}
 			stage = "readback"
 			values := s.Backend.Read(y)
 			readback = int64(len(values)) * 4
@@ -177,6 +242,9 @@ func (s *Session) v41MHCProjectionFunc() v41MHCProjectionFunc {
 					return nil, errV41ProjectionResult
 				}
 			}
+			// Read can alias backend-owned storage. Own the coefficients before
+			// the host RMS scale and before the output tensor is released.
+			values = append([]float32(nil), values...)
 			if full {
 				var ss float32
 				for _, v := range input {

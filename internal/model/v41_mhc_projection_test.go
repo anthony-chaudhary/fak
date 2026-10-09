@@ -321,7 +321,11 @@ func TestV41MHCProjectionRawFullAndReduced(t *testing.T) {
 				host = control.NewSession()
 				t.Cleanup(host.Close)
 			} else {
-				host = v41EngProjSession(t, control, newV41MHCProjBackend(in, scenario.dtype == "Q2_K"))
+				hostBackend := newV41MHCProjBackend(in, scenario.dtype == "Q2_K")
+				// Storage transpose is now eligible; make the host control's
+				// capability decline explicit instead of relying on orientation.
+				hostBackend.deny = scenario.dtype == "F32"
+				host = v41EngProjSession(t, control, hostBackend)
 			}
 			weights := make([][]float32, 2)
 			for layer := range weights {
@@ -442,6 +446,9 @@ func TestV41MHCProjectionLateSelectedFailure(t *testing.T) {
 				if recovered != unknown {
 					t.Error("selected unknown panic identity changed")
 				}
+				if !errors.As(s.halFailure, &closedFailure) || !s.BackendSessionClosed() {
+					t.Error("selected unknown failure left session reusable")
+				}
 			} else {
 				err, ok := recovered.(error)
 				if !ok || !errors.As(err, &closedFailure) || !s.BackendSessionClosed() {
@@ -467,7 +474,7 @@ func TestV41MHCProjectionLateSelectedFailure(t *testing.T) {
 				t.Errorf("selected attempt/completion/no-retry ledger=%v attempts=%d", delta, b.faultAttempts)
 			}
 
-			if site != "unknown" {
+			{
 				callsBefore := api.calls
 				stateBefore := captureV41ForwardSnapshot(s.v41Forward)
 				dataBefore := v41MHCProjPhase(t, m, "decode")
@@ -475,7 +482,7 @@ func TestV41MHCProjectionLateSelectedFailure(t *testing.T) {
 				func() { defer func() { repeated = recover() }(); s.Step(4) }()
 				var closed *BackendForwardOperationError
 				err, ok := repeated.(error)
-				if !ok || !errors.As(err, &closed) || closed != closedFailure || !errors.Is(err, ErrV41ForwardStage) {
+				if !ok || !errors.As(err, &closed) || closed != closedFailure || (site != "unknown" && !errors.Is(err, ErrV41ForwardStage)) {
 					t.Error("closed public entry changed selected failure identity/cause")
 				}
 				if api.calls != callsBefore {
@@ -487,13 +494,7 @@ func TestV41MHCProjectionLateSelectedFailure(t *testing.T) {
 				if len(b.live) != 0 {
 					t.Error("closed public entry changed transient buffer cleanup")
 				}
-				return
 			}
-			b.fault, b.site, b.cause = false, "", nil
-			control := v41MHCProjVariant(t, "Q2_K", false, false, 2)
-			host := v41EngProjSession(t, control, newV41MHCProjBackend(4*control.Cfg.HiddenSize, true))
-			host.Prefill([]int{1, 2, 3})
-			v41GroupedParity(t, s.Step(4), host.Step(4), 1e-4)
 		})
 	}
 }
@@ -617,6 +618,8 @@ func TestV41MHCProjectionHostReturnedWeightSpanOnFailure(t *testing.T) {
 	t.Parallel()
 	m := v41MHCProjVariant(t, "F32", true, false, 2)
 	b := newV41MHCProjBackend(4*m.Cfg.HiddenSize, false)
+	// This is a host-fallback contract. Transposed F32 itself is eligible now.
+	b.deny = true
 	s := v41EngProjSession(t, m, b)
 	meta := m.manifest[layerName(1, "mhc.mixes.weight")]
 	binary.LittleEndian.PutUint32(m.raw[meta.Offset:], math.Float32bits(float32(math.NaN())))
