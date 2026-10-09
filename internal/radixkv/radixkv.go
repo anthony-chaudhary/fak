@@ -937,6 +937,23 @@ func (t *Tree) snapshotVictim(exclude *node) *node {
 	return t.snapshotVictimSkipping(exclude, nil)
 }
 
+// snapshotEvictionView projects only the insertion tick and the one lease a
+// nonempty suffix transfers off its lookup boundary. Prediction never changes
+// the live clock, refs, topology or snapshot ownership. Structural strategy
+// preparation and intervening token-budget eviction are not simulated here.
+type snapshotEvictionView struct {
+	clock    uint64
+	released *node
+}
+
+func (v snapshotEvictionView) refs(n *node) int {
+	refs := n.refs
+	if n == v.released && refs > 0 {
+		refs--
+	}
+	return refs
+}
+
 // snapshotVictimSkipping applies the same retention rules to real byte-pressure
 // eviction and the admission dry run. skipped snapshots have already been selected
 // by the dry run; their nodes remain attached, just as releaseHotSnapshot leaves them.
@@ -945,6 +962,10 @@ func (t *Tree) snapshotVictim(exclude *node) *node {
 // f4c5c935aa891b0826f73936c4831236cb6ff836 (LRUEvictionPolicy::getFreeBlock/refresh).
 // This Go adaptation keeps Fak's existing pin, tier and logical-TTL contracts.
 func (t *Tree) snapshotVictimSkipping(exclude *node, skipped map[*node]bool) *node {
+	return t.snapshotVictimSkippingInView(exclude, skipped, snapshotEvictionView{clock: t.clock})
+}
+
+func (t *Tree) snapshotVictimSkippingInView(exclude *node, skipped map[*node]bool, view snapshotEvictionView) *node {
 	strat := t.evictionStrategy()
 	if prep, ok := strat.(TreePreparer); ok {
 		prep.PrepareTree(t)
@@ -965,12 +986,12 @@ func (t *Tree) snapshotVictimSkipping(exclude *node, skipped map[*node]bool) *no
 				below = true
 			}
 		}
-		evictable := n != exclude && !skipped[n] && n.refs == 0 && !n.IsComputing() &&
-			n.snapshot != nil && !t.isNodePinnedOrImmune(n)
+		evictable := n != exclude && !skipped[n] && view.refs(n) == 0 && !n.IsComputing() &&
+			n.snapshot != nil && !t.isNodePinnedOrImmuneAt(n, view.clock)
 		var key victimKey
 		if evictable {
 			key = strat.Priority(n)
-			if seg, ok := t.nodeTierSeg(n); ok {
+			if seg, ok := t.nodeTierSegAt(n, view.clock); ok {
 				key.seg = seg
 			}
 			evictable = key.seg < 3
@@ -1280,6 +1301,10 @@ func (t *Tree) selectVictimLeaf(record bool) *node {
 // isNodePinnedOrImmune reports whether node n is pinned as a Tier 0 coordinator prompt
 // and therefore immune from eviction (seg = 3).
 func (t *Tree) isNodePinnedOrImmune(n *node) bool {
+	return t.isNodePinnedOrImmuneAt(n, t.clock)
+}
+
+func (t *Tree) isNodePinnedOrImmuneAt(n *node, clock uint64) bool {
 	if n == nil {
 		return false
 	}
@@ -1290,7 +1315,7 @@ func (t *Tree) isNodePinnedOrImmune(n *node) bool {
 		return true
 	}
 	if n.retention != nil {
-		if !n.retention.expiredAtClock(t.clock) && n.retention.Priority >= 90 {
+		if !n.retention.expiredAtClock(clock) && n.retention.Priority >= 90 {
 			return true
 		}
 	}
@@ -1300,14 +1325,18 @@ func (t *Tree) isNodePinnedOrImmune(n *node) bool {
 // nodeTierSeg returns the effective eviction segment (0..3) based on explicit retention or tier.
 // Returns ok=true if an explicit retention, tier, or pin was set on n.
 func (t *Tree) nodeTierSeg(n *node) (int, bool) {
+	return t.nodeTierSegAt(n, t.clock)
+}
+
+func (t *Tree) nodeTierSegAt(n *node, clock uint64) (int, bool) {
 	if n == nil {
 		return 0, false
 	}
-	if t.isNodePinnedOrImmune(n) {
+	if t.isNodePinnedOrImmuneAt(n, clock) {
 		return Tier0PinnedRoot.Seg(), true
 	}
 	if n.retention != nil {
-		if n.retention.expiredAtClock(t.clock) {
+		if n.retention.expiredAtClock(clock) {
 			return Tier3Probationary.Seg(), true
 		}
 		return TierFromRetentionPriority(n.retention.Priority).Seg(), true
