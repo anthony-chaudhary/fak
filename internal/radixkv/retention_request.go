@@ -168,6 +168,14 @@ func (r RetentionRequest) Expired(now int64) bool {
 	return r.TTL != retainForever && now > r.Admitted && now-r.Admitted > r.TTL
 }
 
+// expiredAtClock preserves the tree's unsigned clock instead of narrowing ticks
+// above MaxInt64 into a negative public-API clock. As with Expired, descriptors
+// must be validated first. Ordered subtraction preserves the inclusive window
+// endpoint without summing admission and TTL; uint64 clock wrap is not handled.
+func (r RetentionRequest) expiredAtClock(now uint64) bool {
+	return r.TTL != retainForever && now > uint64(r.Admitted) && now-uint64(r.Admitted) > uint64(r.TTL)
+}
+
 // RetentionEntry binds a stable identity to a RetentionRequest so a set of retained entries
 // can be ordered deterministically. ID is the caller's block/prefix handle; it is the final
 // total-order tie-break, so two entries with identical priority and admission still reclaim in

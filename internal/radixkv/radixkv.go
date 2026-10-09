@@ -1290,7 +1290,7 @@ func (t *Tree) isNodePinnedOrImmune(n *node) bool {
 		return true
 	}
 	if n.retention != nil {
-		if !n.retention.Expired(int64(t.clock)) && n.retention.Priority >= 90 {
+		if !n.retention.expiredAtClock(t.clock) && n.retention.Priority >= 90 {
 			return true
 		}
 	}
@@ -1307,7 +1307,7 @@ func (t *Tree) nodeTierSeg(n *node) (int, bool) {
 		return Tier0PinnedRoot.Seg(), true
 	}
 	if n.retention != nil {
-		if n.retention.Expired(int64(t.clock)) {
+		if n.retention.expiredAtClock(t.clock) {
 			return Tier3Probationary.Seg(), true
 		}
 		return TierFromRetentionPriority(n.retention.Priority).Seg(), true
@@ -1450,7 +1450,7 @@ func (t *Tree) NodeTier(n *node) PriorityTier {
 		return Tier0PinnedRoot
 	}
 	if n.retention != nil {
-		if n.retention.Expired(int64(t.clock)) {
+		if n.retention.expiredAtClock(t.clock) {
 			return Tier3Probationary
 		}
 		return TierFromRetentionPriority(n.retention.Priority)
