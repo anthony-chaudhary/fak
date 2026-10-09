@@ -146,6 +146,7 @@ func TestGuardChildResourceUsageSurfaceRendersJSONAndText(t *testing.T) {
 }
 
 func TestGuardChildResourceDogfoodAdoption(t *testing.T) {
+	stubGuardResourceProcessHooks(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "child-resource-usage.jsonl")
 	t.Setenv("FAK_CHILD_RESOURCE_USAGE_PATH", path)

@@ -583,7 +583,22 @@ func TestFoldGuardResourceReceiptsByWeek(t *testing.T) {
 	}
 }
 
+// Synthetic PID fixtures must never signal a real process or force host GC.
+// Monitors capture these defaults, so cleanup cannot restore real callbacks
+// into a still-stopping monitor. Callers must remain serial.
+func stubGuardResourceProcessHooks(t *testing.T) {
+	t.Helper()
+	oldYield, oldSuspend, oldResume := guardYieldMemory, guardSuspendProcess, guardResumeProcess
+	guardYieldMemory = func(...int) {}
+	guardSuspendProcess = func(int) error { return nil }
+	guardResumeProcess = func(int) error { return nil }
+	t.Cleanup(func() {
+		guardYieldMemory, guardSuspendProcess, guardResumeProcess = oldYield, oldSuspend, oldResume
+	})
+}
+
 func TestGuardChildResourceHeadroomDebounceAndRecovery(t *testing.T) {
+	stubGuardResourceProcessHooks(t)
 	t.Run("debounce grace period delays headroom intervention and invokes yield", func(t *testing.T) {
 		stop := make(chan struct{})
 		defer close(stop)
@@ -1095,6 +1110,7 @@ func TestGuardHeadroomDebounceConfiguration(t *testing.T) {
 }
 
 func TestGuardChildResourceDynamicReasoningPostureDebouncing(t *testing.T) {
+	stubGuardResourceProcessHooks(t)
 	t.Run("allocation spike absorbed under xhigh posture without emitting reap_tree", func(t *testing.T) {
 		stop := make(chan struct{})
 		defer close(stop)
