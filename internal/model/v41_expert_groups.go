@@ -151,15 +151,12 @@ var v41TestLayerCacheBudgetOverride int64
 // as the token-major loop noted it per pick, so the fault/dequant-vs-contraction
 // attribution is unchanged in bucket counts. Any materialization error aborts
 // before the weighted replay, so a partial panel never reaches `out`.
-func (m *Model) v41ContractRoutedGrouped(l int, x [][]float32, perTokenPicks [][]routePick, scratch *v41ProjScratch, ffnNorm []float32, eps float32, cfg Config, out [][]float32, st *v41ForwardState) error {
+func (m *Model) v41ContractRoutedGrouped(l int, xnByToken [][]float32, perTokenPicks [][]routePick, scratch *v41ProjScratch, cfg Config, out [][]float32, st *v41ForwardState) error {
 	H, I := cfg.HiddenSize, cfg.MoEIntermediateSize
 	groups := v41PlanExpertGroups(perTokenPicks)
-	// One rmsnorm row per token, computed once and reused by every group that
-	// contracts a row of that token (the token-major path recomputed it per pick;
-	// rmsnormCfg is pure, so the values are byte-identical).
-	xnByToken := make([][]float32, len(perTokenPicks))
+	// The caller's normalized rows are shared with routing and the shared
+	// expert; neither host nor selected device normalization is repeated here.
 	for t := range perTokenPicks {
-		xnByToken[t] = rmsnormCfg(x[t], ffnNorm, eps, cfg)
 		out[t] = make([]float32, H)
 	}
 	// unweighted[token][slot] holds the contracted expert output BEFORE the pick

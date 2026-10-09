@@ -137,7 +137,6 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	}
 
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
-	ffnNorm := m.tensor(layerName(l, "ffn_norm.weight"))
 	mixBase := m.tensor(layerName(l, "mhc.base"))
 	mixScale := m.tensor(layerName(l, "mhc.scale"))
 	projectOutput := m.v41GroupedOutputProjector(l, nH, hd, cfg.OGroups, cfg.OLoraRank, H, scratch)
@@ -330,7 +329,10 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return err
 	}
-	ffnX := rmsnormCfg(x, ffnNorm, eps, cfg)
+	ffnX, err := m.v41FFNNorm(l, x, eps, scratch.ffnNorm)
+	if err != nil {
+		return err
+	}
 	routerLogits, err := m.v41ProjMatRowsWithProjection(l, "ffn.gate.weight", ffnX, cfg.NumExperts, H, scratch.denseProjection)
 	if err != nil {
 		return err
@@ -707,8 +709,10 @@ func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, 
 	cfg := m.Cfg
 	H := cfg.HiddenSize
 	eps := float32(cfg.RMSNormEps)
-	ffnNorm := m.tensor(layerName(l, "ffn_norm.weight"))
-	ffnX := rmsnormCfg(x, ffnNorm, eps, cfg)
+	ffnX, err := m.v41FFNNorm(l, x, eps, scratch.ffnNorm)
+	if err != nil {
+		return err
+	}
 	routeCfg, err := v41RouterConfigFullGeometry(cfg)
 	if err != nil {
 		return err

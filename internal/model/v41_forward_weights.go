@@ -40,6 +40,7 @@ type v41ProjScratch struct {
 	mhcProjection   v41MHCProjectionFunc
 	queryNorm       v41QueryNormFunc
 	kvNorm          v41KVNormFunc
+	ffnNorm         v41FFNNormFunc
 
 	// exp1/exp3/exp2 are the REUSED materialization targets for one routed
 	// expert's three projections (ffn.experts.<e>.w1/w3/w2.weight). They were
@@ -1110,7 +1111,7 @@ func v41ProjectionOperationErr(l int, leaf string, cause error) error {
 	if l == -1 {
 		stage = v41StageHead
 	}
-	if strings.HasPrefix(leaf, "ffn.") {
+	if strings.HasPrefix(leaf, "ffn.") || leaf == "ffn_norm.weight" {
 		stage = v41StageMoE
 	}
 	return &V41ProjectionOperationError{Layer: l, Leaf: leaf, Stage: string(stage), Cause: v41StageErr(stage, l, cause)}

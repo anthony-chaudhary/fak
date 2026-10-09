@@ -159,6 +159,7 @@ type v41ForwardState struct {
 	finalNorm        v41FinalNormFunc
 	queryNorm        v41QueryNormFunc
 	kvNorm           v41KVNormFunc
+	ffnNorm          v41FFNNormFunc
 	callbackOwner    *Session
 }
 
@@ -286,7 +287,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, callbackOwner: st.callbackOwner}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -437,12 +438,14 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.mhcProjection = nil
 	scratch.queryNorm = nil
 	scratch.kvNorm = nil
+	scratch.ffnNorm = nil
 	if st != nil {
 		scratch.denseProjection = st.denseProjection
 		scratch.groupedOutput = st.groupedOutput
 		scratch.mhcProjection = st.mhcProjection
 		scratch.queryNorm = st.queryNorm
 		scratch.kvNorm = st.kvNorm
+		scratch.ffnNorm = st.ffnNorm
 	}
 	defer func() {
 		scratch.denseProjection = nil
@@ -450,6 +453,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.mhcProjection = nil
 		scratch.queryNorm = nil
 		scratch.kvNorm = nil
+		scratch.ffnNorm = nil
 	}()
 
 	// Engram injection happens at the START of the layer, into the residual,
@@ -470,7 +474,6 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	}
 
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
-	ffnNorm := m.tensor(layerName(l, "ffn_norm.weight"))
 	mixBase := m.tensor(layerName(l, "mhc.base"))
 	mixScale := m.tensor(layerName(l, "mhc.scale"))
 	projectOutput := m.v41GroupedOutputProjector(l, nH, hd, cfg.OGroups, cfg.OLoraRank, H, scratch)
@@ -883,8 +886,16 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		}
 	}
 	perTokenPicks := make([][]routePick, seq)
+	// Reuse one normalized host row for the router, every routed expert, and
+	// the shared expert. Device normalization uploads and reads back only once
+	// per layer/token; grouped contraction consumes this same panel.
+	ffnInputs := make([][]float32, seq)
 	for t := 0; t < seq; t++ {
-		xn := rmsnormCfg(x[t], ffnNorm, eps, cfg)
+		xn, err := m.v41FFNNorm(l, x[t], eps, scratch.ffnNorm)
+		if err != nil {
+			return err
+		}
+		ffnInputs[t] = xn
 		routerLogits, err := m.v41ProjMatRowsWithProjection(l, "ffn.gate.weight", xn, cfg.NumExperts, H, scratch.denseProjection)
 		if err != nil {
 			return err
@@ -915,7 +926,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// (#13358) instead of unconditionally running the host SwiGLU. A nil
 		// callback (Model.Forward, or no device backend) keeps the grouped path
 		// byte-for-byte.
-		if err := m.v41ContractRoutedGrouped(l, x, perTokenPicks, scratch, ffnNorm, eps, cfg, routedByToken, st); err != nil {
+		if err := m.v41ContractRoutedGrouped(l, ffnInputs, perTokenPicks, scratch, cfg, routedByToken, st); err != nil {
 			return err
 		}
 	} else {
@@ -929,7 +940,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			contract = v41SwiGLUParallel
 		}
 		for t := 0; t < seq; t++ {
-			xn := rmsnormCfg(x[t], ffnNorm, eps, cfg)
+			xn := ffnInputs[t]
 			routed := make([]float32, H)
 			for _, pick := range perTokenPicks[t] {
 				stem := "ffn.experts." + itoa(pick.expert)
@@ -1002,7 +1013,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	}
 
 	for t := 0; t < seq; t++ {
-		xn := rmsnormCfg(x[t], ffnNorm, eps, cfg)
+		xn := ffnInputs[t]
 		routed := routedByToken[t]
 		shared, err := m.v41SharedExpertSwiGLUWithProjection(l, xn, cfg, scratch.denseProjection)
 		if err != nil {
@@ -1324,6 +1335,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.finalNorm = s.v41FinalNormFunc()
 		s.v41Forward.queryNorm = s.v41QueryNormFunc()
 		s.v41Forward.kvNorm = s.v41KVNormFunc()
+		s.v41Forward.ffnNorm = s.v41FFNNormFunc()
 		s.v41Forward.callbackOwner = s
 	}
 	return s.v41Forward
