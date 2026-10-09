@@ -231,7 +231,7 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 	done := make(chan struct{})
 	var compErr error
 	go func() {
-		_, compErr = s.planner.Complete(ctx, msgs, nil, agent.WithMaxTokens(1))
+		_, compErr = s.planner.Complete(agent.WithBootProbe(ctx), msgs, nil, agent.WithMaxTokens(1))
 		close(done)
 	}()
 	if ceiling > 0 {

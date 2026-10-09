@@ -242,7 +242,7 @@ func (s *Server) runStartupCoherenceProbe(ctx context.Context, ceiling time.Dura
 	var comp *agent.Completion
 	var compErr error
 	go func() {
-		comp, compErr = s.planner.Complete(ctx, msgs, nil,
+		comp, compErr = s.planner.Complete(agent.WithBootProbe(ctx), msgs, nil,
 			agent.WithMaxTokens(coherence.MaxTokens(n)), agent.WithTemperature(&greedy))
 		close(done)
 	}()

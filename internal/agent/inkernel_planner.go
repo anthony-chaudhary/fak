@@ -2047,17 +2047,21 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped {
 		tenant = owner.Tenant
 	}
-	cacheobs.Default.ObserveLabeled(cacheobs.Labels{Model: p.modelID, Tenant: tenant},
-		promptTok, genRes.cacheable, matched, eligibleTok)
-	// #3896 provenance axis: remote L3 matches are external transfers; L1/L2
-	// matches stay local, and the unmatched suffix is local compute.
-	localHit, externalHit := matched, 0
-	if genRes.sourceTier == radixkv.SnapshotTierRemoteL3 {
-		localHit, externalHit = 0, matched
+	// A boot probe (readiness warmup, coherence probe) is not a served turn; booking it
+	// would put kv_prefix turns ahead of the latency histograms and the perf ledger.
+	if !IsBootProbe(ctx) {
+		cacheobs.Default.ObserveLabeled(cacheobs.Labels{Model: p.modelID, Tenant: tenant},
+			promptTok, genRes.cacheable, matched, eligibleTok)
+		// #3896 provenance axis: remote L3 matches are external transfers; L1/L2
+		// matches stay local, and the unmatched suffix is local compute.
+		localHit, externalHit := matched, 0
+		if genRes.sourceTier == radixkv.SnapshotTierRemoteL3 {
+			localHit, externalHit = 0, matched
+		}
+		cacheobs.Default.ObserveBySource(cacheobs.SourceLocalHit, localHit)
+		cacheobs.Default.ObserveBySource(cacheobs.SourceExternalTransfer, externalHit)
+		cacheobs.Default.ObserveBySource(cacheobs.SourceLocalCompute, promptTok-matched)
 	}
-	cacheobs.Default.ObserveBySource(cacheobs.SourceLocalHit, localHit)
-	cacheobs.Default.ObserveBySource(cacheobs.SourceExternalTransfer, externalHit)
-	cacheobs.Default.ObserveBySource(cacheobs.SourceLocalCompute, promptTok-matched)
 	compReuseEntry := cachemeta.FromProviderCache(cachemeta.ProviderCache{Provider: "fak-inkernel", ModelID: p.modelID, PromptTokens: int64(promptTok), CachedTokens: int64(matched)})
 
 	// Split a Qwen3.5 reasoning block off the decoded text BEFORE it becomes Content
