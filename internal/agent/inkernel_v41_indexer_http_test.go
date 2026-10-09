@@ -110,59 +110,28 @@ func TestV41IndexerProjectionOrdinaryHTTPSourceAndReader(t *testing.T) {
 		if err = json.Unmarshal(sourceRaw, &source); err != nil {
 			t.Fatal(err)
 		}
-		legacyAliases := map[string]string{}
-		facadeType := reflect.TypeOf(planner.MoEResidencyStats().V41Phases.Prefill)
-		modelType := reflect.TypeOf(m.V41ExpertFaultAttribution().Prefill)
-		for index := 0; index < facadeType.NumField(); index++ {
-			facadeField := facadeType.Field(index)
-			modelName := facadeField.Name
-			if modelName == "FaultNanos" {
-				modelName = "FaultDoorNanos"
-			}
-			modelField, found := modelType.FieldByName(modelName)
-			if !found {
-				t.Fatalf("legacy facade field %s lacks its closed model source", facadeField.Name)
-			}
-			facadeKey := strings.Split(facadeField.Tag.Get("json"), ",")[0]
-			modelKey := strings.Split(modelField.Tag.Get("json"), ",")[0]
-			if facadeKey == "" || modelKey == "" {
-				t.Fatalf("legacy field %s lacks a wire key", facadeField.Name)
-			}
-			legacyAliases[facadeKey] = modelKey
-		}
 		current := map[string]map[string]int64{}
 		for _, phase := range []string{"prefill", "decode"} {
 			legacy := doc.MoE.V41.Prefill
 			if phase == "decode" {
 				legacy = doc.MoE.V41.Decode
 			}
-			if len(legacy) != 31 || len(doc.MoE.V41.Projections[phase]) != 16 || len(doc.MoE.V41.Compressor[phase]) != 7 {
-				t.Fatal("indexer extension changed existing default reader shapes")
-			}
-			for _, existing := range []map[string]json.RawMessage{legacy, doc.MoE.V41.Projections[phase], doc.MoE.V41.Compressor[phase]} {
-				for key, raw := range existing {
-					sourceKey := key
-					if alias, found := legacyAliases[key]; found {
-						sourceKey = alias
-					}
-					var got, want *int64
-					if err = json.Unmarshal(raw, &got); err != nil {
-						t.Fatalf("existing facade %s.%s numeric decode failed: %v", phase, key, err)
-					}
-					if len(source[phase][sourceKey]) == 0 {
-						t.Fatalf("existing facade %s.%s missing model source wire key %s", phase, key, sourceKey)
-					}
-					if err = json.Unmarshal(source[phase][sourceKey], &want); err != nil {
-						t.Fatalf("existing model %s.%s numeric decode failed: %v", phase, sourceKey, err)
-					}
-					if got == nil || want == nil || *got != *want {
-						t.Fatalf("existing phase reader value differs from model source %s.%s", phase, key)
-					}
+			for _, existing := range []struct {
+				name   string
+				fields map[string]json.RawMessage
+				keys   []string
+			}{
+				{"legacy", legacy, v41HTTPLegacyKeys},
+				{"projections", doc.MoE.V41.Projections[phase], v41HTTPProjectionKeys},
+				{"compressor", doc.MoE.V41.Compressor[phase], v41HTTPCompressorKeys},
+			} {
+				if err := v41HTTPReaderMatchesSource(existing.fields, source[phase], existing.keys); err != nil {
+					t.Fatalf("%s %s reader: %v", existing.name, phase, err)
 				}
 			}
 			fields := doc.MoE.V41.Indexer[phase]
-			if len(fields) != 9 {
-				t.Fatalf("indexer %s must expose exactly nine numeric fields", phase)
+			if len(fields) != len(keys) {
+				t.Fatalf("indexer %s fields=%d want source keys=%d", phase, len(fields), len(keys))
 			}
 			current[phase] = map[string]int64{}
 			for _, key := range keys {

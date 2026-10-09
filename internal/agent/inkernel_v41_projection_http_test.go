@@ -108,6 +108,19 @@ func TestV41PhaseAttributionProjectionOrdinaryHTTP(t *testing.T) {
 	}
 	t.Cleanup(srv.Close)
 	srv.SetPlanner(planner)
+	// Pin public wire names independently of the facade's struct tags.
+	legacyKeys := []string{
+		"tokens", "attention_contraction_calls", "attention_contraction_nanos",
+		"faults", "faulted_bytes", "fault_nanos", "dequant_bytes", "dequant_nanos", "contractions", "contraction_nanos",
+		"dense_projection_device_calls", "dense_projection_host_calls", "dense_projection_nanos",
+		"dense_projection_activation_upload_bytes", "dense_projection_readback_bytes",
+		"grouped_output_device_calls", "grouped_output_host_calls", "grouped_output_nanos",
+		"grouped_output_activation_upload_bytes", "grouped_output_readback_bytes",
+		"expert_activation_device_calls", "expert_activation_host_calls", "expert_activation_nanos", "expert_activation_readback_bytes",
+		"incremental_engram_injections", "incremental_engram_nanos",
+		"mhc_projection_device_calls", "mhc_projection_host_calls", "mhc_projection_nanos",
+		"mhc_projection_activation_upload_bytes", "mhc_projection_readback_bytes",
+	}
 	keys := []string{
 		"head_projection_device_calls", "head_projection_host_calls", "head_projection_device_rows", "head_projection_host_rows",
 		"head_projection_activation_upload_bytes", "head_projection_readback_bytes", "head_projection_nanos",
@@ -173,8 +186,20 @@ func TestV41PhaseAttributionProjectionOrdinaryHTTP(t *testing.T) {
 			t.Fatal(err)
 		}
 		for phase, fields := range map[string]map[string]json.RawMessage{"prefill": doc.MoE.V41.Prefill, "decode": doc.MoE.V41.Decode} {
-			if len(fields) != 31 {
-				t.Fatalf("legacy served %s fields=%d want 31", phase, len(fields))
+			if len(fields) != len(legacyKeys) {
+				t.Fatalf("legacy served %s fields=%d want named contract=%d", phase, len(fields), len(legacyKeys))
+			}
+			for _, key := range legacyKeys {
+				var got, want *int64
+				if err := json.Unmarshal(fields[key], &got); err != nil {
+					t.Fatalf("legacy served %s.%s missing numeric contract: %v", phase, key, err)
+				}
+				if err := json.Unmarshal(source[phase][key], &want); err != nil {
+					t.Fatal(err)
+				}
+				if got == nil || want == nil || *got != *want {
+					t.Fatalf("legacy served %s.%s differs from numeric model source", phase, key)
+				}
 			}
 			for _, key := range keys {
 				if _, exists := fields[key]; exists {
@@ -184,8 +209,8 @@ func TestV41PhaseAttributionProjectionOrdinaryHTTP(t *testing.T) {
 		}
 		current := map[string]map[string]int64{}
 		for phase, fields := range map[string]map[string]json.RawMessage{"prefill": doc.MoE.V41.Projections.Prefill, "decode": doc.MoE.V41.Projections.Decode} {
-			if len(fields) != 16 {
-				t.Fatalf("served projection %s fields=%d want 16", phase, len(fields))
+			if len(fields) != len(keys) {
+				t.Fatalf("served projection %s fields=%d want named contract=%d", phase, len(fields), len(keys))
 			}
 			current[phase] = map[string]int64{}
 			for _, key := range keys {

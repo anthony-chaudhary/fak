@@ -69,24 +69,30 @@ func v41ProjectionSnapshotPhases(t *testing.T, ledger MoEResidencyLedger) map[st
 	if doc.V41.Scope != "model_lifetime" {
 		t.Fatal("projection source must inherit model_lifetime scope")
 	}
-	legacyJSON, err := json.Marshal(v41SnapshotFixture(0))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var legacy map[string]json.RawMessage
-	if err := json.Unmarshal(legacyJSON, &legacy); err != nil {
-		t.Fatal(err)
-	}
-	if len(legacy) != 31 {
-		t.Fatalf("legacy fixture field count=%d want 31", len(legacy))
+	// Keep the wire oracle independent of V41PhaseSnapshot and its fixture.
+	legacyKeys := []string{
+		"tokens", "attention_contraction_calls", "attention_contraction_nanos",
+		"faults", "faulted_bytes", "fault_nanos", "dequant_bytes", "dequant_nanos", "contractions", "contraction_nanos",
+		"dense_projection_device_calls", "dense_projection_host_calls", "dense_projection_nanos",
+		"dense_projection_activation_upload_bytes", "dense_projection_readback_bytes",
+		"grouped_output_device_calls", "grouped_output_host_calls", "grouped_output_nanos",
+		"grouped_output_activation_upload_bytes", "grouped_output_readback_bytes",
+		"expert_activation_device_calls", "expert_activation_host_calls", "expert_activation_nanos", "expert_activation_readback_bytes",
+		"incremental_engram_injections", "incremental_engram_nanos",
+		"mhc_projection_device_calls", "mhc_projection_host_calls", "mhc_projection_nanos",
+		"mhc_projection_activation_upload_bytes", "mhc_projection_readback_bytes",
 	}
 	for phase, fields := range map[string]map[string]json.RawMessage{"prefill": doc.V41.Prefill, "decode": doc.V41.Decode} {
-		if len(fields) != 31 {
-			t.Fatalf("legacy %s schema changed: fields=%d want 31", phase, len(fields))
+		if len(fields) != len(legacyKeys) {
+			t.Fatalf("legacy %s fields=%d want named contract=%d", phase, len(fields), len(legacyKeys))
 		}
-		for key := range legacy {
-			if _, ok := fields[key]; !ok {
-				t.Fatalf("legacy %s omits %s", phase, key)
+		for _, key := range legacyKeys {
+			var number *int64
+			if err := json.Unmarshal(fields[key], &number); err != nil {
+				t.Fatalf("legacy %s.%s must be numeric: %v", phase, key, err)
+			}
+			if number == nil {
+				t.Fatalf("legacy %s.%s must not be null", phase, key)
 			}
 		}
 	}

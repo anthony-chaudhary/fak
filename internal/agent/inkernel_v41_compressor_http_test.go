@@ -112,7 +112,7 @@ func TestV41CompressorProjectionOrdinaryHTTPSourceAndReader(t *testing.T) {
 	}
 	t.Cleanup(srv.Close)
 	srv.SetPlanner(planner)
-	keys := []string{"compressor_projection_device_calls", "compressor_projection_host_calls", "compressor_projection_device_rows", "compressor_projection_host_rows", "compressor_projection_activation_upload_bytes", "compressor_projection_readback_bytes", "compressor_projection_nanos"}
+	keys := v41HTTPCompressorKeys
 	var previous map[string]map[string]int64
 	for request := 0; request < 2; request++ {
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"native","messages":[{"role":"user","content":"hi"}],"max_tokens":2,"temperature":0}`))
@@ -176,12 +176,15 @@ func TestV41CompressorProjectionOrdinaryHTTPSourceAndReader(t *testing.T) {
 			if phase == "decode" {
 				legacy = doc.MoE.V41.Decode
 			}
-			if len(legacy) != 31 || len(doc.MoE.V41.Projections[phase]) != 16 {
-				t.Fatal("compressor extension changed existing default reader shapes")
+			if err := v41HTTPReaderMatchesSource(legacy, source[phase], v41HTTPLegacyKeys); err != nil {
+				t.Fatalf("legacy %s reader: %v", phase, err)
+			}
+			if err := v41HTTPReaderMatchesSource(doc.MoE.V41.Projections[phase], source[phase], v41HTTPProjectionKeys); err != nil {
+				t.Fatalf("projections %s reader: %v", phase, err)
 			}
 			fields := doc.MoE.V41.Compressor[phase]
-			if len(fields) != 7 {
-				t.Fatalf("compressor %s must expose exactly seven numeric fields", phase)
+			if len(fields) != len(keys) {
+				t.Fatalf("compressor %s fields=%d want source keys=%d", phase, len(fields), len(keys))
 			}
 			current[phase] = map[string]int64{}
 			for _, key := range keys {
@@ -208,5 +211,85 @@ func TestV41CompressorProjectionOrdinaryHTTPSourceAndReader(t *testing.T) {
 			}
 		}
 		previous = current
+	}
+}
+
+// These public reader contracts are deliberately independent of the facade Go
+// types: a removed or renamed field must fail even if the total stays unchanged.
+var v41HTTPLegacyKeys = []string{
+	"tokens", "attention_contraction_calls", "attention_contraction_nanos",
+	"faults", "faulted_bytes", "fault_nanos", "dequant_bytes", "dequant_nanos", "contractions", "contraction_nanos",
+	"dense_projection_device_calls", "dense_projection_host_calls", "dense_projection_nanos",
+	"dense_projection_activation_upload_bytes", "dense_projection_readback_bytes",
+	"grouped_output_device_calls", "grouped_output_host_calls", "grouped_output_nanos",
+	"grouped_output_activation_upload_bytes", "grouped_output_readback_bytes",
+	"expert_activation_device_calls", "expert_activation_host_calls", "expert_activation_nanos", "expert_activation_readback_bytes",
+	"incremental_engram_injections", "incremental_engram_nanos",
+	"mhc_projection_device_calls", "mhc_projection_host_calls", "mhc_projection_nanos",
+	"mhc_projection_activation_upload_bytes", "mhc_projection_readback_bytes",
+}
+
+var v41HTTPProjectionKeys = []string{
+	"head_projection_device_calls", "head_projection_host_calls", "head_projection_device_rows", "head_projection_host_rows",
+	"head_projection_activation_upload_bytes", "head_projection_readback_bytes", "head_projection_nanos",
+	"engram_projection_device_calls", "engram_projection_host_calls", "engram_projection_device_rows", "engram_projection_host_rows",
+	"engram_projection_matmul_calls", "engram_projection_activation_upload_bytes", "engram_projection_readback_bytes",
+	"engram_projection_nanos", "engram_projection_host_weight_f32_bytes",
+}
+
+var v41HTTPCompressorKeys = []string{
+	"compressor_projection_device_calls", "compressor_projection_host_calls", "compressor_projection_device_rows", "compressor_projection_host_rows",
+	"compressor_projection_activation_upload_bytes", "compressor_projection_readback_bytes", "compressor_projection_nanos",
+}
+
+func v41HTTPReaderMatchesSource(fields, source map[string]json.RawMessage, keys []string) error {
+	if len(fields) != len(keys) {
+		return fmt.Errorf("reader fields=%d want source keys=%d", len(fields), len(keys))
+	}
+	for _, key := range keys {
+		var got, want *int64
+		if err := json.Unmarshal(fields[key], &got); err != nil {
+			return fmt.Errorf("reader %s numeric decode: %w", key, err)
+		}
+		if err := json.Unmarshal(source[key], &want); err != nil {
+			return fmt.Errorf("model source %s numeric decode: %w", key, err)
+		}
+		if got == nil || want == nil || *got != *want {
+			return fmt.Errorf("reader %s differs from numeric model source", key)
+		}
+	}
+	return nil
+}
+
+// fak-test:justify why=contract when=changed:internal/agent/**
+// fak-test:runtime fast est=1ms lane=default
+func TestV41HTTPReaderSourceRelationRejectsCorruption(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields, source string
+		wantError            bool
+	}{
+		{"matching including wire alias", `{"tokens":2,"fault_nanos":7}`, `{"tokens":2,"fault_nanos":7,"contraction_backend":"host"}`, false},
+		{"missing field", `{"tokens":2}`, `{"tokens":2,"fault_nanos":7}`, true},
+		{"same size replacement", `{"tokens":2,"other":7}`, `{"tokens":2,"fault_nanos":7}`, true},
+		{"extra field", `{"tokens":2,"fault_nanos":7,"private_path":0}`, `{"tokens":2,"fault_nanos":7}`, true},
+		{"null field", `{"tokens":2,"fault_nanos":null}`, `{"tokens":2,"fault_nanos":7}`, true},
+		{"text field", `{"tokens":2,"fault_nanos":"7"}`, `{"tokens":2,"fault_nanos":7}`, true},
+		{"wrong value", `{"tokens":2,"fault_nanos":8}`, `{"tokens":2,"fault_nanos":7}`, true},
+		{"missing source", `{"tokens":2,"fault_nanos":7}`, `{"tokens":2}`, true},
+		{"null source", `{"tokens":2,"fault_nanos":7}`, `{"tokens":2,"fault_nanos":null}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var fields, source map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(tc.fields), &fields); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(tc.source), &source); err != nil {
+				t.Fatal(err)
+			}
+			err := v41HTTPReaderMatchesSource(fields, source, []string{"tokens", "fault_nanos"})
+			if (err != nil) != tc.wantError {
+				t.Fatalf("source relation error=%v wantError=%t", err, tc.wantError)
+			}
+		})
 	}
 }
