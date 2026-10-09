@@ -238,7 +238,7 @@ func TestServeBackendForwardPreflightProductionOrder(t *testing.T) {
 	ordered := []string{
 		"preflightServeBackendForward(*sf.ggufPath, rt.chatBackend)",
 		"var expertShard *ggufload.ExpertShard",
-		"loadServeInKernelModel(",
+		"loadServeInKernelModelPlaced(",
 		"resolveServeTokenizer(",
 	}
 	last := -1

@@ -291,6 +291,13 @@ func serveStreamedHostFit(backend compute.Backend, fit *serveFitBudget) serveFit
 }
 
 func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int, expertShard *ggufload.ExpertShard, expertRanks int, fit *serveFitBudget) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
+	return loadServeInKernelModelPlaced(modelPath, backend, cpuOffloadExperts, false, contextBudgetTokens, expertShard, expertRanks, fit)
+}
+
+// loadServeInKernelModelPlaced is loadServeInKernelModel for a serve that knows its execution
+// policy: requireDevice (a Strix Halo device-only serve) admits the activated-expert device ring
+// when the full device plan is FitTooBig (fak#13668).
+func loadServeInKernelModelPlaced(modelPath string, backend compute.Backend, cpuOffloadExperts, requireDevice bool, contextBudgetTokens int, expertShard *ggufload.ExpertShard, expertRanks int, fit *serveFitBudget) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
 	if modelPath == "" {
 		return nil, false, nil, gateway.StartupPhase{}
 	}
@@ -502,6 +509,16 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 				memPlan, err = fitAndPlanServeGGUFExpertParallelPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens, fit)
 			} else {
 				memPlan, err = fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens, fit)
+				ring, ringed, ringErr := serveActivatedExpertRingPathPlacement(ggufPath, backend, requireDevice && expertShard == nil, err, contextBudgetTokens, fit)
+				if ringed {
+					memPlan = ring.Plan
+					q4kOpts = append(q4kOpts, serveActivatedExpertRingLoadOptions(ring)...)
+					text := fmt.Sprintf("full device plan does not fit; dense base device-resident (%s), routed experts streamed from the checkpoint through a %s device ring (no host expert GEMMs)",
+						bytesText(uint64(max(ring.Fit.DeviceBaseBytes, 0))), bytesText(uint64(max(ring.RingBytes, 0))))
+					fmt.Fprintln(os.Stderr, "fak serve: activated-expert device ring:", text)
+					loadMessages = append(loadMessages, serveStartupMessage("serving-expert-residency", "info", text))
+				}
+				err = ringErr
 			}
 			must(err)
 			return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend, loadMessages, q4kOpts...)

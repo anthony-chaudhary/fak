@@ -78,6 +78,7 @@ type q4kLoadOptions struct {
 	residentTiedQ6KEmbedding bool
 	streamedExperts          bool
 	streamedExpertBytes      int64
+	streamedExpertDeviceRing int64
 	streamedDenseQ4K         bool
 	streamedDenseBytes       int64
 	streamedDenseBounded     bool
@@ -185,6 +186,13 @@ func WithStreamedExperts(hostBytes int64) Q4KLoadOption {
 	}
 }
 
+// WithStreamedExpertDeviceRing declares the streamed tier's DEVICE ring ceiling (bytes > 0), so a
+// faulted routed expert pages into a bounded device ring instead of an unbounded memo. It only takes
+// effect with WithStreamedExperts; the tier refuses a ceiling below one expert group by name.
+func WithStreamedExpertDeviceRing(bytes int64) Q4KLoadOption {
+	return func(o *q4kLoadOptions) { o.streamedExpertDeviceRing = bytes }
+}
+
 // WithStreamedDenseQ4K leaves eligible identity-layout dense Q4_K tensors on disk. The returned model retains checkpoint range descriptors and requires the WeightSource to stay open.
 func WithStreamedDenseQ4K(enabled bool) Q4KLoadOption {
 	return func(o *q4kLoadOptions) { o.streamedDenseQ4K = enabled }
@@ -243,6 +251,8 @@ type Q4KLoadOptionEffects struct {
 	// one, which refuses the option by contract.
 	StreamedExperts     bool
 	StreamedExpertBytes int64
+	// StreamedExpertDeviceRing is the declared device ring ceiling (WithStreamedExpertDeviceRing).
+	StreamedExpertDeviceRing int64
 	// StreamedDenseQ4K reports that the option list requests the streamed DENSE k-quant tier, which
 	// likewise needs a checkpoint that outlives the model.
 	StreamedDenseQ4K bool
@@ -263,18 +273,19 @@ type Q4KLoadOptionEffects struct {
 func ApplyQ4KLoadOptions(opts []Q4KLoadOption) Q4KLoadOptionEffects {
 	o := probeQ4KLoadOptions(opts)
 	return Q4KLoadOptionEffects{
-		DenseKQuantResident:  o.residentDenseKQuant,
-		DenseQ2KResident:     o.residentDenseQ2K,
-		DenseQ6KResident:     o.residentDenseQ6K,
-		Q2KEmbeddingResident: o.residentQ2KEmbedding,
-		Q4KEmbeddingResident: o.residentQ4KEmbedding,
-		MTPRetention:         o.retainMTP,
-		StreamedExperts:      o.streamedExperts,
-		StreamedExpertBytes:  o.streamedExpertBytes,
-		StreamedDenseQ4K:     o.streamedDenseQ4K,
-		StreamedDenseBytes:   o.streamedDenseBytes,
-		StreamedDenseBounded: o.streamedDenseBounded,
-		ExpertShard:          o.expertShardSet,
+		DenseKQuantResident:      o.residentDenseKQuant,
+		DenseQ2KResident:         o.residentDenseQ2K,
+		DenseQ6KResident:         o.residentDenseQ6K,
+		Q2KEmbeddingResident:     o.residentQ2KEmbedding,
+		Q4KEmbeddingResident:     o.residentQ4KEmbedding,
+		MTPRetention:             o.retainMTP,
+		StreamedExperts:          o.streamedExperts,
+		StreamedExpertBytes:      o.streamedExpertBytes,
+		StreamedExpertDeviceRing: o.streamedExpertDeviceRing,
+		StreamedDenseQ4K:         o.streamedDenseQ4K,
+		StreamedDenseBytes:       o.streamedDenseBytes,
+		StreamedDenseBounded:     o.streamedDenseBounded,
+		ExpertShard:              o.expertShardSet,
 	}
 }
 
@@ -657,6 +668,11 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 		}
 		if len(unstageable) > 0 {
 			return nil, fmt.Errorf("gguf: streamed routed experts requested, but %d routed-expert slab(s) carry an unstageable quant and would be eager-dequantized to f32 (materializing the expert bulk): %s", len(unstageable), strings.Join(unstageable, ", "))
+		}
+		if loadOpts.streamedExpertDeviceRing > 0 {
+			if err := expertTier.SetDeviceRingBudget(loadOpts.streamedExpertDeviceRing); err != nil {
+				return nil, err
+			}
 		}
 		streamed = make(map[string]bool)
 		for _, sh := range shards {

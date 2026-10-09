@@ -771,7 +771,7 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 			os.Exit(2)
 		}
 	}
-	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*sf.ggufPath, rt.chatBackend, *sf.cpuOffloadExperts, rt.nativeContext.ResolvedTokens, expertShard, expertRanks, rt.fitBudget)
+	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModelPlaced(*sf.ggufPath, rt.chatBackend, *sf.cpuOffloadExperts, rt.requireDeviceExecution, rt.nativeContext.ResolvedTokens, expertShard, expertRanks, rt.fitBudget)
 	if loadPhase.Name != "" {
 		rt.startupPhases = append(rt.startupPhases, loadPhase)
 	}
