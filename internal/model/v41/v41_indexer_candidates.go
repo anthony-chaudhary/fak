@@ -99,7 +99,7 @@ func V41SelectIndexRows(logits []float32, compressLen, topK, offset int, candida
 	if candidates != nil && len(candidates) != len(logits) {
 		return nil, fmt.Errorf("v41 index rows: candidate mask length %d, want %d", len(candidates), len(logits))
 	}
-	if offset < 0 || int64(offset)+int64(max(0, compressLen-1)) > math.MaxInt32 {
+	if offset < 0 || int64(offset) > math.MaxInt32-int64(max(0, compressLen-1)) {
 		return nil, fmt.Errorf("v41 index rows: offset %d cannot represent visible rows as int32", offset)
 	}
 
