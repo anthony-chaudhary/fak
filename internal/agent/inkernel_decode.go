@@ -675,6 +675,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		presPenalty: presPenalty,
 		maxNew:      maxNew,
 		measurement: measurement,
+		thinking:    nativeThinkingConstraintFromContext(ctx),
 		firstDraw: func(token int) {
 			p.recordNativeFirstDraw(traceID, token, stops[token])
 		},
@@ -917,6 +918,95 @@ func (p *InKernelPlanner) nativeInferencePrefillChunkTokens() int {
 	return p.effectiveQwenQ4KPrefillChunkTokens()
 }
 
+// NativeThinkingBudgetUnsupportedError refuses a positive native reasoning budget
+// whose closing delimiter cannot safely enter the model's ordinary token/KV path.
+type NativeThinkingBudgetUnsupportedError struct {
+	Reason string
+}
+
+func (e *NativeThinkingBudgetUnsupportedError) Error() string {
+	return "native thinking budget unsupported: " + e.Reason
+}
+
+type nativeThinkingConstraintContextKey struct{}
+
+// nativeThinkingConstraint is owned by one request, including its OOM retry. The
+// singleton choice at exhaustion adapts SGLang's strict reasoning mask and atomic
+// closing-token validation (Apache-2.0, SGLang Team, reasoner_grammar_backend.py at
+// b8ec544946f1c5b6e17a919a691b05c5b3e7af84); no upstream source is copied.
+type nativeThinkingConstraint struct {
+	budget      *ThinkBudget
+	limit       int
+	startInSpan bool
+	closeID     int
+	forced      bool
+	decodeToken func(int) (string, error)
+}
+
+func nativeThinkingConstraintFromContext(ctx context.Context) *nativeThinkingConstraint {
+	constraint, _ := ctx.Value(nativeThinkingConstraintContextKey{}).(*nativeThinkingConstraint)
+	return constraint
+}
+
+func (p *InKernelPlanner) newNativeThinkingConstraint(limit int, startInSpan bool, stops map[int]bool) (*nativeThinkingConstraint, error) {
+	ids, err := p.tok.Encode(thinkClose)
+	if err != nil || len(ids) != 1 {
+		return nil, &NativeThinkingBudgetUnsupportedError{Reason: "closing delimiter must encode as exactly one token"}
+	}
+	id := ids[0]
+	if id < 0 || id >= p.tok.Vocab() || id >= p.m.Cfg.VocabSize {
+		return nil, &NativeThinkingBudgetUnsupportedError{Reason: "closing token is outside the model vocabulary"}
+	}
+	piece, err := p.tok.Decode(ids)
+	if err != nil || piece != thinkClose {
+		return nil, &NativeThinkingBudgetUnsupportedError{Reason: "closing token does not decode to the exact delimiter"}
+	}
+	if stops[id] {
+		return nil, &NativeThinkingBudgetUnsupportedError{Reason: "closing token conflicts with a token-ID stop"}
+	}
+	tok := p.tok
+	constraint := &nativeThinkingConstraint{
+		limit: limit, startInSpan: startInSpan, closeID: id,
+		decodeToken: func(token int) (string, error) { return tok.Decode([]int{token}) },
+	}
+	constraint.reset()
+	return constraint, nil
+}
+
+func (c *nativeThinkingConstraint) reset() {
+	c.budget = NewThinkBudget(c.limit, c.startInSpan)
+	c.forced = false
+}
+
+// acceptToken counts the actual selected token before it can be emitted or
+// forwarded. A decode error must fail closed instead of silently undercounting
+// reasoning tokens; the unconstrained legacy emitter remains unchanged.
+func (c *nativeThinkingConstraint) acceptToken(token int) error {
+	piece, err := c.decodeToken(token)
+	if err != nil {
+		return &NativeThinkingBudgetUnsupportedError{Reason: "selected token could not be decoded for budget accounting"}
+	}
+	if c.budget.Observe(piece) {
+		return &NativeThinkingBudgetUnsupportedError{Reason: "selected token exceeded the reasoning budget"}
+	}
+	return nil
+}
+
+// closingToken returns the only allowed next token once the reasoning budget is
+// spent. Choosing a singleton before sampling is equivalent to a hard allow mask;
+// repetition penalties and user bias cannot re-enable a reasoning token. Raw
+// logits are left untouched for other consumers and cached-prefix reuse.
+func (c *nativeThinkingConstraint) closingToken(vocab int) (int, bool, error) {
+	if c.closeID < 0 || c.closeID >= vocab {
+		return 0, false, &NativeThinkingBudgetUnsupportedError{Reason: "closing token is outside the logits vocabulary"}
+	}
+	if c.budget.InSpan() && !c.budget.canThinkMore() {
+		c.forced = true
+		return c.closeID, true, nil
+	}
+	return 0, false, nil
+}
+
 // decodeLane is one request's live decode state. decodeOne runs one token's worth of the
 // decode loop body EXCEPT the model forward, so the serial driver (Session.Step) and the
 // opt-in batched driver (BatchSession.StepBatchActive) share identical per-token semantics —
@@ -938,6 +1028,7 @@ type decodeLane struct {
 	presPenalty float64
 	maxNew      int
 	measurement *nativeInferenceMeasurement
+	thinking    *nativeThinkingConstraint
 	firstDraw   func(int)
 	// samplerHook / emitHook are the CW-03 (#13351) purpose-observation taps. They are
 	// nil on the served path (a literal no-op) and set only by a cache-prime caller's
@@ -1164,7 +1255,18 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 		ln.samplerHook()
 	}
 	sampleStart := time.Now()
-	next = sampleLogitsWithPenalty(ln.logits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng)
+	forced := false
+	if ln.thinking != nil {
+		var err error
+		next, forced, err = ln.thinking.closingToken(len(ln.logits))
+		if err != nil {
+			ln.err, ln.done = err, true
+			return 0, false
+		}
+	}
+	if !forced {
+		next = sampleLogitsWithPenalty(ln.logits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng)
+	}
 	enginestep.Default.ObservePhase(enginestep.PhaseSample, time.Since(sampleStart))
 	if ln.firstDraw != nil {
 		ln.firstDraw(next)
@@ -1177,6 +1279,12 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 	if err := ln.measurement.record(ln.logits, next); err != nil {
 		ln.err, ln.done = err, true
 		return 0, false
+	}
+	if ln.thinking != nil {
+		if err := ln.thinking.acceptToken(next); err != nil {
+			ln.err, ln.done = err, true
+			return 0, false
+		}
 	}
 	if ln.counts != nil && next < len(ln.counts) {
 		ln.counts[next]++

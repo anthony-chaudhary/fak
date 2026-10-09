@@ -447,19 +447,6 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 	rendered := renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice, sp)
 	startsInReasoning := strings.HasSuffix(rendered, qwenThinkAssistantSeed)
 	projector := newInKernelStreamProjector(sink, sp.Stop, startsInReasoning)
-	// Prompt shrinking preserves the complete trailing tool run: stale-read elision
-	// protects the recent tail, and compaction moves keepStart behind a trailing tool
-	// batch. AssessTranscriptTurn therefore yields the same budget context here as it
-	// does over Complete's prepared messages.
-	var turnContext []TurnAssessment
-	if ta, ok := AssessTranscriptTurn(messages); ok {
-		turnContext = append(turnContext, ta)
-	}
-	effectiveBudget := ResolveEffortBudget(sp.ReasoningEffort, sp.ThinkingBudget, turnContext...)
-	var streamThinkBudget *ThinkBudget
-	if effectiveBudget > 0 {
-		streamThinkBudget = NewThinkBudget(effectiveBudget, startsInReasoning)
-	}
 	comp, err := p.Complete(streamCtx, messages, tools, append(opts, WithDecodeTokenObserver(func(tokenPiece, rawText string) {
 		if sinkErr != nil || tokenPiece == "" {
 			return
@@ -467,14 +454,6 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 		if sinkErr = projector.feed(tokenPiece); sinkErr != nil {
 			cancel()
 			return
-		}
-		// Complete may inject a synthetic reasoning close when the budget is
-		// exhausted. DecodeTokenObserver intentionally reports one decoded token,
-		// so mirror that deterministic projection-only append here.
-		if streamThinkBudget != nil && streamThinkBudget.Observe(tokenPiece) {
-			if sinkErr = projector.feed("\n</think>\n\n"); sinkErr != nil {
-				cancel()
-			}
 		}
 	}))...)
 	// Do not flush withheld stop prefixes or ambiguous control delimiters after a
@@ -1494,8 +1473,10 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 			panic(r)
 		}
 	}()
-	targetOnly := false
-	if coord := p.MetalMTPCoordinator(); coord != nil && p.qwen38MTPCanaryAllowsExecution() {
+	// Budgeted requests use the shared target sampler until speculative acceptance
+	// and rollback carry the same request-local constraint.
+	targetOnly := nativeThinkingConstraintFromContext(ctx) != nil
+	if coord := p.MetalMTPCoordinator(); !targetOnly && coord != nil && p.qwen38MTPCanaryAllowsExecution() {
 		return p.generateReusedMetalMTP(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
 	} else if coord != nil {
 		targetOnly = true
@@ -1777,6 +1758,16 @@ func (s *incrementalStopScanner) reset() {
 	s.total = 0
 }
 
+// splitNativeBudgetReasoning accounts for an opening marker already in the
+// prompt. A length/stop cutoff before a real close remains reasoning; projection
+// never invents an emitted closing token or extends the generation limit.
+func splitNativeBudgetReasoning(raw string, seeded bool) (string, string) {
+	if seeded {
+		return splitReasoning(thinkOpen + raw)
+	}
+	return splitReasoning(raw)
+}
+
 func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (comp *Completion, err error) {
 	// An in-kernel device-allocation failure (e.g. OOM on a small GPU under a large Claude
 	// Code system prompt) panics deep below a CGO boundary with no error channel. Recover it
@@ -1862,15 +1853,22 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	}
 	effectiveBudget := ResolveEffortBudget(sp.ReasoningEffort, sp.ThinkingBudget, turnContext...)
 	startInSpan := strings.HasSuffix(chat, qwenThinkAssistantSeed)
-	var tb *ThinkBudget
+	var thinking *nativeThinkingConstraint
 	if effectiveBudget > 0 {
-		tb = NewThinkBudget(effectiveBudget, startInSpan)
+		if sp.NativeInferenceReceipt {
+			return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: "thinking budget constrains token selection"}
+		}
+		thinking, err = p.newNativeThinkingConstraint(effectiveBudget, startInSpan, stops)
+		if err != nil {
+			return nil, err
+		}
+		ctx = context.WithValue(ctx, nativeThinkingConstraintContextKey{}, thinking)
 	}
 	// emit runs per generated token: decode the piece, accumulate the text, and apply the
 	// per-request string-suffix Stop (orthogonal to the token-ID stops). Returning true
 	// ends the turn with the token counted and its text trimmed (the stop string is not
 	// echoed back, matching the HTTP wires). Factoring decode into this closure keeps the
-	// token-level reuse/decode core (generateReused) tokenizer-free, so the candidate-#13
+	// unbudgeted reuse/decode core (generateReused) tokenizer-free, so the candidate-#13
 	// reuse and #14 eviction are witnessable on a synthetic model with no tokenizer fixture.
 	//
 	// Delta accrual: tokens append into the accumulator once; the stop probe scans only a
@@ -1890,15 +1888,10 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	emit := func(next int) bool {
 		if piece, derr := p.tok.Decode([]int{next}); derr == nil {
 			sb.WriteString(piece)
-			appended := piece
-			if tb != nil && tb.Observe(piece) {
-				sb.WriteString("\n</think>\n\n")
-				appended += "\n</think>\n\n"
-			}
 			if sp.DecodeTokenObserver != nil {
 				sp.DecodeTokenObserver(piece, "")
 			}
-			if scanner.appendPiece(appended) {
+			if scanner.appendPiece(piece) {
 				if trimmed, hit := checkStop(sb.String(), sp.Stop); hit {
 					sb.Reset()
 					sb.WriteString(trimmed)
@@ -1973,8 +1966,8 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		return p.generateReusedWithOOMRetry(runCtx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, func() {
 			sb.Reset()
 			scanner.reset()
-			if effectiveBudget > 0 {
-				tb = NewThinkBudget(effectiveBudget, startInSpan)
+			if thinking != nil {
+				thinking.reset()
 			}
 			if measurement != nil {
 				measurement.reset()
@@ -2080,7 +2073,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	if sp.DecodeTokenObserver != nil {
 		sp.DecodeTokenObserver("", sb.String())
 	}
-	reasoning, content := splitReasoning(sb.String())
+	reasoning, content := splitNativeBudgetReasoning(sb.String(), thinking != nil && startInSpan)
 	for strings.Contains(content, thinkClose) {
 		idx := strings.Index(content, thinkClose)
 		residual := strings.TrimSpace(content[:idx])
@@ -2097,7 +2090,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		}
 		content = strings.TrimSpace(content[idx+len(thinkClose):])
 	}
-	if tb != nil && tb.Forced() {
+	if thinking != nil && thinking.forced {
 		content = StripReasoning(content)
 	}
 	// Model reports the artifact this planner actually decoded, so the gateway
