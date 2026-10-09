@@ -32,9 +32,10 @@ GPU1:
 
 type hostEnvironmentBackend struct {
 	Backend
-	name     string
-	snapshot BackendExecutionSnapshot
-	err      error
+	name       string
+	snapshot   BackendExecutionSnapshot
+	err        error
+	renderNode func() (uint64, uint64, bool)
 }
 
 func (b *hostEnvironmentBackend) Name() string            { return b.name }
@@ -45,19 +46,49 @@ func (b *hostEnvironmentBackend) BackendExecutionSnapshot() (BackendExecutionSna
 	return b.snapshot, b.err
 }
 
+func (b *hostEnvironmentBackend) VulkanDRMRenderNode() (uint64, uint64, bool) {
+	if b == nil || b.renderNode == nil {
+		return 0, 0, false
+	}
+	return b.renderNode()
+}
+
+const hostEnvironmentDRMDevice = "/sys/devices/pci0000:00/0000:00:08.1/0000:c5:00.0"
+const hostEnvironmentDRMNode = hostEnvironmentDRMDevice + "/drm/renderD129"
+const hostEnvironmentOtherDRMDevice = "/sys/devices/pci0000:00/0000:00:08.1/0000:c4:00.0"
+const hostEnvironmentOtherDRMNode = hostEnvironmentOtherDRMDevice + "/drm/renderD128"
+
 func hostEnvironmentFixture() (*hostEnvironmentBackend, hostEnvironmentDeps) {
 	backend := &hostEnvironmentBackend{name: "vulkan", snapshot: BackendExecutionSnapshot{Identity: BackendRuntimeIdentity{
 		Backend: "vulkan", Device: "AMD Radeon 8060S",
 		Driver: "vendor=0x1002 device=0x150e driver=0x00000001", Runtime: "vulkan-1.4.313",
-	}}}
+	}}, renderNode: func() (uint64, uint64, bool) { return 226, 129, true }}
 	files := map[string]string{
-		"/proc/sys/kernel/osrelease":                "6.17.0-test\n",
-		"/sys/class/drm/card0/device/vendor":        "0x1002\n",
-		"/sys/class/drm/card0/device/device":        "0x150e\n",
-		"/sys/class/drm/card0/device/vbios_version": "113-STRIX-TEST\n",
-		"/sys/class/drm/card1/device/vendor":        "0x8086\n",
-		"/sys/class/drm/card1/device/device":        "0x1234\n",
-		"/sys/class/drm/card1/device/vbios_version": "unused\n",
+		"/proc/sys/kernel/osrelease":                     "6.17.0-test\n",
+		hostEnvironmentDRMNode + "/dev":                  "226:129\n",
+		hostEnvironmentDRMDevice + "/vendor":             "0x1002\n",
+		hostEnvironmentDRMDevice + "/device":             "0x150e\n",
+		hostEnvironmentDRMDevice + "/vbios_version":      "113-STRIX-TEST\n",
+		hostEnvironmentOtherDRMNode + "/dev":             "226:128\n",
+		hostEnvironmentOtherDRMDevice + "/vendor":        "0x1002\n",
+		hostEnvironmentOtherDRMDevice + "/device":        "0x150e\n",
+		hostEnvironmentOtherDRMDevice + "/vbios_version": "UNSELECTED\n",
+		// An unrelated same-model card cannot supply the selected firmware.
+		"/sys/class/drm/card0/device/vendor":             "0x1002\n",
+		"/sys/class/drm/card0/device/device":             "0x150e\n",
+		"/sys/class/drm/card0/device/vbios_version":      "UNSELECTED\n",
+	}
+	links := map[string]string{
+		"/sys/dev/char/226:128":                      hostEnvironmentOtherDRMNode,
+		"/sys/dev/char/226:128/device":               hostEnvironmentOtherDRMDevice,
+		hostEnvironmentOtherDRMNode + "/subsystem":   "/sys/class/drm",
+		hostEnvironmentOtherDRMDevice + "/subsystem": "/sys/bus/pci",
+		hostEnvironmentOtherDRMDevice + "/driver":    "/sys/bus/pci/drivers/amdgpu",
+		"/sys/dev/char/226:129":                      hostEnvironmentDRMNode,
+		"/sys/dev/char/226:129/device":               hostEnvironmentDRMDevice,
+		hostEnvironmentDRMNode + "/subsystem":        "/sys/class/drm",
+		hostEnvironmentDRMDevice + "/subsystem":      "/sys/bus/pci",
+		hostEnvironmentDRMDevice + "/driver":         "/sys/bus/pci/drivers/amdgpu",
 	}
 	deps := hostEnvironmentDeps{
 		goos: "linux", arch: "amd64",
@@ -68,11 +99,12 @@ func hostEnvironmentFixture() (*hostEnvironmentBackend, hostEnvironmentDeps) {
 			}
 			return []byte(value), nil
 		},
-		glob: func(pattern string) ([]string, error) {
-			if pattern != "/sys/class/drm/card*/device/vendor" {
-				return nil, fmt.Errorf("unexpected glob %q", pattern)
+		evalSymlinks: func(path string) (string, error) {
+			value, ok := links[path]
+			if !ok {
+				return "", fmt.Errorf("fixture has no symlink %s", path)
 			}
-			return []string{"/sys/class/drm/card0/device/vendor", "/sys/class/drm/card1/device/vendor"}, nil
+			return value, nil
 		},
 		run: func(ctx context.Context, path string, args ...string) ([]byte, error) {
 			switch path {
@@ -94,6 +126,7 @@ func hostEnvironmentFixture() (*hostEnvironmentBackend, hostEnvironmentDeps) {
 	return backend, deps
 }
 
+// fak-test:runtime fast est=10ms lane=default
 func TestObserveVulkanHostEnvironmentBindsBackendAndObservedBytes(t *testing.T) {
 	backend, deps := hostEnvironmentFixture()
 	got, err := observeVulkanHostEnvironment(context.Background(), backend, deps)
@@ -110,6 +143,7 @@ func TestObserveVulkanHostEnvironmentBindsBackendAndObservedBytes(t *testing.T) 
 	}
 }
 
+// fak-test:runtime fast est=20ms lane=default
 func TestObserveVulkanHostEnvironmentFailsClosed(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -166,22 +200,61 @@ func TestObserveVulkanHostEnvironmentFailsClosed(t *testing.T) {
 		{name: "missing kernel", mutate: func(_ *hostEnvironmentBackend, d *hostEnvironmentDeps) {
 			d.readFile = func(path string) ([]byte, error) { return nil, fmt.Errorf("missing %s", path) }
 		}},
-		{name: "ambiguous DRM device", mutate: func(_ *hostEnvironmentBackend, d *hostEnvironmentDeps) {
+		{name: "unavailable render identity", mutate: func(b *hostEnvironmentBackend, _ *hostEnvironmentDeps) {
+			b.renderNode = nil
+		}},
+		{name: "zero render major", mutate: func(b *hostEnvironmentBackend, _ *hostEnvironmentDeps) {
+			b.renderNode = func() (uint64, uint64, bool) { return 0, 129, true }
+		}},
+		{name: "changed selected render node", mutate: func(b *hostEnvironmentBackend, d *hostEnvironmentDeps) {
 			originalRead := d.readFile
 			d.readFile = func(path string) ([]byte, error) {
-				if path == "/sys/class/drm/card1/device/vendor" {
-					return []byte("0x1002\n"), nil
-				}
-				if path == "/sys/class/drm/card1/device/device" {
-					return []byte("0x150e\n"), nil
+				if path == hostEnvironmentDRMDevice+"/vbios_version" {
+					b.renderNode = func() (uint64, uint64, bool) { return 226, 128, true }
 				}
 				return originalRead(path)
+			}
+		}},
+		{name: "mismatched DRM number", mutate: func(_ *hostEnvironmentBackend, d *hostEnvironmentDeps) {
+			originalRead := d.readFile
+			d.readFile = func(path string) ([]byte, error) {
+				if path == hostEnvironmentDRMNode+"/dev" {
+					return []byte("226:128\n"), nil
+				}
+				return originalRead(path)
+			}
+		}},
+		{name: "mismatched DRM device", mutate: func(_ *hostEnvironmentBackend, d *hostEnvironmentDeps) {
+			originalRead := d.readFile
+			d.readFile = func(path string) ([]byte, error) {
+				if path == hostEnvironmentDRMDevice+"/device" {
+					return []byte("0xffff\n"), nil
+				}
+				return originalRead(path)
+			}
+		}},
+		{name: "wrong kernel driver", mutate: func(_ *hostEnvironmentBackend, d *hostEnvironmentDeps) {
+			originalEval := d.evalSymlinks
+			d.evalSymlinks = func(path string) (string, error) {
+				if path == hostEnvironmentDRMDevice+"/driver" {
+					return "/sys/bus/pci/drivers/other", nil
+				}
+				return originalEval(path)
+			}
+		}},
+		{name: "render path outside sysfs", mutate: func(_ *hostEnvironmentBackend, d *hostEnvironmentDeps) {
+			originalEval := d.evalSymlinks
+			d.evalSymlinks = func(path string) (string, error) {
+				if path == "/sys/dev/char/226:129" {
+					return "/tmp/renderD129", nil
+				}
+				return originalEval(path)
 			}
 		}},
 		{name: "missing firmware", mutate: func(_ *hostEnvironmentBackend, d *hostEnvironmentDeps) {
 			originalRead := d.readFile
 			d.readFile = func(path string) ([]byte, error) {
-				if path == "/sys/class/drm/card0/device/vbios_version" {
+				if path == hostEnvironmentDRMDevice+"/vbios_version" {
 					return nil, errors.New("missing")
 				}
 				return originalRead(path)

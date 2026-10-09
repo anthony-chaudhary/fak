@@ -38,10 +38,10 @@ type VulkanHostEnvironment struct {
 // from flags or environment variables and returns a zero value on any error.
 func ObserveVulkanHostEnvironment(ctx context.Context, backend Backend) (VulkanHostEnvironment, error) {
 	return observeVulkanHostEnvironment(ctx, backend, hostEnvironmentDeps{
-		goos:     runtime.GOOS,
-		arch:     runtime.GOARCH,
-		readFile: os.ReadFile,
-		glob:     filepath.Glob,
+		goos:         runtime.GOOS,
+		arch:         runtime.GOARCH,
+		readFile:     os.ReadFile,
+		evalSymlinks: filepath.EvalSymlinks,
 		run: func(ctx context.Context, path string, args ...string) ([]byte, error) {
 			return exec.CommandContext(ctx, path, args...).Output()
 		},
@@ -49,11 +49,11 @@ func ObserveVulkanHostEnvironment(ctx context.Context, backend Backend) (VulkanH
 }
 
 type hostEnvironmentDeps struct {
-	goos     string
-	arch     string
-	readFile func(string) ([]byte, error)
-	glob     func(string) ([]string, error)
-	run      func(context.Context, string, ...string) ([]byte, error)
+	goos         string
+	arch         string
+	readFile     func(string) ([]byte, error)
+	evalSymlinks func(string) (string, error)
+	run          func(context.Context, string, ...string) ([]byte, error)
 }
 
 type vulkanSummaryDevice struct {
@@ -70,7 +70,7 @@ func observeVulkanHostEnvironment(ctx context.Context, backend Backend, deps hos
 	if deps.goos != "linux" || strings.TrimSpace(deps.arch) == "" {
 		return VulkanHostEnvironment{}, fmt.Errorf("compute: Vulkan host observation requires Linux with a known architecture")
 	}
-	if deps.readFile == nil || deps.glob == nil || deps.run == nil {
+	if deps.readFile == nil || deps.evalSymlinks == nil || deps.run == nil {
 		return VulkanHostEnvironment{}, errors.New("compute: Vulkan host observation dependencies are incomplete")
 	}
 
@@ -82,6 +82,11 @@ func observeVulkanHostEnvironment(ctx context.Context, backend Backend, deps hos
 		return VulkanHostEnvironment{}, errors.New("compute: Vulkan backend identity is unavailable")
 	}
 	backendVendor, backendDevice, err := parseBackendPCIIdentity(snapshot.Identity.Driver)
+	if err != nil {
+		return VulkanHostEnvironment{}, err
+	}
+
+	binding, err := bindSelectedVulkanDRMDevice(backend, deps, backendVendor, backendDevice)
 	if err != nil {
 		return VulkanHostEnvironment{}, err
 	}
@@ -127,9 +132,19 @@ func observeVulkanHostEnvironment(ctx context.Context, backend Backend, deps hos
 		return VulkanHostEnvironment{}, errors.New("compute: Vulkan summary does not match the backend-selected device")
 	}
 
-	firmware, err := observeMatchingFirmware(deps, backendVendor, backendDevice)
+	firmware, err := readObservedLine(deps.readFile, path.Join(binding.devicePath, "vbios_version"), "VBIOS firmware")
 	if err != nil {
 		return VulkanHostEnvironment{}, err
+	}
+	closingBinding, err := bindSelectedVulkanDRMDevice(backend, deps, backendVendor, backendDevice)
+	if err != nil {
+		return VulkanHostEnvironment{}, err
+	}
+	if closingBinding != binding {
+		return VulkanHostEnvironment{}, errors.New("compute: selected Vulkan DRM binding changed during host observation")
+	}
+	if err := ctx.Err(); err != nil {
+		return VulkanHostEnvironment{}, fmt.Errorf("compute: Vulkan host observation: %w", err)
 	}
 	return VulkanHostEnvironment{
 		OS: observedOS, Arch: observedArch, Kernel: kernel, Device: selected.name,
@@ -260,37 +275,6 @@ func isGPUHeader(line string) bool {
 	}
 	_, err := strconv.ParseUint(line[3:len(line)-1], 10, 31)
 	return err == nil
-}
-
-func observeMatchingFirmware(deps hostEnvironmentDeps, vendorID, deviceID string) (string, error) {
-	paths, err := deps.glob("/sys/class/drm/card*/device/vendor")
-	if err != nil {
-		return "", fmt.Errorf("compute: enumerate DRM devices: %w", err)
-	}
-	seen := make(map[string]struct{}, len(paths))
-	matches := make([]string, 0, 1)
-	for _, vendorPath := range paths {
-		deviceDir := path.Clean(path.Dir(vendorPath))
-		if _, duplicate := seen[deviceDir]; duplicate {
-			return "", errors.New("compute: DRM device enumeration contains duplicates")
-		}
-		seen[deviceDir] = struct{}{}
-		vendor, err := readObservedPCIID(deps.readFile, vendorPath, "DRM vendor")
-		if err != nil {
-			return "", err
-		}
-		device, err := readObservedPCIID(deps.readFile, path.Join(deviceDir, "device"), "DRM device")
-		if err != nil {
-			return "", err
-		}
-		if vendor == vendorID && device == deviceID {
-			matches = append(matches, deviceDir)
-		}
-	}
-	if len(matches) != 1 {
-		return "", fmt.Errorf("compute: expected one DRM device matching the executed Vulkan device, found %d", len(matches))
-	}
-	return readObservedLine(deps.readFile, path.Join(matches[0], "vbios_version"), "VBIOS firmware")
 }
 
 func readObservedPCIID(readFile func(string) ([]byte, error), path, field string) (string, error) {
