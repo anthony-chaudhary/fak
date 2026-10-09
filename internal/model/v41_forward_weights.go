@@ -39,6 +39,7 @@ type v41ProjScratch struct {
 	groupedOutput   v41GroupedOutputFunc
 	mhcProjection   v41MHCProjectionFunc
 	queryNorm       v41QueryNormFunc
+	kvNorm          v41KVNormFunc
 
 	// exp1/exp3/exp2 are the REUSED materialization targets for one routed
 	// expert's three projections (ffn.experts.<e>.w1/w3/w2.weight). They were

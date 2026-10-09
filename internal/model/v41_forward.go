@@ -158,6 +158,7 @@ type v41ForwardState struct {
 	mhcProjection    v41MHCProjectionFunc
 	finalNorm        v41FinalNormFunc
 	queryNorm        v41QueryNormFunc
+	kvNorm           v41KVNormFunc
 	callbackOwner    *Session
 }
 
@@ -285,7 +286,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, callbackOwner: st.callbackOwner}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -435,17 +436,20 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.groupedOutput = nil
 	scratch.mhcProjection = nil
 	scratch.queryNorm = nil
+	scratch.kvNorm = nil
 	if st != nil {
 		scratch.denseProjection = st.denseProjection
 		scratch.groupedOutput = st.groupedOutput
 		scratch.mhcProjection = st.mhcProjection
 		scratch.queryNorm = st.queryNorm
+		scratch.kvNorm = st.kvNorm
 	}
 	defer func() {
 		scratch.denseProjection = nil
 		scratch.groupedOutput = nil
 		scratch.mhcProjection = nil
 		scratch.queryNorm = nil
+		scratch.kvNorm = nil
 	}()
 
 	// Engram injection happens at the START of the layer, into the residual,
@@ -643,12 +647,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// the full head_dim before the rope tail; artifact-only, so the reduced
 		// fixture's pre-#13009 arithmetic is unchanged.
 		if full {
-			kvNorm := m.tensor(layerName(l, "attn.kv_norm.weight"))
-			if len(kvNorm) != v41KVLoraRank {
-				return v41StageErr(v41StageAttention, l,
-					fmt.Errorf("%w: kv norm has %d values, want %d", ErrV41ForwardStage, len(kvNorm), v41KVLoraRank))
+			if err := m.v41KVNormInPlace(l, kv, eps, scratch.kvNorm); err != nil {
+				return err
 			}
-			kv = rmsnormCfg(kv, kvNorm, eps, cfg)
 		}
 		// #13325 kv_latent: the KV row after the optional kv RMSNorm and BEFORE
 		// RoPE, so a rotary or geometry fault is distinguishable from a projection
@@ -1322,6 +1323,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.mhcProjection = s.v41MHCProjectionFunc()
 		s.v41Forward.finalNorm = s.v41FinalNormFunc()
 		s.v41Forward.queryNorm = s.v41QueryNormFunc()
+		s.v41Forward.kvNorm = s.v41KVNormFunc()
 		s.v41Forward.callbackOwner = s
 	}
 	return s.v41Forward
@@ -1363,6 +1365,50 @@ func (m *Model) v41QueryNormInPlace(layer int, input []float32, eps float32, nor
 		if len(gain) != m.Cfg.QLoraRank {
 			return v41StageErr(v41StageAttention, layer,
 				fmt.Errorf("%w: q-lora norm has %d values, want %d", ErrV41ForwardStage, len(gain), m.Cfg.QLoraRank))
+		}
+		copy(input, rmsnormCfg(input, gain, eps, m.Cfg))
+		return nil
+	}
+	values, err := normalize(layer, input)
+	if err == nil && len(values) != len(input) {
+		err = errV41ProjectionResult
+	}
+	if err == nil {
+		for _, v := range values {
+			if !finite32(v) {
+				err = errV41ProjectionResult
+				break
+			}
+		}
+	}
+	if err != nil {
+		return v41ProjectionOperationErr(layer, leaf, err)
+	}
+	copy(input, values)
+	return nil
+}
+
+// Full-profile KV rows have the published latent width (512) and normalize
+// before tail RoPE. A selected device operation has no host-retry outcome.
+type v41KVNormFunc func(layer int, input []float32) ([]float32, error)
+
+func (s *Session) v41KVNormFunc() v41KVNormFunc {
+	normalize := s.v41RMSNormFunc()
+	if normalize == nil {
+		return nil
+	}
+	return func(layer int, input []float32) ([]float32, error) {
+		return normalize(layerName(layer, "attn.kv_norm.weight"), input, v41KVLoraRank, "v41-kv-norm", layer)
+	}
+}
+
+func (m *Model) v41KVNormInPlace(layer int, input []float32, eps float32, normalize v41KVNormFunc) error {
+	const leaf = "attn.kv_norm.weight"
+	if normalize == nil {
+		gain := m.tensor(layerName(layer, leaf))
+		if len(gain) != v41KVLoraRank {
+			return v41StageErr(v41StageAttention, layer,
+				fmt.Errorf("%w: kv norm has %d values, want %d", ErrV41ForwardStage, len(gain), v41KVLoraRank))
 		}
 		copy(input, rmsnormCfg(input, gain, eps, m.Cfg))
 		return nil

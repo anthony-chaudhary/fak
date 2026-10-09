@@ -234,12 +234,9 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		}
 	}
 	if full {
-		kvNorm := m.tensor(layerName(l, "attn.kv_norm.weight"))
-		if len(kvNorm) != v41KVLoraRank {
-			return v41StageErr(v41StageAttention, l,
-				fmt.Errorf("%w: kv norm has %d values, want %d", ErrV41ForwardStage, len(kvNorm), v41KVLoraRank))
+		if err := m.v41KVNormInPlace(l, kv, eps, scratch.kvNorm); err != nil {
+			return err
 		}
-		kv = rmsnormCfg(kv, kvNorm, eps, cfg)
 	}
 	cos, sin := v41RopeTableForLayer(cfg, l, pos)
 	for h := 0; h < nH; h++ {
@@ -528,12 +525,9 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		return err
 	}
 	kv := kvFull[:hd]
-	kvNorm := m.tensor(layerName(l, "attn.kv_norm.weight"))
-	if len(kvNorm) != v41KVLoraRank {
-		return v41StageErr(v41StageAttention, l,
-			fmt.Errorf("%w: kv norm has %d values, want %d", ErrV41ForwardStage, len(kvNorm), v41KVLoraRank))
+	if err := m.v41KVNormInPlace(l, kv, eps, scratch.kvNorm); err != nil {
+		return err
 	}
-	kv = rmsnormCfg(kv, kvNorm, eps, cfg)
 	cos, sin := v41RopeTableForLayer(cfg, l, pos)
 	for h := 0; h < nH; h++ {
 		applyRopeTailInterleaved(q[h*hd:(h+1)*hd], cos, sin, ropeDim)
