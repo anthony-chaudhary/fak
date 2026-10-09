@@ -1787,6 +1787,30 @@ int fvk_device_identity(char* name, int namelen, uint32_t* vendor_id,
     return 1;
 }
 
+int fvk_device_drm_render_node(uint64_t* major, uint64_t* minor) {
+    if (major) *major = 0;
+    if (minor) *minor = 0;
+#if defined(__linux__) && defined(VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME)
+    if (!major || !minor || !g_ready || g_phys == VK_NULL_HANDLE ||
+        !deviceExtensionSupported(VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME)) {
+        return 0;
+    }
+    VkPhysicalDeviceDrmPropertiesEXT drm{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT};
+    VkPhysicalDeviceProperties2 props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    props.pNext = &drm;
+    vkGetPhysicalDeviceProperties2(g_phys, &props);
+    if (drm.hasRender != VK_TRUE || drm.renderMajor <= 0 || drm.renderMinor < 0) {
+        return 0;
+    }
+    *major = static_cast<uint64_t>(drm.renderMajor);
+    *minor = static_cast<uint64_t>(drm.renderMinor);
+    return 1;
+#else
+    return 0;
+#endif
+}
+
 int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_qwen35_gdn_q8_in_proj = 0;
     g_have_q6k_matmul = 0;

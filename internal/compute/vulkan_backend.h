@@ -37,6 +37,11 @@ int fvk_device_identity(char *name, int namelen, uint32_t *vendor_id,
                         uint32_t *device_id, uint32_t *driver_version,
                         uint32_t *api_version);
 
+/* Query the DRM render node of the initialized, selected physical device. Returns
+ * 1 only for a supported Linux query with a valid major/minor pair; otherwise
+ * returns 0 and clears supplied outputs. This is identity, not memory capacity. */
+int fvk_device_drm_render_node(uint64_t *major, uint64_t *minor);
+
 /* device memory + transfers (the residency seam). The returned handle is an opaque
  * VkBuffer wrapper; it is NOT a host pointer. */
 void *fvk_malloc(size_t bytes);

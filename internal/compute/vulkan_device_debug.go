@@ -276,6 +276,23 @@ func (v *vulkanBackend) VulkanDebugRestoreActive() bool {
 	return C.fvk_restore_active() != 0
 }
 
+// VulkanDRMRenderNode reports the DRM render-node identity of the initialized,
+// selected physical device. Unsupported platforms, headers, drivers, or devices
+// return unavailable. The pair identifies a node, not a dedicated memory pool;
+// callers must independently prove any capacity and host-memory relationship.
+func (v *vulkanBackend) VulkanDRMRenderNode() (major, minor uint64, available bool) {
+	if v == nil {
+		return 0, 0, false
+	}
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	var drmMajor, drmMinor C.uint64_t
+	if C.fvk_device_drm_render_node(&drmMajor, &drmMinor) == 0 || drmMajor == 0 {
+		return 0, 0, false
+	}
+	return uint64(drmMajor), uint64(drmMinor), true
+}
+
 // BackendExecutionSnapshot reports identity and cumulative counters from the
 // selected Vulkan backend. Callers must bracket one execution and subtract via
 // BackendExecutionDelta; this process-global snapshot is never a receipt.
