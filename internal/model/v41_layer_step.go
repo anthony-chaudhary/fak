@@ -208,12 +208,9 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		return err
 	}
 	if full {
-		qNorm := m.tensor(layerName(l, "attn.wq_a_norm.weight"))
-		if len(qNorm) != cfg.QLoraRank {
-			return v41StageErr(v41StageAttention, l,
-				fmt.Errorf("%w: q-lora norm has %d values, want %d", ErrV41ForwardStage, len(qNorm), cfg.QLoraRank))
+		if err := m.v41QueryNormInPlace(l, qLat, eps, scratch.queryNorm); err != nil {
+			return err
 		}
-		copy(qLat, rmsnormCfg(qLat, qNorm, eps, cfg))
 	}
 	q, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank, scratch.denseProjection)
 	if err != nil {
@@ -515,12 +512,9 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	if err != nil {
 		return err
 	}
-	qNorm := m.tensor(layerName(l, "attn.wq_a_norm.weight"))
-	if len(qNorm) != cfg.QLoraRank {
-		return v41StageErr(v41StageAttention, l,
-			fmt.Errorf("%w: q-lora norm has %d values, want %d", ErrV41ForwardStage, len(qNorm), cfg.QLoraRank))
+	if err := m.v41QueryNormInPlace(l, qLat, eps, scratch.queryNorm); err != nil {
+		return err
 	}
-	copy(qLat, rmsnormCfg(qLat, qNorm, eps, cfg))
 	q, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank, scratch.denseProjection)
 	if err != nil {
 		return err

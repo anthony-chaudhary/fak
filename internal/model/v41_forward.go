@@ -157,6 +157,7 @@ type v41ForwardState struct {
 	engramProjection v41EngramProjectionFunc
 	mhcProjection    v41MHCProjectionFunc
 	finalNorm        v41FinalNormFunc
+	queryNorm        v41QueryNormFunc
 	callbackOwner    *Session
 }
 
@@ -284,7 +285,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, finalNorm: st.finalNorm, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, callbackOwner: st.callbackOwner}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -433,12 +434,19 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.denseProjection = nil
 	scratch.groupedOutput = nil
 	scratch.mhcProjection = nil
+	scratch.queryNorm = nil
 	if st != nil {
 		scratch.denseProjection = st.denseProjection
 		scratch.groupedOutput = st.groupedOutput
 		scratch.mhcProjection = st.mhcProjection
+		scratch.queryNorm = st.queryNorm
 	}
-	defer func() { scratch.denseProjection = nil; scratch.groupedOutput = nil; scratch.mhcProjection = nil }()
+	defer func() {
+		scratch.denseProjection = nil
+		scratch.groupedOutput = nil
+		scratch.mhcProjection = nil
+		scratch.queryNorm = nil
+	}()
 
 	// Engram injection happens at the START of the layer, into the residual,
 	// before attention and before attn_norm (ds41_graph_before_attention).
@@ -580,11 +588,6 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	for t := 0; t < seq; t++ {
 		qLat := qLatPanel[t*cfg.QLoraRank : (t+1)*cfg.QLoraRank]
 		if full {
-			qNorm := m.tensor(layerName(l, "attn.wq_a_norm.weight"))
-			if len(qNorm) != cfg.QLoraRank {
-				return v41StageErr(v41StageAttention, l,
-					fmt.Errorf("%w: q-lora norm has %d values, want %d", ErrV41ForwardStage, len(qNorm), cfg.QLoraRank))
-			}
 			// Reference: qr = self.q_norm(self.wq_a(x)). The RMSNorm over the
 			// q-lora latent keeps its magnitude O(1) before the wq_b projection;
 			// omitting it lets ~1e18 activations reach the 512-term attention
@@ -592,7 +595,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			// Artifact-only: the reduced fixture carries no q_norm leaf and its
 			// pre-#13009 arithmetic is unchanged. Written back into the panel row
 			// so the batched wq_b panel reads the normed latents.
-			copy(qLat, rmsnormCfg(qLat, qNorm, eps, cfg))
+			if err := m.v41QueryNormInPlace(l, qLat, eps, scratch.queryNorm); err != nil {
+				return err
+			}
 		}
 		// #13325 q_latent: the q-lora latent as fed to wq_b, after the optional q
 		// RMSNorm. Captured BEFORE the wq_b panel consumes it.
@@ -1316,6 +1321,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.engramProjection = s.v41EngramProjectionFunc()
 		s.v41Forward.mhcProjection = s.v41MHCProjectionFunc()
 		s.v41Forward.finalNorm = s.v41FinalNormFunc()
+		s.v41Forward.queryNorm = s.v41QueryNormFunc()
 		s.v41Forward.callbackOwner = s
 	}
 	return s.v41Forward
@@ -1326,6 +1332,65 @@ func (s *Session) v41State() *v41ForwardState {
 type v41FinalNormFunc func([]float32) ([]float32, error)
 
 func (s *Session) v41FinalNormFunc() v41FinalNormFunc {
+	normalize := s.v41RMSNormFunc()
+	if normalize == nil {
+		return nil
+	}
+	return func(input []float32) ([]float32, error) {
+		return normalize("model.norm.weight", input, s.M.Cfg.HiddenSize, "v41-final-norm", -1)
+	}
+}
+
+// Query normalization stays between wq_a and wq_b on full-profile models.
+// Portable sessions retain the original host arithmetic; a selected callback
+// has no decline outcome and cannot retry a failed device operation on the host.
+type v41QueryNormFunc func(layer int, input []float32) ([]float32, error)
+
+func (s *Session) v41QueryNormFunc() v41QueryNormFunc {
+	normalize := s.v41RMSNormFunc()
+	if normalize == nil {
+		return nil
+	}
+	return func(layer int, input []float32) ([]float32, error) {
+		return normalize(layerName(layer, "attn.wq_a_norm.weight"), input, s.M.Cfg.QLoraRank, "v41-query-norm", layer)
+	}
+}
+
+func (m *Model) v41QueryNormInPlace(layer int, input []float32, eps float32, normalize v41QueryNormFunc) error {
+	const leaf = "attn.wq_a_norm.weight"
+	if normalize == nil {
+		gain := m.tensor(layerName(layer, leaf))
+		if len(gain) != m.Cfg.QLoraRank {
+			return v41StageErr(v41StageAttention, layer,
+				fmt.Errorf("%w: q-lora norm has %d values, want %d", ErrV41ForwardStage, len(gain), m.Cfg.QLoraRank))
+		}
+		copy(input, rmsnormCfg(input, gain, eps, m.Cfg))
+		return nil
+	}
+	values, err := normalize(layer, input)
+	if err == nil && len(values) != len(input) {
+		err = errV41ProjectionResult
+	}
+	if err == nil {
+		for _, v := range values {
+			if !finite32(v) {
+				err = errV41ProjectionResult
+				break
+			}
+		}
+	}
+	if err != nil {
+		return v41ProjectionOperationErr(layer, leaf, err)
+	}
+	copy(input, values)
+	return nil
+}
+
+type v41RMSNormFunc func(name string, input []float32, width int, path string, layer int) ([]float32, error)
+
+// Each row uploads and reads back once. Only immutable learned gains are cached;
+// this does not establish device-resident forward execution or a speedup.
+func (s *Session) v41RMSNormFunc() v41RMSNormFunc {
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
 		s.M.Cfg.LayerNorm || s.M.Cfg.NormGain1p || !compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.F32) {
 		return nil
@@ -1333,11 +1398,11 @@ func (s *Session) v41FinalNormFunc() v41FinalNormFunc {
 	if eps := float32(s.M.Cfg.RMSNormEps); !finite32(eps) || eps <= 0 {
 		return nil
 	}
-	return func(input []float32) (result []float32, cause error) {
+	return func(name string, input []float32, width int, path string, layer int) (result []float32, cause error) {
 		s.ensureOpenBackendSession()
 		stage := "payload"
 		closeFailure := func(err error) error {
-			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-final-norm", Layer: -1, Stage: stage, Cause: err}
+			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: path, Layer: layer, Stage: stage, Cause: err}
 			s.halFailure = closed
 			s.Close()
 			return closed
@@ -1372,14 +1437,13 @@ func (s *Session) v41FinalNormFunc() v41FinalNormFunc {
 				panic(r)
 			}
 		}()
-		width := s.M.Cfg.HiddenSize
 		eps := float32(s.M.Cfg.RMSNormEps)
-		meta, present := s.M.manifest["model.norm.weight"]
+		meta, present := s.M.manifest[name]
 		if width <= 0 || len(input) != width || !finite32(eps) || eps <= 0 ||
 			!present || len(meta.Shape) != 1 || meta.Shape[0] != width {
 			return nil, closeFailure(errV41ProjectionResult)
 		}
-		gain := s.M.tensor("model.norm.weight")
+		gain := s.M.tensor(name)
 		if len(gain) != width {
 			return nil, closeFailure(errV41ProjectionResult)
 		}
@@ -1390,9 +1454,9 @@ func (s *Session) v41FinalNormFunc() v41FinalNormFunc {
 		}
 		run := func() ([]float32, error) {
 			stage = "weight upload"
-			weight := s.weightHAL("model.norm.weight")
+			weight := s.weightHAL(name)
 			stage = "activation upload"
-			x := s.uploadHostF32([]int{width}, input, compute.MemoryActivation, "V4.1 final norm activation")
+			x := s.uploadHostF32([]int{width}, input, compute.MemoryActivation, "V4.1 RMSNorm activation "+name)
 			defer s.Backend.Free(x)
 			stage = "rmsnorm"
 			y := s.Backend.RMSNorm(x, weight, eps)
