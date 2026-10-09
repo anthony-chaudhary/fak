@@ -495,6 +495,101 @@ func (v *vulkanBackend) VulkanTensorBufferBackings(t Tensor) ([]VulkanBufferBack
 	return backings, true
 }
 
+// VulkanBufferReservation reports a buffer binding's nominal native length and
+// its complete VkDeviceMemory allocation request. ReservationBytes repeats the
+// whole allocation size for each binding, including shared weight-arena bindings;
+// it is not a per-tensor charge, driver overhead or physical residency measure.
+// BufferBytes can exceed a borrowed tensor view's logical extent. AllocationID
+// names the memory allocation, not the tensor or buffer binding. It is opaque and
+// valid only within the current initialized-device lifetime. Backing identifies
+// the part/chunk and selected memory type/heap without changing the older record.
+type VulkanBufferReservation struct {
+	BufferBytes      uint64
+	ReservationBytes uint64
+	AllocationID     uint64
+	BindingOffset    uint64
+	Backing          VulkanBufferBacking
+}
+
+// VulkanTensorBufferReservations observes all data/scale bindings in data-then-
+// scales order per chunk under vulkanMu. Missing metadata returns nil, false,
+// never partial evidence. The caller must retain a live tensor and, for borrowed
+// views, its live backing owner; stale aliases cannot be validated from t.be or
+// a lock. The current initialized-device lifetime is a precondition, not a
+// generation check. Explicit shim reinitialization invalidates this contract.
+//
+// Nonzero IDs distinguish shim allocations in that lifetime; arena bindings share
+// a block ID, pool retention preserves an ID, and new allocations do not reuse
+// retired IDs. This supplies no whole-backend inventory or general deduplication
+// guarantee. Separate calls are not an atomic snapshot. Do not infer disjoint
+// physical pools, sum capacities, authorize headroom or predict future placement.
+// Other owner inventories (homes, stages, scratch, pools) are not included here.
+//
+// The query reads host metadata without allocating/freeing Vulkan storage,
+// transferring, flushing batches, fencing device work or changing owners.
+// The result can allocate Go memory. Call outside hot token loops. A matching
+// rebuilt libfakvulkan is required for the additive reservation symbol.
+func (v *vulkanBackend) VulkanTensorBufferReservations(t Tensor) ([]VulkanBufferReservation, bool) {
+	if v == nil || t.be != v {
+		return nil, false
+	}
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	b, ok := t.buf.(*vulkanBuf)
+	if !ok || b == nil {
+		return nil, false
+	}
+	var backings []VulkanBufferReservation
+	appendBacking := func(ptr unsafe.Pointer, part string, chunk int) bool {
+		backing, ok := vulkanBufferReservationLocked(ptr, part, chunk)
+		if !ok {
+			return false
+		}
+		backings = append(backings, backing)
+		return true
+	}
+	if len(b.q8Chunks) != 0 {
+		if b.ptr != nil || b.scalePtr != nil || t.Dtype != Q8_0 {
+			return nil, false
+		}
+		for i, chunk := range b.q8Chunks {
+			if !appendBacking(chunk.ptr, "data", i) || !appendBacking(chunk.scalePtr, "scales", i) {
+				return nil, false
+			}
+		}
+	} else {
+		if !appendBacking(b.ptr, "data", -1) {
+			return nil, false
+		}
+		if b.scalePtr != nil || t.Dtype == Q8_0 {
+			if !appendBacking(b.scalePtr, "scales", -1) {
+				return nil, false
+			}
+		}
+	}
+	return backings, true
+}
+
+// The caller holds vulkanMu and proves live current-lifetime ownership. No raw
+// handle or borrowed native pointer escapes into the returned value record.
+func vulkanBufferReservationLocked(ptr unsafe.Pointer, part string, chunk int) (VulkanBufferReservation, bool) {
+	var info C.fvk_buffer_reservation_info
+	if ptr == nil || C.fvk_buffer_reservation(ptr, &info) == 0 {
+		return VulkanBufferReservation{}, false
+	}
+	backing, ok := vulkanBufferBackingLocked(ptr, part, chunk)
+	if !ok {
+		return VulkanBufferReservation{}, false
+	}
+	return VulkanBufferReservation{
+		BufferBytes:      uint64(info.buffer_bytes),
+		ReservationBytes: uint64(info.reservation_bytes),
+		AllocationID:     uint64(info.allocation_id),
+		BindingOffset:    uint64(info.binding_offset),
+		Backing:          backing,
+	}, true
+}
+
 // VulkanQ4KStageBufferBacking describes the backend-owned shared Q4_K dispatch
 // stage. BufferBytes is its retained nominal buffer length, not the most recent
 // copy length or reserved VkDeviceMemory bytes. Backing uses Part "data", Chunk -1.

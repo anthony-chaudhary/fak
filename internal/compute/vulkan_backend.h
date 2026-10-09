@@ -98,6 +98,30 @@ typedef struct fvk_buffer_backing_info {
  * calls. Indices are local to the current selected device, not persistent IDs. */
 int fvk_buffer_backing(const void *d, fvk_buffer_backing_info *out);
 
+/* One buffer binding's nominal bytes and the full VkDeviceMemory allocation
+ * request backing it. reservation_bytes is allocationSize passed to Vulkan, not
+ * physical residency, driver overhead, available capacity or a per-binding charge.
+ * allocation_id is an opaque nonzero shim token, never a handle/address. Bindings
+ * in one weight-arena block share its token and full reservation; a pooled buffer
+ * retains its token while the same memory allocation is retained. */
+typedef struct fvk_buffer_reservation_info {
+    uint64_t buffer_bytes;
+    uint64_t reservation_bytes;
+    uint64_t allocation_id;
+    uint64_t binding_offset;
+} fvk_buffer_reservation_info;
+/* Returns 1 only for complete reservation metadata; otherwise returns 0 and clears
+ * a supplied output. The caller must supply a live owned Buffer (including a live
+ * borrowed-view owner) and hold the same allocation/free/init lock. Arbitrary or
+ * retired pointers cannot be validated. Identity is meaningful only within the
+ * current initialized-device lifetime; no generation validates reinitialization.
+ * The ID sequence never wraps/reuses tokens; exhaustion makes new reservations
+ * unobservable without changing allocation success, fallback or pooling policy.
+ * Reads host metadata only, with no Vulkan call, owner mutation or batch flush.
+ * No whole-backend inventory, physical-pool disjointness or capacity sum follows.
+ * Additive ABI: existing structs and symbols are unchanged; rebuild the shim. */
+int fvk_buffer_reservation(const void *d, fvk_buffer_reservation_info *out);
+
 /* Observe the one shim-global, persistently mapped ordinary H2D/D2H stage.
  * Returns 1 for a coherent empty owner (buffer_bytes = 0) or a retained stage;
  * returns 0 for uninitialized, inconsistent or unavailable ownership/backing.

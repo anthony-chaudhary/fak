@@ -102,6 +102,18 @@ uint64_t              g_allocationWindowToken = 0;
 uint64_t              g_nextAllocationWindowToken = 1;
 uint64_t              g_allocationWindowPeakBytes = 0;
 
+// Tokens name VkDeviceMemory allocations, not Buffer wrappers, arena indices or
+// addresses. Retention/pooling keeps the token; a new allocation never reuses it.
+// No cross-device-lifetime contract is provided. Exhaustion affects metadata only.
+uint64_t g_nextMemoryAllocationID = 1;
+uint64_t nextMemoryAllocationID() {
+    uint64_t id = g_nextMemoryAllocationID;
+    if (id != 0) {
+        g_nextMemoryAllocationID = id == std::numeric_limits<uint64_t>::max() ? 0 : id + 1;
+    }
+    return id;
+}
+
 bool checkedCounterAdd(std::atomic<uint64_t>& counter, uint64_t value) {
     uint64_t current = counter.load(std::memory_order_relaxed);
     if (value > std::numeric_limits<uint64_t>::max() - current) {
@@ -170,6 +182,7 @@ struct Buffer {
     bool           weightArenaBound = false;
     size_t         weightArenaBlock = std::numeric_limits<size_t>::max();
     VkDeviceSize   allocationBytes = 0;
+    uint64_t       allocationID = 0;
     bool           allocationDeviceLocal = false;
 };
 
@@ -182,6 +195,7 @@ static constexpr VkDeviceSize WEIGHT_ARENA_BLOCK_BYTES = 256ull * 1024ull * 1024
 struct WeightArenaBlock {
     VkDeviceMemory mem = VK_NULL_HANDLE;
     VkDeviceSize capacity = 0;
+    uint64_t allocationID = 0;
     VkDeviceSize used = 0;
     uint32_t memoryTypeIndex = UINT32_MAX;
     size_t liveBuffers = 0;
@@ -636,6 +650,7 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
     b->props = actualProps;
     b->memoryTypeIndex = selectedMemoryType;
     b->allocationBytes = req.size;
+    b->allocationID = nextMemoryAllocationID();
     b->allocationDeviceLocal = memoryTypeUsesDeviceLocalHeap(selectedMemoryType);
     trackDeviceAllocation(req.size, selectedMemoryType);
     return b;
@@ -762,6 +777,7 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
     WeightArenaBlock block{};
     block.mem = memory;
     block.capacity = blockBytes;
+    block.allocationID = nextMemoryAllocationID();
     block.used = req.size;
     block.memoryTypeIndex = memoryType;
     block.liveBuffers = 1;
@@ -2692,6 +2708,34 @@ int fvk_buffer_backing(const void* d, fvk_buffer_backing_info* out) {
     out->heap_flags = g_memprops.memoryHeaps[type.heapIndex].flags;
     out->host_visible_fallback = b->hostVisibleFallback ? 1 : 0;
     out->weight_arena_bound = b->weightArenaBound ? 1 : 0;
+    return 1;
+}
+
+int fvk_buffer_reservation(const void* d, fvk_buffer_reservation_info* out) {
+    if (!out) return 0;
+    *out = {};
+    fvk_buffer_backing_info backing{};
+    if (!fvk_buffer_backing(d, &backing)) return 0;
+    const Buffer* b = B((void*)d);
+    VkDeviceSize reserved = b->allocationBytes;
+    uint64_t id = b->allocationID;
+    if (b->weightArenaBound) {
+        if (b->weightArenaBlock >= g_weightArena.size()) return 0;
+        const WeightArenaBlock& block = g_weightArena[b->weightArenaBlock];
+        if (block.mem != b->mem || block.memoryTypeIndex != b->memoryTypeIndex ||
+            block.liveBuffers == 0 || block.used > block.capacity ||
+            b->memoryOffset > block.used || b->bytes > block.used - b->memoryOffset) return 0;
+        reserved = block.capacity;
+        id = block.allocationID;
+    } else if (b->memoryOffset != 0) {
+        return 0;
+    }
+    if (id == 0 || reserved == 0 || b->memoryOffset > reserved ||
+        b->bytes > reserved - b->memoryOffset) return 0;
+    out->buffer_bytes = static_cast<uint64_t>(b->bytes);
+    out->reservation_bytes = static_cast<uint64_t>(reserved);
+    out->allocation_id = id;
+    out->binding_offset = static_cast<uint64_t>(b->memoryOffset);
     return 1;
 }
 
