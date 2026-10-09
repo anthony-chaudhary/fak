@@ -867,3 +867,17 @@ The optional backend predicate reports whether the loaded Vulkan bundle has the 
 The V4.1 decoder role assigned to a layer that consumes the nearest preceding declared KV source's published compressed rows. Its resolved plan also identifies the index source whose published selection it consumes unless the layer owns that index selection. A ratio-greater-than-one reader still advances its own compressor and private history while contracting the resolved shared KV stream.
 
 **Distinct from:** This value identifies ownership and reuse of published KV rows and index selections across decoder layers. Attention (softmax token-mixer) identifies the mathematical query-key softmax and value contraction operation; the reader role resolves its inputs rather than defining that operation.
+
+
+### parallelQuantLoadContextBudget (ggufload hierarchical quant load)
+
+The internal/ggufload WeightSource method that runs the production hierarchical, cancellable quantized tensor load: an outer tensor fan-out with a per-tensor inner worker budget, applying each computed tensor serially under the caller's context.
+
+**Distinct from:** Names the ctx-aware parallel load scheduler, not the expert-parallel memory plan or the host-load-peak admission estimate that decides whether a load may start.
+
+
+### QuantModelQ4KProfileOptionsContext (cancellable Q4_K model build)
+
+The internal/ggufload WeightSource entry point that builds a Q4_K quantized model from a GGUF under a caller context, a load profile, and functional load options such as streamed experts; the context-aware form the plain QuantModelQ4K wrappers delegate to.
+
+**Distinct from:** Names the cancellable, option-carrying Q4_K model constructor, not the parallel tensor scheduler it drives or the generic command context.

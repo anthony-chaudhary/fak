@@ -10,7 +10,9 @@
       "distinct_from": [
         "context-MMU (ctxmmu)",
         "recall (session core dump)",
-        "x2-context-ctx-reasoncompactionthrash"
+        "x2-context-ctx-reasoncompactionthrash",
+        "context-ctx-parallelquantloadcontextbudget",
+        "context-ctx-quantmodelq4kprofileoptionscontext"
       ],
       "aliases": [
         "newrequestwithcontext",

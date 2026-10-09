@@ -597,6 +597,12 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 // profiler, and elapsed load nanos for the gateway's durable startup surface.
 
 func loadResidentQ4KProfiled(ggufPath string, tLoad time.Time, opts ...ggufload.Q4KLoadOption) (*fakmodel.Model, *ggufload.LoadProfiler, int64) {
+	return loadResidentQ4KProfiledFor(false, ggufPath, tLoad, opts...)
+}
+
+// loadResidentQ4KProfiledFor selects the ordinary mapped-resident entry only
+// after the caller has applied the device and option-list eligibility gates.
+func loadResidentQ4KProfiledFor(mapped bool, ggufPath string, tLoad time.Time, opts ...ggufload.Q4KLoadOption) (*fakmodel.Model, *ggufload.LoadProfiler, int64) {
 	prof := newServeLoadProfiler()
 	// opts carries the per-rank expert shard (ggufload.WithExpertShard) for a sharded expert-
 	// parallel serve: this process admits ONLY its band's routed experts into the resident store,
@@ -616,6 +622,8 @@ func loadResidentQ4KProfiled(ggufPath string, tLoad time.Time, opts ...ggufload.
 		mm, err = ggufload.LoadModelQ4KStreamedExperts(ggufPath, prof, effects.StreamedExpertBytes, opts...)
 	case effects.StreamedDenseQ4K || os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1":
 		mm, err = ggufload.LoadModelQ4KStreamedDense(ggufPath, prof, opts...)
+	case mapped:
+		mm, err = ggufload.LoadModelQ4KMappedResident(ggufPath, prof, opts...)
 	case serveMappedQ4KResidencyRequested():
 		// Reuse the checkpoint-owning entry, then prepare CPU views before
 		// publication. This keeps ordinary residency and fallback semantics;
@@ -638,6 +646,25 @@ func loadResidentQ4KProfiled(ggufPath string, tLoad time.Time, opts ...ggufload.
 	return mm, prof, loadNanos
 }
 
+// serveDeviceMappedQ4KResidency selects mapped ordinary residency for the
+// supported Vulkan device load. Streamed and sharded requests retain their
+// dedicated lifetime and working-set contracts.
+func serveDeviceMappedQ4KResidency(backend compute.Backend, opts []ggufload.Q4KLoadOption) bool {
+	if backend == nil || runtime.GOOS != "linux" || backend.Name() != "vulkan" ||
+		!backend.Caps().DeviceMemory || !backend.Caps().UploadDtype {
+		return false
+	}
+	if os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_GGUF_MMAP"))) {
+	case "0", "off", "false":
+		return false
+	}
+	effects := ggufload.ApplyQ4KLoadOptions(opts)
+	return !effects.StreamedExperts && !effects.StreamedDenseQ4K && !effects.ExpertShard
+}
+
 func serveMappedQ4KResidencyRequested() bool {
 	// Keep other platforms' loader-owned NUMA placement and replica policy.
 	if runtime.GOOS != "darwin" {
@@ -656,7 +683,12 @@ func serveMappedQ4KResidencyRequested() bool {
 // device-resident arms differ only in how memPlan is derived upstream. opts threads the per-rank
 // expert shard (see loadResidentQ4KProfiled).
 func loadResidentQ4KDevice(ggufPath string, tLoad time.Time, memPlan compute.MemoryPlan, backend compute.Backend, messages []gateway.StartupMessage, opts ...ggufload.Q4KLoadOption) (*fakmodel.Model, bool, *gateway.ModelLoadProfile, gateway.StartupPhase) {
-	mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad, opts...)
+	mapped := serveDeviceMappedQ4KResidency(backend, opts)
+	admission, err := serveNativeHostLoadPeakAdmission(ggufPath, mapped, opts, os.Getenv)
+	must(err)
+	fmt.Fprintln(os.Stderr, "fak serve: host-peak admission:", admission.Text)
+	messages = append(messages, admission)
+	mm, prof, loadNanos := loadResidentQ4KProfiledFor(mapped, ggufPath, tLoad, opts...)
 	messages = append(messages, serveStartupMessage("resident-layout", "info", fakmodel.FormatResidentReport(mm.ResidentReport())))
 	profile := withServeStartupMessages(withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k-device", ggufPath, loadNanos)), memPlan, backend), messages...)
 	return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}

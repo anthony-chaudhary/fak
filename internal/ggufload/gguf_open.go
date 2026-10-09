@@ -25,6 +25,20 @@ func Open(path string) (*File, error) {
 // config-carrying shard by general.architecture (not the split.no index, whose base
 // differs between HuggingFace and llama.cpp), so a caller may hand it any shard path.
 func OpenWeights(path string) (*WeightSource, error) {
+	return openWeights(path, ggufMmapEnabled())
+}
+
+// OpenWeightsMapped is OpenWeights with the retained shard readers forced onto a read-only
+// memory map, independent of the process-wide FAK_GGUF_MMAP opt-in. It is the llama.cpp
+// load shape (llama-mmap.cpp): tensor payloads stay file-backed page-cache pages that the
+// kernel can share with another mapper of the same file and reclaim under pressure, instead
+// of anonymous Go-heap copies. Platforms without an mmap impl (native Windows) degrade to the
+// historical os.Open + ReadAt reader, byte-identically.
+func OpenWeightsMapped(path string) (*WeightSource, error) {
+	return openWeights(path, true)
+}
+
+func openWeights(path string, mmap bool) (*WeightSource, error) {
 	f, gg, size, err := openAndRead(path)
 	if err != nil {
 		return nil, err
@@ -35,7 +49,7 @@ func OpenWeights(path string) (*WeightSource, error) {
 		// Single-file checkpoint. The retained reader comes from retainShardReader:
 		// the parse-only file itself by default, or a read-only mmap of the file
 		// under FAK_GGUF_MMAP (gguf_mmap.go) — byte-identical either way.
-		r, size, closer, data, err := retainShardReader(path, f, size)
+		r, size, closer, data, err := retainShardReader(path, f, size, mmap)
 		if err != nil {
 			return nil, err
 		}
@@ -61,9 +75,9 @@ func OpenWeights(path string) (*WeightSource, error) {
 		if err != nil {
 			return nil, fmt.Errorf("gguf: %s is a split shard but its name is not a shard path: %w", filepath.Base(path), err)
 		}
-		return openWeightsSplit(shard1, int(splitCount))
+		return openWeightsSplit(shard1, int(splitCount), mmap)
 	}
-	return openWeightsSplitFromFirst(path, int(splitCount), f, gg, size)
+	return openWeightsSplitFromFirst(path, int(splitCount), f, gg, size, mmap)
 }
 
 // openAndRead opens a GGUF file, parses its header, and returns the still-open
@@ -141,7 +155,7 @@ func shardPaths(shard1Path string, count int) ([]string, error) {
 }
 
 // openWeightsSplit opens shard 1 fresh and assembles the merged WeightSource.
-func openWeightsSplit(shard1Path string, count int) (*WeightSource, error) {
+func openWeightsSplit(shard1Path string, count int, mmap bool) (*WeightSource, error) {
 	f, gg, size, err := openAndRead(shard1Path)
 	if err != nil {
 		return nil, err
@@ -152,7 +166,7 @@ func openWeightsSplit(shard1Path string, count int) (*WeightSource, error) {
 		_ = f.Close()
 		return nil, fmt.Errorf("gguf: %s expected to be the config-carrying shard 1, but general.architecture is absent", shard1Path)
 	}
-	return openWeightsSplitFromFirst(shard1Path, count, f, gg, size)
+	return openWeightsSplitFromFirst(shard1Path, count, f, gg, size, mmap)
 }
 
 // validShardNo reports whether declared split.no is consistent with shard i
@@ -171,7 +185,7 @@ func validShardNo(declared uint64, present bool, i int) bool {
 // and records which shard reader serves each tensor. Each shard's retained
 // reader comes from retainShardReader: the parsed file itself by default, or a
 // read-only mmap of the shard under FAK_GGUF_MMAP (gguf_mmap.go).
-func openWeightsSplitFromFirst(shard1Path string, count int, shard1File *os.File, shard1GG *File, shard1Size int64) (*WeightSource, error) {
+func openWeightsSplitFromFirst(shard1Path string, count int, shard1File *os.File, shard1GG *File, shard1Size int64, mmap bool) (*WeightSource, error) {
 	// The declared split.count -- read from the config-carrying shard -- must
 	// agree with the -of-M total encoded in the filename. A disagreement means
 	// the shard set is not the set this filename claims; refuse before opening
@@ -187,7 +201,7 @@ func openWeightsSplitFromFirst(shard1Path string, count int, shard1File *os.File
 		_ = shard1File.Close()
 		return nil, fmt.Errorf("gguf: %s names a %d-shard set in its filename, but the config shard declares split.count=%d", shard1Path, named, count)
 	}
-	shard1R, shard1Size, shard1Closer, shard1Data, err := retainShardReader(shard1Path, shard1File, shard1Size)
+	shard1R, shard1Size, shard1Closer, shard1Data, err := retainShardReader(shard1Path, shard1File, shard1Size, mmap)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +241,7 @@ func openWeightsSplitFromFirst(shard1Path string, count int, shard1File *os.File
 			closeAll(closers)
 			return nil, fmt.Errorf("gguf: open shard %d (%s): %w", i, p, err)
 		}
-		r, sz, closer, data, err := retainShardReader(p, pf, psz)
+		r, sz, closer, data, err := retainShardReader(p, pf, psz, mmap)
 		if err != nil {
 			closeAll(closers)
 			return nil, fmt.Errorf("gguf: open shard %d (%s): %w", i, p, err)

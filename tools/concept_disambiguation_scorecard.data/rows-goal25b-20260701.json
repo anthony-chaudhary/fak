@@ -27,7 +27,8 @@
       "definition": "WeightSource.EstimateExpertParallelLoadMemoryPlan (internal/ggufload/estimate.go) computes the compute.MemoryPlan for loading expert-parallel weights across a rank count.",
       "distinction": "A weight-load memory ESTIMATE, not the serve-time device-plan extension that consumes it.",
       "distinct_from": [
-        "x-goal25b-plan-appendserveggufdeviceplan"
+        "x-goal25b-plan-appendserveggufdeviceplan",
+        "context-ctx-parallelquantloadcontextbudget"
       ],
       "aliases": [],
       "grounding": "EstimateExpertParallelLoadMemoryPlan",

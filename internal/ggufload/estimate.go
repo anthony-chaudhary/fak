@@ -108,200 +108,30 @@ var ErrQ4KLoadEstimateUnsupported = errors.New("gguf: Q4K load estimate unsuppor
 // It reads only headers. The result excludes page-rounded allocation capacity,
 // staging lifetimes, device copies, KV/GDN state and driver overhead; it is not a
 // physical-memory or startup-peak bound. EstimateLoadMemoryPlan remains raw payload.
+// EstimateQ4KHostLoadPeak folds the same per-tensor storage
+// classification into the host-resident load peak.
 func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute.MemoryPlan, error) {
-	if s == nil || s.File == nil {
-		return nil, fmt.Errorf("gguf: Q4K estimate requires a weight source")
-	}
-	cfg, err := s.File.Config()
-	if err != nil {
-		return nil, err
-	}
-	loadOpts, err := resolveQ4KLoadOptions(cfg, opts)
-	if err != nil {
-		return nil, err
-	}
-	prism, err := s.File.PrismHadamardMeta()
-	if err != nil {
-		return nil, err
-	}
-	loadOpts.prismGDNVGrouped = prism != nil && prism.GDNVGrouped
-	if prism != nil {
-		if embedding, ok := s.Tensor("token_embd.weight"); ok && embedding.Type == TensorPQ2_0 {
-			loadOpts.residentPQ2Embedding = true
-		}
-	}
-	standardDense := cfg.ModelType == "llama" || cfg.ModelType == "qwen2"
-	if (!cfg.IsQwen35Hybrid() && !standardDense) || cfg.IsMoE() {
-		return nil, fmt.Errorf("%w: requires dense Llama, Qwen2 or Qwen3.5-family weights", ErrQ4KLoadEstimateUnsupported)
-	}
-	if (loadOpts.streamedDenseQ4K && !loadOpts.streamedDenseBounded) || loadOpts.streamedExperts || loadOpts.expertShardSet || model.W3MLPRequested() {
-		return nil, fmt.Errorf("%w: streaming, expert shards and W3 selection", ErrQ4KLoadEstimateUnsupported)
-	}
-	if loadOpts.residentQ2KEmbedding {
-		if err := s.validateResidentQ2KEmbedding(cfg); err != nil {
-			return nil, err
-		}
-	}
-	if loadOpts.residentQ4KEmbedding {
-		if err := s.validateResidentQ4KEmbedding(cfg); err != nil {
-			return nil, err
-		}
-	}
-	if loadOpts.residentPQ2Embedding {
-		if loadOpts.residentQ2KEmbedding || loadOpts.residentQ4KEmbedding {
-			return nil, fmt.Errorf("gguf: Prism PQ2_0 embedding conflicts with requested packed embedding format")
-		}
-		if err := s.validateResidentPackedEmbedding(cfg, TensorPQ2_0, 128, blockPQ2_0Bytes); err != nil {
-			return nil, err
-		}
-	}
-	if err := s.resolveTiedQ6KEmbedding(cfg, &loadOpts); err != nil {
-		return nil, err
-	}
 	byDType := map[string]uint64{}
 	hostDenseStreamed := uint64(0)
-	seen := map[string]bool{}
-	qwenMTPSeen := newQwen35MTPSeenWithRetention(cfg, loadOpts.retainMTP)
-	if qwenMTPSeen != nil && (cfg.NumMTPLayers() != 1 || cfg.MTPUseDedicatedEmbeddings) {
-		return nil, fmt.Errorf("%w: retained MTP requires one shared-embedding layer", ErrQ4KLoadEstimateUnsupported)
-	}
-	for _, info := range s.File.Tensors {
-		canon, qwenMTP := qwen35MTPMaterializationNameWithRetention(info.Name, cfg, loadOpts.retainMTP)
-		if qwenMTP {
-			if canon == "" {
-				continue
+	_, loadOpts, err := s.walkQ4KLoadStorage(opts, func(st q4kTensorStorage) error {
+		if st.streamedBounded {
+			if hostDenseStreamed > math.MaxUint64-st.bytes {
+				return fmt.Errorf("gguf: streamed-dense estimate bytes overflow")
 			}
-		} else {
-			if archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
-				continue
-			}
-			var ok bool
-			canon, ok = CanonicalTensorNameArch(info.Name, cfg.ModelType)
-			if !ok {
-				// An unmapped tensor means this checkpoint is outside the qualified
-				// transformed-storage route. Leave the caller on its prior
-				// conservative raw-payload admission rather than claiming exactness.
-				return nil, fmt.Errorf("%w: no canonical mapping for %s", ErrQ4KLoadEstimateUnsupported, info.Name)
-			}
-			var keep bool
-			canon, keep = model.QuantSourceTensorName(cfg, canon)
-			if !keep {
-				continue
-			}
+			hostDenseStreamed += st.bytes
+			return nil
 		}
-		// Linear-attention QKV/gate names have already resolved to their native
-		// storage names. Remaining fused projections need a separate split-shape
-		// contract; counting their source shape alone would assume that contract.
-		if strings.HasSuffix(canon, ".self_attn.qkv_proj.weight") || strings.HasSuffix(canon, ".mlp.gate_up_proj.weight") {
-			return nil, fmt.Errorf("%w: fused projection %s", ErrQ4KLoadEstimateUnsupported, info.Name)
-		}
-		if seen[canon] {
-			return nil, fmt.Errorf("%w: duplicate canonical tensor %s", ErrQ4KLoadEstimateUnsupported, canon)
-		}
-		seen[canon] = true
-		shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
-		if err != nil {
-			return nil, err
-		}
-		if qwenMTP {
-			if err := validateQwen35MTPShape(canon, shape, cfg); err != nil {
-				return nil, err
-			}
-			wantType, matrix := qwen35MTPResidentTypes[canon]
-			if !matrix {
-				wantType = TensorF32
-			}
-			if info.Type != wantType {
-				return nil, fmt.Errorf("gguf: Qwen MTP tensor %s has type %s, want %s", canon, info.Type, wantType)
-			}
-			qwenMTPSeen[canon] = true
-		}
-		payload, err := tensorPayloadBytes(info)
-		if err != nil {
-			return nil, err
-		}
-		elems, err := tensorElems(info)
-		if err != nil {
-			return nil, err
-		}
-		packedEmbedding := info.Name == "token_embd.weight" && (loadOpts.residentQ2KEmbedding || loadOpts.residentQ4KEmbedding || loadOpts.residentPQ2Embedding || loadOpts.residentTiedQ6KEmbedding)
-		// The MTP loader preserves its closed Q4/Q6 matrix roles, including
-		// reordered q/k, independently of ordinary target residency options.
-		// fak#13567: the native-row route keeps qwen35 row-permuted projections packed. It is
-		// the loader's own predicate (qwen35NativeRowResident), so the two cannot disagree.
-		nativeRows := !qwenMTP && qwen35NativeRowResident(cfg, canon, info.Type, shape, loadOpts)
-		packedQ4 := info.Type == TensorQ4_K && (qwenMTP || nativeRows || model.ResidentQ4KEligible(cfg, canon))
-		blockWeights, _, residentable := residentExpertBlockGeometry(info.Type)
-		// retainKQuant mirrors the loader's dense k-quant retention predicate in
-		// quant_q4k_loader.go byte-for-byte: blanket k-quant residency, the selective Q2_K
-		// arm, and the selective Q6_K arm (fak#13310). A Q6-only effect must price eligible
-		// Q6_K at packed bytes here, or admission would charge the Q8 fallback while the
-		// loader retains the packed tensor.
-		retainKQuant := denseKQuantRetained(loadOpts, info.Type)
-		packedKQuant := info.Type != TensorQ4_K && residentable &&
-			((qwenMTP && info.Type == TensorQ6_K) || nativeRows || (info.Type == TensorPQ2_0 && prismPQ2ResidentEligible(cfg, canon, loadOpts.prismGDNVGrouped)) ||
-				(retainKQuant && model.ResidentKQuantEligible(cfg, canon)))
-		n, dtype := payload, ggufTensorDTypeLabel(info.Type)
-		switch {
-		case packedEmbedding:
-		case packedQ4 || packedKQuant:
-			if packedQ4 {
-				blockWeights = qkK
-			}
-			if len(shape) != 2 || blockWeights <= 0 || shape[1]%blockWeights != 0 {
-				return nil, fmt.Errorf("%w: packed tensor %s shape %v", ErrQ4KLoadEstimateUnsupported, info.Name, shape)
-			}
-		case len(shape) == 2 && (qwenMTP || model.IsQuantWeight(canon)):
-			if shape[1]%32 != 0 {
-				return nil, fmt.Errorf("gguf: Q4K estimate tensor %s has invalid Q8 reduction dimension", info.Name)
-			}
-			n, err = estimateNativeQ8LogicalBytes(elems)
-			dtype = "native-q8-f32-scales"
-		default:
-			if elems > math.MaxUint64/4 {
-				return nil, fmt.Errorf("gguf: Q4K estimate F32 bytes overflow")
-			}
-			n, dtype = elems*4, compute.F32.String()
-		}
-		if err != nil {
-			return nil, err
-		}
-		// Under the BOUNDED streamed-dense policy, eligible dense k-quant tensors (Q4_K and the
-		// #13201 non-Q4_K family Q2_K/Q3_K/Q5_K/Q6_K) stay on disk with range descriptors (the
-		// loader's lazyDenseQ4KTensorWork / lazyKQuantTensorWork branches), so they are charged to
-		// a single bounded HOST working set rather than the full dense side. denseBoundedEligible
-		// is the SAME predicate the loader dispatches on, so the estimate and the loader cannot
-		// disagree about which tensors the policy covers. A non-Q4_K type the residency options
-		// send to Q8 (denseKQuantRetained false) is not held lazily by the loader either, so it
-		// stays on the Q8 device charge above instead of folding into the host working set.
-		if loadOpts.streamedDenseBounded && denseBoundedEligible(cfg, info.Type, canon) &&
-			(info.Type == TensorQ4_K || denseKQuantRetained(loadOpts, info.Type)) {
-			if hostDenseStreamed > math.MaxUint64-n {
-				return nil, fmt.Errorf("gguf: streamed-dense estimate bytes overflow")
-			}
-			hostDenseStreamed += n
-			continue
-		}
-		byDType[dtype] += n
-		// The legacy tied loader keeps F32 embedding rows for gathers and a
-		// separate native-Q8 copy for the output head. Charge both allocations.
-		// A packed tied Q6_K table (fak#13567) is the head itself: charged once above.
-		if cfg.TieWordEmbeddings && canon == "model.embed_tokens.weight" && len(shape) == 2 && !packedEmbedding {
-			if shape[1]%32 != 0 {
-				return nil, fmt.Errorf("gguf: tied embedding has invalid Q8 reduction dimension")
-			}
-			headBytes, err := estimateNativeQ8LogicalBytes(elems)
-			if err != nil {
-				return nil, err
-			}
+		byDType[st.dtype] += st.bytes
+		if st.tiedHeadQ8 > 0 {
 			const headDType = "native-q8-f32-scales"
-			if byDType[headDType] > math.MaxUint64-headBytes {
-				return nil, fmt.Errorf("gguf: Q4K tied head estimate bytes overflow")
+			if byDType[headDType] > math.MaxUint64-st.tiedHeadQ8 {
+				return fmt.Errorf("gguf: Q4K tied head estimate bytes overflow")
 			}
-			byDType[headDType] += headBytes
+			byDType[headDType] += st.tiedHeadQ8
 		}
-	}
-	if err := validateQwen35MTPMaterialized(qwenMTPSeen); err != nil {
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	plan, err := ggufMemoryPlanByDType(compute.MemoryWeights, compute.MemoryScopeDevice, "gguf-native-q4k-logical-weights", byDType)
@@ -331,6 +161,242 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 		}
 	}
 	return plan, nil
+}
+
+// q4kStorageKind is the representation the resident-Q4K loader (computeQ4KTensorWork) gives one
+// GGUF tensor under a resolved option list.
+type q4kStorageKind int
+
+const (
+	q4kStoragePackedEmbedding q4kStorageKind = iota + 1 // packed token table kept for row gathers
+	q4kStoragePacked                                    // raw super-blocks retained (q4kw / kqw / q2w)
+	q4kStorageQ8                                        // dequantized to f32, then native Q8 (q8w)
+	q4kStorageF32                                       // dequantized and kept as f32 (builder raw arena)
+)
+
+// q4kTensorStorage is one tensor's storage classification, the unit both the logical-weights
+// plan (EstimateQ4KLoadMemoryPlan) and the host load peak (EstimateQ4KHostLoadPeak) fold.
+type q4kTensorStorage struct {
+	info    TensorInfo
+	canon   string
+	qwenMTP bool
+	shape   []int
+	payload uint64 // on-disk packed bytes the loader reads
+	elems   uint64
+	kind    q4kStorageKind
+	bytes   uint64 // logical stored bytes for kind
+	dtype   string
+	// streamedBounded marks an eligible dense k-quant the BOUNDED streamed-dense policy holds as
+	// a range descriptor; it is charged to one bounded host working set, not to bytes/dtype.
+	streamedBounded bool
+	// tiedHeadQ8 is the separate native-Q8 head copy a tied, unpacked embedding also carries.
+	tiedHeadQ8 uint64
+}
+
+// walkQ4KLoadStorage resolves opts exactly as QuantModelQ4KProfileOptions does and visits every
+// materialized tensor, in header order, with the storage the loader selects for it. It is the one
+// header-only mirror of the loader's storage selection; estimates fold it rather than re-deriving
+// the predicates.
+func (s *WeightSource) walkQ4KLoadStorage(opts []Q4KLoadOption, visit func(q4kTensorStorage) error) (model.Config, q4kLoadOptions, error) {
+	if s == nil || s.File == nil {
+		return model.Config{}, q4kLoadOptions{}, fmt.Errorf("gguf: Q4K estimate requires a weight source")
+	}
+	cfg, err := s.File.Config()
+	if err != nil {
+		return cfg, q4kLoadOptions{}, err
+	}
+	loadOpts, err := resolveQ4KLoadOptions(cfg, opts)
+	if err != nil {
+		return cfg, loadOpts, err
+	}
+	fail := func(err error) (model.Config, q4kLoadOptions, error) { return cfg, loadOpts, err }
+	prism, err := s.File.PrismHadamardMeta()
+	if err != nil {
+		return fail(err)
+	}
+	loadOpts.prismGDNVGrouped = prism != nil && prism.GDNVGrouped
+	if prism != nil {
+		if embedding, ok := s.Tensor("token_embd.weight"); ok && embedding.Type == TensorPQ2_0 {
+			loadOpts.residentPQ2Embedding = true
+		}
+	}
+	standardDense := cfg.ModelType == "llama" || cfg.ModelType == "qwen2"
+	if (!cfg.IsQwen35Hybrid() && !standardDense) || cfg.IsMoE() {
+		return fail(fmt.Errorf("%w: requires dense Llama, Qwen2 or Qwen3.5-family weights", ErrQ4KLoadEstimateUnsupported))
+	}
+	if (loadOpts.streamedDenseQ4K && !loadOpts.streamedDenseBounded) || loadOpts.streamedExperts || loadOpts.expertShardSet || model.W3MLPRequested() {
+		return fail(fmt.Errorf("%w: streaming, expert shards and W3 selection", ErrQ4KLoadEstimateUnsupported))
+	}
+	if loadOpts.residentQ2KEmbedding {
+		if err := s.validateResidentQ2KEmbedding(cfg); err != nil {
+			return fail(err)
+		}
+	}
+	if loadOpts.residentQ4KEmbedding {
+		if err := s.validateResidentQ4KEmbedding(cfg); err != nil {
+			return fail(err)
+		}
+	}
+	if loadOpts.residentPQ2Embedding {
+		if loadOpts.residentQ2KEmbedding || loadOpts.residentQ4KEmbedding {
+			return fail(fmt.Errorf("gguf: Prism PQ2_0 embedding conflicts with requested packed embedding format"))
+		}
+		if err := s.validateResidentPackedEmbedding(cfg, TensorPQ2_0, 128, blockPQ2_0Bytes); err != nil {
+			return fail(err)
+		}
+	}
+	if err := s.resolveTiedQ6KEmbedding(cfg, &loadOpts); err != nil {
+		return fail(err)
+	}
+	seen := map[string]bool{}
+	qwenMTPSeen := newQwen35MTPSeenWithRetention(cfg, loadOpts.retainMTP)
+	if qwenMTPSeen != nil && (cfg.NumMTPLayers() != 1 || cfg.MTPUseDedicatedEmbeddings) {
+		return fail(fmt.Errorf("%w: retained MTP requires one shared-embedding layer", ErrQ4KLoadEstimateUnsupported))
+	}
+	for _, info := range s.File.Tensors {
+		canon, qwenMTP := qwen35MTPMaterializationNameWithRetention(info.Name, cfg, loadOpts.retainMTP)
+		if qwenMTP {
+			if canon == "" {
+				continue
+			}
+		} else {
+			if archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
+				continue
+			}
+			var ok bool
+			canon, ok = CanonicalTensorNameArch(info.Name, cfg.ModelType)
+			if !ok {
+				// An unmapped tensor means this checkpoint is outside the qualified
+				// transformed-storage route. Leave the caller on its prior
+				// conservative raw-payload admission rather than claiming exactness.
+				return fail(fmt.Errorf("%w: no canonical mapping for %s", ErrQ4KLoadEstimateUnsupported, info.Name))
+			}
+			var keep bool
+			canon, keep = model.QuantSourceTensorName(cfg, canon)
+			if !keep {
+				continue
+			}
+		}
+		// Linear-attention QKV/gate names have already resolved to their native
+		// storage names. Remaining fused projections need a separate split-shape
+		// contract; counting their source shape alone would assume that contract.
+		if strings.HasSuffix(canon, ".self_attn.qkv_proj.weight") || strings.HasSuffix(canon, ".mlp.gate_up_proj.weight") {
+			return fail(fmt.Errorf("%w: fused projection %s", ErrQ4KLoadEstimateUnsupported, info.Name))
+		}
+		if seen[canon] {
+			return fail(fmt.Errorf("%w: duplicate canonical tensor %s", ErrQ4KLoadEstimateUnsupported, canon))
+		}
+		seen[canon] = true
+		shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
+		if err != nil {
+			return fail(err)
+		}
+		if qwenMTP {
+			if err := validateQwen35MTPShape(canon, shape, cfg); err != nil {
+				return fail(err)
+			}
+			wantType, matrix := qwen35MTPResidentTypes[canon]
+			if !matrix {
+				wantType = TensorF32
+			}
+			if info.Type != wantType {
+				return fail(fmt.Errorf("gguf: Qwen MTP tensor %s has type %s, want %s", canon, info.Type, wantType))
+			}
+			qwenMTPSeen[canon] = true
+		}
+		payload, err := tensorPayloadBytes(info)
+		if err != nil {
+			return fail(err)
+		}
+		elems, err := tensorElems(info)
+		if err != nil {
+			return fail(err)
+		}
+		packedEmbedding := info.Name == "token_embd.weight" && (loadOpts.residentQ2KEmbedding || loadOpts.residentQ4KEmbedding || loadOpts.residentPQ2Embedding || loadOpts.residentTiedQ6KEmbedding)
+		// The MTP loader preserves its closed Q4/Q6 matrix roles, including
+		// reordered q/k, independently of ordinary target residency options.
+		// fak#13567: the native-row route keeps qwen35 row-permuted projections packed. It is
+		// the loader's own predicate (qwen35NativeRowResident), so the two cannot disagree.
+		nativeRows := !qwenMTP && qwen35NativeRowResident(cfg, canon, info.Type, shape, loadOpts)
+		packedQ4 := info.Type == TensorQ4_K && (qwenMTP || nativeRows || model.ResidentQ4KEligible(cfg, canon))
+		blockWeights, _, residentable := residentExpertBlockGeometry(info.Type)
+		// retainKQuant mirrors the loader's dense k-quant retention predicate in
+		// quant_q4k_loader.go byte-for-byte: blanket k-quant residency, the selective Q2_K
+		// arm, and the selective Q6_K arm (fak#13310). A Q6-only effect must price eligible
+		// Q6_K at packed bytes here, or admission would charge the Q8 fallback while the
+		// loader retains the packed tensor.
+		retainKQuant := denseKQuantRetained(loadOpts, info.Type)
+		packedKQuant := info.Type != TensorQ4_K && residentable &&
+			((qwenMTP && info.Type == TensorQ6_K) || nativeRows || (info.Type == TensorPQ2_0 && prismPQ2ResidentEligible(cfg, canon, loadOpts.prismGDNVGrouped)) ||
+				(retainKQuant && model.ResidentKQuantEligible(cfg, canon)))
+		n, dtype := payload, ggufTensorDTypeLabel(info.Type)
+		var kind q4kStorageKind
+		switch {
+		case packedEmbedding:
+			kind = q4kStoragePackedEmbedding
+		case packedQ4 || packedKQuant:
+			kind = q4kStoragePacked
+			if packedQ4 {
+				blockWeights = qkK
+			}
+			if len(shape) != 2 || blockWeights <= 0 || shape[1]%blockWeights != 0 {
+				return fail(fmt.Errorf("%w: packed tensor %s shape %v", ErrQ4KLoadEstimateUnsupported, info.Name, shape))
+			}
+		case len(shape) == 2 && (qwenMTP || model.IsQuantWeight(canon)):
+			if shape[1]%32 != 0 {
+				return fail(fmt.Errorf("gguf: Q4K estimate tensor %s has invalid Q8 reduction dimension", info.Name))
+			}
+			kind = q4kStorageQ8
+			n, err = estimateNativeQ8LogicalBytes(elems)
+			dtype = "native-q8-f32-scales"
+		default:
+			if elems > math.MaxUint64/4 {
+				return fail(fmt.Errorf("gguf: Q4K estimate F32 bytes overflow"))
+			}
+			kind = q4kStorageF32
+			n, dtype = elems*4, compute.F32.String()
+		}
+		if err != nil {
+			return fail(err)
+		}
+		st := q4kTensorStorage{info: info, canon: canon, qwenMTP: qwenMTP, shape: shape, payload: payload, elems: elems, kind: kind, bytes: n, dtype: dtype}
+		// Under the BOUNDED streamed-dense policy, eligible dense k-quant tensors (Q4_K and the
+		// #13201 non-Q4_K family Q2_K/Q3_K/Q5_K/Q6_K) stay on disk with range descriptors (the
+		// loader's lazyDenseQ4KTensorWork / lazyKQuantTensorWork branches), so they are charged to
+		// a single bounded HOST working set rather than the full dense side. denseBoundedEligible
+		// is the SAME predicate the loader dispatches on, so the estimate and the loader cannot
+		// disagree about which tensors the policy covers. A non-Q4_K type the residency options
+		// send to Q8 (denseKQuantRetained false) is not held lazily by the loader either, so it
+		// stays on the Q8 device charge above instead of folding into the host working set.
+		if loadOpts.streamedDenseBounded && denseBoundedEligible(cfg, info.Type, canon) &&
+			(info.Type == TensorQ4_K || denseKQuantRetained(loadOpts, info.Type)) {
+			st.streamedBounded = true
+			if err := visit(st); err != nil {
+				return fail(err)
+			}
+			continue
+		}
+		// The legacy tied loader keeps F32 embedding rows for gathers and a
+		// separate native-Q8 copy for the output head. Charge both allocations.
+		// A packed tied Q6_K table (fak#13567) is the head itself: charged once above.
+		if cfg.TieWordEmbeddings && canon == "model.embed_tokens.weight" && len(shape) == 2 && !packedEmbedding {
+			if shape[1]%32 != 0 {
+				return fail(fmt.Errorf("gguf: tied embedding has invalid Q8 reduction dimension"))
+			}
+			headBytes, err := estimateNativeQ8LogicalBytes(elems)
+			if err != nil {
+				return fail(err)
+			}
+			st.tiedHeadQ8 = headBytes
+		}
+		if err := visit(st); err != nil {
+			return fail(err)
+		}
+	}
+	if err := validateQwen35MTPMaterialized(qwenMTPSeen); err != nil {
+		return fail(err)
+	}
+	return cfg, loadOpts, nil
 }
 
 // q4kExpandedUpperBoundDetail labels the rows EstimateQ4KLoadExpandedMemoryPlan returns, so a

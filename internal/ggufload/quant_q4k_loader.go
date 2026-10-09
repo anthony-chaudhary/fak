@@ -252,6 +252,9 @@ type Q4KLoadOptionEffects struct {
 	// StreamedDenseBounded reports that the working set was explicitly declared (so 0 means
 	// stream-through, not unbounded); a plain WithStreamedDenseQ4K(true) leaves it false.
 	StreamedDenseBounded bool
+	// ExpertShard reports that the option list carries a WithExpertShard band (an expert-parallel
+	// rank load), so a caller choosing a loader entry can keep sharded loads on their own path.
+	ExpertShard bool
 }
 
 // ApplyQ4KLoadOptions applies opts to the zero value and returns the observable effect set. It is
@@ -271,6 +274,7 @@ func ApplyQ4KLoadOptions(opts []Q4KLoadOption) Q4KLoadOptionEffects {
 		StreamedDenseQ4K:     o.streamedDenseQ4K,
 		StreamedDenseBytes:   o.streamedDenseBytes,
 		StreamedDenseBounded: o.streamedDenseBounded,
+		ExpertShard:          o.expertShardSet,
 	}
 }
 

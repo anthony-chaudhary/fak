@@ -84,5 +84,46 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "context-ctx-parallelquantloadcontextbudget",
+      "canonical": "parallelQuantLoadContextBudget (ggufload hierarchical quant load)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The internal/ggufload WeightSource method that runs the production hierarchical, cancellable quantized tensor load: an outer tensor fan-out with a per-tensor inner worker budget, applying each computed tensor serially under the caller's context.",
+      "distinction": "Names the ctx-aware parallel load scheduler, not the expert-parallel memory plan or the host-load-peak admission estimate that decides whether a load may start.",
+      "distinct_from": [
+        "x-goal25b-plan-estimateexpertparallelloadmemoryplan",
+        "x2-context-ctx-commandcontext",
+        "context-ctx-quantmodelq4kprofileoptionscontext"
+      ],
+      "aliases": [],
+      "grounding": "parallelQuantLoadContextBudget",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "context-ctx-quantmodelq4kprofileoptionscontext",
+      "canonical": "QuantModelQ4KProfileOptionsContext (cancellable Q4_K model build)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The internal/ggufload WeightSource entry point that builds a Q4_K quantized model from a GGUF under a caller context, a load profile, and functional load options such as streamed experts; the context-aware form the plain QuantModelQ4K wrappers delegate to.",
+      "distinction": "Names the cancellable, option-carrying Q4_K model constructor, not the parallel tensor scheduler it drives or the generic command context.",
+      "distinct_from": [
+        "context-ctx-parallelquantloadcontextbudget",
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "QuantModelQ4KProfileOptionsContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

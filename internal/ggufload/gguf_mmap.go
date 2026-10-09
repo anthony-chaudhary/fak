@@ -76,8 +76,11 @@ func ggufMmapEnabled() bool {
 // reads demand-page from SSD instead of issuing preads. Otherwise (gate off, or
 // ok=false on e.g. Windows) it is the historical os.Open path: r is the *os.File,
 // closer closes it, data is nil.
-func openShardReader(path string) (r io.ReaderAt, size int64, closer io.Closer, data []byte, err error) {
-	if ggufMmapEnabled() {
+//
+// mmap is the caller's resolved reader selection: ggufMmapEnabled() for OpenWeights, or true
+// for OpenWeightsMapped (the device-resident load that keeps weights in the page cache).
+func openShardReader(path string, mmap bool) (r io.ReaderAt, size int64, closer io.Closer, data []byte, err error) {
+	if mmap {
 		mapped, mc, ok, merr := model.MmapOpen(path)
 		if merr != nil {
 			return nil, 0, nil, nil, fmt.Errorf("gguf: mmap %s: %w", path, merr)
@@ -105,11 +108,11 @@ func openShardReader(path string) (r io.ReaderAt, size int64, closer io.Closer, 
 // the parse-only file — the header was already parsed from f, so only the retained
 // reader changes. On error the parse-only file is closed here; the caller just
 // propagates err.
-func retainShardReader(path string, f *os.File, size int64) (io.ReaderAt, int64, io.Closer, []byte, error) {
-	if !ggufMmapEnabled() {
+func retainShardReader(path string, f *os.File, size int64, mmap bool) (io.ReaderAt, int64, io.Closer, []byte, error) {
+	if !mmap {
 		return f, size, f, nil, nil
 	}
-	r, rsize, closer, data, err := openShardReader(path)
+	r, rsize, closer, data, err := openShardReader(path, true)
 	if err != nil {
 		_ = f.Close()
 		return nil, 0, nil, nil, err
