@@ -12,6 +12,29 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 )
 
+var errServeHostLoadPeakUnavailable = errors.New("HOST_LOAD_PEAK_UNAVAILABLE")
+
+// serveHostLoadPeakUnavailableError distinguishes an unqualified streamed load
+// from a capacity refusal with a measured available-byte budget.
+type serveHostLoadPeakUnavailableError struct {
+	Reason string
+	Cause  error
+}
+
+func (e *serveHostLoadPeakUnavailableError) Is(target error) bool {
+	return target == errServeHostLoadPeakUnavailable
+}
+
+func (e *serveHostLoadPeakUnavailableError) Unwrap() error { return e.Cause }
+
+func (e *serveHostLoadPeakUnavailableError) Error() string {
+	detail := e.Reason
+	if e.Cause != nil {
+		detail += ": " + e.Cause.Error()
+	}
+	return fmt.Sprintf("%s: streamed-expert host peak is not qualified (%s); refusing before tensor payloads are read; device-ring fit does not bound host staging; use a qualified load route or set %s=off to load anyway", errServeHostLoadPeakUnavailable, detail, ggufload.HostLoadPeakOverrideEnv)
+}
+
 // The device fit checks cover device memory. This gate independently checks
 // the loader's predicted anonymous host peak before tensor payloads are read.
 func serveNativeHostLoadPeakAdmission(ggufPath string, mapped bool, opts []ggufload.Q4KLoadOption, getenv func(string) string) (gateway.StartupMessage, error) {
@@ -21,7 +44,7 @@ func serveNativeHostLoadPeakAdmission(ggufPath string, mapped bool, opts []ggufl
 	}
 	peak, estErr := estimateServeNativeHostLoadPeak(ggufPath, mapped, opts)
 	total, free, known := compute.HostSystemMemoryInfo()
-	return serveNativeHostLoadPeakDecision(peak, estErr, free, known && total > 0, getenv)
+	return serveNativeHostLoadPeakDecision(peak, estErr, free, known && total > 0, getenv, opts...)
 }
 
 // The mapped reader can fall back to owned storage when mapping is unavailable.
@@ -33,17 +56,34 @@ func estimateServeNativeHostLoadPeak(ggufPath string, _ bool, opts []ggufload.Q4
 		return ggufload.HostLoadPeak{}, err
 	}
 	defer ws.Close()
+	effects := ggufload.ApplyQ4KLoadOptions(opts)
+	if effects.StreamedExperts {
+		// Estimate the actual option list, never a hypothetical bounded route.
+		// A zero dense bound creates no model retention ledger and is unbounded.
+		if !effects.StreamedDenseQ4K || !effects.StreamedDenseBounded || effects.StreamedDenseBytes <= 0 {
+			return ggufload.HostLoadPeak{}, fmt.Errorf("%w: streamed-expert admission requires an active, positive bounded dense working set", ggufload.ErrQ4KLoadEstimateUnsupported)
+		}
+		return ws.EstimateStreamedExpertHostLoadPeak(opts...)
+	}
 	return ws.EstimateQ4KHostLoadPeak(false, opts...)
 }
 
-// serveNativeHostLoadPeakDecision keeps unavailable estimates and host probes
-// observable without changing the existing fail-open capacity policy.
-func serveNativeHostLoadPeakDecision(peak ggufload.HostLoadPeak, estErr error, availBytes int64, availKnown bool, getenv func(string) string) (gateway.StartupMessage, error) {
+// Streamed-expert loads fail closed while their full host staging peak is
+// unqualified. Ordinary resident routes retain their existing capacity policy.
+func serveNativeHostLoadPeakDecision(peak ggufload.HostLoadPeak, estErr error, availBytes int64, availKnown bool, getenv func(string) string, opts ...ggufload.Q4KLoadOption) (gateway.StartupMessage, error) {
 	if serveHostPeakAdmissionDisabled(getenv) {
 		return serveStartupMessage("host-peak-admission", "warning", fmt.Sprintf(
 			"native host-peak admission disabled by %s; the load is not checked against host RAM", ggufload.HostLoadPeakOverrideEnv)), nil
 	}
+	streamed := ggufload.ApplyQ4KLoadOptions(opts).StreamedExperts
+	unavailable := func(reason string, cause error) (gateway.StartupMessage, error) {
+		err := &serveHostLoadPeakUnavailableError{Reason: reason, Cause: cause}
+		return serveStartupMessage("host-peak-admission", "error", err.Error()), fmt.Errorf("fak serve: %w", err)
+	}
 	if estErr != nil {
+		if streamed {
+			return unavailable("header-estimate-unavailable", estErr)
+		}
 		level := "warning"
 		if errors.Is(estErr, ggufload.ErrQ4KLoadEstimateUnsupported) {
 			level = "info"
@@ -53,11 +93,24 @@ func serveNativeHostLoadPeakDecision(peak ggufload.HostLoadPeak, estErr error, a
 	}
 	margin := serveHostPeakMarginBytes(getenv)
 	if !availKnown || availBytes < 0 {
+		if streamed {
+			return unavailable("host-available-memory-unknown", nil)
+		}
 		return serveStartupMessage("host-peak-admission", "info", fmt.Sprintf(
 			"native host-peak admission skipped: host available memory is not probeable; predicted peak %s", serveHostPeakSummary(peak))), nil
 	}
+	if streamed && peak.PeakAnonBytes <= 0 {
+		return unavailable("header-estimate-nonpositive", nil)
+	}
 	if err := ggufload.AdmitHostLoadPeak(peak, availBytes, true, margin); err != nil {
 		return serveStartupMessage("host-peak-admission", "error", err.Error()), fmt.Errorf("fak serve: %w", err)
+	}
+	if streamed {
+		// The streamed estimator is useful refusal evidence, not yet an upper
+		// bound for every loader lifetime: it omits the F32 arena coalescing
+		// copy, tied-head Q8 storage and some transform/retention paths. A
+		// fitting estimate cannot authorize staging until those are qualified.
+		return unavailable("streamed-staging-peak-unqualified", nil)
 	}
 	return serveStartupMessage("host-peak-admission", "info", fmt.Sprintf(
 		"predicted host peak %s fits %.2f GiB available with a %.2f GiB margin",
