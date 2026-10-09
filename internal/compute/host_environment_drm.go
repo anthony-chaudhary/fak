@@ -15,7 +15,7 @@ type vulkanDRMRenderNodeProvider interface {
 // capacity probe or a device-lifetime lease. Rechecking detects observed changes
 // but cannot make a sysfs read atomic with backend destruction or hot unplug.
 type vulkanDRMDeviceBinding struct {
-	major, minor                    uint64
+	major, minor                     uint64
 	nodePath, devicePath, driverPath string
 }
 

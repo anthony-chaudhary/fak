@@ -81,8 +81,8 @@ func TestChatResponseFormatCarrierRejectsBeforeDispatch(t *testing.T) {
 			for _, tc := range []struct {
 				name, format, code, path string
 				maxBytes, maxDepth       string
-				tools                   json.RawMessage
-				stream                  bool
+				tools                    json.RawMessage
+				stream                   bool
 			}{
 				{name: "non_object", format: `"json_schema"`, code: "invalid_response_format"},
 				{name: "missing_carrier", format: `{"type":"json_schema"}`, code: "json_schema_missing"},

@@ -74,9 +74,9 @@ func hostEnvironmentFixture() (*hostEnvironmentBackend, hostEnvironmentDeps) {
 		hostEnvironmentOtherDRMDevice + "/device":        "0x150e\n",
 		hostEnvironmentOtherDRMDevice + "/vbios_version": "UNSELECTED\n",
 		// An unrelated same-model card cannot supply the selected firmware.
-		"/sys/class/drm/card0/device/vendor":             "0x1002\n",
-		"/sys/class/drm/card0/device/device":             "0x150e\n",
-		"/sys/class/drm/card0/device/vbios_version":      "UNSELECTED\n",
+		"/sys/class/drm/card0/device/vendor":        "0x1002\n",
+		"/sys/class/drm/card0/device/device":        "0x150e\n",
+		"/sys/class/drm/card0/device/vbios_version": "UNSELECTED\n",
 	}
 	links := map[string]string{
 		"/sys/dev/char/226:128":                      hostEnvironmentOtherDRMNode,

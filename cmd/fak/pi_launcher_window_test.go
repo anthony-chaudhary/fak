@@ -19,37 +19,37 @@ import (
 func TestRunPiUsesSelectedModelWindowEverywhere(t *testing.T) {
 	for _, tc := range []struct {
 		name, health, catalog, configuredModel, explicitModel, explicitWindow string
-		wantModel                                                           string
-		wantWindow                                                          int
+		wantModel                                                             string
+		wantWindow                                                            int
 	}{
 		{
 			name: "detected custom model", health: "custom",
-			catalog: `[{"id":"custom","context_length":65536}]`,
+			catalog:   `[{"id":"custom","context_length":65536}]`,
 			wantModel: "custom", wantWindow: 65536,
 		},
 		{
 			name: "explicit window overrides catalog", health: "custom", explicitWindow: "98304",
-			catalog: `[{"id":"custom","context_length":65536}]`,
+			catalog:   `[{"id":"custom","context_length":65536}]`,
 			wantModel: "custom", wantWindow: 98304,
 		},
 		{
 			name: "configured routed model", health: "local", configuredModel: "routed",
-			catalog: `[{"id":"local","context_length":65536},{"id":"routed","context_length":98304}]`,
+			catalog:   `[{"id":"local","context_length":65536},{"id":"routed","context_length":98304}]`,
 			wantModel: "routed", wantWindow: 98304,
 		},
 		{
 			name: "explicit routed model", health: "local", explicitModel: "routed",
-			catalog: `[{"id":"local","context_length":131072},{"id":"routed","context_length":65536}]`,
+			catalog:   `[{"id":"local","context_length":131072},{"id":"routed","context_length":65536}]`,
 			wantModel: "routed", wantWindow: 65536,
 		},
 		{
 			name: "configured alias uses smallest matching bound", health: "local", configuredModel: "VENDOR/custom",
-			catalog: `[{"id":"local","context_length":131072},{"id":"other/custom","context_length":98304},{"id":"custom","context_length":65536}]`,
+			catalog:   `[{"id":"local","context_length":131072},{"id":"other/custom","context_length":98304},{"id":"custom","context_length":65536}]`,
 			wantModel: "VENDOR/custom", wantWindow: 65536,
 		},
 		{
 			name: "known route missing from catalog uses registry", health: "local", configuredModel: "deepseek-v41-flash",
-			catalog: `[{"id":"local","context_length":65536}]`,
+			catalog:   `[{"id":"local","context_length":65536}]`,
 			wantModel: "deepseek-v41-flash", wantWindow: 1000000,
 		},
 		{
@@ -57,18 +57,18 @@ func TestRunPiUsesSelectedModelWindowEverywhere(t *testing.T) {
 			wantModel: "custom", wantWindow: 131072,
 		},
 		{
-			name: "catalog only detects model and window",
-			catalog: `[{"id":"custom","context_length":65536}]`,
+			name:      "catalog only detects model and window",
+			catalog:   `[{"id":"custom","context_length":65536}]`,
 			wantModel: "custom", wantWindow: 65536,
 		},
 		{
 			name: "nonpositive selected bounds do not inherit local window", health: "local", explicitModel: "custom",
-			catalog: `[{"id":"local","context_length":65536},{"id":"custom","context_length":0},{"id":"custom","context_length":-1}]`,
+			catalog:   `[{"id":"local","context_length":65536},{"id":"custom","context_length":0},{"id":"custom","context_length":-1}]`,
 			wantModel: "custom", wantWindow: 131072,
 		},
 		{
 			name: "duplicate exact ids use smallest positive bound", health: "custom",
-			catalog: `[{"id":"custom","context_length":98304},{"id":"custom","context_length":65536}]`,
+			catalog:   `[{"id":"custom","context_length":98304},{"id":"custom","context_length":65536}]`,
 			wantModel: "custom", wantWindow: 65536,
 		},
 	} {

@@ -698,7 +698,7 @@ func TestPeerWIPNonCommitRefSkippedNotFatal(t *testing.T) {
 	blobRef, peerRef := "refs/fak/wip/a-blob-copy", "refs/fak/wip/peer-agent"
 	for _, tc := range []struct {
 		name, path, commitSize string
-		collision, frameError bool
+		collision, frameError  bool
 	}{
 		{name: "peer-collision-keeps-warning", path: "corpus/file.txt", commitSize: "0", collision: true},
 		{name: "unrelated-work-admitted", path: "corpus/free.txt", commitSize: "0"},
