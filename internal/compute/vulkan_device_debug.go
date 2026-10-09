@@ -495,6 +495,57 @@ func (v *vulkanBackend) VulkanTensorBufferBackings(t Tensor) ([]VulkanBufferBack
 	return backings, true
 }
 
+// VulkanQ4KStageBufferBacking describes the backend-owned shared Q4_K dispatch
+// stage. BufferBytes is its retained nominal buffer length, not the most recent
+// copy length or reserved VkDeviceMemory bytes. Backing uses Part "data", Chunk -1.
+// A record supplies no persistent identity and cannot be used to deduplicate memory.
+type VulkanQ4KStageBufferBacking struct {
+	BufferBytes uint64
+	Backing     VulkanBufferBacking
+}
+
+// VulkanQ4KStageBufferBackings observes the zero or one retained shared Q4_K
+// stage under the same lock as its allocation, growth and retirement. A missing
+// stage with zero length is known-empty; inconsistent ownership or unavailable
+// backing returns nil, false. A retained stage is reported even when Q4_K staging
+// is disabled. Its presence does not establish current dispatch use or contents.
+// Known-empty describes this owner, not device health or driver memory release.
+// Observations require the owner's current initialized device lifetime; they do
+// not validate ownership across shim reinitialization.
+//
+// This inventory excludes tensors, Q4_K homes, ordinary H2D/D2H and restore
+// staging, KV, GDN and other scratch, and pool storage. Separate calls do not
+// form an atomic whole-backend snapshot. Buffer lengths and memory type/heap
+// flags do not establish reserved sizes, disjoint physical pools or headroom;
+// arena/shared-heap deduplication and future placement remain unknown.
+// The query performs no Vulkan allocation, transfer, device-work fence or owner
+// mutation. Its result may allocate Go memory. Call outside hot token loops.
+func (v *vulkanBackend) VulkanQ4KStageBufferBackings() ([]VulkanQ4KStageBufferBacking, bool) {
+	if v == nil {
+		return nil, false
+	}
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return vulkanQ4KStageBufferBackingsLocked(v.q4kStagePtr, v.q4kStageBytes, vulkanBufferBackingLocked)
+}
+
+// The caller holds vulkanMu through the backing read so stage growth, reset and
+// teardown cannot retire the owned handle in flight. The local reader lets tests
+// exercise ownership checks without sending synthetic handles to the C ABI.
+func vulkanQ4KStageBufferBackingsLocked(ptr unsafe.Pointer, bufferBytes int64, readBacking func(unsafe.Pointer, string, int) (VulkanBufferBacking, bool)) ([]VulkanQ4KStageBufferBacking, bool) {
+	if ptr == nil && bufferBytes == 0 {
+		return []VulkanQ4KStageBufferBacking{}, true
+	}
+	if ptr == nil || bufferBytes <= 0 {
+		return nil, false
+	}
+	backing, ok := readBacking(ptr, "data", -1)
+	if !ok {
+		return nil, false
+	}
+	return []VulkanQ4KStageBufferBacking{{BufferBytes: uint64(bufferBytes), Backing: backing}}, true
+}
+
 // vulkanBufferBackingLocked requires vulkanMu and a live, owned handle. The shim
 // cannot validate an arbitrary or retired pointer; ownership supplies that proof.
 func vulkanBufferBackingLocked(ptr unsafe.Pointer, part string, chunk int) (VulkanBufferBacking, bool) {
