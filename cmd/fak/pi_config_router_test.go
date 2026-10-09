@@ -180,8 +180,8 @@ func TestPiConfigFromRouterPlanThenWriteIsIdempotent(t *testing.T) {
 	if len(plan.Changed) != 1 || plan.Changed[0].ID != "org/model-a" || plan.Changed[0].FromWindow != 500000 || plan.Changed[0].ToWindow != 131072 {
 		t.Fatalf("Changed = %+v, want org/model-a 500000 -> 131072", plan.Changed)
 	}
-	if c := plan.Compaction; c.Model != "org/model-a" || !c.Change || c.Budget.ReserveTokens != 22528 || c.Budget.KeepRecentTokens != 20000 {
-		t.Fatalf("Compaction = %+v, want org/model-a envelope reserve 22528 keep 20000", c)
+	if c := plan.Compaction; c.Model != "org/model-a" || !c.Change || c.ReserveTokens != 22528 || c.KeepRecentTokens != 4096 {
+		t.Fatalf("Compaction = %+v, want shared reserve 22528 keep 4096", c)
 	}
 	if plan.Default.Served || plan.Default.Pick != "org/model-a" {
 		t.Fatalf("Default = %+v, want stale custom-model replaced by org/model-a", plan.Default)
@@ -241,8 +241,8 @@ func TestPiConfigFromRouterPlanThenWriteIsIdempotent(t *testing.T) {
 		t.Fatalf("settings = %v, want defaultModel org/model-a with theme preserved", settings)
 	}
 	block, _ := settings["compaction"].(map[string]any)
-	if block["enabled"] != true || block["reserveTokens"] != float64(22528) || block["keepRecentTokens"] != float64(20000) {
-		t.Fatalf("settings compaction = %v, want enabled, reserve 22528, keep 20000 from the default model", block)
+	if block["enabled"] != true || block["reserveTokens"] != float64(22528) || block["keepRecentTokens"] != float64(4096) {
+		t.Fatalf("settings compaction = %v, want enabled, shared reserve 22528, keep 4096", block)
 	}
 	sBackups := piBackups(t, settingsPath)
 	if len(sBackups) != 1 {
@@ -453,5 +453,109 @@ func TestPiRouterBudgetDerivesOnceAndFlagsSmallWindows(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("Warnings = %v, want the non-viable reason token", plan.Warnings)
+	}
+}
+
+// The settings block is global: changing the default or switching models must
+// not make an individually viable smaller window compact back above its trigger.
+// fak-test:runtime fast est=1s
+func TestPiConfigFromRouterSharedCompaction(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		smallWindow int
+		reverse     bool
+		refuse      bool
+	}{
+		{"128k then 64k", 65536, false, false},
+		{"64k then 128k", 65536, true, false},
+		{"128k then incompatible 48k", 49152, false, true},
+		{"incompatible 48k then 128k", 49152, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pinPiRouterTestEnv(t, piRouterTestKey)
+			rows := []piRouterFakeRow{
+				{"id": "large", "context_length": 131072},
+				{"id": "small", "context_length": tc.smallWindow},
+			}
+			if tc.reverse {
+				rows[0], rows[1] = rows[1], rows[0]
+			}
+			srv := newPiRouterFake(t, rows)
+			dir := t.TempDir()
+			modelsPath := filepath.Join(dir, "models.json")
+			settingsPath := filepath.Join(dir, "settings.json")
+			modelsBefore := []byte(`{"providers":{"fak":{"models":[]}}}`)
+			settingsBefore := []byte(`{"theme":"dark"}`)
+			for path, data := range map[string][]byte{modelsPath: modelsBefore, settingsPath: settingsBefore} {
+				if err := os.WriteFile(path, data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			code, stdout, stderr := runPiConfigRouter(t, "--from-router", srv.URL, "--write", "--path", modelsPath, "--settings-path", settingsPath)
+			if tc.refuse {
+				// Each model alone is viable, but the shared 22528 reserve
+				// leaves the 48k model trigger=post=26624 even at keep=4096.
+				if b := piRouterBudget(tc.smallWindow, 0); !b.Viable {
+					t.Fatalf("individual small model unexpectedly non-viable: %+v", b)
+				}
+				if code != 1 || !strings.Contains(stderr, "trigger 26624, post-compaction 26624") {
+					t.Fatalf("unsafe shared block: exit=%d stderr=%s", code, stderr)
+				}
+				for path, want := range map[string][]byte{modelsPath: modelsBefore, settingsPath: settingsBefore} {
+					got, err := os.ReadFile(path)
+					if err != nil || !bytes.Equal(got, want) {
+						t.Fatalf("refused write changed %s: err=%v got=%s", path, err, got)
+					}
+					if backups := piBackups(t, path); len(backups) != 0 {
+						t.Fatalf("refused write created backups: %v", backups)
+					}
+				}
+				return
+			}
+			if code != 0 {
+				t.Fatalf("exit=%d stderr=%s", code, stderr)
+			}
+			if !strings.Contains(stdout, "contextWindow=65536 maxTokens=8192 compactAt=43008") {
+				t.Fatalf("plan did not report the shared compaction trigger: %s", stdout)
+			}
+			var settings struct {
+				DefaultModel string `json:"defaultModel"`
+				Compaction   struct {
+					Enabled bool `json:"enabled"`
+					Reserve int  `json:"reserveTokens"`
+					Keep    int  `json:"keepRecentTokens"`
+				} `json:"compaction"`
+			}
+			raw, err := os.ReadFile(settingsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(raw, &settings); err != nil {
+				t.Fatal(err)
+			}
+			if settings.DefaultModel != rows[0]["id"] {
+				t.Fatalf("defaultModel=%q, want the selected first model %q", settings.DefaultModel, rows[0]["id"])
+			}
+			c := settings.Compaction
+			if !c.Enabled || c.Reserve != 22528 || c.Keep != 4096 {
+				t.Fatalf("shared compaction=%+v, want enabled, reserve22528 keep4096 in either model order", c)
+			}
+			models := readPiFakModels(t, modelsPath)
+			if len(models) != 2 {
+				t.Fatalf("models=%+v, want both original windows", models)
+			}
+			for _, m := range models {
+				wantWindow, wantReclaim := 131072, 71680
+				if m.ID == "small" {
+					wantWindow, wantReclaim = 65536, 14336
+				}
+				trigger := m.ContextWindow - c.Reserve
+				summary := min(c.Reserve*4/5, m.MaxTokens)
+				reclaim := trigger - harnesskit.DefaultFixedPromptTokens - summary - c.Keep
+				if m.ContextWindow != wantWindow || reclaim != wantReclaim || reclaim < trigger/4 {
+					t.Fatalf("model %q: window=%d reclaim=%d trigger=%d, want window=%d reclaim=%d", m.ID, m.ContextWindow, reclaim, trigger, wantWindow, wantReclaim)
+				}
+			}
+		})
 	}
 }

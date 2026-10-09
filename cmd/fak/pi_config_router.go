@@ -18,6 +18,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/projectassets"
 	"github.com/anthony-chaudhary/fak/pkg/fakclient"
+	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
 // `fak pi config --from-router` sources provider "fak"'s model catalog from the
@@ -40,7 +41,8 @@ import (
 // contextWindow and maxTokens come from the harnesskit context envelope of that
 // RAW window (projectassets.PiSafeContextBudget), derived exactly once. With
 // --write, settings.json compaction (enabled, reserveTokens, keepRecentTokens) is
-// set from the default model's envelope; fak owns those keys.
+// made compatible with every listed model; fak owns those keys. An unsafe shared
+// compaction block refuses --write before either file changes.
 
 var (
 	errPiRouterEmptyCatalog  = errors.New("router advertised no models")
@@ -342,16 +344,18 @@ func piRouterBudget(window, floor int) projectassets.PiContextBudget {
 	return projectassets.PiSafeContextBudget(served)
 }
 
-// piRouterCompactionPlan is the settings.json compaction block planned from the
-// default model's envelope.
+// piRouterCompactionPlan is the settings.json compaction block shared by every
+// model in the catalog. Model records the selected default, not a budget source.
 type piRouterCompactionPlan struct {
-	Model       string
-	Budget      projectassets.PiContextBudget
-	FromEnabled bool
-	FromReserve int
-	FromKeep    int
-	Change      bool
-	Skipped     string
+	Model            string
+	ReserveTokens    int
+	KeepRecentTokens int
+	FromEnabled      bool
+	FromReserve      int
+	FromKeep         int
+	Change           bool
+	Skipped          string
+	Blocked          string
 }
 
 type piRouterChange struct {
@@ -758,15 +762,34 @@ func planPiRouterDefault(settingsTarget string, plan *piRouterPlan) (piRouterDef
 	return def, planPiRouterCompaction(raw, plan, def), nil
 }
 
-// planPiRouterCompaction plans settings.json compaction from the envelope of the
-// model Pi will default to, so Pi's trigger (contextWindow - reserveTokens) and
-// kept tail match the contextWindow written for that model.
+// planPiRouterCompaction plans one global settings.json block. Model switching
+// does not change that block, so protect the largest output reserve and use the
+// smallest kept tail, then verify the resulting trigger and summary for EVERY
+// model. Per-model viability alone says nothing about this shared combination.
 func planPiRouterCompaction(raw map[string]interface{}, plan *piRouterPlan, def piRouterDefaultPlan) piRouterCompactionPlan {
 	model := def.Pick
 	if model == "" {
 		model = def.Model
 	}
-	cp := piRouterCompactionPlan{Model: model, Budget: plan.Budgets[model]}
+	cp := piRouterCompactionPlan{Model: model}
+	for _, m := range plan.Models {
+		b := plan.Budgets[m.ID]
+		cp.ReserveTokens = max(cp.ReserveTokens, b.ReserveTokens)
+		cp.KeepRecentTokens = minPositive(cp.KeepRecentTokens, b.KeepRecentTokens)
+	}
+	for _, m := range plan.Models {
+		b := plan.Budgets[m.ID]
+		trigger := b.ResidentTarget - cp.ReserveTokens
+		// An existing lower maxTokens is preserved by the model writer. Using
+		// its envelope's upper bound here is conservative for that entry.
+		summary := min(cp.ReserveTokens*4/5, b.MaxOutputTokens)
+		post := harnesskit.DefaultFixedPromptTokens + summary + cp.KeepRecentTokens
+		if trigger <= 0 || cp.KeepRecentTokens < harnesskit.MinKeepRecentTokens ||
+			trigger-post < trigger/4 || trigger+harnesskit.SummaryPromptOverheadTokens+summary > b.ServedWindow {
+			cp.Blocked = fmt.Sprintf("shared compaction is unsafe for model %q (reserve %d, keep %d, trigger %d, post-compaction %d); use separate Pi settings for incompatible model windows", m.ID, cp.ReserveTokens, cp.KeepRecentTokens, trigger, post)
+			return cp
+		}
+	}
 	block, _ := raw["compaction"].(map[string]interface{})
 	if v, ok := block["enabled"].(bool); ok {
 		cp.FromEnabled = v
@@ -777,7 +800,7 @@ func planPiRouterCompaction(raw map[string]interface{}, plan *piRouterPlan, def 
 	if v, ok := block["keepRecentTokens"].(float64); ok {
 		cp.FromKeep = int(v)
 	}
-	cp.Change = !cp.FromEnabled || cp.FromReserve != cp.Budget.ReserveTokens || cp.FromKeep != cp.Budget.KeepRecentTokens
+	cp.Change = !cp.FromEnabled || cp.FromReserve != cp.ReserveTokens || cp.FromKeep != cp.KeepRecentTokens
 	return cp
 }
 
@@ -827,6 +850,10 @@ func runPiConfigFromRouter(stdout, stderr io.Writer, fs *flag.FlagSet, explicitU
 	if !write {
 		return 0
 	}
+	if plan.Compaction.Blocked != "" {
+		fmt.Fprintf(stderr, "fak pi config: refusing write: %s\n", plan.Compaction.Blocked)
+		return 1
+	}
 	if plan.configChanged() {
 		backup, err := writePiConfigWithBackup(plan.ConfigPath, plan.Original, plan.Exists, plan.Rendered)
 		if err != nil {
@@ -850,12 +877,15 @@ func runPiConfigFromRouter(stdout, stderr io.Writer, fs *flag.FlagSet, explicitU
 		}
 	}
 	if c := plan.Compaction; c.Change {
-		sPath, _, err := projectassets.EnsurePiSafeCompaction(plan.Default.SettingsPath, c.Budget)
+		sPath, _, err := projectassets.EnsurePiSafeCompaction(plan.Default.SettingsPath, projectassets.PiContextBudget{
+			ReserveTokens:    c.ReserveTokens,
+			KeepRecentTokens: c.KeepRecentTokens,
+		})
 		if err != nil {
 			fmt.Fprintf(stderr, "fak pi config: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(stdout, "fak pi config: wrote compaction to %s from model %q (reserveTokens: %d, keepRecentTokens: %d)", sPath, c.Model, c.Budget.ReserveTokens, c.Budget.KeepRecentTokens)
+		fmt.Fprintf(stdout, "fak pi config: wrote shared compaction to %s for the router catalog (reserveTokens: %d, keepRecentTokens: %d)", sPath, c.ReserveTokens, c.KeepRecentTokens)
 		if settingsBackup != "" {
 			fmt.Fprintf(stdout, " (backup %s)", settingsBackup)
 		}
@@ -885,7 +915,11 @@ func printPiRouterPlan(w io.Writer, plan *piRouterPlan, advertised int, write bo
 		if m.Window <= 0 {
 			src = "no router window; conservative"
 		}
-		fmt.Fprintf(w, "  model   %s  owned_by=%s  contextWindow=%d maxTokens=%d compactAt=%d (%s %d)\n", m.ID, m.OwnedBy, b.ResidentTarget, b.MaxOutputTokens, b.Envelope.CompactTrigger, src, b.ServedWindow)
+		compactAt := b.Envelope.CompactTrigger
+		if plan.Compaction.Skipped == "" && plan.Compaction.Blocked == "" {
+			compactAt = b.ResidentTarget - plan.Compaction.ReserveTokens
+		}
+		fmt.Fprintf(w, "  model   %s  owned_by=%s  contextWindow=%d maxTokens=%d compactAt=%d (%s %d)\n", m.ID, m.OwnedBy, b.ResidentTarget, b.MaxOutputTokens, compactAt, src, b.ServedWindow)
 		if len(m.Aliases) > 0 {
 			aliases := append([]string(nil), m.Aliases...)
 			sort.Strings(aliases)
@@ -924,14 +958,16 @@ func printPiRouterPlan(w io.Writer, plan *piRouterPlan, advertised int, write bo
 	switch c := plan.Compaction; {
 	case c.Skipped != "":
 		fmt.Fprintf(w, "  compaction %s: not set (%s)\n", d.SettingsPath, c.Skipped)
+	case c.Blocked != "":
+		fmt.Fprintf(w, "  compaction %s: write blocked (%s)\n", d.SettingsPath, c.Blocked)
 	case c.Change:
 		action := "rerun with --write to apply"
 		if write {
 			action = "applying"
 		}
-		fmt.Fprintf(w, "  compaction %s: reserveTokens %d -> %d, keepRecentTokens %d -> %d from model %q (%s)\n", d.SettingsPath, c.FromReserve, c.Budget.ReserveTokens, c.FromKeep, c.Budget.KeepRecentTokens, c.Model, action)
+		fmt.Fprintf(w, "  compaction %s: reserveTokens %d -> %d, keepRecentTokens %d -> %d shared across the catalog (default model %q; %s)\n", d.SettingsPath, c.FromReserve, c.ReserveTokens, c.FromKeep, c.KeepRecentTokens, c.Model, action)
 	default:
-		fmt.Fprintf(w, "  compaction %s: matches model %q envelope\n", d.SettingsPath, c.Model)
+		fmt.Fprintf(w, "  compaction %s: matches the shared catalog envelope (default model %q)\n", d.SettingsPath, c.Model)
 	}
 	for _, warn := range plan.Warnings {
 		fmt.Fprintf(w, "  warning %s\n", warn)

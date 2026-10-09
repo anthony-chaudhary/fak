@@ -133,8 +133,15 @@ derivation cannot stack. Two bounds, both `MODELED`:
 This replaces the retired blanket 50% halving, which stacked (131072 → 65536) and made Halo Qwen
 sessions compact at ~49K (38% of the slot) while reclaiming ~6.5K per compaction. For a 131072
 slot the envelope is contextWindow 131072, maxTokens 16384, reserve 22528 (compaction at 108544),
-keep 20000, ~55K reclaimed per compaction. `fak pi config --from-router --write` writes the
-default model's compaction block; non-viable models print a warning with the reason token.
+keep 20000, ~55K reclaimed per compaction. `fak pi config --from-router --write` writes one
+shared compaction block using the catalog's largest reserve and smallest kept tail, then
+checks the resulting summary and reclamation bounds for every model. Model windows and the
+selected default are preserved. If those shared settings are unsafe, neither configuration
+file is changed; incompatible windows need separate Pi settings. Non-viable models also
+print a warning with the reason token. The plan shows the old and replacement reserve/keep
+values: `--write` replaces these fak-owned keys even when previously customized; unrelated
+settings are preserved. A larger reserve is not automatically safer when it leaves too
+little room after compaction.
 
 ## When More Than 128K Is Acceptable
 
