@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
 const piRouterTestKey = "test-gateway-key"
@@ -175,8 +177,11 @@ func TestPiConfigFromRouterPlanThenWriteIsIdempotent(t *testing.T) {
 	if got, want := plan.Added, []string{"model-b", "cloud-c"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("Added = %v, want %v", got, want)
 	}
-	if len(plan.Changed) != 1 || plan.Changed[0].ID != "org/model-a" || plan.Changed[0].FromWindow != 500000 || plan.Changed[0].ToWindow != 65536 {
-		t.Fatalf("Changed = %+v, want org/model-a 500000 -> 65536", plan.Changed)
+	if len(plan.Changed) != 1 || plan.Changed[0].ID != "org/model-a" || plan.Changed[0].FromWindow != 500000 || plan.Changed[0].ToWindow != 131072 {
+		t.Fatalf("Changed = %+v, want org/model-a 500000 -> 131072", plan.Changed)
+	}
+	if c := plan.Compaction; c.Model != "org/model-a" || !c.Change || c.Budget.ReserveTokens != 22528 || c.Budget.KeepRecentTokens != 20000 {
+		t.Fatalf("Compaction = %+v, want org/model-a envelope reserve 22528 keep 20000", c)
 	}
 	if plan.Default.Served || plan.Default.Pick != "org/model-a" {
 		t.Fatalf("Default = %+v, want stale custom-model replaced by org/model-a", plan.Default)
@@ -199,17 +204,17 @@ func TestPiConfigFromRouterPlanThenWriteIsIdempotent(t *testing.T) {
 		t.Fatalf("write exit = %d, stderr=%s", code, stderr)
 	}
 	want := []piFakModel{
-		{ID: "org/model-a", ContextWindow: 65536, MaxTokens: 16384},
-		{ID: "model-b", ContextWindow: 32768, MaxTokens: 8192},
+		{ID: "org/model-a", ContextWindow: 131072, MaxTokens: 16384},
+		{ID: "model-b", ContextWindow: 65536, MaxTokens: 8192},
 		// No advertised window: the conservative default is capped by the smallest
 		// window the router does advertise (65536), never the larger prior.
-		{ID: "cloud-c", ContextWindow: 32768, MaxTokens: 8192},
+		{ID: "cloud-c", ContextWindow: 65536, MaxTokens: 8192},
 	}
 	if got := readPiFakModels(t, modelsPath); !reflect.DeepEqual(got, want) {
 		t.Fatalf("fak models = %+v, want %+v", got, want)
 	}
 	written, _ := os.ReadFile(modelsPath)
-	keptEntry := strings.NewReplacer("%CW%", "65536", "%MT%", "16384").Replace(piRouterKeptEntry)
+	keptEntry := strings.NewReplacer("%CW%", "131072", "%MT%", "16384").Replace(piRouterKeptEntry)
 	for _, verbatim := range []string{
 		`"zz-unknown": {"keep": [1, 2, 3]},`,
 		piRouterOtherProviderBlock,
@@ -234,6 +239,10 @@ func TestPiConfigFromRouterPlanThenWriteIsIdempotent(t *testing.T) {
 	}
 	if settings["defaultModel"] != "org/model-a" || settings["defaultProvider"] != "fak" || settings["theme"] != "dark" {
 		t.Fatalf("settings = %v, want defaultModel org/model-a with theme preserved", settings)
+	}
+	block, _ := settings["compaction"].(map[string]any)
+	if block["enabled"] != true || block["reserveTokens"] != float64(22528) || block["keepRecentTokens"] != float64(20000) {
+		t.Fatalf("settings compaction = %v, want enabled, reserve 22528, keep 20000 from the default model", block)
 	}
 	sBackups := piBackups(t, settingsPath)
 	if len(sBackups) != 1 {
@@ -260,7 +269,7 @@ func TestPiConfigFromRouterPlanThenWriteIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan2.configChanged() || len(plan2.Added)+len(plan2.Removed)+len(plan2.Changed) != 0 || !plan2.Default.Served {
+	if plan2.configChanged() || len(plan2.Added)+len(plan2.Removed)+len(plan2.Changed) != 0 || !plan2.Default.Served || plan2.Compaction.Change {
 		t.Fatalf("second plan not empty: %+v", plan2)
 	}
 }
@@ -415,5 +424,34 @@ func TestFoldPiFromRouterArg(t *testing.T) {
 	want := []string{"--from-router=http://r:1/v1", "--write", "--from-router", "--path", "p"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("fold = %v, want %v", got, want)
+	}
+}
+
+// TestPiRouterBudgetDerivesOnceAndFlagsSmallWindows: the router path feeds the RAW
+// advertised window to the envelope exactly once, and a window too small for the
+// harness is reported with its closed reason token instead of being shrunk again.
+// fak-test:runtime fast est=1s
+func TestPiRouterBudgetDerivesOnceAndFlagsSmallWindows(t *testing.T) {
+	if b := piRouterBudget(131072, 0); b.ResidentTarget != 131072 || b.ServedWindow != 131072 {
+		t.Fatalf("131072 budget = %+v, want the slot used in full", b)
+	}
+	if b := piRouterBudget(1048576, 0); b.ResidentTarget != harnesskit.QualityCapTokens {
+		t.Fatalf("1M budget = %+v, want the quality cap", b)
+	}
+	pinPiRouterTestEnv(t, piRouterTestKey)
+	rows := []piRouterRow{{ID: "big", OwnedBy: "a", Window: 131072}, {ID: "tiny", OwnedBy: "b", Window: 32768}}
+	plan, err := buildPiRouterPlan(rows, "http://127.0.0.1:9/v1", filepath.Join(t.TempDir(), "models.json"), filepath.Join(t.TempDir(), "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := plan.Budgets["tiny"]; b.Viable || b.Reason != harnesskit.ReasonWindowTooSmallForHarness || b.ResidentTarget != 32768 {
+		t.Fatalf("tiny budget = %+v, want non-viable 32768", b)
+	}
+	found := false
+	for _, w := range plan.Warnings {
+		found = found || strings.Contains(w, harnesskit.ReasonWindowTooSmallForHarness)
+	}
+	if !found {
+		t.Fatalf("Warnings = %v, want the non-viable reason token", plan.Warnings)
 	}
 }

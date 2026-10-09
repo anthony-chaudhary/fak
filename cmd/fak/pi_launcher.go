@@ -71,7 +71,7 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	checkBackend := fs.Bool("check-backend", true, "verify fak serve backend is reachable before starting Pi")
 	thinking := fs.String("thinking", "", "thinking/reasoning level passed to pi (--thinking <level>)")
 	tools := fs.String("tools", "", "tool allowlist passed to pi (--tools <list>)")
-	window := fs.Int("window", 0, "served model context window in tokens for the SAFE Pi resident budget (default: auto-detect from the backend /v1/models context_length, else the default prior). fak writes contextWindow = min(window, window/2) so Pi auto-compacts inside the safe envelope instead of at the hard cap.")
+	window := fs.Int("window", 0, "served model context window in tokens for the SAFE Pi resident budget (default: auto-detect from the backend /v1/models context_length, else the default prior). fak derives the context envelope once from this RAW window: contextWindow = min(window, quality cap 163840), and compaction reserve/keep sized so a compaction reclaims real room.")
 	safeSettings := fs.Bool("safe-settings", false, "write a safe Pi compaction block (reserveTokens/keepRecentTokens derived from the served window) into Pi's settings.json")
 	settingsPath := fs.String("settings-path", "", "destination path or directory for Pi's settings.json (default: ~/.pi/agent/settings.json)")
 	quiet := fs.Bool("quiet", false, "suppress launcher banner and diagnostics")
@@ -190,8 +190,8 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	// Safe context budget: an explicit --window wins; otherwise the window the backend
-	// advertised; otherwise the default prior. PiSafeContextBudget clamps it and halves it so
-	// the resident target is at most 50% of the served window (docs/long-context-defaults.md).
+	// advertised; otherwise the default prior. PiSafeContextBudget derives the envelope once
+	// from that raw window (docs/long-context-defaults.md).
 	servedWindow := *window
 	if servedWindow <= 0 {
 		servedWindow = detectedWindow
@@ -240,7 +240,7 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		if err != nil && !launch.quiet {
 			fmt.Fprintf(stderr, "fak pi: warning: could not update Pi config %s: %v\n", resolvedPath, err)
 		} else if modified && !launch.quiet {
-			fmt.Fprintf(stderr, "fak pi: updated %s with provider \"fak\" (baseURL: %s, model: %s, contextWindow: %d = safe 50%% of %d)\n", resolvedPath, launch.baseURL, launch.model, budget.ResidentTarget, budget.ServedWindow)
+			fmt.Fprintf(stderr, "fak pi: updated %s with provider \"fak\" (baseURL: %s, model: %s, contextWindow: %d of %d served)\n", resolvedPath, launch.baseURL, launch.model, budget.ResidentTarget, budget.ServedWindow)
 		}
 	}
 
@@ -249,7 +249,7 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		if err != nil && !launch.quiet {
 			fmt.Fprintf(stderr, "fak pi: warning: could not update Pi settings %s: %v\n", sPath, err)
 		} else if modified && !launch.quiet {
-			fmt.Fprintf(stderr, "fak pi: wrote safe compaction to %s (reserveTokens: %d, keepRecentTokens: %d)\n", sPath, budget.OutputReserve, budget.KeepRecentTokens)
+			fmt.Fprintf(stderr, "fak pi: wrote safe compaction to %s (reserveTokens: %d, keepRecentTokens: %d)\n", sPath, budget.ReserveTokens, budget.KeepRecentTokens)
 		}
 	}
 
@@ -313,8 +313,11 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		} else {
 			fmt.Fprintln(stderr, "  skills      = (no project skill pack discovered)")
 		}
-		fmt.Fprintf(stderr, "  context     = resident target %d tokens (safe 50%% of %d served window, %s)\n", budget.ResidentTarget, budget.ServedWindow, budget.Provenance)
-		fmt.Fprintf(stderr, "  compaction  = reserve %d, keep %d (write=%t)\n", budget.OutputReserve, budget.KeepRecentTokens, *safeSettings)
+		fmt.Fprintf(stderr, "  context     = contextWindow %d tokens of %d served window, maxTokens %d (%s)\n", budget.ResidentTarget, budget.ServedWindow, budget.MaxOutputTokens, budget.Provenance)
+		fmt.Fprintf(stderr, "  compaction  = reserve %d, keep %d, fires at %d (write=%t)\n", budget.ReserveTokens, budget.KeepRecentTokens, budget.Envelope.CompactTrigger, *safeSettings)
+		if !budget.Viable {
+			fmt.Fprintf(stderr, "  warning     = %s\n", budget.Reason)
+		}
 		fmt.Fprintln(stderr, "  provider-ext= -e <session-provider-extension> (installed and cleaned by the selected launch mode; no persistent config write)")
 		if !launch.guarded {
 			// Presence only: the resolved value never reaches argv, stdout, stderr, or
@@ -766,7 +769,7 @@ func runPiConfig(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	addr := fs.String("addr", "127.0.0.1:8080", "fak serve gateway listen address")
 	model := fs.String("model", projectassets.DefaultPiModelID, "served model ID")
-	window := fs.Int("window", 0, "served model context window in tokens (default: the default prior). The written contextWindow is min(window, window/2) so Pi auto-compacts inside the safe envelope.")
+	window := fs.Int("window", 0, "served model context window in tokens (default: the default prior). The written contextWindow is min(window, quality cap 163840); compaction reserve/keep come from the same envelope.")
 	write := fs.Bool("write", false, "write or update ~/.pi/agent/models.json (or --path) and the safe Pi compaction settings")
 	path := fs.String("path", "", "destination path or directory for models.json")
 	settingsPath := fs.String("settings-path", "", "destination path or directory for Pi's settings.json (default: ~/.pi/agent/settings.json)")
@@ -791,7 +794,7 @@ func runPiConfig(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 		if modified {
-			fmt.Fprintf(stdout, "fak pi config: updated %s with provider \"fak\" (baseURL: %s, model: %s, contextWindow: %d = safe 50%% of %d)\n", resolvedPath, baseURL, *model, budget.ResidentTarget, budget.ServedWindow)
+			fmt.Fprintf(stdout, "fak pi config: updated %s with provider \"fak\" (baseURL: %s, model: %s, contextWindow: %d of %d served)\n", resolvedPath, baseURL, *model, budget.ResidentTarget, budget.ServedWindow)
 		} else {
 			fmt.Fprintf(stdout, "fak pi config: %s already has up-to-date provider \"fak\"\n", resolvedPath)
 		}
@@ -801,7 +804,7 @@ func runPiConfig(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 		if sModified {
-			fmt.Fprintf(stdout, "fak pi config: wrote safe compaction to %s (reserveTokens: %d, keepRecentTokens: %d)\n", sPath, budget.OutputReserve, budget.KeepRecentTokens)
+			fmt.Fprintf(stdout, "fak pi config: wrote safe compaction to %s (reserveTokens: %d, keepRecentTokens: %d)\n", sPath, budget.ReserveTokens, budget.KeepRecentTokens)
 		} else {
 			fmt.Fprintf(stdout, "fak pi config: %s already has a safe compaction block\n", sPath)
 		}
@@ -825,6 +828,9 @@ func runPiConfig(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	fmt.Fprintln(stdout, string(out))
-	fmt.Fprintf(stderr, "fak pi config: safe context envelope: resident target %d tokens (50%% of %d served window, %s); compaction reserve %d, keep %d\n", budget.ResidentTarget, budget.ServedWindow, budget.Provenance, budget.OutputReserve, budget.KeepRecentTokens)
+	fmt.Fprintf(stderr, "fak pi config: context envelope: contextWindow %d of %d served window, maxTokens %d (%s); compaction reserve %d, keep %d, fires at %d\n", budget.ResidentTarget, budget.ServedWindow, budget.MaxOutputTokens, budget.Provenance, budget.ReserveTokens, budget.KeepRecentTokens, budget.Envelope.CompactTrigger)
+	if !budget.Viable {
+		fmt.Fprintf(stderr, "fak pi config: warning: %s\n", budget.Reason)
+	}
 	return 0
 }

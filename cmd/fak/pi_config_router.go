@@ -37,8 +37,10 @@ import (
 // it or any id collapsed onto it (context_window, context_length,
 // max_context_length). An unadvertised window falls back to the smallest window
 // the catalog advertises, never the larger default prior. The written
-// contextWindow is the safe 50% resident target of that window, the same doctrine
-// every other Pi writer follows (projectassets.PiSafeContextBudget).
+// contextWindow and maxTokens come from the harnesskit context envelope of that
+// RAW window (projectassets.PiSafeContextBudget), derived exactly once. With
+// --write, settings.json compaction (enabled, reserveTokens, keepRecentTokens) is
+// set from the default model's envelope; fak owns those keys.
 
 var (
 	errPiRouterEmptyCatalog  = errors.New("router advertised no models")
@@ -337,18 +339,19 @@ func piRouterBudget(window, floor int) projectassets.PiContextBudget {
 			served = floor
 		}
 	}
-	b := projectassets.PiSafeContextBudget(served)
-	if b.ServedWindow > served {
-		target := max(served/2, 1)
-		b = projectassets.PiContextBudget{
-			ServedWindow:     served,
-			ResidentTarget:   target,
-			OutputReserve:    max(target/4, 1),
-			KeepRecentTokens: max(target/2, 1),
-			Provenance:       projectassets.PiBudgetProvenance,
-		}
-	}
-	return b
+	return projectassets.PiSafeContextBudget(served)
+}
+
+// piRouterCompactionPlan is the settings.json compaction block planned from the
+// default model's envelope.
+type piRouterCompactionPlan struct {
+	Model       string
+	Budget      projectassets.PiContextBudget
+	FromEnabled bool
+	FromReserve int
+	FromKeep    int
+	Change      bool
+	Skipped     string
 }
 
 type piRouterChange struct {
@@ -383,6 +386,7 @@ type piRouterPlan struct {
 	Original   []byte
 	Rendered   []byte
 	Default    piRouterDefaultPlan
+	Compaction piRouterCompactionPlan
 	Warnings   []string
 }
 
@@ -428,12 +432,17 @@ func buildPiRouterPlan(rows []piRouterRow, routerURL, configTarget, settingsTarg
 			return nil, fmt.Errorf("%s: %w", plan.ConfigPath, err)
 		}
 	}
-	def, warnings, err := planPiRouterDefault(settingsTarget, plan)
+	def, compaction, err := planPiRouterDefault(settingsTarget, plan)
 	if err != nil {
 		return nil, err
 	}
 	plan.Default = def
-	plan.Warnings = warnings
+	plan.Compaction = compaction
+	for _, m := range models {
+		if b := plan.Budgets[m.ID]; !b.Viable {
+			plan.Warnings = append(plan.Warnings, fmt.Sprintf("model %s: %s (served window %d, compaction reclaims %d of trigger %d)", m.ID, b.Reason, b.ServedWindow, b.Envelope.ReclaimTokens, b.Envelope.CompactTrigger))
+		}
+	}
 	return plan, nil
 }
 
@@ -623,7 +632,7 @@ func withBOM(has bool, doc []byte) []byte {
 
 // patchPiModelBudget rewrites only contextWindow/maxTokens inside one existing
 // model entry, with the same direction rules as projectassets' budget repair:
-// contextWindow must equal the target; maxTokens must be in (0, OutputReserve].
+// contextWindow must equal the target; maxTokens must be in (0, MaxOutputTokens].
 func patchPiModelBudget(entry []byte, budget projectassets.PiContextBudget, memberIndent, unit string) ([]byte, *piRouterChange, error) {
 	obj := jsonSpan{0, len(entry)}
 	change := &piRouterChange{ToWindow: budget.ResidentTarget}
@@ -657,14 +666,14 @@ func patchPiModelBudget(entry []byte, budget projectassets.PiContextBudget, memb
 		mt, mtNumeric = piJSONInt(out[mtSpan.start:mtSpan.end])
 	}
 	change.FromMaxToken, change.ToMaxToken = mt, mt
-	if !mtNumeric || mt <= 0 || mt > budget.OutputReserve {
-		val := []byte(strconv.Itoa(budget.OutputReserve))
+	if !mtNumeric || mt <= 0 || mt > budget.MaxOutputTokens {
+		val := []byte(strconv.Itoa(budget.MaxOutputTokens))
 		if hasMT {
 			out = jsonReplace(out, mtSpan, val)
 		} else {
 			out = jsonInsertMemberIndent(out, jsonSpan{0, len(out)}, "maxTokens", val, memberIndent)
 		}
-		change.ToMaxToken = budget.OutputReserve
+		change.ToMaxToken = budget.MaxOutputTokens
 		changed = true
 	}
 	if !changed {
@@ -707,7 +716,7 @@ func piJSONInt(raw []byte) (int, bool) {
 	return int(f), true
 }
 
-func planPiRouterDefault(settingsTarget string, plan *piRouterPlan) (piRouterDefaultPlan, []string, error) {
+func planPiRouterDefault(settingsTarget string, plan *piRouterPlan) (piRouterDefaultPlan, piRouterCompactionPlan, error) {
 	path := projectassets.ResolvePiSettingsPath(settingsTarget)
 	def := piRouterDefaultPlan{SettingsPath: path}
 	raw := map[string]interface{}{}
@@ -715,30 +724,19 @@ func planPiRouterDefault(settingsTarget string, plan *piRouterPlan) (piRouterDef
 	switch {
 	case os.IsNotExist(err):
 	case err != nil:
-		return def, nil, fmt.Errorf("read %s: %w", path, err)
+		return def, piRouterCompactionPlan{}, fmt.Errorf("read %s: %w", path, err)
 	default:
 		if err := json.Unmarshal(bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF}), &raw); err != nil {
-			return def, nil, fmt.Errorf("parse existing %s: %w", path, err)
+			return def, piRouterCompactionPlan{}, fmt.Errorf("parse existing %s: %w", path, err)
 		}
 	}
 	def.Provider, _ = raw["defaultProvider"].(string)
 	def.Model, _ = raw["defaultModel"].(string)
 	def.Provider, def.Model = strings.TrimSpace(def.Provider), strings.TrimSpace(def.Model)
 
-	var warnings []string
-	if block, ok := raw["compaction"].(map[string]interface{}); ok {
-		smallest := 0
-		for _, b := range plan.Budgets {
-			smallest = minPositive(smallest, b.ResidentTarget)
-		}
-		if keep, ok := block["keepRecentTokens"].(float64); ok && smallest > 0 && int(keep) >= smallest {
-			warnings = append(warnings, fmt.Sprintf("%s compaction.keepRecentTokens %d >= smallest planned contextWindow %d; lower it so compaction can make room", path, int(keep), smallest))
-		}
-	}
-
 	if def.Provider != "" && def.Provider != projectassets.DefaultPiProviderID {
 		def.Skipped = fmt.Sprintf("defaultProvider is %q, not %q", def.Provider, projectassets.DefaultPiProviderID)
-		return def, warnings, nil
+		return def, piRouterCompactionPlan{Skipped: def.Skipped}, nil
 	}
 	canonicalOf := map[string]string{}
 	for _, m := range plan.Models {
@@ -757,7 +755,30 @@ func planPiRouterDefault(settingsTarget string, plan *piRouterPlan) (piRouterDef
 	default:
 		def.Pick, def.Reason = piRouterDefaultModel(plan.Models), fmt.Sprintf("defaultModel %q is not served by the router", def.Model)
 	}
-	return def, warnings, nil
+	return def, planPiRouterCompaction(raw, plan, def), nil
+}
+
+// planPiRouterCompaction plans settings.json compaction from the envelope of the
+// model Pi will default to, so Pi's trigger (contextWindow - reserveTokens) and
+// kept tail match the contextWindow written for that model.
+func planPiRouterCompaction(raw map[string]interface{}, plan *piRouterPlan, def piRouterDefaultPlan) piRouterCompactionPlan {
+	model := def.Pick
+	if model == "" {
+		model = def.Model
+	}
+	cp := piRouterCompactionPlan{Model: model, Budget: plan.Budgets[model]}
+	block, _ := raw["compaction"].(map[string]interface{})
+	if v, ok := block["enabled"].(bool); ok {
+		cp.FromEnabled = v
+	}
+	if v, ok := block["reserveTokens"].(float64); ok {
+		cp.FromReserve = int(v)
+	}
+	if v, ok := block["keepRecentTokens"].(float64); ok {
+		cp.FromKeep = int(v)
+	}
+	cp.Change = !cp.FromEnabled || cp.FromReserve != cp.Budget.ReserveTokens || cp.FromKeep != cp.Budget.KeepRecentTokens
+	return cp
 }
 
 // piRouterDefaultModel is the router's default route: a row it marks `default`,
@@ -818,15 +839,30 @@ func runPiConfigFromRouter(stdout, stderr io.Writer, fs *flag.FlagSet, explicitU
 			fmt.Fprintf(stdout, "fak pi config: wrote %s\n", plan.ConfigPath)
 		}
 	}
-	if plan.Default.Pick != "" {
-		backup := ""
+	settingsBackup := ""
+	if plan.Default.Pick != "" || plan.Compaction.Change {
 		if orig, err := os.ReadFile(plan.Default.SettingsPath); err == nil {
-			backup, err = writePiBackup(plan.Default.SettingsPath, orig)
+			settingsBackup, err = writePiBackup(plan.Default.SettingsPath, orig)
 			if err != nil {
 				fmt.Fprintf(stderr, "fak pi config: %v\n", err)
 				return 1
 			}
 		}
+	}
+	if c := plan.Compaction; c.Change {
+		sPath, _, err := projectassets.EnsurePiSafeCompaction(plan.Default.SettingsPath, c.Budget)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak pi config: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "fak pi config: wrote compaction to %s from model %q (reserveTokens: %d, keepRecentTokens: %d)", sPath, c.Model, c.Budget.ReserveTokens, c.Budget.KeepRecentTokens)
+		if settingsBackup != "" {
+			fmt.Fprintf(stdout, " (backup %s)", settingsBackup)
+		}
+		fmt.Fprintln(stdout)
+	}
+	if plan.Default.Pick != "" {
+		backup := settingsBackup
 		dPath, _, err := projectassets.EnsurePiDefaultProviderModel(plan.Default.SettingsPath, projectassets.DefaultPiProviderID, plan.Default.Pick)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak pi config: %v\n", err)
@@ -849,7 +885,7 @@ func printPiRouterPlan(w io.Writer, plan *piRouterPlan, advertised int, write bo
 		if m.Window <= 0 {
 			src = "no router window; conservative"
 		}
-		fmt.Fprintf(w, "  model   %s  owned_by=%s  contextWindow=%d (%s %d)\n", m.ID, m.OwnedBy, b.ResidentTarget, src, b.ServedWindow)
+		fmt.Fprintf(w, "  model   %s  owned_by=%s  contextWindow=%d maxTokens=%d compactAt=%d (%s %d)\n", m.ID, m.OwnedBy, b.ResidentTarget, b.MaxOutputTokens, b.Envelope.CompactTrigger, src, b.ServedWindow)
 		if len(m.Aliases) > 0 {
 			aliases := append([]string(nil), m.Aliases...)
 			sort.Strings(aliases)
@@ -884,6 +920,18 @@ func printPiRouterPlan(w io.Writer, plan *piRouterPlan, advertised int, write bo
 			action = "pinning"
 		}
 		fmt.Fprintf(w, "  default %s: %s -> %q (%s)\n", d.SettingsPath, d.Reason, d.Pick, action)
+	}
+	switch c := plan.Compaction; {
+	case c.Skipped != "":
+		fmt.Fprintf(w, "  compaction %s: not set (%s)\n", d.SettingsPath, c.Skipped)
+	case c.Change:
+		action := "rerun with --write to apply"
+		if write {
+			action = "applying"
+		}
+		fmt.Fprintf(w, "  compaction %s: reserveTokens %d -> %d, keepRecentTokens %d -> %d from model %q (%s)\n", d.SettingsPath, c.FromReserve, c.Budget.ReserveTokens, c.FromKeep, c.Budget.KeepRecentTokens, c.Model, action)
+	default:
+		fmt.Fprintf(w, "  compaction %s: matches model %q envelope\n", d.SettingsPath, c.Model)
 	}
 	for _, warn := range plan.Warnings {
 		fmt.Fprintf(w, "  warning %s\n", warn)

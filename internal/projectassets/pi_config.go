@@ -89,11 +89,9 @@ func GeneratePiConfig(baseURL, modelID string) ([]byte, error) {
 	return GeneratePiConfigForWindow(baseURL, modelID, DefaultPiServedWindow)
 }
 
-// GeneratePiConfigForWindow creates a standalone models.json whose "fak" provider advertises a
-// SAFE resident context target derived from servedWindow (at most half the window) instead of the
-// raw hard cap. The written contextWindow is a Pi auto-compaction tripwire
-// (`contextTokens > contextWindow - reserveTokens`), so a smaller value makes Pi compact inside
-// the safe envelope rather than at the ceiling.
+// GeneratePiConfigForWindow creates a standalone models.json whose "fak" provider advertises the
+// context window derived once from the raw servedWindow (harnesskit.DeriveContextEnvelope). Pi
+// compacts at `contextWindow - reserveTokens`; the reserve is written to settings.json.
 func GeneratePiConfigForWindow(baseURL, modelID string, servedWindow int) ([]byte, error) {
 	baseURL = NormalizePiBaseURL(baseURL)
 	modelID = NormalizePiModelID(modelID)
@@ -118,9 +116,9 @@ func GeneratePiConfigForWindow(baseURL, modelID string, servedWindow int) ([]byt
 	return json.MarshalIndent(cfg, "", "  ")
 }
 
-// piModelEntry builds one Pi model entry from the derived safe budget. The contextWindow is the
-// RESIDENT TARGET (at most half the served window), and maxTokens carries the output reserve, so
-// the single JSON object encodes both halves of the cap-vs-target split. See pi_context_budget.go.
+// piModelEntry builds one Pi model entry from the derived budget: contextWindow is the envelope's
+// context window (the served window, quality-capped only when large) and maxTokens its output
+// budget. The compaction trigger lives in settings.json. See pi_context_budget.go.
 func piModelEntry(modelID, modelName string, budget PiContextBudget) map[string]interface{} {
 	entry := map[string]interface{}{
 		"id":            modelID,
@@ -128,7 +126,7 @@ func piModelEntry(modelID, modelName string, budget PiContextBudget) map[string]
 		"reasoning":     false,
 		"input":         []interface{}{"text"},
 		"contextWindow": budget.ResidentTarget,
-		"maxTokens":     budget.OutputReserve,
+		"maxTokens":     budget.MaxOutputTokens,
 		"cost": map[string]interface{}{
 			"input":      0,
 			"output":     0,
@@ -181,9 +179,9 @@ func EnsurePiProviderConfig(target, baseURL, modelID string) (string, bool, erro
 }
 
 // EnsurePiProviderConfigForWindow is EnsurePiProviderConfig with an explicit served window, so
-// the written contextWindow is a SAFE resident target (at most half the window) rather than the
-// raw cap. It also REPAIRS an existing fak model entry whose contextWindow still advertises the
-// raw window (the pre-doctrine value), so an upgrade path exists for configs fak itself wrote.
+// the written contextWindow is the derived envelope window. It also REPAIRS an existing fak model
+// entry whose contextWindow disagrees (a raw 1M window, or a stale halved 65536), so an upgrade
+// path exists for configs fak itself wrote.
 func EnsurePiProviderConfigForWindow(target, baseURL, modelID string, servedWindow int) (string, bool, error) {
 	path := ResolvePiConfigPath(target)
 	baseURL = NormalizePiBaseURL(baseURL)

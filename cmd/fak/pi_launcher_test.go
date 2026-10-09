@@ -674,8 +674,8 @@ func TestRunPiPreservesAdvertisedDefault(t *testing.T) {
 }
 
 // TestRunPiConfigWriteSafeContext is the end-to-end witness for the goal: `fak pi config --write`
-// must write a SAFE resident context target (at most half the served window) and a safe Pi
-// compaction block, never the raw hard cap.
+// must write the envelope context window (never a halved one) and a compaction block whose
+// reserve/keep match that envelope.
 func TestRunPiConfigWriteSafeContext(t *testing.T) {
 	isolatePiHome(t)
 	tmp := t.TempDir()
@@ -706,11 +706,8 @@ func TestRunPiConfigWriteSafeContext(t *testing.T) {
 	}
 	model := models["providers"].(map[string]interface{})["fak"].(map[string]interface{})["models"].([]interface{})[0].(map[string]interface{})
 	cw, _ := model["contextWindow"].(float64)
-	if cw != 65536 {
-		t.Fatalf("contextWindow = %v, want 65536 (safe 50%% of 131072)", cw)
-	}
-	if cw == 131072 {
-		t.Fatal("models.json advertises the raw served window (cap-is-not-target violation)")
+	if cw != 131072 {
+		t.Fatalf("contextWindow = %v, want 131072 (a 128k slot is used in full, never halved)", cw)
 	}
 
 	var settings map[string]interface{}
@@ -728,11 +725,11 @@ func TestRunPiConfigWriteSafeContext(t *testing.T) {
 	if enabled, _ := block["enabled"].(bool); !enabled {
 		t.Fatal("compaction.enabled should be true")
 	}
-	if _, hasReserve := block["reserveTokens"]; !hasReserve {
-		t.Fatal("compaction.reserveTokens missing")
+	if r, _ := block["reserveTokens"].(float64); int(r) != 22528 {
+		t.Fatalf("compaction.reserveTokens = %v, want 22528 (envelope of a 131072 slot)", block["reserveTokens"])
 	}
-	if _, hasKeep := block["keepRecentTokens"]; !hasKeep {
-		t.Fatal("compaction.keepRecentTokens missing")
+	if k, _ := block["keepRecentTokens"].(float64); int(k) != 20000 {
+		t.Fatalf("compaction.keepRecentTokens = %v, want 20000", block["keepRecentTokens"])
 	}
 }
 

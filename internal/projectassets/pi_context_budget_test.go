@@ -5,23 +5,26 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
-// TestPiSafeContextBudget pins the core doctrine: the resident target is at most HALF the
-// served window, never the raw cap, and the derived reserve/keep are ordered sanely.
+// TestPiSafeContextBudget pins the Pi mapping of the harnesskit envelope: the served window
+// is used in full up to the quality cap, never halved, and the compaction numbers come from
+// the envelope.
 func TestPiSafeContextBudget(t *testing.T) {
 	cases := []struct {
 		name       string
 		window     int
 		wantTarget int
+		wantViable bool
 	}{
-		{"128k window halves to 65536", 131072, 65536},
-		{"64k window halves to 32768", 65536, 32768},
-		{"16k window halves to 8192", 16384, 8192},
-		{"8k window halved stays legal", 8192, 4096},
-		{"unset window falls back and halves", 0, DefaultPiServedWindow / 2},
-		{"negative window falls back", -5, DefaultPiServedWindow / 2},
-		{"absurdly small window floors at the default prior", 1024, DefaultPiServedWindow / 2},
+		{"128k slot is used in full", 131072, 131072, true},
+		{"256k window is quality-capped", 262144, harnesskit.QualityCapTokens, true},
+		{"1M window is quality-capped", 1048576, harnesskit.QualityCapTokens, true},
+		{"32k window is not viable for the harness", 32768, 32768, false},
+		{"unset window falls back to the default prior", 0, DefaultPiServedWindow, true},
+		{"negative window falls back", -5, DefaultPiServedWindow, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -29,23 +32,34 @@ func TestPiSafeContextBudget(t *testing.T) {
 			if b.ResidentTarget != tc.wantTarget {
 				t.Fatalf("ResidentTarget = %d, want %d", b.ResidentTarget, tc.wantTarget)
 			}
-			// The core invariant, stated against the EFFECTIVE window (after fallback).
-			if b.ResidentTarget > b.ServedWindow/2 {
-				t.Fatalf("resident target %d exceeds 50%% of served window %d", b.ResidentTarget, b.ServedWindow)
+			if b.Viable != tc.wantViable {
+				t.Fatalf("Viable = %t, want %t (reason %q)", b.Viable, tc.wantViable, b.Reason)
 			}
-			if b.ResidentTarget > b.ServedWindow {
-				t.Fatalf("resident target %d exceeds served window %d", b.ResidentTarget, b.ServedWindow)
+			if !b.Viable && b.Reason != harnesskit.ReasonWindowTooSmallForHarness {
+				t.Fatalf("Reason = %q, want %q", b.Reason, harnesskit.ReasonWindowTooSmallForHarness)
 			}
-			if b.OutputReserve <= 0 || b.OutputReserve > b.ResidentTarget {
-				t.Fatalf("OutputReserve = %d, want in (0, %d]", b.OutputReserve, b.ResidentTarget)
+			env := b.Envelope
+			if b.ReserveTokens != env.ReserveTokens || b.KeepRecentTokens != env.KeepRecentTokens || b.MaxOutputTokens != env.OutputTokens {
+				t.Fatalf("budget %+v does not mirror envelope %+v", b, env)
 			}
-			if b.KeepRecentTokens <= 0 || b.KeepRecentTokens > b.ResidentTarget {
-				t.Fatalf("KeepRecentTokens = %d, want in (0, %d]", b.KeepRecentTokens, b.ResidentTarget)
+			if b.ResidentTarget-b.ReserveTokens != env.CompactTrigger {
+				t.Fatalf("Pi trigger %d != envelope trigger %d", b.ResidentTarget-b.ReserveTokens, env.CompactTrigger)
 			}
 			if b.Provenance != PiBudgetProvenance {
 				t.Fatalf("Provenance = %q, want %q", b.Provenance, PiBudgetProvenance)
 			}
 		})
+	}
+}
+
+// TestPiSafeContextBudgetNoStacking is the regression witness for the 131072 -> 65536 bug:
+// re-deriving from a written contextWindow never shrinks it again.
+func TestPiSafeContextBudgetNoStacking(t *testing.T) {
+	for _, w := range []int{131072, 1048576} {
+		first := PiSafeContextBudget(w)
+		if again := PiSafeContextBudget(first.ResidentTarget); again.ResidentTarget != first.ResidentTarget {
+			t.Fatalf("window %d: %d re-derived to %d (stacked)", w, first.ResidentTarget, again.ResidentTarget)
+		}
 	}
 }
 
@@ -63,11 +77,11 @@ func TestPiSafeContextBudgetMonotone(t *testing.T) {
 	}
 }
 
-// TestGeneratePiConfigNeverAdvertisesRawWindow is the regression witness for the "cap is not
-// target" violation: the generated models.json must NOT advertise the raw served window.
-func TestGeneratePiConfigNeverAdvertisesRawWindow(t *testing.T) {
-	const window = 131072
-	out, err := GeneratePiConfigForWindow("http://127.0.0.1:8080/v1", "qwen38:27b-q4", window)
+// TestGeneratePiConfigAdvertisesEnvelopeWindow witnesses that the generated models.json carries
+// the envelope window: a 1M served window is quality-capped, never advertised raw or halved.
+func TestGeneratePiConfigAdvertisesEnvelopeWindow(t *testing.T) {
+	const window = 1048576
+	out, err := GeneratePiConfigForWindow("http://127.0.0.1:8080/v1", "local-1m-model", window)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -80,25 +94,22 @@ func TestGeneratePiConfigNeverAdvertisesRawWindow(t *testing.T) {
 	if !ok {
 		t.Fatalf("contextWindow missing or not numeric: %v", model["contextWindow"])
 	}
-	if cw == window {
-		t.Fatalf("contextWindow advertises the raw served window %d (cap-is-not-target violation)", window)
-	}
-	if cw > window/2 {
-		t.Fatalf("contextWindow = %d exceeds 50%% of served window %d", cw, window)
+	if cw != harnesskit.QualityCapTokens {
+		t.Fatalf("contextWindow = %d, want the quality cap %d", cw, harnesskit.QualityCapTokens)
 	}
 	mt, ok := numericField(model["maxTokens"])
-	if !ok || mt <= 0 {
-		t.Fatalf("maxTokens missing or non-positive: %v", model["maxTokens"])
+	if !ok || mt != PiSafeContextBudget(window).MaxOutputTokens {
+		t.Fatalf("maxTokens = %v, want the envelope output budget", model["maxTokens"])
 	}
 	// The model must still be usable: id and provider wiring preserved.
-	if model["id"] != "qwen38:27b-q4" {
-		t.Fatalf("model id = %v, want qwen38:27b-q4", model["id"])
+	if model["id"] != "local-1m-model" {
+		t.Fatalf("model id = %v, want local-1m-model", model["id"])
 	}
 }
 
-// TestEnsurePiProviderConfigRepairsRawWindow witnesses the upgrade path: a models.json fak
-// itself wrote with the pre-doctrine raw contextWindow is corrected to the safe target.
-func TestEnsurePiProviderConfigRepairsRawWindow(t *testing.T) {
+// TestEnsurePiProviderConfigRepairsHalvedWindow witnesses the upgrade path: a models.json fak
+// itself wrote with the retired halved contextWindow is corrected to the envelope window.
+func TestEnsurePiProviderConfigRepairsHalvedWindow(t *testing.T) {
 	tmp := t.TempDir()
 	target := filepath.Join(tmp, "models.json")
 	raw := `{
@@ -108,7 +119,7 @@ func TestEnsurePiProviderConfigRepairsRawWindow(t *testing.T) {
       "apiKey": "fak",
       "api": "openai-completions",
       "models": [
-        {"id": "qwen38:27b-q4", "name": "old", "contextWindow": 131072, "maxTokens": 16384,
+        {"id": "qwen38:27b-q4", "name": "old", "contextWindow": 65536, "maxTokens": 16384,
          "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
          "compat": {"` + piDeveloperRoleKey + `": false}}
       ]
@@ -125,14 +136,14 @@ func TestEnsurePiProviderConfigRepairsRawWindow(t *testing.T) {
 		t.Fatalf("EnsurePiProviderConfig: %v", err)
 	}
 	if !modified {
-		t.Fatal("expected the raw contextWindow to be repaired, modified=false")
+		t.Fatal("expected the halved contextWindow to be repaired, modified=false")
 	}
 
 	after := readJSONFile(t, target)
 	model := firstFakModel(t, after)
 	cw, _ := numericField(model["contextWindow"])
-	if cw != DefaultPiServedWindow/2 {
-		t.Fatalf("contextWindow = %d, want %d (half the window)", cw, DefaultPiServedWindow/2)
+	if cw != DefaultPiServedWindow {
+		t.Fatalf("contextWindow = %d, want %d (the served slot, not half of it)", cw, DefaultPiServedWindow)
 	}
 	// Non-clobber invariant: the unrelated provider survives.
 	provs := after["providers"].(map[string]interface{})
@@ -166,8 +177,8 @@ func TestEnsurePiSafeCompactionFresh(t *testing.T) {
 	if enabled, _ := block["enabled"].(bool); !enabled {
 		t.Fatal("compaction.enabled should be true")
 	}
-	if got, _ := numericField(block["reserveTokens"]); got != budget.OutputReserve {
-		t.Fatalf("reserveTokens = %d, want %d", got, budget.OutputReserve)
+	if got, _ := numericField(block["reserveTokens"]); got != budget.ReserveTokens {
+		t.Fatalf("reserveTokens = %d, want %d", got, budget.ReserveTokens)
 	}
 	if got, _ := numericField(block["keepRecentTokens"]); got != budget.KeepRecentTokens {
 		t.Fatalf("keepRecentTokens = %d, want %d", got, budget.KeepRecentTokens)
@@ -175,11 +186,11 @@ func TestEnsurePiSafeCompactionFresh(t *testing.T) {
 }
 
 // TestEnsurePiSafeCompactionPreservesUserKeys witnesses the non-clobber invariant: unrelated
-// settings and a stricter operator reserve survive the write.
+// settings survive, while the fak-owned reserve/keep are set to the envelope exactly.
 func TestEnsurePiSafeCompactionPreservesUserKeys(t *testing.T) {
 	tmp := t.TempDir()
 	target := filepath.Join(tmp, "settings.json")
-	// The operator already set a STRICTER reserve (larger than the derived one) and a theme.
+	// A stale reserve/keep (e.g. from the retired halving) plus unrelated keys.
 	seed := `{
   "theme": "light",
   "defaultProvider": "hive-ai",
@@ -202,12 +213,14 @@ func TestEnsurePiSafeCompactionPreservesUserKeys(t *testing.T) {
 		t.Fatalf("defaultProvider clobbered: %v", doc["defaultProvider"])
 	}
 	block := doc["compaction"].(map[string]interface{})
-	// A stricter (larger) reserve must not be LOWERED to the derived value.
-	if got, _ := numericField(block["reserveTokens"]); got != 100000 {
-		t.Fatalf("reserveTokens = %d, want the operator's stricter 100000 preserved", got)
+	if got, _ := numericField(block["reserveTokens"]); got != budget.ReserveTokens {
+		t.Fatalf("reserveTokens = %d, want the envelope %d", got, budget.ReserveTokens)
 	}
-	if got, _ := numericField(block["keepRecentTokens"]); got != 50000 {
-		t.Fatalf("keepRecentTokens = %d, want the operator's 50000 preserved", got)
+	if got, _ := numericField(block["keepRecentTokens"]); got != budget.KeepRecentTokens {
+		t.Fatalf("keepRecentTokens = %d, want the envelope %d", got, budget.KeepRecentTokens)
+	}
+	if _, modified, err := EnsurePiSafeCompaction(target, budget); err != nil || modified {
+		t.Fatalf("second write: modified=%t err=%v, want idempotent", modified, err)
 	}
 }
 
@@ -230,8 +243,8 @@ func TestEnsurePiSafeCompactionRaisesWeakReserve(t *testing.T) {
 		t.Fatal("expected a weak reserve to be raised, modified=false")
 	}
 	block := readJSONFile(t, target)["compaction"].(map[string]interface{})
-	if got, _ := numericField(block["reserveTokens"]); got != budget.OutputReserve {
-		t.Fatalf("reserveTokens = %d, want raised to %d", got, budget.OutputReserve)
+	if got, _ := numericField(block["reserveTokens"]); got != budget.ReserveTokens {
+		t.Fatalf("reserveTokens = %d, want raised to %d", got, budget.ReserveTokens)
 	}
 }
 

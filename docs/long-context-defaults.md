@@ -114,6 +114,28 @@ Two things about that 48K a reader will otherwise get wrong (#5430):
   therefore set too HIGH, in the safe-looking direction, and the only symptom is an
   `under_budget` bail that sheds nothing — for as long as the session runs.
 
+### Harness context envelope (Pi)
+
+The window fak writes into an external harness (Pi's `contextWindow`, `maxTokens`,
+`compaction.reserveTokens`, `compaction.keepRecentTokens`) comes from one derivation,
+`harnesskit.DeriveContextEnvelope` (`pkg/harnesskit/context_envelope.go`), applied exactly once
+to the RAW served window. A derived number is refused as input (`ErrDerivedWindow`), so the
+derivation cannot stack. Two bounds, both `MODELED`:
+
+- **Quality cap, large windows only.** `contextWindow = min(served, 163840)`: a 256K or 1M window
+  is capped at 160Ki; a 128K slot is used in full.
+- **Compaction risk, every window.** Output = `clamp(window/8, 4K, 32K)`; reserve = output + 2K
+  summary prompt + a `max(1K, window/32)` skew margin, so Pi's summary request fits the hard cap;
+  keep = `min(20000, trigger/2 - fixed prompt - summary)`. A window where one compaction cannot
+  reclaim a quarter of the trigger (a 32K slot under a ~16K Pi prompt) is reported
+  `WINDOW_TOO_SMALL_FOR_HARNESS` instead of being shrunk further.
+
+This replaces the retired blanket 50% halving, which stacked (131072 → 65536) and made Halo Qwen
+sessions compact at ~49K (38% of the slot) while reclaiming ~6.5K per compaction. For a 131072
+slot the envelope is contextWindow 131072, maxTokens 16384, reserve 22528 (compaction at 108544),
+keep 20000, ~55K reclaimed per compaction. `fak pi config --from-router --write` writes the
+default model's compaction block; non-viable models print a warning with the reason token.
+
 ## When More Than 128K Is Acceptable
 
 Use more than 128K resident context only when at least one condition is true:

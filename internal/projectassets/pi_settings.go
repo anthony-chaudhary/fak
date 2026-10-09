@@ -47,8 +47,8 @@ func ResolvePiSettingsPath(target string) string {
 }
 
 // EnsurePiSafeCompaction ensures the Pi settings file carries a compaction block consistent
-// with budget: auto-compaction enabled, reserveTokens = the derived output reserve, and
-// keepRecentTokens = the derived recent floor. Every unrelated user key is preserved. It
+// with budget: auto-compaction enabled and reserveTokens/keepRecentTokens set to the derived
+// envelope (fak owns those keys). Every unrelated user key is preserved. It
 // returns (resolvedPath, modified, error). A missing file is created with just the block.
 func EnsurePiSafeCompaction(target string, budget PiContextBudget) (string, bool, error) {
 	path := ResolvePiSettingsPath(target)
@@ -81,14 +81,14 @@ func EnsurePiSafeCompaction(target string, budget PiContextBudget) (string, bool
 		block["enabled"] = true
 		modified = true
 	}
-	// Only RAISE safety, never fight a stricter operator budget: write the derived reserve
-	// when it is missing or when the existing reserve leaves less headroom than the derived
-	// one (a smaller reserve means compaction fires later, closer to the ceiling).
-	if cur, ok := numericField(block["reserveTokens"]); !ok || cur < budget.OutputReserve {
-		block["reserveTokens"] = budget.OutputReserve
+	// fak owns reserveTokens and keepRecentTokens: both are set to the derived envelope
+	// exactly, because a reserve or keep that disagrees with the written contextWindow is
+	// what made compaction fire early and storm.
+	if cur, ok := numericField(block["reserveTokens"]); !ok || cur != budget.ReserveTokens {
+		block["reserveTokens"] = budget.ReserveTokens
 		modified = true
 	}
-	if cur, ok := numericField(block["keepRecentTokens"]); !ok || cur <= 0 {
+	if cur, ok := numericField(block["keepRecentTokens"]); !ok || cur != budget.KeepRecentTokens {
 		block["keepRecentTokens"] = budget.KeepRecentTokens
 		modified = true
 	}

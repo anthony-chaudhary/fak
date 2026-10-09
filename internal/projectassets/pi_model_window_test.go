@@ -6,18 +6,19 @@ package projectassets
 // backend's /v1/models last advertised, on the operator host the Qwen 131072) and the safe
 // budget derived from it (65536) was applied to EVERY model entry — so
 // `deepseek-ai/DeepSeek-V4.1-Flash`, whose real window is ~1M, advertised contextWindow
-// 65536. The operator pinned the DeepSeek resident maximum to 500k. These tests bind that
-// number and prove the resolution is per-model, not flat.
+// 65536. These tests prove the resolution is per-model, not flat, and that DeepSeek's ~1M
+// served window is quality-capped once by the harnesskit envelope.
 
 import (
 	"encoding/json"
 	"os"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
 // TestPiModelServedWindowDeepSeekPinned is the objective witness: DeepSeek V4.1 Flash
-// resolves to the operator-directed 500k RESIDENT target (its served window is declared as
-// twice that so the doctrine halving lands exactly on it).
+// resolves to its own ~1M served window, and its context window is the quality cap.
 func TestPiModelServedWindowDeepSeekPinned(t *testing.T) {
 	for _, id := range []string{
 		"deepseek-ai/DeepSeek-V4.1-Flash",
@@ -29,12 +30,9 @@ func TestPiModelServedWindowDeepSeekPinned(t *testing.T) {
 			t.Errorf("PiModelServedWindow(%q) = %d, want %d", id, got, PiDeepSeekFlashServedWindow)
 		}
 		budget := PiModelContextBudget(id, 0)
-		if budget.ResidentTarget != PiOperatorDeepSeekResidentMax {
-			t.Errorf("PiModelContextBudget(%q).ResidentTarget = %d, want %d (operator pin)",
-				id, budget.ResidentTarget, PiOperatorDeepSeekResidentMax)
-		}
-		if PiOperatorDeepSeekResidentMax != 500000 {
-			t.Fatalf("operator pin drifted: %d, want 500000", PiOperatorDeepSeekResidentMax)
+		if budget.ResidentTarget != harnesskit.QualityCapTokens || !budget.Envelope.QualityCapped {
+			t.Errorf("PiModelContextBudget(%q).ResidentTarget = %d, want quality cap %d",
+				id, budget.ResidentTarget, harnesskit.QualityCapTokens)
 		}
 	}
 }
@@ -75,9 +73,9 @@ func TestPiModelServedWindowExplicitSmallerWins(t *testing.T) {
 	}
 }
 
-// TestGeneratePiConfigForWindowDeepSeekIs500k is the config-level witness: the models.json
-// generator writes 500000 for DeepSeek V4.1 Flash, not 65536.
-func TestGeneratePiConfigForWindowDeepSeekIs500k(t *testing.T) {
+// TestGeneratePiConfigForWindowDeepSeekIsQualityCapped is the config-level witness: the
+// models.json generator writes the quality cap for DeepSeek V4.1 Flash, not 65536.
+func TestGeneratePiConfigForWindowDeepSeekIsQualityCapped(t *testing.T) {
 	out, err := GeneratePiConfigForWindow("http://127.0.0.1:8080/v1", "deepseek-ai/DeepSeek-V4.1-Flash", 0)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
@@ -92,11 +90,12 @@ func TestGeneratePiConfigForWindowDeepSeekIs500k(t *testing.T) {
 		t.Fatalf("models = %d, want 1", len(models))
 	}
 	entry := models[0].(map[string]interface{})
-	if cw, _ := numericField(entry["contextWindow"]); cw != 500000 {
-		t.Fatalf("contextWindow = %d, want 500000", cw)
+	want := PiModelContextBudget("deepseek-ai/DeepSeek-V4.1-Flash", 0)
+	if cw, _ := numericField(entry["contextWindow"]); cw != harnesskit.QualityCapTokens {
+		t.Fatalf("contextWindow = %d, want %d", cw, harnesskit.QualityCapTokens)
 	}
-	if mt, _ := numericField(entry["maxTokens"]); mt != MaxPiOutputReserve {
-		t.Fatalf("maxTokens = %d, want %d (the output reserve cap)", mt, MaxPiOutputReserve)
+	if mt, _ := numericField(entry["maxTokens"]); mt != want.MaxOutputTokens {
+		t.Fatalf("maxTokens = %d, want %d (the envelope output budget)", mt, want.MaxOutputTokens)
 	}
 }
 
@@ -141,12 +140,12 @@ func TestEnsurePiProviderConfigRepairsQwenLeakDeepSeek(t *testing.T) {
 		cw, _ := numericField(e["contextWindow"])
 		got[id] = cw
 	}
-	if got["deepseek-ai/DeepSeek-V4.1-Flash"] != 500000 {
-		t.Errorf("DeepSeek contextWindow = %d, want 500000 (repaired)", got["deepseek-ai/DeepSeek-V4.1-Flash"])
+	if got["deepseek-ai/DeepSeek-V4.1-Flash"] != harnesskit.QualityCapTokens {
+		t.Errorf("DeepSeek contextWindow = %d, want %d (repaired)", got["deepseek-ai/DeepSeek-V4.1-Flash"], harnesskit.QualityCapTokens)
 	}
-	if got["Qwen3.8-27B-UD-Q2_K_XL"] != DefaultPiServedWindow/2 {
-		t.Errorf("Qwen contextWindow = %d, want %d (its own window, untouched by DeepSeek's)",
-			got["Qwen3.8-27B-UD-Q2_K_XL"], DefaultPiServedWindow/2)
+	if got["Qwen3.8-27B-UD-Q2_K_XL"] != 65536 {
+		t.Errorf("Qwen contextWindow = %d, want the seeded 65536 (untouched by DeepSeek's repair)",
+			got["Qwen3.8-27B-UD-Q2_K_XL"])
 	}
 }
 

@@ -1,18 +1,10 @@
 package projectassets
 
 // pi_model_windows.go — PER-MODEL served context windows for the Pi `fak` provider
-// catalog. Before this file the Pi writers resolved ONE served window (whatever the
-// backend's /v1/models last advertised, on this host the Qwen 131072) and applied the
-// derived safe budget to EVERY model entry in the catalog. Because PiSafeContextBudget
-// halves the window, a catalog whose last-observed window was the Qwen one advertised
-// contextWindow = 65536 for models that are not Qwen at all — including
-// `deepseek-ai/DeepSeek-V4.1-Flash`, whose real served window is ~1M. The router
-// default for DeepSeek therefore reported 66k, which is the Qwen resident target, not a
-// DeepSeek number.
-//
-// The fix is to resolve the served window PER MODEL. The routing-mode catalog is
-// genuinely multi-model (router aliases resolve to different backends with different
-// real windows), so a single flat window cannot be correct for more than one entry.
+// catalog. The routing-mode catalog is multi-model (router aliases resolve to different
+// backends with different real windows), so one flat window cannot be correct for more
+// than one entry: a catalog that applied the Qwen window to every model advertised the
+// Qwen number for DeepSeek V4.1 Flash, whose real served window is ~1M.
 //
 // Precedence for a model's served window:
 //
@@ -21,21 +13,13 @@ package projectassets
 //     operator override for a model the registry does not name.
 //  3. DefaultPiServedWindow, so an unknown model still degrades to the historical number.
 //
-// The operator-directed cap for DeepSeek V4.1 Flash is expressed by declaring its served
-// window as PiOperatorDeepSeekResidentMax*2 (1000000), so the doctrine halving in
-// PiSafeContextBudget yields a 500000 resident target. The model's real cap is ~1M; this
-// table records the OPERATOR WINDOW, not a claim about the upstream's hard limit.
+// Every registry value is a RAW served window. The quality cap that keeps a 1M window
+// from being filled is applied once, by harnesskit.DeriveContextEnvelope; it must never
+// be pre-applied here (that is how a derived number got halved a second time).
 
-// PiOperatorDeepSeekResidentMax is the operator-directed resident maximum (tokens) for
-// DeepSeek V4.1 Flash on the Pi `fak` provider. The upstream model's real window is ~1M;
-// the operator pinned the Pi resident target to 500k explicitly rather than letting the
-// catalog inherit the Qwen 131072 prior (which produced the 65536 report).
-const PiOperatorDeepSeekResidentMax = 500000
-
-// PiDeepSeekFlashServedWindow is the served window recorded for DeepSeek V4.1 Flash so
-// that the doctrine halving lands exactly on PiOperatorDeepSeekResidentMax. It is written
-// as twice the operator maximum so the two numbers cannot drift apart.
-const PiDeepSeekFlashServedWindow = PiOperatorDeepSeekResidentMax * PiSafeWindowDenominator / PiSafeWindowNumerator
+// PiDeepSeekFlashServedWindow is the served window recorded for DeepSeek V4.1 Flash
+// (~1M). The envelope quality-caps it to harnesskit.QualityCapTokens.
+const PiDeepSeekFlashServedWindow = 1000000
 
 // piModelWindow is one registry row: the model identity plus the served window to assume
 // for it.
@@ -49,8 +33,7 @@ type piModelWindow struct {
 // small and explicit: a wrong entry silently resizes an agent's context, so an unnamed
 // model falls through to the caller's window/default rather than being guessed at.
 var piModelWindowRegistry = []piModelWindow{
-	// DeepSeek V4.1 Flash: the router default on this host. Operator-directed resident
-	// maximum of 500k (see PiOperatorDeepSeekResidentMax).
+	// DeepSeek V4.1 Flash: the router default on this host.
 	{match: func(id string) bool {
 		return piMatchModel(id, "deepseek-ai/DeepSeek-V4.1-Flash", "deepseek-v41-flash", "deepseek-v4-flash")
 	}, window: PiDeepSeekFlashServedWindow},
@@ -104,7 +87,7 @@ func piHasModelPrefix(id, prefix string) bool {
 //
 // Precedence:
 //  1. the per-model registry (exact id / alias / glob), so DeepSeek V4.1 Flash gets its
-//     operator-directed window instead of inheriting the Qwen one;
+//     own served window instead of inheriting the Qwen one;
 //  2. explicitWindow when it is positive (the caller's `--window` override for a model the
 //     registry does not name);
 //  3. DefaultPiServedWindow for an unknown model or an unset override, preserving the

@@ -1,0 +1,28 @@
+{
+  "rows": [
+    {
+      "id": "harness-context-envelope",
+      "canonical": "DeriveContextEnvelope",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "DeriveContextEnvelope is the single harnesskit derivation of how much of a RAW served window an external agent harness may use: the context window (served window, quality-capped at 160Ki only on large windows), the per-turn output budget, the compaction reserve and trigger, the kept recent tail, and whether a compaction reclaims enough room to be viable. PiContextBudget, PiSafeContextBudget and PiModelContextBudget are the Pi-shaped view of that envelope written into models.json and settings.json.",
+      "distinction": "DeriveContextEnvelope sizes a harness's configured window from a served window exactly once and refuses a derived window as input; it is not the served window itself (context-window, the backend's hard cap), not ctxplan's per-task resident envelope, and not the in-kernel compaction budget. It never halves a window a second time.",
+      "distinct_from": [
+        "context-window",
+        "ctxplan"
+      ],
+      "aliases": [
+        "derivecontextenvelope",
+        "picontextbudget",
+        "pisafecontextbudget",
+        "pimodelcontextbudget"
+      ],
+      "grounding": "DeriveContextEnvelope",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/long-context-defaults.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
