@@ -90,8 +90,9 @@ func (m *Model) v41IndexRowsWithOperations(l, pos int, qLat, hidden []float32, k
 // index key has been projected and normalized from the unrotated latent. The
 // position is the first absolute token of the completed group. Readers and
 // restored publications already contain this rotation and must not call it.
-// Existing BF16 normalization boundaries are unchanged; reference FP4
-// quantization and post-rotation dtype copyback remain separate work.
+// The normalized latent is widened BF16: the reference's in-place rotary
+// copyback rounds its tail back to BF16. Reference FP4 quantization and
+// index-key/query dtype boundaries remain separate work.
 func (m *Model) v41CompressedPublicationRoPE(l, pos int, latent, indexKey []float32) error {
 	cfg := m.Cfg
 	rd := cfg.QKRopeHeadDim
@@ -106,6 +107,9 @@ func (m *Model) v41CompressedPublicationRoPE(l, pos int, latent, indexKey []floa
 		applyRopeTailInterleaved(indexKey, cos, sin, rd)
 	}
 	applyRopeTailInterleaved(latent, cos, sin, rd)
+	for i := len(latent) - rd; i < len(latent); i++ {
+		latent[i] = v41RoundBF16(latent[i])
+	}
 	return nil
 }
 

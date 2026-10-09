@@ -26,6 +26,13 @@ func TestV41CompressedRotaryPublication(t *testing.T) {
 		out[i+1] = float32(b*c) + float32(a*s)
 		return out
 	}
+	rotateLatent := func(row []float32, pos int) []float32 {
+		out := rotate(row, pos)
+		for i := len(out) - 2; i < len(out); i++ {
+			out[i] = v41CompressorNormRefCast(out[i])
+		}
+		return out
+	}
 	fixture := func() *Model {
 		m := v41CompressorTestFixtureIndex(t, 128)
 		m.Cfg.QKRopeHeadDim, m.Cfg.QKNopeHeadDim = 2, 510
@@ -73,11 +80,11 @@ func TestV41CompressedRotaryPublication(t *testing.T) {
 					t.Fatal("own latent publication count differs from completed groups")
 				}
 				for group := range own {
-					want := rotate(r.latent[layer][group], group*2)
+					want := rotateLatent(r.latent[layer][group], group*2)
 					if !reflect.DeepEqual(own[group], want) {
 						t.Fatalf("layer %d group %d: owner retained the wrong rotary position", layer, group)
 					}
-					if group == 1 && reflect.DeepEqual(want, rotate(r.latent[layer][group], 3)) {
+					if group == 1 && reflect.DeepEqual(want, rotateLatent(r.latent[layer][group], 3)) {
 						t.Fatal("fixture cannot distinguish closing position 3 from group-first position 2")
 					}
 				}
