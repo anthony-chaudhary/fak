@@ -268,10 +268,8 @@ func v41OracleForwardLatentNormHidden(t *testing.T, m *Model, ids []int, opts v4
 				kv = cpuOracleRMSNorm(kv, gainOrUnit(kvGain), eps)
 			}
 			kv = kv[:hd]
-			// Mirror v41RopeTableForLayer: the table is sized to QKRopeHeadDim, uses
-			// the PER-LAYER theta, and folds in the YaRN attention-factor rescale.
-			// (The reduced fixture pins these off; the published full config does
-			// not, so a bare theta table would rotate a different vector.)
+			// Independently resolve the pinned layer regime: plain layers disable
+			// YaRN, nonzero ratios use compressed theta, and both have unit amplitude.
 			cos, sin := v41OracleRopeTable(t, cfg, l, tt)
 			for h := 0; h < nH; h++ {
 				v41OracleRopeTailInterleaved(q[h*hd:(h+1)*hd], cos, sin, cfg.QKRopeHeadDim)
@@ -319,6 +317,7 @@ func v41OracleForwardLatentNormHidden(t *testing.T, m *Model, ids []int, opts v4
 					}
 				}
 			}
+			v41OracleInverseOutput(t, cfg, l, tt, o)
 			attnOut[tt] = v41OracleGroupedOutput(o, woA, woB, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
 		}
 
@@ -379,32 +378,88 @@ func v41OracleHiddenAfterLayers(t *testing.T, m *Model, ids []int) []float32 {
 }
 
 // v41OracleRopeTable is the independent transcription of the V4.1 rotary table:
-// QKRopeHeadDim/2 frequencies over the rope width, the per-layer theta, and the
-// YaRN attention-factor rescale. It is deliberately NOT a call to
-// v41RopeTableForLayer.
+// inference/model.py:369-389,680-696 at the pinned dba1be0a revision. It shares
+// neither the production table builder nor the generic YaRN helpers. Arithmetic
+// follows the host's float64 table convention; this is semantic rather than
+// bitwise PyTorch float32 parity.
 func v41OracleRopeTable(t *testing.T, cfg Config, layer, p int) (cos, sin []float32) {
 	t.Helper()
 	theta := cfg.RopeTheta
 	if layer >= 0 && layer < len(cfg.RopeThetaPerLayer) && cfg.RopeThetaPerLayer[layer] != 0 {
 		theta = cfg.RopeThetaPerLayer[layer]
 	}
-	scale := cfg.ropeAttentionFactor()
+	compressed := cfg.DeepSeekV41 != nil && layer >= 0 &&
+		layer < len(cfg.DeepSeekV41.CompressRatios) && cfg.DeepSeekV41.CompressRatios[layer] > 0
+	if compressed {
+		theta = cfg.DeepSeekV41.CompressRopeTheta
+	}
+	var rp RopeScaling
+	if nested, ok := cfg.RopeParameters["default"]; ok {
+		rp = nested
+	} else if cfg.LongRope != nil && (cfg.LongRope.Type == "yarn" || cfg.LongRope.RopeType == "yarn") {
+		rp = *cfg.LongRope
+	}
+	factor, original := rp.Factor, rp.OriginalMaxPositionEmbeddings
+	if factor == 0 {
+		factor = cfg.RopeFactor
+	}
+	if original == 0 {
+		original = cfg.RopeOrigContext
+	}
+	fast, slow := rp.BetaFast, rp.BetaSlow
+	if fast == 0 {
+		fast = 32
+	}
+	if slow == 0 {
+		slow = 1
+	}
+	scaled := compressed && cfg.RopeScaling == "yarn" && factor != 0 && original != 0 && theta != 0
+	low, high := 0.0, 0.0
+	if scaled {
+		corrected := func(rotations float64) float64 {
+			return float64(cfg.QKRopeHeadDim) * math.Log(float64(original)/(rotations*2*math.Pi)) / (2 * math.Log(theta))
+		}
+		low = math.Max(math.Floor(corrected(fast)), 0)
+		high = math.Min(math.Ceil(corrected(slow)), float64(cfg.QKRopeHeadDim-1))
+	}
 	n := cfg.QKRopeHeadDim / 2
 	cos = make([]float32, n)
 	sin = make([]float32, n)
 	for j := 0; j < n; j++ {
 		a := float64(p) / math.Pow(theta, float64(2*j)/float64(cfg.QKRopeHeadDim))
+		if scaled {
+			freq := 1 / math.Pow(theta, float64(2*j)/float64(cfg.QKRopeHeadDim))
+			ramp := math.Max(0, math.Min(1, (float64(j)-low)/math.Max(high-low, 1e-3)))
+			smooth := 1 - ramp
+			a = float64(p) * ((freq/factor)*(1-smooth) + freq*smooth)
+		}
 		cv := float32(math.Cos(a))
 		sv := float32(math.Sin(a))
-		if scale != 0 && scale != 1 {
-			s := float32(scale)
-			cv *= s
-			sv *= s
-		}
 		cos[j] = cv
 		sin[j] = sv
 	}
 	return cos, sin
+}
+
+// v41OracleInverseOutput transcribes the conjugate complex multiply at pinned
+// model.py:781, after attention contraction and before the grouped projection.
+// It uses the independent table oracle and explicit inverse equations, never
+// the production inverse helper or a production rotation routine.
+func v41OracleInverseOutput(t *testing.T, cfg Config, layer, pos int, out []float32) {
+	t.Helper()
+	if len(out) != cfg.NumHeads*cfg.HeadDim {
+		t.Fatal("inverse oracle output width does not match query heads")
+	}
+	cos, sin := v41OracleRopeTable(t, cfg, layer, pos)
+	for head := 0; head < cfg.NumHeads; head++ {
+		tail := (head+1)*cfg.HeadDim - cfg.QKRopeHeadDim
+		for pair := 0; pair < cfg.QKRopeHeadDim/2; pair++ {
+			i := tail + 2*pair
+			a, b := out[i], out[i+1]
+			out[i] = float32(a*cos[pair]) + float32(b*sin[pair])
+			out[i+1] = float32(b*cos[pair]) - float32(a*sin[pair])
+		}
+	}
 }
 
 // v41OracleRopeTailInterleaved rotates only the last ropeDim components of hv in

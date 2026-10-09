@@ -33,8 +33,8 @@ qwen35_gdn_prefill_tiled qwen35_gdn_prefill_norm qwen35_gdn_verify_tiled q2k_mat
 rmsnorm_q8_matmul2_coop iq4xs_matvec iq3xxs_matvec iq2s_matvec iq3s_matvec iq2xxs_matvec
 iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention`)
 	t.Run("exact names and copy isolation", func(t *testing.T) {
-		if len(want) != 61 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV4(), want) || !reflect.DeepEqual(VulkanShaders, want) {
-			t.Fatal("Go current builder registry differs from the independent exact61 names")
+		if len(want) != 61 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV4(), want) {
+			t.Fatal("historical V4 registry differs from the independent exact61 names")
 		}
 		if !reflect.DeepEqual(historicalVulkanV2Shaders(), want[:59]) || !reflect.DeepEqual(CurrentVulkanShaderRegistry(), want[:60]) {
 			t.Fatal("historical V2/59 or V3/60 membership changed")
@@ -53,11 +53,11 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention`)
 			windows = append(windows, match[1])
 		}
 		// Windows retains its own historical build order; membership is exact.
-		sortedWant := append([]string(nil), want...)
+		sortedWant := append(append([]string(nil), want...), "v41_indexer_score")
 		sort.Strings(sortedWant)
 		sort.Strings(windows)
 		if !reflect.DeepEqual(windows, sortedWant) {
-			t.Fatalf("Windows current shader names = %v, want exact61 names", windows)
+			t.Fatalf("Windows current shader names = %v, want current exact62 names", windows)
 		}
 		copy := CurrentVulkanShaderRegistryV4()
 		copy[0] = "forged"

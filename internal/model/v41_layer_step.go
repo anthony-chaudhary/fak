@@ -318,6 +318,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
 	}
+	v41InverseAttentionOutputInPlace(cfg, l, pos, o, nH, hd)
 	attnOut, err := projectOutput(o)
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
@@ -580,39 +581,18 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 				return m.v41IndexKeyNorm(l, projected, kNorm, eps, scratch.indexKeyNorm)
 			}
 		}
-		var latent []float32
-		var indexKey []float32
-		var emitted bool
-		var start, end int
-		if indexPub {
-			latent, indexKey, emitted, start, end, err = layerState.appendCompressorSourceIndex(
-				l, plan.Ratio, pos, collapsed, pool, projectKV, projectScore, projectIndex, normWeight, eps)
-		} else {
-			latent, emitted, start, end, err = layerState.appendCompressorSource(
-				l, plan.Ratio, pos, collapsed, pool, projectKV, projectScore, normWeight, eps)
-		}
+		_, _, _, _, _, err = layerState.appendCompressorSourcePublication(
+			l, plan.Ratio, pos, collapsed, pool, projectKV, projectScore, normWeight, eps,
+			v41CompressorPublication{
+				projectIndex: projectIndex,
+				finalize: func(start int, latent, key []float32) error {
+					return m.v41CompressedPublicationRoPE(l, start, latent, key)
+				},
+				registry: registry,
+				ref:      V41AttentionStateRef{LayerID: l, Ratio: plan.Ratio, IsKVSource: plan.KVSourceLayer == l, IsIndexSource: indexPub},
+			})
 		if err != nil {
 			return v41StageErr(v41StageCompress, l, err)
-		}
-		if emitted && len(latent) > 0 {
-			// Mirror the completed group into the shared registry so a later
-			// reader resolves it. The layer's own publication already exists on
-			// its state; the registry entry is the cross-layer view.
-			ref := V41AttentionStateRef{LayerID: l, Ratio: plan.Ratio, IsKVSource: plan.KVSourceLayer == l, IsIndexSource: indexPub}
-			upd := V41AttentionStateUpdate{Ref: ref}
-			if ref.IsKVSource {
-				upd.Latent = latent
-			}
-			if indexPub {
-				upd.IndexKey = indexKey
-			}
-			if ref.IsKVSource || ref.IsIndexSource {
-				if err := registry.publishUpdates([]V41AttentionStateUpdate{upd}); err != nil {
-					return v41StageErr(v41StageCompress, l, err)
-				}
-			}
-			_ = start
-			_ = end
 		}
 		if indexPub {
 			keys, ok := layerState.IndexKeys(l)
@@ -620,7 +600,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 			if len(rows) != len(keys) || (rowsOK && !ok) {
 				return v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: own index history is incomplete", ErrV41ForwardStage))
 			}
-			sourceIdx, err = m.v41IndexRowsProjected(l, qLat, collapsed, keys, scratch.denseProjection)
+			sourceIdx, err = m.v41IndexRowsProjected(l, pos, qLat, collapsed, keys, scratch.denseProjection)
 			if err != nil {
 				return err
 			}
@@ -674,7 +654,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		if indexSourceAt(cfg.DeepSeekV41, l) {
 			idx, ierr = m.v41RoleStepNormalizeIndex(l, plan, sourceIdx, len(sharedKV))
 		} else {
-			idx, ierr = m.v41RoleStepIndex(indexState, l, plan, qLat, collapsed, len(sharedKV))
+			idx, ierr = m.v41RoleStepIndex(indexState, l, pos, plan, qLat, collapsed, len(sharedKV))
 		}
 		if ierr != nil {
 			return ierr
@@ -691,6 +671,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
 	}
+	v41InverseAttentionOutputInPlace(cfg, l, pos, o, nH, hd)
 	attnProjected, err := projectOutput(o)
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
@@ -765,16 +746,16 @@ func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, 
 // selection (computed here from the source's own completed stream) and a reader
 // reuses its source's published top-k, matching v41AttentionIndexList's
 // precedence at seq == 1.
-func (m *Model) v41RoleStepIndex(state *V41AttentionState, l int, plan V41AttentionPlan, qLat, hidden []float32, groups int) ([]int32, error) {
+func (m *Model) v41RoleStepIndex(state *V41AttentionState, l, pos int, plan V41AttentionPlan, qLat, hidden []float32, groups int) ([]int32, error) {
 	if plan.TopKWidth <= 0 || groups <= 0 {
 		return nil, nil
 	}
 	if indexSourceAt(m.Cfg.DeepSeekV41, l) {
-		rows, ok := state.KVSourceRows(l)
+		rows, ok := state.IndexKeys(l)
 		if !ok || len(rows) == 0 {
 			return nil, nil
 		}
-		idx, err := m.v41IndexRows(l, qLat, hidden, rows)
+		idx, err := m.v41IndexRowsProjected(l, pos, qLat, hidden, rows, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -815,12 +796,12 @@ func (m *Model) v41RoleStepNormalizeIndex(l int, plan V41AttentionPlan, row []in
 // selection for a just-completed group so a later reader reuses it. It mirrors
 // v41Layer's index-source publication at seq == 1: one selection row for the
 // newest position, the causal superset across the stream.
-func (m *Model) v41RoleStepPublishTopK(state *V41AttentionState, l int, plan V41AttentionPlan, qLat, hidden []float32, sharedKV [][]float32) error {
-	idx, err := m.v41IndexRows(l, qLat, hidden, sharedKV)
+func (m *Model) v41RoleStepPublishTopK(state *V41AttentionState, l, pos int, plan V41AttentionPlan, qLat, hidden []float32, keys [][]float32) error {
+	idx, err := m.v41IndexRowsProjected(l, pos, qLat, hidden, keys, nil)
 	if err != nil {
 		return err
 	}
-	row, err := m.v41RoleStepNormalizeIndex(l, plan, idx, len(sharedKV))
+	row, err := m.v41RoleStepNormalizeIndex(l, plan, idx, len(keys))
 	if err != nil {
 		return err
 	}

@@ -4,7 +4,8 @@ package compute
 
 /*
 #cgo CFLAGS: -I${SRCDIR}
-#cgo LDFLAGS: -L${SRCDIR} -lfakvulkan
+#cgo !v41_indexer_witness LDFLAGS: -L${SRCDIR} -lfakvulkan
+#cgo v41_indexer_witness LDFLAGS: -L${SRCDIR} -lfakvulkan_v41_indexer_witness
 #include "vulkan_backend.h"
 */
 import "C"

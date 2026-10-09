@@ -23,7 +23,7 @@ func v41CompressorHTTPModel(t *testing.T) *model.Model {
 		NSharedExperts: 1, RoutedScalingFactor: 1.5, RopeTheta: 10000, RMSNormEps: 1e-6, EOSTokenID: -1,
 		Window: []int{-1}, IndexNHeads: 1, IndexHeadDim: 512, IndexTopK: 2,
 		DeepSeekV41: &model.DeepSeekV41Config{HCMult: 4, HCEps: 1e-6, HCSinkhornIters: 20,
-			CompressRatios: []int{2, 2}, KVSourceLayerIDs: []int{0}, IndexSourceLayerIDs: []int{0}, CandidateSourceLayerID: 20},
+			CompressRatios: []int{2, 2}, CompressRopeTheta: 10000, KVSourceLayerIDs: []int{0}, IndexSourceLayerIDs: []int{0}, CandidateSourceLayerID: 20},
 	}
 	if !cfg.IsDeepSeekV41() {
 		t.Fatal("public compressed fixture lost V41 identity")

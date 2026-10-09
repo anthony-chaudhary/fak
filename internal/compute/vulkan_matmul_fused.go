@@ -4,7 +4,8 @@ package compute
 
 /*
 #cgo CFLAGS: -I${SRCDIR}
-#cgo LDFLAGS: -L${SRCDIR} -lfakvulkan
+#cgo !v41_indexer_witness LDFLAGS: -L${SRCDIR} -lfakvulkan
+#cgo v41_indexer_witness LDFLAGS: -L${SRCDIR} -lfakvulkan_v41_indexer_witness
 #include <stdlib.h>
 #include "vulkan_backend.h"
 // Issue-local adapter while the shared Vulkan C ABI remains stable: the fused Q2_K

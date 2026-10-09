@@ -218,10 +218,11 @@ func v41OracleForward(t *testing.T, m *Model, ids []int) [][]float32 {
 			qLat := cpuOracleMatVec(wQA, c, cfg.QLoraRank, H)
 			q := cpuOracleMatVec(wQB, qLat, nH*hd, cfg.QLoraRank)
 			kv := cpuOracleMatVec(wKV, c, hd, H)
+			cos, sin := v41OracleRopeTable(t, cfg, l, tt)
 			for h := 0; h < nH; h++ {
-				cpuOracleRopeTailInterleaved(q[h*hd:(h+1)*hd], tt, hd, cfg.QKRopeHeadDim, cfg.RopeTheta)
+				v41OracleRopeTailInterleaved(q[h*hd:(h+1)*hd], cos, sin, cfg.QKRopeHeadDim)
 			}
-			cpuOracleRopeTailInterleaved(kv, tt, hd, cfg.QKRopeHeadDim, cfg.RopeTheta)
+			v41OracleRopeTailInterleaved(kv, cos, sin, cfg.QKRopeHeadDim)
 			qHeads[tt] = q
 			kvRows[tt] = kv
 		}
@@ -259,6 +260,7 @@ func v41OracleForward(t *testing.T, m *Model, ids []int) [][]float32 {
 					}
 				}
 			}
+			v41OracleInverseOutput(t, cfg, l, tt, o)
 			attnOut[tt] = v41OracleGroupedOutput(o, woA, woB, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
 		}
 
@@ -999,10 +1001,11 @@ func v41OracleEngramForward(t *testing.T, m *Model, layout V41EngramLayout, ids 
 			qLat := cpuOracleMatVec(wQA, c, cfg.QLoraRank, H)
 			q := cpuOracleMatVec(wQB, qLat, nH*hd, cfg.QLoraRank)
 			kv := cpuOracleMatVec(wKV, c, hd, H)
+			cos, sin := v41OracleRopeTable(t, cfg, l, tt)
 			for h := 0; h < nH; h++ {
-				cpuOracleRopeTailInterleaved(q[h*hd:(h+1)*hd], tt, hd, cfg.QKRopeHeadDim, cfg.RopeTheta)
+				v41OracleRopeTailInterleaved(q[h*hd:(h+1)*hd], cos, sin, cfg.QKRopeHeadDim)
 			}
-			cpuOracleRopeTailInterleaved(kv, tt, hd, cfg.QKRopeHeadDim, cfg.RopeTheta)
+			v41OracleRopeTailInterleaved(kv, cos, sin, cfg.QKRopeHeadDim)
 			qHeads[tt] = q
 			kvRows[tt] = kv
 		}
@@ -1040,6 +1043,7 @@ func v41OracleEngramForward(t *testing.T, m *Model, layout V41EngramLayout, ids 
 					}
 				}
 			}
+			v41OracleInverseOutput(t, cfg, l, tt, o)
 			attnOut[tt] = v41OracleGroupedOutput(o, woA, woB, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
 		}
 
@@ -1350,7 +1354,7 @@ func TestV41CEDCSA2StagesIndependent(t *testing.T) {
 	cfg.DeepSeekV41.CompressRatios = []int{2}
 	cfg.DeepSeekV41.IndexSourceLayerIDs = []int{0}
 	cfg.IndexNHeads = 2
-	cfg.IndexHeadDim = 4
+	cfg.IndexHeadDim = cfg.QKRopeHeadDim
 	cfg.IndexTopK = 2
 	m.Cfg = cfg
 
@@ -1405,7 +1409,7 @@ func TestV41CEDCSA2StagesIndependent(t *testing.T) {
 		c2.DeepSeekV41.CompressRatios = []int{2}
 		c2.DeepSeekV41.IndexSourceLayerIDs = []int{0}
 		c2.IndexNHeads = 2
-		c2.IndexHeadDim = 4
+		c2.IndexHeadDim = c2.QKRopeHeadDim
 		c2.IndexTopK = 2
 		noW.Cfg = c2
 	}

@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"math"
 )
 
 // v41KVLoraRankReduced is the reduced-model KV latent width. The published V4.1
@@ -223,6 +224,10 @@ func (m *Model) v41CompressIndexForwardAdmitted() error {
 			return v41StageErr(v41StageIndexer, layer,
 				fmt.Errorf("%w: layer %d declares a lightning-indexer source but the indexer geometry (nHeads=%d headDim=%d) is not declared", ErrV41ForwardStage, layer, indexHeads, indexDim))
 		}
+		if rd := cfg.QKRopeHeadDim; rd <= 0 || rd%2 != 0 || rd > indexDim {
+			return v41StageErr(v41StageIndexer, layer,
+				fmt.Errorf("%w: index rotary width %d must be positive, even and <= index head width %d", ErrV41ForwardStage, rd, indexDim))
+		}
 		wq := indexHeads * indexDim
 		if err := m.v41AdmitShape(layerName(layer, "indexer.wq_b.weight"), v41StageIndexer, layer, wq, cfg.QLoraRank); err != nil {
 			return err
@@ -306,7 +311,7 @@ func (m *Model) v41CompressedRowsWithOperations(l int, ratio int, kvRows [][]flo
 // layer declares no index source. Candidate blocks are selected when the layer is
 // the declared candidate source, so the selection reads a blocked pool rather
 // than the full compressed set.
-func (m *Model) v41IndexRows(l int, qLat []float32, hidden []float32, keys [][]float32) ([]int32, error) {
+func (m *Model) v41IndexRows(l, pos int, qLat []float32, hidden []float32, keys [][]float32) ([]int32, error) {
 	if !indexSourceAt(m.Cfg.DeepSeekV41, l) {
 		return nil, nil
 	}
@@ -314,7 +319,13 @@ func (m *Model) v41IndexRows(l int, qLat []float32, hidden []float32, keys [][]f
 	if err != nil {
 		return nil, err
 	}
-	return m.v41IndexRowsProjected(l, qLat, hidden, projected, nil)
+	ratio := v41CompressRatioAt(m.Cfg, l)
+	for group, key := range projected {
+		if err := m.v41IndexRoPE(l, group*ratio, key, 1); err != nil {
+			return nil, err
+		}
+	}
+	return m.v41IndexRowsProjected(l, pos, qLat, hidden, projected, nil)
 }
 
 // v41KVSourceForwardAdmitted fails closed when the config declares a shared-KV
@@ -411,6 +422,27 @@ func v41HCMultForwardAdmitted(cfg Config) error {
 	return nil
 }
 
+// v41RopeForwardAdmitted validates the same per-layer base the table consumes.
+// Nonzero compression ratios, including ratio 1, require their declared
+// compressed base; substituting the plain base would execute a different model.
+// Only active decoder layers participate, so auxiliary schedule entries and
+// metadata inherited by a deliberately narrowed fixture remain untouched.
+func v41RopeForwardAdmitted(cfg Config) error {
+	for layer := 0; layer < cfg.NumLayers; layer++ {
+		theta := v41RopeThetaForLayer(cfg, layer)
+		if theta > 0 && !math.IsNaN(theta) && !math.IsInf(theta, 0) {
+			continue
+		}
+		key := "rope_theta"
+		if v41CompressRatioAt(cfg, layer) > 0 {
+			key = "compress_rope_theta"
+		}
+		return v41StageErr(v41StageAttention, layer,
+			fmt.Errorf("%w: layer %d requires finite positive %s, got %g", ErrV41ForwardStage, layer, key, theta))
+	}
+	return nil
+}
+
 // v41ForwardAdmitted returns nil only when this is an admitted V4.1 config with
 // every required stage's weights present and shape-consistent. It is the gate
 // both Model.Forward and Session.Prefill/Step run before the assembly. A
@@ -434,6 +466,9 @@ func (m *Model) v41ForwardAdmitted() error {
 	// axes disagree with its Attention envelope is refused here rather than
 	// silently assembled against the reduced stand-in geometry.
 	if _, err := v41ForwardGeometry(cfg); err != nil {
+		return err
+	}
+	if err := v41RopeForwardAdmitted(cfg); err != nil {
 		return err
 	}
 	// kvLatentRank is resolved through the same fail-closed discriminator, so an
