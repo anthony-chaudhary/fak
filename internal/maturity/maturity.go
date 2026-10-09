@@ -238,6 +238,8 @@ func importPath(lane string) string {
 // tests. The facts seam lets a test inject a synthetic tree without touching disk.
 type Options struct {
 	Root string
+	// ProgressPath is an optional, bounded diagnostic snapshot; it never supplies evidence.
+	ProgressPath string
 	// facts overrides the disk read for tests; nil means re-derive from Root.
 	facts func(root string) []Capability
 	// Witnesses overrides runtime witness loading for deterministic callers and tests.
@@ -273,16 +275,21 @@ type ScorecardPayload struct {
 func Build(opts Options) ScorecardPayload {
 	opts = opts.normalize()
 	root := scorecard.WorkspaceRoot(opts.Root)
+	progress := newRuntimeProofProgress(opts.ProgressPath)
 	factsFn := opts.facts
 	if factsFn == nil {
 		factsFn = gatherFacts
 	}
+	progress("gather_facts", 0)
 	caps := factsFn(root)
 	witnessFn := opts.Witnesses
 	if witnessFn == nil {
-		witnessFn = verifyRuntimeProofs
+		witnessFn = func(root string) (map[string]RuntimeProof, error) {
+			return verifyRuntimeProofsWithProgress(root, progress)
+		}
 	}
 	witnesses, proofLoadErr := witnessFn(root)
+	progress("adjudicate", 0)
 	for i := range caps {
 		caps[i].Dogfooded = false
 		if proofLoadErr == nil {

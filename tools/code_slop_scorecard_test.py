@@ -14,6 +14,7 @@ from __future__ import annotations
 import builtins
 import contextlib
 import io
+import json
 import os
 import subprocess
 import tempfile
@@ -1628,6 +1629,25 @@ def test_duplication_owner_caches_preserve_outputs_and_bound_work():
     finally:
         cached_spans.cache_clear()
         cached_owner.cache_clear()
+
+
+def test_progress_snapshot_survives_phase_failure_without_payload_changes():
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "slop.progress.json"
+        with contextlib.redirect_stderr(io.StringIO()) as stderr, \
+                patch.object(cs, "gather_go", side_effect=OSError("fixture unavailable")):
+            baseline = cs.collect(Path(directory))
+            traced = cs.collect(Path(directory), progress_path=str(path))
+        assert traced == baseline
+        record = json.loads(path.read_text())
+        assert record["phase"] == "gather_go" and record["proof_index"] == 0
+        assert record["elapsed_ms"] >= 0
+        assert "fixture unavailable" not in path.read_text()
+        assert directory not in path.read_text()
+        assert stderr.getvalue().startswith("FAK_SCORECARD_PROGRESS ")
+        assert not list(Path(directory).glob(".progress-*.tmp"))
 
 
 def main() -> int:

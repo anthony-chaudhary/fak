@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -88,11 +89,16 @@ func validateRuntimeCommand(command string) error {
 }
 
 func verifyRuntimeProofs(root string) (map[string]RuntimeProof, error) {
+	return verifyRuntimeProofsWithProgress(root, newRuntimeProofProgress(""))
+}
+
+func verifyRuntimeProofsWithProgress(root string, progress func(string, int)) (map[string]RuntimeProof, error) {
+	progress("load_proofs", 0)
 	witnesses, err := loadRuntimeProofs(root)
 	if err != nil {
 		return nil, err
 	}
-	if err := runRuntimeProofs(root, witnesses); err != nil {
+	if err := runRuntimeProofs(root, witnesses, progress); err != nil {
 		return nil, err
 	}
 	return witnesses, nil
@@ -104,16 +110,17 @@ func VerifyRuntimeProofs(root string) error {
 	if err != nil {
 		return err
 	}
-	return runRuntimeProofs(root, witnesses)
+	return runRuntimeProofs(root, witnesses, newRuntimeProofProgress(""))
 }
 
-func runRuntimeProofs(root string, witnesses map[string]RuntimeProof) error {
+func runRuntimeProofs(root string, witnesses map[string]RuntimeProof, progress func(string, int)) error {
+	progress("runtime_proofs_start", 0)
 	lanes := make([]string, 0, len(witnesses))
 	for lane := range witnesses {
 		lanes = append(lanes, lane)
 	}
 	sort.Strings(lanes)
-	for _, lane := range lanes {
+	for index, lane := range lanes {
 		witness := witnesses[lane]
 		fields := strings.Fields(witness.Command)
 		if len(fields) == 0 {
@@ -121,6 +128,7 @@ func runRuntimeProofs(root string, witnesses map[string]RuntimeProof) error {
 		}
 		program := fields[0]
 		if isFakProgram(program) {
+			progress("verify_artifact", index+1)
 			resolved, err := resolveRuntimeFak()
 			if err != nil {
 				return fmt.Errorf("runtime witness for %s cannot resolve fak artifact: %w", lane, err)
@@ -132,6 +140,7 @@ func runRuntimeProofs(root string, witnesses map[string]RuntimeProof) error {
 		}
 		command := exec.Command(program, fields[1:]...)
 		command.Dir = root
+		progress("execute_proof", index+1)
 		output, err := command.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("runtime witness for %s failed: %w: %s", lane, err, strings.TrimSpace(string(output)))
@@ -140,7 +149,41 @@ func runRuntimeProofs(root string, witnesses map[string]RuntimeProof) error {
 			return fmt.Errorf("runtime witness for %s did not emit required output %q: %s", lane, witness.OutputContains, strings.TrimSpace(string(output)))
 		}
 	}
+	progress("runtime_proofs_complete", len(lanes))
 	return nil
+}
+
+// newRuntimeProofProgress retains one atomic, bounded snapshot even when the
+// outer garden runner kills this process tree. The proof ID is its one-based
+// position in sorted lane order at the scored source, never an argument or path.
+// Elapsed time is since Build began, not the enclosing process launch.
+func newRuntimeProofProgress(path string) func(string, int) {
+	started := time.Now()
+	lastProof := 0
+	return func(phase string, proof int) {
+		if path == "" {
+			return
+		}
+		if proof > 0 {
+			lastProof = proof
+		}
+		data, _ := json.Marshal(struct {
+			Schema     string `json:"schema"`
+			Phase      string `json:"phase"`
+			ElapsedMS  int64  `json:"elapsed_ms"`
+			ProofIndex int    `json:"proof_index"`
+		}{"fak-scorecard-progress/1", phase, time.Since(started).Milliseconds(), lastProof})
+		// Diagnostic I/O is best-effort and cannot change proof success/failure.
+		if temporary, err := os.CreateTemp(filepath.Dir(path), ".maturity-progress-*.tmp"); err == nil {
+			_, writeErr := temporary.Write(append(data, '\n'))
+			closeErr := temporary.Close()
+			if writeErr == nil && closeErr == nil {
+				_ = os.Rename(temporary.Name(), path)
+			}
+			_ = os.Remove(temporary.Name())
+		}
+		_, _ = fmt.Fprintln(os.Stderr, "FAK_SCORECARD_PROGRESS "+string(data))
+	}
 }
 
 var resolveRuntimeFak = func() (string, error) {

@@ -41,6 +41,7 @@ func runMaturity(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	asJSON := fs.Bool("json", false, "emit control-pane JSON")
+	progressPath := fs.String("progress-file", "", "optional bounded progress snapshot (diagnostics only)")
 	asMarkdown := fs.Bool("markdown", false, "emit scorecard markdown")
 	next := fs.Bool("next", false, "emit only the next-work backlog (ladder-skips first)")
 	comparePath := fs.String("compare", "", "compare against a prior --json payload")
@@ -62,7 +63,7 @@ func runMaturity(stdout, stderr io.Writer, argv []string) int {
 	if root == "" {
 		root = repoRoot()
 	}
-	payload := maturity.Build(maturity.Options{Root: root})
+	payload := maturity.Build(maturity.Options{Root: root, ProgressPath: *progressPath})
 
 	if *comparePath != "" {
 		base, ok := readCompareBase(stderr, "fak maturity", *comparePath)
