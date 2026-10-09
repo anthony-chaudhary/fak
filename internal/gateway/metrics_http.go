@@ -420,7 +420,7 @@ func ensureHTTPTrace(s *Server, w http.ResponseWriter, r *http.Request) string {
 		}
 		traceID = requestTraceID(r)
 		if traceID == "" && s != nil {
-			traceID = s.traceFor("")
+			traceID = s.headerlessTrace(r)
 		}
 		ctx = newTraceContext(w3cTraceID(traceID), 0)
 	}
@@ -465,7 +465,7 @@ func (s *Server) useHTTPTrace(w http.ResponseWriter, r *http.Request, preferred 
 		traceID = requestTraceID(r)
 	}
 	if traceID == "" && s != nil {
-		traceID = s.traceFor("")
+		traceID = s.headerlessTrace(r)
 	}
 	if traceID != "" {
 		r.Header.Set(traceHeader, traceID)

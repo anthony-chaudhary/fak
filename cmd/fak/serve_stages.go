@@ -927,18 +927,25 @@ func (rt *serveRuntime) resolveSessionPlane(sf *serveFlags) {
 
 	defaultTraceID := strings.TrimSpace(*sf.sessionID)
 	if *sf.contextBudgetTokens > 0 {
-		if defaultTraceID == "" {
-			defaultTraceID = "default"
-		}
-		serveSessions.SetBudget(defaultTraceID, session.Budget{
+		budget := session.Budget{
 			TurnsLeft:         session.Unbounded,
 			TokensLeft:        session.Unbounded,
 			ContextTokensLeft: *sf.contextBudgetTokens,
-		})
+		}
+		if defaultTraceID == "" {
+			// One shared session here let one header-less agent's exhaustion refuse every
+			// other header-less caller; each connection gets its own budget instead.
+			defaultTraceID = gateway.UnkeyedPerConnectionTraceID
+			setServeUnkeyedSessionBudget(&budget)
+		} else {
+			serveSessions.SetBudget(defaultTraceID, budget)
+		}
 	}
-	if err := registerServeSessionDurability(context.Background(), defaultTraceID); err != nil {
-		fmt.Fprintln(os.Stderr, "fak serve:", err)
-		os.Exit(1)
+	if defaultTraceID != gateway.UnkeyedPerConnectionTraceID {
+		if err := registerServeSessionDurability(context.Background(), defaultTraceID); err != nil {
+			fmt.Fprintln(os.Stderr, "fak serve:", err)
+			os.Exit(1)
+		}
 	}
 	rt.apiKey, rt.engineCacheAdminKey, rt.requireKey, rt.defaultTraceID = apiKey, engineCacheAdminKey, requireKey, defaultTraceID
 }

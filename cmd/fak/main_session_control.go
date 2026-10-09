@@ -88,6 +88,7 @@ func listSessions(_ context.Context) []gateway.SessionState {
 // turn-budget, token-budget, and pace controls before the upstream request runs.
 func decideSession(ctx context.Context, traceID string) gateway.SessionVerdict {
 	traceID = strings.TrimSpace(traceID)
+	seedServeUnkeyedSession(traceID)
 	v := serveSessions.Decide(traceID)
 	// #5640: this is the one boundary EVERY served session crosses, so it is where the
 	// broadcast tag registry is produced — tag the trace with this process's routing

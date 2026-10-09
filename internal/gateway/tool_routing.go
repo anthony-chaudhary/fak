@@ -1094,7 +1094,7 @@ func (s *Server) traceFor(traceID string) string {
 	s.defaultTraceMu.RLock()
 	defaultTraceID := s.defaultTraceID
 	s.defaultTraceMu.RUnlock()
-	if defaultTraceID != "" {
+	if defaultTraceID != "" && defaultTraceID != UnkeyedPerConnectionTraceID {
 		return defaultTraceID
 	}
 	return "gw-" + itoa(atomic.AddUint64(&s.traceSeq, 1))

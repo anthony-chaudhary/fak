@@ -373,6 +373,20 @@ func (t *Table) SetBudget(trace string, b Budget) (State, bool) {
 	return t.setLocked(trace, func(cur *State) { cur.Budget = b.withContextCap() })
 }
 
+// SeedBudget sets trace's budget only if the table has never seen trace, in one
+// critical section, so concurrent first admissions cannot reset a budget another
+// request already debited. It reports whether it seeded.
+func (t *Table) SeedBudget(trace string, b Budget) (State, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if st, seen := t.state[trace]; seen {
+		return st, false
+	}
+	cur := DefaultState(trace)
+	cur.Budget = b.withContextCap()
+	return t.putLocked(cur), true
+}
+
 // getLockedNonTerminal loads trace's current State (the caller must already hold
 // t.mu, matching the getLocked/putLocked naming convention) and reports whether it
 // is non-terminal — the shared guard setLocked and DecideTimeBudget both open with
