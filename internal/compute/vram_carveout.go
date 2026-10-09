@@ -2,6 +2,7 @@ package compute
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -34,45 +35,52 @@ func DedicatedVRAMCarveoutInfo(b Backend) (bytes int64, known bool) {
 
 const amdPCIVendorID = "0x1002"
 
-// hostDedicatedVRAMCarveout reads the host's amdgpu dedicated VRAM carve-out from sysfs.
-func hostDedicatedVRAMCarveout() (int64, bool) {
-	if runtime.GOOS != "linux" {
-		return 0, false
-	}
-	return dedicatedVRAMCarveoutFromSysfs("/sys/class/drm", filepath.Glob, os.ReadFile)
+// hostDedicatedVRAMCarveout observes only the selected integrated AMD device.
+func hostDedicatedVRAMCarveout(backend Backend) (int64, bool) {
+	return dedicatedVRAMCarveoutFromSysfs(backend, hostEnvironmentDeps{
+		goos: runtime.GOOS, readFile: os.ReadFile, evalSymlinks: filepath.EvalSymlinks,
+	})
 }
 
-// dedicatedVRAMCarveoutFromSysfs returns mem_info_vram_total of EXACTLY ONE amdgpu card under
-// drmRoot. Zero or several AMD cards, or an unreadable or non-positive value, is known=false:
-// the carve-out is never guessed, so an ambiguous host keeps the MemTotal-only bound.
-func dedicatedVRAMCarveoutFromSysfs(drmRoot string, glob func(string) ([]string, error), readFile func(string) ([]byte, error)) (int64, bool) {
-	cards, err := glob(filepath.Join(drmRoot, "card*"))
+// dedicatedVRAMCarveoutFromSysfs reads only the selected device's dedicated VRAM;
+// GTT and other cards never contribute capacity. The caller owns the current
+// initialized-device lifetime. Rechecking identity detects observed changes, but
+// is not a lifetime lease or an atomic guarantee against hot unplug.
+func dedicatedVRAMCarveoutFromSysfs(backend Backend, deps hostEnvironmentDeps) (int64, bool) {
+	if deps.goos != "linux" {
+		return 0, false
+	}
+	typed, ok := backend.(interface{ VulkanPhysicalDeviceType() uint32 })
+	if !ok || typed.VulkanPhysicalDeviceType() != 1 {
+		return 0, false
+	}
+	snapshot, available, err := CaptureBackendExecutionSnapshot(backend)
+	if err != nil || !available || snapshot.Identity.Backend != "vulkan" {
+		return 0, false
+	}
+	vendor, device, err := parseBackendPCIIdentity(snapshot.Identity.Driver)
+	if err != nil || vendor != amdPCIVendorID {
+		return 0, false
+	}
+	binding, err := bindSelectedVulkanDRMDevice(backend, deps, vendor, device)
 	if err != nil {
 		return 0, false
 	}
-	var found int64
-	n := 0
-	for _, card := range cards {
-		if strings.Contains(filepath.Base(card), "-") {
-			continue
-		}
-		vendor, err := readFile(filepath.Join(card, "device", "vendor"))
-		if err != nil || !strings.EqualFold(strings.TrimSpace(string(vendor)), amdPCIVendorID) {
-			continue
-		}
-		n++
-		raw, err := readFile(filepath.Join(card, "device", "mem_info_vram_total"))
-		if err != nil {
-			return 0, false
-		}
-		v, err := strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 64)
-		if err != nil || v <= 0 {
-			return 0, false
-		}
-		found = v
-	}
-	if n != 1 {
+	raw, err := deps.readFile(path.Join(binding.devicePath, "mem_info_vram_total"))
+	if err != nil {
 		return 0, false
 	}
-	return found, true
+	bytes, err := strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 64)
+	if err != nil || bytes <= 0 {
+		return 0, false
+	}
+	closingBinding, err := bindSelectedVulkanDRMDevice(backend, deps, vendor, device)
+	if err != nil || closingBinding != binding {
+		return 0, false
+	}
+	closingSnapshot, available, err := CaptureBackendExecutionSnapshot(backend)
+	if err != nil || !available || closingSnapshot.Identity != snapshot.Identity || typed.VulkanPhysicalDeviceType() != 1 {
+		return 0, false
+	}
+	return bytes, true
 }

@@ -673,7 +673,10 @@ func (v *vulkanBackend) HostMemory() (total, free int64, known bool) {
 }
 
 func (v *vulkanBackend) DedicatedVRAMCarveout() (int64, bool) {
-	return hostDedicatedVRAMCarveout()
+	if v == nil {
+		return 0, false
+	}
+	return hostDedicatedVRAMCarveout(v)
 }
 
 func (v *vulkanBackend) BeginBatch() {
