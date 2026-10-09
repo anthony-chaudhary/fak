@@ -1016,7 +1016,7 @@ func precommitGates(ctx context.Context, run Runner, opts Options, trunk string,
 				res.Detail = appendDetail(res.Detail, "PEER_WIP_COLLISION (warn): "+attrRes.Detail)
 			} else {
 				res.Reason = ReasonPeerWIPCollision
-				res.Detail = attrRes.Detail
+				res.Detail = appendDetail(res.Detail, attrRes.Detail)
 				res.PeerCollisions = attrRes.CollidingPaths
 				return res, true, nil
 			}

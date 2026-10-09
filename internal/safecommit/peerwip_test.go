@@ -691,30 +691,79 @@ func TestNarrowOwnershipReconciliation(t *testing.T) {
 	})
 }
 
+// fak-test:runtime fast est=10ms lane=default
 func TestPeerWIPNonCommitRefSkippedNotFatal(t *testing.T) {
+	t.Setenv(peerWIPGuardEnvVar, "block")
 	blob, commit, root := strings.Repeat("4", 40), strings.Repeat("1", 40), strings.Repeat("2", 40)
 	blobRef, peerRef := "refs/fak/wip/a-blob-copy", "refs/fak/wip/peer-agent"
-	g := map[string]reply{
-		"status --porcelain -- corpus": {out: " M corpus/file.txt\n"},
-		"for-each-ref --sort=refname --format=%(refname) %(objectname) refs/fak/wip": {out: blobRef + " " + blob + "\n" + peerRef + " " + commit + "\n"},
-		// Real git output for a blob ref: empty contents:size and contents.
-		"for-each-ref --sort=refname --format=%(refname)%00%(objectname)%00%(objecttype)%00%(contents:size)%00%(contents)%00 refs/fak/wip": {
-			out: blobRef + "\x00" + blob + "\x00blob\x00\x00\x00\n" + peerRef + "\x00" + commit + "\x00commit\x000\x00\x00\n",
-		},
-		"rev-list --max-parents=0 --max-count=1 " + commit + " --": {out: root + "\n"},
-		"-c log.showRoot=false log --no-walk=unsorted --format=%H --raw -z --no-abbrev --no-renames --no-ext-diff --no-textconv --diff-merges=off -r " + commit + " " + root + " --always --sparse -- :(top,literal)corpus/file.txt": {
-			out: commit + "\x00\n:100644 100644 " + commit + " " + root + " M\x00corpus/file.txt\x00" + root + "\x00",
-		},
-	}
-	fg := &fakeGit{reply: g}
-	res, err := ValidatePathAttribution(context.Background(), fg.run, "/repo", []string{"corpus"}, PathAttributionOptions{SessionID: "self"})
-	if err != nil {
-		t.Fatalf("a blob ref under refs/fak/wip must not fail attribution: %v", err)
-	}
-	if len(res.MalformedPeerRefs) != 1 || res.MalformedPeerRefs[0] != blobRef+" (blob)" {
-		t.Fatalf("MalformedPeerRefs = %v, want [%s (blob)]", res.MalformedPeerRefs, blobRef)
-	}
-	if res.OK || res.Reason != ReasonPeerWIPCollision || len(res.PeerSessions) != 1 || res.PeerSessions[0] != "peer-agent" {
-		t.Fatalf("commit peer ref must still own its path: ok=%v reason=%q peers=%v", res.OK, res.Reason, res.PeerSessions)
+	for _, tc := range []struct {
+		name, path, commitSize string
+		collision, frameError bool
+	}{
+		{name: "peer-collision-keeps-warning", path: "corpus/file.txt", commitSize: "0", collision: true},
+		{name: "unrelated-work-admitted", path: "corpus/free.txt", commitSize: "0"},
+		{name: "empty-commit-size-refused", path: "corpus/file.txt", frameError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			delta := commit + "\x00"
+			if tc.collision {
+				delta += "\n:100644 100644 " + commit + " " + root + " M\x00" + tc.path + "\x00"
+			}
+			delta += root + "\x00"
+			g := map[string]reply{
+				"status --porcelain -- corpus": {out: " M " + tc.path + "\n"},
+				"for-each-ref --sort=refname --format=%(refname) %(objectname) refs/fak/wip": {out: blobRef + " " + blob + "\n" + peerRef + " " + commit + "\n"},
+				// A blob's size is empty; an empty commit size must still fail closed.
+				"for-each-ref --sort=refname --format=%(refname)%00%(objectname)%00%(objecttype)%00%(contents:size)%00%(contents)%00 refs/fak/wip": {
+					out: blobRef + "\x00" + blob + "\x00blob\x00\x00\x00\n" + peerRef + "\x00" + commit + "\x00commit\x00" + tc.commitSize + "\x00\x00\n",
+				},
+				"rev-list --max-parents=0 --max-count=1 " + commit + " --": {out: root + "\n"},
+				"-c log.showRoot=false log --no-walk=unsorted --format=%H --raw -z --no-abbrev --no-renames --no-ext-diff --no-textconv --diff-merges=off -r " + commit + " " + root + " --always --sparse -- :(top,literal)" + tc.path: {out: delta},
+			}
+			fg := &fakeGit{reply: g}
+			run := func(ctx context.Context, dir string, args ...string) (string, int, error) {
+				if _, ok := g[strings.Join(args, " ")]; !ok {
+					t.Fatalf("unexpected git args: %v", args)
+				}
+				return fg.run(ctx, dir, args...)
+			}
+			res, err := ValidatePathAttribution(context.Background(), run, "/repo", []string{"corpus"}, PathAttributionOptions{SessionID: "self"})
+			if tc.frameError {
+				if err == nil || !strings.Contains(err.Error(), "invalid peer WIP message frame") || res.OK {
+					t.Fatalf("malformed commit frame must refuse: result=%+v err=%v", res, err)
+				}
+				if fg.sawSubcommand("rev-list") || fg.sawSubcommand("-c") {
+					t.Fatalf("queried deltas after invalid metadata: %v", fg.calls)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("a blob ref under refs/fak/wip must not fail attribution: %v", err)
+			}
+			if len(res.MalformedPeerRefs) != 1 || res.MalformedPeerRefs[0] != blobRef+" (blob)" {
+				t.Fatalf("MalformedPeerRefs = %v, want [%s (blob)]", res.MalformedPeerRefs, blobRef)
+			}
+			if !tc.collision {
+				if !res.OK || res.Reason != "" || len(res.CollidingPaths) != 0 || len(res.PeerSessions) != 0 {
+					t.Fatalf("unrelated work must remain admissible: %+v", res)
+				}
+				return
+			}
+			if res.OK || res.Reason != ReasonPeerWIPCollision || len(res.PeerSessions) != 1 || res.PeerSessions[0] != "peer-agent" || !reflect.DeepEqual(res.CollidingPaths, []string{tc.path}) {
+				t.Fatalf("commit peer ref must still own its path: %+v", res)
+			}
+
+			g["rev-parse --git-dir"] = reply{out: ".git"}
+			g["symbolic-ref --short HEAD"] = reply{out: "main\n"}
+			g["rev-parse -q --verify MERGE_HEAD"] = reply{}
+			opts := Options{Dir: "/repo", Paths: []string{"corpus"}, SessionID: "self"}
+			gate, refused, err := precommitGates(context.Background(), run, opts, "main", opts.Paths, Result{Paths: opts.Paths})
+			if err != nil || !refused || gate.Reason != ReasonPeerWIPCollision || !reflect.DeepEqual(gate.PeerCollisions, []string{tc.path}) {
+				t.Fatalf("precommit must preserve peer refusal: result=%+v refused=%v err=%v", gate, refused, err)
+			}
+			if !strings.Contains(gate.Detail, "PEER_WIP_MALFORMED_REF (skipped, not a commit): "+blobRef+" (blob)") || !strings.Contains(gate.Detail, tc.path+" belongs to session peer-agent") {
+				t.Fatalf("precommit must retain malformed-ref and ownership diagnostics: %q", gate.Detail)
+			}
+		})
 	}
 }
