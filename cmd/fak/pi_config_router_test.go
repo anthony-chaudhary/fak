@@ -559,3 +559,55 @@ func TestPiConfigFromRouterSharedCompaction(t *testing.T) {
 		})
 	}
 }
+
+func TestPiConfigFromRouterWritesBoundedRetryPolicy(t *testing.T) {
+	pinPiRouterTestEnv(t, piRouterTestKey)
+	srv := newPiRouterFake(t, multiModelRouterRows())
+	routerURL := srv.URL + "/v1"
+	dir := t.TempDir()
+	modelsPath := filepath.Join(dir, "models.json")
+	settingsPath := filepath.Join(dir, "settings.json")
+	orig := `{"defaultProvider": "fak", "defaultModel": "org/model-a", "retry": {"maxRetries": 3, "provider": {"maxRetries": 2}}}`
+	if err := os.WriteFile(settingsPath, []byte(orig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := runPiConfigRouter(t, "--from-router", routerURL, "--write", "--path", modelsPath, "--settings-path", settingsPath); code != 0 {
+		t.Fatalf("write exit = %d, stderr=%s", code, stderr)
+	}
+	var settings map[string]any
+	written, _ := os.ReadFile(settingsPath)
+	if err := json.Unmarshal(written, &settings); err != nil {
+		t.Fatal(err)
+	}
+	retry, _ := settings["retry"].(map[string]any)
+	if retry["enabled"] != true || retry["maxRetries"] != float64(8) || retry["baseDelayMs"] != float64(4000) || retry["maxAgentDelayMs"] != float64(60000) {
+		t.Fatalf("settings retry = %v, want enabled 8 x 4000ms capped 60000ms", retry)
+	}
+	if provider, _ := retry["provider"].(map[string]any); provider["maxRetries"] != float64(2) {
+		t.Fatalf("settings retry.provider = %v, want the user's block preserved", retry["provider"])
+	}
+	if code, _, stderr := runPiConfigRouter(t, "--from-router", routerURL, "--write", "--path", modelsPath, "--settings-path", settingsPath); code != 0 {
+		t.Fatalf("second write exit = %d, stderr=%s", code, stderr)
+	}
+	if again, _ := os.ReadFile(settingsPath); !bytes.Equal(again, written) {
+		t.Fatal("second run changed settings.json")
+	}
+}
+
+func TestPiConfigFromRouterLeavesRetryForForeignDefaultProvider(t *testing.T) {
+	pinPiRouterTestEnv(t, piRouterTestKey)
+	srv := newPiRouterFake(t, multiModelRouterRows())
+	routerURL := srv.URL + "/v1"
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.json")
+	orig := []byte(`{"defaultProvider": "anthropic", "defaultModel": "x"}`)
+	if err := os.WriteFile(settingsPath, orig, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := runPiConfigRouter(t, "--from-router", routerURL, "--write", "--path", filepath.Join(dir, "models.json"), "--settings-path", settingsPath); code != 0 {
+		t.Fatalf("write exit = %d, stderr=%s", code, stderr)
+	}
+	if got, _ := os.ReadFile(settingsPath); !bytes.Equal(got, orig) {
+		t.Fatalf("settings.json changed for a non-fak default provider:\n%s", got)
+	}
+}

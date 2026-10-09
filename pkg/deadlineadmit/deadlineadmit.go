@@ -237,11 +237,22 @@ func (e *Estimator) InFlight() int {
 
 // Observation is one finished request's measured timing.
 type Observation struct {
-	PromptTokens     int
+	PromptTokens int
+	// CachedTokens is the part of PromptTokens served from a resident KV
+	// prefix (llama.cpp timings.cache_n, usage cached_tokens). Those tokens
+	// were not prefilled, so the prefill rate is measured over
+	// PromptTokens-CachedTokens only.
+	CachedTokens     int
 	Prefill          time.Duration // time to first token
 	CompletionTokens int
 	Decode           time.Duration // first token to last token
 }
+
+// minPrefillSampleTokens is the smallest uncached prompt a prefill sample is
+// taken from. A near-fully-cached turn's time to first token is dominated by
+// fixed per-request overhead, and its tiny token count would read as a
+// collapsed prefill rate.
+const minPrefillSampleTokens = 32
 
 // Observe folds one finished request into the averages. The in-flight count
 // at observation time (including the observed request when it has not ended
@@ -250,8 +261,12 @@ type Observation struct {
 // prefill or decode pair update only the half they carry.
 func (e *Estimator) Observe(o Observation) {
 	pre := 0.0
-	if o.PromptTokens > 0 && o.Prefill > 0 {
-		pre = float64(o.PromptTokens) / o.Prefill.Seconds()
+	uncached := o.PromptTokens
+	if o.CachedTokens > 0 {
+		uncached -= o.CachedTokens
+	}
+	if uncached >= minPrefillSampleTokens && o.Prefill > 0 {
+		pre = float64(uncached) / o.Prefill.Seconds()
 	}
 	dec := 0.0
 	if o.CompletionTokens > 1 && o.Decode > 0 {
@@ -351,9 +366,30 @@ func (e *RefusalError) Unwrap() error { return ErrDeadlineInfeasible }
 // throughput roughly fixed, shared by more streams) and for a serial engine
 // (a queue: the wait grows with the number ahead).
 func (e *Estimator) Estimate(promptTokens, maxTokens int) (time.Duration, bool) {
+	return e.EstimateCached(promptTokens, 0, maxTokens)
+}
+
+// EstimateCached is Estimate for a request whose first cachedTokens prompt
+// tokens are expected to be served from a resident KV prefix: only the
+// uncached remainder pays the prefill term. cachedTokens is clamped to
+// [0, promptTokens]; 0 is the cold estimate.
+func (e *Estimator) EstimateCached(promptTokens, cachedTokens, maxTokens int) (time.Duration, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.estimateLocked(promptTokens, maxTokens)
+	return e.estimateLocked(uncachedTokens(promptTokens, cachedTokens), maxTokens)
+}
+
+func uncachedTokens(promptTokens, cachedTokens int) int {
+	if promptTokens < 0 {
+		promptTokens = 0
+	}
+	if cachedTokens < 0 {
+		cachedTokens = 0
+	}
+	if cachedTokens > promptTokens {
+		cachedTokens = promptTokens
+	}
+	return promptTokens - cachedTokens
 }
 
 func (e *Estimator) estimateLocked(promptTokens, maxTokens int) (time.Duration, bool) {
@@ -396,6 +432,14 @@ func (e *Estimator) estimateLocked(promptTokens, maxTokens int) (time.Duration, 
 // admitted. The check itself is a memory read; callers that admit should
 // then call Begin.
 func (e *Estimator) Admit(promptTokens, maxTokens int, remaining time.Duration, hasBudget bool) Verdict {
+	return e.AdmitCached(promptTokens, 0, maxTokens, remaining, hasBudget)
+}
+
+// AdmitCached is Admit for a request whose first cachedTokens prompt tokens
+// are expected to be served from a resident KV prefix (see EstimateCached).
+// A caller without evidence of a resident prefix passes 0, which keeps the
+// cold-prefill protection for a genuinely uncached prompt.
+func (e *Estimator) AdmitCached(promptTokens, cachedTokens, maxTokens int, remaining time.Duration, hasBudget bool) Verdict {
 	if !hasBudget {
 		return Verdict{Admit: true}
 	}
@@ -403,7 +447,7 @@ func (e *Estimator) Admit(promptTokens, maxTokens int, remaining time.Duration, 
 		return Verdict{Reason: ReasonDeadlineExpired, Remaining: remaining, RetryAfter: time.Second}
 	}
 	e.mu.Lock()
-	est, ok := e.estimateLocked(promptTokens, maxTokens)
+	est, ok := e.estimateLocked(uncachedTokens(promptTokens, cachedTokens), maxTokens)
 	inFlight := e.inFlight
 	e.mu.Unlock()
 	v := Verdict{Admit: true, Estimate: est, Remaining: remaining, Measured: ok}

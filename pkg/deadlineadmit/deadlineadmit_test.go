@@ -179,3 +179,66 @@ func TestBufferedObservationMeasuresWithoutPrefillSplit(t *testing.T) {
 		t.Fatalf("Estimate = (%v, %v), want (50s, true): decode rate carries prefill", got, ok)
 	}
 }
+
+// haloPiEstimator primes the strix3 incident shape: one in-flight-free node
+// measured at 86 prompt tokens/s prefill and 21 tokens/s decode.
+func haloPiEstimator(t *testing.T) *Estimator {
+	t.Helper()
+	e := NewEstimator(Config{}, newClock().now)
+	e.Observe(Observation{PromptTokens: 8600, Prefill: 100 * time.Second, CompletionTokens: 210, Decode: 10 * time.Second})
+	return e
+}
+
+func TestAdmitCachedAdmitsWarmMultiTurnPromptWithinBudget(t *testing.T) {
+	e := haloPiEstimator(t)
+	v := e.AdmitCached(50_000, 48_000, 0, 600*time.Second, true)
+	if err := v.Err(); err != nil || !v.Measured {
+		t.Fatalf("50k prompt with 48k cached prefix: err=%v measured=%v estimate=%v; want measured admission", err, v.Measured, v.Estimate)
+	}
+}
+
+func TestAdmitCachedRefusesSameColdPrompt(t *testing.T) {
+	e := haloPiEstimator(t)
+	for name, v := range map[string]Verdict{
+		"cold cached=0": e.AdmitCached(50_000, 0, 0, 600*time.Second, true),
+		"legacy Admit":  e.Admit(50_000, 0, 600*time.Second, true),
+	} {
+		if err := v.Err(); !errors.Is(err, ErrDeadlineInfeasible) || v.Reason != ReasonDeadlineInfeasible {
+			t.Fatalf("%s: err=%v reason=%q; want ErrDeadlineInfeasible/%q", name, err, v.Reason, ReasonDeadlineInfeasible)
+		}
+	}
+}
+
+func TestEstimateCachedClampsCachedToPrompt(t *testing.T) {
+	e := haloPiEstimator(t)
+	over, _ := e.EstimateCached(1000, 5000, 0)
+	neg, _ := e.EstimateCached(1000, -5, 0)
+	full, _ := e.EstimateCached(0, 0, 0)
+	cold, _ := e.Estimate(1000, 0)
+	if over != full || neg != cold {
+		t.Fatalf("over-cached=%v want %v (no prefill); negative-cached=%v want cold %v", over, full, neg, cold)
+	}
+}
+
+func TestObserveWithCacheMeasuresUncachedPrefillRate(t *testing.T) {
+	warm := NewEstimator(Config{}, newClock().now)
+	// 50k prompt, 47.85k served from the KV prefix: 2150 prefilled in 25 s = 86 t/s.
+	warm.Observe(Observation{PromptTokens: 50_000, CachedTokens: 47_850, Prefill: 25 * time.Second, CompletionTokens: 210, Decode: 10 * time.Second})
+	cold := haloPiEstimator(t)
+	got, ok1 := warm.Estimate(8600, 0)
+	want, ok2 := cold.Estimate(8600, 0)
+	if !ok1 || !ok2 || got != want {
+		t.Fatalf("estimate after cached observation = (%v,%v), want the 86 t/s cold-measured (%v,%v)", got, ok1, want, ok2)
+	}
+}
+
+func TestObserveSkipsPrefillSampleForNearFullyCachedTurn(t *testing.T) {
+	e := haloPiEstimator(t)
+	before, _ := e.Estimate(8600, 0)
+	// 4 uncached tokens in 2 s is per-request overhead, not a 2 t/s prefill rate.
+	e.Observe(Observation{PromptTokens: 50_000, CachedTokens: 49_996, Prefill: 2 * time.Second, CompletionTokens: 210, Decode: 10 * time.Second})
+	after, _ := e.Estimate(8600, 0)
+	if after != before {
+		t.Fatalf("estimate moved %v -> %v on a near-fully-cached observation; want the prefill rate untouched", before, after)
+	}
+}
