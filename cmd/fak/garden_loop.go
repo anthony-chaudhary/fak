@@ -636,6 +636,12 @@ func gardenRenderDarwinPlist(fakBin, root string, interval time.Duration, live b
 	})
 }
 
+// gardenDarwinLoadCommand renders shell guidance only; registration never runs it.
+// Always quote the path, including command substitutions and embedded apostrophes.
+func gardenDarwinLoadCommand(plistPath string) string {
+	return "launchctl bootstrap gui/$(id -u) '" + strings.ReplaceAll(plistPath, "'", "'\\''") + "'"
+}
+
 func registerDarwinLaunchdAgent(stdout, stderr io.Writer, fakBin, root string, interval time.Duration, live bool) int {
 	if err := guardGardenTestRegister("darwin"); err != nil {
 		fmt.Fprintf(stderr, "fak garden loop: %v\n", err)
@@ -660,7 +666,7 @@ func registerDarwinLaunchdAgent(stdout, stderr io.Writer, fakBin, root string, i
 		return 1
 	}
 
-	fmt.Fprintf(stdout, "wrote launchd agent to %s\n  to load: launchctl load -w %s\n", plistPath, plistPath)
+	fmt.Fprintf(stdout, "wrote launchd agent to %s\n  to load: %s\n", plistPath, gardenDarwinLoadCommand(plistPath))
 	return 0
 }
 
