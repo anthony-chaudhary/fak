@@ -202,14 +202,24 @@ func V41IndexerScore(q, keys, weights []float32, nHeads, headDim, compressLen in
 	if compressLen < 0 {
 		return nil, fmt.Errorf("model: v41 indexer score negative compress length %d", compressLen)
 	}
+	// Validate both products before shape checks or allocation. Wrapped zero
+	// could otherwise admit an empty query or an impossibly large key panel.
+	maxInt := int(^uint(0) >> 1)
+	if nHeads > maxInt/headDim {
+		return nil, fmt.Errorf("model: v41 indexer score query geometry overflows int: nHeads=%d headDim=%d", nHeads, headDim)
+	}
+	if compressLen > maxInt/headDim {
+		return nil, fmt.Errorf("model: v41 indexer score key geometry overflows int: compressLen=%d headDim=%d", compressLen, headDim)
+	}
+	queryElements, keyElements := nHeads*headDim, compressLen*headDim
 	if len(weights) != nHeads {
 		return nil, fmt.Errorf("model: v41 indexer score weight length %d, want %d", len(weights), nHeads)
 	}
-	if len(q) != nHeads*headDim {
-		return nil, fmt.Errorf("model: v41 indexer score query length %d, want %d", len(q), nHeads*headDim)
+	if len(q) != queryElements {
+		return nil, fmt.Errorf("model: v41 indexer score query length %d, want %d", len(q), queryElements)
 	}
-	if len(keys) != compressLen*headDim {
-		return nil, fmt.Errorf("model: v41 indexer score key length %d, want %d", len(keys), compressLen*headDim)
+	if len(keys) != keyElements {
+		return nil, fmt.Errorf("model: v41 indexer score key length %d, want %d", len(keys), keyElements)
 	}
 	for i, w := range weights {
 		if !Finite32(w) {
