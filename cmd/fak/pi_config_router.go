@@ -41,7 +41,9 @@ import (
 // contextWindow and maxTokens come from the harnesskit context envelope of that
 // RAW window (projectassets.PiSafeContextBudget), derived exactly once. With
 // --write, settings.json compaction (enabled, reserveTokens, keepRecentTokens) is
-// made compatible with every listed model; fak owns those keys. An unsafe shared
+// made compatible with every listed model, and settings.json retry (enabled,
+// maxRetries, baseDelayMs, maxAgentDelayMs) is set to a backoff that outlasts a
+// saturated router; fak owns those keys. An unsafe shared
 // compaction block refuses --write before either file changes.
 
 var (
@@ -391,7 +393,17 @@ type piRouterPlan struct {
 	Rendered   []byte
 	Default    piRouterDefaultPlan
 	Compaction piRouterCompactionPlan
+	Retry      piRouterRetryPlan
 	Warnings   []string
+}
+
+// piRouterRetryPlan is the settings.json agent-turn retry block fak writes for
+// the router provider: Pi's default budget ends a turn inside one saturated
+// router window.
+type piRouterRetryPlan struct {
+	Policy projectassets.PiRetryPolicy
+	From   projectassets.PiRetryPolicy
+	Change bool
 }
 
 func (p *piRouterPlan) configChanged() bool {
@@ -759,6 +771,12 @@ func planPiRouterDefault(settingsTarget string, plan *piRouterPlan) (piRouterDef
 	default:
 		def.Pick, def.Reason = piRouterDefaultModel(plan.Models), fmt.Sprintf("defaultModel %q is not served by the router", def.Model)
 	}
+	from, _ := projectassets.ReadPiRetryPolicy(raw)
+	plan.Retry = piRouterRetryPlan{
+		Policy: projectassets.DefaultPiRouterRetryPolicy,
+		From:   from,
+		Change: !projectassets.PiRetryPolicyMatches(raw, projectassets.DefaultPiRouterRetryPolicy),
+	}
 	return def, planPiRouterCompaction(raw, plan, def), nil
 }
 
@@ -867,7 +885,7 @@ func runPiConfigFromRouter(stdout, stderr io.Writer, fs *flag.FlagSet, explicitU
 		}
 	}
 	settingsBackup := ""
-	if plan.Default.Pick != "" || plan.Compaction.Change {
+	if plan.Default.Pick != "" || plan.Compaction.Change || plan.Retry.Change {
 		if orig, err := os.ReadFile(plan.Default.SettingsPath); err == nil {
 			settingsBackup, err = writePiBackup(plan.Default.SettingsPath, orig)
 			if err != nil {
@@ -886,6 +904,18 @@ func runPiConfigFromRouter(stdout, stderr io.Writer, fs *flag.FlagSet, explicitU
 			return 1
 		}
 		fmt.Fprintf(stdout, "fak pi config: wrote shared compaction to %s for the router catalog (reserveTokens: %d, keepRecentTokens: %d)", sPath, c.ReserveTokens, c.KeepRecentTokens)
+		if settingsBackup != "" {
+			fmt.Fprintf(stdout, " (backup %s)", settingsBackup)
+		}
+		fmt.Fprintln(stdout)
+	}
+	if r := plan.Retry; r.Change {
+		rPath, _, err := projectassets.EnsurePiRetryPolicy(plan.Default.SettingsPath, r.Policy)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak pi config: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "fak pi config: wrote retry policy to %s (maxRetries: %d, baseDelayMs: %d, maxAgentDelayMs: %d)", rPath, r.Policy.MaxRetries, r.Policy.BaseDelayMs, r.Policy.MaxAgentDelayMs)
 		if settingsBackup != "" {
 			fmt.Fprintf(stdout, " (backup %s)", settingsBackup)
 		}
@@ -968,6 +998,18 @@ func printPiRouterPlan(w io.Writer, plan *piRouterPlan, advertised int, write bo
 		fmt.Fprintf(w, "  compaction %s: reserveTokens %d -> %d, keepRecentTokens %d -> %d shared across the catalog (default model %q; %s)\n", d.SettingsPath, c.FromReserve, c.ReserveTokens, c.FromKeep, c.KeepRecentTokens, c.Model, action)
 	default:
 		fmt.Fprintf(w, "  compaction %s: matches the shared catalog envelope (default model %q)\n", d.SettingsPath, c.Model)
+	}
+	if d.Skipped == "" {
+		r := plan.Retry
+		if r.Change {
+			action := "rerun with --write to apply"
+			if write {
+				action = "applying"
+			}
+			fmt.Fprintf(w, "  retry %s: maxRetries %d -> %d, baseDelayMs %d -> %d, maxAgentDelayMs %d -> %d (~%ds backoff before a turn fails; %s)\n", d.SettingsPath, r.From.MaxRetries, r.Policy.MaxRetries, r.From.BaseDelayMs, r.Policy.BaseDelayMs, r.From.MaxAgentDelayMs, r.Policy.MaxAgentDelayMs, r.Policy.TotalDelayMs()/1000, action)
+		} else {
+			fmt.Fprintf(w, "  retry %s: matches the router retry policy (~%ds backoff)\n", d.SettingsPath, r.Policy.TotalDelayMs()/1000)
+		}
 	}
 	for _, warn := range plan.Warnings {
 		fmt.Fprintf(w, "  warning %s\n", warn)
