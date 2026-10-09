@@ -78,6 +78,26 @@ uint32_t fvk_debug_buffer_props(const void *d);
 int fvk_debug_buffer_is_host_visible(const void *d);
 int fvk_debug_buffer_is_device_local(const void *d);
 
+/* Allocation provenance for one live opaque buffer. Requested flags are the
+ * original allocator request; property_flags and heap_flags describe the actual
+ * selected memory type and its heap. Neither flag set proves a disjoint physical
+ * pool. host_visible_fallback records only allocBuffer's successful device-local
+ * to host-visible retry, not Go-side placement/recovery decisions. */
+typedef struct fvk_buffer_backing_info {
+    uint32_t requested_property_flags;
+    uint32_t memory_type_index;
+    uint32_t property_flags;
+    uint32_t heap_index;
+    uint32_t heap_flags;
+    int host_visible_fallback;
+    int weight_arena_bound;
+} fvk_buffer_backing_info;
+/* Returns 1 only for a live buffer with valid selected type/heap indices in the
+ * initialized backend; otherwise returns 0 and clears a supplied output. The
+ * caller must keep d alive and serialize with allocation/free, like other ABI
+ * calls. Indices are local to the current selected device, not persistent IDs. */
+int fvk_buffer_backing(const void *d, fvk_buffer_backing_info *out);
+
 /* y[P,out] = x[P,in] @ W[out,in]^T   (all row-major f32). */
 void fvk_matmul_f32(const void *dW, const void *dX, void *dY, int out, int in, int P);
 /* first argmax of x[1,in] @ W[out,in]^T without materializing the logits vector. */

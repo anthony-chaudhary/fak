@@ -427,6 +427,83 @@ func (v *vulkanBackend) debugBufferDeviceLocal(b *vulkanBuf) bool {
 	return b != nil && b.ptr != nil && C.fvk_debug_buffer_is_device_local(b.ptr) != 0
 }
 
+// VulkanBufferBacking describes one live buffer's allocation selection. Part is
+// "data" or "scales"; Chunk is -1 for an unchunked tensor. Memory type and heap
+// indices are local to the selected device's current lifetime. Flags are raw
+// VkMemoryPropertyFlags and VkMemoryHeapFlags, not physical-pool guarantees.
+type VulkanBufferBacking struct {
+	Part                   string
+	Chunk                  int
+	RequestedPropertyFlags uint32
+	MemoryTypeIndex        uint32
+	PropertyFlags          uint32
+	HeapIndex              uint32
+	HeapFlags              uint32
+	HostVisibleFallback    bool
+	WeightArenaBound       bool
+}
+
+// VulkanTensorBufferBackings observes every data/scale buffer of a live tensor
+// owned by v, in data-then-scales order for each chunk. A missing buffer or shim
+// observation returns nil, false; partial evidence is never returned. The query
+// performs no Vulkan allocation, transfer, or synchronization of device work.
+//
+// HostVisibleFallback denotes only the shim's successful device-local retry in
+// host-visible storage. A false value does not exclude Go-side host-visible
+// placement or recovery; inspect RequestedPropertyFlags and PropertyFlags too.
+// Arena-bound buffers can share one allocation. These observations cannot
+// establish host/device disjointness, reserve future memory, or authorize a
+// larger capacity limit. Call outside hot token loops.
+func (v *vulkanBackend) VulkanTensorBufferBackings(t Tensor) ([]VulkanBufferBacking, bool) {
+	if v == nil || t.be != v {
+		return nil, false
+	}
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	b, ok := t.buf.(*vulkanBuf)
+	if !ok || b == nil {
+		return nil, false
+	}
+	var backings []VulkanBufferBacking
+	appendBacking := func(ptr unsafe.Pointer, part string, chunk int) bool {
+		var info C.fvk_buffer_backing_info
+		if ptr == nil || C.fvk_buffer_backing(ptr, &info) == 0 {
+			return false
+		}
+		backings = append(backings, VulkanBufferBacking{
+			Part: part, Chunk: chunk,
+			RequestedPropertyFlags: uint32(info.requested_property_flags),
+			MemoryTypeIndex:        uint32(info.memory_type_index),
+			PropertyFlags:          uint32(info.property_flags),
+			HeapIndex:              uint32(info.heap_index),
+			HeapFlags:              uint32(info.heap_flags),
+			HostVisibleFallback:    info.host_visible_fallback != 0,
+			WeightArenaBound:       info.weight_arena_bound != 0,
+		})
+		return true
+	}
+	if len(b.q8Chunks) != 0 {
+		if b.ptr != nil || b.scalePtr != nil || t.Dtype != Q8_0 {
+			return nil, false
+		}
+		for i, chunk := range b.q8Chunks {
+			if !appendBacking(chunk.ptr, "data", i) || !appendBacking(chunk.scalePtr, "scales", i) {
+				return nil, false
+			}
+		}
+	} else {
+		if !appendBacking(b.ptr, "data", -1) {
+			return nil, false
+		}
+		if b.scalePtr != nil || t.Dtype == Q8_0 {
+			if !appendBacking(b.scalePtr, "scales", -1) {
+				return nil, false
+			}
+		}
+	}
+	return backings, true
+}
+
 func (v *vulkanBackend) VulkanDebugResidencyBudget() (budgetBytes, dlUsed int64, hostvisN int) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()

@@ -161,6 +161,11 @@ struct Buffer {
     VkDeviceMemory mem = VK_NULL_HANDLE;
     size_t         bytes = 0;
     VkMemoryPropertyFlags props = 0;
+    // Keep provenance separate from props: existing placement/pooling uses that
+    // historical policy field, which need not contain every selected-type flag.
+    VkMemoryPropertyFlags requestedProps = 0;
+    uint32_t       memoryTypeIndex = UINT32_MAX;
+    bool           hostVisibleFallback = false;
     VkDeviceSize   memoryOffset = 0;
     bool           weightArenaBound = false;
     size_t         weightArenaBlock = std::numeric_limits<size_t>::max();
@@ -562,6 +567,7 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
     }
     Buffer* b = new Buffer();
     b->bytes = bytes;
+    b->requestedProps = props;
     VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     bi.size = reqBytes;
     bi.usage = usage;
@@ -604,6 +610,7 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
                 bytes, (int)r);
             r = fr;
             actualProps = fallback;
+            b->hostVisibleFallback = true;
         }
     }
     if (r == VK_ERROR_FEATURE_NOT_PRESENT) {
@@ -627,6 +634,7 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
         return nullptr;
     }
     b->props = actualProps;
+    b->memoryTypeIndex = selectedMemoryType;
     b->allocationBytes = req.size;
     b->allocationDeviceLocal = memoryTypeUsesDeviceLocalHeap(selectedMemoryType);
     trackDeviceAllocation(req.size, selectedMemoryType);
@@ -656,6 +664,7 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
 
     Buffer* b = new Buffer();
     b->bytes = bytes;
+    b->requestedProps = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     bi.size = reqBytes;
     bi.usage = STORAGE_USAGE;
@@ -701,6 +710,7 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
         ++block.liveBuffers;
         b->mem = block.mem;
         b->props = g_memprops.memoryTypes[memoryType].propertyFlags;
+        b->memoryTypeIndex = block.memoryTypeIndex;
         b->memoryOffset = offset;
         b->weightArenaBound = true;
         b->weightArenaBlock = i;
@@ -760,6 +770,7 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
     g_weightArena.push_back(block);
     b->mem = memory;
     b->props = g_memprops.memoryTypes[memoryType].propertyFlags;
+    b->memoryTypeIndex = memoryType;
     b->memoryOffset = 0;
     b->weightArenaBound = true;
     b->weightArenaBlock = g_weightArena.size() - 1;
@@ -2664,6 +2675,24 @@ int fvk_debug_buffer_is_host_visible(const void* d) {
 int fvk_debug_buffer_is_device_local(const void* d) {
     if (!d) return 0;
     return (B((void*)d)->props & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0;
+}
+
+int fvk_buffer_backing(const void* d, fvk_buffer_backing_info* out) {
+    if (!out) return 0;
+    *out = {};
+    if (!g_ready || !g_dev || !d) return 0;
+    const Buffer* b = B((void*)d);
+    if (!b->buf || !b->mem || b->memoryTypeIndex >= g_memprops.memoryTypeCount) return 0;
+    const VkMemoryType& type = g_memprops.memoryTypes[b->memoryTypeIndex];
+    if (type.heapIndex >= g_memprops.memoryHeapCount) return 0;
+    out->requested_property_flags = b->requestedProps;
+    out->memory_type_index = b->memoryTypeIndex;
+    out->property_flags = type.propertyFlags;
+    out->heap_index = type.heapIndex;
+    out->heap_flags = g_memprops.memoryHeaps[type.heapIndex].flags;
+    out->host_visible_fallback = b->hostVisibleFallback ? 1 : 0;
+    out->weight_arena_bound = b->weightArenaBound ? 1 : 0;
+    return 1;
 }
 
 void fvk_trim_pool(void) {
