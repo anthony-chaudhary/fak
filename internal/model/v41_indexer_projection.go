@@ -1,9 +1,6 @@
 package model
 
-import (
-	"fmt"
-	"math"
-)
+import "fmt"
 
 func v41IndexerProjectionLeaf(leaf string) bool {
 	return leaf == "indexer.wq_b.weight" || leaf == "indexer.wk.weight" || leaf == "indexer.weights_proj.weight"
@@ -90,11 +87,9 @@ func (m *Model) v41IndexRowsWithOperations(l, pos int, qLat, hidden []float32, k
 	if err != nil {
 		return nil, err
 	}
-	// Index scores use their own geometry, independent of attention overrides.
-	// Keep each inverse-square-root factor rounded to float32 before multiplying.
-	scale := float32(1/math.Sqrt(float64(dim))) * float32(1/math.Sqrt(float64(nHeads)))
-	for h := range weights {
-		weights[h] *= scale
+	weights, err = v41IndexWeightsBF16(l, weights, dim, nHeads)
+	if err != nil {
+		return nil, err
 	}
 	topKBlocks, blockSize := 0, 0
 	if d41.CandidateSourceLayerID == l {

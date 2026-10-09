@@ -61,8 +61,11 @@ func TestV41IndexerScoreProjectedOperands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for h := range weights {
-		weights[h] *= float32(1/math.Sqrt(float64(cfg.IndexHeadDim))) * float32(1/math.Sqrt(float64(cfg.IndexNHeads)))
+	scale := float32(math.Pow(float64(cfg.IndexHeadDim), -0.5) * math.Pow(float64(cfg.IndexNHeads), -0.5))
+	for h, value := range weights {
+		projected := float32(v41RefBF16(float64(value)))
+		product := float32(projected * scale)
+		weights[h] = float32(v41RefBF16(float64(product)))
 	}
 	counts := map[string]int{}
 	project := func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
@@ -83,9 +86,9 @@ func TestV41IndexerScoreProjectedOperands(t *testing.T) {
 	v41ScoreTestBits(t, b.calls[0].keys, append(append([]float32(nil), keys[0]...), keys[1]...))
 }
 
-// The independent bit oracle pins the current float32 factor boundaries:
-// 128^-0.5 * 32^-0.5 is mathematically 1/64, but rounding each factor first
-// gives 0x3c7fffff. This does not claim reference BF16 weight-product parity.
+// The independent bit oracle pins the widened BF16 head-weight result for the
+// explicit PyTorch v2.9.0 CUDA source contract: the combined F64 scalar rounds
+// to F32 1/64 and remains 1/64 after BF16 output. Runtime parity is not claimed.
 // The runtime estimate is unmeasured until an authorized execution witness.
 // fak-test:runtime fast est=10ms lane=default
 func TestV41IndexerScoreScaleUsesIndexGeometry(t *testing.T) {
@@ -122,8 +125,8 @@ func TestV41IndexerScoreScaleUsesIndexGeometry(t *testing.T) {
 					t.Fatalf("unexpected score geometry: layer=%d heads=%d dim=%d rows=%d weights=%d", layer, heads, dim, rows, len(weights))
 				}
 				for h, value := range weights {
-					if bits := math.Float32bits(value); bits != 0x3c7fffff {
-						t.Fatalf("head %d index weight bits=%08x, want 3c7fffff", h, bits)
+					if bits := math.Float32bits(value); bits != 0x3c800000 {
+						t.Fatalf("head %d index weight bits=%08x, want 3c800000", h, bits)
 					}
 				}
 				return []float32{0}, nil
