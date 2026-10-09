@@ -600,7 +600,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 			if len(rows) != len(keys) || (rowsOK && !ok) {
 				return v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: own index history is incomplete", ErrV41ForwardStage))
 			}
-			sourceIdx, err = m.v41IndexRowsProjected(l, pos, qLat, collapsed, keys, scratch.denseProjection)
+			sourceIdx, err = m.v41IndexRowsWithOperations(l, pos, qLat, collapsed, keys, scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth)
 			if err != nil {
 				return err
 			}

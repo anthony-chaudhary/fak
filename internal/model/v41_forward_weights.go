@@ -43,6 +43,8 @@ type v41ProjScratch struct {
 	ffnNorm          v41FFNNormFunc
 	compressorNorm   v41CompressorNormFunc
 	indexKeyNorm     v41IndexKeyNormFunc
+	indexerScore     v41IndexerScoreFunc
+	indexScoreHealth v41IndexerScoreHealthFunc
 	sharedActivation v41SharedActivationFunc
 	tailRoPE         v41TailRoPEFunc
 	sharedAttention  v41SharedAttentionFunc

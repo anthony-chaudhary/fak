@@ -38,6 +38,10 @@ func (m *Model) v41IndexKeysWithOperations(l int, rows [][]float32, project v41D
 }
 
 func (m *Model) v41IndexRowsProjected(l, pos int, qLat, hidden []float32, keys [][]float32, project v41DenseProjectionFunc) ([]int32, error) {
+	return m.v41IndexRowsWithOperations(l, pos, qLat, hidden, keys, project, nil, nil)
+}
+
+func (m *Model) v41IndexRowsWithOperations(l, pos int, qLat, hidden []float32, keys [][]float32, project v41DenseProjectionFunc, score v41IndexerScoreFunc, health v41IndexerScoreHealthFunc) ([]int32, error) {
 	d41 := m.Cfg.DeepSeekV41
 	if !indexSourceAt(d41, l) {
 		return nil, nil
@@ -79,11 +83,7 @@ func (m *Model) v41IndexRowsProjected(l, pos int, qLat, hidden []float32, keys [
 	}
 	opened := m.v41NowNanos()
 	defer m.v41NoteIndexerScoring(opened)
-	pub, err := NewV41IndexerPublication(l, q, flat, weights, nHeads, dim, len(keys), topKBlocks, blockSize, cfg.IndexTopK, 0)
-	if err != nil {
-		return nil, v41StageErr(v41StageIndexer, l, err)
-	}
-	return pub.Rows(), nil
+	return v41IndexRowsWithScore(l, q, flat, weights, nHeads, dim, len(keys), topKBlocks, blockSize, cfg.IndexTopK, score, health)
 }
 
 // v41CompressedPublicationRoPE runs only on a producer's fresh rows, after the

@@ -162,6 +162,8 @@ type v41ForwardState struct {
 	ffnNorm          v41FFNNormFunc
 	compressorNorm   v41CompressorNormFunc
 	indexKeyNorm     v41IndexKeyNormFunc
+	indexerScore     v41IndexerScoreFunc
+	indexScoreHealth v41IndexerScoreHealthFunc
 	sharedActivation v41SharedActivationFunc
 	tailRoPE         v41TailRoPEFunc
 	sharedAttention  v41SharedAttentionFunc
@@ -292,7 +294,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, callbackOwner: st.callbackOwner}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -446,6 +448,8 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.ffnNorm = nil
 	scratch.compressorNorm = nil
 	scratch.indexKeyNorm = nil
+	scratch.indexerScore = nil
+	scratch.indexScoreHealth = nil
 	scratch.sharedActivation = nil
 	scratch.tailRoPE = nil
 	scratch.sharedAttention = nil
@@ -458,6 +462,8 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.ffnNorm = st.ffnNorm
 		scratch.compressorNorm = st.compressorNorm
 		scratch.indexKeyNorm = st.indexKeyNorm
+		scratch.indexerScore = st.indexerScore
+		scratch.indexScoreHealth = st.indexScoreHealth
 		scratch.sharedActivation = st.sharedActivation
 		scratch.tailRoPE = st.tailRoPE
 		scratch.sharedAttention = st.sharedAttention
@@ -471,6 +477,8 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.ffnNorm = nil
 		scratch.compressorNorm = nil
 		scratch.indexKeyNorm = nil
+		scratch.indexerScore = nil
+		scratch.indexScoreHealth = nil
 		scratch.sharedActivation = nil
 		scratch.tailRoPE = nil
 		scratch.sharedAttention = nil
@@ -749,7 +757,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if plan.Ratio > 1 && indexSourceAt(cfg.DeepSeekV41, l) {
 		for t := 0; t < seq; t++ {
 			groups := min((t+1)/plan.Ratio, len(compressedKV))
-			localIdx, err := m.v41IndexRowsProjected(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection)
+			localIdx, err := m.v41IndexRowsWithOperations(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth)
 			if err != nil {
 				return err
 			}
@@ -760,7 +768,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			indexList = append(indexList, row...)
 		}
 	} else {
-		localIdx, err := m.v41IndexRowsProjected(l, seq-1, qLatRows[seq-1], preByPos[seq-1], indexKeys, scratch.denseProjection)
+		localIdx, err := m.v41IndexRowsWithOperations(l, seq-1, qLatRows[seq-1], preByPos[seq-1], indexKeys, scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth)
 		if err != nil {
 			return err
 		}
@@ -1175,6 +1183,7 @@ func (m *Model) v41HeadWithFinalNorm(x []float32, project v41DenseProjectionFunc
 // turns from a 492 s wedge into a named, pre-emptive "no".
 func (s *Session) prefillV41(ids []int) []float32 {
 	s.ensureOpenBackendSession()
+	defer s.v41IndexerScoreGuard()
 	if err := s.M.v41ForwardAdmitted(); err != nil {
 		panic(err)
 	}
@@ -1229,7 +1238,8 @@ func (s *Session) prefillV41Suffix(ids []int) []float32 {
 		if err != nil {
 			var selectedRoPE *V41TailRoPEOperationError
 			var selectedAttention *V41SharedAttentionOperationError
-			if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || !errors.Is(err, ErrV41ForwardStage) {
+			var selectedScore *V41IndexerScoreOperationError
+			if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || !errors.Is(err, ErrV41ForwardStage) {
 				panic(err)
 			}
 			// Roll the suffix back to the pre-call boundary and re-fold the
@@ -1319,6 +1329,7 @@ func (s *Session) v41IncrementalEligible() bool {
 // state, the whole-history recompute on the fallback).
 func (s *Session) stepV41(id int) []float32 {
 	s.ensureOpenBackendSession()
+	defer s.v41IndexerScoreGuard()
 	if err := s.M.v41ForwardAdmitted(); err != nil {
 		panic(err)
 	}
@@ -1335,7 +1346,8 @@ func (s *Session) stepV41(id int) []float32 {
 		}
 		var selectedRoPE *V41TailRoPEOperationError
 		var selectedAttention *V41SharedAttentionOperationError
-		if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || !errors.Is(err, ErrV41ForwardStage) {
+		var selectedScore *V41IndexerScoreOperationError
+		if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || !errors.Is(err, ErrV41ForwardStage) {
 			panic(err)
 		}
 		// A typed stage refusal the eligibility check could not foresee (e.g. the
@@ -1375,6 +1387,8 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.ffnNorm = s.v41FFNNormFunc()
 		s.v41Forward.compressorNorm = s.v41CompressorNormFunc()
 		s.v41Forward.indexKeyNorm = s.v41IndexKeyNormFunc()
+		s.v41Forward.indexerScore = s.v41IndexerScoreFunc()
+		s.v41Forward.indexScoreHealth = s.v41IndexerScoreHealthFunc()
 		s.v41Forward.sharedActivation = s.v41SharedActivationFunc()
 		s.v41Forward.tailRoPE = s.v41TailRoPEFunc()
 		s.v41Forward.sharedAttention = s.v41SharedAttentionFunc()
