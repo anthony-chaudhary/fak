@@ -922,7 +922,18 @@ func probeScheduledTask(ctx context.Context, run watchdogCommandRunner, task str
 }
 
 func probeLaunchd(ctx context.Context, run watchdogCommandRunner, label, plist string) (watchdogProbe, error) {
-	if _, err := run(ctx, "launchctl", "list", label); err == nil {
+	agent := launchdAgent{
+		uid: os.Getuid(),
+		run: func(ctx context.Context, args ...string) ([]byte, error) {
+			out, err := run(ctx, "launchctl", args...)
+			return []byte(out), err
+		},
+	}
+	loaded, err := agent.Loaded(ctx, label)
+	if err != nil {
+		return watchdogProbe{Detail: "launchd observation failed"}, err
+	}
+	if loaded {
 		return watchdogProbe{Installed: true, Alive: true, Detail: "launchd job loaded"}, nil
 	}
 	if strings.TrimSpace(plist) != "" {
