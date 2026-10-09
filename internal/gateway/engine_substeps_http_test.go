@@ -90,7 +90,12 @@ func TestObservationEngineSubstepsDefaultCPURequest(t *testing.T) {
 		t.Fatal("native response lacks substeps")
 	}
 	s := after.Substeps
-	if !s.KernelObserved || !s.PlannerObserved || s.KernelEvents == 0 || len(s.KernelLatency) == 0 || len(s.PlannerLatency) != 5 || s.PlannerLatency["step"].Count == 0 {
+	// The public kind names must survive even when an unobserved kind has zero events.
+	plannerKinds := []string{"step", "tool", "admission", "seat", "verdict"}
+	if len(s.PlannerLatency) != len(plannerKinds) || len(s.PlannerEvents) != len(plannerKinds) {
+		t.Fatalf("planner wire domain: latency=%v events=%v want kinds=%v", s.PlannerLatency, s.PlannerEvents, plannerKinds)
+	}
+	if !s.KernelObserved || !s.PlannerObserved || s.KernelEvents == 0 || len(s.KernelLatency) == 0 || s.PlannerLatency["step"].Count == 0 {
 		t.Fatalf("native observation: attached=%t kernel_observed=%t kernel_events=%d kernel_series=%d planner_observed=%t planner_kinds=%d step_count=%d planner_events=%v", s.RecorderAttached, s.KernelObserved, s.KernelEvents, len(s.KernelLatency), s.PlannerObserved, len(s.PlannerLatency), s.PlannerLatency["step"].Count, s.PlannerEvents)
 	}
 	metrics := srv.renderMetrics()
@@ -130,8 +135,13 @@ func TestObservationEngineSubstepsDefaultCPURequest(t *testing.T) {
 	if count != s.KernelEvents {
 		t.Fatal("snapshot lost kernel calls")
 	}
-	for kind, latency := range s.PlannerLatency {
-		if latency.Count != s.PlannerEvents[kind] || sample(stepobs.MetricPlannerStepSeconds+`_count{kind="`+kind+`"}`) != float64(latency.Count) || math.Abs(sample(stepobs.MetricPlannerStepSeconds+`_sum{kind="`+kind+`"}`)-latency.TotalSeconds) > 1e-9 {
+	for _, kind := range plannerKinds {
+		latency, hasLatency := s.PlannerLatency[kind]
+		events, hasEvents := s.PlannerEvents[kind]
+		if !hasLatency || !hasEvents {
+			t.Fatalf("planner wire domain omits %q: latency=%t events=%t", kind, hasLatency, hasEvents)
+		}
+		if latency.Count != events || sample(stepobs.MetricPlannerStepSeconds+`_count{kind="`+kind+`"}`) != float64(latency.Count) || math.Abs(sample(stepobs.MetricPlannerStepSeconds+`_sum{kind="`+kind+`"}`)-latency.TotalSeconds) > 1e-9 {
 			t.Fatal("planner HTTP summary disagrees with metrics")
 		}
 	}
