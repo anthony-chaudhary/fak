@@ -263,6 +263,8 @@ func TestPrettyRenderOutput(t *testing.T) {
 // parseable/selectable and that a LIVE cell against an OpenAI-compatible
 // httptest endpoint produces a well-formed FanoutArmResult labeled llamacpp.
 // No network or external service is required.
+// Estimate only; not timed. Includes the existing bounded loopback fixture.
+// fak-test:runtime medium est=2s lane=default
 func TestSubagentFanoutLlamaCPPArm(t *testing.T) {
 	// 1. Arm identifier and description are registered.
 	if ArmLLamaCPP != "llamacpp" {
@@ -381,8 +383,53 @@ func TestSubagentFanoutLlamaCPPArm(t *testing.T) {
 	if res.TTFT.Count == 0 {
 		t.Errorf("expected TTFT samples from the live stream")
 	}
-	if res.OutputHash == "" {
-		t.Errorf("expected non-empty output hash")
+	if res.OutputEquivalence != nil || res.OutputHash != "" {
+		t.Fatalf("unobserved live output must remain unknown: equivalence=%v hash=%q", res.OutputEquivalence, res.OutputHash)
+	}
+	wire, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(wire, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if string(fields["output_equivalence"]) != "null" || string(fields["output_hash"]) != `""` {
+		t.Fatalf("live output wire claims must be null/empty: %s", wire)
+	}
+	var roundTrip FanoutArmResult
+	if err := json.Unmarshal(wire, &roundTrip); err != nil {
+		t.Fatal(err)
+	}
+	if roundTrip.OutputEquivalence != nil || roundTrip.OutputHash != "" {
+		t.Fatalf("live unknown evidence lost in round trip: %+v", roundTrip)
+	}
+	refusedWire, err := json.Marshal(FanoutArmResult{Error: "capacity unobserved"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(refusedWire, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if string(fields["output_equivalence"]) != "null" || string(fields["output_hash"]) != `""` {
+		t.Fatalf("refused cells cannot claim output evidence: %s", refusedWire)
+	}
+	modeled, err := harness.simulateCell(ArmLLamaCPP, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modeled.OutputEquivalence == nil || !*modeled.OutputEquivalence || modeled.OutputHash != deterministicOutputHash(ArmLLamaCPP, 2, 64, 16, 4) {
+		t.Fatalf("modeled output contract changed: %+v", modeled)
+	}
+	modeledWire, err := json.Marshal(modeled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(modeledWire, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if string(fields["output_equivalence"]) != "true" {
+		t.Fatalf("modeled output equivalence must retain true: %s", modeledWire)
 	}
 	// At N > 1 the arm has a shared-prefix cache, so reuse must be accounted.
 	if res.ReusedTokens <= 0 || res.PrefixHitRate <= 0 {

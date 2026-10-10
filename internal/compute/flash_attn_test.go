@@ -67,14 +67,15 @@ func cpuReferenceGoldenAttention(
 				hasValid = true
 			}
 
-			if !hasValid || maxScore <= -1e30 {
+			if !hasValid {
 				continue
 			}
 
 			// 2. Softmax normalization
 			var sumExp float32
 			for kj := 0; kj < kvTokens; kj++ {
-				if scores[kj] <= -1e30 {
+				if (causal && kj > globalQPos) ||
+					(windowSize > 0 && kj < globalQPos-windowSize+1) {
 					scores[kj] = 0.0
 					continue
 				}
@@ -549,4 +550,90 @@ func TestCoopMatAttentionTuning(t *testing.T) {
 
 	t.Logf("Cooperative matrix tile tuning: Br=%d, Bc=%d, Bk=%d, LDS=%d bytes, PaddedStride=%d",
 		tile.Br, tile.Bc, tile.Bk, tile.LDSBytes, tile.PaddedStride)
+}
+
+// Finite score magnitudes do not encode masks. These known means are independent
+// of cpuReferenceGoldenAttention, whose old threshold repeated the engine bug.
+// Estimate only; no runtime measurement has been performed.
+// fak-test:runtime fast est=10ms lane=default
+func TestFlashAttentionExtremeFiniteStructuralMasks(t *testing.T) {
+	for _, layout := range []AttentionMemoryLayout{LayoutPosMajor, LayoutHeadMajor} {
+		for _, tc := range []struct {
+			name                         string
+			queries, keys, block, window int
+			causal                       bool
+			score                        float32
+			values, want                 []float32
+		}{
+			{"single_key", 1, 1, 1, 0, false, -2e30, []float32{7}, []float32{7}},
+			{"equal_keys_across_tiles", 1, 2, 1, 0, false, -2e30, []float32{2, 6}, []float32{4}},
+			{"equal_keys_one_tile", 1, 2, 2, 0, false, -2e30, []float32{2, 6}, []float32{4}},
+			{"lowest_finite_with_mask_collision", 2, 2, 2, 0, true, -math.MaxFloat32, []float32{7, 13}, []float32{7, 10}},
+			{"partial_causal_block", 2, 3, 3, 0, true, -2e30, []float32{2, 6, 10}, []float32{4, 6}},
+			{"partial_window_block", 1, 3, 3, 2, false, -2e30, []float32{1000, 2, 6}, []float32{4}},
+			{"causal_window_gqa", 2, 4, 2, 2, true, -2e30, []float32{1, 3, 5, 7}, []float32{4, 6}},
+			{"all_masked_later_query", 2, 1, 1, 1, true, -2e30, []float32{7}, []float32{7, 0}},
+		} {
+			t.Run(string(layout)+"/"+tc.name, func(t *testing.T) {
+				const heads = 2 // GQA: two query heads share one KV head.
+				cfg := FlashAttentionConfig{NumQueryHeads: heads, NumKVHeads: 1, HeadDim: 1, ValueDim: 1, Scale: 1, Causal: tc.causal, SlidingWindow: tc.window, Layout: layout, BlockSizeR: 1, BlockSizeC: tc.block}
+				e, err := NewFlashAttentionEngine(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				q, k := make([]float32, tc.queries*heads), make([]float32, tc.keys)
+				for i := range q {
+					q[i] = tc.score
+				}
+				for i := range k {
+					k[i] = 1
+				}
+				var got []float32
+				if tc.queries == 1 {
+					got, err = e.ExecuteDecode(q, k, tc.values, tc.keys)
+				} else {
+					got, err = e.Execute(q, k, tc.values, tc.queries, tc.keys)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if layout == LayoutPosMajor {
+					reference := cpuReferenceGoldenAttention(q, k, tc.values, tc.queries, tc.keys, heads, 1, 1, 1, tc.causal, tc.window)
+					for qi, want := range tc.want {
+						for head := 0; head < heads; head++ {
+							if value := reference[qi*heads+head]; math.IsNaN(float64(value)) || math.Abs(float64(value-want)) > 1e-6 {
+								t.Fatalf("reference query%d head%d=%g want independent mean%g", qi, head, value, want)
+							}
+						}
+					}
+				}
+				for qi, want := range tc.want {
+					for head := 0; head < heads; head++ {
+						index := qi*heads + head
+						if layout == LayoutHeadMajor {
+							index = head*tc.queries + qi
+						}
+						if math.IsNaN(float64(got[index])) || math.IsInf(float64(got[index]), 0) || math.Abs(float64(got[index]-want)) > 1e-6 {
+							t.Fatalf("query%d head%d output=%g want independent mean%g", qi, head, got[index], want)
+						}
+					}
+				}
+				if tc.name == "equal_keys_across_tiles" {
+					if stats := e.Stats(); stats.RunningMax != tc.score || stats.RunningSum != 2 {
+						t.Fatalf("extreme running state was reset: %+v", stats)
+					}
+				}
+			})
+		}
+	}
+	// Existing positive-token admission still rejects empty requests.
+	e, err := NewFlashAttentionEngine(FlashAttentionConfig{NumQueryHeads: 1, NumKVHeads: 1, HeadDim: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, shape := range [][2]int{{0, 1}, {1, 0}} {
+		if _, err := e.Execute(nil, nil, nil, shape[0], shape[1]); err == nil {
+			t.Fatalf("empty token request%v accepted", shape)
+		}
+	}
 }

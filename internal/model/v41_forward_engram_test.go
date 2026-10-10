@@ -20,6 +20,7 @@ package model
 import (
 	"errors"
 	"math"
+	"reflect"
 	"testing"
 )
 
@@ -120,7 +121,8 @@ func v41FullEngramModel(t *testing.T) (*Model, V41EngramLayout) {
 // v41FullEngramAsymmetricStreams builds len(ids) positions of four DISTINCT
 // width-H persistent mHC vectors. Stream s is a deterministic ramp scaled by
 // (s+1), so the four RMS/dot statistics are independent and produce four distinct
-// gates. x[t] aliases streams[t][0], exactly as the full forward path does.
+// gates. This fixture deliberately aliases x[t] with stream 0; production also
+// supports independently owned x and residual buffers.
 func v41FullEngramAsymmetricStreams(ids []int, H int) (x [][]float32, streams [][][]float32) {
 	streams = make([][][]float32, len(ids))
 	x = make([][]float32, len(ids))
@@ -129,12 +131,12 @@ func v41FullEngramAsymmetricStreams(ids []int, H int) (x [][]float32, streams []
 		for s := 0; s < 4; s++ {
 			v := make([]float32, H)
 			for i := range v {
-				v[i] = float32(0.05*float64(s+1))*float32((i%7)-3) + float32(s)*0.1
+				v[i] = v41OracleBF16(float32(0.05*float64(s+1))*float32((i%7)-3) + float32(s)*0.1)
 			}
 			set[s] = v
 		}
 		streams[tt] = set
-		x[tt] = set[0] // full-path aliasing: stream 0 IS the live hidden state
+		x[tt] = set[0] // deliberate aliasing witness for the explicit synchronization
 	}
 	return x, streams
 }
@@ -142,7 +144,7 @@ func v41FullEngramAsymmetricStreams(ids []int, H int) (x [][]float32, streams []
 // v41OracleFullEngramUpdates independently transcribes the reference per-stream
 // schedule WITHOUT calling v41EngramInject: hash -> gather -> dequant -> project
 // -> per-stream gate from that stream's own vector -> single-stream write-back.
-// h2/k2/dot are accumulated in float64 and the final add is rounded through f32,
+// h2/k2/dot are accumulated in float64; the F32 residual sum publishes BF16,
 // matching the f32 forward within cpuOracleTol. It returns the expected post-call
 // stream values as [position][stream][dim].
 func v41OracleFullEngramUpdates(t *testing.T, m *Model, layout V41EngramLayout, l int, streams [][][]float32, ids []int, eps float32) [][][]float32 {
@@ -211,7 +213,8 @@ func v41OracleFullEngramUpdates(t *testing.T, m *Model, layout V41EngramLayout, 
 			gate := 1 / (1 + math.Exp(-math.Copysign(math.Sqrt(math.Max(math.Abs(dot), 1e-6)), dot)))
 			row := make([]float32, H)
 			for i := 0; i < H; i++ {
-				row[i] = h[i] + float32(v41OracleBF16(float32(gate)*value[i]))
+				delta := float32(float32(gate) * value[i])
+				row[i] = v41OracleBF16(float32(h[i] + delta))
 			}
 			want[tt][s] = row
 		}
@@ -561,7 +564,8 @@ func v41OracleRectangularEngramUpdates(t *testing.T, m *Model, layout V41EngramL
 			gate := 1 / (1 + math.Exp(-math.Copysign(math.Sqrt(math.Max(math.Abs(dot), 1e-6)), dot)))
 			row := make([]float32, H)
 			for i := 0; i < H; i++ {
-				row[i] = h[i] + float32(v41OracleBF16(float32(gate)*value[i]))
+				delta := float32(float32(gate) * value[i])
+				row[i] = v41OracleBF16(float32(h[i] + delta))
 			}
 			want[tt][s] = row
 		}
@@ -678,5 +682,68 @@ func TestV41EngramRectangularGeometryContract(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The positive-clamped zero dot yields gate ~= 0.50025. With value 1/128,
+// rounding the delta first lands on an exact half ULP above residual 1, whereas
+// the unrounded F32 sum is just above that midpoint and publishes 1.0078125.
+// This is an injection-boundary witness, not checkpoint/device parity.
+// fak-test:runtime fast est=100ms lane=default
+func TestV41EngramFullRoundsResidualSum(t *testing.T) {
+	t.Parallel()
+	m, _ := v41FullEngramModel(t)
+	H := m.Cfg.HiddenSize
+	v41WriteTensorF32(t, m, layerName(0, "engram_q_norm.weight"), make([]float32, 4*H))
+	projected := make([]float32, 5*H)
+	for i := 0; i < 4*H; i++ {
+		projected[i] = 1
+	}
+	for i := 4 * H; i < 5*H; i++ {
+		projected[i] = 1.0 / 128
+	}
+	source := append([]float32(nil), projected...)
+	for _, alias := range []bool{false, true} {
+		streams := make([][]float32, 4)
+		for h := range streams {
+			streams[h] = make([]float32, H)
+			for i := range streams[h] {
+				streams[h][i] = []float32{1, 2, -1, -2}[h]
+			}
+		}
+		x := append([]float32(nil), streams[0]...)
+		if alias {
+			x = streams[0]
+		}
+		before := sysFlatten(streams)
+		calls := 0
+		err := m.v41EngramInjectWithProjection(0, [][]float32{x}, [][][]float32{streams}, true, []int{1}, float32(m.Cfg.RMSNormEps), func(layer int, row []float32, out, in int) ([]float32, v41DenseProjectionOutcome, error) {
+			calls++
+			if layer != 0 || out != 5*H || len(row) != in {
+				t.Fatal("Engram callback lost exact geometry")
+			}
+			return projected, v41ProjectionHandled, nil
+		})
+		if err != nil || calls != 1 {
+			t.Fatalf("Engram projection calls=%d err=%v", calls, err)
+		}
+		// Independent scalar gate and BF16 reference: no production gate/mix helpers.
+		gate := float32(1 / (1 + math.Exp(-math.Sqrt(1e-6))))
+		delta := float32(gate * float32(1.0/128))
+		discriminates := false
+		for h := range streams {
+			for i, got := range streams[h] {
+				residual := before[h*H+i]
+				want := v41OracleBF16(float32(residual + delta))
+				old := residual + v41OracleBF16(delta)
+				if got != want || math.Float32bits(got)&0xffff != 0 {
+					t.Fatalf("stream%d residual publication=%g want%g", h, got, want)
+				}
+				discriminates = discriminates || got != old
+			}
+		}
+		if !discriminates || streams[0][0] != 1.0078125 || streams[0][0] == v41OracleBF16(1+v41OracleBF16(delta)) || !reflect.DeepEqual(x, streams[0]) || !reflect.DeepEqual(projected, source) {
+			t.Fatal("fixed midpoint, x synchronization, or callback ownership changed")
+		}
 	}
 }

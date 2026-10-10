@@ -2,16 +2,57 @@
 
 package compute
 
-import "testing"
+import (
+	"context"
+	"os"
+	"os/exec"
+	"strings"
+	"testing"
+	"time"
+)
 
-// fak-test:runtime integration est=500ms lane=optin
-// Run alone on the required physical Vulkan device with no live weight arena.
+const vulkanReservationChildEnv = "FAK_TEST_VULKAN_RESERVATION_CHILD"
+
+// fak-test:runtime integration est=2s lane=optin
+// The child owns a fresh physical Vulkan context with no live weight arena.
 // The shared-allocation case requires non-dedicated small storage buffers and
 // enough configured weight budget for one arena block. A skip is not a witness.
 func TestVulkanTensorBufferReservations(t *testing.T) {
 	var absent *vulkanBackend
 	if got, ok := absent.VulkanTensorBufferReservations(Tensor{}); ok || got != nil {
 		t.Fatalf("nil backend = %v, %t; want unavailable", got, ok)
+	}
+	if os.Getenv(vulkanReservationChildEnv) != "1" {
+		// Preserve parent eligibility while keeping unrelated process-lifetime
+		// allocations out of the absolute arena lifetime assertions below.
+		vk(t)
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatalf("os.Executable: %v", err)
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, exe, "-test.v", "-test.run=^TestVulkanTensorBufferReservations$")
+		for _, entry := range os.Environ() {
+			key, _, _ := strings.Cut(entry, "=")
+			if key != vulkanReservationChildEnv && key != "FAK_VULKAN_REQUIRE_DEVICE" {
+				cmd.Env = append(cmd.Env, entry)
+			}
+		}
+		cmd.Env = append(cmd.Env, vulkanReservationChildEnv+"=1", "FAK_VULKAN_REQUIRE_DEVICE=1")
+		out, err := cmd.CombinedOutput()
+		if ctx.Err() != nil {
+			t.Fatalf("reservation subprocess timed out: %v\n%s", ctx.Err(), out)
+		}
+		if err != nil {
+			t.Fatalf("reservation subprocess failed: %v\n%s", err, out)
+		}
+		if strings.Contains(string(out), "--- SKIP:") ||
+			!strings.Contains(string(out), "--- PASS: TestVulkanTensorBufferReservations (") {
+			t.Fatalf("reservation subprocess did not execute its required contract:\n%s", out)
+		}
+		t.Logf("Vulkan reservation fixture output:\n%s", out)
+		return
 	}
 	v := vk(t)
 	host := NewF32(Default(), []int{4}, []float32{1, 2, 3, 4})

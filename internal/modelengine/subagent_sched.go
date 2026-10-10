@@ -135,6 +135,7 @@ type SubagentSession struct {
 	sess       *model.Session
 	lastLogits []float32
 	lastToken  int
+	ctx        context.Context // Admission lifetime; released on terminalization.
 
 	tokenCh chan int
 	doneCh  chan struct{}
@@ -315,6 +316,7 @@ func NewSubagentScheduler(cfg SubagentSchedulerConfig) (*SubagentScheduler, erro
 // Admit introduces an asynchronous subagent into the scheduler.
 // If active slots are open, the subagent immediately enters the active decode pool;
 // otherwise it waits in the FIFO queue for the next available slot.
+// ctx controls the request lifetime at scheduling and token-publication boundaries.
 func (s *SubagentScheduler) Admit(ctx context.Context, sessionID string, promptTokens []int, targetTokens int) (*SubagentSession, error) {
 	if sessionID == "" {
 		return nil, errors.New("subagent_sched: empty session ID")
@@ -329,6 +331,11 @@ func (s *SubagentScheduler) Admit(ctx context.Context, sessionID string, promptT
 	if s.closed {
 		return nil, ErrSchedulerClosed
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.pruneCanceledLocked()
+	s.promoteWaitingLocked()
 
 	if existing, exists := s.sessions[sessionID]; exists {
 		if existing.State != SubagentStateCompleted && existing.State != SubagentStateCancelled {
@@ -343,6 +350,7 @@ func (s *SubagentScheduler) Admit(ctx context.Context, sessionID string, promptT
 		GeneratedTokens:   make([]int, 0, targetTokens),
 		TargetTokens:      targetTokens,
 		KVCacheStationary: true,
+		ctx:               ctx,
 		tokenCh:           make(chan int, targetTokens+16),
 		doneCh:            make(chan struct{}),
 		AdmittedAt:        time.Now(),
@@ -354,12 +362,12 @@ func (s *SubagentScheduler) Admit(ctx context.Context, sessionID string, promptT
 			M:     s.cfg.Model,
 			Cache: model.NewKVCache(s.cfg.Model.Cfg),
 		}
-		if len(promptTokens) > 0 {
+		sub.sess = sess
+		if len(promptTokens) > 0 && ctx.Err() == nil {
 			logits := sess.Prefill(promptTokens)
 			sub.lastLogits = logits
 			sub.lastToken = argmax(logits)
 		}
-		sub.sess = sess
 	} else {
 		// Pure scheduler / mock mode: seed lastToken deterministically
 		seed := 42
@@ -370,6 +378,14 @@ func (s *SubagentScheduler) Admit(ctx context.Context, sessionID string, promptT
 	}
 
 	s.sessions[sessionID] = sub
+	// Prefill is synchronous; cancellation during it is observed before the
+	// request can enter a decode queue or publish any output.
+	sub.mu.Lock()
+	ended := s.retireCanceledSessionLocked(sub)
+	sub.mu.Unlock()
+	if ended {
+		return sub, nil
+	}
 
 	// Dynamic admission into active decode pool if capacity permits
 	if len(s.activeSlots) < s.cfg.MaxConcurrency {
@@ -397,6 +413,8 @@ func (s *SubagentScheduler) YieldIO(sessionID, toolName string) error {
 	if s.closed {
 		return ErrSchedulerClosed
 	}
+	s.pruneCanceledLocked()
+	s.promoteWaitingLocked()
 
 	sub, ok := s.sessions[sessionID]
 	if !ok {
@@ -433,17 +451,7 @@ func (s *SubagentScheduler) YieldIO(sessionID, toolName string) error {
 	s.zeroEvictionCount++
 
 	// Immediate slot handoff: promote waiting subagent to keep execution units fully saturated
-	if len(s.waitingQueue) > 0 && len(s.activeSlots) < s.cfg.MaxConcurrency {
-		promoted := s.waitingQueue[0]
-		s.waitingQueue = s.waitingQueue[1:]
-		promoted.mu.Lock()
-		promoted.State = SubagentStateActive
-		promoted.mu.Unlock()
-		s.activeSlots = append(s.activeSlots, promoted)
-		if len(s.activeSlots) > s.peakConcurrency {
-			s.peakConcurrency = len(s.activeSlots)
-		}
-	}
+	s.promoteWaitingLocked()
 
 	s.signalWake()
 	return nil
@@ -458,6 +466,8 @@ func (s *SubagentScheduler) Resume(sessionID string) error {
 	if s.closed {
 		return ErrSchedulerClosed
 	}
+	s.pruneCanceledLocked()
+	s.promoteWaitingLocked()
 
 	sub, ok := s.sessions[sessionID]
 	if !ok {
@@ -509,53 +519,11 @@ func (s *SubagentScheduler) Cancel(sessionID string) error {
 		return ErrSessionNotFound
 	}
 
-	if sub.State == SubagentStateCompleted || sub.State == SubagentStateCancelled {
-		return nil
-	}
-
 	sub.mu.Lock()
-	sub.State = SubagentStateCancelled
-	sub.err = context.Canceled
-	select {
-	case <-sub.doneCh:
-	default:
-		close(sub.doneCh)
-	}
-	close(sub.tokenCh)
+	s.finishSessionLocked(sub, SubagentStateCancelled, context.Canceled)
 	sub.mu.Unlock()
-
-	s.totalCancelled++
-
-	// Remove from active slots if present
-	for i, slot := range s.activeSlots {
-		if slot.ID == sessionID {
-			s.activeSlots = append(s.activeSlots[:i], s.activeSlots[i+1:]...)
-			break
-		}
-	}
-
-	// Remove from waiting queue if present
-	for i, q := range s.waitingQueue {
-		if q.ID == sessionID {
-			s.waitingQueue = append(s.waitingQueue[:i], s.waitingQueue[i+1:]...)
-			break
-		}
-	}
-
-	delete(s.yieldedSessions, sessionID)
-
-	// Promote waiting if slot opened
-	if len(s.waitingQueue) > 0 && len(s.activeSlots) < s.cfg.MaxConcurrency {
-		promoted := s.waitingQueue[0]
-		s.waitingQueue = s.waitingQueue[1:]
-		promoted.mu.Lock()
-		promoted.State = SubagentStateActive
-		promoted.mu.Unlock()
-		s.activeSlots = append(s.activeSlots, promoted)
-		if len(s.activeSlots) > s.peakConcurrency {
-			s.peakConcurrency = len(s.activeSlots)
-		}
-	}
+	s.pruneCanceledLocked()
+	s.promoteWaitingLocked()
 
 	return nil
 }
@@ -565,7 +533,74 @@ func (s *SubagentScheduler) Cancel(sessionID string) error {
 func (s *SubagentScheduler) CompactRaggedBatch() *RaggedBatch {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.pruneCanceledLocked()
 	return s.compactRaggedBatchLocked()
+}
+
+// retireCanceledSessionLocked requires s.mu and sub.mu. The result also covers
+// already-terminal sessions so every queue can discard them without re-closing.
+func (s *SubagentScheduler) retireCanceledSessionLocked(sub *SubagentSession) bool {
+	if sub.State == SubagentStateCompleted || sub.State == SubagentStateCancelled {
+		return true
+	}
+	if err := sub.ctx.Err(); err != nil {
+		s.finishSessionLocked(sub, SubagentStateCancelled, err)
+		return true
+	}
+	return false
+}
+
+// pruneCanceledLocked visits only live scheduling references, not the retained
+// session history. All callers hold s.mu, including across synchronous forwards.
+func (s *SubagentScheduler) pruneCanceledLocked() {
+	retain := func(queue []*SubagentSession) []*SubagentSession {
+		n := 0
+		for _, sub := range queue {
+			sub.mu.Lock()
+			ended := s.retireCanceledSessionLocked(sub)
+			sub.mu.Unlock()
+			if !ended {
+				queue[n] = sub
+				n++
+			}
+		}
+		clear(queue[n:])
+		return queue[:n]
+	}
+	s.activeSlots = retain(s.activeSlots)
+	s.waitingQueue = retain(s.waitingQueue)
+	s.subagentPrefillPool = retain(s.subagentPrefillPool)
+	for id, sub := range s.yieldedSessions {
+		sub.mu.Lock()
+		ended := s.retireCanceledSessionLocked(sub)
+		sub.mu.Unlock()
+		if ended {
+			delete(s.yieldedSessions, id)
+		}
+	}
+}
+
+// promoteWaitingLocked requires s.mu and checks lifetime again at promotion:
+// cancellation may arrive after the preceding queue sweep.
+func (s *SubagentScheduler) promoteWaitingLocked() {
+	for len(s.activeSlots) < s.cfg.MaxConcurrency && len(s.waitingQueue) > 0 {
+		sub := s.waitingQueue[0]
+		s.waitingQueue[0] = nil
+		s.waitingQueue = s.waitingQueue[1:]
+		sub.mu.Lock()
+		ended := s.retireCanceledSessionLocked(sub)
+		if !ended {
+			sub.State = SubagentStateActive
+		}
+		sub.mu.Unlock()
+		if ended {
+			continue
+		}
+		s.activeSlots = append(s.activeSlots, sub)
+		if len(s.activeSlots) > s.peakConcurrency {
+			s.peakConcurrency = len(s.activeSlots)
+		}
+	}
 }
 
 func (s *SubagentScheduler) compactRaggedBatchLocked() *RaggedBatch {
@@ -635,18 +670,9 @@ func (s *SubagentScheduler) StepIteration() (*RaggedBatch, error) {
 		return nil, ErrSchedulerClosed
 	}
 
-	// 1. Dynamic admission of waiting subagents up to MaxConcurrency
-	for len(s.activeSlots) < s.cfg.MaxConcurrency && len(s.waitingQueue) > 0 {
-		sub := s.waitingQueue[0]
-		s.waitingQueue = s.waitingQueue[1:]
-		sub.mu.Lock()
-		sub.State = SubagentStateActive
-		sub.mu.Unlock()
-		s.activeSlots = append(s.activeSlots, sub)
-		if len(s.activeSlots) > s.peakConcurrency {
-			s.peakConcurrency = len(s.activeSlots)
-		}
-	}
+	// 1. Retire canceled requests in every state before admitting waiting lanes.
+	s.pruneCanceledLocked()
+	s.promoteWaitingLocked()
 
 	// 2. Form ragged compacted batch
 	batch := s.compactRaggedBatchLocked()
@@ -685,10 +711,15 @@ func (s *SubagentScheduler) StepIteration() (*RaggedBatch, error) {
 	}
 
 	// 4. Token delivery & iteration-level dynamic retirement
-	retiredCount := 0
 	for i, sub := range batch.ActiveSessions {
 		nextToken := generatedTokens[i]
 		sub.mu.Lock()
+		// Model calls cannot be preempted, but their output must not escape once
+		// cancellation is observed at this publication boundary.
+		if s.retireCanceledSessionLocked(sub) {
+			sub.mu.Unlock()
+			continue
+		}
 		sub.lastToken = nextToken
 		sub.GeneratedTokens = append(sub.GeneratedTokens, nextToken)
 		s.totalTokens++
@@ -699,42 +730,15 @@ func (s *SubagentScheduler) StepIteration() (*RaggedBatch, error) {
 		}
 
 		if len(sub.GeneratedTokens) >= sub.TargetTokens {
-			sub.State = SubagentStateCompleted
-			sub.CompletedAt = time.Now()
-			close(sub.doneCh)
-			close(sub.tokenCh)
-			retiredCount++
-			s.totalCompleted++
+			s.finishSessionLocked(sub, SubagentStateCompleted, nil)
 		}
 		sub.mu.Unlock()
 	}
 
-	// Remove completed sessions from active slots immediately
-	if retiredCount > 0 {
-		retained := make([]*SubagentSession, 0, len(s.activeSlots))
-		for _, slot := range s.activeSlots {
-			slot.mu.Lock()
-			st := slot.State
-			slot.mu.Unlock()
-			if st == SubagentStateActive {
-				retained = append(retained, slot)
-			}
-		}
-		s.activeSlots = retained
-
-		// Immediately admit any waiting subagents into the freed slots
-		for len(s.activeSlots) < s.cfg.MaxConcurrency && len(s.waitingQueue) > 0 {
-			promoted := s.waitingQueue[0]
-			s.waitingQueue = s.waitingQueue[1:]
-			promoted.mu.Lock()
-			promoted.State = SubagentStateActive
-			promoted.mu.Unlock()
-			s.activeSlots = append(s.activeSlots, promoted)
-			if len(s.activeSlots) > s.peakConcurrency {
-				s.peakConcurrency = len(s.activeSlots)
-			}
-		}
-	}
+	// Cancellation may also have arrived for waiting or yielded requests during
+	// the forward pass. Remove those and completed lanes before handing off slots.
+	s.pruneCanceledLocked()
+	s.promoteWaitingLocked()
 
 	s.iteration++
 	s.totalSteps++
@@ -870,20 +874,55 @@ func (s *SubagentScheduler) Receipt() SubagentSchedulerReceipt {
 	}
 }
 
-// Close closes the scheduler and terminates active sessions.
+// finishSessionLocked requires s.mu and sub.mu. All terminal paths release
+// ownership here, including before Admit can replace a completed/cancelled ID.
+// Token delivery also holds s.mu, so no producer can race these channel closes.
+func (s *SubagentScheduler) finishSessionLocked(sub *SubagentSession, state SubagentState, err error) {
+	if sub.State == SubagentStateCompleted || sub.State == SubagentStateCancelled {
+		return
+	}
+	sub.State = state
+	sub.err = err
+	sub.CompletedAt = time.Now()
+	if sub.sess != nil {
+		sub.sess.Close()
+		sub.sess = nil
+	}
+	sub.lastLogits = nil
+	sub.ctx = nil
+	// Closing a buffered channel preserves every token already published.
+	close(sub.tokenCh)
+	close(sub.doneCh)
+	if state == SubagentStateCompleted {
+		s.totalCompleted++
+	} else {
+		s.totalCancelled++
+	}
+}
+
+// Close waits for an in-flight iteration, observes context cancellation, releases
+// all owned sessions, and terminates remaining requests with ErrSchedulerClosed.
+// Terminal outcomes and buffered tokens are preserved. Close does not require Start.
 func (s *SubagentScheduler) Close() error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.closed {
-		s.mu.Unlock()
 		return nil
 	}
+	s.pruneCanceledLocked()
 	s.closed = true
-	select {
-	case <-s.stopCh:
-	default:
-		close(s.stopCh)
+	close(s.stopCh)
+	for _, sub := range s.sessions {
+		sub.mu.Lock()
+		s.finishSessionLocked(sub, SubagentStateCancelled, ErrSchedulerClosed)
+		sub.mu.Unlock()
 	}
-	s.mu.Unlock()
+	// Keep request history for Receipt; remove every scheduling reference without
+	// using Cancel, which would promote waiting requests during shutdown.
+	s.activeSlots = nil
+	s.waitingQueue = nil
+	s.yieldedSessions = nil
+	s.subagentPrefillPool = nil
 	return nil
 }
 

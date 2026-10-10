@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -47,6 +48,76 @@ func TestApplyPatchSingleHunk(t *testing.T) {
 	}
 	if res.HunksApplied != 1 {
 		t.Fatalf("hunks_applied = %d, want 1", res.HunksApplied)
+	}
+}
+
+// A zero-context insertion uses the preceding line as its old-range anchor.
+// fak-test:runtime fast est=10ms lane=default
+func TestApplyPatchEmptyOldRangeInsertsAfterNamedLine(t *testing.T) {
+	t.Parallel()
+	ts, root := newTestToolset(t)
+	p := filepath.Join(root, "insert.txt")
+	mustWrite(t, p, "first\nsecond\n")
+
+	diff := `--- a/insert.txt
++++ b/insert.txt
+@@ -1,0 +2 @@
++inserted
+`
+	out, bad := ts.ApplyPatch(context.Background(), argsOf(t, PatchArgs{Patch: diff}))
+	if bad {
+		t.Fatalf("ApplyPatch empty old range failed: %s", out)
+	}
+	content, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "first\ninserted\nsecond\n"; string(content) != want {
+		t.Fatalf("content = %q, want %q", content, want)
+	}
+}
+
+// fak-test:runtime fast est=20ms lane=default
+func TestApplyPatchEmptyOldRangeBounds(t *testing.T) {
+	t.Parallel()
+	maxInt := strconv.Itoa(int(^uint(0) >> 1))
+	for _, tc := range []struct {
+		name    string
+		hunks   string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:    "declared empty range with context remains conflict",
+			hunks:   "@@ -" + maxInt + ",0 +1,1 @@\n first\n",
+			want:    "first\nsecond\n",
+			wantErr: true,
+		},
+		{
+			name:  "oversized insertion after earlier line growth stays bounded",
+			hunks: "@@ -1,1 +1,2 @@\n-first\n+first\n+added\n@@ -" + maxInt + ",0 +4,1 @@\n+tail\n",
+			want:  "first\nadded\nsecond\ntail\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts, root := newTestToolset(t)
+			p := filepath.Join(root, "bounds.txt")
+			mustWrite(t, p, "first\nsecond\n")
+			patch := "--- a/bounds.txt\n+++ b/bounds.txt\n" + tc.hunks
+			out, bad := ts.ApplyPatch(context.Background(), argsOf(t, map[string]any{
+				"patch": patch, "fuzz_margin": 0,
+			}))
+			if bad != tc.wantErr || bad && errCode(t, out) != CodeEditConflict {
+				t.Fatalf("ApplyPatch bad=%v, want error=%v; output=%s", bad, tc.wantErr, out)
+			}
+			content, err := os.ReadFile(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(content) != tc.want {
+				t.Fatalf("content = %q, want %q", content, tc.want)
+			}
+		})
 	}
 }
 

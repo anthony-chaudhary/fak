@@ -44,6 +44,7 @@ int frocm_rmsnorm_f32(const float *x, const float *weight, float *y,
 int frocm_rope_f32(const float *src, float *dst, int pos, int heads,
                    int head_dim, double theta);
 int frocm_swiglu_f32(const float *gate, const float *up, float *out, int n);
+int frocm_swiglu_limit_f32(const float *gate, const float *up, float *out, int n, float limit);
 int frocm_add_f32(float *dst, const float *src, int n);
 int frocm_add_bias_f32(float *dst, const float *bias, int rows, int width);
 int frocm_attention_f32(const float *q, const float *k, const float *v,

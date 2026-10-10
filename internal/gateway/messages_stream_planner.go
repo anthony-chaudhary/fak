@@ -7,6 +7,7 @@ package gateway
 // its own byte-preserving relay in messages_stream_passthrough.go.
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"sync"
@@ -55,13 +56,33 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	}
 
 	model, id := s.anthropicTurnIdentity(req.Model)
-	var send func(string, any)
+	// Ping and token delivery share the writer and its first-error latch. Cancel
+	// after releasing sendMu so cancellation never runs under the writer lock.
+	writeCtx, cancelWrites := context.WithCancelCause(r.Context())
+	defer cancelWrites(nil)
+	var send func(string, any) error
 	var sendMu sync.Mutex
-	sendLocked := func(event string, data any) {
+	var writeFailure error
+	writeError := func() error {
 		sendMu.Lock()
 		defer sendMu.Unlock()
-		send(event, data)
+		return writeFailure
 	}
+	sendChecked := func(event string, data any) error {
+		sendMu.Lock()
+		if writeFailure == nil {
+			writeFailure = send(event, data)
+		}
+		err := writeFailure
+		sendMu.Unlock()
+		if err != nil {
+			cancelWrites(err)
+		}
+		return err
+	}
+	// Existing block helpers have a void callback; the latch suppresses their
+	// remaining writes and is checked before proceeding to the next operation.
+	sendLocked := func(event string, data any) { _ = sendChecked(event, data) }
 	started := false
 	start := func() {
 		if started {
@@ -74,7 +95,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		h.Set("Connection", "keep-alive")
 		h.Set("X-Accel-Buffering", "no")
 		w.WriteHeader(http.StatusOK)
-		send = anthropicSSESender(w, flusher)
+		send = anthropicSSECheckedSender(w, flusher)
 		sendLocked("message_start", map[string]any{
 			"type": "message_start",
 			"message": map[string]any{
@@ -103,9 +124,12 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	emitText := func(text string) error {
+		if err := writeError(); err != nil {
+			return err
+		}
 		safe := stopBuf.Append(text)
 		if safe == "" {
-			return nil
+			return writeError()
 		}
 		start()
 		if !textOpen {
@@ -121,7 +145,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 			"type": "content_block_delta", "index": textIdx,
 			"delta": map[string]any{"type": "text_delta", "text": safe},
 		})
-		return nil
+		return writeError()
 	}
 
 	opts := chatRouteOpts(r.Context(), s.plannerSampleOpts(req, sessionTurn))
@@ -133,18 +157,44 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 
 	messages := s.maybePlanMessages(r.Context(), reqTrace, req.Messages)
 	messages = s.maybeElideMessagesWithContext(r.Context(), messages, reqTrace)
+	failWrite := func() bool {
+		if err := writeError(); err != nil {
+			s.recordFailedTurn(r.Context(), s.chatServingLocality(r.Context(), req.Model), err, floorBegan, 0, started)
+			s.streamPlannerUpstreamError(w, err, started, reqTrace, floorBegan, sendLocked, closeText)
+			return true
+		}
+		return false
+	}
 	start()
+	if failWrite() {
+		return true
+	}
 	if note := s.toolFailureNoteOnce(reqTrace, req.Messages); note != "" {
 		emitAnthropicTextBlock(sendLocked, &outIdx, note)
+		if failWrite() {
+			return true
+		}
 	}
 	if note := resultAdmissionNote(freshAdmissionNotes(resultAdmissions)); note != "" {
 		emitAnthropicTextBlock(sendLocked, &outIdx, note)
+		if failWrite() {
+			return true
+		}
 	}
 
 	guard := newLiftGuard(emitText)
 	began := time.Now()
 	stopPing := make(chan struct{})
 	pingDone := make(chan struct{})
+	pingStopped := false
+	stopPings := func() {
+		if !pingStopped {
+			close(stopPing)
+			<-pingDone
+			pingStopped = true
+		}
+	}
+	defer stopPings()
 	go func() {
 		defer close(pingDone)
 		ticker := time.NewTicker(anthropicStreamPingInterval)
@@ -152,19 +202,32 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		for {
 			select {
 			case <-ticker.C:
-				sendLocked("ping", map[string]any{"type": "ping"})
+				if sendChecked("ping", map[string]any{"type": "ping"}) != nil {
+					return
+				}
 			case <-stopPing:
 				return
-			case <-r.Context().Done():
+			case <-writeCtx.Done():
 				return
 			}
 		}
 	}()
-	turnCtx := plannerTurnContext(r.Context(), r, messages, s.contextEpoch)
+	turnCtx := plannerTurnContext(writeCtx, r, messages, s.contextEpoch)
 	var firstDelta firstDeltaClock
-	comp, err := sp.CompleteStream(turnCtx, firstDelta.wrap(guard.write), messages, req.Tools, opts...)
-	close(stopPing)
-	<-pingDone
+	turnCtx = withTextToolOffer(turnCtx, req.Tools)
+	// The selected live Messages route opts into native token callbacks. Keep
+	// the shared sampling options untouched for buffered/recovery consumers.
+	liveOpts := append([]agent.SampleOpt(nil), opts...)
+	liveOpts = append(liveOpts, agent.WithPerTokenStream(true))
+	comp, err := sp.CompleteStream(turnCtx, firstDelta.wrap(guard.write), messages, req.Tools, liveOpts...)
+	stopPings()
+	if cause := writeError(); cause != nil {
+		// Preserve independent upstream failures and parent deadline/cancellation.
+		// Only our own writer-triggered cancellation is replaced by its cause.
+		if err == nil || (errors.Is(err, context.Canceled) && r.Context().Err() == nil && writeCtx.Err() == context.Canceled) {
+			err = cause
+		}
+	}
 	if err != nil {
 		s.recordFailedTurn(r.Context(), s.chatServingLocality(r.Context(), req.Model), err, began, 0, started)
 		return s.streamPlannerUpstreamError(w, err, started, reqTrace, began, sendLocked, closeText)
@@ -188,15 +251,29 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 
 	kept, adjs, dropped, servedText, servedHits := s.adjudicateProposedServed(r.Context(), comp.Message.ToolCalls, reqTrace)
 	if remaining := liftRemainder(guard.streamed(), comp.Message.Content); remaining != "" {
-		_ = emitText(remaining)
+		if emitText(remaining) != nil {
+			return true
+		}
 	}
 	start()
+	if writeError() != nil {
+		return true
+	}
 	closeText()
+	if writeError() != nil {
+		return true
+	}
 
 	emitAnthropicToolUseBlocks(sendLocked, &outIdx, kept)
+	if writeError() != nil {
+		return true
+	}
 	if dropped > 0 || anyRepaired(adjs) || anyLivelock(adjs) {
 		if note := adjudicationNote(adjs); note != "" {
 			emitAnthropicTextBlock(sendLocked, &outIdx, note)
+			if writeError() != nil {
+				return true
+			}
 		}
 	}
 	// vDSO served-inline (vDSO live in the hot path): a fresh cache hit is folded into a
@@ -204,6 +281,9 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	// tool_use is emitted for it and the client never re-runs it.
 	if servedText != "" {
 		emitAnthropicTextBlock(sendLocked, &outIdx, servedText)
+		if writeError() != nil {
+			return true
+		}
 	}
 	if servedHits > 0 {
 		s.metrics.recordServedInline(servedHits)

@@ -1,7 +1,9 @@
 package model
 
 import (
+	"errors"
 	"math"
+	"reflect"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -76,11 +78,21 @@ func TestV41InverseAttentionOutput(t *testing.T) {
 						return nil, err
 					}
 					unrotated = append([]float32(nil), out...)
+					full, geometryErr := v41ForwardGeometry(m.Cfg)
+					if geometryErr != nil {
+						t.Fatal(geometryErr)
+					}
+					if full {
+						unrotated = v41LatentNormOracleBF16(unrotated)
+					}
 					theta := float64(256)
 					if role {
 						theta = 4096
 					}
-					expected = v41InverseOutputOracle(out, m.Cfg.NumHeads, m.Cfg.HeadDim, m.Cfg.QKRopeHeadDim, pos, theta)
+					expected = v41InverseOutputOracle(unrotated, m.Cfg.NumHeads, m.Cfg.HeadDim, m.Cfg.QKRopeHeadDim, pos, theta)
+					if full {
+						expected = v41LatentNormOracleBF16(expected)
+					}
 					requests++
 					return out, nil
 				}
@@ -132,4 +144,53 @@ func TestV41InverseAttentionOutput(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestV41FullInverseAttentionPublicationOrder(t *testing.T) {
+	cfg := Config{HeadDim: v41KVLoraRank, NumHeads: 1, QKRopeHeadDim: 2, RopeTheta: 256}
+	const hd = 512
+	input := make([]float32, hd)
+	input[0] = 1.00390625
+	input[hd-2], input[hd-1] = 1.00390625, 1.0/256
+	before := append([]float32(nil), input...)
+	staged := v41LatentNormOracleBF16(input)
+	want := v41LatentNormOracleBF16(v41InverseOutputOracle(staged, 1, hd, 2, 1, 256))
+	wrong := v41LatentNormOracleBF16(v41InverseOutputOracle(input, 1, hd, 2, 1, 256))
+	if reflect.DeepEqual(want, wrong) {
+		t.Fatal("pre-inverse sparse publication control is vacuous")
+	}
+	got, err := v41AttentionOutputForProjection(cfg, 0, 1, input, 1, hd)
+	if err != nil || !reflect.DeepEqual(got, want) || !reflect.DeepEqual(input, before) {
+		t.Fatalf("inverse publication/ownership err=%v", err)
+	}
+	if got[0] != 1 {
+		t.Fatal("sparse prefix BF16 publication missing")
+	}
+	input[0] = 99
+	if got[0] != 1 {
+		t.Fatal("inverse output aliases attention callback")
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestV41FullInverseAttentionPublicationFailure(t *testing.T) {
+	cfg := Config{HeadDim: v41KVLoraRank, NumHeads: 1, QKRopeHeadDim: 2, RopeTheta: 256}
+	for _, bad := range []float32{float32(math.NaN()), float32(math.Inf(1)), math.MaxFloat32} {
+		input := make([]float32, 512)
+		input[0] = bad
+		got, err := v41AttentionOutputForProjection(cfg, 0, 1, input, 1, 512)
+		var named *V41TailRoPEOperationError
+		if got != nil || !errors.As(err, &named) || math.Float32bits(input[0]) != math.Float32bits(bad) {
+			t.Fatalf("inverse invalid publication err=%v", err)
+		}
+	}
+	input := make([]float32, 512)
+	input[510], input[511] = math.Float32frombits(0x7f7f0000), math.Float32frombits(0x7f7f0000)
+	got, err := v41AttentionOutputForProjection(cfg, 0, 1, input, 1, 512)
+	var named *V41TailRoPEOperationError
+	if got != nil || !errors.As(err, &named) || math.Float32bits(input[510]) != 0x7f7f0000 {
+		t.Fatalf("post-inverse overflow err=%v", err)
+	}
+
 }

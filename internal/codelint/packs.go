@@ -82,7 +82,27 @@ func jsonCheck(_ context.Context, path string) ([]Finding, error) {
 		line, col := 0, 0
 		var se *json.SyntaxError
 		if errors.As(uerr, &se) {
-			line, col = offsetToLineCol(src, int(se.Offset))
+			offset := int(se.Offset)
+			// SyntaxError counts bytes already read, including the offending
+			// byte. Unexpected EOF instead names the position after the input.
+			atEOF := se.Error() == "unexpected end of JSON input"
+			if !atEOF && se.Offset == int64(len(src)) {
+				// The scanner also probes EOF with a synthetic space, which can
+				// report a regular syntax error for truncated literals/numbers.
+				// A real bad final byte fails at the same offset with this suffix;
+				// only a synthetic EOF error moves past the original input.
+				probe := make([]byte, len(src)+1)
+				copy(probe, src)
+				probe[len(src)] = ' '
+				var probeError *json.SyntaxError
+				if err := json.Unmarshal(probe, &v); errors.As(err, &probeError) && probeError.Offset > se.Offset {
+					atEOF = true
+				}
+			}
+			if offset > 0 && !atEOF {
+				offset--
+			}
+			line, col = offsetToLineCol(src, offset)
 		}
 		return []Finding{{
 			Pack: "json", Code: "JSON_PARSE", File: path,

@@ -106,10 +106,9 @@ type Policy struct {
 	Allow map[string]bool
 }
 
-// DefaultPolicy admits the three READ-shaped tools this leaf ships. The side-effecting
-// three (Write, Edit, Bash) are deliberately absent — not merely unlisted but not
-// IMPLEMENTED here (#6704, #6705) — so the read spine cannot be mistaken for a mutation
-// surface an operator forgot to close.
+// DefaultPolicy admits the seven implemented coding tools. Callers can supply a
+// narrower explicit allowlist; omitted tools remain denied. Mutation confinement,
+// version checks, and bounded command execution still apply to admitted tools.
 func DefaultPolicy() Policy {
 	return Policy{Allow: map[string]bool{ToolRead: true, ToolGrep: true, ToolGlob: true, ToolWrite: true, ToolEdit: true, ToolBash: true, ToolApplyPatch: true}}
 }

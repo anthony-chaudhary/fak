@@ -287,7 +287,7 @@ func v41HeadProjClone(t *testing.T, m *Model) *Model {
 func TestV41HeadProjectionSelectedFailureRollback(t *testing.T) {
 	t.Parallel()
 	fixture := v41HeadProjFixture(t)
-	for _, site := range []string{"matmul", "read", "length", "finite", "unknown"} {
+	for _, site := range []string{"matmul", "read", "length", "finite", "unknown", "rocm"} {
 		t.Run(site, func(t *testing.T) {
 			m := v41HeadProjClone(t, fixture)
 			b := newV41HeadProjBackend(m.kqw["lm_head.weight"].raw, false)
@@ -303,6 +303,8 @@ func TestV41HeadProjectionSelectedFailureRollback(t *testing.T) {
 			if site == "unknown" {
 				b.site = "matmul"
 				b.cause = unknown
+			} else if site == "rocm" {
+				b.site, b.cause = "read", errors.New("rocm: read: injected native failure")
 			}
 			var recovered any
 			var firstClosed *BackendForwardOperationError
@@ -310,9 +312,15 @@ func TestV41HeadProjectionSelectedFailureRollback(t *testing.T) {
 			if b.faultAttempts != 1 {
 				t.Errorf("selected head attempts=%d want1", b.faultAttempts)
 			}
-			if site == "unknown" {
-				if recovered != unknown {
+			if site == "unknown" || site == "rocm" {
+				if recovered != b.cause {
 					t.Error("unknown head panic identity changed")
+				}
+				if !errors.As(s.halFailure, &firstClosed) || !s.BackendSessionClosed() {
+					t.Fatal("unclassified selected head failure left session reusable")
+				}
+				if site == "rocm" && !errors.Is(s.halFailure, b.cause.(error)) {
+					t.Fatal("plain head backend cause identity lost")
 				}
 			} else {
 				err, ok := recovered.(error)
@@ -340,7 +348,7 @@ func TestV41HeadProjectionSelectedFailureRollback(t *testing.T) {
 			if delta["head_projection_device_calls"] != 1 || delta["head_projection_device_rows"] != 0 || delta["head_projection_host_calls"] != 0 || delta["head_projection_host_rows"] != 0 {
 				t.Errorf("selected head completion/no-host-retry ledger=%v", delta)
 			}
-			if site != "unknown" {
+			{
 				apiBefore := [3]int{b.apiUploads, b.apiMatMuls, b.apiReads}
 				opsBefore := append([]v41DenseTestOp(nil), b.ops...)
 				uploadBefore, readBefore := map[compute.Buffer]int{}, map[compute.Buffer]int{}
@@ -359,20 +367,13 @@ func TestV41HeadProjectionSelectedFailureRollback(t *testing.T) {
 				func() { defer func() { retry = recover() }(); s.Step(4) }()
 				var closed *BackendForwardOperationError
 				err, ok := retry.(error)
-				if !ok || !errors.As(err, &closed) || closed != firstClosed || !errors.Is(err, ErrV41ForwardStage) || b.faultAttempts != attempts {
+				if !ok || !errors.As(err, &closed) || closed != firstClosed || (site != "unknown" && site != "rocm" && !errors.Is(err, ErrV41ForwardStage)) || b.faultAttempts != attempts {
 					t.Error("closed head Session retried execution or changed cause")
 				}
 				if apiBefore != [3]int{b.apiUploads, b.apiMatMuls, b.apiReads} || !reflect.DeepEqual(opsBefore, b.ops) || !reflect.DeepEqual(uploadBefore, b.uploads) || !reflect.DeepEqual(readBefore, b.reads) || !reflect.DeepEqual(liveBefore, b.live) {
 					t.Error("closed Session invoked backend or changed retained backend resources")
 				}
-				return
 			}
-			b.fault = false
-			b.cause = nil
-			control := v41HeadProjClone(t, fixture)
-			host := v41EngProjSession(t, control, newV41HeadProjBackend(control.kqw["lm_head.weight"].raw, true))
-			host.Prefill([]int{1, 2, 3})
-			v41GroupedParity(t, s.Step(4), host.Step(4), 1e-4)
 		})
 	}
 }
@@ -438,11 +439,11 @@ func TestV41HeadProjectionRestoreForkOwnership(t *testing.T) {
 
 // fak-test:justify why=contract when=changed:internal/model/**
 // fak-test:runtime medium est=4s lane=default
-func TestV41HeadProjectionHostNormAndScaleSemantics(t *testing.T) {
+func TestV41HeadProjectionFullNormAndScaleSemantics(t *testing.T) {
 	t.Parallel()
 	fixture := v41HeadProjFixture(t)
 	for _, layerNorm := range []bool{false, true} {
-		t.Run(map[bool]string{false: "gain1p-rms", true: "layernorm-bias"}[layerNorm], func(t *testing.T) {
+		t.Run(map[bool]string{false: "ignore-generic-gain1p", true: "ignore-generic-layernorm-bias"}[layerNorm], func(t *testing.T) {
 			m := v41HeadProjClone(t, fixture)
 			m.Cfg.LayerNorm = layerNorm
 			m.Cfg.NormGain1p = !layerNorm
@@ -465,10 +466,19 @@ func TestV41HeadProjectionHostNormAndScaleSemantics(t *testing.T) {
 			s := v41EngProjSession(t, m, b)
 			ids := []int{1, 2, 3}
 			got := s.Prefill(ids)
-			want := lastLogits(oracle.Forward(ids))
+			act := oracle.Forward(ids)
+			want := lastLogits(act)
 			v41GroupedParity(t, got, want, 1e-4)
 			rows := 0
 			for _, op := range b.operations {
+				for row := 0; row < op.rows; row++ {
+					pos := rows + row
+					hidden := act.Hidden[len(act.Hidden)-1][pos*m.Cfg.HiddenSize : (pos+1)*m.Cfg.HiddenSize]
+					expected := v41AttentionInputNormOracle(hidden, cpuOracleTensor(t, m, "model.norm.weight"), float32(m.Cfg.RMSNormEps))
+					if !reflect.DeepEqual(op.activation[row*m.Cfg.HiddenSize:(row+1)*m.Cfg.HiddenSize], expected) {
+						t.Fatal("head did not consume BF16 learned RMSNorm independent of generic flags")
+					}
+				}
 				rows += op.rows
 			}
 			if rows != len(ids) || len(b.operations) == 0 {
@@ -568,5 +578,28 @@ func TestV41HeadProjectionDedicatedPackedTiedStores(t *testing.T) {
 				t.Errorf("dedicated packed tied head uploads=%d want1", b.stages)
 			}
 		})
+	}
+}
+
+// Unmeasured estimate; preserves the unrelated generic projection policy.
+// fak-test:runtime fast est=100ms lane=default
+func TestV41DenseGenericProjectionUnknownPanicCompatibility(t *testing.T) {
+	m := v41CompressorProducerTestFixture(t)
+	b := newV41CompressorTestBackend()
+	s := v41DenseTestSession(t, m, b)
+	leaf := "attn.wq_a.weight"
+	out, in, ok := m.residentShape(layerName(0, leaf))
+	if !ok {
+		t.Fatal("generic projection fixture missing")
+	}
+	primary := errors.New("generic projection panic")
+	b.fail, b.failSite = primary, "matmul"
+	var got any
+	func() {
+		defer func() { got = recover() }()
+		_, _, _ = s.v41DenseProjectionFunc()(0, leaf, make([]float32, in), out, in, 1)
+	}()
+	if got != primary || s.BackendSessionClosed() || s.halFailure != nil {
+		t.Fatal("guarded-only fix changed generic panic policy")
 	}
 }

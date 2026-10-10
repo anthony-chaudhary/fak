@@ -218,6 +218,45 @@ __global__ void swiglu(const float *gate, const float *up, float *out, int n) {
   }
 }
 
+// Adapted finite-input clamp arithmetic from ROCmFPX PR6, unary.cuh/unary.cu,
+// revision9fb229123f3ee1847e32c29445c8cb0fa1e5fb36 (ggml/llama.cpp upstream).
+// Modification: contiguous separate F32 operands, Fak stream/error ABI, and
+// ordered comparisons to preserve NaN operands rather than fminf masking them.
+// Canonical creator attribution: Carlo Pasquale (Charlie12345), ROCmFPX founder.
+// https://github.com/ROCmFPX/ROCmFPX/blob/9fb229123f3ee1847e32c29445c8cb0fa1e5fb36/NOTICE
+// MIT License
+//
+// Copyright (c) 2023-2026 The ggml authors
+// Copyright (c) 2025-2026 Carlo Pasquale (Charlie12345), ROCmFPX additions
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+__global__ void swiglu_limit(const float *gate, const float *up, float *out, int n, float limit) {
+  unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= static_cast<unsigned int>(n)) return;
+  float g = gate[i];
+  float u = up[i];
+  if (g > limit) g = limit;
+  if (u > limit) u = limit;
+  if (u < -limit) u = -limit;
+  out[i] = (g / (1.0f + expf(-g))) * u;
+}
+
 __global__ void add(float *dst, const float *src, int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) dst[i] += src[i];
@@ -478,6 +517,14 @@ extern "C" int frocm_swiglu_f32(const float *gate, const float *up, float *out, 
   if (!gate || !up || !out || n <= 0) return failf(-1, "swiglu_f32: invalid input");
   swiglu<<<(n + 255) / 256, 256, 0, stream>>>(gate, up, out, n);
   return launch_status("swiglu_f32 launch");
+}
+
+extern "C" int frocm_swiglu_limit_f32(const float *gate, const float *up, float *out, int n, float limit) {
+  if (int rc = ready("swiglu_limit_f32")) return rc;
+  if (!gate || !up || !out || n <= 0 || !isfinite(limit) || limit <= 0.0f)
+    return failf(-1, "swiglu_limit_f32: invalid input");
+  swiglu_limit<<<(n - 1) / 256 + 1, 256, 0, stream>>>(gate, up, out, n, limit);
+  return launch_status("swiglu_limit_f32 launch");
 }
 
 extern "C" int frocm_add_f32(float *dst, const float *src, int n) {

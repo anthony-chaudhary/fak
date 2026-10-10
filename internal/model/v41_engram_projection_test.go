@@ -271,7 +271,7 @@ func TestV41EngramProjectionDefaultExportedLedger(t *testing.T) {
 // fak-test:runtime medium est=3s lane=default
 func TestV41EngramProjectionLateSelectedFailure(t *testing.T) {
 	t.Parallel()
-	for _, site := range []string{"matmul", "read", "length", "finite", "unknown"} {
+	for _, site := range []string{"matmul", "read", "length", "finite", "unknown", "rocm"} {
 		t.Run(site, func(t *testing.T) {
 			t.Parallel()
 			m := v41EngProjFixture(t, "F32", false)
@@ -279,6 +279,7 @@ func TestV41EngramProjectionLateSelectedFailure(t *testing.T) {
 			api := &v41EngramClosedRecorder{v41EngProjBackend: b}
 			s := v41EngProjSession(t, m, api)
 			s.Prefill([]int{1, 2, 3})
+			selectedCallback := s.v41EngramProjectionFunc()
 			before := captureV41ForwardSnapshot(s.v41Forward)
 			ledgerBefore := v41EngProjPhase(t, m, "decode")
 			b.live = map[compute.Buffer]bool{}
@@ -287,6 +288,10 @@ func TestV41EngramProjectionLateSelectedFailure(t *testing.T) {
 			unknown := struct{ Number int }{1366808}
 			if site == "unknown" {
 				b.site, b.cause = "matmul", unknown
+			} else if site == "rocm" {
+				// Match the plain-error representation of rocmLastError;
+				// this recorder does not establish a physical HIP failure.
+				b.site, b.cause = "read", errors.New("rocm: read: injected native call failure")
 			}
 			var closedFailure *BackendForwardOperationError
 			var recovered any
@@ -294,9 +299,15 @@ func TestV41EngramProjectionLateSelectedFailure(t *testing.T) {
 			if !b.failed {
 				t.Fatal("late second Engram projection injection was never reached")
 			}
-			if site == "unknown" {
-				if recovered != unknown {
+			if site == "unknown" || site == "rocm" {
+				if recovered != b.cause {
 					t.Error("late selected Engram operation changed unknown panic identity")
+				}
+				if !errors.As(s.halFailure, &closedFailure) || !s.BackendSessionClosed() {
+					t.Fatal("unclassified selected failure left Session reusable")
+				}
+				if site == "rocm" && !errors.Is(s.halFailure, b.cause.(error)) {
+					t.Error("plain ROCm error lost latched cause identity")
 				}
 			} else {
 				err, ok := recovered.(error)
@@ -325,7 +336,7 @@ func TestV41EngramProjectionLateSelectedFailure(t *testing.T) {
 				t.Errorf("late Engram failure attempted/completed accounting=%v", delta)
 			}
 
-			if site != "unknown" {
+			{
 				callsBefore := api.calls
 				stateBefore := captureV41ForwardSnapshot(s.v41Forward)
 				dataBefore := v41EngProjPhase(t, m, "decode")
@@ -333,25 +344,31 @@ func TestV41EngramProjectionLateSelectedFailure(t *testing.T) {
 				func() { defer func() { repeated = recover() }(); s.Step(4) }()
 				var closed *BackendForwardOperationError
 				err, ok := repeated.(error)
-				if !ok || !errors.As(err, &closed) || closed != closedFailure || !errors.Is(err, ErrV41ForwardStage) {
+				if !ok || !errors.As(err, &closed) || closed != closedFailure ||
+					(site != "unknown" && site != "rocm" && !errors.Is(err, ErrV41ForwardStage)) {
 					t.Error("closed public entry changed selected failure identity/cause")
 				}
 				if api.calls != callsBefore {
 					t.Error("closed public entry invoked backend API")
 				}
+				stage := m.v41EngramStageFor()
+				in, out := stage.columns*stage.headDim, (stage.hc+1)*m.Cfg.HiddenSize
+				var direct any
+				func() {
+					defer func() { direct = recover() }()
+					_, _, _ = selectedCallback(m.Cfg.DeepSeekV41.EngramLayerIDs[0], make([]float32, in), out, in)
+				}()
+				if direct != closedFailure || api.calls != callsBefore {
+					t.Error("closed selected callback retried backend or changed latch")
+				}
+
 				if !reflect.DeepEqual(stateBefore, captureV41ForwardSnapshot(s.v41Forward)) || !reflect.DeepEqual(dataBefore, v41EngProjPhase(t, m, "decode")) {
 					t.Error("closed public entry changed retained state or projection attribution")
 				}
 				if len(b.live) != 0 {
 					t.Error("closed public entry changed transient buffer cleanup")
 				}
-				return
 			}
-			b.decodeFault, b.site, b.cause, b.failed = false, "", nil, false
-			oracle := v41EngProjFixture(t, "F32", false).NewSession()
-			t.Cleanup(oracle.Close)
-			oracle.Prefill([]int{1, 2, 3})
-			v41GroupedParity(t, s.Step(4), oracle.Step(4), 1e-4)
 		})
 	}
 }

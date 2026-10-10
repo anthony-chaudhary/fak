@@ -26,6 +26,7 @@
 #include <vulkan/vulkan.h>
 
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -259,6 +260,19 @@ int g_restoreFailAfterSubmits = -1;
 
 // One compute kernel: pipeline + layout + descriptor set layout + how many storage buffers
 // it binds + push-constant byte size.
+// Matches shaders/attention.comp. Registration and dispatch share this ABI.
+struct AttentionPush {
+    int nPos; int nH; int nKV; int hd; float scale; int mode; int tileCount;
+    int causal; int windowSize;
+};
+static_assert(sizeof(int) == 4 && sizeof(float) == 4 && sizeof(AttentionPush) == 36,
+              "decode attention push ABI must contain nine 32-bit scalars");
+static_assert(offsetof(AttentionPush, nPos) == 0 && offsetof(AttentionPush, nH) == 4 &&
+              offsetof(AttentionPush, nKV) == 8 && offsetof(AttentionPush, hd) == 12 &&
+              offsetof(AttentionPush, scale) == 16 && offsetof(AttentionPush, mode) == 20 &&
+              offsetof(AttentionPush, tileCount) == 24 && offsetof(AttentionPush, causal) == 28 &&
+              offsetof(AttentionPush, windowSize) == 32, "decode attention push offsets changed");
+
 struct Kernel {
     VkShaderModule        shader = VK_NULL_HANDLE;
     VkDescriptorSetLayout dsl    = VK_NULL_HANDLE;
@@ -448,6 +462,61 @@ bool allocPressure(VkResult r) {
            r == VK_ERROR_TOO_MANY_OBJECTS;
 }
 
+// Compatible-type enumeration adapted from ROCmFPX/ggml Vulkan allocation:
+// https://github.com/ROCmFPX/ROCmFPX/blob/9279b36aa69fd1ecc420211fc24b5c011c6889ed/ggml/src/ggml-vulkan/ggml-vulkan-buffers.cpp
+// Copyright (c) 2023-2026 The ggml authors
+// Copyright (c) 2025-2026 Carlo Pasquale (Charlie12345), ROCmFPX additions
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+// Fak retains its first-attempt/pool-drain policy and retries only allocation
+// pressure, never device loss or another fatal error. This selector performs no
+// accounting or binding; the caller publishes those only after success.
+template <typename Allocate>
+VkResult allocateCompatibleMemory(uint32_t typeBits, VkMemoryPropertyFlags want,
+                                  const VkPhysicalDeviceMemoryProperties& properties,
+                                  VkDeviceSize allocationSize, bool tryAll, Allocate allocate,
+                                  VkDeviceMemory* out, uint32_t* selectedType,
+                                  bool* allocationAttempted) {
+    *allocationAttempted = false;
+    *out = VK_NULL_HANDLE;
+    *selectedType = UINT32_MAX;
+    VkResult result = VK_ERROR_FEATURE_NOT_PRESENT;
+    const uint32_t count = std::min(properties.memoryTypeCount, uint32_t(32));
+    const uint32_t heapCount = std::min(properties.memoryHeapCount, uint32_t(VK_MAX_MEMORY_HEAPS));
+    for (uint32_t i = 0; i < count; ++i) {
+        const VkMemoryType& type = properties.memoryTypes[i];
+        if (!(typeBits & (uint32_t(1) << i)) || (type.propertyFlags & want) != want) continue;
+        // VUID-vkAllocateMemory-pAllocateInfo-01713: use the Vulkan allocation
+        // requirement, not the smaller logical payload, for heap eligibility.
+        if (type.heapIndex >= heapCount || allocationSize > properties.memoryHeaps[type.heapIndex].size) continue;
+        VkDeviceMemory candidate = VK_NULL_HANDLE;
+        *allocationAttempted = true;
+        result = allocate(i, &candidate);
+        if (result == VK_SUCCESS) {
+            *out = candidate;
+            *selectedType = i;
+            return result;
+        }
+        if (!tryAll || !allocPressure(result)) return result;
+    }
+    return result;
+}
+
 bool deviceExtensionSupported(const char* name) {
     if (!g_phys || !name || !*name) return false;
     uint32_t n = 0;
@@ -613,13 +682,14 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
     }
     VkMemoryRequirements req{};
     vkGetBufferMemoryRequirements(g_dev, b->buf, &req);
-    auto tryAlloc = [&](VkMemoryPropertyFlags want, VkDeviceMemory* out, uint32_t* selectedType) -> VkResult {
-        VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-        ai.allocationSize = req.size;
-        ai.memoryTypeIndex = findMemType(req.memoryTypeBits, want);
-        if (ai.memoryTypeIndex == UINT32_MAX) return VK_ERROR_FEATURE_NOT_PRESENT;
-        if (selectedType) *selectedType = ai.memoryTypeIndex;
-        return vkAllocateMemory(g_dev, &ai, nullptr, out);
+    bool allocationAttempted = false;
+    auto tryAlloc = [&](VkMemoryPropertyFlags want, VkDeviceMemory* out, uint32_t* selectedType, bool tryAll = false) -> VkResult {
+        return allocateCompatibleMemory(req.memoryTypeBits, want, g_memprops, req.size, tryAll, [&](uint32_t index, VkDeviceMemory* candidate) {
+                VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+                ai.allocationSize = req.size;
+                ai.memoryTypeIndex = index;
+                return vkAllocateMemory(g_dev, &ai, nullptr, candidate);
+            }, out, selectedType, &allocationAttempted);
     };
 
     // First attempt; on out-of-memory / too-many-allocations, drain the recycle pool (which
@@ -630,13 +700,14 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
     VkResult r = tryAlloc(props, &b->mem, &selectedMemoryType);
     if (allocPressure(r)) {
         drainPool();
-        r = tryAlloc(props, &b->mem, &selectedMemoryType);
+        r = tryAlloc(props, &b->mem, &selectedMemoryType, true);
     }
-    if (r != VK_SUCCESS && (props & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) &&
+    if ((allocPressure(r) || (r == VK_ERROR_FEATURE_NOT_PRESENT && !allocationAttempted)) &&
+        (props & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) &&
         (usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)) {
         VkMemoryPropertyFlags fallback =
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-        VkResult fr = tryAlloc(fallback, &b->mem, &selectedMemoryType);
+        VkResult fr = tryAlloc(fallback, &b->mem, &selectedMemoryType, true);
         if (fr == VK_SUCCESS) {
             fprintf(stderr,
                 "fak-vulkan: device-local alloc(%zu bytes) failed VkResult=%d; using host-visible storage\n",
@@ -644,9 +715,11 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
             r = fr;
             actualProps = fallback;
             b->hostVisibleFallback = true;
+        } else {
+            r = fr;
         }
     }
-    if (r == VK_ERROR_FEATURE_NOT_PRESENT) {
+    if (r == VK_ERROR_FEATURE_NOT_PRESENT && !allocationAttempted) {
         fprintf(stderr, "fak-vulkan: no compatible memory type for %zu bytes\n", bytes);
         vkDestroyBuffer(g_dev, b->buf, nullptr);
         delete b;
@@ -1909,10 +1982,21 @@ bool v41IndexerScoreABI(const std::vector<char>& code) {
     return seenBindings == 15;
 }
 
+// Reject only malformed SPIR-V framing, not invalid instructions or unsupported
+// capabilities. SPIR-V physical layout requires five header words; its magic
+// identifies either byte order. Leave version policy and code bytes unchanged.
+// https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html#_physical_layout_of_a_spir_v_module_and_instruction
+static bool spirvModuleFraming(const std::vector<char>& code) {
+    if (code.size() < 5 * sizeof(uint32_t) || code.size() % sizeof(uint32_t) != 0) return false;
+    uint32_t magic = 0;
+    std::memcpy(&magic, code.data(), sizeof(magic));
+    return magic == 0x07230203u || magic == 0x03022307u;
+}
+
 bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsize, uint32_t subgroupSize = 0) {
     const bool fixedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_INDEXER_SCORE];
     std::vector<char> code = fixedV41 ? readV41TailRoPEModule(spvPath) : readFile(spvPath);
-    if (code.empty()) return false;
+    if (!spirvModuleFraming(code)) return false;
     if (&k == &g_kern[K_SWIGLU] && !swigluPushConstantABI(code)) {
         fprintf(stderr, "fak-vulkan: incompatible SwiGLU push-constant ABI in %s\n", spvPath.c_str());
         return false;
@@ -2331,6 +2415,42 @@ float gdnVerifySelfCheck() {
 
 } // namespace
 
+// Pure synthetic seam: shares the actual selector above, never calls Vulkan,
+// mutates backend state, or fabricates live allocation/dispatch observations.
+extern "C" int fvk_debug_memory_type_selection(uint32_t typeBits, uint32_t want,
+        uint32_t typeCount, const uint32_t* flags, const int* results,
+        const uint32_t* heapIndices, uint32_t heapCount, const uint64_t* heapSizes,
+        uint64_t allocationSize, int tryAll, uint32_t* attempts, uint32_t* attemptCount, uint32_t* selectedType,
+        int* publishedHandle) {
+    VkPhysicalDeviceMemoryProperties properties{};
+    properties.memoryTypeCount = typeCount;
+    properties.memoryHeapCount = heapCount;
+    const uint32_t count = std::min(typeCount, uint32_t(32));
+    for (uint32_t i = 0; i < count; ++i) {
+        properties.memoryTypes[i].propertyFlags = flags[i];
+        properties.memoryTypes[i].heapIndex = heapIndices[i];
+    }
+    for (uint32_t i = 0; i < std::min(heapCount, uint32_t(VK_MAX_MEMORY_HEAPS)); ++i) {
+        properties.memoryHeaps[i].size = heapSizes[i];
+    }
+    *attemptCount = 0;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    bool allocationAttempted = false;
+    VkResult result = allocateCompatibleMemory(typeBits, want, properties, allocationSize,
+        tryAll != 0, [&](uint32_t i, VkDeviceMemory* out) {
+            attempts[(*attemptCount)++] = i;
+            VkResult status = static_cast<VkResult>(results[i]);
+            // Failed Vulkan output parameters are undefined. Poison even a
+            // failed synthetic result to prove it is never published or freed.
+            *out = (VkDeviceMemory)(uintptr_t)(i + 1);
+            return status;
+        }, &memory, selectedType, &allocationAttempted);
+    *publishedHandle = memory != VK_NULL_HANDLE ? 1 : 0;
+    return static_cast<int>(result);
+}
+
+
+
 // ---- C ABI ----------------------------------------------------------------------
 extern "C" {
 
@@ -2683,7 +2803,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     ok &= buildKernel(g_kern[K_SWIGLU_MATMUL_ADD], P("swiglu_matmul_add.spv"), 4, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_ADD],       P("add.spv"),       2, sizeof(int));
     ok &= buildKernel(g_kern[K_ADD_BIAS],  P("add_bias.spv"),  2, 2 * sizeof(int));
-    ok &= buildKernel(g_kern[K_ATTENTION], P("attention.spv"), 5, 6 * sizeof(int) + sizeof(float));
+    ok &= buildKernel(g_kern[K_ATTENTION], P("attention.spv"), 5, sizeof(AttentionPush));
     ok &= buildKernel(g_kern[K_ARGMAX],    P("argmax.spv"),    2, sizeof(int));
     ok &= buildKernel(g_kern[K_ARGMAX_PAIRS], P("argmax_pairs.spv"), 3, sizeof(int));
     ok &= buildKernel(g_kern[K_QWEN35_GDN_CONV], P("qwen35_gdn_conv.spv"), 4, 3 * sizeof(int));
@@ -3968,8 +4088,9 @@ void fvk_attention_f32(const void* dQ, const void* dK, const void* dV, void* dOu
     // the candidate without widening the public C or Go backend APIs.
     const char* splitEnv = std::getenv("FAK_VULKAN_ATTENTION_CONTEXT_SPLIT");
     const bool contextSplit = splitEnv && splitEnv[0] == '1' && splitEnv[1] == '\0';
-    struct { int nPos, nH, nKV, hd; float scale; int mode, tileCount; }
-        pc{nPos, nH, nKV, hd, scale, 0, 1};
+    // This is one query at the end of the supplied prefix. The causal bound
+    // equals nPos; no sliding-window policy is supplied by this C entry point.
+    AttentionPush pc{nPos, nH, nKV, hd, scale, 0, 1, 1, 0};
     Buffer* out = B(dOut);
     Buffer* bufs[5] = {B((void*)dQ), B((void*)dK), B((void*)dV), out, out};
     if (!contextSplit) {

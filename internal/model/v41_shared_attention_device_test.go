@@ -34,6 +34,8 @@ type v41SharedAttentionTestBackend struct {
 	failCall                    int // zero fails every call; otherwise one-based dispatch
 	cause                       error
 	panicValue                  any
+	cleanupPanic                any
+	freeAttempts                int
 }
 
 func newV41SharedAttentionTestBackend() *v41SharedAttentionTestBackend {
@@ -157,6 +159,10 @@ func (b *v41SharedAttentionTestBackend) Free(x compute.Tensor) {
 	}
 	delete(b.allocations, x.Buf())
 	b.Backend.Free(x)
+	b.freeAttempts++
+	if b.cleanupPanic != nil {
+		panic(b.cleanupPanic)
+	}
 	if isOutput && b.fault == "free" && (b.failCall == 0 || b.failCall == len(b.calls)) {
 		panic(b.cause)
 	}
@@ -572,8 +578,33 @@ func TestV41SharedAttentionDeviceAdapter(t *testing.T) {
 		b.cause = &compute.V41SharedAttentionArithmeticError{Stage: compute.V41SharedAttentionStageScore, Head: 0, SelectedSlot: 99, Element: -1, ValueBits: 0x7f800000}
 		_, err := v41SparseAttentionSinkWithDevice(0, q, kv, nil, idx, plainOpt, s.v41SharedAttentionFunc())
 		var protocol *compute.V41SharedAttentionProtocolError
-		if !errors.As(err, &protocol) || !errors.Is(err, b.cause) {
+		if !errors.As(err, &protocol) || !errors.Is(err, b.cause) || errors.Is(err, ErrV41SparseSinkNonFinite) {
 			t.Fatalf("malformed status not kept as protocol failure: %v", err)
+		}
+	})
+
+	t.Run("plain-arithmetic-retains-cause-and-host-sentinel", func(t *testing.T) {
+		for _, tc := range []struct {
+			stage         compute.V41SharedAttentionStage
+			slot, element int
+		}{
+			{compute.V41SharedAttentionStageScore, 0, -1},
+			{compute.V41SharedAttentionStageExp, 0, -1},
+			{compute.V41SharedAttentionStageDenominator, -1, -1},
+			{compute.V41SharedAttentionStageWeight, 0, -1},
+			{compute.V41SharedAttentionStageValue, 0, 0},
+			{compute.V41SharedAttentionStageOutput, -1, 0},
+		} {
+			t.Run(fmt.Sprintf("stage-%d", tc.stage), func(t *testing.T) {
+				s, b := newSession(t)
+				arithmetic := &compute.V41SharedAttentionArithmeticError{Stage: tc.stage, Head: 0, SelectedSlot: tc.slot, Element: tc.element, ValueBits: math.Float32bits(float32(math.Inf(1)))}
+				b.fault, b.cause = "dispatch", arithmetic
+				out, err := v41SparseAttentionSinkWithDevice(0, q, kv, nil, idx, plainOpt, s.v41SharedAttentionFunc())
+				var retained *compute.V41SharedAttentionArithmeticError
+				if out != nil || !errors.Is(err, ErrV41SparseSinkNonFinite) || !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &retained) || retained != arithmetic || !errors.Is(err, arithmetic) || len(b.allocations) != 0 {
+					t.Fatalf("plain arithmetic refusal lost: out=%v err=%v retained=%v", out, err, retained)
+				}
+			})
 		}
 	})
 
@@ -586,16 +617,15 @@ func TestV41SharedAttentionDeviceAdapter(t *testing.T) {
 				t.Fatal("unsupported backend selected")
 			}
 			out, err := v41SparseAttentionSinkWithDevice(0, []float32{sign * math.MaxFloat32}, []float32{2}, nil, []int32{0}, one, s.v41SharedAttentionFunc())
-			if err != nil || len(out) != 1 || len(b.calls) != 0 {
-				t.Fatalf("host control changed: %v", err)
-			}
-			if sign > 0 && !math.IsNaN(float64(out[0])) || sign < 0 && out[0] != 0 {
-				t.Fatalf("host overflow behavior changed: %v", out)
+			// The host guard introduced by 1882b2f8849 refuses both signs of
+			// arithmetic overflow rather than publishing NaN or a zero result.
+			if out != nil || !errors.Is(err, ErrV41SparseSinkNonFinite) || len(b.calls) != 0 {
+				t.Fatalf("host sparse-sink refusal lost: out=%v err=%v", out, err)
 			}
 			s, b = newSession(t)
 			out, err = v41SparseAttentionSinkWithDevice(0, []float32{sign * math.MaxFloat32}, []float32{2}, nil, []int32{0}, one, s.v41SharedAttentionFunc())
 			var arithmetic *compute.V41SharedAttentionArithmeticError
-			if out != nil || !errors.As(err, &arithmetic) || arithmetic.Stage != compute.V41SharedAttentionStageScore || arithmetic.SelectedSlot != 0 || arithmetic.ValueBits != math.Float32bits(sign*float32(math.Inf(1))) {
+			if out != nil || !errors.Is(err, ErrV41SparseSinkNonFinite) || !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &arithmetic) || arithmetic.Stage != compute.V41SharedAttentionStageScore || arithmetic.SelectedSlot != 0 || arithmetic.ValueBits != math.Float32bits(sign*float32(math.Inf(1))) {
 				t.Fatalf("selected score tightening lost: %v", err)
 			}
 		}
@@ -664,4 +694,69 @@ func TestV41SharedAttentionDeviceAdapter(t *testing.T) {
 			t.Fatal("Q or widened KV was recast")
 		}
 	})
+}
+
+// fak-test:runtime fast est=5ms lane=default
+// Estimate is unmeasured. CPU recorder checks the callback contract only; no
+// current native-backend double fault or physical qualification is claimed.
+func TestV41SharedAttentionPrimaryFailureSurvivesCleanup(t *testing.T) {
+	for _, cleanup := range []any{&compute.BackendError{Backend: "cleanup", Class: compute.VulkanClassExecutionFailed, Err: errors.New("release failure")}, "unclassified release panic"} {
+		for _, tc := range []struct {
+			name, fault string
+			panicValue  any
+			owned       int
+			cleanupOnly bool
+		}{
+			{name: "returned dispatch", fault: "dispatch", owned: 3},
+			{name: "returned partial", fault: "partial-output", owned: 4},
+			{name: "typed dispatch panic", fault: "panic", owned: 3},
+			{name: "typed read panic", fault: "read", owned: 4},
+			{name: "unknown pointer panic", fault: "panic", panicValue: &struct{ marker int }{17}, owned: 3},
+			{name: "unknown error panic", fault: "panic", panicValue: errors.New("original unknown panic"), owned: 3},
+			{name: "unknown string panic", fault: "panic", panicValue: "original panic", owned: 3},
+			{name: "cleanup only", owned: 4, cleanupOnly: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				b := newV41SharedAttentionTestBackend()
+				s := &Session{M: &Model{}, Backend: b, halW: map[string]compute.Tensor{}}
+				t.Cleanup(s.Close)
+				primary := &compute.BackendError{Backend: "primary", Class: compute.VulkanClassExecutionFailed, Err: errors.New("selected operation failure")}
+				b.fault, b.cause, b.panicValue, b.cleanupPanic = tc.fault, primary, tc.panicValue, cleanup
+				var out []float32
+				var err error
+				recovered := v41IndexerTestRecover(func() {
+					out, err = v41SparseAttentionSinkWithDevice(4, []float32{1}, []float32{2}, nil, []int32{0}, V41SparseAttentionSinkOptions{B: 1, M: 1, Heads: 1, HeadDim: 1, N: 1, TopK: 1, Softmax: 1}, s.v41SharedAttentionFunc())
+				})
+				if tc.panicValue != nil {
+					if recovered != tc.panicValue {
+						t.Fatalf("primary panic identity lost: got %v want %v", recovered, tc.panicValue)
+					}
+				} else if tc.cleanupOnly {
+					if cleanupErr, ok := cleanup.(error); ok {
+						if recovered != nil || !errors.Is(err, cleanupErr) {
+							t.Fatalf("cleanup-only typed failure changed: panic=%v err=%v", recovered, err)
+						}
+					} else if recovered != cleanup {
+						t.Fatalf("cleanup-only panic changed: %v", recovered)
+					}
+				} else if recovered != nil || !errors.Is(err, primary) {
+					t.Fatalf("primary selected cause lost: panic=%v err=%v", recovered, err)
+				}
+				var closed *BackendForwardOperationError
+				if out != nil || !s.BackendSessionClosed() || !errors.As(s.halFailure, &closed) || closed.Layer != 4 || len(b.allocations) != 0 || b.freeAttempts != tc.owned || len(b.calls) != 1 {
+					t.Fatalf("failure did not close and attempt every owned release: out=%v closed=%v live=%d free=%d calls=%d", out, s.halFailure, len(b.allocations), b.freeAttempts, len(b.calls))
+				}
+				if !tc.cleanupOnly && tc.panicValue == nil && !errors.Is(s.halFailure, primary) {
+					t.Fatal("latched primary cause changed")
+				}
+				releases := b.freeAttempts
+				retry := v41IndexerTestRecover(func() {
+					_, _ = v41SparseAttentionSinkWithDevice(4, []float32{1}, []float32{2}, nil, []int32{0}, V41SparseAttentionSinkOptions{B: 1, M: 1, Heads: 1, HeadDim: 1, N: 1, TopK: 1, Softmax: 1}, s.v41SharedAttentionFunc())
+				})
+				if retry != s.halFailure || len(b.calls) != 1 || b.freeAttempts != releases {
+					t.Fatal("closed callback retried work or cleanup")
+				}
+			})
+		}
+	}
 }

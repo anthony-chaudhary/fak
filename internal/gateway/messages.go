@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -184,6 +185,9 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	defer waitEPFanout()
 	req, ok := s.readAnthropicMessagesRequest(w, r)
 	if !ok {
+		return
+	}
+	if rejectStopLimits(w, req.StopSequences) {
 		return
 	}
 	r, ok = s.prepareChatRoute(w, r, req.Model)
@@ -1236,6 +1240,34 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 			markFeatureActivationIncomplete(r.Context())
 			return
 		}
+	}
+}
+
+// anthropicSSECheckedSender is the selected planner-live writer. The legacy
+// void sender below retains its existing contract for the other stream owners.
+func anthropicSSECheckedSender(w http.ResponseWriter, flusher http.Flusher) func(string, any) error {
+	return func(event string, data any) error {
+		b, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+		var buf bytes.Buffer
+		buf.WriteString("event: ")
+		buf.WriteString(event)
+		buf.WriteString("\ndata: ")
+		buf.Write(b)
+		buf.WriteString("\n\n")
+		n, err := w.Write(buf.Bytes())
+		if err != nil {
+			return err
+		}
+		if n != buf.Len() {
+			return io.ErrShortWrite
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return nil
 	}
 }
 

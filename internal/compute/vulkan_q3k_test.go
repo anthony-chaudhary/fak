@@ -7,8 +7,11 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/computebuild"
 )
 
 // vulkan_q3k_test.go is the device-side witness for fak#13677: the pinned
@@ -24,7 +27,11 @@ import (
 // allocation to four bytes. The wider cases cover alternating 110-byte block
 // alignment, the V4.1 hidden/FFN reduction sizes, output workgroup tails, and
 // P=1/2/4 dispatch.
+// fak-test:runtime integration est=3s lane=optin
 func TestVulkanQ3KMatMulStrix(t *testing.T) {
+	if runVulkanProfileFixture(t) {
+		return
+	}
 	v := vk(t)
 	capability, ok := any(v).(interface{ SupportsQ3KMatMul() bool })
 	if !ok || !capability.SupportsQ3KMatMul() {
@@ -120,6 +127,11 @@ func TestVulkanQ3KMatMulStrix(t *testing.T) {
 // entry point, and the Go seam's byte-size pad plus the Q3_K MatMul/BatchedMatMul
 // cases. A future edit that drops any leg fails here without needing a GPU.
 func TestVulkanQ3KSourceContract(t *testing.T) {
+	// The build inventory is delegated to the versioned current registry; its
+	// source-file placement is not the module inclusion contract.
+	if !slices.Contains(computebuild.CurrentVulkanShaderRegistryV5(), "q3k_matmul") {
+		t.Fatal("current Vulkan build registry is missing q3k_matmul")
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("os.Getwd failed: %v", err)
@@ -153,12 +165,6 @@ func TestVulkanQ3KSourceContract(t *testing.T) {
 				"C.fvk_q3k_matmul_f32",
 				"case Q3_K:",
 				"vulkanQ3KByteSizes",
-			},
-		},
-		{
-			path: filepath.Join(repoRoot, "internal", "computebuild", "vulkan.go"),
-			clauses: []string{
-				`"q3k_matmul"`,
 			},
 		},
 	}

@@ -404,6 +404,8 @@ type vulkanQ8Chunk struct {
 	scaleN              int
 	budgetedWeightBytes int64
 	hostVisibleWeight   bool
+	scaleBudgetedBytes  int64
+	scaleHostVisible    bool
 }
 
 // Ready always reports true: Vulkan dispatches are submitted synchronously, so a
@@ -1166,6 +1168,17 @@ func (v *vulkanBackend) uploadQ3KLocked(t Tensor) Tensor {
 	return makeTensor(v, Q3_K, RowMajor, append([]int(nil), t.Shape...), t.Quant, buf)
 }
 func (v *vulkanBackend) uploadQ8Locked(shape []int, codes []int8, scales []float32, block int) Tensor {
+	return v.uploadQ8WithOperations(shape, codes, scales, block,
+		v.dallocWeightFor,
+		func(dst, src unsafe.Pointer, bytes int) { C.fvk_h2d(dst, src, C.size_t(bytes)) },
+		func(ptr unsafe.Pointer) { C.fvk_free(ptr) },
+	)
+}
+
+// uploadQ8WithOperations retains individual allocation owners until publication.
+// Caller holds vulkanMu. Native H2D remains void; this only unwinds Go panics,
+// including a later allocation failure, and does not detect silent copy errors.
+func (v *vulkanBackend) uploadQ8WithOperations(shape []int, codes []int8, scales []float32, block int, allocate func(int, string) *vulkanBuf, upload func(unsafe.Pointer, unsafe.Pointer, int), release func(unsafe.Pointer)) Tensor {
 	if !v.haveQ8 {
 		panic("compute: vulkan Q8 upload requested but device lacks int8/8-bit-storage support")
 	}
@@ -1190,20 +1203,60 @@ func (v *vulkanBackend) uploadQ8Locked(shape []int, codes []int8, scales []float
 		}
 		panic(formatVulkanResourceCapError("Q8_0 weight row "+shapeText(shape), rowBytes, v.maxBufferBytes, v.maxStorageBufferRange, v.maxMemoryAllocationSize))
 	}
+	ownerCount := 2
 	if chunked {
-		return v.uploadQ8ChunksLocked(shape, codes, scales, block, chunks)
+		ownerCount = 2 * len(chunks)
+	}
+	// Reserve the journal before allocating device resources so recording a new
+	// owner cannot itself need a growing slice allocation.
+	owners := make([]*vulkanBuf, 0, ownerCount)
+	published := false
+	defer func() {
+		if published {
+			return
+		}
+		for _, owner := range owners {
+			ptr := owner.ptr
+			owner.ptr = nil
+			// Restore logical placement charges once, even if native retirement
+			// is deferred by an open batch or pending submission failure.
+			v.dlUsed -= owner.budgetedWeightBytes
+			owner.budgetedWeightBytes = 0
+			if owner.hostVisibleWeight {
+				v.hostvisN--
+				owner.hostVisibleWeight = false
+			}
+			if ptr != nil {
+				func() {
+					// Cleanup must not replace the primary panic or prevent the
+					// remaining unpublished allocations from being retired.
+					defer func() { _ = recover() }()
+					release(ptr)
+				}()
+			}
+		}
+	}()
+	alloc := func(bytes int, site string) *vulkanBuf {
+		owner := allocate(bytes, site)
+		owners = append(owners, owner)
+		return owner
+	}
+	if chunked {
+		result := v.uploadQ8ChunksWithOperations(shape, codes, scales, block, chunks, alloc, upload)
+		published = true
+		return result
 	}
 	// The code buffer is the bulk of the weight (in*out bytes) — it's the budget's subject.
 	// The scale buffer is ~1/32 the size; keep it device-local so the hot per-block scales
 	// stay fast even when the codes spill host-visible.
 	shapeName := shapeText(shape)
-	codeBuf := v.dallocWeightFor(len(codes), "Q8_0 weight code buffer "+shapeName)
-	scaleBuf := v.dallocWeightFor(len(scales)*F32.Bytes(), "Q8_0 weight scale buffer "+shapeName)
+	codeBuf := alloc(len(codes), "Q8_0 weight code buffer "+shapeName)
+	scaleBuf := alloc(len(scales)*F32.Bytes(), "Q8_0 weight scale buffer "+shapeName)
 	if len(codes) > 0 {
-		C.fvk_h2d(codeBuf.ptr, unsafe.Pointer(&codes[0]), C.size_t(len(codes)))
+		upload(codeBuf.ptr, unsafe.Pointer(&codes[0]), len(codes))
 	}
 	if len(scales) > 0 {
-		C.fvk_h2d(scaleBuf.ptr, unsafe.Pointer(&scales[0]), C.size_t(len(scales)*F32.Bytes()))
+		upload(scaleBuf.ptr, unsafe.Pointer(&scales[0]), len(scales)*F32.Bytes())
 	}
 	q := &QuantSpec{Block: block, Axis: 2, Bits: 8, Symmetric: true}
 	buf := &vulkanBuf{
@@ -1217,10 +1270,12 @@ func (v *vulkanBackend) uploadQ8Locked(shape []int, codes []int8, scales []float
 		scaleBudgetedBytes:  scaleBuf.budgetedWeightBytes,
 		scaleHostVisible:    scaleBuf.hostVisibleWeight,
 	}
-	return makeTensor(v, Q8_0, RowMajor, append([]int(nil), shape...), q, buf)
+	result := makeTensor(v, Q8_0, RowMajor, append([]int(nil), shape...), q, buf)
+	published = true
+	return result
 }
 
-func (v *vulkanBackend) uploadQ8ChunksLocked(shape []int, codes []int8, scales []float32, block int, chunks []q8RowChunk) Tensor {
+func (v *vulkanBackend) uploadQ8ChunksWithOperations(shape []int, codes []int8, scales []float32, block int, chunks []q8RowChunk, alloc func(int, string) *vulkanBuf, upload func(unsafe.Pointer, unsafe.Pointer, int)) Tensor {
 	out, in := shape[0], shape[1]
 	scaleCols := in / block
 	shapeName := shapeText(shape)
@@ -1232,13 +1287,13 @@ func (v *vulkanBackend) uploadQ8ChunksLocked(shape []int, codes []int8, scales [
 		scaleEnd := scaleStart + chunk.rows*scaleCols
 		codeLabel := "Q8_0 weight code chunk " + strconv.Itoa(i) + " rows " + strconv.Itoa(chunk.start) + ":" + strconv.Itoa(chunk.start+chunk.rows) + " " + shapeName
 		scaleLabel := "Q8_0 weight scale chunk " + strconv.Itoa(i) + " rows " + strconv.Itoa(chunk.start) + ":" + strconv.Itoa(chunk.start+chunk.rows) + " " + shapeName
-		codeBuf := v.dallocWeightFor(codeEnd-codeStart, codeLabel)
-		scaleBuf := v.dallocWeightFor((scaleEnd-scaleStart)*F32.Bytes(), scaleLabel)
+		codeBuf := alloc(codeEnd-codeStart, codeLabel)
+		scaleBuf := alloc((scaleEnd-scaleStart)*F32.Bytes(), scaleLabel)
 		if codeEnd > codeStart {
-			C.fvk_h2d(codeBuf.ptr, unsafe.Pointer(&codes[codeStart]), C.size_t(codeEnd-codeStart))
+			upload(codeBuf.ptr, unsafe.Pointer(&codes[codeStart]), codeEnd-codeStart)
 		}
 		if scaleEnd > scaleStart {
-			C.fvk_h2d(scaleBuf.ptr, unsafe.Pointer(&scales[scaleStart]), C.size_t((scaleEnd-scaleStart)*F32.Bytes()))
+			upload(scaleBuf.ptr, unsafe.Pointer(&scales[scaleStart]), (scaleEnd-scaleStart)*F32.Bytes())
 		}
 		buf.q8Chunks = append(buf.q8Chunks, vulkanQ8Chunk{
 			rowStart:            chunk.start,
@@ -1249,6 +1304,8 @@ func (v *vulkanBackend) uploadQ8ChunksLocked(shape []int, codes []int8, scales [
 			scaleN:              scaleBuf.n,
 			budgetedWeightBytes: codeBuf.budgetedWeightBytes,
 			hostVisibleWeight:   codeBuf.hostVisibleWeight,
+			scaleBudgetedBytes:  scaleBuf.budgetedWeightBytes,
+			scaleHostVisible:    scaleBuf.hostVisibleWeight,
 		})
 	}
 	if out > 0 && len(buf.q8Chunks) == 0 {
@@ -1349,33 +1406,7 @@ func (v *vulkanBackend) Free(t Tensor) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	if db, ok := t.buf.(*vulkanBuf); ok {
-		for i := range db.q8Chunks {
-			chunk := &db.q8Chunks[i]
-			if chunk.scalePtr != nil {
-				C.fvk_free(chunk.scalePtr)
-				chunk.scalePtr = nil
-				chunk.scaleN = 0
-			}
-			if chunk.ptr != nil {
-				C.fvk_free(chunk.ptr)
-				chunk.ptr = nil
-				chunk.n = 0
-			}
-			if chunk.budgetedWeightBytes > 0 {
-				v.dlUsed -= chunk.budgetedWeightBytes
-				if v.dlUsed < 0 {
-					v.dlUsed = 0
-				}
-				chunk.budgetedWeightBytes = 0
-			}
-			if chunk.hostVisibleWeight {
-				if v.hostvisN > 0 {
-					v.hostvisN--
-				}
-				chunk.hostVisibleWeight = false
-			}
-		}
-		db.q8Chunks = nil
+		v.freeQ8ChunksWithOperation(db, func(ptr unsafe.Pointer) { C.fvk_free(ptr) })
 		if db.ptr == nil {
 			return
 		}
@@ -1410,6 +1441,49 @@ func (v *vulkanBackend) Free(t Tensor) {
 			db.hostVisibleWeight = false
 		}
 	}
+}
+
+// freeQ8ChunksWithOperation is the existing chunk Free owner under vulkanMu.
+// Release retains native deferred-batch behavior; charge restoration is logical
+// accounting only. The unchunked owner and release failure behavior are unchanged.
+func (v *vulkanBackend) freeQ8ChunksWithOperation(db *vulkanBuf, release func(unsafe.Pointer)) {
+	for i := range db.q8Chunks {
+		chunk := &db.q8Chunks[i]
+		if chunk.scalePtr != nil {
+			release(chunk.scalePtr)
+			chunk.scalePtr = nil
+			chunk.scaleN = 0
+			if chunk.scaleBudgetedBytes > 0 {
+				v.dlUsed -= chunk.scaleBudgetedBytes
+				chunk.scaleBudgetedBytes = 0
+			}
+			if chunk.scaleHostVisible {
+				if v.hostvisN > 0 {
+					v.hostvisN--
+				}
+				chunk.scaleHostVisible = false
+			}
+		}
+		if chunk.ptr != nil {
+			release(chunk.ptr)
+			chunk.ptr = nil
+			chunk.n = 0
+		}
+		if chunk.budgetedWeightBytes > 0 {
+			v.dlUsed -= chunk.budgetedWeightBytes
+			if v.dlUsed < 0 {
+				v.dlUsed = 0
+			}
+			chunk.budgetedWeightBytes = 0
+		}
+		if chunk.hostVisibleWeight {
+			if v.hostvisN > 0 {
+				v.hostvisN--
+			}
+			chunk.hostVisibleWeight = false
+		}
+	}
+	db.q8Chunks = nil
 }
 
 func (v *vulkanBackend) vp(t Tensor) unsafe.Pointer { return t.buf.(*vulkanBuf).ptr }

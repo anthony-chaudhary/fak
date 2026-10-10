@@ -5,6 +5,8 @@ import (
 	"math"
 	"reflect"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // v41OracleScore independently recomputes sqrt(softplus(z)) from the formula in
@@ -496,4 +498,270 @@ func TestV41SharedExpertAddScaledParity(t *testing.T) {
 			t.Fatalf("field=%q reason=%q want shared_add at 1", typed.Field, typed.Reason)
 		}
 	})
+}
+
+// v41FullRouteNormalizationOracle keeps selection independent (insertion top-k)
+// and stages the full profile's F32 denominator, division and scale separately.
+// The thresholded scalar formula is independent from the stable production
+// expression. This is not a GPU transcendental, denormal or reduction oracle.
+func v41FullRouteNormalizationOracle(logits, bias []float32, topK int, scale float32) ([]int, []float64) {
+	scores := make([]float32, len(logits))
+	choice := make([]float32, len(logits))
+	for i, z := range logits {
+		// Independent thresholded softplus formula; staged tensor publication.
+		softplus := z
+		if z <= 20 {
+			softplus = float32(math.Log1p(math.Exp(float64(z))))
+		}
+		scores[i] = float32(math.Sqrt(float64(softplus)))
+		choice[i] = scores[i]
+		if len(bias) != 0 {
+			choice[i] += bias[i]
+		}
+	}
+	picks := make([]int, 0, topK)
+	for e := range scores {
+		at := len(picks)
+		for i, old := range picks {
+			if choice[e] > choice[old] || (choice[e] == choice[old] && e < old) {
+				at = i
+				break
+			}
+		}
+		if at < topK {
+			picks = append(picks, 0)
+			copy(picks[at+1:], picks[at:])
+			picks[at] = e
+			if len(picks) > topK {
+				picks = picks[:topK]
+			}
+		}
+	}
+	var sum float32
+	for _, e := range picks {
+		sum = float32(sum + scores[e])
+	}
+	denominator := float32(sum + float32(1e-20))
+	weights := make([]float64, len(picks))
+	for i, e := range picks {
+		divided := float32(scores[e] / denominator)
+		weights[i] = float64(float32(divided * scale))
+	}
+	return picks, weights
+}
+
+// Runtime estimate only; unmeasured.
+// fak-test:runtime fast est=100ms lane=default
+func TestV41FullRouteNormalizationEpsilon(t *testing.T) {
+	t.Parallel()
+	cfg := v41TestCfg()
+	for _, z := range []float32{-10000, -120, -104, -103, -96, -90, 0, 20, 21} {
+		logits, bias := make([]float32, cfg.Experts), make([]float32, cfg.Experts)
+		for i := range logits {
+			logits[i] = z
+		}
+		for i := 0; i < cfg.TopK; i++ {
+			bias[11+i] = float32(i + 1)
+		}
+		beforeLogits, beforeBias := append([]float32(nil), logits...), append([]float32(nil), bias...)
+		got, err := v41RouteForGeometry(logits, bias, cfg, true)
+		if err != nil {
+			t.Fatalf("full logits=%g: %v", z, err)
+		}
+		ids, weights := v41FullRouteNormalizationOracle(logits, bias, cfg.TopK, cfg.RouteScale)
+		var total float32
+		for i, pick := range got {
+			if pick.expert != ids[i] || pick.expert != 16-i || math.Float32bits(pick.weight) != math.Float32bits(float32(weights[i])) {
+				t.Fatalf("logit=%g pick[%d]=%v want expert=%d weight=%g", z, i, pick, ids[i], weights[i])
+			}
+			total += pick.weight
+		}
+		if z <= -104 && total != 0 {
+			t.Fatal("zero-score row acquired routing mass")
+		}
+		if z == -96 && !(total > 0 && total < 1) {
+			t.Fatalf("tiny-positive epsilon witness vacuous: sum=%g", total)
+		}
+		legacy, legacyErr := v41Route(logits, bias, cfg)
+		reduced, reducedErr := v41RouteForGeometry(logits, bias, cfg, false)
+		if z == -10000 {
+			if legacyErr == nil || reducedErr == nil {
+				t.Fatal("legacy zero-sum refusal changed")
+			}
+		} else if legacyErr != nil || reducedErr != nil || !reflect.DeepEqual(legacy, reduced) {
+			t.Fatal("reduced routing arithmetic changed")
+		} else if z == -96 && reflect.DeepEqual(got, legacy) {
+			t.Fatal("epsilon has no observable effect")
+		}
+		if !reflect.DeepEqual(logits, beforeLogits) || !reflect.DeepEqual(bias, beforeBias) {
+			t.Fatal("router mutated borrowed operands")
+		}
+	}
+	for _, invalid := range []float32{float32(math.NaN()), float32(math.Inf(1))} {
+		logits := make([]float32, cfg.Experts)
+		logits[0] = invalid
+		if _, err := v41RouteForGeometry(logits, nil, cfg, true); err == nil {
+			t.Fatal("full router admitted nonfinite logit")
+		}
+	}
+}
+
+// Actual full Prefill and both incremental branches must accept finite zero-score
+// rows, using -120 logits whose legacy F64 softplus/sqrt remains nonzero.
+// Callback gate logits are F32; unique correction biases fix the winners.
+// A handled down callback observes the zero weighted operand before contraction.
+// Runtime estimate only; unmeasured.
+// fak-test:runtime medium est=3s lane=default
+func TestV41FullRouteZeroScoresLiveOwners(t *testing.T) {
+	for _, role := range []bool{false, true} {
+		t.Run("role="+itoa(boolToIntV41Expert(role)), func(t *testing.T) {
+			m := v41IncrementalExpertFixture(t, true, false)
+			if !role {
+				m.Cfg.DeepSeekV41.CompressRatios = []int{0}
+				m.Cfg.DeepSeekV41.IndexSourceLayerIDs = nil
+				m.Cfg.DeepSeekV41.KVSourceLayerIDs = nil
+			}
+			if full, err := v41ForwardGeometry(m.Cfg); err != nil || !full {
+				t.Fatal("fixture is not full")
+			}
+			for l := 0; l < m.Cfg.NumLayers; l++ {
+				bias := make([]float32, m.Cfg.NumExperts)
+				for i := 0; i < m.Cfg.NumExpertsPerTok; i++ {
+					bias[11+i] = float32(i + 1)
+				}
+				v41WriteTensorF32(t, m, layerName(l, "ffn.gate.e_score_correction_bias"), bias)
+			}
+			s := v41EngProjSession(t, m, compute.Default())
+			defer s.Close()
+			state := s.v41State()
+			gateCalls, downCalls := 0, 0
+			state.denseProjection = func(layer int, leaf string, input []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
+				if leaf != "ffn.gate.weight" {
+					return nil, v41ProjectionDeclined, nil
+				}
+				gateCalls += rows
+				logits := make([]float32, rows*out)
+				for i := range logits {
+					logits[i] = -120
+				}
+				return logits, v41ProjectionHandled, nil
+			}
+			state.expertGateUp = func(layer int, stem string, input []float32) ([]float32, v41ExpertGateUpOutcome, error) {
+				fused := make([]float32, m.Cfg.MoEIntermediateSize)
+				for i := range fused {
+					fused[i] = 1
+				}
+				return fused, v41GateUpHandled, nil
+			}
+			state.expertDown = func(layer int, stem string, input []float32) ([]float32, v41ExpertDownOutcome, error) {
+				downCalls++
+				for _, value := range input {
+					if value != 0 {
+						t.Fatalf("nonzero weighted down operand=%g", value)
+					}
+				}
+				return make([]float32, m.Cfg.HiddenSize), v41DownHandled, nil
+			}
+			for phase := 0; phase < 2; phase++ {
+				beforeGate, beforeDown := gateCalls, downCalls
+				tokens := 2
+				var got []float32
+				if phase == 0 {
+					got = s.Prefill([]int{1, 2})
+				} else {
+					tokens = 1
+					got = s.Step(3)
+				}
+				if len(got) == 0 || !s.v41IncrementalEligible() {
+					t.Fatal("full route did not retain eligible continuation")
+				}
+				for _, value := range got {
+					if !finite32(value) {
+						t.Fatal("nonfinite live logits")
+					}
+				}
+				if gateCalls-beforeGate != tokens*m.Cfg.NumLayers || downCalls-beforeDown != tokens*m.Cfg.NumLayers*m.Cfg.NumExpertsPerTok {
+					t.Fatalf("phase=%d callback counts=%d/%d", phase, gateCalls-beforeGate, downCalls-beforeDown)
+				}
+			}
+		})
+	}
+}
+
+// Runtime estimate only; unmeasured.
+// fak-test:runtime medium est=2s lane=default
+func TestV41FullRouteSoftplusPublication(t *testing.T) {
+	t.Parallel()
+	cfg := v41TestCfg()
+	logits, bias := make([]float32, cfg.Experts), make([]float32, cfg.Experts)
+	for i := range logits {
+		logits[i] = -120
+	}
+	for i := 0; i < cfg.TopK; i++ {
+		bias[11+i] = float32(i + 1)
+	}
+	full, err := v41RouteForGeometry(logits, bias, cfg, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reduced, err := v41Route(logits, bias, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v41SqrtSoftplus(-120) <= 0 {
+		t.Fatal("legacy underflow discriminator became vacuous")
+	}
+	for i := range full {
+		if full[i].weight != 0 || reduced[i].weight <= 0 {
+			t.Fatal("missing F32 softplus publication or changed reduced route")
+		}
+	}
+	for i := range logits {
+		logits[i] = math.MaxFloat32
+	}
+	extreme, err := v41RouteForGeometry(logits, nil, cfg, true)
+	if err != nil {
+		t.Fatalf("finite positive extreme refused: %v", err)
+	}
+	for _, pick := range extreme {
+		if !finite32(pick.weight) || pick.weight <= 0 {
+			t.Fatal("positive extreme lost finite routing mass")
+		}
+	}
+	// Actual routed consumer: unit fused activation and identity-like down expose
+	// the spurious nonzero route mass even after the BF16 weighted-input cast.
+	m := v41IncrementalExpertFixture(t, true, false)
+	input := make([]float32, m.Cfg.HiddenSize)
+	seen := false
+	_, err = m.v41FullRoutedExpert(0, "ffn.experts.16", input, full[0].weight, m.Cfg,
+		func(int, string, []float32) ([]float32, v41ExpertGateUpOutcome, error) {
+			x := make([]float32, m.Cfg.MoEIntermediateSize)
+			for i := range x {
+				x[i] = 1
+			}
+			return x, v41GateUpHandled, nil
+		},
+		func(_ int, _ string, x []float32) ([]float32, v41ExpertDownOutcome, error) {
+			seen = true
+			for _, v := range x {
+				if v != 0 {
+					t.Fatal("full score injected nonzero weighted operand")
+				}
+			}
+			return make([]float32, m.Cfg.HiddenSize), v41DownHandled, nil
+		}, nil, nil, false)
+	if err != nil || !seen {
+		t.Fatalf("live routed consumer unseen or failed: %v", err)
+	}
+	// Reconstruct the previous full score + epsilon, rather than reduced weights:
+	// the omitted publication produces a small positive BF16 operand, not zero.
+	legacyScore := v41SqrtSoftplus(-120)
+	var sum float32
+	for i := 0; i < cfg.TopK; i++ {
+		sum += legacyScore
+	}
+	wrong := float32(legacyScore/float32(sum+float32(1e-20))) * cfg.RouteScale
+	if v41RoundBF16(wrong) == 0 {
+		t.Fatal("weighted BF16 consumer discriminator is vacuous")
+	}
 }

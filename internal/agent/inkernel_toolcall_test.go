@@ -18,7 +18,7 @@ import (
 // model quality; this is not a weighted-model or hardware qualification witness.
 func inKernelNormalize(t *testing.T, content, finishReason string) *Completion {
 	t.Helper()
-	return inKernelDecodeToCompletion(t, content, finishReason, nil)
+	return inKernelDecodeToCompletion(t, content, finishReason, []ToolDef{{Type: "function", Function: ToolDefFunction{Name: "Bash"}}, {Type: "function", Function: ToolDefFunction{Name: "Read"}}})
 }
 
 // Drive the existing Complete API so the same test file also builds on the
@@ -338,7 +338,7 @@ A100-SXM4-40GB
 true
 </parameter>
 </function>
-</tool_call>`})
+</tool_call>`}, fixtureOfferedTools())
 	if len(m.ToolCalls) != 1 {
 		t.Fatalf("tool calls = %d, want 1; content=%q", len(m.ToolCalls), m.Content)
 	}
@@ -457,5 +457,33 @@ func TestRenderInKernelRequiredSingleTool(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("required single-tool prompt missing %q:\n%s", want, got)
 		}
+	}
+}
+
+// fak-test:runtime medium est=2s lane=default
+func TestInKernelOfferedTextBoundary(t *testing.T) {
+	content := `<tool_call>{"name":"Bash","arguments":{}}</tool_call>`
+	for _, tools := range [][]ToolDef{nil, {{Type: "function", Function: ToolDefFunction{Name: "Read"}}}} {
+		comp := inKernelDecodeToCompletion(t, content, "stop", tools)
+		if comp.Message.Content != content || len(comp.Message.ToolCalls) != 0 || comp.ToolCallsDropped {
+			t.Fatalf("unoffered text changed: %+v", comp)
+		}
+	}
+	// O is exactly the tools argument, even with tool_choice:none; this patch does
+	// not redefine the separate tool-choice policy.
+	comp := inKernelDecodeToCompletion(t, content, "stop", []ToolDef{{Type: "function", Function: ToolDefFunction{Name: "Bash"}}}, WithToolChoice(json.RawMessage(`"none"`)))
+	if len(comp.Message.ToolCalls) != 1 {
+		t.Fatalf("tools-argument policy changed: %+v", comp)
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestNativeUnknownToolSurvivesForcedChoice(t *testing.T) {
+	tools := []ToolDef{{Type: "function", Function: ToolDefFunction{Name: "Read"}}}
+	choice := json.RawMessage(`{"type":"function","function":{"name":"Read"}}`)
+	content := `<tool_call>{"name":"Bash","arguments":{}}</tool_call>`
+	comp := normalizeInKernelToolCalls(&Completion{Message: Message{Content: content}, FinishReason: "tool_calls"}, NewOfferedTools(tools), choice, tools, []Message{{Role: RoleUser, Content: "Read go.mod"}})
+	if !comp.ToolCallsDropped || comp.ToolCallsDroppedReason != abi.ReasonUnknownTool || len(comp.Message.ToolCalls) != 0 || comp.Message.Content != content {
+		t.Fatalf("forced policy overwrote unknown verdict: %+v", comp)
 	}
 }

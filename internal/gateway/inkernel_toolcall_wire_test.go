@@ -18,12 +18,12 @@ type inkernelLiftPlanner struct{ rawText string }
 
 func (inkernelLiftPlanner) Model() string { return "qwen2.5-7b-q8" }
 
-func (p inkernelLiftPlanner) Complete(_ context.Context, _ []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+func (p inkernelLiftPlanner) Complete(_ context.Context, _ []agent.Message, tools []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
 	// Mirror InKernelPlanner.Complete's tail: lift the model's text-form <tool_call> into
 	// structured ToolCalls via the exported LiftTextToolCalls (the same helper the
 	// in-kernel path runs through normalizeCompletionToolCalls), and set the tool_calls
 	// finish reason when a call was recovered.
-	msg := agent.LiftTextToolCalls(agent.Message{Role: agent.RoleAssistant, Content: p.rawText})
+	msg := agent.LiftTextToolCalls(agent.Message{Role: agent.RoleAssistant, Content: p.rawText}, agent.NewOfferedTools(tools))
 	finish := "stop"
 	if len(msg.ToolCalls) > 0 {
 		finish = "tool_calls"

@@ -123,9 +123,15 @@ type CompactorConfig struct {
 	GenerateSummary bool
 	// CASPageOut enables writing compacted payloads into the CAS store.
 	CASPageOut bool
+	// DeduplicateFileWindows closes repeated byte-identical native WindowView
+	// results in middle turns. It is opt-in and requires FileWindowTools.
+	DeduplicateFileWindows bool
+	// FileWindowTools names trusted tool-result producers using toolbound's
+	// complete WindowView format. Names match exactly; no tools are implicit.
+	FileWindowTools []string
 }
 
-// ScanReport summarizes context residency and compaction opportunities without allocating.
+// ScanReport summarizes context residency and compaction opportunities.
 type ScanReport struct {
 	TotalPages        int `json:"total_pages"`
 	TotalTokens       int `json:"total_tokens"`
@@ -225,7 +231,8 @@ func (p *TokenPageFreelist) Stats() (allocated, reclaimed int64, freeCount int) 
 	return atomic.LoadInt64(&p.allocated), atomic.LoadInt64(&p.reclaimed), len(p.freelist)
 }
 
-// Compactor implements sliding-window semantic compaction with zero-alloc page reclamation.
+// Compactor implements sliding-window semantic compaction. The default scan and
+// reclamation path avoids allocation; opt-in file-window recognition allocates.
 type Compactor struct {
 	mu       sync.RWMutex
 	mmu      *MMU
@@ -235,6 +242,7 @@ type Compactor struct {
 
 // NewCompactor builds a compactor with the given configuration.
 func NewCompactor(cfg CompactorConfig) *Compactor {
+	cfg.FileWindowTools = append([]string(nil), cfg.FileWindowTools...)
 	if cfg.WindowSizeK <= 0 {
 		cfg.WindowSizeK = DefaultWindowSizeK
 	}
@@ -269,7 +277,8 @@ func (c *Compactor) Scan(pages []TokenPage) ScanReport {
 	return report
 }
 
-// ScanInto writes context analysis into out without any heap allocations.
+// ScanInto writes context analysis into out. The default scan avoids heap
+// allocations; opt-in file-window recognition allocates tracking state.
 func (c *Compactor) ScanInto(pages []TokenPage, out *ScanReport) {
 	if out == nil {
 		return
@@ -302,6 +311,7 @@ func (c *Compactor) ScanInto(pages []TokenPage, out *ScanReport) {
 	} else {
 		out.ActiveWindowTurns = maxTurn
 	}
+	windows := c.fileWindows(pages)
 
 	threshBytes := c.config.VerboseThresholdBytes
 	if threshBytes <= 0 {
@@ -339,6 +349,14 @@ func (c *Compactor) ScanInto(pages []TokenPage, out *ScanReport) {
 		// Middle turn
 		out.MiddlePages++
 		out.MiddleTokens += tokens
+		if window, ok := windows[i]; ok {
+			if window.duplicate {
+				out.ReclaimablePages++
+				out.ReclaimableTokens += tokens - EstimateTokens(window.content)
+				out.ReclaimableBytes += bytesLen - len(window.content)
+			}
+			continue
+		}
 
 		if p.Kind == PageKindToolResult && !p.Tombstone.Active {
 			if p.IsContinuation {
@@ -359,7 +377,8 @@ func (c *Compactor) ScanInto(pages []TokenPage, out *ScanReport) {
 	}
 }
 
-// CompactInPlace compacts pages in place with zero heap allocations during the scan and compaction pass.
+// CompactInPlace compacts pages in place. Opt-in file-window recognition
+// allocates tracking state; the default scan and compaction path is unchanged.
 func (c *Compactor) CompactInPlace(pages []TokenPage, out *CompactionReport) ([]TokenPage, error) {
 	var report CompactionReport
 	if out == nil {
@@ -418,12 +437,34 @@ func (c *Compactor) CompactInPlace(pages []TokenPage, out *CompactionReport) ([]
 		return pages, nil
 	}
 
+	windows := c.fileWindows(pages)
 	w := 0
 	for r := 0; r < len(pages); r++ {
 		p := &pages[r]
 
 		// Prefix, active window, or pinned -> preserve verbatim
 		if p.Kind.IsPrefix() || p.TurnIndex < 1 || p.TurnIndex >= activeWindowStart || p.Pinned {
+			if r != w {
+				pages[w] = *p
+			}
+			w++
+			continue
+		}
+
+		// Keep the newest complete view of each exact tool/payload pair. Older
+		// identical views close only when the normal tombstone format is smaller.
+		if window, ok := windows[r]; ok {
+			if window.duplicate {
+				if c.config.CASPageOut {
+					window.tombstone.Ref, _ = c.pageOutToCAS(p.Content)
+				}
+				p.Tombstone = window.tombstone
+				p.Content = FormatTombstone(p.Tombstone, p.Content[:0])
+				p.Tokens = EstimateTokens(p.Content)
+				out.TombstonesCreated++
+				out.TokensReclaimed += p.Tombstone.OriginalTokens - p.Tokens
+				out.BytesReclaimed += p.Tombstone.OriginalBytes - len(p.Content)
+			}
 			if r != w {
 				pages[w] = *p
 			}

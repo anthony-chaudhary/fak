@@ -70,13 +70,36 @@ func (s *Session) v41SharedActivationFunc() v41SharedActivationFunc {
 				return nil, v41ProjectionError, closeFailure(errV41ProjectionResult)
 			}
 		}
-		run := func() ([]float32, error) {
+		run := func() (result []float32, cause error) {
+			var owned []compute.Tensor
+			defer func() {
+				// Preserve the selected operation's cause while attempting every
+				// owned release. A cleanup-only failure still retires the session.
+				primaryPanic := recover()
+				var cleanupPanic any
+				for i := len(owned) - 1; i >= 0; i-- {
+					func() {
+						defer func() {
+							if r := recover(); r != nil && cleanupPanic == nil {
+								cleanupPanic = r
+							}
+						}()
+						s.Backend.Free(owned[i])
+					}()
+				}
+				if primaryPanic != nil {
+					panic(primaryPanic)
+				}
+				if cause == nil && cleanupPanic != nil {
+					panic(cleanupPanic)
+				}
+			}()
 			stage = "gate upload"
 			g := s.uploadHostF32([]int{width}, gate, compute.MemoryActivation, "V4.1 shared expert gate")
-			defer s.Backend.Free(g)
+			owned = append(owned, g)
 			stage = "up upload"
 			u := s.uploadHostF32([]int{width}, up, compute.MemoryActivation, "V4.1 shared expert up")
-			defer s.Backend.Free(u)
+			owned = append(owned, u)
 			stage = "swiglu"
 			var y compute.Tensor
 			if limit > 0 {
@@ -85,7 +108,7 @@ func (s *Session) v41SharedActivationFunc() v41SharedActivationFunc {
 			} else {
 				y = s.Backend.SwiGLU(g, u)
 			}
-			defer s.Backend.Free(y)
+			owned = append(owned, y)
 			if y.Buf() == nil || y.Dtype != compute.F32 || len(y.Shape) != 1 || y.Shape[0] != width {
 				return nil, errV41ProjectionResult
 			}

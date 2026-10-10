@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"hash/fnv"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,39 +13,32 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
-// Deadline cache credit: a chat turn may be priced with part of its prompt
-// cached only when this node holds served evidence for that exact prefix.
-//
-// Evidence is a completed turn of the same conversation (same model, tools,
-// system text and first user turn) whose upstream usage reported a nonzero
-// prompt-cache hit. Its message chain is recorded after the response, never at
-// admission or release, so a refused, canceled or failed turn proves nothing.
-// The next turn earns credit only for the leading messages whose fingerprints
-// equal the recorded chain, capped at the resident tokens the upstream
-// reported. Every served turn overwrites the record, so a turn that reports a
-// cache miss (KV evicted, route changed) removes the credit for the one after.
-//
-// A wrong credit is bounded: credit is withdrawn when the cold estimate exceeds
-// the admission ceiling by more than deadlineCacheCreditMaxColdOverrun, and the
-// admitted request still carries the client deadline in its context, so a
-// mispredicted turn is canceled at the deadline instead of running past it.
+// Deadline cache history is observational, not current residency evidence.
+// An accepted buffered completion records provider-reported cache usage for its message
+// chain before the final socket write; delivery is not established. The ledger
+// has no selected-route lease or eviction notification, so
+// its lookup must never discount a served request's deadline admission.
+// Native admission uses its execution-owned prefix; other routes stay cold.
+// Retain the historical estimator and counters for explicit observation and
+// provenance. A served cache miss replaces the record, but cannot retroactively
+// establish whether a previous record was resident when a request arrived.
 
 const (
-	// deadlineCacheCreditMaxColdOverrun bounds the cold estimate of a credited
-	// request at (1+overrun) times the admission ceiling (Headroom*remaining).
+	// deadlineCacheCreditMaxColdOverrun preserves the prior policy parameter
+	// for provenance; served admission no longer uses historical credit.
 	deadlineCacheCreditMaxColdOverrun = 0.5
 	deadlineCacheCreditTTL            = 10 * time.Minute
 	deadlineCacheCreditMaxConvs       = 4096
 )
 
-// Credit outcomes, the closed vocabulary of the admission log field.
+// Historical lookup outcomes retain the previous vocabulary for compatibility.
 const (
 	cacheCreditNone      = "none"       // no record for this conversation
 	cacheCreditStale     = "stale"      // record older than the TTL
 	cacheCreditUncached  = "uncached"   // recorded turn reported no cache hit
 	cacheCreditMismatch  = "mismatch"   // no leading message matches the record
-	cacheCreditCredited  = "credited"   // verified prefix credited
-	cacheCreditOverrun   = "overrun"    // credit withdrawn by the cold-overrun bound
+	cacheCreditCredited  = "credited"   // historical match, not current residency
+	cacheCreditOverrun   = "overrun"    // legacy bounded-credit outcome
 	cacheCreditNoMessage = "no_message" // no conversation key (no user turn)
 )
 
@@ -66,8 +60,8 @@ type warmPrefixLedger struct {
 	mispredicts    atomic.Uint64
 }
 
-// deadlineCacheTicket travels in the request context from admission to the
-// served response.
+// deadlineCacheTicket travels from the original request to an accepted buffered
+// completion. Live streaming returns before this observational recording hook.
 type deadlineCacheTicket struct {
 	key      uint64
 	keyed    bool
@@ -77,6 +71,13 @@ type deadlineCacheTicket struct {
 }
 
 type deadlineCacheTicketKey struct{}
+
+// withDeadlineCacheObservation snapshots the untouched request for a later
+// served-usage observation. It neither looks up credit nor reserves admission.
+func withDeadlineCacheObservation(r *http.Request, model string, tools []agent.ToolDef, messages []agent.Message) *http.Request {
+	ticket := newDeadlineCacheTicket(model, tools, messages)
+	return r.WithContext(context.WithValue(r.Context(), deadlineCacheTicketKey{}, ticket))
+}
 
 func (m *gatewayMetrics) warmPrefixLedger() *warmPrefixLedger {
 	if m == nil {
@@ -128,7 +129,7 @@ func newDeadlineCacheTicket(model string, tools []agent.ToolDef, messages []agen
 	return t
 }
 
-// lookup returns the credited tokens for the ticket's verified common prefix.
+// lookup returns a historical prefix estimate, not an admission credit.
 func (l *warmPrefixLedger) lookup(t *deadlineCacheTicket, now time.Time) (int, string) {
 	if l == nil || t == nil || !t.keyed {
 		return 0, cacheCreditNoMessage
@@ -186,8 +187,9 @@ func (l *warmPrefixLedger) record(t *deadlineCacheTicket, usage agent.Usage, now
 	}
 }
 
-// recordDeadlineWarmPrefix records a successfully served chat turn as cache
-// evidence for the conversation's next admission.
+// recordDeadlineWarmPrefix records reported cache usage after accepted buffered
+// generation, before the final socket write. It does not prove delivery.
+// The observation never establishes residency for the next admission.
 func (s *Server) recordDeadlineWarmPrefix(ctx context.Context, usage agent.Usage) {
 	if s == nil || ctx == nil {
 		return
@@ -199,7 +201,8 @@ func (s *Server) recordDeadlineWarmPrefix(ctx context.Context, usage agent.Usage
 	s.metrics.warmPrefixLedger().record(t, usage, time.Now())
 }
 
-// DeadlineCacheCreditStats is the observable deadline cache-credit roll-up.
+// DeadlineCacheCreditStats retains the historical cache-credit metric schema.
+// Observational-only served routes do not increment credited admissions/tokens.
 type DeadlineCacheCreditStats struct {
 	CreditedAdmits uint64 `json:"credited_admits"`
 	CreditedTokens uint64 `json:"credited_tokens"`

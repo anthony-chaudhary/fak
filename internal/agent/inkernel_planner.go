@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"log"
 	"sort"
 	"strings"
@@ -27,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
@@ -134,7 +136,7 @@ type InKernelPlanner struct {
 	// This serializes concurrent device requests into safe queuing — correct for a single-stream
 	// device — instead of crashing; batched multi-user device decode is the separate throughput
 	// follow-up (internal/model/batch.go), not a correctness fix.
-	devMu sync.Mutex
+	devMu inKernelDeviceGate
 
 	// concurrencyProfile is an OPT-IN phase-timeline recorder for the device
 	// fan-out cell (issue #1589). Its zero value is nil, so a planner that never
@@ -447,6 +449,7 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 	rendered := renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice, sp)
 	startsInReasoning := strings.HasSuffix(rendered, qwenThinkAssistantSeed)
 	projector := newInKernelStreamProjector(sink, sp.Stop, startsInReasoning)
+	projector.spans.deferTools = true
 	comp, err := p.Complete(streamCtx, messages, tools, append(opts, WithDecodeTokenObserver(func(tokenPiece, rawText string) {
 		if sinkErr != nil || tokenPiece == "" {
 			return
@@ -459,7 +462,7 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 	// Do not flush withheld stop prefixes or ambiguous control delimiters after a
 	// decode error: those bytes were never established as safe visible content.
 	if sinkErr == nil && err == nil {
-		sinkErr = projector.flush()
+		sinkErr = projector.finish(comp.Message.Content, len(comp.Message.ToolCalls) > 0 || hasTextToolCandidate(comp.Message.Content))
 	}
 	if sinkErr != nil {
 		return comp, sinkErr
@@ -472,15 +475,108 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 // retains a possible stop suffix until it is known to be ordinary prose. Both run
 // before the caller's sink, so a sink failure cancels decode without another delivery.
 type inKernelStreamProjector struct {
-	spans *toolSpanGuard
-	stops *stopSuffixGuard
+	emitted         int
+	emittedHash     hash.Hash
+	reasoningClosed bool
+	afterReasoning  int
+	emit            StreamSink
+	spans           *toolSpanGuard
+	stops           *stopSuffixGuard
 }
 
 func newInKernelStreamProjector(emit StreamSink, stops []string, startsInReasoning ...bool) *inKernelStreamProjector {
+	p := &inKernelStreamProjector{emit: emit, emittedHash: sha256.New()}
 	seededReasoning := len(startsInReasoning) > 0 && startsInReasoning[0]
-	spanGuard := newToolSpanGuardState(emit, seededReasoning)
-	stopGuard := newStopSuffixGuard(spanGuard.feed, stops)
-	return &inKernelStreamProjector{spans: spanGuard, stops: stopGuard}
+	p.spans = newToolSpanGuardState(func(piece string) error {
+		if err := emit(piece); err != nil {
+			return err
+		}
+		p.emitted += len(piece)
+		writeStreamPrefixHash(p.emittedHash, piece)
+		if p.reasoningClosed {
+			p.afterReasoning += len(piece)
+		}
+		return nil
+	}, seededReasoning)
+	p.spans.onReasoningClose = func() { p.reasoningClosed = true; p.afterReasoning = 0 }
+	p.stops = newStopSuffixGuard(p.spans.feed, stops)
+	return p
+}
+
+// Once a tool opener is observed, only the final request-bound lift verdict can
+// tell whether its bytes are content. Do not emit later prose out of order.
+// hasTextToolCandidate scopes strict reconciliation to text that can participate
+// in a lift. Ordinary late reasoning retains its historical stream behavior.
+func hasTextToolCandidate(content string) bool {
+	for _, marker := range []string{"<tool_call>", "<function_call>", "<function=", "<|python_tag|>", "[TOOL_CALLS]"} {
+		if strings.Contains(content, marker) {
+			return true
+		}
+	}
+	// A fence or JSON value alone is not a tool candidate. Use the same existing
+	// dialect recognizers, so ordinary code and nameless arrays keep legacy status.
+	for _, dialect := range toolCallDialects {
+		if len(dialect.extract(content)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func writeStreamPrefixHash(h hash.Hash, text string) {
+	const chunk = 4096
+	for len(text) > 0 {
+		n := len(text)
+		if n > chunk {
+			n = chunk
+		}
+		_, _ = h.Write([]byte(text[:n]))
+		text = text[n:]
+	}
+}
+
+func (p *inKernelStreamProjector) finish(content string, toolVerdict bool) error {
+	if err := p.stops.flush(); err != nil {
+		return err
+	}
+	if tail := p.spans.utf8Tail; tail != "" {
+		p.spans.utf8Tail = ""
+		if err := p.spans.feedText(tail); err != nil {
+			return err
+		}
+	}
+	// The final completion is the existing authoritative transcript. Keep only a
+	// byte count and digest of successful sink writes, never a second text copy.
+	if p.emitted > len(content) {
+		if !toolVerdict {
+			return p.finishLegacyReasoning(content)
+		}
+		return fmt.Errorf("inkernel: streamed content exceeds final tool verdict")
+	}
+	want := sha256.New()
+	writeStreamPrefixHash(want, content[:p.emitted])
+	if !bytes.Equal(p.emittedHash.Sum(nil), want.Sum(nil)) {
+		if !toolVerdict {
+			return p.finishLegacyReasoning(content)
+		}
+		return fmt.Errorf("inkernel: streamed content is not a prefix of final tool verdict")
+	}
+	if rest := content[p.emitted:]; rest != "" {
+		return p.emit(rest)
+	}
+	return nil
+}
+
+// Preserve the preexisting late-reasoning stream prefix on ordinary answers.
+// Only complete bytes newly delayed by this patch; never replay its prior prefix.
+func (p *inKernelStreamProjector) finishLegacyReasoning(content string) error {
+	if p.reasoningClosed && p.afterReasoning <= len(content) {
+		if rest := content[p.afterReasoning:]; rest != "" {
+			return p.emit(rest)
+		}
+		return nil
+	}
+	return p.flush()
 }
 
 func (p *inKernelStreamProjector) feed(piece string) error { return p.stops.feed(piece) }
@@ -565,10 +661,15 @@ func (g *stopSuffixGuard) emitText(text string) error {
 // span is forwarded normally, so the concatenated content remains a prefix of the final
 // post-lift Content the caller reconciles against.
 //
-// Only UNAMBIGUOUS tag/delimiter openers are guarded; a generic ``` fence or a bare `{`
-// is legitimate prose and is never suppressed. Partial openers split across token pieces
+// Legacy span-only users guard explicit tag/delimiter openers. The production
+// deferTools mode also delays possible fenced/bare JSON lifts until the final
+// offered-set verdict; those bytes are emitted unchanged when they remain content. Partial openers split across token pieces
 // are held until they resolve (open) or definitively cannot be an opener (flushed).
 type toolSpanGuard struct {
+	onReasoningClose    func()
+	utf8Tail            string
+	deferTools          bool
+	deferred            bool
 	emit                StreamSink
 	held                strings.Builder
 	span                strings.Builder
@@ -614,6 +715,27 @@ func newToolSpanGuardState(emit StreamSink, startsInReasoning bool) *toolSpanGua
 
 // feed consumes one raw decoded piece and forwards only prose.
 func (g *toolSpanGuard) feed(piece string) error {
+	if g.deferTools {
+		piece = g.utf8Tail + piece
+		g.utf8Tail = ""
+		end := 0
+		for end < len(piece) {
+			if !utf8.FullRuneInString(piece[end:]) {
+				break
+			}
+			_, size := utf8.DecodeRuneInString(piece[end:])
+			end += size
+		}
+		g.utf8Tail = strings.Clone(piece[end:]) // own at most UTFMax-1 incomplete bytes
+		piece = piece[:end]
+	}
+	return g.feedText(piece)
+}
+
+func (g *toolSpanGuard) feedText(piece string) error {
+	if g.deferred {
+		return nil
+	}
 	if g.inSpan {
 		g.span.WriteString(piece)
 		return g.drainSpan()
@@ -624,7 +746,7 @@ func (g *toolSpanGuard) feed(piece string) error {
 
 // flush emits any held non-span text at end of turn. A confirmed span is never flushed.
 func (g *toolSpanGuard) flush() error {
-	if g.inSpan {
+	if g.deferred || g.inSpan {
 		return nil
 	}
 	rest := g.held.String()
@@ -653,6 +775,9 @@ func (g *toolSpanGuard) drainSpan() error {
 			g.closers = nil
 			if wasReasoning {
 				g.trimReasoningOutput = true
+				if g.onReasoningClose != nil {
+					g.onReasoningClose()
+				}
 			}
 			g.held.WriteString(tail)
 			return g.drainHeld()
@@ -678,9 +803,21 @@ func (g *toolSpanGuard) drainHeld() error {
 			earliest, matched, matchedReasoning = idx, o.closers, o.reasoning
 		}
 	}
+	if g.deferTools {
+		for _, opener := range []string{"<function=", "`", "{", "["} {
+			if idx := strings.Index(buf, opener); idx >= 0 && (earliest < 0 || idx < earliest) {
+				earliest, matched, matchedReasoning = idx, nil, false
+			}
+		}
+	}
 	if earliest >= 0 {
 		if err := g.emitText(buf[:earliest]); err != nil {
 			return err
+		}
+		if g.deferTools && !matchedReasoning {
+			g.deferred = true
+			g.held.Reset()
+			return nil
 		}
 		tail := buf[earliest+lenMatchedOpener(buf[earliest:]):]
 		g.held.Reset()
@@ -708,6 +845,29 @@ func (g *toolSpanGuard) emitText(text string) error {
 	if text == "" {
 		return nil
 	}
+	if g.deferTools {
+		if g.deferred {
+			return nil
+		}
+		if !g.contentStarted && strings.TrimLeftFunc(text, unicode.IsSpace) != text {
+			g.deferred = true
+			return nil
+		}
+		g.contentStarted = true
+		text = g.trailingSpace.String() + text
+		g.trailingSpace.Reset()
+		visible := strings.TrimRightFunc(text, unicode.IsSpace)
+		if len(text)-len(visible) > g.cap {
+			g.deferred = true
+		} else if len(visible) < len(text) {
+			g.trailingSpace.WriteString(text[len(visible):])
+		}
+		if visible == "" {
+			return nil
+		}
+		return g.emit(visible)
+	}
+
 	if !g.trimReasoningOutput {
 		return g.emit(text)
 	}
@@ -1477,11 +1637,17 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 	// and rollback carry the same request-local constraint.
 	targetOnly := nativeThinkingConstraintFromContext(ctx) != nil
 	if coord := p.MetalMTPCoordinator(); !targetOnly && coord != nil && p.qwen38MTPCanaryAllowsExecution() {
+		if err := p.checkExecutionDeadline(ctx, len(ids), 0, maxNew); err != nil {
+			return inKernelGenerateResult{}, err
+		}
 		return p.generateReusedMetalMTP(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
 	} else if coord != nil {
 		targetOnly = true
 	}
 	if !targetOnly && p.greedySpeculativeRequestEligible(temp, logitBias, freqPenalty, presPenalty) {
+		if err := p.checkExecutionDeadline(ctx, len(ids), 0, maxNew); err != nil {
+			return inKernelGenerateResult{}, err
+		}
 		return p.generateReusedSpeculative(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
 	}
 	gen, promptTok, cacheable, matched, sourceTier, prefillS, decodeS, stopped, err := p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
@@ -1777,6 +1943,8 @@ func splitNativeBudgetReasoning(raw string, seeded bool) (string, string) {
 }
 
 func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (comp *Completion, err error) {
+	offered := offeredToolsFor(ctx, tools)
+	defer func() { err = p.executionDeadlineError(ctx, err) }()
 	// An in-kernel device-allocation failure (e.g. OOM on a small GPU under a large Claude
 	// Code system prompt) panics deep below a CGO boundary with no error channel. Recover it
 	// HERE — the narrowest Go frame that wraps the whole device decode (generateReused's
@@ -1930,7 +2098,10 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		// caller opted into a concurrency profile.
 		phase := p.concurrencyProfile.admit()
 		deviceWait := time.Now()
-		p.devMu.Lock()
+		if err := p.devMu.LockContext(ctx); err != nil {
+			enginestep.Default.ObservePhase(enginestep.PhaseDeviceWait, time.Since(deviceWait))
+			return nil, err
+		}
 		enginestep.Default.ObservePhase(enginestep.PhaseDeviceWait, time.Since(deviceWait))
 		p.concurrencyProfile.forwardEnter(phase, true)
 		defer func() {
@@ -2166,15 +2337,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	// the in-kernel forward becomes a first-class tool-calling planner. Without this the
 	// gateway adjudicates nothing (it reads Message.ToolCalls) and the Anthropic wire never
 	// emits a tool_use block, so Claude Code's agent loop has nothing to execute.
-	comp = normalizeCompletionToolCalls(comp)
-	// A length finish is a conformance failure only when the caller actually
-	// forced a named tool. Calling enforceForcedToolChoice for an omitted/auto
-	// choice marks every max_tokens completion as dropped before it even resolves
-	// the effective tool name, which would make an exact T64 receipt unreachable.
-	if inKernelEffectiveToolName(sp.ToolChoice, tools) != "" {
-		comp = enforceForcedToolChoice(comp, sp.ToolChoice, tools, messages)
-	}
-	markInKernelDroppedToolCalls(comp)
+	comp = normalizeInKernelToolCalls(comp, offered, sp.ToolChoice, tools, messages)
 	return comp, nil
 }
 

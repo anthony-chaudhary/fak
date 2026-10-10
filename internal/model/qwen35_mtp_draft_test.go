@@ -595,3 +595,355 @@ func BenchmarkDraftVocabTruncation_40k_vs_248k(b *testing.B) {
 		}
 	})
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestDraftVocabAllMaskedRefusalAndLegacyControls(t *testing.T) {
+	negInf := float32(math.Inf(-1))
+	for _, tc := range []struct {
+		name      string
+		subset    []int
+		logits    []float32
+		threshold float32
+		token     int
+		prob      float32
+		ok        bool
+	}{
+		{"empty-filter", nil, []float32{1}, 0, -1, 0, false},
+		{"empty-logits", []int{4}, nil, 0, -1, 0, false},
+		{"one-masked", []int{4}, []float32{negInf}, 0, -1, 0, false},
+		{"all-masked", []int{-1, 99}, []float32{negInf, negInf}, 0, -1, 0, false},
+		{"all-masked-threshold", []int{4, 5}, []float32{negInf, negInf}, .5, -1, 0, false},
+		{"ignored-extra-logit", []int{4}, []float32{negInf, 1}, 0, -1, 0, false},
+		{"ignored-extra-nan", []int{4}, []float32{negInf, float32(math.NaN())}, 0, -1, 0, false},
+		{"ignored-extra-positive-infinity", []int{4}, []float32{negInf, float32(math.Inf(1))}, 0, -1, 0, false},
+		{"shorter-masked-logits", []int{4, 5}, []float32{negInf}, 0, -1, 0, false},
+		{"finite-after-mask", []int{4, 5}, []float32{negInf, -3}, 0, 5, 1, true},
+		{"finite-tie-first", []int{5, 4}, []float32{2, 2}, .5, 5, .5, true},
+		{"finite-tie-threshold", []int{5, 4}, []float32{2, 2}, .75, 5, .5, false},
+		// These are compatibility controls, not endorsements of a wider IEEE policy.
+		{"legacy-nan-first", []int{4, 5}, []float32{float32(math.NaN()), 1}, 0, 4, 0, true},
+		{"legacy-nan-after-mask", []int{4, 5}, []float32{negInf, float32(math.NaN())}, 0, 4, 0, true},
+		{"legacy-positive-infinity", []int{4, 5}, []float32{1, float32(math.Inf(1))}, 0, 5, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := NewDraftVocabFilterWithThreshold(tc.subset, tc.threshold)
+			token, prob, ok := f.ArgmaxWithProb(tc.logits)
+			if token != tc.token || prob != tc.prob || ok != tc.ok {
+				t.Fatalf("selection = (%d,%g,%v), want (%d,%g,%v)", token, prob, ok, tc.token, tc.prob, tc.ok)
+			}
+		})
+	}
+}
+
+// fak-test:runtime medium est=1s lane=default
+func TestQwen35MTPAllMaskedProjectionRefusesDepthOne(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		subset     []int
+		suppressed []int
+		wantCount  int
+	}{
+		{"invalid-subset", []int{-1, 99}, nil, 0},
+		{"suppressed-subset", []int{0, 1}, []int{0, 1}, 0},
+		{"finite-subset", []int{0}, nil, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := qwen35MTPEnabledSyntheticModel(t)
+			target := m.NewSession()
+			target.captureTargetHidden = true
+			t.Cleanup(target.Close)
+			prompt := []int{0, 1}
+			target.Prefill(prompt)
+			d, err := NewQwen35MTPDraftSession(target, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(d.Close)
+			d.WithDraftVocabFilter(tc.subset)
+			d.forward.draft.M.Cfg.SuppressTokens = append([]int(nil), tc.suppressed...)
+			hidden := make([]float32, m.Cfg.HiddenSize)
+			for i := range hidden {
+				hidden[i] = 1
+			}
+			logits := d.forward.ProjectFiltered(hidden, tc.subset)
+			if len(logits) != len(tc.subset) {
+				t.Fatalf("projection length %d", len(logits))
+			}
+			if tc.wantCount == 0 {
+				for i, v := range logits {
+					if !math.IsInf(float64(v), -1) {
+						t.Fatalf("masked row %d = %g", i, v)
+					}
+				}
+				if token, ok := d.selectCandidate(logits); ok || token != -1 {
+					t.Fatalf("masked projection selected (%d,%v)", token, ok)
+				}
+			}
+			draft := d.Propose(prompt)
+			if len(draft) != tc.wantCount {
+				t.Fatalf("draft = %v, want length %d", draft, tc.wantCount)
+			}
+			if tc.wantCount == 0 && draft != nil {
+				t.Fatalf("refusal must be nil: %v", draft)
+			}
+			for _, token := range draft {
+				if token != 0 {
+					t.Fatalf("unexpected candidate %d", token)
+				}
+			}
+			if d.Err() != nil {
+				t.Fatalf("clean refusal latched error: %v", d.Err())
+			}
+			if target.Cache.Len() != len(prompt) {
+				t.Fatalf("target cache mutated: %d", target.Cache.Len())
+			}
+			if d.pending != nil {
+				t.Fatal("depth-one selection created a speculative checkpoint")
+			}
+		})
+	}
+}
+
+// fak-test:runtime medium est=1s lane=default
+func TestQwen35MTPLaterMaskedRowStopsAndFiniteRetryContinues(t *testing.T) {
+	m := qwen35MTPEnabledSyntheticModel(t)
+	target := m.NewSession()
+	target.captureTargetHidden = true
+	t.Cleanup(target.Close)
+	prompt := []int{0, 1}
+	target.Prefill(prompt)
+	d, err := NewQwen35MTPDraftSession(target, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+	d.WithDraftVocabFilter([]int{0, 1})
+	realStep := d.step
+	maskLater := true
+	calls := 0
+	d.step = func(f *Qwen35MTPForward, pos int, prior, embedding []float32) ([]float32, []float32, error) {
+		calls++
+		feedback, logits, err := realStep(f, pos, prior, embedding)
+		if err == nil && maskLater && pos >= len(prompt) {
+			logits = []float32{float32(math.Inf(-1)), float32(math.Inf(-1))}
+		}
+		return feedback, logits, err
+	}
+	draft := d.Propose(prompt)
+	if len(draft) != 1 || draft[0] < 0 || draft[0] > 1 {
+		t.Fatalf("partial draft = %v", draft)
+	}
+	if calls != len(prompt)+1 {
+		t.Fatalf("forward calls = %d, want %d", calls, len(prompt)+1)
+	}
+	if d.Err() != nil {
+		t.Fatal(d.Err())
+	}
+	maskLater = false
+	draft = d.Propose(prompt)
+	if len(draft) != 3 {
+		t.Fatalf("finite retry = %v", draft)
+	}
+	for _, token := range draft {
+		if token < 0 || token > 1 {
+			t.Fatalf("invalid candidate %d", token)
+		}
+	}
+	if d.Err() != nil {
+		t.Fatal(d.Err())
+	}
+	if target.Cache.Len() != len(prompt) {
+		t.Fatalf("target cache mutated: %d", target.Cache.Len())
+	}
+}
+
+// fak-test:runtime medium est=2s lane=default
+func TestQwen35MTPFilterUpdateReplaysProjectionCoordinates(t *testing.T) {
+	for _, depth := range []int{1, 3} {
+		for _, update := range []string{"reorder", "resize", "remove", "empty"} {
+			t.Run(fmt.Sprintf("depth-%d/%s", depth, update), func(t *testing.T) {
+				m := qwen35MTPEnabledSyntheticModel(t)
+				prompt := []int{0, 1}
+				target := m.NewSession()
+				target.captureTargetHidden = true
+				t.Cleanup(target.Close)
+				target.Prefill(prompt)
+				wantTarget := m.NewSession()
+				wantTarget.captureTargetHidden = true
+				t.Cleanup(wantTarget.Close)
+				wantTarget.Prefill(prompt)
+				d, err := NewQwen35MTPDraftSession(target, depth)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(d.Close)
+				d.WithDraftVocabFilter([]int{0, 2})
+				if d.filterDirty {
+					t.Fatal("pre-proposal filter dirtied an empty projection cache")
+				}
+				var positions []int
+				realStep := d.step
+				d.step = func(f *Qwen35MTPForward, pos int, prior, embedding []float32) ([]float32, []float32, error) {
+					positions = append(positions, pos)
+					return realStep(f, pos, prior, embedding)
+				}
+				if got := d.Propose(prompt); len(got) != depth || d.Err() != nil {
+					t.Fatalf("initial proposal %v: %v", got, d.Err())
+				}
+				if len(positions) != len(prompt)+depth-1 {
+					t.Fatalf("initial calls %v", positions)
+				}
+				old := d.forward
+				pending := d.pending
+				if depth > 1 && pending == nil {
+					t.Fatal("multi-step fixture has no pending snapshot")
+				}
+				var filter *DraftVocabFilter
+				switch update {
+				case "reorder":
+					filter = NewDraftVocabFilter([]int{2, 0})
+				case "resize":
+					filter = NewDraftVocabFilter([]int{1})
+				case "empty":
+					filter = &DraftVocabFilter{}
+				}
+				d.SetDraftVocabFilter(filter)
+				if !d.filterDirty || old.closed || d.pending != pending {
+					t.Fatal("setter eagerly replaced or failed to invalidate live draft state")
+				}
+				positions = nil
+				got := d.Propose(prompt)
+				if d.Err() != nil {
+					t.Fatal(d.Err())
+				}
+				if d.filterDirty || d.forward == old || !old.closed {
+					t.Fatal("successful replay did not replace and clean the draft owner")
+				}
+				if old.draft.Cache.Len() != len(prompt) {
+					t.Fatalf("old cache was not restored before close: %d", old.draft.Cache.Len())
+				}
+				if pending != nil && pending.snapshot.Cache != nil {
+					t.Fatal("old proposal snapshot was not released")
+				}
+				if len(positions) != len(prompt)+depth-1 {
+					t.Fatalf("update replay calls %v", positions)
+				}
+				for i, pos := range positions {
+					if pos != i {
+						t.Fatalf("replay position %d = %d", i, pos)
+					}
+				}
+				fresh, err := NewQwen35MTPDraftSession(wantTarget, depth)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(fresh.Close)
+				fresh.SetDraftVocabFilter(filter)
+				want := fresh.Propose(prompt)
+				if fresh.Err() != nil || !reflect.DeepEqual(got, want) {
+					t.Fatalf("updated %v versus fresh %v: %v", got, want, fresh.Err())
+				}
+				assertFloat32BitsEqual(t, "updated committed projection", d.lastLogits, fresh.lastLogits)
+				assertQwen35MTPTargetStateEqual(t, target, wantTarget)
+				owner := d.forward
+				positions = nil
+				if again := d.Propose(prompt); !reflect.DeepEqual(again, want) || d.Err() != nil {
+					t.Fatalf("fixed-filter repeat %v: %v", again, d.Err())
+				}
+				if d.forward != owner || len(positions) != depth-1 {
+					t.Fatalf("unchanged filter replayed committed work: %v", positions)
+				}
+			})
+		}
+	}
+
+}
+
+// fak-test:runtime medium est=1s lane=default
+func TestQwen35MTPFilterUpdateFailuresKeepExistingLatch(t *testing.T) {
+	for _, stage := range []string{"restore", "recreate", "replay"} {
+		t.Run(stage, func(t *testing.T) {
+			m := qwen35MTPEnabledSyntheticModel(t)
+			prompt := []int{0, 1}
+			target := m.NewSession()
+			target.captureTargetHidden = true
+			t.Cleanup(target.Close)
+			target.Prefill(prompt)
+			wantTarget := m.NewSession()
+			wantTarget.captureTargetHidden = true
+			t.Cleanup(wantTarget.Close)
+			wantTarget.Prefill(prompt)
+			d, err := NewQwen35MTPDraftSession(target, 3)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(d.Close)
+			d.WithDraftVocabFilter([]int{0, 2})
+			if got := d.Propose(prompt); len(got) != 3 || d.Err() != nil {
+				t.Fatalf("initial %v: %v", got, d.Err())
+			}
+			old, pending := d.forward, d.pending
+			d.WithDraftVocabFilter([]int{2, 0})
+			injected := errors.New("filter-update replay failure")
+			calls := 0
+			realStep := d.step
+			d.step = func(f *Qwen35MTPForward, pos int, prior, embedding []float32) ([]float32, []float32, error) {
+				calls++
+				feedback, logits, err := realStep(f, pos, prior, embedding)
+				if err == nil && stage == "replay" {
+					return nil, nil, injected
+				}
+				return feedback, logits, err
+			}
+			meta := m.manifest["mtp.fc.weight"]
+			if stage == "restore" {
+				pending.snapshot.Close()
+			}
+			if stage == "recreate" {
+				delete(m.manifest, "mtp.fc.weight")
+			}
+			got := d.Propose(prompt)
+			m.manifest["mtp.fc.weight"] = meta
+			if got != nil || d.Err() == nil || !d.filterDirty {
+				t.Fatalf("failed update = %v, error %v, dirty %v", got, d.Err(), d.filterDirty)
+			}
+			var failure *Qwen35MTPDrafterError
+			if !errors.As(d.Err(), &failure) {
+				t.Fatalf("untyped failure %v", d.Err())
+			}
+			wantStage := "committed catch-up"
+			if stage == "restore" {
+				wantStage = "rollback"
+			}
+			if failure.Stage != wantStage {
+				t.Fatalf("failure stage %q, want %q", failure.Stage, wantStage)
+			}
+			if d.pending != nil || pending.snapshot.Cache != nil {
+				t.Fatal("failure retained old proposal snapshot")
+			}
+			switch stage {
+			case "restore":
+				if old.closed || d.forward != old || calls != 0 {
+					t.Fatal("restore failure continued to replace draft owner")
+				}
+			case "recreate":
+				if !old.closed || d.forward != nil || calls != 0 {
+					t.Fatal("recreate failure retained owner or executed replay")
+				}
+			case "replay":
+				if !errors.Is(d.Err(), injected) || !old.closed || d.forward == old || calls != 1 {
+					t.Fatalf("replay failure ownership/cause: %v calls=%d", d.Err(), calls)
+				}
+				if d.forward.draft.Cache.Len() != 0 || d.forward.lastPos != -1 || len(d.processed) != 0 || len(d.lastLogits) != 0 {
+					t.Fatal("failed replay did not restore its new empty draft boundary")
+				}
+			}
+			latched, before := d.Err(), calls
+			d.SetDraftVocabFilter(nil)
+			if again := d.Propose(prompt); again != nil || d.Err() != latched || calls != before {
+				t.Fatal("filter update bypassed existing runtime-error latch")
+			}
+			assertQwen35MTPTargetStateEqual(t, target, wantTarget)
+		})
+	}
+}

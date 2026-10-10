@@ -30,6 +30,8 @@ type v41ScoreTestBackend struct {
 	fault             string
 	cause             error
 	panicValue        any
+	cleanupPanic      any
+	freeAttempts      int
 	forceNaN          bool
 	healthErr         error
 	healthCalls       int
@@ -162,6 +164,10 @@ func (b *v41ScoreTestBackend) Free(x compute.Tensor) {
 	}
 	delete(b.allocations, x.Buf())
 	b.Backend.Free(x)
+	b.freeAttempts++
+	if b.cleanupPanic != nil {
+		panic(b.cleanupPanic)
+	}
 	if isOutput && b.fault == "free" {
 		panic(b.cause)
 	}
@@ -374,4 +380,63 @@ func TestV41IndexerScoreDeviceHealth(t *testing.T) {
 			t.Fatalf("cached nil score hid sticky fault: %v", err)
 		}
 	})
+}
+
+// fak-test:runtime fast est=5ms lane=default
+// Estimate is unmeasured. CPU recorder checks the callback contract only; no
+// current native-backend double fault or physical qualification is claimed.
+func TestV41IndexerScorePrimaryFailureSurvivesCleanup(t *testing.T) {
+	for _, cleanup := range []any{&compute.BackendError{Backend: "cleanup", Class: compute.VulkanClassExecutionFailed, Err: errors.New("release failure")}, "unclassified release panic"} {
+		for _, tc := range []struct {
+			name, fault string
+			panicValue  any
+			owned       int
+			cleanupOnly bool
+		}{
+			{name: "returned dispatch", fault: "dispatch", owned: 3},
+			{name: "returned partial", fault: "partial output", owned: 4},
+			{name: "typed dispatch panic", fault: "panic", owned: 3},
+			{name: "typed read panic", fault: "read", owned: 4},
+			{name: "unknown pointer panic", fault: "panic", panicValue: &struct{ marker int }{17}, owned: 3},
+			{name: "unknown error panic", fault: "panic", panicValue: errors.New("original unknown panic"), owned: 3},
+			{name: "unknown string panic", fault: "panic", panicValue: "original panic", owned: 3},
+			{name: "cleanup only", owned: 4, cleanupOnly: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				s, b := v41ScoreTestSession(t)
+				primary := &compute.BackendError{Backend: "primary", Class: compute.VulkanClassExecutionFailed, Err: errors.New("selected operation failure")}
+				b.fault, b.cause, b.panicValue, b.cleanupPanic = tc.fault, primary, tc.panicValue, cleanup
+				var out []float32
+				var err error
+				recovered := v41IndexerTestRecover(func() { out, err = s.v41IndexerScoreFunc()(4, []float32{1}, []float32{2}, []float32{1}, 1, 1, 1) })
+				if tc.panicValue != nil {
+					if recovered != tc.panicValue {
+						t.Fatalf("primary panic identity lost: got %v want %v", recovered, tc.panicValue)
+					}
+				} else if tc.cleanupOnly {
+					if cleanupErr, ok := cleanup.(error); ok {
+						if recovered != nil || !errors.Is(err, cleanupErr) {
+							t.Fatalf("cleanup-only typed failure changed: panic=%v err=%v", recovered, err)
+						}
+					} else if recovered != cleanup {
+						t.Fatalf("cleanup-only panic changed: %v", recovered)
+					}
+				} else if recovered != nil || !errors.Is(err, primary) {
+					t.Fatalf("primary selected cause lost: panic=%v err=%v", recovered, err)
+				}
+				var closed *BackendForwardOperationError
+				if out != nil || !s.BackendSessionClosed() || !errors.As(s.halFailure, &closed) || closed.Layer != 4 || len(b.allocations) != 0 || b.freeAttempts != tc.owned || len(b.calls) != 1 {
+					t.Fatalf("failure did not close and attempt every owned release: out=%v closed=%v live=%d free=%d calls=%d", out, s.halFailure, len(b.allocations), b.freeAttempts, len(b.calls))
+				}
+				if !tc.cleanupOnly && tc.panicValue == nil && !errors.Is(s.halFailure, primary) {
+					t.Fatal("latched primary cause changed")
+				}
+				releases := b.freeAttempts
+				retry := v41IndexerTestRecover(func() { _, _ = s.v41IndexerScoreFunc()(4, []float32{1}, []float32{2}, []float32{1}, 1, 1, 1) })
+				if retry != s.halFailure || len(b.calls) != 1 || b.freeAttempts != releases {
+					t.Fatal("closed callback retried work or cleanup")
+				}
+			})
+		}
+	}
 }

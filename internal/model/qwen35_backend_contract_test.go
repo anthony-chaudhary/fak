@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
 	"strings"
@@ -1053,5 +1054,124 @@ func TestQwen35GDNCapabilityIdentity(t *testing.T) {
 	// Prove prefix snapshot decode refuses unsupported backend.
 	if _, err := DecodeHostPrefixSnapshot(wire, unsupportedBackend, cfg); err == nil {
 		t.Fatal("DecodeHostPrefixSnapshot accepted backend with unsupported GDN path")
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestValidateBackendForwardConfigRejectsGenericLayerNorm(t *testing.T) {
+	be := compute.Pick("cpu-ref")
+	if be == nil {
+		t.Fatal("cpu-ref backend missing")
+	}
+	for _, gain := range []bool{false, true} {
+		cfg := Config{LayerNorm: true, NormGain1p: gain}
+		err := ValidateBackendForwardConfig(cfg, be)
+		var unsupported *UnsupportedBackendForwardError
+		if !errors.As(err, &unsupported) || unsupported.Forward != forwardGenericHAL || unsupported.Backend != be.Name() || unsupported.IntendedPath != "compute HAL" {
+			t.Fatalf("gain=%t: wrong typed refusal: %T %v", gain, err, err)
+		}
+		if !strings.Contains(err.Error(), "LayerNorm") || !strings.Contains(err.Error(), "RMSNorm") || strings.Contains(err.Error(), "issue #4714") {
+			t.Fatalf("generic norm refusal has wrong diagnostic: %v", err)
+		}
+		if err := ValidateBackendForwardConfig(cfg, nil); err != nil {
+			t.Fatalf("legacy reference refused: %v", err)
+		}
+		cfg.LayerNorm = false
+		if err := ValidateBackendForwardConfig(cfg, be); err != nil {
+			t.Fatalf("RMSNorm gain=%t refused: %v", gain, err)
+		}
+	}
+	// These are admission pass-through controls, not evidence that artificial
+	// LayerNorm variants of every dedicated architecture are executable.
+	for _, cfg := range []Config{
+		{ModelType: "deepseek41", LayerNorm: true},
+		{ModelType: "deepseek2", LayerNorm: true},
+		{ModelType: "glm_moe_dsa", LayerNorm: true},
+		{ModelType: "minimax_m3", LayerNorm: true},
+		{ModelType: "gemma4", LayerNorm: true},
+	} {
+		if err := ValidateBackendForwardConfig(cfg, be); err != nil {
+			t.Fatalf("dedicated route %q changed: %v", cfg.ModelType, err)
+		}
+	}
+	cfg := qwen35HybridTestCfg()
+	cfg.LayerNorm = true
+	accepted := &pathQwen35Backend{recordingQwen35Backend: &recordingQwen35Backend{}, path: Qwen35GDNCUDAPath}
+	if err := ValidateBackendForwardConfig(cfg, accepted); err != nil {
+		t.Fatalf("hybrid structural admission changed: %v", err)
+	}
+	var hybrid *UnsupportedBackendForwardError
+	if err := ValidateBackendForwardConfig(cfg, be); !errors.As(err, &hybrid) || hybrid.Forward != ForwardQwen35GDN {
+		t.Fatalf("hybrid refusal changed: %v", err)
+	}
+	want := fmt.Sprintf("model: backend %q cannot execute forward %q via %q: %s; refusing generic QKV/CPU fallback (required deterministic CPU-reference parity cosine >= %.3f; issue #4714)", hybrid.Backend, hybrid.Forward, hybrid.IntendedPath, hybrid.Reason, hybrid.ParityCosineMin)
+	if hybrid.Error() != want {
+		t.Fatalf("existing hybrid diagnostic changed: %q", hybrid.Error())
+	}
+}
+
+type layerNormAdmissionBackend struct {
+	compute.Backend
+	newKV, resets, uploads int
+}
+
+func (b *layerNormAdmissionBackend) NewKV(cfg compute.KVConfig) compute.KVStore {
+	b.newKV++
+	return b.Backend.NewKV(cfg)
+}
+func (b *layerNormAdmissionBackend) GraphReset() { b.resets++ }
+func (b *layerNormAdmissionBackend) Upload(t compute.Tensor, as compute.Dtype) compute.Tensor {
+	b.uploads++
+	return b.Backend.Upload(t, as)
+}
+func (b *layerNormAdmissionBackend) UploadClass(t compute.Tensor, as compute.Dtype, _ compute.MemoryClass, _ string) compute.Tensor {
+	return b.Upload(t, as)
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestGenericLayerNormRefusesBeforeSessionResourcesAndPreservesReference(t *testing.T) {
+	t.Setenv("FAK_PAGED_KV", "0")
+	cfg := Config{HiddenSize: 16, NumLayers: 2, NumHeads: 4, NumKVHeads: 2, HeadDim: 4, IntermediateSize: 32, VocabSize: 64, RMSNormEps: 1e-5, RopeTheta: 10000, TieWordEmbeddings: true, EOSTokenID: -1, LayerNorm: true}
+	m := NewSynthetic(cfg)
+	defer m.CloseWeights()
+	be := &layerNormAdmissionBackend{Backend: compute.Pick("cpu-ref")}
+	if be.Backend == nil {
+		t.Fatal("cpu-ref backend missing")
+	}
+	state := m.ensureWeightCloser()
+	state.mu.Lock()
+	before := state.sessions
+	state.mu.Unlock()
+	s, err := m.NewBackendSessionChecked(be)
+	if s != nil {
+		s.Close()
+		t.Fatal("unsupported HAL returned a session")
+	}
+	var unsupported *UnsupportedBackendForwardError
+	if !errors.As(err, &unsupported) || unsupported.Forward != forwardGenericHAL {
+		t.Fatalf("wrong refusal: %T %v", err, err)
+	}
+	state.mu.Lock()
+	after := state.sessions
+	state.mu.Unlock()
+	if before != after || be.newKV != 0 || be.resets != 0 || be.uploads != 0 {
+		t.Fatalf("refusal acquired resources: holds=%d->%d kv=%d reset=%d uploads=%d", before, after, be.newKV, be.resets, be.uploads)
+	}
+	// NewBackendSessionChecked(nil) selects the default HAL. NewSession is the
+	// actual legacy reference API, and must remain usable for LayerNorm models.
+	legacy := m.NewSession()
+	defer legacy.Close()
+	if legacy.Backend != nil {
+		t.Fatal("reference session unexpectedly selected HAL")
+	}
+	for _, logits := range [][]float32{legacy.Prefill([]int{3, 7, 11}), legacy.Step(19)} {
+		if len(logits) != cfg.VocabSize {
+			t.Fatalf("reference logits=%d, want %d", len(logits), cfg.VocabSize)
+		}
+		for _, x := range logits {
+			if math.IsNaN(float64(x)) || math.IsInf(float64(x), 0) {
+				t.Fatal("reference produced nonfinite logits")
+			}
+		}
 	}
 }

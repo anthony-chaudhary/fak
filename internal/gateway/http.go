@@ -774,14 +774,13 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !validateChatRequestIngress(w, req) {
 		return
 	}
-	// Deadline-aware admission: refuse work that cannot finish before the
-	// client's declared deadline, and bind that deadline to the request
-	// context so generation stops when it passes (deadline_admission.go).
-	r, releaseDeadline, ok := s.admitClientDeadlineChat(w, r, turnCostBegan, req.Model, req.Tools, req.Messages, req.MaxTokens)
-	if !ok {
-		return
-	}
-	defer releaseDeadline()
+	// Bind the client deadline before routing or preparation. Cache credit is
+	// selected only after the execution route is fixed below.
+	r, cancelDeadline := bindClientDeadline(r, turnCostBegan)
+	defer cancelDeadline()
+	// Retain served-prefix history as observation only. Admission below uses
+	// current request-owned native state, or prices unsupported routes cold.
+	r = withDeadlineCacheObservation(r, req.Model, req.Tools, req.Messages)
 	deadlineCtx := r.Context()
 	// Stamp the causal input on the untouched wire envelope before admission
 	// transforms, request routing, planner selection, or model execution.
@@ -807,6 +806,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if s.refuseNativeModelMismatch(w, r, req.Model, routedModel) {
 		return
 	}
+	r, releaseDeadline, ok := s.admitRoutedClientDeadline(w, r, turnCostBegan, req.Messages, req.MaxTokens)
+	if !ok {
+		return
+	}
+	defer releaseDeadline()
 	if !releaseEPFanout(r) {
 		return
 	}
@@ -1004,6 +1008,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 }
 
 func validateChatRequestIngress(w http.ResponseWriter, req ChatRequest) bool {
+	if rejectStopLimits(w, normalizeStop(req.Stop)) {
+		return false
+	}
+	if rejectGuidedRegexLimits(w, req) {
+		return false
+	}
 	if len(req.Messages) == 0 {
 		writeErr(w, http.StatusBadRequest, "messages: field required")
 		return false

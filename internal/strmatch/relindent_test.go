@@ -139,3 +139,44 @@ func TestNearestLineHintNoAnchorOnBlank(t *testing.T) {
 		t.Error("empty content must not yield a hint")
 	}
 }
+
+// fak-test:runtime fast est=10ms lane=default
+func TestRelativeIndentExpandedReplacementPreservesBoundary(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, content, old, replacement, want string
+	}{
+		{
+			name:    "LF boundary",
+			content: "start\n    a\n    b\nafter\n", old: "  a\n  b",
+			replacement: "  x\n  y\n  z", want: "start\n    x\n    y\n    z\nafter\n",
+		},
+		{
+			name:    "CRLF boundary preserves explicit inner LF",
+			content: "start\r\n    a\r\n    b\r\nafter\r\n", old: "  a\n  b",
+			replacement: "  x\n  y\n  z", want: "start\r\n    x\n    y\n    z\r\nafter\r\n",
+		},
+		{
+			name:    "unterminated EOF stays unterminated",
+			content: "start\n    a\n    b", old: "  a\n  b",
+			replacement: "  x\n  y\n  z", want: "start\n    x\n    y\n    z",
+		},
+		{
+			name:    "explicit replacement terminator wins",
+			content: "start\n    a\n    b\nafter\n", old: "  a\n  b",
+			replacement: "  x\n  y\n  z\r\n", want: "start\n    x\n    y\n    z\r\nafter\n",
+		},
+		{
+			name:    "exact match retains original separator",
+			content: "start\n    a\n    b\nafter\n", old: "    a\n    b",
+			replacement: "    x\n    y\n    z", want: "start\n    x\n    y\n    z\nafter\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := MatchAndReplaceRelativeIndent(tc.content, tc.old, tc.replacement)
+			if !ok || got != tc.want {
+				t.Fatalf("replacement ok=%t, got %q, want %q", ok, got, tc.want)
+			}
+		})
+	}
+}

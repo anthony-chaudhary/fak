@@ -7,6 +7,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
+// ErrHostPrefixSnapshotState identifies continuation state that the host image
+// cannot represent. Complete live PrefixSnapshot reuse remains independent.
+var ErrHostPrefixSnapshotState = errors.New("model: host prefix snapshot cannot represent V4.1 continuation state")
+
 // HostPrefixSnapshot is a complete PrefixSnapshot payload copied into ordinary
 // process-owned host DRAM. It includes the host model cache, attention K/Kraw/V,
 // positions, and every Qwen3.5/3.6 convolution/recurrent tensor needed to resume.
@@ -80,6 +84,12 @@ func (p *PrefixSnapshot) CloneToHost() (out *HostPrefixSnapshot, err error) {
 	if p == nil || p.Cache == nil || p.Backend == nil || p.halKV == nil {
 		return nil, errors.New("model: prefix snapshot has no complete backend state to stage")
 	}
+	// The host image has no V4.1 continuation or identity fields. Refuse both
+	// declared V4.1 models and inconsistent snapshots carrying any V4.1 marker.
+	if p.Cache.cfg.IsDeepSeekV41() || p.v41 != nil || p.v41Tokens != 0 || p.hasV41Tokens ||
+		p.v41DeviceIdentity != nil || p.hasV41DeviceIdentity {
+		return nil, ErrHostPrefixSnapshotState
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			if out != nil {
@@ -144,6 +154,11 @@ func (h *HostPrefixSnapshot) Restore() (out *PrefixSnapshot, err error) {
 	defer func() { emitPrefixProfile(started, "restore_from_host", "complete", out, h) }()
 	if h == nil || h.cache == nil || h.backend == nil {
 		return nil, errors.New("model: invalid host prefix snapshot restore")
+	}
+	// Also reject previously constructed or decoded incomplete V4.1 images
+	// before the backend allocates KV or uploads any payload.
+	if h.cache.cfg.IsDeepSeekV41() {
+		return nil, ErrHostPrefixSnapshotState
 	}
 	defer func() {
 		if r := recover(); r != nil {

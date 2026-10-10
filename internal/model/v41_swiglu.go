@@ -21,6 +21,13 @@ func (m *Model) v41SharedExpertSwiGLUWithProjection(l int, xn []float32, cfg Con
 }
 
 func (m *Model) v41SharedExpertSwiGLUWithActivation(l int, xn []float32, cfg Config, project v41DenseProjectionFunc, activate v41SharedActivationFunc) ([]float32, error) {
+	full, err := v41ForwardGeometry(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if full {
+		return m.v41FullSharedExpertSwiGLU(l, xn, cfg, project, activate)
+	}
 	I, H := cfg.MoEIntermediateSize, cfg.HiddenSize
 	h1, err := m.v41ProjMatRowsWithProjection(l, "ffn.shared_experts.w1.weight", xn, I, H, project)
 	if err != nil {
@@ -170,4 +177,77 @@ func v41SwiGLUParallel(w1, w3, w2, xn []float32, I, H int, cfg Config) []float32
 		panic(err)
 	}
 	return y
+}
+
+// v41FullSharedExpertSwiGLU owns the BF16 publications around unchanged F32
+// projection/activation callbacks. DeepSeek's pinned model.py Expert.forward
+// (dba1be0a40aa45a94ad051997016db3960a90277, lines 841-851) widens
+// gate/up outputs, computes clamped SwiGLU, then narrows the down input. This
+// fixes dtype boundaries only; quantized-GEMM activation parity is separate.
+func (m *Model) v41FullSharedExpertSwiGLU(l int, xn []float32, cfg Config, project v41DenseProjectionFunc, activate v41SharedActivationFunc) ([]float32, error) {
+	I, H := cfg.MoEIntermediateSize, cfg.HiddenSize
+	const gateLeaf = "ffn.shared_experts.w1.weight"
+	const upLeaf = "ffn.shared_experts.w3.weight"
+	const downLeaf = "ffn.shared_experts.w2.weight"
+	const activationLeaf = "ffn.shared_experts.activation"
+	if len(xn) != H {
+		return nil, v41ProjectionOperationErr(l, gateLeaf, errV41ProjectionResult)
+	}
+	input, err := v41LatentNormBF16Copy(l, gateLeaf, "input", xn)
+	if err != nil {
+		return nil, err
+	}
+	projectBF16 := func(leaf string, input []float32, rows, cols int) ([]float32, error) {
+		values, err := m.v41ProjMatRowsWithProjection(l, leaf, input, rows, cols, project)
+		if err != nil {
+			return nil, err
+		}
+		if len(values) != rows {
+			return nil, v41ProjectionOperationErr(l, leaf, errV41ProjectionResult)
+		}
+		return v41LatentNormBF16Copy(l, leaf, "projection", values)
+	}
+	gate, err := projectBF16(gateLeaf, input, I, H)
+	if err != nil {
+		return nil, err
+	}
+	up, err := projectBF16(upLeaf, input, I, H)
+	if err != nil {
+		return nil, err
+	}
+	var intermediate []float32
+	if activate != nil {
+		values, outcome, err := activate(l, gate, up, float32(cfg.SwigluLimit))
+		switch outcome {
+		case v41ProjectionHandled:
+			if err == nil && len(values) != I {
+				err = errV41ProjectionResult
+			}
+			if err != nil {
+				return nil, v41ProjectionOperationErr(l, activationLeaf, err)
+			}
+			intermediate, err = v41LatentNormBF16Copy(l, activationLeaf, "down input", values)
+			if err != nil {
+				return nil, err
+			}
+		case v41ProjectionError:
+			return nil, v41ProjectionOperationErr(l, activationLeaf, err)
+		case v41ProjectionDeclined:
+		default:
+			return nil, v41ProjectionOperationErr(l, activationLeaf, errV41ProjectionResult)
+		}
+	}
+	if intermediate == nil {
+		clampSwiGLUProjections(gate, up, float32(cfg.SwigluLimit))
+		// Full V4.1 is SwiGLU, independent of generic GELU configuration flags.
+		values := make([]float32, I)
+		for i := range values {
+			values[i] = silu(gate[i]) * up[i]
+		}
+		intermediate, err = v41LatentNormBF16Copy(l, activationLeaf, "down input", values)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return projectBF16(downLeaf, intermediate, H, I)
 }

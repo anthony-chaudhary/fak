@@ -152,6 +152,15 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 		Arguments      string `json:"arguments"`
 	}
 
+	// One handler goroutine owns Responses emission. Keep the first write
+	// failure and never retry a broken response writer, including error tails.
+	var writeFailure error
+	send := func(event string, data any) {
+		if writeFailure == nil {
+			writeFailure = writeSSEEvent(w, event, data)
+		}
+	}
+
 	start := func() {
 		if started {
 			return
@@ -164,7 +173,7 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 		w.WriteHeader(http.StatusOK)
 		// response.created: the same metadata the buffered path emits (in_progress,
 		// empty output, zero usage), with sequence_number 0.
-		_ = writeSSEEvent(w, "response.created", responseEvent{
+		send("response.created", responseEvent{
 			Type:           "response.created",
 			SequenceNumber: nextSeq,
 			Response: responsesResponse{
@@ -185,7 +194,7 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	// only written when the turn did not complete (the buffered error paths own
 	// nothing at that point — the SSE status line is already spent).
 	emitResponseFailed := func() {
-		_ = writeSSEEvent(w, "response.failed", responseEvent{
+		send("response.failed", responseEvent{
 			Type:           "response.failed",
 			SequenceNumber: nextSeq,
 			Response: responsesResponse{
@@ -216,7 +225,7 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	fullText := ""
 
 	emitDelta := func(delta string) {
-		_ = writeSSEEvent(w, "response.output_text.delta", outputTextDeltaEvent{
+		send("response.output_text.delta", outputTextDeltaEvent{
 			Type:           "response.output_text.delta",
 			SequenceNumber: nextSeq,
 			OutputIndex:    0,
@@ -230,9 +239,12 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 			return nil
 		}
 		start()
+		if writeFailure != nil {
+			return writeFailure
+		}
 		if !itemOpened {
 			itemOpened = true
-			_ = writeSSEEvent(w, "response.output_item.added", outputItemEvent{
+			send("response.output_item.added", outputItemEvent{
 				Type:           "response.output_item.added",
 				SequenceNumber: nextSeq,
 				OutputIndex:    0,
@@ -240,8 +252,11 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 			})
 			nextSeq++
 		}
+		if writeFailure != nil {
+			return writeFailure
+		}
 		emitDelta(delta)
-		return nil
+		return writeFailure
 	}
 
 	// The sink streams prose through the lift-guard so a text-form tool-call dialect a
@@ -253,13 +268,24 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 
 	turnCtx := plannerTurnContext(ctx, nil, turn.messages, s.contextEpoch)
 	var firstDelta firstDeltaClock
-	comp, err := sp.CompleteStream(turnCtx, firstDelta.wrap(fragments.write), turn.messages, turn.tools, turn.sampleOpts...)
+	turnCtx = withTextToolOffer(turnCtx, turn.tools)
+	// Request the native per-token seam only after the live route is selected.
+	// Copy before appending so buffered/recovery callers retain their sampling opts.
+	liveOpts := append([]agent.SampleOpt(nil), turn.sampleOpts...)
+	liveOpts = append(liveOpts, agent.WithPerTokenStream(true))
+	comp, err := sp.CompleteStream(turnCtx, firstDelta.wrap(fragments.write), turn.messages, turn.tools, liveOpts...)
+	if err == nil && writeFailure != nil {
+		err = writeFailure
+	}
 	if err == nil {
 		s.observePrefixReuseTurn(turnCtx, turn.messages, comp)
 	}
 	if err != nil {
 		s.renderTurnDebugError(reqTrace, "openai_responses", err, time.Since(began))
 		s.recordFailedTurn(ctx, s.chatServingLocality(ctx, reqModel), err, began, 0, started)
+		if writeFailure != nil {
+			return true
+		}
 		if !started {
 			// Nothing on the wire yet — surface a real HTTP error exactly as the
 			// buffered path does, and own the request. writeUpstreamErr folds the
@@ -328,7 +354,9 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	streamed := guard.streamed()
 	remaining := liftRemainder(streamed, comp.Message.Content)
 	if remaining != "" {
-		emitContent(remaining)
+		if err := emitContent(remaining); err != nil {
+			return true
+		}
 		fullText = streamed + remaining
 	} else {
 		fullText = streamed
@@ -336,13 +364,17 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	if servedText != "" {
 		// vDSO served-inline: the call was dropped from kept, so the client never
 		// re-runs it; its answer is folded into assistant text (chat-path parity).
-		emitContent("\n" + servedText)
+		if err := emitContent("\n" + servedText); err != nil {
+			return true
+		}
 		fullText += "\n" + servedText
 	}
 	emittedAdjudicationNote := false
 	if anyLivelock(adjs) {
 		if note := adjudicationNote(adjs); note != "" {
-			emitContent(note)
+			if err := emitContent(note); err != nil {
+				return true
+			}
 			fullText += note
 			emittedAdjudicationNote = true
 		}
@@ -352,29 +384,40 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 		// no content of its own — give even a fak-unaware client an actionable note
 		// (which tools were denied and why) rather than an empty turn.
 		if note := denySummary(adjs); note != "" {
-			emitContent(note)
+			if err := emitContent(note); err != nil {
+				return true
+			}
 			fullText += note
 		}
 	}
 
 	if itemOpened {
 		start()
+		if writeFailure != nil {
+			return true
+		}
 		messageItem.Status = "completed"
 		messageItem.Content = []responsesContentPart{{Type: "output_text", Text: fullText}}
-		_ = writeSSEEvent(w, "response.output_text.done", outputTextDoneEvent{
+		send("response.output_text.done", outputTextDoneEvent{
 			Type:           "response.output_text.done",
 			SequenceNumber: nextSeq,
 			OutputIndex:    0,
 			ContentIndex:   0,
 			Text:           fullText,
 		})
+		if writeFailure != nil {
+			return true
+		}
 		nextSeq++
-		_ = writeSSEEvent(w, "response.output_item.done", outputItemEvent{
+		send("response.output_item.done", outputItemEvent{
 			Type:           "response.output_item.done",
 			SequenceNumber: nextSeq,
 			OutputIndex:    0,
 			Item:           messageItem,
 		})
+		if writeFailure != nil {
+			return true
+		}
 		nextSeq++
 	}
 
@@ -386,6 +429,11 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 		fnBase = 1
 	}
 	for i, tc := range kept {
+		// Tool-only completions have no prose to open the SSE envelope.
+		start()
+		if writeFailure != nil {
+			return true
+		}
 		idx := fnBase + i
 		args := tc.Function.Arguments
 		if args == "" {
@@ -400,35 +448,47 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 			Namespace: tc.Function.Namespace,
 			Arguments: args,
 		}
-		_ = writeSSEEvent(w, "response.output_item.added", outputItemEvent{
+		send("response.output_item.added", outputItemEvent{
 			Type:           "response.output_item.added",
 			SequenceNumber: nextSeq,
 			OutputIndex:    idx,
 			Item:           callItem,
 		})
+		if writeFailure != nil {
+			return true
+		}
 		nextSeq++
-		_ = writeSSEEvent(w, "response.function_call_arguments.delta", functionCallArgsDeltaEvent{
+		send("response.function_call_arguments.delta", functionCallArgsDeltaEvent{
 			Type:           "response.function_call_arguments.delta",
 			SequenceNumber: nextSeq,
 			OutputIndex:    idx,
 			CallID:         tc.ID,
 			Delta:          args,
 		})
+		if writeFailure != nil {
+			return true
+		}
 		nextSeq++
-		_ = writeSSEEvent(w, "response.function_call_arguments.done", functionCallArgsDoneEvent{
+		send("response.function_call_arguments.done", functionCallArgsDoneEvent{
 			Type:           "response.function_call_arguments.done",
 			SequenceNumber: nextSeq,
 			OutputIndex:    idx,
 			CallID:         tc.ID,
 			Arguments:      args,
 		})
+		if writeFailure != nil {
+			return true
+		}
 		nextSeq++
-		_ = writeSSEEvent(w, "response.output_item.done", outputItemEvent{
+		send("response.output_item.done", outputItemEvent{
 			Type:           "response.output_item.done",
 			SequenceNumber: nextSeq,
 			OutputIndex:    idx,
 			Item:           callItem,
 		})
+		if writeFailure != nil {
+			return true
+		}
 		nextSeq++
 	}
 
@@ -448,6 +508,9 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	// Open the stream even for an empty turn so the client always gets a
 	// well-formed created → completed sequence.
 	start()
+	if writeFailure != nil {
+		return true
+	}
 	s.logInferenceTurn(reqTrace, "openai_responses", true, comp.Usage, finish, time.Since(began), false)
 
 	resp := responsesResponse{
@@ -492,11 +555,14 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	// Publish the finalized continuation state before response.completed reveals the
 	// ID (the buffered path persists before writeResponsesStream for the same reason).
 	persistResponse(createdID, agent.Message{Role: agent.RoleAssistant, Content: fullText, ToolCalls: kept})
-	_ = writeSSEEvent(w, "response.completed", responseEvent{
+	send("response.completed", responseEvent{
 		Type:           "response.completed",
 		SequenceNumber: nextSeq,
 		Response:       resp,
 	})
+	if writeFailure != nil {
+		return true
+	}
 	nextSeq++
 	return true
 }

@@ -258,9 +258,15 @@ func v41SharedAttentionCause(layer int, p v41SharedAttentionPayload, cause error
 		}
 		return errors.Join(v41CompressedNonFinite(layer, producer, 0, arithmetic.Head, group, element, math.Float32frombits(arithmetic.ValueBits)), cause)
 	}
-	// Plain selected execution retains its selected-operation error wrapper.
-	// Output failures do not invent a producer.
-	return fmt.Errorf("%w: selected attention layer=%d mode=%d head=%d slot=%d stage=%d: %w", ErrV41ForwardStage, layer, p.mode, arithmetic.Head, slot, arithmetic.Stage, cause)
+	// Retain the selected-operation wrapper and original arithmetic cause.
+	// Valid plain sparse-sink arithmetic shares the host refusal contract;
+	// malformed status was rejected above and cannot acquire this sentinel.
+	// Output failures still do not invent a producer.
+	selected := fmt.Errorf("%w: selected attention layer=%d mode=%d head=%d slot=%d stage=%d: %w", ErrV41ForwardStage, layer, p.mode, arithmetic.Head, slot, arithmetic.Stage, cause)
+	if p.mode == compute.V41SharedAttentionPlain {
+		return errors.Join(ErrV41SparseSinkNonFinite, selected)
+	}
+	return selected
 }
 
 // One nonempty call uploads Q, selected shared KV, and a transient sink. Upload
@@ -320,9 +326,12 @@ func (s *Session) v41SharedAttentionFunc() v41SharedAttentionFunc {
 		if len(p.sourceRows) == 0 {
 			return make([]float32, p.heads*p.headDim), nil
 		}
-		run := func() ([]float32, error) {
+		run := func() (result []float32, cause error) {
 			var owned []compute.Tensor
 			defer func() {
+				// Cleanup must not replace the selected operation's error or
+				// original panic. Still attempt every owned release.
+				primaryPanic := recover()
 				var cleanupPanic any
 				for i := len(owned) - 1; i >= 0; i-- {
 					// Try every release even if one backend Free panics. The
@@ -336,7 +345,10 @@ func (s *Session) v41SharedAttentionFunc() v41SharedAttentionFunc {
 						s.Backend.Free(owned[i])
 					}()
 				}
-				if cleanupPanic != nil {
+				if primaryPanic != nil {
+					panic(primaryPanic)
+				}
+				if cause == nil && cleanupPanic != nil {
 					panic(cleanupPanic)
 				}
 			}()

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/codetools"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
@@ -799,5 +800,150 @@ func TestOwnedLoopCASObservationBindsReadThenWriteInSameTurn(t *testing.T) {
 	assertLiteralCASBytes(t, root, "value.txt", "new")
 	if metrics.Denies != 0 || metrics.ToolErrors != 0 {
 		t.Fatalf("same-turn observed mutation refused: %+v; %s", metrics, literalCASToolOutput(p.messages))
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestArmMetricsCountGoEdits(t *testing.T) {
+	root, _ := seedCodeToolFixture(t)
+	vdso.Default.BumpWorld()
+	catalog, err := ArmCodeTools(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(DisarmCodeTools)
+	edit := func(path, old, next string) string {
+		return `{"file_path":` + mustJSON(t, path) + `,"old_string":` + mustJSON(t, old) + `,"new_string":` + mustJSON(t, next) + `}`
+	}
+	p := &literalCASPlanner{script: []codeToolScript{
+		{codetools.ToolRead, `{"file_path":"main.go"}`},
+		{codetools.ToolEdit, edit("main.go", "absentAnchorXYZ", "none")},
+		{codetools.ToolRead, `{"file_path":"main.go"}`},
+		{codetools.ToolEdit, edit("main.go", "greet()", "greet2()")},
+		{codetools.ToolRead, `{"file_path":"main.go"}`},
+		{codetools.ToolEdit, edit("main.go", "func main() {\n\tgreet2()\n}", "func main() {\n\tgreet3()\n}")},
+		{codetools.ToolRead, `{"file_path":"README.md"}`},
+		{codetools.ToolEdit, edit("README.md", "fixture", "changed")},
+		{codetools.ToolEdit, `{"file_path":"../outside.go","old_string":"x","new_string":"y","expected_version":"fv1:blocked"}`},
+		{codetools.ToolEdit, `{"file_path":"main.go","old_string":"x","new_string":"y","expected_version":"fv1:bad","unknown":true}`},
+	}}
+	m := runLiteralCASLoop(t, catalog, p)
+	if m.GoEditCalls != 3 || m.GoEditConflicts != 1 || m.GoWholeDeclRewrites != 1 {
+		t.Fatalf("Go edit counters = %d/%d/%d; results: %s", m.GoEditCalls, m.GoEditConflicts, m.GoWholeDeclRewrites, literalCASToolOutput(p.messages))
+	}
+	assertLiteralCASBytes(t, root, "main.go", "package main\n\nfunc main() {\n\tgreet3()\n}\n")
+	assertLiteralCASBytes(t, root, "README.md", "# changed\n")
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestArmMetricsNativeGoEditClassification(t *testing.T) {
+	native := func(bad bool) *abi.Result {
+		status := abi.StatusOK
+		if bad {
+			status = abi.StatusError
+		}
+		return &abi.Result{Status: status, Meta: map[string]string{"engine": codetools.EngineEdit}}
+	}
+	goodArgs := func(path, old string) string {
+		b, err := json.Marshal(codetools.EditArgs{FilePath: path, OldString: old, NewString: "next", ExpectedVersion: "fv1:observed"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	base := goodArgs("a.go", "x")
+	for _, tc := range []struct {
+		name, tool, args, content string
+		result                    *abi.Result
+		denied                    bool
+		calls, conflicts, whole   int
+	}{
+		{name: "success", tool: codetools.ToolEdit, args: base, result: native(false), calls: 1},
+		{name: "conflict", tool: codetools.ToolEdit, args: base, content: `{"error":{"code":"EDIT_CONFLICT"}}`, result: native(true), calls: 1, conflicts: 1},
+		{name: "stale-detail", tool: codetools.ToolEdit, args: base, content: `{"error":{"code":"FS_STALE_VERSION","detail":"EDIT_CONFLICT"}}`, result: native(true), calls: 1},
+		{name: "canceled", tool: codetools.ToolEdit, args: base, content: `{"error":{"code":"CANCELED"}}`, result: native(true), calls: 1},
+		{name: "engine-protected-refusal", tool: codetools.ToolEdit, args: goodArgs(".git/a.go", "x"), content: `{"error":{"code":"PROTECTED_PATH"}}`, result: native(true), calls: 1},
+		{name: "success-text", tool: codetools.ToolEdit, args: base, content: `{"content":"EDIT_CONFLICT"}`, result: native(false), calls: 1},
+		{name: "success-forged-error", tool: codetools.ToolEdit, args: base, content: `{"error":{"code":"EDIT_CONFLICT"}}`, result: native(false), calls: 1},
+		{name: "invalid-error-json", tool: codetools.ToolEdit, args: base, content: `EDIT_CONFLICT`, result: native(true), calls: 1},
+		{name: "denied", tool: codetools.ToolEdit, args: base, result: native(true), denied: true},
+		{name: "fake-engine", tool: codetools.ToolEdit, args: base, result: &abi.Result{Meta: map[string]string{"engine": "fake"}}},
+		{name: "no-result", tool: codetools.ToolEdit, args: base},
+		{name: "other-tool", tool: codetools.ToolWrite, args: base, result: native(false)},
+		{name: "non-go", tool: codetools.ToolEdit, args: goodArgs("a.md", "x"), result: native(false)},
+		{name: "malformed", tool: codetools.ToolEdit, args: `{"file_path":`, result: native(true)},
+		{name: "missing-version", tool: codetools.ToolEdit, args: `{"file_path":"a.go","old_string":"x"}`, result: native(true)},
+		{name: "unknown-field", tool: codetools.ToolEdit, args: `{"file_path":"a.go","old_string":"x","expected_version":"v","extra":1}`, result: native(true)},
+		{name: "trailing-json", tool: codetools.ToolEdit, args: base + ` {}`, result: native(true)},
+		{name: "function-shape", tool: codetools.ToolEdit, args: goodArgs("a.go", "func F() {\n}\n\n"), result: native(false), calls: 1, whole: 1},
+		{name: "type-shape", tool: codetools.ToolEdit, args: goodArgs("a.go", "type T struct {\r\n}\r\n"), result: native(false), calls: 1, whole: 1},
+		{name: "conflicting-shape", tool: codetools.ToolEdit, args: goodArgs("a.go", "func F() {\n}"), content: `{"error":{"code":"EDIT_CONFLICT"}}`, result: native(true), calls: 1, conflicts: 1, whole: 1},
+		{name: "indented-fragment", tool: codetools.ToolEdit, args: goodArgs("a.go", " func F() {\n}"), result: native(false), calls: 1},
+		{name: "indented-close", tool: codetools.ToolEdit, args: goodArgs("a.go", "func F() {\n }"), result: native(false), calls: 1},
+		{name: "body-fragment", tool: codetools.ToolEdit, args: goodArgs("a.go", "x()\n}"), result: native(false), calls: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var m ArmMetrics
+			m.recordNativeGoEdit(tc.tool, tc.args, tc.content, tc.result, tc.denied)
+			if m.GoEditCalls != tc.calls || m.GoEditConflicts != tc.conflicts || m.GoWholeDeclRewrites != tc.whole {
+				t.Fatalf("counters = %d/%d/%d, want %d/%d/%d", m.GoEditCalls, m.GoEditConflicts, m.GoWholeDeclRewrites, tc.calls, tc.conflicts, tc.whole)
+			}
+		})
+	}
+	var old ArmMetrics
+	if err := json.Unmarshal([]byte(`{"arm":"fak","tool_calls":7}`), &old); err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"go_edit_calls", "go_edit_conflicts", "go_whole_decl_rewrites"} {
+		if strings.Contains(string(b), key) {
+			t.Fatalf("zero metric %s must remain omitted", key)
+		}
+	}
+}
+
+func observationCommitProblems(tools *codetools.Toolset, defs []codetools.ToolDef) []string {
+	var problems []string
+	for _, def := range defs {
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if json.Unmarshal(def.Parameters, &schema) != nil {
+			problems = append(problems, def.Name+": invalid schema")
+			continue
+		}
+		if _, ok := schema.Properties["file_path"]; def.ReadOnly || !ok {
+			continue
+		}
+		o := &codeReadObservations{tools: tools, versions: make(map[string]string)}
+		key, ok := tools.ReadObservationKey("a.go")
+		if !ok {
+			problems = append(problems, def.Name+": fixture path refused")
+			continue
+		}
+		o.versions[key] = "observed"
+		o.commit(def.Name, `{"file_path":"a.go"}`, `{"ok":true}`, false, false)
+		if _, exists := o.versions[key]; exists {
+			problems = append(problems, def.Name+": successful mutation kept stale observation")
+		}
+	}
+	return problems
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestCodeReadObservationsCommitCoversMutatingTools(t *testing.T) {
+	tools, err := codetools.New(codetools.Config{Root: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if problems := observationCommitProblems(tools, codetools.Catalog()); len(problems) > 0 {
+		t.Fatal(strings.Join(problems, "\n"))
+	}
+	fake := codetools.ToolDef{Name: "UnknownMutation", Parameters: json.RawMessage(`{"properties":{"file_path":{}}}`)}
+	if len(observationCommitProblems(tools, []codetools.ToolDef{fake})) == 0 {
+		t.Fatal("checker missed an unknown mutation commit")
 	}
 }

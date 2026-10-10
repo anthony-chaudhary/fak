@@ -881,3 +881,52 @@ The internal/ggufload WeightSource method that runs the production hierarchical,
 The internal/ggufload WeightSource entry point that builds a Q4_K quantized model from a GGUF under a caller context, a load profile, and functional load options such as streamed experts; the context-aware form the plain QuantModelQ4K wrappers delegate to.
 
 **Distinct from:** Names the cancellable, option-carrying Q4_K model constructor, not the parallel tensor scheduler it drives or the generic command context.
+
+
+### v41AttentionQKRoPE
+
+Owns BF16 query and key-value publication before and after the full V4.1 forward tail rotary operation, whose arithmetic remains F32.
+
+**Distinct from:** Unlike attnPrefillDispatch, this owner stages rotary operands and results; it does not select or compute an attention kernel.
+
+
+### v41AttentionOutputForProjection
+
+Owns full V4.1 BF16 sparse-attention output staging before inverse F32 tail rotary arithmetic and BF16 publication to grouped output projection.
+
+**Distinct from:** Unlike v41AttentionQKRoPE, this owner operates on attention output after sparse attention and applies inverse rotation before output projection.
+
+
+### ExecutionDeadlineAdmissionSupported
+
+Reports whether the normal request-owned prefix acquisition route can perform deadline admission using usable cached-prefix credit; speculative routes remain cold-admitted.
+
+**Distinct from:** KVPrefixReuseSupported concerns whether a KV cache contains complete reusable session state; this predicate concerns whether this planner route has the owned-prefix execution boundary required to grant deadline credit.
+
+
+### inKernelDeviceGate
+
+Owns the planner-owned single native forward slot shared by ordinary requests and decode cohorts, supporting cancellation-aware waiters without detached lock-acquisition goroutines.
+
+**Distinct from:** ExecutionDeadlineAdmissionSupported identifies deadline-credit capability at a prefix boundary; this gate controls exclusive concurrent access to the device forward slot and does not estimate deadline feasibility.
+
+
+### deadlineCacheTicket
+
+Immutable fingerprint-chain and estimated-token snapshot of the original request, carried to an accepted buffered completion for historical cache-usage observation before final socket delivery.
+
+**Distinct from:** FeatureCacheProof binds an accepted vDSO hit to the actual call and served payload. This snapshot only describes historical request input; it neither witnesses current residency nor grants route-bound deadline credit.
+
+
+### withDeadlineCacheObservation
+
+Attaches a fresh original-request deadlineCacheTicket to a derived request context for later accepted buffered-completion observation, without querying historical credit or reserving admission.
+
+**Distinct from:** Unlike deadlineCacheTicket, which stores the snapshot, this function defines the request-context attachment boundary; it does not alter deadline admission or prove delivery.
+
+
+### DeadlineCacheCreditStats
+
+Exported compatibility snapshot of historical credited-admission, credited-token, overrun-denial and misprediction counters; observational-only served routes do not increment credited admissions or tokens.
+
+**Distinct from:** Unlike deadlineCacheTicket, which describes one request for historical recording, this aggregate metric schema is monitoring output and carries no current-residency proof or deadline-credit authority.

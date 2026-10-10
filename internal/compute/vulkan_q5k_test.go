@@ -44,7 +44,7 @@ func TestVulkanQ5KOptionalShaderBundleCompatibility(t *testing.T) {
 		t.Fatalf("os.Executable: %v", err)
 	}
 
-	for _, mode := range []string{"missing", "invalid"} {
+	for _, mode := range []string{"missing", "invalid", "misaligned", "bad_magic", "valid"} {
 		t.Run(mode, func(t *testing.T) {
 			bundleDir := q5KCopyOptionalBundleFixture(t, spirvDir, mode)
 			cmd := sysproc.Command(executable, "-test.run=^TestVulkanQ5KOptionalShaderBundleCompatibility$")
@@ -57,7 +57,7 @@ func TestVulkanQ5KOptionalShaderBundleCompatibility(t *testing.T) {
 }
 
 func q5KOptionalBundleChild(t *testing.T, mode string) {
-	if mode != "missing" && mode != "invalid" {
+	if mode != "missing" && mode != "invalid" && mode != "misaligned" && mode != "bad_magic" && mode != "valid" {
 		t.Fatalf("unknown optional Q5_K bundle child mode %q", mode)
 	}
 	backend, ok := Lookup("vulkan")
@@ -67,6 +67,14 @@ func q5KOptionalBundleChild(t *testing.T, mode string) {
 	v, ok := backend.(*vulkanBackend)
 	if !ok {
 		t.Fatalf("registered Vulkan backend has type %T", backend)
+	}
+	// The positive control is an unchanged real shader from the source bundle,
+	// not a synthetic header presented as an executable module.
+	if mode == "valid" {
+		if !v.SupportsQ5KMatMul() {
+			t.Fatal("unchanged source shader lost optional pipeline support")
+		}
+		return
 	}
 	if v.SupportsQ5KMatMul() {
 		t.Fatalf("Vulkan reported Q5_K support with %s q5k_matmul.spv", mode)
@@ -123,8 +131,18 @@ func q5KCopyOptionalBundleFixture(t *testing.T, sourceDir, mode string) string {
 		if err != nil {
 			t.Fatalf("read source shader %s: %v", entry.Name(), err)
 		}
-		if entry.Name() == "q5k_matmul.spv" && mode == "invalid" {
-			data = []byte{0, 0, 0, 0}
+		if entry.Name() == "q5k_matmul.spv" {
+			switch mode {
+			case "invalid": // Truncated header, preserving the original regression.
+				data = []byte{0, 0, 0, 0}
+			case "misaligned": // Real header, incomplete final word.
+				data = append(data, 0)
+			case "bad_magic": // Complete source module except its magic word.
+				if len(data) < 20 {
+					t.Fatal("source shader lacks a complete header")
+				}
+				clear(data[:4])
+			}
 		}
 		if err := os.WriteFile(filepath.Join(destinationDir, entry.Name()), data, 0o644); err != nil {
 			t.Fatalf("write shader fixture %s: %v", entry.Name(), err)
@@ -229,7 +247,11 @@ const (
 // but the host still pads the allocation to four bytes. The wider cases cover
 // alternating 176-byte block alignment, the Qwen hidden/FFN reduction sizes,
 // output workgroup tails, and P=1/2/4 dispatch.
+// fak-test:runtime integration est=3s lane=optin
 func TestVulkanQ5KMatMulStrix(t *testing.T) {
+	if runVulkanProfileFixture(t) {
+		return
+	}
 	v := vk(t)
 	capability, ok := any(v).(interface{ SupportsQ5KMatMul() bool })
 	if !ok || !capability.SupportsQ5KMatMul() {
@@ -402,4 +424,42 @@ func q5KMaxAbsDelta(got, want []float32) (delta, reference float64) {
 		}
 	}
 	return delta, reference
+}
+
+// TestVulkanSPIRVFramingSourceContract pins the narrow loader precondition without
+// treating a five-word header as a valid shader or claiming semantic validation.
+// fak-test:runtime fast est=1ms lane=default
+func TestVulkanSPIRVFramingSourceContract(t *testing.T) {
+	raw, err := os.ReadFile("vulkan_shim.cpp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	start := strings.Index(source, "static bool spirvModuleFraming(")
+	end := strings.Index(source, "bool buildKernel(")
+	if start < 0 || end <= start {
+		t.Fatal("missing framing guard before shared kernel loader")
+	}
+	guard := source[start:end]
+	for _, clause := range []string{
+		"const std::vector<char>& code",
+		"code.size() < 5 * sizeof(uint32_t)",
+		"code.size() % sizeof(uint32_t) != 0",
+		"std::memcpy(&magic, code.data(), sizeof(magic))",
+		"magic == 0x07230203u || magic == 0x03022307u",
+	} {
+		if !strings.Contains(guard, clause) {
+			t.Errorf("missing framing contract %q", clause)
+		}
+	}
+	loader := source[end:]
+	check := strings.Index(loader, "if (!spirvModuleFraming(code)) return false;")
+	create := strings.Index(loader, "vkCreateShaderModule(")
+	if check < 0 || create < 0 || check >= create {
+		t.Fatal("framing rejection must precede module creation")
+	}
+	if !strings.Contains(loader[check:create], "smi.codeSize = code.size();") ||
+		!strings.Contains(loader[check:create], "smi.pCode = reinterpret_cast<const uint32_t*>(code.data());") {
+		t.Fatal("framing guard must preserve the original shader byte stream")
+	}
 }

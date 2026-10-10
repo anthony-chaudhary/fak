@@ -254,7 +254,7 @@ func TestV41GroupedOutputHostPartialMaterializationFailure(t *testing.T) {
 // fak-test:runtime medium est=2s lane=default
 func TestV41GroupedOutputLateFailureAtomic(t *testing.T) {
 	t.Parallel()
-	for _, site := range []string{"matmul", "read", "length", "finite", "unknown"} {
+	for _, site := range []string{"matmul", "read", "length", "finite", "unknown", "rocm"} {
 		t.Run(site, func(t *testing.T) {
 			t.Parallel()
 			m := v41GroupedFixture(t, "F32", false, false)
@@ -262,6 +262,7 @@ func TestV41GroupedOutputLateFailureAtomic(t *testing.T) {
 			api := &v41GroupedClosedRecorder{v41GroupedBackend: b}
 			s := v41DenseTestSession(t, m, api)
 			s.Prefill([]int{1, 2, 3})
+			selectedCallback := s.v41GroupedOutputFunc()
 			b.live = map[compute.Buffer]bool{}
 			before := captureV41ForwardSnapshot(s.v41Forward)
 			ledgerBefore := v41GroupedPhase(t, m, "decode")
@@ -271,6 +272,8 @@ func TestV41GroupedOutputLateFailureAtomic(t *testing.T) {
 			unknown := struct{ Number int }{13668}
 			if site == "unknown" {
 				b.fault, b.cause = "matmul", unknown
+			} else if site == "rocm" {
+				b.fault, b.cause = "read", errors.New("rocm: read: injected native failure")
 			}
 			var closedFailure *BackendForwardOperationError
 			var recovered any
@@ -278,9 +281,15 @@ func TestV41GroupedOutputLateFailureAtomic(t *testing.T) {
 			if !b.failing {
 				t.Fatal("late grouped B failure injection was never reached")
 			}
-			if site == "unknown" {
-				if recovered != unknown {
+			if site == "unknown" || site == "rocm" {
+				if recovered != b.cause {
 					t.Error("selected grouped operation changed unknown panic identity")
+				}
+				if !errors.As(s.halFailure, &closedFailure) || !s.BackendSessionClosed() {
+					t.Fatal("unclassified grouped failure left Session reusable")
+				}
+				if site == "rocm" && !errors.Is(s.halFailure, b.cause.(error)) {
+					t.Fatal("plain grouped cause identity lost")
 				}
 			} else {
 				err, ok := recovered.(error)
@@ -324,7 +333,7 @@ func TestV41GroupedOutputLateFailureAtomic(t *testing.T) {
 				t.Errorf("late failure transfer accounting=%v actual upload=%d read=%d", delta, upload, read)
 			}
 
-			if site != "unknown" {
+			{
 				callsBefore := api.calls
 				stateBefore := captureV41ForwardSnapshot(s.v41Forward)
 				dataBefore := v41GroupedPhase(t, m, "decode")
@@ -332,22 +341,28 @@ func TestV41GroupedOutputLateFailureAtomic(t *testing.T) {
 				func() { defer func() { repeated = recover() }(); s.Step(4) }()
 				var closed *BackendForwardOperationError
 				err, ok := repeated.(error)
-				if !ok || !errors.As(err, &closed) || closed != closedFailure || !errors.Is(err, ErrV41ForwardStage) {
+				if !ok || !errors.As(err, &closed) || closed != closedFailure || (site != "unknown" && site != "rocm" && !errors.Is(err, ErrV41ForwardStage)) {
 					t.Error("closed public entry changed selected failure identity/cause")
 				}
 				if api.calls != callsBefore {
 					t.Error("closed public entry invoked backend API")
 				}
+				var direct any
+				func() {
+					defer func() { direct = recover() }()
+					_, _, _ = selectedCallback(0, make([]float32, m.Cfg.NumHeads*m.Cfg.HeadDim), m.Cfg.NumHeads, m.Cfg.HeadDim, m.Cfg.OGroups, m.Cfg.OLoraRank, m.Cfg.HiddenSize)
+				}()
+				if direct != closedFailure || api.calls != callsBefore {
+					t.Error("closed grouped callback retried or changed latch")
+				}
+
 				if !reflect.DeepEqual(stateBefore, captureV41ForwardSnapshot(s.v41Forward)) || !reflect.DeepEqual(dataBefore, v41GroupedPhase(t, m, "decode")) {
 					t.Error("closed public entry changed retained state or projection attribution")
 				}
 				if len(b.live) != 0 {
 					t.Error("closed public entry changed transient buffer cleanup")
 				}
-				return
 			}
-			b.fault, b.cause, b.failing = "", nil, false
-			v41GroupedParity(t, s.Step(4), lastLogits(v41GroupedFixture(t, "F32", false, false).Forward([]int{1, 2, 3, 4})), 1e-5)
 		})
 	}
 }
@@ -639,3 +654,103 @@ func (b *v41GroupedClosedRecorder) Read(x compute.Tensor) []float32 {
 	return b.v41GroupedBackend.Read(x)
 }
 func (b *v41GroupedClosedRecorder) Free(x compute.Tensor) { b.calls[3]++; b.v41GroupedBackend.Free(x) }
+
+// A grouped Read may reuse scratch and its tensor Free may poison that storage.
+// All other session operations retain the existing software recorder behavior.
+type v41GroupedBorrowedBackend struct {
+	*v41GroupedBackend
+	borrowed       []float32
+	borrowedBuffer compute.Buffer
+	badLeaf        string
+}
+
+func (b *v41GroupedBorrowedBackend) Read(x compute.Tensor) []float32 {
+	values := b.v41GroupedBackend.Read(x)
+	index, ok := b.outputs[x.Buf()]
+	if !ok {
+		return values
+	}
+	b.borrowed = append(b.borrowed[:0], values...)
+	b.borrowedBuffer = x.Buf()
+	if b.badLeaf == b.grouped[index].leaf && len(b.borrowed) > 0 {
+		b.borrowed[0] = math.MaxFloat32
+	}
+	return b.borrowed
+}
+func (b *v41GroupedBorrowedBackend) Free(x compute.Tensor) {
+	if x.Buf() == b.borrowedBuffer {
+		for i := range b.borrowed {
+			b.borrowed[i] = 123
+		}
+	}
+	b.v41GroupedBackend.Free(x)
+}
+
+// fak-test:runtime medium est=5s lane=default
+func TestV41FullGroupedDeviceBF16AndReadOwnership(t *testing.T) {
+	m := v41GroupedBF16Fixture(t)
+	c := m.Cfg
+	b := &v41GroupedBorrowedBackend{v41GroupedBackend: newV41GroupedBackend(t, m)}
+	s := v41DenseTestSession(t, m, b)
+	input := make([]float32, c.NumHeads*c.HeadDim)
+	input[0], input[1] = 1, 1
+	want := v41GroupedBF16Oracle(input, cpuOracleTensor(t, m, layerName(0, "attn.wo_a.weight")), cpuOracleTensor(t, m, layerName(0, "attn.wo_b.weight")), c.NumHeads, c.HeadDim, c.OGroups, c.OLoraRank, c.HiddenSize)
+	m.v41SetExpertFaultPhase(V41PhasePrefill)
+	defer m.v41SetExpertFaultPhase(V41PhaseUnknown)
+	project := m.v41GroupedOutputProjector(0, c.NumHeads, c.HeadDim, c.OGroups, c.OLoraRank, c.HiddenSize, &v41ProjScratch{groupedOutput: s.v41GroupedOutputFunc()})
+	got, err := project(input)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("grouped BF16 device ownership mismatch err=%v", err)
+	}
+	if got[0] != 1.5 {
+		t.Fatal("device intermediate BF16 missing")
+	}
+	ledger := v41GroupedPhase(t, m, "prefill")
+	joined := c.OGroups * c.OLoraRank
+	if ledger["grouped_output_matmul_calls"] != float64(c.OGroups+1) || ledger["grouped_output_activation_upload_bytes"] != float64(4*(len(input)+joined)) || ledger["grouped_output_readback_bytes"] != float64(4*(joined+c.HiddenSize)) {
+		t.Fatalf("BF16 staging changed transfer ledger=%v", ledger)
+	}
+	_, err = project(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatal("next grouped call changed prior returned output")
+	}
+}
+
+// fak-test:runtime medium est=5s lane=default
+func TestV41FullGroupedDeviceNarrowingFailure(t *testing.T) {
+	for _, leaf := range []string{"a", "b"} {
+		m := v41GroupedBF16Fixture(t)
+		c := m.Cfg
+		b := &v41GroupedBorrowedBackend{v41GroupedBackend: newV41GroupedBackend(t, m), badLeaf: leaf}
+		s := v41DenseTestSession(t, m, b)
+		project := m.v41GroupedOutputProjector(0, c.NumHeads, c.HeadDim, c.OGroups, c.OLoraRank, c.HiddenSize, &v41ProjScratch{groupedOutput: s.v41GroupedOutputFunc()})
+		got, err := project(make([]float32, c.NumHeads*c.HeadDim))
+		var selected *BackendForwardOperationError
+		wantCalls := c.OGroups + 1
+		if leaf == "a" {
+			wantCalls = 1
+		}
+		if got != nil || !errors.As(err, &selected) || selected.Stage != "readback" || selected.Path != "v41-grouped-output" || b.matmulAttempts != wantCalls {
+			t.Fatalf("leaf=%s attempts=%d err=%v", leaf, b.matmulAttempts, err)
+		}
+	}
+}
+
+// fak-test:runtime slow est=20s lane=default
+func TestV41FullGroupedOwnedSessionContinuation(t *testing.T) {
+	m := v41GroupedFixture(t, "F32", true, false)
+	b := &v41GroupedBorrowedBackend{v41GroupedBackend: newV41GroupedBackend(t, m)}
+	s := v41DenseTestSession(t, m, b)
+	ids := []int{1, 2, 3}
+	v41GroupedParity(t, s.Prefill(ids), lastLogits(m.Forward(ids)), 1e-4)
+	if !s.v41IncrementalEligible() {
+		t.Fatal("full grouped fixture did not seed incremental state")
+	}
+	ids = append(ids, 4)
+	v41GroupedParity(t, s.Step(4), lastLogits(m.Forward(ids)), 1e-4)
+	ids = append(ids, 5, 6)
+	v41GroupedParity(t, s.Prefill([]int{5, 6}), lastLogits(m.Forward(ids)), 1e-4)
+}

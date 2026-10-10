@@ -138,7 +138,7 @@ func TestRenderChatMLToolCallHistoryRoundTrips(t *testing.T) {
 		t.Fatalf("assistant tool_call not rendered canonically: %q", got)
 	}
 	// Extract just the assistant turn body and round-trip it through the lift.
-	lifted := LiftTextToolCalls(Message{Role: "assistant", Content: got})
+	lifted := LiftTextToolCalls(Message{Role: "assistant", Content: got}, fixtureOfferedTools())
 	if len(lifted.ToolCalls) != 1 {
 		t.Fatalf("round-trip lift recovered %d calls, want 1\nrendered: %q", len(lifted.ToolCalls), got)
 	}

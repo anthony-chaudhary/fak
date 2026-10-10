@@ -161,6 +161,13 @@ func q4kExpertInputHAL(s *Session, gateName, upName string, xn any, intermediate
 // backends without it retain the host projection clamp. The weights stay
 // compressed and resident, and the caller's down projection consumes a host row.
 func q4kExpertInputHALWithLimit(s *Session, gateName, upName string, xn any, intermediate, hidden int, limit float32) ([]float32, bool) {
+	return q4kExpertInputHALWithLimitAndBF16(s, gateName, upName, xn, intermediate, hidden, limit, false, -1)
+}
+
+// Only the full V4.1 binding selects bf16. Device GEMMs are retained; their
+// outputs are read back, owned and BF16-published before host SwiGLU. The
+// generic wrapper retains its original device activation behavior.
+func q4kExpertInputHALWithLimitAndBF16(s *Session, gateName, upName string, xn any, intermediate, hidden int, limit float32, bf16 bool, layer int) ([]float32, bool) {
 	gateW, gateKey, upW, upKey, x, ok := expertInputDeviceAdmitted(s, gateName, upName, xn, hidden)
 	if !ok {
 		return nil, false
@@ -197,6 +204,32 @@ func q4kExpertInputHALWithLimit(s *Session, gateName, upName string, xn any, int
 	deviceCalls, hostCalls := 0, 0
 	var readbackBytes int64
 	defer func() { s.M.v41NoteExpertActivation(deviceCalls, hostCalls, readbackBytes, opened) }()
+	if bf16 {
+		// Backend Read may return borrowed scratch. Own each result before the
+		// next read or deferred Free can overwrite it.
+		raw := s.Backend.Read(g)
+		readbackBytes += int64(len(raw)) * 4
+		gate, err := v41RoutedBF16(layer, "gate/up", raw, intermediate)
+		if err != nil {
+			panic(err)
+		}
+		raw = s.Backend.Read(u)
+		readbackBytes += int64(len(raw)) * 4
+		up, err := v41RoutedBF16(layer, "gate/up", raw, intermediate)
+		if err != nil {
+			panic(err)
+		}
+		clampSwiGLUProjections(gate, up, limit)
+		fused := make([]float32, intermediate)
+		for i := range fused {
+			fused[i] = silu(gate[i]) * up[i]
+			if !finite32(fused[i]) {
+				panic(v41ExpertOperationErr(layer, "gate/up", errV41ExpertResult))
+			}
+		}
+		hostCalls++
+		return fused, true
+	}
 	limited, haveLimited := s.Backend.(interface {
 		SwiGLUWithLimit(compute.Tensor, compute.Tensor, float32) compute.Tensor
 	})
@@ -244,6 +277,12 @@ func q4kExpertInputHALWithLimit(s *Session, gateName, upName string, xn any, int
 // capability, a biased projection, an unresolvable weight, or a kind the backend
 // cannot serve is a clean (nil,false) decline, never a semantic fallback.
 func q4kExpertDownHAL(s *Session, downName string, fused []float32, intermediate, hidden int) ([]float32, bool) {
+	return q4kExpertDownHALWithBF16(s, downName, fused, intermediate, hidden, false, -1)
+}
+
+// Full V4.1 copies/narrows while the device result is still alive. Generic
+// callers keep their existing return contract and admission unchanged.
+func q4kExpertDownHALWithBF16(s *Session, downName string, fused []float32, intermediate, hidden int, bf16 bool, layer int) ([]float32, bool) {
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
 		len(fused) != intermediate || intermediate <= 0 || hidden <= 0 {
 		return nil, false
@@ -260,6 +299,13 @@ func q4kExpertDownHAL(s *Session, downName string, fused []float32, intermediate
 	out := s.Backend.MatMul(downW, xd)
 	defer s.Backend.Free(out)
 	res := s.Backend.Read(out)
+	if bf16 {
+		owned, err := v41RoutedBF16(layer, "down", res, hidden)
+		if err != nil {
+			panic(err)
+		}
+		return owned, true
+	}
 	if len(res) != hidden {
 		panic("model: device expert down returned wrong hidden size")
 	}

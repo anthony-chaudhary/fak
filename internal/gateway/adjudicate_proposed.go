@@ -668,6 +668,25 @@ func (s *Server) subagentDepthRefusal(ctx context.Context, tool string) (WireVer
 	return WireVerdict{}, false
 }
 
+// withTextToolOffer snapshots this call's pre-prune names. It replaces inherited
+// extensions and never consults another request's client-schema context.
+func withTextToolOffer(ctx context.Context, tools []agent.ToolDef) context.Context {
+	counts := make(map[string]int, len(tools))
+	for _, tool := range tools {
+		counts[tool.Function.Name]++
+	}
+	return agent.WithTextToolExtension(ctx, func(name string) bool {
+		if len(counts) == 0 {
+			return false
+		}
+		if isRestoreTool(name) {
+			return true
+		}
+		target := map[string]string{"read_file": "read", "edit_file": "edit", "write_file": "write"}[name]
+		return target != "" && counts[target] == 1
+	})
+}
+
 type clientToolSchemasContextKey struct{}
 
 func withClientToolSchemas(ctx context.Context, tools []agent.ToolDef) context.Context {

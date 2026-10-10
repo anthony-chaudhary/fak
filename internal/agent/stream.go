@@ -799,6 +799,7 @@ func upstreamStreamsSSE(resp *http.Response) bool {
 }
 
 func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
+	offered := offeredToolsFor(ctx, tools)
 	if !p.StreamingSupported() {
 		return nil, ErrStreamingUnsupported
 	}
@@ -830,7 +831,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		if perr != nil {
 			return nil, fmt.Errorf("planner: %s: %w", call.adapter.Provider(), perr)
 		}
-		comp = normalizeCompletionToolCalls(comp)
+		comp = normalizeCompletionToolCalls(comp, offered)
 		attachProviderReportedCost(comp, raw)
 		if sink != nil && comp.Message.Content != "" {
 			if serr := sink(comp.Message.Content); serr != nil {
@@ -964,7 +965,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		FinishReason: finish,
 		Usage:        usage,
 		Model:        model,
-	})
+	}, offered)
 	comp.Timings = timings
 	attachProviderReportedCost(comp, rawBuf.Bytes())
 	p.attachProviderCacheTelemetry(comp, call.body, call.adapter.Provider())

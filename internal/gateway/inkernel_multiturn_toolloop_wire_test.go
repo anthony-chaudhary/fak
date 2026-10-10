@@ -28,7 +28,7 @@ type multiTurnLiftPlanner struct {
 
 func (p *multiTurnLiftPlanner) Model() string { return "qwen2.5-7b-q8" }
 
-func (p *multiTurnLiftPlanner) Complete(_ context.Context, m []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+func (p *multiTurnLiftPlanner) Complete(_ context.Context, m []agent.Message, tools []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
 	// DecodeAnthropicMessagesRequest turned each inbound Anthropic tool_result block into a
 	// RoleTool message; counting them is how the model "reads the result and calls the next
 	// tool". Without the harness round-trip these counts would never advance past 0.
@@ -54,7 +54,7 @@ func (p *multiTurnLiftPlanner) Complete(_ context.Context, m []agent.Message, _ 
 		// Turn 3: both results are in -> final plain-text answer, no tool call (end_turn).
 		raw = "Both files are present; main.go is the entrypoint."
 	}
-	msg := agent.LiftTextToolCalls(agent.Message{Role: agent.RoleAssistant, Content: raw})
+	msg := agent.LiftTextToolCalls(agent.Message{Role: agent.RoleAssistant, Content: raw}, agent.NewOfferedTools(tools))
 	finish := "stop"
 	if len(msg.ToolCalls) > 0 {
 		finish = "tool_calls"

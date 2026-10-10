@@ -177,3 +177,80 @@ func (s *Session) v41TailRoPEFunc() v41TailRoPEFunc {
 		return qResult, kvResult, nil
 	}
 }
+
+// v41AttentionQKRoPE owns full-graph BF16 publications around the unchanged
+// F32 rotary operation. The source Linear publishes Q in BF16 before rotation;
+// apply_rotary_emb widens for arithmetic then copies back into its original
+// dtype (model.py772 and392-405 at dba1be0a40aa45a94ad051997016db3960a90277).
+// Reduced callers retain their original in-place arithmetic and storage.
+func v41AttentionQKRoPE(cfg Config, layer int, q, kv, cos, sin []float32, heads, headDim, rotaryDim int, rotate v41TailRoPEFunc) ([]float32, []float32, error) {
+	full, err := v41ForwardGeometry(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !full {
+		err = v41TailRoPEInPlace(layer, q, kv, cos, sin, heads, headDim, rotaryDim, rotate)
+		return q, kv, err
+	}
+	width, ok := checkedMulInt(heads, headDim)
+	if !ok || heads <= 0 || headDim <= 0 || rotaryDim <= 0 || rotaryDim%2 != 0 || rotaryDim > headDim || len(q) != width || len(kv) != headDim || len(cos) != rotaryDim/2 || len(sin) != rotaryDim/2 {
+		return nil, nil, v41RoPEPublicationErr(layer, errV41TailRoPEResult)
+	}
+	for i := range cos {
+		if !finite32(cos[i]) || !finite32(sin[i]) {
+			return nil, nil, v41RoPEPublicationErr(layer, errV41TailRoPEResult)
+		}
+	}
+	query, err := v41RoPEBF16Copy(layer, q)
+	if err != nil {
+		return nil, nil, err
+	}
+	key, err := v41RoPEBF16Copy(layer, kv)
+	if err != nil {
+		return nil, nil, err
+	}
+	var qOut, kOut []float32
+	if rotate == nil {
+		if err = v41TailRoPEInPlace(layer, query, key, cos, sin, heads, headDim, rotaryDim, nil); err != nil {
+			return nil, nil, err
+		}
+		qOut, kOut = query, key
+	} else {
+		qOut, kOut, err = rotate(layer, query, key, cos, sin, heads, headDim, rotaryDim)
+		if err != nil {
+			return nil, nil, v41RoPEPublicationErr(layer, err)
+		}
+	}
+	if len(qOut) != width || len(kOut) != headDim {
+		return nil, nil, v41RoPEPublicationErr(layer, errV41TailRoPEResult)
+	}
+	// Both callbacks' outputs may alias their inputs or one another. Neither
+	// original row is written; finish owning both outputs before returning either.
+	query, err = v41RoPEBF16Copy(layer, qOut)
+	if err != nil {
+		return nil, nil, err
+	}
+	key, err = v41RoPEBF16Copy(layer, kOut)
+	if err != nil {
+		return nil, nil, err
+	}
+	return query, key, nil
+}
+
+func v41RoPEPublicationErr(layer int, cause error) error {
+	return &V41TailRoPEOperationError{Layer: layer, Cause: v41StageErr(v41StageAttention, layer, cause)}
+}
+
+func v41RoPEBF16Copy(layer int, values []float32) ([]float32, error) {
+	out := make([]float32, len(values))
+	for i, v := range values {
+		if !finite32(v) {
+			return nil, v41RoPEPublicationErr(layer, errV41TailRoPEResult)
+		}
+		out[i] = v41RoundBF16(v)
+		if !finite32(out[i]) {
+			return nil, v41RoPEPublicationErr(layer, errV41TailRoPEResult)
+		}
+	}
+	return out, nil
+}

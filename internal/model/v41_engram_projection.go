@@ -138,6 +138,7 @@ func (s *Session) v41EngramProjectionFunc() v41EngramProjectionFunc {
 		if !supported {
 			return nil, v41ProjectionDeclined, nil
 		}
+		s.ensureOpenBackendSession()
 		opened := s.M.v41NowNanos()
 		completed, calls := 0, 0
 		var upload, readback int64
@@ -162,6 +163,20 @@ func (s *Session) v41EngramProjectionFunc() v41EngramProjectionFunc {
 						return
 					}
 				}
+				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+					if original, ok := r.(error); ok {
+						err = original
+					}
+					result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
+					return
+				}
+				// ROCm and other backends may panic with a plain error. Retire
+				// the selected session while preserving that panic's identity.
+				err, ok := r.(error)
+				if !ok {
+					err = fmt.Errorf("unclassified backend panic: %v", r)
+				}
+				closeFailure(err)
 				panic(r)
 			}
 		}()

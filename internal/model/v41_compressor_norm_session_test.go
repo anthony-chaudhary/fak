@@ -77,6 +77,11 @@ func TestV41CompressorNormSession(t *testing.T) {
 				if s.v41State().compressorNorm == nil {
 					t.Fatal("qualified session did not bind compressor normalization")
 				}
+				// Malformed IDs still refuse; continuation below must use the
+				// reduced fixture's vocabulary rather than token positions.
+				if err := recoverError(func() { s.Prefill([]int{m.Cfg.VocabSize}) }); !errors.Is(err, ErrV41ForwardStage) || len(s.v41State().history) != 0 || len(b.records) != 0 {
+					t.Fatal("out-of-range token did not refuse before compressor work")
+				}
 				producers := 1
 				check := func(tokens int) {
 					t.Helper()
@@ -144,7 +149,7 @@ func TestV41CompressorNormSession(t *testing.T) {
 					}
 				}
 				b.owner, s = target, target
-				v41CompressorTestFiniteParity(t, target.Prefill([]int{7, 8}), host.Prefill([]int{7, 8}), "restored normalization owner after source close")
+				v41CompressorTestFiniteParity(t, target.Prefill([]int{7, 0}), host.Prefill([]int{7, 0}), "restored normalization owner after source close")
 				check(prefixLength + 5)
 				for _, record := range b.records {
 					if record.weight != cached[record.layer] {
@@ -154,7 +159,7 @@ func TestV41CompressorNormSession(t *testing.T) {
 				calls := len(b.records)
 				target.SetExecutionPolicy(ExecutionPolicyDeviceOnly)
 				var refused *BackendForwardOperationError
-				if err := recoverError(func() { target.Step(9) }); !errors.As(err, &refused) || refused.Path != "device-only" || len(b.records) != calls {
+				if err := recoverError(func() { target.Step(1) }); !errors.As(err, &refused) || refused.Path != "device-only" || len(b.records) != calls {
 					t.Fatal("whole-model DeviceOnly guard invoked compressor normalization")
 				}
 			})

@@ -31,15 +31,16 @@
 //     call does.
 //   - Read/search/process output is BOUNDED and process execution carries a DEADLINE
 //     (limits.go); every engine honors ctx cancellation on entry and mid-walk.
-//   - Side effects are DEFAULT-DENY (policy.go). Read/Grep/Glob are admitted by the
-//     default policy; Write/Edit/Bash are not admitted until an operator policy says so,
-//     and a protected path (.git, .dos) is refused for mutation regardless.
+//   - Tool admission uses an explicit allowlist. DefaultPolicy admits all seven
+//     implemented tools; a narrower policy denies omitted tools. Protected paths
+//     (.git, .dos) are refused for mutation regardless of the allowlist.
 //   - Request/tool identity rides the vDSO cache scope (CallMeta): a mutating tool may
 //     never be tagged readOnlyHint, and a version-bearing Read stays cache-ineligible so
 //     a retry can observe peer filesystem writes. A named principal keys cacheable reads.
 //   - Edit semantics are DETERMINISTIC and create/overwrite is EXPLICIT: an edit whose
 //     old_string matches more than once is refused rather than guessed at, and a Write
-//     over an existing file requires overwrite=true.
+//     over an existing file uses an explicit mode and the required observed version
+//     (which the owned loop can bind after a successful same-run Read).
 //   - No shell is invoked for a non-Bash tool. Grep and Glob are Go walks over
 //     regexp/filepath.Match, never a subprocess; only bash.go imports os/exec, and
 //     TestOnlyBashEngineImportsExec pins that.

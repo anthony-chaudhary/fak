@@ -39,7 +39,7 @@ func (p *mockQwenPlanner) Complete(ctx context.Context, messages []agent.Message
 	message := agent.LiftTextToolCalls(agent.Message{
 		Role:    agent.RoleAssistant,
 		Content: p.output,
-	})
+	}, agent.NewOfferedTools(tools))
 	return &agent.Completion{
 		Message:      message,
 		FinishReason: "stop",
@@ -326,7 +326,7 @@ func TestAnthropicMessagesAPI_MultiTurnToolResult(t *testing.T) {
 				message := agent.LiftTextToolCalls(agent.Message{
 					Role:    agent.RoleAssistant,
 					Content: "Let me check the weather.\n<tool_call>\n{\"name\":\"get_weather\",\"arguments\":{\"city\":\"San Francisco\"}}\n</tool_call>",
-				})
+				}, agent.NewOfferedTools(tools))
 				return &agent.Completion{
 					Message:      message,
 					FinishReason: "stop",
@@ -566,7 +566,7 @@ func TestAnthropicMessagesAPI_NonStreaming(t *testing.T) {
 // is properly lifted into Anthropic tool_use blocks.
 func TestAnthropicMessagesAPI_QwenXMLSyntax(t *testing.T) {
 	raw := "I will inspect the file.\n<tool_call>\n<function=inspect_file>\n<parameter=path>\nmain.go\n</parameter>\n</function>\n</tool_call>"
-	prose, calls := ParseQwenToolCalls(raw)
+	prose, calls := ParseQwenToolCalls(raw, offeredWireNames("inspect_file"))
 
 	if prose != "I will inspect the file." {
 		t.Errorf("prose = %q, want 'I will inspect the file.'", prose)

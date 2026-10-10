@@ -101,6 +101,11 @@ type NativeScheduler struct {
 	// GEMM; twins adopt its KV. inBatchDedup is the opt-in switch (default false keeps
 	// the historical per-lane prefill byte-for-byte). prefixFlightsMu guards lazy init
 	// only; inBatchDedup and inBatchDedupStats are guarded by mu.
+	// Prefix state belongs to this scheduler, including admissions that are
+	// still acquiring their owner when Close returns. Never detach it at Close.
+	prefixStateMu sync.RWMutex
+	prefixState   *nativePrefixState
+
 	prefixFlights     *radixkv.PrefixFlightGroup
 	prefixFlightsMu   sync.Mutex
 	inBatchDedup      bool
@@ -377,6 +382,9 @@ func (s *NativeScheduler) AdmitTokenIDs(ctx context.Context, name string, prompt
 }
 
 func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hint dispatchtick.WaveHint, prep schedPrepare) (abi.EngineRequest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -403,7 +411,12 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 	var logits []float32
 	if prefillChunkTokens == 0 {
 		if s.inBatchDedupEligible(sess, prompt) {
-			logits = s.prefillCoalesced(ctx, sess, prompt)
+			var err error
+			logits, err = s.prefillCoalesced(ctx, sess, prompt)
+			if err != nil {
+				s.closeLaneSession(sess)
+				return nil, err
+			}
 		} else {
 			logits = s.coldPrefillSync(sess, prompt)
 		}
@@ -465,8 +478,14 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 		// run loop; publishing this lane would orphan its request and KV-bearing
 		// session. Reject it and release the freshly created session exactly once.
 		cancel()
-		sess.Close()
+		s.closeLaneSession(sess)
 		return nil, errSchedClosed
+	}
+	if err := ctx.Err(); err != nil {
+		s.mu.Unlock()
+		cancel()
+		s.closeLaneSession(sess)
+		return nil, err
 	}
 	s.seqNo++
 	ln.seqNo = s.seqNo

@@ -45,6 +45,7 @@ type Qwen35MTPDraftSession struct {
 	runtimeErr        error
 	closed            bool
 	vocabFilter       *DraftVocabFilter
+	filterDirty       bool
 	coverageThreshold float32
 }
 
@@ -141,9 +142,16 @@ func (d *Qwen35MTPDraftSession) WithDraftVocabFilterThreshold(subset []int, thre
 }
 
 // SetDraftVocabFilter sets the draft vocabulary filter on the session and its underlying forward head.
+// Updating it after committed processing defers a draft-only rebuild and replay
+// to the next proposal, after any speculative checkpoint has been restored.
 func (d *Qwen35MTPDraftSession) SetDraftVocabFilter(filter *DraftVocabFilter) {
 	if d == nil {
 		return
+	}
+	// Cached logits use the previous projection coordinates. Defer rebuilding
+	// until Propose has restored and released any speculative checkpoint.
+	if len(d.processed) > 0 {
+		d.filterDirty = true
 	}
 	d.vocabFilter = filter
 	if d.forward != nil {
@@ -357,7 +365,7 @@ func (d *Qwen35MTPDraftSession) syncCommitted(committed []int) (err error) {
 			len(committed), qwen35MTPResidentPrefixLen(d.target), len(d.target.targetHiddenTokens),
 		)
 	}
-	if !tokenPrefix(d.processed, committed) {
+	if d.filterDirty || !tokenPrefix(d.processed, committed) {
 		if err := d.recreateForward(); err != nil {
 			return err
 		}
@@ -422,6 +430,7 @@ func (d *Qwen35MTPDraftSession) syncCommitted(committed []int) (err error) {
 	}
 	checkpointActive = false
 	checkpoint.Close()
+	d.filterDirty = false
 	return nil
 }
 

@@ -177,7 +177,12 @@ type UnsupportedBackendForwardError struct {
 	Reason          string
 }
 
+const forwardGenericHAL ForwardPathKind = "generic-hal"
+
 func (e *UnsupportedBackendForwardError) Error() string {
+	if e.Forward == forwardGenericHAL {
+		return fmt.Sprintf("model: backend %q cannot execute forward %q via %q: %s", e.Backend, e.Forward, e.IntendedPath, e.Reason)
+	}
 	return fmt.Sprintf(
 		"model: backend %q cannot execute forward %q via %q: %s; refusing generic QKV/CPU fallback (required deterministic CPU-reference parity cosine >= %.3f; issue #4714)",
 		e.Backend, e.Forward, e.IntendedPath, e.Reason, e.ParityCosineMin,
@@ -190,7 +195,21 @@ func (e *UnsupportedBackendForwardError) Error() string {
 // A nil backend still means the caller selected the legacy CPU/reference path; that path
 // remains admitted and never enters the compute HAL.
 func ValidateBackendForwardConfig(cfg Config, be compute.Backend) error {
-	if be == nil || !cfg.IsQwen35Hybrid() {
+	if be == nil {
+		return nil
+	}
+	if !cfg.IsQwen35Hybrid() {
+		// Prefill/Step select these dedicated forwards before the generic HAL
+		// token loop. Their own normalization/admission contracts remain authoritative.
+		dedicated := cfg.IsDeepSeekV41() || cfg.usesMLAMoELayout() || cfg.isMiniMaxSparseAttn() || cfg.isGemma4()
+		if cfg.LayerNorm && !dedicated {
+			return &UnsupportedBackendForwardError{
+				Backend:      be.Name(),
+				Forward:      forwardGenericHAL,
+				IntendedPath: "compute HAL",
+				Reason:       "LayerNorm requires mean subtraction; the generic HAL supports RMSNorm only (issue #12607)",
+			}
+		}
 		return nil
 	}
 	gdn, ok := be.(Qwen35GDNBackend)

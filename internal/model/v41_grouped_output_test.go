@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"reflect"
 	"testing"
@@ -360,5 +361,205 @@ func TestV41GroupedOutputDefaultExportedLedger(t *testing.T) {
 				t.Errorf("inert %s=%g", key, n)
 			}
 		}
+	}
+}
+
+// Independent source-order oracle for the full leaf. Unlike the legacy oracle,
+// F32 contractions publish BF16 after each group and after the final projection.
+func v41GroupedBF16Oracle(o, a, b []float32, heads, headDim, groups, rank, dim int) []float32 {
+	width := heads * headDim / groups
+	input := make([]float32, len(o))
+	for i, v := range o {
+		input[i] = v41OracleBF16(v)
+	}
+	joined := make([]float32, groups*rank)
+	for g := 0; g < groups; g++ {
+		for r := 0; r < rank; r++ {
+			sum := float32(0)
+			for k := 0; k < width; k++ {
+				sum = float32(sum + input[g*width+k]*a[(g*rank+r)*width+k])
+			}
+			joined[g*rank+r] = v41OracleBF16(sum)
+		}
+	}
+	out := make([]float32, dim)
+	for d := range out {
+		sum := float32(0)
+		for k, v := range joined {
+			sum = float32(sum + b[d*len(joined)+k]*v)
+		}
+		out[d] = v41OracleBF16(sum)
+	}
+	return out
+}
+
+func v41GroupedBF16Fixture(t *testing.T) *Model {
+	t.Helper()
+	m := v41GroupedFixture(t, "F32", true, false)
+	cfg := m.Cfg
+	groupIn := cfg.NumHeads * cfg.HeadDim / cfg.OGroups
+	joined := cfg.OGroups * cfg.OLoraRank
+	a := make([]float32, joined*groupIn)
+	b := make([]float32, cfg.HiddenSize*joined)
+	a[0], a[1] = 1, 1.0/256
+	for d := 0; d < cfg.HiddenSize; d++ {
+		b[d*joined] = 1.5
+		if d%2 != 0 {
+			b[d*joined] = -1.5
+		}
+	}
+	names := map[string][]float32{layerName(0, "attn.wo_a.weight"): a, layerName(0, "attn.wo_b.weight"): b}
+	indexes := map[string]int{}
+	manifest, raw := synthBuildRaw([]synthTensor{{layerName(0, "attn.wo_a.weight"), []int{joined, groupIn}}, {layerName(0, "attn.wo_b.weight"), []int{cfg.HiddenSize, joined}}}, func(name string, _ func() float32) float32 {
+		index := indexes[name]
+		indexes[name]++
+		return names[name][index]
+	})
+	for name, entry := range manifest {
+		entry.Offset += len(m.raw)
+		m.manifest[name] = entry
+	}
+	m.raw = append(m.raw, raw...)
+	return m
+}
+
+// fak-test:runtime medium est=5s lane=default
+func TestV41FullGroupedBF16IntermediateWitness(t *testing.T) {
+	m := v41GroupedBF16Fixture(t)
+	c := m.Cfg
+	input := make([]float32, c.NumHeads*c.HeadDim)
+	input[0], input[1] = 1, 1
+	a := cpuOracleTensor(t, m, layerName(0, "attn.wo_a.weight"))
+	b := cpuOracleTensor(t, m, layerName(0, "attn.wo_b.weight"))
+	want := v41GroupedBF16Oracle(input, a, b, c.NumHeads, c.HeadDim, c.OGroups, c.OLoraRank, c.HiddenSize)
+	if want[0] != 1.5 {
+		t.Fatal("invalid BF16 operand witness")
+	}
+	old, err := V41GroupedOutputProjection(input, a, b, 1, 1, c.NumHeads, c.HeadDim, c.OGroups, c.OLoraRank, c.HiddenSize)
+	if err != nil || v41OracleBF16(old[0]) != 1.5078125 {
+		t.Fatalf("non-discriminating old result=%v err=%v", old, err)
+	}
+	for _, decline := range []bool{false, true} {
+		scratch := &v41ProjScratch{}
+		if decline {
+			scratch.groupedOutput = func(_ int, x []float32, _ int, _ int, _ int, _ int, _ int) ([]float32, v41DenseProjectionOutcome, error) {
+				for i := range x {
+					x[i] = 99
+				}
+				return nil, v41ProjectionDeclined, nil
+			}
+		}
+		got, err := m.v41GroupedOutputProjector(0, c.NumHeads, c.HeadDim, c.OGroups, c.OLoraRank, c.HiddenSize, scratch)(input)
+		if err != nil || !reflect.DeepEqual(got, want) || input[0] != 1 || input[1] != 1 {
+			t.Fatalf("decline=%t got=%v err=%v", decline, got, err)
+		}
+	}
+}
+
+// fak-test:runtime medium est=5s lane=default
+func TestV41FullGroupedHandledPublicationOwnership(t *testing.T) {
+	m := v41GroupedBF16Fixture(t)
+	c := m.Cfg
+	input := make([]float32, c.NumHeads*c.HeadDim)
+	input[0] = 1.00390625
+	borrowed := make([]float32, c.HiddenSize)
+	for i := range borrowed {
+		borrowed[i] = 1.01171875
+	}
+	calls := 0
+	scratch := &v41ProjScratch{groupedOutput: func(_ int, x []float32, _ int, _ int, _ int, _ int, _ int) ([]float32, v41DenseProjectionOutcome, error) {
+		calls++
+		if x[0] != 1 {
+			t.Fatal("grouped input not BF16")
+		}
+		return borrowed, v41ProjectionHandled, nil
+	}}
+	got, err := m.v41GroupedOutputProjector(0, c.NumHeads, c.HeadDim, c.OGroups, c.OLoraRank, c.HiddenSize, scratch)(input)
+	if err != nil || calls != 1 {
+		t.Fatalf("handled calls=%d err=%v", calls, err)
+	}
+	for i := range borrowed {
+		if borrowed[i] != 1.01171875 {
+			t.Fatal("borrowed output changed")
+		}
+		borrowed[i] = 99
+	}
+	for _, v := range got {
+		if v != 1.015625 {
+			t.Fatal("handled output not owned BF16")
+		}
+	}
+	if input[0] != 1.00390625 {
+		t.Fatal("caller input changed")
+	}
+}
+
+// fak-test:runtime medium est=5s lane=default
+func TestV41FullGroupedPublicationFailures(t *testing.T) {
+	m := v41GroupedBF16Fixture(t)
+	c := m.Cfg
+	for _, bad := range []float32{float32(math.NaN()), float32(math.Inf(1)), math.MaxFloat32} {
+		for _, inputBad := range []bool{false, true} {
+			input := make([]float32, c.NumHeads*c.HeadDim)
+			if inputBad {
+				input[0] = bad
+			}
+			calls := 0
+			scratch := &v41ProjScratch{groupedOutput: func(int, []float32, int, int, int, int, int) ([]float32, v41DenseProjectionOutcome, error) {
+				calls++
+				out := make([]float32, c.HiddenSize)
+				out[0] = bad
+				return out, v41ProjectionHandled, nil
+			}}
+			got, err := m.v41GroupedOutputProjector(0, c.NumHeads, c.HeadDim, c.OGroups, c.OLoraRank, c.HiddenSize, scratch)(input)
+			var named *V41ProjectionOperationError
+			leaf := "attn.wo_b.weight"
+			wantCalls := 1
+			if inputBad {
+				leaf = "attn.wo_a.weight"
+				wantCalls = 0
+			}
+			if got != nil || !errors.As(err, &named) || named.Leaf != leaf || calls != wantCalls {
+				t.Fatalf("input=%t calls=%d err=%v", inputBad, calls, err)
+			}
+		}
+	}
+	sentinel := errors.New("selected grouped projection")
+	scratch := &v41ProjScratch{groupedOutput: func(int, []float32, int, int, int, int, int) ([]float32, v41DenseProjectionOutcome, error) {
+		return nil, v41ProjectionError, sentinel
+	}}
+	if _, err := m.v41GroupedOutputProjector(0, c.NumHeads, c.HeadDim, c.OGroups, c.OLoraRank, c.HiddenSize, scratch)(make([]float32, c.NumHeads*c.HeadDim)); !errors.Is(err, sentinel) {
+		t.Fatalf("selected error identity=%v", err)
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestV41FullGroupedBF16GroupIsolation(t *testing.T) {
+	const heads, headDim, groups, rank, dim = 4, 4, 2, 2, 3
+	input := make([]float32, heads*headDim)
+	a := make([]float32, groups*rank*(heads*headDim/groups))
+	b := make([]float32, dim*groups*rank)
+	for i := range input {
+		input[i] = float32(i%5-2) * .25
+	}
+	for i := range a {
+		a[i] = float32(i%7-3) * .125
+	}
+	for i := range b {
+		b[i] = float32(i%3-1) * .5
+	}
+	got, err := v41FullGroupedOutput(0, input, a, b, heads, headDim, groups, rank, dim)
+	want := v41GroupedBF16Oracle(input, a, b, heads, headDim, groups, rank, dim)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("grouped BF16 isolation got=%v want=%v err=%v", got, want, err)
+	}
+	// Moving one group's input must not alter the other group's intermediate.
+	for i := 0; i < heads*headDim/groups; i++ {
+		input[i] = 0
+	}
+	got, err = v41FullGroupedOutput(0, input, a, b, heads, headDim, groups, rank, dim)
+	want = v41GroupedBF16Oracle(input, a, b, heads, headDim, groups, rank, dim)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("masked group output got=%v want=%v err=%v", got, want, err)
 	}
 }

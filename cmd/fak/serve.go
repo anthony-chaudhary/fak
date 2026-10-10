@@ -697,6 +697,20 @@ func cmdServe(argv []string) {
 	rt.startupPhases = append(rt.startupPhases, gateway.StartupPhase{Name: "policy-load", Dur: time.Since(tPolicy)})
 	configureServeToolEngines()
 
+	// Reject corrupt persisted state before starting a delegated child or
+	// initializing compute/loading weights. Restore once, not a preflight reread.
+	// COLD resume (#629): re-attach the persisted drive state of every session BEFORE the
+	// per-boot default-budget seed, so a restart resumes each session at the budget/
+	// priority/run-state/pace it held — not its defaults — while an explicit
+	// --context-budget-tokens on THIS boot still re-seeds the default trace. A STOPPED
+	// session reloads STOPPED with its reason (session.Table.Restore), never silently
+	// resurrected as RUNNING. A missing file is a clean first boot; a present-but-corrupt
+	// file fails loud (a tampered drive record is worse than none).
+	if err := restoreServeSessions(serveSessions, *sf.sessionStatePath); err != nil {
+		fmt.Fprintln(os.Stderr, "fak serve:", err)
+		os.Exit(1)
+	}
+
 	// Start the measured child only after every validation step that can terminate
 	// startup, and immediately before compute selection consumes the model source.
 	if err := rt.maybeStartQwen38Delegation(sf); err != nil {

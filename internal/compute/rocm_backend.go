@@ -210,9 +210,11 @@ func (r *rocmBackend) Upload(t Tensor, as Dtype) Tensor {
 			panic(fmt.Errorf("rocm: Upload f32 payload=%d want=%d", len(f), numel))
 		}
 		out, b := r.tensor(t.Shape, F32, MemoryWeights, false)
-		if len(f) > 0 {
-			rocmCheck(C.frocm_h2d(b.ptr, unsafe.Pointer(&f[0]), C.size_t(b.n)), "upload f32")
-		}
+		finishROCmUpload(b, func() {
+			if len(f) > 0 {
+				rocmCheck(C.frocm_h2d(b.ptr, unsafe.Pointer(&f[0]), C.size_t(b.n)), "upload f32")
+			}
+		}, r.freeBuf)
 		return out
 	case Q8_0:
 		if as != Q8_0 || len(t.Shape) != 2 || t.Quant == nil || t.Quant.Block <= 0 || t.Shape[1]%t.Quant.Block != 0 {
@@ -224,12 +226,9 @@ func (r *rocmBackend) Upload(t Tensor, as Dtype) Tensor {
 		if !scalesOK || !bytesOK || len(codes) != numel || len(scales) != wantScales {
 			panic(fmt.Errorf("rocm: invalid Q8_0 payload codes=%d scales=%d", len(codes), len(scales)))
 		}
-		b := r.alloc(len(codes), MemoryWeights, "upload-q8")
-		b.scales, b.scalesN = r.alloc(scaleBytes, MemoryWeights, "upload-q8-scales").ptr, scaleBytes
-		if len(codes) > 0 {
-			rocmCheck(C.frocm_h2d(b.ptr, unsafe.Pointer(&codes[0]), C.size_t(len(codes))), "upload q8 codes")
-			rocmCheck(C.frocm_h2d(b.scales, unsafe.Pointer(&scales[0]), C.size_t(scaleBytes)), "upload q8 scales")
-		}
+		b := uploadROCmQ8Storage(codes, scales, scaleBytes, r.alloc, func(dst, src unsafe.Pointer, bytes int, site string) {
+			rocmCheck(C.frocm_h2d(dst, src, C.size_t(bytes)), site)
+		}, r.freeBuf)
 		q := *t.Quant
 		q.Scale = nil
 		return makeTensor(r, Q8_0, RowMajor, append([]int(nil), t.Shape...), &q, b)
@@ -244,9 +243,11 @@ func (r *rocmBackend) Upload(t Tensor, as Dtype) Tensor {
 			panic(fmt.Errorf("rocm: %s payload=%d want=%d", t.Dtype, len(raw), want))
 		}
 		b := r.alloc(want, MemoryWeights, "upload-"+t.Dtype.String())
-		if want > 0 {
-			rocmCheck(C.frocm_h2d(b.ptr, unsafe.Pointer(&raw[0]), C.size_t(want)), "upload "+t.Dtype.String())
-		}
+		finishROCmUpload(b, func() {
+			if want > 0 {
+				rocmCheck(C.frocm_h2d(b.ptr, unsafe.Pointer(&raw[0]), C.size_t(want)), "upload "+t.Dtype.String())
+			}
+		}, r.freeBuf)
 		q := *t.Quant
 		return makeTensor(r, t.Dtype, RowMajor, append([]int(nil), t.Shape...), &q, b)
 	default:
@@ -255,6 +256,72 @@ func (r *rocmBackend) Upload(t Tensor, as Dtype) Tensor {
 }
 
 func (r *rocmBackend) Host(t Tensor) ([]float32, bool) { return hostF32(t) }
+
+// finishROCmUpload protects the single unpublished allocation in the F32 and
+// packed K-quant upload arms. The caller holds rocmMu and retains ownership on
+// success. A transfer failure attempts release before rethrowing the exact cause;
+// a secondary native Free failure cannot replace the established upload failure.
+func finishROCmUpload(owned *rocmBuf, transfer func(), release func(*rocmBuf)) {
+	defer func() {
+		if primary := recover(); primary != nil {
+			func() {
+				defer func() { _ = recover() }()
+				release(owned)
+			}()
+			panic(primary)
+		}
+	}()
+	transfer()
+}
+
+// uploadROCmQ8Storage owns the two unpublished Q8 allocations until both H2D
+// operations succeed. Upload holds rocmMu and validates payload sizes first.
+// Injected operations make failure ownership testable without global/native hooks.
+func uploadROCmQ8Storage(codes []int8, scales []float32, scaleBytes int,
+	allocate func(int, MemoryClass, string) *rocmBuf,
+	upload func(unsafe.Pointer, unsafe.Pointer, int, string),
+	release func(*rocmBuf),
+) *rocmBuf {
+	var data, scale *rocmBuf
+	committed := false
+	defer func() {
+		primary := recover()
+		if committed {
+			return
+		}
+		var cleanupPanic any
+		for _, owned := range []*rocmBuf{scale, data} {
+			if owned == nil {
+				continue
+			}
+			func() {
+				defer func() {
+					if failure := recover(); failure != nil && cleanupPanic == nil {
+						cleanupPanic = failure
+					}
+				}()
+				release(owned)
+			}()
+		}
+		if primary != nil {
+			panic(primary)
+		}
+		if cleanupPanic != nil {
+			panic(cleanupPanic)
+		}
+	}()
+	data = allocate(len(codes), MemoryWeights, "upload-q8")
+	scale = allocate(scaleBytes, MemoryWeights, "upload-q8-scales")
+	// Preserve the existing zero-element contract: both minimal allocations
+	// exist, but neither empty host slice is indexed or transferred.
+	if len(codes) > 0 {
+		upload(data.ptr, unsafe.Pointer(&codes[0]), len(codes), "upload q8 codes")
+		upload(scale.ptr, unsafe.Pointer(&scales[0]), scaleBytes, "upload q8 scales")
+	}
+	data.scales, data.scalesN = scale.ptr, scaleBytes
+	committed = true
+	return data
+}
 
 func (r *rocmBackend) Read(t Tensor) []float32 {
 	rocmMu.Lock()
@@ -296,19 +363,14 @@ func (r *rocmBackend) CloneTensor(t Tensor) (Tensor, error) {
 	rocmMu.Lock()
 	defer rocmMu.Unlock()
 	b := r.deviceBuf(t, "CloneTensor")
-	d := r.alloc(b.n, b.class, "clone")
-	if C.frocm_d2d(d.ptr, b.ptr, C.size_t(b.n)) != 0 {
-		err := rocmLastError("clone")
-		r.freeBuf(d)
-		return Tensor{}, err
-	}
-	if b.scalesN > 0 {
-		d.scales, d.scalesN = r.alloc(b.scalesN, b.class, "clone-scales").ptr, b.scalesN
-		if C.frocm_d2d(d.scales, b.scales, C.size_t(b.scalesN)) != 0 {
-			err := rocmLastError("clone scales")
-			r.freeBuf(d)
-			return Tensor{}, err
+	d, err := cloneROCmStorage(b, r.alloc, func(dst, src unsafe.Pointer, bytes int, site string) error {
+		if C.frocm_d2d(dst, src, C.size_t(bytes)) != 0 {
+			return rocmLastError(site)
 		}
+		return nil
+	}, r.freeBuf)
+	if err != nil {
+		return Tensor{}, err
 	}
 	out := t
 	out.Shape, out.buf = append([]int(nil), t.Shape...), d
@@ -318,6 +380,59 @@ func (r *rocmBackend) CloneTensor(t Tensor) (Tensor, error) {
 		out.Quant = &q
 	}
 	return out, nil
+}
+
+// cloneROCmStorage is the exception-safe ownership portion of CloneTensor. Its
+// only production caller holds rocmMu; the supplied operations are the existing
+// native allocation/copy/free methods, not mutable process-global hooks.
+// Auxiliary storage stays independently owned until both copies succeed, so a
+// failed cleanup of either allocation cannot prevent attempting the other.
+func cloneROCmStorage(source *rocmBuf,
+	allocate func(int, MemoryClass, string) *rocmBuf,
+	copyDevice func(unsafe.Pointer, unsafe.Pointer, int, string) error,
+	release func(*rocmBuf),
+) (result *rocmBuf, cause error) {
+	var data, scales *rocmBuf
+	committed := false
+	defer func() {
+		primary := recover()
+		if committed {
+			return
+		}
+		var cleanupPanic any
+		for _, owned := range []*rocmBuf{scales, data} {
+			if owned == nil {
+				continue
+			}
+			func() {
+				defer func() {
+					if failure := recover(); failure != nil && cleanupPanic == nil {
+						cleanupPanic = failure
+					}
+				}()
+				release(owned)
+			}()
+		}
+		if primary != nil {
+			panic(primary)
+		}
+		if cause == nil && cleanupPanic != nil {
+			panic(cleanupPanic)
+		}
+	}()
+	data = allocate(source.n, source.class, "clone")
+	if err := copyDevice(data.ptr, source.ptr, source.n, "clone"); err != nil {
+		return nil, err
+	}
+	if source.scalesN > 0 {
+		scales = allocate(source.scalesN, source.class, "clone-scales")
+		if err := copyDevice(scales.ptr, source.scales, source.scalesN, "clone scales"); err != nil {
+			return nil, err
+		}
+		data.scales, data.scalesN = scales.ptr, source.scalesN
+	}
+	committed = true
+	return data, nil
 }
 
 func (r *rocmBackend) Recycle() {
@@ -432,6 +547,43 @@ func (r *rocmBackend) SwiGLU(gate, up Tensor) Tensor {
 	return y
 }
 
+// SwiGLUWithLimit exposes the optional asymmetric clamp operation to existing
+// model consumers. Inputs remain resident and unchanged; output is owned F32.
+func (r *rocmBackend) SwiGLUWithLimit(gate, up Tensor, limit float32) Tensor {
+	if limit <= 0 || math.IsNaN(float64(limit)) || math.IsInf(float64(limit), 0) {
+		panic(fmt.Errorf("rocm: limited swiglu requires finite positive limit"))
+	}
+	rocmMu.Lock()
+	defer rocmMu.Unlock()
+	gb, ub := requireF32Owned(r, gate, "limited swiglu gate"), requireF32Owned(r, up, "limited swiglu up")
+	gn, gok := checkedTensorNumel(gate.Shape)
+	un, uok := checkedTensorNumel(up.Shape)
+	if !gok || !uok || gn <= 0 || gn != un || len(gate.Shape) != len(up.Shape) || gate.Layout != RowMajor || up.Layout != RowMajor {
+		panic(fmt.Errorf("rocm: limited swiglu requires matching nonempty row-major shapes"))
+	}
+	for i := range gate.Shape {
+		if gate.Shape[i] != up.Shape[i] {
+			panic(fmt.Errorf("rocm: limited swiglu shapes differ"))
+		}
+	}
+	n := rocmDim(gn, "limited swiglu elements")
+	y, yb := r.tensor(gate.Shape, F32, MemoryScratchpad, true)
+	if C.frocm_swiglu_limit_f32((*C.float)(gb.ptr), (*C.float)(ub.ptr), (*C.float)(yb.ptr), n, C.float(limit)) != 0 {
+		cause := rocmLastError("limited swiglu")
+		// Capture the launch/stream error before another ABI call overwrites it.
+		// Already under rocmMu: do not call Free, which would acquire it again.
+		if C.frocm_free(yb.ptr) == 0 {
+			atomic.StoreUint32(&yb.freed, 1)
+			yb.ptr = nil
+		} else {
+			// Retain the transient allocation for normal session cleanup to retry.
+			cause = fmt.Errorf("%w; output cleanup: %v", cause, rocmLastError("free limited swiglu output"))
+		}
+		panic(cause)
+	}
+	return y
+}
+
 func (r *rocmBackend) AddInPlace(dst, src Tensor) {
 	rocmMu.Lock()
 	defer rocmMu.Unlock()
@@ -464,6 +616,7 @@ func (r *rocmBackend) Attention(q Tensor, store KVStore, layer int, causal bool,
 	if !ok || kv == nil || kv.be != r || layer < 0 || layer >= kv.cfg.NumLayers || grp <= 0 {
 		panic(fmt.Errorf("rocm: invalid attention KV store or geometry"))
 	}
+	kv.ensureUsable()
 	hd, nKV := kv.cfg.HeadDim, kv.cfg.NumKVHeads
 	if grp > int(^uint(0)>>1)/nKV {
 		panic(fmt.Errorf("rocm: attention head geometry overflows"))

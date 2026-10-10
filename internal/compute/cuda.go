@@ -526,6 +526,15 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 		store = Q8_0
 	}
 	f := hb.F32()
+	// Q8 narrowing and both native matmul routes require complete row blocks.
+	// Validate before cache lookup: equal-Numel reshapes must not bypass this.
+	// Keep the existing empty-host upload policy and separate rank validation.
+	if store == Q8_0 && len(f) > 0 && len(t.Shape) == 2 && t.Shape[1]%q8DeviceBlock != 0 {
+		panic(&CUDAOpError{
+			Op: "Upload", Site: "upload-q8", Class: MemoryWeights,
+			Msg: "cuda Upload(_, Q8_0) needs in divisible by " + itoaC(q8DeviceBlock),
+		})
+	}
 	var hp uintptr
 	if len(f) > 0 && len(t.Shape) >= 2 {
 		hp = uintptr(unsafe.Pointer(&f[0]))
@@ -765,13 +774,59 @@ func (c *cudaBackend) uploadQ2Resident(t Tensor, hb HostBuffer) Tensor {
 // QuantSpec{Block} so the GEMM reconstructs nblk = in/block. Uses dev-family weight allocs so the
 // resident-weight cache is never recycled out from under it.
 func (c *cudaBackend) devQ2(shape []int, block, nScales int) (Tensor, *cudaBuf) {
+	return c.devQ2WithOperations(shape, block, nScales, c.dallocWeight,
+		func(bytes int) *cudaBuf { return c.dallocClass(bytes, MemoryWeights, "q2-scale") },
+		func(ptr unsafe.Pointer) { C.fcuda_free(ptr) },
+	)
+}
+
+// devQ2WithOperations runs under the upload owner's cudaMu. It owns both
+// allocations until Tensor construction succeeds. Only the code allocation has
+// placement charges under the existing CUDA policy; scales remain uncharged.
+// This transaction ends before H2D and upload-cache publication.
+func (c *cudaBackend) devQ2WithOperations(shape []int, block, nScales int, allocateCodes, allocateScales func(int) *cudaBuf, release func(unsafe.Pointer)) (Tensor, *cudaBuf) {
 	out, in := shape[0], shape[1]
-	buf := c.dallocWeight(out * in / 4) // 2-bit codes, 4 per byte
-	scales := c.dallocClass(nScales*4, MemoryWeights, "q2-scale")
+	var owners [2]*cudaBuf
+	published := false
+	defer func() {
+		if published {
+			return
+		}
+		for i, owner := range owners {
+			if owner == nil {
+				continue
+			}
+			ptr := owner.ptr
+			owner.ptr = nil
+			if i == 0 {
+				c.dlUsed -= owner.budgetedWeightBytes
+				owner.budgetedWeightBytes = 0
+				if owner.managedWeight {
+					c.managedN--
+					owner.managedWeight = false
+				}
+				owner.scales = nil
+				owner.scalesN = 0
+			}
+			if ptr != nil {
+				func() {
+					// Preserve the original construction panic and attempt the
+					// other owned allocation even if cleanup itself panics.
+					defer func() { _ = recover() }()
+					release(ptr)
+				}()
+			}
+		}
+	}()
+	owners[0] = allocateCodes(out * in / 4) // packed 2-bit codes, four per byte
+	owners[1] = allocateScales(nScales * 4)
+	buf, scales := owners[0], owners[1]
 	buf.scales = scales.ptr
 	buf.scalesN = scales.n
 	q := &QuantSpec{Block: block, Axis: 2, Bits: 2, Symmetric: true}
-	return makeTensor(c, Q2_0, RowMajor, append([]int(nil), shape...), q, buf), buf
+	result := makeTensor(c, Q2_0, RowMajor, append([]int(nil), shape...), q, buf)
+	published = true
+	return result, buf
 }
 
 // uploadQ4K copies raw Q4_K super-block bytes resident (#485). The host tensor carries the bytes
@@ -803,13 +858,59 @@ func (c *cudaBackend) uploadRawKQuant(t Tensor, hb HostBuffer) Tensor {
 // GEMM kernel reconstructs nblk = in/block. Weights use dev-family allocs, never devTr, so the
 // resident-weight cache is never recycled out from under them.
 func (c *cudaBackend) devQ8(shape []int, block, nScales int) (Tensor, *cudaBuf) {
+	return c.devQ8WithOperations(shape, block, nScales, c.dallocWeight,
+		func(bytes int) *cudaBuf { return c.dallocClass(bytes, MemoryWeights, "q8-scale") },
+		func(ptr unsafe.Pointer) { C.fcuda_free(ptr) },
+	)
+}
+
+// devQ8WithOperations runs under the upload owner's cudaMu. It owns both
+// allocations until Tensor construction succeeds. Only the code allocation has
+// placement charges under the existing CUDA policy; scales remain uncharged.
+// This transaction ends before H2D and upload-cache publication.
+func (c *cudaBackend) devQ8WithOperations(shape []int, block, nScales int, allocateCodes, allocateScales func(int) *cudaBuf, release func(unsafe.Pointer)) (Tensor, *cudaBuf) {
 	out, in := shape[0], shape[1]
-	buf := c.dallocWeight(out * in) // int8 codes, 1 byte each
-	scales := c.dallocClass(nScales*4, MemoryWeights, "q8-scale")
+	var owners [2]*cudaBuf
+	published := false
+	defer func() {
+		if published {
+			return
+		}
+		for i, owner := range owners {
+			if owner == nil {
+				continue
+			}
+			ptr := owner.ptr
+			owner.ptr = nil
+			if i == 0 {
+				c.dlUsed -= owner.budgetedWeightBytes
+				owner.budgetedWeightBytes = 0
+				if owner.managedWeight {
+					c.managedN--
+					owner.managedWeight = false
+				}
+				owner.scales = nil
+				owner.scalesN = 0
+			}
+			if ptr != nil {
+				func() {
+					// Preserve the original construction panic and attempt the
+					// other owned allocation even if cleanup itself panics.
+					defer func() { _ = recover() }()
+					release(ptr)
+				}()
+			}
+		}
+	}()
+	owners[0] = allocateCodes(out * in) // int8 codes, 1 byte each
+	owners[1] = allocateScales(nScales * 4)
+	buf, scales := owners[0], owners[1]
 	buf.scales = scales.ptr
 	buf.scalesN = scales.n
 	q := &QuantSpec{Block: block, Axis: 2, Bits: 8, Symmetric: true}
-	return makeTensor(c, Q8_0, RowMajor, append([]int(nil), shape...), q, buf), buf
+	result := makeTensor(c, Q8_0, RowMajor, append([]int(nil), shape...), q, buf)
+	published = true
+	return result, buf
 }
 
 // devQ4K allocates a resident Q4_K weight: a single nbytes-long uint8 buffer holding the raw GGUF
@@ -840,7 +941,10 @@ func (c *cudaBackend) uploadF16(t Tensor, hb HostBuffer, f []float32, hp uintptr
 	if len(f) == 0 {
 		return out
 	}
-	stage := c.dallocClass(len(f)*4, MemoryScratchpad, "f16-stage")
+	stage := c.allocateF16UploadStage(buf, len(f)*4,
+		func(bytes int) *cudaBuf { return c.dallocClass(bytes, MemoryScratchpad, "f16-stage") },
+		func(ptr unsafe.Pointer) { C.fcuda_free(ptr) },
+	)
 	C.fcuda_h2d(stage.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
 	if t.Layout == ColMajor && len(t.Shape) == 2 {
 		C.fcuda_f32_to_f16_T(buf.ptr, (*C.float)(stage.ptr), C.int(t.Shape[0]), C.int(t.Shape[1]))
@@ -852,6 +956,37 @@ func (c *cudaBackend) uploadF16(t Tensor, hb HostBuffer, f []float32, hp uintptr
 	buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, F16, t.Layout
 	uploadCache[ucKey{hp, F16, t.Layout}] = out
 	return out
+}
+
+// allocateF16UploadStage owns the unpublished destination only while the scratch
+// allocation is pending. Caller holds cudaMu. A failed allocation must not strand
+// the destination or its logical placement charge. H2D, conversion, stage release
+// and upload-cache publication occur after this boundary and are unchanged.
+func (c *cudaBackend) allocateF16UploadStage(dst *cudaBuf, bytes int, allocate func(int) *cudaBuf, release func(unsafe.Pointer)) *cudaBuf {
+	allocated := false
+	defer func() {
+		if allocated {
+			return
+		}
+		ptr := dst.ptr
+		dst.ptr = nil
+		c.dlUsed -= dst.budgetedWeightBytes
+		dst.budgetedWeightBytes = 0
+		if dst.managedWeight {
+			c.managedN--
+			dst.managedWeight = false
+		}
+		if ptr != nil {
+			func() {
+				// Cleanup is best effort and must preserve the allocation panic.
+				defer func() { _ = recover() }()
+				release(ptr)
+			}()
+		}
+	}()
+	stage := allocate(bytes)
+	allocated = true
+	return stage
 }
 
 // Host returns a host-addressable f32 view only for a host-resident tensor; a device
@@ -893,6 +1028,8 @@ func (c *cudaBackend) Read(t Tensor) []float32 {
 // uses the backend stream rather than Download+Upload: prefix-cache hits must not cross
 // the PCIe/host boundary merely to fork recurrent state.
 func (c *cudaBackend) CloneTensor(t Tensor) (Tensor, error) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
 	b, ok := t.buf.(*cudaBuf)
 	if !ok || b == nil || b.ptr == nil {
 		return Tensor{}, fmt.Errorf("cuda: CloneTensor requires a live cuda tensor")

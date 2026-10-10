@@ -193,7 +193,9 @@ const (
 // receives the routed expert's layer stem and the normalized input, and reports
 // one of the closed v41ExpertGateUpOutcome values. On v41GateUpHandled it returns
 // the I-wide fused intermediate from device gate/up projections and the
-// configured SwiGLU activation, sized to the expert intermediate width.
+// configured SwiGLU activation, sized to the expert intermediate width. Full
+// V4.1 bindings publish BF16 gate/up operands before F32 host SwiGLU; the
+// returned intermediate remains F32 until its caller applies the route weight.
 type v41ExpertGateUpFunc func(layer int, stem string, xn []float32) ([]float32, v41ExpertGateUpOutcome, error)
 
 // v41ExpertDownOutcome is the closed result vocabulary of one v41ExpertDownFunc
@@ -222,6 +224,8 @@ const (
 // expert's layer stem and the I-wide fused intermediate the gate/up seam
 // produced, and reports one of the closed v41ExpertDownOutcome values. On
 // v41DownHandled it returns the H-wide expert output computed on the backend.
+// Full V4.1 supplies the already-weighted BF16 operand and owns a BF16 result
+// before the device tensor is freed; reduced bindings retain their F32 contract.
 type v41ExpertDownFunc func(layer int, stem string, fused []float32) ([]float32, v41ExpertDownOutcome, error)
 
 func (st *v41ForwardState) attentionState(headDim, ratioCap int, indexHeadDim ...int) (*V41AttentionState, error) {
@@ -730,7 +734,8 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// fault. Captured here because the RoPE just below rotates `kv` in place.
 		trace.record(l, t, v41TraceStageKVLatent, kv)
 		cos, sin := v41RopeTableForLayer(cfg, l, t)
-		if err := v41TailRoPEInPlace(l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE); err != nil {
+		q, kv, err = v41AttentionQKRoPE(cfg, l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE)
+		if err != nil {
 			return err
 		}
 		qHeads[t] = q
@@ -923,7 +928,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			if err != nil {
 				return v41StageErr(v41StageAttention, l, err)
 			}
-			v41InverseAttentionOutputInPlace(cfg, l, t, o, nH, hd)
+			o, err = v41AttentionOutputForProjection(cfg, l, t, o, nH, hd)
+			if err != nil {
+				return err
+			}
 			projected, err := projectOutput(o)
 			if err != nil {
 				return v41StageErr(v41StageAttention, l, err)
@@ -955,7 +963,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)
 		}
-		v41InverseAttentionOutputInPlace(cfg, l, t, o, nH, hd)
+		o, err = v41AttentionOutputForProjection(cfg, l, t, o, nH, hd)
+		if err != nil {
+			return err
+		}
 		projected, err := projectOutput(o)
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)
@@ -1011,7 +1022,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return err
 		}
-		picks, err := v41Route(routerLogits, gateBias, routeCfg)
+		picks, err := v41RouteForGeometry(routerLogits, gateBias, routeCfg, full)
 		if err != nil {
 			return v41StageErr(v41StageMoE, l, err)
 		}
@@ -1053,6 +1064,28 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		for t := 0; t < seq; t++ {
 			xn := ffnInputs[t]
 			routed := make([]float32, H)
+			if full {
+				outputs := make([][]float32, len(perTokenPicks[t]))
+				var gateUp v41ExpertGateUpFunc
+				var down v41ExpertDownFunc
+				if st != nil {
+					gateUp, down = st.expertGateUp, st.expertDown
+				}
+				for slot, pick := range perTokenPicks[t] {
+					stem := "ffn.experts." + itoa(pick.expert)
+					outputs[slot], err = m.v41FullRoutedExpert(l, stem, xn, pick.weight, cfg, gateUp, down,
+						func() ([]float32, []float32, []float32, error) { return m.v41ExpertTripleInto(l, stem, scratch, true) },
+						func() ([]float32, error) { return m.hostExpertDown(l, stem, scratch) }, seq > 1)
+					if err != nil {
+						return err
+					}
+				}
+				routedByToken[t], err = v41FullRoutedSum(l, perTokenPicks[t], outputs, H)
+				if err != nil {
+					return err
+				}
+				continue
+			}
 			for _, pick := range perTokenPicks[t] {
 				stem := "ffn.experts." + itoa(pick.expert)
 				// #13358: offer the pick to the session's optional device gate/up
@@ -1199,8 +1232,17 @@ func (m *Model) v41HeadWithFinalNorm(x []float32, project v41DenseProjectionFunc
 		return nil, v41StageErr(v41StageHead, -1,
 			fmt.Errorf("%w: no lm_head.weight and no tied embedding", ErrV41ForwardStage))
 	}
+	full, err := v41ForwardGeometry(m.Cfg)
+	if err != nil {
+		return nil, err
+	}
 	var xf []float32
-	if normalize == nil {
+	if full {
+		xf, err = m.v41FullFinalNorm(x, normalize)
+		if err != nil {
+			return nil, err
+		}
+	} else if normalize == nil {
 		xf = m.finalNorm(x)
 	} else {
 		var err error
@@ -1233,6 +1275,48 @@ func (m *Model) v41HeadWithFinalNorm(x []float32, project v41DenseProjectionFunc
 	}
 	logitScaleInPlace(logits, m.Cfg)
 	return logits, nil
+}
+
+// v41FullFinalNorm owns the reference's BF16 -> learned F32 RMSNorm -> BF16
+// boundary before ParallelHead widens to F32. The callback itself remains F32;
+// generic norm flags belong to the reduced compatibility path, not this graph.
+func (m *Model) v41FullFinalNorm(input []float32, normalize v41FinalNormFunc) ([]float32, error) {
+	fail := func(cause error) error {
+		return &V41ProjectionOperationError{Layer: -1, Leaf: "model.norm.weight", Stage: string(v41StageFinalNorm), Cause: v41StageErr(v41StageFinalNorm, -1, cause)}
+	}
+	gain := m.tensor("model.norm.weight")
+	eps := float32(m.Cfg.RMSNormEps)
+	if len(input) == 0 || len(input) != m.Cfg.HiddenSize || len(gain) != len(input) || !finite32(eps) || eps <= 0 {
+		return nil, fail(errV41ProjectionResult)
+	}
+	staged := make([]float32, len(input))
+	for i, value := range input {
+		staged[i] = v41RoundBF16(value)
+		if !finite32(value) || !finite32(staged[i]) || !finite32(gain[i]) {
+			return nil, fail(errV41ProjectionResult)
+		}
+	}
+	var values []float32
+	if normalize == nil {
+		values = rmsnorm(staged, gain, eps)
+	} else {
+		var err error
+		values, err = normalize(staged)
+		if err != nil {
+			return nil, fail(err)
+		}
+	}
+	if len(values) != len(input) {
+		return nil, fail(errV41ProjectionResult)
+	}
+	out := make([]float32, len(values))
+	for i, value := range values {
+		out[i] = v41RoundBF16(value)
+		if !finite32(value) || !finite32(out[i]) {
+			return nil, fail(errV41ProjectionResult)
+		}
+	}
+	return out, nil
 }
 
 // ---- session entry points --------------------------------------------------
@@ -1788,10 +1872,51 @@ func (s *Session) v41ExpertGateUpFunc() v41ExpertGateUpFunc {
 		return nil
 	}
 	cfg := s.M.Cfg
-	return func(layer int, stem string, xn []float32) ([]float32, v41ExpertGateUpOutcome, error) {
+	full, geometryErr := v41ForwardGeometry(cfg)
+	return func(layer int, stem string, xn []float32) (result []float32, outcome v41ExpertGateUpOutcome, cause error) {
+		s.ensureOpenBackendSession()
+		closeFailure := func(err error) error {
+			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-routed-expert", Layer: layer, Stage: "gate/up", Cause: err}
+			s.halFailure = closed
+			s.Close()
+			return closed
+		}
+		// Admission resolves and stages native expert weights, so its failures
+		// belong to this selected callback just like GEMM and readback failures.
+		defer func() {
+			if r := recover(); r != nil {
+				if err, ok := r.(error); ok {
+					var closed *BackendForwardOperationError
+					if errors.As(err, &closed) {
+						panic(r)
+					}
+					var backend *compute.BackendError
+					if errors.As(err, &backend) {
+						result, outcome, cause = nil, v41GateUpError, closeFailure(err)
+						return
+					}
+				}
+				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+					if original, ok := r.(error); ok {
+						err = original
+					}
+					result, outcome, cause = nil, v41GateUpError, closeFailure(err)
+					return
+				}
+				err, ok := r.(error)
+				if !ok {
+					err = fmt.Errorf("unclassified backend panic: %v", r)
+				}
+				closeFailure(err)
+				panic(r)
+			}
+		}()
+		if geometryErr != nil {
+			return nil, v41GateUpError, geometryErr
+		}
 		gateName := layerName(layer, stem+".w1.weight")
 		upName := layerName(layer, stem+".w3.weight")
-		out, ok := q4kExpertInputHALWithLimit(s, gateName, upName, xn, cfg.MoEIntermediateSize, cfg.HiddenSize, float32(cfg.SwigluLimit))
+		out, ok := q4kExpertInputHALWithLimitAndBF16(s, gateName, upName, xn, cfg.MoEIntermediateSize, cfg.HiddenSize, float32(cfg.SwigluLimit), full, layer)
 		if !ok {
 			return nil, v41GateUpDeclined, nil
 		}
@@ -1813,9 +1938,50 @@ func (s *Session) v41ExpertDownFunc() v41ExpertDownFunc {
 		return nil
 	}
 	cfg := s.M.Cfg
-	return func(layer int, stem string, fused []float32) ([]float32, v41ExpertDownOutcome, error) {
+	full, geometryErr := v41ForwardGeometry(cfg)
+	return func(layer int, stem string, fused []float32) (result []float32, outcome v41ExpertDownOutcome, cause error) {
+		s.ensureOpenBackendSession()
+		closeFailure := func(err error) error {
+			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-routed-expert", Layer: layer, Stage: "down", Cause: err}
+			s.halFailure = closed
+			s.Close()
+			return closed
+		}
+		// Admission resolves and stages native expert weights, so its failures
+		// belong to this selected callback just like GEMM and readback failures.
+		defer func() {
+			if r := recover(); r != nil {
+				if err, ok := r.(error); ok {
+					var closed *BackendForwardOperationError
+					if errors.As(err, &closed) {
+						panic(r)
+					}
+					var backend *compute.BackendError
+					if errors.As(err, &backend) {
+						result, outcome, cause = nil, v41DownError, closeFailure(err)
+						return
+					}
+				}
+				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+					if original, ok := r.(error); ok {
+						err = original
+					}
+					result, outcome, cause = nil, v41DownError, closeFailure(err)
+					return
+				}
+				err, ok := r.(error)
+				if !ok {
+					err = fmt.Errorf("unclassified backend panic: %v", r)
+				}
+				closeFailure(err)
+				panic(r)
+			}
+		}()
+		if geometryErr != nil {
+			return nil, v41DownError, geometryErr
+		}
 		downName := layerName(layer, stem+".w2.weight")
-		out, ok := q4kExpertDownHAL(s, downName, fused, cfg.MoEIntermediateSize, cfg.HiddenSize)
+		out, ok := q4kExpertDownHALWithBF16(s, downName, fused, cfg.MoEIntermediateSize, cfg.HiddenSize, full, layer)
 		if !ok {
 			return nil, v41DownDeclined, nil
 		}

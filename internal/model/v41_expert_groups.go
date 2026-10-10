@@ -126,6 +126,9 @@ var v41ForceTokenMajor bool
 // zero value keeps the production budget; no non-test path sets it.
 var v41TestLayerCacheBudgetOverride int64
 
+// Full V4.1 extends this owner with weighted BF16 row outputs and ascending-ID
+// accumulation. The historical unweighted/slot-order description below applies
+// to reduced compatibility only; first-touch materialization is shared by both.
 // v41ContractRoutedGrouped is the #13304 expert-major routed contraction for a
 // multi-token panel. It plans stable expert groups over `perTokenPicks`, then for
 // each group materializes the expert triple ONCE through the same
@@ -153,13 +156,19 @@ var v41TestLayerCacheBudgetOverride int64
 // before the weighted replay, so a partial panel never reaches `out`.
 func (m *Model) v41ContractRoutedGrouped(l int, xnByToken [][]float32, perTokenPicks [][]routePick, scratch *v41ProjScratch, cfg Config, out [][]float32, st *v41ForwardState) error {
 	H, I := cfg.HiddenSize, cfg.MoEIntermediateSize
+	full, err := v41ForwardGeometry(cfg)
+	if err != nil {
+		return err
+	}
 	groups := v41PlanExpertGroups(perTokenPicks)
 	// The caller's normalized rows are shared with routing and the shared
 	// expert; neither host nor selected device normalization is repeated here.
 	for t := range perTokenPicks {
 		out[t] = make([]float32, H)
 	}
-	// unweighted[token][slot] holds the contracted expert output BEFORE the pick
+	// For full V4.1 these rows already include their pick weight and are replayed
+	// by ascending expert ID. The legacy reduced path retains unweighted rows.
+	// unweighted[token][slot] holds the reduced expert output BEFORE the pick
 	// weight is applied, so the replay below can apply weights in original slot
 	// order regardless of the order the groups materialized experts in.
 	unweighted := make([][][]float32, len(perTokenPicks))
@@ -179,6 +188,30 @@ func (m *Model) v41ContractRoutedGrouped(l int, xnByToken [][]float32, perTokenP
 		)
 		for _, row := range g.Rows {
 			xn := xnByToken[row.Token]
+			if full {
+				var gateUp v41ExpertGateUpFunc
+				var down v41ExpertDownFunc
+				if st != nil {
+					gateUp, down = st.expertGateUp, st.expertDown
+				}
+				output, cause := m.v41FullRoutedExpert(l, stem, xn, perTokenPicks[row.Token][row.Slot].weight, cfg, gateUp, down,
+					func() ([]float32, []float32, []float32, error) {
+						if !tripleReady {
+							var cause error
+							w1, w3, w2, cause = m.v41ExpertTripleInto(l, stem, scratch, false)
+							if cause != nil {
+								return nil, nil, nil, cause
+							}
+							tripleReady = true
+						}
+						return w1, w3, w2, nil
+					}, func() ([]float32, error) { return m.hostExpertDown(l, stem, scratch) }, true)
+				if cause != nil {
+					return cause
+				}
+				unweighted[row.Token][row.Slot] = output // full outputs already include this pick's weight
+				continue
+			}
 			// #13511: offer the row to the session's device gate/up seam first, the
 			// same seam the token-major arm consults (#13358). A handled result
 			// returns the I-wide fused intermediate from the backend, so the gate/up
@@ -254,6 +287,14 @@ func (m *Model) v41ContractRoutedGrouped(l int, xnByToken [][]float32, perTokenP
 	// Weighted replay in ORIGINAL SLOT ORDER, byte-identical to the token-major
 	// accumulation `routed[i] += pick.weight * y[i]` per slot.
 	for t, picks := range perTokenPicks {
+		if full {
+			values, cause := v41FullRoutedSum(l, picks, unweighted[t], H)
+			if cause != nil {
+				return cause
+			}
+			out[t] = values
+			continue
+		}
 		dst := out[t]
 		for slot, pick := range picks {
 			y := unweighted[t][slot]

@@ -336,6 +336,7 @@ func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
 		if tap != nil {
 			tap.writeMeta(cfg, H, pos)
 		}
+		s.rememberTargetHidden(pos, id, x)
 		// finalNorm, not rmsnormCfg. This branch is entered precisely BECAUSE
 		// q8FastDecodeSessionOK said no, and q8FastPreNormOK (line 145) refuses every
 		// cfg.LayerNorm config — so a biased-LayerNorm family (StableLM, GPT-NeoX, Falcon,

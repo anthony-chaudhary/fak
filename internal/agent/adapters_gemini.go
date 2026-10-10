@@ -436,7 +436,7 @@ func sanitizeSchemaRequired(m map[string]any) {
 // the usageMetadata token counts (including cached content) map into Usage.
 func (a geminiAdapter) ParseResponse(raw []byte) (*Completion, error) {
 	comp, err := a.parseResponseFields(raw)
-	return normalizeCompletionToolCalls(comp), err
+	return normalizeCompletionFields(comp), err
 }
 
 func (a geminiAdapter) parseResponseFields(raw []byte) (*Completion, error) {

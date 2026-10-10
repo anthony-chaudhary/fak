@@ -9,10 +9,50 @@
       "distinction": "It computes nothing itself: attnPrefillInto (host) and PrefillAttention (device) are the two kernels it routes between.",
       "distinct_from": [
         "x-attention-attnprefillinto",
-        "prefillattention"
+        "prefillattention",
+        "v41attentionqkrope"
       ],
       "aliases": [],
       "grounding": "attnPrefillDispatch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41attentionqkrope",
+      "canonical": "v41AttentionQKRoPE",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Owns BF16 query and key-value publication before and after the full V4.1 forward tail rotary operation, whose arithmetic remains F32.",
+      "distinction": "Unlike attnPrefillDispatch, this owner stages rotary operands and results; it does not select or compute an attention kernel.",
+      "distinct_from": [
+        "attnprefilldispatch",
+        "v41attentionoutputforprojection"
+      ],
+      "aliases": [],
+      "grounding": "v41AttentionQKRoPE",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41attentionoutputforprojection",
+      "canonical": "v41AttentionOutputForProjection",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Owns full V4.1 BF16 sparse-attention output staging before inverse F32 tail rotary arithmetic and BF16 publication to grouped output projection.",
+      "distinction": "Unlike v41AttentionQKRoPE, this owner operates on attention output after sparse attention and applies inverse rotation before output projection.",
+      "distinct_from": [
+        "v41attentionqkrope"
+      ],
+      "aliases": [],
+      "grounding": "v41AttentionOutputForProjection",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

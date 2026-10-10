@@ -280,6 +280,7 @@ func v41OracleForwardLatentNormHidden(t *testing.T, m *Model, ids []int, opts v4
 				kv = v41AttentionInputNormOracle(kv, gainOrUnit(kvGain), eps)
 			}
 			kv = kv[:hd]
+			q = v41LatentNormOracleBF16(q)
 			// Independently resolve the pinned layer regime: plain layers disable
 			// YaRN, nonzero ratios use compressed theta, and both have unit amplitude.
 			cos, sin := v41OracleRopeTable(t, cfg, l, tt)
@@ -287,8 +288,8 @@ func v41OracleForwardLatentNormHidden(t *testing.T, m *Model, ids []int, opts v4
 				v41OracleRopeTailInterleaved(q[h*hd:(h+1)*hd], cos, sin, cfg.QKRopeHeadDim)
 			}
 			v41OracleRopeTailInterleaved(kv, cos, sin, cfg.QKRopeHeadDim)
-			qHeads[tt] = q
-			kvRows[tt] = kv
+			qHeads[tt] = v41LatentNormOracleBF16(q)
+			kvRows[tt] = v41LatentNormOracleBF16(kv)
 		}
 
 		// ---- causal sink contraction + grouped output ----
@@ -329,8 +330,10 @@ func v41OracleForwardLatentNormHidden(t *testing.T, m *Model, ids []int, opts v4
 					}
 				}
 			}
+			o = v41LatentNormOracleBF16(o)
 			v41OracleInverseOutput(t, cfg, l, tt, o)
-			attnOut[tt] = v41OracleGroupedOutput(o, woA, woB, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
+			o = v41LatentNormOracleBF16(o)
+			attnOut[tt] = v41GroupedBF16Oracle(o, woA, woB, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
 		}
 
 		// ---- router + routed/shared experts, then the mHC post-mix ----
@@ -343,19 +346,26 @@ func v41OracleForwardLatentNormHidden(t *testing.T, m *Model, ids []int, opts v4
 			}
 			xn := v41AttentionInputNormOracle(v41GraphOracleCollapse(updated, toF32(hcPre[tt])), ffnNorm, eps)
 			router := cpuOracleMatVec(wGate, xn, cfg.NumExperts, H)
-			picks, weights := oracleV41Route(toF64(router), toF64(gateBias), cfg.NumExpertsPerTok, routeScale)
-			routed := make([]float64, H)
-			for pi, e := range picks {
-				stem := "ffn.experts." + itoa(e)
-				w1 := tensor(layerName(l, stem+".w1.weight"))
-				w3 := tensor(layerName(l, stem+".w3.weight"))
-				w2 := tensor(layerName(l, stem+".w2.weight"))
-				y := oracleSwiGLU(w1, w3, w2, xn, cfg.MoEIntermediateSize, H)
-				for d := range routed {
-					routed[d] += weights[pi] * y[d]
+			picks, weights := v41FullRouteNormalizationOracle(router, gateBias, cfg.NumExpertsPerTok, float32(routeScale))
+			routed32 := make([]float32, H)
+			// Official MoE visits expert IDs ascending, independent of route-slot order.
+			for e := 0; e < cfg.NumExperts; e++ {
+				for pi, pick := range picks {
+					if pick != e {
+						continue
+					}
+					stem := "ffn.experts." + itoa(e)
+					w1 := tensor(layerName(l, stem+".w1.weight"))
+					w3 := tensor(layerName(l, stem+".w3.weight"))
+					w2 := tensor(layerName(l, stem+".w2.weight"))
+					y := v41RoutedExpertBF16Oracle(w1, w3, w2, xn, cfg.MoEIntermediateSize, H, float32(cfg.SwigluLimit), float32(weights[pi]))
+					for d := range routed32 {
+						routed32[d] = float32(routed32[d] + y[d])
+					}
 				}
 			}
-			shared := oracleSwiGLU(shW1, shW3, shW2, xn, cfg.MoEIntermediateSize, H)
+			routed := toF64(routed32)
+			shared := toF64(v41SharedExpertBF16Oracle(shW1, shW3, shW2, xn, cfg.MoEIntermediateSize, H, float32(cfg.SwigluLimit)))
 			moe := oracleV41SharedExpertAdd(routed, shared)
 
 			next := v41GraphOraclePost(toF32(moe), updated, toF32(fpost), toF32(fcomb))
@@ -379,7 +389,7 @@ func v41OracleForwardLatentNormHidden(t *testing.T, m *Model, ids []int, opts v4
 	head := tensor("lm_head.weight")
 	logits := make([][]float32, seq)
 	for tt := 0; tt < seq; tt++ {
-		xf := cpuOracleRMSNorm(x[tt], norm, eps)
+		xf := v41AttentionInputNormOracle(x[tt], norm, eps)
 		logits[tt] = cpuOracleMatVec(head, xf, cfg.VocabSize, H)
 	}
 	return logits, x

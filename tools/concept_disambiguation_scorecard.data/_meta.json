@@ -1322,6 +1322,71 @@
           "category": "false-positive",
           "reason": "Integer position selecting an already-wired per-layer Engram row cache; it introduces no cache identity, admission, retention, or eviction policy.",
           "token": "cacheindex"
+        },
+        {
+          "category": "incidental",
+          "reason": "Retained legacy policy constant for provenance; served admission does not use historical overrun credit.",
+          "token": "deadlineCacheCreditMaxColdOverrun"
+        },
+        {
+          "category": "incidental",
+          "reason": "Expiry duration of the historical observation ledger, not proof of current residency.",
+          "token": "deadlineCacheCreditTTL"
+        },
+        {
+          "category": "incidental",
+          "reason": "Bound on historical ledger entries, not a new cache or admission mechanism.",
+          "token": "deadlineCacheCreditMaxConvs"
+        },
+        {
+          "category": "incidental",
+          "reason": "Compatibility outcome label for no historical record.",
+          "token": "cacheCreditNone"
+        },
+        {
+          "category": "incidental",
+          "reason": "Compatibility outcome label for expired historical record.",
+          "token": "cacheCreditStale"
+        },
+        {
+          "category": "incidental",
+          "reason": "Compatibility outcome label for recorded completion without a reported cache hit.",
+          "token": "cacheCreditUncached"
+        },
+        {
+          "category": "incidental",
+          "reason": "Compatibility outcome label for message-chain mismatch.",
+          "token": "cacheCreditMismatch"
+        },
+        {
+          "category": "incidental",
+          "reason": "Compatibility outcome label for historical prefix match, not served admission credit.",
+          "token": "cacheCreditCredited"
+        },
+        {
+          "category": "incidental",
+          "reason": "Compatibility outcome label for legacy bounded-credit outcome retained for compatibility.",
+          "token": "cacheCreditOverrun"
+        },
+        {
+          "category": "incidental",
+          "reason": "Compatibility outcome label for missing conversation key.",
+          "token": "cacheCreditNoMessage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private context key carrying the positioned historical deadlineCacheTicket snapshot.",
+          "token": "deadlineCacheTicketKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Constructor for the positioned deadlineCacheTicket request snapshot; it grants no cache residency or admission credit.",
+          "token": "newDeadlineCacheTicket"
+        },
+        {
+          "category": "incidental",
+          "reason": "Summary field exposing the positioned DeadlineCacheCreditStats compatibility schema, not a separate cache mechanism.",
+          "token": "DeadlineCacheCredit"
         }
       ],
       "exclude": [
@@ -1367,6 +1432,7 @@
         "CodeKVCache",
         "CounterCacheEvictions",
         "CounterPrefixCacheHits",
+        "DeadlineCacheCredit",
         "DefaultCacheBytes",
         "DefaultCacheStateAllowlist",
         "FAK_ORG_POLICY_CACHE_PATH",
@@ -1434,6 +1500,13 @@
         "cacheAuthenticated",
         "cacheBurstBacktest",
         "cacheCreationSpanLabel",
+        "cacheCreditCredited",
+        "cacheCreditMismatch",
+        "cacheCreditNoMessage",
+        "cacheCreditNone",
+        "cacheCreditOverrun",
+        "cacheCreditStale",
+        "cacheCreditUncached",
         "cacheEntryPresent",
         "cacheLoadMaxWorkersFor",
         "cacheMissing",
@@ -1523,6 +1596,10 @@
         "compactlastcacherd",
         "cuda_arch_matrix",
         "cuda_arch_matrix_test",
+        "deadlineCacheCreditMaxColdOverrun",
+        "deadlineCacheCreditMaxConvs",
+        "deadlineCacheCreditTTL",
+        "deadlineCacheTicketKey",
         "defaultcacheandresidency",
         "defaultcachesize",
         "deriveSelfUpdateCandidateCacheDisposition",
@@ -1578,6 +1655,7 @@
         "microCacheWitnessSchema",
         "minCacheRun",
         "newCache",
+        "newDeadlineCacheTicket",
         "no_cache_state_delta",
         "non_cache_fingerprint",
         "normalizedSchemaCacheCap",
@@ -3886,6 +3964,16 @@
           "category": "false-positive",
           "reason": "Existing expert gate/up callback outcome confirming a selected mathematical projection result; it never grants permission or controls a policy gate.",
           "token": "v41GateUpHandled"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Local callback for neural expert gate/up projection; gate here is a neural-network operand, not an admission or safety guard.",
+          "token": "gateCallback"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Local weight-leaf name for the neural shared-expert gate projection, not an admission guard.",
+          "token": "gateLeaf"
         }
       ],
       "exclude": [
@@ -3896,6 +3984,8 @@
         "delegat",
         "deterministic_gates",
         "fak_gateway_feature_used_requests_total",
+        "gateCallback",
+        "gateLeaf",
         "gateway",
         "investigat",
         "litigated",
@@ -6437,6 +6527,11 @@
           "category": "incidental",
           "reason": "SHA-256 storage representation used only for constant-time comparison of the MCP session bearer; it is not a separately addressable credential or concept.",
           "token": "mcpsessionbearerdigest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #12625 unexported modelengine helper observes an admitted request context at cooperative scheduler boundaries and delegates the existing finishSessionLocked terminal transition; it introduces no separate session record, scheduler policy, or public lifecycle primitive.",
+          "token": "retireCanceledSessionLocked"
         }
       ],
       "exclude": [
@@ -6716,6 +6811,7 @@
         "requireminimaxsession",
         "resolveServeSessionState",
         "restartfreshsession",
+        "retireCanceledSessionLocked",
         "rotateSessionDiscoveryEpoch",
         "runDisambiguationSessionSourceSelfTest",
         "runFilterToolScheduler",
@@ -8782,7 +8878,20 @@
           "category": "incidental",
           "reason": "Serialized engine identity value for the existing fak-native Vulkan execution path; it is receipt data, not a distinct gateway engine.",
           "token": "fak-strix-engine"
+        },
+        {
+          "category": "false-positive",
+          "reason": "The positioned device mutual-exclusion gate serializes native forward work; its name does not define a gateway or inference-engine abstraction.",
+          "token": "inKernelDeviceGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Extracts the existing native completion tool normalization tail while retaining unknown-tool refusal; it is not a distinct gateway or engine.",
+          "token": "normalizeInKernelToolCalls"
         }
+      ],
+      "exclude": [
+        "inKernelDeviceGate"
       ],
       "id": "gateway-engine",
       "ignore": [
@@ -8901,6 +9010,7 @@
         "nativeReasonMessageRoleUnsupported",
         "native_engine_substitution",
         "newInKernelPrefixPressureBridge",
+        "normalizeInKernelToolCalls",
         "pgKernel32",
         "publicGatewayURL",
         "query_public_policy",
@@ -11082,6 +11192,21 @@
           "category": "incidental",
           "reason": "Function-local cancellation context for bounded cleanup after the existing SSD restart operation; it introduces no context lifecycle concept.",
           "token": "cleanupCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Cancellation-aware acquisition method of the positioned inKernelDeviceGate; it is not a separate context-store or context-window concept.",
+          "token": "LockContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Request-derived context local canceled on the first Messages response-writer failure.",
+          "token": "writeCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Request-derived context local canceled on the first selected Chat response-writer failure.",
+          "token": "liveCtx"
         }
       ],
       "exclude": [
@@ -11115,6 +11240,7 @@
         "IncrementalContextGeneration",
         "InitializeIncrementalContext",
         "IsCopiedContext",
+        "LockContext",
         "LookupSnapshotTieredContext",
         "MakeContextSource",
         "MakeIncrementalContext",
@@ -11204,6 +11330,7 @@
         "inspectCodexHookProfileContext",
         "laneCtx",
         "latestGuardCompactionWitness",
+        "liveCtx",
         "lookupCtx",
         "lookupReceiptContextKey",
         "lookupReceiptFromContext",
@@ -11246,6 +11373,7 @@
         "takeCompactionContract",
         "traceContext",
         "wctx",
+        "writeCtx",
         "writeValidateTestContext"
       ],
       "known_tokens": [],
@@ -15394,6 +15522,31 @@
           "category": "incidental",
           "reason": "Private validation helper for bytes of the already-selected candidate archive; it adds no candidate or plan concept.",
           "token": "validateCandidateArchiveBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Formats existing expert-ring admission charges and loader policy for a log; it does not define a new planning mechanism.",
+          "token": "serveActivatedExpertRingPlanText"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local boolean records whether summing planned byte counts overflowed.",
+          "token": "plannedOK"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local formatted representation of planned device bytes for the residency summary.",
+          "token": "plannedText"
+        },
+        {
+          "category": "incidental",
+          "reason": "Residency log field labels an existing placement estimate rather than a new plan abstraction.",
+          "token": "planned_device_bytes"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Detects textual tool-call candidates in existing planner output; the substring candidate is not a planning abstraction.",
+          "token": "hasTextToolCandidate"
         }
       ],
       "exclude": [
@@ -15401,6 +15554,7 @@
         "candidate_fak_share_gross",
         "candidate_fak_share_net",
         "explanat",
+        "hasTextToolCandidate",
         "plane",
         "plank"
       ],
@@ -15584,6 +15738,9 @@
         "planResumeDedup",
         "planapproval",
         "planned",
+        "plannedOK",
+        "plannedText",
+        "planned_device_bytes",
         "plannedcumtok",
         "plannedcumtokens",
         "planner",
@@ -15625,6 +15782,7 @@
         "selfUpdateCandidateCacheReasonMax",
         "selfUpdateCandidateCacheRejected",
         "selfUpdateCandidateCacheState",
+        "serveActivatedExpertRingPlanText",
         "servenativeplannerconfig",
         "setSelfUpdateCandidateCacheDisposition",
         "stablePlanID",

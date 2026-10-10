@@ -34,7 +34,7 @@ type gatewayMetrics struct {
 	// deadline_admission.go); created lazily through deadlineEstimator.
 	deadlineOnce sync.Once
 	deadlineEst  *deadlineadmit.Estimator
-	// warmPrefix is the served-turn evidence for deadline cache credit
+	// warmPrefix is observational served-turn cache history
 	// (deadline_cache_credit.go); created lazily through warmPrefixLedger.
 	warmPrefixOnce sync.Once
 	warmPrefix     *warmPrefixLedger
@@ -848,7 +848,9 @@ type AdjudicationSummary struct {
 	// operator SEES the cache reuse rather than having to scrape /metrics.
 	CachedPromptTokens uint64 `json:"cached_prompt_tokens"`
 	CachedTurns        uint64 `json:"cached_turns"`
-	// DeadlineCacheCredit counts chat admissions priced with a verified cached
+	// DeadlineCacheCredit retains the historical cache-credit metrics; served
+	// routes now use owned residency or stay cold, never historical credit.
+	// Previously this counted chat admissions priced with a reported cached
 	// prefix and the tokens credited (deadline_cache_credit.go).
 	DeadlineCacheCredit *DeadlineCacheCreditStats `json:"deadline_cache_credit,omitempty"`
 	// InputTokens (the uncached input remainder), OutputTokens, and CacheCreationTokens
@@ -1064,7 +1066,7 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	}
 	// Provider prompt-cache reuse rides the inference counters (a separate lock from the
 	// operation ledger); read it first so the two critical sections never nest.
-	if cc := m.warmPrefix.stats(); cc != (DeadlineCacheCreditStats{}) {
+	if cc := m.warmPrefixLedger().stats(); cc != (DeadlineCacheCreditStats{}) {
 		sum.DeadlineCacheCredit = &cc
 	}
 	m.inferenceMu.Lock()

@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
+	"github.com/anthony-chaudhary/fak/pkg/deadlineadmit"
 )
 
 // upstreamErrorStatus maps a planner error to the HTTP status, an OpenAI-style
@@ -27,6 +28,10 @@ import (
 // detail is NEVER forwarded — only the status + classification cross the boundary —
 // so an upstream error message cannot leak to a possibly-unauthenticated caller.
 func upstreamErrorStatus(err error) (status int, code, msg string) {
+	var deadlineErr *deadlineAdmissionError
+	if errors.As(err, &deadlineErr) {
+		return http.StatusServiceUnavailable, deadlineadmit.CodeDeadlineInfeasible, deadlineErr.Error()
+	}
 	if status, code, msg, ok := admissionErrorStatus(err); ok {
 		return status, code, msg
 	}
@@ -263,6 +268,11 @@ func (s *Server) plannerErrorStatus(err error) (status int, code, msg string) {
 // header (or, absent, a clean no-op). It must be set BEFORE writeErrCode, which
 // calls w.WriteHeader and freezes the header block.
 func (s *Server) writeUpstreamErr(w http.ResponseWriter, err error) {
+	var deadlineErr *deadlineAdmissionError
+	if errors.As(err, &deadlineErr) {
+		deadlineadmit.WriteRefusal(w, deadlineErr.verdict)
+		return
+	}
 	status, code, msg := s.plannerErrorStatus(err)
 	if ra := upstreamRetryAfter(err); ra != "" {
 		w.Header().Set("Retry-After", ra)

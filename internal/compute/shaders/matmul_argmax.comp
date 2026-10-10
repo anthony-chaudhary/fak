@@ -24,7 +24,7 @@ void main() {
     uint in_ = uint(pc.inDim);
     uint passes = (out_ + 255u) / 256u;
 
-    float bv = -1e30;
+    float bv = uintBitsToFloat(0xff800000u);
     int bi = 0;
 
     if (in_ <= SHARED_CAP) {

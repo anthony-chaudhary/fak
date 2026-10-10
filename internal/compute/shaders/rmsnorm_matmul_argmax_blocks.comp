@@ -55,7 +55,7 @@ void main() {
         barrier();
     }
 
-    vbest[tid] = valid ? acc : -1e30;
+    vbest[tid] = valid ? acc : uintBitsToFloat(0xff800000u);
     ibest[tid] = valid ? int(o) : 0;
     barrier();
 

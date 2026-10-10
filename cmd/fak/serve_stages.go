@@ -905,17 +905,6 @@ func (rt *serveRuntime) resolveSessionPlane(sf *serveFlags) {
 		})
 		os.Exit(2)
 	}
-	// COLD resume (#629): re-attach the persisted drive state of every session BEFORE the
-	// per-boot default-budget seed, so a restart resumes each session at the budget/
-	// priority/run-state/pace it held — not its defaults — while an explicit
-	// --context-budget-tokens on THIS boot still re-seeds the default trace. A STOPPED
-	// session reloads STOPPED with its reason (session.Table.Restore), never silently
-	// resurrected as RUNNING. A missing file is a clean first boot; a present-but-corrupt
-	// file fails loud (a tampered drive record is worse than none).
-	if err := restoreServeSessions(serveSessions, *sf.sessionStatePath); err != nil {
-		fmt.Fprintln(os.Stderr, "fak serve:", err)
-		os.Exit(1)
-	}
 	// The registry this resolves to IS the reach of every fanned lifecycle op: serveSessions is
 	// hydrated from it, and `fak fleet control send --op pause --all` writes through that table.
 	// A hard-coded "" here made --session-registry unreachable, so a serve armed with a private

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -348,6 +349,77 @@ func (h *heartbeatConfig) emitHeartbeat(w http.ResponseWriter) bool {
 // decodes output the client cannot see yet (a tool call held for adjudication).
 const heldKeepaliveEvery = time.Second
 
+// liveChatResponseWriter adds request-local failure closure only to selected
+// live Chat streaming. It shares the existing serializer mutex; Header retains
+// its existing returned-map contract. Flusher cannot report failures.
+type liveChatResponseWriter struct {
+	*syncResponseWriter
+	firstError error
+	cancel     context.CancelFunc
+}
+
+func (w *liveChatResponseWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	if w.firstError != nil {
+		err := w.firstError
+		w.mu.Unlock()
+		return 0, err
+	}
+	n, err := w.w.Write(p)
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		w.firstError = err
+	}
+	w.mu.Unlock()
+	if err != nil {
+		// Cancellation can run callbacks; never invoke it under the writer lock.
+		w.cancel()
+	}
+	return n, err
+}
+
+func (w *liveChatResponseWriter) WriteHeader(status int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.firstError == nil {
+		w.w.WriteHeader(status)
+	}
+}
+
+func (w *liveChatResponseWriter) Flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.firstError == nil && w.flusher != nil {
+		w.flusher.Flush()
+	}
+}
+
+func (w *liveChatResponseWriter) err() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.firstError
+}
+
+// A writer-triggered child cancellation is secondary to its originating error.
+// Independent request deadlines/cancellation and upstream failures retain priority.
+func liveChatCompletionError(parent context.Context, plannerErr, writeErr error) error {
+	if writeErr == nil {
+		return plannerErr
+	}
+	if plannerErr != nil && !errors.Is(plannerErr, context.Canceled) {
+		return plannerErr
+	}
+	if err := parent.Err(); err != nil {
+		if plannerErr != nil {
+			return plannerErr
+		}
+		return err
+	}
+	return writeErr
+}
+
 // streamChatLive serves POST /v1/chat/completions as a TRUE token stream: it
 // forwards each upstream CONTENT fragment to the client as an OpenAI SSE chunk the
 // instant the model emits it, so time-to-first-token tracks the model rather than the
@@ -382,7 +454,9 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	if sessionTurn.turnCost != nil {
 		sessionTurn.turnCost.Streaming = true
 	}
-	sw := newSyncResponseWriter(w)
+	liveCtx, cancelLive := context.WithCancel(ctx)
+	defer cancelLive()
+	sw := &liveChatResponseWriter{syncResponseWriter: newSyncResponseWriter(w), cancel: cancelLive}
 	w = sw
 	flusher := sw
 	id := "chatcmpl-fak-" + itoa(uint64(time.Now().UnixNano()))
@@ -434,7 +508,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 					hb.emitHeartbeat(w)
 				case <-hbStop:
 					return
-				case <-ctx.Done():
+				case <-liveCtx.Done():
 					return
 				}
 			}
@@ -498,7 +572,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		flusher.Flush()
 		return nil
 	}
-	heldCtx := agent.WithStreamHeldActivity(ctx, func() { _ = heldActivity() })
+	heldCtx := agent.WithStreamHeldActivity(liveCtx, func() { _ = heldActivity() })
 	// The sink streams prose through the lift-guard so a text-form tool-call dialect a
 	// model buries in content never reaches the wire before adjudication. Whatever the
 	// guard withheld is reconciled against the buffered post-lift content below.
@@ -544,8 +618,18 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	began := time.Now()
 	turnCtx := plannerTurnContext(heldCtx, nil, req.Messages, s.contextEpoch)
 	var firstDelta firstDeltaClock
+	turnCtx = withTextToolOffer(turnCtx, req.Tools)
 	comp, err := sp.CompleteStream(turnCtx, firstDelta.wrap(utf8Fragments.write), req.Messages, req.Tools, chatRouteOpts(ctx, opts)...)
 	stopHB()
+	// Joining the heartbeat establishes that no concurrent write can change the
+	// failure latch before completion accounting or trailer/header mutation.
+	completed := err == nil && comp != nil
+	writeErr := sw.err()
+	err = liveChatCompletionError(ctx, err, writeErr)
+	if completed {
+		// A completed generation consumed real tokens even if its client vanished.
+		lease.SettleUsage(comp.Usage)
+	}
 	if err == nil {
 		s.observePrefixReuseTurn(turnCtx, req.Messages, comp)
 	}
@@ -572,6 +656,12 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		}
 		hb.mu.Unlock()
 		s.recordFailedTurn(ctx, s.chatServingLocality(ctx, reqModel), err, began, failTTFT, started)
+		if writeErr != nil {
+			s.logf("gateway: live stream failed after downstream write error: %v", err)
+			// The downstream is already broken. Do not emit terminal frames,
+			// retry generation, or run the successful completion path.
+			return true
+		}
 		if !started {
 			// Nothing on the wire yet — surface a real HTTP error, exactly as the
 			// buffered path does, and own the response (the message is generic so the
@@ -626,7 +716,6 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 
 	// The turn finished. The buffered path records inference metrics inside
 	// s.complete; this path bypasses it, so account here.
-	lease.SettleUsage(comp.Usage) // settle the token-rate window with real usage (#2019)
 	s.accountStreamedTurn(ctx, sessionTurn, comp, req.Messages, began, reqModel, firstDelta.ttft(began))
 
 	// Tool-call conformance fail-closed (the rule itself lives in

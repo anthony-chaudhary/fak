@@ -395,3 +395,68 @@ func TestImmutableWeightUploadSitesRemainWeightClassed(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// fak-test:runtime fast est=5ms lane=default
+// Metadata visitor controls; estimate unmeasured. No physical device operations.
+func TestImmutableDeviceWeightVisitorOnlyObservesExistingOwnedHandles(t *testing.T) {
+	m := &Model{}
+	be := newImmutableWeightRecordingBackend()
+	calls := 0
+	visit := func(compute.Tensor) bool { calls++; return true }
+	if !m.VisitImmutableDeviceWeights(be, visit) || calls != 0 || m.weightCloser != nil {
+		t.Fatal("empty observation created owner state or visited a tensor")
+	}
+	resident := m.immutableDeviceWeights(be)
+	resident.getOrStage("one", func() compute.Tensor { return compute.Tensor{} })
+	resident.getOrStage("two", func() compute.Tensor { return compute.Tensor{} })
+	if !m.VisitImmutableDeviceWeights(be, visit) || calls != 2 || len(resident.weights) != 2 {
+		t.Fatal("visitor lost or changed existing handles")
+	}
+	other := newImmutableWeightRecordingBackend()
+	if !m.VisitImmutableDeviceWeights(other, visit) || calls != 2 || len(m.weightCloser.halWeights.backends) != 1 {
+		t.Fatal("observation created or confused a backend owner")
+	}
+	if m.VisitImmutableDeviceWeights(be, func(compute.Tensor) bool { return false }) {
+		t.Fatal("partial observation reported complete")
+	}
+	if be.immutableUploadCount() != 0 || len(be.freeCalls) != 0 {
+		t.Fatal("metadata observation uploaded or freed storage")
+	}
+	m.weightCloser.closing = true
+	if m.VisitImmutableDeviceWeights(be, visit) || calls != 2 {
+		t.Fatal("closing owner allowed observation")
+	}
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestImmutableDeviceWeightVisitorReleasesLocksAfterRejectedObservation(t *testing.T) {
+	m := &Model{}
+	be := newImmutableWeightRecordingBackend()
+	r := m.immutableDeviceWeights(be)
+	r.getOrStage("one", func() compute.Tensor { return compute.Tensor{} })
+	if m.VisitImmutableDeviceWeights(be, func(compute.Tensor) bool { return false }) {
+		t.Fatal("expected unavailable")
+	}
+	if !m.VisitImmutableDeviceWeights(be, func(compute.Tensor) bool { return true }) {
+		t.Fatal("owner locks retained after rejection")
+	}
+	// Prove each ownership lock is held during the callback without scheduling
+	// another goroutine or allowing a tensor to escape the protected observation.
+	if !m.VisitImmutableDeviceWeights(be, func(compute.Tensor) bool {
+		if m.weightCloser.mu.TryLock() {
+			m.weightCloser.mu.Unlock()
+			t.Error("closer lock absent")
+		}
+		if m.weightCloser.halWeights.mu.TryLock() {
+			m.weightCloser.halWeights.mu.Unlock()
+			t.Error("registry lock absent")
+		}
+		if r.mu.TryLock() {
+			r.mu.Unlock()
+			t.Error("weight owner lock absent")
+		}
+		return true
+	}) {
+		t.Fatal("owned observation failed")
+	}
+}

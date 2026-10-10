@@ -31,6 +31,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -328,13 +329,15 @@ func (c *Client) Models(ctx context.Context) (*ModelsResponse, error) {
 }
 
 // Health checks the unauthenticated liveness endpoint (GET /healthz). It returns
-// nil when the gateway answers 2xx, else an *APIError.
+// nil when the gateway answers 2xx and its body is read successfully. Non-2xx
+// responses expose *APIError through errors.As, even if reading the body fails.
 func (c *Client) Health(ctx context.Context) error {
 	return c.do(ctx, http.MethodGet, "/healthz", nil, nil)
 }
 
 // do issues one request and decodes the JSON response into out (out may be nil to
-// discard the body). A non-2xx status is mapped to *APIError.
+// discard the body). A clean non-2xx response returns *APIError directly.
+// A failed non-2xx body read joins that API error with its original read cause.
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
 	var rdr io.Reader
 	if body != nil {
@@ -365,7 +368,11 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
-		return fmt.Errorf("fak: read response: %w", err)
+		readErr := fmt.Errorf("fak: read response: %w", err)
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return errors.Join(parseAPIError(resp.StatusCode, data), readErr)
+		}
+		return readErr
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return parseAPIError(resp.StatusCode, data)

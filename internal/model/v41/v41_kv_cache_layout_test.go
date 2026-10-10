@@ -261,3 +261,104 @@ func assertV41KVApprox(t *testing.T, what string, want, got []float32, tol float
 		}
 	}
 }
+
+// This oracle derives finite E4M3 magnitudes directly from the format fields.
+// It deliberately uses neither the production decoder nor a quantizer table.
+func v41E4M3FiniteMagnitudeOracle(code int) float32 {
+	exponent, fraction := code>>3, code&7
+	if exponent == 0 {
+		return float32(math.Ldexp(float64(fraction), -9))
+	}
+	return float32(math.Ldexp(float64(8+fraction), exponent-10))
+}
+
+// Every finite magnitude code and every adjacent decision boundary is covered,
+// including immediate F32 neighbors and both signs. This is not a claim to
+// enumerate all F32 inputs or to validate the whole activation kernel.
+// fak-test:runtime fast est=100ms lane=default
+// Estimated only, not measured: bounded in-memory FP8 cases.
+func TestV41E4M3ValueEveryFiniteBoundary(t *testing.T) {
+	check := func(x float32, want byte) {
+		t.Helper()
+		if got := encodeE4M3Value(x); got != want {
+			t.Fatalf("input bits=%08x value=%g: code=%02x want=%02x", math.Float32bits(x), x, got, want)
+		}
+	}
+	for code := 0; code <= 0x7e; code++ {
+		value := v41E4M3FiniteMagnitudeOracle(code)
+		check(value, byte(code))
+		check(float32(math.Copysign(float64(value), -1)), 0x80|byte(code))
+		if code == 0x7e {
+			continue
+		}
+		next := v41E4M3FiniteMagnitudeOracle(code + 1)
+		midpoint := (value + next) / 2
+		even := code
+		if code&1 != 0 {
+			even++
+		}
+		for _, sample := range []struct {
+			value float32
+			want  byte
+		}{
+			{math.Nextafter32(midpoint, float32(math.Inf(-1))), byte(code)},
+			{midpoint, byte(even)},
+			{math.Nextafter32(midpoint, float32(math.Inf(1))), byte(code + 1)},
+		} {
+			check(sample.value, sample.want)
+			check(-sample.value, 0x80|sample.want)
+		}
+	}
+	for _, value := range []float32{math.Nextafter32(448, float32(math.Inf(1))), 464, 512, math.MaxFloat32} {
+		check(value, 0x7e)
+		check(-value, 0xfe)
+	}
+	check(math.SmallestNonzeroFloat32, 0)
+	check(-math.SmallestNonzeroFloat32, 0x80)
+}
+
+// Public consumer witness: the 448 maximum fixes the power-of-two scale at 1,
+// isolating the value conversion from all scale-selection ambiguities.
+// fak-test:runtime fast est=100ms lane=default
+// Estimated only, not measured: bounded in-memory FP8 cases.
+func TestV41KVCacheFP8TiesToEvenPayload(t *testing.T) {
+	layout, _ := V41KVCacheLayoutFor(V41KVFP8)
+	nope, rope := make([]float32, layout.DNoPE), make([]float32, layout.DRoPE)
+	values := []float32{448, 1.1875, -1.1875, 1.0625, -1.0625, 432, -432, float32(math.Copysign(0, -1))}
+	copy(nope, values)
+	copy(rope, values)
+	record, err := layout.V41KVQuantizeRow(nope, rope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []byte{0x7e, 0x3a, 0xba, 0x38, 0xb8, 0x7e, 0xfe, 0x80}
+	for _, offset := range []int{0, layout.DNoPE} {
+		if !bytes.Equal(record[offset:offset+len(want)], want) {
+			t.Fatalf("payload at %d = %x, want %x", offset, record[offset:offset+len(want)], want)
+		}
+	}
+	scaleStart := layout.DNoPE + layout.DRoPE
+	if record[scaleStart] != 127 || record[scaleStart+layout.DNoPE/layout.TileSize] != 127 {
+		t.Fatalf("witness scales are not E8M0 unit codes: %x", record[scaleStart:])
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+// Estimated only, not measured: bounded in-memory FP8 cases.
+func TestV41KVCacheFP8NonfinitePolicyUnchanged(t *testing.T) {
+	layout, _ := V41KVCacheLayoutFor(V41KVFP8)
+	for _, value := range []float32{float32(math.NaN()), float32(math.Inf(1)), float32(math.Inf(-1))} {
+		for _, ropeBad := range []bool{false, true} {
+			nope, rope := make([]float32, layout.DNoPE), make([]float32, layout.DRoPE)
+			if ropeBad {
+				rope[0] = value
+			} else {
+				nope[0] = value
+			}
+			record, err := layout.V41KVQuantizeRow(nope, rope)
+			if !errors.Is(err, ErrV41KVCacheLayout) || record != nil {
+				t.Fatalf("nonfinite input=%g rope=%t: record=%x err=%v", value, ropeBad, record, err)
+			}
+		}
+	}
+}

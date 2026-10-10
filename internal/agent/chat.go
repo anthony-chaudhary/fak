@@ -1116,6 +1116,7 @@ func (p *HTTPPlanner) ProbeReachability(ctx context.Context) (int, error) {
 // omitted field keeps the planner default, so a no-opt call is identical to the
 // pre-seam behavior.
 func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
+	offered := offeredToolsFor(ctx, tools)
 	call, err := p.prepareUpstream(messages, tools, false, opts...)
 	if err != nil {
 		return nil, err
@@ -1286,19 +1287,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		if err != nil {
 			return nil, fmt.Errorf("planner: %s: %w", call.adapter.Provider(), err)
 		}
-		if len(tools) > 0 {
-			comp = normalizeCompletionToolCalls(comp)
-		} else {
-			// With no offered tools, name-bearing JSON and tool-shaped text are
-			// answers. Preserve them while retaining native-call normalization and
-			// the existing fail-closed signal for calls announced but not decoded.
-			normalizeToolCallFields(&comp.Message)
-			if len(comp.Message.ToolCalls) > 0 {
-				comp.FinishReason = "tool_calls"
-			} else if finishReasonClaimsToolCalls(comp.FinishReason) {
-				comp.ToolCallsDropped = true
-			}
-		}
+		comp = normalizeCompletionToolCalls(comp, offered)
 		attachProviderReportedCost(comp, raw)
 		p.attachProviderCacheTelemetry(comp, call.body, call.adapter.Provider())
 		if call.cacheHint.Requested != nil {

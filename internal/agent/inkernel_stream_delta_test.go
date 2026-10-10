@@ -650,3 +650,193 @@ func TestNativeThinkingBudgetRoutesAroundSpeculation(t *testing.T) {
 		t.Fatalf("budget bypassed target-only sampler: ids=%v err=%v", ids, err)
 	}
 }
+
+// fak-test:runtime medium est=2s lane=default
+func TestInKernelStreamOfferedVerdictOrdering(t *testing.T) {
+	const raw = `before <tool_call>{"name":"Bash","arguments":{}}</tool_call> after`
+	for _, names := range [][]string{nil, {"Read"}, {"Bash"}} {
+		const outputID = 259
+		var doc map[string]any
+		if err := json.Unmarshal([]byte(buildByteVocab()), &doc); err != nil {
+			t.Fatal(err)
+		}
+		doc["added_tokens"] = append(doc["added_tokens"].([]any), map[string]any{"id": outputID, "content": raw, "special": true})
+		encoded, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tok, err := tokenizer.ParseJSON(encoded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := model.NewSynthetic(tinyConcurrencyConfig())
+		p := NewInKernelPlanner(m, tok, "offered-stream", false, nil, false)
+		p.quant = false
+		tools := make([]ToolDef, len(names))
+		for i, name := range names {
+			tools[i] = ToolDef{Type: "function", Function: ToolDefFunction{Name: name}}
+		}
+		var streamed strings.Builder
+		comp, err := p.CompleteStream(context.Background(), func(piece string) error { streamed.WriteString(piece); return nil }, []Message{{Role: RoleUser, Content: "probe"}}, tools,
+			WithPerTokenStream(true), WithMaxTokens(1), WithLogitBias(map[int]float64{outputID: 100}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if streamed.String() != comp.Message.Content {
+			t.Fatalf("names=%v streamed=%q final=%q", names, streamed.String(), comp.Message.Content)
+		}
+		if len(names) == 0 || names[0] != "Bash" {
+			if comp.Message.Content != raw || comp.ToolCallsDropped || len(comp.Message.ToolCalls) != 0 {
+				t.Fatalf("unoffered native result: %+v", comp)
+			}
+		} else if len(comp.Message.ToolCalls) != 1 {
+			t.Fatalf("offered call not lifted: %+v", comp)
+		}
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestInKernelDeferredToolVerdictSinkFailure(t *testing.T) {
+	sentinel := errors.New("sink closed")
+	calls := 0
+	p := newInKernelStreamProjector(func(string) error {
+		calls++
+		if calls > 1 {
+			return sentinel
+		}
+		return nil
+	}, nil)
+	p.spans.deferTools = true
+	const raw = `before <tool_call>{"name":"Bash"}</tool_call> after`
+	for _, piece := range []string{"before ", "<tool_", `call>{"name":"Bash"}</tool_call> after`} {
+		if err := p.feed(piece); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("tail emitted before verdict: %d", calls)
+	}
+	if err := p.finish(raw, true); !errors.Is(err, sentinel) {
+		t.Fatalf("finish error=%v", err)
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestInKernelDeferredVerdictWhitespaceBoundaries(t *testing.T) {
+	for _, raw := range []string{
+		`before <tool_call>{"name":"Bash","arguments":{}}</tool_call>`,
+		`  before <tool_call>{"name":"Bash","arguments":{}}</tool_call> after  `,
+		`before <tool_call>{"name":"Bash","arguments":{}}</tool_call> after`,
+		`{"name":"Bash","arguments":{}}`,
+		"```json\n{\"name\":\"Bash\",\"arguments\":{}}\n```",
+		"ordinary text with trailing spaces  ",
+		"\u00a0before <tool_call>{\"name\":\"Bash\",\"arguments\":{}}</tool_call>",
+		"before\u2003<tool_call>{\"name\":\"Bash\",\"arguments\":{}}</tool_call>",
+		"before café \u00a0",
+		"before\xc2",
+	} {
+		for _, offered := range []OfferedTools{{}, offeredTestNames("Read"), offeredTestNames("Bash")} {
+			var out strings.Builder
+			p := newInKernelStreamProjector(func(piece string) error { out.WriteString(piece); return nil }, nil)
+			p.spans.deferTools = true
+			for _, b := range []byte(raw) {
+				if err := p.feed(string(b)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			final := LiftTextToolCalls(Message{Content: raw}, offered).Content
+			if err := p.finish(final, true); err != nil {
+				t.Fatalf("raw=%q finish=%v", raw, err)
+			}
+			if out.String() != final {
+				t.Fatalf("raw=%q got=%q want=%q", raw, out.String(), final)
+			}
+		}
+	}
+	var out strings.Builder
+	p := newInKernelStreamProjector(func(piece string) error { out.WriteString(piece); return nil }, nil)
+	p.spans.deferTools = true
+	p.spans.cap = 8
+	raw := "before" + strings.Repeat(" \t", 20) + "after"
+	for _, b := range []byte(raw) {
+		if err := p.feed(string(b)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !p.spans.deferred || p.spans.trailingSpace.Len() > 8 {
+		t.Fatal("whitespace hold exceeded cap")
+	}
+	if err := p.finish(raw, true); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != raw {
+		t.Fatal("overflow deferral lost content")
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestInKernelNoToolLateReasoningKeepsLegacyStatus(t *testing.T) {
+	for _, answer := range []string{"answer", "```go\nfmt.Println(1)\n```", "[1,2]", `{"value":1}`} {
+		var out strings.Builder
+		p := newInKernelStreamProjector(func(piece string) error { out.WriteString(piece); return nil }, nil)
+		p.spans.deferTools = true
+		if err := p.feed("prose<think>reasoning</think>" + answer); err != nil {
+			t.Fatal(err)
+		}
+		if hasTextToolCandidate(answer) {
+			t.Fatalf("ordinary answer marked as tool: %q", answer)
+		}
+		if err := p.finish(answer, hasTextToolCandidate(answer)); err != nil {
+			t.Fatalf("new error on existing no-tool late reasoning: %v", err)
+		}
+		// The historical prefix mismatch remains deferred, without losing newly
+		// held ordinary code or nameless JSON after the reasoning span.
+		if out.String() != "prose"+answer {
+			t.Fatalf("legacy stream=%q", out.String())
+		}
+	}
+}
+
+// fak-test:runtime medium est=2s lane=default
+func TestInKernelLegacyReasoningMultipleClosesAndSinkFailure(t *testing.T) {
+	for _, answer := range []string{"answer", "[1,2]", "```go\nx()\n```"} {
+		var out strings.Builder
+		p := newInKernelStreamProjector(func(piece string) error { out.WriteString(piece); return nil }, nil)
+		p.spans.deferTools = true
+		raw := "prose<think>first</think>middle<think>second</think>" + answer
+		for _, b := range []byte(raw) {
+			if err := p.feed(string(b)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		final := inKernelDecodeToCompletion(t, raw, "stop", nil).Message.Content
+		if final != answer {
+			t.Fatalf("actual Complete final=%q want=%q", final, answer)
+		}
+		if err := p.finish(final, false); err != nil {
+			t.Fatal(err)
+		}
+		if out.String() != "prosemiddle"+answer {
+			t.Fatalf("duplicated or lost suffix: %q", out.String())
+		}
+	}
+	sentinel := errors.New("legacy suffix sink closed")
+	writes := 0
+	p := newInKernelStreamProjector(func(string) error {
+		writes++
+		if writes > 1 {
+			return sentinel
+		}
+		return nil
+	}, nil)
+	p.spans.deferTools = true
+	if err := p.feed("prose<think>reasoning</think>[1,2]"); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.finish("[1,2]", false); !errors.Is(err, sentinel) {
+		t.Fatalf("sink error=%v", err)
+	}
+	if writes != 2 {
+		t.Fatalf("writes=%d", writes)
+	}
+}

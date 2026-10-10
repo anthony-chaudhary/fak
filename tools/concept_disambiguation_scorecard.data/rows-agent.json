@@ -127,10 +127,50 @@
       "definition": "Config predicate reporting whether a *KVCache is a COMPLETE session prefix for this architecture — i.e. whether cloning the cache carries the whole of what the session already ingested. True for cached architectures whose per-layer K/V rows are the entire state; false for the gemma4 recompute bridge, whose state is the token history and whose cache stays empty.",
       "distinction": "ExactSpanSupported asks whether an engine can EVICT an exact span from a cache it already holds; this asks whether the cache IS the state at all. A recompute architecture answers yes to neither, but for different reasons: eviction is inert because there are no rows, while prefix reuse is unsound because the rows were never where the prefix lived.",
       "distinct_from": [
-        "x2-support-maturity-exactspansupported"
+        "x2-support-maturity-exactspansupported",
+        "executiondeadlineadmissionsupported"
       ],
       "aliases": [],
       "grounding": "KVPrefixReuseSupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "executiondeadlineadmissionsupported",
+      "canonical": "ExecutionDeadlineAdmissionSupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Reports whether the normal request-owned prefix acquisition route can perform deadline admission using usable cached-prefix credit; speculative routes remain cold-admitted.",
+      "distinction": "KVPrefixReuseSupported concerns whether a KV cache contains complete reusable session state; this predicate concerns whether this planner route has the owned-prefix execution boundary required to grant deadline credit.",
+      "distinct_from": [
+        "kvprefixreusesupported",
+        "inkerneldevicegate"
+      ],
+      "aliases": [],
+      "grounding": "ExecutionDeadlineAdmissionSupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "inkerneldevicegate",
+      "canonical": "inKernelDeviceGate",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Owns the planner-owned single native forward slot shared by ordinary requests and decode cohorts, supporting cancellation-aware waiters without detached lock-acquisition goroutines.",
+      "distinction": "ExecutionDeadlineAdmissionSupported identifies deadline-credit capability at a prefix boundary; this gate controls exclusive concurrent access to the device forward slot and does not estimate deadline feasibility.",
+      "distinct_from": [
+        "executiondeadlineadmissionsupported"
+      ],
+      "aliases": [],
+      "grounding": "inKernelDeviceGate",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

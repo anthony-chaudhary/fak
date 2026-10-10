@@ -406,3 +406,247 @@ func TestV41IncrementalDeviceExpertSelectedStageCause(t *testing.T) {
 		}
 	}
 }
+
+// Full-only dtype staging deliberately uses host activation after two device
+// projection readbacks. The generic/reduced device SwiGLU ledgers stay intact.
+// fak-test:runtime slow est=30s lane=default
+func TestV41FullRoutedSessionBF16Ledger(t *testing.T) {
+	for _, role := range []bool{false, true} {
+		for _, tokenMajor := range []bool{false, true} {
+			previous := v41ForceTokenMajor
+			v41ForceTokenMajor = tokenMajor
+			func() {
+				defer func() { v41ForceTokenMajor = previous }()
+				m := v41IncrementalExpertFixture(t, true, false)
+				if !role {
+					// Retain full width and actual quant expert stores while
+					// selecting plain attention rather than a compressed source.
+					m.Cfg.DeepSeekV41.CompressRatios = []int{0}
+					m.Cfg.DeepSeekV41.IndexSourceLayerIDs = nil
+					m.Cfg.DeepSeekV41.KVSourceLayerIDs = nil
+				}
+				if full, err := v41ForwardGeometry(m.Cfg); err != nil || !full {
+					t.Fatalf("full fixture geometry=%t err=%v", full, err)
+				}
+				backend := &v41HalSeamBackend{Backend: compute.Default()}
+				s, err := m.NewBackendSessionChecked(backend)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer s.Close()
+				ids := []int{1, 2, 3}
+				cold := s.Prefill(ids)
+				if !s.v41IncrementalEligible() {
+					t.Fatal("full fixture did not seed incremental state")
+				}
+				seed := v41ClampedActivationPhase(t, m, "prefill")
+				seedRows := len(ids) * m.Cfg.NumExpertsPerTok * m.Cfg.NumLayers
+				if seed["expert_activation_device_calls"] != 0 || seed["expert_activation_host_calls"] != float64(seedRows) || seed["expert_activation_readback_bytes"] != float64(8*seedRows*m.Cfg.MoEIntermediateSize) {
+					t.Fatalf("cold role=%t tokenMajor=%t activation=%v rows=%d", role, tokenMajor, seed, seedRows)
+				}
+				assertV41LogitsClose(t, cold, lastLogits(m.Forward(ids)), "cold full routed BF16 session vs host")
+				for _, suffix := range []bool{false, true} {
+					phase := "decode"
+					next := []int{4}
+					if suffix {
+						phase = "prefill"
+						next = []int{5, 6}
+					}
+					before := v41ClampedActivationPhase(t, m, phase)
+					callbacks := v41IncrementalExpertPhase(t, m, phase)
+					var got []float32
+					if suffix {
+						got = s.Prefill(next)
+					} else {
+						got = s.Step(next[0])
+					}
+					ids = append(ids, next...)
+					assertV41LogitsClose(t, got, lastLogits(m.Forward(ids)), "full routed BF16 session vs host")
+					after := v41ClampedActivationPhase(t, m, phase)
+					now := v41IncrementalExpertPhase(t, m, phase)
+					rows := len(next) * m.Cfg.NumExpertsPerTok * m.Cfg.NumLayers
+					// Cold host Forward above charges contraction but never this device
+					// projection-readback/activation ledger.
+					if after["expert_activation_device_calls"]-before["expert_activation_device_calls"] != 0 || after["expert_activation_host_calls"]-before["expert_activation_host_calls"] != float64(rows) || after["expert_activation_readback_bytes"]-before["expert_activation_readback_bytes"] != float64(8*rows*m.Cfg.MoEIntermediateSize) {
+						t.Fatalf("role=%t tokenMajor=%t suffix=%t activation before=%v after=%v", role, tokenMajor, suffix, before, after)
+					}
+					if now["incremental_device_gate_up_calls"]-callbacks["incremental_device_gate_up_calls"] != float64(rows) || now["incremental_device_down_calls"]-callbacks["incremental_device_down_calls"] != float64(rows) {
+						t.Fatalf("incremental callbacks before=%v after=%v", callbacks, now)
+					}
+				}
+			}()
+		}
+	}
+}
+
+// CPU recorder injects native error representations at real selected adapter calls.
+type v41RoutedFailureBackend struct {
+	*v41HalSeamBackend
+	armed                            bool
+	site                             string
+	ordinal, seen, trips, operations int
+	cause                            any
+	live                             map[compute.Buffer]bool
+}
+
+func (b *v41RoutedFailureBackend) trip(site string) {
+	if b.armed && b.site == site {
+		b.seen++
+		if b.seen == b.ordinal {
+			b.trips++
+			panic(b.cause)
+		}
+	}
+}
+func (b *v41RoutedFailureBackend) Upload(x compute.Tensor, dt compute.Dtype) compute.Tensor {
+	b.operations++
+	if len(x.Shape) == 2 {
+		b.trip("staging")
+	}
+	y := b.v41HalSeamBackend.Upload(x, dt)
+	if b.armed && len(x.Shape) == 1 {
+		b.live[y.Buf()] = true
+	}
+	return y
+}
+func (b *v41RoutedFailureBackend) MatMul(w, x compute.Tensor) compute.Tensor {
+	b.operations++
+	b.trip("matmul")
+	y := b.v41HalSeamBackend.MatMul(w, x)
+	if b.armed {
+		b.live[y.Buf()] = true
+	}
+	return y
+}
+func (b *v41RoutedFailureBackend) Read(x compute.Tensor) []float32 {
+	b.operations++
+	b.trip("read")
+	return b.v41HalSeamBackend.Read(x)
+}
+func (b *v41RoutedFailureBackend) Free(x compute.Tensor) {
+	delete(b.live, x.Buf())
+	b.v41HalSeamBackend.Free(x)
+}
+
+// Unmeasured estimate. Source contracts only, no physical native failure claim.
+// fak-test:runtime slow est=30s lane=default
+func TestV41RoutedSelectedFailuresRetireSession(t *testing.T) {
+	for _, tc := range []struct {
+		name, site string
+		down       bool
+		ordinal    int
+	}{
+		{"gate GEMM", "matmul", false, 1}, {"up GEMM", "matmul", false, 2},
+		{"gate read", "read", false, 1}, {"up read", "read", false, 2},
+		{"down GEMM", "matmul", true, 1}, {"down read", "read", true, 1},
+		{"gate staging", "staging", false, 1}, {"up staging", "staging", false, 2}, {"down staging", "staging", true, 1},
+	} {
+		for _, primary := range []any{&compute.BackendError{Backend: "selected", Class: compute.VulkanClassExecutionFailed, Err: errors.New("selected native failure")}, errors.New("rocm: selected expert: native call failed"), &struct{ marker int }{41}} {
+			t.Run(tc.name, func(t *testing.T) {
+				m := v41IncrementalExpertFixture(t, true, false)
+				b := &v41RoutedFailureBackend{v41HalSeamBackend: &v41HalSeamBackend{Backend: compute.Default()}, site: tc.site, ordinal: tc.ordinal, cause: primary, live: map[compute.Buffer]bool{}}
+				s, err := m.NewBackendSessionChecked(b)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(s.Close)
+				gate, down := s.v41ExpertGateUpFunc(), s.v41ExpertDownFunc()
+				invoke := func() {
+					if tc.down {
+						_, _, err = down(0, "ffn.experts.0", make([]float32, m.Cfg.MoEIntermediateSize))
+					} else {
+						_, _, err = gate(0, "ffn.experts.0", make([]float32, m.Cfg.HiddenSize))
+					}
+				}
+				var before *v41ForwardSnapshot
+				if tc.site != "staging" {
+					s.Prefill([]int{1, 2, 3})
+					before = captureV41ForwardSnapshot(s.v41Forward)
+					originalGate, originalDown := s.v41Forward.expertGateUp, s.v41Forward.expertDown
+					if tc.down {
+						s.v41Forward.expertDown = func(l int, stem string, x []float32) ([]float32, v41ExpertDownOutcome, error) {
+							b.armed = true
+							b.seen = 0
+							defer func() { b.armed = false }()
+							return originalDown(l, stem, x)
+						}
+					} else {
+						s.v41Forward.expertGateUp = func(l int, stem string, x []float32) ([]float32, v41ExpertGateUpOutcome, error) {
+							b.armed = true
+							b.seen = 0
+							defer func() { b.armed = false }()
+							return originalGate(l, stem, x)
+						}
+					}
+				} else {
+					b.armed = true
+				}
+				var got any
+				func() {
+					defer func() { got = recover() }()
+					if tc.site == "staging" {
+						invoke()
+					} else {
+						s.Step(4)
+					}
+				}()
+				b.armed = false
+				var closed *BackendForwardOperationError
+				if !s.BackendSessionClosed() || !errors.As(s.halFailure, &closed) || closed.Layer != 0 || closed.Path != "v41-routed-expert" || b.trips != 1 || len(b.live) != 0 {
+					t.Fatalf("selected failure did not retire/release: latch=%v trips=%d live=%d", s.halFailure, b.trips, len(b.live))
+				}
+				wantStage := "gate/up"
+				if tc.down {
+					wantStage = "down"
+				}
+				if closed.Stage != wantStage {
+					t.Fatal("selected stage lost")
+				}
+				if _, typed := primary.(*compute.BackendError); typed {
+					if cause, ok := got.(error); tc.site != "staging" && (!ok || !errors.Is(cause, primary.(error))) {
+						t.Fatalf("typed panic cause lost: %v", got)
+					}
+					if tc.site == "staging" && !errors.Is(err, primary.(error)) {
+						t.Fatal("typed callback error cause lost")
+					}
+				} else if got != primary {
+					t.Fatalf("original panic identity lost: %v", got)
+				}
+				if cause, ok := primary.(error); ok && !errors.Is(s.halFailure, cause) {
+					t.Fatal("latched cause lost")
+				}
+				if tc.site != "staging" && !reflect.DeepEqual(before, captureV41ForwardSnapshot(s.v41Forward)) {
+					t.Fatal("failure changed continuation state")
+				}
+				calls := b.operations
+				var retry any
+				func() { defer func() { retry = recover() }(); invoke() }()
+				if retry != closed || b.operations != calls {
+					t.Fatal("retained callback retried")
+				}
+				func() { defer func() { retry = recover() }(); s.Step(4) }()
+				if retry != closed || b.operations != calls {
+					t.Fatal("closed public entry retried")
+				}
+			})
+		}
+	}
+}
+
+// Unmeasured estimate; missing expert admission remains an ordinary decline.
+// fak-test:runtime fast est=100ms lane=default
+func TestV41RoutedUnservableExpertStillDeclines(t *testing.T) {
+	m := v41IncrementalExpertFixture(t, true, false)
+	b := &v41RoutedFailureBackend{v41HalSeamBackend: &v41HalSeamBackend{Backend: compute.Default()}, live: map[compute.Buffer]bool{}}
+	s, err := m.NewBackendSessionChecked(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	calls := b.operations
+	_, g, ge := s.v41ExpertGateUpFunc()(0, "ffn.experts.999", make([]float32, m.Cfg.HiddenSize))
+	_, d, de := s.v41ExpertDownFunc()(0, "ffn.experts.999", make([]float32, m.Cfg.MoEIntermediateSize))
+	if g != v41GateUpDeclined || d != v41DownDeclined || ge != nil || de != nil || s.BackendSessionClosed() || b.operations != calls {
+		t.Fatal("unservable expert did not decline without device work")
+	}
+}

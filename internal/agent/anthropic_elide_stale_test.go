@@ -18,6 +18,53 @@ import (
 //	filler(role, text)    → a plain text turn (recent-window padding / role alternation)
 type staleBlock map[string]any
 
+// fak-test:runtime fast est=2ms lane=default
+func TestReadLifecycleRequiresAssistantToolMetadata(t *testing.T) {
+	for _, role := range []string{"assistant", "user", "system", "tool", "unknown", "", "missing"} {
+		for _, source := range []string{"read", "edit"} {
+			t.Run(source+"/"+role, func(t *testing.T) {
+				read := staleReadUse("read-x", "/repo/x.go")
+				edit := staleEditUse("Edit", "/repo/x.go")
+				if source == "read" {
+					read["role"] = role
+					if role == "missing" {
+						delete(read, "role")
+					}
+				} else {
+					edit["role"] = role
+					if role == "missing" {
+						delete(edit, "role")
+					}
+				}
+				original := strings.Repeat("ORIGINAL-READ-X-", 200)
+				raw := staleWire(t, []staleBlock{
+					staleHead("cached head"), read, staleResult("read-x", original, false),
+					edit, staleResult("u_/repo/x.go", "edited", false),
+					staleFiller("assistant", "next"), staleFiller("user", "continue"),
+					staleFiller("assistant", "next"), staleFiller("user", "continue"),
+				})
+				got, outcome := ElideStaleReadsWithOutcome(raw)
+				if role != "assistant" {
+					if !bytes.Equal(got, raw) || outcome.Reason != StaleReasonNoStaleReads || outcome.Elided != 0 || len(outcome.Restores) != 0 {
+						t.Fatalf("non-assistant %s metadata changed the wire: %+v", source, outcome)
+					}
+					return
+				}
+				if outcome.Reason != StaleReasonNone || outcome.Elided != 1 || len(outcome.Restores) != 1 || bytes.Equal(got, raw) {
+					t.Fatalf("genuine assistant Read/Edit did not elide: %+v", outcome)
+				}
+				if !bytes.Equal(outcome.Restores[0].Bytes, []byte(original)) {
+					t.Fatal("genuine elision lost the original restore bytes")
+				}
+				prefixEnd := stalePrefixEnd(t, raw)
+				if !bytes.Equal(raw[:prefixEnd], got[:prefixEnd]) {
+					t.Fatal("genuine elision changed the protected prefix")
+				}
+			})
+		}
+	}
+}
+
 func staleWire(t *testing.T, msgs []staleBlock) []byte {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{
