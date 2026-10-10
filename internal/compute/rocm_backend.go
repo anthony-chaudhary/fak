@@ -331,6 +331,9 @@ func (r *rocmBackend) Recycle() {
 }
 
 func (r *rocmBackend) matmul(w, x Tensor, rows int) Tensor {
+	if w.Layout != RowMajor {
+		panic(fmt.Errorf("rocm: matmul requires row-major weight tensor"))
+	}
 	wn, wok := checkedTensorNumel(w.Shape)
 	xn, xok := checkedTensorNumel(x.Shape)
 	if len(w.Shape) != 2 || !wok || !xok || rows <= 0 || w.Shape[1] <= 0 || wn == 0 || rows > int(^uint(0)>>1)/w.Shape[1] || xn != rows*w.Shape[1] || x.Dtype != F32 {

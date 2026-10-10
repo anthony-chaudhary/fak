@@ -312,3 +312,55 @@ func TestROCmBackendPackedMatMulPaths(t *testing.T) {
 		}
 	}
 }
+
+// fak-test:runtime fast est=1ms
+func TestROCmBackendWeightDtypeAdmission(t *testing.T) {
+	r := &rocmBackend{}
+	for _, tc := range []struct {
+		dtype Dtype
+		want  bool
+	}{
+		{F32, true}, {Q8_0, true}, {Q4_K, true}, {Q5_K, true}, {Q6_K, true},
+		{F16, false}, {BF16, false}, {I8, false}, {I4, false}, {FP8, false},
+		{Q2_0, false}, {Q2_K, false}, {Q3_K, false}, {IQ3_XXS, false},
+		{IQ3_S, false}, {IQ2_XXS, false}, {FP4, false}, {IQ4_XS, false},
+		{IQ2_S, false}, {IQ2_XS, false}, {IQ1_S, false}, {Dtype(255), false},
+	} {
+		if got := r.SupportsDeviceWeightDtype(tc.dtype); got != tc.want {
+			t.Errorf("dtype %s (%d): support = %v, want %v", tc.dtype, tc.dtype, got, tc.want)
+		}
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestROCmBackendRejectsWeightLayoutBeforeDeviceAccess(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		layout Layout
+		rows   int
+	}{
+		{"decode_colmajor", ColMajor, 1},
+		{"decode_tiled", Tiled, 1},
+		{"batch_colmajor", ColMajor, 2},
+		{"batch_tiled", Tiled, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &rocmBackend{}
+			// Metadata-only operands must be rejected before any device access or allocation.
+			w := Tensor{Dtype: F32, Layout: tc.layout, Shape: []int{2, 32}}
+			x := Tensor{Dtype: F32, Layout: RowMajor, Shape: []int{tc.rows, 32}}
+			defer func() {
+				got := recover()
+				err, ok := got.(error)
+				if !ok || err.Error() != "rocm: matmul requires row-major weight tensor" {
+					t.Fatalf("panic = %v, want weight-layout rejection before device access", got)
+				}
+			}()
+			if tc.rows == 1 {
+				r.MatMul(w, x)
+			} else {
+				r.BatchedMatMul(w, x, tc.rows)
+			}
+		})
+	}
+}
