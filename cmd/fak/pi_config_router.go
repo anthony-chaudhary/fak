@@ -829,6 +829,14 @@ func planPiRouterCompaction(raw map[string]interface{}, plan *piRouterPlan, def 
 		b := plan.Budgets[m.ID]
 		cp.ReserveTokens = max(cp.ReserveTokens, b.MaxOutputTokens+harnesskit.SummaryPromptOverheadTokens+harnesskit.MinMarginTokens)
 	}
+	// A raised reserve lowers every trigger, so the kept tail is re-bounded per
+	// model at the shared reserve; the verification below refuses what still fails.
+	for _, m := range plan.Models {
+		b := plan.Budgets[m.ID]
+		summary := min(cp.ReserveTokens*4/5, b.MaxOutputTokens)
+		safe := harnesskit.MaxSafeKeepTokens(b.ResidentTarget-cp.ReserveTokens, harnesskit.DefaultFixedPromptTokens, summary)
+		cp.KeepRecentTokens = max(harnesskit.MinKeepRecentTokens, min(cp.KeepRecentTokens, safe))
+	}
 	for _, m := range plan.Models {
 		b := plan.Budgets[m.ID]
 		trigger := b.ResidentTarget - cp.ReserveTokens

@@ -67,6 +67,9 @@ var HaloPiColdAdmission = harnesskit.ColdAdmission{
 	DecodeTokens:        1024,
 	DecodeTokensPerSec:  21,
 	TurnGrowthTokens:    4096,
+	// Raise to the credited prefix share once gateway admission credits cached
+	// tokens; the trigger then rises as 1/(1-fraction) with no other change.
+	CachedPromptFraction: 0,
 }
 
 // PiServedByHalo reports whether a router catalog owner names a Halo appliance

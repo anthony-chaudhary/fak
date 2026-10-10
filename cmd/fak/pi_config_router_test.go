@@ -181,8 +181,8 @@ func TestPiConfigFromRouterPlanThenWriteIsIdempotent(t *testing.T) {
 	if len(plan.Changed) != 1 || plan.Changed[0].ID != "org/model-a" || plan.Changed[0].FromWindow != 500000 || plan.Changed[0].ToWindow != 131072 {
 		t.Fatalf("Changed = %+v, want org/model-a 500000 -> 131072", plan.Changed)
 	}
-	if c := plan.Compaction; c.Model != "org/model-a" || !c.Change || c.ReserveTokens != 19456 || c.KeepRecentTokens != 4096 {
-		t.Fatalf("Compaction = %+v, want shared reserve 19456 keep 4096", c)
+	if c := plan.Compaction; c.Model != "org/model-a" || !c.Change || c.ReserveTokens != 19456 || c.KeepRecentTokens != 9984 {
+		t.Fatalf("Compaction = %+v, want shared reserve 19456 keep 9984", c)
 	}
 	if plan.Default.Served || plan.Default.Pick != "org/model-a" {
 		t.Fatalf("Default = %+v, want stale custom-model replaced by org/model-a", plan.Default)
@@ -242,8 +242,8 @@ func TestPiConfigFromRouterPlanThenWriteIsIdempotent(t *testing.T) {
 		t.Fatalf("settings = %v, want defaultModel org/model-a with theme preserved", settings)
 	}
 	block, _ := settings["compaction"].(map[string]any)
-	if block["enabled"] != true || block["reserveTokens"] != float64(19456) || block["keepRecentTokens"] != float64(4096) {
-		t.Fatalf("settings compaction = %v, want enabled, shared reserve 19456, keep 4096", block)
+	if block["enabled"] != true || block["reserveTokens"] != float64(19456) || block["keepRecentTokens"] != float64(9984) {
+		t.Fatalf("settings compaction = %v, want enabled, shared reserve 19456, keep 9984", block)
 	}
 	sBackups := piBackups(t, settingsPath)
 	if len(sBackups) != 1 {
@@ -538,17 +538,17 @@ func TestPiConfigFromRouterSharedCompaction(t *testing.T) {
 				t.Fatalf("defaultModel=%q, want the selected first model %q", settings.DefaultModel, rows[0]["id"])
 			}
 			c := settings.Compaction
-			if !c.Enabled || c.Reserve != 19456 || c.Keep != 4096 {
-				t.Fatalf("shared compaction=%+v, want enabled, reserve19456 keep4096 in either model order", c)
+			if !c.Enabled || c.Reserve != 19456 || c.Keep != 9984 {
+				t.Fatalf("shared compaction=%+v, want enabled, reserve19456 keep9984 in either model order", c)
 			}
 			models := readPiFakModels(t, modelsPath)
 			if len(models) != 2 {
 				t.Fatalf("models=%+v, want both original windows", models)
 			}
 			for _, m := range models {
-				wantWindow, wantReclaim := 131072, 75572
+				wantWindow, wantReclaim := 131072, 69684
 				if m.ID == "small" {
-					wantWindow, wantReclaim = 65536, 17408
+					wantWindow, wantReclaim = 65536, 11520
 				}
 				trigger := m.ContextWindow - c.Reserve
 				summary := min(c.Reserve*4/5, m.MaxTokens)

@@ -109,8 +109,8 @@ func TestPiConfigFromRouterHaloCompactionFitsColdAdmission(t *testing.T) {
 	if coldSeconds > 0.9*600 {
 		t.Fatalf("halo trigger %d (reserve %d) prices %.0fs cold, above the 540s admission bound", trigger, r.reserve, coldSeconds)
 	}
-	if r.reserve != 56320 || r.keep != 4608 {
-		t.Fatalf("shared compaction reserve=%d keep=%d, want 56320/4608 (Halo trigger 74752)", r.reserve, r.keep)
+	if r.reserve != 56320 || r.keep != 20000 {
+		t.Fatalf("shared compaction reserve=%d keep=%d, want 56320/20000 (Halo trigger 74752; the kept tail is not squeezed below 20000)", r.reserve, r.keep)
 	}
 	assertSharedCompactionSafe(t, r)
 }
