@@ -784,9 +784,8 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	if *auto {
 		argv = append(argv, "--auto")
 	}
-	if *pure {
-		argv = append(argv, "--pure")
-	}
+	// OpenCode v2 `run` rejects --pure; pure mode is enforced by stripping
+	// plugins from the child config in qualifyOpsRunConfig instead.
 	// Interpolation happens in the child after guard injects its local endpoint.
 	// Start from a fresh config: ambient OpenCode configuration belongs to a
 	// different trust boundary and must not alter this run's provider route.

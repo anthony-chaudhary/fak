@@ -540,8 +540,15 @@ func TestOpsRunConfigPolicy(t *testing.T) {
 			if !tc.wantLaunch && launches != 0 {
 				t.Fatalf("unapproved inherited config launched child: %q", argv)
 			}
-			if tc.name == "pure_disables_plugin" && (childConfig["plugin"] != nil || !strings.Contains(strings.Join(argv, "\x00"), "--pure")) {
-				t.Fatalf("pure run retained plugin or lost --pure: config=%#v argv=%q", childConfig, argv)
+			if tc.name == "pure_disables_plugin" {
+				if childConfig == nil || childConfig["plugin"] != nil {
+					t.Fatalf("pure run did not strip plugin from child config: %#v", childConfig)
+				}
+				for _, arg := range argv {
+					if arg == "--pure" {
+						t.Fatalf("pure run forwarded --pure, which OpenCode v2 run rejects: argv=%q", argv)
+					}
+				}
 			}
 			data, err := os.ReadFile(receipt)
 			if err != nil {
