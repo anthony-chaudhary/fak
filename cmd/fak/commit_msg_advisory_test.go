@@ -236,7 +236,7 @@ func TestCommitMsgAdvisory_doesNotAlterTheCommittedMessage(t *testing.T) {
 	}); code != 0 {
 		t.Fatalf("want exit 0, got %d (stderr=%q)", code, errb.String())
 	}
-	if want := subject + "\n\nBody stays here."; got.Message != want {
+	if want := subject + "\n\nBody stays here.\n\nVerification-Waiver: no-build-check\n"; got.Message != want {
 		t.Fatalf("advisory must not rewrite the message\n got %q\nwant %q", got.Message, want)
 	}
 }

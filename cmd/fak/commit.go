@@ -321,7 +321,8 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	// uncached changed-package tests. The typed outcome rides on Result.BuildCheck into --json,
 	// and a gate that could not FINISH refuses unless the caller opted into fail-open (#6006).
 	buildCheckOutcome, buildCheckDetail := safecommit.BuildCheckDisabled, ""
-	if !*noBuildCheck && os.Getenv("FAK_COMMIT_BUILD_CHECK") != "off" {
+	buildCheckOff := os.Getenv("FAK_COMMIT_BUILD_CHECK") == "off"
+	if !*noBuildCheck && !buildCheckOff {
 		buildCheckOutcome, buildCheckDetail = executeCommitBuildCheck(stderr, root, paths, *buildCheckTimeout)
 	} else {
 		oldFleet := os.Getenv("FLEET_BUILDCHECK_GUARD")
@@ -339,6 +340,8 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		// same red tree); BUILD_CHECK_TIMEOUT is contention (exit 3: the archive lost a race).
 		return refuseCommitBuildCheck(stdout, stderr, paths, buildCheck, buildReason, *asJSON)
 	}
+	waiver := commitVerificationWaiver(*noBuildCheck, buildCheckOff, buildCheck)
+	message = withVerificationWaiverTrailer(message, waiver)
 
 	// Assess immediately before the writer enters safecommit. This deliberately uses only the
 	// current remote-tracking ref: committing must never hide an implicit fetch or become blocked
@@ -366,11 +369,16 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	res = finalizeCommitEvidence(stderr, root, res, buildCheck, buildCheckOutcome, *push, *requireIssue)
+	waiverErr := recordCommitWaiver(stderr, "fak commit", root, res, waiver)
 
 	if code := emitJSONOrRenderPrefixed(stdout, stderr, "fak commit", *asJSON, res, func(w io.Writer) {
 		renderCommitResult(w, res)
 	}); code != 0 {
 		return code
+	}
+	if waiverErr != nil {
+		fmt.Fprintln(stderr, waiverErr)
+		return safecommit.ExitPostCommitFailure
 	}
 	return commitExitCode(res)
 }
@@ -686,7 +694,8 @@ func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	buildCheckOutcome, buildCheckDetail := safecommit.BuildCheckDisabled, ""
-	if !*noBuildCheck && os.Getenv("FAK_COMMIT_BUILD_CHECK") != "off" {
+	buildCheckOff := os.Getenv("FAK_COMMIT_BUILD_CHECK") == "off"
+	if !*noBuildCheck && !buildCheckOff {
 		buildCheckOutcome, buildCheckDetail = executeCommitBuildCheck(stderr, root, plan.UnionPaths, *buildCheckTimeout)
 	}
 	buildCheck, admitBuild, buildReason := safecommit.DecideBuildCheck(buildCheckOutcome, buildCheckDetail, *allowBuildCheckTimeout)
@@ -713,10 +722,11 @@ func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 		return safecommit.ExitRefused
 	}
 
+	waiver := commitVerificationWaiver(*noBuildCheck, buildCheckOff, buildCheck)
 	commitRes, err := commitFn(context.Background(), safecommit.Options{
 		Dir:     root,
 		Paths:   plan.UnionPaths,
-		Message: plan.Subject,
+		Message: withVerificationWaiverTrailer(plan.Subject, waiver),
 		Trunk:   *trunk,
 		SignOff: !*noSignoff || signoff,
 		Push:    *push,
@@ -740,6 +750,7 @@ func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 	commitRes = safecommit.ScoreResult(commitRes)
 	res.Commit = &commitRes
 	res.Pathset = &pathset
+	waiverErr := recordCommitWaiver(stderr, "fak commit drain", root, commitRes, waiver)
 
 	if commitDrainMayMarkDone(commitRes, pathset.OK) {
 		states := commitDrainDoneStates(plan.IntentIDs)
@@ -760,6 +771,10 @@ func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 		}
 	} else {
 		renderCommitDrainResult(stdout, res)
+	}
+	if waiverErr != nil {
+		fmt.Fprintln(stderr, waiverErr)
+		return safecommit.ExitPostCommitFailure
 	}
 	if !pathset.OK {
 		return 1
