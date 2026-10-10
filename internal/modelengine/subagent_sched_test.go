@@ -862,3 +862,366 @@ func TestSubagentCloseWaitsForInFlightIteration(t *testing.T) {
 		t.Fatal("Tokens remains open after Close")
 	}
 }
+
+func assertSubagentContextEnded(t *testing.T, sub *SubagentSession, wantErr error, wantTokens []int) {
+	t.Helper()
+	select {
+	case <-sub.Done():
+	default:
+		t.Fatalf("%s Done remains open", sub.ID)
+	}
+	if sub.State != SubagentStateCancelled || !errors.Is(sub.Err(), wantErr) || sub.CompletedAt.IsZero() {
+		t.Fatalf("%s state=%s err=%v timestamp=%v", sub.ID, sub.State, sub.Err(), sub.CompletedAt)
+	}
+	if sub.ctx != nil || sub.sess != nil || sub.lastLogits != nil {
+		t.Errorf("%s retains context or model state", sub.ID)
+	}
+	if !slices.Equal(sub.GeneratedTokens, wantTokens) {
+		t.Errorf("%s generated=%v, want %v", sub.ID, sub.GeneratedTokens, wantTokens)
+	}
+	for i, want := range wantTokens {
+		select {
+		case got, ok := <-sub.Tokens():
+			if !ok || got != want {
+				t.Errorf("%s token %d=(%d,%t), want (%d,true)", sub.ID, i, got, ok, want)
+			}
+		default:
+			t.Errorf("%s token %d missing", sub.ID, i)
+		}
+	}
+	select {
+	case _, ok := <-sub.Tokens():
+		if ok {
+			t.Errorf("%s published an extra token", sub.ID)
+		}
+	default:
+		t.Errorf("%s Tokens remains open", sub.ID)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestSubagentContextRejectsCanceledAdmission(t *testing.T) {
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	expired, expire := context.WithDeadline(context.Background(), time.Unix(1, 0))
+	defer expire()
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		err  error
+	}{{"canceled", canceled, context.Canceled}, {"expired", expired, context.DeadlineExceeded}} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := DefaultSubagentSchedulerConfig()
+			// Intentionally has no weights: reaching Prefill would fail. Rejected
+			// admissions must not touch the model, even with a nonempty prompt.
+			cfg.Model = &model.Model{}
+			sched, err := NewSubagentScheduler(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer sched.Close()
+			sub, err := sched.Admit(tc.ctx, tc.name, []int{1}, 2)
+			if sub != nil || !errors.Is(err, tc.err) {
+				t.Fatalf("Admit=(%v,%v), want nil/%v", sub, err, tc.err)
+			}
+			if sched.Receipt().TotalAdmitted != 0 || sched.ActiveCount() != 0 || sched.WaitingCount() != 0 {
+				t.Fatal("rejected admission changed scheduling state")
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestSubagentContextCancelsEveryState(t *testing.T) {
+	cfg := DefaultSubagentSchedulerConfig()
+	cfg.MaxConcurrency = 2
+	sched, err := NewSubagentScheduler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sched.Close()
+	backends := make(map[*SubagentSession]*subagentCloseBackend)
+	cancels := make(map[*SubagentSession]context.CancelFunc)
+	admit := func(id string, controlled bool) *SubagentSession {
+		t.Helper()
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		sub, err := sched.Admit(ctx, id, []int{1}, 8)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if controlled {
+			be := &subagentCloseBackend{}
+			sub.sess, sub.lastLogits = &model.Session{Backend: be}, []float32{1}
+			backends[sub], cancels[sub] = be, cancel
+		}
+		return sub
+	}
+	active := admit("active", true)
+	yielded := admit("yielded", true)
+	if _, err := sched.StepIteration(); err != nil {
+		t.Fatal(err)
+	}
+	if err := sched.YieldIO(yielded.ID, "tool"); err != nil {
+		t.Fatal(err)
+	}
+	keeper := admit("keeper", false)
+	waiting := admit("waiting", true)
+	survivor := admit("survivor", false)
+	if active.State != SubagentStateActive || waiting.State != SubagentStateWaiting || yielded.State != SubagentStateYielded {
+		t.Fatal("fixture did not cover active, waiting, and yielded states")
+	}
+	wantTokens := make(map[*SubagentSession][]int)
+	for sub, cancel := range cancels {
+		wantTokens[sub] = append([]int(nil), sub.GeneratedTokens...)
+		cancel()
+	}
+	before := sched.Receipt()
+	batch, err := sched.StepIteration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if batch.ActiveCount != 2 || !slices.Equal(batch.ActiveSessions, []*SubagentSession{keeper, survivor}) {
+		t.Fatalf("canceled lanes reached batch or blocked live FIFO handoff: %+v", batch)
+	}
+	for sub, be := range backends {
+		assertSubagentContextEnded(t, sub, context.Canceled, wantTokens[sub])
+		if be.recycles != 1 {
+			t.Errorf("%s teardown=%d, want 1", sub.ID, be.recycles)
+		}
+		stamp := sub.CompletedAt
+		if err := sched.Cancel(sub.ID); err != nil || sub.CompletedAt != stamp {
+			t.Errorf("%s repeated Cancel changed terminal outcome: %v", sub.ID, err)
+		}
+	}
+	if keeper.TokensGenerated() != 1 || survivor.TokensGenerated() != 1 || sched.WaitingCount() != 0 || sched.YieldedCount() != 0 {
+		t.Fatal("live work did not progress or canceled scheduling references remain")
+	}
+	after := sched.Receipt()
+	if after.TotalCancelled != before.TotalCancelled+3 || after.TotalTokensGenerated != before.TotalTokensGenerated+2 || after.TotalCompleted != before.TotalCompleted {
+		t.Fatalf("incorrect cancellation accounting: before=%+v after=%+v", before, after)
+	}
+	if err := sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for sub, be := range backends {
+		if !errors.Is(sub.Err(), context.Canceled) || be.recycles != 1 {
+			t.Errorf("%s Close changed context outcome or repeated teardown", sub.ID)
+		}
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestSubagentContextStopsBeforeModelExecution(t *testing.T) {
+	for _, lanes := range []int{1, 2} {
+		t.Run(fmt.Sprintf("lanes-%d", lanes), func(t *testing.T) {
+			cfg := DefaultSubagentSchedulerConfig()
+			cfg.MaxConcurrency = lanes
+			sched, err := NewSubagentScheduler(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer sched.Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			subs := make([]*SubagentSession, lanes)
+			for i := range subs {
+				subs[i], err = sched.Admit(ctx, fmt.Sprintf("lane-%d", i), nil, 2)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			cancel()
+			// Neither the single-session nor the batch forward may be reached.
+			// The deliberately uninitialized model/sessions would fail if called.
+			sched.cfg.Model = &model.Model{}
+			batch, err := sched.StepIteration()
+			if err != nil || batch.ActiveCount != 0 {
+				t.Fatalf("StepIteration=(%+v,%v), want empty batch", batch, err)
+			}
+			for _, sub := range subs {
+				assertSubagentContextEnded(t, sub, context.Canceled, nil)
+			}
+			if sched.Receipt().CompactedBatchesRun != 0 {
+				t.Fatal("canceled batch was executed")
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestSubagentContextCancelsDuringModelWork(t *testing.T) {
+	for _, phase := range []string{"prefill", "decode-single", "decode-batch"} {
+		t.Run(phase, func(t *testing.T) {
+			cfg := DefaultSubagentSchedulerConfig()
+			cfg.MaxConcurrency = 1
+			if phase == "decode-batch" {
+				cfg.MaxConcurrency = 2
+			}
+			cfg.Model = model.NewSynthetic(model.Config{
+				HiddenSize: 4, NumLayers: 1, NumHeads: 1, NumKVHeads: 1, HeadDim: 4,
+				IntermediateSize: 8, VocabSize: 8, RMSNormEps: 1e-5, RopeTheta: 10000,
+				ModelType: "llama", EOSTokenID: -1,
+			})
+			sched, err := NewSubagentScheduler(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer sched.Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			observed := make(chan struct{})
+			var once sync.Once
+			observer := func(int, int, int, []int, []float32) {
+				once.Do(func() {
+					cancel()
+					close(observed)
+				})
+			}
+			// The existing attention observer cancels inside actual synchronous
+			// model work. No timing sleep or production test hook is needed.
+			if phase == "prefill" {
+				cfg.Model.SetAttnObserver(observer)
+			}
+			subs := make([]*SubagentSession, cfg.MaxConcurrency)
+			for i := range subs {
+				subs[i], err = sched.Admit(ctx, fmt.Sprintf("lane-%d", i), []int{1}, 1)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if phase != "prefill" {
+				cfg.Model.SetAttnObserver(observer)
+				batch, err := sched.StepIteration()
+				if err != nil || batch.ActiveCount != len(subs) {
+					t.Fatalf("StepIteration=(%+v,%v), want %d executed lanes", batch, err, len(subs))
+				}
+			}
+			select {
+			case <-observed:
+			default:
+				t.Fatal("fixture did not cancel inside model execution")
+			}
+			for _, sub := range subs {
+				assertSubagentContextEnded(t, sub, context.Canceled, nil)
+			}
+			r := sched.Receipt()
+			if r.TotalTokensGenerated != 0 || r.TotalCompleted != 0 || r.TotalCancelled != len(subs) || sched.ActiveCount() != 0 || sched.WaitingCount() != 0 {
+				t.Fatalf("cancellation lost to admission/output/completion: %+v", r)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestSubagentContextSchedulingBoundaries(t *testing.T) {
+	for _, boundary := range []string{"compact", "admit", "yield", "resume", "cancel", "close"} {
+		t.Run(boundary, func(t *testing.T) {
+			cfg := DefaultSubagentSchedulerConfig()
+			cfg.MaxConcurrency = 1
+			sched, err := NewSubagentScheduler(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer sched.Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			sub, err := sched.Admit(ctx, "canceled", nil, 4)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if boundary == "resume" {
+				if err := sched.YieldIO(sub.ID, "tool"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cancel()
+			switch boundary {
+			case "compact":
+				if batch := sched.CompactRaggedBatch(); batch.ActiveCount != 0 {
+					t.Fatal("compaction retained canceled lane")
+				}
+			case "admit":
+				if _, err := sched.Admit(context.Background(), "live", nil, 4); err != nil {
+					t.Fatal(err)
+				}
+			case "yield":
+				if err := sched.YieldIO(sub.ID, "tool"); !errors.Is(err, ErrSessionNotActive) {
+					t.Fatalf("YieldIO=%v, want ErrSessionNotActive", err)
+				}
+			case "resume":
+				if err := sched.Resume(sub.ID); !errors.Is(err, ErrSessionNotYielded) {
+					t.Fatalf("Resume=%v, want ErrSessionNotYielded", err)
+				}
+			case "cancel":
+				if err := sched.Cancel(sub.ID); err != nil {
+					t.Fatal(err)
+				}
+			case "close":
+				if err := sched.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			assertSubagentContextEnded(t, sub, context.Canceled, nil)
+		})
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestSubagentContextTerminalResultsAndIDReuse(t *testing.T) {
+	sched, err := NewSubagentScheduler(DefaultSubagentSchedulerConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sched.Close()
+	for _, completed := range []bool{false, true} {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		old, err := sched.Admit(ctx, "reused", nil, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if completed {
+			if _, err := sched.StepIteration(); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := sched.Cancel(old.ID); err != nil {
+			t.Fatal(err)
+		}
+		stamp, outcome := old.CompletedAt, old.Err()
+		replacement, err := sched.Admit(context.Background(), old.ID, nil, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cancel()
+		if _, err := sched.StepIteration(); err != nil {
+			t.Fatal(err)
+		}
+		if replacement.State != SubagentStateCompleted || replacement.Err() != nil || replacement.TokensGenerated() != 1 {
+			t.Fatal("old context canceled replacement ID")
+		}
+		if old.CompletedAt != stamp || old.Err() != outcome || old.ctx != nil {
+			t.Fatal("late cancellation changed terminal result or retained context")
+		}
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestAuditSubagentSchedulerStopsCanceledAdmissionBeforeNextStep(t *testing.T) {
+	sched, err := NewSubagentScheduler(DefaultSubagentSchedulerConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sched.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub, err := sched.Admit(ctx, "audit-context", []int{1}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	if _, err := sched.StepIteration(); err != nil {
+		t.Fatal(err)
+	}
+	assertSubagentContextEnded(t, sub, context.Canceled, nil)
+}

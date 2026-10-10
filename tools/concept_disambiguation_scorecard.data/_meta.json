@@ -6527,6 +6527,11 @@
           "category": "incidental",
           "reason": "SHA-256 storage representation used only for constant-time comparison of the MCP session bearer; it is not a separately addressable credential or concept.",
           "token": "mcpsessionbearerdigest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #12625 unexported modelengine helper observes an admitted request context at cooperative scheduler boundaries and delegates the existing finishSessionLocked terminal transition; it introduces no separate session record, scheduler policy, or public lifecycle primitive.",
+          "token": "retireCanceledSessionLocked"
         }
       ],
       "exclude": [
@@ -6806,6 +6811,7 @@
         "requireminimaxsession",
         "resolveServeSessionState",
         "restartfreshsession",
+        "retireCanceledSessionLocked",
         "rotateSessionDiscoveryEpoch",
         "runDisambiguationSessionSourceSelfTest",
         "runFilterToolScheduler",
