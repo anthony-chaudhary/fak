@@ -444,6 +444,14 @@ func LoadModelQ4KStreamedExpertsContext(ctx context.Context, path string, p *Loa
 	return loadModelQ4KStreamedExpertsContext(ctx, path, p, hostBytes, OpenWeights, opts...)
 }
 
+// LoadModelQ4KStreamedExpertsMapped is LoadModelQ4KStreamedExperts over the read-only checkpoint
+// map. A dense tensor held as a range descriptor then carries the mapped span, so its device upload
+// copies file-backed pages straight into device memory with no anonymous host copy (fak#13668).
+// Where mapping is unavailable OpenWeightsMapped falls back to ordinary readers.
+func LoadModelQ4KStreamedExpertsMapped(path string, p *LoadProfiler, hostBytes int64, opts ...Q4KLoadOption) (*model.Model, error) {
+	return loadModelQ4KStreamedExpertsContext(context.Background(), path, p, hostBytes, OpenWeightsMapped, opts...)
+}
+
 // loadModelQ4KStreamedExpertsContext is the open-injectable core of the streamed-experts entry,
 // mirroring loadModelQ4KProfileOptionsContext: `open` supplies the checkpoint so a test can pin the
 // lifetime contract without a full model load.

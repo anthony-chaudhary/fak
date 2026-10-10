@@ -17,6 +17,9 @@ type openCodeConfigInstall struct {
 	Model      string `json:"model"`
 	BaseURL    string `json:"base_url"`
 	Reason     string `json:"reason,omitempty"`
+	// Command is the child argv to launch: the input with `--standalone` added
+	// to a bare `opencode run` so the injected config reaches the provider call.
+	Command []string `json:"command,omitempty"`
 }
 
 type guardOpenCodeModelLimits struct {
@@ -27,6 +30,28 @@ type guardOpenCodeModelLimits struct {
 
 func guardIsOpencode(command string) bool {
 	return guardAgentBaseName(command) == "opencode"
+}
+
+// guardOpenCodeStandaloneCommand inserts `--standalone` after a leading `run`
+// in an OpenCode child's argv. OpenCode v2's `run` otherwise hands the prompt to
+// its background service, which keeps the environment it started with, so the
+// guard's OPENCODE_CONFIG_CONTENT never applies and the provider call bypasses
+// the guard proxy. A `--standalone` or `--server` before `--` is left alone.
+func guardOpenCodeStandaloneCommand(command []string) []string {
+	if len(command) < 2 || !guardIsOpencode(command[0]) || command[1] != "run" {
+		return command
+	}
+	for _, arg := range command[2:] {
+		if arg == "--" {
+			break
+		}
+		if arg == "--standalone" || arg == "--server" || strings.HasPrefix(arg, "--standalone=") || strings.HasPrefix(arg, "--server=") {
+			return command
+		}
+	}
+	out := make([]string, 0, len(command)+1)
+	out = append(out, command[0], "run", "--standalone")
+	return append(out, command[2:]...)
 }
 
 func extractModelFromCommand(command []string) string {
@@ -185,6 +210,7 @@ func installGuardOpenCodeConfig(command []string, gwURL, modelID string, getenv 
 		ProviderID: "fak",
 		Model:      "fak/" + cleanModel,
 		BaseURL:    baseURL,
+		Command:    guardOpenCodeStandaloneCommand(command),
 	}
 }
 

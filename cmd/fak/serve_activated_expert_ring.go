@@ -99,7 +99,25 @@ func serveActivatedExpertRingPathPlacement(ggufPath string, be compute.Backend, 
 }
 
 // serveActivatedExpertRingLoadOptions streams every routed expert through the checkpoint tier with
-// zero host retention and bounds the tier's device ring to the admitted size.
+// zero host retention and bounds the tier's device ring to the admitted size. The dense base is
+// also left on disk as checkpoint ranges (fak#13668): it is uploaded to device memory one tensor at
+// a time instead of being staged whole in host RAM first, which swapped a 31 GiB-MemTotal carve-out
+// box loading a 63 GiB base. The load path replaces the stream-through working set declared here
+// with serveActivatedExpertRingDenseOption's sized bound.
 func serveActivatedExpertRingLoadOptions(ring serveActivatedExpertRing) []ggufload.Q4KLoadOption {
-	return []ggufload.Q4KLoadOption{ggufload.WithStreamedExperts(0), ggufload.WithStreamedExpertDeviceRing(ring.RingBytes)}
+	return []ggufload.Q4KLoadOption{ggufload.WithStreamedExperts(0), ggufload.WithStreamedExpertDeviceRing(ring.RingBytes), ggufload.WithStreamedDenseQ4KWorkingSet(0)}
+}
+
+// serveActivatedExpertRingDenseOption sizes the ring route's dense host working set from the
+// headroom left after the route's fixed host peak, so the host-peak admission that follows charges
+// fixed + bound and refuses before any payload is read when even the fixed part does not fit. An
+// unmeasurable host or estimate keeps the host-fit bound, since admission is fail-open there too.
+func serveActivatedExpertRingDenseOption(ggufPath string, opts []ggufload.Q4KLoadOption, fallback serveFitBudget, getenv func(string) string) ggufload.Q4KLoadOption {
+	probe := append(append([]ggufload.Q4KLoadOption(nil), opts...), ggufload.WithStreamedDenseQ4KWorkingSet(0))
+	fixed, err := estimateServeNativeHostLoadPeak(ggufPath, false, probe)
+	_, free, known := compute.HostSystemMemoryInfo()
+	if err != nil || !known || free <= 0 {
+		return ggufload.WithStreamedDenseQ4KWorkingSet(serveStreamedDenseQ4KWorkingSetBound(fallback))
+	}
+	return ggufload.WithStreamedDenseQ4KWorkingSet(ggufload.StreamedDenseWorkingSetFromHeadroom(fixed, free, serveHostPeakMarginBytes(getenv), serveCPUOffloadStreamedResidentMargin))
 }

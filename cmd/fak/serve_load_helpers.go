@@ -513,6 +513,7 @@ func loadServeInKernelModelPlaced(modelPath string, backend compute.Backend, cpu
 				if ringed {
 					memPlan = ring.Plan
 					q4kOpts = append(q4kOpts, serveActivatedExpertRingLoadOptions(ring)...)
+					q4kOpts = append(q4kOpts, serveActivatedExpertRingDenseOption(ggufPath, q4kOpts, hostFit, os.Getenv))
 					text := fmt.Sprintf("full device plan does not fit; dense base device-resident (%s), routed experts streamed from the checkpoint through a %s device ring (no host expert GEMMs)",
 						bytesText(uint64(max(ring.Fit.DeviceBaseBytes, 0))), bytesText(uint64(max(ring.RingBytes, 0))))
 					fmt.Fprintln(os.Stderr, "fak serve: activated-expert device ring:", text)
@@ -635,6 +636,9 @@ func loadResidentQ4KProfiledFor(mapped bool, ggufPath string, tLoad time.Time, o
 	// the bounded-resident streamed-expert arm can actually reach model load.
 	effects := ggufload.ApplyQ4KLoadOptions(opts)
 	switch {
+	case effects.StreamedExperts && effects.StreamedExpertDeviceRing > 0 && effects.StreamedDenseQ4K && !serveGGUFMmapDisabled():
+		// fak#13668: the device-ring route's dense base is uploaded from file-backed map pages.
+		mm, err = ggufload.LoadModelQ4KStreamedExpertsMapped(ggufPath, prof, effects.StreamedExpertBytes, opts...)
 	case effects.StreamedExperts:
 		mm, err = ggufload.LoadModelQ4KStreamedExperts(ggufPath, prof, effects.StreamedExpertBytes, opts...)
 	case effects.StreamedDenseQ4K || os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1":
@@ -680,6 +684,14 @@ func serveDeviceMappedQ4KResidency(backend compute.Backend, opts []ggufload.Q4KL
 	}
 	effects := ggufload.ApplyQ4KLoadOptions(opts)
 	return !effects.StreamedExperts && !effects.StreamedDenseQ4K && !effects.ExpertShard
+}
+
+func serveGGUFMmapDisabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_GGUF_MMAP"))) {
+	case "0", "off", "false":
+		return true
+	}
+	return false
 }
 
 func serveMappedQ4KResidencyRequested() bool {
