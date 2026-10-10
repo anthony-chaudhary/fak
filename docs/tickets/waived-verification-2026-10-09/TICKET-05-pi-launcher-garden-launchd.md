@@ -23,5 +23,5 @@ The targeted test runs exit 0, plus captured CLI output.
 
 ## Done condition
 
-- [ ] Both groups green under targeted tests and CLI execution.
-- [ ] The cmd/fak suite timeout filed separately if it is not already tracked.
+- [x] Both groups green under targeted tests and CLI execution. Every fix fails before and passes after its test; `fak pi config --from-router --write` (temp HOME) and the garden plist render were run end to end. New tests: 501095431bb (Pi), 8fcf7b7e995 (garden). `fak-sync release verify-queue list --root ../fak` shows all 11 non-test commits `verified full`, each noting what was not run (repo-wide suite, macOS launchd hardware). Follow-up: TICKET-05a (#13778).
+- [x] The cmd/fak suite timeout filed separately if it is not already tracked: already tracked as #13441 (TestContractLifecycle passes alone in 22.29s; the cause is cumulative serial suite time).
