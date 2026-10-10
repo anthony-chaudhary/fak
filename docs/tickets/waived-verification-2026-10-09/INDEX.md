@@ -10,5 +10,8 @@ On 2026-10-09, 68 public commits landed under an operator deferred-verification 
 | TICKET-04 | Gateway deadline cache credit vs. the Halo long-chat fix | conflict: tests pass, behavior regressed |
 | TICKET-05 | Pi launcher/router and garden launchd watchdog | targeted tests not yet run |
 | TICKET-06 | safecommit and test-hygiene commits | red (real-git fixtures) |
+| TICKET-07 | FP8 tiled-to-Q8 loader | red |
+| TICKET-08 | V4.1 compressed-window composition + session fallback | red |
+| TICKET-09 | V4.1 sparse-sink host contract | red |
 
 Each ticket is closed by fail-before/pass-after tests landed on trunk that cite the covered commit shas.
