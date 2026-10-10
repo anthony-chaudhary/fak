@@ -117,6 +117,8 @@ type ServingSweepTrackSummary struct {
 type ServingSweepSelection struct {
 	Concurrency      int      `json:"concurrency"`
 	ThroughputTokens float64  `json:"throughput_tok_s"`
+	ThroughputUnit   string   `json:"throughput_unit"`
+	TokenCountBasis  string   `json:"token_count_basis"`
 	GoodputRPS       *float64 `json:"goodput_rps,omitempty"`
 	TTFTP99Millis    *float64 `json:"ttft_p99_ms,omitempty"`
 	ITLP99Millis     *float64 `json:"itl_p99_ms,omitempty"`
@@ -204,9 +206,9 @@ func RunServingSweep(ctx context.Context, cfg ServingSweepConfig) (*ServingSweep
 			ITLP99Millis:  cfg.ITLP99Budget.Milliseconds(),
 		},
 		Honesty: ServingSweepHonestyContract{
-			ComparablePointRule: "workload digest, model, engine, engine receipt, capacity, and capacity source must match the declared track contract",
+			ComparablePointRule: "workload digest, model, engine, engine receipt, capacity, and capacity source must match the declared track contract; throughput unit and non-mixed token count basis must match across points",
 			CapacityRule:        "a point above batch capacity, or with unknown capacity provenance, is invalid and cannot support peak or knee claims",
-			PeakRule:            "peak is the maximum measured token throughput across at least two comparable valid points; ties choose lower concurrency",
+			PeakRule:            "peak is the maximum measured throughput in one unit and token count basis across at least two comparable valid points; ties choose lower concurrency",
 			SLAKneeRule:         "when p99 budgets are configured, the knee is the maximum-throughput valid point satisfying every configured budget; ties choose lower concurrency",
 			UnknownRule:         "failed, sparse, invalid, or missing measurements remain not_measured/invalid and are never converted to zero",
 		},
@@ -318,6 +320,7 @@ func EvaluateServingSweep(report *ServingSweepReport) error {
 		contract.Track = track
 		contracts[track] = contract
 	}
+	throughputPairs := make(map[ServingTrack][2]string)
 	seenConcurrency := make(map[int]bool, len(report.Points))
 	for pointIndex := range report.Points {
 		point := &report.Points[pointIndex]
@@ -379,6 +382,17 @@ func EvaluateServingSweep(report *ServingSweepReport) error {
 				markServingSweepNotMeasured(trackPoint, "throughput_missing", "positive measured token throughput is required")
 				continue
 			}
+			basis := trackPoint.Stats.TokenCountBasis
+			if !validServingSweepThroughputPair(throughput.Unit, basis) {
+				invalidateServingSweepPoint(trackPoint, "throughput_identity_unknown", "throughput requires a recognized unit and matching non-mixed token count basis")
+				continue
+			}
+			pair := [2]string{throughput.Unit, basis}
+			if previous, exists := throughputPairs[trackPoint.Track]; exists && previous != pair {
+				invalidateServingSweepPoint(trackPoint, "throughput_identity_mismatch", "throughput unit or token count basis differs across track points")
+				continue
+			}
+			throughputPairs[trackPoint.Track] = pair
 			trackPoint.Status = "valid"
 			trackPoint.ReasonCode = ""
 			trackPoint.Reason = ""
@@ -391,6 +405,17 @@ func EvaluateServingSweep(report *ServingSweepReport) error {
 		report.Tracks = append(report.Tracks, summary)
 	}
 	return nil
+}
+
+// A mixed aggregate does not record the composition needed to compare points.
+// Keep those observations intact, but do not certify a peak or knee from them.
+func validServingSweepThroughputPair(unit, basis string) bool {
+	switch basis {
+	case "usage.completion_tokens", "stream_content_events", "estimated_content_tokens":
+		return unit == basis+"/s"
+	default:
+		return false
+	}
 }
 
 func validSHA256Digest(value string) bool {
@@ -509,7 +534,22 @@ func servingSweepEvidence(report *ServingSweepReport, track ServingTrack) (sweep
 	sort.Float64s(coordinates)
 	axis := sweepcert.Axis{Name: "serving_concurrency", Unit: "requests", Coordinates: coordinates, LowerClosed: len(coordinates) > 0 && coordinates[0] == 1}
 	axis.UpperClosed = len(coordinates) > 0 && int(coordinates[len(coordinates)-1]) == contract.BatchCapacity
+	throughputUnit, tokenCountBasis := "", ""
+	for _, point := range report.Points {
+		for _, trackPoint := range point.Tracks {
+			if trackPoint.Track == track && trackPoint.Status == "valid" {
+				throughputUnit = trackPoint.Stats.ThroughputTokensS.Unit
+				tokenCountBasis = trackPoint.Stats.TokenCountBasis
+				break
+			}
+		}
+		if throughputUnit != "" {
+			break
+		}
+	}
 	envelope := sweepcert.Envelope{Axis: axis, Bindings: []sweepcert.Binding{
+		{Name: "throughput_unit", Value: nonemptySweepBinding(throughputUnit)},
+		{Name: "token_count_basis", Value: nonemptySweepBinding(tokenCountBasis)},
 		{Name: "model", Value: nonemptySweepBinding(contract.Model)},
 		{Name: "workload", Value: nonemptySweepBinding(report.Workload.Digest)},
 		{Name: "engine", Value: nonemptySweepBinding(contract.Engine + "/" + contract.EngineReceiptDigest)},
@@ -524,7 +564,7 @@ func servingSweepEvidence(report *ServingSweepReport, track ServingTrack) (sweep
 	}
 	evidence := sweepcert.Evidence{
 		Envelope: envelope, EnvelopeDigest: digest,
-		DeclaredInvalidReasons: []string{"contract_missing", "workload_identity_mismatch", "model_identity_mismatch", "engine_identity_unknown", "engine_identity_mismatch", "capacity_unknown", "capacity_identity_mismatch", "capacity_exceeded", "measurement_incomplete"},
+		DeclaredInvalidReasons: []string{"contract_missing", "workload_identity_mismatch", "model_identity_mismatch", "engine_identity_unknown", "engine_identity_mismatch", "capacity_unknown", "capacity_identity_mismatch", "capacity_exceeded", "measurement_incomplete", "throughput_identity_unknown", "throughput_identity_mismatch"},
 	}
 	selections := make(map[string]*ServingSweepSelection)
 	for _, coordinate := range coordinates {
@@ -547,7 +587,7 @@ func servingSweepEvidence(report *ServingSweepReport, track ServingTrack) (sweep
 				default:
 					point.Status = sweepcert.PointNotMeasured
 				}
-				addServingSweepObservation(point.Observations, "throughput_tok_s", "tok/s", trackPoint.Stats.ThroughputTokensS.Value, digest, track)
+				addServingSweepObservation(point.Observations, "throughput_tok_s", trackPoint.Stats.ThroughputTokensS.Unit, trackPoint.Stats.ThroughputTokensS.Value, digest, track)
 				addServingSweepObservation(point.Observations, "ttft_p99_ms", "ms", trackPoint.Stats.TTFTMillis.P99, digest, track)
 				addServingSweepObservation(point.Observations, "itl_p99_ms", "ms", trackPoint.Stats.ITLMillis.P99, digest, track)
 				if trackPoint.Stats.ThroughputTokensS.Value != nil {
@@ -586,7 +626,9 @@ func hardServingSweepInvalidity(code string) bool {
 		"capacity_unknown",
 		"capacity_identity_mismatch",
 		"capacity_exceeded",
-		"measurement_incomplete":
+		"measurement_incomplete",
+		"throughput_identity_unknown",
+		"throughput_identity_mismatch":
 		return true
 	default:
 		return false
@@ -625,6 +667,8 @@ func chooseServingSweepPoint(points []*ServingSweepTrackPoint, concurrencies []i
 	selection := &ServingSweepSelection{
 		Concurrency:      concurrencies[best],
 		ThroughputTokens: *point.Stats.ThroughputTokensS.Value,
+		ThroughputUnit:   point.Stats.ThroughputTokensS.Unit,
+		TokenCountBasis:  point.Stats.TokenCountBasis,
 		TTFTP99Millis:    point.Stats.TTFTMillis.P99,
 		ITLP99Millis:     point.Stats.ITLMillis.P99,
 	}

@@ -300,7 +300,8 @@ func syntheticSweepReport(points []syntheticSweepPoint) *ServingSweepReport {
 				CapacitySource:      contract.CapacitySource,
 				Stats: ServingStats{
 					OK:                1,
-					ThroughputTokensS: ScalarMetric{Status: "measured", Value: &throughput},
+					TokenCountBasis:   "usage.completion_tokens",
+					ThroughputTokensS: ScalarMetric{Status: "measured", Unit: "usage.completion_tokens/s", Value: &throughput},
 					GoodputRPS:        ScalarMetric{Status: "measured", Value: &goodput},
 					TTFTMillis:        QuantileMetric{Status: "measured", P99: &ttft},
 					ITLMillis:         QuantileMetric{Status: "measured", P99: &itl},
@@ -309,4 +310,140 @@ func syntheticSweepReport(points []syntheticSweepPoint) *ServingSweepReport {
 		})
 	}
 	return report
+}
+
+func TestServingSweepThroughputIdentityRefusalPreservesMeasurements(t *testing.T) {
+	for _, tt := range []struct {
+		name, unit, basis, code string
+	}{
+		{"missing unit", "", "usage.completion_tokens", "throughput_identity_unknown"},
+		{"missing basis", "usage.completion_tokens/s", "", "throughput_identity_unknown"},
+		{"legacy token label", "tok/s", "usage.completion_tokens", "throughput_identity_unknown"},
+		{"unknown basis", "unknown/s", "unknown", "throughput_identity_unknown"},
+		{"mismatched pair", "stream_content_events/s", "usage.completion_tokens", "throughput_identity_unknown"},
+		{"mixed aggregate", "output_token_estimate/s", "mixed", "throughput_identity_unknown"},
+		{"event drift", "stream_content_events/s", "stream_content_events", "throughput_identity_mismatch"},
+		{"estimate drift", "estimated_content_tokens/s", "estimated_content_tokens", "throughput_identity_mismatch"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			report := syntheticSweepReport([]syntheticSweepPoint{{concurrency: 1, throughput: 10}, {concurrency: 2, throughput: 90}})
+			point := &report.Points[1].Tracks[0]
+			point.Stats.ThroughputTokensS.Unit = tt.unit
+			point.Stats.TokenCountBasis = tt.basis
+			before := point.Stats
+			for iteration := 0; iteration < 2; iteration++ {
+				if err := EvaluateServingSweep(report); err != nil {
+					t.Fatal(err)
+				}
+				if point.Status != "invalid" || point.ReasonCode != tt.code {
+					t.Fatalf("point = %+v, want invalid/%s", point, tt.code)
+				}
+				if !reflect.DeepEqual(before, point.Stats) {
+					t.Fatal("throughput refusal changed original measurement")
+				}
+				summary := report.Tracks[0]
+				if summary.Status != "invalid" || summary.Peak != nil || summary.SLAKnee != nil || summary.PeakStatus != "invalid" || summary.SLAStatus != "invalid" {
+					t.Fatalf("incomparable evidence retained a claim: %+v", summary)
+				}
+			}
+			evidence, _, err := servingSweepEvidence(report, TrackOurs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			declared := false
+			for _, code := range evidence.DeclaredInvalidReasons {
+				declared = declared || code == tt.code
+			}
+			if !declared {
+				t.Fatalf("refusal %s missing from certificate declaration", tt.code)
+			}
+			observation := evidence.Points[1].Observations["throughput_tok_s"]
+			if observation.Provenance.Unit != tt.unit || observation.Value == nil || *observation.Value != 90 {
+				t.Fatalf("certificate rewrote refused evidence: %+v", observation)
+			}
+		})
+	}
+}
+
+func TestServingSweepHomogeneousThroughputPreservesAndBindsIdentity(t *testing.T) {
+	digests := make(map[string]bool)
+	for _, basis := range []string{"usage.completion_tokens", "stream_content_events", "estimated_content_tokens"} {
+		t.Run(basis, func(t *testing.T) {
+			report := syntheticSweepReport([]syntheticSweepPoint{{concurrency: 1, throughput: 10}, {concurrency: 8, throughput: 90}})
+			for i := range report.Points {
+				stats := &report.Points[i].Tracks[0].Stats
+				stats.TokenCountBasis = basis
+				stats.ThroughputTokensS.Unit = basis + "/s"
+			}
+			if err := EvaluateServingSweep(report); err != nil {
+				t.Fatal(err)
+			}
+			summary := report.Tracks[0]
+			if summary.Status != "measured" || summary.Peak == nil || summary.PeakStatus != "measured" {
+				t.Fatalf("homogeneous sweep refused: %+v", summary)
+			}
+			for _, selection := range []*ServingSweepSelection{summary.Peak, summary.SLAKnee} {
+				if selection == nil || selection.ThroughputUnit != basis+"/s" || selection.TokenCountBasis != basis || selection.ThroughputTokens != 90 {
+					t.Fatalf("selection lost throughput identity: %+v", selection)
+				}
+			}
+			evidence, _, err := servingSweepEvidence(report, TrackOurs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bindings := make(map[string]string)
+			for _, binding := range evidence.Envelope.Bindings {
+				bindings[binding.Name] = binding.Value
+			}
+			if bindings["throughput_unit"] != basis+"/s" || bindings["token_count_basis"] != basis {
+				t.Fatalf("envelope omitted throughput identity: %+v", bindings)
+			}
+			for _, point := range evidence.Points {
+				if got := point.Observations["throughput_tok_s"].Provenance.Unit; got != basis+"/s" {
+					t.Fatalf("provenance unit = %q", got)
+				}
+			}
+			if digests[evidence.EnvelopeDigest] {
+				t.Fatal("different throughput identity retained envelope digest")
+			}
+			digests[evidence.EnvelopeDigest] = true
+		})
+	}
+}
+
+func TestServingSweepRefusesHomogeneousMixedAggregates(t *testing.T) {
+	report := syntheticSweepReport([]syntheticSweepPoint{{concurrency: 1, throughput: 10}, {concurrency: 8, throughput: 90}})
+	for i := range report.Points {
+		stats := &report.Points[i].Tracks[0].Stats
+		stats.TokenCountBasis = "mixed"
+		stats.ThroughputTokensS.Unit = "output_token_estimate/s"
+	}
+	if err := EvaluateServingSweep(report); err != nil {
+		t.Fatal(err)
+	}
+	if summary := report.Tracks[0]; summary.Status != "invalid" || summary.ValidPoints != 0 || summary.Peak != nil || summary.SLAKnee != nil {
+		t.Fatalf("mixed label alone admitted incomparable aggregate composition: %+v", summary)
+	}
+}
+
+func TestServingSweepThroughputIdentityIsScopedPerTrack(t *testing.T) {
+	report := syntheticSweepReport([]syntheticSweepPoint{{concurrency: 1, throughput: 10}, {concurrency: 8, throughput: 90}})
+	contract := report.Contracts[0]
+	contract.Track = TrackVLLM
+	report.Contracts = append(report.Contracts, contract)
+	for i := range report.Points {
+		point := report.Points[i].Tracks[0]
+		point.Track = TrackVLLM
+		point.Stats.TokenCountBasis = "stream_content_events"
+		point.Stats.ThroughputTokensS.Unit = "stream_content_events/s"
+		report.Points[i].Tracks = append(report.Points[i].Tracks, point)
+	}
+	if err := EvaluateServingSweep(report); err != nil {
+		t.Fatal(err)
+	}
+	for _, summary := range report.Tracks {
+		if summary.Status != "measured" || summary.Peak == nil || summary.ValidPoints != 2 {
+			t.Fatalf("independently comparable track refused: %+v", summary)
+		}
+	}
 }

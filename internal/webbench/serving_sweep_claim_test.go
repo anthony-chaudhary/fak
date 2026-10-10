@@ -17,6 +17,11 @@ func TestValidateServingSweepClaim(t *testing.T) {
 		{name: "honest SLA knee", claim: "ours p99 SLA knee is concurrency 2"},
 		{name: "above capacity", claim: "ours serving peak is 120 tok/s", mutate: func(r *ServingSweepReport) { r.Points[1].Concurrency, r.Workload.Concurrencies[1] = 3, 3 }, wantErr: "exceeds declared batch capacity"},
 		{name: "identity drift", claim: "ours capacity-valid peak is 120 tok/s", mutate: func(r *ServingSweepReport) { r.Points[1].Tracks[0].Engine = "other-engine" }, wantErr: "engine identity differs"},
+		{name: "throughput basis drift", claim: "ours serving peak is 120 tok/s", mutate: func(r *ServingSweepReport) {
+			r.Points[1].Tracks[0].Stats.TokenCountBasis = "stream_content_events"
+			r.Points[1].Tracks[0].Stats.ThroughputTokensS.Unit = "stream_content_events/s"
+		}, wantErr: "throughput unit or token count basis differs"},
+		{name: "missing throughput identity", claim: "ours SLA knee is concurrency 2", mutate: func(r *ServingSweepReport) { r.Points[1].Tracks[0].Stats.TokenCountBasis = "" }, wantErr: "matching non-mixed token count basis"},
 		{name: "missing SLA", claim: "ours SLA knee is concurrency 2", mutate: func(r *ServingSweepReport) { r.SLA = ServingSweepSLA{} }, wantErr: "requires a configured p99"},
 		{name: "sparse points", claim: "ours serving peak is 120 tok/s", mutate: func(r *ServingSweepReport) { r.Points = r.Points[:1] }, wantErr: "requires at least two declared coordinates"},
 		{name: "missing track", claim: "vllm serving peak is 120 tok/s", wantErr: "requires measured vllm track"},
@@ -105,11 +110,58 @@ func servingSweepClaimFixture() *ServingSweepReport {
 				MeasurementStatus:   "measured",
 				Stats: ServingStats{
 					OK:                1,
-					ThroughputTokensS: ScalarMetric{Status: "measured", Value: &throughputs[i]},
+					TokenCountBasis:   "usage.completion_tokens",
+					ThroughputTokensS: ScalarMetric{Status: "measured", Unit: "usage.completion_tokens/s", Value: &throughputs[i]},
 					TTFTMillis:        QuantileMetric{Status: "measured", P99: &ttft[i]},
 				},
 			}},
 		})
 	}
 	return report
+}
+
+func TestServingSweepClaimsPreserveThroughputUnits(t *testing.T) {
+	for _, basis := range []string{"usage.completion_tokens", "stream_content_events", "estimated_content_tokens"} {
+		t.Run(basis, func(t *testing.T) {
+			report := servingSweepClaimFixture()
+			for i := range report.Points {
+				stats := &report.Points[i].Tracks[0].Stats
+				stats.TokenCountBasis = basis
+				stats.ThroughputTokensS.Unit = basis + "/s"
+			}
+			for _, claim := range []string{"ours serving peak is 120 tok/s", "ours serving peak is 120 tokens/s", "ours serving peak is 120 tokens/sec", "ours serving peak is 120 tokens per second", "ours peak throughput is token throughput", "ours SLA knee is concurrency 2 at 120 tok/s", "ours serving peak is 120"} {
+				err := ValidateServingSweepClaim(claim, report)
+				if basis == "usage.completion_tokens" && err != nil {
+					t.Fatalf("exact-token control %q refused: %v", claim, err)
+				}
+				if basis != "usage.completion_tokens" && err == nil {
+					t.Fatalf("non-token evidence accepted ambiguous/token claim %q", claim)
+				}
+			}
+			for _, claim := range []string{"ours serving peak is 120 " + basis + "/s", "ours SLA knee is concurrency 2"} {
+				if err := ValidateServingSweepClaim(claim, report); err != nil {
+					t.Fatalf("honest claim %q refused: %v", claim, err)
+				}
+			}
+			other := "stream_content_events/s"
+			if basis == "stream_content_events" {
+				other = "estimated_content_tokens/s"
+			}
+			if err := ValidateServingSweepClaim("ours serving peak is 120 "+basis+"/s and 120 "+other, report); err == nil {
+				t.Fatal("mismatched explicit unit accepted alongside actual unit")
+			}
+		})
+	}
+	for _, basis := range []string{"", "mixed"} {
+		report := servingSweepClaimFixture()
+		for i := range report.Points {
+			report.Points[i].Tracks[0].Stats.TokenCountBasis = basis
+			if basis == "mixed" {
+				report.Points[i].Tracks[0].Stats.ThroughputTokensS.Unit = "output_token_estimate/s"
+			}
+		}
+		if err := ValidateServingSweepClaim("ours serving peak is 120 output_token_estimate/s", report); err == nil {
+			t.Fatalf("unsupported token basis %q accepted", basis)
+		}
+	}
 }
