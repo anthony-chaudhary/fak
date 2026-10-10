@@ -109,15 +109,30 @@ func serveActivatedExpertRingLoadOptions(ring serveActivatedExpertRing) []gguflo
 }
 
 // serveActivatedExpertRingDenseOption sizes the ring route's dense host working set from the
-// headroom left after the route's fixed host peak, so the host-peak admission that follows charges
-// fixed + bound and refuses before any payload is read when even the fixed part does not fit. An
-// unmeasurable host or estimate keeps the host-fit bound, since admission is fail-open there too.
+// headroom left after its estimated fixed host peak. This is planning only: the actual positive
+// bound still reaches host-peak admission, which refuses an unqualified streamed staging peak.
+// An unmeasurable host or estimate keeps the historical host-fit bound; admission remains separate.
 func serveActivatedExpertRingDenseOption(ggufPath string, opts []ggufload.Q4KLoadOption, fallback serveFitBudget, getenv func(string) string) ggufload.Q4KLoadOption {
-	probe := append(append([]ggufload.Q4KLoadOption(nil), opts...), ggufload.WithStreamedDenseQ4KWorkingSet(0))
-	fixed, err := estimateServeNativeHostLoadPeak(ggufPath, false, probe)
-	_, free, known := compute.HostSystemMemoryInfo()
+	return serveActivatedExpertRingDenseOptionForHost(ggufPath, opts, fallback, getenv, compute.HostSystemMemoryInfo)
+}
+
+func serveActivatedExpertRingDenseOptionForHost(ggufPath string, opts []ggufload.Q4KLoadOption, fallback serveFitBudget, getenv func(string) string, hostMemoryInfo func() (int64, int64, bool)) ggufload.Q4KLoadOption {
+	fixed, err := estimateServeActivatedExpertRingFixedHostPeak(ggufPath, opts)
+	_, free, known := hostMemoryInfo()
 	if err != nil || !known || free <= 0 {
 		return ggufload.WithStreamedDenseQ4KWorkingSet(serveStreamedDenseQ4KWorkingSetBound(fallback))
 	}
 	return ggufload.WithStreamedDenseQ4KWorkingSet(ggufload.StreamedDenseWorkingSetFromHeadroom(fixed, free, serveHostPeakMarginBytes(getenv), serveCPUOffloadStreamedResidentMargin))
+}
+
+// The zero-bound probe asks only for the estimator's fixed terms. It is never a load option or
+// admission decision: estimateServeNativeHostLoadPeak correctly rejects zero on the actual route.
+func estimateServeActivatedExpertRingFixedHostPeak(ggufPath string, opts []ggufload.Q4KLoadOption) (ggufload.HostLoadPeak, error) {
+	probe := append(append([]ggufload.Q4KLoadOption(nil), opts...), ggufload.WithStreamedDenseQ4KWorkingSet(0))
+	ws, err := ggufload.OpenWeights(ggufPath)
+	if err != nil {
+		return ggufload.HostLoadPeak{}, err
+	}
+	defer ws.Close()
+	return ws.EstimateStreamedExpertHostLoadPeak(probe...)
 }
