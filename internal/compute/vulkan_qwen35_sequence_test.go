@@ -37,11 +37,9 @@ type qwen35SequenceParityOracleBounds struct {
 	RequireFinite bool    `json:"require_finite"`
 }
 
-func formatQwen35SequenceParityOracle(maxAbsDelta float64, finiteOutput bool, caseCount int) ([]byte, error) {
-	if caseCount <= 0 {
-		caseCount = 4
-	}
-	passed := finiteOutput && maxAbsDelta <= 2e-3
+func formatQwen35SequenceParityOracle(maxAbsDelta float64, finiteOutput bool, caseCount int, fixturePassed bool) ([]byte, error) {
+	// Passing metrics from an aborted or filtered fixture are not parity evidence.
+	passed := fixturePassed && caseCount == 4 && finiteOutput && maxAbsDelta <= 2e-3
 	event := qwen35SequenceParityOracleEvent{
 		Schema:         "fak.strix.subkernel-parity/v1",
 		Selector:       "qwen35_sequence_prefill",
@@ -136,6 +134,7 @@ func TestVulkanQwen35SequenceQuantizedPanelsMatchCPU(t *testing.T) {
 	var worstMaxAbsDelta float64
 	allFinite := true
 	evaluatedPanels := 0
+	completedPanels := 0
 	for _, host := range []Tensor{
 		NewF32(Default(), []int{out, in}, w),
 		QuantizeQ8(Default(), []int{out, in}, w, 32),
@@ -172,10 +171,12 @@ func TestVulkanQwen35SequenceQuantizedPanelsMatchCPU(t *testing.T) {
 					}
 				}
 			}
+			// Count only panels that reached every comparison without aborting.
+			completedPanels++
 			t.Logf("engine=fak-native backend=vulkan dtype=%s tokens=%d in=%d out=%d cpu_parity=true", host.Dtype, tokens, in, out)
 		})
 	}
-	oracleJSON, err := formatQwen35SequenceParityOracle(worstMaxAbsDelta, allFinite, evaluatedPanels)
+	oracleJSON, err := formatQwen35SequenceParityOracle(worstMaxAbsDelta, allFinite, evaluatedPanels, completedPanels == 4 && !t.Failed())
 	if err != nil {
 		t.Fatalf("format parity oracle: %v", err)
 	}
@@ -462,7 +463,7 @@ func TestVulkanQwen35SequenceRejectsUnavailableDeviceLimit(t *testing.T) {
 }
 
 func TestVulkanQwen35SequenceParityOracleFormat(t *testing.T) {
-	raw, err := formatQwen35SequenceParityOracle(1.5e-3, true, 4)
+	raw, err := formatQwen35SequenceParityOracle(1.5e-3, true, 4, true)
 	if err != nil {
 		t.Fatalf("formatQwen35SequenceParityOracle failed: %v", err)
 	}
@@ -525,7 +526,7 @@ func TestVulkanQwen35SequenceParityOracleFormat(t *testing.T) {
 	}
 
 	// Boundary failure: delta exceeds threshold
-	failRaw, err := formatQwen35SequenceParityOracle(2.5e-3, true, 4)
+	failRaw, err := formatQwen35SequenceParityOracle(2.5e-3, true, 4, true)
 	if err != nil {
 		t.Fatalf("format failed oracle failed: %v", err)
 	}
@@ -537,7 +538,7 @@ func TestVulkanQwen35SequenceParityOracleFormat(t *testing.T) {
 	}
 
 	// Boundary failure: non-finite output
-	failRaw2, err := formatQwen35SequenceParityOracle(1.5e-3, false, 4)
+	failRaw2, err := formatQwen35SequenceParityOracle(1.5e-3, false, 4, true)
 	if err != nil {
 		t.Fatalf("format failed oracle 2 failed: %v", err)
 	}
@@ -546,6 +547,53 @@ func TestVulkanQwen35SequenceParityOracleFormat(t *testing.T) {
 	}
 	if parsed.Passed {
 		t.Errorf("expected passed=false when finite_output=false")
+	}
+}
+
+// This exercises fixture completion and failure controls without a Vulkan device.
+// fak-test:runtime fast est=1ms
+func TestVulkanQwen35SequenceParityOracleRequiresCompleteFixture(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		attemptedPanels int
+		completedPanels int
+		fixtureFailed   bool
+		wantPassed      bool
+	}{
+		{name: "complete_success", attemptedPanels: 4, completedPanels: 4, wantPassed: true},
+		{name: "shape_failure", attemptedPanels: 4, completedPanels: 3, fixtureFailed: true},
+		{name: "all_panels_abort", attemptedPanels: 4, fixtureFailed: true},
+		{name: "incomplete_without_failure", attemptedPanels: 4, completedPanels: 3},
+		{name: "filtered_panel", attemptedPanels: 1, completedPanels: 1},
+		{name: "failure_after_completion", attemptedPanels: 4, completedPanels: 4, fixtureFailed: true},
+		{name: "no_panels"},
+		{name: "zero_count", completedPanels: 4},
+		{name: "negative_count", attemptedPanels: -1, completedPanels: 4},
+		{name: "excess_count", attemptedPanels: 5, completedPanels: 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// An aborted shape check leaves these numerical observations unchanged.
+			raw, err := formatQwen35SequenceParityOracle(0, true, tc.attemptedPanels, tc.completedPanels == 4 && !tc.fixtureFailed)
+			if err != nil {
+				t.Fatalf("format parity oracle: %v", err)
+			}
+			var parsed qwen35SequenceParityOracleEvent
+			if err := json.Unmarshal(raw, &parsed); err != nil {
+				t.Fatalf("unmarshal parity oracle: %v", err)
+			}
+			if parsed.Passed != tc.wantPassed {
+				t.Errorf("passed = %v, want %v", parsed.Passed, tc.wantPassed)
+			}
+			if parsed.CaseCount != tc.attemptedPanels {
+				t.Errorf("case_count = %d, want attempted count %d", parsed.CaseCount, tc.attemptedPanels)
+			}
+			if parsed.Observed.MaxAbsDelta != 0 || !parsed.Observed.FiniteOutput {
+				t.Errorf("fixture status changed numerical observations: %+v", parsed.Observed)
+			}
+			if parsed.Bounds.MaxAbsDelta != 2e-3 || !parsed.Bounds.RequireFinite {
+				t.Errorf("parity bounds changed: %+v", parsed.Bounds)
+			}
+		})
 	}
 }
 
@@ -631,14 +679,14 @@ func TestStrixQwen35ParityEmitterContract(t *testing.T) {
 			requireStateIdentity: false,
 			requireFinite:        true,
 			formatFn: func() ([]byte, error) {
-				return formatQwen35SequenceParityOracle(1.5e-3, true, 4)
+				return formatQwen35SequenceParityOracle(1.5e-3, true, 4, true)
 			},
 			formatExceedBoundFn: func() ([]byte, error) {
-				return formatQwen35SequenceParityOracle(2.5e-3, true, 4)
+				return formatQwen35SequenceParityOracle(2.5e-3, true, 4, true)
 			},
 			formatFailIdentityFn: nil,
 			formatFailFiniteFn: func() ([]byte, error) {
-				return formatQwen35SequenceParityOracle(1.5e-3, false, 4)
+				return formatQwen35SequenceParityOracle(1.5e-3, false, 4, true)
 			},
 		},
 	}
