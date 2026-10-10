@@ -22,4 +22,5 @@ Parent: #13764. Found by the TICKET-01 worker; it is outside TICKET-01's group.
 
 ## Done condition
 
-- [ ] An absent mHC mix yields the named missing-tensor refusal; the test is green on trunk, and the fix commit cites the culprit sha.
+- [x] An absent mHC mix yields the named missing-tensor refusal; the test is green on trunk, and the fix commit cites the culprit sha. (ebdead0220f; green at f2be2792ab2.)
+- [x] `RawFullAndReduced/full-q2` green. Bisect: green at 57cbe301f63, red from 4e80401da72 (coherent full mHC graph). Cause: the shared Q2_K fixture (d=1, min=0) gives non-negative weights up to 45, so every post coefficient saturates at 2 and the HC streams stay bit-identical. Production math is correct; the fixture now uses signed 1/64-scaled Q2_K blocks.
