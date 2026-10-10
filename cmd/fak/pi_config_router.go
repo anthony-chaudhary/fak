@@ -346,10 +346,21 @@ func piRouterBudget(window, floor int) projectassets.PiContextBudget {
 	return projectassets.PiSafeContextBudget(served)
 }
 
+// piRouterModelBudget is piRouterBudget for one catalog model: a Halo-served model
+// also caps its trigger at what the Halo admits cold.
+func piRouterModelBudget(m piRouterModel, floor int) projectassets.PiContextBudget {
+	b := piRouterBudget(m.Window, floor)
+	if projectassets.PiServedByHalo(m.OwnedBy) {
+		b = projectassets.PiContextBudgetFor(b.ServedWindow, projectassets.HaloPiColdAdmission.MaxTrigger())
+	}
+	return b
+}
+
 // piRouterCompactionPlan is the settings.json compaction block shared by every
 // model in the catalog. Model records the selected default, not a budget source.
 type piRouterCompactionPlan struct {
 	Model            string
+	Binding          string
 	ReserveTokens    int
 	KeepRecentTokens int
 	FromEnabled      bool
@@ -427,7 +438,7 @@ func buildPiRouterPlan(rows []piRouterRow, routerURL, configTarget, settingsTarg
 		Budgets:    make(map[string]projectassets.PiContextBudget, len(models)),
 	}
 	for _, m := range models {
-		plan.Budgets[m.ID] = piRouterBudget(m.Window, floor)
+		plan.Budgets[m.ID] = piRouterModelBudget(m, floor)
 	}
 	data, err := os.ReadFile(plan.ConfigPath)
 	switch {
@@ -648,8 +659,8 @@ func withBOM(has bool, doc []byte) []byte {
 }
 
 // patchPiModelBudget rewrites only contextWindow/maxTokens inside one existing
-// model entry, with the same direction rules as projectassets' budget repair:
-// contextWindow must equal the target; maxTokens must be in (0, MaxOutputTokens].
+// model entry, with the same rule as projectassets' budget repair: both must equal
+// the derived budget, because the shared compaction reserve is built from it.
 func patchPiModelBudget(entry []byte, budget projectassets.PiContextBudget, memberIndent, unit string) ([]byte, *piRouterChange, error) {
 	obj := jsonSpan{0, len(entry)}
 	change := &piRouterChange{ToWindow: budget.ResidentTarget}
@@ -683,7 +694,7 @@ func patchPiModelBudget(entry []byte, budget projectassets.PiContextBudget, memb
 		mt, mtNumeric = piJSONInt(out[mtSpan.start:mtSpan.end])
 	}
 	change.FromMaxToken, change.ToMaxToken = mt, mt
-	if !mtNumeric || mt <= 0 || mt > budget.MaxOutputTokens {
+	if !mtNumeric || mt != budget.MaxOutputTokens {
 		val := []byte(strconv.Itoa(budget.MaxOutputTokens))
 		if hasMT {
 			out = jsonReplace(out, mtSpan, val)
@@ -797,30 +808,34 @@ func planPiRouterDefault(settingsTarget string, plan *piRouterPlan) (piRouterDef
 	return def, planPiRouterCompaction(raw, plan, def), nil
 }
 
-// planPiRouterCompaction plans one global settings.json block. Model switching
-// does not change that block, so protect the largest output reserve and use the
-// smallest kept tail, then verify the resulting trigger and summary for EVERY
-// model. Per-model viability alone says nothing about this shared combination.
+// planPiRouterCompaction plans one global settings.json block. Pi applies it to
+// every model, so it is taken from the BINDING model: the one with the lowest own
+// compaction trigger (a Halo slot, whose trigger is also capped by its cold
+// deadline admission), ties broken by the default model, then catalog order.
+// Its reserve and kept tail become the shared block; the reserve is raised only
+// as far as every other model's answer plus summary prompt and the minimum
+// margin need, so a larger-window cloud model's own bigger reserve never moves
+// the binding model's trigger. Every model is then verified against the shared
+// block, because per-model viability says nothing about the combination.
 func planPiRouterCompaction(raw map[string]interface{}, plan *piRouterPlan, def piRouterDefaultPlan) piRouterCompactionPlan {
 	model := def.Pick
 	if model == "" {
 		model = def.Model
 	}
-	cp := piRouterCompactionPlan{Model: model}
+	cp := piRouterCompactionPlan{Model: model, Binding: piRouterBindingModel(plan, model)}
+	bind := plan.Budgets[cp.Binding]
+	cp.ReserveTokens, cp.KeepRecentTokens = bind.ReserveTokens, bind.KeepRecentTokens
 	for _, m := range plan.Models {
 		b := plan.Budgets[m.ID]
-		cp.ReserveTokens = max(cp.ReserveTokens, b.ReserveTokens)
-		cp.KeepRecentTokens = minPositive(cp.KeepRecentTokens, b.KeepRecentTokens)
+		cp.ReserveTokens = max(cp.ReserveTokens, b.MaxOutputTokens+harnesskit.SummaryPromptOverheadTokens+harnesskit.MinMarginTokens)
 	}
 	for _, m := range plan.Models {
 		b := plan.Budgets[m.ID]
 		trigger := b.ResidentTarget - cp.ReserveTokens
-		// An existing lower maxTokens is preserved by the model writer. Using
-		// its envelope's upper bound here is conservative for that entry.
 		summary := min(cp.ReserveTokens*4/5, b.MaxOutputTokens)
 		post := harnesskit.DefaultFixedPromptTokens + summary + cp.KeepRecentTokens
-		if trigger <= 0 || cp.KeepRecentTokens < harnesskit.MinKeepRecentTokens ||
-			trigger-post < trigger/4 || trigger+harnesskit.SummaryPromptOverheadTokens+summary > b.ServedWindow {
+		if trigger <= 0 || cp.KeepRecentTokens < harnesskit.MinKeepRecentTokens || trigger-post < trigger/4 ||
+			trigger+b.MaxOutputTokens > b.ServedWindow || trigger+harnesskit.SummaryPromptOverheadTokens+summary > b.ServedWindow {
 			cp.Blocked = fmt.Sprintf("shared compaction is unsafe for model %q (reserve %d, keep %d, trigger %d, post-compaction %d); use separate Pi settings for incompatible model windows", m.ID, cp.ReserveTokens, cp.KeepRecentTokens, trigger, post)
 			return cp
 		}
@@ -837,6 +852,19 @@ func planPiRouterCompaction(raw map[string]interface{}, plan *piRouterPlan, def 
 	}
 	cp.Change = !cp.FromEnabled || cp.FromReserve != cp.ReserveTokens || cp.FromKeep != cp.KeepRecentTokens
 	return cp
+}
+
+// piRouterBindingModel picks the model with the lowest own compaction trigger;
+// a tie goes to the default model, else the first in catalog order.
+func piRouterBindingModel(plan *piRouterPlan, defaultModel string) string {
+	bind, low := "", 0
+	for _, m := range plan.Models {
+		t := plan.Budgets[m.ID].Envelope.CompactTrigger
+		if bind == "" || t < low || (t == low && m.ID == defaultModel) {
+			bind, low = m.ID, t
+		}
+	}
+	return bind
 }
 
 // piRouterDefaultModel is the router's default route: a row it marks `default`,
@@ -1012,9 +1040,9 @@ func printPiRouterPlan(w io.Writer, plan *piRouterPlan, advertised int, write bo
 		if write {
 			action = "applying"
 		}
-		fmt.Fprintf(w, "  compaction %s: reserveTokens %d -> %d, keepRecentTokens %d -> %d shared across the catalog (default model %q; %s)\n", d.SettingsPath, c.FromReserve, c.ReserveTokens, c.FromKeep, c.KeepRecentTokens, c.Model, action)
+		fmt.Fprintf(w, "  compaction %s: reserveTokens %d -> %d, keepRecentTokens %d -> %d shared across the catalog (binding model %q; default model %q; %s)\n", d.SettingsPath, c.FromReserve, c.ReserveTokens, c.FromKeep, c.KeepRecentTokens, c.Binding, c.Model, action)
 	default:
-		fmt.Fprintf(w, "  compaction %s: matches the shared catalog envelope (default model %q)\n", d.SettingsPath, c.Model)
+		fmt.Fprintf(w, "  compaction %s: matches the shared catalog envelope (binding model %q; default model %q)\n", d.SettingsPath, c.Binding, c.Model)
 	}
 	if d.Skipped == "" {
 		r := plan.Retry

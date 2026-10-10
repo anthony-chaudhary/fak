@@ -180,8 +180,8 @@ func TestPiConfigFromRouterPlanThenWriteIsIdempotent(t *testing.T) {
 	if len(plan.Changed) != 1 || plan.Changed[0].ID != "org/model-a" || plan.Changed[0].FromWindow != 500000 || plan.Changed[0].ToWindow != 131072 {
 		t.Fatalf("Changed = %+v, want org/model-a 500000 -> 131072", plan.Changed)
 	}
-	if c := plan.Compaction; c.Model != "org/model-a" || !c.Change || c.ReserveTokens != 22528 || c.KeepRecentTokens != 4096 {
-		t.Fatalf("Compaction = %+v, want shared reserve 22528 keep 4096", c)
+	if c := plan.Compaction; c.Model != "org/model-a" || !c.Change || c.ReserveTokens != 19456 || c.KeepRecentTokens != 4096 {
+		t.Fatalf("Compaction = %+v, want shared reserve 19456 keep 4096", c)
 	}
 	if plan.Default.Served || plan.Default.Pick != "org/model-a" {
 		t.Fatalf("Default = %+v, want stale custom-model replaced by org/model-a", plan.Default)
@@ -241,8 +241,8 @@ func TestPiConfigFromRouterPlanThenWriteIsIdempotent(t *testing.T) {
 		t.Fatalf("settings = %v, want defaultModel org/model-a with theme preserved", settings)
 	}
 	block, _ := settings["compaction"].(map[string]any)
-	if block["enabled"] != true || block["reserveTokens"] != float64(22528) || block["keepRecentTokens"] != float64(4096) {
-		t.Fatalf("settings compaction = %v, want enabled, shared reserve 22528, keep 4096", block)
+	if block["enabled"] != true || block["reserveTokens"] != float64(19456) || block["keepRecentTokens"] != float64(4096) {
+		t.Fatalf("settings compaction = %v, want enabled, shared reserve 19456, keep 4096", block)
 	}
 	sBackups := piBackups(t, settingsPath)
 	if len(sBackups) != 1 {
@@ -493,12 +493,12 @@ func TestPiConfigFromRouterSharedCompaction(t *testing.T) {
 			}
 			code, stdout, stderr := runPiConfigRouter(t, "--from-router", srv.URL, "--write", "--path", modelsPath, "--settings-path", settingsPath)
 			if tc.refuse {
-				// Each model alone is viable, but the shared 22528 reserve
-				// leaves the 48k model trigger=post=26624 even at keep=4096.
+				// Each model alone is viable, but the shared 19456 reserve (the
+				// 128k answer floor) leaves the 48k model reclaiming 3072 of 29696.
 				if b := piRouterBudget(tc.smallWindow, 0); !b.Viable {
 					t.Fatalf("individual small model unexpectedly non-viable: %+v", b)
 				}
-				if code != 1 || !strings.Contains(stderr, "trigger 26624, post-compaction 26624") {
+				if code != 1 || !strings.Contains(stderr, "trigger 29696, post-compaction 26624") {
 					t.Fatalf("unsafe shared block: exit=%d stderr=%s", code, stderr)
 				}
 				for path, want := range map[string][]byte{modelsPath: modelsBefore, settingsPath: settingsBefore} {
@@ -515,7 +515,7 @@ func TestPiConfigFromRouterSharedCompaction(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("exit=%d stderr=%s", code, stderr)
 			}
-			if !strings.Contains(stdout, "contextWindow=65536 maxTokens=8192 compactAt=43008") {
+			if !strings.Contains(stdout, "contextWindow=65536 maxTokens=8192 compactAt=46080") {
 				t.Fatalf("plan did not report the shared compaction trigger: %s", stdout)
 			}
 			var settings struct {
@@ -537,17 +537,17 @@ func TestPiConfigFromRouterSharedCompaction(t *testing.T) {
 				t.Fatalf("defaultModel=%q, want the selected first model %q", settings.DefaultModel, rows[0]["id"])
 			}
 			c := settings.Compaction
-			if !c.Enabled || c.Reserve != 22528 || c.Keep != 4096 {
-				t.Fatalf("shared compaction=%+v, want enabled, reserve22528 keep4096 in either model order", c)
+			if !c.Enabled || c.Reserve != 19456 || c.Keep != 4096 {
+				t.Fatalf("shared compaction=%+v, want enabled, reserve19456 keep4096 in either model order", c)
 			}
 			models := readPiFakModels(t, modelsPath)
 			if len(models) != 2 {
 				t.Fatalf("models=%+v, want both original windows", models)
 			}
 			for _, m := range models {
-				wantWindow, wantReclaim := 131072, 71680
+				wantWindow, wantReclaim := 131072, 75572
 				if m.ID == "small" {
-					wantWindow, wantReclaim = 65536, 14336
+					wantWindow, wantReclaim = 65536, 17408
 				}
 				trigger := m.ContextWindow - c.Reserve
 				summary := min(c.Reserve*4/5, m.MaxTokens)

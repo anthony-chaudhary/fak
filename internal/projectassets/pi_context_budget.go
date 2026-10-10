@@ -1,6 +1,11 @@
 package projectassets
 
-import "github.com/anthony-chaudhary/fak/pkg/harnesskit"
+import (
+	"strings"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
+)
 
 // pi_context_budget.go — the context envelope fak writes into Pi's configuration. The
 // derivation itself lives in harnesskit.DeriveContextEnvelope (one canonical rule, applied
@@ -45,16 +50,48 @@ type PiContextBudget struct {
 	Envelope   harnesskit.ContextEnvelope
 }
 
+// HaloPiColdAdmission is the cold-prompt admission a Halo serving Pi applies, so the
+// trigger stays below the context a Halo admits cold. The gateway prices every chat
+// request cold (internal/gateway/deadline_admission.go gives no prompt-cache credit),
+// so a 0.97 KV-reuse rate does not raise this bound. MODELED priors, 2026-10-09:
+//   - 600s: Pi passes no timeoutMs, so the OpenAI SDK default X-Stainless-Timeout applies;
+//   - 0.9: deadlineadmit.DefaultHeadroom;
+//   - 162 tok/s cold prefill and 21 tok/s decode: Halo Qwen 27B, measured by Fak Ops;
+//   - 1024 completion tokens and 4096 tokens of one turn's growth past the trigger.
+//
+// MaxTrigger() = 74752.
+var HaloPiColdAdmission = harnesskit.ColdAdmission{
+	ClientDeadline:      600 * time.Second,
+	Headroom:            0.9,
+	PrefillTokensPerSec: 162,
+	DecodeTokens:        1024,
+	DecodeTokensPerSec:  21,
+	TurnGrowthTokens:    4096,
+}
+
+// PiServedByHalo reports whether a router catalog owner names a Halo appliance
+// (owned_by "halo-<node>").
+func PiServedByHalo(ownedBy string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(ownedBy)), "halo")
+}
+
 // PiSafeContextBudget derives the Pi context budget from a RAW served window. A
 // non-positive window falls back to DefaultPiServedWindow. The input must never be a
 // value this function (or any other budget) already produced.
 func PiSafeContextBudget(servedWindow int) PiContextBudget {
+	return PiContextBudgetFor(servedWindow, 0)
+}
+
+// PiContextBudgetFor is PiSafeContextBudget with the compaction trigger capped at
+// maxCompactTrigger when positive (HaloPiColdAdmission.MaxTrigger() for a Halo).
+func PiContextBudgetFor(servedWindow, maxCompactTrigger int) PiContextBudget {
 	if servedWindow <= 0 {
 		servedWindow = DefaultPiServedWindow
 	}
 	env, err := harnesskit.DeriveContextEnvelope(harnesskit.ContextEnvelopeInput{
-		ServedWindow: servedWindow,
-		Source:       harnesskit.WindowServed,
+		ServedWindow:      servedWindow,
+		Source:            harnesskit.WindowServed,
+		MaxCompactTrigger: maxCompactTrigger,
 	})
 	if err != nil {
 		// Unreachable: the source is served and the window positive.
@@ -79,15 +116,16 @@ func PiSafeContextBudget(servedWindow int) PiContextBudget {
 // repairPiModelBudget rewrites an existing fak model entry's contextWindow/maxTokens to the
 // derived budget, returning true when it changed anything. contextWindow must equal the
 // derived window in both directions (a halved 65536 entry is raised, a raw 1M entry is
-// capped); maxTokens is lowered when above the derived output budget and an operator's
-// smaller maxTokens is kept.
+// capped). maxTokens equals the derived output budget in both directions too: the
+// compaction reserve is built from that budget, and fak records no maxTokens pin, so a
+// stale smaller value (a hand-set 4096) only disagrees with the reserve.
 func repairPiModelBudget(mObj map[string]interface{}, budget PiContextBudget) bool {
 	changed := false
 	if cw, ok := numericField(mObj["contextWindow"]); !ok || cw != budget.ResidentTarget {
 		mObj["contextWindow"] = budget.ResidentTarget
 		changed = true
 	}
-	if mt, ok := numericField(mObj["maxTokens"]); !ok || mt <= 0 || mt > budget.MaxOutputTokens {
+	if mt, ok := numericField(mObj["maxTokens"]); !ok || mt != budget.MaxOutputTokens {
 		mObj["maxTokens"] = budget.MaxOutputTokens
 		changed = true
 	}

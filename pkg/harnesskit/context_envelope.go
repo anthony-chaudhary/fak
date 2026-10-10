@@ -3,6 +3,7 @@ package harnesskit
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 // ContextEnvelope is the single canonical derivation of how much of a served model
@@ -85,6 +86,41 @@ type ContextEnvelopeInput struct {
 	FixedPromptTokens int
 	// MaxOutputTokens overrides the derived output budget when positive.
 	MaxOutputTokens int
+	// MaxCompactTrigger, when positive and below the derived trigger, lowers the
+	// trigger to it by enlarging the reserve (see ColdAdmission.MaxTrigger).
+	MaxCompactTrigger int
+}
+
+// ColdAdmission models a deadline-admitting backend that prices every request as
+// a cold prompt: a context that grows past what it admits within the client's
+// deadline is refused (503 deadline_infeasible) however warm its KV cache is.
+type ColdAdmission struct {
+	// ClientDeadline is the time budget the harness declares per request.
+	ClientDeadline time.Duration
+	// Headroom is the fraction of ClientDeadline an estimate may use.
+	Headroom float64
+	// PrefillTokensPerSec is the backend's cold (uncached) prefill rate.
+	PrefillTokensPerSec float64
+	// DecodeTokens and DecodeTokensPerSec price the completion term.
+	DecodeTokens       int
+	DecodeTokensPerSec float64
+	// TurnGrowthTokens is one turn's context growth past the trigger before the
+	// harness compacts.
+	TurnGrowthTokens int
+}
+
+// MaxTrigger returns the largest compaction trigger whose next request the
+// backend admits cold, rounded down to 1Ki; 0 when the model is incomplete.
+//
+//	trigger = (Headroom*ClientDeadline - DecodeTokens/DecodeRate) * PrefillRate - TurnGrowth
+func (c ColdAdmission) MaxTrigger() int {
+	if c.ClientDeadline <= 0 || c.Headroom <= 0 || c.PrefillTokensPerSec <= 0 || c.DecodeTokensPerSec <= 0 {
+		return 0
+	}
+	secs := c.Headroom*c.ClientDeadline.Seconds() - float64(c.DecodeTokens)/c.DecodeTokensPerSec
+	tokens := int(secs*c.PrefillTokensPerSec) - c.TurnGrowthTokens
+	tokens -= tokens % 1024
+	return max(tokens, 1)
 }
 
 // ContextEnvelope is the derived harness configuration for one served window.
@@ -95,6 +131,7 @@ type ContextEnvelope struct {
 	OutputTokens      int    `json:"output_tokens"`
 	ReserveTokens     int    `json:"reserve_tokens"`
 	CompactTrigger    int    `json:"compact_trigger"`
+	DeadlineCapped    bool   `json:"deadline_capped,omitempty"`
 	KeepRecentTokens  int    `json:"keep_recent_tokens"`
 	SummaryTokens     int    `json:"summary_tokens"`
 	PostCompactTokens int    `json:"post_compact_tokens"`
@@ -111,7 +148,8 @@ type ContextEnvelope struct {
 //	Margin        = max(1024, ContextWindow/32)
 //	Reserve       = Output + SummaryPromptOverhead + Margin
 //	Summary       = min(0.8*Reserve, Output)            (Pi's summary maxTokens)
-//	Trigger       = ContextWindow - Reserve
+//	Trigger       = ContextWindow - Reserve, lowered to MaxCompactTrigger when set
+//	                (Reserve then grows to ContextWindow - Trigger)
 //	Keep          = max(4096, min(20000, Trigger/2 - Fixed - Summary))
 //	PostCompact   = Fixed + Summary + Keep;  Reclaim = Trigger - PostCompact
 //
@@ -140,8 +178,13 @@ func DeriveContextEnvelope(in ContextEnvelopeInput) (ContextEnvelope, error) {
 	// Pi's summary is min(0.8*reserve, maxTokens); with maxTokens = output the summary
 	// request needs output + its prompt overhead, which dominates output alone.
 	reserve := output + SummaryPromptOverheadTokens + margin
-	summary := min(reserve*4/5, output)
 	trigger := window - reserve
+	capped := in.MaxCompactTrigger > 0 && in.MaxCompactTrigger < trigger
+	if capped {
+		trigger = in.MaxCompactTrigger
+		reserve = window - trigger
+	}
+	summary := min(reserve*4/5, output)
 	keep := max(MinKeepRecentTokens, min(DefaultKeepRecentTokens, trigger/2-fixed-summary))
 	post := fixed + summary + keep
 	reclaim := trigger - post
@@ -153,6 +196,7 @@ func DeriveContextEnvelope(in ContextEnvelopeInput) (ContextEnvelope, error) {
 		OutputTokens:      output,
 		ReserveTokens:     reserve,
 		CompactTrigger:    trigger,
+		DeadlineCapped:    capped,
 		KeepRecentTokens:  keep,
 		SummaryTokens:     summary,
 		PostCompactTokens: post,

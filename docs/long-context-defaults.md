@@ -133,9 +133,14 @@ derivation cannot stack. Two bounds, both `MODELED`:
 This replaces the retired blanket 50% halving, which stacked (131072 → 65536) and made Halo Qwen
 sessions compact at ~49K (38% of the slot) while reclaiming ~6.5K per compaction. For a 131072
 slot the envelope is contextWindow 131072, maxTokens 16384, reserve 22528 (compaction at 108544),
-keep 20000, ~55K reclaimed per compaction. `fak pi config --from-router --write` writes one
-shared compaction block using the catalog's largest reserve and smallest kept tail, then
-checks the resulting summary and reclamation bounds for every model. Model windows and the
+keep 20000, ~55K reclaimed per compaction. maxTokens always equals the derived output budget,
+because the reserve is built from it (fak records no maxTokens pin).
+
+`fak pi config --from-router --write` writes one shared compaction block taken from the binding
+model, the one with the lowest own trigger (ties go to the default model). The reserve is raised only as far as
+every other model's answer plus the 2K summary prompt and 1K margin need. A larger-window cloud model's
+bigger reserve therefore never lowers a Halo slot's trigger. A Halo-served model (`owned_by halo-*`) also caps its trigger at what the Halo admits cold. The gateway prices every chat request cold, with no prompt-cache credit at admission. Pi declares the OpenAI SDK's 600s deadline, and admission refuses above 0.9 of it. With 162 tok/s cold prefill, a 1024-token completion at 21 tok/s, and one 4096-token turn of growth, that bound is a 74752 trigger (reserve 56320, keep 4608 for a 131072 slot).
+The plan then checks the answer, summary, and reclamation bounds for every model. Model windows and the
 selected default are preserved. If those shared settings are unsafe, neither configuration
 file is changed; incompatible windows need separate Pi settings. Non-viable models also
 print a warning with the reason token. The plan shows the old and replacement reserve/keep
