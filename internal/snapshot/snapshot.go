@@ -42,8 +42,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
@@ -53,6 +55,19 @@ import (
 // an envelope whose version it does not recognize (fail closed — a wrong-version dump is
 // worse than none), mirroring recall.ManifestVersion and sessionimage.Version.
 const EnvelopeVersion = "fak.snapshot.v1"
+
+// ErrCorrupt marks bytes that cannot be trusted as a snapshot: undecodable, a wrong
+// envelope version or kind, or a body that fails its digest. It never marks an I/O
+// error, so a caller can quarantine a bad file while still failing loud on a bad disk.
+var ErrCorrupt = errors.New("snapshot: corrupt")
+
+type corruptError struct{ error }
+
+func (e corruptError) Unwrap() []error { return []error{e.error, ErrCorrupt} }
+
+func corrupt(format string, args ...any) error {
+	return corruptError{fmt.Errorf(format, args...)}
+}
 
 // Snapshot is the uniform envelope for one dumped primitive. Body is the
 // primitive-specific state as raw JSON; BodyDigest is the sha256 over those exact bytes,
@@ -113,17 +128,17 @@ func (s Snapshot) Encode() ([]byte, error) { return json.MarshalIndent(s, "", " 
 func Parse(b []byte) (Snapshot, error) {
 	var s Snapshot
 	if err := json.Unmarshal(b, &s); err != nil {
-		return Snapshot{}, fmt.Errorf("snapshot: decode envelope: %w", err)
+		return Snapshot{}, corrupt("snapshot: decode envelope: %w", err)
 	}
 	if s.Envelope != EnvelopeVersion {
-		return Snapshot{}, fmt.Errorf("snapshot: envelope version %q != %q", s.Envelope, EnvelopeVersion)
+		return Snapshot{}, corrupt("snapshot: envelope version %q != %q", s.Envelope, EnvelopeVersion)
 	}
 	d, err := bodyDigest(s.Body)
 	if err != nil {
-		return Snapshot{}, fmt.Errorf("snapshot: body is not valid JSON: %w", err)
+		return Snapshot{}, corrupt("snapshot: body is not valid JSON: %w", err)
 	}
 	if d != s.BodyDigest {
-		return Snapshot{}, fmt.Errorf("snapshot: body digest mismatch (got %s want %s) — integrity check failed", short(d), short(s.BodyDigest))
+		return Snapshot{}, corrupt("snapshot: body digest mismatch (got %s want %s) — integrity check failed", short(d), short(s.BodyDigest))
 	}
 	return s, nil
 }
@@ -131,12 +146,14 @@ func Parse(b []byte) (Snapshot, error) {
 // Into unmarshals the (already integrity-verified) Body into a typed value.
 func (s Snapshot) Into(v any) error {
 	if err := json.Unmarshal(s.Body, v); err != nil {
-		return fmt.Errorf("snapshot: unmarshal body into %T: %w", v, err)
+		return corrupt("snapshot: unmarshal body into %T: %w", v, err)
 	}
 	return nil
 }
 
-// WriteFile marshals a primitive's body into an envelope and writes it to path.
+// WriteFile marshals a primitive's body into an envelope and replaces path with it
+// atomically, so a crash mid-write leaves the previous file or the new one, never a
+// torn or concatenated mix that the next restore would refuse.
 func WriteFile(path, kind, id string, body any, meta map[string]string, now int64) error {
 	s, err := Marshal(kind, id, body, meta, now)
 	if err != nil {
@@ -146,7 +163,33 @@ func WriteFile(path, kind, id string, body any, meta map[string]string, now int6
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o644)
+	return atomicWrite(path, b, 0o644)
+}
+
+func atomicWrite(path string, b []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("snapshot: write %s: %w", path, err)
+	}
+	name := tmp.Name()
+	_, err = tmp.Write(b)
+	if err == nil {
+		err = tmp.Sync()
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(name, perm)
+	}
+	if err == nil {
+		err = os.Rename(name, path)
+	}
+	if err != nil {
+		_ = os.Remove(name)
+		return fmt.Errorf("snapshot: write %s: %w", path, err)
+	}
+	return nil
 }
 
 // ReadFile reads and verifies an envelope from path.

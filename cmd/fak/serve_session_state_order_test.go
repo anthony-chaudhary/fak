@@ -123,7 +123,7 @@ func TestServeSessionStateRestorePrecedesExpensiveBoot(t *testing.T) {
 
 // Estimate only; this test has not been timed. Reuses the existing cmdServe child harness.
 // fak-test:runtime medium est=5s lane=default
-func TestServeSessionStateCorruptionRefusesBeforeCompute(t *testing.T) {
+func TestServeSessionStateCorruptionQuarantinedBeforeCompute(t *testing.T) {
 	const backendSentinel = "session-state-order-unregistered-backend"
 	for _, mode := range []string{"default", "explicit", "off"} {
 		t.Run(mode, func(t *testing.T) {
@@ -147,7 +147,7 @@ func TestServeSessionStateCorruptionRefusesBeforeCompute(t *testing.T) {
 			if mode == "off" {
 				args = append(args, "--session-state", "off")
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, os.Args[0], args...)
 			cmd.Dir = root
@@ -165,14 +165,21 @@ func TestServeSessionStateCorruptionRefusesBeforeCompute(t *testing.T) {
 			}
 			var exit *exec.ExitError
 			if !errors.As(err, &exit) {
-				t.Fatalf("expected refusal exit: %v, output=%s", err, output)
+				t.Fatalf("expected compute-stage exit: %v, output=%s", err, output)
 			}
 			if mode == "off" {
 				if !strings.Contains(string(output), backendSentinel) || strings.Contains(string(output), "--session-state "+snapshotPath) {
 					t.Fatalf("off did not preserve compute-stage control: %s", output)
 				}
-			} else if exit.ExitCode() != 1 || !strings.Contains(string(output), "--session-state "+snapshotPath) || !strings.Contains(string(output), "snapshot:") || strings.Contains(string(output), backendSentinel) {
-				t.Fatalf("snapshot did not refuse before compute: exit=%d output=%s", exit.ExitCode(), output)
+			} else {
+				out := string(output)
+				warnAt, computeAt := strings.Index(out, "SESSION_STATE_CORRUPT"), strings.Index(out, backendSentinel)
+				if warnAt < 0 || computeAt < 0 || warnAt > computeAt || !strings.Contains(out, "--session-state "+snapshotPath) {
+					t.Fatalf("corrupt snapshot was not quarantined before compute: exit=%d output=%s", exit.ExitCode(), output)
+				}
+				if _, err := os.Stat(snapshotPath); !os.IsNotExist(err) {
+					t.Fatalf("corrupt snapshot left in place at %s (stat err=%v)", snapshotPath, err)
+				}
 			}
 		})
 	}

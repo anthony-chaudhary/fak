@@ -78,19 +78,6 @@ func TestServeSessionStateMissingFileIsCleanFirstBoot(t *testing.T) {
 	}
 }
 
-// TestServeSessionStateCorruptFileFailsLoud: a present-but-tampered drive record fails
-// closed — the persisted drive is a re-checkable fact, so a corrupt one is refused rather
-// than resumed as if whole.
-func TestServeSessionStateCorruptFileFailsLoud(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "corrupt.snap")
-	if err := os.WriteFile(path, []byte("{not a valid snapshot envelope"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := restoreServeSessions(session.NewTable(), path); err == nil {
-		t.Fatal("a corrupt --session-state file must fail loud, got nil error")
-	}
-}
-
 // TestServeSessionStateOffIsNoOp: the empty default is off — restore and dump touch
 // nothing and never error, so the no-flag serve path is byte-for-byte today's.
 func TestServeSessionStateOffIsNoOp(t *testing.T) {

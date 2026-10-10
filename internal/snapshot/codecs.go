@@ -141,7 +141,7 @@ func DumpFleet(fleetID string, tbl *session.Table, now int64) (Snapshot, error) 
 // returns the number of sessions restored. It refuses a snapshot of the wrong kind.
 func (s Snapshot) RestoreFleet(tbl *session.Table) (int, error) {
 	if s.Kind != KindFleet {
-		return 0, fmt.Errorf("snapshot: RestoreFleet on kind %q (want %q)", s.Kind, KindFleet)
+		return 0, corrupt("snapshot: RestoreFleet on kind %q (want %q)", s.Kind, KindFleet)
 	}
 	if tbl == nil {
 		return 0, fmt.Errorf("snapshot: RestoreFleet: nil table")
