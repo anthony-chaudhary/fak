@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -383,6 +385,9 @@ func TestStreamChatCompletionsMidStreamDisconnect(t *testing.T) {
 	if !errors.As(err, &sieB) {
 		t.Fatalf("err = %T, want *StreamInterruptedError", err)
 	}
+	if !errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("bare EOF misclassified: %v", err)
+	}
 	if len(sieB.FragmentsDelivered) != 2 {
 		t.Fatalf("FragmentsDelivered = %q, want 2 entries", sieB.FragmentsDelivered)
 	}
@@ -458,5 +463,287 @@ func TestStreamChatCompletionsInBandErrorFrameFailsClosed(t *testing.T) {
 	}
 	if apiErr.Type != "upstream_error" || !strings.Contains(apiErr.Message, "upstream exploded mid-stream") {
 		t.Fatalf("in-band error not surfaced: %+v", apiErr)
+	}
+}
+
+// Estimate only; this test has not been timed.
+// fak-test:runtime fast est=10ms lane=default
+func TestStreamInterruptedErrorMatchesCauseAndSentinel(t *testing.T) {
+	unrelated := errors.New("unrelated transport")
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded, io.EOF, unrelated, nil} {
+		wrapped := &fakclient.StreamInterruptedError{Err: cause}
+		if errors.Unwrap(wrapped) != fakclient.ErrStreamInterrupted || !errors.Is(wrapped, fakclient.ErrStreamInterrupted) {
+			t.Fatal("historical sentinel contract changed")
+		}
+		for _, target := range []error{context.Canceled, context.DeadlineExceeded, io.EOF, unrelated} {
+			if got, want := errors.Is(wrapped, target), errors.Is(cause, target); got != want {
+				t.Fatalf("cause=%v target=%v got=%t want=%t", cause, target, got, want)
+			}
+		}
+	}
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		wrappedCause := &fakclient.StreamInterruptedError{Err: fmt.Errorf("transport: %w", cause)}
+		if !errors.Is(wrappedCause, cause) {
+			t.Fatal("nested cause lost")
+		}
+	}
+	self := &fakclient.StreamInterruptedError{}
+	self.Err = self
+	if self.Is(context.Canceled) || !errors.Is(self, fakclient.ErrStreamInterrupted) {
+		t.Fatal("direct self-reference changed match semantics")
+	}
+	var absent *fakclient.StreamInterruptedError
+	if absent.Is(context.Canceled) {
+		t.Fatal("nil receiver matched cause")
+	}
+}
+
+// Estimate only; this test has not been timed.
+// fak-test:runtime medium est=1s lane=default
+func TestStreamChatCompletionsPartialCancellationKeepsCause(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, sseEvent(sseOpenChunk("partial-cancel", "test-model")))
+		_, _ = io.WriteString(w, sseEvent(sseChunkJSON("partial-cancel", "test-model", map[string]any{"content": "kept"}, nil, nil)))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	t.Cleanup(ts.Close)
+	var fragments []string
+	result, err := fakclient.New(ts.URL).StreamChatCompletions(ctx, fakclient.StreamChatRequest{Model: "test-model", Messages: []fakclient.StreamMessage{{Role: "user", Content: "hi"}}}, func(fragment string) { fragments = append(fragments, fragment); cancel() })
+	if result != nil || !errors.Is(err, fakclient.ErrStreamInterrupted) || !errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("partial cancel result=%v err=%v", result, err)
+	}
+	var interrupted *fakclient.StreamInterruptedError
+	if !errors.As(err, &interrupted) || len(fragments) != 1 || fragments[0] != "kept" || len(interrupted.FragmentsDelivered) != 1 || interrupted.FragmentsDelivered[0] != "kept" {
+		t.Fatalf("partial evidence changed: fragments=%q interruption=%#v", fragments, interrupted)
+	}
+}
+
+// Estimate only; this test has not been timed.
+// fak-test:runtime medium est=1s lane=default
+func TestStreamChatCompletionsFakExtensionAssembly(t *testing.T) {
+	// Both gateway emitters attach fak to the finish chunk; an opted-in usage
+	// frame follows with empty choices and no fak field.
+	const extension = `{"adjudications":[{"tool":"read","decision":"allow"}],"future":{"nested":[1,{"opaque":"kept"}]}}`
+	frames := []string{
+		sseEvent(sseOpenChunk("extension", "test-model")),
+		sseEvent(`{"choices":[{"delta":{"content":"hello"}}]}`),
+		sseEvent(`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"read","arguments":"{\"path\":"}}]}}]}`),
+		sseEvent(`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"x\"}"}}]}}]}`),
+		sseEvent(`{"choices":[{"delta":{},"finish_reason":"tool_calls"}],"fak":` + extension + `}`),
+		sseEvent(`{"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`),
+		sseEvent(fakclient.StreamDoneToken),
+	}
+	ts := newStreamServer(t, frames)
+	var fragments []string
+	res := mustStream(t, fakclient.New(ts.URL), recordFragments(&fragments))
+	if string(res.Fak) != extension || res.Content != "hello" || len(fragments) != 1 || fragments[0] != "hello" || res.FinishReason != "tool_calls" || res.ID != "extension" || res.Model != "test-model" {
+		t.Fatalf("extension/content assembly changed: result=%+v fragments=%q", res, fragments)
+	}
+	if len(res.ToolCalls) != 1 || res.ToolCalls[0].ID != "call-1" || res.ToolCalls[0].Name != "read" || res.ToolCalls[0].Arguments != `{"path":"x"}` {
+		t.Fatalf("tool assembly changed: %+v", res.ToolCalls)
+	}
+	if res.Usage == nil || res.Usage.PromptTokens != 2 || res.Usage.CompletionTokens != 3 || res.Usage.TotalTokens != 5 {
+		t.Fatalf("usage assembly changed: %+v", res.Usage)
+	}
+}
+
+// Estimate only; this test has not been timed.
+// fak-test:runtime medium est=1s lane=default
+func TestStreamChatCompletionsFakExtensionPresence(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		frames []string
+		want   string
+	}{
+		{"absent", []string{`{"choices":[]}`}, ""},
+		{"present_without_choices", []string{`{"fak":{"unknown":true}}`, `{"choices":[]}`}, `{"unknown":true}`},
+		{"replacement", []string{`{"fak":{"old":1}}`, `{"fak":{"new":2}}`, `{"choices":[]}`}, `{"new":2}`},
+		{"explicit_null", []string{`{"fak":{"old":1}}`, `{"fak":null}`, `{"choices":[]}`}, `null`},
+		{"after_null", []string{`{"fak":null}`, `{"fak":{"new":2}}`}, `{"new":2}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			frames := []string{sseEvent(sseOpenChunk("presence", "test-model"))}
+			for _, frame := range tc.frames {
+				frames = append(frames, sseEvent(frame))
+			}
+			frames = append(frames, sseEvent(fakclient.StreamDoneToken))
+			res := mustStream(t, fakclient.New(newStreamServer(t, frames).URL), nil)
+			if string(res.Fak) != tc.want {
+				t.Fatalf("fak=%s want=%s", res.Fak, tc.want)
+			}
+			encoded, err := json.Marshal(res)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(encoded, &fields); err != nil {
+				t.Fatal(err)
+			}
+			got, present := fields["fak"]
+			if present != (tc.want != "") || string(got) != tc.want {
+				t.Fatalf("serialized fak=%s present=%v want=%s", got, present, tc.want)
+			}
+		})
+	}
+}
+
+// Estimate only; this test has not been timed.
+// fak-test:runtime medium est=1s lane=default
+func TestStreamChatCompletionsFakExtensionDoesNotMaskFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		tail        []string
+		interrupted bool
+	}{
+		{"bare_eof", nil, true},
+		{"in_band_error", []string{sseEvent(`{"fak":{"later":true},"error":{"message":"upstream failed","type":"upstream_error"}}`), sseEvent(fakclient.StreamDoneToken)}, false},
+		{"invalid_json", []string{sseEvent(`{"fak":`), sseEvent(fakclient.StreamDoneToken)}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			frames := append([]string{sseEvent(`{"choices":[],"fak":{"adjudications":[]}}`)}, tc.tail...)
+			res, err := fakclient.New(newStreamServer(t, frames).URL).StreamChatCompletions(context.Background(), fakclient.StreamChatRequest{Model: "test-model"}, nil)
+			if res != nil || err == nil {
+				t.Fatalf("failed stream exposed success metadata: result=%+v err=%v", res, err)
+			}
+			if tc.interrupted {
+				if !errors.Is(err, fakclient.ErrStreamInterrupted) || !errors.Is(err, io.EOF) {
+					t.Fatalf("EOF semantics changed: %v", err)
+				}
+			} else {
+				var apiErr *fakclient.APIError
+				if !errors.As(err, &apiErr) {
+					t.Fatalf("error semantics changed: %T %v", err, err)
+				}
+				if tc.name == "in_band_error" && (apiErr.Message != "upstream failed" || apiErr.Type != "upstream_error") {
+					t.Fatalf("upstream refusal changed: %+v", apiErr)
+				}
+				if tc.name == "invalid_json" && apiErr.Type != "stream_decode_error" {
+					t.Fatalf("decode refusal changed: %+v", apiErr)
+				}
+			}
+		})
+	}
+}
+
+type errorBodyRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f errorBodyRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type partialErrorResponseBody struct {
+	data          []byte
+	cause         error
+	reads, closes int
+}
+
+func (b *partialErrorResponseBody) Read(p []byte) (int, error) {
+	b.reads++
+	n := copy(p, b.data)
+	b.data = b.data[n:]
+	return n, b.cause
+}
+func (b *partialErrorResponseBody) Close() error { b.closes++; return nil }
+
+// fak-test:runtime fast est=10ms lane=default
+// Unmeasured estimate; injected HTTP response body, no upstream model.
+func TestStreamHTTPErrorBodyPreservesStatusAndReadCause(t *testing.T) {
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded, io.ErrUnexpectedEOF, errors.New("transport body failure")} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			body := &partialErrorResponseBody{data: []byte(`{"error":{"message":"partial body retained","type":"upstream_error","code":"broken"}}`), cause: cause}
+			requests, callbacks := 0, 0
+			c := fakclient.New("http://fixture.invalid", fakclient.WithHTTPClient(&http.Client{Transport: errorBodyRoundTripper(func(r *http.Request) (*http.Response, error) {
+				requests++
+				return &http.Response{StatusCode: http.StatusBadGateway, Header: make(http.Header), Body: body, Request: r}, nil
+			})}))
+			result, err := c.StreamChatCompletions(context.Background(), fakclient.StreamChatRequest{}, func(string) { callbacks++ })
+			var api *fakclient.APIError
+			var interrupted *fakclient.StreamInterruptedError
+			if result != nil || !errors.Is(err, cause) || !errors.As(err, &api) || api.StatusCode != http.StatusBadGateway || api.Type != "upstream_error" || api.Message != "partial body retained" || api.Code != "broken" {
+				t.Fatalf("status/body/cause lost: result=%v err=%v api=%+v", result, err, api)
+			}
+			if errors.As(err, &interrupted) || errors.Is(err, fakclient.ErrStreamInterrupted) {
+				t.Fatal("HTTP error body misclassified as an SSE interruption")
+			}
+			if requests != 1 || callbacks != 0 || body.reads != 1 || body.closes != 1 {
+				t.Fatalf("request/ownership changed: requests=%d callbacks=%d reads=%d closes=%d", requests, callbacks, body.reads, body.closes)
+			}
+		})
+	}
+}
+
+type signaledErrorResponseBody struct {
+	io.ReadCloser
+	started chan struct{}
+	once    sync.Once
+	closes  atomic.Int32
+}
+
+func (b *signaledErrorResponseBody) Read(p []byte) (int, error) {
+	b.once.Do(func() { close(b.started) })
+	return b.ReadCloser.Read(p)
+}
+func (b *signaledErrorResponseBody) Close() error { b.closes.Add(1); return b.ReadCloser.Close() }
+
+// fak-test:runtime medium est=1s lane=default
+// Unmeasured estimate. Real loopback HTTP headers and cancellation during body read.
+func TestStreamHTTPErrorBodyCancellationAfterHeaders(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	release := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer ts.Close()
+	defer close(release)
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	defer transport.CloseIdleConnections()
+	started := make(chan struct{})
+	var body *signaledErrorResponseBody
+	c := fakclient.New(ts.URL, fakclient.WithHTTPClient(&http.Client{Transport: errorBodyRoundTripper(func(r *http.Request) (*http.Response, error) {
+		resp, err := transport.RoundTrip(r)
+		if err == nil {
+			body = &signaledErrorResponseBody{ReadCloser: resp.Body, started: started}
+			resp.Body = body
+		}
+		return resp, err
+	})}))
+	type completion struct {
+		result *fakclient.ChatResult
+		err    error
+	}
+	done := make(chan completion, 1)
+	var callbacks atomic.Int32
+	go func() {
+		result, err := c.StreamChatCompletions(ctx, fakclient.StreamChatRequest{}, func(string) { callbacks.Add(1) })
+		done <- completion{result, err}
+	}()
+	select {
+	case <-started:
+		cancel()
+	case early := <-done:
+		t.Fatalf("request ended before error-body read: %v", early.err)
+	case <-ctx.Done():
+		t.Fatal("error-body read did not start")
+	}
+	select {
+	case got := <-done:
+		var api *fakclient.APIError
+		if got.result != nil || !errors.Is(got.err, context.Canceled) || !errors.As(got.err, &api) || api.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("post-header cancellation lost: result=%v err=%v api=%+v", got.result, got.err, api)
+		}
+		if errors.Is(got.err, fakclient.ErrStreamInterrupted) || callbacks.Load() != 0 || body == nil || body.closes.Load() != 1 {
+			t.Fatal("post-header cancellation violated callback/body ownership contract")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled error-body request did not return")
 	}
 }

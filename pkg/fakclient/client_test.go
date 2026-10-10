@@ -3,6 +3,7 @@ package fakclient_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -238,5 +239,78 @@ func TestAPIErrorOnNon2xx(t *testing.T) {
 	}
 	if apiErr.Type != "invalid_request_error" || !strings.Contains(apiErr.Message, "malformed") {
 		t.Fatalf("error body not parsed: %+v", apiErr)
+	}
+}
+
+// fak-test:runtime fast est=20ms lane=default
+// Unmeasured estimate. Public methods use injected HTTP bodies; no gateway or model.
+// errorBodyRoundTripper/partialErrorResponseBody are shared with the accepted
+// failed streaming error-body regression in stream_test.go.
+func TestHTTPMethodsFailedBodyPreserveStatusAndCause(t *testing.T) {
+	methods := []struct {
+		name, method, path string
+		invoke             func(*fakclient.Client) (bool, error)
+	}{
+		{"adjudicate", http.MethodPost, "/v1/fak/adjudicate", func(c *fakclient.Client) (bool, error) {
+			r, err := c.Adjudicate(context.Background(), fakclient.SyscallRequest{Tool: "t"})
+			return r == nil, err
+		}},
+		{"syscall", http.MethodPost, "/v1/fak/syscall", func(c *fakclient.Client) (bool, error) {
+			r, err := c.Syscall(context.Background(), fakclient.SyscallRequest{Tool: "t"})
+			return r == nil, err
+		}},
+		{"admit", http.MethodPost, "/v1/fak/admit", func(c *fakclient.Client) (bool, error) {
+			r, err := c.Admit(context.Background(), fakclient.AdmitRequest{Tool: "t"})
+			return r == nil, err
+		}},
+		{"changes", http.MethodGet, "/v1/fak/changes?since=7", func(c *fakclient.Client) (bool, error) {
+			r, err := c.Changes(context.Background(), 7)
+			return r == nil, err
+		}},
+		{"revoke", http.MethodPost, "/v1/fak/revoke", func(c *fakclient.Client) (bool, error) {
+			r, err := c.Revoke(context.Background(), "w")
+			return r == nil, err
+		}},
+		{"models", http.MethodGet, "/v1/models", func(c *fakclient.Client) (bool, error) {
+			r, err := c.Models(context.Background())
+			return r == nil, err
+		}},
+		// Health has no response pointer. Its only result is the error checked below.
+		{"health", http.MethodGet, "/healthz", func(c *fakclient.Client) (bool, error) { return true, c.Health(context.Background()) }},
+	}
+	for _, method := range methods {
+		for _, status := range []int{http.StatusOK, http.StatusBadRequest, http.StatusServiceUnavailable} {
+			for _, cause := range []error{context.Canceled, context.DeadlineExceeded, io.ErrUnexpectedEOF, errors.New("transport body failure")} {
+				t.Run(method.name+"/"+http.StatusText(status)+"/"+cause.Error(), func(t *testing.T) {
+					body := &partialErrorResponseBody{data: []byte(`{"error":{"message":"retained partial body","type":"upstream_error","code":"read-fault","param":"field"}}`), cause: cause}
+					requests := 0
+					c := fakclient.New("http://fixture.invalid", fakclient.WithHTTPClient(&http.Client{Transport: errorBodyRoundTripper(func(req *http.Request) (*http.Response, error) {
+						requests++
+						if req.Method != method.method || req.URL.RequestURI() != method.path {
+							t.Fatalf("wrong public route: %s %s", req.Method, req.URL.RequestURI())
+						}
+						return &http.Response{StatusCode: status, Header: make(http.Header), Body: body, Request: req}, nil
+					})}))
+					nilResult, err := method.invoke(c)
+					if !nilResult || !errors.Is(err, cause) {
+						t.Fatalf("response or cause changed: nil=%v err=%v", nilResult, err)
+					}
+					var api *fakclient.APIError
+					if status == http.StatusOK {
+						if errors.As(err, &api) || err.Error() != "fak: read response: "+cause.Error() {
+							t.Fatalf("2xx failure contract changed: %v", err)
+						}
+					} else if !errors.As(err, &api) || api.StatusCode != status || api.Message != "retained partial body" || api.Type != "upstream_error" || api.Code != "read-fault" || api.Param != "field" {
+						t.Fatalf("API status/body lost: err=%v api=%+v", err, api)
+					}
+					if errors.Is(err, fakclient.ErrStreamInterrupted) {
+						t.Fatal("HTTP body failure became SSE interruption")
+					}
+					if requests != 1 || body.reads != 1 || body.closes != 1 {
+						t.Fatalf("request ownership: requests=%d reads=%d closes=%d", requests, body.reads, body.closes)
+					}
+				})
+			}
+		}
 	}
 }

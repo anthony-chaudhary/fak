@@ -105,6 +105,10 @@ type ChatResult struct {
 	ToolCalls    []StreamToolCall `json:"tool_calls,omitempty"`
 	FinishReason string           `json:"finish_reason"`
 	Usage        *StreamUsage     `json:"usage,omitempty"`
+	// Fak preserves the gateway extension without coupling the SDK to its internal
+	// schema. The last present value wins, including explicit JSON null; omitted
+	// fields on later frames leave it unchanged. It is exposed only after [DONE].
+	Fak json.RawMessage `json:"fak,omitempty"`
 }
 
 // StreamInterruptedError is returned when a stream ends before the gateway
@@ -123,9 +127,15 @@ func (e *StreamInterruptedError) Error() string {
 		len(e.FragmentsDelivered), e.Err)
 }
 
-// Unwrap pins the cause to ErrStreamInterrupted so errors.Is matches the
-// sentinel; the underlying transport error is described in Error.
+// Unwrap preserves the historical ErrStreamInterrupted sentinel contract.
 func (e *StreamInterruptedError) Unwrap() error { return ErrStreamInterrupted }
+
+// Is additionally exposes the stored cause to errors.Is without changing Unwrap
+// or errors.As behavior. Nil and directly self-referential causes do not recurse.
+// As with ordinary error chains, callers must not construct indirect cycles.
+func (e *StreamInterruptedError) Is(target error) bool {
+	return e != nil && e.Err != e && errors.Is(e.Err, target)
+}
 
 // StreamChatCompletions POSTs req to /v1/chat/completions with stream:true and
 // consumes the SSE body, invoking onDelta with each content fragment the moment
@@ -134,6 +144,9 @@ func (e *StreamInterruptedError) Unwrap() error { return ErrStreamInterrupted }
 // short of that terminator — a read error or a bare EOF — returns a
 // *StreamInterruptedError instead of a partial result, so a disconnect can
 // never masquerade as a completed answer (issue #12767).
+// Non-2xx responses return *APIError. If reading that error body also fails,
+// the returned error joins the API error and read cause: use errors.As for
+// *APIError and errors.Is for cancellation or transport errors.
 func (c *Client) StreamChatCompletions(ctx context.Context, req StreamChatRequest, onDelta func(frag string)) (*ChatResult, error) {
 	// stream is unexported (callers never set it), so json.Marshal on the bare
 	// request would drop it; marshal through a promoting wrapper instead.
@@ -168,8 +181,14 @@ func (c *Client) StreamChatCompletions(ctx context.Context, req StreamChatReques
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-		return nil, parseAPIError(resp.StatusCode, data)
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+		apiErr := parseAPIError(resp.StatusCode, data)
+		if readErr != nil {
+			// Headers establish the API failure even when its body is cut short.
+			// Keep both the status and original cancellation/transport cause.
+			return nil, errors.Join(apiErr, fmt.Errorf("fak: read error response: %w", readErr))
+		}
+		return nil, apiErr
 	}
 	return consumeChatStream(resp, onDelta)
 }
@@ -226,6 +245,9 @@ func consumeChatStream(resp *http.Response, onDelta func(frag string)) (*ChatRes
 				apiErr.Param = *chunk.Error.Param
 			}
 			return nil, apiErr
+		}
+		if len(chunk.Fak) > 0 {
+			res.Fak = chunk.Fak
 		}
 		if len(chunk.Choices) > 0 {
 			delta := chunk.Choices[0].Delta
@@ -322,7 +344,8 @@ type chatStreamChunk struct {
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage *StreamUsage `json:"usage"`
+	Usage *StreamUsage    `json:"usage"`
+	Fak   json.RawMessage `json:"fak"`
 	// Error carries the in-band error object both gateway stream paths can
 	// emit mid-stream (followed by data: [DONE]). Its presence is a failure
 	// signal, never a completion; the consumer fails closed on it (#12776).
