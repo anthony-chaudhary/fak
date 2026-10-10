@@ -9,6 +9,7 @@ On 2026-10-09, 68 public commits landed under an operator deferred-verification 
 | TICKET-03 | Vulkan memory accounting and residency (#13668) | CPU green; Vulkan-tagged build and hardware not yet witnessed |
 | TICKET-04 | Gateway deadline cache credit vs. the Halo long-chat fix | conflict: tests pass, behavior regressed |
 | TICKET-05 | Pi launcher/router and garden launchd watchdog | targeted tests not yet run |
+| TICKET-05a | Pi launcher qwen-prefix window row vs router-reported window (#13778) | open: launcher 131072 vs router-derived 163840 for cloud Qwen |
 | TICKET-06 | safecommit and test-hygiene commits | red (real-git fixtures) |
 | TICKET-07 | FP8 tiled-to-Q8 loader | red |
 | TICKET-08 | V4.1 compressed-window composition + session fallback | red |
