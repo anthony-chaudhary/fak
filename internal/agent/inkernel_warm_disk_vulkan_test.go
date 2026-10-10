@@ -27,7 +27,7 @@ const (
 	vulkanWarmDiskChildEnv      = "FAK_TEST_VULKAN_WARM_DISK_CHILD"
 	vulkanWarmDiskChildMarker   = "FAK_VULKAN_WARM_DISK_CHILD="
 	vulkanWarmDiskReceiptMarker = "FAK_VULKAN_WARM_DISK_RECEIPT="
-	vulkanWarmDiskSchema        = "fak-vulkan-warm-disk-restart/1"
+	vulkanWarmDiskSchema        = "fak-vulkan-warm-disk-restart/2"
 )
 
 // The source-bound builder sets both stamps from its admitted immutable archive:
@@ -89,6 +89,9 @@ type vulkanWarmDiskRestartReceipt struct {
 	ExpectedKVTransferBytes uint64                     `json:"expected_kv_transfer_bytes"`
 	ExpectedColdD2HBytes    uint64                     `json:"expected_cold_d2h_bytes"`
 	ExpectedKVTransferCount uint64                     `json:"expected_kv_transfer_count"`
+	ExpectedColdD2HCount    uint64                     `json:"expected_cold_d2h_count"`
+	ExpectedWarmH2DBytes    uint64                     `json:"expected_warm_h2d_bytes"`
+	ExpectedWarmH2DCount    uint64                     `json:"expected_warm_h2d_count"`
 	Cold                    vulkanWarmDiskChildReceipt `json:"cold"`
 	Warm                    vulkanWarmDiskChildReceipt `json:"warm"`
 	TokenParity             bool                       `json:"token_parity"`
@@ -137,10 +140,16 @@ func TestInKernelWarmPrefixDiskAcrossProcessesVulkan(t *testing.T) {
 
 	cold := run("cold")
 	warm := run("warm")
-	cfg := warmCfg()
-	expectedKVBytes := uint64(cold.Stable * 3 * cfg.NumLayers * cfg.NumKVHeads * cfg.HeadDim * compute.F32.Bytes())
-	expectedKVTransfers := uint64(3 * cfg.NumLayers)
-	expectedColdD2HBytes := expectedKVBytes + uint64(cfg.VocabSize*compute.F32.Bytes())
+	expectedKVBytes, expectedKVTransfers := vulkanWarmDiskStateTransfers(vulkanWarmDiskCfg(), cold.Stable)
+	// The hybrid cold path reads back two logits rows: the prefill head and the
+	// captured snapshot's continuation logits.
+	expectedColdD2HBytes := expectedKVBytes + uint64(2*vulkanWarmDiskCfg().VocabSize*compute.F32.Bytes())
+	expectedColdD2HCount := expectedKVTransfers + 2
+	// Restore currently uploads every linear-attention conv+recurrent state twice;
+	// the exact count pins that cost so removing the duplicate is a visible change.
+	linearBytes, linearTransfers := vulkanWarmDiskLinearStateTransfers(vulkanWarmDiskCfg())
+	expectedWarmH2DBytes := expectedKVBytes + linearBytes
+	expectedWarmH2DCount := expectedKVTransfers + linearTransfers
 
 	if cold.Schema != vulkanWarmDiskSchema || warm.Schema != vulkanWarmDiskSchema || cold.Phase != "cold" || warm.Phase != "warm" || cold.PID == warm.PID {
 		t.Fatalf("invalid child identity: cold_schema=%q cold_phase=%q cold_pid=%d warm_schema=%q warm_phase=%q warm_pid=%d", cold.Schema, cold.Phase, cold.PID, warm.Schema, warm.Phase, warm.PID)
@@ -163,11 +172,11 @@ func TestInKernelWarmPrefixDiskAcrossProcessesVulkan(t *testing.T) {
 	if len(cold.Generated) != 4 || len(warm.Generated) != 4 || !eqInts(cold.Generated, warm.Generated) || cold.LogitsDigest == "" || cold.LogitsDigest != warm.LogitsDigest || cold.ContinuationLogitsDigest == "" || cold.ContinuationLogitsDigest != warm.ContinuationLogitsDigest {
 		t.Fatalf("cross-process parity: cold_generated=%d warm_generated=%d tokens=%t initial_logits=%t continuation_logits=%t", len(cold.Generated), len(warm.Generated), eqInts(cold.Generated, warm.Generated), cold.LogitsDigest == warm.LogitsDigest, cold.ContinuationLogitsDigest == warm.ContinuationLogitsDigest)
 	}
-	if got := cold.Transfers; got.D2HBytes != expectedColdD2HBytes || got.D2HCount != expectedKVTransfers+1 || got.ComputeDispatches == 0 || got.DispatchSubmits == 0 {
-		t.Fatalf("cold transfers: compute=%d submits=%d h2d_count=%d h2d_bytes=%d d2h_count=%d d2h_bytes=%d want_d2h_count=%d want_d2h_bytes=%d", got.ComputeDispatches, got.DispatchSubmits, got.H2DCount, got.H2DBytes, got.D2HCount, got.D2HBytes, expectedKVTransfers+1, expectedColdD2HBytes)
+	if got := cold.Transfers; got.D2HBytes != expectedColdD2HBytes || got.D2HCount != expectedColdD2HCount || got.ComputeDispatches == 0 || got.DispatchSubmits == 0 {
+		t.Fatalf("cold transfers: compute=%d submits=%d h2d_count=%d h2d_bytes=%d d2h_count=%d d2h_bytes=%d want_d2h_count=%d want_d2h_bytes=%d", got.ComputeDispatches, got.DispatchSubmits, got.H2DCount, got.H2DBytes, got.D2HCount, got.D2HBytes, expectedColdD2HCount, expectedColdD2HBytes)
 	}
-	if got := warm.Transfers; got.H2DBytes != expectedKVBytes || got.H2DCount != expectedKVTransfers || got.D2HBytes != 0 || got.D2HCount != 0 || got.ComputeDispatches != 0 || got.DispatchSubmits == 0 {
-		t.Fatalf("warm transfers: compute=%d submits=%d h2d_count=%d h2d_bytes=%d d2h_count=%d d2h_bytes=%d want_h2d_count=%d want_h2d_bytes=%d", got.ComputeDispatches, got.DispatchSubmits, got.H2DCount, got.H2DBytes, got.D2HCount, got.D2HBytes, expectedKVTransfers, expectedKVBytes)
+	if got := warm.Transfers; got.H2DBytes != expectedWarmH2DBytes || got.H2DCount != expectedWarmH2DCount || got.D2HBytes != 0 || got.D2HCount != 0 || got.ComputeDispatches != 0 || got.DispatchSubmits == 0 {
+		t.Fatalf("warm transfers: compute=%d submits=%d h2d_count=%d h2d_bytes=%d d2h_count=%d d2h_bytes=%d want_h2d_count=%d want_h2d_bytes=%d", got.ComputeDispatches, got.DispatchSubmits, got.H2DCount, got.H2DBytes, got.D2HCount, got.D2HBytes, expectedWarmH2DCount, expectedWarmH2DBytes)
 	}
 
 	source := vulkanWarmDiskSourceIdentity(t)
@@ -180,6 +189,7 @@ func TestInKernelWarmPrefixDiskAcrossProcessesVulkan(t *testing.T) {
 		SourceRevision: source.Revision, SourceArchiveSHA256: source.ArchiveSHA256, SourceModified: source.Modified, ExecutableSHA256: executable,
 		ModelIdentity: cold.ModelIdentity, ExpectedKVTransferBytes: expectedKVBytes,
 		ExpectedColdD2HBytes: expectedColdD2HBytes, ExpectedKVTransferCount: expectedKVTransfers,
+		ExpectedColdD2HCount: expectedColdD2HCount, ExpectedWarmH2DBytes: expectedWarmH2DBytes, ExpectedWarmH2DCount: expectedWarmH2DCount,
 		Cold: cold, Warm: warm, TokenParity: true, LogitParity: true, ContinuationLogitParity: true,
 	}
 	payload, err := json.Marshal(receipt)
@@ -211,7 +221,7 @@ func TestInKernelWarmPrefixDiskVulkanProcessHelper(t *testing.T) {
 		t.Fatalf("Vulkan device %q does not match required device %q", backend.Tier(), expected)
 	}
 
-	cfg := warmCfg()
+	cfg := vulkanWarmDiskCfg()
 	p := NewInKernelPlannerWithConfig(model.NewSynthetic(cfg), loadProbeTok(t), "synthetic-vulkan-process-disk", false, backend, false, InKernelPlannerConfig{
 		RequireDeviceExecution: true,
 		DenseGPULayers:         cfg.NumLayers,
@@ -315,7 +325,7 @@ func vulkanWarmDiskModelIdentity(t *testing.T) string {
 	wire, err := json.Marshal(struct {
 		Kind   string       `json:"kind"`
 		Config model.Config `json:"config"`
-	}{Kind: "synthetic-vulkan-warm-disk-v1", Config: warmCfg()})
+	}{Kind: "synthetic-vulkan-warm-disk-v2", Config: vulkanWarmDiskCfg()})
 	if err != nil {
 		t.Fatalf("marshal Vulkan model identity: %v", err)
 	}
@@ -392,10 +402,54 @@ func vulkanWarmDiskContinuationLogitsDigest(t *testing.T, p *InKernelPlanner, ba
 	}
 	snap.Close()
 	logits := session.Step(generated[len(generated)-1])
-	if len(logits) != warmCfg().VocabSize {
-		t.Fatalf("continuation logits=%d, want=%d", len(logits), warmCfg().VocabSize)
+	if len(logits) != vulkanWarmDiskCfg().VocabSize {
+		t.Fatalf("continuation logits=%d, want=%d", len(logits), vulkanWarmDiskCfg().VocabSize)
 	}
 	return warmDiskLogitsDigest(logits)
+}
+
+// vulkanWarmDiskStateTransfers is the exact device continuation state of a
+// Qwen3.5 hybrid prefix: three stable-length KV planes per full-attention layer,
+// and one convolution plus one recurrent state buffer per linear-attention layer.
+func vulkanWarmDiskStateTransfers(cfg model.Config, stable int) (bytes, count uint64) {
+	f32 := compute.F32.Bytes()
+	convChannels := 2*cfg.LinearNumKeyHeads*cfg.LinearKeyHeadDim + cfg.LinearNumValueHeads*cfg.LinearValueHeadDim
+	convBytes := (cfg.LinearConvKernelDim - 1) * convChannels * f32
+	recurrentBytes := cfg.LinearNumValueHeads * cfg.LinearKeyHeadDim * cfg.LinearValueHeadDim * f32
+	for _, layerType := range cfg.LayerTypes {
+		if layerType == "full_attention" {
+			bytes += uint64(stable * 3 * cfg.NumKVHeads * cfg.HeadDim * f32)
+			count += 3
+		} else {
+			bytes += uint64(convBytes + recurrentBytes)
+			count += 2
+		}
+	}
+	return bytes, count
+}
+
+// vulkanWarmDiskLinearStateTransfers is the linear-attention share of the state:
+// one convolution and one recurrent buffer per linear-attention layer.
+func vulkanWarmDiskLinearStateTransfers(cfg model.Config) (bytes, count uint64) {
+	linear := cfg
+	linear.LayerTypes = nil
+	for _, layerType := range cfg.LayerTypes {
+		if layerType != "full_attention" {
+			linear.LayerTypes = append(linear.LayerTypes, layerType)
+		}
+	}
+	return vulkanWarmDiskStateTransfers(linear, 0)
+}
+
+// vulkanWarmDiskCfg is a Qwen3.5-hybrid synthetic model: the device prefix-reuse
+// gate (InKernelBackendPrefixReuseSupported) admits only GLM-DSA and Qwen3.5
+// hybrids, so a dense fixture can never warm on a device backend (no_tree).
+// The attention output gate stays on: the Vulkan resident sequence requires
+// the packed Q+gate projection that real Qwen3.5 checkpoints carry.
+func vulkanWarmDiskCfg() model.Config {
+	cfg := tinyHybridCfg()
+	cfg.VocabSize = warmCfg().VocabSize
+	return cfg
 }
 
 func boundedVulkanWarmDiskOutput(output []byte) string {
