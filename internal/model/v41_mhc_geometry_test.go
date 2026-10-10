@@ -74,18 +74,32 @@ func TestV41ForwardReducedMHCStaysAdmitted(t *testing.T) {
 // TestV41ForwardWrongMHCShapeStillRefuses retains the fail-closed contract: a
 // genuinely mis-shaped mHC mix weight still refuses by name at the mHC stage.
 func TestV41ForwardWrongMHCShapeStillRefuses(t *testing.T) {
-	m := v41ReducedModel(t)
-	name := layerName(0, "mhc.mixes.weight")
-	meta := m.manifest[name]
-	meta.Shape = []int{v41MHCMixWidth + 1, m.Cfg.HiddenSize}
-	m.manifest[name] = meta
+	for _, rankMismatch := range []bool{false, true} {
+		name := "wrong-dimensions"
+		if rankMismatch {
+			name = "wrong-rank"
+		}
+		t.Run(name, func(t *testing.T) {
+			m := v41ReducedModel(t)
+			name := layerName(0, "mhc.mixes.weight")
+			meta := m.manifest[name]
+			meta.Shape = []int{v41MHCMixWidth + 1, m.Cfg.HiddenSize}
+			if rankMismatch {
+				meta.Shape = []int{v41MHCMixWidth, m.Cfg.HiddenSize, 1}
+			}
+			m.manifest[name] = meta
 
-	err := m.v41ForwardAdmitted()
-	if !errors.Is(err, ErrV41ForwardStage) {
-		t.Fatalf("mis-shaped mHC mix admission error = %v, want ErrV41ForwardStage", err)
-	}
-	if !strings.Contains(err.Error(), name) {
-		t.Fatalf("mis-shaped mHC mix error = %v, want it to name %s", err, name)
+			err := m.v41ForwardAdmitted()
+			if !errors.Is(err, ErrV41ForwardStage) {
+				t.Fatalf("mis-shaped mHC mix admission error = %v, want ErrV41ForwardStage", err)
+			}
+			if errors.Is(err, errV41MHCMixMissing) {
+				t.Fatalf("present mis-shaped mHC mix error = %v, must not report missing tensor", err)
+			}
+			if !strings.Contains(err.Error(), name) {
+				t.Fatalf("mis-shaped mHC mix error = %v, want it to name %s", err, name)
+			}
+		})
 	}
 }
 
@@ -100,7 +114,15 @@ func TestV41ForwardAbsentMHCMixStillRefuses(t *testing.T) {
 	if !errors.Is(err, ErrV41ForwardStage) {
 		t.Fatalf("absent mHC mix admission error = %v, want ErrV41ForwardStage", err)
 	}
-	if !strings.Contains(err.Error(), "missing tensor "+name) {
-		t.Fatalf("absent mHC mix error = %v, want a named missing-tensor refusal", err)
+	if !errors.Is(err, errV41MHCMixMissing) {
+		t.Fatalf("absent mHC mix error = %v, want errV41MHCMixMissing", err)
+	}
+	var missing *v41MissingMHCMixError
+	if !errors.As(err, &missing) || missing.Name != name {
+		t.Fatalf("absent mHC mix error = %v, want missing tensor %s", err, name)
+	}
+	var stage *V41ForwardError
+	if !errors.As(err, &stage) || stage.Stage != v41StageMHC || stage.Layer != 0 {
+		t.Fatalf("absent mHC mix error = %v, want mHC stage at layer 0", err)
 	}
 }

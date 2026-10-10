@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"math"
 )
@@ -650,8 +651,27 @@ func (m *Model) v41AdmitMHC(l int) error {
 	return nil
 }
 
+// errV41MHCMixMissing distinguishes an absent mix from rejected geometry.
+var errV41MHCMixMissing = errors.New("missing mHC mix tensor")
+
+// v41MissingMHCMixError retains the missing name without parsing error text.
+type v41MissingMHCMixError struct {
+	Name string
+}
+
+func (e *v41MissingMHCMixError) Error() string { return "missing tensor " + e.Name }
+func (e *v41MissingMHCMixError) Unwrap() error { return errV41MHCMixMissing }
+
 func (m *Model) v41AdmitMHCNamed(l int, leaf, base, scale string, requireFlat bool) error {
 	name := layerName(l, leaf)
+	// A malformed manifest rank is still present; leave its geometry refusal
+	// to the existing layout classifier. residentShape covers non-manifest stores.
+	_, manifestPresent := m.manifest[name]
+	_, _, residentPresent := m.residentShape(name)
+	if !manifestPresent && !residentPresent {
+		return v41StageErr(v41StageMHC, l,
+			fmt.Errorf("%w: %w", ErrV41ForwardStage, &v41MissingMHCMixError{Name: name}))
+	}
 	flat, _, ok := m.v41MHCWeightLayoutNamed(l, leaf)
 	if !ok || (requireFlat && !flat) {
 		return v41StageErr(v41StageMHC, l, fmt.Errorf("%w: tensor %s has no admitted mHC geometry (require flattened=%t)", ErrV41ForwardStage, name, requireFlat))
