@@ -4,7 +4,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -165,6 +167,41 @@ func TestWriteRefusalIsTyped503WithRetryAfter(t *testing.T) {
 	}
 	if got := rec.Header().Get(HeaderEstimateMs); got != strconv.Itoa(292000) {
 		t.Fatalf("%s = %q", HeaderEstimateMs, got)
+	}
+}
+
+// A refusal an idle node would also make is a prompt-size refusal: resending the
+// same body only burns the client's retry budget (a Halo pi session spent ~300 s
+// of backoff on it on 2026-10-10), so the body reads as context overflow, which
+// Pi (pi-ai OVERFLOW_PATTERNS /prompt (?:is )?too long/i) answers by compacting.
+// A busy-node refusal stays a plain retryable overload.
+// fak-test:runtime fast est=1s
+func TestRefusalMarksPromptTooLongOnlyWhenIdleNodeAlsoRefuses(t *testing.T) {
+	piOverflow := regexp.MustCompile(`(?i)prompt (?:is )?too long`)
+	body := func(v Verdict) string {
+		rec := httptest.NewRecorder()
+		WriteRefusal(rec, v)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503", rec.Code)
+		}
+		return rec.Body.String()
+	}
+
+	busy, _ := incidentEstimator(newClock())
+	v := busy.Admit(1600, 0, 300*time.Second, true)
+	if v.Admit || v.PromptTooLong {
+		t.Fatalf("busy-node verdict = %+v, want refused but not PromptTooLong (idle node admits it)", v)
+	}
+	if b := body(v); piOverflow.MatchString(b) || !strings.Contains(b, CodeDeadlineInfeasible) {
+		t.Fatalf("busy refusal body = %s, want retryable overload wording with code %s", b, CodeDeadlineInfeasible)
+	}
+
+	cold := haloPiEstimator(t).AdmitCached(50_000, 0, 0, 600*time.Second, true)
+	if cold.Admit || !cold.PromptTooLong {
+		t.Fatalf("cold oversized prompt verdict = %+v, want PromptTooLong", cold)
+	}
+	if b := body(cold); !piOverflow.MatchString(b) || !strings.Contains(b, CodeDeadlineInfeasible) {
+		t.Fatalf("prompt-size refusal body = %s, want overflow wording and code %s", b, CodeDeadlineInfeasible)
 	}
 }
 

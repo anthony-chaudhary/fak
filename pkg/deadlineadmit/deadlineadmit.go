@@ -131,6 +131,12 @@ func WriteRefusal(w http.ResponseWriter, v Verdict) {
 	h.Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusServiceUnavailable)
 	msg := "request cannot finish before its declared deadline (" + string(v.Reason) + ")"
+	if v.PromptTooLong {
+		// Context-overflow wording, so an agent harness (Pi matches "prompt is
+		// too long") compacts and resends instead of retrying the same body
+		// through its whole backoff budget.
+		msg = "prompt is too long to finish before its declared deadline even on an idle node (" + string(v.Reason) + ")"
+	}
 	_, _ = w.Write([]byte(`{"error":{"message":"` + msg + `","type":"server_overloaded","code":"` + CodeDeadlineInfeasible + `"}}`))
 }
 
@@ -330,6 +336,9 @@ type Verdict struct {
 	// Measured is false when no throughput has been observed yet; such a
 	// request is admitted (no data is not evidence of overload).
 	Measured bool
+	// PromptTooLong marks a deadline_infeasible refusal that would be refused
+	// on an idle node too: only a shorter prompt can be admitted.
+	PromptTooLong bool
 }
 
 // Err returns nil for an admitted verdict and an error wrapping
@@ -393,6 +402,12 @@ func uncachedTokens(promptTokens, cachedTokens int) int {
 }
 
 func (e *Estimator) estimateLocked(promptTokens, maxTokens int) (time.Duration, bool) {
+	return e.estimateAtLocked(promptTokens, maxTokens, e.inFlight)
+}
+
+// estimateAtLocked is estimateLocked as if inFlight requests were running;
+// inFlight 0 is the idle-node estimate.
+func (e *Estimator) estimateAtLocked(promptTokens, maxTokens, inFlight int) (time.Duration, bool) {
 	if !e.hasDec || e.decode <= 0 || e.samples < minRateSamples {
 		return 0, false
 	}
@@ -414,7 +429,7 @@ func (e *Estimator) estimateLocked(promptTokens, maxTokens int) (time.Duration, 
 	if conc < minEstimatorConcurrencyObs {
 		conc = minEstimatorConcurrencyObs
 	}
-	scale := float64(e.inFlight+1) / conc
+	scale := float64(inFlight+1) / conc
 	if scale < 1 {
 		// Never predict faster than the measured per-request rate: an idle
 		// node is not faster than the fastest observation.
@@ -447,7 +462,9 @@ func (e *Estimator) AdmitCached(promptTokens, cachedTokens, maxTokens int, remai
 		return Verdict{Reason: ReasonDeadlineExpired, Remaining: remaining, RetryAfter: time.Second}
 	}
 	e.mu.Lock()
-	est, ok := e.estimateLocked(uncachedTokens(promptTokens, cachedTokens), maxTokens)
+	uncached := uncachedTokens(promptTokens, cachedTokens)
+	est, ok := e.estimateLocked(uncached, maxTokens)
+	idle, _ := e.estimateAtLocked(uncached, maxTokens, 0)
 	inFlight := e.inFlight
 	e.mu.Unlock()
 	v := Verdict{Admit: true, Estimate: est, Remaining: remaining, Measured: ok}
@@ -459,6 +476,9 @@ func (e *Estimator) AdmitCached(promptTokens, cachedTokens, maxTokens int, remai
 	}
 	v.Admit = false
 	v.Reason = ReasonDeadlineInfeasible
+	// Refused even on an idle node: the prompt itself cannot fit the deadline,
+	// so waiting and resending the same body is futile; the client must shrink it.
+	v.PromptTooLong = idle.Seconds() > e.cfg.Headroom*remaining.Seconds()
 	// One in-flight request's share of the estimate is the expected time
 	// until a slot frees up.
 	ra := est / time.Duration(inFlight+1)
