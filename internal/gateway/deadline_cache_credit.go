@@ -24,8 +24,8 @@ import (
 // establish whether a previous record was resident when a request arrived.
 
 const (
-	// deadlineCacheCreditMaxColdOverrun preserves the prior policy parameter
-	// for provenance; served admission no longer uses historical credit.
+	// deadlineCacheCreditMaxColdOverrun bounds measured residency credit
+	// (deadline_residency.go); historical observations here never credit.
 	deadlineCacheCreditMaxColdOverrun = 0.5
 	deadlineCacheCreditTTL            = 10 * time.Minute
 	deadlineCacheCreditMaxConvs       = 4096

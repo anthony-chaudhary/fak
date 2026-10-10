@@ -1266,6 +1266,7 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 		}
 	}
 	s.metrics.observeCompletionServedStreamFrom(perfSourceFrom(ctx), s.chatServingLocality(ctx, sample.Model), comp, dur, 0)
+	s.noteDeadlineResidency(ctx, comp)
 	s.observePrefixReuseTurn(ctx, fullHistory, comp)
 	s.observePlannerRequestMemory()
 	// The served turn has mutated the KV cache; relieve HBM pressure by demoting a hot span to

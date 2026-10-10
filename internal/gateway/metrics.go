@@ -38,6 +38,10 @@ type gatewayMetrics struct {
 	// (deadline_cache_credit.go); created lazily through warmPrefixLedger.
 	warmPrefixOnce sync.Once
 	warmPrefix     *warmPrefixLedger
+	// deadlineResidency holds engine /slots residency evidence for deadline
+	// cache credit (deadline_residency.go).
+	deadlineResidencyOnce sync.Once
+	deadlineResidency     *deadlineResidencyMemory
 
 	mu         sync.Mutex
 	http       map[httpMetricKey]*latencyCounter
