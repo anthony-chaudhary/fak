@@ -89,9 +89,10 @@ func byteFallback(piece string) (byte, bool) {
 
 type tokenizerJSON struct {
 	Model struct {
-		Type   string         `json:"type"`
-		Vocab  map[string]int `json:"vocab"`
-		Merges []string       `json:"merges"`
+		Type         string         `json:"type"`
+		Vocab        map[string]int `json:"vocab"`
+		Merges       []string       `json:"merges"`
+		IgnoreMerges bool           `json:"ignore_merges"`
 	} `json:"model"`
 	Decoder struct {
 		Type string `json:"type"`
@@ -256,6 +257,7 @@ func ParseJSON(b []byte) (*Tokenizer, error) {
 		preTokKind:       preKind,
 		split:            split,
 		metaspace:        metaspace,
+		ignoreMerges:     doc.Model.IgnoreMerges,
 	}, nil
 }
 
