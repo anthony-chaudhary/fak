@@ -144,11 +144,9 @@ type qwen35GDNPreprojectedParityOracleBounds struct {
 	RequireFinite        bool    `json:"require_finite"`
 }
 
-func formatQwen35GDNPreprojectedParityOracle(maxAbsDelta float64, stateIdentity, finiteOutput bool, caseCount int) ([]byte, error) {
-	if caseCount <= 0 {
-		caseCount = 4
-	}
-	passed := stateIdentity && finiteOutput && maxAbsDelta <= 2e-4
+func formatQwen35GDNPreprojectedParityOracle(maxAbsDelta float64, stateIdentity, finiteOutput bool, caseCount int, fixturePassed bool) ([]byte, error) {
+	// Passing metrics from an aborted or filtered fixture are not parity evidence.
+	passed := fixturePassed && caseCount == 4 && stateIdentity && finiteOutput && maxAbsDelta <= 2e-4
 	event := qwen35GDNPreprojectedParityOracleEvent{
 		Schema:         "fak.strix.subkernel-parity/v1",
 		Selector:       "qwen35_gdn_preprojected",
@@ -300,7 +298,7 @@ func TestVulkanQwen35GDNPreprojectedParityAndStateContinuity(t *testing.T) {
 		testGDN(t, 3, 1, 2, 4, 65, 3, true, .00025)
 	})
 
-	oracleJSON, err := formatQwen35GDNPreprojectedParityOracle(worstMaxAbsDelta, allStateIdentity, allFinite, caseCount)
+	oracleJSON, err := formatQwen35GDNPreprojectedParityOracle(worstMaxAbsDelta, allStateIdentity, allFinite, caseCount, !t.Failed())
 	if err != nil {
 		t.Fatalf("format parity oracle: %v", err)
 	}
@@ -308,7 +306,7 @@ func TestVulkanQwen35GDNPreprojectedParityAndStateContinuity(t *testing.T) {
 }
 
 func TestVulkanQwen35GDNPreprojectedParityOracleFormat(t *testing.T) {
-	raw, err := formatQwen35GDNPreprojectedParityOracle(1.2e-4, true, true, 4)
+	raw, err := formatQwen35GDNPreprojectedParityOracle(1.2e-4, true, true, 4, true)
 	if err != nil {
 		t.Fatalf("formatQwen35GDNPreprojectedParityOracle failed: %v", err)
 	}
@@ -379,7 +377,7 @@ func TestVulkanQwen35GDNPreprojectedParityOracleFormat(t *testing.T) {
 	}
 
 	// Boundary failure: delta exceeds threshold
-	failRaw, err := formatQwen35GDNPreprojectedParityOracle(3e-4, true, true, 4)
+	failRaw, err := formatQwen35GDNPreprojectedParityOracle(3e-4, true, true, 4, true)
 	if err != nil {
 		t.Fatalf("format failed oracle failed: %v", err)
 	}
@@ -391,7 +389,7 @@ func TestVulkanQwen35GDNPreprojectedParityOracleFormat(t *testing.T) {
 	}
 
 	// Boundary failure: state identity broken
-	failRaw2, err := formatQwen35GDNPreprojectedParityOracle(1.2e-4, false, true, 4)
+	failRaw2, err := formatQwen35GDNPreprojectedParityOracle(1.2e-4, false, true, 4, true)
 	if err != nil {
 		t.Fatalf("format failed oracle 2 failed: %v", err)
 	}
@@ -403,7 +401,7 @@ func TestVulkanQwen35GDNPreprojectedParityOracleFormat(t *testing.T) {
 	}
 
 	// Boundary failure: non-finite output
-	failRaw3, err := formatQwen35GDNPreprojectedParityOracle(1.2e-4, true, false, 4)
+	failRaw3, err := formatQwen35GDNPreprojectedParityOracle(1.2e-4, true, false, 4, true)
 	if err != nil {
 		t.Fatalf("format failed oracle 3 failed: %v", err)
 	}
@@ -412,6 +410,51 @@ func TestVulkanQwen35GDNPreprojectedParityOracleFormat(t *testing.T) {
 	}
 	if parsed.Passed {
 		t.Errorf("expected passed=false when finite_output=false")
+	}
+}
+
+// This exercises fixture completion and failure controls without a Vulkan device.
+// fak-test:runtime fast est=1ms
+func TestVulkanQwen35GDNPreprojectedParityOracleRequiresCompleteFixture(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		completedCases int
+		fixturePassed  bool
+		wantPassed     bool
+	}{
+		{name: "complete_success", completedCases: 4, fixturePassed: true, wantPassed: true},
+		{name: "shape_failure", completedCases: 3},
+		{name: "all_cases_abort"},
+		{name: "skipped_case", completedCases: 3, fixturePassed: true},
+		{name: "filtered_case", completedCases: 1, fixturePassed: true},
+		{name: "failure_after_completion", completedCases: 4},
+		{name: "zero_count", fixturePassed: true},
+		{name: "negative_count", completedCases: -1, fixturePassed: true},
+		{name: "excess_count", completedCases: 5, fixturePassed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Backend and shape failures can leave these favorable observations unchanged.
+			raw, err := formatQwen35GDNPreprojectedParityOracle(0, true, true, tc.completedCases, tc.fixturePassed)
+			if err != nil {
+				t.Fatalf("format parity oracle: %v", err)
+			}
+			var parsed qwen35GDNPreprojectedParityOracleEvent
+			if err := json.Unmarshal(raw, &parsed); err != nil {
+				t.Fatalf("unmarshal parity oracle: %v", err)
+			}
+			if parsed.Passed != tc.wantPassed {
+				t.Errorf("passed = %v, want %v", parsed.Passed, tc.wantPassed)
+			}
+			if parsed.CaseCount != tc.completedCases {
+				t.Errorf("case_count = %d, want completed count %d", parsed.CaseCount, tc.completedCases)
+			}
+			if parsed.Observed.MaxAbsDelta != 0 || !parsed.Observed.StateIdentity || !parsed.Observed.FiniteOutput {
+				t.Errorf("fixture status changed numerical observations: %+v", parsed.Observed)
+			}
+			if parsed.Bounds.MaxAbsDelta != 2e-4 || !parsed.Bounds.RequireStateIdentity || !parsed.Bounds.RequireFinite {
+				t.Errorf("parity bounds changed: %+v", parsed.Bounds)
+			}
+		})
 	}
 }
 

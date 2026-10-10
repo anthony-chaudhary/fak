@@ -656,16 +656,16 @@ func TestStrixQwen35ParityEmitterContract(t *testing.T) {
 			requireStateIdentity: true,
 			requireFinite:        true,
 			formatFn: func() ([]byte, error) {
-				return formatQwen35GDNPreprojectedParityOracle(1.2e-4, true, true, 4)
+				return formatQwen35GDNPreprojectedParityOracle(1.2e-4, true, true, 4, true)
 			},
 			formatExceedBoundFn: func() ([]byte, error) {
-				return formatQwen35GDNPreprojectedParityOracle(3e-4, true, true, 4)
+				return formatQwen35GDNPreprojectedParityOracle(3e-4, true, true, 4, true)
 			},
 			formatFailIdentityFn: func() ([]byte, error) {
-				return formatQwen35GDNPreprojectedParityOracle(1.2e-4, false, true, 4)
+				return formatQwen35GDNPreprojectedParityOracle(1.2e-4, false, true, 4, true)
 			},
 			formatFailFiniteFn: func() ([]byte, error) {
-				return formatQwen35GDNPreprojectedParityOracle(1.2e-4, true, false, 4)
+				return formatQwen35GDNPreprojectedParityOracle(1.2e-4, true, false, 4, true)
 			},
 		},
 		{
