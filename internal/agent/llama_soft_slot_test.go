@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -15,6 +16,10 @@ type fakeLlamaSlots struct {
 	mu      sync.Mutex
 	busy    map[int]bool
 	noSlots bool
+	gone    map[int]bool // ids /slots no longer lists
+	delay   time.Duration
+	props   atomic.Int64 // GET /props count
+	gets    atomic.Int64 // GET /slots count
 }
 
 func (f *fakeLlamaSlots) setBusy(ids ...int) {
@@ -48,17 +53,22 @@ func newSoftSlotPlanner(t *testing.T, f *fakeLlamaSlots) *HTTPPlanner {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/props":
+			f.props.Add(1)
 			_, _ = w.Write([]byte(`{"total_slots":4}`))
 		case "/slots":
+			f.gets.Add(1)
+			time.Sleep(f.delay)
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			if f.noSlots {
 				http.NotFound(w, r)
 				return
 			}
-			parts := make([]string, 4)
-			for i := range parts {
-				parts[i] = fmt.Sprintf(`{"id":%d,"is_processing":%v}`, i, f.busy[i])
+			var parts []string
+			for i := 0; i < 4; i++ {
+				if !f.gone[i] {
+					parts = append(parts, fmt.Sprintf(`{"id":%d,"is_processing":%v}`, i, f.busy[i]))
+				}
 			}
 			_, _ = w.Write([]byte("[" + strings.Join(parts, ",") + "]"))
 		default:
@@ -68,6 +78,12 @@ func newSoftSlotPlanner(t *testing.T, f *fakeLlamaSlots) *HTTPPlanner {
 	t.Cleanup(ts.Close)
 	p := &HTTPPlanner{Provider: ProviderOpenAI, BaseURL: ts.URL + "/v1", ModelID: "m", LlamaSlotAffinity: true, LlamaSoftSlot: true}
 	llamaSlotStateFor(p.BaseURL).slots.Store(4)
+	// A later test's server can reuse this port; do not hand it this upstream's state
+	// (a /slots 404 backoff would outlive the test by a minute).
+	t.Cleanup(func() {
+		llamaSoftSlotRegistry.Delete(p.BaseURL)
+		llamaSlotRegistry.Delete(p.BaseURL)
+	})
 	return p
 }
 
@@ -205,8 +221,9 @@ func TestLlamaSoftSlotIgnoresStaleBusyFromItsOwnFinishedPin(t *testing.T) {
 	a1, c := softSlotTurn(t, p, conv("agent A"))
 	st := llamaSoftSlotsFor(p.BaseURL)
 	st.mu.Lock()
-	st.snapBusy = map[int]bool{a1: true}
+	st.snapBusy = map[int]bool{0: false, 1: false, 2: false, 3: false, a1: true}
 	st.snapAt = time.Now()
+	st.snapSent = st.snapAt
 	st.mu.Unlock()
 	c.releaseSlot()
 	a2, c := softSlotTurn(t, p, conv("agent A", "turn 2"))
@@ -284,5 +301,102 @@ func TestValidateSoftSlotPolicy(t *testing.T) {
 	}
 	if err := ValidateSoftSlotPolicy("wiat"); err == nil || !strings.Contains(err.Error(), `"wiat"`) {
 		t.Fatalf("typo policy error = %v, want a rejection naming it", err)
+	}
+}
+
+// A fresh gateway hit by 16 concurrent first turns must probe /props once, share one GET
+// /slots between them (#13785), and pin turn 1 so turn 2 can find its KV.
+//
+// fak-test:runtime fast est=100ms lane=default
+func TestLlamaSoftSlotColdStampedeSharesOneRead(t *testing.T) {
+	f := &fakeLlamaSlots{delay: 50 * time.Millisecond}
+	p := newSoftSlotPlanner(t, f)
+	llamaSlotStateFor(p.BaseURL).slots.Store(0) // cold: /props not yet probed
+	const n = 16
+	var (
+		wg    sync.WaitGroup
+		start = make(chan struct{})
+		got   [n]int
+		calls [n]*upstreamCall
+	)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			got[i], calls[i] = softSlotTurn(t, p, conv(fmt.Sprintf("agent %d", i)))
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	gets, props := f.gets.Load(), f.props.Load()
+	pinned := map[int]bool{}
+	for i := 0; i < n; i++ {
+		if got[i] >= 0 {
+			if pinned[got[i]] {
+				t.Fatalf("slot %d pinned twice by concurrent first turns", got[i])
+			}
+			pinned[got[i]] = true
+		}
+		calls[i].releaseSlot()
+	}
+	if gets > 2 {
+		t.Fatalf("cold stampede of %d turns made %d GET /slots, want at most 2", n, gets)
+	}
+	if props != 1 {
+		t.Fatalf("cold stampede made %d GET /props, want 1", props)
+	}
+	if len(pinned) != 4 {
+		t.Fatalf("cold stampede pinned slots %v, want all 4 idle slots used on turn 1", pinned)
+	}
+}
+
+// /slots answering 404 (llama-server without --slots) backs off like /props instead of
+// costing every turn a GET (#13786).
+//
+// fak-test:runtime fast est=50ms lane=default
+func TestLlamaSoftSlotBacksOffAfterSlots404(t *testing.T) {
+	f := &fakeLlamaSlots{noSlots: true}
+	p := newSoftSlotPlanner(t, f)
+	before := llamaSoftSlotCounts[SoftSlotUnavailable].Load()
+	for i := 0; i < 10; i++ {
+		if got, _ := softSlotTurn(t, p, conv("agent A", fmt.Sprint(i))); got != -1 {
+			t.Fatalf("turn %d: id_slot %d sent with /slots 404", i, got)
+		}
+	}
+	if gets := f.gets.Load(); gets != 1 {
+		t.Fatalf("10 turns against a /slots 404 made %d GETs, want 1 then backoff", gets)
+	}
+	if d := llamaSoftSlotCounts[SoftSlotUnavailable].Load() - before; d < 10 {
+		t.Fatalf("backed-off turns counted unavailable %d times, want 10", d)
+	}
+	st := llamaSoftSlotsFor(p.BaseURL)
+	st.mu.Lock()
+	until := time.Until(st.unsupportedUntil)
+	st.mu.Unlock()
+	if until < 50*time.Second || until > llamaSlotRetryAfter {
+		t.Fatalf("backoff ends in %s, want about %s", until, llamaSlotRetryAfter)
+	}
+}
+
+// A slot id the latest snapshot no longer lists is gone, not idle (#13788).
+//
+// fak-test:runtime fast est=300ms lane=default
+func TestLlamaSoftSlotNeverNamesAVanishedSlot(t *testing.T) {
+	f := &fakeLlamaSlots{}
+	p := newSoftSlotPlanner(t, f)
+	a1, c := softSlotTurn(t, p, conv("agent A"))
+	c.releaseSlot()
+	if a1 < 0 {
+		t.Fatalf("first turn not pinned")
+	}
+	f.mu.Lock()
+	f.gone = map[int]bool{a1: true}
+	f.mu.Unlock()
+	waitFreshSnapshot(t, p, time.Now())
+	a2, c := softSlotTurn(t, p, conv("agent A", "turn 2"))
+	c.releaseSlot()
+	if a2 == a1 || a2 < 0 {
+		t.Fatalf("slot %d vanished from /slots; got id_slot %d, want another listed idle slot", a1, a2)
 	}
 }

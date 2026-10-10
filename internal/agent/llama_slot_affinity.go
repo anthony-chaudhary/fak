@@ -52,6 +52,9 @@ type llamaSlotState struct {
 	slots     atomic.Int64 // >0 once discovered
 	probing   atomic.Bool
 	nextProbe atomic.Int64 // unix nanos; 0 = probe now
+
+	probeMu   sync.Mutex
+	probeDone chan struct{} // closed when the in-flight probe lands; nil when none runs
 }
 
 // llamaSlotRegistry caches discovered slot counts per upstream base URL: a server
@@ -79,21 +82,40 @@ func llamaSlotStateFor(base string) *llamaSlotState {
 
 // maybeProbe starts at most one background /props discovery per upstream.
 func (st *llamaSlotState) maybeProbe(base, apiKey string) {
+	st.startProbe(base, apiKey)
+}
+
+// startProbe starts a /props discovery unless one is in flight, the count is known, or a
+// failed probe is backing off. It returns a channel closed when the in-flight probe lands,
+// or nil when none runs, so a caller that must know the count can wait on the shared probe.
+func (st *llamaSlotState) startProbe(base, apiKey string) <-chan struct{} {
 	if st.slots.Load() > 0 || time.Now().UnixNano() < st.nextProbe.Load() {
-		return
+		return nil
 	}
-	if !st.probing.CompareAndSwap(false, true) {
-		return
+	st.probeMu.Lock()
+	defer st.probeMu.Unlock()
+	if st.probeDone != nil {
+		return st.probeDone
 	}
+	if st.slots.Load() > 0 {
+		return nil
+	}
+	done := make(chan struct{})
+	st.probeDone = done
+	st.probing.Store(true)
 	go func() {
-		defer st.probing.Store(false)
-		n := probeLlamaTotalSlots(base, apiKey)
-		if n > 0 {
+		if n := probeLlamaTotalSlots(base, apiKey); n > 0 {
 			st.slots.Store(int64(n))
-			return
+		} else {
+			st.nextProbe.Store(time.Now().Add(llamaSlotRetryAfter).UnixNano())
 		}
-		st.nextProbe.Store(time.Now().Add(llamaSlotRetryAfter).UnixNano())
+		st.probeMu.Lock()
+		st.probeDone = nil
+		st.probing.Store(false)
+		st.probeMu.Unlock()
+		close(done)
 	}()
+	return done
 }
 
 func probeLlamaTotalSlots(base, apiKey string) int {

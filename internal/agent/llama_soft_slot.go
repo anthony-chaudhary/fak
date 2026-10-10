@@ -105,11 +105,21 @@ type llamaSoftSlots struct {
 	// before that instant may show the slot busy with our own finished request.
 	released map[int]time.Time
 
-	snapIDs    []int
-	snapBusy   map[int]bool
-	snapAt     time.Time
-	polling    bool
-	lastDemand time.Time
+	snapIDs  []int
+	snapBusy map[int]bool
+	// snapAt is when the snapshot arrived (its age); snapSent is when its GET left, the
+	// bound for released: llama-server may have answered from before a release up to then.
+	snapAt   time.Time
+	snapSent time.Time
+	// fetch is the one in-flight GET /slots, shared by the poller and every cold turn.
+	fetch chan struct{}
+	// unsupportedUntil backs off after /slots answered 404/501 (llama-server without
+	// --slots, or not llama-server), as llamaSlotRetryAfter does for /props.
+	unsupportedUntil time.Time
+	polling          bool
+	lastDemand       time.Time
+	// propsOnce runs the first request's synchronous /props probe, so turn 1 can pin.
+	propsOnce sync.Once
 }
 
 var llamaSoftSlotRegistry sync.Map
@@ -151,31 +161,35 @@ func conversationKey(messages []Message) (uint64, bool) {
 }
 
 // readLlamaBusySlots returns the slot ids llama-server reports as processing, and all ids.
-func readLlamaBusySlots(base, apiKey string, timeout time.Duration) (ids []int, busy map[int]bool, ok bool) {
+// unsupported reports a 404/501: the endpoint is absent, not momentarily slow.
+func readLlamaBusySlots(base, apiKey string, timeout time.Duration) (ids []int, busy map[int]bool, ok, unsupported bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	base = strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(base), "/"), "/v1")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/slots", nil)
 	if err != nil {
-		return nil, nil, false
+		return nil, nil, false, false
 	}
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 	resp, err := llamaSlotHTTPClient.Do(req)
 	if err != nil {
-		return nil, nil, false
+		return nil, nil, false, false
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusNotImplemented {
+		return nil, nil, false, true
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, nil, false
+		return nil, nil, false, false
 	}
 	var slots []struct {
 		ID           int  `json:"id"`
 		IsProcessing bool `json:"is_processing"`
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&slots) != nil || len(slots) == 0 {
-		return nil, nil, false
+		return nil, nil, false, false
 	}
 	busy = make(map[int]bool, len(slots))
 	for _, s := range slots {
@@ -183,7 +197,34 @@ func readLlamaBusySlots(base, apiKey string, timeout time.Duration) (ids []int, 
 		busy[s.ID] = s.IsProcessing
 	}
 	sort.Ints(ids)
-	return ids, busy, true
+	return ids, busy, true, false
+}
+
+// refreshLocked starts a GET /slots unless one is already in flight, and returns a channel
+// closed when that read lands. Every caller shares the one read, so a cold stampede costs
+// one request, and the snapshot is stamped on arrival so a slow answer is not stale on use.
+func (st *llamaSoftSlots) refreshLocked(base, apiKey string) <-chan struct{} {
+	if st.fetch != nil {
+		return st.fetch
+	}
+	done := make(chan struct{})
+	st.fetch = done
+	go func() {
+		sent := time.Now()
+		ids, busy, ok, unsupported := readLlamaBusySlots(base, apiKey, llamaSlotsPollTimeout)
+		arrived := time.Now()
+		st.mu.Lock()
+		st.fetch = nil
+		switch {
+		case ok:
+			st.storeSnapshotLocked(ids, busy, sent, arrived)
+		case unsupported:
+			st.unsupportedUntil = arrived.Add(llamaSlotRetryAfter)
+		}
+		st.mu.Unlock()
+		close(done)
+	}()
+	return done
 }
 
 // pick chooses the slot for one turn, or -1 to leave the choice to llama-server. A non-nil
@@ -195,29 +236,44 @@ func (st *llamaSoftSlots) pick(base, apiKey, policy string, messages []Message, 
 	}
 	st.mu.Lock()
 	st.lastDemand = now
+	if now.Before(st.unsupportedUntil) {
+		st.mu.Unlock()
+		return -1, nil, SoftSlotUnavailable
+	}
 	// A stale snapshot (the poller exits after llamaSlotsPollIdleStop without demand) is as
 	// good as none: re-read it, or the first turn after an idle spell would go unpinned.
 	cold := st.snapAt.IsZero() || now.Sub(st.snapAt) > llamaSlotsSnapshotMaxAge
 	st.startPollLocked(base, apiKey)
-	st.mu.Unlock()
+	var landed <-chan struct{}
 	if cold {
-		// One bounded synchronous read so the first turn after start can pin.
-		if ids, busy, ok := readLlamaBusySlots(base, apiKey, llamaSlotsColdReadTimeout); ok {
-			st.storeSnapshot(ids, busy, time.Now())
+		landed = st.refreshLocked(base, apiKey)
+	}
+	st.mu.Unlock()
+	if landed != nil {
+		// Wait a bounded time for the shared read so the first turn after start can pin; a
+		// read that lands later still serves the turns after this one.
+		t := time.NewTimer(llamaSlotsColdReadTimeout)
+		select {
+		case <-landed:
+		case <-t.C:
 		}
+		t.Stop()
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if st.snapAt.IsZero() || now.Sub(st.snapAt) > llamaSlotsSnapshotMaxAge {
 		return -1, nil, SoftSlotUnavailable
 	}
-	ids, busy, snapAt := st.snapIDs, st.snapBusy, st.snapAt
+	ids, busy, snapSent := st.snapIDs, st.snapBusy, st.snapSent
 	idle := func(id int) bool {
-		if st.inflight[id] > 0 || st.reserved[id] != nil {
+		processing, present := busy[id]
+		if !present || st.inflight[id] > 0 || st.reserved[id] != nil {
+			// An id the latest snapshot does not list is gone (a restarted llama-server
+			// with fewer slots), not idle: naming it would fail the request.
 			return false
 		}
 		rel, ok := st.released[id]
-		return !busy[id] || (ok && !snapAt.After(rel))
+		return !processing || (ok && !snapSent.After(rel))
 	}
 	outcome := SoftSlotAssigned
 	slot := -1
@@ -264,11 +320,9 @@ func (st *llamaSoftSlots) pick(base, apiKey, policy string, messages []Message, 
 	return slot, release, outcome
 }
 
-func (st *llamaSoftSlots) storeSnapshot(ids []int, busy map[int]bool, at time.Time) {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	if at.After(st.snapAt) {
-		st.snapIDs, st.snapBusy, st.snapAt = ids, busy, at
+func (st *llamaSoftSlots) storeSnapshotLocked(ids []int, busy map[int]bool, sent, arrived time.Time) {
+	if arrived.After(st.snapAt) {
+		st.snapIDs, st.snapBusy, st.snapSent, st.snapAt = ids, busy, sent, arrived
 	}
 }
 
@@ -284,16 +338,15 @@ func (st *llamaSoftSlots) startPollLocked(base, apiKey string) {
 		defer t.Stop()
 		for range t.C {
 			st.mu.Lock()
-			if time.Since(st.lastDemand) > llamaSlotsPollIdleStop {
+			now := time.Now()
+			if now.Sub(st.lastDemand) > llamaSlotsPollIdleStop || now.Before(st.unsupportedUntil) {
 				st.polling = false
 				st.mu.Unlock()
 				return
 			}
+			landed := st.refreshLocked(base, apiKey)
 			st.mu.Unlock()
-			taken := time.Now()
-			if ids, busy, ok := readLlamaBusySlots(base, apiKey, llamaSlotsPollTimeout); ok {
-				st.storeSnapshot(ids, busy, taken)
-			}
+			<-landed
 		}
 	}()
 }
@@ -320,8 +373,18 @@ func (p *HTTPPlanner) withLlamaSoftSlot(extra json.RawMessage, messages []Messag
 		return extra, nil
 	}
 	if st := llamaSlotStateFor(p.BaseURL); st.slots.Load() <= 0 {
-		st.maybeProbe(p.BaseURL, p.effectiveAPIKey())
-		return extra, nil
+		// The first request waits for the /props probe (shared with the background one and
+		// with concurrent first requests), so a fresh gateway pins turn 1 and turn 2 finds
+		// its KV. A failed probe falls back to the background retry after llamaSlotRetryAfter.
+		llamaSoftSlotsFor(p.BaseURL).propsOnce.Do(func() {
+			if landed := st.startProbe(p.BaseURL, p.effectiveAPIKey()); landed != nil {
+				<-landed // bounded by llamaSlotProbeTimeout
+			}
+		})
+		if st.slots.Load() <= 0 {
+			st.maybeProbe(p.BaseURL, p.effectiveAPIKey())
+			return extra, nil
+		}
 	}
 	obj := map[string]json.RawMessage{}
 	if len(extra) > 0 && json.Unmarshal(extra, &obj) != nil {
