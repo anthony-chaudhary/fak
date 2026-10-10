@@ -777,11 +777,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// Deadline-aware admission: refuse work that cannot finish before the
 	// client's declared deadline, and bind that deadline to the request
 	// context so generation stops when it passes (deadline_admission.go).
-	r, releaseDeadline, ok := s.admitClientDeadlineMessages(w, r, turnCostBegan, req.Messages, req.MaxTokens)
+	r, releaseDeadline, ok := s.admitClientDeadlineChat(w, r, turnCostBegan, req.Model, req.Tools, req.Messages, req.MaxTokens)
 	if !ok {
 		return
 	}
 	defer releaseDeadline()
+	deadlineCtx := r.Context()
 	// Stamp the causal input on the untouched wire envelope before admission
 	// transforms, request routing, planner selection, or model execution.
 	inputTriggerRoute, routedModel, err := s.admitAndRouteChatInputTriggerWithContext(r.Context(), req)
@@ -990,6 +991,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// this fix removes.
 	respModel := s.responseModel(comp.Model, reqModel, chatStreamModel(stream), "#5399")
 	s.logInferenceTurn(reqTrace, "openai_chat_completions", req.Stream, comp.Usage, finish, time.Since(began), false)
+	s.recordDeadlineWarmPrefix(deadlineCtx, comp.Usage)
 	stampTurnCost(sessionTurn.turnCost, reqTrace, respModel, turnCostBegan)
 	resp := s.buildChatResponse(comp, asst, finish, respModel, adjs, resultAdmissions, inputTriggerRoute, decodeTraceRequested, decodeTokenIDsRequested, sessionTurn.turnCost)
 	if stream != nil {

@@ -28,10 +28,9 @@ import (
 // has not measured any throughput yet admits everything.
 //
 // Observation measures prefill throughput over uncached tokens only. Admission
-// can discount tokens when the caller supplies current resident-prefix evidence.
-// The chat entrypoint has no such evidence, so it estimates the full prompt cold:
-// a previous request's history or successful return does not prove that its KV
-// state is still resident and compatible with the selected execution route.
+// discounts a chat prompt only by the prefix a previous served turn of the same
+// conversation reported as cached (deadline_cache_credit.go); a request's
+// history alone, or an admitted-then-released request, earns no credit.
 
 // deadlineEstimator returns the node-wide estimator, creating it on first use
 // so a directly constructed gatewayMetrics works too.
@@ -72,16 +71,42 @@ func (s *Server) admitClientDeadline(w http.ResponseWriter, r *http.Request, arr
 	return s.admitClientDeadlineCached(w, r, arrived, promptTok, 0, maxTokens)
 }
 
-// admitClientDeadlineMessages estimates a chat request without cache credit.
-// TODO: Supply nonzero credit only from authoritative, route-bound cache
-// residency evidence that remains valid through execution, including eviction.
-// Until then, even genuinely warm long prompts may be refused by the cold estimate.
+// admitClientDeadlineMessages is admitClientDeadlineChat for a request with no
+// model or tools.
 func (s *Server) admitClientDeadlineMessages(w http.ResponseWriter, r *http.Request, arrived time.Time, messages []agent.Message, maxTokens int) (*http.Request, func(), bool) {
+	return s.admitClientDeadlineChat(w, r, arrived, "", nil, messages, maxTokens)
+}
+
+// admitClientDeadlineChat estimates a chat request, crediting only the prefix a
+// served turn of the same conversation verified as cached
+// (deadline_cache_credit.go). A request without that evidence is priced cold.
+func (s *Server) admitClientDeadlineChat(w http.ResponseWriter, r *http.Request, arrived time.Time, model string, tools []agent.ToolDef, messages []agent.Message, maxTokens int) (*http.Request, func(), bool) {
 	promptTok := estimateMessageContentTokens(messages)
-	return s.admitClientDeadlineCached(w, r, arrived, promptTok, 0, maxTokens)
+	ledger := s.metrics.warmPrefixLedger()
+	ticket := newDeadlineCacheTicket(model, tools, messages)
+	credit, outcome := ledger.lookup(ticket, time.Now())
+	r = r.WithContext(context.WithValue(r.Context(), deadlineCacheTicketKey{}, ticket))
+	if credit > 0 {
+		if est := s.metrics.deadlineEstimator(); est != nil {
+			if budget, has := deadlineadmit.Budget(r.Header); has {
+				remaining := budget - time.Since(arrived)
+				bound := time.Duration(float64(remaining) * (1 + deadlineCacheCreditMaxColdOverrun))
+				if remaining > 0 && !est.AdmitCached(promptTok, 0, maxTokens, bound, true).Admit {
+					credit, outcome = 0, cacheCreditOverrun
+					ledger.overrunDenied.Add(1)
+				}
+			}
+		}
+	}
+	ticket.credited = credit
+	return s.admitClientDeadlineCredited(w, r, arrived, promptTok, credit, maxTokens, outcome)
 }
 
 func (s *Server) admitClientDeadlineCached(w http.ResponseWriter, r *http.Request, arrived time.Time, promptTok, cachedTok, maxTokens int) (*http.Request, func(), bool) {
+	return s.admitClientDeadlineCredited(w, r, arrived, promptTok, cachedTok, maxTokens, "")
+}
+
+func (s *Server) admitClientDeadlineCredited(w http.ResponseWriter, r *http.Request, arrived time.Time, promptTok, cachedTok, maxTokens int, creditOutcome string) (*http.Request, func(), bool) {
 	est := s.metrics.deadlineEstimator()
 	if est == nil {
 		return r, func() {}, true
@@ -90,10 +115,17 @@ func (s *Server) admitClientDeadlineCached(w http.ResponseWriter, r *http.Reques
 	remaining := budget - time.Since(arrived)
 	v := est.AdmitCached(promptTok, cachedTok, maxTokens, remaining, has)
 	if !v.Admit {
-		s.logf("gateway: deadline admission refused: reason=%s estimate=%s remaining=%s in_flight=%d prompt_tokens=%d predicted_cached=%d",
-			v.Reason, v.Estimate, v.Remaining, est.InFlight(), promptTok, cachedTok)
+		s.logf("gateway: deadline admission refused: reason=%s estimate=%s remaining=%s in_flight=%d prompt_tokens=%d predicted_cached=%d cache_credit=%s",
+			v.Reason, v.Estimate, v.Remaining, est.InFlight(), promptTok, cachedTok, creditOutcome)
 		deadlineadmit.WriteRefusal(w, v)
 		return r, nil, false
+	}
+	if creditOutcome == cacheCreditCredited && cachedTok > 0 && has {
+		ledger := s.metrics.warmPrefixLedger()
+		ledger.creditedAdmits.Add(1)
+		ledger.creditedTokens.Add(uint64(cachedTok))
+		s.logf("gateway: deadline admission cache credit: credited_tokens=%d prompt_tokens=%d estimate=%s remaining=%s",
+			cachedTok, promptTok, v.Estimate, v.Remaining)
 	}
 	end := est.Begin()
 	if !has {
