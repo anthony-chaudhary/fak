@@ -210,6 +210,20 @@ func ValidateBackendForwardConfig(cfg Config, be compute.Backend) error {
 				Reason:       "LayerNorm requires mean subtraction; the generic HAL supports RMSNorm only (issue #12607)",
 			}
 		}
+		if !dedicated {
+			// Generic Attention cannot express the model's per-layer window.
+			// Ignore entries beyond the layers the forward actually executes.
+			for l := 0; l < cfg.NumLayers && l < len(cfg.Window); l++ {
+				if cfg.windowForLayer(l) > 0 {
+					return &UnsupportedBackendForwardError{
+						Backend:      be.Name(),
+						Forward:      forwardGenericHAL,
+						IntendedPath: "compute HAL",
+						Reason:       fmt.Sprintf("sliding-window attention at layer %d requires a window bound; the generic HAL Attention contract is unwindowed (issue #12609)", l),
+					}
+				}
+			}
+		}
 		return nil
 	}
 	gdn, ok := be.(Qwen35GDNBackend)
