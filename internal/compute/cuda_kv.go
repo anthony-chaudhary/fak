@@ -213,22 +213,55 @@ func (c *cudaBackend) compactDS(d *dslice, fromF, endF, tailFloats int, scratch 
 func (k *cudaKV) Clone() KVStore {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	return k.cloneWithOperations(
+		func(bytes int, site string) unsafe.Pointer { return k.be.dallocKV(bytes, site).ptr },
+		func(dst, src unsafe.Pointer, bytes int) { C.fcuda_d2d(dst, src, C.size_t(bytes)) },
+		func(ptr unsafe.Pointer) { C.fcuda_free(ptr) },
+	)
+}
+
+// cloneWithOperations runs under the caller's cudaMu. Destination rows own each
+// allocation before the copy; a later allocation panic retires all unpublished
+// rows without touching the source or recursively locking via public Free.
+// Native d2d is void and logs errors; this does not add copy-error detection.
+func (k *cudaKV) cloneWithOperations(alloc func(int, string) unsafe.Pointer, copyDevice func(unsafe.Pointer, unsafe.Pointer, int), release func(unsafe.Pointer)) *cudaKV {
 	n := &cudaKV{be: k.be, cfg: k.cfg,
 		K: make([]dslice, len(k.K)), Kraw: make([]dslice, len(k.Kraw)), V: make([]dslice, len(k.V)),
 		pos: append([]int(nil), k.pos...)}
+	published := false
+	defer func() {
+		if published {
+			return
+		}
+		for _, rows := range [][]dslice{n.K, n.Kraw, n.V} {
+			for i := range rows {
+				ptr := rows[i].ptr
+				rows[i] = dslice{}
+				if ptr != nil {
+					// Preserve the original panic and continue retiring other rows
+					// if a cleanup callback itself panics. No pointer is retried.
+					func() {
+						defer func() { _ = recover() }()
+						release(ptr)
+					}()
+				}
+			}
+		}
+	}()
 	cp := func(dst, src *dslice, site string) {
 		if src.len == 0 {
 			return
 		}
-		np := k.be.dallocKV(src.len*F32.Bytes(), site).ptr
-		C.fcuda_d2d(unsafe.Pointer(np), src.ptr, C.size_t(src.len*4))
-		dst.ptr, dst.len, dst.cap = unsafe.Pointer(np), src.len, src.len
+		np := alloc(src.len*F32.Bytes(), site)
+		dst.ptr, dst.len, dst.cap = np, src.len, src.len
+		copyDevice(np, src.ptr, src.len*F32.Bytes())
 	}
 	for l := range k.K {
 		cp(&n.K[l], &k.K[l], "kv-key-clone layer "+itoaC(l))
 		cp(&n.Kraw[l], &k.Kraw[l], "kv-pre-rope-key-clone layer "+itoaC(l))
 		cp(&n.V[l], &k.V[l], "kv-value-clone layer "+itoaC(l))
 	}
+	published = true
 	return n
 }
 

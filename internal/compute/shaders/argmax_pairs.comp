@@ -13,7 +13,7 @@ shared int   ibest[256];
 
 void main() {
     uint tid = gl_LocalInvocationID.x;
-    float bv = -1e30;
+    float bv = uintBitsToFloat(0xff800000u);
     int bi = 0;
     for (uint i = tid; i < uint(pc.n); i += 256u) {
         float v = BestVal[i];

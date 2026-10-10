@@ -126,10 +126,12 @@ func RestoreKVFromHost(be Backend, state KVHostSnapshot) (KVStore, error) {
 	if kv == nil {
 		return nil, fmt.Errorf("compute: backend %q returned nil KV store during host restore", be.Name())
 	}
-	fail := func(err error) (KVStore, error) {
-		kv.Free()
-		return nil, err
-	}
+	installed := false
+	defer func() {
+		if !installed {
+			kv.Free()
+		}
+	}()
 	stride := state.Config.NumKVHeads * state.Config.HeadDim
 	for posIndex, pos := range state.Pos {
 		lo, hi := posIndex*stride, (posIndex+1)*stride
@@ -137,20 +139,22 @@ func RestoreKVFromHost(be Backend, state KVHostSnapshot) (KVStore, error) {
 			if len(state.K[layer]) == 0 {
 				continue
 			}
-			raw := be.Upload(NewF32(be, []int{stride}, state.KRaw[layer][lo:hi]), F32)
-			rope := be.Upload(NewF32(be, []int{stride}, state.K[layer][lo:hi]), F32)
-			value := be.Upload(NewF32(be, []int{stride}, state.V[layer][lo:hi]), F32)
 			func() {
+				// Each successful upload owns a temporary even if a later upload panics.
+				raw := be.Upload(NewF32(be, []int{stride}, state.KRaw[layer][lo:hi]), F32)
 				defer be.Free(raw)
+				rope := be.Upload(NewF32(be, []int{stride}, state.K[layer][lo:hi]), F32)
 				defer be.Free(rope)
+				value := be.Upload(NewF32(be, []int{stride}, state.V[layer][lo:hi]), F32)
 				defer be.Free(value)
 				kv.AppendKV(layer, raw, rope, value, pos)
 			}()
 		}
 	}
 	if kv.Len() != len(state.Pos) {
-		return fail(fmt.Errorf("compute: backend %q restored %d KV positions, want %d", be.Name(), kv.Len(), len(state.Pos)))
+		return nil, fmt.Errorf("compute: backend %q restored %d KV positions, want %d", be.Name(), kv.Len(), len(state.Pos))
 	}
+	installed = true
 	return kv, nil
 }
 

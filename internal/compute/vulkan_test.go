@@ -534,7 +534,43 @@ func TestVulkanResidencyRoundTrip(t *testing.T) {
 	}
 }
 
+const vulkanRestoreBatchesChildEnv = "FAK_TEST_VULKAN_RESTORE_BATCHES_CHILD"
+
+// fak-test:runtime integration est=2s lane=optin
 func TestVulkanRestoreBatchesImmutableResidencyGroups(t *testing.T) {
+	if os.Getenv(vulkanRestoreBatchesChildEnv) != "1" {
+		// The fixture deliberately injects sticky device loss. A registered
+		// process backend is shared by later tests and cannot safely be reset.
+		// Check the parent's device gate, then give this contract its own process.
+		vk(t)
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatalf("os.Executable: %v", err)
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, exe, "-test.v", "-test.run=^TestVulkanRestoreBatchesImmutableResidencyGroups$")
+		for _, entry := range os.Environ() {
+			key, _, _ := strings.Cut(entry, "=")
+			if key != vulkanRestoreBatchesChildEnv && key != "FAK_VULKAN_REQUIRE_DEVICE" {
+				cmd.Env = append(cmd.Env, entry)
+			}
+		}
+		// The parent already has a device. A child that fails to register one
+		// must fail the witness rather than turn the test into a silent skip.
+		cmd.Env = append(cmd.Env, vulkanRestoreBatchesChildEnv+"=1", "FAK_VULKAN_REQUIRE_DEVICE=1")
+		out, err := cmd.CombinedOutput()
+		if ctx.Err() != nil {
+			t.Fatalf("restore-fault subprocess timed out: %v\n%s", ctx.Err(), out)
+		}
+		if err != nil {
+			t.Fatalf("restore-fault subprocess failed: %v\n%s", err, out)
+		}
+		if !strings.Contains(string(out), "--- PASS: TestVulkanRestoreBatchesImmutableResidencyGroups (") {
+			t.Fatalf("restore-fault subprocess did not report its passing contract:\n%s", out)
+		}
+		return
+	}
 	v := vk(t)
 	sources := []VulkanImmutableResidencySource{
 		{Binding: "checkpoint:a/tensor:0", Bytes: []byte{0, 0, 0, 7, 0, 0, 0, 11, 0, 0, 0, 13}},

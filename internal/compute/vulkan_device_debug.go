@@ -22,6 +22,12 @@ void fvk_debug_restore_fail_after_submits(int successful_submits);
 int fvk_phase_performance_query_available(void);
 int fvk_phase_counter_count(void);
 int fvk_phase_counter_describe(int index, char* name, size_t name_len, char* unit, size_t unit_len, int* scope);
+// Pure test adapter for the production compatible-memory-type selector.
+int fvk_debug_memory_type_selection(uint32_t type_bits, uint32_t want,
+    uint32_t type_count, const uint32_t* flags, const int* results,
+    const uint32_t* heap_indices, uint32_t heap_count, const uint64_t* heap_sizes,
+    uint64_t allocation_size, int try_all, uint32_t* attempts, uint32_t* attempt_count, uint32_t* selected_type,
+    int* published_handle);
 int fvk_debug_select_q8_gateup_coop(int enabled);
 int fvk_debug_select_q2k_matvec(int enabled);
 int fvk_debug_select_iq_matvec(int fmt, int enabled);
@@ -1189,4 +1195,46 @@ func boolToCInt(b bool) C.int {
 		return 1
 	}
 	return 0
+}
+
+// vulkanDebugMemoryTypeSelection runs only the shared pure native selector with
+// synthetic results. It performs no Vulkan calls and changes no backend state.
+func vulkanDebugMemoryTypeSelection(typeBits, want uint32, flags []uint32, results []int32, heapIndices []uint32, heapSizes []uint64, allocationSize uint64, tryAll bool) (status int32, attempts []uint32, selected uint32, published bool) {
+	if len(flags) != len(results) || len(flags) != len(heapIndices) {
+		panic("compute: synthetic Vulkan memory type fixtures differ in length")
+	}
+	cflags := make([]C.uint32_t, len(flags))
+	cresults := make([]C.int, len(results))
+	cindices := make([]C.uint32_t, len(heapIndices))
+	csizes := make([]C.uint64_t, len(heapSizes))
+	for i := range heapSizes {
+		csizes[i] = C.uint64_t(heapSizes[i])
+	}
+	for i := range flags {
+		cflags[i] = C.uint32_t(flags[i])
+		cresults[i] = C.int(results[i])
+		cindices[i] = C.uint32_t(heapIndices[i])
+	}
+	var fp *C.uint32_t
+	var rp *C.int
+	var ip *C.uint32_t
+	var sp *C.uint64_t
+	if len(flags) > 0 {
+		fp, rp, ip = &cflags[0], &cresults[0], &cindices[0]
+	}
+	if len(heapSizes) > 0 {
+		sp = &csizes[0]
+	}
+	var tried [32]C.uint32_t
+	var count, chosen C.uint32_t
+	var handle C.int
+	all := C.int(0)
+	if tryAll {
+		all = 1
+	}
+	status = int32(C.fvk_debug_memory_type_selection(C.uint32_t(typeBits), C.uint32_t(want), C.uint32_t(len(flags)), fp, rp, ip, C.uint32_t(len(heapSizes)), sp, C.uint64_t(allocationSize), all, &tried[0], &count, &chosen, &handle))
+	for i := 0; i < int(count); i++ {
+		attempts = append(attempts, uint32(tried[i]))
+	}
+	return status, attempts, uint32(chosen), handle != 0
 }

@@ -45,7 +45,7 @@ func TestVulkanQ6KOptionalShaderBundleCompatibility(t *testing.T) {
 		t.Fatalf("os.Executable: %v", err)
 	}
 
-	for _, mode := range []string{"missing", "invalid"} {
+	for _, mode := range []string{"missing", "invalid", "misaligned", "bad_magic", "valid"} {
 		t.Run(mode, func(t *testing.T) {
 			bundleDir := q6KCopyOptionalBundleFixture(t, spirvDir, mode)
 			cmd := sysproc.Command(executable, "-test.run=^TestVulkanQ6KOptionalShaderBundleCompatibility$")
@@ -58,7 +58,7 @@ func TestVulkanQ6KOptionalShaderBundleCompatibility(t *testing.T) {
 }
 
 func q6KOptionalBundleChild(t *testing.T, mode string) {
-	if mode != "missing" && mode != "invalid" {
+	if mode != "missing" && mode != "invalid" && mode != "misaligned" && mode != "bad_magic" && mode != "valid" {
 		t.Fatalf("unknown optional Q6_K bundle child mode %q", mode)
 	}
 	backend, ok := Lookup("vulkan")
@@ -68,6 +68,14 @@ func q6KOptionalBundleChild(t *testing.T, mode string) {
 	v, ok := backend.(*vulkanBackend)
 	if !ok {
 		t.Fatalf("registered Vulkan backend has type %T", backend)
+	}
+	// The positive control is an unchanged real shader from the source bundle,
+	// not a synthetic header presented as an executable module.
+	if mode == "valid" {
+		if !v.SupportsQ6KMatMul() {
+			t.Fatal("unchanged source shader lost optional pipeline support")
+		}
+		return
 	}
 	if v.SupportsQ6KMatMul() {
 		t.Fatalf("Vulkan reported Q6_K support with %s q6k_matmul.spv", mode)
@@ -124,8 +132,18 @@ func q6KCopyOptionalBundleFixture(t *testing.T, sourceDir, mode string) string {
 		if err != nil {
 			t.Fatalf("read source shader %s: %v", entry.Name(), err)
 		}
-		if entry.Name() == "q6k_matmul.spv" && mode == "invalid" {
-			data = []byte{0, 0, 0, 0}
+		if entry.Name() == "q6k_matmul.spv" {
+			switch mode {
+			case "invalid": // Truncated header, preserving the original regression.
+				data = []byte{0, 0, 0, 0}
+			case "misaligned": // Real header, incomplete final word.
+				data = append(data, 0)
+			case "bad_magic": // Complete source module except its magic word.
+				if len(data) < 20 {
+					t.Fatal("source shader lacks a complete header")
+				}
+				clear(data[:4])
+			}
 		}
 		if err := os.WriteFile(filepath.Join(destinationDir, entry.Name()), data, 0o644); err != nil {
 			t.Fatalf("write shader fixture %s: %v", entry.Name(), err)
@@ -234,7 +252,11 @@ const (
 // f16 scale crosses the last uint-addressed word unless the resident allocation
 // is padded. The wider cases cover alternating 210-byte block alignment, the
 // Qwen hidden/FFN reduction sizes, output workgroup tails, and P=1/2/4 dispatch.
+// fak-test:runtime integration est=3s lane=optin
 func TestVulkanQ6KMatMulStrix(t *testing.T) {
+	if runVulkanProfileFixture(t) {
+		return
+	}
 	v := vk(t)
 	capability, ok := any(v).(interface{ SupportsQ6KMatMul() bool })
 	if !ok || !capability.SupportsQ6KMatMul() {

@@ -26,6 +26,9 @@ type rocmKV struct {
 	cfg        KVConfig
 	K, Kraw, V []rocmRows
 	pos        []int
+	// failure is written once under rocmMu before poisoned publishes it.
+	failure  any
+	poisoned uint32
 }
 
 func (r *rocmBackend) NewKV(cfg KVConfig) KVStore {
@@ -41,6 +44,26 @@ func (r *rocmBackend) NewKV(cfg KVConfig) KVStore {
 	return &rocmKV{be: r, cfg: cloneKVConfig(cfg), K: make([]rocmRows, cfg.NumLayers), Kraw: make([]rocmRows, cfg.NumLayers), V: make([]rocmRows, cfg.NumLayers)}
 }
 
+// ensureUsable rejects logical reuse after ambiguous native retirement. It does
+// not acquire rocmMu: native consumers already hold that lock. The atomic flag
+// also lets borrowed views reject access without reading the failure payload.
+func (k *rocmKV) ensureUsable() {
+	if atomic.LoadUint32(&k.poisoned) != 0 {
+		panic(k.failure)
+	}
+}
+
+// poison retains the first cause. Callers hold rocmMu; publication makes the
+// immutable cause visible before any later consumer observes the flag.
+func (k *rocmKV) poison(primary any) {
+	if atomic.LoadUint32(&k.poisoned) == 0 {
+		k.failure = primary
+		atomic.StoreUint32(&k.poisoned, 1)
+	}
+}
+
+// Geometry and byte/position queries remain diagnostic metadata after failure.
+// In particular, zero logical bytes after Free does not prove physical reclamation.
 func (k *rocmKV) KVConfig() KVConfig { return cloneKVConfig(k.cfg) }
 func (k *rocmKV) stride() int        { return k.cfg.NumKVHeads * k.cfg.HeadDim }
 func (k *rocmKV) Len() int           { return len(k.pos) }
@@ -61,6 +84,7 @@ func (k *rocmKV) ResidentBytes() int64 {
 }
 
 func (k *rocmKV) grow(row *rocmRows, need int, site string) {
+	k.ensureUsable()
 	if need <= row.cap {
 		return
 	}
@@ -75,18 +99,61 @@ func (k *rocmKV) grow(row *rocmRows, need int, site string) {
 	nb := k.be.alloc(nbytes, MemoryKVCache, site)
 	if row.rows > 0 {
 		used, _ := checkedROCmBytes([]int{row.rows, k.stride()}, F32.Bytes())
-		rocmCheck(C.frocm_d2d(nb.ptr, row.ptr, C.size_t(used)), site+" copy")
+		finishROCmKVGrowthCopy(nb, func() {
+			rocmCheck(C.frocm_d2d(nb.ptr, row.ptr, C.size_t(used)), site+" copy")
+		}, k.be.freeBuf)
 	}
-	if row.ptr != nil {
-		rocmCheck(C.frocm_free(row.ptr), site+" old free")
-	}
-	row.ptr, row.cap = nb.ptr, ncap
+	k.finishGrowthRetirement(row, nb, ncap, func(ptr unsafe.Pointer) {
+		rocmCheck(C.frocm_free(ptr), site+" old free")
+	}, k.be.freeBuf)
+}
+
+// finishGrowthRetirement owns the unpublished replacement after prefix copy.
+// Detach the old pointer and invalidate its views BEFORE trying native Free:
+// a failed Free does not establish whether that pointer still exists. On failure
+// the whole store becomes unusable; only one-attempt best-effort cleanup remains.
+// Production grow holds rocmMu; the callbacks expose this same ownership seam.
+func (k *rocmKV) finishGrowthRetirement(row *rocmRows, owned *rocmBuf, capacity int, retire func(unsafe.Pointer), releaseNew func(*rocmBuf)) {
+	old := row.ptr
+	row.ptr = nil
 	atomic.AddUint64(&row.generation, 1)
+	defer func() {
+		if primary := recover(); primary != nil {
+			k.poison(primary)
+			func() {
+				defer func() { _ = recover() }()
+				releaseNew(owned)
+			}()
+			panic(primary)
+		}
+	}()
+	if old != nil {
+		retire(old)
+	}
+	row.ptr, row.cap = owned.ptr, capacity
+}
+
+// finishROCmKVGrowthCopy owns only the new buffer during prefix copying, before
+// any attempt to retire the old row. grow holds rocmMu. A copy failure releases
+// the unpublished destination and leaves row metadata unchanged. This does not
+// establish whole-grow atomicity; finishGrowthRetirement owns the later phase.
+func finishROCmKVGrowthCopy(owned *rocmBuf, copyPrefix func(), release func(*rocmBuf)) {
+	defer func() {
+		if primary := recover(); primary != nil {
+			func() {
+				defer func() { _ = recover() }()
+				release(owned)
+			}()
+			panic(primary)
+		}
+	}()
+	copyPrefix()
 }
 
 func (k *rocmKV) AppendKV(layer int, raw, rope, value Tensor, pos int) {
 	rocmMu.Lock()
 	defer rocmMu.Unlock()
+	k.ensureUsable()
 	if layer < 0 || layer >= k.cfg.NumLayers || pos < 0 {
 		panic(fmt.Errorf("rocm: KV append invalid layer/position"))
 	}
@@ -121,6 +188,7 @@ func (k *rocmKV) AppendKV(layer int, raw, rope, value Tensor, pos int) {
 }
 
 func (k *rocmKV) view(rows *rocmRows) Tensor {
+	k.ensureUsable()
 	p := rows.ptr
 	gen := atomic.LoadUint64(&rows.generation)
 	n, ok := checkedROCmBytes([]int{rows.cap, k.stride()}, F32.Bytes())
@@ -129,16 +197,20 @@ func (k *rocmKV) view(rows *rocmRows) Tensor {
 	}
 	return makeTensor(k.be, F32, RowMajor, []int{rows.rows, k.stride()}, nil, &rocmBuf{
 		ptr: p, n: n, class: MemoryKVCache,
-		alive: func() bool { return p != nil && atomic.LoadUint64(&rows.generation) == gen },
+		alive: func() bool {
+			return atomic.LoadUint32(&k.poisoned) == 0 && p != nil && atomic.LoadUint64(&rows.generation) == gen
+		},
 	})
 }
 func (k *rocmKV) KeysView(layer int) Tensor {
+	k.ensureUsable()
 	if layer < 0 || layer >= len(k.K) {
 		panic(fmt.Errorf("rocm: invalid KV layer %d", layer))
 	}
 	return k.view(&k.K[layer])
 }
 func (k *rocmKV) ValuesView(layer int) Tensor {
+	k.ensureUsable()
 	if layer < 0 || layer >= len(k.V) {
 		panic(fmt.Errorf("rocm: invalid KV layer %d", layer))
 	}
@@ -148,6 +220,7 @@ func (k *rocmKV) ValuesView(layer int) Tensor {
 func (k *rocmKV) Evict(from, n int) int {
 	rocmMu.Lock()
 	defer rocmMu.Unlock()
+	k.ensureUsable()
 	if from < 0 || n <= 0 || from >= len(k.pos) {
 		return 0
 	}
@@ -174,7 +247,42 @@ func (k *rocmKV) Evict(from, n int) int {
 func (k *rocmKV) Clone() KVStore {
 	rocmMu.Lock()
 	defer rocmMu.Unlock()
+	return k.cloneWithOperations(k.be.alloc, func(dst, src unsafe.Pointer, bytes int, site string) {
+		rocmCheck(C.frocm_d2d(dst, src, C.size_t(bytes)), site)
+	}, func(ptr unsafe.Pointer) {
+		rocmCheck(C.frocm_free(ptr), "clone KV rollback")
+	})
+}
+
+// cloneWithOperations owns an unpublished clone. The production caller holds
+// rocmMu and supplies the existing native operations; injected operations expose
+// failure ownership without a global hook or a change to KV allocation policy.
+func (k *rocmKV) cloneWithOperations(
+	allocate func(int, MemoryClass, string) *rocmBuf,
+	copyDevice func(unsafe.Pointer, unsafe.Pointer, int, string),
+	release func(unsafe.Pointer),
+) *rocmKV {
+	k.ensureUsable()
 	n := &rocmKV{be: k.be, cfg: cloneKVConfig(k.cfg), K: make([]rocmRows, len(k.K)), Kraw: make([]rocmRows, len(k.Kraw)), V: make([]rocmRows, len(k.V)), pos: append([]int(nil), k.pos...)}
+	defer func() {
+		if primary := recover(); primary != nil {
+			// This clone has not escaped. Attempt every destination, including
+			// the current failed copy, without releasing any source allocation.
+			for l := len(n.K) - 1; l >= 0; l-- {
+				for _, row := range []*rocmRows{&n.V[l], &n.Kraw[l], &n.K[l]} {
+					if row.ptr == nil {
+						continue
+					}
+					func() {
+						defer func() { _ = recover() }()
+						release(row.ptr)
+					}()
+				}
+			}
+			panic(primary)
+		}
+	}()
+
 	copyRows := func(dst *rocmRows, src rocmRows, site string) {
 		if src.rows == 0 {
 			return
@@ -183,9 +291,11 @@ func (k *rocmKV) Clone() KVStore {
 		if !ok {
 			panic(fmt.Errorf("rocm: %s size overflow", site))
 		}
-		b := k.be.alloc(bytes, MemoryKVCache, site)
-		rocmCheck(C.frocm_d2d(b.ptr, src.ptr, C.size_t(bytes)), site)
-		dst.ptr, dst.rows, dst.cap = b.ptr, src.rows, src.rows
+		b := allocate(bytes, MemoryKVCache, site)
+		// Private clone owns this allocation before the copy can fail.
+		dst.ptr = b.ptr
+		copyDevice(b.ptr, src.ptr, bytes, site)
+		dst.rows, dst.cap = src.rows, src.rows
 	}
 	for l := range k.K {
 		copyRows(&n.K[l], k.K[l], "clone keys")
@@ -198,14 +308,43 @@ func (k *rocmKV) Clone() KVStore {
 func (k *rocmKV) Free() {
 	rocmMu.Lock()
 	defer rocmMu.Unlock()
+	k.freeWithOperation(func(ptr unsafe.Pointer) {
+		rocmCheck(C.frocm_free(ptr), "free KV")
+	})
+}
+
+// freeWithOperation logically retires every known-owned row before its one
+// native release attempt. Continue after failures, never retry an ambiguous
+// pointer. An already-poisoned store suppresses secondary cleanup failures so
+// deferred KV cleanup cannot replace its primary failure. Normal Free reports
+// its first failure after attempting every row. Successful Free keeps the
+// existing reusable-empty-store behavior. Physical reclamation is not promised.
+// The production caller holds rocmMu.
+func (k *rocmKV) freeWithOperation(release func(unsafe.Pointer)) {
+	alreadyPoisoned := atomic.LoadUint32(&k.poisoned) != 0
+	var first any
 	for l := range k.K {
 		for _, row := range []*rocmRows{&k.K[l], &k.Kraw[l], &k.V[l]} {
-			if row.ptr != nil {
-				rocmCheck(C.frocm_free(row.ptr), "free KV")
-			}
+			ptr := row.ptr
 			row.ptr, row.rows, row.cap = nil, 0, 0
 			atomic.AddUint64(&row.generation, 1)
+			if ptr != nil {
+				func() {
+					defer func() {
+						if cause := recover(); cause != nil {
+							if first == nil {
+								first = cause
+							}
+							k.poison(cause)
+						}
+					}()
+					release(ptr)
+				}()
+			}
 		}
 	}
 	k.pos = nil
+	if first != nil && !alreadyPoisoned {
+		panic(first)
+	}
 }

@@ -344,7 +344,7 @@ func (e *FlashAttentionEngine) Execute(q, k, v []float32, qTokens, kvTokens int)
 						hasValidKeys = true
 					}
 
-					if !hasValidKeys || blockMax <= -1e30 {
+					if !hasValidKeys {
 						continue
 					}
 
@@ -360,7 +360,7 @@ func (e *FlashAttentionEngine) Execute(q, k, v []float32, qTokens, kvTokens int)
 					}
 
 					alpha := float32(0.0)
-					if m > -1e30 {
+					if l > 0 {
 						alpha = float32(math.Exp(float64(m - mNew)))
 					}
 
@@ -377,14 +377,17 @@ func (e *FlashAttentionEngine) Execute(q, k, v []float32, qTokens, kvTokens int)
 
 					// Accumulate current block contributions
 					for kj := 0; kj < tileKeys; kj++ {
-						s := scores[kj]
-						if s <= -1e30 {
+						globalKPos := kb + kj
+						// A valid finite score can equal the stored mask sentinel.
+						// Only the structural mask determines key membership.
+						if (e.cfg.Causal && globalKPos > globalQPos) ||
+							(e.cfg.SlidingWindow > 0 && globalKPos < globalQPos-e.cfg.SlidingWindow+1) {
 							continue
 						}
+						s := scores[kj]
 						p := float32(math.Exp(float64(s - mNew)))
 						l += p
 
-						globalKPos := kb + kj
 						var vOff int
 						if isPosMajor {
 							vOff = globalKPos*strideVPos + kvh*vd
