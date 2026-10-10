@@ -41,6 +41,30 @@ single-package
     submission fault -4` (`vulkan_v41_rope.go:23` via `vulkan.go:832`), which ends the package run. The origin of
     the sticky fault is weak. It follows `TestVulkanReadFailsClosed/sticky-submission`, which runs in a child process.
 
+## Attribution (2026-10-10, fak f2be2792ab2 plus this change)
+
+[HW-WITNESSED] Local AMD Radeon RX 7600 (AMD proprietary driver), `FAK_VULKAN_REQUIRE_DEVICE=1`, with `FAK_VULKAN_SPIRV` set.
+Before this change, the full suite ran to completion: 3076 pass, 9 skip, 6 fail, no panic, exit 1.
+After it: 3114 pass, 9 skip, 2 fail (the TICKET-03e q2_k test and its subtest), no panic.
+
+- Already fixed on trunk by 74ccd3528a7 (test isolation), which landed after the 42dc8adb624 probe:
+  - `TestVulkanTensorBufferReservations` runs in a fresh child backend.
+  - The Q3/Q5/Q6K dispatch proofs run in a `runVulkanProfileFixture` child that starts with dispatch profiling.
+    Native counters are a startup setting, so the counters read zero in the shared process.
+  - `TestVulkanQ3KSourceContract` passes.
+  - Every native restore-failure injection (`VulkanDebugSetRestoreFailureAfterSubmits`) runs in a child process.
+- Sticky device_lost: it did not reproduce. No test panicked, and the suite ran to the end. The parent process
+  has no remaining in-process injection site, so the probe's sticky -4 matches the pre-74ccd3528a7 layout. Re-check it
+  on Halo with the HW witness below.
+- Fixed here (test isolation): four tests failed closed because a startup-only env was absent from the witness command.
+  Each now runs in a child that starts with that env:
+  - `TestVulkanKVHostSnapshotContract`, `TestVulkanV41TailRoPEQK` and
+    `TestVulkanQ4KStageGrowthKeepsBatchActiveAndBounded` need `FAK_VULKAN_DISPATCH_PROFILE=1`.
+  - `TestVulkanV41SharedAttentionPhysical` needs its witness, timestamp and expected-device env. An operator-set
+    `FAK_VULKAN_EXPECT_DEVICE` still wins; otherwise it uses the registered device.
+- Real kernel bug, filed as TICKET-03e (#13807): `TestVulkanQwen35SequenceQuantizedPanelsMatchCPU/q2_k` (max_abs 4.55 on the
+  RX 7600 and 4.5 on Halo) traces to the `q2k_matmul.comp` `plainMatMul` shared-memory race.
+
 ## Problem
 
 The Vulkan-tagged suite cannot go green on silicon. Shared-backend state leaks between tests,
@@ -77,7 +101,7 @@ FAK_VULKAN_SPIRV=<spirv dir> VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd
 
 Witness: the command above on a Strix Halo appliance, run from `internal/compute`.
 
-- [ ] [SW-VERIFIED] Each red is attributed: a test-isolation fix, or a product fix with a named call site.
+- [x] [SW-VERIFIED] Each red is attributed: a test-isolation fix, or a product fix with a named call site.
 - [ ] [HW-WITNESSED] The full package exits 0 with the device registered, with no panic.
 
 ## Witness

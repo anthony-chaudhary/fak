@@ -89,10 +89,14 @@ func TestVulkanDispatchProfileDisabledIsZero(t *testing.T) {
 }
 
 func TestVulkanQ4KStageGrowthKeepsBatchActiveAndBounded(t *testing.T) {
-	v, ok := Pick("vulkan").(*vulkanBackend)
-	if !ok {
+	if _, ok := Pick("vulkan").(*vulkanBackend); !ok {
 		t.Skip("Vulkan backend unavailable")
 	}
+	// BatchSubmits counts only when native dispatch profiling starts enabled.
+	if runVulkanProfileFixture(t) {
+		return
+	}
+	v := vk(t)
 	v.VulkanDebugResetQ4KStage()
 	defer v.VulkanDebugResetQ4KStage()
 	v.VulkanDebugResetQ4KProfile()

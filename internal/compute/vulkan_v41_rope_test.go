@@ -15,11 +15,8 @@ import (
 // physical witness. Tolerances are fixed before execution: prefix and the
 // cancellation control are bit-exact; ordinary tail abs/rel bounds are 2e-6.
 func TestVulkanV41TailRoPEQK(t *testing.T) {
-	if os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") != "1" {
-		if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") == "1" {
-			t.Fatal("required V4.1 witness needs FAK_VULKAN_DISPATCH_PROFILE=1 before startup")
-		}
-		t.Skip("V4.1 physical dispatch witness is opt-in")
+	if runVulkanProfileFixture(t) {
+		return
 	}
 	v := vk(t)
 	if !v.SupportsV41TailRoPE() {

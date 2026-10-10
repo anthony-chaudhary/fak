@@ -18,11 +18,10 @@ const vulkanKVHostRestoreFaultChildEnv = "FAK_TEST_VULKAN_KV_HOST_RESTORE_FAULT_
 
 // fak-test:runtime slow est=5s lane=optin
 func TestVulkanKVHostSnapshotContract(t *testing.T) {
-	if os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") != "1" {
-		if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") == "1" {
-			t.Fatal("required-device witness needs FAK_VULKAN_DISPATCH_PROFILE=1 before process startup")
-		}
-		t.Skip("requires FAK_VULKAN_DISPATCH_PROFILE=1 to witness native submits")
+	// Native submit counters are a process-startup setting; the fixture child
+	// starts with them enabled. Its restore-fault grandchild inherits both.
+	if runVulkanProfileFixture(t) {
+		return
 	}
 	if os.Getenv(vulkanKVHostRestoreFaultChildEnv) == "1" {
 		vulkanKVHostRestoreFailureContract(t)
