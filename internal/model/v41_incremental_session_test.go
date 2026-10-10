@@ -203,16 +203,13 @@ func TestV41IncrementalSessionConstantWorkPerStep(t *testing.T) {
 		callsByPrefix[32], refSeqByPrefix[32], refSeqByPrefix[120])
 }
 
-// TestV41IncrementalSessionFallback pins the explicit cold/unsupported status of
-// the activation across the two refusal classes the eligibility gate names:
-//   - an UNSEEDED session state (the "history only" snapshot the leaf calls
-//     out), and
-//   - a layer whose resolved plan is NOT a plain per-layer role.
-//
-// In both cases Session.Step keeps the historical full-history route: the probe
-// must NOT fire, the logits must still equal the full-history reference, and the
-// history must advance by exactly one — a failed incremental attempt never
-// claims a cache hit.
+// TestV41IncrementalSessionFallback distinguishes missing retained state and
+// an unsupported plan from the supported source/reader continuation. The
+// unseeded case remains runnable through the full-history fallback; malformed
+// configuration is only an eligibility refusal, not a promise it can execute.
+// Runtime is an estimate, not an executed witness.
+// fak-test:justify why=contract when=changed:internal/model/**
+// fak-test:runtime medium est=10s lane=default
 func TestV41IncrementalSessionFallback(t *testing.T) {
 	t.Run("unseeded-state", func(t *testing.T) {
 		const tol = 1e-6
@@ -246,34 +243,60 @@ func TestV41IncrementalSessionFallback(t *testing.T) {
 		assertV41LogitsParity(t, m, wantHistory, got, tol)
 	})
 
-	t.Run("non-plain-role", func(t *testing.T) {
+	t.Run("unsupported-plan", func(t *testing.T) {
+		// Supply real seeded temporal state so a missing layer cannot explain
+		// the rejection. Configure the unsupported model before its role map
+		// is resolved; never mutate the read-only cached role map.
+		seedModel := v41IncrementalPlainModel(t, 2)
+		prefix, _ := v41IncrementalPrefix(seedModel.Cfg, 8)
+		seed := v41IncrementalState(t, seedModel, prefix)
 		m := v41IncrementalPlainModel(t, 2)
+		m.Cfg.DeepSeekV41.CompressRatios = []int{3, 0}
+		m.Cfg.DeepSeekV41.KVSourceLayerIDs = []int{0}
 		s := m.NewSession()
-		prefix, _ := v41IncrementalPrefix(m.Cfg, 8)
-		s.Prefill(prefix)
-		if !s.v41IncrementalEligible() {
-			t.Fatal("plain-layer session unexpectedly ineligible before poisoning a role")
+		t.Cleanup(s.Close)
+		s.v41Forward = seed
+		for layer := 0; layer < m.Cfg.NumLayers; layer++ {
+			if s.v41Forward.layerState(layer) == nil {
+				t.Fatal("unsupported-plan control lacks seeded state")
+			}
 		}
+		if _, err := v41AttentionPlanFor(m.Cfg, 0, m.v41AttentionRolesCached()); err == nil {
+			t.Fatal("unsupported ratio unexpectedly resolved a plan")
+		}
+		if s.v41IncrementalEligible() {
+			t.Fatal("unsupported-plan session reported incrementally eligible")
+		}
+	})
 
-		// Force layer 0's resolved plan to a shared-source role by poisoning the
-		// memoized role map the eligibility gate reads. The gate must refuse the
-		// incremental route and keep the fallback; restore the map immediately so
-		// the assertion is purely about the eligibility status, not a run.
-		roles := s.M.v41AttentionRolesCached()
-		orig, had := roles[0]
-		roles[0] = V41AttentionRoleKVSource
-		eligible := s.v41IncrementalEligible()
-		if had {
-			roles[0] = orig
-		} else {
-			delete(roles, 0)
+	t.Run("supported-source-reader", func(t *testing.T) {
+		m := v41ReaderWidthFixture(t)
+		s := m.NewSession()
+		t.Cleanup(s.Close)
+		prefix := []int{1, 2, 3}
+		if len(s.Prefill(prefix)) == 0 {
+			t.Fatal("source-reader prefill produced no logits")
 		}
-		if eligible {
-			t.Fatal("session with a non-plain layer role reported eligible, want fallback")
+		for layer, want := range []V41AttentionRole{V41AttentionRoleKVSource, V41AttentionRoleReader} {
+			plan, err := v41AttentionPlanFor(m.Cfg, layer, m.v41AttentionRolesCached())
+			if err != nil || plan.Role != want || plan.Ratio != 2 || plan.KVSourceLayer != 0 {
+				t.Fatalf("layer %d did not resolve the supported role: %+v, %v", layer, plan, err)
+			}
 		}
 		if !s.v41IncrementalEligible() {
-			t.Fatal("restoring the plain role did not restore eligibility")
+			t.Fatal("seeded supported source-reader session was refused")
 		}
+		read, restore := v41SessionIncrementalCalls(t)
+		defer restore()
+		got := s.Step(4)
+		if read() != 1 {
+			t.Fatal("supported source-reader Step did not use the incremental route")
+		}
+		wantHistory := []int{1, 2, 3, 4}
+		if !reflect.DeepEqual(s.v41Forward.history, wantHistory) {
+			t.Fatal("supported source-reader Step did not commit exactly one token")
+		}
+		assertV41LogitsParity(t, m, wantHistory, got, 1e-6)
 	})
 }
 

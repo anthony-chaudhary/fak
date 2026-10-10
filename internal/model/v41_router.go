@@ -76,6 +76,19 @@ func (cfg v41RouterConfig) validate() error {
 // v41Route performs the V4.1 route for one token. Selection uses the noaux_tc
 // score-plus-bias choice, weights use the unbiased score.
 func v41Route(logits, correctionBias []float32, cfg v41RouterConfig) ([]routePick, error) {
+	return v41RouteWithNormalization(logits, correctionBias, cfg, false)
+}
+
+// v41RouteForGeometry preserves the reduced router contract. The official full
+// Gate divides by sum + 1e-20, including a valid all-zero selected-score row.
+// This changes only that F32 normalization sequence, not score or top-k math.
+// Reference: DeepSeek-V4.1-Flash inference/model.py Gate.forward, revision
+// dba1be0a40aa45a94ad051997016db3960a90277, lines 824-826 (MIT).
+func v41RouteForGeometry(logits, correctionBias []float32, cfg v41RouterConfig, full bool) ([]routePick, error) {
+	return v41RouteWithNormalization(logits, correctionBias, cfg, full)
+}
+
+func v41RouteWithNormalization(logits, correctionBias []float32, cfg v41RouterConfig, full bool) ([]routePick, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -95,7 +108,17 @@ func v41Route(logits, correctionBias []float32, cfg v41RouterConfig) ([]routePic
 		if !finite32(z) {
 			return nil, &v4RouteError{Field: "logits", Reason: fmt.Sprintf("non-finite value at expert %d", i)}
 		}
-		score := v41SqrtSoftplus(z)
+		var score float32
+		if full {
+			// Gate.forward publishes F.softplus(scores) as F32 before sqrt.
+			// Keep the stable host formula, but do not retain tiny F64 values
+			// across that tensor boundary. This is not GPU exp/log parity.
+			zf := float64(z)
+			softplus := float32(math.Max(zf, 0) + math.Log1p(math.Exp(-math.Abs(zf))))
+			score = float32(math.Sqrt(float64(softplus)))
+		} else {
+			score = v41SqrtSoftplus(z)
+		}
 		if !finite32(score) {
 			return nil, &v4RouteError{Field: "logits", Reason: fmt.Sprintf("non-finite score at expert %d", i)}
 		}
@@ -122,11 +145,20 @@ func v41Route(logits, correctionBias []float32, cfg v41RouterConfig) ([]routePic
 		picks[i] = routePick{expert: expert, weight: raw[expert]}
 		sum += raw[expert]
 	}
-	if !finite32(sum) || sum <= 0 {
+	if !finite32(sum) || sum < 0 || (!full && sum == 0) {
 		return nil, &v4RouteError{Field: "normalization", Reason: fmt.Sprintf("selected score sum must be finite and positive, got %g", sum)}
 	}
+	denominator := sum
+	if full {
+		denominator = float32(sum + float32(1e-20))
+	}
 	for i := range picks {
-		picks[i].weight = picks[i].weight / sum * cfg.RouteScale
+		if full {
+			picks[i].weight = float32(picks[i].weight / denominator)
+			picks[i].weight = float32(picks[i].weight * cfg.RouteScale)
+		} else {
+			picks[i].weight = picks[i].weight / sum * cfg.RouteScale
+		}
 		if !finite32(picks[i].weight) {
 			return nil, &v4RouteError{Field: "weight", Reason: fmt.Sprintf("non-finite result for expert %d", picks[i].expert)}
 		}

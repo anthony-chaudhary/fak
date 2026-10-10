@@ -133,6 +133,12 @@ func TestV41ClampedDeviceSwiGLUHalo(t *testing.T) {
 		s.v41State().groupedOutput = nil
 		// This physical witness isolates routed-expert activation transfers.
 		s.v41State().sharedActivation = nil
+		// The reduced fixture's unrelated mHC projection otherwise adds one
+		// MatMul and a 24-F32 readback; final norm adds a HiddenSize-F32
+		// readback. At H=256 that is two reads and 1120 bytes per token.
+		// Keep both on host rather than expanding the routed-expert budget.
+		s.v41State().mhcProjection = nil
+		s.v41State().finalNorm = nil
 		defer s.Close()
 		if len(s.Prefill([]int{1, 2, 3})) == 0 || !s.v41IncrementalEligible() {
 			t.Fatal("physical session did not seed incremental state")

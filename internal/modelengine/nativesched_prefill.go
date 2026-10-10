@@ -84,10 +84,11 @@ type PrefixStats struct {
 }
 
 type prefixHitInfo struct {
-	matched  int
-	boundary *radixkv.Node
-	fullHit  bool
-	applied  bool
+	matched   int
+	boundary  *radixkv.Node
+	ownerTree *radixkv.Tree // tree that acquired boundary, independent of later setters
+	fullHit   bool
+	applied   bool
 }
 
 type nativePrefixState struct {
@@ -99,33 +100,28 @@ type nativePrefixState struct {
 	laneLookups   map[*schedLane]*prefixHitInfo
 }
 
-var (
-	nativePrefixStateMu sync.RWMutex
-	nativePrefixStates  = make(map[*NativeScheduler]*nativePrefixState)
-)
-
 func (s *NativeScheduler) getPrefixState() *nativePrefixState {
 	if s == nil {
 		return nil
 	}
-	nativePrefixStateMu.RLock()
-	defer nativePrefixStateMu.RUnlock()
-	return nativePrefixStates[s]
+	s.prefixStateMu.RLock()
+	defer s.prefixStateMu.RUnlock()
+	return s.prefixState
 }
 
 func (s *NativeScheduler) getOrCreatePrefixState() *nativePrefixState {
 	if s == nil {
 		return nil
 	}
-	nativePrefixStateMu.Lock()
-	defer nativePrefixStateMu.Unlock()
-	st := nativePrefixStates[s]
+	s.prefixStateMu.Lock()
+	defer s.prefixStateMu.Unlock()
+	st := s.prefixState
 	if st == nil {
 		st = &nativePrefixState{
 			holderLookups: make(map[*model.Session]*prefixHitInfo),
 			laneLookups:   make(map[*schedLane]*prefixHitInfo),
 		}
-		nativePrefixStates[s] = st
+		s.prefixState = st
 	}
 	return st
 }
@@ -136,6 +132,7 @@ func (s *NativeScheduler) SetRadixKV(tree *radixkv.Tree) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	st.tree = tree
+	st.prefixTree = nil
 	if tree != nil {
 		st.prefixTree = tree
 	}
@@ -158,8 +155,12 @@ func (s *NativeScheduler) SetPrefixTree(pt PrefixTree) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	st.prefixTree = pt
+	st.tree = nil
 	if tree, ok := pt.(*radixkv.Tree); ok {
 		st.tree = tree
+		if tree == nil {
+			st.prefixTree = nil
+		}
 	}
 }
 
@@ -185,10 +186,10 @@ func (s *NativeScheduler) PrefixStats() PrefixStats {
 	return st.stats
 }
 
-func (s *NativeScheduler) lookupPrefix(prompt []int) (int, *radixkv.Node) {
+func (s *NativeScheduler) lookupPrefix(prompt []int) (int, *radixkv.Node, *radixkv.Tree) {
 	st := s.getPrefixState()
 	if st == nil || len(prompt) == 0 {
-		return 0, nil
+		return 0, nil, nil
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -206,7 +207,12 @@ func (s *NativeScheduler) lookupPrefix(prompt []int) (int, *radixkv.Node) {
 		} else {
 			st.stats.Misses++
 		}
-		return matched, boundary
+		if matched == 0 {
+			// Lookup also leases the root on a miss; no holder will own it.
+			st.tree.Done(boundary)
+			return 0, nil, nil
+		}
+		return matched, boundary, st.tree
 	}
 	if st.prefixTree != nil {
 		matched := st.prefixTree.MatchLen(prompt)
@@ -222,12 +228,12 @@ func (s *NativeScheduler) lookupPrefix(prompt []int) (int, *radixkv.Node) {
 		} else {
 			st.stats.Misses++
 		}
-		return matched, nil
+		return matched, nil, nil
 	}
-	return 0, nil
+	return 0, nil, nil
 }
 
-func (s *NativeScheduler) recordPrefixLookup(sess *model.Session, prompt []int, matched int, boundary *radixkv.Node) {
+func (s *NativeScheduler) recordPrefixLookup(sess *model.Session, prompt []int, matched int, boundary *radixkv.Node, ownerTree *radixkv.Tree) {
 	st := s.getPrefixState()
 	if st == nil || sess == nil {
 		return
@@ -235,9 +241,10 @@ func (s *NativeScheduler) recordPrefixLookup(sess *model.Session, prompt []int, 
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	info := &prefixHitInfo{
-		matched:  matched,
-		boundary: boundary,
-		fullHit:  matched == len(prompt),
+		matched:   matched,
+		boundary:  boundary,
+		ownerTree: ownerTree,
+		fullHit:   matched == len(prompt),
 	}
 	st.holderLookups[sess] = info
 }
@@ -269,8 +276,15 @@ func (s *NativeScheduler) clearPrefixLookup(sess *model.Session) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if info, ok := st.holderLookups[sess]; ok {
-		if info.boundary != nil && st.tree != nil {
-			st.tree.Done(info.boundary)
+		// A retired holder must not leave its lane/history rooted in prefix
+		// metadata. Preserve every association owned by another live holder.
+		for lane, associated := range st.laneLookups {
+			if associated == info {
+				delete(st.laneLookups, lane)
+			}
+		}
+		if info.boundary != nil && info.ownerTree != nil {
+			info.ownerTree.Done(info.boundary)
 			info.boundary = nil
 		}
 		delete(st.holderLookups, sess)
@@ -279,7 +293,12 @@ func (s *NativeScheduler) clearPrefixLookup(sess *model.Session) {
 
 func (s *NativeScheduler) maybeInsertRadixKV(prompt []int, sess *model.Session, logits []float32) {
 	st := s.getPrefixState()
-	if st == nil || st.tree == nil || sess == nil || sess.Cache == nil {
+	if st == nil || sess == nil || sess.Cache == nil {
+		return
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.tree == nil {
 		return
 	}
 	boundary, matched := st.tree.Lookup(prompt)
@@ -333,9 +352,9 @@ func (s *NativeScheduler) qwenPrefillChunkBudget(prep schedPrepare, sess *model.
 	}
 
 	// Acceptance criteria 1: query prefix cache depth during admission.
-	matched, boundary := s.lookupPrefix(prep.prompt)
+	matched, boundary, ownerTree := s.lookupPrefix(prep.prompt)
 	if matched > 0 {
-		s.recordPrefixLookup(sess, prep.prompt, matched, boundary)
+		s.recordPrefixLookup(sess, prep.prompt, matched, boundary, ownerTree)
 	}
 
 	// Calculate chunked prefill step sizes based on uncached suffix length.

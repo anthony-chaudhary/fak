@@ -881,3 +881,17 @@ The internal/ggufload WeightSource method that runs the production hierarchical,
 The internal/ggufload WeightSource entry point that builds a Q4_K quantized model from a GGUF under a caller context, a load profile, and functional load options such as streamed experts; the context-aware form the plain QuantModelQ4K wrappers delegate to.
 
 **Distinct from:** Names the cancellable, option-carrying Q4_K model constructor, not the parallel tensor scheduler it drives or the generic command context.
+
+
+### v41AttentionQKRoPE
+
+Owns BF16 query and key-value publication before and after the full V4.1 forward tail rotary operation, whose arithmetic remains F32.
+
+**Distinct from:** Unlike attnPrefillDispatch, this owner stages rotary operands and results; it does not select or compute an attention kernel.
+
+
+### v41AttentionOutputForProjection
+
+Owns full V4.1 BF16 sparse-attention output staging before inverse F32 tail rotary arithmetic and BF16 publication to grouped output projection.
+
+**Distinct from:** Unlike v41AttentionQKRoPE, this owner operates on attention output after sparse attention and applies inverse rotation before output projection.

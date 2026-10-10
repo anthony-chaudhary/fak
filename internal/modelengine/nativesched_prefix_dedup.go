@@ -97,9 +97,10 @@ func (s *NativeScheduler) coldPrefillSync(sess *model.Session, ids []int) []floa
 
 // prefillCoalesced runs the shared-prefix single-flight for one cold lane and returns the
 // logits for its last prompt token. It records the resolution in s.inBatchDedupStats.
-// It MUST be called with s.mu NOT held. On any non-leader "fail open" branch it recomputes
+// It MUST be called with s.mu NOT held. Request cancellation is returned to the
+// admission owner for cleanup. On other non-leader "fail open" branches it recomputes
 // this lane's own cold prefill, so correctness never depends on a twin arriving.
-func (s *NativeScheduler) prefillCoalesced(ctx context.Context, sess *model.Session, prompt []int) []float32 {
+func (s *NativeScheduler) prefillCoalesced(ctx context.Context, sess *model.Session, prompt []int) ([]float32, error) {
 	var leaderLogits []float32
 	kv, followerLogits, matched, leader, err := s.prefixFlightGroup().CoalesceSharedPrefixNS(
 		ctx, "", prompt, nativeInBatchPrefixDedupMinShared,
@@ -113,23 +114,31 @@ func (s *NativeScheduler) prefillCoalesced(ctx context.Context, sess *model.Sess
 			}
 			return sess.Cache, leaderLogits, nil
 		})
+	if err := ctx.Err(); err != nil {
+		// A completed follower may already own a host KV clone. Transfer it to
+		// the session before admission closes that owner; no lane is published.
+		if !leader && kv != nil {
+			sess.Cache = kv
+		}
+		return nil, err
+	}
 	if leader {
 		s.mu.Lock()
 		s.inBatchDedupStats.Leaders++
 		s.mu.Unlock()
 		if errors.Is(err, errInBatchDedupNotShareable) {
-			return leaderLogits
+			return leaderLogits, nil
 		}
 		if err != nil {
 			// The leader prefill ran but the flight reported a non-sentinel error
 			// (e.g. an incomplete IPC handoff). Never drop a completed local prefill:
 			// use its logits, and only recompute if we somehow have none.
 			if len(leaderLogits) > 0 {
-				return leaderLogits
+				return leaderLogits, nil
 			}
-			return s.coldPrefillSync(sess, prompt)
+			return s.coldPrefillSync(sess, prompt), nil
 		}
-		return leaderLogits
+		return leaderLogits, nil
 	}
 	// Follower.
 	s.mu.Lock()
@@ -137,7 +146,7 @@ func (s *NativeScheduler) prefillCoalesced(ctx context.Context, sess *model.Sess
 	s.mu.Unlock()
 	if err != nil {
 		// The flight failed: fall open to this lane's own cold prefill.
-		return s.coldPrefillSync(sess, prompt)
+		return s.coldPrefillSync(sess, prompt), nil
 	}
 	switch {
 	case kv != nil && matched == len(prompt) && followerLogits != nil:
@@ -147,7 +156,7 @@ func (s *NativeScheduler) prefillCoalesced(ctx context.Context, sess *model.Sess
 		s.inBatchDedupStats.CoalescedPrefills++
 		s.inBatchDedupStats.ExactReuses++
 		s.mu.Unlock()
-		return copyF32(followerLogits)
+		return copyF32(followerLogits), nil
 	case kv != nil && matched > 0 && matched < len(prompt):
 		// Partial twin: adopt the prefix KV, prefill only the divergent suffix.
 		sess.Cache = kv
@@ -156,10 +165,10 @@ func (s *NativeScheduler) prefillCoalesced(ctx context.Context, sess *model.Sess
 		s.inBatchDedupStats.CoalescedPrefills++
 		s.inBatchDedupStats.PrefixReuses++
 		s.mu.Unlock()
-		return logits
+		return logits, nil
 	default:
 		// Not shareable (leader was a strict shorter/longer prefix, recurrent cache, ...):
 		// fail open to a full local cold prefill.
-		return s.coldPrefillSync(sess, prompt)
+		return s.coldPrefillSync(sess, prompt), nil
 	}
 }

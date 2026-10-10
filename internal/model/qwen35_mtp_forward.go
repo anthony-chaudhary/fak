@@ -850,7 +850,8 @@ func (f *DraftVocabFilter) Argmax(subsetLogits []float32) int {
 // ArgmaxWithProb finds the argmax within subsetLogits, maps the subset index
 // back to the full vocabulary token ID, and computes its softmax probability
 // across the subset. It returns (tokenID, prob, ok). ok is false if subsetLogits
-// is empty or if CoverageThreshold > 0 and prob < CoverageThreshold.
+// is empty, every considered logit is -Inf, or CoverageThreshold > 0 and
+// prob < CoverageThreshold.
 func (f *DraftVocabFilter) ArgmaxWithProb(subsetLogits []float32) (int, float32, bool) {
 	if f == nil || len(subsetLogits) == 0 || len(f.Subset) == 0 {
 		return -1, 0, false
@@ -861,11 +862,21 @@ func (f *DraftVocabFilter) ArgmaxWithProb(subsetLogits []float32) (int, float32,
 	}
 	maxIdx := 0
 	maxVal := subsetLogits[0]
+	allMasked := math.IsInf(float64(maxVal), -1)
 	for i := 1; i < n; i++ {
+		if !math.IsInf(float64(subsetLogits[i]), -1) {
+			allMasked = false
+		}
 		if subsetLogits[i] > maxVal {
 			maxVal = subsetLogits[i]
 			maxIdx = i
 		}
+	}
+	// Invalid or suppressed subset rows are represented by -Inf. With no
+	// unmasked row there is no candidate, even when the threshold is zero.
+	// This narrowly preserves the existing NaN/+Inf policy and finite ties.
+	if allMasked {
+		return -1, 0, false
 	}
 	tokenID := f.Subset[maxIdx]
 	var sumExp float64

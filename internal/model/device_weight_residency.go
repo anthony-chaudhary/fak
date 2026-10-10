@@ -120,3 +120,59 @@ func (m *Model) immutableDeviceWeights(be compute.Backend) *backendHALWeightResi
 	closer.halWeights = &modelHALWeightResidency{}
 	return closer.halWeights.backend(be)
 }
+
+// VisitImmutableDeviceWeights observes already staged model-owned weights for one
+// exact backend instance. It never creates a residency pool or stages a weight.
+// The caller must invoke it outside token loops. false means unavailable (closed
+// owner, unsupported identity, or rejected observation); an open, absent pool is
+// known-empty. Session-local tensors, expert rings, KV and backend caches are excluded.
+//
+// visit runs with the model closer, residency registry and backend-weight locks
+// held, so each tensor remains live throughout the observation. It must only read
+// backend metadata: it must not retain tensors, free/stage storage, reenter Model
+// or Session methods, or acquire a lock held while entering model code. A false
+// return stops the traversal; callers must discard any partial inventory.
+func (m *Model) VisitImmutableDeviceWeights(be compute.Backend, visit func(compute.Tensor) bool) bool {
+	if m == nil || !backendHasComparableIdentity(be) || visit == nil {
+		return false
+	}
+	// Read the existing closer without ensureWeightCloser: observation must not
+	// create owner state. Initialization uses this same mutex.
+	weightCloserInitMu.Lock()
+	closer := m.weightCloser
+	weightCloserInitMu.Unlock()
+	if closer == nil {
+		return true
+	}
+	closer.mu.Lock()
+	defer closer.mu.Unlock()
+	if closer.closing || closer.closed {
+		return false
+	}
+	registry := closer.halWeights
+	if registry == nil {
+		return true
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if registry.closed {
+		return false
+	}
+	for _, resident := range registry.backends {
+		if resident.be != be {
+			continue
+		}
+		resident.mu.Lock()
+		defer resident.mu.Unlock()
+		if resident.closed {
+			return false
+		}
+		for _, tensor := range resident.weights {
+			if !visit(tensor) {
+				return false
+			}
+		}
+		break
+	}
+	return true
+}

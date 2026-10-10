@@ -1,5 +1,27 @@
 package model
 
+// MIT License
+//
+// Copyright (c) 2023 DeepSeek
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 // v41_forward_engram.go wires DeepSeek V4.1 Engram packed-row retrieval into
 // the reduced text forward (issue #13007, leaf of parent #12640). The retrieval
 // primitives already existed as leaves — token hashing (V41EngramHashState.Hash),
@@ -25,7 +47,8 @@ package model
 //  4. Per HC stream s: dot_s = sum_i h_s[i]*(qNorm[i,s]*kNorm[i,s])*bf16(key_s[i]),
 //     then dot_s *= rsqrt(mean(h_s^2)+eps)*rsqrt(mean(key_s^2)+eps)*rsqrt(W).
 //  5. gate_s = sigmoid(copysign(sqrt(max(|dot_s|,1e-6)), dot_s)).
-//  6. residual_s[i] += bf16(gate_s * bf16(value[i])).
+//  6. Full reference: residual_s[i] = bf16(residual_s[i] + gate_s * bf16(value[i])).
+//     The reduced compatibility path retains its historical delta rounding.
 //
 // Persistent-stream schedule (full geometry). The forward now carries four
 // DISTINCT persistent mHC streams per position (v41_forward.go v41Layer: stream 0
@@ -34,12 +57,13 @@ package model
 // stream's OWN vector h_s = streams[t][s], and adds the shared value stream into
 // the SAME stream:
 //
-//	streams[t][s][i] += bf16(gate_s * bf16(value[i]))   for s = 0..N_HC-1
+//	streams[t][s][i] = bf16(streams[t][s][i] + gate_s * bf16(value[i]))
 //
-// so the four streams diverge exactly as the reference schedule does and no
-// per-stream gated value is summed across streams. Stream 0 aliases x[t] on the
-// full path (v41_forward.go:2029-2036); x is re-synchronized from streams[t][0]
-// after the write so the two views can never drift.
+// This full residual-sum boundary follows official DeepSeek-V4.1-Flash
+// dba1be0a40aa45a94ad051997016db3960a90277 inference/model.py:350–365 (MIT),
+// not the earlier Metal delta-rounding approximation. Each stream has its own
+// gate; no gated values are summed across streams. x is synchronized explicitly
+// from stream 0, whether or not those caller buffers alias.
 //
 // Reduced-model reconciliation. The reduced fixture (v41_forward.go v41Layer) is
 // not a four-stream residual: it carries one `x[t]` of width H and stands in four
@@ -423,7 +447,9 @@ func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]floa
 				// Each stream receives its own gated value; do NOT sum across streams.
 				stream := streams[t][s]
 				for i := 0; i < H; i++ {
-					stream[i] += v41BF16(gate * value[i])
+					// Keep the product F32 until after residual addition, then publish BF16.
+					delta := float32(gate * value[i])
+					stream[i] = v41BF16(float32(stream[i] + delta))
 				}
 			} else {
 				for i := 0; i < H; i++ {
@@ -432,10 +458,7 @@ func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]floa
 			}
 		}
 		if full {
-			// streams[t][0] aliases x[t] on the full path (v41_forward.go:2029-2036),
-			// so stream 0's write-back already advanced x; copy explicitly to keep the
-			// synchronization self-evident and to cover a caller whose stream 0 is not
-			// the same slice as x[t].
+			// Keep x synchronized for both aliased and independently owned callers.
 			copy(x[t], streams[t][0])
 		} else {
 			for i := 0; i < H; i++ {

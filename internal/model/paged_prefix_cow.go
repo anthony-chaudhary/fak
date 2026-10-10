@@ -349,7 +349,9 @@ type PagedPrefixOwner struct {
 	alignMgr     *AlignStateManager
 }
 
-// NewPagedPrefixOwner constructs a sealed, immutable prefix owner.
+// NewPagedPrefixOwner constructs a sealed, immutable prefix owner. A supplied pool
+// determines the block size: non-positive BlockTokens adopts it, while a positive
+// BlockTokens must match. Without a pool, non-positive BlockTokens defaults to 16.
 func NewPagedPrefixOwner(params PagedPrefixOwnerConfig) (*PagedPrefixOwner, error) {
 	tokens := params.Tokens
 	if tokens <= 0 && len(params.TokenIDs) > 0 {
@@ -359,12 +361,20 @@ func NewPagedPrefixOwner(params PagedPrefixOwnerConfig) (*PagedPrefixOwner, erro
 		return nil, fmt.Errorf("model: paged prefix owner tokens must be positive, got %d", tokens)
 	}
 	blockTokens := params.BlockTokens
-	if blockTokens <= 0 {
-		blockTokens = 16
-	}
 	pool := params.Pool
 	if pool == nil {
+		if blockTokens <= 0 {
+			blockTokens = 16
+		}
 		pool = NewPagedBlockPool(params.Config, blockTokens, params.IsMetal)
+	} else {
+		if pool.blockTokens <= 0 {
+			return nil, fmt.Errorf("model: paged prefix pool block size must be positive, got %d", pool.blockTokens)
+		}
+		if blockTokens > 0 && blockTokens != pool.blockTokens {
+			return nil, fmt.Errorf("model: paged prefix block size %d does not match pool block size %d", blockTokens, pool.blockTokens)
+		}
+		blockTokens = pool.blockTokens
 	}
 
 	nBlocks := (tokens + blockTokens - 1) / blockTokens

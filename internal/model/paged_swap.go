@@ -107,14 +107,15 @@ func (p *PagedKVPool) RestoreFromHost(data []byte) (*PagedKV, error) {
 		return nil, errors.New("model: paged KV swap blob token count exceeds block table")
 	}
 
-	seq := &PagedKV{pool: p, table: make([]int, nBlocks), nTokens: nTokens}
+	// Keep only owned block IDs in the table so failure cannot release another sequence's pages.
+	seq := &PagedKV{pool: p, table: make([]int, 0, nBlocks), nTokens: nTokens}
 	fail := func(err error) (*PagedKV, error) {
 		seq.Free()
 		return nil, err
 	}
 	for i := 0; i < nBlocks; i++ {
 		id := p.alloc()
-		seq.table[i] = id
+		seq.table = append(seq.table, id)
 		blk := p.blocks[id]
 		if len(blk) != p.blockFloats() {
 			return fail(errors.New("model: paged KV pool block geometry changed under restore"))

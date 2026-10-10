@@ -250,6 +250,7 @@ func (p *PrefixSnapshot) Clone() (*PrefixSnapshot, error) {
 	}
 	out := &PrefixSnapshot{
 		owner: p.owner, epoch: p.epoch, Cache: p.Cache.Clone(), halLineage: p.halLineage.clone(0), Backend: p.Backend, Tokens: p.Tokens, ExecutionPolicy: p.ExecutionPolicy,
+		DenseGPULayers: p.DenseGPULayers, GPULayers: p.GPULayers,
 		captureTargetHidden: p.captureTargetHidden,
 		targetHidden:        cloneTargetHidden(p.targetHidden),
 		targetHiddenTokens:  append([]int(nil), p.targetHiddenTokens...),

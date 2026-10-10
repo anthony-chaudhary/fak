@@ -199,15 +199,9 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	stagedWindowRows := make([]int, 0, cfg.NumLayers)
 	stagedKV := make([]v41StepPublicationUndo, 0, cfg.NumLayers)
 	stagedIndex := make([]v41StepPublicationUndo, 0, cfg.NumLayers)
-	// The shared registry a role source publishes into is staged too: a fault in a
-	// LATER layer must not leave an earlier source's just-published row visible to
-	// a reader. Only the mutable publication/cursor surface is copied.
-	registryKVEnd := cloneV41IntMap(registry.kvPublishedEnd)
-	registryIndexEnd := cloneV41IntMap(registry.indexPublishedEnd)
-	registryKV := cloneV41PublicationRows(registry.kvPublications)
-	registryIndex := cloneV41PublicationRows(registry.indexPublications)
-	registryTopK := cloneV41TopKRows(registry.topk)
-	registryTopKSet, registryTopKRatio := registry.topkSet, registry.topkRatio
+	// The live registry is append-only per source during this call. Journal one
+	// prospective KV/index entry per layer, never the retained prefix payloads.
+	registryUndo := stageV41StepRegistry(registry, cfg.NumLayers)
 	rollback := func() {
 		for i := len(stagedPos) - 1; i >= 0; i-- {
 			state := st.layerState(i)
@@ -226,13 +220,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 				}
 			}
 		}
-		registry.kvPublishedEnd = registryKVEnd
-		registry.indexPublishedEnd = registryIndexEnd
-		registry.kvPublications = registryKV
-		registry.indexPublications = registryIndex
-		registry.topk = registryTopK
-		registry.topkSet = registryTopKSet
-		registry.topkRatio = registryTopKRatio
+		registryUndo.restore()
 		st.attn = previousRegistry
 		stats.LayersRolledBack = len(stagedPos)
 	}
@@ -404,28 +392,45 @@ func (s v41StepPublicationUndo) restore() {
 	}
 }
 
-// cloneV41IntMap copies a small int-keyed map so a staged rollback snapshot
-// cannot alias live state.
-func cloneV41IntMap(m map[int]int) map[int]int {
-	if m == nil {
-		return nil
-	}
-	out := make(map[int]int, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
+// v41StepRegistryUndo retains only the prospective publication entry for each
+// source layer. publish allocates new rows; it never mutates retained rows.
+// PublishTopK and PublishCandidates also replace owned slices, and their public
+// readers copy, so old headers remain immutable while the step runs. External
+// prefix/session snapshots still require the deep copies in kv_prefix_snapshot.go.
+// This bounds rollback staging only: attention readers may still copy history.
+type v41StepRegistryUndo struct {
+	state          *V41AttentionState
+	kv, index      []v41StepPublicationUndo
+	topk           [][]int32
+	topkRatio      int
+	topkSet        bool
+	candidates     []bool
+	candidateRatio int
+	candidatesSet  bool
 }
 
-// cloneV41TopKRows copies a top-k selection so a staged snapshot cannot alias the
-// live publication.
-func cloneV41TopKRows(rows [][]int32) [][]int32 {
-	if rows == nil {
-		return nil
+func stageV41StepRegistry(state *V41AttentionState, layers int) v41StepRegistryUndo {
+	u := v41StepRegistryUndo{
+		state: state,
+		kv:    make([]v41StepPublicationUndo, layers),
+		index: make([]v41StepPublicationUndo, layers),
+		topk:  state.topk, topkRatio: state.topkRatio, topkSet: state.topkSet,
+		candidates: state.candidates, candidateRatio: state.candidateRatio, candidatesSet: state.candidatesSet,
 	}
-	out := make([][]int32, len(rows))
-	for i, row := range rows {
-		out[i] = append([]int32(nil), row...)
+	// A live single-token layer appends at most one row to each of its own
+	// source stores. No step resets the maps or mutates another source's rows.
+	for layer := 0; layer < layers; layer++ {
+		u.kv[layer] = stageV41StepPublication(state.kvPublications, state.kvPublishedEnd, layer)
+		u.index[layer] = stageV41StepPublication(state.indexPublications, state.indexPublishedEnd, layer)
 	}
-	return out
+	return u
+}
+
+func (u v41StepRegistryUndo) restore() {
+	for layer := len(u.kv) - 1; layer >= 0; layer-- {
+		u.kv[layer].restore()
+		u.index[layer].restore()
+	}
+	u.state.topk, u.state.topkRatio, u.state.topkSet = u.topk, u.topkRatio, u.topkSet
+	u.state.candidates, u.state.candidateRatio, u.state.candidatesSet = u.candidates, u.candidateRatio, u.candidatesSet
 }

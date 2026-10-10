@@ -835,11 +835,17 @@ func (t *Tree) InsertSnapshot(boundary *node, suffix []int, snap *model.PrefixSn
 	if !t.makeSnapshotRoom(incoming-oldBytes, n) {
 		return n, ErrSnapshotByteBudget
 	}
-	if n.snapshot != nil {
+	if n.snapshot != nil && n.snapshot != snap {
 		n.snapshot.Close()
 	}
 	t.snapshotBytes -= oldBytes
 	n.snapshot = snap
+	// Staged tiers belong to the previous admission, even when the token key
+	// matches. Retire them only after admission succeeds and the new hot owner
+	// is installed, so rejection preserves every old copy and same-owner
+	// re-admission cannot close the owner that remains live.
+	t.releaseHostSnapshot(n)
+	t.releaseRemoteSnapshot(n)
 	n.cachedLogits = append([]float32(nil), logits...)
 	t.snapshotBytes += incoming
 	// Successful admission of a complete local snapshot record mints a fresh

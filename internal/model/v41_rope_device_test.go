@@ -327,6 +327,17 @@ func TestV41TailRoPEDeviceDispatch(t *testing.T) {
 				t.Fatal("Step/suffix replayed a prefix, skipped RoPE, or leaked a transient")
 			}
 			for i, call := range b.calls {
+				if full, err := v41ForwardGeometry(m.Cfg); err != nil {
+					t.Fatal(err)
+				} else if full {
+					for _, row := range [][]float32{call.q, call.kv} {
+						for _, value := range row {
+							if math.Float32bits(value)&0xffff != 0 {
+								t.Fatal("full rotary callback input was not BF16")
+							}
+						}
+					}
+				}
 				layer, pos := i/2, i%2 // cold prefill is layer-major
 				if i >= 2*m.Cfg.NumLayers {
 					layer, pos = i%m.Cfg.NumLayers, i/m.Cfg.NumLayers
@@ -509,5 +520,104 @@ func TestV41TailRoPEDeviceDispatch(t *testing.T) {
 				t.Fatalf("closed session retried selected operation: %v", retry)
 			}
 		})
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestV41FullAttentionRoPEPublicationOrder(t *testing.T) {
+	cfg := Config{HeadDim: v41KVLoraRank}
+	const hd = 512
+	q, kv := make([]float32, hd), make([]float32, hd)
+	q[0], kv[0] = 1.00390625, float32(math.Copysign(0, -1))
+	q[hd-2], q[hd-1] = 1.00390625, 1.0/256
+	kv[hd-2], kv[hd-1] = -.75, .25
+	cos, sin := []float32{float32(math.Cos(1))}, []float32{float32(math.Sin(1))}
+	table := []float32{sin[0], cos[0]}
+	beforeQ, beforeKV := append([]float32(nil), q...), append([]float32(nil), kv...)
+	wantQ := v41LatentNormOracleBF16(v41TailRoPEExactOracle(v41LatentNormOracleBF16(q), table, hd, 2))
+	wantKV := v41LatentNormOracleBF16(v41TailRoPEExactOracle(v41LatentNormOracleBF16(kv), table, hd, 2))
+	wrong := v41LatentNormOracleBF16(v41TailRoPEExactOracle(q, table, hd, 2))
+	if reflect.DeepEqual(wrong, wantQ) {
+		t.Fatal("pre-rotation narrowing witness is vacuous")
+	}
+	for _, selected := range []bool{false, true} {
+		var rotate v41TailRoPEFunc
+		var borrowedQ, borrowedKV []float32
+		if selected {
+			rotate = func(_ int, query, key, c, s []float32, _ int, _ int, _ int) ([]float32, []float32, error) {
+				if !reflect.DeepEqual(query, v41LatentNormOracleBF16(q)) || !reflect.DeepEqual(key, v41LatentNormOracleBF16(kv)) {
+					t.Fatal("callback input publication missing")
+				}
+				borrowedQ = v41TailRoPEExactOracle(query, table, hd, 2)
+				borrowedKV = v41TailRoPEExactOracle(key, table, hd, 2)
+				return borrowedQ, borrowedKV, nil
+			}
+		}
+		qo, ko, err := v41AttentionQKRoPE(cfg, 0, q, kv, cos, sin, 1, hd, 2, rotate)
+		if err != nil || !reflect.DeepEqual(qo, wantQ) || !reflect.DeepEqual(ko, wantKV) {
+			t.Fatalf("selected=%t publication mismatch err=%v", selected, err)
+		}
+		for i := range borrowedQ {
+			borrowedQ[i] = 99
+		}
+		for i := range borrowedKV {
+			borrowedKV[i] = 99
+		}
+		if !reflect.DeepEqual(qo, wantQ) || !reflect.DeepEqual(ko, wantKV) || !reflect.DeepEqual(q, beforeQ) || !reflect.DeepEqual(kv, beforeKV) {
+			t.Fatal("RoPE publication borrowed caller/callback storage")
+		}
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestV41FullAttentionRoPEAliasedOutputsAndAtomicFailure(t *testing.T) {
+	cfg := Config{HeadDim: v41KVLoraRank}
+	const hd = 512
+	q, kv := make([]float32, hd), make([]float32, hd)
+	q[0], kv[0] = 1, 2
+	swap := func(_ int, query, key, _, _ []float32, _, _, _ int) ([]float32, []float32, error) {
+		return key, query, nil
+	}
+	qo, ko, err := v41AttentionQKRoPE(cfg, 0, q, kv, []float32{1}, []float32{0}, 1, hd, 2, swap)
+	if err != nil || qo[0] != 2 || ko[0] != 1 || q[0] != 1 || kv[0] != 2 {
+		t.Fatalf("cross-output alias result=%v/%v err=%v", qo, ko, err)
+	}
+	for _, bad := range []float32{float32(math.NaN()), float32(math.Inf(1)), math.MaxFloat32} {
+		calls := 0
+		badKV := func(_ int, query, key, _, _ []float32, _, _, _ int) ([]float32, []float32, error) {
+			calls++
+			query[0] = 3
+			key[0] = bad
+			return query, key, nil
+		}
+		qo, ko, err := v41AttentionQKRoPE(cfg, 0, q, kv, []float32{1}, []float32{0}, 1, hd, 2, badKV)
+		var named *V41TailRoPEOperationError
+		if qo != nil || ko != nil || !errors.As(err, &named) || calls != 1 || q[0] != 1 || kv[0] != 2 {
+			t.Fatalf("atomic output failure calls=%d err=%v", calls, err)
+		}
+		input := append([]float32(nil), q...)
+		input[0] = bad
+		calls = 0
+		_, _, err = v41AttentionQKRoPE(cfg, 0, input, kv, []float32{1}, []float32{0}, 1, hd, 2, badKV)
+		if !errors.As(err, &named) || calls != 0 {
+			t.Fatalf("input refusal called rotary: calls=%d err=%v", calls, err)
+		}
+	}
+	// Finite BF16 inputs can overflow only after the rotation, which must still
+	// return neither row and leave both original rows untouched.
+	large := make([]float32, hd)
+	large[hd-2], large[hd-1] = math.Float32frombits(0x7f7f0000), math.Float32frombits(0x7f7f0000)
+	coefficient := float32(math.Sqrt(.5))
+	qo, ko, err = v41AttentionQKRoPE(cfg, 0, large, kv, []float32{coefficient}, []float32{coefficient}, 1, hd, 2, nil)
+	var selectedError *V41TailRoPEOperationError
+	if qo != nil || ko != nil || !errors.As(err, &selectedError) || math.Float32bits(large[hd-2]) != 0x7f7f0000 {
+		t.Fatalf("post-rotation overflow err=%v", err)
+	}
+	sentinel := errors.New("selected rotary error")
+	fail := func(int, []float32, []float32, []float32, []float32, int, int, int) ([]float32, []float32, error) {
+		return nil, nil, sentinel
+	}
+	if _, _, err := v41AttentionQKRoPE(cfg, 0, q, kv, []float32{1}, []float32{0}, 1, hd, 2, fail); !errors.Is(err, sentinel) {
+		t.Fatalf("selected identity lost: %v", err)
 	}
 }

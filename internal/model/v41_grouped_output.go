@@ -34,13 +34,35 @@ type v41GroupedOutputFunc func(layer int, o []float32, heads, headDim, groups, r
 func (m *Model) v41GroupedOutputProjector(l, heads, headDim, groups, rank, dim int, scratch *v41ProjScratch) func([]float32) ([]float32, error) {
 	var woA, woB []float32
 	loaded := false
+	full, geometryErr := v41ForwardGeometry(m.Cfg)
 	return func(o []float32) ([]float32, error) {
+		if geometryErr != nil {
+			return nil, geometryErr
+		}
+		if full {
+			total, ok := checkedMulInt(heads, headDim)
+			if !ok || len(o) != total {
+				return nil, v41ProjectionOperationErr(l, "attn.wo_a.weight", errV41ProjectionResult)
+			}
+			var err error
+			o, err = v41LatentNormBF16Copy(l, "attn.wo_a.weight", "input", o)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if scratch.groupedOutput != nil {
-			y, outcome, err := scratch.groupedOutput(l, o, heads, headDim, groups, rank, dim)
+			callbackInput := o
+			if full {
+				callbackInput = append([]float32(nil), o...)
+			}
+			y, outcome, err := scratch.groupedOutput(l, callbackInput, heads, headDim, groups, rank, dim)
 			switch outcome {
 			case v41ProjectionHandled:
 				if err != nil || len(y) != dim {
 					return nil, v41ProjectionOperationErr(l, "attn.wo_b.weight", err)
+				}
+				if full {
+					return v41LatentNormBF16Copy(l, "attn.wo_b.weight", "projection", y)
 				}
 				return y, nil
 			case v41ProjectionError:
@@ -70,7 +92,13 @@ func (m *Model) v41GroupedOutputProjector(l, heads, headDim, groups, rank, dim i
 			scratch.woB = woB
 			loaded = true
 		}
-		y, err := V41GroupedOutputProjection(o, woA, woB, 1, 1, heads, headDim, groups, rank, dim)
+		var y []float32
+		var err error
+		if full {
+			y, err = v41FullGroupedOutput(l, o, woA, woB, heads, headDim, groups, rank, dim)
+		} else {
+			y, err = V41GroupedOutputProjection(o, woA, woB, 1, 1, heads, headDim, groups, rank, dim)
+		}
 		if err != nil {
 			return nil, v41StageErr(v41StageAttention, l, err)
 		}
@@ -280,7 +308,11 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory {
 		return nil
 	}
+	full, geometryErr := v41ForwardGeometry(s.M.Cfg)
 	return func(l int, o []float32, heads, headDim, groups, rank, dim int) (result []float32, outcome v41DenseProjectionOutcome, cause error) {
+		if geometryErr != nil {
+			return nil, v41ProjectionError, geometryErr
+		}
 		totalIn, inOK := checkedMulInt(heads, headDim)
 		joinedWidth, joinOK := checkedMulInt(groups, rank)
 		if heads <= 0 || headDim <= 0 || groups <= 0 || rank <= 0 || dim <= 0 || heads%groups != 0 || !inOK || !joinOK || len(o) != totalIn {
@@ -298,6 +330,13 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 				return nil, v41ProjectionDeclined, nil
 			}
 		}
+		if full {
+			var err error
+			o, err = v41LatentNormBF16Copy(l, "attn.wo_a.weight", "input", o)
+			if err != nil {
+				return nil, v41ProjectionError, err
+			}
+		}
 		aName, bName := layerName(l, "attn.wo_a.weight"), layerName(l, "attn.wo_b.weight")
 		ar, ac, ap := s.M.residentShape(aName)
 		br, bc, bp := s.M.residentShape(bName)
@@ -309,6 +348,7 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 		if !aSupported || !bSupported || a.elems != aElems || b.elems != bElems {
 			return nil, v41ProjectionDeclined, nil
 		}
+		s.ensureOpenBackendSession()
 		opened := s.M.v41NowNanos()
 		completed, calls := 0, 0
 		var upload, readback int64
@@ -333,6 +373,20 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 						return
 					}
 				}
+				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+					if original, ok := r.(error); ok {
+						err = original
+					}
+					result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
+					return
+				}
+				// Retire selected plain-error backends (including ROCm), but
+				// retain the original error or programming panic identity.
+				err, ok := r.(error)
+				if !ok {
+					err = fmt.Errorf("unclassified backend panic: %v", r)
+				}
+				closeFailure(err)
 				panic(r)
 			}
 		}()
@@ -378,7 +432,19 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 					return nil, errV41ProjectionResult
 				}
 			}
-			return values, nil
+			// Read may borrow tensor storage. Own it before deferred Free in both
+			// modes; only full V4.1 narrows each projection publication to BF16.
+			if full {
+				owned := make([]float32, len(values))
+				for i, v := range values {
+					owned[i] = v41RoundBF16(v)
+					if !finite32(owned[i]) {
+						return nil, errV41ProjectionResult
+					}
+				}
+				return owned, nil
+			}
+			return append([]float32(nil), values...), nil
 		}
 		joined := make([]float32, joinedWidth)
 		for g := 0; g < groups; g++ {
@@ -402,4 +468,55 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 		completed = 1
 		return result, v41ProjectionHandled, nil
 	}
+}
+
+// v41FullGroupedOutput preserves the host F32 reduction loops while publishing
+// BF16 between wo_a and wo_b, as model.py787-788 requires. The exported generic
+// primitive retains its legacy F32 contract for reduced and standalone callers.
+func v41FullGroupedOutput(layer int, o, a, b []float32, heads, headDim, groups, rank, dim int) ([]float32, error) {
+	const aLeaf = "attn.wo_a.weight"
+	const bLeaf = "attn.wo_b.weight"
+	total, ok := checkedMulInt(heads, headDim)
+	joinedWidth, joinOK := checkedMulInt(groups, rank)
+	if !ok || !joinOK || heads <= 0 || headDim <= 0 || groups <= 0 || rank <= 0 || dim <= 0 || heads%groups != 0 || len(o) != total {
+		return nil, v41ProjectionOperationErr(layer, aLeaf, errV41ProjectionResult)
+	}
+	groupIn := total / groups
+	aSize, aOK := checkedMulInt(joinedWidth, groupIn)
+	bSize, bOK := checkedMulInt(dim, joinedWidth)
+	if !aOK || !bOK || len(a) != aSize || len(b) != bSize {
+		return nil, v41ProjectionOperationErr(layer, aLeaf, errV41ProjectionResult)
+	}
+	for _, v := range a {
+		if !finite32(v) {
+			return nil, v41ProjectionOperationErr(layer, aLeaf, errV41ProjectionResult)
+		}
+	}
+	for _, v := range b {
+		if !finite32(v) {
+			return nil, v41ProjectionOperationErr(layer, bLeaf, errV41ProjectionResult)
+		}
+	}
+	joined := make([]float32, joinedWidth)
+	for g := 0; g < groups; g++ {
+		for r := 0; r < rank; r++ {
+			var sum float32
+			for k := 0; k < groupIn; k++ {
+				sum += o[g*groupIn+k] * a[(g*rank+r)*groupIn+k]
+			}
+			joined[g*rank+r] = sum
+		}
+	}
+	var err error
+	joined, err = v41LatentNormBF16Copy(layer, aLeaf, "projection", joined)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]float32, dim)
+	for d := range out {
+		for k := range joined {
+			out[d] += b[d*joinedWidth+k] * joined[k]
+		}
+	}
+	return v41LatentNormBF16Copy(layer, bLeaf, "projection", out)
 }

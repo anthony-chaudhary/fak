@@ -247,7 +247,8 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		}
 	}
 	cos, sin := v41RopeTableForLayer(cfg, l, pos)
-	if err := v41TailRoPEInPlace(l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE); err != nil {
+	q, kv, err = v41AttentionQKRoPE(cfg, l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE)
+	if err != nil {
 		return err
 	}
 
@@ -327,7 +328,10 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
 	}
-	v41InverseAttentionOutputInPlace(cfg, l, pos, o, nH, hd)
+	o, err = v41AttentionOutputForProjection(cfg, l, pos, o, nH, hd)
+	if err != nil {
+		return err
+	}
 	attnOut, err := projectOutput(o)
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
@@ -357,19 +361,33 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return err
 	}
-	picks, err := v41Route(routerLogits, gateBias, routeCfg)
+	picks, err := v41RouteForGeometry(routerLogits, gateBias, routeCfg, full)
 	if err != nil {
 		return v41StageErr(v41StageMoE, l, err)
 	}
 	routed := make([]float32, H)
-	for _, pick := range picks {
+	var fullOutputs [][]float32
+	if full {
+		fullOutputs = make([][]float32, len(picks))
+	}
+	for slot, pick := range picks {
 		stem := "ffn.experts." + itoa(pick.expert)
-		y, err := m.v41IncrementalExpert(l, stem, ffnX, scratch)
+		y, err := m.v41IncrementalExpert(l, stem, ffnX, pick.weight, scratch)
 		if err != nil {
 			return err
 		}
+		if full {
+			fullOutputs[slot] = y
+			continue
+		}
 		for i := range routed {
 			routed[i] += pick.weight * y[i]
+		}
+	}
+	if full {
+		routed, err = v41FullRoutedSum(l, picks, fullOutputs, H)
+		if err != nil {
+			return err
 		}
 	}
 	shared, err := m.v41SharedExpertSwiGLUWithActivation(l, ffnX, cfg, scratch.denseProjection, scratch.sharedActivation)
@@ -579,7 +597,8 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		return err
 	}
 	cos, sin := v41RopeTableForLayer(cfg, l, pos)
-	if err := v41TailRoPEInPlace(l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE); err != nil {
+	q, kv, err = v41AttentionQKRoPE(cfg, l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE)
+	if err != nil {
 		return err
 	}
 	window := make([][]float32, 0, pos-windowStart+1)
@@ -700,7 +719,10 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
 	}
-	v41InverseAttentionOutputInPlace(cfg, l, pos, o, nH, hd)
+	o, err = v41AttentionOutputForProjection(cfg, l, pos, o, nH, hd)
+	if err != nil {
+		return err
+	}
 	attnProjected, err := projectOutput(o)
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
@@ -747,20 +769,23 @@ func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, 
 		return err
 	}
 	gateBias := m.tensor(layerName(l, "ffn.gate.e_score_correction_bias"))
-	picks, err := v41Route(routerLogits, gateBias, routeCfg)
+	picks, err := v41RouteForGeometry(routerLogits, gateBias, routeCfg, true)
 	if err != nil {
 		return v41StageErr(v41StageMoE, l, err)
 	}
 	routed := make([]float32, H)
-	for _, pick := range picks {
+	fullOutputs := make([][]float32, len(picks))
+	for slot, pick := range picks {
 		stem := "ffn.experts." + itoa(pick.expert)
-		y, err := m.v41IncrementalExpert(l, stem, ffnX, scratch)
+		y, err := m.v41IncrementalExpert(l, stem, ffnX, pick.weight, scratch)
 		if err != nil {
 			return err
 		}
-		for i := range routed {
-			routed[i] += pick.weight * y[i]
-		}
+		fullOutputs[slot] = y
+	}
+	routed, err = v41FullRoutedSum(l, picks, fullOutputs, H)
+	if err != nil {
+		return err
 	}
 	shared, err := m.v41SharedExpertSwiGLUWithActivation(l, ffnX, cfg, scratch.denseProjection, scratch.sharedActivation)
 	if err != nil {
@@ -1025,13 +1050,19 @@ func v41ExpertOperationErr(l int, stage string, cause error) error {
 	return &V41ExpertOperationError{Layer: l, Stage: stage, Cause: v41StageErr(v41StageMoE, l, cause)}
 }
 
-func (m *Model) v41IncrementalExpert(l int, stem string, xn []float32, scratch *v41ProjScratch) (out []float32, resultErr error) {
+func (m *Model) v41IncrementalExpert(l int, stem string, xn []float32, weight float32, scratch *v41ProjScratch) (out []float32, resultErr error) {
 	cfg := m.Cfg
 	var dispatchOpen int64
 	var dispatchActive, gateUp bool
 	defer func() {
 		if r := recover(); r != nil {
 			if cause, ok := r.(error); ok && dispatchActive {
+				var expertOperation *V41ExpertOperationError
+				if errors.As(cause, &expertOperation) {
+					m.v41NoteIncrementalDeviceDispatch(gateUp, dispatchOpen)
+					out, resultErr = nil, cause
+					return
+				}
 				var operation *BackendForwardOperationError
 				if errors.As(cause, &operation) {
 					m.v41NoteIncrementalDeviceDispatch(gateUp, dispatchOpen)
@@ -1051,6 +1082,39 @@ func (m *Model) v41IncrementalExpert(l int, stem string, xn []float32, scratch *
 			panic(r)
 		}
 	}()
+	full, geometryErr := v41ForwardGeometry(cfg)
+	if geometryErr != nil {
+		return nil, geometryErr
+	}
+	if full {
+		var gateCallback v41ExpertGateUpFunc
+		var downCallback v41ExpertDownFunc
+		if scratch.expertGateUp != nil {
+			gateCallback = func(layer int, name string, x []float32) ([]float32, v41ExpertGateUpOutcome, error) {
+				dispatchOpen, dispatchActive, gateUp = m.v41NowNanos(), true, true
+				values, outcome, cause := scratch.expertGateUp(layer, name, x)
+				dispatchActive = false
+				if outcome == v41GateUpHandled || outcome == v41GateUpError {
+					m.v41NoteIncrementalDeviceDispatch(true, dispatchOpen)
+				}
+				return values, outcome, cause
+			}
+		}
+		if scratch.expertDown != nil {
+			downCallback = func(layer int, name string, x []float32) ([]float32, v41ExpertDownOutcome, error) {
+				dispatchOpen, dispatchActive, gateUp = m.v41NowNanos(), true, false
+				values, outcome, cause := scratch.expertDown(layer, name, x)
+				dispatchActive = false
+				if outcome == v41DownHandled || outcome == v41DownError {
+					m.v41NoteIncrementalDeviceDispatch(false, dispatchOpen)
+				}
+				return values, outcome, cause
+			}
+		}
+		return m.v41FullRoutedExpert(l, stem, xn, weight, cfg, gateCallback, downCallback,
+			func() ([]float32, []float32, []float32, error) { return m.v41ExpertTripleInto(l, stem, scratch, true) },
+			func() ([]float32, error) { return m.hostExpertDown(l, stem, scratch) }, false)
+	}
 	if scratch.expertGateUp != nil {
 		dispatchOpen, dispatchActive, gateUp = m.v41NowNanos(), true, true
 		h, outcome, err := scratch.expertGateUp(l, stem, xn)

@@ -1308,11 +1308,6 @@ func TestPrefixHitApplyClampsToSnapshottedDepth(t *testing.T) {
 	apply := func(t *testing.T, info *prefixHitInfo) *schedLane {
 		t.Helper()
 		s := &NativeScheduler{m: m}
-		t.Cleanup(func() {
-			nativePrefixStateMu.Lock()
-			delete(nativePrefixStates, s)
-			nativePrefixStateMu.Unlock()
-		})
 		sess := m.NewSession()
 		sess.Quant = true
 		sess.Q4K = true

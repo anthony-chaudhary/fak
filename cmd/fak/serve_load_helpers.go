@@ -514,8 +514,7 @@ func loadServeInKernelModelPlaced(modelPath string, backend compute.Backend, cpu
 					memPlan = ring.Plan
 					q4kOpts = append(q4kOpts, serveActivatedExpertRingLoadOptions(ring)...)
 					q4kOpts = append(q4kOpts, serveActivatedExpertRingDenseOption(ggufPath, q4kOpts, hostFit, os.Getenv))
-					text := fmt.Sprintf("full device plan does not fit; dense base device-resident (%s), routed experts streamed from the checkpoint through a %s device ring (no host expert GEMMs)",
-						bytesText(uint64(max(ring.Fit.DeviceBaseBytes, 0))), bytesText(uint64(max(ring.RingBytes, 0))))
+					text := serveActivatedExpertRingPlanText(ring, ggufload.ApplyQ4KLoadOptions(q4kOpts))
 					fmt.Fprintln(os.Stderr, "fak serve: activated-expert device ring:", text)
 					loadMessages = append(loadMessages, serveStartupMessage("serving-expert-residency", "info", text))
 				}
@@ -719,6 +718,10 @@ func loadResidentQ4KDevice(ggufPath string, tLoad time.Time, memPlan compute.Mem
 	messages = append(messages, admission)
 	mm, prof, loadNanos := loadResidentQ4KProfiledFor(mapped, ggufPath, tLoad, opts...)
 	messages = append(messages, serveStartupMessage("resident-layout", "info", fakmodel.FormatResidentReport(mm.ResidentReport())))
+	if text, ok := serveVulkanPostLoadReservations(mm, backend, memPlan); ok {
+		fmt.Fprintln(os.Stderr, "fak serve: post-load Vulkan reservations:", text)
+		messages = append(messages, serveStartupMessage("post-load-device-reservations", "info", text))
+	}
 	profile := withServeStartupMessages(withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k-device", ggufPath, loadNanos)), memPlan, backend), messages...)
 	return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 }
@@ -978,4 +981,18 @@ func serveMetalGGUFAdmissionWeights(path string, ws *ggufload.WeightSource) (com
 		rawBasis = payload
 	}
 	return plan, rawBasis, nil
+}
+
+// serveActivatedExpertRingPlanText describes admission charges and loader policy,
+// never measured device placement. A bounded dense option is a HOST working-set
+// ceiling, not evidence that its bytes have been uploaded or are physically resident.
+func serveActivatedExpertRingPlanText(ring serveActivatedExpertRing, effects ggufload.Q4KLoadOptionEffects) string {
+	text := fmt.Sprintf("full device plan does not fit; planned dense device charge=%s; planned device expert-ring capacity=%s; device weights staged on demand, actual residency unmeasured; routed experts streamed from checkpoint (no host expert GEMMs)",
+		bytesText(uint64(max(ring.Fit.DeviceBaseBytes, 0))), bytesText(uint64(max(ring.RingBytes, 0))))
+	if effects.StreamedDenseBounded {
+		text += fmt.Sprintf("; bounded dense HOST working-set ceiling=%s", bytesText(uint64(max(effects.StreamedDenseBytes, 0))))
+	} else if effects.StreamedDenseQ4K {
+		text += "; dense checkpoint streaming requested without an explicit host working-set ceiling"
+	}
+	return text
 }

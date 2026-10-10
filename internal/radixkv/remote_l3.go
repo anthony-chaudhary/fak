@@ -179,6 +179,9 @@ func (t *Tree) remoteStageFault(digest string, tokens int, err error, elapsed in
 }
 
 func (t *Tree) restoreSnapshotFromRemote(ctx context.Context, ns string, n *node) (*model.PrefixSnapshot, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
 	ref := n.remoteSnapshot
 	if ref == nil {
 		return nil, false, nil
@@ -198,6 +201,10 @@ func (t *Tree) restoreSnapshotFromRemote(ctx context.Context, ns string, n *node
 	started := time.Now()
 	envelope, found, err := t.remoteSnapshotStore.Get(ctx, wantDigest)
 	t.l3RestoreNanos += time.Since(started).Nanoseconds()
+	// A successful transport read does not authorize work for an expired caller.
+	if err == nil {
+		err = ctx.Err()
+	}
 	breaker.RecordResult(err, isProbe)
 	if err != nil {
 		t.l3Faults++
@@ -229,11 +236,21 @@ func (t *Tree) restoreSnapshotFromRemote(ctx context.Context, ns string, n *node
 		t.l3RestoreFaults++
 		return nil, false, err
 	}
+	if err := ctx.Err(); err != nil {
+		host.Close()
+		return nil, false, err
+	}
 	snap, err := host.Restore()
 	host.Close()
 	if err != nil {
 		t.l3Faults++
 		t.l3RestoreFaults++
+		return nil, false, err
+	}
+	// Native restoration may finish after cancellation. Retire its acquired
+	// owner before either request lookup or explicit page-in can publish it.
+	if err := ctx.Err(); err != nil {
+		snap.Close()
 		return nil, false, err
 	}
 	t.l3Hits++

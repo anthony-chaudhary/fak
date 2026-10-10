@@ -885,3 +885,64 @@ func TestV41CompressorProjectionPerLayerIndexSourceOwnHistory(t *testing.T) {
 		}
 	}
 }
+
+// CPU recorder matches native ROCm plain errors and unknown panic values only.
+func v41GuardedProjectionPanicContract(t *testing.T, fixture func() *Model, leaves []string) {
+	t.Helper()
+	for _, leaf := range leaves {
+		for _, site := range []string{"matmul", "read"} {
+			for _, primary := range []any{errors.New("rocm: selected projection: injected native failure"), &struct{ marker int }{41}} {
+				t.Run(leaf+"/"+site, func(t *testing.T) {
+					m := fixture()
+					b := newV41CompressorTestBackend()
+					s := v41DenseTestSession(t, m, b)
+					s.Prefill([]int{1, 2, 3})
+					callback := s.v41DenseProjectionFunc()
+					b.faultWeight = v41CompressorTestWeight(t, s, 0, leaf)
+					b.fail, b.failSite = primary, site
+					before := captureV41ForwardSnapshot(s.v41Forward)
+					var got any
+					func() { defer func() { got = recover() }(); s.Step(4) }()
+					var closed *BackendForwardOperationError
+					if got != primary || !errors.As(s.halFailure, &closed) || !s.BackendSessionClosed() {
+						t.Fatalf("selected primary/closure lost: panic=%v latch=%v", got, s.halFailure)
+					}
+					if cause, ok := primary.(error); ok && !errors.Is(s.halFailure, cause) {
+						t.Fatal("plain native cause identity lost")
+					}
+					if !reflect.DeepEqual(before, captureV41ForwardSnapshot(s.v41Forward)) || len(b.live) != 0 {
+						t.Fatal("selected failure changed rollback or leaked transient")
+					}
+					calls := b.operationCalls
+					var retry any
+					func() { defer func() { retry = recover() }(); s.Step(4) }()
+					if retry != closed || b.operationCalls != calls {
+						t.Fatal("closed public entry retried or changed latch")
+					}
+					out, in, ok := m.residentShape(layerName(0, leaf))
+					if !ok {
+						t.Fatal("missing selected shape")
+					}
+					func() {
+						defer func() { retry = recover() }()
+						_, _, _ = callback(0, leaf, make([]float32, in), out, in, 1)
+					}()
+					if retry != closed || b.operationCalls != calls {
+						t.Fatal("closed guarded callback retried or changed latch")
+					}
+					b.deny = true
+					values, outcome, err := callback(0, leaf, make([]float32, in), out, in, 1)
+					if values != nil || outcome != v41ProjectionDeclined || err != nil || b.operationCalls != calls {
+						t.Fatal("unsupported dtype stopped declining without work")
+					}
+				})
+			}
+		}
+	}
+}
+
+// Unmeasured estimate; no physical backend execution.
+// fak-test:runtime medium est=5s lane=default
+func TestV41CompressorProjectionUnclassifiedFailureCloses(t *testing.T) {
+	v41GuardedProjectionPanicContract(t, func() *Model { return v41CompressorProducerTestFixture(t) }, v41CompressorTestLeaves)
+}

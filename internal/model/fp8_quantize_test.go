@@ -41,9 +41,9 @@ func TestFP8TiledQuantLoadMatchesExpanded(t *testing.T) {
 	}
 	want := quantizeQ8(expanded, out, in)
 	for _, tc := range []struct {
-		label, name, canonical string
-		cfg                    Config
-		keepF32                bool
+		label, name, canonical, absent string
+		cfg                            Config
+		keepF32                        bool
 	}{
 		{
 			label: "projection", name: "model.layers.0.self_attn.q_proj.weight",
@@ -52,6 +52,15 @@ func TestFP8TiledQuantLoadMatchesExpanded(t *testing.T) {
 		{
 			label: "canonicalized", name: "model.language_model.layers.0.self_attn.q_proj.weight",
 			canonical: "model.layers.0.self_attn.q_proj.weight",
+			absent:    "model.language_model.layers.0.self_attn.q_proj.weight",
+			// The loader selects hybrid name normalization from layer geometry,
+			// not model_type alone, matching the expanded FP8 loader fixture.
+			cfg: Config{ModelType: "qwen3_5", HiddenSize: in, LayerTypes: []string{"linear_attention"}},
+		},
+		{
+			label: "nonhybrid source name", name: "model.language_model.layers.0.self_attn.q_proj.weight",
+			canonical: "model.language_model.layers.0.self_attn.q_proj.weight",
+			absent:    "model.layers.0.self_attn.q_proj.weight",
 			cfg:       Config{ModelType: "qwen3_5", HiddenSize: in},
 		},
 		{
@@ -77,6 +86,9 @@ func TestFP8TiledQuantLoadMatchesExpanded(t *testing.T) {
 			got := m.q8w[tc.canonical]
 			if got == nil || got.out != out || got.in != in || got.nblk != want.nblk {
 				t.Fatalf("missing or wrong Q8 shape for %s", tc.canonical)
+			}
+			if _, exists := m.q8w[tc.absent]; tc.absent != "" && exists {
+				t.Fatalf("Q8 tensor also retained unexpected name %s", tc.absent)
 			}
 			for i, q := range want.q {
 				if got.q[i] != q {

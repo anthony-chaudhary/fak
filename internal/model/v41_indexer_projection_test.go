@@ -556,3 +556,9 @@ func TestV41IndexerProjectionOwnIndexSourceWithBorrowedKV(t *testing.T) {
 		coldHAL.Close()
 	}
 }
+
+// Unmeasured estimate; no physical backend execution.
+// fak-test:runtime medium est=5s lane=default
+func TestV41IndexerProjectionUnclassifiedFailureCloses(t *testing.T) {
+	v41GuardedProjectionPanicContract(t, func() *Model { return v41IndexerTestFixture(t) }, v41IndexerTestLeaves)
+}

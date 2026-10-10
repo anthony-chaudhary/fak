@@ -1334,6 +1334,7 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 			}
 		}
 		if head || guarded {
+			s.ensureOpenBackendSession()
 			stage = func() compute.Tensor { return s.v41HeadWeightHAL(name, dtype, out, in) }
 		}
 		opened := s.M.v41NowNanos()
@@ -1379,6 +1380,22 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 						result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
 						return
 					}
+				}
+				if head || guarded {
+					if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+						if original, ok := r.(error); ok {
+							err = original
+						}
+						result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
+						return
+					}
+					// Plain backend errors (including ROCm) and programming panics
+					// retain their identity, but cannot leave this selected owner live.
+					err, ok := r.(error)
+					if !ok {
+						err = fmt.Errorf("unclassified backend panic: %v", r)
+					}
+					closeFailure(err)
 				}
 				panic(r)
 			}

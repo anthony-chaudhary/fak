@@ -463,7 +463,9 @@ func encodeE4M3Scale(tile []float32) byte {
 }
 
 // encodeE4M3Value encodes one already-scaled value as an e4m3 byte, rounding to
-// the nearest finite code. It reuses the production decoder for its value table.
+// the nearest finite code with ties to even and signed finite saturation.
+// The public row API rejects nonfinite inputs before this helper is reached.
+// It reuses the production decoder for its value table.
 func encodeE4M3Value(v float32) byte {
 	x := float64(v)
 	sign := byte(0)
@@ -471,13 +473,18 @@ func encodeE4M3Value(v float32) byte {
 		sign = 0x80
 		x = -x
 	}
+	// Clamp finite overflow before distance subtraction loses low bits. Keep
+	// the pre-existing unreachable nonfinite behavior outside this contract.
+	if x >= v41KVE4M3Max && !math.IsInf(x, 0) {
+		return sign | 0x7e
+	}
 	best, bestErr := 0, math.Inf(1)
 	for code := 0; code < 128; code++ {
 		if code == 0x7f {
 			continue
 		}
 		err := math.Abs(float64(e4m3ScaleToF32(byte(code))) - x)
-		if err < bestErr {
+		if err < bestErr || (err == bestErr && best&1 != 0 && code&1 == 0) {
 			best, bestErr = code, err
 		}
 	}

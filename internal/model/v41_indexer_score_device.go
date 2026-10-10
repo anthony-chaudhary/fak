@@ -222,9 +222,12 @@ func (s *Session) v41IndexerScoreFunc() v41IndexerScoreFunc {
 		if rows == 0 {
 			return make([]float32, 0), nil
 		}
-		run := func() ([]float32, error) {
+		run := func() (result []float32, cause error) {
 			var owned []compute.Tensor
 			defer func() {
+				// Cleanup must not replace the selected operation's error or
+				// original panic. Still attempt every owned release.
+				primaryPanic := recover()
 				var cleanupPanic any
 				for i := len(owned) - 1; i >= 0; i-- {
 					func() {
@@ -236,7 +239,10 @@ func (s *Session) v41IndexerScoreFunc() v41IndexerScoreFunc {
 						s.Backend.Free(owned[i])
 					}()
 				}
-				if cleanupPanic != nil {
+				if primaryPanic != nil {
+					panic(primaryPanic)
+				}
+				if cause == nil && cleanupPanic != nil {
 					panic(cleanupPanic)
 				}
 			}()
