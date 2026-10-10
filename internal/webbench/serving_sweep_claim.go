@@ -21,6 +21,8 @@ type ServingSweepClaim struct {
 	Track ServingTrack
 }
 
+var servingSweepTokenRatePattern = regexp.MustCompile(`(?i)\b(?:tok(?:en)?s?\s*/\s*s(?:ec(?:ond)?s?)?\b|tokens?\s+per\s+second\b|token\s+throughput\b)`)
+
 var servingSweepTrackPattern = regexp.MustCompile(`\b(ours|vllm|sglang|fak-fronts-fleet)\b`)
 
 func ParseServingSweepClaim(claim string) ServingSweepClaim {
@@ -70,6 +72,21 @@ func ValidateServingSweepClaim(claim string, report *ServingSweepReport) error {
 			reason = "fewer than two comparable capacity-valid points or no measured peak"
 		}
 		return fmt.Errorf("serving peak claim for %s refused: %s; rerun with at least two in-capacity identity-stable points", parsed.Track, reason)
+	}
+	for _, unit := range []string{"usage.completion_tokens/s", "stream_content_events/s", "estimated_content_tokens/s", "output_token_estimate/s"} {
+		if strings.Contains(strings.ToLower(claim), unit) && unit != summary.Peak.ThroughputUnit {
+			return fmt.Errorf("serving throughput claim unit %s differs from measured unit %s", unit, summary.Peak.ThroughputUnit)
+		}
+	}
+	// Non-token observations can support their own explicitly named rate, but
+	// must never certify prose that presents events or estimates as exact tokens.
+	if summary.Peak.TokenCountBasis != "usage.completion_tokens" {
+		if servingSweepTokenRatePattern.MatchString(claim) {
+			return fmt.Errorf("serving token throughput claim refused: measured unit is %s with token count basis %s", summary.Peak.ThroughputUnit, summary.Peak.TokenCountBasis)
+		}
+		if parsed.Kind != ServingSweepClaimSLAKnee && !strings.Contains(strings.ToLower(claim), summary.Peak.ThroughputUnit) {
+			return fmt.Errorf("serving peak claim must explicitly identify measured throughput unit %s", summary.Peak.ThroughputUnit)
+		}
 	}
 	if parsed.Kind != ServingSweepClaimSLAKnee {
 		return nil

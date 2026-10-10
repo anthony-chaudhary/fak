@@ -210,6 +210,28 @@ func ValidateBackendForwardConfig(cfg Config, be compute.Backend) error {
 				Reason:       "LayerNorm requires mean subtraction; the generic HAL supports RMSNorm only (issue #12607)",
 			}
 		}
+		if !dedicated {
+			if reason := genericHALRoPERefusal(cfg); reason != "" {
+				return &UnsupportedBackendForwardError{
+					Backend:      be.Name(),
+					Forward:      forwardGenericHAL,
+					IntendedPath: "compute HAL",
+					Reason:       reason + "; the generic HAL RoPE contract supports only full-head rotary width and global theta (issue #12608)",
+				}
+			}
+			// Generic Attention cannot express the model's per-layer window.
+			// Ignore entries beyond the layers the forward actually executes.
+			for l := 0; l < cfg.NumLayers && l < len(cfg.Window); l++ {
+				if cfg.windowForLayer(l) > 0 {
+					return &UnsupportedBackendForwardError{
+						Backend:      be.Name(),
+						Forward:      forwardGenericHAL,
+						IntendedPath: "compute HAL",
+						Reason:       fmt.Sprintf("sliding-window attention at layer %d requires a window bound; the generic HAL Attention contract is unwindowed (issue #12609)", l),
+					}
+				}
+			}
+		}
 		return nil
 	}
 	gdn, ok := be.(Qwen35GDNBackend)
@@ -231,6 +253,35 @@ func ValidateBackendForwardConfig(cfg Config, be compute.Backend) error {
 		ParityCosineMin: Qwen35GDNParityCosineMin,
 		Reason:          reason,
 	}
+}
+
+// genericHALRoPERefusal mirrors the effective axes consumed by invFreq and
+// ropeRowForLayer but absent from Backend.RoPE. Named scaling modes are refused
+// even when their parameters appear degenerate; only the documented empty/none
+// identity modes are admitted. This is admission, not a numerical equivalence test.
+func genericHALRoPERefusal(cfg Config) string {
+	if cfg.RopeScaling != "" && cfg.RopeScaling != "none" {
+		return fmt.Sprintf("configured RoPE scaling %q is unsupported", cfg.RopeScaling)
+	}
+	if cfg.rotaryDim() != cfg.HeadDim {
+		return fmt.Sprintf("partial rotary width %d differs from head width %d", cfg.rotaryDim(), cfg.HeadDim)
+	}
+	for l := 0; l < cfg.NumLayers && l < len(cfg.RopeThetaPerLayer); l++ {
+		if cfg.ropeThetaForLayer(l) != cfg.RopeTheta {
+			return fmt.Sprintf("per-layer RoPE theta at layer %d differs from global theta", l)
+		}
+	}
+	for i, factor := range ropeLongFactor(cfg) {
+		// invFreq ignores surplus factors and zero entries. The LongRoPE
+		// attention multiplier is already carried by cfg.attnScale() to HAL.
+		if i >= cfg.HeadDim/2 {
+			break
+		}
+		if factor != 0 && factor != 1 {
+			return fmt.Sprintf("longrope factor at rotary dimension %d is non-identity", i)
+		}
+	}
+	return ""
 }
 
 // ValidateBackendForwardPath is the Model-bound twin retained for callers that already

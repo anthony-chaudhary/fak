@@ -24,6 +24,7 @@ func TestNativeOwnedToolsRemainInModelPrompt(t *testing.T) {
 			tools := append([]ToolDef(nil), owned...)
 			if cold {
 				tools = append(tools, ToolDef{Type: "function", Function: ToolDefFunction{Name: "external_rare_analyzer", Parameters: json.RawMessage(`{"type":"object"}`)}})
+				tools = append(tools, ToolDef{Type: "function", Function: ToolDefFunction{Name: "ToolSearch", Parameters: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}`)}})
 			}
 			before, _ := json.Marshal(tools)
 			p := &InKernelPlanner{}
@@ -56,7 +57,7 @@ func TestNativeOwnedToolsRemainInModelPrompt(t *testing.T) {
 			}
 			_, hasSearch := byName["ToolSearch"]
 			if hasSearch != cold {
-				t.Errorf("ToolSearch inserted=%t, want %t", hasSearch, cold)
+				t.Errorf("advertised ToolSearch retained=%t, want %t", hasSearch, cold)
 			}
 			after, _ := json.Marshal(tools)
 			if string(before) != string(after) {

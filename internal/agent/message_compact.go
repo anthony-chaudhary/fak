@@ -14,8 +14,8 @@ package agent
 //     tool calls / tool results.
 //   - ElideStaleReadMessages: replaces Read tool_results whose file was superseded by a later in-session
 //     Edit/Write/MultiEdit with a compact fak_context_restore marker.
-//   - DeferColdToolDefs: filters cold tool definitions from the advertised schema list and provides
-//     a ToolSearch tool so the model can search for them on demand.
+//   - DeferColdToolDefs: filters cold tool definitions only when the advertised schema list
+//     already includes a supported discovery tool to retrieve them on demand.
 
 import (
 	"crypto/sha256"
@@ -299,8 +299,8 @@ var DefaultHotToolNames = map[string]bool{
 	ToolTaskSpawn: true, ToolTaskWait: true, ToolTaskStatus: true, ToolTaskCancel: true,
 }
 
-// DeferColdToolDefs filters out cold tools from the advertised tools list and ensures
-// ToolSearch is present so the model can discover deferred tools.
+// DeferColdToolDefs filters out cold tools only when the caller advertises
+// ToolSearch or tool_search. Without discovery, preserve the executable catalog.
 func DeferColdToolDefs(tools []ToolDef) ([]ToolDef, int) {
 	if len(tools) == 0 {
 		return tools, 0
@@ -321,18 +321,8 @@ func DeferColdToolDefs(tools []ToolDef) ([]ToolDef, int) {
 			coldCount++
 		}
 	}
-	if coldCount == 0 {
+	if coldCount == 0 || !hasSearch {
 		return tools, 0
-	}
-	if !hasSearch {
-		hot = append(hot, ToolDef{
-			Type: "function",
-			Function: ToolDefFunction{
-				Name:        "ToolSearch",
-				Description: "Search and retrieve deferred tool definitions by name or query keyword.",
-				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"tool name or capability keyword to search"}},"required":["query"]}`),
-			},
-		})
 	}
 	return hot, coldCount
 }

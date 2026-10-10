@@ -111,7 +111,8 @@ func TestValidateWebbenchClaimConsumesServingSweepReceipt(t *testing.T) {
 				MeasurementStatus: "measured",
 				Stats: webbench.ServingStats{
 					OK:                1,
-					ThroughputTokensS: webbench.ScalarMetric{Status: "measured", Value: &throughputs[i]},
+					TokenCountBasis:   "usage.completion_tokens",
+					ThroughputTokensS: webbench.ScalarMetric{Status: "measured", Unit: "usage.completion_tokens/s", Value: &throughputs[i]},
 					TTFTMillis:        webbench.QuantileMetric{Status: "measured", P99: &ttft[i]},
 				},
 			}},
