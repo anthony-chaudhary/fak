@@ -109,15 +109,15 @@ func TestV41AttentionInputNormAfterCollapse(t *testing.T) {
 				}
 			}
 			v41WriteTensorF32(t, m, layerName(0, "attn_norm.weight"), gain)
-			// A zero mix projection and zero base give sigmoid(0)+hc_eps.
-			// Keep this collapse calculation separate from v41MHCPre.
-			pre := float32(0.5) + hcEpsOrDefault(cfg)
+			// Incoming carry is independent of this layer's zero mix projection.
+			incoming := []float32{.25, .75, .125, .5}
 			collapsed := make([]float32, H)
-			for _, stream := range streams {
+			for h, stream := range streams {
 				for i, value := range stream {
-					collapsed[i] = float32(collapsed[i] + float32(pre*value))
+					collapsed[i] += incoming[h] * value
 				}
 			}
+
 			want := v41AttentionInputNormOracle(collapsed, gain, eps)
 			if reflect.DeepEqual(want, collapsed) {
 				t.Fatal("fixture cannot distinguish the missing norm")
@@ -142,7 +142,7 @@ func TestV41AttentionInputNormAfterCollapse(t *testing.T) {
 			mix := func(int, []float32, int, float32, bool, bool) ([]float32, v41DenseProjectionOutcome, error) {
 				return make([]float32, v41MHCMixWidth), v41ProjectionHandled, nil
 			}
-			scratch := &v41ProjScratch{denseProjection: project, mhcProjection: mix}
+			scratch := &v41ProjScratch{denseProjection: project, mhcProjection: mix, mhcCarry: &v41MHCCarry{pre: [][]float32{append([]float32(nil), incoming...)}}}
 			state, err := NewV41AttentionState(cfg.HeadDim, 8)
 			if err != nil {
 				t.Fatal(err)
@@ -150,6 +150,7 @@ func TestV41AttentionInputNormAfterCollapse(t *testing.T) {
 			x := streams[0]
 			switch route {
 			case "prefill":
+				scratch.mhcCarry.pre = append(scratch.mhcCarry.pre, append([]float32(nil), incoming...))
 				st := &v41ForwardState{denseProjection: project, mhcProjection: mix}
 				err = m.v41Layer(0, []int{0, 0}, [][]float32{x, x}, [][][]float32{streams, streams}, true,
 					cfg.HeadDim, cfg.NumHeads, H, eps, hcItersOrDefault(cfg), hcEpsOrDefault(cfg), v41RouterConfig{}, st, scratch, nil)

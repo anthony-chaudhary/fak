@@ -28,6 +28,9 @@ func v41MHCProjVulkanFixture(t *testing.T, dtype string) (*Model, *Model) {
 		{layerName(0, "attn_norm.weight"), []int{H}},
 		{layerName(0, "ffn_norm.weight"), []int{H}},
 		{layerName(0, "mhc.mixes.weight"), []int{24, 4 * H}},
+		{layerName(0, "mhc.ffn_mixes.weight"), []int{24, 4 * H}},
+		{layerName(0, "mhc.ffn_base"), []int{v41MHCMixWidth}},
+		{layerName(0, "mhc.ffn_scale"), []int{3}},
 		{layerName(0, "mhc.base"), []int{24}},
 		{layerName(0, "mhc.scale"), []int{3}},
 		{layerName(0, "attn.wq_a.weight"), []int{cfg.QLoraRank, H}},
@@ -52,6 +55,10 @@ func v41MHCProjVulkanFixture(t *testing.T, dtype string) (*Model, *Model) {
 		switch {
 		case name == "model.norm.weight" || hasSuffix(name, "attn_norm.weight") || hasSuffix(name, "ffn_norm.weight") || hasSuffix(name, "attn.wq_a_norm.weight") || hasSuffix(name, "attn.kv_norm.weight"):
 			return 1
+		case hasSuffix(name, "mhc.ffn_scale"):
+			return .75
+		case hasSuffix(name, "mhc.ffn_base"):
+			return .125 * next()
 		case hasSuffix(name, "mhc.scale"):
 			return 1
 		case hasSuffix(name, "mhc.base"):
@@ -63,41 +70,41 @@ func v41MHCProjVulkanFixture(t *testing.T, dtype string) (*Model, *Model) {
 		}
 	})
 	m := &Model{Cfg: cfg, manifest: man, raw: raw}
-	name := layerName(0, "mhc.mixes.weight")
-	if dtype == "Q2_K" {
-		m.kqw = map[string]*kQuantTensor{name: q2kFixtureTensor(24, 4*H, 13668105120)}
-		delete(m.manifest, name)
-	} else {
-		logical := cpuOracleTensor(t, m, name)
-		transposed := v41TransposeMixBlock(logical, 4*H)
-		meta := m.manifest[name]
-		meta.Offset = len(m.raw)
-		meta.Shape = []int{4 * H, 24}
-		for _, value := range transposed {
-			var bytes [4]byte
-			putMHCProjectionFloat(bytes[:], value)
-			m.raw = append(m.raw, bytes[:]...)
-		}
-		// Both model owners share immutable ordinary source bytes; only the control's mHC metadata selects the appended true transpose.
-		control := v41RawFullFlattenedMHC(t)
-		control.Cfg, control.raw = cfg, m.raw
-		for key := range control.manifest {
-			delete(control.manifest, key)
-		}
-		for key, value := range m.manifest {
-			control.manifest[key] = value
-		}
-		control.manifest[name] = meta
-		return m, control
-	}
+	leaves := []string{"mhc.mixes.weight", "mhc.ffn_mixes.weight"}
 	control := v41RawFullFlattenedMHC(t)
-	control.Cfg, control.raw, control.kqw = cfg, m.raw, m.kqw
+	control.Cfg = cfg
 	for key := range control.manifest {
 		delete(control.manifest, key)
+	}
+	if dtype == "Q2_K" {
+		m.kqw = map[string]*kQuantTensor{}
+		for phase, leaf := range leaves {
+			name := layerName(0, leaf)
+			m.kqw[name] = q2kFixtureTensor(24, 4*H, uint64(13668105120+phase))
+			delete(m.manifest, name)
+		}
 	}
 	for key, value := range m.manifest {
 		control.manifest[key] = value
 	}
+	if dtype == "F32" {
+		for _, leaf := range leaves {
+			name := layerName(0, leaf)
+			logical := cpuOracleTensor(t, m, name)
+			transposed := v41TransposeMixBlock(logical, 4*H)
+			meta := m.manifest[name]
+			meta.Offset, meta.Shape = len(m.raw), []int{4 * H, 24}
+			for _, value := range transposed {
+				var bytes [4]byte
+				putMHCProjectionFloat(bytes[:], value)
+				m.raw = append(m.raw, bytes[:]...)
+			}
+			control.manifest[name] = meta
+		}
+	}
+	// Immutable sources are shared; each named host control preserves its layout.
+	control.raw, control.kqw = m.raw, m.kqw
+
 	return m, control
 }
 
@@ -149,6 +156,12 @@ func TestV41MHCProjectionVulkan(t *testing.T) {
 			b, hostBackend := newV41MHCProjBackend(20480, false), newV41MHCProjBackend(20480, dtype == "Q2_K")
 			b.Backend, hostBackend.Backend = be, be
 			s, host := v41EngProjSession(t, m, b), v41EngProjSession(t, control, hostBackend)
+			// Explicitly decline only mHC; transposed F32 is device eligible too.
+			decline := func(int, []float32, int, float32, bool, bool) ([]float32, v41DenseProjectionOutcome, error) {
+				return nil, v41ProjectionDeclined, nil
+			}
+			host.v41State().mhcProjection = decline
+			host.v41State().mhcFFNProjection = decline
 			defer func() {
 				s.Close()
 				host.Close()
@@ -159,9 +172,13 @@ func TestV41MHCProjectionVulkan(t *testing.T) {
 					t.Error(err)
 				}
 			}()
-			weights, ok := m.residentF32Mat(layerName(0, "mhc.mixes.weight"))
-			if !ok || len(weights) != 24*20480 {
-				t.Fatal("independent raw coefficient oracle unavailable")
+			weights := make([][]float32, 2)
+			for phase, leaf := range []string{"mhc.mixes.weight", "mhc.ffn_mixes.weight"} {
+				var ok bool
+				weights[phase], ok = m.residentF32Mat(layerName(0, leaf))
+				if !ok || len(weights[phase]) != 24*20480 {
+					t.Fatal("independent named raw coefficient oracle unavailable")
+				}
 			}
 			for index, ids := range [][]int{{1, 2, 3}, {4}, {5, 6}} {
 				phase := "prefill"
@@ -204,7 +221,7 @@ func TestV41MHCProjectionVulkan(t *testing.T) {
 					for out := 0; out < 24; out++ {
 						var dot float64
 						for cell, value := range op.activation {
-							dot += float64(weights[out*20480+cell]) * float64(value)
+							dot += float64(weights[b.weightIndex[op.weight]][out*20480+cell]) * float64(value)
 						}
 						signal = math.Max(signal, math.Abs(dot))
 						if math.Abs(float64(op.result[out])-dot) > 1e-4*math.Max(1, math.Abs(dot)) {
@@ -215,17 +232,17 @@ func TestV41MHCProjectionVulkan(t *testing.T) {
 						t.Fatal("physical raw oracle vacuous")
 					}
 				}
-				if rows != len(ids) || delta["mhc_projection_device_rows"] != float64(len(ids)) || delta["mhc_projection_device_calls"] != float64(len(ids)) || delta["mhc_projection_host_calls"] != 0 || delta["mhc_projection_host_rows"] != 0 || delta["mhc_projection_host_weight_f32_bytes"] != 0 {
+				if rows != 2*len(ids) || delta["mhc_projection_device_rows"] != float64(2*len(ids)) || delta["mhc_projection_device_calls"] != float64(2*len(ids)) || delta["mhc_projection_host_calls"] != 0 || delta["mhc_projection_host_rows"] != 0 || delta["mhc_projection_host_weight_f32_bytes"] != 0 {
 					t.Errorf("physical default mHC route=%v actual rows=%d", delta, rows)
 				}
-				if delta["mhc_projection_matmul_calls"] != float64(b.attempts-attempts) || delta["mhc_projection_activation_upload_bytes"] != float64(upload) || delta["mhc_projection_readback_bytes"] != float64(read) || upload != 4*20480*len(ids) || read != 4*24*len(ids) || delta["mhc_projection_nanos"] <= 0 {
+				if delta["mhc_projection_matmul_calls"] != float64(b.attempts-attempts) || delta["mhc_projection_activation_upload_bytes"] != float64(upload) || delta["mhc_projection_readback_bytes"] != float64(read) || upload != 8*20480*len(ids) || read != 8*24*len(ids) || delta["mhc_projection_nanos"] <= 0 {
 					t.Errorf("physical actual API/transfer/time=%v actual=%d/%d/%d", delta, b.attempts-attempts, upload, read)
 				}
 				materializations := 1
 				if index == 2 {
 					materializations = len(ids)
 				}
-				if hostDelta["mhc_projection_device_calls"] != 0 || hostDelta["mhc_projection_device_rows"] != 0 || hostDelta["mhc_projection_matmul_calls"] != 0 || hostDelta["mhc_projection_host_calls"] != float64(len(ids)) || hostDelta["mhc_projection_host_rows"] != float64(len(ids)) || hostDelta["mhc_projection_host_weight_f32_bytes"] != float64(1966080*materializations) || hostDelta["mhc_projection_nanos"] <= 0 {
+				if hostDelta["mhc_projection_device_calls"] != 0 || hostDelta["mhc_projection_device_rows"] != 0 || hostDelta["mhc_projection_matmul_calls"] != 0 || hostDelta["mhc_projection_host_calls"] != float64(2*len(ids)) || hostDelta["mhc_projection_host_rows"] != float64(2*len(ids)) || hostDelta["mhc_projection_host_weight_f32_bytes"] != float64(2*1966080*materializations) || hostDelta["mhc_projection_nanos"] <= 0 {
 					t.Errorf("actual whole-weight mHC host control=%v", hostDelta)
 				}
 				dense, group := v41DenseTestDelta(v41DenseTestPhase(t, m, phase), denseBefore), v41DenseTestDelta(v41GroupedPhase(t, m, phase), groupBefore)
@@ -244,7 +261,7 @@ func TestV41MHCProjectionVulkan(t *testing.T) {
 				if observation.Counters.H2DBytes < uint64(upload) || observation.Counters.D2HBytes < uint64(read) || observation.Counters.ComputeDispatches < uint64(len(b.ops)-totalFrom+len(hostBackend.ops)-hostFrom) {
 					t.Error("physical profile does not cover actual recorded APIs/transfers")
 				}
-				if b.stages != 1 || hostBackend.stages != 0 {
+				if b.stages != 2 || hostBackend.stages != 0 {
 					t.Errorf("immutable full mHC staging selected=%d control=%d", b.stages, hostBackend.stages)
 				}
 				for weight := range b.weights {

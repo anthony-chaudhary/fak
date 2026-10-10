@@ -127,6 +127,14 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		return err
 	}
 
+	if full {
+		if err := scratch.mhcCarry.validate(l, 1); err != nil {
+			return err
+		}
+		if err := m.v41AdmitMHC(l); err != nil {
+			return err
+		}
+	}
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
 	mixBase := m.tensor(layerName(l, "mhc.base"))
 	mixScale := m.tensor(layerName(l, "mhc.scale"))
@@ -182,7 +190,11 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if !full {
 		streams4 = [][]float32{xn, xn, xn, xn}
 	}
-	collapsed, err := v41MHCPre(streams4, mix.pre)
+	pre := mix.pre
+	if full {
+		pre = scratch.mhcCarry.pre[0]
+	}
+	collapsed, err := v41MHCPre(streams4, pre)
 	if err != nil {
 		return v41StageErr(v41StageMHC, l, err)
 	}
@@ -326,7 +338,18 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return err
 	}
-	ffnX, err := m.v41FFNNorm(l, x, eps, scratch.ffnNorm)
+	var ffnX []float32
+	var ffnResidual [][]float32
+	var ffnMix v41MHCMix
+	if full {
+		projectFFN, ferr := m.v41FFNMHCProjector(l, scratch)
+		if ferr != nil {
+			return ferr
+		}
+		ffnResidual, ffnMix, ffnX, err = m.v41FullFFNInput(l, streams, mix, attnOut, projectFFN, scratch)
+	} else {
+		ffnX, err = m.v41FFNNorm(l, x, eps, scratch.ffnNorm)
+	}
 	if err != nil {
 		return err
 	}
@@ -357,15 +380,17 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return v41StageErr(v41StageMoE, l, err)
 	}
-	delta := make([]float32, H)
-	for i := 0; i < H; i++ {
-		delta[i] = attnOut[i] + moe[i]
-	}
-	residual := [][]float32{collapsed, collapsed, collapsed, collapsed}
+	var next [][]float32
 	if full {
-		residual = streams
+		next, err = v41MHCPostBF16(l, moe, ffnResidual, ffnMix)
+	} else {
+		delta := make([]float32, H)
+		for i := range delta {
+			delta[i] = attnOut[i] + moe[i]
+		}
+		residual := [][]float32{collapsed, collapsed, collapsed, collapsed}
+		next, err = v41MHCPost(delta, residual, mix.post, mix.comb)
 	}
-	next, err := v41MHCPost(delta, residual, mix.post, mix.comb)
 	if err != nil {
 		return v41StageErr(v41StageMHC, l, err)
 	}
@@ -389,6 +414,8 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 			copy(streams[h], next[h])
 		}
 		copy(x, next[0])
+		scratch.mhcCarry.pre[0] = ffnMix.pre
+		scratch.mhcCarry.nextLayer++
 	} else {
 		copy(x, next[0])
 	}
@@ -470,6 +497,14 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 			fmt.Errorf("%w: layer %d role step requires the full V4.1 geometry", ErrV41ForwardStage, l))
 	}
 
+	if full {
+		if err := scratch.mhcCarry.validate(l, 1); err != nil {
+			return err
+		}
+		if err := m.v41AdmitMHC(l); err != nil {
+			return err
+		}
+	}
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
 	mixBase := m.tensor(layerName(l, "mhc.base"))
 	mixScale := m.tensor(layerName(l, "mhc.scale"))
@@ -505,7 +540,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	if err != nil {
 		return v41StageErr(v41StageMHC, l, err)
 	}
-	collapsed, err := v41MHCPre(streams, mix.pre)
+	collapsed, err := v41MHCPre(streams, scratch.mhcCarry.pre[0])
 	if err != nil {
 		return v41StageErr(v41StageMHC, l, err)
 	}
@@ -695,8 +730,11 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, mix v41MHCMix, attnOut []float32, scratch *v41ProjScratch) error {
 	cfg := m.Cfg
 	H := cfg.HiddenSize
-	eps := float32(cfg.RMSNormEps)
-	ffnX, err := m.v41FFNNorm(l, x, eps, scratch.ffnNorm)
+	projectFFN, err := m.v41FFNMHCProjector(l, scratch)
+	if err != nil {
+		return err
+	}
+	ffnResidual, ffnMix, ffnX, err := m.v41FullFFNInput(l, streams, mix, attnOut, projectFFN, scratch)
 	if err != nil {
 		return err
 	}
@@ -732,11 +770,7 @@ func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, 
 	if err != nil {
 		return v41StageErr(v41StageMoE, l, err)
 	}
-	delta := make([]float32, H)
-	for i := 0; i < H; i++ {
-		delta[i] = attnOut[i] + moe[i]
-	}
-	next, err := v41MHCPost(delta, streams, mix.post, mix.comb)
+	next, err := v41MHCPostBF16(l, moe, ffnResidual, ffnMix)
 	if err != nil {
 		return v41StageErr(v41StageMHC, l, err)
 	}
@@ -744,6 +778,8 @@ func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, 
 		copy(streams[h], next[h])
 	}
 	copy(x, next[0])
+	scratch.mhcCarry.pre[0] = ffnMix.pre
+	scratch.mhcCarry.nextLayer++
 	return nil
 }
 

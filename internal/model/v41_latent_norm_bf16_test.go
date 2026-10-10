@@ -166,13 +166,14 @@ func TestV41LatentNormBF16Boundaries(t *testing.T) {
 				return nil, nil, stop
 			}
 			qNorm, kvNorm := normalize(cfg.QLoraRank, &qCalls), normalize(v41KVLoraRank, &kvCalls)
-			scratch := &v41ProjScratch{denseProjection: project, queryNorm: qNorm, kvNorm: kvNorm, tailRoPE: rotate}
+			scratch := &v41ProjScratch{mhcCarry: newV41MHCCarry(1), denseProjection: project, queryNorm: qNorm, kvNorm: kvNorm, tailRoPE: rotate}
 			state, err := NewV41AttentionState(cfg.HeadDim, 8)
 			if err != nil {
 				t.Fatal(err)
 			}
 			switch route {
 			case "prefill":
+				scratch.mhcCarry = newV41MHCCarry(2)
 				st := &v41ForwardState{denseProjection: project, queryNorm: qNorm, kvNorm: kvNorm, tailRoPE: rotate}
 				err = m.v41Layer(0, []int{0, 0}, [][]float32{x, x}, [][][]float32{streams, streams}, true,
 					cfg.HeadDim, cfg.NumHeads, cfg.HiddenSize, float32(cfg.RMSNormEps), hcItersOrDefault(cfg), hcEpsOrDefault(cfg), v41RouterConfig{}, st, scratch, nil)

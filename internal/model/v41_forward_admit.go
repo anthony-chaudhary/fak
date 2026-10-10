@@ -630,40 +630,36 @@ func (m *Model) v41ForwardAdmitted() error {
 	return nil
 }
 
-// v41AdmitMHC admits a layer's mHC coefficient block in either the reduced
-// fixture's legacy [mixWidth, H] geometry or the published artifact's flattened
-// four-stream geometry. The reference (inference/model.py mHC) projects the
-// width-4H flattened residual through hc_attn_fn; the staged vcruz Q2_K artifact
-// stores that projection as [4H, 24] (input-major), while the forward consumes it
-// logically as [24, 4H] (coefficient-major). Both the logical [mixWidth, 4H]
-// orientation and the stored [4H, mixWidth] transpose are admitted here so a real
-// artifact load reaches the forward instead of refusing at admission; every other
-// shape (including the reduced [mixWidth, H]) still falls through to the named
-// two-axis shape guard and fails closed. The base/scale vectors are unchanged.
+// v41AdmitMHC admits the attention mHC trio for reduced geometry, preserving
+// its legacy [mixWidth, H] or flattened layout. Full geometry requires separate
+// attention and FFN trios, each with a logical [mixWidth, 4H] coefficient matrix
+// or supported stored [4H, mixWidth] transpose. Each named matrix and its own
+// base/scale vectors pass exact shape admission; full geometry never falls back
+// to a reduced-width or absent-FFN stand-in.
 func (m *Model) v41AdmitMHC(l int) error {
-	H := m.Cfg.HiddenSize
-	name := layerName(l, "mhc.mixes.weight")
-	out, in, ok := m.residentShape(name)
-	if !ok {
-		return v41StageErr(v41StageMHC, l, fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
-	}
-	switch {
-	case out == v41MHCMixWidth && (in == H || in == 4*H):
-		// logical [mixWidth, in]
-	case in == v41MHCMixWidth && out == 4*H:
-		// stored artifact transpose [4H, mixWidth]
-	default:
-		return v41StageErr(v41StageMHC, l,
-			fmt.Errorf("%w: tensor %s shape [%d %d], want [%d %d], [%d %d] or [%d %d]",
-				ErrV41ForwardStage, name, out, in, v41MHCMixWidth, H, v41MHCMixWidth, 4*H, 4*H, v41MHCMixWidth))
-	}
-	if err := m.v41AdmitShape(layerName(l, "mhc.base"), v41StageMHC, l, v41MHCMixWidth); err != nil {
+	full, err := v41ForwardGeometry(m.Cfg)
+	if err != nil {
 		return err
 	}
-	if err := m.v41AdmitShape(layerName(l, "mhc.scale"), v41StageMHC, l, 3); err != nil {
+	if err := m.v41AdmitMHCNamed(l, "mhc.mixes.weight", "mhc.base", "mhc.scale", full); err != nil {
 		return err
+	}
+	if full {
+		return m.v41AdmitMHCNamed(l, "mhc.ffn_mixes.weight", "mhc.ffn_base", "mhc.ffn_scale", true)
 	}
 	return nil
+}
+
+func (m *Model) v41AdmitMHCNamed(l int, leaf, base, scale string, requireFlat bool) error {
+	name := layerName(l, leaf)
+	flat, _, ok := m.v41MHCWeightLayoutNamed(l, leaf)
+	if !ok || (requireFlat && !flat) {
+		return v41StageErr(v41StageMHC, l, fmt.Errorf("%w: tensor %s has no admitted mHC geometry (require flattened=%t)", ErrV41ForwardStage, name, requireFlat))
+	}
+	if err := m.v41AdmitShape(layerName(l, base), v41StageMHC, l, v41MHCMixWidth); err != nil {
+		return err
+	}
+	return m.v41AdmitShape(layerName(l, scale), v41StageMHC, l, 3)
 }
 
 // v41AdmitGroupedWoA admits a layer's attn.wo_a.weight in either declaration of

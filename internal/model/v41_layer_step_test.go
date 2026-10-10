@@ -432,7 +432,7 @@ func lastHiddenRow(act *Activations) []float32 {
 
 // v41LayerStepInputs builds the input carrier for a step of the NEXT token id
 // through layer 0: the token's scaled embedding in stream 0 and the persistent
-// zero residuals a full forward initializes streams 1..3 to.
+// zero residuals on reduced geometry; full geometry repeats the BF16 embedding.
 func v41LayerStepInputs(t *testing.T, m *Model, next int, full bool) ([]float32, [][]float32) {
 	t.Helper()
 	cfg := m.Cfg
@@ -441,7 +441,12 @@ func v41LayerStepInputs(t *testing.T, m *Model, next int, full bool) ([]float32,
 	x := append([]float32(nil), embed[next*H:(next+1)*H]...)
 	scaleEmbedInPlace(x, cfg)
 	streams := [][]float32{x, make([]float32, H), make([]float32, H), make([]float32, H)}
-	_ = full
+	if full {
+		x = v41LatentNormOracleBF16(x)
+		for h := range streams {
+			streams[h] = append([]float32(nil), x...)
+		}
+	}
 	return x, streams
 }
 

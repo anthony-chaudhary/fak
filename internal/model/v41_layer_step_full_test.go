@@ -22,16 +22,9 @@ package model
 // materialized synthetic raw checkpoint whose mhc.mixes.weight is the stored
 // [4H,24] transpose).
 //
-// NOTE on the seed. The existing v41LayerStepSeed helper builds the retained
-// state from "four identical copies of the raw input", which is the REDUCED
-// stand-in (v41Layer's `streams4 = {xn,xn,xn,xn}` branch). The full path seeds
-// the persistent streams as `{x[t], 0, 0, 0}` (stream 0 the live hidden, streams
-// 1..3 the zero residual), so this file carries its own full-correct seed
-// (v41FullStepSeed) rather than reusing the reduced-only helper; the reduced
-// helper and its witnesses are left untouched. (On this tiny fixture the two
-// initializations happen to agree within tolerance because the KV latent norm
-// compresses the pre-collapse difference; the distinct-stream seed is still the
-// faithful one and is what the forward actually runs.)
+// The full first-layer seed uses four independently owned BF16 embedding copies
+// and one-hot incoming carry. Later layers require the previous FFN's carry and
+// cannot be seeded by replaying first-layer embeddings.
 //
 // Branch coverage is demonstrated non-vacuously:
 //   - the flattened mHC path is gated by v41MHCWeightLayout reporting the stored
@@ -87,7 +80,7 @@ func v41FullStepPatchedNorms(t *testing.T) *Model {
 
 // v41FullStepSeed builds layer 0's retained decode state from a prefix, mirroring
 // the FULL forward's per-position KV row: the row is projected from the mHC
-// PRE-COLLAPSE of the persistent streams `{x[pos], 0, 0, 0}`, through the
+// PRE-COLLAPSE of the persistent streams four BF16 embedding copies under one-hot carry, through the
 // flattened projection, then BF16 attention input normalization, the KV latent
 // norm at the published width, and the rope tail. An empty prefix yields a freshly
 // constructed state (position 0's step seeds it), matching the append-only contract.
@@ -113,36 +106,14 @@ func v41FullStepSeed(t *testing.T, m *Model, l int, prefix []int) *V41AttentionS
 		x[t] = append([]float32(nil), embed[id*H:(id+1)*H]...)
 		scaleEmbedInPlace(x[t], cfg)
 	}
-	wMix, err := m.v41MHCMixF32Into(l, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mixBase := m.tensor(layerName(l, "mhc.base"))
-	mixScale := m.tensor(layerName(l, "mhc.scale"))
-	mhcFlat, mhcTransposed, mhcOK := m.v41MHCWeightLayout(l)
-	if !mhcOK || !mhcFlat {
-		t.Fatalf("layer %d mHC weight is not the flattened full geometry (flat=%v ok=%v)", l, mhcFlat, mhcOK)
+	if l != 0 {
+		t.Fatal("full first-layer seed requires layer zero; later layers need carried graph execution")
 	}
 	kvNorm := m.tensor(layerName(l, "attn.kv_norm.weight"))
 	rows := make([][]float32, len(prefix))
 	for pos := range prefix {
-		// The full forward's persistent streams: stream 0 is the live hidden and
-		// streams 1..3 are the zero-initialized residual (distinct, not copies of
-		// stream 0). This is the initialization v41LayerStepSeed's reduced stand-in
-		// does NOT reproduce, which is why this seed is authored here.
-		streams := [][]float32{x[pos], make([]float32, H), make([]float32, H), make([]float32, H)}
-		mixes, err := v41MHCProjectFull(wMix, streams, H, eps, mhcTransposed)
-		if err != nil {
-			t.Fatal(err)
-		}
-		mix, err := v41MHCSplit(mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg))
-		if err != nil {
-			t.Fatal(err)
-		}
-		collapsed, err := v41MHCPre(streams, mix.pre)
-		if err != nil {
-			t.Fatal(err)
-		}
+		// Repeated BF16 streams with initial [1,0,0,0] carry collapse to embedding.
+		collapsed := v41LatentNormOracleBF16(x[pos])
 		collapsed = v41AttentionInputNormOracle(collapsed, m.tensor(layerName(l, "attn_norm.weight")), eps)
 		kvFull, err := m.v41ProjMatRows(l, "attn.wkv.weight", collapsed, v41KVLoraRank, H)
 		if err != nil {
@@ -170,13 +141,14 @@ func v41RunFullStep(t *testing.T, m *Model, prefix []int, next int) []float32 {
 	}
 	state := v41FullStepSeed(t, m, 0, prefix)
 	x, streams := v41LayerStepInputs(t, m, next, full)
-	if err := m.v41LayerStep(0, x, streams, len(prefix), state, &v41ProjScratch{}); err != nil {
+	scratch := &v41ProjScratch{mhcCarry: newV41MHCCarry(1)}
+	if err := m.v41LayerStep(0, x, streams, len(prefix), state, scratch); err != nil {
 		t.Fatalf("prefix %d: full-geometry v41LayerStep: %v", len(prefix), err)
 	}
 	if got := state.nextWindowPos; got != len(prefix)+1 {
 		t.Fatalf("prefix %d: step advanced window position to %d, want %d", len(prefix), got, len(prefix)+1)
 	}
-	return x
+	return v41GraphOracleCollapse(streams, scratch.mhcCarry.pre[0])
 }
 
 // assertV41RowsClose fails when any element of got differs from want by more
@@ -264,7 +236,7 @@ func TestV41LayerStepFullGeometry(t *testing.T) {
 		}
 		beforePos := state.nextWindowPos
 		x, streams := v41LayerStepInputs(t, m, next, full)
-		err = m.v41LayerStep(0, x, streams, prefixLen, state, &v41ProjScratch{})
+		err = m.v41LayerStep(0, x, streams, prefixLen, state, &v41ProjScratch{mhcCarry: newV41MHCCarry(1)})
 		if err == nil || !errors.Is(err, ErrV41ForwardStage) {
 			t.Fatalf("global full step at prefix %d error = %v, want errors.Is(ErrV41ForwardStage)", prefixLen, err)
 		}

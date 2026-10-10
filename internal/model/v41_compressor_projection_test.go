@@ -59,6 +59,9 @@ func v41CompressorTestFixtureIndex(t *testing.T, indexDim int) *Model {
 			shape []int
 		}{
 			{"mhc.mixes.weight", []int{4 * c.HiddenSize, v41MHCMixWidth}},
+			{"mhc.ffn_mixes.weight", []int{4 * c.HiddenSize, v41MHCMixWidth}},
+			{"mhc.ffn_base", []int{v41MHCMixWidth}},
+			{"mhc.ffn_scale", []int{3}},
 			{"attn.wq_a_norm.weight", []int{c.QLoraRank}},
 			{"attn.wq_b.weight", []int{512, c.QLoraRank}},
 			{"attn.wkv.weight", []int{512, c.HiddenSize}},
@@ -78,6 +81,9 @@ func v41CompressorTestFixtureIndex(t *testing.T, indexDim int) *Model {
 		}
 	}
 	manifest, raw := synthBuildRaw(extra, func(name string, next func() float32) float32 {
+		if strings.HasSuffix(name, "mhc.ffn_scale") {
+			return .75
+		}
 		if strings.HasSuffix(name, "norm.weight") {
 			return 0.8 + 0.2*next()
 		}

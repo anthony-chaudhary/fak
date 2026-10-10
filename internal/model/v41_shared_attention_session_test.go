@@ -15,7 +15,7 @@ func v41SharedAttentionOnly(s *Session) {
 	st := s.v41State()
 	st.expertGateUp, st.expertDown = nil, nil
 	st.denseProjection, st.groupedOutput, st.engramProjection = nil, nil, nil
-	st.mhcProjection, st.finalNorm, st.queryNorm, st.kvNorm = nil, nil, nil, nil
+	st.mhcProjection, st.mhcFFNProjection, st.finalNorm, st.queryNorm, st.kvNorm = nil, nil, nil, nil, nil
 	st.ffnNorm, st.sharedActivation, st.tailRoPE = nil, nil, nil
 }
 

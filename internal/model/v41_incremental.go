@@ -98,6 +98,8 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	scratch.denseProjection = st.denseProjection
 	scratch.groupedOutput = st.groupedOutput
 	scratch.mhcProjection = st.mhcProjection
+	scratch.mhcFFNProjection = st.mhcFFNProjection
+	scratch.mhcCarry = nil
 	scratch.queryNorm = st.queryNorm
 	scratch.kvNorm = st.kvNorm
 	scratch.ffnNorm = st.ffnNorm
@@ -113,6 +115,8 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 		scratch.denseProjection = nil
 		scratch.groupedOutput = nil
 		scratch.mhcProjection = nil
+		scratch.mhcFFNProjection = nil
+		scratch.mhcCarry = nil
 		scratch.queryNorm = nil
 		scratch.kvNorm = nil
 		scratch.ffnNorm = nil
@@ -144,9 +148,19 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 		return nil, stats, embedErr
 	}
 
-	// The four persistent mHC streams: stream 0 is the live hidden row, streams
-	// 1..3 are the persistent zero residuals a full forward initializes them to.
+	full, geometryErr := v41ForwardGeometry(cfg)
+	if geometryErr != nil {
+		return nil, stats, geometryErr
+	}
 	streams := [][]float32{x, make([]float32, H), make([]float32, H), make([]float32, H)}
+	if full {
+		streams, err = v41FullInitialStreams(x)
+		if err != nil {
+			return nil, stats, err
+		}
+		copy(x, streams[0])
+		scratch.mhcCarry = newV41MHCCarry(1)
+	}
 
 	// Fail closed BEFORE any mutation: every layer needs a seeded retained state.
 	// A shadow step cannot seed a prefix -- the caller must seed.
@@ -331,7 +345,15 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 
 	// Head runs BEFORE any commit; a head fault rolls back exactly like a layer
 	// fault (truncate/restore, no clone).
-	res, herr := m.v41HeadWithFinalNorm(x, scratch.denseProjection, st.finalNorm)
+	headInput := x
+	if full {
+		headInput, err = v41MHCPreBF16(cfg.NumLayers-1, streams, scratch.mhcCarry.pre[0])
+		if err != nil {
+			rollback()
+			return nil, stats, err
+		}
+	}
+	res, herr := m.v41HeadWithFinalNorm(headInput, scratch.denseProjection, st.finalNorm)
 	if herr != nil {
 		rollback()
 		var projection *V41ProjectionOperationError

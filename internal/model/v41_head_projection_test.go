@@ -58,6 +58,10 @@ func v41HeadProjFixture(t *testing.T) *Model {
 		switch {
 		case name == "model.norm.weight" || hasSuffix(name, "attn_norm.weight") || hasSuffix(name, "ffn_norm.weight") || hasSuffix(name, "attn.wq_a_norm.weight") || hasSuffix(name, "attn.kv_norm.weight"):
 			return 1
+		case hasSuffix(name, "mhc.ffn_scale"):
+			return .75
+		case hasSuffix(name, "mhc.ffn_base"):
+			return .125 * next()
 		case hasSuffix(name, "mhc.scale"):
 			return 1
 		case hasSuffix(name, "mhc.base"):
@@ -234,7 +238,7 @@ func TestV41HeadProjectionActualDefaultSession(t *testing.T) {
 			t.Error("head timing missing on selected or declined arm")
 		}
 		dense, group, mhc := v41DenseTestDelta(v41DenseTestPhase(t, m, phase), db), v41DenseTestDelta(v41GroupedPhase(t, m, phase), gb), v41DenseTestDelta(v41MHCProjPhase(t, m, phase), mb)
-		if dense["dense_projection_device_rows"] != float64(7*len(ids)) || group["grouped_output_device_rows"] != float64(len(ids)) || mhc["mhc_projection_device_rows"] != float64(len(ids)) {
+		if dense["dense_projection_device_rows"] != float64(7*len(ids)) || group["grouped_output_device_rows"] != float64(len(ids)) || mhc["mhc_projection_device_rows"] != float64(2*len(ids)) {
 			t.Errorf("ordinary default composition dense=%v grouped=%v mhc=%v", dense, group, mhc)
 		}
 	}
@@ -556,7 +560,7 @@ func TestV41HeadProjectionDedicatedPackedTiedStores(t *testing.T) {
 					t.Errorf("dedicated tied natural dtype decline=%v", hd)
 				}
 				dense, group, mhc := v41DenseTestDelta(v41DenseTestPhase(t, m, phase), denseBefore), v41DenseTestDelta(v41GroupedPhase(t, m, phase), groupBefore), v41DenseTestDelta(v41MHCProjPhase(t, m, phase), mhcBefore)
-				if dense["dense_projection_device_rows"] != float64(7*len(ids)) || group["grouped_output_device_rows"] != float64(len(ids)) || mhc["mhc_projection_device_rows"] != float64(len(ids)) {
+				if dense["dense_projection_device_rows"] != float64(7*len(ids)) || group["grouped_output_device_rows"] != float64(len(ids)) || mhc["mhc_projection_device_rows"] != float64(2*len(ids)) {
 					t.Error("dedicated tied head suppressed ordinary default composition")
 				}
 			}

@@ -240,3 +240,38 @@ func TestV41RestoreEagerDeviceSeams(t *testing.T) {
 		})
 	}
 }
+
+// fak-test:runtime medium est=2s lane=default
+func TestV41RestoreNamedMHCGraphCallbacks(t *testing.T) {
+	t.Parallel()
+	m := v41MHCProjFixture(t)
+	b := newV41MHCProjBackend(4*m.Cfg.HiddenSize, false)
+	source := v41EngProjSession(t, m, b)
+	source.Prefill([]int{1, 2})
+	restored := captureV41ForwardSnapshot(source.v41Forward).restore()
+	if restored.mhcProjection != nil || restored.mhcFFNProjection != nil {
+		t.Fatal("snapshot retained source mHC callback")
+	}
+	snap, err := source.PrefixSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer snap.Close()
+	target := v41EngProjSession(t, m, b)
+	if err := snap.Restore(target); err != nil {
+		t.Fatal(err)
+	}
+	source.Close()
+	state := target.v41State()
+	if state.mhcProjection == nil || state.mhcFFNProjection == nil || state.callbackOwner != target {
+		t.Fatal("target did not bind both named mHC callbacks")
+	}
+	before := len(b.operations)
+	v41GroupedParity(t, target.Step(3), lastLogits(m.Forward([]int{1, 2, 3})), 1e-4)
+	if len(b.operations) != before+2 {
+		t.Fatal("restored token did not run both mHC phases exactly once")
+	}
+	if b.operations[before].weight == b.operations[before+1].weight {
+		t.Fatal("attention and FFN reused one weight-cache identity")
+	}
+}

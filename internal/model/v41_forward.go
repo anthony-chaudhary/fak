@@ -156,6 +156,7 @@ type v41ForwardState struct {
 	groupedOutput    v41GroupedOutputFunc
 	engramProjection v41EngramProjectionFunc
 	mhcProjection    v41MHCProjectionFunc
+	mhcFFNProjection v41MHCProjectionFunc
 	finalNorm        v41FinalNormFunc
 	queryNorm        v41QueryNormFunc
 	kvNorm           v41KVNormFunc
@@ -294,7 +295,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, callbackOwner: st.callbackOwner}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -336,20 +337,19 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		x[t] = embedded[t*H : (t+1)*H : (t+1)*H]
 	}
 
-	// Persistent mHC streams, one four-stream set per position. On the full path
-	// stream 0 carries the live hidden state and streams 1..3 are the reference's
-	// persistent residual streams initialized to zero -- DISTINCT from stream 0,
-	// not the reduced stand-in's four identical copies. Both paths carry the same
-	// [][][]float32 shape; only the initialization and mixing differ, so the
-	// reduced arithmetic is byte-identical to the pre-#13009 assembly.
+	// The official full graph repeats the BF16 embedding into four distinct
+	// allocations; the reduced graph retains its legacy initialization.
 	streams := make([][][]float32, len(seq))
 	for t := range streams {
-		set := make([][]float32, 4)
-		set[0] = x[t]
-		for h := 1; h < 4; h++ {
-			set[h] = make([]float32, H)
+		if full {
+			streams[t], err = v41FullInitialStreams(x[t])
+			if err != nil {
+				return nil, err
+			}
+			copy(x[t], streams[t][0])
+		} else {
+			streams[t] = [][]float32{x[t], make([]float32, H), make([]float32, H), make([]float32, H)}
 		}
-		streams[t] = set
 	}
 
 	hcIters := 1
@@ -373,6 +373,9 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	// buffer bounds the wo_a/wo_b term to one layer's worth instead of the
 	// 40-layer accumulated churn that OOM-killed the warmup (#13288).
 	scratch := &v41ProjScratch{}
+	if full {
+		scratch.mhcCarry = newV41MHCCarry(len(seq))
+	}
 	// #13325: resolve the optional activation-checkpoint producer ONCE per
 	// forward. Disabled (the default) it is nil and every emit is skipped, so the
 	// forward is byte-for-byte unchanged and adds no allocations.
@@ -381,7 +384,18 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		if err := m.v41Layer(l, seq, x, streams, full, hd, nH, H, eps, hcIters, hcEps, routeCfg, runState, scratch, trace); err != nil {
 			return nil, err
 		}
-		act.Hidden = append(act.Hidden, flatten(x))
+		hidden := flatten(x)
+		if full {
+			hidden = make([]float32, 0, len(seq)*H)
+			for t := range streams {
+				row, err := v41MHCPreBF16(l, streams[t], scratch.mhcCarry.pre[t])
+				if err != nil {
+					return nil, err
+				}
+				hidden = append(hidden, row...)
+			}
+		}
+		act.Hidden = append(act.Hidden, hidden)
 	}
 
 	var headProjection v41DenseProjectionFunc
@@ -392,7 +406,11 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	}
 	act.Logits = make([][]float32, len(seq))
 	for t := 0; t < len(seq); t++ {
-		logits, err := m.v41HeadWithFinalNorm(x[t], headProjection, finalNorm)
+		headInput := x[t]
+		if full {
+			headInput = act.Hidden[len(act.Hidden)-1][t*H : (t+1)*H]
+		}
+		logits, err := m.v41HeadWithFinalNorm(headInput, headProjection, finalNorm)
 		if err != nil {
 			return nil, err
 		}
@@ -444,9 +462,18 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if scratch == nil {
 		scratch = &v41ProjScratch{}
 	}
+	if full {
+		if err := scratch.mhcCarry.validate(l, len(x)); err != nil {
+			return err
+		}
+		if err := m.v41AdmitMHC(l); err != nil {
+			return err
+		}
+	}
 	scratch.denseProjection = nil
 	scratch.groupedOutput = nil
 	scratch.mhcProjection = nil
+	scratch.mhcFFNProjection = nil
 	scratch.queryNorm = nil
 	scratch.kvNorm = nil
 	scratch.ffnNorm = nil
@@ -461,6 +488,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.denseProjection = st.denseProjection
 		scratch.groupedOutput = st.groupedOutput
 		scratch.mhcProjection = st.mhcProjection
+		scratch.mhcFFNProjection = st.mhcFFNProjection
 		scratch.queryNorm = st.queryNorm
 		scratch.kvNorm = st.kvNorm
 		scratch.ffnNorm = st.ffnNorm
@@ -476,6 +504,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.denseProjection = nil
 		scratch.groupedOutput = nil
 		scratch.mhcProjection = nil
+		scratch.mhcFFNProjection = nil
 		scratch.queryNorm = nil
 		scratch.kvNorm = nil
 		scratch.ffnNorm = nil
@@ -588,7 +617,11 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if !full {
 			streams4 = [][]float32{xn, xn, xn, xn}
 		}
-		collapsed, err := v41MHCPre(streams4, mix.pre)
+		pre := mix.pre
+		if full {
+			pre = scratch.mhcCarry.pre[t]
+		}
+		collapsed, err := v41MHCPre(streams4, pre)
 		if err != nil {
 			return v41StageErr(v41StageMHC, l, err)
 		}
@@ -951,8 +984,25 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	// the shared expert. Device normalization uploads and reads back only once
 	// per layer/token; grouped contraction consumes this same panel.
 	ffnInputs := make([][]float32, seq)
+	var ffnResidual [][][]float32
+	var ffnMixes []v41MHCMix
+	var projectFFN func([]float32) ([]float32, error)
+	if full {
+		// Every attention projection has completed. Reusing scratch.mhc is now safe.
+		projectFFN, err = m.v41FFNMHCProjector(l, scratch)
+		if err != nil {
+			return err
+		}
+		ffnResidual = make([][][]float32, seq)
+		ffnMixes = make([]v41MHCMix, seq)
+	}
 	for t := 0; t < seq; t++ {
-		xn, err := m.v41FFNNorm(l, x[t], eps, scratch.ffnNorm)
+		var xn []float32
+		if full {
+			ffnResidual[t], ffnMixes[t], xn, err = m.v41FullFFNInput(l, streams[t], hcByPos[t], attnOut[t], projectFFN, scratch)
+		} else {
+			xn, err = m.v41FFNNorm(l, x[t], eps, scratch.ffnNorm)
+		}
 		if err != nil {
 			return err
 		}
@@ -1073,6 +1123,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		}
 	}
 
+	var nextPanel [][][]float32
+	if full {
+		nextPanel = make([][][]float32, seq)
+	}
 	for t := 0; t < seq; t++ {
 		xn := ffnInputs[t]
 		routed := routedByToken[t]
@@ -1089,34 +1143,35 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// from an mHC post-mix fault.
 		trace.record(l, t, v41TraceStageMoESum, moe)
 
-		// delta = attention + MoE, then the mHC post-mix back into four streams.
-		delta := make([]float32, H)
-		for i := 0; i < H; i++ {
-			delta[i] = attnOut[t][i] + moe[i]
-		}
-		// The post-mix always reads a four-stream residual set. The reduced path
-		// reconstructs the stand-in (four identical copies of the collapsed pre
-		// vector) so its arithmetic is unchanged; the full path mixes the four
-		// distinct persistent streams.
-		residual := [][]float32{preByPos[t], preByPos[t], preByPos[t], preByPos[t]}
 		if full {
-			residual = streams[t]
-		}
-		next, err := v41MHCPost(delta, residual, hcByPos[t].post, hcByPos[t].comb)
-		if err != nil {
-			return v41StageErr(v41StageMHC, l, err)
-		}
-		if full {
-			// Write ALL FOUR post-mix streams back into the persistent set so the
-			// next layer reads the updated state; stream 0 is the live hidden.
-			for h := 0; h < 4; h++ {
-				copy(streams[t][h], next[h])
+			nextPanel[t], err = v41MHCPostBF16(l, moe, ffnResidual[t], ffnMixes[t])
+			if err != nil {
+				return err
+			}
+		} else {
+			delta := make([]float32, H)
+			for i := range delta {
+				delta[i] = attnOut[t][i] + moe[i]
+			}
+			residual := [][]float32{preByPos[t], preByPos[t], preByPos[t], preByPos[t]}
+			next, err := v41MHCPost(delta, residual, hcByPos[t].post, hcByPos[t].comb)
+			if err != nil {
+				return v41StageErr(v41StageMHC, l, err)
 			}
 			copy(x[t], next[0])
-		} else {
-			// Reduced path: only stream 0 is propagated, exactly as before.
-			copy(x[t], next[0])
 		}
+	}
+	if full {
+		// All token rows succeeded: stream and carry publication has no failing work.
+		for t := range nextPanel {
+			for h := 0; h < 4; h++ {
+				copy(streams[t][h], nextPanel[t][h])
+			}
+			copy(x[t], nextPanel[t][0])
+			scratch.mhcCarry.pre[t] = ffnMixes[t].pre
+		}
+		scratch.mhcCarry.nextLayer++
+
 	}
 	return nil
 }
@@ -1401,6 +1456,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.groupedOutput = s.v41GroupedOutputFunc()
 		s.v41Forward.engramProjection = s.v41EngramProjectionFunc()
 		s.v41Forward.mhcProjection = s.v41MHCProjectionFunc()
+		s.v41Forward.mhcFFNProjection = s.v41MHCProjectionFuncNamed("mhc.ffn_mixes.weight")
 		s.v41Forward.finalNorm = s.v41FinalNormFunc()
 		s.v41Forward.queryNorm = s.v41QueryNormFunc()
 		s.v41Forward.kvNorm = s.v41KVNormFunc()
@@ -1451,7 +1507,10 @@ func (s *Session) v41State() *v41ForwardState {
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 func (m *Model) v41AttentionInputNorm(layer int, collapsed []float32, eps float32) ([]float32, error) {
-	const leaf = "attn_norm.weight"
+	return m.v41AttentionInputNormWithLeaf(layer, "attn_norm.weight", collapsed, eps)
+}
+
+func (m *Model) v41AttentionInputNormWithLeaf(layer int, leaf string, collapsed []float32, eps float32) ([]float32, error) {
 	gain := m.tensor(layerName(layer, leaf))
 	if len(collapsed) != m.Cfg.HiddenSize || len(collapsed) == 0 || len(gain) != len(collapsed) || !finite32(eps) || eps <= 0 {
 		return nil, v41ProjectionOperationErr(layer, leaf, errV41ProjectionResult)

@@ -32,6 +32,9 @@ func v41IncrementalExpertFixture(t *testing.T, role, streamed bool) *Model {
 		H, width := c.HiddenSize, v41CompressorWidth(*c)
 		extra := []synthTensor{
 			{layerName(0, "mhc.mixes.weight"), []int{4 * H, v41MHCMixWidth}},
+			{layerName(0, "mhc.ffn_mixes.weight"), []int{4 * H, v41MHCMixWidth}},
+			{layerName(0, "mhc.ffn_base"), []int{v41MHCMixWidth}},
+			{layerName(0, "mhc.ffn_scale"), []int{3}},
 			{layerName(0, "attn.wq_a_norm.weight"), []int{c.QLoraRank}},
 			{layerName(0, "attn.wq_b.weight"), []int{c.HeadDim, c.QLoraRank}},
 			{layerName(0, "attn.wkv.weight"), []int{v41KVLoraRank, H}},
@@ -48,17 +51,19 @@ func v41IncrementalExpertFixture(t *testing.T, role, streamed bool) *Model {
 			{layerName(0, "indexer.weights_proj.weight"), []int{c.IndexNHeads, H}},
 		}
 		man, raw := synthBuildRaw(extra, func(name string, next func() float32) float32 {
+			if hasSuffix(name, "mhc.ffn_scale") {
+				return .75
+			}
 			if hasSuffix(name, "norm.weight") {
 				return 1
 			}
 			return synthMatmulFill(name, next)
 		})
 		for k, v := range man {
+			v.Offset += len(m.raw)
 			m.manifest[k] = v
 		}
-		for k, v := range raw {
-			m.raw[k] = v
-		}
+		m.raw = append(m.raw, raw...)
 	}
 	return m
 }
