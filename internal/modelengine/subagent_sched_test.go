@@ -2,11 +2,15 @@ package modelengine
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"runtime"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
@@ -624,4 +628,237 @@ func TestSubagentConcurrentStartStop(t *testing.T) {
 
 	wg.Wait()
 	sched.Close()
+}
+
+// subagentCloseBackend exposes Session.Close's teardown callback without running
+// model inference or owning a device allocation.
+type subagentCloseBackend struct {
+	compute.Backend
+	recycles int
+}
+
+func (b *subagentCloseBackend) Recycle() { b.recycles++ }
+
+// fak-test:runtime fast est=10ms lane=default
+func TestSubagentCloseTerminatesAndReleases(t *testing.T) {
+	cfg := DefaultSubagentSchedulerConfig()
+	cfg.MaxConcurrency = 2
+	sched, err := NewSubagentScheduler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	backends := make(map[*SubagentSession]*subagentCloseBackend)
+	owners := make(map[*SubagentSession]*model.Session)
+	admit := func(id string, target int) *SubagentSession {
+		t.Helper()
+		sub, err := sched.Admit(context.Background(), id, []int{1}, target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		be := &subagentCloseBackend{}
+		owner := &model.Session{Backend: be}
+		sub.sess, sub.lastLogits = owner, []float32{1}
+		backends[sub], owners[sub] = be, owner
+		return sub
+	}
+	step := func() {
+		t.Helper()
+		if _, err := sched.StepIteration(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	completed := admit("active", 1)
+	cancelled := admit("waiting", 8)
+	step()
+	if err := sched.Cancel(cancelled.ID); err != nil {
+		t.Fatal(err)
+	}
+	retainedCompleted := admit("retained-completed", 1)
+	retainedCancelled := admit("retained-cancelled", 8)
+	step()
+	if err := sched.Cancel(retainedCancelled.ID); err != nil {
+		t.Fatal(err)
+	}
+	terminalTimes := make(map[*SubagentSession]time.Time)
+	for _, sub := range []*SubagentSession{completed, cancelled, retainedCompleted, retainedCancelled} {
+		terminalTimes[sub] = sub.CompletedAt
+	}
+
+	// Keep terminal entries in the shutdown sweep as well as reusing IDs: both
+	// routes must preserve outcomes and release each previous owner once.
+	active := admit("active", 8)
+	yielded := admit("yielded", 8)
+	promoted := admit("promoted", 8)
+	waiting := admit("waiting", 8)
+	step()
+	if err := sched.YieldIO(yielded.ID, "tool"); err != nil {
+		t.Fatal(err)
+	}
+	step()
+	if sched.ActiveCount() != 2 || sched.WaitingCount() != 1 || sched.YieldedCount() != 1 {
+		t.Fatal("fixture did not retain active, waiting, and yielded requests")
+	}
+	before := sched.Receipt()
+	wantTokens := make(map[*SubagentSession][]int)
+	for sub := range owners {
+		wantTokens[sub] = append([]int(nil), sub.GeneratedTokens...)
+	}
+
+	// Close must finish without Start, including concurrent and repeated callers.
+	closed := make(chan error, 4)
+	for range cap(closed) {
+		go func() { closed <- sched.Close() }()
+	}
+	for range cap(closed) {
+		select {
+		case err := <-closed:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("Close did not finish without Start")
+		}
+	}
+	if err := sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, sub := range []*SubagentSession{active, yielded, promoted, waiting} {
+		if sub.State != SubagentStateCancelled || !errors.Is(sub.Err(), ErrSchedulerClosed) {
+			t.Errorf("%s state=%s err=%v, want cancelled/ErrSchedulerClosed", sub.ID, sub.State, sub.Err())
+		}
+		if sub.CompletedAt.IsZero() {
+			t.Errorf("%s has no terminal timestamp", sub.ID)
+		}
+	}
+	for _, sub := range []*SubagentSession{completed, retainedCompleted} {
+		if sub.State != SubagentStateCompleted || sub.Err() != nil || sub.CompletedAt != terminalTimes[sub] {
+			t.Errorf("Close changed completed outcome for %s", sub.ID)
+		}
+	}
+	for _, sub := range []*SubagentSession{cancelled, retainedCancelled} {
+		if sub.State != SubagentStateCancelled || !errors.Is(sub.Err(), context.Canceled) || sub.CompletedAt != terminalTimes[sub] {
+			t.Errorf("Close changed cancelled outcome for %s", sub.ID)
+		}
+	}
+	for sub, owner := range owners {
+		select {
+		case <-sub.Done():
+		default:
+			t.Errorf("%s Done remains open", sub.ID)
+		}
+		if sub.sess != nil || sub.lastLogits != nil || !owner.BackendSessionClosed() || backends[sub].recycles != 1 {
+			t.Errorf("%s retained model state or teardown count=%d, want 1", sub.ID, backends[sub].recycles)
+		}
+		if !slices.Equal(sub.GeneratedTokens, wantTokens[sub]) {
+			t.Errorf("%s generation changed during Close", sub.ID)
+		}
+		for i, want := range wantTokens[sub] {
+			select {
+			case got, ok := <-sub.Tokens():
+				if !ok || got != want {
+					t.Errorf("%s buffered token %d=(%d,%t), want (%d,true)", sub.ID, i, got, ok, want)
+				}
+			default:
+				t.Errorf("%s buffered token %d missing", sub.ID, i)
+			}
+		}
+		select {
+		case _, ok := <-sub.Tokens():
+			if ok {
+				t.Errorf("%s has an unexpected extra token", sub.ID)
+			}
+		default:
+			t.Errorf("%s Tokens remains open", sub.ID)
+		}
+	}
+	if sched.activeSlots != nil || sched.waitingQueue != nil || sched.yieldedSessions != nil || sched.subagentPrefillPool != nil {
+		t.Error("Close retained scheduling queues")
+	}
+	after := sched.Receipt()
+	if after.TotalAdmitted != before.TotalAdmitted || after.TotalCompleted != before.TotalCompleted || after.TotalCancelled != before.TotalCancelled+4 || after.TotalTokensGenerated != before.TotalTokensGenerated {
+		t.Errorf("Close changed history or counted termination incorrectly: before=%+v after=%+v", before, after)
+	}
+	if _, err := sched.StepIteration(); !errors.Is(err, ErrSchedulerClosed) {
+		t.Errorf("StepIteration after Close: %v", err)
+	}
+	if _, err := sched.Admit(context.Background(), "late", nil, 1); !errors.Is(err, ErrSchedulerClosed) {
+		t.Errorf("Admit after Close: %v", err)
+	}
+	if err := sched.Resume(yielded.ID); !errors.Is(err, ErrSchedulerClosed) {
+		t.Errorf("Resume after Close: %v", err)
+	}
+	if err := sched.Cancel(active.ID); err != nil || !errors.Is(active.Err(), ErrSchedulerClosed) {
+		t.Errorf("Cancel after Close changed shutdown outcome: %v / %v", err, active.Err())
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestSubagentCloseWaitsForInFlightIteration(t *testing.T) {
+	sched, err := NewSubagentScheduler(DefaultSubagentSchedulerConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := sched.Admit(context.Background(), "in-flight", nil, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	be := &subagentCloseBackend{}
+	sub.sess = &model.Session{Backend: be}
+
+	// Hold the session lock so StepIteration can own the scheduler lock but
+	// cannot yet compact or publish a token. No sleeps select the interleaving.
+	sub.mu.Lock()
+	var unlockOnce sync.Once
+	unlock := func() { unlockOnce.Do(sub.mu.Unlock) }
+	defer unlock()
+	stepped := make(chan error, 1)
+	go func() { _, err := sched.StepIteration(); stepped <- err }()
+	deadline := time.Now().Add(2 * time.Second)
+	for sched.mu.TryLock() {
+		sched.mu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatal("StepIteration did not acquire scheduler ownership")
+		}
+		runtime.Gosched()
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- sched.Close() }()
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned before in-flight iteration finished: %v", err)
+	default:
+	}
+	unlock()
+	for _, result := range []<-chan error{stepped, closed} {
+		select {
+		case err := <-result:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("iteration/Close lock order did not finish")
+		}
+	}
+	if sub.TokensGenerated() != 1 || !errors.Is(sub.Err(), ErrSchedulerClosed) || be.recycles != 1 {
+		t.Fatalf("in-flight result: tokens=%d err=%v teardown=%d", sub.TokensGenerated(), sub.Err(), be.recycles)
+	}
+	select {
+	case _, ok := <-sub.Tokens():
+		if !ok {
+			t.Fatal("Close discarded the in-flight token")
+		}
+	default:
+		t.Fatal("in-flight token was not delivered")
+	}
+	select {
+	case _, ok := <-sub.Tokens():
+		if ok {
+			t.Fatal("extra token after Close")
+		}
+	default:
+		t.Fatal("Tokens remains open after Close")
+	}
 }

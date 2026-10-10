@@ -514,17 +514,8 @@ func (s *SubagentScheduler) Cancel(sessionID string) error {
 	}
 
 	sub.mu.Lock()
-	sub.State = SubagentStateCancelled
-	sub.err = context.Canceled
-	select {
-	case <-sub.doneCh:
-	default:
-		close(sub.doneCh)
-	}
-	close(sub.tokenCh)
+	s.finishSessionLocked(sub, SubagentStateCancelled, context.Canceled)
 	sub.mu.Unlock()
-
-	s.totalCancelled++
 
 	// Remove from active slots if present
 	for i, slot := range s.activeSlots {
@@ -699,12 +690,8 @@ func (s *SubagentScheduler) StepIteration() (*RaggedBatch, error) {
 		}
 
 		if len(sub.GeneratedTokens) >= sub.TargetTokens {
-			sub.State = SubagentStateCompleted
-			sub.CompletedAt = time.Now()
-			close(sub.doneCh)
-			close(sub.tokenCh)
+			s.finishSessionLocked(sub, SubagentStateCompleted, nil)
 			retiredCount++
-			s.totalCompleted++
 		}
 		sub.mu.Unlock()
 	}
@@ -870,20 +857,53 @@ func (s *SubagentScheduler) Receipt() SubagentSchedulerReceipt {
 	}
 }
 
-// Close closes the scheduler and terminates active sessions.
+// finishSessionLocked requires s.mu and sub.mu. All terminal paths release
+// ownership here, including before Admit can replace a completed/cancelled ID.
+// Token delivery also holds s.mu, so no producer can race these channel closes.
+func (s *SubagentScheduler) finishSessionLocked(sub *SubagentSession, state SubagentState, err error) {
+	if sub.State == SubagentStateCompleted || sub.State == SubagentStateCancelled {
+		return
+	}
+	sub.State = state
+	sub.err = err
+	sub.CompletedAt = time.Now()
+	if sub.sess != nil {
+		sub.sess.Close()
+		sub.sess = nil
+	}
+	sub.lastLogits = nil
+	// Closing a buffered channel preserves every token already published.
+	close(sub.tokenCh)
+	close(sub.doneCh)
+	if state == SubagentStateCompleted {
+		s.totalCompleted++
+	} else {
+		s.totalCancelled++
+	}
+}
+
+// Close waits for an in-flight iteration, releases all owned sessions, and
+// terminates outstanding requests with ErrSchedulerClosed. Terminal outcomes
+// and buffered tokens are preserved. Close does not require Start to be called.
 func (s *SubagentScheduler) Close() error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.closed {
-		s.mu.Unlock()
 		return nil
 	}
 	s.closed = true
-	select {
-	case <-s.stopCh:
-	default:
-		close(s.stopCh)
+	close(s.stopCh)
+	for _, sub := range s.sessions {
+		sub.mu.Lock()
+		s.finishSessionLocked(sub, SubagentStateCancelled, ErrSchedulerClosed)
+		sub.mu.Unlock()
 	}
-	s.mu.Unlock()
+	// Keep request history for Receipt; remove every scheduling reference without
+	// using Cancel, which would promote waiting requests during shutdown.
+	s.activeSlots = nil
+	s.waitingQueue = nil
+	s.yieldedSessions = nil
+	s.subagentPrefillPool = nil
 	return nil
 }
 
