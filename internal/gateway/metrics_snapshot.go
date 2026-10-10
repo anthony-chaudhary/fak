@@ -47,7 +47,10 @@ type inferenceSnapshot struct {
 	cacheCreateTok uint64
 	cachedHits     uint64
 	syntheticTurns uint64
-	decodeSecs     float64
+	// promptTokByClient / cachedTokByClient are the non-synthetic by-client cuts.
+	promptTokByClient map[string]uint64
+	cachedTokByClient map[string]uint64
+	decodeSecs        float64
 	// prefillSecs is the cumulative TTFT wall-clock over the ttftTurns that measured
 	// it; prefillPromptTok is the prompt-token sum over those same turns. ttftTurns is
 	// the denominator that keeps the prefill rate honest on a mixed workload.
@@ -148,6 +151,8 @@ func (m *gatewayMetrics) inferenceSnapshotData() inferenceSnapshot {
 		cacheCreateTok:     m.inferCacheCreationTokens,
 		cachedHits:         m.inferCachedHits,
 		syntheticTurns:     m.inferSyntheticTurns,
+		promptTokByClient:  copyClientCounts(m.inferPromptTokensByClient),
+		cachedTokByClient:  copyClientCounts(m.inferCachedTokensByClient),
 		decodeSecs:         m.inferDecodeSecs,
 		prefillSecs:        m.inferPrefillSecs,
 		ttftTurns:          m.inferTTFTTurns,

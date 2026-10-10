@@ -72,6 +72,10 @@ type gatewayMetrics struct {
 	// inferSyntheticTurns counts sender-marked synthetic turns (readiness canaries)
 	// kept out of the latency histograms.
 	inferSyntheticTurns uint64
+	// The non-synthetic subset of inferPromptTokens / inferCachedTokens keyed by
+	// the closed perfledger client class (metrics_by_client.go).
+	inferPromptTokensByClient map[string]uint64
+	inferCachedTokensByClient map[string]uint64
 	// The self-hosted split of the SAME volume the unsplit totals above accumulate,
 	// attributed by servedLocality at the observation (epic #5416). Both groups are
 	// strict subsets: a turn whose side could not be resolved lands in neither, so
