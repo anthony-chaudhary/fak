@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -281,5 +282,139 @@ func TestObserveVulkanHostEnvironmentFailsClosed(t *testing.T) {
 	got, err := observeVulkanHostEnvironment(ctx, backend, deps)
 	if !errors.Is(err, context.Canceled) || got != (VulkanHostEnvironment{}) {
 		t.Fatalf("cancellation did not fail closed: env=%+v err=%v", got, err)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestObserveVulkanHostEnvironmentRequiresStableDRMBinding(t *testing.T) {
+	// Expose the fixture's backend identity without promoting its DRM provider.
+	type snapshotBackend interface {
+		Backend
+		BackendExecutionSnapshot() (BackendExecutionSnapshot, error)
+	}
+	tests := []struct {
+		name              string
+		prepare           func(*hostEnvironmentBackend, *hostEnvironmentDeps, context.CancelFunc) Backend
+		wantError         string
+		wantFirmwareReads int
+		wantCanceled      bool
+	}{
+		{
+			name: "missing render-node provider",
+			prepare: func(b *hostEnvironmentBackend, _ *hostEnvironmentDeps, _ context.CancelFunc) Backend {
+				return struct{ snapshotBackend }{b}
+			},
+			wantError: "selected Vulkan DRM render-node identity is unavailable",
+		},
+		{
+			name: "noncanonical render path within sysfs",
+			prepare: func(b *hostEnvironmentBackend, d *hostEnvironmentDeps, _ context.CancelFunc) Backend {
+				originalEval := d.evalSymlinks
+				d.evalSymlinks = func(path string) (string, error) {
+					if path == "/sys/dev/char/226:129" {
+						return hostEnvironmentDRMDevice + "/drm/../drm/renderD129", nil
+					}
+					return originalEval(path)
+				}
+				return b
+			},
+			wantError: "DRM render node did not resolve to a canonical sysfs path",
+		},
+		{
+			name: "same render number changes backing device",
+			prepare: func(b *hostEnvironmentBackend, d *hostEnvironmentDeps, _ context.CancelFunc) Backend {
+				// Both bindings have the same 226:129 identity, PCI IDs and driver.
+				// Only the resolved node/device paths change after the firmware read.
+				reboundNode := hostEnvironmentOtherDRMDevice + "/drm/renderD129"
+				rebound := false
+				originalRead := d.readFile
+				d.readFile = func(path string) ([]byte, error) {
+					if path == hostEnvironmentDRMDevice+"/vbios_version" {
+						rebound = true
+					}
+					if rebound && path == reboundNode+"/dev" {
+						return []byte("226:129\n"), nil
+					}
+					return originalRead(path)
+				}
+				originalEval := d.evalSymlinks
+				d.evalSymlinks = func(path string) (string, error) {
+					if rebound {
+						switch path {
+						case "/sys/dev/char/226:129":
+							return reboundNode, nil
+						case "/sys/dev/char/226:129/device":
+							return hostEnvironmentOtherDRMDevice, nil
+						case reboundNode + "/subsystem":
+							return "/sys/class/drm", nil
+						}
+					}
+					return originalEval(path)
+				}
+				return b
+			},
+			wantError:         "selected Vulkan DRM binding changed during host observation",
+			wantFirmwareReads: 1,
+		},
+		{
+			name: "cancellation during firmware observation",
+			prepare: func(b *hostEnvironmentBackend, d *hostEnvironmentDeps, cancel context.CancelFunc) Backend {
+				originalRead := d.readFile
+				d.readFile = func(path string) ([]byte, error) {
+					if path == hostEnvironmentDRMDevice+"/vbios_version" {
+						cancel()
+					}
+					return originalRead(path)
+				}
+				return b
+			},
+			wantFirmwareReads: 1,
+			wantCanceled:      true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			backend, deps := hostEnvironmentFixture()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			selected := tc.prepare(backend, &deps, cancel)
+			firmwareReads := 0
+			originalRead := deps.readFile
+			deps.readFile = func(path string) ([]byte, error) {
+				if strings.HasPrefix(path, "/sys/class/drm") {
+					t.Fatalf("unexpected DRM inventory fallback read: %s", path)
+				}
+				if path == hostEnvironmentDRMDevice+"/vbios_version" {
+					firmwareReads++
+				}
+				return originalRead(path)
+			}
+			originalEval := deps.evalSymlinks
+			deps.evalSymlinks = func(path string) (string, error) {
+				if strings.HasPrefix(path, "/sys/class/drm") {
+					t.Fatalf("unexpected DRM inventory fallback lookup: %s", path)
+				}
+				if strings.HasPrefix(path, "/sys/dev/char/") && path != "/sys/dev/char/226:129" && path != "/sys/dev/char/226:129/device" {
+					t.Fatalf("unexpected unselected DRM number lookup: %s", path)
+				}
+				return originalEval(path)
+			}
+			got, err := observeVulkanHostEnvironment(ctx, selected, deps)
+			if err == nil {
+				t.Fatalf("expected fail-closed error, got %+v", got)
+			}
+			if got != (VulkanHostEnvironment{}) {
+				t.Fatalf("error returned partial environment: %+v", got)
+			}
+			if tc.wantError != "" && !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("error = %v, want %q", err, tc.wantError)
+			}
+			if tc.wantCanceled && !errors.Is(err, context.Canceled) {
+				t.Fatalf("error = %v, want context cancellation", err)
+			}
+			if firmwareReads != tc.wantFirmwareReads {
+				t.Fatalf("firmware reads = %d, want %d", firmwareReads, tc.wantFirmwareReads)
+			}
+		})
 	}
 }
