@@ -65,6 +65,21 @@ func TestNativeAdmissionConcurrencyUnderShippingPolicy(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			admitted, footprint := admitUntilFull(t, tc.policy, tc.promptTokens, tc.maxTokens, 300)
+			// /props must report the bound that admission actually enforced: a reader
+			// computing min(total_slots, admission_token_budget/footprint) from it
+			// predicts the admitted count exactly.
+			_, body := servingPropsGet(t, &Server{admissionCtl: NewAdmissionController(tc.policy)})
+			fields := propsKeys(t, body)
+			slots := int(requireJSONNumber(t, fields, "total_slots"))
+			budget := int(requireJSONNumber(t, fields, "admission_token_budget"))
+			prealloc := int(requireJSONNumber(t, fields, "admission_prealloc_tokens"))
+			if footprint > tc.promptTokens+prealloc+1 {
+				t.Fatalf("footprint %d exceeds prompt %d + admission_prealloc_tokens %d", footprint, tc.promptTokens, prealloc)
+			}
+			if predicted := min(slots, budget/footprint); predicted != admitted {
+				t.Fatalf("/props predicts %d concurrent (total_slots=%d admission_token_budget=%d footprint=%d), admission ran %d",
+					predicted, slots, budget, footprint, admitted)
+			}
 			if footprint != tc.wantFootprint {
 				t.Fatalf("per-request footprint = %d, want %d", footprint, tc.wantFootprint)
 			}
