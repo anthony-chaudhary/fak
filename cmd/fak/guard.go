@@ -1316,6 +1316,10 @@ func cmdManageCommand(commandName string, argv []string) {
 		}
 		opencodeEnv, opencodeInstall = installGuardOpenCodeConfig(launchPlan.executableCommand(), gwURL, opencodeModel, os.Getenv, opencodeLimits)
 		injected = append(injected, opencodeEnv...)
+		if opencodeInstall.Applied {
+			command = guardOpenCodeStandaloneCommand(command)
+			launchPlan = launchPlan.withExecutableCommand(command)
+		}
 	}
 	injected = append(injected, guardClaudeAutoCompactWindowInjection(up, *model, command)...)
 	// Headless workers: make editor/pager-opening git forms (a `git commit` with no message
