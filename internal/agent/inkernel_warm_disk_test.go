@@ -401,8 +401,17 @@ func TestInKernelWarmPrefixDiskPersistence(t *testing.T) {
 		changedWeights := newPlanner(t, dir, "synthetic-isolation", false)
 		changedWeights.SetWarmDiskModelDigest("sha256:different-loaded-model-bytes")
 		receipt := warm(t, changedWeights, derive(t, changedWeights, "tenant-a", "agent-1", in))
-		if receipt.Disk != nil && receipt.Disk.Outcome == WarmDiskRestored {
-			t.Fatalf("different model bytes disk outcome=%s, want non-restored", receipt.Disk.Outcome)
+		if receipt.Disk == nil || receipt.Disk.RestoreOutcome != WarmDiskOutcomeMiss || receipt.Disk.RestoreReason != "model_identity_changed" {
+			t.Fatalf("different model bytes disk receipt=%+v, want restore miss/model_identity_changed", receipt.Disk)
+		}
+		if receipt.PrefilledTokens != receipt.RequestedTokens {
+			t.Fatalf("refused restore prefilled=%d, want cold %d", receipt.PrefilledTokens, receipt.RequestedTokens)
+		}
+
+		fresh := newPlanner(t, t.TempDir(), "synthetic-isolation", false)
+		freshReceipt := warm(t, fresh, derive(t, fresh, "tenant-a", "agent-1", in))
+		if freshReceipt.Disk == nil || freshReceipt.Disk.RestoreReason != "absent" {
+			t.Fatalf("never-persisted disk receipt=%+v, want restore reason absent", freshReceipt.Disk)
 		}
 	})
 

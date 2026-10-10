@@ -39,6 +39,9 @@ const (
 	defaultWarmDiskBytes       int64 = 8 << 30
 	defaultWarmDiskRecordBytes int64 = 512 << 20
 	maxWarmDiskRecordBytes     int64 = 2 << 30
+	warmDiskSlotsDir                 = "slots"
+	maxWarmDiskSlots                 = 64
+	maxWarmDiskSlotBytes             = 1024
 )
 
 // WarmDiskOutcome is the closed restart-cache result vocabulary.
@@ -186,6 +189,43 @@ func warmDiskKey(spec WarmPrefixSpec, modelIdentity, executionIdentity string) s
 	return hex.EncodeToString(sum[:])
 }
 
+// warmDiskSlotKey names a prefix slot independent of the model artifact, so a
+// restart can tell "never persisted" from "persisted for another incarnation".
+func warmDiskSlotKey(spec WarmPrefixSpec, executionIdentity string) string {
+	sum := sha256.Sum256([]byte("fak-native-prefix-slot/v1\x00" + spec.Identity + "\x00" + executionIdentity))
+	return hex.EncodeToString(sum[:])
+}
+
+func openWarmDiskSlots(cfg WarmDiskConfig) (*l3kv.DiskStore, error) {
+	return l3kv.NewDiskStore(filepath.Join(cfg.Dir, warmDiskSlotsDir))
+}
+
+// warmDiskModelIdentityChanged reports whether the slot was last persisted under
+// a different model identity. Any read failure is treated as no evidence.
+func warmDiskModelIdentityChanged(ctx context.Context, cfg WarmDiskConfig, spec WarmPrefixSpec, identity, execution string) bool {
+	slots, err := openWarmDiskSlots(cfg)
+	if err != nil {
+		return false
+	}
+	prior, found, err := slots.GetBounded(ctx, warmDiskSlotKey(spec, execution), maxWarmDiskSlotBytes)
+	return err == nil && found && string(prior) != identity
+}
+
+// recordWarmDiskSlot is best-effort: the slot only sharpens a miss reason.
+func recordWarmDiskSlot(ctx context.Context, cfg WarmDiskConfig, spec WarmPrefixSpec, identity, execution string) {
+	if len(identity) > maxWarmDiskSlotBytes {
+		return
+	}
+	slots, err := openWarmDiskSlots(cfg)
+	if err != nil {
+		return
+	}
+	key := warmDiskSlotKey(spec, execution)
+	if slots.Put(ctx, key, []byte(identity)) == nil {
+		_ = slots.PruneContext(ctx, maxWarmDiskSlots, 0, key)
+	}
+}
+
 func (p *InKernelPlanner) openWarmDisk() (*l3kv.DiskStore, WarmDiskConfig, string, *WarmDiskReceipt) {
 	cfg, identity := p.warmDiskState()
 	if cfg.Disabled {
@@ -223,7 +263,11 @@ func (p *InKernelPlanner) restoreWarmPrefixDisk(ctx context.Context, spec WarmPr
 		return &WarmDiskReceipt{Outcome: WarmDiskOutcomeFault, Tier: warmDiskTier, Reason: "read_failed", RestoreOutcome: WarmDiskOutcomeFault, RestoreReason: "read_failed", BudgetBytes: cfg.MaxRecordBytes}
 	}
 	if !found {
-		return &WarmDiskReceipt{Outcome: WarmDiskOutcomeMiss, Tier: warmDiskTier, Reason: "absent", RestoreOutcome: WarmDiskOutcomeMiss, RestoreReason: "absent", BudgetBytes: cfg.MaxRecordBytes}
+		reason := "absent"
+		if warmDiskModelIdentityChanged(ctx, cfg, spec, identity, execution) {
+			reason = "model_identity_changed"
+		}
+		return &WarmDiskReceipt{Outcome: WarmDiskOutcomeMiss, Tier: warmDiskTier, Reason: reason, RestoreOutcome: WarmDiskOutcomeMiss, RestoreReason: reason, BudgetBytes: cfg.MaxRecordBytes}
 	}
 	receipt := &WarmDiskReceipt{Outcome: WarmDiskOutcomeFault, Tier: warmDiskTier, ReadBytes: int64(len(payload)), RestoreOutcome: WarmDiskOutcomeFault, BudgetBytes: cfg.MaxRecordBytes}
 	defer func() {
@@ -378,10 +422,12 @@ func (p *InKernelPlanner) persistWarmPrefixDisk(ctx context.Context, spec WarmPr
 	if err := ctx.Err(); err != nil {
 		return newWarmDiskReceipt(cfg, WarmDiskOutcomeFault, "cancelled")
 	}
-	key := warmDiskKey(spec, identity, p.warmDiskExecutionIdentity())
+	execution := p.warmDiskExecutionIdentity()
+	key := warmDiskKey(spec, identity, execution)
 	if err := store.Put(ctx, key, payload); err != nil {
 		return newWarmDiskReceipt(cfg, WarmDiskOutcomeFault, "write_failed")
 	}
+	recordWarmDiskSlot(ctx, cfg, spec, identity, execution)
 	receipt := &WarmDiskReceipt{Outcome: WarmDiskOutcomePersisted, Tier: warmDiskTier, WriteBytes: int64(len(payload)), BudgetBytes: cfg.MaxRecordBytes}
 	if prior != nil {
 		receipt.ReadBytes = prior.ReadBytes
