@@ -48,6 +48,7 @@ type Tokenizer struct {
 	// alphabet, so encode replaces spaces with ▁ (no byte-level remap) and decode maps ▁
 	// back to a space. false (default) keeps the GPT-2 ByteLevel path.
 	metaspace    bool
+	ignoreMerges bool // prefer complete encoded vocabulary pieces before BPE
 	identityOnce sync.Once
 	identity     string
 }
@@ -269,6 +270,10 @@ func (t *Tokenizer) Identity() string {
 		writeIdentityPart(h, "fak.tokenizer.operational.v1")
 		writeIdentityPart(h, fmt.Sprint(int(t.preTokKind)))
 		writeIdentityPart(h, fmt.Sprint(t.metaspace))
+		if t.ignoreMerges {
+			// Keep legacy false-mode digests stable while binding the new semantics.
+			writeIdentityPart(h, "ignore-merges:true")
+		}
 		for id, token := range t.idToToken {
 			writeIdentityPart(h, fmt.Sprintf("token:%d", id))
 			writeIdentityPart(h, token)
@@ -367,6 +372,12 @@ func (t *Tokenizer) Encode(text string) ([]int, error) {
 			encoded := byteLevelEncode(piece)
 			if t.metaspace {
 				encoded = metaspaceEncode(piece)
+			}
+			if t.ignoreMerges {
+				if id, ok := t.tokenToID[encoded]; ok {
+					ids = append(ids, id)
+					continue
+				}
 			}
 			syms, err := t.bpe(encoded)
 			if err != nil {

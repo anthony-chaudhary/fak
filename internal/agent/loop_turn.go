@@ -1,12 +1,14 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"os"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/attemptbudget"
+	"github.com/anthony-chaudhary/fak/internal/codetools"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/stopgate"
@@ -916,6 +919,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			r.metrics.ToolErrors++
 		}
 		isDenied := ev.Verdict == "DENY" || ev.Verdict == "DENIED" || ev.Verdict == "BARRED" || ev.Verdict == "DROPPED" || ev.Verdict == "route-error" || (res.verdict != nil && res.verdict.Kind == abi.VerdictDeny)
+		r.metrics.recordNativeGoEdit(tool, rawArgs, content, res.abiRes, isDenied)
 		if tool == toolDelete && !isDenied {
 			r.metrics.DestructiveExecuted = true
 		}
@@ -1276,4 +1280,46 @@ func (r *armRunner) recordCheckpointSaveError(turn int, err error) {
 		r.metrics.CheckpointSaveError = err.Error()
 	}
 	log.Printf("fak agent: session checkpoint %q turn %d not saved: %v", r.cfg.sessionCheckpointID, turn+1, err)
+}
+
+// recordNativeGoEdit runs once in the serial result-consumption loop. Only the
+// registered native engine's result contributes: denied proposals cannot dilute
+// the conflict rate used to decide whether another editing tool is worthwhile.
+func (m *ArmMetrics) recordNativeGoEdit(tool, rawArgs, content string, result *abi.Result, denied bool) {
+	if denied || tool != codetools.ToolEdit || result == nil || result.Meta["engine"] != codetools.EngineEdit {
+		return
+	}
+	var args codetools.EditArgs
+	dec := json.NewDecoder(bytes.NewBufferString(rawArgs))
+	dec.DisallowUnknownFields()
+	if dec.Decode(&args) != nil || args.Validate() != nil || !strings.HasSuffix(args.FilePath, ".go") {
+		return
+	}
+	var extra any
+	if dec.Decode(&extra) != io.EOF {
+		return
+	}
+	m.GoEditCalls++
+	var refusal struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if result.Status == abi.StatusError && json.Unmarshal([]byte(content), &refusal) == nil && refusal.Error.Code == codetools.CodeEditConflict {
+		m.GoEditConflicts++
+	}
+	lines := strings.Split(args.OldString, "\n")
+	if !strings.HasPrefix(lines[0], "func ") && !strings.HasPrefix(lines[0], "type ") {
+		return
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSuffix(lines[i], "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if line == "}" {
+			m.GoWholeDeclRewrites++
+		}
+		return
+	}
 }

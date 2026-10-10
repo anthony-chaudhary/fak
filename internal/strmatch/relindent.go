@@ -189,8 +189,9 @@ func reindent(oldBlock []line, newLines []line, base string) string {
 		// its own, so a replacement never eats the newline before trailing text.
 		if l.end != "" {
 			b.WriteString(l.end)
-		} else if i == len(newLines)-1 && i < len(oldBlock) {
-			b.WriteString(oldBlock[i].end)
+		} else if i == len(newLines)-1 && len(oldBlock) > 0 {
+			// An expanded replacement still needs the old block's trailing boundary.
+			b.WriteString(oldBlock[min(i, len(oldBlock)-1)].end)
 		} else if i < len(newLines)-1 {
 			b.WriteString("\n")
 		}

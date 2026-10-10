@@ -74,6 +74,43 @@ func TestJSONPackReportsSyntaxError(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=10ms lane=default
+func TestJSONPackSyntaxCoordinates(t *testing.T) {
+	r := DefaultRegistry()
+	for _, tc := range []struct {
+		name, source string
+		line, col    int
+	}{
+		{"first-byte", "?", 1, 1},
+		{"multiline", "[\n  ?\n]", 2, 3},
+		{"invalid-final-byte", "[1,]", 1, 4},
+		{"invalid-newline", "\"x\n\"", 1, 3},
+		{"utf8-byte-column", "[\"é\",?]", 1, 7},
+		{"empty-eof", "", 1, 1},
+		{"truncated-eof", "[1, ", 1, 5},
+		{"multiline-eof", "{\n", 2, 1},
+		{"literal-eof", "tru", 1, 4},
+		{"fraction-eof", "1.", 1, 3},
+		{"exponent-eof", "1e+", 1, 4},
+		{"escape-eof", "\"x\\", 1, 4},
+		{"actual-final-space", "tru ", 1, 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			findings, err := r.LintBytes(bg(), "location.json", []byte(tc.source))
+			if err != nil || len(findings) != 1 {
+				t.Fatalf("LintBytes: findings=%v err=%v", findings, err)
+			}
+			f := findings[0]
+			if f.Line != tc.line || f.Col != tc.col {
+				t.Fatalf("location=%d:%d, want %d:%d (%s)", f.Line, f.Col, tc.line, tc.col, f.Detail)
+			}
+			if f.File != "location.json" || f.Pack != "json" || f.Code != "JSON_PARSE" || f.Severity != Error {
+				t.Fatalf("finding contract changed: %+v", f)
+			}
+		})
+	}
+}
+
 func TestJSONPackCleanHasNoOpinion(t *testing.T) {
 	r := DefaultRegistry()
 	fs, err := r.LintBytes(bg(), "ok.json", []byte(`{"a":[1,2,3],"b":{"c":true}}`))

@@ -191,8 +191,9 @@ type FanoutArmResult struct {
 	WallClockMs               float64           `json:"wall_clock_ms"`
 	KVMemoryBytes             int64             `json:"kv_memory_bytes"`
 	PeakMemoryFraction        float64           `json:"peak_memory_fraction"`
-	OutputEquivalence         bool              `json:"output_equivalence"`
-	OutputHash                string            `json:"output_hash"`
+	// Nil means output equivalence was not established, rather than false.
+	OutputEquivalence *bool  `json:"output_equivalence"`
+	OutputHash        string `json:"output_hash"`
 	// ServeCompleteness records whether the reference server was probed to
 	// actually serve the frozen workload geometry. It is present only for live
 	// cells; a simulated cell leaves it nil. ControlArmServed is the gate: a
@@ -1039,8 +1040,9 @@ func (h *SubagentFanoutHarness) simulateCell(arm string, n int) (FanoutArmResult
 	kvBytes := (totalPromptTokens - reusedTokens + int64(n*D)) * bytesPerToken
 	peakMemFrac := math.Min(h.Config.MemoryFraction, 0.45+(float64(kvBytes)/(1024*1024*1024*32.0)))
 
-	// Deterministic output hash witnessing equivalence
+	// Preserve the modeled simulation contract; this is not observed live output.
 	outputHash := deterministicOutputHash(arm, n, P, S, D)
+	modeledEquivalent := true
 
 	return FanoutArmResult{
 		Arm:                       arm,
@@ -1059,7 +1061,7 @@ func (h *SubagentFanoutHarness) simulateCell(arm string, n int) (FanoutArmResult
 		WallClockMs:               elapsed,
 		KVMemoryBytes:             kvBytes,
 		PeakMemoryFraction:        peakMemFrac,
-		OutputEquivalence:         true,
+		OutputEquivalence:         &modeledEquivalent,
 		OutputHash:                outputHash,
 	}, nil
 }
@@ -1252,9 +1254,10 @@ func (h *SubagentFanoutHarness) executeLiveCell(ctx context.Context, arm string,
 		DecodeThroughputTokPerSec: throughput,
 		WallClockMs:               elapsed,
 		PeakMemoryFraction:        h.Config.MemoryFraction,
-		OutputEquivalence:         true,
-		OutputHash:                deterministicOutputHash(arm, n, P, S, D),
-		ServeCompleteness:         completeness,
+		// This path times SSE events but does not compare or hash model output.
+		OutputEquivalence: nil,
+		OutputHash:        "",
+		ServeCompleteness: completeness,
 	}
 	// Read what the server actually reused during this cell (issue #13076):
 	// the delta of one counter family between the pre- and post-cell scrapes.

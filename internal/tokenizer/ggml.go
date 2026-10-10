@@ -87,6 +87,10 @@ func FromGGML(tokens, merges []string, tokenTypes []int32, pre string) (*Tokeniz
 	// the metaspace flag together. Adding a family is one kind + one resolver case, picked
 	// up here and by the JSON path alike, so the two loaders can never silently diverge.
 	preKind := ggmlPreTokKind(pre)
+	// GLM-4/5 GGUFs prefer a complete vocabulary piece before consulting merges.
+	// chatglm-bpe shares the splitter but retains ordinary merge behavior.
+	p := strings.ToLower(pre)
+	ignoreMerges := p == "glm4" || p == "glm5"
 	split, metaspace := resolvePreTokenizer(preKind)
 
 	return &Tokenizer{
@@ -99,6 +103,7 @@ func FromGGML(tokens, merges []string, tokenTypes []int32, pre string) (*Tokeniz
 		preTokKind:       preKind,
 		split:            split,
 		metaspace:        metaspace,
+		ignoreMerges:     ignoreMerges,
 	}, nil
 }
 
@@ -139,5 +144,5 @@ func isQwenPreTokenizer(pre string) bool {
 // LLAMA_VOCAB_PRE_TYPE_CHATGLM4 is the GPT-4-style split (close to Qwen2), NOT GPT-2 ByteLevel.
 func isGLM4PreTokenizer(pre string) bool {
 	p := strings.ToLower(pre)
-	return strings.Contains(p, "glm4") || strings.Contains(p, "glm-4") || strings.Contains(p, "chatglm")
+	return p == "glm5" || strings.Contains(p, "glm4") || strings.Contains(p, "glm-4") || strings.Contains(p, "chatglm")
 }

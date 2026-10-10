@@ -171,17 +171,63 @@ func (p *InKernelPlanner) runCoalescedGenerate(ctx context.Context, run func(con
 	} else {
 		select {
 		case <-req.drain:
+			if ctx.Err() != nil && p.withdrawCoalescedRequest(req, true) {
+				return inKernelGenerateResult{}, ctx.Err()
+			}
 			p.drainCoalescedGenerates()
 		case out := <-req.result:
 			<-req.receiptReady
 			out.result.batchReceipt = req.receipt
 			return out.result, out.err
+		case <-ctx.Done():
+			if p.withdrawCoalescedRequest(req, false) {
+				return inKernelGenerateResult{}, ctx.Err()
+			}
+			// Already selected: the run closure may own a session or shared
+			// forward state. Wait for its result AND cleanup receipt below.
 		}
 	}
 	out := <-req.result
 	<-req.receiptReady
 	out.result.batchReceipt = req.receipt
 	return out.result, out.err
+}
+
+// withdrawCoalescedRequest removes only a still-queued follower. Selection and
+// withdrawal share coalesceMu, so success proves its run closure cannot start.
+// ownsBaton is true only when this caller just received req.drain. Otherwise a
+// simultaneous cancellation/handoff may have left the baton buffered there.
+func (p *InKernelPlanner) withdrawCoalescedRequest(req *inKernelCoalesceRequest, ownsBaton bool) bool {
+	p.coalesceMu.Lock()
+	defer p.coalesceMu.Unlock()
+	for i, pending := range p.coalesceReady {
+		if pending != req {
+			continue
+		}
+		copy(p.coalesceReady[i:], p.coalesceReady[i+1:])
+		last := len(p.coalesceReady) - 1
+		p.coalesceReady[last] = nil
+		p.coalesceReady = p.coalesceReady[:last]
+		enginestep.Default.SetQueueDepth(len(p.coalesceReady))
+		if !ownsBaton {
+			select {
+			case <-req.drain:
+				ownsBaton = true
+			default:
+			}
+		}
+		if ownsBaton {
+			if len(p.coalesceReady) == 0 {
+				p.coalesceRunning = false
+			} else {
+				p.coalesceReady[0].drain <- struct{}{}
+			}
+		}
+		// Without a baton, the active/initial drainer still owns handoff,
+		// even when withdrawal has temporarily made its pending queue empty.
+		return true
+	}
+	return false
 }
 
 func (p *InKernelPlanner) drainCoalescedGenerates() {

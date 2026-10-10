@@ -33,10 +33,17 @@ const SystemPrompt = "You are an agent assistant. Use the provided tools to comp
 // ArmMetrics is one arm's witnessed outcome. The counts are kernel-measured on the
 // fak arm (k.Counters()) and harness-measured on the baseline arm.
 type ArmMetrics struct {
-	Arm                  string   `json:"arm"`
-	Turns                int      `json:"turns"`        // model round-trips (the headline)
-	ToolCalls            int      `json:"tool_calls"`   // total tool calls emitted
-	ToolErrors           int      `json:"tool_errors"`  // calls the tool rejected (drive retry turns)
+	Arm        string `json:"arm"`
+	Turns      int    `json:"turns"`       // model round-trips (the headline)
+	ToolCalls  int    `json:"tool_calls"`  // total tool calls emitted
+	ToolErrors int    `json:"tool_errors"` // calls the tool rejected (drive retry turns)
+	// GoEditCalls counts classified Go Edit results from the native coding engine,
+	// excluding pre-dispatch denials. GoWholeDeclRewrites is only an old_string
+	// shape heuristic (column-zero func/type through a column-zero closing brace),
+	// not an AST or successful-rewrite measurement. No source or paths are recorded.
+	GoEditCalls          int      `json:"go_edit_calls,omitempty"`
+	GoEditConflicts      int      `json:"go_edit_conflicts,omitempty"`
+	GoWholeDeclRewrites  int      `json:"go_whole_decl_rewrites,omitempty"`
 	Repairs              int      `json:"repairs"`      // in-syscall grammar repairs (fak only)
 	VDSOHits             int      `json:"vdso_hits"`    // duplicate read-only calls served locally (fak only)
 	Denies               int      `json:"denies"`       // calls refused by the adjudicator (fak only)

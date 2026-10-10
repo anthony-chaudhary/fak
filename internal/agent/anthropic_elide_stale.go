@@ -205,6 +205,12 @@ type readLifecycleIndex struct {
 // builds the read/edit index. tool_use blocks live in assistant turns; a Read records id->path, an
 // edit tool records the message index under the normalized path. Malformed / non-array content is
 // skipped, never fatal.
+//
+// The assistant-only metadata gate is adapted from Headroom's _build_tool_metadata
+// and _find_tool_call_msg_index in headroom/transforms/read_lifecycle.py at
+// 38074888ac871b8b44418066d66b6a37159978ed (Apache-2.0). Modified for Fak's raw JSON.
+// Headroom — Copyright 2025 Headroom Contributors.
+// This product includes software developed by the Headroom Contributors.
 func classifyReadLifecycle(elems []json.RawMessage) readLifecycleIndex {
 	idx := readLifecycleIndex{
 		readPathByToolUse: map[string]string{},
@@ -212,9 +218,10 @@ func classifyReadLifecycle(elems []json.RawMessage) readLifecycleIndex {
 	}
 	for i, el := range elems {
 		var m struct {
+			Role    string          `json:"role"`
 			Content json.RawMessage `json:"content"`
 		}
-		if json.Unmarshal(el, &m) != nil || len(m.Content) == 0 || m.Content[0] != '[' {
+		if json.Unmarshal(el, &m) != nil || m.Role != "assistant" || len(m.Content) == 0 || m.Content[0] != '[' {
 			continue
 		}
 		var blocks []json.RawMessage
