@@ -48,6 +48,11 @@ func TestRunPiUsesSelectedModelWindowEverywhere(t *testing.T) {
 			wantModel: "VENDOR/custom", wantWindow: 65536,
 		},
 		{
+			name: "selected window above quality cap", health: "local", explicitModel: "routed",
+			catalog:   `[{"id":"local","context_length":65536},{"id":"routed","context_length":1048576}]`,
+			wantModel: "routed", wantWindow: 1048576,
+		},
+		{
 			name: "known route missing from catalog uses registry", health: "local", configuredModel: "deepseek-v41-flash",
 			catalog:   `[{"id":"local","context_length":65536}]`,
 			wantModel: "deepseek-v41-flash", wantWindow: 1000000,

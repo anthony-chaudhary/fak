@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/projectassets"
 	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
@@ -604,6 +605,45 @@ func TestPiRouterRetryEnabledPlan(t *testing.T) {
 				t.Fatalf("preview changed settings: got=%s err=%v", got, err)
 			}
 		})
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestPiConfigFromRouterWriteReenablesDisabledRetry(t *testing.T) {
+	pinPiRouterTestEnv(t, piRouterTestKey)
+	srv := newPiRouterFake(t, multiModelRouterRows())
+	dir := t.TempDir()
+	modelsPath := filepath.Join(dir, "models.json")
+	settingsPath := filepath.Join(dir, "settings.json")
+	orig := `{"defaultProvider":"fak","defaultModel":"org/model-a","retry":{"enabled":false,"maxRetries":8,"baseDelayMs":4000,"maxAgentDelayMs":60000,"provider":{"maxRetries":2}}}`
+	if err := os.WriteFile(settingsPath, []byte(orig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := runPiConfigRouter(t, "--from-router", srv.URL+"/v1", "--write", "--path", modelsPath, "--settings-path", settingsPath); code != 0 {
+		t.Fatalf("write exit = %d, stderr=%s", code, stderr)
+	}
+	var settings struct {
+		Retry struct {
+			Enabled         *bool `json:"enabled"`
+			MaxRetries      int   `json:"maxRetries"`
+			BaseDelayMs     int   `json:"baseDelayMs"`
+			MaxAgentDelayMs int   `json:"maxAgentDelayMs"`
+			Provider        struct {
+				MaxRetries int `json:"maxRetries"`
+			} `json:"provider"`
+		} `json:"retry"`
+	}
+	written, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(written, &settings); err != nil {
+		t.Fatal(err)
+	}
+	r := settings.Retry
+	want := projectassets.DefaultPiRouterRetryPolicy
+	if r.Enabled == nil || !*r.Enabled || r.MaxRetries != want.MaxRetries || r.BaseDelayMs != want.BaseDelayMs || r.MaxAgentDelayMs != want.MaxAgentDelayMs || r.Provider.MaxRetries != 2 {
+		t.Fatalf("settings retry = %+v (enabled=%v), want re-enabled router policy with retry.provider preserved", r, r.Enabled)
 	}
 }
 
