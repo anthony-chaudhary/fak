@@ -99,6 +99,12 @@ std::atomic<uint64_t> g_h2dCount{0};
 std::atomic<uint64_t> g_d2hCount{0};
 std::atomic<uint64_t> g_d2dCount{0};
 std::atomic<uint64_t> g_d2dBytes{0};
+// Weight bytes written straight into a mapped DEVICE_LOCAL|HOST_VISIBLE arena (no staging copy).
+std::atomic<uint64_t> g_directH2DBytes{0};
+// UMA (integrated GPU, e.g. a carve-out APU): weights go to a device-local, host-visible memory
+// type and are written through the mapping, the llama.cpp ggml-vulkan UMA path. FAK_VULKAN_UMA_DIRECT
+// overrides the device-type default (0/off disables, 1/on forces).
+bool g_umaDirectWeights = false;
 bool                  g_transferCountersValid = true;
 uint64_t              g_deviceAllocationLiveBytes = 0;
 bool                  g_deviceAllocationAccountingValid = true;
@@ -189,6 +195,7 @@ struct Buffer {
     VkDeviceSize   allocationBytes = 0;
     uint64_t       allocationID = 0;
     bool           allocationDeviceLocal = false;
+    void*          mapped = nullptr; // host view of a direct-upload weight arena binding
 };
 
 // Immutable model weights keep their descriptor-visible VkBuffer identity while sharing a
@@ -205,6 +212,7 @@ struct WeightArenaBlock {
     uint32_t memoryTypeIndex = UINT32_MAX;
     size_t liveBuffers = 0;
     bool allocationDeviceLocal = false;
+    void* mapped = nullptr; // persistent map of a host-visible block (UMA direct upload)
 };
 std::vector<WeightArenaBlock> g_weightArena;
 uint64_t g_weightArenaMemoryAllocations = 0;
@@ -444,6 +452,22 @@ void clearDescriptorBindingCache() {
             for (int i = 0; i < MAX_DISPATCH_BUFS; ++i) rec.buffers[i] = VK_NULL_HANDLE;
         }
     }
+}
+
+uint32_t findMemType(uint32_t typeBits, VkMemoryPropertyFlags want);
+
+// findDirectWeightMemType picks a DEVICE_LOCAL|HOST_VISIBLE|HOST_COHERENT type backed by a
+// device-local heap (the UMA carve-out, never the system-RAM GTT heap), or UINT32_MAX.
+uint32_t findDirectWeightMemType(uint32_t typeBits) {
+    const VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    for (uint32_t i = 0; i < g_memprops.memoryTypeCount; ++i) {
+        if ((typeBits & (1u << i)) && (g_memprops.memoryTypes[i].propertyFlags & want) == want &&
+            memoryTypeUsesDeviceLocalHeap(i)) {
+            return i;
+        }
+    }
+    return UINT32_MAX;
 }
 
 uint32_t findMemType(uint32_t typeBits, VkMemoryPropertyFlags want) {
@@ -796,7 +820,8 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
         return allocBuffer(bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, STORAGE_USAGE);
     }
 
-    uint32_t memoryType = findMemType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memoryType = g_umaDirectWeights ? findDirectWeightMemType(req.memoryTypeBits) : UINT32_MAX;
+    if (memoryType == UINT32_MAX) memoryType = findMemType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (memoryType == UINT32_MAX) {
         vkDestroyBuffer(g_dev, b->buf, nullptr);
         delete b;
@@ -820,6 +845,7 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
         b->props = g_memprops.memoryTypes[memoryType].propertyFlags;
         b->memoryTypeIndex = block.memoryTypeIndex;
         b->memoryOffset = offset;
+        b->mapped = block.mapped ? (char*)block.mapped + offset : nullptr;
         b->weightArenaBound = true;
         b->weightArenaBlock = i;
         ++g_weightArenaBufferBindings;
@@ -875,12 +901,17 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
     block.memoryTypeIndex = memoryType;
     block.liveBuffers = 1;
     block.allocationDeviceLocal = memoryTypeUsesDeviceLocalHeap(memoryType);
+    if (g_memprops.memoryTypes[memoryType].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
+        // A failed map leaves mapped null, and uploads take the staging path.
+        if (vkMapMemory(g_dev, memory, 0, VK_WHOLE_SIZE, 0, &block.mapped) != VK_SUCCESS) block.mapped = nullptr;
+    }
     trackDeviceAllocation(blockBytes, memoryType);
     g_weightArena.push_back(block);
     b->mem = memory;
     b->props = g_memprops.memoryTypes[memoryType].propertyFlags;
     b->memoryTypeIndex = memoryType;
     b->memoryOffset = 0;
+    b->mapped = block.mapped;
     b->weightArenaBound = true;
     b->weightArenaBlock = g_weightArena.size() - 1;
     ++g_weightArenaMemoryAllocations;
@@ -1453,10 +1484,24 @@ void batchFlush() {
 	for (Buffer* b : freed)   fvk_free(b);
 }
 
+// UMA direct upload: the destination is coherent device-local memory the CPU maps, so the source
+// (often file-backed checkpoint pages) is copied once, with no staging buffer or transfer submit.
+void copyHostToMappedWeight(Buffer* dst, const void* host, size_t bytes) {
+    memcpy(dst->mapped, host, bytes);
+    if (!checkedCounterAdd(g_h2dCount, 1) || !checkedCounterAdd(g_h2dBytes, bytes) ||
+        !checkedCounterAdd(g_directH2DBytes, bytes)) {
+        g_transferCountersValid = false;
+    }
+}
+
 // staging copy host<->device through one persistent HOST_VISIBLE scratch buffer.
 void copyHostToDevice(Buffer* dst, const void* host, size_t bytes) {
     if (g_v41SubmissionPendingFailure) return;
     if (bytes == 0 || !dst || !host) return;
+    if (dst->mapped) {
+        copyHostToMappedWeight(dst, host, bytes);
+        return;
+    }
     Buffer* stage = stagingBuffer(bytes);
     if (!stage) return;
     memcpy(g_stageMapped, host, bytes);
@@ -2530,6 +2575,15 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         if (p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) { chosen = d; discrete = true; break; }
     }
     g_phys = chosen;
+    {
+        VkPhysicalDeviceProperties chosenProps{};
+        vkGetPhysicalDeviceProperties(g_phys, &chosenProps);
+        g_umaDirectWeights = chosenProps.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+        if (const char* uma = getenv("FAK_VULKAN_UMA_DIRECT")) {
+            if (!strcmp(uma, "0") || !strcmp(uma, "off")) g_umaDirectWeights = false;
+            if (!strcmp(uma, "1") || !strcmp(uma, "on")) g_umaDirectWeights = true;
+        }
+    }
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(g_phys, &props);
     VkPhysicalDeviceMaintenance3Properties maint3{
@@ -3224,6 +3278,7 @@ void fvk_submission_reset(void) {
 }
 int fvk_batch_flush_status(void) { fvk_batch_flush(); return (int)g_submissionStatus; }
 uint64_t fvk_h2d_bytes(void) { return g_h2dBytes.load(std::memory_order_relaxed); }
+uint64_t fvk_direct_h2d_bytes(void) { return g_directH2DBytes.load(std::memory_order_relaxed); }
 uint64_t fvk_d2h_bytes(void) { return g_d2hBytes.load(std::memory_order_relaxed); }
 int fvk_transfer_counters(uint64_t* h2d_count, uint64_t* h2d_bytes,
                            uint64_t* d2h_count, uint64_t* d2h_bytes,

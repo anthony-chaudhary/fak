@@ -383,6 +383,8 @@ void fvk_submission_reset(void);
 int fvk_batch_flush_status(void);
 /* Cumulative host transfer bytes, independent of optional profiling. */
 uint64_t fvk_h2d_bytes(void);
+/* Subset of fvk_h2d_bytes written directly into mapped device-local weight memory (UMA). */
+uint64_t fvk_direct_h2d_bytes(void);
 uint64_t fvk_d2h_bytes(void);
 /* Complete backend-owned transfer tuple. Returns 0 after accounting overflow or
  * before initialization; all six outputs are mandatory. Observed zero directions
