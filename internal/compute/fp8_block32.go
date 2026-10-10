@@ -30,10 +30,15 @@ type RoutedExpertDeviceKernel interface {
 	// and the returned slice has O entries. err is non-nil (fail closed) on any shape,
 	// dtype or device fault; a nil error with a short y is never returned.
 	GemvExpertFP8Block32E8M0(O, I int, weight, scales []byte, x []float32) ([]float32, error)
-	// GemvExpertMXFP4E8M0 computes y[o] = sum_i decode(_E2M1(weight[o,i]), scale[o/32,i/32]) * x[i]
-	// for one routed-expert projection resident on the device. weight holds O*I packed
-	// I8 bytes (two E2M1 nibbles each), scales holds ceil(O/32)*ceil(I/32) raw E8M0
-	// bytes, x has I entries, and the returned slice has O entries. Fail-closed as above.
+	// GemvExpertMXFP4E8M0 computes y[o] = sum_i w[o,i] * x[i] for one
+	// routed-expert projection with unpacked shape [O,I]. O must be positive,
+	// and I must be positive and even.
+	// weight holds O rows of I/2 packed I8 bytes: byte j holds E2M1 codes
+	// for w[o,2*j] in its low nibble and w[o,2*j+1] in its high nibble.
+	// scales holds O*ceil(I/32) raw E8M0 bytes in row-major [O,ceil(I/32)]
+	// order; scales[o*ceil(I/32)+i/32] scales w[o,i]. This is one scale per
+	// row and 32 unpacked K values, not the FP8 method's 32x32 tile layout.
+	// x has I entries, and the returned slice has O entries. Fail-closed as above.
 	GemvExpertMXFP4E8M0(O, I int, weight, scales []byte, x []float32) ([]float32, error)
 }
 
