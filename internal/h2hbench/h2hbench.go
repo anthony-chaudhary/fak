@@ -492,7 +492,6 @@ func measureOnce(ctx context.Context, cfg Config, arm Arm, msgs []message, maxTo
 	}
 	var first time.Time
 	var answer strings.Builder
-	var events int
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 0, 64<<10), 4<<20)
 	for sc.Scan() {
@@ -535,7 +534,6 @@ func measureOnce(ctx context.Context, cfg Config, arm Arm, msgs []message, maxTo
 					onFirst()
 				}
 			}
-			events++
 			answer.WriteString(c.Delta.Content)
 		}
 		if u := ch.Usage; u != nil {
@@ -558,9 +556,8 @@ func measureOnce(ctx context.Context, cfg Config, arm Arm, msgs []message, maxTo
 		return answer.String(), errors.New("no output tokens streamed")
 	}
 	r.TTFTMS = ms(first.Sub(start))
-	if r.CompletionTokens == 0 {
-		r.CompletionTokens = events
-	}
+	// An arm that streams no usage leaves CompletionTokens unknown (0), so no
+	// decode rate is derived: an SSE delta is not a token.
 	if r.Server != nil && r.CachedTokens == 0 && r.Server.CacheN > 0 {
 		r.CachedTokens = r.Server.CacheN
 	}

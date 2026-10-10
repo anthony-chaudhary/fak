@@ -23,6 +23,7 @@ type fakeEngine struct {
 	perTokenDur time.Duration
 	reportCache bool
 	timings     bool
+	noUsage     bool
 }
 
 func (f *fakeEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -67,11 +68,34 @@ func (f *fakeEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		usage["prompt_tokens_details"] = map[string]int{"cached_tokens": cached}
 	}
 	final := map[string]any{"choices": []any{}, "usage": usage}
+	if f.noUsage {
+		delete(final, "usage")
+	}
 	if f.timings {
 		final["timings"] = ServerTimings{CacheN: cached, PromptN: tokens - cached, PredictedN: req.Max, PredictedPerSecond: 99}
 	}
 	b, _ := json.Marshal(final)
 	fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", b)
+}
+
+// An arm that streams no usage block has unknown token counts: the row keeps its
+// measured TTFT but derives no decode rate from SSE delta counts.
+func TestRunWithoutUsageLeavesDecodeRateUnknown(t *testing.T) {
+	srv := httptest.NewServer(&fakeEngine{noUsage: true})
+	defer srv.Close()
+	arm, _ := ParseArm("fak=" + srv.URL + "/v1")
+	rows, err := Run(context.Background(), Config{RunID: "nu", Model: "m", Arms: []Arm{arm}, Reps: 1, DecodeTokens: 12})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("no rows")
+	}
+	for _, r := range rows {
+		if !r.OK || r.TTFTMS <= 0 || r.CompletionTokens != 0 || r.DecodeTPS != 0 {
+			t.Fatalf("row without usage = %+v, want measured ttft and no token count or decode rate", r)
+		}
+	}
 }
 
 func TestRunMeasuresAllScenariosAndKeepsArmsCacheIsolated(t *testing.T) {
