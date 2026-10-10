@@ -137,7 +137,7 @@ func TestV41CompressorNormSelectedFailure(t *testing.T) {
 	t.Parallel()
 	for _, site := range []string{"rmsnorm", "short readback", "BF16 output"} {
 		t.Run(site, func(t *testing.T) {
-			m := v41CompressorTestFixture(t)
+			m := v41CompressorProducerTestFixture(t)
 			s, b := v41CompressorNormTestSession(t, m)
 			s.Prefill([]int{1, 2, 3})
 			before := captureV41ForwardSnapshot(s.v41Forward)
@@ -192,7 +192,7 @@ func TestV41CompressorNormSelectedFailure(t *testing.T) {
 // fak-test:runtime medium est=1s lane=default
 func TestV41CompressorNormDownstreamIndexRollback(t *testing.T) {
 	t.Parallel()
-	m := v41CompressorTestFixture(t)
+	m := v41CompressorProducerTestFixture(t)
 	s, b := v41CompressorNormTestSession(t, m)
 	s.Prefill([]int{1, 2, 3})
 	before, norms := captureV41ForwardSnapshot(s.v41Forward), len(b.records)
@@ -220,7 +220,7 @@ func TestV41CompressorNormPanicIdentity(t *testing.T) {
 	t.Parallel()
 	for _, alreadyClosed := range []bool{false, true} {
 		t.Run(itoa(boolToIntV41Expert(alreadyClosed)), func(t *testing.T) {
-			m := v41CompressorTestFixture(t)
+			m := v41CompressorProducerTestFixture(t)
 			s, b := v41CompressorNormTestSession(t, m)
 			s.Prefill([]int{1, 2, 3})
 			before := captureV41ForwardSnapshot(s.v41Forward)

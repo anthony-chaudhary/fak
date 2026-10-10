@@ -183,6 +183,9 @@ func v41RawFullFlattenedMHC(t *testing.T) *Model {
 		{layerName(0, "attn_norm.weight"), []int{H}},
 		{layerName(0, "ffn_norm.weight"), []int{H}},
 		{layerName(0, "mhc.mixes.weight"), []int{4 * H, v41MHCMixWidth}},
+		{layerName(0, "mhc.ffn_mixes.weight"), []int{4 * H, v41MHCMixWidth}},
+		{layerName(0, "mhc.ffn_base"), []int{v41MHCMixWidth}},
+		{layerName(0, "mhc.ffn_scale"), []int{3}},
 		{layerName(0, "mhc.base"), []int{v41MHCMixWidth}},
 		{layerName(0, "mhc.scale"), []int{3}},
 		{layerName(0, "attn.wq_a.weight"), []int{cfg.QLoraRank, H}},
@@ -212,6 +215,10 @@ func v41RawFullFlattenedMHC(t *testing.T) *Model {
 		switch {
 		case name == "model.norm.weight" || hasSuffix(name, "attn_norm.weight") || hasSuffix(name, "ffn_norm.weight") || hasSuffix(name, "attn.wq_a_norm.weight") || hasSuffix(name, "attn.kv_norm.weight"):
 			return 1.0
+		case hasSuffix(name, "mhc.ffn_scale"):
+			return .75
+		case hasSuffix(name, "mhc.ffn_base"):
+			return .125 * next()
 		case hasSuffix(name, "mhc.scale"):
 			return 1.0
 		case hasSuffix(name, "mhc.base"):

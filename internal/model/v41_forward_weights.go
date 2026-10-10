@@ -38,11 +38,15 @@ type v41ProjScratch struct {
 	denseProjection  v41DenseProjectionFunc
 	groupedOutput    v41GroupedOutputFunc
 	mhcProjection    v41MHCProjectionFunc
+	mhcFFNProjection v41MHCProjectionFunc
+	mhcCarry         *v41MHCCarry
 	queryNorm        v41QueryNormFunc
 	kvNorm           v41KVNormFunc
 	ffnNorm          v41FFNNormFunc
 	compressorNorm   v41CompressorNormFunc
 	indexKeyNorm     v41IndexKeyNormFunc
+	indexerScore     v41IndexerScoreFunc
+	indexScoreHealth v41IndexerScoreHealthFunc
 	sharedActivation v41SharedActivationFunc
 	tailRoPE         v41TailRoPEFunc
 	sharedAttention  v41SharedAttentionFunc
@@ -62,10 +66,9 @@ type v41ProjScratch struct {
 	exp3 []float32
 	exp2 []float32
 
-	// mhc is the REUSED target for mhc.mixes.weight, the last whole-tensor f32
-	// materializer in the forward. It is read once per layer at the top of
-	// v41Layer and consumed read-only by the mHC split; the layer loop is
-	// sequential, so one buffer bounds it to a single layer's worth.
+	// mhc is reused across the attention and FFN mix phases. Every attention
+	// projection finishes before any FFN projection begins; a projector closure
+	// must never be called again after the other phase has reused this buffer.
 	mhc []float32
 
 	// layerExperts is a LAYER-SCOPED f32 cache of routed-expert projections,
@@ -415,7 +418,14 @@ func (m *Model) v41ProjF32Into(l int, leaf string, dst []float32) ([]float32, er
 // absent or holds neither admitted geometry, so the caller fails closed rather
 // than reading a wrong sub-matrix.
 func (m *Model) v41MHCWeightLayout(l int) (flat, transposed, ok bool) {
-	out, in, present := m.residentShape(layerName(l, "mhc.mixes.weight"))
+	return m.v41MHCWeightLayoutNamed(l, "mhc.mixes.weight")
+}
+
+func (m *Model) v41MHCWeightLayoutNamed(l int, leaf string) (flat, transposed, ok bool) {
+	if !v41MHCMixLeaf(leaf) {
+		return false, false, false
+	}
+	out, in, present := m.residentShape(layerName(l, leaf))
 	if !present {
 		return false, false, false
 	}
@@ -463,7 +473,14 @@ func (m *Model) v41MHCMixF32(l int) ([]float32, error) {
 // every store fails closed with the same typed ErrV41ForwardStage naming the
 // tensor.
 func (m *Model) v41MHCMixF32Into(l int, dst []float32) ([]float32, error) {
-	name := layerName(l, "mhc.mixes.weight")
+	return m.v41MHCMixF32IntoNamed(l, "mhc.mixes.weight", dst)
+}
+
+func (m *Model) v41MHCMixF32IntoNamed(l int, leaf string, dst []float32) ([]float32, error) {
+	if !v41MHCMixLeaf(leaf) {
+		return nil, v41StageErr(v41StageMHC, l, errV41ProjectionResult)
+	}
+	name := layerName(l, leaf)
 	if w, ok := m.residentF32Mat(name); ok {
 		return append(dst[:0], w...), nil
 	}

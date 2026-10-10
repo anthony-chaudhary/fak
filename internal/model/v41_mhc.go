@@ -144,3 +144,127 @@ func v41MHCPost(x []float32, residual [][]float32, post []float32, comb []float3
 	}
 	return out, nil
 }
+
+// v41MHCCarry is invocation-local, with one F32 pre-mix row per token. It is
+// never KV history or snapshot state. A layer publishes its carry only with its
+// completed stream panel, so a refused layer cannot advance the graph cursor.
+type v41MHCCarry struct {
+	pre       [][]float32
+	nextLayer int
+}
+
+func newV41MHCCarry(rows int) *v41MHCCarry {
+	c := &v41MHCCarry{pre: make([][]float32, rows)}
+	for i := range c.pre {
+		c.pre[i] = []float32{1, 0, 0, 0}
+	}
+	return c
+}
+
+func (c *v41MHCCarry) validate(layer, rows int) error {
+	if c == nil || c.nextLayer != layer || len(c.pre) != rows {
+		return v41StageErr(v41StageMHC, layer, fmt.Errorf("%w: missing or out-of-order full mHC carry", ErrV41ForwardStage))
+	}
+	for _, pre := range c.pre {
+		if len(pre) != 4 {
+			return v41StageErr(v41StageMHC, layer, errV41ProjectionResult)
+		}
+		for _, v := range pre {
+			if !finite32(v) {
+				return v41StageErr(v41StageMHC, layer, errV41ProjectionResult)
+			}
+		}
+	}
+	return nil
+}
+
+func v41MHCMixLeaf(leaf string) bool {
+	return leaf == "mhc.mixes.weight" || leaf == "mhc.ffn_mixes.weight"
+}
+
+// The pinned model's residuals, sublayer results and hc_pre/hc_post publications
+// are BF16. Keep coefficients and arithmetic F32; own every rounded publication.
+func v41MHCBF16(layer int, values []float32) ([]float32, error) {
+	out := make([]float32, len(values))
+	for i, v := range values {
+		out[i] = v41RoundBF16(v)
+		if !finite32(v) || !finite32(out[i]) {
+			return nil, v41StageErr(v41StageMHC, layer, fmt.Errorf("%w: non-finite full mHC BF16 value %d", ErrV41ForwardStage, i))
+		}
+	}
+	return out, nil
+}
+
+func v41FullInitialStreams(x []float32) ([][]float32, error) {
+	row, err := v41MHCBF16(-1, x)
+	if err != nil {
+		return nil, err
+	}
+	streams := make([][]float32, 4)
+	for h := range streams {
+		streams[h] = append([]float32(nil), row...)
+	}
+	return streams, nil
+}
+
+func v41MHCPreBF16(layer int, streams [][]float32, pre []float32) ([]float32, error) {
+	row, err := v41MHCPre(streams, pre)
+	if err != nil {
+		return nil, v41StageErr(v41StageMHC, layer, err)
+	}
+	return v41MHCBF16(layer, row)
+}
+
+func v41MHCPostBF16(layer int, x []float32, streams [][]float32, mix v41MHCMix) ([][]float32, error) {
+	row, err := v41MHCBF16(layer, x)
+	if err != nil {
+		return nil, err
+	}
+	next, err := v41MHCPost(row, streams, mix.post, mix.comb)
+	if err != nil {
+		return nil, v41StageErr(v41StageMHC, layer, err)
+	}
+	for h := range next {
+		next[h], err = v41MHCBF16(layer, next[h])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return next, nil
+}
+
+func (m *Model) v41FFNMHCProjector(layer int, scratch *v41ProjScratch) (func([]float32) ([]float32, error), error) {
+	if err := m.v41AdmitMHCNamed(layer, "mhc.ffn_mixes.weight", "mhc.ffn_base", "mhc.ffn_scale", true); err != nil {
+		return nil, err
+	}
+	_, transposed, _ := m.v41MHCWeightLayoutNamed(layer, "mhc.ffn_mixes.weight")
+	return m.v41MHCProjectorNamed(layer, "mhc.ffn_mixes.weight", m.Cfg.HiddenSize, float32(m.Cfg.RMSNormEps), true, transposed, scratch), nil
+}
+
+// The attention projector must be dead before this phase starts: projectFFN
+// may reuse its materialization buffer. The returned streams and norm row are
+// owned; the caller retains incoming streams/carry until all later work succeeds.
+func (m *Model) v41FullFFNInput(layer int, streams [][]float32, attnMix v41MHCMix, attnOut []float32, projectFFN func([]float32) ([]float32, error), scratch *v41ProjScratch) ([][]float32, v41MHCMix, []float32, error) {
+	updated, err := v41MHCPostBF16(layer, attnOut, streams, attnMix)
+	if err != nil {
+		return nil, v41MHCMix{}, nil, err
+	}
+	flat := make([]float32, 0, 4*m.Cfg.HiddenSize)
+	for _, row := range updated {
+		flat = append(flat, row...)
+	}
+	projected, err := projectFFN(flat)
+	if err != nil {
+		return nil, v41MHCMix{}, nil, err
+	}
+	mix, err := v41MHCSplit(projected, m.tensor(layerName(layer, "mhc.ffn_scale")), m.tensor(layerName(layer, "mhc.ffn_base")), 4, hcItersOrDefault(m.Cfg), hcEpsOrDefault(m.Cfg))
+	if err != nil {
+		return nil, v41MHCMix{}, nil, v41StageErr(v41StageMHC, layer, err)
+	}
+	collapsed, err := v41MHCPreBF16(layer, updated, attnMix.pre)
+	if err != nil {
+		return nil, v41MHCMix{}, nil, err
+	}
+	normalized, err := m.v41FFNNorm(layer, collapsed, float32(m.Cfg.RMSNormEps), scratch.ffnNorm)
+	return updated, mix, normalized, err
+}

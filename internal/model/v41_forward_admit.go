@@ -159,18 +159,11 @@ func (m *Model) v41EngramForwardAdmitted() error {
 	return nil
 }
 
-// v41CompressIndexForwardAdmitted fails closed when the config declares a
-// CED/CSA2 compressor regime or a lightning-indexer source that lies WITHIN the
-// model's decoder stack. The reduced text assembly executes neither stage (their
-// packed-row / compressed-stream inputs cannot be materialized weight-free — see
-// the scope note at the top of this file), so silently dropping a declared
-// in-range compressor/indexer layer would emit reduced logits for a model the
-// assembly never ran. Declarations that only touch out-of-range layers stay
-// admitted, which keeps the reduced oracle fixture runnable: it derives from the
-// published 40-layer config but narrows NumLayers to 1, so every CompressRatios
-// entry above index 0 and every index source ({2,8,...}) is unreachable. Executing
-// the real compressor/indexer stages is #13006's remaining integration work; until
-// then this is the fail-closed boundary.
+// v41CompressIndexForwardAdmitted checks only tensors a layer owns: compressed
+// producers need compressor weights, every index-query source needs its query
+// and head-weight projections, and only index-key producers need wk/k_norm.
+// Shared readers resolve already-published source rows. Ratio-one assembly stays
+// closed even though its standalone compressor helper is implemented.
 //
 // Two malformed-schedule arms are also refused here: a negative ratio (invalid
 // geometry, never a compressed layer) and a schedule shorter than the decoder
@@ -179,6 +172,18 @@ func (m *Model) v41EngramForwardAdmitted() error {
 func (m *Model) v41CompressIndexForwardAdmitted() error {
 	d41 := m.Cfg.DeepSeekV41
 	if d41 == nil {
+		// The canonical GGUF identity may retain only the flat schedule before
+		// optional metadata attachment. That absence cannot turn active ratio one
+		// into window-only execution. Preserve all other nil-metadata behavior.
+		for layer, ratio := range m.Cfg.CompressRatios {
+			if layer >= m.Cfg.NumLayers {
+				break
+			}
+			if ratio == 1 {
+				return v41StageErr(v41StageCompress, layer,
+					fmt.Errorf("%w: layer %d declares ratio-one compression but the ratio-one forward assembly is not implemented", ErrV41ForwardStage, layer))
+			}
+		}
 		return nil
 	}
 	cfg := m.Cfg
@@ -191,17 +196,24 @@ func (m *Model) v41CompressIndexForwardAdmitted() error {
 			fmt.Errorf("%w: compression schedule declares %d ratios but the model has %d layers", ErrV41ForwardStage, len(d41.CompressRatios), cfg.NumLayers))
 	}
 	H := cfg.HiddenSize
+	roles := v41AttentionRoles(cfg)
 	for layer := 0; layer < cfg.NumLayers; layer++ {
-		// Ratio 0 and 1 are the uncompressed regimes. A ratio > 1 declares a
-		// compressed layer whose compressor must be wired; a negative ratio is
-		// malformed geometry that must fail closed rather than being silently
-		// treated as uncompressed.
+		// Only ratio 0 is window-only. Ratio 1 requires the reference's separate
+		// compressed projection/cache plus window contraction; its standalone
+		// helper does not yet implement that forward assembly. Refuse it regardless
+		// of source declarations or weight presence instead of executing plain KV.
 		ratio := d41.CompressRatios[layer]
 		switch {
 		case ratio < 0:
 			return v41StageErr(v41StageCompress, layer,
 				fmt.Errorf("%w: layer %d declares malformed compressor ratio %d", ErrV41ForwardStage, layer, ratio))
+		case ratio == 1:
+			return v41StageErr(v41StageCompress, layer,
+				fmt.Errorf("%w: layer %d declares ratio-one compression but the ratio-one forward assembly is not implemented", ErrV41ForwardStage, layer))
 		case ratio > 1:
+			if roles[layer] == V41AttentionRoleReader {
+				continue // readers consume the source cache and own no compressor tensors
+			}
 			width := v41CompressorWidth(cfg)
 			if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wkv.weight"), v41StageCompress, layer, width, H); err != nil {
 				return err
@@ -220,6 +232,9 @@ func (m *Model) v41CompressIndexForwardAdmitted() error {
 		if layer < 0 || layer >= cfg.NumLayers {
 			continue
 		}
+		if d41.CompressRatios[layer] == 0 {
+			continue // window-only layers do not execute a declared indexer
+		}
 		if indexHeads <= 0 || indexDim <= 0 {
 			return v41StageErr(v41StageIndexer, layer,
 				fmt.Errorf("%w: layer %d declares a lightning-indexer source but the indexer geometry (nHeads=%d headDim=%d) is not declared", ErrV41ForwardStage, layer, indexHeads, indexDim))
@@ -232,11 +247,22 @@ func (m *Model) v41CompressIndexForwardAdmitted() error {
 		if err := m.v41AdmitShape(layerName(layer, "indexer.wq_b.weight"), v41StageIndexer, layer, wq, cfg.QLoraRank); err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(layer, "indexer.wk.weight"), v41StageIndexer, layer, indexDim, v41CompressorWidth(cfg)); err != nil {
+		plan, err := v41AttentionPlanFor(cfg, layer, roles)
+		if err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(layer, "indexer.k_norm.weight"), v41StageIndexer, layer, indexDim); err != nil {
-			return err
+		if plan.Role == V41AttentionRoleReader {
+			if !indexSourceAt(d41, plan.KVSourceLayer) {
+				return v41StageErr(v41StageIndexer, layer,
+					fmt.Errorf("%w: index-only layer %d requires keys owned by KV source %d", ErrV41ForwardStage, layer, plan.KVSourceLayer))
+			}
+		} else {
+			if err := m.v41AdmitShape(layerName(layer, "indexer.wk.weight"), v41StageIndexer, layer, indexDim, v41CompressorWidth(cfg)); err != nil {
+				return err
+			}
+			if err := m.v41AdmitShape(layerName(layer, "indexer.k_norm.weight"), v41StageIndexer, layer, indexDim); err != nil {
+				return err
+			}
 		}
 		if err := m.v41AdmitShape(layerName(layer, "indexer.weights_proj.weight"), v41StageIndexer, layer, indexHeads, H); err != nil {
 			return err
@@ -252,9 +278,11 @@ func (m *Model) v41CompressIndexForwardAdmitted() error {
 func v41CompressorWidth(cfg Config) int { return cfg.HeadDim }
 
 // v41CompressedRows pools the per-position projected KV rows of one layer
-// through the CED/CSA2 compressor. It returns the emitted compressed rows in
-// causal order. A non-compressed regime returns the input rows unchanged. It
-// fails closed on any malformed geometry rather than emitting a partial stream.
+// through the CED/CSA2 compressor. Ratio one projects each carrier through wkv
+// and the existing BF16/learned-RMSNorm tail, with no gate or pooling. Ratio zero
+// returns the ordinary KV rows unchanged. This helper does not admit a shared
+// ratio-one source to the forward assembly; its ownership and cache integration
+// remain fenced by v41KVSourceForwardAdmitted.
 func (m *Model) v41CompressedRows(l int, ratio int, kvRows [][]float32, inputs [][]float32) ([][]float32, error) {
 	return m.v41CompressedRowsWithProjection(l, ratio, kvRows, inputs, nil)
 }
@@ -264,7 +292,7 @@ func (m *Model) v41CompressedRowsWithProjection(l int, ratio int, kvRows [][]flo
 }
 
 func (m *Model) v41CompressedRowsWithOperations(l int, ratio int, kvRows [][]float32, inputs [][]float32, project v41DenseProjectionFunc, normalize v41CompressorNormFunc) ([][]float32, error) {
-	if ratio <= 1 {
+	if ratio <= 0 {
 		return kvRows, nil
 	}
 	cfg := m.Cfg
@@ -291,9 +319,12 @@ func (m *Model) v41CompressedRowsWithOperations(l int, ratio int, kvRows [][]flo
 		if err != nil {
 			return nil, err
 		}
-		score, err := m.v41ProjMatRowsWithProjection(l, "attn.compressor.wgate.weight", in, width, H, project)
-		if err != nil {
-			return nil, err
+		var score []float32
+		if ratio > 1 {
+			score, err = m.v41ProjMatRowsWithProjection(l, "attn.compressor.wgate.weight", in, width, H, project)
+			if err != nil {
+				return nil, err
+			}
 		}
 		pooled, emitted, err := pool.PushNormalized(pos, kv, score, normWeight, eps)
 		if err != nil {
@@ -599,40 +630,36 @@ func (m *Model) v41ForwardAdmitted() error {
 	return nil
 }
 
-// v41AdmitMHC admits a layer's mHC coefficient block in either the reduced
-// fixture's legacy [mixWidth, H] geometry or the published artifact's flattened
-// four-stream geometry. The reference (inference/model.py mHC) projects the
-// width-4H flattened residual through hc_attn_fn; the staged vcruz Q2_K artifact
-// stores that projection as [4H, 24] (input-major), while the forward consumes it
-// logically as [24, 4H] (coefficient-major). Both the logical [mixWidth, 4H]
-// orientation and the stored [4H, mixWidth] transpose are admitted here so a real
-// artifact load reaches the forward instead of refusing at admission; every other
-// shape (including the reduced [mixWidth, H]) still falls through to the named
-// two-axis shape guard and fails closed. The base/scale vectors are unchanged.
+// v41AdmitMHC admits the attention mHC trio for reduced geometry, preserving
+// its legacy [mixWidth, H] or flattened layout. Full geometry requires separate
+// attention and FFN trios, each with a logical [mixWidth, 4H] coefficient matrix
+// or supported stored [4H, mixWidth] transpose. Each named matrix and its own
+// base/scale vectors pass exact shape admission; full geometry never falls back
+// to a reduced-width or absent-FFN stand-in.
 func (m *Model) v41AdmitMHC(l int) error {
-	H := m.Cfg.HiddenSize
-	name := layerName(l, "mhc.mixes.weight")
-	out, in, ok := m.residentShape(name)
-	if !ok {
-		return v41StageErr(v41StageMHC, l, fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
-	}
-	switch {
-	case out == v41MHCMixWidth && (in == H || in == 4*H):
-		// logical [mixWidth, in]
-	case in == v41MHCMixWidth && out == 4*H:
-		// stored artifact transpose [4H, mixWidth]
-	default:
-		return v41StageErr(v41StageMHC, l,
-			fmt.Errorf("%w: tensor %s shape [%d %d], want [%d %d], [%d %d] or [%d %d]",
-				ErrV41ForwardStage, name, out, in, v41MHCMixWidth, H, v41MHCMixWidth, 4*H, 4*H, v41MHCMixWidth))
-	}
-	if err := m.v41AdmitShape(layerName(l, "mhc.base"), v41StageMHC, l, v41MHCMixWidth); err != nil {
+	full, err := v41ForwardGeometry(m.Cfg)
+	if err != nil {
 		return err
 	}
-	if err := m.v41AdmitShape(layerName(l, "mhc.scale"), v41StageMHC, l, 3); err != nil {
+	if err := m.v41AdmitMHCNamed(l, "mhc.mixes.weight", "mhc.base", "mhc.scale", full); err != nil {
 		return err
+	}
+	if full {
+		return m.v41AdmitMHCNamed(l, "mhc.ffn_mixes.weight", "mhc.ffn_base", "mhc.ffn_scale", true)
 	}
 	return nil
+}
+
+func (m *Model) v41AdmitMHCNamed(l int, leaf, base, scale string, requireFlat bool) error {
+	name := layerName(l, leaf)
+	flat, _, ok := m.v41MHCWeightLayoutNamed(l, leaf)
+	if !ok || (requireFlat && !flat) {
+		return v41StageErr(v41StageMHC, l, fmt.Errorf("%w: tensor %s has no admitted mHC geometry (require flattened=%t)", ErrV41ForwardStage, name, requireFlat))
+	}
+	if err := m.v41AdmitShape(layerName(l, base), v41StageMHC, l, v41MHCMixWidth); err != nil {
+		return err
+	}
+	return m.v41AdmitShape(layerName(l, scale), v41StageMHC, l, 3)
 }
 
 // v41AdmitGroupedWoA admits a layer's attn.wo_a.weight in either declaration of
@@ -735,4 +762,36 @@ func (m *Model) v41AdmitShape(name string, stage v41ForwardStage, layer int, wan
 		}
 	}
 	return nil
+}
+
+// v41OwnsCompressedRows keeps the legacy self-contained PerLayer fixture path
+// while excluding shared readers. Only declared KV sources are producers in the
+// pinned full-model topology; the no-source fallback is not reference parity.
+func v41OwnsCompressedRows(plan V41AttentionPlan) bool {
+	return plan.Ratio > 1 && plan.Role != V41AttentionRoleReader
+}
+
+// v41CompressedReaderRows resolves publications by KV ownership, independently
+// of the most recent index-query source. Readers must never synthesize missing
+// source rows, project fresh index keys, or rotate borrowed publications again.
+func (m *Model) v41CompressedReaderRows(plan V41AttentionPlan, registry *V41AttentionState, positions int) ([][]float32, [][]float32, error) {
+	if registry == nil || plan.KVSourceLayer < 0 || positions < 0 {
+		return nil, nil, v41StageErr(v41StageAttention, plan.Layer,
+			fmt.Errorf("%w: layer %d has no shared KV source state", ErrV41ForwardStage, plan.Layer))
+	}
+	groups := positions / plan.kvGroupSize(m.Cfg)
+	rows, ok := registry.KVSourceRows(plan.KVSourceLayer)
+	if len(rows) != groups || (groups > 0 && !ok) {
+		return nil, nil, v41StageErr(v41StageAttention, plan.Layer,
+			fmt.Errorf("%w: layer %d requires %d completed rows from KV source %d, got %d", ErrV41ForwardStage, plan.Layer, groups, plan.KVSourceLayer, len(rows)))
+	}
+	var keys [][]float32
+	if indexSourceAt(m.Cfg.DeepSeekV41, plan.Layer) {
+		keys, ok = registry.IndexKeys(plan.KVSourceLayer)
+		if len(keys) != groups || (groups > 0 && !ok) {
+			return nil, nil, v41StageErr(v41StageIndexer, plan.Layer,
+				fmt.Errorf("%w: index-only layer %d requires %d keys from KV source %d, got %d", ErrV41ForwardStage, plan.Layer, groups, plan.KVSourceLayer, len(keys)))
+		}
+	}
+	return rows, keys, nil
 }

@@ -49,6 +49,10 @@ const elideRecentKeepMsgs = 4
 // tool_result, so the model (and a human reading the wire) sees that detail was elided rather
 // than silently truncated.
 func elideMarkerf(omittedRunes int, restoreID ...string) string {
+	return elideMarkerSummary(omittedRunes, "head and tail are preserved", restoreID...)
+}
+
+func elideMarkerSummary(omittedRunes int, summary string, restoreID ...string) string {
 	pointer := ""
 	if len(restoreID) > 0 && restoreID[0] != "" {
 		pointer = "; fak_context_restore " + compactRestoreIDField + restoreID[0]
@@ -56,7 +60,7 @@ func elideMarkerf(omittedRunes int, restoreID ...string) string {
 			pointer += " trace_id=" + strconv.Quote(restoreID[1])
 		}
 	}
-	return fmt.Sprintf("\n\n…[fak: %d characters of older tool_result output elided; head and tail are preserved%s]…\n\n", omittedRunes, pointer)
+	return fmt.Sprintf("\n\n…[fak: %d characters of older tool_result output elided; %s%s]…\n\n", omittedRunes, summary, pointer)
 }
 
 // Elision bail-reason vocabulary — the closed set of identity-return causes, mirrored on
@@ -475,11 +479,69 @@ func elideHeadTailWithRestore(s string, threshold int, restoreText string, trace
 		return s
 	}
 	omitted := len(r) - head - tail
+	summary := fmt.Sprintf("%d fragment lines", elidedFragmentLines(r[head:len(r)-tail]))
+	if len(summary) > len("head and tail are preserved") {
+		return s // never enlarge the existing marker budget or move the cuts
+	}
 	markerFields := []string{originatingTaskDigestID([]byte(restoreText))}
 	if len(trace) > 0 {
 		markerFields = append(markerFields, trace[0])
 	}
-	return string(r[:head]) + elideMarkerf(omitted, markerFields...) + string(r[len(r)-tail:])
+	return string(r[:head]) + elideMarkerSummary(omitted, summary, markerFields...) + string(r[len(r)-tail:])
+}
+
+// elidedFragmentLines counts splitlines of the actual omitted rune span. A cut may
+// land inside a source line, so these are fragment lines, not complete source lines.
+// CRLF is one boundary; a trailing boundary does not add a phantom empty line.
+//
+// Adapted from SWE-agent _get_content_stats/LastNObservations, replacing Python
+// str.splitlines with a no-allocation Go scan of the omitted fragment rather than
+// the entire original output. Existing Fak eligibility/cache guards are retained.
+// https://github.com/SWE-agent/SWE-agent/blob/3ea751c087f32b16e039a2233dd6eefecef325d5/sweagent/agent/history_processors.py
+//
+// MIT License
+// Copyright (c) 2024 John Yang, Carlos E. Jimenez, Alexander Wettig, Shunyu Yao,
+// Karthik Narasimhan, Ofir Press
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+func elidedFragmentLines(r []rune) int {
+	if len(r) == 0 {
+		return 0
+	}
+	lines := 0
+	for i := 0; i < len(r); i++ {
+		switch r[i] {
+		case '\r':
+			lines++
+			if i+1 < len(r) && r[i+1] == '\n' {
+				i++
+			}
+		case '\n', '\v', '\f', '\x1c', '\x1d', '\x1e', '\u0085', '\u2028', '\u2029':
+			lines++
+		default:
+			continue
+		}
+		if i == len(r)-1 {
+			return lines
+		}
+	}
+	return lines + 1
 }
 
 // objectValueSpan returns the [start,end) byte span (relative to obj) of the VALUE for the given

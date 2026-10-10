@@ -122,15 +122,17 @@ func TestV41SharedAttentionVulkan(t *testing.T) {
 	for _, role := range []bool{false, true} {
 		name := "plain-window"
 		if role {
-			name = "source-ratio2-reader-ratio0"
+			name = "source-reader-ratio2-with-own-windows"
 		}
 		t.Run(name, func(t *testing.T) {
 			fixture := func() *Model {
 				if role {
-					return v41ReaderWidthFixture(t)
+					m := v41ReaderWidthFixture(t)
+					m.Cfg.Window = []int{2, 2}
+					return m
 				}
 				m := v41IncrementalPlainModel(t, 2)
-				m.Cfg.Window = []int{2}
+				m.Cfg.Window = []int{2, 2}
 				return m
 			}
 			m, hostModel := fixture(), fixture()
@@ -147,8 +149,11 @@ func TestV41SharedAttentionVulkan(t *testing.T) {
 				t.Fatal("normal session failed to select the real operation")
 			}
 			calls, nonempty, readerCalls := 0, 0, 0
+			var positions [2]int
 			var lastOutput, lastCopy []float32
 			st.sharedAttention = func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
+				pos := positions[layer]
+				positions[layer]++
 				calls++
 				if calls > 40 {
 					t.Fatal("physical contraction bound exceeded")
@@ -158,8 +163,18 @@ func TestV41SharedAttentionVulkan(t *testing.T) {
 				}
 				if role && layer == 1 {
 					readerCalls++
-					if request.mode != compute.V41SharedAttentionCompressed || request.compressed.Ratio != 2 {
-						t.Fatal("reader used its private ratio instead of the source ratio")
+					window, groups := min(pos+1, 2), max(pos+1, 2)/2
+					if request.mode != compute.V41SharedAttentionPlain || request.plain.N != window+groups || len(request.idx) != window+groups {
+						t.Fatal("reader lost its own window or shared compressed rows")
+					}
+					for slot, id := range request.idx {
+						want := int32(slot)
+						if slot >= window && (slot-window+1)*2 > pos+1 {
+							want = -1
+						}
+						if id != want {
+							t.Fatal("reader selection lost source-width causality")
+						}
 					}
 				}
 				rows, gathered, heads, dim, scale := v41AttentionPhysicalSelection(t, request)

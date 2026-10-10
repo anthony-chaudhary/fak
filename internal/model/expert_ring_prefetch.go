@@ -107,11 +107,21 @@ func (w expertWeight) ringStaging() (key string, mk func() compute.Tensor, dt co
 		return w.ck.key, w.ck.mk, w.ck.dt, w.ck.bytes, true
 	case w.q4 != nil:
 		qt := w.q4
+		// Hints wrap resident raw bytes; lazy descriptors stay on the demand path,
+		// which materializes under its own staging contract.
+		if qt.lazy != nil {
+			return "", nil, 0, 0, false
+		}
 		return w.halKey(), func() compute.Tensor {
 			return compute.NewQ4K(compute.Default(), []int{qt.out, qt.in}, qt.raw)
 		}, compute.Q4_K, q4kResidentBytes(qt), true
 	case w.kq != nil:
 		qt := w.kq
+		// Hints wrap resident raw bytes; lazy descriptors stay on the demand path,
+		// which materializes under its own staging contract.
+		if qt.lazy != nil {
+			return "", nil, 0, 0, false
+		}
 		if desc, ok := LookupQuantDescriptor(qt.kind); ok && desc.SupportsHAL() {
 			return w.halKey(), func() compute.Tensor {
 				return desc.NewHostTensor(qt.out, qt.in, qt.raw)

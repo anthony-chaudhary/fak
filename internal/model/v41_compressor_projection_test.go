@@ -59,6 +59,9 @@ func v41CompressorTestFixtureIndex(t *testing.T, indexDim int) *Model {
 			shape []int
 		}{
 			{"mhc.mixes.weight", []int{4 * c.HiddenSize, v41MHCMixWidth}},
+			{"mhc.ffn_mixes.weight", []int{4 * c.HiddenSize, v41MHCMixWidth}},
+			{"mhc.ffn_base", []int{v41MHCMixWidth}},
+			{"mhc.ffn_scale", []int{3}},
 			{"attn.wq_a_norm.weight", []int{c.QLoraRank}},
 			{"attn.wq_b.weight", []int{512, c.QLoraRank}},
 			{"attn.wkv.weight", []int{512, c.HiddenSize}},
@@ -78,6 +81,9 @@ func v41CompressorTestFixtureIndex(t *testing.T, indexDim int) *Model {
 		}
 	}
 	manifest, raw := synthBuildRaw(extra, func(name string, next func() float32) float32 {
+		if strings.HasSuffix(name, "mhc.ffn_scale") {
+			return .75
+		}
 		if strings.HasSuffix(name, "norm.weight") {
 			return 0.8 + 0.2*next()
 		}
@@ -88,6 +94,16 @@ func v41CompressorTestFixtureIndex(t *testing.T, indexDim int) *Model {
 		m.manifest[name] = meta
 	}
 	m.raw = append(m.raw, raw...)
+	return m
+}
+
+// v41CompressorProducerTestFixture declares the two producers whose projection,
+// retention, cache, and late-failure paths the compressor-specific tests drive.
+// The base fixture keeps layer 1 a reader for cross-layer ownership witnesses.
+func v41CompressorProducerTestFixture(t *testing.T) *Model {
+	t.Helper()
+	m := v41CompressorTestFixture(t)
+	m.Cfg.DeepSeekV41.KVSourceLayerIDs = []int{0, 1}
 	return m
 }
 
@@ -214,7 +230,7 @@ func TestV41CompressorProjectionActualSessionRoutes(t *testing.T) {
 	t.Parallel()
 	for _, deny := range []bool{false, true} {
 		t.Run(itoa(boolToIntV41Expert(deny)), func(t *testing.T) {
-			m, oracle := v41CompressorTestFixture(t), v41CompressorTestFixture(t)
+			m, oracle := v41CompressorProducerTestFixture(t), v41CompressorProducerTestFixture(t)
 			b := newV41CompressorTestBackend()
 			b.deny = deny
 			s := v41DenseTestSession(t, m, b)
@@ -241,7 +257,7 @@ func TestV41CompressorProjectionActualSessionRoutes(t *testing.T) {
 				}
 				history = append(history, ids...)
 				v41CompressorTestFiniteParity(t, got, want, "actual compressor Session vs separate host Session")
-				cold := v41CompressorTestFixture(t).NewSession()
+				cold := v41CompressorProducerTestFixture(t).NewSession()
 				coldLogits := cold.Prefill(history)
 				v41CompressorTestFiniteParity(t, got, coldLogits, "actual compressor continuation vs fresh full-history cold Session")
 				actualKeys, _ := s.v41Forward.attn.IndexKeys(0)
@@ -285,7 +301,7 @@ func TestV41CompressorProjectionActualSessionRoutes(t *testing.T) {
 						for _, leaf := range v41CompressorTestLeaves {
 							name := layerName(layer, leaf)
 							if len(named[name]) == 0 {
-								t.Fatalf("actual source/reader compressor product missing %s", name)
+								t.Fatalf("actual producer compressor product missing %s", name)
 							}
 							for _, op := range named[name] {
 								if op.in != 64 || op.out != 512 {
@@ -338,7 +354,7 @@ func TestV41CompressorProjectionActualSessionRoutes(t *testing.T) {
 // fak-test:runtime medium est=2s lane=default
 func TestV41CompressorProjectionRestoreOwnerAndStrictRefusal(t *testing.T) {
 	t.Parallel()
-	m := v41CompressorTestFixture(t)
+	m := v41CompressorProducerTestFixture(t)
 	b := newV41CompressorTestBackend()
 	source, target := v41DenseTestSession(t, m, b), v41DenseTestSession(t, m, b)
 	source.Prefill([]int{1, 2, 3})
@@ -361,7 +377,7 @@ func TestV41CompressorProjectionRestoreOwnerAndStrictRefusal(t *testing.T) {
 			}
 		}
 	}
-	oracle := v41CompressorTestFixture(t).NewSession()
+	oracle := v41CompressorProducerTestFixture(t).NewSession()
 	t.Cleanup(oracle.Close)
 	oracle.Prefill([]int{1, 2, 3})
 	v41CompressorTestFiniteParity(t, got, oracle.Step(4), "restored compressor owner")
@@ -437,7 +453,7 @@ func TestV41CompressorProjectionAbsoluteQueryCausality(t *testing.T) {
 // fak-test:runtime medium est=1s lane=default
 func TestV41CompressorProjectionDirectStepAdmittedSourceReader(t *testing.T) {
 	t.Parallel()
-	m := v41CompressorTestFixture(t)
+	m := v41CompressorProducerTestFixture(t)
 	b := newV41CompressorTestBackend()
 	s := v41DenseTestSession(t, m, b)
 	s.Prefill([]int{1, 2, 3})
@@ -452,7 +468,7 @@ func TestV41CompressorProjectionDirectStepAdmittedSourceReader(t *testing.T) {
 	if !stats.Committed || stats.LayerCalls != 2 {
 		t.Fatal("source/reader direct Step did not commit exactly one position per layer")
 	}
-	oracle := v41CompressorTestFixture(t).NewSession()
+	oracle := v41CompressorProducerTestFixture(t).NewSession()
 	t.Cleanup(oracle.Close)
 	v41CompressorTestFiniteParity(t, got, oracle.Prefill([]int{1, 2, 3, 4}), "admitted direct source/reader Step vs fresh full-history cold Session")
 	actualKeys, _ := s.v41Forward.attn.IndexKeys(0)
@@ -495,8 +511,12 @@ func TestV41CompressorProjectionShortPrefixSourceReader(t *testing.T) {
 	v41CompressorTestFiniteParity(t, s.Prefill([]int{1}), host.Prefill([]int{1}), "single token source/reader")
 	for layer := 0; layer < 2; layer++ {
 		state := s.v41Forward.layerState(layer)
-		if !reflect.DeepEqual(state.partialPositions, []int{0}) || len(state.partialInputs) != 1 {
-			t.Fatal("short prefix must retain one original compressor carrier per layer")
+		if layer == 0 {
+			if !reflect.DeepEqual(state.partialPositions, []int{0}) || len(state.partialInputs) != 1 {
+				t.Fatal("short prefix must retain the source compressor carrier")
+			}
+		} else if len(state.partialPositions) != 0 || len(state.partialInputs) != 0 || len(state.partialKV) != 0 {
+			t.Fatal("reader retained a private compressor group")
 		}
 	}
 	if rows, _ := s.v41Forward.attn.KVSourceRows(0); len(rows) != 0 {
@@ -566,7 +586,7 @@ func TestV41CompressorProjectionShortPrefixSourceReader(t *testing.T) {
 // fak-test:runtime medium est=3s lane=default
 func TestV41CompressorProjectionPrismLoRAIndependentScalar(t *testing.T) {
 	t.Parallel()
-	m := v41CompressorTestFixture(t)
+	m := v41CompressorProducerTestFixture(t)
 	inputs := make([][]float32, 2)
 	for row := range inputs {
 		inputs[row] = make([]float32, 64)
@@ -637,7 +657,7 @@ func TestV41CompressorProjectionPrismLoRAIndependentScalar(t *testing.T) {
 	if !reflect.DeepEqual(inputs, original) {
 		t.Fatal("adapted compressor mutated original source carriers")
 	}
-	plain := v41CompressorTestFixture(t)
+	plain := v41CompressorProducerTestFixture(t)
 	base, err := plain.v41CompressedRows(0, 2, inputs, inputs)
 	if err != nil {
 		t.Fatal(err)
@@ -645,7 +665,7 @@ func TestV41CompressorProjectionPrismLoRAIndependentScalar(t *testing.T) {
 	if loraMaxAbsDiff(got[0], base[0]) < 1e-4 {
 		t.Fatal("independent adapted compressor fixture is vacuous")
 	}
-	deviceOracle := v41CompressorTestFixture(t)
+	deviceOracle := v41CompressorProducerTestFixture(t)
 	if err := deviceOracle.SetPrismHadamard(PrismHadamardSpec{BlockSize: 4, SignWidths: []int{64}, SignValues: signs, WeightNames: names}); err != nil {
 		t.Fatal(err)
 	}
@@ -662,7 +682,7 @@ func TestV41CompressorProjectionPrismLoRAIndependentScalar(t *testing.T) {
 // fak-test:runtime medium est=2s lane=default
 func TestV41CompressorProjectionSharedWeightLifetime(t *testing.T) {
 	t.Parallel()
-	m := v41CompressorTestFixture(t)
+	m := v41CompressorProducerTestFixture(t)
 	b := newV41CompressorTestBackend()
 	source := v41DenseTestSession(t, m, b)
 	source.Prefill([]int{1, 2, 3})
@@ -742,14 +762,18 @@ func v41CompressorTestFreshCold(t *testing.T, s *Session, history []int, indexDi
 
 // fak-test:justify why=contract when=changed:internal/model/**
 // fak-test:runtime medium est=4s lane=default
-func TestV41CompressorProjectionDeclaredIndexWidthSourceReader(t *testing.T) {
+func TestV41CompressorProjectionDeclaredIndexWidthProducers(t *testing.T) {
 	t.Parallel()
 	defer func() {
 		if value := recover(); value != nil {
 			t.Fatalf("declared index-width Session unexpectedly panicked: %T %v", value, value)
 		}
 	}()
-	fixture := func() *Model { return v41CompressorTestFixtureIndex(t, 128) }
+	fixture := func() *Model {
+		m := v41CompressorTestFixtureIndex(t, 128)
+		m.Cfg.DeepSeekV41.KVSourceLayerIDs = []int{0, 1}
+		return m
+	}
 	m := fixture()
 	b := newV41CompressorTestBackend()
 	s := v41DenseTestSession(t, m, b)
@@ -831,7 +855,7 @@ func TestV41CompressorProjectionPerLayerIndexSourceOwnHistory(t *testing.T) {
 		}
 	}()
 	fixture := func() *Model {
-		m := v41CompressorTestFixture(t)
+		m := v41CompressorProducerTestFixture(t)
 		m.Cfg.NumLayers = 1
 		m.Cfg.DeepSeekV41.CompressRatios = []int{2}
 		m.Cfg.DeepSeekV41.KVSourceLayerIDs = nil

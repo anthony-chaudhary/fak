@@ -606,6 +606,41 @@ func TestRuntimeProofRejectsDirtyMatchingArtifact(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=10ms
+func TestRuntimeProofProgressPreservesFailureAndSortedProofID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "maturity.progress.json")
+	oldResolver := resolveRuntimeFak
+	resolveRuntimeFak = func() (string, error) { return "", fmt.Errorf("private fixture path") }
+	t.Cleanup(func() { resolveRuntimeFak = oldResolver })
+	witnesses := map[string]RuntimeProof{
+		"zeta":  {Command: "fak version modules", OutputContains: "zeta"},
+		"alpha": {Command: "fak version modules", OutputContains: "alpha"},
+	}
+	baseline := runRuntimeProofs(t.TempDir(), witnesses, newRuntimeProofProgress(""))
+	traced := runRuntimeProofs(t.TempDir(), witnesses, newRuntimeProofProgress(path))
+	if baseline == nil || traced == nil || baseline.Error() != traced.Error() {
+		t.Fatalf("diagnostics changed proof failure: baseline=%v traced=%v", baseline, traced)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record struct {
+		Phase      string `json:"phase"`
+		ProofIndex int    `json:"proof_index"`
+		ElapsedMS  int64  `json:"elapsed_ms"`
+	}
+	if err := json.Unmarshal(data, &record); err != nil {
+		t.Fatal(err)
+	}
+	if record.Phase != "verify_artifact" || record.ProofIndex != 1 || record.ElapsedMS < 0 {
+		t.Fatalf("last proof snapshot = %s", data)
+	}
+	if len(data) > 256 || strings.Contains(string(data), "private") || strings.Contains(string(data), "alpha") {
+		t.Fatalf("snapshot must contain bounded metadata only: %s", data)
+	}
+}
+
 func TestRuntimeProofRejectsStalePathArtifact(t *testing.T) {
 	root := initRuntimeProofGitRepo(t)
 	writeRuntimeProofFixture(t, root, []RuntimeProof{{

@@ -118,8 +118,9 @@ func (m *Model) residentStoreReport() *ResidentReport {
 			continue // counted once as Q6KEmbed*
 		}
 		r.KQuantTensors++
-		r.KQuantBytes += int64(len(qt.raw))
-		r.KQuantParams += int64(len(qt.raw) / qt.kind.blockBytes() * qt.kind.blockWeights())
+		rawBytes := len(qt.residentRawSnapshot())
+		r.KQuantBytes += int64(rawBytes)
+		r.KQuantParams += int64(rawBytes / qt.kind.blockBytes() * qt.kind.blockWeights())
 	}
 	if m.Q2KEmbedding != nil {
 		switch m.Q2KEmbedding.Format() {
@@ -214,7 +215,7 @@ func (m *Model) MoEResidentWeightBytes() (replicated, expert int64, ok bool) {
 		if qt == tiedQ6K {
 			continue // shared with Q2KEmbedding below; count once
 		}
-		add(name, int64(len(qt.raw)))
+		add(name, int64(len(qt.residentRawSnapshot())))
 	}
 	if m.Q2KEmbedding != nil {
 		add("model.embed_tokens.weight", int64(m.Q2KEmbedding.Bytes()))

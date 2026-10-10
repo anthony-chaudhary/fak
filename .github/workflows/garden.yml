@@ -79,7 +79,26 @@ jobs:
       # Explicit Bash keeps pipefail enabled so tee cannot hide a failed gate.
       - name: garden bundle gate (--check)
         shell: bash
+        env:
+          # Bounded, fixed-vocabulary evidence only; raw child output is withheld.
+          FAK_SCORECARD_DIAGNOSTICS_DIR: ${{ runner.temp }}/garden-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
         run: go run ./cmd/fak garden --check --json | tee "$RUNNER_TEMP/garden-payload.json"
+
+      # Producers replace their last progress snapshot before expensive phases,
+      # so evidence survives even an outer process-tree timeout. Never recollect.
+      - name: retain garden timeout diagnostics
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: garden-timeout-diagnostics
+          path: |
+            ${{ runner.temp }}/garden-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}/slop-*/run.json
+            ${{ runner.temp }}/garden-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}/slop-*/progress.json
+            ${{ runner.temp }}/garden-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}/maturity-*/run.json
+            ${{ runner.temp }}/garden-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}/maturity-*/progress.json
+          if-no-files-found: warn
+          retention-days: 7
 
       # Render the captured verdict even after a red gate, without recollecting.
       # Missing or invalid evidence is a reporting failure, never a green substitute.

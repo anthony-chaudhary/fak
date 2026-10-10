@@ -897,6 +897,104 @@ GO_BUILD_TIMEOUT = 300
 # is available -- see build_fak_binary.
 GO_RUN_PREFIX = ("go", "run", "./cmd/fak")
 
+# Diagnostics are an opt-in side channel, never an input to the score or gate.
+# Only fixed-vocabulary progress is publishable: arbitrary child output can carry
+# credentials, private paths or hostnames even when its tail is short.
+PROGRESS_PREFIX = "FAK_SCORECARD_PROGRESS "
+PROGRESS_PHASES = {
+    "slop": {"gather_go", "gather_asm", "read_metadata", "git_churn",
+             "duplication", "dead_code", "comment_slop", "vacuous_tests",
+             "stub_masquerade", "churn_bloat", "build_payload"},
+    "maturity": {"gather_facts", "load_proofs", "runtime_proofs_start",
+                 "verify_artifact", "execute_proof", "runtime_proofs_complete",
+                 "adjudicate"},
+}
+
+
+def _write_diagnostic(path: Path, payload: dict[str, Any]) -> bool:
+    # Atomic replacement leaves the previous complete record readable after a
+    # process-tree kill. The temporary file is not included in the CI artifact.
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=".progress-", suffix=".tmp", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(json.dumps(payload) + "\n")
+        temporary.replace(path)
+        return True
+    except (OSError, ValueError):
+        return False  # Observability must not alter an existing scorecard result.
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _diagnostic_stream(output: str | bytes | None, key: str) -> dict[str, Any]:
+    data = output if isinstance(output, bytes) else (output or "").encode("utf-8")
+    records = []
+    for line in data[-8192:].decode("utf-8", errors="replace").splitlines()[-64:]:
+        if not line.startswith(PROGRESS_PREFIX) or len(line) > 256:
+            continue
+        try:
+            record = json.loads(line[len(PROGRESS_PREFIX):])
+        except ValueError:
+            continue
+        if not isinstance(record, dict) or record.get("schema") != "fak-scorecard-progress/1":
+            continue
+        if type(record.get("phase")) is not str or record["phase"] not in PROGRESS_PHASES[key]:
+            continue
+        elapsed, proof = record.get("elapsed_ms"), record.get("proof_index")
+        if type(elapsed) is not int or not 0 <= elapsed <= 86400000:
+            continue
+        if type(proof) is not int or not 0 <= proof <= 1000000:
+            continue
+        # Reconstruct, rather than copying fields a child could add to a record.
+        records.append({"phase": record["phase"], "elapsed_ms": elapsed,
+                        "proof_index": proof})
+    return {"bytes": len(data), "progress_tail": records[-8:],
+            "byte_count_basis": "raw" if isinstance(output, bytes) else "utf8_reencoded",
+            "raw_output_retained": False}
+
+
+class _CardDiagnostics:
+    def __init__(self, card: dict[str, str] | str, timeout: int, fak_bin: str):
+        self.key = card.get("key", "") if isinstance(card, dict) else ""
+        self.path = None
+        self.started = time.monotonic()
+        directory = os.environ.get("FAK_SCORECARD_DIAGNOSTICS_DIR", "")
+        if not directory or self.key not in PROGRESS_PHASES:
+            return
+        try:
+            directory_path = Path(directory).resolve()
+            directory_path.mkdir(parents=True, exist_ok=True)
+            directory_path = Path(tempfile.mkdtemp(prefix=self.key + "-", dir=directory_path))
+        except (OSError, ValueError, RuntimeError):
+            return
+        self.path = directory_path / "run.json"
+        self.progress_path = directory_path / "progress.json"
+        self.payload = {"schema": "fak-scorecard-diagnostics/1", "card": self.key,
+                        "run_id": directory_path.name,
+                        "timeout_seconds": timeout,
+                        "runner": ("python" if self.key == "slop" else
+                                   "prebuilt" if fak_bin else "go-run")}
+        if not _write_diagnostic(self.progress_path, {"schema": "fak-scorecard-progress/1",
+                                "phase": "card_start", "elapsed_ms": 0, "proof_index": 0}):
+            self.path = None
+            return
+        self.finish("launching")
+
+    def finish(self, state: str, stdout: str | bytes | None = None,
+               stderr: str | bytes | None = None) -> None:
+        if self.path is None:
+            return
+        _write_diagnostic(self.path, {**self.payload, "state": state,
+                          "elapsed_ms": round((time.monotonic() - self.started) * 1000),
+                          "stdout": _diagnostic_stream(stdout, self.key),
+                          "stderr": _diagnostic_stream(stderr, self.key)})
+
 
 def default_jobs() -> int:
     """Default card concurrency: bounded by JOBS_CAP, never below 1."""
@@ -951,16 +1049,22 @@ def run_scorecard(root: Path, card: dict[str, str] | str, *, python: str, timeou
     argv, resolve_error = card_argv(root, card, python=python, fak_bin=fak_bin)
     if resolve_error:
         return None, resolve_error
+    diagnostic = _CardDiagnostics(card, timeout, fak_bin)
+    if diagnostic.path is not None:
+        argv = [*argv, "--progress-file", str(diagnostic.progress_path)]
     try:
         proc = subprocess.run(
             argv,
             cwd=str(root), capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=timeout,
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
+        diagnostic.finish("timeout", exc.stdout, exc.stderr)
         return None, f"timed out after {timeout}s"
     except (OSError, subprocess.SubprocessError) as exc:
+        diagnostic.finish("launch_error")
         return None, str(exc)
+    diagnostic.finish("exited", proc.stdout, proc.stderr)
     try:
         return json.loads(proc.stdout), ""
     except ValueError:

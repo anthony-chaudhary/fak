@@ -24,8 +24,23 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"math"
+)
+
+// ErrV41SparseSinkNonFinite identifies arithmetic overflow or a non-finite
+// inverse-rotation result in V41SparseAttentionSink. No partial output is
+// returned; callers retain their existing attention-stage rollback boundary.
+var ErrV41SparseSinkNonFinite = errors.New("model: DeepSeek V4.1 sparse sink produced a non-finite value")
+
+type v41SparseSinkStage string
+
+const (
+	v41SinkStageScore   v41SparseSinkStage = "score accumulate"
+	v41SinkStageSoftmax v41SparseSinkStage = "softmax denominator"
+	v41SinkStageValue   v41SparseSinkStage = "weighted value accumulate"
+	v41SinkStageInverse v41SparseSinkStage = "inverse rotation"
 )
 
 // V41SparseAttentionSinkOptions names the already-projected tensor geometry
@@ -161,6 +176,9 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 						dot += q[qBase+d] * kv[kvBase+d]
 					}
 					dot *= opt.Softmax
+					if !finite32(dot) {
+						return nil, sparseSinkNonFinite(v41SinkStageScore, b, m, h, row, -1, dot)
+					}
 					if dot > maxScore {
 						maxScore = dot
 					}
@@ -186,7 +204,15 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 						dot += q[qBase+d] * kv[kvBase+d]
 					}
 					// Match the rounded float32 score used by the maximum pass.
-					sum += exp32(float32(dot*opt.Softmax) - maxScore)
+					// A finite score gap may round to -Inf; exp(-Inf)=0 is valid.
+					term := exp32(float32(dot*opt.Softmax) - maxScore)
+					if !finite32(term) {
+						return nil, sparseSinkNonFinite(v41SinkStageSoftmax, b, m, h, row, -1, term)
+					}
+					sum += term
+				}
+				if !finite32(sum) {
+					return nil, sparseSinkNonFinite(v41SinkStageSoftmax, b, m, h, -1, -1, sum)
 				}
 				if sum == 0 {
 					continue
@@ -204,8 +230,14 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 						dot += q[qBase+d] * kv[kvBase+d]
 					}
 					weight := exp32(float32(dot*opt.Softmax)-maxScore) / sum
+					if !finite32(weight) {
+						return nil, sparseSinkNonFinite(v41SinkStageValue, b, m, h, row, -1, weight)
+					}
 					for d := 0; d < opt.HeadDim; d++ {
 						o[oBase+d] += weight * kv[kvBase+d]
+						if !finite32(o[oBase+d]) {
+							return nil, sparseSinkNonFinite(v41SinkStageValue, b, m, h, row, d, o[oBase+d])
+						}
 					}
 				}
 			}
@@ -223,8 +255,27 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 				}
 			}
 		}
+		// A callback can retain a previously supplied tail. Validate the final
+		// tensor after every callback has returned, not only its latest tail.
+		for i, value := range o {
+			if !finite32(value) {
+				head := i / opt.HeadDim
+				return nil, sparseSinkNonFinite(v41SinkStageInverse, head/(opt.M*opt.Heads), head/opt.Heads%opt.M, head%opt.Heads, -1, i%opt.HeadDim, value)
+			}
+		}
 	}
 	return o, nil
+}
+
+func sparseSinkNonFinite(stage v41SparseSinkStage, b, m, h, row, d int, value float32) error {
+	where := fmt.Sprintf("sparse sink %s produced a non-finite value b=%d m=%d h=%d", stage, b, m, h)
+	if row >= 0 {
+		where += fmt.Sprintf(" kvRow=%d", row)
+	}
+	if d >= 0 {
+		where += fmt.Sprintf(" element=%d", d)
+	}
+	return fmt.Errorf("%w: %s value=%v", ErrV41SparseSinkNonFinite, where, value)
 }
 
 // V41GroupedOutputProjection applies the V4.1 attention output projection in

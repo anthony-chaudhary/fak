@@ -258,8 +258,8 @@ func v41SharedAttentionCause(layer int, p v41SharedAttentionPayload, cause error
 		}
 		return errors.Join(v41CompressedNonFinite(layer, producer, 0, arithmetic.Head, group, element, math.Float32frombits(arithmetic.ValueBits)), cause)
 	}
-	// Plain selected execution intentionally tightens the unmodified host path's
-	// finite-arithmetic acceptance. Output failures do not invent a producer.
+	// Plain selected execution retains its selected-operation error wrapper.
+	// Output failures do not invent a producer.
 	return fmt.Errorf("%w: selected attention layer=%d mode=%d head=%d slot=%d stage=%d: %w", ErrV41ForwardStage, layer, p.mode, arithmetic.Head, slot, arithmetic.Stage, cause)
 }
 

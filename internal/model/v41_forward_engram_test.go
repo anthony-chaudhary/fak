@@ -53,6 +53,9 @@ func v41FullEngramModel(t *testing.T) (*Model, V41EngramLayout) {
 		{layerName(0, "attn_norm.weight"), []int{H}},
 		{layerName(0, "ffn_norm.weight"), []int{H}},
 		{layerName(0, "mhc.mixes.weight"), []int{4 * H, v41MHCMixWidth}},
+		{layerName(0, "mhc.ffn_mixes.weight"), []int{4 * H, v41MHCMixWidth}},
+		{layerName(0, "mhc.ffn_base"), []int{v41MHCMixWidth}},
+		{layerName(0, "mhc.ffn_scale"), []int{3}},
 		{layerName(0, "mhc.base"), []int{v41MHCMixWidth}},
 		{layerName(0, "mhc.scale"), []int{3}},
 		{layerName(0, "attn.wq_a.weight"), []int{cfg.QLoraRank, H}},
@@ -87,6 +90,10 @@ func v41FullEngramModel(t *testing.T) (*Model, V41EngramLayout) {
 			hasSuffix(name, "ffn_norm.weight") || hasSuffix(name, "attn.wq_a_norm.weight") ||
 			hasSuffix(name, "attn.kv_norm.weight"):
 			return 1.0
+		case hasSuffix(name, "mhc.ffn_scale"):
+			return .75
+		case hasSuffix(name, "mhc.ffn_base"):
+			return .125 * next()
 		case hasSuffix(name, "mhc.scale"):
 			return 1.0
 		case hasSuffix(name, "mhc.base"):
@@ -418,6 +425,9 @@ func v41RectangularEngramModel(t *testing.T, dim int) (*Model, V41EngramLayout) 
 		{layerName(0, "attn_norm.weight"), []int{H}},
 		{layerName(0, "ffn_norm.weight"), []int{H}},
 		{layerName(0, "mhc.mixes.weight"), []int{4 * H, v41MHCMixWidth}},
+		{layerName(0, "mhc.ffn_mixes.weight"), []int{4 * H, v41MHCMixWidth}},
+		{layerName(0, "mhc.ffn_base"), []int{v41MHCMixWidth}},
+		{layerName(0, "mhc.ffn_scale"), []int{3}},
 		{layerName(0, "mhc.base"), []int{v41MHCMixWidth}},
 		{layerName(0, "mhc.scale"), []int{3}},
 		{layerName(0, "attn.wq_a.weight"), []int{cfg.QLoraRank, H}},
@@ -452,6 +462,10 @@ func v41RectangularEngramModel(t *testing.T, dim int) (*Model, V41EngramLayout) 
 			hasSuffix(name, "ffn_norm.weight") || hasSuffix(name, "attn.wq_a_norm.weight") ||
 			hasSuffix(name, "attn.kv_norm.weight"):
 			return 1.0
+		case hasSuffix(name, "mhc.ffn_scale"):
+			return .75
+		case hasSuffix(name, "mhc.ffn_base"):
+			return .125 * next()
 		case hasSuffix(name, "mhc.scale"):
 			return 1.0
 		case hasSuffix(name, "mhc.base"):

@@ -222,7 +222,7 @@ func TestV41LayerStepRefusesNonPlainRoles(t *testing.T) {
 
 	// A reader layer (compressed regime following a declared source) must refuse.
 	m.Cfg.DeepSeekV41.KVSourceLayerIDs = []int{0}
-	m.Cfg.DeepSeekV41.CompressRatios = []int{0, 2, 0}
+	m.Cfg.DeepSeekV41.CompressRatios = []int{2, 2, 0}
 	m.Cfg.DeepSeekV41.IndexSourceLayerIDs = nil
 	roles := v41AttentionRoles(m.Cfg)
 	if roles[1] != V41AttentionRoleReader {
@@ -432,7 +432,7 @@ func lastHiddenRow(act *Activations) []float32 {
 
 // v41LayerStepInputs builds the input carrier for a step of the NEXT token id
 // through layer 0: the token's scaled embedding in stream 0 and the persistent
-// zero residuals a full forward initializes streams 1..3 to.
+// zero residuals on reduced geometry; full geometry repeats the BF16 embedding.
 func v41LayerStepInputs(t *testing.T, m *Model, next int, full bool) ([]float32, [][]float32) {
 	t.Helper()
 	cfg := m.Cfg
@@ -441,7 +441,12 @@ func v41LayerStepInputs(t *testing.T, m *Model, next int, full bool) ([]float32,
 	x := append([]float32(nil), embed[next*H:(next+1)*H]...)
 	scaleEmbedInPlace(x, cfg)
 	streams := [][]float32{x, make([]float32, H), make([]float32, H), make([]float32, H)}
-	_ = full
+	if full {
+		x = v41LatentNormOracleBF16(x)
+		for h := range streams {
+			streams[h] = append([]float32(nil), x...)
+		}
+	}
 	return x, streams
 }
 

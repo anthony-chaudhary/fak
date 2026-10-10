@@ -48,11 +48,11 @@ func quantizeV4DenseFP8TensorInto(
 	if err != nil {
 		return true, fmt.Errorf("safetensors: tensor %s: %w", scaleName, err)
 	}
-	decoded, err := decodeV4DenseFP8(weightName, weightEntry.Shape, weights, scales)
+	quantized, err := quantizeV4DenseFP8Q8(weightName, weightEntry.Shape, weights, scales)
 	if err != nil {
 		return true, err
 	}
-	m.q8w[weightName] = quantizeQ8(decoded, weightEntry.Shape[0], weightEntry.Shape[1])
+	m.q8w[weightName] = quantized
 	consumed[weightName] = true
 	consumed[scaleName] = true
 	return true, nil

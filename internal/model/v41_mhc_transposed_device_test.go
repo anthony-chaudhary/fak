@@ -11,15 +11,23 @@ import (
 
 type v41MHCTransposeBackend struct {
 	*v41MHCProjBackend
-	packed []float32
+	packed map[compute.Buffer][]float32
 	poison bool
 }
 
 func (b *v41MHCTransposeBackend) Upload(x compute.Tensor, dt compute.Dtype) compute.Tensor {
+	var packed []float32
 	if dt == compute.F32 && len(x.Shape) == 2 && x.Shape[0] == v41MHCMixWidth && x.Shape[1] == b.in {
-		b.packed = append([]float32(nil), b.Backend.Read(x)...)
+		packed = append([]float32(nil), b.Backend.Read(x)...)
 	}
-	return b.v41MHCProjBackend.Upload(x, dt)
+	y := b.v41MHCProjBackend.Upload(x, dt)
+	if packed != nil {
+		if b.packed == nil {
+			b.packed = map[compute.Buffer][]float32{}
+		}
+		b.packed[y.Buf()] = packed
+	}
+	return y
 }
 
 func (b *v41MHCTransposeBackend) Free(x compute.Tensor) {
@@ -43,7 +51,7 @@ func TestV41MHCTransposedDeviceDispatch(t *testing.T) {
 	b := &v41MHCTransposeBackend{v41MHCProjBackend: newV41MHCProjBackend(4*m.Cfg.HiddenSize, false), poison: true}
 	s := v41EngProjSession(t, m, b)
 	name := layerName(0, "mhc.mixes.weight")
-	stored := append([]float32(nil), m.tensor(name)...)
+	stored := [][]float32{append([]float32(nil), m.tensor(name)...), append([]float32(nil), m.tensor(layerName(0, "mhc.ffn_mixes.weight"))...)}
 	for i, ids := range [][]int{{1, 2}, {3}} {
 		var got []float32
 		if i == 0 {
@@ -60,18 +68,21 @@ func TestV41MHCTransposedDeviceDispatch(t *testing.T) {
 		}
 		v41GroupedParity(t, got, lastLogits(m.Forward(prefix)), 1e-4)
 	}
-	if b.stages != 1 || b.attempts != 3 || len(b.operations) != 3 || len(b.packed) != len(stored) {
+	if b.stages != 2 || b.attempts != 6 || len(b.operations) != 6 || len(b.packed) != 2 {
 		t.Fatalf("transposed immutable staging/dispatch=%d/%d/%d packed=%d", b.stages, b.attempts, len(b.operations), len(b.packed))
 	}
-	for out := 0; out < v41MHCMixWidth; out++ {
-		for in := 0; in < b.in; in++ {
-			if b.packed[out*b.in+in] != stored[in*v41MHCMixWidth+out] {
-				t.Fatal("device weight was not reoriented from input-major storage")
+	for weight, packed := range b.packed {
+		source := stored[b.weightIndex[weight]]
+		for out := 0; out < v41MHCMixWidth; out++ {
+			for in := 0; in < b.in; in++ {
+				if packed[out*b.in+in] != source[in*v41MHCMixWidth+out] {
+					t.Fatal("named device weight was not reoriented")
+				}
 			}
 		}
 	}
-	if !reflect.DeepEqual(m.tensor(name), stored) {
-		t.Fatal("reorientation mutated the model's weight storage")
+	if !reflect.DeepEqual(m.tensor(name), stored[0]) || !reflect.DeepEqual(m.tensor(layerName(0, "mhc.ffn_mixes.weight")), stored[1]) {
+		t.Fatal("reorientation mutated model weights")
 	}
 	for _, op := range b.operations {
 		if op.upload != 4*b.in || op.read != 4*v41MHCMixWidth {
@@ -80,7 +91,7 @@ func TestV41MHCTransposedDeviceDispatch(t *testing.T) {
 		for out, value := range op.result {
 			var want float64
 			for in, activation := range op.activation {
-				want += float64(stored[in*v41MHCMixWidth+out]) * float64(activation)
+				want += float64(stored[b.weightIndex[op.weight]][in*v41MHCMixWidth+out]) * float64(activation)
 			}
 			if math.Abs(float64(value)-want) > 1e-4*math.Max(1, math.Abs(want)) {
 				t.Fatalf("raw transposed dot[%d]=%g want=%g", out, value, want)
@@ -110,7 +121,7 @@ func TestV41MHCTransposedSelectedFailure(t *testing.T) {
 		b.fault, b.site, b.cause = true, "matmul", fault
 		err := recoverError(func() { s.Step(3) })
 		var closed *BackendForwardOperationError
-		if !errors.As(err, &closed) || closed.Path != "v41-mhc-projection" || closed.Layer != 1 || closed.Stage != "matmul" || !errors.Is(err, fault) {
+		if !errors.As(err, &closed) || closed.Path != "v41-mhc-projection" || closed.Layer != 0 || closed.Stage != "matmul" || !errors.Is(err, fault) {
 			t.Fatalf("selected transposed failure lost its identity: %v", err)
 		}
 		if b.faultAttempts != 2 || !s.BackendSessionClosed() || len(b.live) != 0 || !reflect.DeepEqual(captureV41ForwardSnapshot(s.v41Forward), before) {

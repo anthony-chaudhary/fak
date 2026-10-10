@@ -35,6 +35,10 @@ import (
 // exactly: per-head dot product, per-element ReLU, then the learned per-head
 // reduction applied to the rectified scores.
 //
+// Products and running sums are explicitly rounded to float32 in dimension and
+// head order. The conversions prevent fused multiply-add from discarding an
+// intermediate rounding, preserving the scalar F32 scoring contract.
+//
 // q is row-major [nHeads * headDim] for one query position. keys is row-major
 // [compressLen * headDim]. weights is the per-head reduction weight
 // (weights_proj(x) * softmaxScale * nHeads**-0.5) already folded by the caller,
@@ -48,6 +52,12 @@ func V41IndexerScore(q, keys, weights []float32, nHeads, headDim, compressLen in
 	}
 	if compressLen < 0 {
 		return nil, fmt.Errorf("model: v41 indexer score negative compress length %d", compressLen)
+	}
+	if nHeads > int(^uint(0)>>1)/headDim {
+		return nil, fmt.Errorf("model: v41 indexer score query geometry %d*%d overflows", nHeads, headDim)
+	}
+	if compressLen > int(^uint(0)>>1)/headDim {
+		return nil, fmt.Errorf("model: v41 indexer score key geometry %d*%d overflows", compressLen, headDim)
 	}
 	if len(weights) != nHeads {
 		return nil, fmt.Errorf("model: v41 indexer score weight length %d, want %d", len(weights), nHeads)
@@ -82,14 +92,14 @@ func V41IndexerScore(q, keys, weights []float32, nHeads, headDim, compressLen in
 			queryBase := h * headDim
 			var dot float32
 			for d := 0; d < headDim; d++ {
-				dot += q[queryBase+d] * keys[keyBase+d]
+				dot = float32(dot + float32(q[queryBase+d]*keys[keyBase+d]))
 			}
 			// The reference rectifies before the learned head reduction:
 			//   index_score = (index_score.relu_() * weights.unsqueeze(-1)).sum(dim=2)
 			if dot < 0 {
 				dot = 0
 			}
-			acc += dot * weights[h]
+			acc = float32(acc + float32(dot*weights[h]))
 		}
 		score[t] = acc
 	}

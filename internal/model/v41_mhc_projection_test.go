@@ -39,9 +39,13 @@ func v41MHCProjPhase(t *testing.T, m *Model, phase string) map[string]float64 {
 func v41MHCProjFixture(t *testing.T) *Model {
 	t.Helper()
 	m := v41RawFullFlattenedMHC(t)
-	name := layerName(0, "mhc.mixes.weight")
-	m.kqw = map[string]*kQuantTensor{name: q2kFixtureTensor(24, 4*m.Cfg.HiddenSize, 136681001)}
-	delete(m.manifest, name)
+	m.kqw = map[string]*kQuantTensor{}
+	for phase, leaf := range []string{"mhc.mixes.weight", "mhc.ffn_mixes.weight"} {
+		name := layerName(0, leaf)
+		m.kqw[name] = q2kFixtureTensor(24, 4*m.Cfg.HiddenSize, uint64(136681001+phase))
+		delete(m.manifest, name)
+	}
+
 	return m
 }
 
@@ -50,6 +54,7 @@ type v41MHCProjBackend struct {
 	in               int
 	decline          bool
 	weights          map[compute.Buffer]bool
+	weightIndex      map[compute.Buffer]int
 	outputs          map[compute.Buffer]int
 	operations       []v41MHCProjOperation
 	stages, attempts int
@@ -69,7 +74,7 @@ type v41MHCProjOperation struct {
 }
 
 func newV41MHCProjBackend(in int, decline bool) *v41MHCProjBackend {
-	return &v41MHCProjBackend{v41DenseTestBackend: newV41DenseTestBackend(), in: in, decline: decline, weights: map[compute.Buffer]bool{}, outputs: map[compute.Buffer]int{}, payloads: map[compute.Buffer][]float32{}, weightFrees: map[compute.Buffer]int{}}
+	return &v41MHCProjBackend{v41DenseTestBackend: newV41DenseTestBackend(), in: in, decline: decline, weights: map[compute.Buffer]bool{}, weightIndex: map[compute.Buffer]int{}, outputs: map[compute.Buffer]int{}, payloads: map[compute.Buffer][]float32{}, weightFrees: map[compute.Buffer]int{}}
 }
 func (b *v41MHCProjBackend) SupportsDeviceWeightDtype(dt compute.Dtype) bool {
 	return !(b.decline && dt == compute.Q2_K) && b.v41DenseTestBackend.SupportsDeviceWeightDtype(dt)
@@ -83,6 +88,7 @@ func (b *v41MHCProjBackend) Upload(x compute.Tensor, dt compute.Dtype) compute.T
 	}
 	if len(x.Shape) == 2 && x.Shape[0] == 24 && x.Shape[1] == b.in {
 		b.weights[y.Buf()] = true
+		b.weightIndex[y.Buf()] = b.stages
 		b.stages++
 	}
 	return y
@@ -178,17 +184,17 @@ func TestV41MHCProjectionActualDefaultSession(t *testing.T) {
 			upload += op.upload
 			read += op.read
 		}
-		if rows != len(ids) || delta["mhc_projection_device_rows"] != float64(len(ids)) || delta["mhc_projection_device_calls"] <= 0 || delta["mhc_projection_host_calls"] != 0 || delta["mhc_projection_host_rows"] != 0 || delta["mhc_projection_host_weight_f32_bytes"] != 0 {
+		if rows != 2*len(ids) || delta["mhc_projection_device_rows"] != float64(2*len(ids)) || delta["mhc_projection_device_calls"] <= 0 || delta["mhc_projection_host_calls"] != 0 || delta["mhc_projection_host_rows"] != 0 || delta["mhc_projection_host_weight_f32_bytes"] != 0 {
 			t.Errorf("actual default Session mHC route=%v recorded_rows=%d want=%d", delta, rows, len(ids))
 		}
-		if delta["mhc_projection_matmul_calls"] != float64(b.attempts-attempts) || delta["mhc_projection_activation_upload_bytes"] != float64(upload) || delta["mhc_projection_readback_bytes"] != float64(read) || upload != 4*b.in*len(ids) || read != 4*24*len(ids) {
+		if delta["mhc_projection_matmul_calls"] != float64(b.attempts-attempts) || delta["mhc_projection_activation_upload_bytes"] != float64(upload) || delta["mhc_projection_readback_bytes"] != float64(read) || upload != 8*b.in*len(ids) || read != 8*24*len(ids) {
 			t.Errorf("actual mHC API/transfer ledger=%v matmuls=%d upload=%d read=%d", delta, b.attempts-attempts, upload, read)
 		}
 		materializations := 1
 		if index == 2 {
 			materializations = len(ids)
 		}
-		if hostDelta["mhc_projection_device_calls"] != 0 || hostDelta["mhc_projection_device_rows"] != 0 || hostDelta["mhc_projection_matmul_calls"] != 0 || hostDelta["mhc_projection_host_rows"] != float64(len(ids)) || hostDelta["mhc_projection_host_weight_f32_bytes"] != float64(4*24*b.in*materializations) {
+		if hostDelta["mhc_projection_device_calls"] != 0 || hostDelta["mhc_projection_device_rows"] != 0 || hostDelta["mhc_projection_matmul_calls"] != 0 || hostDelta["mhc_projection_host_rows"] != float64(2*len(ids)) || hostDelta["mhc_projection_host_weight_f32_bytes"] != float64(8*24*b.in*materializations) {
 			t.Errorf("whole mHC dtype decline host ledger=%v", hostDelta)
 		}
 		if delta["mhc_projection_nanos"] <= 0 || hostDelta["mhc_projection_nanos"] <= 0 {
@@ -200,7 +206,7 @@ func TestV41MHCProjectionActualDefaultSession(t *testing.T) {
 			t.Errorf("ordinary default composition dense=%v grouped=%v", dense, group)
 		}
 	}
-	if b.stages != 1 || hostBackend.stages != 0 || len(hostBackend.operations) != 0 {
+	if b.stages != 2 || hostBackend.stages != 0 || len(hostBackend.operations) != 0 {
 		t.Errorf("immutable mHC staging device=%d declined=%d declined_ops=%d", b.stages, hostBackend.stages, len(hostBackend.operations))
 	}
 }
@@ -260,34 +266,41 @@ func v41MHCProjVariant(t *testing.T, dtype string, transposed, reduced bool, lay
 	if reduced {
 		in = m.Cfg.HiddenSize
 	}
+	leaves := []string{"mhc.mixes.weight"}
+	if !reduced {
+		leaves = append(leaves, "mhc.ffn_mixes.weight")
+	}
 	for layer := 0; layer < layers; layer++ {
-		name := layerName(layer, "mhc.mixes.weight")
-		meta := m.manifest[name]
-		if dtype == "Q2_K" {
-			if m.kqw == nil {
-				m.kqw = map[string]*kQuantTensor{}
+		for phase, leaf := range leaves {
+			name := layerName(layer, leaf)
+			meta := m.manifest[name]
+			if dtype == "Q2_K" {
+				if m.kqw == nil {
+					m.kqw = map[string]*kQuantTensor{}
+				}
+				m.kqw[name] = q2kFixtureTensor(24, in, uint64(136681020+2*layer+phase))
+				delete(m.manifest, name)
+				continue
 			}
-			m.kqw[name] = q2kFixtureTensor(24, in, uint64(136681020+layer))
-			delete(m.manifest, name)
-			continue
+			logical := make([]float32, 24*in)
+			for i := range logical {
+				logical[i] = float32((i*(layer+3+phase)+7+3*phase)%29-14) * .025
+			}
+			stored := logical
+			meta.Shape = []int{24, in}
+			if transposed {
+				stored = v41TransposeMixBlock(logical, in)
+				meta.Shape = []int{in, 24}
+			}
+			meta.Offset = len(m.raw)
+			for _, v := range stored {
+				var bytes [4]byte
+				binary.LittleEndian.PutUint32(bytes[:], math.Float32bits(v))
+				m.raw = append(m.raw, bytes[:]...)
+			}
+			meta.Nbytes = 4 * len(stored)
+			m.manifest[name] = meta
 		}
-		logical := make([]float32, 24*in)
-		for i := range logical {
-			logical[i] = float32((i*(layer+3)+7)%29-14) * .025
-		}
-		stored := logical
-		meta.Shape = []int{24, in}
-		if transposed {
-			stored = v41TransposeMixBlock(logical, in)
-			meta.Shape = []int{in, 24}
-		}
-		meta.Offset = len(m.raw)
-		for _, v := range stored {
-			var bytes [4]byte
-			binary.LittleEndian.PutUint32(bytes[:], math.Float32bits(v))
-			m.raw = append(m.raw, bytes[:]...)
-		}
-		m.manifest[name] = meta
 	}
 	return m
 }
@@ -327,14 +340,20 @@ func TestV41MHCProjectionRawFullAndReduced(t *testing.T) {
 				hostBackend.deny = scenario.dtype == "F32"
 				host = v41EngProjSession(t, control, hostBackend)
 			}
-			weights := make([][]float32, 2)
-			for layer := range weights {
+			phases := 1
+			if !scenario.reduced {
+				phases = 2
+			}
+			leaves := []string{"mhc.mixes.weight", "mhc.ffn_mixes.weight"}
+			weights := make([][]float32, 2*phases)
+			for i := range weights {
 				var ok bool
-				weights[layer], ok = m.residentF32Mat(layerName(layer, "mhc.mixes.weight"))
+				weights[i], ok = m.residentF32Mat(layerName(i/phases, leaves[i%phases]))
 				if !ok {
-					t.Fatal("independent raw weights unavailable")
+					t.Fatal("independent named raw weights unavailable")
 				}
 			}
+
 			for index, ids := range [][]int{{1, 2, 3}, {4}, {5, 6}} {
 				phase := "prefill"
 				if index == 1 {
@@ -350,17 +369,16 @@ func TestV41MHCProjectionRawFullAndReduced(t *testing.T) {
 				}
 				v41GroupedParity(t, got, want, 1e-4)
 				delta := v41DenseTestDelta(v41MHCProjPhase(t, m, phase), before)
-				if delta["mhc_projection_device_rows"] != float64(2*len(ids)) || delta["mhc_projection_host_rows"] != 0 || delta["mhc_projection_host_weight_f32_bytes"] != 0 {
+				if delta["mhc_projection_device_rows"] != float64(2*phases*len(ids)) || delta["mhc_projection_host_rows"] != 0 || delta["mhc_projection_host_weight_f32_bytes"] != 0 {
 					t.Errorf("raw route ledger=%v", delta)
 				}
-				if len(b.operations)-from != 2*len(ids) {
-					t.Fatalf("raw operations=%d want %d", len(b.operations)-from, 2*len(ids))
+				if len(b.operations)-from != 2*phases*len(ids) {
+					t.Fatalf("raw operations=%d want %d", len(b.operations)-from, 2*phases*len(ids))
 				}
 				for j, op := range b.operations[from:] {
-					layer := j / len(ids)
-					if index > 0 {
-						layer = j % 2
-					}
+					weightID := b.weightIndex[op.weight]
+					layer, mixPhase := weightID/phases, weightID%phases
+
 					if len(op.activation) != in || len(op.result) != coefficientWidth {
 						t.Fatalf("observed raw payload width=%d/%d want %d/%d", len(op.activation), len(op.result), in, coefficientWidth)
 					}
@@ -371,7 +389,7 @@ func TestV41MHCProjectionRawFullAndReduced(t *testing.T) {
 					for out := 0; out < 24; out++ {
 						var dot float64
 						for cell, v := range op.activation {
-							dot += float64(weights[layer][out*in+cell]) * float64(v)
+							dot += float64(weights[weightID][out*in+cell]) * float64(v)
 						}
 						if math.Abs(float64(op.result[out])-dot) > 1e-4*math.Max(1, math.Abs(dot)) {
 							t.Fatalf("raw-before-RMS output=%d got=%g want=%g", out, op.result[out], dot)
@@ -385,10 +403,10 @@ func TestV41MHCProjectionRawFullAndReduced(t *testing.T) {
 						if math.Abs(ss/float64(in)-1) > 1e-3 {
 							t.Errorf("reduced input must be normalized H row, RMS squared=%g", ss/float64(in))
 						}
-					} else if index == 0 && layer == 0 {
+					} else if index == 0 && layer == 0 && mixPhase == 0 {
 						embed := cpuOracleTensor(t, m, "model.embed_tokens.weight")
 						for cell := 0; cell < m.Cfg.HiddenSize; cell++ {
-							if op.activation[cell] != embed[ids[j%len(ids)]*m.Cfg.HiddenSize+cell] {
+							if op.activation[cell] != float32(v41RefBF16(float64(embed[ids[j%len(ids)]*m.Cfg.HiddenSize+cell]))) {
 								t.Fatal("full input normalized before raw projection")
 							}
 						}
@@ -440,7 +458,7 @@ func TestV41MHCProjectionLateSelectedFailure(t *testing.T) {
 			var recovered any
 			func() { defer func() { recovered = recover() }(); s.Step(4) }()
 			if !b.failed {
-				t.Fatal("late layer two selected mHC fault not reached")
+				t.Fatal("late layer-zero FFN mHC fault not reached")
 			}
 			if site == "unknown" {
 				if recovered != unknown {
@@ -456,7 +474,8 @@ func TestV41MHCProjectionLateSelectedFailure(t *testing.T) {
 				}
 
 				var selected *BackendForwardOperationError
-				if !ok || !errors.As(err, &selected) || !errors.Is(err, ErrV41ForwardStage) {
+				var projection *V41ProjectionOperationError
+				if !ok || !errors.As(err, &selected) || selected.Layer != 0 || !errors.As(err, &projection) || projection.Leaf != "mhc.ffn_mixes.weight" || !errors.Is(err, ErrV41ForwardStage) {
 					t.Errorf("selected mHC failure lacks typed identity/cause: %T", recovered)
 				}
 				if (site == "matmul" || site == "read") && !errors.Is(err, b.cause.(error)) {
@@ -536,8 +555,8 @@ func TestV41MHCProjectionRestoreForkOwnership(t *testing.T) {
 		host.Prefill([]int{1, 2, 3})
 		before := b.attempts
 		v41GroupedParity(t, branch.Step(4+index), host.Step(4+index), 1e-4)
-		if b.attempts-before != 2 {
-			t.Error("restored target did not select both mHC layers")
+		if b.attempts-before != 4 {
+			t.Error("restored target did not select both mHC phases in both layers")
 		}
 	}
 	left.Close()
@@ -546,15 +565,15 @@ func TestV41MHCProjectionRestoreForkOwnership(t *testing.T) {
 			t.Error("fork close freed sibling immutable mHC weight")
 		}
 	}
-	if b.stages != 2 {
-		t.Errorf("shared immutable mHC staging=%d want 2", b.stages)
+	if b.stages != 4 {
+		t.Errorf("shared immutable mHC staging=%d want 4", b.stages)
 	}
 	right.Close()
 	if err := m.CloseWeights(); err != nil {
 		t.Fatal(err)
 	}
-	if len(b.weights) != 2 {
-		t.Errorf("model-owned mHC residents=%d want 2", len(b.weights))
+	if len(b.weights) != 4 {
+		t.Errorf("model-owned mHC residents=%d want 4", len(b.weights))
 	}
 	for weight := range b.weights {
 		if b.weightFrees[weight] != 1 {
@@ -655,10 +674,10 @@ func TestV41MHCProjectionHostReturnedWeightSpanOnFailure(t *testing.T) {
 		t.Errorf("host downstream refusal lacks existing typed MHC layer/cause contract: %T", err)
 	}
 	phase := v41MHCProjPhase(t, m, "prefill")
-	if phase["mhc_projection_host_weight_f32_bytes"] != float64(2*4*24*b.in) {
-		t.Errorf("actual returned host span, including failing layer,=%g want %d", phase["mhc_projection_host_weight_f32_bytes"], 2*4*24*b.in)
+	if phase["mhc_projection_host_weight_f32_bytes"] != float64(3*4*24*b.in) {
+		t.Errorf("actual returned host span, including failing layer,=%g want %d", phase["mhc_projection_host_weight_f32_bytes"], 3*4*24*b.in)
 	}
-	if phase["mhc_projection_host_calls"] != 4 || phase["mhc_projection_host_rows"] != 4 || phase["mhc_projection_device_rows"] != 0 || b.stages != 0 || b.attempts != 0 {
+	if phase["mhc_projection_host_calls"] != 7 || phase["mhc_projection_host_rows"] != 7 || phase["mhc_projection_device_rows"] != 0 || b.stages != 0 || b.attempts != 0 {
 		t.Errorf("transposed host completion/device isolation=%v stages=%d attempts=%d", phase, b.stages, b.attempts)
 	}
 	if s.v41Forward != nil && len(s.v41Forward.history) != 0 {

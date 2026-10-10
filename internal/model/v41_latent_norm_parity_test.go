@@ -28,10 +28,8 @@ package model
 //     so a missing norm, a mis-ordered norm or substituted unit gains each move
 //     the expected logits beyond tolerance.
 //
-// The default reduced fixture (v41ReducedModel) and the unit-gain full fixture
-// (v41RawFullFlattenedMHC) are left byte-for-byte unchanged; this file only adds
-// an opt-in patched fixture and an independent oracle. Test-only, no production
-// edit.
+// The reduced oracle remains unchanged. This full oracle follows the two-phase
+// mHC graph, carried coefficients, and BF16 publication boundaries.
 
 import (
 	"encoding/binary"
@@ -98,10 +96,14 @@ func v41AllOnes(v []float32) bool {
 // v41LatentNormOpts selects the negative control applied by the independent
 // oracle; the zero value is the correct pinned reference.
 type v41LatentNormOpts struct {
-	omitQ     bool // skip the Q latent norm (the pre-#13290 producer)
-	omitKV    bool // skip the KV latent norm
-	qAfterB   bool // apply the Q norm AFTER wq_b instead of before (wrong order)
-	unitGains bool // substitute all-ones gains (the norm as a no-op)
+	omitQ               bool // skip the Q latent norm (the pre-#13290 producer)
+	omitKV              bool // skip the KV latent norm
+	qAfterB             bool // apply the Q norm AFTER wq_b instead of before (wrong order)
+	unitGains           bool // substitute all-ones gains (the norm as a no-op)
+	graphCurrentPre     bool // wrong: attention consumes its own pre, not incoming carry
+	graphReuseAttention bool // wrong: FFN reuses the attention coefficients
+	graphCombinedPost   bool // wrong: combine attention/FFN outputs in one post
+	graphStreamZero     bool // wrong: final head reads stream zero
 }
 
 // v41OracleMHCProjectFull transcribes the flattened four-stream mHC mix
@@ -166,15 +168,16 @@ func v41OracleForwardLatentNormHidden(t *testing.T, m *Model, ids []int, opts v4
 
 	embed := tensor("model.embed_tokens.weight")
 	x := make([][]float32, seq)
-	// Persistent four-stream set per position: stream 0 carries the live hidden,
-	// streams 1..3 the persistent residual (zero-initialized).
+	// Full reference starts with four owned BF16 copies and one-hot carry.
+	carry := make([][]float32, seq)
 	streams := make([][][]float32, seq)
 	for tt, id := range ids {
-		x[tt] = append([]float32(nil), embed[id*H:(id+1)*H]...)
+		x[tt] = v41LatentNormOracleBF16(embed[id*H : (id+1)*H])
+		carry[tt] = []float32{1, 0, 0, 0}
 		set := make([][]float32, 4)
 		set[0] = x[tt]
 		for h := 1; h < 4; h++ {
-			set[h] = make([]float32, H)
+			set[h] = append([]float32(nil), x[tt]...)
 		}
 		streams[tt] = set
 	}
@@ -215,10 +218,16 @@ func v41OracleForwardLatentNormHidden(t *testing.T, m *Model, ids []int, opts v4
 	}
 
 	for l := 0; l < cfg.NumLayers; l++ {
+		qGain = tensor(layerName(l, "attn.wq_a_norm.weight"))
+		kvGain = tensor(layerName(l, "attn.kv_norm.weight"))
+		attnNorm := tensor(layerName(l, "attn_norm.weight"))
 		ffnNorm := tensor(layerName(l, "ffn_norm.weight"))
 		wMix := tensor(layerName(l, "mhc.mixes.weight"))
 		mixBase := tensor(layerName(l, "mhc.base"))
 		mixScale := tensor(layerName(l, "mhc.scale"))
+		wFFN := tensor(layerName(l, "mhc.ffn_mixes.weight"))
+		ffnBase := tensor(layerName(l, "mhc.ffn_base"))
+		ffnScale := tensor(layerName(l, "mhc.ffn_scale"))
 		wQA := tensor(layerName(l, "attn.wq_a.weight"))
 		wQB := tensor(layerName(l, "attn.wq_b.weight"))
 		wKV := tensor(layerName(l, "attn.wkv.weight"))
@@ -237,11 +246,14 @@ func v41OracleForwardLatentNormHidden(t *testing.T, m *Model, ids []int, opts v4
 		hcComb := make([][]float64, seq)
 		preByPos := make([][]float32, seq)
 		for tt := 0; tt < seq; tt++ {
-			mixes := v41OracleMHCProjectFull(wMix, streams[tt], H, eps, true)
+			mixes := v41OracleMHCProjectFull(wMix, streams[tt], H, eps, m.manifest[layerName(l, "mhc.mixes.weight")].Shape[0] == 4*H)
 			p, po, c := oracleV41MHCKernel(mixes, toF64(mixScale), toF64(mixBase), 4, hcIters, hcEps)
 			hcPre[tt], hcPost[tt], hcComb[tt] = p, po, c
-			streams4 := [][]float64{toF64(streams[tt][0]), toF64(streams[tt][1]), toF64(streams[tt][2]), toF64(streams[tt][3])}
-			preByPos[tt] = toF32(oracleV41MHCPre(streams4, p))
+			incoming := carry[tt]
+			if opts.graphCurrentPre {
+				incoming = toF32(p)
+			}
+			preByPos[tt] = v41AttentionInputNormOracle(v41GraphOracleCollapse(streams[tt], incoming), attnNorm, eps)
 		}
 
 		// ---- attention projections with the latent norms ----
@@ -249,23 +261,23 @@ func v41OracleForwardLatentNormHidden(t *testing.T, m *Model, ids []int, opts v4
 		kvRows := make([][]float32, seq)
 		for tt := 0; tt < seq; tt++ {
 			c := preByPos[tt]
-			qLat := cpuOracleMatVec(wQA, c, cfg.QLoraRank, H)
+			qLat := v41LatentNormOracleBF16(cpuOracleMatVec(wQA, c, cfg.QLoraRank, H))
 			var q []float32
 			switch {
 			case opts.qAfterB:
 				// Wrong order: project first, then norm the up-projected query.
 				q = cpuOracleMatVec(wQB, qLat, nH*hd, cfg.QLoraRank)
-				q = cpuOracleRMSNorm(q, gainOrUnit(v41GainPad(qGain, nH*hd)), eps)
+				q = v41AttentionInputNormOracle(q, gainOrUnit(v41GainPad(qGain, nH*hd)), eps)
 			default:
 				if !opts.omitQ {
-					qLat = cpuOracleRMSNorm(qLat, gainOrUnit(qGain), eps)
+					qLat = v41AttentionInputNormOracle(qLat, gainOrUnit(qGain), eps)
 				}
 				q = cpuOracleMatVec(wQB, qLat, nH*hd, cfg.QLoraRank)
 			}
 			// kv = kv_norm(wkv(x)) at the published latent rank, sliced to hd.
-			kv := cpuOracleMatVec(wKV, c, v41KVLoraRank, H)
+			kv := v41LatentNormOracleBF16(cpuOracleMatVec(wKV, c, v41KVLoraRank, H))
 			if !opts.omitKV {
-				kv = cpuOracleRMSNorm(kv, gainOrUnit(kvGain), eps)
+				kv = v41AttentionInputNormOracle(kv, gainOrUnit(kvGain), eps)
 			}
 			kv = kv[:hd]
 			// Independently resolve the pinned layer regime: plain layers disable
@@ -323,7 +335,13 @@ func v41OracleForwardLatentNormHidden(t *testing.T, m *Model, ids []int, opts v4
 
 		// ---- router + routed/shared experts, then the mHC post-mix ----
 		for tt := 0; tt < seq; tt++ {
-			xn := cpuOracleRMSNorm(x[tt], ffnNorm, eps)
+			updated := v41GraphOraclePost(attnOut[tt], streams[tt], toF32(hcPost[tt]), toF32(hcComb[tt]))
+			ffnProjected := v41OracleMHCProjectFull(wFFN, updated, H, eps, m.manifest[layerName(l, "mhc.ffn_mixes.weight")].Shape[0] == 4*H)
+			fpre, fpost, fcomb := oracleV41MHCKernel(ffnProjected, toF64(ffnScale), toF64(ffnBase), 4, hcIters, hcEps)
+			if opts.graphReuseAttention {
+				fpre, fpost, fcomb = hcPre[tt], hcPost[tt], hcComb[tt]
+			}
+			xn := v41AttentionInputNormOracle(v41GraphOracleCollapse(updated, toF32(hcPre[tt])), ffnNorm, eps)
 			router := cpuOracleMatVec(wGate, xn, cfg.NumExperts, H)
 			picks, weights := oracleV41Route(toF64(router), toF64(gateBias), cfg.NumExpertsPerTok, routeScale)
 			routed := make([]float64, H)
@@ -340,22 +358,20 @@ func v41OracleForwardLatentNormHidden(t *testing.T, m *Model, ids []int, opts v4
 			shared := oracleSwiGLU(shW1, shW3, shW2, xn, cfg.MoEIntermediateSize, H)
 			moe := oracleV41SharedExpertAdd(routed, shared)
 
-			delta := make([]float64, H)
-			for i := 0; i < H; i++ {
-				delta[i] = float64(attnOut[tt][i]) + moe[i]
+			next := v41GraphOraclePost(toF32(moe), updated, toF32(fpost), toF32(fcomb))
+			if opts.graphCombinedPost {
+				delta := toF32(moe)
+				for d := range delta {
+					delta[d] += attnOut[tt][d]
+				}
+				next = v41GraphOraclePost(delta, streams[tt], toF32(hcPost[tt]), toF32(hcComb[tt]))
 			}
-			residual := [][]float64{
-				toF64(streams[tt][0]), toF64(streams[tt][1]),
-				toF64(streams[tt][2]), toF64(streams[tt][3]),
+			streams[tt] = next
+			carry[tt] = toF32(fpre)
+			x[tt] = v41GraphOracleCollapse(next, carry[tt])
+			if opts.graphStreamZero {
+				x[tt] = append([]float32(nil), next[0]...)
 			}
-			next := oracleV41MHCPost(delta, residual, hcPost[tt], hcComb[tt], 4, false)
-			// Full path writes ALL FOUR post-mix streams back; stream 0 is the
-			// live hidden. (oracleV41MHCPost returns []float64; the production
-			// path stores f32, so round through f32 at the write-back boundary.)
-			for h := 0; h < 4; h++ {
-				copy(streams[tt][h], toF32(next[h]))
-			}
-			copy(x[tt], toF32(next[0]))
 		}
 	}
 
@@ -554,4 +570,34 @@ func v41LogitsDiverge(a, b []float32, tol float64) bool {
 		}
 	}
 	return false
+}
+
+// These standalone scalar equations preserve the reference's F32 arithmetic
+// and BF16 publication points; they call no production mHC helper.
+func v41GraphOracleCollapse(streams [][]float32, pre []float32) []float32 {
+	out := make([]float32, len(streams[0]))
+	for h, row := range streams {
+		for d, v := range row {
+			out[d] = float32(out[d] + float32(pre[h]*v))
+		}
+	}
+	return v41LatentNormOracleBF16(out)
+}
+
+func v41GraphOraclePost(x []float32, streams [][]float32, post, comb []float32) [][]float32 {
+	x = v41LatentNormOracleBF16(x)
+	out := make([][]float32, 4)
+	for dst := range out {
+		row := make([]float32, len(x))
+		for src := 0; src < 4; src++ {
+			for d, v := range streams[src] {
+				row[d] = float32(row[d] + float32(comb[src*4+dst]*v))
+			}
+		}
+		for d, v := range x {
+			row[d] = float32(row[d] + float32(post[dst]*v))
+		}
+		out[dst] = v41LatentNormOracleBF16(row)
+	}
+	return out
 }

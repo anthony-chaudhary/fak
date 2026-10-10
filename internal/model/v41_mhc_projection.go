@@ -11,16 +11,27 @@ import (
 type v41MHCProjectionFunc func(layer int, input []float32, H int, eps float32, full, transposed bool) ([]float32, v41DenseProjectionOutcome, error)
 
 func v41MHCProjectionErr(l int, cause error) error {
+	return v41MHCProjectionErrNamed(l, "mhc.mixes.weight", cause)
+}
+
+func v41MHCProjectionErrNamed(l int, leaf string, cause error) error {
 	if cause == nil {
 		cause = errV41ProjectionResult
 	}
-	return &V41ProjectionOperationError{Layer: l, Leaf: "mhc.mixes.weight", Stage: string(v41StageMHC), Cause: v41StageErr(v41StageMHC, l, cause)}
+	return &V41ProjectionOperationError{Layer: l, Leaf: leaf, Stage: string(v41StageMHC), Cause: v41StageErr(v41StageMHC, l, cause)}
 }
 
 func (m *Model) v41MHCProjector(l, H int, eps float32, full, transposed bool, scratch *v41ProjScratch) func([]float32) ([]float32, error) {
+	return m.v41MHCProjectorNamed(l, "mhc.mixes.weight", H, eps, full, transposed, scratch)
+}
+
+func (m *Model) v41MHCProjectorNamed(l int, leaf string, H int, eps float32, full, transposed bool, scratch *v41ProjScratch) func([]float32) ([]float32, error) {
 	var weight []float32
 	loaded := false
 	return func(input []float32) ([]float32, error) {
+		if scratch == nil || !v41MHCMixLeaf(leaf) {
+			return nil, v41MHCProjectionErrNamed(l, leaf, errV41ProjectionResult)
+		}
 		width := H
 		var valid bool
 		if full {
@@ -32,24 +43,28 @@ func (m *Model) v41MHCProjector(l, H int, eps float32, full, transposed bool, sc
 		if H <= 0 || len(input) != width {
 			return nil, v41StageErr(v41StageMHC, l, errV41ProjectionResult)
 		}
-		if scratch.mhcProjection != nil {
-			y, outcome, err := scratch.mhcProjection(l, input, H, eps, full, transposed)
+		project := scratch.mhcProjection
+		if leaf == "mhc.ffn_mixes.weight" {
+			project = scratch.mhcFFNProjection
+		}
+		if project != nil {
+			y, outcome, err := project(l, input, H, eps, full, transposed)
 			switch outcome {
 			case v41ProjectionHandled:
 				if err != nil || len(y) != v41MHCMixWidth {
-					return nil, v41MHCProjectionErr(l, err)
+					return nil, v41MHCProjectionErrNamed(l, leaf, err)
 				}
 				for _, v := range y {
 					if !finite32(v) {
-						return nil, v41MHCProjectionErr(l, errV41ProjectionResult)
+						return nil, v41MHCProjectionErrNamed(l, leaf, errV41ProjectionResult)
 					}
 				}
 				return y, nil
 			case v41ProjectionError:
-				return nil, v41MHCProjectionErr(l, err)
+				return nil, v41MHCProjectionErrNamed(l, leaf, err)
 			case v41ProjectionDeclined:
 			default:
-				return nil, v41MHCProjectionErr(l, errV41ProjectionResult)
+				return nil, v41MHCProjectionErrNamed(l, leaf, errV41ProjectionResult)
 			}
 		}
 		opened := m.v41NowNanos()
@@ -58,7 +73,7 @@ func (m *Model) v41MHCProjector(l, H int, eps float32, full, transposed bool, sc
 		defer func() { m.v41NoteMHCProjection(0, 1, 0, completed, 0, 0, 0, hostBytes, opened) }()
 		if !loaded {
 			var err error
-			weight, err = m.v41MHCMixF32Into(l, scratch.mhc)
+			weight, err = m.v41MHCMixF32IntoNamed(l, leaf, scratch.mhc)
 			hostBytes = int64(len(weight)) * 4
 			if err != nil {
 				return nil, err
@@ -86,6 +101,13 @@ func (m *Model) v41MHCProjector(l, H int, eps float32, full, transposed bool, sc
 }
 
 func (s *Session) v41MHCProjectionFunc() v41MHCProjectionFunc {
+	return s.v41MHCProjectionFuncNamed("mhc.mixes.weight")
+}
+
+func (s *Session) v41MHCProjectionFuncNamed(leaf string) v41MHCProjectionFunc {
+	if !v41MHCMixLeaf(leaf) {
+		return nil
+	}
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory {
 		return nil
 	}
@@ -111,7 +133,7 @@ func (s *Session) v41MHCProjectionFunc() v41MHCProjectionFunc {
 				return nil, v41ProjectionDeclined, nil
 			}
 		}
-		name := layerName(l, "mhc.mixes.weight")
+		name := layerName(l, leaf)
 		out, in, present := s.M.residentShape(name)
 		if !present {
 			return nil, v41ProjectionDeclined, nil

@@ -9,7 +9,7 @@ import (
 func v41ReaderWidthFixture(t *testing.T) *Model {
 	t.Helper()
 	m := v41CompressorTestFixture(t)
-	m.Cfg.DeepSeekV41.CompressRatios = []int{2, 0}
+	m.Cfg.DeepSeekV41.CompressRatios = []int{2, 2}
 	m.Cfg.DeepSeekV41.KVSourceLayerIDs = []int{0}
 	m.Cfg.DeepSeekV41.IndexSourceLayerIDs = nil
 	m.Cfg.IndexTopK = 0
@@ -21,10 +21,24 @@ func v41ReaderWidthFixture(t *testing.T) *Model {
 	}
 	plan, err := m.v41AttentionPlan(1)
 	if err != nil || plan.Role != V41AttentionRoleReader ||
-		plan.Ratio != 0 || plan.KVSourceLayer != 0 || plan.TopKWidth != 0 {
-		t.Fatalf("no-index ratio-0 reader plan=%+v err=%v", plan, err)
+		plan.Ratio != 2 || plan.KVSourceLayer != 0 || plan.TopKWidth != 0 {
+		t.Fatalf("no-index ratio-2 reader plan=%+v err=%v", plan, err)
 	}
 	return m
+}
+
+// The source's span remains authoritative when the reader's declared ratio
+// differs. This is a pure plan invariant, not a runnable ratio-one assembly or
+// a claim that a mixed-ratio source/reader schedule is a published checkpoint.
+// fak-test:runtime fast est=5ms lane=default
+func TestV41ReaderSourceWidthPlan(t *testing.T) {
+	cfg := Config{NumLayers: 2, DeepSeekV41: &DeepSeekV41Config{
+		CompressRatios: []int{2, 1}, KVSourceLayerIDs: []int{0}, CandidateSourceLayerID: -1,
+	}}
+	plan, err := v41AttentionPlanFor(cfg, 1, v41AttentionRoles(cfg))
+	if err != nil || plan.Role != V41AttentionRoleReader || plan.Ratio != 1 || plan.KVSourceLayer != 0 || plan.kvGroupSize(cfg) != 2 {
+		t.Fatalf("reader plan=%+v err=%v, want source span 2 despite reader ratio 1", plan, err)
+	}
 }
 
 func v41ReaderWidthFinite(t *testing.T, values []float32) {

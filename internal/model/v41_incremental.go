@@ -98,11 +98,15 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	scratch.denseProjection = st.denseProjection
 	scratch.groupedOutput = st.groupedOutput
 	scratch.mhcProjection = st.mhcProjection
+	scratch.mhcFFNProjection = st.mhcFFNProjection
+	scratch.mhcCarry = nil
 	scratch.queryNorm = st.queryNorm
 	scratch.kvNorm = st.kvNorm
 	scratch.ffnNorm = st.ffnNorm
 	scratch.compressorNorm = st.compressorNorm
 	scratch.indexKeyNorm = st.indexKeyNorm
+	scratch.indexerScore = st.indexerScore
+	scratch.indexScoreHealth = st.indexScoreHealth
 	scratch.sharedActivation = st.sharedActivation
 	scratch.tailRoPE = st.tailRoPE
 	scratch.sharedAttention = st.sharedAttention
@@ -111,11 +115,15 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 		scratch.denseProjection = nil
 		scratch.groupedOutput = nil
 		scratch.mhcProjection = nil
+		scratch.mhcFFNProjection = nil
+		scratch.mhcCarry = nil
 		scratch.queryNorm = nil
 		scratch.kvNorm = nil
 		scratch.ffnNorm = nil
 		scratch.compressorNorm = nil
 		scratch.indexKeyNorm = nil
+		scratch.indexerScore = nil
+		scratch.indexScoreHealth = nil
 		scratch.sharedActivation = nil
 		scratch.tailRoPE = nil
 		scratch.sharedAttention = nil
@@ -140,9 +148,19 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 		return nil, stats, embedErr
 	}
 
-	// The four persistent mHC streams: stream 0 is the live hidden row, streams
-	// 1..3 are the persistent zero residuals a full forward initializes them to.
+	full, geometryErr := v41ForwardGeometry(cfg)
+	if geometryErr != nil {
+		return nil, stats, geometryErr
+	}
 	streams := [][]float32{x, make([]float32, H), make([]float32, H), make([]float32, H)}
+	if full {
+		streams, err = v41FullInitialStreams(x)
+		if err != nil {
+			return nil, stats, err
+		}
+		copy(x, streams[0])
+		scratch.mhcCarry = newV41MHCCarry(1)
+	}
 
 	// Fail closed BEFORE any mutation: every layer needs a seeded retained state.
 	// A shadow step cannot seed a prefix -- the caller must seed.
@@ -178,6 +196,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	stagedInputs := make([][][]float32, 0, cfg.NumLayers)
 	stagedInputPos := make([][]int, 0, cfg.NumLayers)
 	stagedCopies := make([]int, 0, cfg.NumLayers)
+	stagedWindowRows := make([]int, 0, cfg.NumLayers)
 	stagedKV := make([]v41StepPublicationUndo, 0, cfg.NumLayers)
 	stagedIndex := make([]v41StepPublicationUndo, 0, cfg.NumLayers)
 	// The shared registry a role source publishes into is staged too: a fault in a
@@ -197,6 +216,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 			state.partialInputs = stagedInputs[i]
 			state.partialPositions = stagedInputPos[i]
 			state.retainedCopies = stagedCopies[i]
+			state.retainedWindowRows = stagedWindowRows[i]
 			stagedKV[i].restore()
 			stagedIndex[i].restore()
 			if row := stagedRow[i]; row != nil && state.windowSize > 0 {
@@ -258,13 +278,13 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 		stagedInputs = append(stagedInputs, cloneV41Rows(state.partialInputs))
 		stagedInputPos = append(stagedInputPos, append([]int(nil), state.partialPositions...))
 		stagedCopies = append(stagedCopies, state.retainedCopies)
+		stagedWindowRows = append(stagedWindowRows, state.retainedWindowRows)
 		stagedKV = append(stagedKV, stageV41StepPublication(state.kvPublications, state.kvPublishedEnd, l))
 		stagedIndex = append(stagedIndex, stageV41StepPublication(state.indexPublications, state.indexPublishedEnd, l))
-		// Capture the ring row Step will overwrite. pos != 0 (Step) writes
-		// window[nextWindowPos%windowSize]; pos == 0 (Prefill) cannot clobber a
-		// pre-existing row and gets a nil backup.
+		// Capture the ring slot even at position zero: an internal empty-state
+		// role step can commit its first window row before a later layer fails.
 		var rowBackup []float32
-		if pos != 0 && state.windowSize > 0 && len(state.window) > 0 {
+		if state.windowSize > 0 && len(state.window) > 0 {
 			slot := state.nextWindowPos % state.windowSize
 			if slot >= 0 && slot < len(state.window) {
 				rowBackup = append([]float32(nil), state.window[slot]...)
@@ -325,7 +345,15 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 
 	// Head runs BEFORE any commit; a head fault rolls back exactly like a layer
 	// fault (truncate/restore, no clone).
-	res, herr := m.v41HeadWithFinalNorm(x, scratch.denseProjection, st.finalNorm)
+	headInput := x
+	if full {
+		headInput, err = v41MHCPreBF16(cfg.NumLayers-1, streams, scratch.mhcCarry.pre[0])
+		if err != nil {
+			rollback()
+			return nil, stats, err
+		}
+	}
+	res, herr := m.v41HeadWithFinalNorm(headInput, scratch.denseProjection, st.finalNorm)
 	if herr != nil {
 		rollback()
 		var projection *V41ProjectionOperationError

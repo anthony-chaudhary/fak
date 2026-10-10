@@ -136,7 +136,7 @@ func nodeEvictionSeg(n *node, clock uint64) int {
 		return Tier0PinnedRoot.Seg()
 	}
 	if n.retention != nil {
-		if clock > 0 && n.retention.Expired(int64(clock)) {
+		if clock > 0 && n.retention.expiredAtClock(clock) {
 			return Tier3Probationary.Seg()
 		}
 		return TierFromRetentionPriority(n.retention.Priority).Seg()

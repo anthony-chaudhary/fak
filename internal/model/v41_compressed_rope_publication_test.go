@@ -26,6 +26,13 @@ func TestV41CompressedRotaryPublication(t *testing.T) {
 		out[i+1] = float32(b*c) + float32(a*s)
 		return out
 	}
+	rotateLatent := func(row []float32, pos int) []float32 {
+		out := rotate(row, pos)
+		for i := len(out) - 2; i < len(out); i++ {
+			out[i] = v41CompressorNormRefCast(out[i])
+		}
+		return out
+	}
 	fixture := func() *Model {
 		m := v41CompressorTestFixtureIndex(t, 128)
 		m.Cfg.QKRopeHeadDim, m.Cfg.QKNopeHeadDim = 2, 510
@@ -68,16 +75,24 @@ func TestV41CompressedRotaryPublication(t *testing.T) {
 		check := func(st *v41ForwardState, r *records, groups int) {
 			t.Helper()
 			for layer := 0; layer < m.Cfg.NumLayers; layer++ {
-				own, ok := st.layerState(layer).KVSourceRows(layer)
+				state := st.layerState(layer)
+				own, ok := state.KVSourceRows(layer)
+				if layer != 0 {
+					key, keyOK := state.IndexKeys(layer)
+					if ok || keyOK || len(own) != 0 || len(key) != 0 || len(r.latent[layer]) != 0 || len(r.key[layer]) != 0 || len(state.partialInputs) != 0 || len(state.partialPositions) != 0 {
+						t.Fatal("reader retained or recomputed its own compressor/index history")
+					}
+					continue
+				}
 				if !ok || len(own) != groups || len(r.latent[layer]) != groups {
 					t.Fatal("own latent publication count differs from completed groups")
 				}
 				for group := range own {
-					want := rotate(r.latent[layer][group], group*2)
+					want := rotateLatent(r.latent[layer][group], group*2)
 					if !reflect.DeepEqual(own[group], want) {
 						t.Fatalf("layer %d group %d: owner retained the wrong rotary position", layer, group)
 					}
-					if group == 1 && reflect.DeepEqual(want, rotate(r.latent[layer][group], 3)) {
+					if group == 1 && reflect.DeepEqual(want, rotateLatent(r.latent[layer][group], 3)) {
 						t.Fatal("fixture cannot distinguish closing position 3 from group-first position 2")
 					}
 				}
@@ -90,7 +105,11 @@ func TestV41CompressedRotaryPublication(t *testing.T) {
 				t.Fatal("owner and registry published different latent/key pairs")
 			}
 			for group := range ownK {
-				if !reflect.DeepEqual(ownK[group], rotate(r.key[0][group], group*2)) {
+				key := append([]float32(nil), r.key[0][group]...)
+				for i := range key {
+					key[i] = v41CompressorNormRefCast(key[i])
+				}
+				if !reflect.DeepEqual(ownK[group], rotateLatent(key, group*2)) {
 					t.Fatal("index key was not rotated after normalization at group-first position")
 				}
 			}

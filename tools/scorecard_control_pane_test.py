@@ -13,8 +13,11 @@ or `python -m pytest tools/scorecard_control_pane_test.py -q`.
 from __future__ import annotations
 
 import os
+import json
 import shlex
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -965,6 +968,50 @@ def test_card_argv_reports_a_missing_script() -> None:
 
 
 # --- tolerant live smoke ----------------------------------------------------
+
+def test_timeout_diagnostics_keep_only_bounded_progress_without_changing_failure() -> None:
+    from unittest.mock import patch
+
+    card = next(card for card in scp.SCORECARDS if card["key"] == "maturity")
+    secret = "secret-value /private/host/path"
+    marker = scp.PROGRESS_PREFIX
+    record = {"schema": "fak-scorecard-progress/1", "phase": "execute_proof",
+              "elapsed_ms": 119000, "proof_index": 17, "untrusted": secret}
+    stderr = (secret + "\n" + (marker + json.dumps(record) + "\n") * 40).encode()
+    malformed = {**record, "phase": ["execute_proof"]}
+    stderr += (marker + json.dumps(malformed) + "\n").encode()
+    with tempfile.TemporaryDirectory() as directory:
+        def timeout(argv, **kwargs):
+            assert kwargs["timeout"] == 120
+            assert argv[-2] == "--progress-file"
+            snapshot = Path(argv[-1])
+            assert json.loads(snapshot.read_text())["phase"] == "card_start"
+            # The child replaces its snapshot before hanging. Parent normalization
+            # cannot erase it, and an outer kill would leave this file readable.
+            scp._write_diagnostic(snapshot, {k: v for k, v in record.items()
+                                             if k != "untrusted"})
+            raise subprocess.TimeoutExpired(argv, 120, output=secret.encode(), stderr=stderr)
+
+        with patch.dict(os.environ, {"FAK_SCORECARD_DIAGNOSTICS_DIR": directory}), \
+                patch.object(scp.subprocess, "run", side_effect=timeout) as run:
+            payload, error = scp.run_scorecard(Path(directory), card, python="py",
+                                               timeout=120, fak_bin="fak")
+        assert payload is None and error == "timed out after 120s"
+        assert run.call_count == 1
+        run_path = next(Path(directory).glob("maturity-*/run.json"))
+        retained = run_path.read_text()
+        assert secret not in retained
+        diagnostic = json.loads(retained)
+        assert diagnostic["state"] == "timeout" and diagnostic["runner"] == "prebuilt"
+        assert diagnostic["stdout"]["bytes"] == len(secret.encode())
+        assert diagnostic["stdout"]["byte_count_basis"] == "raw"
+        assert diagnostic["stdout"]["progress_tail"] == []
+        assert len(diagnostic["stderr"]["progress_tail"]) == 8
+        assert diagnostic["stderr"]["progress_tail"][-1] == {
+            "phase": "execute_proof", "elapsed_ms": 119000, "proof_index": 17}
+        assert len(retained) < 4096
+        assert json.loads((run_path.parent / "progress.json").read_text())["proof_index"] == 17
+
 
 def test_live_collect_and_fold() -> None:
     root = scp.repo_root()

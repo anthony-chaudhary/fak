@@ -934,6 +934,38 @@ func (t *Tree) makeSnapshotRoom(delta int64, exclude *node) bool {
 }
 
 func (t *Tree) snapshotVictim(exclude *node) *node {
+	return t.snapshotVictimSkipping(exclude, nil)
+}
+
+// snapshotEvictionView projects only the insertion tick and the one lease a
+// nonempty suffix transfers off its lookup boundary. Prediction never changes
+// the live clock, refs, topology or snapshot ownership. Structural strategy
+// preparation and intervening token-budget eviction are not simulated here.
+type snapshotEvictionView struct {
+	clock    uint64
+	released *node
+}
+
+func (v snapshotEvictionView) refs(n *node) int {
+	refs := n.refs
+	if n == v.released && refs > 0 {
+		refs--
+	}
+	return refs
+}
+
+// snapshotVictimSkipping applies the same retention rules to real byte-pressure
+// eviction and the admission dry run. skipped snapshots have already been selected
+// by the dry run; their nodes remain attached, just as releaseHotSnapshot leaves them.
+// Priority-ordered per-tier reclaim follows NVIDIA/TensorRT-LLM, Apache-2.0,
+// cpp/tensorrt_llm/batch_manager/evictionPolicy.cpp at
+// f4c5c935aa891b0826f73936c4831236cb6ff836 (LRUEvictionPolicy::getFreeBlock/refresh).
+// This Go adaptation keeps Fak's existing pin, tier and logical-TTL contracts.
+func (t *Tree) snapshotVictimSkipping(exclude *node, skipped map[*node]bool) *node {
+	return t.snapshotVictimSkippingInView(exclude, skipped, snapshotEvictionView{clock: t.clock})
+}
+
+func (t *Tree) snapshotVictimSkippingInView(exclude *node, skipped map[*node]bool, view snapshotEvictionView) *node {
 	strat := t.evictionStrategy()
 	if prep, ok := strat.(TreePreparer); ok {
 		prep.PrepareTree(t)
@@ -945,6 +977,7 @@ func (t *Tree) snapshotVictim(exclude *node) *node {
 	// state cannot be truncated, so a lost ancestor cannot be rebuilt from a leaf.
 	// Among candidates the configured strategy picks as before.
 	var victim *node
+	var bestKey victimKey
 	var walk func(*node) bool
 	walk = func(n *node) bool {
 		below := false
@@ -953,10 +986,21 @@ func (t *Tree) snapshotVictim(exclude *node) *node {
 				below = true
 			}
 		}
-		evictable := n != exclude && n.refs == 0 && !n.IsComputing() && n.snapshot != nil
+		evictable := n != exclude && !skipped[n] && view.refs(n) == 0 && !n.IsComputing() &&
+			n.snapshot != nil && !t.isNodePinnedOrImmuneAt(n, view.clock)
+		var key victimKey
+		if evictable {
+			key = strat.Priority(n)
+			if seg, ok := t.nodeTierSegAt(n, view.clock); ok {
+				key.seg = seg
+			}
+			evictable = key.seg < 3
+		}
 		if evictable && !below {
-			if victim == nil || strat.Priority(n).less(strat.Priority(victim)) {
-				victim = n
+			// Snapshot record generations are unique across namespaces and survive
+			// tier moves, giving exact priority ties a stable admission-order key.
+			if victim == nil || key.less(bestKey) || (key == bestKey && n.recordGen < victim.recordGen) {
+				victim, bestKey = n, key
 			}
 		}
 		return below || evictable
@@ -1257,6 +1301,10 @@ func (t *Tree) selectVictimLeaf(record bool) *node {
 // isNodePinnedOrImmune reports whether node n is pinned as a Tier 0 coordinator prompt
 // and therefore immune from eviction (seg = 3).
 func (t *Tree) isNodePinnedOrImmune(n *node) bool {
+	return t.isNodePinnedOrImmuneAt(n, t.clock)
+}
+
+func (t *Tree) isNodePinnedOrImmuneAt(n *node, clock uint64) bool {
 	if n == nil {
 		return false
 	}
@@ -1267,7 +1315,7 @@ func (t *Tree) isNodePinnedOrImmune(n *node) bool {
 		return true
 	}
 	if n.retention != nil {
-		if !n.retention.Expired(int64(t.clock)) && n.retention.Priority >= 90 {
+		if !n.retention.expiredAtClock(clock) && n.retention.Priority >= 90 {
 			return true
 		}
 	}
@@ -1277,14 +1325,18 @@ func (t *Tree) isNodePinnedOrImmune(n *node) bool {
 // nodeTierSeg returns the effective eviction segment (0..3) based on explicit retention or tier.
 // Returns ok=true if an explicit retention, tier, or pin was set on n.
 func (t *Tree) nodeTierSeg(n *node) (int, bool) {
+	return t.nodeTierSegAt(n, t.clock)
+}
+
+func (t *Tree) nodeTierSegAt(n *node, clock uint64) (int, bool) {
 	if n == nil {
 		return 0, false
 	}
-	if t.isNodePinnedOrImmune(n) {
+	if t.isNodePinnedOrImmuneAt(n, clock) {
 		return Tier0PinnedRoot.Seg(), true
 	}
 	if n.retention != nil {
-		if n.retention.Expired(int64(t.clock)) {
+		if n.retention.expiredAtClock(clock) {
 			return Tier3Probationary.Seg(), true
 		}
 		return TierFromRetentionPriority(n.retention.Priority).Seg(), true
@@ -1367,7 +1419,8 @@ func (t *Tree) IsNodePinned(n *node) bool {
 
 // SetNodeRetention sets a client-declared per-request KV retention descriptor on node n.
 // Validates the request (fails closed on out-of-range priority or negative TTL/admitted).
-// Priority >= 90 pins the node as Tier 0 (seg = 3, immune from eviction).
+// Priority >= 90 protects the node as Tier 0 only within its declared TTL window.
+// For these high priorities, RetainForever also pins the ancestor path, like PinPrefix.
 func (t *Tree) SetNodeRetention(n *node, req RetentionRequest) error {
 	if n == nil {
 		return errors.New("radixkv: nil node")
@@ -1379,8 +1432,13 @@ func (t *Tree) SetNodeRetention(n *node, req RetentionRequest) error {
 	n.retention = &retCopy
 	tier := TierFromRetentionPriority(req.Priority)
 	n.tier = tier
-	n.tierSet = true
-	if tier == Tier0PinnedRoot {
+	// A finite high-priority request must remain clock-governed: either a
+	// permanent tier marker or pinPath would make it immune after expiry.
+	// This preserves the TTL lifecycle of TensorRT-LLM's releaseBlock/refresh
+	// at f4c5c935aa891b0826f73936c4831236cb6ff836 (Apache-2.0; #5259), using
+	// Fak's existing logical expiry and probationary demotion semantics.
+	n.tierSet = tier != Tier0PinnedRoot || req.TTL == RetainForever
+	if tier == Tier0PinnedRoot && req.TTL == RetainForever {
 		t.pinPath(n)
 	} else {
 		n.pinned = false
@@ -1421,7 +1479,7 @@ func (t *Tree) NodeTier(n *node) PriorityTier {
 		return Tier0PinnedRoot
 	}
 	if n.retention != nil {
-		if n.retention.Expired(int64(t.clock)) {
+		if n.retention.expiredAtClock(t.clock) {
 			return Tier3Probationary
 		}
 		return TierFromRetentionPriority(n.retention.Priority)

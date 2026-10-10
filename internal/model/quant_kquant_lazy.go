@@ -19,6 +19,32 @@ import "fmt"
 // mapped span, else a bounded-window page-aligned chunked ReadAt that fails closed on a
 // missing reader, a reader error, or a short read.
 func (qt *kQuantTensor) materializeRaw() ([]byte, error) {
+	if qt.denseBound != nil {
+		qt.denseBound.mu.Lock()
+		defer qt.denseBound.mu.Unlock()
+	}
+	return qt.materializeRawLocked()
+}
+
+// residentRawSnapshot returns the published view without faulting a lazy range.
+// It synchronizes diagnostics and staging with bounded CPU publication. The
+// returned bytes are immutable for the model lifetime; callers must not mutate
+// them or retain them beyond weight close.
+func (qt *kQuantTensor) residentRawSnapshot() []byte {
+	if qt == nil {
+		return nil
+	}
+	if qt.denseBound != nil {
+		qt.denseBound.mu.Lock()
+		defer qt.denseBound.mu.Unlock()
+	}
+	return qt.raw
+}
+
+// materializeRawLocked also serves the CPU retention transaction, which already
+// holds denseBound.mu. Device callers use materializeRaw to synchronize the raw
+// view with CPU publication; this does not bound their upload buffer lifetimes.
+func (qt *kQuantTensor) materializeRawLocked() ([]byte, error) {
 	if len(qt.raw) > 0 {
 		return qt.raw, nil
 	}
@@ -53,18 +79,31 @@ func (qt *kQuantTensor) materializeRaw() ([]byte, error) {
 // (#13201/#13202) executes instead of hitting the requireRawCPU panic (#13216). It is the
 // k-quant twin of the `qt.materializeRaw()` call the device staging path already makes in
 // weightHALQ4K (hal.go): the retention primitive has always been able to fault the range, and
-// the CPU forward was simply never asking it to. The read is bounded by the fak#13199 window
-// (q4kMaterializeWindowBytes) into page-aligned resident bytes, so a dense side larger than host
-// RAM is faulted through a small window rather than retained whole.
+// the CPU forward was simply never asking it to. Each fault allocates one full
+// page-aligned payload plus a read window; the positive retention bound is checked
+// before that allocation, not merely before publishing its result.
 //
 // Fail-closed is preserved: a tensor with no resident and no lazy payload is left untouched for
 // requireRawCPU to name, and a read error panics legibly here rather than silently reading nil
 // (which would emit zeros — the exact #13202 wrong answer). No silent zeros in any branch.
 func (qt *kQuantTensor) ensureRawCPU(op string) {
-	if qt == nil || len(qt.raw) > 0 || qt.lazy == nil {
+	if qt == nil || qt.lazy == nil {
 		return
 	}
-	raw, err := qt.materializeRaw()
+	if qt.denseBound != nil {
+		qt.denseBound.mu.Lock()
+		defer qt.denseBound.mu.Unlock()
+	}
+	if len(qt.raw) > 0 {
+		return
+	}
+	// AddLazyKQuant validates this immutable descriptor against block geometry;
+	// both mapped and reader-backed materialization return exactly lazy.Bytes.
+	// Keep the check non-mutating so an I/O error or panic consumes no budget.
+	if qt.denseBound != nil && !qt.denseBound.canRetainLocked(int64(qt.lazy.Bytes)) {
+		panic(denseResidentBoundPanic(op, qt.denseBound.bound, int64(qt.lazy.Bytes), qt.denseBound.retained))
+	}
+	raw, err := qt.materializeRawLocked()
 	if err != nil {
 		panic(fmt.Sprintf("model: lazy k-quant %s materialization failed (kind=%s out=%d in=%d): %v "+
 			"(#13216; the lazy range could not be faulted and a CPU k-quant matmul ran — refusing "+
@@ -78,7 +117,7 @@ func (qt *kQuantTensor) ensureRawCPU(op string) {
 	// the memoizing assignment.
 	if qt.denseBound != nil {
 		incoming := int64(len(raw))
-		if !qt.denseBound.chargeRetained(incoming) {
+		if !qt.denseBound.chargeRetainedLocked(incoming) {
 			panic(denseResidentBoundPanic(op, qt.denseBound.bound, incoming, qt.denseBound.retained))
 		}
 	}
@@ -96,7 +135,14 @@ func (qt *kQuantTensor) ensureRawCPU(op string) {
 // is genuinely unmaterializable (no reader / no lazy range / a failed read), not the ordinary
 // path for a bounded lazy range.
 func (qt *kQuantTensor) requireRawCPU(op string) {
-	if qt != nil && len(qt.raw) == 0 && qt.lazy != nil && qt.out > 0 {
+	if qt == nil || qt.lazy == nil {
+		return
+	}
+	if qt.denseBound != nil {
+		qt.denseBound.mu.Lock()
+		defer qt.denseBound.mu.Unlock()
+	}
+	if len(qt.raw) == 0 && qt.out > 0 {
 		panic(fmt.Sprintf("model: k-quant %s on a lazy tensor (kind=%s out=%d in=%d): the resident "+
 			"raw bytes are a checkpoint range that has not been materialized, and a CPU k-quant "+
 			"matmul ran — reading nil raw would silently produce zeros. Call materializeRaw first, "+

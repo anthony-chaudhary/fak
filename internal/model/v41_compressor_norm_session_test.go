@@ -55,7 +55,7 @@ func v41CompressorNormAssertPublications(t *testing.T, got, want *v41ForwardStat
 
 // Real Session entry points with CPU-recording arithmetic. Both exact latent
 // publications and reader selections are checked independently of final logits.
-// The ratio-two reader owns its own compressor; the ratio-zero reader does not.
+// Neither the ratio-two shared reader nor the ratio-zero layer owns a compressor.
 // fak-test:justify why=contract when=changed:internal/model/**
 // fak-test:runtime medium est=5s lane=default
 func TestV41CompressorNormSession(t *testing.T) {
@@ -78,9 +78,6 @@ func TestV41CompressorNormSession(t *testing.T) {
 					t.Fatal("qualified session did not bind compressor normalization")
 				}
 				producers := 1
-				if readerRatio > 1 {
-					producers++
-				}
 				check := func(tokens int) {
 					t.Helper()
 					wantCalls := producers * (tokens / 2)
@@ -91,8 +88,8 @@ func TestV41CompressorNormSession(t *testing.T) {
 					for _, record := range b.records {
 						counts[record.layer]++
 					}
-					if counts[0] != tokens/2 || (readerRatio == 0 && counts[1] != 0) || (readerRatio == 2 && counts[1] != tokens/2) {
-						t.Fatal("reader reuse renormalized a source or skipped its own compressor")
+					if counts[0] != tokens/2 || counts[1] != 0 {
+						t.Fatal("reader reuse normalized or projected a private compressed row")
 					}
 					v41CompressorNormAssertPublications(t, s.v41Forward, host.v41Forward)
 				}
@@ -173,7 +170,7 @@ func TestV41CompressorNormEphemeralScratch(t *testing.T) {
 	t.Parallel()
 	for _, fail := range []bool{false, true} {
 		t.Run(itoa(boolToIntV41Expert(fail)), func(t *testing.T) {
-			m := v41CompressorTestFixture(t)
+			m := v41CompressorProducerTestFixture(t)
 			s, b := v41CompressorNormTestSession(t, m)
 			s.Prefill([]int{1, 2, 3})
 			if fail {

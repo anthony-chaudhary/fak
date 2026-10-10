@@ -72,6 +72,8 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -1855,10 +1857,46 @@ def git_churn(root: Path, rev_range: str) -> tuple[int, int, int]:
     return _count("A"), _count("D"), n_commits
 
 
+def _progress_writer(path: str):
+    started = time.monotonic()
+
+    def progress(phase: str) -> None:
+        if not path:
+            return
+        # Fixed phase names and counters only; no source text, paths or errors.
+        record = json.dumps({"schema": "fak-scorecard-progress/1", "phase": phase,
+                             "elapsed_ms": round((time.monotonic() - started) * 1000),
+                             "proof_index": 0})
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=Path(path).parent,
+                                             prefix=".progress-", suffix=".tmp", delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(record + "\n")
+            temporary.replace(path)
+        except (OSError, ValueError):
+            pass
+        finally:
+            if temporary is not None:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        try:
+            print("FAK_SCORECARD_PROGRESS " + record, file=sys.stderr, flush=True)
+        except OSError:
+            pass
+
+    return progress
+
+
 def collect(workspace: Path, *, run_churn: bool = True,
-            churn_range: str = "HEAD~20..HEAD") -> dict[str, Any]:
+            churn_range: str = "HEAD~20..HEAD", progress_path: str = "") -> dict[str, Any]:
+    progress = _progress_writer(progress_path)
     try:
+        progress("gather_go")
         files, test_files = gather_go(workspace)
+        progress("gather_asm")
         asm_files = gather_asm(workspace)
     except OSError as exc:
         return build_payload(workspace=str(workspace), kpis=[],
@@ -1866,22 +1904,29 @@ def collect(workspace: Path, *, run_churn: bool = True,
     if not files and not test_files:
         return build_payload(workspace=str(workspace), kpis=[],
                              error="no first-party .go files found (run from repo ROOT)")
+    progress("read_metadata")
     claims_text = _safe_read(workspace / CLAIMS_REL)
     version_text = _safe_read(workspace / VERSION_REL).strip()
 
     if run_churn:
+        progress("git_churn")
         added, removed, n_commits = git_churn(workspace, churn_range)
     else:
         added, removed, n_commits = 0, 0, 0
 
+    def measure(phase, function, *args):
+        progress(phase)
+        return function(*args)
+
     kpis = [
-        kpi_duplication(files),
-        kpi_dead_code(files, test_files, asm_files),
-        kpi_comment_slop(files),
-        kpi_vacuous_tests(test_files),
-        kpi_stub_masquerade(files, claims_text, version_text),
-        kpi_churn_bloat(added, removed, n_commits),
+        measure("duplication", kpi_duplication, files),
+        measure("dead_code", kpi_dead_code, files, test_files, asm_files),
+        measure("comment_slop", kpi_comment_slop, files),
+        measure("vacuous_tests", kpi_vacuous_tests, test_files),
+        measure("stub_masquerade", kpi_stub_masquerade, files, claims_text, version_text),
+        measure("churn_bloat", kpi_churn_bloat, added, removed, n_commits),
     ]
+    progress("build_payload")
     return build_payload(workspace=str(workspace), kpis=kpis)
 
 
@@ -2085,6 +2130,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Code-slop scorecard (read-only).")
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    ap.add_argument("--progress-file", default="",
+                    help="optional bounded progress snapshot (diagnostics only)")
     ap.add_argument("--markdown", action="store_true",
                     help="emit the CODE-SLOP-SCORECARD.md body")
     ap.add_argument("--check-doc", action="store_true",
@@ -2122,7 +2169,7 @@ def main(argv: list[str] | None = None) -> int:
             return rc
 
     payload = collect(workspace, run_churn=not snapshot_mode,
-                      churn_range=args.churn_range)
+                      churn_range=args.churn_range, progress_path=args.progress_file)
 
     if args.json:
         print(json.dumps(payload, indent=2))

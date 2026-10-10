@@ -186,3 +186,57 @@ func TestV41FFNNormDeviceDispatch(t *testing.T) {
 		})
 	}
 }
+
+// The callback remains F32. Its owner supplies the BF16 collapse of attention's
+// updated residuals, then owns and rounds the callback's result before MoE.
+// fak-test:runtime fast est=100ms lane=default
+func TestV41FFNNormGraphOwner(t *testing.T) {
+	t.Parallel()
+	m := v41FullStepModel(t)
+	H := m.Cfg.HiddenSize
+	streams := make([][]float32, 4)
+	attn := make([]float32, H)
+	for h := range streams {
+		streams[h] = make([]float32, H)
+		for d := range streams[h] {
+			streams[h][d] = float32((d+3*h)%13-6) / 8
+		}
+	}
+	for d := range attn {
+		attn[d] = float32(d%7-3)/16 + .003
+	}
+	mix := v41MHCMix{pre: []float32{.125, .25, .625, .875}, post: []float32{.5, .75, 1.25, 1.5}, comb: []float32{.1, .2, .3, .4, .4, .3, .2, .1, .25, .25, .25, .25, .3, .1, .4, .2}}
+	before := sysFlatten(streams)
+	wantResidual := v41GraphOraclePost(attn, streams, mix.post, mix.comb)
+	wantInput := v41GraphOracleCollapse(wantResidual, mix.pre)
+	gain := cpuOracleTensor(t, m, layerName(0, "ffn_norm.weight"))
+	var callbackInput, callbackOutput []float32
+	calls := 0
+	scratch := &v41ProjScratch{ffnNorm: func(layer int, input []float32) ([]float32, error) {
+		calls++
+		callbackInput = append([]float32(nil), input...)
+		callbackOutput = cpuOracleRMSNorm(input, gain, float32(m.Cfg.RMSNormEps))
+		return callbackOutput, nil
+	}}
+	projected := false
+	residual, _, got, err := m.v41FullFFNInput(0, streams, mix, attn, func(flat []float32) ([]float32, error) {
+		projected = true
+		if !reflect.DeepEqual(flat, sysFlatten(wantResidual)) {
+			t.Fatal("FFN mHC did not project attention-post streams")
+		}
+		return make([]float32, 24), nil
+	}, scratch)
+	if err != nil || !projected || calls != 1 || !reflect.DeepEqual(residual, wantResidual) || !reflect.DeepEqual(callbackInput, wantInput) {
+		t.Fatalf("FFN graph operand/order/callback: calls=%d err=%v", calls, err)
+	}
+	if !reflect.DeepEqual(got, v41LatentNormOracleBF16(callbackOutput)) || !reflect.DeepEqual(before, sysFlatten(streams)) {
+		t.Fatal("FFN owner omitted BF16 publication or changed incoming residuals")
+	}
+	callbackOutput[0] = 99
+	if got[0] == 99 {
+		t.Fatal("FFN owner retained borrowed callback output")
+	}
+	if reflect.DeepEqual(callbackInput, streams[0]) {
+		t.Fatal("FFN input discriminator is vacuous")
+	}
+}

@@ -3,8 +3,9 @@ package model
 // v41_forward_full_test.go is the #13009 witness for the FULL (non-reduced)
 // V4.1 forward geometry. The reduced assembly in v41_forward.go historically
 // executed stand-ins for the published checkpoint geometry: a HeadDim-wide KV
-// latent instead of the published v41KVLoraRank (512), and four IDENTICAL mHC
-// streams instead of four distinct persistent streams. (The router geometry was
+// latent instead of the published v41KVLoraRank (512), and reconstructed normalized stand-in mHC
+// streams instead of four independently owned persistent residuals (which start
+// with identical BF16 embedding values). (The router geometry was
 // separately landed on trunk: both paths now route through the strict
 // v41RouterConfigFromConfig envelope via v41RouterConfigFullGeometry.) This file
 // proves the full path is selected and honors the published KV-latent axis, and
@@ -73,7 +74,7 @@ func TestV41FullGeometryForward(t *testing.T) {
 	}
 
 	// (c) The four persistent mHC streams on the full path are DISTINCT: stream 0
-	// carries the live hidden, streams 1..3 are zero. This mirrors the exact
+	// repeats the BF16 embedding into independently owned storage. This mirrors the exact
 	// initialization forwardV41 performs (unlike the reduced stand-in's four
 	// identical copies of the normalized input).
 	live := []float32{1, 2, 3, 4, 5, 6, 7, 8}
@@ -83,13 +84,14 @@ func TestV41FullGeometryForward(t *testing.T) {
 		t.Fatal("stream 0 was zero, so the distinctness assertion is vacuous")
 	}
 	for h := 1; h < 4; h++ {
-		if !allZero32(streams[0][h]) {
-			t.Fatalf("stream %d should be the zero-initialized persistent residual, got %v", h, streams[0][h])
+		if !equalFloat32Slices(streams[0][h], streams[0][0]) {
+			t.Fatalf("stream %d did not repeat embedding", h)
 		}
-		if equalFloat32Slices(streams[0][h], streams[0][0]) {
-			t.Fatalf("stream %d is identical to stream 0, want distinct persistent streams", h)
+		if &streams[0][h][0] == &streams[0][0][0] {
+			t.Fatalf("stream %d aliases stream zero", h)
 		}
 	}
+
 }
 
 // TestV41FullGeometryMissingAxisFailsClosed is the #13009 negative witness: a
@@ -215,7 +217,10 @@ func v41BuildFullModel(cfg Config, kvRank int) *Model {
 		"model.norm.weight":                              {Dtype: "F32", Shape: []int{H}},
 		layerName(0, "attn_norm.weight"):                 {Dtype: "F32", Shape: []int{H}},
 		layerName(0, "ffn_norm.weight"):                  {Dtype: "F32", Shape: []int{H}},
-		layerName(0, "mhc.mixes.weight"):                 {Dtype: "F32", Shape: []int{v41MHCMixWidth, H}},
+		layerName(0, "mhc.mixes.weight"):                 {Dtype: "F32", Shape: []int{v41MHCMixWidth, 4 * H}},
+		layerName(0, "mhc.ffn_mixes.weight"):             {Dtype: "F32", Shape: []int{v41MHCMixWidth, 4 * H}},
+		layerName(0, "mhc.ffn_base"):                     {Dtype: "F32", Shape: []int{v41MHCMixWidth}},
+		layerName(0, "mhc.ffn_scale"):                    {Dtype: "F32", Shape: []int{3}},
 		layerName(0, "mhc.base"):                         {Dtype: "F32", Shape: []int{v41MHCMixWidth}},
 		layerName(0, "mhc.scale"):                        {Dtype: "F32", Shape: []int{3}},
 		layerName(0, "attn.wq_a.weight"):                 {Dtype: "F32", Shape: []int{cfg.QLoraRank, H}},
@@ -242,12 +247,12 @@ func v41BuildFullModel(cfg Config, kvRank int) *Model {
 }
 
 // makeFullStreams mirrors forwardV41's full-path stream initialization: stream 0
-// is the live hidden and streams 1..3 are zero.
+// repeats BF16 embedding values without sharing stream storage.
 func makeFullStreams(live []float32) [][][]float32 {
 	set := make([][]float32, 4)
-	set[0] = append([]float32(nil), live...)
+	set[0] = v41LatentNormOracleBF16(live)
 	for h := 1; h < 4; h++ {
-		set[h] = make([]float32, len(live))
+		set[h] = v41LatentNormOracleBF16(live)
 	}
 	return [][][]float32{set}
 }

@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -465,11 +466,10 @@ func TestV41ForwardEngramDeclaredFailsClosed(t *testing.T) {
 }
 
 // TestV41ForwardCompressIndexDeclaredFailsClosed is the #13006 fail-closed
-// witness: the reduced assembly does not execute the CED/CSA2 compressor or the
-// lightning indexer, so a config that declares a compressed layer WITHIN the
-// model's layer range (CompressRatios[l] > 1), or an index-source layer within
-// range, must refuse rather than silently emit reduced, non-compressed logits as
-// if those stages were absent. Declarations that only touch out-of-range layers
+// witness: a config whose active compressor or indexer lacks required weights
+// must refuse rather than silently omit that stage. A ratio-zero layer does not
+// execute the indexer even if its declaration lists that layer. Declarations
+// that only touch out-of-range layers
 // (the reduced oracle fixture derives from the published 40-layer config but
 // narrows NumLayers to 1, so ratios above index 0 and index sources {2,8,...} are
 // all unreachable) stay admitted, because the assembly never reaches them.
@@ -484,11 +484,14 @@ func TestV41ForwardCompressIndexDeclaredFailsClosed(t *testing.T) {
 		t.Fatalf("in-range compressor Forward panic = %v, want ErrV41ForwardStage", err)
 	}
 
-	// In-range index source 0: must refuse.
-	indexed := v41ReducedModel(t)
-	indexed.Cfg.DeepSeekV41.IndexSourceLayerIDs = []int{0}
-	if err := indexed.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
-		t.Fatalf("in-range indexer admission error = %v, want ErrV41ForwardStage", err)
+	// A real ratio-two index source with one missing index tensor must refuse
+	// at that named indexer leaf, rather than fail at an earlier compressor leaf.
+	indexed := v41ReducedCompressIndexModel(t)
+	missingIndex := layerName(0, "indexer.wq_b.weight")
+	delete(indexed.manifest, missingIndex)
+	var stage *V41ForwardError
+	if err := indexed.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &stage) || stage.Stage != v41StageIndexer || !strings.Contains(err.Error(), missingIndex) {
+		t.Fatalf("in-range indexer admission error = %v, want named indexer refusal for %s", err, missingIndex)
 	}
 	if err := panicAsError(func() { _ = indexed.Forward([]int{1, 2}) }); !errors.Is(err, ErrV41ForwardStage) {
 		t.Fatalf("in-range indexer Forward panic = %v, want ErrV41ForwardStage", err)
@@ -505,10 +508,8 @@ func TestV41ForwardCompressIndexDeclaredFailsClosed(t *testing.T) {
 
 // TestV41ForwardCompressRatioMalformedFailsClosed pins the malformed-ratio arm
 // of the compressor admission seam. v41CompressIndexForwardAdmitted must refuse
-// every declared ratio that is not one of the two uncompressed regimes (0 or 1):
-// a positive ratio > 1 declares a compressed layer the reduced forward does not
-// execute (witnessed above), and a NEGATIVE ratio is malformed geometry that must
-// also fail closed rather than being silently treated as an uncompressed layer.
+// negative ratios and incomplete schedules rather than silently treating them
+// as window-only layers. Ratio-one assembly admission has its own witness below.
 // Before this guard the > 1 arm alone admitted a negative ratio, so a config with
 // a corrupt compression schedule would run the generic per-layer attention
 // contraction over a model the published artifact never describes.
@@ -532,14 +533,69 @@ func TestV41ForwardCompressRatioMalformedFailsClosed(t *testing.T) {
 	if err := short.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
 		t.Fatalf("short compressor schedule admission error = %v, want ErrV41ForwardStage", err)
 	}
-	// The uncompressed regimes (0 and 1) stay admitted so the reduced oracle
-	// fixture keeps running.
-	for _, ratio := range []int{0, 1} {
-		ok := v41ReducedModel(t)
-		ok.Cfg.DeepSeekV41.CompressRatios = []int{ratio}
-		if err := ok.v41ForwardAdmitted(); err != nil {
-			t.Fatalf("uncompressed ratio %d admission error = %v, want nil", ratio, err)
+	// Ratio zero remains window-only, so the reduced oracle fixture keeps running.
+	ok := v41ReducedModel(t)
+	ok.Cfg.DeepSeekV41.CompressRatios = []int{0}
+	if err := ok.v41ForwardAdmitted(); err != nil {
+		t.Fatalf("window-only admission error = %v, want nil", err)
+	}
+}
+
+// The ratio-one helper is independently usable, but cannot enable an assembly
+// that still omits the reference's compressed cache/window composition.
+// fak-test:runtime fast est=100ms lane=default
+func TestV41ForwardRatioOneAssemblyFailsClosed(t *testing.T) {
+	for _, source := range []bool{false, true} {
+		m := v41ReducedModel(t)
+		m.Cfg.DeepSeekV41.CompressRatios = []int{1}
+		m.Cfg.DeepSeekV41.KVSourceLayerIDs = nil
+		m.Cfg.DeepSeekV41.IndexSourceLayerIDs = nil
+		if source {
+			m.Cfg.DeepSeekV41.KVSourceLayerIDs = []int{0}
 		}
+		check := func(err error) {
+			t.Helper()
+			var stage *V41ForwardError
+			if !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &stage) || stage.Stage != v41StageCompress || stage.Layer != 0 || !strings.Contains(err.Error(), "ratio-one forward assembly is not implemented") {
+				t.Fatalf("source=%v: error = %v, want layer-zero ratio-one assembly refusal", source, err)
+			}
+		}
+		check(m.v41ForwardAdmitted())
+		act, err := m.forwardV41([]int{1, 2}, nil)
+		check(err)
+		if act != nil {
+			t.Fatal("refused ratio-one forward returned activations")
+		}
+		check(panicAsError(func() { _ = m.Forward([]int{1, 2}) }))
+	}
+	// The canonical GGUF identity can carry only the flat schedule before typed
+	// metadata is attached. Its active ratio-one declaration must also refuse.
+	flat := v41ReducedModel(t)
+	flat.Cfg.ModelType = "deepseek41"
+	flat.Cfg.DeepSeekV41 = nil
+	flat.Cfg.CompressRatios = []int{1}
+	var stage *V41ForwardError
+	if err := flat.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &stage) || stage.Stage != v41StageCompress || stage.Layer != 0 || !strings.Contains(err.Error(), "ratio-one forward assembly is not implemented") {
+		t.Fatalf("flat-only admission = %v, want layer-zero ratio-one assembly refusal", err)
+	}
+	if act, err := flat.forwardV41([]int{1, 2}, nil); act != nil || !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("flat-only ratio-one forward returned act=%v err=%v", act, err)
+	}
+	flat.Cfg.CompressRatios = []int{0, 1}
+	if err := flat.v41ForwardAdmitted(); err != nil {
+		t.Fatalf("flat-only inactive auxiliary ratio changed admission: %v", err)
+	}
+
+	// A narrowed backbone ignores auxiliary schedule entries. An index-source
+	// declaration on its active ratio-zero layer is dormant and needs no weights.
+	plain := v41ReducedModel(t)
+	plain.Cfg.DeepSeekV41.CompressRatios = []int{0, 1, 1}
+	plain.Cfg.DeepSeekV41.IndexSourceLayerIDs = []int{0}
+	if err := plain.v41ForwardAdmitted(); err != nil {
+		t.Fatalf("window-only active layer with dormant metadata: %v", err)
+	}
+	if act, err := plain.forwardV41([]int{1, 2}, nil); err != nil || act == nil || len(act.Logits) != 2 {
+		t.Fatalf("window-only forward with dormant index declaration: act=%v err=%v", act, err)
 	}
 }
 

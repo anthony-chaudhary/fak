@@ -37,7 +37,7 @@ type V41AttentionRole int
 
 const (
 	// V41AttentionRolePerLayer is a layer with no shared-source participation:
-	// it contracts its own projected KV rows (ratio 0/1 regime).
+	// ratio 0 contracts only its own projected window KV rows.
 	V41AttentionRolePerLayer V41AttentionRole = iota
 	// V41AttentionRoleKVSource is a declared shared-KV source layer. It pools
 	// its own KV input through the CED/CSA2 compressor and publishes the rows.
@@ -52,10 +52,10 @@ const (
 // IndexSourceLayerIDs / CompressRatios onto execution roles, so a layer's role
 // and its source are decided once and consistently.
 //
-// A source layer owns the compressed KV stream; a later layer whose ratio is 0
-// (the reference's uncompressed reader regime) but that follows a source reads
-// the source's rows. A declared source that lies outside [0,NumLayers) is
-// unreachable and is ignored (it keeps the reduced fixture runnable).
+// A source layer owns the compressed KV stream; a later nonzero-ratio layer
+// reads the source's rows. Ratio 0 is always window-only, without consuming or
+// replacing the source available to later layers. A declared source outside
+// [0,NumLayers) is unreachable and is ignored (keeping reduced fixtures runnable).
 func v41AttentionRoles(cfg Config) map[int]V41AttentionRole {
 	roles := make(map[int]V41AttentionRole, cfg.NumLayers)
 	d41 := cfg.DeepSeekV41
@@ -63,7 +63,7 @@ func v41AttentionRoles(cfg Config) map[int]V41AttentionRole {
 		return roles
 	}
 	for _, src := range d41.KVSourceLayerIDs {
-		if src >= 0 && src < cfg.NumLayers {
+		if src >= 0 && src < cfg.NumLayers && v41CompressRatioAt(cfg, src) != 0 {
 			roles[src] = V41AttentionRoleKVSource
 		}
 	}
@@ -72,21 +72,14 @@ func v41AttentionRoles(cfg Config) map[int]V41AttentionRole {
 	// preceding source is a per-layer compressor (self-contained pooling).
 	nearest := -1
 	for l := 0; l < cfg.NumLayers; l++ {
+		if v41CompressRatioAt(cfg, l) == 0 {
+			continue
+		}
 		if roles[l] == V41AttentionRoleKVSource {
 			nearest = l
 			continue
 		}
 		if _, isSource := roles[l]; isSource {
-			continue
-		}
-		ratio := v41CompressRatioAt(cfg, l)
-		if ratio > 1 {
-			// A compressed layer contracts the compressed stream. When a source
-			// precedes it, the reference reuses that source's shared KV rows;
-			// otherwise it pools its own input.
-			if nearest >= 0 {
-				roles[l] = V41AttentionRoleReader
-			}
 			continue
 		}
 		if nearest >= 0 {
@@ -105,13 +98,11 @@ func v41CompressRatioAt(cfg Config, layer int) int {
 	return cfg.DeepSeekV41.CompressRatios[layer]
 }
 
-// v41AttentionRatioImplemented reports whether the reduced assembly can represent
-// a declared compress ratio as a real CED/CSA2 contraction. The published
-// DeepSeek V4.1 Flash schedule carries only 0/1 (the uncompressed regimes) and 2
-// (the compressed group width); see v41_attention.go's fail-closed note. Every
-// other positive ratio is an unimplemented variant and must be refused rather
-// than silently pooled at a different width or run through the generic Q/K/V
-// path.
+// v41AttentionRatioImplemented reports ratios represented by the attention plan
+// and contraction primitives: 0 is window-only, 1 has one compressed row per
+// token, and 2 pools pairs. This is not forward-assembly admission: ratio 1's
+// projection helper exists, but v41CompressIndexForwardAdmitted keeps its full
+// assembly closed until producer/reader cache and window composition are wired.
 func v41AttentionRatioImplemented(ratio int) bool {
 	switch ratio {
 	case 0, 1, 2:
@@ -168,22 +159,24 @@ func v41AttentionPlanFor(cfg Config, layer int, roles map[int]V41AttentionRole) 
 		IndexSourceLayer: -1,
 		CandidateSource:  -1,
 	}
-	if role, ok := roles[layer]; ok {
-		p.Role = role
-	}
 	if p.Ratio < 0 {
 		return p, v41StageErr(v41StageCompress, layer,
 			fmt.Errorf("%w: layer %d declares malformed compressor ratio %d", ErrV41ForwardStage, layer, p.Ratio))
 	}
-	// Fail closed on a ratio the reduced assembly cannot represent. The published
-	// DeepSeek V4.1 Flash schedule carries only the uncompressed regimes (0/1) and
-	// the CED/CSA2 ratio 2 (v41_config.go); any other positive ratio is an
-	// unimplemented attention variant, and silently pooling it at a different
-	// width would emit logits for a model the reference never describes. There is
-	// no fall-through to the generic per-layer Q/K/V path.
+	// Preserve ratio-one topology for the standalone primitives, while refusing
+	// ratios they cannot represent. Forward execution has its own stricter gate.
 	if !v41AttentionRatioImplemented(p.Ratio) {
 		return p, v41StageErr(v41StageCompress, layer,
 			fmt.Errorf("%w: layer %d declares compressor ratio %d, which is not an implemented V4.1 attention variant", ErrV41ForwardStage, layer, p.Ratio))
+	}
+	// The reference branches on compress_ratio before reading any shared state.
+	// Return the empty compressed plan even when callers pass stale source roles.
+	// Do not clear a registry: later nonzero layers still need its publications.
+	if p.Ratio == 0 {
+		return p, nil
+	}
+	if role, ok := roles[layer]; ok {
+		p.Role = role
 	}
 	d41 := cfg.DeepSeekV41
 	if d41 != nil {
@@ -191,12 +184,12 @@ func v41AttentionPlanFor(cfg Config, layer int, roles map[int]V41AttentionRole) 
 		// source's state forward through the stack). A source at or before the
 		// reader is reusable; a later declaration is not yet available.
 		for _, src := range d41.KVSourceLayerIDs {
-			if src <= layer && (p.KVSourceLayer < 0 || src > p.KVSourceLayer) {
+			if src >= 0 && src <= layer && v41CompressRatioAt(cfg, src) != 0 && (p.KVSourceLayer < 0 || src > p.KVSourceLayer) {
 				p.KVSourceLayer = src
 			}
 		}
 		for _, src := range d41.IndexSourceLayerIDs {
-			if src <= layer && (p.IndexSourceLayer < 0 || src > p.IndexSourceLayer) {
+			if src >= 0 && src <= layer && indexSourceAt(d41, src) && (p.IndexSourceLayer < 0 || src > p.IndexSourceLayer) {
 				p.IndexSourceLayer = src
 			}
 		}
@@ -217,9 +210,10 @@ func v41AttentionPlanFor(cfg Config, layer int, roles map[int]V41AttentionRole) 
 	return p, nil
 }
 
-// indexSourceAt reports whether layer is itself a declared index source.
+// indexSourceAt reports an active declared index source. A ratio-zero layer
+// never enters the reference's compressed branch, even if listed as a source.
 func indexSourceAt(d41 *DeepSeekV41Config, layer int) bool {
-	if d41 == nil {
+	if d41 == nil || layer < 0 || layer >= len(d41.CompressRatios) || d41.CompressRatios[layer] == 0 {
 		return false
 	}
 	for _, src := range d41.IndexSourceLayerIDs {
@@ -554,7 +548,7 @@ func (m *Model) v41AttentionRolesCached() map[int]V41AttentionRole {
 // refused instead of silently truncating the contraction. localIdx is the
 // layer's own selection (nil when the layer is not an index source).
 func (m *Model) v41AttentionIndexList(plan V41AttentionPlan, st *v41ForwardState, localIdx []int32, headDim, groups, seq int) ([]int32, error) {
-	if plan.TopKWidth <= 0 || seq <= 0 {
+	if plan.Ratio == 0 || plan.TopKWidth <= 0 || seq <= 0 {
 		return nil, nil
 	}
 	isSource := indexSourceAt(m.Cfg.DeepSeekV41, plan.Layer)
@@ -632,14 +626,16 @@ func (m *Model) v41AttentionIndexList(plan V41AttentionPlan, st *v41ForwardState
 //
 // A compressed source (ratio > 1) publishes one entry per completed group, in
 // order, pairing the pooled latent with the index key the group contributes.
-// When the layer is a KV source or index source at ratio <= 1 (the reader
-// regime), there is no pooled group; the projected query-latent rows are the
-// index keys a downstream reader scores against, so each is published in stack
-// order with its Latent left nil.
+// Ratio-zero layers publish nothing. The legacy empty-latent branch remains a
+// standalone helper behavior for nonzero plans; ratio-one forward assembly is
+// refused before it can rely on those query-latent stand-ins.
 //
 // The update carries every published row in increasing stack order, which the
 // state's validateUpdates requires; a caller therefore never reorders them.
 func (m *Model) v41AttentionSourceUpdates(plan V41AttentionPlan, compressedKV [][]float32, qLatRows [][]float32, projectedKeys ...[][]float32) []V41AttentionStateUpdate {
+	if plan.Ratio == 0 {
+		return nil
+	}
 	var indexKeys [][]float32
 	if len(projectedKeys) > 0 {
 		indexKeys = projectedKeys[0]
@@ -659,9 +655,8 @@ func (m *Model) v41AttentionSourceUpdates(plan V41AttentionPlan, compressedKV []
 		IsIndexSource: isIndex,
 	}
 	if len(compressedKV) == 0 {
-		// No pooled group yet: an index source publishes its projected latents as
-		// the keys a reader will score against. A ratio-0 layer may not carry a
-		// latent (validateUpdates refuses one), so only the key is published.
+		// Legacy empty-latent publication for nonzero standalone plans. A ratio-one
+		// forward must not reach this stand-in; its assembly admission is closed.
 		if !isIndex {
 			return nil
 		}

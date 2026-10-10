@@ -2,12 +2,15 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"math/rand"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
 // streamProjectionSink is the post-decode projection runArmStream's loop wraps around
@@ -359,7 +362,8 @@ func TestInKernelCompleteStreamProjectsStopBeforeSink(t *testing.T) {
 	}
 }
 
-func TestInKernelCompleteStreamProjectsForcedReasoningClose(t *testing.T) {
+// fak-test:runtime fast est=20ms lane=default
+func TestInKernelCompleteStreamRejectsNonAtomicReasoningClose(t *testing.T) {
 	t.Setenv("FAK_STREAM_INKERNEL_PER_TOKEN", "1")
 	t.Setenv("FAK_INKERNEL_ENABLE_THINKING", "1")
 	m := model.NewSynthetic(tinyConcurrencyConfig())
@@ -371,10 +375,278 @@ func TestInKernelCompleteStreamProjectsForcedReasoningClose(t *testing.T) {
 			return nil
 		}, []Message{{Role: RoleUser, Content: "alpha beta gamma delta"}}, nil,
 		WithMaxTokens(8), WithThinkingBudget(1))
+	var unsupported *NativeThinkingBudgetUnsupportedError
+	if !errors.As(err, &unsupported) || comp != nil || streamed.Len() != 0 {
+		t.Fatalf("non-atomic close must refuse without output: comp=%v stream=%q err=%v", comp, streamed.String(), err)
+	}
+}
+
+func atomicThinkingTokenizer(t *testing.T) *tokenizer.Tokenizer {
+	t.Helper()
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(buildByteVocab()), &doc); err != nil {
+		t.Fatal(err)
+	}
+	vocab := doc["model"].(map[string]any)["vocab"].(map[string]any)
+	added := doc["added_tokens"].([]any)
+	for _, marker := range []string{thinkOpen, thinkClose} {
+		id := len(vocab)
+		vocab[marker] = id
+		added = append(added, map[string]any{"id": id, "content": marker, "special": true})
+	}
+	doc["added_tokens"] = added
+	data, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(streamed.String(), thinkClose) || streamed.String() != comp.Message.Content {
-		t.Fatalf("forced-close stream %q != final projected content %q", streamed.String(), comp.Message.Content)
+	tok, err := tokenizer.ParseJSON(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tok
+}
+
+// fak-test:runtime fast est=50ms lane=default
+func TestNativeThinkingBudgetUsesClosingTokenInSerialAndBatchedKV(t *testing.T) {
+	for _, batched := range []bool{false, true} {
+		name := "serial"
+		if batched {
+			name = "batched"
+		}
+		t.Run(name, func(t *testing.T) {
+			tok := atomicThinkingTokenizer(t)
+			cfg := tinyConcurrencyConfig()
+			cfg.VocabSize = tok.Vocab()
+			m := model.NewSynthetic(cfg)
+			p := NewInKernelPlanner(m, tok, "tiny-budget", false, nil, false)
+			constraint, err := p.newNativeThinkingConstraint(1, true, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := tok.Encode("x")
+			prompt := []int{3}
+			s := m.NewSession()
+			defer s.Close()
+			var raw, visible strings.Builder
+			projector := newInKernelStreamProjector(func(piece string) error {
+				visible.WriteString(piece)
+				return nil
+			}, nil, true)
+			measurement := &nativeInferenceMeasurement{inferenceDisabled: true, decodeTokenIDsEnabled: true}
+			ln := &decodeLane{
+				s: s, logits: s.Prefill(prompt), maxNew: 3,
+				rng: rand.New(rand.NewSource(1)), temp: 1, topP: 0.01, topK: 1,
+				logitBias: model.LogitBias{body[0]: 100, constraint.closeID: -100},
+				counts:    make([]int32, cfg.VocabSize), freqPenalty: 0.1, presPenalty: 0.1,
+				thinking: constraint, measurement: measurement, forwarded: make([]int, 0, 2),
+				emit: func(id int) bool {
+					piece, err := tok.Decode([]int{id})
+					if err != nil {
+						t.Fatal(err)
+					}
+					raw.WriteString(piece)
+					if err := projector.feed(piece); err != nil {
+						t.Fatal(err)
+					}
+					return false
+				},
+			}
+			// Bias favors another reasoning token at the cap. The closing-token
+			// penalty and top-k=1 must not override the hard singleton.
+			if batched {
+				inKernelDecodeLanesBatched(context.Background(), []*decodeLane{ln}, m, false)
+			} else {
+				inKernelDecodeSerial(context.Background(), ln)
+			}
+			if err := projector.flush(); err != nil {
+				t.Fatal(err)
+			}
+			want := []int{body[0], constraint.closeID, body[0]}
+			if ln.err != nil || !reflect.DeepEqual(measurement.decodeTokenIDs, want) || ln.gen != 3 {
+				t.Fatalf("actual emitted IDs=%v gen=%d err=%v want=%v", measurement.decodeTokenIDs, ln.gen, ln.err, want)
+			}
+			if raw.String() != "x</think>x" || visible.String() != "x" || constraint.budget.Count() != 1 || !constraint.forced {
+				t.Fatalf("raw=%q visible=%q count=%d forced=%v", raw.String(), visible.String(), constraint.budget.Count(), constraint.forced)
+			}
+			if !reflect.DeepEqual(ln.forwarded, want[:2]) || ln.counts[constraint.closeID] != 1 {
+				t.Fatalf("forwarded=%v close count=%d", ln.forwarded, ln.counts[constraint.closeID])
+			}
+			ref := m.NewSession()
+			defer ref.Close()
+			ref.Prefill(prompt)
+			ref.Step(body[0])
+			ref.Step(constraint.closeID)
+			if s.Cache.Len() != len(prompt)+2 || !reflect.DeepEqual(s.Cache.K, ref.Cache.K) || !reflect.DeepEqual(s.Cache.V, ref.Cache.V) {
+				t.Fatal("KV must contain the actual close token, excluding the unforwarded maxNew terminal")
+			}
+			constraint.reset()
+			if constraint.budget.Count() != 0 || !constraint.budget.InSpan() || constraint.forced {
+				t.Fatal("retry retained spent reasoning state")
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestNativeThinkingBudgetRejectsInvalidBoundaries(t *testing.T) {
+	tok := atomicThinkingTokenizer(t)
+	cfg := tinyConcurrencyConfig()
+	p := NewInKernelPlanner(&model.Model{Cfg: cfg}, tok, "budget-boundary", false, nil, false)
+	valid, err := p.newNativeThinkingConstraint(1, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stopConflict := range []bool{false, true} {
+		stops := map[int]bool{}
+		p.m.Cfg.VocabSize = cfg.VocabSize
+		if stopConflict {
+			stops[valid.closeID] = true
+		} else {
+			p.m.Cfg.VocabSize = valid.closeID
+		}
+		_, err := p.newNativeThinkingConstraint(1, true, stops)
+		var unsupported *NativeThinkingBudgetUnsupportedError
+		if !errors.As(err, &unsupported) {
+			t.Fatalf("vocab/stop conflict accepted: stop=%v err=%v", stopConflict, err)
+		}
+	}
+	if _, _, err := valid.closingToken(valid.closeID); err == nil {
+		t.Fatal("short actual logits row accepted")
+	}
+	if err := valid.acceptToken(tok.Vocab()); err == nil || valid.budget.Count() != 0 {
+		t.Fatal("undecodable token silently consumed reasoning budget")
+	}
+	if err := valid.acceptToken(valid.closeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, force, err := valid.closingToken(tok.Vocab()); err != nil || force || valid.budget.Count() != 0 {
+		t.Fatalf("natural close must end reasoning without force: force=%v err=%v", force, err)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestNativeThinkingBudgetTerminalsAndSplitOpen(t *testing.T) {
+	pieces := []string{"<th", "ink>", "x", thinkClose}
+	constraint := &nativeThinkingConstraint{
+		limit: 1, closeID: 3,
+		decodeToken: func(id int) (string, error) { return pieces[id], nil },
+	}
+	constraint.reset()
+	for _, id := range []int{0, 1} {
+		if err := constraint.acceptToken(id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if constraint.budget.Count() != 0 || !constraint.budget.InSpan() {
+		t.Fatal("split opening marker consumed reasoning budget")
+	}
+	constraint.acceptToken(2)
+	for _, stopOnEmit := range []bool{false, true} {
+		constraint.forced = false
+		constraint.budget = NewThinkBudget(1, true)
+		constraint.acceptToken(2)
+		measurement := &nativeInferenceMeasurement{inferenceDisabled: true, decodeTokenIDsEnabled: true}
+		ln := &decodeLane{
+			logits: []float32{0, 0, 100, -100}, maxNew: 1,
+			thinking: constraint, measurement: measurement,
+			emit: func(id int) bool { return stopOnEmit },
+		}
+		_, advance := ln.decodeOne(context.Background())
+		if advance || ln.err != nil || ln.gen != 1 || !reflect.DeepEqual(measurement.decodeTokenIDs, []int{3}) || ln.stopped != stopOnEmit {
+			t.Fatalf("terminal closing ID accounting: advance=%v gen=%d ids=%v stopped=%v err=%v", advance, ln.gen, measurement.decodeTokenIDs, ln.stopped, ln.err)
+		}
+	}
+	constraint.startInSpan = true
+	constraint.reset()
+	var raw string
+	ln := &decodeLane{
+		logits: []float32{0, 0, 100, -100}, maxNew: 1,
+		thinking: constraint, emit: func(id int) bool { raw += pieces[id]; return false },
+	}
+	_, advance := ln.decodeOne(context.Background())
+	reasoning, content := splitNativeBudgetReasoning(raw, true)
+	if advance || ln.err != nil || ln.gen != 1 || constraint.forced || reasoning != "x" || content != "" {
+		t.Fatalf("maxNew before close: raw=%q reasoning=%q content=%q gen=%d err=%v", raw, reasoning, content, ln.gen, ln.err)
+	}
+	// Unconstrained selection still chooses the original argmax, without a
+	// singleton close or any reasoning-state allocation.
+	plain := &decodeLane{logits: []float32{0, 0, 100, -100}, maxNew: 2}
+	if next, advance := plain.decodeOne(context.Background()); !advance || next != 2 {
+		t.Fatalf("unconstrained selection changed: next=%d advance=%v", next, advance)
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestNativeThinkingBudgetCompleteStreamUsesActualClose(t *testing.T) {
+	for _, stopAtClose := range []bool{false, true} {
+		tok := atomicThinkingTokenizer(t)
+		cfg := tinyConcurrencyConfig()
+		cfg.VocabSize = tok.Vocab()
+		m := model.NewSynthetic(cfg)
+		m.Quantize()
+		p := NewInKernelPlanner(m, tok, "tiny-budget-stream", false, nil, false)
+		open, _ := tok.Encode(thinkOpen)
+		close, _ := tok.Encode(thinkClose)
+		zero := 0.0
+		opts := []SampleOpt{
+			WithMaxTokens(3), WithThinkingBudget(1), WithTemperature(&zero),
+			WithLogitBias(map[int]float64{open[0]: 100, close[0]: -100}),
+			WithPerTokenStream(true), WithDecodeTrace(true), WithNativeDecodeTokenIDs(true),
+		}
+		if stopAtClose {
+			opts = append(opts, WithStop([]string{thinkClose}))
+		}
+		var visible strings.Builder
+		comp, err := p.CompleteStream(context.Background(), func(piece string) error {
+			visible.WriteString(piece)
+			return nil
+		}, []Message{{Role: RoleUser, Content: "budget"}}, nil, opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []int{open[0], open[0], close[0]}
+		if comp.NativeDecodeTokenIDs == nil || !reflect.DeepEqual(comp.NativeDecodeTokenIDs.TokenIDs, want) || comp.Usage.CompletionTokens != 3 {
+			t.Fatalf("real forced-close IDs/usage lost: ids=%v usage=%+v", comp.NativeDecodeTokenIDs, comp.Usage)
+		}
+		if visible.String() != comp.Message.Content || visible.Len() != 0 || comp.Message.ReasoningContent == "" {
+			t.Fatalf("reasoning escaped projection: visible=%q message=%+v", visible.String(), comp.Message)
+		}
+		if stopAtClose && comp.FinishReason != "stop" {
+			t.Fatalf("closing string stop lost: finish=%q", comp.FinishReason)
+		}
+		_, err = p.Complete(context.Background(), []Message{{Role: RoleUser, Content: "budget"}}, nil,
+			WithThinkingBudget(1), WithTemperature(&zero), WithNativeInferenceReceipt(true))
+		var unsupported *model.NativeInferenceReceiptUnsupportedError
+		if !errors.As(err, &unsupported) || !strings.Contains(unsupported.Reason, "thinking budget") {
+			t.Fatalf("modified-token selection claimed an unmodified receipt: %v", err)
+		}
+	}
+}
+
+// fak-test:runtime fast est=30ms lane=default
+func TestNativeThinkingBudgetRoutesAroundSpeculation(t *testing.T) {
+	tok := atomicThinkingTokenizer(t)
+	cfg := tinyConcurrencyConfig()
+	cfg.VocabSize = tok.Vocab()
+	m := model.NewSynthetic(cfg)
+	p := NewInKernelPlanner(m, tok, "tiny-budget-route", false, nil, false)
+	p.quant = false
+	p.speculativeEngine = &model.SpeculativeEngine{}
+	constraint, err := p.newNativeThinkingConstraint(1, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := tok.Encode("x")
+	if err := constraint.acceptToken(body[0]); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.WithValue(context.Background(), nativeThinkingConstraintContextKey{}, constraint)
+	var ids []int
+	_, err = p.generateReusedRecovering(ctx, []int{3}, 1, 0, 0, 0, nil, 0, 0, nil, func(id int) bool {
+		ids = append(ids, id)
+		return false
+	})
+	if err != nil || !reflect.DeepEqual(ids, []int{constraint.closeID}) {
+		t.Fatalf("budget bypassed target-only sampler: ids=%v err=%v", ids, err)
 	}
 }

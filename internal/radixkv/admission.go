@@ -234,9 +234,15 @@ func (t *Tree) snapshotAdmissionComparisons(boundary *node, suffix []int, incomi
 	}
 	var exclude *node
 	var oldBytes int64
+	view := snapshotEvictionView{clock: t.clock}
 	if len(suffix) == 0 {
 		exclude = boundary
 		oldBytes = snapshotResidentBytes(boundary.snapshot, boundary.cachedLogits)
+	} else {
+		// insertWithLogits ticks and transfers one boundary lease before
+		// makeSnapshotRoom runs. Match that phase without mutating the tree.
+		view.clock++
+		view.released = boundary
 	}
 	delta := incoming - oldBytes
 	if delta <= 0 || t.snapshotBytes+delta <= t.maxSnapshotBytes {
@@ -248,7 +254,7 @@ func (t *Tree) snapshotAdmissionComparisons(boundary *node, suffix []int, incomi
 		candidateWriteBytes: incoming,
 	}
 	required := t.snapshotBytes + delta - t.maxSnapshotBytes
-	victims, enough := t.prospectiveSnapshotVictims(required, exclude)
+	victims, enough := t.prospectiveSnapshotVictimsInView(required, exclude, view)
 	if !enough {
 		candidate.forcedReason = admissionReasonInsufficientCapacity
 		return []admissionComparison{candidate}
@@ -262,6 +268,10 @@ func (t *Tree) snapshotAdmissionComparisons(boundary *node, suffix []int, incomi
 }
 
 func (t *Tree) prospectiveSnapshotVictims(required int64, exclude *node) ([]compute.KVSpanStats, bool) {
+	return t.prospectiveSnapshotVictimsInView(required, exclude, snapshotEvictionView{clock: t.clock})
+}
+
+func (t *Tree) prospectiveSnapshotVictimsInView(required int64, exclude *node, view snapshotEvictionView) ([]compute.KVSpanStats, bool) {
 	if required <= 0 {
 		return nil, true
 	}
@@ -269,29 +279,13 @@ func (t *Tree) prospectiveSnapshotVictims(required int64, exclude *node) ([]comp
 	freed := int64(0)
 	var victims []compute.KVSpanStats
 	for freed < required {
-		var best *node
-		var bestKey victimKey
-		strategy := t.evictionStrategy()
-		if prep, ok := strategy.(TreePreparer); ok {
-			prep.PrepareTree(t)
-		}
-		var walk func(*node)
-		walk = func(n *node) {
-			if n != exclude && !selected[n] && n.refs == 0 && n.snapshot != nil {
-				key := strategy.Priority(n)
-				if best == nil || key.less(bestKey) {
-					best, bestKey = n, key
-				}
-			}
-			for _, child := range n.children {
-				walk(child)
-			}
-		}
-		t.forEachRoot(walk)
+		best := t.snapshotVictimSkippingInView(exclude, selected, view)
 		if best == nil {
 			return victims, false
 		}
-		victims = append(victims, snapshotKVSpanStats(best))
+		stats := snapshotKVSpanStats(best)
+		stats.Leased = view.refs(best) > 0
+		victims = append(victims, stats)
 		freed += snapshotResidentBytes(best.snapshot, best.cachedLogits)
 		selected[best] = true
 	}

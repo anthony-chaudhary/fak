@@ -126,6 +126,9 @@ func admitQuantLoad(cfg Config, opts []LoadOption) (loadOptions, error) {
 			return loadOptions{}, err
 		}
 	}
+	if _, err := compressedTensorsLMHeadEnabled(cfg); err != nil {
+		return loadOptions{}, err
+	}
 	return resolveLoadOptions(opts), nil
 }
 
@@ -456,6 +459,13 @@ func quantizeFileInto(sf *safetensorsFile, m *Model, tied bool, raw *[]byte, off
 // the pipeline-parallel window (a returned false consumes the name and skips it); a nil keepLayer
 // keeps every tensor.
 func quantizeNamedTensorsInto(names []string, hdr map[string]json.RawMessage, tensorBytes func(stEntry) ([]byte, error), keepLayer func(name string) bool, m *Model, tied bool, raw *[]byte, off *int) error {
+	compressedHead, err := compressedTensorsLMHeadEnabled(m.Cfg)
+	if err != nil {
+		return err
+	}
+	if compressedHead && tied {
+		return fmt.Errorf("safetensors: compressed-tensors requires an explicit untied lm_head.weight")
+	}
 	consumed := map[string]bool{}
 	for _, name := range names {
 		if consumed[name] {
@@ -480,6 +490,16 @@ func quantizeNamedTensorsInto(names []string, hdr map[string]json.RawMessage, te
 		}
 		if keepLayer != nil && !keepLayer(name) {
 			consumed[name] = true
+			continue
+		}
+		if compressedHead && strings.HasPrefix(name, "lm_head.") {
+			if name != "lm_head.weight" {
+				return fmt.Errorf("safetensors: unsupported compressed-tensors head companion %s", name)
+			}
+			if err := quantizeCompressedTensorsLMHead(hdr, tensorBytes, m); err != nil {
+				return err
+			}
+			consumed["lm_head.weight_scale"] = true
 			continue
 		}
 		handled, err := quantizeV4DenseFP8TensorInto(name, hdr, tensorBytes, m, consumed)
@@ -570,6 +590,16 @@ func quantizeFP8BlockScaleTensorInto(
 	scaleF32, err := decodeSafetensorF32(scaleName, scaleEntry, scaleBytes)
 	if err != nil {
 		return true, err
+	}
+	if canonical, direct := fp8DirectQ8Name(m.Cfg, name, weightEntry.Shape); direct {
+		qt, err := quantizeFP8BlockScaleQ8(name, weightEntry.Shape, weightBytes, scaleF32)
+		if err != nil {
+			return true, err
+		}
+		m.q8w[canonical] = qt
+		consumed[name] = true
+		consumed[scaleName] = true
+		return true, nil
 	}
 	fb, shape, err := decodeFP8BlockScaleTensor(name, weightEntry.Shape, weightBytes, scaleF32)
 	if err != nil {

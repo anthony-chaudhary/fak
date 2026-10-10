@@ -495,7 +495,12 @@ bool queryDeviceLocalMemoryBudget(VkDeviceSize* budget, VkDeviceSize* usage) {
 void destroyBuffer(Buffer* b) {
     if (g_v41SubmissionPendingFailure) return; // referenced scratch/arena may still be in flight
     if (!b) return;
-    if (b->buf) vkDestroyBuffer(g_dev, b->buf, nullptr);
+    if (b->buf) {
+        // Descriptor sets outlive temporary buffers; a recycled handle is not
+        // proof that its old binding is still valid. Cover every destruction path.
+        clearDescriptorBindingCache();
+        vkDestroyBuffer(g_dev, b->buf, nullptr);
+    }
     if (b->weightArenaBound) {
         if (b->weightArenaBlock < g_weightArena.size()) {
             WeightArenaBlock& block = g_weightArena[b->weightArenaBlock];

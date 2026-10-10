@@ -39,6 +39,60 @@ type safetensorsFile struct {
 	data []byte
 }
 
+// unmarshalUniqueJSON preserves encoding/json's syntax, depth and destination
+// checks, but rejects repeated object keys before map decoding can hide them.
+// The key walk is shared by tensor headers, shard indices and quantization
+// metadata. It retains only keys of currently open objects, not a decoded tree.
+func unmarshalUniqueJSON(raw []byte, dst any) error {
+	if !json.Valid(raw) {
+		return json.Unmarshal(raw, dst)
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	// Numbers in ignored metadata need not fit in float64. Only the destination
+	// decoder may impose a numeric type/range, as it did before this key check.
+	d.UseNumber()
+	var value func() error
+	value = func() error {
+		token, err := d.Token()
+		if err != nil {
+			return err
+		}
+		switch token {
+		case json.Delim('{'):
+			seen := map[string]bool{}
+			for d.More() {
+				key, err := d.Token()
+				if err != nil {
+					return err
+				}
+				name, ok := key.(string)
+				if !ok || seen[name] {
+					return fmt.Errorf("duplicate or invalid field %v", key)
+				}
+				seen[name] = true
+				if err := value(); err != nil {
+					return err
+				}
+			}
+			_, err = d.Token()
+			return err
+		case json.Delim('['):
+			for d.More() {
+				if err := value(); err != nil {
+					return err
+				}
+			}
+			_, err = d.Token()
+			return err
+		}
+		return nil
+	}
+	if err := value(); err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, dst)
+}
+
 // openSafetensorsFile opens a single-file safetensors checkpoint, preferring a read-only
 // memory map (zero-copy per-tensor slices, the whole file never resident in the process heap)
 // and falling back to os.Open + per-tensor ReadAt where mmap is unavailable or fails. Both
@@ -124,7 +178,7 @@ func newSafetensorsFile(r io.ReaderAt, size int64, closer io.Closer) (*safetenso
 		return nil, fmt.Errorf("safetensors: header read: %w", err)
 	}
 	var hdr map[string]json.RawMessage
-	if err := json.Unmarshal(header, &hdr); err != nil {
+	if err := unmarshalUniqueJSON(header, &hdr); err != nil {
 		if closer != nil {
 			_ = closer.Close()
 		}
@@ -181,7 +235,7 @@ func parseSafetensorsHeader(buf []byte) (map[string]json.RawMessage, int, error)
 		return nil, 0, fmt.Errorf("safetensors: header too large")
 	}
 	var hdr map[string]json.RawMessage
-	if err := json.Unmarshal(buf[8:8+int(hlen)], &hdr); err != nil {
+	if err := unmarshalUniqueJSON(buf[8:8+int(hlen)], &hdr); err != nil {
 		return nil, 0, fmt.Errorf("safetensors: header json: %w", err)
 	}
 	return hdr, 8 + int(hlen), nil
@@ -287,7 +341,7 @@ func safetensorsIndexShards(idxPath string) (shards []string, weightMap map[stri
 	var index struct {
 		WeightMap map[string]string `json:"weight_map"`
 	}
-	if err := json.Unmarshal(ib, &index); err != nil {
+	if err := unmarshalUniqueJSON(ib, &index); err != nil {
 		return nil, nil, fmt.Errorf("safetensors index: %w", err)
 	}
 	shardSet := map[string]bool{}

@@ -105,20 +105,11 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		return v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: layer %d step requires retained decode state", ErrV41ForwardStage, l))
 	}
-	// A compressed / shared-source / reader role contracts the shared compressed
-	// stream rather than this layer's own per-position window. It is stepped by a
-	// separate one-position composition (#13480) so the per-layer window path
-	// below stays byte-for-byte the plain-layer arithmetic: silently running the
-	// window contraction for a role layer would emit logits from a schedule the
-	// checkpoint never declared. The role step still receives the layer's own
-	// retained state (its compressor group cursor). Success advances its logical
-	// append cursor without adding a row to the plain window.
+	// Role layers combine their own window with shared compressed rows. Their
+	// source append already advances the compressor cursor, so the role path
+	// commits the window itself without calling State.Step a second time.
 	if plan.Role != V41AttentionRolePerLayer || plan.Ratio > 1 {
-		if err := m.v41LayerStepRole(l, plan, x, streams, pos, layerState, registry, scratch); err != nil {
-			return err
-		}
-		layerState.nextWindowPos = pos + 1
-		return nil
+		return m.v41LayerStepRole(l, plan, x, streams, pos, layerState, registry, scratch)
 	}
 	// Append-only: the step position must be the next retained position. This
 	// refuses a caller that skipped or replayed history instead of silently
@@ -136,6 +127,14 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		return err
 	}
 
+	if full {
+		if err := scratch.mhcCarry.validate(l, 1); err != nil {
+			return err
+		}
+		if err := m.v41AdmitMHC(l); err != nil {
+			return err
+		}
+	}
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
 	mixBase := m.tensor(layerName(l, "mhc.base"))
 	mixScale := m.tensor(layerName(l, "mhc.scale"))
@@ -191,9 +190,19 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if !full {
 		streams4 = [][]float32{xn, xn, xn, xn}
 	}
-	collapsed, err := v41MHCPre(streams4, mix.pre)
+	pre := mix.pre
+	if full {
+		pre = scratch.mhcCarry.pre[0]
+	}
+	collapsed, err := v41MHCPre(streams4, pre)
 	if err != nil {
 		return v41StageErr(v41StageMHC, l, err)
+	}
+	if full {
+		collapsed, err = m.v41AttentionInputNorm(l, collapsed, eps)
+		if err != nil {
+			return err
+		}
 	}
 
 	// ---- attention for the one position ----
@@ -329,7 +338,18 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return err
 	}
-	ffnX, err := m.v41FFNNorm(l, x, eps, scratch.ffnNorm)
+	var ffnX []float32
+	var ffnResidual [][]float32
+	var ffnMix v41MHCMix
+	if full {
+		projectFFN, ferr := m.v41FFNMHCProjector(l, scratch)
+		if ferr != nil {
+			return ferr
+		}
+		ffnResidual, ffnMix, ffnX, err = m.v41FullFFNInput(l, streams, mix, attnOut, projectFFN, scratch)
+	} else {
+		ffnX, err = m.v41FFNNorm(l, x, eps, scratch.ffnNorm)
+	}
 	if err != nil {
 		return err
 	}
@@ -360,15 +380,17 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return v41StageErr(v41StageMoE, l, err)
 	}
-	delta := make([]float32, H)
-	for i := 0; i < H; i++ {
-		delta[i] = attnOut[i] + moe[i]
-	}
-	residual := [][]float32{collapsed, collapsed, collapsed, collapsed}
+	var next [][]float32
 	if full {
-		residual = streams
+		next, err = v41MHCPostBF16(l, moe, ffnResidual, ffnMix)
+	} else {
+		delta := make([]float32, H)
+		for i := range delta {
+			delta[i] = attnOut[i] + moe[i]
+		}
+		residual := [][]float32{collapsed, collapsed, collapsed, collapsed}
+		next, err = v41MHCPost(delta, residual, mix.post, mix.comb)
 	}
-	next, err := v41MHCPost(delta, residual, mix.post, mix.comb)
 	if err != nil {
 		return v41StageErr(v41StageMHC, l, err)
 	}
@@ -392,6 +414,8 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 			copy(streams[h], next[h])
 		}
 		copy(x, next[0])
+		scratch.mhcCarry.pre[0] = ffnMix.pre
+		scratch.mhcCarry.nextLayer++
 	} else {
 		copy(x, next[0])
 	}
@@ -399,8 +423,8 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 }
 
 // v41LayerStepRole advances ONE position of a compressed / shared-source / reader
-// V4.1 layer through the retained compressed stream instead of the layer's own
-// per-position window (#13480). It is the role-aware counterpart of v41LayerStep:
+// V4.1 layer through its own retained window plus the shared compressed stream.
+// It is the role-aware counterpart of v41LayerStep:
 // the mHC split/pre-collapse, the query projection, the MoE block and the mHC
 // post are the SAME arithmetic v41LayerStep's plain branch runs for seq == 1, so
 // the only structural difference is the attention KV row set and its commit.
@@ -418,9 +442,8 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 //     KVSourceRows and reuses the source's published top-k exactly as v41Layer's
 //     reader branch does.
 //
-// This function leaves the per-layer window ring and logical append cursor
-// unchanged. Its wrapper advances the logical cursor after success; the outer
-// composition restores compressor and publication state on failure.
+// The window ring commits only after the layer arithmetic succeeds. The outer
+// composition restores window, compressor and publication state on failure.
 func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, streams [][]float32, pos int, layerState, registry *V41AttentionState, scratch *v41ProjScratch) error {
 	cfg := m.Cfg
 	if len(x) != cfg.HiddenSize {
@@ -449,6 +472,19 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 			fmt.Errorf("%w: layer %d role step position %d is not the next retained position %d",
 				ErrV41ForwardStage, l, pos, layerState.nextWindowPos))
 	}
+	if pos < 0 || pos == int(^uint(0)>>1) || layerState.windowSize <= 0 ||
+		len(layerState.window) != layerState.windowSize || layerState.headDim != cfg.HeadDim ||
+		layerState.retainedWindowRows < 0 || layerState.retainedWindowRows > min(pos, layerState.windowSize) ||
+		len(layerState.window[pos%layerState.windowSize]) != cfg.HeadDim {
+		return v41StageErr(v41StageAttention, l, fmt.Errorf("%w: role window state has invalid geometry", ErrV41ForwardStage))
+	}
+	windowStart := 0
+	if window := cfg.windowForLayer(l); window > 0 {
+		windowStart = max(0, pos-window+1)
+	}
+	if windowStart < pos-layerState.retainedWindowRows {
+		return v41StageErr(v41StageAttention, l, fmt.Errorf("%w: role window is not fully retained", ErrV41ForwardStage))
+	}
 
 	H, hd, nH := cfg.HiddenSize, cfg.HeadDim, cfg.NumHeads
 	eps := float32(cfg.RMSNormEps)
@@ -461,6 +497,14 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 			fmt.Errorf("%w: layer %d role step requires the full V4.1 geometry", ErrV41ForwardStage, l))
 	}
 
+	if full {
+		if err := scratch.mhcCarry.validate(l, 1); err != nil {
+			return err
+		}
+		if err := m.v41AdmitMHC(l); err != nil {
+			return err
+		}
+	}
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
 	mixBase := m.tensor(layerName(l, "mhc.base"))
 	mixScale := m.tensor(layerName(l, "mhc.scale"))
@@ -496,9 +540,13 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	if err != nil {
 		return v41StageErr(v41StageMHC, l, err)
 	}
-	collapsed, err := v41MHCPre(streams, mix.pre)
+	collapsed, err := v41MHCPre(streams, scratch.mhcCarry.pre[0])
 	if err != nil {
 		return v41StageErr(v41StageMHC, l, err)
+	}
+	collapsed, err = m.v41AttentionInputNorm(l, collapsed, eps)
+	if err != nil {
+		return err
 	}
 
 	// ---- attention query for the one position (mirrors v41Layer's full branch) ----
@@ -534,6 +582,11 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	if err := v41TailRoPEInPlace(l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE); err != nil {
 		return err
 	}
+	window := make([][]float32, 0, pos-windowStart+1)
+	for key := windowStart; key < pos; key++ {
+		window = append(window, layerState.window[key%layerState.windowSize])
+	}
+	window = append(window, kv)
 
 	// ---- shared compressed stream: source publishes, reader resolves ----
 	//
@@ -543,9 +596,9 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	// rows into the registry so a later reader resolves them; a reader reads the
 	// registry only. This mirrors v41Layer's source-then-consumer ordering (#12896)
 	// at seq == 1.
-	var sharedKV [][]float32
+	var sharedKV, indexKeys [][]float32
 	var sourceIdx []int32
-	if plan.Ratio > 1 {
+	if v41OwnsCompressedRows(plan) {
 		width := v41CompressorWidth(cfg)
 		normWeight := m.tensor(layerName(l, "attn.compressor.norm.weight"))
 		pool, perr := NewV41CompressorPool(plan.Ratio, width)
@@ -566,19 +619,13 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		var indexPub bool
 		var projectIndex func([]float32) ([]float32, error)
 		if indexSourceAt(cfg.DeepSeekV41, l) {
-			kNorm := m.tensor(layerName(l, "indexer.k_norm.weight"))
-			indexDim := cfg.IndexHeadDim
-			if indexDim <= 0 {
-				return v41StageErr(v41StageIndexer, l,
-					fmt.Errorf("%w: indexer geometry headDim=%d is not declared", ErrV41ForwardStage, indexDim))
-			}
 			indexPub = true
 			projectIndex = func(row []float32) ([]float32, error) {
-				projected, err := m.v41ProjMatRowsWithProjection(l, "indexer.wk.weight", row, indexDim, len(row), scratch.denseProjection)
+				keys, err := m.v41IndexKeysWithOperations(l, [][]float32{row}, scratch.denseProjection, scratch.indexKeyNorm)
 				if err != nil {
 					return nil, err
 				}
-				return m.v41IndexKeyNorm(l, projected, kNorm, eps, scratch.indexKeyNorm)
+				return keys[0], nil
 			}
 		}
 		_, _, _, _, _, err = layerState.appendCompressorSourcePublication(
@@ -594,79 +641,61 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		if err != nil {
 			return v41StageErr(v41StageCompress, l, err)
 		}
+		sharedKV, _ = layerState.KVSourceRows(l)
 		if indexPub {
-			keys, ok := layerState.IndexKeys(l)
-			rows, rowsOK := layerState.KVSourceRows(l)
-			if len(rows) != len(keys) || (rowsOK && !ok) {
+			var ok bool
+			indexKeys, ok = layerState.IndexKeys(l)
+			if len(sharedKV) != len(indexKeys) || (len(sharedKV) > 0 && !ok) {
 				return v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: own index history is incomplete", ErrV41ForwardStage))
 			}
-			sourceIdx, err = m.v41IndexRowsProjected(l, pos, qLat, collapsed, keys, scratch.denseProjection)
-			if err != nil {
-				return err
-			}
-			row, err := m.v41RoleStepNormalizeIndex(l, plan, sourceIdx, len(keys))
-			if err != nil {
-				return err
-			}
-			if err := registry.PublishTopK(plan.Ratio, [][]int32{row}); err != nil {
-				return err
-			}
-		}
-		if plan.Role == V41AttentionRoleReader && plan.KVSourceLayer >= 0 {
-			sharedKV, _ = registry.KVSourceRows(plan.KVSourceLayer)
-		} else {
-			sharedKV, _ = layerState.KVSourceRows(l)
-		}
-		if len(sharedKV) == 0 {
-			// No completed group yet: the layer contracts nothing for this position,
-			// exactly as the full path's empty compressed stream does for an
-			// incomplete group. The compressor cursor has advanced; finish the
-			// MoE/mHC tail with a zero attention output so the position advances.
-			return m.v41LayerStepRoleFinish(l, x, streams, mix, make([]float32, H), scratch)
 		}
 	} else {
-		// Reader (or a ratio<=1 shared layer): resolve the nearest preceding
-		// source's completed compressed rows from the shared registry.
-		if plan.KVSourceLayer < 0 {
-			return v41StageErr(v41StageAttention, l,
-				fmt.Errorf("%w: layer %d role step resolves no shared KV source", ErrV41ForwardStage, l))
+		sharedKV, indexKeys, err = m.v41CompressedReaderRows(plan, registry, pos+1)
+		if err != nil {
+			return err
 		}
-		rows, ok := registry.KVSourceRows(plan.KVSourceLayer)
-		if !ok || len(rows) == 0 {
-			return v41StageErr(v41StageAttention, l,
-				fmt.Errorf("%w: layer %d role step reads source %d but no compressed rows are published", ErrV41ForwardStage, l, plan.KVSourceLayer))
+	}
+	if indexSourceAt(cfg.DeepSeekV41, l) {
+		sourceIdx, err = m.v41IndexRowsWithOperations(l, pos, qLat, collapsed, indexKeys, scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth)
+		if err != nil {
+			return err
 		}
-		sharedKV = rows
+		row, err := m.v41RoleStepNormalizeIndex(l, plan, sourceIdx, len(indexKeys))
+		if err != nil {
+			return err
+		}
+		if err := registry.PublishTopK(plan.Ratio, [][]int32{row}); err != nil {
+			return err
+		}
 	}
-
-	// ---- compressed contraction over the shared rows (block-causal) ----
-	opt := V41AttentionSharedKVOptions{
-		Layer: l, Ratio: plan.kvGroupSize(cfg), QueryOffset: pos, Groups: len(sharedKV),
-		HeadDim: hd, Heads: nH, Softmax: cfg.attnScale(), Sink: m.tensor(layerName(l, "attn.sink")),
-	}
+	// Canonical compressed IDs remain unoffset until the common composer adds
+	// this layer's window width. Padding and repeated selections are preserved.
+	var ids []int32
 	if plan.TopKWidth > 0 {
-		indexState := registry
-		if indexSourceAt(cfg.DeepSeekV41, l) {
-			indexState = layerState
-		}
-		var idx []int32
 		var ierr error
 		if indexSourceAt(cfg.DeepSeekV41, l) {
-			idx, ierr = m.v41RoleStepNormalizeIndex(l, plan, sourceIdx, len(sharedKV))
+			ids, ierr = m.v41RoleStepNormalizeIndex(l, plan, sourceIdx, len(sharedKV))
 		} else {
-			idx, ierr = m.v41RoleStepIndex(indexState, l, pos, plan, qLat, collapsed, len(sharedKV))
+			ids, ierr = m.v41RoleStepIndex(registry, l, pos, plan, qLat, collapsed, len(sharedKV))
 		}
 		if ierr != nil {
 			return ierr
 		}
-		if idx != nil {
-			opt.Idx = idx
-			opt.IndexTopK = plan.TopKWidth
-			opt.TopK = plan.TopKWidth
+		if ids == nil {
+			ids, ierr = m.v41RoleStepNormalizeIndex(l, plan, nil, len(sharedKV))
+			if ierr != nil {
+				return ierr
+			}
+		}
+	}
+	if ids == nil {
+		ids = make([]int32, len(sharedKV))
+		for group := range ids {
+			ids[group] = int32(group)
 		}
 	}
 	attentionOpened := m.v41NowNanos()
-	o, err := v41AttentionCompressedForwardWithDevice(q, sharedKV, opt, scratch.sharedAttention)
+	o, err := v41CombinedAttention(l, pos, plan.kvGroupSize(cfg), nH, hd, q, m.tensor(layerName(l, "attn.sink")), window, sharedKV, ids, cfg.attnScale(), scratch.sharedAttention)
 	m.v41NoteAttentionContraction(attentionOpened)
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
@@ -677,20 +706,35 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		return v41StageErr(v41StageAttention, l, err)
 	}
 
-	return m.v41LayerStepRoleFinish(l, x, streams, mix, attnProjected, scratch)
+	if err := m.v41LayerStepRoleFinish(l, x, streams, mix, attnProjected, scratch); err != nil {
+		return err
+	}
+	// No error-returning operation remains. State.Step would advance an owner's
+	// already-committed compressor cursor twice. Retain this layer's own row,
+	// including on reader layers and before the first completed source group.
+	copy(layerState.window[pos%layerState.windowSize], kv)
+	layerState.nextWindowPos, layerState.nextCompressRow = pos+1, pos+1
+	retained := min(layerState.retainedWindowRows+1, layerState.windowSize)
+	if configured := cfg.windowForLayer(l); configured > 0 {
+		retained = min(retained, configured)
+	}
+	layerState.retainedCopies += retained - layerState.retainedWindowRows
+	layerState.retainedWindowRows = retained
+	return nil
 }
 
 // v41LayerStepRoleFinish runs the MoE block and the mHC post for one position and
 // commits the position's mHC streams and hidden row. It is shared by the source
-// (which may have no attention output yet) and the reader path so the tail after
-// attention is byte-identical to the plain branch's seq == 1 arithmetic. The
-// per-layer window cursor is deliberately NOT advanced here: the role path owns
-// the shared compressed stream, not this layer's window ring.
+// and reader paths so the tail after attention is byte-identical to the plain
+// branch's seq == 1 arithmetic. The caller commits its window after this returns.
 func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, mix v41MHCMix, attnOut []float32, scratch *v41ProjScratch) error {
 	cfg := m.Cfg
 	H := cfg.HiddenSize
-	eps := float32(cfg.RMSNormEps)
-	ffnX, err := m.v41FFNNorm(l, x, eps, scratch.ffnNorm)
+	projectFFN, err := m.v41FFNMHCProjector(l, scratch)
+	if err != nil {
+		return err
+	}
+	ffnResidual, ffnMix, ffnX, err := m.v41FullFFNInput(l, streams, mix, attnOut, projectFFN, scratch)
 	if err != nil {
 		return err
 	}
@@ -726,11 +770,7 @@ func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, 
 	if err != nil {
 		return v41StageErr(v41StageMoE, l, err)
 	}
-	delta := make([]float32, H)
-	for i := 0; i < H; i++ {
-		delta[i] = attnOut[i] + moe[i]
-	}
-	next, err := v41MHCPost(delta, streams, mix.post, mix.comb)
+	next, err := v41MHCPostBF16(l, moe, ffnResidual, ffnMix)
 	if err != nil {
 		return v41StageErr(v41StageMHC, l, err)
 	}
@@ -738,6 +778,8 @@ func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, 
 		copy(streams[h], next[h])
 	}
 	copy(x, next[0])
+	scratch.mhcCarry.pre[0] = ffnMix.pre
+	scratch.mhcCarry.nextLayer++
 	return nil
 }
 
