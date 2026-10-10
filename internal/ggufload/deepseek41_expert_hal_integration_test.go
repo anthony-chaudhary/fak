@@ -20,8 +20,9 @@ package ggufload
 //     projections (streamed, not resident);
 //   - on a backend that serves Q2_K but not Q3_K, gate MatMul + up MatMul +
 //     SwiGLU run ON THE DEVICE through the shared q4kExpertInputHAL seam. Typed
-//     accounting distinguishes those expert calls from dense device MatMuls, and
-//     the Q3_K down contraction stays on the host;
+//     accounting distinguishes those expert calls from dense device MatMuls and
+//     from the shared expert's device SwiGLU, and the Q3_K down contraction stays
+//     on the host;
 //   - the checkpoint tier actually FAULTED the activated experts (Reads grew);
 //   - the device arm reproduces the host arm's logits within the f32 reduction
 //     tolerance, so the streamed device seam is numerically the streamed host
@@ -53,6 +54,11 @@ type ds41HALRecordingBackend struct {
 	deviceMemory bool
 	matmuls      map[compute.Dtype]int
 	swiglu       int
+	// A routed SwiGLU consumes the two Q2_K gate/up MatMul outputs. The V4.1
+	// shared expert's device activation consumes host-uploaded operands instead.
+	q2Outputs    map[compute.Buffer]bool
+	routedSwiGLU int
+	sharedSwiGLU int
 }
 
 func (b *ds41HALRecordingBackend) Caps() compute.Caps {
@@ -67,7 +73,14 @@ func (b *ds41HALRecordingBackend) MatMul(w, x compute.Tensor) compute.Tensor {
 		b.matmuls = make(map[compute.Dtype]int)
 	}
 	b.matmuls[w.Dtype]++
-	return b.Backend.MatMul(w, x)
+	out := b.Backend.MatMul(w, x)
+	if w.Dtype == compute.Q2_K {
+		if b.q2Outputs == nil {
+			b.q2Outputs = make(map[compute.Buffer]bool)
+		}
+		b.q2Outputs[out.Buf()] = true
+	}
+	return out
 }
 
 func (b *ds41HALRecordingBackend) matmulCount() int {
@@ -80,6 +93,13 @@ func (b *ds41HALRecordingBackend) matmulCount() int {
 
 func (b *ds41HALRecordingBackend) SwiGLU(g, u compute.Tensor) compute.Tensor {
 	b.swiglu++
+	if b.q2Outputs[g.Buf()] && b.q2Outputs[u.Buf()] {
+		b.routedSwiGLU++
+	} else {
+		b.sharedSwiGLU++
+	}
+	delete(b.q2Outputs, g.Buf())
+	delete(b.q2Outputs, u.Buf())
 	return b.Backend.SwiGLU(g, u)
 }
 
@@ -173,8 +193,13 @@ func TestDeepSeek41MixedQuantExpertHALIntegration(t *testing.T) {
 	if gotTotal := be.matmulCount(); gotTotal != 2*picks+denseMatmuls {
 		t.Fatalf("device MatMul count = %d, want %d Q2_K expert + %d F32/Q8_0 dense and no other dtype", gotTotal, 2*picks, denseMatmuls)
 	}
-	if be.swiglu != picks {
-		t.Fatalf("device SwiGLU count = %d, want %d (one fused SwiGLU per routed pick)", be.swiglu, picks)
+	if be.routedSwiGLU != picks {
+		t.Fatalf("device routed SwiGLU count = %d, want %d (one fused SwiGLU per routed pick)", be.routedSwiGLU, picks)
+	}
+	// The default device session also runs the V4.1 shared expert's activation
+	// on the device: one SwiGLU per layer over host-uploaded gate/up rows.
+	if be.sharedSwiGLU != cfg.NumLayers || be.swiglu != picks+cfg.NumLayers {
+		t.Fatalf("device SwiGLU total = %d (routed %d, shared %d), want %d routed + %d shared", be.swiglu, be.routedSwiGLU, be.sharedSwiGLU, picks, cfg.NumLayers)
 	}
 
 	// (c) The tier faulted the activated experts on the DEVICE arm too — the
