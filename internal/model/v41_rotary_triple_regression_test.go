@@ -158,7 +158,8 @@ func TestV41RotaryTripleRegression(t *testing.T) {
 			}
 			pos := positions[layer]
 			positions[layer]++
-			want := rotateTail(contracted, headDim, rd, pos, compressedTheta, -1)
+			// model.py780-781: BF16 attention output, F32 inverse rotation, BF16 copyback.
+			want := v41LatentNormOracleBF16(rotateTail(v41LatentNormOracleBF16(contracted), headDim, rd, pos, compressedTheta, -1))
 			for i := range want {
 				if delta := math.Abs(float64(out[i]) - float64(want[i])); math.IsNaN(delta) || delta > 1e-6+1e-6*math.Abs(float64(want[i])) {
 					t.Fatalf("layer %d pos %d: projection input[%d]=%g, want inverse-rotated %g (raw %g)",

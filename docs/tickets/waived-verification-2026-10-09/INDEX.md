@@ -18,6 +18,6 @@ On 2026-10-09, 68 public commits landed under an operator deferred-verification 
 | TICKET-10 | V4.1 mHC geometry: absent-mix refusal and lost layer-two stream (#13790) | green: ebdead0220f, 5509c47c9f1 |
 | TICKET-11 | V4.1 clamped SwiGLU failure-retry panic aborts internal/model, fix first (#13795) | red |
 | TICKET-12 | V4.1 compressor/indexer projection fault-closure contract (#13796) | red |
-| TICKET-13 | V4.1 layer-step, grouped-session and head parity drift, BF16 boundaries (#13797) | red |
+| TICKET-13 | V4.1 layer-step, grouped-session and head parity drift, BF16 boundaries (#13797) | green: witness passes at original tolerances |
 
 Each ticket is closed by fail-before/pass-after tests landed on trunk that cite the covered commit shas.

@@ -122,7 +122,8 @@ func v41FullStepSeed(t *testing.T, m *Model, l int, prefix []int) *V41AttentionS
 		kv := v41AttentionInputNormOracle(kvFull[:hd], kvNorm, eps)
 		cos, sin := v41RopeTableForLayer(cfg, l, pos)
 		applyRopeTailInterleaved(kv, cos, sin, cfg.QKRopeHeadDim)
-		rows[pos] = kv
+		// model.py apply_rotary_emb copies the rotated tail back to BF16.
+		rows[pos] = v41LatentNormOracleBF16(kv)
 	}
 	if err := state.seedTemporal(rows, 0, cfg.windowForLayer(l)); err != nil {
 		t.Fatal(err)

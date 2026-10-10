@@ -24,4 +24,11 @@ Parent: #13764.
 
 ## Done condition
 
-- [ ] All three tests green at their original tolerances; the fix cites the reference and the culprit sha.
+- [x] All three tests green at their original tolerances; the fix cites the reference and the culprit sha.
+
+## Resolution
+
+Two causes, found by swapping one session callback at a time into a host forward:
+
+- Grouped-session, head and role-mhc drift: the selected mHC projection (device `MatMul`, fdot reduction) and the host `v41MHCProjectFull` (serial sum) differed in the last F32 bit, and the BF16 stream boundaries added by 57cbe301f63 and 4e80401da72 amplified that into a BF16 ulp. Every other host/device projection already shares fdot, so `v41MHCProjectFull` now uses it.
+- Layer-step and rotary-triple drift: production BF16-copies the rotated KV row and the inverse-rotated attention output (model.py `apply_rotary_emb` and lines 780-781), but the full-step seed oracle and the inverse-output oracle did not. Both oracles now apply those BF16 copies.
