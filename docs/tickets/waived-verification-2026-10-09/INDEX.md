@@ -14,6 +14,9 @@ On 2026-10-09, 68 public commits landed under an operator deferred-verification 
 | TICKET-07 | FP8 tiled-to-Q8 loader | red |
 | TICKET-08 | V4.1 compressed-window composition + session fallback | red |
 | TICKET-09 | V4.1 sparse-sink host contract | red |
-| TICKET-10 | V4.1 absent mHC mix refusal names geometry, not the missing tensor (#13790) | red |
+| TICKET-10 | V4.1 mHC geometry: absent-mix refusal and lost layer-two stream (#13790) | red |
+| TICKET-11 | V4.1 clamped SwiGLU failure-retry panic aborts internal/model, fix first (#13795) | red |
+| TICKET-12 | V4.1 compressor/indexer projection fault-closure contract (#13796) | red |
+| TICKET-13 | V4.1 layer-step, grouped-session and head parity drift, BF16 boundaries (#13797) | red |
 
 Each ticket is closed by fail-before/pass-after tests landed on trunk that cite the covered commit shas.

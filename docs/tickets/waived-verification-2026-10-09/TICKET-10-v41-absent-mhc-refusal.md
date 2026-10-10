@@ -6,6 +6,8 @@ At fak `a512e07ef31`, `TestV41ForwardAbsentMHCMixStillRefuses` (`internal/model/
 
 Likely source: a recent waived mHC or geometry commit by oss-maintainer-12 after `24033b4080f`. Candidates include 6a54495ecd4 (transposed mHC device projection); bisect to confirm.
 
+The same mHC geometry family also has `TestV41MHCProjectionRawFullAndReduced/full-q2` red at `4cbddeafffb` (`v41_mhc_projection_test.go:426`: "layer two lost independent nonzero stream 1"). Fix both here.
+
 Parent: #13764. Found by the TICKET-01 worker; it is outside TICKET-01's group.
 
 ## Working spine
