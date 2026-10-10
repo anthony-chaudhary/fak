@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -228,6 +230,7 @@ func TestDeferColdToolDefs(t *testing.T) {
 		{Type: "function", Function: ToolDefFunction{Name: "Read", Description: "Read file"}},
 		{Type: "function", Function: ToolDefFunction{Name: "custom_cold_analyzer", Description: "Heavy cold analyzer"}},
 		{Type: "function", Function: ToolDefFunction{Name: "database_migrator", Description: "Migrate database"}},
+		{Type: "function", Function: ToolDefFunction{Name: "ToolSearch", Description: "Discover deferred tools"}},
 	}
 	hot, coldCount := DeferColdToolDefs(tools)
 	if coldCount != 2 {
@@ -243,7 +246,54 @@ func TestDeferColdToolDefs(t *testing.T) {
 		}
 	}
 	if !hasSearch {
-		t.Fatal("ToolSearch tool definition was not injected")
+		t.Fatal("advertised ToolSearch tool definition was not retained")
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestExternalClientToolCatalog(t *testing.T) {
+	t.Parallel()
+	for _, resolver := range []string{"", "ToolSearch", "tool_search"} {
+		name := resolver
+		if name == "" {
+			name = "no_discovery"
+		}
+		t.Run(name, func(t *testing.T) {
+			var tools []ToolDef
+			for _, toolName := range []string{"Bash", "read", "task", "bash", "custom_analyzer"} {
+				tools = append(tools, ToolDef{Type: "function", Function: ToolDefFunction{
+					Name:        toolName,
+					Description: "Client-supplied " + toolName,
+					Parameters:  json.RawMessage(`{"type":"object","properties":{"input":{"type":"string"}},"required":["input"],"additionalProperties":false}`),
+				}})
+			}
+			want := tools
+			wantDeferred := 0
+			if resolver != "" {
+				search := ToolDef{Type: "function", Function: ToolDefFunction{
+					Name:        resolver,
+					Description: "Client-supplied discovery",
+					Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}`),
+				}}
+				tools = append(tools, search)
+				want = []ToolDef{tools[0], search}
+				wantDeferred = 4
+			}
+			before, err := json.Marshal(tools)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := &InKernelPlanner{}
+			p.SetPromptShrinkLevers(0, false, true)
+			_, got, outcome := p.ApplyPromptShrink(context.Background(), nil, tools)
+			if outcome.ColdToolsDeferred != wantDeferred || !reflect.DeepEqual(got, want) {
+				t.Fatalf("visible tools = %+v, deferred = %d; want %+v, deferred = %d", got, outcome.ColdToolsDeferred, want, wantDeferred)
+			}
+			after, err := json.Marshal(tools)
+			if err != nil || string(after) != string(before) {
+				t.Fatalf("source catalog changed: before=%s after=%s err=%v", before, after, err)
+			}
+		})
 	}
 }
 
@@ -275,6 +325,7 @@ func TestInKernelPlannerApplyPromptShrink(t *testing.T) {
 	tools := []ToolDef{
 		{Type: "function", Function: ToolDefFunction{Name: "Bash", Description: "Run bash"}},
 		{Type: "function", Function: ToolDefFunction{Name: "cold_tool_x", Description: "Cold tool"}},
+		{Type: "function", Function: ToolDefFunction{Name: "ToolSearch", Description: "Discover deferred tools"}},
 	}
 
 	shrunkMsgs, shrunkTools, outcome := p.ApplyPromptShrink(context.Background(), messages, tools)
@@ -334,6 +385,7 @@ func TestInKernelPlannerPromptShrinkSampleOpts(t *testing.T) {
 	tools := []ToolDef{
 		{Type: "function", Function: ToolDefFunction{Name: "Bash", Description: "Run bash"}},
 		{Type: "function", Function: ToolDefFunction{Name: "cold_db_tool", Description: "Database tool"}},
+		{Type: "function", Function: ToolDefFunction{Name: "ToolSearch", Description: "Discover deferred tools"}},
 	}
 
 	// Without opts: no prompt shrink
