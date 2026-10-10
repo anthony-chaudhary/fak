@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/projectassets"
 	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
@@ -120,6 +122,57 @@ func TestPiConfigFromRouterHaloCompactionFitsColdAdmission(t *testing.T) {
 		t.Fatalf("shared compaction reserve=%d keep=%d, want 23552/20000 (Halo trigger 107520 at 0.30 cached share; keep stays 20000)", r.reserve, r.keep)
 	}
 	assertSharedCompactionSafe(t, r)
+}
+
+// A Halo slot beside a SMALLER non-Halo slot: the small slot has the lowest own
+// trigger and binds, so the shared reserve came from it (raised only to the
+// Halo's answer + summary prompt + margin = 19456), which put the Halo trigger at
+// 131072-19456 = 111616, far above the 74752 its cold deadline admission prices.
+// The shared block must either keep every deadline-capped model at or below its
+// own capped trigger, or refuse --write as unsafe.
+// fak-test:runtime fast est=1s
+func TestPiConfigFromRouterSharedReserveKeepsHaloDeadlineCap(t *testing.T) {
+	pinPiRouterTestEnv(t, piRouterTestKey)
+	rows := []piRouterFakeRow{
+		{"id": "halo-qwen", "owned_by": "halo-node-a", "context_length": 131072},
+		{"id": "slot-64k", "owned_by": "appliance-b", "context_length": 65536},
+	}
+	srv := newPiRouterFake(t, rows)
+	dir := t.TempDir()
+	modelsPath := filepath.Join(dir, "models.json")
+	settingsPath := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(settingsPath, []byte(`{"defaultProvider":"fak","defaultModel":"halo-qwen"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, _, stderr := runPiConfigRouter(t, "--from-router", srv.URL+"/v1", "--write", "--path", modelsPath, "--settings-path", settingsPath)
+	if code != 0 {
+		if !strings.Contains(stderr, "shared compaction is unsafe") {
+			t.Fatalf("write exit=%d without the unsafe-shared-compaction refusal; stderr=%s", code, stderr)
+		}
+		return
+	}
+	raw, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Compaction struct {
+			Reserve int `json:"reserveTokens"`
+		} `json:"compaction"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	var halo piFakModel
+	for _, m := range readPiFakModels(t, modelsPath) {
+		if m.ID == "halo-qwen" {
+			halo = m
+		}
+	}
+	capTrigger := projectassets.HaloPiColdAdmission.MaxTrigger()
+	if trigger := halo.ContextWindow - doc.Compaction.Reserve; trigger > capTrigger {
+		t.Fatalf("halo trigger %d (window %d - shared reserve %d) exceeds its cold-admission cap %d", trigger, halo.ContextWindow, doc.Compaction.Reserve, capTrigger)
+	}
 }
 
 // Without a deadline-capped model, the global reserve is the binding (lowest

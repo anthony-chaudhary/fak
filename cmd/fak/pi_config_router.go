@@ -828,6 +828,13 @@ func planPiRouterCompaction(raw map[string]interface{}, plan *piRouterPlan, def 
 	for _, m := range plan.Models {
 		b := plan.Budgets[m.ID]
 		cp.ReserveTokens = max(cp.ReserveTokens, b.MaxOutputTokens+harnesskit.SummaryPromptOverheadTokens+harnesskit.MinMarginTokens)
+		// A deadline-capped model (a Halo) keeps its own capped reserve even when a
+		// smaller-window model binds, so the shared block never lifts its trigger
+		// past what its backend admits cold; if that starves the smaller model,
+		// the per-model check below refuses the shared block.
+		if b.Envelope.DeadlineCapped {
+			cp.ReserveTokens = max(cp.ReserveTokens, b.ReserveTokens)
+		}
 	}
 	// A raised reserve lowers every trigger, so the kept tail is re-bounded per
 	// model at the shared reserve; the verification below refuses what still fails.
