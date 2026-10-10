@@ -86,6 +86,9 @@ type q4kLoadOptions struct {
 	prismGDNVGrouped         bool // checkpoint metadata, not a caller option
 	// nativeRowsOff disables the fak#13567 native-row route (qwen35NativeRowResident).
 	nativeRowsOff bool
+	// nativeRowsForced keeps native rows on an Apple Silicon host where the resident Metal
+	// Q8 decode runtime would otherwise claim the Qwen3.5-family linear_attn projections.
+	nativeRowsForced bool
 }
 
 // Q4KLoadOption configures the direct-resident-Q4_K GGUF load path.
@@ -109,7 +112,7 @@ func (o *q4kLoadOptions) setMTPRetention(enabled bool) {
 // where qwen35NativeRowResident admits a tensor, never to the exact 64-layer Qwen3.8 runtime whose
 // Metal decode requires those weights as Q8. Pass false to force the historical Q8 route.
 func WithNativeLinearAttnRows(enabled bool) Q4KLoadOption {
-	return func(o *q4kLoadOptions) { o.nativeRowsOff = !enabled }
+	return func(o *q4kLoadOptions) { o.nativeRowsOff, o.nativeRowsForced = !enabled, enabled }
 }
 
 // WithQ2KEmbeddingResident controls whether eligible Q2_K token embedding tables stay in

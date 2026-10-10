@@ -116,11 +116,13 @@ func qwen35ResidentDecodeAutoDisabled() bool { return qwen35ResidentDecodeAutoDi
 
 // qwen35ResidentDecodeAutoEligible reports whether this session may auto-admit the
 // resident GDN sequence owner to reach the one-command-buffer fused linear-attention
-// decode block. It is deliberately exact: only the 64-layer Qwen3.8 hybrid whose full
-// no-copy Q8 projection band resolves, on the backend-nil resident-Q4_K Metal lane, at
+// decode block. It is deliberately exact: only a Qwen3.5-family hybrid whose Q8 runtime band
+// resolves (the 64-layer Qwen3.8, or a declared-cadence 128/128-GDN hybrid such as Qwen3.5-4B),
+// on the backend-nil resident-Q4_K Metal lane, at
 // a fresh or restored prompt boundary. Every other case declines so the historical decode path is
 // byte-identical. The route is ON by default (measured 0.4-0.9 -> 4.2-4.6 tok/s
-// decode on the M3 Pro, Qwen3.8-27B Q4_K_M, bit-identical pooled parity); declare
+// decode on the M3 Pro, Qwen3.8-27B Q4_K_M, bit-identical pooled parity;
+// Qwen3.5-4B 6.6 -> 23.5 tok/s with greedy parity); declare
 // SetQwen35ResidentDecodeAuto(false) to force the historical path.
 func (s *Session) qwen35ResidentDecodeAutoEligible() bool {
 	if s == nil || s.M == nil || s.Cache == nil || s.Backend != nil || !s.Q4K || !s.MetalQ4K {
@@ -141,7 +143,7 @@ func (s *Session) qwen35ResidentDecodeAutoEligible() bool {
 	// A restored (non-fresh) prefix is admissible: Enable seeds the owners from
 	// the complete host linear-attention state, or declines without mutation.
 	if _, err := qwen38MetalQ8RuntimeNames(s.M.Cfg); err != nil {
-		return false // not the exact Qwen3.8 topology the fused block/owner is proven on
+		return false // not a topology the fused block/owner is proven on
 	}
 	return true
 }
