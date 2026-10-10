@@ -298,7 +298,7 @@ func (r WarmReceipt) Usable() bool {
 // V4.1 (and any recompute-only or bare-KV runtime) remains unsupported here: the native
 // continuation-capability chain (fak#13342 / #13338 / #13334) owns that admission, and a
 // warm must never claim readiness for a state the runtime cannot restore.
-func (p *InKernelPlanner) WarmPrefix(ctx context.Context, spec WarmPrefixSpec) (WarmReceipt, error) {
+func (p *InKernelPlanner) WarmPrefix(ctx context.Context, spec WarmPrefixSpec) (result WarmReceipt, err error) {
 	started := time.Now()
 	receipt := WarmReceipt{
 		Status:            WarmStatusUnsupported,
@@ -309,6 +309,21 @@ func (p *InKernelPlanner) WarmPrefix(ctx context.Context, spec WarmPrefixSpec) (
 		RequestedTokens:   spec.StableTokens,
 		ZeroGenerated:     true,
 	}
+	// A device forward that fails closed panics below the planner, the same typed
+	// panics Complete recovers. A startup warm is an optimization, so report it cold
+	// with a closed reason instead of crashing the serving process.
+	defer func() {
+		if r := recover(); r != nil {
+			deviceErr, ok := recoverDevicePanic(r)
+			if !ok {
+				panic(r)
+			}
+			receipt.Ready = false
+			receipt.Status = WarmStatusCold
+			receipt.Reason = "device_fault"
+			result, err = finishWarm(receipt, started), deviceErr
+		}
+	}()
 
 	if p == nil {
 		return finishWarm(receipt, started), ErrWarmPrefixUnsupported
