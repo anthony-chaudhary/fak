@@ -117,10 +117,13 @@ func TestPeerWIPAttributionBounded(t *testing.T) {
 				return "", 1, nil
 			})
 			if tc.real {
+				// The 10,000-commit fixture gets its own budget; only attribution owns the 30s one.
+				fixtureCtx, cancelFixture := context.WithTimeout(context.Background(), 2*time.Minute)
+				defer cancelFixture()
 				dir = t.TempDir()
 				git := func(args ...string) string {
 					t.Helper()
-					out, code, err := realRunner(ctx, dir, args...)
+					out, code, err := realRunner(fixtureCtx, dir, args...)
 					if err != nil || code != 0 {
 						t.Fatalf("fixture %v: code=%d err=%v output=%s", args, code, err, out)
 					}
@@ -164,7 +167,7 @@ func TestPeerWIPAttributionBounded(t *testing.T) {
 					stream.WriteByte('\n')
 				}
 				stream.WriteString("done\n")
-				importCmd := newGitCmd(ctx, dir, "fast-import", "--quiet", "--done")
+				importCmd := newGitCmd(fixtureCtx, dir, "fast-import", "--quiet", "--done")
 				importCmd.Stdin = strings.NewReader(stream.String())
 				if out, err := importCmd.CombinedOutput(); err != nil {
 					t.Fatalf("fixture fast-import: %v: %s", err, out)
@@ -278,12 +281,13 @@ func TestPeerWIPAttributionBounded(t *testing.T) {
 }
 
 func TestPeerWIPLiteralFilterPreservesRealGitOwnership(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	// Fixture git spawns must not drain the attribution budget on a slow-spawn host.
+	fixtureCtx, cancelFixture := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelFixture()
 	dir := t.TempDir()
 	git := func(args ...string) string {
 		t.Helper()
-		out, code, err := realRunner(ctx, dir, args...)
+		out, code, err := realRunner(fixtureCtx, dir, args...)
 		if err != nil || code != 0 {
 			t.Fatalf("git %v: code=%d err=%v output=%s", args, code, err, out)
 		}
@@ -333,6 +337,8 @@ func TestPeerWIPLiteralFilterPreservesRealGitOwnership(t *testing.T) {
 	empty := git("commit-tree", tree, "-p", delta, "-m", "empty")
 	git("update-ref", "refs/fak/wip/c-empty", empty)
 	paths := []string{"literal/[x].go", "deleted.go", "rename-old.go", "rename-new.go", "scope/claimed.go", "free.go"}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	var filteredRaw string
 	var fullBytes int
 	runner := func(unfiltered bool) Runner {
