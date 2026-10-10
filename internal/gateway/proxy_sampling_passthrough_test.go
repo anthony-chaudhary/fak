@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
 // TestProxiedChatSamplingReachesUpstream pins what a proxied OpenAI chat turn puts on
@@ -34,6 +35,30 @@ func TestProxiedChatSamplingReachesUpstream(t *testing.T) {
 		{name: "qwen-extensions", fields: `"top_k":20,"min_p":0.05,"chat_template_kwargs":{"enable_thinking":true},`,
 			want: map[string]any{"top_k": 20.0, "min_p": 0.05, "chat_template_kwargs": map[string]any{"enable_thinking": true}}},
 	}
+	// The exact body Pi (models.json samplingParams, Object.assign'd onto the request)
+	// and OpenCode (options.extraBody) send for Qwen 3.8, from the single harnesskit
+	// profile, plus enable_thinking. min_p:0 must survive as an explicit 0: llama.cpp
+	// defaults min_p to 0.05, so dropping the zero changes the served distribution.
+	profile := harnesskit.SamplingParams("Qwen3.8-27B-UD-Q2_K_XL")
+	if profile == nil {
+		t.Fatal("harnesskit has no Qwen 3.8 sampling profile")
+	}
+	profile["frequency_penalty"] = 0.25
+	profile["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
+	raw, err := json.Marshal(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var profileWant map[string]any
+	if err := json.Unmarshal(raw, &profileWant); err != nil {
+		t.Fatal(err)
+	}
+	cases = append(cases, struct {
+		name   string
+		fields string
+		want   map[string]any
+		absent []string
+	}{name: "pi-qwen38-profile", fields: string(raw[1:len(raw)-1]) + ",", want: profileWant})
 	for _, stream := range []bool{false, true} {
 		for _, tc := range cases {
 			t.Run(fmt.Sprintf("%s/stream=%t", tc.name, stream), func(t *testing.T) {
