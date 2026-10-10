@@ -909,3 +909,24 @@ Reports whether the normal request-owned prefix acquisition route can perform de
 Owns the planner-owned single native forward slot shared by ordinary requests and decode cohorts, supporting cancellation-aware waiters without detached lock-acquisition goroutines.
 
 **Distinct from:** ExecutionDeadlineAdmissionSupported identifies deadline-credit capability at a prefix boundary; this gate controls exclusive concurrent access to the device forward slot and does not estimate deadline feasibility.
+
+
+### deadlineCacheTicket
+
+Immutable fingerprint-chain and estimated-token snapshot of the original request, carried to an accepted buffered completion for historical cache-usage observation before final socket delivery.
+
+**Distinct from:** FeatureCacheProof binds an accepted vDSO hit to the actual call and served payload. This snapshot only describes historical request input; it neither witnesses current residency nor grants route-bound deadline credit.
+
+
+### withDeadlineCacheObservation
+
+Attaches a fresh original-request deadlineCacheTicket to a derived request context for later accepted buffered-completion observation, without querying historical credit or reserving admission.
+
+**Distinct from:** Unlike deadlineCacheTicket, which stores the snapshot, this function defines the request-context attachment boundary; it does not alter deadline admission or prove delivery.
+
+
+### DeadlineCacheCreditStats
+
+Exported compatibility snapshot of historical credited-admission, credited-token, overrun-denial and misprediction counters; observational-only served routes do not increment credited admissions or tokens.
+
+**Distinct from:** Unlike deadlineCacheTicket, which describes one request for historical recording, this aggregate metric schema is monitoring output and carries no current-residency proof or deadline-credit authority.

@@ -1322,6 +1322,71 @@
           "category": "false-positive",
           "reason": "Integer position selecting an already-wired per-layer Engram row cache; it introduces no cache identity, admission, retention, or eviction policy.",
           "token": "cacheindex"
+        },
+        {
+          "category": "incidental",
+          "reason": "Retained legacy policy constant for provenance; served admission does not use historical overrun credit.",
+          "token": "deadlineCacheCreditMaxColdOverrun"
+        },
+        {
+          "category": "incidental",
+          "reason": "Expiry duration of the historical observation ledger, not proof of current residency.",
+          "token": "deadlineCacheCreditTTL"
+        },
+        {
+          "category": "incidental",
+          "reason": "Bound on historical ledger entries, not a new cache or admission mechanism.",
+          "token": "deadlineCacheCreditMaxConvs"
+        },
+        {
+          "category": "incidental",
+          "reason": "Compatibility outcome label for no historical record.",
+          "token": "cacheCreditNone"
+        },
+        {
+          "category": "incidental",
+          "reason": "Compatibility outcome label for expired historical record.",
+          "token": "cacheCreditStale"
+        },
+        {
+          "category": "incidental",
+          "reason": "Compatibility outcome label for recorded completion without a reported cache hit.",
+          "token": "cacheCreditUncached"
+        },
+        {
+          "category": "incidental",
+          "reason": "Compatibility outcome label for message-chain mismatch.",
+          "token": "cacheCreditMismatch"
+        },
+        {
+          "category": "incidental",
+          "reason": "Compatibility outcome label for historical prefix match, not served admission credit.",
+          "token": "cacheCreditCredited"
+        },
+        {
+          "category": "incidental",
+          "reason": "Compatibility outcome label for legacy bounded-credit outcome retained for compatibility.",
+          "token": "cacheCreditOverrun"
+        },
+        {
+          "category": "incidental",
+          "reason": "Compatibility outcome label for missing conversation key.",
+          "token": "cacheCreditNoMessage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private context key carrying the positioned historical deadlineCacheTicket snapshot.",
+          "token": "deadlineCacheTicketKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Constructor for the positioned deadlineCacheTicket request snapshot; it grants no cache residency or admission credit.",
+          "token": "newDeadlineCacheTicket"
+        },
+        {
+          "category": "incidental",
+          "reason": "Summary field exposing the positioned DeadlineCacheCreditStats compatibility schema, not a separate cache mechanism.",
+          "token": "DeadlineCacheCredit"
         }
       ],
       "exclude": [
@@ -1367,6 +1432,7 @@
         "CodeKVCache",
         "CounterCacheEvictions",
         "CounterPrefixCacheHits",
+        "DeadlineCacheCredit",
         "DefaultCacheBytes",
         "DefaultCacheStateAllowlist",
         "FAK_ORG_POLICY_CACHE_PATH",
@@ -1434,6 +1500,13 @@
         "cacheAuthenticated",
         "cacheBurstBacktest",
         "cacheCreationSpanLabel",
+        "cacheCreditCredited",
+        "cacheCreditMismatch",
+        "cacheCreditNoMessage",
+        "cacheCreditNone",
+        "cacheCreditOverrun",
+        "cacheCreditStale",
+        "cacheCreditUncached",
         "cacheEntryPresent",
         "cacheLoadMaxWorkersFor",
         "cacheMissing",
@@ -1523,6 +1596,10 @@
         "compactlastcacherd",
         "cuda_arch_matrix",
         "cuda_arch_matrix_test",
+        "deadlineCacheCreditMaxColdOverrun",
+        "deadlineCacheCreditMaxConvs",
+        "deadlineCacheCreditTTL",
+        "deadlineCacheTicketKey",
         "defaultcacheandresidency",
         "defaultcachesize",
         "deriveSelfUpdateCandidateCacheDisposition",
@@ -1578,6 +1655,7 @@
         "microCacheWitnessSchema",
         "minCacheRun",
         "newCache",
+        "newDeadlineCacheTicket",
         "no_cache_state_delta",
         "non_cache_fingerprint",
         "normalizedSchemaCacheCap",

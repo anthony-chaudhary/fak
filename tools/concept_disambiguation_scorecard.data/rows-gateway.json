@@ -224,7 +224,8 @@
       "definition": "Quantitative accepted-vDSO-hit evidence binding the actual gateway call identity digest to its served payload digest; measured resident entries also carry a signed historical-engine-minus-current-lookup estimate.",
       "distinction": "LookupReceipt authenticates an exact result transiently. This bounded proof records the accepted hit and explicit timing basis without claiming an internal cache key or a measured counterfactual saving. Unmeasured entries retain null timing quantities.",
       "distinct_from": [
-        "vdso-lookup-receipt"
+        "vdso-lookup-receipt",
+        "deadlinecacheticket"
       ],
       "aliases": [],
       "grounding": "FeatureCacheProof",
@@ -269,6 +270,65 @@
         "CompletionTimingNanos"
       ],
       "grounding": "FieldCompletionTiming",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "deadlinecacheticket",
+      "canonical": "deadlineCacheTicket",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Immutable fingerprint-chain and estimated-token snapshot of the original request, carried to an accepted buffered completion for historical cache-usage observation before final socket delivery.",
+      "distinction": "FeatureCacheProof binds an accepted vDSO hit to the actual call and served payload. This snapshot only describes historical request input; it neither witnesses current residency nor grants route-bound deadline credit.",
+      "distinct_from": [
+        "gateway-feature-cache-proof",
+        "withdeadlinecacheobservation",
+        "deadlinecachecreditstats"
+      ],
+      "aliases": [],
+      "grounding": "deadlineCacheTicket",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "withdeadlinecacheobservation",
+      "canonical": "withDeadlineCacheObservation",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Attaches a fresh original-request deadlineCacheTicket to a derived request context for later accepted buffered-completion observation, without querying historical credit or reserving admission.",
+      "distinction": "Unlike deadlineCacheTicket, which stores the snapshot, this function defines the request-context attachment boundary; it does not alter deadline admission or prove delivery.",
+      "distinct_from": [
+        "deadlinecacheticket"
+      ],
+      "aliases": [],
+      "grounding": "withDeadlineCacheObservation",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "deadlinecachecreditstats",
+      "canonical": "DeadlineCacheCreditStats",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Exported compatibility snapshot of historical credited-admission, credited-token, overrun-denial and misprediction counters; observational-only served routes do not increment credited admissions or tokens.",
+      "distinction": "Unlike deadlineCacheTicket, which describes one request for historical recording, this aggregate metric schema is monitoring output and carries no current-residency proof or deadline-credit authority.",
+      "distinct_from": [
+        "deadlinecacheticket"
+      ],
+      "aliases": [],
+      "grounding": "DeadlineCacheCreditStats",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

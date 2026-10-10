@@ -778,6 +778,10 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// selected only after the execution route is fixed below.
 	r, cancelDeadline := bindClientDeadline(r, turnCostBegan)
 	defer cancelDeadline()
+	// Retain served-prefix history as observation only. Admission below uses
+	// current request-owned native state, or prices unsupported routes cold.
+	r = withDeadlineCacheObservation(r, req.Model, req.Tools, req.Messages)
+	deadlineCtx := r.Context()
 	// Stamp the causal input on the untouched wire envelope before admission
 	// transforms, request routing, planner selection, or model execution.
 	inputTriggerRoute, routedModel, err := s.admitAndRouteChatInputTriggerWithContext(r.Context(), req)
@@ -991,6 +995,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// this fix removes.
 	respModel := s.responseModel(comp.Model, reqModel, chatStreamModel(stream), "#5399")
 	s.logInferenceTurn(reqTrace, "openai_chat_completions", req.Stream, comp.Usage, finish, time.Since(began), false)
+	s.recordDeadlineWarmPrefix(deadlineCtx, comp.Usage)
 	stampTurnCost(sessionTurn.turnCost, reqTrace, respModel, turnCostBegan)
 	resp := s.buildChatResponse(comp, asst, finish, respModel, adjs, resultAdmissions, inputTriggerRoute, decodeTraceRequested, decodeTokenIDsRequested, sessionTurn.turnCost)
 	if stream != nil {
