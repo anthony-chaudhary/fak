@@ -40,7 +40,6 @@ type opencodeLaunchOptions struct {
 	ggufPath        string
 	gpuBackend      string
 	tokenizerPath   string
-	pure            bool
 	auto            bool
 	skipPermissions bool
 	passthrough     []string
@@ -64,7 +63,7 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 	dryRun := fs.Bool("dry-run", false, "print the OpenCode command and exit without launching")
 	probePrompt := fs.String("probe", "", "run a single headless probe turn with this prompt and exit")
 	skipPermissions := fs.Bool("skip-permissions", true, "pass --auto to the OpenCode child when running unattended")
-	pure := fs.Bool("pure", false, "pass --pure to opencode child to prevent reading untracked global state")
+	_ = fs.Bool("pure", false, "accepted for compatibility; OpenCode v2 run has no --pure, so nothing is forwarded")
 	auto := fs.Bool("auto", false, "pass --auto to opencode child for non-interactive execution")
 	splitMode := fs.String("split", "auto", "open the 20% fak-info pane when possible: auto|on|off")
 	splitWhere := fs.String("split-where", "bottom", "with --split: place the 20% fak-info pane as a bottom strip or right column")
@@ -196,7 +195,6 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 		ggufPath:        *ggufPath,
 		gpuBackend:      *gpuBackend,
 		tokenizerPath:   *tokenizerPath,
-		pure:            *pure,
 		auto:            *auto,
 		skipPermissions: (*guard || flagSet(fs, "skip-permissions")) && *skipPermissions,
 		passthrough:     fs.Args(),
@@ -265,20 +263,34 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 }
 
 func buildOpencodeDirectArgv(o opencodeLaunchOptions) []string {
-	argv := []string{"opencode"}
+	return append([]string{"opencode"}, opencodeChildArgs(o)...)
+}
+
+// opencodeChildArgs is the OpenCode argv after the binary. OpenCode v2 binds a
+// flag to the command it follows and its root command has no --model, so the
+// model pin goes after `run`; an interactive launch takes the model from the
+// session config's "model" key instead.
+func opencodeChildArgs(o opencodeLaunchOptions) []string {
+	rest := o.passthrough
+	switch {
+	case o.probePrompt != "":
+	case len(rest) > 0 && rest[0] == "run":
+		rest = rest[1:]
+	default:
+		return append([]string(nil), rest...)
+	}
+	args := []string{"run"}
 	if childModel := strings.TrimPrefix(strings.TrimSpace(o.model), "fak/"); childModel != "" {
-		argv = append(argv, "--model", "fak/"+childModel)
+		args = append(args, "--model", "fak/"+childModel)
 	}
 	if o.probePrompt != "" {
-		argv = append(argv, "run", o.probePrompt, "--format", "json")
+		args = append(args, "--format", "json")
 		if o.auto || o.skipPermissions {
-			argv = append(argv, "--auto")
+			args = append(args, "--auto")
 		}
-		if o.pure {
-			argv = append(argv, "--pure")
-		}
+		args = append(args, o.probePrompt)
 	}
-	return append(argv, o.passthrough...)
+	return append(args, rest...)
 }
 
 func validateOpencodeLaunchSplit(mode, where string) error {
@@ -335,19 +347,7 @@ func buildOpencodeLaunchArgv(fakBin string, o opencodeLaunchOptions) []string {
 	appendKV("--tokenizer", o.tokenizerPath)
 
 	argv = append(argv, "--", "opencode")
-	if childModel := strings.TrimPrefix(strings.TrimSpace(o.model), "fak/"); childModel != "" {
-		argv = append(argv, "--model", "fak/"+childModel)
-	}
-	if o.probePrompt != "" {
-		argv = append(argv, "run", o.probePrompt, "--format", "json")
-		if o.auto || o.skipPermissions {
-			argv = append(argv, "--auto")
-		}
-		if o.pure {
-			argv = append(argv, "--pure")
-		}
-	}
-	return append(argv, o.passthrough...)
+	return append(argv, opencodeChildArgs(o)...)
 }
 
 func execOpencodeLaunchChild(stdout, stderr io.Writer, argv, env []string) int {

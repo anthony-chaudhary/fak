@@ -53,7 +53,7 @@ func TestOpencodeIntegrationLoopback(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" || r.URL.Path == "/v1/models" || r.URL.Path == "/models" {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{"object":"list","data":[{"id":%q,"context_length":8192,"max_output_tokens":512}]}`, model)
+			_, _ = fmt.Fprintf(w, `{"object":"list","data":[{"id":%q,"context_length":131072,"max_output_tokens":512}]}`, model)
 			return
 		}
 		if r.URL.Path != "/v1/chat/completions" && r.URL.Path != "/chat/completions" {
@@ -164,6 +164,10 @@ func TestOpencodeIntegrationLoopback(t *testing.T) {
 	}
 	t.Chdir(launchDir)
 	t.Setenv("HOME", home)
+	// OpenCode on Windows resolves its home from USERPROFILE and its project from
+	// PWD, neither of which t.Chdir or HOME isolates.
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("PWD", launchDir)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
@@ -180,11 +184,11 @@ func TestOpencodeIntegrationLoopback(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, os.Args[0])
-		cmd.Dir = workspace
+		cmd.Dir = launchDir
 		cmd.Env = append(opencodeIntegrationBaseEnv(env),
 			guardE2EHelperEnv+"="+strings.Join(argv[2:], " "),
 			"FAK_SESSION_REGISTRY="+filepath.Join(workspace, "session-registry.jsonl"),
-			`OPENCODE_CONFIG_CONTENT={"provider":{"fak":{"models":{"opencode-test-model":{"limit":{"context":8192,"output":512}}}}}}`,
+			`OPENCODE_CONFIG_CONTENT={"provider":{"fak":{"models":{"opencode-test-model":{"limit":{"context":131072,"output":512}}}}}}`,
 		)
 		cmd.Stdout, cmd.Stderr = stdout, stderr
 		cmd.Cancel = func() error {
@@ -206,7 +210,7 @@ func TestOpencodeIntegrationLoopback(t *testing.T) {
 		"--base-url", upstream.URL + "/v1", "--api-key-env", "TEST_OPENCODE_UPSTREAM_KEY",
 		"--model", model, "--audit", auditPath, "--quiet", "--split", "off",
 		"--probe", prompt, "--pure", "--auto", "--skip-permissions=false",
-		"--", "--dir", launchDir, "--format", "json", "--print-logs", "--log-level", "DEBUG",
+		"--", "--print-logs", "--log-level", "debug",
 	})
 	if code != 0 {
 		rows, _ := journal.ReadRows(auditPath)

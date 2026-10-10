@@ -125,14 +125,11 @@ func TestOpencodeLauncherProbeWiring(t *testing.T) {
 	if !strings.Contains(out, "--probe") {
 		t.Errorf("expected --probe flag for guard in dry-run stdout: %s", out)
 	}
-	if !strings.Contains(out, "run \"say hello from test\" --format json") && !strings.Contains(out, "run say hello from test --format json") {
+	if !strings.Contains(out, "-- opencode run ") || !strings.Contains(out, "--format json --auto say hello from test") {
 		t.Errorf("expected probe run command in dry-run stdout: %s", out)
 	}
-	if !strings.Contains(out, "--auto") {
-		t.Errorf("expected --auto for probe in dry-run stdout: %s", out)
-	}
-	if !strings.Contains(out, "--pure") {
-		t.Errorf("expected --pure in dry-run stdout: %s", out)
+	if strings.Contains(out, "--pure") {
+		t.Errorf("OpenCode v2 run rejects --pure; dry-run stdout: %s", out)
 	}
 	if strings.Contains(out, "--dangerously-skip-permissions") {
 		t.Errorf("unexpected retired --dangerously-skip-permissions flag in dry-run stdout: %s", out)
@@ -151,8 +148,8 @@ func TestOpencodeLauncherProbeWiring(t *testing.T) {
 	if !strings.HasPrefix(direct, "opencode ") || strings.Contains(direct, "--probe") {
 		t.Errorf("direct probe must run opencode itself, not guard --probe: %s", direct)
 	}
-	if !strings.Contains(direct, "run say hello from test --format json") || !strings.Contains(direct, "--pure") {
-		t.Errorf("expected direct probe run command with --pure in dry-run stdout: %s", direct)
+	if !strings.HasPrefix(direct, "opencode run ") || !strings.Contains(direct, "--format json say hello from test") || strings.Contains(direct, "--pure") {
+		t.Errorf("expected direct probe run command without --pure in dry-run stdout: %s", direct)
 	}
 	if strings.Contains(direct, "--auto") {
 		t.Errorf("direct probe must not imply the --auto permission bypass: %s", direct)
@@ -205,7 +202,7 @@ func TestOpencodeLauncherOptions(t *testing.T) {
 		"--audit my-audit.jsonl",
 		"--quiet",
 		"--local",
-		"-- opencode --model fak/glm-5.3-flash run do task",
+		"-- opencode run --model fak/glm-5.3-flash do task",
 	}
 	for _, part := range expectedParts {
 		if !strings.Contains(line, part) {
@@ -221,26 +218,26 @@ func TestOpencodeLauncherPinsChildModelOverProjectAgent(t *testing.T) {
 		wantChild []string
 	}{
 		{
-			name: "interactive avoids double provider prefix and preserves passthrough",
+			name: "passthrough run avoids double provider prefix and pins after run",
 			opts: opencodeLaunchOptions{
 				splitMode: "off", splitWhere: "bottom",
 				model:       "fak/Qwen3.8-27B-UD-Q2_K_XL",
-				passthrough: []string{"--agent", "build"},
+				passthrough: []string{"run", "--agent", "build"},
 			},
 			wantChild: []string{
-				"--model", "fak/Qwen3.8-27B-UD-Q2_K_XL", "--agent", "build",
+				"run", "--model", "fak/Qwen3.8-27B-UD-Q2_K_XL", "--agent", "build",
 			},
 		},
 		{
-			name: "probe pins child before run and preserves passthrough",
+			name: "probe pins child after run and preserves passthrough",
 			opts: opencodeLaunchOptions{
 				splitMode: "off", splitWhere: "bottom", model: "Qwen3.8-27B-UD-Q2_K_XL",
-				probePrompt: "inspect repo", auto: true, pure: true,
+				probePrompt: "inspect repo", auto: true,
 				passthrough: []string{"--log-level", "ERROR"},
 			},
 			wantChild: []string{
-				"--model", "fak/Qwen3.8-27B-UD-Q2_K_XL", "run", "inspect repo",
-				"--format", "json", "--auto", "--pure", "--log-level", "ERROR",
+				"run", "--model", "fak/Qwen3.8-27B-UD-Q2_K_XL",
+				"--format", "json", "--auto", "inspect repo", "--log-level", "ERROR",
 			},
 		},
 	}
@@ -445,13 +442,13 @@ func TestOpencodeLauncherVerifiesSnapshotWarning(t *testing.T) {
 func TestOpencodeLauncherModelDefault(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	var stdout, stderr bytes.Buffer
-	args := []string{"--dry-run", "--split", "off"}
+	args := []string{"--dry-run", "--split", "off", "--probe", "hi"}
 	code := runOpencode(&stdout, &stderr, args)
 	if code != 0 {
 		t.Fatalf("runOpencode returned %d, stderr: %s", code, stderr.String())
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "--model") {
+	if !strings.Contains(out, "run --model") {
 		t.Errorf("expected --model in dry-run stdout: %s", out)
 	}
 }
@@ -511,7 +508,7 @@ func TestOpencodeLauncherAutoDetectedModelWiring(t *testing.T) {
 			args            []string
 		}{
 			{name: "guard", args: []string{"--guard"}, wantModel: "--model qwen2.5-coder:7b"},
-			{name: "direct", wantModel: "opencode --model fak/qwen2.5-coder:7b"},
+			{name: "direct", args: []string{"--probe", "hi"}, wantModel: "opencode run --model fak/qwen2.5-coder:7b"},
 		} {
 			var stdout, stderr bytes.Buffer
 			args := append(append([]string{}, mode.args...), "--dry-run", "--split", "off")
@@ -549,7 +546,7 @@ func TestOpencodeLauncherAutoDetectedModelWiring(t *testing.T) {
 			args            []string
 		}{
 			{name: "guard", args: []string{"--guard"}, wantModel: "--model custom-model:32b"},
-			{name: "direct", wantModel: "opencode --model fak/custom-model:32b"},
+			{name: "direct", args: []string{"--probe", "hi"}, wantModel: "opencode run --model fak/custom-model:32b"},
 		} {
 			var stdout, stderr bytes.Buffer
 			args := append(append([]string{}, mode.args...), "--dry-run", "--split", "off", "--model", "custom-model:32b")
@@ -709,8 +706,8 @@ func TestOpencodeLauncherHaloFlag(t *testing.T) {
 			if code := runOpencode(&stdout, &stderr, []string{"--split", "off", flag}); code != 0 {
 				t.Fatalf("runOpencode %s returned %d, stderr: %s", flag, code, stderr.String())
 			}
-			if len(gotArgv) == 0 || gotArgv[0] != "opencode" || !argvHasPair(gotArgv, "--model", "fak/qwen-2.5-coder-32b-instruct") {
-				t.Fatalf("direct %s argv = %v, want opencode --model fak/qwen-2.5-coder-32b-instruct", flag, gotArgv)
+			if len(gotArgv) == 0 || gotArgv[0] != "opencode" || argvHas(gotArgv, "--model") {
+				t.Fatalf("direct %s argv = %v, want bare opencode (the session config pins the model)", flag, gotArgv)
 			}
 			var content string
 			for _, kv := range gotEnv {
@@ -782,7 +779,7 @@ func TestOpencodeLauncherHaloDynamicModel(t *testing.T) {
 		args            []string
 	}{
 		{name: "guard", args: []string{"--guard"}, wantModel: "--model my-custom-qwen-70b"},
-		{name: "direct", wantModel: "opencode --model fak/my-custom-qwen-70b"},
+		{name: "direct", args: []string{"--probe", "hi"}, wantModel: "opencode run --model fak/my-custom-qwen-70b"},
 	} {
 		var stdout, stderr bytes.Buffer
 		args := append(append([]string{}, mode.args...), "--dry-run", "--split", "off", "--halo")
