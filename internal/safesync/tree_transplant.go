@@ -281,33 +281,15 @@ func TransplantDisjointTreeWithRunner(ctx context.Context, run Runner, repo, bra
 	// Query non-conflicting incoming paths added/modified between headSHA and targetSHA.
 	// In the synthetic merge commit (newCommitSHA), incoming paths are precisely those
 	// added or modified relative to headSHA.
-	diffRes := run(ctx, repo, "diff", "-z", "--name-only", "--diff-filter=AM", headSHA, newCommitSHA)
-	if diffRes.Err != nil {
-		return "", fmt.Errorf("git diff incoming paths failed: %w", diffRes.Err)
+	// From here on the ref already names newCommitSHA: a failure must not read as
+	// "nothing happened", or a caller's merge fallback becomes an up-to-date no-op
+	// over a worktree that is missing the incoming files.
+	incomingPaths, err := incomingAMPaths(ctx, run, repo, headSHA, newCommitSHA)
+	if err != nil {
+		return newCommitSHA, &TransplantWorktreeError{Commit: newCommitSHA, Err: err}
 	}
-	if diffRes.Code != 0 {
-		return "", fmt.Errorf("git diff incoming paths exited with code %d: %s", diffRes.Code, strings.TrimSpace(string(diffRes.Stderr)))
-	}
-
-	incomingPaths := splitNUL(diffRes.Stdout)
-
-	const batchSize = 100
-	if len(incomingPaths) > 0 {
-		for i := 0; i < len(incomingPaths); i += batchSize {
-			end := i + batchSize
-			if end > len(incomingPaths) {
-				end = len(incomingPaths)
-			}
-			batch := incomingPaths[i:end]
-			checkoutArgs := append([]string{"checkout", newCommitSHA, "--"}, batch...)
-			coRes := run(ctx, repo, checkoutArgs...)
-			if coRes.Err != nil {
-				return "", fmt.Errorf("git checkout incoming paths failed: %w", coRes.Err)
-			}
-			if coRes.Code != 0 {
-				return "", fmt.Errorf("git checkout incoming paths exited with code %d: %s", coRes.Code, strings.TrimSpace(string(coRes.Stderr)))
-			}
-		}
+	if err := checkoutPaths(ctx, run, repo, newCommitSHA, incomingPaths); err != nil {
+		return newCommitSHA, &TransplantWorktreeError{Commit: newCommitSHA, Err: err}
 	}
 
 	// 5. Handle incoming path renames across disjoint integration.
@@ -318,4 +300,170 @@ func TransplantDisjointTreeWithRunner(ctx context.Context, run Runner, repo, bra
 	}
 
 	return newCommitSHA, nil
+}
+
+// ErrIncomingPathsUnwritten is the closed sentinel for a transplant that
+// advanced the branch ref but did not land every incoming path on disk.
+var ErrIncomingPathsUnwritten = errors.New("transplant advanced the branch ref but incoming paths are not on disk")
+
+// TransplantWorktreeError reports a transplant whose ref move succeeded and whose
+// worktree sync did not. Commit is the merge commit the ref now names.
+type TransplantWorktreeError struct {
+	Commit  string
+	Missing []string
+	Err     error
+}
+
+func (e *TransplantWorktreeError) Error() string {
+	msg := fmt.Sprintf("%v (commit %s", ErrIncomingPathsUnwritten, e.Commit)
+	if len(e.Missing) > 0 {
+		msg += fmt.Sprintf(", %d path(s) missing or stale: %s", len(e.Missing), strings.Join(e.Missing, ", "))
+	}
+	msg += ")"
+	if e.Err != nil {
+		msg += ": " + e.Err.Error()
+	}
+	return msg
+}
+
+func (e *TransplantWorktreeError) Is(target error) bool {
+	return target == ErrIncomingPathsUnwritten
+}
+
+func (e *TransplantWorktreeError) Unwrap() error { return e.Err }
+
+const transplantCheckoutBatch = 100
+
+func incomingAMPaths(ctx context.Context, run Runner, repo, headSHA, commit string) ([]string, error) {
+	res := run(ctx, repo, "diff", "-z", "--name-only", "--diff-filter=AM", headSHA, commit)
+	if res.Err != nil {
+		return nil, fmt.Errorf("git diff incoming paths failed: %w", res.Err)
+	}
+	if res.Code != 0 {
+		return nil, fmt.Errorf("git diff incoming paths exited with code %d: %s", res.Code, strings.TrimSpace(string(res.Stderr)))
+	}
+	return splitNUL(res.Stdout), nil
+}
+
+func checkoutPaths(ctx context.Context, run Runner, repo, commit string, paths []string) error {
+	for i := 0; i < len(paths); i += transplantCheckoutBatch {
+		end := min(i+transplantCheckoutBatch, len(paths))
+		args := append([]string{"checkout", commit, "--"}, paths[i:end]...)
+		res := run(ctx, repo, args...)
+		if res.Err != nil {
+			return fmt.Errorf("git checkout incoming paths failed: %w", res.Err)
+		}
+		if res.Code != 0 {
+			return fmt.Errorf("git checkout incoming paths exited with code %d: %s", res.Code, strings.TrimSpace(string(res.Stderr)))
+		}
+	}
+	return nil
+}
+
+// UnsyncedIncomingPaths returns the incoming (added/modified headSHA..commit)
+// paths whose on-disk content does not hash to commit's blob, including absent files.
+func UnsyncedIncomingPaths(ctx context.Context, run Runner, repo, headSHA, commit string) ([]string, error) {
+	if run == nil {
+		run = RealRunner
+	}
+	paths, err := incomingAMPaths(ctx, run, repo, headSHA, commit)
+	if err != nil {
+		return nil, err
+	}
+	var unsynced []string
+	for i := 0; i < len(paths); i += transplantCheckoutBatch {
+		end := min(i+transplantCheckoutBatch, len(paths))
+		bad, err := unsyncedBatch(ctx, run, repo, commit, paths[i:end])
+		if err != nil {
+			return nil, err
+		}
+		unsynced = append(unsynced, bad...)
+	}
+	return unsynced, nil
+}
+
+func unsyncedBatch(ctx context.Context, run Runner, repo, commit string, paths []string) ([]string, error) {
+	args := append([]string{"ls-tree", "-z", "--full-tree", commit, "--"}, paths...)
+	res := run(ctx, repo, args...)
+	if res.Err != nil || res.Code != 0 {
+		return nil, fmt.Errorf("git ls-tree incoming paths exited with code %d: %s", res.Code, runDetail(res))
+	}
+	want := make(map[string]string, len(paths))
+	mode := make(map[string]string, len(paths))
+	for _, rec := range strings.Split(string(res.Stdout), "\x00") {
+		meta, p, ok := strings.Cut(rec, "\t")
+		if !ok {
+			continue
+		}
+		f := strings.Fields(meta)
+		if len(f) != 3 {
+			continue
+		}
+		mode[p], want[p] = f[0], f[2]
+	}
+
+	var unsynced, hashable []string
+	for _, p := range paths {
+		full, ok := safeWorktreePath(repo, p)
+		if !ok {
+			unsynced = append(unsynced, p)
+			continue
+		}
+		fi, err := os.Lstat(full)
+		switch {
+		case mode[p] == "160000":
+		case err != nil:
+			unsynced = append(unsynced, p)
+		case mode[p] == "120000":
+		case !fi.Mode().IsRegular():
+			unsynced = append(unsynced, p)
+		default:
+			hashable = append(hashable, p)
+		}
+	}
+	if len(hashable) == 0 {
+		return unsynced, nil
+	}
+	hres := run(ctx, repo, append([]string{"hash-object", "--"}, hashable...)...)
+	if hres.Err != nil || hres.Code != 0 {
+		return nil, fmt.Errorf("git hash-object incoming paths exited with code %d: %s", hres.Code, runDetail(hres))
+	}
+	got := strings.Fields(string(hres.Stdout))
+	if len(got) != len(hashable) {
+		return nil, fmt.Errorf("git hash-object returned %d hashes for %d paths", len(got), len(hashable))
+	}
+	for i, p := range hashable {
+		if got[i] != want[p] {
+			unsynced = append(unsynced, p)
+		}
+	}
+	return unsynced, nil
+}
+
+// EnsureIncomingOnDisk proves every incoming headSHA..commit path is on disk at
+// commit's blob, re-checking-out whatever is absent or stale a bounded number of
+// times. It returns a *TransplantWorktreeError naming the paths that never landed.
+func EnsureIncomingOnDisk(ctx context.Context, run Runner, repo, headSHA, commit string) error {
+	if run == nil {
+		run = RealRunner
+	}
+	const attempts = 3
+	var unsynced []string
+	var lastErr error
+	for attempt := 0; attempt <= attempts; attempt++ {
+		var err error
+		unsynced, err = UnsyncedIncomingPaths(ctx, run, repo, headSHA, commit)
+		if err != nil {
+			return &TransplantWorktreeError{Commit: commit, Err: err}
+		}
+		if len(unsynced) == 0 {
+			_ = run(ctx, repo, "update-index", "-q", "--refresh")
+			return nil
+		}
+		if attempt == attempts || ctx.Err() != nil {
+			break
+		}
+		lastErr = checkoutPaths(ctx, run, repo, commit, unsynced)
+	}
+	return &TransplantWorktreeError{Commit: commit, Missing: unsynced, Err: lastErr}
 }
