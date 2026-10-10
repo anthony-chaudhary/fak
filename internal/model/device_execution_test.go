@@ -333,6 +333,14 @@ func TestDeviceOnlyV41PublicEntriesRefuseHostArchitecture(t *testing.T) {
 				if refused.Cause == nil || !errors.Is(err, refused.Cause) || s.halFailure != refused {
 					t.Fatalf("wrong architecture refusal cause: %v", refused.Cause)
 				}
+				var hostOps *v41DeviceOnlyHostOpError
+				if !errors.Is(err, errV41DeviceOnlyHostOp) || !errors.As(err, &hostOps) ||
+					len(hostOps.ops) != len(v41DeviceOnlyHostOps) || hostOps.ops[0] != v41DeviceOnlyHostOps[0] {
+					t.Fatalf("refusal does not name the host op inventory: %v", refused.Cause)
+				}
+				if refused.Forward != ForwardPathKind("deepseek41") {
+					t.Fatalf("refusal forward = %q, want deepseek41", refused.Forward)
+				}
 				if !s.HostFallbackObserved() || !s.BackendSessionClosed() {
 					t.Fatalf("refusal fallback=%t closed=%t, want both true", s.HostFallbackObserved(), s.BackendSessionClosed())
 				}

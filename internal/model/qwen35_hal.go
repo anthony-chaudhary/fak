@@ -51,6 +51,8 @@ func (s *Session) deviceOnlyForward() ForwardPathKind {
 	}
 	cfg := s.M.Cfg
 	switch {
+	case cfg.IsDeepSeekV41():
+		return ForwardPathKind("deepseek41")
 	case cfg.usesMLAMoELayout():
 		return ForwardGLMDsaMLA
 	case cfg.isMiniMaxSparseAttn():
@@ -65,6 +67,10 @@ func (s *Session) deviceOnlyForward() ForwardPathKind {
 }
 
 func (s *Session) refuseHostFallback(stage string) {
+	s.refuseHostFallbackCause(stage, fmt.Errorf("device-only execution policy forbids host model compute"))
+}
+
+func (s *Session) refuseHostFallbackCause(stage string, cause error) {
 	if s == nil || s.executionPolicy != ExecutionPolicyDeviceOnly {
 		return
 	}
@@ -79,7 +85,7 @@ func (s *Session) refuseHostFallback(stage string) {
 		Path:    "device-only",
 		Layer:   -1,
 		Stage:   stage,
-		Cause:   fmt.Errorf("device-only execution policy forbids host model compute"),
+		Cause:   cause,
 	}
 	s.halFailure = err
 	s.halClosed = true
@@ -105,7 +111,12 @@ func (s *Session) validateDeviceOnlyExecution(stage string) {
 	if n > 0 && n < cfg.NumLayers {
 		s.refuseHostFallback(stage + ": partial GPU layer placement")
 	}
-	if cfg.IsDeepSeekV41() || cfg.isMiniMaxSparseAttn() || cfg.isGemma4() {
+	if cfg.IsDeepSeekV41() {
+		if cause := v41DeviceOnlyRefusal(); cause != nil {
+			s.refuseHostFallbackCause(stage+": architecture uses host model compute", cause)
+		}
+	}
+	if cfg.isMiniMaxSparseAttn() || cfg.isGemma4() {
 		s.refuseHostFallback(stage + ": architecture uses host model compute")
 	}
 	if cfg.IsQwen35Hybrid() {
