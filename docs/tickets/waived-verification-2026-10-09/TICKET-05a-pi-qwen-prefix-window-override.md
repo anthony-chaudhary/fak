@@ -27,7 +27,7 @@ Related commits: 51185bc3243 (selected-window propagation), 0c191ba16bc (shared 
 
 ## Done condition
 
-- [ ] The precedence decision is recorded in the `pi_model_window.go` doc comment.
-- [ ] For a cloud Qwen route, the launcher and the router-derived config report the same window.
-- [ ] Halo Qwen still resolves 131072 in both paths.
-- [ ] A fail-before/pass-after test citing 51185bc3243 is on trunk.
+- [x] The precedence decision is recorded in the `pi_model_window.go` doc comment.
+- [x] For a cloud Qwen route, the launcher and the router-derived config report the same window.
+- [x] Halo Qwen still resolves 131072 in both paths.
+- [x] A fail-before/pass-after test citing 51185bc3243 is on trunk (`TestPiModelServedWindowCloudQwenUsesReportedWindow`, `TestRunPiUsesSelectedModelWindowEverywhere/cloud_qwen_route_uses_router_window_not_qwen_prefix_row`).

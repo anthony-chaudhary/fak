@@ -8,10 +8,13 @@ package projectassets
 //
 // Precedence for a model's served window:
 //
-//  1. An explicit per-model registry entry (exact id, then alias, then pattern) below.
-//  2. The caller's explicit served window (the `--window` flag), which remains an
-//     operator override for a model the registry does not name.
-//  3. DefaultPiServedWindow, so an unknown model still degrades to the historical number.
+//  1. An explicit per-model registry entry (exact id or alias) below. Rows name specific
+//     models only, never a family prefix: a model the registry does not name takes the
+//     window the router/catalog reports for it.
+//  2. The caller's served window (the `--window` flag, else the router/catalog-reported
+//     `context_length` for the selected model) for a model the registry does not name, or
+//     when it is smaller than the registry row.
+//  3. DefaultPiServedWindow, the fallback for a route the router does not report.
 //
 // Every registry value is a RAW served window. The quality cap that keeps a 1M window
 // from being filled is applied once, by harnesskit.DeriveContextEnvelope; it must never
@@ -45,8 +48,8 @@ var piModelWindowRegistry = []piModelWindow{
 	{match: func(id string) bool {
 		return piMatchModel(id, "Qwen3.8-27B-UD-Q2_K_XL", "qwen38", "qwen38:27b-q4", "qwen38:27b")
 	}, window: DefaultPiServedWindow},
-	// Any remaining qwen-* id is a Qwen-family route; keep the historical window.
-	{match: func(id string) bool { return piHasModelPrefix(id, "qwen") }, window: DefaultPiServedWindow},
+	// No bare qwen-prefix row: cloud Qwen routes (qwen3.8-max) serve ~1M, so a family
+	// glob pinned them to the Halo window over the router-reported one (#13778).
 }
 
 // piMatchModel reports whether id matches any of the given candidate ids, ignoring case
@@ -73,25 +76,15 @@ func piMatchModel(id string, candidates ...string) bool {
 	return false
 }
 
-// piHasModelPrefix reports whether the id's leaf begins with prefix (case-insensitive).
-func piHasModelPrefix(id, prefix string) bool {
-	leaf := lastPathSegmentOrSelf(normalizePiModelKey(id))
-	prefix = normalizePiModelKey(prefix)
-	if leaf == "" || prefix == "" {
-		return false
-	}
-	return len(leaf) >= len(prefix) && leaf[:len(prefix)] == prefix
-}
-
 // PiModelServedWindow resolves the served context window to assume for a model id.
 //
 // Precedence:
-//  1. the per-model registry (exact id / alias / glob), so DeepSeek V4.1 Flash gets its
-//     own served window instead of inheriting the Qwen one;
-//  2. explicitWindow when it is positive (the caller's `--window` override for a model the
-//     registry does not name);
-//  3. DefaultPiServedWindow for an unknown model or an unset override, preserving the
-//     historical behaviour for ids fak has never heard of.
+//  1. the per-model registry (exact id / alias), so DeepSeek V4.1 Flash gets its own
+//     served window instead of inheriting the Qwen one;
+//  2. explicitWindow when it is positive: the caller's `--window`, or the window the
+//     router/catalog reports for the selected model, for a model the registry does not
+//     name (cloud Qwen routes resolve here);
+//  3. DefaultPiServedWindow for an unknown model the router does not report.
 //
 // A non-positive result is never returned: the floor is DefaultPiServedWindow.
 func PiModelServedWindow(modelID string, explicitWindow int) int {

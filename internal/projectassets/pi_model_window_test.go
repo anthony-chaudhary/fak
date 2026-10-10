@@ -73,6 +73,33 @@ func TestPiModelServedWindowExplicitSmallerWins(t *testing.T) {
 	}
 }
 
+// TestPiModelServedWindowCloudQwenUsesReportedWindow: a cloud Qwen route the registry does
+// not name takes the router-reported window, capped once by the envelope, while Halo Qwen
+// keeps its registry row (#13778, follow-up to 51185bc3243).
+func TestPiModelServedWindowCloudQwenUsesReportedWindow(t *testing.T) {
+	for _, tc := range []struct {
+		id                  string
+		reported            int
+		wantServed          int
+		wantCtxIsQualityCap bool
+	}{
+		{id: "qwen3.8-max", reported: 1000000, wantServed: 1000000, wantCtxIsQualityCap: true},
+		{id: "Qwen/qwen3.8-max", reported: 1048576, wantServed: 1048576, wantCtxIsQualityCap: true},
+		{id: "qwen3.8-max", reported: 0, wantServed: DefaultPiServedWindow},
+		{id: "Qwen3.8-27B-UD-Q2_K_XL", reported: 131072, wantServed: DefaultPiServedWindow},
+		{id: "Qwen3.8-27B-UD-Q2_K_XL", reported: 0, wantServed: DefaultPiServedWindow},
+		{id: "qwen38:27b-q4", reported: 1000000, wantServed: DefaultPiServedWindow},
+	} {
+		if got := PiModelServedWindow(tc.id, tc.reported); got != tc.wantServed {
+			t.Errorf("PiModelServedWindow(%q, %d) = %d, want %d", tc.id, tc.reported, got, tc.wantServed)
+		}
+		budget := PiModelContextBudget(tc.id, tc.reported)
+		if tc.wantCtxIsQualityCap && budget.ResidentTarget != harnesskit.QualityCapTokens {
+			t.Errorf("PiModelContextBudget(%q, %d).ResidentTarget = %d, want %d", tc.id, tc.reported, budget.ResidentTarget, harnesskit.QualityCapTokens)
+		}
+	}
+}
+
 // TestGeneratePiConfigForWindowDeepSeekIsQualityCapped is the config-level witness: the
 // models.json generator writes the quality cap for DeepSeek V4.1 Flash, not 65536.
 func TestGeneratePiConfigForWindowDeepSeekIsQualityCapped(t *testing.T) {
