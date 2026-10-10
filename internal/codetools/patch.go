@@ -721,6 +721,10 @@ func applyHunks(originalLines []string, hunks []diffHunk, fuzz int) ([]string, e
 		if len(oldLines) == 0 {
 			// Pure insertion
 			matchIdx := expectedIdx
+			if hunk.OldCount == 0 {
+				// An empty old range names the line before the insertion point.
+				matchIdx = hunk.OldStart
+			}
 			if matchIdx < fileIdx {
 				matchIdx = fileIdx
 			}
