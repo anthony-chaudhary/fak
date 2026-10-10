@@ -23,4 +23,11 @@ Parent: #13764.
 
 ## Done condition
 
-- [ ] All four tests green on trunk, and the fix cites the culprit sha.
+- [x] All four tests green on trunk, and the fix cites the culprit sha.
+
+## Resolution
+
+Culprit: 82b4d3ce6cb. The code is correct and the tests were wrong, the same finding as #13795.
+
+- 82b4d3ce6cb made the selected compressor/indexer boundary close the Session on any unclassified failure while re-panicking the original value ("cannot leave this selected owner live"). `UnknownAndClosedPanicIdentity` still pinned the earlier contract from 305768ee805/85e0ca21540, where an unknown panic left the Session open. It now requires closure, a `*BackendForwardOperationError` latch, and, when the Session was already closed, the first latch keeping priority.
+- `v41GuardedProjectionPanicContract` was added by 82b4d3ce6cb but never ran. Its `len(b.live) != 0` check counted the seven model-owned immutable norm weights that the Session borrows. `Session.Close` leaves those staged by design (`hal.go`, `borrowedHALW`). The leak check now excludes only those borrowed residents. Rollback state was unchanged in every sub-case.
