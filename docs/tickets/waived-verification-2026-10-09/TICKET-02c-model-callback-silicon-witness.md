@@ -81,8 +81,16 @@ FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_DISPATCH_PROFILE=1 FAK_VULKAN_SPIRV=<spir
 
 Witness: the command above on a Strix Halo appliance.
 
-- [ ] [SW-VERIFIED] The test skips without opt-in and fails if any callback is not reached.
-- [ ] [HW-WITNESSED] Each of the five callbacks dispatches on a Halo GPU with parity against cpu-ref.
+- [x] [SW-VERIFIED] The test skips without opt-in and fails if any callback is not reached.
+- [x] [HW-WITNESSED] Each of the five callbacks dispatches on a Halo GPU with parity against cpu-ref.
+
+## Result
+
+[HW-WITNESSED] 2026-10-10: `TestV41NormRoPECallbacksHalo` PASS on one Strix Halo
+appliance (RADV STRIX_HALO, vulkan-1.4.354) at source f2be2792ab2. Each of the five
+callbacks dispatched on the device 5 times with parity against cpu-ref. Verify queue
+(tier full) is green for 0d0dcda7e63, fa265cd4174, e8340033f8d, 0bae85dd15b and
+4cd54773544.
 
 ## Witness
 
