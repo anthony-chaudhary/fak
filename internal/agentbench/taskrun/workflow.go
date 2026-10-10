@@ -24,12 +24,8 @@ type WorkflowReceipt struct {
 }
 
 func taskfixtureByID(id string) taskfixture.Fixture {
-	for _, fixture := range taskfixture.Cases(true) {
-		if fixture.ID == id {
-			return fixture
-		}
-	}
-	return taskfixture.Fixture{}
+	fixture, _ := taskfixture.ByID(id)
+	return fixture
 }
 
 func validateWorkflow(f taskfixture.Fixture, turns []PlannerTurn, testCommand string) (WorkflowReceipt, error) {

@@ -39,6 +39,9 @@ type ModelObservation struct {
 	UsageInvalidRequests       int      `json:"usage_invalid_requests"`
 	EventsPath                 string   `json:"events_path"`
 	EventsDigest               string   `json:"events_digest,omitempty"`
+	// SamplingSent lists each distinct sampling configuration the observed
+	// request bodies carried, in first-seen order.
+	SamplingSent []Sampling `json:"sampling_sent,omitempty"`
 }
 
 type modelObserver struct {
@@ -60,6 +63,8 @@ type modelObserver struct {
 	result                                                                                                                                     ModelObservation
 	closeErr                                                                                                                                   error
 	meter                                                                                                                                      *modelConcurrencyMeter
+	samplingSeen                                                                                                                               map[string]bool
+	samplingSent                                                                                                                               []Sampling
 }
 
 type modelConcurrencyMeter struct {
@@ -164,6 +169,7 @@ func (o *modelObserver) serve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, terminalErr, status)
 		return
 	}
+	o.observeRequest(body)
 	req, err := http.NewRequestWithContext(o.ctx, http.MethodPost, o.target.String(), bytes.NewReader(body))
 	if err != nil {
 		terminalErr = "upstream_request_failed"
@@ -211,6 +217,23 @@ func (o *modelObserver) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(status)
 	_, _ = w.Write(response)
+}
+
+func (o *modelObserver) observeRequest(body []byte) {
+	sampling := sentSampling(body)
+	key, err := json.Marshal(sampling)
+	if err != nil {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.samplingSeen == nil {
+		o.samplingSeen = map[string]bool{}
+	}
+	if !o.samplingSeen[string(key)] {
+		o.samplingSeen[string(key)] = true
+		o.samplingSent = append(o.samplingSent, sampling)
+	}
 }
 
 func (o *modelObserver) observeResponse(body []byte) {
@@ -315,7 +338,7 @@ func (o *modelObserver) Close() (ModelObservation, error) {
 	} else if o.successful > 0 && o.identityUnknown == 0 && o.identityKnown == o.successful {
 		identity = "matched"
 	}
-	o.result = ModelObservation{Requests: o.requests, UpstreamRequests: o.upstream, SuccessfulRequests: o.successful, PeakHTTPInFlight: o.peak, LimitExceeded: o.exceeded, ExpectedModel: o.expected, ObservedModels: models, ModelIdentityStatus: identity, IdentityKnownRequests: o.identityKnown, IdentityUnknownRequests: o.identityUnknown, IdentityMismatchedRequests: o.identityMismatched, UsageKnownRequests: o.usageKnown, UsageUnknownRequests: o.usageUnknown, UsageInvalidRequests: o.usageInvalid, EventsPath: o.eventsPath}
+	o.result = ModelObservation{Requests: o.requests, UpstreamRequests: o.upstream, SuccessfulRequests: o.successful, PeakHTTPInFlight: o.peak, LimitExceeded: o.exceeded, ExpectedModel: o.expected, ObservedModels: models, ModelIdentityStatus: identity, IdentityKnownRequests: o.identityKnown, IdentityUnknownRequests: o.identityUnknown, IdentityMismatchedRequests: o.identityMismatched, UsageKnownRequests: o.usageKnown, UsageUnknownRequests: o.usageUnknown, UsageInvalidRequests: o.usageInvalid, EventsPath: o.eventsPath, SamplingSent: append([]Sampling(nil), o.samplingSent...)}
 	if b, err := os.ReadFile(o.eventsPath); err == nil {
 		h := sha256.Sum256(b)
 		o.result.EventsDigest = hex.EncodeToString(h[:])

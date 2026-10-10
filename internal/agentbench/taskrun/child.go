@@ -35,6 +35,7 @@ type ChildReceipt struct {
 	Metrics        agent.ArmMetrics `json:"metrics"`
 	Turns          []PlannerTurn    `json:"turns"`
 	Workflow       WorkflowReceipt  `json:"workflow"`
+	ToolCalls      ToolCallMetrics  `json:"tool_call_metrics"`
 	Error          string           `json:"error,omitempty"`
 }
 
@@ -42,6 +43,9 @@ type recordingPlanner struct {
 	inner agent.Planner
 	turns []PlannerTurn
 	prev  []agent.Message
+	// sampling is appended after caller options so the explicit run
+	// configuration wins on every turn.
+	sampling []agent.SampleOpt
 }
 
 func (p *recordingPlanner) Model() string { return p.inner.Model() }
@@ -49,7 +53,7 @@ func (p *recordingPlanner) Complete(ctx context.Context, msgs []agent.Message, t
 	if len(p.turns) >= maxTaskTurns {
 		return nil, errors.New("agentbench planner call cap reached")
 	}
-	c, e := p.inner.Complete(ctx, msgs, tools, opts...)
+	c, e := p.inner.Complete(ctx, msgs, tools, append(append([]agent.SampleOpt(nil), opts...), p.sampling...)...)
 	prefix := sharedMessagePrefix(p.prev, msgs)
 	t := PlannerTurn{PrefixMessages: prefix, Messages: append([]agent.Message(nil), msgs[prefix:]...)}
 	p.prev = append([]agent.Message(nil), msgs...)
@@ -82,7 +86,11 @@ func RunChild(ctx context.Context, configPath string, out io.Writer) error {
 		return err
 	}
 	defer agent.DisarmCodeTools()
-	p := &recordingPlanner{inner: agent.NewHTTPPlanner(cfg.Endpoint, cfg.Model, "")}
+	planner, sampling, err := newTaskClient(cfg.Endpoint, cfg.Model, cfg.Sampling)
+	if err != nil {
+		return err
+	}
+	p := &recordingPlanner{inner: planner, sampling: sampling}
 	task := cfg.Prompt + "\n\nThe visible test below is immutable reference input outside the writable workspace:\n```go\n" + cfg.VisibleTest + "```\n\nAfter editing the target source, run the required test with the Bash tool using this byte-exact command:\n" + cfg.TestCommand
 	metrics, runErr := agent.RunArm(ctx, p, task, true, maxTaskTurns, nil, agent.WithToolCatalog(catalog))
 	r := ChildReceipt{Schema: "fak.agentbench.task-child.v2", Model: p.Model(), PlannerCalls: len(p.turns), Metrics: metrics, Turns: p.turns}
@@ -105,6 +113,7 @@ func RunChild(ctx context.Context, configPath string, out io.Writer) error {
 		}
 	}
 	r.DeniedAttempts = metrics.Denies
+	r.ToolCalls = reduceToolCalls(p.turns, catalog, maxTaskTurns)
 	workflow, workflowErr := validateWorkflow(taskfixtureByID(cfg.TaskID), p.turns, cfg.TestCommand)
 	r.Workflow = workflow
 	if runErr == nil && workflowErr != nil {
@@ -113,7 +122,7 @@ func RunChild(ctx context.Context, configPath string, out io.Writer) error {
 	if runErr != nil {
 		r.Error = runErr.Error()
 	}
-	encErr := json.NewEncoder(out).Encode(r)
+	encErr := writeChildReceipt(cfg.ReceiptPath, out, r)
 	if runErr != nil {
 		return runErr
 	}
@@ -121,6 +130,23 @@ func RunChild(ctx context.Context, configPath string, out io.Writer) error {
 		return encErr
 	}
 	return nil
+}
+
+// writeChildReceipt writes the receipt to path when the parent supplied one, so
+// a long transcript is never cut by the parent's bounded stdout capture.
+func writeChildReceipt(path string, out io.Writer, r ChildReceipt) error {
+	if path == "" {
+		return json.NewEncoder(out).Encode(r)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(f).Encode(r); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func RunTestChild(ctx context.Context, configPath string, out io.Writer) error {
