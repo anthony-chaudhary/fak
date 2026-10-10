@@ -153,6 +153,9 @@ func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Requ
 		writeErr(w, http.StatusBadRequest, "contents: field required")
 		return
 	}
+	if rejectStopLimits(w, req.StopSequences) {
+		return
+	}
 	stream := req.Stream || method == "streamGenerateContent"
 	r, ok = s.prepareChatRoute(w, r, model)
 	if !ok {
@@ -333,9 +336,13 @@ func (s *Server) streamGeminiPending(w http.ResponseWriter, r *http.Request, req
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 	b, _ := json.Marshal(turn.response())
-	_, _ = w.Write([]byte("data: "))
-	_, _ = w.Write(b)
-	_, _ = w.Write([]byte("\n\n"))
+	// This is a completed turn: stop transport work after the first failed or
+	// partial write without retrying the body or flushing a truncated frame.
+	for _, part := range [][]byte{[]byte("data: "), b, []byte("\n\n")} {
+		if n, err := w.Write(part); err != nil || n != len(part) {
+			return
+		}
+	}
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}

@@ -3,7 +3,10 @@ package gateway
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -552,6 +555,117 @@ func TestGeminiCachedContentTokenCountRelay(t *testing.T) {
 		}
 		if frame.UsageMetadata.PromptTokenCount != 100 || frame.UsageMetadata.CandidatesTokenCount != 25 || frame.UsageMetadata.TotalTokenCount != 125 {
 			t.Errorf("stream usageMetadata counts incorrect: %+v", frame.UsageMetadata)
+		}
+	}
+}
+
+// geminiTerminalPlanner exposes both interfaces so the witness also pins that
+// Gemini's current SSE path completes the buffered planner before writing.
+type geminiTerminalPlanner struct {
+	completed, streamed int
+	returned            bool
+}
+
+func (*geminiTerminalPlanner) Model() string            { return "test-model" }
+func (*geminiTerminalPlanner) StreamingSupported() bool { return true }
+func (p *geminiTerminalPlanner) Complete(context.Context, []agent.Message, []agent.ToolDef, ...agent.SampleOpt) (*agent.Completion, error) {
+	p.completed++
+	p.returned = true
+	return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "checking", ToolCalls: []agent.ToolCall{
+		{ID: "a", Type: "function", Function: agent.Func{Name: "allow_a", Arguments: `{"x":1}`}},
+		{ID: "b", Type: "function", Function: agent.Func{Name: "deny_b", Arguments: `{}`}},
+	}}, FinishReason: "tool_calls", Usage: agent.Usage{PromptTokens: 4, CompletionTokens: 2, TotalTokens: 6}}, nil
+}
+func (p *geminiTerminalPlanner) CompleteStream(context.Context, agent.StreamSink, []agent.Message, []agent.ToolDef, ...agent.SampleOpt) (*agent.Completion, error) {
+	p.streamed++
+	return nil, errors.New("unexpected live Gemini dispatch")
+}
+
+type geminiTerminalWriter struct {
+	recorder         *httptest.ResponseRecorder
+	planner          *geminiTerminalPlanner
+	parts            [][]byte
+	failAt, flushes  int
+	short            bool
+	cause            error
+	beforeCompletion bool
+}
+
+func (w *geminiTerminalWriter) Header() http.Header    { return w.recorder.Header() }
+func (w *geminiTerminalWriter) WriteHeader(status int) { w.recorder.WriteHeader(status) }
+func (w *geminiTerminalWriter) Write(b []byte) (int, error) {
+	if !w.planner.returned {
+		w.beforeCompletion = true
+	}
+	w.parts = append(w.parts, append([]byte(nil), b...))
+	if len(w.parts) == w.failAt {
+		if w.short {
+			return len(b) - 1, nil
+		}
+		return 0, w.cause
+	}
+	return w.recorder.Write(b)
+}
+func (w *geminiTerminalWriter) Flush() { w.flushes++; w.recorder.Flush() }
+
+// fak-test:runtime medium est=1s lane=default
+// Unmeasured estimate. Actual handler and test adjudicator; no native decode.
+func TestGeminiTerminalSSEStopsAfterFailedWrite(t *testing.T) {
+	t.Setenv("FAK_EP_FANOUT_ADDRS", "")
+	for _, short := range []bool{false, true} {
+		for failAt := 0; failAt <= 3; failAt++ {
+			t.Run(fmt.Sprintf("short=%v/write=%d", short, failAt), func(t *testing.T) {
+				srv := newTestServer(t)
+				p := &geminiTerminalPlanner{}
+				srv.planner = p
+				w := &geminiTerminalWriter{recorder: httptest.NewRecorder(), planner: p, failAt: failAt, short: short, cause: errors.New("client write failed")}
+				req := httptest.NewRequest(http.MethodPost, "/v1beta/models/test-model:streamGenerateContent", strings.NewReader(`{"contents":[{"role":"user","parts":[{"text":"call tools"}]}],"tools":[{"functionDeclarations":[{"name":"allow_a","parameters":{"type":"object"}},{"name":"deny_b","parameters":{"type":"object"}}]}]}`))
+				req.Header.Set("Content-Type", "application/json")
+				srv.Handler().ServeHTTP(w, req)
+				wantWrites, wantFlush := failAt, 0
+				if failAt == 0 {
+					wantWrites, wantFlush = 3, 1
+				}
+				if len(w.parts) != wantWrites || w.flushes != wantFlush || p.completed != 1 || p.streamed != 0 || w.beforeCompletion || req.Context().Err() != nil {
+					t.Fatalf("writes=%d flush=%d complete=%d live=%d early=%v context=%v", len(w.parts), w.flushes, p.completed, p.streamed, w.beforeCompletion, req.Context().Err())
+				}
+				if w.recorder.Code != http.StatusOK || w.recorder.Header().Get("Content-Type") != "text/event-stream" || w.recorder.Header().Get("Cache-Control") != "no-cache" || w.recorder.Header().Get("Connection") != "keep-alive" {
+					t.Fatalf("status/header=%d %v", w.recorder.Code, w.recorder.Header())
+				}
+				if string(w.parts[0]) != "data: " {
+					t.Fatalf("prefix=%q", w.parts[0])
+				}
+				if len(w.parts) >= 2 {
+					var frame geminiGenerateContentResponse
+					if err := json.Unmarshal(w.parts[1], &frame); err != nil {
+						t.Fatal(err)
+					}
+					if len(frame.Candidates) != 1 || frame.UsageMetadata.TotalTokenCount != 6 {
+						t.Fatalf("candidate/usage=%+v", frame)
+					}
+					calls := 0
+					for _, part := range frame.Candidates[0].Content.Parts {
+						if part.FunctionCall != nil {
+							calls++
+							if part.FunctionCall.Name != "allow_a" {
+								t.Fatalf("unadjudicated call=%+v", part.FunctionCall)
+							}
+						}
+					}
+					if calls != 1 {
+						t.Fatalf("allowed calls=%d", calls)
+					}
+				}
+				if len(w.parts) == 3 && string(w.parts[2]) != "\n\n" {
+					t.Fatalf("terminator=%q", w.parts[2])
+				}
+				if failAt == 0 {
+					want := append(append(append([]byte(nil), w.parts[0]...), w.parts[1]...), w.parts[2]...)
+					if !bytes.Equal(w.recorder.Body.Bytes(), want) {
+						t.Fatal("successful SSE bytes changed")
+					}
+				}
+			})
 		}
 	}
 }

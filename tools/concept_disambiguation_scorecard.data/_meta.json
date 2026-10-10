@@ -8794,7 +8794,20 @@
           "category": "incidental",
           "reason": "Serialized engine identity value for the existing fak-native Vulkan execution path; it is receipt data, not a distinct gateway engine.",
           "token": "fak-strix-engine"
+        },
+        {
+          "category": "false-positive",
+          "reason": "The positioned device mutual-exclusion gate serializes native forward work; its name does not define a gateway or inference-engine abstraction.",
+          "token": "inKernelDeviceGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Extracts the existing native completion tool normalization tail while retaining unknown-tool refusal; it is not a distinct gateway or engine.",
+          "token": "normalizeInKernelToolCalls"
         }
+      ],
+      "exclude": [
+        "inKernelDeviceGate"
       ],
       "id": "gateway-engine",
       "ignore": [
@@ -8913,6 +8926,7 @@
         "nativeReasonMessageRoleUnsupported",
         "native_engine_substitution",
         "newInKernelPrefixPressureBridge",
+        "normalizeInKernelToolCalls",
         "pgKernel32",
         "publicGatewayURL",
         "query_public_policy",
@@ -11094,6 +11108,21 @@
           "category": "incidental",
           "reason": "Function-local cancellation context for bounded cleanup after the existing SSD restart operation; it introduces no context lifecycle concept.",
           "token": "cleanupCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Cancellation-aware acquisition method of the positioned inKernelDeviceGate; it is not a separate context-store or context-window concept.",
+          "token": "LockContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Request-derived context local canceled on the first Messages response-writer failure.",
+          "token": "writeCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Request-derived context local canceled on the first selected Chat response-writer failure.",
+          "token": "liveCtx"
         }
       ],
       "exclude": [
@@ -11127,6 +11156,7 @@
         "IncrementalContextGeneration",
         "InitializeIncrementalContext",
         "IsCopiedContext",
+        "LockContext",
         "LookupSnapshotTieredContext",
         "MakeContextSource",
         "MakeIncrementalContext",
@@ -11216,6 +11246,7 @@
         "inspectCodexHookProfileContext",
         "laneCtx",
         "latestGuardCompactionWitness",
+        "liveCtx",
         "lookupCtx",
         "lookupReceiptContextKey",
         "lookupReceiptFromContext",
@@ -11258,6 +11289,7 @@
         "takeCompactionContract",
         "traceContext",
         "wctx",
+        "writeCtx",
         "writeValidateTestContext"
       ],
       "known_tokens": [],
@@ -15426,6 +15458,11 @@
           "category": "incidental",
           "reason": "Residency log field labels an existing placement estimate rather than a new plan abstraction.",
           "token": "planned_device_bytes"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Detects textual tool-call candidates in existing planner output; the substring candidate is not a planning abstraction.",
+          "token": "hasTextToolCandidate"
         }
       ],
       "exclude": [
@@ -15433,6 +15470,7 @@
         "candidate_fak_share_gross",
         "candidate_fak_share_net",
         "explanat",
+        "hasTextToolCandidate",
         "plane",
         "plank"
       ],

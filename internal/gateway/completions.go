@@ -62,6 +62,9 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "prompt: field required")
 		return
 	}
+	if rejectStopLimits(w, normalizeStop(req.Stop)) {
+		return
+	}
 	if rejectInvalidSampling(w, validateCompletionSampling(req)) {
 		return
 	}

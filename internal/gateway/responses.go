@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1320,8 +1321,15 @@ func writeSSEEvent(w http.ResponseWriter, event string, data interface{}) error 
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(w, "event: %s\n", event)
-	_, _ = fmt.Fprintf(w, "data: %s\n\n", raw)
+	for _, line := range []string{"event: " + event + "\n", "data: " + string(raw) + "\n\n"} {
+		n, err := io.WriteString(w, line)
+		if err != nil {
+			return err
+		}
+		if n != len(line) {
+			return io.ErrShortWrite
+		}
+	}
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}

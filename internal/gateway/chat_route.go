@@ -37,9 +37,14 @@ func (s *Server) prepareChatEPFanout(w http.ResponseWriter, r *http.Request, rou
 	if (route == epRouteMessages && s.native) || r.Header.Get(epFollowerHeader) != "" || len(epFanoutURLsFromEnv(route)) == 0 {
 		return noop, func() {}, true
 	}
-	// Preserve the original early release when there is no account roster.
-	// Responses also needs its existing continuation restriction checked first.
-	if s.roster == nil && route != epRouteResponses {
+	// Stop-bearing wires must finish ingress validation before any follower is
+	// contacted, including without a roster. Reuse the original-body release
+	// closure below; routing and follower payloads remain unchanged.
+	deferForStopIngress := route == epRouteChatCompletions || route == epRouteCompletions ||
+		route == epRouteMessages || route == epRouteGeminiGenerateContent
+	// Other routes retain their prior release timing. Responses also needs its
+	// existing continuation restriction checked first.
+	if s.roster == nil && route != epRouteResponses && !deferForStopIngress {
 		wait, allowed := s.startEPFanoutFollowers(w, r, route)
 		return noop, wait, allowed
 	}
@@ -76,7 +81,7 @@ func (s *Server) prepareChatEPFanout(w http.ResponseWriter, r *http.Request, rou
 		wait, allowed = s.startEPFanoutFollowers(w, follower, route)
 		return allowed
 	}
-	if s.roster == nil {
+	if s.roster == nil && !deferForStopIngress {
 		if !release(r) {
 			return nil, nil, false
 		}

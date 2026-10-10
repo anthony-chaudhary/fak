@@ -25,6 +25,7 @@ func TestToollessBufferedReplyWire(t *testing.T) {
 		{"openai", fmt.Sprintf(`{"model":"served-model","choices":[{"message":{"role":"assistant","content":%s},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}`, quoted)},
 		{"xai", fmt.Sprintf(`{"model":"served-model","choices":[{"message":{"role":"assistant","content":%s},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}`, quoted)},
 		{"openai-responses", fmt.Sprintf(`{"model":"served-model","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":%s}]}],"usage":{"input_tokens":7,"output_tokens":3,"total_tokens":10}}`, quoted)},
+		{"anthropic", fmt.Sprintf(`{"model":"served-model","content":[{"type":"text","text":%s}],"stop_reason":"end_turn","usage":{"input_tokens":7,"output_tokens":3}}`, quoted)},
 		{"gemini", fmt.Sprintf(`{"modelVersion":"served-model","candidates":[{"content":{"role":"model","parts":[{"text":%s}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3,"totalTokenCount":10}}`, quoted)},
 	}
 	for _, provider := range providers {

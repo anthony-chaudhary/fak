@@ -61,7 +61,7 @@ func TestLiftGuardStreamsPrefixOfLiftedContentAndNeverLeaksDialect(t *testing.T)
 		{"js fence not a call", "```js\nconst x = {a: 1}\n```"},
 	}
 	for _, tc := range cases {
-		lifted := agent.LiftTextToolCalls(agent.Message{Content: tc.content})
+		lifted := agent.LiftTextToolCalls(agent.Message{Content: tc.content}, offeredWireNames("get_weather", "do_x"))
 		cleaned := lifted.Content
 		for _, chunk := range []int{1, 2, 3, 4, 7, 13, 1000} {
 			t.Run(fmt.Sprintf("%s/chunk=%d", tc.name, chunk), func(t *testing.T) {

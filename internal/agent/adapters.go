@@ -561,7 +561,7 @@ func marshalWithExtraBody(base any, extra json.RawMessage) ([]byte, error) {
 // function_call into a tool call, and carrying through usage and the echoed model.
 func (a openAIAdapter) ParseResponse(raw []byte) (*Completion, error) {
 	comp, err := a.parseResponseFields(raw)
-	return normalizeCompletionToolCalls(comp), err
+	return normalizeCompletionFields(comp), err
 }
 
 func (a openAIAdapter) parseResponseFields(raw []byte) (*Completion, error) {
@@ -1016,7 +1016,7 @@ func openAIResponsesTools(tools []ToolDef) []json.RawMessage {
 // token details into Usage.
 func (a openAIResponsesAdapter) ParseResponse(raw []byte) (*Completion, error) {
 	comp, err := a.parseResponseFields(raw)
-	return normalizeCompletionToolCalls(comp), err
+	return normalizeCompletionFields(comp), err
 }
 
 func (a openAIResponsesAdapter) parseResponseFields(raw []byte) (*Completion, error) {

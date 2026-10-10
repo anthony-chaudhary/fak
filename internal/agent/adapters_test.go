@@ -482,6 +482,12 @@ func TestProviderAdaptersParseToolCalls(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parse: %v", err)
 			}
+			if c.name == "openai_text_tool_call" {
+				if len(comp.Message.ToolCalls) != 0 || !strings.Contains(comp.Message.Content, "<tool_call>") {
+					t.Fatal("adapter lifted text without request tools")
+				}
+				comp = normalizeCompletionToolCalls(comp, offeredTestNames("lookup"))
+			}
 			if comp.FinishReason != "tool_calls" {
 				t.Errorf("finish_reason = %q, want tool_calls", comp.FinishReason)
 			}
@@ -2877,6 +2883,7 @@ func TestThinkingBlockToolCallsIgnored(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parse: %v", err)
 		}
+		comp = normalizeCompletionToolCalls(comp, offeredTestNames("lookup"))
 		if len(comp.Message.ToolCalls) != 1 {
 			t.Fatalf("expected exactly 1 legitimate tool call, got %d: %+v", len(comp.Message.ToolCalls), comp.Message.ToolCalls)
 		}

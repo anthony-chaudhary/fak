@@ -1,10 +1,13 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
 // hermesToolCallRe matches a Hermes/Qwen-style tool call emitted as plain TEXT
@@ -94,54 +97,105 @@ var toolCallDialects = []dialectExtractor{
 	{name: "bare_json", extract: extractBareJSON},
 }
 
-// LiftTextToolCalls promotes tool calls that a model emitted as TEXT — in any of
-// the dialects in toolCallDialects (Hermes <tool_call>, XML <function_call>,
-// Llama <|python_tag|>, Mistral [TOOL_CALLS], fenced ```json, or a bare JSON
-// object) — into structured Message.ToolCalls, stripping the recovered spans from
-// the content. It is a no-op when the message already carries structured ToolCalls
-// (the provider parsed them) or when no dialect yields a well-formed call.
-//
-// This matters for more than weak-model ergonomics: the gateway adjudicates only
-// STRUCTURED tool calls (s.adjudicateProposed reads Message.ToolCalls), so a call
-// left as content text would bypass the kernel boundary entirely — silently
-// breaking the "every proposed call is adjudicated" guarantee. Every un-recognized
-// dialect is therefore a silent adjudication bypass; lifting it here puts the call
-// back in front of the kernel.
-func LiftTextToolCalls(m Message) Message {
-	// If the provider already gave us structured calls, trust them — don't
-	// double-count a model that emitted both (the structured one is authoritative).
-	if len(m.ToolCalls) > 0 || m.Content == "" {
-		return m
+// OfferedTools is a request-owned snapshot of names offered before prompt pruning.
+// Its zero value permits no text lifts. Structured provider calls are unaffected.
+type OfferedTools struct {
+	names     map[string]struct{}
+	extension func(string) bool
+}
+
+func NewOfferedTools(tools []ToolDef) OfferedTools {
+	o := OfferedTools{names: make(map[string]struct{}, len(tools))}
+	for _, tool := range tools {
+		if name := tool.Function.Name; name != "" {
+			o.names[name] = struct{}{}
+		}
 	}
+	return o
+}
 
-	m.Content = normalizeQwenFunctionToolCalls(m.Content)
+type textToolExtensionKey struct{}
 
-	// First dialect that recovers at least one valid call wins (precedence order).
+// WithTextToolExtension binds gateway-owned served-name/alias recognition to this
+// call. It cannot authorize a lift when the planner received no offered names.
+// The caller must capture an immutable request snapshot, not shared mutable data.
+func WithTextToolExtension(ctx context.Context, extension func(string) bool) context.Context {
+	return context.WithValue(ctx, textToolExtensionKey{}, extension)
+}
+
+func offeredToolsFor(ctx context.Context, tools []ToolDef) OfferedTools {
+	o := NewOfferedTools(tools)
+	o.extension, _ = ctx.Value(textToolExtensionKey{}).(func(string) bool)
+	return o
+}
+
+func (o OfferedTools) allows(name string) bool {
+	if len(o.names) == 0 {
+		return false
+	}
+	if _, ok := o.names[name]; ok {
+		return true
+	}
+	return o.extension != nil && o.extension(name)
+}
+
+// LiftTextToolCalls promotes recognized text calls only within the request's
+// offered set. Unoffered blocks remain byte-identical, including wrapped Qwen
+// blocks and mixed-name arrays. No structured call is filtered here.
+func LiftTextToolCalls(m Message, offered OfferedTools) Message {
+	m, _ = liftTextToolCalls(m, offered)
+	return m
+}
+
+func liftTextToolCalls(m Message, offered OfferedTools) (Message, bool) {
+	if len(m.ToolCalls) > 0 || m.Content == "" {
+		return m, false
+	}
+	content := normalizeQwenFunctionToolCalls(m.Content, offered)
 	var blocks []liftedBlock
 	for _, d := range toolCallDialects {
-		if blocks = d.extract(m.Content); len(blocks) > 0 {
+		if blocks = d.extract(content); len(blocks) > 0 {
 			break
 		}
 	}
-	if len(blocks) == 0 {
-		return m
+	// Array extractors assign a full span to their first call and zero-width
+	// spans at its end to the rest. Decide the entire group before stripping any
+	// bytes, so an unoffered member cannot be erased by an offered sibling.
+	var selected []liftedBlock
+	rejected := false
+	for i := 0; i < len(blocks); {
+		end := i + 1
+		for end < len(blocks) && blocks[end].start == blocks[i].end && blocks[end].end == blocks[i].end {
+			end++
+		}
+		allowed := true
+		for _, block := range blocks[i:end] {
+			if !offered.allows(block.call.Function.Name) {
+				allowed = false
+				rejected = true
+			}
+		}
+		if allowed {
+			selected = append(selected, blocks[i:end]...)
+		}
+		i = end
 	}
-
+	if len(selected) == 0 {
+		return m, rejected
+	}
 	var calls []ToolCall
 	var stripped strings.Builder
 	last := 0
-	for _, block := range blocks {
-		stripped.WriteString(m.Content[last:block.start])
+	for _, block := range selected {
+		stripped.WriteString(content[last:block.start])
 		last = block.end
-		// Re-id by FINAL position so ids are stable and unique regardless of which
-		// dialect produced the block.
 		block.call.ID = fmt.Sprintf("call_text_%d", len(calls))
 		calls = append(calls, block.call)
 	}
-	stripped.WriteString(m.Content[last:])
+	stripped.WriteString(content[last:])
 	m.Content = strings.TrimSpace(stripped.String())
 	m.ToolCalls = calls
-	return m
+	return m, rejected
 }
 
 // qwenFunctionParamRe locates Qwen's antl-style <function=name>…</function> block when
@@ -189,7 +243,7 @@ func extractQwenFunctionBlocks(content string) []liftedBlock {
 // dialect: a malformed or nameless payload yields ok=false (the caller leaves the
 // block in the text rather than fabricate a call).
 
-func normalizeQwenFunctionToolCalls(content string) string {
+func normalizeQwenFunctionToolCalls(content string, offered OfferedTools) string {
 	const open, close = "<tool_call>", "</tool_call>"
 	var out strings.Builder
 	for cursor := 0; cursor < len(content); {
@@ -212,7 +266,7 @@ func normalizeQwenFunctionToolCalls(content string) string {
 			cursor = end
 			continue
 		}
-		if name, args, ok := parseQwenFunctionToolCall(block); ok {
+		if name, args, ok := parseQwenFunctionToolCall(block); ok && offered.allows(name) {
 			encoded, _ := json.Marshal(struct {
 				Name      string         `json:"name"`
 				Arguments map[string]any `json:"arguments"`
@@ -492,7 +546,7 @@ func extractBareJSON(content string) []liftedBlock {
 	return []liftedBlock{{start: start, end: end, call: call}}
 }
 
-func normalizeCompletionToolCalls(comp *Completion) *Completion {
+func normalizeCompletionToolCalls(comp *Completion, offered OfferedTools) *Completion {
 	if comp == nil {
 		return nil
 	}
@@ -501,12 +555,27 @@ func normalizeCompletionToolCalls(comp *Completion) *Completion {
 	// is a conformance failure, not an empty turn (see Completion.ToolCallsDropped).
 	rawClaimedToolCalls := finishReasonClaimsToolCalls(comp.FinishReason)
 
-	comp.Message = LiftTextToolCalls(comp.Message)
+	var rejected bool
+	comp.Message, rejected = liftTextToolCalls(comp.Message, offered)
 	normalizeToolCallFields(&comp.Message)
 	if len(comp.Message.ToolCalls) > 0 {
 		comp.FinishReason = "tool_calls"
 	} else if rawClaimedToolCalls {
 		comp.ToolCallsDropped = true
+		if rejected {
+			comp.ToolCallsDroppedReason = abi.ReasonUnknownTool
+		}
+	}
+	return comp
+}
+
+func normalizeCompletionFields(comp *Completion) *Completion {
+	if comp == nil {
+		return nil
+	}
+	normalizeToolCallFields(&comp.Message)
+	if len(comp.Message.ToolCalls) > 0 {
+		comp.FinishReason = "tool_calls"
 	}
 	return comp
 }

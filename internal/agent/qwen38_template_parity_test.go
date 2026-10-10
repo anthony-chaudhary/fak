@@ -331,7 +331,7 @@ internal/agent/main.go
 	}
 
 	// 2. LiftTextToolCalls lifts structured tool call
-	lifted := LiftTextToolCalls(Message{Role: RoleAssistant, Content: visible})
+	lifted := LiftTextToolCalls(Message{Role: RoleAssistant, Content: visible}, fixtureOfferedTools())
 	if len(lifted.ToolCalls) != 1 {
 		t.Fatalf("expected exactly 1 lifted tool call, got %d (%+v)", len(lifted.ToolCalls), lifted.ToolCalls)
 	}
@@ -372,7 +372,7 @@ internal/agent/main.go
 
 	for _, mc := range malformedCases {
 		t.Run(mc.name, func(t *testing.T) {
-			m := LiftTextToolCalls(Message{Role: RoleAssistant, Content: mc.content})
+			m := LiftTextToolCalls(Message{Role: RoleAssistant, Content: mc.content}, fixtureOfferedTools())
 			if len(m.ToolCalls) != 0 {
 				t.Fatalf("malformed tool call must not be lifted (fail-closed); got %d calls: %+v", len(m.ToolCalls), m.ToolCalls)
 			}

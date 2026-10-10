@@ -11,11 +11,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,10 +39,13 @@ type scriptedLiveResponsesPlanner struct {
 
 	returnedAt time.Time // captured when CompleteStream is about to return
 
-	sawFragments []string
+	sawFragments                 []string
+	optsMu                       sync.Mutex
+	streamParams, bufferedParams []agent.SampleParams
 }
 
-func (p *scriptedLiveResponsesPlanner) Complete(_ context.Context, _ []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+func (p *scriptedLiveResponsesPlanner) Complete(_ context.Context, _ []agent.Message, _ []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	p.captureParams(false, opts)
 	return p.comp, nil
 }
 
@@ -55,7 +61,8 @@ func (p *scriptedLiveResponsesPlanner) ResponsesWireStreamsLive(agent.Provider, 
 	return p.gateAllows
 }
 
-func (p *scriptedLiveResponsesPlanner) CompleteStream(_ context.Context, sink agent.StreamSink, _ []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+func (p *scriptedLiveResponsesPlanner) CompleteStream(_ context.Context, sink agent.StreamSink, _ []agent.Message, _ []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	p.captureParams(true, opts)
 	defer func() { p.returnedAt = time.Now() }()
 	for i, frag := range p.fragments {
 		p.sawFragments = append(p.sawFragments, frag)
@@ -67,6 +74,35 @@ func (p *scriptedLiveResponsesPlanner) CompleteStream(_ context.Context, sink ag
 		}
 	}
 	return p.comp, nil
+}
+
+func (p *scriptedLiveResponsesPlanner) captureParams(stream bool, opts []agent.SampleOpt) {
+	var params agent.SampleParams
+	for _, opt := range opts {
+		opt(&params)
+	}
+	p.optsMu.Lock()
+	defer p.optsMu.Unlock()
+	if stream {
+		p.streamParams = append(p.streamParams, params)
+	} else {
+		p.bufferedParams = append(p.bufferedParams, params)
+	}
+}
+
+func (p *scriptedLiveResponsesPlanner) assertPerTokenRoute(t *testing.T, stream bool) {
+	t.Helper()
+	p.optsMu.Lock()
+	defer p.optsMu.Unlock()
+	if stream {
+		if len(p.streamParams) != 1 || len(p.bufferedParams) != 0 || p.streamParams[0].PerTokenStream == nil || !*p.streamParams[0].PerTokenStream {
+			t.Fatalf("live sampling missing per-token override: stream=%+v buffered=%+v", p.streamParams, p.bufferedParams)
+		}
+	} else {
+		if len(p.streamParams) != 0 || len(p.bufferedParams) != 1 || p.bufferedParams[0].PerTokenStream != nil {
+			t.Fatalf("buffered sampling changed: stream=%+v buffered=%+v", p.streamParams, p.bufferedParams)
+		}
+	}
 }
 
 // timedSSEEvent is one parsed Responses SSE frame with its client-side arrival time.
@@ -110,6 +146,8 @@ func readTimedResponsesStream(t *testing.T, base, body string) ([]timedSSEEvent,
 	return events, resp
 }
 
+// Estimate only; this test has not been timed.
+// fak-test:runtime medium est=1s lane=default
 func TestResponsesLiveStreamsDeltasBeforeUpstreamEOF(t *testing.T) {
 	srv := newTestServer(t)
 	planner := &scriptedLiveResponsesPlanner{
@@ -127,6 +165,7 @@ func TestResponsesLiveStreamsDeltasBeforeUpstreamEOF(t *testing.T) {
 	defer ts.Close()
 
 	events, _ := readTimedResponsesStream(t, ts.URL, `{"model":"test-model","input":"hi","stream":true}`)
+	planner.assertPerTokenRoute(t, true)
 
 	var names []string
 	for _, ev := range events {
@@ -236,6 +275,8 @@ func TestResponsesLiveStreamsDeltasBeforeUpstreamEOF(t *testing.T) {
 	}
 }
 
+// Estimate only; this test has not been timed.
+// fak-test:runtime medium est=1s lane=default
 func TestResponsesLiveFallsBackWhenUpstreamCannotStream(t *testing.T) {
 	comp := &agent.Completion{
 		Message:      agent.Message{Role: agent.RoleAssistant, Content: "Hello"},
@@ -246,7 +287,8 @@ func TestResponsesLiveFallsBackWhenUpstreamCannotStream(t *testing.T) {
 	// REFUSES the Responses live arm — streamResponsesLive must return false having
 	// written nothing, and the request must fall through to writeResponsesStream.
 	fallback := newTestServer(t)
-	fallback.planner = &scriptedLiveResponsesPlanner{supports: true, gateAllows: false, comp: comp}
+	fallbackPlanner := &scriptedLiveResponsesPlanner{supports: true, gateAllows: false, comp: comp}
+	fallback.planner = fallbackPlanner
 	fallbackTS := httptest.NewServer(fallback.Handler())
 	defer fallbackTS.Close()
 
@@ -259,6 +301,7 @@ func TestResponsesLiveFallsBackWhenUpstreamCannotStream(t *testing.T) {
 
 	const body = `{"model":"test-model","input":"hi","stream":true}`
 	fallbackEvents, _ := readTimedResponsesStream(t, fallbackTS.URL, body)
+	fallbackPlanner.assertPerTokenRoute(t, false)
 	controlEvents, _ := readTimedResponsesStream(t, controlTS.URL, body)
 
 	render := func(t *testing.T, events []timedSSEEvent) string {
@@ -335,4 +378,420 @@ func findResponsesLiveItem(items []responsesOutputItem, typ string) (responsesOu
 		}
 	}
 	return responsesOutputItem{}, false
+}
+
+// Estimate only; this test has not been timed.
+// fak-test:runtime medium est=1s lane=default
+func TestResponsesBufferedLeavesPerTokenOverrideAbsent(t *testing.T) {
+	srv := newTestServer(t)
+	planner := &scriptedLiveResponsesPlanner{
+		supports: true, gateAllows: true,
+		comp: &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "Hello"}, FinishReason: "stop"},
+	}
+	srv.planner = planner
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	resp, err := http.Post(ts.URL+"/v1/responses", "application/json", strings.NewReader(`{"model":"test-model","input":"hi","stream":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var result responsesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || result.Status != "completed" || result.OutputText != "Hello" {
+		t.Fatalf("buffered response status=%d result=%+v", resp.StatusCode, result)
+	}
+	planner.assertPerTokenRoute(t, false)
+}
+
+// No embedded ResponseRecorder: promoted WriteString would bypass Write faults.
+type responsesFailWriter struct {
+	header                          http.Header
+	status, writes, flushes, failAt int
+	short                           bool
+	cause                           error
+	body                            strings.Builder
+}
+
+func (w *responsesFailWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+func (w *responsesFailWriter) WriteHeader(status int) { w.status = status }
+func (w *responsesFailWriter) Write(p []byte) (int, error) {
+	w.writes++
+	if w.writes == w.failAt {
+		if w.short {
+			return len(p) - 1, nil
+		}
+		return 0, w.cause
+	}
+	return w.body.Write(p)
+}
+func (w *responsesFailWriter) Flush() { w.flushes++ }
+
+type responsesWriteFailurePlanner struct {
+	upstreamError                         error
+	fragments                             []string
+	content                               string
+	swallow                               bool
+	streamCalls, bufferedCalls, sinkCalls int
+	sinkError                             error
+	contextError                          error
+}
+
+func (*responsesWriteFailurePlanner) Model() string            { return "test-model" }
+func (*responsesWriteFailurePlanner) StreamingSupported() bool { return true }
+func (p *responsesWriteFailurePlanner) Complete(context.Context, []agent.Message, []agent.ToolDef, ...agent.SampleOpt) (*agent.Completion, error) {
+	p.bufferedCalls++
+	return nil, errors.New("unexpected buffered fallback")
+}
+func (p *responsesWriteFailurePlanner) CompleteStream(ctx context.Context, sink agent.StreamSink, _ []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	p.streamCalls++
+	for _, fragment := range p.fragments {
+		p.sinkCalls++
+		if err := sink(fragment); err != nil {
+			if p.sinkError == nil {
+				p.sinkError, p.contextError = err, ctx.Err()
+			}
+			if !p.swallow {
+				return nil, err
+			}
+		}
+	}
+	if p.upstreamError != nil {
+		return nil, p.upstreamError
+	}
+	return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: p.content}, FinishReason: "stop", Usage: agent.Usage{CompletionTokens: 2}}, nil
+}
+
+// fak-test:runtime fast est=20ms lane=default
+// Unmeasured estimate. Direct helper controls; no socket or native planner.
+func TestResponsesSSEHelperPropagatesWriteFailures(t *testing.T) {
+	cause := errors.New("writer failed")
+	for _, short := range []bool{false, true} {
+		for _, at := range []int{1, 2} {
+			w := &responsesFailWriter{cause: cause, failAt: at, short: short}
+			err := writeSSEEvent(w, "sample", map[string]int{"n": 1})
+			want := cause
+			if short {
+				want = io.ErrShortWrite
+			}
+			if err != want || w.writes != at || w.flushes != 0 {
+				t.Fatalf("write error lost/retried/flushed: err=%v writes=%d flushes=%d", err, w.writes, w.flushes)
+			}
+		}
+	}
+	w := &responsesFailWriter{}
+	if err := writeSSEEvent(w, "sample", map[string]int{"n": 1}); err != nil || w.body.String() != "event: sample\ndata: {\"n\":1}\n\n" || w.writes != 2 || w.flushes != 1 {
+		t.Fatalf("clean wire changed: %q err=%v", w.body.String(), err)
+	}
+	w = &responsesFailWriter{}
+	if err := writeSSEEvent(w, "sample", make(chan int)); err == nil || w.writes != 0 || w.flushes != 0 {
+		t.Fatal("marshal failure attempted output")
+	}
+}
+
+// fak-test:runtime medium est=2s lane=default
+// Unmeasured estimate. Real public handler and a live request context, scripted
+// planner, failing writer. No physical generation or latency claim.
+func TestResponsesLiveWriterFailureStopsSelectedTurn(t *testing.T) {
+	t.Setenv("FAK_EP_FANOUT_ADDRS", "")
+	for _, short := range []bool{false, true} {
+		for failAt := 0; failAt <= 14; failAt++ {
+			t.Run(fmt.Sprintf("short=%t/write=%d", short, failAt), func(t *testing.T) {
+				srv := newTestServer(t)
+				p := &responsesWriteFailurePlanner{fragments: []string{"Hel", "lo"}, content: "Hello"}
+				srv.planner = p
+				cause := errors.New("client write failed")
+				w := &responsesFailWriter{cause: cause, failAt: failAt, short: short}
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"test-model","input":"hi","stream":true}`)).WithContext(ctx)
+				req.Header.Set("Content-Type", "application/json")
+				srv.Handler().ServeHTTP(w, req)
+				if ctx.Err() != nil || p.streamCalls != 1 || p.bufferedCalls != 0 {
+					t.Fatalf("wrong selection or canceled request: stream=%d buffered=%d ctx=%v", p.streamCalls, p.bufferedCalls, ctx.Err())
+				}
+				wantWrites := failAt
+				if failAt == 0 {
+					wantWrites = 14
+				}
+				if w.writes != wantWrites {
+					t.Fatalf("writer retried or frame count changed: got=%d want=%d body=%s", w.writes, wantWrites, w.body.String())
+				}
+				if failAt > 0 && failAt <= 8 {
+					want := cause
+					if short {
+						want = io.ErrShortWrite
+					}
+					wantCalls := 1
+					if failAt > 6 {
+						wantCalls = 2
+					}
+					if p.sinkError != want || p.contextError != nil || p.sinkCalls != wantCalls {
+						t.Fatalf("sink cause/early abort lost: err=%v ctx=%v calls=%d", p.sinkError, p.contextError, p.sinkCalls)
+					}
+				} else if p.sinkError != nil {
+					t.Fatalf("tail failure misreported as planner sink failure: %v", p.sinkError)
+				}
+				store := srv.responsesContinuationState()
+				store.mu.Lock()
+				saved := len(store.entries)
+				store.mu.Unlock()
+				wantSaved := 0
+				if failAt == 0 || failAt >= 13 {
+					wantSaved = 1
+				}
+				if saved != wantSaved {
+					t.Fatalf("persist-before-completed contract: saved=%d want=%d", saved, wantSaved)
+				}
+				if failAt == 0 && (!strings.Contains(w.body.String(), "response.completed") || strings.Contains(w.body.String(), "response.failed")) {
+					t.Fatal("clean success changed")
+				}
+			})
+		}
+	}
+}
+
+// fak-test:runtime medium est=1s lane=default
+// Unmeasured estimate. Broken planner and post-generation content controls.
+func TestResponsesWriterFailureCannotBecomeSuccess(t *testing.T) {
+	t.Setenv("FAK_EP_FANOUT_ADDRS", "")
+	for _, tc := range []struct {
+		name      string
+		fragments []string
+		swallow   bool
+		failAt    int
+	}{
+		{"planner-swallows", []string{"Hel", "lo"}, true, 1},
+		{"final-remainder", []string{"Hel"}, false, 7},
+		{"empty-callback-final-start", nil, false, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServer(t)
+			p := &responsesWriteFailurePlanner{fragments: tc.fragments, content: "Hello", swallow: tc.swallow}
+			srv.planner = p
+			cause := errors.New("client write failed")
+			w := &responsesFailWriter{cause: cause, failAt: tc.failAt}
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"test-model","input":"hi","stream":true}`))
+			req.Header.Set("Content-Type", "application/json")
+			srv.Handler().ServeHTTP(w, req)
+			store := srv.responsesContinuationState()
+			store.mu.Lock()
+			saved := len(store.entries)
+			store.mu.Unlock()
+			if w.writes != tc.failAt || p.streamCalls != 1 || p.bufferedCalls != 0 || saved != 0 || strings.Contains(w.body.String(), "response.completed") {
+				t.Fatalf("failure became success/retry: writes=%d calls=%d/%d saved=%d", w.writes, p.streamCalls, p.bufferedCalls, saved)
+			}
+			if tc.swallow && p.sinkError != cause {
+				t.Fatal("swallowed sink error identity lost")
+			}
+		})
+	}
+}
+
+// fak-test:runtime medium est=1s lane=default
+// Unmeasured estimate. Upstream failure keeps its existing best-effort error tail.
+func TestResponsesUpstreamFailureTailDoesNotRetryWriter(t *testing.T) {
+	t.Setenv("FAK_EP_FANOUT_ADDRS", "")
+	for _, failAt := range []int{0, 7, 8} {
+		t.Run(fmt.Sprint(failAt), func(t *testing.T) {
+			srv := newTestServer(t)
+			upstream := errors.New("original upstream failure")
+			p := &responsesWriteFailurePlanner{fragments: []string{"Hel"}, upstreamError: upstream}
+			srv.planner = p
+			w := &responsesFailWriter{cause: errors.New("terminal writer failure"), failAt: failAt}
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"test-model","input":"hi","stream":true}`))
+			req.Header.Set("Content-Type", "application/json")
+			srv.Handler().ServeHTTP(w, req)
+			want := failAt
+			if want == 0 {
+				want = 8
+			}
+			store := srv.responsesContinuationState()
+			store.mu.Lock()
+			saved := len(store.entries)
+			store.mu.Unlock()
+			if w.writes != want || p.streamCalls != 1 || p.bufferedCalls != 0 || p.sinkError != nil || saved != 0 || strings.Contains(w.body.String(), "response.completed") {
+				t.Fatalf("terminal failure retried or completed: writes=%d sink=%v saved=%d", w.writes, p.sinkError, saved)
+			}
+			if failAt == 0 && !strings.Contains(w.body.String(), "response.failed") {
+				t.Fatal("clean upstream-error terminal missing")
+			}
+		})
+	}
+}
+
+// responsesStartWriter snapshots headers at the first physical write, not from
+// the mutable Header map after the handler returns. It also injects start faults.
+type responsesStartWriter struct {
+	recorder       *httptest.ResponseRecorder
+	firstHeader    http.Header
+	writes, failAt int
+	cause          error
+}
+
+func (w *responsesStartWriter) Header() http.Header    { return w.recorder.Header() }
+func (w *responsesStartWriter) WriteHeader(status int) { w.recorder.WriteHeader(status) }
+func (w *responsesStartWriter) Write(b []byte) (int, error) {
+	if w.writes == 0 {
+		w.firstHeader = w.Header().Clone()
+	}
+	w.writes++
+	if w.writes == w.failAt {
+		return 0, w.cause
+	}
+	return w.recorder.Write(b)
+}
+func (w *responsesStartWriter) Flush() { w.recorder.Flush() }
+
+// fak-test:runtime medium est=1s lane=default
+// Unmeasured estimate. Actual handler with admitted tools; no native planner.
+func TestResponsesLiveCreatedPrecedesToolOnlyItems(t *testing.T) {
+	t.Setenv("FAK_EP_FANOUT_ADDRS", "")
+	for _, tc := range []struct {
+		name, content string
+		tools         bool
+	}{
+		{"tool-only", "", true}, {"mixed", "Hello", true}, {"prose", "Hello", false}, {"empty", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServer(t)
+			comp := &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: tc.content}, FinishReason: "stop", Usage: agent.Usage{PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5}}
+			if tc.tools {
+				comp.Message.ToolCalls = []agent.ToolCall{
+					{ID: "call_a", Type: "function", Function: agent.Func{Name: "allow_a", Arguments: `{"x":1}`}},
+					{ID: "call_b", Type: "function", Function: agent.Func{Name: "allow_b", Arguments: `{"x":2}`}},
+				}
+				comp.FinishReason = "tool_calls"
+			}
+			p := &scriptedLiveResponsesPlanner{supports: true, gateAllows: true, comp: comp}
+			if tc.content != "" {
+				p.fragments = []string{tc.content}
+			}
+			srv.planner = p
+			w := &responsesStartWriter{recorder: httptest.NewRecorder()}
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"test-model","input":"hi","stream":true,"tools":[{"type":"function","name":"allow_a"},{"type":"function","name":"allow_b"}]}`))
+			req.Header.Set("Content-Type", "application/json")
+			srv.Handler().ServeHTTP(w, req)
+			p.assertPerTokenRoute(t, true)
+			if w.firstHeader.Get("Content-Type") != "text/event-stream" || w.firstHeader.Get("Cache-Control") != "no-cache" || w.firstHeader.Get("X-Accel-Buffering") != "no" {
+				t.Fatalf("first write headers=%v", w.firstHeader)
+			}
+			if w.recorder.Result().Header.Get("Content-Type") != "text/event-stream" {
+				t.Fatal("committed response lost SSE headers")
+			}
+			var names []string
+			var final responsesResponse
+			toolAdded, toolDone, argsDone := 0, 0, 0
+			for _, frame := range strings.Split(w.recorder.Body.String(), "\n\n") {
+				if strings.TrimSpace(frame) == "" {
+					continue
+				}
+				lines := strings.Split(frame, "\n")
+				if len(lines) != 2 || !strings.HasPrefix(lines[0], "event: ") || !strings.HasPrefix(lines[1], "data: ") {
+					t.Fatalf("malformed frame=%q", frame)
+				}
+				name := strings.TrimPrefix(lines[0], "event: ")
+				var ev struct {
+					Type      string              `json:"type"`
+					Sequence  int                 `json:"sequence_number"`
+					Index     int                 `json:"output_index"`
+					Item      responsesOutputItem `json:"item"`
+					Response  responsesResponse   `json:"response"`
+					CallID    string              `json:"call_id"`
+					Arguments string              `json:"arguments"`
+				}
+				if err := json.Unmarshal([]byte(strings.TrimPrefix(lines[1], "data: ")), &ev); err != nil {
+					t.Fatal(err)
+				}
+				if ev.Type != name || ev.Sequence != len(names) {
+					t.Fatalf("event=%s type=%s seq=%d want=%d", name, ev.Type, ev.Sequence, len(names))
+				}
+				names = append(names, name)
+				if name == "response.created" && (len(names) != 1 || ev.Response.Status != "in_progress" || len(ev.Response.Output) != 0) {
+					t.Fatal("created was late or already populated")
+				}
+				if ev.Item.Type == "function_call" {
+					base := 0
+					if tc.content != "" {
+						base = 1
+					}
+					ordinal := toolAdded
+					if name == "response.output_item.done" {
+						ordinal = toolDone
+					}
+					if ev.Index != base+ordinal || ev.Item.CallID != fmt.Sprintf("call_%c", 'a'+ordinal) || ev.Item.Arguments != fmt.Sprintf(`{"x":%d}`, ordinal+1) {
+						t.Fatalf("tool item/index changed: %+v", ev)
+					}
+					if name == "response.output_item.added" {
+						toolAdded++
+					}
+					if name == "response.output_item.done" {
+						toolDone++
+					}
+				}
+				if name == "response.function_call_arguments.done" {
+					if ev.CallID != fmt.Sprintf("call_%c", 'a'+argsDone) || ev.Arguments != fmt.Sprintf(`{"x":%d}`, argsDone+1) {
+						t.Fatalf("arguments changed: %+v", ev)
+					}
+					argsDone++
+				}
+				if name == "response.completed" {
+					final = ev.Response
+				}
+			}
+			if len(names) < 2 || names[0] != "response.created" || names[len(names)-1] != "response.completed" {
+				t.Fatalf("event order=%v", names)
+			}
+			wantTools := 0
+			if tc.tools {
+				wantTools = 2
+			}
+			wantItems := wantTools
+			if tc.content != "" {
+				wantItems++
+			}
+			if toolAdded != wantTools || toolDone != wantTools || argsDone != wantTools || len(final.Output) != wantItems || final.OutputText != tc.content || final.Usage.TotalTokens != 5 {
+				t.Fatalf("tools=%d/%d/%d final=%+v", toolAdded, toolDone, argsDone, final)
+			}
+			store := srv.responsesContinuationState()
+			store.mu.Lock()
+			saved := len(store.entries)
+			store.mu.Unlock()
+			if saved != 1 {
+				t.Fatalf("saved=%d", saved)
+			}
+		})
+	}
+}
+
+// fak-test:runtime medium est=1s lane=default
+// Unmeasured estimate. Failure of either created-frame write cannot reveal tools.
+func TestResponsesToolOnlyCreatedFailureDoesNotPublish(t *testing.T) {
+	t.Setenv("FAK_EP_FANOUT_ADDRS", "")
+	for _, failAt := range []int{1, 2} {
+		t.Run(fmt.Sprint(failAt), func(t *testing.T) {
+			srv := newTestServer(t)
+			p := &scriptedLiveResponsesPlanner{supports: true, gateAllows: true, comp: &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, ToolCalls: []agent.ToolCall{{ID: "call_a", Type: "function", Function: agent.Func{Name: "allow_a", Arguments: `{"x":1}`}}}}, FinishReason: "tool_calls"}}
+			srv.planner = p
+			w := &responsesStartWriter{recorder: httptest.NewRecorder(), failAt: failAt, cause: errors.New("created write failed")}
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"test-model","input":"hi","stream":true,"tools":[{"type":"function","name":"allow_a"}]}`))
+			req.Header.Set("Content-Type", "application/json")
+			srv.Handler().ServeHTTP(w, req)
+			p.assertPerTokenRoute(t, true)
+			store := srv.responsesContinuationState()
+			store.mu.Lock()
+			saved := len(store.entries)
+			store.mu.Unlock()
+			if w.writes != failAt || saved != 0 || strings.Contains(w.recorder.Body.String(), "response.output_item") || strings.Contains(w.recorder.Body.String(), "response.completed") || w.firstHeader.Get("Content-Type") != "text/event-stream" {
+				t.Fatalf("writes=%d saved=%d body=%s", w.writes, saved, w.recorder.Body.String())
+			}
+		})
+	}
 }

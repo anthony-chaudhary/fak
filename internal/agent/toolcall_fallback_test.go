@@ -1,7 +1,10 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,7 +15,7 @@ func TestLiftTextToolCalls_Hermes(t *testing.T) {
 		Role:    RoleAssistant,
 		Content: `Let me look. <tool_call>{"name": "Bash", "arguments": {"command": "ls"}}</tool_call>`,
 	}
-	got := LiftTextToolCalls(m)
+	got := LiftTextToolCalls(m, fixtureOfferedTools())
 	if len(got.ToolCalls) != 1 {
 		t.Fatalf("want 1 lifted tool call, got %d (content=%q)", len(got.ToolCalls), got.Content)
 	}
@@ -34,7 +37,7 @@ func TestLiftTextToolCalls_Multiple(t *testing.T) {
 		Content: `<tool_call>{"name":"Read","arguments":{"path":"a"}}</tool_call>` +
 			`<tool_call>{"name":"Read","arguments":{"path":"b"}}</tool_call>`,
 	}
-	got := LiftTextToolCalls(m)
+	got := LiftTextToolCalls(m, fixtureOfferedTools())
 	if len(got.ToolCalls) != 2 {
 		t.Fatalf("want 2 lifted calls, got %d", len(got.ToolCalls))
 	}
@@ -48,7 +51,7 @@ func TestLiftTextToolCalls_StringifiedArgs(t *testing.T) {
 		Role:    RoleAssistant,
 		Content: `<tool_call>{"name":"Bash","arguments":"{\"command\":\"pwd\"}"}</tool_call>`,
 	}
-	got := LiftTextToolCalls(m)
+	got := LiftTextToolCalls(m, fixtureOfferedTools())
 	if len(got.ToolCalls) != 1 {
 		t.Fatalf("want 1 call, got %d", len(got.ToolCalls))
 	}
@@ -62,7 +65,7 @@ func TestLiftTextToolCalls_OpenAIStyleFunctionPayload(t *testing.T) {
 		Role:    RoleAssistant,
 		Content: `<tool_call>{"type":"function","function":{"name":"Bash","arguments":{"command":"pwd"}}}</tool_call>`,
 	}
-	got := LiftTextToolCalls(m)
+	got := LiftTextToolCalls(m, fixtureOfferedTools())
 	if len(got.ToolCalls) != 1 {
 		t.Fatalf("want 1 call, got %d", len(got.ToolCalls))
 	}
@@ -79,7 +82,7 @@ func TestLiftTextToolCalls_NoStructuredClobber(t *testing.T) {
 		Content:   `<tool_call>{"name":"X","arguments":{}}</tool_call>`,
 		ToolCalls: []ToolCall{{ID: "call_0", Type: "function", Function: Func{Name: "real"}}},
 	}
-	got := LiftTextToolCalls(m)
+	got := LiftTextToolCalls(m, fixtureOfferedTools())
 	if len(got.ToolCalls) != 1 || got.ToolCalls[0].Function.Name != "real" {
 		t.Errorf("structured calls were clobbered: %+v", got.ToolCalls)
 	}
@@ -91,7 +94,7 @@ func TestLiftTextToolCalls_PreservesMalformedBlocksWhenLiftingOthers(t *testing.
 		Content: `before <tool_call>{"name":"Read","arguments":{"path":"ok"}}</tool_call>` +
 			` middle <tool_call>{not json}</tool_call> after`,
 	}
-	got := LiftTextToolCalls(m)
+	got := LiftTextToolCalls(m, fixtureOfferedTools())
 	if len(got.ToolCalls) != 1 {
 		t.Fatalf("want 1 lifted call, got %d", len(got.ToolCalls))
 	}
@@ -107,7 +110,7 @@ func TestLiftTextToolCalls_Malformed(t *testing.T) {
 		`<tool_call>{"arguments":{"x":1}}</tool_call>`,
 		`plain answer, no tool call here`,
 	} {
-		got := LiftTextToolCalls(Message{Role: RoleAssistant, Content: c})
+		got := LiftTextToolCalls(Message{Role: RoleAssistant, Content: c}, fixtureOfferedTools())
 		if len(got.ToolCalls) != 0 {
 			t.Errorf("content %q wrongly lifted %d calls", c, len(got.ToolCalls))
 		}
@@ -171,7 +174,7 @@ func TestLiftTextToolCalls_Dialects(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := LiftTextToolCalls(Message{Role: RoleAssistant, Content: c.content})
+			got := LiftTextToolCalls(Message{Role: RoleAssistant, Content: c.content}, fixtureOfferedTools())
 			if len(got.ToolCalls) != 1 {
 				t.Fatalf("want 1 lifted call, got %d (content=%q)", len(got.ToolCalls), got.Content)
 			}
@@ -196,7 +199,7 @@ func TestLiftTextToolCalls_MistralMultiCall(t *testing.T) {
 		Role:    RoleAssistant,
 		Content: `[TOOL_CALLS][{"name":"Read","arguments":{"path":"a"}},{"name":"Read","arguments":{"path":"b"}}]`,
 	}
-	got := LiftTextToolCalls(m)
+	got := LiftTextToolCalls(m, fixtureOfferedTools())
 	if len(got.ToolCalls) != 2 {
 		t.Fatalf("want 2 lifted calls, got %d", len(got.ToolCalls))
 	}
@@ -216,7 +219,7 @@ func TestLiftTextToolCalls_DialectPrecedence(t *testing.T) {
 		Role:    RoleAssistant,
 		Content: `<tool_call>{"name":"Bash","arguments":{"command":"ls"}}</tool_call>`,
 	}
-	got := LiftTextToolCalls(m)
+	got := LiftTextToolCalls(m, fixtureOfferedTools())
 	if len(got.ToolCalls) != 1 {
 		t.Fatalf("want exactly 1 lifted call (no dialect double-count), got %d", len(got.ToolCalls))
 	}
@@ -227,7 +230,7 @@ func TestLiftTextToolCalls_DialectPrecedence(t *testing.T) {
 // tool call, and must be left in the content untouched (no fabricated call).
 func TestLiftTextToolCalls_FencedNonCallLeftAlone(t *testing.T) {
 	content := "Here is the config:\n```json\n{\"port\":8080,\"host\":\"localhost\"}\n```"
-	got := LiftTextToolCalls(Message{Role: RoleAssistant, Content: content})
+	got := LiftTextToolCalls(Message{Role: RoleAssistant, Content: content}, fixtureOfferedTools())
 	if len(got.ToolCalls) != 0 {
 		t.Fatalf("nameless fenced JSON wrongly lifted %d calls", len(got.ToolCalls))
 	}
@@ -241,7 +244,7 @@ func TestLiftTextToolCalls_FencedNonCallLeftAlone(t *testing.T) {
 // — bare-JSON fires only when the whole trimmed message is the call object.
 func TestLiftTextToolCalls_BareJSONOnlyWholeContent(t *testing.T) {
 	content := `You could call it like {"name":"Bash","arguments":{"command":"ls"}} if you wanted.`
-	got := LiftTextToolCalls(Message{Role: RoleAssistant, Content: content})
+	got := LiftTextToolCalls(Message{Role: RoleAssistant, Content: content}, fixtureOfferedTools())
 	if len(got.ToolCalls) != 0 {
 		t.Fatalf("bare JSON embedded in prose wrongly lifted %d calls", len(got.ToolCalls))
 	}
@@ -259,7 +262,7 @@ func TestLiftTextToolCalls_NewDialectsRespectStructuredClobber(t *testing.T) {
 		Content:   `[TOOL_CALLS][{"name":"X","arguments":{}}]`,
 		ToolCalls: []ToolCall{{ID: "call_0", Type: "function", Function: Func{Name: "real"}}},
 	}
-	got := LiftTextToolCalls(m)
+	got := LiftTextToolCalls(m, fixtureOfferedTools())
 	if len(got.ToolCalls) != 1 || got.ToolCalls[0].Function.Name != "real" {
 		t.Errorf("structured calls were clobbered by a new dialect: %+v", got.ToolCalls)
 	}
@@ -273,7 +276,7 @@ func TestNormalizeCompletionToolCallsMintsUsableIDsAndTypes(t *testing.T) {
 			{ID: "given", Type: "function", Function: Func{Name: "c", Arguments: `{}`}},
 		}},
 		FinishReason: "stop",
-	})
+	}, fixtureOfferedTools())
 	if comp.FinishReason != "tool_calls" {
 		t.Fatalf("finish_reason = %q, want tool_calls", comp.FinishReason)
 	}
@@ -319,7 +322,7 @@ func TestLiftTextToolCalls_BareQwenFunctionParameterDialect(t *testing.T) {
 <parameter=command>
 echo "fak-10600-tool-ok"
 </parameter>
-</function>`})
+</function>`}, fixtureOfferedTools())
 	if len(m.ToolCalls) != 1 {
 		t.Fatalf("tool calls = %d, want 1; content=%q", len(m.ToolCalls), m.Content)
 	}
@@ -339,7 +342,7 @@ echo "fak-10600-tool-ok"
 // the block — the block span is stripped, the prose survives, and typed parameter values
 // (a JSON number here) keep their parsed form.
 func TestLiftTextToolCalls_BareQwenFunctionWithProse(t *testing.T) {
-	m := LiftTextToolCalls(Message{Role: RoleAssistant, Content: "Let me check.\n<function=Read>\n<parameter=path>\ngo.mod\n</parameter>\n<parameter=line>\n10\n</parameter>\n</function>\nDone."})
+	m := LiftTextToolCalls(Message{Role: RoleAssistant, Content: "Let me check.\n<function=Read>\n<parameter=path>\ngo.mod\n</parameter>\n<parameter=line>\n10\n</parameter>\n</function>\nDone."}, fixtureOfferedTools())
 	if len(m.ToolCalls) != 1 {
 		t.Fatalf("tool calls = %d, want 1; content=%q", len(m.ToolCalls), m.Content)
 	}
@@ -359,7 +362,7 @@ func TestLiftTextToolCalls_BareQwenFunctionWithProse(t *testing.T) {
 // (no </function>) must not fabricate a call — conservative posture, content preserved.
 func TestLiftTextToolCalls_MalformedBareQwenFunctionNotLifted(t *testing.T) {
 	content := "<function=bash>\n<parameter=command>\necho truncated"
-	m := LiftTextToolCalls(Message{Role: RoleAssistant, Content: content})
+	m := LiftTextToolCalls(Message{Role: RoleAssistant, Content: content}, fixtureOfferedTools())
 	if len(m.ToolCalls) != 0 {
 		t.Fatalf("truncated bare antl block wrongly lifted %d calls", len(m.ToolCalls))
 	}
@@ -412,7 +415,7 @@ func TestFencedToolExampleDoesNotDispatch(t *testing.T) {
 				},
 				FinishReason: "stop",
 			}
-			got := normalizeCompletionToolCalls(comp)
+			got := normalizeCompletionToolCalls(comp, fixtureOfferedTools())
 			if len(got.Message.ToolCalls) != 0 {
 				t.Fatalf("expected 0 tool calls (no dispatch), got %d: %+v", len(got.Message.ToolCalls), got.Message.ToolCalls)
 			}
@@ -434,7 +437,7 @@ func TestFencedToolExampleDoesNotDispatch(t *testing.T) {
 			},
 			FinishReason: "stop",
 		}
-		got := normalizeCompletionToolCalls(comp)
+		got := normalizeCompletionToolCalls(comp, fixtureOfferedTools())
 		if len(got.Message.ToolCalls) != 1 {
 			t.Fatalf("expected 1 tool call, got %d", len(got.Message.ToolCalls))
 		}
@@ -457,7 +460,7 @@ func TestFencedToolExampleDoesNotDispatch(t *testing.T) {
 			},
 			FinishReason: "stop",
 		}
-		got := normalizeCompletionToolCalls(comp)
+		got := normalizeCompletionToolCalls(comp, fixtureOfferedTools())
 		if len(got.Message.ToolCalls) != 1 {
 			t.Fatalf("expected 1 tool call, got %d", len(got.Message.ToolCalls))
 		}
@@ -480,7 +483,7 @@ func TestFencedToolExampleDoesNotDispatch(t *testing.T) {
 			},
 			FinishReason: "stop",
 		}
-		got := normalizeCompletionToolCalls(comp)
+		got := normalizeCompletionToolCalls(comp, fixtureOfferedTools())
 		if len(got.Message.ToolCalls) != 1 {
 			t.Fatalf("expected 1 tool call, got %d", len(got.Message.ToolCalls))
 		}
@@ -504,7 +507,7 @@ func TestFencedToolExampleDoesNotDispatch(t *testing.T) {
 			},
 			FinishReason: "stop",
 		}
-		got := normalizeCompletionToolCalls(comp)
+		got := normalizeCompletionToolCalls(comp, fixtureOfferedTools())
 		if len(got.Message.ToolCalls) != 0 {
 			t.Fatalf("expected 0 tool calls (suppressed), got %d: %+v", len(got.Message.ToolCalls), got.Message.ToolCalls)
 		}
@@ -525,7 +528,7 @@ func TestFencedToolExampleDoesNotDispatch(t *testing.T) {
 			},
 			FinishReason: "stop",
 		}
-		got := normalizeCompletionToolCalls(comp)
+		got := normalizeCompletionToolCalls(comp, fixtureOfferedTools())
 		if len(got.Message.ToolCalls) != 0 {
 			t.Fatalf("expected 0 tool calls (suppressed), got %d: %+v", len(got.Message.ToolCalls), got.Message.ToolCalls)
 		}
@@ -546,7 +549,7 @@ func TestFencedToolExampleDoesNotDispatch(t *testing.T) {
 			},
 			FinishReason: "stop",
 		}
-		got := normalizeCompletionToolCalls(comp)
+		got := normalizeCompletionToolCalls(comp, fixtureOfferedTools())
 		if len(got.Message.ToolCalls) != 0 {
 			t.Fatalf("expected 0 tool calls (suppressed), got %d: %+v", len(got.Message.ToolCalls), got.Message.ToolCalls)
 		}
@@ -567,7 +570,7 @@ func TestFencedToolExampleDoesNotDispatch(t *testing.T) {
 			},
 			FinishReason: "stop",
 		}
-		got := normalizeCompletionToolCalls(comp)
+		got := normalizeCompletionToolCalls(comp, fixtureOfferedTools())
 		if len(got.Message.ToolCalls) != 0 {
 			t.Fatalf("expected 0 tool calls (suppressed), got %d: %+v", len(got.Message.ToolCalls), got.Message.ToolCalls)
 		}
@@ -587,7 +590,7 @@ func TestFencedToolExampleDoesNotDispatch(t *testing.T) {
 			},
 			FinishReason: "stop",
 		}
-		got := normalizeCompletionToolCalls(comp)
+		got := normalizeCompletionToolCalls(comp, fixtureOfferedTools())
 		if len(got.Message.ToolCalls) != 1 {
 			t.Fatalf("expected 1 tool call, got %d", len(got.Message.ToolCalls))
 		}
@@ -610,7 +613,7 @@ func TestFencedToolExampleDoesNotDispatch(t *testing.T) {
 			},
 			FinishReason: "stop",
 		}
-		got := normalizeCompletionToolCalls(comp)
+		got := normalizeCompletionToolCalls(comp, fixtureOfferedTools())
 		if len(got.Message.ToolCalls) != 1 {
 			t.Fatalf("expected 1 tool call, got %d", len(got.Message.ToolCalls))
 		}
@@ -676,7 +679,7 @@ func TestLiftTextToolCalls_ExampleSuppression(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := LiftTextToolCalls(Message{Role: RoleAssistant, Content: tc.content})
+			m := LiftTextToolCalls(Message{Role: RoleAssistant, Content: tc.content}, fixtureOfferedTools())
 			if len(m.ToolCalls) != tc.wantCalls {
 				t.Fatalf("got %d tool calls, want %d", len(m.ToolCalls), tc.wantCalls)
 			}
@@ -722,7 +725,7 @@ func TestParseQwenFunctionToolCallParameterForms(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := LiftTextToolCalls(Message{Role: RoleAssistant, Content: tc.content})
+			got := LiftTextToolCalls(Message{Role: RoleAssistant, Content: tc.content}, fixtureOfferedTools())
 			if tc.wantArgs == nil {
 				for _, call := range got.ToolCalls {
 					if call.Function.Arguments == "{}" {
@@ -759,5 +762,69 @@ func TestParseQwenFunctionToolCallParameterForms(t *testing.T) {
 				t.Fatalf("lifted call remained in content: %q", got.Content)
 			}
 		})
+	}
+}
+
+// fixtureOfferedTools declares the names exercised by the historical dialect
+// fixtures. New offered-set tests construct their own deliberately narrow set.
+func fixtureOfferedTools() OfferedTools {
+	return offeredTestNames("Bash", "Read", "Write", "X", "bash", "get_weather", "inspect_file", "lookup", "ls", "person", "probe", "record_metric", "record_probe", "search", "sentinel", "status_report", "book", "x")
+}
+func offeredTestNames(names ...string) OfferedTools {
+	tools := make([]ToolDef, len(names))
+	for i, name := range names {
+		tools[i] = ToolDef{Type: "function", Function: ToolDefFunction{Name: name}}
+	}
+	return NewOfferedTools(tools)
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestLiftTextToolCallsOfferedBoundary(t *testing.T) {
+	read := offeredTestNames("Read")
+	for _, content := range []string{
+		` {"name":"Bash","arguments":{}} `,
+		`<tool_call>{"name":"Bash","arguments":{}}</tool_call>`,
+		`<function_call>{"name":"Bash","arguments":{}}</function_call>`,
+		`<|python_tag|>{"name":"Bash","arguments":{}}`,
+		`[TOOL_CALLS][{"name":"Bash","arguments":{}},{"name":"Read","arguments":{}}]`,
+		"```json\n[{\"name\":\"Read\"},{\"name\":\"Bash\"}]\n```",
+		`[{"name":"Read"},{"name":"Bash"}]`,
+		`<tool_call><function=Bash><parameter=command>ls</parameter></function></tool_call>`,
+		`<function=Bash><parameter=command>ls</parameter></function>`,
+	} {
+		for _, offered := range []OfferedTools{{}, read} {
+			got := LiftTextToolCalls(Message{Content: content}, offered)
+			if got.Content != content || len(got.ToolCalls) != 0 {
+				t.Fatalf("preserved %q became %+v", content, got)
+			}
+		}
+	}
+	unknown := `<tool_call><function=Bash><parameter=command>ls</parameter></function></tool_call>`
+	content := `<tool_call>{"name":"Read","arguments":{}}</tool_call>` + unknown
+	got := LiftTextToolCalls(Message{Content: content}, read)
+	if len(got.ToolCalls) != 1 || got.ToolCalls[0].Function.Name != "Read" || got.Content != unknown {
+		t.Fatalf("mixed blocks: %+v", got)
+	}
+	comp := normalizeCompletionToolCalls(&Completion{Message: Message{Content: unknown}, FinishReason: "tool_calls"}, read)
+	if !comp.ToolCallsDropped || comp.ToolCallsDroppedReason != abi.ReasonUnknownTool || comp.Message.Content != unknown {
+		t.Fatalf("unknown refusal: %+v", comp)
+	}
+	structured := Message{Content: unknown, ToolCalls: []ToolCall{{Function: Func{Name: "Bash"}}}}
+	if !reflect.DeepEqual(LiftTextToolCalls(structured, read), structured) {
+		t.Fatal("structured call changed")
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestOfferedToolsSnapshotAndEmptyExtension(t *testing.T) {
+	tools := []ToolDef{{Function: ToolDefFunction{Name: "Read"}}}
+	ctx := WithTextToolExtension(context.Background(), func(name string) bool { return name == "restore" })
+	offered := offeredToolsFor(ctx, tools)
+	tools[0].Function.Name = "Bash"
+	if !offered.allows("Read") || offered.allows("Bash") || !offered.allows("restore") {
+		t.Fatal("offered snapshot changed")
+	}
+	if offeredToolsFor(ctx, nil).allows("restore") {
+		t.Fatal("inherited extension widened empty request")
 	}
 }

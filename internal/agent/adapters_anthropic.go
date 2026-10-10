@@ -367,7 +367,7 @@ func (anthropicAdapter) ParseResponse(raw []byte) (*Completion, error) {
 		RedactedThinking:  redacted,
 	}
 	separateMessageReasoning(&msg)
-	return normalizeCompletionToolCalls(&Completion{
+	return normalizeCompletionFields(&Completion{
 		Message:      msg,
 		FinishReason: finish,
 		Model:        ar.Model,

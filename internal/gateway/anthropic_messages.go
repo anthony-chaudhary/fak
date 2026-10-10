@@ -101,8 +101,8 @@ func TranslateToQwenChatML(messages []agent.Message) []agent.Message {
 // (both Hermes JSON format and Qwen XML <function=...><parameter=...> format).
 // It converts any detected tool calls into structured ToolCalls with "toolu_" IDs,
 // and strips the <tool_call> tags from the content text so only natural language prose remains.
-func ParseQwenToolCalls(content string) (string, []agent.ToolCall) {
-	msg := agent.LiftTextToolCalls(agent.Message{Role: agent.RoleAssistant, Content: content})
+func ParseQwenToolCalls(content string, offered agent.OfferedTools) (string, []agent.ToolCall) {
+	msg := agent.LiftTextToolCalls(agent.Message{Role: agent.RoleAssistant, Content: content}, offered)
 	prose := strings.TrimSpace(msg.Content)
 	calls := make([]agent.ToolCall, len(msg.ToolCalls))
 	for i, tc := range msg.ToolCalls {

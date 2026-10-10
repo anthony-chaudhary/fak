@@ -238,7 +238,7 @@ func TestBonsaiReasoningSplitConformance(t *testing.T) {
 func TestBonsaiToolCallLiftConformance(t *testing.T) {
 	// Lift: text-form <tool_call> -> structured ToolCalls, content stripped.
 	emitted := "<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Paris\"}}\n</tool_call>"
-	lifted := LiftTextToolCalls(Message{Role: RoleAssistant, Content: emitted})
+	lifted := LiftTextToolCalls(Message{Role: RoleAssistant, Content: emitted}, fixtureOfferedTools())
 	if len(lifted.ToolCalls) != 1 {
 		t.Fatalf("want exactly one lifted tool call, got %d (%+v)", len(lifted.ToolCalls), lifted.ToolCalls)
 	}

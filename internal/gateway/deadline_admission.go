@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -29,9 +31,91 @@ import (
 //
 // Observation measures prefill throughput over uncached tokens only. Admission
 // can discount tokens when the caller supplies current resident-prefix evidence.
-// The chat entrypoint has no such evidence, so it estimates the full prompt cold:
-// a previous request's history or successful return does not prove that its KV
-// state is still resident and compatible with the selected execution route.
+// Direct native execution supplies evidence only after acquiring request-owned
+// state. Other routes estimate the full prompt cold: a previous request's history
+// or successful return does not prove current compatible residency.
+
+type deadlineAdmissionError struct {
+	verdict deadlineadmit.Verdict
+}
+
+func (e *deadlineAdmissionError) Error() string {
+	return "deadline admission: " + string(e.verdict.Reason)
+}
+
+// bindClientDeadline covers routing and request preparation even before an
+// estimator exists. WithDeadline preserves an earlier incoming context deadline.
+func bindClientDeadline(r *http.Request, arrived time.Time) (*http.Request, context.CancelFunc) {
+	budget, has := deadlineadmit.Budget(r.Header)
+	if !has {
+		return r, func() {}
+	}
+	ctx, cancel := context.WithDeadline(r.Context(), arrived.Add(budget))
+	return r.WithContext(ctx), cancel
+}
+
+// admitRoutedClientDeadline postpones only a qualified direct native verdict.
+// The final prompt and owned cache state are known at execution, after all
+// gateway rewrites. No structural lookup or historical cache observation earns
+// credit. Wrappers, providers, and configured speculative routes stay cold.
+func (s *Server) admitRoutedClientDeadline(w http.ResponseWriter, r *http.Request, arrived time.Time, messages []agent.Message, maxTokens int) (*http.Request, func(), bool) {
+	planner, native := s.chatPlanner(r.Context()).(*agent.InKernelPlanner)
+	_, hasBudget := deadlineadmit.Budget(r.Header)
+	if !native || !hasBudget || !planner.ExecutionDeadlineAdmissionSupported() {
+		return s.admitClientDeadlineMessages(w, r, arrived, messages, maxTokens)
+	}
+	est := s.metrics.deadlineEstimator()
+	if est == nil {
+		return r, func() {}, true
+	}
+	var mu sync.Mutex
+	var end func()
+	released := false
+	requestContext := r.Context()
+	check := func(ctx context.Context, prompt, cached, output int) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if released {
+			return context.Canceled
+		}
+		if err := ctx.Err(); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		// A first-token watchdog owns a shorter child context. Its timeout
+		// remains an upstream stall, not exhaustion of the client's deadline.
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) && !errors.Is(requestContext.Err(), context.DeadlineExceeded) {
+			return context.DeadlineExceeded
+		}
+		deadline, bound := ctx.Deadline()
+		if !bound {
+			return context.DeadlineExceeded
+		}
+		// Re-evaluate every attempt, including OOM retries, with time spent in
+		// cloning/restoring/setup already consumed. After Begin, retry estimates
+		// conservatively include this request in the existing in-flight count.
+		v := est.AdmitCached(prompt, cached, output, time.Until(deadline), true)
+		if !v.Admit {
+			s.logf("gateway: deadline admission refused: reason=%s estimate=%s remaining=%s in_flight=%d prompt_tokens=%d predicted_cached=%d credit_source=execution-owned-prefix",
+				v.Reason, v.Estimate, v.Remaining, est.InFlight(), prompt, cached)
+			return &deadlineAdmissionError{verdict: v}
+		}
+		if end == nil {
+			end = est.Begin()
+		}
+		return nil
+	}
+	release := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if !released {
+			released = true
+			if end != nil {
+				end()
+			}
+		}
+	}
+	return r.WithContext(planner.WithExecutionDeadlineAdmission(r.Context(), check)), release, true
+}
 
 // deadlineEstimator returns the node-wide estimator, creating it on first use
 // so a directly constructed gatewayMetrics works too.

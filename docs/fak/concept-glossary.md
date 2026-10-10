@@ -895,3 +895,17 @@ Owns BF16 query and key-value publication before and after the full V4.1 forward
 Owns full V4.1 BF16 sparse-attention output staging before inverse F32 tail rotary arithmetic and BF16 publication to grouped output projection.
 
 **Distinct from:** Unlike v41AttentionQKRoPE, this owner operates on attention output after sparse attention and applies inverse rotation before output projection.
+
+
+### ExecutionDeadlineAdmissionSupported
+
+Reports whether the normal request-owned prefix acquisition route can perform deadline admission using usable cached-prefix credit; speculative routes remain cold-admitted.
+
+**Distinct from:** KVPrefixReuseSupported concerns whether a KV cache contains complete reusable session state; this predicate concerns whether this planner route has the owned-prefix execution boundary required to grant deadline credit.
+
+
+### inKernelDeviceGate
+
+Owns the planner-owned single native forward slot shared by ordinary requests and decode cohorts, supporting cancellation-aware waiters without detached lock-acquisition goroutines.
+
+**Distinct from:** ExecutionDeadlineAdmissionSupported identifies deadline-credit capability at a prefix boundary; this gate controls exclusive concurrent access to the device forward slot and does not estimate deadline feasibility.
