@@ -174,8 +174,8 @@ func TestRunPiUsesSelectedModelWindowEverywhere(t *testing.T) {
 			if settings.Compaction.ReserveTokens != want.ReserveTokens || settings.Compaction.KeepRecentTokens != want.KeepRecentTokens {
 				t.Errorf("compaction = %+v, want reserve=%d keep=%d", settings.Compaction, want.ReserveTokens, want.KeepRecentTokens)
 			}
-			if tc.wantWindow == 65536 && (settings.Compaction.ReserveTokens != 12288 || settings.Compaction.KeepRecentTokens != 4096) {
-				t.Errorf("64KiB regression: compaction = %+v, want reserve=12288 keep=4096", settings.Compaction)
+			if tc.wantWindow == 65536 && (settings.Compaction.ReserveTokens != 12288 || settings.Compaction.KeepRecentTokens != 15360) {
+				t.Errorf("64KiB regression: compaction = %+v, want reserve=12288 keep=15360", settings.Compaction)
 			}
 
 			originalRun := piLaunchRun
