@@ -16514,6 +16514,16 @@
           "category": "incidental",
           "reason": "local (path, mtime) candidate record shared by the codex-loop discovery helpers; not a new concept surface (#10405 dedup)",
           "token": "codexLoopSessionFile"
+        },
+        {
+          "category": "incidental",
+          "reason": "agentbench receipt JSON key: a trial emitted >=3 identical consecutive tool calls; a benchmark metric, not the agent loop concept",
+          "token": "repeat_loop"
+        },
+        {
+          "category": "incidental",
+          "reason": "agentbench receipt JSON key: fraction of measured trials flagged looping; a benchmark metric, not the agent loop concept",
+          "token": "loop_rate"
         }
       ],
       "id": "loop",
@@ -16576,6 +16586,7 @@
         "loopStateSummary",
         "loopStateTerminal",
         "loopStateUnknown",
+        "loop_rate",
         "loop_region",
         "loopconsumes",
         "loopdoneunwitnessed",
@@ -16599,6 +16610,7 @@
         "readSessionRows",
         "recordloop",
         "register_scout_loop",
+        "repeat_loop",
         "residualDriveDecision",
         "runSuperloopFleet",
         "runSuperloopTrigger",

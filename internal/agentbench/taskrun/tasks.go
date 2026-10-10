@@ -25,6 +25,9 @@ const (
 	maxTaskTurns = 12
 	maxTaskTime  = 5 * time.Minute
 	maxChildOut  = 64 << 10
+	// maxChildReceipt bounds the child receipt file. The receipt embeds every
+	// planner turn, so it travels by file rather than the bounded stdout.
+	maxChildReceipt = 64 << 20
 )
 
 type Options struct {
@@ -35,7 +38,10 @@ type Options struct {
 	Concurrency    int
 	IncludeHeldout bool
 	TaskLimit      int
-	modelMeter     *modelConcurrencyMeter
+	// Suite names the fixture set (taskfixture.Suite); empty selects the default.
+	Suite      string
+	Sampling   Sampling
+	modelMeter *modelConcurrencyMeter
 }
 
 // Receipt records only witnessed task outcomes. ObservedModelRequestConcurrency
@@ -48,6 +54,9 @@ type Receipt struct {
 	ObservedModelRequestConcurrency *int          `json:"observed_model_request_concurrency,omitempty"`
 	ConcurrencyQualified            bool          `json:"concurrency_qualified"`
 	IncludeHeldout                  bool          `json:"include_heldout"`
+	Suite                           string        `json:"suite"`
+	SamplingRequested               *Sampling     `json:"sampling_requested,omitempty"`
+	Aggregate                       TrialSummary  `json:"aggregate"`
 	StartedAt                       time.Time     `json:"started_at"`
 	Duration                        time.Duration `json:"duration"`
 	Tasks                           []TaskReceipt `json:"tasks"`
@@ -71,6 +80,7 @@ type TaskReceipt struct {
 	Controls       ControlReceipt    `json:"controls"`
 	Prehistory     PrehistoryReceipt `json:"prehistory,omitempty"`
 	Model          ModelObservation  `json:"model_observation"`
+	ToolCalls      ToolCallMetrics   `json:"tool_call_metrics"`
 }
 
 type ControlReceipt struct {
@@ -81,13 +91,15 @@ type ControlReceipt struct {
 }
 
 type childConfig struct {
-	TaskID      string `json:"task_id"`
-	Prompt      string `json:"prompt"`
-	TrialRoot   string `json:"trial_root"`
-	Endpoint    string `json:"endpoint,omitempty"`
-	Model       string `json:"model,omitempty"`
-	TestCommand string `json:"test_command,omitempty"`
-	VisibleTest string `json:"visible_test,omitempty"`
+	TaskID      string   `json:"task_id"`
+	Prompt      string   `json:"prompt"`
+	TrialRoot   string   `json:"trial_root"`
+	Endpoint    string   `json:"endpoint,omitempty"`
+	Model       string   `json:"model,omitempty"`
+	TestCommand string   `json:"test_command,omitempty"`
+	VisibleTest string   `json:"visible_test,omitempty"`
+	Sampling    Sampling `json:"sampling,omitempty"`
+	ReceiptPath string   `json:"receipt_path,omitempty"`
 }
 
 type testChildConfig struct {
@@ -113,7 +125,18 @@ func runControlledTests(ctx context.Context, candidate, target, visible, oracle 
 
 func Run(ctx context.Context, opts Options) (Receipt, error) {
 	started := time.Now()
-	r := Receipt{Schema: "fak.agentbench.taskrun.v1", Endpoint: opts.Endpoint, Model: opts.Model, ConfiguredConcurrency: opts.Concurrency, IncludeHeldout: opts.IncludeHeldout, StartedAt: started}
+	suite := strings.TrimSpace(opts.Suite)
+	if suite == "" {
+		suite = taskfixture.SuiteDefault
+	}
+	r := Receipt{Schema: "fak.agentbench.taskrun.v1", Endpoint: opts.Endpoint, Model: opts.Model, ConfiguredConcurrency: opts.Concurrency, IncludeHeldout: opts.IncludeHeldout, Suite: suite, StartedAt: started}
+	if !opts.Sampling.empty() {
+		sampling := opts.Sampling
+		r.SamplingRequested = &sampling
+	}
+	if err := opts.Sampling.Validate(); err != nil {
+		return r, err
+	}
 	if strings.TrimSpace(opts.Executable) == "" || strings.TrimSpace(opts.Endpoint) == "" || strings.TrimSpace(opts.Model) == "" || strings.TrimSpace(opts.OutDir) == "" {
 		return r, errors.New("taskrun: executable, endpoint, model, and out dir are required")
 	}
@@ -138,7 +161,10 @@ func Run(ctx context.Context, opts Options) (Receipt, error) {
 	if err := os.Chmod(opts.OutDir, 0700); err != nil {
 		return r, err
 	}
-	cases := taskfixture.Cases(opts.IncludeHeldout)
+	cases, err := taskfixture.Suite(suite, opts.IncludeHeldout)
+	if err != nil {
+		return r, err
+	}
 	if opts.TaskLimit < 0 {
 		return r, errors.New("taskrun: task limit must not be negative")
 	}
@@ -176,6 +202,7 @@ func Run(ctx context.Context, opts Options) (Receipt, error) {
 		r.ObservedModelRequestConcurrency = &peak
 		r.ConcurrencyQualified = true
 	}
+	r.Aggregate = SummarizeTrials(r.Tasks)
 	r.Duration = time.Since(started)
 	if err := writeJSON(filepath.Join(opts.OutDir, "receipt.json"), r); err != nil {
 		return r, err
@@ -268,7 +295,8 @@ func runOne(parent context.Context, opts Options, f taskfixture.Fixture) (tr Tas
 	}
 	testCommand := strings.Join([]string{opts.Executable, "bench", "agent", "test-child", "--config", testCfgPath}, " ")
 	childCfgPath := filepath.Join(taskDir, "child-config.json")
-	if err := writeJSON(childCfgPath, childConfig{TaskID: f.ID, Prompt: f.Prompt, TrialRoot: trial, Endpoint: observer.Endpoint(), Model: opts.Model, TestCommand: testCommand, VisibleTest: f.VisibleTest}); err != nil {
+	receiptPath := filepath.Join(taskDir, "child.json")
+	if err := writeJSON(childCfgPath, childConfig{TaskID: f.ID, Prompt: f.Prompt, TrialRoot: trial, Endpoint: observer.Endpoint(), Model: opts.Model, TestCommand: testCommand, VisibleTest: f.VisibleTest, Sampling: opts.Sampling, ReceiptPath: receiptPath}); err != nil {
 		tr.Model, _ = observer.Close()
 		tr.Error = err.Error()
 		return tr
@@ -276,15 +304,13 @@ func runOne(parent context.Context, opts Options, f taskfixture.Fixture) (tr Tas
 	out, exit, err := runProcess(ctx, opts.Executable, "bench", "agent", "task-child", "--config", childCfgPath)
 	observation, observerErr := observer.Close()
 	tr.Model = observation
-	_ = os.WriteFile(filepath.Join(taskDir, "child.json"), out, 0600)
-	var cr ChildReceipt
-	if decodeErr := json.NewDecoder(bytes.NewReader(out)).Decode(&cr); decodeErr != nil {
+	_ = os.WriteFile(filepath.Join(taskDir, "child-output.log"), out, 0600)
+	cr, decodeErr := readChildReceipt(receiptPath)
+	if decodeErr != nil {
 		tr.Error = "decode child receipt: " + decodeErr.Error()
-		if len(out) >= maxChildOut {
-			tr.Error += fmt.Sprintf(" (child output truncated at the %d-byte cap)", maxChildOut)
-		}
 		return tr
 	}
+	tr.ToolCalls = cr.ToolCalls
 	tr.PlannerCalls, tr.Inspected, tr.Edited, tr.TestSucceeded, tr.DeniedAttempts = cr.PlannerCalls, cr.Inspected, cr.Edited, cr.TestSucceeded, cr.DeniedAttempts
 	if observerErr != nil {
 		tr.Error = "model observer: " + observerErr.Error()
@@ -334,6 +360,16 @@ func runOne(parent context.Context, opts Options, f taskfixture.Fixture) (tr Tas
 	}
 	tr.Artifact = filepath.Join(taskDir, "task.json")
 	return tr
+}
+
+func readChildReceipt(path string) (ChildReceipt, error) {
+	var cr ChildReceipt
+	raw, err := readRegularBounded(path, maxChildReceipt)
+	if err != nil {
+		return cr, err
+	}
+	err = json.Unmarshal(raw, &cr)
+	return cr, err
 }
 
 func seedFixture(root string, f taskfixture.Fixture, source string, includeOracle bool) error {
