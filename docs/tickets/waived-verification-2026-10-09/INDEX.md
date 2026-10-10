@@ -14,5 +14,6 @@ On 2026-10-09, 68 public commits landed under an operator deferred-verification 
 | TICKET-07 | FP8 tiled-to-Q8 loader | red |
 | TICKET-08 | V4.1 compressed-window composition + session fallback | red |
 | TICKET-09 | V4.1 sparse-sink host contract | red |
+| TICKET-10 | V4.1 absent mHC mix refusal names geometry, not the missing tensor (#13790) | red |
 
 Each ticket is closed by fail-before/pass-after tests landed on trunk that cite the covered commit shas.
