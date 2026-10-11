@@ -827,37 +827,39 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
         return allocBuffer(bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, STORAGE_USAGE);
     }
 
-    uint32_t memoryType = g_umaDirectWeights ? findDirectWeightMemType(req.memoryTypeBits) : UINT32_MAX;
-    if (memoryType == UINT32_MAX) memoryType = findMemType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (memoryType == UINT32_MAX) {
-        vkDestroyBuffer(g_dev, b->buf, nullptr);
-        delete b;
-        return nullptr;
-    }
+    const uint32_t preferredType = g_umaDirectWeights ? findDirectWeightMemType(req.memoryTypeBits) : UINT32_MAX;
     if (maxArenaBytes == 0) maxArenaBytes = g_totalDeviceLocalMemory;
     if (maxArenaBytes == 0) maxArenaBytes = g_maxMemoryAllocationSize;
     if (maxArenaBytes == 0) maxArenaBytes = WEIGHT_ARENA_BLOCK_BYTES;
 
-    for (size_t i = 0; i < g_weightArena.size(); ++i) {
-        WeightArenaBlock& block = g_weightArena[i];
-        if (block.memoryTypeIndex != memoryType) continue;
-        VkDeviceSize offset = alignArenaOffset(block.used, req.alignment);
-        if (offset == std::numeric_limits<VkDeviceSize>::max() ||
-            offset > block.capacity || req.size > block.capacity - offset) continue;
-        VkResult br = vkBindBufferMemory(g_dev, b->buf, block.mem, offset);
-        if (br != VK_SUCCESS) continue;
-        block.used = offset + req.size;
-        ++block.liveBuffers;
-        b->mem = block.mem;
-        b->props = g_memprops.memoryTypes[memoryType].propertyFlags;
-        b->memoryTypeIndex = block.memoryTypeIndex;
-        b->memoryOffset = offset;
-        b->mapped = block.mapped ? (char*)block.mapped + offset : nullptr;
-        b->weightArenaBound = true;
-        b->weightArenaBlock = i;
-        ++g_weightArenaBufferBindings;
-        g_weightArenaLiveBytes += bytes;
-        return b;
+    // Prefer existing UMA backing, then reuse any compatible actual backing.
+    const uint32_t memoryTypeCount = std::min(g_memprops.memoryTypeCount, uint32_t(32));
+    for (int pass = 0; pass < 2; ++pass) {
+        for (size_t i = 0; i < g_weightArena.size(); ++i) {
+            WeightArenaBlock& block = g_weightArena[i];
+            const uint32_t memoryType = block.memoryTypeIndex;
+            if (memoryType >= memoryTypeCount ||
+                !(req.memoryTypeBits & (uint32_t(1) << memoryType)) ||
+                !(g_memprops.memoryTypes[memoryType].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) continue;
+            if ((memoryType == preferredType) != (pass == 0)) continue;
+            VkDeviceSize offset = alignArenaOffset(block.used, req.alignment);
+            if (offset == std::numeric_limits<VkDeviceSize>::max() ||
+                offset > block.capacity || req.size > block.capacity - offset) continue;
+            VkResult br = vkBindBufferMemory(g_dev, b->buf, block.mem, offset);
+            if (br != VK_SUCCESS) continue;
+            block.used = offset + req.size;
+            ++block.liveBuffers;
+            b->mem = block.mem;
+            b->props = g_memprops.memoryTypes[memoryType].propertyFlags;
+            b->memoryTypeIndex = block.memoryTypeIndex;
+            b->memoryOffset = offset;
+            b->mapped = block.mapped ? (char*)block.mapped + offset : nullptr;
+            b->weightArenaBound = true;
+            b->weightArenaBlock = i;
+            ++g_weightArenaBufferBindings;
+            g_weightArenaLiveBytes += bytes;
+            return b;
+        }
     }
 
     if (g_weightArenaReservedBytes >= maxArenaBytes) {
@@ -878,14 +880,31 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
         return nullptr;
     }
 
-    VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    ai.allocationSize = blockBytes;
-    ai.memoryTypeIndex = memoryType;
     VkDeviceMemory memory = VK_NULL_HANDLE;
-    VkResult ar = vkAllocateMemory(g_dev, &ai, nullptr, &memory);
+    uint32_t memoryType = UINT32_MAX;
+    bool allocationAttempted = false;
+    auto tryAlloc = [&](bool tryAll) -> VkResult {
+        auto allocate = [&](uint32_t index, VkDeviceMemory* candidate) {
+            VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+            ai.allocationSize = blockBytes;
+            ai.memoryTypeIndex = index;
+            return vkAllocateMemory(g_dev, &ai, nullptr, candidate);
+        };
+        // Preserve the UMA first choice. Heap eligibility uses the entire block;
+        // retry only allocation pressure, with fresh private output per attempt.
+        const uint32_t preferredBits = preferredType < 32 ? (uint32_t(1) << preferredType) : 0;
+        if (preferredBits) {
+            VkResult result = allocateCompatibleMemory(preferredBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                g_memprops, blockBytes, false, allocate, &memory, &memoryType, &allocationAttempted);
+            if (allocationAttempted && (!tryAll || !allocPressure(result))) return result;
+        }
+        return allocateCompatibleMemory(req.memoryTypeBits & ~preferredBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            g_memprops, blockBytes, tryAll, allocate, &memory, &memoryType, &allocationAttempted);
+    };
+    VkResult ar = tryAlloc(false);
     if (allocPressure(ar)) {
         drainPool();
-        ar = vkAllocateMemory(g_dev, &ai, nullptr, &memory);
+        ar = tryAlloc(true);
     }
     if (ar != VK_SUCCESS) {
         vkDestroyBuffer(g_dev, b->buf, nullptr);
@@ -908,7 +927,9 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
     block.memoryTypeIndex = memoryType;
     block.liveBuffers = 1;
     block.allocationDeviceLocal = memoryTypeUsesDeviceLocalHeap(memoryType);
-    if (g_memprops.memoryTypes[memoryType].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
+    const VkMemoryPropertyFlags directMapProps = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    if ((g_memprops.memoryTypes[memoryType].propertyFlags & directMapProps) == directMapProps) {
+        // Direct uploads do not flush noncoherent ranges; those types use staging.
         // A failed map leaves mapped null, and uploads take the staging path.
         if (vkMapMemory(g_dev, memory, 0, VK_WHOLE_SIZE, 0, &block.mapped) != VK_SUCCESS) block.mapped = nullptr;
     }
