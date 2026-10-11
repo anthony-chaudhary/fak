@@ -211,6 +211,20 @@ const (
 // returned intermediate remains F32 until its caller applies the route weight.
 type v41ExpertGateUpFunc func(layer int, stem string, xn []float32) ([]float32, v41ExpertGateUpOutcome, error)
 
+// v41DeviceOnlyGateUp is the device-only gate/up wrapper (see
+// v41BindDeviceOnlyDeclineRefusals): an unbound or declining seam refuses typed.
+func v41DeviceOnlyGateUp(s *Session, f v41ExpertGateUpFunc) v41ExpertGateUpFunc {
+	return func(layer int, stem string, xn []float32) ([]float32, v41ExpertGateUpOutcome, error) {
+		if f != nil {
+			y, outcome, err := f(layer, stem, xn)
+			if outcome != v41GateUpDeclined {
+				return y, outcome, err
+			}
+		}
+		return nil, v41GateUpError, s.v41DeviceOnlyDeclined(layer, "routed-expert-gate-up")
+	}
+}
+
 // v41ExpertDownOutcome is the closed result vocabulary of one v41ExpertDownFunc
 // call. handled-success returns the H-wide expert output with the down projection
 // computed on the backend; declined leaves the caller on the historical host
@@ -1710,6 +1724,9 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.sharedAdd = s.v41SharedAddFunc()
 		s.v41Forward.gatherOps = s.v41DeviceGatherOpsFunc()
 		s.v41Forward.mhcDevice = s.v41MHCDeviceSeam()
+		if s.executionPolicy == ExecutionPolicyDeviceOnly {
+			s.v41BindDeviceOnlyDeclineRefusals(s.v41Forward)
+		}
 		s.v41Forward.callbackOwner = s
 	}
 	return s.v41Forward
