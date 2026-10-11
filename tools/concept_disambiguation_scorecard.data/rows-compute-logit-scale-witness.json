@@ -1,0 +1,80 @@
+{
+  "rows": [
+    {
+      "id": "logit-scale-witness-go-tag",
+      "canonical": "v41_logit_scale_witness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The explicit Go build tag selecting the experimental V4.1 scalar logit multiplication adapter and its software ABI and deferred physical tests. With the Vulkan tag it selects a separate native archive; combining it with either the indexer or BF16 witness tag is a compile-time error.",
+      "distinction": "This controls Go source and archive selection, whereas FAK_V41_LOGIT_SCALE_WITNESS controls native symbol compilation and lfakvulkan_v41_logit_scale_witness names the linker input. The tag does not qualify hardware, enable ordinary production capability or remove host-boundary blockers.",
+      "distinct_from": [
+        "logit-scale-witness-native-define",
+        "logit-scale-witness-archive-link"
+      ],
+      "aliases": [],
+      "grounding": "v41_logit_scale_witness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "logit-scale-witness-native-define",
+      "canonical": "FAK_V41_LOGIT_SCALE_WITNESS",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The native compile-time define that exposes the experimental scalar logit multiplication C declarations and builds its checked dispatch, optional FloatControls module admission and parser-test entry points into the dedicated witness archive. The Go adapter defines it for its C header declarations.",
+      "distinction": "This selects native declarations and implementation; the v41_logit_scale_witness Go tag selects the corresponding Go adapter. Its presence is an experimental build identity rather than physical qualification or a trusted production shader-registry promotion.",
+      "distinct_from": [
+        "logit-scale-witness-go-tag",
+        "logit-scale-witness-archive-link"
+      ],
+      "aliases": [],
+      "grounding": "FAK_V41_LOGIT_SCALE_WITNESS",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "logit-scale-witness-archive-link",
+      "canonical": "-lfakvulkan_v41_logit_scale_witness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The exact cgo linker-option token selecting libfakvulkan_v41_logit_scale_witness.a for the scalar witness-tagged Go build. All five Vulkan archive selectors choose this input exclusively for that tag combination, and an ordinary archive lacks the witness-only symbols.",
+      "distinction": "This names the linker input; it is separate from the Go build tag and native compile-time define. The option alone does not prove which archive bytes were linked: independently reviewed build commands and artifact hashes provide that evidence under immutable-artifact execution.",
+      "distinct_from": [
+        "logit-scale-witness-go-tag",
+        "logit-scale-witness-native-define"
+      ],
+      "aliases": [],
+      "grounding": "lfakvulkan_v41_logit_scale_witness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "logit-scale-witness-count-supported",
+      "canonical": "fvk_v41_logit_scale_count_supported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "The read-only native admission predicate for a scalar logit row. It requires the dedicated witness pipeline and its selected-device FloatControls to be available, a positive element count, and ceil(count/64) within that device's X workgroup limit. The Go adapter checks it before allocating the output because this shader has no grid-stride loop.",
+      "distinction": "This bounds one scalar dispatch shape; it does not execute multiplication, validate input elements, report checkpoint support or establish physical qualification. FAK_V41_LOGIT_SCALE_WITNESS selects native compilation, while this predicate checks the loaded pipeline and requested row length.",
+      "distinct_from": [
+        "support",
+        "logit-scale-witness-native-define"
+      ],
+      "aliases": [],
+      "grounding": "fvk_v41_logit_scale_count_supported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

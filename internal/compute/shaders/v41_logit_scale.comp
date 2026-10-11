@@ -1,0 +1,21 @@
+#version 450
+#extension GL_EXT_spirv_intrinsics : require
+
+// One binary32 multiplication per lane, preserving the host final-logit
+// scale's rounding and signed zero. No softcap, suppression, add, or reduction.
+// The witness loader must check these three selected-device properties as well
+// as the corresponding SPIR-V modes; module declarations alone are insufficient.
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4464], 4459, 32);
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4466], 4461, 32);
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4467], 4462, 32);
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer Input { float X[]; };
+layout(std430, binding = 1) writeonly buffer Output { float Y[]; };
+layout(push_constant) uniform Push { uint count; float scale; } pc;
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= pc.count) return;
+    precise float value = X[i] * pc.scale;
+    Y[i] = value;
+}

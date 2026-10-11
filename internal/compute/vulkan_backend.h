@@ -406,6 +406,17 @@ int fvk_v41_bf16_boundary_f32(const void *dInput, void *dOut, int count);
 int fvk_v41_bf16_boundary_module_abi(const void *data, size_t bytes);
 #endif
 
+/* Experimental exact binary32 scalar multiply. Finite input and factor are
+ * the caller precondition, including signed zeros/subnormals; finite overflow
+ * to infinity is allowed. Fresh disjoint F32 [count], two buffers/8B push.
+ * Ordinary archives omit these symbols and never load this witness module. */
+#ifdef FAK_V41_LOGIT_SCALE_WITNESS
+int fvk_have_v41_logit_scale(void);
+int fvk_v41_logit_scale_count_supported(int count);
+int fvk_v41_logit_scale_f32(const void *dInput, void *dOut, int count, float scale);
+int fvk_v41_logit_scale_module_abi(const void *data, size_t bytes);
+#endif
+
 /* SwiGLU: y = silu(g) * u, elementwise, length n. */
 void fvk_swiglu_f32(const void *dG, const void *dU, void *dY, int n);
 void fvk_swiglu_limit_f32(const void *dG, const void *dU, void *dY, int n, float limit);

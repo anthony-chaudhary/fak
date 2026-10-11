@@ -108,6 +108,9 @@ func (r *vulkanSuccessorRegistry) validateSuccess(receipt *ComputeBuildReceipt) 
 		if strings.Contains(command, "FAK_V41_BF16_BOUNDARY_WITNESS") || strings.Contains(command, "v41_bf16_boundary_witness") {
 			return fmt.Errorf("Vulkan %s rejects the test-only BF16 boundary witness build profile", r.version)
 		}
+		if strings.Contains(command, "FAK_V41_LOGIT_SCALE_WITNESS") || strings.Contains(command, "v41_logit_scale_witness") {
+			return fmt.Errorf("Vulkan %s rejects the test-only logit scale witness build profile", r.version)
+		}
 	}
 	commandSHA, err := hashJSON(p.NormalizedBuildCommand)
 	if err != nil || commandSHA != p.BuildCommandSHA256 {
