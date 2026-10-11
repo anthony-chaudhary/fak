@@ -166,7 +166,22 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 		}
 	}
 	streams := [][]float32{x, make([]float32, H), make([]float32, H), make([]float32, H)}
-	if full {
+	var resident *v41MHCResident
+	if full && st.mhcDevice.resident() {
+		// The panel is authoritative; streams stays a shape placeholder.
+		if resident, err = st.mhcDevice.newResident([][]float32{x}); err != nil {
+			return nil, stats, err
+		}
+		defer resident.free()
+		zero, zerr := resident.streamZero()
+		if zerr != nil {
+			return nil, stats, zerr
+		}
+		copy(x, zero[0])
+		scratch.mhcCarry = newV41MHCCarry(1)
+		scratch.mhcCarry.device = st.mhcDevice
+		scratch.mhcCarry.resident = resident
+	} else if full {
 		streams, err = v41FullInitialStreamsOn(st.mhcDevice, x)
 		if err != nil {
 			return nil, stats, err
@@ -312,8 +327,22 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 						fmt.Errorf("%w: Engram current row identifiers do not cover layer %d", ErrV41NativeUnsupported, l))
 				}
 				opened := m.v41NowNanos()
-				rows, injectionErr := m.v41EngramInjectPrepared(l, [][]float32{x}, [][][]float32{streams}, engramFull, 1,
+				engramStreams := [][][]float32{streams}
+				if resident != nil {
+					// No Engram device op yet: read the panel back around this layer.
+					host, readErr := resident.hostStreams(l)
+					if readErr != nil {
+						rollback()
+						return nil, stats, readErr
+					}
+					copy(x, host[0][0])
+					engramStreams = host
+				}
+				rows, injectionErr := m.v41EngramInjectPrepared(l, [][]float32{x}, engramStreams, engramFull, 1,
 					engramRows[base:base+geometry.cols], float32(cfg.RMSNormEps), geometry)
+				if injectionErr == nil && resident != nil {
+					injectionErr = resident.setHostStreams(l, engramStreams)
+				}
 				injections := 0
 				if injectionErr == nil {
 					injections = 1
@@ -349,7 +378,14 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	// fault (truncate/restore, no clone).
 	headInput := x
 	if full {
-		headInput, err = v41MHCPreBF16On(scratch.mhcCarry.device, cfg.NumLayers-1, streams, scratch.mhcCarry.pre[0])
+		if resident != nil {
+			var rows [][]float32
+			if rows, err = resident.hiddenRows(cfg.NumLayers - 1); err == nil {
+				headInput = rows[0]
+			}
+		} else {
+			headInput, err = v41MHCPreBF16On(scratch.mhcCarry.device, cfg.NumLayers-1, streams, scratch.mhcCarry.pre[0])
+		}
 		if err != nil {
 			rollback()
 			return nil, stats, err

@@ -153,6 +153,9 @@ type v41MHCCarry struct {
 	nextLayer int
 	// device is the forward's selected mHC seam; nil keeps the host reference.
 	device *v41MHCDevice
+	// resident is the device-resident stream panel when device is resident;
+	// the host stream slices are then placeholders, never authoritative.
+	resident *v41MHCResident
 }
 
 func newV41MHCCarry(rows int) *v41MHCCarry {

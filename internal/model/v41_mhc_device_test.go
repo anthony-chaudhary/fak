@@ -43,7 +43,8 @@ func (b *v41MHCTestBackend) UploadClass(x compute.Tensor, dt compute.Dtype, clas
 }
 
 func (b *v41MHCTestBackend) operand(t compute.Tensor, shape ...int) []float32 {
-	if t.Backend() != b || t.Dtype != compute.F32 || !reflect.DeepEqual(t.Shape, shape) {
+	// Projection outputs come from the embedded cpu-ref MatMul.
+	if (t.Backend() != b && t.Backend() != b.Backend) || t.Dtype != compute.F32 || !reflect.DeepEqual(t.Shape, shape) {
 		panic(&compute.BackendError{Backend: "cpu-ref-mhc", Class: compute.VulkanClassInvalidGeometry, Err: compute.ErrVulkanInvalidGeometry, Message: "invalid mHC operand"})
 	}
 	return b.Backend.Read(t)
@@ -85,6 +86,29 @@ func (b *v41MHCTestBackend) V41MHCSplit(mixes, scale, base compute.Tensor, rows,
 		out = append(append(append(out, mix.pre...), mix.post...), mix.comb...)
 	}
 	return b.publish("split", []int{rows, 24}, out)
+}
+
+func (b *v41MHCTestBackend) V41MHCRMSSplit(raw, streams, params compute.Tensor, rows, hidden, iters int, eps, rmsEps float32) (compute.Tensor, error) {
+	m, s, p := b.operand(raw, rows, 24), b.operand(streams, rows, 4, hidden), b.operand(params, 27)
+	width := 4 * hidden
+	out := make([]float32, 0, rows*24)
+	for r := 0; r < rows; r++ {
+		var ss float32
+		for _, v := range s[r*width : (r+1)*width] {
+			ss += float32(v * v)
+		}
+		rsqrt := float32(1 / math.Sqrt(float64(ss/float32(width)+rmsEps)))
+		scaled := make([]float32, 24)
+		for i := range scaled {
+			scaled[i] = float32(m[r*24+i] * rsqrt)
+		}
+		mix, err := v41MHCSplit(scaled, p[:3], p[3:], 4, iters, eps)
+		if err != nil {
+			panic(err)
+		}
+		out = append(append(append(out, mix.pre...), mix.post...), mix.comb...)
+	}
+	return b.publish("rms-split", []int{rows, 24}, out)
 }
 
 func (b *v41MHCTestBackend) V41MHCPre(streams, coeffs compute.Tensor, rows, hidden int) (compute.Tensor, error) {
@@ -174,9 +198,10 @@ func TestV41MHCDeviceSeamRoutesEveryFullOp(t *testing.T) {
 				t.Fatal("device mHC prefill logits differ from the host mHC reference")
 			}
 			v41GroupedParity(t, gotPrefill, lastLogits(m.Forward([]int{1, 2})), 1e-4)
-			// Two prompt rows: per layer two splits and two post-mixes per row,
-			// and attention, FFN and hidden pre-collapses per row.
-			want := map[string]int{"initial": 2, "split": 4 * L, "pre": 6 * L, "post": 4 * L}
+			// One resident panel for both prompt rows: per layer one attention and
+			// one FFN projection split, two post-mixes, and attention, FFN and
+			// hidden pre-collapses, each covering every row in one dispatch.
+			want := map[string]int{"initial": 1, "rms-split": 2 * L, "pre": 3 * L, "post": 2 * L}
 			if !reflect.DeepEqual(device.calls, want) || len(host.calls) != 0 {
 				t.Fatalf("prefill mHC dispatches=%v host=%v want=%v", device.calls, host.calls, want)
 			}
@@ -188,7 +213,7 @@ func TestV41MHCDeviceSeamRoutesEveryFullOp(t *testing.T) {
 				t.Fatal("device mHC step logits differ from the host mHC reference")
 			}
 			// One incremental row: the head's final collapse adds one pre.
-			want = map[string]int{"initial": 3, "split": 6 * L, "pre": 8*L + 1, "post": 6 * L}
+			want = map[string]int{"initial": 2, "rms-split": 4 * L, "pre": 5*L + 1, "post": 4 * L}
 			if !reflect.DeepEqual(device.calls, want) || len(device.outputs) != 0 {
 				t.Fatalf("step mHC dispatches=%v live outputs=%d want=%v", device.calls, len(device.outputs), want)
 			}
@@ -198,7 +223,7 @@ func TestV41MHCDeviceSeamRoutesEveryFullOp(t *testing.T) {
 
 // fak-test:runtime medium est=5s lane=default
 func TestV41MHCDeviceFailureClosesSessionWithoutHostReplay(t *testing.T) {
-	for _, op := range []string{"initial", "split", "pre", "post"} {
+	for _, op := range []string{"initial", "rms-split", "pre", "post"} {
 		t.Run(op, func(t *testing.T) {
 			m := v41FullStepPatchedNorms(t)
 			b := newV41MHCTestBackend(true)
@@ -302,5 +327,36 @@ func TestV41ForwardStateBindsExpertSumAndRouterSeams(t *testing.T) {
 	defer host.Close()
 	if st := host.v41State(); st.routedSum != nil || st.sharedAdd != nil || st.routerTopK != nil {
 		t.Fatal("host session bound a device expert seam")
+	}
+}
+
+// fak-test:runtime medium est=10s lane=default
+func TestV41MHCResidentPanelCarriesEngramLayers(t *testing.T) {
+	for _, compressed := range []bool{false, true} {
+		m, _ := v41IncrementalEngramFixture(t, compressed)
+		oracle, _ := v41IncrementalEngramFixture(t, compressed)
+		if full, err := v41ForwardGeometry(m.Cfg); err != nil || !full || len(m.Cfg.DeepSeekV41.EngramLayerIDs) == 0 {
+			t.Fatalf("fixture is not a full-geometry Engram model: %v", err)
+		}
+		b := newV41MHCTestBackend(true)
+		device := v41DenseTestSession(t, m, b)
+		host := oracle.NewSession()
+		defer host.Close()
+		prefix, next := v41IncrementalPrefix(m.Cfg, 4)
+		assertV41RowsClose(t, "resident Engram prefill", device.Prefill(prefix), host.Prefill(prefix), 1e-6)
+		assertV41RowsClose(t, "resident Engram step", device.Step(next), host.Step(next), 1e-6)
+		assertV41RowsClose(t, "resident Engram suffix", device.Prefill([]int{2, 5}), host.Prefill([]int{2, 5}), 1e-6)
+		if b.calls["rms-split"] == 0 || b.calls["post"] == 0 || len(b.outputs) != 0 {
+			t.Fatalf("compressed=%t resident panel did not carry the forward: calls=%v live=%d", compressed, b.calls, len(b.outputs))
+		}
+	}
+}
+
+// fak-test:runtime fast est=1s lane=default
+func TestV41DeviceOnlyInventoryDropsResidentStreamOps(t *testing.T) {
+	for _, op := range v41DeviceOnlyHostOps {
+		if op.name == "residual-stream-carry" || op.name == "mhc-projection-rms-scale" {
+			t.Fatalf("%s runs on the resident device panel (v41MHCResident) but is still inventoried as host", op.name)
+		}
 	}
 }

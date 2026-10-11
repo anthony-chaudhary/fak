@@ -368,7 +368,24 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	// The official full graph repeats the BF16 embedding into four distinct
 	// allocations; the reduced graph retains its legacy initialization.
 	streams := make([][][]float32, len(seq))
+	var resident *v41MHCResident
+	if full && mhcDevice.resident() {
+		if resident, err = mhcDevice.newResident(x); err != nil {
+			return nil, err
+		}
+		defer resident.free()
+		zero, err := resident.streamZero()
+		if err != nil {
+			return nil, err
+		}
+		for t := range x {
+			copy(x[t], zero[t])
+		}
+	}
 	for t := range streams {
+		if resident != nil {
+			continue
+		}
 		if full {
 			streams[t], err = v41FullInitialStreamsOn(mhcDevice, x[t])
 			if err != nil {
@@ -404,6 +421,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	if full {
 		scratch.mhcCarry = newV41MHCCarry(len(seq))
 		scratch.mhcCarry.device = mhcDevice
+		scratch.mhcCarry.resident = resident
 	}
 	// #13325: resolve the optional activation-checkpoint producer ONCE per
 	// forward. Disabled (the default) it is nil and every emit is skipped, so the
@@ -414,7 +432,16 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 			return nil, err
 		}
 		hidden := flatten(x)
-		if full {
+		if resident != nil {
+			rows, err := resident.hiddenRows(l)
+			if err != nil {
+				return nil, err
+			}
+			hidden = make([]float32, 0, len(seq)*H)
+			for _, row := range rows {
+				hidden = append(hidden, row...)
+			}
+		} else if full {
 			hidden = make([]float32, 0, len(seq)*H)
 			for t := range streams {
 				row, err := v41MHCPreBF16On(scratch.mhcCarry.device, l, streams[t], scratch.mhcCarry.pre[t])
@@ -502,6 +529,14 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		}
 		mhcDevice = scratch.mhcCarry.device
 	}
+	var resident *v41MHCResident
+	if full {
+		resident = scratch.mhcCarry.resident
+	}
+	if resident != nil {
+		// A refused or failed layer never publishes its pending panel.
+		defer resident.abort()
+	}
 	scratch.denseProjection = nil
 	scratch.groupedOutput = nil
 	scratch.mhcProjection = nil
@@ -570,6 +605,24 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 				if st != nil {
 					project = st.engramProjection
 				}
+				if resident != nil {
+					// No Engram device op yet: read the panel back around this
+					// layer only (engram-stream-injection stays inventoried).
+					host, err := resident.hostStreams(l)
+					if err != nil {
+						return err
+					}
+					for t := range x {
+						copy(x[t], host[t][0])
+					}
+					if err := m.v41EngramInjectWithProjection(l, x, host, full, tokens, eps, project); err != nil {
+						return err
+					}
+					if err := resident.setHostStreams(l, host); err != nil {
+						return err
+					}
+					break
+				}
 				if err := m.v41EngramInjectWithProjection(l, x, streams, full, tokens, eps, project); err != nil {
 					return err
 				}
@@ -622,7 +675,18 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	projectMHC := m.v41MHCProjector(l, H, eps, mhcFlat, mhcTransposed, scratch)
 	hcByPos := make([]v41MHCMix, seq)
 	preByPos := make([][]float32, seq)
-	for t := 0; t < seq; t++ {
+	if resident != nil {
+		collapsedRows, err := resident.beginLayer(l, hcIters, hcEps, eps)
+		if err != nil {
+			return err
+		}
+		for t := range collapsedRows {
+			if preByPos[t], err = m.v41AttentionInputNorm(l, collapsedRows[t], eps); err != nil {
+				return err
+			}
+		}
+	}
+	for t := 0; t < seq && resident == nil; t++ {
 		// The reduced path projects the normalized input through the legacy
 		// single-stream [24, H] block; the full path projects the four DISTINCT
 		// persistent streams through the flattened 4H residual with one shared RMS.
@@ -1068,9 +1132,17 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		ffnResidual = make([][][]float32, seq)
 		ffnMixes = make([]v41MHCMix, seq)
 	}
+	var ffnCollapsed [][]float32
+	if resident != nil {
+		if ffnCollapsed, err = resident.ffnInput(l, attnOut, hcIters, hcEps, eps); err != nil {
+			return err
+		}
+	}
 	for t := 0; t < seq; t++ {
 		var xn []float32
-		if full {
+		if resident != nil {
+			xn, err = m.v41FFNNorm(l, ffnCollapsed[t], eps, scratch.ffnNorm)
+		} else if full {
 			ffnResidual[t], ffnMixes[t], xn, err = m.v41FullFFNInput(l, streams[t], hcByPos[t], attnOut[t], projectFFN, scratch)
 		} else {
 			xn, err = m.v41FFNNorm(l, x[t], eps, scratch.ffnNorm)
@@ -1222,6 +1294,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if full {
 		nextPanel = make([][][]float32, seq)
 	}
+	var moeRows [][]float32
+	if resident != nil {
+		moeRows = make([][]float32, seq)
+	}
 	for t := 0; t < seq; t++ {
 		xn := ffnInputs[t]
 		routed := routedByToken[t]
@@ -1238,7 +1314,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// from an mHC post-mix fault.
 		trace.record(l, t, v41TraceStageMoESum, moe)
 
-		if full {
+		if resident != nil {
+			moeRows[t] = moe
+		} else if full {
 			nextPanel[t], err = v41MHCPostBF16On(mhcDevice, l, moe, ffnResidual[t], ffnMixes[t])
 			if err != nil {
 				return err
@@ -1255,6 +1333,17 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			}
 			copy(x[t], next[0])
 		}
+	}
+	if resident != nil {
+		// Every token row succeeded: publish the pending panel and its carry.
+		if err := resident.finishLayer(l, moeRows); err != nil {
+			return err
+		}
+		if err := resident.publish(l); err != nil {
+			return err
+		}
+		scratch.mhcCarry.nextLayer++
+		return nil
 	}
 	if full {
 		// All token rows succeeded: stream and carry publication has no failing work.

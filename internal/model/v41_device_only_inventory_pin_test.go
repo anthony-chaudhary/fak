@@ -13,7 +13,6 @@ import (
 // so an empty inventory can never admit host compute.
 var v41DeviceOnlyPinnedHostOps = []v41HostOp{
 	{name: "engram-stream-injection", site: "Model.v41EngramInjectPrepared"},
-	{name: "mhc-projection-rms-scale", site: "Session.v41MHCProjectionFuncNamed"},
 	{name: "attention-input-norm", site: "Model.v41AttentionInputNormWithLeaf"},
 	{name: "compressor-gated-pool", site: "V41CompressorPool.PushNormalized"},
 	{name: "live-expert-shared-add", site: "Session.v4ExpertForward"},
