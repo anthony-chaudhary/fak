@@ -23,6 +23,9 @@ const (
 	// VulkanShaderRegistryV8ID identifies the exact 67-module bundle that adds the
 	// V4.1 bit-exact RMSNorm module (compressor and index-key norms) to V7/66.
 	VulkanShaderRegistryV8ID = "fak.vulkan-shader-registry.v8.current67"
+	// VulkanShaderRegistryV9ID identifies the exact 68-module ordinary bundle
+	// adding checked attention BF16 publication to the historical V8/67 set.
+	VulkanShaderRegistryV9ID = "fak.vulkan-shader-registry.v9.current68"
 )
 
 type vulkanSuccessorRegistry struct {
@@ -40,10 +43,12 @@ var (
 	vulkanRegistryV7 = &vulkanSuccessorRegistry{version: "V7", schema: VulkanBuildReceiptSchemaV7, id: VulkanShaderRegistryV7ID, count: 66, parent: vulkanRegistryV6, added: []string{"v41_router_topk", "v41_index_select", "v41_q2k_embed_gather"}}
 	vulkanRegistryV8 = &vulkanSuccessorRegistry{version: "V8", schema: VulkanBuildReceiptSchemaV8, id: VulkanShaderRegistryV8ID, count: 67, parent: vulkanRegistryV7, added: []string{"v41_exact_rmsnorm"}}
 
+	vulkanRegistryV9 = &vulkanSuccessorRegistry{version: "V9", schema: VulkanBuildReceiptSchemaV9, id: VulkanShaderRegistryV9ID, count: 68, parent: vulkanRegistryV8, added: []string{"v41_bf16_checked"}}
+
 	// vulkanSuccessorRegistries is every successor schema a receipt may name.
-	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8}
+	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9}
 	// vulkanCurrentRegistry is the registry the builder compiles and stamps.
-	vulkanCurrentRegistry = vulkanRegistryV8
+	vulkanCurrentRegistry = vulkanRegistryV9
 )
 
 func vulkanSuccessorForSchema(schema string) *vulkanSuccessorRegistry {
@@ -113,6 +118,9 @@ func CurrentVulkanShaderRegistryV7() []string { return vulkanRegistryV7.stems() 
 
 // CurrentVulkanShaderRegistryV8 returns an owned copy of the trusted V8 set.
 func CurrentVulkanShaderRegistryV8() []string { return vulkanRegistryV8.stems() }
+
+// CurrentVulkanShaderRegistryV9 returns an owned copy of the trusted V9 set.
+func CurrentVulkanShaderRegistryV9() []string { return vulkanRegistryV9.stems() }
 
 // CurrentVulkanShaderRegistryLatest returns an owned copy of the set the
 // builder compiles and stamps today.

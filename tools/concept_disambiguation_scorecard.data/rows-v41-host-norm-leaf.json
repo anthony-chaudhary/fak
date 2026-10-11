@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "v41-host-input-norm-leaf",
+      "canonical": "v41AttentionInputNormWithLeaf",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The Model host helper in internal/model/v41_forward.go that loads the caller-selected layer norm weight, validates HiddenSize geometry, finite values and positive finite epsilon, then applies an owned BF16 input copy, F32 learned RMSNorm and BF16 output publication. The attention wrapper supplies attn_norm.weight; the full-profile FFN host branch reuses it with ffn_norm.weight.",
+      "distinction": "This executes the portable host normalization and both dtype boundaries for a named weight leaf. v41AttentionInputNormFunc constructs a session-bound device normalization callback, while v41AttentionInputNormWithDevice selects that callback or this host route; neither is an alias for the host arithmetic helper.",
+      "distinct_from": [
+        "v41-attention-input-norm-callback",
+        "v41-attention-input-norm-boundary"
+      ],
+      "aliases": [],
+      "grounding": "v41AttentionInputNormWithLeaf",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

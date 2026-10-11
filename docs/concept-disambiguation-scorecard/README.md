@@ -15,31 +15,31 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **620** (clarity 0 + coverage 620) |
-| **Crystal-clear concepts (and climbing)** | **1184** crystal of 2953 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3057 / 3677** (83.1% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **0** of 223 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **84** of 4199 indexed names |
+| **Disambiguation-debt (drive to 0)** | **619** (clarity 0 + coverage 619) |
+| **Crystal-clear concepts (and climbing)** | **1184** crystal of 2971 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3064 / 3683** (83.2% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **0** of 225 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **86** of 4215 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 89.0/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 89.1/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2953 concepts - score 89.0/100 (grade B) - disambiguation-debt 620
+concept-disambiguation chart - 2971 concepts - score 89.1/100 (grade B) - disambiguation-debt 619
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ###################......... 1184
-  o defined       ############################ 1769
+  o defined       ############################ 1787
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
-  attention        **********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 22 crystal)
+  attention        **********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (115 concept(s); 22 crystal)
   cache            **************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (291 concept(s); 110 crystal)
   context-ctx      ************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (243 concept(s); 84 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
@@ -56,7 +56,7 @@ clarity mix by family (each cell = one concept):
   render-materialize *******************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (199 concept(s); 43 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
   session-runtime  *******************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (264 concept(s); 91 crystal)
-  support-maturity **********************************************ooooooooooooooooooooooooo (71 concept(s); 46 crystal)
+  support-maturity **********************************************ooooooooooooooooooooooooooo (73 concept(s); 46 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    ***********************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (172 concept(s); 83 crystal)
@@ -67,12 +67,12 @@ coverage by family (positioned / discovered):
   cache            #######################..... 333/399
   gateway-engine   #######################..... 226/280
   context-ctx      ########################.... 263/307
-  attention        ####################........ 100/142
+  attention        ####################........ 107/148
   policy-capability ########################.... 221/260
   guard-gate       ##########################.. 511/547
   pool             ###############............. 40/74
   render-materialize ########################.... 216/249
-  support-maturity ####################........ 76/108
+  support-maturity ####################........ 77/109
   witness-proof    ########################.... 173/201
   evict            ####################........ 56/79
   loop             ########################.... 100/117
@@ -84,15 +84,15 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 83.1%  (3057/3677 confusable tokens positioned)
+namespace coverage  [###########################.....] 83.2%  (3064/3683 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
-  mutual       ############################ 223
+  mutual       ############################ 225
   one-sided    ............................ 0
   undrawn      ............................ 0
-  pairs separated   [################################] 223/223
+  pairs separated   [################################] 225/225
 
-name index: 4199 lookup name(s) -> 2953 concept(s), 84 ambiguous
+name index: 4215 lookup name(s) -> 2971 concept(s), 86 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -114,11 +114,11 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 223 |
-| **Separated from each other (drive to all)** | **223 / 223** (223 mutual, 0 one-sided) |
+| Confusable name-pairs discovered | 225 |
+| **Separated from each other (drive to all)** | **225 / 225** (225 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2144 / 5337 |
+| Boundaries drawn (mutual / total) | 2154 / 5360 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4199 over 2953 concepts |
-| Lookup names landing on several concepts | 84 |
+| Lookup names indexed | 4215 over 2971 concepts |
+| Lookup names landing on several concepts | 86 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2953 |
+| Concepts carrying a contrast set | 2971 |
 
 ## The concepts (best verdict first)
 
@@ -1331,6 +1331,21 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | attention | **NeedsAttention (watchdog health gate)** - watchdoghealth.Health.NeedsAttention() and Digest.NeedsAttention - the one-bit operations gate (true when any monitor sits at or above the attention floor: DOWN, UNKNOWN, or GAVE_UP) a supervisor loop or CI keys on without re-scanning every monitor row. |
 | o | defined | symbol | attention | **AttentionTriageLine (operations triage readout)** - A one-line readout function (in gardenbundle, watchdoghealth, and releasestatus) that renders the decenter split - which attention-floor monitors wait on a human vs which the fleet can clear - as a single digest line. |
 | o | defined | symbol | attention | **PartitionAttention (watchdog decenter split)** - watchdoghealth.PartitionAttention - splits the digest's attention-floor monitors into two buckets: those whose remedy needs a human (needHuman) and those the fleet can clear on its own (fleetClears), reserving ALERT severity for the genuine human residual. |
+| o | defined | symbol | attention | **V41AttentionBF16Backend** - The compute interface for an ordinary checked BF16 publication at attention-normalization input or output. It exposes a loaded-operation/count predicate and a synchronous operation returning fresh, disjoint F32 row storage whose successful bits are finite widened BF16. |
+| o | defined | symbol | attention | **SupportsV41AttentionBF16 (attention eligibility method)** - The backend method reporting whether the ordinary checked module is available and the requested positive row count fits the selected device geometry. The Vulkan implementation evaluates both predicates under its mutex. |
+| o | defined | symbol | attention | **V41AttentionBF16** - The selected synchronous backend method for finite BF16 publication at site 3 or 4. The Vulkan implementation owns fresh output and status buffers, dispatches the checked integer module, reads and validates status, and only then returns the output tensor. |
+| o | defined | symbol | attention | **validateV41AttentionBF16** - The compute metadata validator that first restricts publication to the two attention site IDs, then reuses the existing BF16 row dtype, layout, shape and extent validation. |
+| o | defined | symbol | attention | **decodeV41AttentionBF16Status** - The ordinary attention wrapper around the shared checked-BF16 status-envelope decoder. It accepts only sites 3 and 4 before validating the exact record against issued count and site. |
+| o | defined | symbol | attention | **v41AttentionBF16ModuleABI** - The unexported Go adapter that passes nonempty SPIR-V module bytes to the ordinary native checked-BF16 ABI validator. |
+| o | defined | symbol | attention | **fvk_v41_attention_bf16_module_abi** - The ordinary C export for the unchanged checked integer module ABI parser, shared with the witness-only final-norm validator through an internal helper. |
+| o | defined | symbol | attention | **fvk_v41_attention_bf16_count_supported (native geometry predicate)** - The ordinary native count predicate for one attention BF16 row. It reuses the checked count helper, including signed count, byte extent, buffer cap and grid-stride workgroup limits. |
+| o | defined | symbol | attention | **fvk_have_v41_attention_bf16** - The ordinary native availability export backed by the checked module capability set after successful mandatory initialization. Failed initialization leaves this capability false. |
+| o | defined | symbol | attention | **vulkanV41AttentionBF16StatusError** - The Go mapping from the ordinary native publication return code and local reason to a typed Vulkan BackendError. It distinguishes device loss, allocation failure, negative submission codes, invalid geometry and other execution failures. |
+| o | defined | symbol | attention | **fvk_v41_attention_bf16_state** - The native preflight used under the Vulkan mutex before ordinary publication allocates buffers, and repeated by its entrypoint. Sticky failure precedes independent pending-submission failure, which precedes healthy batch or restore refusal. |
+| o | defined | symbol | attention | **fvk_v41_attention_bf16_f32** - The ordinary C entrypoint that checks transient state and the closed site 3/4 policy, then invokes the common checked-BF16 dispatch. Its command initializes the separate status buffer, applies the existing conservative barrier and submits the checked integer kernel. |
+| o | defined | symbol | attention | **v41AttentionBF16Func** - The Session constructor for an ordinary attention publication callback, selected only alongside a full-profile device RMSNorm callback and the ordinary BF16 capability. Its captured owner stages an input row, verifies fresh owned output and checked finite widened-BF16 payload, copies host results and retires selected failures without replay. |
+| o | defined | symbol | attention | **v41AttentionInputNormWithPublications** - The Model helper applying a publication callback before and after the unchanged selected attention-input RMSNorm. A nil publication retains the prior host BF16 casts, and the existing WithDevice helper delegates with nil. |
+| o | defined | symbol | attention | **attentionBF16** - The optional v41ForwardState and scratch field retaining the session-bound ordinary attention BF16 publication callback. Forward binding, scratch propagation and reset carry it alongside attentionNorm through grouped and incremental consumers. |
 | o | defined | concept | attention | **Attention (softmax token-mixer)** - The default softmax scaled-dot-product self-attention token mixer (the be.Attention HAL op and m.attnSeq body) that mixes tokens via Q·K softmax over V. |
 | o | defined | concept | attention | **self_attn (projection namespace)** - The self-attention sublayer's canonical tensor namespace (self_attn.{q,k,v,o}_proj plus q_norm/k_norm) that holds the projection weights of a softmax-attention block. |
 | o | defined | symbol | attention | **attnOut (attention output buffer)** - The per-head context-vector buffer (nH*hd wide) that attention accumulates per position and then feeds into the o_proj output matmul. |
@@ -1397,6 +1412,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | attention | **v41AttentionInputNormFunc** - The model callback signature and same-named Session constructor for normalizing one full-profile V4.1 collapsed hidden row. The constructor binds the existing session-owned RMSNorm operation to the layer attn_norm.weight and HiddenSize, or returns nil when that operation is unavailable. |
 | o | defined | symbol | attention | **v41AttentionInputNormWithDevice** - The Model adapter used at V4.1 attention-input normalization sites. A selected callback receives an owned BF16-rounded hidden row and its result is checked, copied and BF16-rounded for publication. A nil callback preserves the existing host normalization; a selected callback error is returned without host retry. |
 | o | defined | symbol | attention | **attentionNorm (V4.1 forward-state callback)** - The optional v41ForwardState field retaining the session-bound attention-input normalization callback across grouped, incremental and resident-stream forward execution. Scratch reuse clears the field and session state restoration rebinds it to the target session owner. |
+| o | defined | symbol | attention | **v41AttentionInputNormWithLeaf** - The Model host helper in internal/model/v41_forward.go that loads the caller-selected layer norm weight, validates HiddenSize geometry, finite values and positive finite epsilon, then applies an owned BF16 input copy, F32 learned RMSNorm and BF16 output publication. The attention wrapper supplies attn_norm.weight; the full-profile FFN host branch reuses it with ffn_norm.weight. |
 | o | defined | symbol | cache | **cachevalueStatus (cache-value status report)** - cmd/fak/cachevalue_status.go: the top-level `fak cache-value status` report that folds every cache-economics source (kernel/savings/usage ledgers, vCache snapshots and sub-reports) into one verdict with rows and next actions. |
 | o | defined | symbol | cache | **cachevalueStatusRow (one status report row)** - cmd/fak/cachevalue_status.go: one row of the cache-value status report - a single named cache-economics line item (source, value, dash-or-detail) rendered in the status table. |
 | o | defined | symbol | cache | **cachevalueFailureDomain (owner/component failure bucket)** - cmd/fak/cachevalue_status_render.go: classifies a cache-value row's failure into an owner/component domain string, so the status report attributes a missing or bad value to the subsystem responsible. |
@@ -2975,6 +2991,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | session-runtime | **SessionControlRequest** - An external steer directive against a live session: pause / resume / priority / pace change. |
 | o | defined | symbol | session-runtime | **SessionReset** - A directive to clear a session's drive state back to a clean baseline without removing it from the pool. |
 | o | defined | symbol | session-runtime | **ListSessions** - The read query that returns a snapshot of all live sessions in the table. |
+| o | defined | symbol | support-maturity | **SupportsV41AttentionBF16 (support domain)** - The loaded-operation and count-domain predicate used before selecting ordinary attention BF16 publication. It requires the native module capability and checked row geometry after host integer bounds. |
+| o | defined | symbol | support-maturity | **fvk_v41_attention_bf16_count_supported (supported geometry domain)** - The ordinary-exported geometry predicate that delegates to the shared checked-BF16 count implementation. It applies the same positive INT32, four-byte extent, device buffer and grid-stride bounds as the historical witness count predicate. |
 | o | defined | concept | support-maturity | **SupportMaturity Rung (M0-M7 ladder)** - supportmaturity.Rung is the uint8-backed closed M0-M7 support-maturity ladder type (M0 unsupported through M7 beyond-SOTA, with M6Parity the SOTA-local parity rung), and FromSupport lowers a covmatrix Support value onto that ladder (UNDEFINED/FENCED/PROOF-PATH/SUPPORTED to M0/M1/M3/M4). |
 | o | defined | metric | support-maturity | **MaturityScore (cadence maturity fold)** - cadencereport MaturityScore is the LedgerRow integer rating of the feature-lifecycle scorecard, produced by CollectMaturity (which builds and converts the Go-native maturity scorecard in-process) and merged into the cadence envelope by FoldWithMaturity. |
 | o | defined | symbol | support-maturity | **ExactSpanSupported (engine evict capability)** - ExactSpanSupported (enginecache Result field, set by SupportsExactSpan) reports whether a documented serving engine or KV pool can evict exactly the named K/V span instead of resetting the whole prefix cache, the same capability bit SupportsRaw exposes for a paged KV pool that carries the Kraw plane. |
@@ -3231,17 +3249,17 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3193/5337 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2953 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3206/5360 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2971 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
 | separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
-| separation | `pair_separated` | 100 | 0 | all 223 confusable name-pair(s) are separated |
+| separation | `pair_separated` | 100 | 0 | all 225 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4199 lookup name(s) resolves - 84 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4215 lookup name(s) resolves - 86 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3253,12 +3271,12 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | cache | 333 | 399 | 66 |
 | gateway-engine | 226 | 280 | 54 |
 | context-ctx | 263 | 307 | 44 |
-| attention | 100 | 142 | 42 |
+| attention | 107 | 148 | 41 |
 | policy-capability | 221 | 260 | 39 |
 | guard-gate | 511 | 547 | 36 |
 | pool | 40 | 74 | 34 |
 | render-materialize | 216 | 249 | 33 |
-| support-maturity | 76 | 108 | 32 |
+| support-maturity | 77 | 109 | 32 |
 | witness-proof | 173 | 201 | 28 |
 | evict | 56 | 79 | 23 |
 | loop | 100 | 117 | 17 |

@@ -1,0 +1,314 @@
+{
+  "rows": [
+    {
+      "id": "v41-attention-bf16-backend",
+      "canonical": "V41AttentionBF16Backend",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The compute interface for an ordinary checked BF16 publication at attention-normalization input or output. It exposes a loaded-operation/count predicate and a synchronous operation returning fresh, disjoint F32 row storage whose successful bits are finite widened BF16.",
+      "distinction": "This interface describes the publication boundary, not RMSNorm arithmetic or whole-model device-only admission. Its site policy is closed to existing IDs 3 and 4.",
+      "distinct_from": [
+        "v41-attention-input-norm-callback"
+      ],
+      "aliases": [],
+      "grounding": "V41AttentionBF16Backend",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-bf16-supports",
+      "canonical": "SupportsV41AttentionBF16 (attention eligibility method)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The backend method reporting whether the ordinary checked module is available and the requested positive row count fits the selected device geometry. The Vulkan implementation evaluates both predicates under its mutex.",
+      "distinction": "This is stable operation and geometry eligibility, not the execution call or a transient submission-health probe. It deliberately excludes active-batch, restore and sticky-fault state. The support-domain row describes the limits of the same method's affirmative result; this row describes its backend eligibility implementation.",
+      "distinct_from": [
+        "v41-attention-bf16-operation",
+        "v41-attention-bf16-supports-domain"
+      ],
+      "aliases": [],
+      "grounding": "SupportsV41AttentionBF16",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-bf16-supports-domain",
+      "canonical": "SupportsV41AttentionBF16 (support domain)",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "The loaded-operation and count-domain predicate used before selecting ordinary attention BF16 publication. It requires the native module capability and checked row geometry after host integer bounds.",
+      "distinction": "A true result is not physical qualification or a guarantee that the next operation will succeed. The operation separately checks transient state and tensor ownership. This is the support meaning of the same method, rather than a second operation: the attention-eligibility row describes its backend implementation.",
+      "distinct_from": [
+        "support",
+        "v41-attention-bf16-supports"
+      ],
+      "aliases": [],
+      "grounding": "SupportsV41AttentionBF16",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-bf16-operation",
+      "canonical": "V41AttentionBF16",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The selected synchronous backend method for finite BF16 publication at site 3 or 4. The Vulkan implementation owns fresh output and status buffers, dispatches the checked integer module, reads and validates status, and only then returns the output tensor.",
+      "distinction": "This applies BF16 round-to-nearest-even and finite-publication checks, not the learned RMSNorm between these two edges. Failure has no decline or host-replay outcome.",
+      "distinct_from": [
+        "v41-attention-bf16-backend"
+      ],
+      "aliases": [],
+      "grounding": "V41AttentionBF16",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-bf16-metadata",
+      "canonical": "validateV41AttentionBF16",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The compute metadata validator that first restricts publication to the two attention site IDs, then reuses the existing BF16 row dtype, layout, shape and extent validation.",
+      "distinction": "It validates host-visible metadata without reading values or checking native pipeline availability. Status validation is performed by decodeV41AttentionBF16Status after checked transport.",
+      "distinct_from": [
+        "v41-attention-bf16-status-decoder"
+      ],
+      "aliases": [],
+      "grounding": "validateV41AttentionBF16",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-bf16-status-decoder",
+      "canonical": "decodeV41AttentionBF16Status",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The ordinary attention wrapper around the shared checked-BF16 status-envelope decoder. It accepts only sites 3 and 4 before validating the exact record against issued count and site.",
+      "distinction": "This closed policy does not widen the existing final-norm sites 1 and 2 or query-prefix sites 3 through 6. Decoding alone cannot prove fresh initialization or completion.",
+      "distinct_from": [
+        "v41-attention-bf16-metadata"
+      ],
+      "aliases": [],
+      "grounding": "decodeV41AttentionBF16Status",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-bf16-module-go",
+      "canonical": "v41AttentionBF16ModuleABI",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The unexported Go adapter that passes nonempty SPIR-V module bytes to the ordinary native checked-BF16 ABI validator.",
+      "distinction": "It checks the compiled module structure through the native parser; it neither creates a device nor proves numerical execution, archive provenance or hardware qualification.",
+      "distinct_from": [
+        "v41-attention-bf16-module-native"
+      ],
+      "aliases": [],
+      "grounding": "v41AttentionBF16ModuleABI",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-bf16-module-native",
+      "canonical": "fvk_v41_attention_bf16_module_abi",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The ordinary C export for the unchanged checked integer module ABI parser, shared with the witness-only final-norm validator through an internal helper.",
+      "distinction": "This validates module structure without initialization. The ordinary export does not make the witness raw boundary or query-prefix APIs part of the ordinary archive.",
+      "distinct_from": [
+        "v41-attention-bf16-module-go"
+      ],
+      "aliases": [],
+      "grounding": "fvk_v41_attention_bf16_module_abi",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-bf16-count",
+      "canonical": "fvk_v41_attention_bf16_count_supported (native geometry predicate)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The ordinary native count predicate for one attention BF16 row. It reuses the checked count helper, including signed count, byte extent, buffer cap and grid-stride workgroup limits.",
+      "distinction": "It bounds allocation and dispatch geometry; fvk_have_v41_attention_bf16 separately reports successful module initialization. Neither predicate performs arithmetic. The supported-domain row describes the scope of this same predicate's claim; this row describes the native geometry check.",
+      "distinct_from": [
+        "v41-attention-bf16-have",
+        "v41-attention-bf16-count-domain"
+      ],
+      "aliases": [],
+      "grounding": "fvk_v41_attention_bf16_count_supported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-bf16-have",
+      "canonical": "fvk_have_v41_attention_bf16",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The ordinary native availability export backed by the checked module capability set after successful mandatory initialization. Failed initialization leaves this capability false.",
+      "distinction": "This reports the loaded checked pipeline, not permissible row size, transient batch health or physical acceptance. It does not repair the pre-existing general partial-initialization cleanup limitation.",
+      "distinct_from": [
+        "v41-attention-bf16-count"
+      ],
+      "aliases": [],
+      "grounding": "fvk_have_v41_attention_bf16",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-bf16-count-domain",
+      "canonical": "fvk_v41_attention_bf16_count_supported (supported geometry domain)",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "The ordinary-exported geometry predicate that delegates to the shared checked-BF16 count implementation. It applies the same positive INT32, four-byte extent, device buffer and grid-stride bounds as the historical witness count predicate.",
+      "distinction": "This ordinary symbol is distinct from the witness-only fvk_v41_bf16_checked_count_supported export. Both share geometry semantics without implying device or numerical qualification. This is the supported-domain meaning of the same export; the native-geometry row describes its implementation, not a separate predicate.",
+      "distinct_from": [
+        "bf16-checked-count-supported",
+        "v41-attention-bf16-count"
+      ],
+      "aliases": [],
+      "grounding": "fvk_v41_attention_bf16_count_supported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-bf16-status-error",
+      "canonical": "vulkanV41AttentionBF16StatusError",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The Go mapping from the ordinary native publication return code and local reason to a typed Vulkan BackendError. It distinguishes device loss, allocation failure, negative submission codes, invalid geometry and other execution failures.",
+      "distinction": "This maps transport or operation-state failure; decodeV41AttentionBF16Status handles the separate 16-byte numerical/protocol record after successful transport.",
+      "distinct_from": [
+        "v41-attention-bf16-status-decoder"
+      ],
+      "aliases": [],
+      "grounding": "vulkanV41AttentionBF16StatusError",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-bf16-state",
+      "canonical": "fvk_v41_attention_bf16_state",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The native preflight used under the Vulkan mutex before ordinary publication allocates buffers, and repeated by its entrypoint. Sticky failure precedes independent pending-submission failure, which precedes healthy batch or restore refusal.",
+      "distinction": "This checks transient execution state, unlike the stable availability/count predicate. A refusal does not take over or flush a healthy caller-owned batch inside this native entry.",
+      "distinct_from": [
+        "v41-attention-bf16-supports"
+      ],
+      "aliases": [],
+      "grounding": "fvk_v41_attention_bf16_state",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-bf16-dispatch",
+      "canonical": "fvk_v41_attention_bf16_f32",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The ordinary C entrypoint that checks transient state and the closed site 3/4 policy, then invokes the common checked-BF16 dispatch. Its command initializes the separate status buffer, applies the existing conservative barrier and submits the checked integer kernel.",
+      "distinction": "This is the native dispatch boundary, while V41AttentionBF16 additionally owns buffers and validates the transported status before returning a tensor. Existing witness entrypoints retain their original policies.",
+      "distinct_from": [
+        "v41-attention-bf16-operation"
+      ],
+      "aliases": [],
+      "grounding": "fvk_v41_attention_bf16_f32",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-bf16-owner",
+      "canonical": "v41AttentionBF16Func",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The Session constructor for an ordinary attention publication callback, selected only alongside a full-profile device RMSNorm callback and the ordinary BF16 capability. Its captured owner stages an input row, verifies fresh owned output and checked finite widened-BF16 payload, copies host results and retires selected failures without replay.",
+      "distinction": "This constructs a session-bound publication callback, not the normalization callback or a hardware qualification. Restored state rebinds the destination owner, subject to the existing immutable backend-lifetime contract.",
+      "distinct_from": [
+        "v41-attention-input-norm-callback"
+      ],
+      "aliases": [],
+      "grounding": "v41AttentionBF16Func",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-bf16-boundary",
+      "canonical": "v41AttentionInputNormWithPublications",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The Model helper applying a publication callback before and after the unchanged selected attention-input RMSNorm. A nil publication retains the prior host BF16 casts, and the existing WithDevice helper delegates with nil.",
+      "distinction": "This composes two BF16 publications with normalization at each actual consumer. It does not batch them, eliminate host transfers, or remove the static device-only inventory blocker.",
+      "distinct_from": [
+        "v41-attention-input-norm-boundary"
+      ],
+      "aliases": [],
+      "grounding": "v41AttentionInputNormWithPublications",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-bf16-state-field",
+      "canonical": "attentionBF16",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The optional v41ForwardState and scratch field retaining the session-bound ordinary attention BF16 publication callback. Forward binding, scratch propagation and reset carry it alongside attentionNorm through grouped and incremental consumers.",
+      "distinction": "This field stores the publication callable around normalization; attentionNorm stores the separate RMSNorm callable. Neither field itself qualifies the complete ordinary device route.",
+      "distinct_from": [
+        "v41-attention-input-norm-state"
+      ],
+      "aliases": [],
+      "grounding": "attentionBF16",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

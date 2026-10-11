@@ -166,6 +166,7 @@ type v41ForwardState struct {
 	bf16Boundary     v41BF16BoundaryFunc
 	logitScale       v41LogitScaleFunc
 	attentionNorm    v41AttentionInputNormFunc
+	attentionBF16    v41BF16BoundaryFunc
 	queryNorm        v41QueryNormFunc
 	queryPrefix      v41QueryPrefixFunc
 	kvNorm           v41KVNormFunc
@@ -330,7 +331,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, bf16Boundary: st.bf16Boundary, logitScale: st.logitScale, attentionNorm: st.attentionNorm, queryNorm: st.queryNorm, queryPrefix: st.queryPrefix, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, routerTopK: st.routerTopK, routedSum: st.routedSum, sharedAdd: st.sharedAdd, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, bf16Boundary: st.bf16Boundary, logitScale: st.logitScale, attentionNorm: st.attentionNorm, attentionBF16: st.attentionBF16, queryNorm: st.queryNorm, queryPrefix: st.queryPrefix, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, routerTopK: st.routerTopK, routedSum: st.routedSum, sharedAdd: st.sharedAdd, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
 		runState.indexKeyPrior = st.indexKeyMemo
 		runState.indexKeyMemo = map[int][]v41IndexKeyMemoRow{}
 		defer func() {
@@ -564,6 +565,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.mhcProjection = nil
 	scratch.mhcFFNProjection = nil
 	scratch.attentionNorm = nil
+	scratch.attentionBF16 = nil
 	scratch.queryNorm = nil
 	scratch.queryPrefix = nil
 	scratch.kvNorm = nil
@@ -585,6 +587,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.mhcProjection = st.mhcProjection
 		scratch.mhcFFNProjection = st.mhcFFNProjection
 		scratch.attentionNorm = st.attentionNorm
+		scratch.attentionBF16 = st.attentionBF16
 		scratch.queryNorm = st.queryNorm
 		scratch.queryPrefix = st.queryPrefix
 		scratch.kvNorm = st.kvNorm
@@ -607,6 +610,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.mhcProjection = nil
 		scratch.mhcFFNProjection = nil
 		scratch.attentionNorm = nil
+		scratch.attentionBF16 = nil
 		scratch.queryNorm = nil
 		scratch.queryPrefix = nil
 		scratch.kvNorm = nil
@@ -709,7 +713,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			return err
 		}
 		for t := range collapsedRows {
-			if preByPos[t], err = m.v41AttentionInputNormWithDevice(l, collapsedRows[t], eps, scratch.attentionNorm); err != nil {
+			if preByPos[t], err = m.v41AttentionInputNormWithPublications(l, collapsedRows[t], eps, scratch.attentionNorm, scratch.attentionBF16); err != nil {
 				return err
 			}
 		}
@@ -775,7 +779,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			}
 		}
 		if full {
-			collapsed, err = m.v41AttentionInputNormWithDevice(l, collapsed, eps, scratch.attentionNorm)
+			collapsed, err = m.v41AttentionInputNormWithPublications(l, collapsed, eps, scratch.attentionNorm, scratch.attentionBF16)
 			if err != nil {
 				return err
 			}
@@ -1745,6 +1749,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.bf16Boundary = s.v41FinalNormBF16CheckedFunc()
 		s.v41Forward.logitScale = s.v41LogitScaleFunc()
 		s.v41Forward.attentionNorm = s.v41AttentionInputNormFunc()
+		s.v41Forward.attentionBF16 = s.v41AttentionBF16Func()
 		s.v41Forward.queryNorm = s.v41QueryNormFunc()
 		s.v41Forward.queryPrefix = s.v41QueryPrefixFunc()
 		s.v41Forward.kvNorm = s.v41KVNormFunc()

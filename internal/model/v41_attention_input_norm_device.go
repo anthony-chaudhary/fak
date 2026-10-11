@@ -19,6 +19,12 @@ func (s *Session) v41AttentionInputNormFunc() v41AttentionInputNormFunc {
 }
 
 func (m *Model) v41AttentionInputNormWithDevice(layer int, collapsed []float32, eps float32, normalize v41AttentionInputNormFunc) ([]float32, error) {
+	return m.v41AttentionInputNormWithPublications(layer, collapsed, eps, normalize, nil)
+}
+
+// Qualified publications move both BF16 boundaries onto the selected backend;
+// the RMSNorm in between is unchanged. Nil keeps the legacy helper's exact path.
+func (m *Model) v41AttentionInputNormWithPublications(layer int, collapsed []float32, eps float32, normalize v41AttentionInputNormFunc, publish v41BF16BoundaryFunc) ([]float32, error) {
 	if normalize == nil {
 		return m.v41AttentionInputNorm(layer, collapsed, eps)
 	}
@@ -26,7 +32,16 @@ func (m *Model) v41AttentionInputNormWithDevice(layer int, collapsed []float32, 
 	if len(collapsed) != m.Cfg.HiddenSize || len(collapsed) == 0 || !finite32(eps) || eps <= 0 {
 		return nil, v41ProjectionOperationErr(layer, leaf, errV41ProjectionResult)
 	}
-	input, err := v41LatentNormBF16Copy(layer, leaf, "collapse", collapsed)
+	if publish != nil && eps != float32(m.Cfg.RMSNormEps) {
+		return nil, v41ProjectionOperationErr(layer, leaf, errV41ProjectionResult)
+	}
+	var input []float32
+	var err error
+	if publish == nil {
+		input, err = v41LatentNormBF16Copy(layer, leaf, "collapse", collapsed)
+	} else {
+		input, err = v41BF16BoundaryCopy(layer, leaf+" input", collapsed, publish)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -37,5 +52,8 @@ func (m *Model) v41AttentionInputNormWithDevice(layer int, collapsed []float32, 
 	if len(values) != len(collapsed) {
 		return nil, v41ProjectionOperationErr(layer, leaf, errV41ProjectionResult)
 	}
-	return v41LatentNormBF16Copy(layer, leaf, "normalization", values)
+	if publish == nil {
+		return v41LatentNormBF16Copy(layer, leaf, "normalization", values)
+	}
+	return v41BF16BoundaryCopy(layer, leaf+" output", values, publish)
 }

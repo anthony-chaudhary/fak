@@ -163,6 +163,8 @@ function Build-Shaders {
     $shaders += "v41_q2k_embed_gather"
     # Coupled V8/complete67 migration; never accept this bundle as frozen V7/66.
     $shaders += "v41_exact_rmsnorm"
+    # Coupled V9/complete68 migration; V8/67 remains a historical artifact identity.
+    $shaders += "v41_bf16_checked"
     foreach ($s in $shaders) {
         $src = Join-Path $shaderSrc "$s.comp"
         $dst = Join-Path $spvOut "$s.spv"

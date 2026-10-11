@@ -241,7 +241,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 			}
 		}
 		if !prefixHandled {
-			collapsed, err = m.v41AttentionInputNormWithDevice(l, collapsed, eps, scratch.attentionNorm)
+			collapsed, err = m.v41AttentionInputNormWithPublications(l, collapsed, eps, scratch.attentionNorm, scratch.attentionBF16)
 			if err != nil {
 				return err
 			}
@@ -660,7 +660,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		}
 	}
 	if !prefixHandled {
-		collapsed, err = m.v41AttentionInputNormWithDevice(l, collapsed, eps, scratch.attentionNorm)
+		collapsed, err = m.v41AttentionInputNormWithPublications(l, collapsed, eps, scratch.attentionNorm, scratch.attentionBF16)
 		if err != nil {
 			return err
 		}

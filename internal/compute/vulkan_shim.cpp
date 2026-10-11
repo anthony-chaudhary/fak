@@ -3514,13 +3514,15 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // binary32 float controls its execution modes declare are supported.
     const bool v41ExactRMSNormBuilt = g_v41IndexerFloatControls &&
         buildKernel(g_kern[K_V41_EXACT_RMSNORM], P("v41_exact_rmsnorm.spv"), 3, 16);
-    // Experimental extra module, never part of the published shader registry. Ordinary
-    // archives neither load it nor export the witness operation symbols.
+    // Registry V9/current68 promotes only the unchanged finite checked module.
+    // A current archive and its complete bundle cut over together. Keep the
+    // capability false unless mandatory initialization completes below.
+    const bool v41BF16CheckedBuilt = buildKernel(g_kern[K_V41_BF16_CHECKED], P("v41_bf16_checked.spv"), 3, 8);
+    ok &= v41BF16CheckedBuilt;
+    // The raw all-bit operation remains an isolated witness-only extra.
     bool v41BF16BoundaryBuilt = false;
-    bool v41BF16CheckedBuilt = false;
 #ifdef FAK_V41_BF16_BOUNDARY_WITNESS
     v41BF16BoundaryBuilt = buildKernel(g_kern[K_V41_BF16_BOUNDARY], P("v41_bf16_boundary.spv"), 2, 4);
-    v41BF16CheckedBuilt = buildKernel(g_kern[K_V41_BF16_CHECKED], P("v41_bf16_checked.spv"), 3, 8);
 #endif
     bool v41LogitScaleBuilt = false;
 #ifdef FAK_V41_LOGIT_SCALE_WITNESS
@@ -5029,19 +5031,18 @@ int fvk_v41_q2k_embed_gather_f32(const void* dTable, const void* dIds, void* dOu
     return (int)g_submissionStatus;
 }
 
-#ifdef FAK_V41_BF16_BOUNDARY_WITNESS
-int fvk_v41_bf16_checked_module_abi(const void* data, size_t bytes) {
+static int v41BF16CheckedModuleABI(const void* data, size_t bytes) {
     if (!data || bytes < 20 || bytes > 1024 * 1024 || bytes % 4 != 0) return 0;
     std::vector<char> code(bytes);
     memcpy(code.data(), data, bytes);
     return v41BF16CheckedABI(code) ? 1 : 0;
 }
 
-int fvk_have_v41_bf16_checked(void) {
+static int v41HaveBF16Checked(void) {
     return g_ready && g_have_v41_bf16_checked && g_kern[K_V41_BF16_CHECKED].pipe != VK_NULL_HANDLE;
 }
 
-int fvk_v41_bf16_checked_count_supported(int count) {
+static int v41BF16CheckedCountSupported(int count) {
     if (count <= 0 || uint64_t(count) > uint64_t(INT32_MAX) || g_maxComputeWorkGroupCountX == 0) return 0;
     const uint64_t bytes = uint64_t(count) * 4u;
     if (bytes > std::numeric_limits<size_t>::max() || bytes > std::numeric_limits<VkDeviceSize>::max() ||
@@ -5052,12 +5053,12 @@ int fvk_v41_bf16_checked_count_supported(int count) {
     return std::min<uint64_t>(requested, g_maxComputeWorkGroupCountX) != 0;
 }
 
-int fvk_v41_bf16_checked_f32(const void* dInput, void* dOut, void* dStatus, int count, uint32_t site) {
+static int v41BF16CheckedDispatch(const void* dInput, void* dOut, void* dStatus, int count, uint32_t site, bool validSite) {
     if (!g_ready) return 1;
-    if (!fvk_have_v41_bf16_checked()) return 3;
+    if (!v41HaveBF16Checked()) return 3;
     if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
     if (g_v41SubmissionPendingFailure || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
-    if (g_batching || (site != 1 && site != 2) || !fvk_v41_bf16_checked_count_supported(count)) return 2;
+    if (g_batching || !validSite || !v41BF16CheckedCountSupported(count)) return 2;
     const uint64_t bytes = uint64_t(count) * 4u;
     Buffer* bufs[3] = {B(dInput), B(dOut), B(dStatus)};
     const uint64_t required[3] = {bytes, bytes, 16};
@@ -5081,6 +5082,33 @@ int fvk_v41_bf16_checked_f32(const void* dInput, void* dOut, void* dStatus, int 
         return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
     }
     return (int)g_submissionStatus;
+}
+
+// Ordinary attention publication has a separate closed site policy. Sharing
+// the integer module does not expose the final-norm or query witness APIs.
+int fvk_v41_attention_bf16_module_abi(const void* data, size_t bytes) {
+    return v41BF16CheckedModuleABI(data, bytes);
+}
+int fvk_have_v41_attention_bf16(void) { return v41HaveBF16Checked(); }
+int fvk_v41_attention_bf16_state(void) {
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_v41SubmissionPendingFailure) return 4;
+    if (g_batching || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 2;
+    return 0;
+}
+int fvk_v41_attention_bf16_count_supported(int count) { return v41BF16CheckedCountSupported(count); }
+int fvk_v41_attention_bf16_f32(const void* dInput, void* dOut, void* dStatus, int count, uint32_t site) {
+    const int state = fvk_v41_attention_bf16_state();
+    if (state != 0) return state;
+    return v41BF16CheckedDispatch(dInput, dOut, dStatus, count, site, site == 3 || site == 4);
+}
+
+#ifdef FAK_V41_BF16_BOUNDARY_WITNESS
+int fvk_v41_bf16_checked_module_abi(const void* data, size_t bytes) { return v41BF16CheckedModuleABI(data, bytes); }
+int fvk_have_v41_bf16_checked(void) { return v41HaveBF16Checked(); }
+int fvk_v41_bf16_checked_count_supported(int count) { return v41BF16CheckedCountSupported(count); }
+int fvk_v41_bf16_checked_f32(const void* dInput, void* dOut, void* dStatus, int count, uint32_t site) {
+    return v41BF16CheckedDispatch(dInput, dOut, dStatus, count, site, site == 1 || site == 2);
 }
 
 int fvk_have_v41_query_prefix(void) {

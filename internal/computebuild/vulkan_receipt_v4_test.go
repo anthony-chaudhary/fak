@@ -53,11 +53,11 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention`)
 			windows = append(windows, match[1])
 		}
 		// Windows retains its own historical build order; membership is exact.
-		sortedWant := append(append([]string(nil), want...), "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm")
+		sortedWant := append(append([]string(nil), want...), "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_checked")
 		sort.Strings(sortedWant)
 		sort.Strings(windows)
 		if !reflect.DeepEqual(windows, sortedWant) {
-			t.Fatalf("Windows current shader names = %v, want current exact67 names", windows)
+			t.Fatalf("Windows current shader names = %v, want current exact68 names", windows)
 		}
 		copy := CurrentVulkanShaderRegistryV4()
 		copy[0] = "forged"

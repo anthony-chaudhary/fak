@@ -14,8 +14,8 @@ import (
 // executable SPIR-V, source correspondence, or hardware qualification.
 func TestVulkanReceiptV8Current67Boundary(t *testing.T) {
 	want := append(CurrentVulkanShaderRegistryV7(), "v41_exact_rmsnorm")
-	if len(want) != 67 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV8(), want) || !reflect.DeepEqual(VulkanShaders, want) {
-		t.Fatal("current builder does not use the exact67 registry")
+	if len(want) != 67 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV8(), want) {
+		t.Fatal("historical V8 registry does not retain the exact67 membership")
 	}
 	registry, err := vulkanRegistryV8.identity()
 	if err != nil {

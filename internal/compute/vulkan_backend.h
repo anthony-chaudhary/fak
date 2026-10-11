@@ -403,6 +403,18 @@ int fvk_v41_q2k_embed_gather_f32(const void *dTable, const void *dIds, void *dOu
 int fvk_have_v41_exact_rmsnorm(void);
 int fvk_v41_exact_rmsnorm_f32(const void *dX, const void *dW, void *dY,
                               int rows, int width, float eps);
+/* Ordinary V4.1 attention BF16 publication, registry V9/current68. The
+ * unchanged integer checked module accepts only sites 3 (attention input)
+ * and 4 (attention output) through this entrypoint. Input/output/status are
+ * mutually disjoint; status is freshly initialized in the checked command.
+ * Output stays private until checked status transport and decoding succeed. */
+int fvk_have_v41_attention_bf16(void);
+/* Sticky submission status, then pending=4, healthy batch/restore=2, ready=0. */
+int fvk_v41_attention_bf16_state(void);
+int fvk_v41_attention_bf16_count_supported(int count);
+int fvk_v41_attention_bf16_f32(const void *dInput, void *dOut, void *dStatus, int count, uint32_t site);
+int fvk_v41_attention_bf16_module_abi(const void *data, size_t bytes);
+
 /* Experimental BF16 bit-copy spine. Production archives deliberately omit
  * these symbols; a witness-tagged Go build cannot link the wrong archive.
  * A dedicated reviewed module is additional to, never part of, trusted registry.
@@ -415,7 +427,8 @@ int fvk_v41_bf16_boundary_module_abi(const void *data, size_t bytes);
  * count/site push and a freshly initialized 16-byte little-endian status.
  * Site 1 is final-norm input, 2 is output. Reject active batching without flush.
  * The caller withholds output until checked status D2H and decoding succeed;
- * failed output contents are unspecified. Same isolated archive, no registry promotion. */
+ * failed output contents are unspecified. These final-norm symbols remain isolated
+ * even though V9 shares the checked integer module with ordinary attention. */
 int fvk_have_v41_bf16_checked(void);
 
 /* Warm query-prefix composition. All pointers are backend-owned Buffer handles;
