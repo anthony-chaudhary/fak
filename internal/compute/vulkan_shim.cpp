@@ -2307,9 +2307,9 @@ void recycleDescriptorSet(DescriptorSetRecord rec) {
 }
 
 // dispatch: bind `bufs` (nbuf of them) + push constants, run groupsX*groupsY workgroups.
-bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1) {
+bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1, bool forceChecked = false) {
     if (g_v41SubmissionPendingFailure) return false;
-    const bool checkedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER] || &k == &g_kern[K_V41_EXACT_RMSNORM] || &k == &g_kern[K_V41_BF16_BOUNDARY];
+    const bool checkedV41 = forceChecked || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER] || &k == &g_kern[K_V41_EXACT_RMSNORM] || &k == &g_kern[K_V41_BF16_BOUNDARY];
     if (k.nbuf > MAX_DISPATCH_BUFS) {
         fprintf(stderr, "fak-vulkan: dispatch skipped; kernel has %d buffers, max %d\n",
                 k.nbuf, MAX_DISPATCH_BUFS);
@@ -4584,7 +4584,25 @@ void fvk_swiglu_f32(const void* dG, const void* dU, void* dY, int n) {
 void fvk_swiglu_limit_f32(const void* dG, const void* dU, void* dY, int n, float limit) {
     struct { int n; float limit; } pc{n, limit};
     Buffer* bufs[3] = {B((void*)dG), B((void*)dU), B(dY)};
-    dispatch(g_kern[K_SWIGLU], bufs, &pc, sizeof(pc), ((uint32_t)n + 255) / 256);
+    const bool limited = std::isfinite(limit) && limit > 0.0f;
+    if (limited) {
+        if (g_submissionStatus != VK_SUCCESS) return;
+        if (!g_ready || g_kern[K_SWIGLU].pipe == VK_NULL_HANDLE || n <= 0 ||
+            g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) {
+            g_submissionStatus = VK_ERROR_UNKNOWN;
+            return;
+        }
+        const uint64_t bytes = uint64_t(n) * sizeof(float);
+        for (Buffer* b : bufs) {
+            if (!b || b->buf == VK_NULL_HANDLE || b->mem == VK_NULL_HANDLE || bytes > b->bytes ||
+                b->bytes > std::numeric_limits<VkDeviceSize>::max() - b->memoryOffset) {
+                g_submissionStatus = VK_ERROR_UNKNOWN;
+                return;
+            }
+        }
+    }
+    const bool accepted = dispatch(g_kern[K_SWIGLU], bufs, &pc, sizeof(pc), ((uint32_t)n + 255) / 256, 1, limited);
+    if (limited && !accepted && g_submissionStatus == VK_SUCCESS) g_submissionStatus = VK_ERROR_UNKNOWN;
 }
 
 void fvk_swiglu_matmul_add_f32(const void* dW, const void* dG, const void* dU,

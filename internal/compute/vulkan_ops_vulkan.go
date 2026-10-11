@@ -79,15 +79,38 @@ func (v *vulkanBackend) SwiGLUWithLimit(gate, up Tensor, limit float32) Tensor {
 	}
 	vulkanMu.Lock()
 	var y Tensor
+	var ybuf *vulkanBuf
 	completed := false
 	defer func() {
+		primary := recover()
 		vulkanMu.Unlock()
+		var cleanup any
 		if !completed && y.Buf() != nil {
-			v.Free(y)
+			func() {
+				defer func() { cleanup = recover() }()
+				v.Free(y)
+			}()
+		}
+		if primary != nil {
+			panic(primary)
+		}
+		if cleanup != nil {
+			panic(cleanup)
 		}
 	}()
-	y, _ = v.devTr(append([]int(nil), gate.Shape...), F32)
+	checkSubmission := func() {
+		if status := int(C.fvk_submission_status()); status != 0 {
+			err := vulkanV41RoPEStatusError(status)
+			err.Site = "SwiGLUWithLimit"
+			err.Message = fmt.Sprintf("limited SwiGLU failed closed (code %d)", status)
+			panic(err)
+		}
+	}
+	checkSubmission()
+	y, ybuf = v.devTr(append([]int(nil), gate.Shape...), F32)
 	C.fvk_swiglu_limit_f32(v.vp(gate), v.vp(up), v.vp(y), C.int(gate.Numel()), C.float(limit))
+	checkSubmission()
+	ybuf.v41CheckedRead = true
 	completed = true
 	return y
 }
