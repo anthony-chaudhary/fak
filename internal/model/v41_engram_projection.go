@@ -204,15 +204,39 @@ func (s *Session) v41EngramProjectionFunc() v41EngramProjectionFunc {
 		}
 		stage = "weight upload"
 		weight := s.cachedImmutableWeight(key, key, func() compute.Tensor { return s.Backend.Upload(source, descriptor.dtype) })
-		run := func() ([]float32, error) {
+		run := func() (result []float32, cause error) {
+			var owned []compute.Tensor
+			defer func() {
+				// Both releases are still attempted. Cleanup must not replace
+				// the operation's returned error or original panic; after a
+				// successful operation, retain the first cleanup-only panic.
+				primaryPanic := recover()
+				var cleanupPanic any
+				for i := len(owned) - 1; i >= 0; i-- {
+					func() {
+						defer func() {
+							if r := recover(); r != nil && cleanupPanic == nil {
+								cleanupPanic = r
+							}
+						}()
+						s.Backend.Free(owned[i])
+					}()
+				}
+				if primaryPanic != nil {
+					panic(primaryPanic)
+				}
+				if cause == nil && cleanupPanic != nil {
+					panic(cleanupPanic)
+				}
+			}()
 			stage = "activation upload"
 			x := s.uploadHostF32([]int{in}, row, compute.MemoryActivation, "V4.1 Engram projection activation")
-			defer s.Backend.Free(x)
+			owned = append(owned, x)
 			upload += int64(len(row)) * 4
 			stage = "matmul"
 			calls++
 			y := s.Backend.MatMul(weight, x)
-			defer s.Backend.Free(y)
+			owned = append(owned, y)
 			stage = "readback"
 			values := s.Backend.Read(y)
 			readback += int64(len(values)) * 4
