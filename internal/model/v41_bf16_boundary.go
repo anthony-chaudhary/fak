@@ -78,16 +78,25 @@ func (s *Session) v41BF16BoundaryFunc() v41BF16BoundaryFunc {
 	return func(layer int, site string, values []float32) (result []float32, cause error) {
 		s.ensureOpenBackendSession()
 		stage := "payload"
+		closeSelected := func(primary error) {
+			if s.halFailure == nil {
+				s.halFailure = primary
+			}
+			if s.halClosed {
+				return
+			}
+			s.halClosed = true
+			// Retirement cannot replace the selected operation's primary fault.
+			func() { defer func() { _ = recover() }(); s.Close() }()
+		}
 		closeFailure := func(err error) error {
 			if s.halFailure != nil {
+				closeSelected(s.halFailure)
 				return s.halFailure
 			}
 			selected := &V41BF16BoundaryOperationError{Layer: layer, Site: site, Cause: err}
 			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-bf16-boundary", Layer: layer, Stage: stage, Cause: selected}
-			s.halFailure, s.halClosed = closed, true
-			// The operation failure is already latched. A secondary teardown
-			// panic cannot replace it or cause another attempt on this session.
-			func() { defer func() { _ = recover() }(); s.Close() }()
+			closeSelected(closed)
 			return closed
 		}
 		defer func() {
@@ -95,6 +104,7 @@ func (s *Session) v41BF16BoundaryFunc() v41BF16BoundaryFunc {
 				if err, ok := r.(error); ok {
 					var closed *BackendForwardOperationError
 					if errors.As(err, &closed) {
+						closeSelected(err)
 						panic(r)
 					}
 					var backend *compute.BackendError
