@@ -15,7 +15,6 @@ var v41DeviceOnlyPinnedHostOps = []v41HostOp{
 	{name: "engram-stream-injection", site: "Model.v41EngramInjectPrepared"},
 	{name: "attention-input-norm", site: "Model.v41AttentionInputNormWithLeaf"},
 	{name: "compressor-gated-pool", site: "V41CompressorPool.PushNormalized"},
-	{name: "live-expert-shared-add", site: "Session.v4ExpertForward"},
 }
 
 // fak-test:runtime fast est=1s lane=default

@@ -41,7 +41,6 @@ var v41DeviceOnlyHostOps = []v41HostOp{
 	{name: "engram-stream-injection", site: "Model.v41EngramInjectPrepared"},
 	{name: "attention-input-norm", site: "Model.v41AttentionInputNormWithLeaf"},
 	{name: "compressor-gated-pool", site: "V41CompressorPool.PushNormalized"},
-	{name: "live-expert-shared-add", site: "Session.v4ExpertForward"},
 }
 
 func v41DeviceOnlyRefusal() error {
