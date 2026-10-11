@@ -133,6 +133,7 @@ var generatedVerbIndex = []generatedVerb{
 	{Name: "eve", Synopsis: "the impure shell over internal/evebridge: the Eve integration program's operator verbs (security preflight)", Tier: "dev"},
 	{Name: "execution-route", Synopsis: "compose harness, model, tool-policy, and context-continuity choices into one inspectable execution decision", Tier: "dev"},
 	{Name: "experiments", Synopsis: "the experiments registry/runner over experiments/", Tier: "dev"},
+	{Name: "expert-trace", Synopsis: "analyze a FAK_EXPERT_TRACE route trace: unique experts, reuse, LRU/Belady curve, prewarm hot set", Tier: "dev"},
 	{Name: "fanout", Synopsis: "fold the nightrun fan-out reuse ledger into a trend report", Tier: "dev"},
 	{Name: "fleet", Synopsis: "headless-worker fleet control surface: monitor/janitor/fold/replace/capacity/control (read-only by default)", Tier: "dev"},
 	{Name: "fleet-accounts", Synopsis: "fleet-wide account management across config-home seats", Tier: "dev"},

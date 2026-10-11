@@ -27,14 +27,7 @@ func (m *Model) SetExpertRouteObserver(obs ExpertRouteObserver) { m.expertRouteO
 func (m *Model) ExpertRouteObserverSet() bool { return m.expertRouteObs != nil }
 
 func (m *Model) emitExpertRoute(layer int, picks []routePick) {
-	if m == nil || m.expertRouteObs == nil {
-		return
-	}
-	experts := make([]int, len(picks))
-	for i, pick := range picks {
-		experts[i] = pick.expert
-	}
-	m.expertRouteObs(layer, experts)
+	m.emitExpertRouteAt(layer, -1, picks)
 }
 
 // ExpertResidentWeightBytes reports the resident quantized footprint of one routed

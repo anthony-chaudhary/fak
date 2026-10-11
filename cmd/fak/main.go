@@ -298,6 +298,8 @@ func dispatchCoreVerbB(name string, args []string) bool {
 	switch name {
 	case "compute-trace":
 		os.Exit(runComputeTrace(os.Stdout, os.Stderr, args))
+	case "expert-trace":
+		os.Exit(runExpertTrace(os.Stdout, os.Stderr, args))
 	case "loop-score":
 		cmdLoopScore(args)
 	case "waiting":

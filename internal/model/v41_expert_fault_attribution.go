@@ -1,6 +1,7 @@
 package model
 
 import (
+	"math/bits"
 	"sync"
 )
 
@@ -176,6 +177,10 @@ type v41ExpertFaultPhaseLedger struct {
 	// "vulkan"), observed from the model's selection at the last contraction —
 	// an identity, not a device receipt.
 	ContractionBackend string `json:"contraction_backend"`
+
+	// FaultNanosLog2Buckets[i] counts fault doors whose latency fell in
+	// [2^i, 2^(i+1)) ns; bucket 0 also holds 0-1 ns, the last bucket the tail.
+	FaultNanosLog2Buckets [v41FaultLatencyBuckets]int `json:"fault_nanos_log2_buckets"`
 }
 
 // V41ExpertFaultAttributionPhase names the phase value for bounded consumers
@@ -315,7 +320,24 @@ func (l *v41ExpertFaultLedger) nowLocked() int64 {
 // phase: the elapsed (fault door close - open) the caller measured around the
 // checkpoint range read. A phase-less ledger routes nowhere and drops the note.
 func (l *v41ExpertFaultLedger) noteFaultDoor(nanos int64) {
-	l.noteDuration(nanos, func(led *v41ExpertFaultPhaseLedger) { led.FaultDoorNanos += nanos })
+	l.noteDuration(nanos, func(led *v41ExpertFaultPhaseLedger) {
+		led.FaultDoorNanos += nanos
+		led.FaultNanosLog2Buckets[v41FaultLatencyBucket(nanos)]++
+	})
+}
+
+// v41FaultLatencyBuckets spans 1 ns to ~9 minutes in log2 steps.
+const v41FaultLatencyBuckets = 40
+
+func v41FaultLatencyBucket(nanos int64) int {
+	b := bits.Len64(uint64(nanos)) - 1
+	if b < 0 {
+		return 0
+	}
+	if b >= v41FaultLatencyBuckets {
+		return v41FaultLatencyBuckets - 1
+	}
+	return b
 }
 
 // noteDequant records one f32 materialization's wall-clock cost under the
@@ -467,6 +489,18 @@ func v41ExpertFaultLedgerOf(m *Model, install bool) *v41ExpertFaultLedger {
 func (m *Model) v41SetExpertFaultPhase(p V41ExpertPhase) {
 	l := v41ExpertFaultLedgerOf(m, true)
 	l.setPhase(p)
+}
+
+// v41ExpertFaultPhase reads the phase the V4.1 forward declared, or
+// V41PhaseUnknown when no ledger exists. nil-safe.
+func (m *Model) v41ExpertFaultPhase() V41ExpertPhase {
+	l := v41ExpertFaultLedgerOf(m, false)
+	if l == nil {
+		return V41PhaseUnknown
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.phase
 }
 
 // v41NoteExpertFaultToken records n tokens under the currently-set phase.

@@ -1026,6 +1026,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return v41StageErr(v41StageMoE, l, err)
 		}
+		m.emitExpertRouteAt(l, t, picks)
 		perTokenPicks[t] = picks
 	}
 

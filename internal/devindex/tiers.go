@@ -477,6 +477,7 @@ var verbTiers = map[string]VerbTier{
 	"worktree":                      TierDev,
 	"agentic":                       TierDev,
 	"compute-trace":                 TierDev,
+	"expert-trace":                  TierDev,
 	"coordinate":                    TierDev,
 	"hostdiag":                      TierDev,
 	"learning-mesh":                 TierDev,

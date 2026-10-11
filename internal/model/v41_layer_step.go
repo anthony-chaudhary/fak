@@ -365,6 +365,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return v41StageErr(v41StageMoE, l, err)
 	}
+	m.emitExpertRouteAt(l, pos, picks)
 	routed := make([]float32, H)
 	var fullOutputs [][]float32
 	if full {
@@ -728,7 +729,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		return v41StageErr(v41StageAttention, l, err)
 	}
 
-	if err := m.v41LayerStepRoleFinish(l, x, streams, mix, attnProjected, scratch); err != nil {
+	if err := m.v41LayerStepRoleFinish(l, pos, x, streams, mix, attnProjected, scratch); err != nil {
 		return err
 	}
 	// No error-returning operation remains. State.Step would advance an owner's
@@ -749,7 +750,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 // commits the position's mHC streams and hidden row. It is shared by the source
 // and reader paths so the tail after attention is byte-identical to the plain
 // branch's seq == 1 arithmetic. The caller commits its window after this returns.
-func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, mix v41MHCMix, attnOut []float32, scratch *v41ProjScratch) error {
+func (m *Model) v41LayerStepRoleFinish(l, pos int, x []float32, streams [][]float32, mix v41MHCMix, attnOut []float32, scratch *v41ProjScratch) error {
 	cfg := m.Cfg
 	H := cfg.HiddenSize
 	projectFFN, err := m.v41FFNMHCProjector(l, scratch)
@@ -773,6 +774,7 @@ func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, 
 	if err != nil {
 		return v41StageErr(v41StageMoE, l, err)
 	}
+	m.emitExpertRouteAt(l, pos, picks)
 	routed := make([]float32, H)
 	fullOutputs := make([][]float32, len(picks))
 	for slot, pick := range picks {
