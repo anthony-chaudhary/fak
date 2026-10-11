@@ -26,6 +26,9 @@ const (
 	// VulkanShaderRegistryV9ID identifies the exact 68-module ordinary bundle
 	// adding checked attention BF16 publication to the historical V8/67 set.
 	VulkanShaderRegistryV9ID = "fak.vulkan-shader-registry.v9.current68"
+	// VulkanShaderRegistryV10ID identifies the exact 69-module bundle that adds the
+	// V4.1 routed-expert activation module (BF16 clamp SwiGLU route weight) to V9/68.
+	VulkanShaderRegistryV10ID = "fak.vulkan-shader-registry.v10.current69"
 )
 
 type vulkanSuccessorRegistry struct {
@@ -43,12 +46,13 @@ var (
 	vulkanRegistryV7 = &vulkanSuccessorRegistry{version: "V7", schema: VulkanBuildReceiptSchemaV7, id: VulkanShaderRegistryV7ID, count: 66, parent: vulkanRegistryV6, added: []string{"v41_router_topk", "v41_index_select", "v41_q2k_embed_gather"}}
 	vulkanRegistryV8 = &vulkanSuccessorRegistry{version: "V8", schema: VulkanBuildReceiptSchemaV8, id: VulkanShaderRegistryV8ID, count: 67, parent: vulkanRegistryV7, added: []string{"v41_exact_rmsnorm"}}
 
-	vulkanRegistryV9 = &vulkanSuccessorRegistry{version: "V9", schema: VulkanBuildReceiptSchemaV9, id: VulkanShaderRegistryV9ID, count: 68, parent: vulkanRegistryV8, added: []string{"v41_bf16_checked"}}
+	vulkanRegistryV9  = &vulkanSuccessorRegistry{version: "V9", schema: VulkanBuildReceiptSchemaV9, id: VulkanShaderRegistryV9ID, count: 68, parent: vulkanRegistryV8, added: []string{"v41_bf16_checked"}}
+	vulkanRegistryV10 = &vulkanSuccessorRegistry{version: "V10", schema: VulkanBuildReceiptSchemaV10, id: VulkanShaderRegistryV10ID, count: 69, parent: vulkanRegistryV9, added: []string{"v41_routed_swiglu"}}
 
 	// vulkanSuccessorRegistries is every successor schema a receipt may name.
-	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9}
+	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10}
 	// vulkanCurrentRegistry is the registry the builder compiles and stamps.
-	vulkanCurrentRegistry = vulkanRegistryV9
+	vulkanCurrentRegistry = vulkanRegistryV10
 )
 
 func vulkanSuccessorForSchema(schema string) *vulkanSuccessorRegistry {
@@ -121,6 +125,9 @@ func CurrentVulkanShaderRegistryV8() []string { return vulkanRegistryV8.stems() 
 
 // CurrentVulkanShaderRegistryV9 returns an owned copy of the trusted V9 set.
 func CurrentVulkanShaderRegistryV9() []string { return vulkanRegistryV9.stems() }
+
+// CurrentVulkanShaderRegistryV10 returns an owned copy of the trusted V10 set.
+func CurrentVulkanShaderRegistryV10() []string { return vulkanRegistryV10.stems() }
 
 // CurrentVulkanShaderRegistryLatest returns an owned copy of the set the
 // builder compiles and stamps today.

@@ -52,6 +52,14 @@ func v41RoutedBF16(layer int, stage string, values []float32, width int) ([]floa
 }
 
 func (m *Model) v41FullRoutedExpert(layer int, stem string, input []float32, weight float32, cfg Config, gateUp v41ExpertGateUpFunc, down v41ExpertDownFunc, triple v41RoutedTripleLoader, downWeight v41RoutedDownLoader, parallel bool) ([]float32, error) {
+	return m.v41FullRoutedExpertWithDevice(layer, stem, input, weight, cfg, nil, gateUp, down, triple, downWeight, parallel)
+}
+
+// v41FullRoutedExpertWithDevice offers the pick to the fused device routed
+// expert first. Handled keeps the clamp, SwiGLU and route weight on the device;
+// a decline falls through to the gate/up and down seams, then the host triple.
+// Device-only sessions bind a refusing wrapper, so their decline never does.
+func (m *Model) v41FullRoutedExpertWithDevice(layer int, stem string, input []float32, weight float32, cfg Config, routed v41RoutedExpertFunc, gateUp v41ExpertGateUpFunc, down v41ExpertDownFunc, triple v41RoutedTripleLoader, downWeight v41RoutedDownLoader, parallel bool) ([]float32, error) {
 	H, I := cfg.HiddenSize, cfg.MoEIntermediateSize
 	if H <= 0 || I <= 0 || !finite32(weight) {
 		return nil, v41ExpertOperationErr(layer, "gate/up", errV41ExpertResult)
@@ -59,6 +67,29 @@ func (m *Model) v41FullRoutedExpert(layer int, stem string, input []float32, wei
 	x, err := v41RoutedBF16(layer, "gate/up", input, H)
 	if err != nil {
 		return nil, err
+	}
+	if routed != nil {
+		values, outcome, cause := routed(layer, stem, x, weight)
+		switch outcome {
+		case v41RoutedExpertHandled:
+			if cause != nil {
+				return nil, v41ExpertOperationErr(layer, "down", cause)
+			}
+			output, err := v41RoutedBF16(layer, "down", values, H)
+			if err != nil {
+				return nil, err
+			}
+			m.v41NoteExpertContraction()
+			return output, nil
+		case v41RoutedExpertError:
+			if cause == nil {
+				cause = v41ExpertOperationErr(layer, "gate/up", errV41ExpertResult)
+			}
+			return nil, cause
+		case v41RoutedExpertDeclined:
+		default:
+			return nil, v41ExpertOperationErr(layer, "gate/up", errV41ExpertResult)
+		}
 	}
 	var fused, w2 []float32
 	if gateUp != nil {

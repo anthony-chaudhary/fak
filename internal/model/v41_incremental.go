@@ -95,6 +95,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 		scratch = &v41ProjScratch{}
 	}
 	scratch.expertGateUp, scratch.expertDown = st.expertGateUp, st.expertDown
+	scratch.routedExpert = st.routedExpert
 	scratch.denseProjection = st.denseProjection
 	scratch.groupedOutput = st.groupedOutput
 	scratch.mhcProjection = st.mhcProjection
@@ -119,6 +120,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	scratch.gatherOps = st.gatherOps
 	defer func() {
 		scratch.expertGateUp, scratch.expertDown = nil, nil
+		scratch.routedExpert = nil
 		scratch.denseProjection = nil
 		scratch.groupedOutput = nil
 		scratch.mhcProjection = nil

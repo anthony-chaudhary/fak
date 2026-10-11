@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	vulkanVerifyRegistrySHA = "57c7bd4cc6b6f2ad4a3ecfc4498e758a0f5de1b4d4d620bb749ccbaa5a659344"
+	vulkanVerifyRegistrySHA = "e8a725e0b2cdb34cbbef3983460784d512d5106f6135765eca3d5942c3aa4d4a"
 	vulkanVerifyPolicyID    = "fak.v41-indexer-score-f32-structure.v1"
 )
 
@@ -60,7 +60,7 @@ type vulkanVerifyFixture struct {
 // fak-test:runtime medium est=8s lane=default
 // Ref #13823. This exercises static identity admission only: the candidate is
 // an execution sentinel, and no compiler, model, device, service, or network is used.
-func TestBuildVulkanVerifyV9ProjectionAndRefusals(t *testing.T) {
+func TestBuildVulkanVerifyV10ProjectionAndRefusals(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("the canonical verifier intentionally requires Linux fd-bound Git execution")
 	}
@@ -117,7 +117,7 @@ func TestBuildVulkanVerifyV9ProjectionAndRefusals(t *testing.T) {
 			"schema":                     "fak.vulkan-build-verification.v1",
 			"command":                    "verify",
 			"verdict":                    "verified",
-			"receipt_schema":             computebuild.VulkanBuildReceiptSchemaV9,
+			"receipt_schema":             computebuild.VulkanBuildReceiptSchemaV10,
 			"receipt_sha256":             vulkanVerifyTestSHA256File(t, fixture.matchedReceipt),
 			"public_revision":            fixture.commit,
 			"public_tree":                fixture.tree,
@@ -125,7 +125,7 @@ func TestBuildVulkanVerifyV9ProjectionAndRefusals(t *testing.T) {
 			"binary_sha256":              fixture.binarySHA,
 			"binary_size_bytes":          float64(fixture.binarySize),
 			"spirv_bundle_sha256":        fixture.spirvSHA,
-			"spirv_module_count":         float64(68),
+			"spirv_module_count":         float64(69),
 			"toolchain_sha256":           fixture.toolchainSHA,
 			"build_command_sha256":       fixture.commandSHA,
 			"stable_identity_sha256":     fixture.stableIdentity,
@@ -264,15 +264,15 @@ func TestBuildVulkanVerifyV9ProjectionAndRefusals(t *testing.T) {
 		name string
 		edit func(*computebuild.ComputeBuildReceipt)
 	}{
-		{"historical canonical schema", func(r *computebuild.ComputeBuildReceipt) { r.Schema = computebuild.VulkanBuildReceiptSchemaV8 }},
-		{"historical canonical registry", func(r *computebuild.ComputeBuildReceipt) { r.VulkanRegistry.ID = computebuild.VulkanShaderRegistryV8ID }},
+		{"historical canonical schema", func(r *computebuild.ComputeBuildReceipt) { r.Schema = computebuild.VulkanBuildReceiptSchemaV9 }},
+		{"historical canonical registry", func(r *computebuild.ComputeBuildReceipt) { r.VulkanRegistry.ID = computebuild.VulkanShaderRegistryV9ID }},
 		{"historical canonical count", func(r *computebuild.ComputeBuildReceipt) { r.Vulkan.SPIRVModuleCount = 67 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			original := verifyVulkanBinaryReceiptIdentityForSchema
 			verifyVulkanBinaryReceiptIdentityForSchema = func(ctx context.Context, schema string, evidence computebuild.VulkanBinaryReceiptEvidence) (*computebuild.VulkanBinaryReceiptIdentityVerification, error) {
-				if schema != computebuild.VulkanBuildReceiptSchemaV9 || !reflect.DeepEqual(evidence.ExpectedSPIRVModules, computebuild.CurrentVulkanShaderRegistryV9()) {
-					t.Fatal("CLI did not request the exact current V9 identity")
+				if schema != computebuild.VulkanBuildReceiptSchemaV10 || !reflect.DeepEqual(evidence.ExpectedSPIRVModules, computebuild.CurrentVulkanShaderRegistryV10()) {
+					t.Fatal("CLI did not request the exact current V10 identity")
 				}
 				verified, err := original(ctx, schema, evidence)
 				if err != nil {
@@ -389,7 +389,7 @@ func newVulkanVerifyFixture(t *testing.T) *vulkanVerifyFixture {
 	gitSum := sha256.Sum256(readVulkanVerifyTestFile(t, gitPath))
 
 	spirvRoot := filepath.Join(root, "spirv")
-	modules := computebuild.CurrentVulkanShaderRegistryV9()
+	modules := computebuild.CurrentVulkanShaderRegistryV10()
 	for _, stem := range modules {
 		raw := []byte("spirv:" + stem + "\n")
 		if stem == "v41_indexer_score" {
@@ -425,7 +425,7 @@ func newVulkanVerifyFixture(t *testing.T) *vulkanVerifyFixture {
 		GitCommit: commit, GitTree: tree, Clean: true, SourceArchiveSHA256: hex.EncodeToString(archiveSum[:]),
 	}
 	registry := computebuild.VulkanShaderRegistryIdentity{
-		ID: computebuild.VulkanShaderRegistryV9ID, SHA256: vulkanVerifyRegistrySHA, ModuleCount: 68,
+		ID: computebuild.VulkanShaderRegistryV10ID, SHA256: vulkanVerifyRegistrySHA, ModuleCount: 69,
 	}
 	nativeArchive := computebuild.BuildArtifact{Path: "internal/compute/libfakvulkan.a", SizeBytes: int64(len(archiveRaw)), SHA256: vulkanVerifyTestSHA256Hex(archiveRaw)}
 	indexer := computebuild.VulkanIndexerScoreContract{
@@ -446,16 +446,16 @@ func newVulkanVerifyFixture(t *testing.T) *vulkanVerifyFixture {
 		BinarySHA256       string                                    `json:"binary_sha256"`
 		NativeArchive      computebuild.BuildArtifact                `json:"native_archive"`
 		IndexerScore       computebuild.VulkanIndexerScoreContract   `json:"indexer_score_contract"`
-	}{computebuild.VulkanBuildReceiptSchemaV9, registry, source, spirvSHA, 68, toolchainSHA, commandSHA, binarySHA, nativeArchive, indexer})
+	}{computebuild.VulkanBuildReceiptSchemaV10, registry, source, spirvSHA, 69, toolchainSHA, commandSHA, binarySHA, nativeArchive, indexer})
 
 	baselinePath := filepath.Join(root, "baseline-receipt.json")
 	matchedPath := filepath.Join(root, "matched-receipt.json")
 	makeReceipt := func(path, binary string, reproducibility *computebuild.BuildReproducibility) computebuild.ComputeBuildReceipt {
 		return computebuild.ComputeBuildReceipt{
-			Schema: computebuild.VulkanBuildReceiptSchemaV9, Backend: "vulkan", Command: "binary", Outcome: "success", ReceiptPath: path,
+			Schema: computebuild.VulkanBuildReceiptSchemaV10, Backend: "vulkan", Command: "binary", Outcome: "success", ReceiptPath: path,
 			Phases: []computebuild.ComputeBuildPhase{}, Artifact: &computebuild.BuildArtifact{Path: binary, SizeBytes: int64(len(candidate)), SHA256: binarySHA},
 			Vulkan: &computebuild.VulkanBuildProvenance{
-				Source: source, SPIRVBundleSHA256: spirvSHA, SPIRVModuleCount: 68,
+				Source: source, SPIRVBundleSHA256: spirvSHA, SPIRVModuleCount: 69,
 				Toolchain: toolchain, ToolchainSHA256: toolchainSHA, NormalizedBuildCommand: normalized,
 				BuildCommandSHA256: commandSHA, StableIdentitySHA256: stableSHA,
 			},

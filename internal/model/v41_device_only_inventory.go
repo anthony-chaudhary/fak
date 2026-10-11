@@ -44,7 +44,6 @@ var v41DeviceOnlyHostOps = []v41HostOp{
 	{name: "compressor-gated-pool", site: "V41CompressorPool.PushNormalized"},
 	{name: "compressed-publication-rope", site: "Model.v41CompressedPublicationRoPE"},
 	{name: "indexer-query-rope", site: "Model.v41IndexRoPE"},
-	{name: "routed-swiglu-clamp", site: "Model.v41FullRoutedExpert"},
 	{name: "logit-scale", site: "Model.v41HeadWithFinalNorm"},
 }
 

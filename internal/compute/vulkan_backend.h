@@ -403,6 +403,18 @@ int fvk_v41_q2k_embed_gather_f32(const void *dTable, const void *dIds, void *dOu
 int fvk_have_v41_exact_rmsnorm(void);
 int fvk_v41_exact_rmsnorm_f32(const void *dX, const void *dW, void *dY,
                               int rows, int width, float eps);
+
+/* V4.1 routed-expert activation: BF16 gate/up publication, asymmetric clamp,
+ * silu(g)*u, route weight and BF16 down-operand publication. Four storage
+ * bindings: gate[count] F32, up[count] F32, out[count] F32 and a 16-byte status
+ * (magic, count, lowest activation fault, lowest down-operand fault), all
+ * pairwise disjoint. Synchronous: the status is filled with UINT32_MAX in the
+ * same checked command, and an active batch is refused. Push ABI is uint32
+ * count, float32 limit, weight. Returns the tail RoPE status codes. Optional
+ * module (registry V10): absence or missing binary32 float controls leave have=0. */
+int fvk_have_v41_routed_swiglu(void);
+int fvk_v41_routed_swiglu_f32(const void *dGate, const void *dUp, void *dOut, void *dStatus,
+                              int count, float limit, float weight);
 /* Ordinary V4.1 attention BF16 publication, registry V9/current68. The
  * unchanged integer checked module accepts only sites 3 (attention input)
  * and 4 (attention output) through this entrypoint. Input/output/status are

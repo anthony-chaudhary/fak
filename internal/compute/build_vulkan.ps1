@@ -165,6 +165,8 @@ function Build-Shaders {
     $shaders += "v41_exact_rmsnorm"
     # Coupled V9/complete68 migration; V8/67 remains a historical artifact identity.
     $shaders += "v41_bf16_checked"
+    # Coupled V10/complete69 migration; V9/68 remains a historical artifact identity.
+    $shaders += "v41_routed_swiglu"
     foreach ($s in $shaders) {
         $src = Join-Path $shaderSrc "$s.comp"
         $dst = Join-Path $spvOut "$s.spv"

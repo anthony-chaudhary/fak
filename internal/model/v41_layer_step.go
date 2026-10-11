@@ -1211,8 +1211,21 @@ func (m *Model) v41IncrementalExpert(l int, stem string, xn []float32, weight fl
 		return nil, geometryErr
 	}
 	if full {
+		var routedCallback v41RoutedExpertFunc
 		var gateCallback v41ExpertGateUpFunc
 		var downCallback v41ExpertDownFunc
+		if scratch.routedExpert != nil {
+			routedCallback = func(layer int, name string, x []float32, w float32) ([]float32, v41RoutedExpertOutcome, error) {
+				dispatchOpen, dispatchActive, gateUp = m.v41NowNanos(), true, true
+				values, outcome, cause := scratch.routedExpert(layer, name, x, w)
+				dispatchActive = false
+				if outcome == v41RoutedExpertHandled || outcome == v41RoutedExpertError {
+					m.v41NoteIncrementalDeviceDispatch(true, dispatchOpen)
+					m.v41NoteIncrementalDeviceDispatch(false, 0)
+				}
+				return values, outcome, cause
+			}
+		}
 		if scratch.expertGateUp != nil {
 			gateCallback = func(layer int, name string, x []float32) ([]float32, v41ExpertGateUpOutcome, error) {
 				dispatchOpen, dispatchActive, gateUp = m.v41NowNanos(), true, true
@@ -1235,7 +1248,7 @@ func (m *Model) v41IncrementalExpert(l int, stem string, xn []float32, weight fl
 				return values, outcome, cause
 			}
 		}
-		return m.v41FullRoutedExpert(l, stem, xn, weight, cfg, gateCallback, downCallback,
+		return m.v41FullRoutedExpertWithDevice(l, stem, xn, weight, cfg, routedCallback, gateCallback, downCallback,
 			func() ([]float32, []float32, []float32, error) { return m.v41ExpertTripleInto(l, stem, scratch, true) },
 			func() ([]float32, error) { return m.hostExpertDown(l, stem, scratch) }, false)
 	}

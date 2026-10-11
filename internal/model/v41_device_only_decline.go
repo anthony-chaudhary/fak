@@ -29,6 +29,7 @@ func (s *Session) v41BindDeviceOnlyDeclineRefusals(st *v41ForwardState) {
 	st.sharedActivation = v41DeviceOnlySharedActivation(s, st.sharedActivation)
 	st.expertGateUp = v41DeviceOnlyGateUp(s, st.expertGateUp)
 	st.expertDown = v41DeviceOnlyDown(s, st.expertDown)
+	st.routedExpert = v41DeviceOnlyRoutedExpert(s, st.routedExpert)
 }
 
 func v41DeviceOnlyDense(s *Session, f v41DenseProjectionFunc) v41DenseProjectionFunc {

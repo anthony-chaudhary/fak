@@ -291,7 +291,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -309,7 +309,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_ROPE: case K_QWEN35_PARTIAL_ROPE_PANEL: case K_V41_TAIL_ROPE_QK:
         return g_dp.otherRope;
     case K_SWIGLU: case K_SWIGLU_MATMUL_ADD: case K_SWIGLU_Q8_MATMUL_ADD: case K_SIGMOID_MUL:
-    case K_SWIGLU_Q4K_MATMUL_ADD:
+    case K_SWIGLU_Q4K_MATMUL_ADD: case K_V41_ROUTED_SWIGLU:
         return g_dp.otherSwiGLU;
     case K_ADD: case K_ADD_BIAS:
         return g_dp.otherAdd;
@@ -387,6 +387,8 @@ int g_have_v41_exact_rmsnorm = 0;
 int g_have_v41_bf16_boundary = 0;
 int g_have_v41_logit_scale = 0;
 int g_have_v41_bf16_checked = 0;
+// Optional: registry V10 module; needs the binary32 float controls it declares.
+int g_have_v41_routed_swiglu = 0;
 bool g_v41IndexerFloatControls = false;
 std::string g_v41IndexerScoreReason = "Vulkan has not initialized";
 // Fixed-size GLM KDA kernels require an explicitly requested 32-lane subgroup.
@@ -1371,7 +1373,7 @@ const char* const kKernelNames[] = {
     "q6k_matmul", "q5k_matmul", "q3k_matmul", "rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add", "q2k_matmul",
     "rmsnorm_q2k_matmul2", "qwen35_split_qg_panel", "qwen35_partial_rope_panel",
     "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
-    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked",
+    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -2759,13 +2761,17 @@ void recycleDescriptorSet(DescriptorSetRecord rec) {
 // dispatch: bind `bufs` (nbuf of them) + push constants, run groupsX*groupsY workgroups.
 bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1, bool forceChecked = false, Buffer* initializedStatus = nullptr) {
     if (g_v41SubmissionPendingFailure) return false;
-    // Only this concrete synchronous kernel may request the bounded status
-    // initialization. It cannot record into or implicitly flush an active batch.
-    if (&k == &g_kern[K_V41_BF16_CHECKED] && initializedStatus == nullptr) return false;
-    if (initializedStatus != nullptr &&
-        (&k != &g_kern[K_V41_BF16_CHECKED] || !forceChecked || g_batching || k.nbuf != 3 ||
-         !bufs || bufs[2] != initializedStatus || initializedStatus->buf == VK_NULL_HANDLE ||
-         initializedStatus->bytes < 16)) return false;
+    // Only these concrete synchronous kernels may request the bounded status
+    // initialization. They cannot record into or implicitly flush an active batch.
+    if ((&k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_ROUTED_SWIGLU]) && initializedStatus == nullptr) return false;
+    if (initializedStatus != nullptr) {
+        // The status binding is the last one of each status-owning kernel.
+        const bool checkedBF16 = &k == &g_kern[K_V41_BF16_CHECKED] && k.nbuf == 3;
+        const bool routedSwiGLU = &k == &g_kern[K_V41_ROUTED_SWIGLU] && k.nbuf == 4;
+        if ((!checkedBF16 && !routedSwiGLU) || !forceChecked || g_batching ||
+            !bufs || bufs[k.nbuf - 1] != initializedStatus || initializedStatus->buf == VK_NULL_HANDLE ||
+            initializedStatus->bytes < 16) return false;
+    }
     const bool checkedV41 = forceChecked || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER] || &k == &g_kern[K_V41_EXACT_RMSNORM] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE];
     if (k.nbuf > MAX_DISPATCH_BUFS) {
         fprintf(stderr, "fak-vulkan: dispatch skipped; kernel has %d buffers, max %d\n",
@@ -3187,6 +3193,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_v41_bf16_boundary = 0;
     g_have_v41_logit_scale = 0;
     g_have_v41_bf16_checked = 0;
+    g_have_v41_routed_swiglu = 0;
     bool v41IndexerPipelineBuilt = false;
     bool v41MHCPipelineBuilt = false;
     g_v41IndexerFloatControls = false;
@@ -3514,6 +3521,11 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // binary32 float controls its execution modes declare are supported.
     const bool v41ExactRMSNormBuilt = g_v41IndexerFloatControls &&
         buildKernel(g_kern[K_V41_EXACT_RMSNORM], P("v41_exact_rmsnorm.spv"), 3, 16);
+    // V4.1 routed-expert activation (BF16 gate/up, clamp, SwiGLU, route weight,
+    // BF16 down operand), trusted since registry V10/complete69. Optional at init
+    // and built only when its declared binary32 float controls are supported.
+    const bool v41RoutedSwiGLUBuilt = g_v41IndexerFloatControls &&
+        buildKernel(g_kern[K_V41_ROUTED_SWIGLU], P("v41_routed_swiglu.spv"), 4, 12);
     // Registry V9/current68 promotes only the unchanged finite checked module.
     // A current archive and its complete bundle cut over together. Keep the
     // capability false unless mandatory initialization completes below.
@@ -3645,6 +3657,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_v41_bf16_boundary = v41BF16BoundaryBuilt ? 1 : 0;
     g_have_v41_logit_scale = v41LogitScaleBuilt ? 1 : 0;
     g_have_v41_bf16_checked = v41BF16CheckedBuilt ? 1 : 0;
+    g_have_v41_routed_swiglu = v41RoutedSwiGLUBuilt ? 1 : 0;
     // One per-geometry device self-check, before the first forward and never
     // inside one. Its verdict is cached and read by the verify-width route.
     gdnVerifySelfCheck();
@@ -4993,6 +5006,45 @@ int fvk_v41_exact_rmsnorm_f32(const void* dX, const void* dW, void* dY,
     return (int)g_submissionStatus;
 }
 
+int fvk_have_v41_routed_swiglu(void) {
+    return g_ready && g_v41IndexerFloatControls && g_have_v41_routed_swiglu &&
+        g_kern[K_V41_ROUTED_SWIGLU].pipe != VK_NULL_HANDLE && g_kern[K_V41_ROUTED_SWIGLU].nbuf == 4 &&
+        g_kern[K_V41_ROUTED_SWIGLU].pcsize == 12;
+}
+
+int fvk_v41_routed_swiglu_f32(const void* dGate, const void* dUp, void* dOut, void* dStatus,
+                              int count, float limit, float weight) {
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_routed_swiglu()) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_v41SubmissionPendingFailure || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (g_batching || count <= 0 || !std::isfinite(limit) || !std::isfinite(weight) ||
+        g_maxComputeWorkGroupCountX == 0) return 2;
+    const uint64_t bytes = uint64_t(count) * 4u;
+    if (bytes > std::numeric_limits<size_t>::max() || bytes > std::numeric_limits<VkDeviceSize>::max()) return 2;
+    Buffer* bufs[4] = {B(dGate), B(dUp), B(dOut), B(dStatus)};
+    const uint64_t required[4] = {bytes, bytes, bytes, 16};
+    for (int i = 0; i < 4; ++i) {
+        if (!bufs[i] || bufs[i]->buf == VK_NULL_HANDLE || bufs[i]->mem == VK_NULL_HANDLE ||
+            required[i] > bufs[i]->bytes ||
+            bufs[i]->bytes > std::numeric_limits<VkDeviceSize>::max() - bufs[i]->memoryOffset) return 2;
+    }
+    // Conservative whole-allocation ranges; every addition is checked above.
+    for (int i = 0; i < 4; ++i) for (int j = i + 1; j < 4; ++j) {
+        if (bufs[i] == bufs[j] || bufs[i]->buf == bufs[j]->buf ||
+            (bufs[i]->mem == bufs[j]->mem && bufs[i]->memoryOffset < bufs[j]->memoryOffset + bufs[j]->bytes &&
+             bufs[j]->memoryOffset < bufs[i]->memoryOffset + bufs[i]->bytes)) return 2;
+    }
+    struct Push { uint32_t count; float limit, weight; } pc{uint32_t(count), limit, weight};
+    static_assert(sizeof(Push) == 12 && offsetof(Push, limit) == 4 && offsetof(Push, weight) == 8,
+                  "V4.1 routed SwiGLU push ABI must be uint32 count then float32 limit and weight");
+    // groups <= ceil(INT32_MAX/64), so every active grid-stride index stays below 2^31.
+    const uint32_t groups = uint32_t(std::min<uint64_t>((uint64_t(count) + 63u) / 64u, g_maxComputeWorkGroupCountX));
+    if (!dispatch(g_kern[K_V41_ROUTED_SWIGLU], bufs, &pc, sizeof(pc), groups, 1, true, bufs[3])) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
 int fvk_have_v41_q2k_embed_gather(void) {
     return g_ready && g_have_v41_q2k_embed_gather && g_kern[K_V41_Q2K_EMBED_GATHER].pipe != VK_NULL_HANDLE;
 }

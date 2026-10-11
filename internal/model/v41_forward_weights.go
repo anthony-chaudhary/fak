@@ -35,6 +35,7 @@ type v41ProjScratch struct {
 	woB              []float32
 	expertGateUp     v41ExpertGateUpFunc
 	expertDown       v41ExpertDownFunc
+	routedExpert     v41RoutedExpertFunc
 	denseProjection  v41DenseProjectionFunc
 	groupedOutput    v41GroupedOutputFunc
 	mhcProjection    v41MHCProjectionFunc

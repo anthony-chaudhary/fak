@@ -57,6 +57,7 @@ func TestVulkanV41RegistryBundleBindsDeviceOps(t *testing.T) {
 		{"V41Q2KEmbeddingGatherAvailable", v.V41Q2KEmbeddingGatherAvailable()},
 		{"SupportsV41ExactRMSNorm(512)", v.SupportsV41ExactRMSNorm(512, 1e-6)},
 		{"SupportsV41ExactRMSNorm(128)", v.SupportsV41ExactRMSNorm(128, 1e-6)},
+		{"V41RoutedSwiGLUAvailable", v.V41RoutedSwiGLUAvailable()},
 	} {
 		if !c.have {
 			t.Errorf("registry-built bundle leaves %s false", c.name)

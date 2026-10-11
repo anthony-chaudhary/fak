@@ -189,12 +189,13 @@ func (m *Model) v41ContractRoutedGrouped(l int, xnByToken [][]float32, perTokenP
 		for _, row := range g.Rows {
 			xn := xnByToken[row.Token]
 			if full {
+				var routedExpert v41RoutedExpertFunc
 				var gateUp v41ExpertGateUpFunc
 				var down v41ExpertDownFunc
 				if st != nil {
-					gateUp, down = st.expertGateUp, st.expertDown
+					routedExpert, gateUp, down = st.routedExpert, st.expertGateUp, st.expertDown
 				}
-				output, cause := m.v41FullRoutedExpert(l, stem, xn, perTokenPicks[row.Token][row.Slot].weight, cfg, gateUp, down,
+				output, cause := m.v41FullRoutedExpertWithDevice(l, stem, xn, perTokenPicks[row.Token][row.Slot].weight, cfg, routedExpert, gateUp, down,
 					func() ([]float32, []float32, []float32, error) {
 						if !tripleReady {
 							var cause error

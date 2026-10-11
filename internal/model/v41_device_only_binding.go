@@ -25,6 +25,7 @@ var v41DeviceOnlyBindings = []v41DeviceOnlyBinding{
 	{op: v41HostOp{name: "attention-output-rotation", site: "V41TailRoPERowsAvailable"}, bound: func(s *Session) bool { return s.v41InverseOutputRoPEFunc() != nil }},
 	{op: v41HostOp{name: "moe-router-topk", site: "V41RouterTopKAvailable"}, bound: func(s *Session) bool { return s.v41RouterTopKFunc() != nil }},
 	{op: v41HostOp{name: "shared-expert-swiglu", site: "v41SharedActivationFunc"}, bound: func(s *Session) bool { return s.v41SharedActivationFunc() != nil }},
+	{op: v41HostOp{name: "routed-swiglu-clamp", site: "V41RoutedSwiGLUAvailable"}, bound: v41DeviceOnlyRoutedSwiGLUBound},
 }
 
 func v41DeviceOnlyMHCBound(s *Session) bool {

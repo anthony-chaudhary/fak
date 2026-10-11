@@ -104,7 +104,6 @@ func TestV41DeviceOnlyHostInventoryAndLoRAAdmission(t *testing.T) {
 			{name: "bf16-boundary", site: "v41RoundBF16"},
 			{name: "compressed-publication-rope", site: "Model.v41CompressedPublicationRoPE"},
 			{name: "indexer-query-rope", site: "Model.v41IndexRoPE"},
-			{name: "routed-swiglu-clamp", site: "Model.v41FullRoutedExpert"},
 			{name: "logit-scale", site: "Model.v41HeadWithFinalNorm"},
 		}
 		last := -1

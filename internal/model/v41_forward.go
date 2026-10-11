@@ -182,6 +182,10 @@ type v41ForwardState struct {
 	routedSum        v41RoutedSumFunc
 	sharedAdd        v41SharedAddFunc
 	gatherOps        *v41DeviceGatherOps
+	// routedExpert is the OPTIONAL fused device routed expert (gate/up, BF16
+	// clamp-SwiGLU route weight, down). The full profile offers each pick to it
+	// before expertGateUp/expertDown; nil keeps those seams unchanged.
+	routedExpert v41RoutedExpertFunc
 	// mhcDevice is the session's mHC stream seam (initial streams, split,
 	// pre-collapse, post-mix). nil keeps the host reference; a non-nil seam
 	// dispatches every full-geometry mHC op on the backend or refuses.
@@ -331,7 +335,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, bf16Boundary: st.bf16Boundary, logitScale: st.logitScale, attentionNorm: st.attentionNorm, attentionBF16: st.attentionBF16, queryNorm: st.queryNorm, queryPrefix: st.queryPrefix, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, routerTopK: st.routerTopK, routedSum: st.routedSum, sharedAdd: st.sharedAdd, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, bf16Boundary: st.bf16Boundary, logitScale: st.logitScale, attentionNorm: st.attentionNorm, attentionBF16: st.attentionBF16, queryNorm: st.queryNorm, queryPrefix: st.queryPrefix, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, routerTopK: st.routerTopK, routedSum: st.routedSum, sharedAdd: st.sharedAdd, routedExpert: st.routedExpert, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
 		runState.indexKeyPrior = st.indexKeyMemo
 		runState.indexKeyMemo = map[int][]v41IndexKeyMemoRow{}
 		defer func() {
@@ -1235,14 +1239,15 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			routed := make([]float32, H)
 			if full {
 				outputs := make([][]float32, len(perTokenPicks[t]))
+				var routedExpert v41RoutedExpertFunc
 				var gateUp v41ExpertGateUpFunc
 				var down v41ExpertDownFunc
 				if st != nil {
-					gateUp, down = st.expertGateUp, st.expertDown
+					routedExpert, gateUp, down = st.routedExpert, st.expertGateUp, st.expertDown
 				}
 				for slot, pick := range perTokenPicks[t] {
 					stem := "ffn.experts." + itoa(pick.expert)
-					outputs[slot], err = m.v41FullRoutedExpert(l, stem, xn, pick.weight, cfg, gateUp, down,
+					outputs[slot], err = m.v41FullRoutedExpertWithDevice(l, stem, xn, pick.weight, cfg, routedExpert, gateUp, down,
 						func() ([]float32, []float32, []float32, error) { return m.v41ExpertTripleInto(l, stem, scratch, true) },
 						func() ([]float32, error) { return m.hostExpertDown(l, stem, scratch) }, seq > 1)
 					if err != nil {
@@ -1740,6 +1745,7 @@ func (s *Session) v41State() *v41ForwardState {
 	if s.v41Forward.callbackOwner != s {
 		s.v41Forward.expertGateUp = s.v41ExpertGateUpFunc()
 		s.v41Forward.expertDown = s.v41ExpertDownFunc()
+		s.v41Forward.routedExpert = s.v41RoutedExpertFunc()
 		s.v41Forward.denseProjection = s.v41DenseProjectionFunc()
 		s.v41Forward.groupedOutput = s.v41GroupedOutputFunc()
 		s.v41Forward.engramProjection = s.v41EngramProjectionFunc()

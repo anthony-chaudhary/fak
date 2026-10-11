@@ -14,8 +14,8 @@ import (
 // admission, not shader semantics, build causality, or device qualification.
 func TestVulkanReceiptV9Current68Boundary(t *testing.T) {
 	want := append(CurrentVulkanShaderRegistryV8(), "v41_bf16_checked")
-	if len(want) != 68 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV9(), want) || !reflect.DeepEqual(VulkanShaders, want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest(), want) {
-		t.Fatal("current builder does not use V8 plus the checked BF16 module exactly once")
+	if len(want) != 68 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV9(), want) || !reflect.DeepEqual(VulkanShaders[:68], want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest()[:68], want) {
+		t.Fatal("V9 is not V8 plus the checked BF16 module as the current builder prefix")
 	}
 	registry, err := vulkanRegistryV9.identity()
 	if err != nil {
