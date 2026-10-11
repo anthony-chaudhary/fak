@@ -42,13 +42,15 @@
       "canonical": "llamaSoftSlotLease",
       "family": "session-runtime",
       "kind": "symbol",
-      "definition": "The agent request-local handle for a chosen soft slot, its conversation key and its existing release function. It can reserve the slot against other local picks while checking prepared-call residency, and releases the in-flight pin once.",
+      "definition": "The agent request-local handle for a chosen soft slot, its conversation key and its existing release function. It can reserve the slot against other local picks while checking prepared-call residency, and releases the in-flight pin once. The slotLease local in prepareUpstreamContext holds this handle during preparation.",
       "distinction": "This is active process-local routing ownership, not the engine observation in LlamaSlotTask or the completed wire-prefix evidence in LlamaSoftSlotResidency. Foreign upstream clients remain outside the local reservation.",
       "distinct_from": [
         "llama-slot-task-observation",
         "llama-soft-slot-residency-proof"
       ],
-      "aliases": [],
+      "aliases": [
+        "slotLease"
+      ],
       "grounding": "llamaSoftSlotLease",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
@@ -69,6 +71,140 @@
       ],
       "aliases": [],
       "grounding": "LlamaSoftSlotResidency",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "llama-named-slot-reader",
+      "canonical": "readLlamaNamedSlot",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The agent helper that performs a bounded authenticated slots-endpoint read for one selected slot ID, rejects malformed or duplicate slot identities, and returns that slot task observation.",
+      "distinction": "This obtains one live LlamaSlotTask observation; it neither owns a local slot lease nor establishes completed-call residency by itself.",
+      "distinct_from": [
+        "llama-slot-task-observation",
+        "llama-soft-slot-request-lease"
+      ],
+      "aliases": [],
+      "grounding": "readLlamaNamedSlot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "llama-prepared-slot-binding",
+      "canonical": "llamaPreparedSlot",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The per-upstreamCall binding held in its slotResidency field. It connects a request turn and optional local slot lease with the captured endpoint and credential digest, last eligible prepared proof, and one-shot completion channel/release.",
+      "distinction": "This is mutable state for one prepared upstream call. LlamaSoftSlotTurn carries the request across preparation, whereas LlamaSoftSlotResidency is the completed immutable evidence used by a later call.",
+      "distinct_from": [
+        "llama-soft-slot-turn-carrier",
+        "llama-soft-slot-residency-proof"
+      ],
+      "aliases": [
+        "slotResidency"
+      ],
+      "grounding": "llamaPreparedSlot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "llama-soft-slot-turn-carrier",
+      "canonical": "LlamaSoftSlotTurn",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The request-context carrier for an expected HTTP planner/base, optional previous soft-slot evidence, optional prepared-call deadline check, and the latest prepared-call observation channel.",
+      "distinction": "The turn spans upstream preparation and completion handoff. It is not the individual llamaPreparedSlot binding or the already completed LlamaSoftSlotResidency proof.",
+      "distinct_from": [
+        "llama-prepared-slot-binding",
+        "llama-soft-slot-residency-proof"
+      ],
+      "aliases": [],
+      "grounding": "LlamaSoftSlotTurn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "llama-soft-slot-turn-context",
+      "canonical": "WithLlamaSoftSlotResidency",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The HTTPPlanner method that checks soft-slot observation eligibility and returns a context carrying a new LlamaSoftSlotTurn together with that observer. Ineligible planners retain the original context and no observer.",
+      "distinction": "This constructs and attaches the request carrier; it does not select a slot, issue HTTP, or itself approve deadline credit as prepareDeadlineSoftSlot coordinates.",
+      "distinct_from": [
+        "llama-soft-slot-turn-carrier",
+        "deadline-soft-slot-preparation"
+      ],
+      "aliases": [],
+      "grounding": "WithLlamaSoftSlotResidency",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "upstream-context-preparation",
+      "canonical": "prepareUpstreamContext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The HTTPPlanner request preparation method that retains the supplied request context while shaping and serializing the upstream call, selecting any local soft slot, resolving headers, and binding its soft-slot carrier.",
+      "distinction": "This prepares an upstream call without sending its POST. The prepared admission callback callContext is the actual execution context checked immediately before a later POST attempt.",
+      "distinct_from": [
+        "prepared-slot-call-context",
+        "llama-prepared-slot-binding"
+      ],
+      "aliases": [],
+      "grounding": "prepareUpstreamContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "deadline-soft-slot-preparation",
+      "canonical": "prepareDeadlineSoftSlot",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The gateway helper that attaches eligible soft-slot observation and, only for a potentially creditable continuation, installs a deferred prepared-call deadline verdict and its cancellation/release ownership.",
+      "distinction": "This coordinates the gateway estimator and request lifetime. WithLlamaSoftSlotResidency only attaches the agent carrier; AdmitCached evaluates the supplied token and time budget without establishing slot evidence.",
+      "distinct_from": [
+        "llama-soft-slot-turn-context",
+        "deadline-admit-cached"
+      ],
+      "aliases": [],
+      "grounding": "prepareDeadlineSoftSlot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "prepared-slot-call-context",
+      "canonical": "callContext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The context argument received by the deferred soft-slot admission callback immediately before an upstream POST attempt. Its cancellation and deadline reflect the actual call, including any shorter child watchdog.",
+      "distinction": "This is an execution-time context value rather than the prepareUpstreamContext method. It can carry a shorter deadline than the ingress client-budget context, which the callback respects when pricing admission.",
+      "distinct_from": [
+        "upstream-context-preparation"
+      ],
+      "aliases": [],
+      "grounding": "callContext",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "",

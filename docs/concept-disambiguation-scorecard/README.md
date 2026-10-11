@@ -15,33 +15,33 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **611** (clarity 0 + coverage 611) |
-| **Crystal-clear concepts (and climbing)** | **1183** crystal of 2917 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3039 / 3650** (83.3% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **0** of 222 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **84** of 4163 indexed names |
+| **Disambiguation-debt (drive to 0)** | **620** (clarity 0 + coverage 620) |
+| **Crystal-clear concepts (and climbing)** | **1183** crystal of 2933 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3048 / 3668** (83.1% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **0** of 223 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **84** of 4181 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 89.1/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 89.0/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2917 concepts - score 89.1/100 (grade B) - disambiguation-debt 611
+concept-disambiguation chart - 2933 concepts - score 89.0/100 (grade B) - disambiguation-debt 620
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ###################......... 1183
-  o defined       ############################ 1734
+  o defined       ############################ 1750
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
-  attention        **********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (90 concept(s); 22 crystal)
-  cache            **************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (290 concept(s); 110 crystal)
-  context-ctx      ************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (241 concept(s); 84 crystal)
+  attention        **********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (94 concept(s); 22 crystal)
+  cache            **************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (291 concept(s); 110 crystal)
+  context-ctx      ************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (243 concept(s); 84 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         **********************************ooooooooooooooooooooo (55 concept(s); 34 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
@@ -55,7 +55,7 @@ clarity mix by family (each cell = one concept):
   pool             ******oooooooooooooooooooooooooooooooo (38 concept(s); 6 crystal)
   render-materialize *******************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (199 concept(s); 43 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
-  session-runtime  *******************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (253 concept(s); 91 crystal)
+  session-runtime  *******************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (262 concept(s); 91 crystal)
   support-maturity **********************************************oooooooooooooooooooooo (68 concept(s); 46 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
@@ -63,16 +63,16 @@ clarity mix by family (each cell = one concept):
 
 coverage by family (positioned / discovered):
   plan             #######################..... 465/570
-  session-runtime  #######################..... 283/350
-  cache            #######################..... 332/396
+  session-runtime  #######################..... 287/355
+  cache            #######################..... 333/399
   gateway-engine   #######################..... 226/280
   context-ctx      ########################.... 263/307
-  attention        ####################........ 95/136
+  attention        ####################........ 99/141
   policy-capability ########################.... 221/260
   guard-gate       ##########################.. 511/547
   pool             ###############............. 40/74
-  render-materialize #########################... 216/246
-  support-maturity ####################........ 76/106
+  render-materialize ########################.... 216/249
+  support-maturity ####################........ 76/108
   witness-proof    ########################.... 166/194
   evict            ####################........ 56/79
   loop             ########################.... 100/117
@@ -84,15 +84,15 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 83.3%  (3039/3650 confusable tokens positioned)
+namespace coverage  [###########################.....] 83.1%  (3048/3668 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
-  mutual       ############################ 222
+  mutual       ############################ 223
   one-sided    ............................ 0
   undrawn      ............................ 0
-  pairs separated   [################################] 222/222
+  pairs separated   [################################] 223/223
 
-name index: 4163 lookup name(s) -> 2917 concept(s), 84 ambiguous
+name index: 4181 lookup name(s) -> 2933 concept(s), 84 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -114,11 +114,11 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 222 |
-| **Separated from each other (drive to all)** | **222 / 222** (222 mutual, 0 one-sided) |
+| Confusable name-pairs discovered | 223 |
+| **Separated from each other (drive to all)** | **223 / 223** (223 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2090 / 5264 |
+| Boundaries drawn (mutual / total) | 2110 / 5295 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4163 over 2917 concepts |
+| Lookup names indexed | 4181 over 2933 concepts |
 | Lookup names landing on several concepts | 84 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2917 |
+| Concepts carrying a contrast set | 2933 |
 
 ## The concepts (best verdict first)
 
@@ -1387,6 +1387,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | attention | **HasQSASparseAttn (QSA sparse-attention config predicate)** - internal/model Config predicate reporting that the checkpoint declares the QSA sparse-attention layout; routes that only reproduce dense full attention (for example the dense whole-token Q4_K decode admission) decline when it is true. |
 | o | defined | symbol | attention | **k_flash_attention** - k_flash_attention (internal/compute/cuda.go) is the CUDA flash-attention decode kernel - tiled over the KV window with a running max/sum so no full score buffer materializes. |
 | o | defined | symbol | attention | **linearAttnDims** - Config.linearAttnDims (internal/model/qwen35.go) returns the linear-attention head/dim geometry for hybrid models. |
+| o | defined | symbol | attention | **refuseUnimplementedV4FlashAttention** - The Session admission check for the deepseek_v4 Flash attention schedule. It returns the existing typed refusal for an invalid compression ratio or an unimplemented ratio 4/128 layer. GenerateContext returns this error; nonempty Prefill and PrefillNoLogits calls and every Step call panic with it before forward state or keepalive begins. |
+| o | defined | symbol | attention | **v41AttentionInputNormFunc** - The model callback signature and same-named Session constructor for normalizing one full-profile V4.1 collapsed hidden row. The constructor binds the existing session-owned RMSNorm operation to the layer attn_norm.weight and HiddenSize, or returns nil when that operation is unavailable. |
+| o | defined | symbol | attention | **v41AttentionInputNormWithDevice** - The Model adapter used at V4.1 attention-input normalization sites. A selected callback receives an owned BF16-rounded hidden row and its result is checked, copied and BF16-rounded for publication. A nil callback preserves the existing host normalization; a selected callback error is returned without host retry. |
+| o | defined | symbol | attention | **attentionNorm (V4.1 forward-state callback)** - The optional v41ForwardState field retaining the session-bound attention-input normalization callback across grouped, incremental and resident-stream forward execution. Scratch reuse clears the field and session state restoration rebinds it to the target session owner. |
 | o | defined | symbol | cache | **cachevalueStatus (cache-value status report)** - cmd/fak/cachevalue_status.go: the top-level `fak cache-value status` report that folds every cache-economics source (kernel/savings/usage ledgers, vCache snapshots and sub-reports) into one verdict with rows and next actions. |
 | o | defined | symbol | cache | **cachevalueStatusRow (one status report row)** - cmd/fak/cachevalue_status.go: one row of the cache-value status report - a single named cache-economics line item (source, value, dash-or-detail) rendered in the status table. |
 | o | defined | symbol | cache | **cachevalueFailureDomain (owner/component failure bucket)** - cmd/fak/cachevalue_status_render.go: classifies a cache-value row's failure into an owner/component domain string, so the status report attributes a missing or bad value to the subsystem responsible. |
@@ -1567,6 +1571,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | metric | cache | **ProviderPromptCacheTokenEquiv (savings figure)** - ProviderPromptCacheTokenEquiv is the aggregated token-equivalent value (internal/cachevaluereport/track2.go) attributed to the provider prompt cache in a Track-2 cache-value rollup period. |
 | o | defined | symbol | cache | **ColdCache (rehydrate/compact cold prompt-cache reason)** - ColdCache is the rehydrate reason and compact option indicating that the prompt/message-span cache is cold, so a prompt-cache preserving path no longer has warm-cache value to protect. |
 | o | defined | symbol | cache | **coldMessageSpanCache (gateway idle-gap witness)** - coldMessageSpanCache is the gateway metrics helper that witnesses whether a trace's message-span cache has aged past the provider TTL. |
+| o | defined | symbol | cache | **AdmitCached** - The deadlineadmit Estimator method that evaluates prompt tokens, caller-supplied cached tokens, output limit and remaining declared budget using measured rates and live concurrency. It returns a deadline admission verdict; callers are responsible for validating the supplied resident-prefix credit. |
 | o | defined | symbol | context-ctx | **context.Context plumbing helpers (stdlib)** - exec.CommandContext is the Go standard-library constructor that threads a cancellable context.Context into a spawned subprocess, one of the stdlib context-plumbing helpers fak uses to carry deadlines and cancellation through calls. |
 | o | defined | symbol | context-ctx | **BaseContextPlan (syspromptmmu)** - syspromptmmu.BaseContextPlan returns the embedded-PromptSegment projection of the base system context (TierSpine then the TierPolicy floor) as a byte-identical, no-wire-mutation plan. |
 | o | defined | symbol | context-ctx | **AutoSizeContextPlan (compute sizer)** - compute.AutoSizeContextPlan derives the largest context-token count that fits available memory and returns the per-context KV/scratch MemoryPlan for it, reading geometry from a compute.ContextSizeConfig (KV/scratch configs plus the model's declared MaxContext). |
@@ -1721,6 +1726,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | context-ctx | **logInferenceTurnWithContextEvent (gateway usage logger)** - logInferenceTurnWithContextEvent is the gateway metrics helper that records one inference turn and includes whether a context event occurred on that turn. |
 | o | defined | symbol | context-ctx | **longContextPressure (sessionaudit recommendation)** - longContextPressure is the sessionaudit recommendation path that turns high long-context usage or I/O ratio into a compact-session action. |
 | o | defined | metric | context-ctx | **TotalContextTokens (sessionaudit aggregate)** - TotalContextTokens is the sessionaudit aggregate field summing context-token usage across the included sessions or turns. |
+| o | defined | symbol | context-ctx | **prepareUpstreamContext** - The HTTPPlanner request preparation method that retains the supplied request context while shaping and serializing the upstream call, selecting any local soft slot, resolving headers, and binding its soft-slot carrier. |
+| o | defined | symbol | context-ctx | **callContext** - The context argument received by the deferred soft-slot admission callback immediately before an upstream POST attempt. Its cancellation and deadline reflect the actual call, including any shorter child watchdog. |
 | o | defined | config | context-ctx | **FAK_CTX_YIELD_CEILING (resident-token yield ceiling)** - internal/compactcohere/compactcohere.go: env ceiling on the resident-token yield terms in the compaction-coherence score; a non-positive value disables every resident-token term. |
 | o | defined | symbol | context-ctx | **injectionReachedContext (injection-in-context flag)** - internal/agentdojo/agentdojo.go injectionReachedContext: whether a prompt-injection payload actually reached the model context (i.e. was NOT quarantined) on an agentdojo trial. |
 | o | defined | symbol | context-ctx | **observeCompaction (compaction-outcome metric)** - internal/gateway/metrics_observe.go observeCompaction: records a compaction OUTCOME (a CompactOutcome, and whether compaction was off) into the gateway metrics. |
@@ -2843,6 +2850,15 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | metric | session-runtime | **MTTRSessions (resume watchdog session metric)** - MTTRSessions is the resume/operator-touches metric for the sessions included when estimating mean time to repair or recovery. |
 | o | defined | symbol | session-runtime | **RecentSessions (vCache status session summary)** - RecentSessions is the optional compact session-audit report embedded in vCache status output to summarize recent guarded session behavior. |
 | o | defined | subsystem | session-runtime | **sessiondesc (session descriptor package)** - internal/sessiondesc holds helpers for writing and reading session descriptors, the small durable shape that points to a live guard session. |
+| o | defined | symbol | session-runtime | **llamaSlotStateFor** - The agent helper that retrieves or creates the shared llamaSlotState record for an exact upstream base URL in llamaSlotRegistry. The record holds an atomic discovered slot count and discovery coordination state. Retrieving the record performs no HTTP request and does not start discovery. |
+| o | defined | symbol | session-runtime | **LlamaSlotTask** - The agent record of a llama-server slot task identifier, current processing state and prompt-token count obtained from the engine slots endpoint. |
+| o | defined | symbol | session-runtime | **llamaSoftSlotLease** - The agent request-local handle for a chosen soft slot, its conversation key and its existing release function. It can reserve the slot against other local picks while checking prepared-call residency, and releases the in-flight pin once. The slotLease local in prepareUpstreamContext holds this handle during preparation. |
+| o | defined | symbol | session-runtime | **LlamaSoftSlotResidency** - The opaque agent record binding a completed measured request to its actual upstream base and dispatch endpoint, named soft slot, observed engine task and prompt count, serialized request envelope and message-prefix digest, and request credential digest. |
+| o | defined | symbol | session-runtime | **readLlamaNamedSlot** - The agent helper that performs a bounded authenticated slots-endpoint read for one selected slot ID, rejects malformed or duplicate slot identities, and returns that slot task observation. |
+| o | defined | symbol | session-runtime | **llamaPreparedSlot** - The per-upstreamCall binding held in its slotResidency field. It connects a request turn and optional local slot lease with the captured endpoint and credential digest, last eligible prepared proof, and one-shot completion channel/release. |
+| o | defined | symbol | session-runtime | **LlamaSoftSlotTurn** - The request-context carrier for an expected HTTP planner/base, optional previous soft-slot evidence, optional prepared-call deadline check, and the latest prepared-call observation channel. |
+| o | defined | symbol | session-runtime | **WithLlamaSoftSlotResidency** - The HTTPPlanner method that checks soft-slot observation eligibility and returns a context carrying a new LlamaSoftSlotTurn together with that observer. Ineligible planners retain the original context and no observer. |
+| o | defined | symbol | session-runtime | **prepareDeadlineSoftSlot** - The gateway helper that attaches eligible soft-slot observation and, only for a potentially creditable continuation, installs a deferred prepared-call deadline verdict and its cancellation/release ownership. |
 | o | defined | symbol | session-runtime | **SessionImpact (cache-value component impact)** - cmd/fak/cachevalue_status.go SessionImpact (json session_impact): a short human string describing how one cache-value component affects the current session's economics. |
 | o | defined | symbol | session-runtime | **sessionLive (live-process session probe)** - cmd/fak/resume_watchdog_cli.go sessionLive: reports whether any live OS process's command line names the given session id - the resume-watchdog's liveness check. |
 | o | defined | symbol | session-runtime | **SessionMeta (out-of-band session identity)** - internal/guardcorpus/guardcorpus.go SessionMeta: the out-of-band session identity the CLI shell resolves (session id, start info) and carries alongside a guard corpus record. |
@@ -3195,17 +3211,17 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3174/5264 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2917 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3185/5295 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2933 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
 | separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
-| separation | `pair_separated` | 100 | 0 | all 222 confusable name-pair(s) are separated |
+| separation | `pair_separated` | 100 | 0 | all 223 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4163 lookup name(s) resolves - 84 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4181 lookup name(s) resolves - 84 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3213,16 +3229,16 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
 | plan | 465 | 570 | 105 |
-| session-runtime | 283 | 350 | 67 |
-| cache | 332 | 396 | 64 |
+| session-runtime | 287 | 355 | 68 |
+| cache | 333 | 399 | 66 |
 | gateway-engine | 226 | 280 | 54 |
 | context-ctx | 263 | 307 | 44 |
-| attention | 95 | 136 | 41 |
+| attention | 99 | 141 | 42 |
 | policy-capability | 221 | 260 | 39 |
 | guard-gate | 511 | 547 | 36 |
 | pool | 40 | 74 | 34 |
-| render-materialize | 216 | 246 | 30 |
-| support-maturity | 76 | 106 | 30 |
+| render-materialize | 216 | 249 | 33 |
+| support-maturity | 76 | 108 | 32 |
 | witness-proof | 166 | 194 | 28 |
 | evict | 56 | 79 | 23 |
 | loop | 100 | 117 | 17 |
