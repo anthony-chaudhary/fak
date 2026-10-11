@@ -818,6 +818,28 @@ inline void q6k_dequant_chunk16(device const uchar* blk, short il, thread half4x
     }
 }
 
+// q5k_dequant_chunk16 decodes weights [il*16, il*16+16) of one 176-B Q5_K super-block
+// (d@0, dmin@2, scales[12]@4, qh[32]@16, qs[128]@48). Chunk il lives in 64-weight group j=il>>2:
+// chunks 0/1 are the low nibbles of qs[32j + 0..15 / 16..31] (sub-block 2j, high bit 1<<2j of
+// qh[l]); chunks 2/3 the high nibbles (sub-block 2j+1, high bit 2<<2j).
+inline void q5k_dequant_chunk16(device const uchar* blk, short il, thread half4x4& reg) {
+    float d  = (float)(*(device const half*)(blk + 0));
+    float dm = (float)(*(device const half*)(blk + 2));
+    short j = il >> 2;
+    bool hi = (il & 2) != 0;
+    short l0 = 16 * (il & 1);
+    device const uchar* q  = blk + 48 + 32 * j + l0;
+    device const uchar* qh = blk + 16 + l0;
+    float2 sm = q4k_scale_min(2 * j + (hi ? 1 : 0), blk + 4);
+    float dl = d * sm.x, ml = dm * sm.y;
+    uchar mask = (uchar)((hi ? 2 : 1) << (2 * j));
+    for (short i = 0; i < 16; i++) {
+        uchar b = q[i];
+        float nib = (float)(hi ? (b >> 4) : (b & 0x0f)) + ((qh[i] & mask) ? 16.0f : 0.0f);
+        reg[i / 4][i % 4] = (half)(dl * nib - ml);
+    }
+}
+
 template <int BLOCK_BYTES, int KIND>
 inline void kquant_mul_mm(device const uchar* W, device const float* X, device float* Y,
                           int nblk, int out, int P, threadgroup float* shmem,
@@ -846,6 +868,8 @@ inline void kquant_mul_mm(device const uchar* W, device const float* X, device f
         half4x4 temp_a;
         if (KIND == 0) {
             q4k_dequant_chunk16(x, il, temp_a);
+        } else if (KIND == 2) {
+            q5k_dequant_chunk16(x, il, temp_a);
         } else {
             q6k_dequant_chunk16(x, il, temp_a);
         }
@@ -913,6 +937,124 @@ kernel void q6k_mul_mm(device const uchar* W [[buffer(0)]],
                        ushort sgitg  [[simdgroup_index_in_threadgroup]]) {
     threadgroup float shmem[MM_BM * MM_BN];
     kquant_mul_mm<210, 1>(W, X, Y, nblk, out, P, shmem, tg, tiitg, sgitg);
+}
+
+kernel void q5k_mul_mm(device const uchar* W [[buffer(0)]],
+                       device const float* X [[buffer(1)]],
+                       device float*       Y [[buffer(2)]],
+                       constant int&    nblk [[buffer(3)]],
+                       constant int&     out [[buffer(4)]],
+                       constant int&       P [[buffer(5)]],
+                       uint2 tg      [[threadgroup_position_in_grid]],
+                       ushort tiitg  [[thread_index_in_threadgroup]],
+                       ushort sgitg  [[simdgroup_index_in_threadgroup]]) {
+    threadgroup float shmem[MM_BM * MM_BN];
+    kquant_mul_mm<176, 2>(W, X, Y, nblk, out, P, shmem, tg, tiitg, sgitg);
+}
+
+// q5k_mul_mv is the P=1 Q5_K decode GEMV, the Q5_K twin of q6k_mul_mv. It ports llama.cpp's
+// kernel_mul_mv_q5_K_f32_impl in ggml/src/ggml-metal/kernels/mul_mv.metal at
+// 23b0202a189c44a54625aadcb37a946dd1d6278d (MIT; Copyright (c) 2023-2026 The ggml authors; notice
+// retained by reference in q4k_hotpath.go). Changes from upstream: P=1 only, raw byte addressing of
+// the 176-B block (d@0, dmin@2, scales@4, qh@16, qs@48), and a guarded tail so no row past `out`
+// is read or written.
+//
+// Geometry: Q5K_MV_NSG simdgroups per threadgroup, Q5K_MV_NR0 rows per simdgroup. ix = lane%4
+// walks blocks ix, ix+4, ...; tid = lane/4 splits one block: iq = tid/4 picks 64-weight groups iq
+// and iq+2, ir = tid%4 the 8-wide slice l0 = 8ir. sc16 unpacks the four (scale, min) pairs of
+// sub-blocks 2iq, 2iq+1, 2iq+4, 2iq+5 from the 12-B packed scales in one shot.
+#define Q5K_MV_NSG 2 // simdgroups per threadgroup (host: MG_Q5K_MV_THREADS = 32*NSG)
+#define Q5K_MV_NR0 2 // rows per simdgroup (host: MG_Q5K_MV_ROWS = NSG*NR0)
+kernel void q5k_mul_mv(device const uchar* W [[buffer(0)]],
+                       device const float* X [[buffer(1)]],
+                       device float*       Y [[buffer(2)]],
+                       constant int&    nblk [[buffer(3)]],
+                       constant int&     out [[buffer(4)]],
+                       uint   tg    [[threadgroup_position_in_grid]],
+                       ushort tiisg [[thread_index_in_simdgroup]],
+                       ushort sgitg [[simdgroup_index_in_threadgroup]]) {
+    constexpr ushort kmask1 = 0x3f3f, kmask2 = 0x0f0f, kmask3 = 0xc0c0;
+    const int first_row = ((int)tg * Q5K_MV_NSG + (int)sgitg) * Q5K_MV_NR0;
+    if (first_row >= out) return;
+    const int nr = min(Q5K_MV_NR0, out - first_row);
+    const long rowb = (long)nblk * 176;
+    device const uchar* base = W + (long)first_row * rowb;
+
+    const short tid = tiisg / 4;
+    const short ix  = tiisg % 4;
+    const short iq  = tid / 4;
+    const short ir  = tid % 4;
+    const short l0 = 8 * ir;
+    const short q_offset = 32 * iq + l0;
+    const short y_offset = 64 * iq + l0;
+    const uchar hm1 = (uchar)(1u << (2 * iq));
+    const uchar hm2 = (uchar)(hm1 << 1);
+    const uchar hm3 = (uchar)(hm1 << 4);
+    const uchar hm4 = (uchar)(hm2 << 4);
+
+    float sumf[Q5K_MV_NR0];
+    for (short row = 0; row < Q5K_MV_NR0; ++row) sumf[row] = 0.0f;
+    float yl[16], yh[16];
+    ushort sc16[4];
+    thread const uchar* sc8 = (thread const uchar*)sc16;
+
+    device const float* y1 = X + (long)ix * 256 + y_offset;
+    for (int i = ix; i < nblk; i += 4) {
+        device const uchar*  blk = base + (long)i * 176;
+        device const uchar*  q1 = blk + 48 + q_offset;
+        device const uchar*  qh = blk + 16 + l0;
+        device const half*   dh = (device const half*)blk;
+        device const ushort* a  = (device const ushort*)(blk + 4) + iq;
+
+        device const float* y2 = y1 + 128;
+        float4 sumy = 0.0f;
+        for (short l = 0; l < 8; ++l) {
+            yl[l + 0] = y1[l +  0]; sumy[0] += yl[l + 0];
+            yl[l + 8] = y1[l + 32]; sumy[1] += yl[l + 8];
+            yh[l + 0] = y2[l +  0]; sumy[2] += yh[l + 0];
+            yh[l + 8] = y2[l + 32]; sumy[3] += yh[l + 8];
+        }
+        for (short row = 0; row < Q5K_MV_NR0; ++row) {
+            if (row < nr) {
+                device const uchar* q2 = q1 + 64;
+                sc16[0] = a[0] & kmask1;
+                sc16[1] = a[2] & kmask1;
+                sc16[2] = ((a[4] >> 0) & kmask2) | ((a[0] & kmask3) >> 2);
+                sc16[3] = ((a[4] >> 4) & kmask2) | ((a[2] & kmask3) >> 2);
+                float4 acc1 = 0.0f;
+                float4 acc2 = 0.0f;
+                for (short l = 0; l < 8; ++l) {
+                    uchar h = qh[l];
+                    acc1[0] += yl[l + 0] * (float)(q1[l] & 0x0F);
+                    acc1[1] += yl[l + 8] * (float)(q1[l] & 0xF0);
+                    acc1[2] += yh[l + 0] * (float)(q2[l] & 0x0F);
+                    acc1[3] += yh[l + 8] * (float)(q2[l] & 0xF0);
+                    acc2[0] += (h & hm1) ? yl[l + 0] : 0.0f;
+                    acc2[1] += (h & hm2) ? yl[l + 8] : 0.0f;
+                    acc2[2] += (h & hm3) ? yh[l + 0] : 0.0f;
+                    acc2[3] += (h & hm4) ? yh[l + 8] : 0.0f;
+                }
+                const float dall = (float)dh[0];
+                const float dmin = (float)dh[1];
+                sumf[row] += dall * ((float)sc8[0] * (acc1[0]         + 16.0f * acc2[0]) +
+                                     (float)sc8[1] * (acc1[1] / 16.0f + 16.0f * acc2[1]) +
+                                     (float)sc8[4] * (acc1[2]         + 16.0f * acc2[2]) +
+                                     (float)sc8[5] * (acc1[3] / 16.0f + 16.0f * acc2[3])) -
+                             dmin * (sumy[0] * (float)sc8[2] + sumy[1] * (float)sc8[3] +
+                                     sumy[2] * (float)sc8[6] + sumy[3] * (float)sc8[7]);
+            }
+            // Next row, same block index.
+            q1 += rowb;
+            qh += rowb;
+            dh += rowb / 2;
+            a  += rowb / 2;
+        }
+        y1 += 4 * 256;
+    }
+    for (short row = 0; row < Q5K_MV_NR0; ++row) {
+        const float t = simd_sum(sumf[row]);
+        if (tiisg == 0 && row < nr) Y[first_row + row] = t;
+    }
 }
 
 // q4k_swiglu: out[i] = silu(gate[i]) * up[i], the SwiGLU elementwise for the fused decode MLP. Run
@@ -1213,6 +1355,9 @@ static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemvVectorized, psoQ4KGemvM
 // Optional llama.cpp-shaped P=1 GEMVs (fak#13599). A nil PSO keeps every default P=1 dispatch on
 // the legacy one-simdgroup-per-row q4k_gemv / q6k_gemv kernels.
 static id<MTLComputePipelineState> psoQ4KMulMv, psoQ6KMulMv;
+// Q5_K kernels (native Qwen3.5 linear-attention rows): optional, a nil PSO makes every Q5_K
+// upload and graph encode fail closed so callers keep the Q8 store.
+static id<MTLComputePipelineState> psoQ5KMulMv, psoQ5KMulMM;
 static int gQ4KReady;
 
 // P=1 GEMV request modes (the `mode` argument of mg_q4k_gemv, mirrored by q4kGEMVMode in q4k.go).
@@ -1231,6 +1376,8 @@ static int gQ4KReady;
 #define MG_Q4K_MV_THREADS 64 // 32 * Q4K_MV_NSG
 #define MG_Q6K_MV_ROWS    4  // Q6K_MV_NSG * Q6K_MV_NR0
 #define MG_Q6K_MV_THREADS 64 // 32 * Q6K_MV_NSG
+#define MG_Q5K_MV_ROWS    4  // Q5K_MV_NSG * Q5K_MV_NR0
+#define MG_Q5K_MV_THREADS 64 // 32 * Q5K_MV_NSG
 
 // gQ4KP1Kernel is the process default for DEFAULT-mode P=1 GEMVs: 1 = mul_mv, 0 = legacy. It is
 // resolved from FAK_Q4K_GEMV_KERNEL exactly once (first use) unless mg_q4k_set_p1_kernel set it
@@ -1516,6 +1663,12 @@ static int q4k_init(void) {
     psoQ4KMulMv = fnQ4KMulMv ? [gDev newComputePipelineStateWithFunction:fnQ4KMulMv error:&mvErr] : nil;
     psoQ6KMulMv = fnQ6KMulMv ? [gDev newComputePipelineStateWithFunction:fnQ6KMulMv error:&mvErr] : nil;
     if (!psoQ4KMulMv || !psoQ6KMulMv) NSLog(@"q4k: optional mul_mv pipeline unavailable, legacy P=1 GEMV stays default: %@", mvErr);
+    NSError *q5Err = nil;
+    id<MTLFunction> fnQ5KMulMv = [lib newFunctionWithName:@"q5k_mul_mv"];
+    id<MTLFunction> fnQ5KMulMM = [lib newFunctionWithName:@"q5k_mul_mm"];
+    psoQ5KMulMv = fnQ5KMulMv ? [gDev newComputePipelineStateWithFunction:fnQ5KMulMv error:&q5Err] : nil;
+    psoQ5KMulMM = fnQ5KMulMM ? [gDev newComputePipelineStateWithFunction:fnQ5KMulMM error:&q5Err] : nil;
+    if (!psoQ5KMulMv || !psoQ5KMulMM) NSLog(@"q4k: optional Q5_K pipelines unavailable, Q5_K stays off Metal: %@", q5Err);
     if (!psoQ4KGemv || !psoQ4KGemvMulti[0] || !psoQ4KGemvMulti[1] || !psoQ4KGemvMulti[2] ||
         !psoQ4KGemvMulti[3] || !psoQ4KGemvMulti[4] || !psoQ4KGemvMulti[5] || !psoQ4KGemvMulti[6] || !psoQ4KGemm || !psoQ4KSwiGLU ||
         !psoQ6KGemv || !psoQ6KGemm || !psoGraphQuantizeQ8) { NSLog(@"q4k: pipeline build failed: %@", err); return 0; }
@@ -1818,6 +1971,81 @@ void mg_q6k_release(int wid) {
 int mg_q6k_live_count(void) {
     int n = 0;
     for (int i = 0; i < gNQ6; i++) if (gQ6[i].buf != NULL) n++;
+    return n;
+}
+
+// ---- Q5_K weight table (176-B super-blocks) ----
+// Resident raw Q5_K rows for the graph projection route only (q5k_mul_mv at P=1, q5k_mul_mm
+// otherwise). Handles live in their own id range, offset by MG_Q5_BASE, so a Q5_K wid can never
+// alias a Q4_K or Q6_K wid. Both kernels are optional: without them every upload fails closed.
+typedef struct {
+    CFTypeRef buf; // retained id<MTLBuffer>, raw Q5_K bytes [out * nblk * 176]
+    int out;
+    int in;
+    int nblk;
+} Q5KW;
+
+#define MG_MAX_Q5 8192
+#define MG_Q5_BASE 2000000
+static Q5KW gQ5[MG_MAX_Q5];
+static int gNQ5 = 0;
+
+static int q5k_valid(int wid) {
+    int idx = wid - MG_Q5_BASE;
+    return idx >= 0 && idx < gNQ5 && gQ5[idx].buf != NULL;
+}
+
+int mg_q5k_ready(void) {
+    return q4k_init() && psoQ5KMulMv != nil && psoQ5KMulMM != nil;
+}
+
+// mg_q5k_upload makes a row-major Q5_K payload (out rows, in == nblk*256, 176 B/super-block)
+// resident and returns a handle >= MG_Q5_BASE, or -1. nocopy binds page-aligned caller-owned
+// bytes directly (the Go owner pins them until release); otherwise the bytes are copied.
+int mg_q5k_upload(const unsigned char* raw, int out, int in, int nocopy) {
+    if (raw == NULL || gDev == nil || !mg_q5k_ready()) return -1;
+    if (in <= 0 || in % 256 != 0 || out <= 0) return -1;
+    int idx = -1;
+    for (int i = 0; i < gNQ5; i++) if (gQ5[i].buf == NULL) { idx = i; break; }
+    if (idx < 0) {
+        if (gNQ5 >= MG_MAX_Q5) return -1;
+        idx = gNQ5++;
+    }
+    int nblk = in / 256;
+    long bytes = (long)out * nblk * 176;
+    id<MTLBuffer> b = nil;
+    if (nocopy) {
+        long page = sysconf(_SC_PAGESIZE);
+        long buffer_bytes = bytes;
+        if (page > 1 && bytes % page != 0) buffer_bytes += page - bytes % page;
+        b = [gDev newBufferWithBytesNoCopy:(void*)raw length:(NSUInteger)buffer_bytes
+                                   options:MTLResourceStorageModeShared deallocator:nil];
+    } else {
+        b = [gDev newBufferWithLength:(NSUInteger)bytes options:MTLResourceStorageModeShared];
+        if (b != nil) memcpy(b.contents, raw, (size_t)bytes);
+    }
+    if (b == nil) {
+        if (idx == gNQ5 - 1) gNQ5--;
+        return -1;
+    }
+    gQ5[idx].buf = CFBridgingRetain(b);
+    gQ5[idx].out = out;
+    gQ5[idx].in = in;
+    gQ5[idx].nblk = nblk;
+    return MG_Q5_BASE + idx;
+}
+
+void mg_q5k_release(int wid) {
+    if (!q5k_valid(wid)) return;
+    int idx = wid - MG_Q5_BASE;
+    CFBridgingRelease(gQ5[idx].buf);
+    memset(&gQ5[idx], 0, sizeof(Q5KW));
+    while (gNQ5 > 0 && gQ5[gNQ5 - 1].buf == NULL) gNQ5--;
+}
+
+int mg_q5k_live_count(void) {
+    int n = 0;
+    for (int i = 0; i < gNQ5; i++) if (gQ5[i].buf != NULL) n++;
     return n;
 }
 
@@ -2915,6 +3143,36 @@ void *mg_graph_encode_q6k(void *opaque, int wid) {
 void *mg_graph_encode_q6k_from(void *opaque,int wid,void*input,int elems) {
     MGProjectionGraph*g=opaque;int i=wid-MG_Q6_BASE;id<MTLBuffer>x=(__bridge id<MTLBuffer>)input;if(!g||g->committed||!x||!q6k_valid(wid)||gQ6[i].in*g->P!=elems||![g->results containsObject:x])return NULL;
     return mg_graph_encode_q6k_input(g,wid,x);
+}
+// mg_graph_encode_q5k_from encodes one resident Q5_K projection of a graph-owned [P,in] panel:
+// q5k_mul_mv at P=1 (whatever the graph's GEMV opt-in, since Q5_K has no historical parity kernel
+// to preserve), q5k_mul_mm otherwise. NULL before any encoder or result when the input or weight
+// is invalid.
+void *mg_graph_encode_q5k_from(void *opaque, int wid, void *input, int elems) {
+    MGProjectionGraph *g = opaque; id<MTLBuffer> x = (__bridge id<MTLBuffer>)input;
+    if (!g || g->committed || !x || !q5k_valid(wid) || !mg_q5k_ready()) return NULL;
+    Q5KW *w = &gQ5[wid - MG_Q5_BASE];
+    if (w->in * g->P != elems || ![g->results containsObject:x]) return NULL;
+    id<MTLBuffer> y = (__bridge id<MTLBuffer>)mg_graph_result(g, (NSUInteger)g->P * (NSUInteger)w->out);
+    if (!y) return NULL;
+    id<MTLComputeCommandEncoder> e = [g->cb computeCommandEncoder];
+    if (!e) return NULL;
+    [e setComputePipelineState:(g->P == 1 ? psoQ5KMulMv : psoQ5KMulMM)];
+    [e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:0 atIndex:0];
+    [e setBuffer:x offset:0 atIndex:1];
+    [e setBuffer:y offset:0 atIndex:2];
+    [e setBytes:&w->nblk length:sizeof(int) atIndex:3];
+    [e setBytes:&w->out length:sizeof(int) atIndex:4];
+    if (g->P == 1) {
+        [e dispatchThreadgroups:MTLSizeMake((NSUInteger)(w->out + MG_Q5K_MV_ROWS - 1) / MG_Q5K_MV_ROWS, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(MG_Q5K_MV_THREADS, 1, 1)];
+    } else {
+        [e setBytes:&g->P length:sizeof(int) atIndex:5];
+        [e dispatchThreadgroups:MTLSizeMake((NSUInteger)((g->P + 31) / 32), (NSUInteger)((w->out + 63) / 64), 1)
+            threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+    }
+    [e endEncoding];
+    return (__bridge void*)y;
 }
 extern void *mg_q8_graph_encode(void *graph, int wid);
 extern void *mg_q8_graph_encode_from(void *graph, int wid, void *q, void *d, int elems);

@@ -36,6 +36,9 @@ var (
 	// metalQ6KW caches one GPU Q6_K weight handle per (model, weight-name) for the fused MLP's
 	// Q6_K down_proj. Same nil-caching policy as metalQ4KW. Guarded by metalQ4KMu.
 	metalQ6KW = map[*Model]map[string]*metalgemm.Q6KWeight{}
+	// metalQ5KW caches one GPU Q5_K weight handle per (model, weight-name) for the projection
+	// graph's native Qwen3.5 linear-attention rows. Same nil-caching policy. Guarded by metalQ4KMu.
+	metalQ5KW = map[*Model]map[string]*metalgemm.Q5KWeight{}
 	// metalQ2KW caches one GPU Q2_K weight handle per (model, weight-name). Same nil-caching
 	// policy as metalQ4KW. Guarded by metalQ4KMu.
 	metalQ2KW = map[*Model]map[string]*metalgemm.Q2KWeight{}
@@ -838,6 +841,35 @@ func (m *Model) metalQ6KWeight(name string, qt *kQuantTensor) *metalgemm.Q6KWeig
 	return w
 }
 
+// metalQ5KWeight returns this model's GPU Q5_K handle for name, uploading once (nil cached too).
+// The native-row loader page-aligns these bytes, so the upload aliases them without a device copy.
+func (m *Model) metalQ5KWeight(name string, qt *kQuantTensor) *metalgemm.Q5KWeight {
+	if qt == nil || qt.kind != kindQ5K {
+		return nil
+	}
+	metalQ4KMu.Lock()
+	defer metalQ4KMu.Unlock()
+	tbl := metalQ5KW[m]
+	if tbl == nil {
+		tbl = map[string]*metalgemm.Q5KWeight{}
+		metalQ5KW[m] = tbl
+	}
+	if w, ok := tbl[name]; ok {
+		return w
+	}
+	raw := qt.residentRawSnapshot()
+	if raw == nil {
+		var err error
+		if raw, err = qt.materializeRaw(); err != nil {
+			tbl[name] = nil
+			return nil
+		}
+	}
+	w := metalgemm.UploadQ5KGoOwned(raw, qt.out, qt.in)
+	tbl[name] = w
+	return w
+}
+
 // metalQ6KUploadAllowedLocked is the per-tensor admission for the lazy Q6_K upload. Caller holds
 // metalQ4KMu. An alias-eligible payload adds no device bytes, so it is judged only against the
 // activation/KV headroom (q6kAliasFits). A genuinely copied payload is judged by the additive
@@ -1037,8 +1069,37 @@ func (m *Model) metalQ8Weight(name string, qt *q8Tensor) *metalgemm.Q8Weight {
 	return w
 }
 
-func (m *Model) promoteMetalQ8Residency() error {
+// metalNativeGraphProjection reports whether a promised runtime projection is resident in a
+// native k-quant form the projection graph encodes directly (Q4_K, Q6_K, or Q5_K when its Metal
+// kernels exist). Such a projection is served from its own bytes and leaves the Q8 band.
+func (m *Model) metalNativeGraphProjection(name string) bool {
+	if m.q4kw[name] != nil {
+		return true
+	}
+	if q := m.kqw[name]; q != nil {
+		return q.kind == kindQ6K || (q.kind == kindQ5K && metalgemm.Q5KAvailable())
+	}
+	return false
+}
+
+// metalQ8BandNames is the runtime topology's projection set minus the projections the loader kept
+// natively resident: the Q8 band the no-copy promotion actually publishes.
+func (m *Model) metalQ8BandNames() ([]string, error) {
 	names, err := qwen38MetalQ8RuntimeNames(m.Cfg)
+	if err != nil {
+		return nil, err
+	}
+	band := names[:0:0]
+	for _, name := range names {
+		if !m.metalNativeGraphProjection(name) {
+			band = append(band, name)
+		}
+	}
+	return band, nil
+}
+
+func (m *Model) promoteMetalQ8Residency() error {
+	names, err := m.metalQ8BandNames()
 	if err != nil {
 		// Cache the guard reason too so MetalQ8ResidencyError() can explain a declined
 		// promotion to the startup report even on a non-exact model.
@@ -1157,7 +1218,7 @@ func (m *Model) EagerMetalQ8Residency() error {
 	// Q8 is the no-copy band. Only the exact 64-layer Qwen3.8 hybrid has a promised Q8 topology;
 	// for any other model promoteMetalQ8Residency returns its not-applicable guard reason, which
 	// is not a failure of the generic Metal-armed path.
-	names, guardErr := qwen38MetalQ8RuntimeNames(m.Cfg)
+	names, guardErr := m.metalQ8BandNames()
 	if guardErr != nil {
 		return nil
 	}
@@ -1332,7 +1393,7 @@ func (m *Model) metalQ8Weights() map[string]bool {
 	if !metalgemm.Available() {
 		return nil
 	}
-	if names, err := qwen38MetalQ8RuntimeNames(m.Cfg); err == nil {
+	if names, err := m.metalQ8BandNames(); err == nil {
 		if m.promoteMetalQ8Residency() != nil {
 			return nil
 		}
@@ -1477,7 +1538,14 @@ func releaseMetalQ4KResidency(m *Model) {
 	delete(metalQ6Exact, m)
 	tblQ2K := metalQ2KW[m]
 	delete(metalQ2KW, m)
+	tblQ5K := metalQ5KW[m]
+	delete(metalQ5KW, m)
 	metalQ4KMu.Unlock()
+	for _, w := range tblQ5K {
+		if w != nil {
+			w.Release()
+		}
+	}
 	for _, w := range tbl {
 		if w != nil {
 			w.Release()

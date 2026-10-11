@@ -131,21 +131,6 @@ func stepBatchQwen35HybridQ4KMetal(bs *BatchSession, ids []int) ([][]float32, bo
 	return splitScaledLogits(nil, logits, B, cfg.VocabSize, cfg), true
 }
 
-func qwen35BatchQ8Handles(m *Model, names []string) []*metalgemm.Q8Weight {
-	out := make([]*metalgemm.Q8Weight, len(names))
-	for i, name := range names {
-		qt := m.q8w[name]
-		if qt == nil {
-			return nil
-		}
-		out[i] = m.metalQ8Weight(name, qt)
-		if out[i] == nil {
-			return nil
-		}
-	}
-	return out
-}
-
 func joinQwen35Rows(rows [][]float32, w int) []float32 {
 	out := make([]float32, len(rows)*w)
 	for i, r := range rows {
@@ -216,21 +201,20 @@ func resolveQwen35BatchLayerWeights(m *Model, cfg Config, bs *BatchSession, l in
 				return lw, false
 			}
 		}
-		n := []string{p("linear_attn.in_proj_qkv.weight"), p("linear_attn.in_proj_z.weight"), p("linear_attn.in_proj_b.weight"), p("linear_attn.in_proj_a.weight"), p("linear_attn.out_proj.weight")}
-		h := qwen35BatchQ8Handles(m, n)
-		if len(h) != 5 {
+		w, ok := m.qwen35MixerDecodeWeights(l)
+		if !ok {
 			return lw, false
 		}
-		w := metalgemm.Qwen35DecodeWeights{InQKV: h[0], InZ: h[1], InB: h[2], InA: h[3], Out: h[4]}
 		lw.linear = &w
 	} else {
-		h := qwen35BatchQ8Handles(m, []string{p("self_attn.q_proj.weight"), p("self_attn.k_proj.weight")})
+		q, nativeQ, qOK := m.metalDecodeProjection(p("self_attn.q_proj.weight"))
+		k, nativeK, kOK := m.metalDecodeProjection(p("self_attn.k_proj.weight"))
 		v := m.metalQ4KWeight(p("self_attn.v_proj.weight"), m.q4kw[p("self_attn.v_proj.weight")])
 		o := m.metalQ4KWeight(p("self_attn.o_proj.weight"), m.q4kw[p("self_attn.o_proj.weight")])
-		if len(h) != 2 || v == nil || o == nil {
+		if !qOK || !kOK || v == nil || o == nil {
 			return lw, false
 		}
-		w := metalgemm.Qwen35FullAttentionWeights{Q: h[0], K: h[1], V: v}
+		w := metalgemm.Qwen35FullAttentionWeights{Q: q, K: k, V: v, NativeQ: nativeQ, NativeK: nativeK}
 		lw.full = &w
 		lw.out = o
 	}

@@ -58,21 +58,14 @@ func RunQwen35DecodeBatch(req Qwen35DecodeBatchRequest) (out [][]float32, receip
 	if err != nil {
 		return nil, Qwen35DecodeBatchReceipt{}, false, err
 	}
-	weights := []*Q8Weight{req.Weights.InQKV, req.Weights.InZ, req.Weights.InB, req.Weights.InA, req.Weights.Out}
-	for _, weight := range weights {
-		if weight == nil {
-			return nil, Qwen35DecodeBatchReceipt{}, false, &GDNDeclinedError{Reason: "missing resident Q8 decode weight"}
+	projections := req.Weights.projections()
+	for _, projection := range projections {
+		if projection.q8 == nil && !projection.kq.IsSet() {
+			return nil, Qwen35DecodeBatchReceipt{}, false, &GDNDeclinedError{Reason: "missing resident decode weight " + projection.name}
 		}
 	}
-	for _, weight := range weights {
-		weight.mu.RLock()
-	}
-	defer func() {
-		for i := len(weights) - 1; i >= 0; i-- {
-			weights[i].mu.RUnlock()
-		}
-	}()
-	if err := validateLockedQwen35DecodeWeights(req.Weights, hidden, geometry); err != nil {
+	defer lockDecodeQ8(projections)()
+	if err := validateLockedQwen35DecodeProjections(projections, hidden, geometry); err != nil {
 		return nil, Qwen35DecodeBatchReceipt{}, false, err
 	}
 
@@ -88,13 +81,11 @@ func RunQwen35DecodeBatch(req Qwen35DecodeBatchRequest) (out [][]float32, receip
 	if err != nil {
 		return nil, receipt, false, err
 	}
-	quantizedInput, err := graph.QuantizeQ8(input)
-	if err != nil {
-		return nil, receipt, false, err
-	}
+	quantizers := 0
+	var quantizedInput, quantizedCore *QuantizedGraphResult
 	projected := make([]*GraphResult, 4)
-	for i, weight := range weights[:4] {
-		projected[i], err = graph.EncodeQ8From(weight, quantizedInput)
+	for i, projection := range projections[:4] {
+		projected[i], err = projection.encode(graph, input, &quantizedInput, &quantizers)
 		if err != nil {
 			return nil, receipt, false, err
 		}
@@ -103,14 +94,11 @@ func RunQwen35DecodeBatch(req Qwen35DecodeBatchRequest) (out [][]float32, receip
 	if err != nil {
 		return nil, receipt, false, err
 	}
-	quantizedCore, err := graph.QuantizeQ8(core)
+	result, err := projections[4].encode(graph, core, &quantizedCore, &quantizers)
 	if err != nil {
 		return nil, receipt, false, err
 	}
-	result, err := graph.EncodeQ8From(req.Weights.Out, quantizedCore)
-	if err != nil {
-		return nil, receipt, false, err
-	}
+	width := result.out
 	outputs, graphReceipt, err := graph.FinishRead(result)
 	accepted = graphReceipt.Committed
 	releases := 0
@@ -121,7 +109,7 @@ func RunQwen35DecodeBatch(req Qwen35DecodeBatchRequest) (out [][]float32, receip
 		Rows:           batch,
 		OwnerCount:     batch,
 		CommandBuffers: 1, Commits: decodeBoolInt(graphReceipt.Committed), CompletionWaits: decodeBoolInt(graphReceipt.CompletedWait),
-		ProjectionDispatches: 5, Quantizers: 2, GDNDispatches: 3 * batch, GDNEncoders: 1,
+		ProjectionDispatches: 5, Quantizers: quantizers, GDNDispatches: 3 * batch, GDNEncoders: 1,
 		InputUploads: 1, FinalReadbacks: graphReceipt.HostReadbacks,
 		OwnerRetains: batch, OwnerReleases: releases,
 		Encoders: graphReceipt.Encoders, Committed: graphReceipt.Committed, CompletedWait: graphReceipt.CompletedWait,
@@ -129,14 +117,14 @@ func RunQwen35DecodeBatch(req Qwen35DecodeBatchRequest) (out [][]float32, receip
 	if err != nil {
 		return nil, receipt, accepted, err
 	}
-	if len(outputs) != 1 || len(outputs[0]) != batch*req.Weights.Out.Out || !receipt.Committed || !receipt.CompletedWait ||
-		receipt.Encoders != 8 || receipt.FinalReadbacks != 1 || receipt.OwnerReleases != batch {
+	if len(outputs) != 1 || len(outputs[0]) != batch*width || !receipt.Committed || !receipt.CompletedWait ||
+		receipt.Encoders != quantizers+6 || receipt.FinalReadbacks != 1 || receipt.OwnerReleases != batch {
 		return nil, receipt, true, fmt.Errorf("metalgemm: incomplete Qwen batch decode receipt: %+v", receipt)
 	}
 	packed := outputs[0]
 	out = make([][]float32, batch)
 	for row := range out {
-		out[row] = packed[row*req.Weights.Out.Out : (row+1)*req.Weights.Out.Out]
+		out[row] = packed[row*width : (row+1)*width]
 	}
 	return out, receipt, true, nil
 }

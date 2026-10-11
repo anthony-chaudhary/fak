@@ -85,6 +85,9 @@ func dequantForNativeRowsTest(t *testing.T, typ TensorType, raw []byte, rows, in
 // reordering the raw rows and then dequantizing is bit-identical to dequantizing and then running
 // the production float normalizer (normalizeCanonicalTensorData), with nV != nK.
 func TestQwen35NativeRowsByteParity(t *testing.T) {
+	prevQ5 := metalQ5KNativeRows
+	t.Cleanup(func() { metalQ5KNativeRows = prevQ5 })
+	metalQ5KNativeRows = func() bool { return true }
 	cases := []struct {
 		canon string
 		rows  int
@@ -101,7 +104,7 @@ func TestQwen35NativeRowsByteParity(t *testing.T) {
 		{"model.layers.0.linear_attn.in_proj_qkv.weight", 2*2*64 + 4*64, false}, // ungated cfg, same GDN
 	}
 	for i, tc := range cases {
-		for _, typ := range []TensorType{TensorQ4_K, TensorQ6_K} {
+		for _, typ := range []TensorType{TensorQ4_K, TensorQ5_K, TensorQ6_K} {
 			t.Run(tc.canon+"/"+typ.String()+"/"+strconv.Itoa(i), func(t *testing.T) {
 				cfg := nativeRowsTestCfg(tc.gated)
 				shape := []int{tc.rows, cfg.HiddenSize}
@@ -151,8 +154,18 @@ func TestQwen35NativeRowsPredicateBoundaries(t *testing.T) {
 	if qwen35NativeRowResident(cfg, "model.layers.0.linear_attn.out_proj.weight", TensorQ4_K, []int{256, 256}, on) {
 		t.Error("out_proj (input-column transform) admitted")
 	}
+	prevQ5 := metalQ5KNativeRows
+	t.Cleanup(func() { metalQ5KNativeRows = prevQ5 })
+	metalQ5KNativeRows = func() bool { return false }
 	if qwen35NativeRowResident(cfg, qkv, TensorQ5_K, qkvShape, on) {
-		t.Error("Q5_K admitted (no Metal Q5_K GEMV; must stay on Q8)")
+		t.Error("Q5_K admitted on a host without the Metal Q5_K graph kernels")
+	}
+	metalQ5KNativeRows = func() bool { return true }
+	if !qwen35NativeRowResident(cfg, qkv, TensorQ5_K, qkvShape, on) {
+		t.Error("Q5_K rejected on a host with the Metal Q5_K graph kernels")
+	}
+	if qwen35NativeRowResident(cfg, qkv, TensorQ5_K, qkvShape, q4kLoadOptions{residentDenseQ6K: true}) {
+		t.Error("Q5_K admitted while dense Q5_K residency is off")
 	}
 	if qwen35NativeRowResident(cfg, qkv, TensorQ6_K, qkvShape, q4kLoadOptions{}) {
 		t.Error("Q6_K admitted while dense Q6_K residency is off")
@@ -339,6 +352,11 @@ func qwen35NativeRowsFixture(t *testing.T) *WeightSource {
 // native rows decode to dequant+normalize bit-exactly; (4) prefill and decode logits served
 // from native rows match the Q8-served baseline within quant tolerance and argmax.
 func TestQwen35NativeRowsLoaderEstimatorAndForward(t *testing.T) {
+	// Pin a Metal-Q5_K host so the route table is host-independent; the CPU forward serves
+	// resident Q5_K rows through its k-quant kernels either way.
+	prevQ5 := metalQ5KNativeRows
+	t.Cleanup(func() { metalQ5KNativeRows = prevQ5 })
+	metalQ5KNativeRows = func() bool { return true }
 	load := func(opts ...Q4KLoadOption) (*model.Model, int64) {
 		ws := qwen35NativeRowsFixture(t)
 		plan, err := ws.EstimateQ4KLoadMemoryPlan(opts...)
@@ -369,7 +387,7 @@ func TestQwen35NativeRowsLoaderEstimatorAndForward(t *testing.T) {
 	routes := []route{
 		{lp(0, "linear_attn.in_proj_qkv.weight"), "q4k"},
 		{lp(1, "linear_attn.in_proj_qkv.weight"), "kq"},
-		{lp(2, "linear_attn.in_proj_qkv.weight"), "q8"}, // Q5_K stays on Q8
+		{lp(2, "linear_attn.in_proj_qkv.weight"), "kq"}, // Q5_K on a Metal Q5_K host
 		{lp(0, "linear_attn.in_proj_z.weight"), "q4k"},
 		{lp(1, "linear_attn.in_proj_a.weight"), "q4k"},
 		{lp(2, "linear_attn.in_proj_b.weight"), "q4k"},
@@ -403,6 +421,7 @@ func TestQwen35NativeRowsLoaderEstimatorAndForward(t *testing.T) {
 	for _, c := range []struct{ gguf, canon string }{
 		{"blk.0.attn_qkv.weight", lp(0, "linear_attn.in_proj_qkv.weight")},
 		{"blk.1.attn_qkv.weight", lp(1, "linear_attn.in_proj_qkv.weight")},
+		{"blk.2.attn_qkv.weight", lp(2, "linear_attn.in_proj_qkv.weight")},
 		{"blk.0.attn_gate.weight", lp(0, "linear_attn.in_proj_z.weight")},
 		{"blk.3.attn_q.weight", lp(3, "self_attn.q_proj.weight")},
 	} {
@@ -468,24 +487,21 @@ func TestQwen35NativeRowsLoaderEstimatorAndForward(t *testing.T) {
 	}
 }
 
-func TestQwen35NativeRowsYieldToMetalDecodeRuntimeOnAppleSilicon(t *testing.T) {
+// A declared-cadence hybrid keeps native rows on every host: the resident Metal decode graph
+// encodes Q4_K/Q6_K/Q5_K projections directly, and only the remaining Q8 band is promoted.
+func TestQwen35NativeRowsKeptForMetalDecodeRuntime(t *testing.T) {
 	cfg := nativeRowsTestCfg(true)
 	cfg.FullAttentionInterval = 4
 	cfg.LinearKeyHeadDim, cfg.LinearValueHeadDim = 128, 128
+	if !model.Qwen35MetalQ8DecodeRuntime(cfg) {
+		t.Fatal("test geometry does not take the resident Metal decode runtime")
+	}
 	qkv := "model.layers.0.linear_attn.in_proj_qkv.weight"
 	shape := []int{512, 256}
-	prev := metalDecodeRuntimeHost
-	t.Cleanup(func() { metalDecodeRuntimeHost = prev })
-
-	metalDecodeRuntimeHost = false
 	if !qwen35NativeRowResident(cfg, qkv, TensorQ4_K, shape, q4kLoadOptions{}) {
-		t.Fatal("non-Metal host lost native rows on a declared-cadence hybrid")
+		t.Fatal("resident Metal decode runtime lost native Q4_K rows")
 	}
-	metalDecodeRuntimeHost = true
-	if qwen35NativeRowResident(cfg, qkv, TensorQ4_K, shape, q4kLoadOptions{}) {
-		t.Fatal("Metal host kept native rows that the resident Q8 decode runtime needs")
-	}
-	if !qwen35NativeRowResident(cfg, qkv, TensorQ4_K, shape, q4kLoadOptions{nativeRowsForced: true}) {
-		t.Fatal("WithNativeLinearAttnRows(true) did not force native rows on a Metal host")
+	if qwen35NativeRowResident(cfg, qkv, TensorQ4_K, shape, q4kLoadOptions{nativeRowsOff: true}) {
+		t.Fatal("WithNativeLinearAttnRows(false) did not force the Q8 route")
 	}
 }

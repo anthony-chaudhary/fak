@@ -104,6 +104,23 @@ func (b *QuantBuilder) AddCanonicalRowNormalizedQ6K(canon string, shape []int, r
 	return nil
 }
 
+// AddCanonicalRowNormalizedQ5K is the Q5_K (kqw) twin of AddCanonicalRowNormalizedQ6K, for a
+// q4_k_m checkpoint that ships the GDN in_proj_qkv / out_proj as Q5_K. The bytes are moved into a
+// page-aligned owner so the Metal Q5_K graph kernels can alias them without a device copy.
+func (b *QuantBuilder) AddCanonicalRowNormalizedQ5K(canon string, shape []int, raw []byte) error {
+	name, err := b.canonicalRowNormalizedTarget(canon, shape, raw, kindQ5K.blockBytes(), "Q5_K")
+	if err != nil {
+		return err
+	}
+	if b.m.kqw == nil {
+		b.m.kqw = map[string]*kQuantTensor{}
+	}
+	owned := makePageAlignedResidentBytes(len(raw))
+	copy(owned, raw)
+	b.m.kqw[name] = quantizeKQuantFromRaw(owned, shape[0], shape[1], kindQ5K)
+	return nil
+}
+
 func (b *QuantBuilder) canonicalRowNormalizedTarget(canon string, shape []int, raw []byte, blockBytes int, label string) (string, error) {
 	if b == nil || b.m == nil {
 		return "", fmt.Errorf("model: nil QuantBuilder")

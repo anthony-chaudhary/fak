@@ -22,6 +22,9 @@ type Qwen35DecodeWeights struct {
 	MLPActivation, MLPUp      *Q4KWeight
 	MLPDownQ4                 *Q4KWeight
 	MLPDownQ6                 *Q6KWeight
+	// Native serves a mixer projection (order InQKV, InZ, InB, InA, Out) from its resident
+	// k-quant rows instead of Q8; that projection's Q8 field must then be nil.
+	Native [5]KQuantProjection
 }
 
 // Qwen35DecodeBlock extends the mixer graph across the surrounding pre-norm
@@ -77,21 +80,14 @@ func EncodeQwen35Decode(graph *ProjectionGraph, input *GraphResult, req Qwen35De
 	if err != nil {
 		return nil, receipt, err
 	}
-	weights := []*Q8Weight{req.Weights.InQKV, req.Weights.InZ, req.Weights.InB, req.Weights.InA, req.Weights.Out}
-	for _, weight := range weights {
-		if weight == nil {
-			return nil, receipt, &GDNDeclinedError{Reason: "missing resident Q8 decode weight"}
+	projections := req.Weights.projections()
+	for _, projection := range projections {
+		if projection.q8 == nil && !projection.kq.IsSet() {
+			return nil, receipt, &GDNDeclinedError{Reason: "missing resident decode weight " + projection.name}
 		}
 	}
-	for _, weight := range weights {
-		weight.mu.RLock()
-	}
-	defer func() {
-		for i := len(weights) - 1; i >= 0; i-- {
-			weights[i].mu.RUnlock()
-		}
-	}()
-	if err := validateLockedQwen35DecodeWeights(req.Weights, hidden, geometry); err != nil {
+	defer lockDecodeQ8(projections)()
+	if err := validateLockedQwen35DecodeProjections(projections, hidden, geometry); err != nil {
 		return nil, receipt, err
 	}
 	if err := validateQwen35DecodeBlockHidden(req, hidden); err != nil {
@@ -106,13 +102,11 @@ func EncodeQwen35Decode(graph *ProjectionGraph, input *GraphResult, req Qwen35De
 			return nil, receipt, err
 		}
 	}
-	quantizedInput, err := graph.QuantizeQ8(mixerInput)
-	if err != nil {
-		return nil, receipt, err
-	}
+	quantizers := 0
+	var quantizedInput, quantizedCore *QuantizedGraphResult
 	projected := make([]*GraphResult, 4)
-	for i, weight := range weights[:4] {
-		projected[i], err = graph.EncodeQ8From(weight, quantizedInput)
+	for i, projection := range projections[:4] {
+		projected[i], err = projection.encode(graph, mixerInput, &quantizedInput, &quantizers)
 		if err != nil {
 			return nil, receipt, err
 		}
@@ -121,18 +115,14 @@ func EncodeQwen35Decode(graph *ProjectionGraph, input *GraphResult, req Qwen35De
 	if err != nil {
 		return nil, receipt, err
 	}
-	quantizedCore, err := graph.QuantizeQ8(core)
-	if err != nil {
-		return nil, receipt, err
-	}
-	result, err = graph.EncodeQ8From(req.Weights.Out, quantizedCore)
+	result, err = projections[4].encode(graph, core, &quantizedCore, &quantizers)
 	if err != nil {
 		return nil, receipt, err
 	}
 	projectionDispatches, mlpProjectionDispatches := 5, 0
 	rmsNormEncoders, residualAddEncoders, swiGLUEncoders := 0, 0, 0
 	constantUploads := 4
-	wantEncoders := 8
+	wantEncoders := quantizers + 6
 	if req.Block != nil {
 		if err = graph.AddInPlace(input, result); err != nil {
 			return nil, receipt, err
@@ -168,11 +158,11 @@ func EncodeQwen35Decode(graph *ProjectionGraph, input *GraphResult, req Qwen35De
 		result = input
 		projectionDispatches, mlpProjectionDispatches = 8, 3
 		rmsNormEncoders, residualAddEncoders, swiGLUEncoders = 2, 2, 1
-		constantUploads, wantEncoders = 6, 16
+		constantUploads, wantEncoders = 6, quantizers+14
 	}
 	receipt = Qwen35DecodeReceipt{
 		ProjectionDispatches: projectionDispatches, MixerProjectionDispatches: 5, MLPProjectionDispatches: mlpProjectionDispatches,
-		Quantizers: 2, GDNEncoders: 1, RMSNormEncoders: rmsNormEncoders, ResidualAddEncoders: residualAddEncoders, SwiGLUEncoders: swiGLUEncoders,
+		Quantizers: quantizers, GDNEncoders: 1, RMSNormEncoders: rmsNormEncoders, ResidualAddEncoders: residualAddEncoders, SwiGLUEncoders: swiGLUEncoders,
 		ConstantUploads: constantUploads, Encoders: graph.encoders - beforeEncoders,
 	}
 	if receipt.Encoders != wantEncoders {
@@ -222,7 +212,7 @@ func RunQwen35Decode(req Qwen35DecodeRequest) (out []float32, receipt Qwen35Deco
 	if err != nil {
 		return nil, receipt, accepted, err
 	}
-	if len(outputs) != 1 || len(outputs[0]) != req.Weights.Out.Out || !receipt.Committed || !receipt.CompletedWait ||
+	if len(outputs) != 1 || len(outputs[0]) != result.out || !receipt.Committed || !receipt.CompletedWait ||
 		receipt.Encoders != encoded.Encoders || receipt.FinalReadbacks != 1 {
 		return nil, receipt, true, fmt.Errorf("metalgemm: incomplete Qwen decode mixer receipt: %+v", receipt)
 	}
@@ -304,24 +294,23 @@ func validateGDNConstants(geometry GDNGeometry, panel GDNPanel) error {
 	return nil
 }
 
-func validateLockedQwen35DecodeWeights(weights Qwen35DecodeWeights, hidden int, geometry GDNGeometry) error {
-	wants := []struct {
-		name    string
-		weight  *Q8Weight
-		in, out int
-	}{
-		{"in_proj_qkv", weights.InQKV, hidden, geometry.convDim()},
-		{"in_proj_z", weights.InZ, hidden, geometry.valueDim()},
-		{"in_proj_b", weights.InB, hidden, geometry.NumValueHeads},
-		{"in_proj_a", weights.InA, hidden, geometry.NumValueHeads},
-		{"out_proj", weights.Out, geometry.valueDim(), hidden},
+// validateLockedQwen35DecodeProjections checks every resolved mixer projection's live handle and
+// shape. The caller holds the Q8 read locks (lockDecodeQ8).
+func validateLockedQwen35DecodeProjections(projections []decodeProjection, hidden int, geometry GDNGeometry) error {
+	wants := [5]struct{ in, out int }{
+		{hidden, geometry.convDim()}, {hidden, geometry.valueDim()}, {hidden, geometry.NumValueHeads},
+		{hidden, geometry.NumValueHeads}, {geometry.valueDim(), hidden},
 	}
-	for _, want := range wants {
-		if want.weight == nil {
-			return &GDNDeclinedError{Reason: "missing resident Q8 " + want.name}
+	if len(projections) != len(wants) {
+		return &GDNDeclinedError{Reason: "Qwen decode requires five mixer projections"}
+	}
+	for i, projection := range projections {
+		out, in, ok := projection.shape()
+		if !ok {
+			return &GDNDeclinedError{Reason: "invalid resident decode weight " + projection.name}
 		}
-		if want.weight.id < 0 || want.weight.In != want.in || want.weight.Out != want.out {
-			return &GDNDeclinedError{Reason: fmt.Sprintf("resident Q8 %s shape=%dx%d, want %dx%d", want.name, want.weight.Out, want.weight.In, want.out, want.in)}
+		if in != wants[i].in || out != wants[i].out {
+			return &GDNDeclinedError{Reason: fmt.Sprintf("resident %s shape=%dx%d, want %dx%d", projection.name, out, in, wants[i].out, wants[i].in)}
 		}
 	}
 	return nil

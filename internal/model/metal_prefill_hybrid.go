@@ -219,10 +219,17 @@ func qwen35GraphProjection(g *metalgemm.ProjectionGraph, s *Session, name string
 		return g.EncodeQ4KFrom(w, input)
 	}
 	if qt := m.kqw[name]; qt != nil {
-		// kqw also carries Q5_K/Q3_K/Q2_K tensors; only Q6_K has a graph encoder, so
-		// any other kind must refuse rather than upload its bytes as Q6_K.
+		// kqw also carries Q5_K/Q3_K/Q2_K tensors; only Q6_K and Q5_K have graph encoders,
+		// so any other kind must refuse rather than upload its bytes under another layout.
+		if qt.kind == kindQ5K {
+			w := m.metalQ5KWeight(name, qt)
+			if w == nil {
+				return nil, fmt.Errorf("metalgemm: Q5_K graph weight unavailable: %s", name)
+			}
+			return g.EncodeQ5KFrom(w, input)
+		}
 		if qt.kind != kindQ6K {
-			return nil, fmt.Errorf("metalgemm: k-quant graph weight is not Q6_K: %s", name)
+			return nil, fmt.Errorf("metalgemm: k-quant graph weight is not Q6_K or Q5_K: %s", name)
 		}
 		w := m.metalQ6KWeight(name, qt)
 		if w == nil {
@@ -347,6 +354,9 @@ func qwen35MetalMTPProjectionReady(m *Model, name string) bool {
 		return m.metalQ4KWeight(name, q) != nil
 	}
 	if q := m.kqw[name]; q != nil {
+		if q.kind == kindQ5K {
+			return m.metalQ5KWeight(name, q) != nil
+		}
 		return q.kind == kindQ6K && m.metalQ6KWeight(name, q) != nil
 	}
 	if q := m.q8w[name]; q != nil {
