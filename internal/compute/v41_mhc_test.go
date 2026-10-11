@@ -22,6 +22,7 @@ func TestV41MHCContract(t *testing.T) {
 		{V41MHCOpSplit, []Tensor{f32(rows, 24), f32(3), f32(24)}, []int{rows, 24}},
 		{V41MHCOpPre, []Tensor{f32(rows, 4, hidden), f32(rows, 24)}, []int{rows, hidden}},
 		{V41MHCOpPost, []Tensor{f32(rows, hidden), f32(rows, 4, hidden), f32(rows, 24)}, []int{rows, 4, hidden}},
+		{V41MHCOpRMSSplit, []Tensor{f32(rows, 24), f32(rows, 4, hidden), f32(27)}, []int{rows, 24}},
 	}
 	for _, tc := range valid {
 		in, out, err := validateV41MHC(tc.op, rows, hidden, 20, 1e-6, tc.operands...)
@@ -60,6 +61,8 @@ func TestV41MHCContract(t *testing.T) {
 		{V41MHCOpSplit, rows, 0, 1, 0},
 		{V41MHCOpSplit, rows, 0, 1, float32(math.NaN())},
 		{V41MHCOpSplit, rows, 0, 1, float32(math.Inf(1))},
+		{V41MHCOpRMSSplit, rows, hidden, 0, 1e-6},
+		{V41MHCOpRMSSplit, rows, 0, 1, 1e-6},
 		{V41MHCOp(9), rows, hidden, 1, 1e-6},
 	} {
 		if _, _, err := validateV41MHC(bad.op, bad.rows, bad.hidden, bad.iters, bad.eps); err == nil {
@@ -158,6 +161,24 @@ func v41MHCRefSplit(mixes, scale, base []float32, rows, iters int, eps float32) 
 	return out
 }
 
+// v41MHCRefRMSSplit scales each row's raw mixes by the host projection's
+// flatten-RMS factor (serial F32 sum, F64 reciprocal square root) and splits.
+func v41MHCRefRMSSplit(raw, streams, params []float32, rows, hidden, iters int, eps, rmsEps float32) []float32 {
+	width := 4 * hidden
+	scaled := make([]float32, len(raw))
+	for r := 0; r < rows; r++ {
+		var ss float32
+		for _, v := range streams[r*width : (r+1)*width] {
+			ss += float32(v * v)
+		}
+		rsqrt := float32(1 / math.Sqrt(float64(ss/float32(width)+rmsEps)))
+		for i := 0; i < 24; i++ {
+			scaled[r*24+i] = float32(raw[r*24+i] * rsqrt)
+		}
+	}
+	return v41MHCRefSplit(scaled, params[:3], params[3:], rows, iters, eps)
+}
+
 func v41MHCRefPre(streams, coeffs []float32, rows, hidden int) []float32 {
 	out := make([]float32, rows*hidden)
 	for r := 0; r < rows; r++ {
@@ -253,7 +274,8 @@ func TestV41MHCSourceContract(t *testing.T) {
 	}
 	shader := read("shaders/v41_mhc.comp")
 	for _, want := range []string{
-		"int mode;", "int rows;", "int hidden;", "int iters;", "float eps;",
+		"int mode;", "int rows;", "int hidden;", "int iters;", "float eps;", "float rmsEps;",
+		"precise float sq = B[s + k] * B[s + k];",
 		"bits += 0x7fffu + ((bits >> 16) & 1u);", "bits & 0xffff0000u",
 		"precise float p = B[m + h] * A[s + h * H];",
 		"precise float x = C[m + 4u + dst] * bf16(A[row * H + d]);",
@@ -265,8 +287,8 @@ func TestV41MHCSourceContract(t *testing.T) {
 	}
 	shim := read("vulkan_shim.cpp")
 	for _, want := range []string{
-		`P("v41_mhc.spv"), 4, 5 * sizeof(int)`,
-		"struct Push { int32_t mode, rows, hidden, iters; float eps; }",
+		`P("v41_mhc.spv"), 4, 6 * sizeof(int)`,
+		"struct Push { int32_t mode, rows, hidden, iters; float eps, rmsEps; }",
 		"for (int i = 0; i < 3; ++i) if (aliases(bufs[3], bufs[i])) return 2;",
 	} {
 		if !strings.Contains(shim, want) {

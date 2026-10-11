@@ -347,17 +347,19 @@ int fvk_v41_indexer_score_witness_f32(const void *dQ, const void *dKeys,
  * storage bindings A, B, C (read-only) and Out (fresh, disjoint from every
  * input); an unused input binding repeats A. coeffs rows are pre[4] | post[4] |
  * comb[16] (comb row-major [src,dst]). Modes (push ABI int32 mode, rows,
- * hidden, iters; float32 eps):
+ * hidden, iters; float32 eps, rmsEps):
  *   0 initial: A=x[rows,hidden] -> Out[rows,4,hidden], four BF16 copies
  *   1 split:   A=mixes[rows,24] B=scale[3] C=base[24] -> Out=coeffs[rows,24]
  *   2 pre:     A=streams[rows,4,hidden] B=coeffs -> Out[rows,hidden], BF16
  *   3 post:    A=x[rows,hidden] B=streams C=coeffs -> Out[rows,4,hidden], BF16
+ *   4 rms-split: A=raw mixes[rows,24] B=streams[rows,4,hidden] C=scale[3]|base[24]
+ *              -> coeffs; mixes scaled by 1/sqrt(mean(streams^2)+rmsEps) first
  * The module is optional: fvk_have_v41_mhc is 0 when it is absent or its
  * pipeline fails, and initialization does not fail on it. Return codes match
  * tail RoPE above; return 0 is provisional until the checked readback. */
 int fvk_have_v41_mhc(void);
 int fvk_v41_mhc_f32(int mode, const void *dA, const void *dB, const void *dC,
-                    void *dOut, int rows, int hidden, int iters, float eps);
+                    void *dOut, int rows, int hidden, int iters, float eps, float rmsEps);
 
 /* V4.1 one-query index selection after the indexer score. Four storage
  * bindings: scores[rows] F32 (compared as order-preserving integer keys),

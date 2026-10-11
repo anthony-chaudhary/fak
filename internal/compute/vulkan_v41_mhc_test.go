@@ -70,12 +70,23 @@ func TestVulkanV41MHC(t *testing.T) {
 				}
 				init, initErr := v.V41MHCInitialStreams(dx, rows, hidden)
 				coeffs, splitErr := v.V41MHCSplit(dm, dscale, dbase, rows, iters, eps)
+				// Raw mixes sized like an unscaled projection of the streams.
+				raw := make([]float32, len(mixes))
+				for i := range raw {
+					raw[i] = mixes[i] * float32(4*hidden) * 0.01
+				}
+				params := append(append([]float32(nil), scale...), base...)
+				wantRMS := v41MHCRefRMSSplit(raw, streams, params, rows, hidden, iters, eps, 1e-6)
+				draw := upload(t, []int{rows, 24}, raw)
+				dparams := upload(t, []int{27}, params)
+				rmsCoeffs, rmsErr := v.V41MHCRMSSplit(draw, ds, dparams, rows, hidden, iters, eps, 1e-6)
 				pre, preErr := v.V41MHCPre(ds, dk, rows, hidden)
 				post, postErr := v.V41MHCPost(dx, ds, dk, rows, hidden)
 				gotInit := read(t, init, initErr) // checked read fences the marked batch
 				gotCoeffs := read(t, coeffs, splitErr)
 				gotPre := read(t, pre, preErr)
 				gotPost := read(t, post, postErr)
+				gotRMS := read(t, rmsCoeffs, rmsErr)
 				if batched {
 					v.FlushBatch()
 				}
@@ -84,6 +95,10 @@ func TestVulkanV41MHC(t *testing.T) {
 				v41MHCRequireBits(t, "post", gotPost, v41MHCRefPost(x, streams, wantCoeffs, rows, hidden))
 				maxULP, at := v41MHCRequireULP(t, "split", gotCoeffs, wantCoeffs, v41MHCSplitULPBound)
 				t.Logf("split max ulp=%d at %d (got %g want %g; bound %d)", maxULP, at, gotCoeffs[at], wantCoeffs[at], v41MHCSplitULPBound)
+				// The serial sum is bit-exact; the device reciprocal square root
+				// adds about one ulp to every scaled mix before the same split.
+				rmsULP, rmsAt := v41MHCRequireULP(t, "rms-split", gotRMS, wantRMS, v41MHCSplitULPBound)
+				t.Logf("rms-split max ulp=%d at %d", rmsULP, rmsAt)
 			})
 		}
 	}
@@ -113,7 +128,7 @@ func TestVulkanV41MHC(t *testing.T) {
 		status := func(a, b, c, out *vulkanBuf, rows, hidden int) int {
 			vulkanMu.Lock()
 			defer vulkanMu.Unlock()
-			return v41MHCStatusLocked(V41MHCOpPost, a, b, c, out, rows, hidden, 0, 0)
+			return v41MHCStatusLocked(V41MHCOpPost, a, b, c, out, rows, hidden, 0, 0, 0)
 		}
 		xb, sb, kb := dx.buf.(*vulkanBuf), ds.buf.(*vulkanBuf), dk.buf.(*vulkanBuf)
 		if got := status(xb, sb, kb, sb, 2, 8); got != 2 {

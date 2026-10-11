@@ -9,6 +9,9 @@ layout(local_size_x = 64) in;
 // mode 1 split:   A=mixes[rows,24] B=scale[3] C=base[24] -> Out=coeffs[rows,24]
 // mode 2 pre:     A=streams[rows,4,H] B=coeffs[rows,24]  -> Out[rows,H]
 // mode 3 post:    A=x[rows,H] B=streams[rows,4,H] C=coeffs[rows,24] -> Out[rows,4,H]
+// mode 4 rms-split: A=raw mixes[rows,24] B=streams[rows,4,H] C=scale[3]|base[24]
+//                   -> Out=coeffs[rows,24]; mixes are first scaled by the flattened
+//                   streams' 1/sqrt(mean(x^2)+rmsEps), summed serially as the host does.
 // coeffs rows are pre[4] | post[4] | comb[16] (comb row-major [src,dst]).
 layout(std430, binding = 0) readonly buffer ABuf { float A[]; };
 layout(std430, binding = 1) readonly buffer BBuf { float B[]; };
@@ -21,6 +24,7 @@ layout(push_constant) uniform Push {
     int hidden;
     int iters;
     float eps;
+    float rmsEps;
 } pc;
 
 float bf16(float v) {
@@ -90,24 +94,22 @@ void initialStreams(uint i) {
     for (uint h = 0u; h < 4u; ++h) Out[base + h * H] = v;
 }
 
-void split(uint row) {
-    if (row >= uint(pc.rows)) return;
-    uint m = row * 24u;
+void splitCore(uint m, float mix[24], float sc[3], float bs[24]) {
     float eps = pc.eps;
     float c[16];
     for (uint j = 0u; j < 4u; ++j) {
-        precise float a = A[m + j] * B[0];
-        precise float preArg = a + C[j];
+        precise float a = mix[j] * sc[0];
+        precise float preArg = a + bs[j];
         precise float pre = sigmoidF32(preArg) + eps;
         Out[m + j] = pre;
-        precise float b = A[m + 4u + j] * B[1];
-        precise float postArg = b + C[4u + j];
+        precise float b = mix[4u + j] * sc[1];
+        precise float postArg = b + bs[4u + j];
         precise float post = 2.0 * sigmoidF32(postArg);
         Out[m + 4u + j] = post;
     }
     for (uint i = 0u; i < 16u; ++i) {
-        precise float x = A[m + 8u + i] * B[2];
-        precise float y = x + C[8u + i];
+        precise float x = mix[8u + i] * sc[2];
+        precise float y = x + bs[8u + i];
         c[i] = y;
     }
     for (uint r = 0u; r < 4u; ++r) {
@@ -142,6 +144,57 @@ void split(uint row) {
         }
     }
     for (uint i = 0u; i < 16u; ++i) Out[m + 8u + i] = c[i];
+}
+
+void split(uint row) {
+    if (row >= uint(pc.rows)) return;
+    uint m = row * 24u;
+    float mix[24];
+    float sc[3];
+    float bs[24];
+    for (uint i = 0u; i < 24u; ++i) {
+        mix[i] = A[m + i];
+        bs[i] = C[i];
+    }
+    for (uint i = 0u; i < 3u; ++i) sc[i] = B[i];
+    splitCore(m, mix, sc, bs);
+}
+
+// 1/sqrt(x) within about one ulp of the correctly rounded value: hardware
+// estimate refined by one Newton step with fused residuals.
+float rsqrtF32(float x) {
+    precise float y = inversesqrt(x);
+    precise float yy = y * y;
+    precise float e = fma(-x, yy, 1.0);
+    precise float h = 0.5 * y;
+    precise float r = fma(h, e, y);
+    return r;
+}
+
+void rmsSplit(uint row) {
+    if (row >= uint(pc.rows)) return;
+    uint m = row * 24u;
+    uint width = 4u * uint(pc.hidden);
+    uint s = row * width;
+    // Serial F32 sum in index order: bit-identical to the host's ss += v*v.
+    precise float ss = 0.0;
+    for (uint k = 0u; k < width; ++k) {
+        precise float sq = B[s + k] * B[s + k];
+        ss = ss + sq;
+    }
+    precise float mean = divRN(ss, float(width));
+    precise float arg = mean + pc.rmsEps;
+    float r = rsqrtF32(arg);
+    float mix[24];
+    float sc[3];
+    float bs[24];
+    for (uint i = 0u; i < 24u; ++i) {
+        precise float v = A[m + i] * r;
+        mix[i] = v;
+        bs[i] = C[3u + i];
+    }
+    for (uint i = 0u; i < 3u; ++i) sc[i] = C[i];
+    splitCore(m, mix, sc, bs);
 }
 
 void preCollapse(uint i) {
@@ -186,4 +239,5 @@ void main() {
     else if (pc.mode == 1) split(i);
     else if (pc.mode == 2) preCollapse(i);
     else if (pc.mode == 3) postMix(i);
+    else if (pc.mode == 4) rmsSplit(i);
 }

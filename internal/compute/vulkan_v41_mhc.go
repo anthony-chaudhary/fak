@@ -7,7 +7,10 @@ package compute
 */
 import "C"
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 var _ V41MHCBackend = (*vulkanBackend)(nil)
 
@@ -22,6 +25,13 @@ func (v *vulkanBackend) SupportsV41MHC() bool {
 
 func (v *vulkanBackend) V41MHCInitialStreams(x Tensor, rows, hidden int) (Tensor, error) {
 	return v.v41MHC(V41MHCOpInitial, rows, hidden, 0, 0, x)
+}
+
+func (v *vulkanBackend) V41MHCRMSSplit(raw, streams, params Tensor, rows, hidden, iters int, eps, rmsEps float32) (Tensor, error) {
+	if !(rmsEps > 0) || math.IsInf(float64(rmsEps), 0) {
+		return Tensor{}, &BackendError{Backend: "vulkan", Site: "V41MHC/rms-split", Class: VulkanClassInvalidGeometry, Err: ErrVulkanInvalidGeometry, Message: fmt.Sprintf("invalid rmsEps %g", rmsEps)}
+	}
+	return v.v41MHCEps(V41MHCOpRMSSplit, rows, hidden, iters, eps, rmsEps, raw, streams, params)
 }
 
 func (v *vulkanBackend) V41MHCSplit(mixes, scale, base Tensor, rows, iters int, eps float32) (Tensor, error) {
@@ -40,7 +50,11 @@ func (v *vulkanBackend) V41MHCPost(x, streams, coeffs Tensor, rows, hidden int) 
 // owned, never registered as transient scratch. No Upload, Read, or Free method
 // is called under vulkanMu. A pending batch is fenced by the caller's checked
 // readback; an already-observed submission fault fails here immediately.
-func (v *vulkanBackend) v41MHC(op V41MHCOp, rows, hidden, iters int, eps float32, operands ...Tensor) (out Tensor, err error) {
+func (v *vulkanBackend) v41MHC(op V41MHCOp, rows, hidden, iters int, eps float32, operands ...Tensor) (Tensor, error) {
+	return v.v41MHCEps(op, rows, hidden, iters, eps, 0, operands...)
+}
+
+func (v *vulkanBackend) v41MHCEps(op V41MHCOp, rows, hidden, iters int, eps, rmsEps float32, operands ...Tensor) (out Tensor, err error) {
 	site := "V41MHC/" + op.String()
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -82,7 +96,7 @@ func (v *vulkanBackend) v41MHC(op V41MHCOp, rows, hidden, iters int, eps float32
 	}
 	outBytes := 4 * v41MHCElements(outShape)
 	outBuf = v.dallocForClass(outBytes, MemoryActivation, "V4.1 mHC "+op.String()+" output")
-	status := v41MHCStatusLocked(op, bufs[0], bufs[1], bufs[2], outBuf, rows, hidden, iters, eps)
+	status := v41MHCStatusLocked(op, bufs[0], bufs[1], bufs[2], outBuf, rows, hidden, iters, eps, rmsEps)
 	if status != 0 {
 		return Tensor{}, vulkanV41MHCStatusError(site, status)
 	}
@@ -91,8 +105,8 @@ func (v *vulkanBackend) v41MHC(op V41MHCOp, rows, hidden, iters int, eps float32
 
 // Caller holds vulkanMu and owns the live handles. Keeping this adapter separate
 // lets the native rejection witness exercise the actual alias/extent checks.
-func v41MHCStatusLocked(op V41MHCOp, a, b, c, out *vulkanBuf, rows, hidden, iters int, eps float32) int {
-	return int(C.fvk_v41_mhc_f32(C.int(op), a.ptr, b.ptr, c.ptr, out.ptr, C.int(rows), C.int(hidden), C.int(iters), C.float(eps)))
+func v41MHCStatusLocked(op V41MHCOp, a, b, c, out *vulkanBuf, rows, hidden, iters int, eps, rmsEps float32) int {
+	return int(C.fvk_v41_mhc_f32(C.int(op), a.ptr, b.ptr, c.ptr, out.ptr, C.int(rows), C.int(hidden), C.int(iters), C.float(eps), C.float(rmsEps)))
 }
 
 func vulkanV41MHCStatusError(site string, status int) *BackendError {

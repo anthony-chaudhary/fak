@@ -2873,7 +2873,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     }
     // Optional: an absent or rejected mHC module leaves the capability false so
     // the model refuses its device-only route; it never fails initialization.
-    v41MHCPipelineBuilt = buildKernel(g_kern[K_V41_MHC], P("v41_mhc.spv"), 4, 5 * sizeof(int));
+    v41MHCPipelineBuilt = buildKernel(g_kern[K_V41_MHC], P("v41_mhc.spv"), 4, 6 * sizeof(int));
     // V4.1 index selection, trusted since registry V7/complete66 and optional
     // at init: an absent module leaves the capability false, never fails init.
     const bool v41IndexSelectBuilt = buildKernel(g_kern[K_V41_INDEX_SELECT], P("v41_index_select.spv"), 4, 16);
@@ -4181,17 +4181,15 @@ int fvk_have_v41_mhc(void) {
 }
 
 int fvk_v41_mhc_f32(int mode, const void* dA, const void* dB, const void* dC,
-                    void* dOut, int rows, int hidden, int iters, float eps) {
+                    void* dOut, int rows, int hidden, int iters, float eps, float rmsEps) {
     if (!g_ready) return 1;
     if (!fvk_have_v41_mhc()) return 3;
     if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
     if (g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
-    if (mode < 0 || mode > 3 || rows <= 0) return 2;
-    if (mode == 1) {
-        if (iters < 1 || !std::isfinite(eps) || !(eps > 0.0f)) return 2;
-    } else if (hidden <= 0) {
-        return 2;
-    }
+    if (mode < 0 || mode > 4 || rows <= 0) return 2;
+    if ((mode == 1 || mode == 4) && (iters < 1 || !std::isfinite(eps) || !(eps > 0.0f))) return 2;
+    if (mode == 4 && (!std::isfinite(rmsEps) || !(rmsEps > 0.0f))) return 2;
+    if (mode != 1 && hidden <= 0) return 2;
     const uint64_t r = uint64_t(rows), h = uint64_t(hidden);
     const uint64_t coeffs = r * 24u, row = r * h, streams = r * 4u * h;
     // Element counts per binding A, B, C, Out; an unused binding repeats A.
@@ -4202,6 +4200,7 @@ int fvk_v41_mhc_f32(int mode, const void* dA, const void* dB, const void* dC,
     case 1: counts[0] = coeffs; counts[1] = 3; counts[2] = 24; counts[3] = coeffs; threads = r; break;
     case 2: counts[0] = streams; counts[1] = coeffs; counts[2] = streams; counts[3] = row; threads = row; break;
     case 3: counts[0] = row; counts[1] = streams; counts[2] = coeffs; counts[3] = streams; threads = streams; break;
+    case 4: counts[0] = coeffs; counts[1] = streams; counts[2] = 27; counts[3] = coeffs; threads = r; break;
     }
     if (streams > UINT32_MAX || coeffs > UINT32_MAX) return 2;
     const uint64_t groups = (threads + 63u) / 64u;
@@ -4219,9 +4218,10 @@ int fvk_v41_mhc_f32(int mode, const void* dA, const void* dB, const void* dC,
              b->memoryOffset < a->memoryOffset + a->bytes);
     };
     for (int i = 0; i < 3; ++i) if (aliases(bufs[3], bufs[i])) return 2;
-    struct Push { int32_t mode, rows, hidden, iters; float eps; } pc{mode, rows, mode == 1 ? 0 : hidden, mode == 1 ? iters : 0, mode == 1 ? eps : 0.0f};
-    static_assert(sizeof(Push) == 20 && offsetof(Push, eps) == 16,
-                  "V4.1 mHC push ABI must be four int32 values then one float32");
+    const bool splits = mode == 1 || mode == 4;
+    struct Push { int32_t mode, rows, hidden, iters; float eps, rmsEps; } pc{mode, rows, mode == 1 ? 0 : hidden, splits ? iters : 0, splits ? eps : 0.0f, mode == 4 ? rmsEps : 0.0f};
+    static_assert(sizeof(Push) == 24 && offsetof(Push, eps) == 16 && offsetof(Push, rmsEps) == 20,
+                  "V4.1 mHC push ABI must be four int32 values then two float32");
     if (!dispatch(g_kern[K_V41_MHC], bufs, &pc, sizeof(pc), uint32_t(groups))) {
         return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
     }

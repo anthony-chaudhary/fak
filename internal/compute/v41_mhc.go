@@ -39,7 +39,17 @@ type V41MHCBackend interface {
 	// V41MHCPost: x[rows,hidden], streams[rows,4,hidden], coeffs[rows,24] ->
 	// next[rows,4,hidden] = BF16(sum_src comb[src,dst]*stream[src] + post[dst]*BF16(x)).
 	V41MHCPost(x, streams, coeffs Tensor, rows, hidden int) (Tensor, error)
+	// V41MHCRMSSplit: raw mixes[rows,24] (unscaled projection of the flattened
+	// streams), streams[rows,4,hidden], params[27] = scale[3]|base[24] ->
+	// coeffs[rows,24]. Each row's mixes are first multiplied by
+	// 1/sqrt(sum(x^2)/(4*hidden)+rmsEps) over that row's flattened streams, the
+	// sum taken serially in index order as the host projection does, then split
+	// exactly as V41MHCSplit.
+	V41MHCRMSSplit(raw, streams, params Tensor, rows, hidden, iters int, eps, rmsEps float32) (Tensor, error)
 }
+
+// V41MHCParamWidth is the rms-split parameter row: scale[3] | base[24].
+const V41MHCParamWidth = 3 + V41MHCCoeffWidth
 
 // V41MHCOp names one mode of the shared mHC module (its push-constant mode).
 type V41MHCOp int
@@ -49,6 +59,7 @@ const (
 	V41MHCOpSplit
 	V41MHCOpPre
 	V41MHCOpPost
+	V41MHCOpRMSSplit
 )
 
 func (op V41MHCOp) String() string {
@@ -61,6 +72,8 @@ func (op V41MHCOp) String() string {
 		return "pre-collapse"
 	case V41MHCOpPost:
 		return "post-mix"
+	case V41MHCOpRMSSplit:
+		return "rms-split"
 	}
 	return fmt.Sprintf("mhc-op-%d", int(op))
 }
@@ -83,7 +96,10 @@ func validateV41MHC(op V41MHCOp, rows, hidden, iters int, eps float32, operands 
 	var want []v41MHCOperand
 	var out []int
 	switch op {
-	case V41MHCOpInitial, V41MHCOpPre, V41MHCOpPost:
+	case V41MHCOpInitial, V41MHCOpPre, V41MHCOpPost, V41MHCOpRMSSplit:
+		if op == V41MHCOpRMSSplit && (iters < 1 || iters > maxABIInt || eps <= 0 || math.IsInf(float64(eps), 0) || eps != eps) {
+			return nil, nil, fmt.Errorf("compute: V4.1 mHC rms-split invalid iters=%d eps=%g", iters, eps)
+		}
 		if hidden <= 0 || hidden > maxABIInt {
 			return nil, nil, fmt.Errorf("compute: V4.1 mHC %s invalid hidden=%d", op, hidden)
 		}
@@ -117,6 +133,9 @@ func validateV41MHC(op V41MHCOp, rows, hidden, iters int, eps float32, operands 
 	case V41MHCOpPost:
 		want = []v41MHCOperand{{name: "x", shape: []int{rows, hidden}}, {name: "streams", shape: streams}, {name: "coeffs", shape: coeffs}}
 		out = streams
+	case V41MHCOpRMSSplit:
+		want = []v41MHCOperand{{name: "raw", shape: coeffs}, {name: "streams", shape: streams}, {name: "params", shape: []int{V41MHCParamWidth}}}
+		out = coeffs
 	}
 	if len(operands) != len(want) {
 		return nil, nil, fmt.Errorf("compute: V4.1 mHC %s takes %d operands, got %d", op, len(want), len(operands))
