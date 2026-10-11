@@ -937,3 +937,17 @@ Exported compatibility snapshot of historical credited-admission, credited-token
 VulkanReceiptBuildPlan fixes the independently trusted package, output package, and smoke policy used to verify a Vulkan binary receipt.
 
 **Distinct from:** It is the verifier's expected build-policy input, not vulkan_plan command-buffer scheduling and not the generic BuildPlan action planner.
+
+
+### forwardCoverage (per-token native traversal observation)
+
+forwardCoverage is the internal request-local observation emitted only after a logits-producing native V4.1 forward commits, recording configured and executed layers, head dimension, completion, and full versus incremental logits source for one output token.
+
+**Distinct from:** This is the in-process observation of one logits-producing traversal; the serialized NativeForwardCoverage receipt is its external projection, while generic coverage measures breadth across a declared universe.
+
+
+### NativeForwardCoverage (serialized per-token traversal proof)
+
+NativeForwardCoverage is the versioned receipt row attached one-for-one to generated output tokens, projecting the native model type, configured and executed layer counts, head dimension, full-depth/completeness flags, and full or incremental logits source.
+
+**Distinct from:** This is the serialized receipt projection consumed by evidence validators; internal forwardCoverage is captured at decode time, while generic coverage does not prove one token traversed the configured native depth.

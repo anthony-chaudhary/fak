@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **616** (clarity 0 + coverage 616) |
-| **Crystal-clear concepts (and climbing)** | **1184** crystal of 2974 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3067 / 3683** (83.3% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **1186** crystal of 2976 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3069 / 3685** (83.3% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 225 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **86** of 4218 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **86** of 4220 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 89.1/100 (grade B) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2974 concepts - score 89.1/100 (grade B) - disambiguation-debt 616
+concept-disambiguation chart - 2976 concepts - score 89.1/100 (grade B) - disambiguation-debt 616
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ###################......... 1184
+  * crystal       ###################......... 1186
   o defined       ############################ 1790
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -56,7 +56,7 @@ clarity mix by family (each cell = one concept):
   render-materialize *******************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (199 concept(s); 43 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
   session-runtime  *******************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (264 concept(s); 91 crystal)
-  support-maturity **********************************************ooooooooooooooooooooooooooo (73 concept(s); 46 crystal)
+  support-maturity ************************************************ooooooooooooooooooooooooooo (75 concept(s); 48 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    ***********************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (172 concept(s); 83 crystal)
@@ -72,7 +72,7 @@ coverage by family (positioned / discovered):
   guard-gate       ##########################.. 511/547
   pool             ###############............. 40/74
   render-materialize ########################.... 216/249
-  support-maturity ####################........ 77/109
+  support-maturity ####################........ 79/111
   witness-proof    ########################.... 173/201
   evict            ####################........ 56/79
   loop             ########################.... 100/117
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 83.3%  (3067/3683 confusable tokens positioned)
+namespace coverage  [###########################.....] 83.3%  (3069/3685 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 225
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 225/225
 
-name index: 4218 lookup name(s) -> 2974 concept(s), 86 ambiguous
+name index: 4220 lookup name(s) -> 2976 concept(s), 86 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **225 / 225** (225 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2160 / 5366 |
+| Boundaries drawn (mutual / total) | 2166 / 5372 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4218 over 2974 concepts |
+| Lookup names indexed | 4220 over 2976 concepts |
 | Lookup names landing on several concepts | 86 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2974 |
+| Concepts carrying a contrast set | 2976 |
 
 ## The concepts (best verdict first)
 
@@ -1208,6 +1208,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | support-maturity | **FP4_UNSUPPORTED_COMBINATION** - The wire value of the unsupported-combination refusal: the literal reason string emitted when an FP4 document's tuple contradicts the published definition of the format it names. Callers match on this code to distinguish a permanently invalid artifact from one this build merely cannot read yet. |
 | * | crystal | symbol | support-maturity | **CoverageEntries** - The modver adapter that lifts a flat {module: statement-coverage-percent} map into the map[string]ScoreEntry that Report.JoinScores consumes, tagging each entry ProvenanceWitnessed because the percent is read off a real go-coverprofile artifact rather than modeled (#2467). |
 | * | crystal | symbol | support-maturity | **CoverageScores** - The modver fold that decodes a go-coverprofile and returns the flat {module: percent} map, statement-WEIGHTED per module (covered statements over total statements across every file mapping to that module) rather than averaged per file, with repeated file+span blocks merged once and a malformed profile returned as an error instead of a partial fold (#2467). |
+| * | crystal | symbol | support-maturity | **forwardCoverage (per-token native traversal observation)** - forwardCoverage is the internal request-local observation emitted only after a logits-producing native V4.1 forward commits, recording configured and executed layers, head dimension, completion, and full versus incremental logits source for one output token. |
+| * | crystal | symbol | support-maturity | **NativeForwardCoverage (serialized per-token traversal proof)** - NativeForwardCoverage is the versioned receipt row attached one-for-one to generated output tokens, projecting the native model type, configured and executed layer counts, head dimension, full-depth/completeness flags, and full or incremental logits source. |
 | * | crystal | symbol | support-maturity | **IsSupportedQwen35GDNPath (Qwen GDN execution identity allowlist)** - The model predicate accepts the closed set of implemented Qwen GDN execution path identifiers. Native agent receipts use it to preserve the selected backend marker without inventing a CUDA identity for other devices. |
 | * | crystal | symbol | support-maturity | **ReasonUnsupportedPatch** - Go constant naming the shared-task patch-result reason UNSUPPORTED_PATCH: the op and path combination falls outside the contract's closed patch grammar. |
 | * | crystal | symbol | support-maturity | **UNSUPPORTED_PATCH** - Wire reason token in shared-task patch-result JSON: the fold denied a patch whose op or path is outside the supported contract grammar. |
@@ -3252,8 +3254,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3206/5366 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2974 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3206/5372 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2976 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3262,7 +3264,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4218 lookup name(s) resolves - 86 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4220 lookup name(s) resolves - 86 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3279,7 +3281,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | guard-gate | 511 | 547 | 36 |
 | pool | 40 | 74 | 34 |
 | render-materialize | 216 | 249 | 33 |
-| support-maturity | 77 | 109 | 32 |
+| support-maturity | 79 | 111 | 32 |
 | witness-proof | 173 | 201 | 28 |
 | evict | 56 | 79 | 23 |
 | loop | 100 | 117 | 17 |

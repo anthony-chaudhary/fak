@@ -91,6 +91,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 		return nil, stats, v41StageErr(v41StageEmbedding, -1,
 			fmt.Errorf("%w: forwardV41Step requires a seeded session state", ErrV41ForwardStage))
 	}
+	st.forwardCoverage = nil
 	if scratch == nil {
 		scratch = &v41ProjScratch{}
 	}
@@ -417,6 +418,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 		st.attn = nil
 	}
 	stats.Committed = true
+	st.forwardCoverage = newNativeV41ForwardCoverage(cfg, stats.LayerCalls, NativeForwardLogitsSourceV41Incremental)
 	return res, stats, nil
 }
 

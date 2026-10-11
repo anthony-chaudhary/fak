@@ -2314,6 +2314,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			generated:       gen,
 		})
 		receipt := p.buildNativeInferenceReceipt(measurement, prefillS, decodeS, accounting)
+		if err := validateNativeInferenceReceiptForwardCoverage(p.m.Cfg, receipt); err != nil {
+			return nil, err
+		}
 		renderedSum := sha256.Sum256([]byte(prepared.rendered))
 		receipt.PromptTokenIDs = append([]int(nil), prepared.ids...)
 		receipt.TokenizerID = p.tok.Identity()
@@ -2349,6 +2352,31 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	// emits a tool_use block, so Claude Code's agent loop has nothing to execute.
 	comp = normalizeInKernelToolCalls(comp, offered, sp.ToolChoice, tools, messages)
 	return comp, nil
+}
+
+func validateNativeInferenceReceiptForwardCoverage(cfg model.Config, receipt *model.NativeInferenceReceipt) error {
+	if receipt == nil {
+		return nil
+	}
+	if len(receipt.ForwardCoverage) == 0 && !cfg.IsDeepSeekV41() {
+		return nil
+	}
+	if err := model.ValidateNativeForwardCoverage(receipt.ForwardCoverage, len(receipt.TokenIDs)); err != nil {
+		return err
+	}
+	for i := range receipt.ForwardCoverage {
+		coverage := receipt.ForwardCoverage[i]
+		if coverage.ModelType != cfg.ModelType {
+			return fmt.Errorf("%w: output %d model_type %q != live model_type %q", model.ErrNativeForwardCoverageInvalid, i, coverage.ModelType, cfg.ModelType)
+		}
+		if coverage.ConfiguredLayers != cfg.NumLayers {
+			return fmt.Errorf("%w: output %d configured_layers %d != live configured_layers %d", model.ErrNativeForwardCoverageInvalid, i, coverage.ConfiguredLayers, cfg.NumLayers)
+		}
+		if coverage.HeadDim != cfg.HeadDim {
+			return fmt.Errorf("%w: output %d head_dim %d != live head_dim %d", model.ErrNativeForwardCoverageInvalid, i, coverage.HeadDim, cfg.HeadDim)
+		}
+	}
+	return nil
 }
 
 func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferenceMeasurement, prefillS, decodeS float64, accounting ...*model.NativeCacheAccounting) *model.NativeInferenceReceipt {
@@ -2395,6 +2423,7 @@ func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferen
 		PrefillChunkTokens:         p.nativeInferencePrefillChunkTokens(),
 		NativeSelection:            nativeSelection,
 		NativeSelectionDigest:      nativeSelectionDigest,
+		ForwardCoverage:            append([]model.NativeForwardCoverage(nil), measurement.forwardCoverage...),
 		Qwen35MetalForwardSequence: qwen35MetalForwardSequence,
 		Qwen35MetalStateIdentity:   qwen35MetalStateIdentity,
 		Qwen35SequencePrefillRoute: cloneNativeSequencePrefillRouteReceipt(measurement.qwen35SequencePrefillRoute),

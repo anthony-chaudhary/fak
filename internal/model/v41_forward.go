@@ -130,6 +130,9 @@ type v41ForwardState struct {
 	history []int
 	attn    *V41AttentionState
 	layers  []*V41AttentionState
+	// forwardCoverage is replaced only after a successful logits-producing
+	// traversal and is intentionally absent from prefix snapshots.
+	forwardCoverage *NativeForwardCoverage
 
 	// indexKeyMemo is the session's per-index-source-layer memo of the last
 	// committed fold; indexKeyPrior is the read-only copy a re-fold run reuses.
@@ -318,6 +321,9 @@ func (st *v41ForwardState) retainedCopyCount() int {
 // logits. It is package-private: the public entry points are Model.Forward and
 // Session.Prefill/Step.
 func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, err error) {
+	if st != nil {
+		st.forwardCoverage = nil
+	}
 	if err := m.v41ForwardAdmitted(); err != nil {
 		return nil, err
 	}
@@ -450,10 +456,12 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	// forward. Disabled (the default) it is nil and every emit is skipped, so the
 	// forward is byte-for-byte unchanged and adds no allocations.
 	trace := m.v41ActivationTracer(seq)
+	executedLayers := 0
 	for l := 0; l < cfg.NumLayers; l++ {
 		if err := m.v41Layer(l, seq, x, streams, full, hd, nH, H, eps, hcIters, hcEps, routeCfg, runState, scratch, trace); err != nil {
 			return nil, err
 		}
+		executedLayers++
 		hidden := flatten(x)
 		if resident != nil {
 			rows, err := resident.hiddenRows(l)
@@ -512,9 +520,23 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		} else {
 			st.attn = nil
 		}
+		st.forwardCoverage = newNativeV41ForwardCoverage(cfg, executedLayers, NativeForwardLogitsSourceV41Full)
 		committed = true
 	}
 	return act, nil
+}
+
+func newNativeV41ForwardCoverage(cfg Config, executedLayers int, source NativeForwardLogitsSource) *NativeForwardCoverage {
+	return &NativeForwardCoverage{
+		Schema:           NativeForwardCoverageSchemaV1,
+		ModelType:        cfg.ModelType,
+		ConfiguredLayers: cfg.NumLayers,
+		HeadDim:          cfg.HeadDim,
+		ExecutedLayers:   executedLayers,
+		FullDepth:        executedLayers == cfg.NumLayers,
+		Complete:         true,
+		LogitsSource:     source,
+	}
 }
 
 // v41RoleSchedule reports whether any configured layer resolves to a non-plain

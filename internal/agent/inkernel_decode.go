@@ -1035,8 +1035,11 @@ type decodeLane struct {
 	presPenalty float64
 	maxNew      int
 	measurement *nativeInferenceMeasurement
-	thinking    *nativeThinkingConstraint
-	firstDraw   func(int)
+	// forwardCoverageSource is an injected observation seam for the token/coverage
+	// pairing witness. Production leaves it nil and reads the live Session.
+	forwardCoverageSource nativeForwardCoverageSource
+	thinking              *nativeThinkingConstraint
+	firstDraw             func(int)
 	// samplerHook / emitHook are the CW-03 (#13351) purpose-observation taps. They are
 	// nil on the served path (a literal no-op) and set only by a cache-prime caller's
 	// witness; decodeOne fires them at the exact sample and emit seams, so a prime that
@@ -1119,6 +1122,7 @@ type nativeInferenceMeasurement struct {
 	startedAt                           time.Time
 	tokenIDs                            []int
 	logprobs                            []float64
+	forwardCoverage                     []model.NativeForwardCoverage
 	ttftS                               float64
 	inferenceDisabled                   bool
 	traceNow                            func() time.Time
@@ -1140,6 +1144,7 @@ func (m *nativeInferenceMeasurement) reset() {
 	}
 	m.tokenIDs = m.tokenIDs[:0]
 	m.logprobs = m.logprobs[:0]
+	m.forwardCoverage = m.forwardCoverage[:0]
 	m.ttftS = 0
 	m.traceStartedAt = time.Time{}
 	m.traceEvents = m.traceEvents[:0]
@@ -1163,6 +1168,25 @@ func (m *nativeInferenceMeasurement) record(logits []float32, token int) error {
 	}
 	m.tokenIDs = append(m.tokenIDs, token)
 	m.logprobs = append(m.logprobs, lp)
+	return nil
+}
+
+type nativeForwardCoverageSource interface {
+	NativeForwardCoverage() *model.NativeForwardCoverage
+}
+
+func (m *nativeInferenceMeasurement) recordForwardCoverage(s nativeForwardCoverageSource) error {
+	if m == nil || m.inferenceDisabled {
+		return nil
+	}
+	coverage := s.NativeForwardCoverage()
+	if coverage == nil {
+		return nil
+	}
+	if err := coverage.Validate(); err != nil {
+		return err
+	}
+	m.forwardCoverage = append(m.forwardCoverage, *coverage)
 	return nil
 }
 
@@ -1284,6 +1308,14 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 		return 0, false
 	}
 	if err := ln.measurement.record(ln.logits, next); err != nil {
+		ln.err, ln.done = err, true
+		return 0, false
+	}
+	coverageSource := ln.forwardCoverageSource
+	if coverageSource == nil {
+		coverageSource = ln.s
+	}
+	if err := ln.measurement.recordForwardCoverage(coverageSource); err != nil {
 		ln.err, ln.done = err, true
 		return 0, false
 	}

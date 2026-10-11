@@ -1,6 +1,96 @@
 package model
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
+
+const NativeForwardCoverageSchemaV1 = "fak.native-forward-coverage/1"
+
+// NativeForwardLogitsSource names the successful V4.1 logits-producing path
+// observed for one generated token. It is deliberately closed so a receipt
+// cannot relabel a full-history fold as an incremental step (or vice versa).
+type NativeForwardLogitsSource string
+
+const (
+	NativeForwardLogitsSourceV41Full        NativeForwardLogitsSource = "deepseek41_full_forward"
+	NativeForwardLogitsSourceV41Incremental NativeForwardLogitsSource = "deepseek41_incremental_step"
+)
+
+// ErrNativeForwardCoverageInvalid is the typed refusal for incomplete,
+// cardinality-mismatched, or otherwise malformed native forward evidence.
+var ErrNativeForwardCoverageInvalid = errors.New("model: native forward coverage invalid")
+
+// NativeForwardCoverage binds one output token to the actual V4.1 layer
+// traversal that produced its logits. ConfiguredLayers and HeadDim come from
+// the admitted model config; ExecutedLayers is counted at the successful layer
+// calls in the logits-producing path.
+type NativeForwardCoverage struct {
+	Schema           string                    `json:"schema"`
+	ModelType        string                    `json:"model_type"`
+	ConfiguredLayers int                       `json:"configured_layers"`
+	HeadDim          int                       `json:"head_dim"`
+	ExecutedLayers   int                       `json:"executed_layers"`
+	FullDepth        bool                      `json:"full_depth"`
+	Complete         bool                      `json:"complete"`
+	LogitsSource     NativeForwardLogitsSource `json:"logits_source"`
+}
+
+// Validate refuses coverage that does not prove a completed, full-depth V4.1
+// traversal from one of the two real logits-producing paths.
+func (c NativeForwardCoverage) Validate() error {
+	if c.Schema != NativeForwardCoverageSchemaV1 {
+		return fmt.Errorf("%w: schema %q", ErrNativeForwardCoverageInvalid, c.Schema)
+	}
+	switch c.ModelType {
+	case "deepseek41", "deepseek_v41", "deepseek_v41_text":
+	default:
+		return fmt.Errorf("%w: model_type %q", ErrNativeForwardCoverageInvalid, c.ModelType)
+	}
+	if c.ConfiguredLayers <= 0 {
+		return fmt.Errorf("%w: configured_layers must be positive", ErrNativeForwardCoverageInvalid)
+	}
+	if c.HeadDim <= 0 {
+		return fmt.Errorf("%w: head_dim must be positive", ErrNativeForwardCoverageInvalid)
+	}
+	if c.ExecutedLayers < 0 || c.ExecutedLayers > c.ConfiguredLayers {
+		return fmt.Errorf("%w: executed_layers %d outside [0,%d]", ErrNativeForwardCoverageInvalid, c.ExecutedLayers, c.ConfiguredLayers)
+	}
+	if c.ExecutedLayers != c.ConfiguredLayers || !c.FullDepth || !c.Complete {
+		return fmt.Errorf("%w: incomplete traversal executed=%d configured=%d full_depth=%t complete=%t", ErrNativeForwardCoverageInvalid, c.ExecutedLayers, c.ConfiguredLayers, c.FullDepth, c.Complete)
+	}
+	switch c.LogitsSource {
+	case NativeForwardLogitsSourceV41Full, NativeForwardLogitsSourceV41Incremental:
+	default:
+		return fmt.Errorf("%w: logits_source %q", ErrNativeForwardCoverageInvalid, c.LogitsSource)
+	}
+	return nil
+}
+
+// ValidateNativeForwardCoverage enforces the receipt's one-coverage-item per
+// generated-token contract and validates every item in output order.
+func ValidateNativeForwardCoverage(coverage []NativeForwardCoverage, tokenCount int) error {
+	if tokenCount < 0 || len(coverage) != tokenCount {
+		return fmt.Errorf("%w: coverage cardinality %d != token cardinality %d", ErrNativeForwardCoverageInvalid, len(coverage), tokenCount)
+	}
+	for i := range coverage {
+		if err := coverage[i].Validate(); err != nil {
+			return fmt.Errorf("%w: output %d: %v", ErrNativeForwardCoverageInvalid, i, err)
+		}
+	}
+	return nil
+}
+
+// NativeForwardCoverage returns a defensive copy of the last successful V4.1
+// logits-producing traversal. Callers append it to the request receipt as soon
+// as the corresponding output token is chosen.
+func (s *Session) NativeForwardCoverage() *NativeForwardCoverage {
+	if s == nil || s.v41Forward == nil || s.v41Forward.forwardCoverage == nil {
+		return nil
+	}
+	coverage := *s.v41Forward.forwardCoverage
+	return &coverage
+}
 
 // NativeCacheOperation names what a request did with the native KV cache. It is
 // a closed vocabulary: an emitter either declares one of these or omits the
@@ -204,6 +294,9 @@ type NativeInferenceReceipt struct {
 	PrefillChunkTokens    int                     `json:"prefill_chunk_tokens"`
 	NativeSelection       NativeSelectionIdentity `json:"kernel_selection"`
 	NativeSelectionDigest string                  `json:"kernel_selection_digest"`
+	// ForwardCoverage carries exactly one observation for each TokenIDs entry,
+	// in the same order. Call ValidateNativeForwardCoverage before emission.
+	ForwardCoverage []NativeForwardCoverage `json:"forward_coverage,omitempty"`
 	// Qwen35MetalForwardSequence is present only when the model session produced
 	// terminal evidence for the native whole-sequence Metal graph.
 	Qwen35MetalForwardSequence *Qwen35MetalForwardSequenceReceipt `json:"qwen35_metal_forward_sequence,omitempty"`
