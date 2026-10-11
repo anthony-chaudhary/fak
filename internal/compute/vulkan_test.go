@@ -130,6 +130,10 @@ func TestVulkanQ4KStageGrowthKeepsBatchActiveAndBounded(t *testing.T) {
 	defer func() { v.q4kStage = oldStage; v.budgetBytes = oldBudget }()
 	dx := v.Upload(NewF32(Default(), []int{in}, x), F32)
 	defer v.Free(dx)
+	// Native dispatch counters are compiled in but only record when the process
+	// starts with FAK_VULKAN_DISPATCH_PROFILE=1; without it every snapshot is
+	// zero, so only the batch-state and parity contract is checkable here.
+	profiled := os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") == "1"
 	before := v.VulkanDebugDispatchProfileSnapshot()
 	if before.OneShotComputeSubmits != 0 {
 		v.FlushBatch()
@@ -152,6 +156,9 @@ func TestVulkanQ4KStageGrowthKeepsBatchActiveAndBounded(t *testing.T) {
 		t.Fatalf("staged Q4_K cosine %.8f < 0.995", c)
 	}
 	v.FlushBatch()
+	if !profiled {
+		return
+	}
 	final := v.VulkanDebugDispatchProfileSnapshot()
 	if final.OneShotComputeSubmits != 0 {
 		t.Fatalf("flush path regressed to one-shot compute submits=%d", final.OneShotComputeSubmits)
