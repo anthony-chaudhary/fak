@@ -1,6 +1,10 @@
 package metalgemm
 
 // Prior-art: carloslfu/slotstream / MLX (https://github.com/carloslfu/slotstream)
+// ADAPT: vLLM prefetch.py@bd5bbce6e45e09dbd07ac3e8c394626c059078f7
+// (Apache-2.0, Copyright contributors to the vLLM project), credited SGLang
+// offloader.py@11bfd868ac36c0d5c7089c3f1a65ed575feb5540. Retain buffer ownership
+// until completion; shutdown is a Go extension. No Python/CUDA code copied.
 
 import (
 	"context"
@@ -119,9 +123,11 @@ type slot struct {
 }
 
 type loadingState struct {
-	slot *slot
-	done chan struct{}
-	err  error
+	slot      *slot
+	done      chan struct{}
+	err       error
+	reserved  bool
+	abandoned bool
 }
 
 // slotPool manages preallocated reusable buffers with LRU eviction and lease lifecycles.
@@ -207,6 +213,23 @@ func (p *slotPool) releaseSlot(s *slot) {
 	}
 }
 
+func (p *slotPool) releaseReservation(load *loadingState) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !load.reserved {
+		return
+	}
+	if load.slot.state == slotLoading {
+		load.abandoned = true
+		return
+	}
+	load.reserved = false
+	load.slot.refCount--
+	if load.slot.refCount == 0 && load.slot.state == slotReady {
+		p.notifyWaitersLocked()
+	}
+}
+
 func (p *slotPool) close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -283,12 +306,12 @@ func newLease(s *slot, pool *slotPool) *SlotLease {
 }
 
 type workerJob struct {
-	ctx    context.Context
-	reader io.ReaderAt
-	offset int64
-	size   int64
-	dst    []byte
-	done   chan workerResult
+	ctx      context.Context
+	reader   io.ReaderAt
+	offset   int64
+	size     int64
+	dst      []byte
+	complete func(workerResult)
 }
 
 type workerResult struct {
@@ -305,10 +328,11 @@ type ExpertStreamQueue struct {
 	readerMu   sync.RWMutex
 
 	// Worker pool
-	jobChan   chan workerJob
-	closeChan chan struct{}
-	workerWg  sync.WaitGroup
-	closed    atomic.Bool
+	jobChan    chan workerJob
+	closeChan  chan struct{}
+	dispatchMu sync.RWMutex
+	workerWg   sync.WaitGroup
+	closed     atomic.Bool
 
 	// Slot pool
 	slotPool *slotPool
@@ -364,22 +388,18 @@ func NewExpertStreamQueue(cfg StreamConfig) (*ExpertStreamQueue, error) {
 
 func (q *ExpertStreamQueue) workerLoop(laneID int) {
 	defer q.workerWg.Done()
-	for {
-		select {
-		case <-q.closeChan:
-			return
-		case job, ok := <-q.jobChan:
-			if !ok {
-				return
-			}
-			q.executeJob(job)
-		}
+	for job := range q.jobChan {
+		q.executeJob(job)
 	}
 }
 
 func (q *ExpertStreamQueue) executeJob(job workerJob) {
+	if q.closed.Load() {
+		job.complete(workerResult{err: ErrQueueClosed})
+		return
+	}
 	if job.ctx.Err() != nil {
-		job.done <- workerResult{n: 0, err: job.ctx.Err()}
+		job.complete(workerResult{err: job.ctx.Err()})
 		return
 	}
 
@@ -406,34 +426,67 @@ func (q *ExpertStreamQueue) executeJob(job workerJob) {
 	}
 	q.metrics.totalReads.Add(1)
 
-	job.done <- workerResult{n: n, err: err}
+	job.complete(workerResult{n: n, err: err})
 }
 
-func (q *ExpertStreamQueue) dispatchReadAsync(ctx context.Context, slot *slot, offset, size int64) (<-chan workerResult, error) {
+func (q *ExpertStreamQueue) dispatchReadAsync(ctx context.Context, slot *slot, offset, size int64, complete func(workerResult)) error {
+	if q.closed.Load() {
+		return ErrQueueClosed
+	}
 	q.readerMu.RLock()
 	r := q.reader
 	q.readerMu.RUnlock()
 	if r == nil {
-		return nil, errors.New("no reader configured for expert streaming")
+		return errors.New("no reader configured for expert streaming")
 	}
 
-	done := make(chan workerResult, 1)
 	job := workerJob{
-		ctx:    ctx,
-		reader: r,
-		offset: offset,
-		size:   size,
-		dst:    slot.buf,
-		done:   done,
+		ctx:      ctx,
+		reader:   r,
+		offset:   offset,
+		size:     size,
+		dst:      slot.buf,
+		complete: complete,
 	}
 
 	select {
 	case <-q.closeChan:
-		return nil, ErrQueueClosed
+		return ErrQueueClosed
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return ctx.Err()
 	case q.jobChan <- job:
-		return done, nil
+		return nil
+	}
+}
+
+func (q *ExpertStreamQueue) finishLoading(expertID int, load *loadingState, res workerResult) {
+	p := q.slotPool
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	s := load.slot
+	load.err = res.err
+	if p.closed {
+		load.err = ErrQueueClosed
+	}
+	if load.err == nil {
+		s.state = slotReady
+		s.validBytes = res.n
+		p.resident[expertID] = s
+		if load.abandoned {
+			load.reserved = false
+			s.refCount--
+		}
+	} else {
+		s.state = slotFree
+		s.expertID = -1
+		s.validBytes = 0
+		s.refCount = 0
+		load.reserved = false
+	}
+	delete(p.loading, expertID)
+	close(load.done)
+	if s.refCount == 0 {
+		p.notifyWaitersLocked()
 	}
 }
 
@@ -561,6 +614,11 @@ func (q *ExpertStreamQueue) StreamBatch(ctx context.Context, reqs []ExpertReques
 }
 
 func (q *ExpertStreamQueue) acquireExpert(ctx context.Context, expertID int, offset, size int64) (*SlotLease, error) {
+	q.dispatchMu.RLock()
+	defer q.dispatchMu.RUnlock()
+	if q.closed.Load() {
+		return nil, ErrQueueClosed
+	}
 	p := q.slotPool
 
 	for {
@@ -594,6 +652,10 @@ func (q *ExpertStreamQueue) acquireExpert(ctx context.Context, expertID int, off
 			}
 
 			p.mu.Lock()
+			if p.closed {
+				p.mu.Unlock()
+				return nil, ErrQueueClosed
+			}
 			if load.err != nil {
 				err := load.err
 				p.mu.Unlock()
@@ -627,78 +689,46 @@ func (q *ExpertStreamQueue) acquireExpert(ctx context.Context, expertID int, off
 			slot.validBytes = 0
 
 			load := &loadingState{
-				slot: slot,
-				done: make(chan struct{}),
+				slot:     slot,
+				done:     make(chan struct{}),
+				reserved: true,
 			}
 			p.loading[expertID] = load
 			p.mu.Unlock()
 
 			// Dispatch read to QD32 worker lanes.
-			doneCh, err := q.dispatchReadAsync(ctx, slot, offset, size)
+			err := q.dispatchReadAsync(ctx, slot, offset, size, func(res workerResult) {
+				q.finishLoading(expertID, load, res)
+			})
 			if err != nil {
-				p.mu.Lock()
-				slot.state = slotFree
-				slot.expertID = -1
-				slot.refCount = 0
-				delete(p.loading, expertID)
-				close(load.done)
-				p.notifyWaitersLocked()
-				p.mu.Unlock()
+				q.finishLoading(expertID, load, workerResult{err: err})
 				return nil, err
 			}
 
 			select {
-			case res := <-doneCh:
+			case <-load.done:
 				p.mu.Lock()
-				load.err = res.err
-				if res.err == nil {
-					slot.state = slotReady
-					slot.validBytes = res.n
-					p.resident[expertID] = slot
-				} else {
-					slot.state = slotFree
-					slot.expertID = -1
-					slot.validBytes = 0
-					slot.refCount = 0
-					p.notifyWaitersLocked()
+				if p.closed {
+					p.mu.Unlock()
+					p.releaseReservation(load)
+					return nil, ErrQueueClosed
 				}
-				delete(p.loading, expertID)
-				close(load.done)
+				if load.err != nil {
+					err := load.err
+					p.mu.Unlock()
+					return nil, err
+				}
+				load.reserved = false
+				lease := newLease(slot, p)
 				p.mu.Unlock()
-
-				if res.err != nil {
-					return nil, res.err
-				}
-				return newLease(slot, p), nil
+				return lease, nil
 
 			case <-ctx.Done():
-				// Caller cancelled while read is in-flight. Detach cleanup goroutine
-				// to safely retain or free the slot once the worker finishes.
-				go func() {
-					res := <-doneCh
-					p.mu.Lock()
-					defer p.mu.Unlock()
-					load.err = res.err
-					if res.err == nil {
-						slot.state = slotReady
-						slot.validBytes = res.n
-						p.resident[expertID] = slot
-					} else {
-						slot.state = slotFree
-						slot.expertID = -1
-						slot.validBytes = 0
-					}
-					slot.refCount--
-					if slot.refCount <= 0 {
-						slot.refCount = 0
-						p.notifyWaitersLocked()
-					}
-					delete(p.loading, expertID)
-					close(load.done)
-				}()
+				p.releaseReservation(load)
 				return nil, ctx.Err()
 
 			case <-q.closeChan:
+				p.releaseReservation(load)
 				return nil, ErrQueueClosed
 			}
 		}
@@ -835,6 +865,10 @@ func (q *ExpertStreamQueue) Close() error {
 	}
 	q.slotPool.close()
 	close(q.closeChan)
+	// Wake admitted callers before excluding dispatch and draining accepted jobs.
+	q.dispatchMu.Lock()
+	close(q.jobChan)
+	q.dispatchMu.Unlock()
 	q.workerWg.Wait()
 	return nil
 }
