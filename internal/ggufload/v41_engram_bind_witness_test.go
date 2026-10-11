@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -105,6 +106,14 @@ func TestV41EngramBindLoadWitness(t *testing.T) {
 			t.Fatalf("layer %d: bind: %v", eng.LayerIDs[i], err)
 		}
 	}
-	t.Logf("V41_ENGRAM_BIND mode=%s layers=%v served_bytes=%d encoded_bytes=%d setup_s=%.3f bind_wall_s=%.3f digests=%v",
-		mode, eng.LayerIDs, served, encoded, setup.Seconds(), wall.Seconds(), digests)
+	hwm := "unknown"
+	if status, err := os.ReadFile("/proc/self/status"); err == nil {
+		for _, line := range strings.Split(string(status), "\n") {
+			if v, ok := strings.CutPrefix(line, "VmHWM:"); ok {
+				hwm = strings.Join(strings.Fields(v), "")
+			}
+		}
+	}
+	t.Logf("V41_ENGRAM_BIND mode=%s layers=%v served_bytes=%d encoded_bytes=%d setup_s=%.3f bind_wall_s=%.3f vm_hwm=%s digests=%v",
+		mode, eng.LayerIDs, served, encoded, setup.Seconds(), wall.Seconds(), hwm, digests)
 }
