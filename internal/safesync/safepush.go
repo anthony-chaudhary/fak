@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
@@ -88,15 +89,26 @@ const (
 
 // PushResult is the structured outcome of SafePush.
 type PushResult struct {
-	Pushed     bool         `json:"pushed"`
-	Attempts   int          `json:"attempts"`
-	Branch     string       `json:"branch,omitempty"`
-	Remote     string       `json:"remote,omitempty"`
-	Reason     string       `json:"reason,omitempty"`     // "" | one of the PushReason* constants
-	Divergence string       `json:"divergence,omitempty"` // last classified divergence on a non-ff
-	Detail     string       `json:"detail,omitempty"`
-	Worktree   *Worktree    `json:"worktree,omitempty"`
-	Velocity   PushVelocity `json:"velocity"`
+	Pushed      bool             `json:"pushed"`
+	Attempts    int              `json:"attempts"`
+	Branch      string           `json:"branch,omitempty"`
+	Remote      string           `json:"remote,omitempty"`
+	Reason      string           `json:"reason,omitempty"`     // "" | one of the PushReason* constants
+	Divergence  string           `json:"divergence,omitempty"` // last classified divergence on a non-ff
+	Detail      string           `json:"detail,omitempty"`
+	Diagnostics *PushDiagnostics `json:"diagnostics,omitempty"`
+	Worktree    *Worktree        `json:"worktree,omitempty"`
+	Velocity    PushVelocity     `json:"velocity"`
+}
+
+// PushDiagnostics preserves bounded output from a terminal PUSH_ERROR. Streams
+// stay separate because their relative ordering is unavailable and a native
+// check can write its cause to stdout while a wrapper writes the gate to stderr.
+// Each stream is valid UTF-8 and retains at most 4096 bytes, including any
+// truncation marker.
+type PushDiagnostics struct {
+	Stdout string `json:"stdout,omitempty"`
+	Stderr string `json:"stderr,omitempty"`
 }
 
 // PushVelocity is end-to-end, safety-qualified push timing. A numeric score is
@@ -220,6 +232,7 @@ func SafePush(ctx context.Context, opts PushOptions) (res PushResult, err error)
 			}
 			res.Reason = PushReasonError
 			res.Detail = pushHeadline(msg)
+			res.Diagnostics = pushDiagnostics(pr)
 			return res, nil
 		}
 		lastNetDetail = ""
@@ -559,6 +572,34 @@ func runDetail(r RunResult) string {
 		d = strings.TrimSpace(string(r.Stdout))
 	}
 	return d
+}
+
+func pushDiagnostics(r RunResult) *PushDiagnostics {
+	d := &PushDiagnostics{
+		Stdout: pushDiagnosticTail(string(r.Stdout)),
+		Stderr: pushDiagnosticTail(string(r.Stderr)),
+	}
+	if d.Stdout == "" && d.Stderr == "" {
+		return nil
+	}
+	return d
+}
+
+// Keep the end of each stream: earlier advisory chatter must not crowd out the
+// native failure immediately preceding the final gate. Detail remains the terse
+// compatible headline; truncation is visible and never splits a UTF-8 encoding.
+func pushDiagnosticTail(s string) string {
+	const limit = 4096
+	const marker = "[earlier output truncated]\n"
+	s = strings.TrimSpace(strings.ToValidUTF8(s, "\ufffd"))
+	if len(s) <= limit {
+		return s
+	}
+	start := len(s) - (limit - len(marker))
+	for start < len(s) && !utf8.RuneStart(s[start]) {
+		start++
+	}
+	return marker + s[start:]
 }
 
 // pushFirstLine returns the first non-empty line of s (push rejections are multi-line;
