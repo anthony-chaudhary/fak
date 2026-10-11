@@ -45,6 +45,18 @@ Q2_K passes bit-exact only because its fixture uses d=1/min=0 blocks with weight
 45. Those saturate the post coefficients, so the Q2 parity cannot see drift. TICKET-10
 records the same saturation on the CPU fixture.
 
+2026-10-11 strix1, `90ca2be851b`: [HW-WITNESSED] explanation (1) holds and (2) is ruled
+out. The first divergent stage is the raw mHC coefficients: device dots differ from a
+float64 oracle by 2.3e-6 to 2.7e-6 relative, F32 rounding for 20480-term dots. A host
+control that replays the device's own raw dots, with the production serial F32 RMS scale,
+reproduces the device logits bit-identically in all three phases (`replay_max_diff=0`).
+Every activation it sees is bit-equal to the device's. Host float64 and reversed-F32 dot
+orders drift 0.017 to 0.032 from the host fdot control on the same fixture, and the device
+drifts 0.018 / 0.032 / 0.00015. Each last-bit order change flips a BF16 stream rounding and
+moves the logits by the same ~0.02, so no fixed bound against the fdot control is
+principled. The F32 grouped parity now holds the device against the replay control at the
+unchanged 1e-4. Device-vs-fdot cosine >= 0.999 and greedy equality stay asserted.
+
 ## Problem
 
 Two explanations remain open. (1) The drift is F32 reduction-order differences over
@@ -85,8 +97,10 @@ cd internal/model && FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_DISPATCH_PROFILE=1 F
 
 ## Done condition / witness
 
-- [ ] [SW-VERIFIED] First divergent mHC stage named, with values.
-- [ ] [HW-WITNESSED] `TestV41MHCProjectionVulkan` F32 and Q2_K both PASS on a Halo.
+- [x] [SW-VERIFIED] First divergent mHC stage named, with values.
+  - Raw coefficients, 2.3e-6 to 2.7e-6 relative to float64; measured on strix1 silicon (see Current state).
+- [x] [HW-WITNESSED] `TestV41MHCProjectionVulkan` F32 and Q2_K both PASS on a Halo.
+  - 2026-10-11 strix1, `90ca2be851b` plus the replay-control test: PASS twice. The parent is red at maximum_diff 0.018140.
 
 ## Witness
 

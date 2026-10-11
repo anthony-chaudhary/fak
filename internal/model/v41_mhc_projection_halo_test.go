@@ -113,6 +113,64 @@ func putMHCProjectionFloat(dst []byte, value float32) {
 	dst[0], dst[1], dst[2], dst[3] = byte(bits), byte(bits>>8), byte(bits>>16), byte(bits>>24)
 }
 
+// v41MHCDeviceReplay is a host mHC projection that reuses the device's raw dot
+// products, in call order, for bit-equal activations. Only the reduction order
+// is borrowed; the RMS scale is the production serial F32 code.
+func v41MHCDeviceReplay(b *v41MHCProjBackend, leaf int, next *int, fault *string) v41MHCProjectionFunc {
+	return func(_ int, input []float32, _ int, eps float32, full, _ bool) ([]float32, v41DenseProjectionOutcome, error) {
+		if *fault != "" {
+			return nil, v41ProjectionDeclined, nil
+		}
+		if !full || *next >= len(b.operations) {
+			*fault = "has no recorded device operation"
+			return nil, v41ProjectionDeclined, nil
+		}
+		op := b.operations[*next]
+		*next++
+		if b.weightIndex[op.weight] != leaf || len(op.result) != v41MHCMixWidth || len(op.activation) != len(input) {
+			*fault = "names another leaf or geometry"
+			return nil, v41ProjectionDeclined, nil
+		}
+		for cell, v := range input {
+			if math.Float32bits(v) != math.Float32bits(op.activation[cell]) {
+				*fault = "saw a different activation"
+				return nil, v41ProjectionDeclined, nil
+			}
+		}
+		var ss float32
+		for _, v := range input {
+			ss += v * v
+		}
+		rsqrt := float32(1 / math.Sqrt(float64(ss/float32(len(input))+eps)))
+		mixes := make([]float32, v41MHCMixWidth)
+		for i, v := range op.result {
+			mixes[i] = v * rsqrt
+		}
+		return mixes, v41ProjectionHandled, nil
+	}
+}
+
+func v41LogitAgreement(got, want []float32) (cosine, maxDiff float64, greedyGot, greedyWant int) {
+	var dot, a2, c2 float64
+	for cell, value := range got {
+		a, c := float64(value), float64(want[cell])
+		dot += a * c
+		a2 += a * a
+		c2 += c * c
+		maxDiff = math.Max(maxDiff, math.Abs(a-c))
+		if value > got[greedyGot] {
+			greedyGot = cell
+		}
+		if want[cell] > want[greedyWant] {
+			greedyWant = cell
+		}
+	}
+	if a2 == 0 || c2 == 0 {
+		return math.NaN(), maxDiff, greedyGot, greedyWant
+	}
+	return dot / math.Sqrt(a2*c2), maxDiff, greedyGot, greedyWant
+}
+
 // fak-test:justify why=integration when=changed:internal/model/**
 // fak-test:runtime slow est=60s lane=optin
 func TestV41MHCProjectionVulkan(t *testing.T) {
@@ -162,9 +220,13 @@ func TestV41MHCProjectionVulkan(t *testing.T) {
 			}
 			host.v41State().mhcProjection = decline
 			host.v41State().mhcFFNProjection = decline
+			var replay *Session
 			defer func() {
 				s.Close()
 				host.Close()
+				if replay != nil {
+					replay.Close()
+				}
 				if err := m.CloseWeights(); err != nil {
 					t.Error(err)
 				}
@@ -179,6 +241,15 @@ func TestV41MHCProjectionVulkan(t *testing.T) {
 				if !ok || len(weights[phase]) != 24*20480 {
 					t.Fatal("independent named raw coefficient oracle unavailable")
 				}
+			}
+			// F32 logits move by reduction order alone once BF16 stream boundaries
+			// amplify last-bit coefficient differences (#13808), so F32 parity is
+			// held against a host control that replays the device's dot products.
+			replayed, replayFault := 0, ""
+			if dtype == "F32" {
+				replay = v41EngProjSession(t, control, hostBackend)
+				replay.v41State().mhcProjection = v41MHCDeviceReplay(b, 0, &replayed, &replayFault)
+				replay.v41State().mhcFFNProjection = v41MHCDeviceReplay(b, 1, &replayed, &replayFault)
 			}
 			for index, ids := range [][]int{{1, 2, 3}, {4}, {5, 6}} {
 				phase := "prefill"
@@ -210,6 +281,7 @@ func TestV41MHCProjectionVulkan(t *testing.T) {
 				}
 				delta, hostDelta := v41DenseTestDelta(v41MHCProjPhase(t, m, phase), before), v41DenseTestDelta(v41MHCProjPhase(t, control, phase), hostBefore)
 				rows, upload, read := 0, 0, 0
+				var coefficientDrift float64
 				for _, op := range b.operations[from:] {
 					rows += op.rows
 					upload += op.upload
@@ -224,6 +296,7 @@ func TestV41MHCProjectionVulkan(t *testing.T) {
 							dot += float64(weights[b.weightIndex[op.weight]][out*20480+cell]) * float64(value)
 						}
 						signal = math.Max(signal, math.Abs(dot))
+						coefficientDrift = math.Max(coefficientDrift, math.Abs(float64(op.result[out])-dot)/math.Max(1, math.Abs(dot)))
 						if math.Abs(float64(op.result[out])-dot) > 1e-4*math.Max(1, math.Abs(dot)) {
 							t.Fatalf("physical raw-before-RMS projection output %d got=%g want=%g", out, op.result[out], dot)
 						}
@@ -269,32 +342,30 @@ func TestV41MHCProjectionVulkan(t *testing.T) {
 						t.Error("physical witness read cached immutable mHC weight")
 					}
 				}
-				v41GroupedParity(t, got, want, 1e-4)
-				var dot, a2, c2, maxDiff float64
-				greedyGot, greedyWant := 0, 0
-				for cell, value := range got {
-					a, c := float64(value), float64(want[cell])
-					dot += a * c
-					a2 += a * a
-					c2 += c * c
-					maxDiff = math.Max(maxDiff, math.Abs(a-c))
-					if value > got[greedyGot] {
-						greedyGot = cell
+				// The replay control runs after every delta window closes.
+				oracle, replayDiff := want, math.NaN()
+				if replay != nil {
+					if index == 1 {
+						oracle = replay.Step(ids[0])
+					} else {
+						oracle = replay.Prefill(ids)
 					}
-					if want[cell] > want[greedyWant] {
-						greedyWant = cell
+					if replayFault != "" || replayed != len(b.operations) {
+						t.Fatalf("device mHC replay %s at operation %d of %d", replayFault, replayed, len(b.operations))
 					}
+					_, replayDiff, _, _ = v41LogitAgreement(got, oracle)
 				}
-				if a2 == 0 || c2 == 0 {
+				v41GroupedParity(t, got, oracle, 1e-4)
+				cosine, maxDiff, greedyGot, greedyWant := v41LogitAgreement(got, want)
+				if math.IsNaN(cosine) {
 					t.Fatal("physical logit control vacuous")
 				}
-				cosine := dot / math.Sqrt(a2*c2)
 				if cosine < .999 || greedyGot != greedyWant {
 					t.Errorf("physical parity cosine=%g max_diff=%g greedy=%d/%d", cosine, maxDiff, greedyGot, greedyWant)
 				}
 				data, _ := json.Marshal(delta)
 				controlData, _ := json.Marshal(hostDelta)
-				t.Logf("backend=%s device=%q driver=%q runtime=%q dtype=%s synthetic_H5120_HC4_out24_in20480 phase=%s cold=%t tokens=%d actual_mhc_matmuls=%d actual_rows=%d q2_dispatches=%d h2d_bytes=%d d2h_bytes=%d compute_dispatches=%d cosine=%g max_diff=%g greedy=%d/%d default_mhc_json=%s actual_host_control_json=%s", observation.Identity.Backend, observation.Identity.Device, observation.Identity.Driver, observation.Identity.Runtime, dtype, phase, index == 0, len(ids), b.attempts-attempts, rows, q2, observation.Counters.H2DBytes, observation.Counters.D2HBytes, observation.Counters.ComputeDispatches, cosine, maxDiff, greedyGot, greedyWant, data, controlData)
+				t.Logf("backend=%s device=%q driver=%q runtime=%q dtype=%s synthetic_H5120_HC4_out24_in20480 phase=%s cold=%t tokens=%d actual_mhc_matmuls=%d actual_rows=%d q2_dispatches=%d h2d_bytes=%d d2h_bytes=%d compute_dispatches=%d raw_coefficient_rel_drift=%g cosine=%g max_diff=%g replay_max_diff=%g greedy=%d/%d default_mhc_json=%s actual_host_control_json=%s", observation.Identity.Backend, observation.Identity.Device, observation.Identity.Driver, observation.Identity.Runtime, dtype, phase, index == 0, len(ids), b.attempts-attempts, rows, q2, observation.Counters.H2DBytes, observation.Counters.D2HBytes, observation.Counters.ComputeDispatches, coefficientDrift, cosine, maxDiff, replayDiff, greedyGot, greedyWant, data, controlData)
 			}
 		})
 		// Sequential subtest cleanup releases sessions and model caches before the next ~755 MB immutable synthetic source is constructed.

@@ -6,7 +6,7 @@ On 2026-10-09, 68 public commits landed under an operator deferred-verification 
 | --- | --- | --- |
 | TICKET-01 | V4.1 attention, rotary and indexer numerics | red (parity drift, session panic, shader count) |
 | TICKET-02 | V4.1 device kernels qualified on Strix Halo silicon | unwitnessed |
-| TICKET-02d | V4.1 mHC F32 Halo device-vs-host logit drift (#13808, from #13767) | red [HW-WITNESSED]: max_diff 0.0535 vs 1e-4 |
+| TICKET-02d | V4.1 mHC F32 Halo device-vs-host logit drift (#13808, from #13767) | green [HW-WITNESSED]: reduction order only; a device-dot replay control matches bit-identically at 1e-4 |
 | TICKET-03 | Vulkan memory accounting and residency (#13668) | CPU green; Vulkan-tagged build and hardware not yet witnessed |
 | TICKET-03d | Vulkan-tagged compute suite runs green with the device registered (#13776) | RX 7600: full run, no panic; only the TICKET-03e q2_k red left |
 | TICKET-03e | Vulkan Q2_K panel matmul (P>1) shared-memory race (#13807) | red (max_abs 4.55, RX 7600 and Halo) |
