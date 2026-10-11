@@ -154,6 +154,7 @@ func (v *vulkanBackend) V41TailRoPERows(x, sinCos Tensor, rows, headDim, rotaryD
 	if status := v41TailRoPEQKStatusLocked(xb, xb, outBuf, discard, sinCos.buf.(*vulkanBuf), rows, headDim, rotaryDim); status != 0 {
 		return Tensor{}, vulkanV41RoPERowsStatusError(status)
 	}
+	outBuf.v41CheckedRead = true
 	return makeTensor(v, F32, RowMajor, []int{rows, headDim}, nil, outBuf), nil
 }
 

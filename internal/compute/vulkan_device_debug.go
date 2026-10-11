@@ -430,6 +430,14 @@ func (w *vulkanExecutionWindow) End() (BackendExecutionObservation, error) {
 // device-local memory on the UMA direct-upload path, a subset of the H2D transfer bytes.
 func VulkanDirectWeightUploadBytes() uint64 { return uint64(C.fvk_direct_h2d_bytes()) }
 
+// VulkanH2DUploadBytes returns the process-cumulative H2D payload bytes written through a mapping
+// (no staging copy) and the total H2D payload bytes, direct included.
+func (v *vulkanBackend) VulkanH2DUploadBytes() (direct, total uint64) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return uint64(C.fvk_direct_h2d_bytes()), uint64(C.fvk_h2d_bytes())
+}
+
 func (v *vulkanBackend) debugBufferHostVisible(b *vulkanBuf) bool {
 	return b != nil && b.ptr != nil && C.fvk_debug_buffer_is_host_visible(b.ptr) != 0
 }

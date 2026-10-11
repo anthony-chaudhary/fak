@@ -196,6 +196,7 @@ struct Buffer {
     uint64_t       allocationID = 0;
     bool           allocationDeviceLocal = false;
     void*          mapped = nullptr; // host view of a direct-upload weight arena binding
+    bool           ownsMapping = false; // mapped is this buffer's own map of mem, unmapped on destroy
 };
 
 // Immutable model weights keep their descriptor-visible VkBuffer identity while sharing a
@@ -612,6 +613,7 @@ void destroyBuffer(Buffer* b) {
         else g_weightArenaLiveBytes = 0;
     } else if (b->mem) {
         untrackDeviceAllocation(b->allocationBytes, b->allocationDeviceLocal);
+        if (b->ownsMapping) vkUnmapMemory(g_dev, b->mem);
         vkFreeMemory(g_dev, b->mem, nullptr);
     }
     delete b;
@@ -781,6 +783,22 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
     return b;
 }
 
+// mapHostVisibleWeight gives a weight's own host-visible allocation (the GTT fallback when the
+// UMA carve-out is too small) a persistent map, so uploads write through it like the direct arena.
+// Only HOST_COHERENT types qualify: a non-coherent type would need explicit flushes, so it keeps
+// the staging path, as does a failed map or UMA direct upload being off.
+void mapHostVisibleWeight(Buffer* b) {
+    if (!g_umaDirectWeights || !b || !b->mem || b->mapped || b->weightArenaBound ||
+        b->memoryOffset != 0 || b->memoryTypeIndex >= g_memprops.memoryTypeCount) return;
+    const VkMemoryPropertyFlags want =
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    if ((g_memprops.memoryTypes[b->memoryTypeIndex].propertyFlags & want) != want) return;
+    void* mapped = nullptr;
+    if (vkMapMemory(g_dev, b->mem, 0, VK_WHOLE_SIZE, 0, &mapped) != VK_SUCCESS || !mapped) return;
+    b->mapped = mapped;
+    b->ownsMapping = true;
+}
+
 // device-local storage buffer used for all tensors (the residency seam).
 const VkBufferUsageFlags STORAGE_USAGE =
     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
@@ -826,7 +844,9 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
     if (dedicated.requiresDedicatedAllocation) {
         vkDestroyBuffer(g_dev, b->buf, nullptr);
         delete b;
-        return allocBuffer(bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, STORAGE_USAGE);
+        Buffer* own = allocBuffer(bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, STORAGE_USAGE);
+        if (own && own->hostVisibleFallback) mapHostVisibleWeight(own);
+        return own;
     }
 
     const uint32_t preferredType = g_umaDirectWeights ? findDirectWeightMemType(req.memoryTypeBits) : UINT32_MAX;
@@ -3066,6 +3086,16 @@ void* fvk_malloc_hostvis(size_t bytes) {
     VkMemoryPropertyFlags hostvis =
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     return allocBuffer(bytes, hostvis, STORAGE_USAGE);
+}
+
+// fvk_malloc_hostvis_weight is fvk_malloc_hostvis for an immutable weight: with UMA direct upload
+// on, a HOST_COHERENT allocation is persistently mapped so fvk_h2d writes straight through it.
+// Host-visible buffers are never pooled (fvk_free destroys them), so a mapping cannot leak into an
+// unrelated reuse.
+void* fvk_malloc_hostvis_weight(size_t bytes) {
+    Buffer* b = B(fvk_malloc_hostvis(bytes));
+    mapHostVisibleWeight(b);
+    return b;
 }
 
 // Per-size-bucket recycle cap. The forward pass reissues the SAME handful of sizes every

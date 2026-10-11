@@ -7,6 +7,8 @@ import (
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 )
 
+func serveVulkanH2DUpload(compute.Backend) (string, bool) { return "", false }
+
 func serveVulkanPostLoadReservations(*fakmodel.Model, compute.Backend, compute.MemoryPlan) (string, bool) {
 	return "", false
 }

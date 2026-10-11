@@ -20,6 +20,19 @@ type serveVulkanReservationReader interface {
 	VulkanTransferStageBufferReservations() ([]compute.VulkanBufferReservation, bool)
 }
 
+type serveVulkanH2DUploadReader interface {
+	VulkanH2DUploadBytes() (direct, total uint64)
+}
+
+// serveVulkanH2DUpload reports how many uploaded bytes skipped the staging copy (fak#13668).
+func serveVulkanH2DUpload(be compute.Backend) (string, bool) {
+	r, ok := be.(serveVulkanH2DUploadReader)
+	if !ok {
+		return "", false
+	}
+	return formatServeH2DUpload(r.VulkanH2DUploadBytes()), true
+}
+
 type serveVulkanReservationTotals struct {
 	allocations                        map[uint64]compute.VulkanBufferReservation
 	reserved, deviceLocal, hostVisible uint64

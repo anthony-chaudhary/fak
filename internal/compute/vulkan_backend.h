@@ -54,6 +54,9 @@ void *fvk_malloc(size_t bytes);
  * device-local allocation race and spill unpredictably. Same opaque handle + STORAGE_USAGE as
  * fvk_malloc; the compute path reads it the same way, just slower (over PCIe). */
 void *fvk_malloc_hostvis(size_t bytes);
+/* fvk_malloc_hostvis_weight is fvk_malloc_hostvis for an immutable weight; on UMA direct upload
+ * a HOST_COHERENT allocation is persistently mapped and fvk_h2d writes through the mapping. */
+void *fvk_malloc_hostvis_weight(size_t bytes);
 void fvk_free(void *d);
 void fvk_h2d(void *d, const void *h, size_t bytes);
 /* fvk_d2h returns 0 only after the requested bytes reached host memory. Negative
