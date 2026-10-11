@@ -1,5 +1,6 @@
 //go:build darwin && arm64 && cgo
 
+#include <os/lock.h>
 #import <Metal/Metal.h>
 #include <limits.h>
 #include <math.h>
@@ -462,6 +463,31 @@ static int qg_init(void) {
 
 int mg_qwen35_graph_ready(void){return qg_init();}
 static id<MTLBuffer> qg_host(const float*p,int n){return[gDev newBufferWithBytes:p length:(NSUInteger)n*sizeof(float) options:MTLResourceStorageModeShared];}
+// mg_const_buffer is qg_host for model constants (norm weights, GDN conv/A_log/dt_bias/
+// norm): it reuses one shared buffer per host span across graphs instead of allocating
+// and copying it every token. The cached bytes are compared with the host span on every
+// hit, so a reused host address with different contents gets a fresh buffer; a cached
+// buffer is never written after creation, so in-flight graphs keep reading valid bytes.
+static NSMutableDictionary *gConstBufs;
+static os_unfair_lock gConstBufsLock = OS_UNFAIR_LOCK_INIT;
+enum { MG_CONST_BUFS_MAX = 4096 };
+id<MTLBuffer> mg_const_buffer(const float*p,int n){
+    if(!p||n<=0)return nil;
+    NSUInteger bytes=(NSUInteger)n*sizeof(float);
+    NSNumber*key=@(((uint64_t)(uintptr_t)p)^((uint64_t)n<<48));
+    os_unfair_lock_lock(&gConstBufsLock);
+    id<MTLBuffer>b=gConstBufs[key];
+    os_unfair_lock_unlock(&gConstBufsLock);
+    if(b&&b.length==bytes&&memcmp(b.contents,p,bytes)==0)return b;
+    b=qg_host(p,n);
+    if(!b)return nil;
+    os_unfair_lock_lock(&gConstBufsLock);
+    if(!gConstBufs)gConstBufs=[NSMutableDictionary dictionary];
+    if(gConstBufs.count>=MG_CONST_BUFS_MAX)[gConstBufs removeAllObjects];
+    gConstBufs[key]=b;
+    os_unfair_lock_unlock(&gConstBufsLock);
+    return b;
+}
 static void qg_dispatch(id<MTLComputeCommandEncoder>e,id<MTLComputePipelineState>p,int n){int t=(int)p.maxTotalThreadsPerThreadgroup;if(t>n)t=n;if(t<1)t=1;[e dispatchThreads:MTLSizeMake((NSUInteger)n,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)t,1,1)];}
 // QG_MAX_ROWS mirrors metalgemm.PromptPanelMaxTokens (graph.go). The ordered-panel
 // kernels loop generically over the graph's row count; the historical {1,2,3,4,32}
@@ -520,7 +546,7 @@ static void qg_split_policy_for(int rows,int total,int mlxPart,int*splits,int*ch
 }
 static void qg_split_policy(int rows,int total,int*splits,int*chunk,int*useSplit){qg_split_policy_for(rows,total,0,splits,chunk,useSplit);}
 
-void *mg_qwen35_graph_norm(void*g,void*input,const float*w,int rows,int width,float eps,int gain1p,int lastOnly){if(!qg_init()||!g||!input||!w||rows<=0||width<=0||eps<=0||(lastOnly&&!qg_ordered_rows(g))||mg_graph_prompt(g)!=rows)return NULL;id<MTLCommandBuffer>cb=(__bridge id<MTLCommandBuffer>)mg_graph_command_buffer(g);id<MTLBuffer>x=(__bridge id<MTLBuffer>)input,wb=qg_host(w,width),y=(__bridge id<MTLBuffer>)mg_graph_alloc_result(g,lastOnly?width:rows*width);if(!cb||!x||!wb||!y)return NULL;id<MTLComputeCommandEncoder>e=[cb computeCommandEncoder];[e setComputePipelineState:qgNorm];[e setBuffer:x offset:0 atIndex:0];[e setBuffer:wb offset:0 atIndex:1];[e setBuffer:y offset:0 atIndex:2];[e setBytes:&width length:4 atIndex:3];[e setBytes:&eps length:4 atIndex:4];[e setBytes:&gain1p length:4 atIndex:5];int row=lastOnly?rows-1:-1;[e setBytes:&row length:4 atIndex:6];[e dispatchThreadgroups:MTLSizeMake(lastOnly?1:rows,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];[e endEncoding];return(__bridge void*)y;}
+void *mg_qwen35_graph_norm(void*g,void*input,const float*w,int rows,int width,float eps,int gain1p,int lastOnly){if(!qg_init()||!g||!input||!w||rows<=0||width<=0||eps<=0||(lastOnly&&!qg_ordered_rows(g))||mg_graph_prompt(g)!=rows)return NULL;id<MTLCommandBuffer>cb=(__bridge id<MTLCommandBuffer>)mg_graph_command_buffer(g);id<MTLBuffer>x=(__bridge id<MTLBuffer>)input,wb=mg_const_buffer(w,width),y=(__bridge id<MTLBuffer>)mg_graph_alloc_result(g,lastOnly?width:rows*width);if(!cb||!x||!wb||!y)return NULL;id<MTLComputeCommandEncoder>e=[cb computeCommandEncoder];[e setComputePipelineState:qgNorm];[e setBuffer:x offset:0 atIndex:0];[e setBuffer:wb offset:0 atIndex:1];[e setBuffer:y offset:0 atIndex:2];[e setBytes:&width length:4 atIndex:3];[e setBytes:&eps length:4 atIndex:4];[e setBytes:&gain1p length:4 atIndex:5];int row=lastOnly?rows-1:-1;[e setBytes:&row length:4 atIndex:6];[e dispatchThreadgroups:MTLSizeMake(lastOnly?1:rows,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];[e endEncoding];return(__bridge void*)y;}
 int mg_qwen35_graph_add(void*g,void*xp,void*yp,int n){if(!qg_init()||!g||!xp||!yp||n<=0)return 0;id<MTLCommandBuffer>cb=(__bridge id<MTLCommandBuffer>)mg_graph_command_buffer(g);id<MTLComputeCommandEncoder>e=[cb computeCommandEncoder];[e setComputePipelineState:qgAdd];[e setBuffer:(__bridge id<MTLBuffer>)xp offset:0 atIndex:0];[e setBuffer:(__bridge id<MTLBuffer>)yp offset:0 atIndex:1];[e setBytes:&n length:4 atIndex:2];qg_dispatch(e,qgAdd,n);[e endEncoding];mg_graph_note_encoder(g);return 1;}
 // mg_qwen35_graph_bias broadcasts a host bias vector of `width` floats over `rows` rows of a
 // graph-owned panel in place (x[i] += b[i % width]). The bias is staged through qg_host like
@@ -531,7 +557,7 @@ int mg_qwen35_graph_split(void*g,void*srcp,int qwidth,int hd,void**qout,void**ga
 
 int mg_qwen35_graph_attention(void*g,void*qp,void*kp,void*vp,void*gatep,const float*qw,const float*kw,const float*cosv,const float*sinv,const float*prefixK,const float*prefixV,int base,int nH,int nKV,int hd,int rotary,float scale,float qkEps,int gain1p,int qknorm,int qnw,int knw,void**outp,void**krawp,void**kpostp,void**vcurp){
     int rows=qg_ordered_rows(g);if(!qg_init()||!g||!rows||!qp||!kp||!vp||!qw||!kw||!cosv||!sinv||base<0||base>INT_MAX-rows||nH<1||nKV<1||nH%nKV||hd<2||hd>256||nH>INT_MAX/hd||nKV>INT_MAX/hd||rotary<2||rotary>hd||rotary%2||!isfinite(scale)||scale<=0||!isfinite(qkEps)||qkEps<=0||!outp||!krawp||!kpostp||!vcurp)return 0;int qwidth=nH*hd,kvwidth=nKV*hd,total=base+rows;if((qnw!=hd&&qnw!=qwidth)||(knw!=hd&&knw!=kvwidth)||rows>INT_MAX/qwidth||rows>INT_MAX/kvwidth||total>INT_MAX/kvwidth||(NSUInteger)total*(NSUInteger)kvwidth>NSUIntegerMax/sizeof(float))return 0;int qn=rows*qwidth,kn=rows*kvwidth;
-    id<MTLBuffer>qo=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,qn),kr=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,kn),kpo=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,kn),out=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,qn);id<MTLBuffer>qa=qg_host(qw,qnw),ka=qg_host(kw,knw);if(!qo||!kr||!kpo||!out||!qa||!ka)return 0;
+    id<MTLBuffer>qo=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,qn),kr=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,kn),kpo=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,kn),out=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,qn);id<MTLBuffer>qa=mg_const_buffer(qw,qnw),ka=mg_const_buffer(kw,knw);if(!qo||!kr||!kpo||!out||!qa||!ka)return 0;
     // A nil gate is the ungated (dense Llama/Qwen2) epilogue: the kernels skip the sigmoid
     // and `out` is bound at the gate index only so every declared buffer slot is valid.
     int gated=gatep!=NULL;id<MTLBuffer>gateb=gated?(__bridge id<MTLBuffer>)gatep:out;
@@ -614,7 +640,7 @@ int mg_qwen35_graph_attention_dkv(void*g,void*qp,void*kp,void*vp,void*gatep,cons
     id<MTLBuffer>kall=(__bridge id<MTLBuffer>)kvKpost,vall=(__bridge id<MTLBuffer>)kvV,krawall=kvKraw?(__bridge id<MTLBuffer>)kvKraw:nil;
     // The layer's device slices must hold through `total` rows (prefix + this panel).
     if((NSUInteger)(kvOff+prefixElems+kn)*sizeof(float)>kall.length||(NSUInteger)(kvOff+prefixElems+kn)*sizeof(float)>vall.length||(krawall&&(NSUInteger)(kvOff+prefixElems+kn)*sizeof(float)>krawall.length))return 0;
-    id<MTLBuffer>qo=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,qn),kr=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,kn),kpo=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,kn),out=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,qn);id<MTLBuffer>qa=qg_host(qw,qnw),ka=qg_host(kw,knw);if(!qo||!kr||!kpo||!out||!qa||!ka)return 0;
+    id<MTLBuffer>qo=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,qn),kr=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,kn),kpo=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,kn),out=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,qn);id<MTLBuffer>qa=mg_const_buffer(qw,qnw),ka=mg_const_buffer(kw,knw);if(!qo||!kr||!kpo||!out||!qa||!ka)return 0;
     // A nil gate is the ungated (dense Llama/Qwen2) epilogue: the kernels skip the sigmoid
     // and `out` is bound at the gate index only so every declared buffer slot is valid.
     int gated=gatep!=NULL;id<MTLBuffer>gateb=gated?(__bridge id<MTLBuffer>)gatep:out;

@@ -243,6 +243,7 @@ func qwen35DecodeCBTraceEnabled() bool { return qwen35DecodeCBTrace }
 // (f32) K/V to the kernel-owned cache, so Evict/Clone and the KV semantics are unchanged;
 // returns the post-final-norm hidden (caller applies headQ).
 func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
+	s.qwen35Logits = nil
 	cbTrace := qwen35DecodeCBTraceEnabled()
 	if cbTrace {
 		s.ResetMetalCommandBuffers()

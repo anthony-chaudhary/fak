@@ -696,12 +696,13 @@ func validateWholeSequenceOperationBlocks(route, path string, executed WholeSequ
 	// BlockAcceptedCalls and rewrites the HAL forward receipt to a fresh
 	// Tokens=1 executed receipt. Requiring ResidentAcceptedCalls to advance would
 	// wrongly reject that real route; requiring it to stay unchanged still
-	// rejects a per-layer fallback.
+	// rejects a per-layer fallback. The graph may commit in several segments
+	// (CommandBuffers >= 1); it still has exactly one terminal wait and readback.
 	case "whole-token":
 		if path == "" {
 			return fmt.Errorf("model: whole-sequence capability path is required")
 		}
-		if op.Before == op.After || a.Tokens != 1 || !a.Committed || !a.CompletedWait || a.CommandBuffers != 1 || a.TerminalWaits != 1 || a.TerminalReadbacks != 1 || a.IntermediateReadbacks != 0 || a.IntermediateWaits != 0 || a.Path != path || a.EvidenceState != executed || n.BlockAcceptedCalls != c.BlockAcceptedCalls+1 || n.ResidentAcceptedCalls != c.ResidentAcceptedCalls || n.MixerAcceptedCalls != c.MixerAcceptedCalls {
+		if op.Before == op.After || a.Tokens != 1 || !a.Committed || !a.CompletedWait || a.CommandBuffers < 1 || a.TerminalWaits != 1 || a.TerminalReadbacks != 1 || a.IntermediateReadbacks != 0 || a.IntermediateWaits != 0 || a.Path != path || a.EvidenceState != executed || n.BlockAcceptedCalls != c.BlockAcceptedCalls+1 || n.ResidentAcceptedCalls != c.ResidentAcceptedCalls || n.MixerAcceptedCalls != c.MixerAcceptedCalls {
 			return fmt.Errorf("model: whole-sequence Step lacks a fresh successful whole-token receipt; fallback is non-qualifying")
 		}
 	case "per-layer":

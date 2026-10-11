@@ -16,8 +16,11 @@ type GraphReceipt struct {
 	Committed, CompletedWait, TimingAvailable bool
 	Encoders, IntermediateWaits               int
 	IntermediateReadbacks, HostReadbacks      int
-	HostUploadBytes, HostReadbackBytes        uint64
-	GPUMilliseconds, WaitMilliseconds         float64
+	// CommandBuffers is the number of command buffers the graph committed: 1 plus
+	// one per Flush. Only the last is waited on.
+	CommandBuffers                     int
+	HostUploadBytes, HostReadbackBytes uint64
+	GPUMilliseconds, WaitMilliseconds  float64
 	// Graph-tracked allocation evidence; unavailable on the portable stub.
 	AllocatedBuffers    int
 	RetainedBufferBytes uint64

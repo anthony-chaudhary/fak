@@ -5,6 +5,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
@@ -262,4 +263,114 @@ func (b *metalQwen35GDNSequenceBackend) ReconcileDeviceKV(s *Session, base, rows
 		s.Cache.V[row.layer] = append(s.Cache.V[row.layer], row.v...)
 	}
 	return nil
+}
+
+// qwen35DecodeKVCapacity is denseDecodeKVCapacity for the hybrid's attend-only decode
+// mirror, which holds only the full-attention layers' KPost and V sides.
+func qwen35DecodeKVCapacity(cfg Config, attnLayers, need int, limitBytes int64) int {
+	capTokens := 2 * need
+	if capTokens < need+256 {
+		capTokens = need + 256
+	}
+	if mp := cfg.MaxPositionEmbeddings; mp >= need && capTokens > mp {
+		capTokens = mp
+	}
+	perToken := int64(2*attnLayers) * int64(cfg.NumKVHeads*cfg.HeadDim) * 4
+	if perToken <= 0 {
+		return 0
+	}
+	if maxTokens := limitBytes / perToken; int64(capTokens) > maxTokens {
+		capTokens = int(maxTokens)
+	}
+	return capTokens
+}
+
+// prepareDecodeMirror returns the decode mirror holding exactly the host cache's Len()
+// full-attention rows with room for `need`, catching up rows the host appended outside
+// the graph (prompt prefill, a declined token) and reallocating plus reseeding after a
+// cache mutation or when `need` outgrows it. It returns the bytes it uploaded. nil
+// declines to the host-prefix attention; FAK_QWEN35_DECODE_DKV=0 forces that.
+func (b *metalQwen35GDNSequenceBackend) prepareDecodeMirror(s *Session, need int) (*metalgemm.DeviceKV, uint64) {
+	if os.Getenv("FAK_QWEN35_DECODE_DKV") == "0" || s.Cache.quantized() {
+		b.invalidateDecodeMirror()
+		return nil, 0
+	}
+	c, cfg := s.Cache, s.M.Cfg
+	w, n := cfg.NumKVHeads*cfg.HeadDim, c.Len()
+	var attn []int
+	for l := 0; l < cfg.NumLayers; l++ {
+		if cfg.isLinearAttnLayer(l) {
+			continue
+		}
+		if len(c.K[l]) != n*w || len(c.V[l]) != n*w {
+			b.invalidateDecodeMirror()
+			return nil, 0
+		}
+		attn = append(attn, l)
+	}
+	if len(attn) == 0 || w <= 0 {
+		return nil, 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	valid := b.decodeKV != nil && b.decodeKVCache == c && b.decodeKVGen == c.mutationGeneration() && b.decodeKVRows <= n
+	from := b.decodeKVRows
+	if !valid || need > b.decodeKVCapacity {
+		if b.decodeKV == nil || need > b.decodeKVCapacity {
+			// Free the old mirror first so the device room below counts only OTHER mirrors.
+			b.closeDecodeMirrorLocked()
+			capTokens := qwen35DecodeKVCapacity(cfg, len(attn), need, denseDecodeKVLimitBytes(s.M))
+			if capTokens < need {
+				return nil, 0
+			}
+			kv := metalgemm.NewDeviceKVAttendOnly(len(attn), capTokens, w)
+			if kv == nil {
+				return nil, 0
+			}
+			b.decodeKV, b.decodeKVCapacity = kv, capTokens
+		}
+		b.decodeKVCache, b.decodeKVGen, b.decodeKVRows = c, c.mutationGeneration(), 0
+		from = 0
+		b.decodeKVReseeds++
+	}
+	var seeded uint64
+	if from < n {
+		stride := b.decodeKV.LayerStride()
+		for ordinal, l := range attn {
+			// Side 1 is KPost (the host's post-RoPE K), side 2 is V.
+			for i, host := range [2][]float32{c.K[l], c.V[l]} {
+				if err := b.decodeKV.UploadRegion(1+i, ordinal*stride+from*w, host[from*w:n*w]); err != nil {
+					b.closeDecodeMirrorLocked()
+					return nil, 0
+				}
+			}
+		}
+		seeded = uint64(2*len(attn)*(n-from)*w) * 4
+		b.decodeKVRows = n
+	}
+	return b.decodeKV, seeded
+}
+
+// advanceDecodeMirror records the row a committed decode token appended on the device
+// once the host cache holds the same row.
+func (b *metalQwen35GDNSequenceBackend) advanceDecodeMirror(s *Session) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.decodeKV != nil && b.decodeKVCache == s.Cache && b.decodeKVGen == s.Cache.mutationGeneration() {
+		b.decodeKVRows = s.Cache.Len()
+	}
+}
+
+func (b *metalQwen35GDNSequenceBackend) invalidateDecodeMirror() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.closeDecodeMirrorLocked()
+}
+
+func (b *metalQwen35GDNSequenceBackend) closeDecodeMirrorLocked() {
+	if b.decodeKV != nil {
+		b.decodeKV.Close()
+	}
+	b.decodeKV, b.decodeKVCache = nil, nil
+	b.decodeKVGen, b.decodeKVRows, b.decodeKVCapacity = 0, 0, 0
 }

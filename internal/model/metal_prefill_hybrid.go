@@ -30,6 +30,8 @@ import (
 	"math"
 	"os"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,6 +62,17 @@ type metalQwen35GDNSequenceBackend struct {
 	deviceKVLineageTail            uint32
 	deviceKVLineage                []uint32
 	deviceKVPersistent             bool
+	// decodeKV is the whole-token decode's own attend-only KV mirror: it holds the host
+	// cache's full-attention KPost/V rows so a decode token attends on the device
+	// instead of re-uploading the whole prefix. It is caught up from the host cache
+	// before each token and reseeded after any cache mutation.
+	decodeKV         *metalgemm.DeviceKV
+	decodeKVCache    *KVCache
+	decodeKVGen      uint64
+	decodeKVRows     int
+	decodeKVCapacity int
+	decodeKVReseeds  int
+	traceLastEnd     time.Time // FAK_QWEN35_WHOLE_TOKEN_TRACE host gap between tokens
 }
 
 func qwen35PersistentDecodeDeviceKV() bool {
@@ -1043,7 +1056,14 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 		return nil, receipt, false, nil
 	}
 	base, H, P := s.Cache.Len(), cfg.HiddenSize, 1
+	tStart := time.Now()
 	deviceKV := b.decodeDeviceKV(s)
+	decodeMirror := false
+	var mirrorSeedBytes uint64
+	if deviceKV == nil {
+		deviceKV, mirrorSeedBytes = b.prepareDecodeMirror(s, base+1)
+		decodeMirror = deviceKV != nil
+	}
 	// The decode full-attention route is uncapped: above 2048 context
 	// mg_qwen35_graph_attention uses split-KV (qg_attn_split + qg_attn_combine,
 	// one SIMDgroup per (head, KV split)), below it the ordered qg_attn_online;
@@ -1053,6 +1073,16 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 	// Resolve every resident handle before graph construction. Once Begin succeeds,
 	// a failure remains accepted and cannot replay through the host forward.
 	s.prefillQwen35HybridQ4KMetalUpload()
+	var head qwen35MetalMTPHead
+	wantLogits := s.qwen35WantLogits && m.prism == nil && os.Getenv("FAK_QWEN35_WHOLE_TOKEN_HEAD") != "0"
+	// Resolving a Q4_K head uploads it, and under FAK_Q4K_FREE_CPU that drops the CPU
+	// copy the host head (prefill logits, any declined token) still reads.
+	if freeCPUCopyAfterUpload && (m.q4khead != nil || m.q4kw[m.q4kHeadName()] != nil) {
+		wantLogits = false
+	}
+	if wantLogits {
+		head, wantLogits = resolveDenseQ4KMetalHead(m)
+	}
 	X := make([]float32, P*H)
 	m.embedRowsInto(X, []int{id}, H, cfg)
 
@@ -1064,7 +1094,11 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 	deviceKVCompleted := false
 	defer func() {
 		if deviceKV != nil && !deviceKVCompleted {
-			b.invalidateDeviceKV()
+			if decodeMirror {
+				b.invalidateDecodeMirror()
+			} else {
+				b.invalidateDeviceKV()
+			}
 		}
 	}()
 	// The whole-token graph is P=1: route every Q4_K/Q6_K/Q8 projection through the
@@ -1102,7 +1136,13 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 	var kvResults []kvResult
 	deviceAttnOrdinal := 0
 	eps := float32(cfg.RMSNormEps)
+	flushAfter := qwen35WholeTokenFlushLayers(cfg.NumLayers)
 	for l := 0; l < cfg.NumLayers; l++ {
+		// A refused flush (no fresh command buffer, a test terminal gate) only
+		// keeps encoding into the current one.
+		if flushAfter[l] {
+			_ = g.Flush()
+		}
 		p := func(suffix string) string { return layerName(l, suffix) }
 		xn, runErr := g.RMSNorm(x, m.tensor(p("input_layernorm.weight")), eps, cfg.NormGain1p)
 		if runErr != nil {
@@ -1207,19 +1247,31 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 	if err != nil {
 		return nil, receipt, true, err
 	}
+	tEncoded := time.Now()
+	var logitsResult *metalgemm.GraphResult
+	if wantLogits {
+		if logitsResult, err = head.encode(g, hiddenResult, quantized); err != nil {
+			return nil, receipt, true, err
+		}
+	}
 	captureRaw := s.captureTargetHidden
 	terminal := []*metalgemm.GraphResult{hiddenResult}
 	for _, kv := range kvResults {
 		terminal = append(terminal, kv.kraw, kv.kpost, kv.v)
 	}
+	logitsIndex := len(terminal)
+	if logitsResult != nil {
+		terminal = append(terminal, logitsResult)
+	}
 	if captureRaw {
 		terminal = append(terminal, x)
 	}
 	outputs, graphReceipt, err := g.FinishRead(terminal...)
+	tFinished := time.Now()
 	receipt = Qwen35MetalForwardSequenceReceipt{
 		Path: Qwen35MetalGDNSequenceForwardPath, Available: true,
 		SelectorState: Qwen35MetalSequenceSelectorOn, EvidenceState: Qwen35MetalSequenceEvidenceExecuted, Tokens: P,
-		CommandBuffers: 1, Encoders: graphReceipt.Encoders, TerminalWaits: 1, TerminalReadbacks: graphReceipt.HostReadbacks,
+		CommandBuffers: graphReceipt.CommandBuffers, Encoders: graphReceipt.Encoders, TerminalWaits: 1, TerminalReadbacks: graphReceipt.HostReadbacks,
 		IntermediateWaits: graphReceipt.IntermediateWaits, IntermediateReadbacks: graphReceipt.IntermediateReadbacks,
 		HostUploadBytes: graphReceipt.HostUploadBytes, HostReadbackBytes: graphReceipt.HostReadbackBytes,
 		AllocatedBuffers: graphReceipt.AllocatedBuffers, RetainedBufferBytes: graphReceipt.RetainedBufferBytes,
@@ -1230,11 +1282,19 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 		receipt.DeviceKVAttentionLayers = deviceAttnOrdinal
 		receipt.DeviceKVSuffixReadbackBytes = uint64(deviceAttnOrdinal * 3 * cfg.NumKVHeads * cfg.HeadDim * 4)
 	}
+	receipt.HostUploadBytes += mirrorSeedBytes
 	if err != nil || !graphReceipt.Committed || !graphReceipt.CompletedWait || graphReceipt.HostReadbacks != 1 {
 		if err == nil {
 			err = fmt.Errorf("metalgemm: incomplete Qwen decode-token graph receipt: %+v", graphReceipt)
 		}
 		return nil, receipt, true, err
+	}
+	var logits []float32
+	if logitsResult != nil {
+		if logits = outputs[logitsIndex]; len(logits) != cfg.VocabSize {
+			return nil, receipt, true, fmt.Errorf("metalgemm: whole-token logits width %d, want %d", len(logits), cfg.VocabSize)
+		}
+		logitScaleInPlace(logits, cfg)
 	}
 	var rawHidden []float32
 	if captureRaw {
@@ -1248,10 +1308,10 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 			}
 		}
 	}
-	s.countMetalGraphCommandBuffer(1)
+	s.countMetalGraphCommandBuffer(graphReceipt.CommandBuffers)
 	if os.Getenv("FAK_QWEN35_WHOLE_TOKEN_TRACE") == "1" {
-		fmt.Fprintf(os.Stderr, "w1-whole-token P=1 cb=1 encoders=%d gpu_ms=%.2f wait_ms=%.2f host_up=%dB host_down=%dB graph_cb_total=%d dispatch_cb_total=%d gdn_fused=%v\n",
-			graphReceipt.Encoders, graphReceipt.GPUMilliseconds, graphReceipt.WaitMilliseconds,
+		fmt.Fprintf(os.Stderr, "w1-whole-token P=1 cb=%d encoders=%d enc_ms=%.2f finish_ms=%.2f since_prev_ms=%.2f gpu_ms=%.2f wait_ms=%.2f host_up=%dB host_down=%dB graph_cb_total=%d dispatch_cb_total=%d gdn_fused=%v\n",
+			graphReceipt.CommandBuffers, graphReceipt.Encoders, tEncoded.Sub(tStart).Seconds()*1e3, tFinished.Sub(tEncoded).Seconds()*1e3, tStart.Sub(b.traceLastEnd).Seconds()*1e3, graphReceipt.GPUMilliseconds, graphReceipt.WaitMilliseconds,
 			graphReceipt.HostUploadBytes, graphReceipt.HostReadbackBytes,
 			s.metalGraphCommandBuffers, s.metalCommandBuffers,
 			os.Getenv("FAK_QWEN35_WHOLE_TOKEN_GDN_FUSED") == "1")
@@ -1264,7 +1324,10 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 		outIndex += 3
 	}
 	s.Cache.appendPosition(base, id)
-	if deviceKV != nil {
+	if decodeMirror {
+		b.advanceDecodeMirror(s)
+		deviceKVCompleted = true
+	} else if deviceKV != nil {
 		if !b.KeepDeviceKV(s) {
 			b.invalidateDeviceKV()
 		} else {
@@ -1274,7 +1337,46 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 	if captureRaw {
 		s.rememberTargetHidden(base, id, rawHidden[0:H])
 	}
+	s.qwen35Logits = logits
+	b.traceLastEnd = time.Now()
 	return outputs[0], receipt, true, nil
+}
+
+// qwen35WholeTokenFlushDefault is the whole-token flush schedule for a 32-layer
+// stack, in completed layers: the first segment is one layer so the GPU starts
+// almost at once, and each later segment is a few times longer because host
+// encode runs several times faster than the GPU executes a layer. Deeper stacks
+// scale the points proportionally.
+var qwen35WholeTokenFlushDefault = []int{1, 4, 12, 24}
+
+// qwen35WholeTokenFlushLayers returns, per layer index, whether the graph commits
+// its encoded prefix before encoding that layer. FAK_QWEN35_WHOLE_TOKEN_FLUSH=0
+// restores the single command buffer; a comma list of completed-layer counts
+// overrides the scaled default.
+func qwen35WholeTokenFlushLayers(layers int) []bool {
+	at := make([]bool, layers)
+	points := qwen35WholeTokenFlushDefault
+	scale := true
+	if v := os.Getenv("FAK_QWEN35_WHOLE_TOKEN_FLUSH"); v != "" {
+		if v == "0" {
+			return at
+		}
+		points, scale = nil, false
+		for _, f := range strings.Split(v, ",") {
+			if n, err := strconv.Atoi(strings.TrimSpace(f)); err == nil {
+				points = append(points, n)
+			}
+		}
+	}
+	for _, n := range points {
+		if scale {
+			n = n * layers / 32
+		}
+		if n > 0 && n < layers {
+			at[n] = true
+		}
+	}
+	return at
 }
 
 func init() {
@@ -1397,6 +1499,7 @@ func (b *metalQwen35GDNSequenceBackend) FreeQwen35GDNAuxState(handles Qwen35GDNA
 		b.deviceKVCache = nil
 		b.deviceKVPersistent = false
 		b.deviceKVLineage = nil
+		b.closeDecodeMirrorLocked()
 	}
 	b.mu.Unlock()
 	if state != nil {

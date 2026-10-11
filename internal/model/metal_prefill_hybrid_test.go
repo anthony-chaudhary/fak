@@ -327,10 +327,15 @@ func TestQwen35MetalP32TwoP1PersistentDeviceKV(t *testing.T) {
 
 	run := func(persistent bool) (*Session, [][]float32, []Qwen35MetalForwardSequenceReceipt) {
 		t.Helper()
+		// The control is the historical host-prefix decode, so it also turns off the
+		// whole-token decode's own mirror; one command buffer keeps the receipt exact.
+		t.Setenv("FAK_QWEN35_WHOLE_TOKEN_FLUSH", "0")
 		if persistent {
 			t.Setenv("FAK_QWEN35_PERSISTENT_DECODE_DKV", "1")
+			t.Setenv("FAK_QWEN35_DECODE_DKV", "1")
 		} else {
 			t.Setenv("FAK_QWEN35_PERSISTENT_DECODE_DKV", "0")
+			t.Setenv("FAK_QWEN35_DECODE_DKV", "0")
 		}
 		s := m.NewSession()
 		s.Q4K, s.MetalQ4K = true, true
