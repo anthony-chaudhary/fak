@@ -16,6 +16,9 @@ type v41IndexRoPERecorder struct {
 	cleanupCalls int
 	cleanupArmed bool
 	resources    map[compute.Buffer]*v41IndexRoPEResource
+	foreign      compute.Buffer
+	foreignReads int
+	foreignFrees int
 }
 
 type v41IndexRoPEResource struct {
@@ -36,7 +39,17 @@ func (b *v41IndexRoPERecorder) FlushBatch() {
 	}
 }
 
+func (b *v41IndexRoPERecorder) Read(x compute.Tensor) []float32 {
+	if b.foreign != nil && x.Buf() == b.foreign {
+		b.foreignReads++
+	}
+	return b.v41InverseRowsTestBackend.Read(x)
+}
+
 func (b *v41IndexRoPERecorder) Free(x compute.Tensor) {
+	if b.foreign != nil && x.Buf() == b.foreign {
+		b.foreignFrees++
+	}
 	owned := b.resources[x.Buf()]
 	if owned != nil {
 		owned.attempts++
@@ -93,6 +106,14 @@ func (b *v41IndexRoPERecorder) V41TailRoPERows(x, table compute.Tensor, rows, hd
 		case "panic":
 			b.cleanupArmed = true
 			panic(b.cause)
+		case "alias-query":
+			return x, nil
+		case "alias-table":
+			return table, nil
+		case "foreign":
+			out := compute.NewF32(b.Backend, []int{rows, hd}, v41TailRoPEExactOracle(call.x, call.table, hd, rd))
+			b.foreign = out.Buf()
+			return out, nil
 		}
 	}
 	values := v41TailRoPEExactOracle(call.x, call.table, hd, rd)
@@ -232,7 +253,7 @@ func TestV41IndexRoPEDeviceReachability(t *testing.T) {
 		}
 		v41IndexRoPECheckResources(t, b, false)
 	})
-	for _, fault := range []string{"error", "panic", "length", "prefix", "nonfinite"} {
+	for _, fault := range []string{"error", "panic", "length", "prefix", "nonfinite", "alias-query", "alias-table", "foreign"} {
 		t.Run("selected-"+fault, func(t *testing.T) {
 			m := v41IndexerTestFixture(t)
 			b := newV41IndexRoPERecorder()
@@ -257,6 +278,9 @@ func TestV41IndexRoPEDeviceReachability(t *testing.T) {
 			}
 			if retry := recoverError(func() { s.Step(4) }); retry != s.halFailure || len(b.calls) != b.failCall {
 				t.Fatal("closed query retried")
+			}
+			if fault == "foreign" && (b.foreign == nil || b.foreignReads != 0 || b.foreignFrees != 0) {
+				t.Fatalf("foreign output was not rejected before read/free: output=%v reads=%d frees=%d", b.foreign != nil, b.foreignReads, b.foreignFrees)
 			}
 			v41IndexRoPECheckResources(t, b, false)
 		})
@@ -355,4 +379,61 @@ func TestV41IndexRoPEDeviceReachability(t *testing.T) {
 		}
 		v41TailRoPECheckBits(t, "device-only atomic refusal", x, before)
 	})
+}
+
+// fak-test:runtime medium est=2s lane=default
+// fak-test:justify Exercises restored ownership of both consumers of the row-RoPE primitive.
+func TestV41IndexRoPERestoredGatherOwnership(t *testing.T) {
+	if ref := compute.Default(); ref == nil || ref.Name() != "cpu-ref" || ref.Caps().DeviceMemory {
+		t.Fatal("restored query-RoPE software witness requires cpu-ref")
+	}
+	m := v41IndexerTestFixture(t)
+	b := newV41IndexRoPERecorder()
+	source := v41DenseTestSession(t, m, b)
+	v41ScoreOnly(source)
+	// Leave both row-RoPE consumers enabled: the shared carrier must rebind
+	// query rotation and inverse attention output to the destination session.
+	if ops := source.v41State().gatherOps; ops.indexRoPEFunc() == nil || ops.inverseOutputFunc() == nil {
+		t.Fatal("both row-RoPE callbacks must be selected")
+	}
+	host := v41DenseTestSession(t, m, newV41DenseTestBackend())
+	v41ScoreOnly(host)
+	v41ScoreTestBits(t, source.Prefill([]int{1, 2, 3}), host.Prefill([]int{1, 2, 3}))
+	snap, err := source.PrefixSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer snap.Close()
+	target := v41DenseTestSession(t, m, b)
+	if err := snap.Restore(target); err != nil {
+		t.Fatal(err)
+	}
+	v41ScoreOnly(target)
+	source.Close()
+	ops := target.v41State().gatherOps
+	if target.v41Forward.callbackOwner != target || ops == nil || ops.owner != target ||
+		ops.indexRoPEFunc() == nil || ops.inverseOutputFunc() == nil {
+		t.Fatal("restored gather carrier retained the source owner or lost a callback")
+	}
+	query, inverse := ops.indexRoPE, ops.inverseOutput
+	queryCalls, inverseCalls := 0, 0
+	ops.indexRoPE = func(layer int, values, cos, sin []float32, heads, hd, rd int) ([]float32, error) {
+		queryCalls++
+		return query(layer, values, cos, sin, heads, hd, rd)
+	}
+	ops.inverseOutput = func(layer int, values, cos, sin []float32, heads, hd, rd int) ([]float32, error) {
+		inverseCalls++
+		return inverse(layer, values, cos, sin, heads, hd, rd)
+	}
+	v41ScoreTestBits(t, target.Prefill([]int{4}), host.Prefill([]int{4}))
+	if queryCalls == 0 || inverseCalls == 0 {
+		t.Fatal("restored suffix omitted one row-RoPE consumer")
+	}
+	priorQuery, priorInverse := queryCalls, inverseCalls
+	v41ScoreTestBits(t, target.Step(5), host.Step(5))
+	if queryCalls <= priorQuery || inverseCalls <= priorInverse || target.BackendSessionClosed() ||
+		len(b.outputs) != 0 || !reflect.DeepEqual(captureV41ForwardSnapshot(target.v41Forward), captureV41ForwardSnapshot(host.v41Forward)) {
+		t.Fatal("restored step lost target ownership, omitted a callback, leaked, or changed continuation")
+	}
+	v41IndexRoPECheckResources(t, b, false)
 }
