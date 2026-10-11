@@ -40,6 +40,28 @@ type v41EngramRowReaderAt struct {
 	rowBytes int
 }
 
+// v41EngramEncodedRowReaderAt is the adapter over a source whose rows decode
+// from an encoded extent, so acquisition binds those bytes rather than the
+// decoded rows.
+type v41EngramEncodedRowReaderAt struct {
+	*v41EngramRowReaderAt
+	enc model.V41EngramEncodedRows
+}
+
+func (w v41EngramEncodedRowReaderAt) V41EngramEncodedRows(start, count int) (io.ReaderAt, int64, int64, string, error) {
+	return w.enc.V41EngramEncodedRows(start, count)
+}
+
+// newV41EngramRowReaderAt adapts src for binding, carrying its encoded extent
+// through when it names one.
+func newV41EngramRowReaderAt(src model.V41EngramRowSource, rows, rowBytes int) io.ReaderAt {
+	w := &v41EngramRowReaderAt{src: src, rows: rows, rowBytes: rowBytes}
+	if enc, ok := src.(model.V41EngramEncodedRows); ok {
+		return v41EngramEncodedRowReaderAt{v41EngramRowReaderAt: w, enc: enc}
+	}
+	return w
+}
+
 func (w *v41EngramRowReaderAt) RowBytes() int { return w.rowBytes }
 
 func (w *v41EngramRowReaderAt) ReadRows(start, count int, dst []byte) (int, error) {
@@ -210,7 +232,7 @@ func attachV41EngramServing(m *model.Model, ws *WeightSource) error {
 
 	type engramAcquire struct {
 		id     int
-		reader *v41EngramRowReaderAt
+		reader io.ReaderAt
 		shard  model.V41EngramShard
 		bind   model.V41EngramArtifactBinding
 	}
@@ -233,7 +255,7 @@ func attachV41EngramServing(m *model.Model, ws *WeightSource) error {
 		size := int64(tableRows) * int64(innerRowBytes)
 		pending[i] = engramAcquire{
 			id:     id,
-			reader: &v41EngramRowReaderAt{src: inner, rows: tableRows, rowBytes: innerRowBytes},
+			reader: newV41EngramRowReaderAt(inner, tableRows, innerRowBytes),
 			shard:  model.V41EngramShard{ID: shardName, ExpectedID: shardName, Offset: 0, Size: size, Rows: tableRows},
 			bind:   model.V41EngramArtifactBinding{Shard: shardName, Offset: 0, Size: size, Rows: tableRows, RowBytes: innerRowBytes},
 		}
@@ -241,7 +263,8 @@ func attachV41EngramServing(m *model.Model, ws *WeightSource) error {
 
 	// Admit only a source bound to the bytes of its exact extent: the verified
 	// route, never the unverified prepared reader. Each layer's extent is hashed
-	// once, and the layers hash concurrently (one sha256 stream each).
+	// once (the Q2_K blocks, not their f32 expansion), and the layers hash
+	// concurrently, each on a tree-digest leaf pool.
 	srcs := make([]model.V41EngramRowSource, len(pending))
 	errs := make([]error, len(pending))
 	var wg sync.WaitGroup

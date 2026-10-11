@@ -218,6 +218,20 @@ func (s *V41EngramQ2KSource) RowBytes() int { return v41EngramQ2KRowBytes }
 // TableRows returns the table's resolved row count.
 func (s *V41EngramQ2KSource) TableRows() int { return s.tableRows }
 
+// V41EngramEncodedRows names the Q2_K super-blocks rows [start, start+count)
+// decode from: exactly the bytes ReadRows reads for that range. A binding then
+// addresses the checkpoint bytes instead of their f32 expansion.
+func (s *V41EngramQ2KSource) V41EngramEncodedRows(start, count int) (io.ReaderAt, int64, int64, string, error) {
+	if s.r == nil {
+		return nil, 0, 0, "", &V41EngramQ2KError{Kind: V41EngramQ2KRange, Detail: "source is closed"}
+	}
+	if start < 0 || count <= 0 || start > s.tableRows || count > s.tableRows-start {
+		return nil, 0, 0, "", &V41EngramQ2KError{Kind: V41EngramQ2KRange,
+			Detail: fmt.Sprintf("encoded range start=%d count=%d tableRows=%d", start, count, s.tableRows)}
+	}
+	return s.r, s.payloadOff + int64(start)*int64(blockQ2KBytes), int64(count) * int64(blockQ2KBytes), model.V41EngramEncodingQ2K, nil
+}
+
 // ReadRows reads count contiguous Q2_K rows starting at row index start. It issues
 // ONE bounded ReaderAt at payloadOff+start*blockQ2KBytes for count*84 raw bytes,
 // dequantizes the whole buffer with dequantQ2K, and writes count*1024 f32 bytes
@@ -284,5 +298,8 @@ var v41EngramHostLittleEndian = func() bool {
 	return *(*byte)(unsafe.Pointer(&x)) == 1
 }()
 
-// compile-time proof the source satisfies the model-side read seam.
-var _ model.V41EngramRowSource = (*V41EngramQ2KSource)(nil)
+// compile-time proof the source satisfies the model-side read and encoded seams.
+var (
+	_ model.V41EngramRowSource   = (*V41EngramQ2KSource)(nil)
+	_ model.V41EngramEncodedRows = (*V41EngramQ2KSource)(nil)
+)
