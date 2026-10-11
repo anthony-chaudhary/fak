@@ -489,11 +489,13 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	var finalNorm v41FinalNormFunc
 	var bf16Boundary v41BF16BoundaryFunc
 	var logitScale v41LogitScaleFunc
+	var logitRefusal v41LogitHostRefusal
 	if runState != nil {
 		headProjection = runState.denseProjection
 		finalNorm = runState.finalNorm
 		bf16Boundary = runState.bf16Boundary
 		logitScale = runState.logitScale
+		logitRefusal = runState.logitHostRefusal()
 	}
 	act.Logits = make([][]float32, len(seq))
 	for t := 0; t < len(seq); t++ {
@@ -501,7 +503,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		if full {
 			headInput = act.Hidden[len(act.Hidden)-1][t*H : (t+1)*H]
 		}
-		logits, err := m.v41HeadWithLogitScale(headInput, headProjection, finalNorm, bf16Boundary, logitScale)
+		logits, err := m.v41HeadWithLogitScale(headInput, headProjection, finalNorm, bf16Boundary, logitScale, logitRefusal)
 		if err != nil {
 			return nil, err
 		}
@@ -1451,10 +1453,10 @@ func (m *Model) v41HeadWithFinalNorm(x []float32, project v41DenseProjectionFunc
 }
 
 func (m *Model) v41HeadWithBF16Boundary(x []float32, project v41DenseProjectionFunc, normalize v41FinalNormFunc, round v41BF16BoundaryFunc) ([]float32, error) {
-	return m.v41HeadWithLogitScale(x, project, normalize, round, nil)
+	return m.v41HeadWithLogitScale(x, project, normalize, round, nil, nil)
 }
 
-func (m *Model) v41HeadWithLogitScale(x []float32, project v41DenseProjectionFunc, normalize v41FinalNormFunc, round v41BF16BoundaryFunc, scale v41LogitScaleFunc) ([]float32, error) {
+func (m *Model) v41HeadWithLogitScale(x []float32, project v41DenseProjectionFunc, normalize v41FinalNormFunc, round v41BF16BoundaryFunc, scale v41LogitScaleFunc, refuse v41LogitHostRefusal) ([]float32, error) {
 	if !m.has("model.norm.weight") {
 		return nil, v41StageErr(v41StageFinalNorm, -1,
 			fmt.Errorf("%w: missing model.norm.weight", ErrV41ForwardStage))
@@ -1508,7 +1510,7 @@ func (m *Model) v41HeadWithLogitScale(x []float32, project v41DenseProjectionFun
 	if err != nil {
 		return nil, err
 	}
-	return v41ScaleHeadLogits(logits, m.Cfg, scale)
+	return v41ScaleHeadLogits(logits, m.Cfg, scale, refuse)
 }
 
 // v41FullFinalNorm owns the reference's BF16 -> learned F32 RMSNorm -> BF16

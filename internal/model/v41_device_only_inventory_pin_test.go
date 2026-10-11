@@ -14,7 +14,6 @@ import (
 var v41DeviceOnlyPinnedHostOps = []v41HostOp{
 	{name: "bf16-boundary", site: "v41RoundBF16"},
 	{name: "compressed-publication-rope", site: "Model.v41CompressedPublicationRoPE"},
-	{name: "logit-scale", site: "Model.v41HeadWithFinalNorm"},
 }
 
 // fak-test:runtime fast est=1s lane=default

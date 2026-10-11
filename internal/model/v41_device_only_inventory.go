@@ -40,7 +40,6 @@ func (e *v41DeviceOnlyHostOpError) Is(target error) bool { return target == errV
 var v41DeviceOnlyHostOps = []v41HostOp{
 	{name: "bf16-boundary", site: "v41RoundBF16"},
 	{name: "compressed-publication-rope", site: "Model.v41CompressedPublicationRoPE"},
-	{name: "logit-scale", site: "Model.v41HeadWithFinalNorm"},
 }
 
 func v41DeviceOnlyRefusal() error {

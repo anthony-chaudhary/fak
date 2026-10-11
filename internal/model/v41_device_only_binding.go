@@ -31,6 +31,17 @@ var v41DeviceOnlyBindings = []v41DeviceOnlyBinding{
 	{op: v41HostOp{name: "moe-router-topk", site: "V41RouterTopKAvailable"}, bound: func(s *Session) bool { return s.v41RouterTopKFunc() != nil }},
 	{op: v41HostOp{name: "shared-expert-swiglu", site: "v41SharedActivationFunc"}, bound: func(s *Session) bool { return s.v41SharedActivationFunc() != nil }},
 	{op: v41HostOp{name: "routed-swiglu-clamp", site: "V41RoutedSwiGLUAvailable"}, bound: v41DeviceOnlyRoutedSwiGLUBound},
+	// The head postprocess is the identity unless the config sets it (V4.1 Flash
+	// sets none). Softcap and token suppression have no device seam yet.
+	{op: v41HostOp{name: "logit-scale", site: "V41LogitScaleAvailable"}, uses: v41UsesLogitScale, bound: v41DeviceOnlyLogitScaleBound},
+	{op: v41HostOp{name: "logit-softcap", site: "softcapInPlace"}, uses: v41UsesLogitSoftcap, bound: v41DeviceOnlyNoSeam},
+	{op: v41HostOp{name: "logit-token-suppression", site: "logitScaleInPlace"}, uses: v41UsesLogitSuppression, bound: v41DeviceOnlyNoSeam},
+}
+
+func v41DeviceOnlyNoSeam(*Session) bool { return false }
+
+func v41DeviceOnlyLogitScaleBound(s *Session) bool {
+	return s != nil && s.M != nil && finite32(v41LogitFactor(s.M.Cfg)) && s.v41LogitScaleFunc() != nil
 }
 
 func v41DeviceOnlyMHCBound(s *Session) bool {

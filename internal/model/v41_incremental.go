@@ -412,7 +412,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 			return nil, stats, err
 		}
 	}
-	res, herr := m.v41HeadWithLogitScale(headInput, scratch.denseProjection, st.finalNorm, st.bf16Boundary, st.logitScale)
+	res, herr := m.v41HeadWithLogitScale(headInput, scratch.denseProjection, st.finalNorm, st.bf16Boundary, st.logitScale, st.logitHostRefusal())
 	if herr != nil {
 		rollback()
 		var projection *V41ProjectionOperationError

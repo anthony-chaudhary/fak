@@ -26,14 +26,55 @@ func (e *V41LogitScaleOperationError) Is(target error) bool {
 
 var errV41LogitScaleResult = errors.New("model: invalid V4.1 logit scale result")
 
-// Preserve the existing float64-config-to-float32 conversion and ordering:
-// multiply, exact existing host softcap, then forced token suppression. The
-// generic device-only logit-scale blocker remains: the last two operations and
-// the model-only portable Tail path have not been moved to a device primitive.
-func v41ScaleHeadLogits(logits []float32, cfg Config, scale v41LogitScaleFunc) ([]float32, error) {
-	factor := float32(1)
+// v41LogitHostRefusal returns the typed device-only refusal for a host arm of
+// the head postprocess. Nil permits the host arms.
+type v41LogitHostRefusal func(op string) error
+
+// v41LogitFactor is the binary32 multiplier logitScaleInPlace applies; 1 is
+// the identity.
+func v41LogitFactor(cfg Config) float32 {
 	if cfg.LogitScale != 0 && cfg.LogitScale != 1 {
-		factor = float32(cfg.LogitScale)
+		return float32(cfg.LogitScale)
+	}
+	return 1
+}
+
+// These mirror the guards in logitScaleInPlace and softcapInPlace, so a
+// postprocess op counts as used exactly when its host arm would compute.
+func v41UsesLogitScale(cfg Config) bool { return v41LogitFactor(cfg) != 1 }
+
+func v41UsesLogitSoftcap(cfg Config) bool { return !(float32(cfg.LogitSoftcap) <= 0) }
+
+func v41UsesLogitSuppression(cfg Config) bool { return len(cfg.SuppressTokens) > 0 }
+
+// logitHostRefusal is non-nil when the state's owning session runs under
+// ExecutionPolicyDeviceOnly. Model-only forwards have no owner and no policy.
+func (st *v41ForwardState) logitHostRefusal() v41LogitHostRefusal {
+	if st == nil || st.callbackOwner == nil || st.callbackOwner.executionPolicy != ExecutionPolicyDeviceOnly {
+		return nil
+	}
+	s := st.callbackOwner
+	return func(op string) error { return s.v41DeviceOnlyDeclined(-1, op) }
+}
+
+// Preserve the existing float64-config-to-float32 conversion and ordering:
+// multiply, exact existing host softcap, then forced token suppression.
+// Under device-only (refuse non-nil) no host arm runs: a used op without its
+// device seam refuses typed before the multiply is selected, and the identity
+// returns the projected row untouched. Softcap and suppression have no seam.
+func v41ScaleHeadLogits(logits []float32, cfg Config, scale v41LogitScaleFunc, refuse v41LogitHostRefusal) ([]float32, error) {
+	factor := v41LogitFactor(cfg)
+	if refuse != nil {
+		switch {
+		case factor != 1 && (scale == nil || !finite32(factor) || !v41AllFinite32(logits)):
+			return nil, refuse("logit-scale")
+		case v41UsesLogitSoftcap(cfg):
+			return nil, refuse("logit-softcap")
+		case v41UsesLogitSuppression(cfg):
+			return nil, refuse("logit-token-suppression")
+		case factor == 1:
+			return logits, nil
+		}
 	}
 	if scale == nil || factor == 1 || !finite32(factor) {
 		logitScaleInPlace(logits, cfg)
@@ -42,11 +83,9 @@ func v41ScaleHeadLogits(logits []float32, cfg Config, scale v41LogitScaleFunc) (
 	// Head projection historically permits nonfinite raw results, including
 	// infinities that a later softcap maps to finite logits. Such a row is
 	// outside this primitive's finite-input domain, before any selection.
-	for _, value := range logits {
-		if !finite32(value) {
-			logitScaleInPlace(logits, cfg)
-			return logits, nil
-		}
+	if !v41AllFinite32(logits) {
+		logitScaleInPlace(logits, cfg)
+		return logits, nil
 	}
 	out, err := scale(logits, factor)
 	if err != nil {
@@ -60,6 +99,15 @@ func v41ScaleHeadLogits(logits []float32, cfg Config, scale v41LogitScaleFunc) (
 	cfg.LogitScale = 1
 	logitScaleInPlace(out, cfg)
 	return out, nil
+}
+
+func v41AllFinite32(values []float32) bool {
+	for _, value := range values {
+		if !finite32(value) {
+			return false
+		}
+	}
+	return true
 }
 
 // This copy seam uploads and reads back 4N bytes each, with 8N live device
