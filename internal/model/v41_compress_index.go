@@ -37,9 +37,13 @@ type V41CompressorPool struct {
 	kv      []float32
 	scores  []float32
 
-	// normalize is session-bound only on ephemeral producer pools. Retained
-	// attention state and prefix snapshots contain data, never this callback.
+	// normalize and gatedPool are session-bound only on ephemeral producer
+	// pools. Retained attention state and prefix snapshots contain data, never
+	// these callbacks. gatedPool, when set, owns a completed group's softmax
+	// gate and weighted sum (ratio >= 2); it receives the group's kv and score
+	// rows [ratio*width] in token order and returns the raw pooled row.
 	normalize func(pooled, gain []float32, eps float32) ([]float32, error)
+	gatedPool func(kv, scores []float32) ([]float32, error)
 }
 
 // NewV41CompressorPool builds a pooling state for a ratio and latent width.
@@ -144,6 +148,17 @@ func (c *V41CompressorPool) Push(pos int, projectedKV, projectedScore []float32)
 	c.nextPos++
 	if c.filled < c.ratio {
 		return nil, false, nil
+	}
+	if c.gatedPool != nil {
+		c.filled = 0
+		out, err := c.gatedPool(c.kv, c.scores)
+		if err != nil {
+			return nil, false, err
+		}
+		if len(out) != c.width {
+			return nil, false, fmt.Errorf("model: V41 compressor gated pool width %d, want %d", len(out), c.width)
+		}
+		return out, true, nil
 	}
 
 	out := make([]float32, c.width)

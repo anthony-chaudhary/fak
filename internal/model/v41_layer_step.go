@@ -730,6 +730,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 				return normalize(l, pooled, gain, eps)
 			}
 		}
+		pool.bindGatedPool(l, scratch.gatherOps.compressorPoolFunc())
 		projectKV := func(in []float32) ([]float32, error) {
 			return m.v41ProjMatRowsWithProjection(l, "attn.compressor.wkv.weight", in, width, H, scratch.denseProjection)
 		}

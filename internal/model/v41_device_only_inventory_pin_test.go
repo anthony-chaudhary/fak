@@ -13,8 +13,6 @@ import (
 // so an empty inventory can never admit host compute.
 var v41DeviceOnlyPinnedHostOps = []v41HostOp{
 	{name: "bf16-boundary", site: "v41RoundBF16"},
-	{name: "engram-stream-injection", site: "Model.v41EngramInjectPrepared"},
-	{name: "compressor-gated-pool", site: "V41CompressorPool.PushNormalized"},
 	{name: "compressed-publication-rope", site: "Model.v41CompressedPublicationRoPE"},
 	{name: "logit-scale", site: "Model.v41HeadWithFinalNorm"},
 }

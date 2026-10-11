@@ -15,10 +15,12 @@ type v41DeviceOnlyBinding struct {
 var v41DeviceOnlyBindings = []v41DeviceOnlyBinding{
 	{op: v41HostOp{name: "embedding-panel", site: "V41EmbeddingGatherAvailable"}, bound: func(s *Session) bool { return s.v41EmbeddingGatherFunc() != nil }},
 	{op: v41HostOp{name: "mhc-streams", site: "SupportsV41MHC"}, bound: v41DeviceOnlyMHCBound},
+	{op: v41HostOp{name: "engram-stream-injection", site: "SupportsV41EngramGate"}, uses: v41UsesEngram, bound: func(s *Session) bool { return s.v41EngramGateFunc() != nil }},
 	{op: v41HostOp{name: "rms-norm", site: "v41RMSNormFunc"}, bound: func(s *Session) bool { return s.v41RMSNormFunc() != nil }},
 	// A reduced geometry leaves this seam nil and normalizes on the host.
 	{op: v41HostOp{name: "attention-input-norm", site: "v41AttentionInputNormFunc"}, bound: func(s *Session) bool { return s.v41AttentionInputNormFunc() != nil }},
 	{op: v41HostOp{name: "tail-rope-qk", site: "SupportsV41TailRoPE"}, bound: func(s *Session) bool { return s.v41TailRoPEFunc() != nil }},
+	{op: v41HostOp{name: "compressor-gated-pool", site: "SupportsV41CompressorPool"}, uses: v41UsesCompressedKV, bound: func(s *Session) bool { return s.v41CompressorPoolFunc() != nil }},
 	{op: v41HostOp{name: "compressor-norm", site: "SupportsV41CompressorNorm"}, uses: v41UsesCompressedKV, bound: func(s *Session) bool { return s.v41CompressorNormFunc() != nil }},
 	{op: v41HostOp{name: "index-key-norm", site: "SupportsV41IndexKeyNorm"}, uses: v41UsesIndexer, bound: func(s *Session) bool { return s.v41IndexKeyNormFunc() != nil }},
 	{op: v41HostOp{name: "indexer-query-rope", site: "V41TailRoPERowsAvailable"}, uses: v41UsesIndexer, bound: func(s *Session) bool { return s.v41IndexRoPEFunc() != nil }},
@@ -37,6 +39,10 @@ func v41DeviceOnlyMHCBound(s *Session) bool {
 	}
 	op, ok := s.Backend.(compute.V41MHCBackend)
 	return ok && op.SupportsV41MHC()
+}
+
+func v41UsesEngram(cfg Config) bool {
+	return cfg.DeepSeekV41 != nil && len(cfg.DeepSeekV41.EngramLayerIDs) > 0
 }
 
 func v41UsesCompressedKV(cfg Config) bool {

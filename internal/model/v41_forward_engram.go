@@ -292,15 +292,26 @@ func (m *Model) v41EngramInject(l int, x [][]float32, streams [][][]float32, ful
 }
 
 func (m *Model) v41EngramInjectWithProjection(l int, x [][]float32, streams [][][]float32, full bool, seq []int, eps float32, project v41EngramProjectionFunc) error {
-	geometry, err := m.v41EngramInjectionGeometry(l, len(seq))
+	geometry, layerRows, err := m.v41EngramLayerRows(l, seq)
 	if err != nil {
 		return err
 	}
 	geometry.project = project
+	_, err = m.v41EngramInjectPrepared(l, x, streams, full, len(seq), layerRows, eps, geometry)
+	return err
+}
+
+// v41EngramLayerRows hashes seq from the sequence start and returns layer l's
+// row identifiers, position-major [len(seq), cols].
+func (m *Model) v41EngramLayerRows(l int, seq []int) (v41EngramGeometry, []uint32, error) {
+	geometry, err := m.v41EngramInjectionGeometry(l, len(seq))
+	if err != nil {
+		return v41EngramGeometry{}, nil, err
+	}
 	stage, cacheIdx := geometry.stage, geometry.cacheIdx
 	allRows, err := stage.hashPrototype.Clone().Hash(seq, nil)
 	if err != nil {
-		return v41StageErr(v41StageEngram, l, fmt.Errorf("%w: %w", ErrV41NativeUnsupported, err))
+		return v41EngramGeometry{}, nil, v41StageErr(v41StageEngram, l, fmt.Errorf("%w: %w", ErrV41NativeUnsupported, err))
 	}
 	cols, layers := stage.columns, len(stage.layout.Rows)
 	layerRows := make([]uint32, 0, len(seq)*cols)
@@ -308,8 +319,69 @@ func (m *Model) v41EngramInjectWithProjection(l int, x [][]float32, streams [][]
 		base := t*layers*cols + cacheIdx*cols
 		layerRows = append(layerRows, allRows[base:base+cols]...)
 	}
-	_, err = m.v41EngramInjectPrepared(l, x, streams, full, len(seq), layerRows, eps, geometry)
-	return err
+	return geometry, layerRows, nil
+}
+
+// v41EngramGateParamsErr rejects non-finite gate parameters before retrieval
+// or publication. Finite zero/negative epsilon and gains stay admitted, as the
+// host equation accepts them.
+func v41EngramGateParamsErr(l int, eps float32, qNorm, kNorm []float32) error {
+	if !finite32(eps) {
+		return v41StageErr(v41StageEngram, l,
+			fmt.Errorf("%w: Engram gate epsilon is non-finite", ErrV41NativeUnsupported))
+	}
+	for _, norm := range [...]struct {
+		leaf   string
+		values []float32
+	}{{"engram_q_norm.weight", qNorm}, {"engram_k_norm.weight", kNorm}} {
+		for i, value := range norm.values {
+			if !finite32(value) {
+				return v41StageErr(v41StageEngram, l,
+					fmt.Errorf("%w: Engram %s value[%d] is non-finite", ErrV41NativeUnsupported, norm.leaf, i))
+			}
+		}
+	}
+	return nil
+}
+
+// v41EngramDecodePosition decodes position t's cols gathered rows into dst
+// [cols*dim], the projection input of that position.
+func v41EngramDecodePosition(l int, stage *v41EngramStage, cacheIdx int, gathered [][]byte, t, cols, dim int, dst []float32) error {
+	for c := 0; c < cols; c++ {
+		values, err := decodeV41EngramRow(gathered[t*cols+c], dim, stage.rowBytes)
+		if err != nil {
+			// A successful source read can poison other cached rows in this layer.
+			stage.caches[cacheIdx].invalidateRows()
+			return v41StageErr(v41StageEngram, l, err)
+		}
+		copy(dst[c*dim:], values)
+	}
+	return nil
+}
+
+// v41EngramRowPanel gathers and decodes layer l's rows for positions tokens
+// into one row-major [positions, cols*dim] projection-input panel.
+func (m *Model) v41EngramRowPanel(l, positions int, layerRows []uint32, eps float32, geometry v41EngramGeometry) (panel []float32, gatheredRows int, err error) {
+	stage, cacheIdx, cols, dim := geometry.stage, geometry.cacheIdx, geometry.cols, geometry.dim
+	if positions < 0 || len(layerRows) != positions*cols {
+		return nil, 0, v41StageErr(v41StageEngram, l,
+			fmt.Errorf("%w: Engram row identifiers %d, want %d positions x %d columns", ErrV41NativeUnsupported, len(layerRows), positions, cols))
+	}
+	if err := v41EngramGateParamsErr(l, eps, geometry.qNorm, geometry.kNorm); err != nil {
+		return nil, 0, err
+	}
+	gathered, err := GatherV41EngramRows([]*V41EngramRowCache{stage.caches[cacheIdx]}, layerRows, cols)
+	if err != nil {
+		return nil, 0, v41StageErr(v41StageEngram, l, fmt.Errorf("%w: %w", ErrV41NativeUnsupported, err))
+	}
+	width := cols * dim
+	panel = make([]float32, positions*width)
+	for t := range positions {
+		if err := v41EngramDecodePosition(l, stage, cacheIdx, gathered, t, cols, dim, panel[t*width:(t+1)*width]); err != nil {
+			return nil, len(layerRows), err
+		}
+	}
+	return panel, len(layerRows), nil
 }
 
 type v41EngramGeometry struct {
@@ -363,23 +435,9 @@ func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]floa
 		return gatheredRows, v41StageErr(v41StageEngram, l,
 			fmt.Errorf("%w: Engram row identifiers %d, want %d positions x %d columns", ErrV41NativeUnsupported, len(layerRows), positions, cols))
 	}
-	// These shared gate parameters are consumed by every position. Reject
-	// nonfinite values before retrieval or publication, while preserving finite
-	// zero/negative epsilon and gains accepted by the existing host equation.
-	if !finite32(eps) {
-		return gatheredRows, v41StageErr(v41StageEngram, l,
-			fmt.Errorf("%w: Engram gate epsilon is non-finite", ErrV41NativeUnsupported))
-	}
-	for _, norm := range [...]struct {
-		leaf   string
-		values []float32
-	}{{"engram_q_norm.weight", qNorm}, {"engram_k_norm.weight", kNorm}} {
-		for i, value := range norm.values {
-			if !finite32(value) {
-				return gatheredRows, v41StageErr(v41StageEngram, l,
-					fmt.Errorf("%w: Engram %s value[%d] is non-finite", ErrV41NativeUnsupported, norm.leaf, i))
-			}
-		}
+	// These shared gate parameters are consumed by every position.
+	if err := v41EngramGateParamsErr(l, eps, qNorm, kNorm); err != nil {
+		return gatheredRows, err
 	}
 	// Both paths use x[t]: reduced gates index its hidden row, while full gates
 	// publish stream 0 back into it. Validate every used row before gathering or
@@ -430,14 +488,8 @@ func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]floa
 		}
 	}
 	for t := range positions {
-		for c := 0; c < cols; c++ {
-			values, err := decodeV41EngramRow(gathered[t*cols+c], dim, stage.rowBytes)
-			if err != nil {
-				// A successful source read can poison other cached rows in this layer.
-				stage.caches[cacheIdx].invalidateRows()
-				return gatheredRows, v41StageErr(v41StageEngram, l, err)
-			}
-			copy(rowVec[c*dim:], values)
+		if err := v41EngramDecodePosition(l, stage, cacheIdx, gathered, t, cols, dim, rowVec); err != nil {
+			return gatheredRows, err
 		}
 		// Project the COLS*DIM concatenation through engram_kv.weight
 		// [COLS*DIM, (N_HC+1)*H]: output stream s is the key for HC stream s and

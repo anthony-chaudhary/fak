@@ -1,0 +1,260 @@
+#version 450
+#extension GL_EXT_spirv_intrinsics : require
+
+// v41_engram_gate.comp - DeepSeek V4.1 Engram gate/add over the resident mHC
+// stream panel (Ref #13668, #13811), the full-geometry arithmetic of the host
+// Model.v41EngramInjectPrepared. One workgroup owns one (row, stream) pair:
+// invocation 0 runs the three serial reductions and the scalar gate, then every
+// lane publishes BF16(h + gate*BF16(value)) for its columns. Binary32
+// DenormPreserve, SignedZeroInfNanPreserve and RoundingModeRTE are explicit, as
+// in v41_exact_rmsnorm.comp, and every product and sum is `precise`.
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4464], 4459, 32);
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4466], 4461, 32);
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4467], 4462, 32);
+layout(local_size_x = 64) in;
+
+layout(std430, binding = 0) readonly  buffer SBuf { float S[]; };      // streams [rows,4,H]
+layout(std430, binding = 1) readonly  buffer PBuf { float P[]; };      // projection [rows,5H]
+layout(std430, binding = 2) readonly  buffer NBuf { float N[]; };      // qNorm[4H] | kNorm[4H]
+layout(std430, binding = 3) writeonly buffer OBuf { float Out[]; };    // next streams [rows,4,H]
+layout(std430, binding = 4) writeonly buffer FBuf { float Status[]; }; // [rows,4]
+
+// pow2 selects h2*invHidden (the exact quotient for a power-of-two hidden);
+// otherwise the quotient is the corrected divRN(h2, hiddenF). invSqrtHidden is
+// the host float32(1/sqrt(float64(H))).
+layout(push_constant) uniform Push {
+    int rows;
+    int hidden;
+    int pow2;
+    float eps;
+    float invHidden;
+    float hiddenF;
+    float invSqrtHidden;
+} pc;
+
+shared float sGate;
+shared float sBad;
+
+bool finiteF(float v) { return (floatBitsToUint(v) & 0x7f800000u) != 0x7f800000u; }
+
+// model.v41BF16: integer round-to-nearest-even; NaN and Inf bit patterns pass.
+float bf16(float v) {
+    uint bits = floatBitsToUint(v);
+    if ((bits & 0x7f800000u) != 0x7f800000u) bits += 0x7fffu + ((bits >> 16) & 1u);
+    return uintBitsToFloat(bits & 0xffff0000u);
+}
+
+// Correctly rounded binary32 quotient for finite, normal operands: one Newton
+// step on the reciprocal, then one residual correction (Markstein).
+float divRN(float a, float b) {
+    precise float y = 1.0 / b;
+    precise float e = fma(-b, y, 1.0);
+    precise float y1 = fma(e, y, y);
+    precise float q = a * y1;
+    precise float r = fma(-b, q, a);
+    precise float out1 = fma(r, y1, q);
+    return out1;
+}
+
+// Cody-Waite reduction and the Cephes expf polynomial (about 1 ulp), the same
+// evaluation as v41_mhc.comp.
+float expF32(float x) {
+    if (x > 88.72283935546875) return uintBitsToFloat(0x7f800000u);
+    if (x < -103.97207641601562) return 0.0;
+    precise float n = roundEven(x * 1.4426950408889634);
+    precise float r0 = fma(n, -0.693359375, x);
+    precise float r = fma(n, 2.12194440e-4, r0);
+    precise float p = 1.9875691500e-4;
+    p = fma(p, r, 1.3981999507e-3);
+    p = fma(p, r, 8.3334519073e-3);
+    p = fma(p, r, 4.1665795894e-2);
+    p = fma(p, r, 1.6666665459e-1);
+    p = fma(p, r, 5.0000001201e-1);
+    precise float rr = r * r;
+    precise float poly = fma(p, rr, r);
+    precise float e = poly + 1.0;
+    int k = int(n);
+    if (k > 127) {
+        e = e * 2.0;
+        k -= 1;
+    }
+    if (k < -126) {
+        precise float tiny = e * uintBitsToFloat(0x00800000u);
+        return tiny * exp2(float(k + 126));
+    }
+    return e * uintBitsToFloat(uint(k + 127) << 23);
+}
+
+// Unsigned 64-bit integers as uvec2(lo, hi); shifts take 1 <= k <= 31.
+uvec2 shl64(uvec2 a, uint k) { return uvec2(a.x << k, (a.y << k) | (a.x >> (32u - k))); }
+uvec2 shr64(uvec2 a, uint k) { return uvec2((a.x >> k) | (a.y << (32u - k)), a.y >> k); }
+bool ge64(uvec2 a, uvec2 b) { return a.y > b.y || (a.y == b.y && a.x >= b.x); }
+uvec2 sub64(uvec2 a, uvec2 b) {
+    uint borrow;
+    uint lo = usubBorrow(a.x, b.x, borrow);
+    return uvec2(lo, a.y - b.y - borrow);
+}
+uvec2 inc64(uvec2 a) {
+    uint carry;
+    uint lo = uaddCarry(a.x, 1u, carry);
+    return uvec2(lo, a.y + carry);
+}
+
+// The host float32(1 / math.Sqrt(float64(y))) for y >= +0, exactly as
+// v41_exact_rmsnorm.comp: restoring square root of m*2^84 rounded to 53 bits,
+// restoring division of 2^106 rounded to 53 bits, then RNE to 24 bits.
+float invScale(float y) {
+    uint b = floatBitsToUint(y);
+    if (b >= 0x7f800000u) return 0.0;
+    uint m = b & 0x7fffffu;
+    int e = int(b >> 23) - 150;
+    if ((b >> 23) == 0u) {
+        if (m == 0u) return uintBitsToFloat(0x7f800000u);
+        e = -149;
+        while ((m & 0x800000u) == 0u) { m <<= 1; e -= 1; }
+    } else {
+        m |= 0x800000u;
+    }
+    if ((e & 1) != 0) { m <<= 1; e -= 1; }
+
+    uvec2 root = uvec2(0u), rem = uvec2(0u);
+    for (int i = 54; i >= 0; --i) {
+        uint pair = i >= 42 ? (m >> uint(2 * (i - 42))) & 3u : 0u;
+        rem = shl64(rem, 2u);
+        rem.x |= pair;
+        uvec2 trial = shl64(root, 2u);
+        trial.x |= 1u;
+        root = shl64(root, 1u);
+        if (ge64(rem, trial)) { rem = sub64(rem, trial); root.x |= 1u; }
+    }
+    uint shift = root.y >= (1u << 22) ? 2u : 1u;
+    uvec2 s = shr64(root, shift);
+    uint low = root.x & ((1u << shift) - 1u), half_ = 1u << (shift - 1u);
+    int es = e / 2 - 42 + int(shift);
+    bool remNonZero = (rem.x | rem.y) != 0u;
+    if (low > half_ || (low == half_ && (remNonZero || (s.x & 1u) == 1u))) s = inc64(s);
+    if (s.y == (1u << 21) && s.x == 0u) { s = uvec2(0u, 1u << 20); es += 1; }
+
+    uvec2 q = uvec2(0u), r = uvec2(0u);
+    for (int i = 106; i >= 0; --i) {
+        r = shl64(r, 1u);
+        if (i == 106) r.x |= 1u;
+        q = shl64(q, 1u);
+        if (ge64(r, s)) { r = sub64(r, s); q.x |= 1u; }
+    }
+    uint lowq = q.x & 1u;
+    uvec2 qq = shr64(q, 1u);
+    int eq = -105 - es;
+    if (lowq == 1u && ((r.x | r.y) != 0u || (qq.x & 1u) == 1u)) qq = inc64(qq);
+    if (qq.y == (1u << 21) && qq.x == 0u) { qq = uvec2(0u, 1u << 20); eq += 1; }
+
+    uint mant = shr64(qq, 29u).x;
+    uint low29 = qq.x & 0x1fffffffu;
+    int f = eq + 29;
+    if (low29 > (1u << 28) || (low29 == (1u << 28) && (mant & 1u) == 1u)) mant += 1u;
+    if (mant == (1u << 24)) { mant = 1u << 23; f += 1; }
+    return uintBitsToFloat((uint(f + 150) << 23) | (mant & 0x7fffffu));
+}
+
+// Host rsqrtf over every input: -0 -> -Inf, negative or NaN -> NaN.
+float rsqrtHost(float y) {
+    uint b = floatBitsToUint(y);
+    if (b == 0x80000000u) return uintBitsToFloat(0xff800000u);
+    if (b > 0x7f800000u) return uintBitsToFloat(0x7fc00000u);
+    return invScale(y);
+}
+
+// Correctly rounded binary32 square root of a positive normal or +Inf input,
+// the host float32(math.Sqrt(float64(x))). x = m*2^e with e even and m in
+// [2^23, 2^25); the restoring root of m*2^26 has 25 or 26 bits and its
+// remainder is the sticky bit. A binary32 root is never a rounding tie.
+float sqrtRN(float x) {
+    uint b = floatBitsToUint(x);
+    if (b >= 0x7f800000u) return x;
+    uint m = (b & 0x7fffffu) | 0x800000u;
+    int e = int(b >> 23) - 150;
+    if ((e & 1) != 0) { m <<= 1; e -= 1; }
+    uint root = 0u, rem = 0u;
+    for (int i = 25; i >= 0; --i) {
+        uint pair = i >= 13 ? (m >> uint(2 * (i - 13))) & 3u : 0u;
+        rem = (rem << 2) | pair;
+        uint trial = (root << 2) | 1u;
+        root <<= 1;
+        if (rem >= trial) { rem -= trial; root |= 1u; }
+    }
+    uint shift = root >= (1u << 25) ? 2u : 1u;
+    uint mant = root >> shift;
+    uint guard = (root >> (shift - 1u)) & 1u;
+    bool sticky = (root & ((1u << (shift - 1u)) - 1u)) != 0u || rem != 0u;
+    int f = (e - 26) / 2 + int(shift);
+    if (guard == 1u && (sticky || (mant & 1u) == 1u)) mant += 1u;
+    if (mant == (1u << 24)) { mant = 1u << 23; f += 1; }
+    return uintBitsToFloat((uint(f + 150) << 23) | (mant & 0x7fffffu));
+}
+
+float meanOf(float sum) {
+    if (pc.pow2 != 0) {
+        precise float m = sum * pc.invHidden;
+        return m;
+    }
+    return divRN(sum, pc.hiddenF);
+}
+
+void main() {
+    uint g = gl_WorkGroupID.x;
+    uint rows = uint(pc.rows);
+    if (g >= rows * 4u) return;
+    uint H = uint(pc.hidden);
+    uint row = g >> 2u;
+    uint s = g & 3u;
+    uint streamBase = g * H;
+    uint keyBase = row * 5u * H + s * H;
+    uint valueBase = row * 5u * H + 4u * H;
+    uint qBase = s * H;
+    uint kBase = 4u * H + s * H;
+    if (gl_LocalInvocationID.x == 0u) {
+        precise float h2 = 0.0;
+        precise float k2 = 0.0;
+        precise float dotSum = 0.0;
+        bool bad = false;
+        for (uint i = 0u; i < H; ++i) {
+            float hi = S[streamBase + i];
+            float key = bf16(P[keyBase + i]);
+            bad = bad || !finiteF(key) || !finiteF(bf16(P[valueBase + i]));
+            precise float hh = hi * hi;
+            precise float nh = h2 + hh;
+            h2 = nh;
+            precise float kk = key * key;
+            precise float nk = k2 + kk;
+            k2 = nk;
+            precise float qk = N[qBase + i] * N[kBase + i];
+            precise float t1 = hi * qk;
+            precise float t2 = t1 * key;
+            precise float nd = dotSum + t2;
+            dotSum = nd;
+        }
+        precise float yh = meanOf(h2) + pc.eps;
+        precise float yk = meanOf(k2) + pc.eps;
+        precise float d1 = dotSum * rsqrtHost(yh);
+        precise float d2 = d1 * rsqrtHost(yk);
+        precise float dot = d2 * pc.invSqrtHidden;
+        // Host maxf(absf(dot), 1e-6): a NaN dot selects the float32 1e-6.
+        float a = abs(dot);
+        float floor_ = uintBitsToFloat(0x358637bdu);
+        float mag = sqrtRN(a > floor_ ? a : floor_);
+        float z = uintBitsToFloat((floatBitsToUint(mag) & 0x7fffffffu) | (floatBitsToUint(dot) & 0x80000000u));
+        precise float ex = expF32(-z);
+        precise float den = 1.0 + ex;
+        sGate = isinf(den) ? 0.0 : divRN(1.0, den);
+        sBad = bad ? 1.0 : 0.0;
+    }
+    barrier();
+    float gate = sGate;
+    for (uint i = gl_LocalInvocationID.x; i < H; i += 64u) {
+        float value = bf16(P[valueBase + i]);
+        precise float delta = gate * value;
+        precise float sum = S[streamBase + i] + delta;
+        Out[streamBase + i] = bf16(sum);
+    }
+    if (gl_LocalInvocationID.x == 0u) Status[g] = sBad;
+}

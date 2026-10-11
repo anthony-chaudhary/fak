@@ -58,6 +58,8 @@ func TestVulkanV41RegistryBundleBindsDeviceOps(t *testing.T) {
 		{"SupportsV41ExactRMSNorm(512)", v.SupportsV41ExactRMSNorm(512, 1e-6)},
 		{"SupportsV41ExactRMSNorm(128)", v.SupportsV41ExactRMSNorm(128, 1e-6)},
 		{"V41RoutedSwiGLUAvailable", v.V41RoutedSwiGLUAvailable()},
+		{"SupportsV41EngramGate", v.SupportsV41EngramGate()},
+		{"SupportsV41CompressorPool", v.SupportsV41CompressorPool()},
 	} {
 		if !c.have {
 			t.Errorf("registry-built bundle leaves %s false", c.name)

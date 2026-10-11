@@ -337,20 +337,32 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 				}
 				opened := m.v41NowNanos()
 				engramStreams := [][][]float32{streams}
+				layerRows := engramRows[base : base+geometry.cols]
+				var rows int
+				var injectionErr error
+				handled := false
 				if resident != nil {
-					// No Engram device op yet: read the panel back around this layer.
-					host, readErr := resident.hostStreams(l)
-					if readErr != nil {
-						rollback()
-						return nil, stats, readErr
+					if gate := scratch.gatherOps.engramGateFunc(); gate != nil {
+						rows, handled, injectionErr = m.v41EngramInjectResident(l, resident.streams, 1, layerRows, float32(cfg.RMSNormEps), geometry, gate)
+						handled = handled || injectionErr != nil
 					}
-					copy(x, host[0][0])
-					engramStreams = host
 				}
-				rows, injectionErr := m.v41EngramInjectPrepared(l, [][]float32{x}, engramStreams, engramFull, 1,
-					engramRows[base:base+geometry.cols], float32(cfg.RMSNormEps), geometry)
-				if injectionErr == nil && resident != nil {
-					injectionErr = resident.setHostStreams(l, engramStreams)
+				if !handled {
+					if resident != nil {
+						// The session has no Engram gate: read the panel back around this layer.
+						host, readErr := resident.hostStreams(l)
+						if readErr != nil {
+							rollback()
+							return nil, stats, readErr
+						}
+						copy(x, host[0][0])
+						engramStreams = host
+					}
+					rows, injectionErr = m.v41EngramInjectPrepared(l, [][]float32{x}, engramStreams, engramFull, 1,
+						layerRows, float32(cfg.RMSNormEps), geometry)
+					if injectionErr == nil && resident != nil {
+						injectionErr = resident.setHostStreams(l, engramStreams)
+					}
 				}
 				injections := 0
 				if injectionErr == nil {

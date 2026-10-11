@@ -511,6 +511,7 @@ func (s *V41AttentionState) appendCompressorSourcePublication(
 	// Replay owns only this completing group; inherit the selected tail without
 	// retaining a session callback in attention state or published rows.
 	replay.normalize = pool.normalize
+	replay.gatedPool = pool.gatedPool
 	var pooled []float32
 	didEmit := false
 	for i, row := range staged {

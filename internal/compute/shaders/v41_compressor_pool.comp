@@ -1,0 +1,88 @@
+#version 450
+#extension GL_EXT_spirv_intrinsics : require
+
+// v41_compressor_pool.comp - DeepSeek V4.1 compressor gated pool (Ref #13668,
+// #13812), the ratio >= 2 group emission of the host V41CompressorPool.Push.
+// One invocation owns one latent dimension: the max, the softmax denominator
+// and the gated sum run serially in token order, every product, sum and
+// quotient separately rounded. Binary32 DenormPreserve,
+// SignedZeroInfNanPreserve and RoundingModeRTE are explicit.
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4464], 4459, 32);
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4466], 4461, 32);
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4467], 4462, 32);
+layout(local_size_x = 64) in;
+
+layout(std430, binding = 0) readonly  buffer KBuf { float KV[]; };  // [ratio,width]
+layout(std430, binding = 1) readonly  buffer SBuf { float SC[]; };  // [ratio,width]
+layout(std430, binding = 2) writeonly buffer OBuf { float Out[]; }; // [width]
+
+layout(push_constant) uniform Push { int ratio; int width; } pc;
+
+// Correctly rounded binary32 quotient for finite, normal operands (Markstein).
+float divRN(float a, float b) {
+    precise float y = 1.0 / b;
+    precise float e = fma(-b, y, 1.0);
+    precise float y1 = fma(e, y, y);
+    precise float q = a * y1;
+    precise float r = fma(-b, q, a);
+    precise float out1 = fma(r, y1, q);
+    return out1;
+}
+
+// Cody-Waite reduction and the Cephes expf polynomial (about 1 ulp), the same
+// evaluation as v41_mhc.comp.
+float expF32(float x) {
+    if (x > 88.72283935546875) return uintBitsToFloat(0x7f800000u);
+    if (x < -103.97207641601562) return 0.0;
+    precise float n = roundEven(x * 1.4426950408889634);
+    precise float r0 = fma(n, -0.693359375, x);
+    precise float r = fma(n, 2.12194440e-4, r0);
+    precise float p = 1.9875691500e-4;
+    p = fma(p, r, 1.3981999507e-3);
+    p = fma(p, r, 8.3334519073e-3);
+    p = fma(p, r, 4.1665795894e-2);
+    p = fma(p, r, 1.6666665459e-1);
+    p = fma(p, r, 5.0000001201e-1);
+    precise float rr = r * r;
+    precise float poly = fma(p, rr, r);
+    precise float e = poly + 1.0;
+    int k = int(n);
+    if (k > 127) {
+        e = e * 2.0;
+        k -= 1;
+    }
+    if (k < -126) {
+        precise float tiny = e * uintBitsToFloat(0x00800000u);
+        return tiny * exp2(float(k + 126));
+    }
+    return e * uintBitsToFloat(uint(k + 127) << 23);
+}
+
+void main() {
+    uint d = gl_GlobalInvocationID.x;
+    uint W = uint(pc.width);
+    if (d >= W) return;
+    uint R = uint(pc.ratio);
+    float mx = SC[d];
+    for (uint t = 1u; t < R; ++t) {
+        float v = SC[t * W + d];
+        if (v > mx) mx = v;
+    }
+    precise float denom = 0.0;
+    for (uint t = 0u; t < R; ++t) {
+        precise float shifted = SC[t * W + d] - mx;
+        precise float w = expF32(shifted);
+        precise float next = denom + w;
+        denom = next;
+    }
+    precise float acc = 0.0;
+    for (uint t = 0u; t < R; ++t) {
+        precise float shifted = SC[t * W + d] - mx;
+        precise float w = expF32(shifted);
+        precise float q = divRN(w, denom);
+        precise float prod = KV[t * W + d] * q;
+        precise float next = acc + prod;
+        acc = next;
+    }
+    Out[d] = acc;
+}

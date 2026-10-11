@@ -293,6 +293,12 @@ func (m *Model) v41CompressedRowsWithProjection(l int, ratio int, kvRows [][]flo
 }
 
 func (m *Model) v41CompressedRowsWithOperations(l int, ratio int, kvRows [][]float32, inputs [][]float32, project v41DenseProjectionFunc, normalize v41CompressorNormFunc) ([][]float32, error) {
+	return m.v41CompressedRowsWithDeviceOps(l, ratio, kvRows, inputs, project, normalize, nil)
+}
+
+// v41CompressedRowsWithDeviceOps additionally routes each completed group's
+// gated pool through gatedPool when it is non-nil.
+func (m *Model) v41CompressedRowsWithDeviceOps(l int, ratio int, kvRows [][]float32, inputs [][]float32, project v41DenseProjectionFunc, normalize v41CompressorNormFunc, gatedPool v41CompressorPoolFunc) ([][]float32, error) {
 	if ratio <= 0 {
 		return kvRows, nil
 	}
@@ -310,6 +316,7 @@ func (m *Model) v41CompressedRowsWithOperations(l int, ratio int, kvRows [][]flo
 			return normalize(l, pooled, gain, eps)
 		}
 	}
+	pool.bindGatedPool(l, gatedPool)
 	var out [][]float32
 	for pos := range inputs {
 		var in []float32

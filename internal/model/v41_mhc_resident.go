@@ -190,8 +190,9 @@ func (r *v41MHCResident) streamZero() ([][]float32, error) {
 	return out, nil
 }
 
-// hostStreams reads the panel back for a host consumer that has no device op
-// yet (the Engram gate/add); setHostStreams publishes its BF16 result.
+// hostStreams reads the panel back for the Engram host injection of a session
+// that binds no Engram gate; setHostStreams publishes its BF16 result.
+// Device-only never reaches this round trip.
 func (r *v41MHCResident) hostStreams(layer int) ([][][]float32, error) {
 	var host [][][]float32
 	err := r.d.guard(layer, "stream-readback", func(stage *string) error {

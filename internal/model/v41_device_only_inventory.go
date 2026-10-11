@@ -39,8 +39,6 @@ func (e *v41DeviceOnlyHostOpError) Is(target error) bool { return target == errV
 // an empty inventory is the V4.1 admission condition.
 var v41DeviceOnlyHostOps = []v41HostOp{
 	{name: "bf16-boundary", site: "v41RoundBF16"},
-	{name: "engram-stream-injection", site: "Model.v41EngramInjectPrepared"},
-	{name: "compressor-gated-pool", site: "V41CompressorPool.PushNormalized"},
 	{name: "compressed-publication-rope", site: "Model.v41CompressedPublicationRoPE"},
 	{name: "logit-scale", site: "Model.v41HeadWithFinalNorm"},
 }

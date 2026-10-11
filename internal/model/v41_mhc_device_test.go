@@ -27,6 +27,13 @@ type v41MHCTestBackend struct {
 	paramUploads       []compute.Tensor
 	paramFrees         map[compute.Buffer]int
 	paramUploadFailure error
+	// Optional Engram gate and compressor pool transcriptions, off by default
+	// (v41_engram_pool_device_test.go). streamUploads counts the Engram host
+	// round trip's panel republications.
+	engram, pool           bool
+	engramFlag             bool
+	engramCause, poolCause error
+	streamUploads          int
 }
 
 func newV41MHCTestBackend(supported bool) *v41MHCTestBackend {
@@ -36,6 +43,9 @@ func newV41MHCTestBackend(supported bool) *v41MHCTestBackend {
 func (b *v41MHCTestBackend) SupportsV41MHC() bool { return b.supported }
 
 func (b *v41MHCTestBackend) UploadClass(x compute.Tensor, dt compute.Dtype, class compute.MemoryClass, site string) compute.Tensor {
+	if site == "V4.1 mHC streams" {
+		b.streamUploads++
+	}
 	if !strings.HasPrefix(site, "V4.1 mHC ") {
 		return b.v41DenseTestBackend.Upload(x, dt)
 	}

@@ -291,7 +291,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -323,6 +323,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_GLM_KDA_REREAD: case K_GLM_KDA_WAVE32:
         return g_dp.otherGDN;
     case K_V41_MHC: case K_V41_Q2K_EMBED_GATHER: case K_V41_BF16_BOUNDARY: case K_V41_LOGIT_SCALE: case K_V41_BF16_CHECKED:
+    case K_V41_ENGRAM_GATE: case K_V41_COMPRESSOR_POOL:
     case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q4K_MATMUL_COOPMAT: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_Q2K_MATVEC: case K_COUNT:
         return g_dp.otherUnclassified;
     }
@@ -389,6 +390,9 @@ int g_have_v41_logit_scale = 0;
 int g_have_v41_bf16_checked = 0;
 // Optional: registry V10 module; needs the binary32 float controls it declares.
 int g_have_v41_routed_swiglu = 0;
+// Optional: registry V11 modules; same binary32 float controls as the exact RMSNorm.
+int g_have_v41_engram_gate = 0;
+int g_have_v41_compressor_pool = 0;
 bool g_v41IndexerFloatControls = false;
 std::string g_v41IndexerScoreReason = "Vulkan has not initialized";
 // Fixed-size GLM KDA kernels require an explicitly requested 32-lane subgroup.
@@ -1373,7 +1377,7 @@ const char* const kKernelNames[] = {
     "q6k_matmul", "q5k_matmul", "q3k_matmul", "rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add", "q2k_matmul",
     "rmsnorm_q2k_matmul2", "qwen35_split_qg_panel", "qwen35_partial_rope_panel",
     "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
-    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu",
+    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -2772,7 +2776,7 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
             !bufs || bufs[k.nbuf - 1] != initializedStatus || initializedStatus->buf == VK_NULL_HANDLE ||
             initializedStatus->bytes < 16) return false;
     }
-    const bool checkedV41 = forceChecked || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER] || &k == &g_kern[K_V41_EXACT_RMSNORM] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE];
+    const bool checkedV41 = forceChecked || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER] || &k == &g_kern[K_V41_EXACT_RMSNORM] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_ENGRAM_GATE] || &k == &g_kern[K_V41_COMPRESSOR_POOL];
     if (k.nbuf > MAX_DISPATCH_BUFS) {
         fprintf(stderr, "fak-vulkan: dispatch skipped; kernel has %d buffers, max %d\n",
                 k.nbuf, MAX_DISPATCH_BUFS);
@@ -3194,6 +3198,8 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_v41_logit_scale = 0;
     g_have_v41_bf16_checked = 0;
     g_have_v41_routed_swiglu = 0;
+    g_have_v41_engram_gate = 0;
+    g_have_v41_compressor_pool = 0;
     bool v41IndexerPipelineBuilt = false;
     bool v41MHCPipelineBuilt = false;
     g_v41IndexerFloatControls = false;
@@ -3526,6 +3532,13 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // and built only when its declared binary32 float controls are supported.
     const bool v41RoutedSwiGLUBuilt = g_v41IndexerFloatControls &&
         buildKernel(g_kern[K_V41_ROUTED_SWIGLU], P("v41_routed_swiglu.spv"), 4, 12);
+    // V4.1 Engram gate/add and compressor gated pool, trusted since registry
+    // V11/complete71. Optional at init and only built with the binary32 float
+    // controls their execution modes declare.
+    const bool v41EngramGateBuilt = g_v41IndexerFloatControls &&
+        buildKernel(g_kern[K_V41_ENGRAM_GATE], P("v41_engram_gate.spv"), 5, 28);
+    const bool v41CompressorPoolBuilt = g_v41IndexerFloatControls &&
+        buildKernel(g_kern[K_V41_COMPRESSOR_POOL], P("v41_compressor_pool.spv"), 3, 8);
     // Registry V9/current68 promotes only the unchanged finite checked module.
     // A current archive and its complete bundle cut over together. Keep the
     // capability false unless mandatory initialization completes below.
@@ -3658,6 +3671,8 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_v41_logit_scale = v41LogitScaleBuilt ? 1 : 0;
     g_have_v41_bf16_checked = v41BF16CheckedBuilt ? 1 : 0;
     g_have_v41_routed_swiglu = v41RoutedSwiGLUBuilt ? 1 : 0;
+    g_have_v41_engram_gate = v41EngramGateBuilt ? 1 : 0;
+    g_have_v41_compressor_pool = v41CompressorPoolBuilt ? 1 : 0;
     // One per-geometry device self-check, before the first forward and never
     // inside one. Its verdict is cached and read by the verify-width route.
     gdnVerifySelfCheck();
@@ -5001,6 +5016,80 @@ int fvk_v41_exact_rmsnorm_f32(const void* dX, const void* dW, void* dY,
     static_assert(sizeof(Push) == 16 && offsetof(Push, eps) == 8 && offsetof(Push, invWidth) == 12,
                   "V4.1 exact RMSNorm push ABI must be two int32 values then two float32 values");
     if (!dispatch(g_kern[K_V41_EXACT_RMSNORM], bufs, &pc, sizeof(pc), uint32_t(rows))) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
+static bool v41ExtentOK(const Buffer* b, uint64_t count) {
+    return b && b->buf != VK_NULL_HANDLE && b->mem != VK_NULL_HANDLE &&
+        count <= std::numeric_limits<size_t>::max() / sizeof(float) &&
+        count * sizeof(float) <= b->bytes && b->bytes <= g_maxStorageBufferRange &&
+        b->bytes <= std::numeric_limits<VkDeviceSize>::max() - b->memoryOffset;
+}
+
+static bool v41BuffersAlias(const Buffer* a, const Buffer* b) {
+    return a == b || a->buf == b->buf ||
+        (a->mem == b->mem && a->memoryOffset < b->memoryOffset + b->bytes &&
+         b->memoryOffset < a->memoryOffset + a->bytes);
+}
+
+int fvk_have_v41_engram_gate(void) {
+    return g_ready && g_v41IndexerFloatControls && g_have_v41_engram_gate &&
+        g_kern[K_V41_ENGRAM_GATE].pipe != VK_NULL_HANDLE;
+}
+
+int fvk_v41_engram_gate_f32(const void* dStreams, const void* dProjection, const void* dNorms,
+                            void* dNext, void* dStatus, int rows, int hidden, float eps,
+                            float invSqrtHidden) {
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_engram_gate()) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (rows <= 0 || hidden <= 0 || hidden > (1 << 16) || !std::isfinite(eps) || !std::isfinite(invSqrtHidden)) return 2;
+    const uint64_t r = uint64_t(rows), h = uint64_t(hidden);
+    const uint64_t panel = r * 4u * h, projection = r * 5u * h, groups = r * 4u;
+    if (projection > INT32_MAX || groups > g_maxComputeWorkGroupCountX) return 2;
+    Buffer* bufs[5] = {B(dStreams), B(dProjection), B(dNorms), B(dNext), B(dStatus)};
+    const uint64_t counts[5] = {panel, projection, 8u * h, panel, groups};
+    for (int i = 0; i < 5; ++i) if (!v41ExtentOK(bufs[i], counts[i])) return 2;
+    for (int i = 0; i < 3; ++i) {
+        if (v41BuffersAlias(bufs[3], bufs[i]) || v41BuffersAlias(bufs[4], bufs[i])) return 2;
+    }
+    if (v41BuffersAlias(bufs[3], bufs[4])) return 2;
+    const bool pow2 = (hidden & (hidden - 1)) == 0;
+    struct Push { int32_t rows, hidden, pow2; float eps, invHidden, hiddenF, invSqrtHidden; } pc{
+        rows, hidden, pow2 ? 1 : 0, eps, 1.0f / float(hidden), float(hidden), invSqrtHidden};
+    static_assert(sizeof(Push) == 28 && offsetof(Push, eps) == 12 && offsetof(Push, invSqrtHidden) == 24,
+                  "V4.1 Engram gate push ABI must be three int32 values then four float32 values");
+    if (!dispatch(g_kern[K_V41_ENGRAM_GATE], bufs, &pc, sizeof(pc), uint32_t(groups))) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
+int fvk_have_v41_compressor_pool(void) {
+    return g_ready && g_v41IndexerFloatControls && g_have_v41_compressor_pool &&
+        g_kern[K_V41_COMPRESSOR_POOL].pipe != VK_NULL_HANDLE;
+}
+
+int fvk_v41_compressor_pool_f32(const void* dKV, const void* dScores, void* dOut,
+                                int ratio, int width) {
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_compressor_pool()) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (ratio < 2 || ratio > (1 << 12) || width <= 0) return 2;
+    const uint64_t total = uint64_t(ratio) * uint64_t(width);
+    const uint64_t groups = (uint64_t(width) + 63u) / 64u;
+    if (total > INT32_MAX || groups > g_maxComputeWorkGroupCountX) return 2;
+    Buffer* bufs[3] = {B(dKV), B(dScores), B(dOut)};
+    const uint64_t counts[3] = {total, total, uint64_t(width)};
+    for (int i = 0; i < 3; ++i) if (!v41ExtentOK(bufs[i], counts[i])) return 2;
+    if (v41BuffersAlias(bufs[2], bufs[0]) || v41BuffersAlias(bufs[2], bufs[1])) return 2;
+    struct Push { int32_t ratio, width; } pc{ratio, width};
+    static_assert(sizeof(Push) == 8, "V4.1 compressor pool push ABI must be two int32 values");
+    if (!dispatch(g_kern[K_V41_COMPRESSOR_POOL], bufs, &pc, sizeof(pc), uint32_t(groups))) {
         return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
     }
     return (int)g_submissionStatus;

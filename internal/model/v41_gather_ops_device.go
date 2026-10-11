@@ -18,6 +18,8 @@ type v41DeviceGatherOps struct {
 	indexRoPE                 v41IndexRoPEFunc
 	embedGather               v41EmbeddingGatherFunc
 	compressedPublicationRoPE v41CompressedPublicationRoPEFunc
+	engramGate                v41EngramGateFunc
+	compressorPool            v41CompressorPoolFunc
 }
 
 // v41DeviceGatherOpsFunc binds every available slice-3 operation. The policy is
@@ -26,7 +28,7 @@ func (s *Session) v41DeviceGatherOpsFunc() *v41DeviceGatherOps {
 	if s == nil {
 		return nil
 	}
-	return &v41DeviceGatherOps{owner: s, inverseOutput: s.v41InverseOutputRoPEFunc(), indexSelect: s.v41IndexSelectFunc(), embedGather: s.v41EmbeddingGatherFunc(), indexRoPE: s.v41IndexRoPEFunc(), compressedPublicationRoPE: s.v41CompressedPublicationRoPEFunc()}
+	return &v41DeviceGatherOps{owner: s, inverseOutput: s.v41InverseOutputRoPEFunc(), indexSelect: s.v41IndexSelectFunc(), embedGather: s.v41EmbeddingGatherFunc(), indexRoPE: s.v41IndexRoPEFunc(), compressedPublicationRoPE: s.v41CompressedPublicationRoPEFunc(), engramGate: s.v41EngramGateFunc(), compressorPool: s.v41CompressorPoolFunc()}
 }
 
 func (o *v41DeviceGatherOps) inverseOutputFunc() v41InverseOutputRoPEFunc {
@@ -111,4 +113,41 @@ func (o *v41DeviceGatherOps) compressedPublicationRoPEFunc() v41CompressedPublic
 		}
 	}
 	return o.compressedPublicationRoPE
+}
+
+// engramGateFunc returns the resident Engram gate/add seam. Under device-only an
+// unbound or declining seam refuses typed instead of handing the panel back to
+// the host injection.
+func (o *v41DeviceGatherOps) engramGateFunc() v41EngramGateFunc {
+	if o == nil {
+		return nil
+	}
+	if !o.owner.v41DeviceOnlyPolicy() {
+		return o.engramGate
+	}
+	gate := o.engramGate
+	return func(layer int, streams *v41DeviceStreams, rows []float32, positions int, geometry v41EngramGeometry, eps float32) (bool, error) {
+		if gate == nil {
+			return false, o.owner.v41DeviceOnlyMissingOp(layer, "engram-stream-injection")
+		}
+		handled, err := gate(layer, streams, rows, positions, geometry, eps)
+		if err == nil && !handled {
+			return false, o.owner.v41DeviceOnlyDeclined(layer, "engram-stream-injection")
+		}
+		return handled, err
+	}
+}
+
+// compressorPoolFunc returns the gated-pool seam; under device-only an unbound
+// seam refuses typed instead of pooling on the host.
+func (o *v41DeviceGatherOps) compressorPoolFunc() v41CompressorPoolFunc {
+	if o == nil {
+		return nil
+	}
+	if o.compressorPool == nil && o.owner.v41DeviceOnlyPolicy() {
+		return func(layer int, _, _ []float32, _, _ int) ([]float32, error) {
+			return nil, o.owner.v41DeviceOnlyMissingOp(layer, "compressor-gated-pool")
+		}
+	}
+	return o.compressorPool
 }

@@ -404,6 +404,26 @@ int fvk_have_v41_exact_rmsnorm(void);
 int fvk_v41_exact_rmsnorm_f32(const void *dX, const void *dW, void *dY,
                               int rows, int width, float eps);
 
+/* V4.1 Engram gate/add over the resident mHC panel (registry V11). Five
+ * storage bindings: streams[rows,4,hidden], projection[rows,5*hidden],
+ * norms[8*hidden] (qNorm | kNorm), next[rows,4,hidden] and status[rows,4], all
+ * F32; both outputs are disjoint from every input and from each other. Push
+ * ABI is int32 rows, hidden, pow2, float32 eps, invHidden, hiddenF,
+ * invSqrtHidden. Returns the tail RoPE status codes. Optional module: absence
+ * or missing binary32 float controls leave have=0. */
+int fvk_have_v41_engram_gate(void);
+int fvk_v41_engram_gate_f32(const void *dStreams, const void *dProjection, const void *dNorms,
+                            void *dNext, void *dStatus, int rows, int hidden, float eps,
+                            float invSqrtHidden);
+
+/* V4.1 compressor gated pool (registry V11). Three storage bindings: kv and
+ * scores [ratio,width] and pooled[width], all F32; the output is disjoint from
+ * both inputs. 2 <= ratio <= 4096. Push ABI is int32 ratio, width. Returns the
+ * tail RoPE status codes. Optional module like the Engram gate. */
+int fvk_have_v41_compressor_pool(void);
+int fvk_v41_compressor_pool_f32(const void *dKV, const void *dScores, void *dOut,
+                                int ratio, int width);
+
 /* V4.1 routed-expert activation: BF16 gate/up publication, asymmetric clamp,
  * silu(g)*u, route weight and BF16 down-operand publication. Four storage
  * bindings: gate[count] F32, up[count] F32, out[count] F32 and a 16-byte status

@@ -11,7 +11,8 @@ import (
 // v41CompressorNormFunc owns the complete raw-pool -> BF16 -> learned RMSNorm
 // -> BF16 tail and returns one owned, finite, widened-BF16 row. It has no decline
 // outcome: once selected, any failure closes the session instead of replaying on
-// the host. Pooling and both BF16 rounding boundaries remain host operations.
+// the host. The gated pool is its own seam (v41CompressorPoolFunc); both BF16
+// rounding boundaries remain host operations.
 type v41CompressorNormFunc func(layer int, pooled, gain []float32, eps float32) ([]float32, error)
 
 // v41CompressorNormBackend is an explicit exact-publication qualification, not

@@ -664,8 +664,22 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 					project = st.engramProjection
 				}
 				if resident != nil {
-					// No Engram device op yet: read the panel back around this
-					// layer only (engram-stream-injection stays inventoried).
+					// The panel never leaves the device when the session binds the
+					// Engram gate; device-only refuses rather than reach the host
+					// round trip below.
+					if gate := scratch.gatherOps.engramGateFunc(); gate != nil {
+						geometry, layerRows, err := m.v41EngramLayerRows(l, tokens)
+						if err != nil {
+							return err
+						}
+						_, handled, err := m.v41EngramInjectResident(l, resident.streams, len(tokens), layerRows, eps, geometry, gate)
+						if err != nil {
+							return err
+						}
+						if handled {
+							break
+						}
+					}
 					host, err := resident.hostStreams(l)
 					if err != nil {
 						return err
@@ -941,7 +955,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	ownsCompressed := v41OwnsCompressedRows(plan)
 	var compressedKV [][]float32
 	if ownsCompressed {
-		compressed, err := m.v41CompressedRowsWithOperations(l, plan.Ratio, kvRows, preByPos, scratch.denseProjection, scratch.compressorNorm)
+		compressed, err := m.v41CompressedRowsWithDeviceOps(l, plan.Ratio, kvRows, preByPos, scratch.denseProjection, scratch.compressorNorm, scratch.gatherOps.compressorPoolFunc())
 		if err != nil {
 			return err
 		}

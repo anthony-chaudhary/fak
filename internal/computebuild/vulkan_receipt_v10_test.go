@@ -14,8 +14,8 @@ import (
 // executable SPIR-V, source correspondence, or hardware qualification.
 func TestVulkanReceiptV10Current69Boundary(t *testing.T) {
 	want := append(CurrentVulkanShaderRegistryV9(), "v41_routed_swiglu")
-	if len(want) != 69 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV10(), want) || !reflect.DeepEqual(VulkanShaders, want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest(), want) {
-		t.Fatal("current builder does not use V9 plus the routed SwiGLU module exactly once")
+	if len(want) != 69 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV10(), want) || !reflect.DeepEqual(VulkanShaders[:69], want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest()[:69], want) {
+		t.Fatal("V10 is not V9 plus the routed SwiGLU module as the current builder prefix")
 	}
 	registry, err := vulkanRegistryV10.identity()
 	if err != nil {
