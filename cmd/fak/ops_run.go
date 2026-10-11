@@ -26,6 +26,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/childprocess"
 	"github.com/anthony-chaudhary/fak/internal/processalive"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
+	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -47,30 +48,32 @@ type opsRunReceipt struct {
 const opsRunLaunchIdentitySchema = "fak.ops-run.launch-identity.v1"
 
 type opsRunLaunchIdentityReceipt struct {
-	Schema                string `json:"schema"`
-	RunID                 string `json:"run_id"`
-	Harness               string `json:"harness"`
-	BinaryVersion         string `json:"binary_version"`
-	BinaryDigest          string `json:"binary_digest"`
-	WorkspaceDigest       string `json:"workspace_digest"`
-	ModelDigest           string `json:"model_digest"`
-	RouteDigest           string `json:"route_digest"`
-	EffectiveConfigDigest string `json:"effective_config_digest"`
-	PolicySource          string `json:"policy_source"`
-	PolicyDigest          string `json:"policy_digest"`
-	GuardRequested        string `json:"guard_requested"`
-	GuardEffective        string `json:"guard_effective"`
-	GuardEvidenceRef      string `json:"guard_evidence_ref"`
-	GuardModeRequested    string `json:"guard_mode_requested"`
-	GuardModeEffective    string `json:"guard_mode_effective"`
-	InferenceGuard        string `json:"inference_guard"`
-	RepositoryProofHooks  string `json:"repository_proof_hooks"`
-	NativeToolMediation   string `json:"native_tool_mediation"`
-	OSIsolation           string `json:"os_isolation"`
-	InferenceProbeRef     string `json:"inference_probe_ref"`
-	CapabilityEvidenceRef string `json:"capability_evidence_ref"`
-	Auto                  bool   `json:"auto"`
-	Pure                  bool   `json:"pure"`
+	Schema                          string `json:"schema"`
+	RunID                           string `json:"run_id"`
+	Harness                         string `json:"harness"`
+	BinaryVersion                   string `json:"binary_version"`
+	BinaryDigest                    string `json:"binary_digest"`
+	WorkspaceDigest                 string `json:"workspace_digest"`
+	ModelDigest                     string `json:"model_digest"`
+	RouteDigest                     string `json:"route_digest"`
+	EffectiveConfigDigest           string `json:"effective_config_digest"`
+	SessionJournalSource            string `json:"session_journal_source"`
+	SessionJournalDestinationDigest string `json:"session_journal_destination_digest"`
+	PolicySource                    string `json:"policy_source"`
+	PolicyDigest                    string `json:"policy_digest"`
+	GuardRequested                  string `json:"guard_requested"`
+	GuardEffective                  string `json:"guard_effective"`
+	GuardEvidenceRef                string `json:"guard_evidence_ref"`
+	GuardModeRequested              string `json:"guard_mode_requested"`
+	GuardModeEffective              string `json:"guard_mode_effective"`
+	InferenceGuard                  string `json:"inference_guard"`
+	RepositoryProofHooks            string `json:"repository_proof_hooks"`
+	NativeToolMediation             string `json:"native_tool_mediation"`
+	OSIsolation                     string `json:"os_isolation"`
+	InferenceProbeRef               string `json:"inference_probe_ref"`
+	CapabilityEvidenceRef           string `json:"capability_evidence_ref"`
+	Auto                            bool   `json:"auto"`
+	Pure                            bool   `json:"pure"`
 }
 
 func opsRunDigest(parts ...string) string {
@@ -109,30 +112,60 @@ func newOpsRunLaunchIdentity(runID, harness, workspace, provider, baseURL, model
 		configDigest = opsRunDigest(encodedConfig)
 	}
 	return opsRunLaunchIdentityReceipt{
-		Schema:                opsRunLaunchIdentitySchema,
-		RunID:                 runID,
-		Harness:               harness,
-		BinaryVersion:         "unknown",
-		BinaryDigest:          opsRunFileDigest(opencodeBin),
-		WorkspaceDigest:       opsRunDigest(workspace),
-		ModelDigest:           opsRunDigest(model),
-		RouteDigest:           opsRunDigest(provider, baseURL, model),
-		EffectiveConfigDigest: configDigest,
-		PolicySource:          policySource,
-		PolicyDigest:          policyDigest,
-		GuardRequested:        "fail_closed",
-		GuardEffective:        "unknown",
-		GuardEvidenceRef:      "unknown",
-		GuardModeRequested:    guardMode,
-		GuardModeEffective:    "unknown",
-		InferenceGuard:        "unknown",
-		RepositoryProofHooks:  "unknown",
-		NativeToolMediation:   "unknown",
-		OSIsolation:           "unknown",
-		InferenceProbeRef:     "unknown",
-		CapabilityEvidenceRef: "unknown",
-		Auto:                  auto,
-		Pure:                  pure,
+		Schema:                          opsRunLaunchIdentitySchema,
+		RunID:                           runID,
+		Harness:                         harness,
+		BinaryVersion:                   "unknown",
+		BinaryDigest:                    opsRunFileDigest(opencodeBin),
+		WorkspaceDigest:                 opsRunDigest(workspace),
+		ModelDigest:                     opsRunDigest(model),
+		RouteDigest:                     opsRunDigest(provider, baseURL, model),
+		EffectiveConfigDigest:           configDigest,
+		SessionJournalSource:            "platform_default",
+		SessionJournalDestinationDigest: "unknown",
+		PolicySource:                    policySource,
+		PolicyDigest:                    policyDigest,
+		GuardRequested:                  "fail_closed",
+		GuardEffective:                  "unknown",
+		GuardEvidenceRef:                "unknown",
+		GuardModeRequested:              guardMode,
+		GuardModeEffective:              "unknown",
+		InferenceGuard:                  "unknown",
+		RepositoryProofHooks:            "unknown",
+		NativeToolMediation:             "unknown",
+		OSIsolation:                     "unknown",
+		InferenceProbeRef:               "unknown",
+		CapabilityEvidenceRef:           "unknown",
+		Auto:                            auto,
+		Pure:                            pure,
+	}
+}
+
+func opsRunBindSessionJournal(identity *opsRunLaunchIdentityReceipt, env []string, workspace string) {
+	for _, item := range env {
+		name, value, ok := strings.Cut(item, "=")
+		if !ok || !strings.EqualFold(name, sessionjournal.EnvPath) {
+			continue
+		}
+		path := strings.TrimSpace(value)
+		if path == "" {
+			return
+		}
+		identity.SessionJournalSource = "environment_override"
+		binding := opsRunDigest(path, workspace)
+		ambiguousWindowsPath := runtime.GOOS == "windows" && !filepath.IsAbs(path) && (filepath.VolumeName(path) != "" || os.IsPathSeparator(path[0]))
+		if !ambiguousWindowsPath {
+			destination := path
+			if !filepath.IsAbs(destination) {
+				destination = filepath.Join(workspace, destination)
+			}
+			if filepath.IsAbs(destination) {
+				identity.SessionJournalDestinationDigest = opsRunDigest(filepath.Clean(destination))
+				binding = identity.SessionJournalDestinationDigest
+			}
+		}
+		identity.EffectiveConfigDigest = opsRunDigest(identity.EffectiveConfigDigest, sessionjournal.EnvPath, binding)
+		return
 	}
 }
 
@@ -777,12 +810,13 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak-ops-run-plan/1", "harness": *harness, "provider": *provider, "workspace": resolvedWorkspace, "guarded": false, "guard_requested": "fail_closed", "guard_effective": "unknown", "guard_mode_requested": guardMode, "guard_mode_effective": "unknown", "prompt_delivery": "stdin", "timeout": timeout.String(), "auto": *auto, "pure": *pure, "config_policy": configPolicy})
 		return 0
 	}
-	env, cleanupEnv, err := opsRunChildEnvironment(string(encoded), *apiKeyEnv)
+	env, cleanupEnv, err := opsRunChildEnvironment(string(encoded), *apiKeyEnv, true)
 	if err != nil {
 		fmt.Fprintf(stderr, "ops run: create isolated child environment: %v\n", err)
 		return 1
 	}
 	defer cleanupEnv()
+	opsRunBindSessionJournal(&identity, env, resolvedWorkspace)
 	receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: *harness, Workspace: resolvedWorkspace, LaunchIdentity: &identity, Status: "running", Started: time.Now().UTC(), ConfigPolicy: &configPolicy}
 	if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {
 		fmt.Fprintf(stderr, "ops run: write receipt: %v\n", err)
@@ -858,7 +892,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	return code
 }
 
-func opsRunChildEnvironment(configContent, apiKeyEnv string) ([]string, func(), error) {
+func opsRunChildEnvironment(configContent, apiKeyEnv string, forwardJournalOverride ...bool) ([]string, func(), error) {
 	runRoot, err := os.MkdirTemp("", "fak-ops-run-")
 	if err != nil {
 		return nil, func() {}, err
@@ -876,10 +910,11 @@ func opsRunChildEnvironment(configContent, apiKeyEnv string) ([]string, func(), 
 
 	out := make([]string, 0, 20)
 	seen := make(map[string]bool)
+	forwardJournal := len(forwardJournalOverride) > 0 && forwardJournalOverride[0]
 	for _, item := range os.Environ() {
 		name, _, ok := strings.Cut(item, "=")
 		canonical := strings.ToUpper(name)
-		if !ok || seen[canonical] || !opsRunAllowedPlatformEnv(canonical) {
+		if !ok || seen[canonical] || (!opsRunAllowedPlatformEnv(canonical) && !(forwardJournal && canonical == sessionjournal.EnvPath)) {
 			continue
 		}
 		seen[canonical] = true
@@ -888,7 +923,7 @@ func opsRunChildEnvironment(configContent, apiKeyEnv string) ([]string, func(), 
 	apiKeyEnv = strings.TrimSpace(apiKeyEnv)
 	if apiKeyEnv != "" {
 		canonical := strings.ToUpper(apiKeyEnv)
-		if !opsRunValidEnvName(apiKeyEnv) || opsRunControlledEnv(canonical) || opsRunAllowedPlatformEnv(canonical) {
+		if !opsRunValidEnvName(apiKeyEnv) || opsRunControlledEnv(canonical) || opsRunAllowedPlatformEnv(canonical) || (forwardJournal && canonical == sessionjournal.EnvPath) {
 			cleanup()
 			return nil, func() {}, fmt.Errorf("unsafe --api-key-env name %q", apiKeyEnv)
 		}
