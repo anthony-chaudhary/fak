@@ -40,10 +40,8 @@ func (e *v41DeviceOnlyHostOpError) Is(target error) bool { return target == errV
 var v41DeviceOnlyHostOps = []v41HostOp{
 	{name: "bf16-boundary", site: "v41RoundBF16"},
 	{name: "engram-stream-injection", site: "Model.v41EngramInjectPrepared"},
-	{name: "attention-input-norm", site: "Model.v41AttentionInputNormWithLeaf"},
 	{name: "compressor-gated-pool", site: "V41CompressorPool.PushNormalized"},
 	{name: "compressed-publication-rope", site: "Model.v41CompressedPublicationRoPE"},
-	{name: "indexer-query-rope", site: "Model.v41IndexRoPE"},
 	{name: "logit-scale", site: "Model.v41HeadWithFinalNorm"},
 }
 

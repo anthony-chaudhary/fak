@@ -103,7 +103,6 @@ func TestV41DeviceOnlyHostInventoryAndLoRAAdmission(t *testing.T) {
 		want := []v41HostOp{
 			{name: "bf16-boundary", site: "v41RoundBF16"},
 			{name: "compressed-publication-rope", site: "Model.v41CompressedPublicationRoPE"},
-			{name: "indexer-query-rope", site: "Model.v41IndexRoPE"},
 			{name: "logit-scale", site: "Model.v41HeadWithFinalNorm"},
 		}
 		last := -1
