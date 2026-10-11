@@ -371,6 +371,16 @@ int fvk_have_v41_index_select(void);
 int fvk_v41_index_select_f32(const void *dScores, void *dScratch, void *dOut, void *dStatus,
                              int rows, int topK, int topKBlocks, int blockSize);
 
+/* V4.1 Q2_K token-embedding row gather. Three storage bindings: the raw Q2_K
+ * table [vocab, hidden] (84-byte super-blocks, GGUF order), ids[rows] uint32,
+ * out[rows, hidden] F32. Only the selected rows are dequantized, with the host
+ * scalar Q2_K operation order and exact f16 widening. Push ABI is int32 rows,
+ * hidden, vocab. Returns the tail RoPE status codes. Optional module outside
+ * the shader registry: absence leaves have=0. */
+int fvk_have_v41_q2k_embed_gather(void);
+int fvk_v41_q2k_embed_gather_f32(const void *dTable, const void *dIds, void *dOut,
+                                 int rows, int hidden, int vocab);
+
 /* SwiGLU: y = silu(g) * u, elementwise, length n. */
 void fvk_swiglu_f32(const void *dG, const void *dU, void *dY, int n);
 void fvk_swiglu_limit_f32(const void *dG, const void *dU, void *dY, int n, float limit);

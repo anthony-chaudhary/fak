@@ -98,6 +98,41 @@ func TestV41GatherOpsVulkanSeams(t *testing.T) {
 		}
 	})
 
+	t.Run("q2k-embedding-gather", func(t *testing.T) {
+		q2k, ok := be.(v41Q2KEmbeddingGatherBackend)
+		if !ok {
+			t.Fatal("vulkan backend lacks the Q2_K embedding gather seam")
+		}
+		if !q2k.V41Q2KEmbeddingGatherAvailable() {
+			if os.Getenv("FAK_VULKAN_REQUIRE_V41_Q2K_EMBED_GATHER") == "1" {
+				t.Fatal("required v41_q2k_embed_gather.spv not loaded")
+			}
+			t.Skip("optional V4.1 Q2_K embedding gather module not loaded")
+		}
+		const vocab, hidden = 11, 512
+		embed, err := NewQ2KEmbedding(v41Q2KEmbeddingTestRaw(vocab, hidden, 7), vocab, hidden)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := &Model{Cfg: Config{HiddenSize: hidden, VocabSize: vocab}, Q2KEmbedding: embed}
+		s := &Session{M: m, Backend: be}
+		t.Cleanup(s.Close)
+		ops := s.v41DeviceGatherOpsFunc()
+		if ops.embedGather == nil {
+			t.Fatal("Q2_K embedding gather seam was not bound")
+		}
+		ids := []int{10, 0, 4, 4, 9}
+		want, err := m.v41EmbeddingPanel(ids)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := m.v41EmbeddingPanelOn(ids, ops)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v41TailRoPECheckBits(t, "device Q2_K embedding panel", got, want)
+	})
+
 	t.Run("embedding-gather", func(t *testing.T) {
 		m := v41IncrementalPlainModel(t, 1)
 		s := v41DenseTestSession(t, m, be)

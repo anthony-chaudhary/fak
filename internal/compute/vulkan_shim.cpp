@@ -290,7 +290,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -321,7 +321,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_QWEN35_GDN_VERIFY_TILED:
     case K_GLM_KDA_REREAD: case K_GLM_KDA_WAVE32:
         return g_dp.otherGDN;
-    case K_V41_MHC:
+    case K_V41_MHC: case K_V41_Q2K_EMBED_GATHER:
     case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q4K_MATMUL_COOPMAT: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_Q2K_MATVEC: case K_COUNT:
         return g_dp.otherUnclassified;
     }
@@ -377,6 +377,7 @@ int g_have_v41_router_topk = 0;
 int g_have_v41_indexer_score = 0;
 int g_have_v41_mhc = 0;
 int g_have_v41_index_select = 0;
+int g_have_v41_q2k_embed_gather = 0;
 bool g_v41IndexerFloatControls = false;
 std::string g_v41IndexerScoreReason = "Vulkan has not initialized";
 // Fixed-size GLM KDA kernels require an explicitly requested 32-lane subgroup.
@@ -1321,7 +1322,7 @@ const char* const kKernelNames[] = {
     "q6k_matmul", "q5k_matmul", "q3k_matmul", "rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add", "q2k_matmul",
     "rmsnorm_q2k_matmul2", "qwen35_split_qg_panel", "qwen35_partial_rope_panel",
     "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
-    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select",
+    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -2149,7 +2150,7 @@ void recycleDescriptorSet(DescriptorSetRecord rec) {
 // dispatch: bind `bufs` (nbuf of them) + push constants, run groupsX*groupsY workgroups.
 bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1) {
     if (g_v41SubmissionPendingFailure) return false;
-    const bool checkedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT];
+    const bool checkedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER];
     if (k.nbuf > MAX_DISPATCH_BUFS) {
         fprintf(stderr, "fak-vulkan: dispatch skipped; kernel has %d buffers, max %d\n",
                 k.nbuf, MAX_DISPATCH_BUFS);
@@ -2556,6 +2557,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_v41_indexer_score = 0;
     g_have_v41_mhc = 0;
     g_have_v41_index_select = 0;
+    g_have_v41_q2k_embed_gather = 0;
     bool v41IndexerPipelineBuilt = false;
     bool v41MHCPipelineBuilt = false;
     g_v41IndexerFloatControls = false;
@@ -2874,6 +2876,8 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // Optional V4.1 index selection, outside the shader registry: an absent
     // module leaves the capability false and never fails initialization.
     const bool v41IndexSelectBuilt = buildKernel(g_kern[K_V41_INDEX_SELECT], P("v41_index_select.spv"), 4, 16);
+    // Optional V4.1 Q2_K embedding row gather, likewise outside the registry.
+    const bool v41Q2KEmbedGatherBuilt = buildKernel(g_kern[K_V41_Q2K_EMBED_GATHER], P("v41_q2k_embed_gather.spv"), 3, 12);
 
     ok &= buildKernel(g_kern[K_SWIGLU],    P("swiglu.spv"),    3, sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_SWIGLU_MATMUL_ADD], P("swiglu_matmul_add.spv"), 4, 3 * sizeof(int));
@@ -2984,6 +2988,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_v41_indexer_score = v41IndexerPipelineBuilt ? 1 : 0;
     g_have_v41_mhc = v41MHCPipelineBuilt ? 1 : 0;
     g_have_v41_index_select = v41IndexSelectBuilt ? 1 : 0;
+    g_have_v41_q2k_embed_gather = v41Q2KEmbedGatherBuilt ? 1 : 0;
     // One per-geometry device self-check, before the first forward and never
     // inside one. Its verdict is cached and read by the verify-width route.
     gdnVerifySelfCheck();
@@ -4263,6 +4268,44 @@ int fvk_v41_index_select_f32(const void* dScores, void* dScratch, void* dOut, vo
     struct Push { int32_t rows, topK, topKBlocks, blockSize; } pc{rows, topK, topKBlocks, blockSize};
     static_assert(sizeof(Push) == 16, "V4.1 index select push ABI must be four int32 values");
     if (!dispatch(g_kern[K_V41_INDEX_SELECT], bufs, &pc, sizeof(pc), 1u)) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
+int fvk_have_v41_q2k_embed_gather(void) {
+    return g_ready && g_have_v41_q2k_embed_gather && g_kern[K_V41_Q2K_EMBED_GATHER].pipe != VK_NULL_HANDLE;
+}
+
+int fvk_v41_q2k_embed_gather_f32(const void* dTable, const void* dIds, void* dOut,
+                                 int rows, int hidden, int vocab) {
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_q2k_embed_gather()) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (rows <= 0 || hidden <= 0 || (hidden % 256) != 0 || vocab <= 0) return 2;
+    const uint64_t rowBytes = uint64_t(hidden / 256) * 84u;
+    const uint64_t total = uint64_t(rows) * uint64_t(hidden);
+    if (uint64_t(vocab) * rowBytes > UINT32_MAX || total > INT32_MAX) return 2;
+    Buffer* bufs[3] = {B(dTable), B(dIds), B(dOut)};
+    const uint64_t bytes[3] = {uint64_t(vocab) * rowBytes, uint64_t(rows) * 4u, total * 4u};
+    for (int i = 0; i < 3; ++i) {
+        if (!bufs[i] || bufs[i]->buf == VK_NULL_HANDLE || bufs[i]->mem == VK_NULL_HANDLE ||
+            bytes[i] > bufs[i]->bytes ||
+            bufs[i]->bytes > std::numeric_limits<VkDeviceSize>::max() - bufs[i]->memoryOffset) return 2;
+    }
+    auto aliases = [](const Buffer* a, const Buffer* b) {
+        return a == b || a->buf == b->buf ||
+            (a->mem == b->mem && a->memoryOffset < b->memoryOffset + b->bytes &&
+             b->memoryOffset < a->memoryOffset + a->bytes);
+    };
+    if (aliases(bufs[2], bufs[0]) || aliases(bufs[2], bufs[1])) return 2;
+    struct Push { int32_t rows, hidden, vocab; } pc{rows, hidden, vocab};
+    static_assert(sizeof(Push) == 12, "V4.1 Q2_K embedding gather push ABI must be three int32 values");
+    uint64_t groups = (total + 255u) / 256u;
+    if (groups > g_maxComputeWorkGroupCountX) groups = g_maxComputeWorkGroupCountX;
+    if (groups == 0) return 2;
+    if (!dispatch(g_kern[K_V41_Q2K_EMBED_GATHER], bufs, &pc, sizeof(pc), uint32_t(groups))) {
         return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
     }
     return (int)g_submissionStatus;

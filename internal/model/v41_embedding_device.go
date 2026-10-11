@@ -7,39 +7,87 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
-// v41EmbeddingGatherFunc gathers token-embedding rows on the device and returns
-// an owned [len(ids), hidden] panel. A nil callback keeps the host gather; a
-// selected call has no decline arm and no host retry.
 // v41EmbeddingGatherBackend is the model-side view of the device embedding
-// gather: byte-copied rows of a device F32
-// [vocab,hidden] table, in id order, into a fresh caller-owned panel.
+// gather: byte-copied rows of a device F32 [vocab,hidden] table, in id order,
+// into a fresh caller-owned panel.
 type v41EmbeddingGatherBackend interface {
 	V41EmbeddingGatherAvailable() bool
 	V41EmbeddingGather(table compute.Tensor, ids []int, hidden int) (compute.Tensor, error)
 }
 
+// v41Q2KEmbeddingGatherBackend is the model-side view of the device Q2_K
+// embedding gather: only the selected rows of a resident raw Q2_K
+// [vocab,hidden] table are dequantized, bit for bit as the host scalar Q2_K
+// dequantization, into a fresh caller-owned F32 panel.
+type v41Q2KEmbeddingGatherBackend interface {
+	V41Q2KEmbeddingGatherAvailable() bool
+	V41Q2KEmbeddingGather(table compute.Tensor, ids []int, hidden int) (compute.Tensor, error)
+}
+
+// v41EmbeddingGatherFunc gathers token-embedding rows on the device and returns
+// an owned [len(ids), hidden] panel. A nil callback keeps the host gather; a
+// selected call has no decline arm and no host retry.
 type v41EmbeddingGatherFunc func(ids []int) ([]float32, error)
 
 var errV41EmbeddingGatherResult = errors.New("model: invalid selected V4.1 embedding gather result")
 
 const v41EmbeddingTableName = "model.embed_tokens.weight"
 
-// Refs #13668. The F32 embedding table is staged once as an immutable device
-// weight (model-owned cache, shared by forked sessions); each call gathers the
-// requested rows by device copies and reads the panel back, 4*len(ids)*hidden
-// bytes. Packed (Q2_K/Q4_K/PQ2/Q6_K) tables and a non-unit embedding scale have
-// no device gather yet, so they leave the callback nil: host gather normally,
+// Refs #13668. The embedding table is staged once as an immutable device weight
+// (model-owned cache, shared by forked sessions): the F32 table as F32, a Q2_K
+// table as its raw super-blocks (never expanded to F32). Each call gathers the
+// requested rows on the device and reads the F32 panel back,
+// 4*len(ids)*hidden bytes. Q4_K/PQ2/Q6_K tables and a non-unit embedding scale
+// have no device gather, so they leave the callback nil: host gather normally,
 // a typed refusal under device-only.
 func (s *Session) v41EmbeddingGatherFunc() v41EmbeddingGatherFunc {
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
-		!compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.F32) ||
-		!s.M.has(v41EmbeddingTableName) || s.M.Cfg.embedScale() != 1 {
+		!compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.F32) || s.M.Cfg.embedScale() != 1 {
 		return nil
 	}
-	operation, ok := s.Backend.(v41EmbeddingGatherBackend)
-	if !ok || !operation.V41EmbeddingGatherAvailable() {
+	cfg := s.M.Cfg
+	hidden, vocab := cfg.HiddenSize, cfg.VocabSize
+	size, valid := checkedMulInt(vocab, hidden)
+	if !valid || hidden <= 0 || vocab <= 0 {
 		return nil
 	}
+	if s.M.has(v41EmbeddingTableName) {
+		operation, ok := s.Backend.(v41EmbeddingGatherBackend)
+		if !ok || !operation.V41EmbeddingGatherAvailable() {
+			return nil
+		}
+		key := fmt.Sprintf("v41-embedding:%s:%d:%d", v41EmbeddingTableName, vocab, hidden)
+		var table []float32
+		check := func() error {
+			if table = s.M.tensor(v41EmbeddingTableName); len(table) < size {
+				return errV41EmbeddingGatherResult
+			}
+			return nil
+		}
+		return s.v41EmbeddingGatherSelected(key, check, func() compute.Tensor {
+			return s.Backend.Upload(compute.NewF32(compute.Default(), []int{vocab, hidden}, table[:size]), compute.F32)
+		}, operation.V41EmbeddingGather)
+	}
+	packed := s.M.Q2KEmbedding
+	if packed == nil || packed.format != packedEmbeddingQ2K || packed.prism != nil ||
+		packed.vocab != vocab || packed.hidden != hidden || hidden%qkK != 0 {
+		return nil
+	}
+	operation, ok := s.Backend.(v41Q2KEmbeddingGatherBackend)
+	if !ok || !operation.V41Q2KEmbeddingGatherAvailable() {
+		return nil
+	}
+	key := fmt.Sprintf("v41-embedding:%s:Q2_K:%d:%d", v41EmbeddingTableName, vocab, hidden)
+	return s.v41EmbeddingGatherSelected(key, func() error { return nil }, func() compute.Tensor {
+		return s.Backend.Upload(compute.NewQ2K(compute.Default(), []int{vocab, hidden}, packed.raw), compute.Q2_K)
+	}, operation.V41Q2KEmbeddingGather)
+}
+
+// v41EmbeddingGatherSelected owns the selected-call contract shared by both
+// table encodings: id validation, one-time staging, fresh-output checks,
+// owned readback and fail-closed session teardown.
+func (s *Session) v41EmbeddingGatherSelected(key string, check func() error, stageTable func() compute.Tensor,
+	gather func(table compute.Tensor, ids []int, hidden int) (compute.Tensor, error)) v41EmbeddingGatherFunc {
 	return func(ids []int) (result []float32, cause error) {
 		s.ensureOpenBackendSession()
 		stage := "payload"
@@ -79,10 +127,8 @@ func (s *Session) v41EmbeddingGatherFunc() v41EmbeddingGatherFunc {
 		}()
 		cfg := s.M.Cfg
 		hidden, vocab := cfg.HiddenSize, cfg.VocabSize
-		size, valid := checkedMulInt(vocab, hidden)
 		width, widthOK := checkedMulInt(len(ids), hidden)
-		table := s.M.tensor(v41EmbeddingTableName)
-		if !valid || !widthOK || hidden <= 0 || vocab <= 0 || len(ids) == 0 || len(table) < size {
+		if !widthOK || len(ids) == 0 {
 			return nil, closeFailure(errV41EmbeddingGatherResult)
 		}
 		for _, id := range ids {
@@ -92,12 +138,12 @@ func (s *Session) v41EmbeddingGatherFunc() v41EmbeddingGatherFunc {
 		}
 		run := func() ([]float32, error) {
 			stage = "table upload"
-			key := fmt.Sprintf("v41-embedding:%s:%d:%d", v41EmbeddingTableName, vocab, hidden)
-			weight := s.cachedImmutableWeight(key, key, func() compute.Tensor {
-				return s.Backend.Upload(compute.NewF32(compute.Default(), []int{vocab, hidden}, table[:size]), compute.F32)
-			})
+			if err := check(); err != nil {
+				return nil, err
+			}
+			weight := s.cachedImmutableWeight(key, key, stageTable)
 			stage = "embedding-gather"
-			panel, err := operation.V41EmbeddingGather(weight, ids, hidden)
+			panel, err := gather(weight, ids, hidden)
 			fresh := panel.Buf() != nil && panel.Backend() == s.Backend && panel.Buf() != weight.Buf()
 			if fresh {
 				defer s.Backend.Free(panel)
