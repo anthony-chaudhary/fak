@@ -239,11 +239,34 @@ func TestV41NormRoPECallbacksHalo(t *testing.T) {
 		}
 	}()
 	st, hs := s.v41State(), host.v41State()
-	if st.compressorNorm != nil || st.indexKeyNorm != nil {
-		t.Fatal("ordinary Vulkan unexpectedly acquired exact-publication norm qualification")
+	// Ordinary registry V8 includes the exact RMSNorm module. Its availability
+	// still requires the selected device's FloatControls and width/eps domain;
+	// generic RMSNorm or a backend name alone does not qualify these callbacks.
+	exact, ok := be.(compute.V41ExactRMSNormBackend)
+	if !ok {
+		t.Fatal("current Vulkan backend is missing the exact RMSNorm capability interface")
+	}
+	for _, norm := range []struct {
+		name  string
+		width int
+		bound bool
+	}{
+		{"compressor", v41CompressorWidth(m.Cfg), st.compressorNorm != nil},
+		{"index-key", m.Cfg.IndexHeadDim, st.indexKeyNorm != nil},
+	} {
+		qualified := exact.SupportsV41ExactRMSNorm(norm.width, float32(m.Cfg.RMSNormEps))
+		if norm.bound != qualified {
+			t.Fatalf("%s norm binding=%t disagrees with exact publication qualification=%t at width=%d", norm.name, norm.bound, qualified, norm.width)
+		}
+		t.Logf("isolated exact norm callback=%s width=%d qualified=%t", norm.name, norm.width, qualified)
 	}
 	v41NormRoPEHaloIsolate(st)
 	v41NormRoPEHaloIsolate(hs)
+	// Keep this witness's original five-callback scope. Neither attention-input
+	// normalization nor exact compressor/index-key execution is qualified here.
+	if st.attentionNorm != nil || hs.attentionNorm != nil || st.compressorNorm != nil || hs.compressorNorm != nil || st.indexKeyNorm != nil || hs.indexKeyNorm != nil {
+		t.Fatal("five-callback witness did not isolate adjacent normalization seams")
+	}
 	hs.queryNorm, hs.kvNorm, hs.ffnNorm, hs.finalNorm, hs.tailRoPE = nil, nil, nil, nil, nil
 	query, kv, ffn, final, rope := st.queryNorm, st.kvNorm, st.ffnNorm, st.finalNorm, st.tailRoPE
 	if query == nil || kv == nil || ffn == nil || final == nil || rope == nil {
