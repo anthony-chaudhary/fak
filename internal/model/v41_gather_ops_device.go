@@ -15,6 +15,7 @@ type v41DeviceGatherOps struct {
 	owner         *Session
 	inverseOutput v41InverseOutputRoPEFunc
 	indexSelect   v41IndexSelectFunc
+	indexRoPE     v41IndexRoPEFunc
 	embedGather   v41EmbeddingGatherFunc
 }
 
@@ -24,7 +25,7 @@ func (s *Session) v41DeviceGatherOpsFunc() *v41DeviceGatherOps {
 	if s == nil {
 		return nil
 	}
-	return &v41DeviceGatherOps{owner: s, inverseOutput: s.v41InverseOutputRoPEFunc(), indexSelect: s.v41IndexSelectFunc(), embedGather: s.v41EmbeddingGatherFunc()}
+	return &v41DeviceGatherOps{owner: s, inverseOutput: s.v41InverseOutputRoPEFunc(), indexSelect: s.v41IndexSelectFunc(), embedGather: s.v41EmbeddingGatherFunc(), indexRoPE: s.v41IndexRoPEFunc()}
 }
 
 func (o *v41DeviceGatherOps) inverseOutputFunc() v41InverseOutputRoPEFunc {
@@ -49,6 +50,18 @@ func (o *v41DeviceGatherOps) indexSelectFunc() v41IndexSelectFunc {
 		}
 	}
 	return o.indexSelect
+}
+
+func (o *v41DeviceGatherOps) indexRoPEFunc() v41IndexRoPEFunc {
+	if o == nil {
+		return nil
+	}
+	if o.indexRoPE == nil && o.owner.v41DeviceOnlyPolicy() {
+		return func(layer int, _, _, _ []float32, _, _, _ int) ([]float32, error) {
+			return nil, o.owner.v41DeviceOnlyMissingOp(layer, "indexer-query-rope")
+		}
+	}
+	return o.indexRoPE
 }
 
 func (o *v41DeviceGatherOps) embeddingGatherFunc() v41EmbeddingGatherFunc {

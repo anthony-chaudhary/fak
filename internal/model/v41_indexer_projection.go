@@ -1,6 +1,9 @@
 package model
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 func v41IndexerProjectionLeaf(leaf string) bool {
 	return leaf == "indexer.wq_b.weight" || leaf == "indexer.wk.weight" || leaf == "indexer.weights_proj.weight"
@@ -86,7 +89,7 @@ func (m *Model) v41IndexRowsWithDeviceOps(l, pos int, qLat, hidden []float32, ke
 	if err != nil {
 		return nil, err
 	}
-	if err := m.v41IndexRoPE(l, pos, q, nHeads); err != nil {
+	if err := m.v41IndexRoPEWithDevice(l, pos, q, nHeads, ops.indexRoPEFunc()); err != nil {
 		return nil, err
 	}
 	weights, err := m.v41ProjMatRowsWithProjection(l, "indexer.weights_proj.weight", hidden, nHeads, cfg.HiddenSize, project)
@@ -139,6 +142,10 @@ func (m *Model) v41CompressedPublicationRoPE(l, pos int, latent, indexKey []floa
 }
 
 func (m *Model) v41IndexRoPE(l, pos int, values []float32, heads int) error {
+	return m.v41IndexRoPEWithDevice(l, pos, values, heads, nil)
+}
+
+func (m *Model) v41IndexRoPEWithDevice(l, pos int, values []float32, heads int, rotate v41IndexRoPEFunc) error {
 	cfg := m.Cfg
 	dim, rd := cfg.IndexHeadDim, cfg.QKRopeHeadDim
 	width, valid := checkedMulInt(heads, dim)
@@ -146,6 +153,35 @@ func (m *Model) v41IndexRoPE(l, pos int, values []float32, heads int) error {
 		return v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: invalid index rotary geometry or position", ErrV41ForwardStage))
 	}
 	cos, sin := v41RopeTableForLayer(cfg, l, pos)
+	if rotate != nil {
+		fail := func(cause error) error {
+			return &V41ProjectionOperationError{Layer: l, Leaf: "indexer.wq_b.weight", Stage: string(v41StageIndexer), Cause: v41StageErr(v41StageIndexer, l, cause)}
+		}
+		rotated, err := rotate(l, append([]float32(nil), values...), append([]float32(nil), cos...), append([]float32(nil), sin...), heads, dim, rd)
+		if err != nil {
+			return fail(err)
+		}
+		if len(rotated) != width {
+			return fail(errV41TailRoPEResult)
+		}
+		owned := append([]float32(nil), rotated...)
+		for i, value := range owned {
+			if !finite32(value) || (i%dim < dim-rd && math.Float32bits(value) != math.Float32bits(values[i])) {
+				return fail(errV41TailRoPEResult)
+			}
+		}
+		for h := 0; h < heads; h++ {
+			tail := owned[(h+1)*dim-rd : (h+1)*dim]
+			rounded, err := v41IndexBF16Copyback(l, "indexer.wq_b.weight", "rotary", tail)
+			if err != nil {
+				return fail(err)
+			}
+			copy(tail, rounded)
+		}
+		copy(values, owned)
+		return nil
+	}
+
 	for h := 0; h < heads; h++ {
 		head := values[h*dim : (h+1)*dim]
 		applyRopeTailInterleaved(head, cos, sin, rd)
