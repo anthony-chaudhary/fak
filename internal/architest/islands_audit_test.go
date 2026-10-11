@@ -74,7 +74,7 @@ func TestFeatureIslandsWiredAudit(t *testing.T) {
 		callee    string
 	}{
 		{1, "adjudicator/lifecycle_fsm", adjDir, "AdjudicateWithFSM", "NewLifecycleFSM"},
-		{2, "agent/goal_prefix_stabilizer", agentDir, "prepareUpstream", "StabilizePromptPrefix"},
+		{2, "agent/goal_prefix_stabilizer", agentDir, "prepareUpstreamContext", "StabilizePromptPrefix"},
 		{3, "agent/goal_anchor", agentDir, "runArm", "NewGoalAnchor"},
 		{4, "adjudicator/recovery_audit", adjDir, "New", "NewRecoveryAuditLedger"},
 		{5, "adjudicator/heredoc_target", adjDir, "commandWriteTargetsWithSpecs", "ExtractHeredocTargets"},
