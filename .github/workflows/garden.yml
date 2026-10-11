@@ -88,7 +88,6 @@ jobs:
       # so evidence survives even an outer process-tree timeout. Never recollect.
       - name: retain garden timeout diagnostics
         if: always()
-        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: garden-timeout-diagnostics
