@@ -14,53 +14,6 @@ import (
 	"testing"
 )
 
-type qwen35SequenceParityOracleEvent struct {
-	Schema         string                             `json:"schema"`
-	Selector       string                             `json:"selector"`
-	TestName       string                             `json:"test_name"`
-	OracleKind     string                             `json:"oracle_kind"`
-	Engine         string                             `json:"engine"`
-	DeviceObserved bool                               `json:"device_observed"`
-	CaseCount      int                                `json:"case_count"`
-	Passed         bool                               `json:"passed"`
-	Observed       qwen35SequenceParityOracleObserved `json:"observed"`
-	Bounds         qwen35SequenceParityOracleBounds   `json:"bounds"`
-}
-
-type qwen35SequenceParityOracleObserved struct {
-	MaxAbsDelta  float64 `json:"max_abs_delta"`
-	FiniteOutput bool    `json:"finite_output"`
-}
-
-type qwen35SequenceParityOracleBounds struct {
-	MaxAbsDelta   float64 `json:"max_abs_delta"`
-	RequireFinite bool    `json:"require_finite"`
-}
-
-func formatQwen35SequenceParityOracle(maxAbsDelta float64, finiteOutput bool, caseCount int, fixturePassed bool) ([]byte, error) {
-	// Passing metrics from an aborted or filtered fixture are not parity evidence.
-	passed := fixturePassed && caseCount == 4 && finiteOutput && maxAbsDelta <= 2e-3
-	event := qwen35SequenceParityOracleEvent{
-		Schema:         "fak.strix.subkernel-parity/v1",
-		Selector:       "qwen35_sequence_prefill",
-		TestName:       "TestVulkanQwen35SequenceQuantizedPanelsMatchCPU",
-		OracleKind:     "max_abs",
-		Engine:         "fak-native/vulkan",
-		DeviceObserved: true,
-		CaseCount:      caseCount,
-		Passed:         passed,
-		Observed: qwen35SequenceParityOracleObserved{
-			MaxAbsDelta:  maxAbsDelta,
-			FiniteOutput: finiteOutput,
-		},
-		Bounds: qwen35SequenceParityOracleBounds{
-			MaxAbsDelta:   2e-3,
-			RequireFinite: true,
-		},
-	}
-	return json.Marshal(event)
-}
-
 type qwen35SequenceKVReserveParityEvent struct {
 	Schema         string                             `json:"schema"`
 	Selector       string                             `json:"selector"`
@@ -131,7 +84,7 @@ func TestVulkanQwen35SequenceQuantizedPanelsMatchCPU(t *testing.T) {
 		binaryPutFloat16(block[80:82], .015625)
 		binaryPutFloat16(block[82:84], .0078125)
 	}
-	var worstMaxAbsDelta float64
+	var worstBoundRatio, worstRawAbsDelta float64
 	allFinite := true
 	evaluatedPanels := 0
 	completedPanels := 0
@@ -163,10 +116,10 @@ func TestVulkanQwen35SequenceQuantizedPanelsMatchCPU(t *testing.T) {
 						t.Fatalf("token=%d row=%d got=%g want=%g must be finite", token, row, actual, expected)
 					}
 					delta := math.Abs(float64(actual - expected))
-					if delta > worstMaxAbsDelta {
-						worstMaxAbsDelta = delta
-					}
-					if delta > 2e-3+2e-4*math.Abs(float64(expected)) {
+					worstRawAbsDelta = math.Max(worstRawAbsDelta, delta)
+					ratio := qwen35PanelBoundRatio(delta, float64(expected))
+					worstBoundRatio = math.Max(worstBoundRatio, ratio)
+					if ratio > 1 {
 						t.Fatalf("token=%d row=%d got=%g want=%g", token, row, actual, expected)
 					}
 				}
@@ -176,7 +129,8 @@ func TestVulkanQwen35SequenceQuantizedPanelsMatchCPU(t *testing.T) {
 			t.Logf("engine=fak-native backend=vulkan dtype=%s tokens=%d in=%d out=%d cpu_parity=true", host.Dtype, tokens, in, out)
 		})
 	}
-	oracleJSON, err := formatQwen35SequenceParityOracle(worstMaxAbsDelta, allFinite, evaluatedPanels, completedPanels == 4 && !t.Failed())
+	t.Logf("worst raw max_abs_delta=%g worst per-element bound ratio=%g", worstRawAbsDelta, worstBoundRatio)
+	oracleJSON, err := formatQwen35SequenceParityOracle(qwen35PanelReceiptDelta(worstBoundRatio), allFinite, evaluatedPanels, completedPanels == 4 && !t.Failed())
 	if err != nil {
 		t.Fatalf("format parity oracle: %v", err)
 	}
