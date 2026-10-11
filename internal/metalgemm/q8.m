@@ -1,5 +1,27 @@
 //go:build darwin && arm64 && cgo
 
+// The q8_mul_mm kernel below adapts llama.cpp's Metal kernel_mul_mm and
+// dequantize_q8_0 at 541bf376229d6c5cb61e4eb59b3c7629755b8271 under the MIT License.
+// Copyright (c) 2023-2026 The ggml authors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 // q8.m — the Metal Q8_0 dequant-GEMV/GEMM. The Q8 twin of q4k.m, and the missing primitive for the
 // GPU-resident GDN decode forward (issue #67). The q4_k GPU kernels alone CANNOT move the
 // Gated-DeltaNet token mixer onto the device: every linear_attn.* projection (in_proj_qkv/z/b/a,
@@ -199,11 +221,14 @@ kernel void q8_gemm(device const char*  W    [[buffer(0)]],  // out*in int8 code
 }
 
 // q8_mul_mm: the simdgroup-matrix Q8_0 prefill GEMM, a port of llama.cpp's kernel_mul_mm
-// instantiated for block_q8_0 (ggml/src/ggml-metal/ggml-metal.metal:11474-11780 and
-// dequantize_q8_0 :3436-3447 @ 541bf376229d6c5cb61e4eb59b3c7629755b8271 (b8200), MIT; Copyright
+// instantiated for block_q8_0 (ggml/src/ggml-metal/ggml-metal.metal:8543-8849 and
+// dequantize_q8_0 :507-518, Q8_0 f32 specialization :9304 @
+// 541bf376229d6c5cb61e4eb59b3c7629755b8271 (b8200), MIT; Copyright
 // (c) 2023-2026 The ggml authors), in the same tile topology as q4k.m's q4k_mul_mm: a 64-row x
 // 32-token output tile over 4 simdgroups, one 32-wide K step per Q8_0 block, weights staged as half
-// 8x8 tiles, activations as f32, f32 accumulators. It reads FAK's split resident layout (int8 codes
+// 8x8 tiles, activations as f32, f32 accumulators. Upstream stages both operands as half;
+// this adaptation keeps activations as f32 after their int8 dequantization.
+// It reads FAK's split resident layout (int8 codes
 // + f32 block scales) and the same int8 activation panel as q8_gemm, so the bindings are q8_gemm's
 // minus the t0/nt token loop: one dispatch covers the GEMM. Weights round to half after scaling,
 // so parity with q8_gemm is cosine-tight rather than bit-close.
