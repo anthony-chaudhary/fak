@@ -359,6 +359,18 @@ int fvk_have_v41_mhc(void);
 int fvk_v41_mhc_f32(int mode, const void *dA, const void *dB, const void *dC,
                     void *dOut, int rows, int hidden, int iters, float eps);
 
+/* V4.1 one-query index selection after the indexer score. Four storage
+ * bindings: scores[rows] F32 (compared as order-preserving integer keys),
+ * scratch[2*blocks+rows] uint32, out[min(topK,rows)] F32 exact row integers
+ * (-1 empty), status[1] uint32 (nonzero = a NaN score). One workgroup ranks
+ * by score descending then position ascending, with optional candidate-block
+ * masking (topKBlocks>0, blocks of blockSize, newest block pinned). Push ABI is
+ * int32 rows, topK, topKBlocks, blockSize. Returns the tail RoPE status codes.
+ * Optional module outside the shader registry: absence leaves have=0. */
+int fvk_have_v41_index_select(void);
+int fvk_v41_index_select_f32(const void *dScores, void *dScratch, void *dOut, void *dStatus,
+                             int rows, int topK, int topKBlocks, int blockSize);
+
 /* SwiGLU: y = silu(g) * u, elementwise, length n. */
 void fvk_swiglu_f32(const void *dG, const void *dU, void *dY, int n);
 void fvk_swiglu_limit_f32(const void *dG, const void *dU, void *dY, int n, float limit);

@@ -1,0 +1,102 @@
+#version 450
+layout(local_size_x = 256) in;
+
+// One workgroup selects the DeepSeek-V4.1 index rows for one query. Scores are
+// compared as order-preserving integer keys, never as floats, so no driver float
+// mode can change a decision. Every phase is an exact rank count: a higher score
+// ranks first, an equal score ranks the lower position first, and -0 equals +0.
+layout(std430, binding = 0) readonly buffer ScoreBuf { uint Score[]; };
+// Scratch: [blocks] block keys, [blocks] block keep flags, [rows] selected flags.
+layout(std430, binding = 1) buffer ScratchBuf { uint Scratch[]; };
+// Out holds min(topK, rows) position-sorted rows as exact F32 integers; -1 is empty.
+layout(std430, binding = 2) writeonly buffer OutBuf { float Out[]; };
+// Status[0] is nonzero when any score is NaN; the caller refuses the selection.
+layout(std430, binding = 3) buffer StatusBuf { uint Status[]; };
+
+layout(push_constant) uniform Push {
+    int rows;
+    int topK;
+    int topKBlocks;
+    int blockSize;
+} pc;
+
+const uint KEY_NEG_INF = 0x007fffffu; // order key of 0xff800000
+const uint KEY_POS_INF = 0xff800000u; // order key of 0x7f800000
+
+uint orderKey(uint bits) {
+    if (bits == 0x80000000u) bits = 0u; // -0 ranks equal to +0
+    return (bits & 0x80000000u) != 0u ? ~bits : bits | 0x80000000u;
+}
+
+bool isNaNBits(uint bits) {
+    return (bits & 0x7f800000u) == 0x7f800000u && (bits & 0x007fffffu) != 0u;
+}
+
+bool outranks(uint a, uint ia, uint b, uint ib) {
+    return a > b || (a == b && ia < ib);
+}
+
+void phaseBarrier() {
+    memoryBarrierBuffer();
+    barrier();
+}
+
+void main() {
+    uint lane = gl_LocalInvocationID.x;
+    uint rows = uint(pc.rows);
+    uint blockSize = uint(max(pc.blockSize, 1));
+    bool masked = pc.topKBlocks > 0;
+    uint blocks = masked ? (rows - 1u) / blockSize + 1u : 0u;
+    uint keepBase = blocks;
+    uint selectedBase = 2u * blocks;
+
+    if (lane == 0u) Status[0] = 0u;
+    phaseBarrier();
+    for (uint i = lane; i < rows; i += 256u) {
+        if (isNaNBits(Score[i])) atomicOr(Status[0], 1u);
+    }
+    phaseBarrier();
+    if (Status[0] != 0u) return;
+
+    if (masked) {
+        uint pinned = (rows - 1u) / blockSize;
+        for (uint b = lane; b < blocks; b += 256u) {
+            uint best = KEY_NEG_INF;
+            uint start = b * blockSize;
+            uint end = min(start + blockSize, rows);
+            for (uint p = start; p < end; ++p) best = max(best, orderKey(Score[p]));
+            Scratch[b] = b == pinned ? KEY_POS_INF : best;
+        }
+        phaseBarrier();
+        for (uint b = lane; b < blocks; b += 256u) {
+            uint mine = Scratch[b];
+            uint rank = 0u;
+            for (uint o = 0u; o < blocks; ++o) {
+                if (outranks(Scratch[o], o, mine, b)) ++rank;
+            }
+            Scratch[keepBase + b] = (rank < uint(pc.topKBlocks) && mine != KEY_NEG_INF) ? 1u : 0u;
+        }
+        phaseBarrier();
+    }
+
+    for (uint i = lane; i < rows; i += 256u) {
+        uint mine = (!masked || Scratch[keepBase + i / blockSize] != 0u) ? orderKey(Score[i]) : KEY_NEG_INF;
+        uint rank = 0u;
+        for (uint j = 0u; j < rows; ++j) {
+            uint other = (!masked || Scratch[keepBase + j / blockSize] != 0u) ? orderKey(Score[j]) : KEY_NEG_INF;
+            if (outranks(other, j, mine, i)) ++rank;
+        }
+        Scratch[selectedBase + i] = rank < uint(pc.topK) ? (mine == KEY_NEG_INF ? 2u : 1u) : 0u;
+    }
+    phaseBarrier();
+
+    for (uint i = lane; i < rows; i += 256u) {
+        uint flag = Scratch[selectedBase + i];
+        if (flag == 0u) continue;
+        uint slot = 0u;
+        for (uint j = 0u; j < i; ++j) {
+            if (Scratch[selectedBase + j] != 0u) ++slot;
+        }
+        Out[slot] = flag == 2u ? -1.0 : float(i);
+    }
+}
