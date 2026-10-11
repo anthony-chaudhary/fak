@@ -958,10 +958,14 @@ func cmdTrunkRed(argv []string) {
 }
 
 func runTrunkRed(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && (argv[0] == "claim" || argv[0] == "release") {
+		return runTrunkRedClaim(stdout, stderr, argv[0], argv[1:])
+	}
 	fs := flag.NewFlagSet("trunk-red", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: fak trunk-red [--ledger PATH] [--json]")
+		fmt.Fprintln(stderr, "       fak trunk-red claim|release [--base SHA] <pkg-dir>...")
 		fmt.Fprintln(stderr, "  Fold the pre-existing trunk-red witness ledger: the distinct shared")
 		fmt.Fprintln(stderr, "  breaks build gates admitted over, worst (most clones stuck) first.")
 		fs.PrintDefaults()

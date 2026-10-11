@@ -122,6 +122,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak sync: capture push source: %v\n", err)
 			return syncExitInternal
 		}
+		syncDuplicateFixAdvisory(stderr, repoPath, *remote, *branch)
 		res, err := syncSafePush(context.Background(), safesync.PushOptions{
 			Repo:           repoPath,
 			Remote:         *remote,
