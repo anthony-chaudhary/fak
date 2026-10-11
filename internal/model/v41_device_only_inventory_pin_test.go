@@ -7,14 +7,19 @@ import (
 	"testing"
 )
 
-// These ops still compute on the host under device-only (gate/add, RMS scale,
-// RMSNorm, gated pooling, shared add). Each stays pinned in the inventory until
+// These operations still have host arithmetic between selected device seams.
+// Each stays pinned in the inventory until
 // the change that moves it onto a device seam removes both the entry and its pin,
 // so an empty inventory can never admit host compute.
 var v41DeviceOnlyPinnedHostOps = []v41HostOp{
+	{name: "bf16-boundary", site: "v41RoundBF16"},
 	{name: "engram-stream-injection", site: "Model.v41EngramInjectPrepared"},
 	{name: "attention-input-norm", site: "Model.v41AttentionInputNormWithLeaf"},
 	{name: "compressor-gated-pool", site: "V41CompressorPool.PushNormalized"},
+	{name: "compressed-publication-rope", site: "Model.v41CompressedPublicationRoPE"},
+	{name: "indexer-query-rope", site: "Model.v41IndexRoPE"},
+	{name: "routed-swiglu-clamp", site: "Model.v41FullRoutedExpert"},
+	{name: "logit-scale", site: "Model.v41HeadWithFinalNorm"},
 }
 
 // fak-test:runtime fast est=1s lane=default
@@ -46,7 +51,10 @@ func TestV41DeviceOnlyInventoryPinsUninventoriedHostOps(t *testing.T) {
 		}
 		last = at
 		parts := regexp.MustCompile(`^(\w+)\.(\w+)$`).FindStringSubmatch(pin.site)
-		decl := regexp.MustCompile(`func \(\w+ \*` + parts[1] + `\) ` + parts[2] + `\(`)
+		decl := regexp.MustCompile(`func ` + regexp.QuoteMeta(pin.site) + `\(`)
+		if len(parts) == 3 {
+			decl = regexp.MustCompile(`func \(\w+ \*` + parts[1] + `\) ` + parts[2] + `\(`)
+		}
 		if !decl.Match(corpus) {
 			t.Fatalf("pinned host site %s no longer exists; re-point the inventory entry", pin.site)
 		}

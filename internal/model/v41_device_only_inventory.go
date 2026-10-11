@@ -15,8 +15,8 @@ type v41HostOp struct {
 	site string
 }
 
-// v41DeviceOnlyHostOpError names every V4.1 forward op still on the host, in
-// forward order.
+// v41DeviceOnlyHostOpError names V4.1 host work that blocks device-only
+// admission: static inventory, then session prerequisites and unbound seams.
 type v41DeviceOnlyHostOpError struct {
 	ops []v41HostOp
 }
@@ -38,9 +38,14 @@ func (e *v41DeviceOnlyHostOpError) Is(target error) bool { return target == errV
 // Remove an entry only in the change that moves that op onto the device seam;
 // an empty inventory is the V4.1 admission condition.
 var v41DeviceOnlyHostOps = []v41HostOp{
+	{name: "bf16-boundary", site: "v41RoundBF16"},
 	{name: "engram-stream-injection", site: "Model.v41EngramInjectPrepared"},
 	{name: "attention-input-norm", site: "Model.v41AttentionInputNormWithLeaf"},
 	{name: "compressor-gated-pool", site: "V41CompressorPool.PushNormalized"},
+	{name: "compressed-publication-rope", site: "Model.v41CompressedPublicationRoPE"},
+	{name: "indexer-query-rope", site: "Model.v41IndexRoPE"},
+	{name: "routed-swiglu-clamp", site: "Model.v41FullRoutedExpert"},
+	{name: "logit-scale", site: "Model.v41HeadWithFinalNorm"},
 }
 
 func v41DeviceOnlyRefusal() error {

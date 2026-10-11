@@ -59,13 +59,20 @@ func v41UsesIndexer(cfg Config) bool {
 	return false
 }
 
-// v41DeviceOnlyUnboundOps names, in forward order, each op the model runs whose
-// device seam this session's backend does not bind.
+// v41DeviceOnlyUnboundOps names session-wide host-only prerequisites first,
+// followed by forward-ordered operations whose device seams are unbound.
 func (s *Session) v41DeviceOnlyUnboundOps() []v41HostOp {
 	if s == nil || s.M == nil {
 		return nil
 	}
 	var unbound []v41HostOp
+	// A selected dense projection still applies installed LoRA factors on the
+	// host, including a tied packed head. There is no device LoRA seam yet;
+	// refuse installed sets at every entry, including a set toggled between
+	// decode steps. The unadapted model must not inherit this conditional debt.
+	if s.M.lora != nil {
+		unbound = append(unbound, v41HostOp{name: "dense-lora-apply", site: "Session.v41DenseProjectionFunc"})
+	}
 	for _, b := range v41DeviceOnlyBindings {
 		if b.uses != nil && !b.uses(s.M.Cfg) {
 			continue
