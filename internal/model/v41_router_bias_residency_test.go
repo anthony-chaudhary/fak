@@ -107,8 +107,9 @@ func TestV41DecodeResidentH2DRouterBias(t *testing.T) {
 		m, oracle := v41RouterBiasModel(t), v41RouterBiasModel(t)
 		b := newV41RouterBiasRecorder()
 		s := v41DenseTestSession(t, m, b)
-		host := oracle.NewSession()
-		defer host.Close()
+		// Same device seams, host routing: only router-bias residency differs.
+		// The pure host session reduces grouped output in another order.
+		host := v41DenseTestSession(t, oracle, newV41DenseTestBackend())
 		if got, want := s.Prefill([]int{1}), host.Prefill([]int{1}); !reflect.DeepEqual(got, want) {
 			t.Fatal("resident router bias changed prefill logits")
 		}
@@ -188,19 +189,21 @@ func TestV41DecodeResidentH2DRouterBias(t *testing.T) {
 		invalid := original
 		invalid.Offset = len(m.raw) + 1
 		m.manifest[name] = invalid
+		before := len(b.biasUploads)
 		_, err := call(0, logits, copyBias, cfg, true)
 		m.manifest[name] = original
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(b.biasUploads) != 5 || b.frees[b.biasUploads[4].Buf()] != 1 {
+		if len(b.biasUploads) != before+1 || b.frees[b.biasUploads[before].Buf()] != 1 {
 			t.Fatal("malformed metadata admitted resident bias")
 		}
+		before = len(b.biasUploads)
 		bare := &Session{M: m, Backend: b}
 		if _, err := bare.v41RouterTopKFunc()(0, logits, canonical, cfg, true); err != nil {
 			t.Fatal(err)
 		}
-		if len(b.biasUploads) != 6 || b.frees[b.biasUploads[5].Buf()] != 1 {
+		if len(b.biasUploads) != before+1 || b.frees[b.biasUploads[before].Buf()] != 1 {
 			t.Fatal("unheld model lifetime admitted resident bias")
 		}
 		s.Close()
