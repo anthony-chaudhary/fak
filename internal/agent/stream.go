@@ -546,6 +546,7 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 		// so the upstream picks the slot. No-op for non-llama upstreams.
 		extraBody = p.withLlamaSlotAffinity(extraBody)
 		extraBody, slotRelease = p.withLlamaSoftSlot(extraBody, safeMessages)
+		extraBody, slotRelease = sp.llamaSlotPin.apply(extraBody, slotRelease)
 		reqBody, err = adapter.MarshalRequest(adapterRequest{
 			Model:                    modelID,
 			ServiceTier:              sp.ServiceTier,
@@ -803,7 +804,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	if !p.StreamingSupported() {
 		return nil, ErrStreamingUnsupported
 	}
-	call, err := p.prepareUpstream(messages, tools, true, opts...)
+	call, err := p.prepareUpstream(messages, tools, true, withContextLlamaSlotPin(ctx, opts)...)
 	if err != nil {
 		return nil, err
 	}

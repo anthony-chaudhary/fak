@@ -548,6 +548,9 @@ type NativeDecodeTokenIDs struct {
 // the caller also wants top_p/stop, and a bare float64 could not carry that intent.
 type SampleParams struct {
 	ServiceTier modelroute.ServiceMode
+	// llamaSlotPin sends the turn to the llama-server slot deadline admission
+	// verified, and records the id_slot it carried (llama_slot_residency.go).
+	llamaSlotPin *LlamaSlotPin
 	// Model, when non-empty, overrides the planner's configured ModelID for THIS
 	// request — the gateway's request-model pass-through (#82). It is the model id
 	// that reaches the upstream request body (and, for a path-templated provider
@@ -1117,7 +1120,7 @@ func (p *HTTPPlanner) ProbeReachability(ctx context.Context) (int, error) {
 // pre-seam behavior.
 func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
 	offered := offeredToolsFor(ctx, tools)
-	call, err := p.prepareUpstream(messages, tools, false, opts...)
+	call, err := p.prepareUpstream(messages, tools, false, withContextLlamaSlotPin(ctx, opts)...)
 	if err != nil {
 		return nil, err
 	}

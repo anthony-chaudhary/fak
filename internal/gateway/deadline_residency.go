@@ -29,9 +29,16 @@ import (
 //   - the cold estimate stays within deadlineCacheCreditMaxColdOverrun of the
 //     remaining budget, bounding the cost if a request reaches the slot first.
 //
+// A multi-slot llama-server (--parallel N) is credited only through the planner's
+// soft slot choice (--llama-soft-slot): the served turn's id_slot names the slot
+// that holds its prefix, and that slot's task id and prompt length are recorded.
+// At admission the named slot must be idle with that task id and prompt length;
+// the credited turn is then sent to that same slot, so the evidence holds through
+// dispatch. Requests in flight on other slots do not void it.
+//
 // A credited turn whose engine reported less than half the credit as cached
-// clears every entry. Upstreams that do not expose a single-slot /slots, and
-// non-HTTP planners, get no credit.
+// clears every entry. Upstreams without /slots, multi-slot upstreams without soft
+// slot choice, and non-HTTP planners get no credit.
 
 const (
 	deadlineResidencyTTL        = 10 * time.Minute
@@ -50,7 +57,9 @@ type deadlineResidencyEntry struct {
 	planner    *agent.HTTPPlanner
 	engineTask int
 	slotPrompt int
-	at         time.Time
+	// slot is the id_slot the turn was sent to, or -1 for a single-slot upstream.
+	slot int
+	at   time.Time
 }
 
 // deadlineResidencyTicket follows one admitted chat request from admission to
@@ -61,6 +70,9 @@ type deadlineResidencyTicket struct {
 	model    string
 	planner  *agent.HTTPPlanner
 	credited int
+	// creditSlot is the slot whose residency was credited, or -1.
+	creditSlot int
+	pin        *agent.LlamaSlotPin
 
 	mu       sync.Mutex
 	measured int
@@ -153,14 +165,25 @@ func (p *deadlineResidencyMemory) forgetAll() {
 func (s *Server) deadlineResidencyCredit(r *http.Request, t *deadlineResidencyTicket, chain [][sha256.Size]byte, arrived time.Time, maxTokens int) int {
 	est := s.metrics.deadlineEstimator()
 	budget, has := deadlineadmit.Budget(r.Header)
-	if est == nil || !has || t.planner == nil || est.InFlight() != 0 {
+	if est == nil || !has || t.planner == nil {
 		return 0
 	}
 	e, ok := s.metrics.deadlineResidencyMem().lookup(chain, t.model, t.planner, arrived)
 	if !ok {
 		return 0
 	}
-	slot, ok := t.planner.LlamaSingleSlot(r.Context(), deadlineSlotReadTimeout)
+	var slot agent.LlamaSlotTask
+	if e.slot >= 0 {
+		if !t.planner.LlamaSoftSlot {
+			return 0
+		}
+		slot, ok = t.planner.LlamaSlot(r.Context(), deadlineSlotReadTimeout, e.slot)
+	} else {
+		if est.InFlight() != 0 {
+			return 0
+		}
+		slot, ok = t.planner.LlamaSingleSlot(r.Context(), deadlineSlotReadTimeout)
+	}
 	if !ok || slot.Processing || slot.IDTask != e.engineTask || slot.PromptTokens != e.slotPrompt {
 		return 0
 	}
@@ -168,6 +191,7 @@ func (s *Server) deadlineResidencyCredit(r *http.Request, t *deadlineResidencyTi
 	if cold := est.AdmitCached(t.estTok, 0, maxTokens, remaining, true); cold.Estimate.Seconds() > remaining.Seconds()*(1+deadlineCacheCreditMaxColdOverrun) {
 		return 0
 	}
+	t.creditSlot = e.slot
 	return min(e.tokens, slot.PromptTokens)
 }
 
@@ -189,8 +213,9 @@ func (s *Server) noteDeadlineResidency(ctx context.Context, comp *agent.Completi
 }
 
 // releaseDeadlineResidency records the request's prefix when its turn was
-// served, finished with a healthy context, and the upstream's only slot holds
-// exactly that prompt. The /slots read runs off the request path.
+// served, finished with a healthy context, and the slot it was sent to (or the
+// upstream's only slot) holds exactly that prompt. The /slots read runs off the
+// request path.
 func (s *Server) releaseDeadlineResidency(ctx context.Context, t *deadlineResidencyTicket) {
 	if t == nil || t.planner == nil || ctx.Err() != nil {
 		return
@@ -203,7 +228,15 @@ func (s *Server) releaseDeadlineResidency(ctx context.Context, t *deadlineReside
 	}
 	mem := s.metrics.deadlineResidencyMem()
 	go func() {
-		slot, ok := t.planner.LlamaSingleSlot(context.Background(), deadlineSlotReadTimeout)
+		var slot agent.LlamaSlotTask
+		var ok bool
+		served, pinned := t.pin.Served()
+		if pinned {
+			slot, ok = t.planner.LlamaSlot(context.Background(), deadlineSlotReadTimeout, served)
+		} else {
+			served = -1
+			slot, ok = t.planner.LlamaSingleSlot(context.Background(), deadlineSlotReadTimeout)
+		}
 		if !ok || slot.Processing || slot.PromptTokens != measured {
 			return
 		}
@@ -213,6 +246,7 @@ func (s *Server) releaseDeadlineResidency(ctx context.Context, t *deadlineReside
 			planner:    t.planner,
 			engineTask: slot.IDTask,
 			slotPrompt: slot.PromptTokens,
+			slot:       served,
 			at:         time.Now(),
 		})
 	}()

@@ -176,14 +176,18 @@ func (s *Server) admitClientDeadlineChat(w http.ResponseWriter, r *http.Request,
 		return s.admitClientDeadlineCached(w, r, arrived, promptTok, 0, maxTokens)
 	}
 	planner, _ := s.chatPlanner(r.Context()).(*agent.HTTPPlanner)
-	ticket := &deadlineResidencyTicket{key: chain[len(chain)-1], estTok: promptTok, model: model, planner: planner}
+	ticket := &deadlineResidencyTicket{key: chain[len(chain)-1], estTok: promptTok, model: model, planner: planner, creditSlot: -1}
 	ticket.credited = s.deadlineResidencyCredit(r, ticket, chain, arrived, maxTokens)
 	r, release, ok := s.admitClientDeadlineCached(w, r, arrived, promptTok, ticket.credited, maxTokens)
 	if !ok {
 		return r, release, false
 	}
-	r = r.WithContext(context.WithValue(r.Context(), deadlineResidencyCtxKey{}, ticket))
-	ctx := r.Context()
+	ctx := context.WithValue(r.Context(), deadlineResidencyCtxKey{}, ticket)
+	if planner != nil && planner.LlamaSoftSlot {
+		ticket.pin = agent.NewLlamaSlotPin(ticket.creditSlot)
+		ctx = agent.ContextWithLlamaSlotPin(ctx, ticket.pin)
+	}
+	r = r.WithContext(ctx)
 	return r, func() {
 		s.releaseDeadlineResidency(ctx, ticket)
 		release()
