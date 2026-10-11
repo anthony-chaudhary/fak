@@ -19,6 +19,7 @@ package ggufload
 import (
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -57,6 +58,17 @@ func (w *v41EngramRowReaderAt) ReadAt(p []byte, off int64) (int, error) {
 	endRow := (off + int64(len(p)) + rb - 1) / rb
 	if startRow < 0 || endRow > int64(w.rows) {
 		return 0, fmt.Errorf("gguf: V4.1 Engram ReadAt [%d,%d) outside table (%d rows)", off, off+int64(len(p)), w.rows)
+	}
+	if off%rb == 0 && int64(len(p))%rb == 0 {
+		want := len(p)
+		n, err := w.src.ReadRows(int(startRow), int(endRow-startRow), p)
+		if err != nil {
+			return 0, err
+		}
+		if n != want {
+			return 0, fmt.Errorf("gguf: V4.1 Engram ReadAt short read: have %d, need [%d,%d)", n, 0, want)
+		}
+		return want, nil
 	}
 	buf := make([]byte, (endRow-startRow)*rb)
 	n, err := w.src.ReadRows(int(startRow), int(endRow-startRow), buf)
@@ -196,7 +208,13 @@ func attachV41EngramServing(m *model.Model, ws *WeightSource) error {
 		return refuse(err)
 	}
 
-	srcs := make([]model.V41EngramRowSource, len(eng.LayerIDs))
+	type engramAcquire struct {
+		id     int
+		reader *v41EngramRowReaderAt
+		shard  model.V41EngramShard
+		bind   model.V41EngramArtifactBinding
+	}
+	pending := make([]engramAcquire, len(eng.LayerIDs))
 	rowBytes := 0
 	for i, id := range eng.LayerIDs {
 		inner, tableRows, innerRowBytes, err := openV41EngramRowSource(ws, id)
@@ -211,29 +229,34 @@ func attachV41EngramServing(m *model.Model, ws *WeightSource) error {
 		} else if innerRowBytes != rowBytes {
 			return refuse(fmt.Errorf("layer %d row width %d disagrees with %d (one dialect per stage)", id, innerRowBytes, rowBytes))
 		}
-
-		// Admit only after the declared extent's bytes match a binding over that
-		// exact extent: the verified route, never the unverified prepared reader.
 		shardName := fmt.Sprintf("blk.%d.%s", id, v41EngramEmbdSuffix)
 		size := int64(tableRows) * int64(innerRowBytes)
-		reader := &v41EngramRowReaderAt{src: inner, rows: tableRows, rowBytes: innerRowBytes}
-		digest, err := model.V41EngramDigestExtent(reader, 0, size)
+		pending[i] = engramAcquire{
+			id:     id,
+			reader: &v41EngramRowReaderAt{src: inner, rows: tableRows, rowBytes: innerRowBytes},
+			shard:  model.V41EngramShard{ID: shardName, ExpectedID: shardName, Offset: 0, Size: size, Rows: tableRows},
+			bind:   model.V41EngramArtifactBinding{Shard: shardName, Offset: 0, Size: size, Rows: tableRows, RowBytes: innerRowBytes},
+		}
+	}
+
+	// Admit only a source bound to the bytes of its exact extent: the verified
+	// route, never the unverified prepared reader. Each layer's extent is hashed
+	// once, and the layers hash concurrently (one sha256 stream each).
+	srcs := make([]model.V41EngramRowSource, len(pending))
+	errs := make([]error, len(pending))
+	var wg sync.WaitGroup
+	for i := range pending {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			srcs[i], errs[i] = model.NewV41AcquiredEngramRowSource(pending[i].reader, pending[i].shard, pending[i].bind)
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
 		if err != nil {
-			return refuse(fmt.Errorf("layer %d: hash Engram extent: %w", id, err))
+			return refuse(fmt.Errorf("layer %d: bind Engram extent: %w", pending[i].id, err))
 		}
-		binding := model.V41EngramArtifactBinding{
-			Shard: shardName, Offset: 0, Size: size,
-			Rows: tableRows, RowBytes: innerRowBytes, Digest: digest,
-		}
-		shard := model.V41EngramShard{
-			ID: shardName, ExpectedID: shardName,
-			Offset: 0, Size: size, Rows: tableRows,
-		}
-		verified, err := model.NewV41VerifiedEngramRowSource(reader, shard, binding)
-		if err != nil {
-			return refuse(fmt.Errorf("layer %d: verify Engram binding: %w", id, err))
-		}
-		srcs[i] = verified
 	}
 
 	spec := model.V41EngramAttachSpec{

@@ -27,10 +27,27 @@ import (
 // fak-test:runtime integration est=45s lane=optin
 func TestVulkanV41SharedAttentionPhysical(t *testing.T) {
 	if os.Getenv("FAK_V41_SHARED_ATTENTION_WITNESS") != "1" {
-		if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") == "1" {
-			t.Fatal("required-device run needs explicit FAK_V41_SHARED_ATTENTION_WITNESS=1")
+		if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") != "1" {
+			t.Skip("deferred physical shared-attention witness is opt-in")
 		}
-		t.Skip("deferred physical shared-attention witness is opt-in")
+		// A required-device suite run executes the witness in a child that starts
+		// with the profiling it needs. An operator-set expected device still wins;
+		// otherwise the child must report the device this process registered.
+		expect := os.Getenv("FAK_VULKAN_EXPECT_DEVICE")
+		if expect == "" {
+			identity, err := vk(t).BackendExecutionSnapshot()
+			if err != nil {
+				t.Fatal(err)
+			}
+			expect = identity.Identity.Device
+		}
+		runVulkanStartupEnvFixture(t, 2*time.Minute, map[string]string{
+			"FAK_V41_SHARED_ATTENTION_WITNESS":   "1",
+			"FAK_VULKAN_TIMESTAMP_PROFILE":       "1",
+			"FAK_VULKAN_TIMESTAMP_PROFILE_EVERY": "1",
+			"FAK_VULKAN_EXPECT_DEVICE":           expect,
+		})
+		return
 	}
 	for _, key := range []string{"FAK_VULKAN_REQUIRE_DEVICE", "FAK_VULKAN_DISPATCH_PROFILE", "FAK_VULKAN_TIMESTAMP_PROFILE", "FAK_VULKAN_TIMESTAMP_PROFILE_EVERY"} {
 		if os.Getenv(key) != "1" {

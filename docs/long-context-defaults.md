@@ -126,7 +126,7 @@ derivation cannot stack. Two bounds, both `MODELED`:
   is capped at 160Ki; a 128K slot is used in full.
 - **Compaction risk, every window.** Output = `clamp(window/8, 4K, 32K)`; reserve = output + 2K
   summary prompt + a `max(1K, window/32)` skew margin, so Pi's summary request fits the hard cap;
-  keep = `min(20000, trigger/2 - fixed prompt - summary)`. A window where one compaction cannot
+  keep = `min(20000, trigger*3/4 - fixed prompt - summary)`, the largest tail that still reclaims a quarter. A window where one compaction cannot
   reclaim a quarter of the trigger (a 32K slot under a ~16K Pi prompt) is reported
   `WINDOW_TOO_SMALL_FOR_HARNESS` instead of being shrunk further.
 
@@ -139,7 +139,7 @@ because the reserve is built from it (fak records no maxTokens pin).
 `fak pi config --from-router --write` writes one shared compaction block taken from the binding
 model, the one with the lowest own trigger (ties go to the default model). The reserve is raised only as far as
 every other model's answer plus the 2K summary prompt and 1K margin need. A larger-window cloud model's
-bigger reserve therefore never lowers a Halo slot's trigger. A Halo-served model (`owned_by halo-*`) also caps its trigger at what the Halo admits cold. The gateway prices every chat request cold, with no prompt-cache credit at admission. Pi declares the OpenAI SDK's 600s deadline, and admission refuses above 0.9 of it. With 162 tok/s cold prefill, a 1024-token completion at 21 tok/s, and one 4096-token turn of growth, that bound is a 74752 trigger (reserve 56320, keep 4608 for a 131072 slot).
+bigger reserve therefore never lowers a Halo slot's trigger. A Halo-served model (`owned_by halo-*`) also caps its trigger at what the Halo admits. Pi declares the OpenAI SDK's 600s deadline, and admission refuses above 0.9 of it. With 162 tok/s cold prefill, a 1024-token completion at 21 tok/s, and one 4096-token turn of growth, a fully cold bound is a 74752 trigger. Admission credits a conversation's verified cached prefix while the cold estimate stays under 1.5x the ceiling (810s), so `HaloPiColdAdmission` sets `CachedPromptFraction` 0.30 and the trigger rises as 1/(1-fraction) to 107520 (reserve 23552, keep 20000 for a 131072 slot), under the 112640 window cap. Its full cold estimate is about 738s, inside the credit cutoff.
 The plan then checks the answer, summary, and reclamation bounds for every model. Model windows and the
 selected default are preserved. If those shared settings are unsafe, neither configuration
 file is changed; incompatible windows need separate Pi settings. Non-viable models also

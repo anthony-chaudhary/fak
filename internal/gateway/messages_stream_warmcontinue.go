@@ -21,6 +21,7 @@ package gateway
 // rejects an assistant prefill when extended thinking is enabled.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -99,9 +100,10 @@ func requestEnablesThinking(raw []byte) bool {
 // warmContinuableErr reports whether err is a MIGRATABLE mid-stream failure — a transport
 // reset or an idle stall — rather than a definite HTTP status. A status error (e.g. a 400 the
 // prefill itself provoked, or an exhausted 429) will not be fixed by replaying on another
-// worker, so it is surfaced instead of retried.
+// worker, so it is surfaced instead of retried. Request cancellation/deadline
+// errors are terminal too; typed idle/no-progress watchdog stalls remain eligible.
 func warmContinuableErr(err error) bool {
-	if err == nil {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
 	var se *agent.UpstreamStatusError
@@ -114,8 +116,14 @@ func warmContinuableErr(err error) bool {
 // error when the death is not migratable or the attempt budget is spent — in which case the
 // caller emits the terminal error frame exactly as before.
 func (p *anthropicPassthrough) warmContinue(hp *agent.HTTPPlanner, upstreamKey, upstreamBeta string) error {
+	if err := p.r.Context().Err(); err != nil {
+		return err
+	}
 	p.continuing = true // suppress the continuation's own message_start echo/notes
 	for attempt := 0; attempt < warmContinueMaxAttempts; attempt++ {
+		if err := p.r.Context().Err(); err != nil {
+			return err
+		}
 		// Re-check the shape every time round: the previous attempt may have opened a tool_use
 		// or thinking block before it died, which makes a further replay unsafe (see
 		// warmContinueShapeOK). Standing down hands the caller back to the terminal-error path.
@@ -129,15 +137,29 @@ func (p *anthropicPassthrough) warmContinue(hp *agent.HTTPPlanner, upstreamKey, 
 		}
 		// Close a dangling open client block (the death interrupted it) so the continuation
 		// opens a fresh, well-formed block on the resumed stream.
+		if err := p.r.Context().Err(); err != nil {
+			return err
+		}
 		p.closeOpenClientBlock()
+		// A downstream callback can cancel the request while closing the old
+		// block. Do not issue a continuation after that boundary.
+		if err := p.r.Context().Err(); err != nil {
+			return err
+		}
 		err := hp.StreamAnthropicRaw(p.r.Context(), body, upstreamKey, upstreamBeta, p.onEvent)
 		if err == nil {
 			return nil // resumed to a clean terminal — one unbroken turn on the client wire
 		}
 		if !warmContinuableErr(err) {
-			return err // a definite status won't be fixed by another replay
+			return err // preserve definite status or terminal context cause
+		}
+		if cause := p.r.Context().Err(); cause != nil {
+			return cause
 		}
 		p.s.logf("gateway: warm-continue attempt %d died again mid-stream: %v", attempt+1, err)
+	}
+	if err := p.r.Context().Err(); err != nil {
+		return err
 	}
 	return errWarmContinueExhausted
 }

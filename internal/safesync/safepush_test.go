@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func twoPointClock(start, end time.Time) func() time.Time {
@@ -117,6 +118,95 @@ func TestSafePush_HeadlineFallsBackToFirstLineWithoutABlockedGate(t *testing.T) 
 	}
 	if res.Detail != "remote: error: hook declined to update refs/heads/main" {
 		t.Errorf("without a blocked gate the first line is the headline, got %q", res.Detail)
+	}
+}
+
+// fak-test:runtime fast est=10ms
+func TestSafePush_PreservesBoundedRefusalDiagnostics(t *testing.T) {
+	t.Parallel()
+	// Synthetic missing-base output exercises evidence retention, not the cause of
+	// any historical refusal. The native check can write stdout before stderr's gate.
+	const blocked = "PREPUSH_STRUCTURE (blocked): immutable-range admission refused or could not run."
+	const cause = "cannot resolve pushed base refs/heads/example: unknown revision"
+	for _, tc := range []struct {
+		name      string
+		stdout    string
+		stderr    string
+		wantOut   string
+		wantErr   string
+		truncated bool
+		published bool
+	}{
+		{name: "preceding stderr cause", stderr: cause + "\n" + blocked, wantErr: cause + "\n" + blocked},
+		{name: "stdout cause and stderr gate", stdout: cause, stderr: blocked, wantOut: cause, wantErr: blocked},
+		{name: "trim outer whitespace", stdout: " \r\n\t" + cause + " \r\n", stderr: "\r\n  " + blocked + "\t\r\n", wantOut: cause, wantErr: blocked},
+		{name: "bounded tails", stdout: strings.Repeat("界", 2000) + "\n" + cause, stderr: strings.Repeat("old advisory\n", 1000) + cause + "\n" + blocked, wantOut: cause, wantErr: cause + "\n" + blocked, truncated: true},
+		{name: "repair short UTF-8", stdout: "\xff" + cause, stderr: blocked, wantOut: "\ufffd" + cause, wantErr: blocked},
+		{name: "bound after UTF-8 repair", stdout: strings.Repeat("\xffx", 2000) + "\n" + cause, stderr: strings.Repeat("\xfez", 2000) + cause + "\n" + blocked, wantOut: "\ufffdx\n" + cause, wantErr: "\ufffdz" + cause + "\n" + blocked, truncated: true},
+		{name: "empty output", stdout: " \r\n", stderr: "\t\n"},
+		{name: "concurrent publication", stdout: cause, stderr: blocked, published: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sr := &scriptedRunner{push: []RunResult{{Code: 1, Stdout: []byte(tc.stdout), Stderr: []byte(tc.stderr)}}}
+			if tc.published {
+				sr.ancestors = map[string]int{"HEAD..origin/main": 0}
+			}
+			res, err := SafePush(context.Background(), PushOptions{Repo: ".", Branch: "main", Runner: sr.run})
+			if err != nil {
+				t.Fatalf("SafePush: %v", err)
+			}
+			if res.Attempts != 1 || res.Pushed != tc.published {
+				t.Fatalf("push outcome changed: %+v", res)
+			}
+			wantCalls := "push origin main|fetch origin main|merge-base --is-ancestor HEAD origin/main"
+			if got := strings.Join(sr.calls, "|"); got != wantCalls {
+				t.Fatalf("calls = %q, want %q", got, wantCalls)
+			}
+			if !tc.published {
+				wantDetail := blocked
+				if tc.wantErr == "" {
+					wantDetail = ""
+				}
+				if res.Reason != PushReasonError || res.Detail != wantDetail {
+					t.Fatalf("refusal headline changed: reason=%q detail=%q", res.Reason, res.Detail)
+				}
+			}
+			encoded, err := json.Marshal(res)
+			if err != nil {
+				t.Fatalf("marshal result: %v", err)
+			}
+			var decoded PushResult
+			if err := json.Unmarshal(encoded, &decoded); err != nil {
+				t.Fatalf("unmarshal result: %v", err)
+			}
+			if tc.published || (tc.wantOut == "" && tc.wantErr == "") {
+				if res.Diagnostics != nil || decoded.Diagnostics != nil || strings.Contains(string(encoded), `"diagnostics"`) {
+					t.Fatalf("empty or successful result retained diagnostics: %s", encoded)
+				}
+				return
+			}
+			if res.Diagnostics == nil || !strings.Contains(string(encoded), `"diagnostics"`) {
+				t.Fatalf("refusal diagnostics missing: %s", encoded)
+			}
+			if decoded.Diagnostics == nil || *decoded.Diagnostics != *res.Diagnostics {
+				t.Fatalf("diagnostics changed during JSON round trip: %s", encoded)
+			}
+			for _, stream := range []struct{ name, got, want string }{
+				{"stdout", res.Diagnostics.Stdout, tc.wantOut},
+				{"stderr", res.Diagnostics.Stderr, tc.wantErr},
+			} {
+				if len(stream.got) > 4096 || !utf8.ValidString(stream.got) {
+					t.Errorf("%s diagnostics exceed byte bound or split UTF-8", stream.name)
+				}
+				if tc.truncated {
+					if !strings.HasPrefix(stream.got, "[earlier output truncated]\n") || !strings.HasSuffix(stream.got, stream.want) {
+						t.Errorf("%s lost truncation marker or final diagnostic", stream.name)
+					}
+				} else if stream.got != stream.want {
+					t.Errorf("%s = %q, want %q", stream.name, stream.got, stream.want)
+				}
+			}
+		})
 	}
 }
 

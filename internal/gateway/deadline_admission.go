@@ -32,8 +32,9 @@ import (
 // Observation measures prefill throughput over uncached tokens only. Admission
 // can discount tokens when the caller supplies current resident-prefix evidence.
 // Direct native execution supplies evidence only after acquiring request-owned
-// state. Other routes estimate the full prompt cold: a previous request's history
-// or successful return does not prove current compatible residency.
+// state. Other chat routes are credited only from the upstream engine's own
+// /slots evidence (deadline_residency.go); a previous request's history or
+// successful return alone does not prove current compatible residency.
 
 type deadlineAdmissionError struct {
 	verdict deadlineadmit.Verdict
@@ -54,15 +55,20 @@ func bindClientDeadline(r *http.Request, arrived time.Time) (*http.Request, cont
 	return r.WithContext(ctx), cancel
 }
 
-// admitRoutedClientDeadline postpones only a qualified direct native verdict.
-// The final prompt and owned cache state are known at execution, after all
-// gateway rewrites. No structural lookup or historical cache observation earns
-// credit. Wrappers, providers, and configured speculative routes stay cold.
 func (s *Server) admitRoutedClientDeadline(w http.ResponseWriter, r *http.Request, arrived time.Time, messages []agent.Message, maxTokens int) (*http.Request, func(), bool) {
+	return s.admitRoutedClientDeadlineModel(w, r, arrived, "", messages, maxTokens)
+}
+
+// admitRoutedClientDeadlineModel postpones only a qualified direct native
+// verdict. The final prompt and owned cache state are known at execution, after
+// all gateway rewrites. Every other route is admitted at ingress, credited only
+// by measured residency evidence for the same model; no structural lookup or
+// historical cache observation earns credit.
+func (s *Server) admitRoutedClientDeadlineModel(w http.ResponseWriter, r *http.Request, arrived time.Time, model string, messages []agent.Message, maxTokens int) (*http.Request, func(), bool) {
 	planner, native := s.chatPlanner(r.Context()).(*agent.InKernelPlanner)
 	_, hasBudget := deadlineadmit.Budget(r.Header)
 	if !native || !hasBudget || !planner.ExecutionDeadlineAdmissionSupported() {
-		return s.admitClientDeadlineMessages(w, r, arrived, messages, maxTokens)
+		return s.admitClientDeadlineChat(w, r, arrived, model, messages, maxTokens)
 	}
 	est := s.metrics.deadlineEstimator()
 	if est == nil {
@@ -156,13 +162,32 @@ func (s *Server) admitClientDeadline(w http.ResponseWriter, r *http.Request, arr
 	return s.admitClientDeadlineCached(w, r, arrived, promptTok, 0, maxTokens)
 }
 
-// admitClientDeadlineMessages estimates a chat request without cache credit.
-// TODO: Supply nonzero credit only from authoritative, route-bound cache
-// residency evidence that remains valid through execution, including eviction.
-// Until then, even genuinely warm long prompts may be refused by the cold estimate.
 func (s *Server) admitClientDeadlineMessages(w http.ResponseWriter, r *http.Request, arrived time.Time, messages []agent.Message, maxTokens int) (*http.Request, func(), bool) {
+	return s.admitClientDeadlineChat(w, r, arrived, "", messages, maxTokens)
+}
+
+// admitClientDeadlineChat admits a chat request for model, crediting only
+// measured, route-bound residency evidence (deadline_residency.go). On a
+// measured, healthy finish it records this request's prefix for the next turn.
+func (s *Server) admitClientDeadlineChat(w http.ResponseWriter, r *http.Request, arrived time.Time, model string, messages []agent.Message, maxTokens int) (*http.Request, func(), bool) {
 	promptTok := estimateMessageContentTokens(messages)
-	return s.admitClientDeadlineCached(w, r, arrived, promptTok, 0, maxTokens)
+	chain := deadlinePrefixChain(messages)
+	if len(chain) == 0 {
+		return s.admitClientDeadlineCached(w, r, arrived, promptTok, 0, maxTokens)
+	}
+	planner, _ := s.chatPlanner(r.Context()).(*agent.HTTPPlanner)
+	ticket := &deadlineResidencyTicket{key: chain[len(chain)-1], estTok: promptTok, model: model, planner: planner}
+	ticket.credited = s.deadlineResidencyCredit(r, ticket, chain, arrived, maxTokens)
+	r, release, ok := s.admitClientDeadlineCached(w, r, arrived, promptTok, ticket.credited, maxTokens)
+	if !ok {
+		return r, release, false
+	}
+	r = r.WithContext(context.WithValue(r.Context(), deadlineResidencyCtxKey{}, ticket))
+	ctx := r.Context()
+	return r, func() {
+		s.releaseDeadlineResidency(ctx, ticket)
+		release()
+	}, true
 }
 
 func (s *Server) admitClientDeadlineCached(w http.ResponseWriter, r *http.Request, arrived time.Time, promptTok, cachedTok, maxTokens int) (*http.Request, func(), bool) {

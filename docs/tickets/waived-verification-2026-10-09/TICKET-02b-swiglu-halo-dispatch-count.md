@@ -11,7 +11,7 @@ Waived commit: d6e79ea3d3d `feat(model): add V4.1 shared expert device activatio
 
 ```routing
 lane: model/v41-device
-paths: ["internal/model/v41_clamped_device_swiglu_halo_test.go", "internal/model/v41_shared_activation.go", "docs/tickets/waived-verification-2026-10-09/TICKET-02b-swiglu-halo-dispatch-count.md"]
+paths: ["internal/model/v41_clamped_device_swiglu_halo_test.go", "internal/model/v41_shared_activation.go", "internal/ggufload/deepseek41_expert_hal_integration_test.go", "docs/tickets/waived-verification-2026-10-09/TICKET-02b-swiglu-halo-dispatch-count.md"]
 expected_steps: 2
 public_issue: anthony-chaudhary/fak#13769
 ```
@@ -34,6 +34,24 @@ readbacks per token.
 
 Silicon run: one Strix Halo appliance, RADV STRIX_HALO, vulkan-1.4.354, source dff9be67b4a,
 2026-10-09.
+
+Attribution (2026-10-10, base f2be2792ab2):
+
+- Halo witness: per token, the extra MatMul and the 24-F32 readback come from the
+  reduced fixture's mHC projection callback. The second extra readback, H=256
+  F32s, comes from the final-norm callback. 4*(24+256) = 1120 bytes = 13408-12288.
+  82b4d3ce6cb, which landed after the dff9be67b4a silicon run, keeps both on the host
+  inside this witness (`mhcProjection = nil`, `finalNorm = nil`). The routed-expert
+  contract is unchanged. A silicon rerun on the current tree is still pending.
+- ggufload `TestDeepSeek41MixedQuantExpertHALIntegration` (CPU, reproduced red at
+  f2be2792ab2: `device SwiGLU count = 7, want 6`): the seventh SwiGLU is the V4.1
+  shared expert's device activation (d6e79ea3d3d, `v41SharedActivationFunc`). It
+  runs once per layer over host-uploaded gate/up rows. The recording backend now
+  classifies each SwiGLU by its operands. When both operands are Q2_K gate/up
+  MatMul outputs, it counts a routed SwiGLU (6 = one per pick). Otherwise it counts
+  a shared SwiGLU (1 = one per layer). The test now asserts each count separately.
+  This is a contract change, not a removed transfer: the shared seam's two uploads
+  and one readback are the documented design of d6e79ea3d3d.
 
 ## Problem
 
@@ -73,7 +91,7 @@ FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_DISPATCH_PROFILE=1 FAK_VULKAN_SPIRV=<spir
 
 Witness: the command above on a Strix Halo appliance.
 
-- [ ] [SW-VERIFIED] Each extra matmul and readback is attributed to a named call site.
+- [x] [SW-VERIFIED] Each extra matmul and readback is attributed to a named call site.
 - [ ] [HW-WITNESSED] `TestV41ClampedDeviceSwiGLUHalo` PASS on a Halo.
 
 ## Witness

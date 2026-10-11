@@ -316,7 +316,7 @@ func TestV41IndexKeyNormSourceReaderLifecycle(t *testing.T) {
 			}
 			s.Close()
 			b.owner, s = target, target
-			v41CompressorTestFiniteParity(t, s.Step(8), host.Step(8), "index normalization restored owner")
+			v41CompressorTestFiniteParity(t, s.Step(0), host.Step(0), "index normalization restored owner")
 			check(8)
 			for _, record := range b.records {
 				if record.weight != cached[record.layer] || b.frees[record.weight] != 0 {
@@ -325,7 +325,7 @@ func TestV41IndexKeyNormSourceReaderLifecycle(t *testing.T) {
 			}
 			// An incomplete next group still runs the real step while retaining no callback in scratch.
 			scratch := &v41ProjScratch{}
-			if _, stats, err := m.forwardV41Step(9, s.v41State(), scratch); err != nil || !stats.Committed || scratch.indexKeyNorm != nil || len(b.records) != producers*4 {
+			if _, stats, err := m.forwardV41Step(1, s.v41State(), scratch); err != nil || !stats.Committed || scratch.indexKeyNorm != nil || len(b.records) != producers*4 {
 				t.Fatal("step retained callback or normalized an incomplete group")
 			}
 		})

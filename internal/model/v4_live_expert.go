@@ -303,9 +303,11 @@ func (s *Session) v4ExpertForward(layer, tokenID int, normalized compute.Tensor)
 		if err != nil {
 			return compute.Tensor{}, err
 		}
-		combined, err := v41SharedExpertAdd(out, shared, v41RouterConfig{SharedCount: s.M.Cfg.NSharedExperts})
+		// A device backend adds on the shared-add seam; a selected device
+		// failure keeps its typed identity and never replays the host add.
+		combined, err := v41SharedExpertAddWith(layer, out, shared, v41RouterConfig{SharedCount: s.M.Cfg.NSharedExperts}, s.v41SharedAddFunc())
 		if err != nil {
-			return compute.Tensor{}, fmt.Errorf("%w: shared add: %v", ErrV4SharedExpert, err)
+			return compute.Tensor{}, fmt.Errorf("%w: shared add: %w", ErrV4SharedExpert, err)
 		}
 		out = combined
 	}

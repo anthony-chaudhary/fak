@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime/debug"
 	"strconv"
 	"strings"
 
@@ -68,8 +69,9 @@ func estimateServeNativeHostLoadPeak(ggufPath string, _ bool, opts []ggufload.Q4
 	return ws.EstimateQ4KHostLoadPeak(false, opts...)
 }
 
-// Streamed-expert loads fail closed while their full host staging peak is
-// unqualified. Ordinary resident routes retain their existing capacity policy.
+// Streamed-expert loads fail closed on any estimate, probe or memory-limit gap, and
+// are admitted only under a Go memory limit equal to the predicted peak. Ordinary
+// resident routes retain their existing capacity policy.
 func serveNativeHostLoadPeakDecision(peak ggufload.HostLoadPeak, estErr error, availBytes int64, availKnown bool, getenv func(string) string, opts ...ggufload.Q4KLoadOption) (gateway.StartupMessage, error) {
 	if serveHostPeakAdmissionDisabled(getenv) {
 		return serveStartupMessage("host-peak-admission", "warning", fmt.Sprintf(
@@ -106,15 +108,41 @@ func serveNativeHostLoadPeakDecision(peak ggufload.HostLoadPeak, estErr error, a
 		return serveStartupMessage("host-peak-admission", "error", err.Error()), fmt.Errorf("fak serve: %w", err)
 	}
 	if streamed {
-		// The streamed estimator is useful refusal evidence, not yet an upper
-		// bound for every loader lifetime: it omits the F32 arena coalescing
-		// copy, tied-head Q8 storage and some transform/retention paths. A
-		// fitting estimate cannot authorize staging until those are qualified.
-		return unavailable("streamed-staging-peak-unqualified", nil)
+		// The streamed estimator charges the arena coalescing copy, tied-head Q8, KV-b buffering
+		// and canonical copies (fak#13798), and a heap-sampled real-loader witness holds the load
+		// under it. The garbage it does not retain (dead dequant buffers, per-upload staging,
+		// per-fault expert strides) is bounded only by a Go memory limit. The limit is the
+		// predicted peak itself, not peak + margin, so GC slack cannot carry RssAnon past the
+		// prediction; the margin stays headroom for non-Go (driver) allocations.
+		limit, ok := serveCapHostPeakMemoryLimit(peak)
+		if !ok {
+			return unavailable("streamed-staging-peak-unqualified", fmt.Errorf("could not install a Go memory limit of the predicted peak"))
+		}
+		return serveStartupMessage("host-peak-admission", "info", fmt.Sprintf(
+			"predicted streamed-expert host peak %s fits %.2f GiB available with a %.2f GiB margin; Go memory limit %.2f GiB bounds unretained staging",
+			serveHostPeakSummary(peak), float64(availBytes)/(1<<30), float64(margin)/(1<<30), float64(limit)/(1<<30))), nil
 	}
 	return serveStartupMessage("host-peak-admission", "info", fmt.Sprintf(
 		"predicted host peak %s fits %.2f GiB available with a %.2f GiB margin",
 		serveHostPeakSummary(peak), float64(availBytes)/(1<<30), float64(margin)/(1<<30))), nil
+}
+
+// serveSetMemoryLimit is debug.SetMemoryLimit, injectable so admission tests never lower the
+// test process's own limit.
+var serveSetMemoryLimit = debug.SetMemoryLimit
+
+// serveCapHostPeakMemoryLimit lowers the Go memory limit to the predicted peak (never raising an
+// operator's lower GOMEMLIMIT) and reports the limit now in force.
+func serveCapHostPeakMemoryLimit(peak ggufload.HostLoadPeak) (int64, bool) {
+	if peak.PeakAnonBytes <= 0 {
+		return 0, false
+	}
+	want := peak.PeakAnonBytes
+	if cur := serveSetMemoryLimit(-1); cur > want {
+		serveSetMemoryLimit(want)
+	}
+	cur := serveSetMemoryLimit(-1)
+	return cur, cur <= want
 }
 
 func serveHostPeakAdmissionDisabled(getenv func(string) string) bool {

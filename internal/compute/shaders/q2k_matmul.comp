@@ -51,7 +51,20 @@ float halfAt(bool second, uint off) {
     return unpackHalf2x16(bits).x;
 }
 
-float q2kDot(bool second, uint row, uint sb, float values[256]) {
+// Input sources for q2kDot. SRC_X reads the invocation's own token slice of X
+// straight from the storage buffer: plainMatMul invocations in one workgroup can
+// belong to different tokens, so they must never stage X through shared memory.
+const int SRC_X = 0;
+const int SRC_FUSED = 1;
+const int SRC_NORMALIZED = 2;
+
+float inputAt(int src, uint xBase, uint i) {
+    if (src == SRC_FUSED) return fusedX[i];
+    if (src == SRC_NORMALIZED) return normalizedX[i];
+    return x[xBase + i];
+}
+
+float q2kDot(bool second, uint row, uint sb, int src, uint xBase) {
     uint base = uint((row * uint(pc.inDim / 256) + sb) * 84u);
     float d = halfAt(second, base + 80u);
     float minVal = halfAt(second, base + 82u);
@@ -73,8 +86,8 @@ float q2kDot(bool second, uint row, uint sb, float values[256]) {
             for (uint lane = 0u; lane < 16u; ++lane) {
                 uint q0 = byteAt(second, qBase0 + lane);
                 uint q1 = byteAt(second, qBase1 + lane);
-                sum += (dl0 * float((q0 >> shift) & 3u) - ml0) * values[valueBase + lane];
-                sum += (dl1 * float((q1 >> shift) & 3u) - ml1) * values[valueBase + 16u + lane];
+                sum += (dl0 * float((q0 >> shift) & 3u) - ml0) * inputAt(src, xBase, valueBase + lane);
+                sum += (dl1 * float((q1 >> shift) & 3u) - ml1) * inputAt(src, xBase, valueBase + 16u + lane);
             }
             shift += 2u;
         }
@@ -99,10 +112,7 @@ void plainMatMul() {
     int blocks = pc.inDim / 256;
     float sum = 0.0;
     for (int sb = 0; sb < blocks; ++sb) {
-        for (uint lane = 0u; lane < 256u; ++lane) {
-            fusedX[lane] = x[uint(token * pc.inDim + sb * 256) + lane];
-        }
-        sum += q2kDot(false, uint(row), uint(sb), fusedX);
+        sum += q2kDot(false, uint(row), uint(sb), SRC_X, uint(token * pc.inDim + sb * 256));
     }
     y[token * pc.outDim + row] = sum;
 }
@@ -118,7 +128,7 @@ void fusedSwiGLUAdd() {
         float gate = x[xBase + tid];
         fusedX[tid] = (gate / (1.0 + exp(-gate))) * u[xBase + tid];
         barrier();
-        if (valid) sum += q2kDot(false, row, uint(sb), fusedX);
+        if (valid) sum += q2kDot(false, row, uint(sb), SRC_FUSED, 0u);
         barrier();
     }
     if (valid) y[row] += sum;
@@ -151,7 +161,7 @@ void fusedRMSNormMatMul2() {
         uint index = uint(sb * 256) + tid;
         normalizedX[tid] = x[index] * inv * normWeight[index];
         barrier();
-        if (validOutput) sum += q2kDot(second, row, uint(sb), normalizedX);
+        if (validOutput) sum += q2kDot(second, row, uint(sb), SRC_NORMALIZED, 0u);
         barrier();
     }
 

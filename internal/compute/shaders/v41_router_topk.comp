@@ -1,0 +1,133 @@
+#version 450
+layout(local_size_x = 1) in;
+
+// One invocation owns one token row: scalar order is deliberate, not a reduction.
+// score = sqrt(softplus(z)); select topK of score+bias, descending, lower expert
+// first on ties; weight = score / (in-order sum [+1e-20 when full]) * scale.
+layout(std430, binding = 0) readonly buffer LogitBuf { float Logits[]; };
+layout(std430, binding = 1) readonly buffer BiasBuf { float Bias[]; };
+layout(std430, binding = 2) writeonly buffer ExpertBuf { uint Experts[]; };
+layout(std430, binding = 3) writeonly buffer WeightBuf { float Weights[]; };
+layout(std430, binding = 4) writeonly buffer StatusBuf { uint Status[]; };
+
+layout(push_constant) uniform Push {
+    int rows;
+    int experts;
+    int topK;
+    int full;
+    int hasBias;
+    float routeScale;
+} pc;
+
+const int MAX_K = 8;
+
+bool finiteValue(float x) {
+    return !isnan(x) && !isinf(x);
+}
+
+void fault(uint row, uint stage, int expert, float value) {
+    uint base = row * 4u;
+    Status[base] = stage;
+    Status[base + 1u] = uint(expert + 1);
+    Status[base + 2u] = floatBitsToUint(value);
+    Status[base + 3u] = 0u;
+}
+
+// log1p(e) for e in [0,1]: log(u) * e / (u - 1) cancels the rounding of u = 1 + e.
+float log1pUnit(float e) {
+    precise float u = 1.0 + e;
+    if (u == 1.0) return e;
+    precise float l = log(u);
+    precise float ratio = e / (u - 1.0);
+    precise float r = l * ratio;
+    return r;
+}
+
+float routerScore(float z) {
+    // Below -20, log1p(e^z) = e^z to F32 precision; sqrt(e^z) = e^(z/2) avoids
+    // underflowing e^z before the root.
+    if (z < -20.0) {
+        precise float h = 0.5 * z;
+        precise float r = exp(h);
+        return r;
+    }
+    precise float a = abs(z);
+    precise float e = exp(-a);
+    precise float sp = max(z, 0.0) + log1pUnit(e);
+    precise float s = sqrt(sp);
+    return s;
+}
+
+float selectionScore(uint row, int expert) {
+    precise float s = routerScore(Logits[row * uint(pc.experts) + uint(expert)]);
+    if (pc.hasBias != 0) {
+        precise float c = s + Bias[expert];
+        return c;
+    }
+    return s;
+}
+
+void main() {
+    uint row = gl_GlobalInvocationID.x;
+    if (row >= uint(pc.rows)) return;
+    uint base = row * 4u;
+    Status[base] = 0u;
+    Status[base + 1u] = 0u;
+    Status[base + 2u] = 0u;
+    Status[base + 3u] = 0u;
+    uint pickBase = row * uint(pc.topK);
+    for (int slot = 0; slot < pc.topK; ++slot) {
+        Experts[pickBase + uint(slot)] = 0u;
+        Weights[pickBase + uint(slot)] = 0.0;
+    }
+
+    // Host order: per expert ascending, logit, score, bias, then selection score.
+    for (int e = 0; e < pc.experts; ++e) {
+        float z = Logits[row * uint(pc.experts) + uint(e)];
+        if (!finiteValue(z)) { fault(row, 1u, e, z); return; }
+        precise float s = routerScore(z);
+        if (!finiteValue(s)) { fault(row, 2u, e, s); return; }
+        if (pc.hasBias != 0) {
+            float b = Bias[e];
+            if (!finiteValue(b)) { fault(row, 3u, e, b); return; }
+            precise float c = s + b;
+            if (!finiteValue(c)) { fault(row, 4u, e, c); return; }
+        }
+    }
+
+    int picked[MAX_K];
+    for (int slot = 0; slot < pc.topK; ++slot) {
+        int best = -1;
+        float bestValue = 0.0;
+        for (int e = 0; e < pc.experts; ++e) {
+            bool taken = false;
+            for (int j = 0; j < slot; ++j) taken = taken || picked[j] == e;
+            if (taken) continue;
+            float c = selectionScore(row, e);
+            // Strict > over an ascending scan keeps the lower expert on ties.
+            if (best < 0 || c > bestValue) { best = e; bestValue = c; }
+        }
+        picked[slot] = best;
+    }
+
+    precise float sum = 0.0;
+    for (int slot = 0; slot < pc.topK; ++slot) {
+        precise float s = routerScore(Logits[row * uint(pc.experts) + uint(picked[slot])]);
+        precise float next = sum + s;
+        sum = next;
+    }
+    if (!finiteValue(sum) || sum < 0.0 || (pc.full == 0 && sum == 0.0)) { fault(row, 5u, -1, sum); return; }
+    precise float denominator = sum;
+    if (pc.full != 0) {
+        precise float d = sum + 1e-20;
+        denominator = d;
+    }
+    for (int slot = 0; slot < pc.topK; ++slot) {
+        precise float s = routerScore(Logits[row * uint(pc.experts) + uint(picked[slot])]);
+        precise float q = s / denominator;
+        precise float w = q * pc.routeScale;
+        if (!finiteValue(w)) { fault(row, 6u, picked[slot], w); return; }
+        Experts[pickBase + uint(slot)] = uint(picked[slot]);
+        Weights[pickBase + uint(slot)] = w;
+    }
+}

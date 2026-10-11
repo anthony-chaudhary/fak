@@ -62,12 +62,20 @@ func (s *Session) v41IndexerScoreGuard() {
 // path changes only the score producer; the existing selectors retain ties,
 // newest-block pinning, masks, -1 sentinels, infinity handling and NaN rejection.
 func v41IndexRowsWithScore(layer int, q, keys, weights []float32, heads, headDim, rows, topKBlocks, blockSize, topK int, score v41IndexerScoreFunc, health v41IndexerScoreHealthFunc) ([]int32, error) {
+	return v41IndexRowsSelected(layer, q, keys, weights, heads, headDim, rows, topKBlocks, blockSize, topK, score, health, nil)
+}
+
+// v41IndexRowsSelected additionally routes the candidate-block mask and final
+// top-k through a selected device index-select seam. That seam owns the same
+// tie order, pinning and -1 sentinels; its failure propagates without a host
+// re-selection (Ref #13668).
+func v41IndexRowsSelected(layer int, q, keys, weights []float32, heads, headDim, rows, topKBlocks, blockSize, topK int, score v41IndexerScoreFunc, health v41IndexerScoreHealthFunc, sel v41IndexSelectFunc) ([]int32, error) {
 	if health != nil {
 		if err := health(layer); err != nil {
 			return nil, v41IndexerScoreOperationErr(layer, err)
 		}
 	}
-	if score == nil {
+	if score == nil && sel == nil {
 		pub, err := NewV41IndexerPublication(layer, q, keys, weights, heads, headDim, rows, topKBlocks, blockSize, topK, 0)
 		if err != nil {
 			return nil, v41StageErr(v41StageIndexer, layer, err)
@@ -77,12 +85,30 @@ func v41IndexRowsWithScore(layer int, q, keys, weights []float32, heads, headDim
 	if layer < 0 || topK < 0 {
 		return nil, v41IndexerScoreOperationErr(layer, fmt.Errorf("%w: invalid index publication layer or top-k", ErrV41ForwardStage))
 	}
-	values, err := score(layer, q, keys, weights, heads, headDim, rows)
-	if err == nil && len(values) != rows {
-		err = errV41IndexerScoreResult
+	var values []float32
+	var err error
+	if score == nil {
+		if values, err = V41IndexerScore(q, keys, weights, heads, headDim, rows); err != nil {
+			return nil, v41StageErr(v41StageIndexer, layer, err)
+		}
+	} else {
+		values, err = score(layer, q, keys, weights, heads, headDim, rows)
+		if err == nil && len(values) != rows {
+			err = errV41IndexerScoreResult
+		}
+		if err != nil {
+			return nil, v41IndexerScoreOperationErr(layer, err)
+		}
 	}
-	if err != nil {
-		return nil, v41IndexerScoreOperationErr(layer, err)
+	if sel != nil {
+		selected, err := sel(layer, values, topK, topKBlocks, blockSize)
+		if err == nil && len(selected) != min(topK, rows) {
+			err = errV41IndexSelectResult
+		}
+		if err != nil {
+			return nil, v41IndexerScoreOperationErr(layer, err)
+		}
+		return selected, nil
 	}
 	var mask []bool
 	if topKBlocks > 0 {

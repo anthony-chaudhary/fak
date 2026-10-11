@@ -222,7 +222,9 @@ func TestV41SharedAttentionVulkan(t *testing.T) {
 				v41AttentionPhysicalNear(t, "contraction", out, want, 2e-5)
 				lastOutput, lastCopy = out, slices.Clone(out)
 				t.Logf("layer=%d mode=%d selected_rows=%v calls=%d nonempty=%d actual=%+v", layer, request.mode, rows, calls, nonempty, observation)
-				return out, nil
+				// The caller owns its row and inverse-rotates it in place (model.py:781);
+				// keep the adapter's buffer private so only device work can change it.
+				return slices.Clone(out), nil
 			}
 			for phase, ids := range [][]int{{1, 2}, {3}, {4}} {
 				openingCalls, openingNonempty := calls, nonempty

@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/projectassets"
+	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
 // fak-test:runtime fast est=250ms
@@ -20,7 +21,7 @@ func TestRunPiUsesSelectedModelWindowEverywhere(t *testing.T) {
 	for _, tc := range []struct {
 		name, health, catalog, configuredModel, explicitModel, explicitWindow string
 		wantModel                                                             string
-		wantWindow                                                            int
+		wantWindow, wantResident                                              int
 	}{
 		{
 			name: "detected custom model", health: "custom",
@@ -46,6 +47,21 @@ func TestRunPiUsesSelectedModelWindowEverywhere(t *testing.T) {
 			name: "configured alias uses smallest matching bound", health: "local", configuredModel: "VENDOR/custom",
 			catalog:   `[{"id":"local","context_length":131072},{"id":"other/custom","context_length":98304},{"id":"custom","context_length":65536}]`,
 			wantModel: "VENDOR/custom", wantWindow: 65536,
+		},
+		{
+			name: "selected window above quality cap", health: "local", explicitModel: "routed",
+			catalog:   `[{"id":"local","context_length":65536},{"id":"routed","context_length":1048576}]`,
+			wantModel: "routed", wantWindow: 1048576,
+		},
+		{
+			name: "cloud qwen route uses router window not qwen prefix row", health: "local", explicitModel: "qwen3.8-max",
+			catalog:   `[{"id":"local","context_length":131072},{"id":"qwen3.8-max","context_length":1048576}]`,
+			wantModel: "qwen3.8-max", wantWindow: 1048576, wantResident: harnesskit.QualityCapTokens,
+		},
+		{
+			name: "halo qwen keeps registry window", health: "local", explicitModel: "Qwen3.8-27B-UD-Q2_K_XL",
+			catalog:   `[{"id":"local","context_length":65536},{"id":"Qwen3.8-27B-UD-Q2_K_XL","context_length":131072}]`,
+			wantModel: "Qwen3.8-27B-UD-Q2_K_XL", wantWindow: 131072,
 		},
 		{
 			name: "known route missing from catalog uses registry", health: "local", configuredModel: "deepseek-v41-flash",
@@ -112,6 +128,9 @@ func TestRunPiUsesSelectedModelWindowEverywhere(t *testing.T) {
 				args = append(args, "--window", tc.explicitWindow)
 			}
 			want := projectassets.PiModelContextBudget(tc.wantModel, tc.wantWindow)
+			if want.ServedWindow != tc.wantWindow || (tc.wantResident > 0 && want.ResidentTarget != tc.wantResident) {
+				t.Fatalf("budget for %s = served %d resident %d, want served %d resident %d", tc.wantModel, want.ServedWindow, want.ResidentTarget, tc.wantWindow, tc.wantResident)
+			}
 			var stdout, stderr bytes.Buffer
 			if code := runPi(&stdout, &stderr, append([]string{"--dry-run"}, args...)); code != 0 {
 				t.Fatalf("dry-run returned %d: %s", code, stderr.String())
@@ -155,8 +174,8 @@ func TestRunPiUsesSelectedModelWindowEverywhere(t *testing.T) {
 			if settings.Compaction.ReserveTokens != want.ReserveTokens || settings.Compaction.KeepRecentTokens != want.KeepRecentTokens {
 				t.Errorf("compaction = %+v, want reserve=%d keep=%d", settings.Compaction, want.ReserveTokens, want.KeepRecentTokens)
 			}
-			if tc.wantWindow == 65536 && (settings.Compaction.ReserveTokens != 12288 || settings.Compaction.KeepRecentTokens != 4096) {
-				t.Errorf("64KiB regression: compaction = %+v, want reserve=12288 keep=4096", settings.Compaction)
+			if tc.wantWindow == 65536 && (settings.Compaction.ReserveTokens != 12288 || settings.Compaction.KeepRecentTokens != 15360) {
+				t.Errorf("64KiB regression: compaction = %+v, want reserve=12288 keep=15360", settings.Compaction)
 			}
 
 			originalRun := piLaunchRun

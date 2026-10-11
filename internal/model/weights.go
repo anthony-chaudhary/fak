@@ -311,6 +311,9 @@ type Model struct {
 	// production default, so ordinary routing performs no extra allocation or accounting.
 	// The observer is diagnostic only and never changes a pick or eviction policy.
 	expertRouteObs ExpertRouteObserver
+	// expertRouteEventObs is the positional twin of expertRouteObs: (layer, token,
+	// phase, experts) per router decision. See expert_route_trace.go.
+	expertRouteEventObs ExpertRouteEventObserver
 
 	// routeObs is the optional per-token MoE expert-routing witness (#2623), the routing
 	// analogue of attnObs (#852): when set via SetRouteObserver, route()/glmRoute() emit a

@@ -132,9 +132,16 @@ func q6kAliasFits(residentBytes, deviceTotal int64) error {
 	return nil
 }
 
+// qwen38MetalQ8RuntimeNames names the Q8 projection band of the resident Metal decode runtime.
+// It admits the exact 64-layer Qwen3.8 hybrid, and any smaller Qwen3.5-family hybrid
+// (e.g. Qwen3.5-4B, 24 linear / 8 full) whose checkpoint declares a full-attention cadence
+// that every layer type follows.
 func qwen38MetalQ8RuntimeNames(cfg Config) ([]string, error) {
-	if cfg.NumLayers != 64 || len(cfg.LayerTypes) != 64 || !cfg.IsQwen35Hybrid() {
-		return nil, &MetalQ8ResidencyUnavailableError{Reason: "runtime is not the exact 64-layer Qwen3.8 hybrid"}
+	if !cfg.IsQwen35Hybrid() {
+		return nil, &MetalQ8ResidencyUnavailableError{Reason: "runtime is not a Qwen3.5-family hybrid"}
+	}
+	if cfg.NumLayers != 64 || len(cfg.LayerTypes) != 64 {
+		return qwen35CadenceQ8RuntimeNames(cfg)
 	}
 	names := make([]string, 0, 272)
 	linear, full := 0, 0
@@ -178,4 +185,37 @@ func buildAllOrNothing[T any](names []string, build func(string) (T, error), rel
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func qwen35CadenceQ8RuntimeNames(cfg Config) ([]string, error) {
+	k := cfg.FullAttentionInterval
+	if k < 2 || cfg.NumLayers <= 0 || cfg.NumLayers > 64 || len(cfg.LayerTypes) != cfg.NumLayers || cfg.NumLayers%k != 0 {
+		return nil, &MetalQ8ResidencyUnavailableError{Reason: "runtime is not the exact 64-layer Qwen3.8 hybrid or a declared-cadence Qwen3.5-family hybrid"}
+	}
+	if cfg.LinearKeyHeadDim != 128 || cfg.LinearValueHeadDim != 128 {
+		return nil, &MetalQ8ResidencyUnavailableError{Reason: fmt.Sprintf("linear-attention head dims %d/%d are not the proven 128/128 GDN geometry", cfg.LinearKeyHeadDim, cfg.LinearValueHeadDim)}
+	}
+	names := make([]string, 0, 5*cfg.NumLayers)
+	for l, kind := range cfg.LayerTypes {
+		lp := func(s string) string { return layerName(l, s) }
+		want := "linear_attention"
+		if (l+1)%k == 0 {
+			want = "full_attention"
+		}
+		if kind != want {
+			return nil, &MetalQ8ResidencyUnavailableError{Reason: fmt.Sprintf("layer %d has type %q, cadence %d wants %q", l, kind, k, want)}
+		}
+		if kind == "full_attention" {
+			names = append(names, lp("self_attn.q_proj.weight"), lp("self_attn.k_proj.weight"))
+			continue
+		}
+		for _, suffix := range []string{
+			"linear_attn.in_proj_qkv.weight", "linear_attn.in_proj_z.weight",
+			"linear_attn.in_proj_b.weight", "linear_attn.in_proj_a.weight",
+			"linear_attn.out_proj.weight",
+		} {
+			names = append(names, lp(suffix))
+		}
+	}
+	return names, nil
 }

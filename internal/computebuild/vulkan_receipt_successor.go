@@ -13,60 +13,65 @@ import (
 	"strings"
 )
 
-// V5 has its own strict envelope; the common alias deliberately does not gain
-// an UnmarshalJSON method or expose successor fields to historical decoders.
-type vulkanBuildReceiptV5Wire struct {
+// Successor receipts have their own strict envelope; the common alias
+// deliberately does not gain an UnmarshalJSON method or expose successor fields
+// to historical decoders. The schema field keeps successors apart.
+type vulkanBuildReceiptSuccessorWire struct {
 	computeBuildReceiptV2Wire
 	ShaderRegistry *VulkanShaderRegistryIdentity `json:"shader_registry,omitempty"`
 	NativeArchive  *BuildArtifact                `json:"native_archive,omitempty"`
 	IndexerScore   *VulkanIndexerScoreContract   `json:"indexer_score_contract,omitempty"`
 }
 
-func decodeStrictVulkanReceiptV5(raw []byte) (ComputeBuildReceipt, error) {
+func successorReceiptWire(receipt *ComputeBuildReceipt) vulkanBuildReceiptSuccessorWire {
+	return vulkanBuildReceiptSuccessorWire{computeBuildReceiptV2Wire: computeBuildReceiptV2Wire(*receipt), ShaderRegistry: receipt.VulkanRegistry, NativeArchive: receipt.VulkanNativeArchive, IndexerScore: receipt.VulkanIndexerScore}
+}
+
+func (r *vulkanSuccessorRegistry) decodeStrict(raw []byte) (ComputeBuildReceipt, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	var wire vulkanBuildReceiptV5Wire
+	var wire vulkanBuildReceiptSuccessorWire
 	if err := dec.Decode(&wire); err != nil {
-		return ComputeBuildReceipt{}, fmt.Errorf("decode Vulkan V5 receipt: %w", err)
+		return ComputeBuildReceipt{}, fmt.Errorf("decode Vulkan %s receipt: %w", r.version, err)
 	}
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
-		return ComputeBuildReceipt{}, fmt.Errorf("decode Vulkan V5 receipt: trailing JSON data")
+		return ComputeBuildReceipt{}, fmt.Errorf("decode Vulkan %s receipt: trailing JSON data", r.version)
 	}
 	receipt := ComputeBuildReceipt(wire.computeBuildReceiptV2Wire)
 	receipt.VulkanRegistry = wire.ShaderRegistry
 	receipt.VulkanNativeArchive = wire.NativeArchive
 	receipt.VulkanIndexerScore = wire.IndexerScore
-	if receipt.Schema != VulkanBuildReceiptSchemaV5 {
-		return ComputeBuildReceipt{}, fmt.Errorf("Vulkan receipt schema mismatch: want %s", VulkanBuildReceiptSchemaV5)
+	if receipt.Schema != r.schema {
+		return ComputeBuildReceipt{}, fmt.Errorf("Vulkan receipt schema mismatch: want %s", r.schema)
 	}
 	return receipt, nil
 }
 
-func validateVulkanReceiptV5Registry(receipt ComputeBuildReceipt) error {
-	expected, err := currentVulkanRegistryV5Identity()
+func (r *vulkanSuccessorRegistry) validateRegistry(receipt ComputeBuildReceipt) error {
+	expected, err := r.identity()
 	if err != nil {
 		return err
 	}
-	if receipt.Schema != VulkanBuildReceiptSchemaV5 || receipt.VulkanRegistry == nil || *receipt.VulkanRegistry != expected {
-		return fmt.Errorf("Vulkan V5 receipt trusted registry identity mismatch")
+	if receipt.Schema != r.schema || receipt.VulkanRegistry == nil || *receipt.VulkanRegistry != expected {
+		return fmt.Errorf("Vulkan %s receipt trusted registry identity mismatch", r.version)
 	}
-	if receipt.Vulkan == nil || receipt.Vulkan.SPIRVModuleCount != vulkanV5ModuleCount {
-		return fmt.Errorf("Vulkan V5 receipt requires exactly %d modules", vulkanV5ModuleCount)
+	if receipt.Vulkan == nil || receipt.Vulkan.SPIRVModuleCount != r.count {
+		return fmt.Errorf("Vulkan %s receipt requires exactly %d modules", r.version, r.count)
 	}
 	return nil
 }
 
-// Validate declared success before comparing identities. This is framing and
-// completeness validation, not authentication; the evidence verifier still
-// observes source, tools, bundle, build plan, and binary independently.
-func validateVulkanReceiptV5Success(receipt *ComputeBuildReceipt) error {
+// validateSuccess checks declared success before comparing identities. This is
+// framing and completeness validation, not authentication; the evidence
+// verifier still observes source, tools, bundle, build plan, and binary.
+func (r *vulkanSuccessorRegistry) validateSuccess(receipt *ComputeBuildReceipt) error {
 	if receipt == nil || receipt.Artifact == nil || receipt.Backend != "vulkan" || receipt.Command != "binary" || receipt.Outcome != "success" || receipt.ExitCode != 0 || receipt.Error != "" || receipt.Artifact.Signed {
-		return fmt.Errorf("Vulkan V5 requires a complete successful binary receipt")
+		return fmt.Errorf("Vulkan %s requires a complete successful binary receipt", r.version)
 	}
 	if receipt.GitCommit != "" || receipt.GitRef != "" || receipt.Clean != nil || receipt.SourceArchiveSHA256 != "" || receipt.ShaderBundleSHA256 != "" || len(receipt.BuildArgs) != 0 || receipt.Toolchain != nil {
-		return fmt.Errorf("Vulkan V5 rejects ambiguous legacy provenance fields")
+		return fmt.Errorf("Vulkan %s rejects ambiguous legacy provenance fields", r.version)
 	}
-	if err := validateVulkanReceiptV5Registry(*receipt); err != nil {
+	if err := r.validateRegistry(*receipt); err != nil {
 		return err
 	}
 	if err := validateVulkanV5Extras(receipt.VulkanNativeArchive, receipt.VulkanIndexerScore); err != nil {
@@ -74,49 +79,49 @@ func validateVulkanReceiptV5Success(receipt *ComputeBuildReceipt) error {
 	}
 	p := receipt.Vulkan
 	if !p.Source.Clean || !validGitObjectID(p.Source.GitCommit) || !validGitObjectID(p.Source.GitTree) || !validLowerSHA256(p.Source.SourceArchiveSHA256) {
-		return fmt.Errorf("Vulkan V5 source identity is incomplete")
+		return fmt.Errorf("Vulkan %s source identity is incomplete", r.version)
 	}
 	if receipt.Artifact.SizeBytes <= 0 || receipt.Artifact.Path == "" || !validLowerSHA256(receipt.Artifact.SHA256) || !validLowerSHA256(p.SPIRVBundleSHA256) || !validLowerSHA256(p.ToolchainSHA256) || !validLowerSHA256(p.BuildCommandSHA256) || !validLowerSHA256(p.StableIdentitySHA256) {
-		return fmt.Errorf("Vulkan V5 artifact or provenance digest is incomplete")
+		return fmt.Errorf("Vulkan %s artifact or provenance digest is incomplete", r.version)
 	}
 	roles := []string{"go", "cc", "cxx", "ar", "glslc"}
 	if len(p.Toolchain) != len(roles) {
-		return fmt.Errorf("Vulkan V5 toolchain identity is incomplete")
+		return fmt.Errorf("Vulkan %s toolchain identity is incomplete", r.version)
 	}
 	for i, tool := range p.Toolchain {
 		if tool.Role != roles[i] || tool.Executable == "" || tool.Executable == "." || tool.Executable == ".." || strings.ContainsAny(tool.Executable, "/\\") || !validLowerSHA256(tool.SHA256) {
-			return fmt.Errorf("Vulkan V5 %s tool identity is invalid", roles[i])
+			return fmt.Errorf("Vulkan %s %s tool identity is invalid", r.version, roles[i])
 		}
 	}
 	if len(p.NormalizedBuildCommand) == 0 {
-		return fmt.Errorf("Vulkan V5 build command is missing")
+		return fmt.Errorf("Vulkan %s build command is missing", r.version)
 	}
 	for _, command := range p.NormalizedBuildCommand {
 		if strings.TrimSpace(command) == "" || strings.ContainsRune(command, '\x00') {
-			return fmt.Errorf("Vulkan V5 build command is invalid")
+			return fmt.Errorf("Vulkan %s build command is invalid", r.version)
 		}
-		// Witness archives and binaries are a separate test profile. V5 binds
-		// only the disarmed production archive and its ordinary compiler plan.
+		// Witness archives and binaries are a separate test profile. A
+		// successor binds only the disarmed production archive and its plan.
 		if strings.Contains(command, "FAK_V41_INDEXER_SCORE_WITNESS") || strings.Contains(command, "v41_indexer_witness") {
-			return fmt.Errorf("Vulkan V5 rejects the test-only indexer witness build profile")
+			return fmt.Errorf("Vulkan %s rejects the test-only indexer witness build profile", r.version)
 		}
 	}
 	commandSHA, err := hashJSON(p.NormalizedBuildCommand)
 	if err != nil || commandSHA != p.BuildCommandSHA256 {
-		return fmt.Errorf("Vulkan V5 build command digest mismatch")
+		return fmt.Errorf("Vulkan %s build command digest mismatch", r.version)
 	}
-	stableSHA, err := vulkanStableIdentityV5SHA(p.Source, p.SPIRVBundleSHA256, p.SPIRVModuleCount, p.ToolchainSHA256, p.BuildCommandSHA256, receipt.Artifact.SHA256, *receipt.VulkanNativeArchive, *receipt.VulkanIndexerScore)
+	stableSHA, err := r.stableIdentitySHA(p.Source, p.SPIRVBundleSHA256, p.SPIRVModuleCount, p.ToolchainSHA256, p.BuildCommandSHA256, receipt.Artifact.SHA256, *receipt.VulkanNativeArchive, *receipt.VulkanIndexerScore)
 	if err != nil || stableSHA != p.StableIdentitySHA256 {
-		return fmt.Errorf("Vulkan V5 stable identity mismatch")
+		return fmt.Errorf("Vulkan %s stable identity mismatch", r.version)
 	}
 	return nil
 }
 
-// Equality is not authentication. Compare every declared identity field and
-// its known digest framing; the evidence verifier independently observes bytes.
-func compareVulkanReceiptProvenanceV5(a, b *ComputeBuildReceipt) error {
+// compareProvenance: equality is not authentication. Compare every declared
+// identity field and its digest framing; the evidence verifier observes bytes.
+func (r *vulkanSuccessorRegistry) compareProvenance(a, b *ComputeBuildReceipt) error {
 	for _, receipt := range []*ComputeBuildReceipt{a, b} {
-		if err := validateVulkanReceiptV5Success(receipt); err != nil {
+		if err := r.validateSuccess(receipt); err != nil {
 			return err
 		}
 	}
@@ -129,18 +134,18 @@ func compareVulkanReceiptProvenanceV5(a, b *ComputeBuildReceipt) error {
 		return err
 	}
 	if *a.VulkanNativeArchive != *b.VulkanNativeArchive || *a.VulkanIndexerScore != *b.VulkanIndexerScore || left != right || a.Artifact.SHA256 != b.Artifact.SHA256 || a.Artifact.SizeBytes != b.Artifact.SizeBytes || a.Artifact.Signed != b.Artifact.Signed {
-		return fmt.Errorf("Vulkan V5 provenance mismatch")
+		return fmt.Errorf("Vulkan %s provenance mismatch", r.version)
 	}
 	return nil
 }
 
-func vulkanStableIdentityV5SHA(source BuildSourceProvenance, spirvSHA string, spirvCount int, toolchainSHA, commandSHA, binarySHA string, archive BuildArtifact, score VulkanIndexerScoreContract) (string, error) {
-	registry, err := currentVulkanRegistryV5Identity()
+func (r *vulkanSuccessorRegistry) stableIdentitySHA(source BuildSourceProvenance, spirvSHA string, spirvCount int, toolchainSHA, commandSHA, binarySHA string, archive BuildArtifact, score VulkanIndexerScoreContract) (string, error) {
+	registry, err := r.identity()
 	if err != nil {
 		return "", err
 	}
-	if spirvCount != vulkanV5ModuleCount {
-		return "", fmt.Errorf("Vulkan V5 stable identity requires %d modules", vulkanV5ModuleCount)
+	if spirvCount != r.count {
+		return "", fmt.Errorf("Vulkan %s stable identity requires %d modules", r.version, r.count)
 	}
 	return hashJSON(struct {
 		Schema             string                       `json:"schema"`
@@ -153,10 +158,10 @@ func vulkanStableIdentityV5SHA(source BuildSourceProvenance, spirvSHA string, sp
 		BinarySHA256       string                       `json:"binary_sha256"`
 		NativeArchive      BuildArtifact                `json:"native_archive"`
 		IndexerScore       VulkanIndexerScoreContract   `json:"indexer_score_contract"`
-	}{VulkanBuildReceiptSchemaV5, registry, source, spirvSHA, spirvCount, toolchainSHA, commandSHA, binarySHA, archive, score})
+	}{r.schema, registry, source, spirvSHA, spirvCount, toolchainSHA, commandSHA, binarySHA, archive, score})
 }
 
-func verifyVulkanBinaryReceiptV5Identity(ctx context.Context, evidence VulkanBinaryReceiptEvidence) (*VulkanBinaryReceiptIdentityVerification, error) {
+func (r *vulkanSuccessorRegistry) verifyIdentity(ctx context.Context, evidence VulkanBinaryReceiptEvidence) (*VulkanBinaryReceiptIdentityVerification, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("verify Vulkan receipt identity: nil context")
 	}
@@ -177,10 +182,10 @@ func verifyVulkanBinaryReceiptV5Identity(ctx context.Context, evidence VulkanBin
 		}
 		defer closeComparisonGit()
 	}
-	return verifyVulkanBinaryReceiptV5IdentityWithRunners(ctx, evidence, gitRun, comparisonGitRun)
+	return r.verifyIdentityWithRunners(ctx, evidence, gitRun, comparisonGitRun)
 }
 
-func verifyVulkanBinaryReceiptV5IdentityWithRunners(ctx context.Context, evidence VulkanBinaryReceiptEvidence, gitRun, comparisonGitRun vulkanGitRunner) (*VulkanBinaryReceiptIdentityVerification, error) {
+func (r *vulkanSuccessorRegistry) verifyIdentityWithRunners(ctx context.Context, evidence VulkanBinaryReceiptEvidence, gitRun, comparisonGitRun vulkanGitRunner) (*VulkanBinaryReceiptIdentityVerification, error) {
 	if evidence.Comparison != nil && evidence.Comparison.Comparison != nil {
 		return nil, fmt.Errorf("verify Vulkan receipt identity: nested comparison evidence is not supported")
 	}
@@ -199,27 +204,27 @@ func verifyVulkanBinaryReceiptV5IdentityWithRunners(ctx context.Context, evidenc
 		}
 	}
 
-	before, err := observeVulkanReceiptEvidenceV5(ctx, evidence, gitRun)
+	before, err := r.observeEvidence(ctx, evidence, gitRun)
 	if err != nil {
 		return nil, err
 	}
-	receipt, err := decodeStrictVulkanReceiptV5(raw)
+	receipt, err := r.decodeStrict(raw)
 	if err != nil {
 		return nil, err
 	}
 
 	var comparisonReceipt *ComputeBuildReceipt
-	var comparisonObservation *observedVulkanReceiptV5Identity
+	var comparisonObservation *observedVulkanReceiptSuccessorIdentity
 	if evidence.Comparison != nil {
-		observed, err := observeVulkanReceiptEvidenceV5(ctx, *evidence.Comparison, comparisonGitRun)
+		observed, err := r.observeEvidence(ctx, *evidence.Comparison, comparisonGitRun)
 		if err != nil {
 			return nil, fmt.Errorf("verify comparison Vulkan receipt identity: %w", err)
 		}
-		decoded, err := decodeStrictVulkanReceiptV5(comparisonRaw)
+		decoded, err := r.decodeStrict(comparisonRaw)
 		if err != nil {
 			return nil, fmt.Errorf("verify comparison Vulkan receipt identity: %w", err)
 		}
-		if err := compareReceiptV5ToObservation(decoded, observed); err != nil {
+		if err := r.compareToObservation(decoded, observed); err != nil {
 			return nil, fmt.Errorf("verify comparison Vulkan receipt identity: %w", err)
 		}
 		if err := verifyBaselineReproducibility(decoded); err != nil {
@@ -229,7 +234,7 @@ func verifyVulkanBinaryReceiptV5IdentityWithRunners(ctx context.Context, evidenc
 		comparisonObservation = &observed
 	}
 
-	if err := compareReceiptV5ToObservation(receipt, before); err != nil {
+	if err := r.compareToObservation(receipt, before); err != nil {
 		return nil, err
 	}
 	if evidence.Comparison == nil {
@@ -240,19 +245,19 @@ func verifyVulkanBinaryReceiptV5IdentityWithRunners(ctx context.Context, evidenc
 		return nil, err
 	}
 
-	after, err := observeVulkanReceiptEvidenceV5(ctx, evidence, gitRun)
+	after, err := r.observeEvidence(ctx, evidence, gitRun)
 	if err != nil {
 		return nil, fmt.Errorf("revalidate Vulkan receipt evidence: %w", err)
 	}
-	if !sameObservedVulkanV5Identity(before, after) {
+	if !sameObservedVulkanSuccessorIdentity(before, after) {
 		return nil, fmt.Errorf("Vulkan receipt evidence changed during verification")
 	}
 	if evidence.Comparison != nil {
-		comparisonAfter, err := observeVulkanReceiptEvidenceV5(ctx, *evidence.Comparison, comparisonGitRun)
+		comparisonAfter, err := r.observeEvidence(ctx, *evidence.Comparison, comparisonGitRun)
 		if err != nil {
 			return nil, fmt.Errorf("revalidate comparison Vulkan receipt evidence: %w", err)
 		}
-		if !sameObservedVulkanV5Identity(*comparisonObservation, comparisonAfter) {
+		if !sameObservedVulkanSuccessorIdentity(*comparisonObservation, comparisonAfter) {
 			return nil, fmt.Errorf("comparison Vulkan receipt evidence changed during verification")
 		}
 	}
@@ -265,49 +270,49 @@ func verifyVulkanBinaryReceiptV5IdentityWithRunners(ctx context.Context, evidenc
 	}, nil
 }
 
-func observeVulkanReceiptEvidenceV5(ctx context.Context, evidence VulkanBinaryReceiptEvidence, gitRun vulkanGitRunner) (observedVulkanReceiptV5Identity, error) {
+func (r *vulkanSuccessorRegistry) observeEvidence(ctx context.Context, evidence VulkanBinaryReceiptEvidence, gitRun vulkanGitRunner) (observedVulkanReceiptSuccessorIdentity, error) {
 	if evidence.Comparison != nil && evidence.Comparison.ReceiptPath == evidence.ReceiptPath {
-		return observedVulkanReceiptV5Identity{}, fmt.Errorf("comparison receipt must be distinct")
+		return observedVulkanReceiptSuccessorIdentity{}, fmt.Errorf("comparison receipt must be distinct")
 	}
-	if err := validateCurrentVulkanRegistryV5(evidence.ExpectedSPIRVModules); err != nil {
-		return observedVulkanReceiptV5Identity{}, err
+	if err := r.validateStems(evidence.ExpectedSPIRVModules); err != nil {
+		return observedVulkanReceiptSuccessorIdentity{}, err
 	}
 	gitSHA, _, err := stableRegularFileSHA256(evidence.GitExecutable, "Git executable")
 	if err != nil {
-		return observedVulkanReceiptV5Identity{}, err
+		return observedVulkanReceiptSuccessorIdentity{}, err
 	}
 	if !validLowerSHA256(evidence.ExpectedGitSHA256) || gitSHA != evidence.ExpectedGitSHA256 {
-		return observedVulkanReceiptV5Identity{}, fmt.Errorf("policy-pinned Git executable identity mismatch")
+		return observedVulkanReceiptSuccessorIdentity{}, fmt.Errorf("policy-pinned Git executable identity mismatch")
 	}
 	source, err := prepareVulkanSourceWithGit(ctx, gitRun, evidence.SourceRoot, evidence.ExpectedCommit)
 	if err != nil {
-		return observedVulkanReceiptV5Identity{}, err
+		return observedVulkanReceiptSuccessorIdentity{}, err
 	}
 	artifactSHA, artifactSize, err := stableRegularFileSHA256(evidence.BinaryPath, "sealed mapped executable")
 	if err != nil {
-		return observedVulkanReceiptV5Identity{}, err
+		return observedVulkanReceiptSuccessorIdentity{}, err
 	}
 	if !validLowerSHA256(evidence.ExpectedBinarySHA256) || artifactSHA != evidence.ExpectedBinarySHA256 || artifactSize != evidence.ExpectedBinarySize || artifactSize <= 0 {
-		return observedVulkanReceiptV5Identity{}, fmt.Errorf("sealed mapped executable identity mismatch")
+		return observedVulkanReceiptSuccessorIdentity{}, fmt.Errorf("sealed mapped executable identity mismatch")
 	}
-	spirvSHA, spirvCount, score, err := hashCurrentSPIRVBundleV5(evidence.SPIRVRoot)
+	spirvSHA, spirvCount, score, err := r.hashBundle(evidence.SPIRVRoot)
 	if err != nil {
-		return observedVulkanReceiptV5Identity{}, err
+		return observedVulkanReceiptSuccessorIdentity{}, err
 	}
 	toolchain, toolchainSHA, err := strictVulkanToolchainIdentity(evidence.Tools)
 	if err != nil {
-		return observedVulkanReceiptV5Identity{}, err
+		return observedVulkanReceiptSuccessorIdentity{}, err
 	}
 	if evidence.BuildPlan.OutPackage != "./cmd/fak" {
-		return observedVulkanReceiptV5Identity{}, fmt.Errorf("trusted Vulkan build plan must target ./cmd/fak")
+		return observedVulkanReceiptSuccessorIdentity{}, fmt.Errorf("trusted Vulkan build plan must target ./cmd/fak")
 	}
 	repoRoot, err := strictAbsoluteDirectory(evidence.SourceRoot, "Vulkan source root")
 	if err != nil {
-		return observedVulkanReceiptV5Identity{}, err
+		return observedVulkanReceiptSuccessorIdentity{}, err
 	}
 	expectedPkg := filepath.Join(repoRoot, "internal", "compute")
 	if !samePath(evidence.BuildPlan.PackageDir, expectedPkg) {
-		return observedVulkanReceiptV5Identity{}, fmt.Errorf("trusted Vulkan package directory must be source-root/internal/compute")
+		return observedVulkanReceiptSuccessorIdentity{}, fmt.Errorf("trusted Vulkan package directory must be source-root/internal/compute")
 	}
 	tc := evidence.Tools.toolchain()
 	commands, commandSHA, err := normalizedVulkanBuildCommand(&VulkanConfig{
@@ -319,21 +324,21 @@ func observeVulkanReceiptEvidenceV5(ctx context.Context, evidence VulkanBinaryRe
 		Toolchain: tc,
 	})
 	if err != nil {
-		return observedVulkanReceiptV5Identity{}, err
+		return observedVulkanReceiptSuccessorIdentity{}, err
 	}
 	archive, err := observeVulkanNativeArchiveV5(repoRoot)
 	if err != nil {
-		return observedVulkanReceiptV5Identity{}, err
+		return observedVulkanReceiptSuccessorIdentity{}, err
 	}
-	stableSHA, err := vulkanStableIdentityV5SHA(source, spirvSHA, spirvCount, toolchainSHA, commandSHA, artifactSHA, archive, score)
+	stableSHA, err := r.stableIdentitySHA(source, spirvSHA, spirvCount, toolchainSHA, commandSHA, artifactSHA, archive, score)
 	if err != nil {
-		return observedVulkanReceiptV5Identity{}, err
+		return observedVulkanReceiptSuccessorIdentity{}, err
 	}
 	gitAfterSHA, _, err := stableRegularFileSHA256(evidence.GitExecutable, "Git executable")
 	if err != nil || gitAfterSHA != gitSHA {
-		return observedVulkanReceiptV5Identity{}, fmt.Errorf("Git executable changed during verification")
+		return observedVulkanReceiptSuccessorIdentity{}, fmt.Errorf("Git executable changed during verification")
 	}
-	return observedVulkanReceiptV5Identity{
+	return observedVulkanReceiptSuccessorIdentity{
 		NativeArchive: archive, IndexerScore: score,
 		observedVulkanReceiptIdentity: observedVulkanReceiptIdentity{
 			ReceiptPath:       filepath.Clean(evidence.ReceiptPath),
@@ -346,12 +351,12 @@ func observeVulkanReceiptEvidenceV5(ctx context.Context, evidence VulkanBinaryRe
 		}}, nil
 }
 
-func hashCurrentSPIRVBundleV5(root string) (string, int, VulkanIndexerScoreContract, error) {
+func (r *vulkanSuccessorRegistry) hashBundle(root string) (string, int, VulkanIndexerScoreContract, error) {
 	root, err := strictAbsoluteDirectory(root, "runtime SPIR-V root")
 	if err != nil {
 		return "", 0, VulkanIndexerScoreContract{}, err
 	}
-	expectedStems := CurrentVulkanShaderRegistryV5()
+	expectedStems := r.stems()
 	expected := make(map[string]struct{}, len(expectedStems))
 	for _, stem := range expectedStems {
 		if stem == "" || filepath.Base(stem) != stem || filepath.Ext(stem) != "" {
@@ -390,12 +395,12 @@ func hashCurrentSPIRVBundleV5(root string) (string, int, VulkanIndexerScoreContr
 	return hex.EncodeToString(h.Sum(nil)), len(entriesBefore), score, nil
 }
 
-func compareReceiptV5ToObservation(receipt ComputeBuildReceipt, observed observedVulkanReceiptV5Identity) error {
-	if err := validateVulkanReceiptV5Success(&receipt); err != nil {
+func (r *vulkanSuccessorRegistry) compareToObservation(receipt ComputeBuildReceipt, observed observedVulkanReceiptSuccessorIdentity) error {
+	if err := r.validateSuccess(&receipt); err != nil {
 		return err
 	}
 	if *receipt.VulkanNativeArchive != observed.NativeArchive || *receipt.VulkanIndexerScore != observed.IndexerScore {
-		return fmt.Errorf("Vulkan V5 native archive or indexer score contract mismatch")
+		return fmt.Errorf("Vulkan %s native archive or indexer score contract mismatch", r.version)
 	}
 	if !samePath(receipt.ReceiptPath, observed.ReceiptPath) {
 		return fmt.Errorf("Vulkan receipt snapshot path mismatch")
@@ -421,16 +426,16 @@ func compareReceiptV5ToObservation(receipt ComputeBuildReceipt, observed observe
 	return nil
 }
 
-// compareVulkanBuildReceiptV5 compares a current build only within V5. This
-// comparison is build reproducibility metadata, not independent authentication
-// of a historical receipt; that requires the evidence verifier above.
-func compareVulkanBuildReceiptV5(path string, artifact *BuildArtifact, provenance *VulkanBuildProvenance, registry *VulkanShaderRegistryIdentity, archive *BuildArtifact, score *VulkanIndexerScoreContract) (*BuildReproducibility, error) {
+// compareBuildReceipt compares a current build only within one successor
+// schema. This is build reproducibility metadata, not independent
+// authentication of a historical receipt; that requires the verifier above.
+func (r *vulkanSuccessorRegistry) compareBuildReceipt(path string, artifact *BuildArtifact, provenance *VulkanBuildProvenance, registry *VulkanShaderRegistryIdentity, archive *BuildArtifact, score *VulkanIndexerScoreContract) (*BuildReproducibility, error) {
 	current := ComputeBuildReceipt{
-		Schema: VulkanBuildReceiptSchemaV5, Backend: "vulkan", Command: "binary", Outcome: "success",
+		Schema: r.schema, Backend: "vulkan", Command: "binary", Outcome: "success",
 		Artifact: artifact, Vulkan: provenance, VulkanRegistry: registry, VulkanNativeArchive: archive, VulkanIndexerScore: score,
 	}
-	if err := validateVulkanReceiptV5Success(&current); err != nil {
-		return &BuildReproducibility{Status: "invalid"}, fmt.Errorf("current Vulkan V5 build evidence: %w", err)
+	if err := r.validateSuccess(&current); err != nil {
+		return &BuildReproducibility{Status: "invalid"}, fmt.Errorf("current Vulkan %s build evidence: %w", r.version, err)
 	}
 	if path == "" {
 		return &BuildReproducibility{Status: "baseline"}, nil
@@ -439,18 +444,18 @@ func compareVulkanBuildReceiptV5(path string, artifact *BuildArtifact, provenanc
 	if err != nil {
 		return &BuildReproducibility{Status: "invalid"}, err
 	}
-	raw, err := readStableRegularFile(path, "comparison Vulkan V5 receipt")
+	raw, err := readStableRegularFile(path, "comparison Vulkan "+r.version+" receipt")
 	if err != nil {
 		return &BuildReproducibility{Status: "invalid"}, err
 	}
 	digest := sha256.Sum256(raw)
 	rep := &BuildReproducibility{Status: "mismatch", ComparedReceiptSHA256: hex.EncodeToString(digest[:])}
-	prior, err := decodeStrictVulkanReceiptV5(raw)
+	prior, err := r.decodeStrict(raw)
 	if err != nil {
 		rep.Status = "invalid"
 		return rep, err
 	}
-	if err := validateVulkanReceiptV5Success(&prior); err != nil {
+	if err := r.validateSuccess(&prior); err != nil {
 		rep.Status = "invalid"
 		return rep, err
 	}
@@ -482,22 +487,22 @@ func compareVulkanBuildReceiptV5(path string, artifact *BuildArtifact, provenanc
 	return rep, nil
 }
 
-type observedVulkanReceiptV5Identity struct {
+type observedVulkanReceiptSuccessorIdentity struct {
 	observedVulkanReceiptIdentity
 	NativeArchive BuildArtifact
 	IndexerScore  VulkanIndexerScoreContract
 }
 
-func sameObservedVulkanV5Identity(a, b observedVulkanReceiptV5Identity) bool {
+func sameObservedVulkanSuccessorIdentity(a, b observedVulkanReceiptSuccessorIdentity) bool {
 	return a.NativeArchive == b.NativeArchive && a.IndexerScore == b.IndexerScore && sameObservedVulkanIdentity(a.observedVulkanReceiptIdentity, b.observedVulkanReceiptIdentity)
 }
 
-func finalizeVulkanBinaryV5(cfg *VulkanConfig, source BuildSourceProvenance, outBinPath string, expectedTools []BuildToolIdentity, expectedToolchainSHA string) (*BuildArtifact, *VulkanBuildProvenance, *BuildArtifact, *VulkanIndexerScoreContract, error) {
+func (r *vulkanSuccessorRegistry) finalizeBinary(cfg *VulkanConfig, source BuildSourceProvenance, outBinPath string, expectedTools []BuildToolIdentity, expectedToolchainSHA string) (*BuildArtifact, *VulkanBuildProvenance, *BuildArtifact, *VulkanIndexerScoreContract, error) {
 	binarySHA, binarySize, err := stableRegularFileSHA256(outBinPath, "Vulkan output binary")
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	spirvSHA, spirvCount, score, err := hashCurrentSPIRVBundleV5(filepath.Join(cfg.RepoRoot, "internal", "compute", "spirv"))
+	spirvSHA, spirvCount, score, err := r.hashBundle(filepath.Join(cfg.RepoRoot, "internal", "compute", "spirv"))
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -516,7 +521,7 @@ func finalizeVulkanBinaryV5(cfg *VulkanConfig, source BuildSourceProvenance, out
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	stableSHA, err := vulkanStableIdentityV5SHA(source, spirvSHA, spirvCount, toolchainSHA, commandSHA, binarySHA, archive, score)
+	stableSHA, err := r.stableIdentitySHA(source, spirvSHA, spirvCount, toolchainSHA, commandSHA, binarySHA, archive, score)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

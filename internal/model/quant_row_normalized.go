@@ -62,6 +62,13 @@ func Qwen35RowNormalizedProjection(cfg Config, canon string) bool {
 // q/k projection in the Q8 store. Native row residency must stay off for that topology.
 func Qwen38ExactMetalQ8Runtime(cfg Config) bool {
 	_, err := qwen38MetalQ8RuntimeNames(cfg)
+	return err == nil && cfg.NumLayers == 64
+}
+
+// Qwen35MetalQ8DecodeRuntime reports whether cfg can take the resident Metal decode runtime,
+// which serves every linear_attn and full-attention q/k projection from the Q8 store.
+func Qwen35MetalQ8DecodeRuntime(cfg Config) bool {
+	_, err := qwen38MetalQ8RuntimeNames(cfg)
 	return err == nil
 }
 

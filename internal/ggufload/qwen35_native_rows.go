@@ -2,6 +2,7 @@ package ggufload
 
 import (
 	"fmt"
+	"runtime"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -15,6 +16,11 @@ import (
 // an independent run of 256-weight super-blocks) yields exactly the bytes that dequantize to the
 // normalized tensor — no requantization. The row map is DERIVED from the float normalizer itself
 // (qwen35CanonicalRowSource) so there is one copy of the permutation math.
+
+// metalDecodeRuntimeHost is true where the resident Metal decode runtime can run. There its
+// one-command-buffer decode (measured 6.6 -> 23.5 tok/s on Qwen3.5-4B, M3 Pro) outranks the
+// native-row memory saving, so declared-cadence hybrids keep the Q8 store by default.
+var metalDecodeRuntimeHost = runtime.GOOS == "darwin" && runtime.GOARCH == "arm64"
 
 // qwen35NativeRowResident is the ONE predicate, shared by computeQ4KTensorWork and
 // EstimateQ4KLoadMemoryPlan, deciding whether a tensor takes the native-row route instead of
@@ -44,6 +50,9 @@ func qwen35NativeRowResident(cfg model.Config, canon string, t TensorType, shape
 		return false
 	}
 	if model.Qwen38ExactMetalQ8Runtime(cfg) {
+		return false
+	}
+	if !o.nativeRowsForced && metalDecodeRuntimeHost && model.Qwen35MetalQ8DecodeRuntime(cfg) {
 		return false
 	}
 	return model.Qwen35RowNormalizedProjection(cfg, canon)

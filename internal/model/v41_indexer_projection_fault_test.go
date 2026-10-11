@@ -146,7 +146,10 @@ func TestV41IndexerProjectionUnknownAndClosedPanicIdentity(t *testing.T) {
 			if !reflect.DeepEqual(before, captureV41ForwardSnapshot(s.v41Forward)) {
 				t.Fatal("unknown indexer panic changed retained state")
 			}
-			if s.BackendSessionClosed() != closed {
+			// The selected boundary closes on any failure while preserving the
+			// panic identity; an already-closed latch keeps priority.
+			var latch *BackendForwardOperationError
+			if !s.BackendSessionClosed() || !errors.As(s.halFailure, &latch) || (closed && s.halFailure != cause) {
 				t.Fatal("unknown panic changed Session closure priority")
 			}
 		})

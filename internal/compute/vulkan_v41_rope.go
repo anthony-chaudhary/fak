@@ -96,6 +96,67 @@ func (v *vulkanBackend) V41TailRoPEQK(q, kv, sinCos Tensor, heads, headDim, rota
 	return makeTensor(v, F32, RowMajor, []int{heads, headDim}, nil, qBuf), makeTensor(v, F32, RowMajor, []int{headDim}, nil, kvBuf), nil
 }
 
+var _ V41TailRoPERowsBackend = (*vulkanBackend)(nil)
+
+// The row panel reuses the mandatory tail-RoPE pipeline, so its capability is
+// exactly that module's presence; no separate SPIR-V module exists.
+func (v *vulkanBackend) V41TailRoPERowsAvailable() bool { return v.SupportsV41TailRoPE() }
+
+// V41TailRoPERows dispatches the tail-RoPE kernel over x with x's first row
+// bound as the read-only paired input. That pair writes a discard allocation
+// released through fvk_free, which parks it until an open batch flushes.
+func (v *vulkanBackend) V41TailRoPERows(x, sinCos Tensor, rows, headDim, rotaryDim int) (out Tensor, err error) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	var outBuf, discard *vulkanBuf
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = ClassifyVulkanPanic(recovered, "V41TailRoPERows")
+		}
+		release := []*vulkanBuf{discard}
+		if err != nil {
+			release = append(release, outBuf)
+			out = Tensor{}
+		}
+		for _, b := range release {
+			if b != nil && b.ptr != nil {
+				C.fvk_free(b.ptr)
+				b.ptr = nil
+				b.n = 0
+			}
+		}
+	}()
+	if v == nil || C.fvk_have_v41_tail_rope_qk() == 0 {
+		return Tensor{}, vulkanV41RoPERowsStatusError(3)
+	}
+	xBytes, tableBytes, validationErr := validateV41TailRoPERows(x, sinCos, rows, headDim, rotaryDim)
+	if validationErr != nil {
+		return Tensor{}, &BackendError{Backend: "vulkan", Site: "V41TailRoPERows", Class: VulkanClassInvalidGeometry, Err: ErrVulkanInvalidGeometry, Message: validationErr.Error()}
+	}
+	for _, operand := range []struct {
+		name  string
+		t     Tensor
+		bytes int
+	}{
+		{"x", x, xBytes}, {"sinCos", sinCos, tableBytes},
+	} {
+		b, ok := operand.t.buf.(*vulkanBuf)
+		if operand.t.be != v || !ok || b == nil || b.ptr == nil || b.n < operand.bytes || b.scalePtr != nil || len(b.q8Chunks) != 0 {
+			return Tensor{}, &BackendError{Backend: "vulkan", Site: "V41TailRoPERows", Class: VulkanClassInvalidGeometry, Err: ErrVulkanInvalidGeometry, Message: operand.name + " must be a live, full-sized F32 buffer owned by this backend"}
+		}
+	}
+	if status := int(C.fvk_submission_status()); status != 0 {
+		return Tensor{}, vulkanV41RoPERowsStatusError(status)
+	}
+	outBuf = v.dallocForClass(xBytes, MemoryActivation, "V4.1 RoPE rows output")
+	discard = v.dallocForClass(headDim*4, MemoryActivation, "V4.1 RoPE rows discard")
+	xb := x.buf.(*vulkanBuf)
+	if status := v41TailRoPEQKStatusLocked(xb, xb, outBuf, discard, sinCos.buf.(*vulkanBuf), rows, headDim, rotaryDim); status != 0 {
+		return Tensor{}, vulkanV41RoPERowsStatusError(status)
+	}
+	return makeTensor(v, F32, RowMajor, []int{rows, headDim}, nil, outBuf), nil
+}
+
 // Caller holds vulkanMu and owns the live handles. Keeping this adapter separate
 // lets the native rejection witness exercise the actual alias/extent checks.
 func v41TailRoPEQKStatusLocked(q, kv, qOut, kvOut, sinCos *vulkanBuf, heads, headDim, rotaryDim int) int {
@@ -113,4 +174,10 @@ func vulkanV41RoPEStatusError(status int) *BackendError {
 		class, cause = VulkanClassInvalidGeometry, ErrVulkanInvalidGeometry
 	}
 	return &BackendError{Backend: "vulkan", Site: "V41TailRoPEQK", Class: class, Err: cause, Message: fmt.Sprintf("dedicated tail RoPE failed closed (code %d)", status)}
+}
+
+func vulkanV41RoPERowsStatusError(status int) *BackendError {
+	err := vulkanV41RoPEStatusError(status)
+	err.Site = "V41TailRoPERows"
+	return err
 }

@@ -235,6 +235,21 @@ func TestV41MHCProjectionDefaultExportedLedger(t *testing.T) {
 	}
 }
 
+// v41MHCSignedQ2Fixture rescales the shared Q2_K fixture (d=1, min=0) to
+// signed weights near the F32 fixture's scale. The shared fixture's weights
+// reach 45, so every post coefficient saturates at 2 and the HC streams
+// become bit-identical after layer one, hiding stream independence.
+func v41MHCSignedQ2Fixture(out, in int, seed uint64) *kQuantTensor {
+	q := q2kFixtureTensor(out, in, seed)
+	const f16OneSixtyFourth = 0x2400
+	for b := 0; b < out*q.nblk; b++ {
+		blk := q.raw[b*q2kBlockBytes:]
+		binary.LittleEndian.PutUint16(blk[80:], f16OneSixtyFourth)
+		binary.LittleEndian.PutUint16(blk[82:], f16OneSixtyFourth)
+	}
+	return q
+}
+
 func v41MHCProjVariant(t *testing.T, dtype string, transposed, reduced bool, layers int) *Model {
 	t.Helper()
 	m := v41RawFullFlattenedMHC(t)
@@ -278,7 +293,7 @@ func v41MHCProjVariant(t *testing.T, dtype string, transposed, reduced bool, lay
 				if m.kqw == nil {
 					m.kqw = map[string]*kQuantTensor{}
 				}
-				m.kqw[name] = q2kFixtureTensor(24, in, uint64(136681020+2*layer+phase))
+				m.kqw[name] = v41MHCSignedQ2Fixture(24, in, uint64(136681020+2*layer+phase))
 				delete(m.manifest, name)
 				continue
 			}

@@ -473,6 +473,7 @@ func (s *Server) debitServedSessionTurn(ctx context.Context, turn servedSessionT
 // did); it fills TTFT for a proxied stream whose planner reports no Timings.
 func (s *Server) accountStreamedTurn(ctx context.Context, turn servedSessionTurn, comp *agent.Completion, messages []agent.Message, began time.Time, reqModel string, streamTTFT time.Duration) {
 	s.metrics.observeCompletionServedStreamFrom(perfSourceFrom(ctx), s.chatServingLocality(ctx, reqModel), comp, time.Since(began), streamTTFT)
+	s.noteDeadlineResidency(ctx, comp)
 	s.observePlannerRequestMemory()
 	s.debitServedSessionTurn(ctx, turn, comp.Usage, time.Since(began), messages)
 }

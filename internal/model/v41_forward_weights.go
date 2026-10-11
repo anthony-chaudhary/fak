@@ -50,6 +50,10 @@ type v41ProjScratch struct {
 	sharedActivation v41SharedActivationFunc
 	tailRoPE         v41TailRoPEFunc
 	sharedAttention  v41SharedAttentionFunc
+	routerTopK       v41RouterTopKFunc
+	routedSum        v41RoutedSumFunc
+	sharedAdd        v41SharedAddFunc
+	gatherOps        *v41DeviceGatherOps
 
 	// exp1/exp3/exp2 are the REUSED materialization targets for one routed
 	// expert's three projections (ffn.experts.<e>.w1/w3/w2.weight). They were
@@ -1072,20 +1076,23 @@ func v41MHCProjectFull(wMix []float32, streams [][]float32, H int, eps float32, 
 		ss += v * v
 	}
 	rsqrt := float32(1 / math.Sqrt(float64(ss/float32(len(xflat))+eps)))
+	// Share fdot's reduction with matRows and the selected device MatMul. A
+	// serial sum differs in the last F32 bit, which the downstream BF16 stream
+	// boundaries amplify into host/device parity drift (#13797).
 	mixes := make([]float32, v41MHCMixWidth)
+	var column []float32
+	if transposed {
+		column = make([]float32, flatWidth)
+	}
 	for m := 0; m < v41MHCMixWidth; m++ {
-		var s float32
+		row := wMix[m*flatWidth : (m+1)*flatWidth]
 		if transposed {
-			for i := 0; i < flatWidth; i++ {
-				s += wMix[i*v41MHCMixWidth+m] * xflat[i]
+			for i := range column {
+				column[i] = wMix[i*v41MHCMixWidth+m]
 			}
-		} else {
-			row := wMix[m*flatWidth : (m+1)*flatWidth]
-			for i := 0; i < flatWidth; i++ {
-				s += row[i] * xflat[i]
-			}
+			row = column
 		}
-		mixes[m] = s * rsqrt
+		mixes[m] = fdot(row, xflat) * rsqrt
 	}
 	return mixes, nil
 }

@@ -1,0 +1,243 @@
+#version 450
+layout(local_size_x = 64) in;
+
+// DeepSeek V4.1 mHC stream operations over row panels. Every mode reads and
+// writes binary32 storage; residual publications are rounded to BF16 with the
+// same integer round-to-nearest-even as the host (model.v41RoundBF16).
+//
+// mode 0 initial: A=x[rows,H]                      -> Out[rows,4,H]
+// mode 1 split:   A=mixes[rows,24] B=scale[3] C=base[24] -> Out=coeffs[rows,24]
+// mode 2 pre:     A=streams[rows,4,H] B=coeffs[rows,24]  -> Out[rows,H]
+// mode 3 post:    A=x[rows,H] B=streams[rows,4,H] C=coeffs[rows,24] -> Out[rows,4,H]
+// mode 4 rms-split: A=raw mixes[rows,24] B=streams[rows,4,H] C=scale[3]|base[24]
+//                   -> Out=coeffs[rows,24]; mixes are first scaled by the flattened
+//                   streams' 1/sqrt(mean(x^2)+rmsEps), summed serially as the host does.
+// coeffs rows are pre[4] | post[4] | comb[16] (comb row-major [src,dst]).
+layout(std430, binding = 0) readonly buffer ABuf { float A[]; };
+layout(std430, binding = 1) readonly buffer BBuf { float B[]; };
+layout(std430, binding = 2) readonly buffer CBuf { float C[]; };
+layout(std430, binding = 3) writeonly buffer OutBuf { float Out[]; };
+
+layout(push_constant) uniform Push {
+    int mode;
+    int rows;
+    int hidden;
+    int iters;
+    float eps;
+    float rmsEps;
+} pc;
+
+float bf16(float v) {
+    uint bits = floatBitsToUint(v);
+    bits += 0x7fffu + ((bits >> 16) & 1u);
+    return uintBitsToFloat(bits & 0xffff0000u);
+}
+
+// Correctly rounded binary32 quotient for finite, normal operands: one Newton
+// step on the reciprocal, then one residual correction (Markstein).
+float divRN(float a, float b) {
+    precise float y = 1.0 / b;
+    precise float e = fma(-b, y, 1.0);
+    precise float y1 = fma(e, y, y);
+    precise float q = a * y1;
+    precise float r = fma(-b, q, a);
+    precise float out1 = fma(r, y1, q);
+    return out1;
+}
+
+// Cody-Waite reduction and the Cephes expf polynomial (about 1 ulp), so the
+// result tracks the host's float32(math.Exp(float64(x))) without the
+// range-dependent error of exp2(x*log2e).
+float expF32(float x) {
+    if (x > 88.72283935546875) return uintBitsToFloat(0x7f800000u);
+    if (x < -103.97207641601562) return 0.0;
+    precise float n = roundEven(x * 1.4426950408889634);
+    precise float r0 = fma(n, -0.693359375, x);
+    precise float r = fma(n, 2.12194440e-4, r0);
+    precise float p = 1.9875691500e-4;
+    p = fma(p, r, 1.3981999507e-3);
+    p = fma(p, r, 8.3334519073e-3);
+    p = fma(p, r, 4.1665795894e-2);
+    p = fma(p, r, 1.6666665459e-1);
+    p = fma(p, r, 5.0000001201e-1);
+    precise float rr = r * r;
+    precise float poly = fma(p, rr, r);
+    precise float e = poly + 1.0;
+    int k = int(n);
+    // Split the scale so 2^k never overflows before the product rounds.
+    if (k > 127) {
+        e = e * 2.0;
+        k -= 1;
+    }
+    if (k < -126) {
+        precise float tiny = e * uintBitsToFloat(0x00800000u);
+        return tiny * exp2(float(k + 126));
+    }
+    return e * uintBitsToFloat(uint(k + 127) << 23);
+}
+
+float sigmoidF32(float x) {
+    precise float e = expF32(-x);
+    precise float d = 1.0 + e;
+    if (isinf(d)) return 0.0;
+    return divRN(1.0, d);
+}
+
+void initialStreams(uint i) {
+    uint H = uint(pc.hidden);
+    uint total = uint(pc.rows) * H;
+    if (i >= total) return;
+    uint row = i / H;
+    uint d = i - row * H;
+    float v = bf16(A[i]);
+    uint base = row * 4u * H + d;
+    for (uint h = 0u; h < 4u; ++h) Out[base + h * H] = v;
+}
+
+void splitCore(uint m, float mix[24], float sc[3], float bs[24]) {
+    float eps = pc.eps;
+    float c[16];
+    for (uint j = 0u; j < 4u; ++j) {
+        precise float a = mix[j] * sc[0];
+        precise float preArg = a + bs[j];
+        precise float pre = sigmoidF32(preArg) + eps;
+        Out[m + j] = pre;
+        precise float b = mix[4u + j] * sc[1];
+        precise float postArg = b + bs[4u + j];
+        precise float post = 2.0 * sigmoidF32(postArg);
+        Out[m + 4u + j] = post;
+    }
+    for (uint i = 0u; i < 16u; ++i) {
+        precise float x = mix[8u + i] * sc[2];
+        precise float y = x + bs[8u + i];
+        c[i] = y;
+    }
+    for (uint r = 0u; r < 4u; ++r) {
+        float mx = c[r * 4u];
+        for (uint k = 1u; k < 4u; ++k) mx = max(mx, c[r * 4u + k]);
+        precise float sum = 0.0;
+        for (uint k = 0u; k < 4u; ++k) {
+            precise float shifted = c[r * 4u + k] - mx;
+            c[r * 4u + k] = expF32(shifted);
+            sum = sum + c[r * 4u + k];
+        }
+        for (uint k = 0u; k < 4u; ++k) {
+            precise float q = divRN(c[r * 4u + k], sum);
+            precise float v = q + eps;
+            c[r * 4u + k] = v;
+        }
+    }
+    for (int it = 0; it < pc.iters; ++it) {
+        if (it > 0) {
+            for (uint r = 0u; r < 4u; ++r) {
+                precise float sum = 0.0;
+                for (uint k = 0u; k < 4u; ++k) sum = sum + c[r * 4u + k];
+                precise float den = sum + eps;
+                for (uint k = 0u; k < 4u; ++k) c[r * 4u + k] = divRN(c[r * 4u + k], den);
+            }
+        }
+        for (uint k = 0u; k < 4u; ++k) {
+            precise float sum = 0.0;
+            for (uint r = 0u; r < 4u; ++r) sum = sum + c[r * 4u + k];
+            precise float den = sum + eps;
+            for (uint r = 0u; r < 4u; ++r) c[r * 4u + k] = divRN(c[r * 4u + k], den);
+        }
+    }
+    for (uint i = 0u; i < 16u; ++i) Out[m + 8u + i] = c[i];
+}
+
+void split(uint row) {
+    if (row >= uint(pc.rows)) return;
+    uint m = row * 24u;
+    float mix[24];
+    float sc[3];
+    float bs[24];
+    for (uint i = 0u; i < 24u; ++i) {
+        mix[i] = A[m + i];
+        bs[i] = C[i];
+    }
+    for (uint i = 0u; i < 3u; ++i) sc[i] = B[i];
+    splitCore(m, mix, sc, bs);
+}
+
+// 1/sqrt(x) within about one ulp of the correctly rounded value: hardware
+// estimate refined by one Newton step with fused residuals.
+float rsqrtF32(float x) {
+    precise float y = inversesqrt(x);
+    precise float yy = y * y;
+    precise float e = fma(-x, yy, 1.0);
+    precise float h = 0.5 * y;
+    precise float r = fma(h, e, y);
+    return r;
+}
+
+void rmsSplit(uint row) {
+    if (row >= uint(pc.rows)) return;
+    uint m = row * 24u;
+    uint width = 4u * uint(pc.hidden);
+    uint s = row * width;
+    // Serial F32 sum in index order: bit-identical to the host's ss += v*v.
+    precise float ss = 0.0;
+    for (uint k = 0u; k < width; ++k) {
+        precise float sq = B[s + k] * B[s + k];
+        ss = ss + sq;
+    }
+    precise float mean = divRN(ss, float(width));
+    precise float arg = mean + pc.rmsEps;
+    float r = rsqrtF32(arg);
+    float mix[24];
+    float sc[3];
+    float bs[24];
+    for (uint i = 0u; i < 24u; ++i) {
+        precise float v = A[m + i] * r;
+        mix[i] = v;
+        bs[i] = C[3u + i];
+    }
+    for (uint i = 0u; i < 3u; ++i) sc[i] = C[i];
+    splitCore(m, mix, sc, bs);
+}
+
+void preCollapse(uint i) {
+    uint H = uint(pc.hidden);
+    uint total = uint(pc.rows) * H;
+    if (i >= total) return;
+    uint row = i / H;
+    uint d = i - row * H;
+    uint s = row * 4u * H + d;
+    uint m = row * 24u;
+    precise float acc = 0.0;
+    for (uint h = 0u; h < 4u; ++h) {
+        precise float p = B[m + h] * A[s + h * H];
+        acc = acc + p;
+    }
+    Out[i] = bf16(acc);
+}
+
+void postMix(uint i) {
+    uint H = uint(pc.hidden);
+    uint total = uint(pc.rows) * 4u * H;
+    if (i >= total) return;
+    uint row = i / (4u * H);
+    uint rem = i - row * 4u * H;
+    uint dst = rem / H;
+    uint d = rem - dst * H;
+    uint s = row * 4u * H + d;
+    uint m = row * 24u;
+    precise float acc = 0.0;
+    for (uint src = 0u; src < 4u; ++src) {
+        precise float p = C[m + 8u + src * 4u + dst] * B[s + src * H];
+        acc = acc + p;
+    }
+    precise float x = C[m + 4u + dst] * bf16(A[row * H + d]);
+    acc = acc + x;
+    Out[i] = bf16(acc);
+}
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (pc.mode == 0) initialStreams(i);
+    else if (pc.mode == 1) split(i);
+    else if (pc.mode == 2) preCollapse(i);
+    else if (pc.mode == 3) postMix(i);
+    else if (pc.mode == 4) rmsSplit(i);
+}

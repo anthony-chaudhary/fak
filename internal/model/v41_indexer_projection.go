@@ -49,6 +49,12 @@ func (m *Model) v41IndexRowsProjected(l, pos int, qLat, hidden []float32, keys [
 }
 
 func (m *Model) v41IndexRowsWithOperations(l, pos int, qLat, hidden []float32, keys [][]float32, project v41DenseProjectionFunc, score v41IndexerScoreFunc, health v41IndexerScoreHealthFunc) ([]int32, error) {
+	return m.v41IndexRowsWithDeviceOps(l, pos, qLat, hidden, keys, project, score, health, nil)
+}
+
+// v41IndexRowsWithDeviceOps also offers the row selection to the session's
+// device index-select seam when ops binds one (Ref #13668).
+func (m *Model) v41IndexRowsWithDeviceOps(l, pos int, qLat, hidden []float32, keys [][]float32, project v41DenseProjectionFunc, score v41IndexerScoreFunc, health v41IndexerScoreHealthFunc, ops *v41DeviceGatherOps) ([]int32, error) {
 	d41 := m.Cfg.DeepSeekV41
 	if !indexSourceAt(d41, l) {
 		return nil, nil
@@ -97,7 +103,7 @@ func (m *Model) v41IndexRowsWithOperations(l, pos int, qLat, hidden []float32, k
 	}
 	opened := m.v41NowNanos()
 	defer m.v41NoteIndexerScoring(opened)
-	return v41IndexRowsWithScore(l, q, flat, weights, nHeads, dim, len(keys), topKBlocks, blockSize, cfg.IndexTopK, score, health)
+	return v41IndexRowsSelected(l, q, flat, weights, nHeads, dim, len(keys), topKBlocks, blockSize, cfg.IndexTopK, score, health, ops.indexSelectFunc())
 }
 
 // v41CompressedPublicationRoPE runs only on a producer's fresh rows, after the

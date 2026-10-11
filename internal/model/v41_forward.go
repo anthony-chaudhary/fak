@@ -131,6 +131,11 @@ type v41ForwardState struct {
 	attn    *V41AttentionState
 	layers  []*V41AttentionState
 
+	// indexKeyMemo is the session's per-index-source-layer memo of the last
+	// committed fold; indexKeyPrior is the read-only copy a re-fold run reuses.
+	indexKeyMemo  map[int][]v41IndexKeyMemoRow
+	indexKeyPrior map[int][]v41IndexKeyMemoRow
+
 	// expertGateUp is the OPTIONAL device gate/up callback the session installs
 	// when its backend can run a routed expert's gate/up projections plus SwiGLU
 	// (the shared q4kExpertInputHALWithLimit operation, bound in
@@ -168,7 +173,15 @@ type v41ForwardState struct {
 	sharedActivation v41SharedActivationFunc
 	tailRoPE         v41TailRoPEFunc
 	sharedAttention  v41SharedAttentionFunc
-	callbackOwner    *Session
+	routerTopK       v41RouterTopKFunc
+	routedSum        v41RoutedSumFunc
+	sharedAdd        v41SharedAddFunc
+	gatherOps        *v41DeviceGatherOps
+	// mhcDevice is the session's mHC stream seam (initial streams, split,
+	// pre-collapse, post-mix). nil keeps the host reference; a non-nil seam
+	// dispatches every full-geometry mHC op on the backend or refuses.
+	mhcDevice     *v41MHCDevice
+	callbackOwner *Session
 }
 
 // v41ExpertGateUpOutcome is the closed result vocabulary of one v41ExpertGateUpFunc
@@ -197,6 +210,20 @@ const (
 // V4.1 bindings publish BF16 gate/up operands before F32 host SwiGLU; the
 // returned intermediate remains F32 until its caller applies the route weight.
 type v41ExpertGateUpFunc func(layer int, stem string, xn []float32) ([]float32, v41ExpertGateUpOutcome, error)
+
+// v41DeviceOnlyGateUp is the device-only gate/up wrapper (see
+// v41BindDeviceOnlyDeclineRefusals): an unbound or declining seam refuses typed.
+func v41DeviceOnlyGateUp(s *Session, f v41ExpertGateUpFunc) v41ExpertGateUpFunc {
+	return func(layer int, stem string, xn []float32) ([]float32, v41ExpertGateUpOutcome, error) {
+		if f != nil {
+			y, outcome, err := f(layer, stem, xn)
+			if outcome != v41GateUpDeclined {
+				return y, outcome, err
+			}
+		}
+		return nil, v41GateUpError, s.v41DeviceOnlyDeclined(layer, "routed-expert-gate-up")
+	}
+}
 
 // v41ExpertDownOutcome is the closed result vocabulary of one v41ExpertDownFunc
 // call. handled-success returns the H-wide expert output with the down projection
@@ -299,7 +326,9 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, routerTopK: st.routerTopK, routedSum: st.routedSum, sharedAdd: st.sharedAdd, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
+		runState.indexKeyPrior = st.indexKeyMemo
+		runState.indexKeyMemo = map[int][]v41IndexKeyMemoRow{}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -330,9 +359,18 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	if err != nil {
 		return nil, err
 	}
+	var mhcDevice *v41MHCDevice
+	if runState != nil {
+		mhcDevice = runState.mhcDevice
+	}
+	if !full {
+		if err := mhcDevice.refuseReduced(); err != nil {
+			return nil, err
+		}
+	}
 
 	// ---- embedding ----
-	embedded, err := m.v41EmbeddingPanel(seq)
+	embedded, err := m.v41EmbeddingPanelOn(seq, runState.deviceGatherOps())
 	if err != nil {
 		return nil, err
 	}
@@ -344,9 +382,26 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	// The official full graph repeats the BF16 embedding into four distinct
 	// allocations; the reduced graph retains its legacy initialization.
 	streams := make([][][]float32, len(seq))
+	var resident *v41MHCResident
+	if full && mhcDevice.resident() {
+		if resident, err = mhcDevice.newResident(x); err != nil {
+			return nil, err
+		}
+		defer resident.free()
+		zero, err := resident.streamZero()
+		if err != nil {
+			return nil, err
+		}
+		for t := range x {
+			copy(x[t], zero[t])
+		}
+	}
 	for t := range streams {
+		if resident != nil {
+			continue
+		}
 		if full {
-			streams[t], err = v41FullInitialStreams(x[t])
+			streams[t], err = v41FullInitialStreamsOn(mhcDevice, x[t])
 			if err != nil {
 				return nil, err
 			}
@@ -379,6 +434,8 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	scratch := &v41ProjScratch{}
 	if full {
 		scratch.mhcCarry = newV41MHCCarry(len(seq))
+		scratch.mhcCarry.device = mhcDevice
+		scratch.mhcCarry.resident = resident
 	}
 	// #13325: resolve the optional activation-checkpoint producer ONCE per
 	// forward. Disabled (the default) it is nil and every emit is skipped, so the
@@ -389,10 +446,19 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 			return nil, err
 		}
 		hidden := flatten(x)
-		if full {
+		if resident != nil {
+			rows, err := resident.hiddenRows(l)
+			if err != nil {
+				return nil, err
+			}
+			hidden = make([]float32, 0, len(seq)*H)
+			for _, row := range rows {
+				hidden = append(hidden, row...)
+			}
+		} else if full {
 			hidden = make([]float32, 0, len(seq)*H)
 			for t := range streams {
-				row, err := v41MHCPreBF16(l, streams[t], scratch.mhcCarry.pre[t])
+				row, err := v41MHCPreBF16On(scratch.mhcCarry.device, l, streams[t], scratch.mhcCarry.pre[t])
 				if err != nil {
 					return nil, err
 				}
@@ -422,6 +488,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	}
 	if st != nil {
 		st.layers = runState.layers
+		st.indexKeyMemo = runState.indexKeyMemo
 		// Completed cross-layer publications are step-local and can be released
 		// -- EXCEPT when the schedule has a compressed / shared-source / reader
 		// role (#13480): a later incremental Step's reader resolves the source's
@@ -466,6 +533,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if scratch == nil {
 		scratch = &v41ProjScratch{}
 	}
+	var mhcDevice *v41MHCDevice
 	if full {
 		if err := scratch.mhcCarry.validate(l, len(x)); err != nil {
 			return err
@@ -473,6 +541,15 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err := m.v41AdmitMHC(l); err != nil {
 			return err
 		}
+		mhcDevice = scratch.mhcCarry.device
+	}
+	var resident *v41MHCResident
+	if full {
+		resident = scratch.mhcCarry.resident
+	}
+	if resident != nil {
+		// A refused or failed layer never publishes its pending panel.
+		defer resident.abort()
 	}
 	scratch.denseProjection = nil
 	scratch.groupedOutput = nil
@@ -488,6 +565,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.sharedActivation = nil
 	scratch.tailRoPE = nil
 	scratch.sharedAttention = nil
+	scratch.routerTopK = nil
+	scratch.routedSum = nil
+	scratch.sharedAdd = nil
+	scratch.gatherOps = nil
 	if st != nil {
 		scratch.denseProjection = st.denseProjection
 		scratch.groupedOutput = st.groupedOutput
@@ -503,6 +584,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.sharedActivation = st.sharedActivation
 		scratch.tailRoPE = st.tailRoPE
 		scratch.sharedAttention = st.sharedAttention
+		scratch.routerTopK = st.routerTopK
+		scratch.routedSum = st.routedSum
+		scratch.sharedAdd = st.sharedAdd
+		scratch.gatherOps = st.gatherOps
 	}
 	defer func() {
 		scratch.denseProjection = nil
@@ -519,6 +604,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.sharedActivation = nil
 		scratch.tailRoPE = nil
 		scratch.sharedAttention = nil
+		scratch.routerTopK = nil
+		scratch.routedSum = nil
+		scratch.sharedAdd = nil
+		scratch.gatherOps = nil
 	}()
 
 	// Engram injection happens at the START of the layer, into the residual,
@@ -529,6 +618,24 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 				var project v41EngramProjectionFunc
 				if st != nil {
 					project = st.engramProjection
+				}
+				if resident != nil {
+					// No Engram device op yet: read the panel back around this
+					// layer only (engram-stream-injection stays inventoried).
+					host, err := resident.hostStreams(l)
+					if err != nil {
+						return err
+					}
+					for t := range x {
+						copy(x[t], host[t][0])
+					}
+					if err := m.v41EngramInjectWithProjection(l, x, host, full, tokens, eps, project); err != nil {
+						return err
+					}
+					if err := resident.setHostStreams(l, host); err != nil {
+						return err
+					}
+					break
 				}
 				if err := m.v41EngramInjectWithProjection(l, x, streams, full, tokens, eps, project); err != nil {
 					return err
@@ -582,7 +689,18 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	projectMHC := m.v41MHCProjector(l, H, eps, mhcFlat, mhcTransposed, scratch)
 	hcByPos := make([]v41MHCMix, seq)
 	preByPos := make([][]float32, seq)
-	for t := 0; t < seq; t++ {
+	if resident != nil {
+		collapsedRows, err := resident.beginLayer(l, hcIters, hcEps, eps)
+		if err != nil {
+			return err
+		}
+		for t := range collapsedRows {
+			if preByPos[t], err = m.v41AttentionInputNorm(l, collapsedRows[t], eps); err != nil {
+				return err
+			}
+		}
+	}
+	for t := 0; t < seq && resident == nil; t++ {
 		// The reduced path projects the normalized input through the legacy
 		// single-stream [24, H] block; the full path projects the four DISTINCT
 		// persistent streams through the flattened 4H residual with one shared RMS.
@@ -606,9 +724,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return err
 		}
-		mix, err := v41MHCSplit(mixes, mixScale, mixBase, 4, hcIters, hcEps)
+		mix, err := v41MHCSplitOn(mhcDevice, l, mixes, mixScale, mixBase, 4, hcIters, hcEps)
 		if err != nil {
-			return v41StageErr(v41StageMHC, l, err)
+			return err
 		}
 		hcByPos[t] = mix
 		// The mHC pre-collapse always reads a four-stream set collapsed by the
@@ -625,9 +743,19 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if full {
 			pre = scratch.mhcCarry.pre[t]
 		}
-		collapsed, err := v41MHCPre(streams4, pre)
-		if err != nil {
-			return v41StageErr(v41StageMHC, l, err)
+		var collapsed []float32
+		if mhcDevice != nil {
+			// The device publishes hc_pre's BF16 copy; the input norm's own BF16
+			// widening of it is the identity.
+			collapsed, err = mhcDevice.preBF16(l, streams4, pre)
+			if err != nil {
+				return err
+			}
+		} else {
+			collapsed, err = v41MHCPre(streams4, pre)
+			if err != nil {
+				return v41StageErr(v41StageMHC, l, err)
+			}
 		}
 		if full {
 			collapsed, err = m.v41AttentionInputNorm(l, collapsed, eps)
@@ -774,6 +902,8 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	}
 	sharedKV := compressedKV
 	var indexKeys [][]float32
+	var reusedKeys []bool
+	var keyMemo []v41IndexKeyMemoRow
 	if plan.Role == V41AttentionRoleReader {
 		if st == nil {
 			return v41StageErr(v41StageAttention, l, fmt.Errorf("%w: shared reader requires source state", ErrV41ForwardStage))
@@ -787,27 +917,36 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			return err
 		}
 	} else if ownsCompressed && indexSourceAt(cfg.DeepSeekV41, l) {
-		indexKeys, err = m.v41IndexKeysWithOperations(l, compressedKV, scratch.denseProjection, scratch.indexKeyNorm)
+		indexKeys, reusedKeys, keyMemo, err = m.v41IndexKeysReusing(l, compressedKV, st, scratch)
 		if err != nil {
 			return err
 		}
 	}
 	// Both publications derive from the same RoPE-free normalized latent.
-	// Rotate only these fresh producer rows, never borrowed source rows.
+	// Rotate only these fresh producer rows, never borrowed source rows; a key
+	// reused from the previous fold is already rotated.
 	for group, latent := range compressedKV {
 		var key []float32
-		if indexKeys != nil {
+		if indexKeys != nil && (reusedKeys == nil || !reusedKeys[group]) {
 			key = indexKeys[group]
 		}
 		if err := m.v41CompressedPublicationRoPE(l, group*plan.Ratio, latent, key); err != nil {
 			return err
 		}
 	}
+	if keyMemo != nil && st != nil && st.indexKeyMemo != nil {
+		for group := range keyMemo {
+			if !reusedKeys[group] {
+				keyMemo[group].key = append([]float32(nil), indexKeys[group]...)
+			}
+		}
+		st.indexKeyMemo[l] = keyMemo
+	}
 	var indexList []int32
 	if plan.Ratio > 1 && indexSourceAt(cfg.DeepSeekV41, l) {
 		for t := 0; t < seq; t++ {
 			groups := min((t+1)/plan.kvGroupSize(cfg), len(indexKeys))
-			localIdx, err := m.v41IndexRowsWithOperations(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth)
+			localIdx, err := m.v41IndexRowsWithDeviceOps(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps)
 			if err != nil {
 				return err
 			}
@@ -818,7 +957,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			indexList = append(indexList, row...)
 		}
 	} else {
-		localIdx, err := m.v41IndexRowsWithOperations(l, seq-1, qLatRows[seq-1], preByPos[seq-1], indexKeys, scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth)
+		localIdx, err := m.v41IndexRowsWithDeviceOps(l, seq-1, qLatRows[seq-1], preByPos[seq-1], indexKeys, scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps)
 		if err != nil {
 			return err
 		}
@@ -928,7 +1067,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			if err != nil {
 				return v41StageErr(v41StageAttention, l, err)
 			}
-			o, err = v41AttentionOutputForProjection(cfg, l, t, o, nH, hd)
+			o, err = v41RotatedOutputForProjection(cfg, l, t, o, nH, hd, scratch.gatherOps)
 			if err != nil {
 				return err
 			}
@@ -963,7 +1102,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)
 		}
-		o, err = v41AttentionOutputForProjection(cfg, l, t, o, nH, hd)
+		o, err = v41RotatedOutputForProjection(cfg, l, t, o, nH, hd, scratch.gatherOps)
 		if err != nil {
 			return err
 		}
@@ -1007,9 +1146,17 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		ffnResidual = make([][][]float32, seq)
 		ffnMixes = make([]v41MHCMix, seq)
 	}
+	var ffnCollapsed [][]float32
+	if resident != nil {
+		if ffnCollapsed, err = resident.ffnInput(l, attnOut, hcIters, hcEps, eps); err != nil {
+			return err
+		}
+	}
 	for t := 0; t < seq; t++ {
 		var xn []float32
-		if full {
+		if resident != nil {
+			xn, err = m.v41FFNNorm(l, ffnCollapsed[t], eps, scratch.ffnNorm)
+		} else if full {
 			ffnResidual[t], ffnMixes[t], xn, err = m.v41FullFFNInput(l, streams[t], hcByPos[t], attnOut[t], projectFFN, scratch)
 		} else {
 			xn, err = m.v41FFNNorm(l, x[t], eps, scratch.ffnNorm)
@@ -1022,10 +1169,11 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return err
 		}
-		picks, err := v41RouteForGeometry(routerLogits, gateBias, routeCfg, full)
+		picks, err := v41RouteForGeometryWith(l, routerLogits, gateBias, routeCfg, full, scratch.routerTopK)
 		if err != nil {
 			return v41StageErr(v41StageMoE, l, err)
 		}
+		m.emitExpertRouteAt(l, t, picks)
 		perTokenPicks[t] = picks
 	}
 
@@ -1080,7 +1228,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 						return err
 					}
 				}
-				routedByToken[t], err = v41FullRoutedSum(l, perTokenPicks[t], outputs, H)
+				routedByToken[t], err = v41FullRoutedSumWith(l, perTokenPicks[t], outputs, H, scratch.routedSum)
 				if err != nil {
 					return err
 				}
@@ -1160,6 +1308,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if full {
 		nextPanel = make([][][]float32, seq)
 	}
+	var moeRows [][]float32
+	if resident != nil {
+		moeRows = make([][]float32, seq)
+	}
 	for t := 0; t < seq; t++ {
 		xn := ffnInputs[t]
 		routed := routedByToken[t]
@@ -1167,7 +1319,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return err
 		}
-		moe, err := v41SharedExpertAdd(routed, shared, routeCfg)
+		moe, err := v41SharedExpertAddWith(l, routed, shared, routeCfg, scratch.sharedAdd)
 		if err != nil {
 			return v41StageErr(v41StageMoE, l, err)
 		}
@@ -1176,8 +1328,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// from an mHC post-mix fault.
 		trace.record(l, t, v41TraceStageMoESum, moe)
 
-		if full {
-			nextPanel[t], err = v41MHCPostBF16(l, moe, ffnResidual[t], ffnMixes[t])
+		if resident != nil {
+			moeRows[t] = moe
+		} else if full {
+			nextPanel[t], err = v41MHCPostBF16On(mhcDevice, l, moe, ffnResidual[t], ffnMixes[t])
 			if err != nil {
 				return err
 			}
@@ -1193,6 +1347,17 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			}
 			copy(x[t], next[0])
 		}
+	}
+	if resident != nil {
+		// Every token row succeeded: publish the pending panel and its carry.
+		if err := resident.finishLayer(l, moeRows); err != nil {
+			return err
+		}
+		if err := resident.publish(l); err != nil {
+			return err
+		}
+		scratch.mhcCarry.nextLayer++
+		return nil
 	}
 	if full {
 		// All token rows succeeded: stream and carry publication has no failing work.
@@ -1398,7 +1563,8 @@ func (s *Session) prefillV41Suffix(ids []int) []float32 {
 			var selectedRoPE *V41TailRoPEOperationError
 			var selectedAttention *V41SharedAttentionOperationError
 			var selectedScore *V41IndexerScoreOperationError
-			if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || !errors.Is(err, ErrV41ForwardStage) {
+			var selectedMHC *V41MHCOperationError
+			if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || !errors.Is(err, ErrV41ForwardStage) {
 				panic(err)
 			}
 			// Roll the suffix back to the pre-call boundary and re-fold the
@@ -1506,7 +1672,8 @@ func (s *Session) stepV41(id int) []float32 {
 		var selectedRoPE *V41TailRoPEOperationError
 		var selectedAttention *V41SharedAttentionOperationError
 		var selectedScore *V41IndexerScoreOperationError
-		if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || !errors.Is(err, ErrV41ForwardStage) {
+		var selectedMHC *V41MHCOperationError
+		if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || !errors.Is(err, ErrV41ForwardStage) {
 			panic(err)
 		}
 		// A typed stage refusal the eligibility check could not foresee (e.g. the
@@ -1552,6 +1719,14 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.sharedActivation = s.v41SharedActivationFunc()
 		s.v41Forward.tailRoPE = s.v41TailRoPEFunc()
 		s.v41Forward.sharedAttention = s.v41SharedAttentionFunc()
+		s.v41Forward.routerTopK = s.v41RouterTopKFunc()
+		s.v41Forward.routedSum = s.v41RoutedSumFunc()
+		s.v41Forward.sharedAdd = s.v41SharedAddFunc()
+		s.v41Forward.gatherOps = s.v41DeviceGatherOpsFunc()
+		s.v41Forward.mhcDevice = s.v41MHCDeviceSeam()
+		if s.executionPolicy == ExecutionPolicyDeviceOnly {
+			s.v41BindDeviceOnlyDeclineRefusals(s.v41Forward)
+		}
 		s.v41Forward.callbackOwner = s
 	}
 	return s.v41Forward
@@ -1994,40 +2169,4 @@ func lastLogits(act *Activations) []float32 {
 		return nil
 	}
 	return act.Logits[len(act.Logits)-1]
-}
-
-func (m *Model) v41EmbeddingPanel(ids []int) ([]float32, error) {
-	cfg := m.Cfg
-	H := cfg.HiddenSize
-	count, ok := checkedMulInt(len(ids), H)
-	if !ok || H <= 0 {
-		return nil, v41StageErr(v41StageEmbedding, -1, errV41ProjectionResult)
-	}
-	var panel []float32
-	if m.has("model.embed_tokens.weight") {
-		embed := m.tensor("model.embed_tokens.weight")
-		expected, valid := checkedMulInt(cfg.VocabSize, H)
-		if !valid || len(embed) < expected {
-			return nil, v41StageErr(v41StageEmbedding, -1, fmt.Errorf("%w: invalid embedding table length", ErrV41ForwardStage))
-		}
-		panel = make([]float32, count)
-		for t, id := range ids {
-			copy(panel[t*H:(t+1)*H], embed[id*H:(id+1)*H])
-		}
-	} else if m.Q2KEmbedding != nil {
-		var err error
-		panel, err = m.Q2KEmbedding.GatherRows(ids, 1)
-		if err != nil {
-			return nil, v41StageErr(v41StageEmbedding, -1, err)
-		}
-		if len(panel) != count {
-			return nil, v41StageErr(v41StageEmbedding, -1, errV41ProjectionResult)
-		}
-	} else {
-		return nil, v41StageErr(v41StageEmbedding, -1, fmt.Errorf("%w: missing model.embed_tokens.weight", ErrV41ForwardStage))
-	}
-	for t := range ids {
-		scaleEmbedInPlace(panel[t*H:(t+1)*H], cfg)
-	}
-	return panel, nil
 }

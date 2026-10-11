@@ -49,3 +49,22 @@ func validateV41TailRoPE(q, kv, sinCos Tensor, heads, headDim, rotaryDim int) (q
 	}
 	return int(qElements) * 4, headDim * 4, rotaryDim * 4, nil
 }
+
+// V41TailRoPERowsBackend is the row-panel companion of V41TailRoPEBackend. It
+// applies the supplied table to every row of x[rows,headDim] with no paired KV
+// row, under exactly the V41TailRoPEQK arithmetic contract. DeepSeek-V4.1's
+// inverse output rotation passes the negated-sine [-sin,cos] table; negation is
+// exact, so the negated-sine product order matches the host inverse bit for bit.
+// The returned tensor is a fresh caller-owned allocation; x is never written.
+type V41TailRoPERowsBackend interface {
+	V41TailRoPERowsAvailable() bool
+	V41TailRoPERows(x, sinCos Tensor, rows, headDim, rotaryDim int) (Tensor, error)
+}
+
+// validateV41TailRoPERows applies the QK geometry gate to a row panel. The
+// shader's paired row is a discarded read of row 0, so its extent is headDim.
+func validateV41TailRoPERows(x, sinCos Tensor, rows, headDim, rotaryDim int) (xBytes, tableBytes int, err error) {
+	paired := Tensor{Dtype: F32, Layout: RowMajor, Shape: []int{headDim}}
+	xBytes, _, tableBytes, err = validateV41TailRoPE(x, paired, sinCos, rows, headDim, rotaryDim)
+	return xBytes, tableBytes, err
+}

@@ -13,13 +13,18 @@ const MinSubagentTimeoutMs = 60000
 // DefaultMaxThreads is the default maximum thread limit preventing thread exhaustion.
 const DefaultMaxThreads = 16
 
-// Subagent thread execution states.
+// Subagent thread tracking states.
 const (
 	SubagentStateRunning   = "running"
 	SubagentStateCompleted = "completed"
 	SubagentStateFailed    = "failed"
 	SubagentStateTimedOut  = "timed_out"
+	// SubagentStateAbandoned means tracking ended without an execution outcome.
+	SubagentStateAbandoned = "abandoned"
 )
+
+// ErrSubagentAbandoned reports observer teardown, not executor cancellation.
+var ErrSubagentAbandoned = errors.New("parent teardown abandoned subagent tracking; execution outcome unknown")
 
 // ClampWaitTimeout clamps timeoutMs to >= MinSubagentTimeoutMs (or default 60s if <= 0).
 func ClampWaitTimeout(timeoutMs int) int {
@@ -39,6 +44,8 @@ type GoalDescriptor struct {
 }
 
 // SubagentThread represents an individual subagent thread and its lifecycle.
+// CompletedAt is the terminal tracking time; abandonment does not prove that
+// execution ended at that time.
 type SubagentThread struct {
 	ID              string          `json:"id"`
 	ParentSessionID string          `json:"parent_session_id"`
@@ -121,7 +128,7 @@ func (s *SubagentSupervisor) Spawn(parentSessionID, subagentID string, parentGoa
 	return thread, nil
 }
 
-// Wait blocks until the specified subagent completes, fails, or times out.
+// Wait blocks until the specified subagent completes, fails, times out, or is abandoned.
 // Clamps requested timeoutMs to >= 60,000ms using ClampWaitTimeout.
 func (s *SubagentSupervisor) Wait(subagentID string, timeoutMs int) (*SubagentThread, error) {
 	clampedTimeout := ClampWaitTimeout(timeoutMs)
@@ -206,7 +213,8 @@ func (s *SubagentSupervisor) autoReapLocked() {
 	}
 }
 
-// TeardownParent automatically reaps all child subagents owned by this parent.
+// TeardownParent reaps this parent's tracking records. Running children are
+// abandoned, not completed: this supervisor does not cancel their execution.
 func (s *SubagentSupervisor) TeardownParent(parentSessionID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -215,7 +223,8 @@ func (s *SubagentSupervisor) TeardownParent(parentSessionID string) {
 	for id, thread := range s.active {
 		if thread.ParentSessionID == parentSessionID {
 			if thread.State == SubagentStateRunning {
-				thread.State = SubagentStateCompleted
+				thread.State = SubagentStateAbandoned
+				thread.ExitErr = ErrSubagentAbandoned
 				thread.CompletedAt = now
 				thread.closeOnce.Do(func() {
 					close(thread.done)

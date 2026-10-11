@@ -50,23 +50,26 @@ type PiContextBudget struct {
 	Envelope   harnesskit.ContextEnvelope
 }
 
-// HaloPiColdAdmission is the cold-prompt admission a Halo serving Pi applies, so the
-// trigger stays below the context a Halo admits cold. The gateway prices every chat
-// request cold (internal/gateway/deadline_admission.go gives no prompt-cache credit),
-// so a 0.97 KV-reuse rate does not raise this bound. MODELED priors, 2026-10-09:
+// HaloPiColdAdmission is the deadline admission a Halo serving Pi applies, so the
+// trigger stays below the context a Halo admits. The gateway credits a multi-turn
+// chat's verified cached prefix but withdraws the credit once the cold estimate
+// exceeds 1.5x the 540s ceiling (810s). MODELED priors, 2026-10-10:
 //   - 600s: Pi passes no timeoutMs, so the OpenAI SDK default X-Stainless-Timeout applies;
 //   - 0.9: deadlineadmit.DefaultHeadroom;
 //   - 162 tok/s cold prefill and 21 tok/s decode: Halo Qwen 27B, measured by Fak Ops;
-//   - 1024 completion tokens and 4096 tokens of one turn's growth past the trigger.
+//   - 1024 completion tokens and 4096 tokens of one turn's growth past the trigger;
+//   - 0.30 cached share: below the ~0.35 the credit justifies, and the trigger's
+//     full cold estimate (~738s) stays under the 810s credit cutoff.
 //
-// MaxTrigger() = 74752.
+// MaxTrigger() = 107520, under the 112640 Halo window cap.
 var HaloPiColdAdmission = harnesskit.ColdAdmission{
-	ClientDeadline:      600 * time.Second,
-	Headroom:            0.9,
-	PrefillTokensPerSec: 162,
-	DecodeTokens:        1024,
-	DecodeTokensPerSec:  21,
-	TurnGrowthTokens:    4096,
+	ClientDeadline:       600 * time.Second,
+	Headroom:             0.9,
+	PrefillTokensPerSec:  162,
+	DecodeTokens:         1024,
+	DecodeTokensPerSec:   21,
+	TurnGrowthTokens:     4096,
+	CachedPromptFraction: 0.30,
 }
 
 // PiServedByHalo reports whether a router catalog owner names a Halo appliance

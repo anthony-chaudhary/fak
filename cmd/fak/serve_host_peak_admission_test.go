@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -179,12 +180,30 @@ func TestServeStreamedHostPeakAdmissionUsesActualRoute(t *testing.T) {
 	}
 }
 
-// No fitting partial estimate is a license for an unqualified staging route.
+// stubServeMemoryLimit replaces the process memory-limit setter for one test and returns the
+// limit the admission left in force. stuck simulates a limit that cannot be lowered.
+func stubServeMemoryLimit(t *testing.T, start int64, stuck bool) *int64 {
+	t.Helper()
+	limit := start
+	prev := serveSetMemoryLimit
+	serveSetMemoryLimit = func(n int64) int64 {
+		old := limit
+		if n >= 0 && !stuck {
+			limit = n
+		}
+		return old
+	}
+	t.Cleanup(func() { serveSetMemoryLimit = prev })
+	return &limit
+}
+
+// No fitting estimate admits a streamed route without a Go memory limit of the predicted peak.
 // The existing capacity error retains exact estimated bytes, including the
 // one-byte boundary, while unknown memory and unsupported routes fail closed.
 // fak-test:runtime fast est=2ms lane=default
 func TestServeStreamedHostPeakDecisionFailsClosed(t *testing.T) {
 	const gib = int64(1 << 30)
+	stubServeMemoryLimit(t, math.MaxInt64, true)
 	peak := ggufload.HostLoadPeak{SteadyAnonBytes: 18 * gib, TransientBytes: 6 * gib, PeakAnonBytes: 24 * gib}
 	opts := []ggufload.Q4KLoadOption{ggufload.WithStreamedExperts(0), ggufload.WithStreamedDenseQ4KWorkingSet(gib)}
 	for name, tc := range map[string]struct {
@@ -199,8 +218,7 @@ func TestServeStreamedHostPeakDecisionFailsClosed(t *testing.T) {
 		"unknown memory":       {peak: peak, avail: 26 * gib, reason: "host-available-memory-unknown"},
 		"negative memory":      {peak: peak, avail: -1, known: true, reason: "host-available-memory-unknown"},
 		"nonpositive estimate": {avail: 26 * gib, known: true, reason: "header-estimate-nonpositive"},
-		"exact partial fit":    {peak: peak, avail: 26 * gib, known: true, reason: "streamed-staging-peak-unqualified"},
-		"ample memory":         {peak: peak, avail: 128 * gib, known: true, reason: "streamed-staging-peak-unqualified"},
+		"limit not lowered":    {peak: peak, avail: 128 * gib, known: true, reason: "streamed-staging-peak-unqualified"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			msg, err := serveNativeHostLoadPeakDecision(tc.peak, tc.estimate, tc.avail, tc.known, hostPeakTestEnv(nil), opts...)
@@ -226,5 +244,40 @@ func TestServeStreamedHostPeakDecisionFailsClosed(t *testing.T) {
 		if err != nil || msg.Level != "warning" {
 			t.Fatalf("override %q: message=%+v error=%v, want observable explicit override", spelling, msg, err)
 		}
+	}
+}
+
+// fak#13798: a fitting streamed estimate is admitted only by installing a Go memory limit of
+// the predicted peak (not peak + margin), never raising an operator's lower GOMEMLIMIT.
+// fak-test:runtime fast est=2ms lane=default
+func TestServeStreamedHostPeakDecisionAdmitsUnderMemoryLimit(t *testing.T) {
+	const gib = int64(1 << 30)
+	peak := ggufload.HostLoadPeak{SteadyAnonBytes: 18 * gib, TransientBytes: 6 * gib, PeakAnonBytes: 24 * gib}
+	opts := []ggufload.Q4KLoadOption{ggufload.WithStreamedExperts(0), ggufload.WithStreamedDenseQ4KWorkingSet(gib)}
+	for name, tc := range map[string]struct {
+		start, avail, want int64
+	}{
+		"exact fit":          {start: math.MaxInt64, avail: 26 * gib, want: 24 * gib},
+		"ample memory":       {start: math.MaxInt64, avail: 128 * gib, want: 24 * gib},
+		"lower operator cap": {start: 20 * gib, avail: 128 * gib, want: 20 * gib},
+	} {
+		t.Run(name, func(t *testing.T) {
+			limit := stubServeMemoryLimit(t, tc.start, false)
+			msg, err := serveNativeHostLoadPeakDecision(peak, nil, tc.avail, true, hostPeakTestEnv(nil), opts...)
+			if err != nil || msg.Level != "info" {
+				t.Fatalf("message=%+v error=%v, want admitted streamed route", msg, err)
+			}
+			if *limit != tc.want {
+				t.Fatalf("memory limit = %d, want %d", *limit, tc.want)
+			}
+			requireBoundedHostPeakDiagnostic(t, msg.Level, msg.Kind, msg.Text)
+		})
+	}
+	limit := stubServeMemoryLimit(t, math.MaxInt64, false)
+	if _, err := serveNativeHostLoadPeakDecision(peak, nil, 26*gib-1, true, hostPeakTestEnv(nil), opts...); !errors.Is(err, ggufload.ErrHostLoadPeakTooBig) {
+		t.Fatalf("over-budget error = %v, want ErrHostLoadPeakTooBig", err)
+	}
+	if *limit != math.MaxInt64 {
+		t.Fatalf("refused load changed the memory limit to %d", *limit)
 	}
 }

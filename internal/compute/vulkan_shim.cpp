@@ -99,6 +99,12 @@ std::atomic<uint64_t> g_h2dCount{0};
 std::atomic<uint64_t> g_d2hCount{0};
 std::atomic<uint64_t> g_d2dCount{0};
 std::atomic<uint64_t> g_d2dBytes{0};
+// Weight bytes written straight into a mapped DEVICE_LOCAL|HOST_VISIBLE arena (no staging copy).
+std::atomic<uint64_t> g_directH2DBytes{0};
+// UMA (integrated GPU, e.g. a carve-out APU): weights go to a device-local, host-visible memory
+// type and are written through the mapping, the llama.cpp ggml-vulkan UMA path. FAK_VULKAN_UMA_DIRECT
+// overrides the device-type default (0/off disables, 1/on forces).
+bool g_umaDirectWeights = false;
 bool                  g_transferCountersValid = true;
 uint64_t              g_deviceAllocationLiveBytes = 0;
 bool                  g_deviceAllocationAccountingValid = true;
@@ -189,6 +195,7 @@ struct Buffer {
     VkDeviceSize   allocationBytes = 0;
     uint64_t       allocationID = 0;
     bool           allocationDeviceLocal = false;
+    void*          mapped = nullptr; // host view of a direct-upload weight arena binding
 };
 
 // Immutable model weights keep their descriptor-visible VkBuffer identity while sharing a
@@ -205,6 +212,7 @@ struct WeightArenaBlock {
     uint32_t memoryTypeIndex = UINT32_MAX;
     size_t liveBuffers = 0;
     bool allocationDeviceLocal = false;
+    void* mapped = nullptr; // persistent map of a host-visible block (UMA direct upload)
 };
 std::vector<WeightArenaBlock> g_weightArena;
 uint64_t g_weightArenaMemoryAllocations = 0;
@@ -282,7 +290,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -306,13 +314,14 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
         return g_dp.otherAdd;
     case K_ATTENTION: case K_QWEN35_CAUSAL_ATTENTION_PANEL: case K_V41_SHARED_ATTENTION: case K_V41_INDEXER_SCORE:
         return g_dp.otherAttention;
-    case K_ARGMAX: case K_ARGMAX_PAIRS:
+    case K_ARGMAX: case K_ARGMAX_PAIRS: case K_V41_ROUTER_TOPK: case K_V41_INDEX_SELECT:
         return g_dp.otherArgmax;
     case K_QWEN35_GDN_Q8_IN_PROJ: case K_QWEN35_GDN_CONV: case K_QWEN35_GDN_RECURRENT:
     case K_QWEN35_GDN_PREFILL_TILED: case K_QWEN35_GDN_PREFILL_NORM:
     case K_QWEN35_GDN_VERIFY_TILED:
     case K_GLM_KDA_REREAD: case K_GLM_KDA_WAVE32:
         return g_dp.otherGDN;
+    case K_V41_MHC: case K_V41_Q2K_EMBED_GATHER:
     case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q4K_MATMUL_COOPMAT: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_Q2K_MATVEC: case K_COUNT:
         return g_dp.otherUnclassified;
     }
@@ -361,8 +370,14 @@ int g_have_qwen35_gdn_q8_in_proj = 0;
 // Mandatory in a current build; published only after complete initialization.
 int g_have_v41_tail_rope_qk = 0;
 int g_have_v41_shared_attention = 0;
+// Optional: the router module is not in the trusted shader registry yet, so it
+// is published only when its module is present and its ABI matches.
+int g_have_v41_router_topk = 0;
 // Independently admitted only after dynamic binary32 properties and module proof.
 int g_have_v41_indexer_score = 0;
+int g_have_v41_mhc = 0;
+int g_have_v41_index_select = 0;
+int g_have_v41_q2k_embed_gather = 0;
 bool g_v41IndexerFloatControls = false;
 std::string g_v41IndexerScoreReason = "Vulkan has not initialized";
 // Fixed-size GLM KDA kernels require an explicitly requested 32-lane subgroup.
@@ -444,6 +459,22 @@ void clearDescriptorBindingCache() {
             for (int i = 0; i < MAX_DISPATCH_BUFS; ++i) rec.buffers[i] = VK_NULL_HANDLE;
         }
     }
+}
+
+uint32_t findMemType(uint32_t typeBits, VkMemoryPropertyFlags want);
+
+// findDirectWeightMemType picks a DEVICE_LOCAL|HOST_VISIBLE|HOST_COHERENT type backed by a
+// device-local heap (the UMA carve-out, never the system-RAM GTT heap), or UINT32_MAX.
+uint32_t findDirectWeightMemType(uint32_t typeBits) {
+    const VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    for (uint32_t i = 0; i < g_memprops.memoryTypeCount; ++i) {
+        if ((typeBits & (1u << i)) && (g_memprops.memoryTypes[i].propertyFlags & want) == want &&
+            memoryTypeUsesDeviceLocalHeap(i)) {
+            return i;
+        }
+    }
+    return UINT32_MAX;
 }
 
 uint32_t findMemType(uint32_t typeBits, VkMemoryPropertyFlags want) {
@@ -796,7 +827,8 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
         return allocBuffer(bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, STORAGE_USAGE);
     }
 
-    uint32_t memoryType = findMemType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memoryType = g_umaDirectWeights ? findDirectWeightMemType(req.memoryTypeBits) : UINT32_MAX;
+    if (memoryType == UINT32_MAX) memoryType = findMemType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (memoryType == UINT32_MAX) {
         vkDestroyBuffer(g_dev, b->buf, nullptr);
         delete b;
@@ -820,6 +852,7 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
         b->props = g_memprops.memoryTypes[memoryType].propertyFlags;
         b->memoryTypeIndex = block.memoryTypeIndex;
         b->memoryOffset = offset;
+        b->mapped = block.mapped ? (char*)block.mapped + offset : nullptr;
         b->weightArenaBound = true;
         b->weightArenaBlock = i;
         ++g_weightArenaBufferBindings;
@@ -875,12 +908,17 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
     block.memoryTypeIndex = memoryType;
     block.liveBuffers = 1;
     block.allocationDeviceLocal = memoryTypeUsesDeviceLocalHeap(memoryType);
+    if (g_memprops.memoryTypes[memoryType].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
+        // A failed map leaves mapped null, and uploads take the staging path.
+        if (vkMapMemory(g_dev, memory, 0, VK_WHOLE_SIZE, 0, &block.mapped) != VK_SUCCESS) block.mapped = nullptr;
+    }
     trackDeviceAllocation(blockBytes, memoryType);
     g_weightArena.push_back(block);
     b->mem = memory;
     b->props = g_memprops.memoryTypes[memoryType].propertyFlags;
     b->memoryTypeIndex = memoryType;
     b->memoryOffset = 0;
+    b->mapped = block.mapped;
     b->weightArenaBound = true;
     b->weightArenaBlock = g_weightArena.size() - 1;
     ++g_weightArenaMemoryAllocations;
@@ -1284,7 +1322,7 @@ const char* const kKernelNames[] = {
     "q6k_matmul", "q5k_matmul", "q3k_matmul", "rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add", "q2k_matmul",
     "rmsnorm_q2k_matmul2", "qwen35_split_qg_panel", "qwen35_partial_rope_panel",
     "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
-    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score",
+    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -1453,10 +1491,24 @@ void batchFlush() {
 	for (Buffer* b : freed)   fvk_free(b);
 }
 
+// UMA direct upload: the destination is coherent device-local memory the CPU maps, so the source
+// (often file-backed checkpoint pages) is copied once, with no staging buffer or transfer submit.
+void copyHostToMappedWeight(Buffer* dst, const void* host, size_t bytes) {
+    memcpy(dst->mapped, host, bytes);
+    if (!checkedCounterAdd(g_h2dCount, 1) || !checkedCounterAdd(g_h2dBytes, bytes) ||
+        !checkedCounterAdd(g_directH2DBytes, bytes)) {
+        g_transferCountersValid = false;
+    }
+}
+
 // staging copy host<->device through one persistent HOST_VISIBLE scratch buffer.
 void copyHostToDevice(Buffer* dst, const void* host, size_t bytes) {
     if (g_v41SubmissionPendingFailure) return;
     if (bytes == 0 || !dst || !host) return;
+    if (dst->mapped) {
+        copyHostToMappedWeight(dst, host, bytes);
+        return;
+    }
     Buffer* stage = stagingBuffer(bytes);
     if (!stage) return;
     memcpy(g_stageMapped, host, bytes);
@@ -2098,7 +2150,7 @@ void recycleDescriptorSet(DescriptorSetRecord rec) {
 // dispatch: bind `bufs` (nbuf of them) + push constants, run groupsX*groupsY workgroups.
 bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1) {
     if (g_v41SubmissionPendingFailure) return false;
-    const bool checkedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_INDEXER_SCORE];
+    const bool checkedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER];
     if (k.nbuf > MAX_DISPATCH_BUFS) {
         fprintf(stderr, "fak-vulkan: dispatch skipped; kernel has %d buffers, max %d\n",
                 k.nbuf, MAX_DISPATCH_BUFS);
@@ -2501,8 +2553,13 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     if (g_v41SubmissionPendingFailure) return 9;
     g_have_v41_tail_rope_qk = 0;
     g_have_v41_shared_attention = 0;
+    g_have_v41_router_topk = 0;
     g_have_v41_indexer_score = 0;
+    g_have_v41_mhc = 0;
+    g_have_v41_index_select = 0;
+    g_have_v41_q2k_embed_gather = 0;
     bool v41IndexerPipelineBuilt = false;
+    bool v41MHCPipelineBuilt = false;
     g_v41IndexerFloatControls = false;
     g_v41IndexerScoreReason = "Vulkan initialization did not complete";
     g_have_qwen35_gdn_q8_in_proj = 0;
@@ -2530,6 +2587,15 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         if (p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) { chosen = d; discrete = true; break; }
     }
     g_phys = chosen;
+    {
+        VkPhysicalDeviceProperties chosenProps{};
+        vkGetPhysicalDeviceProperties(g_phys, &chosenProps);
+        g_umaDirectWeights = chosenProps.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+        if (const char* uma = getenv("FAK_VULKAN_UMA_DIRECT")) {
+            if (!strcmp(uma, "0") || !strcmp(uma, "off")) g_umaDirectWeights = false;
+            if (!strcmp(uma, "1") || !strcmp(uma, "on")) g_umaDirectWeights = true;
+        }
+    }
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(g_phys, &props);
     VkPhysicalDeviceMaintenance3Properties maint3{
@@ -2791,6 +2857,13 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // Archive and complete61 shader bundle cut over and roll back together.
     // Never silently substitute legacy59/60 when this required module fails.
     ok &= buildKernel(g_kern[K_V41_SHARED_ATTENTION], P("v41_shared_attention.spv"), 5, 24);
+    // Trusted since registry V7/complete66, but still optional at init: an
+    // absent module leaves the capability false and device-only V4.1 refuses.
+    const std::string v41RouterModule = P("v41_router_topk.spv");
+    FILE* v41RouterProbe = fopen(v41RouterModule.c_str(), "rb");
+    const bool v41RouterModulePresent = v41RouterProbe != nullptr;
+    if (v41RouterProbe) fclose(v41RouterProbe);
+    const bool v41RouterPipelineBuilt = v41RouterModulePresent && buildKernel(g_kern[K_V41_ROUTER_TOPK], v41RouterModule, 5, 24);
     // This registration is coupled to the separately versioned V5/complete62
     // receipt migration. The frozen V4/complete61 identity is not extended.
     if (g_v41IndexerFloatControls) {
@@ -2798,6 +2871,15 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         v41IndexerPipelineBuilt = buildKernel(g_kern[K_V41_INDEXER_SCORE], P("v41_indexer_score.spv"), 4, 12);
         if (v41IndexerPipelineBuilt) g_v41IndexerScoreReason.clear();
     }
+    // Optional: an absent or rejected mHC module leaves the capability false so
+    // the model refuses its device-only route; it never fails initialization.
+    v41MHCPipelineBuilt = buildKernel(g_kern[K_V41_MHC], P("v41_mhc.spv"), 4, 6 * sizeof(int));
+    // V4.1 index selection, trusted since registry V7/complete66 and optional
+    // at init: an absent module leaves the capability false, never fails init.
+    const bool v41IndexSelectBuilt = buildKernel(g_kern[K_V41_INDEX_SELECT], P("v41_index_select.spv"), 4, 16);
+    // V4.1 Q2_K embedding row gather, trusted since registry V7/complete66 and
+    // optional at init like the router and index-select modules.
+    const bool v41Q2KEmbedGatherBuilt = buildKernel(g_kern[K_V41_Q2K_EMBED_GATHER], P("v41_q2k_embed_gather.spv"), 3, 12);
 
     ok &= buildKernel(g_kern[K_SWIGLU],    P("swiglu.spv"),    3, sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_SWIGLU_MATMUL_ADD], P("swiglu_matmul_add.spv"), 4, 3 * sizeof(int));
@@ -2904,7 +2986,11 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_ready = true;
     g_have_v41_tail_rope_qk = 1;
     g_have_v41_shared_attention = 1;
+    g_have_v41_router_topk = v41RouterPipelineBuilt ? 1 : 0;
     g_have_v41_indexer_score = v41IndexerPipelineBuilt ? 1 : 0;
+    g_have_v41_mhc = v41MHCPipelineBuilt ? 1 : 0;
+    g_have_v41_index_select = v41IndexSelectBuilt ? 1 : 0;
+    g_have_v41_q2k_embed_gather = v41Q2KEmbedGatherBuilt ? 1 : 0;
     // One per-geometry device self-check, before the first forward and never
     // inside one. Its verdict is cached and read by the verify-width route.
     gdnVerifySelfCheck();
@@ -3224,6 +3310,7 @@ void fvk_submission_reset(void) {
 }
 int fvk_batch_flush_status(void) { fvk_batch_flush(); return (int)g_submissionStatus; }
 uint64_t fvk_h2d_bytes(void) { return g_h2dBytes.load(std::memory_order_relaxed); }
+uint64_t fvk_direct_h2d_bytes(void) { return g_directH2DBytes.load(std::memory_order_relaxed); }
 uint64_t fvk_d2h_bytes(void) { return g_d2hBytes.load(std::memory_order_relaxed); }
 int fvk_transfer_counters(uint64_t* h2d_count, uint64_t* h2d_bytes,
                            uint64_t* d2h_count, uint64_t* d2h_bytes,
@@ -3970,6 +4057,56 @@ int fvk_v41_shared_attention_f32(const void* dQ, const void* dSharedKV,
     return (int)g_submissionStatus;
 }
 
+int fvk_have_v41_router_topk(void) {
+    return g_ready && g_have_v41_router_topk && g_kern[K_V41_ROUTER_TOPK].pipe != VK_NULL_HANDLE;
+}
+
+int fvk_v41_router_topk_f32(const void* dLogits, const void* dBias,
+                            void* dExperts, void* dWeights, void* dStatus,
+                            int rows, int experts, int topK,
+                            int full, int hasBias, float routeScale) {
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_router_topk()) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (rows <= 0 || experts <= 0 || topK <= 0 || topK > experts || topK > 8 ||
+        (full != 0 && full != 1) || (hasBias != 0 && hasBias != 1) ||
+        !std::isfinite(routeScale) || !(routeScale > 0.0f)) return 2;
+    const uint64_t logitCount = uint64_t(rows) * uint64_t(experts);
+    const uint64_t pickCount = uint64_t(rows) * uint64_t(topK);
+    const uint64_t statusWords = uint64_t(rows) * 4u;
+    if (logitCount > INT32_MAX || pickCount > INT32_MAX || statusWords > UINT32_MAX ||
+        uint64_t(rows) > g_maxComputeWorkGroupCountX) return 2;
+    Buffer* bufs[5] = {B(dLogits), B(dBias), B(dExperts), B(dWeights), B(dStatus)};
+    const uint64_t counts[5] = {logitCount, hasBias ? uint64_t(experts) : 1u, pickCount, pickCount, statusWords};
+    for (int i = 0; i < 5; ++i) {
+        if (!bufs[i] || bufs[i]->buf == VK_NULL_HANDLE || bufs[i]->mem == VK_NULL_HANDLE ||
+            counts[i] > std::numeric_limits<size_t>::max() / sizeof(uint32_t) ||
+            counts[i] * sizeof(uint32_t) != bufs[i]->bytes ||
+            bufs[i]->bytes > std::numeric_limits<VkDeviceSize>::max() - bufs[i]->memoryOffset) return 2;
+    }
+    auto aliases = [](const Buffer* a, const Buffer* b) {
+        return a == b || a->buf == b->buf ||
+            (a->mem == b->mem && a->memoryOffset < b->memoryOffset + b->bytes &&
+             b->memoryOffset < a->memoryOffset + a->bytes);
+    };
+    for (int out = 2; out <= 4; ++out) {
+        for (int i = 0; i < 5; ++i) if (i != out && aliases(bufs[out], bufs[i])) return 2;
+    }
+    struct Push {
+        int32_t rows, experts, topK, full, hasBias;
+        float routeScale;
+    } pc{rows, experts, topK, full, hasBias, routeScale};
+    static_assert(sizeof(int) == 4 && sizeof(float) == 4 && sizeof(Push) == 24,
+                  "V4.1 router push ABI must be five int32 values and one float32");
+    // One scalar invocation per row initializes its status and pick slots,
+    // then owns that row's first fault. There is no atomic winner race.
+    if (!dispatch(g_kern[K_V41_ROUTER_TOPK], bufs, &pc, sizeof(pc), uint32_t(rows))) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
 static bool v41IndexerScorePrerequisites() {
     return g_ready && g_submissionStatus == VK_SUCCESS && !g_v41SubmissionPendingFailure &&
         g_v41IndexerFloatControls && g_have_v41_indexer_score &&
@@ -3979,8 +4116,9 @@ static bool v41IndexerScorePrerequisites() {
 int fvk_have_v41_indexer_score(void) {
     // Source-only candidate: no trusted compiler/source/numerical qualification
     // admission is integrated yet. Neither environment nor module bytes can
-    // enable production dispatch. A future change must bind that admission to
-    // the exact V5 archive/module/compiler/source/device witness identities.
+    // enable production dispatch. The 2026-10-09 gfx1151 parity run used the
+    // separate witness archive, not this production profile, so it does not
+    // open this gate. Device-only V4.1 names this op as unbound and refuses.
     return 0;
 }
 
@@ -4038,6 +4176,58 @@ int fvk_v41_indexer_score_f32(const void* dQ, const void* dKeys,
     return v41IndexerScoreChecked(dQ, dKeys, dWeights, dScores, rows, heads, headDim);
 }
 
+int fvk_have_v41_mhc(void) {
+    return g_ready && g_have_v41_mhc && g_kern[K_V41_MHC].pipe != VK_NULL_HANDLE;
+}
+
+int fvk_v41_mhc_f32(int mode, const void* dA, const void* dB, const void* dC,
+                    void* dOut, int rows, int hidden, int iters, float eps, float rmsEps) {
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_mhc()) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (mode < 0 || mode > 4 || rows <= 0) return 2;
+    if ((mode == 1 || mode == 4) && (iters < 1 || !std::isfinite(eps) || !(eps > 0.0f))) return 2;
+    if (mode == 4 && (!std::isfinite(rmsEps) || !(rmsEps > 0.0f))) return 2;
+    if (mode != 1 && hidden <= 0) return 2;
+    const uint64_t r = uint64_t(rows), h = uint64_t(hidden);
+    const uint64_t coeffs = r * 24u, row = r * h, streams = r * 4u * h;
+    // Element counts per binding A, B, C, Out; an unused binding repeats A.
+    uint64_t counts[4] = {0, 0, 0, 0};
+    uint64_t threads = 0;
+    switch (mode) {
+    case 0: counts[0] = row; counts[1] = row; counts[2] = row; counts[3] = streams; threads = row; break;
+    case 1: counts[0] = coeffs; counts[1] = 3; counts[2] = 24; counts[3] = coeffs; threads = r; break;
+    case 2: counts[0] = streams; counts[1] = coeffs; counts[2] = streams; counts[3] = row; threads = row; break;
+    case 3: counts[0] = row; counts[1] = streams; counts[2] = coeffs; counts[3] = streams; threads = streams; break;
+    case 4: counts[0] = coeffs; counts[1] = streams; counts[2] = 27; counts[3] = coeffs; threads = r; break;
+    }
+    if (streams > UINT32_MAX || coeffs > UINT32_MAX) return 2;
+    const uint64_t groups = (threads + 63u) / 64u;
+    if (groups == 0 || groups > g_maxComputeWorkGroupCountX) return 2;
+    Buffer* bufs[4] = {B(dA), B(dB), B(dC), B(dOut)};
+    for (int i = 0; i < 4; ++i) {
+        if (!bufs[i] || bufs[i]->buf == VK_NULL_HANDLE || bufs[i]->mem == VK_NULL_HANDLE ||
+            counts[i] > std::numeric_limits<size_t>::max() / sizeof(float) ||
+            counts[i] * sizeof(float) > bufs[i]->bytes || bufs[i]->bytes > g_maxStorageBufferRange ||
+            bufs[i]->bytes > std::numeric_limits<VkDeviceSize>::max() - bufs[i]->memoryOffset) return 2;
+    }
+    auto aliases = [](const Buffer* a, const Buffer* b) {
+        return a == b || a->buf == b->buf ||
+            (a->mem == b->mem && a->memoryOffset < b->memoryOffset + b->bytes &&
+             b->memoryOffset < a->memoryOffset + a->bytes);
+    };
+    for (int i = 0; i < 3; ++i) if (aliases(bufs[3], bufs[i])) return 2;
+    const bool splits = mode == 1 || mode == 4;
+    struct Push { int32_t mode, rows, hidden, iters; float eps, rmsEps; } pc{mode, rows, mode == 1 ? 0 : hidden, splits ? iters : 0, splits ? eps : 0.0f, mode == 4 ? rmsEps : 0.0f};
+    static_assert(sizeof(Push) == 24 && offsetof(Push, eps) == 16 && offsetof(Push, rmsEps) == 20,
+                  "V4.1 mHC push ABI must be four int32 values then two float32");
+    if (!dispatch(g_kern[K_V41_MHC], bufs, &pc, sizeof(pc), uint32_t(groups))) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
 #ifdef FAK_V41_INDEXER_SCORE_WITNESS
 // Test-archive-only symbols. No production runtime switch can enable them or
 // mark Supports true. The tagged Go witness must link this exact test archive.
@@ -4048,6 +4238,81 @@ int fvk_v41_indexer_score_witness_f32(const void* dQ, const void* dKeys,
     return v41IndexerScoreChecked(dQ, dKeys, dWeights, dScores, rows, heads, headDim);
 }
 #endif
+
+int fvk_have_v41_index_select(void) {
+    return g_ready && g_have_v41_index_select && g_kern[K_V41_INDEX_SELECT].pipe != VK_NULL_HANDLE;
+}
+
+int fvk_v41_index_select_f32(const void* dScores, void* dScratch, void* dOut, void* dStatus,
+                             int rows, int topK, int topKBlocks, int blockSize) {
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_index_select()) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (rows <= 0 || rows > (1 << 24) || topK <= 0 || topKBlocks < 0 || (topKBlocks > 0 && blockSize <= 0)) return 2;
+    const uint64_t blocks = topKBlocks > 0 ? uint64_t(rows - 1) / uint64_t(blockSize) + 1u : 0u;
+    const uint64_t selected = uint64_t(topK < rows ? topK : rows);
+    Buffer* bufs[4] = {B(dScores), B(dScratch), B(dOut), B(dStatus)};
+    const uint64_t counts[4] = {uint64_t(rows), 2u * blocks + uint64_t(rows), selected, 1u};
+    for (int i = 0; i < 4; ++i) {
+        if (!bufs[i] || bufs[i]->buf == VK_NULL_HANDLE || bufs[i]->mem == VK_NULL_HANDLE ||
+            counts[i] > std::numeric_limits<size_t>::max() / sizeof(uint32_t) ||
+            counts[i] * sizeof(uint32_t) > bufs[i]->bytes ||
+            bufs[i]->bytes > std::numeric_limits<VkDeviceSize>::max() - bufs[i]->memoryOffset) return 2;
+    }
+    auto aliases = [](const Buffer* a, const Buffer* b) {
+        return a == b || a->buf == b->buf ||
+            (a->mem == b->mem && a->memoryOffset < b->memoryOffset + b->bytes &&
+             b->memoryOffset < a->memoryOffset + a->bytes);
+    };
+    for (int i = 0; i < 4; ++i) {
+        for (int j = i + 1; j < 4; ++j) if (aliases(bufs[i], bufs[j])) return 2;
+    }
+    struct Push { int32_t rows, topK, topKBlocks, blockSize; } pc{rows, topK, topKBlocks, blockSize};
+    static_assert(sizeof(Push) == 16, "V4.1 index select push ABI must be four int32 values");
+    if (!dispatch(g_kern[K_V41_INDEX_SELECT], bufs, &pc, sizeof(pc), 1u)) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
+int fvk_have_v41_q2k_embed_gather(void) {
+    return g_ready && g_have_v41_q2k_embed_gather && g_kern[K_V41_Q2K_EMBED_GATHER].pipe != VK_NULL_HANDLE;
+}
+
+int fvk_v41_q2k_embed_gather_f32(const void* dTable, const void* dIds, void* dOut,
+                                 int rows, int hidden, int vocab) {
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_q2k_embed_gather()) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (rows <= 0 || hidden <= 0 || (hidden % 256) != 0 || vocab <= 0) return 2;
+    const uint64_t rowBytes = uint64_t(hidden / 256) * 84u;
+    const uint64_t total = uint64_t(rows) * uint64_t(hidden);
+    if (uint64_t(vocab) * rowBytes > UINT32_MAX || total > INT32_MAX) return 2;
+    Buffer* bufs[3] = {B(dTable), B(dIds), B(dOut)};
+    const uint64_t bytes[3] = {uint64_t(vocab) * rowBytes, uint64_t(rows) * 4u, total * 4u};
+    for (int i = 0; i < 3; ++i) {
+        if (!bufs[i] || bufs[i]->buf == VK_NULL_HANDLE || bufs[i]->mem == VK_NULL_HANDLE ||
+            bytes[i] > bufs[i]->bytes ||
+            bufs[i]->bytes > std::numeric_limits<VkDeviceSize>::max() - bufs[i]->memoryOffset) return 2;
+    }
+    auto aliases = [](const Buffer* a, const Buffer* b) {
+        return a == b || a->buf == b->buf ||
+            (a->mem == b->mem && a->memoryOffset < b->memoryOffset + b->bytes &&
+             b->memoryOffset < a->memoryOffset + a->bytes);
+    };
+    if (aliases(bufs[2], bufs[0]) || aliases(bufs[2], bufs[1])) return 2;
+    struct Push { int32_t rows, hidden, vocab; } pc{rows, hidden, vocab};
+    static_assert(sizeof(Push) == 12, "V4.1 Q2_K embedding gather push ABI must be three int32 values");
+    uint64_t groups = (total + 255u) / 256u;
+    if (groups > g_maxComputeWorkGroupCountX) groups = g_maxComputeWorkGroupCountX;
+    if (groups == 0) return 2;
+    if (!dispatch(g_kern[K_V41_Q2K_EMBED_GATHER], bufs, &pc, sizeof(pc), uint32_t(groups))) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
 
 void fvk_swiglu_f32(const void* dG, const void* dU, void* dY, int n) {
     fvk_swiglu_limit_f32(dG, dU, dY, n, 0.0f);

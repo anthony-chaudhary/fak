@@ -355,7 +355,7 @@ func TestQwen35NativeRowsLoaderEstimatorAndForward(t *testing.T) {
 		}
 		return m, plan.Total()
 	}
-	native, nativeBytes := load()
+	native, nativeBytes := load(WithNativeLinearAttnRows(true))
 	baseline, baselineBytes := load(WithNativeLinearAttnRows(false))
 	if nativeBytes >= baselineBytes {
 		t.Fatalf("native-row resident %d not below Q8 baseline %d", nativeBytes, baselineBytes)
@@ -465,5 +465,27 @@ func TestQwen35NativeRowsLoaderEstimatorAndForward(t *testing.T) {
 		if a, b := argmaxF32(got[i]), argmaxF32(want[i]); a != b {
 			t.Errorf("step %d argmax native=%d Q8=%d", i, a, b)
 		}
+	}
+}
+
+func TestQwen35NativeRowsYieldToMetalDecodeRuntimeOnAppleSilicon(t *testing.T) {
+	cfg := nativeRowsTestCfg(true)
+	cfg.FullAttentionInterval = 4
+	cfg.LinearKeyHeadDim, cfg.LinearValueHeadDim = 128, 128
+	qkv := "model.layers.0.linear_attn.in_proj_qkv.weight"
+	shape := []int{512, 256}
+	prev := metalDecodeRuntimeHost
+	t.Cleanup(func() { metalDecodeRuntimeHost = prev })
+
+	metalDecodeRuntimeHost = false
+	if !qwen35NativeRowResident(cfg, qkv, TensorQ4_K, shape, q4kLoadOptions{}) {
+		t.Fatal("non-Metal host lost native rows on a declared-cadence hybrid")
+	}
+	metalDecodeRuntimeHost = true
+	if qwen35NativeRowResident(cfg, qkv, TensorQ4_K, shape, q4kLoadOptions{}) {
+		t.Fatal("Metal host kept native rows that the resident Q8 decode runtime needs")
+	}
+	if !qwen35NativeRowResident(cfg, qkv, TensorQ4_K, shape, q4kLoadOptions{nativeRowsForced: true}) {
+		t.Fatal("WithNativeLinearAttnRows(true) did not force native rows on a Metal host")
 	}
 }

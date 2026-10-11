@@ -127,6 +127,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		return err
 	}
 
+	var mhcDevice *v41MHCDevice
 	if full {
 		if err := scratch.mhcCarry.validate(l, 1); err != nil {
 			return err
@@ -134,6 +135,14 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		if err := m.v41AdmitMHC(l); err != nil {
 			return err
 		}
+		mhcDevice = scratch.mhcCarry.device
+	}
+	var resident *v41MHCResident
+	if full {
+		resident = scratch.mhcCarry.resident
+	}
+	if resident != nil {
+		defer resident.abort()
 	}
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
 	mixBase := m.tensor(layerName(l, "mhc.base"))
@@ -159,49 +168,69 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		return v41StageErr(v41StageMHC, l,
 			fmt.Errorf("%w: mHC mix weight holds no admitted geometry", ErrV41ForwardStage))
 	}
-	xn := rmsnormCfg(x, attnNorm, eps, cfg)
-	input := xn
-	if mhcFlat {
-		width, ok := checkedMulInt(4, H)
-		if !ok || len(streams) != 4 {
-			return v41StageErr(v41StageMHC, l, errV41ProjectionResult)
+	var xn []float32
+	var mix v41MHCMix
+	var collapsed []float32
+	if resident != nil {
+		rows, rerr := resident.beginLayer(l, hcItersOrDefault(cfg), hcEpsOrDefault(cfg), eps)
+		if rerr != nil {
+			return rerr
 		}
-		input = make([]float32, 0, width)
-		for _, stream := range streams {
-			if len(stream) != H {
+		if collapsed, err = m.v41AttentionInputNorm(l, rows[0], eps); err != nil {
+			return err
+		}
+	} else {
+		xn = rmsnormCfg(x, attnNorm, eps, cfg)
+		input := xn
+		if mhcFlat {
+			width, ok := checkedMulInt(4, H)
+			if !ok || len(streams) != 4 {
 				return v41StageErr(v41StageMHC, l, errV41ProjectionResult)
 			}
-			input = append(input, stream...)
+			input = make([]float32, 0, width)
+			for _, stream := range streams {
+				if len(stream) != H {
+					return v41StageErr(v41StageMHC, l, errV41ProjectionResult)
+				}
+				input = append(input, stream...)
+			}
 		}
-	}
-	projectMHC := m.v41MHCProjector(l, H, eps, mhcFlat, mhcTransposed, scratch)
-	mixes, err := projectMHC(input)
-	if err != nil {
-		return err
-	}
-	mix, err := v41MHCSplit(mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg))
-	if err != nil {
-		return v41StageErr(v41StageMHC, l, err)
-	}
-	// The pre-collapse reads the four DISTINCT persistent streams on the full
-	// path and the reduced stand-in (four identical copies of the normalized
-	// input) on the reduced path -- byte-identical to v41Layer's seq==1 branch.
-	streams4 := streams
-	if !full {
-		streams4 = [][]float32{xn, xn, xn, xn}
-	}
-	pre := mix.pre
-	if full {
-		pre = scratch.mhcCarry.pre[0]
-	}
-	collapsed, err := v41MHCPre(streams4, pre)
-	if err != nil {
-		return v41StageErr(v41StageMHC, l, err)
-	}
-	if full {
-		collapsed, err = m.v41AttentionInputNorm(l, collapsed, eps)
+		projectMHC := m.v41MHCProjector(l, H, eps, mhcFlat, mhcTransposed, scratch)
+		mixes, err := projectMHC(input)
 		if err != nil {
 			return err
+		}
+		mix, err = v41MHCSplitOn(mhcDevice, l, mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg))
+		if err != nil {
+			return err
+		}
+		// The pre-collapse reads the four DISTINCT persistent streams on the full
+		// path and the reduced stand-in (four identical copies of the normalized
+		// input) on the reduced path -- byte-identical to v41Layer's seq==1 branch.
+		streams4 := streams
+		if !full {
+			streams4 = [][]float32{xn, xn, xn, xn}
+		}
+		pre := mix.pre
+		if full {
+			pre = scratch.mhcCarry.pre[0]
+		}
+		if mhcDevice != nil {
+			collapsed, err = mhcDevice.preBF16(l, streams4, pre)
+			if err != nil {
+				return err
+			}
+		} else {
+			collapsed, err = v41MHCPre(streams4, pre)
+			if err != nil {
+				return v41StageErr(v41StageMHC, l, err)
+			}
+		}
+		if full {
+			collapsed, err = m.v41AttentionInputNorm(l, collapsed, eps)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -328,7 +357,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
 	}
-	o, err = v41AttentionOutputForProjection(cfg, l, pos, o, nH, hd)
+	o, err = v41RotatedOutputForProjection(cfg, l, pos, o, nH, hd, scratch.gatherOps)
 	if err != nil {
 		return err
 	}
@@ -345,7 +374,13 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	var ffnX []float32
 	var ffnResidual [][]float32
 	var ffnMix v41MHCMix
-	if full {
+	if resident != nil {
+		rows, rerr := resident.ffnInput(l, [][]float32{attnOut}, hcItersOrDefault(cfg), hcEpsOrDefault(cfg), eps)
+		if rerr != nil {
+			return rerr
+		}
+		ffnX, err = m.v41FFNNorm(l, rows[0], eps, scratch.ffnNorm)
+	} else if full {
 		projectFFN, ferr := m.v41FFNMHCProjector(l, scratch)
 		if ferr != nil {
 			return ferr
@@ -361,10 +396,11 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return err
 	}
-	picks, err := v41RouteForGeometry(routerLogits, gateBias, routeCfg, full)
+	picks, err := v41RouteForGeometryWith(l, routerLogits, gateBias, routeCfg, full, scratch.routerTopK)
 	if err != nil {
 		return v41StageErr(v41StageMoE, l, err)
 	}
+	m.emitExpertRouteAt(l, pos, picks)
 	routed := make([]float32, H)
 	var fullOutputs [][]float32
 	if full {
@@ -385,7 +421,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		}
 	}
 	if full {
-		routed, err = v41FullRoutedSum(l, picks, fullOutputs, H)
+		routed, err = v41FullRoutedSumWith(l, picks, fullOutputs, H, scratch.routedSum)
 		if err != nil {
 			return err
 		}
@@ -394,13 +430,15 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return err
 	}
-	moe, err := v41SharedExpertAdd(routed, shared, routeCfg)
+	moe, err := v41SharedExpertAddWith(l, routed, shared, routeCfg, scratch.sharedAdd)
 	if err != nil {
 		return v41StageErr(v41StageMoE, l, err)
 	}
 	var next [][]float32
-	if full {
-		next, err = v41MHCPostBF16(l, moe, ffnResidual, ffnMix)
+	if resident != nil {
+		err = resident.finishLayer(l, [][]float32{moe})
+	} else if full {
+		next, err = v41MHCPostBF16On(mhcDevice, l, moe, ffnResidual, ffnMix)
 	} else {
 		delta := make([]float32, H)
 		for i := range delta {
@@ -427,7 +465,12 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if commitErr != nil {
 		return v41StageErr(v41StageAttention, l, commitErr)
 	}
-	if full {
+	if resident != nil {
+		if err := resident.publish(l); err != nil {
+			return err
+		}
+		scratch.mhcCarry.nextLayer++
+	} else if full {
 		for h := 0; h < 4; h++ {
 			copy(streams[h], next[h])
 		}
@@ -515,6 +558,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 			fmt.Errorf("%w: layer %d role step requires the full V4.1 geometry", ErrV41ForwardStage, l))
 	}
 
+	var mhcDevice *v41MHCDevice
 	if full {
 		if err := scratch.mhcCarry.validate(l, 1); err != nil {
 			return err
@@ -522,6 +566,14 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		if err := m.v41AdmitMHC(l); err != nil {
 			return err
 		}
+		mhcDevice = scratch.mhcCarry.device
+	}
+	var resident *v41MHCResident
+	if full {
+		resident = scratch.mhcCarry.resident
+	}
+	if resident != nil {
+		defer resident.abort()
 	}
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
 	mixBase := m.tensor(layerName(l, "mhc.base"))
@@ -534,33 +586,50 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		return v41StageErr(v41StageMHC, l,
 			fmt.Errorf("%w: mHC mix weight holds no admitted geometry", ErrV41ForwardStage))
 	}
-	xn := rmsnormCfg(x, attnNorm, eps, cfg)
-	input := xn
-	if mhcFlat {
-		width, ok := checkedMulInt(4, H)
-		if !ok || len(streams) != 4 {
-			return v41StageErr(v41StageMHC, l, errV41ProjectionResult)
+	var mix v41MHCMix
+	var collapsed []float32
+	if resident != nil {
+		rows, rerr := resident.beginLayer(l, hcItersOrDefault(cfg), hcEpsOrDefault(cfg), eps)
+		if rerr != nil {
+			return rerr
 		}
-		input = make([]float32, 0, width)
-		for _, stream := range streams {
-			if len(stream) != H {
+		collapsed = rows[0]
+	} else {
+		xn := rmsnormCfg(x, attnNorm, eps, cfg)
+		input := xn
+		if mhcFlat {
+			width, ok := checkedMulInt(4, H)
+			if !ok || len(streams) != 4 {
 				return v41StageErr(v41StageMHC, l, errV41ProjectionResult)
 			}
-			input = append(input, stream...)
+			input = make([]float32, 0, width)
+			for _, stream := range streams {
+				if len(stream) != H {
+					return v41StageErr(v41StageMHC, l, errV41ProjectionResult)
+				}
+				input = append(input, stream...)
+			}
 		}
-	}
-	projectMHC := m.v41MHCProjector(l, H, eps, mhcFlat, mhcTransposed, scratch)
-	mixes, err := projectMHC(input)
-	if err != nil {
-		return err
-	}
-	mix, err := v41MHCSplit(mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg))
-	if err != nil {
-		return v41StageErr(v41StageMHC, l, err)
-	}
-	collapsed, err := v41MHCPre(streams, scratch.mhcCarry.pre[0])
-	if err != nil {
-		return v41StageErr(v41StageMHC, l, err)
+		projectMHC := m.v41MHCProjector(l, H, eps, mhcFlat, mhcTransposed, scratch)
+		mixes, err := projectMHC(input)
+		if err != nil {
+			return err
+		}
+		mix, err = v41MHCSplitOn(mhcDevice, l, mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg))
+		if err != nil {
+			return err
+		}
+		if mhcDevice != nil {
+			collapsed, err = mhcDevice.preBF16(l, streams, scratch.mhcCarry.pre[0])
+			if err != nil {
+				return err
+			}
+		} else {
+			collapsed, err = v41MHCPre(streams, scratch.mhcCarry.pre[0])
+			if err != nil {
+				return v41StageErr(v41StageMHC, l, err)
+			}
+		}
 	}
 	collapsed, err = m.v41AttentionInputNorm(l, collapsed, eps)
 	if err != nil {
@@ -675,7 +744,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		}
 	}
 	if indexSourceAt(cfg.DeepSeekV41, l) {
-		sourceIdx, err = m.v41IndexRowsWithOperations(l, pos, qLat, collapsed, indexKeys, scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth)
+		sourceIdx, err = m.v41IndexRowsWithDeviceOps(l, pos, qLat, collapsed, indexKeys, scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps)
 		if err != nil {
 			return err
 		}
@@ -719,7 +788,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
 	}
-	o, err = v41AttentionOutputForProjection(cfg, l, pos, o, nH, hd)
+	o, err = v41RotatedOutputForProjection(cfg, l, pos, o, nH, hd, scratch.gatherOps)
 	if err != nil {
 		return err
 	}
@@ -728,7 +797,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		return v41StageErr(v41StageAttention, l, err)
 	}
 
-	if err := m.v41LayerStepRoleFinish(l, x, streams, mix, attnProjected, scratch); err != nil {
+	if err := m.v41LayerStepRoleFinish(l, pos, x, streams, mix, attnProjected, scratch); err != nil {
 		return err
 	}
 	// No error-returning operation remains. State.Step would advance an owner's
@@ -749,14 +818,26 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 // commits the position's mHC streams and hidden row. It is shared by the source
 // and reader paths so the tail after attention is byte-identical to the plain
 // branch's seq == 1 arithmetic. The caller commits its window after this returns.
-func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, mix v41MHCMix, attnOut []float32, scratch *v41ProjScratch) error {
+func (m *Model) v41LayerStepRoleFinish(l, pos int, x []float32, streams [][]float32, mix v41MHCMix, attnOut []float32, scratch *v41ProjScratch) error {
 	cfg := m.Cfg
 	H := cfg.HiddenSize
 	projectFFN, err := m.v41FFNMHCProjector(l, scratch)
 	if err != nil {
 		return err
 	}
-	ffnResidual, ffnMix, ffnX, err := m.v41FullFFNInput(l, streams, mix, attnOut, projectFFN, scratch)
+	resident := scratch.mhcCarry.resident
+	var ffnResidual [][]float32
+	var ffnMix v41MHCMix
+	var ffnX []float32
+	if resident != nil {
+		rows, rerr := resident.ffnInput(l, [][]float32{attnOut}, hcItersOrDefault(cfg), hcEpsOrDefault(cfg), float32(cfg.RMSNormEps))
+		if rerr != nil {
+			return rerr
+		}
+		ffnX, err = m.v41FFNNorm(l, rows[0], float32(cfg.RMSNormEps), scratch.ffnNorm)
+	} else {
+		ffnResidual, ffnMix, ffnX, err = m.v41FullFFNInput(l, streams, mix, attnOut, projectFFN, scratch)
+	}
 	if err != nil {
 		return err
 	}
@@ -769,10 +850,11 @@ func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, 
 		return err
 	}
 	gateBias := m.tensor(layerName(l, "ffn.gate.e_score_correction_bias"))
-	picks, err := v41RouteForGeometry(routerLogits, gateBias, routeCfg, true)
+	picks, err := v41RouteForGeometryWith(l, routerLogits, gateBias, routeCfg, true, scratch.routerTopK)
 	if err != nil {
 		return v41StageErr(v41StageMoE, l, err)
 	}
+	m.emitExpertRouteAt(l, pos, picks)
 	routed := make([]float32, H)
 	fullOutputs := make([][]float32, len(picks))
 	for slot, pick := range picks {
@@ -783,7 +865,7 @@ func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, 
 		}
 		fullOutputs[slot] = y
 	}
-	routed, err = v41FullRoutedSum(l, picks, fullOutputs, H)
+	routed, err = v41FullRoutedSumWith(l, picks, fullOutputs, H, scratch.routedSum)
 	if err != nil {
 		return err
 	}
@@ -791,11 +873,21 @@ func (m *Model) v41LayerStepRoleFinish(l int, x []float32, streams [][]float32, 
 	if err != nil {
 		return err
 	}
-	moe, err := v41SharedExpertAdd(routed, shared, routeCfg)
+	moe, err := v41SharedExpertAddWith(l, routed, shared, routeCfg, scratch.sharedAdd)
 	if err != nil {
 		return v41StageErr(v41StageMoE, l, err)
 	}
-	next, err := v41MHCPostBF16(l, moe, ffnResidual, ffnMix)
+	if resident != nil {
+		if err := resident.finishLayer(l, [][]float32{moe}); err != nil {
+			return err
+		}
+		if err := resident.publish(l); err != nil {
+			return err
+		}
+		scratch.mhcCarry.nextLayer++
+		return nil
+	}
+	next, err := v41MHCPostBF16On(scratch.mhcCarry.device, l, moe, ffnResidual, ffnMix)
 	if err != nil {
 		return v41StageErr(v41StageMHC, l, err)
 	}

@@ -288,7 +288,7 @@ func (m *Model) v41ContractRoutedGrouped(l int, xnByToken [][]float32, perTokenP
 	// accumulation `routed[i] += pick.weight * y[i]` per slot.
 	for t, picks := range perTokenPicks {
 		if full {
-			values, cause := v41FullRoutedSum(l, picks, unweighted[t], H)
+			values, cause := v41FullRoutedSumWith(l, picks, unweighted[t], H, scratch.routedSum)
 			if cause != nil {
 				return cause
 			}

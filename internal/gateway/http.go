@@ -779,7 +779,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	r, cancelDeadline := bindClientDeadline(r, turnCostBegan)
 	defer cancelDeadline()
 	// Retain served-prefix history as observation only. Admission below uses
-	// current request-owned native state, or prices unsupported routes cold.
+	// current request-owned native state or measured residency evidence.
 	r = withDeadlineCacheObservation(r, req.Model, req.Tools, req.Messages)
 	deadlineCtx := r.Context()
 	// Stamp the causal input on the untouched wire envelope before admission
@@ -806,7 +806,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if s.refuseNativeModelMismatch(w, r, req.Model, routedModel) {
 		return
 	}
-	r, releaseDeadline, ok := s.admitRoutedClientDeadline(w, r, turnCostBegan, req.Messages, req.MaxTokens)
+	r, releaseDeadline, ok := s.admitRoutedClientDeadlineModel(w, r, turnCostBegan, req.Model, req.Messages, req.MaxTokens)
 	if !ok {
 		return
 	}

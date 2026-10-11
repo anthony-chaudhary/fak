@@ -73,8 +73,9 @@ FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_DISPATCH_PROFILE=1 FAK_VULKAN_SPIRV=<spir
 
 Witness: the command above on a Strix Halo appliance.
 
-- [ ] [SW-VERIFIED] Root cause named: the control routes to device by design, or a routing regression.
+- [x] [SW-VERIFIED] Root cause named: by design. 6a54495ecd4 made transposed F32 device eligible, so the orientation-only control routed to device. 4e80401da72 (after the dff9be67b4a silicon run) added an explicit per-session mHC decline to the Halo control. `TestV41MHCTransposedF32HostControlRoute` pins both halves on cpu-ref.
 - [ ] [HW-WITNESSED] `TestV41MHCProjectionVulkan` F32 and Q2_K both PASS on a Halo.
+  - 2026-10-10 strix1, f2be2792ab2: [HW-WITNESSED] Q2_K PASS. F32 host-control route and staging asserts pass (the control runs on host), but F32 grouped parity fails at maximum_diff 0.0535 against 1e-4. This drift was hidden while the control also ran on device. It is the same with a logical-layout control, so it is not the transposed path. Tracked as TICKET-02d (#13808).
 
 ## Witness
 

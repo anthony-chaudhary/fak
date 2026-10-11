@@ -155,6 +155,12 @@ function Build-Shaders {
     $shaders += "v41_shared_attention"
     # Coupled V5/complete62 migration; never accept this bundle as frozen V4/61.
     $shaders += "v41_indexer_score"
+    # Coupled V6/complete63 migration; never accept this bundle as frozen V5/62.
+    $shaders += "v41_mhc"
+    # Coupled V7/complete66 migration; never accept this bundle as frozen V6/63.
+    $shaders += "v41_router_topk"
+    $shaders += "v41_index_select"
+    $shaders += "v41_q2k_embed_gather"
     foreach ($s in $shaders) {
         $src = Join-Path $shaderSrc "$s.comp"
         $dst = Join-Path $spvOut "$s.spv"

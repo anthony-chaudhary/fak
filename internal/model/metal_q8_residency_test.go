@@ -164,3 +164,39 @@ func TestNewQ8TensorOwnsPageAlignedByteIdenticalBacking(t *testing.T) {
 		t.Fatal("Q8 owner lost byte identity")
 	}
 }
+
+func cadenceQwen35Q8Config(layers, interval int) Config {
+	types := make([]string, layers)
+	for i := range types {
+		types[i] = "linear_attention"
+		if (i+1)%interval == 0 {
+			types[i] = "full_attention"
+		}
+	}
+	return Config{ModelType: "qwen3_5_text", NumLayers: layers, LayerTypes: types, FullAttentionInterval: interval,
+		LinearKeyHeadDim: 128, LinearValueHeadDim: 128}
+}
+
+func TestQwen35CadenceQ8RuntimeAdmitsSmallHybrid(t *testing.T) {
+	names, err := qwen38MetalQ8RuntimeNames(cadenceQwen35Q8Config(32, 4))
+	if err != nil {
+		t.Fatalf("32-layer cadence-4 hybrid refused: %v", err)
+	}
+	if want := 5*24 + 2*8; len(names) != want {
+		t.Fatalf("got %d runtime names, want %d", len(names), want)
+	}
+	for _, mutate := range []func(*Config){
+		func(c *Config) { c.FullAttentionInterval = 0 },
+		func(c *Config) { c.LayerTypes[0] = "full_attention" },
+		func(c *Config) { c.LayerTypes[3] = "linear_attention" },
+		func(c *Config) { c.NumLayers = 30; c.LayerTypes = c.LayerTypes[:30] },
+		func(c *Config) { c.LinearKeyHeadDim = 64 },
+	} {
+		c := cadenceQwen35Q8Config(32, 4)
+		mutate(&c)
+		var unavailable *MetalQ8ResidencyUnavailableError
+		if _, err := qwen38MetalQ8RuntimeNames(c); !errors.As(err, &unavailable) {
+			t.Fatalf("drifted cadence config not refused with MetalQ8ResidencyUnavailableError: %v", err)
+		}
+	}
+}

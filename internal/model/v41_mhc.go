@@ -151,6 +151,11 @@ func v41MHCPost(x []float32, residual [][]float32, post []float32, comb []float3
 type v41MHCCarry struct {
 	pre       [][]float32
 	nextLayer int
+	// device is the forward's selected mHC seam; nil keeps the host reference.
+	device *v41MHCDevice
+	// resident is the device-resident stream panel when device is resident;
+	// the host stream slices are then placeholders, never authoritative.
+	resident *v41MHCResident
 }
 
 func newV41MHCCarry(rows int) *v41MHCCarry {
@@ -245,7 +250,11 @@ func (m *Model) v41FFNMHCProjector(layer int, scratch *v41ProjScratch) (func([]f
 // may reuse its materialization buffer. The returned streams and norm row are
 // owned; the caller retains incoming streams/carry until all later work succeeds.
 func (m *Model) v41FullFFNInput(layer int, streams [][]float32, attnMix v41MHCMix, attnOut []float32, projectFFN func([]float32) ([]float32, error), scratch *v41ProjScratch) ([][]float32, v41MHCMix, []float32, error) {
-	updated, err := v41MHCPostBF16(layer, attnOut, streams, attnMix)
+	var device *v41MHCDevice
+	if scratch != nil && scratch.mhcCarry != nil {
+		device = scratch.mhcCarry.device
+	}
+	updated, err := v41MHCPostBF16On(device, layer, attnOut, streams, attnMix)
 	if err != nil {
 		return nil, v41MHCMix{}, nil, err
 	}
@@ -257,11 +266,11 @@ func (m *Model) v41FullFFNInput(layer int, streams [][]float32, attnMix v41MHCMi
 	if err != nil {
 		return nil, v41MHCMix{}, nil, err
 	}
-	mix, err := v41MHCSplit(projected, m.tensor(layerName(layer, "mhc.ffn_scale")), m.tensor(layerName(layer, "mhc.ffn_base")), 4, hcItersOrDefault(m.Cfg), hcEpsOrDefault(m.Cfg))
+	mix, err := v41MHCSplitOn(device, layer, projected, m.tensor(layerName(layer, "mhc.ffn_scale")), m.tensor(layerName(layer, "mhc.ffn_base")), 4, hcItersOrDefault(m.Cfg), hcEpsOrDefault(m.Cfg))
 	if err != nil {
-		return nil, v41MHCMix{}, nil, v41StageErr(v41StageMHC, layer, err)
+		return nil, v41MHCMix{}, nil, err
 	}
-	collapsed, err := v41MHCPreBF16(layer, updated, attnMix.pre)
+	collapsed, err := v41MHCPreBF16On(device, layer, updated, attnMix.pre)
 	if err != nil {
 		return nil, v41MHCMix{}, nil, err
 	}

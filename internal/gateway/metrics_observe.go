@@ -1023,6 +1023,7 @@ func (m *gatewayMetrics) observeInferenceTimedDetail(loc servingLocality, prompt
 	if cacheCreateTok > 0 {
 		m.inferCacheCreationTokens += uint64(cacheCreateTok) // this turn WROTE the provider cache
 	}
+	m.observeByClientLocked(detail.src, promptTok, cachedTok)
 	if dur > 0 {
 		m.inferDecodeSecs += dur.Seconds()
 		// e2e distribution: every served non-synthetic turn lands here.

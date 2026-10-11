@@ -19,6 +19,13 @@ const vulkanProfileFixtureChildEnv = "FAK_TEST_VULKAN_PROFILE_FIXTURE_CHILD"
 // changing Go's environment after registration cannot enable its real counters.
 func runVulkanProfileFixture(t *testing.T) bool {
 	t.Helper()
+	return runVulkanStartupEnvFixture(t, 60*time.Second, nil)
+}
+
+// runVulkanStartupEnvFixture is runVulkanProfileFixture with extra startup-only
+// environment for the child. Values in startup are set exactly as given.
+func runVulkanStartupEnvFixture(t *testing.T, timeout time.Duration, startup map[string]string) bool {
+	t.Helper()
 	if os.Getenv(vulkanProfileFixtureChildEnv) == t.Name() {
 		if os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") != "1" {
 			t.Fatal("Vulkan profile child must start with dispatch profiling enabled")
@@ -32,17 +39,21 @@ func runVulkanProfileFixture(t *testing.T) bool {
 	if err != nil {
 		t.Fatalf("os.Executable: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, exe, "-test.v", "-test.run=^"+regexp.QuoteMeta(t.Name())+"$")
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
-		if key != vulkanProfileFixtureChildEnv && key != "FAK_VULKAN_DISPATCH_PROFILE" && key != "FAK_VULKAN_REQUIRE_DEVICE" {
+		if _, override := startup[key]; !override &&
+			key != vulkanProfileFixtureChildEnv && key != "FAK_VULKAN_DISPATCH_PROFILE" && key != "FAK_VULKAN_REQUIRE_DEVICE" {
 			cmd.Env = append(cmd.Env, entry)
 		}
 	}
 	cmd.Env = append(cmd.Env, vulkanProfileFixtureChildEnv+"="+t.Name(),
 		"FAK_VULKAN_DISPATCH_PROFILE=1", "FAK_VULKAN_REQUIRE_DEVICE=1")
+	for key, value := range startup {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
 		t.Fatalf("Vulkan profile fixture timed out: %v\n%s", ctx.Err(), out)

@@ -1,0 +1,78 @@
+#version 450
+layout(local_size_x = 256) in;
+
+// Gathers and dequantizes the selected rows of a raw Q2_K token-embedding table
+// ([vocab, hidden] in 84-byte super-blocks, GGUF byte order) into an F32 panel.
+// Only the requested rows are read; the table is never expanded. The arithmetic
+// is the host q2kDequantSuperBlockScalar order: dl = d*scale, ml = min*m, then
+// value = dl*code - ml, every product and difference separately rounded to F32.
+layout(std430, binding = 0) readonly buffer TableBuf { uint Table[]; };
+layout(std430, binding = 1) readonly buffer IdsBuf { uint Ids[]; };
+layout(std430, binding = 2) writeonly buffer OutBuf { uint Out[]; };
+
+layout(push_constant) uniform Push {
+    int rows;
+    int hidden;
+    int vocab;
+} pc;
+
+uint tableByte(uint offset) {
+    return (Table[offset >> 2] >> ((offset & 3u) * 8u)) & 0xffu;
+}
+
+// Bit-exact mirror of kquantbits.F16BitsToF32Bits, independent of driver
+// half-float conversion and denormal modes.
+float f16ToF32(uint h) {
+    uint sign = (h & 0x8000u) << 16;
+    int exponent = int((h >> 10) & 0x1fu);
+    uint frac = h & 0x3ffu;
+    if (exponent == 0) {
+        if (frac == 0u) return uintBitsToFloat(sign);
+        exponent = -14;
+        while ((frac & 0x400u) == 0u) {
+            frac <<= 1;
+            exponent--;
+        }
+        frac &= 0x3ffu;
+        return uintBitsToFloat(sign | (uint(exponent + 127) << 23) | (frac << 13));
+    }
+    if (exponent == 0x1f) return uintBitsToFloat(sign | 0x7f800000u | (frac << 13));
+    return uintBitsToFloat(sign | (uint(exponent - 15 + 127) << 23) | (frac << 13));
+}
+
+void main() {
+    uint hidden = uint(pc.hidden);
+    uint total = uint(pc.rows) * hidden;
+    uint blocksPerRow = hidden / 256u;
+    uint stride = gl_NumWorkGroups.x * 256u;
+    for (uint i = gl_GlobalInvocationID.x; i < total; i += stride) {
+        uint row = i / hidden;
+        uint col = i - row * hidden;
+        uint id = Ids[row];
+        if (id >= uint(pc.vocab)) continue; // host-validated; never read past the table
+        uint base = (id * blocksPerRow + col / 256u) * 84u;
+        uint e = col & 255u;
+        uint half128 = e >> 7;
+        uint r = e & 127u;
+        uint j = r >> 5;
+        uint h = (r >> 4) & 1u;
+        uint l = r & 15u;
+        uint sc = tableByte(base + half128 * 8u + j * 2u + h);
+        uint code = (tableByte(base + 16u + half128 * 32u + h * 16u + l) >> (2u * j)) & 3u;
+        float d = f16ToF32(tableByte(base + 80u) | (tableByte(base + 81u) << 8));
+        float m = f16ToF32(tableByte(base + 82u) | (tableByte(base + 83u) << 8));
+        precise float dl = d * float(sc & 15u);
+        precise float ml = m * float(sc >> 4);
+        uint bits;
+        if (code == 0u) {
+            // Host 0 - ml: +0 for either zero, otherwise exactly -ml. Integer
+            // sign flip keeps the zero sign independent of float folding.
+            bits = ml == 0.0 ? 0u : (floatBitsToUint(ml) ^ 0x80000000u);
+        } else {
+            precise float scaled = dl * float(code);
+            precise float value = scaled - ml;
+            bits = floatBitsToUint(value);
+        }
+        Out[i] = bits;
+    }
+}

@@ -34,6 +34,10 @@ const (
 	// ReasonCollisionRisk indicates a collision risk between incoming disjoint paths and local untracked files.
 	ReasonCollisionRisk = "COLLISION_RISK"
 
+	// ReasonWorktreeUnsynced indicates the branch ref advanced to the integrate commit
+	// but incoming paths are still absent or stale on disk.
+	ReasonWorktreeUnsynced = "WORKTREE_UNSYNCED"
+
 	// StateSynchronized indicates successful reconciliation where tip matches expected synchronized state.
 	StateSynchronized = "synchronized"
 )
@@ -698,19 +702,40 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 			}
 
 			newCommitSHA, transplantErr := TransplantDisjointTreeWithRunner(ctx, run, repo, targetBranch, headSHA, targetSHA, targetRef)
-			if transplantErr == nil {
+			// Once the transplant advanced the ref, HEAD already contains targetSHA and a
+			// merge fallback is an up-to-date no-op; heal and prove the worktree instead.
+			if transplantErr == nil || errors.Is(transplantErr, ErrIncomingPathsUnwritten) {
 				syncIndexWithHEAD(ctx, run, repo, headSHA, newCommitSHA, targetSHA)
 				// Handle incoming path renames across disjoint integration
 				if renames, err := InspectIncomingRenames(ctx, run, repo, headSHA, targetSHA, newCommitSHA); err == nil && len(renames) > 0 {
 					_ = ApplyIncomingRenames(ctx, run, repo, headSHA, newCommitSHA, renames)
 				}
+				syncErr := EnsureIncomingOnDisk(ctx, run, repo, headSHA, newCommitSHA)
 				if qTx != nil {
+					// The ref has moved either way; restoring untracked files over
+					// incoming paths would be worse than keeping them parked.
 					qReceipt, commitErr := qTx.Commit()
 					if commitErr == nil {
 						assessment.Quarantine = &qReceipt
 					}
 				}
 				newHead, _ := rev(ctx, run, repo, "HEAD")
+				if syncErr != nil {
+					assessment.OK = false
+					assessment.Reason = ReasonWorktreeUnsynced
+					assessment.Detail = syncErr.Error()
+					assessment.Applied = false
+					assessment.AppliedCommit = newCommitSHA
+					assessment.Execution = &ReconcileExecution{
+						Primitive:     primitive,
+						Applied:       true,
+						Success:       false,
+						NewHead:       newHead,
+						AppliedCommit: newCommitSHA,
+						Error:         syncErr.Error(),
+					}
+					return assessment, nil
+				}
 				exec := &ReconcileExecution{
 					Primitive:     primitive,
 					Applied:       true,

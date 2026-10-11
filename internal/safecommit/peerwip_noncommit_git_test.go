@@ -12,14 +12,15 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/wipref"
 )
 
-// fak-test:runtime fast est=1s lane=default
+// fak-test:runtime medium est=3s lane=default
 func TestPeerWIPNonCommitRefsPreserveRealGitAttribution(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	// ~25 fixture git spawns must not drain the budget each attribution check gets.
+	fixtureCtx, cancelFixture := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelFixture()
 	dir := t.TempDir()
 	git := func(args ...string) string {
 		t.Helper()
-		out, code, err := realRunner(ctx, dir, args...)
+		out, code, err := realRunner(fixtureCtx, dir, args...)
 		if err != nil || code != 0 {
 			t.Fatalf("fixture git %v: code=%d err=%v output=%s", args, code, err, out)
 		}
@@ -75,6 +76,8 @@ func TestPeerWIPNonCommitRefsPreserveRealGitAttribution(t *testing.T) {
 
 	check := func(stage string, paths, wantCollisions []string) {
 		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 		res, err := ValidatePathAttribution(ctx, realRunner, dir, paths, PathAttributionOptions{SessionID: "self"})
 		if err != nil {
 			t.Fatalf("%s attribution: %v", stage, err)

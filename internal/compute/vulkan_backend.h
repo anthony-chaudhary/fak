@@ -300,6 +300,20 @@ int fvk_v41_shared_attention_f32(const void *dQ, const void *dSharedKV,
                                  int heads, int headDim, int selectedRows,
                                  int mode, int hasSink, float scale);
 
+/* Optional V4.1 MoE router top-k, outside the trusted shader registry. Five
+ * exact storage bindings: logits[rows,experts] F32, bias[experts] F32 (a [1]
+ * dummy when hasBias=0), experts[rows,topK] uint32, weights[rows,topK] F32,
+ * status[rows,4] uint32. Outputs are disjoint from each other and inputs.
+ * Push ABI: int32 rows, experts, topK, full, hasBias; float32 routeScale.
+ * Status fields: stage, expertPlusOne, offendingValueBits, 0; stage 0 success,
+ * 1 logit, 2 score, 3 bias, 4 selection, 5 normalization, 6 weight. Return
+ * codes match shared attention; success is provisional until status is read. */
+int fvk_have_v41_router_topk(void);
+int fvk_v41_router_topk_f32(const void *dLogits, const void *dBias,
+                            void *dExperts, void *dWeights, void *dStatus,
+                            int rows, int experts, int topK,
+                            int full, int hasBias, float routeScale);
+
 /* V4.1 scalar-order indexer score. Four exact F32 storage bindings:
  * Q[heads,headDim], keys[rows,headDim], weights[heads], scores[rows]. Inputs
  * are caller-validated finite and immutable; output must not alias any input.
@@ -328,6 +342,46 @@ int fvk_v41_indexer_score_witness_f32(const void *dQ, const void *dKeys,
                                       const void *dWeights, void *dScores,
                                       int rows, int heads, int headDim);
 #endif
+
+/* V4.1 mHC stream operations (one module, mode in push constants). Four F32
+ * storage bindings A, B, C (read-only) and Out (fresh, disjoint from every
+ * input); an unused input binding repeats A. coeffs rows are pre[4] | post[4] |
+ * comb[16] (comb row-major [src,dst]). Modes (push ABI int32 mode, rows,
+ * hidden, iters; float32 eps, rmsEps):
+ *   0 initial: A=x[rows,hidden] -> Out[rows,4,hidden], four BF16 copies
+ *   1 split:   A=mixes[rows,24] B=scale[3] C=base[24] -> Out=coeffs[rows,24]
+ *   2 pre:     A=streams[rows,4,hidden] B=coeffs -> Out[rows,hidden], BF16
+ *   3 post:    A=x[rows,hidden] B=streams C=coeffs -> Out[rows,4,hidden], BF16
+ *   4 rms-split: A=raw mixes[rows,24] B=streams[rows,4,hidden] C=scale[3]|base[24]
+ *              -> coeffs; mixes scaled by 1/sqrt(mean(streams^2)+rmsEps) first
+ * The module is optional: fvk_have_v41_mhc is 0 when it is absent or its
+ * pipeline fails, and initialization does not fail on it. Return codes match
+ * tail RoPE above; return 0 is provisional until the checked readback. */
+int fvk_have_v41_mhc(void);
+int fvk_v41_mhc_f32(int mode, const void *dA, const void *dB, const void *dC,
+                    void *dOut, int rows, int hidden, int iters, float eps, float rmsEps);
+
+/* V4.1 one-query index selection after the indexer score. Four storage
+ * bindings: scores[rows] F32 (compared as order-preserving integer keys),
+ * scratch[2*blocks+rows] uint32, out[min(topK,rows)] F32 exact row integers
+ * (-1 empty), status[1] uint32 (nonzero = a NaN score). One workgroup ranks
+ * by score descending then position ascending, with optional candidate-block
+ * masking (topKBlocks>0, blocks of blockSize, newest block pinned). Push ABI is
+ * int32 rows, topK, topKBlocks, blockSize. Returns the tail RoPE status codes.
+ * Optional module outside the shader registry: absence leaves have=0. */
+int fvk_have_v41_index_select(void);
+int fvk_v41_index_select_f32(const void *dScores, void *dScratch, void *dOut, void *dStatus,
+                             int rows, int topK, int topKBlocks, int blockSize);
+
+/* V4.1 Q2_K token-embedding row gather. Three storage bindings: the raw Q2_K
+ * table [vocab, hidden] (84-byte super-blocks, GGUF order), ids[rows] uint32,
+ * out[rows, hidden] F32. Only the selected rows are dequantized, with the host
+ * scalar Q2_K operation order and exact f16 widening. Push ABI is int32 rows,
+ * hidden, vocab. Returns the tail RoPE status codes. Optional module outside
+ * the shader registry: absence leaves have=0. */
+int fvk_have_v41_q2k_embed_gather(void);
+int fvk_v41_q2k_embed_gather_f32(const void *dTable, const void *dIds, void *dOut,
+                                 int rows, int hidden, int vocab);
 
 /* SwiGLU: y = silu(g) * u, elementwise, length n. */
 void fvk_swiglu_f32(const void *dG, const void *dU, void *dY, int n);
@@ -383,6 +437,8 @@ void fvk_submission_reset(void);
 int fvk_batch_flush_status(void);
 /* Cumulative host transfer bytes, independent of optional profiling. */
 uint64_t fvk_h2d_bytes(void);
+/* Subset of fvk_h2d_bytes written directly into mapped device-local weight memory (UMA). */
+uint64_t fvk_direct_h2d_bytes(void);
 uint64_t fvk_d2h_bytes(void);
 /* Complete backend-owned transfer tuple. Returns 0 after accounting overflow or
  * before initialization; all six outputs are mandatory. Observed zero directions

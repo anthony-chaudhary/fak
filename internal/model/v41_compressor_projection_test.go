@@ -886,6 +886,28 @@ func TestV41CompressorProjectionPerLayerIndexSourceOwnHistory(t *testing.T) {
 	}
 }
 
+// v41ModelResidentBuffers names the model-owned immutable weights a session
+// borrows; Session.Close leaves them staged by design, so they are not transients.
+func v41ModelResidentBuffers(s *Session) map[compute.Buffer]bool {
+	out := map[compute.Buffer]bool{}
+	for key, weight := range s.halW {
+		if _, borrowed := s.borrowedHALW[key]; borrowed {
+			out[weight.Buf()] = true
+		}
+	}
+	return out
+}
+
+func v41LeakedTransients(live, resident map[compute.Buffer]bool) int {
+	leaked := 0
+	for buffer := range live {
+		if !resident[buffer] {
+			leaked++
+		}
+	}
+	return leaked
+}
+
 // CPU recorder matches native ROCm plain errors and unknown panic values only.
 func v41GuardedProjectionPanicContract(t *testing.T, fixture func() *Model, leaves []string) {
 	t.Helper()
@@ -901,6 +923,7 @@ func v41GuardedProjectionPanicContract(t *testing.T, fixture func() *Model, leav
 					b.faultWeight = v41CompressorTestWeight(t, s, 0, leaf)
 					b.fail, b.failSite = primary, site
 					before := captureV41ForwardSnapshot(s.v41Forward)
+					resident := v41ModelResidentBuffers(s)
 					var got any
 					func() { defer func() { got = recover() }(); s.Step(4) }()
 					var closed *BackendForwardOperationError
@@ -910,7 +933,7 @@ func v41GuardedProjectionPanicContract(t *testing.T, fixture func() *Model, leav
 					if cause, ok := primary.(error); ok && !errors.Is(s.halFailure, cause) {
 						t.Fatal("plain native cause identity lost")
 					}
-					if !reflect.DeepEqual(before, captureV41ForwardSnapshot(s.v41Forward)) || len(b.live) != 0 {
+					if !reflect.DeepEqual(before, captureV41ForwardSnapshot(s.v41Forward)) || v41LeakedTransients(b.live, resident) != 0 {
 						t.Fatal("selected failure changed rollback or leaked transient")
 					}
 					calls := b.operationCalls

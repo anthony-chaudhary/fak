@@ -387,6 +387,7 @@ var maintainerDevCommands = []string{
 	"worktype",
 	"agentic",
 	"compute-trace",
+	"expert-trace",
 	"coordinate",
 	"hostdiag",
 	"learning-mesh",

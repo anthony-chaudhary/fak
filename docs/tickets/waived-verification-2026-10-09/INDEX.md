@@ -6,12 +6,20 @@ On 2026-10-09, 68 public commits landed under an operator deferred-verification 
 | --- | --- | --- |
 | TICKET-01 | V4.1 attention, rotary and indexer numerics | red (parity drift, session panic, shader count) |
 | TICKET-02 | V4.1 device kernels qualified on Strix Halo silicon | unwitnessed |
+| TICKET-02d | V4.1 mHC F32 Halo device-vs-host logit drift (#13808, from #13767) | red [HW-WITNESSED]: max_diff 0.0535 vs 1e-4 |
 | TICKET-03 | Vulkan memory accounting and residency (#13668) | CPU green; Vulkan-tagged build and hardware not yet witnessed |
+| TICKET-03d | Vulkan-tagged compute suite runs green with the device registered (#13776) | RX 7600: full run, no panic; only the TICKET-03e q2_k red left |
+| TICKET-03e | Vulkan Q2_K panel matmul (P>1) shared-memory race (#13807) | red (max_abs 4.55, RX 7600 and Halo) |
 | TICKET-04 | Gateway deadline cache credit vs. the Halo long-chat fix | conflict: tests pass, behavior regressed |
-| TICKET-05 | Pi launcher/router and garden launchd watchdog | targeted tests not yet run |
+| TICKET-05 | Pi launcher/router and garden launchd watchdog | green: 11/11 verified (501095431bb, 8fcf7b7e995) |
+| TICKET-05a | Pi launcher qwen-prefix window row vs router-reported window (#13778) | green: qwen-prefix row removed; cloud Qwen 163840 on both paths, Halo Qwen 131072 |
 | TICKET-06 | safecommit and test-hygiene commits | red (real-git fixtures) |
 | TICKET-07 | FP8 tiled-to-Q8 loader | red |
 | TICKET-08 | V4.1 compressed-window composition + session fallback | red |
 | TICKET-09 | V4.1 sparse-sink host contract | red |
+| TICKET-10 | V4.1 mHC geometry: absent-mix refusal and lost layer-two stream (#13790) | green: ebdead0220f, 5509c47c9f1 |
+| TICKET-11 | V4.1 clamped SwiGLU failure-retry panic aborts internal/model, fix first (#13795) | red |
+| TICKET-12 | V4.1 compressor/indexer projection fault-closure contract (#13796) | red |
+| TICKET-13 | V4.1 layer-step, grouped-session and head parity drift, BF16 boundaries (#13797) | green: witness passes at original tolerances |
 
 Each ticket is closed by fail-before/pass-after tests landed on trunk that cite the covered commit shas.

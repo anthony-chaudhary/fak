@@ -412,7 +412,21 @@ func TestV41ClampedDeviceSwiGLUFailureFreesAndRetries(t *testing.T) {
 			}
 			b.failActivation, b.failRead = false, false
 			b.failReadAt, b.failMatmulAt = 0, 0
-			got := s.Step(4)
+			// A selected-device failure closes the session (no CPU retry); the
+			// retry is a fresh session over the same model and backend.
+			var closed *BackendForwardOperationError
+			if err := panicAsError(func() { s.Step(4) }); !errors.As(err, &closed) || !errors.Is(err, compute.ErrVulkanExecutionFailed) {
+				t.Errorf("failed selected activation left the session usable: %v", err)
+			}
+			retry, err := m.NewBackendSessionChecked(selected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b.session = retry
+			retry.v41State().sharedActivation = nil
+			t.Cleanup(retry.Close)
+			retry.Prefill([]int{1, 2, 3})
+			got := retry.Step(4)
 			oracle := v41IncrementalExpertFixture(t, false, false)
 			oracle.Cfg.SwigluLimit = m.Cfg.SwigluLimit
 			assertV41LogitsClose(t, got, lastLogits(oracle.Forward([]int{1, 2, 3, 4})), "retry after selected activation failure")

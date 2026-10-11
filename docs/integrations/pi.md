@@ -224,7 +224,13 @@ writes is a deliberate tripwire, not a ceiling to aim at. fak therefore writes:
   derived from the same budget, so the post-fire working set agrees with the tripwire.
 
 `fak pi` derives the served window from the backend's `/v1/models` `context_length`, falling
-back to the default prior when the backend is unreachable. Override it explicitly:
+back to the default prior when the backend is unreachable. Precedence for the selected model:
+an exact-id registry row (DeepSeek V4.1 Flash, GLM 5.3, Halo Qwen) wins unless the reported
+window is smaller; otherwise the router-reported window wins; the registry/default prior is
+only the fallback for a route the router does not report. There is no family-prefix row, so a
+cloud Qwen route (`qwen3.8-max`, ~1M served) gets the same quality-capped window from
+`fak pi` and `fak pi config --from-router`. The quality cap is applied once, by
+`harnesskit.DeriveContextEnvelope`. Override it explicitly:
 
 ```bash
 fak pi --window 131072                       # 128k backend -> contextWindow 65536

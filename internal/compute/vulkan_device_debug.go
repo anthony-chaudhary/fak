@@ -426,6 +426,10 @@ func (w *vulkanExecutionWindow) End() (BackendExecutionObservation, error) {
 	return BackendExecutionWindowDelta(w.before, after, uint64(live), uint64(peak))
 }
 
+// VulkanDirectWeightUploadBytes is the cumulative weight bytes written straight into mapped
+// device-local memory on the UMA direct-upload path, a subset of the H2D transfer bytes.
+func VulkanDirectWeightUploadBytes() uint64 { return uint64(C.fvk_direct_h2d_bytes()) }
+
 func (v *vulkanBackend) debugBufferHostVisible(b *vulkanBuf) bool {
 	return b != nil && b.ptr != nil && C.fvk_debug_buffer_is_host_visible(b.ptr) != 0
 }

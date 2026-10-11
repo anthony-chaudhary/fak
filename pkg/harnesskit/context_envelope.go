@@ -105,22 +105,34 @@ type ColdAdmission struct {
 	DecodeTokens       int
 	DecodeTokensPerSec float64
 	// TurnGrowthTokens is one turn's context growth past the trigger before the
-	// harness compacts.
+	// harness compacts; it is always priced uncached.
 	TurnGrowthTokens int
+	// CachedPromptFraction is the share of the resident context the backend's
+	// admission credits as a cached prefix, in [0, 0.95]. 0 prices it all cold.
+	CachedPromptFraction float64
 }
 
 // MaxTrigger returns the largest compaction trigger whose next request the
-// backend admits cold, rounded down to 1Ki; 0 when the model is incomplete.
+// backend admits, rounded down to 1Ki; 0 when the model is incomplete.
 //
-//	trigger = (Headroom*ClientDeadline - DecodeTokens/DecodeRate) * PrefillRate - TurnGrowth
+//	trigger = ((Headroom*ClientDeadline - DecodeTokens/DecodeRate) * PrefillRate - TurnGrowth)
+//	          / (1 - CachedPromptFraction)
 func (c ColdAdmission) MaxTrigger() int {
 	if c.ClientDeadline <= 0 || c.Headroom <= 0 || c.PrefillTokensPerSec <= 0 || c.DecodeTokensPerSec <= 0 {
 		return 0
 	}
+	cached := min(max(c.CachedPromptFraction, 0), 0.95)
 	secs := c.Headroom*c.ClientDeadline.Seconds() - float64(c.DecodeTokens)/c.DecodeTokensPerSec
-	tokens := int(secs*c.PrefillTokensPerSec) - c.TurnGrowthTokens
+	uncached := secs*c.PrefillTokensPerSec - float64(c.TurnGrowthTokens)
+	tokens := int(uncached / (1 - cached))
 	tokens -= tokens % 1024
 	return max(tokens, 1)
+}
+
+// MaxSafeKeepTokens is the largest kept tail that still lets a compaction at
+// trigger reclaim a quarter of it (the viability bound): Trigger*3/4 - Fixed - Summary.
+func MaxSafeKeepTokens(trigger, fixed, summary int) int {
+	return trigger*3/4 - fixed - summary
 }
 
 // ContextEnvelope is the derived harness configuration for one served window.
@@ -150,7 +162,8 @@ type ContextEnvelope struct {
 //	Summary       = min(0.8*Reserve, Output)            (Pi's summary maxTokens)
 //	Trigger       = ContextWindow - Reserve, lowered to MaxCompactTrigger when set
 //	                (Reserve then grows to ContextWindow - Trigger)
-//	Keep          = max(4096, min(20000, Trigger/2 - Fixed - Summary))
+//	Keep          = max(4096, min(20000, Trigger*3/4 - Fixed - Summary))
+//	                (the largest tail that still reclaims the quarter viability needs)
 //	PostCompact   = Fixed + Summary + Keep;  Reclaim = Trigger - PostCompact
 //
 // The envelope is viable when the summary request fits the served window and a
@@ -185,7 +198,7 @@ func DeriveContextEnvelope(in ContextEnvelopeInput) (ContextEnvelope, error) {
 		reserve = window - trigger
 	}
 	summary := min(reserve*4/5, output)
-	keep := max(MinKeepRecentTokens, min(DefaultKeepRecentTokens, trigger/2-fixed-summary))
+	keep := max(MinKeepRecentTokens, min(DefaultKeepRecentTokens, MaxSafeKeepTokens(trigger, fixed, summary)))
 	post := fixed + summary + keep
 	reclaim := trigger - post
 
