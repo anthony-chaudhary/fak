@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+// Completion ownership adapted from vllm/v1/kv_offload/tiering/manager.py:281-358
+// at bd5bbce6e45e09dbd07ac3e8c394626c059078f7; modified for Go scoped snapshot
+// acquisition through the shared success/failure ownership guard.
 package radixkv
 
 import (
@@ -189,6 +194,9 @@ func (s *ScopedTree) LookupSnapshotTieredContext(ctx context.Context, owner Cach
 	if strings.TrimSpace(owner.Tenant) == "" {
 		return nil, nil, 0, ScopeTenant, SnapshotTierMiss, ErrCacheIdentity
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, 0, ScopeTenant, SnapshotTierMiss, err
+	}
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	checks := []ShareScope{ScopeAgent, ScopeTenant, ScopeFleet}
@@ -222,7 +230,7 @@ func (s *ScopedTree) LookupSnapshotTieredContext(ctx context.Context, owner Cach
 		}
 	}
 	if bestHot != nil {
-		snap, err := bestHot.snapshot.Clone()
+		snap, err := acquireSnapshotForRequest(ctx, bestHot.snapshot.Clone)
 		if err != nil {
 			s.tree.l1Faults++
 			return nil, nil, bestHotMatched, bestHotScope, SnapshotTierDeviceL1, err
@@ -236,7 +244,7 @@ func (s *ScopedTree) LookupSnapshotTieredContext(ctx context.Context, owner Cach
 		return nil, nil, 0, ScopeTenant, SnapshotTierMiss, nil
 	}
 	if bestHost != nil {
-		snap, err := bestHost.hostSnapshot.Restore()
+		snap, err := acquireSnapshotForRequest(ctx, bestHost.hostSnapshot.Restore)
 		if err != nil {
 			s.tree.l2Faults++
 			return nil, nil, bestHostMatched, bestHostScope, SnapshotTierHostL2, err

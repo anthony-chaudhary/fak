@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+// Completion ownership adapted from vllm/v1/kv_offload/tiering/manager.py:281-358
+// at bd5bbce6e45e09dbd07ac3e8c394626c059078f7; modified for Go synchronous
+// snapshot acquisition: publish successful owners and release rejected owners.
+//
 // Package radixkv is SGLang's RadixAttention prefix cache, rebuilt over fak's
 // kernel-owned KV cache — the apples-to-apples answer to "how does fak compare to
 // SGLang's KV-cache radix attention?".
@@ -757,14 +763,34 @@ func (t *Tree) LookupSnapshotTiered(tokens []int) (*node, *model.PrefixSnapshot,
 	return t.LookupSnapshotTieredContext(context.Background(), tokens)
 }
 
+func acquireSnapshotForRequest(ctx context.Context, acquire func() (*model.PrefixSnapshot, error)) (*model.PrefixSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	snap, err := acquire()
+	if canceled := ctx.Err(); canceled != nil {
+		err = canceled
+	}
+	if err != nil {
+		if snap != nil {
+			snap.Close()
+		}
+		return nil, err
+	}
+	return snap, nil
+}
+
 // LookupSnapshotTieredContext is the request-cancellable L1→L2→L3 lookup.
 func (t *Tree) LookupSnapshotTieredContext(ctx context.Context, tokens []int) (*node, *model.PrefixSnapshot, int, SnapshotTier, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, 0, SnapshotTierMiss, err
+	}
 	n, _ := t.Lookup(tokens)
 	for candidate := n; candidate != nil; candidate = candidate.parent {
 		if candidate.snapshot == nil {
 			continue
 		}
-		snap, err := candidate.snapshot.Clone()
+		snap, err := acquireSnapshotForRequest(ctx, candidate.snapshot.Clone)
 		if err != nil {
 			t.l1Faults++
 			return n, nil, candidate.plen, SnapshotTierDeviceL1, err
@@ -781,7 +807,7 @@ func (t *Tree) LookupSnapshotTieredContext(ctx context.Context, tokens []int) (*
 		if candidate.hostSnapshot == nil {
 			continue
 		}
-		snap, err := candidate.hostSnapshot.Restore()
+		snap, err := acquireSnapshotForRequest(ctx, candidate.hostSnapshot.Restore)
 		if err != nil {
 			t.l2Faults++
 			return n, nil, candidate.plen, SnapshotTierHostL2, err
