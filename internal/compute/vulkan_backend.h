@@ -277,6 +277,13 @@ void fvk_rope_f32(void *dX, int pos, int nHeads, int headDim, double theta);
  * New native builds require the dedicated module; absence/ABI failure refuses
  * initialization. Deploy only a coupled rebuilt archive and verified V4/complete61
  * bundle. fvk_init itself does not verify the external build receipt. */
+#ifdef FAK_V41_TAIL_ROPE_EXACT_WITNESS
+/* Experimental exact environment for the existing mandatory tail module.
+ * Requires admitted loaded bytes and all three selected-device F32 controls.
+ * Symbols are absent from ordinary archives; this is not physical qualification. */
+int fvk_v41_tail_rope_exact_available(void);
+int fvk_v41_tail_rope_exact_module_abi(const void* data, size_t bytes);
+#endif
 int fvk_have_v41_tail_rope_qk(void);
 int fvk_v41_tail_rope_qk_f32(const void *dQ, const void *dKV,
                             void *dQOut, void *dKVOut, const void *dSinCos,

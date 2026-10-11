@@ -370,6 +370,9 @@ int g_have_q8 = 0;
 int g_have_qwen35_gdn_q8_in_proj = 0;
 // Mandatory in a current build; published only after complete initialization.
 int g_have_v41_tail_rope_qk = 0;
+#ifdef FAK_V41_TAIL_ROPE_EXACT_WITNESS
+bool g_v41TailRoPEExactModule = false;
+#endif
 int g_have_v41_shared_attention = 0;
 // Optional: the router module is not in the trusted shader registry yet, so it
 // is published only when its module is present and its ABI matches.
@@ -1683,7 +1686,8 @@ std::vector<char> readV41TailRoPEModule(const std::string& path) {
     return complete && closed ? code : std::vector<char>{};
 }
 
-bool v41TailRoPEABI(const std::vector<char>& code) {
+bool v41TailRoPEABI(const std::vector<char>& code, bool strict = false) {
+    if (strict && code.size() > 1024 * 1024) return false;
     if (code.size() < 20 || code.size() % 4 != 0) return false;
     std::vector<uint32_t> w(code.size() / 4);
     memcpy(w.data(), code.data(), code.size());
@@ -1770,6 +1774,125 @@ bool v41TailRoPEABI(const std::vector<char>& code) {
         const auto* integer = definition((*structure)[m + 2], typeInt, 4);
         if (!integer || (*integer)[2] != 32 || (*integer)[3] != 1 || !atOffset(pushStruct, m, m * 4)) return false;
     }
+    // Strict mode extends this existing ABI proof on the exact bytes passed
+    // to vkCreateShaderModule. Ordinary callers retain their historical policy.
+    // This is a bounded shape/dataflow check, not a full validator or provenance
+    // attestation; independently reviewed source and actual compiler output stay
+    // separate witness requirements.
+    std::unordered_map<uint64_t, bool> variableAccess;
+    if (strict) {
+        uint32_t modes = 0, capabilities = 0, modeEntry = 0;
+        size_t extensions = 0, floatTypes = 0;
+        std::unordered_map<uint32_t, std::vector<uint32_t>> values;
+        std::unordered_map<uint32_t, uint32_t> stores;
+        std::vector<uint32_t> products;
+        uint32_t subtract = 0, add = 0;
+        for (size_t p = 5; p < w.size();) {
+            const uint32_t count = w[p] >> 16, op = w[p] & 0xffff;
+            const uint32_t* a = w.data() + p; // framing already checked above
+            switch (op) {
+            case 0: case 3: case 4: case 5: case 6: case 7: case 8: case 10: case 11:
+            case 14: case 15: case 16: case 17:
+            case 19: case 20: case 21: case 22: case 23: case 29: case 30: case 32: case 33:
+            case 41: case 42: case 43: case 44: case 46:
+            case 54: case 56: case 59: case 61: case 62: case 65: case 66:
+            case 71: case 72: case 80: case 81: case 83: case 124:
+            case 128: case 130: case 132: case 137: // integer index arithmetic
+            case 129: case 131: case 133: // exactly four FMul, one FSub, one FAdd
+            case 168: case 169: case 170: case 171: case 174: case 176: case 199:
+            case 245: case 247: case 248: case 249: case 250: case 253: case 255:
+            case 317: case 330:
+                break;
+            default:
+                return false;
+            }
+            if (op == 16) {
+                if (count < 3 || !validID(a[1])) return false;
+                if (a[2] != 17) {
+                    const uint32_t bit = a[2] == 4459 ? 1u : a[2] == 4461 ? 2u : a[2] == 4462 ? 4u : 0u;
+                    if (!bit || count != 4 || a[3] != 32 || (modes & bit) ||
+                        (modeEntry != 0 && modeEntry != a[1])) return false;
+                    modes |= bit; modeEntry = a[1];
+                }
+            } else if (op == 17) {
+                if (count != 2) return false;
+                const uint32_t bit = a[1] == 1 ? 1u : a[1] == 4464 ? 2u : a[1] == 4466 ? 4u : a[1] == 4467 ? 8u : 0u;
+                if (!bit || (capabilities & bit)) return false;
+                capabilities |= bit;
+            } else if (op == 10) {
+                const char expected[] = "SPV_KHR_float_controls";
+                if (count != 1 + (sizeof(expected) + 3) / 4 ||
+                    memcmp(a + 1, expected, sizeof(expected)) != 0 || ++extensions != 1) return false;
+            } else if (op == typeFloat) {
+                if (a[2] != 32) return false;
+                ++floatTypes;
+            } else if (op == typeInt) {
+                if (a[2] != 32 || a[3] > 1) return false;
+            } else if (op == 23) {
+                if (count != 4 || !definition(a[2], typeInt, 4)) return false;
+            } else if (op == 71 || op == 72) {
+                const uint32_t kind = a[op == 71 ? 2 : 3];
+                if (kind == 0 || kind == 1 || kind == 39 || kind == 40) return false;
+                if (op == 71 && (kind == 24 || kind == 25)) {
+                    if (count != 3 || !variableAccess.emplace(key(a[1], kind), true).second) return false;
+                }
+            }
+            if (op == 61 || op == 83 || op == 129 || op == 131 || op == 133) {
+                if ((op == 61 && count != 4) || (op == 83 && count != 4) ||
+                    ((op == 129 || op == 131 || op == 133) && count != 5) ||
+                    !validID(a[1]) || !validID(a[2]) || !validID(a[3]) ||
+                    !values.emplace(a[2], std::vector<uint32_t>(a, a + count)).second) return false;
+            }
+            if (op == 62) {
+                if (count != 3 || !validID(a[1]) || !validID(a[2])) return false;
+                // Ambiguous stores cannot be used to prove scalar dataflow.
+                if (!stores.emplace(a[1], a[2]).second) stores[a[1]] = 0;
+            }
+            if (op == 129 || op == 131 || op == 133) {
+                const auto* scalar = definition(a[1], typeFloat, 3);
+                if (!scalar || (*scalar)[2] != 32 || !validID(a[4])) return false;
+                if (op == 133) products.push_back(a[2]);
+                else if (op == 131) { if (subtract) return false; subtract = a[2]; }
+                else { if (add) return false; add = a[2]; }
+            }
+            p += count;
+        }
+        if (modes != 7 || capabilities != 15 || extensions != 1 || modeEntry != entry ||
+            floatTypes != 1 || products.size() != 4 || !subtract || !add || floatResults.size() != 6) return false;
+        // Follow single-assignment function locals and CopyObject aliases. This
+        // binds the two sums to their four products while allowing unoptimized
+        // GLSL output; table/input origin and complete program validity remain
+        // independently reviewed compiler/source evidence.
+        auto origin = [&](uint32_t id) {
+            for (unsigned depth = 0; depth < 32; ++depth) {
+                auto it = values.find(id);
+                if (it == values.end()) return id;
+                const auto& v = it->second;
+                const uint32_t op = v[0] & 0xffff;
+                if (op == 83) { id = v[3]; continue; }
+                if (op != 61) return id;
+                auto store = stores.find(v[3]);
+                if (store == stores.end()) return id;
+                if (!store->second) return uint32_t(0);
+                id = store->second;
+            }
+            return uint32_t(0);
+        };
+        auto product = [&](uint32_t id) -> const std::vector<uint32_t>* {
+            auto it = values.find(origin(id));
+            return it != values.end() && (it->second[0] & 0xffff) == 133 ? &it->second : nullptr;
+        };
+        const auto& sub = values.at(subtract);
+        const auto& sum = values.at(add);
+        const auto* ac = product(sub[3]); const auto* bs = product(sub[4]);
+        const auto* bc = product(sum[3]); const auto* as = product(sum[4]);
+        if (!ac || !bs || !bc || !as || ac == bs || ac == bc || ac == as || bs == bc || bs == as || bc == as) return false;
+        const uint32_t a = origin((*ac)[3]), c = origin((*ac)[4]);
+        const uint32_t b = origin((*bs)[3]), sine = origin((*bs)[4]);
+        if (!a || !b || !c || !sine || a == b || a == c || a == sine || b == c || b == sine || c == sine ||
+            origin((*bc)[3]) != b || origin((*bc)[4]) != c ||
+            origin((*as)[3]) != a || origin((*as)[4]) != sine) return false;
+    }
     uint32_t seenBindings = 0;
     for (uint32_t id : buffers) {
         const auto* var = definition(id, variable, 4);
@@ -1789,6 +1912,12 @@ bool v41TailRoPEABI(const std::vector<char>& code) {
         if (!scalar || (*scalar)[2] != 32 || (slot != 4 && (*scalar)[3] != 0)) return false;
         const uint32_t access = slot == 2 || slot == 3 ? 25 : 24;
         if (memberAccess.count(key(structID, access)) != 1) return false;
+        if (strict) {
+            const bool nonWritable = memberAccess.count(key(structID, 24)) || variableAccess.count(key(id, 24));
+            const bool nonReadable = memberAccess.count(key(structID, 25)) || variableAccess.count(key(id, 25));
+            if (nonWritable != (slot == 0 || slot == 1 || slot == 4) ||
+                nonReadable != (slot == 2 || slot == 3)) return false;
+        }
     }
     return seenBindings == 31;
 }
@@ -2528,6 +2657,13 @@ bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsiz
         fprintf(stderr, "fak-vulkan: incompatible V4.1 tail RoPE module in %s\n", spvPath.c_str());
         return false;
     }
+#ifdef FAK_V41_TAIL_ROPE_EXACT_WITNESS
+    if (&k == &g_kern[K_V41_TAIL_ROPE_QK] &&
+        (!g_v41IndexerFloatControls || !v41TailRoPEABI(code, true))) {
+        fprintf(stderr, "fak-vulkan: exact tail RoPE witness lacks admitted module modes or selected-device controls in %s\n", spvPath.c_str());
+        return false;
+    }
+#endif
     if (&k == &g_kern[K_V41_SHARED_ATTENTION] &&
         (nbuf != 5 || pcsize != 24 || !v41SharedAttentionABI(code))) {
         fprintf(stderr, "fak-vulkan: incompatible V4.1 shared attention module in %s\n", spvPath.c_str());
@@ -2580,6 +2716,9 @@ bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsiz
 
     k.nbuf = nbuf;
     k.pcsize = pcsize;
+#ifdef FAK_V41_TAIL_ROPE_EXACT_WITNESS
+    if (&k == &g_kern[K_V41_TAIL_ROPE_QK]) g_v41TailRoPEExactModule = true;
+#endif
     return true;
 }
 
@@ -3035,6 +3174,9 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // the poisoned context and its loaded capability bound until process exit.
     if (g_v41SubmissionPendingFailure) return 9;
     g_have_v41_tail_rope_qk = 0;
+#ifdef FAK_V41_TAIL_ROPE_EXACT_WITNESS
+    g_v41TailRoPEExactModule = false;
+#endif
     g_have_v41_shared_attention = 0;
     g_have_v41_router_topk = 0;
     g_have_v41_indexer_score = 0;
@@ -4475,6 +4617,20 @@ void fvk_rope_f32(void* dX, int pos, int nHeads, int headDim, double theta) {
     uint32_t total = (uint32_t)nHeads * (uint32_t)(headDim / 2);
     dispatch(g_kern[K_ROPE], bufs, &pc, sizeof(pc), (total + 127) / 128);
 }
+
+#ifdef FAK_V41_TAIL_ROPE_EXACT_WITNESS
+int fvk_v41_tail_rope_exact_module_abi(const void* data, size_t bytes) {
+    if (!data || bytes < 20 || bytes > 1024 * 1024 || bytes % 4 != 0) return 0;
+    std::vector<char> code(bytes);
+    memcpy(code.data(), data, bytes);
+    return v41TailRoPEABI(code, true) ? 1 : 0;
+}
+
+int fvk_v41_tail_rope_exact_available(void) {
+    return g_ready && g_v41IndexerFloatControls && g_v41TailRoPEExactModule &&
+        g_have_v41_tail_rope_qk && g_kern[K_V41_TAIL_ROPE_QK].pipe != VK_NULL_HANDLE;
+}
+#endif
 
 int fvk_have_v41_tail_rope_qk(void) {
     return g_ready && g_have_v41_tail_rope_qk && g_kern[K_V41_TAIL_ROPE_QK].pipe != VK_NULL_HANDLE;

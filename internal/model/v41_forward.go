@@ -943,7 +943,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if indexKeys != nil && (reusedKeys == nil || !reusedKeys[group]) {
 			key = indexKeys[group]
 		}
-		if err := m.v41CompressedPublicationRoPE(l, group*plan.Ratio, latent, key); err != nil {
+		if err := m.v41CompressedPublicationRoPEWithDevice(l, group*plan.Ratio, latent, key, scratch.gatherOps.compressedPublicationRoPEFunc()); err != nil {
 			return err
 		}
 	}

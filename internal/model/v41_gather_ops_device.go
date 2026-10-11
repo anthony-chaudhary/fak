@@ -12,11 +12,12 @@ import "fmt"
 // ExecutionPolicyDeviceOnly: there the accessor returns a refusal that closes
 // the session with a typed error naming the op, so no host compute runs.
 type v41DeviceGatherOps struct {
-	owner         *Session
-	inverseOutput v41InverseOutputRoPEFunc
-	indexSelect   v41IndexSelectFunc
-	indexRoPE     v41IndexRoPEFunc
-	embedGather   v41EmbeddingGatherFunc
+	owner                     *Session
+	inverseOutput             v41InverseOutputRoPEFunc
+	indexSelect               v41IndexSelectFunc
+	indexRoPE                 v41IndexRoPEFunc
+	embedGather               v41EmbeddingGatherFunc
+	compressedPublicationRoPE v41CompressedPublicationRoPEFunc
 }
 
 // v41DeviceGatherOpsFunc binds every available slice-3 operation. The policy is
@@ -25,7 +26,7 @@ func (s *Session) v41DeviceGatherOpsFunc() *v41DeviceGatherOps {
 	if s == nil {
 		return nil
 	}
-	return &v41DeviceGatherOps{owner: s, inverseOutput: s.v41InverseOutputRoPEFunc(), indexSelect: s.v41IndexSelectFunc(), embedGather: s.v41EmbeddingGatherFunc(), indexRoPE: s.v41IndexRoPEFunc()}
+	return &v41DeviceGatherOps{owner: s, inverseOutput: s.v41InverseOutputRoPEFunc(), indexSelect: s.v41IndexSelectFunc(), embedGather: s.v41EmbeddingGatherFunc(), indexRoPE: s.v41IndexRoPEFunc(), compressedPublicationRoPE: s.v41CompressedPublicationRoPEFunc()}
 }
 
 func (o *v41DeviceGatherOps) inverseOutputFunc() v41InverseOutputRoPEFunc {
@@ -95,4 +96,19 @@ func (s *Session) v41DeviceOnlyMissingOp(layer int, op string) error {
 	s.halFailure = closed
 	s.Close()
 	return closed
+}
+
+// compressedPublicationRoPEFunc keeps the ordinary host arm while the strict
+// arithmetic profile is unavailable. Device-only still refuses this inventory
+// boundary; an experimental witness does not qualify ordinary Vulkan builds.
+func (o *v41DeviceGatherOps) compressedPublicationRoPEFunc() v41CompressedPublicationRoPEFunc {
+	if o == nil {
+		return nil
+	}
+	if o.compressedPublicationRoPE == nil && o.owner.v41DeviceOnlyPolicy() {
+		return func(layer int, _, _, _ []float32, _, _ int) ([]float32, error) {
+			return nil, o.owner.v41DeviceOnlyMissingOp(layer, "compressed-publication-rope")
+		}
+	}
+	return o.compressedPublicationRoPE
 }

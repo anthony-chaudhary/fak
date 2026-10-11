@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **620** (clarity 0 + coverage 620) |
-| **Crystal-clear concepts (and climbing)** | **1184** crystal of 2944 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3054 / 3674** (83.1% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **1184** crystal of 2947 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3056 / 3676** (83.1% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 223 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **84** of 4190 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **84** of 4193 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 89.0/100 (grade B) |
 
@@ -28,11 +28,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2944 concepts - score 89.0/100 (grade B) - disambiguation-debt 620
+concept-disambiguation chart - 2947 concepts - score 89.0/100 (grade B) - disambiguation-debt 620
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ###################......... 1184
-  o defined       ############################ 1760
+  o defined       ############################ 1763
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -59,7 +59,7 @@ clarity mix by family (each cell = one concept):
   support-maturity **********************************************oooooooooooooooooooooooo (70 concept(s); 46 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
-  witness-proof    ***********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (169 concept(s); 83 crystal)
+  witness-proof    ***********************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (172 concept(s); 83 crystal)
 
 coverage by family (positioned / discovered):
   plan             #######################..... 466/571
@@ -73,7 +73,7 @@ coverage by family (positioned / discovered):
   pool             ###############............. 40/74
   render-materialize ########################.... 216/249
   support-maturity ####################........ 76/108
-  witness-proof    ########################.... 171/199
+  witness-proof    ########################.... 173/201
   evict            ####################........ 56/79
   loop             ########################.... 100/117
   layout           #################........... 20/33
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 83.1%  (3054/3674 confusable tokens positioned)
+namespace coverage  [###########################.....] 83.1%  (3056/3676 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 223
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 223/223
 
-name index: 4190 lookup name(s) -> 2944 concept(s), 84 ambiguous
+name index: 4193 lookup name(s) -> 2947 concept(s), 84 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **223 / 223** (223 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2130 / 5319 |
+| Boundaries drawn (mutual / total) | 2136 / 5325 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4190 over 2944 concepts |
+| Lookup names indexed | 4193 over 2947 concepts |
 | Lookup names landing on several concepts | 84 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2944 |
+| Concepts carrying a contrast set | 2947 |
 
 ## The concepts (best verdict first)
 
@@ -3013,6 +3013,9 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | witness-proof | **v41_logit_scale_witness** - The explicit Go build tag selecting the experimental V4.1 scalar logit multiplication adapter and its software ABI and deferred physical tests. With the Vulkan tag it selects a separate native archive; combining it with either the indexer or BF16 witness tag is a compile-time error. |
 | o | defined | symbol | witness-proof | **FAK_V41_LOGIT_SCALE_WITNESS** - The native compile-time define that exposes the experimental scalar logit multiplication C declarations and builds its checked dispatch, optional FloatControls module admission and parser-test entry points into the dedicated witness archive. The Go adapter defines it for its C header declarations. |
 | o | defined | symbol | witness-proof | **-lfakvulkan_v41_logit_scale_witness** - The exact cgo linker-option token selecting libfakvulkan_v41_logit_scale_witness.a for the scalar witness-tagged Go build. All five Vulkan archive selectors choose this input exclusively for that tag combination, and an ordinary archive lacks the witness-only symbols. |
+| o | defined | symbol | witness-proof | **v41_tail_rope_exact_witness** - The explicit Go build tag selecting the experimental strict binary32 environment marker for V4.1 tail RoPE Rows and its software ABI tests. With Vulkan it selects a separate native archive; combining it with the indexer, BF16 or scalar-logit witness tag is a compile-time error. |
+| o | defined | symbol | witness-proof | **FAK_V41_TAIL_ROPE_EXACT_WITNESS** - The native compile-time define that requires the existing mandatory tail RoPE module to carry DenormPreserve, SignedZeroInfNanPreserve and RoundingModeRTE F32 modes with matching selected-device support and strict ABI/arithmetic-shape admission. It exposes the exact-environment and parser-test C symbols. The same define enables those modes in the unchanged GLSL arithmetic algorithm; ordinary builds retain their prior module policy. |
+| o | defined | symbol | witness-proof | **-lfakvulkan_v41_tail_rope_exact_witness** - The exact cgo linker-option token selecting libfakvulkan_v41_tail_rope_exact_witness.a for the strict tail RoPE witness-tagged Go build. All five Vulkan archive selectors choose this input exclusively for that tag combination. Ordinary native archives lack the strict environment marker and parser-test symbols. |
 | o | defined | symbol | witness-proof | **DISCARD_WITNESSED (wip-recon safe-discard action)** - internal/wiprecon/recon.go: the reconciliation ACTION for a crashed owner's checkpoint whose delta already LANDED in HEAD (git-witnessed), so dropping it loses nothing. Fail-safe by construction: the only path to it requires Landed==true. |
 | o | defined | symbol | witness-proof | **validWitness (two same-named witness membership tests)** - validWitness is a REUSED name for two different membership tests: internal/dsparity's map of accepted parity Witness values, and internal/trajctl's function over a WitnessRung. Both answer 'is this witness value in the closed set', over unrelated vocabularies. |
 | o | defined | symbol | witness-proof | **witnessExitedWorkers (post-run commit-claim audit)** - cmd/fak/dispatch_tick_witness.go: audits the workers that have EXITED, bucketing each resolve log into witnessed / unwitnessed / no-commit claims and returning the per-worker witness records. |
@@ -3222,8 +3225,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3189/5319 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2944 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3189/5325 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2947 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3232,7 +3235,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4190 lookup name(s) resolves - 84 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4193 lookup name(s) resolves - 84 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3250,7 +3253,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | pool | 40 | 74 | 34 |
 | render-materialize | 216 | 249 | 33 |
 | support-maturity | 76 | 108 | 32 |
-| witness-proof | 171 | 199 | 28 |
+| witness-proof | 173 | 201 | 28 |
 | evict | 56 | 79 | 23 |
 | loop | 100 | 117 | 17 |
 | layout | 20 | 33 | 13 |

@@ -1,4 +1,10 @@
 #version 450
+#ifdef FAK_V41_TAIL_ROPE_EXACT_WITNESS
+#extension GL_EXT_spirv_intrinsics : require
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4464], 4459, 32); // DenormPreserve
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4466], 4461, 32); // SignedZeroInfNanPreserve
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4467], 4462, 32); // RoundingModeRTE
+#endif
 layout(local_size_x = 256) in;
 
 // Integer storage preserves every prefix bit, including signed zero/NaN payloads.

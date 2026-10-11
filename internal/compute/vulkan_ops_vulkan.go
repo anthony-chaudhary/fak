@@ -4,10 +4,11 @@ package compute
 
 /*
 #cgo CFLAGS: -I${SRCDIR}
-#cgo !v41_indexer_witness,!v41_bf16_boundary_witness,!v41_logit_scale_witness LDFLAGS: -L${SRCDIR} -lfakvulkan
-#cgo v41_indexer_witness,!v41_bf16_boundary_witness,!v41_logit_scale_witness LDFLAGS: -L${SRCDIR} -lfakvulkan_v41_indexer_witness
-#cgo v41_bf16_boundary_witness,!v41_indexer_witness,!v41_logit_scale_witness LDFLAGS: -L${SRCDIR} -lfakvulkan_v41_bf16_boundary_witness
-#cgo v41_logit_scale_witness,!v41_indexer_witness,!v41_bf16_boundary_witness LDFLAGS: -L${SRCDIR} -lfakvulkan_v41_logit_scale_witness
+#cgo !v41_indexer_witness,!v41_bf16_boundary_witness,!v41_logit_scale_witness,!v41_tail_rope_exact_witness LDFLAGS: -L${SRCDIR} -lfakvulkan
+#cgo v41_indexer_witness,!v41_bf16_boundary_witness,!v41_logit_scale_witness,!v41_tail_rope_exact_witness LDFLAGS: -L${SRCDIR} -lfakvulkan_v41_indexer_witness
+#cgo v41_bf16_boundary_witness,!v41_indexer_witness,!v41_logit_scale_witness,!v41_tail_rope_exact_witness LDFLAGS: -L${SRCDIR} -lfakvulkan_v41_bf16_boundary_witness
+#cgo v41_logit_scale_witness,!v41_indexer_witness,!v41_bf16_boundary_witness,!v41_tail_rope_exact_witness LDFLAGS: -L${SRCDIR} -lfakvulkan_v41_logit_scale_witness
+#cgo v41_tail_rope_exact_witness,!v41_indexer_witness,!v41_bf16_boundary_witness,!v41_logit_scale_witness LDFLAGS: -L${SRCDIR} -lfakvulkan_v41_tail_rope_exact_witness
 #include <stdlib.h>
 #include "vulkan_backend.h"
 */

@@ -68,3 +68,14 @@ func validateV41TailRoPERows(x, sinCos Tensor, rows, headDim, rotaryDim int) (xB
 	xBytes, _, tableBytes, err = validateV41TailRoPE(x, paired, sinCos, rows, headDim, rotaryDim)
 	return xBytes, tableBytes, err
 }
+
+// V41TailRoPEExactBackend adds an explicitly qualified binary32 arithmetic
+// environment to Rows: separate RNE products and add/sub, preserved denormals,
+// signed zero, infinities and NaNs. The marker must bind the selected device and
+// actual admitted module, not merely an implementation name or build tag.
+// It makes no residency, performance or physical-qualification claim. Ordinary
+// Vulkan intentionally does not implement this experimental witness marker.
+type V41TailRoPEExactBackend interface {
+	V41TailRoPERowsBackend
+	V41TailRoPEExactAvailable() bool
+}

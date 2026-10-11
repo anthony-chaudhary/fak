@@ -1,0 +1,61 @@
+{
+  "rows": [
+    {
+      "id": "tail-rope-exact-witness-go-tag",
+      "canonical": "v41_tail_rope_exact_witness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The explicit Go build tag selecting the experimental strict binary32 environment marker for V4.1 tail RoPE Rows and its software ABI tests. With Vulkan it selects a separate native archive; combining it with the indexer, BF16 or scalar-logit witness tag is a compile-time error.",
+      "distinction": "The tag controls Go source and archive selection. The native define controls strict loaded-module admission, and the linker token names the archive input. The marker additionally requires actual module modes and selected-device properties; the tag alone does not qualify hardware, enable ordinary production dispatch or remove host-boundary blockers.",
+      "distinct_from": [
+        "tail-rope-exact-witness-native-define",
+        "tail-rope-exact-witness-archive-link"
+      ],
+      "aliases": [],
+      "grounding": "v41_tail_rope_exact_witness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "tail-rope-exact-witness-native-define",
+      "canonical": "FAK_V41_TAIL_ROPE_EXACT_WITNESS",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The native compile-time define that requires the existing mandatory tail RoPE module to carry DenormPreserve, SignedZeroInfNanPreserve and RoundingModeRTE F32 modes with matching selected-device support and strict ABI/arithmetic-shape admission. It exposes the exact-environment and parser-test C symbols. The same define enables those modes in the unchanged GLSL arithmetic algorithm; ordinary builds retain their prior module policy.",
+      "distinction": "This selects native and shader compilation for an isolated witness profile. The Go tag selects its adapter and archive. It changes no ordinary registry membership, and source/module/archive build provenance remains separate from parser admission and physical qualification.",
+      "distinct_from": [
+        "tail-rope-exact-witness-go-tag",
+        "tail-rope-exact-witness-archive-link"
+      ],
+      "aliases": [],
+      "grounding": "FAK_V41_TAIL_ROPE_EXACT_WITNESS",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "tail-rope-exact-witness-archive-link",
+      "canonical": "-lfakvulkan_v41_tail_rope_exact_witness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The exact cgo linker-option token selecting libfakvulkan_v41_tail_rope_exact_witness.a for the strict tail RoPE witness-tagged Go build. All five Vulkan archive selectors choose this input exclusively for that tag combination. Ordinary native archives lack the strict environment marker and parser-test symbols.",
+      "distinction": "This names the linker input, separately from the Go tag and native/shader define. The option alone does not prove linked bytes: reviewed build commands and artifact hashes bind immutable-artifact provenance. The existing Rows dispatch is reused and tail BF16 readback remains on the host.",
+      "distinct_from": [
+        "tail-rope-exact-witness-go-tag",
+        "tail-rope-exact-witness-native-define"
+      ],
+      "aliases": [],
+      "grounding": "lfakvulkan_v41_tail_rope_exact_witness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

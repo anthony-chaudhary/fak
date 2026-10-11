@@ -723,7 +723,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 			v41CompressorPublication{
 				projectIndex: projectIndex,
 				finalize: func(start int, latent, key []float32) error {
-					return m.v41CompressedPublicationRoPE(l, start, latent, key)
+					return m.v41CompressedPublicationRoPEWithDevice(l, start, latent, key, scratch.gatherOps.compressedPublicationRoPEFunc())
 				},
 				registry: registry,
 				ref:      V41AttentionStateRef{LayerID: l, Ratio: plan.Ratio, IsKVSource: plan.KVSourceLayer == l, IsIndexSource: indexPub},

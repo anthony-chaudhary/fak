@@ -117,6 +117,10 @@ func (m *Model) v41IndexRowsWithDeviceOps(l, pos int, qLat, hidden []float32, ke
 // rotary copyback rounds their tails back to BF16. Reference FP4 quantization
 // remains separate work.
 func (m *Model) v41CompressedPublicationRoPE(l, pos int, latent, indexKey []float32) error {
+	return m.v41CompressedPublicationRoPEWithDevice(l, pos, latent, indexKey, nil)
+}
+
+func (m *Model) v41CompressedPublicationRoPEWithDevice(l, pos int, latent, indexKey []float32, rotate v41CompressedPublicationRoPEFunc) error {
 	cfg := m.Cfg
 	rd := cfg.QKRopeHeadDim
 	if pos < 0 || rd <= 0 || rd%2 != 0 || rd > cfg.HeadDim || len(latent) != cfg.HeadDim {
@@ -126,6 +130,33 @@ func (m *Model) v41CompressedPublicationRoPE(l, pos int, latent, indexKey []floa
 		return v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: index rotary width %d exceeds or disagrees with key width %d", ErrV41ForwardStage, rd, cfg.IndexHeadDim))
 	}
 	cos, sin := v41RopeTableForLayer(cfg, l, pos)
+	if rotate != nil {
+		rows := 1
+		if indexKey != nil {
+			rows = 2
+		}
+		// Only consumed tails enter the operation. Prefix bits (including
+		// non-finite payloads) retain their historical untouched semantics.
+		tails := make([]float32, 0, rows*rd)
+		if indexKey != nil {
+			tails = append(tails, indexKey[len(indexKey)-rd:]...)
+		}
+		tails = append(tails, latent[len(latent)-rd:]...)
+		finished, err := rotate(l, tails, append([]float32(nil), cos...), append([]float32(nil), sin...), rows, rd)
+		if err == nil && len(finished) != len(tails) {
+			err = errV41TailRoPEResult
+		}
+		if err != nil {
+			return &V41TailRoPEOperationError{Layer: l, Cause: v41StageErr(v41StageCompress, l, err)}
+		}
+		// The captured session has completed both checked BF16 conversions
+		// on owned storage. Publish neither tail until that whole call succeeds.
+		if indexKey != nil {
+			copy(indexKey[len(indexKey)-rd:], finished[:rd])
+		}
+		copy(latent[len(latent)-rd:], finished[(rows-1)*rd:])
+		return nil
+	}
 	if indexKey != nil {
 		applyRopeTailInterleaved(indexKey, cos, sin, rd)
 		tail, err := v41IndexBF16Copyback(l, "indexer.k_norm.weight", "rotary", indexKey[len(indexKey)-rd:])
