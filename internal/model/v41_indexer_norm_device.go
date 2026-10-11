@@ -93,18 +93,42 @@ func (s *Session) v41ExactRMSNormFunc(width int, eps float32) v41RMSNormFunc {
 				return nil, closeFailure(errV41ProjectionResult)
 			}
 		}
-		run := func() ([]float32, error) {
+		run := func() (result []float32, cause error) {
+			var owned []compute.Tensor
+			defer func() {
+				// Preserve the operation's returned error or panic if release
+				// also fails. Existing defers already attempted both releases;
+				// retain the first cleanup-only panic after a successful run.
+				primaryPanic := recover()
+				var cleanupPanic any
+				for i := len(owned) - 1; i >= 0; i-- {
+					func() {
+						defer func() {
+							if r := recover(); r != nil && cleanupPanic == nil {
+								cleanupPanic = r
+							}
+						}()
+						s.Backend.Free(owned[i])
+					}()
+				}
+				if primaryPanic != nil {
+					panic(primaryPanic)
+				}
+				if cause == nil && cleanupPanic != nil {
+					panic(cleanupPanic)
+				}
+			}()
 			stage = "weight upload"
 			weight := s.weightHAL(name)
 			stage = "activation upload"
 			x := s.uploadHostF32([]int{width}, input, compute.MemoryActivation, "V4.1 RMSNorm activation "+name)
-			defer s.Backend.Free(x)
+			owned = append(owned, x)
 			stage = "rmsnorm"
 			y, err := operation.V41ExactRMSNorm(x, weight, eps)
 			if err != nil {
 				return nil, err
 			}
-			defer s.Backend.Free(y)
+			owned = append(owned, y)
 			if y.Buf() == nil || y.Buf() == x.Buf() || y.Dtype != compute.F32 || len(y.Shape) != 1 || y.Shape[0] != width {
 				return nil, errV41ProjectionResult
 			}
