@@ -1,5 +1,28 @@
 //go:build darwin && arm64 && cgo
 
+// The llama.cpp-derived Metal kernels below retain the ggml MIT notice.
+// Q5_K mul_mv source: ggml/src/ggml-metal/kernels/mul_mv.metal at
+// 23b0202a189c44a54625aadcb37a946dd1d6278d; other source pins accompany their kernels.
+// Copyright (c) 2023-2026 The ggml authors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 // q4k.m — the Metal q4_k dequant-GEMV/GEMM. This is the lever that the f16/MPS path
 // (metal.m) cannot be: a 27B model is ~54 GB in f16, which does NOT fit the 36 GB unified
 // pool, so the f16-resident route OOMs. The q4_k_m GGUF is ~16 GB and DOES fit, but MPS has
@@ -247,8 +270,8 @@ kernel void q4k_gemv_vectorized(device const uchar* W [[buffer(0)]],
 
 // q4k_mul_mv is the default P=1 Q4_K decode GEMV (fak#13599). It is a port of llama.cpp's
 // kernel_mul_mv_q4_K_f32_impl in ggml-metal.metal at 17197474510622a3b4ea7d0909d70b606f542b96
-// (MIT; Copyright (c) 2023-2026 The ggml authors; the copyright and permission notice are
-// retained by reference in q4k_hotpath.go's provenance block). Changes from upstream: the
+// (MIT; Copyright (c) 2023-2026 The ggml authors; the complete notice is retained
+// at the top of this file). Changes from upstream: the
 // broadcast/batch strides are dropped (P=1 only), fak's row-major 144-B block layout is
 // addressed through raw byte offsets, and the per-row loop is guarded so a tail simdgroup never
 // reads or writes past `out` (upstream relies on padded rows).
@@ -955,7 +978,7 @@ kernel void q5k_mul_mm(device const uchar* W [[buffer(0)]],
 // q5k_mul_mv is the P=1 Q5_K decode GEMV, the Q5_K twin of q6k_mul_mv. It ports llama.cpp's
 // kernel_mul_mv_q5_K_f32_impl in ggml/src/ggml-metal/kernels/mul_mv.metal at
 // 23b0202a189c44a54625aadcb37a946dd1d6278d (MIT; Copyright (c) 2023-2026 The ggml authors; notice
-// retained by reference in q4k_hotpath.go). Changes from upstream: P=1 only, raw byte addressing of
+// retained at the top of this file). Changes from upstream: P=1 only, raw byte addressing of
 // the 176-B block (d@0, dmin@2, scales@4, qh@16, qs@48), and a guarded tail so no row past `out`
 // is read or written.
 //
@@ -1130,7 +1153,7 @@ kernel void q6k_gemv(device const uchar* W [[buffer(0)]],
 // q6k_mul_mv is the default P=1 Q6_K decode GEMV (fak#13599), the Q6_K twin of q4k_mul_mv. It
 // ports llama.cpp's kernel_mul_mv_q6_K_f32_impl in ggml-metal.metal at
 // 17197474510622a3b4ea7d0909d70b606f542b96 (MIT; Copyright (c) 2023-2026 The ggml authors;
-// notice retained by reference in q4k_hotpath.go). Changes from upstream: P=1 only, raw byte
+// notice retained at the top of this file). Changes from upstream: P=1 only, raw byte
 // addressing of fak's 210-B blocks, and a guarded tail so no row past `out` is read or written.
 //
 // Geometry: Q6K_MV_NSG simdgroups per threadgroup, Q6K_MV_NR0 rows per simdgroup. Lane parity
