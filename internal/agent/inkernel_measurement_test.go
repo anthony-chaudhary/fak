@@ -720,7 +720,10 @@ func TestNativeOOMRetryStopsAfterObserverDelivery(t *testing.T) {
 			if mode == "hidden-stream" {
 				wantCallbacks = 0
 			}
-			if comp != nil || callbacks != wantCallbacks || internalEmits != 1 || be.recycled != 0 || be.trimmed != 0 || be.trimLarge != 0 || len(p.InKernelOOMRetryStats().Rows) != 0 {
+			// Recycle and Trim also belong to ordinary HAL token/session cleanup.
+			// TrimLarge and retry rows witness retry preparation/replay without
+			// forbidding the failed attempt from releasing its resources.
+			if comp != nil || callbacks != wantCallbacks || internalEmits != 1 || be.trimLarge != 0 || len(p.InKernelOOMRetryStats().Rows) != 0 {
 				t.Fatalf("observed request replayed/trimmed: comp=%v callbacks=%d internal=%d trim=%d/%d/%d stats=%+v", comp, callbacks, internalEmits, be.recycled, be.trimmed, be.trimLarge, p.InKernelOOMRetryStats())
 			}
 		})
@@ -733,13 +736,24 @@ func TestObservedOOMRetryPreservesErrorAndCancellationPrecedence(t *testing.T) {
 	delivered.Store(true)
 	ctx := context.WithValue(context.Background(), inKernelObserverDeliveryContextKey{}, delivered)
 	oom := &InKernelOOMError{Bytes: 4096, Site: "already-observed", Class: compute.MemoryScratchpad}
-	p := &InKernelPlanner{}
+	be := &receiptOOMRetryBackend{Backend: compute.Default()}
+	p := &InKernelPlanner{m: model.NewSynthetic(tinyCfg()), backend: be}
+	assertNoRetryPreparation := func() {
+		t.Helper()
+		// This direct admission call owns no session, so every cleanup call
+		// here would be forbidden retry preparation, not ordinary HAL cleanup.
+		if be.recycled != 0 || be.trimmed != 0 || be.trimLarge != 0 || len(p.InKernelOOMRetryStats().Rows) != 0 {
+			t.Fatalf("observed admission prepared a retry: trim=%d/%d/%d stats=%+v", be.recycled, be.trimmed, be.trimLarge, p.InKernelOOMRetryStats())
+		}
+	}
 	if retry, err := p.admitDeviceOOMRetry(ctx, oom, 0, 0); retry || err != error(oom) {
 		t.Fatalf("observed retry changed original error: retry=%v err=%v", retry, err)
 	}
+	assertNoRetryPreparation()
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
 	if retry, err := p.admitDeviceOOMRetry(canceled, oom, 0, 0); retry || err != context.Canceled {
 		t.Fatalf("cancellation precedence changed: retry=%v err=%v", retry, err)
 	}
+	assertNoRetryPreparation()
 }
