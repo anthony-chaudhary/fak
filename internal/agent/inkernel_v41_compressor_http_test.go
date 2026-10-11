@@ -39,10 +39,10 @@ func v41CompressorHTTPModel(t *testing.T) *model.Model {
 		for i := range data {
 			seed = seed*6364136223846793005 + 1442695040888963407
 			v := (float32(seed>>40)/float32(1<<24)*2 - 1) * 0.1
-			if strings.HasSuffix(name, "norm.weight") || strings.HasSuffix(name, "mhc.scale") {
+			if strings.HasSuffix(name, "norm.weight") || strings.HasSuffix(name, "mhc.scale") || strings.HasSuffix(name, "mhc.ffn_scale") {
 				v = 1
 			}
-			if strings.HasSuffix(name, "mhc.base") {
+			if strings.HasSuffix(name, "mhc.base") || strings.HasSuffix(name, "mhc.ffn_base") {
 				v = 0
 			}
 			data[i] = v
@@ -85,6 +85,14 @@ func v41CompressorHTTPModel(t *testing.T) *model.Model {
 			add(e+".w3.weight", 32, 64)
 			add(e+".w2.weight", 64, 32)
 		}
+	}
+	// Append the full-geometry FFN mHC trio after the existing tensors so their
+	// seeded values stay unchanged. FFN coefficients are independent of attention.
+	for layer := 0; layer < cfg.NumLayers; layer++ {
+		p := fmt.Sprintf("model.layers.%d.", layer)
+		add(p+"mhc.ffn_mixes.weight", 4*cfg.HiddenSize, 24)
+		add(p+"mhc.ffn_base", 24)
+		add(p+"mhc.ffn_scale", 3)
 	}
 	m, err := model.NewFromF32Tensors(cfg, tensors)
 	if err != nil {
