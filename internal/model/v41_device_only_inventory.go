@@ -33,9 +33,6 @@ func (e *v41DeviceOnlyHostOpError) Is(target error) bool { return target == errV
 // Remove an entry only in the change that moves that op onto the device seam;
 // an empty inventory is the V4.1 admission condition.
 var v41DeviceOnlyHostOps = []v41HostOp{
-	{name: "moe-router-topk", site: "v41RouteForGeometry"},
-	{name: "routed-expert-weighted-sum", site: "v41FullRoutedSum"},
-	{name: "shared-expert-add", site: "v41SharedExpertAdd"},
 	{name: "residual-stream-carry", site: "Model.v41Layer"},
 }
 

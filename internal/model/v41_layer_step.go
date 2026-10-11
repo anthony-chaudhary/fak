@@ -371,7 +371,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return err
 	}
-	picks, err := v41RouteForGeometry(routerLogits, gateBias, routeCfg, full)
+	picks, err := v41RouteForGeometryWith(l, routerLogits, gateBias, routeCfg, full, scratch.routerTopK)
 	if err != nil {
 		return v41StageErr(v41StageMoE, l, err)
 	}
@@ -396,7 +396,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		}
 	}
 	if full {
-		routed, err = v41FullRoutedSum(l, picks, fullOutputs, H)
+		routed, err = v41FullRoutedSumWith(l, picks, fullOutputs, H, scratch.routedSum)
 		if err != nil {
 			return err
 		}
@@ -405,7 +405,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return err
 	}
-	moe, err := v41SharedExpertAdd(routed, shared, routeCfg)
+	moe, err := v41SharedExpertAddWith(l, routed, shared, routeCfg, scratch.sharedAdd)
 	if err != nil {
 		return v41StageErr(v41StageMoE, l, err)
 	}
@@ -790,7 +790,7 @@ func (m *Model) v41LayerStepRoleFinish(l, pos int, x []float32, streams [][]floa
 		return err
 	}
 	gateBias := m.tensor(layerName(l, "ffn.gate.e_score_correction_bias"))
-	picks, err := v41RouteForGeometry(routerLogits, gateBias, routeCfg, true)
+	picks, err := v41RouteForGeometryWith(l, routerLogits, gateBias, routeCfg, true, scratch.routerTopK)
 	if err != nil {
 		return v41StageErr(v41StageMoE, l, err)
 	}
@@ -805,7 +805,7 @@ func (m *Model) v41LayerStepRoleFinish(l, pos int, x []float32, streams [][]floa
 		}
 		fullOutputs[slot] = y
 	}
-	routed, err = v41FullRoutedSum(l, picks, fullOutputs, H)
+	routed, err = v41FullRoutedSumWith(l, picks, fullOutputs, H, scratch.routedSum)
 	if err != nil {
 		return err
 	}
@@ -813,7 +813,7 @@ func (m *Model) v41LayerStepRoleFinish(l, pos int, x []float32, streams [][]floa
 	if err != nil {
 		return err
 	}
-	moe, err := v41SharedExpertAdd(routed, shared, routeCfg)
+	moe, err := v41SharedExpertAddWith(l, routed, shared, routeCfg, scratch.sharedAdd)
 	if err != nil {
 		return v41StageErr(v41StageMoE, l, err)
 	}

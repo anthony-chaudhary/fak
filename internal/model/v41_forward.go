@@ -168,6 +168,9 @@ type v41ForwardState struct {
 	sharedActivation v41SharedActivationFunc
 	tailRoPE         v41TailRoPEFunc
 	sharedAttention  v41SharedAttentionFunc
+	routerTopK       v41RouterTopKFunc
+	routedSum        v41RoutedSumFunc
+	sharedAdd        v41SharedAddFunc
 	gatherOps        *v41DeviceGatherOps
 	// mhcDevice is the session's mHC stream seam (initial streams, split,
 	// pre-collapse, post-mix). nil keeps the host reference; a non-nil seam
@@ -304,7 +307,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, routerTopK: st.routerTopK, routedSum: st.routedSum, sharedAdd: st.sharedAdd, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -505,6 +508,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.sharedActivation = nil
 	scratch.tailRoPE = nil
 	scratch.sharedAttention = nil
+	scratch.routerTopK = nil
+	scratch.routedSum = nil
+	scratch.sharedAdd = nil
 	scratch.gatherOps = nil
 	if st != nil {
 		scratch.denseProjection = st.denseProjection
@@ -521,6 +527,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.sharedActivation = st.sharedActivation
 		scratch.tailRoPE = st.tailRoPE
 		scratch.sharedAttention = st.sharedAttention
+		scratch.routerTopK = st.routerTopK
+		scratch.routedSum = st.routedSum
+		scratch.sharedAdd = st.sharedAdd
 		scratch.gatherOps = st.gatherOps
 	}
 	defer func() {
@@ -538,6 +547,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.sharedActivation = nil
 		scratch.tailRoPE = nil
 		scratch.sharedAttention = nil
+		scratch.routerTopK = nil
+		scratch.routedSum = nil
+		scratch.sharedAdd = nil
 		scratch.gatherOps = nil
 	}()
 
@@ -1052,7 +1064,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return err
 		}
-		picks, err := v41RouteForGeometry(routerLogits, gateBias, routeCfg, full)
+		picks, err := v41RouteForGeometryWith(l, routerLogits, gateBias, routeCfg, full, scratch.routerTopK)
 		if err != nil {
 			return v41StageErr(v41StageMoE, l, err)
 		}
@@ -1111,7 +1123,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 						return err
 					}
 				}
-				routedByToken[t], err = v41FullRoutedSum(l, perTokenPicks[t], outputs, H)
+				routedByToken[t], err = v41FullRoutedSumWith(l, perTokenPicks[t], outputs, H, scratch.routedSum)
 				if err != nil {
 					return err
 				}
@@ -1198,7 +1210,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return err
 		}
-		moe, err := v41SharedExpertAdd(routed, shared, routeCfg)
+		moe, err := v41SharedExpertAddWith(l, routed, shared, routeCfg, scratch.sharedAdd)
 		if err != nil {
 			return v41StageErr(v41StageMoE, l, err)
 		}
@@ -1585,6 +1597,9 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.sharedActivation = s.v41SharedActivationFunc()
 		s.v41Forward.tailRoPE = s.v41TailRoPEFunc()
 		s.v41Forward.sharedAttention = s.v41SharedAttentionFunc()
+		s.v41Forward.routerTopK = s.v41RouterTopKFunc()
+		s.v41Forward.routedSum = s.v41RoutedSumFunc()
+		s.v41Forward.sharedAdd = s.v41SharedAddFunc()
 		s.v41Forward.gatherOps = s.v41DeviceGatherOpsFunc()
 		s.v41Forward.mhcDevice = s.v41MHCDeviceSeam()
 		s.v41Forward.callbackOwner = s

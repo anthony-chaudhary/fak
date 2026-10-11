@@ -50,6 +50,9 @@ type v41ProjScratch struct {
 	sharedActivation v41SharedActivationFunc
 	tailRoPE         v41TailRoPEFunc
 	sharedAttention  v41SharedAttentionFunc
+	routerTopK       v41RouterTopKFunc
+	routedSum        v41RoutedSumFunc
+	sharedAdd        v41SharedAddFunc
 	gatherOps        *v41DeviceGatherOps
 
 	// exp1/exp3/exp2 are the REUSED materialization targets for one routed
