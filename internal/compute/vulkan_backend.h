@@ -300,6 +300,20 @@ int fvk_v41_shared_attention_f32(const void *dQ, const void *dSharedKV,
                                  int heads, int headDim, int selectedRows,
                                  int mode, int hasSink, float scale);
 
+/* Optional V4.1 MoE router top-k, outside the trusted shader registry. Five
+ * exact storage bindings: logits[rows,experts] F32, bias[experts] F32 (a [1]
+ * dummy when hasBias=0), experts[rows,topK] uint32, weights[rows,topK] F32,
+ * status[rows,4] uint32. Outputs are disjoint from each other and inputs.
+ * Push ABI: int32 rows, experts, topK, full, hasBias; float32 routeScale.
+ * Status fields: stage, expertPlusOne, offendingValueBits, 0; stage 0 success,
+ * 1 logit, 2 score, 3 bias, 4 selection, 5 normalization, 6 weight. Return
+ * codes match shared attention; success is provisional until status is read. */
+int fvk_have_v41_router_topk(void);
+int fvk_v41_router_topk_f32(const void *dLogits, const void *dBias,
+                            void *dExperts, void *dWeights, void *dStatus,
+                            int rows, int experts, int topK,
+                            int full, int hasBias, float routeScale);
+
 /* V4.1 scalar-order indexer score. Four exact F32 storage bindings:
  * Q[heads,headDim], keys[rows,headDim], weights[heads], scores[rows]. Inputs
  * are caller-validated finite and immutable; output must not alias any input.
