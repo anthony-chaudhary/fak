@@ -313,6 +313,9 @@ func attentionBatchCPUOracle(t *testing.T, req Qwen35FullAttentionBatchRequest) 
 	kvWidth := req.NumKVHeads * req.HeadDim
 	panel := make([]float32, 32*modelWidth)
 	copy(panel, req.Input)
+	// The oracle's Q8 projections stay on the int8-exact q8_gemm, not the half-weight q8_mul_mm.
+	SetQ8UseMulMM(false)
+	defer SetQ8UseMulMM(true)
 	g, err := BeginProjectionGraph(panel, nil, nil, 32, modelWidth)
 	if err != nil {
 		t.Fatal(err)

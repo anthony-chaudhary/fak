@@ -197,10 +197,137 @@ kernel void q8_gemm(device const char*  W    [[buffer(0)]],  // out*in int8 code
         }
     }
 }
+
+// q8_mul_mm: the simdgroup-matrix Q8_0 prefill GEMM, a port of llama.cpp's kernel_mul_mm
+// instantiated for block_q8_0 (ggml/src/ggml-metal/ggml-metal.metal:11474-11780 and
+// dequantize_q8_0 :3436-3447 @ 541bf376229d6c5cb61e4eb59b3c7629755b8271 (b8200), MIT; Copyright
+// (c) 2023-2026 The ggml authors), in the same tile topology as q4k.m's q4k_mul_mm: a 64-row x
+// 32-token output tile over 4 simdgroups, one 32-wide K step per Q8_0 block, weights staged as half
+// 8x8 tiles, activations as f32, f32 accumulators. It reads FAK's split resident layout (int8 codes
+// + f32 block scales) and the same int8 activation panel as q8_gemm, so the bindings are q8_gemm's
+// minus the t0/nt token loop: one dispatch covers the GEMM. Weights round to half after scaling,
+// so parity with q8_gemm is cosine-tight rather than bit-close.
+#define Q8MM_BM 64
+#define Q8MM_BN 32
+#define Q8MM_TPR 2
+#define Q8MM_TPC 4
+#define Q8MM_TG 128
+kernel void q8_mul_mm(device const char*  W    [[buffer(0)]],
+                      device const float* WD   [[buffer(1)]],
+                      device const char*  X    [[buffer(2)]],
+                      device const float* XD   [[buffer(3)]],
+                      device float*       Y    [[buffer(4)]],
+                      constant int&       nblk [[buffer(5)]],
+                      constant int&       out_ [[buffer(6)]],
+                      constant int&       P    [[buffer(7)]],
+                      uint2 tg     [[threadgroup_position_in_grid]],
+                      ushort tiitg [[thread_index_in_threadgroup]],
+                      ushort sgitg [[simdgroup_index_in_threadgroup]]) {
+    threadgroup float shmem[Q8MM_BM * Q8MM_BN];
+    threadgroup half*  sa = (threadgroup half*)shmem;
+    threadgroup float* sb = shmem + Q8MM_BM * 32 / 2;
+    const int r1 = (int)tg.x;
+    const int r0 = (int)tg.y;
+    const int in = nblk * 32;
+    const short n_rows = (short)min(out_ - r0 * Q8MM_BM, Q8MM_BM);
+    const short n_cols = (short)min(P - r1 * Q8MM_BN, Q8MM_BN);
+    const short thread_row = min((short)(tiitg / Q8MM_TPR), (short)(n_rows - 1));
+    const short thread_col = min((short)(tiitg / Q8MM_TPC), (short)(n_cols - 1));
+    const short il = (short)(tiitg % Q8MM_TPR);
+    const short kc = (short)(tiitg % Q8MM_TPC);
+
+    simdgroup_half8x8  ma[4];
+    simdgroup_float8x8 mb[2];
+    simdgroup_float8x8 mc[8];
+    for (short i = 0; i < 8; i++) mc[i] = make_filled_simdgroup_matrix<float, 8>(0.0f);
+
+    const long wrow = (long)(r0 * Q8MM_BM + thread_row);
+    const long xrow = (long)(r1 * Q8MM_BN + thread_col);
+    device const char*  x  = W  + wrow * in + 16 * il;
+    device const float* xd = WD + wrow * nblk;
+    device const char*  y  = X  + xrow * in + 8 * kc;
+    device const float* yd = XD + xrow * nblk;
+
+    for (int b = 0; b < nblk; b++) {
+        const float d = xd[b];
+        half4x4 temp_a;
+        for (short i = 0; i < 16; i++) temp_a[i / 4][i % 4] = (half)((float)x[i] * d);
+        const float dy = yd[b];
+        const char4 c0 = *(device const char4*)(y);
+        const char4 c1 = *(device const char4*)(y + 4);
+        float2x4 temp_b = float2x4(float4(c0) * dy, float4(c1) * dy);
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        for (short i = 0; i < 16; i++) {
+            sa[64 * ((tiitg / Q8MM_TPR / 8) + il * 16 + (i / 8) * 8) + (tiitg / Q8MM_TPR) % 8 + (i & 7) * 8] = temp_a[i / 4][i % 4];
+        }
+        *(threadgroup float2x4*)(sb + kc * 8 * 32 + 8 * (tiitg / Q8MM_TPC)) = temp_b;
+        x += 32;
+        y += 32;
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+
+        threadgroup const half*  lsma = sa + 4 * 64 * (sgitg % 2);
+        threadgroup const float* lsmb = sb + 2 * 64 * (sgitg / 2);
+        for (short ik = 0; ik < 4; ik++) {
+            for (short i = 0; i < 4; i++) simdgroup_load(ma[i], lsma + 64 * i);
+            simdgroup_barrier(mem_flags::mem_none);
+            for (short i = 0; i < 2; i++) simdgroup_load(mb[i], lsmb + 64 * i);
+            lsma += Q8MM_BM / 8 * 64;
+            lsmb += Q8MM_BN / 8 * 64;
+            for (short i = 0; i < 8; i++) simdgroup_multiply_accumulate(mc[i], mb[i / 4], ma[i % 4], mc[i]);
+        }
+    }
+
+    if ((r0 + 1) * Q8MM_BM <= out_ && (r1 + 1) * Q8MM_BN <= P) {
+        device float* C = Y + (Q8MM_BM * r0 + 32 * (sgitg & 1)) + (long)(Q8MM_BN * r1 + 16 * (sgitg >> 1)) * out_;
+        for (short i = 0; i < 8; i++) simdgroup_store(mc[i], C + 8 * (i % 4) + 8 * (long)out_ * (i / 4), (ulong)out_);
+    } else {
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        threadgroup float* temp = shmem + 32 * (sgitg & 1) + (16 * (sgitg >> 1)) * Q8MM_BM;
+        for (short i = 0; i < 8; i++) simdgroup_store(mc[i], temp + 8 * (i % 4) + 8 * Q8MM_BM * (i / 4), Q8MM_BM);
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        for (int idx = (int)tiitg; idx < Q8MM_BN * Q8MM_BM; idx += Q8MM_TG) {
+            int t = idx / Q8MM_BM, r = idx % Q8MM_BM;
+            if (t < n_cols && r < n_rows) Y[(long)(r1 * Q8MM_BN + t) * out_ + r0 * Q8MM_BM + r] = shmem[t * Q8MM_BM + r];
+        }
+    }
+}
 )MSL";
 
-static id<MTLComputePipelineState> psoQ8Gemv, psoQ8Gemm;
+static id<MTLComputePipelineState> psoQ8Gemv, psoQ8Gemm, psoQ8MulMM;
 static int gQ8Ready;
+static int q8_init(void);
+// gQ8MulMMEnabled is the q8_mul_mm kill switch (mg_q8_set_mulmm); the kernel also needs P >= Q8MM_MIN_P.
+// The floor is the 32-token prefill panel quantum: batched decode (B < 32 rows) stays on the int8-exact
+// q8_gemm, whose rows match the single-row q8_gemv decode to 1e-6 cosine; half-rounded weights do not.
+static int gQ8MulMMEnabled = 1;
+#define Q8MM_MIN_P 32
+
+static int q8_use_mulmm(int P) { return psoQ8MulMM != nil && gQ8MulMMEnabled && P >= Q8MM_MIN_P; }
+
+// q8_encode_gemm encodes the P>1 Q8 GEMM with bindings 0..7 already set on e: one q8_mul_mm
+// dispatch when admitted, else q8_gemm's 64-token loop.
+static void q8_encode_gemm(id<MTLComputeCommandEncoder> e, int out, int P) {
+    if (q8_use_mulmm(P)) {
+        [e setComputePipelineState:psoQ8MulMM];
+        [e dispatchThreadgroups:MTLSizeMake((NSUInteger)((P + 31) / 32), (NSUInteger)((out + 63) / 64), 1)
+            threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+        return;
+    }
+    [e setComputePipelineState:psoQ8Gemm];
+    const int BN = 64, TG = 256;
+    int rowBlocks = (out + 63) / 64;
+    for (int t0 = 0; t0 < P; t0 += BN) {
+        int nt = P - t0;
+        if (nt > BN) nt = BN;
+        [e setBytes:&t0 length:sizeof(int) atIndex:8];
+        [e setBytes:&nt length:sizeof(int) atIndex:9];
+        [e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG, 1, 1)];
+    }
+}
+
+void mg_q8_set_mulmm(int on) { gQ8MulMMEnabled = on ? 1 : 0; }
+int mg_q8_mulmm_ready(void) { return q8_init() && psoQ8MulMM != nil; }
 
 static int q8_init(void) {
     if (gQ8Ready) return 1;
@@ -211,6 +338,8 @@ static int q8_init(void) {
     psoQ8Gemv = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q8_gemv"] error:&err];
     psoQ8Gemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q8_gemm"] error:&err];
     if (!psoQ8Gemv || !psoQ8Gemm) { NSLog(@"q8: pipeline build failed: %@", err); return 0; }
+    // Optional: a device without simdgroup_matrix keeps q8_gemm.
+    psoQ8MulMM = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q8_mul_mm"] error:&err];
     gQ8Ready = 1;
     return 1;
 }
@@ -534,7 +663,6 @@ void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y
         mg_execution_event_command_buffer(event, cmd);
         id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
         mg_execution_event_encoder(event, e);
-        [e setComputePipelineState:psoQ8Gemm];
         [e setBuffer:(__bridge id<MTLBuffer>)W.codes  offset:0 atIndex:0];
         [e setBuffer:(__bridge id<MTLBuffer>)W.scales offset:0 atIndex:1];
         [e setBuffer:gQ8XBuf  offset:0 atIndex:2];
@@ -543,18 +671,7 @@ void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y
         [e setBytes:&W.nblk length:sizeof(int) atIndex:5];
         [e setBytes:&W.out  length:sizeof(int) atIndex:6];
         [e setBytes:&P      length:sizeof(int) atIndex:7];
-        const int BM = 64;  // output rows per threadgroup; must match Q8_BM in the MSL source
-        const int BN = 64;  // token-tile width;            must match Q8_BN in the MSL source
-        const int TG = 256; // threads per threadgroup;     must match Q8_TG in the MSL source
-        int rowBlocks = (W.out + BM - 1) / BM;
-        for (int t0 = 0; t0 < P; t0 += BN) {
-            int nt = P - t0;
-            if (nt > BN) nt = BN;
-            [e setBytes:&t0 length:sizeof(int) atIndex:8];
-            [e setBytes:&nt length:sizeof(int) atIndex:9];
-            [e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks, 1, 1)
-                threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG, 1, 1)];
-        }
+        q8_encode_gemm(e, W.out, P);
         [e endEncoding];
         [cmd commit];
         mg_execution_event_committed(event);
@@ -583,33 +700,21 @@ void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float
         memcpy(gQ8XBuf.contents,  Xq, (size_t)P * W0.in);
         memcpy(gQ8XDBuf.contents, Xd, (size_t)P * W0.nblk * 4);
 
-        const int BM = 64;  // output rows per threadgroup; must match Q8_BM in the MSL source
-        const int BN = 64;  // token-tile width;            must match Q8_BN in the MSL source
-        const int TG = 256; // threads per threadgroup;     must match Q8_TG in the MSL source
         id<MTLCommandBuffer> cmd = [gQueue commandBuffer];
         mg_execution_event_command_buffer(event, cmd);
         id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
         mg_execution_event_encoder(event, e);
-        [e setComputePipelineState:psoQ8Gemm];
         [e setBuffer:gQ8XBuf  offset:0 atIndex:2]; // shared X panel for every weight
         [e setBuffer:gQ8XDBuf offset:0 atIndex:3];
         [e setBytes:&P length:sizeof(int) atIndex:7];
         for (int i = 0; i < n; i++) {
             Q8W W = gQ8[wids[i]];
-            int rowBlocks = (W.out + BM - 1) / BM;
             [e setBuffer:(__bridge id<MTLBuffer>)W.codes  offset:0 atIndex:0];
             [e setBuffer:(__bridge id<MTLBuffer>)W.scales offset:0 atIndex:1];
             [e setBuffer:gQ8YBuf offset:(NSUInteger)((long)yoff[i] * 4) atIndex:4];
             [e setBytes:&W.nblk length:sizeof(int) atIndex:5];
             [e setBytes:&W.out  length:sizeof(int) atIndex:6];
-            for (int t0 = 0; t0 < P; t0 += BN) {
-                int nt = P - t0;
-                if (nt > BN) nt = BN;
-                [e setBytes:&t0 length:sizeof(int) atIndex:8];
-                [e setBytes:&nt length:sizeof(int) atIndex:9];
-                [e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks, 1, 1)
-                    threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG, 1, 1)];
-            }
+            q8_encode_gemm(e, W.out, P);
         }
         [e endEncoding];
         [cmd commit];
@@ -659,7 +764,7 @@ void *mg_q8_graph_encode(void *graph, int wid) {
     if (!q8_valid(wid) || !q8_init()) return NULL; int P=mg_graph_prompt(graph),in=mg_graph_input(graph);if(P<=0||in!=gQ8[wid].in)return NULL;
     id<MTLCommandBuffer>cb=(__bridge id<MTLCommandBuffer>)mg_graph_command_buffer(graph);id<MTLBuffer>xq=(__bridge id<MTLBuffer>)mg_graph_xq_buffer(graph),xd=(__bridge id<MTLBuffer>)mg_graph_xd_buffer(graph);if(!cb||!xq||!xd)return NULL;Q8W*w=&gQ8[wid];id<MTLBuffer>y=(__bridge id<MTLBuffer>)mg_graph_alloc_result(graph,P*w->out);if(!y)return NULL;
     if (mg_graph_gemv_p1(graph) && P == 1) { id<MTLComputeCommandEncoder>e=[cb computeCommandEncoder];[e setComputePipelineState:psoQ8Gemv];[e setBuffer:(__bridge id<MTLBuffer>)w->codes offset:0 atIndex:0];[e setBuffer:(__bridge id<MTLBuffer>)w->scales offset:0 atIndex:1];[e setBuffer:xq offset:0 atIndex:2];[e setBuffer:xd offset:0 atIndex:3];[e setBuffer:y offset:0 atIndex:4];[e setBytes:&w->nblk length:sizeof(int) atIndex:5];[e setBytes:&w->out length:sizeof(int) atIndex:6];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)w->out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];[e endEncoding];return (__bridge void*)y; }
-    id<MTLComputeCommandEncoder>e=[cb computeCommandEncoder];[e setComputePipelineState:psoQ8Gemm];[e setBuffer:(__bridge id<MTLBuffer>)w->codes offset:0 atIndex:0];[e setBuffer:(__bridge id<MTLBuffer>)w->scales offset:0 atIndex:1];[e setBuffer:xq offset:0 atIndex:2];[e setBuffer:xd offset:0 atIndex:3];[e setBuffer:y offset:0 atIndex:4];[e setBytes:&w->nblk length:sizeof(int) atIndex:5];[e setBytes:&w->out length:sizeof(int) atIndex:6];[e setBytes:&P length:sizeof(int) atIndex:7];const int BM=64,BN=64,TG=256;int rowBlocks=(w->out+BM-1)/BM;for(int t0=0;t0<P;t0+=BN){int nt=P-t0;if(nt>BN)nt=BN;[e setBytes:&t0 length:sizeof(int) atIndex:8];[e setBytes:&nt length:sizeof(int) atIndex:9];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG,1,1)];}[e endEncoding];return (__bridge void*)y;
+    id<MTLComputeCommandEncoder>e=[cb computeCommandEncoder];[e setBuffer:(__bridge id<MTLBuffer>)w->codes offset:0 atIndex:0];[e setBuffer:(__bridge id<MTLBuffer>)w->scales offset:0 atIndex:1];[e setBuffer:xq offset:0 atIndex:2];[e setBuffer:xd offset:0 atIndex:3];[e setBuffer:y offset:0 atIndex:4];[e setBytes:&w->nblk length:sizeof(int) atIndex:5];[e setBytes:&w->out length:sizeof(int) atIndex:6];[e setBytes:&P length:sizeof(int) atIndex:7];q8_encode_gemm(e,w->out,P);[e endEncoding];return (__bridge void*)y;
 }
 
 // Encode a Q8 projection from graph-owned quantized activation buffers. The
@@ -673,5 +778,5 @@ void *mg_q8_graph_encode_from(void *graph, int wid, void *qptr, void *dptr, int 
     if(P<=0||elems<=0||elems%P||elems/P!=gQ8[wid].in||!cb||!xq||!xd)return NULL;
     Q8W*w=&gQ8[wid];id<MTLBuffer>y=(__bridge id<MTLBuffer>)mg_graph_alloc_result(graph,P*w->out);if(!y)return NULL;
     if (mg_graph_gemv_p1(graph) && P == 1) { id<MTLComputeCommandEncoder>e=[cb computeCommandEncoder];[e setComputePipelineState:psoQ8Gemv];[e setBuffer:(__bridge id<MTLBuffer>)w->codes offset:0 atIndex:0];[e setBuffer:(__bridge id<MTLBuffer>)w->scales offset:0 atIndex:1];[e setBuffer:xq offset:0 atIndex:2];[e setBuffer:xd offset:0 atIndex:3];[e setBuffer:y offset:0 atIndex:4];[e setBytes:&w->nblk length:sizeof(int) atIndex:5];[e setBytes:&w->out length:sizeof(int) atIndex:6];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)w->out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];[e endEncoding];return (__bridge void*)y; }
-    id<MTLComputeCommandEncoder>e=[cb computeCommandEncoder];[e setComputePipelineState:psoQ8Gemm];[e setBuffer:(__bridge id<MTLBuffer>)w->codes offset:0 atIndex:0];[e setBuffer:(__bridge id<MTLBuffer>)w->scales offset:0 atIndex:1];[e setBuffer:xq offset:0 atIndex:2];[e setBuffer:xd offset:0 atIndex:3];[e setBuffer:y offset:0 atIndex:4];[e setBytes:&w->nblk length:sizeof(int) atIndex:5];[e setBytes:&w->out length:sizeof(int) atIndex:6];[e setBytes:&P length:sizeof(int) atIndex:7];const int BM=64,BN=64,TG=256;int rowBlocks=(w->out+BM-1)/BM;for(int t0=0;t0<P;t0+=BN){int nt=P-t0;if(nt>BN)nt=BN;[e setBytes:&t0 length:sizeof(int) atIndex:8];[e setBytes:&nt length:sizeof(int) atIndex:9];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG,1,1)];}[e endEncoding];return (__bridge void*)y;
+    id<MTLComputeCommandEncoder>e=[cb computeCommandEncoder];[e setBuffer:(__bridge id<MTLBuffer>)w->codes offset:0 atIndex:0];[e setBuffer:(__bridge id<MTLBuffer>)w->scales offset:0 atIndex:1];[e setBuffer:xq offset:0 atIndex:2];[e setBuffer:xd offset:0 atIndex:3];[e setBuffer:y offset:0 atIndex:4];[e setBytes:&w->nblk length:sizeof(int) atIndex:5];[e setBytes:&w->out length:sizeof(int) atIndex:6];[e setBytes:&P length:sizeof(int) atIndex:7];q8_encode_gemm(e,w->out,P);[e endEncoding];return (__bridge void*)y;
 }
