@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"math"
 	"path/filepath"
 	"testing"
 
@@ -33,7 +34,7 @@ func TestServeHaloGPUActivatedExpertsRingStreamsDenseBaseWithEstimatedHostPeak(t
 }
 
 // fak#13774: fixed-term sizing must not ask actual-route admission to accept a zero bound.
-// A reachable planner estimate does not qualify the streamed load for admission.
+// The sized route is admitted only under a Go memory limit of the predicted peak (fak#13798).
 // fak-test:justify why=regression when=changed:cmd/fak/serve_activated_expert_ring.go
 // fak-test:runtime fast est=20ms lane=default
 func TestServeActivatedExpertRingDenseSizingUsesFixedPeakWithoutAdmitting(t *testing.T) {
@@ -88,10 +89,18 @@ func TestServeActivatedExpertRingDenseSizingUsesFixedPeakWithoutAdmitting(t *tes
 				if estimateErr != nil {
 					t.Fatal(estimateErr)
 				}
-				_, admissionErr := serveNativeHostLoadPeakDecision(peak, nil, free, true, env, actual...)
+				// fak#13798: the sized route is admitted, and only under a limit of the predicted peak.
+				limit := stubServeMemoryLimit(t, math.MaxInt64, false)
+				if _, admissionErr := serveNativeHostLoadPeakDecision(peak, nil, free, true, env, actual...); admissionErr != nil {
+					t.Fatalf("admission error=%v, want the fixed-peak sized route admitted", admissionErr)
+				}
+				if *limit != peak.PeakAnonBytes {
+					t.Fatalf("memory limit = %d, want predicted peak %d", *limit, peak.PeakAnonBytes)
+				}
+				stubServeMemoryLimit(t, math.MaxInt64, true)
 				var unavailable *serveHostLoadPeakUnavailableError
-				if !errors.As(admissionErr, &unavailable) || unavailable.Reason != "streamed-staging-peak-unqualified" {
-					t.Fatalf("admission error=%v, want unchanged unqualified-staging refusal", admissionErr)
+				if _, admissionErr := serveNativeHostLoadPeakDecision(peak, nil, free, true, env, actual...); !errors.As(admissionErr, &unavailable) || unavailable.Reason != "streamed-staging-peak-unqualified" {
+					t.Fatalf("admission error=%v, want unqualified refusal without a memory limit", admissionErr)
 				}
 			}
 		})
