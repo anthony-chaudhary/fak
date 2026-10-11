@@ -273,8 +273,14 @@ func (r *v41MHCResident) mixes(layer int, streams *v41DeviceStreams, leaf, scale
 		view := raw
 		view.Shape = []int{rows, compute.V41MHCCoeffWidth}
 		*stage = "params upload"
-		pt := s.uploadHostF32([]int{compute.V41MHCParamWidth}, params, compute.MemoryActivation, "V4.1 mHC split params")
-		defer s.Backend.Free(pt)
+		// The split coefficients are immutable checkpoint data, just like the
+		// mix matrix above. The model/backend owner separates loaded model
+		// generations and backend instances; these leaf names separate layer
+		// and attention/FFN role. Forward-local cleanup must not free them.
+		paramsKey := "v41-mhc-split-params:" + layerName(layer, scaleLeaf) + ":" + layerName(layer, baseLeaf)
+		pt := s.cachedImmutableWeight(paramsKey, paramsKey, func() compute.Tensor {
+			return s.uploadHostF32([]int{compute.V41MHCParamWidth}, params, compute.MemoryWeights, "V4.1 mHC split params")
+		})
 		*stage = "rms-split"
 		out, err := r.d.op.V41MHCRMSSplit(view, streams.Tensor(), pt, rows, streams.Hidden(), iters, hcEps, rmsEps)
 		if err != nil {

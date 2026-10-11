@@ -23,6 +23,10 @@ type v41MHCTestBackend struct {
 	failOp      string
 	failCall    int
 	cause       error
+	// Optional residency instrumentation. Existing arithmetic remains unchanged.
+	paramUploads       []compute.Tensor
+	paramFrees         map[compute.Buffer]int
+	paramUploadFailure error
 }
 
 func newV41MHCTestBackend(supported bool) *v41MHCTestBackend {
@@ -35,11 +39,20 @@ func (b *v41MHCTestBackend) UploadClass(x compute.Tensor, dt compute.Dtype, clas
 	if !strings.HasPrefix(site, "V4.1 mHC ") {
 		return b.v41DenseTestBackend.Upload(x, dt)
 	}
-	if class != compute.MemoryActivation || dt != compute.F32 {
-		panic("mHC upload is not a classed F32 activation")
+	params := site == "V4.1 mHC split params"
+	if dt != compute.F32 || (class != compute.MemoryActivation && !(params && class == compute.MemoryWeights)) {
+		panic("mHC upload has an invalid F32 memory class")
+	}
+	if params && b.paramUploadFailure != nil {
+		panic(b.paramUploadFailure)
 	}
 	// Device uploads own storage; cpu-ref's identity Upload would hide aliasing.
-	return compute.NewF32(b, append([]int(nil), x.Shape...), append([]float32(nil), b.Backend.Read(x)...))
+	out := compute.NewF32(b, append([]int(nil), x.Shape...), append([]float32(nil), b.Backend.Read(x)...))
+	if params && b.paramFrees != nil {
+		b.paramUploads = append(b.paramUploads, out)
+		b.paramFrees[out.Buf()] = 0
+	}
+	return out
 }
 
 func (b *v41MHCTestBackend) operand(t compute.Tensor, shape ...int) []float32 {
@@ -160,6 +173,9 @@ func (b *v41MHCTestBackend) Read(x compute.Tensor) []float32 {
 }
 
 func (b *v41MHCTestBackend) Free(x compute.Tensor) {
+	if _, recorded := b.paramFrees[x.Buf()]; recorded {
+		b.paramFrees[x.Buf()]++
+	}
 	if b.outputs[x.Buf()] != "" {
 		delete(b.outputs, x.Buf())
 		for i := range b.readScratch {

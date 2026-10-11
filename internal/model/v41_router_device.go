@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -83,8 +84,9 @@ func v41RouterFaultError(f *compute.V41RouterTopKFault) error {
 
 // v41RouterTopKFunc binds the router to the session backend when it offers the
 // optional V4.1 router primitive. This host-row adapter uploads the 4*E logit
-// row and the 4*E correction bias per call and reads back 8*k pick bytes plus
-// 16 status bytes. A resident caller hands its logits tensor to v41DeviceRoute.
+// row per call, borrowing canonical checkpoint bias from the immutable owner.
+// Arbitrary caller bias remains a transient 4*E upload. It reads back 8*k pick
+// bytes plus 16 status bytes; v41DeviceRoute also accepts resident logits.
 func (s *Session) v41RouterTopKFunc() v41RouterTopKFunc {
 	if !s.v41DeviceSumAvailable() {
 		return nil
@@ -94,7 +96,30 @@ func (s *Session) v41RouterTopKFunc() v41RouterTopKFunc {
 		return nil
 	}
 	return func(layer int, logits, correctionBias []float32, cfg v41RouterConfig, full bool) ([]routePick, error) {
-		return v41SelectedDeviceCall(s, layer, "v41-router-topk", func(stage *string) ([]routePick, error) {
+		return v41SelectedDeviceCall(s, layer, "v41-router-topk", func(stage *string) (result []routePick, cause error) {
+			// Release only call-owned uploads. Preserve a primary selected
+			// failure if a later Free also fails, while attempting both frees.
+			var owned []compute.Tensor
+			defer func() {
+				primaryPanic := recover()
+				var cleanupPanic any
+				for i := len(owned) - 1; i >= 0; i-- {
+					func() {
+						defer func() {
+							if r := recover(); r != nil && cleanupPanic == nil {
+								cleanupPanic = r
+							}
+						}()
+						s.Backend.Free(owned[i])
+					}()
+				}
+				if primaryPanic != nil {
+					panic(primaryPanic)
+				}
+				if cause == nil && cleanupPanic != nil {
+					panic(cleanupPanic)
+				}
+			}()
 			if err := cfg.validate(); err != nil {
 				return nil, err
 			}
@@ -107,14 +132,37 @@ func (s *Session) v41RouterTopKFunc() v41RouterTopKFunc {
 			}
 			*stage = "logit upload"
 			lt := s.uploadHostF32([]int{1, cfg.Experts}, logits, compute.MemoryActivation, "V4.1 router logits")
-			defer s.Backend.Free(lt)
+			owned = append(owned, lt)
 			*stage = "bias upload"
 			bias := []float32{0}
 			if hasBias {
 				bias = correctionBias
 			}
-			bt := s.uploadHostF32([]int{len(bias)}, bias, compute.MemoryActivation, "V4.1 router correction bias")
-			defer s.Backend.Free(bt)
+			var bt compute.Tensor
+			resident := false
+			// Production passes the immutable checkpoint view. The callback
+			// also accepts arbitrary caller slices: equal values, a layer id,
+			// or a backend name do not establish checkpoint identity.
+			// A bare callback session without a held model lifetime stays transient.
+			name := layerName(layer, "ffn.gate.e_score_correction_bias")
+			if hasBias && s.modelWeightsHeld && s.halW != nil {
+				meta, present := s.M.manifest[name]
+				bytes, valid := checkedMulInt(len(bias), 4)
+				if present && valid && strings.EqualFold(meta.Dtype, "F32") &&
+					len(meta.Shape) == 1 && meta.Shape[0] == len(bias) && meta.Nbytes == bytes &&
+					meta.Offset >= 0 && meta.Offset <= len(s.M.raw) && bytes <= len(s.M.raw)-meta.Offset {
+					canonical := s.M.tensor(name)
+					if &canonical[0] == &bias[0] {
+						// Existing cache ownership separates loaded-model and
+						// exact-backend identities and owns final release.
+						bt, resident = s.weightHAL(name), true
+					}
+				}
+			}
+			if !resident {
+				bt = s.uploadHostF32([]int{len(bias)}, bias, compute.MemoryActivation, "V4.1 router correction bias")
+				owned = append(owned, bt)
+			}
 			*stage = "router-topk"
 			rows, err := v41DeviceRoute(op, lt, bt, 1, cfg, full, hasBias)
 			if err != nil {
