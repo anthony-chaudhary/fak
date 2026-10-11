@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"unsafe"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -262,6 +263,10 @@ func (s *V41EngramQ2KSource) ReadRows(start, count int, dst []byte) (int, error)
 	// fill row[:want] exactly. The dequantized row is then serialized into the
 	// caller's byte-oriented dst as little-endian float32. Never zero-fill: the
 	// typed refusals above guarantee only a validated Q2_K range reaches here.
+	if v41EngramHostLittleEndian && uintptr(unsafe.Pointer(&dst[0]))%4 == 0 {
+		dequantQ2K(unsafe.Slice((*float32)(unsafe.Pointer(&dst[0])), count*qkK), raw)
+		return want, nil
+	}
 	row := make([]float32, count*qkK)
 	dequantQ2K(row, raw)
 	for i, v := range row {
@@ -269,6 +274,15 @@ func (s *V41EngramQ2KSource) ReadRows(start, count int, dst []byte) (int, error)
 	}
 	return want, nil
 }
+
+// v41EngramHostLittleEndian gates ReadRows' in-place decode: on a little-endian
+// host an aligned float32 view of dst holds exactly the bytes the
+// PutUint32(Float32bits) loop would write, so the decode skips the f32 scratch
+// row and the per-element copy.
+var v41EngramHostLittleEndian = func() bool {
+	x := uint16(1)
+	return *(*byte)(unsafe.Pointer(&x)) == 1
+}()
 
 // compile-time proof the source satisfies the model-side read seam.
 var _ model.V41EngramRowSource = (*V41EngramQ2KSource)(nil)

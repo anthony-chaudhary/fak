@@ -34,7 +34,6 @@ package model
 // change, not this one.
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -85,6 +84,21 @@ func (b V41EngramArtifactBinding) rowWidth() (int, error) {
 // A zero or malformed digest is refused here rather than allowed to reach a
 // comparison that would then reject a correct artifact for the wrong reason.
 func (b V41EngramArtifactBinding) validate() error {
+	if err := b.validateExtent(); err != nil {
+		return err
+	}
+	digest := strings.ToLower(strings.TrimSpace(b.Digest))
+	const prefix = "sha256:"
+	if !strings.HasPrefix(digest, prefix) || len(digest) != len(prefix)+64 {
+		return fmt.Errorf("binding digest %q is not a sha256 content address", b.Digest)
+	}
+	if _, err := hex.DecodeString(digest[len(prefix):]); err != nil {
+		return fmt.Errorf("binding digest %q is not hex", b.Digest)
+	}
+	return nil
+}
+
+func (b V41EngramArtifactBinding) validateExtent() error {
 	if strings.TrimSpace(b.Shard) == "" {
 		return fmt.Errorf("binding declares no shard name")
 	}
@@ -98,45 +112,16 @@ func (b V41EngramArtifactBinding) validate() error {
 	if b.Size != int64(b.Rows)*int64(rowBytes) {
 		return fmt.Errorf("binding size=%d is not rows=%d * %d bytes", b.Size, b.Rows, rowBytes)
 	}
-	digest := strings.ToLower(strings.TrimSpace(b.Digest))
-	const prefix = "sha256:"
-	if !strings.HasPrefix(digest, prefix) || len(digest) != len(prefix)+64 {
-		return fmt.Errorf("binding digest %q is not a sha256 content address", b.Digest)
-	}
-	if _, err := hex.DecodeString(digest[len(prefix):]); err != nil {
-		return fmt.Errorf("binding digest %q is not hex", b.Digest)
-	}
 	return nil
 }
 
 // v41EngramDigestExtent hashes exactly the declared extent of reader. It reads in
 // bounded chunks so a large declared extent does not require a full-size buffer.
+// The chunk reads run ahead on a bounded worker pool (v41_engram_digest.go)
+// while one goroutine hashes them in extent order, so the digest is the serial
+// form's byte-for-byte.
 func v41EngramDigestExtent(reader io.ReaderAt, offset, size int64) (string, error) {
-	if size <= 0 {
-		return "", fmt.Errorf("extent size %d must be positive", size)
-	}
-	h := sha256.New()
-	const chunk = 1 << 20
-	buf := make([]byte, chunk)
-	remaining := size
-	at := offset
-	for remaining > 0 {
-		n := int64(chunk)
-		if n > remaining {
-			n = remaining
-		}
-		got, err := reader.ReadAt(buf[:n], at)
-		if int64(got) != n {
-			if err == nil {
-				err = io.ErrUnexpectedEOF
-			}
-			return "", fmt.Errorf("hashing extent at offset %d: read %d want %d: %w", at, got, n, err)
-		}
-		h.Write(buf[:got])
-		at += int64(got)
-		remaining -= int64(got)
-	}
-	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+	return v41EngramDigestExtentWorkers(reader, offset, size, v41EngramDigestWorkers(size))
 }
 
 // NewV41VerifiedEngramRowSource returns a row reader over the binding's declared
@@ -153,19 +138,9 @@ func NewV41VerifiedEngramRowSource(reader io.ReaderAt, shard V41EngramShard, bin
 		return nil, &V41EngramStreamError{Kind: V41EngramStreamGeometry, Row: -1, Shard: shard.ID,
 			Err: fmt.Errorf("invalid artifact binding: %w", err)}
 	}
-	rowBytes, _ := binding.rowWidth()
-	// The reader-side geometry checks (nil reader, packed extent, requested==observed
-	// name) are the prepared-reader contract; reuse them rather than restating them.
-	base, err := newV41PreparedEngramRowSource(reader, shard, rowBytes)
+	base, rowBytes, err := v41BoundEngramBase(reader, shard, binding)
 	if err != nil {
 		return nil, err
-	}
-	// The observed extent must be the bound extent. A binding for a different
-	// shard, a different offset, or a different row count is a mis-paired reader.
-	if shard.ID != binding.Shard || shard.Offset != binding.Offset || shard.Size != binding.Size || shard.Rows != binding.Rows {
-		return nil, &V41EngramStreamError{Kind: V41EngramStreamShardMismatch, Row: -1, Shard: shard.ID,
-			Err: fmt.Errorf("observed extent name=%q offset=%d size=%d rows=%d does not match binding name=%q offset=%d size=%d rows=%d",
-				shard.ID, shard.Offset, shard.Size, shard.Rows, binding.Shard, binding.Offset, binding.Size, binding.Rows)}
 	}
 	observed, err := v41EngramDigestExtent(reader, binding.Offset, binding.Size)
 	if err != nil {
@@ -177,6 +152,27 @@ func NewV41VerifiedEngramRowSource(reader io.ReaderAt, shard V41EngramShard, bin
 			Err: fmt.Errorf("shard bytes digest %s does not match bound artifact %s", observed, binding.Digest)}
 	}
 	return &v41VerifiedEngramRowSource{inner: base, binding: binding, rowBytes: rowBytes}, nil
+}
+
+// v41BoundEngramBase runs the geometry half of admission shared by the verified
+// and acquired constructors: the prepared-reader contract plus the observed
+// extent agreeing with the bound one. It reads no payload bytes.
+func v41BoundEngramBase(reader io.ReaderAt, shard V41EngramShard, binding V41EngramArtifactBinding) (V41EngramRowSource, int, error) {
+	rowBytes, _ := binding.rowWidth()
+	// The reader-side geometry checks (nil reader, packed extent, requested==observed
+	// name) are the prepared-reader contract; reuse them rather than restating them.
+	base, err := newV41PreparedEngramRowSource(reader, shard, rowBytes)
+	if err != nil {
+		return nil, 0, err
+	}
+	// The observed extent must be the bound extent. A binding for a different
+	// shard, a different offset, or a different row count is a mis-paired reader.
+	if shard.ID != binding.Shard || shard.Offset != binding.Offset || shard.Size != binding.Size || shard.Rows != binding.Rows {
+		return nil, 0, &V41EngramStreamError{Kind: V41EngramStreamShardMismatch, Row: -1, Shard: shard.ID,
+			Err: fmt.Errorf("observed extent name=%q offset=%d size=%d rows=%d does not match binding name=%q offset=%d size=%d rows=%d",
+				shard.ID, shard.Offset, shard.Size, shard.Rows, binding.Shard, binding.Offset, binding.Size, binding.Rows)}
+	}
+	return base, rowBytes, nil
 }
 
 // NewV41VerifiedPackedEngramRowSource is the packed-264 dialect entry point. It
