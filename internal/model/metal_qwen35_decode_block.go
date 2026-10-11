@@ -35,22 +35,9 @@ func (b *metalQwen35GDNSequenceBackend) qwen35MetalDecodeBlock(s *Session, layer
 			return nil, qwen35DecodeBlockReceipt{}, false, nil
 		}
 	}
-	mixerNames := []string{
-		p("linear_attn.in_proj_qkv.weight"), p("linear_attn.in_proj_z.weight"),
-		p("linear_attn.in_proj_b.weight"), p("linear_attn.in_proj_a.weight"),
-		p("linear_attn.out_proj.weight"),
-	}
-	metalQ4KMu.Lock()
-	q8Table := metalQ8KW[s.M]
-	q8 := make([]*metalgemm.Q8Weight, len(mixerNames))
-	for i, name := range mixerNames {
-		q8[i] = q8Table[name]
-	}
-	metalQ4KMu.Unlock()
-	for _, weight := range q8 {
-		if weight == nil {
-			return nil, qwen35DecodeBlockReceipt{}, false, nil
-		}
+	weights, ok := s.M.qwen35MixerDecodeWeights(layer)
+	if !ok {
+		return nil, qwen35DecodeBlockReceipt{}, false, nil
 	}
 	gateName, upName, downName := p("mlp.gate_proj.weight"), p("mlp.up_proj.weight"), p("mlp.down_proj.weight")
 	gateTensor, upTensor := s.M.q4kw[gateName], s.M.q4kw[upName]
@@ -61,9 +48,7 @@ func (b *metalQwen35GDNSequenceBackend) qwen35MetalDecodeBlock(s *Session, layer
 	if gate == nil || up == nil {
 		return nil, qwen35DecodeBlockReceipt{}, false, nil
 	}
-	weights := metalgemm.Qwen35DecodeWeights{
-		InQKV: q8[0], InZ: q8[1], InB: q8[2], InA: q8[3], Out: q8[4], MLPActivation: gate, MLPUp: up,
-	}
+	weights.MLPActivation, weights.MLPUp = gate, up
 	if downTensor := s.M.q4kw[downName]; downTensor != nil {
 		weights.MLPDownQ4 = s.M.metalQ4KWeight(downName, downTensor)
 	} else if downTensor := s.M.kqw[downName]; downTensor != nil && downTensor.kind == kindQ6K {

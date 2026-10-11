@@ -86,9 +86,6 @@ type q4kLoadOptions struct {
 	prismGDNVGrouped         bool // checkpoint metadata, not a caller option
 	// nativeRowsOff disables the fak#13567 native-row route (qwen35NativeRowResident).
 	nativeRowsOff bool
-	// nativeRowsForced keeps native rows on an Apple Silicon host where the resident Metal
-	// Q8 decode runtime would otherwise claim the Qwen3.5-family linear_attn projections.
-	nativeRowsForced bool
 }
 
 // Q4KLoadOption configures the direct-resident-Q4_K GGUF load path.
@@ -107,12 +104,12 @@ func (o *q4kLoadOptions) setMTPRetention(enabled bool) {
 
 // WithNativeLinearAttnRows controls the Qwen3.5-family native-row residency (fak#13567): the
 // GDN in_proj_qkv/z/a/b and self_attn q/k projections, whose GGUF-to-model transform is a pure
-// output-row permutation, keep their Q4_K (q4kw) / Q6_K (kqw) bytes after a lossless raw row
+// output-row permutation, keep their Q4_K (q4kw) / Q6_K / Q5_K (kqw) bytes after a lossless raw row
 // reorder instead of being requantized to Q8. The default (enabled) is automatic: it applies only
 // where qwen35NativeRowResident admits a tensor, never to the exact 64-layer Qwen3.8 runtime whose
 // Metal decode requires those weights as Q8. Pass false to force the historical Q8 route.
 func WithNativeLinearAttnRows(enabled bool) Q4KLoadOption {
-	return func(o *q4kLoadOptions) { o.nativeRowsOff, o.nativeRowsForced = !enabled, enabled }
+	return func(o *q4kLoadOptions) { o.nativeRowsOff = !enabled }
 }
 
 // WithQ2KEmbeddingResident controls whether eligible Q2_K token embedding tables stay in
@@ -950,8 +947,11 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 			}
 		case pt.canonicalRows:
 			add := builder.AddCanonicalRowNormalizedQ4K
-			if pt.residentType == TensorQ6_K {
+			switch pt.residentType {
+			case TensorQ6_K:
 				add = builder.AddCanonicalRowNormalizedQ6K
+			case TensorQ5_K:
+				add = builder.AddCanonicalRowNormalizedQ5K
 			}
 			if err := add(pt.name, pt.shape, pt.raw); err != nil {
 				return err

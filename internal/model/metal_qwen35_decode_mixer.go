@@ -23,23 +23,9 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeMixer(s *Session, layer
 	if state == nil {
 		return nil, qwen35DecodeMixerReceipt{}, false, nil
 	}
-	prefix := func(suffix string) string { return layerName(layer, suffix) }
-	names := []string{
-		prefix("linear_attn.in_proj_qkv.weight"), prefix("linear_attn.in_proj_z.weight"),
-		prefix("linear_attn.in_proj_b.weight"), prefix("linear_attn.in_proj_a.weight"),
-		prefix("linear_attn.out_proj.weight"),
-	}
-	metalQ4KMu.Lock()
-	table := metalQ8KW[s.M]
-	handles := make([]*metalgemm.Q8Weight, len(names))
-	for i, name := range names {
-		handles[i] = table[name]
-	}
-	metalQ4KMu.Unlock()
-	for _, handle := range handles {
-		if handle == nil {
-			return nil, qwen35DecodeMixerReceipt{}, false, nil
-		}
+	weights, ok := s.M.qwen35MixerDecodeWeights(layer)
+	if !ok {
+		return nil, qwen35DecodeMixerReceipt{}, false, nil
 	}
 	cfg := s.M.Cfg
 	if len(xn) != cfg.HiddenSize {
@@ -48,7 +34,7 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeMixer(s *Session, layer
 	p := func(suffix string) string { return layerName(layer, suffix) }
 	result, nativeReceipt, accepted, err := metalgemm.RunQwen35Decode(metalgemm.Qwen35DecodeRequest{
 		Input:   xn,
-		Weights: metalgemm.Qwen35DecodeWeights{InQKV: handles[0], InZ: handles[1], InB: handles[2], InA: handles[3], Out: handles[4]},
+		Weights: weights,
 		State:   state,
 		Panel: metalgemm.GDNPanel{
 			Tokens: 1, Conv1D: s.M.tensor(p("linear_attn.conv1d.weight")), ALog: s.M.tensor(p("linear_attn.A_log")),

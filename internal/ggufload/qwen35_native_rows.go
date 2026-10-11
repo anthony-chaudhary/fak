@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"runtime"
 
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
@@ -17,10 +18,11 @@ import (
 // normalized tensor — no requantization. The row map is DERIVED from the float normalizer itself
 // (qwen35CanonicalRowSource) so there is one copy of the permutation math.
 
-// metalDecodeRuntimeHost is true where the resident Metal decode runtime can run. There its
-// one-command-buffer decode (measured 6.6 -> 23.5 tok/s on Qwen3.5-4B, M3 Pro) outranks the
-// native-row memory saving, so declared-cadence hybrids keep the Q8 store by default.
-var metalDecodeRuntimeHost = runtime.GOOS == "darwin" && runtime.GOARCH == "arm64"
+// metalQ5KNativeRows reports whether this host's resident Metal graph can encode raw Q5_K rows
+// (q5k_mul_mv / q5k_mul_mm). It is a var so tests can pin either host.
+var metalQ5KNativeRows = func() bool {
+	return runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" && metalgemm.Q5KAvailable()
+}
 
 // qwen35NativeRowResident is the ONE predicate, shared by computeQ4KTensorWork and
 // EstimateQ4KLoadMemoryPlan, deciding whether a tensor takes the native-row route instead of
@@ -28,8 +30,10 @@ var metalDecodeRuntimeHost = runtime.GOOS == "darwin" && runtime.GOARCH == "arm6
 // estimator's resolved one (model.Qwen35RowNormalizedProjection resolves idempotently).
 //
 // Admitted: Q4_K always (resident q4kw), Q6_K only when the options retain dense Q6_K (kqw; a
-// backend without a Q6_K kernel keeps the proven Q8 path exactly as for any dense Q6_K weight).
-// Q5_K and every other type stay on Q8 (no Metal Q5_K GEMV). The exact 64-layer Qwen3.8 runtime
+// backend without a Q6_K kernel keeps the proven Q8 path exactly as for any dense Q6_K weight),
+// and Q5_K only where the Metal Q5_K graph kernels run (Apple Silicon) and dense k-quants are
+// retained. Every other type stays on Q8. The resident Metal decode graph encodes each admitted
+// type natively, and the Q8 band shrinks to what stays Q8. The exact 64-layer Qwen3.8 runtime
 // requires these weights as Q8 and is excluded; WithNativeLinearAttnRows(false) forces it off.
 func qwen35NativeRowResident(cfg model.Config, canon string, t TensorType, shape []int, o q4kLoadOptions) bool {
 	if o.nativeRowsOff {
@@ -41,6 +45,10 @@ func qwen35NativeRowResident(cfg model.Config, canon string, t TensorType, shape
 		if !denseKQuantRetained(o, t) {
 			return false
 		}
+	case TensorQ5_K:
+		if !denseKQuantRetained(o, t) || !metalQ5KNativeRows() {
+			return false
+		}
 	default:
 		return false
 	}
@@ -50,9 +58,6 @@ func qwen35NativeRowResident(cfg model.Config, canon string, t TensorType, shape
 		return false
 	}
 	if model.Qwen38ExactMetalQ8Runtime(cfg) {
-		return false
-	}
-	if !o.nativeRowsForced && metalDecodeRuntimeHost && model.Qwen35MetalQ8DecodeRuntime(cfg) {
 		return false
 	}
 	return model.Qwen35RowNormalizedProjection(cfg, canon)

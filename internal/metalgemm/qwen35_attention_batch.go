@@ -24,7 +24,15 @@ const qwen35MaxCInt = int(^uint32(0) >> 1)
 type Qwen35FullAttentionWeights struct {
 	Q, K *Q8Weight
 	V    *Q4KWeight
+	// NativeQ / NativeK serve the gated-Q / K projection from resident k-quant rows instead of
+	// Q8; the matching Q8 field must then be nil.
+	NativeQ, NativeK KQuantProjection
 }
+
+func (w Qwen35FullAttentionWeights) projections() []decodeProjection {
+	return []decodeProjection{{name: "q_proj", q8: w.Q, kq: w.NativeQ}, {name: "k_proj", q8: w.K, kq: w.NativeK}}
+}
+
 type Qwen35FullAttentionLane struct {
 	Position         int
 	PrefixK, PrefixV []float32
@@ -71,15 +79,15 @@ func RunQwen35FullAttentionDecodeBatch(req Qwen35FullAttentionBatchRequest) (res
 	if err != nil {
 		return result, receipt, false, err
 	}
-	qi, err := g.QuantizeQ8(input)
+	qk := req.Weights.projections()
+	defer lockDecodeQ8(qk)()
+	var qi *QuantizedGraphResult
+	quantizers := 0
+	qgate, err := qk[0].encode(g, input, &qi, &quantizers)
 	if err != nil {
 		return result, receipt, false, err
 	}
-	qgate, err := g.EncodeQ8From(req.Weights.Q, qi)
-	if err != nil {
-		return result, receipt, false, err
-	}
-	k, err := g.EncodeQ8From(req.Weights.K, qi)
+	k, err := qk[1].encode(g, input, &qi, &quantizers)
 	if err != nil {
 		return result, receipt, false, err
 	}
@@ -142,7 +150,10 @@ func validateQwen35FullAttentionBatch(req Qwen35FullAttentionBatchRequest) (batc
 	if batch < 2 || batch > Qwen35FullAttentionBatchMax {
 		return 0, 0, 0, 0, 0, nil, nil, nil, nil, &MixedQKVError{Stage: MixedQKVDeclined, Detail: fmt.Sprintf("batch=%d outside [2,%d]", batch, Qwen35FullAttentionBatchMax)}
 	}
-	if req.Weights.Q == nil || req.Weights.K == nil || req.Weights.V == nil {
+	qk := req.Weights.projections()
+	qOut, qIn, qOK := qk[0].liveShape()
+	kOut, kIn, kOK := qk[1].liveShape()
+	if !qOK || !kOK || req.Weights.V == nil {
 		return 0, 0, 0, 0, 0, nil, nil, nil, nil, &MixedQKVError{Stage: MixedQKVDeclined, Detail: "missing projection weights"}
 	}
 	if req.NumHeads < 1 || req.NumKVHeads < 1 || req.NumHeads%req.NumKVHeads != 0 || req.HeadDim < 1 || req.HeadDim > 256 ||
@@ -150,14 +161,14 @@ func validateQwen35FullAttentionBatch(req Qwen35FullAttentionBatchRequest) (batc
 		req.Scale <= 0 || math.IsNaN(float64(req.Scale)) || math.IsInf(float64(req.Scale), 0) || req.QKNormEpsilon <= 0 || math.IsNaN(float64(req.QKNormEpsilon)) || math.IsInf(float64(req.QKNormEpsilon), 0) {
 		return 0, 0, 0, 0, 0, nil, nil, nil, nil, &MixedQKVError{Stage: MixedQKVDeclined, Detail: "unsupported attention geometry"}
 	}
-	modelWidth = req.Weights.Q.In
+	modelWidth = qIn
 	attentionWidth = req.NumHeads * req.HeadDim
 	kvWidth = req.NumKVHeads * req.HeadDim
 	sizes, sizesOK := qwen35CheckedFullAttentionBatchSizes(batch, modelWidth, attentionWidth, kvWidth)
 	if !sizesOK || modelWidth%256 != 0 || len(req.Input) != sizes.Input {
 		return 0, 0, 0, 0, 0, nil, nil, nil, nil, &MixedQKVError{Stage: MixedQKVDeclined, Detail: "missing or malformed model-width panel"}
 	}
-	if req.Weights.Q.ID() < 0 || req.Weights.K.ID() < 0 || req.Weights.V.ID() < 0 || req.Weights.Q.Out != 2*attentionWidth || batch*req.Weights.Q.Out != sizes.GatedQ || req.Weights.K.In != modelWidth || req.Weights.K.Out != kvWidth || req.Weights.V.In != modelWidth || req.Weights.V.Out != kvWidth {
+	if req.Weights.V.ID() < 0 || qOut != 2*attentionWidth || batch*qOut != sizes.GatedQ || kIn != modelWidth || kOut != kvWidth || req.Weights.V.In != modelWidth || req.Weights.V.Out != kvWidth {
 		return 0, 0, 0, 0, 0, nil, nil, nil, nil, &MixedQKVError{Stage: MixedQKVDeclined, Detail: "model/attention/kv projection shape mismatch"}
 	}
 	if len(req.QNorm) != req.HeadDim && len(req.QNorm) != attentionWidth {
