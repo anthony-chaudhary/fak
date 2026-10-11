@@ -78,7 +78,8 @@ const (
 	VulkanHazardUnknown VulkanHazardKind = "unknown"
 )
 
-// VulkanHazardEdge records the exact dependency between a producer and its successor.
+// VulkanHazardEdge records the barrier before Next at the adjacent Prev/Next
+// boundary. Its hazard may come from an older access since the last global barrier.
 type VulkanHazardEdge struct {
 	Prev      int
 	Next      int
@@ -146,7 +147,7 @@ func accessModesConflict(prev, next VulkanBufferAccess) (VulkanHazardKind, bool)
 		return VulkanHazardWriteAfterWrite, true
 	case prev.Mode == VulkanAccessReadWrite && next.Mode == VulkanAccessReadWrite:
 		return VulkanHazardWriteAfterWrite, true
-	case prev.Mode == VulkanAccessRead && next.Mode == VulkanAccessWrite:
+	case prev.Mode == VulkanAccessRead && (next.Mode == VulkanAccessWrite || next.Mode == VulkanAccessReadWrite):
 		return VulkanHazardWriteAfterRead, true
 	default:
 		return VulkanHazardNone, false
@@ -170,7 +171,9 @@ func accessRangesOverlap(a, b VulkanBufferAccess) bool {
 
 // LowerVulkanBatchHazards computes the exact hazard plan for a batch window in
 // recording order. It returns Exact=false (never a partial plan) when any dispatch is
-// undeclared, so a caller can fail closed to the coarse barrier.
+// undeclared or the search budget is exhausted, so a caller can fail closed to the
+// coarse barrier. The per-call budget allows 65536 pending-dispatch visits plus
+// access-pair comparisons in total; planned barriers do not replenish it.
 func LowerVulkanBatchHazards(dispatches []VulkanDispatchAccess) VulkanHazardPlan {
 	for _, d := range dispatches {
 		if !d.Declared {
@@ -181,18 +184,42 @@ func LowerVulkanBatchHazards(dispatches []VulkanDispatchAccess) VulkanHazardPlan
 		}
 	}
 	plan := VulkanHazardPlan{Exact: true}
+	pendingStart := 0
+	remaining := 1 << 16
 	for i := 1; i < len(dispatches); i++ {
 		prev, next := dispatches[i-1], dispatches[i]
 		edge := VulkanHazardEdge{Prev: prev.NodeID, Next: next.NodeID, Kind: VulkanHazardNone, NextShimOrdinal: next.ShimOrdinal}
-		for _, pa := range prev.Accesses {
-			for _, na := range next.Accesses {
-				kind, needs := accessModesConflict(pa, na)
-				if kind == VulkanHazardNone {
-					continue
+		// An elided boundary retires no accesses: W(A), W(B), R(A) still
+		// requires a barrier before R(A). Only a global sync below retires
+		// every earlier read/write; the successor then starts a new window.
+	searchPending:
+		for _, pending := range dispatches[pendingStart:i] {
+			// Empty successors need no comparisons. Counting even empty
+			// producers bounds sparse windows as well as disjoint ranges.
+			if len(next.Accesses) == 0 {
+				break
+			}
+			if remaining == 0 {
+				return VulkanHazardPlan{Reason: "batch hazard search budget exhausted"}
+			}
+			remaining--
+			for _, pa := range pending.Accesses {
+				for _, na := range next.Accesses {
+					if remaining == 0 {
+						return VulkanHazardPlan{Reason: "batch hazard search budget exhausted"}
+					}
+					remaining--
+					kind, needs := accessModesConflict(pa, na)
+					if kind == VulkanHazardNone {
+						continue
+					}
+					edge.Kind = kind
+					edge.BufferID = pa.BufferID
+					if needs {
+						edge.NeedsSync = true
+						break searchPending
+					}
 				}
-				edge.Kind = kind
-				edge.BufferID = pa.BufferID
-				edge.NeedsSync = edge.NeedsSync || needs
 			}
 		}
 		// The shim fences each recorded op against its IMMEDIATE predecessor. A verdict may
@@ -204,6 +231,7 @@ func LowerVulkanBatchHazards(dispatches []VulkanDispatchAccess) VulkanHazardPlan
 			edge.Kind = VulkanHazardUnknown
 		}
 		if edge.NeedsSync {
+			pendingStart = i
 			plan.Synchronized++
 		} else {
 			plan.Elided++
