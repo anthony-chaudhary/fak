@@ -38,10 +38,25 @@ func (s *Session) v41InverseOutputRoPEFunc() v41InverseOutputRoPEFunc {
 	return func(layer int, out, cos, conjSin []float32, heads, headDim, rotaryDim int) (result []float32, cause error) {
 		s.ensureOpenBackendSession()
 		stage := "payload"
-		closeFailure := func(err error) error {
-			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-inverse-output-rope", Layer: layer, Stage: stage, Cause: err}
-			s.halFailure = closed
+		closeSelected := func(primary error) {
+			if s.halFailure == nil {
+				s.halFailure = primary
+			}
+			if s.halClosed {
+				return
+			}
+			// An incoming typed error can belong to another operation. Retire
+			// this owner without letting a secondary Close panic replace it.
+			defer func() { s.halClosed = true; _ = recover() }()
 			s.Close()
+		}
+		closeFailure := func(err error) error {
+			if s.halFailure != nil {
+				closeSelected(s.halFailure)
+				return s.halFailure
+			}
+			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-inverse-output-rope", Layer: layer, Stage: stage, Cause: err}
+			closeSelected(closed)
 			return closed
 		}
 		defer func() {
@@ -49,6 +64,7 @@ func (s *Session) v41InverseOutputRoPEFunc() v41InverseOutputRoPEFunc {
 				if err, ok := r.(error); ok {
 					var closed *BackendForwardOperationError
 					if errors.As(err, &closed) {
+						closeSelected(err)
 						panic(r)
 					}
 					var backend *compute.BackendError
