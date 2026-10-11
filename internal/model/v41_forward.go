@@ -131,6 +131,11 @@ type v41ForwardState struct {
 	attn    *V41AttentionState
 	layers  []*V41AttentionState
 
+	// indexKeyMemo is the session's per-index-source-layer memo of the last
+	// committed fold; indexKeyPrior is the read-only copy a re-fold run reuses.
+	indexKeyMemo  map[int][]v41IndexKeyMemoRow
+	indexKeyPrior map[int][]v41IndexKeyMemoRow
+
 	// expertGateUp is the OPTIONAL device gate/up callback the session installs
 	// when its backend can run a routed expert's gate/up projections plus SwiGLU
 	// (the shared q4kExpertInputHALWithLimit operation, bound in
@@ -308,6 +313,8 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
 		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, routerTopK: st.routerTopK, routedSum: st.routedSum, sharedAdd: st.sharedAdd, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
+		runState.indexKeyPrior = st.indexKeyMemo
+		runState.indexKeyMemo = map[int][]v41IndexKeyMemoRow{}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -440,6 +447,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	}
 	if st != nil {
 		st.layers = runState.layers
+		st.indexKeyMemo = runState.indexKeyMemo
 		// Completed cross-layer publications are step-local and can be released
 		// -- EXCEPT when the schedule has a compressed / shared-source / reader
 		// role (#13480): a later incremental Step's reader resolves the source's
@@ -816,6 +824,8 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	}
 	sharedKV := compressedKV
 	var indexKeys [][]float32
+	var reusedKeys []bool
+	var keyMemo []v41IndexKeyMemoRow
 	if plan.Role == V41AttentionRoleReader {
 		if st == nil {
 			return v41StageErr(v41StageAttention, l, fmt.Errorf("%w: shared reader requires source state", ErrV41ForwardStage))
@@ -829,21 +839,30 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			return err
 		}
 	} else if ownsCompressed && indexSourceAt(cfg.DeepSeekV41, l) {
-		indexKeys, err = m.v41IndexKeysWithOperations(l, compressedKV, scratch.denseProjection, scratch.indexKeyNorm)
+		indexKeys, reusedKeys, keyMemo, err = m.v41IndexKeysReusing(l, compressedKV, st, scratch)
 		if err != nil {
 			return err
 		}
 	}
 	// Both publications derive from the same RoPE-free normalized latent.
-	// Rotate only these fresh producer rows, never borrowed source rows.
+	// Rotate only these fresh producer rows, never borrowed source rows; a key
+	// reused from the previous fold is already rotated.
 	for group, latent := range compressedKV {
 		var key []float32
-		if indexKeys != nil {
+		if indexKeys != nil && (reusedKeys == nil || !reusedKeys[group]) {
 			key = indexKeys[group]
 		}
 		if err := m.v41CompressedPublicationRoPE(l, group*plan.Ratio, latent, key); err != nil {
 			return err
 		}
+	}
+	if keyMemo != nil && st != nil && st.indexKeyMemo != nil {
+		for group := range keyMemo {
+			if !reusedKeys[group] {
+				keyMemo[group].key = append([]float32(nil), indexKeys[group]...)
+			}
+		}
+		st.indexKeyMemo[l] = keyMemo
 	}
 	var indexList []int32
 	if plan.Ratio > 1 && indexSourceAt(cfg.DeepSeekV41, l) {
