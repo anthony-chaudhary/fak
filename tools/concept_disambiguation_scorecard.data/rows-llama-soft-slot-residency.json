@@ -43,14 +43,13 @@
       "family": "session-runtime",
       "kind": "symbol",
       "definition": "The agent request-local handle for a chosen soft slot, its conversation key and its existing release function. It can reserve the slot against other local picks while checking prepared-call residency, and releases the in-flight pin once. The slotLease local in prepareUpstreamContext holds this handle during preparation.",
-      "distinction": "This is active process-local routing ownership, not the engine observation in LlamaSlotTask or the completed wire-prefix evidence in LlamaSoftSlotResidency. Foreign upstream clients remain outside the local reservation.",
+      "distinction": "This is active process-local routing ownership, not the engine observation in LlamaSlotTask or the completed wire-prefix evidence in LlamaSoftSlotResidency. Foreign upstream clients remain outside the local reservation. The slotLease local only holds this lease during preparation; it is not a separate lease owner.",
       "distinct_from": [
         "llama-slot-task-observation",
-        "llama-soft-slot-residency-proof"
+        "llama-soft-slot-residency-proof",
+        "upstream-slot-lease-local"
       ],
-      "aliases": [
-        "slotLease"
-      ],
+      "aliases": [],
       "grounding": "llamaSoftSlotLease",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
@@ -102,14 +101,13 @@
       "family": "session-runtime",
       "kind": "symbol",
       "definition": "The per-upstreamCall binding held in its slotResidency field. It connects a request turn and optional local slot lease with the captured endpoint and credential digest, last eligible prepared proof, and one-shot completion channel/release.",
-      "distinction": "This is mutable state for one prepared upstream call. LlamaSoftSlotTurn carries the request across preparation, whereas LlamaSoftSlotResidency is the completed immutable evidence used by a later call.",
+      "distinction": "This is mutable state for one prepared upstream call. LlamaSoftSlotTurn carries the request across preparation, whereas LlamaSoftSlotResidency is the completed immutable evidence used by a later call. The slotResidency field is the optional pointer storing this binding on its upstreamCall.",
       "distinct_from": [
         "llama-soft-slot-turn-carrier",
-        "llama-soft-slot-residency-proof"
+        "llama-soft-slot-residency-proof",
+        "upstream-slot-residency-field"
       ],
-      "aliases": [
-        "slotResidency"
-      ],
+      "aliases": [],
       "grounding": "llamaPreparedSlot",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
@@ -205,6 +203,42 @@
       ],
       "aliases": [],
       "grounding": "callContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "upstream-slot-lease-local",
+      "canonical": "slotLease",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The local pointer in prepareUpstreamContext that retains the optional llamaSoftSlotLease returned while selecting an outbound soft slot, for later binding to the prepared call.",
+      "distinction": "This variable holds the existing request-local lease during preparation; it neither allocates another reservation nor defines the ownership and idempotent release implemented by llamaSoftSlotLease.",
+      "distinct_from": [
+        "llama-soft-slot-request-lease"
+      ],
+      "aliases": [],
+      "grounding": "slotLease",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "upstream-slot-residency-field",
+      "canonical": "slotResidency",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The optional upstreamCall field pointing to the llamaPreparedSlot binding installed from the request context after preparation. Before a POST attempt it supplies the bound admission state.",
+      "distinction": "This field stores a pointer, whereas llamaPreparedSlot owns the mutable prepared-call comparison and release state. An absent field leaves calls without that request carrier unchanged.",
+      "distinct_from": [
+        "llama-prepared-slot-binding"
+      ],
+      "aliases": [],
+      "grounding": "slotResidency",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "",

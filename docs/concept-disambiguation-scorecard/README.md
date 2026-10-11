@@ -16,7 +16,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **620** (clarity 0 + coverage 620) |
-| **Crystal-clear concepts (and climbing)** | **1183** crystal of 2933 positioned |
+| **Crystal-clear concepts (and climbing)** | **1183** crystal of 2935 positioned |
 | **Confusable tokens positioned (covered / discovered)** | **3048 / 3668** (83.1% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 223 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **84** of 4181 indexed names |
@@ -28,11 +28,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2933 concepts - score 89.0/100 (grade B) - disambiguation-debt 620
+concept-disambiguation chart - 2935 concepts - score 89.0/100 (grade B) - disambiguation-debt 620
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ###################......... 1183
-  o defined       ############################ 1750
+  o defined       ############################ 1752
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -55,7 +55,7 @@ clarity mix by family (each cell = one concept):
   pool             ******oooooooooooooooooooooooooooooooo (38 concept(s); 6 crystal)
   render-materialize *******************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (199 concept(s); 43 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
-  session-runtime  *******************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (262 concept(s); 91 crystal)
+  session-runtime  *******************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (264 concept(s); 91 crystal)
   support-maturity **********************************************oooooooooooooooooooooo (68 concept(s); 46 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 223/223
 
-name index: 4181 lookup name(s) -> 2933 concept(s), 84 ambiguous
+name index: 4181 lookup name(s) -> 2935 concept(s), 84 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **223 / 223** (223 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2110 / 5295 |
+| Boundaries drawn (mutual / total) | 2114 / 5299 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4181 over 2933 concepts |
+| Lookup names indexed | 4181 over 2935 concepts |
 | Lookup names landing on several concepts | 84 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2933 |
+| Concepts carrying a contrast set | 2935 |
 
 ## The concepts (best verdict first)
 
@@ -2859,6 +2859,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | session-runtime | **LlamaSoftSlotTurn** - The request-context carrier for an expected HTTP planner/base, optional previous soft-slot evidence, optional prepared-call deadline check, and the latest prepared-call observation channel. |
 | o | defined | symbol | session-runtime | **WithLlamaSoftSlotResidency** - The HTTPPlanner method that checks soft-slot observation eligibility and returns a context carrying a new LlamaSoftSlotTurn together with that observer. Ineligible planners retain the original context and no observer. |
 | o | defined | symbol | session-runtime | **prepareDeadlineSoftSlot** - The gateway helper that attaches eligible soft-slot observation and, only for a potentially creditable continuation, installs a deferred prepared-call deadline verdict and its cancellation/release ownership. |
+| o | defined | symbol | session-runtime | **slotLease** - The local pointer in prepareUpstreamContext that retains the optional llamaSoftSlotLease returned while selecting an outbound soft slot, for later binding to the prepared call. |
+| o | defined | symbol | session-runtime | **slotResidency** - The optional upstreamCall field pointing to the llamaPreparedSlot binding installed from the request context after preparation. Before a POST attempt it supplies the bound admission state. |
 | o | defined | symbol | session-runtime | **SessionImpact (cache-value component impact)** - cmd/fak/cachevalue_status.go SessionImpact (json session_impact): a short human string describing how one cache-value component affects the current session's economics. |
 | o | defined | symbol | session-runtime | **sessionLive (live-process session probe)** - cmd/fak/resume_watchdog_cli.go sessionLive: reports whether any live OS process's command line names the given session id - the resume-watchdog's liveness check. |
 | o | defined | symbol | session-runtime | **SessionMeta (out-of-band session identity)** - internal/guardcorpus/guardcorpus.go SessionMeta: the out-of-band session identity the CLI shell resolves (session id, start info) and carries alongside a guard corpus record. |
@@ -3211,8 +3213,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3185/5295 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2933 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3185/5299 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2935 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
