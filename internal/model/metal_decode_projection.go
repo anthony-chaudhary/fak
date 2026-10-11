@@ -20,8 +20,9 @@ func (m *Model) metalDecodeProjection(name string) (*metalgemm.Q8Weight, metalge
 		case kindQ6K:
 			w := m.metalQ6KWeight(name, qt)
 			return nil, metalgemm.KQuantProjection{Q6K: w}, w != nil
+		default:
+			return nil, metalgemm.KQuantProjection{}, false
 		}
-		return nil, metalgemm.KQuantProjection{}, false
 	}
 	if qt := m.q8w[name]; qt != nil {
 		w := m.metalQ8Weight(name, qt)
