@@ -1162,12 +1162,6 @@ func fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath string, be compute.Backe
 	return refuseIfTooBigOnDevice(plan, err, be, override)
 }
 
-func serveGGUFPathMemoryPlan(ggufPath string, f32Resident bool, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
-	return withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
-		return serveGGUFMemoryPlan(ws, f32Resident, contextBudgetTokens, fit)
-	})
-}
-
 func serveGGUFCPUOffloadPathMemoryPlan(ggufPath string, ranks, contextBudgetTokens int, fit serveFitBudget, q4kOpts ...ggufload.Q4KLoadOption) (compute.MemoryPlan, error) {
 	return withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
 		return serveGGUFCPUOffloadMemoryPlan(ws, ranks, contextBudgetTokens, fit, q4kOpts...)
