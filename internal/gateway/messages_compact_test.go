@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/compactcohere"
 )
 
@@ -630,6 +631,7 @@ func headOrderedWireBody(t *testing.T, nMsgs, recentBpBack int) []byte {
 //     input rate ($5/MTok), the same rate and model the placement witness uses, so the two artifacts
 //     are directly comparable.
 func TestFakCompactionShedNetSavingOnClaudeCodePath(t *testing.T) {
+	t.Cleanup(swapCacheObserver(cacheobs.New()))
 	// A real Claude-Code-shaped body: a system head that marks its OWN cache_control breakpoint
 	// (the stable cached head the provider reuses) plus a RECENT message breakpoint. On the
 	// warm-cache-safe firstBP default this anchors near the end and the lever stays dormant

@@ -125,12 +125,15 @@ func TestOfferedToolGatewayTypedRefusal(t *testing.T) {
 	srv.planner = agent.NewHTTPPlanner(up.URL, "model", "")
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
-	var result map[string]any
-	body := json.RawMessage(`{"model":"model","messages":[{"role":"user","content":"inspect"}],"tools":[{"type":"function","function":{"name":"allow_a","parameters":{"type":"object"}}}]}`)
-	code := postJSON(t, ts.URL+"/v1/chat/completions", body, &result)
-	encoded, _ := json.Marshal(result)
-	if code != http.StatusBadGateway || !strings.Contains(string(encoded), "UNKNOWN_TOOL") {
-		t.Fatalf("status=%d body=%s", code, encoded)
+	body := `{"model":"model","messages":[{"role":"user","content":"inspect"}],"tools":[{"type":"function","function":{"name":"allow_a","parameters":{"type":"object"}}}]}`
+	resp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusBadGateway || !strings.Contains(string(raw), "UNKNOWN_TOOL") {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, raw)
 	}
 }
 
@@ -177,6 +180,7 @@ func TestOfferedRestoreThroughResponsesContinuation(t *testing.T) {
 	}))
 	defer up.Close()
 	srv := newTestServer(t)
+	abi.RegisterAdjudicator(1, readAdj{})
 	srv.stashRestore(trace, id, "evidence", []byte(saved))
 	srv.planner = agent.NewHTTPPlanner(up.URL, "model", "")
 	ts := httptest.NewServer(srv.Handler())

@@ -36,6 +36,7 @@ type softDeadlineUpstream struct {
 	nextTask  int
 	dispatch  []softDeadlineDispatch
 	gate      *softDeadlineReadGate
+	postGate  *softDeadlineReadGate // holds only the next chat POST, before it is recorded
 	duplicate bool
 }
 
@@ -78,6 +79,18 @@ func (f *softDeadlineUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+		f.mu.Lock()
+		postGate := f.postGate
+		f.postGate = nil
+		f.mu.Unlock()
+		if postGate != nil {
+			postGate.entered <- struct{}{}
+			select {
+			case <-postGate.open:
+			case <-r.Context().Done():
+				return
+			}
 		}
 		id, sent := 0, -1
 		if req.Slot != nil {
@@ -274,7 +287,7 @@ func softDeadlineWaitRead(t *testing.T, g *softDeadlineReadGate) {
 	t.Helper()
 	select {
 	case <-g.entered:
-	case <-time.After(3 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatal("expected bounded /slots read did not arrive")
 	}
 }
@@ -287,7 +300,19 @@ func TestDeadlineAdmissionSoftSlotReservationLifecycle(t *testing.T) {
 			srv, p, f := softDeadlineServer(t)
 			p.LlamaSoftSlotPolicy = agent.SoftSlotPolicyWait
 			slot := softDeadlineCold(t, srv, f)
-			gate := softDeadlineGate(t, f)
+			// The canceled proof is held at its bounded /slots read. The surviving
+			// proof is held at its POST instead: the reservation spans dispatch, and
+			// a held /slots read would expire before a loaded host serves the peer.
+			var gate *softDeadlineReadGate
+			if cancelWarm {
+				gate = softDeadlineGate(t, f)
+			} else {
+				gate = &softDeadlineReadGate{entered: make(chan struct{}, 1), open: make(chan struct{})}
+				t.Cleanup(gate.release)
+				f.mu.Lock()
+				f.postGate = gate
+				f.mu.Unlock()
+			}
 			_, warm := haloPiTurns()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -310,11 +335,16 @@ func TestDeadlineAdmissionSoftSlotReservationLifecycle(t *testing.T) {
 			gate.release()
 			select {
 			case <-done:
-			case <-time.After(3 * time.Second):
+			case <-time.After(15 * time.Second):
 				t.Fatal("warm request did not release")
 			}
-			if !cancelWarm && w.Code != http.StatusOK {
-				t.Fatalf("reserved warm turn status=%d: %s", w.Code, w.Body.String())
+			if !cancelWarm {
+				f.mu.Lock()
+				calls := append([]softDeadlineDispatch(nil), f.dispatch...)
+				f.mu.Unlock()
+				if w.Code != http.StatusOK || len(calls) != 3 || calls[2].slot != slot || !calls[2].cache {
+					t.Fatalf("reserved warm turn status=%d calls=%+v: %s", w.Code, calls, w.Body.String())
+				}
 			}
 			if cancelWarm {
 				f.mu.Lock()

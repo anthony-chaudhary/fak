@@ -30,6 +30,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/guardvars"
 )
 
@@ -68,6 +69,7 @@ func servedCacheAttributionBlock(t *testing.T, srv *Server) (string, *guardvars.
 // turns AND names which tools went cold — and none of it is priced or reported as the compaction
 // shed, so the two mechanisms stay separately addressable by anyone scraping the document.
 func TestServedDebugVarsCarriesDeferColdToolList(t *testing.T) {
+	t.Cleanup(swapCacheObserver(cacheobs.New()))
 	const turns = 3
 	srv := armedHTTPDeferServer(t)
 	sum := runDeferTurns(srv, deferBody, turns)
