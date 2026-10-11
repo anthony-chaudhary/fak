@@ -460,7 +460,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 				return nil, &rpcError{Code: rpcInvalidParams, Message: "fak_read requires a non-empty file_paths array"}
 			}
 			traceID := s.traceFor(rr.TraceID)
-			return mcpToolResult(s.fakReadBatch(ctx, rr.FilePaths, traceID, rr.Witness)), nil
+			return mcpToolResult(s.fakReadBatchWithOptions(ctx, rr.FilePaths, rr.Offset, rr.Limit, rr.LineNumbers, traceID, rr.Witness)), nil
 		}
 		path := rr.FilePath
 		if path == "" {
@@ -906,18 +906,22 @@ func fakReadReceipt(payload []byte, r *abi.Result, duration time.Duration) []byt
 	return out
 }
 
-// fakReadBatch is the additive batch form of fak_read. Each path crosses fakRead on its
+// fakReadBatch is the additive batch form of fak_read. Each path crosses fakReadWithOptions on its
 // own, so every item gets an independent buildCall + k.Syscall adjudication and its own
 // cache hit/miss decision. Results retain request order; an item-level fault is captured
 // on that row instead of aborting the remaining independent reads.
 func (s *Server) fakReadBatch(ctx context.Context, paths []string, traceID, witness string) FakReadBatchResponse {
+	return s.fakReadBatchWithOptions(ctx, paths, 0, 0, false, traceID, witness)
+}
+
+func (s *Server) fakReadBatchWithOptions(ctx context.Context, paths []string, offset, limit int, lineNumbers bool, traceID, witness string) FakReadBatchResponse {
 	resp := FakReadBatchResponse{
 		TraceID:   traceID,
 		ItemCount: len(paths),
 		Results:   make([]FakReadBatchItem, 0, len(paths)),
 	}
 	for _, path := range paths {
-		wv, env, err := s.fakRead(ctx, path, traceID, witness)
+		wv, env, err := s.fakReadWithOptions(ctx, path, offset, limit, lineNumbers, traceID, witness)
 		item := FakReadBatchItem{FilePath: path, Verdict: wv, Result: env}
 		if err != nil {
 			item.Error = err.Error()
