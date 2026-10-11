@@ -559,18 +559,39 @@ func (s *Session) expertSwiGLUHAL(gateName, upName, downName string, x []float32
 	}
 	gateW, upW, downW := staged[0], staged[1], staged[2]
 
+	// Keep the existing release attempts and order, without letting a secondary
+	// Free panic replace the selected operation's original fault.
+	var cleanup any
+	defer func() {
+		if primary := recover(); primary != nil {
+			panic(primary)
+		}
+		if cleanup != nil {
+			panic(cleanup)
+		}
+	}()
+	free := func(t compute.Tensor) {
+		defer func() {
+			if r := recover(); r != nil && cleanup == nil {
+				cleanup = r
+			}
+		}()
+		s.Backend.Free(t)
+	}
+
 	hostX := compute.NewF32(compute.Default(), []int{len(x)}, append([]float32(nil), x...))
 	dx := s.Backend.Upload(hostX, compute.F32)
-	defer s.Backend.Free(dx)
+	defer free(dx)
 	gate := s.Backend.MatMul(gateW, dx)
-	defer s.Backend.Free(gate)
+	defer free(gate)
 	up := s.Backend.MatMul(upW, dx)
-	defer s.Backend.Free(up)
+	defer free(up)
 	act := s.Backend.SwiGLU(gate, up)
-	defer s.Backend.Free(act)
+	defer free(act)
 	out := s.Backend.MatMul(downW, act)
-	defer s.Backend.Free(out)
-	return s.Backend.Read(out), true
+	defer free(out)
+	// Read may borrow out: own the successful host row before deferred Free.
+	return append([]float32(nil), s.Backend.Read(out)...), true
 }
 
 // weightHALF16 stages the host f32 weight `name` onto the backend narrowed to device F16, the
