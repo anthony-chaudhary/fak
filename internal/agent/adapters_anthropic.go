@@ -354,7 +354,7 @@ func (anthropicAdapter) ParseResponse(raw []byte) (*Completion, error) {
 			}
 		}
 	}
-	finish := ar.StopReason
+	finish := canonicalAnthropicFinish(ar.StopReason)
 	if len(calls) > 0 {
 		finish = "tool_calls"
 	}
@@ -380,4 +380,19 @@ func (anthropicAdapter) ParseResponse(raw []byte) (*Completion, error) {
 			CacheCreationInputTokens: ar.Usage.CacheCreationInputTokens,
 		},
 	}), nil
+}
+
+// canonicalAnthropicFinish maps a Messages API stop_reason onto the OpenAI finish_reason
+// vocabulary Completion carries; AnthropicStopReason is the inverse for /v1/messages.
+func canonicalAnthropicFinish(stopReason string) string {
+	switch stopReason {
+	case "end_turn", "stop_sequence":
+		return "stop"
+	case "max_tokens":
+		return "length"
+	case "tool_use":
+		return "tool_calls"
+	default:
+		return stopReason
+	}
 }
