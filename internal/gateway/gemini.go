@@ -156,6 +156,7 @@ func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Requ
 	if rejectStopLimits(w, req.StopSequences) {
 		return
 	}
+	s.bindUnkeyedWireConversation(w, r, "gemini", model, raw)
 	stream := req.Stream || method == "streamGenerateContent"
 	r, ok = s.prepareChatRoute(w, r, model)
 	if !ok {

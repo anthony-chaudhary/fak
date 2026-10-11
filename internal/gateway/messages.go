@@ -190,6 +190,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	if rejectStopLimits(w, req.StopSequences) {
 		return
 	}
+	s.bindUnkeyedWireConversation(w, r, "anthropic", req.Model, req.Raw)
 	r, ok = s.prepareChatRoute(w, r, req.Model)
 	if !ok {
 		return

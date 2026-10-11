@@ -12,7 +12,7 @@ import (
 
 // UnkeyedPerConnectionTraceID is a reserved DefaultTraceID: instead of charging
 // every header-less request to one shared session, the gateway derives one
-// session per client connection. OpenAI chat requests with a first user turn
+// session per client connection. Supported chat wires with a first user turn
 // refine that fallback to conversation continuity after bounded body decoding.
 // This is session accounting, not an authenticated agent identity (#13777).
 const UnkeyedPerConnectionTraceID = "unkeyed:per-connection"
@@ -62,7 +62,8 @@ type unkeyedTraceGeneratedKey struct{}
 // to model, tools or root start new accounting, as does session-table eviction.
 // Identical anonymous prefixes share accounting: this cannot identify an agent
 // or prevent intentional budget resets. No-user requests retain the connection
-// fallback. Other wire adapters and explicit/default traces are unchanged.
+// fallback. Other wires use their own versioned raw-prefix tuple; this OpenAI
+// key and explicit/default traces remain unchanged.
 func (s *Server) bindUnkeyedChatConversation(w http.ResponseWriter, r *http.Request, model string, tools []agent.ToolDef, messages []agent.Message) {
 	if s == nil || r == nil || s.DefaultTraceID() != UnkeyedPerConnectionTraceID ||
 		r.Context().Value(unkeyedTraceGeneratedKey{}) != true {
