@@ -29,8 +29,8 @@ qwen35_gdn_tiled_transpose coopmat_wave32_wmma rmsnorm_q4k_matmul2 swiglu_q4k_ma
 qwen35_gdn_prefill_tiled qwen35_gdn_prefill_norm qwen35_gdn_verify_tiled q2k_matvec
 rmsnorm_q8_matmul2_coop iq4xs_matvec iq3xxs_matvec iq2s_matvec iq3s_matvec iq2xxs_matvec
 iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score v41_mhc`)
-	if len(want) != 63 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV6(), want) || !reflect.DeepEqual(VulkanShaders, want) {
-		t.Fatal("current builder does not use the independent exact63 registry")
+	if len(want) != 63 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV6(), want) || !reflect.DeepEqual(VulkanShaders[:63], want) {
+		t.Fatal("V6 exact63 registry is not a prefix of the current builder registry")
 	}
 	if !reflect.DeepEqual(historicalVulkanV2Shaders(), want[:59]) || !reflect.DeepEqual(CurrentVulkanShaderRegistry(), want[:60]) || !reflect.DeepEqual(CurrentVulkanShaderRegistryV4(), want[:61]) || !reflect.DeepEqual(CurrentVulkanShaderRegistryV5(), want[:62]) {
 		t.Fatal("historical V2/59, V3/60, V4/61, or V5/62 membership changed")
@@ -40,7 +40,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 	if !reflect.DeepEqual(CurrentVulkanShaderRegistryV6(), want) {
 		t.Fatal("mutable trusted registry")
 	}
-	registry, err := currentVulkanRegistryV6Identity()
+	registry, err := vulkanRegistryV6.identity()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 		source := BuildSourceProvenance{GitCommit: strings.Repeat("1", 40), GitTree: strings.Repeat("2", 40), Clean: true, SourceArchiveSHA256: strings.Repeat("3", 64)}
 		archive := BuildArtifact{Path: "internal/compute/libfakvulkan.a", SizeBytes: 17, SHA256: strings.Repeat("8", 64)}
 		score := VulkanIndexerScoreContract{PolicyID: "fak.v41-indexer-score-f32-structure.v1", ModuleSHA256: strings.Repeat("9", 64), EntryPoint: "main", LocalSize: [3]uint32{1, 1, 1}, FloatWidth: 32, DenormPreserve: true, SignedZeroInfNanPreserve: true, RoundingModeRTE: true, NoContractionFAddCount: 2, NoContractionFMulCount: 2}
-		got, err := vulkanStableIdentityV6SHA(source, strings.Repeat("4", 64), 63, strings.Repeat("5", 64), strings.Repeat("6", 64), strings.Repeat("7", 64), archive, score)
+		got, err := vulkanRegistryV6.stableIdentitySHA(source, strings.Repeat("4", 64), 63, strings.Repeat("5", 64), strings.Repeat("6", 64), strings.Repeat("7", 64), archive, score)
 		if err != nil || got != "95dde809ef2851167f6389701a58c01f719fe3132b9c613936f9ca525149423a" {
 			t.Fatalf("V6 framing = %s, %v", got, err)
 		}
@@ -74,7 +74,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 	evidence.ExpectedCommit = strings.TrimSpace(runFixtureGit(t, evidence.SourceRoot, "rev-parse", "HEAD"))
 	evidence.ExpectedSPIRVModules = append([]string(nil), want...)
 	evidence.ReceiptPath = filepath.Join(fixture.root, "v6-receipt.json")
-	observed, err := observeVulkanReceiptEvidenceV6(ctx, evidence, fixture.gitRun)
+	observed, err := vulkanRegistryV6.observeEvidence(ctx, evidence, fixture.gitRun)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,10 +86,10 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 	}
 	raw := writeVerifierReceipt(t, evidence.ReceiptPath, receipt)
 	verify := func(e VulkanBinaryReceiptEvidence) error {
-		_, err := verifyVulkanBinaryReceiptV6IdentityWithRunners(ctx, e, fixture.gitRun, fixture.gitRun)
+		_, err := vulkanRegistryV6.verifyIdentityWithRunners(ctx, e, fixture.gitRun, fixture.gitRun)
 		return err
 	}
-	verified, err := verifyVulkanBinaryReceiptV6IdentityWithRunners(ctx, evidence, fixture.gitRun, nil)
+	verified, err := vulkanRegistryV6.verifyIdentityWithRunners(ctx, evidence, fixture.gitRun, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 	}
 	clone := func(t *testing.T) ComputeBuildReceipt {
 		t.Helper()
-		r, err := decodeStrictVulkanReceiptV6(raw)
+		r, err := vulkanRegistryV6.decodeStrict(raw)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -107,7 +107,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 	repair := func(t *testing.T, r *ComputeBuildReceipt) {
 		t.Helper()
 		forgeVerifierReceiptDownstream(t, r, evidence)
-		r.Vulkan.StableIdentitySHA256, err = vulkanStableIdentityV6SHA(r.Vulkan.Source, r.Vulkan.SPIRVBundleSHA256, r.Vulkan.SPIRVModuleCount, r.Vulkan.ToolchainSHA256, r.Vulkan.BuildCommandSHA256, r.Artifact.SHA256, *r.VulkanNativeArchive, *r.VulkanIndexerScore)
+		r.Vulkan.StableIdentitySHA256, err = vulkanRegistryV6.stableIdentitySHA(r.Vulkan.Source, r.Vulkan.SPIRVBundleSHA256, r.Vulkan.SPIRVModuleCount, r.Vulkan.ToolchainSHA256, r.Vulkan.BuildCommandSHA256, r.Artifact.SHA256, *r.VulkanNativeArchive, *r.VulkanIndexerScore)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -119,7 +119,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 		}
 	}
 	t.Run("strict wire and historical isolation", func(t *testing.T) {
-		for _, decoder := range []func([]byte) (ComputeBuildReceipt, error){decodeStrictVulkanReceipt, decodeStrictVulkanReceiptV3, decodeStrictVulkanReceiptV4, decodeStrictVulkanReceiptV5} {
+		for _, decoder := range []func([]byte) (ComputeBuildReceipt, error){decodeStrictVulkanReceipt, decodeStrictVulkanReceiptV3, decodeStrictVulkanReceiptV4, vulkanRegistryV5.decodeStrict} {
 			if _, err := decoder(raw); err == nil {
 				t.Fatal("historical decoder admitted V6-only fields")
 			}
@@ -136,7 +136,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 			if schema != VulkanBuildReceiptSchemaV5 && (bytes.Contains(old, []byte("native_archive")) || bytes.Contains(old, []byte("indexer_score_contract"))) {
 				t.Fatal("V6 extras leaked into historical wire")
 			}
-			if _, err := decodeStrictVulkanReceiptV6(old); err == nil {
+			if _, err := vulkanRegistryV6.decodeStrict(old); err == nil {
 				t.Fatal("V6 decoder admitted historical wire")
 			}
 			if CompareReceiptProvenance(&r, &receipt) == nil || CompareReceiptProvenance(&receipt, &r) == nil {
@@ -147,7 +147,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 			if bytes.Equal(invalid, raw) {
 				t.Fatal("invalid wire fixture unchanged")
 			}
-			if _, err := decodeStrictVulkanReceiptV6(invalid); err == nil {
+			if _, err := vulkanRegistryV6.decodeStrict(invalid); err == nil {
 				t.Fatal("unknown nested field or trailing JSON accepted")
 			}
 		}
@@ -174,7 +174,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 			r := clone(t)
 			tc.edit(&r)
 			repair(t, &r)
-			if err := validateVulkanReceiptV6Success(&r); err != nil {
+			if err := vulkanRegistryV6.validateSuccess(&r); err != nil {
 				t.Fatalf("forged envelope must be self-consistent: %v", err)
 			}
 			if CompareReceiptProvenance(&receipt, &r) == nil {
@@ -215,7 +215,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 	})
 	t.Run("exact census", func(t *testing.T) {
 		for _, stems := range [][]string{want[:62], append(append([]string(nil), want...), "extra"), append(append([]string(nil), want[:62]...), want[0])} {
-			if validateCurrentVulkanRegistryV6(stems) == nil {
+			if vulkanRegistryV6.validateStems(stems) == nil {
 				t.Fatal("caller census replaced exact63 policy")
 			}
 		}
@@ -228,13 +228,13 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 		if err := os.Remove(path); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, _, err := hashCurrentSPIRVBundleV6(evidence.SPIRVRoot); err == nil {
+		if _, _, _, err := vulkanRegistryV6.hashBundle(evidence.SPIRVRoot); err == nil {
 			t.Fatal("absent score module accepted")
 		}
 		if err := os.WriteFile(path, []byte("stale non-SPIR-V shader"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, _, err := hashCurrentSPIRVBundleV6(evidence.SPIRVRoot); err == nil {
+		if _, _, _, err := vulkanRegistryV6.hashBundle(evidence.SPIRVRoot); err == nil {
 			t.Fatal("stale score module accepted")
 		}
 	})
@@ -284,7 +284,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 			}
 			return out, err
 		}
-		_, err = verifyVulkanBinaryReceiptV6IdentityWithRunners(ctx, evidence, race, nil)
+		_, err = vulkanRegistryV6.verifyIdentityWithRunners(ctx, evidence, race, nil)
 		if archives != 2 || err == nil || !strings.Contains(err.Error(), "changed during verification") {
 			t.Fatalf("archive revalidation: count=%d error=%v", archives, err)
 		}

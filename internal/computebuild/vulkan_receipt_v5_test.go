@@ -40,7 +40,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 	if !reflect.DeepEqual(CurrentVulkanShaderRegistryV5(), want) {
 		t.Fatal("mutable trusted registry")
 	}
-	registry, err := currentVulkanRegistryV5Identity()
+	registry, err := vulkanRegistryV5.identity()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 		source := BuildSourceProvenance{GitCommit: strings.Repeat("1", 40), GitTree: strings.Repeat("2", 40), Clean: true, SourceArchiveSHA256: strings.Repeat("3", 64)}
 		archive := BuildArtifact{Path: "internal/compute/libfakvulkan.a", SizeBytes: 17, SHA256: strings.Repeat("8", 64)}
 		score := VulkanIndexerScoreContract{PolicyID: "fak.v41-indexer-score-f32-structure.v1", ModuleSHA256: strings.Repeat("9", 64), EntryPoint: "main", LocalSize: [3]uint32{1, 1, 1}, FloatWidth: 32, DenormPreserve: true, SignedZeroInfNanPreserve: true, RoundingModeRTE: true, NoContractionFAddCount: 2, NoContractionFMulCount: 2}
-		got, err := vulkanStableIdentityV5SHA(source, strings.Repeat("4", 64), 62, strings.Repeat("5", 64), strings.Repeat("6", 64), strings.Repeat("7", 64), archive, score)
+		got, err := vulkanRegistryV5.stableIdentitySHA(source, strings.Repeat("4", 64), 62, strings.Repeat("5", 64), strings.Repeat("6", 64), strings.Repeat("7", 64), archive, score)
 		if err != nil || got != "306c858944042cd77f08a1af65d7a3d20bd8c28ff4f3aa587fd273b6379b00fc" {
 			t.Fatalf("V5 framing = %s, %v", got, err)
 		}
@@ -74,7 +74,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 	evidence.ExpectedCommit = strings.TrimSpace(runFixtureGit(t, evidence.SourceRoot, "rev-parse", "HEAD"))
 	evidence.ExpectedSPIRVModules = append([]string(nil), want...)
 	evidence.ReceiptPath = filepath.Join(fixture.root, "v5-receipt.json")
-	observed, err := observeVulkanReceiptEvidenceV5(ctx, evidence, fixture.gitRun)
+	observed, err := vulkanRegistryV5.observeEvidence(ctx, evidence, fixture.gitRun)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,10 +86,10 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 	}
 	raw := writeVerifierReceipt(t, evidence.ReceiptPath, receipt)
 	verify := func(e VulkanBinaryReceiptEvidence) error {
-		_, err := verifyVulkanBinaryReceiptV5IdentityWithRunners(ctx, e, fixture.gitRun, fixture.gitRun)
+		_, err := vulkanRegistryV5.verifyIdentityWithRunners(ctx, e, fixture.gitRun, fixture.gitRun)
 		return err
 	}
-	verified, err := verifyVulkanBinaryReceiptV5IdentityWithRunners(ctx, evidence, fixture.gitRun, nil)
+	verified, err := vulkanRegistryV5.verifyIdentityWithRunners(ctx, evidence, fixture.gitRun, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 	}
 	clone := func(t *testing.T) ComputeBuildReceipt {
 		t.Helper()
-		r, err := decodeStrictVulkanReceiptV5(raw)
+		r, err := vulkanRegistryV5.decodeStrict(raw)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -107,7 +107,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 	repair := func(t *testing.T, r *ComputeBuildReceipt) {
 		t.Helper()
 		forgeVerifierReceiptDownstream(t, r, evidence)
-		r.Vulkan.StableIdentitySHA256, err = vulkanStableIdentityV5SHA(r.Vulkan.Source, r.Vulkan.SPIRVBundleSHA256, r.Vulkan.SPIRVModuleCount, r.Vulkan.ToolchainSHA256, r.Vulkan.BuildCommandSHA256, r.Artifact.SHA256, *r.VulkanNativeArchive, *r.VulkanIndexerScore)
+		r.Vulkan.StableIdentitySHA256, err = vulkanRegistryV5.stableIdentitySHA(r.Vulkan.Source, r.Vulkan.SPIRVBundleSHA256, r.Vulkan.SPIRVModuleCount, r.Vulkan.ToolchainSHA256, r.Vulkan.BuildCommandSHA256, r.Artifact.SHA256, *r.VulkanNativeArchive, *r.VulkanIndexerScore)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -134,7 +134,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 			if bytes.Contains(old, []byte("native_archive")) || bytes.Contains(old, []byte("indexer_score_contract")) {
 				t.Fatal("V5 extras leaked into historical wire")
 			}
-			if _, err := decodeStrictVulkanReceiptV5(old); err == nil {
+			if _, err := vulkanRegistryV5.decodeStrict(old); err == nil {
 				t.Fatal("V5 decoder admitted historical wire")
 			}
 			if CompareReceiptProvenance(&r, &receipt) == nil || CompareReceiptProvenance(&receipt, &r) == nil {
@@ -145,7 +145,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 			if bytes.Equal(invalid, raw) {
 				t.Fatal("invalid wire fixture unchanged")
 			}
-			if _, err := decodeStrictVulkanReceiptV5(invalid); err == nil {
+			if _, err := vulkanRegistryV5.decodeStrict(invalid); err == nil {
 				t.Fatal("unknown nested field or trailing JSON accepted")
 			}
 		}
@@ -172,7 +172,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 			r := clone(t)
 			tc.edit(&r)
 			repair(t, &r)
-			if err := validateVulkanReceiptV5Success(&r); err != nil {
+			if err := vulkanRegistryV5.validateSuccess(&r); err != nil {
 				t.Fatalf("forged envelope must be self-consistent: %v", err)
 			}
 			if CompareReceiptProvenance(&receipt, &r) == nil {
@@ -213,7 +213,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 	})
 	t.Run("exact census", func(t *testing.T) {
 		for _, stems := range [][]string{want[:61], append(append([]string(nil), want...), "extra"), append(append([]string(nil), want[:61]...), want[0])} {
-			if validateCurrentVulkanRegistryV5(stems) == nil {
+			if vulkanRegistryV5.validateStems(stems) == nil {
 				t.Fatal("caller census replaced exact62 policy")
 			}
 		}
@@ -226,13 +226,13 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 		if err := os.Remove(path); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, _, err := hashCurrentSPIRVBundleV5(evidence.SPIRVRoot); err == nil {
+		if _, _, _, err := vulkanRegistryV5.hashBundle(evidence.SPIRVRoot); err == nil {
 			t.Fatal("absent score module accepted")
 		}
 		if err := os.WriteFile(path, []byte("stale non-SPIR-V shader"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, _, err := hashCurrentSPIRVBundleV5(evidence.SPIRVRoot); err == nil {
+		if _, _, _, err := vulkanRegistryV5.hashBundle(evidence.SPIRVRoot); err == nil {
 			t.Fatal("stale score module accepted")
 		}
 	})
@@ -282,7 +282,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score
 			}
 			return out, err
 		}
-		_, err = verifyVulkanBinaryReceiptV5IdentityWithRunners(ctx, evidence, race, nil)
+		_, err = vulkanRegistryV5.verifyIdentityWithRunners(ctx, evidence, race, nil)
 		if archives != 2 || err == nil || !strings.Contains(err.Error(), "changed during verification") {
 			t.Fatalf("archive revalidation: count=%d error=%v", archives, err)
 		}

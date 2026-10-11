@@ -2857,7 +2857,8 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // Archive and complete61 shader bundle cut over and roll back together.
     // Never silently substitute legacy59/60 when this required module fails.
     ok &= buildKernel(g_kern[K_V41_SHARED_ATTENTION], P("v41_shared_attention.spv"), 5, 24);
-    // Optional and outside the trusted registry: absence never fails init.
+    // Trusted since registry V7/complete66, but still optional at init: an
+    // absent module leaves the capability false and device-only V4.1 refuses.
     const std::string v41RouterModule = P("v41_router_topk.spv");
     FILE* v41RouterProbe = fopen(v41RouterModule.c_str(), "rb");
     const bool v41RouterModulePresent = v41RouterProbe != nullptr;
@@ -2873,10 +2874,11 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // Optional: an absent or rejected mHC module leaves the capability false so
     // the model refuses its device-only route; it never fails initialization.
     v41MHCPipelineBuilt = buildKernel(g_kern[K_V41_MHC], P("v41_mhc.spv"), 4, 5 * sizeof(int));
-    // Optional V4.1 index selection, outside the shader registry: an absent
-    // module leaves the capability false and never fails initialization.
+    // V4.1 index selection, trusted since registry V7/complete66 and optional
+    // at init: an absent module leaves the capability false, never fails init.
     const bool v41IndexSelectBuilt = buildKernel(g_kern[K_V41_INDEX_SELECT], P("v41_index_select.spv"), 4, 16);
-    // Optional V4.1 Q2_K embedding row gather, likewise outside the registry.
+    // V4.1 Q2_K embedding row gather, trusted since registry V7/complete66 and
+    // optional at init like the router and index-select modules.
     const bool v41Q2KEmbedGatherBuilt = buildKernel(g_kern[K_V41_Q2K_EMBED_GATHER], P("v41_q2k_embed_gather.spv"), 3, 12);
 
     ok &= buildKernel(g_kern[K_SWIGLU],    P("swiglu.spv"),    3, sizeof(int) + sizeof(float));
@@ -4114,8 +4116,9 @@ static bool v41IndexerScorePrerequisites() {
 int fvk_have_v41_indexer_score(void) {
     // Source-only candidate: no trusted compiler/source/numerical qualification
     // admission is integrated yet. Neither environment nor module bytes can
-    // enable production dispatch. A future change must bind that admission to
-    // the exact V5 archive/module/compiler/source/device witness identities.
+    // enable production dispatch. The 2026-10-09 gfx1151 parity run used the
+    // separate witness archive, not this production profile, so it does not
+    // open this gate. Device-only V4.1 names this op as unbound and refuses.
     return 0;
 }
 
