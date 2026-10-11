@@ -170,6 +170,8 @@ function Build-Shaders {
     # Coupled V11/complete71 migration; V10/69 remains a historical artifact identity.
     $shaders += "v41_engram_gate"
     $shaders += "v41_compressor_pool"
+    # Coupled V12/complete72 migration; V11/71 remains a historical artifact identity.
+    $shaders += "v41_tail_rope_exact"
     foreach ($s in $shaders) {
         $src = Join-Path $shaderSrc "$s.comp"
         $dst = Join-Path $spvOut "$s.spv"

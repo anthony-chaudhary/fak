@@ -102,6 +102,8 @@ const (
 	VulkanBuildReceiptSchemaV10 = "fak.vulkan-build-receipt.v10"
 	// VulkanBuildReceiptSchemaV11 binds exact71 (V10/69 plus the V4.1 Engram gate and compressor pool modules).
 	VulkanBuildReceiptSchemaV11 = "fak.vulkan-build-receipt.v11"
+	// VulkanBuildReceiptSchemaV12 binds exact72 (V11/71 plus the V4.1 strict binary32 tail-RoPE module).
+	VulkanBuildReceiptSchemaV12 = "fak.vulkan-build-receipt.v12"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"

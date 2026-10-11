@@ -101,7 +101,6 @@ func TestV41DeviceOnlyHostInventoryAndLoRAAdmission(t *testing.T) {
 	}
 	t.Run("static-inventory", func(t *testing.T) {
 		want := []v41HostOp{
-			{name: "compressed-publication-rope", site: "Model.v41CompressedPublicationRoPE"},
 			{name: "indexer-weight-scale", site: "v41IndexWeightsBF16"},
 		}
 		last := -1

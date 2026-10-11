@@ -14,8 +14,8 @@ import (
 // executable SPIR-V, source correspondence, or hardware qualification.
 func TestVulkanReceiptV11Current71Boundary(t *testing.T) {
 	want := append(CurrentVulkanShaderRegistryV10(), "v41_engram_gate", "v41_compressor_pool")
-	if len(want) != 71 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV11(), want) || !reflect.DeepEqual(VulkanShaders, want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest(), want) {
-		t.Fatal("current builder does not use V10 plus the Engram gate and compressor pool modules exactly once")
+	if len(want) != 71 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV11(), want) || !reflect.DeepEqual(VulkanShaders[:71], want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest()[:71], want) {
+		t.Fatal("V11 is not V10 plus the Engram gate and compressor pool modules as the current builder prefix")
 	}
 	registry, err := vulkanRegistryV11.identity()
 	if err != nil {

@@ -12,7 +12,6 @@ import (
 // the change that moves it onto a device seam removes both the entry and its pin,
 // so an empty inventory can never admit host compute.
 var v41DeviceOnlyPinnedHostOps = []v41HostOp{
-	{name: "compressed-publication-rope", site: "Model.v41CompressedPublicationRoPE"},
 	{name: "indexer-weight-scale", site: "v41IndexWeightsBF16"},
 }
 

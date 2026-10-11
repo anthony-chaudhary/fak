@@ -102,7 +102,7 @@ func TestV41TailRoPESourceContract(t *testing.T) {
 		"nbuf != 5 || pcsize != 12 || !v41TailRoPEABI(code)", "buffers.size() != 5", "seenBindings == 31",
 		"!decorated(id, noContraction, 0)", "!atOffset(pushStruct, m, m * 4)",
 		"if (i != out && aliases(bufs[out], bufs[i])) return 2;", "groups > g_maxComputeWorkGroupCountX",
-		"if (!dispatch(g_kern[K_V41_TAIL_ROPE_QK]", "g_have_v41_tail_rope_qk = 0;",
+		"return v41TailRoPEDispatch(g_kern[K_V41_TAIL_ROPE_QK]", "if (!dispatch(kernel, bufs, &pc, sizeof(pc), uint32_t(groups)))", "g_have_v41_tail_rope_qk = 0;",
 		"g_have_v41_tail_rope_qk = 1;", "v41BeginCmdChecked()", "v41EndSubmitWaitChecked(cmd, true)",
 		"if (g_v41SubmissionPendingFailure) return;", "if (g_batching || g_v41SubmissionPendingFailure)",
 	} {

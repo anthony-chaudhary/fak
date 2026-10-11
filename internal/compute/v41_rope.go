@@ -74,7 +74,8 @@ func validateV41TailRoPERows(x, sinCos Tensor, rows, headDim, rotaryDim int) (xB
 // signed zero, infinities and NaNs. The marker must bind the selected device and
 // actual admitted module, not merely an implementation name or build tag.
 // It makes no residency, performance or physical-qualification claim. Ordinary
-// Vulkan intentionally does not implement this experimental witness marker.
+// Vulkan implements it with the separate registry V12 strict twin module, which
+// Rows then runs; the witness archive implements it on its strict main module.
 type V41TailRoPEExactBackend interface {
 	V41TailRoPERowsBackend
 	V41TailRoPEExactAvailable() bool

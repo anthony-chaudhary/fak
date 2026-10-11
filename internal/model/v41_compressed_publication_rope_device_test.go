@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -568,6 +569,47 @@ func TestV41CompressedPublicationRoPEUnavailable(t *testing.T) {
 		t.Fatalf("missing strict capability failed open: %v", err)
 	}
 	v41TailRoPECheckBits(t, "device-only no publication", got, before)
+}
+
+// fak-test:runtime fast est=1s lane=default
+// fak-test:justify Admission follows the strict seam binding once the static entry is gone (#13816).
+func TestV41CompressedPublicationRoPEDeviceOnlyBinding(t *testing.T) {
+	v41PublicationRoPERequireCPU(t)
+	for _, op := range v41DeviceOnlyHostOps {
+		if op.name == "compressed-publication-rope" {
+			t.Fatal("compressed-publication-rope runs on its strict device seam but is still statically inventoried as host")
+		}
+	}
+	names := func(s *Session) []string { return v41HostOpNames(s.v41DeviceOnlyUnboundOps()) }
+	m := v41PublicationRoPEFixture(t)
+	if !v41UsesCompressedKV(m.Cfg) {
+		t.Fatal("fixture must publish compressed KV rows")
+	}
+	strict := newV41PublicationRoPERecorder()
+	ordinary := newV41PublicationRoPERecorder()
+	ordinary.exact = false
+	if got := names(v41DenseTestSession(t, m, strict)); slices.Contains(got, "compressed-publication-rope") {
+		t.Fatalf("strict backend leaves publication RoPE unbound: %v", got)
+	}
+	unbound := v41DenseTestSession(t, m, ordinary)
+	if got := names(unbound); !slices.Contains(got, "compressed-publication-rope") {
+		t.Fatalf("ordinary Rows backend without the strict marker is admitted for publication RoPE: %v", got)
+	}
+	plain := &Session{M: &Model{Cfg: Config{DeepSeekV41: &DeepSeekV41Config{CompressRatios: []int{1, 1}}}}, Backend: ordinary}
+	if got := names(plain); slices.Contains(got, "compressed-publication-rope") {
+		t.Fatalf("model without compressed KV names the unused publication op: %v", got)
+	}
+
+	unbound.SetExecutionPolicy(ExecutionPolicyDeviceOnly)
+	err := recoverError(func() { unbound.validateDeviceOnlyExecution("decode") })
+	var closed *BackendForwardOperationError
+	var hostOps *v41DeviceOnlyHostOpError
+	if !errors.As(err, &closed) || closed.Path != "device-only" || !errors.Is(err, errV41DeviceOnlyHostOp) || !errors.As(err, &hostOps) {
+		t.Fatalf("device-only admission = %v, want typed host-op refusal", err)
+	}
+	if !slices.Contains(v41HostOpNames(hostOps.ops), "compressed-publication-rope") || !unbound.BackendSessionClosed() || len(ordinary.calls) != 0 {
+		t.Fatalf("refusal %v does not name publication RoPE, left the session open or dispatched", v41HostOpNames(hostOps.ops))
+	}
 }
 
 // fak-test:runtime medium est=2s lane=default

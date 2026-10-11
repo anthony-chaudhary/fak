@@ -32,6 +32,9 @@ const (
 	// VulkanShaderRegistryV11ID identifies the exact 71-module bundle that adds the
 	// V4.1 Engram gate/add and compressor gated-pool modules to V10/69.
 	VulkanShaderRegistryV11ID = "fak.vulkan-shader-registry.v11.current71"
+	// VulkanShaderRegistryV12ID identifies the exact 72-module bundle that adds the
+	// V4.1 strict binary32 tail-RoPE module (compressed publication RoPE) to V11/71.
+	VulkanShaderRegistryV12ID = "fak.vulkan-shader-registry.v12.current72"
 )
 
 type vulkanSuccessorRegistry struct {
@@ -54,10 +57,12 @@ var (
 
 	vulkanRegistryV11 = &vulkanSuccessorRegistry{version: "V11", schema: VulkanBuildReceiptSchemaV11, id: VulkanShaderRegistryV11ID, count: 71, parent: vulkanRegistryV10, added: []string{"v41_engram_gate", "v41_compressor_pool"}}
 
+	vulkanRegistryV12 = &vulkanSuccessorRegistry{version: "V12", schema: VulkanBuildReceiptSchemaV12, id: VulkanShaderRegistryV12ID, count: 72, parent: vulkanRegistryV11, added: []string{"v41_tail_rope_exact"}}
+
 	// vulkanSuccessorRegistries is every successor schema a receipt may name.
-	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11}
+	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12}
 	// vulkanCurrentRegistry is the registry the builder compiles and stamps.
-	vulkanCurrentRegistry = vulkanRegistryV11
+	vulkanCurrentRegistry = vulkanRegistryV12
 )
 
 func vulkanSuccessorForSchema(schema string) *vulkanSuccessorRegistry {
@@ -136,6 +141,9 @@ func CurrentVulkanShaderRegistryV10() []string { return vulkanRegistryV10.stems(
 
 // CurrentVulkanShaderRegistryV11 returns an owned copy of the trusted V11 set.
 func CurrentVulkanShaderRegistryV11() []string { return vulkanRegistryV11.stems() }
+
+// CurrentVulkanShaderRegistryV12 returns an owned copy of the trusted V12 set.
+func CurrentVulkanShaderRegistryV12() []string { return vulkanRegistryV12.stems() }
 
 // CurrentVulkanShaderRegistryLatest returns an owned copy of the set the
 // builder compiles and stamps today.

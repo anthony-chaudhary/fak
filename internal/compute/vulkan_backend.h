@@ -289,6 +289,19 @@ int fvk_v41_tail_rope_qk_f32(const void *dQ, const void *dKV,
                             void *dQOut, void *dKVOut, const void *dSinCos,
                             int heads, int headDim, int rotaryDim);
 
+/* Strict binary32 twin of the tail kernel (registry V12/complete72 module
+ * v41_tail_rope_exact.spv): same ABI, arguments and return codes as
+ * fvk_v41_tail_rope_qk_f32, plus declared F32 DenormPreserve,
+ * SignedZeroInfNanPreserve and RoundingModeRTE. Optional at init: loaded only
+ * when the selected device reports all three controls and the strict ABI proof
+ * admits the exact module bytes; otherwise it stays unavailable (return 3).
+ * fvk_v41_tail_rope_strict_abi runs that proof on caller bytes, with no device. */
+int fvk_have_v41_tail_rope_exact(void);
+int fvk_v41_tail_rope_exact_f32(const void *dQ, const void *dKV,
+                               void *dQOut, void *dKVOut, const void *dSinCos,
+                               int heads, int headDim, int rotaryDim);
+int fvk_v41_tail_rope_strict_abi(const void *data, size_t bytes);
+
 /* Shared-latent sink attention for one query position. Five storage bindings:
  * Q[heads,headDim], sharedKV[selectedRows,headDim], sink[heads] (or live [1]
  * dummy when hasSink=0), out[heads,headDim], status[heads,4] uint32. All buffer

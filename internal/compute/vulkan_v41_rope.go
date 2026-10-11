@@ -98,13 +98,15 @@ func (v *vulkanBackend) V41TailRoPEQK(q, kv, sinCos Tensor, heads, headDim, rota
 
 var _ V41TailRoPERowsBackend = (*vulkanBackend)(nil)
 
-// The row panel reuses the mandatory tail-RoPE pipeline, so its capability is
-// exactly that module's presence; no separate SPIR-V module exists.
+// The row panel's capability is the mandatory tail-RoPE pipeline's presence.
+// When the optional strict twin is admitted, the panel runs on it instead.
 func (v *vulkanBackend) V41TailRoPERowsAvailable() bool { return v.SupportsV41TailRoPE() }
 
 // V41TailRoPERows dispatches the tail-RoPE kernel over x with x's first row
 // bound as the read-only paired input. That pair writes a discard allocation
-// released through fvk_free, which parks it until an open batch flushes.
+// released through fvk_free, which parks it until an open batch flushes. An
+// admitted strict twin (V41TailRoPEExactAvailable) is the module that runs, so
+// the exact marker binds the executed pipeline; otherwise the ordinary one runs.
 func (v *vulkanBackend) V41TailRoPERows(x, sinCos Tensor, rows, headDim, rotaryDim int) (out Tensor, err error) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -151,7 +153,7 @@ func (v *vulkanBackend) V41TailRoPERows(x, sinCos Tensor, rows, headDim, rotaryD
 	outBuf = v.dallocForClass(xBytes, MemoryActivation, "V4.1 RoPE rows output")
 	discard = v.dallocForClass(headDim*4, MemoryActivation, "V4.1 RoPE rows discard")
 	xb := x.buf.(*vulkanBuf)
-	if status := v41TailRoPEQKStatusLocked(xb, xb, outBuf, discard, sinCos.buf.(*vulkanBuf), rows, headDim, rotaryDim); status != 0 {
+	if status := v41TailRoPERowsStatusLocked(xb, outBuf, discard, sinCos.buf.(*vulkanBuf), rows, headDim, rotaryDim); status != 0 {
 		return Tensor{}, vulkanV41RoPERowsStatusError(status)
 	}
 	outBuf.v41CheckedRead = true
@@ -162,6 +164,15 @@ func (v *vulkanBackend) V41TailRoPERows(x, sinCos Tensor, rows, headDim, rotaryD
 // lets the native rejection witness exercise the actual alias/extent checks.
 func v41TailRoPEQKStatusLocked(q, kv, qOut, kvOut, sinCos *vulkanBuf, heads, headDim, rotaryDim int) int {
 	return int(C.fvk_v41_tail_rope_qk_f32(q.ptr, kv.ptr, qOut.ptr, kvOut.ptr, sinCos.ptr, C.int(heads), C.int(headDim), C.int(rotaryDim)))
+}
+
+// The row panel selects the strict twin whenever the shim admitted it; both
+// modules share the native alias/extent checks and return codes.
+func v41TailRoPERowsStatusLocked(x, out, discard, sinCos *vulkanBuf, rows, headDim, rotaryDim int) int {
+	if C.fvk_have_v41_tail_rope_exact() != 0 {
+		return int(C.fvk_v41_tail_rope_exact_f32(x.ptr, x.ptr, out.ptr, discard.ptr, sinCos.ptr, C.int(rows), C.int(headDim), C.int(rotaryDim)))
+	}
+	return v41TailRoPEQKStatusLocked(x, x, out, discard, sinCos, rows, headDim, rotaryDim)
 }
 
 func vulkanV41RoPEStatusError(status int) *BackendError {

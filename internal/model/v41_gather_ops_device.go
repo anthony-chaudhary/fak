@@ -118,8 +118,9 @@ func (s *Session) v41DeviceOnlyMissingOp(layer int, op string) error {
 }
 
 // compressedPublicationRoPEFunc keeps the ordinary host arm while the strict
-// arithmetic profile is unavailable. Device-only still refuses this inventory
-// boundary; an experimental witness does not qualify ordinary Vulkan builds.
+// arithmetic profile is unavailable. Under device-only an unbound seam refuses
+// typed instead of rotating on the host; ordinary Vulkan binds it only when the
+// strict tail-RoPE twin is admitted for the selected device.
 func (o *v41DeviceGatherOps) compressedPublicationRoPEFunc() v41CompressedPublicationRoPEFunc {
 	if o == nil {
 		return nil

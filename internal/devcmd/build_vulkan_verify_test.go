@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	vulkanVerifyRegistrySHA = "c032225a0fa215d5cea54ffd8d2c5bdc1b14c66685959ae4913e6521ca5cde2a"
+	vulkanVerifyRegistrySHA = "0863e4b09e7ebda6085b4914cae7430640a760649de5445c7220af8fbb46d97a"
 	vulkanVerifyPolicyID    = "fak.v41-indexer-score-f32-structure.v1"
 )
 
@@ -60,7 +60,7 @@ type vulkanVerifyFixture struct {
 // fak-test:runtime medium est=8s lane=default
 // Ref #13823. This exercises static identity admission only: the candidate is
 // an execution sentinel, and no compiler, model, device, service, or network is used.
-func TestBuildVulkanVerifyV11ProjectionAndRefusals(t *testing.T) {
+func TestBuildVulkanVerifyV12ProjectionAndRefusals(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("the canonical verifier intentionally requires Linux fd-bound Git execution")
 	}
@@ -117,7 +117,7 @@ func TestBuildVulkanVerifyV11ProjectionAndRefusals(t *testing.T) {
 			"schema":                     "fak.vulkan-build-verification.v1",
 			"command":                    "verify",
 			"verdict":                    "verified",
-			"receipt_schema":             computebuild.VulkanBuildReceiptSchemaV11,
+			"receipt_schema":             computebuild.VulkanBuildReceiptSchemaV12,
 			"receipt_sha256":             vulkanVerifyTestSHA256File(t, fixture.matchedReceipt),
 			"public_revision":            fixture.commit,
 			"public_tree":                fixture.tree,
@@ -125,7 +125,7 @@ func TestBuildVulkanVerifyV11ProjectionAndRefusals(t *testing.T) {
 			"binary_sha256":              fixture.binarySHA,
 			"binary_size_bytes":          float64(fixture.binarySize),
 			"spirv_bundle_sha256":        fixture.spirvSHA,
-			"spirv_module_count":         float64(71),
+			"spirv_module_count":         float64(72),
 			"toolchain_sha256":           fixture.toolchainSHA,
 			"build_command_sha256":       fixture.commandSHA,
 			"stable_identity_sha256":     fixture.stableIdentity,
@@ -264,17 +264,17 @@ func TestBuildVulkanVerifyV11ProjectionAndRefusals(t *testing.T) {
 		name string
 		edit func(*computebuild.ComputeBuildReceipt)
 	}{
-		{"historical canonical schema", func(r *computebuild.ComputeBuildReceipt) { r.Schema = computebuild.VulkanBuildReceiptSchemaV10 }},
+		{"historical canonical schema", func(r *computebuild.ComputeBuildReceipt) { r.Schema = computebuild.VulkanBuildReceiptSchemaV11 }},
 		{"historical canonical registry", func(r *computebuild.ComputeBuildReceipt) {
-			r.VulkanRegistry.ID = computebuild.VulkanShaderRegistryV10ID
+			r.VulkanRegistry.ID = computebuild.VulkanShaderRegistryV11ID
 		}},
-		{"historical canonical count", func(r *computebuild.ComputeBuildReceipt) { r.Vulkan.SPIRVModuleCount = 69 }},
+		{"historical canonical count", func(r *computebuild.ComputeBuildReceipt) { r.Vulkan.SPIRVModuleCount = 71 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			original := verifyVulkanBinaryReceiptIdentityForSchema
 			verifyVulkanBinaryReceiptIdentityForSchema = func(ctx context.Context, schema string, evidence computebuild.VulkanBinaryReceiptEvidence) (*computebuild.VulkanBinaryReceiptIdentityVerification, error) {
-				if schema != computebuild.VulkanBuildReceiptSchemaV11 || !reflect.DeepEqual(evidence.ExpectedSPIRVModules, computebuild.CurrentVulkanShaderRegistryV11()) {
-					t.Fatal("CLI did not request the exact current V11 identity")
+				if schema != computebuild.VulkanBuildReceiptSchemaV12 || !reflect.DeepEqual(evidence.ExpectedSPIRVModules, computebuild.CurrentVulkanShaderRegistryV12()) {
+					t.Fatal("CLI did not request the exact current V12 identity")
 				}
 				verified, err := original(ctx, schema, evidence)
 				if err != nil {
@@ -391,7 +391,7 @@ func newVulkanVerifyFixture(t *testing.T) *vulkanVerifyFixture {
 	gitSum := sha256.Sum256(readVulkanVerifyTestFile(t, gitPath))
 
 	spirvRoot := filepath.Join(root, "spirv")
-	modules := computebuild.CurrentVulkanShaderRegistryV11()
+	modules := computebuild.CurrentVulkanShaderRegistryV12()
 	for _, stem := range modules {
 		raw := []byte("spirv:" + stem + "\n")
 		if stem == "v41_indexer_score" {
@@ -427,7 +427,7 @@ func newVulkanVerifyFixture(t *testing.T) *vulkanVerifyFixture {
 		GitCommit: commit, GitTree: tree, Clean: true, SourceArchiveSHA256: hex.EncodeToString(archiveSum[:]),
 	}
 	registry := computebuild.VulkanShaderRegistryIdentity{
-		ID: computebuild.VulkanShaderRegistryV11ID, SHA256: vulkanVerifyRegistrySHA, ModuleCount: 71,
+		ID: computebuild.VulkanShaderRegistryV12ID, SHA256: vulkanVerifyRegistrySHA, ModuleCount: 72,
 	}
 	nativeArchive := computebuild.BuildArtifact{Path: "internal/compute/libfakvulkan.a", SizeBytes: int64(len(archiveRaw)), SHA256: vulkanVerifyTestSHA256Hex(archiveRaw)}
 	indexer := computebuild.VulkanIndexerScoreContract{
@@ -448,16 +448,16 @@ func newVulkanVerifyFixture(t *testing.T) *vulkanVerifyFixture {
 		BinarySHA256       string                                    `json:"binary_sha256"`
 		NativeArchive      computebuild.BuildArtifact                `json:"native_archive"`
 		IndexerScore       computebuild.VulkanIndexerScoreContract   `json:"indexer_score_contract"`
-	}{computebuild.VulkanBuildReceiptSchemaV11, registry, source, spirvSHA, 71, toolchainSHA, commandSHA, binarySHA, nativeArchive, indexer})
+	}{computebuild.VulkanBuildReceiptSchemaV12, registry, source, spirvSHA, 72, toolchainSHA, commandSHA, binarySHA, nativeArchive, indexer})
 
 	baselinePath := filepath.Join(root, "baseline-receipt.json")
 	matchedPath := filepath.Join(root, "matched-receipt.json")
 	makeReceipt := func(path, binary string, reproducibility *computebuild.BuildReproducibility) computebuild.ComputeBuildReceipt {
 		return computebuild.ComputeBuildReceipt{
-			Schema: computebuild.VulkanBuildReceiptSchemaV11, Backend: "vulkan", Command: "binary", Outcome: "success", ReceiptPath: path,
+			Schema: computebuild.VulkanBuildReceiptSchemaV12, Backend: "vulkan", Command: "binary", Outcome: "success", ReceiptPath: path,
 			Phases: []computebuild.ComputeBuildPhase{}, Artifact: &computebuild.BuildArtifact{Path: binary, SizeBytes: int64(len(candidate)), SHA256: binarySHA},
 			Vulkan: &computebuild.VulkanBuildProvenance{
-				Source: source, SPIRVBundleSHA256: spirvSHA, SPIRVModuleCount: 71,
+				Source: source, SPIRVBundleSHA256: spirvSHA, SPIRVModuleCount: 72,
 				Toolchain: toolchain, ToolchainSHA256: toolchainSHA, NormalizedBuildCommand: normalized,
 				BuildCommandSHA256: commandSHA, StableIdentitySHA256: stableSHA,
 			},
