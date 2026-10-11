@@ -202,7 +202,7 @@ func TestCompletePlainChatUnaffected(t *testing.T) {
 func TestReasoningThenToolCallOrdering(t *testing.T) {
 	raw := "<think>The user wants the directory listing. I'll run ls.</think>" +
 		`<tool_call>{"name": "Bash", "arguments": {"command": "ls"}}</tool_call>`
-	comp := inKernelDecodeToCompletion(t, raw, "stop", nil)
+	comp := inKernelNormalize(t, raw, "stop")
 
 	// The reasoning is split off into ReasoningContent, not left in Content.
 	if !strings.Contains(comp.Message.ReasoningContent, "directory listing") {
@@ -235,7 +235,7 @@ func TestReasoningThenMultipleToolCalls(t *testing.T) {
 	raw := "<think>Read both files to compare them.</think>" +
 		`<tool_call>{"name": "Read", "arguments": {"path": "a"}}</tool_call>` + "\n" +
 		`<tool_call>{"name": "Read", "arguments": {"path": "b"}}</tool_call>`
-	comp := inKernelDecodeToCompletion(t, raw, "stop", nil)
+	comp := inKernelNormalize(t, raw, "stop")
 	if !strings.Contains(comp.Message.ReasoningContent, "compare them") {
 		t.Fatalf("reasoning not captured: %q", comp.Message.ReasoningContent)
 	}
@@ -251,7 +251,7 @@ func TestReasoningThenMultipleToolCalls(t *testing.T) {
 func TestReasoningWithTruncatedToolCallFailsClosed(t *testing.T) {
 	raw := "<think>I'll call Bash now.</think>" +
 		`calling it: <tool_call>{"name": "Bash", "argum`
-	comp := inKernelDecodeToCompletion(t, raw, "length", nil)
+	comp := inKernelNormalize(t, raw, "length")
 	if !strings.Contains(comp.Message.ReasoningContent, "call Bash") {
 		t.Fatalf("reasoning not captured ahead of the truncated call: %q", comp.Message.ReasoningContent)
 	}

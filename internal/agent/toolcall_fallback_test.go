@@ -725,7 +725,7 @@ func TestParseQwenFunctionToolCallParameterForms(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := LiftTextToolCalls(Message{Role: RoleAssistant, Content: tc.content}, fixtureOfferedTools())
+			got := LiftTextToolCalls(Message{Role: RoleAssistant, Content: tc.content}, offeredTestNames("read", "write"))
 			if tc.wantArgs == nil {
 				for _, call := range got.ToolCalls {
 					if call.Function.Arguments == "{}" {
