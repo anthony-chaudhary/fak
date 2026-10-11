@@ -161,6 +161,8 @@ function Build-Shaders {
     $shaders += "v41_router_topk"
     $shaders += "v41_index_select"
     $shaders += "v41_q2k_embed_gather"
+    # Coupled V8/complete67 migration; never accept this bundle as frozen V7/66.
+    $shaders += "v41_exact_rmsnorm"
     foreach ($s in $shaders) {
         $src = Join-Path $shaderSrc "$s.comp"
         $dst = Join-Path $spvOut "$s.spv"

@@ -21,8 +21,10 @@ type v41CompressorNormFunc func(layer int, pooled, gain []float32, eps float32) 
 // arbitrary inputs or gains. A narrower artifact/gain qualification needs a
 // separately designed admission identity before hardware can opt in.
 //
-// Ordinary Vulkan intentionally does not implement this capability. Neither a
-// backend name/Class/Caps nor a CPU-backed recorder qualifies physical Vulkan.
+// Ordinary Vulkan intentionally does not implement this capability: its generic
+// RMSNorm reduction is not bit-exact. Vulkan binds this seam only through the
+// dedicated compute.V41ExactRMSNormBackend operation, which v41ExactRMSNormFunc
+// prefers over this qualification (Ref #13668).
 type v41CompressorNormBackend interface {
 	SupportsV41CompressorNorm(width int, eps float32) bool
 }
@@ -38,15 +40,20 @@ func v41CompressorNormOperationErr(layer int, cause error) error {
 }
 
 func (s *Session) v41CompressorNormFunc() v41CompressorNormFunc {
-	normalize := s.v41RMSNormFunc()
-	if normalize == nil {
+	if s == nil || s.M == nil {
 		return nil
 	}
 	width := v41CompressorWidth(s.M.Cfg)
 	eps := float32(s.M.Cfg.RMSNormEps)
-	qualified, ok := s.Backend.(v41CompressorNormBackend)
-	if width <= 0 || !ok || !qualified.SupportsV41CompressorNorm(width, eps) {
-		return nil
+	normalize := s.v41ExactRMSNormFunc(width, eps)
+	if normalize == nil {
+		qualified, ok := s.Backend.(v41CompressorNormBackend)
+		if width <= 0 || !ok || !qualified.SupportsV41CompressorNorm(width, eps) {
+			return nil
+		}
+		if normalize = s.v41RMSNormFunc(); normalize == nil {
+			return nil
+		}
 	}
 	return func(layer int, pooled, gain []float32, suppliedEps float32) (result []float32, cause error) {
 		s.ensureOpenBackendSession()

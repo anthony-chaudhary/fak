@@ -40,8 +40,8 @@ func TestVulkanV41IndexerScorePhysical(t *testing.T) {
 	if !v.v41IndexerScoreWitnessReady() {
 		t.Fatalf("indexer unsupported: %s", v.V41IndexerScoreUnavailableReason())
 	}
-	if v.SupportsV41IndexerScore() || v.V41IndexerScoreUnavailableReason() == "" {
-		t.Fatal("test archive must not enable production qualification")
+	if !v.SupportsV41IndexerScore() || v.V41IndexerScoreUnavailableReason() != "" {
+		t.Fatal("production capability must equal the witness prerequisites")
 	}
 	identity, err := v.BackendExecutionSnapshot()
 	if err != nil {

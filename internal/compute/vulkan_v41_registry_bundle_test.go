@@ -16,8 +16,8 @@ import (
 // Qualification requires FAK_VULKAN_REQUIRE_DEVICE=1 and FAK_VULKAN_SPIRV naming
 // a bundle built from the current trusted registry; a skip is no witness. It
 // checks that a registry-built bundle binds every V4.1 device capability the
-// model's device-only admission requires, and that the indexer score stays
-// hard-off until its production qualification lands (Ref #13668).
+// model's device-only admission requires, including the indexer score whose
+// production gate is its dispatch prerequisites (Ref #13668).
 func TestVulkanV41RegistryBundleBindsDeviceOps(t *testing.T) {
 	v := vk(t)
 	dir := os.Getenv("FAK_VULKAN_SPIRV")
@@ -55,12 +55,14 @@ func TestVulkanV41RegistryBundleBindsDeviceOps(t *testing.T) {
 		{"SupportsV41SharedAttention", v.SupportsV41SharedAttention()},
 		{"V41EmbeddingGatherAvailable", v.V41EmbeddingGatherAvailable()},
 		{"V41Q2KEmbeddingGatherAvailable", v.V41Q2KEmbeddingGatherAvailable()},
+		{"SupportsV41ExactRMSNorm(512)", v.SupportsV41ExactRMSNorm(512, 1e-6)},
+		{"SupportsV41ExactRMSNorm(128)", v.SupportsV41ExactRMSNorm(128, 1e-6)},
 	} {
 		if !c.have {
 			t.Errorf("registry-built bundle leaves %s false", c.name)
 		}
 	}
-	if v.SupportsV41IndexerScore() {
-		t.Error("indexer score production capability opened without its production-profile qualification")
+	if !v.SupportsV41IndexerScore() {
+		t.Errorf("registry-built bundle leaves SupportsV41IndexerScore false: %s", v.V41IndexerScoreUnavailableReason())
 	}
 }
