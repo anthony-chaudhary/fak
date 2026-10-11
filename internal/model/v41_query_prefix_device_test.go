@@ -339,13 +339,20 @@ func TestV41QueryPrefixRestoredWarmOwnership(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer snap.Close()
-			target := v41QueryPrefixSession(t, source.M, b)
+			// Restore owns initial continuation binding. The regular prefix helper
+			// calls v41State first and would create a zero-token target history.
+			target := v41DenseTestSession(t, source.M, b)
+			b.owner = target
+			t.Cleanup(func() { b.armed = false })
+			if target.v41Forward != nil || len(target.halW) != 0 {
+				t.Fatal("restore destination is not fresh")
+			}
 			if err := snap.Restore(target); err != nil {
 				t.Fatal(err)
 			}
 			source.Close()
-			if target.v41State().callbackOwner != target {
-				t.Fatal("restore retained source callback owner")
+			if st := target.v41State(); st.callbackOwner != target || st.queryPrefix == nil {
+				t.Fatal("restore did not bind the destination-owned prefix callback")
 			}
 			before := v41QueryPrefixOldCounts(b)
 			target.Step(3)
