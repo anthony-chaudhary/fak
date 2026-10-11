@@ -33,7 +33,7 @@ qwen35_gdn_prefill_tiled qwen35_gdn_prefill_norm qwen35_gdn_verify_tiled q2k_mat
 rmsnorm_q8_matmul2_coop iq4xs_matvec iq3xxs_matvec iq2s_matvec iq3s_matvec iq2xxs_matvec
 iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention`)
 	t.Run("exact names and copy isolation", func(t *testing.T) {
-		if len(want) != 61 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV4(), want) {
+		if len(want) != 61 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV4(), want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
 			t.Fatal("historical V4 registry differs from the independent exact61 names")
 		}
 		if !reflect.DeepEqual(historicalVulkanV2Shaders(), want[:59]) || !reflect.DeepEqual(CurrentVulkanShaderRegistry(), want[:60]) {

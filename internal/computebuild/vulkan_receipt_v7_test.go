@@ -52,7 +52,7 @@ func TestVulkanSuccessorRegistryTable(t *testing.T) {
 // SPIR-V, source correspondence, or hardware qualification.
 func TestVulkanReceiptV7Current66Boundary(t *testing.T) {
 	want := append(CurrentVulkanShaderRegistryV6(), "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather")
-	if len(want) != 66 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV7(), want) || !reflect.DeepEqual(VulkanShaders[:66], want) {
+	if len(want) != 66 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV7(), want) || !reflect.DeepEqual(VulkanShaders[:66], want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
 		t.Fatal("V7 is not the exact66 registry prefix of the current builder")
 	}
 	registry, err := vulkanRegistryV7.identity()

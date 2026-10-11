@@ -798,9 +798,20 @@ func main() {
 	return binary
 }
 
+// resolvedFixtureTempDir returns t.TempDir with symlinks resolved: the Vulkan
+// receipt paths refuse symlink traversal, and darwin's temp root is a symlink.
+func resolvedFixtureTempDir(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 func newVulkanFixture(t *testing.T) (string, string, *Toolchain) {
 	t.Helper()
-	root := t.TempDir()
+	root := resolvedFixtureTempDir(t)
 	repo := filepath.Join(root, "repo")
 	writeFixtureFile(t, filepath.Join(repo, "go.mod"), "module example.test/vulkanfixture\n\ngo 1.26\n")
 	writeFixtureFile(t, filepath.Join(repo, "README.md"), "fixture\n")
@@ -1079,7 +1090,7 @@ func verifyVulkanFixture(ctx context.Context, fixture vulkanVerifierFixture, evi
 
 func newVulkanVerifierFixture(t *testing.T) vulkanVerifierFixture {
 	t.Helper()
-	root := t.TempDir()
+	root := resolvedFixtureTempDir(t)
 	repo := filepath.Join(root, "repo")
 	writeFixtureFile(t, filepath.Join(repo, "go.mod"), "module example.test/verifier\n\ngo 1.26\n")
 	writeFixtureFile(t, filepath.Join(repo, "cmd", "fak", "main.go"), "package main\nfunc main() {}\n")

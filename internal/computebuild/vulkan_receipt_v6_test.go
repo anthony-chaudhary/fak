@@ -29,7 +29,7 @@ qwen35_gdn_tiled_transpose coopmat_wave32_wmma rmsnorm_q4k_matmul2 swiglu_q4k_ma
 qwen35_gdn_prefill_tiled qwen35_gdn_prefill_norm qwen35_gdn_verify_tiled q2k_matvec
 rmsnorm_q8_matmul2_coop iq4xs_matvec iq3xxs_matvec iq2s_matvec iq3s_matvec iq2xxs_matvec
 iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score v41_mhc`)
-	if len(want) != 63 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV6(), want) || !reflect.DeepEqual(VulkanShaders[:63], want) {
+	if len(want) != 63 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV6(), want) || !reflect.DeepEqual(VulkanShaders[:63], want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
 		t.Fatal("V6 exact63 registry is not a prefix of the current builder registry")
 	}
 	if !reflect.DeepEqual(historicalVulkanV2Shaders(), want[:59]) || !reflect.DeepEqual(CurrentVulkanShaderRegistry(), want[:60]) || !reflect.DeepEqual(CurrentVulkanShaderRegistryV4(), want[:61]) || !reflect.DeepEqual(CurrentVulkanShaderRegistryV5(), want[:62]) {
