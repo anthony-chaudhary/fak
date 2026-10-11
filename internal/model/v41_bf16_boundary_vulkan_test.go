@@ -133,6 +133,10 @@ func TestV41BF16BoundaryVulkan(t *testing.T) {
 		t.Fatal("witness-tagged module was not admitted")
 	}
 	snapshot := func() compute.BackendExecutionSnapshot {
+		// Free parks rows in the backend reuse pool; drain it so live bytes count owned allocations only.
+		if pool, ok := be.(interface{ Trim() }); ok {
+			pool.Trim()
+		}
 		value, available, err := compute.CaptureBackendExecutionSnapshot(be)
 		if err != nil || !available || value.Identity.Backend != "vulkan" || value.Identity.Device != os.Getenv("FAK_VULKAN_EXPECT_DEVICE") || !value.TransferCountersObserved || !value.DeviceAllocationObserved {
 			t.Fatalf("physical counters/identity unavailable: %+v %v", value, err)

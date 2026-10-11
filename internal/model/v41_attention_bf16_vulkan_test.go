@@ -13,7 +13,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -85,8 +87,9 @@ func v41AttentionBF16PhysicalProvenance(t *testing.T) {
 		t.Fatal(e)
 	}
 	registryHash := sha256.Sum256(registryBytes)
-	if len(stems) != 68 || hex.EncodeToString(registryHash[:]) != "57c7bd4cc6b6f2ad4a3ecfc4498e758a0f5de1b4d4d620bb749ccbaa5a659344" {
-		t.Fatal("test requires exact V9/current68 policy")
+	// Bind the census this source's builder stamps, not a frozen successor that later modules retire.
+	if !slices.Contains(stems, "v41_bf16_checked") {
+		t.Fatal("current registry policy lacks checked attention BF16 publication")
 	}
 	required := []string{"canonical_verification", "native_archive", "test_binary", "shader_source", "native_source", "native_header", "go_adapter", "model_owner", "model_forward", "model_forward_weights", "model_incremental", "model_layer_step", "model_attention_helper", "physical_test_source"}
 	for _, stem := range stems {
@@ -147,8 +150,9 @@ func v41AttentionBF16PhysicalProvenance(t *testing.T) {
 		t.Fatal(e)
 	}
 	sort.Strings(v.Modules)
-	if v.Schema != "fak.vulkan-build-verification.v1" || v.Verdict != "verified" || v.ReceiptSchema != "fak.vulkan-build-receipt.v9" || v.Revision != revision || v.Count != 68 || !reflect.DeepEqual(v.Modules, stems) || v.Registry.ID != "fak.vulkan-shader-registry.v9.current68" || v.Registry.Count != 68 || v.Registry.SHA256 != hex.EncodeToString(registryHash[:]) || v.Archive.SHA256 != record.Files["native_archive"].SHA256 {
-		t.Fatal("canonical verification does not bind this ordinary current68 profile")
+	version, versioned := strings.CutPrefix(v.ReceiptSchema, "fak.vulkan-build-receipt.")
+	if v.Schema != "fak.vulkan-build-verification.v1" || v.Verdict != "verified" || !versioned || v.Revision != revision || v.Count != len(stems) || !reflect.DeepEqual(v.Modules, stems) || v.Registry.ID != fmt.Sprintf("fak.vulkan-shader-registry.%s.current%d", version, len(stems)) || v.Registry.Count != len(stems) || v.Registry.SHA256 != hex.EncodeToString(registryHash[:]) || v.Archive.SHA256 != record.Files["native_archive"].SHA256 {
+		t.Fatal("canonical verification does not bind this ordinary current profile")
 	}
 	t.Logf("ordinary attention BF16 source=%s execution_record=%s", revision, expected)
 }
@@ -163,6 +167,10 @@ type v41AttentionBF16PhysicalObserver struct {
 
 func (w *v41AttentionBF16PhysicalObserver) snapshot() compute.BackendExecutionSnapshot {
 	w.t.Helper()
+	// Free parks rows in the backend reuse pool; drain it so live bytes count owned allocations only.
+	if pool, ok := w.backend.(interface{ Trim() }); ok {
+		pool.Trim()
+	}
 	x, ok, e := compute.CaptureBackendExecutionSnapshot(w.backend)
 	if e != nil || !ok || x.Identity != w.identity || !x.TransferCountersObserved || !x.DeviceAllocationObserved {
 		w.t.Fatal("physical counters/identity unavailable", e)

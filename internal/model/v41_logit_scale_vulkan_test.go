@@ -112,6 +112,7 @@ func v41LogitScaleProvenance(t *testing.T) {
 // Nine literal scalar cases, one 4096-value model-copy dispatch, and synthetic
 // two-token prefill plus one decode bound this probe. No full-checkpoint or
 // trusted production registry qualification is implied by source wiring.
+// Compile v41_logit_scale.comp without glslc -O: the optimized module fails native ABI admission.
 // fak-test:runtime integration est=30s lane=optin
 func TestV41LogitScaleVulkan(t *testing.T) {
 	if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") != "1" || os.Getenv("FAK_VULKAN_EXPECT_DEVICE") == "" || os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") != "1" {
@@ -131,6 +132,10 @@ func TestV41LogitScaleVulkan(t *testing.T) {
 		t.Fatal("witness scalar module or actual-device FloatControls unavailable")
 	}
 	snapshot := func() compute.BackendExecutionSnapshot {
+		// Free parks rows in the backend reuse pool; drain it so live bytes count owned allocations only.
+		if pool, ok := be.(interface{ Trim() }); ok {
+			pool.Trim()
+		}
 		value, available, err := compute.CaptureBackendExecutionSnapshot(be)
 		if err != nil || !available || value.Identity.Backend != "vulkan" || value.Identity.Device != os.Getenv("FAK_VULKAN_EXPECT_DEVICE") || !value.TransferCountersObserved || !value.DeviceAllocationObserved {
 			t.Fatalf("physical counters/identity unavailable: %+v %v", value, err)
