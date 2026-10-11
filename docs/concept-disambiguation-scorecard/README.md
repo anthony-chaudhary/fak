@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **620** (clarity 0 + coverage 620) |
-| **Crystal-clear concepts (and climbing)** | **1184** crystal of 2947 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3056 / 3676** (83.1% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **1184** crystal of 2953 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3057 / 3677** (83.1% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 223 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **84** of 4193 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **84** of 4199 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 89.0/100 (grade B) |
 
@@ -28,18 +28,18 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2947 concepts - score 89.0/100 (grade B) - disambiguation-debt 620
+concept-disambiguation chart - 2953 concepts - score 89.0/100 (grade B) - disambiguation-debt 620
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ###################......... 1184
-  o defined       ############################ 1763
+  o defined       ############################ 1769
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
-  attention        **********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (94 concept(s); 22 crystal)
+  attention        **********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 22 crystal)
   cache            **************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (291 concept(s); 110 crystal)
   context-ctx      ************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (243 concept(s); 84 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
@@ -56,7 +56,7 @@ clarity mix by family (each cell = one concept):
   render-materialize *******************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (199 concept(s); 43 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
   session-runtime  *******************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (264 concept(s); 91 crystal)
-  support-maturity **********************************************oooooooooooooooooooooooo (70 concept(s); 46 crystal)
+  support-maturity **********************************************ooooooooooooooooooooooooo (71 concept(s); 46 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    ***********************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (172 concept(s); 83 crystal)
@@ -67,7 +67,7 @@ coverage by family (positioned / discovered):
   cache            #######################..... 333/399
   gateway-engine   #######################..... 226/280
   context-ctx      ########################.... 263/307
-  attention        ####################........ 99/141
+  attention        ####################........ 100/142
   policy-capability ########################.... 221/260
   guard-gate       ##########################.. 511/547
   pool             ###############............. 40/74
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 83.1%  (3056/3676 confusable tokens positioned)
+namespace coverage  [###########################.....] 83.1%  (3057/3677 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 223
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 223/223
 
-name index: 4193 lookup name(s) -> 2947 concept(s), 84 ambiguous
+name index: 4199 lookup name(s) -> 2953 concept(s), 84 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **223 / 223** (223 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2136 / 5325 |
+| Boundaries drawn (mutual / total) | 2144 / 5337 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4193 over 2947 concepts |
+| Lookup names indexed | 4199 over 2953 concepts |
 | Lookup names landing on several concepts | 84 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2947 |
+| Concepts carrying a contrast set | 2953 |
 
 ## The concepts (best verdict first)
 
@@ -1381,6 +1381,11 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | attention | **glmDsaAttentionKStride (DSA key stride)** - The internal/model helper returning the GLM-DSA per-position key stride (NumHeads * (QKNopeHeadDim + QKRopeHeadDim)) used to size and index the K cache and paged GLM-DSA attention. |
 | o | defined | symbol | attention | **glmDsaAttnSeqShared (replicated DSA attention body)** - The internal/model Model method running the GLM-DSA MLA + dynamic-sparse whole-sequence attention sublayer, replicated across expert-parallel ranks and optionally sharing a top-k selection across layers. |
 | o | defined | config | attention | **num_attention_heads (HF head-count key)** - The HuggingFace config key `num_attention_heads` that benchcli/batchbench read into cfg.NumHeads (and from which HeadDim is derived as hidden_size/num_attention_heads when head_dim is absent). |
+| o | defined | symbol | attention | **V41BF16CheckedAttentionNormInput** - The uint32 site identifier 3 for checked BF16 publication of the collapsed hidden row before the query-prefix attention RMSNorm. The native prefix supplies this site in the first checked dispatch, and the separate prefix status decoder uses it to identify the earliest logical numerical boundary. |
+| o | defined | symbol | attention | **V41BF16CheckedAttentionNormOutput** - The uint32 site identifier 4 for checked BF16 publication after the query-prefix attention RMSNorm and before the F32 wq_a projection. Its finite widened-BF16 row is the collapsed output retained alongside qLat only when the whole prefix succeeds. |
+| o | defined | symbol | attention | **AttentionGainHost** - The borrowed host float32 view in V41QueryPrefixInputs for the layer attn_norm.weight gain. The model obtains it from the canonical immutable tensor, and the selected prefix validator checks its hidden-width extent and every gain value for finiteness before dispatch. |
+| o | defined | symbol | attention | **AttentionGain** - The borrowed Tensor field in V41QueryPrefixInputs containing the canonical resident F32 attention-normalization gain of hidden width. The warm model owner obtains it from its existing weight memo; the adapter verifies shape, dtype, layout, live storage and captured backend ownership before the first RMSNorm dispatch. |
+| o | defined | symbol | attention | **attentionName** - The local layer-qualified string constructed as layerName(layer, "attn_norm.weight") inside the query-prefix Session callback. The callback uses this exact key for canonical F32 manifest validation, warm resident-weight memo lookup and the matching host tensor view. |
 | o | defined | config | attention | **QueryPreAttnScalar (Gemma per-head scale override)** - internal/model/config.go: the config field that OVERRIDES the per-head attention scale denominator - when non-zero (Gemma) the scale is 1/sqrt(QueryPreAttnScalar) instead of 1/sqrt(HeadDim), which is why Gemma 27B's 144 differs from its head dim. |
 | o | defined | symbol | attention | **longropeAttnScaleMul (Phi longrope attention-scale multiplier)** - internal/model/longrope.go: the multiplicative attention-scale adjustment the Phi longrope path applies on top of the 1/sqrt(denominator) term. |
 | o | defined | concept | attention | **self_attention (Falcon checkpoint tensor namespace)** - internal/model: the FALCON-family checkpoint tensor namespace - self_attention.query_key_value.weight (a fused QKV panel split at materialize time) and self_attention.dense, which fak canonicalizes to self_attn.o_proj. |
@@ -2976,6 +2981,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | support-maturity | **interpretmaturity (support-maturity identifier)** - interpretmaturity is the concrete support-maturity identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring support-maturity concepts. |
 | o | defined | symbol | support-maturity | **fvk_v41_bf16_checked_count_supported** - The read-only native geometry predicate for one checked BF16 publication row. It requires a positive count within INT32_MAX, a nonzero device X workgroup limit, a checked four-byte-per-element extent representable by host and Vulkan sizes, and compliance with any nonzero device buffer-byte cap including the 16-byte status buffer. The grid-stride shader uses the smaller of ceil(count/64) and that workgroup limit. |
 | o | defined | symbol | support-maturity | **fvk_v41_logit_scale_count_supported** - The read-only native admission predicate for a scalar logit row. It requires the dedicated witness pipeline and its selected-device FloatControls to be available, a positive element count, and ceil(count/64) within that device's X workgroup limit. The Go adapter checks it before allocating the output because this shader has no grid-stride loop. |
+| o | defined | symbol | support-maturity | **fvk_v41_query_prefix_geometry_supported** - The native read-only geometry predicate for the warm F32 query prefix. It applies the existing checked-BF16 count predicate to hidden and rank, bounds their product by INT32_MAX, checks its four-byte extent against host and Vulkan sizes, requires a nonzero sufficient storage-buffer range, and enforces any nonzero device buffer-byte limit. |
 | o | defined | subsystem | support-maturity | **arch_support.go (in-kernel architecture support surface)** - internal/model/arch_support.go: the surface stating which checkpoint architectures fak's in-kernel forward actually implements - it carries the forward-path classification and the typed refusal for anything it does not. |
 | o | defined | symbol | support-maturity | **UnsupportedArchError (typed unsupported-arch refusal)** - internal/model/arch_support.go: the typed refusal newModel returns when a checkpoint carries weights for an architecture whose in-kernel forward fak does not yet implement, so `fak serve` can surface a named refusal before serving a token instead of binding the gateway and panicking on the first turn. |
 | o | defined | symbol | support-maturity | **CoverageReport (four same-named per-package coverage folds)** - CoverageReport is a REUSED name, not one type: internal/accountprobe grades an enrolled seat roster (and separately reports whether the ledger said anything at all); internal/issuefanout is the two-rate adoption scorecard with per-leaf evidence; internal/productscorecard.CoverageReport is a FUNCTION over a catalog; and cmd/fak/route_coverage.go's lowercase coverageReport renders model-route coverage. |
@@ -3225,8 +3231,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3189/5325 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2947 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3193/5337 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2953 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3235,7 +3241,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4193 lookup name(s) resolves - 84 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4199 lookup name(s) resolves - 84 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3247,7 +3253,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | cache | 333 | 399 | 66 |
 | gateway-engine | 226 | 280 | 54 |
 | context-ctx | 263 | 307 | 44 |
-| attention | 99 | 141 | 42 |
+| attention | 100 | 142 | 42 |
 | policy-capability | 221 | 260 | 39 |
 | guard-gate | 511 | 547 | 36 |
 | pool | 40 | 74 | 34 |

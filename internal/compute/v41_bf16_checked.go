@@ -56,6 +56,14 @@ func v41BF16CheckedSiteName(site uint32) string {
 		return "final-norm input"
 	case V41BF16CheckedFinalNormOutput:
 		return "final-norm output"
+	case V41BF16CheckedAttentionNormInput:
+		return "attention-norm input"
+	case V41BF16CheckedAttentionNormOutput:
+		return "attention-norm output"
+	case V41BF16CheckedQueryNormInput:
+		return "query-norm input"
+	case V41BF16CheckedQueryNormOutput:
+		return "query-norm output"
 	default:
 		return fmt.Sprintf("unknown site %d", site)
 	}
@@ -75,9 +83,17 @@ func validateV41BF16Checked(input Tensor, site uint32) (int, error) {
 // Freshness is supplied by checked all-ones initialization and ordering on
 // EVERY dispatch; a decoder alone cannot detect an identical stale success.
 func decodeV41BF16CheckedStatus(raw []byte, count int, site uint32) error {
+	if site != V41BF16CheckedFinalNormInput && site != V41BF16CheckedFinalNormOutput {
+		return &V41BF16CheckedProtocolError{Message: "invalid issued geometry or status size"}
+	}
+	return decodeV41BF16CheckedEnvelope(raw, count, site)
+}
+
+// Callers validate their own closed site domain before sharing this envelope.
+func decodeV41BF16CheckedEnvelope(raw []byte, count int, site uint32) error {
 	bad := func(message string) error { return &V41BF16CheckedProtocolError{Message: message} }
 	if count <= 0 || count > math.MaxInt32 || count > math.MaxInt/4 ||
-		(site != V41BF16CheckedFinalNormInput && site != V41BF16CheckedFinalNormOutput) || len(raw) != v41BF16CheckedStatusBytes {
+		len(raw) != v41BF16CheckedStatusBytes {
 		return bad("invalid issued geometry or status size")
 	}
 	magic := binary.LittleEndian.Uint32(raw[0:4])

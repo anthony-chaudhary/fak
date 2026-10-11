@@ -417,6 +417,25 @@ int fvk_v41_bf16_boundary_module_abi(const void *data, size_t bytes);
  * The caller withholds output until checked status D2H and decoding succeed;
  * failed output contents are unspecified. Same isolated archive, no registry promotion. */
 int fvk_have_v41_bf16_checked(void);
+
+/* Warm query-prefix composition. All pointers are backend-owned Buffer handles;
+ * host_collapse is borrowed synchronously and never retained. No generic batch
+ * is acquired or completed. Sites1/2 of the sibling operation stay unchanged. */
+#define FVK_V41_QUERY_PREFIX_BUSY_BATCH 20
+#define FVK_V41_QUERY_PREFIX_BUSY_RESTORE 21
+typedef struct fvk_v41_query_prefix_buffers {
+    const void* weights[3]; /* attention gain, wq_a, query gain */
+    void* input;
+    void* values[7]; /* BF16 input, norm, collapsed, projection, BF16, norm, qLat */
+    void* status[4]; /* distinct 16-byte records for sites3..6 */
+} fvk_v41_query_prefix_buffers;
+int fvk_have_v41_query_prefix(void);
+int fvk_v41_query_prefix_state(void);
+int fvk_v41_query_prefix_geometry_supported(int hidden, int rank);
+int fvk_v41_query_prefix_f32(const float* host_collapse,
+    const fvk_v41_query_prefix_buffers* buffers, int hidden, int rank,
+    float eps, uint32_t* failed_stage);
+
 int fvk_v41_bf16_checked_count_supported(int count);
 int fvk_v41_bf16_checked_f32(const void *dInput, void *dOut, void *dStatus, int count, uint32_t site);
 int fvk_v41_bf16_checked_module_abi(const void *data, size_t bytes);

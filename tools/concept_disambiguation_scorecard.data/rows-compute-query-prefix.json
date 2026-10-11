@@ -1,0 +1,118 @@
+{
+  "rows": [
+    {
+      "id": "v41-query-prefix-attention-input-site",
+      "canonical": "V41BF16CheckedAttentionNormInput",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The uint32 site identifier 3 for checked BF16 publication of the collapsed hidden row before the query-prefix attention RMSNorm. The native prefix supplies this site in the first checked dispatch, and the separate prefix status decoder uses it to identify the earliest logical numerical boundary.",
+      "distinction": "This identifies a status and publication boundary; it is not a normalization callback or capability flag. Site 4 identifies the output of that RMSNorm. The existing synchronous final-norm decoder remains limited to sites 1 and 2.",
+      "distinct_from": [
+        "v41-query-prefix-attention-output-site",
+        "v41-attention-input-norm-boundary"
+      ],
+      "aliases": [],
+      "grounding": "V41BF16CheckedAttentionNormInput",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-query-prefix-attention-output-site",
+      "canonical": "V41BF16CheckedAttentionNormOutput",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The uint32 site identifier 4 for checked BF16 publication after the query-prefix attention RMSNorm and before the F32 wq_a projection. Its finite widened-BF16 row is the collapsed output retained alongside qLat only when the whole prefix succeeds.",
+      "distinction": "This names the second prefix status boundary, not the learned gain, forward callback or attention result. Site 3 describes its normalization input; the older model boundary applies the corresponding casts around a separately invoked callback.",
+      "distinct_from": [
+        "v41-query-prefix-attention-input-site",
+        "v41-attention-input-norm-boundary"
+      ],
+      "aliases": [],
+      "grounding": "V41BF16CheckedAttentionNormOutput",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-query-prefix-attention-gain-host",
+      "canonical": "AttentionGainHost",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The borrowed host float32 view in V41QueryPrefixInputs for the layer attn_norm.weight gain. The model obtains it from the canonical immutable tensor, and the selected prefix validator checks its hidden-width extent and every gain value for finiteness before dispatch.",
+      "distinction": "This host view supplies validation data and is not uploaded by the prefix. AttentionGain is the already resident device tensor consumed by RMSNorm; attentionName is the layer-qualified key used to locate both representations.",
+      "distinct_from": [
+        "v41-query-prefix-attention-gain-device",
+        "v41-query-prefix-attention-gain-key"
+      ],
+      "aliases": [],
+      "grounding": "AttentionGainHost",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-query-prefix-attention-gain-device",
+      "canonical": "AttentionGain",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The borrowed Tensor field in V41QueryPrefixInputs containing the canonical resident F32 attention-normalization gain of hidden width. The warm model owner obtains it from its existing weight memo; the adapter verifies shape, dtype, layout, live storage and captured backend ownership before the first RMSNorm dispatch.",
+      "distinction": "This is a resident operand handle, not the corresponding host validation view or a new weight upload. Prefix eligibility declines when the required memo is absent, while AttentionGainHost carries the immutable host values used for finite-gain checks.",
+      "distinct_from": [
+        "v41-query-prefix-attention-gain-host",
+        "v41-query-prefix-attention-gain-key"
+      ],
+      "aliases": [],
+      "grounding": "AttentionGain",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-query-prefix-geometry-supported",
+      "canonical": "fvk_v41_query_prefix_geometry_supported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "The native read-only geometry predicate for the warm F32 query prefix. It applies the existing checked-BF16 count predicate to hidden and rank, bounds their product by INT32_MAX, checks its four-byte extent against host and Vulkan sizes, requires a nonzero sufficient storage-buffer range, and enforces any nonzero device buffer-byte limit.",
+      "distinction": "This bounds row and matrix geometry before allocation. It does not inspect pipeline availability, healthy busy state, operand lifetime, gain values or numerical results, and does not qualify hardware or publish outputs. The existing checked count predicate governs each individual row.",
+      "distinct_from": [
+        "bf16-checked-count-supported",
+        "support"
+      ],
+      "aliases": [],
+      "grounding": "fvk_v41_query_prefix_geometry_supported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-query-prefix-attention-gain-key",
+      "canonical": "attentionName",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The local layer-qualified string constructed as layerName(layer, \"attn_norm.weight\") inside the query-prefix Session callback. The callback uses this exact key for canonical F32 manifest validation, warm resident-weight memo lookup and the matching host tensor view.",
+      "distinction": "This is a scoped lookup key, not the learned values, device Tensor or an executable normalization callback. AttentionGainHost and AttentionGain are the two borrowed operand representations selected using this key.",
+      "distinct_from": [
+        "v41-query-prefix-attention-gain-host",
+        "v41-query-prefix-attention-gain-device"
+      ],
+      "aliases": [],
+      "grounding": "attentionName",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

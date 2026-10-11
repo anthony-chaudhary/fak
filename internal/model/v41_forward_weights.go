@@ -42,6 +42,7 @@ type v41ProjScratch struct {
 	mhcCarry         *v41MHCCarry
 	attentionNorm    v41AttentionInputNormFunc
 	queryNorm        v41QueryNormFunc
+	queryPrefix      v41QueryPrefixFunc
 	kvNorm           v41KVNormFunc
 	ffnNorm          v41FFNNormFunc
 	compressorNorm   v41CompressorNormFunc

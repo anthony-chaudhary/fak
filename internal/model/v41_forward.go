@@ -167,6 +167,7 @@ type v41ForwardState struct {
 	logitScale       v41LogitScaleFunc
 	attentionNorm    v41AttentionInputNormFunc
 	queryNorm        v41QueryNormFunc
+	queryPrefix      v41QueryPrefixFunc
 	kvNorm           v41KVNormFunc
 	ffnNorm          v41FFNNormFunc
 	compressorNorm   v41CompressorNormFunc
@@ -329,7 +330,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, bf16Boundary: st.bf16Boundary, logitScale: st.logitScale, attentionNorm: st.attentionNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, routerTopK: st.routerTopK, routedSum: st.routedSum, sharedAdd: st.sharedAdd, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, bf16Boundary: st.bf16Boundary, logitScale: st.logitScale, attentionNorm: st.attentionNorm, queryNorm: st.queryNorm, queryPrefix: st.queryPrefix, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, routerTopK: st.routerTopK, routedSum: st.routedSum, sharedAdd: st.sharedAdd, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
 		runState.indexKeyPrior = st.indexKeyMemo
 		runState.indexKeyMemo = map[int][]v41IndexKeyMemoRow{}
 		defer func() {
@@ -564,6 +565,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.mhcFFNProjection = nil
 	scratch.attentionNorm = nil
 	scratch.queryNorm = nil
+	scratch.queryPrefix = nil
 	scratch.kvNorm = nil
 	scratch.ffnNorm = nil
 	scratch.compressorNorm = nil
@@ -584,6 +586,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.mhcFFNProjection = st.mhcFFNProjection
 		scratch.attentionNorm = st.attentionNorm
 		scratch.queryNorm = st.queryNorm
+		scratch.queryPrefix = st.queryPrefix
 		scratch.kvNorm = st.kvNorm
 		scratch.ffnNorm = st.ffnNorm
 		scratch.compressorNorm = st.compressorNorm
@@ -605,6 +608,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.mhcFFNProjection = nil
 		scratch.attentionNorm = nil
 		scratch.queryNorm = nil
+		scratch.queryPrefix = nil
 		scratch.kvNorm = nil
 		scratch.ffnNorm = nil
 		scratch.compressorNorm = nil
@@ -1593,7 +1597,7 @@ func (s *Session) prefillV41Suffix(ids []int) []float32 {
 			var selectedAttention *V41SharedAttentionOperationError
 			var selectedScore *V41IndexerScoreOperationError
 			var selectedMHC *V41MHCOperationError
-			if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || errors.Is(err, ErrV41LogitScaleOperation) || !errors.Is(err, ErrV41ForwardStage) {
+			if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || errors.Is(err, ErrV41LogitScaleOperation) || errors.Is(err, ErrV41QueryPrefixOperation) || !errors.Is(err, ErrV41ForwardStage) {
 				panic(err)
 			}
 			// Roll the suffix back to the pre-call boundary and re-fold the
@@ -1702,7 +1706,7 @@ func (s *Session) stepV41(id int) []float32 {
 		var selectedAttention *V41SharedAttentionOperationError
 		var selectedScore *V41IndexerScoreOperationError
 		var selectedMHC *V41MHCOperationError
-		if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || errors.Is(err, ErrV41LogitScaleOperation) || !errors.Is(err, ErrV41ForwardStage) {
+		if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || errors.Is(err, ErrV41LogitScaleOperation) || errors.Is(err, ErrV41QueryPrefixOperation) || !errors.Is(err, ErrV41ForwardStage) {
 			panic(err)
 		}
 		// A typed stage refusal the eligibility check could not foresee (e.g. the
@@ -1742,6 +1746,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.logitScale = s.v41LogitScaleFunc()
 		s.v41Forward.attentionNorm = s.v41AttentionInputNormFunc()
 		s.v41Forward.queryNorm = s.v41QueryNormFunc()
+		s.v41Forward.queryPrefix = s.v41QueryPrefixFunc()
 		s.v41Forward.kvNorm = s.v41KVNormFunc()
 		s.v41Forward.ffnNorm = s.v41FFNNormFunc()
 		s.v41Forward.compressorNorm = s.v41CompressorNormFunc()

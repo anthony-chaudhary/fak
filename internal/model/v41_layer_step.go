@@ -176,9 +176,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		if rerr != nil {
 			return rerr
 		}
-		if collapsed, err = m.v41AttentionInputNormWithDevice(l, rows[0], eps, scratch.attentionNorm); err != nil {
-			return err
-		}
+		collapsed = rows[0]
 	} else {
 		if !full {
 			xn = rmsnormCfg(x, attnNorm, eps, cfg)
@@ -228,7 +226,21 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 				return v41StageErr(v41StageMHC, l, err)
 			}
 		}
-		if full {
+	}
+	var qLat []float32
+	prefixHandled := false
+	if full {
+		if scratch.queryPrefix != nil {
+			var nextCollapsed []float32
+			nextCollapsed, qLat, prefixHandled, err = scratch.queryPrefix(l, collapsed)
+			if err != nil {
+				return err
+			}
+			if prefixHandled {
+				collapsed = nextCollapsed
+			}
+		}
+		if !prefixHandled {
 			collapsed, err = m.v41AttentionInputNormWithDevice(l, collapsed, eps, scratch.attentionNorm)
 			if err != nil {
 				return err
@@ -242,13 +254,15 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		return v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: attention qk_rope_head_dim must be a positive even value <= head_dim %d, got %d", ErrV41ForwardStage, hd, ropeDim))
 	}
-	qLat, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_a.weight", collapsed, cfg.QLoraRank, H, scratch.denseProjection)
-	if err != nil {
-		return err
-	}
-	if full {
-		if err := m.v41QueryNormInPlace(l, qLat, eps, scratch.queryNorm); err != nil {
+	if !prefixHandled {
+		qLat, err = m.v41ProjMatRowsWithProjection(l, "attn.wq_a.weight", collapsed, cfg.QLoraRank, H, scratch.denseProjection)
+		if err != nil {
 			return err
+		}
+		if full {
+			if err := m.v41QueryNormInPlace(l, qLat, eps, scratch.queryNorm); err != nil {
+				return err
+			}
 		}
 	}
 	q, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank, scratch.denseProjection)
@@ -633,9 +647,23 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 			}
 		}
 	}
-	collapsed, err = m.v41AttentionInputNormWithDevice(l, collapsed, eps, scratch.attentionNorm)
-	if err != nil {
-		return err
+	var qLat []float32
+	prefixHandled := false
+	if scratch.queryPrefix != nil {
+		var nextCollapsed []float32
+		nextCollapsed, qLat, prefixHandled, err = scratch.queryPrefix(l, collapsed)
+		if err != nil {
+			return err
+		}
+		if prefixHandled {
+			collapsed = nextCollapsed
+		}
+	}
+	if !prefixHandled {
+		collapsed, err = m.v41AttentionInputNormWithDevice(l, collapsed, eps, scratch.attentionNorm)
+		if err != nil {
+			return err
+		}
 	}
 
 	// ---- attention query for the one position (mirrors v41Layer's full branch) ----
@@ -644,12 +672,14 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		return v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: attention qk_rope_head_dim must be a positive even value <= head_dim %d, got %d", ErrV41ForwardStage, hd, ropeDim))
 	}
-	qLat, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_a.weight", collapsed, cfg.QLoraRank, H, scratch.denseProjection)
-	if err != nil {
-		return err
-	}
-	if err := m.v41QueryNormInPlace(l, qLat, eps, scratch.queryNorm); err != nil {
-		return err
+	if !prefixHandled {
+		qLat, err = m.v41ProjMatRowsWithProjection(l, "attn.wq_a.weight", collapsed, cfg.QLoraRank, H, scratch.denseProjection)
+		if err != nil {
+			return err
+		}
+		if err := m.v41QueryNormInPlace(l, qLat, eps, scratch.queryNorm); err != nil {
+			return err
+		}
 	}
 	q, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank, scratch.denseProjection)
 	if err != nil {

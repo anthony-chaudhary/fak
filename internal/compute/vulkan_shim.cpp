@@ -5083,6 +5083,182 @@ int fvk_v41_bf16_checked_f32(const void* dInput, void* dOut, void* dStatus, int 
     return (int)g_submissionStatus;
 }
 
+int fvk_have_v41_query_prefix(void) {
+    // Availability is module identity, not transient healthy-busy state.
+    return fvk_have_v41_bf16_checked() &&
+        g_kern[K_RMSNORM].pipe != VK_NULL_HANDLE && g_kern[K_RMSNORM].nbuf == 3 && g_kern[K_RMSNORM].pcsize == 12 &&
+        g_kern[K_MATMUL].pipe != VK_NULL_HANDLE && g_kern[K_MATMUL].nbuf == 3 && g_kern[K_MATMUL].pcsize == 12;
+}
+
+int fvk_v41_query_prefix_state(void) {
+    if (g_submissionStatus != VK_SUCCESS) return int(g_submissionStatus);
+    if (g_v41SubmissionPendingFailure) return int(VK_ERROR_UNKNOWN);
+    if (g_batching) return FVK_V41_QUERY_PREFIX_BUSY_BATCH;
+    if (g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return FVK_V41_QUERY_PREFIX_BUSY_RESTORE;
+    return 0;
+}
+
+int fvk_v41_query_prefix_geometry_supported(int hidden, int rank) {
+    if (!fvk_v41_bf16_checked_count_supported(hidden) || !fvk_v41_bf16_checked_count_supported(rank)) return 0;
+    const uint64_t elements = uint64_t(hidden) * uint64_t(rank);
+    const uint64_t bytes = elements * 4u;
+    return elements <= uint64_t(INT32_MAX) && bytes <= std::numeric_limits<size_t>::max() &&
+        bytes <= std::numeric_limits<VkDeviceSize>::max() &&
+        g_maxStorageBufferRange > 0 && bytes <= g_maxStorageBufferRange &&
+        (g_maxBufferBytes == 0 || bytes <= g_maxBufferBytes);
+}
+
+int fvk_v41_query_prefix_f32(const float* hostCollapse, const fvk_v41_query_prefix_buffers* a,
+                            int hidden, int rank, float eps, uint32_t* failedStage) {
+    if (failedStage) *failedStage = 0;
+    const int state = fvk_v41_query_prefix_state();
+    if (state != 0) return state;
+    if (!fvk_have_v41_query_prefix()) return 3;
+    if (!hostCollapse || !a || !failedStage || !std::isfinite(eps) || eps <= 0 ||
+        !fvk_v41_query_prefix_geometry_supported(hidden, rank)) return 2;
+    const uint64_t hb = uint64_t(hidden) * 4u, rb = uint64_t(rank) * 4u;
+    Buffer* weights[3] = {B(a->weights[0]), B(a->weights[1]), B(a->weights[2])};
+    Buffer* input = B(a->input);
+    Buffer* values[7];
+    Buffer* statuses[4];
+    Buffer* all[15] = {weights[0], weights[1], weights[2], input};
+    uint64_t sizes[15] = {hb, hb * uint64_t(rank), rb, hb};
+    for (int i = 0; i < 7; ++i) {
+        values[i] = B(a->values[i]); all[i+4] = values[i]; sizes[i+4] = i < 3 ? hb : rb;
+    }
+    for (int i = 0; i < 4; ++i) {
+        statuses[i] = B(a->status[i]); all[i+11] = statuses[i]; sizes[i+11] = 16;
+    }
+    for (int i = 0; i < 15; ++i) {
+        Buffer* b = all[i];
+        if (!b || b->buf == VK_NULL_HANDLE || b->mem == VK_NULL_HANDLE || b->bytes < sizes[i] ||
+            b->bytes > g_maxStorageBufferRange || b->bytes > std::numeric_limits<VkDeviceSize>::max() - b->memoryOffset) return 2;
+    }
+    // Read-only weights may share storage. Every mutable range must be disjoint
+    // from every other range, including weights and the initial staging owner.
+    auto overlaps = [](Buffer* x, Buffer* y) {
+        return x == y || x->buf == y->buf || (x->mem == y->mem &&
+            x->memoryOffset < y->memoryOffset + y->bytes && y->memoryOffset < x->memoryOffset + x->bytes);
+    };
+    for (int i = 3; i < 15; ++i) for (int j = 0; j < i; ++j) if (overlaps(all[i], all[j])) return 2;
+    *failedStage = 1; // initial staging/copy
+    int stagingStatus = VK_SUCCESS;
+    Buffer* stage = stagingBuffer(size_t(hb), &stagingStatus);
+    if (!stage) {
+        if (stagingStatus == VK_ERROR_DEVICE_LOST) {
+            g_submissionStatus = VK_ERROR_DEVICE_LOST;
+            g_v41SubmissionPendingFailure = true;
+        }
+        return stagingStatus == VK_SUCCESS ? 4 : stagingStatus;
+    }
+    if (stage->bytes > std::numeric_limits<VkDeviceSize>::max() - stage->memoryOffset) return 2;
+    for (Buffer* b : all) if (overlaps(stage, b)) return 2;
+    memcpy(g_stageMapped, hostCollapse, size_t(hb)); // no retained Go pointer
+    VkCommandBuffer cmd = v41BeginCmdChecked();
+    if (cmd == VK_NULL_HANDLE) return g_submissionStatus != VK_SUCCESS ? int(g_submissionStatus) : 4;
+    DescriptorSetRecord records[7]{};
+    size_t recordCount = 0;
+    auto recycle = [&]() {
+        for (size_t i = recordCount; i > 0; --i) recycleDescriptorSet(records[i-1]);
+        recordCount = 0;
+    };
+    auto discardUnsubmitted = [&]() {
+        // This command has never reached the queue. Do not submit a partial
+        // prefix as recovery, and do not call the generic batch flush.
+        vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
+        cmd = VK_NULL_HANDLE;
+        recycle();
+    };
+    VkBufferCopy copy{0, 0, VkDeviceSize(hb)};
+    vkCmdCopyBuffer(cmd, stage->buf, input->buf, 1, &copy);
+    for (Buffer* status : statuses) vkCmdFillBuffer(cmd, status->buf, 0, 16, UINT32_MAX);
+    recordComputeBarrier(cmd); // initial input transfer + every fresh status fill
+    auto record = [&](Kernel& kernel, Buffer* x, Buffer* y, Buffer* z,
+                      const void* push, uint32_t pushBytes, uint32_t groups) {
+        if (recordCount >= 7 || kernel.nbuf != 3 || kernel.pcsize != pushBytes ||
+            kernel.pipe == VK_NULL_HANDLE || kernel.layout == VK_NULL_HANDLE || groups == 0) return false;
+        DescriptorSetRecord rec = acquireDescriptorSet(kernel, true);
+        if (!rec.set) return false;
+        // Hold the descriptor before any command references it; all seven
+        // records survive until checked completion or process-lifetime quarantine.
+        records[recordCount++] = rec;
+        DescriptorSetRecord& owned = records[recordCount-1];
+        Buffer* buffers[3] = {x, y, z};
+        VkDescriptorBufferInfo info[3]{};
+        VkWriteDescriptorSet write[3]{};
+        owned.nbuf = 3;
+        for (uint32_t i = 0; i < 3; ++i) {
+            info[i].buffer = buffers[i]->buf;
+            info[i].offset = 0;
+            info[i].range = VK_WHOLE_SIZE;
+            write[i] = VkWriteDescriptorSet{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+            write[i].dstSet = owned.set;
+            write[i].dstBinding = i;
+            write[i].descriptorCount = 1;
+            write[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            write[i].pBufferInfo = &info[i];
+            owned.buffers[i] = buffers[i]->buf;
+        }
+        for (int i = 3; i < MAX_DISPATCH_BUFS; ++i) owned.buffers[i] = VK_NULL_HANDLE;
+        vkUpdateDescriptorSets(g_dev, 3, write, 0, nullptr);
+        if (recordCount > 1) recordComputeBarrier(cmd);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, kernel.pipe);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, kernel.layout, 0, 1, &owned.set, 0, nullptr);
+        vkCmdPushConstants(cmd, kernel.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushBytes, push);
+        dpDispatch(kernel);
+        vkCmdDispatch(cmd, groups, 1, 1);
+        return true;
+    };
+    struct BF16Push { uint32_t count, site; };
+    struct NormPush { int rows, width; float eps; };
+    struct MatmulPush { int out, in, rows; };
+    static_assert(sizeof(BF16Push) == 8 && sizeof(NormPush) == 12 && sizeof(MatmulPush) == 12,
+                  "query-prefix kernels keep their existing push layouts");
+    BF16Push bf[4] = {{uint32_t(hidden),3}, {uint32_t(hidden),4}, {uint32_t(rank),5}, {uint32_t(rank),6}};
+    NormPush normH{1,hidden,eps}, normR{1,rank,eps};
+    MatmulPush mat{rank,hidden,1};
+    const uint32_t gh = uint32_t(std::min<uint64_t>((uint64_t(hidden)+63)/64, g_maxComputeWorkGroupCountX));
+    const uint32_t gr = uint32_t(std::min<uint64_t>((uint64_t(rank)+63)/64, g_maxComputeWorkGroupCountX));
+    bool ok = false;
+    do {
+        *failedStage = 2;
+        if (!record(g_kern[K_V41_BF16_CHECKED],input,values[0],statuses[0],&bf[0],8,gh)) break;
+        *failedStage = 3;
+        if (!record(g_kern[K_RMSNORM],values[0],weights[0],values[1],&normH,12,1)) break;
+        *failedStage = 4;
+        if (!record(g_kern[K_V41_BF16_CHECKED],values[1],values[2],statuses[1],&bf[1],8,gh)) break;
+        *failedStage = 5;
+        if (!record(g_kern[K_MATMUL],weights[1],values[2],values[3],&mat,12,1)) break;
+        *failedStage = 6;
+        if (!record(g_kern[K_V41_BF16_CHECKED],values[3],values[4],statuses[2],&bf[2],8,gr)) break;
+        *failedStage = 7;
+        if (!record(g_kern[K_RMSNORM],values[4],weights[2],values[5],&normR,12,1)) break;
+        *failedStage = 8;
+        if (!record(g_kern[K_V41_BF16_CHECKED],values[5],values[6],statuses[3],&bf[3],8,gr)) break;
+        ok = true;
+    } while (false);
+    if (!ok) {
+        // Checked descriptor allocation can report device loss and quarantine
+        // the device even before this local command is submitted. Honor that
+        // global uncertainty: retain this command and every prior descriptor.
+        if (!g_v41SubmissionPendingFailure) discardUnsubmitted();
+        return g_submissionStatus != VK_SUCCESS ? int(g_submissionStatus) : 4;
+    }
+    *failedStage = 9;
+    dp_inc(g_dp.batchSubmits); // one combined H2D+compute submission, not two
+    const bool completed = v41EndSubmitWaitChecked(cmd, true);
+    // The helper owns command freeing on success/known-pre-submit failure.
+    // On uncertainty neither command nor descriptors nor staging may be reused.
+    if (!g_v41SubmissionPendingFailure) recycle();
+    if (!completed) {
+        g_transferCountersValid = false;
+        return g_submissionStatus != VK_SUCCESS ? int(g_submissionStatus) : 4;
+    }
+    if (!checkedCounterAdd(g_h2dCount, 1) || !checkedCounterAdd(g_h2dBytes, hb)) g_transferCountersValid = false;
+    *failedStage = 0;
+    return 0;
+}
+
 int fvk_v41_bf16_boundary_module_abi(const void* data, size_t bytes) {
     if (!data || bytes < 20 || bytes > 1024 * 1024 || bytes % 4 != 0) return 0;
     std::vector<char> code(bytes);
