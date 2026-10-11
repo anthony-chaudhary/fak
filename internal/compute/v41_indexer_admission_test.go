@@ -79,9 +79,29 @@ func TestV41IndexerAdmissionFaultBeforeCapability(t *testing.T) {
 	}
 	shim := read("vulkan_shim.cpp")
 	// The status getter is sufficient only while native pending quarantine
-	// implies nonzero sticky status. Pin every transition and its accompanying
-	// result, and reject an additional transition until its invariant is audited.
-	if strings.Count(shim, "g_v41SubmissionPendingFailure = true;") != 4 ||
+	// implies nonzero sticky status. Every pending transition outside the
+	// checked completion (pinned below) must set sticky status in its own block.
+	checkedBody := section(shim, "bool v41EndSubmitWaitChecked(VkCommandBuffer cmd, bool submit) {", "\n}\n")
+	outside := strings.Replace(shim, checkedBody, "", 1)
+	lines := strings.Split(outside, "\n")
+	pending := 0
+	for i, line := range lines {
+		if !strings.Contains(line, "g_v41SubmissionPendingFailure = true;") {
+			continue
+		}
+		pending++
+		paired := false
+		for j := i; j >= 0 && j >= i-4; j-- {
+			if strings.Contains(lines[j], "g_submissionStatus = ") && !strings.Contains(lines[j], "VK_SUCCESS;") {
+				paired = true
+				break
+			}
+		}
+		if !paired {
+			t.Fatalf("pending quarantine transition without sticky status in its block: %q", strings.TrimSpace(line))
+		}
+	}
+	if pending < 2 ||
 		strings.Count(shim, "g_v41SubmissionPendingFailure = false;") != 1 ||
 		strings.Count(shim, "g_submissionStatus = VK_SUCCESS;") != 1 {
 		t.Fatal("native quarantine/status transitions changed; re-audit admission")
