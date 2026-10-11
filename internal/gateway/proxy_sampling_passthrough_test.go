@@ -40,6 +40,10 @@ func TestProxiedChatSamplingReachesUpstream(t *testing.T) {
 				var mu sync.Mutex
 				var got map[string]any
 				up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+						http.NotFound(w, r)
+						return
+					}
 					raw, _ := io.ReadAll(r.Body)
 					var body map[string]any
 					if err := json.Unmarshal(raw, &body); err != nil {
