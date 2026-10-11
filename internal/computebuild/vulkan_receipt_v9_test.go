@@ -14,7 +14,7 @@ import (
 // admission, not shader semantics, build causality, or device qualification.
 func TestVulkanReceiptV9Current68Boundary(t *testing.T) {
 	want := append(CurrentVulkanShaderRegistryV8(), "v41_bf16_checked")
-	if len(want) != 68 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV9(), want) || !reflect.DeepEqual(VulkanShaders[:68], want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest()[:68], want) {
+	if len(want) != 68 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV9(), want) || !reflect.DeepEqual(VulkanShaders[:68], want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest()[:68], want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
 		t.Fatal("V9 is not V8 plus the checked BF16 module as the current builder prefix")
 	}
 	registry, err := vulkanRegistryV9.identity()

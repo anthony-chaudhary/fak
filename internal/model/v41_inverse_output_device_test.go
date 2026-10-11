@@ -194,12 +194,13 @@ func TestV41InverseOutputDeviceDispatch(t *testing.T) {
 		}
 		cfg := Config{HeadDim: 8, NumHeads: 1, QKRopeHeadDim: 4, RopeTheta: 256}
 		out := []float32{1, 2, 3, 4, 5, 6, 7, 8}
+		input := append([]float32(nil), out...)
 		got, err := v41RotatedOutputForProjection(cfg, 0, 1, out, 1, 8, ops)
 		var closed *BackendForwardOperationError
 		if got != nil || !errors.Is(err, errV41DeviceOnlyHostOp) || !errors.As(err, &closed) || closed.Path != "device-only" || !s.BackendSessionClosed() {
 			t.Fatalf("device-only missing inverse did not fail closed: %v", err)
 		}
-		if !reflect.DeepEqual(out, []float32{1, 2, 3, 4, 5, 6, 7, 8}) {
+		if !reflect.DeepEqual(out, input) {
 			t.Fatal("device-only refusal computed on the host")
 		}
 	})

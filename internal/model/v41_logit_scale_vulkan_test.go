@@ -3,6 +3,7 @@
 package model
 
 import (
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -37,7 +38,7 @@ func v41LogitScaleProvenance(t *testing.T) {
 	recordPath := os.Getenv("FAK_V41_LOGIT_SCALE_WITNESS_PROVENANCE")
 	expected := os.Getenv("FAK_V41_LOGIT_SCALE_WITNESS_PROVENANCE_SHA256")
 	revision := os.Getenv("FAK_V41_LOGIT_SCALE_WITNESS_REVISION")
-	if len(revision) != 40 || len(expected) != 64 {
+	if len(revision) != hex.EncodedLen(sha1.Size) || len(expected) != hex.EncodedLen(sha256.Size) {
 		t.Fatal("reviewed full source revision and record digest required")
 	}
 	if _, err := hex.DecodeString(revision); err != nil {
@@ -82,7 +83,7 @@ func v41LogitScaleProvenance(t *testing.T) {
 	}
 	for _, kind := range []string{"native_archive", "shader_module", "test_binary", "shader_source", "native_source", "native_header", "go_adapter"} {
 		file, ok := record.Files[kind]
-		if !ok || !filepath.IsAbs(file.Path) || len(file.SHA256) != 64 {
+		if !ok || !filepath.IsAbs(file.Path) || len(file.SHA256) != hex.EncodedLen(sha256.Size) {
 			t.Fatalf("missing reviewed %s", kind)
 		}
 		if kind == "native_archive" && filepath.Base(file.Path) != "libfakvulkan_v41_logit_scale_witness.a" {

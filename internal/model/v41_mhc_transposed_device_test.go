@@ -68,7 +68,7 @@ func TestV41MHCTransposedDeviceDispatch(t *testing.T) {
 		}
 		v41GroupedParity(t, got, lastLogits(m.Forward(prefix)), 1e-4)
 	}
-	if b.stages != 2 || b.attempts != 6 || len(b.operations) != 6 || len(b.packed) != 2 {
+	if b.stages != 2 || b.attempts != 6 || len(b.operations) != b.attempts || len(b.packed) != 2 {
 		t.Fatalf("transposed immutable staging/dispatch=%d/%d/%d packed=%d", b.stages, b.attempts, len(b.operations), len(b.packed))
 	}
 	for weight, packed := range b.packed {

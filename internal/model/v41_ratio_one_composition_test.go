@@ -18,11 +18,23 @@ func TestV41RatioOneComposition(t *testing.T) {
 		window := [][]float32{{2, 4}, {6, 8}}
 		compressed := [][]float32{{2, 4}, {10, 12}, {100, 200}}
 		ids := []int32{0, 0, 1, 2, -1}
+		const position, ratio = 3, 2
+		wantIdx := make([]int32, 0, len(window)+len(ids))
+		for i := range window {
+			wantIdx = append(wantIdx, int32(i))
+		}
+		for _, id := range ids {
+			if id < 0 || int(id) >= (position+1)/ratio {
+				wantIdx = append(wantIdx, -1)
+				continue
+			}
+			wantIdx = append(wantIdx, id+int32(len(window)))
+		}
 		calls := 0
 		selected := func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
 			calls++
 			if layer != 3 || r.plain.N != 5 || r.plain.TopK != 7 || r.plain.Inverse != nil ||
-				!reflect.DeepEqual(r.idx, []int32{0, 1, 2, 2, 3, -1, -1}) {
+				!reflect.DeepEqual(r.idx, wantIdx) {
 				t.Fatalf("wrong combined request: layer=%d options=%+v indices=%v", layer, r.plain, r.idx)
 			}
 			return V41SparseAttentionSink(r.q, r.kv, r.sink, r.idx, r.plain)

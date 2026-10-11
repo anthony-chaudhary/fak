@@ -3,6 +3,7 @@
 package model
 
 import (
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -43,7 +44,7 @@ type v41AttentionBF16PhysicalRecord struct {
 func v41AttentionBF16PhysicalProvenance(t *testing.T) {
 	t.Helper()
 	expected, revision := os.Getenv("FAK_V41_ATTENTION_BF16_RECORD_SHA256"), os.Getenv("FAK_V41_ATTENTION_BF16_REVISION")
-	if len(expected) != 64 || len(revision) != 40 {
+	if len(expected) != hex.EncodedLen(sha256.Size) || len(revision) != hex.EncodedLen(sha1.Size) {
 		t.Fatal("externally reviewed record digest and full revision required")
 	}
 	if _, e := hex.DecodeString(expected); e != nil {
@@ -97,7 +98,7 @@ func v41AttentionBF16PhysicalProvenance(t *testing.T) {
 	}
 	for _, kind := range required {
 		f, ok := record.Files[kind]
-		if !ok || !filepath.IsAbs(f.Path) || len(f.SHA256) != 64 {
+		if !ok || !filepath.IsAbs(f.Path) || len(f.SHA256) != hex.EncodedLen(sha256.Size) {
 			t.Fatalf("missing reviewed %s", kind)
 		}
 		switch kind {

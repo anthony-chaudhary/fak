@@ -74,8 +74,20 @@ func TestVulkanV41BF16Publish(t *testing.T) {
 			sites = append(sites, site)
 		}
 	}
-	if len(sites) != 25 {
-		t.Fatalf("ordinary site set has %d sites, want 25", len(sites))
+	policy := map[uint32]bool{
+		V41BF16PublishFinalNormInput: true, V41BF16PublishFinalNormOutput: true,
+		V41BF16PublishQueryNormInput: true, V41BF16PublishQueryNormOutput: true,
+	}
+	for site := range v41BF16PublishSiteNames {
+		policy[site] = true
+	}
+	if len(sites) != len(policy) {
+		t.Fatalf("ordinary site set has %d sites, want the %d named policy sites", len(sites), len(policy))
+	}
+	for _, site := range sites {
+		if !policy[site] {
+			t.Fatalf("site %d admitted outside the named policy", site)
+		}
 	}
 	dx := upload(values)
 	defer v.Free(dx)

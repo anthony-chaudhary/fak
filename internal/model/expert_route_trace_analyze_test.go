@@ -108,7 +108,7 @@ func TestExpertRouteTraceToStrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Schema != StrixMoECacheTraceSchema || st.Layers != 2 || st.Experts != 8 || st.TopK != 2 || len(st.Events) != 16 {
+	if st.Schema != StrixMoECacheTraceSchema || st.Layers != 2 || st.Experts != 8 || st.TopK != 2 || len(st.Events) != syntheticRouteAnalysis(t, ExpertRouteAnalyzeOptions{}).Picks {
 		t.Fatalf("strix trace = %s layers=%d experts=%d topk=%d events=%d", st.Schema, st.Layers, st.Experts, st.TopK, len(st.Events))
 	}
 	if st.Events[0] != (StrixMoECacheEvent{Layer: 0, Expert: 0, Bytes: 4096}) {

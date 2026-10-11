@@ -16,6 +16,7 @@ func TestExpertRouteExportNormalizesPickIdentity(t *testing.T) {
 {"layer":0,"token":1,"phase":"decode","experts":[1,1,9,5,9]}
 `)
 	const bytes = int64(4096)
+	input := append([]int(nil), trace.Events[0].Experts...)
 	report, exported := expertRouteIdentityAnalyzeExport(t, trace, ExpertRouteAnalyzeOptions{}, bytes)
 	want := []StrixMoECacheEvent{
 		{Layer: 0, Expert: 5, Bytes: bytes},
@@ -41,7 +42,7 @@ func TestExpertRouteExportNormalizesPickIdentity(t *testing.T) {
 		t.Fatalf("export schema/layers/experts/bytes = %s/%d/%d/%d, want %s/2/10/%d",
 			exported.Schema, exported.Layers, exported.Experts, exported.ExpertBytes, StrixMoECacheTraceSchema, bytes)
 	}
-	if !reflect.DeepEqual(trace.Events[0].Experts, []int{5, 2, 5, 1, 2}) {
+	if !reflect.DeepEqual(trace.Events[0].Experts, input) {
 		t.Fatalf("input experts changed = %v", trace.Events[0].Experts)
 	}
 }

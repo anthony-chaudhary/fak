@@ -14,7 +14,7 @@ import (
 // executable SPIR-V, source correspondence, or hardware qualification.
 func TestVulkanReceiptV10Current69Boundary(t *testing.T) {
 	want := append(CurrentVulkanShaderRegistryV9(), "v41_routed_swiglu")
-	if len(want) != 69 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV10(), want) || !reflect.DeepEqual(VulkanShaders[:69], want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest()[:69], want) {
+	if len(want) != 69 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV10(), want) || !reflect.DeepEqual(VulkanShaders[:69], want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest()[:69], want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
 		t.Fatal("V10 is not V9 plus the routed SwiGLU module as the current builder prefix")
 	}
 	registry, err := vulkanRegistryV10.identity()

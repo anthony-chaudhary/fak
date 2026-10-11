@@ -102,7 +102,7 @@ func TestCompressedTensorsLMHeadTensorQ8(t *testing.T) {
 			sg.Quant, sw.Quant = true, true
 			check := func(a, b []float32) {
 				t.Helper()
-				if len(a) != 32 || len(b) != 32 {
+				if len(a) != cfg.VocabSize || len(b) != cfg.VocabSize {
 					t.Fatal("missing vocabulary logits")
 				}
 				for i := range a {

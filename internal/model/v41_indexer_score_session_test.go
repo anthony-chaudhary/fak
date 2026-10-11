@@ -121,7 +121,7 @@ func TestV41IndexerScoreScaleUsesIndexGeometry(t *testing.T) {
 			calls := 0
 			score := func(layer int, q, keys, weights []float32, heads, dim, rows int) ([]float32, error) {
 				calls++
-				if layer != 0 || heads != 32 || dim != 128 || rows != 1 || len(weights) != 32 {
+				if layer != 0 || heads != 32 || dim != 128 || rows != 1 || len(weights) != heads {
 					t.Fatalf("unexpected score geometry: layer=%d heads=%d dim=%d rows=%d weights=%d", layer, heads, dim, rows, len(weights))
 				}
 				for h, value := range weights {

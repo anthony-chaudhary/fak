@@ -21,7 +21,8 @@ func TestV41RopePinnedLayerRegimes(t *testing.T) {
 	}
 	check := func(label string, gotCos, gotSin, wantCos, wantSin []float32) {
 		t.Helper()
-		if len(gotCos) != 32 || len(gotSin) != 32 || len(wantCos) != 32 || len(wantSin) != 32 {
+		half := cfg.QKRopeHeadDim / 2
+		if len(gotCos) != half || len(gotSin) != half || len(wantCos) != half || len(wantSin) != half {
 			t.Fatalf("%s: table width does not match rotary_dim/2", label)
 		}
 		for j := range gotCos {

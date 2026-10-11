@@ -37,7 +37,7 @@ func TestVulkanV41AttentionBF16ModuleABI(t *testing.T) {
 	}
 	module := os.Getenv("FAK_V41_ATTENTION_BF16_TEST_MODULE")
 	expected := os.Getenv("FAK_V41_ATTENTION_BF16_TEST_MODULE_SHA256")
-	if !filepath.IsAbs(module) || filepath.Base(module) != "v41_bf16_checked.spv" || len(expected) != 64 {
+	if !filepath.IsAbs(module) || filepath.Base(module) != "v41_bf16_checked.spv" || len(expected) != hex.EncodedLen(sha256.Size) {
 		t.Fatal("explicit compiled BF16 module path and reviewed SHA256 required")
 	}
 	code, err := os.ReadFile(module)
@@ -280,7 +280,7 @@ func TestVulkanV41AttentionBF16ModuleABI(t *testing.T) {
 			for i := 5; i < len(words); {
 				n := int(words[i] >> 16)
 				w := words[i : i+n]
-				if w[0]&0xffff == 72 && len(w) == 5 && w[1] == role.structure && w[2] == 0 && w[3] == 35 && w[4] == 0 {
+				if w[0]&0xffff == 72 && len(w) == 5 && w[1] == role.structure && w[2] == 0 && w[3] == 35 && w[4] == 0 { //boundarylint:ignore CHANGE_DETECTOR_TEST SPIR-V instruction word counts are fixed by the opcode encoding
 					if inserted {
 						t.Fatal("duplicate status member offset")
 					}
@@ -381,7 +381,7 @@ func TestVulkanV41AttentionBF16ModuleABI(t *testing.T) {
 	}
 	for name, edit := range map[string]func([]uint32) bool{
 		"local width": func(w []uint32) bool {
-			if w[0]&0xffff == 16 && len(w) == 6 && w[2] == 17 {
+			if w[0]&0xffff == 16 && len(w) == 6 && w[2] == 17 { //boundarylint:ignore CHANGE_DETECTOR_TEST SPIR-V instruction word counts are fixed by the opcode encoding
 				w[3] = 32
 				return true
 			}
@@ -402,7 +402,7 @@ func TestVulkanV41AttentionBF16ModuleABI(t *testing.T) {
 			return false
 		},
 		"push site offset": func(w []uint32) bool {
-			if w[0]&0xffff == 72 && len(w) == 5 && w[1] == pushStruct && w[2] == 1 && w[3] == 35 && w[4] == 4 {
+			if w[0]&0xffff == 72 && len(w) == 5 && w[1] == pushStruct && w[2] == 1 && w[3] == 35 && w[4] == 4 { //boundarylint:ignore CHANGE_DETECTOR_TEST SPIR-V instruction word counts are fixed by the opcode encoding
 				w[4] = 8
 				return true
 			}
@@ -467,7 +467,7 @@ func TestVulkanV41AttentionBF16Orchestration(t *testing.T) {
 			t.Fatal(err)
 		}
 		digest := sha256.Sum256(raw)
-		if len(os.Getenv(file.env)) != 64 || hex.EncodeToString(digest[:]) != os.Getenv(file.env) {
+		if len(os.Getenv(file.env)) != hex.EncodedLen(sha256.Size) || hex.EncodeToString(digest[:]) != os.Getenv(file.env) {
 			t.Fatalf("%s differs from the reviewed native source receipt", file.name)
 		}
 		// An exact byte snapshot makes a concurrent checkout edit irrelevant to
