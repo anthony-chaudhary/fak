@@ -15,13 +15,23 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
+// matmuls counts only MatMuls issued inside the session's routed-expert
+// callbacks. Since 5ca8cf34e5 the dense, router, shared-expert and head
+// projections also dispatch device MatMuls through v41ProjectionRows; those
+// are counted apart so the 3-per-routed-row expert contract stays exact.
 type v41IncrementalHaloBackend struct {
 	compute.Backend
-	matmuls int
+	inExpert     bool
+	matmuls      int
+	otherMatmuls int
 }
 
 func (b *v41IncrementalHaloBackend) MatMul(w, x compute.Tensor) compute.Tensor {
-	b.matmuls++
+	if b.inExpert {
+		b.matmuls++
+	} else {
+		b.otherMatmuls++
+	}
 	return b.Backend.MatMul(w, x)
 }
 func (b *v41IncrementalHaloBackend) SupportsDeviceWeightDtype(dt compute.Dtype) bool {
@@ -67,12 +77,26 @@ func TestV41IncrementalDeviceExpertHalo(t *testing.T) {
 	if len(s.Prefill([]int{1, 2, 3})) == 0 || !s.v41IncrementalEligible() {
 		t.Fatal("actual device session did not seed incremental state")
 	}
+	gateUp, down := s.v41Forward.expertGateUp, s.v41Forward.expertDown
+	if gateUp == nil || down == nil {
+		t.Fatal("actual device session bound no routed-expert callbacks")
+	}
+	s.v41Forward.expertGateUp = func(l int, stem string, x []float32) ([]float32, v41ExpertGateUpOutcome, error) {
+		b.inExpert = true
+		defer func() { b.inExpert = false }()
+		return gateUp(l, stem, x)
+	}
+	s.v41Forward.expertDown = func(l int, stem string, x []float32) ([]float32, v41ExpertDownOutcome, error) {
+		b.inExpert = true
+		defer func() { b.inExpert = false }()
+		return down(l, stem, x)
+	}
 	for _, suffix := range []bool{false, true} {
 		opening, available, err := compute.CaptureBackendExecutionSnapshot(be)
 		if err != nil || !available || opening.Identity != identity.Identity {
 			t.Fatalf("physical execution opening identity invalid: available=%t err=%v", available, err)
 		}
-		before, n := profile.VulkanDebugDispatchProfileSnapshot(), b.matmuls
+		before, n, other := profile.VulkanDebugDispatchProfileSnapshot(), b.matmuls, b.otherMatmuls
 		phase, ids := "decode", []int{4}
 		var got []float32
 		if suffix {
@@ -92,6 +116,9 @@ func TestV41IncrementalDeviceExpertHalo(t *testing.T) {
 		rows := len(ids) * m.Cfg.NumExpertsPerTok * m.Cfg.NumLayers
 		if b.matmuls-n != 3*rows {
 			t.Errorf("actual Vulkan expert MatMuls=%d, want %d", b.matmuls-n, 3*rows)
+		}
+		if b.otherMatmuls-other <= 0 {
+			t.Error("dense projections issued no device MatMuls outside the expert callbacks")
 		}
 		after := profile.VulkanDebugDispatchProfileSnapshot()
 		if after.Q2KMatmulDispatches <= before.Q2KMatmulDispatches {
@@ -122,6 +149,6 @@ func TestV41IncrementalDeviceExpertHalo(t *testing.T) {
 		if a2 == 0 || b2 == 0 || dot/math.Sqrt(a2*b2) < 0.999 {
 			t.Error("physical incremental logits lost host oracle cosine >=0.999")
 		}
-		t.Logf("backend=%s device=%q driver=%q runtime=%q phase=%s routed_rows=%d physical_q2_dispatches=%d compute_dispatches=%d dispatch_submits=%d h2d_bytes=%d d2h_bytes=%d", observation.Identity.Backend, observation.Identity.Device, observation.Identity.Driver, observation.Identity.Runtime, phase, rows, after.Q2KMatmulDispatches-before.Q2KMatmulDispatches, observation.Counters.ComputeDispatches, observation.Counters.DispatchSubmits, observation.Counters.H2DBytes, observation.Counters.D2HBytes)
+		t.Logf("backend=%s device=%q driver=%q runtime=%q phase=%s routed_rows=%d expert_matmuls=%d dense_matmuls=%d physical_q2_dispatches=%d compute_dispatches=%d dispatch_submits=%d h2d_bytes=%d d2h_bytes=%d", observation.Identity.Backend, observation.Identity.Device, observation.Identity.Driver, observation.Identity.Runtime, phase, rows, b.matmuls-n, b.otherMatmuls-other, after.Q2KMatmulDispatches-before.Q2KMatmulDispatches, observation.Counters.ComputeDispatches, observation.Counters.DispatchSubmits, observation.Counters.H2DBytes, observation.Counters.D2HBytes)
 	}
 }
