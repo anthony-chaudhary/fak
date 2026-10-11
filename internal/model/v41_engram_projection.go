@@ -83,6 +83,14 @@ func (m *Model) v41EngramProjector(l, out, in int, project v41EngramProjectionFu
 				if err != nil || len(y) != out {
 					return nil, v41EngramProjectionErr(l, err)
 				}
+				// Keys and values are consumed as BF16. Reject both non-finite
+				// results and finite F32 values that overflow at that boundary,
+				// before this position can publish any persistent stream.
+				for _, v := range y {
+					if !finite32(v41BF16(v)) {
+						return nil, v41EngramProjectionErr(l, errV41ProjectionResult)
+					}
+				}
 				return y, nil
 			case v41ProjectionError:
 				return nil, v41EngramProjectionErr(l, err)
@@ -115,6 +123,11 @@ func (m *Model) v41EngramProjector(l, out, in int, project v41EngramProjectionFu
 			loaded = true
 		}
 		y := matRows(weight, row, out, in)
+		for _, v := range y {
+			if !finite32(v41BF16(v)) {
+				return nil, v41StageErr(v41StageEngram, l, errV41ProjectionResult)
+			}
+		}
 		completed = 1
 		return y, nil
 	}
@@ -207,7 +220,7 @@ func (s *Session) v41EngramProjectionFunc() v41EngramProjectionFunc {
 				return nil, errV41ProjectionResult
 			}
 			for _, v := range values {
-				if !finite32(v) {
+				if !finite32(v41BF16(v)) {
 					return nil, errV41ProjectionResult
 				}
 			}
