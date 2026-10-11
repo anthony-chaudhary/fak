@@ -367,6 +367,12 @@ type Session struct {
 	// explicit selector once per session and zeroed by Close; no mutable package-global owner exists.
 	mixedQKV mixedQKVSession
 
+	// qwen35WantLogits asks the Qwen3.5 whole-token decode graph to encode the LM head
+	// too; qwen35Logits carries that token's logits back to token(), which then skips
+	// the separate head command buffer. Both are transient per decode step.
+	qwen35WantLogits bool
+	qwen35Logits     []float32
+
 	// targetHidden keeps the exact residual stream immediately before final_norm for
 	// positions evaluated by the native f32 token path. It is deliberately session-owned:
 	// MTP consumers must never reconstruct this state from logits or embeddings.
@@ -551,8 +557,14 @@ func (s *Session) token(id, pos int) []float32 {
 		}
 		// Resident Q4_K decode: block matmuls dispatch per name (raw q4_k majority + Q8
 		// minority); the LM head is whichever resident format it loaded as, so headResident
-		// picks q4k/q8/f32 rather than assuming Q8.
-		return s.tappedLogitsAt(pos, s.headResident(s.tokenHiddenQ(id, pos)))
+		// picks q4k/q8/f32 rather than assuming Q8. The Qwen3.5 whole-token graph encodes
+		// that same head itself when it can and hands the logits back.
+		hidden := s.tokenHiddenQWantLogits(id, pos)
+		if logits := s.qwen35Logits; logits != nil {
+			s.qwen35Logits = nil
+			return s.tappedLogitsAt(pos, logits)
+		}
+		return s.tappedLogitsAt(pos, s.headResident(hidden))
 	}
 	if s.GPTQ {
 		return s.tappedLogitsAt(pos, s.headResident(s.tokenHiddenGPTQ(id, pos)))
@@ -567,6 +579,12 @@ func (s *Session) token(id, pos int) []float32 {
 		return s.tappedLogitsAt(pos, s.headQ(s.tokenHiddenQ(id, pos)))
 	}
 	return s.tappedLogitsAt(pos, s.head(s.tokenHidden(id, pos)))
+}
+
+func (s *Session) tokenHiddenQWantLogits(id, pos int) []float32 {
+	s.qwen35WantLogits = true
+	defer func() { s.qwen35WantLogits = false }()
+	return s.tokenHiddenQ(id, pos)
 }
 
 func (s *Session) requireGLMDsaSession() {

@@ -6,6 +6,7 @@
 #include <string.h>
 
 extern id<MTLDevice> gDev;
+extern id<MTLBuffer> mg_const_buffer(const float *p, int n);
 extern id<MTLCommandQueue> gQueue;
 int mg_init(void);
 
@@ -601,7 +602,7 @@ void *mg_gdn_graph_encode(void *graph, int owner,
     if(slot.conv==NULL||slot.recurrent==NULL||slot.nK!=nK||slot.nV!=nV||slot.kHd!=kHd||slot.vHd!=vHd||slot.convKernel!=convKernel)return NULL;
     int keyDim=nK*kHd,valueDim=nV*vHd,convDim=2*keyDim+valueDim;
     id<MTLBuffer>mixed=(__bridge id<MTLBuffer>)mixedPtr,z=(__bridge id<MTLBuffer>)zPtr,b=(__bridge id<MTLBuffer>)bPtr,a=(__bridge id<MTLBuffer>)aPtr;
-    id<MTLBuffer>convWB=mg_gdn_shared(convW,(size_t)convDim*convKernel),aLogB=mg_gdn_shared(aLog,nV),dtBiasB=mg_gdn_shared(dtBias,nV),normB=mg_gdn_shared(norm,vHd);
+    id<MTLBuffer>convWB=mg_const_buffer(convW,convDim*convKernel),aLogB=mg_const_buffer(aLog,nV),dtBiasB=mg_const_buffer(dtBias,nV),normB=mg_const_buffer(norm,vHd);
     id<MTLBuffer>convOut=[gDev newBufferWithLength:(size_t)tokens*convDim*sizeof(float) options:MTLResourceStorageModePrivate];
     id<MTLBuffer>qNorm=[gDev newBufferWithLength:(size_t)tokens*nK*kHd*sizeof(float) options:MTLResourceStorageModePrivate];
     id<MTLBuffer>kNorm=[gDev newBufferWithLength:(size_t)tokens*nK*kHd*sizeof(float) options:MTLResourceStorageModePrivate];

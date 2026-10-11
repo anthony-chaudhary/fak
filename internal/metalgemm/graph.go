@@ -30,6 +30,8 @@ void *mg_graph_quantize_q8(void *graph, void *input, int elems, void **scales);
 void *mg_graph_encode_q8_from(void *graph, int wid, void *q, void *d, int elems);
 int mg_graph_finish(void *graph, mg_graph_receipt *receipt, int inject_post_submit_failure);
 int mg_graph_await_terminal(void *graph);
+int mg_graph_flush(void *graph);
+int mg_graph_segments(void *graph);
 int mg_graph_read(void *graph, void *result, float *dst, int n);
 int mg_graph_read_pack(void *graph, void **results, const int *sizes, int count, float *dst, int total);
 void mg_graph_free(void *graph);
@@ -125,8 +127,11 @@ type GraphReceipt struct {
 	Committed, CompletedWait, TimingAvailable bool
 	Encoders, IntermediateWaits               int
 	IntermediateReadbacks, HostReadbacks      int
-	HostUploadBytes, HostReadbackBytes        uint64
-	GPUMilliseconds, WaitMilliseconds         float64
+	// CommandBuffers is the number of command buffers the graph committed: 1 plus
+	// one per Flush. Only the last is waited on.
+	CommandBuffers                     int
+	HostUploadBytes, HostReadbackBytes uint64
+	GPUMilliseconds, WaitMilliseconds  float64
 	// AllocatedBuffers and RetainedBufferBytes count distinct graph-tracked
 	// Metal buffers, including input, intermediate and terminal results. All
 	// remain retained until Free, so the bytes are their peak for this graph.
@@ -192,6 +197,7 @@ type ProjectionGraph struct {
 	gdnCheckpoints          []*GDNGraphCheckpoint
 	testTerminalGate        unsafe.Pointer
 	quarantineDone          chan struct{}
+	flushed                 bool
 }
 
 // InjectPostSubmitFailureForTest makes Finish return an accepted failure after
@@ -1107,8 +1113,9 @@ func (g *ProjectionGraph) Finish() (GraphReceipt, error) {
 	}
 	q4kKernels := GEMVKernelSet(C.mg_graph_gemv_executed(g.ptr, 0))
 	q6kKernels := GEMVKernelSet(C.mg_graph_gemv_executed(g.ptr, 1))
+	segments := int(C.mg_graph_segments(g.ptr))
 	ok := C.mg_graph_finish(g.ptr, &r, inject) != 0
-	receipt := GraphReceipt{Committed: r.committed != 0, CompletedWait: r.completed_wait != 0, TimingAvailable: r.timing_available != 0, Encoders: int(r.encoders), HostReadbacks: int(r.host_readbacks), HostUploadBytes: g.hostUploadBytes, AllocatedBuffers: int(r.allocated_buffers), RetainedBufferBytes: uint64(r.retained_buffer_bytes), GPUMilliseconds: float64(r.gpu_milliseconds), WaitMilliseconds: float64(r.wait_milliseconds), Q4KGEMVKernels: q4kKernels, Q6KGEMVKernels: q6kKernels}
+	receipt := GraphReceipt{CommandBuffers: segments, Committed: r.committed != 0, CompletedWait: r.completed_wait != 0, TimingAvailable: r.timing_available != 0, Encoders: int(r.encoders), HostReadbacks: int(r.host_readbacks), HostUploadBytes: g.hostUploadBytes, AllocatedBuffers: int(r.allocated_buffers), RetainedBufferBytes: uint64(r.retained_buffer_bytes), GPUMilliseconds: float64(r.gpu_milliseconds), WaitMilliseconds: float64(r.wait_milliseconds), Q4KGEMVKernels: q4kKernels, Q6KGEMVKernels: q6kKernels}
 	if !ok && receipt.Committed && !receipt.CompletedWait {
 		g.quarantineCommittedGraph()
 		return receipt, commandBufferStallError(receipt.WaitMilliseconds, int(r.status_code), int(r.error_code), cString(&r.error_text[0]), "graph finish")
@@ -1130,6 +1137,26 @@ func (g *ProjectionGraph) Finish() (GraphReceipt, error) {
 	return receipt, nil
 }
 
+// Flush commits everything encoded so far as its own command buffer and continues
+// the graph on a fresh one from the same serial queue, so the GPU runs the early
+// segment while the host is still encoding the rest. It does not wait. A flushed
+// graph is past its replay point: its early segments run even if a later encode
+// fails, so callers flush only where a post-submit failure is already terminal.
+// Free waits for flushed segments before releasing native owners.
+func (g *ProjectionGraph) Flush() error {
+	if err := g.open(); err != nil {
+		return err
+	}
+	if g.encoders == 0 {
+		return errGraphEmpty
+	}
+	if C.mg_graph_flush(g.ptr) == 0 {
+		return errors.New("metalgemm: graph flush failed")
+	}
+	g.flushed = true
+	return nil
+}
+
 // quarantineCommittedGraph transfers the sole native owner to a background
 // terminal waiter. Metal may still reference every graph result and GDN owner,
 // so caller Free becomes a no-op until the real command buffer is terminal.
@@ -1147,6 +1174,25 @@ func (g *ProjectionGraph) quarantineCommittedGraph() {
 		g.finishGDNCheckpoints(GraphReceipt{Committed: true, CompletedWait: false})
 		g.releaseGDNLeases(false)
 		C.mg_graph_free(ptr)
+	}()
+}
+
+// quarantineFlushedGraph frees a graph abandoned after Flush committed some of
+// it. Those segments may still be running (or stalled) on the device, so the
+// native free, which waits for them, runs on a background waiter exactly like a
+// timed-out Finish, and new graph admissions are refused until it is terminal.
+func (g *ProjectionGraph) quarantineFlushedGraph() {
+	ptr := g.ptr
+	g.ptr = nil
+	g.freed = true
+	g.quarantineDone = make(chan struct{})
+	projectionGraphQuarantines.Add(1)
+	go func() {
+		defer close(g.quarantineDone)
+		defer projectionGraphQuarantines.Add(-1)
+		C.mg_graph_free(ptr)
+		g.abandonGDNCheckpoints()
+		g.releaseGDNLeases(false)
 	}()
 }
 
@@ -1258,6 +1304,10 @@ func (g *ProjectionGraph) FinishRead(results ...*GraphResult) ([][]float32, Grap
 	return out, receipt, nil
 }
 func (g *ProjectionGraph) Free() {
+	if g != nil && g.ptr != nil && !g.freed && !g.finished && g.flushed {
+		g.quarantineFlushedGraph()
+		return
+	}
 	if g != nil && g.ptr != nil && !g.freed {
 		finished := g.finished
 		C.mg_graph_free(g.ptr)

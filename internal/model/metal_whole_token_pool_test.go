@@ -74,7 +74,7 @@ func TestQwen35MetalWholeTokenPoolDefault(t *testing.T) {
 			r := s.Qwen35MetalForwardSequenceReceipt()
 			if !r.Available || !r.Committed || !r.CompletedWait || r.Tokens != 1 ||
 				r.SelectorState != Qwen35MetalSequenceSelectorOn || r.EvidenceState != Qwen35MetalSequenceEvidenceExecuted ||
-				r.Path != Qwen35MetalGDNSequenceForwardPath || r.CommandBuffers != 1 || r.TerminalWaits != 1 ||
+				r.Path != Qwen35MetalGDNSequenceForwardPath || r.CommandBuffers < 1 || r.TerminalWaits != 1 ||
 				r.IntermediateWaits != 0 || r.IntermediateReadbacks != 0 || r.FallbackCount != 0 ||
 				r.AllocatedBuffers <= 0 || r.RetainedBufferBytes == 0 {
 				t.Fatalf("pool=%q token=%d lacks executed whole-token allocation witness: %+v", pool, id, r)
