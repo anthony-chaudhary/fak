@@ -190,24 +190,39 @@ func (s *V41EngramHashState) Hash(tokens []int, mask []bool) ([]uint32, error) {
 // GatherV41EngramRows resolves flattened hash output through one bounded cache
 // per Engram layer, preserving token/layer/column order.
 func GatherV41EngramRows(caches []*V41EngramRowCache, rows []uint32, columnsPerLayer int) ([][]byte, error) {
-	if len(caches) == 0 || columnsPerLayer <= 0 || len(rows)%(len(caches)*columnsPerLayer) != 0 {
+	if len(caches) == 0 || columnsPerLayer <= 0 || columnsPerLayer > math.MaxInt/len(caches) {
 		return nil, fmt.Errorf("model: invalid V4.1 Engram row gather geometry")
 	}
-	out := make([][]byte, len(rows))
 	stride := len(caches) * columnsPerLayer
-	for token := 0; token < len(rows)/stride; token++ {
-		for layer, cache := range caches {
-			if cache == nil {
-				return nil, fmt.Errorf("model: nil V4.1 Engram row cache at layer %d", layer)
-			}
-			for col := 0; col < columnsPerLayer; col++ {
-				i := token*stride + layer*columnsPerLayer + col
-				row, err := cache.Row(int(rows[i]))
-				if err != nil {
-					return nil, fmt.Errorf("model: gather V4.1 Engram layer %d row %d: %w", layer, rows[i], err)
-				}
-				out[i] = row
-			}
+	if len(rows)%stride != 0 {
+		return nil, fmt.Errorf("model: invalid V4.1 Engram row gather geometry")
+	}
+	for layer, cache := range caches {
+		if err := cache.validateGatherGeometry(); err != nil {
+			return nil, fmt.Errorf("model: gather V4.1 Engram layer %d: %w", layer, err)
+		}
+	}
+	for i, row := range rows {
+		layer := i % stride / columnsPerLayer
+		if uint64(row) >= uint64(caches[layer].opts.TableRows) {
+			return nil, &V41EngramStreamError{Kind: V41EngramStreamOutOfBounds, Row: int(row),
+				Err: fmt.Errorf("gather layer %d row outside [0,%d)", layer, caches[layer].opts.TableRows)}
+		}
+	}
+	out := make([][]byte, len(rows))
+	for layer, cache := range caches {
+		layerRows := make([]uint32, 0, len(rows)/len(caches))
+		for token := 0; token < len(rows)/stride; token++ {
+			lo := token*stride + layer*columnsPerLayer
+			layerRows = append(layerRows, rows[lo:lo+columnsPerLayer]...)
+		}
+		gathered, err := cache.gatherKnownRows(layerRows)
+		if err != nil {
+			return nil, fmt.Errorf("model: gather V4.1 Engram layer %d: %w", layer, err)
+		}
+		for token := 0; token < len(rows)/stride; token++ {
+			lo := token*stride + layer*columnsPerLayer
+			copy(out[lo:lo+columnsPerLayer], gathered[token*columnsPerLayer:(token+1)*columnsPerLayer])
 		}
 	}
 	return out, nil

@@ -433,6 +433,8 @@ func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]floa
 		for c := 0; c < cols; c++ {
 			values, err := decodeV41EngramRow(gathered[t*cols+c], dim, stage.rowBytes)
 			if err != nil {
+				// A successful source read can poison other cached rows in this layer.
+				stage.caches[cacheIdx].invalidateRows()
 				return gatheredRows, v41StageErr(v41StageEngram, l, err)
 			}
 			copy(rowVec[c*dim:], values)
@@ -576,13 +578,8 @@ func (m *Model) WarmV41EngramPrefix(tokens []int, mask []bool) (V41EngramWarmDel
 			fmt.Errorf("%w: hashed row geometry is not a whole number of tokens", ErrV41NativeUnsupported))
 	}
 
-	// Take the before-snapshot, then establish residency for each requested
-	// address in that layer's own cache. V41EngramRowCache.Row only prefetches
-	// forward from idx+1 and never retains idx itself (see v41_cache.go:223-249),
-	// so warming must read the row AND store it: a following forward's
-	// GatherV41EngramRows -> Row(rowID) then hits exactly these entries. A
-	// repeated address within one layer is read once; the store makes the second
-	// lookup a hit.
+	// Demand reads retain rows in the layer's bounded cache. Deduplicate
+	// prefix addresses so each row is warmed once.
 	before := make([]V41EngramRowStats, layers)
 	for i, cache := range stage.caches {
 		before[i] = cache.Stats()
@@ -596,12 +593,7 @@ func (m *Model) WarmV41EngramPrefix(tokens []int, mask []bool) (V41EngramWarmDel
 					continue
 				}
 				seen[row] = struct{}{}
-				payload, err := cache.Row(int(row))
-				if err != nil {
-					return zero, v41StageErr(v41StageEngram, stage.layerIDs[layer],
-						fmt.Errorf("%w: %v", ErrV41NativeUnsupported, err))
-				}
-				if err := cache.inner.Put(0, int(row), payload); err != nil {
+				if err := cache.warmRow(int(row)); err != nil {
 					return zero, v41StageErr(v41StageEngram, stage.layerIDs[layer],
 						fmt.Errorf("%w: %v", ErrV41NativeUnsupported, err))
 				}
@@ -609,8 +601,7 @@ func (m *Model) WarmV41EngramPrefix(tokens []int, mask []bool) (V41EngramWarmDel
 		}
 	}
 
-	// Project the delta from the counter snapshots. Every field is additive and
-	// monotone, so a concurrent caller can only shrink the delta, never inflate it.
+	// Snapshot differences include concurrent traffic through these shared caches.
 	var delta V41EngramWarmDelta
 	delta.Layers = layers
 	for i, cache := range stage.caches {

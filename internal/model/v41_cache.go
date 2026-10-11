@@ -9,7 +9,10 @@ package model
 // There is no distributed placement, no quantization change, and no performance claim here;
 // only the cache and its traffic counters.
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
 // V41ExpertCacheOptions configures a bounded, in-memory expert block cache.
 type V41ExpertCacheOptions struct {
@@ -178,6 +181,7 @@ type V41EngramRowCacheOptions struct {
 // V41EngramRowCache is a bounded row cache over a V41EngramRowSource with eager,
 // bounded prefetch and page-amplification telemetry.
 type V41EngramRowCache struct {
+	mu    sync.Mutex
 	src   V41EngramRowSource
 	opts  V41EngramRowCacheOptions
 	inner *V41ExpertCache
@@ -228,6 +232,12 @@ func NewV41EngramRowCache(src V41EngramRowSource, opts V41EngramRowCacheOptions)
 // Row returns row `idx`, serving from cache on hit and reading via the source on miss,
 // additionally issuing a best-effort eager prefetch of the next <=PrefetchRows rows.
 func (c *V41EngramRowCache) Row(idx int) ([]byte, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.rowLocked(idx)
+}
+
+func (c *V41EngramRowCache) rowLocked(idx int) ([]byte, error) {
 	if idx < 0 || idx >= c.opts.TableRows {
 		return nil, fmt.Errorf("model: V41 Engram row %d out of range [0,%d)", idx, c.opts.TableRows)
 	}
@@ -262,9 +272,30 @@ func (c *V41EngramRowCache) Row(idx int) ([]byte, error) {
 	return row, nil
 }
 
+func (c *V41EngramRowCache) warmRow(idx int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	payload, err := c.rowLocked(idx)
+	if err != nil {
+		return err
+	}
+	return c.inner.Put(0, idx, payload)
+}
+
+func (c *V41EngramRowCache) invalidateRows() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	clear(c.inner.entries)
+	clear(c.inner.cached)
+	c.inner.order = nil
+	c.inner.resident = 0
+}
+
 // Stats returns hit/miss, bytes read from source, bytes served, useful bytes, and the
 // page-amplification ratio (bytes read / useful bytes), 0 when no useful bytes.
 func (c *V41EngramRowCache) Stats() V41EngramRowStats {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	out := c.stats
 	if out.UsefulBytes > 0 {
 		out.PageAmplification = float64(out.BytesRead) / float64(out.UsefulBytes)
