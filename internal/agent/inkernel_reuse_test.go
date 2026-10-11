@@ -477,9 +477,11 @@ func TestInKernelBackendRestoresDemotedPrefixFromHostDRAML2(t *testing.T) {
 	if matched != len(ids) || !eqInts(second, first) {
 		t.Fatalf("host-L2 replay matched=%d/%d tokens=%v want=%v", matched, len(ids), second, first)
 	}
+	// The replay re-admits the restored prefix as the hot owner, and admission
+	// retires the prior admission's staged tiers (radixkv InsertSnapshot).
 	stats := p.KVMemoryStats()
 	if stats.L2Hits != 1 || stats.L1Misses != 2 || stats.L2StageBytes != staged.BytesMoved ||
-		stats.L2RestoreBytes != staged.BytesMoved || stats.L2HostResidentBytes <= 0 {
+		stats.L2RestoreBytes != staged.BytesMoved || stats.L2HostResidentBytes != 0 {
 		t.Fatalf("host-L2 counters=%+v", stats)
 	}
 	if stats.L2HostCapacityBytes != 1<<30 {
@@ -552,10 +554,11 @@ func TestInKernelBackendWritesThroughAndRestoresQwenPrefixFromRemoteL3(t *testin
 	if matched != len(ids) || !eqInts(second, first) {
 		t.Fatalf("remote-L3 replay matched=%d/%d tokens=%v want=%v", matched, len(ids), second, first)
 	}
+	// Re-admission after the remote page-in retires the prior remote reference.
 	stats := p.KVMemoryStats()
 	if !stats.L3Enabled || stats.L3Hits != 1 || stats.L3HitTokens != len(ids) ||
 		stats.L3StageBytes != staged.BytesMoved || stats.L3RestoreBytes != staged.BytesMoved ||
-		stats.L3Faults != 0 || stats.L3ReferencedBytes <= 0 || stats.L2HostResidentBytes != 0 {
+		stats.L3Faults != 0 || stats.L3ReferencedBytes != 0 || stats.L2HostResidentBytes != 0 {
 		t.Fatalf("remote-L3 counters=%+v", stats)
 	}
 }

@@ -37,6 +37,24 @@ func (s *streamProjectionSink) completeFinalize(comp *Completion) {
 	}
 }
 
+// visibleProseBias suppresses whitespace tokens. The synthetic fixture otherwise
+// decodes only "\n", and deferTools holds a whitespace-led turn to the final
+// tool verdict, so the per-token seam would be unobservable.
+func visibleProseBias(t *testing.T, tok *tokenizer.Tokenizer) SampleOpt {
+	t.Helper()
+	bias := map[int]float64{}
+	for _, ws := range []string{"\n", " ", "\t", "\r"} {
+		ids, err := tok.Encode(ws)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range ids {
+			bias[id] = -100
+		}
+	}
+	return WithLogitBias(bias)
+}
+
 // TestInKernelPlannerStreamsPerTokenFragments is the fragment-count witness: a decoded
 // N-token turn must reach the sink as N>=2 fragments, not one post-hoc blob. Fail if a
 // regression collapses the per-token emit seam back into the single-blob projection.
@@ -44,13 +62,14 @@ func TestInKernelPlannerStreamsPerTokenFragments(t *testing.T) {
 	t.Setenv("FAK_STREAM_INKERNEL_PER_TOKEN", "1")
 	m := model.NewSynthetic(tinyConcurrencyConfig())
 	m.Quantize()
-	p := NewInKernelPlanner(m, loadProbeTok(t), "tiny-stream-fragments", false, nil, false)
+	tok := loadProbeTok(t)
+	p := NewInKernelPlanner(m, tok, "tiny-stream-fragments", false, nil, false)
 
 	var fragments []string
 	comp, err := p.CompleteStream(context.Background(), func(delta string) error {
 		fragments = append(fragments, delta)
 		return nil
-	}, []Message{{Role: RoleUser, Content: "a b c d e"}}, nil, WithMaxTokens(6))
+	}, []Message{{Role: RoleUser, Content: "a b c d e"}}, nil, WithMaxTokens(6), visibleProseBias(t, tok))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +93,7 @@ func TestInKernelPlannerStreamParityConcatenatedDeltasEqualsBufferedText(t *test
 	messages := []Message{{Role: RoleUser, Content: "alpha beta gamma"}}
 
 	buffered, err := NewInKernelPlanner(m, tok, "tiny-stream-parity-buffered", false, nil, false).Complete(
-		context.Background(), messages, nil, WithMaxTokens(8))
+		context.Background(), messages, nil, WithMaxTokens(8), visibleProseBias(t, tok))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +105,7 @@ func TestInKernelPlannerStreamParityConcatenatedDeltasEqualsBufferedText(t *test
 			raw.WriteString(delta)
 			fragmentCount++
 			return nil
-		}, messages, nil, WithMaxTokens(8))
+		}, messages, nil, WithMaxTokens(8), visibleProseBias(t, tok))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,13 +152,14 @@ func TestInKernelTokenStreamFlagGatesPerToken(t *testing.T) {
 		t.Setenv("FAK_STREAM_INKERNEL_PER_TOKEN", "1")
 		m := model.NewSynthetic(tinyConcurrencyConfig())
 		m.Quantize()
-		p := NewInKernelPlanner(m, loadProbeTok(t), "tiny-token-stream-on", false, nil, false)
+		tok := loadProbeTok(t)
+		p := NewInKernelPlanner(m, tok, "tiny-token-stream-on", false, nil, false)
 
 		var fragments []string
 		comp, err := p.CompleteStream(context.Background(), func(delta string) error {
 			fragments = append(fragments, delta)
 			return nil
-		}, []Message{{Role: RoleUser, Content: prompt}}, nil, WithMaxTokens(6))
+		}, []Message{{Role: RoleUser, Content: prompt}}, nil, WithMaxTokens(6), visibleProseBias(t, tok))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -205,13 +225,14 @@ func TestInKernelPerTokenStreamOptInDefaultsOn(t *testing.T) {
 	t.Setenv("FAK_STREAM_INKERNEL_PER_TOKEN", "")
 	m := model.NewSynthetic(tinyConcurrencyConfig())
 	m.Quantize()
-	p := NewInKernelPlanner(m, loadProbeTok(t), "tiny-per-token-optin", false, nil, false)
+	tok := loadProbeTok(t)
+	p := NewInKernelPlanner(m, tok, "tiny-per-token-optin", false, nil, false)
 
 	var fragments []string
 	comp, err := p.CompleteStream(context.Background(), func(delta string) error {
 		fragments = append(fragments, delta)
 		return nil
-	}, []Message{{Role: RoleUser, Content: "a b c d e"}}, nil, WithMaxTokens(6), WithPerTokenStream(true))
+	}, []Message{{Role: RoleUser, Content: "a b c d e"}}, nil, WithMaxTokens(6), WithPerTokenStream(true), visibleProseBias(t, tok))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -739,8 +760,8 @@ func TestInKernelDeferredVerdictWhitespaceBoundaries(t *testing.T) {
 			var out strings.Builder
 			p := newInKernelStreamProjector(func(piece string) error { out.WriteString(piece); return nil }, nil)
 			p.spans.deferTools = true
-			for _, b := range []byte(raw) {
-				if err := p.feed(string(b)); err != nil {
+			for i := range len(raw) {
+				if err := p.feed(raw[i : i+1]); err != nil {
 					t.Fatal(err)
 				}
 			}
