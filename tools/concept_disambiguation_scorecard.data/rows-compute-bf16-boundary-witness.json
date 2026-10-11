@@ -1,0 +1,61 @@
+{
+  "rows": [
+    {
+      "id": "bf16-boundary-witness-go-tag",
+      "canonical": "v41_bf16_boundary_witness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The explicit Go build tag selecting the experimental V4.1 BF16 boundary adapter and its software ABI and deferred physical tests. With the Vulkan tag it selects a separate native archive; combining it with the indexer witness tag is a compile-time error.",
+      "distinction": "This controls Go source and archive selection, whereas FAK_V41_BF16_BOUNDARY_WITNESS controls native symbol compilation and lfakvulkan_v41_bf16_boundary_witness names the linker input. The tag does not qualify hardware, enable ordinary production capability or remove host-boundary blockers.",
+      "distinct_from": [
+        "bf16-boundary-witness-native-define",
+        "bf16-boundary-witness-archive-link"
+      ],
+      "aliases": [],
+      "grounding": "v41_bf16_boundary_witness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "bf16-boundary-witness-native-define",
+      "canonical": "FAK_V41_BF16_BOUNDARY_WITNESS",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The native compile-time define that exposes the experimental BF16 boundary C declarations and builds its checked dispatch, optional module admission and parser-test entry points into the dedicated witness archive. The Go adapter defines it for its C header declarations.",
+      "distinction": "This selects native declarations and implementation; the v41_bf16_boundary_witness Go tag selects the corresponding Go adapter. Its presence is an experimental build identity rather than physical qualification or a trusted production shader-registry promotion.",
+      "distinct_from": [
+        "bf16-boundary-witness-go-tag",
+        "bf16-boundary-witness-archive-link"
+      ],
+      "aliases": [],
+      "grounding": "FAK_V41_BF16_BOUNDARY_WITNESS",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "bf16-boundary-witness-archive-link",
+      "canonical": "-lfakvulkan_v41_bf16_boundary_witness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The exact cgo linker-option token selecting libfakvulkan_v41_bf16_boundary_witness.a for the BF16 witness-tagged Go build. All five Vulkan archive selectors choose this input exclusively for that tag combination, and an ordinary archive lacks the witness-only symbols.",
+      "distinction": "This names the linker input; it is separate from the Go build tag and native compile-time define. The option alone does not prove which archive bytes were linked: independently reviewed build commands and artifact hashes provide that evidence under immutable-artifact execution.",
+      "distinct_from": [
+        "bf16-boundary-witness-go-tag",
+        "bf16-boundary-witness-native-define"
+      ],
+      "aliases": [],
+      "grounding": "lfakvulkan_v41_bf16_boundary_witness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

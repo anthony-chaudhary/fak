@@ -1,0 +1,18 @@
+#version 450
+layout(local_size_x = 64) in;
+
+// Raw uint storage is deliberate. A float load/conversion would permit device
+// NaN canonicalization or denormal flushing before the integer RNE boundary.
+// The model rejects nonfinite input before upload and rounded overflow after
+// readback. This leaf is the exact bit operation, including unsigned wrapping.
+layout(std430, binding = 0) readonly buffer Input { uint inputBits[]; };
+layout(std430, binding = 1) writeonly buffer Output { uint outputBits[]; };
+layout(push_constant) uniform Push { uint count; } pc;
+
+void main() {
+    uint stride = gl_NumWorkGroups.x * 64u;
+    for (uint i = gl_GlobalInvocationID.x; i < pc.count; i += stride) {
+        uint bits = inputBits[i];
+        outputBits[i] = (bits + 0x7fffu + ((bits >> 16u) & 1u)) & 0xffff0000u;
+    }
+}

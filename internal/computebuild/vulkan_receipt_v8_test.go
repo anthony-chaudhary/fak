@@ -69,6 +69,31 @@ func TestVulkanReceiptV8Current67Boundary(t *testing.T) {
 	if CompareReceiptProvenance(&asV7, &receipt) == nil || vulkanRegistryV7.validateSuccess(&asV7) == nil {
 		t.Fatal("V8 evidence accepted under the V7 schema")
 	}
+	for _, command := range []string{
+		"cxx|-DFAK_V41_BF16_BOUNDARY_WITNESS",
+		"go|build|-tags|vulkan,v41_bf16_boundary_witness",
+		"link|-lfakvulkan_v41_bf16_boundary_witness",
+	} {
+		t.Run("reject BF16 witness "+command, func(t *testing.T) {
+			candidate := receipt
+			provenance := *receipt.Vulkan
+			candidate.Vulkan = &provenance
+			provenance.NormalizedBuildCommand = append(append([]string(nil), receipt.Vulkan.NormalizedBuildCommand...), command)
+			var err error
+			provenance.BuildCommandSHA256, err = hashJSON(provenance.NormalizedBuildCommand)
+			if err != nil {
+				t.Fatal(err)
+			}
+			provenance.StableIdentitySHA256, err = vulkanRegistryV8.stableIdentitySHA(provenance.Source, provenance.SPIRVBundleSHA256, provenance.SPIRVModuleCount, provenance.ToolchainSHA256, provenance.BuildCommandSHA256, candidate.Artifact.SHA256, *candidate.VulkanNativeArchive, *candidate.VulkanIndexerScore)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Repair every digest so a stale identity cannot make this test pass.
+			if err := vulkanRegistryV8.validateSuccess(&candidate); err == nil || !strings.Contains(err.Error(), "test-only BF16 boundary witness") {
+				t.Fatalf("witness profile was not specifically rejected: %v", err)
+			}
+		})
+	}
 	path := filepath.Join(evidence.SPIRVRoot, "v41_exact_rmsnorm.spv")
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)

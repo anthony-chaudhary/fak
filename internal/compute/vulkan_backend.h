@@ -396,6 +396,15 @@ int fvk_v41_q2k_embed_gather_f32(const void *dTable, const void *dIds, void *dOu
 int fvk_have_v41_exact_rmsnorm(void);
 int fvk_v41_exact_rmsnorm_f32(const void *dX, const void *dW, void *dY,
                               int rows, int width, float eps);
+/* Experimental BF16 bit-copy spine. Production archives deliberately omit
+ * these symbols; a witness-tagged Go build cannot link the wrong archive.
+ * A dedicated reviewed module is additional to, never part of, trusted registry.
+ * F32 storage [count] -> fresh F32 [count], integer RNE, two buffers/4B push. */
+#ifdef FAK_V41_BF16_BOUNDARY_WITNESS
+int fvk_have_v41_bf16_boundary(void);
+int fvk_v41_bf16_boundary_f32(const void *dInput, void *dOut, int count);
+int fvk_v41_bf16_boundary_module_abi(const void *data, size_t bytes);
+#endif
 
 /* SwiGLU: y = silu(g) * u, elementwise, length n. */
 void fvk_swiglu_f32(const void *dG, const void *dU, void *dY, int n);

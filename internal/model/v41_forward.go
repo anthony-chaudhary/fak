@@ -163,6 +163,7 @@ type v41ForwardState struct {
 	mhcProjection    v41MHCProjectionFunc
 	mhcFFNProjection v41MHCProjectionFunc
 	finalNorm        v41FinalNormFunc
+	bf16Boundary     v41BF16BoundaryFunc
 	attentionNorm    v41AttentionInputNormFunc
 	queryNorm        v41QueryNormFunc
 	kvNorm           v41KVNormFunc
@@ -327,7 +328,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, attentionNorm: st.attentionNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, routerTopK: st.routerTopK, routedSum: st.routedSum, sharedAdd: st.sharedAdd, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, bf16Boundary: st.bf16Boundary, attentionNorm: st.attentionNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, routerTopK: st.routerTopK, routedSum: st.routedSum, sharedAdd: st.sharedAdd, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
 		runState.indexKeyPrior = st.indexKeyMemo
 		runState.indexKeyMemo = map[int][]v41IndexKeyMemoRow{}
 		defer func() {
@@ -471,9 +472,11 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 
 	var headProjection v41DenseProjectionFunc
 	var finalNorm v41FinalNormFunc
+	var bf16Boundary v41BF16BoundaryFunc
 	if runState != nil {
 		headProjection = runState.denseProjection
 		finalNorm = runState.finalNorm
+		bf16Boundary = runState.bf16Boundary
 	}
 	act.Logits = make([][]float32, len(seq))
 	for t := 0; t < len(seq); t++ {
@@ -481,7 +484,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		if full {
 			headInput = act.Hidden[len(act.Hidden)-1][t*H : (t+1)*H]
 		}
-		logits, err := m.v41HeadWithFinalNorm(headInput, headProjection, finalNorm)
+		logits, err := m.v41HeadWithBF16Boundary(headInput, headProjection, finalNorm, bf16Boundary)
 		if err != nil {
 			return nil, err
 		}
@@ -1392,6 +1395,10 @@ func (m *Model) v41HeadWithProjection(x []float32, project v41DenseProjectionFun
 }
 
 func (m *Model) v41HeadWithFinalNorm(x []float32, project v41DenseProjectionFunc, normalize v41FinalNormFunc) ([]float32, error) {
+	return m.v41HeadWithBF16Boundary(x, project, normalize, nil)
+}
+
+func (m *Model) v41HeadWithBF16Boundary(x []float32, project v41DenseProjectionFunc, normalize v41FinalNormFunc, round v41BF16BoundaryFunc) ([]float32, error) {
 	if !m.has("model.norm.weight") {
 		return nil, v41StageErr(v41StageFinalNorm, -1,
 			fmt.Errorf("%w: missing model.norm.weight", ErrV41ForwardStage))
@@ -1410,7 +1417,7 @@ func (m *Model) v41HeadWithFinalNorm(x []float32, project v41DenseProjectionFunc
 	}
 	var xf []float32
 	if full {
-		xf, err = m.v41FullFinalNorm(x, normalize)
+		xf, err = m.v41FullFinalNormWithBF16Boundary(x, normalize, round)
 		if err != nil {
 			return nil, err
 		}
@@ -1453,6 +1460,10 @@ func (m *Model) v41HeadWithFinalNorm(x []float32, project v41DenseProjectionFunc
 // boundary before ParallelHead widens to F32. The callback itself remains F32;
 // generic norm flags belong to the reduced compatibility path, not this graph.
 func (m *Model) v41FullFinalNorm(input []float32, normalize v41FinalNormFunc) ([]float32, error) {
+	return m.v41FullFinalNormWithBF16Boundary(input, normalize, nil)
+}
+
+func (m *Model) v41FullFinalNormWithBF16Boundary(input []float32, normalize v41FinalNormFunc, round v41BF16BoundaryFunc) ([]float32, error) {
 	fail := func(cause error) error {
 		return &V41ProjectionOperationError{Layer: -1, Leaf: "model.norm.weight", Stage: string(v41StageFinalNorm), Cause: v41StageErr(v41StageFinalNorm, -1, cause)}
 	}
@@ -1461,12 +1472,17 @@ func (m *Model) v41FullFinalNorm(input []float32, normalize v41FinalNormFunc) ([
 	if len(input) == 0 || len(input) != m.Cfg.HiddenSize || len(gain) != len(input) || !finite32(eps) || eps <= 0 {
 		return nil, fail(errV41ProjectionResult)
 	}
-	staged := make([]float32, len(input))
-	for i, value := range input {
-		staged[i] = v41RoundBF16(value)
-		if !finite32(value) || !finite32(staged[i]) || !finite32(gain[i]) {
+	for _, value := range gain {
+		if !finite32(value) {
 			return nil, fail(errV41ProjectionResult)
 		}
+	}
+	staged, err := v41BF16BoundaryCopy(-1, "model.norm.weight input", input, round)
+	if err != nil {
+		if round == nil {
+			return nil, fail(errV41ProjectionResult)
+		}
+		return nil, fail(err)
 	}
 	var values []float32
 	if normalize == nil {
@@ -1481,12 +1497,12 @@ func (m *Model) v41FullFinalNorm(input []float32, normalize v41FinalNormFunc) ([
 	if len(values) != len(input) {
 		return nil, fail(errV41ProjectionResult)
 	}
-	out := make([]float32, len(values))
-	for i, value := range values {
-		out[i] = v41RoundBF16(value)
-		if !finite32(value) || !finite32(out[i]) {
+	out, err := v41BF16BoundaryCopy(-1, "model.norm.weight output", values, round)
+	if err != nil {
+		if round == nil {
 			return nil, fail(errV41ProjectionResult)
 		}
+		return nil, fail(err)
 	}
 	return out, nil
 }
@@ -1571,7 +1587,7 @@ func (s *Session) prefillV41Suffix(ids []int) []float32 {
 			var selectedAttention *V41SharedAttentionOperationError
 			var selectedScore *V41IndexerScoreOperationError
 			var selectedMHC *V41MHCOperationError
-			if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || !errors.Is(err, ErrV41ForwardStage) {
+			if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || !errors.Is(err, ErrV41ForwardStage) {
 				panic(err)
 			}
 			// Roll the suffix back to the pre-call boundary and re-fold the
@@ -1680,7 +1696,7 @@ func (s *Session) stepV41(id int) []float32 {
 		var selectedAttention *V41SharedAttentionOperationError
 		var selectedScore *V41IndexerScoreOperationError
 		var selectedMHC *V41MHCOperationError
-		if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || !errors.Is(err, ErrV41ForwardStage) {
+		if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || !errors.Is(err, ErrV41ForwardStage) {
 			panic(err)
 		}
 		// A typed stage refusal the eligibility check could not foresee (e.g. the
@@ -1716,6 +1732,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.mhcProjection = s.v41MHCProjectionFunc()
 		s.v41Forward.mhcFFNProjection = s.v41MHCProjectionFuncNamed("mhc.ffn_mixes.weight")
 		s.v41Forward.finalNorm = s.v41FinalNormFunc()
+		s.v41Forward.bf16Boundary = s.v41BF16BoundaryFunc()
 		s.v41Forward.attentionNorm = s.v41AttentionInputNormFunc()
 		s.v41Forward.queryNorm = s.v41QueryNormFunc()
 		s.v41Forward.kvNorm = s.v41KVNormFunc()
