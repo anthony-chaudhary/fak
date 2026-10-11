@@ -3,6 +3,25 @@ package model
 import "fmt"
 
 func (m *Model) v41EmbeddingPanel(ids []int) ([]float32, error) {
+	return m.v41EmbeddingPanelOn(ids, nil)
+}
+
+// v41EmbeddingPanelOn gathers through the session's device seam when ops binds
+// one (Ref #13668). That seam binds only a unit embedding scale, so its rows
+// are already the scaled panel; a selected failure is never retried on the host.
+func (m *Model) v41EmbeddingPanelOn(ids []int, ops *v41DeviceGatherOps) ([]float32, error) {
+	if gather := ops.embeddingGatherFunc(); gather != nil {
+		panel, err := gather(ids)
+		if err == nil {
+			if want, ok := checkedMulInt(len(ids), m.Cfg.HiddenSize); !ok || len(panel) != want {
+				err = errV41EmbeddingGatherResult
+			}
+		}
+		if err != nil {
+			return nil, v41StageErr(v41StageEmbedding, -1, err)
+		}
+		return panel, nil
+	}
 	cfg := m.Cfg
 	H := cfg.HiddenSize
 	count, ok := checkedMulInt(len(ids), H)

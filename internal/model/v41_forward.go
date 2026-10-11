@@ -168,6 +168,7 @@ type v41ForwardState struct {
 	sharedActivation v41SharedActivationFunc
 	tailRoPE         v41TailRoPEFunc
 	sharedAttention  v41SharedAttentionFunc
+	gatherOps        *v41DeviceGatherOps
 	callbackOwner    *Session
 }
 
@@ -299,7 +300,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, callbackOwner: st.callbackOwner}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -332,7 +333,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	}
 
 	// ---- embedding ----
-	embedded, err := m.v41EmbeddingPanel(seq)
+	embedded, err := m.v41EmbeddingPanelOn(seq, runState.deviceGatherOps())
 	if err != nil {
 		return nil, err
 	}
@@ -488,6 +489,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.sharedActivation = nil
 	scratch.tailRoPE = nil
 	scratch.sharedAttention = nil
+	scratch.gatherOps = nil
 	if st != nil {
 		scratch.denseProjection = st.denseProjection
 		scratch.groupedOutput = st.groupedOutput
@@ -503,6 +505,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.sharedActivation = st.sharedActivation
 		scratch.tailRoPE = st.tailRoPE
 		scratch.sharedAttention = st.sharedAttention
+		scratch.gatherOps = st.gatherOps
 	}
 	defer func() {
 		scratch.denseProjection = nil
@@ -519,6 +522,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.sharedActivation = nil
 		scratch.tailRoPE = nil
 		scratch.sharedAttention = nil
+		scratch.gatherOps = nil
 	}()
 
 	// Engram injection happens at the START of the layer, into the residual,
@@ -807,7 +811,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if plan.Ratio > 1 && indexSourceAt(cfg.DeepSeekV41, l) {
 		for t := 0; t < seq; t++ {
 			groups := min((t+1)/plan.kvGroupSize(cfg), len(indexKeys))
-			localIdx, err := m.v41IndexRowsWithOperations(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth)
+			localIdx, err := m.v41IndexRowsWithDeviceOps(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps)
 			if err != nil {
 				return err
 			}
@@ -818,7 +822,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			indexList = append(indexList, row...)
 		}
 	} else {
-		localIdx, err := m.v41IndexRowsWithOperations(l, seq-1, qLatRows[seq-1], preByPos[seq-1], indexKeys, scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth)
+		localIdx, err := m.v41IndexRowsWithDeviceOps(l, seq-1, qLatRows[seq-1], preByPos[seq-1], indexKeys, scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps)
 		if err != nil {
 			return err
 		}
@@ -928,7 +932,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			if err != nil {
 				return v41StageErr(v41StageAttention, l, err)
 			}
-			o, err = v41AttentionOutputForProjection(cfg, l, t, o, nH, hd)
+			o, err = v41RotatedOutputForProjection(cfg, l, t, o, nH, hd, scratch.gatherOps)
 			if err != nil {
 				return err
 			}
@@ -963,7 +967,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)
 		}
-		o, err = v41AttentionOutputForProjection(cfg, l, t, o, nH, hd)
+		o, err = v41RotatedOutputForProjection(cfg, l, t, o, nH, hd, scratch.gatherOps)
 		if err != nil {
 			return err
 		}
@@ -1553,6 +1557,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.sharedActivation = s.v41SharedActivationFunc()
 		s.v41Forward.tailRoPE = s.v41TailRoPEFunc()
 		s.v41Forward.sharedAttention = s.v41SharedAttentionFunc()
+		s.v41Forward.gatherOps = s.v41DeviceGatherOpsFunc()
 		s.v41Forward.callbackOwner = s
 	}
 	return s.v41Forward

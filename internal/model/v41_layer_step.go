@@ -328,7 +328,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
 	}
-	o, err = v41AttentionOutputForProjection(cfg, l, pos, o, nH, hd)
+	o, err = v41RotatedOutputForProjection(cfg, l, pos, o, nH, hd, scratch.gatherOps)
 	if err != nil {
 		return err
 	}
@@ -676,7 +676,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		}
 	}
 	if indexSourceAt(cfg.DeepSeekV41, l) {
-		sourceIdx, err = m.v41IndexRowsWithOperations(l, pos, qLat, collapsed, indexKeys, scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth)
+		sourceIdx, err = m.v41IndexRowsWithDeviceOps(l, pos, qLat, collapsed, indexKeys, scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps)
 		if err != nil {
 			return err
 		}
@@ -720,7 +720,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
 	}
-	o, err = v41AttentionOutputForProjection(cfg, l, pos, o, nH, hd)
+	o, err = v41RotatedOutputForProjection(cfg, l, pos, o, nH, hd, scratch.gatherOps)
 	if err != nil {
 		return err
 	}
