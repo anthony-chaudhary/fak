@@ -167,6 +167,8 @@ func v41NormRoPEHaloIsolate(st *v41ForwardState) {
 	st.sharedActivation, st.sharedAttention = nil, nil
 	st.compressorNorm, st.indexKeyNorm, st.indexerScore = nil, nil, nil
 	st.indexScoreHealth = nil
+	st.routerTopK, st.routedSum, st.sharedAdd = nil, nil, nil
+	st.gatherOps, st.mhcDevice = nil, nil
 }
 
 // FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_DISPATCH_PROFILE=1 with the Halo SPIRV
@@ -334,7 +336,7 @@ func TestV41NormRoPECallbacksHalo(t *testing.T) {
 			t.Fatal(e)
 		}
 		if observation.Counters.ComputeDispatches != uint64(len(ids)*(4*m.Cfg.NumLayers+1)) {
-			t.Fatal("phase contains missing or unexpected native dispatches")
+			t.Fatalf("phase %d native dispatches=%d want %d", phase, observation.Counters.ComputeDispatches, len(ids)*(4*m.Cfg.NumLayers+1))
 		}
 		data, _ := json.Marshal(observation)
 		t.Logf("phase=%d tokens=%d callbacks=%v physical=%s", phase, len(ids), w.calls, data)
