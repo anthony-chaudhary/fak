@@ -723,7 +723,8 @@
       "distinction": "It builds an ACTION list from a diff, NOT a reusable plan cache (PlanTemplate) nor a context-window plan (PlanCells).",
       "distinct_from": [
         "PlanTemplate (cachemeta)",
-        "PlanCells (ctxplan)"
+        "PlanCells (ctxplan)",
+        "fak13823-plan-vulkanreceiptbuildplan"
       ],
       "aliases": [],
       "grounding": "buildplan",

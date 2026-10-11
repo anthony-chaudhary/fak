@@ -930,3 +930,10 @@ Attaches a fresh original-request deadlineCacheTicket to a derived request conte
 Exported compatibility snapshot of historical credited-admission, credited-token, overrun-denial and misprediction counters; observational-only served routes do not increment credited admissions or tokens.
 
 **Distinct from:** Unlike deadlineCacheTicket, which describes one request for historical recording, this aggregate metric schema is monitoring output and carries no current-residency proof or deadline-credit authority.
+
+
+### VulkanReceiptBuildPlan (receipt verification policy plan)
+
+VulkanReceiptBuildPlan fixes the independently trusted package, output package, and smoke policy used to verify a Vulkan binary receipt.
+
+**Distinct from:** It is the verifier's expected build-policy input, not vulkan_plan command-buffer scheduling and not the generic BuildPlan action planner.
