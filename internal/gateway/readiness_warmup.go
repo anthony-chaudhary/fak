@@ -266,24 +266,13 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 		return time.Since(start), err
 	}
 	d := time.Since(start)
-	s.MarkWarmupComplete(d)
 
 	if rep, ok := s.planner.(agent.KVMemoryReporter); ok {
-		st := rep.KVMemoryStats()
-		if st.BytesPerToken > 0 {
-			usable := st.FitBudgetBytes
-			if usable <= 0 {
-				usable = st.CapacityFreeBytes
-			}
-			if usable <= 0 {
-				usable = st.CapacityTotalBytes
-			}
-			if usable > 0 {
-				s.SetWarmupCapacity(kvbudget.WarmupCapacity{
-					UsableBytes:   usable,
-					BytesPerToken: st.BytesPerToken,
-				})
-			}
+		s.admissionMu.RLock()
+		ctl := s.admissionCtl
+		s.admissionMu.RUnlock()
+		if cap, found := kvStatsWarmupCapacity(rep.KVMemoryStats(), ctl); found {
+			s.SetWarmupCapacity(cap)
 		}
 	} else if rep, ok := s.planner.(WarmupCapacityReporter); ok {
 		if c, okCap := rep.WarmupCapacity(); okCap {
@@ -300,6 +289,10 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 			s.SetWarmupBlockCapacity(bc)
 		}
 	}
+	if err := s.fixedWarmupAdmissionError(); err != nil {
+		return d, err
+	}
+	s.MarkWarmupComplete(d)
 	return d, compErr
 }
 

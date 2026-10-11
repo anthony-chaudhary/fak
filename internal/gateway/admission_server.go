@@ -12,6 +12,60 @@ import (
 	"github.com/anthony-chaudhary/fak/pkg/turncost"
 )
 
+// bindWarmupStreams uses the live admission bound, never a reporter-supplied
+// stream count. A missing or unbounded controller cannot reserve fixed state.
+func bindWarmupStreams(cap kvbudget.WarmupCapacity, ctl *AdmissionController) kvbudget.WarmupCapacity {
+	if cap.FixedBytesPerStream > 0 {
+		cap.MaxConcurrentStreams = 0
+		if ctl != nil {
+			cap.MaxConcurrentStreams = int64(ctl.Policy().MaxNumSeqs)
+		}
+	}
+	return cap
+}
+
+func kvStatsWarmupCapacity(st agent.KVMemoryStats, ctl *AdmissionController) (kvbudget.WarmupCapacity, bool) {
+	usable := st.FitBudgetBytes
+	if usable <= 0 {
+		usable = st.CapacityFreeBytes
+	}
+	if usable <= 0 {
+		usable = st.CapacityTotalBytes
+	}
+	cap := bindWarmupStreams(kvbudget.WarmupCapacity{
+		UsableBytes: usable, BytesPerToken: st.BytesPerToken,
+		FixedBytesPerStream: st.FixedBytesPerStream,
+	}, ctl)
+	// Preserve legacy missing-measurement behavior for uniform layouts. Known
+	// fixed state must instead reach the derive, including its refusal reasons.
+	return cap, st.FixedBytesPerStream > 0 || (st.BytesPerToken > 0 && usable > 0)
+}
+
+type fixedWarmupCapacityError struct{ reason kvbudget.Reason }
+
+func (e *fixedWarmupCapacityError) Error() string {
+	return "compressed KV warmup capacity unavailable: " + string(e.reason)
+}
+
+func (s *Server) fixedWarmupAdmissionError() error {
+	s.admissionMu.RLock()
+	cap, ctl, fraction := s.warmupCapacity, s.admissionCtl, s.warmupReserveFraction
+	s.admissionMu.RUnlock()
+	return fixedWarmupCapacityAdmissionError(cap, ctl, fraction)
+}
+
+func fixedWarmupCapacityAdmissionError(cap *kvbudget.WarmupCapacity, ctl *AdmissionController, fraction float64) error {
+	if cap != nil && cap.FixedBytesPerStream > 0 {
+		if fraction <= 0 {
+			fraction = kvbudget.DefaultReserveFraction
+		}
+		if derived := bindWarmupStreams(*cap, ctl).DeriveTokenBudget(fraction); !derived.Derived() {
+			return &fixedWarmupCapacityError{reason: derived.Reason}
+		}
+	}
+	return nil
+}
+
 // SetWarmupCapacity records a byte-measured warmup probe.
 func (s *Server) SetWarmupCapacity(cap kvbudget.WarmupCapacity) {
 	if s == nil {
@@ -27,7 +81,7 @@ func (s *Server) SetWarmupCapacity(cap kvbudget.WarmupCapacity) {
 		if fraction <= 0 {
 			fraction = kvbudget.DefaultReserveFraction
 		}
-		derived := cap.DeriveTokenBudget(fraction)
+		derived := bindWarmupStreams(cap, ctl).DeriveTokenBudget(fraction)
 		if derived.Derived() {
 			ctl.SetTokenBudgetWithProvenance(int(derived.TokenBudget), "measured")
 		}
@@ -43,8 +97,13 @@ func (s *Server) SetWarmupBlockCapacity(cap kvbudget.WarmupBlockCapacity) {
 	s.warmupBlockCapacity = &cap
 	ctl := s.admissionCtl
 	fraction := s.warmupReserveFraction
+	fixedCap := s.warmupCapacity
 	s.admissionMu.Unlock()
 
+	// A block-only measurement cannot replace a known compressed fixed charge.
+	if fixedCap != nil && fixedCap.FixedBytesPerStream > 0 {
+		return
+	}
 	if ctl != nil && ctl.TokenBudgetProvenance() != "explicit" {
 		if fraction <= 0 {
 			fraction = kvbudget.DefaultReserveFraction
@@ -74,34 +133,20 @@ func (s *Server) WarmupCapacity() (kvbudget.WarmupCapacity, bool) {
 	s.admissionMu.RLock()
 	defer s.admissionMu.RUnlock()
 	if s.warmupCapacity != nil {
-		return *s.warmupCapacity, true
+		return bindWarmupStreams(*s.warmupCapacity, s.admissionCtl), true
 	}
 	if s.planner != nil {
 		if r, ok := s.planner.(WarmupCapacityReporter); ok {
-			return r.WarmupCapacity()
+			cap, found := r.WarmupCapacity()
+			return bindWarmupStreams(cap, s.admissionCtl), found
 		}
 		if r, ok := s.planner.(interface {
 			WarmupCapacity() kvbudget.WarmupCapacity
 		}); ok {
-			return r.WarmupCapacity(), true
+			return bindWarmupStreams(r.WarmupCapacity(), s.admissionCtl), true
 		}
 		if r, ok := s.planner.(agent.KVMemoryReporter); ok {
-			st := r.KVMemoryStats()
-			if st.BytesPerToken > 0 {
-				usable := st.FitBudgetBytes
-				if usable <= 0 {
-					usable = st.CapacityFreeBytes
-				}
-				if usable <= 0 {
-					usable = st.CapacityTotalBytes
-				}
-				if usable > 0 {
-					return kvbudget.WarmupCapacity{
-						UsableBytes:   usable,
-						BytesPerToken: st.BytesPerToken,
-					}, true
-				}
-			}
+			return kvStatsWarmupCapacity(r.KVMemoryStats(), s.admissionCtl)
 		}
 	}
 	return kvbudget.WarmupCapacity{}, false
@@ -117,6 +162,7 @@ func (s *Server) WarmupDerivedBudget() (kvbudget.DerivedBudget, bool) {
 	blockCap := s.warmupBlockCapacity
 	fraction := s.warmupReserveFraction
 	p := s.planner
+	ctl := s.admissionCtl
 	s.admissionMu.RUnlock()
 
 	if fraction <= 0 {
@@ -124,9 +170,9 @@ func (s *Server) WarmupDerivedBudget() (kvbudget.DerivedBudget, bool) {
 	}
 
 	if cap != nil {
-		derived := cap.DeriveTokenBudget(fraction)
-		if derived.Derived() {
-			return derived, true
+		derived := bindWarmupStreams(*cap, ctl).DeriveTokenBudget(fraction)
+		if derived.Derived() || cap.FixedBytesPerStream > 0 {
+			return derived, derived.Derived()
 		}
 	}
 	if blockCap != nil {
@@ -138,18 +184,18 @@ func (s *Server) WarmupDerivedBudget() (kvbudget.DerivedBudget, bool) {
 	if p != nil {
 		if r, ok := p.(WarmupCapacityReporter); ok {
 			if c, okCap := r.WarmupCapacity(); okCap {
-				derived := c.DeriveTokenBudget(fraction)
-				if derived.Derived() {
-					return derived, true
+				derived := bindWarmupStreams(c, ctl).DeriveTokenBudget(fraction)
+				if derived.Derived() || c.FixedBytesPerStream > 0 {
+					return derived, derived.Derived()
 				}
 			}
 		} else if r, ok := p.(interface {
 			WarmupCapacity() kvbudget.WarmupCapacity
 		}); ok {
 			c := r.WarmupCapacity()
-			derived := c.DeriveTokenBudget(fraction)
-			if derived.Derived() {
-				return derived, true
+			derived := bindWarmupStreams(c, ctl).DeriveTokenBudget(fraction)
+			if derived.Derived() || c.FixedBytesPerStream > 0 {
+				return derived, derived.Derived()
 			}
 		}
 		if r, ok := p.(interface {
@@ -171,21 +217,10 @@ func (s *Server) WarmupDerivedBudget() (kvbudget.DerivedBudget, bool) {
 			}
 		}
 		if r, ok := p.(agent.KVMemoryReporter); ok {
-			st := r.KVMemoryStats()
-			if st.BytesPerToken > 0 {
-				usable := st.FitBudgetBytes
-				if usable <= 0 {
-					usable = st.CapacityFreeBytes
-				}
-				if usable <= 0 {
-					usable = st.CapacityTotalBytes
-				}
-				if usable > 0 {
-					c := kvbudget.WarmupCapacity{UsableBytes: usable, BytesPerToken: st.BytesPerToken}
-					derived := c.DeriveTokenBudget(fraction)
-					if derived.Derived() {
-						return derived, true
-					}
+			if c, found := kvStatsWarmupCapacity(r.KVMemoryStats(), ctl); found {
+				derived := c.DeriveTokenBudget(fraction)
+				if derived.Derived() || c.FixedBytesPerStream > 0 {
+					return derived, derived.Derived()
 				}
 			}
 		}
@@ -233,6 +268,12 @@ func (s *Server) SetAdmissionController(c *AdmissionController) {
 	s.admissionCtl = c
 	s.admissionMu.Unlock()
 	if c != nil {
+		// Retain declared fixed state even before RunWarmup. Both initialization
+		// orders must enforce a refused derive on the served path, including when
+		// an explicit token budget would otherwise skip measured derivation.
+		if cap, found := s.WarmupCapacity(); found && cap.FixedBytesPerStream > 0 {
+			s.SetWarmupCapacity(cap)
+		}
 		if s.table != nil {
 			c.SetTable(s.table)
 		}
@@ -311,7 +352,18 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 	c := s.admissionCtl
 	g := s.tokenRateGate
 	b := s.principalTokenRates
+	cap, fraction := s.warmupCapacity, s.warmupReserveFraction
 	s.admissionMu.RUnlock()
+	// Zero disables the controller's token limit, so a refused fixed-state
+	// derive must stop here rather than install zero or retain a default budget.
+	// Validate the SAME captured controller used for Acquire: a concurrent
+	// replacement must not check one stream bound then acquire under another.
+	if err := fixedWarmupCapacityAdmissionError(cap, c, fraction); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, err
+	}
 	if c == nil && g == nil && b == nil {
 		return nil, nil
 	}
@@ -426,6 +478,10 @@ func sampleMaxTokens(opts []agent.SampleOpt) int {
 }
 
 func admissionErrorStatus(err error) (status int, code, msg string, ok bool) {
+	var capacityErr *fixedWarmupCapacityError
+	if errors.As(err, &capacityErr) {
+		return http.StatusServiceUnavailable, "warmup_capacity_unavailable", capacityErr.Error(), true
+	}
 	var ae *AdmissionError
 	if !errors.As(err, &ae) {
 		return 0, "", "", false

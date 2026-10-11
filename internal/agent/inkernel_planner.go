@@ -1055,13 +1055,12 @@ func (p *InKernelPlanner) ApplyPromptShrink(ctx context.Context, messages []Mess
 // KVMemoryStats reports the in-process KV prefix cache's physical resident shape.
 // Native backend snapshots are split into hot device bytes, hot host metadata, and
 // the independently owned host-DRAM L2. Proxy/provider counters never enter here.
-// effectiveKVConfig is the compute.KVConfig this planner's admission math must use:
+// effectiveKVConfig is the full context charge this planner's admission math must use:
 // the model's geometry plus the realized KV storage tier (p.kvPrecision, mapped to the
 // compute tier). The F32 default maps to compute.KVPrecisionF32, so a planner that
 // never set a tier estimates byte-identically to before.
-func (p *InKernelPlanner) effectiveKVConfig() compute.KVConfig {
-	cfg := p.m.Cfg.ContextSizeConfigWithPrecision(computeKVPrecisionFor(p.kvPrecision)).KV
-	return cfg
+func (p *InKernelPlanner) effectiveKVConfig() compute.ContextSizeConfig {
+	return p.m.Cfg.ContextSizeConfigWithPrecision(computeKVPrecisionFor(p.kvPrecision))
 }
 
 // computeKVPrecisionFor maps a model.KVPrecision tier to the compute.KVPrecision the
@@ -1085,15 +1084,16 @@ func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 		}
 	}
 	kvCfg := p.effectiveKVConfig()
-	bytesPerToken := compute.EstimateKVStoreBytes(kvCfg, 1)
+	bytesPerToken := kvCfg.KVBytesPerToken()
 	stats := KVMemoryStats{
-		Enabled:       p.tree != nil,
-		Backend:       "radixkv",
-		MemoryClass:   string(compute.MemoryKVCache),
-		Scope:         string(compute.MemoryScopeHost),
-		DType:         kvCfg.Precision.StorageLabel(),
-		BytesPerToken: bytesPerToken,
-		HeadroomRatio: inKernelKVMemoryHeadroom,
+		Enabled:             p.tree != nil,
+		Backend:             "radixkv",
+		MemoryClass:         string(compute.MemoryKVCache),
+		Scope:               string(compute.MemoryScopeHost),
+		DType:               kvCfg.KV.Precision.StorageLabel(),
+		BytesPerToken:       bytesPerToken,
+		FixedBytesPerStream: kvCfg.FixedKVBytesPerStream(),
+		HeadroomRatio:       inKernelKVMemoryHeadroom,
 	}
 	if p.backend != nil && p.tree == nil {
 		stats.Enabled = false
@@ -1120,7 +1120,7 @@ func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 		applyKVMemoryCapacity(&stats, total, free, known)
 	} else {
 		stats.ResidentTokens = st.PrefixTokens
-		stats.ResidentBytes = compute.EstimateKVStoreBytes(kvCfg, st.PrefixTokens)
+		stats.ResidentBytes = kvCfg.KVBytes(st.PrefixTokens)
 		applyKVMemoryCapacity(&stats, hostTotal, hostFree, hostKnown)
 	}
 	stats.BudgetTokens = st.MaxTokens
