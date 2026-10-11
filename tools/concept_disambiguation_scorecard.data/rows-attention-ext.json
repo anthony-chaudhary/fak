@@ -230,9 +230,10 @@
       "family": "attention",
       "kind": "symbol",
       "definition": "m.attentionNorms(l) \u2014 the bundle of pre/post normalization weights (and biases) that wrap the attention sublayer for a layer's topology.",
-      "distinction": "It is the attention sublayer's own norm weights, NOT the post_attention_layernorm that feeds the following MLP.",
+      "distinction": "It is the attention sublayer's own norm weights, NOT the post_attention_layernorm that feeds the following MLP. The V4.1 attentionNorm field stores an executable normalization callback rather than this bundle of weights and biases.",
       "distinct_from": [
-        "attended"
+        "attended",
+        "v41-attention-input-norm-state"
       ],
       "aliases": [
         "attnnorm"

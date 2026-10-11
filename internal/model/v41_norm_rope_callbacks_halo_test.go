@@ -160,6 +160,7 @@ func (w *v41NormRoPEHaloObserver) rope(run v41TailRoPEFunc) v41TailRoPEFunc {
 }
 
 func v41NormRoPEHaloIsolate(st *v41ForwardState) {
+	st.attentionNorm = nil
 	st.expertGateUp, st.expertDown = nil, nil
 	st.denseProjection, st.groupedOutput, st.engramProjection = nil, nil, nil
 	st.mhcProjection, st.mhcFFNProjection = nil, nil

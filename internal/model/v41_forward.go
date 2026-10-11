@@ -163,6 +163,7 @@ type v41ForwardState struct {
 	mhcProjection    v41MHCProjectionFunc
 	mhcFFNProjection v41MHCProjectionFunc
 	finalNorm        v41FinalNormFunc
+	attentionNorm    v41AttentionInputNormFunc
 	queryNorm        v41QueryNormFunc
 	kvNorm           v41KVNormFunc
 	ffnNorm          v41FFNNormFunc
@@ -326,7 +327,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, routerTopK: st.routerTopK, routedSum: st.routedSum, sharedAdd: st.sharedAdd, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, attentionNorm: st.attentionNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, routerTopK: st.routerTopK, routedSum: st.routedSum, sharedAdd: st.sharedAdd, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
 		runState.indexKeyPrior = st.indexKeyMemo
 		runState.indexKeyMemo = map[int][]v41IndexKeyMemoRow{}
 		defer func() {
@@ -555,6 +556,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.groupedOutput = nil
 	scratch.mhcProjection = nil
 	scratch.mhcFFNProjection = nil
+	scratch.attentionNorm = nil
 	scratch.queryNorm = nil
 	scratch.kvNorm = nil
 	scratch.ffnNorm = nil
@@ -574,6 +576,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.groupedOutput = st.groupedOutput
 		scratch.mhcProjection = st.mhcProjection
 		scratch.mhcFFNProjection = st.mhcFFNProjection
+		scratch.attentionNorm = st.attentionNorm
 		scratch.queryNorm = st.queryNorm
 		scratch.kvNorm = st.kvNorm
 		scratch.ffnNorm = st.ffnNorm
@@ -594,6 +597,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.groupedOutput = nil
 		scratch.mhcProjection = nil
 		scratch.mhcFFNProjection = nil
+		scratch.attentionNorm = nil
 		scratch.queryNorm = nil
 		scratch.kvNorm = nil
 		scratch.ffnNorm = nil
@@ -695,7 +699,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			return err
 		}
 		for t := range collapsedRows {
-			if preByPos[t], err = m.v41AttentionInputNorm(l, collapsedRows[t], eps); err != nil {
+			if preByPos[t], err = m.v41AttentionInputNormWithDevice(l, collapsedRows[t], eps, scratch.attentionNorm); err != nil {
 				return err
 			}
 		}
@@ -704,8 +708,11 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// The reduced path projects the normalized input through the legacy
 		// single-stream [24, H] block; the full path projects the four DISTINCT
 		// persistent streams through the flattened 4H residual with one shared RMS.
-		// xn is retained for the reduced pre-collapse stand-in below either way.
-		xn := rmsnormCfg(x[t], attnNorm, eps, cfg)
+		// Only the reduced stand-in consumes a pre-collapse host norm.
+		var xn []float32
+		if !full {
+			xn = rmsnormCfg(x[t], attnNorm, eps, cfg)
+		}
 		input := xn
 		if mhcFlat {
 			width, ok := checkedMulInt(4, H)
@@ -758,7 +765,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			}
 		}
 		if full {
-			collapsed, err = m.v41AttentionInputNorm(l, collapsed, eps)
+			collapsed, err = m.v41AttentionInputNormWithDevice(l, collapsed, eps, scratch.attentionNorm)
 			if err != nil {
 				return err
 			}
@@ -1709,6 +1716,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.mhcProjection = s.v41MHCProjectionFunc()
 		s.v41Forward.mhcFFNProjection = s.v41MHCProjectionFuncNamed("mhc.ffn_mixes.weight")
 		s.v41Forward.finalNorm = s.v41FinalNormFunc()
+		s.v41Forward.attentionNorm = s.v41AttentionInputNormFunc()
 		s.v41Forward.queryNorm = s.v41QueryNormFunc()
 		s.v41Forward.kvNorm = s.v41KVNormFunc()
 		s.v41Forward.ffnNorm = s.v41FFNNormFunc()

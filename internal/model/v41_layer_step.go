@@ -176,11 +176,13 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		if rerr != nil {
 			return rerr
 		}
-		if collapsed, err = m.v41AttentionInputNorm(l, rows[0], eps); err != nil {
+		if collapsed, err = m.v41AttentionInputNormWithDevice(l, rows[0], eps, scratch.attentionNorm); err != nil {
 			return err
 		}
 	} else {
-		xn = rmsnormCfg(x, attnNorm, eps, cfg)
+		if !full {
+			xn = rmsnormCfg(x, attnNorm, eps, cfg)
+		}
 		input := xn
 		if mhcFlat {
 			width, ok := checkedMulInt(4, H)
@@ -227,7 +229,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 			}
 		}
 		if full {
-			collapsed, err = m.v41AttentionInputNorm(l, collapsed, eps)
+			collapsed, err = m.v41AttentionInputNormWithDevice(l, collapsed, eps, scratch.attentionNorm)
 			if err != nil {
 				return err
 			}
@@ -575,7 +577,6 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	if resident != nil {
 		defer resident.abort()
 	}
-	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
 	mixBase := m.tensor(layerName(l, "mhc.base"))
 	mixScale := m.tensor(layerName(l, "mhc.scale"))
 	projectOutput := m.v41GroupedOutputProjector(l, nH, hd, cfg.OGroups, cfg.OLoraRank, H, scratch)
@@ -595,8 +596,9 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		}
 		collapsed = rows[0]
 	} else {
-		xn := rmsnormCfg(x, attnNorm, eps, cfg)
-		input := xn
+		// Role steps require the full flattened mHC geometry, so the
+		// historical pre-collapse host normalization has no consumer.
+		var input []float32
 		if mhcFlat {
 			width, ok := checkedMulInt(4, H)
 			if !ok || len(streams) != 4 {
@@ -631,7 +633,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 			}
 		}
 	}
-	collapsed, err = m.v41AttentionInputNorm(l, collapsed, eps)
+	collapsed, err = m.v41AttentionInputNormWithDevice(l, collapsed, eps, scratch.attentionNorm)
 	if err != nil {
 		return err
 	}

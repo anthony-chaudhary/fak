@@ -1,0 +1,62 @@
+{
+  "rows": [
+    {
+      "id": "v41-attention-input-norm-callback",
+      "canonical": "v41AttentionInputNormFunc",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The model callback signature and same-named Session constructor for normalizing one full-profile V4.1 collapsed hidden row. The constructor binds the existing session-owned RMSNorm operation to the layer attn_norm.weight and HiddenSize, or returns nil when that operation is unavailable.",
+      "distinction": "This is the callable operation and its session-bound construction. v41AttentionInputNormWithDevice owns the BF16 input/output boundary; attentionNorm stores the resulting callback in forward state.",
+      "distinct_from": [
+        "v41-attention-input-norm-boundary",
+        "v41-attention-input-norm-state"
+      ],
+      "aliases": [],
+      "grounding": "v41AttentionInputNormFunc",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-input-norm-boundary",
+      "canonical": "v41AttentionInputNormWithDevice",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The Model adapter used at V4.1 attention-input normalization sites. A selected callback receives an owned BF16-rounded hidden row and its result is checked, copied and BF16-rounded for publication. A nil callback preserves the existing host normalization; a selected callback error is returned without host retry.",
+      "distinction": "This is the per-invocation BF16 and error boundary around normalization. v41AttentionInputNormFunc defines and binds the operation, while attentionNorm retains that operation across forward execution.",
+      "distinct_from": [
+        "v41-attention-input-norm-callback",
+        "v41-attention-input-norm-state"
+      ],
+      "aliases": [],
+      "grounding": "v41AttentionInputNormWithDevice",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-input-norm-state",
+      "canonical": "attentionNorm (V4.1 forward-state callback)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The optional v41ForwardState field retaining the session-bound attention-input normalization callback across grouped, incremental and resident-stream forward execution. Scratch reuse clears the field and session state restoration rebinds it to the target session owner.",
+      "distinction": "This is forward-state storage for the selected operation. v41AttentionInputNormFunc constructs the callable; v41AttentionInputNormWithDevice applies its dtype, ownership and failure contract to each input row. The similarly named attentionNorms method returns a bundle of normalization weights and biases; this field stores an executable callback.",
+      "distinct_from": [
+        "v41-attention-input-norm-callback",
+        "v41-attention-input-norm-boundary",
+        "x-attention-attentionnorms"
+      ],
+      "aliases": [],
+      "grounding": "attentionNorm",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
