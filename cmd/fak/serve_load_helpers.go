@@ -722,6 +722,10 @@ func loadResidentQ4KDevice(ggufPath string, tLoad time.Time, memPlan compute.Mem
 		fmt.Fprintln(os.Stderr, "fak serve: post-load Vulkan reservations:", text)
 		messages = append(messages, serveStartupMessage("post-load-device-reservations", "info", text))
 	}
+	if text, ok := serveVulkanH2DUpload(backend); ok {
+		fmt.Fprintln(os.Stderr, "fak serve: post-load H2D upload:", text)
+		messages = append(messages, serveStartupMessage("post-load-h2d-upload", "info", text))
+	}
 	profile := withServeStartupMessages(withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k-device", ggufPath, loadNanos)), memPlan, backend), messages...)
 	return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 }

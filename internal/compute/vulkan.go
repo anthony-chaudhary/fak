@@ -823,6 +823,18 @@ func (v *vulkanBackend) dallocHostVisFor(nbytes int, what string) *vulkanBuf {
 	return &vulkanBuf{ptr: unsafe.Pointer(p), n: nbytes, class: MemoryOffload}
 }
 
+// dallocHostVisWeightFor is dallocHostVisFor for an immutable weight: on UMA direct upload the
+// shim maps a host-coherent allocation so the upload skips the staging copy (fak#13668).
+func (v *vulkanBackend) dallocHostVisWeightFor(nbytes int, what string) *vulkanBuf {
+	requireVulkanSubmissionHealthyLocked("dallocHostVisWeightFor")
+	v.checkResourceCap(nbytes, what)
+	p := C.fvk_malloc_hostvis_weight(C.size_t(nbytes))
+	if p == nil {
+		panic(&DeviceAllocError{Bytes: nbytes, Site: "vulkan:" + what, Class: MemoryOffload})
+	}
+	return &vulkanBuf{ptr: unsafe.Pointer(p), n: nbytes, class: MemoryOffload}
+}
+
 // dallocWeight places a weight buffer device-local while under the residency budget, else
 // host-visible (deliberately, in upload order). budgetBytes==0 means unbounded -> always
 // device-local. Caller holds vulkanMu.
@@ -833,7 +845,7 @@ func (v *vulkanBackend) dallocWeight(nbytes int) *vulkanBuf {
 func (v *vulkanBackend) dallocWeightFor(nbytes int, what string) *vulkanBuf {
 	requireVulkanSubmissionHealthyLocked("dallocWeightFor")
 	if v.budgetBytes > 0 && v.dlUsed+int64(nbytes) > v.budgetBytes {
-		buf := v.dallocHostVisFor(nbytes, what)
+		buf := v.dallocHostVisWeightFor(nbytes, what)
 		v.accountWeightPlacement(buf, nbytes)
 		return buf
 	}
@@ -851,7 +863,7 @@ func (v *vulkanBackend) dallocWeightFor(nbytes int, what string) *vulkanBuf {
 	if p == nil {
 		// Arena exhaustion must not escape its declared reservation bound by falling back to an
 		// untracked device allocation. Preserve the existing deliberate host-visible recovery.
-		buf = v.dallocHostVisFor(nbytes, what)
+		buf = v.dallocHostVisWeightFor(nbytes, what)
 	} else {
 		buf = &vulkanBuf{ptr: unsafe.Pointer(p), n: nbytes, class: MemoryWeights}
 	}
