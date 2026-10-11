@@ -9,14 +9,18 @@ package gateway
 // unset the same death ends the stream with a terminal error frame, no resume.
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -516,5 +520,212 @@ func TestCanWarmContinueStandsDownWhenThinkingEnabled(t *testing.T) {
 	off := `{"model":"m","max_tokens":100,"thinking":{"type":"disabled"},"messages":[{"role":"user","content":"hi"}]}`
 	if !newPassthrough(off).canWarmContinue(death) {
 		t.Fatal("thinking explicitly disabled should still warm-continue")
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestWarmContinuationTerminalErrorsAreNotMigratable(t *testing.T) {
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		for _, err := range []error{cause, fmt.Errorf("upstream read: %w", cause)} {
+			if warmContinuableErr(err) {
+				t.Errorf("terminal error eligible: %v", err)
+			}
+		}
+	}
+	if warmContinuableErr(nil) || warmContinuableErr(&agent.UpstreamStatusError{Status: 400}) {
+		t.Fatal("nil/status admission changed")
+	}
+	for _, err := range []error{io.ErrUnexpectedEOF, errors.New("connection reset"), &agent.UpstreamStalledError{Kind: "idle", Err: agent.ErrUpstreamStalled}, &agent.UpstreamStalledError{Kind: "no-progress", Err: agent.ErrUpstreamStalled}, &agent.UpstreamStalledError{Kind: "max-duration", Err: agent.ErrUpstreamStalled}} {
+		if !warmContinuableErr(err) {
+			t.Errorf("existing eligible failure rejected: %v", err)
+		}
+	}
+}
+
+func warmCancellationOwner(ctx context.Context, send func(string, any)) *anthropicPassthrough {
+	p := &anthropicPassthrough{r: httptest.NewRequest(http.MethodPost, "/v1/messages", nil).WithContext(ctx), req: &agent.AnthropicMessagesRequest{Raw: warmContinueInbound()}, openClientBlock: 0, send: send}
+	p.asstText.WriteString("Hel")
+	return p
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestWarmContinuationCanceledBeforeEntryOrCall(t *testing.T) {
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	deadline, stop := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer stop()
+	for _, ctx := range []context.Context{canceled, deadline} {
+		writes := 0
+		p := warmCancellationOwner(ctx, func(string, any) { writes++ })
+		// Nil planner is deliberate: canceled entry must not reach it.
+		if err := p.warmContinue(nil, "", ""); err != ctx.Err() {
+			t.Fatalf("entry cause=%v want%v", err, ctx.Err())
+		}
+		if writes != 0 || p.continuing || p.openClientBlock != 0 {
+			t.Fatal("canceled recovery changed state or wrote a frame")
+		}
+	}
+	ctx, cancelDuringClose := context.WithCancel(context.Background())
+	defer cancelDuringClose()
+	writes := 0
+	p := warmCancellationOwner(ctx, func(event string, _ any) {
+		writes++
+		if event != "content_block_stop" {
+			t.Errorf("unexpected close event %s", event)
+		}
+		cancelDuringClose()
+	})
+	if err := p.warmContinue(nil, "", ""); err != context.Canceled {
+		t.Fatalf("post-close cause=%v", err)
+	}
+	if writes != 1 || p.openClientBlock != -1 {
+		t.Fatal("existing close not completed exactly once")
+	}
+}
+
+type warmCancelRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f warmCancelRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type warmCancelReadBody struct{ cancel context.CancelFunc }
+
+func (b *warmCancelReadBody) Read([]byte) (int, error) { b.cancel(); return 0, io.ErrUnexpectedEOF }
+func (*warmCancelReadBody) Close() error               { return nil }
+
+// Cancellation can win while an otherwise retryable upstream read returns.
+// fak-test:runtime fast est=1ms lane=default
+func TestWarmContinuationCanceledDuringAttemptKeepsContextCause(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	attempts, writes := 0, 0
+	p := warmCancellationOwner(ctx, func(string, any) { writes++ })
+	hp := agent.NewHTTPPlanner("http://warm.invalid", "claude-test", "")
+	hp.Provider = agent.ProviderAnthropic
+	hp.Client = &http.Client{Transport: warmCancelRoundTripper(func(r *http.Request) (*http.Response, error) {
+		attempts++
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: &warmCancelReadBody{cancel: cancel}, Request: r}, nil
+	})}
+	if err := p.warmContinue(hp, "key", ""); err != context.Canceled {
+		t.Fatalf("attempt cause=%v", err)
+	}
+	if attempts != 1 || writes != 1 {
+		t.Fatalf("recovery continued after cancel: attempts=%d writes=%d", attempts, writes)
+	}
+}
+
+type warmCancelOnTextWriter struct {
+	*httptest.ResponseRecorder
+	cancel context.CancelFunc
+	once   sync.Once
+}
+
+func (w *warmCancelOnTextWriter) Write(b []byte) (int, error) {
+	n, err := w.ResponseRecorder.Write(b)
+	if strings.Contains(string(b), "Hel") {
+		w.once.Do(w.cancel)
+	}
+	return n, err
+}
+
+// Actual public Anthropic passthrough, partial text, then caller cancellation.
+// The parent is canceled by a successful text write, not a synthetic write error.
+// fak-test:runtime medium est=100ms lane=default
+func TestWarmContinuationPublicPassthroughStopsOnCallerCancel(t *testing.T) {
+	t.Setenv("FAK_WARM_CONTINUE", "1")
+	t.Setenv("FAK_STREAM_HEARTBEAT_S", "")
+	t.Setenv("FAK_EP_FANOUT_ADDRS", "")
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterAdjudicator(0, toolAdj{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var calls atomic.Int32
+	upDone := make(chan struct{})
+	var doneOnce sync.Once
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, warmContinueDeadFrames)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+		doneOnce.Do(func() { close(upDone) })
+	}))
+	defer upstream.Close()
+	srv, err := New(Config{EngineID: "test", Model: "claude-test", BaseURL: upstream.URL, Provider: "anthropic", APIKey: "configured-key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	var logMu sync.Mutex
+	var logs []string
+	srv.logf = func(format string, args ...any) {
+		logMu.Lock()
+		logs = append(logs, fmt.Sprintf(format, args...))
+		logMu.Unlock()
+	}
+	writer := &warmCancelOnTextWriter{ResponseRecorder: httptest.NewRecorder(), cancel: cancel}
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(warmContinueInbound()))).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", "caller-key")
+	done := make(chan struct{})
+	go func() { defer close(done); srv.Handler().ServeHTTP(writer, req) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Error("handler did not join")
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled passthrough did not terminate")
+	}
+	select {
+	case <-upDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("upstream request not canceled")
+	}
+	if calls.Load() != 1 || ctx.Err() != context.Canceled {
+		t.Fatalf("calls=%d context=%v", calls.Load(), ctx.Err())
+	}
+	body := writer.Body.String()
+	if !strings.Contains(body, "Hel") || strings.Contains(body, "content_block_stop") {
+		t.Fatalf("canceled turn entered recovery: %q", body)
+	}
+	logMu.Lock()
+	text := strings.Join(logs, "\n")
+	logMu.Unlock()
+	if !strings.Contains(text, "context canceled") || strings.Contains(text, "warm-continue") {
+		t.Fatalf("terminal cause was replaced or retried: %s", text)
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestWarmContinuationCancelAtFinalAttemptPreservesCause(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	attempts, logs := 0, 0
+	p := warmCancellationOwner(ctx, func(string, any) {})
+	p.s = &Server{logf: func(string, ...any) {
+		logs++
+		if logs == warmContinueMaxAttempts {
+			cancel()
+		}
+	}}
+	hp := agent.NewHTTPPlanner("http://warm.invalid", "claude-test", "")
+	hp.Provider = agent.ProviderAnthropic
+	hp.Client = &http.Client{Transport: warmCancelRoundTripper(func(r *http.Request) (*http.Response, error) {
+		attempts++
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: &warmCancelReadBody{cancel: func() {}}, Request: r}, nil
+	})}
+	if err := p.warmContinue(hp, "key", ""); err != context.Canceled {
+		t.Fatalf("final callback replaced cause: %v", err)
+	}
+	if attempts != warmContinueMaxAttempts || logs != warmContinueMaxAttempts {
+		t.Fatalf("fixture did not reach final attempt: %d/%d", attempts, logs)
 	}
 }
