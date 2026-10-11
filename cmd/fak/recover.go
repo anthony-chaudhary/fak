@@ -614,7 +614,11 @@ func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 			Notes: []string{
 				"the command was blocked by a dangerous gotchas pattern, an explicit deny rule, or an arg predicate",
 				"for autonomous agents: practice scoped fail-to-abstain — pivot to permitted tools, isolate safe non-gated subtasks (tests, diagnostics), commit partial verified deliverables, and record a structured ABSTAIN verdict with exact boundary specifications for operator escalation",
-				"(Operator only — do not attempt from autonomous agent): if the operation is benign, run with --posture default_open or configure an operator overlay with `fak guard allow`",
+				"for source data mistaken for execution: propose the actual typed Write or Edit with explicit file targets and data fields; apply_patch input still requires exact admission, and an incomplete parser or workspace admission leaves its DENY in force",
+				"execute only ALLOW or the exact TRANSFORM through the matching client operation; an admitted Write permits only the identical file target and content, never shell execution or a previously denied patch",
+				"default_open, `fak guard allow`, and confirmation tokens do not lift explicit deny rules or dangerous gotchas; human task approval is not a verdict override",
+				"(Operator only — do not attempt from autonomous agent): changing an active deny policy requires a separate scoped operator policy decision; source-task approval does not override the existing verdict",
+				"enable FAK_AUDIT_JOURNAL in the gateway process environment before startup, verify the journal with `fak audit verify <path>`, and select an actual denial with `fak complain --from-journal --journal <path> --trace-id <trace>`; missing historical rows remain missing",
 			},
 		},
 		"TRUST_VIOLATION": {

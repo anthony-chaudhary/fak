@@ -265,6 +265,59 @@ What Codex gets from this path:
 Use this path when you are running Codex itself. It preserves Codex's current model wire and
 adds fak as an explicit, inspectable tool boundary.
 
+### Recover a source-data refusal
+
+When a source edit is refused because its payload describes a dangerous operation,
+retain the refusal and run `fak recover POLICY_BLOCK`. Propose the edit through its
+actual typed data tool, such as `Write` with `file_path` and `content`, or the
+client's declared `Edit` schema. An `apply_patch` call uses `input` with explicit
+`*** Update File` or `*** Add File` targets, but incomplete patch parsing or
+workspace admission may still refuse it. Keep that `DENY`; this recovery advice
+does not establish that patch support has been repaired. Preserve absolute
+targets inside the authorized workspace when the client uses absolute paths.
+Path, policy, credential, self-modification, and live-lease checks remain
+authoritative for each proposed edit.
+
+An independently admitted `Write` is a different typed data operation from a
+denied patch. Perform only the identical target/content write through the client
+file API named by that admission, retaining the prior patch refusal. A `Write`
+verdict never authorizes a shell action, execution payload, or a different patch.
+
+Re-adjudicate the corrected call with a fresh trace. Execute only an `ALLOW` call
+or the exact repaired call returned by `TRANSFORM`; retain a new `DENY` and continue
+permitted independent work. Human approval authorizes the task, not overriding a
+kernel verdict. `default_open`, `fak guard allow`, and confirmation tokens do not
+lift explicit deny rules or dangerous gotchas. Do not encode, hide, or relabel an
+executable payload to pass an edit as data.
+
+To retain future MCP verdicts for an appeal, set `FAK_AUDIT_JOURNAL` to an absolute
+file path in the gateway child environment before it starts. The existing journal
+emitter records kernel decisions when enabled. A standalone `fak serve --stdio`
+does not enable the guard CLI's default journal. For a direct PowerShell launch:
+
+```powershell
+$env:FAK_AUDIT_JOURNAL = 'C:\absolute\workspace\.fak\guard\audit\source-recovery.jsonl'
+fak serve --stdio --policy C:\absolute\policy.json
+```
+
+For an installed MCP server, set the same variable in that child process's
+configured environment, then restart or reload the MCP child. Setting it in an
+unrelated shell cannot change an already running gateway.
+
+After an actual refusal, verify the hash chain and select the exact denial:
+
+```text
+fak audit verify <absolute-journal-path>
+fak complain --reason POLICY_BLOCK --tool apply_patch --from-journal --journal <absolute-journal-path> --trace-id <actual-denial-trace> --workspace <blocked-workspace> --repo <owner/repo> --summary "Source-data refusal"
+```
+
+Add `--live` only when filing is authorized. If a trace has multiple matching
+denials, add `--journal-seq <seq>` or `--args-digest <digest>` with `--from-journal`
+to select the refused call.
+The journal does not create historical rows for refusals emitted before it was
+enabled. Preserve those receipts as missing-journal evidence in a workflow
+complaint; a later reproduced refusal is a separate witness, not a recovered row.
+
 ### Break-glass recovery for guard failures
 
 If the guarded authentication bootstrap itself cannot start on Windows, invoke the installed
