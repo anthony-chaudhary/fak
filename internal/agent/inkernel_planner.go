@@ -314,6 +314,7 @@ type InKernelPlanner struct {
 	// acquisition/validation/release serialize with every other tree access and can
 	// never race a demand path. Nil until the first claim-bearing warm. Guarded by mu.
 	warmClaimCache *radixkv.StartupCache
+	warmClaimNow   func() time.Time
 	// warmClaimHandle is the currently bound startup claim (CW-06, #13341). It is the
 	// finite residency handle the last successful warm acquired; the lifecycle's
 	// BindRelease callback owns releasing it on Complete/Release. Guarded by mu.

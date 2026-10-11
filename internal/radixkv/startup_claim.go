@@ -144,6 +144,7 @@ type StartupCache struct {
 	releasedClaims int
 	expiredClaims  int
 	refusedClaims  int
+	now            func() time.Time
 }
 
 // NewStartupCache wraps tree with its own mutex. Callers that already serialize the tree
@@ -154,13 +155,26 @@ func NewStartupCache(tree *Tree) *StartupCache {
 
 // NewStartupCacheWithLocker shares serialization with other access paths over tree.
 func NewStartupCacheWithLocker(tree *Tree, lock sync.Locker) *StartupCache {
+	return NewStartupCacheWithClock(tree, lock, nil)
+}
+
+// NewStartupCacheWithClock shares tree serialization and fixes the expiry clock at
+// construction. A nil clock uses time.Now; callbacks run under the shared locker.
+func NewStartupCacheWithClock(tree *Tree, lock sync.Locker, now func() time.Time) *StartupCache {
 	if tree == nil {
 		tree = New(0)
 	}
 	if lock == nil {
 		lock = &sync.Mutex{}
 	}
-	return &StartupCache{lock: lock, tree: tree}
+	return &StartupCache{lock: lock, tree: tree, now: now}
+}
+
+func (s *StartupCache) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
 }
 
 // StartupClaimStats is a snapshot of this boundary's claim accounting.
@@ -247,7 +261,7 @@ func (s *StartupCache) AcquireStartup(cfg StartupClaimConfig, tokens []int, kv *
 	}
 	if cfg.TTL > 0 {
 		st.hasExpiry = true
-		st.expiresAt = time.Now().Add(cfg.TTL)
+		st.expiresAt = s.clock().Add(cfg.TTL)
 	}
 	if s.gens == nil {
 		s.gens = map[*node]uint64{}
@@ -276,7 +290,7 @@ func (s *StartupCache) validateLocked(st *startupClaimState) bool {
 	if st.released || st.gen == 0 || st.gen > s.claimSeq {
 		return false
 	}
-	if st.hasExpiry && !time.Now().Before(st.expiresAt) {
+	if st.hasExpiry && !s.clock().Before(st.expiresAt) {
 		s.expireLocked(st)
 		return false
 	}
@@ -360,7 +374,7 @@ func (s *StartupCache) dropClaimLocked(st *startupClaimState) {
 // reclaimExpiredLocked sweeps every tracked claim for lazily-expired leases. It is bounded
 // by the number of live claims (the gens map), not by tree size.
 func (s *StartupCache) reclaimExpiredLocked() {
-	now := time.Now()
+	now := s.clock()
 	for n, gen := range s.gens {
 		if st := s.claimsByGen[gen]; st != nil && st.hasExpiry && !now.Before(st.expiresAt) && st.node == n {
 			s.expireLocked(st)
