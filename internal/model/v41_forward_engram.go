@@ -363,6 +363,21 @@ func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]floa
 		return gatheredRows, v41StageErr(v41StageEngram, l,
 			fmt.Errorf("%w: Engram row identifiers %d, want %d positions x %d columns", ErrV41NativeUnsupported, len(layerRows), positions, cols))
 	}
+	// Both paths use x[t]: reduced gates index its hidden row, while full gates
+	// publish stream 0 back into it. Validate every used row before gathering or
+	// mutating any position, so missing rows cannot panic and copy cannot truncate.
+	if len(x) < positions {
+		return gatheredRows, v41StageErr(v41StageEngram, l,
+			fmt.Errorf("%w: Engram hidden geometry has %d positions for %d tokens",
+				ErrV41NativeUnsupported, len(x), positions))
+	}
+	for t := range positions {
+		if len(x[t]) != H {
+			return gatheredRows, v41StageErr(v41StageEngram, l,
+				fmt.Errorf("%w: Engram hidden geometry position %d has width %d, want %d",
+					ErrV41NativeUnsupported, t, len(x[t]), H))
+		}
+	}
 	gathered, err := GatherV41EngramRows([]*V41EngramRowCache{stage.caches[cacheIdx]}, layerRows, cols)
 	if err != nil {
 		return gatheredRows, v41StageErr(v41StageEngram, l, fmt.Errorf("%w: %w", ErrV41NativeUnsupported, err))
