@@ -195,7 +195,7 @@ func softDeadlineCold(t *testing.T, srv *Server, f *softDeadlineUpstream) int {
 // fak-test:justify why=regression when=changed:internal/gateway/**
 // fak-test:runtime medium est=7s lane=default
 func TestDeadlineAdmissionPreparedSoftSlotResidency(t *testing.T) {
-	for _, name := range []string{"buffered", "streamed", "other_slot_evicted", "shorter_watchdog", "selected_slot_evicted", "prompt_changed", "busy_wait_slot", "soft_disabled", "explicit_slot", "cache_disabled", "shaped_prefix", "shaping_loses_soft_slot", "shaping_grows_tail", "static_authorization_override", "dynamic_authorization_override", "duplicate_slot"} {
+	for _, name := range []string{"buffered", "streamed", "other_slot_evicted", "shorter_watchdog", "selected_slot_evicted", "prompt_changed", "busy_wait_slot", "soft_disabled", "explicit_slot", "explicit_other_slot", "cache_disabled", "shaped_prefix", "shaping_loses_soft_slot", "shaping_grows_tail", "static_authorization_override", "dynamic_authorization_override", "duplicate_slot"} {
 		t.Run(name, func(t *testing.T) {
 			srv, p, f := softDeadlineServer(t)
 			slot := softDeadlineCold(t, srv, f)
@@ -217,6 +217,8 @@ func TestDeadlineAdmissionPreparedSoftSlotResidency(t *testing.T) {
 				p.LlamaSoftSlot = false
 			case "explicit_slot":
 				p.ExtraBody = json.RawMessage(fmt.Sprintf(`{"id_slot":%d}`, slot))
+			case "explicit_other_slot":
+				p.ExtraBody = json.RawMessage(fmt.Sprintf(`{"id_slot":%d}`, (slot+1)%4))
 			case "cache_disabled":
 				p.ExtraBody = json.RawMessage(`{"cache_prompt":false}`)
 			case "shaped_prefix":
