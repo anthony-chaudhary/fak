@@ -774,6 +774,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !validateChatRequestIngress(w, req) {
 		return
 	}
+	s.bindUnkeyedChatConversation(w, r, req.Model, req.Tools, req.Messages)
 	// Bind the client deadline before routing or preparation. Cache credit is
 	// selected only after the execution route is fixed below.
 	r, cancelDeadline := bindClientDeadline(r, turnCostBegan)

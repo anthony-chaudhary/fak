@@ -3,22 +3,26 @@ package gateway
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 // UnkeyedPerConnectionTraceID is a reserved DefaultTraceID: instead of charging
 // every header-less request to one shared session, the gateway derives one
-// session per client connection, so one agent exhausting a budget cannot 409
-// every other header-less client on the endpoint (fak-private#930).
+// session per client connection. OpenAI chat requests with a first user turn
+// refine that fallback to conversation continuity after bounded body decoding.
+// This is session accounting, not an authenticated agent identity (#13777).
 const UnkeyedPerConnectionTraceID = "unkeyed:per-connection"
 
-// UnkeyedTracePrefix prefixes every per-connection identity the gateway derives
+// UnkeyedTracePrefix prefixes every header-less session the gateway derives
 // under UnkeyedPerConnectionTraceID.
 const UnkeyedTracePrefix = "unkeyed-"
 
-// IsUnkeyedTrace reports whether trace is a gateway-derived per-connection
-// identity for a caller that sent no trace header.
+// IsUnkeyedTrace recognizes the derived-session namespace for budget seeding.
+// The prefix alone is not proof of gateway provenance or caller identity.
 func IsUnkeyedTrace(trace string) bool {
 	return strings.HasPrefix(trace, UnkeyedTracePrefix) && len(trace) > len(UnkeyedTracePrefix)
 }
@@ -43,4 +47,53 @@ func unkeyedConnectionTrace(r *http.Request) string {
 	}
 	sum := sha256.Sum256([]byte(r.RemoteAddr))
 	return UnkeyedTracePrefix + hex.EncodeToString(sum[:8])
+}
+
+// Only metrics middleware can set this request-local marker when it generates
+// a missing trace. An incoming header in the unkeyed namespace is not a marker.
+type unkeyedTraceGeneratedKey struct{}
+
+// bindUnkeyedChatConversation keeps an unchanged OpenAI conversation prefix on
+// one budget across reconnections, and separates different prefixes sharing a
+// proxy connection. Call after authentication and the existing bounded decode,
+// before model/tool/message transformations or session admission.
+//
+// The root is the original message prefix through the first user turn. Changes
+// to model, tools or root start new accounting, as does session-table eviction.
+// Identical anonymous prefixes share accounting: this cannot identify an agent
+// or prevent intentional budget resets. No-user requests retain the connection
+// fallback. Other wire adapters and explicit/default traces are unchanged.
+func (s *Server) bindUnkeyedChatConversation(w http.ResponseWriter, r *http.Request, model string, tools []agent.ToolDef, messages []agent.Message) {
+	if s == nil || r == nil || s.DefaultTraceID() != UnkeyedPerConnectionTraceID ||
+		r.Context().Value(unkeyedTraceGeneratedKey{}) != true {
+		return
+	}
+	end := 0
+	for i, message := range messages {
+		if message.Role == agent.RoleUser {
+			end = i + 1
+			break
+		}
+	}
+	if end == 0 {
+		return
+	}
+	if model == "" {
+		model = s.model
+	}
+	// Use only the principal authenticated into context, never principalFor's
+	// legacy header/body fallback. Structured encoding separates tuple fields.
+	identity := struct {
+		Version   string          `json:"version"`
+		Principal string          `json:"principal"`
+		Model     string          `json:"model"`
+		Tools     []agent.ToolDef `json:"tools,omitempty"`
+		Root      []agent.Message `json:"root"`
+	}{"unkeyed-chat-v1", principalFromContext(r.Context()), model, tools, messages[:end]}
+	encoded, err := json.Marshal(identity)
+	if err != nil {
+		return // no new body reader or alternate decode path
+	}
+	sum := sha256.Sum256(encoded)
+	s.useHTTPTrace(w, r, UnkeyedTracePrefix+"conversation-"+hex.EncodeToString(sum[:]))
 }

@@ -421,6 +421,9 @@ func ensureHTTPTrace(s *Server, w http.ResponseWriter, r *http.Request) string {
 		traceID = requestTraceID(r)
 		if traceID == "" && s != nil {
 			traceID = s.headerlessTrace(r)
+			if s.DefaultTraceID() == UnkeyedPerConnectionTraceID {
+				*r = *r.WithContext(context.WithValue(r.Context(), unkeyedTraceGeneratedKey{}, true))
+			}
 		}
 		ctx = newTraceContext(w3cTraceID(traceID), 0)
 	}
