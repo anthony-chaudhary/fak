@@ -258,8 +258,8 @@ const (
 	preparedDisambiguationNotRequired  = "not-required"
 )
 
-func bindPreparedLandDisambiguation(root, wtPath, candidateTree string, paths []string, witnesses *DisambiguationWitnesses, git GitRunner) (PreparedLandDisambiguation, error) {
-	rootTree, err := preparedLandTreeSHA(root, "HEAD", git)
+func bindPreparedLandDisambiguation(root, wtPath, rootRevision, candidateTree string, paths []string, witnesses *DisambiguationWitnesses, git GitRunner) (PreparedLandDisambiguation, error) {
+	rootTree, err := preparedLandTreeSHA(root, rootRevision, git)
 	if err != nil {
 		return PreparedLandDisambiguation{}, fmt.Errorf("bind root disambiguation tree: %w", err)
 	}
@@ -419,7 +419,7 @@ func persistPreparedLand(root, wtPath, targetRef, parentSHA, treeSHA, candidateS
 	if err != nil {
 		return PreparedLandReceipt{}, err
 	}
-	disambiguationBinding, err := bindPreparedLandDisambiguation(root, wtPath, treeSHA, paths, disambiguation, git)
+	disambiguationBinding, err := bindPreparedLandDisambiguation(root, wtPath, parentSHA, treeSHA, paths, disambiguation, git)
 	if err != nil {
 		return PreparedLandReceipt{}, err
 	}

@@ -209,7 +209,7 @@ func persistPendingLand(root, wtPath, targetRef, parentSHA, treeSHA, candidateSH
 	if err != nil {
 		return PendingLandReceipt{}, fmt.Errorf("parent tree: %w", err)
 	}
-	disambiguationBinding, err := bindPreparedLandDisambiguation(root, wtPath, treeSHA, paths, disambiguation, git)
+	disambiguationBinding, err := bindPreparedLandDisambiguation(root, wtPath, parentSHA, treeSHA, paths, disambiguation, git)
 	if err != nil {
 		return PendingLandReceipt{}, err
 	}

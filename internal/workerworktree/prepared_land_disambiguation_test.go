@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -11,6 +12,57 @@ import (
 type preparedDisambiguationObservation struct {
 	reads       int
 	postApplies int
+}
+
+// fak-test:runtime fast est=10s lane=default
+func TestPrepareCacheBindingRetainsParentWhenRootAdvances(t *testing.T) {
+	installPreparedDisambiguationOracle(t)
+	f := newPreparedFixture(t, "internal/workerworktree/prepared_candidate.go")
+	parentTree := strings.TrimSpace(mustGit(t, f.root, "rev-parse", f.base+"^{tree}"))
+	var peer string
+	prospective := func(_ string, materializationErr error) Result {
+		if materializationErr != nil {
+			t.Fatal(materializationErr)
+		}
+		if err := os.WriteFile(filepath.Join(f.root, "peer.txt"), []byte("peer\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mustGit(t, f.root, "add", "peer.txt")
+		mustGit(t, f.root, "commit", "-q", "-m", "peer")
+		peer = strings.TrimSpace(mustGit(t, f.root, "rev-parse", "refs/heads/main"))
+		return Result{OK: true}
+	}
+	r, prep := PrepareProspectiveLand(f.root, f.wt, f.base, f.msg, []string{f.rel}, f.binding,
+		func(string) (bool, string) { return true, "verified" }, prospective, nil)
+	if !prep.OK || prep.Code != LandResultPrepared {
+		t.Fatalf("immutable parent preparation failed: code=%s detail=%s", prep.Code, prep.Detail)
+	}
+	if peer == "" || peer == f.base {
+		t.Fatal("fixture did not advance live root")
+	}
+	if r.ParentSHA != f.base || r.Disambiguation.RootTreeSHA != parentTree || r.Disambiguation.RootCacheIdentity != disambiguationCacheKey(parentTree) {
+		t.Fatal("prepared receipt relabeled its verified parent view")
+	}
+	if parent := strings.TrimSpace(mustGit(t, f.root, "rev-parse", r.CandidateSHA+"^")); parent != f.base {
+		t.Fatal("candidate parent changed to live root")
+	}
+	cas := 0
+	git := func(root string, args []string) (int, string) {
+		if len(args) > 0 && args[0] == "update-ref" {
+			cas++
+		}
+		return defaultGit(root, args)
+	}
+	got := AcceptPreparedLand(f.root, f.wt, preparedWant(f, r), git)
+	if got.OK || got.Code != LandResultPreparedReprepare || !got.Preserved || got.Applied || got.Committed {
+		t.Fatalf("drift refusal contract: code=%s preserved=%t applied=%t committed=%t", got.Code, got.Preserved, got.Applied, got.Committed)
+	}
+	if cas != 0 {
+		t.Fatalf("root drift attempted %d CAS operations", cas)
+	}
+	if after := strings.TrimSpace(mustGit(t, f.root, "rev-parse", "refs/heads/main")); after != peer {
+		t.Fatal("drift refusal changed peer root")
+	}
 }
 
 func installPreparedDisambiguationOracle(t *testing.T) *preparedDisambiguationObservation {
