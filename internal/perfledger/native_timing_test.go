@@ -10,8 +10,8 @@ import (
 // fak-test:runtime fast est=10ms lane=default
 func TestNativeTimingSummaryPreservesMeasuredPhases(t *testing.T) {
 	recs := []Record{
-		{PromptTokens: 100, CompletionTokens: 4, CachedTokens: 2, NativeTiming: NewNativeTiming(10, 4, 10, 8)},
-		{PromptTokens: 200, CompletionTokens: 6, CachedTokens: 3, NativeTiming: NewNativeTiming(20, 6, 20, 0)},
+		{PromptTokens: 100, CompletionTokens: 4, CachedTokens: 2, NativeTiming: NewNativeTiming(128, 4, 10, 8)},
+		{PromptTokens: 200, CompletionTokens: 6, CachedTokens: 3, NativeTiming: NewNativeTiming(256, 6, 20, 0)},
 		{PromptTokens: 300, CompletionTokens: 8, CachedTokens: 4, NativeTiming: NewNativeTiming(0, 8, 0, 2)},
 		{PromptTokens: 40, CompletionTokens: 10, CachedTokens: 5}, // proxy or an older row
 	}
@@ -31,15 +31,15 @@ func TestNativeTimingSummaryPreservesMeasuredPhases(t *testing.T) {
 	if n.PrefillP50MS != 10 || n.DecodeP50MS != 2 {
 		t.Errorf("phase latency p50 = prefill %.3fms decode %.3fms, want 10ms/2ms", n.PrefillP50MS, n.DecodeP50MS)
 	}
-	if n.PrefillTPSP50 != 1000 || n.DecodeTPSP50 != 500 {
-		t.Errorf("phase rate p50 = prefill %.2f decode %.2f, want 1000/500", n.PrefillTPSP50, n.DecodeTPSP50)
+	if n.PrefillTPSP50 != 12800 || n.DecodeTPSP50 != 375 {
+		t.Errorf("phase rate p50 = prefill %.2f decode %.2f, want 12800/375", n.PrefillTPSP50, n.DecodeTPSP50)
 	}
-	if n.PrefillTPSWeighted != 1000 || n.DecodeTPSWeighted != 1200 {
-		t.Errorf("weighted phase rates = prefill %.2f decode %.2f, want 1000/1200", n.PrefillTPSWeighted, n.DecodeTPSWeighted)
+	if n.PrefillTPSWeighted != 12800 || n.DecodeTPSWeighted != 1000 {
+		t.Errorf("weighted phase rates = prefill %.2f decode %.2f, want 12800/1000", n.PrefillTPSWeighted, n.DecodeTPSWeighted)
 	}
 
 	line := RenderCompact(rep)
-	for _, want := range []string{"native phases=3", "measured 2/3", "prefill p50=10ms/1000.0 tok/s", "decode p50=2ms/500.0 tok/s"} {
+	for _, want := range []string{"native phases=3", "measured 2/3", "prefill p50=10ms/12800.0 tok/s", "decode p50=2ms/375.0 tok/s"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("compact report %q does not contain %q", line, want)
 		}
@@ -48,7 +48,7 @@ func TestNativeTimingSummaryPreservesMeasuredPhases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"native_timing"`, `"prefill_measured":2`, `"decode_tps_weighted":1200`} {
+	for _, want := range []string{`"native_timing"`, `"prefill_measured":2`, `"decode_tps_weighted":1000`} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("report JSON %s does not contain %s", raw, want)
 		}
@@ -69,7 +69,7 @@ func TestNativeTimingRejectsInvalidAndMissingMeasurements(t *testing.T) {
 	}
 
 	partial := NewNativeTiming(9, 7, 9, math.Inf(1))
-	if partial == nil || partial.PrefillMS != 9 || partial.PrefillTokens != 9 || partial.PrefillTPS != 1000 {
+	if partial == nil || partial.PrefillMS != 9 || partial.PrefillTokens != 9 || partial.PrefillTPS != 0 {
 		t.Fatalf("partial valid timing = %+v, want measured prefill", partial)
 	}
 	if partial.DecodeMS != 0 || partial.DecodeTokens != 0 || partial.DecodeTPS != 0 {
@@ -86,5 +86,38 @@ func TestNativeTimingRejectsInvalidAndMissingMeasurements(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "native_timing") {
 		t.Fatalf("older/proxy row invented native timing: %s", raw)
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestNativeTimingRateEligibilityRetainsRawMeasurements(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name                  string
+		prefill, decode       int
+		prefillTPS, decodeTPS float64
+	}{
+		{"zero tokens", 0, 0, 0, 0},
+		{"below floors", 127, 1, 0, 0},
+		{"at floors", 128, 2, 128, 1},
+		{"above floors", 256, 3, 256, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n := NewNativeTiming(tc.prefill, tc.decode, 1000, 1000)
+			if n == nil || n.PrefillMS != 1000 || n.DecodeMS != 1000 ||
+				n.PrefillTokens != tc.prefill || n.DecodeTokens != tc.decode ||
+				n.PrefillTPS != tc.prefillTPS || n.DecodeTPS != tc.decodeTPS {
+				t.Fatalf("timing=%+v, want raw measurements and rates %g/%g", n, tc.prefillTPS, tc.decodeTPS)
+			}
+			raw, err := json.Marshal(n)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for field, rate := range map[string]float64{"prefill_tps": tc.prefillTPS, "decode_tps": tc.decodeTPS} {
+				if strings.Contains(string(raw), field) != (rate > 0) {
+					t.Errorf("rate field %s eligibility wrong: %s", field, raw)
+				}
+			}
+		})
 	}
 }

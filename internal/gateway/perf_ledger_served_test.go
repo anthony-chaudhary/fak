@@ -157,12 +157,31 @@ func TestPerfLedgerServedNativeTurnsCarryEngineAnatomy(t *testing.T) {
 			}
 			return false
 		}
-		if ms < 0 || math.IsNaN(ms) || math.IsInf(ms, 0) || tokens < 0 || math.IsNaN(rate) || math.IsInf(rate, 0) || (tokens > 0 && rate <= 0) {
+		if ms < 0 || math.IsNaN(ms) || math.IsInf(ms, 0) || tokens < 0 || math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 {
 			t.Fatalf("row %d measured %s phase is invalid: ms=%v tokens=%d rate=%v", row, name, ms, tokens, rate)
+		}
+		rateTokens := 0
+		switch name {
+		case "prefill":
+			if tokens >= perfledger.MinPrefillRateTokens {
+				rateTokens = tokens
+			}
+		case "decode":
+			if tokens >= 2 {
+				rateTokens = tokens - 1
+			}
+		default:
+			t.Fatalf("unexpected native phase %q", name)
+		}
+		wantRate := math.Round(float64(rateTokens)/(ms/1000)*100) / 100
+		if rate != wantRate {
+			t.Fatalf("row %d measured %s rate=%v, want %v for %d raw tokens in %vms", row, name, rate, wantRate, tokens, ms)
 		}
 		return true
 	}
 	wantPrefillMeasured, wantDecodeMeasured, wantTTFTMeasured := 0, 0, 0
+	var prefillRateTokens, decodeRateTokens int
+	var prefillRateMS, decodeRateMS float64
 	for i, r := range rep.Records {
 		if r.Model != "native-synth" {
 			t.Errorf("row %d model = %q, want native-synth", i, r.Model)
@@ -174,6 +193,14 @@ func TestPerfLedgerServedNativeTurnsCarryEngineAnatomy(t *testing.T) {
 		if timing := r.NativeTiming; timing != nil {
 			prefillMeasured = phaseMeasured(i, "prefill", timing.PrefillMS, timing.PrefillTokens, timing.PrefillTPS)
 			decodeMeasured = phaseMeasured(i, "decode", timing.DecodeMS, timing.DecodeTokens, timing.DecodeTPS)
+			if prefillMeasured && timing.PrefillTokens >= perfledger.MinPrefillRateTokens {
+				prefillRateTokens += timing.PrefillTokens
+				prefillRateMS += timing.PrefillMS
+			}
+			if decodeMeasured && timing.DecodeTokens >= 2 {
+				decodeRateTokens += timing.DecodeTokens - 1
+				decodeRateMS += timing.DecodeMS
+			}
 		}
 		if prefillMeasured {
 			wantPrefillMeasured++
@@ -227,8 +254,15 @@ func TestPerfLedgerServedNativeTurnsCarryEngineAnatomy(t *testing.T) {
 	if rep.Summary.Native != 3 || rep.Summary.ByPath[perfledger.PathSerial] != 3 || rep.Summary.TTFTMeasured != wantTTFTMeasured {
 		t.Fatalf("summary = %+v, want native=3 serial=3 ttft_measured=%d", rep.Summary, wantTTFTMeasured)
 	}
+	wantPrefillWeighted, wantDecodeWeighted := 0.0, 0.0
+	if prefillRateMS > 0 {
+		wantPrefillWeighted = math.Round(float64(prefillRateTokens)/(prefillRateMS/1000)*100) / 100
+	}
+	if decodeRateMS > 0 {
+		wantDecodeWeighted = math.Round(float64(decodeRateTokens)/(decodeRateMS/1000)*100) / 100
+	}
 	path := rep.Summary.ByPathStats[perfledger.PathSerial]
-	if path.Count != 3 || path.PrefillMeasured != wantPrefillMeasured || path.DecodeMeasured != wantDecodeMeasured || path.PrefillTPSWeighted <= 0 || path.DecodeTPSWeighted <= 0 {
+	if path.Count != 3 || path.PrefillMeasured != wantPrefillMeasured || path.DecodeMeasured != wantDecodeMeasured || path.PrefillTPSWeighted != wantPrefillWeighted || path.DecodeTPSWeighted != wantDecodeWeighted {
 		t.Fatalf("live serial path summary = %+v, want measured prefill/decode=%d/%d", path, wantPrefillMeasured, wantDecodeMeasured)
 	}
 	metrics := h.srv.renderMetrics()
@@ -285,7 +319,7 @@ func TestPerfLedgerServedNativeTurnsCarryEngineAnatomy(t *testing.T) {
 		t.Fatalf("durable TTFT measured=%d, want live count %d", offline.Summary.TTFTMeasured, wantTTFTMeasured)
 	}
 	offlinePath := offline.Summary.ByPathStats[perfledger.PathSerial]
-	if offlinePath.Count != 3 || offlinePath.PrefillMeasured != wantPrefillMeasured || offlinePath.DecodeMeasured != wantDecodeMeasured || offlinePath.PrefillTPSWeighted <= 0 || offlinePath.DecodeTPSWeighted <= 0 {
+	if offlinePath.Count != 3 || offlinePath.PrefillMeasured != wantPrefillMeasured || offlinePath.DecodeMeasured != wantDecodeMeasured || offlinePath.PrefillTPSWeighted != wantPrefillWeighted || offlinePath.DecodeTPSWeighted != wantDecodeWeighted {
 		t.Fatalf("durable serial path summary = %+v, want measured prefill/decode=%d/%d", offlinePath, wantPrefillMeasured, wantDecodeMeasured)
 	}
 }

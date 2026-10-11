@@ -127,12 +127,20 @@ func TestPerfLedgerNativeTimingSurvivesChatAndOwnedLoopHTTP(t *testing.T) {
 	wantPrefillMS := []float64{80, 90, 140}
 	wantDecodeMS := []float64{4, 3, 2}
 	wantCached := []int{40, 60, 80}
+	wantPrefillTokens := []int{80, 180, 280}
+	wantDecodeTokens := []int{4, 6, 8}
+	wantPrefillTPS := []float64{0, 2000, 2000}
+	wantDecodeTPS := []float64{750, 1666.67, 3500}
 	for i, r := range rep.Records {
 		if r.NativeTiming == nil {
 			t.Fatalf("row %d has no native timing: %+v", i, r)
 		}
 		if r.NativeTiming.PrefillMS != wantPrefillMS[i] || r.NativeTiming.DecodeMS != wantDecodeMS[i] {
 			t.Errorf("row %d phases = %+v, want prefill %.0fms decode %.0fms", i, r.NativeTiming, wantPrefillMS[i], wantDecodeMS[i])
+		}
+		if n := r.NativeTiming; n.PrefillTokens != wantPrefillTokens[i] || n.DecodeTokens != wantDecodeTokens[i] ||
+			n.PrefillTPS != wantPrefillTPS[i] || n.DecodeTPS != wantDecodeTPS[i] {
+			t.Errorf("row %d native raw counts/rates = %+v, want tokens %d/%d rates %g/%g", i, n, wantPrefillTokens[i], wantDecodeTokens[i], wantPrefillTPS[i], wantDecodeTPS[i])
 		}
 		if r.CachedTokens != wantCached[i] {
 			t.Errorf("row %d cached_tokens=%d, want %d", i, r.CachedTokens, wantCached[i])
@@ -148,11 +156,11 @@ func TestPerfLedgerNativeTimingSurvivesChatAndOwnedLoopHTTP(t *testing.T) {
 	if n == nil || n.Count != 3 || n.PrefillMeasured != 3 || n.DecodeMeasured != 3 {
 		t.Fatalf("live native timing coverage = %+v, want 3/3 prefill and decode", n)
 	}
-	if n.PrefillP50MS != 90 || n.DecodeP50MS != 3 || n.PrefillTPSP50 != 2000 || n.DecodeTPSP50 != 2000 {
-		t.Errorf("live native timing medians = %+v, want 90ms/3ms and 2000/2000 tok/s", n)
+	if n.PrefillP50MS != 90 || n.DecodeP50MS != 3 || n.PrefillTPSP50 != 2000 || n.DecodeTPSP50 != 1666.67 {
+		t.Errorf("live native timing medians = %+v, want 90ms/3ms and 2000/1666.67 tok/s", n)
 	}
-	if n.PrefillTPSWeighted != 1741.94 || n.DecodeTPSWeighted != 2000 {
-		t.Errorf("live native timing weighted rates = %+v, want 1741.94/2000", n)
+	if n.PrefillTPSWeighted != 2000 || n.DecodeTPSWeighted != 1666.67 {
+		t.Errorf("live native timing weighted rates = %+v, want 2000/1666.67", n)
 	}
 	if rep.Summary.CacheHitShare != 0.25 {
 		t.Errorf("cache hit share=%.4f, want 0.25", rep.Summary.CacheHitShare)
@@ -164,6 +172,13 @@ func TestPerfLedgerNativeTimingSurvivesChatAndOwnedLoopHTTP(t *testing.T) {
 	recs := h.durable()
 	if len(recs) != 3 {
 		t.Fatalf("durable rows=%d, want 3: %+v", len(recs), recs)
+	}
+	for i, r := range recs {
+		if n := r.NativeTiming; n == nil || n.PrefillMS != wantPrefillMS[i] || n.DecodeMS != wantDecodeMS[i] ||
+			n.PrefillTokens != wantPrefillTokens[i] || n.DecodeTokens != wantDecodeTokens[i] ||
+			n.PrefillTPS != wantPrefillTPS[i] || n.DecodeTPS != wantDecodeTPS[i] {
+			t.Fatalf("durable row %d lost native measurements/rates: %+v", i, n)
+		}
 	}
 	offline := perfledger.BuildReport(recs, 2, false, 0)
 	if len(offline.Records) != 2 || offline.Summary.NativeTiming == nil || offline.Summary.NativeTiming.Count != 2 {

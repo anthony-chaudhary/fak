@@ -147,15 +147,20 @@ type NativeTiming struct {
 }
 
 // NewNativeTiming keeps only finite, positive engine-authored phases. Missing
-// phases remain unknown rather than becoming zero-duration measurements.
+// phases remain unknown rather than becoming zero-duration measurements. Measured
+// phases retain raw counts even when too short to report a rate.
 func NewNativeTiming(prefillTokens, decodeTokens int, prefillMS, decodeMS float64) *NativeTiming {
 	n := &NativeTiming{}
-	if ms, rate, ok := measuredNativePhase(prefillTokens, prefillMS); ok {
+	prefillRateTokens := prefillTokens
+	if prefillRateTokens < MinPrefillRateTokens {
+		prefillRateTokens = 0
+	}
+	if ms, rate, ok := measuredNativePhase(prefillTokens, prefillRateTokens, prefillMS); ok {
 		n.PrefillMS = ms
 		n.PrefillTokens = prefillTokens
 		n.PrefillTPS = rate
 	}
-	if ms, rate, ok := measuredNativePhase(decodeTokens, decodeMS); ok {
+	if ms, rate, ok := measuredNativePhase(decodeTokens, max(decodeTokens, 1)-1, decodeMS); ok {
 		n.DecodeMS = ms
 		n.DecodeTokens = decodeTokens
 		n.DecodeTPS = rate
@@ -166,7 +171,9 @@ func NewNativeTiming(prefillTokens, decodeTokens int, prefillMS, decodeMS float6
 	return n
 }
 
-func measuredNativePhase(tokens int, ms float64) (float64, float64, bool) {
+// rateTokens is separate from the raw count: prefill needs the token floor,
+// and decode excludes the first token emitted by prefill.
+func measuredNativePhase(tokens, rateTokens int, ms float64) (float64, float64, bool) {
 	// Native durations originate as time.Duration; reject values outside that
 	// representable domain when reading persisted rows back from JSONL.
 	const maxNativePhaseMS = 9.223372036854775e12
@@ -177,10 +184,10 @@ func measuredNativePhase(tokens int, ms float64) (float64, float64, bool) {
 	if ms <= 0 || math.IsNaN(ms) || math.IsInf(ms, 0) {
 		return 0, 0, false
 	}
-	if tokens == 0 {
+	if rateTokens == 0 {
 		return ms, 0, true
 	}
-	rate := roundTo(float64(tokens)/(ms/1000), 100)
+	rate := roundTo(float64(rateTokens)/(ms/1000), 100)
 	if rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
 		return ms, 0, true
 	}
@@ -466,35 +473,39 @@ func Summarize(recs []Record) Summary {
 				if n.PrefillMS > 0 {
 					s.NativeTiming.PrefillMeasured++
 					nativePrefillMS = append(nativePrefillMS, n.PrefillMS)
-					if total := nativePrefillTotalMS + n.PrefillMS; math.IsInf(total, 0) || math.IsNaN(total) {
-						nativePrefillWeighted = false
-					} else {
-						nativePrefillTotalMS = total
-					}
-					if total, ok := addNativeTokens(nativePrefillTokens, n.PrefillTokens); ok {
-						nativePrefillTokens = total
-					} else {
-						nativePrefillWeighted = false
-					}
-					if n.PrefillTPS > 0 {
-						nativePrefillTPS = append(nativePrefillTPS, n.PrefillTPS)
+					if n.PrefillTokens >= MinPrefillRateTokens {
+						if n.PrefillTPS > 0 {
+							nativePrefillTPS = append(nativePrefillTPS, n.PrefillTPS)
+						}
+						if total := nativePrefillTotalMS + n.PrefillMS; math.IsInf(total, 0) || math.IsNaN(total) {
+							nativePrefillWeighted = false
+						} else {
+							nativePrefillTotalMS = total
+						}
+						if total, ok := addNativeTokens(nativePrefillTokens, n.PrefillTokens); ok {
+							nativePrefillTokens = total
+						} else {
+							nativePrefillWeighted = false
+						}
 					}
 				}
 				if n.DecodeMS > 0 {
 					s.NativeTiming.DecodeMeasured++
 					nativeDecodeMS = append(nativeDecodeMS, n.DecodeMS)
-					if total := nativeDecodeTotalMS + n.DecodeMS; math.IsInf(total, 0) || math.IsNaN(total) {
-						nativeDecodeWeighted = false
-					} else {
-						nativeDecodeTotalMS = total
-					}
-					if total, ok := addNativeTokens(nativeDecodeTokens, n.DecodeTokens); ok {
-						nativeDecodeTokens = total
-					} else {
-						nativeDecodeWeighted = false
-					}
-					if n.DecodeTPS > 0 {
-						nativeDecodeTPS = append(nativeDecodeTPS, n.DecodeTPS)
+					if n.DecodeTokens >= 2 {
+						if n.DecodeTPS > 0 {
+							nativeDecodeTPS = append(nativeDecodeTPS, n.DecodeTPS)
+						}
+						if total := nativeDecodeTotalMS + n.DecodeMS; math.IsInf(total, 0) || math.IsNaN(total) {
+							nativeDecodeWeighted = false
+						} else {
+							nativeDecodeTotalMS = total
+						}
+						if total, ok := addNativeTokens(nativeDecodeTokens, n.DecodeTokens-1); ok {
+							nativeDecodeTokens = total
+						} else {
+							nativeDecodeWeighted = false
+						}
 					}
 				}
 			}
