@@ -90,15 +90,38 @@ func (s *Session) v41IndexSelectFunc() v41IndexSelectFunc {
 			return []int32{}, nil
 		}
 		want := min(topK, rows)
-		run := func() ([]int32, error) {
+		run := func() (result []int32, cause error) {
+			var owned []compute.Tensor
+			defer func() {
+				// Preserve the selected operation's error or original panic,
+				// while still attempting every owned release.
+				primaryPanic := recover()
+				var cleanupPanic any
+				for i := len(owned) - 1; i >= 0; i-- {
+					func() {
+						defer func() {
+							if r := recover(); r != nil && cleanupPanic == nil {
+								cleanupPanic = r
+							}
+						}()
+						s.Backend.Free(owned[i])
+					}()
+				}
+				if primaryPanic != nil {
+					panic(primaryPanic)
+				}
+				if cause == nil && cleanupPanic != nil {
+					panic(cleanupPanic)
+				}
+			}()
 			stage = "score upload"
 			st := s.uploadHostF32([]int{rows}, scores, compute.MemoryActivation, "V4.1 index-select scores")
-			defer s.Backend.Free(st)
+			owned = append(owned, st)
 			stage = "index-select"
 			selected, err := operation.V41IndexSelect(st, rows, topK, topKBlocks, blockSize)
 			fresh := selected.Buf() != nil && selected.Backend() == s.Backend && selected.Buf() != st.Buf()
 			if fresh {
-				defer s.Backend.Free(selected)
+				owned = append(owned, selected)
 			}
 			if err != nil {
 				return nil, err
