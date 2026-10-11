@@ -267,3 +267,47 @@ The full upstream LICENSE at the pinned revision follows:
    See the License for the specific language governing permissions and
    limitations under the License.
 ```
+
+
+## Expert route identity normalization
+
+`internal/model/expert_route_trace_analyze.go` adapts the grouped distinct-expert
+request contract from Mixtral-offloading at revision
+`ce545188b804238f0b23a59fc45e6a8f8b390c40`:
+https://github.com/dvmazur/mixtral-offloading/blob/ce545188b804238f0b23a59fc45e6a8f8b390c40/src/custom_layers.py#L292
+https://github.com/dvmazur/mixtral-offloading/blob/ce545188b804238f0b23a59fc45e6a8f8b390c40/src/expert_cache.py#L134
+
+The equivalent set contract was compared with MoE-Infinity at revision
+`0f96d563db2dda5f1834bf667f6fcc44f45b2b9d` (Apache-2.0):
+https://github.com/EfficientMoE/MoE-Infinity/blob/0f96d563db2dda5f1834bf667f6fcc44f45b2b9d/moe_infinity/spec_decode/_prefetch_route.py#L52
+https://github.com/EfficientMoE/MoE-Infinity/blob/0f96d563db2dda5f1834bf667f6fcc44f45b2b9d/LICENSE
+No upstream NOTICE file appears in either pinned source tree.
+
+Changed for Fak: reuse the existing order-preserving Go `dedupeInts` helper in
+offline route export and inferred TopK. Later invocations remain separate accesses.
+No upstream cache, prefetch implementation, dependency or test fixture is copied.
+The Mixtral MIT copyright and permission notice follows:
+
+```text
+MIT License
+
+Copyright (c) 2023 Artyom Eliseev, Denis Mazur
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

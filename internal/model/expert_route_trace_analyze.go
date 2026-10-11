@@ -222,8 +222,8 @@ func AnalyzeExpertRouteTrace(t ExpertRouteTrace, opts ExpertRouteAnalyzeOptions)
 		set := dedupeInts(ev.Experts)
 		rep.Picks += len(set)
 		byLayer[ev.Layer] = append(byLayer[ev.Layer], set)
-		if len(ev.Experts) > rep.TopK && t.Header.TopK == 0 {
-			rep.TopK = len(ev.Experts)
+		if len(set) > rep.TopK && t.Header.TopK == 0 {
+			rep.TopK = len(set)
 		}
 	}
 	layers := make([]int, 0, len(byLayer))
@@ -499,11 +499,12 @@ func ExpertRouteTraceToStrix(t ExpertRouteTrace, opts ExpertRouteAnalyzeOptions,
 	maxLayer, maxExpert := -1, -1
 	for _, ev := range routes {
 		maxLayer = maxInt(maxLayer, ev.Layer)
-		for _, e := range ev.Experts {
+		set := dedupeInts(ev.Experts)
+		for _, e := range set {
 			maxExpert = maxInt(maxExpert, e)
 			out.Events = append(out.Events, StrixMoECacheEvent{Layer: ev.Layer, Expert: e, Bytes: expertBytes})
 		}
-		out.TopK = maxInt(out.TopK, len(ev.Experts))
+		out.TopK = maxInt(out.TopK, len(set))
 	}
 	if len(out.Events) == 0 {
 		return StrixMoECacheTrace{}, fmt.Errorf("%w: no routes after phase filter %q", ErrExpertRouteTrace, opts.Phase)
