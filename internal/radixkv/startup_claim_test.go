@@ -118,12 +118,21 @@ func TestStartupClaimQuotaRefusalKeepsDemandIntact(t *testing.T) {
 // report warm readiness and its lease is reclaimed lazily (no timer).
 func TestStartupClaimExpiryInvalidatesHandle(t *testing.T) {
 	tree := New(0)
-	sc := NewStartupCache(tree)
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	sc := NewStartupCacheWithClock(tree, nil, func() time.Time { return now })
 	claim, err := sc.AcquireStartup(StartupClaimConfig{SpareBytes: 1 << 20, TTL: time.Millisecond}, []int{1, 2, 3}, smallStartupKV(t, 4))
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
-	time.Sleep(5 * time.Millisecond)
+	deadline, expires := claim.ExpiresAt()
+	if !expires || !deadline.Equal(now.Add(time.Millisecond)) {
+		t.Fatal("claim deadline must use injected clock")
+	}
+	now = deadline.Add(-time.Nanosecond)
+	if !sc.Validate(claim) {
+		t.Fatal("claim must remain live strictly before deadline")
+	}
+	now = deadline
 	if sc.Validate(claim) {
 		t.Fatal("expired claim must not validate")
 	}
@@ -237,5 +246,22 @@ func TestStartupClaimConcurrentUseAndRelease(t *testing.T) {
 	}
 	if s := sc.Stats(); s.Claims != s.Released {
 		t.Fatalf("claims %d != released %d — permanent pin", s.Claims, s.Released)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestStartupClaimNilClockCompatibility(t *testing.T) {
+	tree := New(0)
+	cache := NewStartupCacheWithClock(tree, nil, nil)
+	claim, err := cache.AcquireStartup(StartupClaimConfig{SpareBytes: 1 << 20, TTL: time.Hour}, []int{9, 8}, smallStartupKV(t, 4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cache.Validate(claim) {
+		t.Fatal("nil clock must use a live default clock")
+	}
+	cache.Release(claim)
+	if startupLeaseRefs(tree) != 0 {
+		t.Fatal("release must return the lease")
 	}
 }

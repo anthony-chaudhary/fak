@@ -21,6 +21,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -677,10 +678,13 @@ func TestWarmCacheDemandHandoff(t *testing.T) {
 	t.Run("a stale claim and a scope mismatch preserve the cold fallback", func(t *testing.T) {
 		// Expired claim: the handoff must refuse and hand off nothing.
 		p := warmFixturePlanner(t)
+		var clock atomic.Int64
+		clock.Store(time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC).UnixNano())
+		p.warmClaimNow = func() time.Time { return time.Unix(0, clock.Load()) }
 		scope, suffix := warmAndSuffix(t, p, WarmClaimConfig{SpareBytes: 1 << 20, TTL: time.Minute})
 		// Prime readiness must not race expiry. Replace only the handoff's claim
-		// after the healthy warm, then wait against that handle's precise deadline.
-		p.SetWarmClaimConfig(WarmClaimConfig{SpareBytes: 1 << 20, TTL: time.Nanosecond})
+		// after the healthy warm, then advance the injected clock to its precise deadline.
+		p.SetWarmClaimConfig(WarmClaimConfig{SpareBytes: 1 << 20, TTL: time.Minute})
 		claim, reason := p.acquireWarmClaim(suffix[:len(suffix)-5], WarmPrefixSpec{Scope: scope})
 		if claim == nil || claim.Generation == 0 {
 			t.Fatalf("expiring handoff claim missing: claim=%+v reason=%s", claim, reason)
@@ -689,7 +693,11 @@ func TestWarmCacheDemandHandoff(t *testing.T) {
 		if !expires {
 			t.Fatal("handoff claim has no expiry deadline")
 		}
-		time.Sleep(time.Until(deadline))
+		clock.Store(deadline.Add(-time.Nanosecond).UnixNano())
+		if !p.WarmClaimLive() {
+			t.Fatal("handoff claim must remain live before its deadline")
+		}
+		clock.Store(deadline.UnixNano())
 		if hand := p.demandWarmHandoff(suffix); hand.HandedOff || hand.Reason != "stale_claim" {
 			t.Fatalf("expired claim handed off: %+v", hand)
 		}

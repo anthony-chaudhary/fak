@@ -503,7 +503,7 @@ func (p *InKernelPlanner) acquireWarmClaim(tokens []int, spec WarmPrefixSpec) (*
 		// Share p.mu as the boundary's locker: claim acquisition/validation/release then
 		// serialize with every other tree access over this planner, exactly as scopedTree
 		// does. A separate lock would race the demand path.
-		cache = radixkv.NewStartupCacheWithLocker(tree, &p.mu)
+		cache = radixkv.NewStartupCacheWithClock(tree, &p.mu, p.warmClaimNow)
 		p.warmClaimCache = cache
 	}
 	p.mu.Unlock()
