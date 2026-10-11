@@ -6,10 +6,10 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1285<br>
-rows: 1263<br>
-unverified rows: 0 / 1263<br>
-source-only rows absent from help: 1027
+parsed files: 1300<br>
+rows: 1268<br>
+unverified rows: 0 / 1268<br>
+source-only rows absent from help: 1032
 
 ## Surface table
 
@@ -98,6 +98,10 @@ source-only rows absent from help: 1027
 | `fak bench agent` | executes the bounded same-repository coding-agent benchmark. | runBenchAgent / internal/agentbench | `case` arm of the dispatch switch in cmdBench() | NONE | — | **SOURCE ONLY** |
 | `fak bench effort` |  | runBenchEffort / internal/agent, internal/agentopt, internal/gateway | `case` arm of the dispatch switch in cmdBench() | NONE | — | **SOURCE ONLY** |
 | `fak bench gitspawn` |  | runGitSpawnBench / internal/windowgate | `case` arm of the dispatch switch in cmdBench() | RUNTIME | — | **SOURCE ONLY** |
+| `fak bench h2h` |  | runBenchH2H / internal/h2hbench | `case` arm of the dispatch switch in cmdBench() | NONE | — | **SOURCE ONLY** |
+| `fak bench h2h help` |  |  | `if` arm of the dispatch in runBenchH2H() | N/A | — | **SOURCE ONLY** |
+| `fak bench h2h report` |  | runBenchH2HReport / internal/h2hbench | `case` arm of the dispatch switch in runBenchH2H() | NONE | — | **SOURCE ONLY** |
+| `fak bench h2h run` |  | runBenchH2HRun / internal/h2hbench | `case` arm of the dispatch switch in runBenchH2H() | NONE | — | **SOURCE ONLY** |
 | `fak bench local` |  | runBenchLocal / internal/localbench | `case` arm of the dispatch switch in cmdBench() | NONE | — | **SOURCE ONLY** |
 | `fak bench post` | handles `fak bench post`. | runBenchPost / internal/benchpost, internal/scoreboard, internal/slackenv, internal/slackoutbox, internal/slackwire | `case` arm of the dispatch switch in cmdBench() | NONE | — | **SOURCE ONLY** |
 | `fak bench request` | handles `fak bench request` — the next-test-per-machine run-request | runBenchRequest / internal/benchpost, internal/scoreboard, internal/slackenv, internal/slackoutbox, internal/slackwire, internal/windowgate | `case` arm of the dispatch switch in cmdBench() | RUNTIME | — | **SOURCE ONLY** |
@@ -429,6 +433,7 @@ source-only rows absent from help: 1027
 | `fak experiments query` |  | experimentsQuery / internal/experiments | `case` arm of the dispatch switch in runExperiments() | NONE | — | **SOURCE ONLY** |
 | `fak experiments record` |  | experimentsRecord / internal/experiments | `case` arm of the dispatch switch in runExperiments() | NONE | — | **SOURCE ONLY** |
 | `fak experiments register` |  | experimentsRegister / internal/experiments | `case` arm of the dispatch switch in runExperiments() | NONE | — | **SOURCE ONLY** |
+| `fak expert-trace` | analyze a FAK_EXPERT_TRACE route trace: unique experts, reuse, LRU/Belady curve, prewarm hot set | runExpertTrace / internal/model | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak fanout` | fold the nightrun fan-out reuse ledger into a trend report | cmdFanout | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak fleet` | headless-worker fleet control surface: monitor/janitor/fold/replace/capacity/control (read-only by default) | cmdFleet | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
 | `fak fleet-accounts` | fleet-wide account management across config-home seats | cmdFleetAccounts / internal/accountprobe, internal/dispatchaudit, internal/dispatchtick, internal/fleetaccounts, internal/strmatch | `case` arm of the dispatch switch in dispatchExtendedVerbA() | STRUCTURAL | `ASSISTANT_RESPONSE_MISSING`, `PROMPT_HOOK_BLOCK` | **SOURCE ONLY** |
@@ -773,7 +778,7 @@ source-only rows absent from help: 1027
 | `fak ops` | production operational tooling, health probes, and cluster telemetry | runOps / internal/ops, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbB() | RUNTIME | — | **SOURCE ONLY** |
 | `fak ops daemon` |  | runOpsDaemon / internal/ops | `case` arm of the dispatch switch in runOps() | NONE | — | **SOURCE ONLY** |
 | `fak ops log` |  | runOpsLog / internal/ops | `case` arm of the dispatch switch in runOps() | NONE | — | **SOURCE ONLY** |
-| `fak ops run` |  | runOpsRun / internal/canon, internal/childprocess, internal/policy, internal/procguard, internal/projectassets, internal/systools, internal/windowgate | `case` arm of the dispatch switch in runOps() | RUNTIME | — | **SOURCE ONLY** |
+| `fak ops run` |  | runOpsRun / internal/canon, internal/childprocess, internal/policy, internal/procguard, internal/projectassets, internal/sessionjournal, internal/systools, internal/windowgate | `case` arm of the dispatch switch in runOps() | RUNTIME | — | **SOURCE ONLY** |
 | `fak ops schedule` |  | runOpsSchedule / internal/windowgate | `case` arm of the dispatch switch in runOps() | RUNTIME | — | **SOURCE ONLY** |
 | `fak ops status` |  | runOpsStatus / internal/ops | `case` arm of the dispatch switch in runOps() | NONE | — | **SOURCE ONLY** |
 | `fak ops sweep` |  | runOpsSweep / internal/ops | `case` arm of the dispatch switch in runOps() | NONE | — | **SOURCE ONLY** |
@@ -902,7 +907,7 @@ source-only rows absent from help: 1027
 | `fak roofline` | run micro-roofline probes measuring compute and memory bandwidth ceilings on accelerator hardware | cmdRoofline / internal/roofline | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak route` | the model-routing oracle: per-aspect + ensemble model routing for one classified subject | cmdRoute / internal/maputil, internal/modelroute | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
 | `fak routebench` | the offline routing benchmark: a per-aspect+ensemble policy vs a single-model baseline | cmdRoutebench / internal/modelroute | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
-| `fak run` | run an agent turn (or a recorded trace via --trace) through the kernel | cmdRun / internal/abi, internal/agent, internal/bench, internal/cacheobs, internal/cachevalueledger, internal/compute, internal/compute/strix, internal/gateway, internal/ggufload, internal/gpulease, internal/hfhub, internal/kernel, internal/localadmission, internal/memgate, internal/model, internal/modelengine, internal/modelreg, internal/pathutil, internal/policy, internal/tokenizer | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | yes |
+| `fak run` | run an agent turn (or a recorded trace via --trace) through the kernel | cmdRun / internal/abi, internal/agent, internal/bench, internal/cacheobs, internal/cachevalueledger, internal/compute/strix, internal/gateway, internal/gpulease, internal/hfhub, internal/kernel, internal/localadmission, internal/memgate, internal/model, internal/modelengine, internal/modelreg, internal/pathutil, internal/policy, internal/tokenizer | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | yes |
 | `fak rungstats` | stats over the verification-ladder rungs | cmdRungStats / internal/abi, internal/adjudicator, internal/kernel, internal/rungobs | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak runtime-capabilities` | report the capabilities exposed by the current runtime build | runRuntimeCapabilities / internal/runtimecap | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak savings` | audit, gate, and lint the Track-2 OBSERVED-$ cache-savings ledger | cmdSavings | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
@@ -925,7 +930,7 @@ source-only rows absent from help: 1027
 | `fak self` | converge a built-from-source fak binary on origin/main | cmdSelfUpdate / internal/selfupdate/cmd | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | **SOURCE ONLY** |
 | `fak self-update` | converge a built-from-source fak binary on origin/main | cmdSelfUpdate / internal/selfupdate/cmd | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | yes |
 | `fak sensecheck` | evaluate text, commits, or session traces for grounded truth and hallucination drift | cmdSenseCheck / internal/sensecheck | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
-| `fak serve` | run the OpenAI-compatible gateway in front of a local or remote model | cmdServe / internal/abi, internal/adjudicator, internal/agent, internal/branchrole, internal/compute, internal/compute/strix, internal/deploymanifest, internal/gateway, internal/ggufload, internal/gpulease, internal/guardvars, internal/ifc, internal/journal, internal/l3kv, internal/localadmission, internal/memgate, internal/model, internal/pathutil, internal/policy, internal/power, internal/projectassets, internal/ratelimit, internal/toolplugin | `case` arm of the dispatch switch in dispatchCoreVerbB() | STRUCTURAL | `DEFAULT_DENY`, `FAK_REMOTE_KV_TIMEOUT`, `POLICY_BLOCK` | yes |
+| `fak serve` | run the OpenAI-compatible gateway in front of a local or remote model | cmdServe / internal/abi, internal/adjudicator, internal/agent, internal/branchrole, internal/compute, internal/compute/strix, internal/deploymanifest, internal/gateway, internal/ggufload, internal/gpulease, internal/guardvars, internal/ifc, internal/journal, internal/l3kv, internal/localadmission, internal/memgate, internal/model, internal/pathutil, internal/policy, internal/power, internal/projectassets, internal/ratelimit, internal/snapshot, internal/toolplugin | `case` arm of the dispatch switch in dispatchCoreVerbB() | STRUCTURAL | `DEFAULT_DENY`, `FAK_REMOTE_KV_TIMEOUT`, `POLICY_BLOCK` | yes |
 | `fak serve help` |  |  | `if` arm of the dispatch in serveHelpTopic() | N/A | — | **SOURCE ONLY** |
 | `fak serve-wiring` | audit fak serve flag -> gateway.Config -> runtime-read wiring | cmdServeWiring | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | yes |
 | `fak service` | run or install fak as a long-lived OS service (Windows service dispatcher + install/status) | cmdService / internal/guardsessions, internal/servicewatchdog, internal/systemservice | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
@@ -1152,7 +1157,7 @@ source-only rows absent from help: 1027
 | `fak ultracode status` |  | runUltracodeStatus / internal/orchestration, internal/processalive, internal/trajectory, internal/ultracodebench | `if` arm of the dispatch in runUltracode() | NONE | — | yes |
 | `fak unwired-debt-dispatch` | unwired-scorecard -> backlog: file one deduped issue per orphaned internal package | cmdUnwiredDebtDispatch / internal/dogfoodissues, internal/unwiredscore | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak unwired-scorecard` | score which code-complete internal packages are not wired into a runnable CLI surface | cmdUnwiredScorecard / internal/unwiredscore | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
-| `fak up` | start the local fak application surface and report readiness | cmdUp / internal/agent, internal/allinone, internal/appversion, internal/compute, internal/compute/strix, internal/gateway, internal/ggufload, internal/gpulease, internal/hfhub, internal/macfit, internal/metalgemm, internal/model, internal/modelengine, internal/modelreg, internal/pathutil, internal/processalive, internal/tokenizer | `case` arm of the dispatch switch in dispatchCoreVerbB() | STRUCTURAL | `NOT_SUPPORTED` | **SOURCE ONLY** |
+| `fak up` | start the local fak application surface and report readiness | cmdUp / internal/agent, internal/allinone, internal/appversion, internal/compute, internal/compute/strix, internal/gateway, internal/gpulease, internal/hfhub, internal/macfit, internal/metalgemm, internal/model, internal/modelengine, internal/modelreg, internal/pathutil, internal/processalive, internal/tokenizer | `case` arm of the dispatch switch in dispatchCoreVerbB() | STRUCTURAL | `NOT_SUPPORTED` | **SOURCE ONLY** |
 | `fak up off` |  | runUpServiceOff / internal/gpulease, internal/servicespec, internal/systemservice | `case` arm of the dispatch switch in runUpService() | STRUCTURAL | `NOT_SUPPORTED` | **SOURCE ONLY** |
 | `fak up on` |  | runUpServiceOn / internal/gpulease, internal/servicespec, internal/systemservice | `case` arm of the dispatch switch in runUpService() | STRUCTURAL | `NOT_SUPPORTED` | **SOURCE ONLY** |
 | `fak up status` |  | runUpServiceStatus / internal/gpulease, internal/servicespec, internal/systemservice | `case` arm of the dispatch switch in runUpService() | STRUCTURAL | `NOT_SUPPORTED` | **SOURCE ONLY** |
