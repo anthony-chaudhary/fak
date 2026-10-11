@@ -185,6 +185,9 @@ func decodeV41SharedAttentionStatus(words []uint32, heads, selectedRows, headDim
 			return bad("arithmetic failure contains a finite offending value")
 		}
 		switch stage {
+		case V41SharedAttentionStageSuccess:
+			// Success records were validated and skipped above.
+			continue
 		case V41SharedAttentionStageScore, V41SharedAttentionStageWeight:
 			if w[1] == 0 || w[2] != 0 {
 				return bad("score/weight requires a slot and no element")

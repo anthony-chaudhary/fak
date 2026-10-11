@@ -5,9 +5,38 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/enumlint"
 )
+
+// Success is validated before the arithmetic switch, but the enum ratchet still
+// requires its explicit case. Scan only this production file without exemptions.
+// fak-test:justify why=contract when=changed:internal/compute/v41_shared_attention.go
+// fak-test:runtime fast est=10ms lane=default
+func TestV41SharedAttentionStageSwitchesExhaustive(t *testing.T) {
+	t.Parallel()
+	source, err := os.ReadFile("v41_shared_attention.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "v41_shared_attention.go"), source, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := enumlint.Scan(dir, enumlint.Config{Rules: []string{enumlint.RuleSwitch}, Exempt: enumlint.NoExemptions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Unparsed) != 0 || report.Packages != 1 || report.Enums < 2 || report.Members < 9 || report.Sites < 2 {
+		t.Fatalf("incomplete shared-attention enum scan: %+v", report)
+	}
+	for _, finding := range report.Findings {
+		t.Error(finding.Msg)
+	}
+}
 
 // fak-test:runtime fast est=1ms lane=default
 func TestV41SharedAttentionGeometryAndStatus(t *testing.T) {
