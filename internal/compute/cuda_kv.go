@@ -34,13 +34,42 @@ func (c *cudaBackend) NewKV(cfg KVConfig) KVStore {
 		// and lean (no per-session preallocation).
 		k.maxPos = cudaKVMaxPos
 		capF := k.maxPos * cfg.NumKVHeads * cfg.HeadDim
-		for l := 0; l < cfg.NumLayers; l++ {
-			k.K[l] = dslice{ptr: k.be.dallocKV(capF*F32.Bytes(), "kv-key-prealloc layer "+itoaC(l)).ptr, cap: capF}
-			k.Kraw[l] = dslice{ptr: k.be.dallocKV(capF*F32.Bytes(), "kv-pre-rope-key-prealloc layer "+itoaC(l)).ptr, cap: capF}
-			k.V[l] = dslice{ptr: k.be.dallocKV(capF*F32.Bytes(), "kv-value-prealloc layer "+itoaC(l)).ptr, cap: capF}
-		}
+		k.preallocateGraphWithOperations(capF,
+			func(bytes int, site string) unsafe.Pointer { return c.dallocKV(bytes, site).ptr },
+			func(ptr unsafe.Pointer) { C.fcuda_free(ptr) },
+		)
 	}
 	return k
+}
+
+// preallocateGraphWithOperations owns the fresh, unpublished cache until every
+// row is allocated. A later allocation panic must retire earlier rows without
+// replacing the original panic or skipping a row if cleanup itself panics.
+// Native free returns device allocations to the pool; it does not prove physical
+// reclamation or recovery of a poisoned CUDA context.
+func (k *cudaKV) preallocateGraphWithOperations(capF int, alloc func(int, string) unsafe.Pointer, release func(unsafe.Pointer)) {
+	complete := false
+	defer func() {
+		if complete {
+			return
+		}
+		releaseKVDeviceSlices(k.K, k.Kraw, k.V, &k.pos, func(d *dslice) {
+			ptr := d.ptr
+			*d = dslice{}
+			if ptr != nil {
+				func() {
+					defer func() { _ = recover() }()
+					release(ptr)
+				}()
+			}
+		})
+	}()
+	for l := range k.K {
+		k.K[l] = dslice{ptr: alloc(capF*F32.Bytes(), "kv-key-prealloc layer "+itoaC(l)), cap: capF}
+		k.Kraw[l] = dslice{ptr: alloc(capF*F32.Bytes(), "kv-pre-rope-key-prealloc layer "+itoaC(l)), cap: capF}
+		k.V[l] = dslice{ptr: alloc(capF*F32.Bytes(), "kv-value-prealloc layer "+itoaC(l)), cap: capF}
+	}
+	complete = true
 }
 
 func (c *cudaBackend) dallocKV(nbytes int, site string) *cudaBuf {
