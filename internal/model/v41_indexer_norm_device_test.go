@@ -18,10 +18,15 @@ type v41ExactNormTestBackend struct {
 	supported bool
 	calls     int
 	fail      error
+	// Wrapping recorders set this to the outer operation owner, as real
+	// backends do. CPU storage does not change the output's declared owner.
+	outputOwner compute.Backend
 }
 
 func newV41ExactNormTestBackend() *v41ExactNormTestBackend {
-	return &v41ExactNormTestBackend{v41DenseTestBackend: newV41DenseTestBackend(), supported: true}
+	b := &v41ExactNormTestBackend{v41DenseTestBackend: newV41DenseTestBackend(), supported: true}
+	b.outputOwner = b
+	return b
 }
 
 func (b *v41ExactNormTestBackend) SupportsV41ExactRMSNorm(width int, eps float32) bool {
@@ -34,7 +39,7 @@ func (b *v41ExactNormTestBackend) V41ExactRMSNorm(x, weight compute.Tensor, eps 
 		return compute.Tensor{}, b.fail
 	}
 	out := norm.SerialRMSNorm(b.Backend.Read(x), b.Backend.Read(weight), eps)
-	return b.v41DenseTestBackend.Upload(compute.NewF32(compute.Default(), append([]int(nil), x.Shape...), out), compute.F32), nil
+	return compute.NewF32(b.outputOwner, append([]int(nil), x.Shape...), out), nil
 }
 
 func v41ExactNormTestRow(width int, seed float32) []float32 {

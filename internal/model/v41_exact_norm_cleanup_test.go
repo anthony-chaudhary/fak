@@ -107,6 +107,7 @@ func TestV41ExactNormPrimaryFailureSurvivesCleanup(t *testing.T) {
 				primary := backendError("primary operation failure")
 				b := &v41ExactNormCleanupBackend{v41ExactNormTestBackend: newV41ExactNormTestBackend(),
 					fault: tc.fault, primary: primary, cleanup: cleanup.values, freeAttempts: map[compute.Buffer]int{}}
+				b.outputOwner = b
 				if tc.panicValue != nil {
 					b.primary = tc.panicValue
 				}

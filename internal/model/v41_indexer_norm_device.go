@@ -125,11 +125,17 @@ func (s *Session) v41ExactRMSNormFunc(width int, eps float32) v41RMSNormFunc {
 			owned = append(owned, x)
 			stage = "rmsnorm"
 			y, err := operation.V41ExactRMSNorm(x, weight, eps)
+			// Only a fresh output on this backend transfers transient ownership.
+			// Aliases retain their existing activation/model owner; a foreign
+			// tensor must never be read or freed through this backend.
+			fresh := y.Buf() != nil && y.Backend() == s.Backend && y.Buf() != x.Buf() && y.Buf() != weight.Buf()
+			if fresh {
+				owned = append(owned, y)
+			}
 			if err != nil {
 				return nil, err
 			}
-			owned = append(owned, y)
-			if y.Buf() == nil || y.Buf() == x.Buf() || y.Dtype != compute.F32 || len(y.Shape) != 1 || y.Shape[0] != width {
+			if !fresh || y.Dtype != compute.F32 || y.Layout != compute.RowMajor || y.Quant != nil || len(y.Shape) != 1 || y.Shape[0] != width {
 				return nil, errV41ProjectionResult
 			}
 			stage = "readback"
