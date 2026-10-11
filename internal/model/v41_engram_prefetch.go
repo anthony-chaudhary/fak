@@ -64,18 +64,27 @@ func (c *V41EngramRowCache) gatherKnownRows(rows []uint32) ([][]byte, error) {
 		c.stats.BytesServed += served * int64(c.opts.RowBytes)
 		c.stats.UsefulBytes += served * int64(c.opts.RowBytes)
 	}
-	missing := make([]uint32, 0, len(unique))
-	for _, row := range unique {
+	serveResident := func(row uint32) (bool, error) {
 		payload, ok := c.inner.Get(0, int(row))
 		if !ok {
-			missing = append(missing, row)
-			continue
+			return false, nil
 		}
 		if len(payload) != c.opts.RowBytes {
-			return nil, &V41EngramStreamError{Kind: V41EngramStreamShortRead, Row: int(row),
+			return false, &V41EngramStreamError{Kind: V41EngramStreamShortRead, Row: int(row),
 				Err: io.ErrUnexpectedEOF}
 		}
 		serve(row, payload, int64(len(positions[row])))
+		return true, nil
+	}
+	missing := make([]uint32, 0, len(unique))
+	for _, row := range unique {
+		resident, err := serveResident(row)
+		if err != nil {
+			return nil, err
+		}
+		if !resident {
+			missing = append(missing, row)
+		}
 	}
 	sort.Slice(missing, func(i, j int) bool { return missing[i] < missing[j] })
 	maxBytes := c.opts.BudgetBytes
@@ -88,8 +97,20 @@ func (c *V41EngramRowCache) gatherKnownRows(rows []uint32) ([][]byte, error) {
 		maxRows = 1
 	}
 	for lo := 0; lo < len(missing); {
+		// Readahead from an earlier range may already hold this row.
+		resident, err := serveResident(missing[lo])
+		if err != nil {
+			return nil, err
+		}
+		if resident {
+			lo++
+			continue
+		}
 		hi := lo + 1
 		for hi < len(missing) && hi-lo < maxRows && uint64(missing[hi]) == uint64(missing[hi-1])+1 {
+			if _, ok := c.inner.Get(0, int(missing[hi])); ok {
+				break
+			}
 			hi++
 		}
 		count := hi - lo
@@ -115,6 +136,9 @@ func (c *V41EngramRowCache) gatherKnownRows(rows []uint32) ([][]byte, error) {
 		for i, row := range missing[lo:hi] {
 			payload := buf[i*c.opts.RowBytes : (i+1)*c.opts.RowBytes]
 			serve(row, payload, int64(len(positions[row])-1))
+		}
+		if c.opts.PrefetchRows > 0 {
+			c.prefetch(int(missing[hi-1]))
 		}
 		lo = hi
 	}

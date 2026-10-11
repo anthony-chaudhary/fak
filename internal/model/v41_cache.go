@@ -333,9 +333,6 @@ func (c *V41EngramRowCache) prefetch(idx int) {
 		lo := r * c.opts.RowBytes
 		hi := lo + c.opts.RowBytes
 		if hi > n {
-			hi = n
-		}
-		if lo >= hi {
 			break
 		}
 		_ = c.inner.Put(0, start+r, buf[lo:hi])
