@@ -207,7 +207,7 @@ func (d *v41MHCDevice) initialStreams(x []float32) ([][]float32, error) {
 	for _, v := range x {
 		if !finite32(v) {
 			// The host refuses the same input before any selection.
-			return v41FullInitialStreams(x)
+			return nil, v41MHCBF16Refusal(-1, x)
 		}
 	}
 	H := len(x)
@@ -269,7 +269,7 @@ func (d *v41MHCDevice) postBF16(layer int, x []float32, streams [][]float32, mix
 	for _, v := range x {
 		if !finite32(v) {
 			// The host's BF16 publication refuses a non-finite sublayer result.
-			return v41MHCPostBF16(layer, x, streams, mix)
+			return nil, v41MHCBF16Refusal(layer, x)
 		}
 	}
 	flat, H, err := v41MHCStreamsRow(streams)
@@ -318,4 +318,14 @@ func v41MHCPostBF16On(d *v41MHCDevice, layer int, x []float32, streams [][]float
 		return v41MHCPostBF16(layer, x, streams, mix)
 	}
 	return d.postBF16(layer, x, streams, mix)
+}
+
+// v41MHCBF16Refusal is the host BF16 publication's typed refusal at its lowest
+// non-finite or overflowing value, found without rounding anything on the host.
+func v41MHCBF16Refusal(layer int, values []float32) error {
+	i, bad := v41BF16PublishFault(values)
+	if !bad {
+		return v41StageErr(v41StageMHC, layer, errV41MHCResult)
+	}
+	return v41StageErr(v41StageMHC, layer, fmt.Errorf("%w: non-finite full mHC BF16 value %d", ErrV41ForwardStage, i))
 }

@@ -348,8 +348,8 @@ func (r *v41MHCResident) post(layer int, x [][]float32, streams *v41DeviceStream
 	if !ok || len(x) != rows {
 		for _, row := range x {
 			// A non-finite sublayer row is the host's BF16 publication refusal.
-			if _, err := v41MHCBF16(layer, row); err != nil {
-				return compute.Tensor{}, err
+			if _, bad := v41BF16PublishFault(row); bad {
+				return compute.Tensor{}, v41MHCBF16Refusal(layer, row)
 			}
 		}
 		return compute.Tensor{}, v41StageErr(v41StageMHC, layer, fmt.Errorf("model: invalid V41 mHC post shape"))

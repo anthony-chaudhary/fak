@@ -12,7 +12,7 @@ import (
 // -> BF16 tail and returns one owned, finite, widened-BF16 row. It has no decline
 // outcome: once selected, any failure closes the session instead of replaying on
 // the host. The gated pool is its own seam (v41CompressorPoolFunc); both BF16
-// rounding boundaries remain host operations.
+// boundaries publish on the device when the backend has the ordinary operation.
 type v41CompressorNormFunc func(layer int, pooled, gain []float32, eps float32) ([]float32, error)
 
 // v41CompressorNormBackend is an explicit exact-publication qualification, not
@@ -56,6 +56,7 @@ func (s *Session) v41CompressorNormFunc() v41CompressorNormFunc {
 			return nil
 		}
 	}
+	publish := s.v41BF16PublishFunc()
 	return func(layer int, pooled, gain []float32, suppliedEps float32) (result []float32, cause error) {
 		s.ensureOpenBackendSession()
 		stage := "payload"
@@ -132,11 +133,21 @@ func (s *Session) v41CompressorNormFunc() v41CompressorNormFunc {
 		}
 
 		stage = "BF16 input"
-		input := append([]float32(nil), pooled...)
-		for i, value := range input {
-			input[i] = v41RoundBF16(value)
-			if !finite32(input[i]) {
-				return nil, closeFailure(errV41ProjectionResult)
+		var input []float32
+		if publish != nil {
+			// The selected publication closes this session itself on failure.
+			published, err := v41PublishBF16(layer, "attn.compressor.norm.weight input", pooled, publish, nil)
+			if err != nil {
+				return nil, v41CompressorNormOperationErr(layer, err)
+			}
+			input = published
+		} else {
+			input = append([]float32(nil), pooled...)
+			for i, value := range input {
+				input[i] = v41RoundBF16(value)
+				if !finite32(input[i]) {
+					return nil, closeFailure(errV41ProjectionResult)
+				}
 			}
 		}
 		stage = "rmsnorm"
@@ -149,6 +160,13 @@ func (s *Session) v41CompressorNormFunc() v41CompressorNormFunc {
 		stage = "BF16 output"
 		if len(values) != width {
 			return nil, closeFailure(errV41ProjectionResult)
+		}
+		if publish != nil {
+			published, err := v41PublishBF16(layer, "attn.compressor.norm.weight output", values, publish, nil)
+			if err != nil {
+				return nil, v41CompressorNormOperationErr(layer, err)
+			}
+			return published, nil
 		}
 		for i, value := range values {
 			if !finite32(value) {

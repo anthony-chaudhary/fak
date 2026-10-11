@@ -191,6 +191,9 @@ func (c *V41CompressorPool) Push(pos int, projectedKV, projectedScore []float32)
 // bit patterns untouched for the Engram path), this rounds every finite value the
 // way the reference's dtype cast does; non-finite inputs are refused upstream.
 func v41RoundBF16(value float32) float32 {
+	if v41HostBF16Witness.Load() {
+		v41HostBF16Rounds.Add(1)
+	}
 	bits := math.Float32bits(value)
 	bits += 0x7fff + ((bits >> 16) & 1)
 	return math.Float32frombits(bits & 0xffff0000)

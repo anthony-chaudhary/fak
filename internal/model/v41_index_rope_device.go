@@ -147,7 +147,7 @@ func (s *Session) v41IndexRoPEFunc() v41IndexRoPEFunc {
 			}
 			for i, value := range values {
 				if !finite32(value) || (i%headDim < headDim-rotaryDim && math.Float32bits(value) != math.Float32bits(out[i])) ||
-					(i%headDim >= headDim-rotaryDim && !finite32(v41RoundBF16(value))) {
+					(i%headDim >= headDim-rotaryDim && v41BF16Overflows(value)) {
 					return nil, errV41TailRoPEResult
 				}
 			}

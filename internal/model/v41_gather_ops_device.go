@@ -20,6 +20,7 @@ type v41DeviceGatherOps struct {
 	compressedPublicationRoPE v41CompressedPublicationRoPEFunc
 	engramGate                v41EngramGateFunc
 	compressorPool            v41CompressorPoolFunc
+	bf16Publish               v41BF16BoundaryFunc
 }
 
 // v41DeviceGatherOpsFunc binds every available slice-3 operation. The policy is
@@ -28,7 +29,23 @@ func (s *Session) v41DeviceGatherOpsFunc() *v41DeviceGatherOps {
 	if s == nil {
 		return nil
 	}
-	return &v41DeviceGatherOps{owner: s, inverseOutput: s.v41InverseOutputRoPEFunc(), indexSelect: s.v41IndexSelectFunc(), embedGather: s.v41EmbeddingGatherFunc(), indexRoPE: s.v41IndexRoPEFunc(), compressedPublicationRoPE: s.v41CompressedPublicationRoPEFunc(), engramGate: s.v41EngramGateFunc(), compressorPool: s.v41CompressorPoolFunc()}
+	ops := &v41DeviceGatherOps{owner: s, inverseOutput: s.v41InverseOutputRoPEFunc(), indexSelect: s.v41IndexSelectFunc(), embedGather: s.v41EmbeddingGatherFunc(), indexRoPE: s.v41IndexRoPEFunc(), compressedPublicationRoPE: s.v41CompressedPublicationRoPEFunc(), engramGate: s.v41EngramGateFunc(), compressorPool: s.v41CompressorPoolFunc()}
+	ops.bf16Publish = s.v41BF16PublishFunc()
+	return ops
+}
+
+// bf16PublishFunc returns the ordinary BF16 publication; under device-only an
+// unbound seam refuses typed instead of rounding on the host.
+func (o *v41DeviceGatherOps) bf16PublishFunc() v41BF16BoundaryFunc {
+	if o == nil {
+		return nil
+	}
+	if o.bf16Publish == nil && o.owner.v41DeviceOnlyPolicy() {
+		return func(layer int, _ string, _ []float32) ([]float32, error) {
+			return nil, o.owner.v41DeviceOnlyMissingOp(layer, "bf16-boundary")
+		}
+	}
+	return o.bf16Publish
 }
 
 func (o *v41DeviceGatherOps) inverseOutputFunc() v41InverseOutputRoPEFunc {

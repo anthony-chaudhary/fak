@@ -192,10 +192,12 @@ func (m *Model) v41ContractRoutedGrouped(l int, xnByToken [][]float32, perTokenP
 				var routedExpert v41RoutedExpertFunc
 				var gateUp v41ExpertGateUpFunc
 				var down v41ExpertDownFunc
+				var publish v41BF16BoundaryFunc
 				if st != nil {
 					routedExpert, gateUp, down = st.routedExpert, st.expertGateUp, st.expertDown
+					publish = st.gatherOps.bf16PublishFunc()
 				}
-				output, cause := m.v41FullRoutedExpertWithDevice(l, stem, xn, perTokenPicks[row.Token][row.Slot].weight, cfg, routedExpert, gateUp, down,
+				output, cause := m.v41FullRoutedExpertPublished(l, stem, xn, perTokenPicks[row.Token][row.Slot].weight, cfg, routedExpert, gateUp, down,
 					func() ([]float32, []float32, []float32, error) {
 						if !tripleReady {
 							var cause error
@@ -206,7 +208,7 @@ func (m *Model) v41ContractRoutedGrouped(l int, xnByToken [][]float32, perTokenP
 							tripleReady = true
 						}
 						return w1, w3, w2, nil
-					}, func() ([]float32, error) { return m.hostExpertDown(l, stem, scratch) }, true)
+					}, func() ([]float32, error) { return m.hostExpertDown(l, stem, scratch) }, true, publish)
 				if cause != nil {
 					return cause
 				}

@@ -21,12 +21,16 @@ func (m *Model) v41SharedExpertSwiGLUWithProjection(l int, xn []float32, cfg Con
 }
 
 func (m *Model) v41SharedExpertSwiGLUWithActivation(l int, xn []float32, cfg Config, project v41DenseProjectionFunc, activate v41SharedActivationFunc) ([]float32, error) {
+	return m.v41SharedExpertSwiGLUWithPublish(l, xn, cfg, project, activate, nil)
+}
+
+func (m *Model) v41SharedExpertSwiGLUWithPublish(l int, xn []float32, cfg Config, project v41DenseProjectionFunc, activate v41SharedActivationFunc, publish v41BF16BoundaryFunc) ([]float32, error) {
 	full, err := v41ForwardGeometry(cfg)
 	if err != nil {
 		return nil, err
 	}
 	if full {
-		return m.v41FullSharedExpertSwiGLU(l, xn, cfg, project, activate)
+		return m.v41FullSharedExpertSwiGLU(l, xn, cfg, project, activate, publish)
 	}
 	I, H := cfg.MoEIntermediateSize, cfg.HiddenSize
 	h1, err := m.v41ProjMatRowsWithProjection(l, "ffn.shared_experts.w1.weight", xn, I, H, project)
@@ -184,7 +188,7 @@ func v41SwiGLUParallel(w1, w3, w2, xn []float32, I, H int, cfg Config) []float32
 // (dba1be0a40aa45a94ad051997016db3960a90277, lines 841-851) widens
 // gate/up outputs, computes clamped SwiGLU, then narrows the down input. This
 // fixes dtype boundaries only; quantized-GEMM activation parity is separate.
-func (m *Model) v41FullSharedExpertSwiGLU(l int, xn []float32, cfg Config, project v41DenseProjectionFunc, activate v41SharedActivationFunc) ([]float32, error) {
+func (m *Model) v41FullSharedExpertSwiGLU(l int, xn []float32, cfg Config, project v41DenseProjectionFunc, activate v41SharedActivationFunc, publish v41BF16BoundaryFunc) ([]float32, error) {
 	I, H := cfg.MoEIntermediateSize, cfg.HiddenSize
 	const gateLeaf = "ffn.shared_experts.w1.weight"
 	const upLeaf = "ffn.shared_experts.w3.weight"
@@ -193,7 +197,7 @@ func (m *Model) v41FullSharedExpertSwiGLU(l int, xn []float32, cfg Config, proje
 	if len(xn) != H {
 		return nil, v41ProjectionOperationErr(l, gateLeaf, errV41ProjectionResult)
 	}
-	input, err := v41LatentNormBF16Copy(l, gateLeaf, "input", xn)
+	input, err := v41LatentNormBF16Publish(l, gateLeaf, "input", xn, publish)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +209,7 @@ func (m *Model) v41FullSharedExpertSwiGLU(l int, xn []float32, cfg Config, proje
 		if len(values) != rows {
 			return nil, v41ProjectionOperationErr(l, leaf, errV41ProjectionResult)
 		}
-		return v41LatentNormBF16Copy(l, leaf, "projection", values)
+		return v41LatentNormBF16Publish(l, leaf, "projection", values, publish)
 	}
 	gate, err := projectBF16(gateLeaf, input, I, H)
 	if err != nil {
@@ -226,7 +230,7 @@ func (m *Model) v41FullSharedExpertSwiGLU(l int, xn []float32, cfg Config, proje
 			if err != nil {
 				return nil, v41ProjectionOperationErr(l, activationLeaf, err)
 			}
-			intermediate, err = v41LatentNormBF16Copy(l, activationLeaf, "down input", values)
+			intermediate, err = v41LatentNormBF16Publish(l, activationLeaf, "down input", values, publish)
 			if err != nil {
 				return nil, err
 			}
@@ -244,7 +248,7 @@ func (m *Model) v41FullSharedExpertSwiGLU(l int, xn []float32, cfg Config, proje
 		for i := range values {
 			values[i] = silu(gate[i]) * up[i]
 		}
-		intermediate, err = v41LatentNormBF16Copy(l, activationLeaf, "down input", values)
+		intermediate, err = v41LatentNormBF16Publish(l, activationLeaf, "down input", values, publish)
 		if err != nil {
 			return nil, err
 		}

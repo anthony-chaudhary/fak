@@ -868,7 +868,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			// Artifact-only: the reduced fixture carries no q_norm leaf and its
 			// pre-#13009 arithmetic is unchanged. Written back into the panel row
 			// so the batched wq_b panel reads the normed latents.
-			if err := m.v41QueryNormInPlace(l, qLat, eps, scratch.queryNorm); err != nil {
+			if err := m.v41QueryNormInPlaceWithPublish(l, qLat, eps, scratch.queryNorm, scratch.gatherOps.bf16PublishFunc()); err != nil {
 				return err
 			}
 		}
@@ -916,7 +916,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// the full head_dim before the rope tail; artifact-only, so the reduced
 		// fixture's pre-#13009 arithmetic is unchanged.
 		if full {
-			if err := m.v41KVNormInPlace(l, kv, eps, scratch.kvNorm); err != nil {
+			if err := m.v41KVNormInPlaceWithPublish(l, kv, eps, scratch.kvNorm, scratch.gatherOps.bf16PublishFunc()); err != nil {
 				return err
 			}
 		}
@@ -925,7 +925,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// fault. Captured here because the RoPE just below rotates `kv` in place.
 		trace.record(l, t, v41TraceStageKVLatent, kv)
 		cos, sin := v41RopeTableForLayer(cfg, l, t)
-		q, kv, err = v41AttentionQKRoPE(cfg, l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE)
+		q, kv, err = v41AttentionQKRoPEWithPublish(cfg, l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE, scratch.gatherOps.bf16PublishFunc())
 		if err != nil {
 			return err
 		}
@@ -1218,11 +1218,11 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	for t := 0; t < seq; t++ {
 		var xn []float32
 		if resident != nil {
-			xn, err = m.v41FFNNorm(l, ffnCollapsed[t], eps, scratch.ffnNorm)
+			xn, err = m.v41FFNNormWithPublish(l, ffnCollapsed[t], eps, scratch.ffnNorm, scratch.gatherOps.bf16PublishFunc())
 		} else if full {
 			ffnResidual[t], ffnMixes[t], xn, err = m.v41FullFFNInput(l, streams[t], hcByPos[t], attnOut[t], projectFFN, scratch)
 		} else {
-			xn, err = m.v41FFNNorm(l, x[t], eps, scratch.ffnNorm)
+			xn, err = m.v41FFNNormWithPublish(l, x[t], eps, scratch.ffnNorm, scratch.gatherOps.bf16PublishFunc())
 		}
 		if err != nil {
 			return err
@@ -1285,9 +1285,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 				}
 				for slot, pick := range perTokenPicks[t] {
 					stem := "ffn.experts." + itoa(pick.expert)
-					outputs[slot], err = m.v41FullRoutedExpertWithDevice(l, stem, xn, pick.weight, cfg, routedExpert, gateUp, down,
+					outputs[slot], err = m.v41FullRoutedExpertPublished(l, stem, xn, pick.weight, cfg, routedExpert, gateUp, down,
 						func() ([]float32, []float32, []float32, error) { return m.v41ExpertTripleInto(l, stem, scratch, true) },
-						func() ([]float32, error) { return m.hostExpertDown(l, stem, scratch) }, seq > 1)
+						func() ([]float32, error) { return m.hostExpertDown(l, stem, scratch) }, seq > 1, scratch.gatherOps.bf16PublishFunc())
 					if err != nil {
 						return err
 					}
@@ -1379,7 +1379,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	for t := 0; t < seq; t++ {
 		xn := ffnInputs[t]
 		routed := routedByToken[t]
-		shared, err := m.v41SharedExpertSwiGLUWithActivation(l, xn, cfg, scratch.denseProjection, scratch.sharedActivation)
+		shared, err := m.v41SharedExpertSwiGLUWithPublish(l, xn, cfg, scratch.denseProjection, scratch.sharedActivation, scratch.gatherOps.bf16PublishFunc())
 		if err != nil {
 			return err
 		}
@@ -1809,6 +1809,9 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.routedSum = s.v41RoutedSumFunc()
 		s.v41Forward.sharedAdd = s.v41SharedAddFunc()
 		s.v41Forward.gatherOps = s.v41DeviceGatherOpsFunc()
+		if s.v41Forward.bf16Boundary == nil {
+			s.v41Forward.bf16Boundary = s.v41Forward.gatherOps.bf16PublishFunc()
+		}
 		s.v41Forward.mhcDevice = s.v41MHCDeviceSeam()
 		if s.executionPolicy == ExecutionPolicyDeviceOnly {
 			s.v41BindDeviceOnlyDeclineRefusals(s.v41Forward)
@@ -1915,11 +1918,15 @@ func (s *Session) v41QueryNormFunc() v41QueryNormFunc {
 }
 
 func (m *Model) v41QueryNormInPlace(layer int, input []float32, eps float32, normalize v41QueryNormFunc) error {
+	return m.v41QueryNormInPlaceWithPublish(layer, input, eps, normalize, nil)
+}
+
+func (m *Model) v41QueryNormInPlaceWithPublish(layer int, input []float32, eps float32, normalize v41QueryNormFunc, publish v41BF16BoundaryFunc) error {
 	const leaf = "attn.wq_a_norm.weight"
 	if m.Cfg.QLoraRank <= 0 || len(input) != m.Cfg.QLoraRank {
 		return v41ProjectionOperationErr(layer, leaf, errV41ProjectionResult)
 	}
-	staged, err := v41LatentNormBF16Copy(layer, leaf, "projection", input)
+	staged, err := v41LatentNormBF16Publish(layer, leaf, "projection", input, publish)
 	if err != nil {
 		return err
 	}
@@ -1940,7 +1947,7 @@ func (m *Model) v41QueryNormInPlace(layer int, input []float32, eps float32, nor
 	if err != nil {
 		return v41ProjectionOperationErr(layer, leaf, err)
 	}
-	rounded, err := v41LatentNormBF16Copy(layer, leaf, "normalization", values)
+	rounded, err := v41LatentNormBF16Publish(layer, leaf, "normalization", values, publish)
 	if err != nil {
 		return err
 	}
@@ -1964,11 +1971,15 @@ func (s *Session) v41KVNormFunc() v41KVNormFunc {
 }
 
 func (m *Model) v41KVNormInPlace(layer int, input []float32, eps float32, normalize v41KVNormFunc) error {
+	return m.v41KVNormInPlaceWithPublish(layer, input, eps, normalize, nil)
+}
+
+func (m *Model) v41KVNormInPlaceWithPublish(layer int, input []float32, eps float32, normalize v41KVNormFunc, publish v41BF16BoundaryFunc) error {
 	const leaf = "attn.kv_norm.weight"
 	if len(input) != v41KVLoraRank {
 		return v41ProjectionOperationErr(layer, leaf, errV41ProjectionResult)
 	}
-	staged, err := v41LatentNormBF16Copy(layer, leaf, "projection", input)
+	staged, err := v41LatentNormBF16Publish(layer, leaf, "projection", input, publish)
 	if err != nil {
 		return err
 	}
@@ -1989,7 +2000,7 @@ func (m *Model) v41KVNormInPlace(layer int, input []float32, eps float32, normal
 	if err != nil {
 		return v41ProjectionOperationErr(layer, leaf, err)
 	}
-	rounded, err := v41LatentNormBF16Copy(layer, leaf, "normalization", values)
+	rounded, err := v41LatentNormBF16Publish(layer, leaf, "normalization", values, publish)
 	if err != nil {
 		return err
 	}

@@ -35,6 +35,7 @@ func (m *Model) v41GroupedOutputProjector(l, heads, headDim, groups, rank, dim i
 	var woA, woB []float32
 	loaded := false
 	full, geometryErr := v41ForwardGeometry(m.Cfg)
+	publish := scratch.gatherOps.bf16PublishFunc()
 	return func(o []float32) ([]float32, error) {
 		if geometryErr != nil {
 			return nil, geometryErr
@@ -45,7 +46,7 @@ func (m *Model) v41GroupedOutputProjector(l, heads, headDim, groups, rank, dim i
 				return nil, v41ProjectionOperationErr(l, "attn.wo_a.weight", errV41ProjectionResult)
 			}
 			var err error
-			o, err = v41LatentNormBF16Copy(l, "attn.wo_a.weight", "input", o)
+			o, err = v41LatentNormBF16Publish(l, "attn.wo_a.weight", "input", o, publish)
 			if err != nil {
 				return nil, err
 			}
@@ -62,7 +63,7 @@ func (m *Model) v41GroupedOutputProjector(l, heads, headDim, groups, rank, dim i
 					return nil, v41ProjectionOperationErr(l, "attn.wo_b.weight", err)
 				}
 				if full {
-					return v41LatentNormBF16Copy(l, "attn.wo_b.weight", "projection", y)
+					return v41LatentNormBF16Publish(l, "attn.wo_b.weight", "projection", y, publish)
 				}
 				return y, nil
 			case v41ProjectionError:
@@ -309,6 +310,7 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 		return nil
 	}
 	full, geometryErr := v41ForwardGeometry(s.M.Cfg)
+	publish := s.v41BF16PublishFunc()
 	return func(l int, o []float32, heads, headDim, groups, rank, dim int) (result []float32, outcome v41DenseProjectionOutcome, cause error) {
 		if geometryErr != nil {
 			return nil, v41ProjectionError, geometryErr
@@ -332,7 +334,7 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 		}
 		if full {
 			var err error
-			o, err = v41LatentNormBF16Copy(l, "attn.wo_a.weight", "input", o)
+			o, err = v41LatentNormBF16Publish(l, "attn.wo_a.weight", "input", o, publish)
 			if err != nil {
 				return nil, v41ProjectionError, err
 			}
@@ -421,6 +423,20 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 			calls++
 			y := s.Backend.MatMul(weight, x)
 			defer s.Backend.Free(y)
+			published := false
+			if full {
+				// Full V4.1 publishes each projection as BF16 on the device before its
+				// one readback; a backend without the ordinary publication rounds below.
+				stage = "BF16 publication"
+				p, ok, err := s.v41PublishResidentBF16(y, compute.V41BF16PublishGroupedOutputProjection)
+				if err != nil {
+					return nil, err
+				}
+				if ok {
+					defer s.Backend.Free(p)
+					y, published = p, true
+				}
+			}
 			stage = "readback"
 			values := s.Backend.Read(y)
 			readback += int64(len(values)) * 4
@@ -434,7 +450,7 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 			}
 			// Read may borrow tensor storage. Own it before deferred Free in both
 			// modes; only full V4.1 narrows each projection publication to BF16.
-			if full {
+			if full && !published {
 				owned := make([]float32, len(values))
 				for i, v := range values {
 					owned[i] = v41RoundBF16(v)

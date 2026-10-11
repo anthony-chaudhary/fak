@@ -72,7 +72,8 @@ func v41RotatedOutputForProjection(cfg Config, layer, pos int, out []float32, he
 	if !ok || heads <= 0 || headDim <= 0 || len(out) != width || cfg.QKRopeHeadDim <= 0 || cfg.QKRopeHeadDim%2 != 0 || cfg.QKRopeHeadDim > headDim {
 		return nil, v41RoPEPublicationErr(layer, errV41TailRoPEResult)
 	}
-	staged, err := v41RoPEBF16Copy(layer, out)
+	publish := ops.bf16PublishFunc()
+	staged, err := v41RoPEBF16Publish(layer, v41InverseOutputInputSite, out, publish)
 	if err != nil {
 		return nil, err
 	}
@@ -81,5 +82,18 @@ func v41RotatedOutputForProjection(cfg Config, layer, pos int, out []float32, he
 	} else if staged, err = v41InverseAttentionOutputDevice(cfg, layer, pos, staged, heads, headDim, rotate); err != nil {
 		return nil, err
 	}
-	return v41RoPEBF16Copy(layer, staged)
+	return v41RoPEBF16Publish(layer, v41InverseOutputOutputSite, staged, publish)
+}
+
+// v41RoPEBF16Publish is v41RoPEBF16Copy routed through the session's ordinary
+// device publication when one is bound.
+func v41RoPEBF16Publish(layer int, site string, values []float32, publish v41BF16BoundaryFunc) ([]float32, error) {
+	out, err := v41PublishBF16(layer, site, values, publish, func(values []float32) ([]float32, error) {
+		return v41RoPEBF16Copy(layer, values)
+	})
+	if err != nil && publish != nil {
+		// The host copy already returns the typed RoPE refusal.
+		err = v41RoPEPublicationErr(layer, err)
+	}
+	return out, err
 }

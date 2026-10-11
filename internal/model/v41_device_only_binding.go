@@ -19,6 +19,8 @@ var v41DeviceOnlyBindings = []v41DeviceOnlyBinding{
 	{op: v41HostOp{name: "rms-norm", site: "v41RMSNormFunc"}, bound: func(s *Session) bool { return s.v41RMSNormFunc() != nil }},
 	// A reduced geometry leaves this seam nil and normalizes on the host.
 	{op: v41HostOp{name: "attention-input-norm", site: "v41AttentionInputNormFunc"}, bound: func(s *Session) bool { return s.v41AttentionInputNormFunc() != nil }},
+	// Every BF16 dtype boundary, from the attention-input pair to the final norm.
+	{op: v41HostOp{name: "bf16-boundary", site: "SupportsV41BF16Publish"}, bound: v41DeviceOnlyBF16Bound},
 	{op: v41HostOp{name: "tail-rope-qk", site: "SupportsV41TailRoPE"}, bound: func(s *Session) bool { return s.v41TailRoPEFunc() != nil }},
 	{op: v41HostOp{name: "compressor-gated-pool", site: "SupportsV41CompressorPool"}, uses: v41UsesCompressedKV, bound: func(s *Session) bool { return s.v41CompressorPoolFunc() != nil }},
 	{op: v41HostOp{name: "compressor-norm", site: "SupportsV41CompressorNorm"}, uses: v41UsesCompressedKV, bound: func(s *Session) bool { return s.v41CompressorNormFunc() != nil }},

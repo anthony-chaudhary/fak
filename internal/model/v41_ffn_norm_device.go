@@ -21,6 +21,10 @@ func (s *Session) v41FFNNormFunc() v41FFNNormFunc {
 }
 
 func (m *Model) v41FFNNorm(layer int, input []float32, eps float32, normalize v41FFNNormFunc) ([]float32, error) {
+	return m.v41FFNNormWithPublish(layer, input, eps, normalize, nil)
+}
+
+func (m *Model) v41FFNNormWithPublish(layer int, input []float32, eps float32, normalize v41FFNNormFunc, publish v41BF16BoundaryFunc) ([]float32, error) {
 	const leaf = "ffn_norm.weight"
 	full, err := v41ForwardGeometry(m.Cfg)
 	if err != nil {
@@ -31,7 +35,7 @@ func (m *Model) v41FFNNorm(layer int, input []float32, eps float32, normalize v4
 		if len(input) != m.Cfg.HiddenSize {
 			return nil, v41ProjectionOperationErr(layer, leaf, errV41ProjectionResult)
 		}
-		staged, err = v41LatentNormBF16Copy(layer, leaf, "collapse", input)
+		staged, err = v41LatentNormBF16Publish(layer, leaf, "collapse", input, publish)
 		if err != nil {
 			return nil, err
 		}
@@ -61,7 +65,7 @@ func (m *Model) v41FFNNorm(layer int, input []float32, eps float32, normalize v4
 		return nil, v41ProjectionOperationErr(layer, leaf, err)
 	}
 	if full {
-		return v41LatentNormBF16Copy(layer, leaf, "normalization", values)
+		return v41LatentNormBF16Publish(layer, leaf, "normalization", values, publish)
 	}
 	return values, nil
 }

@@ -23,8 +23,9 @@ const (
 // gate/up GEMMs, the fused BF16 clamp-SwiGLU route-weight publication
 // (compute.V41RoutedSwiGLUBackend) and the down GEMM, with the I-wide
 // activation resident between them (Ref #13815). x is the BF16-published
-// expert input. On handled it returns the unrounded H-wide down output; the
-// caller owns its BF16 publication.
+// expert input. On handled it returns the H-wide down output, already published
+// as BF16 on a backend with the ordinary publication; the caller's own BF16
+// publication is then the identity.
 type v41RoutedExpertFunc func(layer int, stem string, x []float32, weight float32) ([]float32, v41RoutedExpertOutcome, error)
 
 // v41RoutedExpertFunc binds the fused device routed expert, or returns nil when
@@ -134,8 +135,23 @@ func (s *Session) v41RoutedExpertFunc() v41RoutedExpertFunc {
 		stage = "down"
 		out := s.Backend.MatMul(downW, activation)
 		defer s.Backend.Free(out)
+		// The down output is published as BF16 on the device before its one
+		// readback; a backend without the ordinary publication keeps the caller's
+		// host rounding. An overflow is the same numeric verdict the host reports.
+		read := out
+		if published, ok, err := s.v41PublishResidentBF16(out, compute.V41BF16PublishRoutedDown); ok {
+			var numeric *compute.V41BF16CheckedArithmeticError
+			if errors.As(err, &numeric) {
+				return nil, v41RoutedExpertError, v41ExpertOperationErr(layer, stage, errV41ExpertResult)
+			}
+			if err != nil {
+				return nil, v41RoutedExpertError, closeFailure(err)
+			}
+			defer s.Backend.Free(published)
+			read = published
+		}
 		// Read may return borrowed scratch; own it before any deferred Free.
-		values := append([]float32(nil), s.Backend.Read(out)...)
+		values := append([]float32(nil), s.Backend.Read(read)...)
 		if len(values) != H {
 			return nil, v41RoutedExpertError, v41ExpertOperationErr(layer, stage, errV41ExpertResult)
 		}

@@ -5243,6 +5243,13 @@ int fvk_v41_attention_bf16_f32(const void* dInput, void* dOut, void* dStatus, in
     if (state != 0) return state;
     return v41BF16CheckedDispatch(dInput, dOut, dStatus, count, site, site == 3 || site == 4);
 }
+// The ordinary publication policy mirrors compute.V41BF16PublishSite.
+int fvk_v41_bf16_publish_f32(const void* dInput, void* dOut, void* dStatus, int count, uint32_t site) {
+    const int state = fvk_v41_attention_bf16_state();
+    if (state != 0) return state;
+    const bool validSite = site == 1 || site == 2 || (site >= 5 && site <= 27);
+    return v41BF16CheckedDispatch(dInput, dOut, dStatus, count, site, validSite);
+}
 
 #ifdef FAK_V41_BF16_BOUNDARY_WITNESS
 int fvk_v41_bf16_checked_module_abi(const void* data, size_t bytes) { return v41BF16CheckedModuleABI(data, bytes); }

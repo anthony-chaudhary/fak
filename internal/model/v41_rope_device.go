@@ -184,6 +184,22 @@ func (s *Session) v41TailRoPEFunc() v41TailRoPEFunc {
 // dtype (model.py772 and392-405 at dba1be0a40aa45a94ad051997016db3960a90277).
 // Reduced callers retain their original in-place arithmetic and storage.
 func v41AttentionQKRoPE(cfg Config, layer int, q, kv, cos, sin []float32, heads, headDim, rotaryDim int, rotate v41TailRoPEFunc) ([]float32, []float32, error) {
+	return v41AttentionQKRoPEWithPublish(cfg, layer, q, kv, cos, sin, heads, headDim, rotaryDim, rotate, nil)
+}
+
+// v41RoPEBF16Pair publishes Q and KV as one owned row, so a bound device
+// publication costs one dispatch. Element-wise rounding makes the split exact.
+func v41RoPEBF16Pair(layer int, site string, q, kv []float32, publish v41BF16BoundaryFunc) ([]float32, []float32, error) {
+	joined := make([]float32, 0, len(q)+len(kv))
+	joined = append(append(joined, q...), kv...)
+	published, err := v41RoPEBF16Publish(layer, site, joined, publish)
+	if err != nil {
+		return nil, nil, err
+	}
+	return published[:len(q):len(q)], published[len(q):], nil
+}
+
+func v41AttentionQKRoPEWithPublish(cfg Config, layer int, q, kv, cos, sin []float32, heads, headDim, rotaryDim int, rotate v41TailRoPEFunc, publish v41BF16BoundaryFunc) ([]float32, []float32, error) {
 	full, err := v41ForwardGeometry(cfg)
 	if err != nil {
 		return nil, nil, err
@@ -201,11 +217,7 @@ func v41AttentionQKRoPE(cfg Config, layer int, q, kv, cos, sin []float32, heads,
 			return nil, nil, v41RoPEPublicationErr(layer, errV41TailRoPEResult)
 		}
 	}
-	query, err := v41RoPEBF16Copy(layer, q)
-	if err != nil {
-		return nil, nil, err
-	}
-	key, err := v41RoPEBF16Copy(layer, kv)
+	query, key, err := v41RoPEBF16Pair(layer, v41TailRoPEInputSite, q, kv, publish)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -226,15 +238,7 @@ func v41AttentionQKRoPE(cfg Config, layer int, q, kv, cos, sin []float32, heads,
 	}
 	// Both callbacks' outputs may alias their inputs or one another. Neither
 	// original row is written; finish owning both outputs before returning either.
-	query, err = v41RoPEBF16Copy(layer, qOut)
-	if err != nil {
-		return nil, nil, err
-	}
-	key, err = v41RoPEBF16Copy(layer, kOut)
-	if err != nil {
-		return nil, nil, err
-	}
-	return query, key, nil
+	return v41RoPEBF16Pair(layer, v41TailRoPEOutputSite, qOut, kOut, publish)
 }
 
 func v41RoPEPublicationErr(layer int, cause error) error {

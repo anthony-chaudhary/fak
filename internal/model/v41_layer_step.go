@@ -260,7 +260,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 			return err
 		}
 		if full {
-			if err := m.v41QueryNormInPlace(l, qLat, eps, scratch.queryNorm); err != nil {
+			if err := m.v41QueryNormInPlaceWithPublish(l, qLat, eps, scratch.queryNorm, scratch.gatherOps.bf16PublishFunc()); err != nil {
 				return err
 			}
 		}
@@ -287,12 +287,12 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		}
 	}
 	if full {
-		if err := m.v41KVNormInPlace(l, kv, eps, scratch.kvNorm); err != nil {
+		if err := m.v41KVNormInPlaceWithPublish(l, kv, eps, scratch.kvNorm, scratch.gatherOps.bf16PublishFunc()); err != nil {
 			return err
 		}
 	}
 	cos, sin := v41RopeTableForLayer(cfg, l, pos)
-	q, kv, err = v41AttentionQKRoPE(cfg, l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE)
+	q, kv, err = v41AttentionQKRoPEWithPublish(cfg, l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE, scratch.gatherOps.bf16PublishFunc())
 	if err != nil {
 		return err
 	}
@@ -395,7 +395,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		if rerr != nil {
 			return rerr
 		}
-		ffnX, err = m.v41FFNNorm(l, rows[0], eps, scratch.ffnNorm)
+		ffnX, err = m.v41FFNNormWithPublish(l, rows[0], eps, scratch.ffnNorm, scratch.gatherOps.bf16PublishFunc())
 	} else if full {
 		projectFFN, ferr := m.v41FFNMHCProjector(l, scratch)
 		if ferr != nil {
@@ -403,7 +403,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		}
 		ffnResidual, ffnMix, ffnX, err = m.v41FullFFNInput(l, streams, mix, attnOut, projectFFN, scratch)
 	} else {
-		ffnX, err = m.v41FFNNorm(l, x, eps, scratch.ffnNorm)
+		ffnX, err = m.v41FFNNormWithPublish(l, x, eps, scratch.ffnNorm, scratch.gatherOps.bf16PublishFunc())
 	}
 	if err != nil {
 		return err
@@ -442,7 +442,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 			return err
 		}
 	}
-	shared, err := m.v41SharedExpertSwiGLUWithActivation(l, ffnX, cfg, scratch.denseProjection, scratch.sharedActivation)
+	shared, err := m.v41SharedExpertSwiGLUWithPublish(l, ffnX, cfg, scratch.denseProjection, scratch.sharedActivation, scratch.gatherOps.bf16PublishFunc())
 	if err != nil {
 		return err
 	}
@@ -677,7 +677,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		if err != nil {
 			return err
 		}
-		if err := m.v41QueryNormInPlace(l, qLat, eps, scratch.queryNorm); err != nil {
+		if err := m.v41QueryNormInPlaceWithPublish(l, qLat, eps, scratch.queryNorm, scratch.gatherOps.bf16PublishFunc()); err != nil {
 			return err
 		}
 	}
@@ -694,11 +694,11 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		return err
 	}
 	kv := kvFull[:hd]
-	if err := m.v41KVNormInPlace(l, kv, eps, scratch.kvNorm); err != nil {
+	if err := m.v41KVNormInPlaceWithPublish(l, kv, eps, scratch.kvNorm, scratch.gatherOps.bf16PublishFunc()); err != nil {
 		return err
 	}
 	cos, sin := v41RopeTableForLayer(cfg, l, pos)
-	q, kv, err = v41AttentionQKRoPE(cfg, l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE)
+	q, kv, err = v41AttentionQKRoPEWithPublish(cfg, l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE, scratch.gatherOps.bf16PublishFunc())
 	if err != nil {
 		return err
 	}
@@ -742,7 +742,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		if indexSourceAt(cfg.DeepSeekV41, l) {
 			indexPub = true
 			projectIndex = func(row []float32) ([]float32, error) {
-				keys, err := m.v41IndexKeysWithOperations(l, [][]float32{row}, scratch.denseProjection, scratch.indexKeyNorm)
+				keys, err := m.v41IndexKeysPublished(l, [][]float32{row}, scratch.denseProjection, scratch.indexKeyNorm, scratch.gatherOps.bf16PublishFunc())
 				if err != nil {
 					return nil, err
 				}
@@ -867,7 +867,7 @@ func (m *Model) v41LayerStepRoleFinish(l, pos int, x []float32, streams [][]floa
 		if rerr != nil {
 			return rerr
 		}
-		ffnX, err = m.v41FFNNorm(l, rows[0], float32(cfg.RMSNormEps), scratch.ffnNorm)
+		ffnX, err = m.v41FFNNormWithPublish(l, rows[0], float32(cfg.RMSNormEps), scratch.ffnNorm, scratch.gatherOps.bf16PublishFunc())
 	} else {
 		ffnResidual, ffnMix, ffnX, err = m.v41FullFFNInput(l, streams, mix, attnOut, projectFFN, scratch)
 	}
@@ -902,7 +902,7 @@ func (m *Model) v41LayerStepRoleFinish(l, pos int, x []float32, streams [][]floa
 	if err != nil {
 		return err
 	}
-	shared, err := m.v41SharedExpertSwiGLUWithActivation(l, ffnX, cfg, scratch.denseProjection, scratch.sharedActivation)
+	shared, err := m.v41SharedExpertSwiGLUWithPublish(l, ffnX, cfg, scratch.denseProjection, scratch.sharedActivation, scratch.gatherOps.bf16PublishFunc())
 	if err != nil {
 		return err
 	}
@@ -1249,9 +1249,9 @@ func (m *Model) v41IncrementalExpert(l int, stem string, xn []float32, weight fl
 				return values, outcome, cause
 			}
 		}
-		return m.v41FullRoutedExpertWithDevice(l, stem, xn, weight, cfg, routedCallback, gateCallback, downCallback,
+		return m.v41FullRoutedExpertPublished(l, stem, xn, weight, cfg, routedCallback, gateCallback, downCallback,
 			func() ([]float32, []float32, []float32, error) { return m.v41ExpertTripleInto(l, stem, scratch, true) },
-			func() ([]float32, error) { return m.hostExpertDown(l, stem, scratch) }, false)
+			func() ([]float32, error) { return m.hostExpertDown(l, stem, scratch) }, false, scratch.gatherOps.bf16PublishFunc())
 	}
 	if scratch.expertGateUp != nil {
 		dispatchOpen, dispatchActive, gateUp = m.v41NowNanos(), true, true

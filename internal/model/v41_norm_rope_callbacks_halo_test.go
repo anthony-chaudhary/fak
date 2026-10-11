@@ -169,6 +169,9 @@ func v41NormRoPEHaloIsolate(st *v41ForwardState) {
 	st.indexScoreHealth = nil
 	st.routerTopK, st.routedSum, st.sharedAdd = nil, nil, nil
 	st.gatherOps, st.mhcDevice = nil, nil
+	// The final-norm BF16 pair binds the ordinary publication; this witness
+	// budgets only its five callbacks' dispatches.
+	st.bf16Boundary = nil
 }
 
 // FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_DISPATCH_PROFILE=1 with the Halo SPIRV

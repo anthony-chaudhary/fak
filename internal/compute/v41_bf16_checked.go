@@ -65,6 +65,9 @@ func v41BF16CheckedSiteName(site uint32) string {
 	case V41BF16CheckedQueryNormOutput:
 		return "query-norm output"
 	default:
+		if name, ok := v41BF16PublishSiteNames[site]; ok {
+			return name
+		}
 		return fmt.Sprintf("unknown site %d", site)
 	}
 }

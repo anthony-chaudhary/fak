@@ -446,6 +446,10 @@ int fvk_v41_attention_bf16_state(void);
 int fvk_v41_attention_bf16_count_supported(int count);
 int fvk_v41_attention_bf16_f32(const void *dInput, void *dOut, void *dStatus, int count, uint32_t site);
 int fvk_v41_attention_bf16_module_abi(const void *data, size_t bytes);
+/* Ordinary V4.1 BF16 publication for every other full-profile boundary, on the
+ * same checked module and state. Its closed site policy is final norm 1/2,
+ * query norm 5/6 and 7..27; attention 3/4 stays on the entry above. */
+int fvk_v41_bf16_publish_f32(const void *dInput, void *dOut, void *dStatus, int count, uint32_t site);
 
 /* Experimental BF16 bit-copy spine. Production archives deliberately omit
  * these symbols; a witness-tagged Go build cannot link the wrong archive.

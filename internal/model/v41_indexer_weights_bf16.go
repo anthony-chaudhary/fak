@@ -13,6 +13,14 @@ import (
 // reference's runtime version or emulate its FP8/FP4 projection arithmetic.
 // Both copybacks own their output, so failure never partly changes the caller.
 func v41IndexWeightsBF16(l int, projected []float32, dim, nHeads int) ([]float32, error) {
+	return v41IndexWeightsBF16Published(l, projected, dim, nHeads, nil)
+}
+
+// v41IndexWeightsBF16Published rounds both boundaries through the session's
+// ordinary device publication when one is bound. The F32 scalar multiply
+// between them stays on the host; it is its own device-only inventory entry
+// (indexer-weight-scale), not part of the BF16 boundary.
+func v41IndexWeightsBF16Published(l int, projected []float32, dim, nHeads int, publish v41BF16BoundaryFunc) ([]float32, error) {
 	const leaf = "indexer.weights_proj.weight"
 	if dim <= 0 || nHeads <= 0 || len(projected) != nHeads {
 		return nil, &V41ProjectionOperationError{
@@ -20,7 +28,7 @@ func v41IndexWeightsBF16(l int, projected []float32, dim, nHeads int) ([]float32
 			Cause: v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: invalid index weight geometry", ErrV41ForwardStage)),
 		}
 	}
-	weights, err := v41IndexBF16Copyback(l, leaf, "projection", projected)
+	weights, err := v41IndexBF16Publish(l, leaf, "projection", projected, publish)
 	if err != nil {
 		return nil, err
 	}
@@ -31,5 +39,5 @@ func v41IndexWeightsBF16(l int, projected []float32, dim, nHeads int) ([]float32
 	for h := range weights {
 		weights[h] = float32(weights[h] * scale)
 	}
-	return v41IndexBF16Copyback(l, leaf, "scaled weight", weights)
+	return v41IndexBF16Publish(l, leaf, "scaled weight", weights, publish)
 }

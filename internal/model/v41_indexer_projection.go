@@ -14,6 +14,10 @@ func (m *Model) v41IndexKeys(l int, rows [][]float32, project v41DenseProjection
 }
 
 func (m *Model) v41IndexKeysWithOperations(l int, rows [][]float32, project v41DenseProjectionFunc, normalize v41IndexKeyNormFunc) ([][]float32, error) {
+	return m.v41IndexKeysPublished(l, rows, project, normalize, nil)
+}
+
+func (m *Model) v41IndexKeysPublished(l int, rows [][]float32, project v41DenseProjectionFunc, normalize v41IndexKeyNormFunc, publish v41BF16BoundaryFunc) ([][]float32, error) {
 	dim := m.Cfg.IndexHeadDim
 	if dim <= 0 {
 		return nil, v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: invalid index head width", ErrV41ForwardStage))
@@ -29,7 +33,7 @@ func (m *Model) v41IndexKeysWithOperations(l int, rows [][]float32, project v41D
 			return nil, err
 		}
 		// The reference's BF16 wk output is widened for RMSNorm arithmetic.
-		key, err = v41IndexBF16Copyback(l, "indexer.wk.weight", "projection", key)
+		key, err = v41IndexBF16Publish(l, "indexer.wk.weight", "projection", key, publish)
 		if err != nil {
 			return nil, err
 		}
@@ -38,7 +42,7 @@ func (m *Model) v41IndexKeysWithOperations(l int, rows [][]float32, project v41D
 			return nil, err
 		}
 		// RMSNorm multiplies its learned gain in F32, then casts once.
-		key, err = v41IndexBF16Copyback(l, "indexer.k_norm.weight", "normalization", key)
+		key, err = v41IndexBF16Publish(l, "indexer.k_norm.weight", "normalization", key, publish)
 		if err != nil {
 			return nil, err
 		}
@@ -85,18 +89,19 @@ func (m *Model) v41IndexRowsWithDeviceOps(l, pos int, qLat, hidden []float32, ke
 	}
 	// Both the BF16 linear and the reference's FP8 GEMM return BF16 in the
 	// pinned BF16 execution profile. This does not emulate FP8 input quantization.
-	q, err = v41IndexBF16Copyback(l, "indexer.wq_b.weight", "projection", q)
+	publish := ops.bf16PublishFunc()
+	q, err = v41IndexBF16Publish(l, "indexer.wq_b.weight", "projection", q, publish)
 	if err != nil {
 		return nil, err
 	}
-	if err := m.v41IndexRoPEWithDevice(l, pos, q, nHeads, ops.indexRoPEFunc()); err != nil {
+	if err := m.v41IndexRoPEPublished(l, pos, q, nHeads, ops.indexRoPEFunc(), publish); err != nil {
 		return nil, err
 	}
 	weights, err := m.v41ProjMatRowsWithProjection(l, "indexer.weights_proj.weight", hidden, nHeads, cfg.HiddenSize, project)
 	if err != nil {
 		return nil, err
 	}
-	weights, err = v41IndexWeightsBF16(l, weights, dim, nHeads)
+	weights, err = v41IndexWeightsBF16Published(l, weights, dim, nHeads, publish)
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +182,10 @@ func (m *Model) v41IndexRoPE(l, pos int, values []float32, heads int) error {
 }
 
 func (m *Model) v41IndexRoPEWithDevice(l, pos int, values []float32, heads int, rotate v41IndexRoPEFunc) error {
+	return m.v41IndexRoPEPublished(l, pos, values, heads, rotate, nil)
+}
+
+func (m *Model) v41IndexRoPEPublished(l, pos int, values []float32, heads int, rotate v41IndexRoPEFunc, publish v41BF16BoundaryFunc) error {
 	cfg := m.Cfg
 	dim, rd := cfg.IndexHeadDim, cfg.QKRopeHeadDim
 	width, valid := checkedMulInt(heads, dim)
@@ -201,28 +210,66 @@ func (m *Model) v41IndexRoPEWithDevice(l, pos int, values []float32, heads int, 
 				return fail(errV41TailRoPEResult)
 			}
 		}
-		for h := 0; h < heads; h++ {
-			tail := owned[(h+1)*dim-rd : (h+1)*dim]
-			rounded, err := v41IndexBF16Copyback(l, "indexer.wq_b.weight", "rotary", tail)
-			if err != nil {
-				return fail(err)
-			}
-			copy(tail, rounded)
+		if err := v41IndexTailsBF16(l, owned, heads, dim, rd, publish); err != nil {
+			return fail(err)
 		}
 		copy(values, owned)
 		return nil
 	}
 
-	for h := 0; h < heads; h++ {
-		head := values[h*dim : (h+1)*dim]
-		applyRopeTailInterleaved(head, cos, sin, rd)
-		tail, err := v41IndexBF16Copyback(l, "indexer.wq_b.weight", "rotary", head[dim-rd:])
-		if err != nil {
-			return err
+	if publish == nil {
+		for h := 0; h < heads; h++ {
+			head := values[h*dim : (h+1)*dim]
+			applyRopeTailInterleaved(head, cos, sin, rd)
+			tail, err := v41IndexBF16Copyback(l, "indexer.wq_b.weight", "rotary", head[dim-rd:])
+			if err != nil {
+				return err
+			}
+			copy(head[dim-rd:], tail)
 		}
-		copy(head[dim-rd:], tail)
+		return nil
+	}
+	for h := 0; h < heads; h++ {
+		applyRopeTailInterleaved(values[h*dim:(h+1)*dim], cos, sin, rd)
+	}
+	return v41IndexTailsBF16(l, values, heads, dim, rd, publish)
+}
+
+// v41IndexTailsBF16 publishes every head's rotary tail as one row and writes the
+// results back only after the whole publication succeeds. Without a bound
+// publication each tail keeps its own host copy, as before.
+func v41IndexTailsBF16(l int, values []float32, heads, dim, rd int, publish v41BF16BoundaryFunc) error {
+	if publish == nil {
+		for h := 0; h < heads; h++ {
+			tail := values[(h+1)*dim-rd : (h+1)*dim]
+			rounded, err := v41IndexBF16Copyback(l, "indexer.wq_b.weight", "rotary", tail)
+			if err != nil {
+				return err
+			}
+			copy(tail, rounded)
+		}
+		return nil
+	}
+	tails := make([]float32, 0, heads*rd)
+	for h := 0; h < heads; h++ {
+		tails = append(tails, values[(h+1)*dim-rd:(h+1)*dim]...)
+	}
+	rounded, err := v41IndexBF16Publish(l, "indexer.wq_b.weight", "rotary", tails, publish)
+	if err != nil {
+		return err
+	}
+	for h := 0; h < heads; h++ {
+		copy(values[(h+1)*dim-rd:(h+1)*dim], rounded[h*rd:(h+1)*rd])
 	}
 	return nil
+}
+
+// v41IndexBF16Publish is v41IndexBF16Copyback routed through the session's
+// ordinary device publication when one is bound.
+func v41IndexBF16Publish(l int, leaf, phase string, values []float32, publish v41BF16BoundaryFunc) ([]float32, error) {
+	return v41PublishBF16(l, leaf+" "+phase, values, publish, func(values []float32) ([]float32, error) {
+		return v41IndexBF16Copyback(l, leaf, phase, values)
+	})
 }
 
 // v41IndexBF16Copyback owns its result so a projection or norm callback's

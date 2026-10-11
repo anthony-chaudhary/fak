@@ -60,11 +60,30 @@ func (m *Model) v41FullRoutedExpert(layer int, stem string, input []float32, wei
 // a decline falls through to the gate/up and down seams, then the host triple.
 // Device-only sessions bind a refusing wrapper, so their decline never does.
 func (m *Model) v41FullRoutedExpertWithDevice(layer int, stem string, input []float32, weight float32, cfg Config, routed v41RoutedExpertFunc, gateUp v41ExpertGateUpFunc, down v41ExpertDownFunc, triple v41RoutedTripleLoader, downWeight v41RoutedDownLoader, parallel bool) ([]float32, error) {
+	return m.v41FullRoutedExpertPublished(layer, stem, input, weight, cfg, routed, gateUp, down, triple, downWeight, parallel, nil)
+}
+
+// v41RoutedBF16Publish is v41RoutedBF16 routed through the session's ordinary
+// device publication when one is bound.
+func v41RoutedBF16Publish(layer int, stage string, values []float32, width int, publish v41BF16BoundaryFunc) ([]float32, error) {
+	if len(values) != width {
+		return nil, v41ExpertOperationErr(layer, stage, errV41ExpertResult)
+	}
+	site := v41RoutedGateUpSite
+	if stage == "down" {
+		site = v41RoutedDownSite
+	}
+	return v41PublishBF16(layer, site, values, publish, func(values []float32) ([]float32, error) {
+		return v41RoutedBF16(layer, stage, values, width)
+	})
+}
+
+func (m *Model) v41FullRoutedExpertPublished(layer int, stem string, input []float32, weight float32, cfg Config, routed v41RoutedExpertFunc, gateUp v41ExpertGateUpFunc, down v41ExpertDownFunc, triple v41RoutedTripleLoader, downWeight v41RoutedDownLoader, parallel bool, publish v41BF16BoundaryFunc) ([]float32, error) {
 	H, I := cfg.HiddenSize, cfg.MoEIntermediateSize
 	if H <= 0 || I <= 0 || !finite32(weight) {
 		return nil, v41ExpertOperationErr(layer, "gate/up", errV41ExpertResult)
 	}
-	x, err := v41RoutedBF16(layer, "gate/up", input, H)
+	x, err := v41RoutedBF16Publish(layer, "gate/up", input, H, publish)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +94,7 @@ func (m *Model) v41FullRoutedExpertWithDevice(layer int, stem string, input []fl
 			if cause != nil {
 				return nil, v41ExpertOperationErr(layer, "down", cause)
 			}
-			output, err := v41RoutedBF16(layer, "down", values, H)
+			output, err := v41RoutedBF16Publish(layer, "down", values, H, publish)
 			if err != nil {
 				return nil, err
 			}
@@ -130,11 +149,11 @@ func (m *Model) v41FullRoutedExpertWithDevice(layer int, stem string, input []fl
 			atomic.AddInt64(&v41SwiGLUParallelCalls, 1)
 		}
 		opened = m.v41NowNanos()
-		gate, cause := v41RoutedBF16(layer, "gate/up", proj(w1, x, I, H), I)
+		gate, cause := v41RoutedBF16Publish(layer, "gate/up", proj(w1, x, I, H), I, publish)
 		if cause != nil {
 			return nil, cause
 		}
-		up, cause := v41RoutedBF16(layer, "gate/up", proj(w3, x, I, H), I)
+		up, cause := v41RoutedBF16Publish(layer, "gate/up", proj(w3, x, I, H), I, publish)
 		if cause != nil {
 			return nil, cause
 		}
@@ -151,7 +170,7 @@ func (m *Model) v41FullRoutedExpertWithDevice(layer int, stem string, input []fl
 		}
 		weighted[i] = float32(v * weight)
 	}
-	operand, err := v41RoutedBF16(layer, "down", weighted, I)
+	operand, err := v41RoutedBF16Publish(layer, "down", weighted, I, publish)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +184,7 @@ func (m *Model) v41FullRoutedExpertWithDevice(layer int, stem string, input []fl
 			if cause != nil {
 				return nil, v41ExpertOperationErr(layer, "down", cause)
 			}
-			output, err = v41RoutedBF16(layer, "down", values, H)
+			output, err = v41RoutedBF16Publish(layer, "down", values, H, publish)
 			if err != nil {
 				return nil, err
 			}
@@ -187,7 +206,7 @@ func (m *Model) v41FullRoutedExpertWithDevice(layer int, stem string, input []fl
 		if len(w2) != H*I {
 			return nil, v41ExpertOperationErr(layer, "down", errV41ExpertResult)
 		}
-		output, err = v41RoutedBF16(layer, "down", proj(w2, operand, H, I), H)
+		output, err = v41RoutedBF16Publish(layer, "down", proj(w2, operand, H, I), H, publish)
 		if err != nil {
 			return nil, err
 		}

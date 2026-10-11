@@ -63,9 +63,8 @@ func v41BF16BoundaryCopy(layer int, site string, values []float32, round v41BF16
 // 4N upload bytes, 4N readback bytes, and 8N live device bytes across distinct
 // input/output allocations. Two final-norm publications cost 16N transfer
 // bytes in total; the existing norm's own transfers are additional.
-// Ordinary Vulkan builds do not implement the experimental backend interface.
-// The bf16-boundary device-only inventory entry stays until every call site is
-// migrated and the separate capability/physical qualification gates are met.
+// Ordinary Vulkan builds do not implement the experimental backend interface;
+// they publish every boundary through v41BF16PublishFunc instead.
 func (s *Session) v41BF16BoundaryFunc() v41BF16BoundaryFunc {
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
 		!compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.F32) {
