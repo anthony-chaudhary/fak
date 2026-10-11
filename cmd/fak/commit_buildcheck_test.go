@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
 )
@@ -375,5 +378,57 @@ func TestFormatPreexistingRedAdvisory(t *testing.T) {
 	// never empty, never a panic.
 	if base := formatPreexistingRedAdvisory(""); !strings.Contains(base, "ALREADY red") {
 		t.Fatalf("empty build output should still carry the base advisory; got %q", base)
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+// fak-test:justify Keeps baseline failure diagnostics classifiable without printing arbitrary tool output.
+func TestFormatPreexistingRedAdvisoryDiagnosticSummary(t *testing.T) {
+	secret := "synthetic-private-value-that-must-not-appear"
+	for _, tc := range []struct {
+		name, detail, kind string
+		caveat             bool
+	}{
+		{"empty", "", "empty", true},
+		{"setup", "go: toolchain is unavailable: " + secret, "unclassified", true},
+		{"credential-like-output", "go: Get https://user:" + secret + "@example.invalid/module?token=" + secret + "\nAuthorization: Bearer " + secret, "unclassified", true},
+		{"compiler", "# buildcheck.test/p\np/p.go:3:9: undefined: neverDefined\n" + secret, "compiler-header", false},
+		{"credential-like-package", "# https://user:" + secret + "@example.invalid/p?token=" + secret, "compiler-header", false},
+		{"credential-like-symbol", "undefined: https://user:" + secret + "@example.invalid/", "unclassified", true},
+		{"invalid-utf8", "# bad\xff\nundefined: bad\xff", "compiler-header", false},
+		{"terminal-control", "# bad\x1b[31m\nundefined: bad\x1b[31m", "compiler-header", false},
+		{"large-raw-output", strings.Repeat(secret+"\n", 10000), "unclassified", true},
+		{"large-parsed-identifiers", "# " + strings.Repeat("界", 10000) + "\nundefined: " + strings.Repeat("界", 10000), "compiler-header", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out := formatPreexistingRedAdvisory(tc.detail)
+			meta := fmt.Sprintf("head diagnostic: kind=%s bytes=%d sha256=%x", tc.kind, len(tc.detail), sha256.Sum256([]byte(tc.detail)))
+			if !strings.Contains(out, meta) || !strings.Contains(out, "ALREADY red") || !strings.Contains(out, "raw output withheld") {
+				t.Fatalf("bounded diagnostic metadata missing: %q", out)
+			}
+			if strings.Contains(out, secret) || strings.Contains(out, "https://") || strings.Contains(out, "Authorization:") {
+				t.Fatal("arbitrary subprocess details escaped the summary")
+			}
+			if strings.Contains(out, "attribution caveat:") != tc.caveat {
+				t.Fatalf("compiler-header absence was not reported truthfully: %q", out)
+			}
+			if strings.Contains(out, "\x1b") {
+				t.Fatal("terminal control escaped the summary")
+			}
+			if len(out) > 2048 || !utf8.ValidString(out) {
+				t.Fatalf("diagnostic summary is unbounded or invalid UTF-8: %d bytes", len(out))
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+// fak-test:justify Keeps ordinary package paths and valid qualified Unicode symbols visible.
+func TestFormatPreexistingRedAdvisorySafeFields(t *testing.T) {
+	out := formatPreexistingRedAdvisory("# github.com/example/pkg-name/v2\nundefined: pkg.符号")
+	for _, want := range []string{"github.com/example/pkg-name/v2", "undefined: pkg.符号"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("safe compiler field missing %q: %q", want, out)
+		}
 	}
 }

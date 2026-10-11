@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"go/token"
 	"io"
 	"os"
 	"os/exec"
@@ -326,11 +328,36 @@ func commitBuildCheckAdvice(reason string) string {
 func formatPreexistingRedAdvisory(headDetail string) string {
 	var b strings.Builder
 	b.WriteString("fak commit: build-check: the committed trunk is ALREADY red at HEAD (pre-existing, not introduced by this commit) — your commit is allowed.\n")
-	if pkgs := failingPackagesFromBuild(headDetail); len(pkgs) > 0 {
-		b.WriteString("  shared trunk red in: " + strings.Join(pkgs, " ") + "\n")
+	pkgs := failingPackagesFromBuild(headDetail)
+	kind := "unclassified"
+	if len(headDetail) == 0 {
+		kind = "empty"
+	} else if len(pkgs) > 0 {
+		kind = "compiler-header"
+	}
+	// Keep a bounded correlation receipt without echoing arbitrary subprocess
+	// output, which can contain credentials in URLs or environment diagnostics.
+	fmt.Fprintf(&b, "  head diagnostic: kind=%s bytes=%d sha256=%x (raw output withheld)\n", kind, len(headDetail), sha256.Sum256([]byte(headDetail)))
+	if len(pkgs) > 0 {
+		// Parsed fields are still untrusted subprocess text. Keep ordinary import
+		// paths, but withhold URL credentials, control bytes and non-ASCII bytes.
+		for i, pkg := range pkgs {
+			if strings.Trim(pkg, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._/-") != "" {
+				pkgs[i] = "[withheld]"
+			}
+		}
+		fmt.Fprintf(&b, "  shared trunk red in: %.256s\n", strings.Join(pkgs, " "))
+	} else {
+		b.WriteString("  attribution caveat: no compiler package header; source failure versus toolchain/setup failure is unclassified.\n")
 	}
 	if sym := extractUndefinedSymbol(headDetail); sym != "" {
-		b.WriteString("  first break: undefined: " + sym + "\n")
+		for _, part := range strings.Split(sym, ".") {
+			if !token.IsIdentifier(part) {
+				sym = "[withheld]"
+				break
+			}
+		}
+		fmt.Fprintf(&b, "  first break: undefined: %.128s\n", sym)
 	}
 	b.WriteString("  this is a SHARED break that still needs a fix at its source — until HEAD builds, every peer inherits it.\n")
 	return b.String()
