@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -53,6 +54,7 @@ func (s *WeightSource) EstimateStreamedExpertHostLoadPeak(opts ...Q4KLoadOption)
 	byType := map[TensorType]*HostLoadTypeRow{}
 	var windows []int64
 	var eligible, largestLazy int64
+	kvb := kvbBufferSim{buffered: map[int]int64{}}
 	add := func(dst *int64, n int64) error {
 		if n < 0 || *dst > math.MaxInt64-n {
 			return fmt.Errorf("gguf: streamed-expert host peak estimate overflows int64")
@@ -66,28 +68,12 @@ func (s *WeightSource) EstimateStreamedExpertHostLoadPeak(opts ...Q4KLoadOption)
 			(archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name)) {
 			continue
 		}
-		payloadU, err := tensorPayloadBytes(info)
+		ch, err := streamedTensorHostCharge(cfg, o, info)
 		if err != nil {
 			return HostLoadPeak{}, err
 		}
-		elemsU, err := tensorElems(info)
-		if err != nil {
-			return HostLoadPeak{}, err
-		}
-		payload, err := checkedEstimateUint64(payloadU, "payload", info.Name)
-		if err != nil {
-			return HostLoadPeak{}, err
-		}
-		f32, err := checkedEstimateMulUint64(elemsU, 4, "f32 bytes", info.Name)
-		if err != nil {
-			return HostLoadPeak{}, err
-		}
-		canon, mapped := CanonicalTensorNameArch(info.Name, cfg.ModelType)
-		if mapped {
-			var keep bool
-			if canon, keep = model.QuantSourceTensorName(cfg, canon); !keep {
-				continue
-			}
+		if ch.skip {
+			continue
 		}
 		row := byType[info.Type]
 		if row == nil {
@@ -95,45 +81,19 @@ func (s *WeightSource) EstimateStreamedExpertHostLoadPeak(opts ...Q4KLoadOption)
 			byType[info.Type] = row
 		}
 		row.Tensors++
-		if err := add(&row.PayloadBytes, payload); err != nil {
-			return HostLoadPeak{}, err
+		for _, d := range []struct {
+			dst *int64
+			n   int64
+		}{
+			{&row.PayloadBytes, ch.payload}, {&row.StreamBytes, ch.stream}, {&eligible, ch.stream},
+			{&row.Q8Bytes, ch.q8}, {&row.F32Bytes, ch.f32}, {&out.ArenaCopyBytes, ch.f32},
+		} {
+			if err := add(d.dst, d.n); err != nil {
+				return HostLoadPeak{}, err
+			}
 		}
-		if mapped && streamedDenseLazy(cfg, o, info.Type, canon) {
-			if err := add(&row.StreamBytes, payload); err != nil {
-				return HostLoadPeak{}, err
-			}
-			if err := add(&eligible, payload); err != nil {
-				return HostLoadPeak{}, err
-			}
-			largestLazy = max(largestLazy, payload)
-			windows = append(windows, 0)
-			continue
-		}
-		shape, shapeErr := modelShapeFromGGUFDims(info.Name, info.Dims)
-		if mapped && shapeErr == nil && len(shape) == 2 && shape[1]%32 == 0 && model.IsQuantWeight(canon) {
-			q8U, err := estimateNativeQ8LogicalBytes(elemsU)
-			if err != nil {
-				return HostLoadPeak{}, err
-			}
-			q8, err := checkedEstimateUint64(q8U, "q8 bytes", info.Name)
-			if err != nil {
-				return HostLoadPeak{}, err
-			}
-			if err := add(&row.Q8Bytes, q8); err != nil {
-				return HostLoadPeak{}, err
-			}
-			window, err := sumWindow(payload, f32, f32)
-			if err != nil {
-				return HostLoadPeak{}, err
-			}
-			windows = append(windows, window)
-			continue
-		}
-		steady := max(payload, f32)
-		if err := add(&row.F32Bytes, steady); err != nil {
-			return HostLoadPeak{}, err
-		}
-		window, err := sumWindow(payload, f32)
+		largestLazy = max(largestLazy, ch.stream)
+		window, err := kvb.admit(ch)
 		if err != nil {
 			return HostLoadPeak{}, err
 		}
@@ -169,12 +129,138 @@ func (s *WeightSource) EstimateStreamedExpertHostLoadPeak(opts ...Q4KLoadOption)
 			return HostLoadPeak{}, err
 		}
 	}
-	out.TransientBytes = max(out.WorkerWindowBytes, staging)
+	// The tensor windows (load), Build's arena coalescing copy, and the device upload's staging
+	// are disjoint phases of one load.
+	out.TransientBytes = max(out.WorkerWindowBytes, out.ArenaCopyBytes, staging)
 	out.PeakAnonBytes = out.SteadyAnonBytes
 	if err := add(&out.PeakAnonBytes, out.TransientBytes); err != nil {
 		return HostLoadPeak{}, err
 	}
 	return out, nil
+}
+
+// streamedTensorCharge is one non-streamed tensor's share of the streamed-expert host load.
+type streamedTensorCharge struct {
+	skip    bool  // dropped by the loader (QuantSourceTensorName keep=false)
+	payload int64 // packed bytes on disk
+	stream  int64 // bounded streamed-dense candidate (a range descriptor; no anon bytes at load)
+	q8      int64 // steady native Q8 (a 2-D quant weight, plus a tied head's Q8 copy)
+	f32     int64 // steady F32 builder chunk; Build coalesces it into the arena with a second copy
+	window  int64 // the tensor's own worker-window transient
+	// kvbLayer >= 0 marks an MLA KV-b half (attn_k_b/attn_v_b) that the collector buffers as an
+	// owned f32 copy of kvbF32 bytes until its partner arrives.
+	kvbLayer int
+	kvbF32   int64
+}
+
+// streamedTensorHostCharge mirrors computeQ4KTensorWork + applyQ4KTensorWork for one tensor of
+// the streamed-expert load. Each window holds the raw read and the f32 dequant; a Q8 weight also
+// holds the normalized f32 it quantizes from, an F32 tensor holds the normalized copy when its
+// canonical transform reallocates, and an MLA KV-b half holds the append copy it buffers.
+func streamedTensorHostCharge(cfg model.Config, o q4kLoadOptions, info TensorInfo) (streamedTensorCharge, error) {
+	ch := streamedTensorCharge{kvbLayer: -1}
+	payloadU, err := tensorPayloadBytes(info)
+	if err != nil {
+		return ch, err
+	}
+	elemsU, err := tensorElems(info)
+	if err != nil {
+		return ch, err
+	}
+	if ch.payload, err = checkedEstimateUint64(payloadU, "payload", info.Name); err != nil {
+		return ch, err
+	}
+	f32, err := checkedEstimateMulUint64(elemsU, 4, "f32 bytes", info.Name)
+	if err != nil {
+		return ch, err
+	}
+	q8U, err := estimateNativeQ8LogicalBytes(elemsU)
+	if err != nil {
+		return ch, err
+	}
+	q8, err := checkedEstimateUint64(q8U, "q8 bytes", info.Name)
+	if err != nil {
+		return ch, err
+	}
+	if archUsesMLAMoELayout(cfg.ModelType) {
+		if layer, _, ok := glmMoeDsaSplitKVB(info.Name); ok {
+			// The merged kv_b_proj lands as F32 or Q8; charge the larger per half.
+			ch.f32 = max(ch.payload, f32, q8)
+			ch.kvbLayer, ch.kvbF32 = layer, f32
+			ch.window, err = sumWindow(ch.payload, f32, f32)
+			return ch, err
+		}
+	}
+	canon, mapped := CanonicalTensorNameArch(info.Name, cfg.ModelType)
+	if mapped {
+		var keep bool
+		if canon, keep = model.QuantSourceTensorName(cfg, canon); !keep {
+			ch.skip = true
+			return ch, nil
+		}
+	}
+	if mapped && streamedDenseLazy(cfg, o, info.Type, canon) {
+		ch.stream = ch.payload
+		return ch, nil
+	}
+	shape, shapeErr := modelShapeFromGGUFDims(info.Name, info.Dims)
+	if mapped && shapeErr == nil && len(shape) == 2 && shape[1]%32 == 0 && model.IsQuantWeight(canon) {
+		ch.q8 = q8
+		ch.window, err = sumWindow(ch.payload, f32, f32)
+		return ch, err
+	}
+	ch.f32 = max(ch.payload, f32)
+	copied := int64(0)
+	if !mapped || normalizeCanonicalMayCopy(canon, cfg) {
+		copied = f32
+	}
+	if ch.window, err = sumWindow(ch.payload, f32, copied); err != nil {
+		return ch, err
+	}
+	// A tied embedding stays F32 for the row gather and is also quantized as the LM head.
+	if cfg.TieWordEmbeddings && canon == "model.embed_tokens.weight" && shapeErr == nil && len(shape) == 2 {
+		ch.q8 = q8
+		ch.window, err = sumWindow(ch.window, q8)
+	}
+	return ch, err
+}
+
+// kvbBufferSim replays the collector's MLA KV-b pairing (bufferGLMKVBHalf) in header order: each
+// half's owned f32 copy stays buffered until its partner arrives, and the merge then holds the
+// buffered pair, the merged tensor and its normalized copy at once.
+type kvbBufferSim struct {
+	buffered map[int]int64 // layer -> f32 bytes of the half waiting for its partner
+	held     int64         // sum of buffered
+}
+
+// admit returns ch's window including every KV-b half still buffered at that point and, for the
+// half that completes a pair, the merge transient.
+func (k *kvbBufferSim) admit(ch streamedTensorCharge) (int64, error) {
+	if ch.kvbLayer < 0 {
+		return sumWindow(ch.window, k.held)
+	}
+	partner, ok := k.buffered[ch.kvbLayer]
+	if !ok {
+		k.buffered[ch.kvbLayer] = ch.kvbF32
+		k.held += ch.kvbF32
+		return sumWindow(ch.window, k.held)
+	}
+	delete(k.buffered, ch.kvbLayer)
+	k.held -= partner
+	pair, err := sumWindow(partner, ch.kvbF32)
+	if err != nil {
+		return 0, err
+	}
+	return sumWindow(ch.window, k.held, pair, pair, pair)
+}
+
+// normalizeCanonicalMayCopy reports whether normalizeCanonicalTensorData can return a fresh
+// slice for canon rather than its input: every qwen35-hybrid transform and the rotary unpermute.
+func normalizeCanonicalMayCopy(canon string, cfg model.Config) bool {
+	if cfg.IsQwen35Hybrid() {
+		return true
+	}
+	return strings.HasSuffix(canon, ".self_attn.q_proj.weight") || strings.HasSuffix(canon, ".self_attn.k_proj.weight")
 }
 
 // streamedDenseLazy is the loader's streamed-dense dispatch (computeQ4KTensorWork): an eligible
