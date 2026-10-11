@@ -1,0 +1,79 @@
+{
+  "rows": [
+    {
+      "id": "deadline-admit-cached",
+      "canonical": "AdmitCached",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "The deadlineadmit Estimator method that evaluates prompt tokens, caller-supplied cached tokens, output limit and remaining declared budget using measured rates and live concurrency. It returns a deadline admission verdict; callers are responsible for validating the supplied resident-prefix credit.",
+      "distinction": "This is a duration-budget decision using an already supplied cache count, rather than the promptcachekey identity used to distinguish cached prompts. It does not discover, allocate or prove KV residency.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "AdmitCached",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "llama-slot-task-observation",
+      "canonical": "LlamaSlotTask",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The agent record of a llama-server slot task identifier, current processing state and prompt-token count obtained from the engine slots endpoint.",
+      "distinction": "The observation does not itself contain a slot ID, wire-prefix identity or local ownership. LlamaSoftSlotResidency adds the completed-call binding; llamaSoftSlotLease owns the local in-flight pin.",
+      "distinct_from": [
+        "llama-soft-slot-residency-proof",
+        "llama-soft-slot-request-lease"
+      ],
+      "aliases": [],
+      "grounding": "LlamaSlotTask",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "llama-soft-slot-request-lease",
+      "canonical": "llamaSoftSlotLease",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The agent request-local handle for a chosen soft slot, its conversation key and its existing release function. It can reserve the slot against other local picks while checking prepared-call residency, and releases the in-flight pin once.",
+      "distinction": "This is active process-local routing ownership, not the engine observation in LlamaSlotTask or the completed wire-prefix evidence in LlamaSoftSlotResidency. Foreign upstream clients remain outside the local reservation.",
+      "distinct_from": [
+        "llama-slot-task-observation",
+        "llama-soft-slot-residency-proof"
+      ],
+      "aliases": [],
+      "grounding": "llamaSoftSlotLease",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "llama-soft-slot-residency-proof",
+      "canonical": "LlamaSoftSlotResidency",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The opaque agent record binding a completed measured request to its actual upstream base and dispatch endpoint, named soft slot, observed engine task and prompt count, serialized request envelope and message-prefix digest, and request credential digest.",
+      "distinction": "This records completed-call evidence for a later prepared-call comparison; it does not own the active local slot as llamaSoftSlotLease does. LlamaSlotTask alone lacks this slot and wire-prefix binding.",
+      "distinct_from": [
+        "llama-slot-task-observation",
+        "llama-soft-slot-request-lease"
+      ],
+      "aliases": [],
+      "grounding": "LlamaSoftSlotResidency",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

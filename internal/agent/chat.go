@@ -1117,7 +1117,7 @@ func (p *HTTPPlanner) ProbeReachability(ctx context.Context) (int, error) {
 // pre-seam behavior.
 func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
 	offered := offeredToolsFor(ctx, tools)
-	call, err := p.prepareUpstream(messages, tools, false, opts...)
+	call, err := p.prepareUpstreamContext(ctx, messages, tools, false, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1191,6 +1191,9 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		}
 		if stop {
 			break
+		}
+		if err := call.admitSoftResidency(ctx, p); err != nil {
+			return nil, err
 		}
 		req, err := http.NewRequestWithContext(ctx, "POST", call.url, bytes.NewReader(call.body))
 		if err != nil {

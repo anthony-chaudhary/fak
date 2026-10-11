@@ -170,7 +170,8 @@ type upstreamCall struct {
 	attemptsUsed int
 	// slotRelease frees the soft llama-server slot pin (llama_soft_slot.go) when the
 	// upstream request ends; nil when no slot was pinned.
-	slotRelease func()
+	slotRelease   func()
+	slotResidency *llamaPreparedSlot
 	// authRefreshable marks the pinned/rotating-credential path — no per-request
 	// UpstreamAPIKey (the transparent passthrough hop authenticates with the client's
 	// OWN key, which we must not second-guess) AND a live APIKeyFunc on the planner. On
@@ -471,8 +472,13 @@ func (c *upstreamCall) applyHeaders(req *http.Request) {
 // selects whether the marshaled body asks the provider to deliver an SSE token
 // stream (honored only by the OpenAI-compatible chat wire; other adapters ignore the
 // flag, so an unsupported-wire body is byte-for-byte the non-stream one).
-func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, stream bool, opts ...SampleOpt) (_ *upstreamCall, retErr error) {
+func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, stream bool, opts ...SampleOpt) (*upstreamCall, error) {
+	return p.prepareUpstreamContext(context.Background(), messages, tools, stream, opts...)
+}
+
+func (p *HTTPPlanner) prepareUpstreamContext(ctx context.Context, messages []Message, tools []ToolDef, stream bool, opts ...SampleOpt) (_ *upstreamCall, retErr error) {
 	var slotRelease func()
+	var slotLease *llamaSoftSlotLease
 	defer func() {
 		if retErr != nil && slotRelease != nil {
 			slotRelease()
@@ -545,7 +551,10 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 		// Advisory llama-server hint (llama_slot_affinity.go): cache_prompt=true, no id_slot,
 		// so the upstream picks the slot. No-op for non-llama upstreams.
 		extraBody = p.withLlamaSlotAffinity(extraBody)
-		extraBody, slotRelease = p.withLlamaSoftSlot(extraBody, safeMessages)
+		extraBody, slotLease = p.withLlamaSoftSlot(extraBody, safeMessages)
+		if slotLease != nil {
+			slotRelease = slotLease.release
+		}
 		reqBody, err = adapter.MarshalRequest(adapterRequest{
 			Model:                    modelID,
 			ServiceTier:              sp.ServiceTier,
@@ -596,7 +605,7 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 	if sp.UpstreamAPIKey != "" {
 		apiKey = sp.UpstreamAPIKey
 	}
-	return &upstreamCall{
+	call := &upstreamCall{
 		adapter:           adapter,
 		url:               adapter.Endpoint(p.BaseURL, modelID),
 		body:              reqBody,
@@ -610,7 +619,9 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 		responsesStreamed: forceResponsesStream,
 		authRefreshable:   authRefreshable,
 		slotRelease:       slotRelease,
-	}, nil
+	}
+	call.bindSoftResidency(ctx, p, slotLease)
+	return call, nil
 }
 
 // StreamingSupported reports whether the planner's configured wire can stream. Only
@@ -718,6 +729,9 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		if stop {
 			break
 		}
+		if err := call.admitSoftResidency(ctx, p); err != nil {
+			return nil, nil, err
+		}
 		req, err := http.NewRequestWithContext(ctx, "POST", call.url, bytes.NewReader(call.body))
 		if err != nil {
 			return nil, nil, err
@@ -803,7 +817,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	if !p.StreamingSupported() {
 		return nil, ErrStreamingUnsupported
 	}
-	call, err := p.prepareUpstream(messages, tools, true, opts...)
+	call, err := p.prepareUpstreamContext(ctx, messages, tools, true, opts...)
 	if err != nil {
 		return nil, err
 	}

@@ -100,6 +100,7 @@ type llamaSoftSlots struct {
 	slotOwner map[int]uint64
 	slotUsed  map[int]time.Time
 	inflight  map[int]int
+	reserved  map[int]*llamaSoftSlotLease // excludes even wait-policy picks during a proved dispatch
 	// released records when this process's last pin on a slot ended: a snapshot taken
 	// before that instant may show the slot busy with our own finished request.
 	released map[int]time.Time
@@ -212,7 +213,7 @@ func (st *llamaSoftSlots) pick(base, apiKey, policy string, messages []Message, 
 	}
 	ids, busy, snapAt := st.snapIDs, st.snapBusy, st.snapAt
 	idle := func(id int) bool {
-		if st.inflight[id] > 0 {
+		if st.inflight[id] > 0 || st.reserved[id] != nil {
 			return false
 		}
 		rel, ok := st.released[id]
@@ -225,7 +226,7 @@ func (st *llamaSoftSlots) pick(base, apiKey, policy string, messages []Message, 
 	switch {
 	case owned && idle(c.slot):
 		slot, outcome = c.slot, SoftSlotSticky
-	case owned && policy == SoftSlotPolicyWait:
+	case owned && policy == SoftSlotPolicyWait && st.reserved[c.slot] == nil:
 		slot, outcome = c.slot, SoftSlotWaited
 	default:
 		for _, id := range ids {
@@ -314,7 +315,7 @@ func (st *llamaSoftSlots) trimLocked() {
 // withLlamaSoftSlot adds id_slot for an opted-in planner when soft choice picks an idle
 // slot. It returns extra unchanged (and a nil release) otherwise, and never overrides an
 // id_slot the operator set through ExtraBody.
-func (p *HTTPPlanner) withLlamaSoftSlot(extra json.RawMessage, messages []Message) (json.RawMessage, func()) {
+func (p *HTTPPlanner) withLlamaSoftSlot(extra json.RawMessage, messages []Message) (json.RawMessage, *llamaSoftSlotLease) {
 	if p == nil || !p.LlamaSoftSlot || p.Provider != ProviderOpenAI || strings.TrimSpace(p.BaseURL) == "" {
 		return extra, nil
 	}
@@ -343,5 +344,6 @@ func (p *HTTPPlanner) withLlamaSoftSlot(extra json.RawMessage, messages []Messag
 		release()
 		return extra, nil
 	}
-	return out, release
+	key, _ := conversationKey(messages)
+	return out, &llamaSoftSlotLease{state: llamaSoftSlotsFor(p.BaseURL), slot: slot, key: key, free: release}
 }

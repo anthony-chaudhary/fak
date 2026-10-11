@@ -177,6 +177,12 @@ func (s *Server) admitClientDeadlineChat(w http.ResponseWriter, r *http.Request,
 	}
 	planner, _ := s.chatPlanner(r.Context()).(*agent.HTTPPlanner)
 	ticket := &deadlineResidencyTicket{key: chain[len(chain)-1], estTok: promptTok, model: model, planner: planner}
+	r, preparedRelease, deferred := s.prepareDeadlineSoftSlot(r, ticket, chain, arrived, maxTokens)
+	if deferred {
+		r = r.WithContext(context.WithValue(r.Context(), deadlineResidencyCtxKey{}, ticket))
+		ctx := r.Context()
+		return r, func() { s.releaseDeadlineResidency(ctx, ticket); preparedRelease() }, true
+	}
 	ticket.credited = s.deadlineResidencyCredit(r, ticket, chain, arrived, maxTokens)
 	r, release, ok := s.admitClientDeadlineCached(w, r, arrived, promptTok, ticket.credited, maxTokens)
 	if !ok {

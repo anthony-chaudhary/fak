@@ -30,8 +30,9 @@ import (
 //     remaining budget, bounding the cost if a request reaches the slot first.
 //
 // A credited turn whose engine reported less than half the credit as cached
-// clears every entry. Upstreams that do not expose a single-slot /slots, and
-// non-HTTP planners, get no credit.
+// clears every entry. The separate prepared soft-slot path (deadline_soft_slot.go) requires an
+// opted-in request-owned named slot and matching final wire prefix. Other
+// multi-slot routes and non-HTTP planners receive no residency credit.
 
 const (
 	deadlineResidencyTTL        = 10 * time.Minute
@@ -50,6 +51,7 @@ type deadlineResidencyEntry struct {
 	planner    *agent.HTTPPlanner
 	engineTask int
 	slotPrompt int
+	soft       *agent.LlamaSoftSlotResidency
 	at         time.Time
 }
 
@@ -61,6 +63,7 @@ type deadlineResidencyTicket struct {
 	model    string
 	planner  *agent.HTTPPlanner
 	credited int
+	soft     *agent.LlamaSoftSlotTurn
 
 	mu       sync.Mutex
 	measured int
@@ -157,7 +160,7 @@ func (s *Server) deadlineResidencyCredit(r *http.Request, t *deadlineResidencyTi
 		return 0
 	}
 	e, ok := s.metrics.deadlineResidencyMem().lookup(chain, t.model, t.planner, arrived)
-	if !ok {
+	if !ok || e.soft != nil {
 		return 0
 	}
 	slot, ok := t.planner.LlamaSingleSlot(r.Context(), deadlineSlotReadTimeout)
@@ -179,9 +182,12 @@ func (s *Server) noteDeadlineResidency(ctx context.Context, comp *agent.Completi
 		return
 	}
 	hit := max(comp.Usage.CachedPromptTokens(), perfDetailFromCompletion(comp).kvCacheN)
-	if t.credited > 0 && hit*2 < t.credited {
+	t.mu.Lock()
+	credited := t.credited
+	t.mu.Unlock()
+	if credited > 0 && hit*2 < credited {
 		s.metrics.deadlineResidencyMem().forgetAll()
-		s.logf("gateway: deadline residency mispredicted: credited=%d engine_cached=%d; cleared residency evidence", t.credited, hit)
+		s.logf("gateway: deadline residency mispredicted: credited=%d engine_cached=%d; cleared residency evidence", credited, hit)
 	}
 	t.mu.Lock()
 	t.measured = comp.Usage.PromptTokens
@@ -202,6 +208,12 @@ func (s *Server) releaseDeadlineResidency(ctx context.Context, t *deadlineReside
 		return
 	}
 	mem := s.metrics.deadlineResidencyMem()
+	if t.soft != nil {
+		t.soft.Record(measured, func(proof *agent.LlamaSoftSlotResidency) {
+			mem.remember(t.key, deadlineResidencyEntry{tokens: min(t.estTok, measured), model: t.model, planner: t.planner, soft: proof, at: time.Now()})
+		})
+		return
+	}
 	go func() {
 		slot, ok := t.planner.LlamaSingleSlot(context.Background(), deadlineSlotReadTimeout)
 		if !ok || slot.Processing || slot.PromptTokens != measured {
