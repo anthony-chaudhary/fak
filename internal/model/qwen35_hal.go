@@ -112,7 +112,7 @@ func (s *Session) validateDeviceOnlyExecution(stage string) {
 		s.refuseHostFallback(stage + ": partial GPU layer placement")
 	}
 	if cfg.IsDeepSeekV41() {
-		if cause := v41DeviceOnlyRefusal(); cause != nil {
+		if cause := s.v41DeviceOnlyAdmissionRefusal(); cause != nil {
 			s.refuseHostFallbackCause(stage+": architecture uses host model compute", cause)
 		}
 	}

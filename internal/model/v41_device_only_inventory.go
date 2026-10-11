@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 var errV41DeviceOnlyHostOp = errors.New("model: V4.1 forward op runs on host under device-only policy")
@@ -24,7 +25,11 @@ func (e *v41DeviceOnlyHostOpError) Error() string {
 	if e == nil || len(e.ops) == 0 {
 		return errV41DeviceOnlyHostOp.Error()
 	}
-	return fmt.Sprintf("%v: %s (%s) and %d more", errV41DeviceOnlyHostOp, e.ops[0].name, e.ops[0].site, len(e.ops)-1)
+	names := make([]string, len(e.ops))
+	for i, op := range e.ops {
+		names[i] = op.name + " (" + op.site + ")"
+	}
+	return fmt.Sprintf("%v: %s", errV41DeviceOnlyHostOp, strings.Join(names, ", "))
 }
 
 func (e *v41DeviceOnlyHostOpError) Is(target error) bool { return target == errV41DeviceOnlyHostOp }
