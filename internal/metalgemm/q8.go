@@ -32,6 +32,8 @@ void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float
 void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y, mg_execution_event* event);
 void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float* Xd, int P, float* Ycat, const int* yoff, mg_execution_event* event);
 void mg_q8_reset(void);
+void mg_q8_set_mulmm(int on);
+int  mg_q8_mulmm_ready(void);
 */
 import "C"
 
@@ -356,3 +358,19 @@ func (w *Q8Weight) GEMM(Xq []int8, Xd []float32, P int, Y []float32) {
 func GEMMGroupQ8(ws []*Q8Weight, Xq []int8, Xd []float32, P int) [][]float32 {
 	return GEMMGroupQ8WithEvents(ws, Xq, Xd, P, nil)
 }
+
+// SetQ8UseMulMM is the process-local switch for the simdgroup-matrix q8_mul_mm prefill GEMM
+// (default on). Off, every Q8 GEMM with P > 1 takes the scalar q8_gemm.
+func SetQ8UseMulMM(on bool) {
+	v := C.int(0)
+	if on {
+		v = 1
+	}
+	C.mg_q8_set_mulmm(v)
+}
+
+// Q8MulMMReady reports whether the q8_mul_mm pipeline compiled on this device.
+func Q8MulMMReady() bool { return Available() && C.mg_q8_mulmm_ready() != 0 }
+
+// Q8MulMMMinPrompt is the smallest prompt width routed to q8_mul_mm; it must match Q8MM_MIN_P in q8.m.
+const Q8MulMMMinPrompt = 32
