@@ -51,7 +51,7 @@ func (s *Session) v41IndexRoPEFunc() v41IndexRoPEFunc {
 				if err, ok := r.(error); ok {
 					var closed *BackendForwardOperationError
 					if errors.As(err, &closed) {
-						closeSelected(closed)
+						closeSelected(err)
 						panic(r)
 					}
 					var backend *compute.BackendError

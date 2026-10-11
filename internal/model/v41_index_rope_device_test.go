@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
 	"testing"
@@ -436,4 +437,76 @@ func TestV41IndexRoPERestoredGatherOwnership(t *testing.T) {
 		t.Fatal("restored step lost target ownership, omitted a callback, leaked, or changed continuation")
 	}
 	v41IndexRoPECheckResources(t, b, false)
+}
+
+// fak-test:runtime medium est=3s lane=default
+// fak-test:justify Preserves a wrapped primary across actual query dispatch, retirement and retry.
+func TestV41IndexRoPEWrappedPrimary(t *testing.T) {
+	if ref := compute.Default(); ref == nil || ref.Name() != "cpu-ref" || ref.Caps().DeviceMemory {
+		t.Fatal("wrapped query-RoPE witness requires cpu-ref")
+	}
+	for _, restored := range []bool{false, true} {
+		owner := "fresh"
+		if restored {
+			owner = "restored"
+		}
+		for _, cleanup := range []string{"none", "flush", "free"} {
+			t.Run(owner+"/"+cleanup, func(t *testing.T) {
+				m := v41IndexerTestFixture(t)
+				b := newV41IndexRoPERecorder()
+				source := v41DenseTestSession(t, m, b)
+				v41ScoreOnly(source)
+				source.v41State().gatherOps.inverseOutput = nil
+				source.Prefill([]int{1, 2, 3})
+				if len(b.calls) == 0 {
+					t.Fatal("fixture did not select real query rotation")
+				}
+				target := source
+				if restored {
+					snap, err := source.PrefixSnapshot()
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer snap.Close()
+					target = v41DenseTestSession(t, m, b)
+					if err := snap.Restore(target); err != nil {
+						t.Fatal(err)
+					}
+					v41ScoreOnly(target)
+					target.v41State().gatherOps.inverseOutput = nil
+					source.Close()
+				}
+				// Teardown disarms only after assertions; a retirement regression must not
+				// cause a second injected cleanup panic to abort unrelated subtests.
+				t.Cleanup(func() { b.cleanupArmed = false })
+				if target.v41State().gatherOps.owner != target || target.v41Forward.callbackOwner != target {
+					t.Fatal("selected callback is not bound to current owner")
+				}
+				before := captureV41ForwardSnapshot(target.v41Forward)
+				inner := &BackendForwardOperationError{Backend: "query-recorder", Path: "upstream-selected-operation", Stage: "execution", Cause: ErrV41ForwardStage}
+				primary := fmt.Errorf("outer query attribution: %w", inner)
+				b.failure, b.failCall, b.cause = "panic", len(b.calls)+1, primary
+				if cleanup != "none" {
+					b.cleanupStage = cleanup
+				}
+				first := recoverError(func() { target.Step(4) })
+				if first != primary {
+					t.Fatalf("first panic lost original wrapper: got %v, want exact %v", first, primary)
+				}
+				if target.halFailure != primary || !target.BackendSessionClosed() {
+					t.Fatalf("retirement lost wrapped primary: latch=%v, closed=%t", target.halFailure, target.BackendSessionClosed())
+				}
+				if cleanup != "none" && b.cleanupCalls == 0 {
+					t.Fatal("secondary cleanup failure was not exercised")
+				}
+				if len(b.calls) != b.failCall || !reflect.DeepEqual(before, captureV41ForwardSnapshot(target.v41Forward)) {
+					t.Fatal("selected failure replayed or changed continuation")
+				}
+				if retry := recoverError(func() { target.Step(4) }); retry != primary || len(b.calls) != b.failCall {
+					t.Fatal("retired owner did not rethrow the exact original wrapper")
+				}
+				v41IndexRoPECheckResources(t, b, cleanup == "free")
+			})
+		}
+	}
 }
