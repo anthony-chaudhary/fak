@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **620** (clarity 0 + coverage 620) |
-| **Crystal-clear concepts (and climbing)** | **1183** crystal of 2938 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3050 / 3670** (83.1% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **1184** crystal of 2939 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3051 / 3671** (83.1% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 223 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **84** of 4184 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **84** of 4185 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 89.0/100 (grade B) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2938 concepts - score 89.0/100 (grade B) - disambiguation-debt 620
+concept-disambiguation chart - 2939 concepts - score 89.0/100 (grade B) - disambiguation-debt 620
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ###################......... 1183
+  * crystal       ###################......... 1184
   o defined       ############################ 1755
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -50,7 +50,7 @@ clarity mix by family (each cell = one concept):
   guard-gate       ******************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (452 concept(s); 210 crystal)
   layout           **********ooooooooo (19 concept(s); 10 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
-  plan             *************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (401 concept(s); 157 crystal)
+  plan             **************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (402 concept(s); 158 crystal)
   policy-capability **************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (203 concept(s); 98 crystal)
   pool             ******oooooooooooooooooooooooooooooooo (38 concept(s); 6 crystal)
   render-materialize *******************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (199 concept(s); 43 crystal)
@@ -62,7 +62,7 @@ clarity mix by family (each cell = one concept):
   witness-proof    ***********************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (166 concept(s); 83 crystal)
 
 coverage by family (positioned / discovered):
-  plan             #######################..... 465/570
+  plan             #######################..... 466/571
   session-runtime  #######################..... 287/355
   cache            #######################..... 333/399
   gateway-engine   #######################..... 226/280
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 83.1%  (3050/3670 confusable tokens positioned)
+namespace coverage  [###########################.....] 83.1%  (3051/3671 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 223
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 223/223
 
-name index: 4184 lookup name(s) -> 2938 concept(s), 84 ambiguous
+name index: 4185 lookup name(s) -> 2939 concept(s), 84 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **223 / 223** (223 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2120 / 5305 |
+| Boundaries drawn (mutual / total) | 2124 / 5309 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4184 over 2938 concepts |
+| Lookup names indexed | 4185 over 2939 concepts |
 | Lookup names landing on several concepts | 84 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2938 |
+| Concepts carrying a contrast set | 2939 |
 
 ## The concepts (best verdict first)
 
@@ -881,6 +881,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | plan | **plan implementation surface for runplanaudit** - `RunPlanAudit` is the plan symbol declared or used at `cmd/fak-dev/main.go:48` as `return devcmd.RunPlanAudit(stdout, stderr, argv[1:])`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | plan | **plan implementation surface for runwipland** - `runWipLand` is the plan symbol declared or used at `cmd/fak/wip.go:61` as `return runWipLand(stdout, stderr, argv[1:])`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | plan | **plan implementation surface for unplanned** - `unplanned` is the plan symbol declared or used at `internal/plancfi/plancfi.go:9` as `// produces a call OUTSIDE the approved plan — an unplanned gadget — and plancfi`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | plan | **VulkanReceiptBuildPlan (receipt verification policy plan)** - VulkanReceiptBuildPlan fixes the independently trusted package, output package, and smoke policy used to verify a Vulkan binary receipt. |
 | * | crystal | symbol | plan | **FleetPlan (goalrunner fleet serial plan)** - The declared multi-goal execution plan `goalrunner.FleetPlan` (internal/goalrunner/types.go), an ordered set of GoalContracts run serially by `RunFleetPlan`, which records per-contract witness evidence and a rollup (`SerializePlanJSON`, `RenderRollup`). |
 | * | crystal | metric | plan | **PlannedSteps (issue-orchestrator wave plan)** - Exported count field on issueorchestrator's wave Plan recording the total step budget summed across the planned waves (the private debtlane campaign plan mirrors the same name). |
 | * | crystal | doc-term | plan | **NonCandidate** - The study-classification disposition for a source record that is release metadata or otherwise outside the actionable mechanism queue. |
@@ -3216,8 +3217,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3185/5305 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2938 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3185/5309 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2939 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3226,14 +3227,14 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4184 lookup name(s) resolves - 84 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4185 lookup name(s) resolves - 84 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 465 | 570 | 105 |
+| plan | 466 | 571 | 105 |
 | session-runtime | 287 | 355 | 68 |
 | cache | 333 | 399 | 66 |
 | gateway-engine | 226 | 280 | 54 |

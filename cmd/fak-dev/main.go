@@ -209,7 +209,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  build [--profile P] [--out F] [--receipt F] [--json]  build fak and record phase timings")
 	fmt.Fprintln(w, "  build-matrix [flags]                  validate compile matrix across build variants and targets")
 	fmt.Fprintln(w, "  buildcheck [--vet] [packages...]       compile-check while masking peer WIP")
-	fmt.Fprintln(w, "  build-vulkan [subcommand] [flags]     orchestrate Vulkan compute build (shaders|lib|build|binary|test)")
+	fmt.Fprintln(w, "  build-vulkan [subcommand] [flags]     orchestrate Vulkan compute build (shaders|lib|build|binary|test|verify)")
 	fmt.Fprintln(w, "  build-cuda [subcommand] [flags]       orchestrate CUDA compute build (check|build|test|bench|binary)")
 	fmt.Fprintln(w, "  goal-launch [flags]                   launch a detached goal worker")
 	fmt.Fprintln(w, "  goal-fleet [flags]                    run serialized goal fleet")

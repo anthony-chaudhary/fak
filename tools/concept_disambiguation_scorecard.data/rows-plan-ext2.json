@@ -91,7 +91,8 @@
       "definition": "internal/compute/vulkan_plan.go is the host-tractable scaffold for issue #10's Vulkan command-buffer wiring, the compute-side plan of which cold weights spill on a discrete GPU.",
       "distinction": "It is a GPU compute/command-buffer plan, NOT a ctxplan conversation resident view nor a compute MemoryPlan headroom fit.",
       "distinct_from": [
-        "MemoryPlan (compute)"
+        "MemoryPlan (compute)",
+        "fak13823-plan-vulkanreceiptbuildplan"
       ],
       "aliases": [],
       "grounding": "vulkanplan",
@@ -571,6 +572,26 @@
       "glossary_anchor": "",
       "parent": "",
       "verdict": "defined",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "fak13823-plan-vulkanreceiptbuildplan",
+      "canonical": "VulkanReceiptBuildPlan (receipt verification policy plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "VulkanReceiptBuildPlan fixes the independently trusted package, output package, and smoke policy used to verify a Vulkan binary receipt.",
+      "distinction": "It is the verifier's expected build-policy input, not vulkan_plan command-buffer scheduling and not the generic BuildPlan action planner.",
+      "distinct_from": [
+        "x2-plan-vulkanplan",
+        "x-plan-buildplan"
+      ],
+      "aliases": [],
+      "grounding": "vulkanreceiptbuildplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
       "gaps": []
     }
   ]
