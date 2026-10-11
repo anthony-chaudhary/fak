@@ -129,38 +129,58 @@ func (s *Session) expertInputDeviceWeight(name string) (compute.Tensor, func(), 
 // (compute.BackendSupportsDeviceWeightDtype on the resolved device dtype) says THIS
 // backend's MatMul actually has a kernel for it. Both must pass. A k-quant whose
 // descriptor has no HAL kernel (IQ4_XS), or a dtype the backend's MatMul switch has no
-// case for (e.g. Q5_K on Vulkan), is a clean (compute.Tensor{},false) decline — never a
-// panic and never a host-expanded fallback.
-func (s *Session) q4kExpertDownDeviceWeight(downName string) (compute.Tensor, bool) {
+// case for (e.g. Q5_K on Vulkan), is a clean (compute.Tensor{},nil,false) decline — never a
+// panic and never a host-expanded fallback. The selected tensor is held until its
+// caller invokes the returned release callback, which retains the original ring.
+func (s *Session) q4kExpertDownDeviceWeight(downName string) (compute.Tensor, func(), bool) {
 	w, ok := s.resolveExpertWeight(downName)
 	if !ok {
-		return compute.Tensor{}, false
+		return compute.Tensor{}, nil, false
 	}
+	var stage func() compute.Tensor
 	switch {
 	case w.q4 != nil:
 		if !compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.Q4_K) {
-			return compute.Tensor{}, false
+			return compute.Tensor{}, nil, false
 		}
-		return s.weightHALQ4K(downName, w.q4), true
+		stage = func() compute.Tensor { return s.weightHALQ4K(downName, w.q4) }
 	case w.kq != nil:
 		desc, ok := LookupQuantDescriptor(w.kq.kind)
 		if !ok || !desc.SupportsHAL() {
-			return compute.Tensor{}, false
+			return compute.Tensor{}, nil, false
 		}
 		if !compute.BackendSupportsDeviceWeightDtype(s.Backend, desc.Dtype()) {
-			return compute.Tensor{}, false
+			return compute.Tensor{}, nil, false
 		}
-		return s.weightHALKQuant(downName, w.kq), true
+		stage = func() compute.Tensor { return s.weightHALKQuant(downName, w.kq) }
 	default:
 		// A checkpoint-served projection stages through the SAME bounded path as a
 		// resident one (same key, same dtype, same byte accounting, R5/#5616), exactly
 		// as expertInputDeviceWeight does for gate/up, so a streamed-down expert can
 		// execute on the device.
 		if !compute.BackendSupportsDeviceWeightDtype(s.Backend, w.ck.dt) {
-			return compute.Tensor{}, false
+			return compute.Tensor{}, nil, false
 		}
-		return s.weightHALStagedBounded(w.ck.key, downName, w.ck.mk, w.ck.dt, w.ck.bytes), true
+		stage = func() compute.Tensor {
+			return s.weightHALStagedBounded(w.ck.key, downName, w.ck.mk, w.ck.dt, w.ck.bytes)
+		}
 	}
+	// Hold across the caller's activation upload and every dispatch. Keep staging
+	// and pinning in one shared span, just like gate/up acquisition above.
+	r := s.routedExpertRing(downName)
+	if r == nil {
+		return stage(), func() {}, true
+	}
+	done := s.ringEnter(r)
+	defer done()
+	weight := stage()
+	key := w.halKey()
+	r.hold(key)
+	return weight, func() {
+		done := s.ringEnter(r)
+		defer done()
+		r.release(key)
+	}, true
 }
 
 // clampSwiGLUProjections applies the expert's asymmetric projection clamp before
@@ -299,10 +319,11 @@ func q4kExpertDownHALWithBF16(s *Session, downName string, fused []float32, inte
 	if s.M.has(downName[:len(downName)-len("weight")] + "bias") {
 		return nil, false
 	}
-	downW, ok := s.q4kExpertDownDeviceWeight(downName)
+	downW, releaseDown, ok := s.q4kExpertDownDeviceWeight(downName)
 	if !ok {
 		return nil, false
 	}
+	defer releaseDown()
 	xd := s.uploadHostF32([]int{intermediate}, fused, compute.MemoryActivation, "moe expert down activation")
 	defer s.Backend.Free(xd)
 	out := s.Backend.MatMul(downW, xd)
@@ -344,10 +365,11 @@ func q4kExpertGateUpDownHAL(s *Session, gateName, upName, downName string, xn an
 	}
 	defer releaseGate()
 	defer releaseUp()
-	downW, ok := s.q4kExpertDownDeviceWeight(downName)
+	downW, releaseDown, ok := s.q4kExpertDownDeviceWeight(downName)
 	if !ok {
 		return nil, false
 	}
+	defer releaseDown()
 	xd := s.uploadHostF32([]int{hidden}, x, compute.MemoryActivation, "moe expert gate/up activation")
 	defer s.Backend.Free(xd)
 	g := s.Backend.MatMul(gateW, xd)

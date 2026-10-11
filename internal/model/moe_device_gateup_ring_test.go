@@ -22,6 +22,7 @@ type gateUpRingRecorder struct {
 	fault         error
 	onUpload      func()
 	onMatMul      func()
+	onActivation  func()
 }
 
 func (b *gateUpRingRecorder) Caps() compute.Caps {
@@ -49,7 +50,10 @@ func (b *gateUpRingRecorder) Upload(x compute.Tensor, dt compute.Dtype) compute.
 	return y
 }
 
-func (b *gateUpRingRecorder) UploadClass(x compute.Tensor, dt compute.Dtype, _ compute.MemoryClass, _ string) compute.Tensor {
+func (b *gateUpRingRecorder) UploadClass(x compute.Tensor, dt compute.Dtype, class compute.MemoryClass, _ string) compute.Tensor {
+	if class == compute.MemoryActivation && b.onActivation != nil {
+		b.onActivation()
+	}
 	return b.Upload(x, dt)
 }
 
@@ -315,6 +319,175 @@ func TestExpertGateUpRingLifetime(t *testing.T) {
 		s.Q4K = false
 		if got, ok := q4kExpertInputHAL(s, gate, up, x, H, H); got != nil || ok || b.weightUploads != 0 || s.expertRing != nil {
 			t.Fatal("disabled resident tier no longer declines before staging")
+		}
+	})
+}
+
+// Ref #13815. A peer demand between activation upload and GEMM must not evict
+// a selected down weight. These synchronous interleavings witness ownership,
+// not physical device deallocation or concurrent Session use.
+// fak-test:runtime medium est=7s lane=default
+func TestExpertDownRingLifetime(t *testing.T) {
+	if compute.Default().Name() != "cpu-ref" || compute.Default().Caps().DeviceMemory {
+		t.Fatal("requires the actual cpu-ref backend; recorder is software evidence only")
+	}
+	const H = 256
+	m := expertRingTestModel(t, H, 2)
+	gate, up, down := expertName(0, 0, "gate_proj.weight"), expertName(0, 0, "up_proj.weight"), expertName(0, 0, "down_proj.weight")
+	other := expertName(0, 1, "down_proj.weight")
+	bytes, x := expertRingWeightBytes(t, m), expertRingTestInput(H)
+	for _, route := range []string{"down", "down-bf16", "gate-up-down"} {
+		run := func(s *Session) ([]float32, bool) {
+			if route == "gate-up-down" {
+				return q4kExpertGateUpDownHAL(s, gate, up, down, x, H, H)
+			}
+			return q4kExpertDownHALWithBF16(s, down, x, H, H, route == "down-bf16", 0)
+		}
+		control, cb := gateUpRingSession(m, 0)
+		want, ok := run(control)
+		if !ok || len(want) != H || control.expertRing != nil {
+			t.Fatal("disabled-ring control declined or allocated a ring")
+		}
+		want = append([]float32(nil), want...)
+		for _, value := range want {
+			if !finite32(value) {
+				t.Fatal("nonfinite arithmetic control")
+			}
+		}
+		control.Close()
+		gateUpRingFreedOnce(t, cb)
+		for _, event := range []string{"peer-pressure", "gemm-failure", "retirement"} {
+			t.Run(route+"/"+event, func(t *testing.T) {
+				s, b := gateUpRingSession(m, 0)
+				peer := &Session{M: m, Backend: b, Q4K: true, halW: map[string]compute.Tensor{}}
+				budget := bytes
+				if route == "gate-up-down" {
+					budget *= 3
+				}
+				sh, err := NewSharedExpertRing(SharedExpertRingConfig{Model: m, Backend: b, BudgetBytes: budget})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := sh.Attach(peer, "peer"); err != nil {
+					t.Fatal(err)
+				}
+				if err := sh.Attach(s, "subject"); err != nil {
+					t.Fatal(err)
+				}
+				r, key := peer.expertRing, "q4k:"+down
+				peerHold := event == "retirement"
+				if peerHold {
+					peer.weightHALQ4K(down, m.q4kw[down])
+					done := peer.ringEnter(r)
+					r.hold(key)
+					done()
+					s.SetExecutionPolicy(ExecutionPolicyDeviceOnly)
+				}
+				t.Cleanup(func() {
+					b.onActivation, b.onUpload, b.onMatMul = nil, nil, nil
+					if peerHold {
+						done := peer.ringEnter(r)
+						r.release(key)
+						done()
+					}
+					s.Close()
+					peer.Close()
+					if err := sh.Close(); err != nil {
+						t.Error(err)
+					}
+					gateUpRingFreedOnce(t, b)
+				})
+				observations := 0
+				if !peerHold {
+					downUpload := 1
+					if route == "gate-up-down" {
+						downUpload = 3
+					}
+					b.onUpload = func() {
+						if b.weightUploads == downUpload && s.ringDepth < 2 {
+							t.Error("down staging lacks an outer shared stage-and-hold span")
+						}
+					}
+				}
+				b.onActivation = func() {
+					// This occurs outside the subject's staging span. A different
+					// session can therefore make a real shared-ring demand here.
+					b.onActivation = nil
+					observations++
+					wantHolds := 1
+					if peerHold {
+						wantHolds++
+					}
+					if r.holds[polymodel.ModelID(key)] != wantHolds || s.ringDepth != 0 {
+						t.Error("down weight is not held exactly once across activation upload")
+					}
+					if event == "peer-pressure" {
+						peer.weightHALQ4K(other, m.q4kw[other])
+					} else if event == "retirement" {
+						s.failExpertRing(r, b.fault)
+					}
+				}
+				if event == "gemm-failure" {
+					b.failMatMul = 1
+					if route == "gate-up-down" {
+						b.failMatMul = 3
+					}
+				}
+				var got []float32
+				var handled bool
+				caught := deviceOnlyExpertRingPanic(func() { got, handled = run(s) })
+				if event == "peer-pressure" {
+					if caught != nil || !handled || len(got) != len(want) {
+						t.Fatalf("peer pressure invalidated selected down: panic=%v handled=%t", caught, handled)
+					}
+					for i := range want {
+						if !finite32(got[i]) || math.Float32bits(got[i]) != math.Float32bits(want[i]) {
+							t.Fatalf("residency changed arithmetic at %d", i)
+						}
+					}
+				} else if event == "gemm-failure" {
+					if caught != b.fault {
+						t.Errorf("down GEMM changed primary panic: %v", caught)
+					}
+				} else {
+					err, _ := caught.(error)
+					if caught != s.halFailure || !errors.Is(err, b.fault) || !s.BackendSessionClosed() || s.sharedRing != nil || s.expertRing != nil || b.matmuls != 0 {
+						t.Errorf("retirement lost primary identity or failed to detach: %v", caught)
+					}
+					beforeUploads, beforeMatMuls := b.weightUploads, b.matmuls
+					if retry := deviceOnlyExpertRingPanic(func() { _, _ = run(s) }); retry != s.halFailure || b.weightUploads != beforeUploads || b.matmuls != beforeMatMuls {
+						t.Error("retired subject replayed work or changed failure identity")
+					}
+				}
+				remaining := 0
+				if peerHold {
+					remaining = 1
+				}
+				if observations != 1 || r.holds[polymodel.ModelID(key)] != remaining || len(r.holds) != remaining || s.ringDepth != 0 || b.freedDispatch != 0 {
+					t.Error("down lifetime leaked/doubled a hold, lost a peer hold, stranded a span, or dispatched freed storage")
+				}
+			})
+		}
+		t.Run(route+"/down-stage-failure", func(t *testing.T) {
+			s, b := gateUpRingSession(m, 3*bytes)
+			t.Cleanup(s.Close)
+			b.failUpload = 1
+			if route == "gate-up-down" {
+				b.failUpload = 3
+			}
+			caught := deviceOnlyExpertRingPanic(func() { _, _ = run(s) })
+			if caught != b.fault || b.matmuls != 0 || s.ringDepth != 0 || len(s.expertRing.holds) != 0 {
+				t.Error("down staging failure changed identity, dispatched, or retained a projection hold")
+			}
+		})
+	}
+	t.Run("down-admission-without-gate-up-resident-flag", func(t *testing.T) {
+		s, b := gateUpRingSession(m, bytes)
+		t.Cleanup(s.Close)
+		s.Q4K = false
+		got, ok := q4kExpertDownHAL(s, down, x, H, H)
+		if !ok || len(got) != H || b.matmuls != 1 || len(s.expertRing.holds) != 0 {
+			t.Fatal("down inherited a gate/up-only resident-tier restriction")
 		}
 	})
 }

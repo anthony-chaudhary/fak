@@ -592,10 +592,11 @@ func TestExpertDownDeviceWeightStagesCheckpointTier(t *testing.T) {
 	rec := &expertHALRecordingBackend{Backend: compute.Default(), uploads: map[compute.Dtype]int{}}
 	be := &vulkanLikeSeamBackend{expertHALRecordingBackend: rec}
 	s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
-	gotW, ok := s.q4kExpertDownDeviceWeight(names[2])
+	gotW, release, ok := s.q4kExpertDownDeviceWeight(names[2])
 	if !ok {
 		t.Fatal("q4kExpertDownDeviceWeight declined a stageable checkpoint Q3_K down")
 	}
+	defer release()
 	if gotW.Dtype != compute.Q3_K {
 		t.Fatalf("staged checkpoint down dtype = %v, want Q3_K", gotW.Dtype)
 	}
