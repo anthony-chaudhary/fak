@@ -42,7 +42,7 @@ Two facts to internalize up front, both surfaced by the mapping and easy to get 
 | `FLEET_STATE_DIR` | cooldown store + registry parent | `%LOCALAPPDATA%\Fleet` → `%TEMP%\Fleet` → `<repo>/tools/_registry` |
 | `FLEET_POLICY_PATH` / `FLEET_POLICY_DIR` | `accounts_policy.json` (read-only) | `<repo>/tools/_registry/accounts_policy.json` |
 | `FAK_AUDIT_JOURNAL` | guard decision journal (boot-time enable) | `--audit PATH` flag, else `.dispatch-runs/guard-audit/...` |
-| `FAK_SESSION_JOURNAL` | session crash-journal | `UserConfigDir/fak/session-journal.jsonl` → `.fak/session-journal.jsonl` |
+| `FAK_SESSION_JOURNAL` | session crash-journal | Windows: `%ProgramData%\fak\session-journal\events.jsonl`; Darwin: `UserConfigDir/fak/session-journal/events.jsonl`; other Unix: `/var/lib/fak/session-journal/events.jsonl` |
 | `FAK_USAGE_LOG` | CLI-invocation usage journal — **on by default**; the single value `off` disables recording entirely (see [§4](#the-cli-usage-journal-is-on-by-default)) | on unless set to `off` |
 | `FAK_USAGE_LOG_PATH` | usage-journal destination | `UserConfigDir/fak/usage.jsonl` → `.fak/usage.jsonl` |
 | `FAK_TOOLPROC_JOURNAL` / `FAK_REPO_GUARD_TOOLPROC_JOURNAL` | toolproc journal | `.fak/toolproc/journal.jsonl` |
@@ -57,6 +57,35 @@ Two facts to internalize up front, both surfaced by the mapping and easy to get 
 env-configurable** (the runs dir is `--workspace`-relative). The `docs/nightrun/*` family
 anchors to the real repo root via `nightrunLedgerPath` (`cmd/fak/nightrun_ledger_path.go:23`,
 a `go.mod` upward walk) regardless of process cwd.
+
+The guarded OpenCode launcher in `fak ops run` forwards the existing
+`FAK_SESSION_JOURNAL` override to its child. Choose an absolute path in durable
+storage, outside the run's temporary configuration directories. For example, in
+PowerShell:
+
+```powershell
+$env:FAK_SESSION_JOURNAL = Join-Path $env:LOCALAPPDATA 'fak\session-journal\events.jsonl'
+fak ops run --harness opencode --workspace C:\work\project --prompt-file C:\work\task.txt --receipt C:\work\run.json --base-url http://127.0.0.1:8080/v1 --model your-model
+fak sessionjournal report --path $env:FAK_SESSION_JOURNAL --json
+fak agents --source history --journal $env:FAK_SESSION_JOURNAL
+```
+
+The override selects a separate journal. Readers need the same environment
+setting or the explicit `--path`/`--journal` option; readers using the platform
+default do not automatically include that store. An unset or whitespace-only
+override leaves the guarded child's platform default unchanged. Ordinary
+relative paths resolve against `ops run --workspace`.
+
+The OpenCode Ops launch receipt records `session_journal_source` as
+`environment_override` or `platform_default`. Its
+`session_journal_destination_digest` hashes the absolute, cleaned destination
+of an explicit override, and binds that destination into
+`effective_config_digest`; it never hashes journal contents. The destination
+digest is `unknown` for the platform default and for ambiguous Windows
+drive-relative or rooted-without-volume overrides. Those explicit unresolved
+values still bind their trimmed value and launch workspace into the effective
+configuration digest. These fields identify configuration, not proof of a
+successful append or child launch.
 
 ---
 
