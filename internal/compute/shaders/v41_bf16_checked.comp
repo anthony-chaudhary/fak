@@ -1,0 +1,33 @@
+#version 450
+layout(local_size_x = 64) in;
+
+// Separate finite-only publication. The raw all-bit boundary remains unchanged.
+// Native ownership fills all four status words with UINT32_MAX and establishes
+// transfer/shader-write -> shader-read/write visibility before this dispatch.
+layout(std430, binding = 0) readonly buffer Input { uint inputBits[]; };
+layout(std430, binding = 1) writeonly buffer Output { uint outputBits[]; };
+layout(std430, binding = 2) buffer CheckedStatus { uint status[]; };
+layout(push_constant) uniform Push { uint count; uint site; } pc;
+
+void main() {
+    uint first = gl_GlobalInvocationID.x;
+    if (first == 0u) {
+        status[0] = 0x42463143u;
+        status[1] = pc.site;
+        status[3] = pc.count;
+    }
+    // Native groups <= ceil(count/64), count <= INT32_MAX, so stride <= 2^31
+    // and active i + stride <= 2^32-2. The grid-stride increment cannot wrap.
+    uint stride = gl_NumWorkGroups.x * 64u;
+    for (uint i = first; i < pc.count; i += stride) {
+        uint bits = inputBits[i];
+        uint rounded = (bits + 0x7fffu + ((bits >> 16u) & 1u)) & 0xffff0000u;
+        if ((bits & 0x7f800000u) == 0x7f800000u ||
+            (rounded & 0x7f800000u) == 0x7f800000u) {
+            atomicMin(status[2], i);
+        }
+        // These bytes are unpublished on any fault. Raw bit arithmetic is
+        // preserved; no NaN can disappear before its input was checked above.
+        outputBits[i] = rounded;
+    }
+}

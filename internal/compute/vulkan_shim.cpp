@@ -291,7 +291,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -322,7 +322,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_QWEN35_GDN_VERIFY_TILED:
     case K_GLM_KDA_REREAD: case K_GLM_KDA_WAVE32:
         return g_dp.otherGDN;
-    case K_V41_MHC: case K_V41_Q2K_EMBED_GATHER: case K_V41_BF16_BOUNDARY: case K_V41_LOGIT_SCALE:
+    case K_V41_MHC: case K_V41_Q2K_EMBED_GATHER: case K_V41_BF16_BOUNDARY: case K_V41_LOGIT_SCALE: case K_V41_BF16_CHECKED:
     case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q4K_MATMUL_COOPMAT: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_Q2K_MATVEC: case K_COUNT:
         return g_dp.otherUnclassified;
     }
@@ -383,6 +383,7 @@ int g_have_v41_q2k_embed_gather = 0;
 int g_have_v41_exact_rmsnorm = 0;
 int g_have_v41_bf16_boundary = 0;
 int g_have_v41_logit_scale = 0;
+int g_have_v41_bf16_checked = 0;
 bool g_v41IndexerFloatControls = false;
 std::string g_v41IndexerScoreReason = "Vulkan has not initialized";
 // Fixed-size GLM KDA kernels require an explicitly requested 32-lane subgroup.
@@ -1367,7 +1368,7 @@ const char* const kKernelNames[] = {
     "q6k_matmul", "q5k_matmul", "q3k_matmul", "rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add", "q2k_matmul",
     "rmsnorm_q2k_matmul2", "qwen35_split_qg_panel", "qwen35_partial_rope_panel",
     "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
-    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale",
+    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -2193,6 +2194,133 @@ bool v41BF16BoundaryABI(const std::vector<char>& code) {
     return seenBindings == 3;
 }
 
+// Optional finite BF16 publication: three disjoint uint buffers, count/site
+// push, one unsigned invalid-index reduction. Structural admission is separate
+// from actual SPIR-V validation, reviewed source/module provenance and hardware
+// qualification. The original raw BF16 ABI and all-bit semantics stay unchanged.
+bool v41BF16CheckedABI(const std::vector<char>& code) {
+    if (code.size() < 20 || code.size() % 4 != 0) return false;
+    std::vector<uint32_t> w(code.size() / 4);
+    memcpy(w.data(), code.data(), code.size());
+    if (w[0] != 0x07230203 || w[3] == 0 || w[4] != 0) return false;
+    const uint32_t bound = w[3];
+    const uint32_t typeInt = 21, typeFloat = 22, typeRuntimeArray = 29;
+    const uint32_t typeStruct = 30, typePointer = 32, variable = 59;
+    const uint32_t block = 2, arrayStride = 6, binding = 33, descriptorSet = 34;
+    const uint32_t offset = 35, pushConstant = 9, storageBuffer = 12;
+    std::unordered_map<uint32_t, std::vector<uint32_t>> defs;
+    std::unordered_map<uint64_t, uint32_t> decorations, memberOffsets;
+    std::unordered_map<uint64_t, bool> memberAccess;
+    std::vector<uint32_t> buffers;
+    uint32_t push = 0, entry = 0, localEntry = 0;
+    size_t pushCount = 0, entryCount = 0, localCount = 0, shaderCount = 0;
+    std::vector<uint32_t> atomicResultTypes;
+    auto validID = [bound](uint32_t id) { return id != 0 && id < bound; };
+    auto key = [](uint32_t id, uint32_t kind) { return (uint64_t(id) << 32) | kind; };
+    for (size_t p = 5; p < w.size();) {
+        const uint32_t count = w[p] >> 16, op = w[p] & 0xffff;
+        if (count == 0 || count > w.size() - p) return false;
+        const uint32_t* a = w.data() + p;
+        // Integer-only publication: no floating or extended instruction.
+        // Exactly one unsigned atomic minimum reduces the invalid index.
+        if (op == typeFloat || op == 12) return false;
+        if ((op >= 227 && op <= 242 && op != 237) || op == 318 || op == 319) return false;
+        if (op == 237) { // OpAtomicUMin
+            if (count != 7) return false;
+            for (uint32_t i = 1; i < count; ++i) if (!validID(a[i])) return false;
+            atomicResultTypes.push_back(a[1]);
+        }
+        if (op == typeInt || op == typeRuntimeArray || op == typeStruct || op == typePointer || op == variable) {
+            if ((op == typeInt && count != 4) || (op == typeRuntimeArray && count != 3) ||
+                (op == typeStruct && count < 2) || (op == typePointer && count != 4) ||
+                (op == variable && count != 4 && count != 5)) return false;
+            const uint32_t id = a[op == variable ? 2 : 1];
+            if (!validID(id) || !defs.emplace(id, std::vector<uint32_t>(a, a + count)).second) return false;
+            if (op == typeInt && (a[2] != 32 || a[3] > 1)) return false;
+            if (op == variable) {
+                if (!validID(a[1])) return false;
+                if (a[3] == pushConstant) { push = a[1]; ++pushCount; }
+                else if (a[3] == storageBuffer) buffers.push_back(id);
+                else if (a[3] == 0 || a[3] == 2) return false;
+            }
+        } else if (op == 71) {
+            if (count < 3 || !validID(a[1])) return false;
+            const uint32_t kind = a[2];
+            if (kind == block || kind == 24 || kind == 25) {
+                if (count != 3 || !decorations.emplace(key(a[1], kind), 0).second) return false;
+            } else if (kind == arrayStride || kind == binding || kind == descriptorSet) {
+                if (count != 4 || !decorations.emplace(key(a[1], kind), a[3]).second) return false;
+            }
+        } else if (op == 72) {
+            if (count < 4 || !validID(a[1])) return false;
+            if (a[3] == offset) {
+                if (count != 5 || !memberOffsets.emplace(key(a[1], a[2]), a[4]).second) return false;
+            } else if (a[3] == 24 || a[3] == 25) {
+                if (count != 4 || a[2] != 0 || !memberAccess.emplace(key(a[1], a[3]), true).second) return false;
+            }
+        } else if (op == 15) {
+            if (count < 5 || a[1] != 5 || !validID(a[2]) || a[3] != 0x6e69616d || a[4] != 0) return false;
+            entry = a[2]; ++entryCount;
+        } else if (op == 16) {
+            if (count != 6 || !validID(a[1]) || a[2] != 17 || a[3] != 64 || a[4] != 1 || a[5] != 1) return false;
+            localEntry = a[1]; ++localCount;
+        } else if (op == 17) {
+            if (count != 2 || a[1] != 1) return false; // only Shader
+            ++shaderCount;
+        }
+        p += count;
+    }
+    auto definition = [&](uint32_t id, uint32_t op, size_t size) -> const std::vector<uint32_t>* {
+        auto it = defs.find(id);
+        return it != defs.end() && (it->second[0] & 0xffff) == op && it->second.size() == size ? &it->second : nullptr;
+    };
+    auto decorated = [&](uint32_t id, uint32_t kind, uint32_t value) {
+        auto it = decorations.find(key(id, kind));
+        return it != decorations.end() && it->second == value;
+    };
+    auto atOffset = [&](uint32_t id, uint32_t member, uint32_t value) {
+        auto it = memberOffsets.find(key(id, member));
+        return it != memberOffsets.end() && it->second == value;
+    };
+    if (entryCount != 1 || localCount != 1 || shaderCount != 1 || entry != localEntry || pushCount != 1 || buffers.size() != 3 || atomicResultTypes.size() != 1) return false;
+    const auto* atomicType = definition(atomicResultTypes[0], typeInt, 4);
+    if (!atomicType || (*atomicType)[2] != 32 || (*atomicType)[3] != 0) return false;
+    const auto* pointer = definition(push, typePointer, 4);
+    if (!pointer || (*pointer)[2] != pushConstant) return false;
+    const uint32_t pushStruct = (*pointer)[3];
+    const auto* structure = definition(pushStruct, typeStruct, 4);
+    if (!structure || !decorated(pushStruct, block, 0)) return false;
+    for (uint32_t member = 0; member < 2; ++member) {
+        const auto* scalar = definition((*structure)[member + 2], typeInt, 4);
+        if (!scalar || (*scalar)[2] != 32 || (*scalar)[3] != 0 ||
+            !atOffset(pushStruct, member, member * 4)) return false;
+    }
+    uint32_t seenBindings = 0;
+    for (uint32_t id : buffers) {
+        const auto* var = definition(id, variable, 4);
+        auto bind = decorations.find(key(id, binding));
+        if (!var || bind == decorations.end() || bind->second >= 3 || !decorated(id, descriptorSet, 0)) return false;
+        const uint32_t slot = bind->second, mask = 1u << slot;
+        if (seenBindings & mask) return false;
+        seenBindings |= mask;
+        const auto* ptr = definition((*var)[1], typePointer, 4);
+        if (!ptr || (*ptr)[2] != storageBuffer) return false;
+        const uint32_t structID = (*ptr)[3];
+        const auto* st = definition(structID, typeStruct, 3);
+        if (!st || !decorated(structID, block, 0) || !atOffset(structID, 0, 0)) return false;
+        const auto* array = definition((*st)[2], typeRuntimeArray, 3);
+        if (!array || !decorated((*st)[2], arrayStride, 4)) return false;
+        const auto* scalar = definition((*array)[2], typeInt, 4);
+        if (!scalar || (*scalar)[2] != 32 || (*scalar)[3] != 0) return false;
+        // SPIR-V may put access restrictions on the variable, its block
+        // member, or both. Enforce the effective role, including contradictions.
+        const bool nonWritable = decorated(id, 24, 0) || memberAccess.count(key(structID, 24)) != 0;
+        const bool nonReadable = decorated(id, 25, 0) || memberAccess.count(key(structID, 25)) != 0;
+        if (nonWritable != (slot == 0) || nonReadable != (slot == 1)) return false;
+    }
+    return seenBindings == 7;
+}
+
 // Witness-only scalar ABI and declared floating-mode admission. This parser
 // checks shape, one NoContraction FMul and the required binary32 controls;
 // it is not a general SPIR-V validator or an algorithm/provenance proof.
@@ -2373,12 +2501,17 @@ static bool spirvModuleFraming(const std::vector<char>& code) {
 }
 
 bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsize, uint32_t subgroupSize = 0) {
-    const bool fixedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE];
+    const bool fixedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_BF16_CHECKED];
     std::vector<char> code = fixedV41 ? readV41TailRoPEModule(spvPath) : readFile(spvPath);
     if (!spirvModuleFraming(code)) return false;
     if (&k == &g_kern[K_V41_BF16_BOUNDARY] &&
         (nbuf != 2 || pcsize != 4 || !v41BF16BoundaryABI(code))) {
         fprintf(stderr, "fak-vulkan: incompatible integer BF16 boundary module in %s\n", spvPath.c_str());
+        return false;
+    }
+    if (&k == &g_kern[K_V41_BF16_CHECKED] &&
+        (nbuf != 3 || pcsize != 8 || !v41BF16CheckedABI(code))) {
+        fprintf(stderr, "fak-vulkan: incompatible checked BF16 module in %s\n", spvPath.c_str());
         return false;
     }
     if (&k == &g_kern[K_V41_LOGIT_SCALE] &&
@@ -2485,8 +2618,15 @@ void recycleDescriptorSet(DescriptorSetRecord rec) {
 }
 
 // dispatch: bind `bufs` (nbuf of them) + push constants, run groupsX*groupsY workgroups.
-bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1, bool forceChecked = false) {
+bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1, bool forceChecked = false, Buffer* initializedStatus = nullptr) {
     if (g_v41SubmissionPendingFailure) return false;
+    // Only this concrete synchronous kernel may request the bounded status
+    // initialization. It cannot record into or implicitly flush an active batch.
+    if (&k == &g_kern[K_V41_BF16_CHECKED] && initializedStatus == nullptr) return false;
+    if (initializedStatus != nullptr &&
+        (&k != &g_kern[K_V41_BF16_CHECKED] || !forceChecked || g_batching || k.nbuf != 3 ||
+         !bufs || bufs[2] != initializedStatus || initializedStatus->buf == VK_NULL_HANDLE ||
+         initializedStatus->bytes < 16)) return false;
     const bool checkedV41 = forceChecked || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER] || &k == &g_kern[K_V41_EXACT_RMSNORM] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE];
     if (k.nbuf > MAX_DISPATCH_BUFS) {
         fprintf(stderr, "fak-vulkan: dispatch skipped; kernel has %d buffers, max %d\n",
@@ -2552,6 +2692,12 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     // Unbatched: one-shot submit + fence (the original per-op path).
     VkCommandBuffer cmd = checkedV41 ? v41BeginCmdChecked() : beginCmd();
     if (cmd == VK_NULL_HANDLE) { recycleDescriptorSet(rec); return false; }
+    if (initializedStatus != nullptr) {
+        // Completion alone is not memory visibility. This same-command fill
+        // and conservative dependency cover status atomics AND prior input writes.
+        vkCmdFillBuffer(cmd, initializedStatus->buf, 0, 16, UINT32_MAX);
+        recordComputeBarrier(cmd);
+    }
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.pipe);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.layout, 0, 1, &rec.set, 0, nullptr);
     if (pcsize > 0) vkCmdPushConstants(cmd, k.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pcsize, pc);
@@ -2898,6 +3044,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_v41_exact_rmsnorm = 0;
     g_have_v41_bf16_boundary = 0;
     g_have_v41_logit_scale = 0;
+    g_have_v41_bf16_checked = 0;
     bool v41IndexerPipelineBuilt = false;
     bool v41MHCPipelineBuilt = false;
     g_v41IndexerFloatControls = false;
@@ -3228,8 +3375,10 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // Experimental extra module, never part of the published shader registry. Ordinary
     // archives neither load it nor export the witness operation symbols.
     bool v41BF16BoundaryBuilt = false;
+    bool v41BF16CheckedBuilt = false;
 #ifdef FAK_V41_BF16_BOUNDARY_WITNESS
     v41BF16BoundaryBuilt = buildKernel(g_kern[K_V41_BF16_BOUNDARY], P("v41_bf16_boundary.spv"), 2, 4);
+    v41BF16CheckedBuilt = buildKernel(g_kern[K_V41_BF16_CHECKED], P("v41_bf16_checked.spv"), 3, 8);
 #endif
     bool v41LogitScaleBuilt = false;
 #ifdef FAK_V41_LOGIT_SCALE_WITNESS
@@ -3351,6 +3500,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_v41_exact_rmsnorm = v41ExactRMSNormBuilt ? 1 : 0;
     g_have_v41_bf16_boundary = v41BF16BoundaryBuilt ? 1 : 0;
     g_have_v41_logit_scale = v41LogitScaleBuilt ? 1 : 0;
+    g_have_v41_bf16_checked = v41BF16CheckedBuilt ? 1 : 0;
     // One per-geometry device self-check, before the first forward and never
     // inside one. Its verdict is cached and read by the verify-width route.
     gdnVerifySelfCheck();
@@ -4724,6 +4874,59 @@ int fvk_v41_q2k_embed_gather_f32(const void* dTable, const void* dIds, void* dOu
 }
 
 #ifdef FAK_V41_BF16_BOUNDARY_WITNESS
+int fvk_v41_bf16_checked_module_abi(const void* data, size_t bytes) {
+    if (!data || bytes < 20 || bytes > 1024 * 1024 || bytes % 4 != 0) return 0;
+    std::vector<char> code(bytes);
+    memcpy(code.data(), data, bytes);
+    return v41BF16CheckedABI(code) ? 1 : 0;
+}
+
+int fvk_have_v41_bf16_checked(void) {
+    return g_ready && g_have_v41_bf16_checked && g_kern[K_V41_BF16_CHECKED].pipe != VK_NULL_HANDLE;
+}
+
+int fvk_v41_bf16_checked_count_supported(int count) {
+    if (count <= 0 || uint64_t(count) > uint64_t(INT32_MAX) || g_maxComputeWorkGroupCountX == 0) return 0;
+    const uint64_t bytes = uint64_t(count) * 4u;
+    if (bytes > std::numeric_limits<size_t>::max() || bytes > std::numeric_limits<VkDeviceSize>::max() ||
+        (g_maxBufferBytes > 0 && (bytes > g_maxBufferBytes || g_maxBufferBytes < 16))) return 0;
+    // groups <= ceil(INT32_MAX/64), hence 64*groups <= 2^31. Every active
+    // grid-stride index is <= 2^31-2, so its following increment cannot wrap.
+    const uint64_t requested = (uint64_t(count) + 63u) / 64u;
+    return std::min<uint64_t>(requested, g_maxComputeWorkGroupCountX) != 0;
+}
+
+int fvk_v41_bf16_checked_f32(const void* dInput, void* dOut, void* dStatus, int count, uint32_t site) {
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_bf16_checked()) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_v41SubmissionPendingFailure || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (g_batching || (site != 1 && site != 2) || !fvk_v41_bf16_checked_count_supported(count)) return 2;
+    const uint64_t bytes = uint64_t(count) * 4u;
+    Buffer* bufs[3] = {B(dInput), B(dOut), B(dStatus)};
+    const uint64_t required[3] = {bytes, bytes, 16};
+    for (int i = 0; i < 3; ++i) {
+        if (!bufs[i] || bufs[i]->buf == VK_NULL_HANDLE || bufs[i]->mem == VK_NULL_HANDLE ||
+            required[i] > bufs[i]->bytes ||
+            bufs[i]->bytes > std::numeric_limits<VkDeviceSize>::max() - bufs[i]->memoryOffset) return 2;
+    }
+    // Use conservative whole-allocation ranges, not only the prefix accessed
+    // by this operation. All additions are checked above before comparison.
+    for (int i = 0; i < 3; ++i) for (int j = i + 1; j < 3; ++j) {
+        if (bufs[i] == bufs[j] || bufs[i]->buf == bufs[j]->buf ||
+            (bufs[i]->mem == bufs[j]->mem && bufs[i]->memoryOffset < bufs[j]->memoryOffset + bufs[j]->bytes &&
+             bufs[j]->memoryOffset < bufs[i]->memoryOffset + bufs[i]->bytes)) return 2;
+    }
+    struct Push { uint32_t count, site; } pc{uint32_t(count), site};
+    static_assert(sizeof(Push) == 8 && offsetof(Push, count) == 0 && offsetof(Push, site) == 4,
+                  "checked BF16 push ABI must contain count/site uint32 values");
+    const uint32_t groups = uint32_t(std::min<uint64_t>((uint64_t(count) + 63u) / 64u, g_maxComputeWorkGroupCountX));
+    if (!dispatch(g_kern[K_V41_BF16_CHECKED], bufs, &pc, sizeof(pc), groups, 1, true, bufs[2])) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
 int fvk_v41_bf16_boundary_module_abi(const void* data, size_t bytes) {
     if (!data || bytes < 20 || bytes > 1024 * 1024 || bytes % 4 != 0) return 0;
     std::vector<char> code(bytes);

@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "bf16-checked-count-supported",
+      "canonical": "fvk_v41_bf16_checked_count_supported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "The read-only native geometry predicate for one checked BF16 publication row. It requires a positive count within INT32_MAX, a nonzero device X workgroup limit, a checked four-byte-per-element extent representable by host and Vulkan sizes, and compliance with any nonzero device buffer-byte cap including the 16-byte status buffer. The grid-stride shader uses the smaller of ceil(count/64) and that workgroup limit.",
+      "distinction": "This checks dispatch geometry before the Go adapter allocates output and status. It does not check pipeline availability, inspect tensor values, initialize status, dispatch arithmetic or qualify hardware; those have separate checks and evidence. The BF16 witness native define controls whether this symbol is compiled, while this predicate bounds the requested row.",
+      "distinct_from": [
+        "support",
+        "bf16-boundary-witness-native-define"
+      ],
+      "aliases": [],
+      "grounding": "fvk_v41_bf16_checked_count_supported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

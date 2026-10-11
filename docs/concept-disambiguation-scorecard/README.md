@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **620** (clarity 0 + coverage 620) |
-| **Crystal-clear concepts (and climbing)** | **1184** crystal of 2943 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3053 / 3673** (83.1% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **1184** crystal of 2944 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3054 / 3674** (83.1% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 223 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **84** of 4189 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **84** of 4190 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 89.0/100 (grade B) |
 
@@ -28,11 +28,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2943 concepts - score 89.0/100 (grade B) - disambiguation-debt 620
+concept-disambiguation chart - 2944 concepts - score 89.0/100 (grade B) - disambiguation-debt 620
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ###################......... 1184
-  o defined       ############################ 1759
+  o defined       ############################ 1760
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -56,7 +56,7 @@ clarity mix by family (each cell = one concept):
   render-materialize *******************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (199 concept(s); 43 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
   session-runtime  *******************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (264 concept(s); 91 crystal)
-  support-maturity **********************************************ooooooooooooooooooooooo (69 concept(s); 46 crystal)
+  support-maturity **********************************************oooooooooooooooooooooooo (70 concept(s); 46 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    ***********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (169 concept(s); 83 crystal)
@@ -73,7 +73,7 @@ coverage by family (positioned / discovered):
   pool             ###############............. 40/74
   render-materialize ########################.... 216/249
   support-maturity ####################........ 76/108
-  witness-proof    ########################.... 170/198
+  witness-proof    ########################.... 171/199
   evict            ####################........ 56/79
   loop             ########################.... 100/117
   layout           #################........... 20/33
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 83.1%  (3053/3673 confusable tokens positioned)
+namespace coverage  [###########################.....] 83.1%  (3054/3674 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 223
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 223/223
 
-name index: 4189 lookup name(s) -> 2943 concept(s), 84 ambiguous
+name index: 4190 lookup name(s) -> 2944 concept(s), 84 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **223 / 223** (223 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2130 / 5317 |
+| Boundaries drawn (mutual / total) | 2130 / 5319 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4189 over 2943 concepts |
+| Lookup names indexed | 4190 over 2944 concepts |
 | Lookup names landing on several concepts | 84 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2943 |
+| Concepts carrying a contrast set | 2944 |
 
 ## The concepts (best verdict first)
 
@@ -2974,6 +2974,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | metric | support-maturity | **MaturityScore (cadence maturity fold)** - cadencereport MaturityScore is the LedgerRow integer rating of the feature-lifecycle scorecard, produced by CollectMaturity (which builds and converts the Go-native maturity scorecard in-process) and merged into the cadence envelope by FoldWithMaturity. |
 | o | defined | symbol | support-maturity | **ExactSpanSupported (engine evict capability)** - ExactSpanSupported (enginecache Result field, set by SupportsExactSpan) reports whether a documented serving engine or KV pool can evict exactly the named K/V span instead of resetting the whole prefix cache, the same capability bit SupportsRaw exposes for a paged KV pool that carries the Kraw plane. |
 | o | defined | symbol | support-maturity | **interpretmaturity (support-maturity identifier)** - interpretmaturity is the concrete support-maturity identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring support-maturity concepts. |
+| o | defined | symbol | support-maturity | **fvk_v41_bf16_checked_count_supported** - The read-only native geometry predicate for one checked BF16 publication row. It requires a positive count within INT32_MAX, a nonzero device X workgroup limit, a checked four-byte-per-element extent representable by host and Vulkan sizes, and compliance with any nonzero device buffer-byte cap including the 16-byte status buffer. The grid-stride shader uses the smaller of ceil(count/64) and that workgroup limit. |
 | o | defined | symbol | support-maturity | **fvk_v41_logit_scale_count_supported** - The read-only native admission predicate for a scalar logit row. It requires the dedicated witness pipeline and its selected-device FloatControls to be available, a positive element count, and ceil(count/64) within that device's X workgroup limit. The Go adapter checks it before allocating the output because this shader has no grid-stride loop. |
 | o | defined | subsystem | support-maturity | **arch_support.go (in-kernel architecture support surface)** - internal/model/arch_support.go: the surface stating which checkpoint architectures fak's in-kernel forward actually implements - it carries the forward-path classification and the typed refusal for anything it does not. |
 | o | defined | symbol | support-maturity | **UnsupportedArchError (typed unsupported-arch refusal)** - internal/model/arch_support.go: the typed refusal newModel returns when a checkpoint carries weights for an architecture whose in-kernel forward fak does not yet implement, so `fak serve` can surface a named refusal before serving a token instead of binding the gateway and panicking on the first turn. |
@@ -3221,8 +3222,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3187/5317 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2943 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3189/5319 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2944 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3231,7 +3232,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4189 lookup name(s) resolves - 84 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4190 lookup name(s) resolves - 84 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3249,7 +3250,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | pool | 40 | 74 | 34 |
 | render-materialize | 216 | 249 | 33 |
 | support-maturity | 76 | 108 | 32 |
-| witness-proof | 170 | 198 | 28 |
+| witness-proof | 171 | 199 | 28 |
 | evict | 56 | 79 | 23 |
 | loop | 100 | 117 | 17 |
 | layout | 20 | 33 | 13 |

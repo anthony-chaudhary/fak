@@ -404,6 +404,15 @@ int fvk_v41_exact_rmsnorm_f32(const void *dX, const void *dW, void *dY,
 int fvk_have_v41_bf16_boundary(void);
 int fvk_v41_bf16_boundary_f32(const void *dInput, void *dOut, int count);
 int fvk_v41_bf16_boundary_module_abi(const void *data, size_t bytes);
+/* Separate finite-only publication: three mutually disjoint buffers, 8-byte
+ * count/site push and a freshly initialized 16-byte little-endian status.
+ * Site 1 is final-norm input, 2 is output. Reject active batching without flush.
+ * The caller withholds output until checked status D2H and decoding succeed;
+ * failed output contents are unspecified. Same isolated archive, no registry promotion. */
+int fvk_have_v41_bf16_checked(void);
+int fvk_v41_bf16_checked_count_supported(int count);
+int fvk_v41_bf16_checked_f32(const void *dInput, void *dOut, void *dStatus, int count, uint32_t site);
+int fvk_v41_bf16_checked_module_abi(const void *data, size_t bytes);
 #endif
 
 /* Experimental exact binary32 scalar multiply. Finite input and factor are

@@ -1738,7 +1738,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.mhcProjection = s.v41MHCProjectionFunc()
 		s.v41Forward.mhcFFNProjection = s.v41MHCProjectionFuncNamed("mhc.ffn_mixes.weight")
 		s.v41Forward.finalNorm = s.v41FinalNormFunc()
-		s.v41Forward.bf16Boundary = s.v41BF16BoundaryFunc()
+		s.v41Forward.bf16Boundary = s.v41FinalNormBF16CheckedFunc()
 		s.v41Forward.logitScale = s.v41LogitScaleFunc()
 		s.v41Forward.attentionNorm = s.v41AttentionInputNormFunc()
 		s.v41Forward.queryNorm = s.v41QueryNormFunc()
