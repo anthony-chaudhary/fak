@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "v4-flash-direct-attention-refusal",
+      "canonical": "refuseUnimplementedV4FlashAttention",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The Session admission check for the deepseek_v4 Flash attention schedule. It returns the existing typed refusal for an invalid compression ratio or an unimplemented ratio 4/128 layer. GenerateContext returns this error; nonempty Prefill and PrefillNoLogits calls and every Step call panic with it before forward state or keepalive begins.",
+      "distinction": "This is an architecture admission check, not an attention computation or backend-operation failure. It leaves ratio-zero schedules, absent schedules and other model families admitted, including the distinct deepseek_v41 path. The served recovery seam recognizes only its two declared sentinel errors. Unlike the sliding_attention layer-type selector, this check refuses a model schedule and executes no attention.",
+      "distinct_from": [
+        "x-attention-slidingattention"
+      ],
+      "aliases": [],
+      "grounding": "refuseUnimplementedV4FlashAttention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

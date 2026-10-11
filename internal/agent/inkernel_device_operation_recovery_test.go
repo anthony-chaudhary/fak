@@ -41,3 +41,27 @@ func TestDeviceOnlyExpertRingOperationRecoveryPreservesIdentity(t *testing.T) {
 		}
 	}
 }
+
+// Only the two existing Flash architecture-admission sentinels are recoverable;
+// textual lookalikes remain ordinary panics for the caller to re-raise.
+// fak-test:runtime fast est=1ms
+func TestV4FlashAdmissionRecoveryPreservesIdentity(t *testing.T) {
+	for _, cause := range []error{model.ErrV4FlashAttentionUnimplemented, model.ErrV4FlashAttentionRatioInvalid} {
+		for _, input := range []error{cause, fmt.Errorf("direct session: %w", cause)} {
+			got, handled := recoverDevicePanic(input)
+			if !handled || got != input || !errors.Is(got, cause) {
+				t.Errorf("recovery = (%v, %v), want unchanged %v", got, handled, input)
+			}
+			var oom *InKernelOOMError
+			var operation *model.BackendForwardOperationError
+			if errors.As(got, &oom) || errors.As(got, &operation) {
+				t.Error("architecture refusal relabeled as device failure")
+			}
+		}
+		for _, input := range []any{cause.Error(), errors.New(cause.Error())} {
+			if got, handled := recoverDevicePanic(input); handled || got != nil {
+				t.Errorf("textual lookalike %T was handled as architecture refusal", input)
+			}
+		}
+	}
+}

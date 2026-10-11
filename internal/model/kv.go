@@ -956,6 +956,9 @@ func (s *Session) Prefill(ids []int) []float32 {
 	if len(ids) == 0 {
 		return nil
 	}
+	if err := s.refuseUnimplementedV4FlashAttention(); err != nil {
+		panic(err)
+	}
 	s.validateDeviceOnlyExecution("prefill")
 	if s.M.Cfg.IsDeepSeekV41() {
 		return s.prefillV41(ids)
@@ -1080,6 +1083,9 @@ func (s *Session) Prefill(ids []int) []float32 {
 func (s *Session) PrefillNoLogits(ids []int) {
 	if len(ids) == 0 {
 		return
+	}
+	if err := s.refuseUnimplementedV4FlashAttention(); err != nil {
+		panic(err)
 	}
 	s.validateDeviceOnlyExecution("prefill-no-logits")
 	s.cacheGeometryMu.RLock()
@@ -1209,6 +1215,9 @@ func (s *Session) prefillTokenLoop(ids []int) []float32 {
 // sessions reuse their logits buffer; consume or copy the returned slice before the next
 // quantized Prefill/Step call on the same session.
 func (s *Session) Step(id int) []float32 {
+	if err := s.refuseUnimplementedV4FlashAttention(); err != nil {
+		panic(err)
+	}
 	defer s.BeginGPUKeepAlive()()
 	s.validateDeviceOnlyExecution("decode")
 	if s.M.Cfg.IsDeepSeekV41() {

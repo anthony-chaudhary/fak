@@ -1527,11 +1527,18 @@ func (e *InKernelCapacityError) Error() string {
 // recoverDevicePanic is the body of Complete's deferred recover, factored out so it is
 // unit-testable without a GPU (the panic payload is an ordinary Go value). It converts a
 // recovered in-kernel device failure (allocation OOM, typed CUDA backend error, or device fault)
-// into a typed, actionable error and reports handled=true; for ANY other recovered value it
+// or one of the two declared Flash attention-admission refusals into a typed,
+// actionable error and reports handled=true; for ANY other recovered value it
 // reports handled=false so the caller re-panics — the recover stays surgical and never swallows
-// a genuine bug (a nil deref, a non-device validation panic).
+// a genuine bug (a nil deref, an unrelated validation panic).
 func recoverDevicePanic(r any) (err error, handled bool) {
 	if e, ok := r.(error); ok {
+		// Direct session APIs have no error return. Recover only the declared
+		// unsupported/malformed Flash schedule refusals, never arbitrary model
+		// validation errors or string panics, and preserve the original cause.
+		if errors.Is(e, model.ErrV4FlashAttentionUnimplemented) || errors.Is(e, model.ErrV4FlashAttentionRatioInvalid) {
+			return e, true
+		}
 		var operation *model.BackendForwardOperationError
 		if errors.As(e, &operation) {
 			return e, true
@@ -1950,7 +1957,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	// HERE — the narrowest Go frame that wraps the whole device decode (generateReused's
 	// Prefill/Step + NewBackendSession's NewKV) AND returns the error the gateway already maps
 	// to a client response — converting it into a typed error instead of crashing the serving
-	// goroutine. Everything else re-panics, preserving today's crash/stack behavior for bugs.
+	// goroutine. The same seam recovers the two declared Flash attention-admission
+	// refusals from direct Prefill/Step calls. Everything else re-panics, preserving
+	// today's crash/stack behavior for bugs.
 	defer func() {
 		if r := recover(); r != nil {
 			if e, ok := recoverDevicePanic(r); ok {

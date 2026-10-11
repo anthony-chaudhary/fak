@@ -19,14 +19,9 @@ import (
 //  2. fail-closed dispatch: a V4 session whose layers carry an unimplemented
 //     compression ratio must REFUSE to run before any prefill/decode, rather
 //     than silently falling through to the generic sliding-window Q/K/V path.
-//     NOTE: this guard is wired into Session.GenerateContext ONLY; the direct
-//     Session.Prefill/Session.Step seam in kv.go does not consult it (see
-//     invariant 3).
-//  3. the Prefill/Step seam gap (#12935 / #12636): Session.Prefill (kv.go:1146)
-//     and Session.Step (kv.go:1398) branch only on IsDeepSeekV41(), which
-//     excludes "deepseek_v4", so they bypass refuseUnimplementedV4FlashAttention
-//     entirely. TestV4FlashPrefillStepSeamBypassesFailClosedGuard pins that
-//     structural fact so the record stays honest until #12636 closes the seam.
+//  3. direct Prefill, PrefillNoLogits and Step apply the same refusal before
+//     forward state or GPU keepalive begins. Empty prefills remain no-ops and
+//     the already-admitted ratio-0/non-Flash paths remain available.
 
 // v4FlashTracerConfig is a small synthetic DeepSeek-V4 config carrying the
 // published per-layer compression schedule shape. Dims are miniature so the
@@ -197,55 +192,121 @@ func TestV4FlashRatioScheduleIsSingleSourced(t *testing.T) {
 	}
 }
 
-// TestV4FlashPrefillStepSeamBypassesFailClosedGuard witnesses the #12935
-// blocker: the fail-closed V4 Flash attention guard is wired into
-// Session.GenerateContext ONLY. The direct Session.Prefill (kv.go:1146) and
-// Session.Step (kv.go:1398) seam does NOT consult
-// refuseUnimplementedV4FlashAttention; both branch solely on
-// IsDeepSeekV41(), which excludes "deepseek_v4" (v41_config.go:91). A caller
-// of Prefill/Step on a deepseek_v4 config with compressed layers therefore
-// bypasses the guard and would fall through to the generic Q/K/V path.
-//
-// This test asserts the CURRENT (gap) behaviour so the record is honest: it
-// passes while the gap exists and will be updated by #12636 when the seam is
-// closed. It deliberately does NOT call s.Prefill/s.Step on the compressed
-// tracer config: those entry points do not refuse the compressed geometry, and
-// exercising an unimplemented native forward on it is neither safe nor
-// deterministic here. The gap is pinned structurally instead.
-func TestV4FlashPrefillStepSeamBypassesFailClosedGuard(t *testing.T) {
-	cfg := v4FlashTracerConfig([]int{0, 4, 128})
-	s := NewSynthetic(cfg).NewSession()
-
-	// (b) Sanity: the guarded entry point DOES refuse the compressed schedule.
-	if _, err := s.GenerateContext(context.Background(), []int{1, 2, 3}, 1); !errors.Is(err, ErrV4FlashAttentionUnimplemented) {
-		t.Fatalf("GenerateContext error = %v, want ErrV4FlashAttentionUnimplemented", err)
+// TestV4FlashDirectEntriesRefuseBeforeMutation closes the direct-entry gap
+// recorded by #12935. Every call uses the existing session API, so this same
+// witness can run on the parent without introducing candidate-only symbols.
+// fak-test:runtime fast est=100ms
+func TestV4FlashDirectEntriesRefuseBeforeMutation(t *testing.T) {
+	begin, end := 0, 0
+	previous := beginSessionGPUKeepAlive
+	beginSessionGPUKeepAlive = func(*Session) func() {
+		begin++
+		return func() { end++ }
 	}
-
-	// (c) The guard helper itself refuses the same session.
-	if err := s.refuseUnimplementedV4FlashAttention(); !errors.Is(err, ErrV4FlashAttentionUnimplemented) {
-		t.Fatalf("refuseUnimplementedV4FlashAttention error = %v, want ErrV4FlashAttentionUnimplemented", err)
+	t.Cleanup(func() { beginSessionGPUKeepAlive = previous })
+	entries := []struct {
+		name string
+		call func(*Session)
+	}{
+		{"prefill", func(s *Session) { s.Prefill([]int{1, 2}) }},
+		{"prefill-no-logits", func(s *Session) { s.PrefillNoLogits([]int{1, 2}) }},
+		{"step", func(s *Session) { s.Step(1) }},
 	}
-
-	// (d) The gap: the guard is the ONLY gate, and it lives on
-	// GenerateContext alone. The direct Prefill/Step seam in kv.go never calls
-	// it (no "refuseUnimplementedV4FlashAttention" call site in kv.go). Pin the
-	// structural facts in-package: the real 0731 geometry is compressed-dominated,
-	// so the guard WOULD fire on the published schedule, yet Prefill/Step skip it.
-	if len(deepSeekV4FlashCompressRatios) != 46 { //boundarylint:ignore CHANGE_DETECTOR_TEST V4 Flash published schedule length: 43 decoder + 3 MTP layers
-		t.Fatalf("deepSeekV4FlashCompressRatios length = %d, want 46", len(deepSeekV4FlashCompressRatios))
-	}
-	compressed := 0
-	for _, r := range deepSeekV4FlashCompressRatios {
-		if r == 4 || r == 128 {
-			compressed++
+	for _, schedule := range []struct {
+		name   string
+		ratios []int
+		want   error
+	}{
+		{"ratio-4", []int{4}, ErrV4FlashAttentionUnimplemented},
+		{"ratio-128", []int{128}, ErrV4FlashAttentionUnimplemented},
+		{"mixed", []int{0, 4, 128}, ErrV4FlashAttentionUnimplemented},
+		{"invalid", []int{0, 5}, ErrV4FlashAttentionRatioInvalid},
+	} {
+		for _, entry := range entries {
+			t.Run(schedule.name+"/"+entry.name, func(t *testing.T) {
+				s := NewSynthetic(v4FlashTracerConfig(schedule.ratios)).NewSession()
+				t.Cleanup(s.Close)
+				beforeBegin, beforeEnd := begin, end
+				var raised any
+				func() {
+					defer func() { raised = recover() }()
+					entry.call(s)
+				}()
+				err, ok := raised.(error)
+				if !ok || !errors.Is(err, schedule.want) {
+					t.Errorf("direct entry panic = %v, want %v", raised, schedule.want)
+				}
+				if got := s.Cache.Len(); got != 0 {
+					t.Errorf("cache advanced to %d rows before refusal", got)
+				}
+				if begin != beforeBegin || end != beforeEnd {
+					t.Errorf("keepalive began/ended before refusal: %d/%d", begin-beforeBegin, end-beforeEnd)
+				}
+				if s.BackendSessionClosed() || s.halFailure != nil {
+					t.Errorf("admission refusal retired backend session: closed=%v failure=%v", s.BackendSessionClosed(), s.halFailure)
+				}
+			})
 		}
 	}
-	if compressed != 41 {
-		t.Fatalf("compressed (ratio 4/128) layers = %d, want 41 of 46", compressed)
+	t.Run("empty-prefills", func(t *testing.T) {
+		s := NewSynthetic(v4FlashTracerConfig([]int{4})).NewSession()
+		t.Cleanup(s.Close)
+		if got := s.Prefill(nil); got != nil {
+			t.Fatalf("empty prefill = %v, want nil", got)
+		}
+		s.PrefillNoLogits(nil)
+		if s.Cache.Len() != 0 {
+			t.Fatal("empty prefill changed cache")
+		}
+	})
+	t.Run("cancelled-generate", func(t *testing.T) {
+		s := NewSynthetic(v4FlashTracerConfig([]int{4})).NewSession()
+		t.Cleanup(s.Close)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, err := s.GenerateContext(ctx, []int{1}, 1); !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled GenerateContext = %v, want cancellation before architecture refusal", err)
+		}
+		if s.Cache.Len() != 0 {
+			t.Fatal("cancelled generation changed cache")
+		}
+	})
+}
+
+// These are the existing generic tracer paths, not a claim that compressed
+// Flash attention or the complete V4 Pro architecture has been implemented.
+// fak-test:runtime fast est=100ms
+func TestV4FlashDirectEntriesPreserveAdmittedPaths(t *testing.T) {
+	for _, kind := range []string{"ratio-zero", "no-schedule", "non-v4"} {
+		t.Run(kind, func(t *testing.T) {
+			cfg := v4FlashTracerConfig([]int{0, 0})
+			switch kind {
+			case "no-schedule":
+				cfg.CompressRatios = nil
+			case "non-v4":
+				cfg.ModelType = "llama"
+				cfg.CompressRatios = []int{4, 5}
+			}
+			s := NewSynthetic(cfg).NewSession()
+			t.Cleanup(s.Close)
+			if got := s.Prefill([]int{1, 2}); len(got) != cfg.VocabSize {
+				t.Fatalf("prefill logits = %d, want %d", len(got), cfg.VocabSize)
+			}
+			if got := s.Step(3); len(got) != cfg.VocabSize {
+				t.Fatalf("step logits = %d, want %d", len(got), cfg.VocabSize)
+			}
+			s.PrefillNoLogits([]int{4, 5})
+			if s.Cache.Len() != 5 {
+				t.Fatalf("direct entries advanced cache to %d, want 5", s.Cache.Len())
+			}
+		})
 	}
-	// The same classifier that refuses the tracer session also flags the real
-	// published geometry, proving Prefill/Step would have plenty to guard.
-	if cl, invalid := v4FlashCompressedLayerRatios(cfg); invalid != 0 || len(cl) != 2 {
-		t.Fatalf("v4FlashCompressedLayerRatios(cfg) = (%v, %d), want 2 compressed layers and no invalid", cl, invalid)
+	// V4.1 owns a distinct forward and ratio contract. Classify it without
+	// manufacturing V4.1 weights for this generic tracer fixture.
+	cfg := v4FlashTracerConfig([]int{0, 1, 2})
+	cfg.ModelType = "deepseek_v41"
+	s := &Session{M: &Model{Cfg: cfg}}
+	if err := s.refuseUnimplementedV4FlashAttention(); err != nil {
+		t.Fatalf("V4.1 intercepted by Flash guard: %v", err)
 	}
 }
