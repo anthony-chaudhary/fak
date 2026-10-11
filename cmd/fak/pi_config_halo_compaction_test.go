@@ -85,10 +85,11 @@ func assertSharedCompactionSafe(t *testing.T, r piHaloCompactionResult) {
 // The live Halo shape: a hand-set maxTokens 4096 on the Halo Qwen slot and a
 // reserve inflated by 163840-window cloud models. The Halo slot's maxTokens must
 // follow the derivation, and its trigger must stay inside what the Halo's
-// deadline admission prices for a cold prompt: the gateway gives no prompt-cache
-// credit at admission, pi declares the OpenAI SDK's 600s, admission refuses
-// above 0.9 of it, and the measured cold prefill is 162 tok/s with decode
-// 21 tok/s (a 1024-token completion) after one 4096-token turn of growth.
+// deadline admission prices: pi declares the OpenAI SDK's 600s, admission refuses
+// above 0.9 of it, the measured cold prefill is 162 tok/s with decode 21 tok/s
+// (a 1024-token completion) after one 4096-token turn of growth, 30% of the
+// resident prefix is credited as cached, and the credit holds only while the
+// full cold estimate stays under 1.5x the ceiling.
 // fak-test:runtime fast est=1s
 func TestPiConfigFromRouterHaloCompactionFitsColdAdmission(t *testing.T) {
 	rows := []piRouterFakeRow{
@@ -105,12 +106,18 @@ func TestPiConfigFromRouterHaloCompactionFitsColdAdmission(t *testing.T) {
 		t.Fatalf("halo-qwen = %+v, want contextWindow 131072 maxTokens %d (the derivation, not the stale 4096)", halo, want)
 	}
 	trigger := halo.ContextWindow - r.reserve
-	coldSeconds := float64(trigger+4096)/162 + 1024.0/21
-	if coldSeconds > 0.9*600 {
-		t.Fatalf("halo trigger %d (reserve %d) prices %.0fs cold, above the 540s admission bound", trigger, r.reserve, coldSeconds)
+	creditedSeconds := (0.7*float64(trigger)+4096)/162 + 1024.0/21
+	if creditedSeconds > 0.9*600 {
+		t.Fatalf("halo trigger %d (reserve %d) prices %.0fs with 30%% cache credit, above the 540s admission bound", trigger, r.reserve, creditedSeconds)
 	}
-	if r.reserve != 56320 || r.keep != 20000 {
-		t.Fatalf("shared compaction reserve=%d keep=%d, want 56320/20000 (Halo trigger 74752; the kept tail is not squeezed below 20000)", r.reserve, r.keep)
+	if coldSeconds := float64(trigger+4096)/162 + 1024.0/21; coldSeconds > 1.5*0.9*600 {
+		t.Fatalf("halo trigger %d prices %.0fs cold, above the 810s cutoff where admission withdraws cache credit", trigger, coldSeconds)
+	}
+	if trigger > 112640 {
+		t.Fatalf("halo trigger %d exceeds the 112640 Halo window cap", trigger)
+	}
+	if r.reserve != 23552 || r.keep != 20000 {
+		t.Fatalf("shared compaction reserve=%d keep=%d, want 23552/20000 (Halo trigger 107520 at 0.30 cached share; keep stays 20000)", r.reserve, r.keep)
 	}
 	assertSharedCompactionSafe(t, r)
 }
