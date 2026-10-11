@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "llama-slot-state-registry-accessor",
+      "canonical": "llamaSlotStateFor",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The agent helper that retrieves or creates the shared llamaSlotState record for an exact upstream base URL in llamaSlotRegistry. The record holds an atomic discovered slot count and discovery coordination state. Retrieving the record performs no HTTP request and does not start discovery.",
+      "distinction": "This is access to per-upstream capability state, not the per-planner LlamaSlotAffinity opt-in or the withLlamaSlotAffinity request-body hint. The hint may separately start discovery; the LlamaSingleSlot residency reader uses the cached count and refuses unless it is exactly one.",
+      "distinct_from": [
+        "x-session-runtime-llamaslotaffinity",
+        "x-session-runtime-withllamaslotaffinity"
+      ],
+      "aliases": [],
+      "grounding": "llamaSlotStateFor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

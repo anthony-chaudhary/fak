@@ -18,25 +18,34 @@ import (
 // fakeLlamaSlot is a llama-server upstream with one slot: each chat completion
 // becomes the slot's next task, and GET /slots reports that task's id and prompt.
 type fakeLlamaSlot struct {
-	mu         sync.Mutex
-	task       int
-	prompt     int
-	cached     int  // prompt_tokens_details.cached_tokens of the next completion
-	busy       bool // /slots reports is_processing
-	slots      int  // slots reported; 0 means 1
-	skewPrompt int  // added to n_prompt_tokens in /slots
-	noSlots    bool // /slots answers 404
-	completes  atomic.Int32
-	slotReads  atomic.Int32
+	mu           sync.Mutex
+	task         int
+	prompt       int
+	cached       int  // prompt_tokens_details.cached_tokens of the next completion
+	busy         bool // /slots reports is_processing
+	slots        int  // slots reported; 0 means 1
+	skewPrompt   int  // added to n_prompt_tokens in /slots
+	noSlots      bool // /slots answers 404
+	completes    atomic.Int32
+	slotReads    atomic.Int32
+	affinitySeen atomic.Bool
 }
 
 func (f *fakeLlamaSlot) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
+	case "/props":
+		// Advertise one slot; the several_slots case models a later mismatch
+		// that the live /slots read must still reject.
+		_, _ = w.Write([]byte(`{"total_slots":1}`))
 	case "/v1/chat/completions":
 		var req struct {
-			Messages []agent.Message `json:"messages"`
+			Messages    []agent.Message `json:"messages"`
+			CachePrompt bool            `json:"cache_prompt"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.CachePrompt {
+			f.affinitySeen.Store(true)
+		}
 		f.mu.Lock()
 		f.task++
 		f.prompt = estimateMessageContentTokens(req.Messages)
@@ -81,7 +90,20 @@ func llamaSlotHaloServer(t *testing.T, f *fakeLlamaSlot) *Server {
 	srv := haloPiDeadlineServer(t)
 	up := httptest.NewServer(f)
 	t.Cleanup(up.Close)
-	srv.planner = agent.NewHTTPPlanner(up.URL+"/v1", "halo", "")
+	planner := agent.NewHTTPPlanner(up.URL+"/v1", "halo", "")
+	planner.LlamaSlotAffinity = true
+	// Prime asynchronous discovery through the real planner. Seeing its
+	// cache_prompt hint proves the capability is published, not merely that
+	// the /props handler has returned. These setup calls bypass the gateway.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for !f.affinitySeen.Load() {
+		if _, err := planner.Complete(ctx, []agent.Message{{Role: "user", Content: "discover"}}, nil); err != nil {
+			t.Fatalf("prime llama capability: %v", err)
+		}
+	}
+	f.completes.Store(0)
+	srv.planner = planner
 	return srv
 }
 
@@ -182,6 +204,7 @@ func TestDeadlineAdmissionRefusesUnprovenSlotResidency(t *testing.T) {
 		{name: "planner_replaced", between: func(_ *testing.T, srv *Server, _ *fakeLlamaSlot) {
 			old := srv.planner.(*agent.HTTPPlanner)
 			srv.planner = agent.NewHTTPPlanner(old.BaseURL, "halo", "")
+			srv.planner.(*agent.HTTPPlanner).LlamaSlotAffinity = true
 		}},
 		{name: "concurrent_in_flight", between: func(t *testing.T, srv *Server, _ *fakeLlamaSlot) {
 			_, release, ok := admitHaloTurn(t, srv, context.Background(), []agent.Message{{Role: "user", Content: "x"}}, "")

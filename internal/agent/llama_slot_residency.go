@@ -22,7 +22,13 @@ type LlamaSlotTask struct {
 // the upstream reports exactly one slot carrying an id_task: with several slots
 // the slot a request lands on is not known before it runs.
 func (p *HTTPPlanner) LlamaSingleSlot(ctx context.Context, timeout time.Duration) (LlamaSlotTask, bool) {
-	if p == nil || p.Provider != ProviderOpenAI || strings.TrimSpace(p.BaseURL) == "" {
+	if p == nil || !p.LlamaSlotAffinity || p.Provider != ProviderOpenAI || strings.TrimSpace(p.BaseURL) == "" {
+		return LlamaSlotTask{}, false
+	}
+	// OpenAI compatibility alone does not identify a llama-server. Reuse the
+	// capability learned by opt-in, asynchronous /props discovery; an unknown
+	// or multi-slot upstream cannot supply single-slot residency evidence.
+	if llamaSlotStateFor(p.BaseURL).slots.Load() != 1 {
 		return LlamaSlotTask{}, false
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
