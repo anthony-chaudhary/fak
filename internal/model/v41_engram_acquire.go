@@ -2,15 +2,13 @@ package model
 
 // v41_engram_acquire.go — the load-time cost of binding a V4.1 Engram table.
 //
-// The published Q2_K table is exposed as dequantized f32 rows, so its content
-// address hashes ~12x the on-disk bytes. On strix3 (fak#13668) that hash ran on
-// one core at ~105 MB/s of checkpoint and the loader then hashed the same extent
-// a second time to verify a binding it had derived from that very reader: two
-// ~300 s passes per Engram layer, 1221 s of a 1221 s load. This file removes the
-// second pass (NewV41AcquiredEngramRowSource binds what it observes, once) and
-// moves the chunk reads, where the dequantization happens, onto a bounded worker
-// pool while a single goroutine hashes them in extent order. The digest is the
-// serial form's byte-for-byte; only the producer side runs in parallel.
+// NewV41AcquiredEngramRowSource binds what it observes, once, under the tree
+// scheme (v41_engram_digest_tree.go): over the Q2_K blocks when the reader names
+// them, so the published table is hashed at checkpoint size on every core and
+// never dequantized to be bound. The flat "sha256:" form below is the scheme
+// acquisition bound before; it stays the verifier for bindings that carry it.
+// Its chunk reads run ahead on a bounded worker pool while one goroutine hashes
+// them in extent order, so it is the serial form's byte-for-byte.
 
 import (
 	"crypto/sha256"
@@ -147,7 +145,8 @@ func v41EngramDigestExtentSerial(reader io.ReaderAt, offset, size int64) (string
 // NewV41AcquiredEngramRowSource is the loader's acquisition-time form of
 // NewV41VerifiedEngramRowSource: the binding names the shard, extent, row count
 // and row width, and its Digest must be empty, because the content address is
-// what this constructor observes. The extent is hashed exactly once and the
+// what this constructor observes. The extent is hashed exactly once, under the
+// tree scheme (over the encoded extent when the reader names one), and the
 // returned source carries the completed binding (V41EngramBinding), so the
 // loader no longer hashes the extent to build a binding and again to verify it.
 // Geometry is refused before any payload byte is read.
@@ -164,7 +163,7 @@ func NewV41AcquiredEngramRowSource(reader io.ReaderAt, shard V41EngramShard, bin
 	if err != nil {
 		return nil, err
 	}
-	digest, err := v41EngramDigestExtent(reader, binding.Offset, binding.Size)
+	digest, err := v41EngramAcquireDigest(reader, binding, rowBytes)
 	if err != nil {
 		return nil, &V41EngramStreamError{Kind: V41EngramStreamBindingMismatch, Row: -1, Shard: shard.ID,
 			Err: fmt.Errorf("cannot hash shard bytes: %w", err)}

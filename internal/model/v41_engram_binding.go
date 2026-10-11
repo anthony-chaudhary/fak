@@ -34,7 +34,6 @@ package model
 // change, not this one.
 
 import (
-	"encoding/hex"
 	"fmt"
 	"io"
 	"strings"
@@ -48,7 +47,9 @@ import (
 // requested identity cannot be conflated.
 //
 // Rows is the row count and RowBytes is the per-row width, so Size must equal
-// Rows*RowBytes. Digest is "sha256:<hex>" over the extent bytes.
+// Rows*RowBytes. Digest is "<scheme>:<hex>" (v41_engram_digest_tree.go):
+// "sha256" over the extent bytes, "sha256t1-rows" a tree over them, or
+// "sha256t1-q2_k" a tree over the Q2_K blocks the extent's rows decode from.
 //
 // RowBytes makes the binding dialect-parameterized. The published V4.1 artifact's
 // Engram table is stored as Q2_K (one super-block per row), so the loader's
@@ -80,22 +81,15 @@ func (b V41EngramArtifactBinding) rowWidth() (int, error) {
 	return rb, nil
 }
 
-// validate checks the binding's internal consistency and normalizes its digest.
-// A zero or malformed digest is refused here rather than allowed to reach a
-// comparison that would then reject a correct artifact for the wrong reason.
-func (b V41EngramArtifactBinding) validate() error {
+// validate checks the binding's internal consistency and returns its normalized
+// digest and scheme. A zero, malformed or unknown-scheme digest is refused here
+// rather than allowed to reach a comparison that would then reject a correct
+// artifact for the wrong reason.
+func (b V41EngramArtifactBinding) validate() (digest, scheme string, err error) {
 	if err := b.validateExtent(); err != nil {
-		return err
+		return "", "", err
 	}
-	digest := strings.ToLower(strings.TrimSpace(b.Digest))
-	const prefix = "sha256:"
-	if !strings.HasPrefix(digest, prefix) || len(digest) != len(prefix)+64 {
-		return fmt.Errorf("binding digest %q is not a sha256 content address", b.Digest)
-	}
-	if _, err := hex.DecodeString(digest[len(prefix):]); err != nil {
-		return fmt.Errorf("binding digest %q is not hex", b.Digest)
-	}
-	return nil
+	return v41EngramParseDigest(b.Digest)
 }
 
 func (b V41EngramArtifactBinding) validateExtent() error {
@@ -130,11 +124,12 @@ func v41EngramDigestExtent(reader io.ReaderAt, offset, size int64) (string, erro
 // so a caller cannot pair a packed reader with an f32 binding by accident. The
 // shard name, extent, and row count must agree with the binding, the shard's
 // observed identity must match the requested identity, and the extent's content
-// address must equal the binding's digest. Any disagreement is refused before a
-// single row can be served, so a wrong shard/range cannot reach Engram projection
-// or Prefill/Step.
+// address, recomputed under the scheme the binding's digest names, must equal
+// the binding's digest. Any disagreement is refused before a single row can be
+// served, so a wrong shard/range cannot reach Engram projection or Prefill/Step.
 func NewV41VerifiedEngramRowSource(reader io.ReaderAt, shard V41EngramShard, binding V41EngramArtifactBinding) (V41EngramRowSource, error) {
-	if err := binding.validate(); err != nil {
+	want, scheme, err := binding.validate()
+	if err != nil {
 		return nil, &V41EngramStreamError{Kind: V41EngramStreamGeometry, Row: -1, Shard: shard.ID,
 			Err: fmt.Errorf("invalid artifact binding: %w", err)}
 	}
@@ -142,12 +137,12 @@ func NewV41VerifiedEngramRowSource(reader io.ReaderAt, shard V41EngramShard, bin
 	if err != nil {
 		return nil, err
 	}
-	observed, err := v41EngramDigestExtent(reader, binding.Offset, binding.Size)
+	observed, err := v41EngramBindingDigest(reader, binding, scheme, rowBytes)
 	if err != nil {
 		return nil, &V41EngramStreamError{Kind: V41EngramStreamBindingMismatch, Row: -1, Shard: shard.ID,
 			Err: fmt.Errorf("cannot verify shard bytes: %w", err)}
 	}
-	if observed != strings.ToLower(strings.TrimSpace(binding.Digest)) {
+	if observed != want {
 		return nil, &V41EngramStreamError{Kind: V41EngramStreamBindingMismatch, Row: -1, Shard: shard.ID,
 			Err: fmt.Errorf("shard bytes digest %s does not match bound artifact %s", observed, binding.Digest)}
 	}

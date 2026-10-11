@@ -104,17 +104,22 @@ func TestV41AcquiredEngramRowSourceBindsObservedDigest(t *testing.T) {
 	if !ok {
 		t.Fatal("acquired source carries no verified binding")
 	}
-	digest, err := V41EngramDigestExtent(bytes.NewReader(f32), 0, size)
+	digest, err := v41EngramTreeDigest(bytes.NewReader(f32), 0, size, v41EngramEncodingRows, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Digest != digest || got.Digest != v41EngramTestDigest(f32) {
-		t.Fatalf("acquired digest %q, want %q", got.Digest, digest)
+	if got.Digest != digest {
+		t.Fatalf("acquired digest %q, want the rows tree digest %q", got.Digest, digest)
 	}
 	bound := bind
 	bound.Digest = digest
 	if _, err := NewV41VerifiedEngramRowSource(bytes.NewReader(f32), shard, bound); err != nil {
 		t.Fatalf("verified route refuses the binding acquisition produced: %v", err)
+	}
+	flat := bind
+	flat.Digest = v41EngramTestDigest(f32)
+	if _, err := NewV41VerifiedEngramRowSource(bytes.NewReader(f32), shard, flat); err != nil {
+		t.Fatalf("verified route refuses a flat sha256 binding of the same bytes: %v", err)
 	}
 	row := make([]byte, V41EngramF32RowBytes)
 	if _, err := src.ReadRows(rows-1, 1, row); err != nil || !bytes.Equal(row, f32[(rows-1)*V41EngramF32RowBytes:]) {

@@ -89,7 +89,7 @@ func TestDeepSeek41EngramServingAttachment(t *testing.T) {
 		t.Fatalf("stage bindings = %v ok=%t, want one verified binding", bindings, ok)
 	}
 	if bindings[0].Rows != 72 || bindings[0].RowBytes != model.V41EngramF32RowBytes ||
-		!strings.HasPrefix(bindings[0].Digest, "sha256:") || len(bindings[0].Digest) != len("sha256:")+64 {
+		!strings.HasPrefix(bindings[0].Digest, "sha256t1-q2_k:") || len(bindings[0].Digest) != len("sha256t1-q2_k:")+64 {
 		t.Fatalf("wired source binding is not the verified Q2_K f32 binding: %+v", bindings[0])
 	}
 

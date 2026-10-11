@@ -40,9 +40,9 @@ type V41EngramAttachSpec struct {
 	CompressedVocabSize int
 }
 
-// V41EngramDigestExtent returns the canonical "sha256:<hex>" content address
-// over reader's [offset,offset+size) extent, the same digest form
-// V41EngramArtifactBinding carries. It lets a loader bind an artifact it opened
+// V41EngramDigestExtent returns the flat "sha256:<hex>" content address over
+// reader's [offset,offset+size) extent, one of the digest schemes
+// V41EngramArtifactBinding carries (acquisition binds the tree scheme). It lets a loader bind an artifact it opened
 // (and whose rows it dequantizes) without re-implementing the hashing contract
 // the verified constructor enforces.
 func V41EngramDigestExtent(reader io.ReaderAt, offset, size int64) (string, error) {
