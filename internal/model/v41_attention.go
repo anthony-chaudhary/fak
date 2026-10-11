@@ -299,6 +299,11 @@ func V41AttentionCompressedForward(q []float32, values [][]float32, opt V41Atten
 		return nil, v41StageErr(v41StageAttention, opt.Layer,
 			fmt.Errorf("%w: compressed attention geometry heads=%d dim=%d", ErrV41ForwardStage, opt.Heads, opt.HeadDim))
 	}
+	queryWidth, queryOK := checkedMulInt(opt.Heads, opt.HeadDim)
+	if !queryOK {
+		return nil, v41StageErr(v41StageAttention, opt.Layer,
+			fmt.Errorf("%w: compressed attention query geometry overflows heads=%d dim=%d", ErrV41ForwardStage, opt.Heads, opt.HeadDim))
+	}
 	if opt.TopK < 0 || opt.Groups < 0 {
 		return nil, v41StageErr(v41StageAttention, opt.Layer,
 			fmt.Errorf("%w: compressed attention topk=%d groups=%d", ErrV41ForwardStage, opt.TopK, opt.Groups))
@@ -314,6 +319,12 @@ func V41AttentionCompressedForward(q []float32, values [][]float32, opt V41Atten
 	if opt.HeadDim != v41KVHeadDim(opt) {
 		return nil, v41StageErr(v41StageAttention, opt.Layer,
 			fmt.Errorf("%w: compressed attention head dim %d does not match the compressed row width", ErrV41ForwardStage, opt.HeadDim))
+	}
+	// Groups describes the supplied completed stream, not spare capacity. Check
+	// it before allocating a mask or indexing a causally visible source row.
+	if len(values) != opt.Groups {
+		return nil, v41StageErr(v41StageAttention, opt.Layer,
+			fmt.Errorf("%w: compressed stream has %d rows, want %d", ErrV41ForwardStage, len(values), opt.Groups))
 	}
 	for g, row := range values {
 		if len(row) != opt.HeadDim {
@@ -331,14 +342,11 @@ func V41AttentionCompressedForward(q []float32, values [][]float32, opt V41Atten
 		return nil, v41StageErr(v41StageAttention, opt.Layer,
 			fmt.Errorf("%w: shared KV stream has %d rows, want %d", ErrV41ForwardStage, len(opt.SourceRows), opt.Groups))
 	}
-	seq := 0
-	if opt.Heads > 0 && opt.HeadDim > 0 {
-		if len(q)%(opt.Heads*opt.HeadDim) != 0 {
-			return nil, v41StageErr(v41StageAttention, opt.Layer,
-				fmt.Errorf("%w: compressed attention query length %d not a multiple of heads*dim %d", ErrV41ForwardStage, len(q), opt.Heads*opt.HeadDim))
-		}
-		seq = len(q) / (opt.Heads * opt.HeadDim)
+	if len(q)%queryWidth != 0 {
+		return nil, v41StageErr(v41StageAttention, opt.Layer,
+			fmt.Errorf("%w: compressed attention query length %d not a multiple of heads*dim %d", ErrV41ForwardStage, len(q), queryWidth))
 	}
+	seq := len(q) / queryWidth
 	for i, v := range q {
 		if !finite32(v) {
 			return nil, v41StageErr(v41StageAttention, opt.Layer,
@@ -362,15 +370,15 @@ func V41AttentionCompressedForward(q []float32, values [][]float32, opt V41Atten
 		return nil, v41StageErr(v41StageAttention, opt.Layer,
 			fmt.Errorf("%w: compressed attention query offset %d overflows %d rows", ErrV41ForwardStage, opt.QueryOffset, seq))
 	}
-	mask := v41CompressedCausalMaskAt(seq, opt.Ratio, opt.Groups, opt.QueryOffset)
 	if opt.Idx != nil {
 		if opt.IndexTopK <= 0 {
 			return nil, v41StageErr(v41StageAttention, opt.Layer,
 				fmt.Errorf("%w: compressed attention index list supplied with non-positive top-k %d", ErrV41ForwardStage, opt.IndexTopK))
 		}
-		if len(opt.Idx) != seq*opt.IndexTopK {
+		indexCount, indexOK := checkedMulInt(seq, opt.IndexTopK)
+		if !indexOK || len(opt.Idx) != indexCount {
 			return nil, v41StageErr(v41StageAttention, opt.Layer,
-				fmt.Errorf("%w: compressed attention index list length %d, want %d", ErrV41ForwardStage, len(opt.Idx), seq*opt.IndexTopK))
+				fmt.Errorf("%w: compressed attention index list length %d does not match seq=%d top-k=%d", ErrV41ForwardStage, len(opt.Idx), seq, opt.IndexTopK))
 		}
 		for i, row := range opt.Idx {
 			if row < -1 || int(row) >= opt.Groups {
@@ -380,6 +388,11 @@ func V41AttentionCompressedForward(q []float32, values [][]float32, opt V41Atten
 		}
 	}
 
+	if _, maskOK := checkedMulInt(seq, opt.Groups); !maskOK {
+		return nil, v41StageErr(v41StageAttention, opt.Layer,
+			fmt.Errorf("%w: compressed attention mask geometry overflows seq=%d groups=%d", ErrV41ForwardStage, seq, opt.Groups))
+	}
+	mask := v41CompressedCausalMaskAt(seq, opt.Ratio, opt.Groups, opt.QueryOffset)
 	out := make([]float32, len(q))
 	for t := 0; t < seq; t++ {
 		qBase := t * opt.Heads * opt.HeadDim

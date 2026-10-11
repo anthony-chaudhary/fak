@@ -538,3 +538,61 @@ func TestV41AttentionSourcePublishReaderReuse(t *testing.T) {
 		t.Fatalf("reader with no publication error = %v, want ErrV41ForwardStage", err)
 	}
 }
+
+// TestV41AttentionCompressedGeometry validates declared extents before any mask
+// allocation or contraction. Overflow cases carry only zero or four query values.
+// fak-test:runtime fast est=10ms
+func TestV41AttentionCompressedGeometry(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	for _, tc := range []struct {
+		name                     string
+		q                        []float32
+		values                   [][]float32
+		groups, heads, dim, topK int
+		idx                      []int32
+	}{
+		{name: "missing completed row", q: []float32{1}, values: [][]float32{{2}}, groups: 2, heads: 1, dim: 1},
+		{name: "excess completed row", q: []float32{1}, values: [][]float32{{2}, {3}}, groups: 1, heads: 1, dim: 1},
+		{name: "query width wraps zero", heads: maxInt/2 + 1, dim: 4},
+		{name: "index stride wraps zero", q: []float32{1, 1, 1, 1}, values: [][]float32{{2}}, groups: 1, heads: 1, dim: 1, topK: maxInt/2 + 1, idx: []int32{}},
+		{name: "nonfinite query", q: []float32{float32(math.NaN())}, values: [][]float32{{2}}, groups: 1, heads: 1, dim: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("invalid compressed geometry panicked instead of refusing: %v", r)
+				}
+			}()
+			out, err := V41AttentionCompressedForward(tc.q, tc.values, V41AttentionSharedKVOptions{
+				Layer: 3, Ratio: 1, QueryOffset: 1, Groups: tc.groups,
+				Heads: tc.heads, HeadDim: tc.dim, Softmax: 1, IndexTopK: tc.topK, Idx: tc.idx,
+			})
+			var stage *V41ForwardError
+			if out != nil || !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &stage) || stage.Layer != 3 || stage.Stage != v41StageAttention {
+				t.Fatalf("invalid geometry returned out=%v err=%v; want typed layer-3 attention refusal", out, err)
+			}
+		})
+	}
+
+	// Two completed rows remain available while causality admits them one at a
+	// time. The independent scalar oracle also covers the zero-visible prefix.
+	q := [][]float32{{1}, {1}, {1}, {1}}
+	rows := [][]float32{{2}, {3}}
+	sink := []float32{0}
+	got, err := V41AttentionCompressedForward(flatten(q), rows, V41AttentionSharedKVOptions{
+		Ratio: 2, Groups: len(rows), Heads: 1, HeadDim: 1, Softmax: 1, Sink: sink,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := flatten(v41OracleCompressedForward(t, 2, q, rows, sink, 1))
+	if len(got) != len(want) {
+		t.Fatalf("valid output width=%d want=%d", len(got), len(want))
+	}
+	for i := range want {
+		delta := math.Abs(float64(got[i] - want[i]))
+		if math.IsNaN(delta) || math.IsInf(delta, 0) || delta > 1e-6 {
+			t.Fatalf("valid output[%d]=%g want=%g", i, got[i], want[i])
+		}
+	}
+}
