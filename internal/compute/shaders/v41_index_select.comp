@@ -7,11 +7,13 @@ layout(local_size_x = 256) in;
 // ranks first, an equal score ranks the lower position first, and -0 equals +0.
 layout(std430, binding = 0) readonly buffer ScoreBuf { uint Score[]; };
 // Scratch: [blocks] block keys, [blocks] block keep flags, [rows] selected flags.
-layout(std430, binding = 1) buffer ScratchBuf { uint Scratch[]; };
+// coherent: later phases read Scratch written by other waves of this workgroup;
+// without it a wave can read a stale L0 line and drop whole kept blocks.
+layout(std430, binding = 1) coherent buffer ScratchBuf { uint Scratch[]; };
 // Out holds min(topK, rows) position-sorted rows as exact F32 integers; -1 is empty.
 layout(std430, binding = 2) writeonly buffer OutBuf { float Out[]; };
 // Status[0] is nonzero when any score is NaN; the caller refuses the selection.
-layout(std430, binding = 3) buffer StatusBuf { uint Status[]; };
+layout(std430, binding = 3) coherent buffer StatusBuf { uint Status[]; };
 
 layout(push_constant) uniform Push {
     int rows;
