@@ -2338,6 +2338,11 @@ func TestVulkanMissingQ2ShaderPreventsRegistration(t *testing.T) {
 		if ok {
 			os.Exit(1)
 		}
+		// fvk_init resets process-global capability flags before it fails, so the
+		// direct witness must never run in the parent's shared registered backend.
+		if VulkanDebugInitShim(os.Getenv("FAK_VULKAN_SPIRV")) == 0 {
+			os.Exit(2)
+		}
 		os.Exit(0)
 	}
 
@@ -2382,13 +2387,8 @@ func TestVulkanMissingQ2ShaderPreventsRegistration(t *testing.T) {
 		t.Fatal("no SPIR-V files copied")
 	}
 
-	// Direct shim initialization witness: missing q2k_matmul.spv must fail (return non-zero, code 8).
-	ret := VulkanDebugInitShim(tempDir)
-	if ret == 0 {
-		t.Fatalf("VulkanDebugInitShim(%s) returned 0 with missing q2k_matmul.spv; want non-zero failure", tempDir)
-	}
-
-	// Subprocess witness: backend registration must fail closed on missing Q2 shader
+	// Subprocess witness: registration and a direct shim init must both fail
+	// closed on a missing Q2 shader (child exit 1 and 2 respectively).
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatalf("os.Executable: %v", err)
