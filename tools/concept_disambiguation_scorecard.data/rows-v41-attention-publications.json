@@ -1,0 +1,61 @@
+{
+  "rows": [
+    {
+      "id": "v41-attention-publication-range-key",
+      "canonical": "v41AttentionPublicationKey",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The internal/model value key containing sourceLayer and an absolute half-open compressed-row range [start,end). Separate KV and index publication maps use it to identify source-published completed rows; current publication appends a unit range and advances that source's published end.",
+      "distinction": "This addresses a published row range inside a registry. It contains neither raw token positions nor payload values and does not encode the layer's compression ratio or source-role flags; those belong to the layer reference carried by an update.",
+      "distinct_from": [
+        "v41-attention-layer-publication-ref",
+        "v41-attention-completed-row-update"
+      ],
+      "aliases": [],
+      "grounding": "v41AttentionPublicationKey",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-layer-publication-ref",
+      "canonical": "V41AttentionStateRef",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The layer-publication descriptor shared by the corresponding internal/model and internal/model/v41 types: zero-based LayerID, compression Ratio, and independent IsKVSource and IsIndexSource flags. Attention-state update validation uses these fields to check stack order and whether a supplied completed row is permitted.",
+      "distinction": "This is a value descriptor of a layer's role, not a pointer to attention state or a publication-range key. It carries no latent/index row payload; V41AttentionStateUpdate combines it with those optional completed rows.",
+      "distinct_from": [
+        "v41-attention-publication-range-key",
+        "v41-attention-completed-row-update"
+      ],
+      "aliases": [],
+      "grounding": "V41AttentionStateRef",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "v41-attention-completed-row-update",
+      "canonical": "V41AttentionStateUpdate",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The projection-free update value used by the corresponding internal/model and internal/model/v41 attention-state APIs: a V41AttentionStateRef plus optional Latent and IndexKey slices for a completed compressor group. The state validates updates before publication and copies each supplied row into its own registry.",
+      "distinction": "This carries caller-produced row data and its layer descriptor for publication; it does not itself perform projection or own the mutable session registry. Its Ref identifies the source role, while the internal model's publication-range key identifies where a completed row is stored.",
+      "distinct_from": [
+        "v41-attention-publication-range-key",
+        "v41-attention-layer-publication-ref"
+      ],
+      "aliases": [],
+      "grounding": "V41AttentionStateUpdate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

@@ -15,11 +15,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **619** (clarity 0 + coverage 619) |
-| **Crystal-clear concepts (and climbing)** | **1184** crystal of 2971 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3064 / 3683** (83.2% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **616** (clarity 0 + coverage 616) |
+| **Crystal-clear concepts (and climbing)** | **1184** crystal of 2974 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3067 / 3683** (83.3% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 225 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **86** of 4215 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **86** of 4218 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 89.1/100 (grade B) |
 
@@ -28,18 +28,18 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2971 concepts - score 89.1/100 (grade B) - disambiguation-debt 619
+concept-disambiguation chart - 2974 concepts - score 89.1/100 (grade B) - disambiguation-debt 616
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ###################......... 1184
-  o defined       ############################ 1787
+  o defined       ############################ 1790
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
-  attention        **********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (115 concept(s); 22 crystal)
+  attention        **********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (118 concept(s); 22 crystal)
   cache            **************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (291 concept(s); 110 crystal)
   context-ctx      ************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (243 concept(s); 84 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
@@ -67,8 +67,8 @@ coverage by family (positioned / discovered):
   cache            #######################..... 333/399
   gateway-engine   #######################..... 226/280
   context-ctx      ########################.... 263/307
-  attention        ####################........ 107/148
   policy-capability ########################.... 221/260
+  attention        #####################....... 110/148
   guard-gate       ##########################.. 511/547
   pool             ###############............. 40/74
   render-materialize ########################.... 216/249
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 83.2%  (3064/3683 confusable tokens positioned)
+namespace coverage  [###########################.....] 83.3%  (3067/3683 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 225
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 225/225
 
-name index: 4215 lookup name(s) -> 2971 concept(s), 86 ambiguous
+name index: 4218 lookup name(s) -> 2974 concept(s), 86 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **225 / 225** (225 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2154 / 5360 |
+| Boundaries drawn (mutual / total) | 2160 / 5366 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4215 over 2971 concepts |
+| Lookup names indexed | 4218 over 2974 concepts |
 | Lookup names landing on several concepts | 86 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2971 |
+| Concepts carrying a contrast set | 2974 |
 
 ## The concepts (best verdict first)
 
@@ -1412,6 +1412,9 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | attention | **v41AttentionInputNormFunc** - The model callback signature and same-named Session constructor for normalizing one full-profile V4.1 collapsed hidden row. The constructor binds the existing session-owned RMSNorm operation to the layer attn_norm.weight and HiddenSize, or returns nil when that operation is unavailable. |
 | o | defined | symbol | attention | **v41AttentionInputNormWithDevice** - The Model adapter used at V4.1 attention-input normalization sites. A selected callback receives an owned BF16-rounded hidden row and its result is checked, copied and BF16-rounded for publication. A nil callback preserves the existing host normalization; a selected callback error is returned without host retry. |
 | o | defined | symbol | attention | **attentionNorm (V4.1 forward-state callback)** - The optional v41ForwardState field retaining the session-bound attention-input normalization callback across grouped, incremental and resident-stream forward execution. Scratch reuse clears the field and session state restoration rebinds it to the target session owner. |
+| o | defined | symbol | attention | **v41AttentionPublicationKey** - The internal/model value key containing sourceLayer and an absolute half-open compressed-row range [start,end). Separate KV and index publication maps use it to identify source-published completed rows; current publication appends a unit range and advances that source's published end. |
+| o | defined | symbol | attention | **V41AttentionStateRef** - The layer-publication descriptor shared by the corresponding internal/model and internal/model/v41 types: zero-based LayerID, compression Ratio, and independent IsKVSource and IsIndexSource flags. Attention-state update validation uses these fields to check stack order and whether a supplied completed row is permitted. |
+| o | defined | symbol | attention | **V41AttentionStateUpdate** - The projection-free update value used by the corresponding internal/model and internal/model/v41 attention-state APIs: a V41AttentionStateRef plus optional Latent and IndexKey slices for a completed compressor group. The state validates updates before publication and copies each supplied row into its own registry. |
 | o | defined | symbol | attention | **v41AttentionInputNormWithLeaf** - The Model host helper in internal/model/v41_forward.go that loads the caller-selected layer norm weight, validates HiddenSize geometry, finite values and positive finite epsilon, then applies an owned BF16 input copy, F32 learned RMSNorm and BF16 output publication. The attention wrapper supplies attn_norm.weight; the full-profile FFN host branch reuses it with ffn_norm.weight. |
 | o | defined | symbol | cache | **cachevalueStatus (cache-value status report)** - cmd/fak/cachevalue_status.go: the top-level `fak cache-value status` report that folds every cache-economics source (kernel/savings/usage ledgers, vCache snapshots and sub-reports) into one verdict with rows and next actions. |
 | o | defined | symbol | cache | **cachevalueStatusRow (one status report row)** - cmd/fak/cachevalue_status.go: one row of the cache-value status report - a single named cache-economics line item (source, value, dash-or-detail) rendered in the status table. |
@@ -3249,8 +3252,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3206/5360 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2971 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3206/5366 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2974 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3259,7 +3262,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4215 lookup name(s) resolves - 86 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4218 lookup name(s) resolves - 86 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3271,8 +3274,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | cache | 333 | 399 | 66 |
 | gateway-engine | 226 | 280 | 54 |
 | context-ctx | 263 | 307 | 44 |
-| attention | 107 | 148 | 41 |
 | policy-capability | 221 | 260 | 39 |
+| attention | 110 | 148 | 38 |
 | guard-gate | 511 | 547 | 36 |
 | pool | 40 | 74 | 34 |
 | render-materialize | 216 | 249 | 33 |
