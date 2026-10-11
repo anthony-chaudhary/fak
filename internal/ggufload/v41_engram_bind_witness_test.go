@@ -106,14 +106,17 @@ func TestV41EngramBindLoadWitness(t *testing.T) {
 			t.Fatalf("layer %d: bind: %v", eng.LayerIDs[i], err)
 		}
 	}
-	hwm := "unknown"
+	// VmHWM counts the touched mapped checkpoint pages; RssAnon is the heap.
+	mem := map[string]string{"VmHWM": "unknown", "RssAnon": "unknown"}
 	if status, err := os.ReadFile("/proc/self/status"); err == nil {
 		for _, line := range strings.Split(string(status), "\n") {
-			if v, ok := strings.CutPrefix(line, "VmHWM:"); ok {
-				hwm = strings.Join(strings.Fields(v), "")
+			for key := range mem {
+				if v, ok := strings.CutPrefix(line, key+":"); ok {
+					mem[key] = strings.Join(strings.Fields(v), "")
+				}
 			}
 		}
 	}
-	t.Logf("V41_ENGRAM_BIND mode=%s layers=%v served_bytes=%d encoded_bytes=%d setup_s=%.3f bind_wall_s=%.3f vm_hwm=%s digests=%v",
-		mode, eng.LayerIDs, served, encoded, setup.Seconds(), wall.Seconds(), hwm, digests)
+	t.Logf("V41_ENGRAM_BIND mode=%s layers=%v served_bytes=%d encoded_bytes=%d setup_s=%.3f bind_wall_s=%.3f rss_anon=%s vm_hwm_incl_mapped=%s digests=%v",
+		mode, eng.LayerIDs, served, encoded, setup.Seconds(), wall.Seconds(), mem["RssAnon"], mem["VmHWM"], digests)
 }
