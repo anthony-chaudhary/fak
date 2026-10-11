@@ -18,37 +18,47 @@ import (
 // backend, a GELU expert, a biased projection, an unresolvable weight, or a dtype the
 // backend cannot serve is a clean decline (false), never a semantic fallback.
 //
-// The returned tensors are the staged gate/up device weights; the caller owns their
-// lifetime. Under a bounded routed-expert ring the caller must hold them for the rest of
-// its computation (stage-and-hold must be ONE span, R7/#5618), which the callers do.
-func expertInputDeviceAdmitted(s *Session, gateName, upName string, xn any, hidden int) (compute.Tensor, string, compute.Tensor, string, []float32, bool) {
+// The returned tensors are staged and held gate/up device weights. The caller must invoke
+// both release callbacks after its last use. Each stage-and-hold is ONE shared-ring span
+// (R7/#5618), so staging up cannot evict gate before either projection is dispatched.
+func expertInputDeviceAdmitted(s *Session, gateName, upName string, xn any, hidden int) (compute.Tensor, func(), compute.Tensor, func(), []float32, bool) {
 	none := compute.Tensor{}
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
 		s.M.Cfg.ActGeluTanh || s.M.Cfg.ActGeluErf ||
 		s.M.has(gateName[:len(gateName)-len("weight")]+"bias") ||
 		s.M.has(upName[:len(upName)-len("weight")]+"bias") {
-		return none, "", none, "", nil, false
+		return none, nil, none, nil, nil, false
 	}
 	x, ok := xn.([]float32)
 	if !ok || len(x) != hidden {
-		return none, "", none, "", nil, false
+		return none, nil, none, nil, nil, false
 	}
-	gateW, gateKey, ok := s.expertInputDeviceWeight(gateName)
+	gateW, releaseGate, ok := s.expertInputDeviceWeight(gateName)
 	if !ok {
-		return none, "", none, "", nil, false
+		return none, nil, none, nil, nil, false
 	}
-	upW, upKey, ok := s.expertInputDeviceWeight(upName)
+	// Keep the first hold owned here until both weights can be handed to the caller.
+	// In particular, up staging may decline or panic before the caller installs defers.
+	transferred := false
+	defer func() {
+		if !transferred {
+			releaseGate()
+		}
+	}()
+	upW, releaseUp, ok := s.expertInputDeviceWeight(upName)
 	if !ok {
-		return none, "", none, "", nil, false
+		return none, nil, none, nil, nil, false
 	}
-	return gateW, gateKey, upW, upKey, x, true
+	transferred = true
+	return gateW, releaseGate, upW, releaseUp, x, true
 }
 
 // expertInputDeviceWeight resolves and stages one expert gate/up projection for the
 // incremental device seam, admitting resident Q4_K, resident k-quants, and
 // checkpoint-backed (R5/#5616) weights alike, and declining anything the ACTUAL backend's
-// MatMul cannot serve. It returns the staged device tensor together with the HAL ring key
-// it was staged under, so the caller can hold it across its GEMMs under a bounded ring.
+// MatMul cannot serve. It returns a held device tensor and its release callback. The
+// callback captures the original ring, so failed-session teardown cannot lose the
+// outstanding shared hold.
 //
 // Each resident tier is gated by the SAME session predicate matWeightHAL uses to select
 // it (useHALQ4KWeights / useHALKQuantWeights), so a session that does not stage that
@@ -56,35 +66,54 @@ func expertInputDeviceAdmitted(s *Session, gateName, upName string, xn any, hidd
 // moe_device_engine_test. A checkpoint-served weight needs no resident flag: the tier
 // itself is the authorization, which is what lets a non-Q4_K V4.1 Q2_K expert slate reach
 // the device seam.
-func (s *Session) expertInputDeviceWeight(name string) (compute.Tensor, string, bool) {
+func (s *Session) expertInputDeviceWeight(name string) (compute.Tensor, func(), bool) {
 	w, ok := s.resolveExpertWeight(name)
 	if !ok {
-		return compute.Tensor{}, "", false
+		return compute.Tensor{}, nil, false
 	}
+	var stage func() compute.Tensor
 	switch {
 	case w.q4 != nil:
 		if !s.useHALQ4KWeights() || !compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.Q4_K) {
-			return compute.Tensor{}, "", false
+			return compute.Tensor{}, nil, false
 		}
-		return s.weightHALQ4K(name, w.q4), w.halKey(), true
+		stage = func() compute.Tensor { return s.weightHALQ4K(name, w.q4) }
 	case w.kq != nil:
 		desc, ok := LookupQuantDescriptor(w.kq.kind)
 		if !ok || !desc.SupportsHAL() || !s.useHALKQuantWeights() {
-			return compute.Tensor{}, "", false
+			return compute.Tensor{}, nil, false
 		}
 		if !compute.BackendSupportsDeviceWeightDtype(s.Backend, desc.Dtype()) {
-			return compute.Tensor{}, "", false
+			return compute.Tensor{}, nil, false
 		}
-		return s.weightHALKQuant(name, w.kq), w.halKey(), true
+		stage = func() compute.Tensor { return s.weightHALKQuant(name, w.kq) }
 	default:
 		// A checkpoint-served projection is staged through the SAME bounded path as a
 		// resident one — same key, same dtype, same byte accounting (R5/#5616) — so the
 		// ring cannot tell the two apart and a hit costs no checkpoint read.
 		if !compute.BackendSupportsDeviceWeightDtype(s.Backend, w.ck.dt) {
-			return compute.Tensor{}, "", false
+			return compute.Tensor{}, nil, false
 		}
-		return s.weightHALStagedBounded(w.ck.key, name, w.ck.mk, w.ck.dt, w.ck.bytes), w.halKey(), true
+		stage = func() compute.Tensor {
+			return s.weightHALStagedBounded(w.ck.key, name, w.ck.mk, w.ck.dt, w.ck.bytes)
+		}
 	}
+	// Admission above remains side-effect free. Once selected, use the same atomic
+	// stage-and-hold discipline as expertSwiGLUHAL, including reentrant shared spans.
+	r := s.routedExpertRing(name)
+	if r == nil {
+		return stage(), func() {}, true
+	}
+	done := s.ringEnter(r)
+	defer done()
+	weight := stage()
+	key := w.halKey()
+	r.hold(key)
+	return weight, func() {
+		done := s.ringEnter(r)
+		defer done()
+		r.release(key)
+	}, true
 }
 
 // q4kExpertDownDeviceWeight resolves and stages one expert down projection for the device
@@ -168,32 +197,12 @@ func q4kExpertInputHALWithLimit(s *Session, gateName, upName string, xn any, int
 // outputs are read back, owned and BF16-published before host SwiGLU. The
 // generic wrapper retains its original device activation behavior.
 func q4kExpertInputHALWithLimitAndBF16(s *Session, gateName, upName string, xn any, intermediate, hidden int, limit float32, bf16 bool, layer int) ([]float32, bool) {
-	gateW, gateKey, upW, upKey, x, ok := expertInputDeviceAdmitted(s, gateName, upName, xn, hidden)
+	gateW, releaseGate, upW, releaseUp, x, ok := expertInputDeviceAdmitted(s, gateName, upName, xn, hidden)
 	if !ok {
 		return nil, false
 	}
-	// Under a bounded routed-expert ring, staging `up` could evict `gate` and Free a handle
-	// the GEMMs below still need. Hold each weight for the rest of this computation and
-	// release it on return; without a ring every hold is a no-op and this is byte-for-byte
-	// the previous path. Staging and holding are ONE span (R7/#5618) so a peer agent's stage
-	// landing between them cannot evict the handle just returned.
-	for _, h := range []struct {
-		name string
-		key  string
-	}{{gateName, gateKey}, {upName, upKey}} {
-		r := s.routedExpertRing(h.name)
-		if r == nil {
-			continue
-		}
-		done := s.ringEnter(r)
-		r.hold(h.key)
-		done()
-		defer func(r *pagedRing, key string) {
-			done := s.ringEnter(r)
-			r.release(key)
-			done()
-		}(r, h.key)
-	}
+	defer releaseGate()
+	defer releaseUp()
 	xd := s.uploadHostF32([]int{hidden}, x, compute.MemoryActivation, "moe expert gate/up activation")
 	defer s.Backend.Free(xd)
 	g := s.Backend.MatMul(gateW, xd)
@@ -329,34 +338,15 @@ func q4kExpertGateUpDownHAL(s *Session, gateName, upName, downName string, xn an
 		s.M.has(downName[:len(downName)-len("weight")]+"bias") {
 		return nil, false
 	}
-	gateW, gateKey, upW, upKey, x, ok := expertInputDeviceAdmitted(s, gateName, upName, xn, hidden)
+	gateW, releaseGate, upW, releaseUp, x, ok := expertInputDeviceAdmitted(s, gateName, upName, xn, hidden)
 	if !ok {
 		return nil, false
 	}
+	defer releaseGate()
+	defer releaseUp()
 	downW, ok := s.q4kExpertDownDeviceWeight(downName)
 	if !ok {
 		return nil, false
-	}
-	// Hold the gate/up (and resolved down) weights for the rest of this expert's computation
-	// under a bounded routed-expert ring, so staging the later projections cannot evict an
-	// earlier handle the GEMMs still need. Without a ring every hold is a no-op.
-	holds := []struct {
-		name string
-		key  string
-	}{{gateName, gateKey}, {upName, upKey}}
-	for _, h := range holds {
-		r := s.routedExpertRing(h.name)
-		if r == nil {
-			continue
-		}
-		done := s.ringEnter(r)
-		r.hold(h.key)
-		done()
-		defer func(r *pagedRing, key string) {
-			done := s.ringEnter(r)
-			r.release(key)
-			done()
-		}(r, h.key)
 	}
 	xd := s.uploadHostF32([]int{hidden}, x, compute.MemoryActivation, "moe expert gate/up activation")
 	defer s.Backend.Free(xd)
