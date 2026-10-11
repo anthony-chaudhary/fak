@@ -103,8 +103,12 @@ func TestV41IndexerAdmissionFaultBeforeCapability(t *testing.T) {
 		strings.Count(checked, "return ") != 1 || !strings.HasSuffix(checked, "return r == VK_SUCCESS;") {
 		t.Fatal("checked completion no longer records sticky status after every pending transition")
 	}
+	// Production capability is exactly the dispatch prerequisites: no env or
+	// module-byte switch, and the same sticky-fault/float-control/pipeline gate
+	// the checked dispatch repeats (Ref #13668).
 	production := section(shim, "int fvk_have_v41_indexer_score(void) {", "\n}\n")
-	if strings.Count(production, "return ") != 1 || !strings.HasSuffix(production, "return 0;") {
-		t.Fatal("production capability changed; this admission does not qualify dispatch")
+	if strings.Count(production, "return ") != 1 || !strings.HasSuffix(production, "return v41IndexerScorePrerequisites() ? 1 : 0;") ||
+		strings.Contains(production, "getenv") {
+		t.Fatal("production capability is no longer exactly the dispatch prerequisites")
 	}
 }

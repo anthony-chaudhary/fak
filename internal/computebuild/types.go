@@ -94,6 +94,8 @@ const (
 	VulkanBuildReceiptSchemaV6 = "fak.vulkan-build-receipt.v6"
 	// VulkanBuildReceiptSchemaV7 binds exact66 (V6/63 plus the V4.1 router top-k, index-select and Q2_K embedding-gather modules).
 	VulkanBuildReceiptSchemaV7 = "fak.vulkan-build-receipt.v7"
+	// VulkanBuildReceiptSchemaV8 binds exact67 (V7/66 plus the V4.1 bit-exact RMSNorm module).
+	VulkanBuildReceiptSchemaV8 = "fak.vulkan-build-receipt.v8"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"

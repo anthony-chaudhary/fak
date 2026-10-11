@@ -290,7 +290,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -303,7 +303,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
         return g_dp.otherMatmul;
     case K_RMSNORM: case K_RMSNORM_MATMUL: case K_RMSNORM_MATMUL2: case K_RMSNORM_MATMUL3:
     case K_RMSNORM_MATMUL_ARGMAX_BLOCKS: case K_RMSNORM_Q8_MATMUL2: case K_RMSNORM_Q8_MATMUL3: case K_RMSNORM_Q8_MATMUL2_COOP:
-    case K_RMSNORM_Q4K_MATMUL2:
+    case K_RMSNORM_Q4K_MATMUL2: case K_V41_EXACT_RMSNORM:
         return g_dp.otherNorm;
     case K_ROPE: case K_QWEN35_PARTIAL_ROPE_PANEL: case K_V41_TAIL_ROPE_QK:
         return g_dp.otherRope;
@@ -378,6 +378,8 @@ int g_have_v41_indexer_score = 0;
 int g_have_v41_mhc = 0;
 int g_have_v41_index_select = 0;
 int g_have_v41_q2k_embed_gather = 0;
+// Optional: needs the same binary32 float controls as the indexer score.
+int g_have_v41_exact_rmsnorm = 0;
 bool g_v41IndexerFloatControls = false;
 std::string g_v41IndexerScoreReason = "Vulkan has not initialized";
 // Fixed-size GLM KDA kernels require an explicitly requested 32-lane subgroup.
@@ -1343,7 +1345,7 @@ const char* const kKernelNames[] = {
     "q6k_matmul", "q5k_matmul", "q3k_matmul", "rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add", "q2k_matmul",
     "rmsnorm_q2k_matmul2", "qwen35_split_qg_panel", "qwen35_partial_rope_panel",
     "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
-    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather",
+    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -2171,7 +2173,7 @@ void recycleDescriptorSet(DescriptorSetRecord rec) {
 // dispatch: bind `bufs` (nbuf of them) + push constants, run groupsX*groupsY workgroups.
 bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1) {
     if (g_v41SubmissionPendingFailure) return false;
-    const bool checkedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER];
+    const bool checkedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER] || &k == &g_kern[K_V41_EXACT_RMSNORM];
     if (k.nbuf > MAX_DISPATCH_BUFS) {
         fprintf(stderr, "fak-vulkan: dispatch skipped; kernel has %d buffers, max %d\n",
                 k.nbuf, MAX_DISPATCH_BUFS);
@@ -2579,6 +2581,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_v41_mhc = 0;
     g_have_v41_index_select = 0;
     g_have_v41_q2k_embed_gather = 0;
+    g_have_v41_exact_rmsnorm = 0;
     bool v41IndexerPipelineBuilt = false;
     bool v41MHCPipelineBuilt = false;
     g_v41IndexerFloatControls = false;
@@ -2901,6 +2904,11 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // V4.1 Q2_K embedding row gather, trusted since registry V7/complete66 and
     // optional at init like the router and index-select modules.
     const bool v41Q2KEmbedGatherBuilt = buildKernel(g_kern[K_V41_Q2K_EMBED_GATHER], P("v41_q2k_embed_gather.spv"), 3, 12);
+    // V4.1 bit-exact RMSNorm for the compressor and index-key norms, trusted
+    // since registry V8/complete67. Optional at init, and only built when the
+    // binary32 float controls its execution modes declare are supported.
+    const bool v41ExactRMSNormBuilt = g_v41IndexerFloatControls &&
+        buildKernel(g_kern[K_V41_EXACT_RMSNORM], P("v41_exact_rmsnorm.spv"), 3, 16);
 
     ok &= buildKernel(g_kern[K_SWIGLU],    P("swiglu.spv"),    3, sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_SWIGLU_MATMUL_ADD], P("swiglu_matmul_add.spv"), 4, 3 * sizeof(int));
@@ -3012,6 +3020,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_v41_mhc = v41MHCPipelineBuilt ? 1 : 0;
     g_have_v41_index_select = v41IndexSelectBuilt ? 1 : 0;
     g_have_v41_q2k_embed_gather = v41Q2KEmbedGatherBuilt ? 1 : 0;
+    g_have_v41_exact_rmsnorm = v41ExactRMSNormBuilt ? 1 : 0;
     // One per-geometry device self-check, before the first forward and never
     // inside one. Its verdict is cached and read by the verify-width route.
     gdnVerifySelfCheck();
@@ -4135,12 +4144,12 @@ static bool v41IndexerScorePrerequisites() {
 }
 
 int fvk_have_v41_indexer_score(void) {
-    // Source-only candidate: no trusted compiler/source/numerical qualification
-    // admission is integrated yet. Neither environment nor module bytes can
-    // enable production dispatch. The 2026-10-09 gfx1151 parity run used the
-    // separate witness archive, not this production profile, so it does not
-    // open this gate. Device-only V4.1 names this op as unbound and refuses.
-    return 0;
+    // Production capability: the module is in the trusted registry since
+    // V5/complete62, whose receipt checks its float-control execution modes,
+    // and dispatch still needs the binary32 float-control properties and a
+    // built pipeline. The production-archive witness is the model selection
+    // parity TestV41IndexerSelectionVulkanParity (Ref #13668).
+    return v41IndexerScorePrerequisites() ? 1 : 0;
 }
 
 const char* fvk_v41_indexer_score_unavailable_reason(void) {
@@ -4149,7 +4158,7 @@ const char* fvk_v41_indexer_score_unavailable_reason(void) {
     if (!v41IndexerScorePrerequisites()) {
         return g_v41IndexerScoreReason.empty() ? "indexer pipeline unavailable" : g_v41IndexerScoreReason.c_str();
     }
-    return "trusted source/compiler and numerical qualification admission not integrated";
+    return "";
 }
 
 static int v41IndexerScoreChecked(const void* dQ, const void* dKeys,
@@ -4292,6 +4301,45 @@ int fvk_v41_index_select_f32(const void* dScores, void* dScratch, void* dOut, vo
     struct Push { int32_t rows, topK, topKBlocks, blockSize; } pc{rows, topK, topKBlocks, blockSize};
     static_assert(sizeof(Push) == 16, "V4.1 index select push ABI must be four int32 values");
     if (!dispatch(g_kern[K_V41_INDEX_SELECT], bufs, &pc, sizeof(pc), 1u)) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
+int fvk_have_v41_exact_rmsnorm(void) {
+    return g_ready && g_v41IndexerFloatControls && g_have_v41_exact_rmsnorm &&
+        g_kern[K_V41_EXACT_RMSNORM].pipe != VK_NULL_HANDLE;
+}
+
+int fvk_v41_exact_rmsnorm_f32(const void* dX, const void* dW, void* dY,
+                              int rows, int width, float eps) {
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_exact_rmsnorm()) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    // Power-of-two width keeps ss*invWidth the correctly rounded ss/width; a
+    // normal eps keeps mean+eps normal. Both are the Go domain check repeated.
+    if (rows <= 0 || width <= 0 || width > (1 << 16) || (width & (width - 1)) != 0 ||
+        !std::isfinite(eps) || !(eps >= std::numeric_limits<float>::min())) return 2;
+    const uint64_t total = uint64_t(rows) * uint64_t(width);
+    if (total > INT32_MAX || uint64_t(rows) > g_maxComputeWorkGroupCountX) return 2;
+    Buffer* bufs[3] = {B(dX), B(dW), B(dY)};
+    const uint64_t counts[3] = {total, uint64_t(width), total};
+    for (int i = 0; i < 3; ++i) {
+        if (!bufs[i] || bufs[i]->buf == VK_NULL_HANDLE || bufs[i]->mem == VK_NULL_HANDLE ||
+            counts[i] * sizeof(float) > bufs[i]->bytes ||
+            bufs[i]->bytes > std::numeric_limits<VkDeviceSize>::max() - bufs[i]->memoryOffset) return 2;
+    }
+    auto aliases = [](const Buffer* a, const Buffer* b) {
+        return a == b || a->buf == b->buf ||
+            (a->mem == b->mem && a->memoryOffset < b->memoryOffset + b->bytes &&
+             b->memoryOffset < a->memoryOffset + a->bytes);
+    };
+    if (aliases(bufs[2], bufs[0]) || aliases(bufs[2], bufs[1])) return 2;
+    struct Push { int32_t rows, width; float eps, invWidth; } pc{rows, width, eps, 1.0f / float(width)};
+    static_assert(sizeof(Push) == 16 && offsetof(Push, eps) == 8 && offsetof(Push, invWidth) == 12,
+                  "V4.1 exact RMSNorm push ABI must be two int32 values then two float32 values");
+    if (!dispatch(g_kern[K_V41_EXACT_RMSNORM], bufs, &pc, sizeof(pc), uint32_t(rows))) {
         return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
     }
     return (int)g_submissionStatus;

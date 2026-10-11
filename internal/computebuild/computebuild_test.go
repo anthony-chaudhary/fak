@@ -40,7 +40,7 @@ func TestVulkanShadersCompleteness(t *testing.T) {
 		"flash_attn_dequant", "qwen35_gdn_tiled_transpose", "coopmat_wave32_wmma",
 		"rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add",
 		"qwen35_gdn_prefill_tiled", "qwen35_gdn_prefill_norm", "qwen35_gdn_verify_tiled",
-		"q2k_matvec", "rmsnorm_q8_matmul2_coop", "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather",
+		"q2k_matvec", "rmsnorm_q8_matmul2_coop", "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm",
 	}
 	if len(VulkanShaders) != len(expectedShaders) {
 		t.Fatalf("expected %d Vulkan shaders, got %d", len(expectedShaders), len(VulkanShaders))
@@ -863,7 +863,7 @@ func TestVulkanBinaryDirtySourceRefusesBeforeBuildTool(t *testing.T) {
 		t.Fatal("build tool executed before dirty-source refusal")
 	}
 	receipt := readBuildReceipt(t, receiptPath)
-	if receipt.Schema != VulkanBuildReceiptSchemaV7 || receipt.Outcome != "failed" {
+	if receipt.Schema != vulkanCurrentRegistry.schema || receipt.Outcome != "failed" {
 		t.Fatalf("receipt = %+v", receipt)
 	}
 	if len(receipt.Phases) != 1 || receipt.Phases[0].Name != "source_preflight" {
@@ -981,7 +981,7 @@ func TestVulkanBinaryReceiptBindsReproducibleSourceToolsShadersAndBinary(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if firstReceipt.Schema != VulkanBuildReceiptSchemaV7 || firstReceipt.Artifact == nil || len(firstReceipt.Artifact.SHA256) != sha256Hex || firstReceipt.Vulkan == nil || firstReceipt.VulkanRegistry == nil || firstReceipt.VulkanRegistry.ID != VulkanShaderRegistryV7ID || firstReceipt.VulkanRegistry.ModuleCount != vulkanRegistryV7.count {
+	if firstReceipt.Schema != vulkanCurrentRegistry.schema || firstReceipt.Artifact == nil || len(firstReceipt.Artifact.SHA256) != sha256Hex || firstReceipt.Vulkan == nil || firstReceipt.VulkanRegistry == nil || firstReceipt.VulkanRegistry.ID != vulkanCurrentRegistry.id || firstReceipt.VulkanRegistry.ModuleCount != vulkanCurrentRegistry.count {
 		t.Fatalf("incomplete first receipt: %+v", firstReceipt)
 	}
 	if firstReceipt.Vulkan.Source != firstSource || firstReceipt.Vulkan.SPIRVModuleCount != len(VulkanShaders) || len(firstReceipt.Vulkan.SPIRVBundleSHA256) != sha256Hex || len(firstReceipt.Vulkan.Toolchain) != len(wantTools) || len(firstReceipt.Vulkan.ToolchainSHA256) != sha256Hex || len(firstReceipt.Vulkan.BuildCommandSHA256) != sha256Hex || len(firstReceipt.Vulkan.StableIdentitySHA256) != sha256Hex {

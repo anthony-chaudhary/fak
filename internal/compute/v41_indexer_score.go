@@ -28,8 +28,9 @@ import (
 // Capability absence permits the caller to choose its unchanged host reference.
 // Capability admission additionally requires trusted source/compiler provenance
 // and a numerical witness bound to the exact module/archive/device identities.
-// This source-only candidate keeps production capability false until that
-// separately reviewed qualification admission is integrated.
+// On Vulkan the module is in the trusted registry since V5, and the production
+// capability is its dispatch prerequisites; the production-archive witness is
+// the model selection parity TestV41IndexerSelectionVulkanParity (Ref #13668).
 type V41IndexerScoreBackend interface {
 	Backend
 	// V41IndexerScoreAdmission atomically distinguishes healthy capability

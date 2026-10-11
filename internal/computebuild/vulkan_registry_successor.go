@@ -20,6 +20,9 @@ const (
 	// VulkanShaderRegistryV7ID identifies the exact 66-module bundle that adds the
 	// V4.1 MoE router top-k, index-select and Q2_K embedding-gather modules to V6/63.
 	VulkanShaderRegistryV7ID = "fak.vulkan-shader-registry.v7.current66"
+	// VulkanShaderRegistryV8ID identifies the exact 67-module bundle that adds the
+	// V4.1 bit-exact RMSNorm module (compressor and index-key norms) to V7/66.
+	VulkanShaderRegistryV8ID = "fak.vulkan-shader-registry.v8.current67"
 )
 
 type vulkanSuccessorRegistry struct {
@@ -35,11 +38,12 @@ var (
 	vulkanRegistryV5 = &vulkanSuccessorRegistry{version: "V5", schema: VulkanBuildReceiptSchemaV5, id: VulkanShaderRegistryV5ID, count: 62, added: []string{"v41_indexer_score"}}
 	vulkanRegistryV6 = &vulkanSuccessorRegistry{version: "V6", schema: VulkanBuildReceiptSchemaV6, id: VulkanShaderRegistryV6ID, count: 63, parent: vulkanRegistryV5, added: []string{"v41_mhc"}}
 	vulkanRegistryV7 = &vulkanSuccessorRegistry{version: "V7", schema: VulkanBuildReceiptSchemaV7, id: VulkanShaderRegistryV7ID, count: 66, parent: vulkanRegistryV6, added: []string{"v41_router_topk", "v41_index_select", "v41_q2k_embed_gather"}}
+	vulkanRegistryV8 = &vulkanSuccessorRegistry{version: "V8", schema: VulkanBuildReceiptSchemaV8, id: VulkanShaderRegistryV8ID, count: 67, parent: vulkanRegistryV7, added: []string{"v41_exact_rmsnorm"}}
 
 	// vulkanSuccessorRegistries is every successor schema a receipt may name.
-	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7}
+	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8}
 	// vulkanCurrentRegistry is the registry the builder compiles and stamps.
-	vulkanCurrentRegistry = vulkanRegistryV7
+	vulkanCurrentRegistry = vulkanRegistryV8
 )
 
 func vulkanSuccessorForSchema(schema string) *vulkanSuccessorRegistry {
@@ -106,6 +110,9 @@ func CurrentVulkanShaderRegistryV6() []string { return vulkanRegistryV6.stems() 
 
 // CurrentVulkanShaderRegistryV7 returns an owned copy of the trusted V7 set.
 func CurrentVulkanShaderRegistryV7() []string { return vulkanRegistryV7.stems() }
+
+// CurrentVulkanShaderRegistryV8 returns an owned copy of the trusted V8 set.
+func CurrentVulkanShaderRegistryV8() []string { return vulkanRegistryV8.stems() }
 
 // CurrentVulkanShaderRegistryLatest returns an owned copy of the set the
 // builder compiles and stamps today.

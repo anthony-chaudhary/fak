@@ -20,10 +20,112 @@ type v41IndexKeyNormFunc func(layer int, input, gain []float32, eps float32) ([]
 // choices. A finite corpus cannot establish that full-domain promise. A narrower
 // artifact/gain qualification needs a separate admission identity.
 //
-// Ordinary Vulkan intentionally does not implement this capability. Backend
-// name/Class/Caps, compressor qualification and CPU recorders do not qualify it.
+// Ordinary Vulkan intentionally does not implement this capability: its generic
+// RMSNorm reduction is not bit-exact. Backend name/Class/Caps, compressor
+// qualification and CPU recorders do not qualify it. Vulkan binds this seam
+// only through compute.V41ExactRMSNormBackend (Ref #13668).
 type v41IndexKeyNormBackend interface {
 	SupportsV41IndexKeyNorm(width int, eps float32) bool
+}
+
+// v41ExactRMSNormFunc binds the backend's dedicated bit-exact RMSNorm, the only
+// device route that keeps the full-domain exact-publication promise both the
+// compressor and index-key seams make. It returns nil unless the backend
+// qualifies this width and eps. Each row uploads and reads back once; only the
+// immutable learned gain is cached.
+func (s *Session) v41ExactRMSNormFunc(width int, eps float32) v41RMSNormFunc {
+	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
+		s.M.Cfg.LayerNorm || s.M.Cfg.NormGain1p || !compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.F32) ||
+		math.Float32bits(float32(s.M.Cfg.RMSNormEps)) != math.Float32bits(eps) {
+		return nil
+	}
+	operation, ok := s.Backend.(compute.V41ExactRMSNormBackend)
+	if !ok || !operation.SupportsV41ExactRMSNorm(width, eps) {
+		return nil
+	}
+	return func(name string, input []float32, w int, path string, layer int) (result []float32, cause error) {
+		s.ensureOpenBackendSession()
+		stage := "payload"
+		closeFailure := func(err error) error {
+			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: path, Layer: layer, Stage: stage, Cause: err}
+			s.halFailure = closed
+			s.Close()
+			return closed
+		}
+		defer func() {
+			if r := recover(); r != nil {
+				if err, ok := r.(error); ok {
+					var closed *BackendForwardOperationError
+					if errors.As(err, &closed) {
+						panic(r)
+					}
+					var backend *compute.BackendError
+					if errors.As(err, &backend) {
+						result, cause = nil, closeFailure(err)
+						return
+					}
+				}
+				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+					if original, ok := r.(error); ok {
+						err = original
+					}
+					result, cause = nil, closeFailure(err)
+					return
+				}
+				err, ok := r.(error)
+				if !ok {
+					err = fmt.Errorf("unclassified backend panic: %v", r)
+				}
+				closeFailure(err)
+				panic(r)
+			}
+		}()
+		meta, present := s.M.manifest[name]
+		if w != width || len(input) != width || !present || len(meta.Shape) != 1 || meta.Shape[0] != width {
+			return nil, closeFailure(errV41ProjectionResult)
+		}
+		gain := s.M.tensor(name)
+		if len(gain) != width {
+			return nil, closeFailure(errV41ProjectionResult)
+		}
+		for i, v := range input {
+			if !finite32(v) || !finite32(gain[i]) {
+				return nil, closeFailure(errV41ProjectionResult)
+			}
+		}
+		run := func() ([]float32, error) {
+			stage = "weight upload"
+			weight := s.weightHAL(name)
+			stage = "activation upload"
+			x := s.uploadHostF32([]int{width}, input, compute.MemoryActivation, "V4.1 RMSNorm activation "+name)
+			defer s.Backend.Free(x)
+			stage = "rmsnorm"
+			y, err := operation.V41ExactRMSNorm(x, weight, eps)
+			if err != nil {
+				return nil, err
+			}
+			defer s.Backend.Free(y)
+			if y.Buf() == nil || y.Buf() == x.Buf() || y.Dtype != compute.F32 || len(y.Shape) != 1 || y.Shape[0] != width {
+				return nil, errV41ProjectionResult
+			}
+			stage = "readback"
+			values := s.Backend.Read(y)
+			if len(values) != width {
+				return nil, errV41ProjectionResult
+			}
+			for _, v := range values {
+				if !finite32(v) {
+					return nil, errV41ProjectionResult
+				}
+			}
+			return append([]float32(nil), values...), nil
+		}
+		result, cause = run()
+		if cause != nil {
+			return nil, closeFailure(cause)
+		}
+		return result, nil
+	}
 }
 
 func v41IndexKeyNormOperationErr(layer int, cause error) error {
@@ -37,15 +139,20 @@ func v41IndexKeyNormOperationErr(layer int, cause error) error {
 }
 
 func (s *Session) v41IndexKeyNormFunc() v41IndexKeyNormFunc {
-	normalize := s.v41RMSNormFunc()
-	if normalize == nil {
+	if s == nil || s.M == nil {
 		return nil
 	}
 	width := s.M.Cfg.IndexHeadDim
 	eps := float32(s.M.Cfg.RMSNormEps)
-	qualified, ok := s.Backend.(v41IndexKeyNormBackend)
-	if width <= 0 || !ok || !qualified.SupportsV41IndexKeyNorm(width, eps) {
-		return nil
+	normalize := s.v41ExactRMSNormFunc(width, eps)
+	if normalize == nil {
+		qualified, ok := s.Backend.(v41IndexKeyNormBackend)
+		if width <= 0 || !ok || !qualified.SupportsV41IndexKeyNorm(width, eps) {
+			return nil
+		}
+		if normalize = s.v41RMSNormFunc(); normalize == nil {
+			return nil
+		}
 	}
 	return func(layer int, input, gain []float32, suppliedEps float32) (result []float32, cause error) {
 		s.ensureOpenBackendSession()

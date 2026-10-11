@@ -176,8 +176,8 @@ func (s *Session) v41IndexerScoreHealthFunc() v41IndexerScoreHealthFunc {
 	}
 }
 
-// Native production capability remains false until separately qualified. Name,
-// Class, generic device memory and F32 support alone cannot select this seam.
+// Only the backend's native production capability selects this seam. Name,
+// Class, generic device memory and F32 support alone cannot select it.
 // Scores are returned as an owned host copy; this is not device-resident top-k
 // or whole-model GPU execution. Snapshots never persist the callback.
 func (s *Session) v41IndexerScoreFunc() v41IndexerScoreFunc {

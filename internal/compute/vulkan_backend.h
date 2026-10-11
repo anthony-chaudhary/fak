@@ -333,9 +333,10 @@ int fvk_v41_indexer_score_f32(const void *dQ, const void *dKeys,
                               const void *dWeights, void *dScores,
                               int rows, int heads, int headDim);
 
-/* Qualification is not integrated: production have remains false. A separately
- * built test archive may expose only these physical-witness symbols; no runtime
- * environment flag enables them or changes the production capability result. */
+/* Production have is the dispatch prerequisites (registry V5+ module, binary32
+ * float controls, built pipeline). A separately built test archive may also
+ * expose these physical-witness symbols; no runtime environment flag enables
+ * them or changes the production capability result. */
 #ifdef FAK_V41_INDEXER_SCORE_WITNESS
 int fvk_v41_indexer_score_witness_ready(void);
 int fvk_v41_indexer_score_witness_f32(const void *dQ, const void *dKeys,
@@ -382,6 +383,16 @@ int fvk_v41_index_select_f32(const void *dScores, void *dScratch, void *dOut, vo
 int fvk_have_v41_q2k_embed_gather(void);
 int fvk_v41_q2k_embed_gather_f32(const void *dTable, const void *dIds, void *dOut,
                                  int rows, int hidden, int vocab);
+
+/* V4.1 bit-exact RMSNorm (compressor and index-key norms). Three storage
+ * bindings: x[rows,width] F32, weight[width] F32, y[rows,width] F32 (disjoint
+ * from both inputs). Each row equals the host serial RMSNorm bit for bit for a
+ * power-of-two width <= 65536 and a positive normal eps. Push ABI is int32 rows,
+ * width, float32 eps, invWidth. Returns the tail RoPE status codes. Optional
+ * module (registry V8): absence or missing binary32 float controls leave have=0. */
+int fvk_have_v41_exact_rmsnorm(void);
+int fvk_v41_exact_rmsnorm_f32(const void *dX, const void *dW, void *dY,
+                              int rows, int width, float eps);
 
 /* SwiGLU: y = silu(g) * u, elementwise, length n. */
 void fvk_swiglu_f32(const void *dG, const void *dU, void *dY, int n);
