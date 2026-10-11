@@ -1230,6 +1230,7 @@ func runSmoke(f *benchFlags, m *model.Model, modelName string, loadMS float64, v
 		"precision":                precision,
 		"backend":                  backendReport,
 		"model":                    modelName,
+		"model_config":             modelConfigReport(m.Cfg),
 		"source":                   loadSource(*f.hf, *f.gguf, *f.dir, *f.lean, *f.q4k, streamQ4KEnabled(f)),
 		"stream_q4k":               streamQ4KEnabled(f),
 		"load_worker_control":      currentLoadWorkerControl(),

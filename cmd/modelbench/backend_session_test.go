@@ -320,12 +320,19 @@ func TestModelbenchSelectedBackendExecutesSmoke(t *testing.T) {
 		Backend struct{ Selected string } `json:"backend"`
 		Status  string                    `json:"smoke_status"`
 		Steps   int                       `json:"smoke_decode_steps"`
+		Config  struct {
+			NumLayers int `json:"num_hidden_layers"`
+			HeadDim   int `json:"head_dim"`
+		} `json:"model_config"`
 	}
 	if err := json.Unmarshal(raw, &report); err != nil {
 		t.Fatal(err)
 	}
 	if report.Backend.Selected != "cpu-ref" || report.Status != smokeStatusOK || report.Steps != 16 {
 		t.Fatalf("smoke execution identity: %+v", report)
+	}
+	if report.Config.NumLayers != m.Cfg.NumLayers || report.Config.HeadDim != m.Cfg.HeadDim {
+		t.Fatalf("smoke model geometry = layers %d head_dim %d, want source config layers %d head_dim %d", report.Config.NumLayers, report.Config.HeadDim, m.Cfg.NumLayers, m.Cfg.HeadDim)
 	}
 	// An independent prefill through the real HAL proves smoke included a decode
 	// step as well, instead of claiming decode success from prefill alone.
