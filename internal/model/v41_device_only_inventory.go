@@ -33,6 +33,11 @@ func (e *v41DeviceOnlyHostOpError) Is(target error) bool { return target == errV
 // Remove an entry only in the change that moves that op onto the device seam;
 // an empty inventory is the V4.1 admission condition.
 var v41DeviceOnlyHostOps = []v41HostOp{
+	{name: "engram-stream-injection", site: "Model.v41EngramInjectPrepared"},
+	{name: "mhc-projection-rms-scale", site: "Session.v41MHCProjectionFuncNamed"},
+	{name: "attention-input-norm", site: "Model.v41AttentionInputNormWithLeaf"},
+	{name: "compressor-gated-pool", site: "V41CompressorPool.PushNormalized"},
+	{name: "live-expert-shared-add", site: "Session.v4ExpertForward"},
 	{name: "residual-stream-carry", site: "Model.v41Layer"},
 }
 
