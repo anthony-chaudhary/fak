@@ -169,7 +169,11 @@ type v41ForwardState struct {
 	tailRoPE         v41TailRoPEFunc
 	sharedAttention  v41SharedAttentionFunc
 	gatherOps        *v41DeviceGatherOps
-	callbackOwner    *Session
+	// mhcDevice is the session's mHC stream seam (initial streams, split,
+	// pre-collapse, post-mix). nil keeps the host reference; a non-nil seam
+	// dispatches every full-geometry mHC op on the backend or refuses.
+	mhcDevice     *v41MHCDevice
+	callbackOwner *Session
 }
 
 // v41ExpertGateUpOutcome is the closed result vocabulary of one v41ExpertGateUpFunc
@@ -300,7 +304,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, denseProjection: st.denseProjection, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, queryNorm: st.queryNorm, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -331,6 +335,15 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	if err != nil {
 		return nil, err
 	}
+	var mhcDevice *v41MHCDevice
+	if runState != nil {
+		mhcDevice = runState.mhcDevice
+	}
+	if !full {
+		if err := mhcDevice.refuseReduced(); err != nil {
+			return nil, err
+		}
+	}
 
 	// ---- embedding ----
 	embedded, err := m.v41EmbeddingPanelOn(seq, runState.deviceGatherOps())
@@ -347,7 +360,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	streams := make([][][]float32, len(seq))
 	for t := range streams {
 		if full {
-			streams[t], err = v41FullInitialStreams(x[t])
+			streams[t], err = v41FullInitialStreamsOn(mhcDevice, x[t])
 			if err != nil {
 				return nil, err
 			}
@@ -380,6 +393,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	scratch := &v41ProjScratch{}
 	if full {
 		scratch.mhcCarry = newV41MHCCarry(len(seq))
+		scratch.mhcCarry.device = mhcDevice
 	}
 	// #13325: resolve the optional activation-checkpoint producer ONCE per
 	// forward. Disabled (the default) it is nil and every emit is skipped, so the
@@ -393,7 +407,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		if full {
 			hidden = make([]float32, 0, len(seq)*H)
 			for t := range streams {
-				row, err := v41MHCPreBF16(l, streams[t], scratch.mhcCarry.pre[t])
+				row, err := v41MHCPreBF16On(scratch.mhcCarry.device, l, streams[t], scratch.mhcCarry.pre[t])
 				if err != nil {
 					return nil, err
 				}
@@ -467,6 +481,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if scratch == nil {
 		scratch = &v41ProjScratch{}
 	}
+	var mhcDevice *v41MHCDevice
 	if full {
 		if err := scratch.mhcCarry.validate(l, len(x)); err != nil {
 			return err
@@ -474,6 +489,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err := m.v41AdmitMHC(l); err != nil {
 			return err
 		}
+		mhcDevice = scratch.mhcCarry.device
 	}
 	scratch.denseProjection = nil
 	scratch.groupedOutput = nil
@@ -610,9 +626,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return err
 		}
-		mix, err := v41MHCSplit(mixes, mixScale, mixBase, 4, hcIters, hcEps)
+		mix, err := v41MHCSplitOn(mhcDevice, l, mixes, mixScale, mixBase, 4, hcIters, hcEps)
 		if err != nil {
-			return v41StageErr(v41StageMHC, l, err)
+			return err
 		}
 		hcByPos[t] = mix
 		// The mHC pre-collapse always reads a four-stream set collapsed by the
@@ -629,9 +645,19 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if full {
 			pre = scratch.mhcCarry.pre[t]
 		}
-		collapsed, err := v41MHCPre(streams4, pre)
-		if err != nil {
-			return v41StageErr(v41StageMHC, l, err)
+		var collapsed []float32
+		if mhcDevice != nil {
+			// The device publishes hc_pre's BF16 copy; the input norm's own BF16
+			// widening of it is the identity.
+			collapsed, err = mhcDevice.preBF16(l, streams4, pre)
+			if err != nil {
+				return err
+			}
+		} else {
+			collapsed, err = v41MHCPre(streams4, pre)
+			if err != nil {
+				return v41StageErr(v41StageMHC, l, err)
+			}
 		}
 		if full {
 			collapsed, err = m.v41AttentionInputNorm(l, collapsed, eps)
@@ -1182,7 +1208,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		trace.record(l, t, v41TraceStageMoESum, moe)
 
 		if full {
-			nextPanel[t], err = v41MHCPostBF16(l, moe, ffnResidual[t], ffnMixes[t])
+			nextPanel[t], err = v41MHCPostBF16On(mhcDevice, l, moe, ffnResidual[t], ffnMixes[t])
 			if err != nil {
 				return err
 			}
@@ -1403,7 +1429,8 @@ func (s *Session) prefillV41Suffix(ids []int) []float32 {
 			var selectedRoPE *V41TailRoPEOperationError
 			var selectedAttention *V41SharedAttentionOperationError
 			var selectedScore *V41IndexerScoreOperationError
-			if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || !errors.Is(err, ErrV41ForwardStage) {
+			var selectedMHC *V41MHCOperationError
+			if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || !errors.Is(err, ErrV41ForwardStage) {
 				panic(err)
 			}
 			// Roll the suffix back to the pre-call boundary and re-fold the
@@ -1511,7 +1538,8 @@ func (s *Session) stepV41(id int) []float32 {
 		var selectedRoPE *V41TailRoPEOperationError
 		var selectedAttention *V41SharedAttentionOperationError
 		var selectedScore *V41IndexerScoreOperationError
-		if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || !errors.Is(err, ErrV41ForwardStage) {
+		var selectedMHC *V41MHCOperationError
+		if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || !errors.Is(err, ErrV41ForwardStage) {
 			panic(err)
 		}
 		// A typed stage refusal the eligibility check could not foresee (e.g. the
@@ -1558,6 +1586,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.tailRoPE = s.v41TailRoPEFunc()
 		s.v41Forward.sharedAttention = s.v41SharedAttentionFunc()
 		s.v41Forward.gatherOps = s.v41DeviceGatherOpsFunc()
+		s.v41Forward.mhcDevice = s.v41MHCDeviceSeam()
 		s.v41Forward.callbackOwner = s
 	}
 	return s.v41Forward

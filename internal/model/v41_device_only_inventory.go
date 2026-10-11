@@ -34,15 +34,11 @@ func (e *v41DeviceOnlyHostOpError) Is(target error) bool { return target == errV
 // an empty inventory is the V4.1 admission condition.
 var v41DeviceOnlyHostOps = []v41HostOp{
 	{name: "embedding-panel", site: "Model.v41EmbeddingPanel"},
-	{name: "mhc-initial-streams", site: "v41FullInitialStreams"},
-	{name: "mhc-sinkhorn-split", site: "v41MHCSplit"},
-	{name: "mhc-pre-collapse", site: "v41MHCPre"},
 	{name: "attention-index-list", site: "Model.v41AttentionIndexList"},
 	{name: "attention-output-rotation", site: "v41AttentionOutputForProjection"},
 	{name: "moe-router-topk", site: "v41RouteForGeometry"},
 	{name: "routed-expert-weighted-sum", site: "v41FullRoutedSum"},
 	{name: "shared-expert-add", site: "v41SharedExpertAdd"},
-	{name: "mhc-post-mix", site: "v41MHCPostBF16"},
 	{name: "residual-stream-carry", site: "Model.v41Layer"},
 }
 

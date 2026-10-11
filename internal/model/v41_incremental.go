@@ -154,14 +154,20 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	if geometryErr != nil {
 		return nil, stats, geometryErr
 	}
+	if !full {
+		if err := st.mhcDevice.refuseReduced(); err != nil {
+			return nil, stats, err
+		}
+	}
 	streams := [][]float32{x, make([]float32, H), make([]float32, H), make([]float32, H)}
 	if full {
-		streams, err = v41FullInitialStreams(x)
+		streams, err = v41FullInitialStreamsOn(st.mhcDevice, x)
 		if err != nil {
 			return nil, stats, err
 		}
 		copy(x, streams[0])
 		scratch.mhcCarry = newV41MHCCarry(1)
+		scratch.mhcCarry.device = st.mhcDevice
 	}
 
 	// Fail closed BEFORE any mutation: every layer needs a seeded retained state.
@@ -337,7 +343,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	// fault (truncate/restore, no clone).
 	headInput := x
 	if full {
-		headInput, err = v41MHCPreBF16(cfg.NumLayers-1, streams, scratch.mhcCarry.pre[0])
+		headInput, err = v41MHCPreBF16On(scratch.mhcCarry.device, cfg.NumLayers-1, streams, scratch.mhcCarry.pre[0])
 		if err != nil {
 			rollback()
 			return nil, stats, err

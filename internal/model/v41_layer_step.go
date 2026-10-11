@@ -127,6 +127,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		return err
 	}
 
+	var mhcDevice *v41MHCDevice
 	if full {
 		if err := scratch.mhcCarry.validate(l, 1); err != nil {
 			return err
@@ -134,6 +135,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		if err := m.v41AdmitMHC(l); err != nil {
 			return err
 		}
+		mhcDevice = scratch.mhcCarry.device
 	}
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
 	mixBase := m.tensor(layerName(l, "mhc.base"))
@@ -179,9 +181,9 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if err != nil {
 		return err
 	}
-	mix, err := v41MHCSplit(mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg))
+	mix, err := v41MHCSplitOn(mhcDevice, l, mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg))
 	if err != nil {
-		return v41StageErr(v41StageMHC, l, err)
+		return err
 	}
 	// The pre-collapse reads the four DISTINCT persistent streams on the full
 	// path and the reduced stand-in (four identical copies of the normalized
@@ -194,9 +196,17 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	if full {
 		pre = scratch.mhcCarry.pre[0]
 	}
-	collapsed, err := v41MHCPre(streams4, pre)
-	if err != nil {
-		return v41StageErr(v41StageMHC, l, err)
+	var collapsed []float32
+	if mhcDevice != nil {
+		collapsed, err = mhcDevice.preBF16(l, streams4, pre)
+		if err != nil {
+			return err
+		}
+	} else {
+		collapsed, err = v41MHCPre(streams4, pre)
+		if err != nil {
+			return v41StageErr(v41StageMHC, l, err)
+		}
 	}
 	if full {
 		collapsed, err = m.v41AttentionInputNorm(l, collapsed, eps)
@@ -401,7 +411,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	}
 	var next [][]float32
 	if full {
-		next, err = v41MHCPostBF16(l, moe, ffnResidual, ffnMix)
+		next, err = v41MHCPostBF16On(mhcDevice, l, moe, ffnResidual, ffnMix)
 	} else {
 		delta := make([]float32, H)
 		for i := range delta {
@@ -516,6 +526,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 			fmt.Errorf("%w: layer %d role step requires the full V4.1 geometry", ErrV41ForwardStage, l))
 	}
 
+	var mhcDevice *v41MHCDevice
 	if full {
 		if err := scratch.mhcCarry.validate(l, 1); err != nil {
 			return err
@@ -523,6 +534,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		if err := m.v41AdmitMHC(l); err != nil {
 			return err
 		}
+		mhcDevice = scratch.mhcCarry.device
 	}
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
 	mixBase := m.tensor(layerName(l, "mhc.base"))
@@ -555,13 +567,21 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 	if err != nil {
 		return err
 	}
-	mix, err := v41MHCSplit(mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg))
+	mix, err := v41MHCSplitOn(mhcDevice, l, mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg))
 	if err != nil {
-		return v41StageErr(v41StageMHC, l, err)
+		return err
 	}
-	collapsed, err := v41MHCPre(streams, scratch.mhcCarry.pre[0])
-	if err != nil {
-		return v41StageErr(v41StageMHC, l, err)
+	var collapsed []float32
+	if mhcDevice != nil {
+		collapsed, err = mhcDevice.preBF16(l, streams, scratch.mhcCarry.pre[0])
+		if err != nil {
+			return err
+		}
+	} else {
+		collapsed, err = v41MHCPre(streams, scratch.mhcCarry.pre[0])
+		if err != nil {
+			return v41StageErr(v41StageMHC, l, err)
+		}
 	}
 	collapsed, err = m.v41AttentionInputNorm(l, collapsed, eps)
 	if err != nil {
@@ -797,7 +817,7 @@ func (m *Model) v41LayerStepRoleFinish(l, pos int, x []float32, streams [][]floa
 	if err != nil {
 		return v41StageErr(v41StageMoE, l, err)
 	}
-	next, err := v41MHCPostBF16(l, moe, ffnResidual, ffnMix)
+	next, err := v41MHCPostBF16On(scratch.mhcCarry.device, l, moe, ffnResidual, ffnMix)
 	if err != nil {
 		return v41StageErr(v41StageMHC, l, err)
 	}
