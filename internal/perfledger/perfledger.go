@@ -90,6 +90,8 @@ type Record struct {
 	Client    string `json:"client,omitempty"`
 	Synthetic bool   `json:"synthetic,omitempty"`
 	Identity
+
+	BenchEvidence *BenchEvidence `json:"bench_evidence,omitempty"`
 }
 
 // Identity names the server that wrote a row, so a window spanning a planner

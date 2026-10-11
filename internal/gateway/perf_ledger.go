@@ -1,7 +1,10 @@
 package gateway
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -38,6 +41,7 @@ type perfDetail struct {
 	model        string
 	engine       *perfledger.Engine
 	nativeTiming *perfledger.NativeTiming
+	completion   *agent.Completion
 	nativeLoop   bool
 	// upstreamDraft / upstreamAccepted are a proxied upstream's own speculative
 	// counts from its llama.cpp-shaped timings.
@@ -88,7 +92,7 @@ func perfDetailFromCompletion(comp *agent.Completion) perfDetail {
 	if comp == nil {
 		return perfDetail{}
 	}
-	d := perfDetail{model: comp.Model}
+	d := perfDetail{model: comp.Model, completion: comp}
 	if t := comp.Timings; t != nil && t.CacheN > 0 {
 		d.kvCacheN = t.CacheN
 	}
@@ -106,6 +110,90 @@ func perfDetailFromCompletion(comp *agent.Completion) perfDetail {
 		d.upstreamAccepted = min(max(t.DraftNAccepted, 0), t.DraftN)
 	}
 	return d
+}
+
+func completionBenchEvidence(comp *agent.Completion) *perfledger.BenchEvidence {
+	if comp == nil {
+		return nil
+	}
+	complete := false
+	switch comp.FinishReason {
+	case "stop", "length", "tool_calls", "function_call", "end_turn", "max_tokens", "stop_sequence", "tool_use", "eos":
+		complete = true
+	}
+	raw := bytes.TrimSpace(comp.Raw)
+	var usage, runtimeRaw json.RawMessage
+	if len(raw) > 4<<20 {
+		complete = false
+	} else if len(raw) > 0 {
+		if raw[0] == '{' {
+			var valid bool
+			usage, runtimeRaw, valid = completionBenchPayload(raw)
+			complete = complete && valid
+		} else {
+			done, valid := false, true
+			scanner := bufio.NewScanner(bytes.NewReader(raw))
+			scanner.Buffer(make([]byte, 1024), 1<<20)
+			for scanner.Scan() {
+				line := bytes.TrimSpace(scanner.Bytes())
+				if bytes.HasPrefix(line, []byte("event:")) {
+					if bytes.Equal(bytes.TrimSpace(line[len("event:"):]), []byte("error")) {
+						valid = false
+						break
+					}
+					continue
+				}
+				if len(line) == 0 || line[0] == ':' || bytes.HasPrefix(line, []byte("id:")) || bytes.HasPrefix(line, []byte("retry:")) {
+					continue
+				}
+				if !bytes.HasPrefix(line, []byte("data:")) {
+					valid = false
+					break
+				}
+				payload := bytes.TrimSpace(line[len("data:"):])
+				if bytes.Equal(payload, []byte("[DONE]")) {
+					done = true
+					continue
+				}
+				observedUsage, observedRuntime, ok := completionBenchPayload(payload)
+				if !ok || done {
+					valid = false
+					break
+				}
+				if observedUsage != nil {
+					usage = observedUsage
+				}
+				if observedRuntime != nil {
+					runtimeRaw = observedRuntime
+				}
+			}
+			if !valid || scanner.Err() != nil {
+				usage, runtimeRaw = nil, nil
+			}
+			complete = complete && done && valid && scanner.Err() == nil
+		}
+	}
+	var runtime struct {
+		TokenSHA json.RawMessage `json:"token_sha"`
+	}
+	tokenSHA := ""
+	if json.Unmarshal(runtimeRaw, &runtime) == nil {
+		if json.Unmarshal(runtime.TokenSHA, &tokenSHA) != nil {
+			tokenSHA = ""
+		}
+	}
+	return perfledger.NewBenchEvidence(usage, comp.Message.Content, comp.Message.ReasoningContent, tokenSHA, complete)
+}
+
+func completionBenchPayload(raw []byte) (json.RawMessage, json.RawMessage, bool) {
+	var payload map[string]json.RawMessage
+	if json.Unmarshal(raw, &payload) != nil || payload == nil {
+		return nil, nil, false
+	}
+	if errorRaw, ok := payload["error"]; ok && !bytes.Equal(bytes.TrimSpace(errorRaw), []byte("null")) {
+		return nil, nil, false
+	}
+	return payload["usage"], payload["tensorfold"], true
 }
 
 // perfIdentity is the server identity stamped on every perf row. Backend is
@@ -170,6 +258,9 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 	rec.Engine = detail.engine
 	rec.NativeTiming = detail.nativeTiming
 	rec.UpstreamSpecDraftTokens, rec.UpstreamSpecAcceptedTokens = detail.upstreamDraft, detail.upstreamAccepted
+	if rec.Error == "" {
+		rec.BenchEvidence = completionBenchEvidence(detail.completion)
+	}
 	detail.src.apply(&rec)
 	m.commitPerf(rec)
 }
