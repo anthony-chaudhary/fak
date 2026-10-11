@@ -92,6 +92,7 @@ type CheckpointResidencySnapshot struct {
 	Scope            string `json:"scope"`
 	Reads            int    `json:"reads"`
 	Hits             int    `json:"hits"`
+	Coalesced        int    `json:"coalesced"`
 	BytesRead        int64  `json:"bytes_read"`
 	Evictions        int    `json:"evictions"`
 	Failures         int    `json:"failures"`
@@ -407,6 +408,7 @@ func (p *InKernelPlanner) foldMoEResidencyLocked(rep model.MoEResidencyReport, t
 			Scope:            "model_lifetime",
 			Reads:            ck.Reads,
 			Hits:             ck.Hits,
+			Coalesced:        ck.Coalesced,
 			BytesRead:        ck.BytesRead,
 			Evictions:        ck.Evictions,
 			Failures:         ck.Failures,

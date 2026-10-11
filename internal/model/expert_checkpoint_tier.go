@@ -48,14 +48,9 @@ import (
 // residency this rung exists to remove. A positive budget makes the middle "pinned-host" rung real
 // for a host that has RAM to spare.
 //
-// Concurrency. Two sessions sharing one Model share one tier. The bookkeeping is mutex-guarded, but
-// the READ is issued outside the lock, because ggufExpertSource is safe for concurrent use whenever
-// its ReaderAt is (os.File, bytes.Reader and stripeload.StripedReaderAt all are) and serializing
-// every fault behind one lock would make the tier a throughput floor for the whole fleet. The cost
-// is that two agents faulting the same cold expert at the same instant may both read it â€” a
-// duplicated read of byte-identical bytes, never a corrupted one. Coalescing those into one read is
-// precisely R7/#5618, which needs a shared ring to coalesce ONTO; this rung supplies the tier it
-// coalesces at.
+// Concurrency. Sessions sharing a Model share this tier. One canonical-key loading owner
+// publishes a complete weight or error to all attached waiters; failed ownership permits retry.
+// Source I/O stays outside the bookkeeping mutex so different experts read concurrently.
 //
 // A read failure is never swallowed silently: the failure count and the last error surface through
 // ExpertCheckpointStats, and the fault itself reports the error to its caller. On the staging path
@@ -250,9 +245,11 @@ type ExpertCheckpointTier struct {
 	// pool bounds the RETAINED host copies. A zero budget retains nothing (every Admit reports
 	// ErrTooLarge and the faulted expert is simply handed to the caller and dropped), which is the
 	// stream-through default.
-	pool *polymodel.Pool
-	host map[polymodel.ModelID]expertWeight
-	peak int64
+	pool      *polymodel.Pool
+	host      map[polymodel.ModelID]expertWeight
+	peak      int64
+	loading   map[polymodel.ModelID]*expertCheckpointLoad
+	coalesced int
 
 	reads     int
 	hits      int
@@ -267,6 +264,16 @@ type ExpertCheckpointTier struct {
 	overlayRows  int
 	overlayBytes int64
 }
+
+// Loading ownership and complete-only publication adapt JigSawPT/llama.cpp's
+// host-tier contract; the pinned source and MIT notice are in THIRD_PARTY_NOTICES.md.
+type expertCheckpointLoad struct {
+	done   chan struct{}
+	weight expertWeight
+	err    error
+}
+
+var ErrExpertCheckpointLoadAborted = errors.New("model: expert checkpoint load owner aborted")
 
 // NewExpertCheckpointTier returns an empty tier whose retained host cache is bounded by hostBytes.
 // hostBytes <= 0 is stream-through: bytes are faulted, staged and dropped, which is what keeps host
@@ -592,7 +599,7 @@ func (t *ExpertCheckpointTier) admitBounded(id polymodel.ModelID, name string, w
 // fault answers one canonical per-expert tensor name by reading exactly that expert's stride â€” or
 // by serving a retained host copy when the bounded host cache holds one. It never returns a
 // partially-built weight.
-func (t *ExpertCheckpointTier) fault(name string) (expertWeight, error) {
+func (t *ExpertCheckpointTier) fault(name string) (w expertWeight, err error) {
 	if t == nil {
 		return expertWeight{}, fmt.Errorf("%w: %s (no checkpoint tier)", ErrGGUFExpertNotFound, name)
 	}
@@ -610,9 +617,38 @@ func (t *ExpertCheckpointTier) fault(name string) (expertWeight, error) {
 		t.mu.Unlock()
 		return w, nil
 	}
+	if load := t.loading[id]; load != nil {
+		t.coalesced++
+		t.mu.Unlock()
+		<-load.done
+		return load.weight, load.err
+	}
+	load := &expertCheckpointLoad{done: make(chan struct{})}
+	if t.loading == nil {
+		t.loading = make(map[polymodel.ModelID]*expertCheckpointLoad)
+	}
+	t.loading[id] = load
 	src := t.shards[entry.shard]
 	overlay := t.overlays[entry.fused] // nil unless a per-rank sparse overlay was registered
 	t.mu.Unlock()
+	completed := false
+	defer func() {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		if !completed {
+			w, err = expertWeight{}, ErrExpertCheckpointLoadAborted
+			t.failures, t.lastErr = t.failures+1, err
+		}
+		load.weight, load.err = w, err
+		delete(t.loading, id)
+		close(load.done)
+	}()
+	w, err = t.faultOwned(name, id, entry, src, overlay)
+	completed = true
+	return w, err
+}
+
+func (t *ExpertCheckpointTier) faultOwned(name string, id polymodel.ModelID, entry expertCheckpointEntry, src *ggufExpertSource, overlay *ExpertSparseOverlay) (expertWeight, error) {
 
 	// Sparse-overlay fast path (#13030): when this rank registered an overlay banding this fused
 	// tensor AND the routed expert is bitmap-present, serve the copied rows and move no device
@@ -630,16 +666,11 @@ func (t *ExpertCheckpointTier) fault(name string) (expertWeight, error) {
 			// the same expert is a host hit and the overlay bytes are moved exactly once.
 			t.mu.Lock()
 			defer t.mu.Unlock()
-			if prev, live := t.host[id]; live {
-				t.pool.Touch(id)
-				return prev, nil
-			}
 			return t.admitBounded(id, name, w, int64(len(have)))
 		}
 	}
 
-	// Issued OUTSIDE the lock: see the file header on why a duplicated concurrent read of identical
-	// bytes is the right trade against serializing every fleet fault behind one mutex. On a shard
+	// Source I/O stays outside the lock. On a shard
 	// admitted to the page-cache path (#1302) readExpertPageCache is used, so a repeat fault of a
 	// warm expert moves zero device bytes; otherwise it is the historical readExpert path exactly.
 	raw, _, err := src.readExpertPageCache(entry.fused, entry.expert)
@@ -655,13 +686,6 @@ func (t *ExpertCheckpointTier) fault(name string) (expertWeight, error) {
 	defer t.mu.Unlock()
 	t.reads++
 	t.bytesRead += int64(len(raw))
-	if have, live := t.host[id]; live {
-		// A concurrent fault landed first. Its bytes and ours are byte-identical, so serve the
-		// retained copy and let this one go â€” but the read still happened and is still counted, or
-		// the ledger would under-report the IO the workload actually issued.
-		t.pool.Touch(id)
-		return have, nil
-	}
 	return t.admitBounded(id, name, w, int64(len(raw)))
 }
 
@@ -678,7 +702,9 @@ type ExpertCheckpointStats struct {
 	Reads     int   `json:"reads"`
 	BytesRead int64 `json:"bytes_read"`
 	Hits      int   `json:"hits"`
-	Evictions int   `json:"evictions"`
+	// Coalesced counts callers that shared an in-flight fault, separately from retained hits.
+	Coalesced int `json:"coalesced"`
+	Evictions int `json:"evictions"`
 	// OverlayRows/OverlayBytesRead are the per-rank sparse-overlay ledger (#13030): how many faults
 	// were served from a registered overlay's copied rows, and the row bytes those faults moved.
 	// A fault outside every registered overlay falls through to the dense stride and is counted in
@@ -718,6 +744,7 @@ func (t *ExpertCheckpointTier) Stats() ExpertCheckpointStats {
 		Reads:         t.reads,
 		BytesRead:     t.bytesRead,
 		Hits:          t.hits,
+		Coalesced:     t.coalesced,
 		Evictions:     t.evictions,
 		BudgetBytes:   t.pool.Budget(),
 		ResidentBytes: t.pool.Used(),

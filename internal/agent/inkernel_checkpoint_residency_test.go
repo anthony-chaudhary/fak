@@ -11,6 +11,7 @@ type checkpointResidencyWire struct {
 	Scope            string `json:"scope"`
 	Reads            int    `json:"reads"`
 	Hits             int    `json:"hits"`
+	Coalesced        int    `json:"coalesced"`
 	BytesRead        int64  `json:"bytes_read"`
 	Evictions        int    `json:"evictions"`
 	Failures         int    `json:"failures"`
@@ -72,6 +73,26 @@ func TestCheckpointResidencyLatestModelLifetimeSnapshotSurvivesRinglessRequests(
 	}
 	if l.Requests != 0 || l.Tokens != 0 {
 		t.Fatalf("ring requests/tokens=%d/%d want 0/0 for checkpoint-only observations", l.Requests, l.Tokens)
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestCheckpointResidencyCoalescedIsLatestModelLifetimeSnapshot(t *testing.T) {
+	p := &InKernelPlanner{}
+	first := checkpointResidencyReport(1, 0, 144)
+	first.Checkpoint.Coalesced = 7
+	p.foldMoEResidency(first, 3)
+	second := checkpointResidencyReport(2, 0, 288)
+	second.Checkpoint.Coalesced = 14
+	p.foldMoEResidency(second, 5)
+	p.foldMoEResidency(second, 5)
+	c := checkpointFromLedger(t, p.MoEResidencyStats())
+	if c == nil {
+		t.Fatal("checkpoint-only observations omitted the bounded snapshot")
+	}
+	if c.Coalesced != 14 || c.Reads != 2 || c.Hits != 0 || c.BytesRead != 288 || c.Scope != "model_lifetime" {
+		t.Fatalf("checkpoint snapshot coalesced/reads/hits/bytes/scope=%d/%d/%d/%d/%q, want 14/2/0/288/model_lifetime",
+			c.Coalesced, c.Reads, c.Hits, c.BytesRead, c.Scope)
 	}
 }
 

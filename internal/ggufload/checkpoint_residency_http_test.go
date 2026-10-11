@@ -17,6 +17,7 @@ type checkpointResidencyWire struct {
 		Scope     string `json:"scope"`
 		Reads     int    `json:"reads"`
 		Hits      int    `json:"hits"`
+		Coalesced int    `json:"coalesced"`
 		BytesRead int64  `json:"bytes_read"`
 	} `json:"checkpoint"`
 	V41Phases *checkpointV41Wire `json:"v41_phases"`
@@ -96,8 +97,13 @@ func TestCheckpointResidencyHTTPReportsRealFileBackedCumulativeIO(t *testing.T) 
 		if err := json.Unmarshal(doc["moe_residency"], &bounded); err != nil {
 			t.Fatal(err)
 		}
+		value, present := bounded.Checkpoint["coalesced"]
+		var coalesced *int
+		if err := json.Unmarshal(value, &coalesced); !present || err != nil || coalesced == nil {
+			t.Fatal("checkpoint reader must expose a numeric coalesced field")
+		}
 		allowed := map[string]bool{
-			"scope": true, "reads": true, "hits": true, "bytes_read": true,
+			"scope": true, "reads": true, "hits": true, "bytes_read": true, "coalesced": true,
 			"evictions": true, "failures": true, "budget_bytes": true,
 			"resident_bytes": true, "peak_bytes": true, "resident_count": true,
 			"overlay_rows": true, "overlay_bytes_read": true,
@@ -197,9 +203,9 @@ func TestCheckpointResidencyHTTPReportsRealFileBackedCumulativeIO(t *testing.T) 
 	if second.Hits <= first.Hits {
 		t.Fatalf("second request did not reuse retained file rows: hits %d->%d", first.Hits, second.Hits)
 	}
-	if second.Reads != source.Reads || second.Hits != source.Hits || second.BytesRead != source.BytesRead {
-		t.Fatalf("served snapshot reads=%d hits=%d bytes=%d; source reads=%d hits=%d bytes=%d",
-			second.Reads, second.Hits, second.BytesRead, source.Reads, source.Hits, source.BytesRead)
+	if second.Reads != source.Reads || second.Hits != source.Hits || second.Coalesced != source.Coalesced || second.BytesRead != source.BytesRead {
+		t.Fatalf("served snapshot reads=%d hits=%d coalesced=%d bytes=%d; source reads=%d hits=%d coalesced=%d bytes=%d",
+			second.Reads, second.Hits, second.Coalesced, second.BytesRead, source.Reads, source.Hits, source.Coalesced, source.BytesRead)
 	}
 	phaseSource := m.V41ExpertFaultAttribution()
 	if secondRead.V41Phases == nil {
@@ -232,7 +238,7 @@ func TestCheckpointResidencyHTTPReportsRealFileBackedCumulativeIO(t *testing.T) 
 		t.Fatalf("second request did not advance both phase counters: prefill %d->%d decode %d->%d",
 			int(firstPrefillAttention), int(secondPrefillAttention), int(firstDecodeAttention), int(secondDecodeAttention))
 	}
-	t.Logf("file-backed checkpoint cumulative reads=%d hits=%d bytes=%d", second.Reads, second.Hits, second.BytesRead)
+	t.Logf("file-backed checkpoint cumulative reads=%d hits=%d coalesced=%d bytes=%d", second.Reads, second.Hits, second.Coalesced, second.BytesRead)
 }
 
 // TestCheckpointResidencyHTTPReportsV41WithoutCheckpoint proves the default
