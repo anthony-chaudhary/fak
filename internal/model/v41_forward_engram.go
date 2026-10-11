@@ -363,6 +363,24 @@ func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]floa
 		return gatheredRows, v41StageErr(v41StageEngram, l,
 			fmt.Errorf("%w: Engram row identifiers %d, want %d positions x %d columns", ErrV41NativeUnsupported, len(layerRows), positions, cols))
 	}
+	// These shared gate parameters are consumed by every position. Reject
+	// nonfinite values before retrieval or publication, while preserving finite
+	// zero/negative epsilon and gains accepted by the existing host equation.
+	if !finite32(eps) {
+		return gatheredRows, v41StageErr(v41StageEngram, l,
+			fmt.Errorf("%w: Engram gate epsilon is non-finite", ErrV41NativeUnsupported))
+	}
+	for _, norm := range [...]struct {
+		leaf   string
+		values []float32
+	}{{"engram_q_norm.weight", qNorm}, {"engram_k_norm.weight", kNorm}} {
+		for i, value := range norm.values {
+			if !finite32(value) {
+				return gatheredRows, v41StageErr(v41StageEngram, l,
+					fmt.Errorf("%w: Engram %s value[%d] is non-finite", ErrV41NativeUnsupported, norm.leaf, i))
+			}
+		}
+	}
 	// Both paths use x[t]: reduced gates index its hidden row, while full gates
 	// publish stream 0 back into it. Validate every used row before gathering or
 	// mutating any position, so missing rows cannot panic and copy cannot truncate.
