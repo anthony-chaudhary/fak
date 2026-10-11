@@ -27,6 +27,9 @@ func buildReceiptWireValue(receipt *ComputeBuildReceipt) any {
 	if receipt == nil {
 		return (*computeBuildReceiptV2Wire)(nil)
 	}
+	if receipt.Schema == VulkanBuildReceiptSchemaV6 {
+		return vulkanBuildReceiptV6Wire{computeBuildReceiptV2Wire: computeBuildReceiptV2Wire(*receipt), ShaderRegistry: receipt.VulkanRegistry, NativeArchive: receipt.VulkanNativeArchive, IndexerScore: receipt.VulkanIndexerScore}
+	}
 	if receipt.Schema == VulkanBuildReceiptSchemaV5 {
 		return vulkanBuildReceiptV5Wire{computeBuildReceiptV2Wire: computeBuildReceiptV2Wire(*receipt), ShaderRegistry: receipt.VulkanRegistry, NativeArchive: receipt.VulkanNativeArchive, IndexerScore: receipt.VulkanIndexerScore}
 	}
@@ -40,7 +43,7 @@ func buildReceiptWireValue(receipt *ComputeBuildReceipt) any {
 }
 
 // MarshalJSON preserves historical wire fields and emits the explicit registry
-// for V3, V4, and V5, including when nested in an identity-verification result.
+// for V3, V4, V5, and V6, including when nested in an identity-verification result.
 func (receipt ComputeBuildReceipt) MarshalJSON() ([]byte, error) {
 	var out bytes.Buffer
 	enc := json.NewEncoder(&out)
@@ -138,6 +141,8 @@ func VerifyVulkanBinaryReceiptIdentityForSchema(ctx context.Context, expectedSch
 		return verifyVulkanBinaryReceiptV4Identity(ctx, evidence)
 	case VulkanBuildReceiptSchemaV5:
 		return verifyVulkanBinaryReceiptV5Identity(ctx, evidence)
+	case VulkanBuildReceiptSchemaV6:
+		return verifyVulkanBinaryReceiptV6Identity(ctx, evidence)
 	default:
 		return nil, fmt.Errorf("unsupported trusted Vulkan receipt schema %q", expectedSchema)
 	}

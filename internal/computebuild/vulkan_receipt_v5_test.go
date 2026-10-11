@@ -29,8 +29,8 @@ qwen35_gdn_tiled_transpose coopmat_wave32_wmma rmsnorm_q4k_matmul2 swiglu_q4k_ma
 qwen35_gdn_prefill_tiled qwen35_gdn_prefill_norm qwen35_gdn_verify_tiled q2k_matvec
 rmsnorm_q8_matmul2_coop iq4xs_matvec iq3xxs_matvec iq2s_matvec iq3s_matvec iq2xxs_matvec
 iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention v41_indexer_score`)
-	if len(want) != 62 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV5(), want) || !reflect.DeepEqual(VulkanShaders, want) {
-		t.Fatal("current builder does not use the independent exact62 registry")
+	if len(want) != 62 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV5(), want) || !reflect.DeepEqual(VulkanShaders[:62], want) {
+		t.Fatal("historical exact62 registry is not the prefix of the current builder")
 	}
 	if !reflect.DeepEqual(historicalVulkanV2Shaders(), want[:59]) || !reflect.DeepEqual(CurrentVulkanShaderRegistry(), want[:60]) || !reflect.DeepEqual(CurrentVulkanShaderRegistryV4(), want[:61]) {
 		t.Fatal("historical V2/59, V3/60, or V4/61 membership changed")

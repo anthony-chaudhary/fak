@@ -90,6 +90,8 @@ const (
 	VulkanBuildReceiptSchemaV4 = "fak.vulkan-build-receipt.v4"
 	// VulkanBuildReceiptSchemaV5 binds exact62, the native archive, and score float controls.
 	VulkanBuildReceiptSchemaV5 = "fak.vulkan-build-receipt.v5"
+	// VulkanBuildReceiptSchemaV6 binds exact63 (V5/62 plus the V4.1 mHC module).
+	VulkanBuildReceiptSchemaV6 = "fak.vulkan-build-receipt.v6"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"
