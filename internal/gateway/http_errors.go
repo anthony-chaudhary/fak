@@ -169,6 +169,15 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 		if se.Status >= 400 && se.Status < 500 {
 			return upstream4xxStatus(se)
 		}
+		// A chat-template (Jinja) render failure is llama.cpp's bare 500 for a message shape its
+		// template refuses (an unknown role, a late system turn). The agent already fails it fast
+		// (classifyUpstream -> RemedyTerminal); here it gets a typed code so a client can tell
+		// "fix the message shape" apart from a crashed upstream, instead of the opaque code:null
+		// "upstream model error" (#13784). The template's own reason rides along scrubbed and
+		// bounded: it names WHICH rule tripped and is template prose, not request content.
+		if agent.IsChatTemplateRejected([]byte(se.Body)) {
+			return http.StatusBadGateway, codeUpstreamTemplateRender, templateRenderMessage(se.Body)
+		}
 		// A 529 is Anthropic's non-standard "Overloaded": the PROVIDER is over capacity,
 		// which is a different failure from a 500 crash AND from a 429 rate limit. Its
 		// recovery is the OPPOSITE of a 429's: a 429 carries a trustworthy Retry-After to
