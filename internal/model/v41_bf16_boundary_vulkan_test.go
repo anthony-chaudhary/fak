@@ -124,7 +124,7 @@ func TestV41BF16BoundaryVulkan(t *testing.T) {
 	if !ok || be == nil || !be.Caps().DeviceMemory {
 		t.Fatal("required Vulkan device unavailable")
 	}
-	physical, ok := be.(interface{ VulkanPhysicalDeviceType() int })
+	physical, ok := be.(interface{ VulkanPhysicalDeviceType() uint32 })
 	if !ok || (physical.VulkanPhysicalDeviceType() != 1 && physical.VulkanPhysicalDeviceType() != 2) {
 		t.Fatal("physical integrated/discrete GPU required")
 	}
