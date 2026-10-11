@@ -268,6 +268,11 @@ func chatTemplateRejected(body []byte) bool {
 	)
 }
 
+// IsChatTemplateRejected is the exported witness for a server-side chat-template render
+// failure, so the gateway can give it a typed client code (upstream_template_render) from the
+// same signature the retry classifier uses — one taxonomy, not two (#13784).
+func IsChatTemplateRejected(body []byte) bool { return chatTemplateRejected(body) }
+
 // streamRequired reports whether an upstream refusal body explicitly says the request must
 // STREAM — the discriminator for a stream-only OpenAI-compatible gateway. It matches the
 // phrasings such gateways actually emit ("stream required", "streaming is required", "must
