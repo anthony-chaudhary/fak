@@ -509,7 +509,7 @@ func newInKernelStreamProjector(emit StreamSink, stops []string, startsInReasoni
 // hasTextToolCandidate scopes strict reconciliation to text that can participate
 // in a lift. Ordinary late reasoning retains its historical stream behavior.
 func hasTextToolCandidate(content string) bool {
-	for _, marker := range []string{"<tool_call>", "<function_call>", "<function=", "<|python_tag|>", "[TOOL_CALLS]"} {
+	for _, marker := range []string{"<tool_call>", "<function_call>", "<function=", "<|python_tag|>", "[TOOL_CALLS]", deepSeekDSMLCallsOpen} {
 		if strings.Contains(content, marker) {
 			return true
 		}
@@ -696,6 +696,7 @@ var toolSpanOpeners = []struct {
 	{open: "<function_call>", closers: []string{"</function_call>"}},
 	{open: "<|python_tag|>", closers: []string{"<|eom_id|>", "<|eot_id|>"}},
 	{open: "[TOOL_CALLS]", closers: nil},
+	{open: deepSeekDSMLCallsOpen, closers: []string{deepSeekDSMLCallsClose}},
 }
 
 const toolSpanGuardMaxBytes = 4 << 20
