@@ -87,14 +87,22 @@ func splitSpans(rs []rune, spans []runeSpan, matchAt func(rs []rune, i, end int)
 // category. Testing whitespace first keeps U+00A0 or U+3000 out of every \p class.
 func ds3Space(r rune) bool { return unicode.IsSpace(r) }
 
-func ds3Letter(r rune) bool { return !ds3Space(r) && unicode.IsLetter(r) }
+// The pinned llama.cpp tables include Unicode 15.1 additions absent from Go's
+// Unicode 15.0 tables: CJK Extension I letters and five ideographic symbols.
+// Source: vcruz305/llama.cpp@5210c7c5ed61dddaee6ed476623abf4b63093d16,
+// src/unicode-data.cpp (MIT; Copyright (c) 2023-2026 The ggml authors).
+// TestDeepSeek3UnicodeVersion requires review when Go's Unicode tables change.
+func ds3Letter(r rune) bool {
+	return !ds3Space(r) && (unicode.IsLetter(r) || (r >= 0x2EBF0 && r <= 0x2EE5D))
+}
 
 func ds3Mark(r rune) bool { return !ds3Space(r) && unicode.Is(unicode.M, r) }
 
 func ds3Number(r rune) bool { return !ds3Space(r) && unicode.IsNumber(r) }
 
 func ds3PunctOrSymbol(r rune) bool {
-	return !ds3Space(r) && (unicode.IsPunct(r) || unicode.IsSymbol(r))
+	return !ds3Space(r) && (unicode.IsPunct(r) || unicode.IsSymbol(r) ||
+		(r >= 0x2FFC && r <= 0x2FFF) || r == 0x31EF)
 }
 
 func ds3LetterOrMark(r rune) bool { return ds3Letter(r) || ds3Mark(r) }
