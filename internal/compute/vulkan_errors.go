@@ -575,11 +575,21 @@ func SafeVulkanValue[T any](site string, fn func() T) (val T, err error) {
 
 // ExecuteVulkanRequest executes a request function fn under a Vulkan request boundary.
 // It establishes a RequestLifetime, catches any request-time panic, converts it into
-// a typed *BackendError, and guarantees request resource retirement so subsequent requests
-// can proceed.
+// a typed *BackendError, and attempts request resource retirement exactly once.
+// A retirement panic is classified separately and joined after any request error;
+// a failed retirement does not establish that the backend is safe to reuse.
 func ExecuteVulkanRequest[T any](backend Backend, site string, fn func() (T, error)) (res T, err error) {
 	lifetime := BeginRequest(backend)
-	defer lifetime.Retire()
+	defer func() {
+		// The request recovery runs first, preserving its cause before cleanup.
+		if cleanupErr := SafeVulkanOp(site+".RetireRequestResources", lifetime.Retire); cleanupErr != nil {
+			if err == nil {
+				err = cleanupErr
+			} else {
+				err = errors.Join(err, cleanupErr)
+			}
+		}
+	}()
 	defer CatchVulkanPanic(site, &err)
 
 	return fn()
