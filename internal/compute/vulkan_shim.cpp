@@ -2145,7 +2145,7 @@ bool v41SharedAttentionABI(const std::vector<char>& code) {
             if (count < 5 || a[1] != 5 || !validID(a[2]) || a[3] != 0x6e69616d || a[4] != 0) return false;
             entry = a[2]; ++entryCount;
         } else if (op == 16 && count >= 3 && a[2] == 17) { // LocalSize
-            if (count != 6 || a[3] != 1 || a[4] != 1 || a[5] != 1) return false;
+            if (count != 6 || a[3] != 128 || a[4] != 1 || a[5] != 1) return false;
             localEntry = a[1]; ++localCount;
         } else if (op == 129 || op == 131 || op == 133 || op == 136) { // scalar FAdd/FSub/FMul/FDiv
             if (count != 5 || !validID(a[2])) return false;
@@ -5192,8 +5192,8 @@ int fvk_v41_shared_attention_f32(const void* dQ, const void* dSharedKV,
                   offsetof(Push, selectedRows) == 8 && offsetof(Push, mode) == 12 &&
                   offsetof(Push, hasSink) == 16 && offsetof(Push, scale) == 20,
                   "V4.1 attention push ABI member offsets must be fixed");
-    // One scalar invocation per head initializes all four status words, then
-    // owns that head's ordered first fault. There is no atomic winner race.
+    // One 128-lane workgroup per head; its lane 0 initializes the four status
+    // words and publishes the ordered first fault. There is no atomic winner race.
     if (!dispatch(g_kern[K_V41_SHARED_ATTENTION], bufs, &pc, sizeof(pc), uint32_t(heads))) {
         return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
     }

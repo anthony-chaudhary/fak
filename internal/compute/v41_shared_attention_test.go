@@ -230,7 +230,7 @@ func TestV41SharedAttentionShaderSourceContract(t *testing.T) {
 	}
 	s := string(raw)
 	for _, token := range []string{
-		"layout(local_size_x = 1) in;",
+		"layout(local_size_x = 128) in;", "const int CHUNK = 2048;",
 		"binding = 0) readonly buffer QBuf { float Q[]; }", "binding = 1) readonly buffer KVBuf { float KV[]; }",
 		"binding = 2) readonly buffer SinkBuf { float Sink[]; }", "binding = 3) buffer OutBuf { float Out[]; }",
 		"binding = 4) writeonly buffer StatusBuf { uint Status[]; }",
@@ -239,25 +239,25 @@ func TestV41SharedAttentionShaderSourceContract(t *testing.T) {
 		"precise float product = Q[qBase + uint(d)] * KV[kvBase + uint(d)];", "precise float nextDot = dot + product;",
 		"precise float score = dot * pc.scale;", "precise float shift = score - maximum;",
 		"precise float nextDenominator = denominator + term;", "precise float weight = term / denominator;",
-		"precise float product = weight * KV[kvBase + uint(d)];", "precise float nextValue = Out[outBase + uint(d)] + product;",
-		"fault(head, 1u, slot, -1, score)", "fault(head, 2u, -1, -1, term)", "fault(head, 2u, slot, -1, term)",
-		"fault(head, 3u, -1, -1, denominator)", "fault(head, 4u, slot, -1, weight)",
-		"fault(head, 5u, slot, d, nextValue)", "fault(head, 6u, -1, d, value)",
+		"precise float product = sWeight[i] * KV[uint(base + i) * uint(pc.headDim) + uint(d)];", "precise float nextValue = value + product;",
+		"fault(head, 1u, base + i, -1, score)", "fault(head, 2u, -1, -1, term)", "fault(head, 2u, base + i, -1, term)",
+		"fault(head, 3u, -1, -1, denominator)", "fault(head, 4u, base + limit, -1, sWeight[limit])",
+		"publishFirstLaneFault(head, 5u, base)", "publishFirstLaneFault(head, 6u, 0)",
 		"Status[statusBase] = 0u;", "Status[statusBase + 1u] = 0u;", "Status[statusBase + 2u] = 0u;", "Status[statusBase + 3u] = 0u;",
 	} {
 		if !strings.Contains(s, token) {
 			t.Errorf("missing shader contract %q", token)
 		}
 	}
-	for _, forbidden := range []string{"fma(", "float16_t", "atomic", "subgroup", "shared ", "finiteValue(shift)"} {
+	for _, forbidden := range []string{"fma(", "float16_t", "atomic", "subgroup", "finiteValue(shift)"} {
 		if strings.Contains(s, forbidden) {
 			t.Errorf("unreviewed shader behavior %q", forbidden)
 		}
 	}
-	if strings.Count(s, "binding = ") != 5 || strings.Count(s, "for (int slot = 0;") != 3 {
-		t.Fatal("five bindings or three ordered row passes changed")
+	if strings.Count(s, "binding = ") != 5 || strings.Count(s, "for (int base = 0; base < pc.selectedRows; base += CHUNK)") != 3 {
+		t.Fatal("five bindings or three ordered chunk passes changed")
 	}
-	if check, skip := strings.Index(s, "if (!finiteValue(score))"), strings.Index(s, "if (maximum == seed) return;"); check < 0 || skip <= check {
+	if check, skip := strings.Index(s, "if (!finiteValue(score))"), strings.Index(s, "if (maximum == seed) {"); check < 0 || skip <= check {
 		t.Fatal("compressed sentinel skipped score validation")
 	}
 }

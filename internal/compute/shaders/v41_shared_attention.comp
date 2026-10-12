@@ -1,7 +1,13 @@
 #version 450
-layout(local_size_x = 1) in;
+layout(local_size_x = 128) in;
 
-// One invocation owns one head: scalar order is deliberate, not a reduction.
+// One workgroup owns one head. Each score and each output element is still one
+// lane's serial sum in slot/element order; lane 0 keeps the ordered maximum,
+// denominator and first-fault scans, so every value and status bit is unchanged.
+const int LANES = 128;
+const int CHUNK = 2048;
+const int NONE = 0x7fffffff;
+
 layout(std430, binding = 0) readonly buffer QBuf { float Q[]; };
 layout(std430, binding = 1) readonly buffer KVBuf { float KV[]; };
 layout(std430, binding = 2) readonly buffer SinkBuf { float Sink[]; };
@@ -16,6 +22,16 @@ layout(push_constant) uniform Push {
     int hasSink;
     float scale;
 } pc;
+
+shared float sScore[CHUNK];
+shared float sWeight[CHUNK];
+shared uint sStop;
+shared float sMaximum;
+shared float sDenominator;
+shared int sLimit;
+shared int sFaultSlot[LANES];
+shared int sFaultElement[LANES];
+shared float sFaultValue[LANES];
 
 bool finiteValue(float x) {
     return !isnan(x) && !isinf(x);
@@ -42,64 +58,176 @@ float scaledScore(uint head, int slot) {
     return score;
 }
 
+void sync() {
+    memoryBarrierShared();
+    barrier();
+}
+
+// Lane 0 picks the first (slot, element) fault in the scalar kernel's order.
+void publishFirstLaneFault(uint head, uint stage, int slotBase) {
+    int slot = NONE;
+    int element = NONE;
+    float value = 0.0;
+    for (int l = 0; l < LANES; ++l) {
+        int s = sFaultSlot[l];
+        int e = sFaultElement[l];
+        if (s < slot || (s == slot && e < element)) { slot = s; element = e; value = sFaultValue[l]; }
+    }
+    if (element != NONE) {
+        fault(head, stage, slot == NONE ? -1 : slotBase + slot, element, value);
+        sStop = 1u;
+    }
+}
+
 void main() {
-    uint head = gl_GlobalInvocationID.x;
+    uint head = gl_WorkGroupID.x;
+    int lane = int(gl_LocalInvocationID.x);
     if (head >= uint(pc.heads)) return;
     uint statusBase = head * 4u;
-    Status[statusBase] = 0u;
-    Status[statusBase + 1u] = 0u;
-    Status[statusBase + 2u] = 0u;
-    Status[statusBase + 3u] = 0u;
+    if (lane == 0) {
+        Status[statusBase] = 0u;
+        Status[statusBase + 1u] = 0u;
+        Status[statusBase + 2u] = 0u;
+        Status[statusBase + 3u] = 0u;
+        sStop = 0u;
+    }
     uint outBase = head * uint(pc.headDim);
-    for (int d = 0; d < pc.headDim; ++d) Out[outBase + uint(d)] = 0.0;
+    for (int d = lane; d < pc.headDim; d += LANES) Out[outBase + uint(d)] = 0.0;
+    bool resident = pc.selectedRows <= CHUNK;
 
     // Plain and compressed intentionally have different finite-extreme behavior.
     float seed = pc.mode == 0 ? uintBitsToFloat(0xff800000u) : uintBitsToFloat(0xff7fffffu);
     float maximum = pc.hasSink != 0 ? Sink[head] : seed;
-    for (int slot = 0; slot < pc.selectedRows; ++slot) {
-        precise float score = scaledScore(head, slot);
-        if (!finiteValue(score)) { fault(head, 1u, slot, -1, score); return; }
-        if (score > maximum) maximum = score;
+    for (int base = 0; base < pc.selectedRows; base += CHUNK) {
+        int count = pc.selectedRows - base < CHUNK ? pc.selectedRows - base : CHUNK;
+        for (int i = lane; i < count; i += LANES) sScore[i] = scaledScore(head, base + i);
+        sync();
+        if (lane == 0) {
+            for (int i = 0; i < count; ++i) {
+                float score = sScore[i];
+                if (!finiteValue(score)) { fault(head, 1u, base + i, -1, score); sStop = 1u; break; }
+                if (score > maximum) maximum = score;
+            }
+        }
+        sync();
+        if (sStop != 0u) return;
     }
     // Score validation precedes the compressed finite-sentinel skip.
-    if (maximum == seed) return;
-
-    precise float denominator = 0.0;
-    if (pc.hasSink != 0) {
-        precise float shift = Sink[head] - maximum;
-        precise float term = exp(shift);
-        if (!finiteValue(term)) { fault(head, 2u, -1, -1, term); return; }
-        denominator = term;
-    }
-    for (int slot = 0; slot < pc.selectedRows; ++slot) {
-        precise float score = scaledScore(head, slot);
-        // A finite extreme subtraction may become -Inf; exp(-Inf)=0 is valid.
-        precise float shift = score - maximum;
-        precise float term = exp(shift);
-        if (!finiteValue(term)) { fault(head, 2u, slot, -1, term); return; }
-        precise float nextDenominator = denominator + term;
-        denominator = nextDenominator;
-    }
-    if (!finiteValue(denominator)) { fault(head, 3u, -1, -1, denominator); return; }
-    if (denominator == 0.0) return;
-
-    for (int slot = 0; slot < pc.selectedRows; ++slot) {
-        precise float score = scaledScore(head, slot);
-        precise float shift = score - maximum;
-        precise float term = exp(shift);
-        if (!finiteValue(term)) { fault(head, 2u, slot, -1, term); return; }
-        precise float weight = term / denominator;
-        if (!finiteValue(weight)) { fault(head, 4u, slot, -1, weight); return; }
-        uint kvBase = uint(slot) * uint(pc.headDim);
-        for (int d = 0; d < pc.headDim; ++d) {
-            precise float product = weight * KV[kvBase + uint(d)];
-            precise float nextValue = Out[outBase + uint(d)] + product;
-            if (!finiteValue(nextValue)) { fault(head, 5u, slot, d, nextValue); return; }
-            Out[outBase + uint(d)] = nextValue;
+    if (lane == 0) {
+        sMaximum = maximum;
+        if (maximum == seed) {
+            sStop = 1u;
+        } else {
+            precise float denominator = 0.0;
+            if (pc.hasSink != 0) {
+                precise float shift = Sink[head] - maximum;
+                precise float term = exp(shift);
+                if (!finiteValue(term)) { fault(head, 2u, -1, -1, term); sStop = 1u; }
+                denominator = term;
+            }
+            sDenominator = denominator;
         }
     }
-    for (int d = 0; d < pc.headDim; ++d) {
-        float value = Out[outBase + uint(d)];
-        if (!finiteValue(value)) { fault(head, 6u, -1, d, value); return; }
+    sync();
+    if (sStop != 0u) return;
+    maximum = sMaximum;
+
+    for (int base = 0; base < pc.selectedRows; base += CHUNK) {
+        int count = pc.selectedRows - base < CHUNK ? pc.selectedRows - base : CHUNK;
+        for (int i = lane; i < count; i += LANES) {
+            // A finite extreme subtraction may become -Inf; exp(-Inf)=0 is valid.
+            float score = resident ? sScore[i] : scaledScore(head, base + i);
+            precise float shift = score - maximum;
+            precise float term = exp(shift);
+            sWeight[i] = term;
+        }
+        sync();
+        if (lane == 0) {
+            precise float denominator = sDenominator;
+            for (int i = 0; i < count; ++i) {
+                float term = sWeight[i];
+                if (!finiteValue(term)) { fault(head, 2u, base + i, -1, term); sStop = 1u; break; }
+                precise float nextDenominator = denominator + term;
+                denominator = nextDenominator;
+            }
+            sDenominator = denominator;
+        }
+        sync();
+        if (sStop != 0u) return;
     }
+    if (lane == 0) {
+        float denominator = sDenominator;
+        if (!finiteValue(denominator)) { fault(head, 3u, -1, -1, denominator); sStop = 1u; }
+        else if (denominator == 0.0) sStop = 1u;
+    }
+    sync();
+    if (sStop != 0u) return;
+    float denominator = sDenominator;
+
+    for (int base = 0; base < pc.selectedRows; base += CHUNK) {
+        int count = pc.selectedRows - base < CHUNK ? pc.selectedRows - base : CHUNK;
+        for (int i = lane; i < count; i += LANES) {
+            float term;
+            if (resident) {
+                term = sWeight[i];
+            } else {
+                float score = scaledScore(head, base + i);
+                precise float shift = score - maximum;
+                term = exp(shift);
+            }
+            precise float weight = term / denominator;
+            sWeight[i] = weight;
+        }
+        sync();
+        if (lane == 0) {
+            sLimit = count;
+            for (int i = 0; i < count; ++i) {
+                if (!finiteValue(sWeight[i])) { sLimit = i; break; }
+            }
+        }
+        sync();
+        // A weight fault at slot s precedes every value of slot s.
+        int limit = sLimit;
+        int faultSlot = NONE;
+        int faultElement = NONE;
+        float faultValue = 0.0;
+        for (int d = lane; d < pc.headDim; d += LANES) {
+            float value = Out[outBase + uint(d)];
+            for (int i = 0; i < limit; ++i) {
+                precise float product = sWeight[i] * KV[uint(base + i) * uint(pc.headDim) + uint(d)];
+                precise float nextValue = value + product;
+                if (!finiteValue(nextValue)) {
+                    if (i < faultSlot) { faultSlot = i; faultElement = d; faultValue = nextValue; }
+                    break;
+                }
+                value = nextValue;
+            }
+            Out[outBase + uint(d)] = value;
+        }
+        sFaultSlot[lane] = faultSlot;
+        sFaultElement[lane] = faultElement;
+        sFaultValue[lane] = faultValue;
+        sync();
+        if (lane == 0) {
+            publishFirstLaneFault(head, 5u, base);
+            if (sStop == 0u && limit < count) {
+                fault(head, 4u, base + limit, -1, sWeight[limit]);
+                sStop = 1u;
+            }
+        }
+        sync();
+        if (sStop != 0u) return;
+    }
+
+    int faultElement = NONE;
+    float faultValue = 0.0;
+    for (int d = lane; d < pc.headDim; d += LANES) {
+        float value = Out[outBase + uint(d)];
+        if (!finiteValue(value)) { faultElement = d; faultValue = value; break; }
+    }
+    sFaultSlot[lane] = NONE;
+    sFaultElement[lane] = faultElement;
+    sFaultValue[lane] = faultValue;
+    sync();
+    if (lane == 0) publishFirstLaneFault(head, 6u, 0);
 }
