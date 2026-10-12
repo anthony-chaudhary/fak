@@ -1298,6 +1298,7 @@ func (c *cudaBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, gr
 
 // SpecVerifyAttention runs the split-KV multi-query speculative verify attention kernel (#11100).
 // q is [qLen, nH, d], k is [kvLen, nHkv, d], v is [kvLen, nHkv, d], out is [qLen, nH, d].
+// Inputs and any reused output must be live row-major F32 CUDA tensors.
 // Query tiling across BLOCK_M with KV sequence splitting across NUM_SEGMENTS
 // thread blocks and online softmax merging.
 func (c *cudaBackend) SpecVerifyAttention(q, k, v, out *Tensor, qLen, kvLen, nH, nHkv, d int) error {
@@ -1330,6 +1331,10 @@ func (c *cudaBackend) SpecVerifyAttention(q, k, v, out *Tensor, qLen, kvLen, nH,
 
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+
+	if err := c.validateSpecVerifyOperandsLocked(q, k, v, out, expectedQ); err != nil {
+		return err
+	}
 
 	if out.buf == nil || out.Numel() != expectedQ {
 		devOut, _ := c.devTr([]int{qLen, nH, d}, F32)
