@@ -539,6 +539,9 @@ type Server struct {
 	modelLoadMu sync.Mutex
 	modelLoad   *ModelLoadProfile
 
+	// executionPolicy is the optional /healthz execution_policy block (SetExecutionPolicy).
+	executionPolicy atomic.Pointer[ExecutionPolicyReport]
+
 	// endpointsProvider is the optional pull source for the live accounts+nodes block
 	// on /debug/vars (the "endpoints" block). fak guard wires it to a closure over the
 	// on-box account roster + the resolved serving nodes (see cmd/fak/guard_endpoints.go);

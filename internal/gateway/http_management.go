@@ -493,6 +493,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if s.inKernelModelButChatIsMock {
 		health["in_kernel_model_but_chat_is_mock"] = true
 	}
+	if ep := s.executionPolicy.Load(); ep != nil {
+		health["execution_policy"] = ep
+	}
 	// A boot-time fixed-prompt decode can prove that the local model is loaded but
 	// incoherent. Keep that process out of readiness until it restarts and probes
 	// cleanly; proxy/mock serves never arm this gate.

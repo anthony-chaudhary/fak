@@ -245,16 +245,27 @@ func lookupRegisteredServeBackend(name string) (compute.Backend, error) {
 }
 
 func resolveServeChatBackend(backendName string) (compute.Backend, error) {
+	return resolveServeChatBackendForPolicy(backendName, nil)
+}
+
+// resolveServeChatBackendForPolicy is resolveServeChatBackend under an execution
+// policy: an admitted bringup policy lifts the GFX1151 device-only refusal and
+// serves the selected backend (nil = host CPU) instead.
+func resolveServeChatBackendForPolicy(backendName string, policy *serveExecutionPolicy) (compute.Backend, error) {
 	halo, _, err := computestrix.DetectPhysicalGFX1151("", "")
 	if err != nil {
 		return nil, &haloHardwareDetectionError{Cause: err}
 	}
-	return resolveServeChatBackendForHost(backendName, os.Getenv("FAK_BACKEND"), runtime.GOOS, lookupRegisteredServeBackend, halo)
+	return resolveServeChatBackendForHostPolicy(backendName, os.Getenv("FAK_BACKEND"), runtime.GOOS, lookupRegisteredServeBackend, halo, policy)
 }
 
 // resolveServeChatBackendForHost is the deterministic admission seam. Production passes
 // physical Halo evidence; tests inject the host fact and backend registry directly.
 func resolveServeChatBackendForHost(backendName, envValue, goos string, lookup serveBackendLookup, halo bool) (compute.Backend, error) {
+	return resolveServeChatBackendForHostPolicy(backendName, envValue, goos, lookup, halo, nil)
+}
+
+func resolveServeChatBackendForHostPolicy(backendName, envValue, goos string, lookup serveBackendLookup, halo bool, policy *serveExecutionPolicy) (compute.Backend, error) {
 	selection, err := resolveServeBackendSelection(backendName, envValue, goos, lookup)
 	if err != nil {
 		return nil, err
@@ -262,17 +273,25 @@ func resolveServeChatBackendForHost(backendName, envValue, goos string, lookup s
 	if !halo {
 		return selection.backend, nil
 	}
+	if err := policy.admit(haloBackendRefusal(selection)); err != nil {
+		return nil, err
+	}
+	return selection.backend, nil
+}
+
+// haloBackendRefusal is the GFX1151 device-only verdict on a backend selection.
+func haloBackendRefusal(selection serveBackendSelection) error {
 	if selection.name == serveBackendCPU || selection.backend == nil {
 		reason := haloGPUReasonNoDeviceBackend
 		if selection.name == serveBackendCPU && selection.explicit {
 			reason = haloGPUReasonCPUBackend
 		}
-		return nil, &haloGPURequiredError{Reason: reason, Detail: "initialize a supported accelerator backend; CPU execution is reserved for equivalence validation"}
+		return &haloGPURequiredError{Reason: reason, Detail: "initialize a supported accelerator backend; CPU execution is reserved for equivalence validation"}
 	}
 	if !selection.backend.Caps().DeviceMemory {
-		return nil, &haloGPURequiredError{Reason: haloGPUReasonNoDeviceBackend, Detail: fmt.Sprintf("backend %q does not prove non-host device residency", selection.backend.Name())}
+		return &haloGPURequiredError{Reason: haloGPUReasonNoDeviceBackend, Detail: fmt.Sprintf("backend %q does not prove non-host device residency", selection.backend.Name())}
 	}
-	return selection.backend, nil
+	return nil
 }
 
 // writeBackendUnavailableBail renders the BACKEND_UNAVAILABLE bail for a --backend

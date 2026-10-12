@@ -10311,6 +10311,11 @@
           "category": "incidental",
           "reason": "Private helper reading timing configuration and deriving the two existing WSL command-availability probe durations; it does not grant security capabilities, select fallback, alter required commands, or authorize validation. It is not a separate policy-capability mechanism.",
           "token": "validateWSLPreflightBounds"
+        },
+        {
+          "category": "incidental",
+          "reason": "existing header-only forward preflight that --dry-admit now also calls; a helper name, not a policy concept.",
+          "token": "preflightServeBackendForward"
         }
       ],
       "exclude": [
@@ -10560,7 +10565,8 @@
         "verifyTailPolicyMatrix",
         "windowReceipt",
         "windowResult",
-        "wsl_preflight"
+        "wsl_preflight",
+        "preflightServeBackendForward"
       ],
       "known_tokens": [],
       "min_files": 3,
@@ -11344,6 +11350,11 @@
           "category": "incidental",
           "reason": "Private serving helper selecting the existing activated-expert ring weight plan for context-window memory sizing; it introduces no separate context lifetime or ownership model.",
           "token": "serveExpertRingContextWeights"
+        },
+        {
+          "category": "incidental",
+          "reason": "serveRuntime field holding the resolved native context window; --dry-admit reads it for its verdict, not a new context concept.",
+          "token": "nativeContext"
         }
       ],
       "exclude": [
@@ -11512,7 +11523,8 @@
         "traceContext",
         "wctx",
         "writeCtx",
-        "writeValidateTestContext"
+        "writeValidateTestContext",
+        "nativeContext"
       ],
       "known_tokens": [],
       "min_files": 3,

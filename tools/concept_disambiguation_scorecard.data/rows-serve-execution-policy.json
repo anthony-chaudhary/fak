@@ -1,0 +1,40 @@
+{
+  "rows": [
+    {
+      "id": "serveexecutionpolicy",
+      "canonical": "serve execution policy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The resolved `fak serve --execution-policy` (production or bringup): whether the GFX1151 device-only refusals apply to this serve, and which of them a bring-up-dedicated node lifted.",
+      "distinction": "Unlike the per-session model.ExecutionPolicy (device-only or not), it is the launch-time operator policy that decides whether that session policy is installed at all; bringup is admitted only when FAK_BRINGUP_DEDICATED names the served model.",
+      "distinct_from": [
+        "x-ci-coverage-policy-capability-executionpolicy"
+      ],
+      "aliases": [],
+      "grounding": "serveexecutionpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "executionpolicyreport",
+      "canonical": "execution policy report",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The /healthz execution_policy block a serve publishes under a non-production execution policy: the dedicated model and every device-only refusal token the policy bypassed.",
+      "distinction": "A read-only receipt of the serve execution policy's outcome; it decides nothing and is absent on a production serve.",
+      "distinct_from": [
+        "serveexecutionpolicy"
+      ],
+      "aliases": [],
+      "grounding": "executionpolicyreport",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "serveexecutionpolicy",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
