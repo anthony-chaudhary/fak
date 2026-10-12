@@ -16,8 +16,8 @@ package selfinstall
 // reported success, so a half-converged host was indistinguishable from a converged one.
 //
 // This file is the missing declaration. Roles() names ONE canonical path per role — derived
-// from the repo root, the home dir, and the invoking (scheduled) binary, and NEVER from an
-// ambient PATH lookup, so the table cannot shift under a changed PATH. Census() says what each
+// from explicit host inputs, including the captured PATH order for the Windows installer
+// role, rather than an ambient exec.LookPath lookup. Census() says what each
 // of those files actually is, AuditCopies() says whether they agree, and Convergeable() says
 // which ones an unattended self-update may swap. The rest — the roles it may NOT swap — must
 // still be reported, because "converge or explicitly audit EVERY configured hot copy" is the
@@ -55,15 +55,15 @@ const (
 	// RoleScheduled is the binary a scheduled task pinned at REGISTRATION time and re-executes
 	// every tick. It is frozen at whatever was on disk that day unless something converges it.
 	RoleScheduled Role = "scheduled"
-	// RoleLocalPrograms is the newest <LocalAppData>/Programs/fak/<build>/bin/fak[.exe]: a
-	// per-user Windows install that prepends itself to the user PATH. Nothing else rebuilds it,
-	// so once installed it shadows every fresher copy unless self-update converges it in place.
+	// RoleLocalPrograms is the first <LocalAppData>/Programs/fak/<build>/bin/fak[.exe]
+	// named by PATH, falling back to newest mtime when none is named. This per-user Windows
+	// install can shadow fresher copies unless self-update converges the selected copy in place.
 	RoleLocalPrograms Role = "localprograms"
 )
 
 // Host roots the role table. Every path is derived from these inputs and nothing else —
-// in particular never from `exec.LookPath("fak")`, so "which binary is role X?" has one answer
-// that does not depend on the environment a tick happened to inherit.
+// in particular never from an ambient `exec.LookPath("fak")`. The caller captures PATH once
+// for the installer role; fixed roles continue to derive only from their declared roots.
 type Host struct {
 	RepoRoot  string // the checkout (RoleGate, RoleWorker)
 	Home      string // the user home dir (RolePath, RoleGoBin)
@@ -71,6 +71,9 @@ type Host struct {
 	// LocalAppData is the per-user Windows app-data root (RoleLocalPrograms). Callers set it only
 	// on Windows, so the role is absent elsewhere.
 	LocalAppData string
+	// PathDirs is the caller's captured PATH in resolution order. Only RoleLocalPrograms uses
+	// it, and only for binaries inside LocalAppData's installer tree. Empty means mtime fallback.
+	PathDirs []string
 }
 
 // HotCopy is one role's canonical path plus what the file at that path actually is. A copy that
@@ -98,6 +101,7 @@ type StampProbe func(path string) (build string, dirty bool, ok bool)
 // invented, so the table never claims an install location that does not exist.
 func Roles(h Host) []HotCopy {
 	exe := "fak" + binExt()
+	localPrograms, _ := localProgramsCopies(h, exe)
 	plan := []struct {
 		role Role
 		path string
@@ -107,7 +111,7 @@ func Roles(h Host) []HotCopy {
 		{RolePath, under(h.Home, "bin", exe)},
 		{RoleGoBin, under(h.Home, "go", "bin", exe)},
 		{RoleScheduled, strings.TrimSpace(h.Scheduled)},
-		{RoleLocalPrograms, newestLocalProgramsBinary(h.LocalAppData, exe)},
+		{RoleLocalPrograms, localPrograms},
 	}
 	out := make([]HotCopy, 0, len(plan))
 	for _, p := range plan {
@@ -470,21 +474,29 @@ func under(base string, parts ...string) string {
 	return filepath.Join(append([]string{base}, parts...)...)
 }
 
-// newestLocalProgramsBinary picks the <root>/Programs/fak/*/bin/<exe> with the newest mtime,
-// breaking ties by the greater directory name so the choice is deterministic. Each install lands
-// in its own build-named directory and the latest one is the one an installer put on PATH, so the
-// newest is the live shadowing copy. A missing tree yields "" and therefore no role row.
-func newestLocalProgramsBinary(root, exe string) string {
-	base := under(root, "Programs", "fak")
+// LocalProgramsSiblings returns the other installed binaries under Programs/fak in stable
+// directory order. They are report-only: they do not add roles or convergence targets, and
+// their presence alone does not prove that their builds are older than the selected copy.
+func LocalProgramsSiblings(h Host) []string {
+	_, siblings := localProgramsCopies(h, "fak"+binExt())
+	return siblings
+}
+
+// localProgramsCopies shares selection between the role table and sibling diagnostics.
+// The first matching PATH directory wins even when a newer installer directory exists;
+// mtime (then greater build-directory name) is only a fallback when PATH names none.
+func localProgramsCopies(h Host, exe string) (string, []string) {
+	base := under(h.LocalAppData, "Programs", "fak")
 	if base == "" {
-		return ""
+		return "", nil
 	}
 	entries, err := os.ReadDir(base)
 	if err != nil {
-		return ""
+		return "", nil
 	}
 	best, bestName := "", ""
 	var bestMod int64
+	var copies []string
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -494,12 +506,44 @@ func newestLocalProgramsBinary(root, exe string) string {
 		if serr != nil || st.IsDir() {
 			continue
 		}
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
+		copies = append(copies, p)
 		mod := st.ModTime().UnixNano()
 		if best == "" || mod > bestMod || (mod == bestMod && e.Name() > bestName) {
 			best, bestName, bestMod = p, e.Name(), mod
 		}
 	}
-	return best
+	pathWinner := ""
+	for _, dir := range h.PathDirs {
+		if strings.TrimSpace(dir) == "" {
+			continue
+		}
+		candidate, err := filepath.Abs(filepath.Join(dir, exe))
+		if err != nil {
+			continue
+		}
+		for _, p := range copies {
+			if sameTransactionPath(p, candidate) {
+				pathWinner = p
+				break
+			}
+		}
+		if pathWinner != "" {
+			break
+		}
+	}
+	if pathWinner != "" {
+		best = pathWinner
+	}
+	var siblings []string
+	for _, p := range copies {
+		if p != best {
+			siblings = append(siblings, p)
+		}
+	}
+	return best, siblings
 }
 
 func binExt() string {

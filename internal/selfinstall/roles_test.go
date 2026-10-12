@@ -3,6 +3,7 @@ package selfinstall
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -424,5 +425,85 @@ func TestRolesLocalProgramsAbsentWithoutInstallTree(t *testing.T) {
 		if rows := localProgramsRows(Roles(Host{LocalAppData: appData})); len(rows) != 0 {
 			t.Errorf("%s: localprograms rows = %+v, want none", name, rows)
 		}
+	}
+}
+
+// #13831: PATH order, not install mtime, determines the copy self-update repairs.
+// fak-test:runtime fast est=50ms lane=default
+func TestRolesLocalProgramsPATHWinnerConvergesWithoutTouchingSiblings(t *testing.T) {
+	t.Parallel()
+	appData := t.TempDir()
+	mod := time.Unix(1700000000, 0)
+	old := writeLocalProgramsBinary(t, appData, "old", mod)
+	middle := writeLocalProgramsBinary(t, appData, "middle", mod.Add(time.Hour))
+	newest := writeLocalProgramsBinary(t, appData, "newest", mod.Add(2*time.Hour))
+	h := Host{LocalAppData: appData, PathDirs: []string{
+		filepath.Join(appData, "Programs", "fak", "missing", "bin"),
+		filepath.Dir(old), filepath.Dir(newest), filepath.Dir(middle), filepath.Dir(old),
+	}}
+	copies := Roles(h)
+	rows := localProgramsRows(copies)
+	if len(rows) != 1 || rows[0].Path != old || !rows[0].Present {
+		t.Fatalf("PATH winner row = %+v, want only %q", rows, old)
+	}
+	targets := ConvergeTargets(copies, "")
+	if len(targets) != 1 || targets[0] != old {
+		t.Fatalf("convergence targets = %v, want only PATH winner %q", targets, old)
+	}
+	wantSiblings := []string{middle, newest}
+	siblings := LocalProgramsSiblings(h)
+	if strings.Join(siblings, "\n") != strings.Join(wantSiblings, "\n") {
+		t.Fatalf("report-only siblings = %v, want %v", siblings, wantSiblings)
+	}
+	// Exercise the same activation primitive self-update uses, on fixture bytes only.
+	result := RunLaunchTransaction([]Copy{{Source: newest, Target: targets[0]}}, targets[0], OSSwap)
+	if updated, ok := result.(Updated); !ok || updated.Changed != 1 {
+		t.Fatalf("converge PATH winner = %#v, want one updated copy", result)
+	}
+	for path, want := range map[string]string{old: "newest", middle: "middle", newest: "newest"} {
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != want {
+			t.Fatalf("installed copy %q = %q, %v; want %q", path, got, err, want)
+		}
+	}
+	if got := LocalProgramsSiblings(h); strings.Join(got, "\n") != strings.Join(wantSiblings, "\n") {
+		t.Fatalf("repair changed the report-only sibling set: %v", got)
+	}
+}
+
+// fak-test:runtime fast est=20ms lane=default
+func TestRolesLocalProgramsPATHOrderAndFallback(t *testing.T) {
+	t.Parallel()
+	appData := t.TempDir()
+	mod := time.Unix(1700000000, 0)
+	old := writeLocalProgramsBinary(t, appData, "old", mod)
+	middle := writeLocalProgramsBinary(t, appData, "middle", mod.Add(time.Hour))
+	newest := writeLocalProgramsBinary(t, appData, "newest", mod.Add(2*time.Hour))
+	for _, tc := range []struct {
+		name string
+		dirs []string
+		want string
+	}{
+		{"older first", []string{filepath.Dir(old), filepath.Dir(middle)}, old},
+		{"reversed PATH", []string{filepath.Dir(middle), filepath.Dir(old)}, middle},
+		{"none match", []string{filepath.Join(appData, "elsewhere")}, newest},
+		{"unset PATH", nil, newest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows := localProgramsRows(Roles(Host{LocalAppData: appData, PathDirs: tc.dirs}))
+			if len(rows) != 1 || rows[0].Path != tc.want {
+				t.Fatalf("role = %+v, want %q", rows, tc.want)
+			}
+		})
+	}
+	if runtime.GOOS == "windows" {
+		t.Run("quoted Windows PATH with mixed case and separators", func(t *testing.T) {
+			dir := strings.ToUpper(filepath.ToSlash(filepath.Dir(old))) + "/"
+			dirs := filepath.SplitList(`"` + dir + `";` + filepath.Dir(newest))
+			rows := localProgramsRows(Roles(Host{LocalAppData: appData, PathDirs: dirs}))
+			if len(rows) != 1 || rows[0].Path != old {
+				t.Fatalf("normalized Windows PATH role = %+v, want %q", rows, old)
+			}
+		})
 	}
 }

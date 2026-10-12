@@ -384,7 +384,7 @@ func selfUpdateFetchOrigin(ctx context.Context, runner selfinstall.Runner, repoR
 func selfUpdateHost(repoRoot string) selfinstall.Host {
 	exe, _ := os.Executable()
 	home, _ := os.UserHomeDir()
-	h := selfinstall.Host{RepoRoot: repoRoot, Home: home}
+	h := selfinstall.Host{RepoRoot: repoRoot, Home: home, PathDirs: filepath.SplitList(os.Getenv("PATH"))}
 	// Only a running fak build is a fak copy: as the standalone fak-selfupdate helper, naming
 	// itself here would get it audited as stale fak and overwritten with the fak binary.
 	if runningAsFak() {

@@ -31,6 +31,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
+	"github.com/anthony-chaudhary/fak/internal/selfinstall"
 	"github.com/anthony-chaudhary/fak/internal/trajectory"
 )
 
@@ -145,6 +146,16 @@ func runDoctor(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 		if pathRec.Severity == appversion.SeverityWarn {
 			rep.Findings++
 		}
+		// Installer siblings can be absent from PATH altogether, so the PATH scan cannot
+		// report them. Use the updater's role selection without adding any swap targets.
+		if runtime.GOOS == "windows" {
+			if home, err := os.UserHomeDir(); err == nil && home != "" {
+				appendLocalProgramsFindings(&rep, selfinstall.Host{
+					LocalAppData: filepath.Join(home, "AppData", "Local"),
+					PathDirs:     filepath.SplitList(os.Getenv("PATH")),
+				})
+			}
+		}
 
 		if *asJSON {
 			b, _ := json.MarshalIndent(rep, "", "  ")
@@ -167,6 +178,28 @@ func runDoctor(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 	rep := diagnose(input, answershape.Limits{MaxRepeat: *maxRepeat, MaxChars: *maxChars, NGram: *ngram})
 
 	return renderJSONOrHuman(stdout, *asJSON, rep, writeDoctorHuman, rep.Findings > 0)
+}
+
+// appendLocalProgramsFindings reports leftover installer copies without asserting an
+// unwitnessed build age. The localprograms role selects one installer copy; another
+// declared role (for example a scheduled pin) may independently name a sibling.
+func appendLocalProgramsFindings(rep *appversion.BinaryReport, host selfinstall.Host) {
+	selected := ""
+	for _, copy := range selfinstall.Roles(host) {
+		if copy.Role == selfinstall.RoleLocalPrograms {
+			selected = copy.Path
+			break
+		}
+	}
+	for _, path := range selfinstall.LocalProgramsSiblings(host) {
+		rep.Recommendations = append(rep.Recommendations, appversion.BinaryRecommendation{
+			Check:     "binary-localprograms-sibling",
+			Severity:  appversion.SeverityWarn,
+			Finding:   "additional Programs fak install at " + path + "; selected localprograms role is " + selected,
+			Recommend: "review this additional installer directory; the localprograms role selects one installer copy and does not remove sibling directories or rewrite PATH",
+		})
+		rep.Findings++
+	}
 }
 
 func writeBinaryDoctorHuman(w io.Writer, rep appversion.BinaryReport) {
