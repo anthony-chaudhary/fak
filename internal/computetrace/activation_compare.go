@@ -23,13 +23,15 @@ const (
 	// first such identity.
 	TraceDivergent Verdict = "DIVERGENT"
 	// TraceIncomparable: the traces cannot be meaningfully compared (dropped
-	// samples, conflicting provenance, missing/duplicate identities, or
-	// incompatible shapes). Never treat this as agreement.
+	// samples, conflicting provenance, missing/duplicate identities,
+	// incompatible shapes, or invalid tolerances). Never treat this as agreement.
 	TraceIncomparable Verdict = "INCOMPARABLE"
 )
 
 // ActivationTolerance is the caller-declared comparison tolerance. A sample
 // value pair (a, b) matches when |a-b| <= Atol + Rtol*|b|.
+// Atol and Rtol must be finite and non-negative; otherwise the comparison is
+// INCOMPARABLE. The zero value requests exact equality of finite samples.
 type ActivationTolerance struct {
 	Atol float64
 	Rtol float64
@@ -64,6 +66,10 @@ func incomparable(reason string) ActivationComparison {
 // identity. A trace with no sampled events at all is INCOMPARABLE -- a
 // sampleless trace is not evidence of agreement.
 func CompareActivationTraces(ref, got Artifact, tol ActivationTolerance) ActivationComparison {
+	if math.IsNaN(tol.Atol) || math.IsInf(tol.Atol, 0) || tol.Atol < 0 ||
+		math.IsNaN(tol.Rtol) || math.IsInf(tol.Rtol, 0) || tol.Rtol < 0 {
+		return incomparable("activation tolerances must be finite and non-negative")
+	}
 	if ref.DroppedSampleValues != 0 || got.DroppedSampleValues != 0 {
 		return incomparable("a trace dropped activation samples; agreement cannot be proven")
 	}
