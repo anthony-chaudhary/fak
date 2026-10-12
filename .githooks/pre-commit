@@ -9,6 +9,7 @@
 #      - Run secret leak audit: python "$companion/tools/scrub_public_copy.py" --audit-staged --root .
 #      - Run 5-Gate boundary verification with the absolute public repository root after go -C changes directory
 #      - Output: "✅ Companion 5-Gate boundary & leak checks passed."
+#      - Trunk-publication guard: fak-run fak-flow trunk commit-guard --repo-root <this repo>
 #   5) If Companion Absent:
 #      - Run public boundary lint: go run ./cmd/fak-dev boundary
 #      - Output: "ℹ️ Standalone public checkout; public boundary checks passed."
@@ -107,6 +108,24 @@ if [ -n "$companion" ]; then
     fi
 
     echo "✅ Companion 5-Gate boundary & leak checks passed."
+
+    # A commit onto main is admitted by the companion's trunk-publication guard,
+    # which refuses stacking on stale unpublished commits and records the attempt
+    # in this repository's landing ledger. Exit 1 refuses; anything else fails open.
+    if command -v fak-run >/dev/null 2>&1; then
+        set +e
+        (cd "$companion" && fak-run fak-flow trunk commit-guard --repo-root "$REPO_ROOT")
+        guard_rc=$?
+        set -e
+        if [ "$guard_rc" -eq 1 ]; then
+            echo "" >&2
+            echo "❌ COMMIT BLOCKED: main already holds stale unpublished commits (see the guard output above)." >&2
+            echo "   Publish or converge main first, or commit on a lane branch and land it." >&2
+            exit 1
+        elif [ "$guard_rc" -ne 0 ]; then
+            echo "⚠️  ADVISORY: trunk-publication guard unavailable (exit $guard_rc); committing anyway."
+        fi
+    fi
 else
     echo "ℹ️ Standalone public checkout (no companion fak-private detected)."
     echo "Running public boundary lint..."
