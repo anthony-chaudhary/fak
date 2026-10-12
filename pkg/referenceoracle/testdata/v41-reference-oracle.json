@@ -1,0 +1,2395 @@
+{
+ "schema": "fak.v41_reference_oracle.v1",
+ "evidence_label": "[HW-WITNESSED]",
+ "captured_utc": "2026-10-12T02:43Z..03:01Z",
+ "reference_engine": {
+  "repo": "https://github.com/vcruz305/llama.cpp",
+  "branch": "runtime/deepseek41",
+  "commit": "5210c7c5ed61dddaee6ed476623abf4b63093d16",
+  "sha256": {
+   "llama-cli": "b0e5da80f8286531a9bf371ddbaae5c2c796607ae7c3be7e1af3b6ecc4a409f5",
+   "llama-server": "9e30ee6e8e6673b08beb21b514c0e05c3f98a4e3f67d3d4dd62c2bf539f85a6a"
+  }
+ },
+ "model": {
+  "repo_id": "vcruz305/DeepSeek-V4.1-Flash-GGUF",
+  "revision": "543d86fd975044332d4366204eadd6da1b0cbeda",
+  "quant": "Q2_K",
+  "shards": 7,
+  "shard1": "DeepSeek-V4.1-Flash-Q2_K-00001-of-00007.gguf",
+  "shard1_sha256": "0bcee934bd4e8350c54410681d9300b0321a300fcb1df1437a20703394d08ee0",
+  "total_bytes": 264515279456
+ },
+ "request": {
+  "temperature": 0,
+  "seed": 42,
+  "n_predict": 16,
+  "n_probs": 5
+ },
+ "determinism": {
+  "method": "second identical run of all four prompts on the same server",
+  "results": [
+   {
+    "prompt": "The chemical symbol for gold is",
+    "greedy_tokens_identical": true,
+    "top5_logprobs_identical_1e-6": true
+   },
+   {
+    "prompt": "The capital of France is",
+    "greedy_tokens_identical": true,
+    "top5_logprobs_identical_1e-6": true
+   },
+   {
+    "prompt": "Say hello.",
+    "greedy_tokens_identical": true,
+    "top5_logprobs_identical_1e-6": true
+   },
+   {
+    "prompt": "What is 17 times 3?",
+    "greedy_tokens_identical": true,
+    "top5_logprobs_identical_1e-6": true
+   }
+  ]
+ },
+ "prompts": {
+  "The chemical symbol for gold is": {
+   "prompt_token_ids": [
+    671,
+    7658,
+    7380,
+    362,
+    8495,
+    344
+   ],
+   "prompt_pieces": [
+    "The",
+    " chemical",
+    " symbol",
+    " for",
+    " gold",
+    " is"
+   ],
+   "input_token_ids": [
+    0,
+    671,
+    7658,
+    7380,
+    362,
+    8495,
+    344
+   ],
+   "tokens_evaluated": 7,
+   "greedy_token_ids": [
+    582,
+    48865,
+    4,
+    538,
+    270,
+    13851,
+    2004,
+    42203,
+    395,
+    5281,
+    582,
+    3037,
+    2367,
+    36365,
+    3305,
+    983
+   ],
+   "greedy_pieces": [
+    " \"",
+    "Au",
+    "\"",
+    " from",
+    " the",
+    " Latin",
+    " word",
+    " aur",
+    "um",
+    " meaning",
+    " \"",
+    "sh",
+    "ining",
+    " dawn",
+    "\".",
+    " It"
+   ],
+   "greedy_text": " \"Au\" from the Latin word aurum meaning \"shining dawn\". It",
+   "stop_type": "limit",
+   "top5": [
+    [
+     {
+      "id": 582,
+      "piece": " \"",
+      "logprob": -1.103766,
+      "prob": 0.33162
+     },
+     {
+      "id": 21556,
+      "piece": " Au",
+      "logprob": -1.56419,
+      "prob": 0.209257
+     },
+     {
+      "id": 38323,
+      "piece": " AU",
+      "logprob": -1.790398,
+      "prob": 0.166894
+     },
+     {
+      "id": 811,
+      "piece": " “",
+      "logprob": -2.950043,
+      "prob": 0.052337
+     },
+     {
+      "id": 905,
+      "piece": " '",
+      "logprob": -3.298134,
+      "prob": 0.036952
+     }
+    ],
+    [
+     {
+      "id": 48865,
+      "piece": "Au",
+      "logprob": -0.107273,
+      "prob": 0.89828
+     },
+     {
+      "id": 33211,
+      "piece": "AU",
+      "logprob": -2.330788,
+      "prob": 0.097219
+     },
+     {
+      "id": 11124,
+      "piece": "Ag",
+      "logprob": -6.210964,
+      "prob": 0.002007
+     },
+     {
+      "id": 21556,
+      "piece": " Au",
+      "logprob": -7.04652,
+      "prob": 0.00087
+     },
+     {
+      "id": 1751,
+      "piece": "au",
+      "logprob": -7.088846,
+      "prob": 0.000834
+     }
+    ],
+    [
+     {
+      "id": 4,
+      "piece": "\"",
+      "logprob": -0.605063,
+      "prob": 0.54604
+     },
+     {
+      "id": 3305,
+      "piece": "\".",
+      "logprob": -1.914301,
+      "prob": 0.147445
+     },
+     {
+      "id": 1760,
+      "piece": "\",",
+      "logprob": -2.098711,
+      "prob": 0.122614
+     },
+     {
+      "id": 3184,
+      "piece": ",\"",
+      "logprob": -2.403018,
+      "prob": 0.090445
+     },
+     {
+      "id": 34258,
+      "piece": "\".\n",
+      "logprob": -3.445357,
+      "prob": 0.031893
+     }
+    ],
+    [
+     {
+      "id": 538,
+      "piece": " from",
+      "logprob": -0.774727,
+      "prob": 0.46083
+     },
+     {
+      "id": 778,
+      "piece": " which",
+      "logprob": -1.419279,
+      "prob": 0.241888
+     },
+     {
+      "id": 305,
+      "piece": " and",
+      "logprob": -2.482088,
+      "prob": 0.083569
+     },
+     {
+      "id": 12283,
+      "piece": " derived",
+      "logprob": -2.655434,
+      "prob": 0.070268
+     },
+     {
+      "id": 343,
+      "piece": " (",
+      "logprob": -3.136442,
+      "prob": 0.043437
+     }
+    ],
+    [
+     {
+      "id": 270,
+      "piece": " the",
+      "logprob": -0.332774,
+      "prob": 0.716932
+     },
+     {
+      "id": 1009,
+      "piece": " its",
+      "logprob": -1.54906,
+      "prob": 0.212448
+     },
+     {
+      "id": 13851,
+      "piece": " Latin",
+      "logprob": -2.727437,
+      "prob": 0.065387
+     },
+     {
+      "id": 1205,
+      "piece": " what",
+      "logprob": -6.920655,
+      "prob": 0.000987
+     },
+     {
+      "id": 778,
+      "piece": " which",
+      "logprob": -7.020713,
+      "prob": 0.000893
+     }
+    ],
+    [
+     {
+      "id": 13851,
+      "piece": " Latin",
+      "logprob": -0.025278,
+      "prob": 0.975039
+     },
+     {
+      "id": 83737,
+      "piece": " latin",
+      "logprob": -3.894886,
+      "prob": 0.020346
+     },
+     {
+      "id": 42761,
+      "piece": " ____",
+      "logprob": -6.766184,
+      "prob": 0.001152
+     },
+     {
+      "id": 28534,
+      "piece": " ______",
+      "logprob": -7.491085,
+      "prob": 0.000558
+     },
+     {
+      "id": 45080,
+      "piece": " _____",
+      "logprob": -7.84387,
+      "prob": 0.000392
+     }
+    ],
+    [
+     {
+      "id": 2004,
+      "piece": " word",
+      "logprob": -0.193942,
+      "prob": 0.823706
+     },
+     {
+      "id": 2112,
+      "piece": " term",
+      "logprob": -2.059239,
+      "prob": 0.127551
+     },
+     {
+      "id": 42203,
+      "piece": " aur",
+      "logprob": -3.860421,
+      "prob": 0.021059
+     },
+     {
+      "id": 582,
+      "piece": " \"",
+      "logprob": -4.295069,
+      "prob": 0.013636
+     },
+     {
+      "id": 15761,
+      "piece": " ''",
+      "logprob": -4.800833,
+      "prob": 0.008223
+     }
+    ],
+    [
+     {
+      "id": 42203,
+      "piece": " aur",
+      "logprob": -0.119109,
+      "prob": 0.887711
+     },
+     {
+      "id": 582,
+      "piece": " \"",
+      "logprob": -2.745518,
+      "prob": 0.064215
+     },
+     {
+      "id": 362,
+      "piece": " for",
+      "logprob": -3.298516,
+      "prob": 0.036938
+     },
+     {
+      "id": 73212,
+      "piece": " Aurora",
+      "logprob": -5.727229,
+      "prob": 0.003256
+     },
+     {
+      "id": 45003,
+      "piece": " Aur",
+      "logprob": -5.78836,
+      "prob": 0.003063
+     }
+    ],
+    [
+     {
+      "id": 395,
+      "piece": "um",
+      "logprob": -4.4e-05,
+      "prob": 0.999956
+     },
+     {
+      "id": 1613,
+      "piece": "...",
+      "logprob": -11.690903,
+      "prob": 8e-06
+     },
+     {
+      "id": 33,
+      "piece": "?",
+      "logprob": -12.199867,
+      "prob": 5e-06
+     },
+     {
+      "id": 3970,
+      "piece": "umn",
+      "logprob": -12.27553,
+      "prob": 5e-06
+     },
+     {
+      "id": 3688,
+      "piece": " um",
+      "logprob": -12.598787,
+      "prob": 3e-06
+     }
+    ],
+    [
+     {
+      "id": 5281,
+      "piece": " meaning",
+      "logprob": -0.92879,
+      "prob": 0.395031
+     },
+     {
+      "id": 14,
+      "piece": ",",
+      "logprob": -1.285188,
+      "prob": 0.276599
+     },
+     {
+      "id": 16,
+      "piece": ".",
+      "logprob": -1.512113,
+      "prob": 0.220444
+     },
+     {
+      "id": 339,
+      "piece": ".\n\n",
+      "logprob": -3.333984,
+      "prob": 0.035651
+     },
+     {
+      "id": 603,
+      "piece": ".\n",
+      "logprob": -3.912452,
+      "prob": 0.019991
+     }
+    ],
+    [
+     {
+      "id": 582,
+      "piece": " \"",
+      "logprob": -0.336,
+      "prob": 0.714623
+     },
+     {
+      "id": 48189,
+      "piece": " shining",
+      "logprob": -1.302656,
+      "prob": 0.271809
+     },
+     {
+      "id": 811,
+      "piece": " “",
+      "logprob": -4.795721,
+      "prob": 0.008265
+     },
+     {
+      "id": 42265,
+      "piece": " shine",
+      "logprob": -6.897829,
+      "prob": 0.00101
+     },
+     {
+      "id": 8060,
+      "piece": " ...\n\n",
+      "logprob": -7.024801,
+      "prob": 0.00089
+     }
+    ],
+    [
+     {
+      "id": 3037,
+      "piece": "sh",
+      "logprob": -0.016755,
+      "prob": 0.983385
+     },
+     {
+      "id": 30478,
+      "piece": "shine",
+      "logprob": -4.496975,
+      "prob": 0.011143
+     },
+     {
+      "id": 48189,
+      "piece": " shining",
+      "logprob": -5.841513,
+      "prob": 0.002904
+     },
+     {
+      "id": 4614,
+      "piece": "Sh",
+      "logprob": -6.564572,
+      "prob": 0.001409
+     },
+     {
+      "id": 69865,
+      "piece": "gold",
+      "logprob": -7.526728,
+      "prob": 0.000538
+     }
+    ],
+    [
+     {
+      "id": 2367,
+      "piece": "ining",
+      "logprob": -0.005256,
+      "prob": 0.994758
+     },
+     {
+      "id": 25493,
+      "piece": "inning",
+      "logprob": -5.302009,
+      "prob": 0.004982
+     },
+     {
+      "id": 1188,
+      "piece": "ning",
+      "logprob": -9.354739,
+      "prob": 8.7e-05
+     },
+     {
+      "id": 288,
+      "piece": "ing",
+      "logprob": -9.966195,
+      "prob": 4.7e-05
+     },
+     {
+      "id": 48503,
+      "piece": "inging",
+      "logprob": -10.306125,
+      "prob": 3.3e-05
+     }
+    ],
+    [
+     {
+      "id": 36365,
+      "piece": " dawn",
+      "logprob": -0.309816,
+      "prob": 0.733582
+     },
+     {
+      "id": 834,
+      "piece": " one",
+      "logprob": -2.525121,
+      "prob": 0.080049
+     },
+     {
+      "id": 4,
+      "piece": "\"",
+      "logprob": -2.602635,
+      "prob": 0.074078
+     },
+     {
+      "id": 3305,
+      "piece": "\".",
+      "logprob": -2.909597,
+      "prob": 0.054498
+     },
+     {
+      "id": 2900,
+      "piece": " light",
+      "logprob": -4.845983,
+      "prob": 0.00786
+     }
+    ],
+    [
+     {
+      "id": 3305,
+      "piece": "\".",
+      "logprob": -0.728002,
+      "prob": 0.482873
+     },
+     {
+      "id": 2148,
+      "piece": ".\"",
+      "logprob": -2.035263,
+      "prob": 0.130646
+     },
+     {
+      "id": 4,
+      "piece": "\"",
+      "logprob": -2.063215,
+      "prob": 0.127045
+     },
+     {
+      "id": 13404,
+      "piece": "\".\n\n",
+      "logprob": -2.693701,
+      "prob": 0.06763
+     },
+     {
+      "id": 1760,
+      "piece": "\",",
+      "logprob": -2.733875,
+      "prob": 0.064967
+     }
+    ],
+    [
+     {
+      "id": 983,
+      "piece": " It",
+      "logprob": -0.247722,
+      "prob": 0.780577
+     },
+     {
+      "id": 10243,
+      "piece": " Gold",
+      "logprob": -2.783935,
+      "prob": 0.061795
+     },
+     {
+      "id": 455,
+      "piece": " The",
+      "logprob": -2.931821,
+      "prob": 0.0533
+     },
+     {
+      "id": 660,
+      "piece": " In",
+      "logprob": -4.562353,
+      "prob": 0.010437
+     },
+     {
+      "id": 4588,
+      "piece": " ...",
+      "logprob": -4.565105,
+      "prob": 0.010409
+     }
+    ]
+   ],
+   "low_margin_positions": []
+  },
+  "The capital of France is": {
+   "prompt_token_ids": [
+    671,
+    6102,
+    294,
+    8760,
+    344
+   ],
+   "prompt_pieces": [
+    "The",
+    " capital",
+    " of",
+    " France",
+    " is"
+   ],
+   "input_token_ids": [
+    0,
+    671,
+    6102,
+    294,
+    8760,
+    344
+   ],
+   "tokens_evaluated": 6,
+   "greedy_token_ids": [
+    11111,
+    16,
+    660,
+    223,
+    4215,
+    21,
+    14,
+    270,
+    4593,
+    734,
+    5185,
+    515,
+    2448,
+    223,
+    20,
+    16
+   ],
+   "greedy_pieces": [
+    " Paris",
+    ".",
+    " In",
+    " ",
+    "192",
+    "3",
+    ",",
+    " the",
+    " city",
+    "'s",
+    " population",
+    " was",
+    " around",
+    " ",
+    "2",
+    "."
+   ],
+   "greedy_text": " Paris. In 1923, the city's population was around 2.",
+   "stop_type": "limit",
+   "top5": [
+    [
+     {
+      "id": 11111,
+      "piece": " Paris",
+      "logprob": -0.246239,
+      "prob": 0.781735
+     },
+     {
+      "id": 260,
+      "piece": " a",
+      "logprob": -3.349782,
+      "prob": 0.035092
+     },
+     {
+      "id": 3459,
+      "piece": " known",
+      "logprob": -4.027934,
+      "prob": 0.017811
+     },
+     {
+      "id": 12734,
+      "piece": " famous",
+      "logprob": -4.252623,
+      "prob": 0.014227
+     },
+     {
+      "id": 1137,
+      "piece": ":\n",
+      "logprob": -4.656266,
+      "prob": 0.009502
+     }
+    ],
+    [
+     {
+      "id": 16,
+      "piece": ".",
+      "logprob": -0.410825,
+      "prob": 0.663103
+     },
+     {
+      "id": 603,
+      "piece": ".\n",
+      "logprob": -2.119785,
+      "prob": 0.120057
+     },
+     {
+      "id": 14,
+      "piece": ",",
+      "logprob": -2.419875,
+      "prob": 0.088933
+     },
+     {
+      "id": 339,
+      "piece": ".\n\n",
+      "logprob": -3.100898,
+      "prob": 0.045009
+     },
+     {
+      "id": 305,
+      "piece": " and",
+      "logprob": -4.345298,
+      "prob": 0.012968
+     }
+    ],
+    [
+     {
+      "id": 660,
+      "piece": " In",
+      "logprob": -0.657494,
+      "prob": 0.518148
+     },
+     {
+      "id": 455,
+      "piece": " The",
+      "logprob": -1.921731,
+      "prob": 0.146353
+     },
+     {
+      "id": 11111,
+      "piece": " Paris",
+      "logprob": -3.00281,
+      "prob": 0.049647
+     },
+     {
+      "id": 983,
+      "piece": " It",
+      "logprob": -3.073523,
+      "prob": 0.046258
+     },
+     {
+      "id": 4588,
+      "piece": " ...",
+      "logprob": -3.331114,
+      "prob": 0.035753
+     }
+    ],
+    [
+     {
+      "id": 223,
+      "piece": " ",
+      "logprob": -0.070105,
+      "prob": 0.932296
+     },
+     {
+      "id": 270,
+      "piece": " the",
+      "logprob": -2.746708,
+      "prob": 0.064139
+     },
+     {
+      "id": 7213,
+      "piece": " French",
+      "logprob": -7.417624,
+      "prob": 0.000601
+     },
+     {
+      "id": 566,
+      "piece": " this",
+      "logprob": -7.85715,
+      "prob": 0.000387
+     },
+     {
+      "id": 3947,
+      "piece": " English",
+      "logprob": -8.377622,
+      "prob": 0.00023
+     }
+    ],
+    [
+     {
+      "id": 4215,
+      "piece": "192",
+      "logprob": -0.36033,
+      "prob": 0.697446
+     },
+     {
+      "id": 3885,
+      "piece": "193",
+      "logprob": -2.740548,
+      "prob": 0.064535
+     },
+     {
+      "id": 2254,
+      "piece": "197",
+      "logprob": -2.917615,
+      "prob": 0.054062
+     },
+     {
+      "id": 6917,
+      "piece": "186",
+      "logprob": -2.958825,
+      "prob": 0.05188
+     },
+     {
+      "id": 3298,
+      "piece": "195",
+      "logprob": -3.41722,
+      "prob": 0.032803
+     }
+    ],
+    [
+     {
+      "id": 21,
+      "piece": "3",
+      "logprob": -0.210345,
+      "prob": 0.810305
+     },
+     {
+      "id": 18,
+      "piece": "0",
+      "logprob": -2.693291,
+      "prob": 0.067658
+     },
+     {
+      "id": 22,
+      "piece": "4",
+      "logprob": -3.85915,
+      "prob": 0.021086
+     },
+     {
+      "id": 23,
+      "piece": "5",
+      "logprob": -3.910105,
+      "prob": 0.020038
+     },
+     {
+      "id": 24,
+      "piece": "6",
+      "logprob": -4.124747,
+      "prob": 0.016168
+     }
+    ],
+    [
+     {
+      "id": 14,
+      "piece": ",",
+      "logprob": -0.104686,
+      "prob": 0.900608
+     },
+     {
+      "id": 270,
+      "piece": " the",
+      "logprob": -2.92697,
+      "prob": 0.053559
+     },
+     {
+      "id": 436,
+      "piece": " it",
+      "logprob": -4.380694,
+      "prob": 0.012517
+     },
+     {
+      "id": 260,
+      "piece": " a",
+      "logprob": -4.717685,
+      "prob": 0.008936
+     },
+     {
+      "id": 58214,
+      "piece": " Ernest",
+      "logprob": -5.34442,
+      "prob": 0.004775
+     }
+    ],
+    [
+     {
+      "id": 270,
+      "piece": " the",
+      "logprob": -0.297313,
+      "prob": 0.742812
+     },
+     {
+      "id": 436,
+      "piece": " it",
+      "logprob": -2.141982,
+      "prob": 0.117422
+     },
+     {
+      "id": 566,
+      "piece": " this",
+      "logprob": -3.594329,
+      "prob": 0.027479
+     },
+     {
+      "id": 579,
+      "piece": " we",
+      "logprob": -4.294414,
+      "prob": 0.013645
+     },
+     {
+      "id": 34484,
+      "piece": " Pierre",
+      "logprob": -4.376964,
+      "prob": 0.012563
+     }
+    ],
+    [
+     {
+      "id": 4593,
+      "piece": " city",
+      "logprob": -0.547347,
+      "prob": 0.578483
+     },
+     {
+      "id": 12770,
+      "piece": " writer",
+      "logprob": -2.033934,
+      "prob": 0.13082
+     },
+     {
+      "id": 5625,
+      "piece": " International",
+      "logprob": -2.332766,
+      "prob": 0.097027
+     },
+     {
+      "id": 7213,
+      "piece": " French",
+      "logprob": -2.383017,
+      "prob": 0.092272
+     },
+     {
+      "id": 3707,
+      "piece": " American",
+      "logprob": -3.630057,
+      "prob": 0.026515
+     }
+    ],
+    [
+     {
+      "id": 734,
+      "piece": "'s",
+      "logprob": -0.019862,
+      "prob": 0.980334
+     },
+     {
+      "id": 936,
+      "piece": " had",
+      "logprob": -4.117816,
+      "prob": 0.01628
+     },
+     {
+      "id": 18636,
+      "piece": "´",
+      "logprob": -7.321555,
+      "prob": 0.000661
+     },
+     {
+      "id": 6006,
+      "piece": " began",
+      "logprob": -7.380343,
+      "prob": 0.000623
+     },
+     {
+      "id": 294,
+      "piece": " of",
+      "logprob": -8.097781,
+      "prob": 0.000304
+     }
+    ],
+    [
+     {
+      "id": 5185,
+      "piece": " population",
+      "logprob": -0.006183,
+      "prob": 0.993836
+     },
+     {
+      "id": 2329,
+      "piece": " name",
+      "logprob": -5.485574,
+      "prob": 0.004146
+     },
+     {
+      "id": 64054,
+      "piece": "population",
+      "logprob": -7.559368,
+      "prob": 0.000521
+     },
+     {
+      "id": 7017,
+      "piece": " former",
+      "logprob": -8.427925,
+      "prob": 0.000219
+     },
+     {
+      "id": 14216,
+      "piece": " authorities",
+      "logprob": -8.712036,
+      "prob": 0.000165
+     }
+    ],
+    [
+     {
+      "id": 515,
+      "piece": " was",
+      "logprob": -0.002546,
+      "prob": 0.997457
+     },
+     {
+      "id": 294,
+      "piece": " of",
+      "logprob": -7.034685,
+      "prob": 0.000881
+     },
+     {
+      "id": 936,
+      "piece": " had",
+      "logprob": -7.967043,
+      "prob": 0.000347
+     },
+     {
+      "id": 6006,
+      "piece": " began",
+      "logprob": -8.030951,
+      "prob": 0.000325
+     },
+     {
+      "id": 14,
+      "piece": ",",
+      "logprob": -8.485174,
+      "prob": 0.000207
+     }
+    ],
+    [
+     {
+      "id": 2448,
+      "piece": " around",
+      "logprob": -0.457885,
+      "prob": 0.63262
+     },
+     {
+      "id": 223,
+      "piece": " ",
+      "logprob": -1.161551,
+      "prob": 0.313
+     },
+     {
+      "id": 943,
+      "piece": " about",
+      "logprob": -4.165952,
+      "prob": 0.015515
+     },
+     {
+      "id": 9648,
+      "piece": " approximately",
+      "logprob": -5.468402,
+      "prob": 0.004218
+     },
+     {
+      "id": 19275,
+      "piece": " ________",
+      "logprob": -5.480752,
+      "prob": 0.004166
+     }
+    ],
+    [
+     {
+      "id": 223,
+      "piece": " ",
+      "logprob": -0.083952,
+      "prob": 0.919475
+     },
+     {
+      "id": 2038,
+      "piece": " three",
+      "logprob": -2.5324,
+      "prob": 0.079468
+     },
+     {
+      "id": 21,
+      "piece": "3",
+      "logprob": -8.529942,
+      "prob": 0.000197
+     },
+     {
+      "id": 1234,
+      "piece": " two",
+      "logprob": -9.100735,
+      "prob": 0.000112
+     },
+     {
+      "id": 305,
+      "piece": " and",
+      "logprob": -9.132833,
+      "prob": 0.000108
+     }
+    ],
+    [
+     {
+      "id": 20,
+      "piece": "2",
+      "logprob": -0.201382,
+      "prob": 0.8176
+     },
+     {
+      "id": 21,
+      "piece": "3",
+      "logprob": -1.742329,
+      "prob": 0.175112
+     },
+     {
+      "id": 19,
+      "piece": "1",
+      "logprob": -5.749585,
+      "prob": 0.003184
+     },
+     {
+      "id": 20714,
+      "piece": "850",
+      "logprob": -6.867795,
+      "prob": 0.001041
+     },
+     {
+      "id": 856,
+      "piece": "15",
+      "logprob": -7.081467,
+      "prob": 0.000841
+     }
+    ],
+    [
+     {
+      "id": 16,
+      "piece": ".",
+      "logprob": -0.009842,
+      "prob": 0.990206
+     },
+     {
+      "id": 14,
+      "piece": ",",
+      "logprob": -5.411267,
+      "prob": 0.004466
+     },
+     {
+      "id": 3646,
+      "piece": " million",
+      "logprob": -5.721409,
+      "prob": 0.003275
+     },
+     {
+      "id": 339,
+      "piece": ".\n\n",
+      "logprob": -6.729256,
+      "prob": 0.001195
+     },
+     {
+      "id": 603,
+      "piece": ".\n",
+      "logprob": -7.413214,
+      "prob": 0.000603
+     }
+    ]
+   ],
+   "low_margin_positions": []
+  },
+  "Say hello.": {
+   "prompt_token_ids": [
+    63006,
+    44388,
+    16
+   ],
+   "prompt_pieces": [
+    "Say",
+    " hello",
+    "."
+   ],
+   "input_token_ids": [
+    0,
+    63006,
+    44388,
+    16
+   ],
+   "tokens_evaluated": 4,
+   "greedy_token_ids": [
+    223,
+    939,
+    21,
+    15,
+    3663,
+    15,
+    907,
+    223,
+    779,
+    28,
+    2111,
+    223,
+    62132,
+    2295,
+    28,
+    223
+   ],
+   "greedy_pieces": [
+    " ",
+    "202",
+    "3",
+    "-",
+    "04",
+    "-",
+    "13",
+    " ",
+    "11",
+    ":",
+    "32",
+    " ",
+    "采纳",
+    "率",
+    ":",
+    " "
+   ],
+   "greedy_text": " 2023-04-13 11:32 采纳率: ",
+   "stop_type": "limit",
+   "top5": [
+    [
+     {
+      "id": 223,
+      "piece": " ",
+      "logprob": -2.708132,
+      "prob": 0.066661
+     },
+     {
+      "id": 455,
+      "piece": " The",
+      "logprob": -2.794833,
+      "prob": 0.061125
+     },
+     {
+      "id": 1350,
+      "piece": " We",
+      "logprob": -3.354738,
+      "prob": 0.034919
+     },
+     {
+      "id": 342,
+      "piece": " I",
+      "logprob": -3.421718,
+      "prob": 0.032656
+     },
+     {
+      "id": 343,
+      "piece": " (",
+      "logprob": -3.535865,
+      "prob": 0.029134
+     }
+    ],
+    [
+     {
+      "id": 939,
+      "piece": "202",
+      "logprob": -2.224013,
+      "prob": 0.108174
+     },
+     {
+      "id": 643,
+      "piece": "201",
+      "logprob": -3.19188,
+      "prob": 0.041095
+     },
+     {
+      "id": 19,
+      "piece": "1",
+      "logprob": -3.252535,
+      "prob": 0.038676
+     },
+     {
+      "id": 25,
+      "piece": "7",
+      "logprob": -3.513433,
+      "prob": 0.029794
+     },
+     {
+      "id": 26,
+      "piece": "8",
+      "logprob": -3.8931,
+      "prob": 0.020382
+     }
+    ],
+    [
+     {
+      "id": 21,
+      "piece": "3",
+      "logprob": -1.296517,
+      "prob": 0.273483
+     },
+     {
+      "id": 22,
+      "piece": "4",
+      "logprob": -1.475503,
+      "prob": 0.228664
+     },
+     {
+      "id": 20,
+      "piece": "2",
+      "logprob": -1.63736,
+      "prob": 0.194493
+     },
+     {
+      "id": 19,
+      "piece": "1",
+      "logprob": -2.080441,
+      "prob": 0.124875
+     },
+     {
+      "id": 18,
+      "piece": "0",
+      "logprob": -2.426537,
+      "prob": 0.088342
+     }
+    ],
+    [
+     {
+      "id": 15,
+      "piece": "-",
+      "logprob": -0.210507,
+      "prob": 0.810174
+     },
+     {
+      "id": 3361,
+      "piece": " ·",
+      "logprob": -2.871334,
+      "prob": 0.056623
+     },
+     {
+      "id": 695,
+      "piece": "年",
+      "logprob": -2.89723,
+      "prob": 0.055176
+     },
+     {
+      "id": 16,
+      "piece": ".",
+      "logprob": -3.516318,
+      "prob": 0.029709
+     },
+     {
+      "id": 223,
+      "piece": " ",
+      "logprob": -5.039268,
+      "prob": 0.006478
+     }
+    ],
+    [
+     {
+      "id": 3663,
+      "piece": "04",
+      "logprob": -1.98686,
+      "prob": 0.137125
+     },
+     {
+      "id": 3600,
+      "piece": "03",
+      "logprob": -2.095483,
+      "prob": 0.123011
+     },
+     {
+      "id": 2642,
+      "piece": "05",
+      "logprob": -2.099229,
+      "prob": 0.122551
+     },
+     {
+      "id": 3398,
+      "piece": "06",
+      "logprob": -2.33958,
+      "prob": 0.096368
+     },
+     {
+      "id": 779,
+      "piece": "11",
+      "logprob": -2.396848,
+      "prob": 0.091004
+     }
+    ],
+    [
+     {
+      "id": 15,
+      "piece": "-",
+      "logprob": -4.2e-05,
+      "prob": 0.999958
+     },
+     {
+      "id": 1127,
+      "piece": "–",
+      "logprob": -10.53673,
+      "prob": 2.7e-05
+     },
+     {
+      "id": 16,
+      "piece": ".",
+      "logprob": -12.994656,
+      "prob": 2e-06
+     },
+     {
+      "id": 28,
+      "piece": ":",
+      "logprob": -13.080273,
+      "prob": 2e-06
+     },
+     {
+      "id": 610,
+      "piece": "--",
+      "logprob": -13.093504,
+      "prob": 2e-06
+     }
+    ],
+    [
+     {
+      "id": 907,
+      "piece": "13",
+      "logprob": -2.819335,
+      "prob": 0.059646
+     },
+     {
+      "id": 929,
+      "piece": "14",
+      "logprob": -2.859341,
+      "prob": 0.057307
+     },
+     {
+      "id": 864,
+      "piece": "18",
+      "logprob": -2.8769,
+      "prob": 0.056309
+     },
+     {
+      "id": 3663,
+      "piece": "04",
+      "logprob": -2.950333,
+      "prob": 0.052322
+     },
+     {
+      "id": 3600,
+      "piece": "03",
+      "logprob": -2.97132,
+      "prob": 0.051236
+     }
+    ],
+    [
+     {
+      "id": 223,
+      "piece": " ",
+      "logprob": -0.002201,
+      "prob": 0.997802
+     },
+     {
+      "id": 271,
+      "piece": "\n\n",
+      "logprob": -6.609123,
+      "prob": 0.001348
+     },
+     {
+      "id": 16,
+      "piece": ".",
+      "logprob": -9.097317,
+      "prob": 0.000112
+     },
+     {
+      "id": 201,
+      "piece": "\n",
+      "logprob": -9.594064,
+      "prob": 6.8e-05
+     },
+     {
+      "id": 14,
+      "piece": ",",
+      "logprob": -10.117075,
+      "prob": 4e-05
+     }
+    ],
+    [
+     {
+      "id": 779,
+      "piece": "11",
+      "logprob": -1.855047,
+      "prob": 0.156446
+     },
+     {
+      "id": 856,
+      "piece": "15",
+      "logprob": -1.990309,
+      "prob": 0.136653
+     },
+     {
+      "id": 553,
+      "piece": "10",
+      "logprob": -2.196642,
+      "prob": 0.111176
+     },
+     {
+      "id": 926,
+      "piece": "16",
+      "logprob": -2.44054,
+      "prob": 0.087114
+     },
+     {
+      "id": 3130,
+      "piece": "09",
+      "logprob": -2.483072,
+      "prob": 0.083486
+     }
+    ],
+    [
+     {
+      "id": 28,
+      "piece": ":",
+      "logprob": -1.1e-05,
+      "prob": 0.999989
+     },
+     {
+      "id": 15,
+      "piece": "-",
+      "logprob": -12.732001,
+      "prob": 3e-06
+     },
+     {
+      "id": 223,
+      "piece": " ",
+      "logprob": -12.799628,
+      "prob": 3e-06
+     },
+     {
+      "id": 76834,
+      "piece": "年前的",
+      "logprob": -14.028797,
+      "prob": 1e-06
+     },
+     {
+      "id": 16,
+      "piece": ".",
+      "logprob": -14.291677,
+      "prob": 1e-06
+     }
+    ],
+    [
+     {
+      "id": 2111,
+      "piece": "32",
+      "logprob": -3.388903,
+      "prob": 0.033746
+     },
+     {
+      "id": 736,
+      "piece": "12",
+      "logprob": -3.403399,
+      "prob": 0.03326
+     },
+     {
+      "id": 779,
+      "piece": "11",
+      "logprob": -3.404528,
+      "prob": 0.033222
+     },
+     {
+      "id": 929,
+      "piece": "14",
+      "logprob": -3.414141,
+      "prob": 0.032905
+     },
+     {
+      "id": 926,
+      "piece": "16",
+      "logprob": -3.629565,
+      "prob": 0.026528
+     }
+    ],
+    [
+     {
+      "id": 223,
+      "piece": " ",
+      "logprob": -0.15804,
+      "prob": 0.853815
+     },
+     {
+      "id": 28,
+      "piece": ":",
+      "logprob": -1.924138,
+      "prob": 0.146001
+     },
+     {
+      "id": 271,
+      "piece": "\n\n",
+      "logprob": -8.83982,
+      "prob": 0.000145
+     },
+     {
+      "id": 4748,
+      "piece": " PM",
+      "logprob": -10.91521,
+      "prob": 1.8e-05
+     },
+     {
+      "id": 979,
+      "piece": ":\n\n",
+      "logprob": -12.267292,
+      "prob": 5e-06
+     }
+    ],
+    [
+     {
+      "id": 62132,
+      "piece": "采纳",
+      "logprob": -0.000468,
+      "prob": 0.999532
+     },
+     {
+      "id": 34631,
+      "piece": "广东省",
+      "logprob": -9.683741,
+      "prob": 6.2e-05
+     },
+     {
+      "id": 7758,
+      "piece": "关注",
+      "logprob": -9.973484,
+      "prob": 4.7e-05
+     },
+     {
+      "id": 7582,
+      "piece": "发布",
+      "logprob": -10.230949,
+      "prob": 3.6e-05
+     },
+     {
+      "id": 18,
+      "piece": "0",
+      "logprob": -11.132013,
+      "prob": 1.5e-05
+     }
+    ],
+    [
+     {
+      "id": 2295,
+      "piece": "率",
+      "logprob": -0.014758,
+      "prob": 0.98535
+     },
+     {
+      "id": 429,
+      "piece": "了",
+      "logprob": -5.026303,
+      "prob": 0.006563
+     },
+     {
+      "id": 36231,
+      "piece": "率的",
+      "logprob": -6.329297,
+      "prob": 0.001783
+     },
+     {
+      "id": 28561,
+      "piece": "率为",
+      "logprob": -6.803393,
+      "prob": 0.00111
+     },
+     {
+      "id": 21072,
+      "piece": "链接",
+      "logprob": -6.939464,
+      "prob": 0.000969
+     }
+    ],
+    [
+     {
+      "id": 28,
+      "piece": ":",
+      "logprob": -0.0,
+      "prob": 1.0
+     },
+     {
+      "id": 271,
+      "piece": "\n\n",
+      "logprob": -15.683393,
+      "prob": 0.0
+     },
+     {
+      "id": 768,
+      "piece": "：",
+      "logprob": -18.116131,
+      "prob": 0.0
+     },
+     {
+      "id": 223,
+      "piece": " ",
+      "logprob": -18.304495,
+      "prob": 0.0
+     },
+     {
+      "id": 10,
+      "piece": "(",
+      "logprob": -19.089993,
+      "prob": 0.0
+     }
+    ],
+    [
+     {
+      "id": 223,
+      "piece": " ",
+      "logprob": -0.0,
+      "prob": 1.0
+     },
+     {
+      "id": 565,
+      "piece": " -",
+      "logprob": -14.783737,
+      "prob": 0.0
+     },
+     {
+      "id": 1204,
+      "piece": " .",
+      "logprob": -15.721251,
+      "prob": 0.0
+     },
+     {
+      "id": 1457,
+      "piece": "100",
+      "logprob": -16.739885,
+      "prob": 0.0
+     },
+     {
+      "id": 81409,
+      "piece": " NaN",
+      "logprob": -16.971691,
+      "prob": 0.0
+     }
+    ]
+   ],
+   "low_margin_positions": [
+    {
+     "position": 0,
+     "top1_minus_top2_prob": 0.0055
+    },
+    {
+     "position": 4,
+     "top1_minus_top2_prob": 0.0141
+    },
+    {
+     "position": 6,
+     "top1_minus_top2_prob": 0.0023
+    },
+    {
+     "position": 8,
+     "top1_minus_top2_prob": 0.0198
+    },
+    {
+     "position": 10,
+     "top1_minus_top2_prob": 0.0005
+    }
+   ]
+  },
+  "What is 17 times 3?": {
+   "prompt_token_ids": [
+    3085,
+    344,
+    223,
+    1002,
+    2734,
+    223,
+    21,
+    33
+   ],
+   "prompt_pieces": [
+    "What",
+    " is",
+    " ",
+    "17",
+    " times",
+    " ",
+    "3",
+    "?"
+   ],
+   "input_token_ids": [
+    0,
+    3085,
+    344,
+    223,
+    1002,
+    2734,
+    223,
+    21,
+    33
+   ],
+   "tokens_evaluated": 9,
+   "greedy_token_ids": [
+    32108,
+    223,
+    19,
+    9361,
+    1567,
+    523,
+    126524,
+    3361,
+    14943,
+    437,
+    3122,
+    223,
+    22,
+    14,
+    223,
+    643
+   ],
+   "greedy_pieces": [
+    " Algebra",
+    " ",
+    "1",
+    " Answer",
+    " sm",
+    "end",
+    "yka",
+    " ·",
+    " Jim",
+    " H",
+    " Mar",
+    " ",
+    "4",
+    ",",
+    " ",
+    "201"
+   ],
+   "greedy_text": " Algebra 1 Answer smendyka · Jim H Mar 4, 201",
+   "stop_type": "limit",
+   "top5": [
+    [
+     {
+      "id": 32108,
+      "piece": " Algebra",
+      "logprob": -0.419641,
+      "prob": 0.657283
+     },
+     {
+      "id": 565,
+      "piece": " -",
+      "logprob": -2.273988,
+      "prob": 0.102901
+     },
+     {
+      "id": 223,
+      "piece": " ",
+      "logprob": -3.145952,
+      "prob": 0.043026
+     },
+     {
+      "id": 1350,
+      "piece": " We",
+      "logprob": -3.413692,
+      "prob": 0.032919
+     },
+     {
+      "id": 1162,
+      "piece": " This",
+      "logprob": -3.671861,
+      "prob": 0.025429
+     }
+    ],
+    [
+     {
+      "id": 223,
+      "piece": " ",
+      "logprob": -0.046535,
+      "prob": 0.954531
+     },
+     {
+      "id": 74058,
+      "piece": " Expressions",
+      "logprob": -4.129411,
+      "prob": 0.016092
+     },
+     {
+      "id": 15233,
+      "piece": " Examples",
+      "logprob": -4.342254,
+      "prob": 0.013007
+     },
+     {
+      "id": 31469,
+      "piece": " Linear",
+      "logprob": -5.237571,
+      "prob": 0.005313
+     },
+     {
+      "id": 16,
+      "piece": ".",
+      "logprob": -6.242279,
+      "prob": 0.001945
+     }
+    ],
+    [
+     {
+      "id": 19,
+      "piece": "1",
+      "logprob": -0.038333,
+      "prob": 0.962392
+     },
+     {
+      "id": 20,
+      "piece": "2",
+      "logprob": -3.298999,
+      "prob": 0.03692
+     },
+     {
+      "id": 18,
+      "piece": "0",
+      "logprob": -8.202407,
+      "prob": 0.000274
+     },
+     {
+      "id": 25,
+      "piece": "7",
+      "logprob": -9.505206,
+      "prob": 7.4e-05
+     },
+     {
+      "id": 21,
+      "piece": "3",
+      "logprob": -9.563579,
+      "prob": 7e-05
+     }
+    ],
+    [
+     {
+      "id": 9361,
+      "piece": " Answer",
+      "logprob": -0.000288,
+      "prob": 0.999712
+     },
+     {
+      "id": 223,
+      "piece": " ",
+      "logprob": -8.640314,
+      "prob": 0.000177
+     },
+     {
+      "id": 32801,
+      "piece": " Expression",
+      "logprob": -10.22253,
+      "prob": 3.6e-05
+     },
+     {
+      "id": 16,
+      "piece": ".",
+      "logprob": -10.944786,
+      "prob": 1.8e-05
+     },
+     {
+      "id": 1492,
+      "piece": " /",
+      "logprob": -11.565079,
+      "prob": 9e-06
+     }
+    ],
+    [
+     {
+      "id": 1567,
+      "piece": " sm",
+      "logprob": -2.280743,
+      "prob": 0.102208
+     },
+     {
+      "id": 3428,
+      "piece": " Me",
+      "logprob": -2.532477,
+      "prob": 0.079462
+     },
+     {
+      "id": 15177,
+      "piece": " Ak",
+      "logprob": -2.816403,
+      "prob": 0.059821
+     },
+     {
+      "id": 14943,
+      "piece": " Jim",
+      "logprob": -2.890326,
+      "prob": 0.055558
+     },
+     {
+      "id": 223,
+      "piece": " ",
+      "logprob": -3.075052,
+      "prob": 0.046187
+     }
+    ],
+    [
+     {
+      "id": 523,
+      "piece": "end",
+      "logprob": -9.8e-05,
+      "prob": 0.999902
+     },
+     {
+      "id": 71,
+      "piece": "e",
+      "logprob": -10.200912,
+      "prob": 3.7e-05
+     },
+     {
+      "id": 28771,
+      "piece": "udge",
+      "logprob": -11.046519,
+      "prob": 1.6e-05
+     },
+     {
+      "id": 306,
+      "piece": "as",
+      "logprob": -11.779052,
+      "prob": 8e-06
+     },
+     {
+      "id": 400,
+      "piece": "ith",
+      "logprob": -12.311597,
+      "prob": 4e-06
+     }
+    ],
+    [
+     {
+      "id": 126524,
+      "piece": "yka",
+      "logprob": -8e-06,
+      "prob": 0.999992
+     },
+     {
+      "id": 21919,
+      "piece": "yk",
+      "logprob": -13.015301,
+      "prob": 2e-06
+     },
+     {
+      "id": 57349,
+      "piece": "iez",
+      "logprob": -14.133926,
+      "prob": 1e-06
+     },
+     {
+      "id": 102999,
+      "piece": "dez",
+      "logprob": -14.327343,
+      "prob": 1e-06
+     },
+     {
+      "id": 5913,
+      "piece": "ivil",
+      "logprob": -14.554991,
+      "prob": 0.0
+     }
+    ],
+    [
+     {
+      "id": 3361,
+      "piece": " ·",
+      "logprob": -0.940728,
+      "prob": 0.390343
+     },
+     {
+      "id": 5629,
+      "piece": " Dec",
+      "logprob": -1.65553,
+      "prob": 0.190991
+     },
+     {
+      "id": 5132,
+      "piece": " Feb",
+      "logprob": -2.11156,
+      "prob": 0.121049
+     },
+     {
+      "id": 4648,
+      "piece": " Apr",
+      "logprob": -2.839227,
+      "prob": 0.058471
+     },
+     {
+      "id": 4013,
+      "piece": " Jan",
+      "logprob": -3.192819,
+      "prob": 0.041056
+     }
+    ],
+    [
+     {
+      "id": 14943,
+      "piece": " Jim",
+      "logprob": -1.454847,
+      "prob": 0.233436
+     },
+     {
+      "id": 54122,
+      "piece": " Stefan",
+      "logprob": -2.284363,
+      "prob": 0.101839
+     },
+     {
+      "id": 446,
+      "piece": " E",
+      "logprob": -2.513884,
+      "prob": 0.080953
+     },
+     {
+      "id": 28661,
+      "piece": " Alan",
+      "logprob": -2.953878,
+      "prob": 0.052137
+     },
+     {
+      "id": 91373,
+      "piece": " BRI",
+      "logprob": -3.345068,
+      "prob": 0.035258
+     }
+    ],
+    [
+     {
+      "id": 437,
+      "piece": " H",
+      "logprob": -0.012752,
+      "prob": 0.987329
+     },
+     {
+      "id": 489,
+      "piece": " G",
+      "logprob": -4.777351,
+      "prob": 0.008418
+     },
+     {
+      "id": 327,
+      "piece": " S",
+      "logprob": -5.530605,
+      "prob": 0.003964
+     },
+     {
+      "id": 60196,
+      "piece": " Riley",
+      "logprob": -9.45216,
+      "prob": 7.9e-05
+     },
+     {
+      "id": 345,
+      "piece": " C",
+      "logprob": -10.557646,
+      "prob": 2.6e-05
+     }
+    ],
+    [
+     {
+      "id": 3122,
+      "piece": " Mar",
+      "logprob": -0.43376,
+      "prob": 0.648068
+     },
+     {
+      "id": 4276,
+      "piece": " Nov",
+      "logprob": -2.460986,
+      "prob": 0.085351
+     },
+     {
+      "id": 4466,
+      "piece": " Oct",
+      "logprob": -2.773593,
+      "prob": 0.062437
+     },
+     {
+      "id": 5629,
+      "piece": " Dec",
+      "logprob": -2.797873,
+      "prob": 0.06094
+     },
+     {
+      "id": 5132,
+      "piece": " Feb",
+      "logprob": -3.320422,
+      "prob": 0.036138
+     }
+    ],
+    [
+     {
+      "id": 223,
+      "piece": " ",
+      "logprob": -9e-06,
+      "prob": 0.999991
+     },
+     {
+      "id": 92,
+      "piece": "z",
+      "logprob": -13.521121,
+      "prob": 1e-06
+     },
+     {
+      "id": 78926,
+      "piece": "asmus",
+      "logprob": -13.617986,
+      "prob": 1e-06
+     },
+     {
+      "id": 6539,
+      "piece": "cia",
+      "logprob": -13.918988,
+      "prob": 1e-06
+     },
+     {
+      "id": 8203,
+      "piece": "cher",
+      "logprob": -14.052046,
+      "prob": 1e-06
+     }
+    ],
+    [
+     {
+      "id": 22,
+      "piece": "4",
+      "logprob": -1.757752,
+      "prob": 0.172432
+     },
+     {
+      "id": 856,
+      "piece": "15",
+      "logprob": -2.122555,
+      "prob": 0.119725
+     },
+     {
+      "id": 23,
+      "piece": "5",
+      "logprob": -2.137776,
+      "prob": 0.117917
+     },
+     {
+      "id": 25,
+      "piece": "7",
+      "logprob": -2.523331,
+      "prob": 0.080192
+     },
+     {
+      "id": 24,
+      "piece": "6",
+      "logprob": -2.683193,
+      "prob": 0.068345
+     }
+    ],
+    [
+     {
+      "id": 14,
+      "piece": ",",
+      "logprob": 0.0,
+      "prob": 1.0
+     },
+     {
+      "id": 44477,
+      "piece": ",...",
+      "logprob": -17.787159,
+      "prob": 0.0
+     },
+     {
+      "id": 223,
+      "piece": " ",
+      "logprob": -19.133902,
+      "prob": 0.0
+     },
+     {
+      "id": 18005,
+      "piece": ",,",
+      "logprob": -19.271757,
+      "prob": 0.0
+     },
+     {
+      "id": 303,
+      "piece": "，",
+      "logprob": -19.350838,
+      "prob": 0.0
+     }
+    ],
+    [
+     {
+      "id": 223,
+      "piece": " ",
+      "logprob": -1e-06,
+      "prob": 0.999999
+     },
+     {
+      "id": 643,
+      "piece": "201",
+      "logprob": -14.593143,
+      "prob": 0.0
+     },
+     {
+      "id": 1,
+      "piece": "",
+      "logprob": -15.255269,
+      "prob": 0.0
+     },
+     {
+      "id": 1417,
+      "piece": " An",
+      "logprob": -15.458025,
+      "prob": 0.0
+     },
+     {
+      "id": 17666,
+      "piece": " Calculate",
+      "logprob": -15.787635,
+      "prob": 0.0
+     }
+    ],
+    [
+     {
+      "id": 643,
+      "piece": "201",
+      "logprob": -7e-06,
+      "prob": 0.999993
+     },
+     {
+      "id": 939,
+      "piece": "202",
+      "logprob": -12.377011,
+      "prob": 4e-06
+     },
+     {
+      "id": 792,
+      "piece": "200",
+      "logprob": -13.937409,
+      "prob": 1e-06
+     },
+     {
+      "id": 3298,
+      "piece": "195",
+      "logprob": -14.865051,
+      "prob": 0.0
+     },
+     {
+      "id": 2722,
+      "piece": "196",
+      "logprob": -15.182552,
+      "prob": 0.0
+     }
+    ]
+   ],
+   "low_margin_positions": []
+  }
+ }
+}

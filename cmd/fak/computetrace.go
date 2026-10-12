@@ -13,7 +13,7 @@ import (
 
 func runComputeTrace(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak compute-trace capture|summary|from-llamacpp|profile [flags]")
+		fmt.Fprintln(stderr, "usage: fak compute-trace capture|summary|from-llamacpp|profile|first-divergence [flags]")
 		return 2
 	}
 	switch args[0] {
@@ -76,6 +76,8 @@ func runComputeTrace(stdout, stderr io.Writer, args []string) int {
 		return runComputeTraceFromLlamaCpp(stdout, stderr, args[1:])
 	case "profile":
 		return runComputeTraceProfile(stdout, stderr, args[1:])
+	case "first-divergence":
+		return runComputeTraceFirstDivergence(stdout, stderr, args[1:])
 	default:
 		fmt.Fprintf(stderr, "unknown compute-trace action %q\n", args[0])
 		return 2

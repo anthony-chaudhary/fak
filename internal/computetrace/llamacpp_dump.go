@@ -16,16 +16,10 @@ package computetrace
 //   - <file>       raw little-endian f32 tensor data, relative to <dir>
 //   - tokens.json  {"prompt","tokens":[...]}
 //
-// Names are "<base>-<layer>". Mapped bases (unknown bases are ignored):
-//
-//	qr       -> q_latent             width ne0
-//	kv       -> kv_latent            width ne0; the fork captures kv AFTER RoPE
-//	                                 while fak samples it before, so sample
-//	                                 indices in the last 64 dims (the RoPE tail)
-//	                                 are listed in ExcludedSampleIndices
-//	attn_out -> attention_projected  width ne0
-//	ffn_out  -> moe_sum              width ne0
-//	l_last   -> residual_streams     width ne0*ne1 (ne1 = hc streams)
+// Names are "<base>-<layer>" for per-layer tensors and a bare "<name>" for
+// tensors outside the layer stack. Which names map to which fak stage is a
+// per-GGUF-arch LlamaCppStageMap (see llamacpp_stagemap.go); unmapped names are
+// ignored. ConvertLlamaCppDump uses the deepseek41 map.
 //
 // ggml stores ne0 fastest, so a [ne0=H, ne1=hc, ne2=tokens] tensor is [t][hc][i]
 // in memory -- the same order as fak's streams[t][s][i] flattened. Every
@@ -55,25 +49,13 @@ import (
 // matching fak's V4.1 activation producer.
 const LlamaCppActivationSamples = 8
 
-// llamaCppRoPETail is the trailing kv dimension span the fork has rotated.
-const llamaCppRoPETail = 64
-
-type llamaCppStage struct {
-	stage     string
-	widthDims int
-	ropeTail  int
-}
-
-var llamaCppStages = map[string]llamaCppStage{
-	"qr":       {stage: "q_latent", widthDims: 1},
-	"kv":       {stage: "kv_latent", widthDims: 1, ropeTail: llamaCppRoPETail},
-	"attn_out": {stage: "attention_projected", widthDims: 1},
-	"ffn_out":  {stage: "moe_sum", widthDims: 1},
-	"l_last":   {stage: "residual_streams", widthDims: 2},
-}
-
 // ErrLlamaCppDump wraps every malformed-dump refusal.
 var ErrLlamaCppDump = errors.New("computetrace: malformed llama.cpp dump")
+
+type llamaCppRow struct {
+	stage string
+	layer int
+}
 
 type llamaCppIndexEntry struct {
 	Seq    int     `json:"seq"`
@@ -94,9 +76,20 @@ func dumpErr(format string, args ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{ErrLlamaCppDump}, args...)...)
 }
 
-// ConvertLlamaCppDump reads a llama.cpp dump directory and returns a sampled
-// reference Artifact whose InputTokens are the dump's tokens.
+// ConvertLlamaCppDump reads a llama.cpp dump directory with the deepseek41
+// stage map and returns a sampled reference Artifact whose InputTokens are the
+// dump's tokens.
 func ConvertLlamaCppDump(dir string) (Artifact, error) {
+	return ConvertLlamaCppDumpArch(dir, LlamaCppArchDeepSeek41)
+}
+
+// ConvertLlamaCppDumpArch is ConvertLlamaCppDump with the stage map registered
+// for arch. An unregistered arch fails with ErrUnknownStageMap.
+func ConvertLlamaCppDumpArch(dir, arch string) (Artifact, error) {
+	stageMap, ok := LlamaCppStageMapFor(arch)
+	if !ok {
+		return Artifact{}, fmt.Errorf("%w: %q (known: %s)", ErrUnknownStageMap, arch, strings.Join(LlamaCppStageMapArches(), ", "))
+	}
 	var toks llamaCppTokens
 	raw, err := os.ReadFile(filepath.Join(dir, "tokens.json"))
 	if err != nil {
@@ -122,20 +115,35 @@ func ConvertLlamaCppDump(dir string) (Artifact, error) {
 	}
 	inputDigest := Digest("llamacpp-tokens", tokenText.String())
 
-	type rowKey struct {
-		stage string
-		layer int
-	}
-	nextToken := map[rowKey]int{}
-	art := Artifact{Schema: Schema, InputTokens: append([]int(nil), toks.Tokens...)}
+	dumped := map[string]bool{}
 	for _, e := range entries {
-		base, layer, ok := splitLlamaCppName(e.Name)
-		if !ok {
-			continue
+		if e.Dumped {
+			dumped[e.Name] = true
 		}
-		spec, ok := llamaCppStages[base]
+	}
+	nextToken := map[llamaCppRow]int{}
+	rowSource := map[llamaCppRow]string{}
+	art := Artifact{Schema: Schema, InputTokens: append([]int(nil), toks.Tokens...)}
+	maxLayer := -1
+	for _, e := range entries {
+		spec, layer, ok := stageMap.lookup(e.Name)
 		if !ok || !e.Dumped {
 			continue
+		}
+		if spec.SupersededBy != "" && dumped[spec.SupersededBy+"-"+strconv.Itoa(layer)] {
+			continue
+		}
+		base := e.Name
+		if b, _, split := splitLlamaCppName(e.Name); split && layer != -1 && layer != llamaCppPostLayer {
+			base = b
+		}
+		key := llamaCppRow{stage: spec.Stage, layer: layer}
+		if prev, seen := rowSource[key]; seen && prev != base {
+			return Artifact{}, dumpErr("%s: stage %s layer %d already fed by %s", e.Name, spec.Stage, layer, prev)
+		}
+		rowSource[key] = base
+		if layer != llamaCppPostLayer {
+			maxLayer = max(maxLayer, layer)
 		}
 		if e.Type != "f32" {
 			return Artifact{}, dumpErr("%s: tensor type %q, want f32", e.Name, e.Type)
@@ -145,7 +153,12 @@ func ConvertLlamaCppDump(dir string) (Artifact, error) {
 		}
 		width, tokens, byteSize := int64(1), int64(1), int64(4)
 		maxBytes := int64(^uint(0) >> 1)
+		emptyTail := false
 		for d, n := range e.Ne {
+			if n == 0 && d >= spec.WidthDims && spec.TailAligned {
+				emptyTail = true
+				continue
+			}
 			if n <= 0 {
 				return Artifact{}, dumpErr("%s: ne[%d]=%d", e.Name, d, n)
 			}
@@ -154,11 +167,14 @@ func ConvertLlamaCppDump(dir string) (Artifact, error) {
 				return Artifact{}, dumpErr("%s: f32 byte size exceeds int for ne=%v", e.Name, e.Ne)
 			}
 			byteSize *= n
-			if d < spec.widthDims {
+			if d < spec.WidthDims {
 				width *= n
 			} else {
 				tokens *= n
 			}
+		}
+		if emptyTail {
+			continue
 		}
 		if !filepath.IsLocal(e.File) {
 			return Artifact{}, dumpErr("%s: file %q is not local to the dump", e.Name, e.File)
@@ -173,14 +189,13 @@ func ConvertLlamaCppDump(dir string) (Artifact, error) {
 		w := int(width)
 		idx := ActivationSampleIndices(w, LlamaCppActivationSamples)
 		var excluded []int
-		if spec.ropeTail > 0 {
+		if spec.RoPETail > 0 {
 			for _, j := range idx {
-				if j >= w-spec.ropeTail {
+				if j >= w-spec.RoPETail {
 					excluded = append(excluded, j)
 				}
 			}
 		}
-		key := rowKey{stage: spec.stage, layer: layer}
 		for t := 0; t < int(tokens); t++ {
 			vals := make([]float32, len(idx))
 			for i, j := range idx {
@@ -190,7 +205,7 @@ func ConvertLlamaCppDump(dir string) (Artifact, error) {
 			art.Events = append(art.Events, Event{
 				Sequence:              int64(len(art.Events) + 1),
 				Operation:             "llamacpp.dump",
-				Phase:                 spec.stage,
+				Phase:                 spec.Stage,
 				Backend:               "llamacpp",
 				Device:                "reference",
 				Layer:                 layer,
@@ -207,6 +222,7 @@ func ConvertLlamaCppDump(dir string) (Artifact, error) {
 		}
 		nextToken[key] += int(tokens)
 	}
+	stageMap.finish(&art, maxLayer, nextToken)
 	return art, nil
 }
 
