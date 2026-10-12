@@ -599,6 +599,9 @@ type SampleParams struct {
 	// ChatTemplateKwargs is the llama.cpp/vLLM chat_template_kwargs object, forwarded
 	// verbatim on the OpenAI-compatible chat wire (empty => unset).
 	ChatTemplateKwargs json.RawMessage
+	// SpeculativeNMax is the llama-server per-request speculative draft-length cap
+	// (0 disables drafting; nil => unset on the OpenAI chat wire).
+	SpeculativeNMax *int
 	// NativeInferenceReceipt requests the strict native measurement envelope. It is
 	// false by default, preserving both planner work and response bytes.
 	NativeInferenceReceipt bool

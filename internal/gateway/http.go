@@ -948,6 +948,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithChatWireTopK(req.TopK),
 		agent.WithMinP(req.MinP),
 		agent.WithChatTemplateKwargs(req.ChatTemplateKwargs),
+		agent.WithSpeculativeNMax(req.SpeculativeNMax),
 		agent.WithNativeInferenceReceipt(receiptRequested),
 		agent.WithDecodeTrace(decodeTraceRequested),
 		agent.WithNativeDecodeTokenIDs(decodeTokenIDsRequested),
@@ -1327,6 +1328,9 @@ func (s *Server) applyAdjudicatedTurn(asst *agent.Message, adjs []ToolAdjudicati
 func validateSampling(req ChatRequest) string {
 	if req.MaxTokens < 0 {
 		return "max_tokens: must be a positive integer"
+	}
+	if req.SpeculativeNMax != nil && *req.SpeculativeNMax < 0 {
+		return "speculative.n_max: must be a non-negative integer"
 	}
 	return validateSamplingRanges(req.Temperature, req.TopP)
 }

@@ -122,6 +122,17 @@ func WithChatTemplateKwargs(raw json.RawMessage) SampleOpt {
 	}
 }
 
+// WithSpeculativeNMax sets the per-request llama-server speculative draft-length cap
+// for the OpenAI chat wire. nil or a negative value is a no-op.
+func WithSpeculativeNMax(n *int) SampleOpt {
+	return func(sp *SampleParams) {
+		if n != nil && *n >= 0 {
+			v := *n
+			sp.SpeculativeNMax = &v
+		}
+	}
+}
+
 // WithStop sets the per-request stop sequences. An empty/nil slice is a no-op.
 func WithStop(s []string) SampleOpt {
 	return func(sp *SampleParams) {
