@@ -37,12 +37,27 @@ func (s *v41IncrementalEngramSource) ReadRows(start, count int, dst []byte) (int
 func v41IncrementalEngramFixture(t *testing.T, compressed bool) (*Model, []*v41IncrementalEngramSource) {
 	t.Helper()
 	m, _ := v41FullEngramModel(t)
+	return v41IncrementalEngramFixtureFromModel(t, m, compressed)
+}
+
+// v41IncrementalEngramFixtureFromModel keeps the same three-layer schedule,
+// two independent Engram hash layouts, packed rows and compression variants.
+func v41IncrementalEngramFixtureFromModel(t *testing.T, m *Model, compressed bool) (*Model, []*v41IncrementalEngramSource) {
+	t.Helper()
 	for l := 1; l < 3; l++ {
 		for name, meta := range m.manifest {
 			const prefix = "model.layers.0."
 			if len(name) >= len(prefix) && name[:len(prefix)] == prefix {
 				target := layerName(l, name[len(prefix):])
 				m.manifest[target] = meta
+			}
+		}
+		// These immutable fixture weights may share bytes across layers, while
+		// their canonical names retain distinct device-cache identities.
+		for name, weight := range m.kqw {
+			const prefix = "model.layers.0."
+			if len(name) >= len(prefix) && name[:len(prefix)] == prefix {
+				m.kqw[layerName(l, name[len(prefix):])] = weight
 			}
 		}
 	}

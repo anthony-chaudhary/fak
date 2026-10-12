@@ -187,6 +187,19 @@ func v41DeviceParityDeviceOnly(t *testing.T, m *Model, be compute.Backend, promp
 	}
 }
 
+// v41DeviceParityEngramFixture keeps the original whole-forward coverage,
+// with block-aligned routed experts the existing device seam can actually stage.
+// Reference, default and device-only arms all consume this same quantized artifact;
+// the original H=64/I=32 F32 fixture remains unchanged for its other consumers.
+func v41DeviceParityEngramFixture(t *testing.T, compressed bool) *Model {
+	t.Helper()
+	cfg := v41FullGeometryConfig(t)
+	cfg.HiddenSize, cfg.MoEIntermediateSize = qkK, qkK
+	m, _ := v41FullEngramModelConfig(t, cfg, true)
+	m, _ = v41IncrementalEngramFixtureFromModel(t, m, compressed)
+	return m
+}
+
 // fak-test:justify why=integration when=changed:internal/model/**
 // fak-test:runtime slow est=60s lane=optin
 func TestV41DeviceForwardGreedyParityVulkan(t *testing.T) {
@@ -208,8 +221,7 @@ func TestV41DeviceForwardGreedyParityVulkan(t *testing.T) {
 	for _, compressed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("layers3_engram_compressed_%t", compressed), func(t *testing.T) {
 			fixture := func() *Model {
-				m, _ := v41IncrementalEngramFixture(t, compressed)
-				return m
+				return v41DeviceParityEngramFixture(t, compressed)
 			}
 			ref, hostModel, devModel, onlyModel := fixture(), fixture(), fixture(), fixture()
 			defer func() {

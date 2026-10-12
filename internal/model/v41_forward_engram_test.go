@@ -32,7 +32,18 @@ import (
 // flattened orientation so the full forward uses v41MHCProjectFull.
 func v41FullEngramModel(t *testing.T) (*Model, V41EngramLayout) {
 	t.Helper()
-	cfg := v41FullGeometryConfig(t)
+	return v41FullEngramModelConfig(t, v41FullGeometryConfig(t), false)
+}
+
+// v41FullEngramModelConfig preserves the original F32 fixture by default.
+// deviceExperts uses the mixed Q2_K gate/up and Q3_K down fixture bytes from
+// v41MixedQuantExpertModel, without first allocating an unused F32 expert slab.
+// This changes only the synthetic test artifact; the production paths are unchanged.
+func v41FullEngramModelConfig(t *testing.T, cfg Config, deviceExperts bool) (*Model, V41EngramLayout) {
+	t.Helper()
+	if deviceExperts && (cfg.HiddenSize%qkK != 0 || cfg.MoEIntermediateSize%qkK != 0) {
+		t.Fatal("device Engram fixture requires block-aligned expert axes")
+	}
 	cfg.OGroups = 1
 	cfg.DeepSeekV41.EngramLayerIDs = []int{0}
 	cfg.DeepSeekV41.EngramNumEmbeddings = []int{48}
@@ -76,13 +87,15 @@ func v41FullEngramModel(t *testing.T) (*Model, V41EngramLayout) {
 		{layerName(0, "engram_q_norm.weight"), []int{4 * H}},
 		{layerName(0, "engram_k_norm.weight"), []int{4 * H}},
 	}
-	for e := 0; e < cfg.NumExperts; e++ {
-		stem := "ffn.experts." + itoa(e)
-		tensors = append(tensors,
-			ts{layerName(0, stem+".w1.weight"), []int{I, H}},
-			ts{layerName(0, stem+".w3.weight"), []int{I, H}},
-			ts{layerName(0, stem+".w2.weight"), []int{H, I}},
-		)
+	if !deviceExperts {
+		for e := 0; e < cfg.NumExperts; e++ {
+			stem := "ffn.experts." + itoa(e)
+			tensors = append(tensors,
+				ts{layerName(0, stem+".w1.weight"), []int{I, H}},
+				ts{layerName(0, stem+".w3.weight"), []int{I, H}},
+				ts{layerName(0, stem+".w2.weight"), []int{H, I}},
+			)
+		}
 	}
 
 	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
@@ -106,6 +119,15 @@ func v41FullEngramModel(t *testing.T) (*Model, V41EngramLayout) {
 		}
 	})
 	m := &Model{Cfg: cfg, manifest: man, raw: raw}
+	if deviceExperts {
+		m.kqw = make(map[string]*kQuantTensor, 3*cfg.NumExperts)
+		for e := 0; e < cfg.NumExperts; e++ {
+			stem := "ffn.experts." + itoa(e)
+			m.kqw[layerName(0, stem+".w1.weight")] = q2kFixtureTensor(I, H, uint64(0x13358+3*e))
+			m.kqw[layerName(0, stem+".w3.weight")] = q2kFixtureTensor(I, H, uint64(0x13358+3*e+1))
+			m.kqw[layerName(0, stem+".w2.weight")] = q3kFixtureTensor(H, I)
+		}
+	}
 
 	layout := v41EngramTestLayout(cfg)
 	src := &v41EngramMemorySource{
