@@ -149,7 +149,7 @@ func TestV41EngramPrefixWarmUnsupported(t *testing.T) {
 
 	t.Run("declared but unwired stage", func(t *testing.T) {
 		m, _ := v41ReducedEngramModel(t)
-		v41EngramStages.Delete(m)
+		m.v41DetachEngramStage()
 		delta, err := m.WarmV41EngramPrefix([]int{1, 3}, nil)
 		if !errors.Is(err, ErrV41NativeUnsupported) {
 			t.Fatalf("error = %v, want ErrV41NativeUnsupported", err)

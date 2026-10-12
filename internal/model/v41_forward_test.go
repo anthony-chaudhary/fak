@@ -1192,7 +1192,7 @@ func TestV41EngramRetrievalForward(t *testing.T) {
 func TestV41EngramNoSourceFailsClosed(t *testing.T) {
 	m, _ := v41ReducedEngramModel(t)
 	// Drop the stage to model an in-range declaration whose source is absent.
-	v41EngramStages.Delete(m)
+	m.v41DetachEngramStage()
 
 	if err := m.v41ForwardAdmitted(); !errors.Is(err, ErrV41NativeUnsupported) {
 		t.Fatalf("unwired Engram admission error = %v, want ErrV41NativeUnsupported", err)

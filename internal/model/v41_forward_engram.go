@@ -92,7 +92,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"runtime"
 	"sync"
+	"weak"
 )
 
 // v41BF16 rounds x to the nearest bfloat16 value (round-half-to-even), matching
@@ -132,17 +134,20 @@ type v41EngramStage struct {
 }
 
 // v41EngramStages attaches a stage to a *Model without widening the Model struct
-// (the stage is the #13007 leaf's private wiring). It mirrors the existing
-// metalResidentReady map[*Model] pattern; a model is loaded once and the entry is
-// read for the life of that model.
-var v41EngramStages sync.Map // map[*Model]*v41EngramStage
+// (the stage is the #13007 leaf's private wiring). Keys are weak and a runtime
+// cleanup deletes the entry once the model is unreachable, so a released model
+// (a reload, or every test fixture) is not kept alive by its stage.
+var v41EngramStages sync.Map // map[weak.Pointer[Model]]*v41EngramStage
+
+// v41DetachEngramStage removes the model's wired Engram stage, if any.
+func (m *Model) v41DetachEngramStage() { v41EngramStages.Delete(weak.Make(m)) }
 
 // v41EngramStageFor returns the model's wired Engram stage, or nil.
 func (m *Model) v41EngramStageFor() *v41EngramStage {
 	if m == nil {
 		return nil
 	}
-	v, ok := v41EngramStages.Load(m)
+	v, ok := v41EngramStages.Load(weak.Make(m))
 	if !ok {
 		return nil
 	}
@@ -229,7 +234,10 @@ func (m *Model) wireV41Engram(layout V41EngramLayout, srcs []V41EngramRowSource,
 	for i, src := range srcs {
 		stage.bindings[i], _ = V41EngramBinding(src)
 	}
-	v41EngramStages.Store(m, stage)
+	key := weak.Make(m)
+	if _, loaded := v41EngramStages.Swap(key, stage); !loaded {
+		runtime.AddCleanup(m, func(k weak.Pointer[Model]) { v41EngramStages.Delete(k) }, key)
+	}
 	return nil
 }
 

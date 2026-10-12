@@ -2,7 +2,9 @@ package model
 
 import (
 	"math/bits"
+	"runtime"
 	"sync"
+	"weak"
 )
 
 // v41_expert_fault_attribution.go — phase-scoped (prefill vs decode) routed-expert
@@ -201,10 +203,9 @@ type V41ExpertFaultAttribution struct {
 // routed-expert reads record into: one guard byte is deliberately cheaper than
 // per-field atomics for a diagnostic that fires once per request summary, and
 // a plain struct keeps snapshot() a simple consistent copy. The ledger lives
-// in a package registry keyed by *Model (below) rather than as a Model field,
-// so adding this observation touches no shared struct layout; the *Model is
-// process-lifetime on every serve that carries a checkpoint tier, so
-// key-by-pointer retention matches the object it observes.
+// in a package registry weakly keyed by *Model (below) rather than as a Model
+// field, so adding this observation touches no shared struct layout and never
+// keeps a released model (a reload, or every test fixture) reachable.
 type v41ExpertFaultLedger struct {
 	mu    sync.Mutex
 	phase V41ExpertPhase
@@ -219,7 +220,8 @@ type v41ExpertFaultLedger struct {
 	backend string
 }
 
-// v41ExpertFaultLedgers maps *Model -> *v41ExpertFaultLedger, installed ONLY
+// v41ExpertFaultLedgers maps weak.Pointer[Model] -> *v41ExpertFaultLedger, and a
+// runtime cleanup on the model deletes the entry once it is unreachable. Installed ONLY
 // by v41SetExpertFaultPhase (the instrumented V4.1 wiring) and read by
 // everything else. A model that never declares a phase is never inserted, so
 // the uninstrumented default allocates nothing and its note*/snapshot are one
@@ -466,13 +468,15 @@ func v41ExpertFaultLedgerOf(m *Model, install bool) *v41ExpertFaultLedger {
 	if m == nil {
 		return nil
 	}
-	if !install {
-		if l, ok := v41ExpertFaultLedgers.Load(m); ok {
-			return l.(*v41ExpertFaultLedger)
-		}
-		return nil
+	key := weak.Make(m)
+	if l, ok := v41ExpertFaultLedgers.Load(key); ok || !install {
+		ledger, _ := l.(*v41ExpertFaultLedger)
+		return ledger
 	}
-	l, _ := v41ExpertFaultLedgers.LoadOrStore(m, &v41ExpertFaultLedger{})
+	l, loaded := v41ExpertFaultLedgers.LoadOrStore(key, &v41ExpertFaultLedger{})
+	if !loaded {
+		runtime.AddCleanup(m, func(k weak.Pointer[Model]) { v41ExpertFaultLedgers.Delete(k) }, key)
+	}
 	return l.(*v41ExpertFaultLedger)
 }
 

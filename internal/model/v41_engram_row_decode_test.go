@@ -389,7 +389,7 @@ func TestV41EngramQ2KBlocksDecodeWhereConsumed(t *testing.T) {
 	wire := func(encoded bool) *Model {
 		m, _ := v41IncrementalEngramFixture(t, false)
 		layout := m.v41EngramStageFor().layout
-		v41EngramStages.Delete(m)
+		m.v41DetachEngramStage()
 		srcs := make([]V41EngramRowSource, len(layout.Rows))
 		for i := range srcs {
 			src, decoded := v41EngramQ2KFixtureSource(t, int(layout.Rows[i]), int64(i+1))
