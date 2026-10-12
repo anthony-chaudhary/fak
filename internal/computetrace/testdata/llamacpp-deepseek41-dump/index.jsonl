@@ -1,0 +1,17 @@
+{"dumped":true,"file":"t000.bin","maxabs":0,"name":"hc_mixed-0","ne":[16,3,1,1],"nonfinite":0,"op":"ADD","seq":0,"sum":0,"sumsq":0,"type":"f32"}
+{"dumped":true,"file":"t001.bin","maxabs":0,"name":"qr-0","ne":[32,3,1,1],"nonfinite":0,"op":"ADD","seq":1,"sum":0,"sumsq":0,"type":"f32"}
+{"dumped":true,"file":"t002.bin","maxabs":0,"name":"kv-0","ne":[512,1,3,1],"nonfinite":0,"op":"ADD","seq":2,"sum":0,"sumsq":0,"type":"f32"}
+{"dumped":true,"file":"t003.bin","maxabs":0,"name":"attn_norm-0","ne":[16,3,1,1],"nonfinite":0,"op":"ADD","seq":3,"sum":0,"sumsq":0,"type":"f32"}
+{"dumped":true,"file":"t004.bin","maxabs":0,"name":"attn_out-0","ne":[16,3,1,1],"nonfinite":0,"op":"ADD","seq":4,"sum":0,"sumsq":0,"type":"f32"}
+{"dumped":true,"file":"t005.bin","maxabs":0,"name":"ffn_out-0","ne":[16,3,1,1],"nonfinite":0,"op":"ADD","seq":5,"sum":0,"sumsq":0,"type":"f32"}
+{"dumped":true,"file":"t006.bin","maxabs":0,"name":"l_last-0","ne":[16,4,2,1],"nonfinite":0,"op":"ADD","seq":6,"sum":0,"sumsq":0,"type":"f32"}
+{"dumped":true,"file":"t007.bin","maxabs":0,"name":"l_last-0","ne":[16,4,1,1],"nonfinite":0,"op":"ADD","seq":7,"sum":0,"sumsq":0,"type":"f32"}
+{"dumped":true,"file":"t008.bin","maxabs":0,"name":"hc_mixed-1","ne":[16,3,1,1],"nonfinite":0,"op":"ADD","seq":8,"sum":0,"sumsq":0,"type":"f32"}
+{"dumped":true,"file":"t009.bin","maxabs":0,"name":"qr-1","ne":[32,3,1,1],"nonfinite":0,"op":"ADD","seq":9,"sum":0,"sumsq":0,"type":"f32"}
+{"dumped":true,"file":"t010.bin","maxabs":0,"name":"kv-1","ne":[512,1,3,1],"nonfinite":0,"op":"ADD","seq":10,"sum":0,"sumsq":0,"type":"f32"}
+{"dumped":true,"file":"t011.bin","maxabs":0,"name":"attn_norm-1","ne":[16,3,1,1],"nonfinite":0,"op":"ADD","seq":11,"sum":0,"sumsq":0,"type":"f32"}
+{"dumped":false,"file":"t012.bin","maxabs":0,"name":"attn_out-1","ne":[16,3,1,1],"nonfinite":0,"op":"ADD","seq":12,"sum":0,"sumsq":0,"type":"f32"}
+{"dumped":true,"file":"t013.bin","maxabs":0,"name":"ffn_out-1","ne":[16,3,1,1],"nonfinite":0,"op":"ADD","seq":13,"sum":0,"sumsq":0,"type":"f32"}
+{"dumped":true,"file":"t014.bin","maxabs":0,"name":"l_last-1","ne":[16,4,2,1],"nonfinite":0,"op":"ADD","seq":14,"sum":0,"sumsq":0,"type":"f32"}
+{"dumped":true,"file":"t015.bin","maxabs":0,"name":"l_last-1","ne":[16,4,1,1],"nonfinite":0,"op":"ADD","seq":15,"sum":0,"sumsq":0,"type":"f32"}
+{"dumped":true,"file":"t016.bin","maxabs":0,"name":"result_norm","ne":[16,1,1,1],"nonfinite":0,"op":"ADD","seq":16,"sum":0,"sumsq":0,"type":"f32"}

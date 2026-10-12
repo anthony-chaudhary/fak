@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 const modelPreflightUsage = "usage: fak model preflight --gguf <path|shard1> [--hf-config <config.json>] [--json]"
@@ -23,6 +24,8 @@ func runModelPreflight(stdout, stderr io.Writer, args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	*gguf = pathutil.ExpandTilde(*gguf)
+	*hfConfig = pathutil.ExpandTilde(*hfConfig)
 	if *gguf == "" || fs.NArg() != 0 {
 		fmt.Fprintln(stderr, modelPreflightUsage)
 		return 2

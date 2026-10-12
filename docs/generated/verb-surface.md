@@ -6,10 +6,10 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1307<br>
-rows: 1272<br>
-unverified rows: 0 / 1272<br>
-source-only rows absent from help: 1036
+parsed files: 1308<br>
+rows: 1273<br>
+unverified rows: 0 / 1273<br>
+source-only rows absent from help: 1037
 
 ## Surface table
 
@@ -233,6 +233,7 @@ source-only rows absent from help: 1036
 | `fak compute help` |  |  | `case` arm of the dispatch switch in runCompute() | N/A | — | **SOURCE ONLY** |
 | `fak compute-trace` | capture or summarize bounded compute-event trace artifacts | runComputeTrace / internal/compute, internal/computetrace | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak compute-trace capture` |  | eventDuration | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
+| `fak compute-trace first-divergence` | reports the first (layer, stage) where an actual trace leaves the reference, with the full per-layer x stage profile. | runComputeTraceFirstDivergence / internal/computetrace | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
 | `fak compute-trace from-llamacpp` | converts a llama.cpp tensor dump directory into a reference activation trace, optionally adopting a fak trace's digests. | runComputeTraceFromLlamaCpp / internal/computetrace | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
 | `fak compute-trace profile` | prints the per-(layer, stage) activation error profile of an actual trace against a reference trace. | runComputeTraceProfile / internal/computetrace | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
 | `fak compute-trace summary` |  | eventDuration | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
@@ -725,7 +726,7 @@ source-only rows absent from help: 1036
 | `fak model load` | downloads (or cache-hits) the file a model ref names and prints its local path | cmdModelLoad / internal/hfhub, internal/modelreg | `case` arm of the dispatch switch in cmdModel() | NONE | — | yes |
 | `fak model ls` | `fak ls` / `fak model ls`: list the merged alias registry (embedded catalog + the user's registry.json) with each alias's target and whether it is already downloaded locally | cmdModelLs / internal/modelreg | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model plan` |  | runModelPlan / internal/compute, internal/modelloadplan | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
-| `fak model preflight` | checks a GGUF header (every shard, no tensor bytes) for unread keys, HF-config mismatches, missing/orphan tensors and dtypes without a host kernel, all in one pass | runModelPreflight / internal/ggufload | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
+| `fak model preflight` | checks a GGUF header (every shard, no tensor bytes) for unread keys, HF-config mismatches, missing/orphan tensors and dtypes without a host kernel, all in one pass | runModelPreflight / internal/ggufload, internal/pathutil | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model provider-contracts` |  | runModelProviderContracts / internal/modelroute | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model pull` | `fak pull <ref>` / `fak model pull <ref>`: resolve an alias to its target (a bare hf:// URI or path passes through), download it into the local cache (cache-hit if already present), and print the loca… | cmdModelPull / internal/hfhub, internal/modelreg | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model qwen38-ladder` |  | runModelQwen38Ladder / internal/qwen38ladder | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
@@ -749,7 +750,7 @@ source-only rows absent from help: 1036
 | `fak negate reframe` | flips unambiguous negative idioms to their positive inverse in token space and prints the rewritten text (the substitution half of the operator, L0) | runNegateReframe / internal/negframe | `case` arm of the dispatch switch in cmdNegate() | NONE | — | **SOURCE ONLY** |
 | `fak negate resolve` | resolves the positive complement of "not X" over the L2 registry | runNegateResolve / internal/negframe | `case` arm of the dispatch switch in cmdNegate() | NONE | — | **SOURCE ONLY** |
 | `fak new-leaf` | scaffold a new leaf package at a layering tier, optionally registering its defconfig blank-import | cmdNewLeaf / internal/newleaf | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
-| `fak new-model` | scaffold a new model adapter/leaf | cmdNewModel / internal/ggufload, internal/newmodel | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
+| `fak new-model` | scaffold a new model adapter/leaf | cmdNewModel / internal/ggufload, internal/newmodel, internal/pathutil | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak news` | the news Slack surface for source-linked external industry/SOTA/OSS research updates | cmdNews | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | yes |
 | `fak nightrun` | run it all night: the local-capability-aware data-collection door (next/plan/run/ledger/caps) | cmdNightrun | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
 | `fak nightrun caps` |  | nightrunCaps / internal/nightrun | `case` arm of the dispatch switch in runNightrun() | NONE | — | yes |

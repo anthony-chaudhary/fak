@@ -41,6 +41,7 @@ const (
 	kindQ2K
 	kindQ3K
 	kindIQ3S
+	kindIQ4NL
 )
 
 // Resident k-quant super-block byte sizes per 256 weights (== ggufload.blockQ{5,6}KBytes),
@@ -81,6 +82,9 @@ const (
 	q3kBlockBytes    = 110
 	iq3sBlockBytes   = 110
 	q2kBlockBytes    = qkK/16 + qkK/4 + 2 + 2
+	// IQ4_NL = d(f16,2) + qs(16 nibble bytes indexing kvaluesIQ4NL) = 18 (per 32 weights)
+	iq4nlBlockWeights = 32
+	iq4nlBlockBytes   = 2 + iq4nlBlockWeights/2
 )
 
 func (k kQuantKind) blockBytes() int {
@@ -111,6 +115,8 @@ func (k kQuantKind) blockBytes() int {
 		return q4_0BlockBytes
 	case kindQ2K:
 		return q2kBlockBytes
+	case kindIQ4NL:
+		return iq4nlBlockBytes
 	default:
 		return q5kBlockBytes
 	}
@@ -122,6 +128,8 @@ func (k kQuantKind) blockWeights() int {
 		return q8_0BlockWeights
 	case kindQ4_0:
 		return q4_0BlockWeights
+	case kindIQ4NL:
+		return iq4nlBlockWeights
 	}
 	return qkK
 }
@@ -154,6 +162,8 @@ func (k kQuantKind) String() string {
 		return "Q4_0"
 	case kindQ2K:
 		return "Q2_K"
+	case kindIQ4NL:
+		return "IQ4_NL"
 	default:
 		return "Q5_K"
 	}
@@ -328,6 +338,8 @@ func kQuantDequantSuperBlock(dst []float32, blk []byte, kind kQuantKind) {
 		}
 	case kindIQ4XS:
 		iq4xsDequantSuperBlock(dst, blk)
+	case kindIQ4NL:
+		iq4nlDequantBlock(dst, blk)
 	case kindIQ2XXS:
 		dequantIQ2XXSScalar(dst, blk)
 	case kindIQ2XS:
@@ -626,6 +638,12 @@ func (b *QuantBuilder) AddResidentW3MLPIQ3XXS(canon string, shape []int, raw []b
 
 func (b *QuantBuilder) AddResidentIQ4XS(canon string, shape []int, raw []byte) error {
 	return b.addResidentKQuant(canon, shape, raw, kindIQ4XS)
+}
+
+// AddResidentIQ4NL stores a raw IQ4_NL payload (32-weight blocks) verbatim, so IQ4_NL
+// routed experts stay at their 0.5625 B/weight file density instead of the Q8 round trip.
+func (b *QuantBuilder) AddResidentIQ4NL(canon string, shape []int, raw []byte) error {
+	return b.addResidentKQuant(canon, shape, raw, kindIQ4NL)
 }
 
 func (b *QuantBuilder) AddResidentIQ2XXS(canon string, shape []int, raw []byte) error {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/newmodel"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 func runNewModel(stdout, stderr io.Writer, argv []string) int {
@@ -29,6 +30,8 @@ func runNewModel(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak new-model: positional arguments are not supported")
 		return 2
 	}
+	*gguf = pathutil.ExpandTilde(*gguf)
+	*hfConfig = pathutil.ExpandTilde(*hfConfig)
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
 

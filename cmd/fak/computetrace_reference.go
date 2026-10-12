@@ -37,16 +37,17 @@ func runComputeTraceFromLlamaCpp(stdout, stderr io.Writer, args []string) int {
 	fs.SetOutput(stderr)
 	out := fs.String("out", "", "reference trace artifact path")
 	adopt := fs.String("adopt-digests", "", "fak trace whose input/weight digests the reference adopts after its token ids match")
+	stageMap := fs.String("stage-map", computetrace.LlamaCppArchDeepSeek41, "GGUF arch whose llama.cpp stage map names the dump ("+strings.Join(computetrace.LlamaCppStageMapArches(), ", ")+")")
 	pos, rest := computeTraceSplitPositional(args)
 	if err := fs.Parse(rest); err != nil {
 		return 2
 	}
 	pos = append(pos, fs.Args()...)
 	if len(pos) != 1 || *out == "" {
-		fmt.Fprintln(stderr, "usage: fak compute-trace from-llamacpp <dump-dir> --out ref.json [--adopt-digests fak-trace.json]")
+		fmt.Fprintln(stderr, "usage: fak compute-trace from-llamacpp <dump-dir> --out ref.json [--stage-map deepseek41|qwen4exp] [--adopt-digests fak-trace.json]")
 		return 2
 	}
-	ref, err := computetrace.ConvertLlamaCppDump(pos[0])
+	ref, err := computetrace.ConvertLlamaCppDumpArch(pos[0], *stageMap)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1

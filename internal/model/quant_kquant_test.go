@@ -101,7 +101,7 @@ func TestKQuantMatRowsMatchesDequantRef(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		kind kQuantKind
-	}{{"Q5_K", kindQ5K}, {"Q6_K", kindQ6K}, {"IQ3_XXS", kindIQ3XXS}, {"IQ4_XS", kindIQ4XS}, {"Q8_0", kindQ8_0}, {"Q4_0", kindQ4_0}, {"Q2_K", kindQ2K}} {
+	}{{"Q5_K", kindQ5K}, {"Q6_K", kindQ6K}, {"IQ3_XXS", kindIQ3XXS}, {"IQ4_XS", kindIQ4XS}, {"Q8_0", kindQ8_0}, {"Q4_0", kindQ4_0}, {"Q2_K", kindQ2K}, {"IQ4_NL", kindIQ4NL}} {
 		t.Run(tc.name, func(t *testing.T) {
 			nblk := in / tc.kind.blockWeights()
 			bb := tc.kind.blockBytes()
@@ -445,5 +445,26 @@ func TestResidentMatRowsDispatchesIQAndQ8RawExperts(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestIQ4NLDequantGolden(t *testing.T) {
+	// d=2.0; byte j=0x1F puts code 15 (kvalues 113) at weight j and code 1 (kvalues -104)
+	// at weight j+16, so weights are 226 and -208.
+	blk := make([]byte, iq4nlBlockBytes)
+	binary.LittleEndian.PutUint16(blk[0:], 0x4000)
+	for j := 0; j < 16; j++ {
+		blk[2+j] = 0x1F
+	}
+	dst := make([]float32, iq4nlBlockWeights)
+	kQuantDequantSuperBlock(dst, blk, kindIQ4NL)
+	for j := 0; j < 16; j++ {
+		if dst[j] != 226 || dst[j+16] != -208 {
+			t.Fatalf("weight %d/%d = %v/%v, want 226/-208", j, j+16, dst[j], dst[j+16])
+		}
+	}
+	if kindIQ4NL.blockBytes() != 18 || kindIQ4NL.blockWeights() != 32 || kindIQ4NL.String() != "IQ4_NL" {
+		t.Fatal("IQ4_NL block geometry")
 	}
 }

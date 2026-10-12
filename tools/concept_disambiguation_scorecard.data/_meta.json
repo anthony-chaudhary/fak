@@ -1827,10 +1827,61 @@
           "category": "false-positive",
           "reason": "Scanner artifact from the percent-s formatting prefix in an architecture-specific attention metadata key; no sattention identifier or new attention mechanism is introduced.",
           "token": "sattention"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
+          "token": "linear_attn_qkv_mixed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
+          "token": "linear_attn_out"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
+          "token": "attn_q_full"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
+          "token": "attn_q_normed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
+          "token": "attn_k_normed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
+          "token": "attn_pregate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
+          "token": "attn_core"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
+          "token": "attn_gate_sigmoid"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
+          "token": "attn_gated"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Scanner artifact joining the %s formatting verb to full_attention_interval in a GGUF metadata refusal; no symbol named sfull_attention_interval or new attention primitive exists.",
+          "token": "sfull_attention_interval"
         }
       ],
       "exclude": [
-        "sattention"
+        "sattention",
+        "sfull_attention_interval"
       ],
       "id": "attention",
       "ignore": [
@@ -1845,9 +1896,18 @@
         "ValidateTreeAttentionMask",
         "attentions",
         "attentive",
+        "attn_core",
+        "attn_gate_sigmoid",
+        "attn_gated",
+        "attn_k_normed",
+        "attn_pregate",
+        "attn_q_full",
+        "attn_q_normed",
         "attnkvanorm",
         "estimated_attention_s",
         "executevulkanattentionwithdequantonce",
+        "linear_attn_out",
+        "linear_attn_qkv_mixed",
         "mg_prefill_attn",
         "mg_prefill_attn_supported",
         "prefillAttnDeviceMinRows",
@@ -4037,6 +4097,71 @@
           "category": "incidental",
           "reason": "Private serve execution-policy dry-admit adapter rejecting nonnative runtime modes before compute selection or delegation; it implements the existing admission refusal rather than a separate guard framework.",
           "token": "refuseServeDryAdmitDelegated"
+        },
+        {
+          "category": "incidental",
+          "reason": "Neural gating tensor or activation-stage wire label in the pinned llama.cpp reference stage map; it describes arithmetic intermediates rather than an admission gate or security guard.",
+          "token": "ple_gate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Neural gating tensor or activation-stage wire label in the pinned llama.cpp reference stage map; it describes arithmetic intermediates rather than an admission gate or security guard.",
+          "token": "ple_gated_value"
+        },
+        {
+          "category": "incidental",
+          "reason": "Neural gating tensor or activation-stage wire label in the pinned llama.cpp reference stage map; it describes arithmetic intermediates rather than an admission gate or security guard.",
+          "token": "gate_reshaped"
+        },
+        {
+          "category": "incidental",
+          "reason": "Neural gating tensor or activation-stage wire label in the pinned llama.cpp reference stage map; it describes arithmetic intermediates rather than an admission gate or security guard.",
+          "token": "attn_pregate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Neural gating tensor or activation-stage wire label in the pinned llama.cpp reference stage map; it describes arithmetic intermediates rather than an admission gate or security guard.",
+          "token": "gate_sigmoid"
+        },
+        {
+          "category": "incidental",
+          "reason": "Neural gating tensor or activation-stage wire label in the pinned llama.cpp reference stage map; it describes arithmetic intermediates rather than an admission gate or security guard.",
+          "token": "attn_gate_sigmoid"
+        },
+        {
+          "category": "incidental",
+          "reason": "Neural gating tensor or activation-stage wire label in the pinned llama.cpp reference stage map; it describes arithmetic intermediates rather than an admission gate or security guard.",
+          "token": "attn_gated"
+        },
+        {
+          "category": "incidental",
+          "reason": "Neural gating tensor or activation-stage wire label in the pinned llama.cpp reference stage map; it describes arithmetic intermediates rather than an admission gate or security guard.",
+          "token": "shared_expert_gate_sigmoid"
+        },
+        {
+          "category": "incidental",
+          "reason": "Neural gating tensor or activation-stage wire label in the pinned llama.cpp reference stage map; it describes arithmetic intermediates rather than an admission gate or security guard.",
+          "token": "ffn_shexp_gated"
+        },
+        {
+          "category": "incidental",
+          "reason": "Neural gating tensor or activation-stage wire label in the pinned llama.cpp reference stage map; it describes arithmetic intermediates rather than an admission gate or security guard.",
+          "token": "shared_expert_gated"
+        },
+        {
+          "category": "incidental",
+          "reason": "External hyperconnection neural gating tensor label explicitly left unmapped because it is emitted twice per layer; it is not an admission or security guard.",
+          "token": "hc_gate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing GGUF tensor-name spelling used in Qwen4Exp shape validation for neural feed-forward gating weights; it is not an admission gate or security guard framework.",
+          "token": "ffn_gate_up_exps"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing GGUF tensor-name spelling used in Qwen4Exp shape validation for neural feed-forward gating weights; it is not an admission gate or security guard framework.",
+          "token": "ffn_gate_inp_shexp"
         }
       ],
       "exclude": [
@@ -4153,6 +4278,9 @@
         "appendGuardDisableUsage",
         "applyGuardDeadlineEnvOverrides",
         "armbenchPonytailGates",
+        "attn_gate_sigmoid",
+        "attn_gated",
+        "attn_pregate",
         "baseAggregates",
         "beginGuardProviderBoundary",
         "bindGuardRegistration",
@@ -4196,6 +4324,9 @@
         "fak_gateway_kv_prefix_tier_transfer_latency_seconds_total",
         "fak_gateway_moe_expert_ring_bytes",
         "fetchGuardPreCompactSignalsHTTP",
+        "ffn_gate_inp_shexp",
+        "ffn_gate_up_exps",
+        "ffn_shexp_gated",
         "firstGuardEnv",
         "fleetDogfoodGuardBaseURL",
         "fleetbarecommitguard",
@@ -4210,6 +4341,8 @@
         "gateProse",
         "gateSkew",
         "gateSourcePaths",
+        "gate_reshaped",
+        "gate_sigmoid",
         "gate_test",
         "gate_verbtier",
         "gated",
@@ -4417,6 +4550,7 @@
         "guardtrajectorywarningline",
         "guardwireretryhop",
         "hasAggregate",
+        "hc_gate",
         "injectGuardProfiles",
         "installGuardCodexSessionStartHookAt",
         "installGuardLogvaultMetrics",
@@ -4453,6 +4587,8 @@
         "parseGate",
         "parseGuardDisable",
         "parseGuardProviderSessionStart",
+        "ple_gate",
+        "ple_gated_value",
         "prepareGuardChildRegistration",
         "prepushGateContract",
         "prepushLegacyGateContract",
@@ -4492,6 +4628,8 @@
         "setGuardCompactionAnchorMode",
         "setGuardCoreLockAll",
         "setq4kgateupoutputslab",
+        "shared_expert_gate_sigmoid",
+        "shared_expert_gated",
         "shrinkLeverGuardCommand",
         "stallscanSkewGuard",
         "startBoundGuardRegistration",
@@ -13213,6 +13351,11 @@
           "category": "incidental",
           "reason": "Host-kernel availability query or dtype refusal within header preflight; it reports the existing host implementation coverage and does not assert product maturity or device qualification.",
           "token": "RefusalUnsupportedDtype"
+        },
+        {
+          "category": "incidental",
+          "reason": "Diagnostic output field counting leading sampled MATCH layers under the trace report tolerance and completeness rules; it is not a product support-maturity designation or full-checkpoint parity qualification.",
+          "token": "parity_layers"
         }
       ],
       "exclude": [
@@ -13418,6 +13561,7 @@
         "numareplicapolicyunsupported",
         "observeFaultDomain",
         "parityPanelHeader",
+        "parity_layers",
         "paritybench",
         "parityreport",
         "parseCoverageLine",
@@ -16578,6 +16722,11 @@
           "category": "incidental",
           "reason": "Literal environment-variable spelling for the positioned FakExpertRingPoolFractionEnv host-memory sizing knob (pool-expert-ring-host-memory-fraction); it is an alias of that one configuration concept, not a second pool.",
           "token": "FAK_EXPERT_RING_POOL_FRACTION"
+        },
+        {
+          "category": "incidental",
+          "reason": "External indexer cache-block tensor label explicitly listed as unmapped for per-token activation import; it is not a memory-pool allocator or ownership policy.",
+          "token": "indexer_k_pooled"
         }
       ],
       "exclude": [
@@ -16604,6 +16753,7 @@
         "PooledSpeedupPct",
         "canonicalPoolLane",
         "defaultPoolCap",
+        "indexer_k_pooled",
         "kvpoolbytes",
         "leasePooled",
         "leaseSpecificPooled",
