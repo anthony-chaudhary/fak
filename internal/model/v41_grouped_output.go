@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 type v41GroupedOutputFunc func(layer int, o []float32, heads, headDim, groups, rank, dim int) ([]float32, v41DenseProjectionOutcome, error)
@@ -488,9 +489,10 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 	}
 }
 
-// v41FullGroupedOutput preserves the host F32 reduction loops while publishing
-// BF16 between wo_a and wo_b, as model.py787-788 requires. The exported generic
-// primitive retains its legacy F32 contract for reduced and standalone callers.
+// v41FullGroupedOutput reduces wo_a and wo_b in the mathx.FDot order the
+// reference backend uses, so a BF16 publication between them (model.py787-788)
+// cannot round a host row differently from the device seam. The exported
+// generic primitive retains its legacy F32 contract for reduced callers.
 func v41FullGroupedOutput(layer int, o, a, b []float32, heads, headDim, groups, rank, dim int) ([]float32, error) {
 	const aLeaf = "attn.wo_a.weight"
 	const bLeaf = "attn.wo_b.weight"
@@ -518,11 +520,7 @@ func v41FullGroupedOutput(layer int, o, a, b []float32, heads, headDim, groups, 
 	joined := make([]float32, joinedWidth)
 	for g := 0; g < groups; g++ {
 		for r := 0; r < rank; r++ {
-			var sum float32
-			for k := 0; k < groupIn; k++ {
-				sum += o[g*groupIn+k] * a[(g*rank+r)*groupIn+k]
-			}
-			joined[g*rank+r] = sum
+			joined[g*rank+r] = mathx.FDot(a[(g*rank+r)*groupIn:(g*rank+r+1)*groupIn], o[g*groupIn:(g+1)*groupIn])
 		}
 	}
 	var err error
@@ -532,9 +530,7 @@ func v41FullGroupedOutput(layer int, o, a, b []float32, heads, headDim, groups, 
 	}
 	out := make([]float32, dim)
 	for d := range out {
-		for k := range joined {
-			out[d] += b[d*joinedWidth+k] * joined[k]
-		}
+		out[d] = mathx.FDot(b[d*joinedWidth:(d+1)*joinedWidth], joined)
 	}
 	return v41LatentNormBF16Copy(layer, bLeaf, "projection", out)
 }
