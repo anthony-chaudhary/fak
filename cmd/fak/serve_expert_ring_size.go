@@ -19,9 +19,10 @@ import (
 //	token    the default: one token's activated experts, exactly the historical ring.
 //	auto     the smaller of a device bound and a host bound, after the dense base, the transient
 //	         scratch and the KV for the target context are reserved, and never more than
-//	         FAK_EXPERT_RING_POOL_FRACTION (default 0.10) of host MemTotal: on a UMA box with a
-//	         small carve-out the driver's BO_VA ceiling aborts mid-request long before the
-//	         measured bounds bind, and the routed band beyond the ring stays SSD-backed.
+//	         FAK_EXPERT_RING_POOL_FRACTION of host MemTotal. The default is 0.50 when the ring
+//	         pages live in mapped GTT (integrated, known carve-out <= 4 GiB) and 0.10 otherwise,
+//	         where DEVICE_LOCAL pages can fill a small carve-out and hit the driver's BO_VA
+//	         ceiling mid-request. The routed band beyond the ring stays SSD-backed.
 //	<bytes>  an explicit ring, admitted or refused at load.
 //
 // On a UMA box (shared host RAM, carve-out <= serveExpertRingUMACarveoutMax) the device ring,
@@ -46,6 +47,7 @@ const (
 	serveExpertRingHostMarginFraction float64 = 0.05
 	serveExpertRingUMACarveoutMax     int64   = 4 << 30
 	serveExpertRingPoolFractionDef    float64 = 0.10
+	serveExpertRingPoolFractionGTT    float64 = 0.5
 	serveExpertRingPoolFractionMax    float64 = 0.5
 )
 
@@ -115,12 +117,13 @@ func resolveServeExpertRingSize(flagValue string, getenv func(string) string) (s
 	return size, err
 }
 
-// parseServeExpertRingPoolFraction returns the default for an empty value and refuses anything
-// outside (0, 0.5] with ErrServeExpertRingSize, matching a malformed FAK_EXPERT_RING_BYTES.
+// parseServeExpertRingPoolFraction returns 0 (the host tier's default) for an empty value and
+// refuses anything outside (0, 0.5] with ErrServeExpertRingSize, matching a malformed
+// FAK_EXPERT_RING_BYTES.
 func parseServeExpertRingPoolFraction(raw string) (float64, error) {
 	v := strings.TrimSpace(raw)
 	if v == "" {
-		return serveExpertRingPoolFractionDef, nil
+		return 0, nil
 	}
 	f, err := strconv.ParseFloat(v, 64)
 	if err != nil || !(f > 0 && f <= serveExpertRingPoolFractionMax) {
@@ -140,6 +143,15 @@ type serveExpertRingHost struct {
 	SharedPool    bool
 	Carveout      int64
 	CarveoutKnown bool
+}
+
+// serveExpertRingDefaultPoolFraction mirrors compute's host-visible ring-page policy: there the
+// ring never fills the carve-out, and a 64.2 GiB auto ring served on strix3 (512 MiB carve-out).
+func serveExpertRingDefaultPoolFraction(host serveExpertRingHost) float64 {
+	if host.SharedPool && host.CarveoutKnown && host.Carveout > 0 && host.Carveout <= serveExpertRingUMACarveoutMax {
+		return serveExpertRingPoolFractionGTT
+	}
+	return serveExpertRingPoolFractionDef
 }
 
 func serveExpertRingHostMargin(total int64) int64 {
@@ -216,7 +228,7 @@ func sizeServeExpertRing(size serveExpertRingSize, f ggufload.ActivatedExpertFit
 		if host.Known && host.Total > 0 {
 			s.PoolFraction = size.PoolFraction
 			if s.PoolFraction <= 0 {
-				s.PoolFraction = serveExpertRingPoolFractionDef
+				s.PoolFraction = serveExpertRingDefaultPoolFraction(host)
 			}
 			s.PoolCapBytes = int64(s.PoolFraction * float64(host.Total))
 			ring = min(ring, s.PoolCapBytes)

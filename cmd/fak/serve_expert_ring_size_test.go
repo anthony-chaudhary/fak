@@ -224,6 +224,26 @@ func TestSizeServeExpertRingTable(t *testing.T) {
 			t.Fatalf("explicit ring=%d cap=%d err=%v, want 20 GiB uncapped", s.RingBytes, s.PoolCapBytes, err)
 		}
 	})
+	t.Run("auto_pool_fraction_gtt_tier", func(t *testing.T) {
+		total := 1249 * ringGiB / 10
+		gtt := serveExpertRingHost{Total: total, Avail: 118 * ringGiB, Known: true, RSSAnonPeak: 2 * ringGiB, SharedPool: true, Carveout: 512 << 20, CarveoutKnown: true}
+		s, err := sizeServeExpertRing(serveExpertRingSize{Mode: serveExpertRingAuto}, f, token, nonRing, 200*ringGiB, gtt)
+		if want := int64(0.5 * float64(total)); err != nil || s.RingBytes != want || s.PoolFraction != 0.5 {
+			t.Fatalf("gtt-tier auto ring=%d fraction=%v err=%v, want %d at 0.5", s.RingBytes, s.PoolFraction, err, want)
+		}
+		s, err = sizeServeExpertRing(serveExpertRingSize{Mode: serveExpertRingAuto, PoolFraction: 0.20}, f, token, nonRing, 200*ringGiB, gtt)
+		if want := int64(0.20 * float64(total)); err != nil || s.RingBytes != want {
+			t.Fatalf("gtt-tier env 0.20 ring=%d err=%v, want %d", s.RingBytes, err, want)
+		}
+		for name, h := range map[string]serveExpertRingHost{
+			"carveout_unknown": {Total: total, Avail: 118 * ringGiB, Known: true, SharedPool: true},
+			"carveout_large":   {Total: total, Avail: 118 * ringGiB, Known: true, SharedPool: false, Carveout: 64 * ringGiB, CarveoutKnown: true},
+		} {
+			if got := serveExpertRingDefaultPoolFraction(h); got != serveExpertRingPoolFractionDef {
+				t.Errorf("%s default fraction=%v, want %v", name, got, serveExpertRingPoolFractionDef)
+			}
+		}
+	})
 	t.Run("auto_pool_cap_below_floor_takes_floor", func(t *testing.T) {
 		small := serveExpertRingHost{Total: 512 << 20, Avail: 100 * ringGiB, Known: true}
 		s, err := sizeServeExpertRing(serveExpertRingSize{Mode: serveExpertRingAuto}, f, token, nonRing, 200*ringGiB, small)
@@ -252,8 +272,8 @@ func ringEnv(ring, fraction string) func(string) string {
 
 // fak-test:runtime fast est=1ms lane=default
 func TestResolveServeExpertRingPoolFraction(t *testing.T) {
-	if size, err := resolveServeExpertRingSize("", ringEnv("auto", "")); err != nil || size.PoolFraction != 0.10 {
-		t.Fatalf("unset fraction %+v err=%v, want default 0.10", size, err)
+	if size, err := resolveServeExpertRingSize("", ringEnv("auto", "")); err != nil || size.PoolFraction != 0 {
+		t.Fatalf("unset fraction %+v err=%v, want 0 (host tier default)", size, err)
 	}
 	if size, err := resolveServeExpertRingSize("", ringEnv("auto", "0.5")); err != nil || size.PoolFraction != 0.5 {
 		t.Fatalf("ceiling fraction %+v err=%v", size, err)
@@ -276,7 +296,7 @@ func TestResolveServeExpertRingSizeFlagEnvParity(t *testing.T) {
 		wantErr  bool
 	}{
 		{fraction: "0.20", want: 0.20},
-		{fraction: "", want: serveExpertRingPoolFractionDef},
+		{fraction: "", want: 0},
 		{fraction: "0.5", want: 0.5},
 		{fraction: "0", wantErr: true},
 		{fraction: "-0.1", wantErr: true},
