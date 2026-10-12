@@ -459,9 +459,10 @@ var fastAdvisoryRatchets = map[string]string{
 	"TestLiveInternalGoPackagesResolveToExplicitLaneTrees": "internal/devindex",
 	"TestCheckedInPageIsFresh":                             "cmd/verbsdoc",
 	"TestLiveGitGatherIsWellFormed":                        "internal/flowmetrics",
+	"TestTestSuitePolicy":                                  "internal/boundarylint",
 }
 
-const fastAdvisorySkip = "^(TestLiveTreeUnderCeiling|TestTreeEnumExhaustivenessNotGrowing|TestLiveInternalGoPackagesResolveToExplicitLaneTrees|TestCheckedInPageIsFresh|TestLiveGitGatherIsWellFormed)$"
+const fastAdvisorySkip = "^(TestLiveTreeUnderCeiling|TestTreeEnumExhaustivenessNotGrowing|TestLiveInternalGoPackagesResolveToExplicitLaneTrees|TestCheckedInPageIsFresh|TestLiveGitGatherIsWellFormed|TestTestSuitePolicy)$"
 
 func fastShardCommand(packages ...string) []string {
 	return append([]string{"go", "test", "-timeout=20m", "-skip", fastAdvisorySkip}, packages...)

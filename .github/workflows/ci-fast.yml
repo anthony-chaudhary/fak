@@ -67,13 +67,13 @@ env:
   GOFLAGS: "-p=2"
   # Live-tree ratchets grade the repository's current shape or history (god-file
   # LOC caps, the enum-exhaustiveness floor, lane-tree taxonomy parity, generated
-  # verb-page freshness, live commit-subject parsing), not shipped behavior. Any
-  # unrelated landing can red them, which held every release for 7+ main runs on
-  # 2026-10-12. The decisive shards skip exactly these names; ci.yml's full
+  # verb-page freshness, live commit-subject parsing, the change-detector test
+  # ratchet), not shipped behavior. Any unrelated landing can red them, which
+  # held every release for 7+ main runs on 2026-10-12. The decisive shards skip exactly these names; ci.yml's full
   # `go test ./...` still runs them on every push. Receipts record the -skip argv
   # and the verifier refuses any other value. The list is pinned, name by name, by
   # internal/releasereadiness TestFastReleaseGateSkipsOnlyPinnedLiveTreeRatchets.
-  CI_FAST_ADVISORY_TESTS: "^(TestLiveTreeUnderCeiling|TestTreeEnumExhaustivenessNotGrowing|TestLiveInternalGoPackagesResolveToExplicitLaneTrees|TestCheckedInPageIsFresh|TestLiveGitGatherIsWellFormed)$"
+  CI_FAST_ADVISORY_TESTS: "^(TestLiveTreeUnderCeiling|TestTreeEnumExhaustivenessNotGrowing|TestLiveInternalGoPackagesResolveToExplicitLaneTrees|TestCheckedInPageIsFresh|TestLiveGitGatherIsWellFormed|TestTestSuitePolicy)$"
 
 # These receipts bind checkout commits and reported job execution. They do not
 # seal generated/untracked files or external Go inputs, and grant no release
