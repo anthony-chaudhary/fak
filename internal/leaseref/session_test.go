@@ -16,7 +16,7 @@ func TestPublishSessionWritesSessionRef(t *testing.T) {
 
 	d := SessionDescriptor{
 		ID:        "guard-7",
-		Host:      "dgx3",
+		Host:      "node3",
 		PCBState:  "RUNNING",
 		UpdatedAt: 1000,
 		TTLSecs:   300,

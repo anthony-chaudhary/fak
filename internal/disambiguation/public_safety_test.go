@@ -10,7 +10,7 @@ func TestPublicSafetyRejectsSensitiveCorpus(t *testing.T) {
 		name, text, code string
 	}{
 		{"windows local path", `operator file C:\\Users\\alice\\secrets.txt`, ErrPublicSafetyLocalPath},
-		{"unix local path", "operator file /home/alice/secrets.txt", ErrPublicSafetyLocalPath},
+		{"unix local path", "operator file /home/" + "alice/secrets.txt", ErrPublicSafetyLocalPath},
 		{"credential", "Authorization: Bearer abcdefghijklmnop", ErrPublicSafetyCredential},
 		{"private repository", "copied from github.com/example/fak-private", ErrPublicSafetyPrivateRepo},
 		{"private hostname", "run this on gpu-01.internal", ErrPublicSafetyPrivateHost},

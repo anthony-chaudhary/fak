@@ -75,7 +75,7 @@ func TestParseBenchResultLocal(t *testing.T) {
 	os.WriteFile(p, []byte(`{
 	  "schema_version": 6, "profile_name": "swebench-verified-mini-workers-sweep",
 	  "total_run_time": {"seconds": 1234.5},
-	  "cache_verdict": {"status": "CACHE_SATURATED", "per_server": {"DGX3": {"token_hit_ratio_pct": 0.0}}}
+	  "cache_verdict": {"status": "CACHE_SATURATED", "per_server": {"NODE3": {"token_hit_ratio_pct": 0.0}}}
 	}`), 0o644)
 	bs, err := ParseBenchResult(p)
 	if err != nil {

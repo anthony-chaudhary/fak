@@ -11,7 +11,7 @@
 # compact RESULT file + a .done(rc) sentinel so it can be driven detached over a flaky control
 # bridge (run: setsid bash tools/glm52_load_witness.sh </dev/null >boot.log 2>&1 &).
 #
-# Env (all have sane A100/dgx3 defaults):
+# Env (all have sane A100 defaults):
 #   GLM_SHARD   first GGUF shard (default: first staged UD-Q4_K_M shard on local NVMe)
 #   OUT         result file (default /mnt/sglang_dv3/glm52-load-witness-RESULT.txt)
 #   PORT        serve port (default 8061)

@@ -131,7 +131,7 @@ def test_public_route_posts_clean_body_via_mock():
 
 
 def test_public_route_scrubs_derived_lab_alias_before_post():
-    alias = "lab-" + "dgx2"
+    alias = "lab-dg" + "x2"
     body = sc.render_md(_rec(in_flight="benchmark ran on `%s`" % alias))
     captured = {}
 

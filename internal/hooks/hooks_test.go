@@ -122,6 +122,40 @@ func TestPublicLeak_operatorIdentifyingUserHomePaths(t *testing.T) {
 	}
 }
 
+func TestPublicLeak_homePathPlaceholdersCorporaAndScrubberSelfTests(t *testing.T) {
+	cases := []struct {
+		name, file, line, reason string
+		leak                     bool
+	}{
+		{name: "generic POSIX placeholder", file: "docs/a.md", line: "cd " + operatorHomePathFixture("home", "u", "a"), reason: operatorHomePathLabel},
+		{name: "default cloud account", file: "docs/a.md", line: "cd " + operatorHomePathFixture("home", "ubuntu", "a"), reason: operatorHomePathLabel},
+		{name: "Windows placeholder", file: "docs/a.md", line: "cd " + operatorHomePathFixture("windows", "devuser", "a"), reason: operatorHomePathLabel},
+		{name: "unknown user outside a corpus", file: "docs/a.md", line: "cd " + operatorHomePathFixture("home", "alice", "a"), reason: operatorHomePathLabel, leak: true},
+		{name: "real path beside a placeholder", file: "docs/a.md", line: operatorHomePathFixture("home", "u", "a") + " " + operatorHomePathFixture("home", "alice", "a"), reason: operatorHomePathLabel, leak: true},
+		{name: "upstream contributor in research corpus", file: "docs/research/inventory/x-corpus.jsonl", line: `{"t":"` + operatorHomePathFixture("home", "alice", "a") + `"}`, reason: operatorHomePathLabel},
+		{name: "operator in research corpus", file: "docs/research/inventory/x-corpus.jsonl", line: `{"t":"` + operatorHomePathFixture("home", "antho", "a") + `"}`, reason: operatorHomePathLabel, leak: true},
+		{name: "operator Windows family is never a placeholder", file: "docs/a.md", line: operatorHomePathFixture("windows", operatorNameFixture(), "a"), reason: operatorHomePathLabel, leak: true},
+		{name: "corpus prefix outside inventory", file: "docs/research/x-corpus.jsonl", line: operatorHomePathFixture("home", "alice", "a"), reason: operatorHomePathLabel, leak: true},
+		{name: "dgx alias in scrubber self-test", file: "tools/scrub_hardware_names_test.py", line: "ran on " + privateGPUAliasFixture(), reason: privateGPUAliasLabel},
+		{name: "dgx alias elsewhere", file: "cmd/fak/x_test.go", line: "ran on " + privateGPUAliasFixture(), reason: privateGPUAliasLabel, leak: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			staged, err := gatePublicLeak(diffOf("/r", map[string][]string{tc.file: {tc.line}}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			tree := publicLeakLineFindings(tc.line, 1, tc.file, nil)
+			if got := hasFindingFor(staged, "PUBLIC_LEAK", tc.reason); got != tc.leak {
+				t.Fatalf("staged finding = %v, want %v; findings: %+v", got, tc.leak, staged)
+			}
+			if got := hasFindingFor(tree, "PUBLIC_LEAK", tc.reason); got != tc.leak {
+				t.Fatalf("tree finding = %v, want %v; findings: %+v", got, tc.leak, tree)
+			}
+		})
+	}
+}
+
 func TestPublicLeak_privateDefaultsAreCaseInsensitiveAcrossPathAndContent(t *testing.T) {
 	repoNeedle := strings.ToUpper(privateRepoFixture())
 	identityNeedle := strings.ToUpper(privateIdentityFixture())

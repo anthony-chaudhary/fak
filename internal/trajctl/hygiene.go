@@ -26,7 +26,7 @@ const (
 
 // absPathRE matches machine-revealing absolute filesystem paths: a Windows drive
 // path (C:\Users\...), a UNC share (\\host\share\...), or a POSIX path rooted at a
-// real top-level directory with at least one nested segment (/home/alice/...). A
+// real top-level directory with at least one nested segment (/home/<user>/...). A
 // RELATIVE path (docs/nightrun/trajctl.jsonl) is intentionally NOT matched, so the
 // ledger's own relative references survive scrubbing; only rooted, layout-revealing
 // paths are redacted.

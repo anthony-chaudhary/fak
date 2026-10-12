@@ -38,7 +38,7 @@ func TestRenderIssueStatusCommentIsIdempotentAndPathFree(t *testing.T) {
 	rows := []StatusProjection{
 		ProjectStatus(StatusEvidence{IssueNumber: 10551, Lane: "workerworktree", Session: "worker-2", AssociationKnown: true, CleanupReady: true}),
 		ProjectStatus(StatusEvidence{IssueNumber: 10551, Lane: "workerworktree", Session: "worker-1", AssociationKnown: true, Dirty: true}),
-		ProjectStatus(StatusEvidence{IssueNumber: 9, Lane: "other", Session: "/Users/alice/private", AssociationKnown: true, Dirty: true}),
+		ProjectStatus(StatusEvidence{IssueNumber: 9, Lane: "other", Session: "/Users/" + "alice/private", AssociationKnown: true, Dirty: true}),
 	}
 	first, err := RenderIssueStatusComment("operator preface", 10551, rows)
 	if err != nil {

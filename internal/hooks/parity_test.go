@@ -164,7 +164,7 @@ func parityGCPEmail() string {
 	return "svc@proj." + "iam." + "gserviceaccount.com"
 }
 func parityInternalHost() string    { return "ms" + "l-bui" + "ld-7" }
-func parityPrivateLabAlias() string { return "lab-" + "dgx2" }
+func parityPrivateLabAlias() string { return "lab-dg" + "x2" }
 func parityPrivateRepo() string     { return "ca" + "ma" }
 func parityPrivateIdentity() string { return "sar" + "onic" }
 

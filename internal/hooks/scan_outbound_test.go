@@ -18,7 +18,7 @@ func TestScanOutboundTextCleanPayloadPasses(t *testing.T) {
 }
 
 func TestScanOutboundTextFlagsDerivedLabAlias(t *testing.T) {
-	alias := "lab-" + "dgx2"
+	alias := "lab-dg" + "x2"
 	got := ScanOutboundText("benchmark ran on "+alias, "")
 	if len(got) != 1 || got[0].Gate != "PUBLIC_LEAK" || !strings.Contains(got[0].Detail, "private GPU host alias") {
 		t.Fatalf("derived lab alias must be refused before outbound send, got %+v", got)

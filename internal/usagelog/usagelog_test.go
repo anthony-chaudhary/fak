@@ -98,7 +98,7 @@ func TestRedactionNoRawArgvByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	secret := "/home/alice/secret-token-abc123"
+	secret := "/home/" + "alice/secret-token-abc123"
 	digest := Digest([]byte("salty"), []string{"-m", secret})
 	if _, err := lg.Append(Row{Verb: "commit", Argc: 2, ArgsDigest: digest}); err != nil {
 		t.Fatalf("Append: %v", err)

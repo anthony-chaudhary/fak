@@ -209,7 +209,7 @@ func TestGuardResourceMonitorFailureReceiptPersistsScrubbedDetail(t *testing.T) 
 		Processes: []procguard.MemoryProcess{{
 			PID:         42,
 			Name:        "codex",
-			CommandLine: "/Users/alice/bin/codex --api-key=hunter2",
+			CommandLine: "/Users/" + "alice/bin/codex --api-key=hunter2",
 		}},
 	}
 	event := guardResourceMonitorFailure(42, snapshot, "CHILD_RESOURCE_MONITOR_ERROR", rawDetail)

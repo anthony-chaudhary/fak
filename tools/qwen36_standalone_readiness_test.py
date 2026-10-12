@@ -278,16 +278,16 @@ def write_dgx_remote_probe(run_dir: Path, resolved: bool = False) -> None:
     (run_dir / "REMOTE_PROBE.dns.json").write_text(json.dumps({
         "schema": "fak.dgx-one-touch.v1.remote-probe",
         "generated_at": "2026-06-19T00:04:00Z",
-        "ssh_target": "<ssh-password>-dgx1.example.lab",
+        "ssh_target": "<ssh-password>-gpu1.example.lab",
         "proxy_jump": "",
         "target_dns": {
-            "host": "<ssh-password>-dgx1.example.lab",
+            "host": "<ssh-password>-gpu1.example.lab",
             "resolved": resolved,
             "addresses": ["10.0.0.1"] if resolved else [],
             "error": "" if resolved else "[Errno 11001] getaddrinfo failed",
         },
         "jump_dns": None,
-        "ssh_argv": ["ssh", "<ssh-password>-dgx1.example.lab", "hostname && nvidia-smi -L"],
+        "ssh_argv": ["ssh", "<ssh-password>-gpu1.example.lab", "hostname && nvidia-smi -L"],
         "ssh": {"attempted": False, "returncode": None, "stdout": "", "stderr": ""},
     }), encoding="utf-8")
 
@@ -689,7 +689,7 @@ def test_dgx_remote_probe_dns_failure_is_reported_without_blocking_handoff():
     assert report["summary"]["dgx_remote_probes"] == 1
     assert checks["DGX remote probe"]["status"] == "WARN"
     assert probe["status"] == "DNS_FAILED"
-    assert probe["ssh_target"] == "<ssh-password>-dgx1.example.lab"
+    assert probe["ssh_target"] == "<ssh-password>-gpu1.example.lab"
     assert probe["target_dns_resolved"] is False
     rendered = readiness.render_markdown(report)
     assert "DGX remote probes: `1`" in rendered

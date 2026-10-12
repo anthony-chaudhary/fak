@@ -111,7 +111,7 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"PowerShell Start-Process RunAs (privilege escalation) denied", "PowerShell", `{"command":"Start-Process powershell -Verb RunAs"}`, abi.VerdictDeny},
 		{"PowerShell terraform destroy denied", "PowerShell", `{"command":"terraform.exe -chdir infra destroy -auto-approve"}`, abi.VerdictDeny},
 		{"PowerShell case-insensitive remove-item denied", "PowerShell", `{"command":"remove-item -force -recurse ."}`, abi.VerdictDeny},
-		{"PowerShell broad root recursive search denied", "PowerShell", `{"command":"Get-ChildItem -Path C:\\Users\\antho -Directory -Filter fak -Recurse"}`, abi.VerdictDeny},
+		{"PowerShell broad root recursive search denied", "PowerShell", `{"command":"Get-ChildItem -Path C:\\Users\\u -Directory -Filter fak -Recurse"}`, abi.VerdictDeny},
 		{"PowerShell broad home recursive search denied", "PowerShell", `{"command":"Get-ChildItem -Path ~ -Recurse -File"}`, abi.VerdictDeny},
 		{"PowerShell scoped recursive search allowed", "PowerShell", `{"command":"Get-ChildItem -Path . -Recurse"}`, abi.VerdictAllow},
 
@@ -168,7 +168,7 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"Codex namespaced exec_command rm -rf denied", "functions.exec_command", `{"cmd":"rm -rf /tmp/x"}`, abi.VerdictDeny},
 		{"Codex namespaced exec_command Remove-Item -Recurse denied", "functions.exec_command", `{"cmd":"Remove-Item -Recurse -Force C:\\work"}`, abi.VerdictDeny},
 		{"Codex broad recursive search denied", "exec_command", `{"cmd":"Get-ChildItem -Path ~ -Recurse"}`, abi.VerdictDeny},
-		{"Codex namespaced broad recursive search denied", "functions.exec_command", `{"cmd":"Get-ChildItem -Path C:\\Users\\antho -Recurse"}`, abi.VerdictDeny},
+		{"Codex namespaced broad recursive search denied", "functions.exec_command", `{"cmd":"Get-ChildItem -Path C:\\Users\\u -Recurse"}`, abi.VerdictDeny},
 		{"Codex namespaced scoped recursive search allowed", "functions.exec_command", `{"cmd":"Get-ChildItem -Path . -Recurse"}`, abi.VerdictAllow},
 
 		// The broader ultracode orchestration surface is admitted so a full-toolset turn never

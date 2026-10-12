@@ -14,8 +14,8 @@ func TestGuardHostFromBase(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"https://api.anthropic.com", "api.anthropic.com"},
 		{"https://api.openai.com/v1", "api.openai.com"},
-		{"http://dgx1:8080/v1", "dgx1:8080"},
-		{"dgx1:8080/v1", "dgx1:8080"},
+		{"http://node1:8080/v1", "node1:8080"},
+		{"node1:8080/v1", "node1:8080"},
 		{"127.0.0.1:11434", "127.0.0.1:11434"},
 		{"", ""},
 	}
@@ -32,7 +32,7 @@ func TestGuardIsLoopbackHost(t *testing.T) {
 			t.Errorf("guardIsLoopbackHost(%q) = false, want true", h)
 		}
 	}
-	for _, h := range []string{"api.anthropic.com", "dgx1:8080", "10.0.0.5:8080"} {
+	for _, h := range []string{"api.anthropic.com", "node1:8080", "10.0.0.5:8080"} {
 		if guardIsLoopbackHost(h) {
 			t.Errorf("guardIsLoopbackHost(%q) = true, want false", h)
 		}
@@ -47,9 +47,9 @@ func TestGuardResolveServingNodes(t *testing.T) {
 	}
 
 	// --remote-serve: the lab box, kind remote-serve.
-	got = guardResolveServingNodes(guardEndpointNodes{provider: "openai", resolvedBase: "http://dgx1:8080/v1", remoteServe: true})
-	if len(got) != 1 || got[0].ID != "dgx1:8080" || got[0].Kind != "remote-serve" {
-		t.Fatalf("remote-serve nodes = %+v, want one dgx1:8080 remote-serve node", got)
+	got = guardResolveServingNodes(guardEndpointNodes{provider: "openai", resolvedBase: "http://node1:8080/v1", remoteServe: true})
+	if len(got) != 1 || got[0].ID != "node1:8080" || got[0].Kind != "remote-serve" {
+		t.Fatalf("remote-serve nodes = %+v, want one node1:8080 remote-serve node", got)
 	}
 
 	// Detected local server: loopback host, kind local-server.

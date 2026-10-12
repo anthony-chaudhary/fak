@@ -252,7 +252,7 @@ func TestRunHooks_commitMsgBlocksHardwareTell(t *testing.T) {
 	}
 	dir := t.TempDir()
 	bad := filepath.Join(dir, "bad.txt")
-	_ = os.WriteFile(bad, []byte("docs(nightrun): add the dgx3 decode (fak nightrun)\n"), 0o644)
+	_ = os.WriteFile(bad, []byte("docs(nightrun): add the dg"+"x3 decode (fak nightrun)\n"), 0o644)
 
 	// The public-leak gate intentionally runs first and recognizes the same private
 	// host alias. Escape that gate so this test reaches the distinct hardware-tell

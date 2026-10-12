@@ -50,27 +50,79 @@ var auditRegexes = []struct {
 }{
 	{regexp.MustCompile(`xox[bp]-\d{8,}-\d{8,}-[A-Za-z0-9]{16,}`), "live Slack token (xoxb/xoxp)"},
 	{regexp.MustCompile(`[a-z0-9](?:[a-z0-9-]*[a-z0-9])?@[a-z0-9-]+\.iam\.gserviceaccount\.com`), "GCP service-account email"},
-	{regexp.MustCompile(`(?i)\b(?:lab[-_ ])?dgx[0-9]+\b`), "private GPU host alias (dgxN)"},
-	{
-		regexp.MustCompile(
-			`(?:(?i:[a-z]:\\users\\)[A-Za-z0-9._-]+\\` +
-				`|(?:^|[^A-Za-z0-9+./?&=%_-])/(?:Users|home)/[A-Za-z0-9._-]+/)`,
-		),
-		"operator-identifying absolute user-home path",
-	},
+	{regexp.MustCompile(`(?i)\b(?:lab[-_ ])?dgx[0-9]+\b`), privateGPUAliasLabel},
+	{operatorHomePathRe, operatorHomePathLabel},
 }
 
-const operatorHomePathLabel = "operator-identifying absolute user-home path"
-
-var placeholderUserHomePathRe = regexp.MustCompile(
-	`(?i:[a-z]:\\users\\USER\\)|(?:^|[^A-Za-z0-9+./?&=%_-])/(?:Users|home)/USER/`,
+const (
+	operatorHomePathLabel = "operator-identifying absolute user-home path"
+	privateGPUAliasLabel  = "private GPU host alias (dgxN)"
 )
 
-func auditRegexMatches(re *regexp.Regexp, label, line string) bool {
-	if label == operatorHomePathLabel {
-		line = placeholderUserHomePathRe.ReplaceAllString(line, "")
+// operatorHomePathRe captures the username of a Windows (group 1) or POSIX (group 2) home path.
+var operatorHomePathRe = regexp.MustCompile(
+	`(?:(?i:[a-z]:\\users\\)([A-Za-z0-9._-]+)\\` +
+		`|(?:^|[^A-Za-z0-9+./?&=%_-])/(?:Users|home)/([A-Za-z0-9._-]+)/)`,
+)
+
+// placeholderHomeUsers are documentation and default-account usernames, compared lower-cased;
+// a home path under one identifies no operator. It extends placeholderUsers (SECRET_SHAPE) so
+// the two gates never disagree about a placeholder.
+var placeholderHomeUsers = map[string]bool{
+	"u": true, "x": true, "xx": true, "xxx": true, "xxxx": true, "...": true, "..": true,
+	"me": true, "foo": true, "test": true, "example": true, "dev": true, "devuser": true,
+	"developer": true, "agent": true, "worker": true, "admin": true, "root": true,
+	"ubuntu": true, "jovyan": true, "yourname": true, "operator": true, "private": true,
+	"bench": true, "run": true, "git": true, "bin": true, "go": true, "test-user": true,
+	"test.user": true,
+}
+
+// operatorUserPrefix is the operator's own username family; no exemption ever covers it.
+func operatorUserPrefix() string { return "an" + "tho" }
+
+// thirdPartyCorpus reports whether rel is an imported corpus of public upstream repository
+// text, whose home paths name upstream contributors rather than the operator.
+func thirdPartyCorpus(rel string) bool {
+	return strings.HasPrefix(rel, "docs/research/inventory/") && strings.HasSuffix(rel, ".jsonl")
+}
+
+// hardwareScrubberSelfTest names the files that define or self-test the dgxN hardware-tell
+// scrubber; their fixtures must spell the alias they prove is caught.
+var hardwareScrubberSelfTest = map[string]bool{
+	"tools/scrub_hardware_names.py":        true,
+	"tools/scrub_hardware_names_test.py":   true,
+	"tools/githooks/commit-msg":            true,
+	"internal/hooks/gate_hardware_test.go": true,
+	"internal/hooks/hooks_test.go":         true,
+	"cmd/fak/sync_publicleak_test.go":      true,
+}
+
+func auditRegexMatches(re *regexp.Regexp, label, line, file string) bool {
+	file = strings.ReplaceAll(file, "\\", "/")
+	switch label {
+	case operatorHomePathLabel:
+		return operatorHomePathLeaks(line, file)
+	case privateGPUAliasLabel:
+		if hardwareScrubberSelfTest[file] {
+			return false
+		}
 	}
 	return re.MatchString(line)
+}
+
+func operatorHomePathLeaks(line, file string) bool {
+	corpus := thirdPartyCorpus(file)
+	for _, m := range operatorHomePathRe.FindAllStringSubmatch(line, -1) {
+		user := strings.ToLower(m[1] + m[2])
+		if strings.HasPrefix(user, operatorUserPrefix()) {
+			return true
+		}
+		if corpus || placeholderUsers[user] || placeholderHomeUsers[user] {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // selfReferentialLeak — files exempt from the needle scan (scrub_public_copy.py L463-467), path
@@ -117,7 +169,7 @@ func gatePublicLeak(d *StagedDiff) ([]Finding, error) {
 				}
 			}
 			for _, rx := range auditRegexes {
-				if auditRegexMatches(rx.re, rx.label, al.Text) {
+				if auditRegexMatches(rx.re, rx.label, al.Text, f) {
 					findings = append(findings, Finding{
 						Gate: "PUBLIC_LEAK", File: f, Line: al.New,
 						Detail: "[" + rx.label + "]  " + preview(al.Text),

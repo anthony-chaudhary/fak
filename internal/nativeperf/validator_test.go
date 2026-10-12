@@ -320,7 +320,7 @@ func TestReproducibilityPacket_GenerationAndChecksumDeterminism(t *testing.T) {
 	dirtyReceipt.Environment["SECRET_KEY"] = "sk-ant-api03-abcdef1234567890abcdef1234567890"
 	dirtyReceipt.Environment["USER_PROFILE_PATH"] = `C:\Users\devuser\secret\keys`
 	dirtyReceipt.Environment["SAFE_FLAG"] = "enabled"
-	dirtyReceipt.Metadata["run_path"] = `/home/anthony/private/bench`
+	dirtyReceipt.Metadata["run_path"] = `/home/` + "operator-x/private/bench"
 	dirtyReceipt.GitRevision = `c5a3b411f-C:\Users\devuser\repo`
 
 	scrubbedPacket, err := GenerateReproducibilityPacket(dirtyReceipt)
@@ -338,7 +338,7 @@ func TestReproducibilityPacket_GenerationAndChecksumDeterminism(t *testing.T) {
 	if strings.Contains(scrubbedStr, `C:\Users\`) || strings.Contains(scrubbedStr, `C:/Users/`) {
 		t.Errorf("scrubbed packet leaked Windows user path:\n%s", scrubbedStr)
 	}
-	if strings.Contains(scrubbedStr, `/home/anthony`) {
+	if strings.Contains(scrubbedStr, `/home/operator-x`) {
 		t.Errorf("scrubbed packet leaked Unix user path:\n%s", scrubbedStr)
 	}
 	if strings.Contains(scrubbedStr, "sk-ant-") {

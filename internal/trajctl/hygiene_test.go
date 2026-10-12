@@ -26,7 +26,7 @@ func TestHygieneRedactsHostnameAndAbsolutePathFromPersistedRows(t *testing.T) {
 			ID:        "obj-leak",
 			Statement: `repro on buildbox-07.corp.internal under C:\Users\` + user + `\work\fak`,
 			Status:    StatusActive,
-			Plan:      []PlanPhase{{ID: "p1", Title: "clone into /home/alice/src/fak then build"}},
+			Plan:      []PlanPhase{{ID: "p1", Title: "clone into /home/" + user + "/src/fak then build"}},
 		}),
 		ScoreRecord(ScoreRow{
 			ObjectiveID: "obj-leak", Value: 0.5, Method: "m", Version: "v1", Witness: W3,
@@ -67,7 +67,7 @@ func TestScrubTextKeepsRelativeLedgerPaths(t *testing.T) {
 	if leaks := leakScan(keep, nil); len(leaks) != 0 {
 		t.Fatalf("relative path flagged as a leak: %v", leaks)
 	}
-	drop := `/home/alice/secret and C:\Windows\Temp\x`
+	drop := `/home/` + `alice/secret and C:\Windows\Temp\x`
 	if leaks := leakScan(drop, nil); len(leaks) != 2 {
 		t.Fatalf("absolute paths = %v, want 2 leaks", leaks)
 	}

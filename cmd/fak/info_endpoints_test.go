@@ -17,7 +17,7 @@ func endpointsFixture() *gateway.SessionEndpoints {
 		Nodes: []gateway.SessionNode{
 			{Role: "kernel", ID: "win-box", Kind: "host"},
 			{Role: "serving", ID: "api.anthropic.com", Kind: "proxy", Detail: "anthropic"},
-			{Role: "serving", ID: "dgx1:8080", Kind: "remote-serve"},
+			{Role: "serving", ID: "node1:8080", Kind: "remote-serve"},
 		},
 	}
 }
@@ -47,7 +47,7 @@ func TestGuardInfoEndpointsPanelFull(t *testing.T) {
 	if !strings.Contains(joined, "kernel win-box") || !strings.Contains(joined, "serving api.anthropic.com") {
 		t.Fatalf("node row missing kernel/serving:\n%s", joined)
 	}
-	if !strings.Contains(joined, "dgx1:8080") {
+	if !strings.Contains(joined, "node1:8080") {
 		t.Fatalf("second serving node missing:\n%s", joined)
 	}
 }

@@ -73,7 +73,7 @@ func TestRemoteSnapshotTwoClonesPublishFetchList(t *testing.T) {
 }
 
 func TestRemoteSnapshotRedactsPathsHostPIDAndDirtyDetails(t *testing.T) {
-	secretPath := "/Users/alice/private/fak-worker-secret"
+	secretPath := "/Users/" + "alice/private/fak-worker-secret"
 	rows := []SnapshotRow{{HeadSHA: "abc", BaseSHA: "def", Association: SnapshotAssociation{State: "ASSOCIATED", Lane: "lane-a", LeaseID: "lease-a"}, Liveness: SnapshotLiveness{Owner: "LIVE", Lease: "LIVE"}, Cleanliness: SnapshotCleanliness{State: "DIRTY"}, Lifecycle: "DIRTY"}}
 	s, err := NewRemoteSnapshot("alice-workstation.internal", time.Now(), rows)
 	if err != nil {
