@@ -378,15 +378,32 @@ func verifyAppliedDisambiguation(root, wtPath, treeSHA string) (*DisambiguationW
 }
 
 func verifyApplicableDisambiguation(root, wtPath, treeSHA string) (*DisambiguationWitnesses, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultDisambiguationTimeout)
+	timeoutReceipt, timeout, configErr := resolveDisambiguationTimeout(os.LookupEnv)
+	if configErr != nil {
+		// Oracle-only configuration must not reject a root that never carried
+		// the contract. Probe with the default, then let the oracle reject an
+		// invalid override if any of the three trees makes it applicable.
+		timeout = defaultDisambiguationTimeout
+		timeoutReceipt = DisambiguationTimeoutReceipt{
+			DefaultTimeoutMS:   timeout.Milliseconds(),
+			EffectiveTimeoutMS: timeout.Milliseconds(),
+			RecoveryMode:       disambiguationRecoveryDefault,
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	applicable, err := disambiguationApplicable(ctx, root, wtPath, treeSHA)
+	// CommandContext can return an exit error after killing a timed-out Git
+	// probe. Preserve that evidence while retaining the deadline's identity.
+	if ctx.Err() != nil {
+		err = errors.Join(err, ctx.Err())
+	}
 	cancel()
 	if err != nil {
-		all := newDisambiguationWitnesses(treeSHA, DisambiguationTimeoutReceipt{
-			DefaultTimeoutMS:   defaultDisambiguationTimeout.Milliseconds(),
-			EffectiveTimeoutMS: defaultDisambiguationTimeout.Milliseconds(),
-			RecoveryMode:       disambiguationRecoveryDefault,
-		})
+		all := newDisambiguationWitnesses(treeSHA, timeoutReceipt)
+		if errors.Is(err, context.DeadlineExceeded) {
+			all.Before = timeoutResult("HEAD", "applicability", "contract-probe", timeout, err)
+			return all, false
+		}
 		all.Before.Detail = fmt.Sprintf("%s: witness=applicability subphase=contract-probe: %v", DisambiguationApplicabilityCode, err)
 		all.Before.Diagnostic = &DisambiguationDiagnostic{
 			Code: DisambiguationApplicabilityCode, Witness: "applicability", Subphase: "contract-probe",
