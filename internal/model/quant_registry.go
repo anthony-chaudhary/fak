@@ -177,6 +177,7 @@ func resetDefaultQuantDescriptors() {
 		{kindIQ1M, "IQ1_M", 0},
 		{kindQ8_0, "Q8_0", compute.Q8_0},
 		{kindQ4_0, "Q4_0", 0},
+		{kindIQ4NL, "IQ4_NL", 0},
 	}
 	for _, item := range nonHAL {
 		registerDefaultLocked(BaseQuantDescriptor{

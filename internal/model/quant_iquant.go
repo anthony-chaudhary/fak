@@ -38,6 +38,17 @@ func q4_0DequantBlock(dst []float32, blk []byte) {
 	}
 }
 
+// iq4nlDequantBlock is ggml dequantize_row_iq4_nl for one 32-weight block: byte j's low
+// nibble is weight j, its high nibble weight j+16, each scaled through kvaluesIQ4NL.
+func iq4nlDequantBlock(dst []float32, blk []byte) {
+	d := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[0:])))
+	qs := blk[2:iq4nlBlockBytes]
+	for j := 0; j < iq4nlBlockWeights/2; j++ {
+		dst[j] = d * kvaluesIQ4NL[qs[j]&0x0f]
+		dst[j+iq4nlBlockWeights/2] = d * kvaluesIQ4NL[qs[j]>>4]
+	}
+}
+
 func iq4xsDequantSuperBlock(dst []float32, blk []byte) {
 	d := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[0:])))
 	scalesH := binary.LittleEndian.Uint16(blk[2:])
