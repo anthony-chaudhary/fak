@@ -36,6 +36,7 @@ type v41ProjScratch struct {
 	expertGateUp     v41ExpertGateUpFunc
 	expertDown       v41ExpertDownFunc
 	routedExpert     v41RoutedExpertFunc
+	routedLayer      v41RoutedLayerFunc
 	denseProjection  v41DenseProjectionFunc
 	groupedOutput    v41GroupedOutputFunc
 	mhcProjection    v41MHCProjectionFunc

@@ -69,6 +69,10 @@ int fvk_d2h(void *h, const void *d, size_t bytes);
  * submit/wait. A failed submit or wait quarantines resources until process exit.
  * Used for attention status and that operation's fresh device output only. */
 int fvk_v41_d2h(void *h, const void *d, size_t bytes);
+/* fvk_v41_d2h for count ordered, disjoint regions of one host image behind one
+ * checked host fence: srcs[i] (bytes[i]) lands at host + offsets[i]. */
+int fvk_v41_d2h_many(void *host, size_t host_bytes, int count, void *const *srcs,
+                     const size_t *offsets, const size_t *bytes);
 /* One-shot deterministic failure injection for backend tests. */
 void fvk_debug_d2h_staging_failure_once(int enabled);
 void fvk_d2d(void *dst, const void *src, size_t bytes);

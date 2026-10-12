@@ -72,7 +72,7 @@ func TestV41DecodeSubmits(t *testing.T) {
 			t.Log(line)
 		}
 	}()
-	for _, fx := range v41DecodeSubmitsFixtures() {
+	for _, fx := range append(v41DecodeSubmitsFixtures(), v41DecodeSubmitsPinnedFixtures()...) {
 		t.Run(fx.name, func(t *testing.T) {
 			for _, ctx := range contexts {
 				t.Run(fmt.Sprintf("ctx_%d", ctx), func(t *testing.T) {
@@ -114,4 +114,16 @@ func TestV41DecodeSubmits(t *testing.T) {
 			}
 		})
 	}
+}
+
+// v41DecodeSubmitsPinnedFixtures adds the pinned Q2_K/Q3_K slate, whose routed
+// experts run on the device; the F32 fixtures above keep them on the host.
+func v41DecodeSubmitsPinnedFixtures() []v41DecodeSubmitsFixture {
+	var out []v41DecodeSubmitsFixture
+	for _, compressed := range []bool{false, true} {
+		out = append(out, v41DecodeSubmitsFixture{fmt.Sprintf("pinned_q2k_q3k_layers3_compressed_%t", compressed), func(t *testing.T) *Model {
+			return v41PinnedSlateFixture(t, compressed)
+		}})
+	}
+	return out
 }
