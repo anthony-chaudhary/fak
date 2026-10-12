@@ -130,6 +130,63 @@ type v41ResidentKVRun struct {
 	gathers int
 }
 
+// fak-test:runtime fast est=10ms lane=default
+func TestV41StepWindowKVOwnedGather(t *testing.T) {
+	for _, pos := range []int{0, 2, 3, 7, 8} {
+		t.Run(fmt.Sprintf("pos_%d", pos), func(t *testing.T) {
+			state := &V41AttentionState{windowSize: 3, nextWindowPos: pos, window: make([][]float32, 3)}
+			for key := max(0, pos-3); key < pos; key++ {
+				state.window[key%3] = []float32{float32(key), -float32(key)}
+			}
+			current := []float32{float32(pos), -float32(pos)}
+			first := max(0, pos-3)
+			if pos == 8 {
+				first = pos - 1 // a configured window narrower than the retained ring
+			}
+			keys := make([]int32, 0, 4)
+			for key := first; key <= pos; key++ {
+				keys = append(keys, int32(key))
+			}
+			// The previous gather first obtained owned inspection rows.
+			legacy := func() []float32 {
+				rows := state.retainedTailRows()
+				out := make([]float32, 0, len(keys)*len(current))
+				for _, key := range keys {
+					if int(key) == pos {
+						out = append(out, current...)
+					} else {
+						out = append(out, rows[int(key)-max(0, pos-3)]...)
+					}
+				}
+				return out
+			}
+			want := legacy()
+			got, err := state.stepWindowKV(0, pos, keys, current)
+			if err != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("gather=%v err=%v want=%v", got, err, want)
+			}
+			for i := range got {
+				got[i] = -999
+			}
+			if !reflect.DeepEqual(legacy(), want) {
+				t.Fatal("attention payload aliases the live ring or current row")
+			}
+			var output []float32
+			allocs := testing.AllocsPerRun(10, func() {
+				output, err = state.stepWindowKV(0, pos, keys, current)
+			})
+			if err != nil || !reflect.DeepEqual(output, want) || allocs != 1 {
+				t.Fatalf("owned gather allocs=%g err=%v, want one flat allocation", allocs, err)
+			}
+			if pos > 3 {
+				if _, err := state.stepWindowKV(0, pos, []int32{int32(pos - 4)}, current); !errors.Is(err, ErrV41ForwardStage) {
+					t.Fatalf("dropped key error=%v, want typed refusal", err)
+				}
+			}
+		})
+	}
+}
+
 func v41ResidentKVDecode(t *testing.T, build func(*testing.T) *Model, ctx int, disabled bool) v41ResidentKVRun {
 	t.Helper()
 	prior := v41ResidentKVDisabled

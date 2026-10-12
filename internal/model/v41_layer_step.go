@@ -307,7 +307,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	// seedTemporal sets but the incremental Step does not grow), so a
 	// multi-step decode sees the correct retained prefix.
 	windowKeys := v41PlainWindowKeys(pos, cfg.windowForLayer(l))
-	retained := layerState.retainedTailRows()
+	retainedRows := layerState.retainedTailRowCount()
 	// Fail closed whenever the configured visible key set is not fully retained.
 	// That covers a GLOBAL (non-positive-window) layer whose causal prefix has
 	// outgrown the fixed ring, AND a LOCAL layer configured with a window wider
@@ -318,18 +318,18 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	// if that key predates the retained tail's first row the window is not
 	// covered.
 	if len(windowKeys) > 0 {
-		retainedLoKey := pos - len(retained)
+		retainedLoKey := pos - retainedRows
 		if firstVisible := int(windowKeys[0]); firstVisible < retainedLoKey {
 			return v41StageErr(v41StageAttention, l,
 				fmt.Errorf("%w: layer %d cannot step position %d from a %d-row retained ring: visible keys [%d,%d] are not fully retained (oldest %d < %d)",
-					ErrV41ForwardStage, l, pos, len(retained), firstVisible, int(windowKeys[len(windowKeys)-1]), firstVisible, retainedLoKey))
+					ErrV41ForwardStage, l, pos, retainedRows, firstVisible, int(windowKeys[len(windowKeys)-1]), firstVisible, retainedLoKey))
 		}
 	}
 	// Build the ordered visible key set: because pos is append-only, retained
 	// rows are exactly the suffix of windowKeys already available, in ascending
 	// order, followed by the current position.
 	visibleKeys := make([]int32, 0, len(windowKeys))
-	retainedLo := pos - len(retained)
+	retainedLo := pos - retainedRows
 	for _, k := range windowKeys {
 		if int(k) < pos {
 			if int(k) < retainedLo {
@@ -346,22 +346,11 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		visibleKeys = append(visibleKeys, int32(pos))
 	}
 
-	// Assemble the ordered KV row set: retained rows for the visible prefix
-	// (oldest first) followed by the newly projected row. This reproduces the
-	// relative order a full forward's `kvRows` window would present.
-	flatKV := make([]float32, 0, len(visibleKeys)*hd)
-	for _, k := range visibleKeys {
-		if int(k) == pos {
-			flatKV = append(flatKV, kv...)
-			continue
-		}
-		rowIdx := int(k) - retainedLo
-		if rowIdx < 0 || rowIdx >= len(retained) {
-			return v41StageErr(v41StageAttention, l,
-				fmt.Errorf("%w: layer %d step key %d is outside retained window [%d,%d)",
-					ErrV41ForwardStage, l, k, retainedLo, pos))
-		}
-		flatKV = append(flatKV, retained[rowIdx]...)
+	// Copy directly from the live ring into one owned payload. The ring is not
+	// advanced until this layer succeeds; no borrowed row reaches a callback.
+	flatKV, err := layerState.stepWindowKV(l, pos, visibleKeys, kv)
+	if err != nil {
+		return err
 	}
 	idx := v41PlainWindowIndexList(visibleKeys)
 	scale := cfg.attnScale()
@@ -1056,6 +1045,37 @@ func (s *V41AttentionState) retainedTailRows() [][]float32 {
 		out[i] = append([]float32(nil), s.window[(start+i)%s.windowSize]...)
 	}
 	return out
+}
+
+func (s *V41AttentionState) retainedTailRowCount() int {
+	if s == nil || s.nextWindowPos == 0 || s.windowSize <= 0 {
+		return 0
+	}
+	return min(s.nextWindowPos, s.windowSize)
+}
+
+// stepWindowKV gathers the visible rows without the intermediate inspection
+// copies made by retainedTailRows. The session owns the ring and does not append
+// until the layer succeeds. Only the owned flat copy crosses the attention seam,
+// so callback writes or retention cannot alias the live ring or current KV row.
+func (s *V41AttentionState) stepWindowKV(layer, pos int, visibleKeys []int32, kv []float32) ([]float32, error) {
+	tail := s.retainedTailRowCount()
+	retainedLo := pos - tail
+	flat := make([]float32, 0, len(visibleKeys)*len(kv))
+	for _, key := range visibleKeys {
+		if int(key) == pos {
+			flat = append(flat, kv...)
+			continue
+		}
+		rowIdx := int(key) - retainedLo
+		if rowIdx < 0 || rowIdx >= tail {
+			return nil, v41StageErr(v41StageAttention, layer,
+				fmt.Errorf("%w: layer %d step key %d is outside retained window [%d,%d)",
+					ErrV41ForwardStage, layer, key, retainedLo, pos))
+		}
+		flat = append(flat, s.window[(s.nextWindowPos-tail+rowIdx)%s.windowSize]...)
+	}
+	return flat, nil
 }
 
 // v41IndexReaderStep resolves the ONE committed index publication a reader
