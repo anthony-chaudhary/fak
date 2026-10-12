@@ -150,10 +150,10 @@ func (m *Model) v41EngramForwardAdmitted() error {
 		if err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(layer, "engram_q_norm.weight"), v41StageEngram, layer, normCells); err != nil {
+		if err := m.v41AdmitCells(layerName(layer, "engram_q_norm.weight"), v41StageEngram, layer, normCells); err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(layer, "engram_k_norm.weight"), v41StageEngram, layer, normCells); err != nil {
+		if err := m.v41AdmitCells(layerName(layer, "engram_k_norm.weight"), v41StageEngram, layer, normCells); err != nil {
 			return err
 		}
 	}
@@ -832,6 +832,28 @@ func (m *Model) v41AdmitShape(name string, stage v41ForwardStage, layer int, wan
 			return v41StageErr(stage, layer,
 				fmt.Errorf("%w: tensor %s shape %v, want %v", ErrV41ForwardStage, name, meta.Shape, want))
 		}
+	}
+	return nil
+}
+
+// v41AdmitCells admits a manifest tensor by element count. The GGUF ships the
+// Engram mixing norms as [hc][hidden] while reduced fixtures declare the flat
+// [hc*hidden] vector; the consumer reads the flat cells either way, so either
+// rank is admitted and any other cell count still refuses.
+func (m *Model) v41AdmitCells(name string, stage v41ForwardStage, layer, cells int) error {
+	meta, ok := m.manifest[name]
+	if !ok {
+		return v41StageErr(stage, layer, fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+	}
+	got, sized := 1, len(meta.Shape) == 1 || len(meta.Shape) == 2
+	for _, d := range meta.Shape {
+		if got, ok = checkedMulInt(got, d); !ok || d <= 0 {
+			sized = false
+		}
+	}
+	if !sized || got != cells {
+		return v41StageErr(stage, layer,
+			fmt.Errorf("%w: tensor %s shape %v, want %d cells", ErrV41ForwardStage, name, meta.Shape, cells))
 	}
 	return nil
 }
