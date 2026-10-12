@@ -1,0 +1,904 @@
+package model
+
+import (
+	"fmt"
+
+	"github.com/anthony-chaudhary/fak/internal/model/ffn"
+)
+
+// v41RoleSchedule reports whether any configured layer resolves to a non-plain
+// attention role. It is the release gate for the shared source registry: a role
+// schedule must retain the source publications across a prefill so a later
+// incremental Step can resolve them (#13480).
+func (m *Model) v41RoleSchedule() bool {
+	cfg := m.Cfg
+	roles := m.v41AttentionRolesCached()
+	for l := 0; l < cfg.NumLayers; l++ {
+		if v41CompressRatioAt(cfg, l) > 0 {
+			return true
+		}
+		if role, ok := roles[l]; ok && role != V41AttentionRolePerLayer {
+			return true
+		}
+	}
+	return false
+}
+
+// v41Layer applies one V4.1 decoder layer to x in place, updating the persistent
+// mHC streams[t] for each position. tokens carries the ids for the positions in
+// x so a declared Engram layer can hash them. The reduced path reproduces the
+// pre-#13009 arithmetic exactly (four identical stand-in streams derived from the
+// normalized input, and stream 0 of the post-mix written back); the full path
+// reads and writes all four DISTINCT persistent streams.
+func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float32, full bool, hd, nH, H int, eps float32, hcIters int, hcEps float32, routeCfg v41RouterConfig, st *v41ForwardState, scratch *v41ProjScratch, trace *v41ActivationTraceState) error {
+	cfg := m.Cfg
+	if scratch == nil {
+		scratch = &v41ProjScratch{}
+	}
+	var mhcDevice *v41MHCDevice
+	if full {
+		if err := scratch.mhcCarry.validate(l, len(x)); err != nil {
+			return err
+		}
+		if err := m.v41AdmitMHC(l); err != nil {
+			return err
+		}
+		mhcDevice = scratch.mhcCarry.device
+	}
+	var resident *v41MHCResident
+	if full {
+		resident = scratch.mhcCarry.resident
+	}
+	if resident != nil {
+		// A refused or failed layer never publishes its pending panel.
+		defer resident.abort()
+	}
+	scratch.denseProjection = nil
+	scratch.groupedOutput = nil
+	scratch.mhcProjection = nil
+	scratch.mhcFFNProjection = nil
+	scratch.attentionNorm = nil
+	scratch.attentionBF16 = nil
+	scratch.queryNorm = nil
+	scratch.queryPrefix = nil
+	scratch.kvNorm = nil
+	scratch.ffnNorm = nil
+	scratch.compressorNorm = nil
+	scratch.indexKeyNorm = nil
+	scratch.indexerScore = nil
+	scratch.indexScoreHealth = nil
+	scratch.sharedActivation = nil
+	scratch.tailRoPE = nil
+	scratch.sharedAttention = nil
+	scratch.routerTopK = nil
+	scratch.routedSum = nil
+	scratch.sharedAdd = nil
+	scratch.gatherOps = nil
+	if st != nil {
+		scratch.denseProjection = st.denseProjection
+		scratch.groupedOutput = st.groupedOutput
+		scratch.mhcProjection = st.mhcProjection
+		scratch.mhcFFNProjection = st.mhcFFNProjection
+		scratch.attentionNorm = st.attentionNorm
+		scratch.attentionBF16 = st.attentionBF16
+		scratch.queryNorm = st.queryNorm
+		scratch.queryPrefix = st.queryPrefix
+		scratch.kvNorm = st.kvNorm
+		scratch.ffnNorm = st.ffnNorm
+		scratch.compressorNorm = st.compressorNorm
+		scratch.indexKeyNorm = st.indexKeyNorm
+		scratch.indexerScore = st.indexerScore
+		scratch.indexScoreHealth = st.indexScoreHealth
+		scratch.sharedActivation = st.sharedActivation
+		scratch.tailRoPE = st.tailRoPE
+		scratch.sharedAttention = st.sharedAttention
+		scratch.routerTopK = st.routerTopK
+		scratch.routedSum = st.routedSum
+		scratch.sharedAdd = st.sharedAdd
+		scratch.gatherOps = st.gatherOps
+	}
+	defer func() {
+		scratch.denseProjection = nil
+		scratch.groupedOutput = nil
+		scratch.mhcProjection = nil
+		scratch.mhcFFNProjection = nil
+		scratch.attentionNorm = nil
+		scratch.attentionBF16 = nil
+		scratch.queryNorm = nil
+		scratch.queryPrefix = nil
+		scratch.kvNorm = nil
+		scratch.ffnNorm = nil
+		scratch.compressorNorm = nil
+		scratch.indexKeyNorm = nil
+		scratch.indexerScore = nil
+		scratch.indexScoreHealth = nil
+		scratch.sharedActivation = nil
+		scratch.tailRoPE = nil
+		scratch.sharedAttention = nil
+		scratch.routerTopK = nil
+		scratch.routedSum = nil
+		scratch.sharedAdd = nil
+		scratch.gatherOps = nil
+	}()
+
+	// Engram injection happens at the START of the layer, into the residual,
+	// before attention and before attn_norm (ds41_graph_before_attention).
+	if cfg.DeepSeekV41 != nil {
+		for _, eng := range cfg.DeepSeekV41.EngramLayerIDs {
+			if eng == l {
+				var project v41EngramProjectionFunc
+				if st != nil {
+					project = st.engramProjection
+				}
+				if resident != nil {
+					// The panel never leaves the device when the session binds the
+					// Engram gate; device-only refuses rather than reach the host
+					// round trip below.
+					if gate := scratch.gatherOps.engramGateFunc(); gate != nil {
+						geometry, layerRows, err := m.v41EngramLayerRows(l, tokens)
+						if err != nil {
+							return err
+						}
+						_, handled, err := m.v41EngramInjectResident(l, resident.streams, len(tokens), layerRows, eps, geometry, gate)
+						if err != nil {
+							return err
+						}
+						if handled {
+							break
+						}
+					}
+					host, err := resident.hostStreams(l)
+					if err != nil {
+						return err
+					}
+					for t := range x {
+						copy(x[t], host[t][0])
+					}
+					if err := m.v41EngramInjectWithProjection(l, x, host, full, tokens, eps, project); err != nil {
+						return err
+					}
+					if err := resident.setHostStreams(l, host); err != nil {
+						return err
+					}
+					break
+				}
+				if err := m.v41EngramInjectWithProjection(l, x, streams, full, tokens, eps, project); err != nil {
+					return err
+				}
+				break
+			}
+		}
+	}
+
+	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
+	mixBase := m.tensor(layerName(l, "mhc.base"))
+	mixScale := m.tensor(layerName(l, "mhc.scale"))
+	projectOutput := m.v41GroupedOutputProjector(l, nH, hd, cfg.OGroups, cfg.OLoraRank, H, scratch)
+	// The remaining per-layer projections are applied only through matRows, so
+	// they read through the streaming-safe v41ProjMatRows at their use site
+	// instead of materializing a whole f32 block here (#2150). Fail closed NOW,
+	// with the same typed #13276 refusal, if any is absent from every store, so
+	// the refuse happens before any layer arithmetic rather than mid-forward.
+	for _, leaf := range []string{
+		"attn.wq_a.weight", "attn.wq_b.weight", "attn.wkv.weight",
+		"ffn.gate.weight",
+		"ffn.shared_experts.w1.weight", "ffn.shared_experts.w3.weight",
+		"ffn.shared_experts.w2.weight",
+	} {
+		if !m.hasResidentWeight(layerName(l, leaf)) {
+			return v41StageErr(v41StageAttention, l,
+				fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, layerName(l, leaf)))
+		}
+	}
+	// attn.sink is a 1-D per-head vector (not an isQuantWeight matmul leaf), so it
+	// stays on the f32 manifest.
+	sink := m.tensor(layerName(l, "attn.sink"))
+	gateBias := m.tensor(layerName(l, "ffn.gate.e_score_correction_bias"))
+
+	seq := len(x)
+	// ---- mHC coefficient split (one split per layer) ----
+	//
+	// The mHC mix projection geometry is per-layer (it is a per-layer weight), so
+	// resolve it once. The published artifact's hc_attn_fn is the flattened
+	// four-stream projection (logical 24 x 4H, stored [4H, 24]); the reference
+	// (inference/model.py mHC; v4_flash_oracle_test.go:168) computes it over the
+	// four width-H streams laid end to end with a single shared flatten-RMS. The
+	// reduced fixture uses the legacy 24 x H single-stream matmul. Both are
+	// executed here; only the reduced path's arithmetic is held byte-identical to
+	// pre-#13009.
+	mhcFlat, mhcTransposed, mhcOK := m.v41MHCWeightLayout(l)
+	if !mhcOK {
+		return v41StageErr(v41StageMHC, l,
+			fmt.Errorf("%w: mHC mix weight holds no admitted geometry", ErrV41ForwardStage))
+	}
+	projectMHC := m.v41MHCProjector(l, H, eps, mhcFlat, mhcTransposed, scratch)
+	hcByPos := make([]v41MHCMix, seq)
+	preByPos := make([][]float32, seq)
+	if resident != nil {
+		collapsedRows, err := resident.beginLayer(l, hcIters, hcEps, eps)
+		if err != nil {
+			return err
+		}
+		for t := range collapsedRows {
+			if preByPos[t], err = m.v41AttentionInputNormWithPublications(l, collapsedRows[t], eps, scratch.attentionNorm, scratch.attentionBF16); err != nil {
+				return err
+			}
+		}
+	}
+	for t := 0; t < seq && resident == nil; t++ {
+		// The reduced path projects the normalized input through the legacy
+		// single-stream [24, H] block; the full path projects the four DISTINCT
+		// persistent streams through the flattened 4H residual with one shared RMS.
+		// Only the reduced stand-in consumes a pre-collapse host norm.
+		var xn []float32
+		if !full {
+			xn = rmsnormCfg(x[t], attnNorm, eps, cfg)
+		}
+		input := xn
+		if mhcFlat {
+			width, ok := checkedMulInt(4, H)
+			if !ok || len(streams[t]) != 4 {
+				return v41StageErr(v41StageMHC, l, errV41ProjectionResult)
+			}
+			input = make([]float32, 0, width)
+			for _, stream := range streams[t] {
+				if len(stream) != H {
+					return v41StageErr(v41StageMHC, l, errV41ProjectionResult)
+				}
+				input = append(input, stream...)
+			}
+		}
+		mixes, err := projectMHC(input)
+		if err != nil {
+			return err
+		}
+		mix, err := v41MHCSplitOn(mhcDevice, l, mixes, mixScale, mixBase, 4, hcIters, hcEps)
+		if err != nil {
+			return err
+		}
+		hcByPos[t] = mix
+		// The mHC pre-collapse always reads a four-stream set collapsed by the
+		// learned pre coefficients. The reduced path reconstructs the reference's
+		// stand-in (four identical copies of the normalized input, byte-identical
+		// to pre-#13009) rather than reading the persistent set, so its numerics
+		// are unchanged. The full path reads the four DISTINCT persistent streams
+		// carried into this layer (stream 0 = live hidden, 1..3 = residual).
+		streams4 := streams[t]
+		if !full {
+			streams4 = [][]float32{xn, xn, xn, xn}
+		}
+		pre := mix.pre
+		if full {
+			pre = scratch.mhcCarry.pre[t]
+		}
+		var collapsed []float32
+		if mhcDevice != nil {
+			// The device publishes hc_pre's BF16 copy; the input norm's own BF16
+			// widening of it is the identity.
+			collapsed, err = mhcDevice.preBF16(l, streams4, pre)
+			if err != nil {
+				return err
+			}
+		} else {
+			collapsed, err = v41MHCPre(streams4, pre)
+			if err != nil {
+				return v41StageErr(v41StageMHC, l, err)
+			}
+		}
+		if full {
+			collapsed, err = m.v41AttentionInputNormWithPublications(l, collapsed, eps, scratch.attentionNorm, scratch.attentionBF16)
+			if err != nil {
+				return err
+			}
+		}
+		preByPos[t] = collapsed
+	}
+
+	// ---- attention: projected q/kv per position, then sparse sink per position ----
+	qHeads := make([][]float32, seq) // [t][nH*hd], rotated
+	kvRows := make([][]float32, seq) // [t][hd], rotated (single KV head)
+	qLatRows := make([][]float32, seq)
+	// RoPE geometry, fail-closed. The reference rotates only the LAST
+	// qk_rope_head_dim components of each head (the leading qk_nope_head_dim pass
+	// through byte-identical) using the interleaved adjacent-pair convention. A
+	// head width that cannot carry that slice (a non-positive, odd, or
+	// head-wider rope dim) is refused with a typed error rather than silently
+	// rotating a wrong sub-vector.
+	ropeDim := cfg.QKRopeHeadDim
+	if ropeDim <= 0 || ropeDim%2 != 0 || ropeDim > hd {
+		return v41StageErr(v41StageAttention, l,
+			fmt.Errorf("%w: attention qk_rope_head_dim must be a positive even value <= head_dim %d, got %d", ErrV41ForwardStage, hd, ropeDim))
+	}
+	// Batched query projections across the prefill panel: residentMatMulBatch
+	// reads each attn.wq_a / attn.wq_b weight row ONCE and reuses it across all
+	// seq prompt tokens, instead of the per-token GEMV loop re-streaming every
+	// weight seq times (#13301). The per-token q_norm and RoPE glue below stays
+	// scalar, so this is byte-for-byte the per-token v41ProjMatRows path (the
+	// adapter's contract); seq==1 (decode) stays entirely on that scalar path.
+	preFlat := make([]float32, seq*H)
+	for t := 0; t < seq; t++ {
+		copy(preFlat[t*H:(t+1)*H], preByPos[t])
+	}
+	qLatPanel, err := m.v41ProjPanelWithProjection(l, "attn.wq_a.weight", preFlat, cfg.QLoraRank, H, seq, scratch.denseProjection)
+	if err != nil {
+		return err
+	}
+	for t := 0; t < seq; t++ {
+		qLat := qLatPanel[t*cfg.QLoraRank : (t+1)*cfg.QLoraRank]
+		if full {
+			// Reference: qr = self.q_norm(self.wq_a(x)). The RMSNorm over the
+			// q-lora latent keeps its magnitude O(1) before the wq_b projection;
+			// omitting it lets ~1e18 activations reach the 512-term attention
+			// accumulation and overflow it to +Inf at HeadDim=512 (#13290).
+			// Artifact-only: the reduced fixture carries no q_norm leaf and its
+			// pre-#13009 arithmetic is unchanged. Written back into the panel row
+			// so the batched wq_b panel reads the normed latents.
+			if err := m.v41QueryNormInPlaceWithPublish(l, qLat, eps, scratch.queryNorm, scratch.gatherOps.bf16PublishFunc()); err != nil {
+				return err
+			}
+		}
+		// #13325 q_latent: the q-lora latent as fed to wq_b, after the optional q
+		// RMSNorm. Captured BEFORE the wq_b panel consumes it.
+		trace.record(l, t, v41TraceStageQLatent, qLat)
+	}
+	qPanel, err := m.v41ProjPanelWithProjection(l, "attn.wq_b.weight", qLatPanel, nH*hd, cfg.QLoraRank, seq, scratch.denseProjection)
+	if err != nil {
+		return err
+	}
+	for t := 0; t < seq; t++ {
+		c := preByPos[t]
+		q := qPanel[t*nH*hd : (t+1)*nH*hd]
+		qLat := qLatPanel[t*cfg.QLoraRank : (t+1)*cfg.QLoraRank]
+		// KV latent seam. The full path admits and projects attn.wkv at the
+		// published latent rank (v41KVLoraRank = 512); the attention contraction
+		// below consumes a per-position row of width hd (head_dim), so the full
+		// projection is taken at the published latent rank and sliced to the first
+		// hd columns for the sink contraction. On a valid full config
+		// hd == v41KVLoraRank == 512, so the slice is a no-op; an hd wider than the
+		// latent rank is refused rather than silently mis-read. The reduced fixture
+		// keeps its HeadDim-wide projection byte-for-byte.
+		var kv []float32
+		if full {
+			if hd > v41KVLoraRank {
+				return v41StageErr(v41StageAttention, l,
+					fmt.Errorf("%w: attention head_dim %d exceeds full KV latent rank %d", ErrV41ForwardStage, hd, v41KVLoraRank))
+			}
+			kvFull, err := m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", c, v41KVLoraRank, H, scratch.denseProjection)
+			if err != nil {
+				return err
+			}
+			kv = kvFull[:hd]
+		} else {
+			kv, err = m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", c, hd, H, scratch.denseProjection)
+			if err != nil {
+				return err
+			}
+		}
+		// Reference: kv = self.kv_norm(self.wkv(x)) then RoPE on the rope tail
+		// (_window_kv). The RMSNorm over the KV vector keeps its magnitude O(1);
+		// omitting it lets an unbounded projection reach the 512-term attention
+		// accumulation and overflow it to +Inf at HeadDim=512 (#13290). Applied to
+		// the full head_dim before the rope tail; artifact-only, so the reduced
+		// fixture's pre-#13009 arithmetic is unchanged.
+		if full {
+			if err := m.v41KVNormInPlaceWithPublish(l, kv, eps, scratch.kvNorm, scratch.gatherOps.bf16PublishFunc()); err != nil {
+				return err
+			}
+		}
+		// #13325 kv_latent: the KV row after the optional kv RMSNorm and BEFORE
+		// RoPE, so a rotary or geometry fault is distinguishable from a projection
+		// fault. Captured here because the RoPE just below rotates `kv` in place.
+		trace.record(l, t, v41TraceStageKVLatent, kv)
+		cos, sin := v41RopeTableForLayer(cfg, l, t)
+		q, kv, err = v41AttentionQKRoPEWithPublish(cfg, l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE, scratch.gatherOps.bf16PublishFunc())
+		if err != nil {
+			return err
+		}
+		qHeads[t] = q
+		kvRows[t] = kv
+		qLatRows[t] = qLat
+	}
+
+	// ---- CED/CSA2 compressor + lightning indexer stages (#13006, #12896) ----
+	//
+	// A compressed producer pools its pre-attention inputs through the compressor;
+	// shared readers consume that publication without private compression. A layer
+	// declaring an in-range index source scores its projected index query against
+	// those compressed keys and selects rows (v41IndexRows). Both stages execute
+	// here and fail closed with a typed *V41ForwardError on malformed geometry; a
+	// config that declares an in-range stage without its weights is refused at
+	// admission, not here.
+	//
+	// #12896 maps the sink contraction onto the reference's compressed KV cache:
+	// a compressed layer contracts the COMPRESSED stream directly (block-causal
+	// visibility, one pooled key/value row per group) instead of expanding the
+	// pooled latent back onto causal positions. A declared shared-KV source layer
+	// publishes its compressed rows into the session state, and a later reader
+	// layer resolves its KV stream from that published source.
+	plan, err := v41AttentionPlanFor(cfg, l, m.v41AttentionRolesCached())
+	if err != nil {
+		return err
+	}
+	ownsCompressed := v41OwnsCompressedRows(plan)
+	var compressedKV [][]float32
+	if ownsCompressed {
+		compressed, err := m.v41CompressedRowsWithDeviceOps(l, plan.Ratio, kvRows, preByPos, scratch.denseProjection, scratch.compressorNorm, scratch.gatherOps.compressorPoolFunc())
+		if err != nil {
+			return err
+		}
+		compressedKV = compressed
+	}
+	sharedKV := compressedKV
+	var indexKeys [][]float32
+	var reusedKeys []bool
+	var keyMemo []v41IndexKeyMemoRow
+	if plan.Role == V41AttentionRoleReader {
+		if st == nil {
+			return v41StageErr(v41StageAttention, l, fmt.Errorf("%w: shared reader requires source state", ErrV41ForwardStage))
+		}
+		registry, err := st.attentionState(hd, 8, cfg.IndexHeadDim)
+		if err != nil {
+			return v41StageErr(v41StageAttention, l, err)
+		}
+		sharedKV, indexKeys, err = m.v41CompressedReaderRows(plan, registry, seq)
+		if err != nil {
+			return err
+		}
+	} else if ownsCompressed && indexSourceAt(cfg.DeepSeekV41, l) {
+		indexKeys, reusedKeys, keyMemo, err = m.v41IndexKeysReusing(l, compressedKV, st, scratch)
+		if err != nil {
+			return err
+		}
+	}
+	// Both publications derive from the same RoPE-free normalized latent.
+	// Rotate only these fresh producer rows, never borrowed source rows; a key
+	// reused from the previous fold is already rotated.
+	for group, latent := range compressedKV {
+		var key []float32
+		if indexKeys != nil && (reusedKeys == nil || !reusedKeys[group]) {
+			key = indexKeys[group]
+		}
+		if err := m.v41CompressedPublicationRoPEWithDevice(l, group*plan.Ratio, latent, key, scratch.gatherOps.compressedPublicationRoPEFunc()); err != nil {
+			return err
+		}
+	}
+	if keyMemo != nil && st != nil && st.indexKeyMemo != nil {
+		for group := range keyMemo {
+			if !reusedKeys[group] {
+				keyMemo[group].key = append([]float32(nil), indexKeys[group]...)
+			}
+		}
+		st.indexKeyMemo[l] = keyMemo
+	}
+	var indexList []int32
+	if plan.Ratio > 0 && indexSourceAt(cfg.DeepSeekV41, l) {
+		for t := 0; t < seq; t++ {
+			groups := min((t+1)/plan.kvGroupSize(cfg), len(indexKeys))
+			localIdx, err := m.v41IndexRowsWithDeviceOps(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps)
+			if err != nil {
+				return err
+			}
+			row, err := m.v41AttentionIndexList(plan, st, localIdx, hd, groups, 1)
+			if err != nil {
+				return err
+			}
+			indexList = append(indexList, row...)
+		}
+	} else {
+		localIdx, err := m.v41IndexRowsWithDeviceOps(l, seq-1, qLatRows[seq-1], preByPos[seq-1], indexKeys, scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps)
+		if err != nil {
+			return err
+		}
+		indexList, err = m.v41AttentionIndexList(plan, st, localIdx, hd, len(sharedKV), seq)
+		if err != nil {
+			return err
+		}
+	}
+
+	// V41AttentionState is the session-owned validation anchor for the projected
+	// KV window. It runs no projection and never changes the arithmetic; it fails
+	// closed on malformed geometry before the sink contraction reads the rows.
+	//
+	// Each layer gets independent temporal ownership. Completed source rows stay
+	// in the per-forward registry; retained session state contains only the
+	// configured window tail and incomplete compressor group.
+	if st != nil {
+		layerState, err := NewV41AttentionState(hd, 8)
+		if err != nil {
+			return v41StageErr(v41StageAttention, l, err)
+		}
+		if cfg.IndexHeadDim > 0 {
+			layerState.indexHeadDim = cfg.IndexHeadDim
+		}
+		// Seed the retained temporal state. For a compressed source layer the
+		// incomplete trailing group's PRE-ATTENTION carriers are passed through so
+		// the incremental source append (#13480) can continue a mid-group prefix
+		// without replaying the projected latents; a non-compressed layer passes
+		// none and keeps the historical seed byte-for-byte.
+		var seedInputs [][]float32
+		seedRatio := 0
+		if ownsCompressed {
+			seedRatio = plan.Ratio
+			if partial := len(preByPos) % plan.Ratio; partial > 0 {
+				seedInputs = preByPos[len(preByPos)-partial:]
+			}
+		}
+		if err := layerState.seedTemporalWithInputs(kvRows, seedInputs, seedRatio, cfg.windowForLayer(l)); err != nil {
+			return v41StageErr(v41StageAttention, l, err)
+		}
+		if ownsCompressed {
+			ownPlan := plan
+			ownPlan.KVSourceLayer = l
+			updates := m.v41AttentionSourceUpdates(ownPlan, compressedKV, qLatRows, indexKeys)
+			if err := layerState.publishUpdates(updates); err != nil {
+				return v41StageErr(v41StageAttention, l, err)
+			}
+		}
+		registry, err := st.attentionState(hd, 8, cfg.IndexHeadDim)
+		if err != nil {
+			return v41StageErr(v41StageAttention, l, err)
+		}
+		// A declared source layer publishes its compressed rows and index keys so
+		// later readers can resolve them within this same forward pass (the
+		// V41AttentionState source-then-consumer ordering).
+		updates := m.v41AttentionSourceUpdates(plan, compressedKV, qLatRows, indexKeys)
+		if len(updates) > 0 {
+			if err := registry.publishUpdates(updates); err != nil {
+				return v41StageErr(v41StageAttention, l, err)
+			}
+		}
+		// No owner becomes visible until both its rows and the registry rows
+		// passed validation. Registry publication above has no partial-error path.
+		st.setLayerState(l, cfg.NumLayers, layerState)
+		// An index source publishes its own per-position top-k selection so a
+		// later reader layer can reuse it without recomputing the scoring path.
+		// The selection is the source's local index list, one row per published
+		// query position.
+		if indexSourceAt(cfg.DeepSeekV41, l) && indexList != nil && plan.TopKWidth > 0 {
+			rows := make([][]int32, seq)
+			for t := range rows {
+				rows[t] = append([]int32(nil), indexList[t*plan.TopKWidth:(t+1)*plan.TopKWidth]...)
+			}
+			if err := registry.PublishTopK(plan.Ratio, rows); err != nil {
+				return v41StageErr(v41StageIndexer, l, err)
+			}
+		}
+	}
+
+	scale := cfg.attnScale()
+	attnOut := make([][]float32, seq)
+	for t := 0; t < seq; t++ {
+		// The reference concatenates this layer's window with selected source
+		// groups before ONE sink contraction, even before a group completes.
+		if plan.Ratio > 0 || plan.Role == V41AttentionRoleReader {
+			keys := v41PlainWindowKeys(t, cfg.windowForLayer(l))
+			window := make([][]float32, len(keys))
+			for i, key := range keys {
+				window[i] = kvRows[key]
+			}
+			var ids []int32
+			if indexList != nil {
+				width := plan.topKWidth()
+				if width <= 0 || len(indexList) != seq*width {
+					return v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: compressed selection does not cover every query", ErrV41ForwardStage))
+				}
+				ids = indexList[t*width : (t+1)*width]
+			} else {
+				ids = make([]int32, len(sharedKV))
+				for group := range ids {
+					ids[group] = int32(group)
+				}
+			}
+			attentionOpened := m.v41NowNanos()
+			o, err := v41CombinedAttention(l, t, plan.kvGroupSize(cfg), nH, hd, qHeads[t], sink, window, sharedKV, ids, scale, scratch.sharedAttention)
+			m.v41NoteAttentionContraction(attentionOpened)
+			if err != nil {
+				return v41StageErr(v41StageAttention, l, err)
+			}
+			o, err = v41RotatedOutputForProjection(cfg, l, t, o, nH, hd, scratch.gatherOps)
+			if err != nil {
+				return err
+			}
+			projected, err := projectOutput(o)
+			if err != nil {
+				return v41StageErr(v41StageAttention, l, err)
+			}
+			attnOut[t] = projected
+			trace.record(l, t, v41TraceStageAttnOut, projected)
+			continue
+		}
+		// #13303: the plain layer's visible keys are its CONFIGURED causal
+		// window, not the unconditioned full prefix. A positive
+		// Config.Window[l] restricts the row set to the trailing w causal keys
+		// max(0,t-w+1)..t; the -1 sentinel (and a nil/short Window, which
+		// windowForLayer defaults to -1) keeps the historical full-causal
+		// prefix 0..t byte-for-byte. The window changes only WHICH ordered rows
+		// are contracted; the score/softmax/value math is untouched.
+		window := cfg.windowForLayer(l)
+		keys := v41PlainWindowKeys(t, window)
+		idx := v41PlainWindowIndexList(keys)
+		rows := len(keys)
+		flatKV := make([]float32, 0, rows*hd)
+		for _, k := range keys {
+			flatKV = append(flatKV, kvRows[k]...)
+		}
+		attentionOpened := m.v41NowNanos()
+		o, err := v41SparseAttentionSinkWithDevice(l, qHeads[t], flatKV, sink, idx, V41SparseAttentionSinkOptions{
+			B: 1, M: 1, Heads: nH, HeadDim: hd, TopK: rows + 1, N: rows, Softmax: scale,
+		}, scratch.sharedAttention)
+		m.v41NoteAttentionContraction(attentionOpened)
+		if err != nil {
+			return v41StageErr(v41StageAttention, l, err)
+		}
+		o, err = v41RotatedOutputForProjection(cfg, l, t, o, nH, hd, scratch.gatherOps)
+		if err != nil {
+			return err
+		}
+		projected, err := projectOutput(o)
+		if err != nil {
+			return v41StageErr(v41StageAttention, l, err)
+		}
+		attnOut[t] = projected
+		trace.record(l, t, v41TraceStageAttnOut, projected)
+	}
+
+	// ---- MoE: router + shared expert + routed experts ----
+	//
+	// The router runs once per position and its picks are retained for the
+	// contraction loop below (byte-identical to the per-token router it replaces:
+	// the same v41ProjMatRows over the same rmsnormCfg(x[t]) and the same
+	// v41Route). The layer-scoped expert cache is reset here so its working set is
+	// exactly this layer's routed experts (#13296).
+	scratch.v41LayerCacheReset()
+	if scratch.expertLayerCacheBytes == 0 {
+		if v41TestLayerCacheBudgetOverride > 0 {
+			scratch.expertLayerCacheBytes = v41TestLayerCacheBudgetOverride
+		} else {
+			scratch.expertLayerCacheBytes = m.v41LayerExpertCacheBudget()
+		}
+	}
+	perTokenPicks := make([][]routePick, seq)
+	// Reuse one normalized host row for the router, every routed expert, and
+	// the shared expert. Device normalization uploads and reads back only once
+	// per layer/token; grouped contraction consumes this same panel.
+	ffnInputs := make([][]float32, seq)
+	var ffnResidual [][][]float32
+	var ffnMixes []v41MHCMix
+	var projectFFN func([]float32) ([]float32, error)
+	if full {
+		// Every attention projection has completed. Reusing scratch.mhc is now safe.
+		projectFFN, err = m.v41FFNMHCProjector(l, scratch)
+		if err != nil {
+			return err
+		}
+		ffnResidual = make([][][]float32, seq)
+		ffnMixes = make([]v41MHCMix, seq)
+	}
+	var ffnCollapsed [][]float32
+	if resident != nil {
+		if ffnCollapsed, err = resident.ffnInput(l, attnOut, hcIters, hcEps, eps); err != nil {
+			return err
+		}
+	}
+	for t := 0; t < seq; t++ {
+		var xn []float32
+		if resident != nil {
+			xn, err = m.v41FFNNormWithPublish(l, ffnCollapsed[t], eps, scratch.ffnNorm, scratch.gatherOps.bf16PublishFunc())
+		} else if full {
+			ffnResidual[t], ffnMixes[t], xn, err = m.v41FullFFNInput(l, streams[t], hcByPos[t], attnOut[t], projectFFN, scratch)
+		} else {
+			xn, err = m.v41FFNNormWithPublish(l, x[t], eps, scratch.ffnNorm, scratch.gatherOps.bf16PublishFunc())
+		}
+		if err != nil {
+			return err
+		}
+		ffnInputs[t] = xn
+		routerLogits, err := m.v41ProjMatRowsWithProjection(l, "ffn.gate.weight", xn, cfg.NumExperts, H, scratch.denseProjection)
+		if err != nil {
+			return err
+		}
+		picks, err := v41RouteForGeometryWith(l, routerLogits, gateBias, routeCfg, full, scratch.routerTopK)
+		if err != nil {
+			return v41StageErr(v41StageMoE, l, err)
+		}
+		m.emitExpertRouteAt(l, t, picks)
+		perTokenPicks[t] = picks
+	}
+
+	// ---- routed-expert contraction ----
+	//
+	// #13304: a multi-token prefill panel is contracted EXPERT-MAJOR when its
+	// routed union exceeds the layer cache. The grouped path materializes one
+	// expert triple, contracts every (token, slot) row assigned to it, releases
+	// it, then replays each token's weighted sum in original slot order -- so a
+	// panel whose alternating routes re-read the same experts faults each distinct
+	// projection once, and peak retained expert materialization stays one triple.
+	// When the union fits the layer cache the two paths are equivalent (the cache
+	// served the repeats either way); the single-token path keeps the historical
+	// token-major stream byte-for-byte.
+	routedByToken := make([][]float32, seq)
+	if seq > 1 && !v41ForceTokenMajor {
+		// #13511: thread the session's optional device gate/up callback into the
+		// grouped (expert-major) contraction too, so a multi-token prefill offers
+		// each routed row to the same device seam the token-major arm uses
+		// (#13358) instead of unconditionally running the host SwiGLU. A nil
+		// callback (Model.Forward, or no device backend) keeps the grouped path
+		// byte-for-byte.
+		if err := m.v41ContractRoutedGrouped(l, ffnInputs, perTokenPicks, scratch, cfg, routedByToken, st); err != nil {
+			return err
+		}
+	} else {
+		// The multi-token token-major arm (test-forced, or a panel that the
+		// grouped path did not take) contracts each pick through the row-parallel
+		// twin; the seq == 1 decode fallback through this same arm keeps the
+		// package-level serial contraction, because three tiny expert GEMVs per
+		// pick would pay the parFor dispatch barrier with no bandwidth to reclaim.
+		contract := v41SwiGLU
+		if seq > 1 {
+			contract = v41SwiGLUParallel
+		}
+		for t := 0; t < seq; t++ {
+			xn := ffnInputs[t]
+			routed := make([]float32, H)
+			if full {
+				outputs := make([][]float32, len(perTokenPicks[t]))
+				var routedExpert v41RoutedExpertFunc
+				var gateUp v41ExpertGateUpFunc
+				var down v41ExpertDownFunc
+				if st != nil {
+					routedExpert, gateUp, down = st.routedExpert, st.expertGateUp, st.expertDown
+				}
+				for slot, pick := range perTokenPicks[t] {
+					stem := "ffn.experts." + itoa(pick.expert)
+					outputs[slot], err = m.v41FullRoutedExpertPublished(l, stem, xn, pick.weight, cfg, routedExpert, gateUp, down,
+						func() ([]float32, []float32, []float32, error) { return m.v41ExpertTripleInto(l, stem, scratch, true) },
+						func() ([]float32, error) { return m.hostExpertDown(l, stem, scratch) }, seq > 1, scratch.gatherOps.bf16PublishFunc())
+					if err != nil {
+						return err
+					}
+				}
+				routedByToken[t], err = v41FullRoutedSumWith(l, perTokenPicks[t], outputs, H, scratch.routedSum)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+			for _, pick := range perTokenPicks[t] {
+				stem := "ffn.experts." + itoa(pick.expert)
+				// #13358: offer the pick to the session's optional device gate/up
+				// seam first. A handled result returns the I-wide fused intermediate
+				// from the backend, so the existing host down contraction below runs
+				// over it WITHOUT ever materializing the gate/up f32 weights. A
+				// decline (or no callback at all) keeps the historical host triple
+				// byte-for-byte. A selected device failure must surface.
+				if st != nil && st.expertGateUp != nil {
+					h, outcome, gerr := st.expertGateUp(l, stem, xn)
+					switch outcome {
+					case v41GateUpError:
+						return v41StageErr(v41StageMoE, l, gerr)
+					case v41GateUpHandled:
+						// #13704: offer the I-wide intermediate to the device down seam.
+						// When it handles, all three projections ran on the backend and no
+						// host expert GEMM remains; a decline keeps the historical host f32
+						// down contraction byte-for-byte.
+						if st.expertDown != nil {
+							yd, dOutcome, derr := st.expertDown(l, stem, h)
+							switch dOutcome {
+							case v41DownError:
+								return v41StageErr(v41StageMoE, l, derr)
+							case v41DownHandled:
+								contractOpen := m.v41NowNanos()
+								if contractOpen != 0 {
+									m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
+								} else {
+									m.v41NoteExpertContraction()
+								}
+								_ = ffn.AddScaled(routed, yd, pick.weight)
+								continue
+							}
+						}
+						w2, err := m.hostExpertDown(l, stem, scratch)
+						if err != nil {
+							return err
+						}
+						contractOpen := m.v41NowNanos()
+						y := matRows(w2, h, H, cfg.MoEIntermediateSize)
+						if contractOpen != 0 {
+							m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
+						} else {
+							m.v41NoteExpertContraction()
+						}
+						_ = ffn.AddScaled(routed, y, pick.weight)
+						continue
+					}
+				}
+				w1, w3, w2, err := m.v41ExpertTripleInto(l, stem, scratch, true)
+				if err != nil {
+					return err
+				}
+				// #13299: time the routed-expert contraction (the SwiGLU the pick
+				// applies) separately from the fault/dequant that produced its
+				// weights, so the ledger can attribute the 492 s first token
+				// (fak#13294) to scalar contraction vs tier IO. Inert with no clock.
+				contractOpen := m.v41NowNanos()
+				y := contract(w1, w3, w2, xn, cfg.MoEIntermediateSize, H, cfg)
+				if contractOpen != 0 {
+					m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
+				} else {
+					m.v41NoteExpertContraction()
+				}
+				_ = ffn.AddScaled(routed, y, pick.weight)
+			}
+			routedByToken[t] = routed
+		}
+	}
+
+	var nextPanel [][][]float32
+	if full {
+		nextPanel = make([][][]float32, seq)
+	}
+	var moeRows [][]float32
+	if resident != nil {
+		moeRows = make([][]float32, seq)
+	}
+	for t := 0; t < seq; t++ {
+		xn := ffnInputs[t]
+		routed := routedByToken[t]
+		shared, err := m.v41SharedExpertSwiGLUWithPublish(l, xn, cfg, scratch.denseProjection, scratch.sharedActivation, scratch.gatherOps.bf16PublishFunc())
+		if err != nil {
+			return err
+		}
+		moe, err := v41SharedExpertAddWith(l, routed, shared, routeCfg, scratch.sharedAdd)
+		if err != nil {
+			return v41StageErr(v41StageMoE, l, err)
+		}
+		// #13325 moe_sum: the summed routed + shared expert output, captured BEFORE
+		// the delta/residual mixing so an expert-contraction fault is distinguishable
+		// from an mHC post-mix fault.
+		trace.record(l, t, v41TraceStageMoESum, moe)
+
+		if resident != nil {
+			moeRows[t] = moe
+		} else if full {
+			nextPanel[t], err = v41MHCPostBF16On(mhcDevice, l, moe, ffnResidual[t], ffnMixes[t])
+			if err != nil {
+				return err
+			}
+		} else {
+			delta := make([]float32, H)
+			for i := range delta {
+				delta[i] = attnOut[t][i] + moe[i]
+			}
+			residual := [][]float32{preByPos[t], preByPos[t], preByPos[t], preByPos[t]}
+			next, err := v41MHCPost(delta, residual, hcByPos[t].post, hcByPos[t].comb)
+			if err != nil {
+				return v41StageErr(v41StageMHC, l, err)
+			}
+			copy(x[t], next[0])
+		}
+	}
+	if resident != nil {
+		// Every token row succeeded: publish the pending panel and its carry.
+		if err := resident.finishLayer(l, moeRows); err != nil {
+			return err
+		}
+		if err := resident.publish(l); err != nil {
+			return err
+		}
+		scratch.mhcCarry.nextLayer++
+		return nil
+	}
+	if full {
+		// All token rows succeeded: stream and carry publication has no failing work.
+		for t := range nextPanel {
+			for h := 0; h < 4; h++ {
+				copy(streams[t][h], nextPanel[t][h])
+			}
+			copy(x[t], nextPanel[t][0])
+			scratch.mhcCarry.pre[t] = ffnMixes[t].pre
+		}
+		scratch.mhcCarry.nextLayer++
+
+	}
+	return nil
+}
