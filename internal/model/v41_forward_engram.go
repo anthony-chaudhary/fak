@@ -121,9 +121,9 @@ type v41EngramStage struct {
 	headDim       int
 	hc            int
 	layerIDs      []int
-	// rowBytes is the per-row width every wired source serves (264 packed or
-	// 1024 dequantized-f32). The forward dispatches row decode on it, so the
-	// packed and f32 dialects share one architecture-neutral stage.
+	// rowBytes is the per-row width every cached row has (264 packed, 84 Q2_K
+	// blocks of a verified Q2_K source, or 1024 f32). The forward dispatches row
+	// decode on it, so the dialects share one architecture-neutral stage.
 	rowBytes int
 	// bindings records the verified artifact binding each source was admitted
 	// under (zero for an unverified source), so the exported attach seam's
@@ -184,8 +184,26 @@ func (m *Model) wireV41Engram(layout V41EngramLayout, srcs []V41EngramRowSource,
 				ErrV41NativeUnsupported, ids[i], got, rowBytes)
 		}
 	}
-	caches := make([]*V41EngramRowCache, len(srcs))
-	for i, src := range srcs {
+	// A verified Q2_K source is cached as its bound super-blocks: the decode
+	// then runs where the row is consumed, on the device when the session binds
+	// one, instead of dequantizing every cache fill on the host.
+	cached := srcs
+	if rowBytes == V41EngramF32RowBytes {
+		encoded := make([]V41EngramRowSource, len(srcs))
+		for i, src := range srcs {
+			form, ok := v41EngramEncodedForm(src)
+			if !ok {
+				encoded = nil
+				break
+			}
+			encoded[i] = form
+		}
+		if encoded != nil {
+			cached, rowBytes = encoded, v41EngramQ2KEncodedRowBytes
+		}
+	}
+	caches := make([]*V41EngramRowCache, len(cached))
+	for i, src := range cached {
 		budget := budgetBytes
 		if budget < int64(rowBytes) {
 			budget = int64(rowBytes)
@@ -226,13 +244,17 @@ func (s *v41EngramStage) cacheIndex(l int) int {
 }
 
 // decodeV41EngramRow decodes one cached row of the stage's dialect into dim f32
-// values: the packed 264-byte dialect is dequantized (E4M3 weights * E8M0 scales),
-// and the dequantized-f32 dialect (1024 bytes, the published Q2_K table) is read
-// little-endian. Both dialects fail closed on a width they do not own.
+// values on the host: the packed 264-byte dialect is dequantized (E4M3 weights *
+// E8M0 scales), a Q2_K block (84 bytes) is dequantized by the scalar super-block
+// reference, and the f32 dialect (1024 bytes) is read little-endian. Every
+// dialect fails closed on a width it does not own.
 func decodeV41EngramRow(row []byte, dim, rowBytes int) ([]float32, error) {
+	v41NoteHostEngramRowDecode()
 	switch rowBytes {
 	case V41EngramPackedRowBytes:
 		return dequantV41EngramRow(row, dim)
+	case v41EngramQ2KEncodedRowBytes:
+		return dequantV41EngramQ2KRow(row, dim)
 	case V41EngramF32RowBytes:
 		if len(row) != V41EngramF32RowBytes {
 			return nil, fmt.Errorf("%w: Engram f32 row has %d bytes, want %d",
@@ -361,31 +383,6 @@ func v41EngramDecodePosition(l int, stage *v41EngramStage, cacheIdx int, gathere
 		copy(dst[c*dim:], values)
 	}
 	return nil
-}
-
-// v41EngramRowPanel gathers and decodes layer l's rows for positions tokens
-// into one row-major [positions, cols*dim] projection-input panel.
-func (m *Model) v41EngramRowPanel(l, positions int, layerRows []uint32, eps float32, geometry v41EngramGeometry) (panel []float32, gatheredRows int, err error) {
-	stage, cacheIdx, cols, dim := geometry.stage, geometry.cacheIdx, geometry.cols, geometry.dim
-	if positions < 0 || len(layerRows) != positions*cols {
-		return nil, 0, v41StageErr(v41StageEngram, l,
-			fmt.Errorf("%w: Engram row identifiers %d, want %d positions x %d columns", ErrV41NativeUnsupported, len(layerRows), positions, cols))
-	}
-	if err := v41EngramGateParamsErr(l, eps, geometry.qNorm, geometry.kNorm); err != nil {
-		return nil, 0, err
-	}
-	gathered, err := GatherV41EngramRows([]*V41EngramRowCache{stage.caches[cacheIdx]}, layerRows, cols)
-	if err != nil {
-		return nil, 0, v41StageErr(v41StageEngram, l, fmt.Errorf("%w: %w", ErrV41NativeUnsupported, err))
-	}
-	width := cols * dim
-	panel = make([]float32, positions*width)
-	for t := range positions {
-		if err := v41EngramDecodePosition(l, stage, cacheIdx, gathered, t, cols, dim, panel[t*width:(t+1)*width]); err != nil {
-			return nil, len(layerRows), err
-		}
-	}
-	return panel, len(layerRows), nil
 }
 
 type v41EngramGeometry struct {

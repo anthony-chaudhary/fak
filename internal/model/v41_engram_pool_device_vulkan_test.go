@@ -58,7 +58,7 @@ func TestV41EngramGateAndCompressorPoolVulkan(t *testing.T) {
 			}
 			gateCalls, poolCalls := 0, 0
 			bound, boundPool := ops.engramGate, ops.compressorPool
-			ops.engramGate = func(l int, streams *v41DeviceStreams, rows []float32, positions int, g v41EngramGeometry, eps float32) (bool, error) {
+			ops.engramGate = func(l int, streams *v41DeviceStreams, rows *v41EngramGatheredRows, positions int, g v41EngramGeometry, eps float32) (bool, error) {
 				gateCalls++
 				return bound(l, streams, rows, positions, g, eps)
 			}

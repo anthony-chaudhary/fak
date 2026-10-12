@@ -1,0 +1,172 @@
+#version 450
+#extension GL_EXT_spirv_intrinsics : require
+
+// v41_engram_row_decode.comp - DeepSeek V4.1 Engram table-row decode (Ref
+// #13668). The host gathers the stored bytes of the demanded rows; this module
+// turns them into the F32 projection input the host decode produced:
+//
+//   mode 0 packed: BF16(E4M3(code) * 2^(scale-127)), an exact binary32 product
+//                  built in integer arithmetic, then the host v41BF16 RNE
+//   mode 1 q2_k:   the host scalar Q2_K super-block dequantization
+//   mode 2 f32:    the stored binary32 word
+//   mode 3 poison: write a quiet NaN into Dst[target] when any row status is set
+//
+// Every decode mode writes Dst[row*dim + j] for j < dim and one status word per
+// row: 0, or 1 + 2*j + kind for the lowest faulting element (kind 0 a NaN code
+// or scale byte, kind 1 a non-finite value), the first refusal the host raises.
+// Binary32 DenormPreserve, SignedZeroInfNanPreserve and RoundingModeRTE are
+// explicit, as in v41_engram_gate.comp, and the Q2_K arithmetic is `precise`.
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4464], 4459, 32);
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4466], 4461, 32);
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4467], 4462, 32);
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer SrcBuf { uint Src[]; };      // encoded rows
+layout(std430, binding = 1) writeonly buffer DstBuf { uint Dst[]; };     // [rows,dim] F32 bits, or the poison target
+layout(std430, binding = 2) buffer StatusBuf { uint Status[]; };         // [rows]
+
+layout(push_constant) uniform Push {
+    int mode;
+    int rows;
+    int dim;
+    int target;
+} pc;
+
+shared uint sFault;
+
+uint srcByte(uint offset) {
+    return (Src[offset >> 2] >> ((offset & 3u) * 8u)) & 0xffu;
+}
+
+bool finiteBits(uint bits) { return (bits & 0x7f800000u) != 0x7f800000u; }
+
+// model.v41BF16: integer round-to-nearest-even; NaN and Inf bit patterns pass.
+uint bf16Bits(uint bits) {
+    if (finiteBits(bits)) bits += 0x7fffu + ((bits >> 16) & 1u);
+    return bits & 0xffff0000u;
+}
+
+// Bit-exact mirror of kquantbits.F16BitsToF32Bits.
+float f16ToF32(uint h) {
+    uint sign = (h & 0x8000u) << 16;
+    int exponent = int((h >> 10) & 0x1fu);
+    uint frac = h & 0x3ffu;
+    if (exponent == 0) {
+        if (frac == 0u) return uintBitsToFloat(sign);
+        exponent = -14;
+        while ((frac & 0x400u) == 0u) {
+            frac <<= 1;
+            exponent--;
+        }
+        frac &= 0x3ffu;
+        return uintBitsToFloat(sign | (uint(exponent + 127) << 23) | (frac << 13));
+    }
+    if (exponent == 0x1f) return uintBitsToFloat(sign | 0x7f800000u | (frac << 13));
+    return uintBitsToFloat(sign | (uint(exponent - 15 + 127) << 23) | (frac << 13));
+}
+
+// E4M3FN(code) = m * 2^q with at most four significant bits, so its product
+// with 2^(scale-127) is exact in binary32 unless it reaches 2^128 (+-Inf).
+uint packedBits(uint base, uint j, out uint kind) {
+    uint code = srcByte(base + j);
+    uint scale = srcByte(base + 256u + (j >> 5));
+    kind = 2u;
+    if ((code & 0x7fu) == 0x7fu || scale == 0xffu) {
+        kind = 0u;
+        return 0u;
+    }
+    uint sign = (code & 0x80u) << 24;
+    uint e = (code >> 3) & 0xfu;
+    uint mant = e == 0u ? (code & 7u) : (8u | (code & 7u));
+    int q = e == 0u ? -9 : int(e) - 10;
+    uint bits = sign;
+    if (mant != 0u) {
+        int k = q + int(scale) - 127;
+        int msb = findMSB(mant);
+        int x = msb + k;
+        if (x > 127) {
+            bits = sign | 0x7f800000u;
+        } else if (x >= -126) {
+            bits = sign | (uint(x + 127) << 23) | ((mant << uint(23 - msb)) & 0x7fffffu);
+        } else {
+            bits = sign | (mant << uint(k + 149));
+        }
+    }
+    bits = bf16Bits(bits);
+    if (!finiteBits(bits)) kind = 1u;
+    return bits;
+}
+
+// The host q2kDequantSuperBlockScalar table: 0 - ml, dl - ml, dl*2 - ml, dl*3 - ml.
+uint q2kBits(uint base, uint e, out uint kind) {
+    uint half128 = e >> 7;
+    uint r = e & 127u;
+    uint j = r >> 5;
+    uint h = (r >> 4) & 1u;
+    uint l = r & 15u;
+    uint sc = srcByte(base + half128 * 8u + j * 2u + h);
+    uint code = (srcByte(base + 16u + half128 * 32u + h * 16u + l) >> (2u * j)) & 3u;
+    float d = f16ToF32(srcByte(base + 80u) | (srcByte(base + 81u) << 8));
+    float m = f16ToF32(srcByte(base + 82u) | (srcByte(base + 83u) << 8));
+    precise float dl = d * float(sc & 15u);
+    precise float ml = m * float(sc >> 4);
+    uint bits;
+    if (code == 0u) {
+        // Host 0 - ml: +0 for either zero, otherwise -ml; the integer sign flip
+        // keeps the zero sign independent of float folding.
+        bits = ml == 0.0 ? 0u : (floatBitsToUint(ml) ^ 0x80000000u);
+    } else if (code == 1u) {
+        precise float value = dl - ml;
+        bits = floatBitsToUint(value);
+    } else {
+        precise float scaled = dl * float(code);
+        precise float value = scaled - ml;
+        bits = floatBitsToUint(value);
+    }
+    kind = finiteBits(bits) ? 2u : 1u;
+    return bits;
+}
+
+void poison() {
+    if (gl_WorkGroupID.x != 0u) return;
+    if (gl_LocalInvocationID.x == 0u) sFault = 0u;
+    barrier();
+    uint seen = 0u;
+    for (uint i = gl_LocalInvocationID.x; i < uint(pc.rows); i += 256u) seen |= Status[i];
+    if (seen != 0u) atomicOr(sFault, 1u);
+    barrier();
+    if (gl_LocalInvocationID.x == 0u && sFault != 0u) Dst[uint(pc.target)] = 0x7fc00000u;
+}
+
+void main() {
+    if (pc.mode == 3) {
+        poison();
+        return;
+    }
+    uint rows = uint(pc.rows);
+    uint dim = uint(pc.dim);
+    uint stride = pc.mode == 0 ? 264u : (pc.mode == 1 ? 84u : 1024u);
+    uint j = gl_LocalInvocationID.x;
+    for (uint row = gl_WorkGroupID.x; row < rows; row += gl_NumWorkGroups.x) {
+        if (j == 0u) sFault = 0xffffffffu;
+        barrier();
+        if (j < dim) {
+            uint base = row * stride;
+            uint kind = 2u;
+            uint bits;
+            if (pc.mode == 0) {
+                bits = packedBits(base, j, kind);
+            } else if (pc.mode == 1) {
+                bits = q2kBits(base, j, kind);
+            } else {
+                bits = Src[(base >> 2) + j];
+                kind = finiteBits(bits) ? 2u : 1u;
+            }
+            Dst[row * dim + j] = bits;
+            if (kind != 2u) atomicMin(sFault, j * 2u + kind);
+        }
+        barrier();
+        if (j == 0u) Status[row] = sFault == 0xffffffffu ? 0u : sFault + 1u;
+        barrier();
+    }
+}

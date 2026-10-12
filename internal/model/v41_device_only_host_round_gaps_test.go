@@ -9,13 +9,16 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
-// Engram rows are decoded on the host, so a device-only admission names that
-// decode for every model that declares Engram layers, even when the gate and
-// pool seams bind; the decode helper is visible to the host BF16 witness.
+// A backend without the device row decode would decode Engram rows on the
+// host, so a device-only admission names that decode for every model that
+// declares Engram layers, even when the gate and pool seams bind; a backend
+// with it binds the row. The host decode stays visible to the BF16 witness.
 // fak-test:runtime fast est=2s lane=default
 func TestV41DeviceOnlyNamesHostEngramRowDecode(t *testing.T) {
 	m, _ := v41IncrementalEngramFixture(t, true)
-	s := v41DenseTestSession(t, m, v41EngramPoolBackend(true, true))
+	hostDecode := v41EngramPoolBackend(true, true)
+	hostDecode.rowDecode = false
+	s := v41DenseTestSession(t, m, hostDecode)
 	s.SetExecutionPolicy(ExecutionPolicyDeviceOnly)
 	unbound := v41HostOpNames(s.v41DeviceOnlyUnboundOps())
 	if !slices.Contains(unbound, "engram-row-decode") || slices.Contains(unbound, "engram-stream-injection") {
@@ -24,28 +27,33 @@ func TestV41DeviceOnlyNamesHostEngramRowDecode(t *testing.T) {
 	refusal := s.v41DeviceOnlyAdmissionRefusal()
 	var typed *v41DeviceOnlyHostOpError
 	if !errors.Is(refusal, errV41DeviceOnlyHostOp) || !errors.As(refusal, &typed) ||
-		!slices.Contains(typed.ops, v41HostOp{name: "engram-row-decode", site: "decodeV41EngramRow"}) {
+		!slices.Contains(typed.ops, v41HostOp{name: "engram-row-decode", site: "SupportsV41EngramRowDecode"}) {
 		t.Fatalf("Engram device-only admission = %v, want the typed engram-row-decode refusal", refusal)
+	}
+	if got := v41HostOpNames(v41DenseTestSession(t, m, v41EngramPoolBackend(true, true)).v41DeviceOnlyUnboundOps()); slices.Contains(got, "engram-row-decode") {
+		t.Fatalf("a backend with the device row decode still names it: %v", got)
 	}
 
 	plain, _ := v41IncrementalEngramFixture(t, false)
 	plain.Cfg.DeepSeekV41.EngramLayerIDs = nil
-	if got := v41HostOpNames(v41DenseTestSession(t, plain, v41EngramPoolBackend(true, true)).v41DeviceOnlyUnboundOps()); slices.Contains(got, "engram-row-decode") {
+	if got := v41HostOpNames(v41DenseTestSession(t, plain, hostDecode).v41DeviceOnlyUnboundOps()); slices.Contains(got, "engram-row-decode") {
 		t.Fatalf("model without Engram layers names the row decode: %v", got)
 	}
 
+	// Every element of a host-decoded packed row is one witnessed BF16 round.
+	const dim = compute.V41EngramRowDecodeMaxDim
 	row := make([]byte, V41EngramPackedRowBytes)
-	for i := range 256 {
+	for i := range dim {
 		row[i] = 0x38
 	}
-	for i := 256; i < V41EngramPackedRowBytes; i++ {
+	for i := dim; i < V41EngramPackedRowBytes; i++ {
 		row[i] = 127
 	}
 	var decoded []float32
 	var err error
-	rounds := v41BF16PublishHostRounds(t, func() { decoded, err = decodeV41EngramRow(row, 256, V41EngramPackedRowBytes) })
-	if err != nil || len(decoded) != 256 || decoded[0] != 1 || rounds != 256 {
-		t.Fatalf("packed decode err=%v len=%d first=%v host_rounds=%d, want 256 witnessed rounds", err, len(decoded), decoded, rounds)
+	rounds := v41BF16PublishHostRounds(t, func() { decoded, err = decodeV41EngramRow(row, dim, V41EngramPackedRowBytes) })
+	if err != nil || len(decoded) != dim || decoded[0] != 1 || rounds != int64(len(decoded)) {
+		t.Fatalf("packed decode err=%v len=%d first=%v host_rounds=%d, want one witnessed round per element", err, len(decoded), decoded, rounds)
 	}
 }
 

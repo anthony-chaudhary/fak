@@ -74,7 +74,7 @@ func TestV41ScaleExactSourceContract(t *testing.T) {
 		"g_have_v41_scale_exact = v41ScaleExactBuilt ? 1 : 0;",
 		"return g_ready && g_v41IndexerFloatControls && g_have_v41_scale_exact &&",
 		"if (!dispatch(g_kern[K_V41_SCALE_EXACT], bufs, &pc, sizeof(pc), groups)) {",
-		"|| &k == &g_kern[K_V41_COMPRESSOR_POOL] || &k == &g_kern[K_V41_SCALE_EXACT];",
+		"|| &k == &g_kern[K_V41_COMPRESSOR_POOL] || &k == &g_kern[K_V41_SCALE_EXACT]",
 		`"v41_tail_rope_exact", "v41_scale_exact",`,
 	} {
 		if !strings.Contains(shim, token) {

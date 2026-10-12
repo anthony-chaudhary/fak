@@ -146,7 +146,7 @@ func NewV41VerifiedEngramRowSource(reader io.ReaderAt, shard V41EngramShard, bin
 		return nil, &V41EngramStreamError{Kind: V41EngramStreamBindingMismatch, Row: -1, Shard: shard.ID,
 			Err: fmt.Errorf("shard bytes digest %s does not match bound artifact %s", observed, binding.Digest)}
 	}
-	return &v41VerifiedEngramRowSource{inner: base, binding: binding, rowBytes: rowBytes}, nil
+	return &v41VerifiedEngramRowSource{inner: base, binding: binding, rowBytes: rowBytes, encoded: v41EngramBoundEncoded(reader, want)}, nil
 }
 
 // v41BoundEngramBase runs the geometry half of admission shared by the verified
@@ -185,6 +185,9 @@ type v41VerifiedEngramRowSource struct {
 	inner    V41EngramRowSource
 	binding  V41EngramArtifactBinding
 	rowBytes int
+	// encoded is the reader's encoded-row seam when the binding digest commits
+	// to those encoded bytes (a tree over the Q2_K blocks), else nil.
+	encoded V41EngramEncodedRows
 }
 
 func (s *v41VerifiedEngramRowSource) RowBytes() int { return s.rowBytes }

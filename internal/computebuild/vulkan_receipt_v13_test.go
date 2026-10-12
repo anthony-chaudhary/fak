@@ -14,8 +14,8 @@ import (
 // executable SPIR-V, source correspondence, or hardware qualification.
 func TestVulkanReceiptV13Current73Boundary(t *testing.T) {
 	want := append(CurrentVulkanShaderRegistryV12(), "v41_scale_exact")
-	if len(want) != 73 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV13(), want) || !reflect.DeepEqual(VulkanShaders, want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest(), want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
-		t.Fatal("current builder does not use V12 plus the strict scalar-multiply module exactly once")
+	if len(want) != 73 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV13(), want) || !reflect.DeepEqual(VulkanShaders[:73], want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest()[:73], want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
+		t.Fatal("V13 is not V12 plus the strict scalar-multiply module as the current builder prefix")
 	}
 	registry, err := vulkanRegistryV13.identity()
 	if err != nil {

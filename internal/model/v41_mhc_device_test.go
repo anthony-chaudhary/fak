@@ -34,6 +34,8 @@ type v41MHCTestBackend struct {
 	engramFlag             bool
 	engramCause, poolCause error
 	streamUploads          int
+	// rowDecode binds the Engram table-row decode (v41_engram_row_decode_test.go).
+	rowDecode bool
 }
 
 func newV41MHCTestBackend(supported bool) *v41MHCTestBackend {

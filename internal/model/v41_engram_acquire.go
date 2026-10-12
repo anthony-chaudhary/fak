@@ -169,5 +169,5 @@ func NewV41AcquiredEngramRowSource(reader io.ReaderAt, shard V41EngramShard, bin
 			Err: fmt.Errorf("cannot hash shard bytes: %w", err)}
 	}
 	binding.Digest = digest
-	return &v41VerifiedEngramRowSource{inner: base, binding: binding, rowBytes: rowBytes}, nil
+	return &v41VerifiedEngramRowSource{inner: base, binding: binding, rowBytes: rowBytes, encoded: v41EngramBoundEncoded(reader, digest)}, nil
 }

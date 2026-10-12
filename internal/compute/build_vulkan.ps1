@@ -174,6 +174,8 @@ function Build-Shaders {
     $shaders += "v41_tail_rope_exact"
     # Coupled V13/complete73 migration; V12/72 remains a historical artifact identity.
     $shaders += "v41_scale_exact"
+    # Coupled V14/complete74 migration; V13/73 remains a historical artifact identity.
+    $shaders += "v41_engram_row_decode"
     foreach ($s in $shaders) {
         $src = Join-Path $shaderSrc "$s.comp"
         $dst = Join-Path $spvOut "$s.spv"
