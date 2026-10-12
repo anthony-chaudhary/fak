@@ -638,6 +638,9 @@ func (s *Server) writeMoEResidencyMetrics(b *strings.Builder) {
 	fmt.Fprintf(b, "fak_gateway_moe_expert_budget_bytes %d\n", l.BudgetBytes)
 	writeHelpType(b, "fak_gateway_moe_expert_peak_resident_bytes", "High-water resident routed-expert footprint across every request. Staying well under the budget means the surplus could be given back to KV.", "gauge")
 	fmt.Fprintf(b, "fak_gateway_moe_expert_peak_resident_bytes %d\n", l.PeakBytes)
+	writeHelpType(b, "fak_gateway_moe_expert_ring_bytes", "Activated-expert device ring bytes: kind=budget is the declared ceiling, kind=resident the routed-expert bytes still resident after the most recent request (non-zero only for a model-scoped ring that persists across requests).", "gauge")
+	fmt.Fprintf(b, "fak_gateway_moe_expert_ring_bytes{kind=\"budget\"} %d\n", l.BudgetBytes)
+	fmt.Fprintf(b, "fak_gateway_moe_expert_ring_bytes{kind=\"resident\"} %d\n", l.ResidentBytes)
 
 	last := l.Last
 	if last.Shape.Experts > 0 {

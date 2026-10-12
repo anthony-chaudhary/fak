@@ -65,6 +65,11 @@ type MoEResidencyLedger struct {
 	// across requests rather than only within one.
 	BudgetBytes int64 `json:"budget_bytes"`
 	PeakBytes   int64 `json:"peak_bytes"`
+	// RingScope is "model" when requests attach to one model-scoped ring and "request" when each
+	// request builds and frees its own. ResidentBytes is the routed-expert bytes still resident
+	// after the most recent request: the model-scoped ring keeps them, a request ring frees them.
+	RingScope     string `json:"ring_scope,omitempty"`
+	ResidentBytes int64  `json:"resident_bytes"`
 	// ReconciliationFailures counts requests whose own report failed its internal identity checks
 	// (hits+page-ins+refusals == lookups, resident within budget, and the cross-agent pairs under a
 	// shared ring). It should be 0 forever. A non-zero value means the ring's accounting disagreed
@@ -386,14 +391,21 @@ func (p *InKernelPlanner) foldMoEResidencyLocked(rep model.MoEResidencyReport, t
 		if tokens < 0 {
 			tokens = 0
 		}
+		ring := rep.Ring
+		l.RingScope, l.ResidentBytes = "request", 0
+		if rep.Shared != nil {
+			// A model-scoped ring reports its lifetime counters; fold only this request's share.
+			ring = p.sharedRingDeltaLocked(rep.Ring)
+			l.RingScope, l.ResidentBytes = "model", rep.Ring.ResidentBytes
+		}
 		l.Requests++
 		l.Tokens += tokens
-		l.Lookups += int64(rep.Ring.Lookups)
-		l.Hits += int64(rep.Ring.Hits)
-		l.PageIns += int64(rep.Ring.PageIns)
-		l.Evictions += int64(rep.Ring.Evictions)
-		l.Refusals += int64(rep.Ring.Refusals)
-		l.PageInBytes += rep.Ring.PageInBytes
+		l.Lookups += int64(ring.Lookups)
+		l.Hits += int64(ring.Hits)
+		l.PageIns += int64(ring.PageIns)
+		l.Evictions += int64(ring.Evictions)
+		l.Refusals += int64(ring.Refusals)
+		l.PageInBytes += ring.PageInBytes
 		l.BudgetBytes = rep.Ring.BudgetBytes
 		if rep.Ring.PeakBytes > l.PeakBytes {
 			l.PeakBytes = rep.Ring.PeakBytes
@@ -450,4 +462,27 @@ func (p *InKernelPlanner) MoEResidencyStats() MoEResidencyLedger {
 type moeResidencyState struct {
 	moeMu        sync.Mutex
 	moeResidency MoEResidencyLedger
+	// moeSharedPrev is the model-scoped ring's lifetime counters at the previous fold.
+	moeSharedPrev model.ExpertRingStats
+}
+
+// sharedRingDeltaLocked converts a model-scoped ring's lifetime counters into the increment since
+// the previous fold. Folds are serialized under moeMu and each snapshot is taken inside that
+// span, so the snapshots are monotone; a counter that went backwards means a new ring, whose
+// counters are the increment from zero.
+func (p *InKernelPlanner) sharedRingDeltaLocked(cur model.ExpertRingStats) model.ExpertRingStats {
+	prev := p.moeSharedPrev
+	p.moeSharedPrev = cur
+	if cur.Lookups < prev.Lookups || cur.Hits < prev.Hits || cur.PageIns < prev.PageIns ||
+		cur.Evictions < prev.Evictions || cur.Refusals < prev.Refusals || cur.PageInBytes < prev.PageInBytes {
+		return cur
+	}
+	d := cur
+	d.Lookups -= prev.Lookups
+	d.Hits -= prev.Hits
+	d.PageIns -= prev.PageIns
+	d.Evictions -= prev.Evictions
+	d.Refusals -= prev.Refusals
+	d.PageInBytes -= prev.PageInBytes
+	return d
 }

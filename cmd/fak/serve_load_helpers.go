@@ -509,7 +509,7 @@ func loadServeInKernelModelPlaced(modelPath string, backend compute.Backend, cpu
 				memPlan, err = fitAndPlanServeGGUFExpertParallelPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens, fit)
 			} else {
 				memPlan, err = fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens, fit)
-				ring, ringed, ringErr := serveActivatedExpertRingPathPlacement(ggufPath, backend, requireDevice && expertShard == nil, err, contextBudgetTokens, fit)
+				ring, ringed, ringErr := serveActivatedExpertRingPathPlacement(ggufPath, backend, requireDevice && expertShard == nil, err, contextBudgetTokens, fit, os.Getenv, q4kOpts)
 				if ringed {
 					memPlan = ring.Plan
 					q4kOpts = append(q4kOpts, serveActivatedExpertRingLoadOptions(ring)...)
@@ -519,6 +519,15 @@ func loadServeInKernelModelPlaced(modelPath string, backend compute.Backend, cpu
 					loadMessages = append(loadMessages, serveStartupMessage("serving-expert-residency", "info", text))
 				}
 				err = ringErr
+				if ringed {
+					must(err)
+					mm, q4k, profile, phase := loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend, loadMessages, q4kOpts...)
+					if err := enableServeSharedExpertRing(mm, backend); err != nil {
+						// The historical request-scoped ring still bounds residency; only reuse is lost.
+						fmt.Fprintln(os.Stderr, "fak serve: activated-expert device ring stays request-scoped:", err)
+					}
+					return mm, q4k, profile, phase
+				}
 			}
 			must(err)
 			return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend, loadMessages, q4kOpts...)
@@ -991,8 +1000,8 @@ func serveMetalGGUFAdmissionWeights(path string, ws *ggufload.WeightSource) (com
 // never measured device placement. A bounded dense option is a HOST working-set
 // ceiling, not evidence that its bytes have been uploaded or are physically resident.
 func serveActivatedExpertRingPlanText(ring serveActivatedExpertRing, effects ggufload.Q4KLoadOptionEffects) string {
-	text := fmt.Sprintf("full device plan does not fit; planned dense device charge=%s; planned device expert-ring capacity=%s; device weights staged on demand, actual residency unmeasured; routed experts streamed from checkpoint (no host expert GEMMs)",
-		bytesText(uint64(max(ring.Fit.DeviceBaseBytes, 0))), bytesText(uint64(max(ring.RingBytes, 0))))
+	text := fmt.Sprintf("full device plan does not fit; planned dense device charge=%s; planned device expert-ring capacity=%s; device weights staged on demand, actual residency unmeasured; routed experts streamed from checkpoint (no host expert GEMMs); ring scope=model (shared by every request); %s",
+		bytesText(uint64(max(ring.Fit.DeviceBaseBytes, 0))), bytesText(uint64(max(ring.RingBytes, 0))), ring.Sizing.Text())
 	if effects.StreamedDenseBounded {
 		text += fmt.Sprintf("; bounded dense HOST working-set ceiling=%s", bytesText(uint64(max(effects.StreamedDenseBytes, 0))))
 	} else if effects.StreamedDenseQ4K {

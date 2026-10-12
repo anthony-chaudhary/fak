@@ -79,6 +79,10 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (*Session, error) {
 		// path identity before KV or weight allocation.
 		s.initQwen35HALState(be.(Qwen35GDNBackend))
 	}
+	if err := m.attachSharedExpertRing(s); err != nil {
+		s.Close()
+		return nil, err
+	}
 	return s, nil
 }
 

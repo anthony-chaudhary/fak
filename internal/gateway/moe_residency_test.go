@@ -216,3 +216,21 @@ func TestMoEResidencyDebugVarsCarryTheRatesAndNameWhatBroke(t *testing.T) {
 		t.Fatalf("an unreconciled serve blanked its own block (%d requests)", v.Requests)
 	}
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestMoEResidencyMetricsExportRingBytesGauge(t *testing.T) {
+	srv := newTestServer(t)
+	ledger := moeEngagedLedger()
+	ledger.RingScope, ledger.ResidentBytes = "model", 700<<10
+	srv.planner = moeResidencyPlanner{ledger: ledger}
+	text := srv.renderMetrics()
+	for _, want := range []string{
+		"# TYPE fak_gateway_moe_expert_ring_bytes gauge",
+		"fak_gateway_moe_expert_ring_bytes{kind=\"budget\"} 1048576",
+		"fak_gateway_moe_expert_ring_bytes{kind=\"resident\"} 716800",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("metrics missing %q:\n%s", want, text)
+		}
+	}
+}

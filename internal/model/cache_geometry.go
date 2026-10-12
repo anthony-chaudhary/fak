@@ -205,6 +205,10 @@ func (s *Session) RebuildCacheGeometry(req CacheGeometryRequest) (report CacheRe
 	if s.cacheGeometryFailed {
 		return report, &CacheRebuildError{Reason: CacheRebuildRollbackFailed, Err: errors.New("session is latched in failed maintenance")}
 	}
+	if s.sharedRing != nil {
+		// A model-scoped ring belongs to every attached session; rebuilding would free a peer's experts.
+		return report, &CacheRebuildError{Reason: CacheRebuildBusy, Err: ErrSharedRingResidency}
+	}
 	target, err := planCacheGeometry(s.M.Cfg, req)
 	if err != nil {
 		return report, err

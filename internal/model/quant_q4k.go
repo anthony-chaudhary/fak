@@ -746,6 +746,7 @@ func (m *Model) finishWeightClose(s *weightCloserState) {
 		// here, after the last session has detached (fak#13479). Sessions detach in Close and
 		// never free resident pages themselves.
 		m.freeV4ExpertOwners()
+		m.closeSharedExpertRings()
 		if s.c != nil {
 			s.err = s.c.Close()
 		}

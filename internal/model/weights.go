@@ -295,6 +295,11 @@ type Model struct {
 	// V4 session attaches, so non-V4 models allocate nothing.
 	v4ExpertOwners map[compute.Backend]*v4ExpertOwner
 
+	// sharedExpertRings is the per-(Model, Backend) routed-expert ring a serve enables with
+	// EnableSharedExpertRing. Sessions on that backend attach at construction and detach at
+	// Close; CloseWeights frees each ring once. nil until enabled.
+	sharedExpertRings map[compute.Backend]*SharedExpertRing
+
 	// Q2KEmbedding holds the optional resident Q2_K embedding table for native row gathering.
 	// When populated, embedRows() refuses whole-table expansion, while native row gathering
 	// paths (TokenEmbedding, embedRowsInto, HAL upload) dequantize rows on demand.

@@ -1,0 +1,271 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"math"
+	"os"
+	"strconv"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
+)
+
+// serve_expert_ring_size.go — the operator knob that sizes the activated-expert device ring
+// (--expert-ring-bytes / FAK_EXPERT_RING_BYTES).
+//
+//	token    the default: one token's activated experts, exactly the historical ring.
+//	auto     the smaller of a device bound and a host bound, after the dense base, the transient
+//	         scratch and the KV for the target context are reserved.
+//	<bytes>  an explicit ring, admitted or refused at load.
+//
+// On a UMA box (shared host RAM, carve-out <= serveExpertRingUMACarveoutMax) the device ring,
+// the page cache and every other plan row draw on one pool, so auto and explicit sizes are
+// judged against MemAvailable as that pool. A size that does not fit refuses at load with a
+// typed *compute.FitError that also matches ErrServeExpertRingTooBig, never mid-request.
+
+// FakExpertRingBytesEnv is the environment twin of --expert-ring-bytes.
+const FakExpertRingBytesEnv = "FAK_EXPERT_RING_BYTES"
+
+// ErrServeExpertRingTooBig marks a ring size the load-time memory bound refused.
+var ErrServeExpertRingTooBig = errors.New("fak serve: activated-expert device ring does not fit")
+
+// ErrServeExpertRingSize marks an --expert-ring-bytes value that cannot name a ring.
+var ErrServeExpertRingSize = errors.New("fak serve: invalid --expert-ring-bytes")
+
+const (
+	serveExpertRingHostMarginFloor    int64   = 6 << 30
+	serveExpertRingHostMarginFraction float64 = 0.05
+	serveExpertRingUMACarveoutMax     int64   = 4 << 30
+)
+
+type serveExpertRingMode string
+
+const (
+	serveExpertRingToken    serveExpertRingMode = "token"
+	serveExpertRingAuto     serveExpertRingMode = "auto"
+	serveExpertRingExplicit serveExpertRingMode = "explicit"
+)
+
+type serveExpertRingSize struct {
+	Mode  serveExpertRingMode
+	Bytes int64
+}
+
+func (s serveExpertRingSize) String() string {
+	if s.Mode == serveExpertRingExplicit {
+		return strconv.FormatInt(s.Bytes, 10)
+	}
+	if s.Mode == "" {
+		return string(serveExpertRingToken)
+	}
+	return string(s.Mode)
+}
+
+// parseServeExpertRingSize accepts token, auto, or a positive byte count with an optional
+// binary suffix (K, M, G, T; KiB/KB style spellings are the same powers of 1024).
+func parseServeExpertRingSize(raw string) (serveExpertRingSize, error) {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	switch v {
+	case "", string(serveExpertRingToken):
+		return serveExpertRingSize{Mode: serveExpertRingToken}, nil
+	case string(serveExpertRingAuto):
+		return serveExpertRingSize{Mode: serveExpertRingAuto}, nil
+	}
+	shift := 0
+	for _, unit := range []struct {
+		suffix string
+		shift  int
+	}{{"tib", 40}, {"gib", 30}, {"mib", 20}, {"kib", 10}, {"tb", 40}, {"gb", 30}, {"mb", 20}, {"kb", 10}, {"t", 40}, {"g", 30}, {"m", 20}, {"k", 10}, {"b", 0}} {
+		if strings.HasSuffix(v, unit.suffix) {
+			v, shift = strings.TrimSpace(strings.TrimSuffix(v, unit.suffix)), unit.shift
+			break
+		}
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n <= 0 || n > math.MaxInt64>>shift {
+		return serveExpertRingSize{}, fmt.Errorf("%w %q: want token, auto, or a positive byte count", ErrServeExpertRingSize, raw)
+	}
+	return serveExpertRingSize{Mode: serveExpertRingExplicit, Bytes: n << shift}, nil
+}
+
+// resolveServeExpertRingSize lets a non-empty flag win over the environment.
+func resolveServeExpertRingSize(flagValue string, getenv func(string) string) (serveExpertRingSize, error) {
+	if strings.TrimSpace(flagValue) != "" {
+		return parseServeExpertRingSize(flagValue)
+	}
+	if getenv == nil {
+		return serveExpertRingSize{Mode: serveExpertRingToken}, nil
+	}
+	return parseServeExpertRingSize(getenv(FakExpertRingBytesEnv))
+}
+
+// serveExpertRingHost is the host-side snapshot a non-token size is judged against.
+type serveExpertRingHost struct {
+	Total, Avail int64
+	Known        bool
+	// RSSAnonPeak is the estimated anonymous host peak of the load route (ggufload.HostLoadPeak).
+	RSSAnonPeak int64
+	// SharedPool: device allocations draw on MemAvailable (integrated tier, carve-out <= 4 GiB or
+	// unreadable).
+	SharedPool    bool
+	Carveout      int64
+	CarveoutKnown bool
+}
+
+func serveExpertRingHostMargin(total int64) int64 {
+	return max(serveExpertRingHostMarginFloor, int64(float64(max(total, 0))*serveExpertRingHostMarginFraction))
+}
+
+// serveExpertRingSizing is the size choice and every input it was made from, for the log line.
+type serveExpertRingSizing struct {
+	Mode       serveExpertRingMode
+	RingBytes  int64
+	TokenBytes int64
+	Floor      int64
+	Ceiling    int64
+	// DeviceBound / HostBound are the room each bound leaves the ring; Known=false when the
+	// bound could not be measured and did not constrain the choice.
+	DeviceBound, HostBound           int64
+	DeviceBoundKnown, HostBoundKnown bool
+	DeviceAvail                      int64
+	NonRingDevice, NonRingHost       int64
+	HostAvail, HostMargin            int64
+	RSSAnonPeak                      int64
+	HostGatheredBytes                int64
+	HostGatheredReserve              int64
+	SharedPool                       bool
+	// GuardTrimBytes is how much the load-time guard trimmed an auto ring below the bounds.
+	GuardTrimBytes int64
+}
+
+// sizeServeExpertRing picks the ring for a non-token mode from the plan the token ring was
+// admitted in (nonRing: every plan row except the ring). Token mode returns tokenRing unchanged.
+func sizeServeExpertRing(size serveExpertRingSize, f ggufload.ActivatedExpertFit, tokenRing int64, nonRing compute.MemoryPlan, deviceAvail int64, host serveExpertRingHost) (serveExpertRingSizing, error) {
+	s := serveExpertRingSizing{
+		Mode: size.Mode, RingBytes: tokenRing, TokenBytes: tokenRing,
+		Floor: f.ActivatedLayerBytes, Ceiling: f.RoutedBandBytes,
+		DeviceAvail: deviceAvail, NonRingDevice: nonRing.DeviceTotal(), NonRingHost: nonRing.HostTotal(),
+		HostAvail: host.Avail, RSSAnonPeak: max(host.RSSAnonPeak, 0),
+		HostGatheredBytes: f.HostGatheredBytes, HostGatheredReserve: f.HostGatheredPageReserve(),
+		SharedPool: host.SharedPool,
+	}
+	if s.Mode == "" {
+		s.Mode = serveExpertRingToken
+	}
+	if s.Mode == serveExpertRingToken {
+		return s, nil
+	}
+	if deviceAvail > 0 {
+		s.DeviceBound, s.DeviceBoundKnown = deviceAvail-s.NonRingDevice, true
+	}
+	if host.Known && host.Avail > 0 {
+		s.HostMargin = serveExpertRingHostMargin(host.Total)
+		// The host-gathered page reserve is already a host-scoped row of nonRing.
+		room := host.Avail - s.RSSAnonPeak - s.HostMargin - s.NonRingHost
+		if host.SharedPool {
+			room -= s.NonRingDevice
+		}
+		s.HostBound, s.HostBoundKnown = room, true
+	}
+	switch s.Mode {
+	case serveExpertRingAuto:
+		if !s.DeviceBoundKnown && !s.HostBoundKnown {
+			// Nothing measurable to size against: keep the admitted token ring.
+			return s, nil
+		}
+		ring := int64(math.MaxInt64)
+		if s.DeviceBoundKnown {
+			ring = min(ring, s.DeviceBound)
+		}
+		if s.HostBoundKnown {
+			ring = min(ring, s.HostBound)
+		}
+		s.RingBytes = min(ring, s.Ceiling)
+		if s.RingBytes < s.Floor {
+			s.RingBytes = s.Floor
+		}
+	case serveExpertRingExplicit:
+		s.RingBytes = min(size.Bytes, s.Ceiling)
+	default:
+		return s, fmt.Errorf("%w: mode %q", ErrServeExpertRingSize, size.Mode)
+	}
+	if s.RingBytes < s.Floor {
+		return s, fmt.Errorf("%w: %d bytes is below one layer's activated experts (%d bytes)", ErrServeExpertRingSize, s.RingBytes, s.Floor)
+	}
+	return s, s.refuseIfOverBound(nonRing)
+}
+
+// refuseIfOverBound returns the typed refusal for a ring larger than a measured bound.
+func (s serveExpertRingSizing) refuseIfOverBound(nonRing compute.MemoryPlan) error {
+	plan := append(append(compute.MemoryPlan(nil), nonRing...), compute.MemoryDemand{Class: compute.MemoryWeights, Bytes: s.RingBytes, Detail: serveActivatedRingDetail, Scope: compute.MemoryScopeDevice})
+	if s.DeviceBoundKnown && s.RingBytes > s.DeviceBound {
+		return serveExpertRingTooBig(s, &compute.FitError{Verdict: compute.FitTooBig, Want: s.NonRingDevice + s.RingBytes, Avail: s.DeviceAvail, Demands: plan, Scope: compute.MemoryScopeDevice})
+	}
+	if s.HostBoundKnown && s.RingBytes > s.HostBound {
+		want := s.RingBytes + s.NonRingHost + s.RSSAnonPeak
+		if s.SharedPool {
+			want += s.NonRingDevice
+		}
+		return serveExpertRingTooBig(s, &compute.FitError{Verdict: compute.FitTooBig, Want: want, Avail: s.HostAvail - s.HostMargin, Demands: plan, Scope: compute.MemoryScopeHost})
+	}
+	return nil
+}
+
+func serveExpertRingTooBig(s serveExpertRingSizing, fe *compute.FitError) error {
+	return fmt.Errorf("%w (mode=%s ring=%d bytes): %w", ErrServeExpertRingTooBig, s.Mode, s.RingBytes, fe)
+}
+
+// Text renders the inputs of the size choice for the startup log line.
+func (s serveExpertRingSizing) Text() string {
+	bound := func(v int64, known bool) string {
+		if !known {
+			return "unmeasured"
+		}
+		return bytesText(uint64(max(v, 0)))
+	}
+	mode := s.Mode
+	if mode == "" {
+		mode = serveExpertRingToken
+	}
+	return fmt.Sprintf("ring size mode=%s chosen=%s token=%s floor=%s band=%s device_bound=%s (device_avail=%s non_ring_device=%s) host_bound=%s (mem_available=%s rss_anon_peak=%s margin=%s non_ring_host=%s shared_pool=%t) guard_trim=%s host_gathered=%s page_reserve=%s",
+		mode, bytesText(uint64(max(s.RingBytes, 0))), bytesText(uint64(max(s.TokenBytes, 0))),
+		bytesText(uint64(max(s.Floor, 0))), bytesText(uint64(max(s.Ceiling, 0))),
+		bound(s.DeviceBound, s.DeviceBoundKnown), bytesText(uint64(max(s.DeviceAvail, 0))), bytesText(uint64(max(s.NonRingDevice, 0))),
+		bound(s.HostBound, s.HostBoundKnown), bytesText(uint64(max(s.HostAvail, 0))), bytesText(uint64(s.RSSAnonPeak)),
+		bytesText(uint64(max(s.HostMargin, 0))), bytesText(uint64(max(s.NonRingHost, 0))), s.SharedPool,
+		bytesText(uint64(max(s.GuardTrimBytes, 0))),
+		bytesText(uint64(max(s.HostGatheredBytes, 0))), bytesText(uint64(max(s.HostGatheredReserve, 0))))
+}
+
+// serveExpertRingBytesFlag is the flag name, kept in one place so registration and refusals agree.
+const serveExpertRingBytesFlag = "expert-ring-bytes"
+
+// applyServeExpertRingBytes validates the flag before the load and carries it to the load path
+// through FakExpertRingBytesEnv, normalized, so the flag wins over a pre-set environment value.
+func applyServeExpertRingBytes(v string) error {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	size, err := parseServeExpertRingSize(v)
+	if err != nil {
+		return fmt.Errorf("fak serve: --%s: %w", serveExpertRingBytesFlag, err)
+	}
+	return os.Setenv(FakExpertRingBytesEnv, size.String())
+}
+
+// enableServeSharedExpertRing gives the loaded model ONE routed-expert ring for the serve's
+// backend, so every request attaches to the same residency instead of building and freeing a
+// fresh ring: an expert paged in by request N is a hit for request N+1, and concurrent sessions
+// share one budget instead of overcommitting it N times.
+func enableServeSharedExpertRing(m *fakmodel.Model, be compute.Backend) error {
+	if m == nil || be == nil {
+		return nil
+	}
+	if _, err := m.EnableSharedExpertRing(be); err != nil {
+		return fmt.Errorf("fak serve: model-scoped activated-expert ring: %w", err)
+	}
+	return nil
+}
