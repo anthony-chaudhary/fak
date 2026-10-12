@@ -95,7 +95,7 @@ func TestCUDAKVCloneUnwindsAllocationPanic(t *testing.T) {
 				if !reflect.DeepEqual(source.K, beforeK) || !reflect.DeepEqual(source.Kraw, beforeRaw) || !reflect.DeepEqual(source.V, beforeV) || !reflect.DeepEqual(source.pos, beforePos) {
 					t.Fatal("source metadata changed")
 				}
-				if len(sourceBacking) != 6 || len(storage) != failAt-1 {
+				if len(sourceBacking) != len(source.K)+len(source.Kraw)+len(source.V) || len(storage) != failAt-1 {
 					t.Fatal("synthetic backing ownership changed")
 				}
 			})
@@ -140,7 +140,7 @@ func TestCUDAKVCloneSuccessfulOwnershipAndEmptyRows(t *testing.T) {
 		}
 	}
 	clone.pos[0] = 99
-	if source.pos[0] != 4 || len(storage) != 5 || len(backing) != 6 {
+	if source.pos[0] != 4 || len(storage) != len(expectedSources) || len(backing) != len(source.K)+len(source.Kraw)+len(source.V) {
 		t.Fatal("source position alias or backing mismatch")
 	}
 	empty := (&cudaKV{}).cloneWithOperations(func(int, string) unsafe.Pointer { t.Fatal("empty allocation"); return nil }, func(unsafe.Pointer, unsafe.Pointer, int) { t.Fatal("empty copy") }, func(unsafe.Pointer) { t.Fatal("empty release") })

@@ -50,7 +50,7 @@ func TestVulkanV41QueryPrefixOrchestration(t *testing.T) {
 			t.Fatal(err)
 		}
 		digest := sha256.Sum256(raw)
-		if len(os.Getenv(file.env)) != 64 || hex.EncodeToString(digest[:]) != os.Getenv(file.env) {
+		if len(os.Getenv(file.env)) != hex.EncodedLen(sha256.Size) || hex.EncodeToString(digest[:]) != os.Getenv(file.env) {
 			t.Fatalf("%s differs from the reviewed native source receipt", file.name)
 		}
 		// An exact byte snapshot makes a concurrent checkout edit irrelevant to

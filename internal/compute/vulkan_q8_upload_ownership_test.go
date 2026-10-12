@@ -152,10 +152,13 @@ func TestVulkanQ8UploadSuccessKeepsPlacementAndLayout(t *testing.T) {
 				}
 			}
 			if chunked {
-				if len(buf.q8Chunks) != 3 || !reflect.DeepEqual(uploadSizes, []int{32, 4, 32, 4, 32, 4}) {
+				if len(buf.q8Chunks) != len(scales) || len(uploadSizes) != 2*len(scales) {
 					t.Fatal("chunk layout changed")
 				}
 				for i, c := range buf.q8Chunks {
+					if uploadSizes[2*i] != len(codes)/len(scales) || uploadSizes[2*i+1] != int(unsafe.Sizeof(scales[0])) {
+						t.Fatal("chunk code and scale upload sizes changed")
+					}
 					if c.rowStart != i || c.rows != 1 || c.ptr != owners[2*i].ptr || c.scalePtr != owners[2*i+1].ptr {
 						t.Fatal("chunk handles changed")
 					}
@@ -226,7 +229,8 @@ func TestVulkanQ8ChunkFreeRestoresScalePlacement(t *testing.T) {
 			v := &vulkanBackend{haveQ8: true, maxBufferBytes: 32, dlUsed: 77, hostvisN: 3}
 			var owners []*vulkanBuf
 			var storage [][]byte
-			out := v.uploadQ8WithOperations([]int{3, 32}, make([]int8, 96), []float32{1, 2, 3}, 32, func(bytes int, site string) *vulkanBuf {
+			scales := []float32{1, 2, 3}
+			out := v.uploadQ8WithOperations([]int{len(scales), 32}, make([]int8, len(scales)*32), scales, 32, func(bytes int, site string) *vulkanBuf {
 				data := make([]byte, bytes)
 				storage = append(storage, data)
 				owner := &vulkanBuf{ptr: unsafe.Pointer(&data[0]), n: bytes, class: MemoryWeights}
@@ -244,7 +248,7 @@ func TestVulkanQ8ChunkFreeRestoresScalePlacement(t *testing.T) {
 			}, func(unsafe.Pointer, unsafe.Pointer, int) {}, func(unsafe.Pointer) { t.Fatal("successful upload unwound") })
 			db := out.buf.(*vulkanBuf)
 			rows := db.q8Chunks
-			if len(rows) != 3 || len(owners) != 6 {
+			if len(rows) != len(scales) || len(owners) != 2*len(scales) {
 				t.Fatal("fixture did not chunk")
 			}
 			for i, row := range rows {
@@ -256,7 +260,7 @@ func TestVulkanQ8ChunkFreeRestoresScalePlacement(t *testing.T) {
 			var released []unsafe.Pointer
 			v.freeQ8ChunksWithOperation(db, func(ptr unsafe.Pointer) { released = append(released, ptr) })
 			expected := []unsafe.Pointer{}
-			for i := 0; i < 3; i++ {
+			for i := range scales {
 				expected = append(expected, owners[2*i+1].ptr, owners[2*i].ptr)
 			}
 			if !reflect.DeepEqual(released, expected) {
@@ -274,7 +278,7 @@ func TestVulkanQ8ChunkFreeRestoresScalePlacement(t *testing.T) {
 				}
 			}
 			v.freeQ8ChunksWithOperation(db, func(unsafe.Pointer) { t.Fatal("repeated successful cleanup released again") })
-			if v.dlUsed != 77 || v.hostvisN != 3 || len(storage) != 6 {
+			if v.dlUsed != 77 || v.hostvisN != 3 || len(storage) != 2*len(scales) {
 				t.Fatal("repeat cleanup changed accounting")
 			}
 		})

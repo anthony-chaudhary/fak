@@ -96,8 +96,15 @@ func TestVulkanDecodeAttentionPushContract(t *testing.T) {
 	for i := range args {
 		args[i] = strings.TrimSpace(args[i])
 	}
-	if !reflect.DeepEqual(args, []string{"nPos", "nH", "nKV", "hd", "scale", "0", "1", "1", "0"}) {
+	if len(args) != len(want) {
 		t.Fatalf("decode defaults changed: %v", args)
+	}
+	defaults := map[string]string{"nPos": "nPos", "nH": "nH", "nKV": "nKV", "hd": "hd", "scale": "scale", "mode": "0", "tileCount": "1", "causal": "1", "windowSize": "0"}
+	for i, field := range want {
+		name := strings.Fields(field)[1]
+		if expression, ok := defaults[name]; !ok || args[i] != expression {
+			t.Fatalf("decode default %s=%q, want %q", name, args[i], expression)
+		}
 	}
 	if strings.Count(body, `dispatch(g_kern[K_ATTENTION], bufs, &pc, sizeof(pc),`) != 3 {
 		t.Fatal("all three default/split dispatches must send the complete push object")

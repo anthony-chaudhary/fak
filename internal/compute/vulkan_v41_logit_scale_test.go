@@ -27,7 +27,7 @@ func TestVulkanV41LogitScaleModuleABI(t *testing.T) {
 	}
 	module := os.Getenv("FAK_V41_LOGIT_SCALE_WITNESS_MODULE")
 	expected := os.Getenv("FAK_V41_LOGIT_SCALE_WITNESS_MODULE_SHA256")
-	if !filepath.IsAbs(module) || filepath.Base(module) != "v41_logit_scale.spv" || len(expected) != 64 {
+	if !filepath.IsAbs(module) || filepath.Base(module) != "v41_logit_scale.spv" || len(expected) != hex.EncodedLen(sha256.Size) {
 		t.Fatal("explicit compiled logit-scale module path and reviewed SHA256 required")
 	}
 	code, err := os.ReadFile(module)
@@ -73,7 +73,7 @@ func TestVulkanV41LogitScaleModuleABI(t *testing.T) {
 	}
 	for name, edit := range map[string]func([]uint32) bool{
 		"local width": func(w []uint32) bool {
-			if w[0]&0xffff == 16 && len(w) == 6 && w[2] == 17 {
+			if w[0]&0xffff == 16 && len(w) == 6 && w[2] == 17 { //boundarylint:ignore CHANGE_DETECTOR_TEST SPIR-V OpExecutionMode LocalSize has six words: opcode, entry point, mode, x, y, z.
 				w[3] = 32
 				return true
 			}
@@ -101,7 +101,7 @@ func TestVulkanV41LogitScaleModuleABI(t *testing.T) {
 			return false
 		},
 		"push scale offset": func(w []uint32) bool {
-			if w[0]&0xffff == 72 && len(w) == 5 && w[2] == 1 && w[3] == 35 && w[4] == 4 {
+			if w[0]&0xffff == 72 && len(w) == 5 && w[2] == 1 && w[3] == 35 && w[4] == 4 { //boundarylint:ignore CHANGE_DETECTOR_TEST SPIR-V OpMemberDecorate Offset has five words: opcode, target, member, decoration, offset.
 				w[4] = 8
 				return true
 			}
@@ -115,7 +115,7 @@ func TestVulkanV41LogitScaleModuleABI(t *testing.T) {
 			return false
 		},
 		"add instead of multiply": func(w []uint32) bool {
-			if w[0]&0xffff == 133 && len(w) == 5 {
+			if w[0]&0xffff == 133 && len(w) == 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST SPIR-V OpFMul has five words: opcode, result type, result ID, left operand, right operand.
 				w[0] = w[0]&0xffff0000 | 129
 				return true
 			}

@@ -1288,7 +1288,7 @@ func TestROCmKVOldRetirementFailurePoisonsAllConsumers(t *testing.T) {
 			if cause := rocmKVRetirementPanic(func() { k.freeWithOperation(func(ptr unsafe.Pointer) { calls[ptr]++; panic(secondary) }) }); cause != nil {
 				t.Fatalf("poison cleanup replaced primary: %v", cause)
 			}
-			if calls[pointers[0]] != 0 || len(calls) != 5 {
+			if calls[pointers[0]] != 0 || len(calls) != len(pointers)-1 {
 				t.Fatalf("ambiguous old handle retried or survivors skipped: %v", calls)
 			}
 			for _, ptr := range pointers[1:] {
@@ -1327,7 +1327,7 @@ func TestROCmKVFreeReportsFirstFailureAfterEveryAttempt(t *testing.T) {
 				panic(errors.New("later Free failure"))
 			})
 		})
-		if cause != first || len(calls) != 6 || rocmKVRetirementPanic(k.ensureUsable) != first {
+		if cause != first || len(calls) != len(pointers) || rocmKVRetirementPanic(k.ensureUsable) != first {
 			t.Fatalf("first failure lost or cleanup incomplete: %v calls=%d", cause, len(calls))
 		}
 		for _, n := range calls {

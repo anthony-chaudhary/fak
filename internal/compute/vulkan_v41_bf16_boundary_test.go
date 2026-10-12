@@ -27,7 +27,7 @@ func TestVulkanV41BF16BoundaryModuleABI(t *testing.T) {
 	}
 	module := os.Getenv("FAK_V41_BF16_BOUNDARY_WITNESS_MODULE")
 	expected := os.Getenv("FAK_V41_BF16_BOUNDARY_WITNESS_MODULE_SHA256")
-	if !filepath.IsAbs(module) || filepath.Base(module) != "v41_bf16_boundary.spv" || len(expected) != 64 {
+	if !filepath.IsAbs(module) || filepath.Base(module) != "v41_bf16_boundary.spv" || len(expected) != hex.EncodedLen(sha256.Size) {
 		t.Fatal("explicit compiled BF16 module path and reviewed SHA256 required")
 	}
 	code, err := os.ReadFile(module)
@@ -73,7 +73,7 @@ func TestVulkanV41BF16BoundaryModuleABI(t *testing.T) {
 	}
 	for name, edit := range map[string]func([]uint32) bool{
 		"local width": func(w []uint32) bool {
-			if w[0]&0xffff == 16 && len(w) == 6 && w[2] == 17 {
+			if w[0]&0xffff == 16 && len(w) == 6 && w[2] == 17 { //boundarylint:ignore CHANGE_DETECTOR_TEST SPIR-V OpExecutionMode LocalSize has six words: opcode, entry point, mode, x, y, z.
 				w[3] = 32
 				return true
 			}

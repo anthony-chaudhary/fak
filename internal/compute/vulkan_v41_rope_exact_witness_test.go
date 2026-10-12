@@ -27,7 +27,7 @@ func TestVulkanV41TailRoPEExactModuleABI(t *testing.T) {
 	}
 	module := os.Getenv("FAK_V41_TAIL_ROPE_EXACT_WITNESS_MODULE")
 	expected := os.Getenv("FAK_V41_TAIL_ROPE_EXACT_WITNESS_MODULE_SHA256")
-	if !filepath.IsAbs(module) || filepath.Base(module) != "v41_tail_rope_qk.spv" || len(expected) != 64 {
+	if !filepath.IsAbs(module) || filepath.Base(module) != "v41_tail_rope_qk.spv" || len(expected) != hex.EncodedLen(sha256.Size) {
 		t.Fatal("explicit compiled strict tail-RoPE module path and reviewed SHA256 required")
 	}
 	code, err := os.ReadFile(module)
@@ -43,7 +43,7 @@ func TestVulkanV41TailRoPEExactModuleABI(t *testing.T) {
 	}
 	rawModule := os.Getenv("FAK_V41_TAIL_ROPE_EXACT_WITNESS_RAW_MODULE")
 	rawExpected := os.Getenv("FAK_V41_TAIL_ROPE_EXACT_WITNESS_RAW_MODULE_SHA256")
-	if !filepath.IsAbs(rawModule) || rawModule == module || filepath.Base(rawModule) != "v41_tail_rope_qk.spv" || len(rawExpected) != 64 {
+	if !filepath.IsAbs(rawModule) || rawModule == module || filepath.Base(rawModule) != "v41_tail_rope_qk.spv" || len(rawExpected) != hex.EncodedLen(sha256.Size) {
 		t.Fatal("separately compiled ordinary tail module and reviewed SHA256 required")
 	}
 	rawCode, err := os.ReadFile(rawModule)
@@ -153,7 +153,7 @@ func TestVulkanV41TailRoPEExactModuleABI(t *testing.T) {
 	}
 	for name, edit := range map[string]func([]uint32) bool{
 		"local width": func(w []uint32) bool {
-			if w[0]&0xffff == 16 && len(w) == 6 && w[2] == 17 {
+			if w[0]&0xffff == 16 && len(w) == 6 && w[2] == 17 { //boundarylint:ignore CHANGE_DETECTOR_TEST SPIR-V OpExecutionMode LocalSize has six words: opcode, entry point, mode, x, y, z.
 				w[3] = 128
 				return true
 			}
@@ -181,28 +181,28 @@ func TestVulkanV41TailRoPEExactModuleABI(t *testing.T) {
 			return false
 		},
 		"push head width offset": func(w []uint32) bool {
-			if w[0]&0xffff == 72 && len(w) == 5 && w[2] == 1 && w[3] == 35 && w[4] == 4 {
+			if w[0]&0xffff == 72 && len(w) == 5 && w[2] == 1 && w[3] == 35 && w[4] == 4 { //boundarylint:ignore CHANGE_DETECTOR_TEST SPIR-V OpMemberDecorate Offset has five words: opcode, target, member, decoration, offset.
 				w[4] = 8
 				return true
 			}
 			return false
 		},
 		"add instead of multiply": func(w []uint32) bool {
-			if w[0]&0xffff == 133 && len(w) == 5 {
+			if w[0]&0xffff == 133 && len(w) == 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST SPIR-V binary float arithmetic has five words: opcode, result type, result ID, left operand, right operand.
 				w[0] = w[0]&0xffff0000 | 129
 				return true
 			}
 			return false
 		},
 		"wrong product operand": func(w []uint32) bool {
-			if w[0]&0xffff == 133 && len(w) == 5 {
+			if w[0]&0xffff == 133 && len(w) == 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST SPIR-V binary float arithmetic has five words: opcode, result type, result ID, left operand, right operand.
 				w[4] = w[3]
 				return true
 			}
 			return false
 		},
 		"add instead of subtract": func(w []uint32) bool {
-			if w[0]&0xffff == 131 && len(w) == 5 {
+			if w[0]&0xffff == 131 && len(w) == 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST SPIR-V binary float arithmetic has five words: opcode, result type, result ID, left operand, right operand.
 				w[0] = w[0]&0xffff0000 | 129
 				return true
 			}
@@ -259,7 +259,7 @@ func TestVulkanV41TailRoPEExactModuleABI(t *testing.T) {
 		for i := 5; i < len(words); i += int(words[i] >> 16) {
 			w := words[i : i+int(words[i]>>16)]
 			op := w[0] & 0xffff
-			if len(w) == 5 && (op == 129 || op == 131 || op == 133) && float32Types[w[1]] {
+			if len(w) == 5 && (op == 129 || op == 131 || op == 133) && float32Types[w[1]] { //boundarylint:ignore CHANGE_DETECTOR_TEST SPIR-V binary float arithmetic has five words: opcode, result type, result ID, left operand, right operand.
 				id = w[2]
 				break
 			}
