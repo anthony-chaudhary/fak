@@ -40,6 +40,7 @@ func TestV41CompressedPublicationRoPEVulkan(t *testing.T) {
 		}
 		roles := m.v41AttentionRolesCached()
 		tails, exactLanes, calls := 0, 0, 0
+		var hostRounds int64
 		for l := 0; l < cfg.NumLayers; l++ {
 			plan, err := v41AttentionPlanFor(cfg, l, roles)
 			if err != nil {
@@ -65,19 +66,27 @@ func TestV41CompressedPublicationRoPEVulkan(t *testing.T) {
 					if !withKey {
 						wantK = nil
 					}
-					if err := m.v41CompressedPublicationRoPE(l, pos, wantL, wantK); err != nil {
+					var err error
+					hostRounds += v41BF16PublishHostRounds(t, func() { err = m.v41CompressedPublicationRoPE(l, pos, wantL, wantK) })
+					if err != nil {
 						t.Fatal(err)
 					}
 					gotL, gotK := append([]float32(nil), latent...), append([]float32(nil), key...)
 					if !withKey {
 						gotK = nil
 					}
-					n := v41SeamDispatches(t, be, func() { err = m.v41CompressedPublicationRoPEWithDevice(l, pos, gotL, gotK, rotate) })
+					var n uint64
+					rounds := v41BF16PublishHostRounds(t, func() {
+						n = v41SeamDispatches(t, be, func() { err = m.v41CompressedPublicationRoPEWithDevice(l, pos, gotL, gotK, rotate) })
+					})
 					if err != nil {
 						t.Fatal(err)
 					}
 					if n == 0 {
 						t.Fatalf("layer %d pos %d key=%t device publication issued no native dispatch", l, pos, withKey)
+					}
+					if rounds != 0 {
+						t.Fatalf("layer %d pos %d key=%t device publication rounded %d tail values to BF16 on the host", l, pos, withKey, rounds)
 					}
 					calls++
 					v41TailRoPECheckBits(t, "latent publication", gotL, wantL)
@@ -94,7 +103,10 @@ func TestV41CompressedPublicationRoPEVulkan(t *testing.T) {
 		if calls == 0 {
 			t.Fatal("fixture has no compressed producer layer; the seam witness would be vacuous")
 		}
-		t.Logf("V41_COMPRESSED_PUBLICATION_ROPE_SEAM calls=%d tail_lanes=%d bit_exact=%d device=%t", calls, tails, exactLanes, true)
+		if hostRounds != int64(tails) {
+			t.Fatalf("host arm rounded %d tail values, want %d; the zero-host-round witness would be vacuous", hostRounds, tails)
+		}
+		t.Logf("V41_COMPRESSED_PUBLICATION_ROPE_SEAM calls=%d tail_lanes=%d bit_exact=%d device=%t device_host_bf16_rounds=0 host_arm_bf16_rounds=%d", calls, tails, exactLanes, true, hostRounds)
 	})
 	t.Run("bits", func(t *testing.T) {
 		vectors := []struct {
@@ -145,12 +157,18 @@ func TestV41CompressedPublicationRoPEVulkan(t *testing.T) {
 					wantK = v41PublicationRoPEOracle(key, 2, cos, sin)
 				}
 				var err error
-				n := v41SeamDispatches(t, be, func() { err = m.v41CompressedPublicationRoPEWithDevice(0, v.pos, latent, key, rotate) })
+				var n uint64
+				rounds := v41BF16PublishHostRounds(t, func() {
+					n = v41SeamDispatches(t, be, func() { err = m.v41CompressedPublicationRoPEWithDevice(0, v.pos, latent, key, rotate) })
+				})
 				if err != nil {
 					t.Fatalf("%s rows=%d: %v", v.name, rows, err)
 				}
 				if n == 0 {
 					t.Fatalf("%s rows=%d issued no native dispatch", v.name, rows)
+				}
+				if rounds != 0 {
+					t.Fatalf("%s rows=%d rounded %d tail values to BF16 on the host", v.name, rows, rounds)
 				}
 				v41TailRoPECheckBits(t, v.name+" latent", latent, wantL)
 				v41TailRoPECheckBits(t, v.name+" index", key, wantK)
@@ -158,7 +176,7 @@ func TestV41CompressedPublicationRoPEVulkan(t *testing.T) {
 				lanes += 2 * rows
 			}
 		}
-		t.Logf("V41_COMPRESSED_PUBLICATION_ROPE_BITS vectors=%d rows=1,2 tail_lanes=%d bit_exact=%d", len(vectors), lanes, lanes)
+		t.Logf("V41_COMPRESSED_PUBLICATION_ROPE_BITS vectors=%d rows=1,2 tail_lanes=%d bit_exact=%d host_bf16_rounds=0", len(vectors), lanes, lanes)
 	})
 	t.Run("default-session", func(t *testing.T) {
 		v41SeamGreedy(t, "compressed-publication-rope", func() *Model { return v41IndexerTestFixture(t) }, be, func(st *v41ForwardState) *int {
