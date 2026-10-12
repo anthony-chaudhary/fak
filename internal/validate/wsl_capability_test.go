@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -135,11 +137,11 @@ func stubValidateWSLCapabilityCommands(t *testing.T, identity, missing string) *
 	checkRuns := 0
 	validateWSLLookPath = func(string) (string, error) { return `C:\Windows\System32\wsl.exe`, nil }
 	validateWSLCommand = func(_ context.Context, args ...string) ([]byte, error) {
-		if len(args) < 3 || args[0] != "bash" || args[1] != "-lc" {
+		if len(args) != 4 || args[0] != "-e" || args[1] != "bash" || args[2] != "-lc" {
 			return nil, fmt.Errorf("unexpected WSL capability command: %v", args)
 		}
-		if !strings.Contains(args[2], validateWSLDistroPrefix) || !strings.Contains(args[2], validateWSLPathPrefix) {
-			return nil, fmt.Errorf("capability script omits identity protocol: %s", args[2])
+		if !strings.Contains(args[3], validateWSLDistroPrefix) || !strings.Contains(args[3], validateWSLPathPrefix) {
+			return nil, fmt.Errorf("capability script omits identity protocol: %s", args[3])
 		}
 		checkRuns++
 		parts := strings.SplitN(identity, "\n", 2)
@@ -292,5 +294,68 @@ func TestValidateWSLCapabilityPreflightStaysTypedWhenEveryAttemptTimesOut(t *tes
 	}
 	if len(*bounds) != 2 {
 		t.Fatalf("probe attempts = %d, want 2", len(*bounds))
+	}
+}
+
+func TestValidateWSLCapabilityPreflightRecordsProbePhaseTiming(t *testing.T) {
+	stubValidateWSLCapabilityCommands(t, "Ubuntu-24.04\n/usr/bin", validateWSLCheckUSPrefix+"137000\n")
+	clock := time.Unix(0, 0)
+	oldNow := validateNow
+	validateNow = func() time.Time { clock = clock.Add(400 * time.Millisecond); return clock }
+	t.Cleanup(func() { validateNow = oldNow })
+
+	verdict := preflightValidateWSLCapabilitiesWithin(context.Background())
+	if verdict.Status != "ready" || len(verdict.Missing) != 0 {
+		t.Fatalf("verdict = status %q missing %v, want ready with the timing line not read as a missing command", verdict.Status, verdict.Missing)
+	}
+	want := validateWSLProbeAttempt{BoundMS: validateWSLPreflightTimeout.Milliseconds(), ElapsedMS: 400, LaunchMS: 263, CheckMS: 137, Outcome: validateWSLProbeOK}
+	if len(verdict.Attempts) != 1 || verdict.Attempts[0] != want {
+		t.Fatalf("attempts = %+v, want [%+v]", verdict.Attempts, want)
+	}
+}
+
+func TestValidateWSLCapabilityPreflightTypesEachAttemptOutcome(t *testing.T) {
+	t.Setenv(validateWSLPreflightTimeoutEnv, "10ms")
+	stubValidateWSLProbeTimeouts(t, 2)
+
+	verdict := preflightValidateWSLCapabilitiesWithin(context.Background())
+	if len(verdict.Attempts) != 2 {
+		t.Fatalf("attempts = %+v, want 2", verdict.Attempts)
+	}
+	for i, wantBound := range []int64{10, 30} {
+		if got := verdict.Attempts[i]; got.Outcome != validateWSLProbeTimeout || got.BoundMS != wantBound {
+			t.Fatalf("attempt %d = %+v, want outcome %q bound %dms", i, got, validateWSLProbeTimeout, wantBound)
+		}
+	}
+}
+
+func TestValidateWSLCapabilityScriptReportsCheckTimeUnderRealWSL(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("WSL is Windows-only")
+	}
+	if _, err := exec.LookPath("wsl.exe"); err != nil {
+		t.Skip("wsl.exe unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	out, err := runValidateWSLCapabilityCommand(ctx, "-e", "bash", "-lc", validateWSLCapabilityScript([]string{"bash"}))
+	if err != nil {
+		t.Skipf("WSL not runnable here: %v", err)
+	}
+	_, rest, err := parseValidateWSLCapabilityOutput(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var missing, timing []string
+	for _, line := range strings.Split(strings.TrimSpace(string(rest)), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, validateWSLCheckUSPrefix) {
+			timing = append(timing, line)
+		} else if line != "" {
+			missing = append(missing, line)
+		}
+	}
+	if len(missing) != 0 || len(timing) != 1 {
+		t.Fatalf("probe output missing=%v timing=%v, want no missing command and one timing line", missing, timing)
 	}
 }

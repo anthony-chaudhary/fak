@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -77,6 +78,23 @@ type validateWSLCapabilityVerdict struct {
 	Missing  []string `json:"missing"`
 	Detail   string   `json:"detail,omitempty"`
 	Cached   bool     `json:"cached"`
+	// Attempts records each probe's bound and wall time; LaunchMS (wsl.exe
+	// launch plus login profile) and CheckMS (in-distro command checks) split it.
+	Attempts []validateWSLProbeAttempt `json:"attempts,omitempty"`
+}
+
+const (
+	validateWSLProbeOK      = "ok"
+	validateWSLProbeTimeout = "timeout"
+	validateWSLProbeError   = "error"
+)
+
+type validateWSLProbeAttempt struct {
+	BoundMS   int64  `json:"bound_ms"`
+	ElapsedMS int64  `json:"elapsed_ms"`
+	LaunchMS  int64  `json:"launch_ms,omitempty"`
+	CheckMS   int64  `json:"check_ms,omitempty"`
+	Outcome   string `json:"outcome"`
 }
 
 type validateResult struct {
@@ -870,6 +888,7 @@ func preflightValidateWSLCapabilitiesWithin(ctx context.Context) validateWSLCapa
 			cached.Cached = true
 			cached.Required = append([]string(nil), cached.Required...)
 			cached.Missing = append([]string(nil), cached.Missing...)
+			cached.Attempts = append([]validateWSLProbeAttempt(nil), cached.Attempts...)
 			return cached
 		}
 	}
@@ -880,9 +899,21 @@ func preflightValidateWSLCapabilitiesWithin(ctx context.Context) validateWSLCapa
 	timedOut := false
 	for _, bound := range bounds {
 		probeCtx, cancel := context.WithTimeout(ctx, bound)
-		out, err = validateWSLCommand(probeCtx, "bash", "-lc", validateWSLCapabilityScript(required))
+		started := validateNow()
+		// -e execs bash directly; without it wsl.exe re-parses the command line
+		// through the distro's default shell, which measured 5-20s per probe
+		// against under 1.5s for -e on the same host.
+		out, err = validateWSLCommand(probeCtx, "-e", "bash", "-lc", validateWSLCapabilityScript(required))
+		attempt := validateWSLProbeAttempt{BoundMS: bound.Milliseconds(), ElapsedMS: validateNow().Sub(started).Milliseconds(), Outcome: validateWSLProbeOK}
 		timedOut = err != nil && errors.Is(probeCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 		cancel()
+		switch {
+		case timedOut:
+			attempt.Outcome = validateWSLProbeTimeout
+		case err != nil:
+			attempt.Outcome = validateWSLProbeError
+		}
+		verdict.Attempts = append(verdict.Attempts, attempt)
 		if !timedOut {
 			break
 		}
@@ -909,6 +940,14 @@ func preflightValidateWSLCapabilitiesWithin(ctx context.Context) validateWSLCapa
 	cacheKey := wslPath + "\x00" + identityKey
 	seen := make(map[string]bool)
 	for _, line := range strings.Split(string(missingOut), "\n") {
+		if raw, ok := strings.CutPrefix(strings.TrimSpace(line), validateWSLCheckUSPrefix); ok {
+			if us, err := strconv.ParseInt(raw, 10, 64); err == nil && us >= 0 {
+				last := &verdict.Attempts[len(verdict.Attempts)-1]
+				last.CheckMS = us / 1000
+				last.LaunchMS = max(last.ElapsedMS-last.CheckMS, 0)
+			}
+			continue
+		}
 		if command := strings.TrimSpace(line); command != "" && !seen[command] {
 			seen[command] = true
 			verdict.Missing = append(verdict.Missing, command)
@@ -927,8 +966,9 @@ func preflightValidateWSLCapabilitiesWithin(ctx context.Context) validateWSLCapa
 }
 
 const (
-	validateWSLDistroPrefix = "__FAK_VALIDATE_DISTRO__="
-	validateWSLPathPrefix   = "__FAK_VALIDATE_PATH__="
+	validateWSLDistroPrefix  = "__FAK_VALIDATE_DISTRO__="
+	validateWSLPathPrefix    = "__FAK_VALIDATE_PATH__="
+	validateWSLCheckUSPrefix = "__FAK_VALIDATE_CHECK_US__="
 )
 
 func parseValidateWSLCapabilityOutput(out []byte) (identity, missing []byte, err error) {
@@ -963,9 +1003,10 @@ func validateWSLCapabilityScript(required []string) string {
 			checked = append(checked, posixQuote(command))
 		}
 	}
-	return "set -u; printf '" + validateWSLDistroPrefix + "%s\\n" + validateWSLPathPrefix + "%s\\n' \"${WSL_DISTRO_NAME:-unknown}\" \"${PATH:-}\"; " +
+	return "set -u; t0=${EPOCHREALTIME:-}; printf '" + validateWSLDistroPrefix + "%s\\n" + validateWSLPathPrefix + "%s\\n' \"${WSL_DISTRO_NAME:-unknown}\" \"${PATH:-}\"; " +
 		"for cmd in " + strings.Join(checked, " ") + "; do " +
-		"command -v \"$cmd\" >/dev/null 2>&1 || printf '%s\\n' \"$cmd\"; done"
+		"command -v \"$cmd\" >/dev/null 2>&1 || printf '%s\\n' \"$cmd\"; done; " +
+		"t1=${EPOCHREALTIME:-}; if [ -n \"$t0\" ] && [ -n \"$t1\" ]; then printf '" + validateWSLCheckUSPrefix + "%s\\n' \"$(( 10#${t1//[.,]/} - 10#${t0//[.,]/} ))\"; fi"
 }
 
 func runValidateTestsWithin(ctx context.Context, repo, dir, tip string, args []string, wsl bool) (string, bool) {
