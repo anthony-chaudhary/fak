@@ -165,18 +165,6 @@ func v41MHCWitnessRow(n, salt int) []float32 {
 	return out
 }
 
-func v41MHCRequireBits(t *testing.T, name string, got, want []float32) {
-	t.Helper()
-	if len(got) != len(want) {
-		t.Fatalf("%s: got %d values want %d", name, len(got), len(want))
-	}
-	for i := range want {
-		if got[i] != want[i] && math.Float32bits(got[i]) != math.Float32bits(want[i]) {
-			t.Fatalf("%s[%d]: got %g (%#08x) want %g (%#08x)", name, i, got[i], math.Float32bits(got[i]), want[i], math.Float32bits(want[i]))
-		}
-	}
-}
-
 func v41MHCRequireULP(t *testing.T, name string, got, want []float32, bound int64) (int64, int) {
 	t.Helper()
 	if len(got) != len(want) {
