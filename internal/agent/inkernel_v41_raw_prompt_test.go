@@ -114,7 +114,7 @@ func TestV41ChatPromptUsesDeepSeekTemplateIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []int{0, 128803, 671, 7658, 7380, 362, 8495, 344, 128804, 128822}
-	if !reflect.DeepEqual(chat.TokenIDs, want) || chat.RendererID != "deepseek41-chat-nothink-v1" {
-		t.Fatalf("V4.1 chat prompt = %s %v, want deepseek41-chat-nothink-v1 %v", chat.RendererID, chat.TokenIDs, want)
+	if !reflect.DeepEqual(chat.TokenIDs, want) || chat.RendererID != "deepseek41-chat-nothink-v2" {
+		t.Fatalf("V4.1 chat prompt = %s %v, want deepseek41-chat-nothink-v2 %v", chat.RendererID, chat.TokenIDs, want)
 	}
 }

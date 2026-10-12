@@ -38,7 +38,7 @@ func TestRenderDeepSeekV41ChatMultiTurn(t *testing.T) {
 		{Role: RoleUser, Content: "U1"},
 		{Role: RoleAssistant, Content: "A1"},
 		{Role: RoleUser, Content: "U2"},
-	})
+	}, nil, nil)
 	want := deepSeekV41BOS + "S" + deepSeekV41User + "U1" + deepSeekV41Assistant + "</think>A1" + deepSeekV41EOS +
 		deepSeekV41User + "U2" + deepSeekV41Assistant + "</think>"
 	if got != want {

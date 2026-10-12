@@ -1,0 +1,47 @@
+<｜begin▁of▁sentence｜>You are terse.
+
+Use metric units.
+
+## Tools
+
+You have access to a set of tools to help answer the user's question. You can invoke tools by writing a "<｜DSML｜tool_calls>" block like the following:
+
+<｜DSML｜tool_calls>
+<｜DSML｜invoke name="$TOOL_NAME">
+<｜DSML｜parameter name="$PARAMETER_NAME" string="true|false">$PARAMETER_VALUE</｜DSML｜parameter>
+...
+</｜DSML｜invoke>
+<｜DSML｜invoke name="$TOOL_NAME2">
+...
+</｜DSML｜invoke>
+</｜DSML｜tool_calls>
+
+String parameters should be specified as is and set `string="true"`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set `string="false"`.
+
+If thinking_mode is enabled (triggered by <think>), you MUST output your complete reasoning inside <think>...</think> BEFORE any tool calls or final response.
+
+Otherwise, output directly after </think> with tool calls or final response.
+
+### Available Tool Schemas
+
+{"name": "get_weather", "description": "Get the weather <now>", "parameters": {"type": "object", "properties": {"city": {"type": "string"}, "days": {"type": "integer"}}, "required": ["city"]}}
+
+You MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.
+
+
+## Response Format:
+
+You MUST strictly adhere to the following schema to reply:
+{"type": "json_schema", "json_schema": {"name": "w", "schema": {"type": "object"}}}<｜User｜>Weather in Paris?<｜Assistant｜></think>
+
+<｜DSML｜tool_calls>
+<｜DSML｜invoke name="get_weather">
+<｜DSML｜parameter name="city" string="true">Paris</｜DSML｜parameter>
+<｜DSML｜parameter name="days" string="false">3</｜DSML｜parameter>
+<｜DSML｜parameter name="opts" string="false">{"units": ["c", "k"], "ok": true}</｜DSML｜parameter>
+</｜DSML｜invoke>
+</｜DSML｜tool_calls><｜end▁of▁sentence｜><｜User｜><tool_result>{"temp": 18}</tool_result>
+
+<tool_result>cloudy</tool_result>
+
+And tomorrow?<｜Assistant｜></think>Rain, 15 C.<｜end▁of▁sentence｜><｜User｜>Thanks — ünïcode ok?<｜Assistant｜></think>
