@@ -251,6 +251,14 @@ type ExpertCheckpointTier struct {
 	loading   map[polymodel.ModelID]*expertCheckpointLoad
 	coalesced int
 
+	// ready holds prefetched projections no demand fault has consumed yet. Each entry is
+	// handed out once, and entries left from an older Prefetch generation are dropped.
+	ready         map[polymodel.ModelID]expertCheckpointReady
+	readyGen      uint64
+	prefetched    int
+	prefetchHits  int
+	prefetchStale int
+
 	reads     int
 	hits      int
 	evictions int
@@ -268,9 +276,15 @@ type ExpertCheckpointTier struct {
 // Loading ownership and complete-only publication adapt JigSawPT/llama.cpp's
 // host-tier contract; the pinned source and MIT notice are in THIRD_PARTY_NOTICES.md.
 type expertCheckpointLoad struct {
-	done   chan struct{}
+	done    chan struct{}
+	weight  expertWeight
+	err     error
+	waiters int
+}
+
+type expertCheckpointReady struct {
 	weight expertWeight
-	err    error
+	gen    uint64
 }
 
 var ErrExpertCheckpointLoadAborted = errors.New("model: expert checkpoint load owner aborted")
@@ -640,8 +654,15 @@ func (t *ExpertCheckpointTier) fault(name string) (w expertWeight, err error) {
 		t.mu.Unlock()
 		return w, nil
 	}
+	if r, ok := t.ready[id]; ok {
+		delete(t.ready, id)
+		t.prefetchHits++
+		t.mu.Unlock()
+		return r.weight, nil
+	}
 	if load := t.loading[id]; load != nil {
 		t.coalesced++
+		load.waiters++
 		t.mu.Unlock()
 		<-load.done
 		return load.weight, load.err
@@ -669,6 +690,79 @@ func (t *ExpertCheckpointTier) fault(name string) (w expertWeight, err error) {
 	w, err = t.faultOwned(name, id, entry, src, overlay)
 	completed = true
 	return w, err
+}
+
+// Prefetch starts one concurrent read for each named projection that is indexed, not retained,
+// not in flight and not already prefetched, and returns how many it started. A page-in at queue
+// depth one leaves the NVMe mostly idle; reading a layer's misses together keeps several requests
+// outstanding. A read that a demand fault joined is handed to it through the in-flight load; one
+// that finishes first waits in ready for the next fault of that name. Ready entries from the
+// previous generation are dropped, so at most two layers' prefetches are held.
+func (t *ExpertCheckpointTier) Prefetch(names []string) int {
+	if t == nil || len(names) == 0 {
+		return 0
+	}
+	type job struct {
+		name    string
+		id      polymodel.ModelID
+		entry   expertCheckpointEntry
+		src     *ggufExpertSource
+		overlay *ExpertSparseOverlay
+		load    *expertCheckpointLoad
+	}
+	t.mu.Lock()
+	t.readyGen++
+	for id, r := range t.ready {
+		if r.gen+1 < t.readyGen {
+			delete(t.ready, id)
+			t.prefetchStale++
+		}
+	}
+	jobs := make([]job, 0, len(names))
+	for _, name := range names {
+		id := polymodel.ModelID(name)
+		entry, indexed := t.index[name]
+		if !indexed {
+			continue
+		}
+		if _, live := t.host[id]; live {
+			continue
+		}
+		if _, ok := t.ready[id]; ok {
+			continue
+		}
+		if t.loading[id] != nil {
+			continue
+		}
+		if t.loading == nil {
+			t.loading = make(map[polymodel.ModelID]*expertCheckpointLoad)
+		}
+		load := &expertCheckpointLoad{done: make(chan struct{})}
+		t.loading[id] = load
+		jobs = append(jobs, job{name: name, id: id, entry: entry, src: t.shards[entry.shard], overlay: t.overlays[entry.fused], load: load})
+	}
+	gen := t.readyGen
+	t.prefetched += len(jobs)
+	t.mu.Unlock()
+	for _, j := range jobs {
+		go func() {
+			w, err := t.faultOwned(j.name, j.id, j.entry, j.src, j.overlay)
+			t.mu.Lock()
+			defer t.mu.Unlock()
+			j.load.weight, j.load.err = w, err
+			delete(t.loading, j.id)
+			if err == nil && j.load.waiters == 0 {
+				if _, live := t.host[j.id]; !live {
+					if t.ready == nil {
+						t.ready = make(map[polymodel.ModelID]expertCheckpointReady)
+					}
+					t.ready[j.id] = expertCheckpointReady{weight: w, gen: gen}
+				}
+			}
+			close(j.load.done)
+		}()
+	}
+	return len(jobs)
 }
 
 func (t *ExpertCheckpointTier) faultOwned(name string, id polymodel.ModelID, entry expertCheckpointEntry, src *ggufExpertSource, overlay *ExpertSparseOverlay) (expertWeight, error) {
@@ -738,7 +832,12 @@ type ExpertCheckpointStats struct {
 	Hits      int   `json:"hits"`
 	// Coalesced counts callers that shared an in-flight fault, separately from retained hits.
 	Coalesced int `json:"coalesced"`
-	Evictions int `json:"evictions"`
+	// Prefetched counts reads Prefetch started, PrefetchHits demand faults served from their
+	// handoff, PrefetchStale handoffs dropped unconsumed.
+	Prefetched    int `json:"prefetched"`
+	PrefetchHits  int `json:"prefetch_hits"`
+	PrefetchStale int `json:"prefetch_stale"`
+	Evictions     int `json:"evictions"`
 	// OverlayRows/OverlayBytesRead are the per-rank sparse-overlay ledger (#13030): how many faults
 	// were served from a registered overlay's copied rows, and the row bytes those faults moved.
 	// A fault outside every registered overlay falls through to the dense stride and is counted in
@@ -779,6 +878,9 @@ func (t *ExpertCheckpointTier) Stats() ExpertCheckpointStats {
 		BytesRead:     t.bytesRead,
 		Hits:          t.hits,
 		Coalesced:     t.coalesced,
+		Prefetched:    t.prefetched,
+		PrefetchHits:  t.prefetchHits,
+		PrefetchStale: t.prefetchStale,
 		Evictions:     t.evictions,
 		BudgetBytes:   t.pool.Budget(),
 		ResidentBytes: t.pool.Used(),
