@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# .githooks/commit-msg: Test-Lifecycle gate for public fak.
+#
+# A commit that deletes a test, drops its assertions or table cases, loosens a
+# numeric bound, or adds a skip must declare why with a Test-Retired: /
+# Test-Weakened: trailer from the closed reason vocabulary. The gate is the
+# companion's fak-testlint (one tool, one vocabulary for both repositories);
+# this hook only hands it this repository's index and the proposed message.
+#
+# Exit 1 blocks only when the tool says REFUSED; any other failure (no
+# companion, no fak-run, a build error) fails open with an advisory, so a broken
+# checker never wedges every commit in the clone.
+
+set -uo pipefail
+
+top="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+abspath() {
+    case "$1" in
+        /* | [A-Za-z]:*) printf '%s' "$1" ;;
+        *) printf '%s/%s' "$top" "$1" ;;
+    esac
+}
+msgfile="$(abspath "$1")"
+index="$(abspath "${GIT_INDEX_FILE:-$(git rev-parse --git-path index)}")"
+
+companion=""
+case "${FAK_PRIVATE_ROOT:-}" in
+    none | off | disable) ;;
+    "") [ -d "$top/../fak-private" ] && companion="$top/../fak-private" ;;
+    *) [ -d "$FAK_PRIVATE_ROOT" ] && companion="$FAK_PRIVATE_ROOT" ;;
+esac
+if [ -z "$companion" ]; then
+    exit 0
+fi
+if ! command -v fak-run >/dev/null 2>&1; then
+    echo "⚠️  ADVISORY: fak-run not on PATH; test-lifecycle gate skipped." >&2
+    exit 0
+fi
+
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_PREFIX || true
+echo "🛡️  Running Test-Lifecycle Check (a deleted or weakened test must be declared)..."
+out=$( (cd "$companion" && fak-run fak-testlint lifecycle --staged --root "$top" --index-file "$index" --msg-file "$msgfile") 2>&1 )
+rc=$?
+[ -n "$out" ] && printf '%s\n' "$out" >&2
+if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'fak-testlint lifecycle: REFUSED'; then
+    exit 1
+elif [ "$rc" -ne 0 ]; then
+    echo "⚠️  ADVISORY: test-lifecycle gate unavailable (exit $rc); committing anyway." >&2
+fi
+exit 0
