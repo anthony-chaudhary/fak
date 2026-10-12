@@ -353,7 +353,7 @@ func TestLiveGitGatherIsWellFormed(t *testing.T) {
 	if len(commits) == 0 {
 		t.Fatalf("live gather returned no commits")
 	}
-	withLeaf, withRefs := 0, 0
+	withLeaf := 0
 	for _, c := range commits {
 		if c.SHA == "" || c.When.IsZero() || c.Subject == "" {
 			t.Fatalf("live commit missing a required field: %+v", c)
@@ -365,7 +365,6 @@ func TestLiveGitGatherIsWellFormed(t *testing.T) {
 			if n <= 0 || n >= ForeignRefFloor {
 				t.Fatalf("commit %s yielded an out-of-range ref %d", c.SHA, n)
 			}
-			withRefs++
 		}
 	}
 	// The repo mandates the `(fak <leaf>)` trailer, so a run that parsed zero
@@ -373,9 +372,8 @@ func TestLiveGitGatherIsWellFormed(t *testing.T) {
 	if withLeaf == 0 {
 		t.Fatalf("parsed 0 leaf trailers from %d live commits — leafRE has drifted", len(commits))
 	}
-	if withRefs == 0 {
-		t.Fatalf("parsed 0 issue refs from %d live commits — issueRefRE has drifted", len(commits))
-	}
+	// Recent history may contain no issue references. Subject and body parsing
+	// are covered by TestGatherCommitsParsesRealGitOutput's controlled history.
 
 	tree, err := GatherTree(ctx, root, time.Now())
 	if err != nil {
