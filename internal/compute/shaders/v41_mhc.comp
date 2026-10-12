@@ -11,7 +11,8 @@ layout(local_size_x = 64) in;
 // mode 3 post:    A=x[rows,H] B=streams[rows,4,H] C=coeffs[rows,24] -> Out[rows,4,H]
 // mode 4 rms-split: A=raw mixes[rows,24] B=streams[rows,4,H] C=scale[3]|base[24]
 //                   -> Out=coeffs[rows,24]; mixes are first scaled by the flattened
-//                   streams' 1/sqrt(mean(x^2)+rmsEps), summed serially as the host does.
+//                   streams' 1/sqrt(mean(x^2)+rmsEps), summed serially as the host does;
+//                   dispatched as one workgroup per row.
 // coeffs rows are pre[4] | post[4] | comb[16] (comb row-major [src,dst]).
 layout(std430, binding = 0) readonly buffer ABuf { float A[]; };
 layout(std430, binding = 1) readonly buffer BBuf { float B[]; };
@@ -171,17 +172,39 @@ float rsqrtF32(float x) {
     return r;
 }
 
-void rmsSplit(uint row) {
-    if (row >= uint(pc.rows)) return;
+// One workgroup per row. The 64 lanes stage the squares of a chunk into shared
+// memory with coalesced loads; lane 0 then adds them in index order, so the sum
+// stays the host's serial F32 ss += v*v bit for bit.
+const uint RMS_CHUNK = 2048u;
+shared vec4 Sq[RMS_CHUNK / 4u];
+
+void rmsSplit(uint row, uint lid) {
     uint m = row * 24u;
     uint width = 4u * uint(pc.hidden);
     uint s = row * width;
-    // Serial F32 sum in index order: bit-identical to the host's ss += v*v.
     precise float ss = 0.0;
-    for (uint k = 0u; k < width; ++k) {
-        precise float sq = B[s + k] * B[s + k];
-        ss = ss + sq;
+    for (uint base = 0u; base < width; base += RMS_CHUNK) {
+        uint n = min(RMS_CHUNK, width - base);
+        for (uint j = lid; j < n; j += 64u) {
+            uint k = base + j;
+            precise float sq = B[s + k] * B[s + k];
+            Sq[j >> 2u][j & 3u] = sq;
+        }
+        barrier();
+        if (lid == 0u) {
+            uint j = 0u;
+            for (; j + 16u <= n; j += 16u) {
+                vec4 a = Sq[j >> 2u], b = Sq[(j >> 2u) + 1u], c = Sq[(j >> 2u) + 2u], e = Sq[(j >> 2u) + 3u];
+                ss = ss + a.x; ss = ss + a.y; ss = ss + a.z; ss = ss + a.w;
+                ss = ss + b.x; ss = ss + b.y; ss = ss + b.z; ss = ss + b.w;
+                ss = ss + c.x; ss = ss + c.y; ss = ss + c.z; ss = ss + c.w;
+                ss = ss + e.x; ss = ss + e.y; ss = ss + e.z; ss = ss + e.w;
+            }
+            for (; j < n; ++j) ss = ss + Sq[j >> 2u][j & 3u];
+        }
+        barrier();
     }
+    if (lid != 0u) return;
     precise float mean = divRN(ss, float(width));
     precise float arg = mean + pc.rmsEps;
     float r = rsqrtF32(arg);
@@ -239,5 +262,5 @@ void main() {
     else if (pc.mode == 1) split(i);
     else if (pc.mode == 2) preCollapse(i);
     else if (pc.mode == 3) postMix(i);
-    else if (pc.mode == 4) rmsSplit(i);
+    else if (pc.mode == 4 && gl_WorkGroupID.x < uint(pc.rows)) rmsSplit(gl_WorkGroupID.x, gl_LocalInvocationID.x);
 }

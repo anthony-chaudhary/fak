@@ -25,7 +25,72 @@ layout(push_constant) uniform Push { int outDim; int inDim; int P; } pc;
 const uint SHARED_CAP = 1024u;
 shared float Xs[SHARED_CAP];
 
+// Decode (P < 0 marks one row): every SHARED_CAP chunk's serial partial runs on
+// its own lane, and the lane holding chunk 0 adds the partials in chunk order onto
+// 0.0. That is the exact operation sequence of the staged path below, so the
+// outputs are bit-identical while the work spreads over ceil(out / (256 / chunks))
+// workgroups instead of one.
+shared float Part[256];
+
+void decodeChunks() {
+    uint tid = gl_LocalInvocationID.x;
+    uint in_ = uint(pc.inDim);
+    uint out_ = uint(pc.outDim);
+    uint chunks = (in_ + SHARED_CAP - 1u) / SHARED_CAP;
+    uint perGroup = 256u / chunks;
+    uint local = tid / chunks;
+    uint c = tid - local * chunks;
+    uint o = gl_WorkGroupID.x * perGroup + local;
+    bool live = local < perGroup && o < out_;
+    if (live) {
+        uint c0 = c * SHARED_CAP;
+        uint clen = min(SHARED_CAP, in_ - c0);
+        uint wbase = o * in_ + c0;
+        float acc = 0.0;
+        uint i = 0u;
+        // All sixteen loads issue before the in-order accumulation.
+        for (; i + 16u <= clen; i += 16u) {
+            float w0 = W[wbase + i + 0u], w1 = W[wbase + i + 1u], w2 = W[wbase + i + 2u], w3 = W[wbase + i + 3u];
+            float w4 = W[wbase + i + 4u], w5 = W[wbase + i + 5u], w6 = W[wbase + i + 6u], w7 = W[wbase + i + 7u];
+            float w8 = W[wbase + i + 8u], w9 = W[wbase + i + 9u], w10 = W[wbase + i + 10u], w11 = W[wbase + i + 11u];
+            float w12 = W[wbase + i + 12u], w13 = W[wbase + i + 13u], w14 = W[wbase + i + 14u], w15 = W[wbase + i + 15u];
+            float x0 = X[c0 + i + 0u], x1 = X[c0 + i + 1u], x2 = X[c0 + i + 2u], x3 = X[c0 + i + 3u];
+            float x4 = X[c0 + i + 4u], x5 = X[c0 + i + 5u], x6 = X[c0 + i + 6u], x7 = X[c0 + i + 7u];
+            float x8 = X[c0 + i + 8u], x9 = X[c0 + i + 9u], x10 = X[c0 + i + 10u], x11 = X[c0 + i + 11u];
+            float x12 = X[c0 + i + 12u], x13 = X[c0 + i + 13u], x14 = X[c0 + i + 14u], x15 = X[c0 + i + 15u];
+            acc += w0 * x0;
+            acc += w1 * x1;
+            acc += w2 * x2;
+            acc += w3 * x3;
+            acc += w4 * x4;
+            acc += w5 * x5;
+            acc += w6 * x6;
+            acc += w7 * x7;
+            acc += w8 * x8;
+            acc += w9 * x9;
+            acc += w10 * x10;
+            acc += w11 * x11;
+            acc += w12 * x12;
+            acc += w13 * x13;
+            acc += w14 * x14;
+            acc += w15 * x15;
+        }
+        for (; i < clen; ++i) acc += W[wbase + i] * X[c0 + i];
+        Part[tid] = acc;
+    }
+    barrier();
+    if (live && c == 0u) {
+        float y = 0.0;
+        for (uint k = 0u; k < chunks; ++k) y += Part[tid + k];
+        Y[o] = y;
+    }
+}
+
 void main() {
+    if (pc.P < 0) {
+        decodeChunks();
+        return;
+    }
     uint t = gl_WorkGroupID.x;
     if (t >= uint(pc.P)) return;
     uint tid = gl_LocalInvocationID.x;

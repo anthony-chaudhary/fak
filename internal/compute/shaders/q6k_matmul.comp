@@ -36,7 +36,90 @@ float halfAt(uint offset) {
     return unpackHalf2x16(bits).x;
 }
 
+// Decode (tokens < 0 marks one token): the workgroup's 64 rows stage each
+// superblock's packed bytes and the token's 256 inputs in shared memory with
+// coalesced word loads, then every lane runs its row's unchanged serial sum
+// from there, reading four packed bytes per shared-memory word. The arithmetic
+// and its order equal the per-row path below.
+const uint ROW_WORDS = 53u;
+shared uint RawS[64u * ROW_WORDS + 1u];
+shared float XS[256];
+
+// Word i of the 210-byte superblock, re-aligned from its 0- or 2-byte lead.
+uint blockWord(uint rowBase, uint lead, uint i) {
+    uint lo = RawS[rowBase + i];
+    return lead == 0u ? lo : (lo >> 16u) | (RawS[rowBase + i + 1u] << 16u);
+}
+
+int signedByteOf(uint word, uint k) {
+    return bitfieldExtract(int(word), int(8u * k), 8);
+}
+
+void decodeRows() {
+    uint lid = gl_LocalInvocationID.x;
+    uint outDim = uint(pc.outDim);
+    uint row0 = gl_WorkGroupID.x * 64u;
+    uint row = row0 + lid;
+    bool live = row < outDim;
+    uint blocks = uint(pc.inDim) / 256u;
+    uint rowBase = lid * ROW_WORDS;
+    float sum = 0.0;
+    for (uint sb = 0u; sb < blocks; ++sb) {
+        if (lid < ROW_WORDS) {
+            for (uint r = 0u; r < 64u && row0 + r < outDim; ++r) {
+                uint start = ((row0 + r) * blocks + sb) * 210u;
+                RawS[r * ROW_WORDS + lid] = raw[(start >> 2u) + lid];
+            }
+        }
+        for (uint k = lid; k < 256u; k += 64u) XS[k] = x[sb * 256u + k];
+        barrier();
+        if (live) {
+            uint lead = ((row * blocks + sb) * 210u) & 3u;
+            float d = unpackHalf2x16(blockWord(rowBase, lead, 52u) & 0xffffu).x;
+            for (uint segment = 0u; segment < 2u; ++segment) {
+                uint qlW = segment * 16u;
+                uint qhW = 32u + segment * 8u;
+                uint sc0 = blockWord(rowBase, lead, 48u + segment * 2u);
+                uint sc1 = blockWord(rowBase, lead, 49u + segment * 2u);
+                uint valueBase = segment * 128u;
+                for (uint l4 = 0u; l4 < 8u; ++l4) {
+                    uint w0 = blockWord(rowBase, lead, qlW + l4);
+                    uint w1 = blockWord(rowBase, lead, qlW + 8u + l4);
+                    uint wh = blockWord(rowBase, lead, qhW + l4);
+                    uint scaleGroup = l4 / 4u;
+                    int s1 = signedByteOf(sc0, scaleGroup);
+                    int s2 = signedByteOf(sc0, scaleGroup + 2u);
+                    int s3 = signedByteOf(sc1, scaleGroup);
+                    int s4 = signedByteOf(sc1, scaleGroup + 2u);
+                    for (uint j = 0u; j < 4u; ++j) {
+                        uint lane = l4 * 4u + j;
+                        uint low0 = (w0 >> (8u * j)) & 255u;
+                        uint low1 = (w1 >> (8u * j)) & 255u;
+                        uint high = (wh >> (8u * j)) & 255u;
+
+                        int q1 = int((low0 & 15u) | (((high >> 0u) & 3u) << 4u)) - 32;
+                        int q2 = int((low1 & 15u) | (((high >> 2u) & 3u) << 4u)) - 32;
+                        int q3 = int((low0 >> 4u) | (((high >> 4u) & 3u) << 4u)) - 32;
+                        int q4 = int((low1 >> 4u) | (((high >> 6u) & 3u) << 4u)) - 32;
+
+                        sum += ((d * float(s1)) * float(q1)) * XS[valueBase + lane];
+                        sum += ((d * float(s2)) * float(q2)) * XS[valueBase + lane + 32u];
+                        sum += ((d * float(s3)) * float(q3)) * XS[valueBase + lane + 64u];
+                        sum += ((d * float(s4)) * float(q4)) * XS[valueBase + lane + 96u];
+                    }
+                }
+            }
+        }
+        barrier();
+    }
+    if (live) y[row] = sum;
+}
+
 void main() {
+    if (pc.tokens < 0) {
+        decodeRows();
+        return;
+    }
     uint globalIndex = gl_GlobalInvocationID.x;
     uint outDim = uint(pc.outDim);
     uint row = globalIndex % outDim;
