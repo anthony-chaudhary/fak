@@ -65,6 +65,15 @@ env:
   # without unbounded process pressure or changing the package/test set.
   GOMAXPROCS: "2"
   GOFLAGS: "-p=2"
+  # Live-tree ratchets grade the repository's current shape or history (god-file
+  # LOC caps, the enum-exhaustiveness floor, lane-tree taxonomy parity, generated
+  # verb-page freshness, live commit-subject parsing), not shipped behavior. Any
+  # unrelated landing can red them, which held every release for 7+ main runs on
+  # 2026-10-12. The decisive shards skip exactly these names; ci.yml's full
+  # `go test ./...` still runs them on every push. Receipts record the -skip argv
+  # and the verifier refuses any other value. The list is pinned, name by name, by
+  # internal/releasereadiness TestFastReleaseGateSkipsOnlyPinnedLiveTreeRatchets.
+  CI_FAST_ADVISORY_TESTS: "^(TestLiveTreeUnderCeiling|TestTreeEnumExhaustivenessNotGrowing|TestLiveInternalGoPackagesResolveToExplicitLaneTrees|TestCheckedInPageIsFresh|TestLiveGitGatherIsWellFormed)$"
 
 # These receipts bind checkout commits and reported job execution. They do not
 # seal generated/untracked files or external Go inputs, and grant no release
@@ -207,7 +216,7 @@ jobs:
             all_packages=$(jq -Rsc 'split("\n") | map(select(length > 0))' "$RUNNER_TEMP/ci-fast-packages.txt")
             jq '. + {FAK_REQUIRE_OPENAPI_VALIDATOR:"1"}' "$RUNNER_TEMP/ci-fast-environment.json" > "$RUNNER_TEMP/ci-fast-environment-complete.json"
             mv "$RUNNER_TEMP/ci-fast-environment-complete.json" "$RUNNER_TEMP/ci-fast-environment.json"
-            commands=$(jq -nc --argjson packages "$packages" '[["go","test","-timeout=20m"] + $packages]')
+            commands=$(jq -nc --arg skip "$CI_FAST_ADVISORY_TESTS" --argjson packages "$packages" '[["go","test","-timeout=20m","-skip",$skip] + $packages]')
             coverage=$(jq -nc --argjson packages "$packages" --argjson all_packages "$all_packages" --argjson index "$SHARD_INDEX" --argjson total "$SHARD_TOTAL" '{kind:"go-test-shard",shard_index:$index,shard_total:$total,packages:$packages,all_packages:$all_packages}')
           fi
           jq -n --arg job "$JOB_ID" --arg sha "$TESTED_SHA" --arg tree "$TESTED_TREE" \
@@ -326,7 +335,7 @@ jobs:
           status_file="$RUNNER_TEMP/ci-fast-go-test.status"
           (
             set +e
-            go test -timeout=20m "${shard_pkgs[@]}" 2>&1 | tee "$RUNNER_TEMP/ci-fast-go-test.log"
+            go test -timeout=20m -skip "$CI_FAST_ADVISORY_TESTS" "${shard_pkgs[@]}" 2>&1 | tee "$RUNNER_TEMP/ci-fast-go-test.log"
             printf '%s\n' "${PIPESTATUS[0]}" > "$status_file"
           ) &
           test_pid=$!
@@ -367,7 +376,7 @@ jobs:
             all_packages=$(jq -Rsc 'split("\n") | map(select(length > 0))' "$RUNNER_TEMP/ci-fast-packages.txt")
             jq '. + {FAK_REQUIRE_OPENAPI_VALIDATOR:"1"}' "$RUNNER_TEMP/ci-fast-environment.json" > "$RUNNER_TEMP/ci-fast-environment-complete.json"
             mv "$RUNNER_TEMP/ci-fast-environment-complete.json" "$RUNNER_TEMP/ci-fast-environment.json"
-            commands=$(jq -nc --argjson packages "$packages" '[["go","test","-timeout=20m"] + $packages]')
+            commands=$(jq -nc --arg skip "$CI_FAST_ADVISORY_TESTS" --argjson packages "$packages" '[["go","test","-timeout=20m","-skip",$skip] + $packages]')
             coverage=$(jq -nc --argjson packages "$packages" --argjson all_packages "$all_packages" --argjson index "$SHARD_INDEX" --argjson total "$SHARD_TOTAL" '{kind:"go-test-shard",shard_index:$index,shard_total:$total,packages:$packages,all_packages:$all_packages}')
           fi
           jq -n --arg job "$JOB_ID" --arg sha "$TESTED_SHA" --arg tree "$TESTED_TREE" \
@@ -443,7 +452,7 @@ jobs:
             qualified=$(jq -se --arg sha "$EXPECTED_SHA" --arg tree "$EXPECTED_TREE" \
               --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
               --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" \
-              --arg intent "$REQUESTED_INTENT" '
+              --arg intent "$REQUESTED_INTENT" --arg skip "$CI_FAST_ADVISORY_TESTS" '
               ([.[] | select(.job == "build-vet-fast")][0].environment) as $environment |
               ([.[] | select(.coverage.kind == "go-test-shard")][0].coverage.all_packages) as $all |
               ($sha | test("^[0-9a-f]{40}$")) and ($tree | test("^[0-9a-f]{40}$")) and
@@ -469,7 +478,7 @@ jobs:
                   ($c.shard_index | type == "number" and . >= 0 and . < 4 and . == floor) and
                   .job == ("go-test-shard-" + ($c.shard_index|tostring)) and $c.all_packages == $all and
                   $c.packages == [$all | to_entries[] | select(.key % 4 == $c.shard_index) | .value] and
-                  .commands == [["go","test","-timeout=20m"] + $c.packages])
+                  .commands == [["go","test","-timeout=20m","-skip",$skip] + $c.packages])
                 end))' "${files[@]}" || echo false)
           fi
           [[ "$qualified" == true ]] || qualified=false
