@@ -120,6 +120,7 @@ type validateResult struct {
 	Overlays         validateOverlayProgress        `json:"overlays"`
 	WSLPreflight     *validateWSLCapabilityVerdict  `json:"wsl_preflight,omitempty"`
 	StrixValidation  *amdgpu.StrixValidationReceipt `json:"strix_validation,omitempty"`
+	StrixReceipt     *hwReceiptAdmission            `json:"strix_receipt_admission,omitempty"`
 	Failures         []ciPreflightFailure           `json:"failures"`
 	SelectionAudit   *validateSelectionAudit        `json:"selection_audit,omitempty"`
 }
@@ -220,6 +221,7 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 	strixHost := fs.String("strix-host", "", "target hostname for AMD Strix Halo validation (default: strix1)")
 	subkernels := fs.String("subkernels", "", "sub-kernel functions to validate on Strix Halo (comma-separated, or 'all')")
 	ablate := fs.String("ablate", "", "ablation arms to evaluate on Strix Halo (comma-separated, or 'all')")
+	strixReceipt := fs.String("strix-receipt", "", "admit a fresh source-bound `fak-dev amd-strix-validate` receipt for this exact prospective tree instead of running hardware in-process (env "+hwReceiptEnv+")")
 	var mine pathList
 	fs.Var(&mine, "mine", "owned changed path to overlay (repeatable; files and directories accepted)")
 	positional, parseErr := interspersedflags.Parse(fs, argv)
@@ -412,7 +414,9 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 				return code
 			}
 		}
-		if shouldRunStrixValidation(*strix, paths) {
+		if receiptPath := hwReceiptPath(*strixReceipt); receiptPath != "" && shouldRunStrixValidation(*strix, paths) {
+			admitHWReceipt(ctx, &res, &recorder, r, receiptPath, paths)
+		} else if shouldRunStrixValidation(*strix, paths) {
 			if err := executeStrixValidationPhase(ctx, stdout, stderr, &res, &recorder, r, *strix, *strixHost, *subkernels, *ablate, paths); err != nil {
 				res.OK = false
 			}
