@@ -35,6 +35,7 @@ var generatedVerbIndex = []generatedVerb{
 	{Name: "arch", Synopsis: "architecture preflight verification and component boundary enforcement", Tier: "dev"},
 	{Name: "architecture", Synopsis: "analyze dependency tiers, violations, fan-out, depth, and blast radius for a leaf or workspace", Tier: "dev"},
 	{Name: "armbench", Synopsis: "run provenance-locked paired benchmark arms from one immutable manifest", Tier: "dev"},
+	{Name: "arms", Synopsis: "inspect research project arms and manage their concurrency limits and leases", Tier: "dev"},
 	{Name: "assume", Synopsis: "check a declared assumption against its witness: seat-launchable (doctor claim vs accounts-next authority)", Tier: "dev"},
 	{Name: "attest", Synopsis: "compliance attestation generator: prove the policy capability floor from preflight", Tier: "frontdoor"},
 	{Name: "audit", Synopsis: "audit-trail consumer: verify/export a fak guard decision journal's hash chain", Tier: "frontdoor"},

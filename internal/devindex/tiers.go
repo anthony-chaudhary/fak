@@ -180,6 +180,7 @@ var verbTiers = map[string]VerbTier{
 	"api-host":                      TierDev,
 	"arch":                          TierDev,
 	"armbench":                      TierDev,
+	"arms":                          TierDev,
 	"baseline-arms":                 TierDev,
 	"assume":                        TierDev,
 	"backend":                       TierDev,

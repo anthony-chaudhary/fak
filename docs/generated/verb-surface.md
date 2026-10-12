@@ -7,9 +7,9 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
 parsed files: 1308<br>
-rows: 1273<br>
-unverified rows: 0 / 1273<br>
-source-only rows absent from help: 1037
+rows: 1282<br>
+unverified rows: 0 / 1282<br>
+source-only rows absent from help: 1046
 
 ## Surface table
 
@@ -77,6 +77,15 @@ source-only rows absent from help: 1037
 | `fak armbench run` |  | armbenchRun / internal/armbench | `case` arm of the dispatch switch in runArmbench() | NONE | — | yes |
 | `fak armbench selfcheck` |  | armbenchSelfcheck / internal/armbench | `case` arm of the dispatch switch in runArmbench() | NONE | — | yes |
 | `fak armbench validate` |  | armbenchValidate / internal/armbench | `case` arm of the dispatch switch in runArmbench() | NONE | — | **SOURCE ONLY** |
+| `fak arms` | inspect research project arms and manage their concurrency limits and leases | cmdArms | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
+| `fak arms help` |  | armsUsage | `case` arm of the dispatch switch in runArms() | NONE | — | **SOURCE ONLY** |
+| `fak arms lease` |  | runArmsLease | `case` arm of the dispatch switch in runArms() | NONE | — | **SOURCE ONLY** |
+| `fak arms lease acquire` |  | runArmsLeaseAcquire / internal/researcharm, internal/secretload | `case` arm of the dispatch switch in runArmsLease() | NONE | — | **SOURCE ONLY** |
+| `fak arms lease list` |  | runArmsLeaseList / internal/researcharm, internal/secretload | `case` arm of the dispatch switch in runArmsLease() | NONE | — | **SOURCE ONLY** |
+| `fak arms lease release` |  | runArmsLeaseRelease / internal/secretload | `case` arm of the dispatch switch in runArmsLease() | NONE | — | **SOURCE ONLY** |
+| `fak arms limit` |  | runArmsLimit / internal/researcharm, internal/secretload | `case` arm of the dispatch switch in runArms() | NONE | — | **SOURCE ONLY** |
+| `fak arms status` |  | runArmsStatus / internal/researcharm, internal/secretload | `case` arm of the dispatch switch in runArms() | NONE | — | **SOURCE ONLY** |
+| `fak arms who` |  | runArmsTraffic / internal/researcharm, internal/secretload | `case` arm of the dispatch switch in runArms() | RUNTIME | — | **SOURCE ONLY** |
 | `fak assume` | check a declared assumption against its witness: seat-launchable (doctor claim vs accounts-next authority) | cmdAssume | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak assume check` | witnesses ONE registered assumption and maps its closed verdict to an exit code. | runAssumeCheck / internal/assumecheck, internal/pathutil | `case` arm of the dispatch switch in runAssume() | NONE | — | **SOURCE ONLY** |
 | `fak assume list` | enumerates the declarative registry (#3820): one row per registered assumption with its scope, declared witness kind, owner, and whether this shell actually has a witness gatherer wired for it — so… | runAssumeList / internal/assumecheck | `case` arm of the dispatch switch in runAssume() | NONE | — | **SOURCE ONLY** |
