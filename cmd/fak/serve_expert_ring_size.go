@@ -101,16 +101,14 @@ func parseServeExpertRingSize(raw string) (serveExpertRingSize, error) {
 	return serveExpertRingSize{Mode: serveExpertRingExplicit, Bytes: n << shift}, nil
 }
 
-// resolveServeExpertRingSize lets a non-empty flag win over the environment.
+// resolveServeExpertRingSize lets a non-empty flag select the mode over the environment;
+// auto uses the pool fraction regardless of how it was selected.
 func resolveServeExpertRingSize(flagValue string, getenv func(string) string) (serveExpertRingSize, error) {
-	if strings.TrimSpace(flagValue) != "" {
-		return parseServeExpertRingSize(flagValue)
+	if strings.TrimSpace(flagValue) == "" && getenv != nil {
+		flagValue = getenv(FakExpertRingBytesEnv)
 	}
-	if getenv == nil {
-		return serveExpertRingSize{Mode: serveExpertRingToken}, nil
-	}
-	size, err := parseServeExpertRingSize(getenv(FakExpertRingBytesEnv))
-	if err != nil || size.Mode != serveExpertRingAuto {
+	size, err := parseServeExpertRingSize(flagValue)
+	if err != nil || size.Mode != serveExpertRingAuto || getenv == nil {
 		return size, err
 	}
 	size.PoolFraction, err = parseServeExpertRingPoolFraction(getenv(FakExpertRingPoolFractionEnv))

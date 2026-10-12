@@ -268,6 +268,48 @@ func TestResolveServeExpertRingPoolFraction(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=1ms lane=default
+func TestResolveServeExpertRingSizeFlagEnvParity(t *testing.T) {
+	for _, tc := range []struct {
+		fraction string
+		want     float64
+		wantErr  bool
+	}{
+		{fraction: "0.20", want: 0.20},
+		{fraction: "", want: serveExpertRingPoolFractionDef},
+		{fraction: "0.5", want: 0.5},
+		{fraction: "0", wantErr: true},
+		{fraction: "-0.1", wantErr: true},
+		{fraction: "0.51", wantErr: true},
+		{fraction: "1", wantErr: true},
+		{fraction: "abc", wantErr: true},
+		{fraction: "NaN", wantErr: true},
+		{fraction: "+Inf", wantErr: true},
+	} {
+		envSize, envErr := resolveServeExpertRingSize("", ringEnv("auto", tc.fraction))
+		flagSize, flagErr := resolveServeExpertRingSize(" Auto ", ringEnv("invalid", tc.fraction))
+		if tc.wantErr {
+			if !errors.Is(envErr, ErrServeExpertRingSize) || !errors.Is(flagErr, ErrServeExpertRingSize) || envErr.Error() != flagErr.Error() {
+				t.Fatalf("auto flag/env fraction=%q: flag err=%v, env err=%v, want matching fraction refusals", tc.fraction, flagErr, envErr)
+			}
+			continue
+		}
+		want := serveExpertRingSize{Mode: serveExpertRingAuto, PoolFraction: tc.want}
+		if envErr != nil || flagErr != nil || envSize != want || flagSize != want {
+			t.Fatalf("auto flag/env fraction=%q: flag=%+v err=%v, env=%+v err=%v, want %+v", tc.fraction, flagSize, flagErr, envSize, envErr, want)
+		}
+	}
+	for _, flag := range []string{"token", "2g"} {
+		want, _ := parseServeExpertRingSize(flag)
+		if size, err := resolveServeExpertRingSize(flag, ringEnv("auto", "abc")); err != nil || size != want {
+			t.Fatalf("non-auto flag %q must win and ignore the fraction: %+v err=%v, want %+v", flag, size, err, want)
+		}
+	}
+	if size, err := resolveServeExpertRingSize("auto", nil); err != nil || size != (serveExpertRingSize{Mode: serveExpertRingAuto}) {
+		t.Fatalf("auto without an environment: %+v err=%v", size, err)
+	}
+}
+
 // fak-test:runtime fast est=20ms lane=default
 func TestServeActivatedExpertRingTokenPlacementIsUnchanged(t *testing.T) {
 	ws := serveStreamedSynthWeightSource(t)
