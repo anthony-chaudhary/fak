@@ -1,0 +1,149 @@
+[
+ {
+  "paper": {
+   "id": "2211.17192",
+   "authors": [
+    {
+     "_id": "649b9c3aa55a9a74f728697d",
+     "name": "Yaniv Leviathan",
+     "hidden": false
+    },
+    {
+     "_id": "649b9c3aa55a9a74f728697e",
+     "name": "Matan Kalman",
+     "status": "claimed_verified",
+     "statusLastChangedAt": "2024-10-07T15:10:25.754Z",
+     "hidden": false
+    },
+    {
+     "_id": "649b9c3aa55a9a74f728697f",
+     "name": "Yossi Matias",
+     "hidden": false
+    }
+   ],
+   "publishedAt": "2022-11-30T17:33:28.000Z",
+   "title": "Fast Inference from Transformers via Speculative Decoding",
+   "summary": "Inference from large autoregressive models like Transformers is slow -\ndecoding K tokens takes K serial runs of the model. In this work we introduce\nspeculative decoding - an algorithm to sample from autoregressive models faster\nwithout any changes to the outputs, by computing several tokens in parallel. At\nthe heart of our approach lie the observations that (1) hard language-modeling\ntasks often include easier subtasks that can be approximated well by more\nefficient models, and (2) using speculative execution and a novel sampling\nmethod, we can make exact decoding from the large models faster, by running\nthem in parallel on the outputs of the approximation models, potentially\ngenerating several tokens concurrently, and without changing the distribution.\nOur method can accelerate existing off-the-shelf models without retraining or\narchitecture changes. We demonstrate it on T5-XXL and show a 2X-3X acceleration\ncompared to the standard T5X implementation, with identical outputs.",
+   "upvotes": 11,
+   "discussionId": "649b9c3aa55a9a74f7286988",
+   "ai_summary": "Speculative decoding accelerates autoregressive model inference by parallelizing token generation without altering outputs or requiring retraining.",
+   "ai_keywords": [
+    "autoregressive models",
+    "Transformers",
+    "speculative decoding",
+    "speculative execution"
+   ],
+   "ai_summary_model": "Qwen/Qwen2.5-Coder-32B-Instruct"
+  },
+  "publishedAt": "2022-11-30T12:33:28.000Z",
+  "title": "Fast Inference from Transformers via Speculative Decoding",
+  "summary": "Inference from large autoregressive models like Transformers is slow -\ndecoding K tokens takes K serial runs of the model. In this work we introduce\nspeculative decoding - an algorithm to sample from autoregressive models faster\nwithout any changes to the outputs, by computing several tokens in parallel. At\nthe heart of our approach lie the observations that (1) hard language-modeling\ntasks often include easier subtasks that can be approximated well by more\nefficient models, and (2) using speculative execution and a novel sampling\nmethod, we can make exact decoding from the large models faster, by running\nthem in parallel on the outputs of the approximation models, potentially\ngenerating several tokens concurrently, and without changing the distribution.\nOur method can accelerate existing off-the-shelf models without retraining or\narchitecture changes. We demonstrate it on T5-XXL and show a 2X-3X acceleration\ncompared to the standard T5X implementation, with identical outputs.",
+  "numComments": 1,
+  "upvoted": false,
+  "isAuthorParticipating": false
+ },
+ {
+  "paper": {
+   "id": "2310.08461",
+   "authors": [
+    {
+     "_id": "653a27a853dcf597ba7adc72",
+     "name": "Yongchao Zhou",
+     "hidden": false
+    },
+    {
+     "_id": "653a27a853dcf597ba7adc73",
+     "name": "Kaifeng Lyu",
+     "status": "claimed_verified",
+     "statusLastChangedAt": "2024-06-21T07:07:59.095Z",
+     "hidden": false
+    },
+    {
+     "_id": "653a27a853dcf597ba7adc74",
+     "name": "Ankit Singh Rawat",
+     "hidden": false
+    },
+    {
+     "_id": "653a27a853dcf597ba7adc75",
+     "name": "Aditya Krishna Menon",
+     "hidden": false
+    }
+   ],
+   "publishedAt": "2023-10-12T16:21:04.000Z",
+   "title": "DistillSpec: Improving Speculative Decoding via Knowledge Distillation",
+   "summary": "Speculative decoding (SD) accelerates large language model inference by\nemploying a faster draft model for generating multiple tokens, which are then\nverified in parallel by the larger target model, resulting in the text\ngenerated according to the target model distribution. However, identifying a\ncompact draft model that is well-aligned with the target model is challenging.\nTo tackle this issue, we propose DistillSpec that uses knowledge distillation\nto better align the draft model with the target model, before applying SD.\nDistillSpec makes two key design choices, which we demonstrate via systematic\nstudy to be crucial to improving the draft and target alignment: utilizing\non-policy data generation from the draft model, and tailoring the divergence\nfunction to the task and decoding strategy. Notably, DistillSpec yields\nimpressive 10 - 45% speedups over standard SD on a range of standard\nbenchmarks, using both greedy and non-greedy sampling. Furthermore, we combine\nDistillSpec with lossy SD to achieve fine-grained control over the latency vs.\ntask performance trade-off. Finally, in practical scenarios with models of\nvarying sizes, first using distillation to boost the performance of the target\nmodel and then applying DistillSpec to train a well-aligned draft model can\nreduce decoding latency by 6-10x with minimal performance drop, compared to\nstandard decoding without distillation.",
+   "upvotes": 1,
+   "discussionId": "653a27a853dcf597ba7adc90",
+   "ai_summary": "DistillSpec enhances speculative decoding by using knowledge distillation to align a smaller draft model with a larger target model, achieving significant speedups in text generation with minimal performance loss.",
+   "ai_keywords": [
+    "speculative decoding",
+    "knowledge distillation",
+    "draft model",
+    "target model",
+    "on-policy data generation",
+    "divergence function",
+    "lossy SD",
+    "decoding latency"
+   ],
+   "ai_summary_model": "Qwen/Qwen2.5-Coder-32B-Instruct"
+  },
+  "publishedAt": "2023-10-12T12:21:04.000Z",
+  "title": "DistillSpec: Improving Speculative Decoding via Knowledge Distillation",
+  "summary": "Speculative decoding (SD) accelerates large language model inference by\nemploying a faster draft model for generating multiple tokens, which are then\nverified in parallel by the larger target model, resulting in the text\ngenerated according to the target model distribution. However, identifying a\ncompact draft model that is well-aligned with the target model is challenging.\nTo tackle this issue, we propose DistillSpec that uses knowledge distillation\nto better align the draft model with the target model, before applying SD.\nDistillSpec makes two key design choices, which we demonstrate via systematic\nstudy to be crucial to improving the draft and target alignment: utilizing\non-policy data generation from the draft model, and tailoring the divergence\nfunction to the task and decoding strategy. Notably, DistillSpec yields\nimpressive 10 - 45% speedups over standard SD on a range of standard\nbenchmarks, using both greedy and non-greedy sampling. Furthermore, we combine\nDistillSpec with lossy SD to achieve fine-grained control over the latency vs.\ntask performance trade-off. Finally, in practical scenarios with models of\nvarying sizes, first using distillation to boost the performance of the target\nmodel and then applying DistillSpec to train a well-aligned draft model can\nreduce decoding latency by 6-10x with minimal performance drop, compared to\nstandard decoding without distillation.",
+  "numComments": 0,
+  "upvoted": false,
+  "isAuthorParticipating": false
+ },
+ {
+  "paper": {
+   "id": "2311.08981",
+   "authors": [
+    {
+     "_id": "6555b93ebc6ff300d45f1590",
+     "name": "Hongyi Yuan",
+     "hidden": false
+    },
+    {
+     "_id": "6555b93ebc6ff300d45f1591",
+     "name": "Keming Lu",
+     "status": "claimed_verified",
+     "statusLastChangedAt": "2024-05-29T07:29:14.704Z",
+     "hidden": false
+    },
+    {
+     "_id": "6555b93ebc6ff300d45f1592",
+     "name": "Fei Huang",
+     "hidden": false
+    },
+    {
+     "_id": "6555b93ebc6ff300d45f1593",
+     "name": "Zheng Yuan",
+     "hidden": false
+    }
+   ],
+   "publishedAt": "2023-11-15T14:15:30.000Z",
+   "title": "Speculative Contrastive Decoding",
+   "summary": "Large language models (LLMs) have shown extraordinary performance in various\nlanguage tasks, but high computational requirements hinder their widespread\ndeployment. Speculative decoding, which uses amateur models to predict the\ngeneration of expert models, has been proposed as a way to accelerate LLM\ninference. However, speculative decoding focuses on acceleration instead of\nmaking the best use of the token distribution from amateur models. We proposed\nSpeculative Contrastive Decoding (SCD), an accelerated decoding method\nleveraging the natural contrast between expert and amateur models in\nspeculative decoding. Comprehensive evaluations on four benchmarks show that\nSCD can achieve similar acceleration factors as speculative decoding while\nfurther improving the generation quality as the contrastive decoding. The\nanalysis of token probabilities further demonstrates the compatibility between\nspeculative and contrastive decoding. Overall, SCD provides an effective\napproach to enhance the decoding quality of LLMs while saving computational\nresources.",
+   "upvotes": 2,
+   "discussionId": "6555b93ebc6ff300d45f15c2",
+   "ai_summary": "Speculative Contrastive Decoding enhances the quality of large language model inference while加快ing processing and reducing computational resources by leveraging the contrast between expert and amateur models.",
+   "ai_keywords": [
+    "large language models",
+    "speculative decoding",
+    "speculative contrastive decoding",
+    "expert models",
+    "amateur models",
+    "contrastive decoding",
+    "token probabilities",
+    "benchmarks"
+   ],
+   "ai_summary_model": "Qwen/Qwen2.5-Coder-32B-Instruct"
+  },
+  "publishedAt": "2023-11-15T09:15:30.000Z",
+  "title": "Speculative Contrastive Decoding",
+  "summary": "Large language models (LLMs) have shown extraordinary performance in various\nlanguage tasks, but high computational requirements hinder their widespread\ndeployment. Speculative decoding, which uses amateur models to predict the\ngeneration of expert models, has been proposed as a way to accelerate LLM\ninference. However, speculative decoding focuses on acceleration instead of\nmaking the best use of the token distribution from amateur models. We proposed\nSpeculative Contrastive Decoding (SCD), an accelerated decoding method\nleveraging the natural contrast between expert and amateur models in\nspeculative decoding. Comprehensive evaluations on four benchmarks show that\nSCD can achieve similar acceleration factors as speculative decoding while\nfurther improving the generation quality as the contrastive decoding. The\nanalysis of token probabilities further demonstrates the compatibility between\nspeculative and contrastive decoding. Overall, SCD provides an effective\napproach to enhance the decoding quality of LLMs while saving computational\nresources.",
+  "numComments": 0,
+  "upvoted": false,
+  "isAuthorParticipating": false
+ }
+]

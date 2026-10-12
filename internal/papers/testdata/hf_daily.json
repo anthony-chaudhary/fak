@@ -1,0 +1,135 @@
+[
+ {
+  "paper": {
+   "id": "2610.12374",
+   "authors": [
+    {
+     "_id": "6ac84b7d4364a3d18a5cc6b4",
+     "name": "Jiawei Chi",
+     "hidden": false
+    },
+    {
+     "_id": "6ac84b7d4364a3d18a5cc6b5",
+     "name": "Shangchen Miao",
+     "hidden": false
+    },
+    {
+     "_id": "6ac84b7d4364a3d18a5cc6b6",
+     "name": "Zhiyuan Shi",
+     "hidden": false
+    },
+    {
+     "_id": "6ac84b7d4364a3d18a5cc6b7",
+     "name": "Kailu Wu",
+     "hidden": false
+    }
+   ],
+   "publishedAt": "2026-10-08T00:00:00.000Z",
+   "submittedOnDailyAt": "2026-10-09T00:00:00.000Z",
+   "title": "AgentGarten: Code Worlds for Evolving Agents",
+   "summary": "Interactive virtual worlds allow agents to learn through exploration and interaction. What agents can learn is bounded by the environments they practice in, which must be faithful, with consistent state, rules, and dynamics, and realistic, with observations that follow the real-world visual distributions. Achieving both across diverse worlds remains a bottleneck. We introduce AgentGarten, a framework that couples simulators and game engines with a shared neural renderer to build real-time interactive environments. Its simulation backends maintain persistent world state and execute program-defined interaction rules, while the renderer generates visual observations from structured conditions exported through a common interface. To build the neural renderer, we adapt a pretrained video model to geometry conditions, distill it with our proposed Adversarial Forcing, and optimize inference for real-time interaction. Adversarial Forcing makes history prefilling differentiable through exact replay, so that losses on later predictions update how the renderer encodes prior observations, and adds real-data adversarial supervision to improve its visual quality. In AgentGarten, agents perceive the world through visual observations, interact with it in real time, and improve by distilling each round of experience into playbooks that subsequent agents inherit and refine. Our empirical study demonstrates a substantial gain in learning efficiency, with agents learning from just 4 rounds compared with millions for a conventional reinforcement learning counterpart. As new worlds can be written as code and rendered through the same interface, environments can scale in both number and difficulty alongside their agents, a step toward agents that keep evolving through interactive experience.",
+   "upvotes": 259,
+   "discussionId": "6ac84b7d4364a3d18a5cc6c2",
+   "projectPage": "https://mirros-lab.github.io/agent-garten/",
+   "githubRepo": "https://github.com/MirroS-Lab/AgentGarten",
+   "githubStars": 168
+  },
+  "publishedAt": "2026-10-07T20:00:00.000Z",
+  "title": "AgentGarten: Code Worlds for Evolving Agents",
+  "summary": "Interactive virtual worlds allow agents to learn through exploration and interaction. What agents can learn is bounded by the environments they practice in, which must be faithful, with consistent state, rules, and dynamics, and realistic, with observations that follow the real-world visual distributions. Achieving both across diverse worlds remains a bottleneck. We introduce AgentGarten, a framework that couples simulators and game engines with a shared neural renderer to build real-time interactive environments. Its simulation backends maintain persistent world state and execute program-defined interaction rules, while the renderer generates visual observations from structured conditions exported through a common interface. To build the neural renderer, we adapt a pretrained video model to geometry conditions, distill it with our proposed Adversarial Forcing, and optimize inference for real-time interaction. Adversarial Forcing makes history prefilling differentiable through exact replay, so that losses on later predictions update how the renderer encodes prior observations, and adds real-data adversarial supervision to improve its visual quality. In AgentGarten, agents perceive the world through visual observations, interact with it in real time, and improve by distilling each round of experience into playbooks that subsequent agents inherit and refine. Our empirical study demonstrates a substantial gain in learning efficiency, with agents learning from just 4 rounds compared with millions for a conventional reinforcement learning counterpart. As new worlds can be written as code and rendered through the same interface, environments can scale in both number and difficulty alongside their agents, a step toward agents that keep evolving through interactive experience.",
+  "numComments": 3,
+  "isAuthorParticipating": false
+ },
+ {
+  "paper": {
+   "id": "2610.08215",
+   "authors": [
+    {
+     "_id": "6ac855944364a3d18a5cc77d",
+     "name": "Yibo Li",
+     "status": "claimed_verified",
+     "statusLastChangedAt": "2026-10-09T08:45:05.650Z",
+     "hidden": false
+    },
+    {
+     "_id": "6ac855944364a3d18a5cc77e",
+     "name": "Jinhang Qiu",
+     "hidden": false
+    },
+    {
+     "_id": "6ac855944364a3d18a5cc77f",
+     "name": "Zhi Zheng",
+     "status": "claimed_verified",
+     "statusLastChangedAt": "2026-10-09T08:45:05.641Z",
+     "hidden": false
+    },
+    {
+     "_id": "6ac855944364a3d18a5cc780",
+     "name": "Qianyun Guo",
+     "hidden": false
+    }
+   ],
+   "publishedAt": "2026-10-08T00:00:00.000Z",
+   "submittedOnDailyAt": "2026-10-09T00:00:00.000Z",
+   "title": "Learn2Play Bench: How Well Do LLM Agents Learn from Experience in Unfamiliar Environments?",
+   "summary": "Learning from experience is essential for LLM agents to adapt to unfamiliar and dynmaic environments. Evaluating this ability is therefore important for understanding how effectively agents acquire and use new knowledge. Existing benchmarks have sought to evaluate this ability, but they primarily evaluate tasks whose rules are provided in the instructions or already familiar to pretrained models, making it difficult to distinguish learning from interactions from reasoning with existing knowledge. To address this, we introduce Learn2Play Bench, a benchmark of newly designed text-based games, whose rules are novel or counterintuitive, requiring agents to acquire knowledge through interaction rather than rely solely on pretrained knowledge. These games provide reproducible feedback and automatic scoring, enabling controlled evaluation of learning across repeated attempts. We also vary game instances to test whether agents can apply what they have learned to new situations. Therefore, we evaluate how backbone models, self-evolving methods, and agent harnesses affect agents' learning ability, revealing three findings: (1) Experience retention: Retaining complete records of actions and feedback can support more effective learning than summarizing these experiences into rules or strategies. (2) Human agent gap: Top-performing human players achieve higher peak scores than the evaluated agents. Human explore more varied strategies, and repeat actions less. (3) Harness matters: With the backbone fixed, changing the harness can improve performance while reducing estimated inference cost. Together, these findings provide insights into how LLM agents learn from experience and suggest directions for future work to improve their learning ability. Project website: https://liushiliushi.github.io/learn2play-bench-website/",
+   "upvotes": 137,
+   "discussionId": "6ac855944364a3d18a5cc784",
+   "projectPage": "https://liushiliushi.github.io/learn2play-bench-website/",
+   "githubRepo": "https://github.com/liushiliushi/Learn2Play-Bench",
+   "githubStars": 12
+  },
+  "publishedAt": "2026-10-07T20:00:00.000Z",
+  "title": "Learn2Play Bench: How Well Do LLM Agents Learn from Experience in Unfamiliar Environments?",
+  "summary": "Learning from experience is essential for LLM agents to adapt to unfamiliar and dynmaic environments. Evaluating this ability is therefore important for understanding how effectively agents acquire and use new knowledge. Existing benchmarks have sought to evaluate this ability, but they primarily evaluate tasks whose rules are provided in the instructions or already familiar to pretrained models, making it difficult to distinguish learning from interactions from reasoning with existing knowledge. To address this, we introduce Learn2Play Bench, a benchmark of newly designed text-based games, whose rules are novel or counterintuitive, requiring agents to acquire knowledge through interaction rather than rely solely on pretrained knowledge. These games provide reproducible feedback and automatic scoring, enabling controlled evaluation of learning across repeated attempts. We also vary game instances to test whether agents can apply what they have learned to new situations. Therefore, we evaluate how backbone models, self-evolving methods, and agent harnesses affect agents' learning ability, revealing three findings: (1) Experience retention: Retaining complete records of actions and feedback can support more effective learning than summarizing these experiences into rules or strategies. (2) Human agent gap: Top-performing human players achieve higher peak scores than the evaluated agents. Human explore more varied strategies, and repeat actions less. (3) Harness matters: With the backbone fixed, changing the harness can improve performance while reducing estimated inference cost. Together, these findings provide insights into how LLM agents learn from experience and suggest directions for future work to improve their learning ability. Project website: https://liushiliushi.github.io/learn2play-bench-website/",
+  "numComments": 3,
+  "isAuthorParticipating": true
+ },
+ {
+  "paper": {
+   "id": "2610.12242",
+   "authors": [
+    {
+     "_id": "6ac8556c4364a3d18a5cc773",
+     "name": "Tianyu Fu",
+     "status": "claimed_verified",
+     "statusLastChangedAt": "2026-10-09T13:21:26.584Z",
+     "hidden": false
+    },
+    {
+     "_id": "6ac8556c4364a3d18a5cc774",
+     "name": "Tengxuan Liu",
+     "status": "claimed_verified",
+     "statusLastChangedAt": "2026-10-10T08:45:05.913Z",
+     "hidden": false
+    },
+    {
+     "_id": "6ac8556c4364a3d18a5cc775",
+     "name": "Ruoxi Wang",
+     "status": "claimed_verified",
+     "statusLastChangedAt": "2026-10-09T08:45:05.623Z",
+     "hidden": false
+    },
+    {
+     "_id": "6ac8556c4364a3d18a5cc776",
+     "name": "Yixin Dong",
+     "hidden": false
+    }
+   ],
+   "publishedAt": "2026-10-08T00:00:00.000Z",
+   "submittedOnDailyAt": "2026-10-09T00:00:00.000Z",
+   "title": "TokenRouter: Efficient Serving System for Token-Level LLM Routing",
+   "summary": "Large language model (LLM) routing distributes inference work across different models, advancing the cost-quality Pareto frontier of LLM serving. While coarse-grained routing at the session or query level has been widely adopted in production systems, recent algorithmic work shows that fine-grained token-level routing can yield substantial efficiency and quality gains. However, efficiently serving token-level routed inference poses significant challenges to existing systems. Built on single-LLM assumptions, current systems suffer from severe step desynchronization and frequent batch admission delays under token-level routing, and they also impose high implementation complexity on developers. To address these challenges, we design TokenRouter, an efficient and developer-friendly serving system for token-level routed LLM inference. TokenRouter follows the principle of request-centric programming, model-centric execution: developers describe routing logic from the perspective of a single request, while the runtime launches a subserver for each LLM and dispatches requests asynchronously. Each subserver employs a delayed-batching scheduler, whose optimal hyperparameters are derived from a mathematical throughput model of the system. Across diverse routing algorithms, workloads, and model pairs, TokenRouter achieves 2.01-64.15x higher decoding throughput than existing systems, substantially advancing the serving efficiency of token-level LLM routing. Our code is available at https://github.com/thu-nics/TokenRouter.",
+   "upvotes": 130,
+   "discussionId": "6ac8556c4364a3d18a5cc77a",
+   "projectPage": "https://fuvty.github.io/thinking_yard_project_page/projects/tokenrouter/",
+   "githubRepo": "https://github.com/thu-nics/TokenRouter",
+   "githubStars": 47
+  },
+  "publishedAt": "2026-10-07T20:00:00.000Z",
+  "title": "TokenRouter: Efficient Serving System for Token-Level LLM Routing",
+  "summary": "Large language model (LLM) routing distributes inference work across different models, advancing the cost-quality Pareto frontier of LLM serving. While coarse-grained routing at the session or query level has been widely adopted in production systems, recent algorithmic work shows that fine-grained token-level routing can yield substantial efficiency and quality gains. However, efficiently serving token-level routed inference poses significant challenges to existing systems. Built on single-LLM assumptions, current systems suffer from severe step desynchronization and frequent batch admission delays under token-level routing, and they also impose high implementation complexity on developers. To address these challenges, we design TokenRouter, an efficient and developer-friendly serving system for token-level routed LLM inference. TokenRouter follows the principle of request-centric programming, model-centric execution: developers describe routing logic from the perspective of a single request, while the runtime launches a subserver for each LLM and dispatches requests asynchronously. Each subserver employs a delayed-batching scheduler, whose optimal hyperparameters are derived from a mathematical throughput model of the system. Across diverse routing algorithms, workloads, and model pairs, TokenRouter achieves 2.01-64.15x higher decoding throughput than existing systems, substantially advancing the serving efficiency of token-level LLM routing. Our code is available at https://github.com/thu-nics/TokenRouter.",
+  "numComments": 2,
+  "isAuthorParticipating": true
+ }
+]

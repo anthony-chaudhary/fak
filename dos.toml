@@ -348,7 +348,7 @@ concurrent = [
   "grafanapost", "growthgate", "guard", "guardaccuracy", "guardaudit", "guardcorpus",
   "guardrotate", "guardroute", "guardrsi", "guardsessions", "guardtrace", "guardvars",
   "guideddecode", "harnessres", "headlesslint", "heavinessscore", "hooks", "horizonrecovery",
-  "hostfault", "hostplacement", "hostresurrect", "hil", "benchpromotion", "landingvoucher", "mtpbench", "rawdecode", "telemetry", "hwgatelint", "ideascout", "idempotency",
+  "hostfault", "hostplacement", "hostresurrect", "hil", "benchpromotion", "landingvoucher", "mtpbench", "rawdecode", "telemetry", "hwgatelint", "ideascout", "idempotency", "papers",
   "incidentrsi",
   "intlist", "issuecatalog", "issuecohort", "issuecontractrepair", "issuecost",
   "issuededup", "issuehygiene", "issuesmallness", "issuesolved", "issuestriage", "jsonlledger", "kimik3page",
@@ -1274,6 +1274,7 @@ rawdecode = ["internal/rawdecode/**"]
 telemetry = ["internal/telemetry/**"]
 hwgatelint = ["internal/hwgatelint/**"]
 ideascout = ["internal/ideascout/**"]
+papers = ["internal/papers/**"]
 idempotency = ["internal/idempotency/**"]
 incidentrsi = ["internal/incidentrsi/**"]
 intlist = ["internal/intlist/**"]
