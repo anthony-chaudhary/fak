@@ -1528,7 +1528,7 @@ func (e *InKernelCapacityError) Error() string {
 // recoverDevicePanic is the body of Complete's deferred recover, factored out so it is
 // unit-testable without a GPU (the panic payload is an ordinary Go value). It converts a
 // recovered in-kernel device failure (allocation OOM, typed CUDA backend error, or device fault)
-// or one of the two declared Flash attention-admission refusals into a typed,
+// or a declared Flash / V4.1 forward-admission refusal into a typed,
 // actionable error and reports handled=true; for ANY other recovered value it
 // reports handled=false so the caller re-panics — the recover stays surgical and never swallows
 // a genuine bug (a nil deref, an unrelated validation panic).
@@ -1538,6 +1538,13 @@ func recoverDevicePanic(r any) (err error, handled bool) {
 		// unsupported/malformed Flash schedule refusals, never arbitrary model
 		// validation errors or string panics, and preserve the original cause.
 		if errors.Is(e, model.ErrV4FlashAttentionUnimplemented) || errors.Is(e, model.ErrV4FlashAttentionRatioInvalid) {
+			return e, true
+		}
+		// V4.1 Prefill/Step panic their typed stage-admission refusal before any
+		// math; under the default policy it must fail the request (or warmup),
+		// not the serving process.
+		var v41Stage *model.V41ForwardError
+		if errors.As(e, &v41Stage) || errors.Is(e, model.ErrV41PrefillLatency) {
 			return e, true
 		}
 		var operation *model.BackendForwardOperationError
