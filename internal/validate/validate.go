@@ -394,6 +394,9 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 			if code, timedOut := runValidateBuildAndVet(ctx, stdout, &res, &recorder, dir, wslWorkspace, *asJSON, vetTargets, buildTargets); timedOut {
 				return code
 			}
+			if code, timedOut := runValidatePlatformPhases(ctx, stdout, &res, &recorder, r, dir, paths, fileToPkg, wslWorkspace, *asJSON); timedOut {
+				return code
+			}
 		}
 		selectedObservation, code, timedOut := runValidateTestsPhase(ctx, stdout, &res, &recorder, r, dir, tip, effectiveTestRun, fileToPkg, *wslTests, wslWorkspace, *auditSelection, *asJSON)
 		if timedOut {
