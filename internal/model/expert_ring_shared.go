@@ -120,11 +120,14 @@ type SharedExpertRing struct {
 	attached     map[string]*Session
 	peakAttached int
 	closed       bool
+	// modelManaged marks only live, never-reused request identities. Public Attach names
+	// retain their historical deduplication even after the named agent detaches.
+	modelManaged map[string]bool
 
-	// inSpan is the agent name of the session currently inside a ring span, written under mu at the
+	// inSpan is the identity of the session currently inside a ring span, written under mu at the
 	// span boundary and read only by the ledger hooks that run inside it. It is how a pagedRing
 	// method — which knows nothing about sessions — attributes a demand to an agent.
-	inSpan string
+	inSpan sharedRingAgentIdentity
 	span   *expertRingSpan
 
 	ledger sharedRingLedger
@@ -133,6 +136,14 @@ type SharedExpertRing struct {
 type expertRingSpan struct {
 	session   *Session
 	cancelled bool
+}
+
+// The tag separates an automatic request from an explicitly named agent even if the
+// public name equals a former automatic label. Inferring lifetime from a name prefix
+// would erase named-agent history and misattribute hits to the residency's payer.
+type sharedRingAgentIdentity struct {
+	name         string
+	modelManaged bool
 }
 
 // sharedRingLedger is the cross-agent coalescing account. Every field is guarded by
@@ -148,10 +159,15 @@ type sharedRingLedger struct {
 	// demands counts DEMAND stagings routed through the ring (prefetch hints excluded — a hint is not
 	// an agent asking for bytes). This is the B*K numerator.
 	demands int64
-	// payer names the agent whose staging paid for each live residency span; served is the set of
-	// agents that have been served off that span.
-	payer  map[polymodel.ModelID]string
-	served map[polymodel.ModelID]map[string]bool
+	// payer names the agent whose staging paid for each live residency span. served keeps
+	// historical named agents and only LIVE model-managed requests: a closed automatic
+	// identity can never demand again, so retaining it would grow with total request count.
+	payer  map[polymodel.ModelID]sharedRingAgentIdentity
+	served map[polymodel.ModelID]map[sharedRingAgentIdentity]bool
+	// servedState preserves historical cardinality after automatic identities are pruned:
+	// 0 = never served, 1 = one distinct agent, 2 = two or more. It keeps the once-per-span
+	// sharedResidencies transition independent of the currently retained identity set.
+	servedState map[polymodel.ModelID]uint8
 
 	// distinctServes sums, over all spans, the number of distinct agents each served. Divided by
 	// page-ins it is the coalescing factor: 1.0 for a solo agent, rising toward B as activated sets
@@ -196,8 +212,9 @@ func NewSharedExpertRing(cfg SharedExpertRingConfig) (*SharedExpertRing, error) 
 		be:       cfg.Backend,
 		attached: map[string]*Session{},
 	}
-	sh.ledger.payer = map[polymodel.ModelID]string{}
-	sh.ledger.served = map[polymodel.ModelID]map[string]bool{}
+	sh.ledger.payer = map[polymodel.ModelID]sharedRingAgentIdentity{}
+	sh.ledger.served = map[polymodel.ModelID]map[sharedRingAgentIdentity]bool{}
+	sh.ledger.servedState = map[polymodel.ModelID]uint8{}
 	sh.ring = newPagedRing(cfg.Backend, cfg.BudgetBytes)
 	sh.ring.policy = cfg.Evict
 	sh.ring.shared = sh
@@ -219,6 +236,12 @@ func NewSharedExpertRing(cfg SharedExpertRingConfig) (*SharedExpertRing, error) 
 // own ExpertRingEvict / pin warm-start do not apply, because B agents' priors are one pin-set and
 // merging them is a policy question this rung does not settle.
 func (sh *SharedExpertRing) Attach(s *Session, agent string) error {
+	return sh.attach(s, agent, false)
+}
+
+// attach's modelManaged mode is private to the model's unique request identities.
+// The public named-agent lifetime and deduplication contract stay unchanged.
+func (sh *SharedExpertRing) attach(s *Session, agent string, modelManaged bool) error {
 	if sh == nil {
 		return ErrSharedRingClosed
 	}
@@ -246,6 +269,12 @@ func (sh *SharedExpertRing) Attach(s *Session, agent string) error {
 		return ErrSharedRingAgent
 	}
 	sh.attached[agent] = s
+	if modelManaged {
+		if sh.modelManaged == nil {
+			sh.modelManaged = map[string]bool{}
+		}
+		sh.modelManaged[agent] = true
+	}
 	if n := len(sh.attached); n > sh.peakAttached {
 		sh.peakAttached = n
 	}
@@ -266,6 +295,21 @@ func (sh *SharedExpertRing) Detach(s *Session) {
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
 	if s.ringAgent != "" && sh.attached[s.ringAgent] == s {
+		if sh.modelManaged[s.ringAgent] {
+			agent := sharedRingAgentIdentity{name: s.ringAgent, modelManaged: true}
+			for id, set := range sh.ledger.served {
+				delete(set, agent)
+				if len(set) == 0 {
+					// Retire the map itself, including its bucket allocation. Historical
+					// promotion state and payer attribution remain bounded per residency.
+					delete(sh.ledger.served, id)
+				}
+			}
+			delete(sh.modelManaged, s.ringAgent)
+			if len(sh.modelManaged) == 0 {
+				sh.modelManaged = nil
+			}
+		}
 		delete(sh.attached, s.ringAgent)
 	}
 	s.sharedRing = nil
@@ -446,7 +490,7 @@ func (s *Session) ringEnter(r *pagedRing) func() {
 	}
 	sh := r.shared
 	sh.mu.Lock()
-	sh.inSpan = s.ringAgent
+	sh.inSpan = sharedRingAgentIdentity{name: s.ringAgent, modelManaged: sh.modelManaged[s.ringAgent]}
 	span := &expertRingSpan{session: s}
 	sh.span = span
 	s.ringDepth = 1
@@ -456,7 +500,7 @@ func (s *Session) ringEnter(r *pagedRing) func() {
 		}
 		s.ringDepth--
 		if s.ringDepth == 0 {
-			sh.inSpan = ""
+			sh.inSpan = sharedRingAgentIdentity{}
 			sh.span = nil
 			sh.mu.Unlock()
 		}
@@ -476,7 +520,7 @@ func (s *Session) cancelRingSpan(r *pagedRing) {
 	}
 	span.cancelled = true
 	s.ringDepth = 0
-	sh.inSpan = ""
+	sh.inSpan = sharedRingAgentIdentity{}
 	sh.span = nil
 	sh.mu.Unlock()
 }
@@ -497,6 +541,7 @@ func (sh *SharedExpertRing) notePageIn(id polymodel.ModelID, weightBytes int64) 
 	sh.ledger.pageInBytes += weightBytes
 	sh.ledger.payer[id] = sh.inSpan
 	delete(sh.ledger.served, id)
+	delete(sh.ledger.servedState, id)
 }
 
 // noteServe books one agent being served off a live residency span. A serve by an agent other than
@@ -504,7 +549,7 @@ func (sh *SharedExpertRing) notePageIn(id polymodel.ModelID, weightBytes int64) 
 // and the first such agent also promotes the span to a shared one.
 func (sh *SharedExpertRing) noteServe(id polymodel.ModelID) {
 	agent := sh.inSpan
-	if agent == "" {
+	if agent.name == "" {
 		return // no attached agent owns this span; nothing to attribute
 	}
 	if payer, ok := sh.ledger.payer[id]; ok && payer != agent {
@@ -512,14 +557,17 @@ func (sh *SharedExpertRing) noteServe(id polymodel.ModelID) {
 	}
 	set := sh.ledger.served[id]
 	if set == nil {
-		set = map[string]bool{}
+		set = map[sharedRingAgentIdentity]bool{}
 		sh.ledger.served[id] = set
 	}
 	if set[agent] {
 		return
 	}
-	if len(set) == 1 {
+	if sh.ledger.servedState[id] == 1 {
 		sh.ledger.sharedResidencies++
+	}
+	if sh.ledger.servedState[id] < 2 {
+		sh.ledger.servedState[id]++
 	}
 	set[agent] = true
 	sh.ledger.distinctServes++
@@ -532,4 +580,5 @@ func (sh *SharedExpertRing) noteServe(id polymodel.ModelID) {
 func (sh *SharedExpertRing) endResidency(id polymodel.ModelID) {
 	delete(sh.ledger.payer, id)
 	delete(sh.ledger.served, id)
+	delete(sh.ledger.servedState, id)
 }

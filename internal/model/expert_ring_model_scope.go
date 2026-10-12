@@ -78,7 +78,7 @@ func (m *Model) attachSharedExpertRing(s *Session) error {
 	if sh == nil {
 		return nil
 	}
-	return sh.Attach(s, "session-"+strconv.FormatUint(sharedExpertRingAgent.Add(1), 10))
+	return sh.attach(s, "session-"+strconv.FormatUint(sharedExpertRingAgent.Add(1), 10), true)
 }
 
 // closeSharedExpertRings frees every model-scoped ring once, after the last session detached.
