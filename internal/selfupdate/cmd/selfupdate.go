@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -383,7 +384,12 @@ func selfUpdateFetchOrigin(ctx context.Context, runner selfinstall.Runner, repoR
 func selfUpdateHost(repoRoot string) selfinstall.Host {
 	exe, _ := os.Executable()
 	home, _ := os.UserHomeDir()
-	h := selfinstall.Host{RepoRoot: repoRoot, Home: home, Scheduled: exe}
+	h := selfinstall.Host{RepoRoot: repoRoot, Home: home}
+	// Only a running fak build is a fak copy: as the standalone fak-selfupdate helper, naming
+	// itself here would get it audited as stale fak and overwritten with the fak binary.
+	if runningAsFak() {
+		h.Scheduled = exe
+	}
 	// Derived from home, not the LOCALAPPDATA variable, so a run that isolates the home dir can
 	// never reach the real per-user install.
 	if runtime.GOOS == "windows" && home != "" {
@@ -391,6 +397,14 @@ func selfUpdateHost(repoRoot string) selfinstall.Host {
 	}
 	return h
 }
+
+// runningAsFak reports whether this process is the cmd/fak main package.
+func runningAsFak() bool {
+	bi, ok := debug.ReadBuildInfo()
+	return ok && bi.Path == fakMainPackage
+}
+
+const fakMainPackage = "github.com/anthony-chaudhary/fak/cmd/fak"
 
 // selfUpdateProbe reads one deployed binary's VCS provenance from its path. This includes our
 // own path: after a Windows swap the mapped process still carries the old stamp while the file
