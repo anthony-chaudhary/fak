@@ -91,7 +91,8 @@ type V41SparseAttentionSinkOptions struct {
 // [B, M, Heads, HeadDim] tensor. A row whose indices are all -1 yields an
 // all-zero output, matching the reference's finite lower bound. Every input is
 // validated and every non-finite value is refused before any output is
-// produced.
+// produced. Products are rounded explicitly so no architecture fuses them into
+// FMA: the host result is the same rounded F32 on arm64 and amd64.
 func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V41SparseAttentionSinkOptions) ([]float32, error) {
 	if opt.B <= 0 || opt.M <= 0 || opt.Heads <= 0 || opt.HeadDim <= 0 || opt.TopK < 0 || opt.N < 0 {
 		return nil, fmt.Errorf("model: invalid V4.1 sparse sink geometry b=%d m=%d heads=%d dim=%d topk=%d n=%d", opt.B, opt.M, opt.Heads, opt.HeadDim, opt.TopK, opt.N)
@@ -173,7 +174,7 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 					kvBase := (b*opt.N + row) * opt.HeadDim
 					var dot float32
 					for d := 0; d < opt.HeadDim; d++ {
-						dot += q[qBase+d] * kv[kvBase+d]
+						dot += float32(q[qBase+d] * kv[kvBase+d])
 					}
 					dot *= opt.Softmax
 					if !finite32(dot) {
@@ -201,7 +202,7 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 					kvBase := (b*opt.N + row) * opt.HeadDim
 					var dot float32
 					for d := 0; d < opt.HeadDim; d++ {
-						dot += q[qBase+d] * kv[kvBase+d]
+						dot += float32(q[qBase+d] * kv[kvBase+d])
 					}
 					// Match the rounded float32 score used by the maximum pass.
 					// A finite score gap may round to -Inf; exp(-Inf)=0 is valid.
@@ -227,14 +228,14 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 					kvBase := (b*opt.N + row) * opt.HeadDim
 					var dot float32
 					for d := 0; d < opt.HeadDim; d++ {
-						dot += q[qBase+d] * kv[kvBase+d]
+						dot += float32(q[qBase+d] * kv[kvBase+d])
 					}
 					weight := exp32(float32(dot*opt.Softmax)-maxScore) / sum
 					if !finite32(weight) {
 						return nil, sparseSinkNonFinite(v41SinkStageValue, b, m, h, row, -1, weight)
 					}
 					for d := 0; d < opt.HeadDim; d++ {
-						o[oBase+d] += weight * kv[kvBase+d]
+						o[oBase+d] += float32(weight * kv[kvBase+d])
 						if !finite32(o[oBase+d]) {
 							return nil, sparseSinkNonFinite(v41SinkStageValue, b, m, h, row, d, o[oBase+d])
 						}
