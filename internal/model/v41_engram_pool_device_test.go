@@ -96,7 +96,7 @@ func (b *v41MHCTestBackend) V41CompressorPool(kv, scores compute.Tensor, ratio, 
 
 func v41EngramPoolBackend(engram, pool bool) *v41MHCTestBackend {
 	b := newV41MHCTestBackend(true)
-	b.engram, b.pool = engram, pool
+	b.engram, b.pool, b.rowDecode = engram, pool, engram
 	return b
 }
 

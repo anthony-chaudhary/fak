@@ -160,7 +160,7 @@ func (o *v41DeviceGatherOps) engramGateFunc() v41EngramGateFunc {
 		return o.engramGate
 	}
 	gate := o.engramGate
-	return func(layer int, streams *v41DeviceStreams, rows []float32, positions int, geometry v41EngramGeometry, eps float32) (bool, error) {
+	return func(layer int, streams *v41DeviceStreams, rows *v41EngramGatheredRows, positions int, geometry v41EngramGeometry, eps float32) (bool, error) {
 		if gate == nil {
 			return false, o.owner.v41DeviceOnlyMissingOp(layer, "engram-stream-injection")
 		}

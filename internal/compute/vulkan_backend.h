@@ -429,6 +429,17 @@ int fvk_v41_engram_gate_f32(const void *dStreams, const void *dProjection, const
                             void *dNext, void *dStatus, int rows, int hidden, float eps,
                             float invSqrtHidden);
 
+/* V4.1 Engram table-row decode (registry V14). Three storage bindings: the
+ * encoded rows (rows x 264 packed E4M3/E8M0, 84 Q2_K or 1024 F32 bytes for
+ * mode 0/1/2), the F32 panel [rows,dim] and one uint32 status word per row,
+ * pairwise disjoint; 1 <= dim <= 256. The poison entry writes a quiet NaN into
+ * target[index] when any of the first rows status words is nonzero. Push ABI
+ * is int32 mode, rows, dim, target. Returns the tail RoPE status codes.
+ * Optional module like the Engram gate. */
+int fvk_have_v41_engram_row_decode(void);
+int fvk_v41_engram_row_decode(const void *dSrc, void *dDst, void *dStatus, int mode, int rows, int dim);
+int fvk_v41_engram_row_poison(const void *dStatus, void *dTarget, int rows, int targetCount, int index);
+
 /* V4.1 compressor gated pool (registry V11). Three storage bindings: kv and
  * scores [ratio,width] and pooled[width], all F32; the output is disjoint from
  * both inputs. 2 <= ratio <= 4096. Push ABI is int32 ratio, width. Returns the
