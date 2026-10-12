@@ -56,11 +56,12 @@ func (m *mockPreRegisterer) DiscardPreRegistered(shardID int) {
 }
 
 func (m *mockPreRegisterer) OnAllocatorChanged(change AllocatorChange) {
-	m.onChangedCalled.Add(1)
 	// Check if pre-registered data was staged
 	if _, ok := m.staged.LoadAndDelete(change.ShardID); ok {
 		m.usedPreReg.Store(true)
 	}
+	// Publish callback completion after the state the test observes.
+	m.onChangedCalled.Add(1)
 	// Simulate deferred cleanup in background (like RDMA server does)
 	go func() {
 		time.Sleep(10 * time.Millisecond)
@@ -151,10 +152,10 @@ func TestPreRegistrationDuringMigration(t *testing.T) {
 		t.Error("no GETs succeeded during migration â€” shard appears blocked")
 	}
 
-	// Wait for migration to fully complete
+	// Wait for callback completion and the final migration metric publication.
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if mock.onChangedCalled.Load() > 0 {
+		if mock.onChangedCalled.Load() > 0 && s.Metrics().MigrationsTotal() >= 1 {
 			break
 		}
 		// Keep submitting ops to drive the shard event loop
