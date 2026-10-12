@@ -56,6 +56,12 @@ type PrismHadamard struct {
 // not loading, because the failure is silent garbage rather than a loud error.
 var ErrPrismHadamardMalformed = errors.New("ggufload: prism.hadamard metadata is malformed")
 
+// ErrPrismHadamardGDNLayout refuses a declared rotation whose value-width signs
+// are not explicitly in the grouped order emitted by fak's GDN. It also matches
+// ErrPrismHadamardMalformed through errors.Is.
+var ErrPrismHadamardGDNLayout = errors.Join(ErrPrismHadamardMalformed,
+	errors.New("ggufload: prism.hadamard.gdn_v_grouped must be true for GDN architectures"))
+
 // PrismHadamardMeta reads the prism.hadamard.* keys. It returns (nil, nil) for a file
 // that does not declare the contract at all (the common case — only Bonsai-2 family
 // GGUFs carry these keys). When any prism.hadamard.* key is present, the contract is
@@ -96,11 +102,20 @@ func (f *File) PrismHadamardMeta() (*PrismHadamard, error) {
 	if h.WeightNames, ok = f.StringArray("prism.hadamard.weight_names"); !ok {
 		return nil, malformedf("weight_names")
 	}
-	// inverse_weight_names and gdn_v_grouped are optional refinements: a file that
-	// omits them still declares a usable rotation, and their absence changes no byte
-	// of the transform. Read them best-effort.
+	// inverse_weight_names remains an optional refinement.
 	h.InverseNames, _ = f.StringArray("prism.hadamard.inverse_weight_names")
-	h.GDNVGrouped, _ = f.Bool("prism.hadamard.gdn_v_grouped")
+	h.GDNVGrouped, ok = f.Bool("prism.hadamard.gdn_v_grouped")
+	arch, _ := f.String("general.architecture")
+	switch canonicalGGUFArch(arch) {
+	case "qwen35", "qwen35moe":
+		// The native GDN emits grouped values. Ordinary Qwen GGUF tensors are
+		// deinterleaved by the loader; Prism's grouped out-projection columns
+		// bypass that reorder. The value-width signs must already match this
+		// grouped order. Metadata alone cannot prove the stored tensor order.
+		if !ok || !h.GDNVGrouped {
+			return nil, ErrPrismHadamardGDNLayout
+		}
+	}
 
 	// The declared transform and axis are a closed vocabulary for version 1. An
 	// unrecognized transform is a different rotation we cannot promise to invert, so

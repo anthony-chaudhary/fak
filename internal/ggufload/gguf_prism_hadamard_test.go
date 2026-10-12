@@ -69,6 +69,13 @@ func TestPrismHadamardMetaReadsDeclaredContract(t *testing.T) {
 	if len(h.InverseNames) != 1 || h.InverseNames[0] != "token_embd.weight" {
 		t.Fatalf("bad inverse names: %v", h.InverseNames)
 	}
+	// Non-GDN architectures retain the optional flag contract.
+	f.Metadata["general.architecture"] = Value{Type: TypeString, Value: "llama"}
+	delete(f.Metadata, "prism.hadamard.gdn_v_grouped")
+	h, err = f.PrismHadamardMeta()
+	if err != nil || h == nil || h.GDNVGrouped {
+		t.Fatalf("non-GDN contract without grouped flag = (%+v, %v)", h, err)
+	}
 }
 
 // A file with no prism.hadamard.* keys (every non-Bonsai-2 GGUF) must read as
@@ -84,6 +91,7 @@ func TestPrismHadamardMetaAbsentOnPlainFile(t *testing.T) {
 
 // Once ANY prism.hadamard.* key is present the contract is required: a truncated
 // declaration must refuse, never degrade to "no rotation declared".
+// fak-test:runtime fast est=1ms lane=default
 func TestPrismHadamardMetaMalformedIsRefused(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -107,6 +115,33 @@ func TestPrismHadamardMetaMalformedIsRefused(t *testing.T) {
 			h, err := f.PrismHadamardMeta()
 			if !errors.Is(err, ErrPrismHadamardMalformed) {
 				t.Fatalf("want ErrPrismHadamardMalformed, got (%+v,%v)", h, err)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name string
+		arch string
+		flag *Value
+	}{
+		{"missing grouped flag", "qwen35", nil},
+		{"tiled signs", "qwen35", &Value{Type: TypeBool, Value: false}},
+		{"integer flag", "qwen35", &Value{Type: TypeUint8, Value: uint8(1)}},
+		{"string flag", "qwen35", &Value{Type: TypeString, Value: "true"}},
+		{"Bonsai tiled signs", "bonsai", &Value{Type: TypeBool, Value: false}},
+		{"Qwen3.6 tiled signs", "qwen3.6", &Value{Type: TypeBool, Value: false}},
+		{"MoE missing grouped flag", "qwen35moe", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := synthPrismHadamardMeta()
+			m["general.architecture"] = Value{Type: TypeString, Value: tc.arch}
+			if tc.flag == nil {
+				delete(m, "prism.hadamard.gdn_v_grouped")
+			} else {
+				m["prism.hadamard.gdn_v_grouped"] = *tc.flag
+			}
+			h, err := (&File{Metadata: m}).PrismHadamardMeta()
+			if h != nil || !errors.Is(err, ErrPrismHadamardGDNLayout) || !errors.Is(err, ErrPrismHadamardMalformed) {
+				t.Fatalf("want nil contract and typed malformed GDN layout refusal, got (%+v, %v)", h, err)
 			}
 		})
 	}

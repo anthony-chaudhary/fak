@@ -16877,10 +16877,16 @@
           "category": "incidental",
           "reason": "Private helper calculating 16-byte-aligned offsets for status and row byte regions in one host staging image; it introduces no tensor-layout or dtype convention.",
           "token": "v41DeferredLayout"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed refusal within the existing grouped-sign metadata contract, not a new storage layout or reordering mechanism.",
+          "token": "ErrPrismHadamardGDNLayout"
         }
       ],
       "id": "layout",
       "ignore": [
+        "ErrPrismHadamardGDNLayout",
         "ExpertStorageLayout",
         "ExportLayout",
         "ImportLayout",
