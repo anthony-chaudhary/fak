@@ -18,7 +18,10 @@ import (
 //
 //	token    the default: one token's activated experts, exactly the historical ring.
 //	auto     the smaller of a device bound and a host bound, after the dense base, the transient
-//	         scratch and the KV for the target context are reserved.
+//	         scratch and the KV for the target context are reserved, and never more than
+//	         FAK_EXPERT_RING_POOL_FRACTION (default 0.10) of host MemTotal: on a UMA box with a
+//	         small carve-out the driver's BO_VA ceiling aborts mid-request long before the
+//	         measured bounds bind, and the routed band beyond the ring stays SSD-backed.
 //	<bytes>  an explicit ring, admitted or refused at load.
 //
 // On a UMA box (shared host RAM, carve-out <= serveExpertRingUMACarveoutMax) the device ring,
@@ -28,6 +31,9 @@ import (
 
 // FakExpertRingBytesEnv is the environment twin of --expert-ring-bytes.
 const FakExpertRingBytesEnv = "FAK_EXPERT_RING_BYTES"
+
+// FakExpertRingPoolFractionEnv caps an auto ring at this fraction of host MemTotal (0 < f <= 0.5).
+const FakExpertRingPoolFractionEnv = "FAK_EXPERT_RING_POOL_FRACTION"
 
 // ErrServeExpertRingTooBig marks a ring size the load-time memory bound refused.
 var ErrServeExpertRingTooBig = errors.New("fak serve: activated-expert device ring does not fit")
@@ -39,6 +45,8 @@ const (
 	serveExpertRingHostMarginFloor    int64   = 6 << 30
 	serveExpertRingHostMarginFraction float64 = 0.05
 	serveExpertRingUMACarveoutMax     int64   = 4 << 30
+	serveExpertRingPoolFractionDef    float64 = 0.10
+	serveExpertRingPoolFractionMax    float64 = 0.5
 )
 
 type serveExpertRingMode string
@@ -52,6 +60,8 @@ const (
 type serveExpertRingSize struct {
 	Mode  serveExpertRingMode
 	Bytes int64
+	// PoolFraction caps an auto ring at this fraction of host MemTotal; 0 means the default.
+	PoolFraction float64
 }
 
 func (s serveExpertRingSize) String() string {
@@ -99,7 +109,26 @@ func resolveServeExpertRingSize(flagValue string, getenv func(string) string) (s
 	if getenv == nil {
 		return serveExpertRingSize{Mode: serveExpertRingToken}, nil
 	}
-	return parseServeExpertRingSize(getenv(FakExpertRingBytesEnv))
+	size, err := parseServeExpertRingSize(getenv(FakExpertRingBytesEnv))
+	if err != nil || size.Mode != serveExpertRingAuto {
+		return size, err
+	}
+	size.PoolFraction, err = parseServeExpertRingPoolFraction(getenv(FakExpertRingPoolFractionEnv))
+	return size, err
+}
+
+// parseServeExpertRingPoolFraction returns the default for an empty value and refuses anything
+// outside (0, 0.5] with ErrServeExpertRingSize, matching a malformed FAK_EXPERT_RING_BYTES.
+func parseServeExpertRingPoolFraction(raw string) (float64, error) {
+	v := strings.TrimSpace(raw)
+	if v == "" {
+		return serveExpertRingPoolFractionDef, nil
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || !(f > 0 && f <= serveExpertRingPoolFractionMax) {
+		return 0, fmt.Errorf("%w: %s=%q: want a fraction in (0, %g]", ErrServeExpertRingSize, FakExpertRingPoolFractionEnv, raw, serveExpertRingPoolFractionMax)
+	}
+	return f, nil
 }
 
 // serveExpertRingHost is the host-side snapshot a non-token size is judged against.
@@ -139,6 +168,9 @@ type serveExpertRingSizing struct {
 	SharedPool                       bool
 	// GuardTrimBytes is how much the load-time guard trimmed an auto ring below the bounds.
 	GuardTrimBytes int64
+	// PoolCapBytes = PoolFraction x host MemTotal bounds an auto ring; 0 when not applied.
+	PoolFraction float64
+	PoolCapBytes int64
 }
 
 // sizeServeExpertRing picks the ring for a non-token mode from the plan the token ring was
@@ -182,6 +214,14 @@ func sizeServeExpertRing(size serveExpertRingSize, f ggufload.ActivatedExpertFit
 		}
 		if s.HostBoundKnown {
 			ring = min(ring, s.HostBound)
+		}
+		if host.Known && host.Total > 0 {
+			s.PoolFraction = size.PoolFraction
+			if s.PoolFraction <= 0 {
+				s.PoolFraction = serveExpertRingPoolFractionDef
+			}
+			s.PoolCapBytes = int64(s.PoolFraction * float64(host.Total))
+			ring = min(ring, s.PoolCapBytes)
 		}
 		s.RingBytes = min(ring, s.Ceiling)
 		if s.RingBytes < s.Floor {
@@ -230,14 +270,22 @@ func (s serveExpertRingSizing) Text() string {
 	if mode == "" {
 		mode = serveExpertRingToken
 	}
-	return fmt.Sprintf("ring size mode=%s chosen=%s token=%s floor=%s band=%s device_bound=%s (device_avail=%s non_ring_device=%s) host_bound=%s (mem_available=%s rss_anon_peak=%s margin=%s non_ring_host=%s shared_pool=%t) guard_trim=%s host_gathered=%s page_reserve=%s",
+	return fmt.Sprintf("ring size mode=%s chosen=%s token=%s floor=%s band=%s device_bound=%s (device_avail=%s non_ring_device=%s) host_bound=%s (mem_available=%s rss_anon_peak=%s margin=%s non_ring_host=%s shared_pool=%t) pool_cap=%s guard_trim=%s host_gathered=%s page_reserve=%s",
 		mode, bytesText(uint64(max(s.RingBytes, 0))), bytesText(uint64(max(s.TokenBytes, 0))),
 		bytesText(uint64(max(s.Floor, 0))), bytesText(uint64(max(s.Ceiling, 0))),
 		bound(s.DeviceBound, s.DeviceBoundKnown), bytesText(uint64(max(s.DeviceAvail, 0))), bytesText(uint64(max(s.NonRingDevice, 0))),
 		bound(s.HostBound, s.HostBoundKnown), bytesText(uint64(max(s.HostAvail, 0))), bytesText(uint64(s.RSSAnonPeak)),
 		bytesText(uint64(max(s.HostMargin, 0))), bytesText(uint64(max(s.NonRingHost, 0))), s.SharedPool,
+		s.poolCapText(),
 		bytesText(uint64(max(s.GuardTrimBytes, 0))),
 		bytesText(uint64(max(s.HostGatheredBytes, 0))), bytesText(uint64(max(s.HostGatheredReserve, 0))))
+}
+
+func (s serveExpertRingSizing) poolCapText() string {
+	if s.PoolCapBytes <= 0 {
+		return "none"
+	}
+	return fmt.Sprintf("%d (fraction=%.2f)", s.PoolCapBytes, s.PoolFraction)
 }
 
 // serveExpertRingBytesFlag is the flag name, kept in one place so registration and refusals agree.
