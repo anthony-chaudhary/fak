@@ -74,11 +74,22 @@ func TestVulkanV41BF16Publish(t *testing.T) {
 			sites = append(sites, site)
 		}
 	}
-	policy := map[uint32]bool{
-		V41BF16PublishFinalNormInput: true, V41BF16PublishFinalNormOutput: true,
-		V41BF16PublishQueryNormInput: true, V41BF16PublishQueryNormOutput: true,
-	}
-	for site := range v41BF16PublishSiteNames {
+	policy := map[uint32]bool{}
+	for _, site := range []uint32{
+		V41BF16PublishFinalNormInput, V41BF16PublishFinalNormOutput,
+		V41BF16PublishQueryNormInput, V41BF16PublishQueryNormOutput,
+		V41BF16PublishKVNormInput, V41BF16PublishKVNormOutput,
+		V41BF16PublishFFNNormInput, V41BF16PublishFFNNormOutput,
+		V41BF16PublishTailRoPEInput, V41BF16PublishTailRoPEOutput,
+		V41BF16PublishInverseOutputInput, V41BF16PublishInverseOutputOutput,
+		V41BF16PublishGroupedOutputInput, V41BF16PublishGroupedOutputProjection,
+		V41BF16PublishSharedExpertInput, V41BF16PublishSharedExpertProjection,
+		V41BF16PublishSharedExpertDownInput,
+		V41BF16PublishRoutedGateUp, V41BF16PublishRoutedDown,
+		V41BF16PublishIndexerProjection, V41BF16PublishIndexerKeyNorm,
+		V41BF16PublishIndexerRotary, V41BF16PublishIndexerScaledWeight,
+		V41BF16PublishCompressorNormInput, V41BF16PublishCompressorNormOutput,
+	} {
 		policy[site] = true
 	}
 	if len(sites) != len(policy) {
