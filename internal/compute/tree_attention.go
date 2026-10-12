@@ -69,6 +69,11 @@ func validateTreeVerifyAttention(q, k, v, out *Tensor, maskRows []uint32, qLen, 
 	if d <= 0 || d > 1024 {
 		return fmt.Errorf("compute: TreeVerifyAttention head dim %d outside [1,1024]", d)
 	}
+	maxInt := int(^uint(0) >> 1)
+	if nH > maxInt/d || qLen > maxInt/(nH*d) ||
+		nHkv > maxInt/d || kvLen > maxInt/(nHkv*d) {
+		return fmt.Errorf("compute: TreeVerifyAttention tensor dimensions overflow int")
+	}
 	validBits := ^uint32(0)
 	if qLen < MaxTreeAttentionCandidates {
 		validBits = (uint32(1) << uint(qLen)) - 1
@@ -179,6 +184,21 @@ func TreeVerifyAttention(q, k, v, out *Tensor, maskRows []uint32, qLen, kvLen, n
 func (c *cpuBackend) TreeVerifyAttention(q, k, v, out *Tensor, maskRows []uint32, qLen, kvLen, nH, nHkv, d int) error {
 	if err := validateTreeVerifyAttention(q, k, v, out, maskRows, qLen, kvLen, nH, nHkv, d); err != nil {
 		return err
+	}
+	for _, input := range []struct {
+		name string
+		t    *Tensor
+	}{{"q", q}, {"k", k}, {"v", v}} {
+		if input.t.Dtype != F32 || input.t.Layout != RowMajor {
+			return fmt.Errorf("compute: TreeVerifyAttention %s requires row-major F32 input", input.name)
+		}
+		host, ok := input.t.buf.(*hostBuf)
+		if !ok || host == nil {
+			return fmt.Errorf("compute: TreeVerifyAttention %s requires host buffer", input.name)
+		}
+		if len(host.f32) < input.t.Numel() {
+			return fmt.Errorf("compute: TreeVerifyAttention %s host buffer length %d < expected %d", input.name, len(host.f32), input.t.Numel())
+		}
 	}
 	result := make([]float32, qLen*nH*d)
 	treeVerifyAttentionHost(c.f32(*q), c.f32(*k), c.f32(*v), result, maskRows, qLen, kvLen, nH, nHkv, d, float32(1/math.Sqrt(float64(d))))
