@@ -12,7 +12,7 @@ func validStrixSSDRestartWitnessForTest() *StrixSSDRestartWitness {
 	plainHash := strings.TrimPrefix(testHash, "sha256:")
 	child := func(phase, outcome string, pid int) StrixSSDRestartChild {
 		c := StrixSSDRestartChild{
-			Schema: "fak-vulkan-warm-disk-restart/1", Phase: phase, PID: pid,
+			Schema: "fak-vulkan-warm-disk-restart/2", Phase: phase, PID: pid,
 			SourceRevision: testTip, SourceArchiveSHA256: strings.TrimPrefix(testHash, "sha256:"), ExecutableSHA256: strings.TrimPrefix(testHash, "sha256:"),
 			ModelIdentity: testHash, Backend: "vulkan", Device: "AMD Radeon 8060S Graphics Strix Halo gfx1151", Driver: "RADV", Runtime: "Vulkan 1.3",
 			DiskOutcome: outcome, DiskTier: "local_ssd_l3", Stable: 8, Matched: 8, Generated: []int{11, 12, 13, 14},
@@ -28,9 +28,10 @@ func validStrixSSDRestartWitnessForTest() *StrixSSDRestartWitness {
 		return c
 	}
 	return &StrixSSDRestartWitness{
-		Schema: "fak-vulkan-warm-disk-restart/1", PID: 100, CacheMode: "isolated-default",
+		Schema: "fak-vulkan-warm-disk-restart/2", PID: 100, CacheMode: "isolated-default",
 		SourceRevision: testTip, SourceArchiveSHA256: plainHash, ExecutableSHA256: plainHash, ModelIdentity: testHash,
 		ExpectedKVTransferBytes: 1024, ExpectedColdD2HBytes: 2048, ExpectedKVTransferCount: 2,
+		ExpectedColdD2HCount: 3, ExpectedWarmH2DBytes: 1024, ExpectedWarmH2DCount: 2,
 		Cold: child("cold", "persisted", 101), Warm: child("warm", "restored", 102),
 		TokenParity: true, LogitParity: true, ContinuationLogitParity: true,
 	}
@@ -57,6 +58,20 @@ func validStrixSSDRestartReceiptForTest(t *testing.T) *StrixSSDRestartReceipt {
 func TestStrixSSDRestartWitnessRequiresCompleteRestartEvidence(t *testing.T) {
 	if err := validStrixSSDRestartReceiptForTest(t).Validate(); err != nil {
 		t.Fatalf("complete SSD restart receipt rejected: %v", err)
+	}
+	// The agent witness reports executable digests as "sha256:<hex>".
+	prefixed := validStrixSSDRestartReceiptForTest(t)
+	prefixed.Witness.ExecutableSHA256 = "sha256:" + prefixed.Witness.ExecutableSHA256
+	prefixed.Witness.Cold.ExecutableSHA256 = "sha256:" + prefixed.Witness.Cold.ExecutableSHA256
+	prefixed.Witness.Warm.ExecutableSHA256 = "sha256:" + prefixed.Witness.Warm.ExecutableSHA256
+	prefixed.Provenance.ExecutionManifestSHA256 = strixSSDRestartExecutionManifestDigest(prefixed)
+	if digest, err := prefixed.ComputeDigest(); err != nil {
+		t.Fatal(err)
+	} else {
+		prefixed.Digest = digest
+	}
+	if err := prefixed.Validate(); err != nil {
+		t.Fatalf("sha256-prefixed executable digests rejected: %v", err)
 	}
 	tests := []struct {
 		name   string
