@@ -148,6 +148,7 @@ func (m *Model) v41EngramStageFor() *v41EngramStage {
 		return nil
 	}
 	v, ok := v41EngramStages.Load(weak.Make(m))
+	runtime.KeepAlive(m)
 	if !ok {
 		return nil
 	}
