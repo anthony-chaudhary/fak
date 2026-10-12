@@ -18,6 +18,16 @@ type v41BF16PublishRecorder struct {
 	calls   int
 	faultAt int
 	fault   error
+	// self names the outermost recorder when another recorder embeds this
+	// one, so fresh tensors carry the session backend's identity.
+	self compute.Backend
+}
+
+func (b *v41BF16PublishRecorder) owner() compute.Backend {
+	if b.self != nil {
+		return b.self
+	}
+	return b
 }
 
 func newV41BF16PublishRecorder() *v41BF16PublishRecorder {
@@ -56,13 +66,13 @@ func (b *v41BF16PublishRecorder) publish(x compute.Tensor, site uint32) (compute
 		}
 		values[i] = math.Float32frombits(rounded)
 	}
-	return compute.NewF32(b, []int{len(values)}, values), nil
+	return compute.NewF32(b.owner(), []int{len(values)}, values), nil
 }
 func (b *v41BF16PublishRecorder) UploadClass(x compute.Tensor, dt compute.Dtype, class compute.MemoryClass, site string) compute.Tensor {
 	if site != "V4.1 BF16 publication input" && site != "V4.1 attention BF16 input" {
 		return b.v41DenseTestBackend.Upload(x, dt)
 	}
-	return compute.NewF32(b, append([]int(nil), x.Shape...), append([]float32(nil), b.Backend.Read(x)...))
+	return compute.NewF32(b.owner(), append([]int(nil), x.Shape...), append([]float32(nil), b.Backend.Read(x)...))
 }
 
 // v41BF16PublishRows are finite rows that are not widened BF16, so a bound

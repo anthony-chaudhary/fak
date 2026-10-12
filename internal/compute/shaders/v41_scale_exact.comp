@@ -1,0 +1,25 @@
+#version 450
+#extension GL_EXT_spirv_intrinsics : require
+
+// Ordinary-build twin of the witness-only v41_logit_scale.comp: one separately
+// rounded binary32 multiplication per lane, Y[i] = X[i] * scale, with declared
+// F32 DenormPreserve, SignedZeroInfNanPreserve and RoundingModeRTE. main() has
+// one exit and keeps the unsigned >= bound test, so the registry's glslc -O
+// build stays inside the exact scalar ABI proof. The host loads it only when
+// the selected device reports all three controls.
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4464], 4459, 32); // DenormPreserve
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4466], 4461, 32); // SignedZeroInfNanPreserve
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4467], 4462, 32); // RoundingModeRTE
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer Input { float X[]; };
+layout(std430, binding = 1) writeonly buffer Output { float Y[]; };
+layout(push_constant) uniform Push { uint count; float scale; } pc;
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= pc.count) {
+    } else {
+        precise float value = X[i] * pc.scale;
+        Y[i] = value;
+    }
+}

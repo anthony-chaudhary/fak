@@ -21,6 +21,7 @@ type v41DeviceGatherOps struct {
 	engramGate                v41EngramGateFunc
 	compressorPool            v41CompressorPoolFunc
 	bf16Publish               v41BF16BoundaryFunc
+	indexWeightScale          v41IndexWeightScaleFunc
 }
 
 // v41DeviceGatherOpsFunc binds every available slice-3 operation. The policy is
@@ -31,6 +32,7 @@ func (s *Session) v41DeviceGatherOpsFunc() *v41DeviceGatherOps {
 	}
 	ops := &v41DeviceGatherOps{owner: s, inverseOutput: s.v41InverseOutputRoPEFunc(), indexSelect: s.v41IndexSelectFunc(), embedGather: s.v41EmbeddingGatherFunc(), indexRoPE: s.v41IndexRoPEFunc(), compressedPublicationRoPE: s.v41CompressedPublicationRoPEFunc(), engramGate: s.v41EngramGateFunc(), compressorPool: s.v41CompressorPoolFunc()}
 	ops.bf16Publish = s.v41BF16PublishFunc()
+	ops.indexWeightScale = s.v41IndexWeightScaleFunc()
 	return ops
 }
 
@@ -46,6 +48,20 @@ func (o *v41DeviceGatherOps) bf16PublishFunc() v41BF16BoundaryFunc {
 		}
 	}
 	return o.bf16Publish
+}
+
+// indexWeightScaleFunc returns the device index weight scale; under device-only
+// an unbound seam refuses typed instead of multiplying on the host.
+func (o *v41DeviceGatherOps) indexWeightScaleFunc() v41IndexWeightScaleFunc {
+	if o == nil {
+		return nil
+	}
+	if o.indexWeightScale == nil && o.owner.v41DeviceOnlyPolicy() {
+		return func(layer int, _ []float32, _ float32) ([]float32, error) {
+			return nil, o.owner.v41DeviceOnlyMissingOp(layer, "indexer-weight-scale")
+		}
+	}
+	return o.indexWeightScale
 }
 
 func (o *v41DeviceGatherOps) inverseOutputFunc() v41InverseOutputRoPEFunc {

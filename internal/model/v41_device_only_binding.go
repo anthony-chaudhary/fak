@@ -27,6 +27,7 @@ var v41DeviceOnlyBindings = []v41DeviceOnlyBinding{
 	{op: v41HostOp{name: "index-key-norm", site: "SupportsV41IndexKeyNorm"}, uses: v41UsesIndexer, bound: func(s *Session) bool { return s.v41IndexKeyNormFunc() != nil }},
 	{op: v41HostOp{name: "compressed-publication-rope", site: "V41TailRoPEExactAvailable"}, uses: v41UsesCompressedKV, bound: func(s *Session) bool { return s.v41CompressedPublicationRoPEFunc() != nil }},
 	{op: v41HostOp{name: "indexer-query-rope", site: "V41TailRoPERowsAvailable"}, uses: v41UsesIndexer, bound: func(s *Session) bool { return s.v41IndexRoPEFunc() != nil }},
+	{op: v41HostOp{name: "indexer-weight-scale", site: "V41ScaleExactAvailable"}, uses: v41UsesIndexer, bound: func(s *Session) bool { return s.v41IndexWeightScaleFunc() != nil }},
 	{op: v41HostOp{name: "attention-indexer-score", site: "V41IndexerScoreAdmission"}, uses: v41UsesIndexer, bound: func(s *Session) bool { return s.v41IndexerScoreFunc() != nil }},
 	{op: v41HostOp{name: "attention-index-list", site: "V41IndexSelectAvailable"}, uses: v41UsesIndexer, bound: func(s *Session) bool { return s.v41IndexSelectFunc() != nil }},
 	{op: v41HostOp{name: "shared-attention", site: "SupportsV41SharedAttention"}, bound: func(s *Session) bool { return s.v41SharedAttentionFunc() != nil }},

@@ -14,8 +14,8 @@ import (
 // executable SPIR-V, source correspondence, or hardware qualification.
 func TestVulkanReceiptV12Current72Boundary(t *testing.T) {
 	want := append(CurrentVulkanShaderRegistryV11(), "v41_tail_rope_exact")
-	if len(want) != 72 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV12(), want) || !reflect.DeepEqual(VulkanShaders, want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest(), want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
-		t.Fatal("current builder does not use V11 plus the strict tail-RoPE module exactly once")
+	if len(want) != 72 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV12(), want) || !reflect.DeepEqual(VulkanShaders[:72], want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest()[:72], want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
+		t.Fatal("V12 is not V11 plus the strict tail-RoPE module as the current builder prefix")
 	}
 	registry, err := vulkanRegistryV12.identity()
 	if err != nil {

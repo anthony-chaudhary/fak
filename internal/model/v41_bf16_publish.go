@@ -24,6 +24,7 @@ func enableV41BF16Witness() (stop func()) {
 	v41HostBF16Rounds.Store(0)
 	v41BF16PublishCalls.Store(0)
 	v41BF16ResidentCalls.Store(0)
+	v41IndexWeightScaleCalls.Store(0)
 	v41HostBF16Witness.Store(true)
 	return func() { v41HostBF16Witness.Store(false) }
 }
