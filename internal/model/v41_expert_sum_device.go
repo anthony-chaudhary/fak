@@ -80,10 +80,25 @@ func v41SelectedDeviceCall[T any](s *Session, layer int, path string, run func(s
 	var zero T
 	s.ensureOpenBackendSession()
 	stage := "payload"
-	closeFailure := func(err error) error {
-		closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: path, Layer: layer, Stage: stage, Cause: err}
-		s.halFailure = closed
+	closeSelected := func(primary error) {
+		if s.halFailure == nil {
+			s.halFailure = primary
+		}
+		if s.halClosed {
+			return
+		}
+		// An incoming typed fault can belong to another operation or owner.
+		// Retire this owner without replacing its primary if Close also fails.
+		defer func() { s.halClosed = true; _ = recover() }()
 		s.Close()
+	}
+	closeFailure := func(err error) error {
+		if s.halFailure != nil {
+			closeSelected(s.halFailure)
+			return s.halFailure
+		}
+		closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: path, Layer: layer, Stage: stage, Cause: err}
+		closeSelected(closed)
 		return closed
 	}
 	defer func() {
@@ -91,6 +106,7 @@ func v41SelectedDeviceCall[T any](s *Session, layer int, path string, run func(s
 			if err, ok := r.(error); ok {
 				var closed *BackendForwardOperationError
 				if errors.As(err, &closed) {
+					closeSelected(err)
 					panic(r)
 				}
 				var backend *compute.BackendError
