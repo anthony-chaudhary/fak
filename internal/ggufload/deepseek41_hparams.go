@@ -124,8 +124,9 @@ func ds41FloatArray(f *File, key string) ([]float64, bool, error) {
 			return float64(item.Value.(float32)), true
 		case TypeFloat64:
 			return item.Value.(float64), true
+		default:
+			return 0, false
 		}
-		return 0, false
 	})
 	if !ok || len(vals) == 0 {
 		return nil, true, ds41HParamErr(key, "must be a non-empty float array")
