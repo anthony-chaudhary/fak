@@ -6,10 +6,10 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1303<br>
-rows: 1269<br>
-unverified rows: 0 / 1269<br>
-source-only rows absent from help: 1033
+parsed files: 1305<br>
+rows: 1271<br>
+unverified rows: 0 / 1271<br>
+source-only rows absent from help: 1035
 
 ## Surface table
 
@@ -233,6 +233,8 @@ source-only rows absent from help: 1033
 | `fak compute help` |  |  | `case` arm of the dispatch switch in runCompute() | N/A | — | **SOURCE ONLY** |
 | `fak compute-trace` | capture or summarize bounded compute-event trace artifacts | runComputeTrace / internal/compute, internal/computetrace | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak compute-trace capture` |  | eventDuration | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
+| `fak compute-trace from-llamacpp` | converts a llama.cpp tensor dump directory into a reference activation trace, optionally adopting a fak trace's digests. | runComputeTraceFromLlamaCpp / internal/computetrace | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
+| `fak compute-trace profile` | prints the per-(layer, stage) activation error profile of an actual trace against a reference trace. | runComputeTraceProfile / internal/computetrace | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
 | `fak compute-trace summary` |  | eventDuration | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
 | `fak concept` | position, classify, or validate entries in the concept catalog | runConceptCLI / internal/conceptcatalog, internal/hooks, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbA() | RUNTIME | — | **SOURCE ONLY** |
 | `fak concept freshness` | answers the question the gate asks, so an operator can check a pathspec before paying for a refusal. | runConceptFreshnessStaged / internal/conceptcatalog, internal/windowgate | `case` arm of the dispatch switch in runConceptCLI() | RUNTIME | — | **SOURCE ONLY** |
