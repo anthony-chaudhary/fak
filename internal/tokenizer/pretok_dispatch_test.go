@@ -114,3 +114,37 @@ func TestPreTokKindMappingParity(t *testing.T) {
 		}
 	}
 }
+
+// TestGGMLPreTokKindExistingFamiliesUnchanged pins that wiring the DeepSeek-V3/JoyAI hints
+// (exact "deepseek-v3"/"joyai-llm") moved no other GGUF hint: Qwen, GLM-4 and Gemma keep
+// their splitters and the GPT-2 hints keep ByteLevel. The existing kind values also stay
+// put, since Tokenizer.Identity digests int(preTokKind) for every loaded tokenizer.
+func TestGGMLPreTokKindExistingFamiliesUnchanged(t *testing.T) {
+	cases := map[string]preTokKind{
+		"qwen2":       preTokQwen,
+		"qwen35":      preTokQwen,
+		"qwen2moe":    preTokQwen,
+		"qwen3moe":    preTokQwen,
+		"glm4":        preTokGLM4,
+		"glm5":        preTokGLM4,
+		"chatglm-bpe": preTokGLM4,
+		"gemma4":      preTokMetaspace,
+		"gpt2":        preTokByteLevel,
+		"smollm":      preTokByteLevel,
+		"":            preTokByteLevel,
+	}
+	for hint, want := range cases {
+		if got := ggmlPreTokKind(hint); got != want {
+			t.Errorf("ggmlPreTokKind(%q) = %d, want %d", hint, got, want)
+		}
+	}
+	if preTokByteLevel != 0 || preTokQwen != 1 || preTokGLM4 != 2 || preTokMetaspace != 3 {
+		t.Errorf("existing pre-tokenizer kinds renumbered: bytelevel=%d qwen=%d glm4=%d metaspace=%d",
+			preTokByteLevel, preTokQwen, preTokGLM4, preTokMetaspace)
+	}
+	for _, hint := range []string{"joyai-llm", "deepseek-v3"} {
+		if ggmlPreTokKind(hint) == preTokByteLevel {
+			t.Errorf("ggmlPreTokKind(%q) fell through to GPT-2 ByteLevel", hint)
+		}
+	}
+}

@@ -1,0 +1,2514 @@
+# DeepSeek-V4.1-Flash GGUF tokenizer slice (vcruz305/DeepSeek-V4.1-Flash-GGUF Q2_K shard 1,
+# sha256 0bcee934bd4e8350c54410681d9300b0321a300fcb1df1437a20703394d08ee0): every token and
+# merge whose byte-level text is a substring of a deepseek_v41_golden.tsv line, original ids
+# and merge order kept. Fields are TAB-separated; token and merge text is base64.
+pre	joyai-llm
+n_vocab	129280
+token	0	3	PO+9nGJlZ2lu4paBb2biloFzZW50ZW5jZe+9nD4=
+token	1	3	PO+9nGVuZOKWgW9m4paBc2VudGVuY2XvvZw+
+token	3	1	IQ==
+token	4	1	Ig==
+token	5	1	Iw==
+token	6	1	JA==
+token	7	1	JQ==
+token	8	1	Jg==
+token	9	1	Jw==
+token	10	1	KA==
+token	11	1	KQ==
+token	12	1	Kg==
+token	13	1	Kw==
+token	14	1	LA==
+token	15	1	LQ==
+token	16	1	Lg==
+token	17	1	Lw==
+token	18	1	MA==
+token	19	1	MQ==
+token	20	1	Mg==
+token	21	1	Mw==
+token	22	1	NA==
+token	23	1	NQ==
+token	24	1	Ng==
+token	25	1	Nw==
+token	26	1	OA==
+token	27	1	OQ==
+token	28	1	Og==
+token	29	1	Ow==
+token	31	1	PQ==
+token	32	1	Pg==
+token	33	1	Pw==
+token	34	1	QA==
+token	35	1	QQ==
+token	36	1	Qg==
+token	37	1	Qw==
+token	39	1	RQ==
+token	40	1	Rg==
+token	42	1	SA==
+token	43	1	SQ==
+token	48	1	Tg==
+token	49	1	Tw==
+token	50	1	UA==
+token	53	1	Uw==
+token	54	1	VA==
+token	57	1	Vw==
+token	60	1	Wg==
+token	61	1	Ww==
+token	62	1	XA==
+token	63	1	XQ==
+token	64	1	Xg==
+token	65	1	Xw==
+token	66	1	YA==
+token	67	1	YQ==
+token	68	1	Yg==
+token	69	1	Yw==
+token	70	1	ZA==
+token	71	1	ZQ==
+token	72	1	Zg==
+token	73	1	Zw==
+token	74	1	aA==
+token	75	1	aQ==
+token	76	1	ag==
+token	77	1	aw==
+token	78	1	bA==
+token	79	1	bQ==
+token	80	1	bg==
+token	81	1	bw==
+token	82	1	cA==
+token	83	1	cQ==
+token	84	1	cg==
+token	85	1	cw==
+token	86	1	dA==
+token	87	1	dQ==
+token	88	1	dg==
+token	89	1	dw==
+token	90	1	eA==
+token	91	1	eQ==
+token	92	1	eg==
+token	93	1	ew==
+token	95	1	fQ==
+token	96	1	fg==
+token	98	1	wqI=
+token	99	1	wqM=
+token	100	1	wqQ=
+token	101	1	wqU=
+token	102	1	wqY=
+token	104	1	wqg=
+token	105	1	wqk=
+token	106	1	wqo=
+token	107	1	wqs=
+token	108	1	wqw=
+token	109	1	wq4=
+token	110	1	wq8=
+token	113	1	wrI=
+token	114	1	wrM=
+token	115	1	wrQ=
+token	116	1	wrU=
+token	118	1	wrc=
+token	119	1	wrg=
+token	120	1	wrk=
+token	121	1	wro=
+token	122	1	wrs=
+token	123	1	wrw=
+token	124	1	wr0=
+token	126	1	wr8=
+token	129	1	w4I=
+token	130	1	w4M=
+token	139	1	w4w=
+token	141	1	w44=
+token	143	1	w5A=
+token	144	1	w5E=
+token	152	1	w5k=
+token	161	1	w6I=
+token	162	1	w6M=
+token	163	1	w6Q=
+token	164	1	w6U=
+token	165	1	w6Y=
+token	166	1	w6c=
+token	167	1	w6g=
+token	169	1	w6o=
+token	170	1	w6s=
+token	171	1	w6w=
+token	172	1	w60=
+token	174	1	w68=
+token	175	1	w7A=
+token	192	1	xIE=
+token	200	1	xIk=
+token	201	1	xIo=
+token	204	1	xI0=
+token	223	1	xKA=
+token	225	1	xKI=
+token	226	1	xKM=
+token	227	1	xKQ=
+token	228	1	xKU=
+token	229	1	xKY=
+token	230	1	xKc=
+token	231	1	xKg=
+token	232	1	xKk=
+token	233	1	xKo=
+token	234	1	xKs=
+token	235	1	xKw=
+token	236	1	xK0=
+token	237	1	xK4=
+token	238	1	xK8=
+token	239	1	xLA=
+token	241	1	xLI=
+token	242	1	xLM=
+token	243	1	xLQ=
+token	244	1	xLU=
+token	245	1	xLY=
+token	246	1	xLc=
+token	247	1	xLg=
+token	248	1	xLk=
+token	249	1	xLo=
+token	250	1	xLs=
+token	253	1	xL4=
+token	254	1	xL8=
+token	255	1	xYA=
+token	256	1	xYE=
+token	257	1	xYI=
+token	258	1	xYM=
+token	259	1	xKB0
+token	260	1	xKBh
+token	261	1	aW4=
+token	262	1	xKDEoA==
+token	263	1	aGU=
+token	264	1	ZXI=
+token	265	1	b24=
+token	266	1	cmU=
+token	267	1	ZW4=
+token	268	1	YXQ=
+token	269	1	xKBz
+token	270	1	xKB0aGU=
+token	271	1	xIrEig==
+token	272	1	b3I=
+token	273	1	ZXM=
+token	274	1	xKBj
+token	275	1	w6TCuA==
+token	276	1	YW4=
+token	277	1	xKBv
+token	278	1	aXM=
+token	279	1	aXQ=
+token	280	1	xKBw
+token	281	1	xKB3
+token	282	1	YWw=
+token	283	1	xKBk
+token	284	1	ZWQ=
+token	285	1	xKBm
+token	286	1	w6/CvA==
+token	287	1	YXI=
+token	288	1	aW5n
+token	289	1	bmQ=
+token	290	1	xKDEoMSgxKA=
+token	291	1	xKBi
+token	292	1	xKBt
+token	293	1	b3U=
+token	294	1	xKBvZg==
+token	296	1	aW9u
+token	297	1	aWM=
+token	298	1	w6PEog==
+token	300	1	w6LEog==
+token	302	1	bGU=
+token	303	1	w6/CvMSu
+token	305	1	xKBhbmQ=
+token	306	1	YXM=
+token	307	1	cm8=
+token	309	1	ZW50
+token	310	1	xKBo
+token	312	1	xKBl
+token	313	1	xKBu
+token	314	1	xKBs
+token	315	1	xKB0aA==
+token	316	1	b20=
+token	317	1	ZWw=
+token	319	1	ZXQ=
+token	320	1	w6PEosSk
+token	321	1	aWw=
+token	322	1	xKByZQ==
+token	325	1	w6bEvg==
+token	328	1	aW0=
+token	329	1	aWQ=
+token	331	1	b2w=
+token	332	1	xKDDkA==
+token	336	1	xKBn
+token	337	1	cmE=
+token	339	1	LsSKxIo=
+token	342	1	xKBJ
+token	343	1	xKAo
+token	344	1	xKBpcw==
+token	345	1	xKBD
+token	346	1	dXI=
+token	347	1	b3Q=
+token	348	1	Y2g=
+token	350	1	aWc=
+token	352	1	w6XEqg==
+token	353	1	Y2U=
+token	356	1	YW0=
+token	357	1	w6TCvQ==
+token	360	1	YWQ=
+token	361	1	xKDEoMSg
+token	362	1	xKBmb3I=
+token	363	1	dWw=
+token	364	1	w6XEsg==
+token	381	1	ZW0=
+token	383	1	xKB5
+token	386	1	YXk=
+token	393	1	w5DCuA==
+token	395	1	dW0=
+token	397	1	MjA=
+token	401	1	b2Q=
+token	403	1	cXU=
+token	408	1	w6jCrw==
+token	409	1	YWc=
+token	410	1	w6PEosSj
+token	411	1	xKBhbg==
+token	415	1	w6PEow==
+token	417	1	w6bEuA==
+token	425	1	YWI=
+token	426	1	Li4=
+token	427	1	dmU=
+token	428	1	w6LEosS+
+token	430	1	w6LEosS/
+token	431	1	w6bEuQ==
+token	438	1	xKA9
+token	439	1	YWM=
+token	442	1	w6LEosS7
+token	444	1	w5HEow==
+token	447	1	xKBG
+token	448	1	xKBX
+token	452	1	w5HEog==
+token	458	1	YW5k
+token	463	1	dGg=
+token	465	1	xKBjb20=
+token	467	1	c2U=
+token	468	1	xKBoZQ==
+token	469	1	xKBvcg==
+token	480	1	YWs=
+token	484	1	b2M=
+token	490	1	bWVudA==
+token	491	1	aHQ=
+token	494	1	xKBy
+token	504	1	MDA=
+token	511	1	MTk=
+token	514	1	bGQ=
+token	516	1	w6XCpQ==
+token	520	1	b2c=
+token	521	1	YXJ0
+token	523	1	ZW5k
+token	525	1	w6TCuMWD
+token	532	1	xKBsZQ==
+token	533	1	bnQ=
+token	537	1	xKBjaA==
+token	539	1	xKDEig==
+token	540	1	cGw=
+token	544	1	xKDDmQ==
+token	549	1	xKB1
+token	551	1	b3Vy
+token	553	1	MTA=
+token	560	1	aW5l
+token	565	1	xKAt
+token	568	1	xKBzaA==
+token	574	1	ZWxs
+token	578	1	YWxs
+token	579	1	xKB3ZQ==
+token	582	1	xKAi
+token	592	1	dGU=
+token	593	1	YXJk
+token	595	1	aWNhbA==
+token	597	1	xKBq
+token	603	1	LsSK
+token	604	1	dWI=
+token	619	1	w4PCqQ==
+token	630	1	YXA=
+token	645	1	xKBxdQ==
+token	647	1	xKB3b3I=
+token	649	1	w5HEpQ==
+token	655	1	aW5k
+token	658	1	w5DCug==
+token	663	1	xKDDosSi
+token	665	1	w6PEpA==
+token	666	1	Kio=
+token	671	1	VGhl
+token	680	1	xKB7
+token	681	1	aWRl
+token	682	1	KcSK
+token	689	1	w6bCtQ==
+token	691	1	YW1l
+token	696	1	xKBkbw==
+token	723	1	aW1l
+token	726	1	YXNl
+token	730	1	YW5jZQ==
+token	734	1	J3M=
+token	736	1	MTI=
+token	751	1	w6XEqsSo
+token	762	1	Li4uLg==
+token	763	1	b3Jk
+token	764	1	xKBb
+token	803	1	bmU=
+token	804	1	w6TCvcWC
+token	805	1	YWNl
+token	807	1	xKBnbw==
+token	811	1	xKDDosSixL4=
+token	813	1	a3M=
+token	829	1	eHQ=
+token	835	1	Ly8=
+token	849	1	dXJu
+token	851	1	xKB0aGV5
+token	853	1	w6XCpcK9
+token	856	1	MTU=
+token	862	1	bGw=
+token	866	1	cGg=
+token	868	1	KcSKxIo=
+token	874	1	xKBc
+token	877	1	YWtl
+token	878	1	xKBzcA==
+token	879	1	YWls
+token	890	1	xKB1cA==
+token	897	1	Y2Vz
+token	901	1	YXRo
+token	905	1	xKAn
+token	912	1	w6PEpQ==
+token	917	1	w6bEvsKs
+token	924	1	b2I=
+token	928	1	ZGU=
+token	929	1	MTQ=
+token	939	1	MjAy
+token	940	1	xKAr
+token	944	1	xKBf
+token	957	1	xKAk
+token	958	1	ZXc=
+token	961	1	xKB6
+token	962	1	cGxl
+token	965	1	w6LEosS2
+token	968	1	Y29t
+token	971	1	d2U=
+token	978	1	w6bEuMSp
+token	987	1	w6XEssSq
+token	989	1	LMSK
+token	992	1	bmc=
+token	994	1	aXNo
+token	998	1	xInEiQ==
+token	1002	1	MTc=
+token	1004	1	xKDEisSK
+token	1008	1	xKBp
+token	1013	1	YXJr
+token	1014	1	xKB0aW1l
+token	1015	1	d28=
+token	1024	1	xKBjb21t
+token	1034	1	Y2hl
+token	1067	1	xKDDgw==
+token	1080	1	w6bEucKl
+token	1089	1	ZXRo
+token	1094	1	xKByZXQ=
+token	1096	1	w6fEtw==
+token	1127	1	w6LEosS1
+token	1129	1	b2xk
+token	1137	1	OsSK
+token	1149	1	cHM=
+token	1185	1	aGF0
+token	1188	1	bmluZw==
+token	1200	1	aW8=
+token	1203	1	xKDDgg==
+token	1204	1	xKAu
+token	1218	1	xKBjbw==
+token	1225	1	xKBzaGU=
+token	1238	1	ZWY=
+token	1240	1	P8SKxIo=
+token	1247	1	xKDDjg==
+token	1248	1	w6LEosKm
+token	1282	1	Ymxl
+token	1289	1	ZXg=
+token	1298	1	xKBkaQ==
+token	1303	1	aXRz
+token	1320	1	MDAw
+token	1323	1	w6bCtw==
+token	1327	1	xKDDog==
+token	1328	1	NTA=
+token	1349	1	MjM=
+token	1354	1	xKByZXR1cm4=
+token	1357	1	MTk5
+token	1366	1	ZWM=
+token	1383	1	xKBwYXI=
+token	1393	1	KCk=
+token	1394	1	b3Ro
+token	1421	1	d2Vlbg==
+token	1422	1	dWxs
+token	1423	1	aXg=
+token	1425	1	dXA=
+token	1431	1	ZXk=
+token	1443	1	w5DCuQ==
+token	1450	1	MjY=
+token	1457	1	MTAw
+token	1462	1	aGVk
+token	1480	1	eW0=
+token	1483	1	c3A=
+token	1492	1	xKAv
+token	1506	1	xKBoZWw=
+token	1518	1	ZnVs
+token	1527	1	xKB4
+token	1537	1	xKAs
+token	1552	1	dHQ=
+token	1576	1	w6PEo8Ku
+token	1613	1	Li4u
+token	1619	1	cmFu
+token	1628	1	w4LCsg==
+token	1636	1	VGg=
+token	1639	1	xKBjaGU=
+token	1648	1	dHM=
+token	1653	1	xKBa
+token	1664	1	J3Q=
+token	1692	1	Y28=
+token	1695	1	aW1lcw==
+token	1780	1	Jyw=
+token	1789	1	cGFy
+token	1805	1	dGhl
+token	1823	1	xKAj
+token	1826	1	bmVy
+token	1836	1	bGluZQ==
+token	1844	1	YXNo
+token	1864	1	ZWI=
+token	1876	1	b3g=
+token	1883	1	NDU=
+token	1892	1	ODA=
+token	1911	1	aXRhbA==
+token	1932	1	w5HEo8OQwro=
+token	1964	1	T04=
+token	1977	1	OTk=
+token	1984	1	w6TCuMS4
+token	1999	1	xKBXaGF0
+token	2012	1	MzQ=
+token	2014	1	YW5j
+token	2018	1	w63Etw==
+token	2030	1	YW1w
+token	2058	1	xKB3b3JsZA==
+token	2064	1	w6jCqg==
+token	2070	1	xKBsZWFk
+token	2083	1	bWU=
+token	2090	1	xKBkb24=
+token	2096	1	xKDDosSixLo=
+token	2098	1	xKDDkQ==
+token	2101	1	cmV0
+token	2105	1	LT4=
+token	2106	1	w47CuQ==
+token	2121	1	xKBtYXJr
+token	2136	1	xKDDosSixLY=
+token	2143	1	xKDEoMSK
+token	2148	1	LiI=
+token	2154	1	b2Y=
+token	2162	1	w4LFgg==
+token	2175	1	cmFwaA==
+token	2190	1	w6LEqg==
+token	2193	1	LmNvbQ==
+token	2198	1	bGk=
+token	2223	1	w47CvQ==
+token	2225	1	OTA=
+token	2234	1	w6fEt8Su
+token	2238	1	YWk=
+token	2248	1	ZWU=
+token	2251	1	Zm9y
+token	2258	1	bWE=
+token	2272	1	Oi8v
+token	2282	1	xKBXaA==
+token	2304	1	YmU=
+token	2314	1	b3Rl
+token	2315	1	NTU=
+token	2317	1	emU=
+token	2342	1	xKBjYXA=
+token	2343	1	bGlzaA==
+token	2367	1	aW5pbmc=
+token	2382	1	YnM=
+token	2390	1	xKBA
+token	2401	1	w6jCr8S3
+token	2417	1	LWQ=
+token	2438	1	a2U=
+token	2453	1	U1Q=
+token	2495	1	w6PEo8Ko
+token	2551	1	QU4=
+token	2568	1	dGE=
+token	2596	1	IcSKxIo=
+token	2597	1	Nzg=
+token	2605	1	KTo=
+token	2610	1	ZW50aW9u
+token	2616	1	MDE=
+token	2678	1	xKDDg8Kp
+token	2679	1	w6bCtcSt
+token	2689	1	xKBmb3Vy
+token	2701	1	IsSK
+token	2710	1	Z28=
+token	2714	1	w6vErQ==
+token	2720	1	bmE=
+token	2726	1	QVM=
+token	2734	1	xKB0aW1lcw==
+token	2737	1	Q29t
+token	2743	1	ZGVu
+token	2755	1	P8SK
+token	2761	1	bGluZw==
+token	2779	1	w6/Cvw==
+token	2797	1	YWY=
+token	2806	1	xKDDosSo
+token	2846	1	LWM=
+token	2864	1	xKBwYQ==
+token	2868	1	aGVt
+token	2881	1	dWJs
+token	2902	1	bWF0aA==
+token	2909	1	b2dyYXBo
+token	2936	1	w6PEo8Su
+token	2942	1	w6PEo8Kq
+token	3015	1	cmFw
+token	3025	1	w5HEosORxKU=
+token	3037	1	c2g=
+token	3050	1	dHI=
+token	3085	1	V2hhdA==
+token	3104	1	xKAl
+token	3108	1	Li4uxIrEig==
+token	3119	1	xKBuYQ==
+token	3158	1	SGU=
+token	3174	1	cmFn
+token	3186	1	Njc=
+token	3251	1	xKBkaWc=
+token	3254	1	xKDDosSq
+token	3286	1	NDE=
+token	3289	1	XCg=
+token	3305	1	Ii4=
+token	3309	1	aWNh
+token	3315	1	MDc=
+token	3318	1	NTk=
+token	3319	1	w4PCqXM=
+token	3335	1	XC4=
+token	3367	1	xKBtYXI=
+token	3372	1	SWQ=
+token	3384	1	Y29tbQ==
+token	3395	1	KTrEig==
+token	3403	1	w5DCusOQwrg=
+token	3421	1	aWxp
+token	3422	1	w47Cuw==
+token	3425	1	MDI=
+token	3427	1	w6TCuMS4w6fEt8Su
+token	3444	1	YXJh
+token	3465	1	ZGVm
+token	3478	1	w47Cug==
+token	3505	1	w6LEosS6
+token	3511	1	w47Ctw==
+token	3519	1	xKBzeW0=
+token	3530	1	xKBmdWxs
+token	3541	1	Ym8=
+token	3567	1	bm8=
+token	3574	1	w7DFgQ==
+token	3575	1	SWY=
+token	3583	1	xKBwYXJh
+token	3608	1	xKBg
+token	3614	1	aHR0
+token	3625	1	L2g=
+token	3649	1	xKDDrQ==
+token	3661	1	NTY=
+token	3708	1	YXJ0aA==
+token	3778	1	Ymw=
+token	3823	1	YWNlcw==
+token	3845	1	LmQ=
+token	3874	1	w6vErcKk
+token	3884	1	ZXJv
+token	3899	1	d29yZA==
+token	3916	1	cmV0dXJu
+token	3960	1	xKBDTw==
+token	3973	1	QVA=
+token	3987	1	xKBzcGFjZQ==
+token	4001	1	LmM=
+token	4016	1	ZG8=
+token	4042	1	KHg=
+token	4050	1	xKAh
+token	4054	1	xKA/
+token	4055	1	w6jCr8Sv
+token	4059	1	aGE=
+token	4069	1	w4LFgsOCxYI=
+token	4127	1	xKBjYW1l
+token	4144	1	Xyw=
+token	4247	1	aGVs
+token	4291	1	V2g=
+token	4313	1	w5HEo8OQwrrDkMK4
+token	4319	1	YXJj
+token	4336	1	YXJi
+token	4362	1	ODk=
+token	4378	1	RW4=
+token	4394	1	LnQ=
+token	4552	1	Ym9s
+token	4557	1	Lyg=
+token	4580	1	YmI=
+token	4584	1	LkE=
+token	4588	1	xKAuLi4=
+token	4610	1	NzI=
+token	4615	1	xKBzeQ==
+token	4665	1	KHQ=
+token	4707	1	IsSKxIo=
+token	4708	1	aWR0aA==
+token	4710	1	cnQ=
+token	4750	1	J3Jl
+token	4778	1	aWRlbw==
+token	4856	1	w6zFgA==
+token	4858	1	NjI=
+token	4862	1	aXRh
+token	4878	1	xKBGcmFu
+token	4934	1	bWVu
+token	4941	1	X2M=
+token	4970	1	w6PEpMSr
+token	4979	1	bG8=
+token	4981	1	aW5p
+token	5053	1	aXhlZA==
+token	5055	1	Q08=
+token	5096	1	Y2Fs
+token	5110	1	LiM=
+token	5123	1	KGY=
+token	5136	1	Lik=
+token	5164	1	xKBtYQ==
+token	5175	1	Zm8=
+token	5196	1	Lmg=
+token	5228	1	bWFy
+token	5230	1	YGA=
+token	5252	1	L2M=
+token	5269	1	xKBjaGVt
+token	5270	1	J3Zl
+token	5333	1	dGQ=
+token	5360	1	bGlu
+token	5395	1	aHR0cHM=
+token	5404	1	YW1wbGU=
+token	5563	1	w47CrA==
+token	5567	1	ZGluZw==
+token	5590	1	xKBqbw==
+token	5615	1	aGlj
+token	5618	1	xKBx
+token	5626	1	xKBGcg==
+token	5628	1	YmE=
+token	5634	1	w63Et8S+
+token	5646	1	xKB3b24=
+token	5674	1	c3Vt
+token	5677	1	KMSK
+token	5745	1	Z2w=
+token	5764	1	w6bCt8K3
+token	5787	1	bmk=
+token	5790	1	cGFjZQ==
+token	5801	1	bXA=
+token	5826	1	w4LCsw==
+token	5832	1	J8SK
+token	5840	1	TmV3
+token	5849	1	YnQ=
+token	5858	1	xKBmdWw=
+token	5883	1	ZWFk
+token	5920	1	ZGY=
+token	5922	1	J2xs
+token	5976	1	cGk=
+token	6002	1	bW0=
+token	6036	1	KGE=
+token	6060	1	cGF0
+token	6102	1	xKBjYXBpdGFs
+token	6142	1	Li4v
+token	6204	1	U0U=
+token	6223	1	w47CucOOwro=
+token	6229	1	LmI=
+token	6248	1	xKAtPg==
+token	6256	1	cGE=
+token	6328	1	xIrEisSK
+token	6366	1	aGk=
+token	6379	1	b28=
+token	6392	1	w6bEucKlw6bEvsKs
+token	6421	1	w6PEpMK5
+token	6424	1	bWF0
+token	6434	1	KGM=
+token	6438	1	b21i
+token	6488	1	xKBjYQ==
+token	6515	1	YmFy
+token	6544	1	Y2E=
+token	6596	1	b3Jkcw==
+token	6620	1	xKDDkMSy
+token	6646	1	xKBsZWFkaW5n
+token	6661	1	w6LEqA==
+token	6717	1	Li4uLi4u
+token	6761	1	L2Q=
+token	6768	1	xKrDq8StwqQ=
+token	6776	1	xKDEoMSKxIo=
+token	6787	1	xKDDosSoxLQ=
+token	6796	1	w4PFgQ==
+token	6833	1	xKB0aW0=
+token	6846	1	ZW50ZQ==
+token	6851	1	Llc=
+token	6883	1	xKB+
+token	6884	1	ODAw
+token	6895	1	MTIz
+token	6900	1	aHR0cA==
+token	6909	1	ISE=
+token	6921	1	cmM=
+token	6925	1	bWVz
+token	6961	1	xKBjYW0=
+token	6975	1	X8SKxIo=
+token	6980	1	KCg=
+token	6984	1	Li8=
+token	6996	1	w4PCqXQ=
+token	7006	1	xKBjb21tZW50
+token	7011	1	KGI=
+token	7028	1	xInEig==
+token	7063	1	amk=
+token	7079	1	am8=
+token	7129	1	bW8=
+token	7164	1	KGQ=
+token	7171	1	w6zErA==
+token	7182	1	w6PEpcSq
+token	7183	1	b3Rlcw==
+token	7202	1	xKByw4PCqQ==
+token	7216	1	bWk=
+token	7301	1	emVy
+token	7308	1	w5HEo8ORxKM=
+token	7349	1	w6rCtQ==
+token	7351	1	xKDDsMWB
+token	7380	1	xKBzeW1ib2w=
+token	7400	1	aWxpbmc=
+token	7414	1	KC0=
+token	7485	1	J2Q=
+token	7562	1	ZHM=
+token	7565	1	w6zEuA==
+token	7626	1	w5DEsg==
+token	7658	1	xKBjaGVtaWNhbA==
+token	7747	1	bWFyaw==
+token	7772	1	aGV0
+token	7795	1	cmQ=
+token	7815	1	Xy4=
+token	7835	1	Li4uxIo=
+token	8189	1	ZWxsbw==
+token	8195	1	YXBp
+token	8322	1	dGltZQ==
+token	8408	1	b2k=
+token	8441	1	c2k=
+token	8442	1	Z3Jh
+token	8453	1	Ymk=
+token	8487	1	TlM=
+token	8495	1	xKBnb2xk
+token	8533	1	Q0E=
+token	8566	1	b2dyYXBoaWM=
+token	8567	1	IcSK
+token	8616	1	YWRp
+token	8674	1	w6LEqMS0
+token	8760	1	xKBGcmFuY2U=
+token	8811	1	Pz8=
+token	8812	1	dGVz
+token	8863	1	eWU=
+token	9106	1	w4PCqWQ=
+token	9181	1	X2I=
+token	9227	1	w6zEuMK0
+token	9237	1	JCQ=
+token	9275	1	Z2k=
+token	9292	1	J8SKxIo=
+token	9337	1	ZW1pYw==
+token	9350	1	LVw=
+token	9391	1	L3A=
+token	9417	1	dGk=
+token	9552	1	LcSKxIo=
+token	9576	1	xKDDosSr
+token	9688	1	b2o=
+token	9787	1	ZGQ=
+token	9800	1	b3VibGU=
+token	9855	1	LWE=
+token	9860	1	cGF0aA==
+token	9896	1	RW5n
+token	9899	1	dGVk
+token	9908	1	KS0=
+token	9926	1	MTQx
+token	9942	1	bmNl
+token	9972	1	w6vErcSqw6vErcKk
+token	10030	1	b3JsZA==
+token	10065	1	w6LEqw==
+token	10129	1	aW5lcg==
+token	10130	1	YXBo
+token	10251	1	w6bCtcStw6jCr8S3
+token	10276	1	Llw=
+token	10353	1	Q2Fs
+token	10419	1	w6LEpg==
+token	10435	1	xKAoLQ==
+token	10595	1	d29yZHM=
+token	10714	1	w6zErMKk
+token	10764	1	xKBqb2lu
+token	10774	1	Lng=
+token	10783	1	dGltZXM=
+token	10915	1	c2lu
+token	10923	1	xKBkaWdpdHM=
+token	10967	1	w6jCqsWA
+token	10969	1	MTU5
+token	10975	1	bHM=
+token	11067	1	TmU=
+token	11139	1	bWlj
+token	11160	1	dHRw
+token	11162	1	b3RoZQ==
+token	11278	1	xKBDT04=
+token	11313	1	Li7EisSK
+token	11340	1	Q28=
+token	11352	1	c20=
+token	11409	1	LcSK
+token	11424	1	xKBkaWdpdA==
+token	11432	1	ZGI=
+token	11581	1	eW1ib2w=
+token	11646	1	c3U=
+token	11648	1	ZGk=
+token	11675	1	Y2FzZQ==
+token	11714	1	YWRpbmc=
+token	11767	1	w6PEpMK/
+token	11775	1	d2k=
+token	11833	1	xKDDrcS3
+token	11859	1	PyI=
+token	11926	1	xKDDkcSi
+token	12040	1	LVc=
+token	12061	1	VEE=
+token	12317	1	cGhp
+token	12349	1	Z3I=
+token	12356	1	d2lkdGg=
+token	12390	1	aGFz
+token	12427	1	YWdyYXBo
+token	12514	1	b2E=
+token	12997	1	YnNw
+token	13014	1	xKDDkcSiw5HEpQ==
+token	13054	1	w4PCqWM=
+token	13314	1	Ymlu
+token	13318	1	xIrEisSKxIo=
+token	13382	1	cmFuY2U=
+token	13417	1	ZGM=
+token	13419	1	YXJrcw==
+token	13420	1	xKDDgsKp
+token	13564	1	xKBzcGFjZXM=
+token	13714	1	xKDDgsWC
+token	13719	1	b2lu
+token	13840	1	xKA/xIrEig==
+token	14235	1	X0M=
+token	14278	1	dGFi
+token	14286	1	w63ErA==
+token	14415	1	b2Rv
+token	14456	1	MjM0
+token	14505	1	SGVs
+token	14508	1	xKDDosSm
+token	14637	1	Y2hlbQ==
+token	14769	1	w6bCt8K3w6XEssSq
+token	14771	1	w6/CvMSz
+token	14791	1	c2hl
+token	15039	1	xKDDjsK7
+token	15138	1	KHk=
+token	15248	1	ZW50aQ==
+token	15271	1	xKBmdQ==
+token	15349	1	w63ErMK4
+token	15354	1	QVNF
+token	15363	1	xKBwYXJhZ3JhcGg=
+token	15372	1	xInEicSK
+token	15434	1	Q2FzZQ==
+token	15559	1	w47Ct8OOwr0=
+token	15576	1	QU5U
+token	15671	1	ZWVu
+token	15830	1	xKBjb21tZQ==
+token	15844	1	xKBtYXJrcw==
+token	15877	1	b2Nh
+token	15961	1	w6PEpMKr
+token	16087	1	xIlm
+token	16175	1	xKBoZWxs
+token	16323	1	LmE=
+token	16520	1	eWVz
+token	16597	1	ZHQ=
+token	16621	1	dGlvbg==
+token	16625	1	MjYy
+token	16642	1	xKBmbw==
+token	16651	1	cmg=
+token	16709	1	w4PCrw==
+token	16756	1	w4LCqQ==
+token	16760	1	w4LCrg==
+token	16836	1	KSM=
+token	16969	1	b2dyYXA=
+token	16980	1	w5HEo8OQwrrDkMK4w5DCuQ==
+token	17219	1	LSg=
+token	17237	1	Y2Fw
+token	17330	1	bWI=
+token	17382	1	xKDDrcS3xL4=
+token	17383	1	w6PEpcSo
+token	17466	1	w5HEpcORxKM=
+token	17469	1	LXg=
+token	17530	1	RW5nbGlzaA==
+token	17564	1	w6rCtcWD
+token	17713	1	csODwqk=
+token	17793	1	w4zEow==
+token	17844	1	ZWE=
+token	17889	1	MjY3
+token	17950	1	Z2xl
+token	18009	1	NDU2
+token	18014	1	MzQ1
+token	18141	1	W24=
+token	18214	1	NzIw
+token	18237	1	w6/CvMS0
+token	18253	1	xKBcxIo=
+token	18437	1	ZHg=
+token	18441	1	fsSK
+token	18520	1	Q2FsbA==
+token	18524	1	w6PEosSi
+token	18611	1	xKAuLg==
+token	18687	1	b2xz
+token	18750	1	XHg=
+token	18778	1	X3g=
+token	18872	1	ZW1v
+token	19091	1	YXBpdA==
+token	19177	1	KGg=
+token	19217	1	xKDDjsS3
+token	19425	1	aW5nbGU=
+token	19435	1	xKBzeW1ib2xz
+token	19453	1	NDE1
+token	19464	1	ZXRoZQ==
+token	19513	1	aGVsbA==
+token	19597	1	YXJkbw==
+token	19624	1	w47Cu8OOwrs=
+token	19660	1	dHJh
+token	19679	1	dHU=
+token	19686	1	ZW50ZWQ=
+token	19753	1	YmV0
+token	19923	1	SGVsbG8=
+token	20041	1	dGhleQ==
+token	20091	1	Py4=
+token	20229	1	c3BhY2U=
+token	20295	1	NTU1
+token	20300	1	bG9j
+token	20367	1	w6PEpMWD
+token	20385	1	ZG9u
+token	20563	1	ZG91Ymxl
+token	20608	1	xKB0aQ==
+token	20692	1	emVybw==
+token	20702	1	YmM=
+token	20823	1	X2E=
+token	20922	1	L2E=
+token	20975	1	w47CucOOwrrDjsKs
+token	21133	1	V29ybGQ=
+token	21134	1	w6TCuMWDw6bEuMSp
+token	21276	1	QVBJ
+token	21400	1	MDE5
+token	21457	1	ZnI=
+token	21538	1	xKByw4PCqXM=
+token	21592	1	LmNv
+token	21674	1	LHg=
+token	21692	1	dHc=
+token	21769	1	w6vErcSq
+token	21814	1	NjIw
+token	21877	1	XC8=
+token	21991	1	xKBGcmE=
+token	22141	1	xLfErg==
+token	22144	1	bWFya3M=
+token	22485	1	ZW1p
+token	22555	1	YWlsaW5n
+token	22904	1	Q09O
+token	23043	1	UEk=
+token	23277	1	am9pbg==
+token	23315	1	dHdv
+token	23462	1	w6zFgMSn
+token	23603	1	w6LEpw==
+token	23731	1	xKAoKw==
+token	23951	1	w4LCvQ==
+token	24004	1	xKBxdW90
+token	24164	1	dGFn
+token	24199	1	bWVs
+token	24222	1	ZGln
+token	24258	1	KV8=
+token	24351	1	LGM=
+token	24538	1	xKBxdW90ZQ==
+token	24552	1	w6PEpMK5w6PEpcSq
+token	24602	1	dWJsZQ==
+token	25081	1	w6/CvMS1
+token	25104	1	dHg=
+token	25141	1	Z3JhcGg=
+token	25191	1	bWF5
+token	25301	1	bmRl
+token	25358	1	I8SK
+token	25514	1	TlQ=
+token	25601	1	NTY3
+token	25605	1	JC4=
+token	25696	1	w47Cu8OOwrc=
+token	25744	1	Nzg5
+token	25951	1	w6LEqsSz
+token	26142	1	Li4uLi4=
+token	26819	1	w6LEpsKi
+token	26834	1	X8SK
+token	26904	1	dW8=
+token	26908	1	xKB3bw==
+token	27071	1	w6PEpcSs
+token	27168	1	ODkw
+token	27183	1	Njc4
+token	27184	1	MDI2
+token	27344	1	K8SK
+token	27552	1	Y2hlbWljYWw=
+token	27589	1	ZGlu
+token	27612	1	bnRl
+token	27684	1	L3g=
+token	27809	1	Q2E=
+token	28414	1	Ly4=
+token	28706	1	bmJzcA==
+token	28927	1	w7DFgcS6
+token	29015	1	ZnVsbA==
+token	29614	1	aW5kZQ==
+token	29616	1	d29ybGQ=
+token	29656	1	aGV4
+token	29693	1	K8SKxIo=
+token	29827	1	JCTEig==
+token	29870	1	KSI=
+token	30139	1	Z2l0
+token	30357	1	ZXhhbXBsZQ==
+token	30575	1	Y29tbWVudA==
+token	30580	1	Q29tYg==
+token	30594	1	w6TCvcWCw6XCpcK9
+token	30918	1	aGVh
+token	31084	1	YXJm
+token	31105	1	YW1lbA==
+token	31234	1	ZnU=
+token	31318	1	LSM=
+token	31831	1	L2U=
+token	32065	1	xKA/xIo=
+token	32142	1	fsSKxIo=
+token	32244	1	LGQ=
+token	32260	1	Iyc=
+token	32372	1	YWJj
+token	32401	1	ZWNh
+token	32560	1	c24=
+token	32842	1	aGVj
+token	33047	1	xKBxdW90ZXM=
+token	33095	1	w6/CvMS2
+token	33310	1	aGVsbG8=
+token	33680	1	c2luZw==
+token	33767	1	LC4=
+token	33853	1	bGlz
+token	34428	1	JMSK
+token	34513	1	ISEh
+token	34529	1	xKBjYWY=
+token	34705	1	K3g=
+token	34929	1	bG90
+token	34941	1	w6zFgMSnw6vErcSqw6vErcKk
+token	35020	1	w6LEosSt
+token	35211	1	XMSK
+token	35261	1	aGFzaA==
+token	35305	1	cmY=
+token	35638	1	cGFyYQ==
+token	35749	1	xInEoA==
+token	35904	1	PyM=
+token	35915	1	aW5kZW4=
+token	36284	1	Zm91cg==
+token	36290	1	bGVhZGluZw==
+token	36320	1	xKDEoMSKxKDEoMSK
+token	36382	1	L2hl
+token	36464	1	RnJhbg==
+token	36966	1	w63Epw==
+token	36975	1	cm4=
+token	37156	1	cXVv
+token	37496	1	xIli
+token	37953	1	L1w=
+token	37985	1	e20=
+token	38182	1	Pyg=
+token	38190	1	eGU=
+token	38620	1	Li7Eig==
+token	39201	1	cGl0
+token	39305	1	Oi8=
+token	39435	1	w5DCusOQwrjDkMK5
+token	39547	1	K2M=
+token	39641	1	xKDDkcSiw5HEpcORxKM=
+token	40020	1	KC4=
+token	40188	1	YmV0d2Vlbg==
+token	40259	1	w6PEo8Ky
+token	40435	1	w47Etw==
+token	40666	1	Y2Fz
+token	40784	1	d29y
+token	40897	1	Zm9v
+token	41045	1	cmI=
+token	41625	1	ZWRv
+token	41680	1	LWRv
+token	42236	1	aWdp
+token	42380	1	KyI=
+token	42625	1	ZsODwqk=
+token	42713	1	Li4uLi4uLg==
+token	43378	1	ZW8=
+token	43595	1	w47Cu8OOwrvDjsK3w47CvQ==
+token	43658	1	dGlt
+token	43687	1	cXVvdA==
+token	43829	1	xKBGcmFuYw==
+token	43941	1	b21tZW4=
+token	44234	1	w4PEog==
+token	44295	1	KFc=
+token	44388	1	xKBoZWxsbw==
+token	44477	1	LC4uLg==
+token	44673	1	LnRoZQ==
+token	45018	1	U2E=
+token	45075	1	Li4uIg==
+token	45119	1	bmFr
+token	45154	1	LiQ=
+token	45157	1	T05T
+token	45315	1	xKBxdW8=
+token	45441	1	LmNh
+token	45652	1	w6zErMKkw63ErMK4
+token	46219	1	eGE=
+token	46320	1	bmM=
+token	46405	1	ZGg=
+token	46617	1	aW5pbg==
+token	47031	1	Jy0=
+token	47224	1	b2dyYQ==
+token	47231	1	eGY=
+token	47261	1	cmw=
+token	47423	1	Xy0=
+token	47493	1	aGV5
+token	47619	1	YXJhZw==
+token	47808	1	ZXR1cg==
+token	47913	1	ISw=
+token	47953	1	csODwqlz
+token	48127	1	X1w=
+token	48536	1	c3k=
+token	48726	1	xKBjYXBpdGE=
+token	49293	1	xKDEiQ==
+token	49524	1	xKBjYXBpdA==
+token	49635	1	Y2Ft
+token	49648	1	YXJkb24=
+token	49803	1	PXQ=
+token	49917	1	ZXR3ZWVu
+token	49987	1	xKBnb2w=
+token	50366	1	LiE=
+token	50640	1	Pz8/
+token	50735	1	IkE=
+token	50964	1	KXg=
+token	51175	1	KcOixKLEtg==
+token	51669	1	xIl4
+token	51725	1	RnJhbmNl
+token	52143	1	xKBmb3U=
+token	52621	1	xKDDosSqxLM=
+token	53153	1	w7DFgcSw
+token	53169	1	YXJjYQ==
+token	53323	1	J2g=
+token	53428	1	cng=
+token	53769	1	xKDDsMWBxLo=
+token	53828	1	LSQ=
+token	54016	1	cXVvdGU=
+token	54125	1	b2dy
+token	54155	1	xIlp
+token	54346	1	dGFs
+token	54363	1	Y2hlbWlj
+token	54366	1	Ky8=
+token	54423	1	b2luZQ==
+token	54492	1	c2luZ2xl
+token	54613	1	b21t
+token	54975	1	YCk=
+token	55225	1	xKBzeW1i
+token	55233	1	Li4uIw==
+token	56465	1	dHA=
+token	56470	1	w6LEq8WC
+token	56883	1	bGVhZA==
+token	57203	1	dGY=
+token	57215	1	bWFydA==
+token	57291	1	YWdyYQ==
+token	57664	1	xKBjYWbDg8Kp
+token	57963	1	dGM=
+token	58331	1	w5HEosORxKXDkcSj
+token	58575	1	LGg=
+token	59088	1	bmI=
+token	59202	1	RnI=
+token	59751	1	aWxpbg==
+token	60431	1	w6LEosS2xIo=
+token	60657	1	ZnJh
+token	60744	1	aWdpdA==
+token	60746	1	L2V4
+token	61264	1	J2w=
+token	61291	1	xKDDrcSn
+token	61503	1	bGVh
+token	61547	1	bGxv
+token	61663	1	LyM=
+token	61873	1	b2Rvbg==
+token	62015	1	Ymg=
+token	62190	1	eWI=
+token	62279	1	xKDDgsKu
+token	62747	1	KUE=
+token	62932	1	xKAhIQ==
+token	63006	1	U2F5
+token	63014	1	xKDDosSrxYI=
+token	63154	1	cmFp
+token	63438	1	aHRh
+token	63618	1	KCs=
+token	63917	1	xIl3
+token	63918	1	YWRpbg==
+token	64048	1	d29u
+token	65292	1	bcODwqk=
+token	65392	1	KFo=
+token	66373	1	xKBzcGE=
+token	66383	1	w4zEqg==
+token	66524	1	cmFpbA==
+token	66670	1	J3Ro
+token	67130	1	xIrEoMSgxIo=
+token	67144	1	KC4uLg==
+token	67297	1	c3ltYm9s
+token	67920	1	YmFyZA==
+token	69804	1	KV/EisSK
+token	69865	1	Z29sZA==
+token	70042	1	xKBDT05TVA==
+token	70120	1	cGFyYWdyYXBo
+token	70753	1	dHVybg==
+token	70988	1	ZGVudA==
+token	71703	1	cGFjZXM=
+token	71928	1	bmlu
+token	72016	1	dGhlbA==
+token	72335	1	bWF5YmU=
+token	72571	1	Q2Fz
+token	73781	1	P1w=
+token	73923	1	d2Vl
+token	74572	1	xKBzcGFj
+token	74943	1	w5DCuMOQwrk=
+token	76093	1	LSc=
+token	76398	1	J3I=
+token	77126	1	ZXR1
+token	77930	1	bG9k
+token	78280	1	K3Q=
+token	78392	1	X2Nhc2U=
+token	79476	1	Q0FT
+token	79666	1	Y2FwaXRhbA==
+token	80201	1	cms=
+token	80696	1	LmRv
+token	81534	1	w6LEosS2LQ==
+token	81864	1	J2I=
+token	82389	1	xKBjYW1lbA==
+token	82644	1	b2pp
+token	84238	1	w4LFgsSg
+token	85444	1	ZGlnaXQ=
+token	86387	1	xKDDsA==
+token	86405	1	aWdpdHM=
+token	86677	1	V28=
+token	87266	1	c21hcnQ=
+token	87388	1	aXhl
+token	87653	1	ZG91
+token	87674	1	K2Y=
+token	87958	1	Li4uKQ==
+token	88089	1	xKDDrw==
+token	88180	1	YW1wbA==
+token	88768	1	w6bEucKlw6bEvsKsw6jCqsWA
+token	89017	1	c3lt
+token	89043	1	Lmhl
+token	89108	1	xInEisSK
+token	89471	1	U1RB
+token	89504	1	Lj8=
+token	90231	1	K0E=
+token	90264	1	w47CusOOwqw=
+token	90399	1	Li4j
+token	90445	1	Ii4uLg==
+token	90705	1	xKDDr8K8
+token	90902	1	dW3Dg8Kp
+token	91223	1	w4PCr3Zl
+token	91629	1	cmFwaGlj
+token	92233	1	ZGVv
+token	94876	1	ZXhhbQ==
+token	95148	1	KHRoZQ==
+token	95372	1	w6LEosS2Xw==
+token	96705	1	xKDDjA==
+token	97031	1	LnRo
+token	97256	1	LEA=
+token	97257	1	RnJh
+token	98656	1	eW1i
+token	98681	1	Z2xp
+token	98822	1	KCM=
+token	99321	1	bmRlbg==
+token	100086	1	xKBiw4PCqQ==
+token	100563	1	dHVy
+token	100695	1	bmFrZQ==
+token	100869	1	X2Jhcg==
+token	101287	1	aWR0
+token	102703	1	w6/Cv8Kl
+token	103768	1	xKBDT05T
+token	103919	1	b3Vi
+token	106787	1	Py4uLg==
+token	107296	1	xLPEisSK
+token	107948	1	d2lk
+token	108099	1	aGVi
+token	108138	1	KWI=
+token	108238	1	J1c=
+token	108675	1	xKBfLg==
+token	109344	1	SVc=
+token	109934	1	xIlpbg==
+token	110771	1	eGg=
+token	111880	1	SGVsbA==
+token	112105	1	P2E=
+token	112693	1	WmQ=
+token	112752	1	xKBuYcODwq92ZQ==
+token	113311	1	XGg=
+token	113912	1	LVdvcmxk
+token	114299	1	XCQ=
+token	114595	1	YXBpdGFs
+token	115184	1	bWl4
+token	117284	1	SWI=
+token	118993	1	YVc=
+token	119078	1	dGhlbGxv
+token	119777	1	LmFi
+token	120140	1	cGFj
+token	120740	1	cGl0YWw=
+token	121402	1	w6XEqsSow6jCr8Sv
+token	121482	1	YmFydA==
+token	122226	1	bG94
+token	122545	1	bWl4ZWQ=
+token	124452	1	bWVudGlvbg==
+token	126944	1	KHRo
+token	127024	1	fig=
+token	127056	1	w5nCow==
+token	127145	1	JGE=
+token	127167	1	w6/CvMSzw6/CvMS0
+merge	xKAgdA==
+merge	xKAgYQ==
+merge	aSBu
+merge	xKAgxKA=
+merge	aCBl
+merge	ZSBy
+merge	byBu
+merge	ciBl
+merge	ZSBu
+merge	YSB0
+merge	xKAgcw==
+merge	xKB0IGhl
+merge	xIogxIo=
+merge	byBy
+merge	ZSBz
+merge	xKAgYw==
+merge	w6Qgwrg=
+merge	YSBu
+merge	xKAgbw==
+merge	aSBz
+merge	aSB0
+merge	xKAgcA==
+merge	xKAgdw==
+merge	YSBs
+merge	xKAgZA==
+merge	ZSBk
+merge	xKAgZg==
+merge	w68gwrw=
+merge	YSBy
+merge	aW4gZw==
+merge	biBk
+merge	xKDEoCDEoMSg
+merge	xKAgYg==
+merge	xKAgbQ==
+merge	byB1
+merge	xKBvIGY=
+merge	aSBvbg==
+merge	aSBj
+merge	w6MgxKI=
+merge	w6IgxKI=
+merge	bCBl
+merge	w6/CvCDErg==
+merge	xKBhIG5k
+merge	YSBz
+merge	ciBv
+merge	ZW4gdA==
+merge	xKAgaA==
+merge	xKAgZQ==
+merge	xKAgbg==
+merge	xKAgbA==
+merge	xKB0IGg=
+merge	byBt
+merge	ZSBs
+merge	ZSB0
+merge	w6PEoiDEpA==
+merge	aSBs
+merge	xKAgcmU=
+merge	w6YgxL4=
+merge	aSBt
+merge	aSBk
+merge	byBs
+merge	xKAgw5A=
+merge	xKAgZw==
+merge	ciBh
+merge	LiDEisSK
+merge	xKAgSQ==
+merge	xKAgKA==
+merge	xKAgaXM=
+merge	xKAgQw==
+merge	dSBy
+merge	byB0
+merge	YyBo
+merge	aSBn
+merge	w6UgxKo=
+merge	YyBl
+merge	YSBt
+merge	w6Qgwr0=
+merge	YSBk
+merge	xKDEoCDEoA==
+merge	xKBmIG9y
+merge	dSBs
+merge	w6UgxLI=
+merge	ZSBt
+merge	xKAgeQ==
+merge	YSB5
+merge	w5Agwrg=
+merge	dSBt
+merge	MiAw
+merge	byBk
+merge	cSB1
+merge	w6ggwq8=
+merge	YSBn
+merge	w6PEoiDEow==
+merge	xKBhIG4=
+merge	w6MgxKM=
+merge	w6YgxLg=
+merge	YSBi
+merge	LiAu
+merge	diBl
+merge	w6LEoiDEvg==
+merge	w6LEoiDEvw==
+merge	w6YgxLk=
+merge	xKAgPQ==
+merge	YSBj
+merge	w6LEoiDEuw==
+merge	w5EgxKM=
+merge	xKAgRg==
+merge	xKAgVw==
+merge	w5EgxKI=
+merge	YW4gZA==
+merge	dCBo
+merge	xKBjIG9t
+merge	cyBl
+merge	xKAgaGU=
+merge	xKAgb3I=
+merge	YSBr
+merge	byBj
+merge	bSBlbnQ=
+merge	aCB0
+merge	xKAgcg==
+merge	MCAw
+merge	MSA5
+merge	bCBk
+merge	w6UgwqU=
+merge	byBn
+merge	YXIgdA==
+merge	ZW4gZA==
+merge	w6TCuCDFgw==
+merge	xKAgbGU=
+merge	biB0
+merge	xKBjIGg=
+merge	xKAgxIo=
+merge	cCBs
+merge	xKAgw5k=
+merge	xKAgdQ==
+merge	b3Ugcg==
+merge	MSAw
+merge	aW4gZQ==
+merge	xKAgLQ==
+merge	xKBzIGg=
+merge	ZWwgbA==
+merge	YWwgbA==
+merge	xKB3IGU=
+merge	xKAgIg==
+merge	dCBl
+merge	YXIgZA==
+merge	aWMgYWw=
+merge	xKAgag==
+merge	LiDEig==
+merge	dSBi
+merge	w4Mgwqk=
+merge	YSBw
+merge	xKAgcXU=
+merge	xKB3IG9y
+merge	w5EgxKU=
+merge	aW4gZA==
+merge	w5Agwro=
+merge	xKAgw6LEog==
+merge	w6MgxKQ=
+merge	KiAq
+merge	VCBoZQ==
+merge	xKAgew==
+merge	aWQgZQ==
+merge	KSDEig==
+merge	w6YgwrU=
+merge	YW0gZQ==
+merge	xKBkIG8=
+merge	aW0gZQ==
+merge	YXMgZQ==
+merge	YW4gY2U=
+merge	JyBz
+merge	MSAy
+merge	w6XEqiDEqA==
+merge	Li4gLi4=
+merge	b3IgZA==
+merge	xKAgWw==
+merge	biBl
+merge	w6TCvSDFgg==
+merge	YSBjZQ==
+merge	xKBnIG8=
+merge	xKAgw6LEosS+
+merge	ayBz
+merge	eCB0
+merge	LyAv
+merge	dXIgbg==
+merge	xKB0aGUgeQ==
+merge	w6XCpSDCvQ==
+merge	MSA1
+merge	bCBs
+merge	cCBo
+merge	KSDEisSK
+merge	xKAgXA==
+merge	YWsgZQ==
+merge	xKBzIHA=
+merge	YSBpbA==
+merge	xKB1IHA=
+merge	YyBlcw==
+merge	YXQgaA==
+merge	xKAgJw==
+merge	w6MgxKU=
+merge	w6bEviDCrA==
+merge	byBi
+merge	ZCBl
+merge	MSA0
+merge	MjAgMg==
+merge	xKAgKw==
+merge	xKAgXw==
+merge	xKAgJA==
+merge	ZSB3
+merge	xKAgeg==
+merge	cCBsZQ==
+merge	w6LEoiDEtg==
+merge	YyBvbQ==
+merge	dyBl
+merge	w6bEuCDEqQ==
+merge	w6XEsiDEqg==
+merge	LCDEig==
+merge	biBn
+merge	aXMgaA==
+merge	xIkgxIk=
+merge	MSA3
+merge	xKAgxIrEig==
+merge	xKAgaQ==
+merge	YXIgaw==
+merge	xKB0IGltZQ==
+merge	dyBv
+merge	xKBjb20gbQ==
+merge	YyBoZQ==
+merge	xKAgw4M=
+merge	w6bEuSDCpQ==
+merge	ZXQgaA==
+merge	xKByZSB0
+merge	w6cgxLc=
+merge	w6LEoiDEtQ==
+merge	b2wgZA==
+merge	OiDEig==
+merge	cCBz
+merge	aCBhdA==
+merge	biBpbmc=
+merge	aSBv
+merge	xKAgw4I=
+merge	xKAgLg==
+merge	xKBjIG8=
+merge	xKBzIGhl
+merge	ZSBm
+merge	PyDEisSK
+merge	xKAgw44=
+merge	w6LEoiDCpg==
+merge	YiBsZQ==
+merge	ZSB4
+merge	xKBkIGk=
+merge	aXQgcw==
+merge	MDAgMA==
+merge	w6Ygwrc=
+merge	xKAgw6I=
+merge	NSAw
+merge	MiAz
+merge	xKByZXQgdXJu
+merge	MTkgOQ==
+merge	ZSBj
+merge	xKBwIGFy
+merge	KCAp
+merge	b3QgaA==
+merge	d2UgZW4=
+merge	dWwgbA==
+merge	aSB4
+merge	dSBw
+merge	ZSB5
+merge	w5Agwrk=
+merge	MiA2
+merge	MSAwMA==
+merge	aGUgZA==
+merge	eSBt
+merge	cyBw
+merge	xKAgLw==
+merge	xKBoZSBs
+merge	ZiB1bA==
+merge	xKAgeA==
+merge	xKAgLA==
+merge	dCB0
+merge	w6PEoyDCrg==
+merge	Li4gLg==
+merge	ciBhbg==
+merge	w4IgwrI=
+merge	VCBo
+merge	xKBjIGhl
+merge	dCBz
+merge	xKAgWg==
+merge	JyB0
+merge	YyBv
+merge	aW0gZXM=
+merge	JyAs
+merge	cCBhcg==
+merge	dCBoZQ==
+merge	xKAgIw==
+merge	biBlcg==
+merge	bCBpbmU=
+merge	YXMgaA==
+merge	ZSBi
+merge	byB4
+merge	NCA1
+merge	OCAw
+merge	aXQgYWw=
+merge	w5HEoyDDkMK6
+merge	TyBO
+merge	OSA5
+merge	w6TCuCDEuA==
+merge	xKBXIGhhdA==
+merge	MyA0
+merge	YW4gYw==
+merge	w60gxLc=
+merge	YW0gcA==
+merge	xKB3b3IgbGQ=
+merge	w6ggwqo=
+merge	xKBsZSBhZA==
+merge	bSBl
+merge	xKBkIG9u
+merge	xKDDosSiIMS6
+merge	xKAgw5E=
+merge	cmUgdA==
+merge	LSA+
+merge	w44gwrk=
+merge	xKBtIGFyaw==
+merge	xKDDosSiIMS2
+merge	xKDEoCDEig==
+merge	LiAi
+merge	byBm
+merge	w4IgxYI=
+merge	cmEgcGg=
+merge	w6IgxKo=
+merge	LiBjb20=
+merge	bCBp
+merge	w44gwr0=
+merge	OSAw
+merge	w6fEtyDErg==
+merge	YSBp
+merge	ZSBl
+merge	ZiBvcg==
+merge	bSBh
+merge	OiAvLw==
+merge	xKBXIGg=
+merge	YiBl
+merge	b3QgZQ==
+merge	NSA1
+merge	eiBl
+merge	xKBjIGFw
+merge	bCBpc2g=
+merge	aW4gaW5n
+merge	YiBz
+merge	xKAgQA==
+merge	w6jCryDEtw==
+merge	LSBk
+merge	ayBl
+merge	UyBU
+merge	w6PEoyDCqA==
+merge	QSBO
+merge	dCBh
+merge	ISDEisSK
+merge	NyA4
+merge	KSA6
+merge	ZW50IGlvbg==
+merge	MCAx
+merge	xKAgw4PCqQ==
+merge	w6bCtSDErQ==
+merge	xKBmIG91cg==
+merge	IiDEig==
+merge	ZyBv
+merge	w6sgxK0=
+merge	biBh
+merge	QSBT
+merge	xKB0IGltZXM=
+merge	QyBvbQ==
+merge	ZCBlbg==
+merge	PyDEig==
+merge	bCBpbmc=
+merge	w68gwr8=
+merge	YSBm
+merge	xKDDoiDEqA==
+merge	LSBj
+merge	xKBwIGE=
+merge	aGUgbQ==
+merge	dWIgbA==
+merge	bSBhdGg=
+merge	b2cgcmFwaA==
+merge	w6PEoyDErg==
+merge	w6PEoyDCqg==
+merge	cmEgcA==
+merge	w5HEoiDDkcSl
+merge	cyBo
+merge	dCBy
+merge	VyBoYXQ=
+merge	xKAgJQ==
+merge	Li4gLsSKxIo=
+merge	xKBuIGE=
+merge	SCBl
+merge	cmEgZw==
+merge	NiA3
+merge	xKBkIGln
+merge	xKDDoiDEqg==
+merge	NCAx
+merge	XCAo
+merge	IiAu
+merge	aWMgYQ==
+merge	MCA3
+merge	NSA5
+merge	w4PCqSBz
+merge	XCAu
+merge	xKBtIGFy
+merge	SSBk
+merge	Y29tIG0=
+merge	KSA6xIo=
+merge	w5DCuiDDkMK4
+merge	aWwgaQ==
+merge	w44gwrs=
+merge	MCAy
+merge	w6TCuMS4IMOnxLfErg==
+merge	YXIgYQ==
+merge	ZGUgZg==
+merge	w44gwro=
+merge	w6LEoiDEug==
+merge	w44gwrc=
+merge	xKBzIHlt
+merge	xKBmIHVsbA==
+merge	YiBv
+merge	biBv
+merge	w7AgxYE=
+merge	SSBm
+merge	xKBwYXIgYQ==
+merge	xKAgYA==
+merge	aHQgdA==
+merge	LyBo
+merge	xKAgw60=
+merge	NSA2
+merge	YXIgdGg=
+merge	YiBs
+merge	YWMgZXM=
+merge	LiBk
+merge	w6vErSDCpA==
+merge	ZXIgbw==
+merge	dyBvcmQ=
+merge	cmV0IHVybg==
+merge	xKBDIE8=
+merge	QSBQ
+merge	xKBzcCBhY2U=
+merge	LiBj
+merge	ZCBv
+merge	KCB4
+merge	xKAgIQ==
+merge	xKAgPw==
+merge	w6jCryDErw==
+merge	aCBh
+merge	w4LFgiDDgsWC
+merge	xKBjIGFtZQ==
+merge	XyAs
+merge	aGUgbA==
+merge	VyBo
+merge	w5HEo8OQwrogw5DCuA==
+merge	YXIgYw==
+merge	YXIgYg==
+merge	OCA5
+merge	RSBu
+merge	LiB0
+merge	YiBvbA==
+merge	LyAo
+merge	YiBi
+merge	LiBB
+merge	xKAgLi4u
+merge	NyAy
+merge	xKBzIHk=
+merge	KCB0
+merge	IiDEisSK
+merge	aWQgdGg=
+merge	ciB0
+merge	JyByZQ==
+merge	aWRlIG8=
+merge	w6wgxYA=
+merge	NiAy
+merge	aXQgYQ==
+merge	xKBGIHJhbg==
+merge	bSBlbg==
+merge	XyBj
+merge	w6PEpCDEqw==
+merge	bCBv
+merge	aW4gaQ==
+merge	aXggZWQ=
+merge	QyBP
+merge	YyBhbA==
+merge	LiAj
+merge	KCBm
+merge	LiAp
+merge	xKBtIGE=
+merge	ZiBv
+merge	LiBo
+merge	bSBhcg==
+merge	YCBg
+merge	LyBj
+merge	xKBjaGUgbQ==
+merge	JyB2ZQ==
+merge	dCBk
+merge	bCBpbg==
+merge	aHR0IHBz
+merge	YW0gcGxl
+merge	w44gwqw=
+merge	ZCBpbmc=
+merge	xKBqIG8=
+merge	aCBpYw==
+merge	xKAgcQ==
+merge	xKBGIHI=
+merge	YiBh
+merge	w63EtyDEvg==
+merge	xKB3IG9u
+merge	cyB1bQ==
+merge	KCDEig==
+merge	ZyBs
+merge	w6bCtyDCtw==
+merge	biBp
+merge	cCBhY2U=
+merge	bSBw
+merge	w4IgwrM=
+merge	JyDEig==
+merge	TiBldw==
+merge	YiB0
+merge	xKBmIHVs
+merge	ZSBhZA==
+merge	ZCBm
+merge	JyBsbA==
+merge	cCBp
+merge	bSBt
+merge	KCBh
+merge	cCBhdA==
+merge	xKBjYXAgaXRhbA==
+merge	Li4gLw==
+merge	UyBF
+merge	w47CuSDDjsK6
+merge	LiBi
+merge	xKAtID4=
+merge	cCBh
+merge	xIrEiiDEig==
+merge	aCBp
+merge	byBv
+merge	w6bEucKlIMOmxL7CrA==
+merge	w6PEpCDCuQ==
+merge	bSBhdA==
+merge	KCBj
+merge	b20gYg==
+merge	xKBjIGE=
+merge	YiBhcg==
+merge	YyBh
+merge	b3JkIHM=
+merge	xKDDkCDEsg==
+merge	xKBsZWFkIGluZw==
+merge	w6IgxKg=
+merge	Li4uLiAuLg==
+merge	LyBk
+merge	xKogw6vErcKk
+merge	xKDEoCDEisSK
+merge	xKDDosSoIMS0
+merge	w4MgxYE=
+merge	xKB0IGlt
+merge	ZW50IGU=
+merge	LiBX
+merge	xKAgfg==
+merge	OCAwMA==
+merge	MTIgMw==
+merge	aHR0IHA=
+merge	ISAh
+merge	ciBj
+merge	bSBlcw==
+merge	xKBjIGFt
+merge	XyDEisSK
+merge	KCAo
+merge	LiAv
+merge	w4PCqSB0
+merge	xKBjb20gbWVudA==
+merge	KCBi
+merge	xIkgxIo=
+merge	aiBp
+merge	aiBv
+merge	bSBv
+merge	KCBk
+merge	w6wgxKw=
+merge	w6PEpSDEqg==
+merge	b3QgZXM=
+merge	xKByIMODwqk=
+merge	bSBp
+merge	eiBlcg==
+merge	w5HEoyDDkcSj
+merge	w6ogwrU=
+merge	xKAgw7DFgQ==
+merge	xKBzeW0gYm9s
+merge	aWwgaW5n
+merge	KCAt
+merge	JyBk
+merge	ZCBz
+merge	w6wgxLg=
+merge	w5AgxLI=
+merge	xKBjaGVtIGljYWw=
+merge	bSBhcms=
+merge	aGUgdA==
+merge	ciBk
+merge	XyAu
+merge	Li4gLsSK
+merge	ZWxsIG8=
+merge	YXAgaQ==
+merge	dCBpbWU=
+merge	byBp
+merge	cyBp
+merge	ZyByYQ==
+merge	YiBp
+merge	TiBT
+merge	xKBnIG9sZA==
+merge	QyBB
+merge	b2dyYXBoIGlj
+merge	ISDEig==
+merge	YWQgaQ==
+merge	w6LEqCDEtA==
+merge	xKBGciBhbmNl
+merge	PyA/
+merge	dCBlcw==
+merge	eSBl
+merge	w4PCqSBk
+merge	XyBi
+merge	w6zEuCDCtA==
+merge	JCAk
+merge	ZyBp
+merge	JyDEisSK
+merge	ZW0gaWM=
+merge	LSBc
+merge	LyBw
+merge	dCBp
+merge	LSDEisSK
+merge	xKDDoiDEqw==
+merge	byBq
+merge	ZCBk
+merge	b3UgYmxl
+merge	LSBh
+merge	cCBhdGg=
+merge	RSBuZw==
+merge	dCBlZA==
+merge	KSAt
+merge	MTQgMQ==
+merge	biBjZQ==
+merge	w6vErSDEqsOrxK3CpA==
+merge	b3IgbGQ=
+merge	w6IgxKs=
+merge	aW4gZXI=
+merge	YXAgaA==
+merge	w6bCtcStIMOowq/Etw==
+merge	LiBc
+merge	QyBhbA==
+merge	w6IgxKY=
+merge	xKAoIC0=
+merge	d29yZCBz
+merge	w6zErCDCpA==
+merge	xKBqbyBpbg==
+merge	LiB4
+merge	dCBpbWVz
+merge	cyBpbg==
+merge	xKBkaWcgaXRz
+merge	w6jCqiDFgA==
+merge	MTUgOQ==
+merge	bCBz
+merge	TiBl
+merge	bSBpYw==
+merge	dHQgcA==
+merge	b3QgaGU=
+merge	xKBDIE9O
+merge	LiAuxIrEig==
+merge	QyBv
+merge	cyBt
+merge	LSDEig==
+merge	xKBkaWcgaXQ=
+merge	ZCBi
+merge	eW0gYm9s
+merge	cyB1
+merge	ZCBp
+merge	YyBhc2U=
+merge	YWQgaW5n
+merge	w6PEpCDCvw==
+merge	dyBp
+merge	xKAgw63Etw==
+merge	PyAi
+merge	xKAgw5HEog==
+merge	LSBX
+merge	VCBB
+merge	cGggaQ==
+merge	ZyBy
+merge	dyBpZHRo
+merge	aCBhcw==
+merge	YWcgcmFwaA==
+merge	byBh
+merge	YiBzcA==
+merge	xKAgw5HEosORxKU=
+merge	w4PCqSBj
+merge	YiBpbg==
+merge	xIrEiiDEisSK
+merge	ciBhbmNl
+merge	ZCBj
+merge	YXIga3M=
+merge	xKDDgiDCqQ==
+merge	xKBzcCBhY2Vz
+merge	xKDDgiDFgg==
+merge	byBpbg==
+merge	xKAgP8SKxIo=
+merge	XyBD
+merge	dCBhYg==
+merge	w60gxKw=
+merge	b2Qgbw==
+merge	MjMgNA==
+merge	SCBlbA==
+merge	xKDDoiDEpg==
+merge	Y2hlIG0=
+merge	w6bCt8K3IMOlxLLEqg==
+merge	w6/CvCDEsw==
+merge	cyBoZQ==
+merge	xKDDjiDCuw==
+merge	KCB5
+merge	ZW50IGk=
+merge	xKBmIHU=
+merge	w63ErCDCuA==
+merge	QVMgRQ==
+merge	xKBwYXIgYWdyYXBo
+merge	xInEiSDEig==
+merge	QyBhc2U=
+merge	w47CtyDDjsK9
+merge	QU4gVA==
+merge	ZSBlbg==
+merge	xKBjb21tIGU=
+merge	xKBtYXIga3M=
+merge	b2MgYQ==
+merge	w6PEpCDCqw==
+merge	xIkgZg==
+merge	xKBoZSBsbA==
+merge	LiBh
+merge	eSBlcw==
+merge	ZCB0
+merge	dCBpb24=
+merge	MjYgMg==
+merge	xKBmIG8=
+merge	ciBo
+merge	w4Mgwq8=
+merge	w4Igwqk=
+merge	w4Igwq4=
+merge	KSAj
+merge	b2cgcmFw
+merge	w5HEo8OQwrrDkMK4IMOQwrk=
+merge	LSAo
+merge	YyBhcA==
+merge	bSBi
+merge	xKAgw63Et8S+
+merge	w6PEpSDEqA==
+merge	w5HEpSDDkcSj
+merge	LSB4
+merge	RW5nIGxpc2g=
+merge	w6rCtSDFgw==
+merge	ciDDg8Kp
+merge	w4wgxKM=
+merge	ZSBh
+merge	MjYgNw==
+merge	ZyBsZQ==
+merge	NDUgNg==
+merge	MyA0NQ==
+merge	WyBu
+merge	NyAyMA==
+merge	w6/CvCDEtA==
+merge	xKBcIMSK
+merge	ZCB4
+merge	fiDEig==
+merge	QyBhbGw=
+merge	w6PEoiDEog==
+merge	xKAgLi4=
+merge	b2wgcw==
+merge	XCB4
+merge	XyB4
+merge	ZW0gbw==
+merge	YXAgaXQ=
+merge	KCBo
+merge	xKDDjiDEtw==
+merge	aW5nIGxl
+merge	xKBzeW1ib2wgcw==
+merge	NCAxNQ==
+merge	ZXQgaGU=
+merge	aGUgbGw=
+merge	YXJkIG8=
+merge	w47CuyDDjsK7
+merge	dCByYQ==
+merge	dCB1
+merge	ZW50IGVk
+merge	YiBldA==
+merge	SCBlbGxv
+merge	dGhlIHk=
+merge	PyAu
+merge	c3AgYWNl
+merge	NTUgNQ==
+merge	bCBvYw==
+merge	w6PEpCDFgw==
+merge	ZCBvbg==
+merge	ZCBvdWJsZQ==
+merge	xKB0IGk=
+merge	eiBlcm8=
+merge	YiBj
+merge	XyBh
+merge	LyBh
+merge	w47CucOOwrogw47CrA==
+merge	VyBvcmxk
+merge	w6TCuMWDIMOmxLjEqQ==
+merge	QVAgSQ==
+merge	MCAxOQ==
+merge	ZiBy
+merge	xKByIMODwqlz
+merge	LiBjbw==
+merge	LCB4
+merge	dCB3
+merge	w6vErSDEqg==
+merge	NiAyMA==
+merge	XCAv
+merge	xKBGIHJh
+merge	xLcgxK4=
+merge	bWFyIGtz
+merge	ZW0gaQ==
+merge	YWlsIGluZw==
+merge	QyBPTg==
+merge	UCBJ
+merge	am8gaW4=
+merge	dCB3bw==
+merge	w6zFgCDEpw==
+merge	w6IgxKc=
+merge	xKAoICs=
+merge	w4Igwr0=
+merge	xKBxdSBvdA==
+merge	dCBhZw==
+merge	bSBlbA==
+merge	ZCBpZw==
+merge	KSBf
+merge	LCBj
+merge	xKBxdSBvdGU=
+merge	w6PEpMK5IMOjxKXEqg==
+merge	dWIgbGU=
+merge	w6/CvCDEtQ==
+merge	dCB4
+merge	ZyByYXBo
+merge	bSBheQ==
+merge	bmQgZQ==
+merge	IyDEig==
+merge	TiBU
+merge	NSA2Nw==
+merge	JCAu
+merge	w47CuyDDjsK3
+merge	NzggOQ==
+merge	w6LEqiDEsw==
+merge	Li4uLiAu
+merge	w6LEpiDCog==
+merge	XyDEig==
+merge	dSBv
+merge	xKB3IG8=
+merge	w6PEpSDErA==
+merge	OCA5MA==
+merge	NiA3OA==
+merge	MCAyNg==
+merge	KyDEig==
+merge	Y2hlbSBpY2Fs
+merge	ZCBpbg==
+merge	bnQgZQ==
+merge	LyB4
+merge	QyBh
+merge	LyAu
+merge	biBic3A=
+merge	w7DFgSDEug==
+merge	ZiB1bGw=
+merge	aW5kIGU=
+merge	dyBvcmxk
+merge	aGUgeA==
+merge	KyDEisSK
+merge	JCQgxIo=
+merge	KSAi
+merge	ZyBpdA==
+merge	ZXggYW1wbGU=
+merge	Y29tIG1lbnQ=
+merge	Q29tIGI=
+merge	w6TCvcWCIMOlwqXCvQ==
+merge	aGUgYQ==
+merge	YXIgZg==
+merge	YW0gZWw=
+merge	ZiB1
+merge	LSAj
+merge	LyBl
+merge	xKAgP8SK
+merge	fiDEisSK
+merge	LCBk
+merge	IyAn
+merge	YWIgYw==
+merge	ZWMgYQ==
+merge	cyBu
+merge	aGUgYw==
+merge	xKBxdSBvdGVz
+merge	w6/CvCDEtg==
+merge	aGVsbCBv
+merge	cyBpbmc=
+merge	LCAu
+merge	bCBpcw==
+merge	JCDEig==
+merge	ISEgIQ==
+merge	xKBjIGFm
+merge	KyB4
+merge	bCBvdA==
+merge	w6zFgMSnIMOrxK3EqsOrxK3CpA==
+merge	w6LEoiDErQ==
+merge	XCDEig==
+merge	aCBhc2g=
+merge	ciBm
+merge	cGFyIGE=
+merge	xIkgxKA=
+merge	PyAj
+merge	aW5kIGVu
+merge	ZiBvdXI=
+merge	bGUgYWRpbmc=
+merge	xKDEoMSKIMSgxKDEig==
+merge	LyBoZQ==
+merge	RiByYW4=
+merge	w60gxKc=
+merge	ciBu
+merge	cXUgbw==
+merge	xIkgYg==
+merge	LyBc
+merge	eyBt
+merge	PyAo
+merge	eCBl
+merge	Li4gxIo=
+merge	cCBpdA==
+merge	OiAv
+merge	w5DCusOQwrggw5DCuQ==
+merge	KyBj
+merge	xKDDkcSiw5HEpSDDkcSj
+merge	KCAu
+merge	YmV0IHdlZW4=
+merge	w6PEoyDCsg==
+merge	w44gxLc=
+merge	YyBhcw==
+merge	dyBvcg==
+merge	Zm8gbw==
+merge	ciBi
+merge	ZWQgbw==
+merge	LWQgbw==
+merge	aWcgaQ==
+merge	KyAi
+merge	ZiDDg8Kp
+merge	Li4uLiAuLi4=
+merge	ZSBv
+merge	w47Cu8OOwrsgw47Ct8OOwr0=
+merge	dCBpbQ==
+merge	cXUgb3Q=
+merge	xKBGcmFuIGM=
+merge	b20gbWVu
+merge	w4MgxKI=
+merge	KCBX
+merge	xKBoZWxsIG8=
+merge	LCAuLi4=
+merge	LiB0aGU=
+merge	UyBh
+merge	Li4uICI=
+merge	biBhaw==
+merge	LiAk
+merge	T04gUw==
+merge	xKBxdSBv
+merge	LmMgYQ==
+merge	w6zErMKkIMOtxKzCuA==
+merge	eCBh
+merge	biBj
+merge	ZCBo
+merge	aW4gaW4=
+merge	JyAt
+merge	b2cgcmE=
+merge	eCBm
+merge	ciBs
+merge	XyAt
+merge	aGUgeQ==
+merge	YXIgYWc=
+merge	ZXQgdXI=
+merge	ISAs
+merge	ciDDg8Kpcw==
+merge	XyBc
+merge	cyB5
+merge	xKBjYXAgaXRh
+merge	xKAgxIk=
+merge	xKBjYXAgaXQ=
+merge	YyBhbQ==
+merge	YXJkIG9u
+merge	PSB0
+merge	ZXQgd2Vlbg==
+merge	xKBnIG9s
+merge	LiAh
+merge	Pz8gPw==
+merge	IiBB
+merge	KSB4
+merge	KSDDosSixLY=
+merge	xIkgeA==
+merge	RiByYW5jZQ==
+merge	xKBmIG91
+merge	xKDDosSqIMSz
+merge	w7DFgSDEsA==
+merge	YXJjIGE=
+merge	JyBo
+merge	ciB4
+merge	xKDDsMWBIMS6
+merge	LSAk
+merge	cXUgb3Rl
+merge	b2cgcg==
+merge	xIkgaQ==
+merge	dCBhbA==
+merge	Y2hlIG1pYw==
+merge	KyAv
+merge	byBpbmU=
+merge	cyBpbmdsZQ==
+merge	b20gbQ==
+merge	YCAp
+merge	xKBzeW0gYg==
+merge	Li4uICM=
+merge	dCBw
+merge	w6LEqyDFgg==
+merge	bGUgYWQ=
+merge	dCBm
+merge	bSBhcnQ=
+merge	YWcgcmE=
+merge	xKBjYWYgw4PCqQ==
+merge	dCBj
+merge	w5HEosORxKUgw5HEow==
+merge	LCBo
+merge	biBi
+merge	RiBy
+merge	aWwgaW4=
+merge	w6LEosS2IMSK
+merge	ZiByYQ==
+merge	aWcgaXQ=
+merge	LyBleA==
+merge	JyBs
+merge	xKDDrSDEpw==
+merge	bGUgYQ==
+merge	bGwgbw==
+merge	LyAj
+merge	b2Qgb24=
+merge	YiBo
+merge	eSBi
+merge	xKDDgiDCrg==
+merge	KSBB
+merge	xKAhICE=
+merge	UyBheQ==
+merge	xKDDosSrIMWC
+merge	cmEgaQ==
+merge	aHQgYQ==
+merge	KCAr
+merge	xIkgdw==
+merge	YWQgaW4=
+merge	dyBvbg==
+merge	bSDDg8Kp
+merge	KCBa
+merge	xKBzcCBh
+merge	w4wgxKo=
+merge	cmEgaWw=
+merge	JyB0aA==
+merge	xIogxKDEoMSK
+merge	KCAuLi4=
+merge	cyB5bWJvbA==
+merge	YiBhcmQ=
+merge	KSBfxIrEig==
+merge	ZyBvbGQ=
+merge	xKBDT04gU1Q=
+merge	cGFyIGFncmFwaA==
+merge	dCB1cm4=
+merge	ZCBlbnQ=
+merge	cCBhY2Vz
+merge	biBpbg==
+merge	dGhlIGw=
+merge	bWF5IGJl
+merge	QyBhcw==
+merge	PyBc
+merge	d2UgZQ==
+merge	xKBzcCBhYw==
+merge	w5DCuCDDkMK5
+merge	LSAn
+merge	JyBy
+merge	ZXQgdQ==
+merge	bCBvZA==
+merge	KyB0
+merge	X2MgYXNl
+merge	QyBBUw==
+merge	Y2FwIGl0YWw=
+merge	ciBr
+merge	LmQgbw==
+merge	w6LEosS2IC0=
+merge	JyBi
+merge	xKBjYW0gZWw=
+merge	byBqaQ==
+merge	w4LFgiDEoA==
+merge	ZGlnIGl0
+merge	xKAgw7A=
+merge	aWcgaXRz
+merge	VyBv
+merge	c20gYXJ0
+merge	aXggZQ==
+merge	ZCBvdQ==
+merge	KyBm
+merge	Li4uICk=
+merge	xKAgw68=
+merge	YW0gcGw=
+merge	w6bEucKlw6bEvsKsIMOowqrFgA==
+merge	cyB5bQ==
+merge	LiBoZQ==
+merge	xIkgxIrEig==
+merge	U1QgQQ==
+merge	LiA/
+merge	KyBB
+merge	w47CuiDDjsKs
+merge	Li4gIw==
+merge	IiAuLi4=
+merge	xKAgw6/CvA==
+merge	dW0gw4PCqQ==
+merge	w4PCryB2ZQ==
+merge	cmFwaCBpYw==
+merge	ZGUgbw==
+merge	ZXggYW0=
+merge	KCB0aGU=
+merge	w6LEosS2IF8=
+merge	xKAgw4w=
+merge	LiB0aA==
+merge	LCBA
+merge	RiByYQ==
+merge	eW0gYg==
+merge	ZyBsaQ==
+merge	KCAj
+merge	bmQgZW4=
+merge	xKBiIMODwqk=
+merge	dCB1cg==
+merge	biBha2U=
+merge	XyBiYXI=
+merge	aWQgdA==
+merge	w6/CvyDCpQ==
+merge	xKBDT04gUw==
+merge	b3UgYg==
+merge	PyAuLi4=
+merge	xLMgxIrEig==
+merge	dyBpZA==
+merge	aGUgYg==
+merge	KSBi
+merge	JyBX
+merge	xKBfIC4=
+merge	SSBX
+merge	xIkgaW4=
+merge	eCBo
+merge	SCBlbGw=
+merge	PyBh
+merge	WiBk
+merge	xKBuYSDDg8KvdmU=
+merge	XCBo
+merge	LVcgb3JsZA==
+merge	XCAk
+merge	YXAgaXRhbA==
+merge	bSBpeA==
+merge	SSBi
+merge	YSBX
+merge	dGhlIGxsbw==
+merge	LiBhYg==
+merge	cCBhYw==
+merge	cCBpdGFs
+merge	w6XEqsSoIMOowq/Erw==
+merge	YiBhcnQ=
+merge	bCBveA==
+merge	bSBpeGVk
+merge	bWVudCBpb24=
+merge	KCB0aA==
+merge	fiAo
+merge	w5kgwqM=
+merge	JCBh
+merge	w6/CvMSzIMOvwrzEtA==

@@ -22,6 +22,9 @@ const (
 	preTokGLM4
 	// preTokMetaspace is the SentencePiece metaspace BPE (Gemma 4): ▁-marked literal text.
 	preTokMetaspace
+	// preTokDeepSeek3 is llama.cpp's DeepSeek-V3/JoyAI three-regex sequence
+	// (DeepSeek-V4.1-Flash GGUFs carry tokenizer.ggml.pre=joyai-llm).
+	preTokDeepSeek3
 )
 
 // resolvePreTokenizer maps a closed pre-tokenizer kind to the split function and the
@@ -34,6 +37,8 @@ func resolvePreTokenizer(kind preTokKind) (split func(string) []string, metaspac
 		return preTokenizeQwen, false
 	case preTokGLM4:
 		return preTokenizeGLM4, false
+	case preTokDeepSeek3:
+		return preTokenizeDeepSeek3, false
 	case preTokMetaspace:
 		// Gemma BPEs the ▁-marked literal chunk directly; Encode keys off metaspace and
 		// does not regex-split, so the ByteLevel splitter is the inert placeholder here
@@ -63,7 +68,8 @@ func jsonPreTokKind(c preTokConfig) preTokKind {
 // general.architecture fallback) to the closed kind, keeping FromGGML byte-exact with
 // llama.cpp's own hint-driven dispatch. Order mirrors the pre-unification FromGGML:
 // Qwen and GLM-4 select their explicit splitters; the Gemma hint selects metaspace;
-// everything else is the GPT-2 ByteLevel default.
+// the exact deepseek-v3/joyai-llm hints select the DeepSeek-V3 sequence; everything
+// else is the GPT-2 ByteLevel default.
 func ggmlPreTokKind(pre string) preTokKind {
 	switch {
 	case isQwenPreTokenizer(pre):
@@ -72,6 +78,8 @@ func ggmlPreTokKind(pre string) preTokKind {
 		return preTokGLM4
 	case isMetaspaceTokenizer(pre):
 		return preTokMetaspace
+	case isDeepSeek3PreTokenizer(pre):
+		return preTokDeepSeek3
 	default:
 		return preTokByteLevel
 	}
