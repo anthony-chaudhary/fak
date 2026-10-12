@@ -381,7 +381,7 @@ func TestV41EngramFullPersistentStreams(t *testing.T) {
 	// (6) Missing source fails closed: with the stage deleted, a declared
 	// in-range Engram layer must refuse with ErrV41NativeUnsupported.
 	missing, _ := v41FullEngramModel(t)
-	v41EngramStages.Delete(missing)
+	missing.v41DetachEngramStage()
 	if err := missing.v41ForwardAdmitted(); !errors.Is(err, ErrV41NativeUnsupported) {
 		t.Fatalf("unwired full Engram admission error = %v, want ErrV41NativeUnsupported", err)
 	}

@@ -131,7 +131,7 @@ func TestV41EngramVerifiedSourceReachesForward(t *testing.T) {
 		t.Fatal("unverified source reported a binding")
 	}
 
-	v41EngramStages.Delete(mVerified)
+	mVerified.v41DetachEngramStage()
 	if err := mVerified.wireV41Engram(layoutV, []V41EngramRowSource{verified}, int64(V41EngramPackedRowBytes)*4); err != nil {
 		t.Fatalf("wire verified Engram stage: %v", err)
 	}

@@ -160,7 +160,7 @@ func TestV41EngramF32ForwardConsumeParity(t *testing.T) {
 
 	// Rewire the same model onto the f32 dialect. The wire seam enforces one
 	// dialect across sources and the cache width follows src.RowBytes().
-	v41EngramStages.Delete(mF32)
+	mF32.v41DetachEngramStage()
 	if err := mF32.wireV41Engram(layout, []V41EngramRowSource{verified}, int64(V41EngramF32RowBytes)*4); err != nil {
 		t.Fatalf("wire f32 Engram stage: %v", err)
 	}
