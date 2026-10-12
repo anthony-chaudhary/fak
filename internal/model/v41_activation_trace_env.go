@@ -9,23 +9,25 @@ package model
 // sized for that forward (every layer x every stage x up to
 // v41ActivationTraceEnvMaxTokens tokens x 8 samples), runs, and writes the
 // artifact -- with the consumed token ids in InputTokens -- to <path>,
-// replacing the previous forward's trace. A session Step recomputes its whole
-// history, so the last write covers every position so far.
+// replacing the previous full forward's trace. Incremental Session.Step and
+// suffix-prefill routes do not currently emit these activation checkpoints;
+// their successful completion does not update this artifact.
 //
-// The recorder retains only v41.activation events: the backends' per-kernel
-// matmul events reach the same process recorder and would otherwise spend the
-// event budget before the deeper layers emit.
+// The env recorder retains only v41.activation events. Other backend events
+// cannot consume its event/sample budget; global observers still receive them.
 //
-// Unset, the cost is one cached string check per forward. Env-traced forwards
-// are serialized because the recorder is process-global, and the variable never
-// clobbers a recorder some other caller already enabled. Tokens beyond the cap
-// are dropped and counted, so a comparator reports the trace incomplete rather
-// than silently short.
+// Unset, the cost is one cached string check per full forward. Env capture and
+// publication are serialized because the recorder is process-global. Recorder
+// installation atomically preserves an existing owner. The event budget bounds
+// all recorded events; it is not an independently enforced token-coverage cap.
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -58,19 +60,21 @@ func (m *Model) v41ActivationTraceFromEnv(seq []int) func(error) error {
 		return nil
 	}
 	v41ActivationTraceEnvMu.Lock()
-	if computetrace.Enabled() {
-		v41ActivationTraceEnvMu.Unlock()
-		return nil
-	}
 	events := max(1, m.Cfg.NumLayers) * v41ActivationTraceEnvStageSlots * max(1, min(len(seq), v41ActivationTraceEnvMaxTokens))
-	rec, disable := computetrace.EnableWithOptions(events, computetrace.RecorderOptions{
+	rec, disable := computetrace.TryEnableWithOptions(events, computetrace.RecorderOptions{
 		MaxSamples: events * v41ActivationTraceMaxSamples,
 		Operations: []string{v41ActivationTraceOperation},
 	}, "v41-forward", v41ActivationTraceEnvVar)
+	if rec == nil {
+		v41ActivationTraceEnvMu.Unlock()
+		return nil
+	}
 	tokens := append([]int(nil), seq...)
 	return func(err error) error {
+		// Publication belongs to the same critical section as capture, so an
+		// older env capture cannot overwrite a later one after releasing it.
+		defer v41ActivationTraceEnvMu.Unlock()
 		disable()
-		v41ActivationTraceEnvMu.Unlock()
 		a := rec.Artifact()
 		a.InputTokens = tokens
 		if werr := writeV41ActivationTrace(path, a); werr != nil && err == nil {
@@ -80,22 +84,58 @@ func (m *Model) v41ActivationTraceFromEnv(seq []int) func(error) error {
 	}
 }
 
-// writeV41ActivationTrace replaces path atomically so a reader never sees a
-// half-written trace. Non-finite samples are clamped (ClampNonFinite) because a
-// diverging forward is exactly the one whose trace must still be written.
+// writeV41ActivationTrace publishes a closed, unique same-directory temporary
+// file with Rename. Publication ordering is the caller's responsibility;
+// filesystem/platform Rename semantics determine atomic replacement support.
+// Uses the original fresh-temporary creation policy: 0644 before umask.
+// The destination inode's mode is not inherited.
+// Non-finite samples are clamped (ClampNonFinite) for JSON serialization.
 func writeV41ActivationTrace(path string, a computetrace.Artifact) error {
 	a.ClampNonFinite()
 	data, err := json.Marshal(a)
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
+	f, err := createV41ActivationTraceTemp(path, rand.Reader)
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		_ = f.Close()
 		return err
 	}
-	return nil
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// createV41ActivationTraceTemp retains exclusive, unpredictable same-directory
+// creation while letting the kernel apply the original writer's 0644 mode and
+// current umask. Chmod after CreateTemp would bypass the umask's restrictions.
+// The entropy reader permits deterministic collision tests without a global hook.
+func createV41ActivationTraceTemp(path string, entropy io.Reader) (*os.File, error) {
+	dir, target := filepath.Dir(path), filepath.Base(path)
+	for range 10000 {
+		var suffix [16]byte
+		if _, err := io.ReadFull(entropy, suffix[:]); err != nil {
+			return nil, err
+		}
+		base := fmt.Sprintf(".fak-v41-trace-%x", suffix[:])
+		// The configured destination may itself use our temporary naming
+		// pattern. Never create it before publication, even on a case-folding
+		// filesystem, or deferred cleanup could remove the final artifact.
+		if strings.EqualFold(base, target) {
+			continue
+		}
+		name := filepath.Join(dir, base)
+		f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if os.IsExist(err) {
+			continue
+		}
+		return f, err
+	}
+	return nil, &os.PathError{Op: "createtemp", Path: path, Err: os.ErrExist}
 }

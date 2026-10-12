@@ -283,10 +283,35 @@ func EnableWithOptions(limit int, opts RecorderOptions, run, request string) (*R
 	return install(NewWithOptions(limit, opts), run, request)
 }
 
+// TryEnableWithSampleBudget installs a recorder only when no recorder is
+// installed. A non-nil recorder with a zero event limit still owns the slot.
+// It returns nil, nil if the slot is occupied. Check and install are atomic;
+// a later explicit Enable call retains its existing replacement semantics.
+func TryEnableWithSampleBudget(limit, maxSamples int, run, request string) (*Recorder, func()) {
+	return TryEnableWithOptions(limit, RecorderOptions{MaxSamples: maxSamples}, run, request)
+}
+
+// TryEnableWithOptions atomically installs an options-configured recorder only
+// when the global slot has no owner, including no zero-limit owner. Like the
+// other install paths, its disable function cannot remove a later replacement.
+func TryEnableWithOptions(limit int, opts RecorderOptions, run, request string) (*Recorder, func()) {
+	active.Lock()
+	defer active.Unlock()
+	if active.recorder != nil {
+		return nil, nil
+	}
+	return installLocked(NewWithOptions(limit, opts), run, request)
+}
+
 func install(r *Recorder, run, request string) (*Recorder, func()) {
 	active.Lock()
+	defer active.Unlock()
+	return installLocked(r, run, request)
+}
+
+// installLocked requires active's write lock.
+func installLocked(r *Recorder, run, request string) (*Recorder, func()) {
 	active.recorder, active.run, active.request = r, run, request
-	active.Unlock()
 	return r, func() {
 		active.Lock()
 		if active.recorder == r {
