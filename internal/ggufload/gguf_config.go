@@ -198,7 +198,7 @@ func (f *File) Config() (model.Config, error) {
 		TieWordEmbeddings:     !f.hasTensor("output.weight") && !f.hasTensor("lm_head.weight"),
 		AttentionBias:         f.hasTensor("blk.0.attn_q.bias") || f.hasTensor("blk.0.attn_k.bias") || f.hasTensor("blk.0.attn_v.bias"),
 		ModelType:             canonicalGGUFArch(arch),
-		Name:                  stringMetaOr(f.Metadata, "general.name", ""),
+		Name:                  stringMetaOr(f, "general.name", ""),
 		EOSTokenID:            eos,
 		MaxPositionEmbeddings: intValueOrZero(f, p+"context_length"),
 		HiddenAct:             "silu",
@@ -239,10 +239,30 @@ func (f *File) Config() (model.Config, error) {
 		if groups, ok := f.Uint64(p + "ssm.group_count"); ok {
 			cfg.LinearNumKeyHeads = int(groups)
 		}
+		inner, hasInner := f.Uint64(p + "ssm.inner_size")
 		if rank, ok := f.Uint64(p + "ssm.time_step_rank"); ok {
 			cfg.LinearNumValueHeads = int(rank)
-		} else if inner, ok := f.Uint64(p + "ssm.inner_size"); ok && cfg.LinearValueHeadDim > 0 {
+			if hasInner && inner != rank*uint64(cfg.LinearValueHeadDim) {
+				return model.Config{}, fmt.Errorf("gguf: %sssm.inner_size=%d, want ssm.time_step_rank*ssm.state_size=%d", p, inner, rank*uint64(cfg.LinearValueHeadDim))
+			}
+		} else if hasInner && cfg.LinearValueHeadDim > 0 {
 			cfg.LinearNumValueHeads = int(inner) / cfg.LinearValueHeadDim
+		}
+		// The GDN forward uses one head width for q/k and v, and a text-only
+		// sequence makes interleaved mrope plain rope only when the sections
+		// tile the rotary half; refuse a header that breaks either.
+		if v, ok := f.Uint64(p + "attention.value_length"); ok && int(v) != cfg.HeadDim {
+			return model.Config{}, fmt.Errorf("gguf: %sattention.value_length=%d, want key_length=%d", p, v, cfg.HeadDim)
+		}
+		if f.hasKey(p + "rope.dimension_sections") {
+			sections, ok := f.IntArray(p + "rope.dimension_sections")
+			sum := 0
+			for _, s := range sections {
+				sum += s
+			}
+			if !ok || ropeDim <= 0 || 2*sum != ropeDim {
+				return model.Config{}, fmt.Errorf("gguf: %srope.dimension_sections=%v must tile rope.dimension_count=%d (2*sum)", p, sections, ropeDim)
+			}
 		}
 		cfg.AttnOutputGate = true
 		cfg.NormGain1p = true
@@ -360,7 +380,7 @@ func requiredDenseFFNLen(f *File, arch, p string) (int, error) {
 		return int(v), nil
 	}
 	if archIsMoEForDenseFFNDerive(arch) {
-		if _, ok := f.Metadata[p+glmKeyExpertFFNLength]; ok {
+		if f.hasKey(p + glmKeyExpertFFNLength) {
 			if v := intValueOrZero(f, p+glmKeyExpertFFNLength); v > 0 {
 				return v, nil
 			}
@@ -742,8 +762,8 @@ func applyGLMMoeDsaConfig(f *File, p string, cfg *model.Config, ropeDim int) err
 	return nil
 }
 
-func stringMetaOr(meta map[string]Value, key, fallback string) string {
-	value, ok := meta[key]
+func stringMetaOr(f *File, key, fallback string) string {
+	value, ok := f.lookup(key)
 	if !ok {
 		return fallback
 	}

@@ -238,6 +238,9 @@ type File struct {
 	// applyDeepSeek41Config (deepseek41.go). model.Config has no Engram fields, so
 	// the axes live here; nil for every non-deepseek41 file.
 	DeepSeek41Engram *DeepSeek41Engram
+	// keyReads, when non-nil, records every metadata key a reader looks up, so the
+	// manifest preflight can name keys no reader consumes (KEY_UNREAD).
+	keyReads *keyReadTrace
 }
 
 // WeightSource binds a parsed File to the readers that hold its tensor bytes, routing

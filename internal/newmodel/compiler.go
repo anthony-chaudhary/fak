@@ -37,7 +37,25 @@ const (
 	RefusalUnsupportedNativeCombination RefusalReason = "UNSUPPORTED_NATIVE_COMBINATION"
 	RefusalHardwareEnvelopeInvalid      RefusalReason = "HARDWARE_ENVELOPE_INVALID"
 	RefusalNativeEngineMismatch         RefusalReason = "NATIVE_ENGINE_MISMATCH"
+
+	// Header-preflight reasons: a GGUF header checked against fak's readers, the
+	// HF config, the arch's tensor consumers, and the host kernel registry.
+	RefusalHeaderConfigInvalid RefusalReason = "HEADER_CONFIG_INVALID"
+	RefusalKeyUnread           RefusalReason = "KEY_UNREAD"
+	RefusalHFMismatch          RefusalReason = "HF_MISMATCH"
+	RefusalTensorMissing       RefusalReason = "TENSOR_MISSING"
+	RefusalTensorOrphan        RefusalReason = "TENSOR_ORPHAN"
+	RefusalTensorShape         RefusalReason = "TENSOR_SHAPE_MISMATCH"
+	RefusalUnsupportedDtype    RefusalReason = "UNSUPPORTED_DTYPE"
 )
+
+// PhaseHeaderPreflight marks refusals found off a GGUF header, before any load.
+const PhaseHeaderPreflight = "header-preflight"
+
+// HeaderRefusal builds one header-preflight refusal in the shared vocabulary.
+func HeaderRefusal(reason RefusalReason, axis, detail string) Refusal {
+	return Refusal{Schema: RefusalSchema, Reason: reason, Phase: PhaseHeaderPreflight, Axis: axis, Detail: detail}
+}
 
 // Refusal is a machine-readable fail-closed result from manifest compilation.
 type Refusal struct {

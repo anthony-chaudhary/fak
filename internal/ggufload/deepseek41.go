@@ -440,27 +440,39 @@ func applyDeepSeek41Config(f *File, p string, cfg *model.Config, ropeDim int) er
 		Multipliers:         uint64ArrayOrNil(f, p+ds41KeyEngramMultipliers),
 		Offsets:             intArrayOrNil(f, p+ds41KeyEngramOffsets),
 	}
-	if _, ok := f.Metadata[p+ds41KeyEngramMaxNgramSize]; !ok {
+	if !f.hasKey(p + ds41KeyEngramMaxNgramSize) {
 		eng.MaxNgramSize = max(eng.MaxNgramSize, intValueOrZero(f, p+ds41LegacyEngramMaxNgramSize))
 	}
-	if _, ok := f.Metadata[p+ds41KeyEngramHeadCount]; !ok {
+	if !f.hasKey(p + ds41KeyEngramHeadCount) {
 		eng.NHeads = max(eng.NHeads, intValueOrZero(f, p+ds41LegacyEngramNHeads))
 	}
-	if _, ok := f.Metadata[p+ds41KeyEngramKeyLength]; !ok {
+	if !f.hasKey(p + ds41KeyEngramKeyLength) {
 		eng.HeadDim = max(eng.HeadDim, intValueOrZero(f, p+ds41LegacyEngramHeadDim))
 	}
 	eng.Encoding, _ = f.String(p + ds41KeyEngramEncoding)
-	if _, ok := f.Metadata[p+ds41KeyEngramLayerIDs]; !ok {
+	if !f.hasKey(p + ds41KeyEngramLayerIDs) {
 		eng.LayerIDs = intArrayOrNil(f, p+ds41LegacyEngramLayerIDs)
 	}
-	if _, ok := f.Metadata[p+ds41KeyEngramNumEmbedding]; !ok {
+	if !f.hasKey(p + ds41KeyEngramNumEmbedding) {
 		eng.NumEmbeddings = intArrayOrNil(f, p+ds41LegacyEngramNumEmbedding)
 	}
-	if _, ok := f.Metadata[p+ds41KeyEngramPadTokenID]; !ok {
+	if !f.hasKey(p + ds41KeyEngramPadTokenID) {
 		eng.PadTokenID = intValueOrZero(f, p+ds41LegacyEngramPadTokenID)
 	}
-	if _, ok := f.Metadata[p+ds41KeyEngramCompVocab]; !ok {
+	if !f.hasKey(p + ds41KeyEngramCompVocab) {
 		eng.CompressedVocabSize = intValueOrZero(f, p+ds41LegacyEngramCompVocab)
+	}
+	for _, alias := range [][2]string{
+		{ds41KeyEngramMaxNgramSize, ds41LegacyEngramMaxNgramSize},
+		{ds41KeyEngramHeadCount, ds41LegacyEngramNHeads},
+		{ds41KeyEngramKeyLength, ds41LegacyEngramHeadDim},
+		{ds41KeyEngramLayerIDs, ds41LegacyEngramLayerIDs},
+		{ds41KeyEngramNumEmbedding, ds41LegacyEngramNumEmbedding},
+		{ds41KeyEngramPadTokenID, ds41LegacyEngramPadTokenID},
+		{ds41KeyEngramCompVocab, ds41LegacyEngramCompVocab},
+	} {
+		// The legacy alias is consulted on every load: the converter key shadows it.
+		f.hasKey(p + alias[1])
 	}
 	if len(eng.LayerIDs) > 0 && len(eng.Multipliers)%len(eng.LayerIDs) == 0 {
 		eng.MaxNgramSize = max(eng.MaxNgramSize, len(eng.Multipliers)/len(eng.LayerIDs))
@@ -573,12 +585,12 @@ func validateDeepSeek41Engram(f *File, p string, cfg *model.Config, eng *DeepSee
 			}
 		}
 		// offsets is vcruz-only: validate its width only when the key is present.
-		if _, ok := f.Metadata[p+ds41KeyEngramOffsets]; ok && !metadataArrayHasIntegerElement(f, p+ds41KeyEngramOffsets) {
+		if f.hasKey(p+ds41KeyEngramOffsets) && !metadataArrayHasIntegerElement(f, p+ds41KeyEngramOffsets) {
 			return fmt.Errorf("gguf: deepseek41 converter key %s must be an integer array", p+ds41KeyEngramOffsets)
 		}
 		// ds4-only scalar keys: validate the width only when the key is present.
 		for _, key := range []string{ds41KeyEngramCompVocab, ds41KeyEngramPadTokenID} {
-			if value, ok := f.Metadata[p+key]; ok && value.Type != TypeUint32 {
+			if value, ok := f.lookup(p + key); ok && value.Type != TypeUint32 {
 				return fmt.Errorf("gguf: deepseek41 converter key %s must be uint32", p+key)
 			}
 		}
@@ -592,7 +604,7 @@ func validateDeepSeek41Engram(f *File, p string, cfg *model.Config, eng *DeepSee
 	}
 	// The vcruz dialect carries no per-layer row counts, so enforce the pairing
 	// only for a file that actually declares the rows key.
-	if _, hasRows := f.Metadata[p+rowsKey]; hasRows && len(eng.NumEmbeddings) != len(eng.LayerIDs) {
+	if f.hasKey(p+rowsKey) && len(eng.NumEmbeddings) != len(eng.LayerIDs) {
 		return fmt.Errorf("gguf: deepseek41 declares %s=%v but %s has %d entries, want %d",
 			p+layerKey, eng.LayerIDs, p+rowsKey, len(eng.NumEmbeddings), len(eng.LayerIDs))
 	}
@@ -662,7 +674,7 @@ func hasDeepSeek41ConverterEngramMetadata(f *File, p string) bool {
 		ds41KeyEngramMaxNgramSize,
 		ds41KeyEngramOffsets,
 	} {
-		if _, ok := f.Metadata[p+key]; ok {
+		if f.hasKey(p + key) {
 			return true
 		}
 	}
@@ -680,7 +692,7 @@ func hasDeepSeek41VcruzEngramMetadata(f *File, p string) bool {
 		ds41KeyEngramMaxNgramSize,
 		ds41KeyEngramOffsets,
 	} {
-		if _, ok := f.Metadata[p+key]; ok {
+		if f.hasKey(p + key) {
 			return true
 		}
 	}
@@ -692,7 +704,7 @@ func hasDeepSeek41VcruzEngramMetadata(f *File, p string) bool {
 // predicate the V4.1 Engram guard uses: ds4 writes U32 arrays while vcruz writes
 // I32/U64 arrays for the same logical keys.
 func metadataArrayHasIntegerElement(f *File, key string) bool {
-	v, ok := f.Metadata[key]
+	v, ok := f.lookup(key)
 	if !ok || v.Type != TypeArray {
 		return false
 	}

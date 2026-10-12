@@ -1,0 +1,50 @@
+{
+  "schema": "fak.gguf-header-fixture/1",
+  "artifact": "DeepSeek-V4.1-Flash-Q2_K (vcruz305 dialect, 7 shards)",
+  "source": "strix3:/home/fak/models/deepseek-v41-q2k-58d8ac86/ (read-only dd of each shard's first 16 MiB, 2026-10-12)",
+  "fixture_scope": "each shard truncated at its 32-byte aligned tensor-data offset; no tensor payload",
+  "shards": [
+    {
+      "file": "DeepSeek-V4.1-Flash-Q2_K-00001-of-00007.gguf.gz",
+      "shard_bytes": 43072989056,
+      "header_bytes": 5772832,
+      "header_sha256": "1841deee0aa1d6cd3ffe3db924e94acbfc49a06749e4ac5bf3cfaed7dcc64862"
+    },
+    {
+      "file": "DeepSeek-V4.1-Flash-Q2_K-00002-of-00007.gguf.gz",
+      "shard_bytes": 44805480352,
+      "header_bytes": 14752,
+      "header_sha256": "fa9272a304f32cc23eb1b0032ce5afeec2ed541755daab9d8d2252b1037aa726"
+    },
+    {
+      "file": "DeepSeek-V4.1-Flash-Q2_K-00003-of-00007.gguf.gz",
+      "shard_bytes": 14935107904,
+      "header_bytes": 4928,
+      "header_sha256": "41c7ca3a30df01314a932fb1bffb5f5a98aa9b78ec3b2e202810cc668bfeb42d"
+    },
+    {
+      "file": "DeepSeek-V4.1-Flash-Q2_K-00004-of-00007.gguf.gz",
+      "shard_bytes": 44217904672,
+      "header_bytes": 4032,
+      "header_sha256": "c1567a36d197b437fdddc03488f841b939bcb672fd271923fdedb2a35202dcf4"
+    },
+    {
+      "file": "DeepSeek-V4.1-Flash-Q2_K-00005-of-00007.gguf.gz",
+      "shard_bytes": 44804598176,
+      "header_bytes": 14752,
+      "header_sha256": "02f2e67253dff2c8ab3b269659804a29288704c5ba18888208e9177fff0526fa"
+    },
+    {
+      "file": "DeepSeek-V4.1-Flash-Q2_K-00006-of-00007.gguf.gz",
+      "shard_bytes": 44803713696,
+      "header_bytes": 14496,
+      "header_sha256": "f603ab63762ab83f08d31984e084305fe600f1da14aff845fc9d227c8e0164da"
+    },
+    {
+      "file": "DeepSeek-V4.1-Flash-Q2_K-00007-of-00007.gguf.gz",
+      "shard_bytes": 27875485600,
+      "header_bytes": 8864,
+      "header_sha256": "c9cedd9197ed86194a9dcf0a9fc12f2e83e4197802942cd72cf2f8f4b4f7f098"
+    }
+  ]
+}
