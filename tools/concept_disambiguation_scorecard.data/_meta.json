@@ -13356,6 +13356,11 @@
           "category": "incidental",
           "reason": "Diagnostic output field counting leading sampled MATCH layers under the trace report tolerance and completeness rules; it is not a product support-maturity designation or full-checkpoint parity qualification.",
           "token": "parity_layers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Explicit per-consumer runtime interface contract for synchronous consumption of immutable Q2_K/Q3_K source bytes and independent uploaded-buffer ownership, controlling whether borrowing is permitted; it is not a product maturity level, device qualification result, or performance claim.",
+          "token": "SupportsBorrowedExpertUploads"
         }
       ],
       "exclude": [
@@ -13481,6 +13486,7 @@
         "SupportLocalOnly",
         "SupportPartial",
         "SupportedFeatures",
+        "SupportsBorrowedExpertUploads",
         "SupportsRoutedExpertKQuant",
         "SupportsV41DeferredStatus",
         "TensorCoverageArchSchema",

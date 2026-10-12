@@ -46,6 +46,24 @@ func (m *mmapReaderAt) ReadAt(p []byte, off int64) (int, error) {
 	return n, nil
 }
 
+// ReadOnlyRange borrows an exact, capacity-capped span of the read-only mapping.
+// The caller must not modify it or retain it past the checkpoint owner's Close.
+// The checkpoint file must remain immutable while mapped. ReadAt keeps its
+// separate copy-and-own contract, including for TensorBytes callers.
+//
+// Prior-art: adapts llama_model_loader::load_data_range's mapped-address arm from
+// ggml-org/llama.cpp src/llama-model-loader.cpp:1471-1491 at
+// f2cc7282ce0042641df55e0e563b75e824e2b647 (MIT, Copyright (c) 2023-2026
+// The ggml authors; license reproduced in THIRD_PARTY_NOTICES.md). Go uses
+// subtraction-based bounds checks and a three-index slice instead of a pointer.
+func (m *mmapReaderAt) ReadOnlyRange(off, size int64) ([]byte, error) {
+	if m == nil || off < 0 || size < 0 || off > int64(len(m.data)) || size > int64(len(m.data))-off {
+		return nil, fmt.Errorf("gguf: mmap range offset %d size %d outside mapping", off, size)
+	}
+	end := off + size // bounded above before addition
+	return m.data[off:end:end], nil
+}
+
 // ggufMmapOnce/ggufMmapOn cache the FAK_GGUF_MMAP decision once per process (mirroring
 // the W3MLPRequested opt-in idiom): loader goroutines never re-read process environment,
 // so a load has one immutable reader-selection contract even across split shards opened

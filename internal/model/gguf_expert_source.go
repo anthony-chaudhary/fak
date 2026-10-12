@@ -174,6 +174,41 @@ func (s *ggufExpertSource) readExpert(name string, e int) ([]byte, error) {
 	return buf, nil
 }
 
+// ggufReadOnlyRange is an optional reader capability. Its bytes must be immutable
+// and remain valid until the reader's checkpoint owner closes. Callers borrow
+// them for staging and must never write through the returned slice.
+type ggufReadOnlyRange interface {
+	ReadOnlyRange(off, size int64) ([]byte, error)
+}
+
+// readExpertReadOnly borrows the indexed expert range when the reader supports
+// it, otherwise preserving readExpert's owned-copy path. A broken capability is
+// an error, never a reason to hide the failure with a second read.
+func (s *ggufExpertSource) readExpertReadOnly(name string, e int) ([]byte, error) {
+	r, mapped := s.r.(ggufReadOnlyRange)
+	if !mapped {
+		return s.readExpert(name, e)
+	}
+	entry, ok := s.tensors[name]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrGGUFExpertNotFound, name)
+	}
+	if e < 0 || e >= entry.desc.Experts {
+		return nil, fmt.Errorf("%w: expert %d of %s outside [0,%d)", ErrGGUFExpertOutOfRange, e, name, entry.desc.Experts)
+	}
+	if entry.stride > int64(^uint(0)>>1) {
+		return nil, fmt.Errorf("%w: %s expert stride %d exceeds addressable buffer size", ErrGGUFExpertMetadata, name, entry.stride)
+	}
+	raw, err := r.ReadOnlyRange(entry.desc.Offset+int64(e)*entry.stride, entry.stride)
+	if err != nil {
+		return nil, fmt.Errorf("model: gguf expert mapped range %s[%d]: %w", name, e, err)
+	}
+	if int64(len(raw)) != entry.stride {
+		return nil, fmt.Errorf("%w: %s expert %d mapped range has %d bytes, want %d", ErrGGUFExpertMetadata, name, e, len(raw), entry.stride)
+	}
+	return raw[:len(raw):len(raw)], nil
+}
+
 // expertStride returns the derived per-expert byte stride of the named fused tensor.
 func (s *ggufExpertSource) expertStride(name string) (int64, bool) {
 	entry, ok := s.tensors[name]

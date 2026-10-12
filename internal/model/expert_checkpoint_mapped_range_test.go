@@ -1,0 +1,470 @@
+package model
+
+import (
+	"bytes"
+	"errors"
+	"sync"
+	"testing"
+	"unsafe"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
+)
+
+func mappedCheckpointFixture(t *testing.T, quant ExpertCheckpointQuant, budget int64, page, overlay bool) (*ExpertCheckpointTier, *mappedExpertReader, string, int) {
+	t.Helper()
+	_, stride, _ := quant.blockGeometry()
+	r := &mappedExpertReader{data: make([]byte, 2*stride)}
+	for i := range r.data {
+		r.data[i] = byte(i*7 + 11)
+	}
+	tier := NewExpertCheckpointTier(budget)
+	var data []byte
+	if page {
+		data = r.data
+	}
+	const fused = "blk.0.ffn_gate_exps.weight"
+	if err := tier.AddShardData(r, int64(len(r.data)), data, []FusedExpertTensor{{Name: fused, Layer: 0, Proj: "gate_proj", Quant: quant, Experts: 2, Rows: 1, Cols: 256}}); err != nil {
+		t.Fatal(err)
+	}
+	if overlay {
+		// Even an overlay without this row must retain the historical dense fallback.
+		tier.overlays = map[string]*ExpertSparseOverlay{fused: {}}
+	}
+	return tier, r, expertName(0, 0, "gate_proj.weight"), stride
+}
+
+func mappedCheckpointRaw(w expertWeight) []byte {
+	if w.kq != nil {
+		return w.kq.raw
+	}
+	if w.q4 != nil {
+		return w.q4.raw
+	}
+	return nil
+}
+
+// fak-test:runtime fast est=100ms
+func TestExpertCheckpointMappedRangeEligibility(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name                  string
+		quant                 ExpertCheckpointQuant
+		budget                int64
+		page, overlay, borrow bool
+	}{
+		{name: "q2", quant: ExpertCheckpointQ2K, borrow: true},
+		{name: "q3", quant: ExpertCheckpointQ3K, borrow: true},
+		{name: "q4", quant: ExpertCheckpointQ4K},
+		{name: "q5", quant: ExpertCheckpointQ5K},
+		{name: "q6", quant: ExpertCheckpointQ6K},
+		{name: "retained", quant: ExpertCheckpointQ2K, budget: 4096},
+		{name: "overlay_missing_row", quant: ExpertCheckpointQ2K, overlay: true},
+		{name: "page_cache", quant: ExpertCheckpointQ3K, page: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tier, r, name, stride := mappedCheckpointFixture(t, tc.quant, tc.budget, tc.page, tc.overlay)
+			w, err := tier.fault(name)
+			raw := mappedCheckpointRaw(w)
+			if err != nil || !bytes.Equal(raw, r.data[:stride]) {
+				t.Fatalf("fault bytes differ: %v", err)
+			}
+			if aliased := &raw[0] == &r.data[0]; aliased != tc.borrow {
+				t.Fatalf("alias=%t want=%t", aliased, tc.borrow)
+			}
+			wantRanges, wantReads := int64(0), int64(1)
+			if tc.borrow {
+				wantRanges, wantReads = 1, 0
+				if cap(raw) != stride {
+					t.Fatalf("borrowed capacity=%d want=%d", cap(raw), stride)
+				}
+			}
+			st := tier.Stats()
+			if r.ranges.Load() != wantRanges || r.reads.Load() != wantReads || st.Reads != 1 || st.BytesRead != int64(stride) || st.Failures != 0 {
+				t.Fatalf("capability/accounting mismatch: ranges=%d reads=%d stats=%+v", r.ranges.Load(), r.reads.Load(), st)
+			}
+			if tc.budget == 0 && (st.ResidentBytes != 0 || st.ResidentCount != 0 || st.PeakBytes != 0) {
+				t.Fatalf("stream-through retained host bytes: %+v", st)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=100ms
+func TestExpertCheckpointMappedRangeConstructorsPreserveSource(t *testing.T) {
+	t.Parallel()
+	for _, quant := range []ExpertCheckpointQuant{ExpertCheckpointQ2K, ExpertCheckpointQ3K} {
+		tier, r, name, stride := mappedCheckpointFixture(t, quant, 0, false, false)
+		before := append([]byte(nil), r.data...)
+		safe := &mappedBorrowSafeUpload{&mappedUploadWitness{Backend: compute.Default(), label: "opted-in"}}
+		stage, ok := tier.stagingForBackend(name, safe)
+		if !ok || r.ranges.Load() != 0 {
+			t.Fatal("staging descriptor faulted eagerly")
+		}
+		host := stage.mk()
+		hb, ok := host.Buf().(compute.HostBuffer)
+		if !ok || len(hb.I8()) != stride || mappedHostPointer(host) != uintptr(unsafe.Pointer(&r.data[0])) || !bytes.Equal(before, r.data) {
+			t.Fatal("host constructor changed or expanded mapped source")
+		}
+		for i, b := range hb.I8() {
+			if b != int8(before[i]) {
+				t.Fatalf("host constructor changed byte %d", i)
+			}
+		}
+		// The odd Q3_K block remains 110 bytes here. Vulkan owns its separate
+		// 112-byte padded upload allocation; it must never pad this mapped source.
+		if quant == ExpertCheckpointQ3K && len(hb.I8()) != 110 {
+			t.Fatal("Q3_K host source lost exact payload length")
+		}
+	}
+}
+
+// fak-test:runtime fast est=100ms
+func TestExpertCheckpointMappedRangeSessionLifetime(t *testing.T) {
+	t.Parallel()
+	for _, quant := range []ExpertCheckpointQuant{ExpertCheckpointQ2K, ExpertCheckpointQ3K} {
+		tier, r, name, stride := mappedCheckpointFixture(t, quant, 0, false, false)
+		m := NewSynthetic(Config{VocabSize: 8, HiddenSize: 256, NumLayers: 0})
+		m.SetExpertCheckpoint(tier)
+		closer := &countWeightCloser{}
+		m.SetWeightCloser(closer)
+		safe := &mappedBorrowSafeUpload{&mappedUploadWitness{Backend: compute.Default(), label: "opted-in"}}
+		s := m.NewBackendSession(safe)
+		t.Cleanup(s.Close)
+		weight, ok := s.resolveExpertWeight(name)
+		if !ok || weight.ck == nil {
+			t.Fatal("missing mapped expert staging")
+		}
+		// Retain the borrowed host tensor before its synchronous Upload while
+		// the session owns the model/checkpoint lifetime.
+		host := weight.ck.mk()
+		hb, ok := host.Buf().(compute.HostBuffer)
+		if !ok || len(hb.I8()) != stride || mappedHostPointer(host) != uintptr(unsafe.Pointer(&r.data[0])) || r.ranges.Load() != 1 || r.reads.Load() != 0 {
+			t.Fatal("safe staging did not retain the borrowed host tensor")
+		}
+		var active *WeightSessionsActiveError
+		if err := m.CloseWeights(); !errors.As(err, &active) || active.Count != 1 || closer.n.Load() != 0 {
+			t.Fatalf("borrowed source closed while session remained: %v", err)
+		}
+		for i, b := range hb.I8() {
+			if b != int8(r.data[i]) {
+				t.Fatalf("borrowed byte %d changed before session close", i)
+			}
+		}
+		s.Close()
+		if closer.n.Load() != 1 {
+			t.Fatalf("source closes=%d want=1", closer.n.Load())
+		}
+		// Borrowed bytes are never accessed after the final session close.
+		if err := m.CloseWeights(); err != nil || closer.n.Load() != 1 {
+			t.Fatalf("repeated source close: %v count=%d", err, closer.n.Load())
+		}
+	}
+}
+
+// fak-test:runtime fast est=100ms
+func TestExpertCheckpointMappedRangeOwnerWaiters(t *testing.T) {
+	t.Parallel()
+	const callers = 8
+	boom := errors.New("mapped range failed")
+	for _, mode := range []string{"success", "short", "long", "nil", "error", "panic"} {
+		t.Run(mode, func(t *testing.T) {
+			tier, r, name, stride := mappedCheckpointFixture(t, ExpertCheckpointQ2K, 0, false, false)
+			entered := make(chan struct{}, 1)
+			release := make(chan struct{})
+			unblock := sync.OnceFunc(func() { close(release) })
+			t.Cleanup(unblock)
+			r.rangeFn = func(off, size int64) ([]byte, error) {
+				entered <- struct{}{}
+				<-release
+				switch mode {
+				case "short":
+					return r.data[:stride-1], nil
+				case "long":
+					return r.data[:stride+1], nil
+				case "nil":
+					return nil, nil
+				case "error":
+					return r.data[:stride], boom
+				case "panic":
+					panic(boom)
+				}
+				return r.data[off : off+size : off+size], nil
+			}
+			names := make([]string, callers)
+			for i := range names {
+				names[i] = name
+			}
+			results := checkpointFlightFaults(tier, names...)
+			checkpointFlightWait(t, func() bool { return len(entered) == 1 && checkpointFlightCoalesced(tier) == callers-1 })
+			if st := tier.Stats(); st.Reads != 0 || st.ResidentBytes != 0 {
+				t.Fatalf("incomplete owner published bytes: %+v", st)
+			}
+			unblock()
+			var shared error
+			panics := 0
+			for _, result := range checkpointFlightCollect(t, results, callers) {
+				if mode == "success" {
+					raw := mappedCheckpointRaw(result.weight)
+					if result.err != nil || result.panic != nil || len(raw) != stride || &raw[0] != &r.data[0] {
+						t.Fatalf("waiter did not receive complete borrowed view: %+v", result)
+					}
+					continue
+				}
+				if result.panic != nil {
+					if mode != "panic" || result.panic != boom {
+						t.Fatalf("unexpected owner panic: %v", result.panic)
+					}
+					panics++
+					continue
+				}
+				want := ErrGGUFExpertMetadata
+				if mode == "error" {
+					want = boom
+				}
+				if mode == "panic" {
+					want = ErrExpertCheckpointLoadAborted
+				}
+				if !errors.Is(result.err, want) || mappedCheckpointRaw(result.weight) != nil {
+					t.Fatalf("failed owner published a weight: %+v", result)
+				}
+				if shared == nil {
+					shared = result.err
+				} else if shared != result.err {
+					t.Fatal("waiters received separate errors")
+				}
+			}
+			st := tier.Stats()
+			if r.ranges.Load() != 1 || r.reads.Load() != 0 || st.Coalesced != callers-1 || st.ResidentCount != 0 {
+				t.Fatalf("owner/coalescing changed: ranges=%d reads=%d stats=%+v", r.ranges.Load(), r.reads.Load(), st)
+			}
+			if mode == "success" {
+				if st.Reads != 1 || st.BytesRead != int64(stride) || st.Failures != 0 {
+					t.Fatalf("success accounting: %+v", st)
+				}
+			} else {
+				if st.Reads != 0 || st.BytesRead != 0 || st.Failures != 1 {
+					t.Fatalf("failure accounting: %+v", st)
+				}
+				if (mode == "panic") != (panics == 1) {
+					t.Fatalf("owner panics=%d mode=%s", panics, mode)
+				}
+			}
+			// A new fault after complete publication still borrows at budget zero;
+			// a failed or panicking owner leaves no stale loading entry.
+			r.rangeFn = nil
+			w, err := tier.fault(name)
+			if err != nil || len(mappedCheckpointRaw(w)) != stride || r.ranges.Load() != 2 || r.reads.Load() != 0 {
+				t.Fatalf("retry failed: %v", err)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=100ms
+func TestExpertCheckpointMappedRangeIndependentKeys(t *testing.T) {
+	t.Parallel()
+	tier, r, name, stride := mappedCheckpointFixture(t, ExpertCheckpointQ3K, 0, false, false)
+	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(unblock)
+	r.rangeFn = func(off, size int64) ([]byte, error) {
+		<-release
+		return r.data[off : off+size : off+size], nil
+	}
+	other := expertName(0, 1, "gate_proj.weight")
+	results := checkpointFlightFaults(tier, name, other)
+	// Both ranges must enter while the first is held, proving mapping access
+	// does not hold the tier bookkeeping mutex or serialize different experts.
+	checkpointFlightWait(t, func() bool { return r.ranges.Load() == 2 })
+	unblock()
+	for _, result := range checkpointFlightCollect(t, results, 2) {
+		off := 0
+		if result.name == other {
+			off = stride
+		}
+		raw := mappedCheckpointRaw(result.weight)
+		if result.err != nil || result.panic != nil || len(raw) != stride || &raw[0] != &r.data[off] {
+			t.Fatalf("independent mapped expert: %+v", result)
+		}
+	}
+	if st := tier.Stats(); st.Reads != 2 || st.BytesRead != int64(2*stride) || st.Coalesced != 0 || st.Failures != 0 || r.reads.Load() != 0 {
+		t.Fatalf("independent-key accounting: %+v", st)
+	}
+}
+
+// mappedUploadWitness models host-pointer interning without a physical device.
+// Free visibly invalidates one returned allocation so peer ownership is tested.
+type mappedUploadWitness struct {
+	compute.Backend
+	label  string
+	intern bool
+	mu     sync.Mutex
+	inputs []uintptr
+	keep   []compute.Tensor
+	cache  map[uintptr]compute.Tensor
+}
+
+func (b *mappedUploadWitness) Name() string { return b.label }
+
+func mappedHostPointer(t compute.Tensor) uintptr {
+	raw := t.Buf().(compute.HostBuffer).I8()
+	return uintptr(unsafe.Pointer(&raw[0]))
+}
+
+func (b *mappedUploadWitness) Upload(t compute.Tensor, as compute.Dtype) compute.Tensor {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	ptr := mappedHostPointer(t)
+	b.inputs = append(b.inputs, ptr)
+	if b.intern {
+		if cached, ok := b.cache[ptr]; ok {
+			return cached
+		}
+		b.keep = append(b.keep, t) // mirror the interning backend's retained host owner
+	}
+	i8 := t.Buf().(compute.HostBuffer).I8()
+	raw := make([]byte, len(i8))
+	for i, v := range i8 {
+		raw[i] = byte(v)
+	}
+	var out compute.Tensor
+	if as == compute.Q2_K {
+		out = compute.NewQ2K(compute.Default(), t.Shape, raw)
+	} else {
+		out = compute.NewQ3K(compute.Default(), t.Shape, raw)
+	}
+	if b.intern {
+		if b.cache == nil {
+			b.cache = map[uintptr]compute.Tensor{}
+		}
+		b.cache[ptr] = out
+	}
+	return out
+}
+
+func (b *mappedUploadWitness) Free(t compute.Tensor) {
+	if hb, ok := t.Buf().(compute.HostBuffer); ok {
+		clear(hb.I8())
+	}
+}
+
+// The positive test backend copies synchronously and never interns ownership.
+type mappedBorrowSafeUpload struct{ *mappedUploadWitness }
+
+func (*mappedBorrowSafeUpload) SupportsBorrowedExpertUploads() bool { return true }
+
+type mappedBorrowDeclinedUpload struct{ *mappedUploadWitness }
+
+func (*mappedBorrowDeclinedUpload) SupportsBorrowedExpertUploads() bool { return false }
+
+func mappedBackendSession(t *testing.T, m *Model, be compute.Backend) *Session {
+	t.Helper()
+	s, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	return s
+}
+
+func mappedSessionStage(s *Session, name string) compute.Tensor {
+	w, ok := s.resolveExpertWeight(name)
+	if !ok || w.ck == nil {
+		panic("missing checkpoint staging")
+	}
+	return s.weightHALStagedBounded(w.ck.key, name, w.ck.mk, w.ck.dt, w.ck.bytes)
+}
+
+// fak-test:runtime fast est=100ms
+func TestExpertCheckpointMappedRangeUnsafeConsumersOwnCopies(t *testing.T) {
+	t.Parallel()
+	for _, label := range []string{"cuda", "vulkan", "unknown", "declined"} {
+		t.Run(label, func(t *testing.T) {
+			tier, r, name, stride := mappedCheckpointFixture(t, ExpertCheckpointQ2K, 0, false, false)
+			m := NewSynthetic(Config{VocabSize: 8, HiddenSize: 256, NumLayers: 0})
+			m.SetExpertCheckpoint(tier)
+			be := &mappedUploadWitness{Backend: compute.Default(), label: label, intern: true}
+			var backend compute.Backend = be
+			if label == "declined" {
+				backend = &mappedBorrowDeclinedUpload{be}
+			}
+			first, second := mappedBackendSession(t, m, backend), mappedBackendSession(t, m, backend)
+			one, two := mappedSessionStage(first, name), mappedSessionStage(second, name)
+			mapped := uintptr(unsafe.Pointer(&r.data[0]))
+			if len(be.inputs) != 2 || be.inputs[0] == mapped || be.inputs[1] == mapped || be.inputs[0] == be.inputs[1] || one.Buf() == two.Buf() {
+				t.Fatal("unknown or name-only backend shared mapped host/device ownership")
+			}
+			first.Close()
+			for i, b := range two.Buf().(compute.HostBuffer).I8() {
+				if b != int8(r.data[i]) {
+					t.Fatalf("peer close invalidated byte %d", i)
+				}
+			}
+			if r.ranges.Load() != 2 || r.reads.Load() != 0 || tier.Stats().BytesRead != int64(2*stride) {
+				t.Fatal("unsafe fallback changed logical source accounting")
+			}
+		})
+	}
+}
+
+type mappedOwnedReader struct{ data, last []byte }
+
+func (r *mappedOwnedReader) ReadAt(p []byte, off int64) (int, error) {
+	r.last = p
+	return bytes.NewReader(r.data).ReadAt(p, off)
+}
+
+// fak-test:runtime fast est=100ms
+func TestExpertCheckpointMappedRangePreservesOwnedReadAtResult(t *testing.T) {
+	t.Parallel()
+	r := &mappedOwnedReader{data: bytes.Repeat([]byte{31}, q2kBlockBytes)}
+	tier := NewExpertCheckpointTier(0)
+	if err := tier.AddShard(r, int64(len(r.data)), []FusedExpertTensor{{Name: "gate", Layer: 0, Proj: "gate_proj", Quant: ExpertCheckpointQ2K, Experts: 1, Rows: 1, Cols: 256}}); err != nil {
+		t.Fatal(err)
+	}
+	stage, ok := tier.stagingForBackend(expertName(0, 0, "gate_proj.weight"), &mappedUploadWitness{Backend: compute.Default(), label: "unknown", intern: true})
+	if !ok {
+		t.Fatal("missing owned staging")
+	}
+	host := stage.mk()
+	if len(r.last) != q2kBlockBytes || mappedHostPointer(host) != uintptr(unsafe.Pointer(&r.last[0])) || !bytes.Equal(r.last, r.data) {
+		t.Fatal("ordinary ReadAt result was copied again or changed")
+	}
+}
+
+// fak-test:runtime fast est=100ms
+func TestExpertCheckpointMappedRangeMixedBackendWaiters(t *testing.T) {
+	t.Parallel()
+	tier, r, name, stride := mappedCheckpointFixture(t, ExpertCheckpointQ3K, 0, false, false)
+	m := NewSynthetic(Config{VocabSize: 8, HiddenSize: 256, NumLayers: 0})
+	m.SetExpertCheckpoint(tier)
+	safe := &mappedBorrowSafeUpload{&mappedUploadWitness{Backend: compute.Default(), label: "opted-in"}}
+	unsafeBackend := &mappedUploadWitness{Backend: compute.Default(), label: "vulkan", intern: true}
+	sessions := []*Session{mappedBackendSession(t, m, safe), mappedBackendSession(t, m, unsafeBackend)}
+	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(unblock)
+	r.rangeFn = func(off, size int64) ([]byte, error) { <-release; return r.data[off : off+size : off+size], nil }
+	results := make(chan compute.Tensor, 2)
+	for _, s := range sessions {
+		go func() { results <- mappedSessionStage(s, name) }()
+	}
+	checkpointFlightWait(t, func() bool { return r.ranges.Load() == 1 && tier.Stats().Coalesced == 1 })
+	unblock()
+	checkpointFlightWait(t, func() bool { return len(results) == 2 })
+	one, two := <-results, <-results
+	mapped := uintptr(unsafe.Pointer(&r.data[0]))
+	if len(safe.inputs) != 1 || safe.inputs[0] != mapped || len(unsafeBackend.inputs) != 1 || unsafeBackend.inputs[0] == mapped || one.Buf() == two.Buf() {
+		t.Fatal("mixed waiters lost per-consumer borrowed/owned policy")
+	}
+	if st := tier.Stats(); st.Reads != 1 || st.BytesRead != int64(stride) || st.Coalesced != 1 || st.Failures != 0 || st.ResidentCount != 0 || r.reads.Load() != 0 {
+		t.Fatalf("mixed-backend source accounting: %+v", st)
+	}
+	for _, tensor := range []compute.Tensor{one, two} {
+		for i, b := range tensor.Buf().(compute.HostBuffer).I8() {
+			if b != int8(r.data[i]) {
+				t.Fatalf("mixed consumer byte %d changed", i)
+			}
+		}
+	}
+}

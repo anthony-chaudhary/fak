@@ -414,8 +414,9 @@ func (t *ExpertCheckpointTier) AddShard(r io.ReaderAt, size int64, fused []Fused
 // data is non-empty and exactly size bytes, the shard's per-expert projections are read through the
 // page-cache-aware path (ggufExpertSource.enablePageCache / readExpertPageCache): a repeat read of an
 // already-faulted expert is served zero-copy from the mapping and moves no device bytes. A nil/empty
-// or mismatched data leaves the shard on the historical readExpert path byte-for-byte, which is the
-// default and the only arm reachable on a platform without an mmap impl (Windows).
+// or mismatched data leaves page-cache accounting off. Eligible zero-retention Q2_K/Q3_K
+// faults may still borrow through r's optional read-only range capability; an ordinary
+// ReaderAt retains the historical copied path, including platforms without mmap support.
 func (t *ExpertCheckpointTier) AddShardData(r io.ReaderAt, size int64, data []byte, fused []FusedExpertTensor) error {
 	if t == nil {
 		return fmt.Errorf("%w: nil tier", ErrGGUFExpertMetadata)
@@ -505,6 +506,21 @@ type checkpointStaging struct {
 // checkpoint the weight is resident nowhere else, so a caller told "absent" would report a missing
 // tensor and bury the real IO error. The failure is counted in the ledger either way.
 func (t *ExpertCheckpointTier) staging(name string) (*checkpointStaging, bool) {
+	return t.stagingForBackend(name, nil)
+}
+
+// borrowedExpertUploadBackend explicitly admits immutable Q2_K/Q3_K source
+// views. Every selected upload entry point (Upload, UploadClass, or UploadAsync)
+// must consume/copy every source byte before returning, even if device completion
+// is deferred, and must not mutate or retain the source. Returned tensors require
+// independent ownership: freeing one cannot invalidate another upload of the same
+// host range.
+// Unknown backends, including host-pointer-interning backends, keep owned bytes.
+type borrowedExpertUploadBackend interface {
+	SupportsBorrowedExpertUploads() bool
+}
+
+func (t *ExpertCheckpointTier) stagingForBackend(name string, be compute.Backend) (*checkpointStaging, bool) {
 	if t == nil {
 		return nil, false
 	}
@@ -514,12 +530,19 @@ func (t *ExpertCheckpointTier) staging(name string) (*checkpointStaging, bool) {
 	if !indexed {
 		return nil, false
 	}
+	capability, capable := be.(borrowedExpertUploadBackend)
+	borrowSafe := capable && capability.SupportsBorrowedExpertUploads()
 	return &checkpointStaging{
 		key: entry.halKey(name),
 		mk: func() compute.Tensor {
 			w, err := t.fault(name)
 			if err != nil {
 				panic("model: checkpoint expert read " + name + ": " + err.Error())
+			}
+			if w.borrowed && !borrowSafe {
+				// Ownership is per consumer, after shared fault publication. Never
+				// replace a waiter's kq/raw in place: another backend may use it.
+				w = entry.weight(name, append([]byte(nil), w.kq.raw...))
 			}
 			if w.q4 != nil {
 				return compute.NewQ4K(compute.Default(), []int{w.q4.out, w.q4.in}, w.q4.raw)
@@ -670,10 +693,20 @@ func (t *ExpertCheckpointTier) faultOwned(name string, id polymodel.ModelID, ent
 		}
 	}
 
-	// Source I/O stays outside the lock. On a shard
-	// admitted to the page-cache path (#1302) readExpertPageCache is used, so a repeat fault of a
-	// warm expert moves zero device bytes; otherwise it is the historical readExpert path exactly.
-	raw, _, err := src.readExpertPageCache(entry.fused, entry.expert)
+	// The narrow Q2_K/Q3_K stream-through path can borrow immutable checkpoint
+	// bytes under the model/session lifetime. Staging separately requires an
+	// explicit borrow-safe upload capability or makes a consumer-owned copy.
+	// Retained caches, overlays (including absent
+	// rows), and page-cache accounting keep their existing read contract. Source
+	// I/O stays outside the bookkeeping lock; ownership/publication below is shared.
+	var err error
+	var borrowed bool
+	if (entry.quant == ExpertCheckpointQ2K || entry.quant == ExpertCheckpointQ3K) && t.pool.Budget() == 0 && overlay == nil && !src.PageCacheEnabled() {
+		_, borrowed = src.r.(ggufReadOnlyRange)
+		raw, err = src.readExpertReadOnly(entry.fused, entry.expert)
+	} else {
+		raw, _, err = src.readExpertPageCache(entry.fused, entry.expert)
+	}
 	if err != nil {
 		t.mu.Lock()
 		t.failures, t.lastErr = t.failures+1, err
@@ -681,6 +714,7 @@ func (t *ExpertCheckpointTier) faultOwned(name string, id polymodel.ModelID, ent
 		return expertWeight{}, err
 	}
 	w := entry.weight(name, raw)
+	w.borrowed = borrowed
 
 	t.mu.Lock()
 	defer t.mu.Unlock()

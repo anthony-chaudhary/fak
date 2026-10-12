@@ -430,6 +430,9 @@ type expertWeight struct {
 	q4   *q4kTensor
 	kq   *kQuantTensor
 	ck   *checkpointStaging
+	// borrowed marks immutable checkpoint bytes shared by fault waiters. A
+	// consumer without borrow-safe upload must copy them without mutating w.
+	borrowed bool
 }
 
 // halKey is the dtype-prefixed staging key this weight lands under — the same key weightHALQ4K /
@@ -478,7 +481,7 @@ func (s *Session) resolveExpertWeight(name string) (expertWeight, bool) {
 		}
 		return expertWeight{name: name, kq: qt}, true
 	}
-	ck, ok := s.M.expertCheckpoint.staging(name)
+	ck, ok := s.M.expertCheckpoint.stagingForBackend(name, s.Backend)
 	if !ok {
 		return expertWeight{}, false
 	}
