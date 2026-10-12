@@ -1037,7 +1037,12 @@ func landIsolatedProspectivePrepared(root, wtPath, diff, msgFile string, paths [
 			disambiguation, valid = verifyApplicableDisambiguation(root, wtPath, treeSHA)
 			finishAnalysis()
 			if !valid {
-				return isolatedLandReconciliationResult(wtPath, Result{Reason: "post-apply disambiguation invariant failed", Detail: disambiguation.compactDetail(), Disambiguation: disambiguation}), true
+				result := Result{Reason: "post-apply disambiguation invariant failed", Detail: disambiguation.compactDetail(), Disambiguation: disambiguation}
+				if disambiguation.deadlineExceeded() {
+					result.Code = DisambiguationTimeoutCode
+					result.Reason = "whole-tree disambiguation deadline exceeded; analysis incomplete"
+				}
+				return isolatedLandReconciliationResult(wtPath, result), true
 			}
 		}
 		finishCommit := beginLandPhase(tracker, "commit-construction", attempt)

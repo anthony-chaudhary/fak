@@ -66,6 +66,10 @@ type DisambiguationDiagnostic struct {
 	Witness   string `json:"witness"`
 	Subphase  string `json:"subphase"`
 	TimeoutMS int64  `json:"timeout_ms,omitempty"`
+	// Recoverable names an incomplete deadline result, never an oracle verdict
+	// or permission to retry automatically. Recovery preserves every witness.
+	Recoverable bool   `json:"recoverable,omitempty"`
+	Recovery    string `json:"recovery,omitempty"`
 }
 
 // DisambiguationTimeoutReceipt makes the deadline authority explicit on every
@@ -534,16 +538,32 @@ func readOneBounded(ctx context.Context, witness, repo, tree string, timeout tim
 func timeoutResult(tree, witness, subphase string, timeout time.Duration, err error) DisambiguationWitness {
 	timeoutMS := timeout.Milliseconds()
 	detail := fmt.Sprintf("%s: witness=%s subphase=%s timeout_ms=%d", DisambiguationTimeoutCode, witness, subphase, timeoutMS)
+	diagnostic := &DisambiguationDiagnostic{
+		Code: DisambiguationTimeoutCode, Witness: witness, Subphase: subphase, TimeoutMS: timeoutMS,
+	}
 	if err != nil {
 		detail += ": " + err.Error()
 	}
-	return DisambiguationWitness{
-		Tree:   tree,
-		Detail: detail,
-		Diagnostic: &DisambiguationDiagnostic{
-			Code: DisambiguationTimeoutCode, Witness: witness, Subphase: subphase, TimeoutMS: timeoutMS,
-		},
+	if errors.Is(err, context.DeadlineExceeded) {
+		diagnostic.Recoverable = true
+		diagnostic.Recovery = fmt.Sprintf("analysis incomplete; inspect host contention and the stalled subphase, then rerun the same managed land with --disambiguation-timeout-ms <milliseconds> or %s=<milliseconds> (1..%d); all three witnesses remain required", DisambiguationTimeoutEnv, maxDisambiguationTimeout.Milliseconds())
+		detail += "; " + diagnostic.Recovery
 	}
+	return DisambiguationWitness{
+		Tree: tree, Detail: detail, Diagnostic: diagnostic,
+	}
+}
+
+func (w *DisambiguationWitnesses) deadlineExceeded() bool {
+	if w == nil {
+		return false
+	}
+	for _, witness := range []DisambiguationWitness{w.Before, w.Worktree, w.PostApply} {
+		if d := witness.Diagnostic; d != nil && d.Code == DisambiguationTimeoutCode && d.Recoverable {
+			return true
+		}
+	}
+	return false
 }
 
 func coverageFamilyRegressed(before, after map[string]float64) bool {
