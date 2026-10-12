@@ -1543,8 +1543,7 @@ func recoverDevicePanic(r any) (err error, handled bool) {
 		// V4.1 Prefill/Step panic their typed stage-admission refusal before any
 		// math; under the default policy it must fail the request (or warmup),
 		// not the serving process.
-		var v41Stage *model.V41ForwardError
-		if errors.As(e, &v41Stage) || errors.Is(e, model.ErrV41PrefillLatency) {
+		if v41ForwardRefusal(e) {
 			return e, true
 		}
 		var operation *model.BackendForwardOperationError
@@ -1585,6 +1584,30 @@ func recoverDevicePanic(r any) (err error, handled bool) {
 		return e, true
 	}
 	return nil, false
+}
+
+// v41ForwardRefusal reports a typed V4.1 forward failure that Prefill/Step panic:
+// a stage refusal, the prefill-latency refusal, or a selected operation error.
+// Not every operation error wraps a stage error, so each type is named.
+func v41ForwardRefusal(e error) bool {
+	var (
+		stage    *model.V41ForwardError
+		decoder  *model.V41DecoderError
+		engram   *model.V41EngramStreamError
+		logit    *model.V41LogitScaleOperationError
+		rope     *model.V41TailRoPEOperationError
+		idxScale *model.V41IndexWeightScaleOperationError
+		score    *model.V41IndexerScoreOperationError
+		prefix   *model.V41QueryPrefixOperationError
+		mhc      *model.V41MHCOperationError
+		shared   *model.V41SharedAttentionOperationError
+		bf16     *model.V41BF16BoundaryOperationError
+	)
+	return errors.Is(e, model.ErrV41PrefillLatency) ||
+		errors.As(e, &stage) || errors.As(e, &decoder) || errors.As(e, &engram) ||
+		errors.As(e, &logit) || errors.As(e, &rope) || errors.As(e, &idxScale) ||
+		errors.As(e, &score) || errors.As(e, &prefix) || errors.As(e, &mhc) ||
+		errors.As(e, &shared) || errors.As(e, &bf16)
 }
 
 type inKernelGenerateResult struct {

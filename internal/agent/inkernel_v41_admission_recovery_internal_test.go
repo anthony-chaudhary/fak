@@ -36,3 +36,28 @@ func TestV41AdmissionRecoveryPreservesIdentity(t *testing.T) {
 		}
 	}
 }
+
+// Every selected V4.1 operation error is a request failure even when its cause is
+// not a stage refusal (the ratio-one and device seams return these unwrapped).
+// fak-test:runtime fast est=1ms
+func TestV41OperationErrorsRecovered(t *testing.T) {
+	cause := errors.New("selected operation failed")
+	for _, op := range []error{
+		&model.V41DecoderError{Err: cause},
+		&model.V41EngramStreamError{},
+		&model.V41LogitScaleOperationError{Cause: cause},
+		&model.V41TailRoPEOperationError{Cause: cause},
+		&model.V41IndexWeightScaleOperationError{Cause: cause},
+		&model.V41IndexerScoreOperationError{Cause: cause},
+		&model.V41QueryPrefixOperationError{Cause: cause},
+		&model.V41MHCOperationError{Cause: cause},
+		&model.V41SharedAttentionOperationError{Cause: cause},
+		&model.V41BF16BoundaryOperationError{Cause: cause},
+	} {
+		for _, input := range []error{op, fmt.Errorf("direct session: %w", op)} {
+			if got, handled := recoverDevicePanic(input); !handled || got != input {
+				t.Errorf("%T: recovery = (%v, %v), want unchanged", op, got, handled)
+			}
+		}
+	}
+}
