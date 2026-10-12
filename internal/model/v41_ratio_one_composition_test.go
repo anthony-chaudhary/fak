@@ -277,9 +277,10 @@ func TestV41RatioOneComposition(t *testing.T) {
 		if !errors.Is(m.v41CompressIndexForwardAdmitted(), ErrV41ForwardStage) || !errors.Is(m.v41KVSourceForwardAdmitted(), ErrV41ForwardStage) {
 			t.Fatal("unsourced ratio-one producer was admitted")
 		}
+		// A candidate source with no declared pool is malformed.
 		m.Cfg.DeepSeekV41.CandidateSourceLayerID = 0
 		if !errors.Is(v41CandidateSourceForwardAdmitted(m.Cfg), ErrV41ForwardStage) {
-			t.Fatal("internal composition widened candidate-source public admission")
+			t.Fatal("candidate source without a pool was admitted")
 		}
 	})
 }

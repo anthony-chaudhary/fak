@@ -434,28 +434,52 @@ func (m *Model) v41AdmitCompressorProducer(layer, ratio int) error {
 	return m.v41AdmitShape(layerName(layer, "attn.compressor.norm.weight"), v41StageCompress, layer, width)
 }
 
-// v41CandidateSourceForwardAdmitted fails closed when the config declares a
-// candidate-source layer that lies WITHIN the model's decoder stack. The reduced
-// text assembly runs its own full per-layer attention contraction and never
-// executes the CED/CSA2 blocked-candidate selection the lightning indexer reads
-// (the reference's candidate_source_layer_id / candidate_topk_blocks /
-// candidate_block_size schedule), so silently running an in-range candidate source
-// would emit logits from an unblocked attention path where the official model
-// selects a sparse candidate pool first. Declarations that only touch out-of-range
-// layers stay admitted, which keeps the reduced oracle fixture runnable: it derives
-// from the published 40-layer config but narrows NumLayers to 1, so the candidate
-// source (20) is unreachable. Executing the real candidate selection is the
-// CED/CSA2 attention leaf's remaining work; until then this is the fail-closed
-// boundary.
+// v41CandidateSourceForwardAdmitted admits an in-range candidate source only
+// with a well-formed pool (positive top-k blocks and block size whose product
+// fits). The two-level candidate mask is not executed: it selects every block
+// until the compressed length passes candidate_topk_blocks*candidate_block_size,
+// so below that bound it changes nothing, and v41CandidatePoolCovers refuses any
+// forward past it rather than run unmasked attention
+// (src/models/deepseek41.cpp:32-34@5210c7c, vcruz305/llama.cpp, MIT).
+// Out-of-range declarations stay admitted, which keeps the reduced oracle
+// fixture (NumLayers=1, candidate source 20) runnable.
 func v41CandidateSourceForwardAdmitted(cfg Config) error {
+	_, err := v41CandidatePoolRows(cfg)
+	return err
+}
+
+// v41CandidatePoolRows returns the compressed-row bound below which candidate
+// selection is the identity, or 0 when no in-range candidate source exists.
+func v41CandidatePoolRows(cfg Config) (int, error) {
 	m := cfg.DeepSeekV41
 	if m == nil {
-		return nil
+		return 0, nil
 	}
 	layer := m.CandidateSourceLayerID
-	if layer >= 0 && layer < cfg.NumLayers {
+	if layer < 0 || layer >= cfg.NumLayers {
+		return 0, nil
+	}
+	rows, ok := checkedMulInt(m.CandidateTopKBlocks, m.CandidateBlockSize)
+	if m.CandidateTopKBlocks <= 0 || m.CandidateBlockSize <= 0 || !ok {
+		return 0, v41StageErr(v41StageIndexer, layer,
+			fmt.Errorf("%w: layer %d declares a candidate source with malformed pool topk_blocks=%d block_size=%d", ErrV41ForwardStage, layer, m.CandidateTopKBlocks, m.CandidateBlockSize))
+	}
+	return rows, nil
+}
+
+// v41CandidatePoolCovers refuses a forward over positions tokens whose candidate
+// source would hold more compressed rows than its pool selects in full, where
+// the unexecuted candidate mask would start pruning.
+func v41CandidatePoolCovers(cfg Config, positions int) error {
+	bound, err := v41CandidatePoolRows(cfg)
+	if err != nil || bound == 0 {
+		return err
+	}
+	layer := cfg.DeepSeekV41.CandidateSourceLayerID
+	rows := positions / maxInt(v41CompressRatioAt(cfg, layer), 1)
+	if rows > bound {
 		return v41StageErr(v41StageIndexer, layer,
-			fmt.Errorf("%w: layer %d declares a candidate source but the reduced forward does not execute the CED/CSA2 blocked-candidate selection", ErrV41ForwardStage, layer))
+			fmt.Errorf("%w: %d positions give candidate source %d %d compressed rows, past the %d its candidate pool selects in full", ErrV41ForwardStage, positions, layer, rows, bound))
 	}
 	return nil
 }

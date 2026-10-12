@@ -284,9 +284,9 @@ func TestV41RatioOneAdmission(t *testing.T) {
 
 // The published Flash schedule (ratio 0/2/1 mix, KV sources 2/8/14/20) resolves
 // every ratio-one layer onto source 20 at its own row span, so only layer 20
-// projects a compressed stream for layers 20-39, and the reader/source ratio
-// rule (src/models/deepseek41.cpp:236-243@5210c7c) admits it and refuses a
-// reader moved to another ratio.
+// projects a compressed stream for layers 20-39, the reader/source ratio rule
+// (src/models/deepseek41.cpp:236-243@5210c7c) admits it and refuses a reader
+// moved to another ratio, and candidate source 20 is admitted within its pool.
 // fak-test:justify why=contract when=changed:internal/model/**
 // fak-test:runtime fast est=50ms lane=default
 func TestV41RatioOnePublishedSchedule(t *testing.T) {
@@ -311,6 +311,18 @@ func TestV41RatioOnePublishedSchedule(t *testing.T) {
 	}
 	if err := v41ReaderSourceRatioAdmitted(cfg); err != nil {
 		t.Fatalf("published schedule refused: %v", err)
+	}
+	// Candidate source 20 (2048 blocks of 8) is the identity through 16384
+	// ratio-one rows and refuses typed past them (deepseek41.cpp:32-34@5210c7c).
+	if err := v41CandidateSourceForwardAdmitted(cfg); err != nil {
+		t.Fatalf("published candidate source refused: %v", err)
+	}
+	if err := v41CandidatePoolCovers(cfg, 16384); err != nil {
+		t.Fatalf("16384 positions refused inside the candidate pool: %v", err)
+	}
+	var pool *V41ForwardError
+	if err := v41CandidatePoolCovers(cfg, 16385); !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &pool) || pool.Layer != 20 {
+		t.Fatalf("16385 positions: %v, want ErrV41ForwardStage at candidate source 20", err)
 	}
 	cfg.DeepSeekV41.CompressRatios = append([]int(nil), cfg.DeepSeekV41.CompressRatios...)
 	cfg.DeepSeekV41.CompressRatios[21] = 2

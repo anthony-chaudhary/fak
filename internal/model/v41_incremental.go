@@ -158,6 +158,9 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 	// This step consumes the NEXT token, so its absolute position is the current
 	// committed history length. The per-layer retained states must already match.
 	pos := len(st.history)
+	if err := v41CandidatePoolCovers(cfg, pos+1); err != nil {
+		return nil, stats, err
+	}
 
 	// Embed the token into a fresh hidden row.
 	x, embedErr := m.v41EmbeddingPanelOn([]int{id}, st.deviceGatherOps())

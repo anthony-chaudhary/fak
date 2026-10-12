@@ -23,9 +23,9 @@ package model
 // reduced assembly projects a per-layer attn.wkv.weight, executes neither
 // compression stage, and never reuses a shared KV/index source, so an in-range
 // declaration is refused rather than silently run against a per-layer cache. The
-// blocked-candidate selection the lightning indexer reads is likewise not executed
-// (v41CandidateSourceForwardAdmitted), so an in-range candidate source is refused
-// rather than silently run as unblocked attention. The
+// blocked-candidate selection the lightning indexer reads is not executed; it is
+// the identity below its pool bound, so a forward past that bound is refused
+// (v41CandidatePoolCovers) rather than silently run as unblocked attention. The
 // mHC hyperconnection multiplicity is likewise fixed at the published four-stream
 // layout (v41HCMultForwardAdmitted), so a declared hc_mult other than 4 is refused
 // rather than silently run as four streams. The assembled
@@ -359,6 +359,9 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 			committed = true
 		}
 		return &Activations{}, nil
+	}
+	if err := v41CandidatePoolCovers(cfg, len(seq)); err != nil {
+		return nil, err
 	}
 	for _, id := range seq {
 		if id < 0 || id >= cfg.VocabSize {

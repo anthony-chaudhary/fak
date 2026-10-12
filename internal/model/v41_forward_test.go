@@ -1205,29 +1205,40 @@ func TestV41EngramNoSourceFailsClosed(t *testing.T) {
 	}
 }
 
-// TestV41ForwardCandidateSourceDeclaredFailsClosed is the candidate-source
-// fail-closed witness: the reduced assembly runs its own full per-layer attention
-// contraction and never executes the CED/CSA2 blocked-candidate selection, so a
-// config that declares a candidate-source layer WITHIN the model's layer range
-// must refuse rather than silently emit logits from an unblocked attention path
-// as if the candidate selection were absent. Out-of-range declared candidate
-// sources (the reduced oracle fixture derives from the published 40-layer config
-// but narrows NumLayers to 1, so the candidate source 20 is unreachable) stay
-// admitted, because the assembly never reaches them.
-func TestV41ForwardCandidateSourceDeclaredFailsClosed(t *testing.T) {
-	// In-range candidate source 0: must refuse.
-	selected := v41ReducedModel(t)
-	selected.Cfg.DeepSeekV41.CandidateSourceLayerID = 0
-
-	if err := selected.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
-		t.Fatalf("in-range candidate source admission error = %v, want ErrV41ForwardStage", err)
+// An in-range candidate source runs while its pool selects every block (the
+// unexecuted candidate mask is the identity there) and refuses typed once the
+// compressed rows pass topk_blocks*block_size or the pool is malformed
+// (src/models/deepseek41.cpp:32-34@5210c7c). An out-of-range source (the reduced
+// oracle fixture narrows NumLayers to 1, so source 20 is unreachable) is inert.
+func TestV41ForwardCandidateSourcePoolBound(t *testing.T) {
+	refused := func(label string, err error) {
+		t.Helper()
+		var stage *V41ForwardError
+		if !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &stage) || stage.Stage != v41StageIndexer || stage.Layer != 0 {
+			t.Fatalf("%s: error = %v, want an indexer-stage refusal at candidate source 0", label, err)
+		}
 	}
-	if err := panicAsError(func() { _ = selected.Forward([]int{1, 2}) }); !errors.Is(err, ErrV41ForwardStage) {
-		t.Fatalf("in-range candidate source Forward panic = %v, want ErrV41ForwardStage", err)
+	within := v41ReducedModel(t)
+	within.Cfg.DeepSeekV41.CandidateSourceLayerID = 0
+	within.Cfg.DeepSeekV41.CandidateTopKBlocks, within.Cfg.DeepSeekV41.CandidateBlockSize = 1, 2
+	if err := within.v41ForwardAdmitted(); err != nil {
+		t.Fatalf("in-range candidate source with a covering pool refused: %v", err)
 	}
+	if act, err := within.forwardV41([]int{1, 2}, nil); err != nil || len(act.Logits) != 2 {
+		t.Fatalf("forward within the candidate pool: act=%v err=%v", act, err)
+	}
+	act, err := within.forwardV41([]int{1, 2, 3}, nil)
+	refused("past the pool", err)
+	if act != nil {
+		t.Fatal("refused forward returned activations")
+	}
+	refused("Forward past the pool", panicAsError(func() { _ = within.Forward([]int{1, 2, 3}) }))
 
-	// The reduced oracle fixture declares only an out-of-range candidate source
-	// (20), so the existing reduced forward must keep running (no regression).
+	malformed := v41ReducedModel(t)
+	malformed.Cfg.DeepSeekV41.CandidateSourceLayerID = 0
+	malformed.Cfg.DeepSeekV41.CandidateTopKBlocks = 0
+	refused("malformed pool", malformed.v41ForwardAdmitted())
+
 	reduced := v41ReducedModel(t)
 	if err := reduced.v41ForwardAdmitted(); err != nil {
 		t.Fatalf("reduced out-of-range candidate source admission error = %v, want nil", err)
