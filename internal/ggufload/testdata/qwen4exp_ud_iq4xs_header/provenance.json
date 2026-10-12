@@ -1,0 +1,26 @@
+{
+  "schema": "fak.gguf-header-fixture/1",
+  "artifact": "unsloth/Qwen3.8-Flash-Next-GGUF@38bb39ee97821de2c9009abb7e93950eec396e66 UD-IQ4_XS (3 shards)",
+  "source": "strix1:/var/lib/fak/models/ (read-only dd of each shard's first 24 MiB, 2026-10-12)",
+  "fixture_scope": "each shard truncated at its 32-byte aligned tensor-data offset; shard 1 is metadata-only and is whole",
+  "shards": [
+    {
+      "file": "Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf.gz",
+      "shard_bytes": 10946624,
+      "header_bytes": 10946624,
+      "header_sha256": "5ce89370720f8bf90890f439361282104c1aa1482d4013bb9a50923e758e71a4"
+    },
+    {
+      "file": "Qwen3.8-Flash-Next-UD-IQ4_XS-00002-of-00003.gguf.gz",
+      "shard_bytes": 49835229856,
+      "header_bytes": 23584,
+      "header_sha256": "65aed4c0d6ffeda13b7188179f3c4d9764076012eedacf7cc5e4df52f46d7f70"
+    },
+    {
+      "file": "Qwen3.8-Flash-Next-UD-IQ4_XS-00003-of-00003.gguf.gz",
+      "shard_bytes": 43836407744,
+      "header_bytes": 54336,
+      "header_sha256": "f017b6c65eaa7b52dd0cc37d117a1480a79b275732869420b1b850653b9c6a13"
+    }
+  ]
+}

@@ -338,6 +338,11 @@ func CanonicalTensorNameArch(name, arch string) (string, bool) {
 		// forward when rotating the long-context layers.
 		return "model.rope_freqs.weight", true
 	}
+	if archIsQwen4Exp(arch) {
+		if g, ok := qwen4ExpGlobalTensorNames[name]; ok {
+			return g, true
+		}
+	}
 	if !strings.HasPrefix(name, "blk.") {
 		return "", false
 	}
@@ -390,6 +395,11 @@ func CanonicalTensorNameArch(name, arch string) (string, bool) {
 			if strings.HasPrefix(mapped, deepseek41EngramPrefix) {
 				return strings.Replace(mapped, deepseek41EngramLayerPlaceholder, layer, 1), true
 			}
+			return "model.layers." + layer + "." + mapped, true
+		}
+	}
+	if archIsQwen4Exp(arch) {
+		if mapped, ok := qwen4ExpCanonicalSuffix(suffix); ok {
 			return "model.layers." + layer + "." + mapped, true
 		}
 	}

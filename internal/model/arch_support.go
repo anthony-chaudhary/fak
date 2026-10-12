@@ -71,6 +71,9 @@ func (e *UnsupportedArchError) Error() string {
 // misleading "fused tensor has N rows, config implies M" from the GDN in_proj
 // (attn_qkv) being mistaken for a standard q/k/v stack.
 func refuseUnsupportedHybridArch(cfg Config, man map[string]tensorMeta) error {
+	if err := refuseQwen4ExpNative(cfg); err != nil {
+		return err
+	}
 	if cfg.IsQwen35Hybrid() {
 		return nil // layer_types marks the linear-attention layers — GDN forward is wired
 	}

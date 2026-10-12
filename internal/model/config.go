@@ -25,6 +25,8 @@ type Config struct {
 	// DeepSeekV41 retains the nested V4.1 Flash metadata without aliasing the
 	// incompatible deepseek_v4 runtime profile. Nil for every other family.
 	DeepSeekV41 *DeepSeekV41Config `json:"-"`
+	// Qwen4Exp carries the Qwen3.8-Flash-Next GGUF axes with no generic field.
+	Qwen4Exp *Qwen4ExpHParams `json:"-"`
 	// EnableResidualHook gates the activation-space write seam. Its zero value is off.
 	EnableResidualHook bool
 	residualHook       ResidualHook

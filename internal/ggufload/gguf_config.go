@@ -206,7 +206,7 @@ func (f *File) Config() (model.Config, error) {
 	if ropeDim > 0 && ropeDim < headDim {
 		cfg.PartialRotaryFactor = float64(ropeDim) / float64(headDim)
 	}
-	if canonArch := canonicalGGUFArch(arch); canonArch == "qwen35" || canonArch == "qwen35moe" {
+	if canonArch := canonicalGGUFArch(arch); canonArch == "qwen35" || canonArch == "qwen35moe" || archIsQwen4Exp(canonArch) {
 		// llama.cpp's Qwen converter appends the MTP decoder block after the target stack,
 		// includes it in block_count, and records the split in nextn_predict_layers. fak's
 		// target forward must retain the target depth while the optional MTP materializer
@@ -290,6 +290,11 @@ func (f *File) Config() (model.Config, error) {
 	}
 	if archIsDeepSeek41(canonicalGGUFArch(arch)) {
 		if err := applyDeepSeek41Config(f, arch+".", &cfg, ropeDim); err != nil {
+			return model.Config{}, err
+		}
+	}
+	if archIsQwen4Exp(canonicalGGUFArch(arch)) {
+		if err := applyQwen4ExpConfig(f, p, &cfg); err != nil {
 			return model.Config{}, err
 		}
 	}
@@ -401,7 +406,7 @@ func archIsMoEForDenseFFNDerive(arch string) bool {
 		return true
 	}
 	switch arch {
-	case "deepseek41", "qwen3moe", "qwen35moe", "qwen2moe":
+	case "deepseek41", "qwen3moe", "qwen35moe", "qwen2moe", qwen4ExpArch:
 		return true
 	}
 	return false

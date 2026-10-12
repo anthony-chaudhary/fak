@@ -130,7 +130,7 @@ func inKernelUsesOrnithQwen35Template(cfg model.Config) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(cfg.ModelType)) {
-	case "qwen3_5", "qwen3_5_text", "qwen3_5_moe", "qwen35", "qwen35moe":
+	case "qwen3_5", "qwen3_5_text", "qwen3_5_moe", "qwen35", "qwen35moe", "qwen4exp", "qwen4_exp_text":
 		return true
 	}
 	for _, arch := range cfg.Architectures {

@@ -820,7 +820,10 @@ func (c Config) HasPLEEngram() bool {
 	if !c.IsQwen35Hybrid() {
 		return false
 	}
-	return c.ModelType == "qwen3_8_flash_next" || c.ModelType == "qwen3_5_text" || c.VocabSize >= 150000
+	if c.Qwen4Exp != nil {
+		return c.Qwen4Exp.PLE != nil
+	}
+	return c.IsQwen4Exp() || c.ModelType == "qwen3_8_flash_next"
 }
 
 // ComputePLERowIndex computes the 1D table row index for a token and attention head.
