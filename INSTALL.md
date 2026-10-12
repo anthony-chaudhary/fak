@@ -63,7 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.
 Then confirm:
 
 ```sh
-fak version          # prints the installed version, e.g. 0.55.0
+fak version          # prints the installed version, e.g. 0.56.0
 ```
 
 What you'll see: a single version line on stdout (the release you just installed). If
@@ -79,14 +79,14 @@ Knobs (environment variables):
 
 | Variable | Effect | Default |
 | --- | --- | --- |
-| `FAK_VERSION` | Pin a version, e.g. `0.54.0` for Metal | latest release |
+| `FAK_VERSION` | Pin a version, e.g. `0.56.0` for Metal | latest release |
 | `FAK_INSTALL_DIR` | Install target directory | `/usr/local/bin` if writable, else `~/.local/bin` |
 | `FAK_REPO` | `owner/repo` override | `anthony-chaudhary/fak` |
 
 Example — install the available v0.54.0 Metal build on Apple Silicon into a user-local dir:
 
 ```sh
-FAK_VERSION=0.54.0 FAK_INSTALL_DIR="$HOME/.local/bin" \
+FAK_VERSION=0.56.0 FAK_INSTALL_DIR="$HOME/.local/bin" \
   sh -c 'curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh'
 ```
 
@@ -147,7 +147,7 @@ fak version
 This is the secondary CPU reference build.
 
 ```powershell
-$Version = "0.55.0"
+$Version = "0.56.0"
 $Archive = "fak_${Version}_windows_amd64.zip"
 $Base    = "https://github.com/anthony-chaudhary/fak/releases/download/v$Version"
 
@@ -196,7 +196,7 @@ Containers must bind `0.0.0.0`, not loopback — the default `CMD` already does
 (`serve --addr 0.0.0.0:8080`). Stamp a specific version into the binary at build time:
 
 ```sh
-docker build --build-arg APP_VERSION=0.55.0 -t fak:0.55.0 .
+docker build --build-arg APP_VERSION=0.56.0 -t fak:0.56.0 .
 ```
 
 Override the entrypoint command to run `fak agent`, `fak policy`, etc. instead of the
