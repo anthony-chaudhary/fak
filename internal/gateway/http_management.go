@@ -511,7 +511,17 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	// (MarkWarmupComplete); after that it exposes time_to_ready_ms so the one-time
 	// tax is visible. A serve that never arms the gate is unaffected. Liveness is not
 	// readiness. See readiness_warmup.go.
-	if s.warmup.pending() {
+	// G14: a warmup that FAILED is terminal — report warmup_failed with a closed
+	// reason instead of a warmup_pending that would never clear.
+	if reason, msg, failed := s.warmup.failure(); failed {
+		health["ok"] = false
+		health["warmup_failed"] = true
+		failure := map[string]any{"reason": reason}
+		if msg != "" {
+			failure["message"] = msg
+		}
+		health["warmup_failure"] = failure
+	} else if s.warmup.pending() {
 		health["ok"] = false
 		health["warmup_pending"] = true
 	} else if ttr, ok := s.warmup.ready(); ok {

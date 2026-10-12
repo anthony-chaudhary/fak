@@ -96,6 +96,9 @@ type warmupGate struct {
 	armed       bool
 	complete    bool
 	timeToReady time.Duration
+	failed      bool
+	failReason  string
+	failMessage string
 }
 
 // arm declares that this serve expects a warmup inference before it is ready.
@@ -126,6 +129,7 @@ func (g *warmupGate) markComplete(d time.Duration) {
 		return
 	}
 	g.armed, g.complete, g.timeToReady = true, true, d
+	g.failed, g.failReason, g.failMessage = false, "", ""
 }
 
 // pending reports whether readiness is being HELD for an incomplete warmup — true
@@ -242,10 +246,10 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 		case <-ctx.Done():
 			// A cancelled/expired caller context surfaces as before, leaving the gate
 			// PENDING; the worker goroutine is abandoned.
-			return time.Since(start), ctx.Err()
+			return time.Since(start), s.failWarmup(ctx.Err(), "")
 		case <-timer.C:
-			return time.Since(start), fmt.Errorf("%w after %s (ceiling %s); the backend forward never returned its first token — readiness remains pending",
-				ErrWarmupTimeout, time.Since(start).Round(time.Millisecond), ceiling)
+			return time.Since(start), s.failWarmup(fmt.Errorf("%w after %s (ceiling %s); the backend forward never returned its first token — readiness held as warmup_failed",
+				ErrWarmupTimeout, time.Since(start).Round(time.Millisecond), ceiling), "")
 		}
 	} else {
 		// A negative FAK_WARMUP_CEILING_S disables the bound: wait indefinitely, but
@@ -253,17 +257,17 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 		select {
 		case <-done:
 		case <-ctx.Done():
-			return time.Since(start), ctx.Err()
+			return time.Since(start), s.failWarmup(ctx.Err(), "")
 		}
 	}
 
 	if compErr != nil {
-		return time.Since(start), compErr
+		return time.Since(start), s.failWarmup(compErr, "")
 	}
 	// The known-answer coherence probe runs BEFORE the gate releases, so there is
 	// no window in which a skewed binary/shader pair reports ready.
 	if err := s.runStartupCoherenceProbe(ctx, ceiling); err != nil {
-		return time.Since(start), err
+		return time.Since(start), s.failWarmup(err, WarmupFailureCoherenceProbe)
 	}
 	d := time.Since(start)
 
@@ -290,7 +294,7 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 		}
 	}
 	if err := s.fixedWarmupAdmissionError(); err != nil {
-		return d, err
+		return d, s.failWarmup(err, "")
 	}
 	s.MarkWarmupComplete(d)
 	return d, compErr
@@ -320,6 +324,11 @@ func (s *Server) checkWarmupPending(w http.ResponseWriter) bool {
 	}
 	if !s.warmup.pending() {
 		return false
+	}
+	if reason, _, failed := s.warmup.failure(); failed {
+		// No Retry-After: nothing re-runs a failed warmup, so a retry cannot succeed.
+		writeErrCode(w, http.StatusServiceUnavailable, "warmup_failed", "backend startup warmup failed ("+reason+"); the serve is not ready")
+		return true
 	}
 	w.Header().Set("Retry-After", "1")
 	writeErrCode(w, http.StatusServiceUnavailable, "warmup_pending", "server is warming up; please retry shortly")
