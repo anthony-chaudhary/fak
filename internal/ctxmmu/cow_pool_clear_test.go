@@ -15,8 +15,8 @@ func TestCOWPageTable_CandidatePoolClearsEntireBuffer(t *testing.T) {
 		Buffer:     buffer,
 		Tokens:     []int{123, 456},
 		TokenCount: 2,
-		immutable:  true,
 	}
+	dirty.immutable.Store(true)
 	dirty.refCount.Store(0)
 	// The pool is unused. Supplying its first object through New avoids relying
 	// on sync.Pool retaining a Put across a GC or a scheduler migration.
@@ -29,9 +29,9 @@ func TestCOWPageTable_CandidatePoolClearsEntireBuffer(t *testing.T) {
 	if got.ID != 7 || got.Capacity != table.blockCapacity || len(got.Buffer) != int(table.blockSize) {
 		t.Fatal("candidate allocation changed block identity or capacity")
 	}
-	if got.RefCount() != 1 || got.TokenCount != 0 || len(got.Tokens) != 0 || got.immutable {
+	if got.RefCount() != 1 || got.TokenCount != 0 || len(got.Tokens) != 0 || got.immutable.Load() {
 		t.Fatalf("block state was not reset: refs=%d count=%d tokens=%v immutable=%v",
-			got.RefCount(), got.TokenCount, got.Tokens, got.immutable)
+			got.RefCount(), got.TokenCount, got.Tokens, got.immutable.Load())
 	}
 	for i, b := range got.Buffer {
 		if b != 0 {
