@@ -4685,9 +4685,27 @@ void fvk_trim_pool_if_over(size_t max_buffers) {
     }
 }
 
+// matmulDecodeGroups returns the workgroup count of matmul.comp's one-row chunk
+// split (push P = -1), or 0 when the shape needs the staged one-group-per-row path.
+static uint32_t matmulDecodeGroups(int out, int in) {
+    if (out <= 0 || in <= 0) return 0;
+    const uint64_t chunks = (uint64_t(in) + 1023u) / 1024u;
+    if (chunks > 256u) return 0;
+    const uint64_t perGroup = 256u / chunks;
+    const uint64_t groups = (uint64_t(out) + perGroup - 1u) / perGroup;
+    return groups > g_maxComputeWorkGroupCountX ? 0 : uint32_t(groups);
+}
+
 void fvk_matmul_f32(const void* dW, const void* dX, void* dY, int out, int in, int P) {
     struct { int outDim, inDim, P; } pc{out, in, P};
     Buffer* bufs[3] = {B((void*)dW), B((void*)dX), B(dY)};
+    if (P == 1) {
+        if (const uint32_t groups = matmulDecodeGroups(out, in)) {
+            pc.P = -1;
+            dispatch(g_kern[K_MATMUL], bufs, &pc, sizeof(pc), groups);
+            return;
+        }
+    }
     dispatch(g_kern[K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)P);
 }
 
@@ -5310,7 +5328,8 @@ int fvk_v41_mhc_f32(int mode, const void* dA, const void* dB, const void* dC,
     case 4: counts[0] = coeffs; counts[1] = streams; counts[2] = 27; counts[3] = coeffs; threads = r; break;
     }
     if (streams > UINT32_MAX || coeffs > UINT32_MAX) return 2;
-    const uint64_t groups = (threads + 63u) / 64u;
+    // rms-split reduces a whole row per workgroup; every other mode is one thread per element.
+    const uint64_t groups = mode == 4 ? r : (threads + 63u) / 64u;
     if (groups == 0 || groups > g_maxComputeWorkGroupCountX) return 2;
     Buffer* bufs[4] = {B(dA), B(dB), B(dC), B(dOut)};
     for (int i = 0; i < 4; ++i) {
@@ -5842,7 +5861,8 @@ int fvk_v41_query_prefix_f32(const float* hostCollapse, const fvk_v41_query_pref
                   "query-prefix kernels keep their existing push layouts");
     BF16Push bf[4] = {{uint32_t(hidden),3}, {uint32_t(hidden),4}, {uint32_t(rank),5}, {uint32_t(rank),6}};
     NormPush normH{1,hidden,eps}, normR{1,rank,eps};
-    MatmulPush mat{rank,hidden,1};
+    const uint32_t gm = matmulDecodeGroups(rank, hidden);
+    MatmulPush mat{rank,hidden,gm ? -1 : 1};
     const uint32_t gh = uint32_t(std::min<uint64_t>((uint64_t(hidden)+63)/64, g_maxComputeWorkGroupCountX));
     const uint32_t gr = uint32_t(std::min<uint64_t>((uint64_t(rank)+63)/64, g_maxComputeWorkGroupCountX));
     bool ok = false;
@@ -5854,7 +5874,7 @@ int fvk_v41_query_prefix_f32(const float* hostCollapse, const fvk_v41_query_pref
         *failedStage = 4;
         if (!record(g_kern[K_V41_BF16_CHECKED],values[1],values[2],statuses[1],&bf[1],8,gh)) break;
         *failedStage = 5;
-        if (!record(g_kern[K_MATMUL],weights[1],values[2],values[3],&mat,12,1)) break;
+        if (!record(g_kern[K_MATMUL],weights[1],values[2],values[3],&mat,12,gm ? gm : 1)) break;
         *failedStage = 6;
         if (!record(g_kern[K_V41_BF16_CHECKED],values[3],values[4],statuses[2],&bf[2],8,gr)) break;
         *failedStage = 7;
@@ -6465,7 +6485,9 @@ extern "C" void fvk_q4k_matmul_f32(const void* dQ4K, const void* dX, void* dY,
 extern "C" void fvk_q6k_matmul_f32(const void* dQ6K, const void* dX, void* dY,
                                     int out, int in, int P) {
     if (!g_have_q6k_matmul || g_kern[K_Q6K_MATMUL].pipe == VK_NULL_HANDLE) return;
-    struct PC { int out, in, p; } pc{out, in, P};
+    // One token takes the shader's shared-memory staged row path (tokens = -1);
+    // the workgroup count is the same ceil(out / 64).
+    struct PC { int out, in, p; } pc{out, in, P == 1 ? -1 : P};
     Buffer* bufs[3] = {B((void*)dQ6K), B((void*)dX), B(dY)};
     dispatch(g_kern[K_Q6K_MATMUL], bufs, &pc, sizeof(pc),
              (uint32_t)(((size_t)out * (size_t)P + 63) / 64));
