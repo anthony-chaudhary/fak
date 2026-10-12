@@ -448,7 +448,7 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 	var sinkErr error
 	sp := applySampleOpts(opts...)
 	rendered := renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice, sp)
-	startsInReasoning := strings.HasSuffix(rendered, qwenThinkAssistantSeed)
+	startsInReasoning := !inKernelRawV41Prompt(p.m.Cfg, sp) && strings.HasSuffix(rendered, qwenThinkAssistantSeed)
 	projector := newInKernelStreamProjector(sink, sp.Stop, startsInReasoning)
 	projector.spans.deferTools = true
 	comp, err := p.Complete(streamCtx, messages, tools, append(opts, WithDecodeTokenObserver(func(tokenPiece, rawText string) {

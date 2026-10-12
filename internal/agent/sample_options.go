@@ -262,6 +262,12 @@ func WithGuidedDecode(fields map[string]json.RawMessage) SampleOpt {
 	}
 }
 
+// WithRawPrompt marks a legacy-completions request whose prompt is raw text, not a
+// chat turn; see SampleParams.RawPrompt.
+func WithRawPrompt() SampleOpt {
+	return func(sp *SampleParams) { sp.RawPrompt = true }
+}
+
 // WithRawRequestBody forwards the client's ORIGINAL request bytes to the upstream
 // verbatim (the anthropic→anthropic passthrough path), preserving its prompt-cache
 // prefix. An empty slice is a no-op (the planner marshals a fresh body as usual).

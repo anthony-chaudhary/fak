@@ -418,6 +418,12 @@ func applyDeepSeek41Config(f *File, p string, cfg *model.Config, ropeDim int) er
 	if err := applyDeepSeek41HParams(f, p, cfg); err != nil {
 		return err
 	}
+	// The GGUF tokenizer does not add BOS to raw text, but the reference expects
+	// the prompt to start with it (vcruz305/llama.cpp@5210c7c raw completion).
+	if v, ok := f.Uint64("tokenizer.ggml.bos_token_id"); ok && v <= uint64(^uint32(0)>>1) {
+		bos := int(v)
+		cfg.BOSTokenID = &bos
+	}
 
 	// ---- Engram (ds4 converter keys; legacy flat keys are fallback-only) -----
 	eng := &DeepSeek41Engram{

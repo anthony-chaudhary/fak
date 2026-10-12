@@ -664,6 +664,9 @@ type SampleParams struct {
 	// ThinkingBudget carries an explicit token budget for reasoning. A nil pointer
 	// means unset / fall back to effort tier resolution.
 	ThinkingBudget *int
+	// RawPrompt asks a native planner to encode the request text without a chat
+	// template (the legacy /v1/completions wire). Only DeepSeek V4.1 honors it.
+	RawPrompt bool
 }
 
 // Planner is the seam both the live HTTP client and the offline mock satisfy. One
