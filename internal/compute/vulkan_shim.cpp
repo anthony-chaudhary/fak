@@ -3882,6 +3882,34 @@ void* fvk_malloc(size_t bytes) {
     return allocBuffer(bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, STORAGE_USAGE);
 }
 
+// A paged weight (an expert-ring page-in) is evicted and replaced while the model runs, so it
+// must not take the bump-only weight arena: its offsets are never reused, and an evicted page
+// would leave its bytes reserved until every arena buffer died. It takes the size-bucketed pool
+// instead, so an evicted page's buffer serves the next same-size page-in.
+uint64_t g_offloadWeightReused = 0;
+uint64_t g_offloadWeightFresh = 0;
+
+void* fvk_malloc_offload_weight(size_t bytes) {
+    if (g_v41SubmissionPendingFailure) return nullptr;
+    if (bytes == 0) bytes = 4;
+    auto it = g_pool.find(bytes);
+    if (it != g_pool.end() && !it->second.empty()) {
+        Buffer* b = it->second.back();
+        it->second.pop_back();
+        if (g_poolCount > 0) --g_poolCount;
+        ++g_offloadWeightReused;
+        return b;
+    }
+    Buffer* b = allocBuffer(bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, STORAGE_USAGE);
+    if (b) ++g_offloadWeightFresh;
+    return b;
+}
+
+void fvk_offload_weight_stats(uint64_t* reused, uint64_t* fresh) {
+    if (reused) *reused = g_offloadWeightReused;
+    if (fresh) *fresh = g_offloadWeightFresh;
+}
+
 void* fvk_malloc_weight(size_t bytes, uint64_t max_arena_bytes) {
     if (g_v41SubmissionPendingFailure) return nullptr;
     if (bytes == 0) bytes = 4;
