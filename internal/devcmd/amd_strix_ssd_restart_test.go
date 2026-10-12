@@ -18,7 +18,7 @@ func validCLIStrixSSDRestartReceipt(t *testing.T, opts amdgpu.StrixSSDRestartOpt
 	exit := 0
 	child := func(phase, outcome string, pid int) amdgpu.StrixSSDRestartChild {
 		c := amdgpu.StrixSSDRestartChild{
-			Schema: "fak-vulkan-warm-disk-restart/1", Phase: phase, PID: pid, SourceRevision: opts.GitTip,
+			Schema: "fak-vulkan-warm-disk-restart/2", Phase: phase, PID: pid, SourceRevision: opts.GitTip,
 			SourceArchiveSHA256: strings.TrimPrefix(opts.SourceArchiveSHA256, "sha256:"), ExecutableSHA256: strings.TrimPrefix(hash, "sha256:"),
 			ModelIdentity: hash, Backend: "vulkan", Device: "AMD Radeon 8060S Graphics Strix Halo gfx1151", Driver: "RADV", Runtime: "Vulkan 1.3",
 			DiskOutcome: outcome, DiskTier: "local_ssd_l3", Stable: 8, Matched: 8, Generated: []int{1, 2, 3, 4}, LogitsDigest: plainHash, ContinuationLogitsDigest: plainHash,
@@ -40,9 +40,10 @@ func validCLIStrixSSDRestartReceipt(t *testing.T, opts amdgpu.StrixSSDRestartOpt
 		Device:     &amdgpu.StrixVulkanDeviceObservation{Name: target.GPUName, DeviceType: "PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU", VendorID: "0x1002", DriverID: "DRIVER_ID_MESA_RADV", DriverName: "radv", DriverInfo: "Mesa RADV", ISA: "gfx1151", SummarySHA256: hash, SummaryBytes: 1},
 		Filesystem: &amdgpu.StrixSSDFileSystemObservation{Workspace: "/tmp/fak-strix-validation.fixture", MountTarget: "/", Source: "/dev/nvme0n1p1", FSType: "ext4", MajorMinor: "259:1", SourcePath: "/dev/nvme0n1p1", SourceType: "part", ParentDisk: "/dev/nvme0n1", ParentType: "disk", Transport: "nvme", RotationObserved: true, ObservationSHA256: hash},
 		Witness: &amdgpu.StrixSSDRestartWitness{
-			Schema: "fak-vulkan-warm-disk-restart/1", PID: 100, CacheMode: "isolated-default", SourceRevision: opts.GitTip,
+			Schema: "fak-vulkan-warm-disk-restart/2", PID: 100, CacheMode: "isolated-default", SourceRevision: opts.GitTip,
 			SourceArchiveSHA256: strings.TrimPrefix(opts.SourceArchiveSHA256, "sha256:"), ExecutableSHA256: plainHash, ModelIdentity: hash,
 			ExpectedKVTransferBytes: 1024, ExpectedColdD2HBytes: 2048, ExpectedKVTransferCount: 2,
+			ExpectedColdD2HCount: 3, ExpectedWarmH2DBytes: 1024, ExpectedWarmH2DCount: 2,
 			Cold: child("cold", "persisted", 101), Warm: child("warm", "restored", 102), TokenParity: true, LogitParity: true, ContinuationLogitParity: true,
 		},
 	}

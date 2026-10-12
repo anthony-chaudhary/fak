@@ -687,13 +687,15 @@ func TestBuildStrixCandidateArchiveDeterministicAndTamperClosed(t *testing.T) {
 }
 
 func TestValidateStrixWorkspaceRejectsTraversal(t *testing.T) {
-	for _, bad := range []string{"/tmp/fak-strix-validation.ok/../victim", "/tmp/fak-strix-validation.", "/tmp/fak-strix-validation.ok/child", "/var/tmp/fak-strix-validation.ok"} {
+	for _, bad := range []string{"/tmp/fak-strix-validation.ok/../victim", "/tmp/fak-strix-validation.", "/tmp/fak-strix-validation.ok/child", "/var/tmp/fak-strix-validation.ok", "/var/tmp/fak-strix-ssd-validation.ok/../victim", "/tmp/fak-strix-ssd-validation.ok"} {
 		if err := validateStrixWorkspace(bad); err == nil {
 			t.Errorf("unsafe workspace accepted: %q", bad)
 		}
 	}
-	if err := validateStrixWorkspace("/tmp/fak-strix-validation.AbC_123-x"); err != nil {
-		t.Fatalf("safe workspace rejected: %v", err)
+	for _, good := range []string{"/tmp/fak-strix-validation.AbC_123-x", "/var/tmp/fak-strix-ssd-validation.AbC_123-x"} {
+		if err := validateStrixWorkspace(good); err != nil {
+			t.Fatalf("safe workspace %q rejected: %v", good, err)
+		}
 	}
 }
 

@@ -76,7 +76,11 @@ type tarEntry struct {
 	body []byte
 }
 
-var safeStrixWorkspaceRE = regexp.MustCompile(`^/tmp/fak-strix-validation\.[A-Za-z0-9_-]+$`)
+// SSD restart workspaces live under /var/tmp: /tmp is commonly tmpfs, which the
+// SSD filesystem observation (correctly) refuses as non-persistent RAM.
+var safeStrixWorkspaceRE = regexp.MustCompile(`^(?:/tmp/fak-strix-validation|` + regexp.QuoteMeta(strixSSDWorkspaceRoot) + `)\.[A-Za-z0-9_-]+$`)
+
+const strixSSDWorkspaceRoot = "/var/tmp/fak-strix-ssd-validation"
 
 func validateStrixWorkspace(work string) error {
 	if !safeStrixWorkspaceRE.MatchString(work) {

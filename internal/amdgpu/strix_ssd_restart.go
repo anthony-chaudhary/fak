@@ -129,6 +129,9 @@ type StrixSSDRestartWitness struct {
 	ExpectedKVTransferBytes uint64               `json:"expected_kv_transfer_bytes"`
 	ExpectedColdD2HBytes    uint64               `json:"expected_cold_d2h_bytes"`
 	ExpectedKVTransferCount uint64               `json:"expected_kv_transfer_count"`
+	ExpectedColdD2HCount    uint64               `json:"expected_cold_d2h_count"`
+	ExpectedWarmH2DBytes    uint64               `json:"expected_warm_h2d_bytes"`
+	ExpectedWarmH2DCount    uint64               `json:"expected_warm_h2d_count"`
 	Cold                    StrixSSDRestartChild `json:"cold"`
 	Warm                    StrixSSDRestartChild `json:"warm"`
 	TokenParity             bool                 `json:"token_parity"`
@@ -228,7 +231,7 @@ func stageStrixSSDRestart(ctx context.Context, target *StrixTarget, opts StrixSS
 	if err := validateCandidateArchiveBytes(opts.CandidateArchive); err != nil {
 		return stagedStrixSSDRestart{}, err
 	}
-	out, err := runStrixTargetCommand(ctx, target, "mktemp -d /tmp/fak-strix-validation.XXXXXX", nil)
+	out, err := runStrixTargetCommand(ctx, target, "mktemp -d "+strixSSDWorkspaceRoot+".XXXXXX", nil)
 	if err != nil {
 		return stagedStrixSSDRestart{}, fmt.Errorf("amdgpu: allocate fresh target workspace: %w", err)
 	}
@@ -666,14 +669,30 @@ func validateStrixSSDRestartWitness(w *StrixSSDRestartWitness, revision, archive
 	}
 	archive := strings.TrimPrefix(archiveDigest, "sha256:")
 	binary := strings.TrimPrefix(binaryDigest, "sha256:")
-	if w.Schema != "fak-vulkan-warm-disk-restart/1" || w.PID <= 0 || w.CacheMode != "isolated-default" || w.SourceRevision != revision || !isLowerHex(w.SourceRevision, 40) || w.SourceArchiveSHA256 != archive || !isLowerHex(w.SourceArchiveSHA256, 64) || w.SourceModified || w.ExecutableSHA256 != binary || !isLowerHex(w.ExecutableSHA256, 64) || !strings.HasPrefix(w.ModelIdentity, "sha256:") || !isLowerHex(strings.TrimPrefix(w.ModelIdentity, "sha256:"), 64) {
-		return errors.New("native SSD restart parent identity mismatch")
+	for _, check := range []struct {
+		field string
+		ok    bool
+	}{
+		{"schema", w.Schema == "fak-vulkan-warm-disk-restart/2"},
+		{"pid", w.PID > 0},
+		{"cache_mode", w.CacheMode == "isolated-default"},
+		{"source_revision", w.SourceRevision == revision && isLowerHex(w.SourceRevision, 40)},
+		{"source_archive_sha256", w.SourceArchiveSHA256 == archive && isLowerHex(w.SourceArchiveSHA256, 64)},
+		{"source_modified", !w.SourceModified},
+		{"executable_sha256", strings.TrimPrefix(w.ExecutableSHA256, "sha256:") == binary && isLowerHex(binary, 64)},
+		{"model_identity", strings.HasPrefix(w.ModelIdentity, "sha256:") && isLowerHex(strings.TrimPrefix(w.ModelIdentity, "sha256:"), 64)},
+	} {
+		if !check.ok {
+			return fmt.Errorf("native SSD restart parent identity mismatch: %s", check.field)
+		}
 	}
-	if !w.TokenParity || !w.LogitParity || !w.ContinuationLogitParity || w.ExpectedKVTransferBytes == 0 || w.ExpectedColdD2HBytes == 0 || w.ExpectedKVTransferCount == 0 {
+	if !w.TokenParity || !w.LogitParity || !w.ContinuationLogitParity || w.ExpectedKVTransferBytes == 0 || w.ExpectedColdD2HBytes == 0 || w.ExpectedKVTransferCount == 0 ||
+		w.ExpectedColdD2HCount <= w.ExpectedKVTransferCount || w.ExpectedColdD2HBytes <= w.ExpectedKVTransferBytes ||
+		w.ExpectedWarmH2DCount < w.ExpectedKVTransferCount || w.ExpectedWarmH2DBytes < w.ExpectedKVTransferBytes {
 		return errors.New("native SSD restart parity or transfer expectation missing")
 	}
 	for phase, child := range map[string]StrixSSDRestartChild{"cold": w.Cold, "warm": w.Warm} {
-		if child.Schema != w.Schema || child.Phase != phase || child.PID <= 0 || child.PID == w.PID || child.SourceRevision != revision || child.SourceArchiveSHA256 != archive || child.SourceModified || child.ExecutableSHA256 != binary || child.ModelIdentity != w.ModelIdentity || child.Backend != "vulkan" || child.Device != targetDevice || child.Driver == "" || child.Runtime == "" || child.DiskTier != "local_ssd_l3" || child.Stable <= 0 || child.Matched < child.Stable || len(child.Generated) != 4 || !isLowerHex(child.LogitsDigest, 64) || !isLowerHex(child.ContinuationLogitsDigest, 64) {
+		if child.Schema != w.Schema || child.Phase != phase || child.PID <= 0 || child.PID == w.PID || child.SourceRevision != revision || child.SourceArchiveSHA256 != archive || child.SourceModified || strings.TrimPrefix(child.ExecutableSHA256, "sha256:") != binary || child.ModelIdentity != w.ModelIdentity || child.Backend != "vulkan" || child.Device != targetDevice || child.Driver == "" || child.Runtime == "" || child.DiskTier != "local_ssd_l3" || child.Stable <= 0 || child.Matched < child.Stable || len(child.Generated) != 4 || !isLowerHex(child.LogitsDigest, 64) || !isLowerHex(child.ContinuationLogitsDigest, 64) {
 			return fmt.Errorf("native SSD restart %s child identity mismatch", phase)
 		}
 	}
@@ -684,7 +703,7 @@ func validateStrixSSDRestartWitness(w *StrixSSDRestartWitness, revision, archive
 		return errors.New("native SSD restart disk reuse mismatch")
 	}
 	cold, warm := w.Cold.Transfers, w.Warm.Transfers
-	if cold.D2HBytes != w.ExpectedColdD2HBytes || cold.D2HCount != w.ExpectedKVTransferCount+1 || cold.ComputeDispatches == 0 || cold.DispatchSubmits == 0 || warm.H2DBytes != w.ExpectedKVTransferBytes || warm.H2DCount != w.ExpectedKVTransferCount || warm.D2HBytes != 0 || warm.D2HCount != 0 || warm.ComputeDispatches != 0 || warm.DispatchSubmits == 0 {
+	if cold.D2HBytes != w.ExpectedColdD2HBytes || cold.D2HCount != w.ExpectedColdD2HCount || cold.ComputeDispatches == 0 || cold.DispatchSubmits == 0 || warm.H2DBytes != w.ExpectedWarmH2DBytes || warm.H2DCount != w.ExpectedWarmH2DCount || warm.D2HBytes != 0 || warm.D2HCount != 0 || warm.ComputeDispatches != 0 || warm.DispatchSubmits == 0 {
 		return errors.New("native SSD restart transfer counters mismatch")
 	}
 	return nil
