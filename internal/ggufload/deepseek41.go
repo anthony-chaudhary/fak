@@ -414,6 +414,9 @@ func applyDeepSeek41Config(f *File, p string, cfg *model.Config, ropeDim int) er
 	if v, ok := f.Float64(p + ds41KeyHCEpsilon); ok {
 		cfg.HCEps = v
 	}
+	if err := applyDeepSeek41HParams(f, p, cfg); err != nil {
+		return err
+	}
 
 	// ---- Engram (ds4 converter keys; legacy flat keys are fallback-only) -----
 	eng := &DeepSeek41Engram{

@@ -84,19 +84,7 @@ func (m *Model) AttachV41Engram(spec V41EngramAttachSpec, layout V41EngramLayout
 	// Populate the config axes wireV41Engram reads. The GGUF identity reaches
 	// this seam with DeepSeekV41 == nil, so create it rather than refuse.
 	if m.Cfg.DeepSeekV41 == nil {
-		d41 := &DeepSeekV41Config{
-			CompressRatios:         append([]int(nil), m.Cfg.CompressRatios...),
-			HCMult:                 m.Cfg.HCMult,
-			HCSinkhornIters:        m.Cfg.HCSinkhornIters,
-			HCEps:                  m.Cfg.HCEps,
-			CandidateSourceLayerID: -1,
-		}
-		for layer, kind := range m.Cfg.IndexerTypes {
-			if kind == "full" {
-				d41.IndexSourceLayerIDs = append(d41.IndexSourceLayerIDs, layer)
-			}
-		}
-		m.Cfg.DeepSeekV41 = d41
+		m.Cfg.DeepSeekV41 = v41ConfigFromFlat(m.Cfg)
 	}
 	d41 := m.Cfg.DeepSeekV41
 	d41.EngramLayerIDs = append([]int(nil), spec.LayerIDs...)
@@ -150,4 +138,23 @@ func (m *Model) V41EngramStageBindings() ([]V41EngramArtifactBinding, bool) {
 	out := make([]V41EngramArtifactBinding, len(stage.bindings))
 	copy(out, stage.bindings)
 	return out, true
+}
+
+// v41ConfigFromFlat builds the V4.1 envelope a GGUF-loaded Config lacks from
+// the flat axes the loader fills.
+func v41ConfigFromFlat(cfg Config) *DeepSeekV41Config {
+	d41 := &DeepSeekV41Config{
+		CompressRatios:         append([]int(nil), cfg.CompressRatios...),
+		CompressRopeTheta:      cfg.CompressRopeTheta,
+		HCMult:                 cfg.HCMult,
+		HCSinkhornIters:        cfg.HCSinkhornIters,
+		HCEps:                  cfg.HCEps,
+		CandidateSourceLayerID: -1,
+	}
+	for layer, kind := range cfg.IndexerTypes {
+		if kind == "full" {
+			d41.IndexSourceLayerIDs = append(d41.IndexSourceLayerIDs, layer)
+		}
+	}
+	return d41
 }

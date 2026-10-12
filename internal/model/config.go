@@ -270,6 +270,9 @@ type Config struct {
 	HCSinkhornIters int     `json:"hc_sinkhorn_iters,omitempty"`
 	OGroups         int     `json:"o_groups,omitempty"`
 	OLoraRank       int     `json:"o_lora_rank,omitempty"`
+	// CompressRopeTheta is the compressed-layer RoPE base read from GGUF; the HF
+	// path keeps it in DeepSeekV41 and AttachV41Engram copies it there.
+	CompressRopeTheta float64 `json:"compress_rope_theta,omitempty"`
 
 	// Legacy V4 compatibility metadata retained for older callers. Published Flash
 	// checkpoints use CompressRatios to choose a single per-layer regime rather than
