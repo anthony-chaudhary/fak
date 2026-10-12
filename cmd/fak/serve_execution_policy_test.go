@@ -91,6 +91,20 @@ func TestServeExecutionPolicyBringupDedicatedAdmitsHaloCPUOffload(t *testing.T) 
 }
 
 // fak-test:runtime fast est=1ms lane=default
+func TestServeExecutionPolicyBringupDeviceBackendKeepsDeviceOnly(t *testing.T) {
+	p, err := resolveServeExecutionPolicy("bringup", "m", "m", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.admit(validateServeHaloCPUOffload(true, false, "", "")); err != nil {
+		t.Fatal(err)
+	}
+	if !p.requireDeviceExecution(true) || len(p.Bypassed) != 0 {
+		t.Fatalf("bringup with nothing host-side lifted: bypassed=%v, want device-only kept (expert ring stays admissible)", p.Bypassed)
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
 func TestServeExecutionPolicyBringupOffHaloBypassesNothing(t *testing.T) {
 	p, err := resolveServeExecutionPolicy("bringup", "m", "m", nil)
 	if err != nil {
@@ -104,12 +118,14 @@ func TestServeExecutionPolicyBringupOffHaloBypassesNothing(t *testing.T) {
 // fak-test:runtime slow est=3s lane=default
 func TestServeDryAdmitExecutionPolicyVerdict(t *testing.T) {
 	if policy, ok := os.LookupEnv("FAK_TEST_DRY_ADMIT_POLICY"); ok {
-		cmdServe([]string{"--dry-admit", "--model", "mock", "--backend", "cpu", "--execution-policy", policy, "--session-registry", "off"})
+		args := []string{"--dry-admit", "--model", "mock", "--backend", "cpu", "--execution-policy", policy, "--session-registry", "off"}
+		cmdServe(append(args, strings.Fields(os.Getenv("FAK_TEST_DRY_ADMIT_EXTRA"))...))
 		return
 	}
+	extra := ""
 	run := func(policy, dedicated string) (string, string, int) {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestServeDryAdmitExecutionPolicyVerdict$")
-		cmd.Env = append(os.Environ(), "FAK_TEST_DRY_ADMIT_POLICY="+policy, ServeBringupDedicatedEnv+"="+dedicated, "FAK_BACKEND=", "FAK_METAL=", "FAK_SESSION_STATE=off")
+		cmd.Env = append(os.Environ(), "FAK_TEST_DRY_ADMIT_POLICY="+policy, ServeBringupDedicatedEnv+"="+dedicated, "FAK_BACKEND=", "FAK_METAL=", "FAK_SESSION_STATE=off", "FAK_TEST_DRY_ADMIT_EXTRA="+extra)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		err := cmd.Run()
@@ -133,7 +149,7 @@ func TestServeDryAdmitExecutionPolicyVerdict(t *testing.T) {
 	}
 
 	out, stderr, code := run("production", "")
-	if v := verdict(out); code != 0 || v.Schema != serveDryAdmitSchema || v.Verdict != serveDryAdmitAdmit || v.ExecutionPolicy != serveExecutionPolicyProduction || v.Backend != "cpu" {
+	if v := verdict(out); code != 0 || v.Schema != serveDryAdmitSchema || v.Verdict != serveDryAdmitAdmit || v.ExecutionPolicy != serveExecutionPolicyProduction || v.Backend != "cpu" || v.LoadFit != serveDryAdmitLoadFitNotRun {
 		t.Fatalf("production: code=%d verdict=%+v stderr=%s", code, v, stderr)
 	}
 	if _, stderr, code := run("bringup", ""); code != 2 || !strings.Contains(stderr, ExecutionPolicyNotDedicated) {
@@ -142,5 +158,9 @@ func TestServeDryAdmitExecutionPolicyVerdict(t *testing.T) {
 	out, stderr, code = run("bringup", "mock")
 	if v := verdict(out); code != 0 || v.Verdict != serveDryAdmitAdmit || v.ExecutionPolicy != serveExecutionPolicyBringup || v.Policy == nil || v.Policy.Model != "mock" {
 		t.Fatalf("dedicated bringup: code=%d verdict=%+v stderr=%s", code, v, stderr)
+	}
+	extra = "--qwen38-runtime llama-mtp"
+	if out, stderr, code := run("production", ""); code != 2 || !strings.Contains(stderr, DryAdmitDelegatedRuntime) || strings.Contains(out, serveDryAdmitAdmit) {
+		t.Fatalf("delegated runtime: code=%d stderr=%s, want exit 2 %s", code, stderr, DryAdmitDelegatedRuntime)
 	}
 }

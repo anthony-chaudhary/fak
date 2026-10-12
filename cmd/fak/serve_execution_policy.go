@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/ggufload"
 )
 
 // Execution policies for `fak serve --execution-policy`. production keeps the
@@ -109,12 +111,14 @@ func (p *serveExecutionPolicy) bypass(token, detail string) {
 }
 
 // requireDeviceExecution is the session device-only decision for a halo host.
-// An admitted bringup policy admits host execution and records the lift.
+// An admitted bringup policy lifts it only once it lifted a host or offload
+// refusal, so a device-backend bringup serve keeps the device-only path and
+// its activated-expert ring.
 func (p *serveExecutionPolicy) requireDeviceExecution(halo bool) bool {
 	if !halo {
 		return false
 	}
-	if p == nil || !p.Admitted {
+	if p == nil || !p.Admitted || len(p.Bypassed) == 0 {
 		return true
 	}
 	p.bypass(executionPolicyBypassDeviceOnlySession, "native sessions may execute on the host")
@@ -131,25 +135,62 @@ func (p *serveExecutionPolicy) report() *gateway.ExecutionPolicyReport {
 }
 
 const (
-	serveDryAdmitFlag   = "dry-admit"
-	serveDryAdmitSchema = "fak.serve.dry_admit.v1"
-	serveDryAdmitAdmit  = "ADMIT"
+	serveDryAdmitFlag          = "dry-admit"
+	serveDryAdmitSchema        = "fak.serve.dry_admit.v1"
+	serveDryAdmitAdmit         = "ADMIT"
+	serveDryAdmitLoadFitNotRun = "not_run"
+
+	// DryAdmitDelegatedRuntime refuses a dry run of a serve that would hand
+	// execution to a llama.cpp child: its admission is that child's, not fak's.
+	DryAdmitDelegatedRuntime = "DRY_ADMIT_DELEGATED_RUNTIME"
 )
+
+// refuseServeDryAdmitDelegated is the dry-run stand-in for the qwen38
+// delegation step a launch runs before compute selection.
+func refuseServeDryAdmitDelegated(sf *serveFlags) error {
+	mode, err := normalizeQwen38Runtime(derefString(sf.qwen38Runtime))
+	if err != nil {
+		return err
+	}
+	if mode != qwen38RuntimeNative {
+		return &executionPolicyError{Code: DryAdmitDelegatedRuntime, Detail: fmt.Sprintf("--qwen38-runtime %s delegates execution to llama.cpp; --dry-admit covers fak-native admission only", mode)}
+	}
+	return nil
+}
+
+// resolveExecutionPolicy validates --execution-policy once, before any stage
+// that starts a child or touches compute.
+func (rt *serveRuntime) resolveExecutionPolicy(sf *serveFlags) error {
+	if rt.executionPolicy != nil {
+		return nil
+	}
+	policy, err := resolveServeExecutionPolicy(derefString(sf.executionPolicy), derefString(sf.model), os.Getenv(ServeBringupDedicatedEnv), os.Stderr)
+	if err != nil {
+		return err
+	}
+	rt.executionPolicy = policy
+	return nil
+}
 
 // serveDryAdmitVerdict is the --dry-admit stdout document. A refusal never
 // reaches it: the admission stage that refuses exits non-zero with its typed
 // stderr line, exactly as a real launch would.
 type serveDryAdmitVerdict struct {
-	Schema                 string                         `json:"schema"`
-	Verdict                string                         `json:"verdict"`
-	Model                  string                         `json:"model"`
-	GGUF                   string                         `json:"gguf,omitempty"`
-	Backend                string                         `json:"backend"`
-	ExecutionPolicy        string                         `json:"execution_policy"`
-	Bypassed               []string                       `json:"bypassed"`
-	RequireDeviceExecution bool                           `json:"require_device_execution"`
-	NativeContextTokens    int                            `json:"native_context_tokens,omitempty"`
-	Policy                 *gateway.ExecutionPolicyReport `json:"execution_policy_report,omitempty"`
+	Schema                 string   `json:"schema"`
+	Verdict                string   `json:"verdict"`
+	Model                  string   `json:"model"`
+	GGUF                   string   `json:"gguf,omitempty"`
+	Backend                string   `json:"backend"`
+	ExecutionPolicy        string   `json:"execution_policy"`
+	Bypassed               []string `json:"bypassed"`
+	RequireDeviceExecution bool     `json:"require_device_execution"`
+	NativeContextTokens    int      `json:"native_context_tokens,omitempty"`
+	// LoadFit says the load-time memory fit (arm selection, expert ring) did
+	// not run; FitWarnings are the header-derived --plan-json would-be fit
+	// refusals, advisory because that estimate does not model the expert ring.
+	LoadFit     string                         `json:"load_fit"`
+	FitWarnings []string                       `json:"fit_warnings"`
+	Policy      *gateway.ExecutionPolicyReport `json:"execution_policy_report,omitempty"`
 }
 
 func newServeDryAdmitVerdict(rt *serveRuntime, sf *serveFlags) serveDryAdmitVerdict {
@@ -158,6 +199,7 @@ func newServeDryAdmitVerdict(rt *serveRuntime, sf *serveFlags) serveDryAdmitVerd
 		Model: derefString(sf.model), GGUF: derefString(sf.ggufPath),
 		Backend: "cpu", ExecutionPolicy: serveExecutionPolicyProduction, Bypassed: []string{},
 		RequireDeviceExecution: rt.requireDeviceExecution, NativeContextTokens: rt.nativeContext.ResolvedTokens,
+		LoadFit: serveDryAdmitLoadFitNotRun, FitWarnings: []string{},
 	}
 	if rt.useMetal {
 		v.Backend = "metal"
@@ -194,7 +236,29 @@ func (rt *serveRuntime) runServeDryAdmit(sf *serveFlags, w io.Writer) error {
 			return err
 		}
 	}
+	v := newServeDryAdmitVerdict(rt, sf)
+	v.FitWarnings = append(v.FitWarnings, serveDryAdmitFitWarnings(rt, sf)...)
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(newServeDryAdmitVerdict(rt, sf))
+	return enc.Encode(v)
+}
+
+// serveDryAdmitFitWarnings is the --plan-json fit estimate for a GGUF file;
+// a directory or unreadable header yields none (the gates above refuse those).
+func serveDryAdmitFitWarnings(rt *serveRuntime, sf *serveFlags) []string {
+	path := strings.TrimSpace(derefString(sf.ggufPath))
+	info, err := os.Stat(path)
+	if path == "" || err != nil || info.IsDir() {
+		return nil
+	}
+	ws, err := ggufload.OpenWeights(path)
+	if err != nil {
+		return nil
+	}
+	defer ws.Close()
+	art, err := buildServeSizingArtifact(ws, rt.chatBackend, *sf.cpuOffloadExperts, *sf.nativeContextTokens, path, info.Size())
+	if err != nil {
+		return []string{"fit estimate unavailable: " + err.Error()}
+	}
+	return art.Warnings
 }

@@ -10316,6 +10316,11 @@
           "category": "incidental",
           "reason": "existing header-only forward preflight that --dry-admit now also calls; a helper name, not a policy concept.",
           "token": "preflightServeBackendForward"
+        },
+        {
+          "category": "incidental",
+          "reason": "serveRuntime method that resolves the serve execution policy once before delegation and compute; the concept is serveexecutionpolicy, this is its resolver.",
+          "token": "resolveExecutionPolicy"
         }
       ],
       "exclude": [
@@ -10566,7 +10571,8 @@
         "windowReceipt",
         "windowResult",
         "wsl_preflight",
-        "preflightServeBackendForward"
+        "preflightServeBackendForward",
+        "resolveExecutionPolicy"
       ],
       "known_tokens": [],
       "min_files": 3,

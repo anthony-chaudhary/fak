@@ -315,7 +315,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.profile = fs.String("profile", "", "permission profile: dev|prod|audit (env: FAK_PROFILE)")
 	sf.policyCanaryTurns = fs.Int("policy-canary-turns", 0, "after a policy reload, roll back when this many consecutive requests are denied; 0 disables the canary")
 	sf.policyCheck = fs.Bool("policy-check", false, "validate --policy and exit without binding a listener")
-	sf.dryAdmit = fs.Bool(serveDryAdmitFlag, false, "run admission only and exit: execution policy, backend selection, the GFX1151 device-only guards, expert placement, native context and the header-only forward preflight, exactly as a launch would run them, then print a "+serveDryAdmitSchema+" ADMIT verdict on stdout. A refusal exits non-zero with the same typed stderr line a launch prints. No tensor payload loads, no listener binds and no llama.cpp delegate starts.")
+	sf.dryAdmit = fs.Bool(serveDryAdmitFlag, false, "run the pre-load admission gates and exit: execution policy, backend selection, the GFX1151 device-only guards, the expert-placement grade, session-state restore, native context and the header-only forward preflight, as a launch runs them, then print a "+serveDryAdmitSchema+" ADMIT verdict on stdout. A refusal exits non-zero with the same typed stderr line a launch prints. The load-time memory fit (arm selection, expert ring) does not run: load_fit is not_run and fit_warnings carries the advisory --plan-json estimate. A --qwen38-runtime llama-mtp serve refuses with "+DryAdmitDelegatedRuntime+". No tensor payload loads and no listener binds.")
 	sf.sizingJSON = fs.Bool("plan-json", false, "with --gguf: print the versioned header-derived memory sizing artifact (classed demands, disk/ram/vram tier rollup, per-pool usable bytes after headroom, warnings incl. would-be fit refusals) as JSON on stdout and exit BEFORE any load — nothing is allocated, no listener binds (#4361). The numbers are the same ones the selected serve arm's fit check admits against; a demand set a live boot would refuse still emits, with the refusal in warnings[].")
 	fs.Var(&sf.expose, "expose", "ALLOWLIST of MCP tool-name glob patterns to advertise AND allow — everything else is neither listed by tools/list nor callable (an attempt answers \"unknown tool\", so hiding a tool never leaks that it exists). Patterns are path.Match globs over the bare tool name; one value may be comma-separated (--expose 'fak_memory_*,fak_capabilities') and the flag may repeat. Empty (default) exposes the full surface. A malformed glob or a pattern matching NO known tool fails startup loud (a typo must not silently shrink the surface). Cuts prompt-prefix token cost by advertising only the tools a given harness uses; for the leanest surface expose just the discovery tools (--expose 'fak_tools_search,fak_capabilities') and let the agent page the rest in on demand.")
 	sf.vdso = fs.Bool("vdso", true, "enable the vDSO dedup fast path")
@@ -719,7 +719,16 @@ func cmdServe(argv []string) {
 
 	// Start the measured child only after every validation step that can terminate
 	// startup, and immediately before compute selection consumes the model source.
-	if !*sf.dryAdmit {
+	if err := rt.resolveExecutionPolicy(sf); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if *sf.dryAdmit {
+		if err := refuseServeDryAdmitDelegated(sf); err != nil {
+			fmt.Fprintln(os.Stderr, "fak serve: --dry-admit:", err)
+			os.Exit(2)
+		}
+	} else {
 		if err := rt.maybeStartQwen38Delegation(sf); err != nil {
 			fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
 			os.Exit(2)
