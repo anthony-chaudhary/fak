@@ -34,7 +34,7 @@ func TestLaunchdHygiene(t *testing.T) {
 			}
 			if d.IsDir() {
 				name := d.Name()
-				if name == ".git" || name == "_scratch" || name == ".cache" || name == "vendor" || name == "node_modules" {
+				if name == ".git" || name == ".worktrees" || name == "_scratch" || name == ".cache" || name == "vendor" || name == "node_modules" {
 					return filepath.SkipDir
 				}
 				return nil
@@ -161,7 +161,7 @@ func TestLaunchdHygiene(t *testing.T) {
 			}
 			if d.IsDir() {
 				name := d.Name()
-				if name == ".git" || name == "_scratch" || name == ".cache" || name == "vendor" {
+				if name == ".git" || name == ".worktrees" || name == "_scratch" || name == ".cache" || name == "vendor" {
 					return filepath.SkipDir
 				}
 				return nil

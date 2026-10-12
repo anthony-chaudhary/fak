@@ -283,7 +283,8 @@ func zeroDepCorpus(root string) ([]string, error) {
 		rel = filepath.ToSlash(rel)
 		if d.IsDir() {
 			// Dated histories: a record of what was true then is not a claim about now.
-			if rel == "docs/notes" || rel == "docs/archive" {
+			// docs/_audits is gitignored local triage output, never published.
+			if rel == "docs/notes" || rel == "docs/archive" || rel == "docs/_audits" {
 				return filepath.SkipDir
 			}
 			return nil
