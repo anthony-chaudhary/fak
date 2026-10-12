@@ -62,11 +62,11 @@ func TestRefreshSourceCopiesCallerBytes(t *testing.T) {
 
 func TestSelectDueIsBoundedAndPriorityAware(t *testing.T) {
 	registry := Registry{Repositories: []Repository{
-		{Repository: "low", Status: "active", Priority: 3, LastChecked: "2026-01-01"},
-		{Repository: "fresh", Status: "active", Priority: 1, LastChecked: "2026-08-25"},
-		{Repository: "high", Status: "active", Priority: 1, LastChecked: "2026-02-01"},
-		{Repository: "paused", Status: "paused", Priority: 0, LastChecked: "2026-01-01"},
-		{Repository: "middle", Status: "active", Priority: 2, LastChecked: "2026-03-01"},
+		{Repository: "low", Status: "candidate", Priority: 3, LastChecked: "2026-01-01"},
+		{Repository: "fresh", Status: "studied", Priority: 1, LastChecked: "2026-08-25"},
+		{Repository: "high", Status: "studied", Priority: 1, LastChecked: "2026-02-01"},
+		{Repository: "paused", Status: "dismissed", Priority: 0, LastChecked: "2026-01-01"},
+		{Repository: "middle", Status: "watch", Priority: 2, LastChecked: "2026-03-01"},
 	}}
 	due := SelectDue(registry, time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC), 30, 2)
 	if got := []string{due[0].Repository, due[1].Repository}; !reflect.DeepEqual(got, []string{"high", "middle"}) {
@@ -74,5 +74,20 @@ func TestSelectDueIsBoundedAndPriorityAware(t *testing.T) {
 	}
 	if got := SelectDue(registry, time.Now(), 30, 0); len(got) != 0 {
 		t.Fatalf("zero limit selected %d", len(got))
+	}
+}
+
+func TestSelectDueSelectsStudiedPastHorizonAndSkipsDismissed(t *testing.T) {
+	registry := Registry{Repositories: []Repository{
+		{Repository: "studied-stale", Status: "studied", Priority: 1, LastChecked: "2026-01-01"},
+		{Repository: "dismissed-stale", Status: "dismissed", Priority: 1, LastChecked: "2026-01-01"},
+	}}
+	due := SelectDue(registry, time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC), 30, 10)
+	var got []string
+	for _, repository := range due {
+		got = append(got, repository.Repository)
+	}
+	if !reflect.DeepEqual(got, []string{"studied-stale"}) {
+		t.Fatalf("due = %v, want [studied-stale]", got)
 	}
 }

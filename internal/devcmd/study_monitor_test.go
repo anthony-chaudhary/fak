@@ -175,6 +175,12 @@ func TestStudyMonitorInventoryCheckAcceptsMachineMap(t *testing.T) {
 func TestStudyMonitorResolvesFromEnv(t *testing.T) {
 	workDir := t.TempDir()
 	t.Chdir(workDir)
+	if err := os.MkdirAll(filepath.Join("docs", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(defaultStudyMonitorRegistry, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	regDir := t.TempDir()
 	regPath := filepath.Join(regDir, "env-repos.json")

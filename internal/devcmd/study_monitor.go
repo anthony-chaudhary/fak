@@ -76,11 +76,11 @@ func RunStudyMonitor(stdout, stderr io.Writer, args []string) int {
 }
 
 func resolveStudyMonitorRegistry(registryPath string) string {
-	if fileExists(registryPath) {
-		return registryPath
-	}
 	if env := os.Getenv("FAK_STUDY_REGISTRY"); env != "" && fileExists(env) {
 		return env
+	}
+	if fileExists(registryPath) {
+		return registryPath
 	}
 	privateCandidate := filepath.Join("..", "fak-private", "docs", "research", "monitored-repositories.json")
 	if fileExists(privateCandidate) {

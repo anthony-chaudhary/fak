@@ -111,7 +111,18 @@ func cloneSourceObservation(observation SourceObservation) SourceObservation {
 	return observation
 }
 
-// SelectDue returns at most limit active repositories needing refresh, ordered
+// refreshEligible reports whether a status is swept by refresh: every validated
+// status except dismissed.
+func refreshEligible(status string) bool {
+	switch status {
+	case "candidate", "studied", "watch":
+		return true
+	default:
+		return false
+	}
+}
+
+// SelectDue returns at most limit refresh-eligible repositories needing refresh, ordered
 // by monitored-repository priority and then oldest check. A non-positive limit
 // deliberately selects nothing.
 func SelectDue(registry Registry, now time.Time, dueDays, limit int) []Repository {
@@ -121,7 +132,7 @@ func SelectDue(registry Registry, now time.Time, dueDays, limit int) []Repositor
 	cutoff := now.AddDate(0, 0, -dueDays)
 	var due []Repository
 	for _, repository := range registry.Repositories {
-		if repository.Status != "active" {
+		if !refreshEligible(repository.Status) {
 			continue
 		}
 		checked, err := time.Parse("2006-01-02", repository.LastChecked)
