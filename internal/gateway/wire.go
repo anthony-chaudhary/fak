@@ -410,8 +410,11 @@ type ChatRequest struct {
 	TopK               *int            `json:"top_k,omitempty"`
 	MinP               *float64        `json:"min_p,omitempty"`
 	ChatTemplateKwargs json.RawMessage `json:"chat_template_kwargs,omitempty"`
-	ReasoningEffort    string          `json:"reasoning_effort,omitempty"`
-	ThinkingConfig     json.RawMessage `json:"thinking_config,omitempty"`
+	// SpeculativeNMax caps a llama-server's speculative draft length for this
+	// request (0 disables drafting). Absent => unset on the upstream wire.
+	SpeculativeNMax *int            `json:"speculative.n_max,omitempty"`
+	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
+	ThinkingConfig  json.RawMessage `json:"thinking_config,omitempty"`
 	// Guided* are provider-native guided-decode controls accepted by common
 	// OpenAI-compatible ride engines. They are not part of the core OpenAI request,
 	// so the gateway collects only these known keys and threads them through the

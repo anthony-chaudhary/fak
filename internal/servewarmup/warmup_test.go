@@ -25,7 +25,7 @@ func TestRunReportsFailureAndPendingReadiness(t *testing.T) {
 	got := stderr.String()
 	for _, want := range []string{
 		"backend startup warmup failed after 10m0s",
-		"readiness remains pending",
+		"readiness held as warmup_failed",
 		backendErr.Error(),
 	} {
 		if !strings.Contains(got, want) {

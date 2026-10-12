@@ -20,7 +20,8 @@ import (
 // decoding the gateway invented: Halo llama.cpp upstreams then repeated identical
 // tool-call bundles. Explicit sampling and repetition penalties must arrive intact,
 // as must the llama.cpp/vLLM extensions top_k, min_p and chat_template_kwargs that
-// Halo Qwen's recommended sampling and enable_thinking ride on.
+// Halo Qwen's recommended sampling and enable_thinking ride on, and the llama-server
+// speculative.n_max draft cap (0 included: it disables drafting for the request).
 func TestProxiedChatSamplingReachesUpstream(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -28,7 +29,9 @@ func TestProxiedChatSamplingReachesUpstream(t *testing.T) {
 		want   map[string]any
 		absent []string
 	}{
-		{name: "omitted", fields: ``, absent: []string{"temperature", "presence_penalty", "frequency_penalty", "top_k", "min_p", "chat_template_kwargs"}},
+		{name: "omitted", fields: ``, absent: []string{"temperature", "presence_penalty", "frequency_penalty", "top_k", "min_p", "chat_template_kwargs", "speculative.n_max"}},
+		{name: "speculative-cap", fields: `"speculative.n_max":4,`, want: map[string]any{"speculative.n_max": 4.0}},
+		{name: "speculative-disabled", fields: `"speculative.n_max":0,`, want: map[string]any{"speculative.n_max": 0.0}},
 		{name: "explicit-zero", fields: `"temperature":0,`, want: map[string]any{"temperature": 0.0}},
 		{name: "explicit-sampling", fields: `"temperature":0.7,"top_p":0.8,"presence_penalty":1.5,"frequency_penalty":0.25,`,
 			want: map[string]any{"temperature": 0.7, "top_p": 0.8, "presence_penalty": 1.5, "frequency_penalty": 0.25}},
@@ -122,5 +125,58 @@ func TestProxiedChatSamplingReachesUpstream(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestProxiedChatNegativeSpeculativeNMaxIsBadRequest pins that a negative
+// speculative.n_max is refused as an invalid_request_error before any upstream hop,
+// on both the buffered and the streamed wire.
+//
+// fak-test:runtime fast est=100ms lane=default
+func TestProxiedChatNegativeSpeculativeNMaxIsBadRequest(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%t", stream), func(t *testing.T) {
+			var mu sync.Mutex
+			hits := 0
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				hits++
+				mu.Unlock()
+				http.Error(w, "unexpected upstream hop", http.StatusInternalServerError)
+			}))
+			defer up.Close()
+
+			srv := newTestServer(t)
+			srv.planner = agent.NewHTTPPlanner(up.URL+"/v1", "qwen", "")
+			ts := httptest.NewServer(srv.Handler())
+			defer ts.Close()
+
+			req := fmt.Sprintf(`{"model":"qwen","speculative.n_max":-1,"stream":%t,"messages":[{"role":"user","content":"hi"}]}`, stream)
+			resp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", strings.NewReader(req))
+			if err != nil {
+				t.Fatalf("post: %v", err)
+			}
+			raw, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("chat status = %d, want 400", resp.StatusCode)
+			}
+			var envelope struct {
+				Error struct {
+					Type string `json:"type"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(raw, &envelope); err != nil {
+				t.Fatalf("decode error envelope: %v", err)
+			}
+			if envelope.Error.Type != "invalid_request_error" {
+				t.Errorf("error.type = %q, want invalid_request_error", envelope.Error.Type)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if hits != 0 {
+				t.Errorf("upstream hits = %d, want 0", hits)
+			}
+		})
 	}
 }

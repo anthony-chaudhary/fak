@@ -86,6 +86,7 @@ type dialectExtractor struct {
 // message, so an overlapping match (e.g. a Hermes tag whose inner JSON also looks
 // like bare JSON) is lifted exactly once, by the more specific dialect.
 var toolCallDialects = []dialectExtractor{
+	{name: "deepseek_dsml", extract: extractDeepSeekDSMLBlocks},
 	{name: "hermes", extract: extractDelimited(hermesToolCallRe)},
 	{name: "function_call_tag", extract: extractDelimited(functionCallTagRe)},
 	{name: "llama_python_tag", extract: extractDelimited(llamaPythonTagRe)},

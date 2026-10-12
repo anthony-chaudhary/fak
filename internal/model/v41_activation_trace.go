@@ -16,6 +16,8 @@ package model
 //   - kv_latent             kv after the optional kv RMSNorm, before RoPE
 //   - attention_projected   attnOut[t] after the grouped output projection
 //   - moe_sum               moe after v41SharedExpertAdd, before delta/residual
+//   - residual_streams      the post-FFN hc-stream residual at the end of each
+//                           layer, flattened [hc*H] per token
 //
 // It never changes the forward arithmetic: every emission is a read of an
 // already-computed slice, and while tracing is disabled the tracer is nil and the
@@ -54,6 +56,7 @@ const (
 	v41TraceStageKVLatent    = "kv_latent"
 	v41TraceStageAttnOut     = "attention_projected"
 	v41TraceStageMoESum      = "moe_sum"
+	v41TraceStageResidual    = "residual_streams"
 	v41TraceCaptureBackend   = "host"
 	v41TraceCaptureDeviceTag = "host"
 )
@@ -88,24 +91,61 @@ func (s *v41ActivationTraceState) record(layer, token int, stage string, values 
 		return false
 	}
 	width := len(values)
-	n := width
-	if n > v41ActivationTraceMaxSamples {
-		n = v41ActivationTraceMaxSamples
+	idx := computetrace.ActivationSampleIndices(width, v41ActivationTraceMaxSamples)
+	vals := make([]float32, len(idx))
+	for i, j := range idx {
+		vals[i] = values[j]
 	}
-	stride := width / n
-	idx := make([]int, 0, n)
-	vals := make([]float32, 0, n)
-	for i := 0; i < n; i++ {
-		j := i * stride
-		if j >= width {
-			break
-		}
-		idx = append(idx, j)
-		vals = append(vals, values[j])
-	}
-	if len(idx) == 0 {
+	s.emit(layer, token, stage, width, idx, vals)
+	return true
+}
+
+// recordStreams emits the residual_streams checkpoint for one token: the hc
+// streams read as one flattened [hc*H] row, sampled by the same index rule
+// without materializing the flattened copy.
+func (s *v41ActivationTraceState) recordStreams(layer, token int, streams [][]float32) bool {
+	if s == nil || len(streams) == 0 {
 		return false
 	}
+	H := len(streams[0])
+	for _, stream := range streams {
+		if len(stream) != H {
+			return false
+		}
+	}
+	width := H * len(streams)
+	if width == 0 {
+		return false
+	}
+	idx := computetrace.ActivationSampleIndices(width, v41ActivationTraceMaxSamples)
+	vals := make([]float32, len(idx))
+	for i, j := range idx {
+		vals[i] = streams[j/H][j%H]
+	}
+	s.emit(layer, token, v41TraceStageResidual, width, idx, vals)
+	return true
+}
+
+// recordLayerStreams emits residual_streams for every token at the end of layer.
+// A device-resident panel is read back for the sample only while tracing.
+func (s *v41ActivationTraceState) recordLayerStreams(layer int, streams [][][]float32, resident *v41MHCResident) error {
+	if s == nil {
+		return nil
+	}
+	if resident != nil {
+		host, err := resident.hostStreams(layer)
+		if err != nil {
+			return err
+		}
+		streams = host
+	}
+	for t := range streams {
+		s.recordStreams(layer, t, streams[t])
+	}
+	return nil
+}
+
+func (s *v41ActivationTraceState) emit(layer, token int, stage string, width int, idx []int, vals []float32) {
 	computetrace.Record(computetrace.Event{
 		Operation:        v41ActivationTraceOperation,
 		Phase:            stage,
@@ -121,7 +161,6 @@ func (s *v41ActivationTraceState) record(layer, token int, stage string, values 
 		ProvenanceDigest: computetrace.Digest("v41-activation", DeepSeekV41FlashModelID+"@"+DeepSeekV41FlashRevision, stage),
 		Status:           "ok",
 	})
-	return true
 }
 
 // v41ActivationInputIdentity binds the pinned source revision, the flat decoder

@@ -25,7 +25,7 @@ var v41DeviceOnlyBindings = []v41DeviceOnlyBinding{
 	// Every BF16 dtype boundary, from the attention-input pair to the final norm.
 	{op: v41HostOp{name: "bf16-boundary", site: "SupportsV41BF16Publish"}, bound: v41DeviceOnlyBF16Bound},
 	{op: v41HostOp{name: "tail-rope-qk", site: "SupportsV41TailRoPE"}, bound: func(s *Session) bool { return s.v41TailRoPEFunc() != nil }},
-	{op: v41HostOp{name: "compressor-gated-pool", site: "SupportsV41CompressorPool"}, uses: v41UsesCompressedKV, bound: func(s *Session) bool { return s.v41CompressorPoolFunc() != nil }},
+	{op: v41HostOp{name: "compressor-gated-pool", site: "SupportsV41CompressorPool"}, uses: v41UsesGatedCompressor, bound: func(s *Session) bool { return s.v41CompressorPoolFunc() != nil }},
 	{op: v41HostOp{name: "compressor-norm", site: "SupportsV41CompressorNorm"}, uses: v41UsesCompressedKV, bound: func(s *Session) bool { return s.v41CompressorNormFunc() != nil }},
 	{op: v41HostOp{name: "index-key-norm", site: "SupportsV41IndexKeyNorm"}, uses: v41UsesIndexer, bound: func(s *Session) bool { return s.v41IndexKeyNormFunc() != nil }},
 	{op: v41HostOp{name: "compressed-publication-rope", site: "V41TailRoPEExactAvailable"}, uses: v41UsesCompressedKV, bound: func(s *Session) bool { return s.v41CompressedPublicationRoPEFunc() != nil }},
@@ -63,12 +63,19 @@ func v41UsesEngram(cfg Config) bool {
 	return cfg.DeepSeekV41 != nil && len(cfg.DeepSeekV41.EngramLayerIDs) > 0
 }
 
-func v41UsesCompressedKV(cfg Config) bool {
+// v41UsesCompressedKV covers every compressed producer, ratio one included:
+// each normalizes and rotates its published rows.
+func v41UsesCompressedKV(cfg Config) bool { return v41UsesCompressRatioAbove(cfg, 0) }
+
+// v41UsesGatedCompressor covers only producers that pool a gated group.
+func v41UsesGatedCompressor(cfg Config) bool { return v41UsesCompressRatioAbove(cfg, 1) }
+
+func v41UsesCompressRatioAbove(cfg Config, floor int) bool {
 	if cfg.DeepSeekV41 == nil {
 		return false
 	}
 	for _, ratio := range cfg.DeepSeekV41.CompressRatios {
-		if ratio > 1 {
+		if ratio > floor {
 			return true
 		}
 	}

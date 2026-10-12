@@ -28,6 +28,8 @@ void fvk_rmsnorm_q2k_matmul2_f32(const void* dW0, const void* dW1,
 // Issue-local #12217 ABI pending the generic #11096 VMM contract. Keeping these declarations
 // beside the only Go consumer avoids widening the public backend header before that contract lands.
 void *fvk_malloc_weight(size_t bytes, uint64_t max_arena_bytes);
+void *fvk_malloc_offload_weight(size_t bytes);
+void fvk_offload_weight_stats(uint64_t *reused, uint64_t *fresh);
 void fvk_weight_arena_stats(uint64_t *memory_allocations, uint64_t *buffer_bindings,
                             uint64_t *reserved_bytes, uint64_t *live_bytes,
                             uint64_t *peak_reserved_bytes);
@@ -897,6 +899,43 @@ func memoryClassForVulkanAlloc(what string) MemoryClass {
 	}
 }
 
+// dallocWeightClassFor places a K-quant weight. A MemoryOffload page (an expert-ring page-in,
+// evicted and replaced while the model runs) takes the size-bucketed device pool, so an evicted
+// page's buffer is reused by the next same-size page-in; every other weight keeps the bump-only
+// arena, whose bytes are released only when every arena buffer is dead. Both keep the residency
+// budget's host-visible spill. Caller holds vulkanMu.
+func (v *vulkanBackend) dallocWeightClassFor(nbytes int, class MemoryClass, what string) *vulkanBuf {
+	if class != MemoryOffload {
+		return v.dallocWeightFor(nbytes, what)
+	}
+	requireVulkanSubmissionHealthyLocked("dallocWeightClassFor")
+	if v.budgetBytes > 0 && v.dlUsed+int64(nbytes) > v.budgetBytes {
+		buf := v.dallocHostVisWeightFor(nbytes, what)
+		v.accountWeightPlacement(buf, nbytes)
+		return buf
+	}
+	v.checkResourceCap(nbytes, what)
+	var buf *vulkanBuf
+	if p := C.fvk_malloc_offload_weight(C.size_t(nbytes)); p != nil {
+		buf = &vulkanBuf{ptr: unsafe.Pointer(p), n: nbytes, class: MemoryOffload}
+	} else {
+		buf = v.dallocHostVisWeightFor(nbytes, what)
+	}
+	v.accountWeightPlacement(buf, nbytes)
+	return buf
+}
+
+// VulkanOffloadWeightCounters reports how many paged-weight page-ins reused a pooled device
+// buffer versus allocated fresh device memory. A ring that churns within its budget settles on
+// reuse; steady fresh growth means pages are not coming back.
+func (v *vulkanBackend) VulkanOffloadWeightCounters() (reused, fresh uint64) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	var r, f C.uint64_t
+	C.fvk_offload_weight_stats(&r, &f)
+	return uint64(r), uint64(f)
+}
+
 func (v *vulkanBackend) accountWeightPlacement(buf *vulkanBuf, nbytes int) {
 	if v.budgetBytes == 0 || buf == nil || buf.ptr == nil {
 		return
@@ -1005,28 +1044,28 @@ func (v *vulkanBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, what 
 		panic("compute: vulkan Upload expects host data")
 	}
 	if t.Dtype == Q4_K {
-		return v.uploadQ4KLocked(t)
+		return v.uploadQ4KLocked(t, class)
 	}
 	if t.Dtype == Q6_K {
 		if as != Q6_K {
 			panic("compute: vulkan packed Q6_K upload requires as=Q6_K")
 		}
-		return v.uploadQ6KLocked(t)
+		return v.uploadQ6KLocked(t, class)
 	}
 	if t.Dtype == Q5_K {
 		if as != Q5_K {
 			panic("compute: vulkan packed Q5_K upload requires as=Q5_K")
 		}
-		return v.uploadQ5KLocked(t)
+		return v.uploadQ5KLocked(t, class)
 	}
 	if t.Dtype == Q3_K {
 		if as != Q3_K {
 			panic("compute: vulkan packed Q3_K upload requires as=Q3_K")
 		}
-		return v.uploadQ3KLocked(t)
+		return v.uploadQ3KLocked(t, class)
 	}
 	if t.Dtype == Q2_K {
-		return v.uploadQ2KLocked(t)
+		return v.uploadQ2KLocked(t, class)
 	}
 	if isRawIQ(t.Dtype) {
 		return v.uploadRawIQLocked(t)
@@ -1063,25 +1102,25 @@ func (v *vulkanBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, what 
 	})
 }
 
-func (v *vulkanBackend) uploadQ4KLocked(t Tensor) Tensor {
+func (v *vulkanBackend) uploadQ4KLocked(t Tensor, class MemoryClass) Tensor {
 	hb, ok := t.buf.(HostBuffer)
 	if !ok || len(t.Shape) != 2 || t.Shape[1]%256 != 0 {
 		panic("compute: vulkan Q4_K upload requires host raw bytes and [out,in] with in divisible by 256")
 	}
 	codes := hb.I8()
-	raw := i8AsBytes(codes)
+	raw := i8View(codes)
 	want := t.Shape[0] * (t.Shape[1] / 256) * 144
 	if len(raw) != want {
 		panic("compute: vulkan Q4_K raw byte length does not match shape")
 	}
-	buf := v.dallocWeightFor(len(raw), "Q4_K weight buffer "+shapeText(t.Shape))
+	buf := v.dallocWeightClassFor(len(raw), class, "Q4_K weight buffer "+shapeText(t.Shape))
 	if len(raw) > 0 {
 		C.fvk_h2d(buf.ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
 	}
 	return makeTensor(v, Q4_K, RowMajor, append([]int(nil), t.Shape...), nil, buf)
 }
 
-func (v *vulkanBackend) uploadQ6KLocked(t Tensor) Tensor {
+func (v *vulkanBackend) uploadQ6KLocked(t Tensor, class MemoryClass) Tensor {
 	hb, ok := t.buf.(HostBuffer)
 	if !ok || len(t.Shape) != 2 || t.Shape[0] <= 0 || t.Shape[1] <= 0 || t.Shape[1]%256 != 0 {
 		panic("compute: vulkan Q6_K upload requires host raw bytes and [out,in] with positive in divisible by 256")
@@ -1089,7 +1128,7 @@ func (v *vulkanBackend) uploadQ6KLocked(t Tensor) Tensor {
 	if C.fvk_have_q6k_matmul() == 0 {
 		panic("compute: vulkan Q6_K upload requested but the loaded shader bundle lacks q6k_matmul")
 	}
-	raw := i8AsBytes(hb.I8())
+	raw := i8View(hb.I8())
 	payloadBytes, residentBytes := vulkanQ6KByteSizes(t.Shape[0], t.Shape[1])
 	if len(raw) != payloadBytes {
 		panic("compute: vulkan Q6_K raw byte length does not match shape")
@@ -1101,7 +1140,7 @@ func (v *vulkanBackend) uploadQ6KLocked(t Tensor) Tensor {
 		resident = make([]byte, residentBytes)
 		copy(resident, raw)
 	}
-	buf := v.dallocWeightFor(residentBytes, "Q6_K weight buffer "+shapeText(t.Shape))
+	buf := v.dallocWeightClassFor(residentBytes, class, "Q6_K weight buffer "+shapeText(t.Shape))
 	buf.logicalN = payloadBytes
 	if residentBytes > 0 {
 		C.fvk_h2d(buf.ptr, unsafe.Pointer(&resident[0]), C.size_t(residentBytes))
@@ -1109,7 +1148,7 @@ func (v *vulkanBackend) uploadQ6KLocked(t Tensor) Tensor {
 	return makeTensor(v, Q6_K, RowMajor, append([]int(nil), t.Shape...), t.Quant, buf)
 }
 
-func (v *vulkanBackend) uploadQ5KLocked(t Tensor) Tensor {
+func (v *vulkanBackend) uploadQ5KLocked(t Tensor, class MemoryClass) Tensor {
 	hb, ok := t.buf.(HostBuffer)
 	if !ok || len(t.Shape) != 2 || t.Shape[0] <= 0 || t.Shape[1] <= 0 || t.Shape[1]%256 != 0 {
 		panic("compute: vulkan Q5_K upload requires host raw bytes and [out,in] with positive in divisible by 256")
@@ -1117,7 +1156,7 @@ func (v *vulkanBackend) uploadQ5KLocked(t Tensor) Tensor {
 	if C.fvk_have_q5k_matmul() == 0 {
 		panic("compute: vulkan Q5_K upload requested but the loaded shader bundle lacks q5k_matmul")
 	}
-	raw := i8AsBytes(hb.I8())
+	raw := i8View(hb.I8())
 	payloadBytes, residentBytes := vulkanQ5KByteSizes(t.Shape[0], t.Shape[1])
 	if len(raw) != payloadBytes {
 		panic("compute: vulkan Q5_K raw byte length does not match shape")
@@ -1129,7 +1168,7 @@ func (v *vulkanBackend) uploadQ5KLocked(t Tensor) Tensor {
 		resident = make([]byte, residentBytes)
 		copy(resident, raw)
 	}
-	buf := v.dallocWeightFor(residentBytes, "Q5_K weight buffer "+shapeText(t.Shape))
+	buf := v.dallocWeightClassFor(residentBytes, class, "Q5_K weight buffer "+shapeText(t.Shape))
 	buf.logicalN = payloadBytes
 	if residentBytes > 0 {
 		C.fvk_h2d(buf.ptr, unsafe.Pointer(&resident[0]), C.size_t(residentBytes))
@@ -1137,25 +1176,25 @@ func (v *vulkanBackend) uploadQ5KLocked(t Tensor) Tensor {
 	return makeTensor(v, Q5_K, RowMajor, append([]int(nil), t.Shape...), t.Quant, buf)
 }
 
-func (v *vulkanBackend) uploadQ2KLocked(t Tensor) Tensor {
+func (v *vulkanBackend) uploadQ2KLocked(t Tensor, class MemoryClass) Tensor {
 	hb, ok := t.buf.(HostBuffer)
 	if !ok || len(t.Shape) != 2 || t.Shape[1]%q2kSuper != 0 {
 		panic("compute: vulkan Q2_K upload requires host raw bytes and [out,in] with in divisible by 256")
 	}
 	codes := hb.I8()
-	raw := i8AsBytes(codes)
+	raw := i8View(codes)
 	want := t.Shape[0] * (t.Shape[1] / q2kSuper) * q2kSuperBlock
 	if len(raw) != want {
 		panic("compute: vulkan Q2_K raw byte length does not match shape")
 	}
-	buf := v.dallocWeightFor(len(raw), "Q2_K weight buffer "+shapeText(t.Shape))
+	buf := v.dallocWeightClassFor(len(raw), class, "Q2_K weight buffer "+shapeText(t.Shape))
 	if len(raw) > 0 {
 		C.fvk_h2d(buf.ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
 	}
 	return makeTensor(v, Q2_K, RowMajor, append([]int(nil), t.Shape...), t.Quant, buf)
 }
 
-func (v *vulkanBackend) uploadQ3KLocked(t Tensor) Tensor {
+func (v *vulkanBackend) uploadQ3KLocked(t Tensor, class MemoryClass) Tensor {
 	hb, ok := t.buf.(HostBuffer)
 	if !ok || len(t.Shape) != 2 || t.Shape[0] <= 0 || t.Shape[1] <= 0 || t.Shape[1]%q3kSuper != 0 {
 		panic("compute: vulkan Q3_K upload requires host raw bytes and [out,in] with positive in divisible by 256")
@@ -1163,7 +1202,7 @@ func (v *vulkanBackend) uploadQ3KLocked(t Tensor) Tensor {
 	if C.fvk_have_q3k_matmul() == 0 {
 		panic("compute: vulkan Q3_K upload requested but the loaded shader bundle lacks q3k_matmul")
 	}
-	raw := i8AsBytes(hb.I8())
+	raw := i8View(hb.I8())
 	payloadBytes, residentBytes := vulkanQ3KByteSizes(t.Shape[0], t.Shape[1])
 	if len(raw) != payloadBytes {
 		panic("compute: vulkan Q3_K raw byte length does not match shape")
@@ -1175,7 +1214,7 @@ func (v *vulkanBackend) uploadQ3KLocked(t Tensor) Tensor {
 		resident = make([]byte, residentBytes)
 		copy(resident, raw)
 	}
-	buf := v.dallocWeightFor(residentBytes, "Q3_K weight buffer "+shapeText(t.Shape))
+	buf := v.dallocWeightClassFor(residentBytes, class, "Q3_K weight buffer "+shapeText(t.Shape))
 	buf.logicalN = payloadBytes
 	if residentBytes > 0 {
 		C.fvk_h2d(buf.ptr, unsafe.Pointer(&resident[0]), C.size_t(residentBytes))
@@ -1889,22 +1928,25 @@ func (v *vulkanBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
 // no per-dispatch performance-query counter read, so on today's devices the
 // honest verdict is the typed-unavailable marker — never a host-monotonic
 // number wearing a device timer domain.
+//
+// The probe runs before vulkanMu is taken and the event is recorded after it is
+// released: the probe locks vulkanMu itself (sync.Mutex is not reentrant), and the
+// process observer must never run while the device lock is held.
 func (v *vulkanBackend) MatMul(w, x Tensor) Tensor {
-	vulkanMu.Lock()
-	defer vulkanMu.Unlock()
 	emitKernel := computetrace.Emitting()
 	var kernelStarted time.Time
 	var kernelTiming vulkanKernelTiming
 	if emitKernel {
-		kernelStarted = time.Now()
 		kernelTiming = vulkanKernelTimingFrom(ObservePhasePerformanceQuery(v), vulkanKernelPhase, nil)
+		defer func() {
+			recordVulkanMatMulKernel(v.Name(), w, x, kernelStarted, kernelTiming)
+		}()
 	}
-	defer func() {
-		if !emitKernel {
-			return
-		}
-		recordVulkanMatMulKernel(v.Name(), w, x, kernelStarted, kernelTiming)
-	}()
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	if emitKernel {
+		kernelStarted = time.Now()
+	}
 	if w.Dtype == Q6_K {
 		v.validateQ6KMatMulInputs(w, x, 1)
 	}

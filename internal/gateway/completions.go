@@ -121,6 +121,7 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithTemperature(req.Temperature),
 		agent.WithTopP(req.TopP),
 		agent.WithStop(normalizeStop(req.Stop)),
+		agent.WithRawPrompt(),
 	)
 	if err != nil {
 		s.logf("gateway: upstream model error: %v", err)

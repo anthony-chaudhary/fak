@@ -111,12 +111,17 @@ if [ -n "$companion" ]; then
 
     # A commit onto main is admitted by the companion's trunk-publication guard,
     # which refuses stacking on stale unpublished commits and records the attempt
-    # in this repository's landing ledger. Exit 1 refuses; anything else fails open.
+    # in this repository's landing ledger. Only exit 1 carrying the guard's closed
+    # token refuses; fak-run also exits 1 on its own build failures, which fail open.
     if command -v fak-run >/dev/null 2>&1; then
         set +e
-        (cd "$companion" && fak-run fak-flow trunk commit-guard --repo-root "$REPO_ROOT")
+        guard_out=$( (cd "$companion" && fak-run fak-flow trunk commit-guard --repo-root "$REPO_ROOT") 2>&1 )
         guard_rc=$?
         set -e
+        [ -n "$guard_out" ] && printf '%s\n' "$guard_out" >&2
+        if [ "$guard_rc" -eq 1 ] && ! printf '%s' "$guard_out" | grep -q 'ERR_FLOW_TRUNK_UNPUBLISHED'; then
+            guard_rc=125
+        fi
         if [ "$guard_rc" -eq 1 ]; then
             echo "" >&2
             echo "❌ COMMIT BLOCKED: main already holds stale unpublished commits (see the guard output above)." >&2
@@ -125,6 +130,8 @@ if [ -n "$companion" ]; then
         elif [ "$guard_rc" -ne 0 ]; then
             echo "⚠️  ADVISORY: trunk-publication guard unavailable (exit $guard_rc); committing anyway."
         fi
+    else
+        echo "⚠️  ADVISORY: fak-run not on PATH; trunk-publication guard skipped."
     fi
 else
     echo "ℹ️ Standalone public checkout (no companion fak-private detected)."

@@ -40,6 +40,12 @@ func v41IncrementalEngramFixture(t *testing.T, compressed bool) (*Model, []*v41I
 	return v41IncrementalEngramFixtureFromModel(t, m, compressed)
 }
 
+func v41IncrementalEngramFixtureWith(t *testing.T, compressed bool, mutate func(*Config)) (*Model, []*v41IncrementalEngramSource) {
+	t.Helper()
+	m, _ := v41FullEngramModelWith(t, mutate)
+	return v41IncrementalEngramFixtureFromModel(t, m, compressed)
+}
+
 // v41IncrementalEngramFixtureFromModel keeps the same three-layer schedule,
 // two independent Engram hash layouts, packed rows and compression variants.
 func v41IncrementalEngramFixtureFromModel(t *testing.T, m *Model, compressed bool) (*Model, []*v41IncrementalEngramSource) {

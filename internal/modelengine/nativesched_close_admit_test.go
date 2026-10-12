@@ -3,6 +3,7 @@ package modelengine
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,6 +13,17 @@ import (
 
 func TestNativeSchedulerCloseDuringPrefillCannotPublishWorkAfterCloseAndWait(t *testing.T) {
 	s := NewNativeScheduler(model.NewSynthetic(SyntheticConfig()))
+	prefillEntered := make(chan struct{})
+	releasePrefill := make(chan struct{})
+	var armed atomic.Bool
+	var armedCalls atomic.Int32
+	s.now = func() time.Time {
+		if armed.Load() && armedCalls.Add(1) == 1 {
+			close(prefillEntered)
+			<-releasePrefill
+		}
+		return time.Now()
+	}
 	first, err := s.AdmitTokenIDs(context.Background(), "start-and-idle", []int{1})
 	if err != nil {
 		t.Fatalf("initial AdmitTokenIDs: %v", err)
@@ -22,17 +34,9 @@ func TestNativeSchedulerCloseDuringPrefillCannotPublishWorkAfterCloseAndWait(t *
 		t.Fatalf("initial Result: %v", err)
 	}
 
-	prefillEntered := make(chan struct{})
-	releasePrefill := make(chan struct{})
-	nowCalls := 0
-	s.now = func() time.Time {
-		nowCalls++
-		if nowCalls == 1 {
-			close(prefillEntered)
-			<-releasePrefill
-		}
-		return time.Now()
-	}
+	s.executor.Lock()
+	armed.Store(true)
+	s.executor.Unlock()
 
 	type admitResult struct {
 		req abi.EngineRequest

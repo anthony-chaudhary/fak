@@ -2,7 +2,8 @@
 
 // Run serially from the repository root with the coupled shader bundle:
 // FAK_VULKAN_SPIRV="$PWD/internal/compute/spirv" FAK_VULKAN_REQUIRE_DEVICE=1 go test -tags vulkan ./internal/model -run '^TestV41DeviceForwardGreedyParityVulkan$' -count=1 -timeout=10m
-// Synthetic three-layer full-geometry fixtures; no checkpoint, coherence or performance claim.
+// Synthetic three-layer full-geometry fixtures with the pinned Q2_K/Q3_K expert dtypes;
+// no checkpoint, coherence or performance claim.
 
 package model
 
@@ -22,6 +23,11 @@ const (
 	// in TestV41NormRoPECallbacksHalo). Device reductions reorder F32 sums, and
 	// BF16 stream publications can turn a few F32 ulps into one BF16 ulp.
 	v41DeviceParityLogitTol = 2e-3
+	// The pinned Q2_K/Q3_K slate's GEMMs sum in a different order on the device, so a
+	// value straddling a BF16 rounding boundary publishes one BF16 ulp (2^-8) apart.
+	// Steps either match to ~1e-7 or carry such a flip (observed worst 9.0e-3 on the
+	// 8060S); greedy tokens must still agree exactly.
+	v41DeviceParityQuantLogitTol = 2e-2
 )
 
 type v41DeviceParityRun struct {
@@ -99,6 +105,11 @@ func v41DeviceParitySeams(st *v41ForwardState) (bound, host []string) {
 // within the relative bound, and returns the worst relative logit delta.
 func v41DeviceParityCompare(t *testing.T, label string, got, want v41DeviceParityRun) float64 {
 	t.Helper()
+	return v41DeviceParityCompareTol(t, label, got, want, v41DeviceParityLogitTol)
+}
+
+func v41DeviceParityCompareTol(t *testing.T, label string, got, want v41DeviceParityRun, tol float64) float64 {
+	t.Helper()
 	worst := 0.0
 	for i := range want.tokens {
 		if len(got.logits[i]) != len(want.logits[i]) {
@@ -125,8 +136,8 @@ func v41DeviceParityCompare(t *testing.T, label string, got, want v41DeviceParit
 		if got.tokens[i] != want.tokens[i] {
 			t.Errorf("%s greedy token[%d]=%d want %d (got %v want %v)", label, i, got.tokens[i], want.tokens[i], got.tokens, want.tokens)
 		}
-		if rel > v41DeviceParityLogitTol {
-			t.Errorf("%s step %d logits max_abs=%g scale=%g rel=%g > %g", label, i, delta, scale, rel, v41DeviceParityLogitTol)
+		if rel > tol {
+			t.Errorf("%s step %d logits max_abs=%g scale=%g rel=%g > %g", label, i, delta, scale, rel, tol)
 		}
 	}
 	return worst
@@ -148,7 +159,9 @@ func v41DeviceParityMargin(logits []float32) float64 {
 // v41DeviceParityDeviceOnly runs the same greedy decode under the device-only
 // policy. While the host-op inventory is non-empty the admission must refuse
 // typed; once it drains, the device-only forward must meet the same parity.
-func v41DeviceParityDeviceOnly(t *testing.T, m *Model, be compute.Backend, prompt []int, want v41DeviceParityRun) {
+// declined, when set, is the one device seam this slate cannot stage: device-only must
+// then refuse typed at exactly that seam instead of running it on the host.
+func v41DeviceParityDeviceOnly(t *testing.T, m *Model, be compute.Backend, prompt []int, want v41DeviceParityRun, tol float64, declined string) {
 	t.Helper()
 	s, err := m.NewBackendSessionChecked(be)
 	if err != nil {
@@ -172,6 +185,15 @@ func v41DeviceParityDeviceOnly(t *testing.T, m *Model, be compute.Backend, promp
 		return nil
 	}()
 	inventory := v41DeviceOnlyRefusal()
+	if declined != "" {
+		var op *BackendForwardOperationError
+		if refusal == nil || !errors.As(refusal, &op) || op.Stage != declined+" declined" {
+			t.Errorf("device-only = %v, want the typed %q decline", refusal, declined)
+		} else {
+			t.Logf("device-only refused typed at the %s seam: %v", declined, refusal)
+		}
+		return
+	}
 	switch {
 	case refusal != nil && inventory != nil:
 		t.Logf("device-only admission refused while the host-op inventory is non-empty: %v", refusal)
@@ -183,7 +205,7 @@ func v41DeviceParityDeviceOnly(t *testing.T, m *Model, be compute.Backend, promp
 		if s.HostFallbackObserved() {
 			t.Error("device-only forward observed a host fallback")
 		}
-		v41DeviceParityCompare(t, "device-only", got, want)
+		v41DeviceParityCompareTol(t, "device-only", got, want, tol)
 	}
 }
 
@@ -198,6 +220,48 @@ func v41DeviceParityEngramFixture(t *testing.T, compressed bool) *Model {
 	m, _ := v41FullEngramModelConfig(t, cfg, true)
 	m, _ = v41IncrementalEngramFixtureFromModel(t, m, compressed)
 	return m
+}
+
+// v41DeviceParityBlockAligned widens the hidden and expert widths to one k-quant
+// super-block (256), the narrowest geometry that carries real Q2_K/Q3_K experts.
+func v41DeviceParityBlockAligned(cfg *Config) {
+	cfg.HiddenSize = qkK
+	cfg.MoEIntermediateSize = qkK
+}
+
+// v41DeviceParityPinnedExperts replaces every routed expert with the pinned
+// DeepSeek-V4.1-Flash Q2_K slate's dtypes: Q2_K gate/up and Q3_K down. The checkpoint has
+// no F32 experts, and the device-only routed seam stages only the quantized kinds a
+// device kernel serves, so an F32 slate would test a route the real model never takes.
+//
+// Quantized GEMMs and BF16 publications drift by about one BF16 ulp between host and
+// device, and the random router had near-ties at its top-k boundary: one flipped
+// selection (layer 2, expert 287 vs 321) moved later logits by 5%. That is tie-breaking,
+// not device arithmetic, so the selection-only correction bias spaces experts a unit
+// apart, which no score drift can cross; routing weights still come from the scores.
+func v41DeviceParityPinnedExperts(t *testing.T, m *Model) {
+	t.Helper()
+	H, I := m.Cfg.HiddenSize, m.Cfg.MoEIntermediateSize
+	bias := make([]float32, m.Cfg.NumExperts)
+	for e := range bias {
+		bias[e] = -float32(e)
+	}
+	if m.kqw == nil {
+		m.kqw = map[string]*kQuantTensor{}
+	}
+	for l := 0; l < m.Cfg.NumLayers; l++ {
+		v41WriteTensorF32(t, m, layerName(l, "ffn.gate.e_score_correction_bias"), bias)
+		for e := 0; e < m.Cfg.NumExperts; e++ {
+			stem := "ffn.experts." + itoa(e)
+			w1, w3, w2 := layerName(l, stem+".w1.weight"), layerName(l, stem+".w3.weight"), layerName(l, stem+".w2.weight")
+			m.kqw[w1] = q2kFixtureTensor(I, H, uint64(0x13827+3*e))
+			m.kqw[w3] = q2kFixtureTensor(I, H, uint64(0x13827+3*e+1))
+			m.kqw[w2] = q3kFixtureTensor(H, I)
+			delete(m.manifest, w1)
+			delete(m.manifest, w3)
+			delete(m.manifest, w2)
+		}
+	}
 }
 
 // fak-test:justify why=integration when=changed:internal/model/**
@@ -218,55 +282,71 @@ func TestV41DeviceForwardGreedyParityVulkan(t *testing.T) {
 		}
 	}
 	prompt := []int{1, 2, 3}
-	for _, compressed := range []bool{false, true} {
-		t.Run(fmt.Sprintf("layers3_engram_compressed_%t", compressed), func(t *testing.T) {
-			fixture := func() *Model {
-				return v41DeviceParityEngramFixture(t, compressed)
-			}
-			ref, hostModel, devModel, onlyModel := fixture(), fixture(), fixture(), fixture()
-			defer func() {
-				for _, m := range []*Model{ref, hostModel, devModel, onlyModel} {
-					if err := m.CloseWeights(); err != nil {
-						t.Error(err)
+	for _, slate := range []struct {
+		name     string
+		tol      float64
+		declined string
+	}{
+		// F32 experts have no device kernel route; the pinned slate is the real one.
+		{"f32", v41DeviceParityLogitTol, "routed-swiglu-clamp"},
+		{"q2k_q3k", v41DeviceParityQuantLogitTol, ""},
+	} {
+		for _, compressed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("layers3_engram_compressed_%t_experts_%s", compressed, slate.name), func(t *testing.T) {
+				fixture := func() *Model {
+					if slate.declined != "" {
+						m, _ := v41IncrementalEngramFixture(t, compressed)
+						return m
 					}
+					m := v41DeviceParityEngramFixture(t, compressed)
+					v41DeviceParityPinnedExperts(t, m)
+					return m
 				}
-			}()
-			want := v41DeviceParityReference(t, ref, prompt, v41DeviceParitySteps)
-			if v41DeviceParityMargin(want.logits[0]) == 0 {
-				t.Fatal("reference greedy choice is a tie; the token witness would be vacuous")
-			}
+				ref, hostModel, devModel, onlyModel := fixture(), fixture(), fixture(), fixture()
+				defer func() {
+					for _, m := range []*Model{ref, hostModel, devModel, onlyModel} {
+						if err := m.CloseWeights(); err != nil {
+							t.Error(err)
+						}
+					}
+				}()
+				want := v41DeviceParityReference(t, ref, prompt, v41DeviceParitySteps)
+				if v41DeviceParityMargin(want.logits[0]) == 0 {
+					t.Fatal("reference greedy choice is a tie; the token witness would be vacuous")
+				}
 
-			host := &Session{M: hostModel}
-			hostRun := v41DeviceParitySession(t, host, prompt, v41DeviceParitySteps)
-			host.Close()
-			v41DeviceParityCompare(t, "host-session", hostRun, want)
+				host := &Session{M: hostModel}
+				hostRun := v41DeviceParitySession(t, host, prompt, v41DeviceParitySteps)
+				host.Close()
+				v41DeviceParityCompare(t, "host-session", hostRun, want)
 
-			dev, err := devModel.NewBackendSessionChecked(be)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer dev.Close()
-			bound, unbound := v41DeviceParitySeams(dev.v41State())
-			if len(bound) == 0 {
-				t.Fatal("Vulkan session bound no V4.1 device seam; the parity would compare host with host")
-			}
-			t.Logf("device seams bound=%v host=%v", bound, unbound)
-			before, observed, _ := compute.CaptureBackendExecutionSnapshot(be)
-			devRun := v41DeviceParitySession(t, dev, prompt, v41DeviceParitySteps)
-			if after, ok, _ := compute.CaptureBackendExecutionSnapshot(be); observed && ok {
-				delta, err := compute.BackendExecutionDelta(before, after)
+				dev, err := devModel.NewBackendSessionChecked(be)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if delta.Counters.ComputeDispatches == 0 {
-					t.Fatal("device forward issued no compute dispatches")
+				defer dev.Close()
+				bound, unbound := v41DeviceParitySeams(dev.v41State())
+				if len(bound) == 0 {
+					t.Fatal("Vulkan session bound no V4.1 device seam; the parity would compare host with host")
 				}
-				t.Logf("device forward compute_dispatches=%d h2d_bytes=%d d2h_bytes=%d", delta.Counters.ComputeDispatches, delta.Counters.H2DBytes, delta.Counters.D2HBytes)
-			}
-			worst := v41DeviceParityCompare(t, "device", devRun, want)
-			t.Logf("greedy tokens device=%v reference=%v worst_rel=%.4g", devRun.tokens, want.tokens, worst)
+				t.Logf("device seams bound=%v host=%v", bound, unbound)
+				before, observed, _ := compute.CaptureBackendExecutionSnapshot(be)
+				devRun := v41DeviceParitySession(t, dev, prompt, v41DeviceParitySteps)
+				if after, ok, _ := compute.CaptureBackendExecutionSnapshot(be); observed && ok {
+					delta, err := compute.BackendExecutionDelta(before, after)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if delta.Counters.ComputeDispatches == 0 {
+						t.Fatal("device forward issued no compute dispatches")
+					}
+					t.Logf("device forward compute_dispatches=%d h2d_bytes=%d d2h_bytes=%d", delta.Counters.ComputeDispatches, delta.Counters.H2DBytes, delta.Counters.D2HBytes)
+				}
+				worst := v41DeviceParityCompareTol(t, "device", devRun, want, slate.tol)
+				t.Logf("greedy tokens device=%v reference=%v worst_rel=%.4g", devRun.tokens, want.tokens, worst)
 
-			v41DeviceParityDeviceOnly(t, onlyModel, be, prompt, want)
-		})
+				v41DeviceParityDeviceOnly(t, onlyModel, be, prompt, want, slate.tol, slate.declined)
+			})
+		}
 	}
 }

@@ -100,9 +100,8 @@ func v41CompressRatioAt(cfg Config, layer int) int {
 
 // v41AttentionRatioImplemented reports ratios represented by the attention plan
 // and contraction primitives: 0 is window-only, 1 has one compressed row per
-// token, and 2 pools pairs. This is not forward-assembly admission: ratio 1's
-// projection helper exists, but v41CompressIndexForwardAdmitted keeps its full
-// assembly closed until producer/reader cache and window composition are wired.
+// token, and 2 pools pairs. Forward admission of each layer's tensors and
+// sources stays with v41CompressIndexForwardAdmitted.
 func v41AttentionRatioImplemented(ratio int) bool {
 	switch ratio {
 	case 0, 1, 2:
@@ -592,7 +591,7 @@ func (m *Model) v41AttentionIndexList(plan V41AttentionPlan, st *v41ForwardState
 	}
 
 	if isSource {
-		if localIdx == nil && !(plan.Ratio > 1 && groups == 0) {
+		if localIdx == nil && !(plan.Ratio > 0 && groups == 0) {
 			return nil, nil
 		}
 		row, err := one(localIdx)
@@ -637,11 +636,10 @@ func (m *Model) v41AttentionIndexList(plan V41AttentionPlan, st *v41ForwardState
 // source nor an index source publishes nothing, so the reduced non-shared path
 // stays a no-op here.
 //
-// A compressed source (ratio > 1) publishes one entry per completed group, in
-// order, pairing the pooled latent with the index key the group contributes.
-// Ratio-zero layers publish nothing. The legacy empty-latent branch remains a
-// standalone helper behavior for nonzero plans; ratio-one forward assembly is
-// refused before it can rely on those query-latent stand-ins.
+// A compressed source (ratio >= 1) publishes one entry per completed group, in
+// order, pairing the latent with the index key the group contributes. Ratio-zero
+// layers and an empty compressed stream publish nothing. The legacy empty-latent
+// branch below is unreachable from a nonzero plan.
 //
 // The update carries every published row in increasing stack order, which the
 // state's validateUpdates requires; a caller therefore never reorders them.
@@ -653,7 +651,7 @@ func (m *Model) v41AttentionSourceUpdates(plan V41AttentionPlan, compressedKV []
 	if len(projectedKeys) > 0 {
 		indexKeys = projectedKeys[0]
 	}
-	if plan.Ratio > 1 && len(compressedKV) == 0 {
+	if plan.Ratio > 0 && len(compressedKV) == 0 {
 		return nil
 	}
 	isKV := plan.KVSourceLayer == plan.Layer

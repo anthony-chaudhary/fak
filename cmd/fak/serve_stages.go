@@ -380,7 +380,7 @@ func (rt *serveRuntime) proxyOnlyCompute(sf *serveFlags, getenv func(string) str
 		return false, nil
 	}
 	for _, name := range []string{
-		"backend", "metal", "gpu-layers", "native-gpu-layers", "cpu-offload-experts", "n-cpu-moe",
+		"backend", "metal", "gpu-layers", "native-gpu-layers", "cpu-offload-experts", "n-cpu-moe", serveExpertRingBytesFlag,
 		"expert-parallel", "tensor-parallel", "cuda-graph", "native-context-tokens", "native-admission-token-budget",
 		"native-compact-history-budget", nativeQwenQ4KPrefillChunkFlag, "native-qwen35-metal-gdn-sequence",
 		"native-q4k-gateup-slab", "kv-precision", "native-prefix-profile", "vulkan-q4k-profile", "vulkan-stage-q4k",
@@ -389,7 +389,7 @@ func (rt *serveRuntime) proxyOnlyCompute(sf *serveFlags, getenv func(string) str
 			return false, nil
 		}
 	}
-	for _, name := range []string{"FAK_BACKEND", "FAK_METAL", agent.ExpertSpillEnv, "FAK_EP_RANK", "FAK_EP_COORD_ADDR", "FAK_CUDA_GRAPH", "FAK_UP_KV_PRECISION"} {
+	for _, name := range []string{"FAK_BACKEND", "FAK_METAL", agent.ExpertSpillEnv, FakExpertRingBytesEnv, "FAK_EP_RANK", "FAK_EP_COORD_ADDR", "FAK_CUDA_GRAPH", "FAK_UP_KV_PRECISION"} {
 		if strings.TrimSpace(getenv(name)) != "" {
 			return false, nil
 		}
@@ -609,6 +609,11 @@ func (rt *serveRuntime) resolveNativeContext(sf *serveFlags, ranks int) error {
 			if inputErr != nil {
 				return inputErr
 			}
+			if ringSize, sizeErr := resolveServeExpertRingSize("", os.Getenv); sizeErr != nil {
+				return sizeErr
+			} else if ringWeights, ok := serveExpertRingContextWeights(ws, rt.chatBackend, rt.requireDeviceExecution && !*sf.cpuOffloadExperts && ranks <= 1, ringSize, weights, fit); ok {
+				weights = ringWeights
+			}
 			rt.fitBudget = &fit
 			resolution, _, err = resolveServeNativeContext(ws, rt.chatBackend, weights, fit, requested)
 			if err != nil {
@@ -702,6 +707,7 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 	// not the load's: a mistyped --n-cpu-moe refuses here rather than after the weights are
 	// resident. Carried to the planner through agent.ExpertSpillEnv (serve_ncpumoe.go).
 	must(applyServeNCPUMoE(*sf.nCPUMoE))
+	must(applyServeExpertRingBytes(*sf.expertRingBytes))
 	expertRanks := 1
 	if rt.ep.sharded {
 		expertRanks = rt.ep.ranks

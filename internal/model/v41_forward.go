@@ -23,9 +23,9 @@ package model
 // reduced assembly projects a per-layer attn.wkv.weight, executes neither
 // compression stage, and never reuses a shared KV/index source, so an in-range
 // declaration is refused rather than silently run against a per-layer cache. The
-// blocked-candidate selection the lightning indexer reads is likewise not executed
-// (v41CandidateSourceForwardAdmitted), so an in-range candidate source is refused
-// rather than silently run as unblocked attention. The
+// blocked-candidate selection the lightning indexer reads is not executed; it is
+// the identity below its pool bound, so a forward past that bound is refused
+// (v41CandidatePoolCovers) rather than silently run as unblocked attention. The
 // mHC hyperconnection multiplicity is likewise fixed at the published four-stream
 // layout (v41HCMultForwardAdmitted), so a declared hc_mult other than 4 is refused
 // rather than silently run as four streams. The assembled
@@ -360,6 +360,9 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		}
 		return &Activations{}, nil
 	}
+	if err := v41CandidatePoolCovers(cfg, len(seq)); err != nil {
+		return nil, err
+	}
 	for _, id := range seq {
 		if id < 0 || id >= cfg.VocabSize {
 			return nil, v41StageErr(v41StageEmbedding, -1,
@@ -452,6 +455,9 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		scratch.mhcCarry.device = mhcDevice
 		scratch.mhcCarry.resident = resident
 	}
+	if finish := m.v41ActivationTraceFromEnv(seq); finish != nil {
+		defer func() { err = finish(err) }()
+	}
 	// #13325: resolve the optional activation-checkpoint producer ONCE per
 	// forward. Disabled (the default) it is nil and every emit is skipped, so the
 	// forward is byte-for-byte unchanged and adds no allocations.
@@ -462,6 +468,9 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 			return nil, err
 		}
 		executedLayers++
+		if err := trace.recordLayerStreams(l, streams, resident); err != nil {
+			return nil, err
+		}
 		hidden := flatten(x)
 		if resident != nil {
 			rows, err := resident.hiddenRows(l)
@@ -549,7 +558,7 @@ func (m *Model) v41RoleSchedule() bool {
 	cfg := m.Cfg
 	roles := m.v41AttentionRolesCached()
 	for l := 0; l < cfg.NumLayers; l++ {
-		if v41CompressRatioAt(cfg, l) > 1 {
+		if v41CompressRatioAt(cfg, l) > 0 {
 			return true
 		}
 		if role, ok := roles[l]; ok && role != V41AttentionRolePerLayer {
@@ -1006,7 +1015,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		st.indexKeyMemo[l] = keyMemo
 	}
 	var indexList []int32
-	if plan.Ratio > 1 && indexSourceAt(cfg.DeepSeekV41, l) {
+	if plan.Ratio > 0 && indexSourceAt(cfg.DeepSeekV41, l) {
 		for t := 0; t < seq; t++ {
 			groups := min((t+1)/plan.kvGroupSize(cfg), len(indexKeys))
 			localIdx, err := m.v41IndexRowsWithDeviceOps(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps)
@@ -1105,7 +1114,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	for t := 0; t < seq; t++ {
 		// The reference concatenates this layer's window with selected source
 		// groups before ONE sink contraction, even before a group completes.
-		if plan.Ratio > 1 || plan.Role == V41AttentionRoleReader {
+		if plan.Ratio > 0 || plan.Role == V41AttentionRoleReader {
 			keys := v41PlainWindowKeys(t, cfg.windowForLayer(l))
 			window := make([][]float32, len(keys))
 			for i, key := range keys {

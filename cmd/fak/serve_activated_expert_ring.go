@@ -35,6 +35,8 @@ type serveActivatedExpertRing struct {
 	Fit       ggufload.ActivatedExpertFit
 	RingBytes int64
 	Plan      compute.MemoryPlan
+	// Sizing is the --expert-ring-bytes choice and its inputs; Mode is token by default.
+	Sizing serveExpertRingSizing
 }
 
 func serveFullPlanFitTooBig(err error) bool {
@@ -44,24 +46,59 @@ func serveFullPlanFitTooBig(err error) bool {
 
 // serveActivatedExpertRingWeightPlan sizes the ring to one whole token's activated experts when the
 // budget allows, never below one layer's activated set and never above the room the budget leaves.
-// Filling the whole room would leave the KV cache nothing.
+// Filling the whole room would leave the KV cache nothing. Host-gathered tables (the V4.1 Engram
+// rows) are never device-resident; they ride as a host-scoped page reserve so a shared-pool check
+// still counts them.
 func serveActivatedExpertRingWeightPlan(f ggufload.ActivatedExpertFit) (compute.MemoryPlan, int64) {
 	ring := min(f.ActivatedTokenBytes, f.RingBytes)
 	ring = max(ring, f.ActivatedLayerBytes)
-	plan := make(compute.MemoryPlan, 0, 2)
+	plan := make(compute.MemoryPlan, 0, 3)
 	if f.DeviceBaseBytes > 0 {
 		plan = append(plan, compute.MemoryDemand{Class: compute.MemoryWeights, Bytes: f.DeviceBaseBytes, Detail: serveActivatedRingBaseDetail, Scope: compute.MemoryScopeDevice})
 	}
 	if ring > 0 {
 		plan = append(plan, compute.MemoryDemand{Class: compute.MemoryWeights, Bytes: ring, Detail: serveActivatedRingDetail, Scope: compute.MemoryScopeDevice})
 	}
+	if d, ok := f.HostGatheredDemand(); ok {
+		plan = append(plan, d)
+	}
 	return plan, ring
+}
+
+// serveActivatedExpertRingSplit returns every plan row except the device ring row.
+func serveActivatedExpertRingSplit(plan compute.MemoryPlan) compute.MemoryPlan {
+	out := make(compute.MemoryPlan, 0, len(plan))
+	for _, d := range plan {
+		if d.Detail == serveActivatedRingDetail && d.DeviceScoped() {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// serveActivatedExpertRingResize sets the device ring row to ring bytes; every other row is kept.
+func serveActivatedExpertRingResize(plan compute.MemoryPlan, ring int64) compute.MemoryPlan {
+	out := append(compute.MemoryPlan(nil), plan...)
+	for i := range out {
+		if out[i].Detail == serveActivatedRingDetail && out[i].DeviceScoped() {
+			out[i].Bytes = ring
+		}
+	}
+	return out
 }
 
 // serveActivatedExpertRingPlacement returns the ring placement when fullErr is the full device plan's
 // FitTooBig on a device-only serve. Any other case returns fullErr unchanged, so a non-Halo serve and
 // a fitting checkpoint keep their historical arm.
 func serveActivatedExpertRingPlacement(ws *ggufload.WeightSource, be compute.Backend, requireDevice bool, fullErr error, contextBudgetTokens int, fit serveFitBudget) (serveActivatedExpertRing, bool, error) {
+	return serveActivatedExpertRingPlacementSized(ws, be, requireDevice, fullErr, contextBudgetTokens, fit, serveExpertRingSize{Mode: serveExpertRingToken}, serveExpertRingHost{})
+}
+
+// serveActivatedExpertRingPlacementSized is the placement with an operator ring size. The token
+// ring is admitted first, so KV for the target context is reserved before a larger ring takes the
+// remaining room; a non-token size is then judged against the device bound and the host bound.
+func serveActivatedExpertRingPlacementSized(ws *ggufload.WeightSource, be compute.Backend, requireDevice bool, fullErr error, contextBudgetTokens int, fit serveFitBudget, size serveExpertRingSize, host serveExpertRingHost) (serveActivatedExpertRing, bool, error) {
 	if !requireDevice || be == nil || ws == nil || !serveFullPlanFitTooBig(fullErr) {
 		return serveActivatedExpertRing{}, false, fullErr
 	}
@@ -77,25 +114,94 @@ func serveActivatedExpertRingPlacement(ws *ggufload.WeightSource, be compute.Bac
 	}
 	weights, ring := serveActivatedExpertRingWeightPlan(f)
 	plan := appendServeGGUFDevicePlan(ws, be, weights, contextBudgetTokens, fit)
-	plan, err = refuseIfTooBigOnDevice(plan, nil, be, &fit)
+	sizing, err := sizeServeExpertRing(size, f, ring, serveActivatedExpertRingSplit(plan), fit.avail(), host)
+	if err != nil {
+		return serveActivatedExpertRing{}, false, err
+	}
+	if sizing.RingBytes != ring {
+		ring = sizing.RingBytes
+		plan = serveActivatedExpertRingResize(plan, ring)
+	}
+	plan, ring, err = serveAdmitActivatedExpertRing(plan, ring, &sizing, be, fit)
 	if err != nil {
 		// Admission can fail before the caller logs the selected placement. Keep the
 		// candidate byte split visible without returning an admitted ring or load options.
-		return serveActivatedExpertRing{}, false, fmt.Errorf("activated-expert device ring refused (dense base=%d bytes, ring=%d bytes): %w", f.DeviceBaseBytes, ring, err)
+		err = fmt.Errorf("activated-expert device ring refused (dense base=%d bytes, ring=%d bytes): %w", f.DeviceBaseBytes, ring, err)
+		if sizing.Mode == serveExpertRingAuto || sizing.Mode == serveExpertRingExplicit {
+			err = fmt.Errorf("%w: %w", ErrServeExpertRingTooBig, err)
+		}
+		return serveActivatedExpertRing{}, false, err
 	}
-	return serveActivatedExpertRing{Fit: f, RingBytes: ring, Plan: plan}, true, nil
+	return serveActivatedExpertRing{Fit: f, RingBytes: ring, Plan: plan, Sizing: sizing}, true, nil
 }
 
-func serveActivatedExpertRingPathPlacement(ggufPath string, be compute.Backend, requireDevice bool, fullErr error, contextBudgetTokens int, override *serveFitBudget) (serveActivatedExpertRing, bool, error) {
+// serveAdmitActivatedExpertRingAttempts bounds how often an auto ring is trimmed to the
+// load-time guard's own shortfall before the refusal stands.
+const serveAdmitActivatedExpertRingAttempts = 4
+
+// serveAdmitActivatedExpertRing runs the load-time device and shared-pool guard on the plan. An
+// auto ring that a guard refuses is trimmed by the guard's reported shortfall and retried, so the
+// guard (live device budget, physical pool) stays the authority over the size the bounds chose;
+// token and explicit rings are judged as given.
+func serveAdmitActivatedExpertRing(plan compute.MemoryPlan, ring int64, sizing *serveExpertRingSizing, be compute.Backend, fit serveFitBudget) (compute.MemoryPlan, int64, error) {
+	for attempt := 0; ; attempt++ {
+		admitted, err := refuseIfTooBigOnDevice(plan, nil, be, &fit)
+		if err == nil {
+			return admitted, ring, nil
+		}
+		var fe *compute.FitError
+		if sizing.Mode != serveExpertRingAuto || attempt+1 >= serveAdmitActivatedExpertRingAttempts || !errors.As(err, &fe) || fe.Want <= fe.Avail {
+			return nil, ring, err
+		}
+		trimmed := ring - (fe.Want - fe.Avail)
+		if trimmed < sizing.Floor {
+			return nil, ring, err
+		}
+		sizing.GuardTrimBytes += ring - trimmed
+		ring = trimmed
+		sizing.RingBytes = ring
+		plan = serveActivatedExpertRingResize(plan, ring)
+	}
+}
+
+// serveActivatedExpertRingPathPlacement resolves the --expert-ring-bytes size from getenv only
+// once the ring route applies, so a serve that never takes it never reads the knob.
+func serveActivatedExpertRingPathPlacement(ggufPath string, be compute.Backend, requireDevice bool, fullErr error, contextBudgetTokens int, override *serveFitBudget, getenv func(string) string, baseOpts []ggufload.Q4KLoadOption) (serveActivatedExpertRing, bool, error) {
 	if !requireDevice || be == nil || !serveFullPlanFitTooBig(fullErr) {
 		return serveActivatedExpertRing{}, false, fullErr
 	}
-	ws, err := ggufload.OpenWeights(ggufPath)
+	size, err := resolveServeExpertRingSize("", getenv)
 	if err != nil {
+		return serveActivatedExpertRing{}, false, err
+	}
+	ws, openErr := ggufload.OpenWeights(ggufPath)
+	if openErr != nil {
 		return serveActivatedExpertRing{}, false, fullErr
 	}
 	defer ws.Close()
-	return serveActivatedExpertRingPlacement(ws, be, requireDevice, fullErr, contextBudgetTokens, serveDeviceFitBudgetFromReported(be, override))
+	var host serveExpertRingHost
+	if size.Mode != serveExpertRingToken && size.Mode != "" {
+		host = serveExpertRingHostProbe(ggufPath, be, baseOpts, compute.HostSystemMemoryInfo)
+	}
+	return serveActivatedExpertRingPlacementSized(ws, be, requireDevice, fullErr, contextBudgetTokens, serveDeviceFitBudgetFromReported(be, override), size, host)
+}
+
+// serveExpertRingHostProbe reads the host snapshot a non-token ring size is judged against:
+// MemAvailable at load, the route's estimated anonymous host peak, and whether the device ring
+// draws on that same pool (integrated tier with a carve-out <= 4 GiB or an unreadable one).
+func serveExpertRingHostProbe(ggufPath string, be compute.Backend, baseOpts []ggufload.Q4KLoadOption, hostMemoryInfo func() (int64, int64, bool)) serveExpertRingHost {
+	var h serveExpertRingHost
+	h.Total, h.Avail, h.Known = compute.HostMemoryInfo(be)
+	if !h.Known {
+		h.Total, h.Avail, h.Known = hostMemoryInfo()
+	}
+	h.Carveout, h.CarveoutKnown = compute.DedicatedVRAMCarveoutInfo(be)
+	h.SharedPool = serveExpertRingSharedPool(ggufload.BackendSharesHostRAM(be), h.Carveout, h.CarveoutKnown)
+	opts := append(append([]ggufload.Q4KLoadOption(nil), baseOpts...), ggufload.WithStreamedExperts(0), ggufload.WithStreamedExpertDeviceRing(1), ggufload.WithStreamedDenseQ4KWorkingSet(0))
+	if peak, err := estimateServeActivatedExpertRingFixedHostPeak(ggufPath, opts); err == nil {
+		h.RSSAnonPeak = peak.PeakAnonBytes
+	}
+	return h
 }
 
 // serveActivatedExpertRingLoadOptions streams every routed expert through the checkpoint tier with
@@ -135,4 +241,31 @@ func estimateServeActivatedExpertRingFixedHostPeak(ggufPath string, opts []ggufl
 	}
 	defer ws.Close()
 	return ws.EstimateStreamedExpertHostLoadPeak(probe...)
+}
+
+// serveExpertRingSharedPool reports whether a backend's device ring is judged against host RAM.
+func serveExpertRingSharedPool(sharesHostRAM bool, carveout int64, carveoutKnown bool) bool {
+	return sharesHostRAM && (!carveoutKnown || carveout <= serveExpertRingUMACarveoutMax)
+}
+
+// serveExpertRingContextWeights is the weight plan a non-token ring size resolves the native
+// context against. A device-only serve whose full resident weights exceed the device budget loads
+// the ring placement, so sizing the context against the full weights collapses it to the minimum
+// window; the placement's token plan (dense base + token ring + host page reserve) is what KV is
+// actually reserved next to before the ring takes the rest. Token mode keeps the historical
+// context resolution unchanged.
+func serveExpertRingContextWeights(ws *ggufload.WeightSource, be compute.Backend, requireDevice bool, size serveExpertRingSize, weights compute.MemoryPlan, fit serveFitBudget) (compute.MemoryPlan, bool) {
+	if size.Mode == serveExpertRingToken || size.Mode == "" || !requireDevice || be == nil || ws == nil {
+		return weights, false
+	}
+	avail := fit.avail()
+	if avail <= 0 || weights.DeviceTotal() <= avail || !serveStreamedExpertsCapable(ws) {
+		return weights, false
+	}
+	f, ok, err := ws.ActivatedExpertFitFor(avail)
+	if err != nil || !ok {
+		return weights, false
+	}
+	ringWeights, _ := serveActivatedExpertRingWeightPlan(f)
+	return ringWeights, true
 }

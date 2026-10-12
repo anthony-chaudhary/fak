@@ -6,9 +6,7 @@ import (
 	"testing"
 )
 
-// The helper's projection/normalization boundary is exercised directly.
-// Ratio-one shared-source admission stays closed until shared-source ownership,
-// prefill/Step publication and restore are implemented together. The F32 fixture
+// The helper's projection/normalization boundary is exercised directly. The F32 fixture
 // carries BF16-representable projection inputs/weights; it is not an artifact,
 // physical BF16 GEMM or FP4 cache qualification.
 // fak-test:justify why=contract when=changed:internal/model/**
@@ -89,9 +87,14 @@ func TestV41RatioOneCompressorRows(t *testing.T) {
 	if rows, err := m.v41CompressedRowsWithOperations(0, 1, ordinaryKV, inputs, nil, faultNorm); rows != nil || !errors.Is(err, failure) || normFailures != 1 {
 		t.Fatalf("normalization failure returned partial rows or retried: %v, %v, calls=%d", rows, err, normFailures)
 	}
-	// The completed helper does not lift ratio-one shared-source admission.
+	// A ratio-one source is admitted with exactly wkv and its norm (no wgate),
+	// and still refuses when a tensor it reads is absent.
 	m.Cfg.DeepSeekV41 = &DeepSeekV41Config{CompressRatios: []int{1}, KVSourceLayerIDs: []int{0}}
+	if err := m.v41KVSourceForwardAdmitted(); err != nil {
+		t.Fatalf("sourced ratio-one producer refused: %v", err)
+	}
+	delete(m.manifest, normName)
 	if err := m.v41KVSourceForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
-		t.Fatalf("ratio-one shared source must remain fenced, got %v", err)
+		t.Fatalf("ratio-one source without its norm admitted: %v", err)
 	}
 }

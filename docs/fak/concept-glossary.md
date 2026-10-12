@@ -972,3 +972,10 @@ An immutable session-local V4.1 sparse-attention publication retaining one owned
 The V4.1 source-selection operation that consumes already computed per-query compressed-key scores and atomically returns a candidate-mask publication plus unmasked source top-k ID rows, or neither output on error.
 
 **Distinct from:** v41CandidateSource supplies identity and geometry, and v41CandidatePublication retains immutable masks. This operation constructs that publication without projections or rescoring; later query-owning indexers apply its masks to their own scores, while source top-k remains unmasked.
+
+
+### renderDeepSeekV41Chat (DeepSeek V4.1 GGUF-style prompt)
+
+Renders the implemented DeepSeek V4.1 GGUF-style chat grammar: role boundaries, tool definitions and DSML tool-call history, merged tool results, and response-format instructions in the in-kernel prompt path.
+
+**Distinct from:** Uses DeepSeek V4.1 message and DSML tool grammar rather than the ChatML role framing and Qwen thinking-prefix seeding of renderInKernelChatMLTools. This implementation record does not establish official-profile selection, checkpoint parity, or output-schema enforcement.

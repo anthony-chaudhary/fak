@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -259,6 +260,9 @@ func TestAuditBoundary_LiveRepoIfPresent(t *testing.T) {
 	if fi, err := os.Stat(privRoot); err != nil || !fi.IsDir() {
 		t.Skip("sibling fak-private not present on this host")
 	}
+	if !isPrivateRepoRoot(privRoot) {
+		t.Skipf("%s is not the private repository (no %s module or no platform/ dir); a public export can live in a directory named fak-private", privRoot, privateModulePath)
+	}
 
 	violations, err := AuditBoundary(privRoot)
 	if err != nil {
@@ -267,6 +271,24 @@ func TestAuditBoundary_LiveRepoIfPresent(t *testing.T) {
 	if len(violations) > 0 {
 		t.Errorf("found %d unexpected boundary violations in live fak-private: %+v", len(violations), violations)
 	}
+}
+
+const privateModulePath = "github.com/anthony-chaudhary/fak-private"
+
+func isPrivateRepoRoot(root string) bool {
+	if fi, err := os.Stat(filepath.Join(root, "platform")); err != nil || !fi.IsDir() {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if fields := strings.Fields(line); len(fields) == 2 && fields[0] == "module" {
+			return fields[1] == privateModulePath
+		}
+	}
+	return false
 }
 
 func TestScaffold(t *testing.T) {

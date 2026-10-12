@@ -333,6 +333,7 @@ func (s *Server) renderMetrics() string {
 	s.writeInKernelOOMRetryMetrics(&b)
 	s.writeInKernelPressureTrimMetrics(&b)
 	s.writeMoEResidencyMetrics(&b) // #5617: activated-expert residency for a serve that declared an expert budget
+	s.writeDeviceWeightMemoryMetrics(&b)
 	m.writeCompactionMetrics(&b)
 	writeLlamaSoftSlotMetrics(&b)
 	s.writeToolPageMetrics(&b) // #2440: ctxmmu tool-schema page catalog residency + dedup witnesses
@@ -557,6 +558,42 @@ func (s *Server) writeInKernelOOMRetryMetrics(b *strings.Builder) {
 	}
 }
 
+// writeDeviceWeightMemoryMetrics emits the device weight-memory family of a local backend that
+// reports it: the bump-only weight arena (whose reserved bytes return only when every arena buffer
+// dies, so a flat series across prompts is the healthy shape) and paged-weight page-ins split by
+// whether they reused an evicted device buffer or allocated fresh memory. A ring that churns inside
+// its budget settles on reuse; a fresh count that keeps climbing means pages are not coming back.
+// A backend without the counters emits nothing.
+func (s *Server) writeDeviceWeightMemoryMetrics(b *strings.Builder) {
+	if s == nil || s.planner == nil {
+		return
+	}
+	reporter, ok := s.planner.(agent.DeviceWeightMemoryReporter)
+	if !ok {
+		return
+	}
+	mem, ok := reporter.DeviceWeightMemory()
+	if !ok {
+		return
+	}
+	backend := promQuote(defaultBackendLabel(mem.Backend))
+	if mem.Arena {
+		writeHelpType(b, "fak_gateway_device_weight_arena_reserved_bytes", "Device memory reserved by the bump-only weight arena. Its blocks are released only when every arena buffer dies, so growth across prompts means arena bytes are being consumed by weights that come and go.", "gauge")
+		fmt.Fprintf(b, "fak_gateway_device_weight_arena_reserved_bytes{backend=\"%s\"} %d\n", backend, mem.ArenaReservedBytes)
+		writeHelpType(b, "fak_gateway_device_weight_arena_live_bytes", "Bytes of live weight buffers bound in the weight arena.", "gauge")
+		fmt.Fprintf(b, "fak_gateway_device_weight_arena_live_bytes{backend=\"%s\"} %d\n", backend, mem.ArenaLiveBytes)
+		writeHelpType(b, "fak_gateway_device_weight_arena_peak_reserved_bytes", "High-water device memory the weight arena has reserved.", "gauge")
+		fmt.Fprintf(b, "fak_gateway_device_weight_arena_peak_reserved_bytes{backend=\"%s\"} %d\n", backend, mem.ArenaPeakReservedBytes)
+		writeHelpType(b, "fak_gateway_device_weight_arena_memory_allocations_total", "Device memory allocations the weight arena has made.", "counter")
+		fmt.Fprintf(b, "fak_gateway_device_weight_arena_memory_allocations_total{backend=\"%s\"} %d\n", backend, mem.ArenaMemoryAllocations)
+	}
+	if mem.PagedWeights {
+		writeHelpType(b, "fak_gateway_device_paged_weight_page_ins_total", "Paged-weight (expert ring) device page-ins, split by whether the page reused an evicted device buffer or allocated fresh device memory.", "counter")
+		fmt.Fprintf(b, "fak_gateway_device_paged_weight_page_ins_total{backend=\"%s\",allocation=\"reused\"} %d\n", backend, mem.PagedWeightsReused)
+		fmt.Fprintf(b, "fak_gateway_device_paged_weight_page_ins_total{backend=\"%s\",allocation=\"fresh\"} %d\n", backend, mem.PagedWeightsFreshly)
+	}
+}
+
 // writeMoEResidencyMetrics emits the activated-expert residency family (R6, #5617): what a serve
 // that declared an expert budget actually paid to keep the top-k experts resident.
 //
@@ -601,6 +638,9 @@ func (s *Server) writeMoEResidencyMetrics(b *strings.Builder) {
 	fmt.Fprintf(b, "fak_gateway_moe_expert_budget_bytes %d\n", l.BudgetBytes)
 	writeHelpType(b, "fak_gateway_moe_expert_peak_resident_bytes", "High-water resident routed-expert footprint across every request. Staying well under the budget means the surplus could be given back to KV.", "gauge")
 	fmt.Fprintf(b, "fak_gateway_moe_expert_peak_resident_bytes %d\n", l.PeakBytes)
+	writeHelpType(b, "fak_gateway_moe_expert_ring_bytes", "Activated-expert device ring bytes: kind=budget is the declared ceiling, kind=resident the routed-expert bytes still resident after the most recent request (non-zero only for a model-scoped ring that persists across requests).", "gauge")
+	fmt.Fprintf(b, "fak_gateway_moe_expert_ring_bytes{kind=\"budget\"} %d\n", l.BudgetBytes)
+	fmt.Fprintf(b, "fak_gateway_moe_expert_ring_bytes{kind=\"resident\"} %d\n", l.ResidentBytes)
 
 	last := l.Last
 	if last.Shape.Experts > 0 {

@@ -35,16 +35,30 @@ func v41FullEngramModel(t *testing.T) (*Model, V41EngramLayout) {
 	return v41FullEngramModelConfig(t, v41FullGeometryConfig(t), false)
 }
 
+// v41FullEngramModelWith adjusts the base geometry before tensor declaration.
+func v41FullEngramModelWith(t *testing.T, mutate func(*Config)) (*Model, V41EngramLayout) {
+	t.Helper()
+	return v41FullEngramModelConfigWith(t, v41FullGeometryConfig(t), false, mutate)
+}
+
 // v41FullEngramModelConfig preserves the original F32 fixture by default.
 // deviceExperts uses the mixed Q2_K gate/up and Q3_K down fixture bytes from
 // v41MixedQuantExpertModel, without first allocating an unused F32 expert slab.
 // This changes only the synthetic test artifact; the production paths are unchanged.
 func v41FullEngramModelConfig(t *testing.T, cfg Config, deviceExperts bool) (*Model, V41EngramLayout) {
 	t.Helper()
+	return v41FullEngramModelConfigWith(t, cfg, deviceExperts, nil)
+}
+
+func v41FullEngramModelConfigWith(t *testing.T, cfg Config, deviceExperts bool, mutate func(*Config)) (*Model, V41EngramLayout) {
+	t.Helper()
+	cfg.OGroups = 1
+	if mutate != nil {
+		mutate(&cfg)
+	}
 	if deviceExperts && (cfg.HiddenSize%qkK != 0 || cfg.MoEIntermediateSize%qkK != 0) {
 		t.Fatal("device Engram fixture requires block-aligned expert axes")
 	}
-	cfg.OGroups = 1
 	cfg.DeepSeekV41.EngramLayerIDs = []int{0}
 	cfg.DeepSeekV41.EngramNumEmbeddings = []int{48}
 	cfg.DeepSeekV41.EngramMaxNgramSize = 4

@@ -140,6 +140,16 @@ func dequantQ6K(dst []float32, b []byte) {
 	}
 }
 
+// i8View is i8AsBytes without the copy: the returned bytes alias s, so a caller
+// must only read them. Device uploads use it because a per-byte copy of every
+// streamed expert page-in dominated V4.1 decode host time.
+func i8View(s []int8) []byte {
+	if len(s) == 0 {
+		return nil
+	}
+	return unsafe.Slice((*byte)(unsafe.Pointer(&s[0])), len(s))
+}
+
 func i8AsBytes(s []int8) []byte {
 	b := make([]byte, len(s))
 	for i, v := range s {

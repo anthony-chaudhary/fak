@@ -13,7 +13,7 @@ import (
 
 func runComputeTrace(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak compute-trace capture|summary [flags]")
+		fmt.Fprintln(stderr, "usage: fak compute-trace capture|summary|from-llamacpp|profile [flags]")
 		return 2
 	}
 	switch args[0] {
@@ -72,6 +72,10 @@ func runComputeTrace(stdout, stderr io.Writer, args []string) int {
 		}
 		fmt.Fprintf(stdout, "schema=%s events=%d dropped=%d duration_ns=%d observer_overhead_ns=%d\n", a.Schema, len(a.Events), a.Dropped, eventDuration(a), a.ObserverOverheadNS)
 		return 0
+	case "from-llamacpp":
+		return runComputeTraceFromLlamaCpp(stdout, stderr, args[1:])
+	case "profile":
+		return runComputeTraceProfile(stdout, stderr, args[1:])
 	default:
 		fmt.Fprintf(stderr, "unknown compute-trace action %q\n", args[0])
 		return 2

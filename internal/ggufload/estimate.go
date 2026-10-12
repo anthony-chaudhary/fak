@@ -701,10 +701,19 @@ type RoutedExpertActiveSet struct {
 
 	RoutedParams         int64 // routed-expert element count (all experts, unsharded)
 	PerExpertParams      int64 // RoutedParams / NumExperts
-	NonExpertResident    int64 // resident bytes of every tensor that is NOT a batched routed expert
+	NonExpertResident    int64 // resident bytes of every LOADED tensor that is NOT a batched routed expert
 	NonExpertParams      int64 // element count of every non-routed tensor
 	ActiveBytesPerToken  int64 // ActivePerToken + NonExpertResident — full per-token divisor, UPPER BOUND (0 when K unread)
 	ActiveParamsPerToken int64 // K × PerExpertParams + NonExpertParams (0 when K unread)
+
+	// HostGatheredResident is the on-disk bytes of tensors the forward reads row-wise from the
+	// checkpoint instead of holding as weights: the DeepSeek-V4.1 packed Engram tables
+	// (blk.<L>.engram_embd.weight, ~30 GiB each on the Q2_K Flash checkpoint). The loader drops
+	// them (glmMoeDsaSkipGGUFTensorForType) and rows are decoded on device after a host gather,
+	// so they are never device-resident and are excluded from NonExpertResident; a host-scoped
+	// plan charges their page working set instead. MTP/vision sidecars the loader also drops are
+	// in neither field: they are never read.
+	HostGatheredResident int64
 
 	// Embedding-gather correction (the one named looseness in the ActiveBytesPerToken UPPER BOUND).
 	// The input token-embedding is read by a get_rows GATHER at decode — one row (~hidden bytes) per
@@ -736,12 +745,21 @@ func (s *WeightSource) RoutedExpertActiveSet() (RoutedExpertActiveSet, bool, err
 	if !archUsesGGUFBatchedMoEExperts(cfg.ModelType) || cfg.NumExperts <= 0 {
 		return RoutedExpertActiveSet{}, false, nil
 	}
-	var routedBytes, routedElems, totalBytes, totalElems, inputEmbedBytes uint64
+	var routedBytes, routedElems, totalBytes, totalElems, inputEmbedBytes, hostGathered uint64
 	moeLayers := map[int]struct{}{}
 	for _, info := range s.File.Tensors {
 		n, err := tensorPayloadBytes(info)
 		if err != nil {
 			return RoutedExpertActiveSet{}, false, fmt.Errorf("gguf: active-set tensor %s: %w", info.Name, err)
+		}
+		if glmMoeDsaSkipGGUFTensorForType(cfg.ModelType, info.Name) {
+			if archIsDeepSeek41(cfg.ModelType) && deepseek41EngramTableTensor(info.Name) {
+				if hostGathered > math.MaxUint64-n {
+					return RoutedExpertActiveSet{}, false, fmt.Errorf("gguf: active-set host-gathered total overflows uint64")
+				}
+				hostGathered += n
+			}
+			continue
 		}
 		e, err := tensorElems(info)
 		if err != nil {
@@ -764,8 +782,8 @@ func (s *WeightSource) RoutedExpertActiveSet() (RoutedExpertActiveSet, bool, err
 	if routedBytes == 0 {
 		return RoutedExpertActiveSet{}, false, nil
 	}
-	if totalBytes > math.MaxInt64 || totalElems > math.MaxInt64 {
-		return RoutedExpertActiveSet{}, false, fmt.Errorf("gguf: active-set totals %d/%d overflow int64", totalBytes, totalElems)
+	if totalBytes > math.MaxInt64 || totalElems > math.MaxInt64 || hostGathered > math.MaxInt64 {
+		return RoutedExpertActiveSet{}, false, fmt.Errorf("gguf: active-set totals %d/%d/%d overflow int64", totalBytes, totalElems, hostGathered)
 	}
 	perExpert := int64(routedBytes) / int64(cfg.NumExperts)
 	perExpertParams := int64(routedElems) / int64(cfg.NumExperts)
@@ -781,6 +799,8 @@ func (s *WeightSource) RoutedExpertActiveSet() (RoutedExpertActiveSet, bool, err
 		PerExpertParams:   perExpertParams,
 		NonExpertResident: nonExpertBytes,
 		NonExpertParams:   nonExpertParams,
+
+		HostGatheredResident: int64(hostGathered),
 	}
 	if cfg.NumExpertsPerTok > 0 {
 		k := int64(cfg.NumExpertsPerTok)

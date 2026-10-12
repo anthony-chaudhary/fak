@@ -2,7 +2,7 @@
 // backend warmup gate (internal/gateway/readiness_warmup.go). The gateway owns the
 // readiness POLICY and the bounded wait (#13500); this package owns the small
 // reporting seam so a failed or timed-out warmup is written to the operator's
-// stderr instead of silently holding readiness warmup_pending forever.
+// stderr; the gateway itself reports it on /healthz as warmup_failed.
 package servewarmup
 
 import (
@@ -15,7 +15,7 @@ import (
 // Run invokes the backend startup warmup once and reports a NON-nil result to
 // stderr: an error (a backend failure, or the gateway's bounded
 // gateway.ErrWarmupTimeout when the forward never returns, #13500) is surfaced as
-// `fak serve: backend startup warmup failed after <d>; readiness remains pending:
+// `fak serve: backend startup warmup failed after <d>; readiness held as warmup_failed:
 // <err>`. A successful warmup is quiet — it is already reported by
 // gateway.MarkWarmupComplete's [READY] line.
 //
@@ -31,5 +31,5 @@ func Run(ctx context.Context, run func(context.Context) (time.Duration, error), 
 	if stderr == nil {
 		stderr = io.Discard
 	}
-	fmt.Fprintf(stderr, "fak serve: backend startup warmup failed after %s; readiness remains pending: %v\n", elapsed.Round(time.Millisecond), err)
+	fmt.Fprintf(stderr, "fak serve: backend startup warmup failed after %s; readiness held as warmup_failed: %v\n", elapsed.Round(time.Millisecond), err)
 }

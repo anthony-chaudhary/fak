@@ -541,10 +541,18 @@ func TestV41ForwardCompressRatioMalformedFailsClosed(t *testing.T) {
 	}
 }
 
-// The ratio-one helper is independently usable, but cannot enable an assembly
-// that still omits the reference's compressed cache/window composition.
+// Ratio one is admitted only when correctly sourced: a producer without its
+// compressor tensors, or a flat schedule with no V4.1 metadata to resolve its
+// sources, still refuses before any arithmetic.
 // fak-test:runtime fast est=100ms lane=default
-func TestV41ForwardRatioOneAssemblyFailsClosed(t *testing.T) {
+func TestV41ForwardRatioOneUnsourcedFailsClosed(t *testing.T) {
+	check := func(label string, err error) {
+		t.Helper()
+		var stage *V41ForwardError
+		if !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &stage) || stage.Stage != v41StageCompress || stage.Layer != 0 {
+			t.Fatalf("%s: error = %v, want a layer-zero compress-stage refusal", label, err)
+		}
+	}
 	for _, source := range []bool{false, true} {
 		m := v41ReducedModel(t)
 		m.Cfg.DeepSeekV41.CompressRatios = []int{1}
@@ -553,20 +561,14 @@ func TestV41ForwardRatioOneAssemblyFailsClosed(t *testing.T) {
 		if source {
 			m.Cfg.DeepSeekV41.KVSourceLayerIDs = []int{0}
 		}
-		check := func(err error) {
-			t.Helper()
-			var stage *V41ForwardError
-			if !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &stage) || stage.Stage != v41StageCompress || stage.Layer != 0 || !strings.Contains(err.Error(), "ratio-one forward assembly is not implemented") {
-				t.Fatalf("source=%v: error = %v, want layer-zero ratio-one assembly refusal", source, err)
-			}
-		}
-		check(m.v41ForwardAdmitted())
+		label := "producer without compressor tensors source=" + itoa(boolToIntV41Expert(source))
+		check(label, m.v41ForwardAdmitted())
 		act, err := m.forwardV41([]int{1, 2}, nil)
-		check(err)
+		check(label, err)
 		if act != nil {
 			t.Fatal("refused ratio-one forward returned activations")
 		}
-		check(panicAsError(func() { _ = m.Forward([]int{1, 2}) }))
+		check(label, panicAsError(func() { _ = m.Forward([]int{1, 2}) }))
 	}
 	// The canonical GGUF identity can carry only the flat schedule before typed
 	// metadata is attached. Its active ratio-one declaration must also refuse.
@@ -574,10 +576,7 @@ func TestV41ForwardRatioOneAssemblyFailsClosed(t *testing.T) {
 	flat.Cfg.ModelType = "deepseek41"
 	flat.Cfg.DeepSeekV41 = nil
 	flat.Cfg.CompressRatios = []int{1}
-	var stage *V41ForwardError
-	if err := flat.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &stage) || stage.Stage != v41StageCompress || stage.Layer != 0 || !strings.Contains(err.Error(), "ratio-one forward assembly is not implemented") {
-		t.Fatalf("flat-only admission = %v, want layer-zero ratio-one assembly refusal", err)
-	}
+	check("flat-only admission", flat.v41ForwardAdmitted())
 	if act, err := flat.forwardV41([]int{1, 2}, nil); act != nil || !errors.Is(err, ErrV41ForwardStage) {
 		t.Fatalf("flat-only ratio-one forward returned act=%v err=%v", act, err)
 	}
@@ -1206,29 +1205,40 @@ func TestV41EngramNoSourceFailsClosed(t *testing.T) {
 	}
 }
 
-// TestV41ForwardCandidateSourceDeclaredFailsClosed is the candidate-source
-// fail-closed witness: the reduced assembly runs its own full per-layer attention
-// contraction and never executes the CED/CSA2 blocked-candidate selection, so a
-// config that declares a candidate-source layer WITHIN the model's layer range
-// must refuse rather than silently emit logits from an unblocked attention path
-// as if the candidate selection were absent. Out-of-range declared candidate
-// sources (the reduced oracle fixture derives from the published 40-layer config
-// but narrows NumLayers to 1, so the candidate source 20 is unreachable) stay
-// admitted, because the assembly never reaches them.
-func TestV41ForwardCandidateSourceDeclaredFailsClosed(t *testing.T) {
-	// In-range candidate source 0: must refuse.
-	selected := v41ReducedModel(t)
-	selected.Cfg.DeepSeekV41.CandidateSourceLayerID = 0
-
-	if err := selected.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
-		t.Fatalf("in-range candidate source admission error = %v, want ErrV41ForwardStage", err)
+// An in-range candidate source runs while its pool selects every block (the
+// unexecuted candidate mask is the identity there) and refuses typed once the
+// compressed rows pass topk_blocks*block_size or the pool is malformed
+// (src/models/deepseek41.cpp:32-34@5210c7c). An out-of-range source (the reduced
+// oracle fixture narrows NumLayers to 1, so source 20 is unreachable) is inert.
+func TestV41ForwardCandidateSourcePoolBound(t *testing.T) {
+	refused := func(label string, err error) {
+		t.Helper()
+		var stage *V41ForwardError
+		if !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &stage) || stage.Stage != v41StageIndexer || stage.Layer != 0 {
+			t.Fatalf("%s: error = %v, want an indexer-stage refusal at candidate source 0", label, err)
+		}
 	}
-	if err := panicAsError(func() { _ = selected.Forward([]int{1, 2}) }); !errors.Is(err, ErrV41ForwardStage) {
-		t.Fatalf("in-range candidate source Forward panic = %v, want ErrV41ForwardStage", err)
+	within := v41ReducedModel(t)
+	within.Cfg.DeepSeekV41.CandidateSourceLayerID = 0
+	within.Cfg.DeepSeekV41.CandidateTopKBlocks, within.Cfg.DeepSeekV41.CandidateBlockSize = 1, 2
+	if err := within.v41ForwardAdmitted(); err != nil {
+		t.Fatalf("in-range candidate source with a covering pool refused: %v", err)
 	}
+	if act, err := within.forwardV41([]int{1, 2}, nil); err != nil || len(act.Logits) != 2 {
+		t.Fatalf("forward within the candidate pool: act=%v err=%v", act, err)
+	}
+	act, err := within.forwardV41([]int{1, 2, 3}, nil)
+	refused("past the pool", err)
+	if act != nil {
+		t.Fatal("refused forward returned activations")
+	}
+	refused("Forward past the pool", panicAsError(func() { _ = within.Forward([]int{1, 2, 3}) }))
 
-	// The reduced oracle fixture declares only an out-of-range candidate source
-	// (20), so the existing reduced forward must keep running (no regression).
+	malformed := v41ReducedModel(t)
+	malformed.Cfg.DeepSeekV41.CandidateSourceLayerID = 0
+	malformed.Cfg.DeepSeekV41.CandidateTopKBlocks = 0
+	refused("malformed pool", malformed.v41ForwardAdmitted())
+
 	reduced := v41ReducedModel(t)
 	if err := reduced.v41ForwardAdmitted(); err != nil {
 		t.Fatalf("reduced out-of-range candidate source admission error = %v, want nil", err)

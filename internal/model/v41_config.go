@@ -343,12 +343,6 @@ func parseDeepSeekV41Metadata(root, text []byte, c Config) (*DeepSeekV41Config, 
 }
 
 func admitDeepSeekV41Published(c Config, m *DeepSeekV41Config) error {
-	wantCompression := []int{
-		0, 0,
-		2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-		1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-		0, 0, 0,
-	}
 	checks := []struct {
 		name string
 		ok   bool
@@ -358,10 +352,10 @@ func admitDeepSeekV41Published(c Config, m *DeepSeekV41Config) error {
 		{"decoder geometry", c.NumLayers == 40 && c.HiddenSize == 5120 && c.NumHeads == 64 && c.NumKVHeads == 1 && c.HeadDim == 512, fmt.Sprintf("layers=%d hidden=%d heads=%d kv_heads=%d head_dim=%d", c.NumLayers, c.HiddenSize, c.NumHeads, c.NumKVHeads, c.HeadDim)},
 		{"attention geometry", c.QKRopeHeadDim == 64 && c.QLoraRank == 1280 && c.OLoraRank == 1024 && c.OGroups == 8, fmt.Sprintf("rope=%d qrank=%d orank=%d groups=%d", c.QKRopeHeadDim, c.QLoraRank, c.OLoraRank, c.OGroups)},
 		{"moe geometry", c.NumExperts == 384 && c.NSharedExperts == 1 && c.NumExpertsPerTok == 6 && c.MoEIntermediateSize == 2304, fmt.Sprintf("experts=%d shared=%d topk=%d width=%d", c.NumExperts, c.NSharedExperts, c.NumExpertsPerTok, c.MoEIntermediateSize)},
-		{"compression schedule", len(m.CompressRatios) == c.NumLayers+c.NumNextNPredictLayers && v41EqualInts(m.CompressRatios, wantCompression) && m.CompressRopeTheta == 160000, fmt.Sprintf("ratios=%v theta=%g", m.CompressRatios, m.CompressRopeTheta)},
-		{"kv sources", v41EqualInts(m.KVSourceLayerIDs, []int{2, 8, 14, 20}), m.KVSourceLayerIDs},
-		{"index sources", v41EqualInts(m.IndexSourceLayerIDs, []int{2, 8, 14, 20, 24, 28, 32, 36}), m.IndexSourceLayerIDs},
-		{"candidate geometry", m.CandidateSourceLayerID == 20 && m.CandidateTopKBlocks == 2048 && m.CandidateBlockSize == 8, fmt.Sprintf("source=%d topk=%d block=%d", m.CandidateSourceLayerID, m.CandidateTopKBlocks, m.CandidateBlockSize)},
+		{"compression schedule", len(m.CompressRatios) == c.NumLayers+c.NumNextNPredictLayers && v41EqualInts(m.CompressRatios, v41PublishedCompressRatios) && m.CompressRopeTheta == v41PublishedCompressRopeTheta, fmt.Sprintf("ratios=%v theta=%g", m.CompressRatios, m.CompressRopeTheta)},
+		{"kv sources", v41EqualInts(m.KVSourceLayerIDs, v41PublishedKVSourceLayerIDs), m.KVSourceLayerIDs},
+		{"index sources", v41EqualInts(m.IndexSourceLayerIDs, v41PublishedIndexSourceLayerIDs), m.IndexSourceLayerIDs},
+		{"candidate geometry", m.CandidateSourceLayerID == v41PublishedCandidateSourceLayerID && m.CandidateTopKBlocks == v41PublishedCandidateTopKBlocks && m.CandidateBlockSize == v41PublishedCandidateBlockSize, fmt.Sprintf("source=%d topk=%d block=%d", m.CandidateSourceLayerID, m.CandidateTopKBlocks, m.CandidateBlockSize)},
 		{"hyperconnection", m.HCMult == 4 && m.HCSinkhornIters == 20 && m.HCEps == 1e-6, fmt.Sprintf("mult=%d iters=%d eps=%g", m.HCMult, m.HCSinkhornIters, m.HCEps)},
 		{"engram layers", v41EqualInts(m.EngramLayerIDs, []int{1, 14}) && v41EqualInts(m.EngramNumEmbeddings, []int{384006168, 384016682}), fmt.Sprintf("layers=%v embeddings=%v", m.EngramLayerIDs, m.EngramNumEmbeddings)},
 		{"engram geometry", m.EngramMaxNgramSize == 4 && m.EngramVocabSize == 16000000 && m.EngramNHeads == 8 && m.EngramHeadDim == 256 && m.EngramPadTokenID == 2 && m.EngramCompressedVocabSize == 99092, fmt.Sprintf("ngram=%d vocab=%d heads=%d dim=%d pad=%d compressed=%d", m.EngramMaxNgramSize, m.EngramVocabSize, m.EngramNHeads, m.EngramHeadDim, m.EngramPadTokenID, m.EngramCompressedVocabSize)},

@@ -3974,6 +3974,51 @@
           "category": "false-positive",
           "reason": "Local weight-leaf name for the neural shared-expert gate projection, not an admission guard.",
           "token": "gateLeaf"
+        },
+        {
+          "category": "incidental",
+          "reason": "Diagnostic byte count and its log key for the existing load-time expert-ring trim. This records a sizing result, rather than defining another guard or gate.",
+          "token": "GuardTrimBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Diagnostic byte count and its log key for the existing load-time expert-ring trim. This records a sizing result, rather than defining another guard or gate.",
+          "token": "guard_trim"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus wire label reporting existing device-weight arena, page-in or expert-ring accounting. The gateway namespace identifies the emitting component; this measurement is not a new gateway, engine, or guard abstraction.",
+          "token": "fak_gateway_device_weight_arena_reserved_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus wire label reporting existing device-weight arena, page-in or expert-ring accounting. The gateway namespace identifies the emitting component; this measurement is not a new gateway, engine, or guard abstraction.",
+          "token": "fak_gateway_device_weight_arena_live_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus wire label reporting existing device-weight arena, page-in or expert-ring accounting. The gateway namespace identifies the emitting component; this measurement is not a new gateway, engine, or guard abstraction.",
+          "token": "fak_gateway_device_weight_arena_peak_reserved_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus wire label reporting existing device-weight arena, page-in or expert-ring accounting. The gateway namespace identifies the emitting component; this measurement is not a new gateway, engine, or guard abstraction.",
+          "token": "fak_gateway_device_weight_arena_memory_allocations_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus wire label reporting existing device-weight arena, page-in or expert-ring accounting. The gateway namespace identifies the emitting component; this measurement is not a new gateway, engine, or guard abstraction.",
+          "token": "fak_gateway_device_paged_weight_page_ins_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus wire label reporting existing device-weight arena, page-in or expert-ring accounting. The gateway namespace identifies the emitting component; this measurement is not a new gateway, engine, or guard abstraction.",
+          "token": "fak_gateway_moe_expert_ring_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Predicate selecting the already-declared model gated-compressor operation. Gated describes neural compression arithmetic, not an independent policy guard.",
+          "token": "v41UsesGatedCompressor"
         }
       ],
       "exclude": [
@@ -4053,6 +4098,7 @@
         "GatewaySeat",
         "GuardClauses",
         "GuardJoined",
+        "GuardTrimBytes",
         "GuardedProcessTrees",
         "IsAggregate",
         "LifecycleGate",
@@ -4115,6 +4161,11 @@
         "explicit_retirement_gate",
         "exposureGated",
         "extensionFixtureCells",
+        "fak_gateway_device_paged_weight_page_ins_total",
+        "fak_gateway_device_weight_arena_live_bytes",
+        "fak_gateway_device_weight_arena_memory_allocations_total",
+        "fak_gateway_device_weight_arena_peak_reserved_bytes",
+        "fak_gateway_device_weight_arena_reserved_bytes",
         "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
         "fak_gateway_kv_prefix_tier_capacity_bytes",
         "fak_gateway_kv_prefix_tier_evictions_total",
@@ -4124,6 +4175,7 @@
         "fak_gateway_kv_prefix_tier_transfer_bytes_total",
         "fak_gateway_kv_prefix_tier_transfer_faults_total",
         "fak_gateway_kv_prefix_tier_transfer_latency_seconds_total",
+        "fak_gateway_moe_expert_ring_bytes",
         "fetchGuardPreCompactSignalsHTTP",
         "firstGuardEnv",
         "fleetDogfoodGuardBaseURL",
@@ -4324,6 +4376,7 @@
         "guard_receipt",
         "guard_refusal",
         "guard_split_close_test",
+        "guard_trim",
         "guardarbitrateflagvalue",
         "guardbudgetrestartevent",
         "guardbuildskewassessment",
@@ -4434,6 +4487,7 @@
         "transform_guard",
         "ungated",
         "unguarded",
+        "v41UsesGatedCompressor",
         "validateGuardBudgetFlags",
         "verifyGateCheckout",
         "wgate",
@@ -6532,6 +6586,11 @@
           "category": "incidental",
           "reason": "Issue #12625 unexported modelengine helper observes an admitted request context at cooperative scheduler boundaries and delegates the existing finishSessionLocked terminal transition; it introduces no separate session record, scheduler policy, or public lifecycle primitive.",
           "token": "retireCanceledSessionLocked"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fixed capacity multiplier for existing per-layer activation-trace stages. Slot counting is not a new session-runtime abstraction.",
+          "token": "v41ActivationTraceEnvStageSlots"
         }
       ],
       "exclude": [
@@ -6938,6 +6997,7 @@
         "topsessions",
         "totalslots",
         "tuisessionrow",
+        "v41ActivationTraceEnvStageSlots",
         "validSessionRelayURL",
         "verifiedSlotMetadata",
         "verifiedSlotSchema",
@@ -8888,6 +8948,46 @@
           "category": "incidental",
           "reason": "Extracts the existing native completion tool normalization tail while retaining unknown-tool refusal; it is not a distinct gateway or engine.",
           "token": "normalizeInKernelToolCalls"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private format dispatcher selecting existing ChatML or positioned render-materialize-deepseek-v41-chat prompt rendering; it does not introduce another engine or rendering contract.",
+          "token": "inKernelRenderPrompt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private predicate selecting the existing explicit V4.1 raw-prompt mode; the inKernel prefix denotes its caller, not a newly independent engine.",
+          "token": "inKernelRawV41Prompt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus wire label reporting existing device-weight arena, page-in or expert-ring accounting. The gateway namespace identifies the emitting component; this measurement is not a new gateway, engine, or guard abstraction.",
+          "token": "fak_gateway_device_weight_arena_reserved_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus wire label reporting existing device-weight arena, page-in or expert-ring accounting. The gateway namespace identifies the emitting component; this measurement is not a new gateway, engine, or guard abstraction.",
+          "token": "fak_gateway_device_weight_arena_live_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus wire label reporting existing device-weight arena, page-in or expert-ring accounting. The gateway namespace identifies the emitting component; this measurement is not a new gateway, engine, or guard abstraction.",
+          "token": "fak_gateway_device_weight_arena_peak_reserved_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus wire label reporting existing device-weight arena, page-in or expert-ring accounting. The gateway namespace identifies the emitting component; this measurement is not a new gateway, engine, or guard abstraction.",
+          "token": "fak_gateway_device_weight_arena_memory_allocations_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus wire label reporting existing device-weight arena, page-in or expert-ring accounting. The gateway namespace identifies the emitting component; this measurement is not a new gateway, engine, or guard abstraction.",
+          "token": "fak_gateway_device_paged_weight_page_ins_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus wire label reporting existing device-weight arena, page-in or expert-ring accounting. The gateway namespace identifies the emitting component; this measurement is not a new gateway, engine, or guard abstraction.",
+          "token": "fak_gateway_moe_expert_ring_bytes"
         }
       ],
       "exclude": [
@@ -8961,6 +9061,11 @@
         "fak-strix-engine",
         "fak_decode_trace",
         "fak_gateway_compaction_thrash_sessions_total",
+        "fak_gateway_device_paged_weight_page_ins_total",
+        "fak_gateway_device_weight_arena_live_bytes",
+        "fak_gateway_device_weight_arena_memory_allocations_total",
+        "fak_gateway_device_weight_arena_peak_reserved_bytes",
+        "fak_gateway_device_weight_arena_reserved_bytes",
         "fak_gateway_kv_prefix_tier_capacity_bytes",
         "fak_gateway_kv_prefix_tier_evictions_total",
         "fak_gateway_kv_prefix_tier_hit_tokens_total",
@@ -8969,6 +9074,7 @@
         "fak_gateway_kv_prefix_tier_transfer_bytes_total",
         "fak_gateway_kv_prefix_tier_transfer_faults_total",
         "fak_gateway_kv_prefix_tier_transfer_latency_seconds_total",
+        "fak_gateway_moe_expert_ring_bytes",
         "fetchWebEngine",
         "forcedtoolargumentsfrommessages",
         "gatewayLink",
@@ -8988,6 +9094,8 @@
         "inKernelDecodeCohortMax",
         "inKernelPlannerEPCoordinated",
         "inKernelPrefixPressureBridge",
+        "inKernelRawV41Prompt",
+        "inKernelRenderPrompt",
         "inkernelbatch",
         "inkernelforcedtoolinstruction",
         "inkernelforcedtoolname",
@@ -11207,6 +11315,11 @@
           "category": "incidental",
           "reason": "Request-derived context local canceled on the first selected Chat response-writer failure.",
           "token": "liveCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private serving helper selecting the existing activated-expert ring weight plan for context-window memory sizing; it introduces no separate context lifetime or ownership model.",
+          "token": "serveExpertRingContextWeights"
         }
       ],
       "exclude": [
@@ -11366,6 +11479,7 @@
         "repository_context",
         "requestContext",
         "routeEngineWithContext",
+        "serveExpertRingContextWeights",
         "sessionClientDescriptorForContext",
         "session_compaction_thrash",
         "setGuardCompactionAnchorMode",
@@ -14305,6 +14419,21 @@
           "category": "incidental",
           "reason": "Existing validation phase wire label duplicated by the extracted CLI; it names test workspace creation, not a rendering or materialization subsystem.",
           "token": "test_materialize"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private format dispatcher selecting existing ChatML or positioned render-materialize-deepseek-v41-chat prompt rendering; it does not introduce another engine or rendering contract.",
+          "token": "inKernelRenderPrompt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate tool-call formatting helper or cache-identity constant for positioned render-materialize-deepseek-v41-chat. Its meaning follows that renderer, rather than a separate rendering abstraction.",
+          "token": "deepSeekV41RenderToolCall"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate tool-call formatting helper or cache-identity constant for positioned render-materialize-deepseek-v41-chat. Its meaning follows that renderer, rather than a separate rendering abstraction.",
+          "token": "deepSeekV41ChatRendererID"
         }
       ],
       "id": "render-materialize",
@@ -14341,7 +14470,10 @@
         "RenderUnrun",
         "RenderUserSplice",
         "StatusUnmaterialized",
+        "deepSeekV41ChatRendererID",
+        "deepSeekV41RenderToolCall",
         "formatTUIRenderStatus",
+        "inKernelRenderPrompt",
         "incumbentRenderInput",
         "incumbentRenderSchema",
         "incumbentRenderSpec",
@@ -15552,6 +15684,31 @@
           "category": "incidental",
           "reason": "Provenance-only reference to the external DeepSeek-V4.1-Flash Python function in inference/model.py at dba1be0a40aa45a94ad051997016db3960a90277; this spelling is not a declared fak symbol. The native producer identity, mask publication, and selection operation are separately positioned.",
           "token": "select_candidate_blocks"
+        },
+        {
+          "category": "incidental",
+          "reason": "Published V4.1 candidate-selection geometry constant used by the existing model topology check. The candidate token is model geometry, not a work-plan concept.",
+          "token": "v41PublishedCandidateTopKBlocks"
+        },
+        {
+          "category": "incidental",
+          "reason": "Published V4.1 candidate-selection geometry constant used by the existing model topology check. The candidate token is model geometry, not a work-plan concept.",
+          "token": "v41PublishedCandidateBlockSize"
+        },
+        {
+          "category": "incidental",
+          "reason": "Published V4.1 candidate-selection geometry constant used by the existing model topology check. The candidate token is model geometry, not a work-plan concept.",
+          "token": "v41PublishedCandidateSourceLayerID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Arithmetic coverage and row-count helpers for the already-positioned V4.1 candidate publication/source contract. They add neither a work-plan abstraction nor an independently owned resource pool.",
+          "token": "v41CandidatePoolCovers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Arithmetic coverage and row-count helpers for the already-positioned V4.1 candidate publication/source contract. They add neither a work-plan abstraction nor an independently owned resource pool.",
+          "token": "v41CandidatePoolRows"
         }
       ],
       "exclude": [
@@ -15793,6 +15950,11 @@
         "setSelfUpdateCandidateCacheDisposition",
         "stablePlanID",
         "stagedStrixCandidate",
+        "v41CandidatePoolCovers",
+        "v41CandidatePoolRows",
+        "v41PublishedCandidateBlockSize",
+        "v41PublishedCandidateSourceLayerID",
+        "v41PublishedCandidateTopKBlocks",
         "validateCandidateArchiveBytes",
         "validateGroupedPlan",
         "walkHTTPPlanners",
@@ -16094,6 +16256,21 @@
           "category": "incidental",
           "reason": "Constructor",
           "token": "NewMultiTensorSlotPool"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private boolean helper deciding whether expert-ring device and host budgets share physical RAM. It does not allocate or introduce a new pool abstraction.",
+          "token": "serveExpertRingSharedPool"
+        },
+        {
+          "category": "incidental",
+          "reason": "Arithmetic coverage and row-count helpers for the already-positioned V4.1 candidate publication/source contract. They add neither a work-plan abstraction nor an independently owned resource pool.",
+          "token": "v41CandidatePoolCovers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Arithmetic coverage and row-count helpers for the already-positioned V4.1 candidate publication/source contract. They add neither a work-plan abstraction nor an independently owned resource pool.",
+          "token": "v41CandidatePoolRows"
         }
       ],
       "exclude": [
@@ -16154,8 +16331,11 @@
         "removePoolMemberState",
         "resetPooled",
         "returnPooled",
+        "serveExpertRingSharedPool",
         "spoolsv",
         "unpoolable",
+        "v41CandidatePoolCovers",
+        "v41CandidatePoolRows",
         "validPoolState",
         "withPoolLaneLock",
         "writePoolMemberLocked"

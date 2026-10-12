@@ -12,6 +12,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/kvbudget"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // readiness_warmup.go is the #3051 warmup-TIMING gate on the local-model
@@ -99,8 +100,11 @@ type warmupGate struct {
 	mu          sync.Mutex
 	armed       bool
 	complete    bool
-	failure     string
 	timeToReady time.Duration
+	failed      bool
+	failReason  string
+	failMessage string
+	failSite    *model.V41RefusalSite
 }
 
 // arm declares that this serve expects a warmup inference before it is ready.
@@ -131,45 +135,16 @@ func (g *warmupGate) markComplete(d time.Duration) {
 		return
 	}
 	g.armed, g.complete, g.timeToReady = true, true, d
-	g.failure = ""
+	g.failed, g.failReason, g.failMessage, g.failSite = false, "", "", nil
 }
 
 // pending reports whether readiness is being HELD for an incomplete warmup — true
 // only when the gate was armed and warmup has not yet completed. A never-armed or
 // already-complete gate returns false (readiness unaffected / already warm).
 func (g *warmupGate) pending() bool {
-	pending, _ := g.status()
-	return pending
-}
-
-// status returns one consistent readiness/failure snapshot. Failure is a closed
-// token; arbitrary backend error and panic payloads never enter HTTP responses.
-func (g *warmupGate) status() (pending bool, failure string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.armed && !g.complete, g.failure
-}
-
-// fail records only an armed, incomplete gate. An older failed attempt cannot
-// regress a gate that another attempt already completed successfully.
-func (g *warmupGate) fail(err error) {
-	if err == nil {
-		return
-	}
-	reason := "warmup_error"
-	switch {
-	case errors.Is(err, ErrWarmupPanic):
-		reason = "warmup_panic"
-	case errors.Is(err, ErrWarmupTimeout):
-		reason = "warmup_timeout"
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		reason = "warmup_canceled"
-	}
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.armed && !g.complete {
-		g.failure = reason
-	}
+	return g.armed && !g.complete
 }
 
 // completeBootProbe contains only the planner call, on the worker goroutine that
@@ -271,11 +246,10 @@ func (s *Server) MarkWarmupComplete(d time.Duration) {
 // backend is not warm). The synthetic turn's goroutine is abandoned; only
 // cooperative cancellation from the backend could reclaim it, which is #993's
 // shader-attestation territory, not this readiness policy's.
-func (s *Server) RunWarmup(ctx context.Context) (elapsed time.Duration, err error) {
+func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 	if s == nil {
 		return 0, nil
 	}
-	defer func() { s.warmup.fail(err) }()
 	if s.planner == nil {
 		s.MarkWarmupComplete(0)
 		return 0, nil
@@ -298,10 +272,10 @@ func (s *Server) RunWarmup(ctx context.Context) (elapsed time.Duration, err erro
 		case <-ctx.Done():
 			// A cancelled/expired caller context surfaces as before, leaving the gate
 			// PENDING; the worker goroutine is abandoned.
-			return time.Since(start), ctx.Err()
+			return time.Since(start), s.failWarmup(ctx.Err(), "")
 		case <-timer.C:
-			return time.Since(start), fmt.Errorf("%w after %s (ceiling %s); the backend forward never returned its first token — readiness remains pending",
-				ErrWarmupTimeout, time.Since(start).Round(time.Millisecond), ceiling)
+			return time.Since(start), s.failWarmup(fmt.Errorf("%w after %s (ceiling %s); the backend forward never returned its first token — readiness held as warmup_failed",
+				ErrWarmupTimeout, time.Since(start).Round(time.Millisecond), ceiling), "")
 		}
 	} else {
 		// A negative FAK_WARMUP_CEILING_S disables the bound: wait indefinitely, but
@@ -309,17 +283,17 @@ func (s *Server) RunWarmup(ctx context.Context) (elapsed time.Duration, err erro
 		select {
 		case <-done:
 		case <-ctx.Done():
-			return time.Since(start), ctx.Err()
+			return time.Since(start), s.failWarmup(ctx.Err(), "")
 		}
 	}
 
 	if compErr != nil {
-		return time.Since(start), compErr
+		return time.Since(start), s.failWarmup(compErr, "")
 	}
 	// The known-answer coherence probe runs BEFORE the gate releases, so there is
 	// no window in which a skewed binary/shader pair reports ready.
 	if err := s.runStartupCoherenceProbe(ctx, ceiling); err != nil {
-		return time.Since(start), err
+		return time.Since(start), s.failWarmup(err, WarmupFailureCoherenceProbe)
 	}
 	d := time.Since(start)
 
@@ -346,12 +320,12 @@ func (s *Server) RunWarmup(ctx context.Context) (elapsed time.Duration, err erro
 		}
 	}
 	if err := s.fixedWarmupAdmissionError(); err != nil {
-		return d, err
+		return d, s.failWarmup(err, "")
 	}
 	// If completion and cancellation raced in select, cancellation still cannot
 	// advertise a ready backend, even when the planner ignored its context.
 	if err := ctx.Err(); err != nil {
-		return d, err
+		return d, s.failWarmup(err, "")
 	}
 	s.MarkWarmupComplete(d)
 	return d, compErr
@@ -371,11 +345,9 @@ func (s *Server) checkWarmupPending(w http.ResponseWriter) bool {
 	if s == nil {
 		return false
 	}
-	pending, failure := s.warmup.status()
-	if pending && failure != "" {
-		w.Header().Set("Retry-After", "1")
-		writeErrCode(w, http.StatusServiceUnavailable, "warmup_failed",
-			"server warmup failed ("+failure+"); readiness remains pending")
+	if reason, _, failed := s.warmup.failure(); failed {
+		// No Retry-After: nothing re-runs a failed warmup, so a retry cannot succeed.
+		writeErrCode(w, http.StatusServiceUnavailable, "warmup_failed", "backend startup warmup failed ("+reason+"); the serve is not ready")
 		return true
 	}
 	if blocked, _, reason := s.agentWarm.admit(); blocked {
@@ -387,7 +359,7 @@ func (s *Server) checkWarmupPending(w http.ResponseWriter) bool {
 		writeErrCode(w, http.StatusServiceUnavailable, "agent_warm_pending", msg)
 		return true
 	}
-	if !pending {
+	if !s.warmup.pending() {
 		return false
 	}
 	w.Header().Set("Retry-After", "1")

@@ -67,6 +67,9 @@ type Config struct {
 	// authoritative set; EOSTokenID keeps the first id for back-compat callers.
 	EOSTokenID  int   `json:"-"`
 	EOSTokenIDs []int `json:"-"`
+	// BOSTokenID is a GGUF tokenizer's declared BOS id (tokenizer.ggml.bos_token_id)
+	// for families whose prompt must start with it; nil when not carried.
+	BOSTokenID *int `json:"-"`
 	// eosJSONDecoded preserves explicit zero/null across later JSON overlays.
 	eosJSONDecoded bool
 

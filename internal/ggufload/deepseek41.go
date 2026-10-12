@@ -27,6 +27,7 @@ package ggufload
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -417,6 +418,12 @@ func applyDeepSeek41Config(f *File, p string, cfg *model.Config, ropeDim int) er
 	if err := applyDeepSeek41HParams(f, p, cfg); err != nil {
 		return err
 	}
+	// The GGUF tokenizer does not add BOS to raw text, but the reference expects
+	// the prompt to start with it (vcruz305/llama.cpp@5210c7c raw completion).
+	if v, ok := f.Uint64("tokenizer.ggml.bos_token_id"); ok && v <= uint64(^uint32(0)>>1) {
+		bos := int(v)
+		cfg.BOSTokenID = &bos
+	}
 
 	// ---- Engram (ds4 converter keys; legacy flat keys are fallback-only) -----
 	eng := &DeepSeek41Engram{
@@ -465,6 +472,74 @@ func applyDeepSeek41Config(f *File, p string, cfg *model.Config, ropeDim int) er
 		return err
 	}
 	f.DeepSeek41Engram = eng
+	return applyDeepSeek41Topology(f, cfg)
+}
+
+// applyDeepSeek41Topology attaches the V4.1 metadata the native forward reads to
+// any file that declares a compress schedule, Engram or not, so the compressed
+// RoPE base applyDeepSeek41HParams read reaches the forward. The GGUF has no
+// source keys: vcruz305/llama.cpp derives each role from tensor presence
+// (src/models/deepseek41.cpp:207-255@5210c7c), a KV source being a block with
+// attn_compressor_kv and an index source one with indexer.attn_q_b, and its
+// stream checks are ported below. model.NewDeepSeekV41GGUFConfig then
+// cross-checks the sources against the published schedule. A header-only file
+// leaves the sources unobserved.
+func applyDeepSeek41Topology(f *File, cfg *model.Config) error {
+	if len(cfg.CompressRatios) == 0 {
+		return nil
+	}
+	var topo model.V41GGUFTopology
+	if len(f.Tensors) > 0 {
+		names := make(map[string]bool, len(f.Tensors))
+		for _, t := range f.Tensors {
+			names[t.Name] = true
+		}
+		has := func(l int, suffix string) bool { return names[fmt.Sprintf("blk.%d.%s", l, suffix)] }
+		topo.KVSourceLayerIDs, topo.IndexSourceLayerIDs = []int{}, []int{}
+		keyOwners := []int{}
+		lastKV, lastKey, lastIndex := -1, -1, -1
+		for l := 0; l < cfg.NumLayers; l++ {
+			if has(l, "attn_compressor_kv.weight") {
+				topo.KVSourceLayerIDs = append(topo.KVSourceLayerIDs, l)
+				lastKV = l
+			}
+			if has(l, "indexer.attn_k.weight") {
+				keyOwners = append(keyOwners, l)
+				lastKey = l
+			}
+			if has(l, "indexer.attn_q_b.weight") {
+				topo.IndexSourceLayerIDs = append(topo.IndexSourceLayerIDs, l)
+				lastIndex = l
+			}
+			// The fork checks streams at full model load; a partial tensor directory
+			// with no compressor at all is a metadata fixture, not a V4.1 artifact.
+			if len(topo.KVSourceLayerIDs) == 0 || l >= len(cfg.CompressRatios) || cfg.CompressRatios[l] == 0 {
+				continue
+			}
+			if lastKV < 0 || lastKey < 0 || lastIndex < 0 {
+				return fmt.Errorf("gguf: deepseek41 layer %d reads a compressed stream before any layer publishes one: %w", l, model.ErrV41ConfigAdmission)
+			}
+			if cfg.CompressRatios[l] != cfg.CompressRatios[lastKV] {
+				return fmt.Errorf("gguf: deepseek41 layer %d compresses at ratio %d but reads layer %d, compressed at %d: %w",
+					l, cfg.CompressRatios[l], lastKV, cfg.CompressRatios[lastKV], model.ErrV41ConfigAdmission)
+			}
+		}
+		// The ratio-one state reads index keys from its KV source
+		// (model v41_ratio_one_state.go), so key owners must be exactly the KV sources.
+		if !reflect.DeepEqual(keyOwners, topo.KVSourceLayerIDs) {
+			return fmt.Errorf("gguf: deepseek41 index-key owners %v are not the KV sources %v: %w", keyOwners, topo.KVSourceLayerIDs, model.ErrV41ConfigAdmission)
+		}
+		for _, l := range topo.KVSourceLayerIDs {
+			if l < len(cfg.CompressRatios) && cfg.CompressRatios[l] != 1 && !has(l, "attn_compressor_gate.weight") {
+				return fmt.Errorf("gguf: deepseek41 layer %d compresses %d tokens per row but has no pooling gate: %w", l, cfg.CompressRatios[l], model.ErrV41ConfigAdmission)
+			}
+		}
+	}
+	d41, err := model.NewDeepSeekV41GGUFConfig(*cfg, topo)
+	if err != nil {
+		return fmt.Errorf("gguf: deepseek41 shared-attention topology: %w", err)
+	}
+	cfg.DeepSeekV41 = d41
 	return nil
 }
 

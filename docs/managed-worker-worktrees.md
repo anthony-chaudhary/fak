@@ -246,7 +246,7 @@ fak worktree worker land --worktree <dir> [flags]
 - `--require-remote-recovery`: Refuses trunk CAS if remote candidate read-back fails.
 - `--disambiguation-timeout-ms <ms>`: Disambiguation deadline (1..900000 ms; default 120000 ms).
 - `--unsafe-skip-symptom-witness`: Bypasses mandatory fail-to-pass test witness for `fix(*)` commits.
-- `--symptom-timeout <duration>`: Wall-clock budget for the `fix(*)` symptom witness (two scratch worktrees plus a candidate and a parent `go test` compile; default `10m`). A run the budget kills abstains as `SYMPTOM_TIMEOUT`, never `SYMPTOM_NO_MATCH`; raise it for large packages or a loaded host.
+- `--symptom-timeout <duration>`: Wall-clock budget for the `fix(*)` symptom witness (two scratch worktrees plus a candidate and a parent `go test` compile; default `10m`). A run the budget kills abstains as `SYMPTOM_ABSTAIN_TIMEOUT`, never `SYMPTOM_NO_MATCH`; an abstention lands with an advisory instead of refusing, so raise it only when you want the red-then-green proof.
 - `--root <dir>`: Repo root (default: discovered from working directory).
 
 #### Landing mechanics and safety guarantees
@@ -261,7 +261,17 @@ fak worktree worker land --worktree <dir> [flags]
 4. **Readback verification:** After committing, `LandReadbackVerify` confirms trunk
    `HEAD` contains the worker's intended paths (`LAND_READBACK_MISMATCH` refusal if missing).
 5. **Symptom witness:** Fix commits (`fix(...)`) must include a test that reproduces
-   the failure on the parent commit and passes on the fix.
+   the failure on the parent commit and passes on the fix. The land result's
+   `symptom_verdict` field carries one closed token:
+   - `SYMPTOM_CONFIRMED` - red at the parent, green at the fix (preferred).
+   - `SYMPTOM_ABSTAIN_TIMEOUT`, `SYMPTOM_ABSTAIN_PARENT_BUILD` (the regression names
+     fix-introduced API; decided statically before any scratch checkout),
+     `SYMPTOM_ABSTAIN_SELECTION`, `SYMPTOM_ABSTAIN_OTHER` - no verdict, which is not
+     evidence against the fix: the land proceeds, `symptom_advisory` holds the detail,
+     and stderr prints one `advisory: SYMPTOM_ABSTAIN_<X>: ...` line.
+   - A refutation refuses with code `SYMPTOM_UNWITNESSED` and a subtype such as
+     `SYMPTOM_CANDIDATE_FAILED` (the test fails on the fix), `SYMPTOM_PARENT_PASSED`
+     (tautological), `SYMPTOM_NO_MATCH` or `SYMPTOM_NO_TEST`.
 
 ### 4. `reap` — Clean removal and bulk sweeps
 

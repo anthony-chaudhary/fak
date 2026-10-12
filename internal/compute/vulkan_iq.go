@@ -28,7 +28,7 @@ func (v *vulkanBackend) uploadRawIQLocked(t Tensor) Tensor {
 	if !ok || len(t.Shape) != 2 || t.Shape[1]%rawIQSuper != 0 {
 		panic("compute: vulkan " + t.Dtype.String() + " upload requires host raw bytes and [out,in] with in divisible by 256")
 	}
-	raw := i8AsBytes(hb.I8())
+	raw := i8View(hb.I8())
 	if len(raw) != t.Shape[0]*(t.Shape[1]/rawIQSuper)*f.blockBytes {
 		panic("compute: vulkan " + t.Dtype.String() + " raw byte length does not match shape")
 	}

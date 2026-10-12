@@ -453,8 +453,8 @@ func (s *V41AttentionState) appendCompressorSourcePublication(
 	if layer < 0 {
 		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source layer %d is negative", layer)
 	}
-	if ratio <= 1 || ratio > s.ratioCap {
-		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source ratio %d outside (1,%d]", ratio, s.ratioCap)
+	if ratio < 1 || ratio > s.ratioCap {
+		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source ratio %d outside [1,%d]", ratio, s.ratioCap)
 	}
 	if pool == nil {
 		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source requires a pool")
@@ -519,9 +519,12 @@ func (s *V41AttentionState) appendCompressorSourcePublication(
 		if err != nil {
 			return nil, nil, false, 0, 0, err
 		}
-		score, err := projectScore(row)
-		if err != nil {
-			return nil, nil, false, 0, 0, err
+		// Ratio one has no gate: each token is its own group.
+		var score []float32
+		if ratio > 1 {
+			if score, err = projectScore(row); err != nil {
+				return nil, nil, false, 0, 0, err
+			}
 		}
 		// A fresh pool is contiguity-checked from position 0, so the group is
 		// replayed with GROUP-RELATIVE positions 0..ratio-1, exactly as

@@ -150,7 +150,7 @@ func (c *ForkedCandidate) AppendTokens(tokens []int) error {
 
 		if !isFull {
 			// Check if shared
-			if lastBlock.RefCount() > 1 || lastBlock.immutable {
+			if lastBlock.RefCount() > 1 || lastBlock.immutable.Load() {
 				// Copy-On-Write for candidate branch
 				newBlock := t.allocBlockLockFree()
 
@@ -159,7 +159,7 @@ func (c *ForkedCandidate) AppendTokens(tokens []int) error {
 				newBlock.TokenCount = len(newBlock.Tokens)
 				copy(newBlock.Buffer, lastBlock.Buffer)
 				lastBlock.mu.RUnlock()
-				newBlock.immutable = false
+				newBlock.immutable.Store(false)
 
 				// Decrement refcount on shared block
 				t.releaseBlockLockFree(lastBlock)
@@ -211,7 +211,7 @@ func (c *ForkedCandidate) AppendTokens(tokens []int) error {
 				binary.LittleEndian.PutUint64(newBlock.Buffer[off:], uint64(rem[j]))
 			}
 		}
-		newBlock.immutable = false
+		newBlock.immutable.Store(false)
 		newBlock.mu.Unlock()
 
 		c.Blocks = append(c.Blocks, newBlock)
@@ -242,7 +242,7 @@ func (c *ForkedCandidate) MutateToken(tokenIndex int, newToken int) error {
 		if tokenIndex >= currIdx && tokenIndex < currIdx+blk.TokenCount {
 			offset := tokenIndex - currIdx
 
-			if blk.RefCount() > 1 || blk.immutable {
+			if blk.RefCount() > 1 || blk.immutable.Load() {
 				newBlock := t.allocBlockLockFree()
 
 				blk.mu.RLock()
@@ -250,7 +250,7 @@ func (c *ForkedCandidate) MutateToken(tokenIndex int, newToken int) error {
 				newBlock.TokenCount = len(newBlock.Tokens)
 				copy(newBlock.Buffer, blk.Buffer)
 				blk.mu.RUnlock()
-				newBlock.immutable = false
+				newBlock.immutable.Store(false)
 
 				t.releaseBlockLockFree(blk)
 				c.Blocks[i] = newBlock
@@ -375,7 +375,7 @@ func (t *COWPageTable) ForkCandidate(parentBranchID string, candidateID string) 
 	// Atomically retain each block and mark immutable
 	for i, blk := range parentBlocks {
 		blk.Retain()
-		blk.immutable = true
+		blk.markImmutable()
 		cand.Blocks[i] = blk
 	}
 
@@ -485,7 +485,7 @@ func (t *COWPageTable) PromoteCandidate(candidateID string, acceptedTokens ...in
 			tokensRemaining -= blkTokCount
 		} else {
 			// Partial block acceptance: truncate to tokensRemaining
-			if blk.RefCount() > 1 || blk.immutable {
+			if blk.RefCount() > 1 || blk.immutable.Load() {
 				// Block is shared, allocate private copy for truncated portion
 				cloned := t.allocBlockLockFree()
 				blk.mu.RLock()
@@ -493,7 +493,7 @@ func (t *COWPageTable) PromoteCandidate(candidateID string, acceptedTokens ...in
 				cloned.TokenCount = tokensRemaining
 				copy(cloned.Buffer, blk.Buffer[:tokensRemaining*t.bytesPerToken])
 				blk.mu.RUnlock()
-				cloned.immutable = false
+				cloned.immutable.Store(false)
 				t.releaseBlockLockFree(blk)
 				blk = cloned
 			} else {

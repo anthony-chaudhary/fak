@@ -257,7 +257,7 @@ func (s *Server) runStartupCoherenceProbe(ctx context.Context, ceiling time.Dura
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-timeout:
-		return fmt.Errorf("%w: startup coherence probe did not answer after %s (ceiling %s) — readiness remains pending",
+		return fmt.Errorf("%w: startup coherence probe did not answer after %s (ceiling %s) — readiness held as warmup_failed",
 			ErrWarmupTimeout, time.Since(start).Round(time.Millisecond), ceiling)
 	}
 	if compErr != nil {

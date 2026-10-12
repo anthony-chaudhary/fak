@@ -263,7 +263,7 @@
    "kind": "symbol",
    "definition": "The live in-kernel prompt renderer: wraps renderChatMLTools and, for Qwen3.5/Qwen3.6 hybrid-reasoning checkpoints, pre-seeds an empty <think> block so short max_tokens turns don't spend their whole budget unclosed (internal/agent/inkernel_render.go).",
    "distinction": "Adds hybrid-reasoning seeding on TOP of renderChatMLTools; it is not renderChatMLTools itself (the zero-seed tool-aware ChatML renderer it calls).",
-   "distinct_from": ["x2-render-materialize-renderchatmltools"],
+   "distinct_from": ["x2-render-materialize-renderchatmltools", "render-materialize-deepseek-v41-chat"],
    "aliases": ["renderInKernelChatMLTools", "renderinkernelchatmltools"],
    "grounding": "renderInKernelChatMLTools",
    "grounding_kind": "symbol",
@@ -608,5 +608,24 @@
    "verdict": "defined",
    "gaps": []
   }
- ]
+ ,
+    {
+      "id": "render-materialize-deepseek-v41-chat",
+      "canonical": "renderDeepSeekV41Chat (DeepSeek V4.1 GGUF-style prompt)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "Renders the implemented DeepSeek V4.1 GGUF-style chat grammar: role boundaries, tool definitions and DSML tool-call history, merged tool results, and response-format instructions in the in-kernel prompt path.",
+      "distinction": "Uses DeepSeek V4.1 message and DSML tool grammar rather than the ChatML role framing and Qwen thinking-prefix seeding of renderInKernelChatMLTools. This implementation record does not establish official-profile selection, checkpoint parity, or output-schema enforcement.",
+      "distinct_from": [
+        "render-materialize-render-in-kernel-chatml-tools"
+      ],
+      "aliases": [],
+      "grounding": "renderDeepSeekV41Chat",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
 }

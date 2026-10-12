@@ -714,8 +714,14 @@ func TestRunWarmupBoundedTimeoutOnNonReturningBackend(t *testing.T) {
 	}
 	if code, body := warmupHealthz(t, srv); code != http.StatusServiceUnavailable || body["ok"] != false {
 		t.Fatalf("post-timeout serve: /healthz = %d ok=%v, want 503 ok=false", code, body["ok"])
-	} else if body["warmup_failed"] != "warmup_timeout" {
-		t.Fatalf("post-timeout reason = %v, want warmup_timeout", body["warmup_failed"])
+	} else {
+		failure, _ := body["warmup_failure"].(map[string]any)
+		if body["warmup_failed"] != true || failure["reason"] != "warmup_timeout" {
+			t.Fatalf("post-timeout failure = %v, want warmup_failed with warmup_timeout", body)
+		}
+		if _, present := body["warmup_pending"]; present {
+			t.Fatalf("timed-out warmup still reports warmup_pending: %v", body)
+		}
 	}
 }
 
@@ -806,11 +812,27 @@ func TestRunWarmupPanicIsTypedRefusal(t *testing.T) {
 					t.Fatalf("panic cause lost: %v", err)
 				}
 				assertBootFailureResponse(t, srv, "warmup_panic")
+				code, body := warmupHealthz(t, srv)
+				if code != http.StatusServiceUnavailable {
+					t.Fatalf("panic /healthz status = %d, want 503", code)
+				}
+				failure, _ := body["warmup_failure"].(map[string]any)
+				if failure["message"] != ErrWarmupPanic.Error() {
+					t.Fatalf("panic health message = %v, want the stable sentinel text", failure["message"])
+				}
+				// Terminal backend failure also wins while the independent agent
+				// cache gate is pending; clients must not be told merely to retry.
+				srv.agentWarm.configure(agent.WarmPrefixSpec{}, false)
+				assertBootFailureResponse(t, srv, "warmup_panic")
 				if _, err := srv.RunWarmup(context.Background()); err != nil {
 					t.Fatalf("successful retry: %v", err)
 				}
-				body := warmupHealthzBody(t, srv)
-				for _, key := range []string{"warmup_pending", "warmup_failed"} {
+				code, body = warmupHealthz(t, srv)
+				agentWarm, _ := body["agent_warm"].(map[string]any)
+				if code != http.StatusServiceUnavailable || body["ok"] != false || agentWarm["status"] != AgentWarmPending || agentWarm["pending"] != true {
+					t.Fatalf("successful backend retry /healthz = %d %v, want 503 while agent cache remains pending", code, body)
+				}
+				for _, key := range []string{"warmup_pending", "warmup_failed", "warmup_failure"} {
 					if _, present := body[key]; present {
 						t.Fatalf("successful retry retained %s: %v", key, body)
 					}
@@ -833,11 +855,11 @@ func TestWarmupFailureReasonClosedSet(t *testing.T) {
 		cancel bool
 		want   string
 	}{
-		{"backend_error", errors.New("private boot panic detail"), false, "warmup_error"},
+		{"backend_error", errors.New("private boot panic detail"), false, "backend_error"},
 		{"wrapped_timeout", errors.Join(errors.New("wrapper"), ErrWarmupTimeout), false, "warmup_timeout"},
-		{"wrapped_cancel", errors.Join(errors.New("wrapper"), context.Canceled), false, "warmup_canceled"},
-		{"wrapped_deadline", errors.Join(errors.New("wrapper"), context.DeadlineExceeded), false, "warmup_canceled"},
-		{"canceled_context_ignored_by_planner", nil, true, "warmup_canceled"},
+		{"wrapped_cancel", errors.Join(errors.New("wrapper"), context.Canceled), false, "canceled"},
+		{"wrapped_deadline", errors.Join(errors.New("wrapper"), context.DeadlineExceeded), false, "canceled"},
+		{"canceled_context_ignored_by_planner", nil, true, "canceled"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newTestServer(t)
@@ -867,13 +889,52 @@ func TestWarmupFailureReasonClosedSet(t *testing.T) {
 	}
 }
 
+type cancelAfterWarmupPlanner struct {
+	*bootFailurePlanner
+	cancel context.CancelFunc
+}
+
+func (p *cancelAfterWarmupPlanner) KVMemoryStats() agent.KVMemoryStats {
+	p.cancel()
+	return agent.KVMemoryStats{}
+}
+
+// Cancellation after the completed planner call must still hold readiness. The
+// capacity callback makes this deterministic rather than racing the select.
+// fak-test:runtime fast est=10ms lane=default
+func TestRunWarmupCanceledAfterCompletionDoesNotBecomeReady(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv := newTestServer(t)
+	srv.MarkReady()
+	srv.ArmWarmupGate()
+	srv.planner = &cancelAfterWarmupPlanner{
+		bootFailurePlanner: &bootFailurePlanner{
+			MockPlanner: agent.NewMockPlanner("test-model"),
+			boot: func(context.Context, []agent.Message) (*agent.Completion, error) {
+				return &agent.Completion{}, nil
+			},
+		},
+		cancel: cancel,
+	}
+	if _, err := srv.RunWarmup(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunWarmup error = %v, want context.Canceled", err)
+	}
+	assertBootFailureResponse(t, srv, "canceled")
+}
+
 func assertBootFailureResponse(t *testing.T, srv *Server, reason string) {
 	t.Helper()
-	if code, body := warmupHealthz(t, srv); code != http.StatusServiceUnavailable ||
-		body["ok"] != false || body["warmup_pending"] != true || body["warmup_failed"] != reason {
-		t.Fatalf("failed warmup /healthz = %d %v, want 503 pending with %q", code, body, reason)
-	} else if _, present := body["time_to_ready_ms"]; present {
-		t.Fatalf("failed warmup advertised time_to_ready_ms: %v", body)
+	code, body := warmupHealthz(t, srv)
+	failure, _ := body["warmup_failure"].(map[string]any)
+	if code != http.StatusServiceUnavailable || body["ok"] != false ||
+		body["warmup_failed"] != true || failure["reason"] != reason {
+		t.Fatalf("failed warmup /healthz = %d %v, want 503 warmup_failed with %q", code, body, reason)
+	}
+	for _, key := range []string{"warmup_pending", "time_to_ready_ms"} {
+		if _, present := body[key]; present {
+			t.Fatalf("failed warmup advertised %s: %v", key, body)
+		}
 	}
 	for _, path := range []string{"/v1/chat/completions", "/v1/messages"} {
 		rec := httptest.NewRecorder()
@@ -881,7 +942,7 @@ func assertBootFailureResponse(t *testing.T, srv *Server, reason string) {
 			strings.NewReader(`{"model":"test-model","messages":[{"role":"user","content":"hello"}],"max_tokens":1}`))
 		req.Header.Set("Content-Type", "application/json")
 		srv.Handler().ServeHTTP(rec, req)
-		if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "1" ||
+		if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "" ||
 			!strings.Contains(rec.Body.String(), `"code":"warmup_failed"`) ||
 			!strings.Contains(rec.Body.String(), reason) {
 			t.Fatalf("%s = %d %s, want 503 warmup_failed with %q", path, rec.Code, rec.Body.String(), reason)

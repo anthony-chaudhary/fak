@@ -77,6 +77,7 @@ type adapterRequest struct {
 	ChatWireTopK        *int     // nil => omit; a client top_k relayed on the OpenAI-compatible chat wire
 	MinP                *float64 // nil => omit; OpenAI-compatible chat wire only
 	ChatTemplateKwargs  json.RawMessage
+	SpeculativeNMax     *int     // nil => omit; ProviderOpenAI chat wire only (llama-server)
 	Stop                []string // empty => omit from the wire
 	// ResponseFormat / LogitBias are the OpenAI structured/guided-decode carriers
 	// (#560). They ride on the wire ONLY where the provider has a native field
@@ -178,6 +179,7 @@ type openAIRequest struct {
 	TopK               *int                 `json:"top_k,omitempty"`
 	MinP               *float64             `json:"min_p,omitempty"`
 	ChatTemplateKwargs json.RawMessage      `json:"chat_template_kwargs,omitempty"` // llama.cpp/vLLM, verbatim
+	SpeculativeNMax    *int                 `json:"speculative.n_max,omitempty"`    // llama-server draft-length cap
 	Stop               []string             `json:"stop,omitempty"`
 	ResponseFormat     json.RawMessage      `json:"response_format,omitempty"` // #560 structured/guided decode (OpenAI/xAI native)
 	LogitBias          map[int]float64      `json:"logit_bias,omitempty"`      // #560 per-token logit mask (OpenAI/xAI native)
@@ -246,7 +248,40 @@ func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 		req.Stream = true
 		req.StreamOptions = &openAIStreamOptions{IncludeUsage: true}
 	}
+	if r.SpeculativeNMax != nil && a.provider == ProviderOpenAI {
+		req.SpeculativeNMax = r.SpeculativeNMax
+		extra = withoutExtraKey(extra, speculativeNMaxKey)
+	}
 	return marshalWithExtraBody(req, extra)
+}
+
+const speculativeNMaxKey = "speculative.n_max"
+
+// withoutExtraKey drops key from an ExtraBody object so a per-request value for it
+// wins instead of colliding in marshalWithExtraBody. Unlike the sampling keys (see
+// unlessExtra), the speculative draft cap is a per-request throughput decision, not a
+// sampling control, so the process-wide value is only a default. An unparseable
+// extra is returned unchanged for marshalWithExtraBody to refuse.
+func withoutExtraKey(extra json.RawMessage, key string) json.RawMessage {
+	if len(extra) == 0 {
+		return extra
+	}
+	var keys map[string]json.RawMessage
+	if json.Unmarshal(extra, &keys) != nil {
+		return extra
+	}
+	if _, ok := keys[key]; !ok {
+		return extra
+	}
+	delete(keys, key)
+	if len(keys) == 0 {
+		return nil
+	}
+	rest, err := json.Marshal(keys)
+	if err != nil {
+		return extra
+	}
+	return rest
 }
 
 // unlessExtra keeps an operator ExtraBody sampling value authoritative: a client

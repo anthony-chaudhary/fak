@@ -617,9 +617,14 @@ func TestV41CompressedPublicationRoPEDeviceOnlyBinding(t *testing.T) {
 	if got := names(unbound); !slices.Contains(got, "compressed-publication-rope") {
 		t.Fatalf("ordinary Rows backend without the strict marker is admitted for publication RoPE: %v", got)
 	}
-	plain := &Session{M: &Model{Cfg: Config{DeepSeekV41: &DeepSeekV41Config{CompressRatios: []int{1, 1}}}}, Backend: ordinary}
+	plain := &Session{M: &Model{Cfg: Config{DeepSeekV41: &DeepSeekV41Config{CompressRatios: []int{0, 0}}}}, Backend: ordinary}
 	if got := names(plain); slices.Contains(got, "compressed-publication-rope") {
 		t.Fatalf("model without compressed KV names the unused publication op: %v", got)
+	}
+	// Ratio one publishes a rotated row per token, so it needs the seam too.
+	ratioOne := &Session{M: &Model{Cfg: Config{DeepSeekV41: &DeepSeekV41Config{CompressRatios: []int{1, 1}}}}, Backend: ordinary}
+	if got := names(ratioOne); !slices.Contains(got, "compressed-publication-rope") || slices.Contains(got, "compressor-gated-pool") {
+		t.Fatalf("ratio-one model must bind publication RoPE and no gated pool: %v", got)
 	}
 
 	unbound.SetExecutionPolicy(ExecutionPolicyDeviceOnly)

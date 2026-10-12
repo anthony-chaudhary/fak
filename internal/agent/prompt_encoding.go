@@ -81,10 +81,14 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 		return preparedPrompt{}, err
 	}
 	messages, tools, shrink := p.ApplyPromptShrink(ctx, messages, tools, opts...)
-	rendered := renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice, sp)
+	raw := inKernelRawV41Prompt(p.m.Cfg, sp)
+	rendered := inKernelRenderPrompt(messages, tools, p.m.Cfg, sp)
 	ids, err := p.tok.Encode(rendered)
 	if err != nil {
 		return preparedPrompt{}, err
+	}
+	if raw && p.m.Cfg.BOSTokenID != nil {
+		ids = append([]int{*p.m.Cfg.BOSTokenID}, ids...)
 	}
 	maxNew := p.maxNew
 	if sp.MaxTokens != nil && *sp.MaxTokens > 0 {
@@ -97,7 +101,20 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 	}, nil
 }
 
+// inKernelRawV41Prompt reports a raw-completion request on DeepSeek V4.1: the text
+// is encoded as is and prefixed with the GGUF's BOS, matching the reference fork's
+// raw completion instead of the ChatML template other families use.
+func inKernelRawV41Prompt(cfg model.Config, sp SampleParams) bool {
+	return sp.RawPrompt && cfg.IsDeepSeekV41()
+}
+
 func inKernelPromptRendererID(cfg model.Config, sp SampleParams) string {
+	if inKernelRawV41Prompt(cfg, sp) {
+		return "deepseek41-raw-bos-v1"
+	}
+	if cfg.IsDeepSeekV41() {
+		return deepSeekV41ChatRendererID
+	}
 	thinking := "thinking"
 	if inKernelSuppressQwenThinking(cfg, sp) {
 		thinking = "no-thinking"

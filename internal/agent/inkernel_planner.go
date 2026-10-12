@@ -447,7 +447,7 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 	defer cancel()
 	var sinkErr error
 	sp := applySampleOpts(opts...)
-	rendered := renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice, sp)
+	rendered := inKernelRenderPrompt(messages, tools, p.m.Cfg, sp)
 	startsInReasoning := strings.HasSuffix(rendered, qwenThinkAssistantSeed)
 	projector := newInKernelStreamProjector(sink, sp.Stop, startsInReasoning)
 	projector.spans.deferTools = true
@@ -509,7 +509,7 @@ func newInKernelStreamProjector(emit StreamSink, stops []string, startsInReasoni
 // hasTextToolCandidate scopes strict reconciliation to text that can participate
 // in a lift. Ordinary late reasoning retains its historical stream behavior.
 func hasTextToolCandidate(content string) bool {
-	for _, marker := range []string{"<tool_call>", "<function_call>", "<function=", "<|python_tag|>", "[TOOL_CALLS]"} {
+	for _, marker := range []string{"<tool_call>", "<function_call>", "<function=", "<|python_tag|>", "[TOOL_CALLS]", deepSeekDSMLCallsOpen} {
 		if strings.Contains(content, marker) {
 			return true
 		}
@@ -696,6 +696,7 @@ var toolSpanOpeners = []struct {
 	{open: "<function_call>", closers: []string{"</function_call>"}},
 	{open: "<|python_tag|>", closers: []string{"<|eom_id|>", "<|eot_id|>"}},
 	{open: "[TOOL_CALLS]", closers: nil},
+	{open: deepSeekDSMLCallsOpen, closers: []string{deepSeekDSMLCallsClose}},
 }
 
 const toolSpanGuardMaxBytes = 4 << 20
@@ -1528,7 +1529,7 @@ func (e *InKernelCapacityError) Error() string {
 // recoverDevicePanic is the body of Complete's deferred recover, factored out so it is
 // unit-testable without a GPU (the panic payload is an ordinary Go value). It converts a
 // recovered in-kernel device failure (allocation OOM, typed CUDA backend error, or device fault)
-// or one of the two declared Flash attention-admission refusals into a typed,
+// or a declared Flash / V4.1 forward-admission refusal into a typed,
 // actionable error and reports handled=true; for ANY other recovered value it
 // reports handled=false so the caller re-panics — the recover stays surgical and never swallows
 // a genuine bug (a nil deref, an unrelated validation panic).
@@ -1538,6 +1539,12 @@ func recoverDevicePanic(r any) (err error, handled bool) {
 		// unsupported/malformed Flash schedule refusals, never arbitrary model
 		// validation errors or string panics, and preserve the original cause.
 		if errors.Is(e, model.ErrV4FlashAttentionUnimplemented) || errors.Is(e, model.ErrV4FlashAttentionRatioInvalid) {
+			return e, true
+		}
+		// V4.1 Prefill/Step panic their typed stage-admission refusal before any
+		// math; under the default policy it must fail the request (or warmup),
+		// not the serving process.
+		if _, ok := model.V41RefusalSiteOf(e); ok {
 			return e, true
 		}
 		var operation *model.BackendForwardOperationError

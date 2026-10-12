@@ -65,6 +65,10 @@ type ActivatedExpertFit struct {
 	RingBytes int64
 	// HostBandBytes is RoutedBandBytes - RingBytes: the routed bytes that stay on host.
 	HostBandBytes int64
+	// HostGatheredBytes is the checkpoint bytes the forward gathers row-wise on the host (the
+	// V4.1 packed Engram tables, RoutedExpertActiveSet.HostGatheredResident). They are never part
+	// of DeviceBaseBytes; HostGatheredPageReserve is what a host-scoped plan charges for them.
+	HostGatheredBytes int64
 
 	MinFits   bool // DeviceBaseBytes + ActivatedLayerBytes fits: decode can run, paging
 	TokenFits bool // DeviceBaseBytes + ActivatedTokenBytes fits: no intra-token re-page
@@ -106,6 +110,7 @@ func activatedExpertFit(as RoutedExpertActiveSet, deviceBudgetBytes int64) (Acti
 		RoutedBandBytes:     as.RoutedResident,
 		ActivatedTokenBytes: as.ActivePerToken,
 		DeviceBudgetBytes:   deviceBudgetBytes,
+		HostGatheredBytes:   max(as.HostGatheredResident, 0),
 	}
 	if k > 0 {
 		perExpertLayer := ceilDivInt64(as.RoutedResident, int64(as.NumExperts)*int64(as.MoELayers))
@@ -184,7 +189,43 @@ func (f ActivatedExpertFit) MemoryPlan() compute.MemoryPlan {
 			Scope:  compute.MemoryScopeHost,
 		})
 	}
+	if d, ok := f.HostGatheredDemand(); ok {
+		plan = append(plan, d)
+	}
 	return plan
+}
+
+// HostGatheredPageReserveCap bounds the host page working set charged for host-gathered tables.
+// Decode touches a few rows per token per Engram layer, so the live set is the pages those rows
+// and their readahead fault in, not the table. The cap is an ESTIMATE, not a measurement; the
+// kernel can reclaim these clean file pages, so the reserve protects throughput, not safety.
+const HostGatheredPageReserveCap int64 = 4 << 30
+
+// HostGatheredDetail names the host-scoped plan row for the host-gathered page reserve.
+const HostGatheredDetail = "gguf-host-engram-gather-pages"
+
+// HostGatheredPageReserve is the host bytes a plan reserves for the host-gathered tables:
+// min(HostGatheredBytes, HostGatheredPageReserveCap), 0 when the checkpoint has none.
+func (f ActivatedExpertFit) HostGatheredPageReserve() int64 {
+	if f.HostGatheredBytes <= 0 {
+		return 0
+	}
+	return min(f.HostGatheredBytes, HostGatheredPageReserveCap)
+}
+
+// HostGatheredDemand is the host-scoped plan row for HostGatheredPageReserve. ok=false when the
+// checkpoint gathers nothing from the host, so a plan without Engram tables is unchanged.
+func (f ActivatedExpertFit) HostGatheredDemand() (compute.MemoryDemand, bool) {
+	reserve := f.HostGatheredPageReserve()
+	if reserve <= 0 {
+		return compute.MemoryDemand{}, false
+	}
+	return compute.MemoryDemand{
+		Class:  compute.MemoryWeights,
+		Bytes:  reserve,
+		Detail: HostGatheredDetail,
+		Scope:  compute.MemoryScopeHost,
+	}, true
 }
 
 // FitActivatedExpertsOnDevice is the device-fit refusal for the bounded activated-expert placement:
