@@ -10291,6 +10291,26 @@
           "category": "incidental",
           "reason": "Package-local result type copied for the narrow CLI; it reports the existing WSL probe and adds no capability class.",
           "token": "validateWSLCapabilityVerdict"
+        },
+        {
+          "category": "incidental",
+          "reason": "Operator environment-variable name selecting the initial timeout of existing WSL command-availability probes; it does not grant security capabilities, select fallback, alter required commands, or authorize validation. It is not a separate policy-capability mechanism.",
+          "token": "validateWSLPreflightTimeoutEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "Literal spelling of the operator environment-variable override for the initial WSL command-availability probe timeout; it does not grant security capabilities, select fallback, alter required commands, or authorize validation. It is not a separate policy-capability mechanism.",
+          "token": "FAK_VALIDATE_WSL_PREFLIGHT_TIMEOUT"
+        },
+        {
+          "category": "incidental",
+          "reason": "Numeric retry multiplier for existing WSL command-availability probe timing; it does not grant security capabilities, select fallback, alter required commands, or authorize validation. It is not a separate policy-capability mechanism.",
+          "token": "validateWSLPreflightRetryFactor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper reading timing configuration and deriving the two existing WSL command-availability probe durations; it does not grant security capabilities, select fallback, alter required commands, or authorize validation. It is not a separate policy-capability mechanism.",
+          "token": "validateWSLPreflightBounds"
         }
       ],
       "exclude": [
@@ -10336,6 +10356,7 @@
         "FAK_ORG_POLICY_CACHE_PATH",
         "FAK_ORG_POLICY_URL",
         "FAK_PREFLIGHT_ALLOW_BIN_SKEW",
+        "FAK_VALIDATE_WSL_PREFLIGHT_TIMEOUT",
         "FailurePolicy",
         "FallbackPolicyLocalCPUDegrade",
         "FallbackPolicyPinOrRefuse",
@@ -10533,6 +10554,9 @@
         "ultracodePostureWord",
         "unnamed_capability",
         "validateWSLCapabilityVerdict",
+        "validateWSLPreflightBounds",
+        "validateWSLPreflightRetryFactor",
+        "validateWSLPreflightTimeoutEnv",
         "verifyTailPolicyMatrix",
         "windowReceipt",
         "windowResult",

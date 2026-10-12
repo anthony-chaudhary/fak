@@ -211,3 +211,53 @@ func TestReadWSLWorktreeGitDirTranslatesWindowsPaths(t *testing.T) {
 		})
 	}
 }
+
+func stubValidateWSLProbeTimeouts(t *testing.T, timeouts int) *[]time.Duration {
+	t.Helper()
+	resetValidateWSLCapabilityCacheForTest()
+	oldLookPath := validateWSLLookPath
+	oldCommand := validateWSLCommand
+	validateWSLLookPath = func(string) (string, error) { return `C:\Windows\System32\wsl.exe`, nil }
+	var bounds []time.Duration
+	validateWSLCommand = func(ctx context.Context, _ ...string) ([]byte, error) {
+		deadline, _ := ctx.Deadline()
+		bounds = append(bounds, time.Until(deadline))
+		if len(bounds) <= timeouts {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		return []byte(validateWSLDistroPrefix + "Ubuntu-24.04\n" + validateWSLPathPrefix + "/usr/bin\n"), nil
+	}
+	t.Cleanup(func() {
+		validateWSLLookPath = oldLookPath
+		validateWSLCommand = oldCommand
+		resetValidateWSLCapabilityCacheForTest()
+	})
+	return &bounds
+}
+
+func TestValidateWSLCapabilityPreflightRetriesLoadedProbeWithLongerBound(t *testing.T) {
+	t.Setenv(validateWSLPreflightTimeoutEnv, "20ms")
+	bounds := stubValidateWSLProbeTimeouts(t, 1)
+
+	verdict := preflightValidateWSLCapabilitiesWithin(context.Background())
+	if verdict.Status != "ready" {
+		t.Fatalf("verdict status = %q, want ready after one slow probe", verdict.Status)
+	}
+	if len(*bounds) != 2 || (*bounds)[1] <= 20*time.Millisecond {
+		t.Fatalf("probe bounds = %v, want a second attempt longer than the first", *bounds)
+	}
+}
+
+func TestValidateWSLCapabilityPreflightStaysTypedWhenEveryAttemptTimesOut(t *testing.T) {
+	t.Setenv(validateWSLPreflightTimeoutEnv, "10ms")
+	bounds := stubValidateWSLProbeTimeouts(t, 2)
+
+	verdict := preflightValidateWSLCapabilitiesWithin(context.Background())
+	if verdict.Status != "unavailable" || len(verdict.Missing) != 0 {
+		t.Fatalf("verdict = status %q missing %v, want unavailable with nothing missing", verdict.Status, verdict.Missing)
+	}
+	if len(*bounds) != 2 {
+		t.Fatalf("probe attempts = %d, want 2", len(*bounds))
+	}
+}
