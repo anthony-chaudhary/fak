@@ -1108,7 +1108,7 @@ func (v *vulkanBackend) uploadQ4KLocked(t Tensor, class MemoryClass) Tensor {
 		panic("compute: vulkan Q4_K upload requires host raw bytes and [out,in] with in divisible by 256")
 	}
 	codes := hb.I8()
-	raw := i8AsBytes(codes)
+	raw := i8View(codes)
 	want := t.Shape[0] * (t.Shape[1] / 256) * 144
 	if len(raw) != want {
 		panic("compute: vulkan Q4_K raw byte length does not match shape")
@@ -1128,7 +1128,7 @@ func (v *vulkanBackend) uploadQ6KLocked(t Tensor, class MemoryClass) Tensor {
 	if C.fvk_have_q6k_matmul() == 0 {
 		panic("compute: vulkan Q6_K upload requested but the loaded shader bundle lacks q6k_matmul")
 	}
-	raw := i8AsBytes(hb.I8())
+	raw := i8View(hb.I8())
 	payloadBytes, residentBytes := vulkanQ6KByteSizes(t.Shape[0], t.Shape[1])
 	if len(raw) != payloadBytes {
 		panic("compute: vulkan Q6_K raw byte length does not match shape")
@@ -1156,7 +1156,7 @@ func (v *vulkanBackend) uploadQ5KLocked(t Tensor, class MemoryClass) Tensor {
 	if C.fvk_have_q5k_matmul() == 0 {
 		panic("compute: vulkan Q5_K upload requested but the loaded shader bundle lacks q5k_matmul")
 	}
-	raw := i8AsBytes(hb.I8())
+	raw := i8View(hb.I8())
 	payloadBytes, residentBytes := vulkanQ5KByteSizes(t.Shape[0], t.Shape[1])
 	if len(raw) != payloadBytes {
 		panic("compute: vulkan Q5_K raw byte length does not match shape")
@@ -1182,7 +1182,7 @@ func (v *vulkanBackend) uploadQ2KLocked(t Tensor, class MemoryClass) Tensor {
 		panic("compute: vulkan Q2_K upload requires host raw bytes and [out,in] with in divisible by 256")
 	}
 	codes := hb.I8()
-	raw := i8AsBytes(codes)
+	raw := i8View(codes)
 	want := t.Shape[0] * (t.Shape[1] / q2kSuper) * q2kSuperBlock
 	if len(raw) != want {
 		panic("compute: vulkan Q2_K raw byte length does not match shape")
@@ -1202,7 +1202,7 @@ func (v *vulkanBackend) uploadQ3KLocked(t Tensor, class MemoryClass) Tensor {
 	if C.fvk_have_q3k_matmul() == 0 {
 		panic("compute: vulkan Q3_K upload requested but the loaded shader bundle lacks q3k_matmul")
 	}
-	raw := i8AsBytes(hb.I8())
+	raw := i8View(hb.I8())
 	payloadBytes, residentBytes := vulkanQ3KByteSizes(t.Shape[0], t.Shape[1])
 	if len(raw) != payloadBytes {
 		panic("compute: vulkan Q3_K raw byte length does not match shape")
