@@ -32,8 +32,18 @@ import (
 // flattened orientation so the full forward uses v41MHCProjectFull.
 func v41FullEngramModel(t *testing.T) (*Model, V41EngramLayout) {
 	t.Helper()
+	return v41FullEngramModelWith(t, nil)
+}
+
+// v41FullEngramModelWith is v41FullEngramModel with the base geometry adjusted by
+// mutate before any tensor is declared, so every derived shape follows it.
+func v41FullEngramModelWith(t *testing.T, mutate func(*Config)) (*Model, V41EngramLayout) {
+	t.Helper()
 	cfg := v41FullGeometryConfig(t)
 	cfg.OGroups = 1
+	if mutate != nil {
+		mutate(&cfg)
+	}
 	cfg.DeepSeekV41.EngramLayerIDs = []int{0}
 	cfg.DeepSeekV41.EngramNumEmbeddings = []int{48}
 	cfg.DeepSeekV41.EngramMaxNgramSize = 4

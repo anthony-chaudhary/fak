@@ -36,7 +36,12 @@ func (s *v41IncrementalEngramSource) ReadRows(start, count int, dst []byte) (int
 
 func v41IncrementalEngramFixture(t *testing.T, compressed bool) (*Model, []*v41IncrementalEngramSource) {
 	t.Helper()
-	m, _ := v41FullEngramModel(t)
+	return v41IncrementalEngramFixtureWith(t, compressed, nil)
+}
+
+func v41IncrementalEngramFixtureWith(t *testing.T, compressed bool, mutate func(*Config)) (*Model, []*v41IncrementalEngramSource) {
+	t.Helper()
+	m, _ := v41FullEngramModelWith(t, mutate)
 	for l := 1; l < 3; l++ {
 		for name, meta := range m.manifest {
 			const prefix = "model.layers.0."
