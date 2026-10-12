@@ -56,8 +56,9 @@ func TestV41DecodeResidentH2DMHCConstants(t *testing.T) {
 		m, oracle := v41MHCConstantFixture(t), v41MHCConstantFixture(t)
 		b := v41MHCConstantRecorder()
 		first := v41DenseTestSession(t, m, b)
-		host := oracle.NewSession()
-		defer host.Close()
+		// Same dense seams, host mHC: only constant residency differs. The
+		// pure host session reduces grouped output in another order.
+		host := v41DenseTestSession(t, oracle, newV41DenseTestBackend())
 		if got, want := first.Prefill([]int{1, 2}), host.Prefill([]int{1, 2}); !reflect.DeepEqual(got, want) {
 			t.Fatal("constant residency changed prefill numerics")
 		}
