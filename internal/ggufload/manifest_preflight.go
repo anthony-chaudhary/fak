@@ -473,11 +473,12 @@ func metaNumber(v Value) (float64, bool) {
 			return 1, true
 		}
 		return 0, true
+	default:
+		if u, ok := valueUint64(v); ok {
+			return float64(u), true
+		}
+		return 0, false
 	}
-	if u, ok := valueUint64(v); ok {
-		return float64(u), true
-	}
-	return 0, false
 }
 
 // TensorRequest is one tensor an arch's forward reads: its GGUF name and GGUF
@@ -625,8 +626,9 @@ func HostDequantSupported(t TensorType) bool {
 		TensorIQ2_XXS, TensorIQ2_XS, TensorIQ2_S, TensorIQ3_XXS, TensorIQ3_S, TensorIQ1_S, TensorIQ1_M,
 		TensorIQ4_NL, TensorIQ4_XS, TensorMXFP4, TensorQ2_0, TensorPQ2_0, TensorQ1_0, TensorHQQ4:
 		return true
+	default:
+		return false
 	}
-	return false
 }
 
 // expertResidentSupported reports whether a routed-expert tensor of type t runs
