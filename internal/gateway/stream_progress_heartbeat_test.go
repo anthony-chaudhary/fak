@@ -273,12 +273,13 @@ func TestStreamChatLiveEmitsTypedHeartbeatsDuringLongStream(t *testing.T) {
 }
 
 // TestStreamChatLiveHeartbeatSilentBeforeFirstToken pins the wire-position rule: before the
-// 200/SSE headers are committed (nothing on the wire yet) the heartbeat must NOT write — a
-// premature write would break the "clean HTTP error before any byte" contract. While the
-// modeled upstream parks BEFORE its first fragment, the client sees NOTHING at all: no
-// head, no heartbeat comment, no chunk. After the park ends the turn completes normally.
+// first token the typed heartbeat must NOT write (it reports decode progress there is none
+// of) and no data chunk may leak. Since #13783 the headers DO commit during the park
+// (prefillCommitAfter), carrying only bare `: keepalive` comments so a long prefill is
+// never a silent socket. After the park ends the turn completes normally.
 func TestStreamChatLiveHeartbeatSilentBeforeFirstToken(t *testing.T) {
 	t.Setenv("FAK_STREAM_HEARTBEAT_S", "1")
+	t.Setenv("FAK_STREAM_PREFILL_KEEPALIVE_S", "")
 	silent := newHBProbePlanner("test-model", "late ", "tail", 2500*time.Millisecond, nil)
 	silent.parkFirst = true
 	silent.postCommitPause = 1200 * time.Millisecond
@@ -292,32 +293,35 @@ func TestStreamChatLiveHeartbeatSilentBeforeFirstToken(t *testing.T) {
 	body := []byte(`{"model":"test-model","messages":[{"role":"user","content":"probe"}],"stream":true}`)
 	tap := tapChatStream(ts.URL+"/v1/chat/completions", body)
 
-	// Parked pre-first-token with the heartbeat ticker running: for a full heartbeat
-	// interval + margin NOTHING may reach the client — the response is not committed yet,
-	// so any early write (a heartbeat, a header) would forfeit the clean-error contract.
+	// Parked pre-first-token with the heartbeat ticker running: the head commits early,
+	// but for a full heartbeat interval + margin only keepalive comments may follow it.
+	resp := tap.waitHead(t, hbBudget, "no HTTP head during the pre-first-token park (#13783)")
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("early head = %d %q, want 200 text/event-stream", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
 	silentWindow := time.After(hbBudget)
-	select {
-	case h := <-tap.head:
-		if h.err == nil {
-			t.Fatalf("HTTP head reached the client before the first token (status %d) — a heartbeat or chunk was written pre-commit", h.resp.StatusCode)
+	var opening string
+park:
+	for {
+		select {
+		case line, ok := <-tap.frames:
+			if !ok {
+				t.Fatal("stream closed during the pre-first-token park")
+			}
+			if line != ": keepalive" {
+				t.Fatalf("a non-keepalive frame reached the client before the first token: %q", line)
+			}
+		case <-silentWindow:
+			silent.releasePause()
+			break park
 		}
-		t.Fatalf("request failed during the pre-first-token park: %v", h.err)
-	case line, ok := <-tap.frames:
-		if !ok {
-			t.Fatal("stream closed during the pre-first-token park")
-		}
-		t.Fatalf("a frame reached the client before the first token: %q", line)
-	case <-silentWindow:
-		silent.releasePause()
 	}
 
-	// The turn completes normally once the park ends: well-formed head, role chunk, content.
-	resp := tap.waitHead(t, hbBudget, "no HTTP head after the pre-first-token park ended")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	// The turn completes normally once the park ends: role chunk, content.
+	for opening == "" || opening == ": keepalive" {
+		opening = tap.waitFrame(t, hbBudget, "no opening role chunk after the park")
 	}
-	opening := decodeSSEChunk(t, tap.waitFrame(t, hbBudget, "no opening role chunk after the park"))
-	if got := opening.Choices[0].Delta.Role; got != agent.RoleAssistant {
+	if got := decodeSSEChunk(t, opening).Choices[0].Delta.Role; got != agent.RoleAssistant {
 		t.Fatalf("opening delta role = %q, want assistant", got)
 	}
 	var heartbeatDataFrames []string

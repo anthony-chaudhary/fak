@@ -349,6 +349,75 @@ func (h *heartbeatConfig) emitHeartbeat(w http.ResponseWriter) bool {
 // decodes output the client cannot see yet (a tool call held for adjudication).
 const heldKeepaliveEvery = time.Second
 
+// prefillCommitAfter is how long an admitted live stream may stay uncommitted waiting
+// for its first upstream chunk before the gateway commits the 200 + text/event-stream
+// headers anyway (#13783). An upstream that fails inside this window still gets a real
+// HTTP status; one that fails later (a 300s UPSTREAM_TIMEOUT behind a 102k-token prefill)
+// reaches the client as an in-band SSE error frame instead of a lost write (#13782).
+var prefillCommitAfter = 250 * time.Millisecond
+
+// prefillKeepaliveEvery spaces the `: keepalive` SSE comments sent between the early
+// header commit and the first upstream chunk, so a client or router stall watchdog never
+// sees a silent socket during a long prefill. FAK_STREAM_PREFILL_KEEPALIVE_S overrides
+// it; 0 disables the early commit and keepalives (headers wait for the first chunk).
+var prefillKeepaliveEvery = 5 * time.Second
+
+// startPrefillKeepalive commits the stream's headers after prefillCommitAfter and then
+// writes `: keepalive` comments every interval until the returned stop runs. stop joins
+// the goroutine, so after it returns the caller owns the writer and commit's side effects
+// exclusively. A write error ends the loop (the live writer has already canceled the turn).
+func startPrefillKeepalive(ctx context.Context, w io.Writer, flusher http.Flusher, every time.Duration, commit func()) (stop func()) {
+	if every <= 0 {
+		return func() {}
+	}
+	quit := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		send := func() bool {
+			if _, err := io.WriteString(w, ": keepalive\n\n"); err != nil {
+				return false
+			}
+			flusher.Flush()
+			return true
+		}
+		timer := time.NewTimer(prefillCommitAfter)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-quit:
+			return
+		case <-ctx.Done():
+			return
+		}
+		commit()
+		if !send() {
+			return
+		}
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if !send() {
+					return
+				}
+			case <-quit:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			close(quit)
+			<-done
+		})
+	}
+}
+
 // liveChatResponseWriter adds request-local failure closure only to selected
 // live Chat streaming. It shares the existing serializer mutex; Header retains
 // its existing returned-map contract. Flusher cannot report failures.
@@ -515,20 +584,34 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		}()
 	}
 
-	// Headers + the opening role chunk are written lazily on the first content
-	// fragment, so an upstream failure BEFORE any token still lets us return a real
-	// HTTP status (a 200 + SSE error is far worse for a client than a clean 502).
-	var started bool
-	start := func() error {
-		if started {
-			return nil
+	// The opening role chunk is written lazily on the first content fragment. The
+	// headers go out with it, or earlier from the prefill keepalive loop once the
+	// upstream has been silent for prefillCommitAfter (#13783), so a fast upstream
+	// failure still gets a real HTTP status while a long prefill is never a silent,
+	// header-less socket. headersSent is written only by commitHeaders, which runs on
+	// the keepalive goroutine before stopPrefill joins it or on this goroutine after.
+	var started, headersSent bool
+	commitHeaders := func() {
+		if headersSent {
+			return
 		}
-		started = true
+		headersSent = true
 		h := w.Header()
 		h.Set("Content-Type", "text/event-stream")
 		h.Set("Cache-Control", "no-cache")
 		h.Set("X-Accel-Buffering", "no")
+		// Through the metrics recorder this 200 SSE commit also lifts the server write
+		// deadline (clearStreamWriteDeadline), so a late failure can still be written.
 		w.WriteHeader(http.StatusOK)
+	}
+	stopPrefill := func() {}
+	start := func() error {
+		if started {
+			return nil
+		}
+		stopPrefill()
+		started = true
+		commitHeaders()
 		return writeSSEData(w, chunk(ChatDelta{Role: agent.RoleAssistant}, nil, nil))
 	}
 	var lastWrite time.Time
@@ -615,6 +698,8 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		return true
 	}
 	defer lease.Release()
+	stopPrefill = startPrefillKeepalive(liveCtx, w, flusher, durEnv("FAK_STREAM_PREFILL_KEEPALIVE_S", prefillKeepaliveEvery), commitHeaders)
+	defer stopPrefill()
 
 	began := time.Now()
 	turnCtx := plannerTurnContext(heldCtx, nil, req.Messages, s.contextEpoch)
@@ -622,6 +707,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	turnCtx = withTextToolOffer(turnCtx, req.Tools)
 	comp, err := sp.CompleteStream(turnCtx, firstDelta.wrap(utf8Fragments.write), req.Messages, req.Tools, chatRouteOpts(ctx, opts)...)
 	stopHB()
+	stopPrefill()
 	// Joining the heartbeat establishes that no concurrent write can change the
 	// failure latch before completion accounting or trailer/header mutation.
 	completed := err == nil && comp != nil
@@ -663,7 +749,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 			// retry generation, or run the successful completion path.
 			return true
 		}
-		if !started {
+		if !headersSent {
 			// Nothing on the wire yet — surface a real HTTP error, exactly as the
 			// buffered path does, and own the response (the message is generic so the
 			// upstream body never crosses the trust boundary).
@@ -671,9 +757,10 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 			s.writeUpstreamErr(w, err)
 			return true
 		}
-		// Headers + content already went out; we cannot change the status. Emit a
-		// terminal error frame + [DONE] so the client's SSE parser ends cleanly rather
-		// than hanging, and log the cause for the operator.
+		// Headers (and maybe content) already went out; we cannot change the status.
+		// Emit a terminal error frame + [DONE] so the client's SSE parser ends cleanly
+		// rather than hanging, and log the cause for the operator. A failure during
+		// prefill (headers committed early, no token yet) lands here too (#13782).
 		_, _, msg := s.plannerErrorStatus(err)
 		s.logf("gateway: upstream model error mid-stream: %v", err)
 
@@ -706,7 +793,11 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		} else {
 			cause = "upstream_error"
 		}
-		ic.writeIncident("openai_chat_completions", "mid_stream", statusClass, boundPolicy, cause, ttft, elapsed, bytesEmitted, eventsEmitted, lastEventAge)
+		phase := "mid_stream"
+		if !started {
+			phase = "prefill"
+		}
+		ic.writeIncident("openai_chat_completions", phase, statusClass, boundPolicy, cause, ttft, elapsed, bytesEmitted, eventsEmitted, lastEventAge)
 
 		_ = writeSSEData(w, map[string]any{
 			"error": map[string]any{"message": msg, "type": "server_error"},
@@ -723,7 +814,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	// failClosedOnUnparsedToolCalls; the buffered counterpart is handleChatCompletions).
 	// Mid-stream this surface ends the turn in the OpenAI dialect: a data frame carrying
 	// a server_error, then [DONE].
-	if s.failClosedOnUnparsedToolCalls(w, comp, started, "stream conformance fail-closed", "conformance fail-closed", func() {
+	if s.failClosedOnUnparsedToolCalls(w, comp, headersSent, "stream conformance fail-closed", "conformance fail-closed", func() {
 		_ = writeSSEData(w, map[string]any{
 			"error": map[string]any{"message": "upstream tool-call format not recognized", "type": "server_error"},
 		})
