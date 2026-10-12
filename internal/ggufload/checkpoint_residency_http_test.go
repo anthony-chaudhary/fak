@@ -52,7 +52,7 @@ func TestCheckpointResidencyHTTPReportsRealFileBackedCumulativeIO(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ws.Close() })
-	const prompt = "<|im_start|>user\nhi<|im_end|>\n<|im_start|>assistant\n"
+	const prompt = "<｜begin▁of▁sentence｜><｜User｜>hi<｜Assistant｜></think>"
 	tok, err := tokenizer.FromGGML(
 		[]string{prompt, "a", "b", "c", "d", "e", "f", "g"},
 		[]string{"a b"}, []int32{3, 1, 1, 1, 1, 1, 1, 1}, "gpt2",
@@ -69,7 +69,15 @@ func TestCheckpointResidencyHTTPReportsRealFileBackedCumulativeIO(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv.SetPlanner(agent.NewInKernelPlanner(m, tok, "native", false, nil, false))
+	planner := agent.NewInKernelPlanner(m, tok, "native", false, nil, false)
+	encoded, err := planner.EncodePrompt(t.Context(), []agent.Message{{Role: agent.RoleUser, Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatalf("encode checkpoint residency prompt: %v", err)
+	}
+	if len(encoded.TokenIDs) != 1 || encoded.TokenIDs[0] != 0 {
+		t.Fatalf("checkpoint residency prompt tokens = %v, want [0]", encoded.TokenIDs)
+	}
+	srv.SetPlanner(planner)
 
 	read := func() checkpointResidencyWire {
 		t.Helper()
@@ -259,7 +267,7 @@ func TestCheckpointResidencyHTTPReportsV41WithoutCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const prompt = "<|im_start|>user\nhi<|im_end|>\n<|im_start|>assistant\n"
+	const prompt = "<｜begin▁of▁sentence｜><｜User｜>hi<｜Assistant｜></think>"
 	tok, err := tokenizer.FromGGML(
 		[]string{prompt, "a", "b", "c", "d", "e", "f", "g"},
 		[]string{"a b"}, []int32{3, 1, 1, 1, 1, 1, 1, 1}, "gpt2",
@@ -271,7 +279,15 @@ func TestCheckpointResidencyHTTPReportsV41WithoutCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv.SetPlanner(agent.NewInKernelPlanner(m, tok, "native", false, nil, false))
+	planner := agent.NewInKernelPlanner(m, tok, "native", false, nil, false)
+	encoded, err := planner.EncodePrompt(t.Context(), []agent.Message{{Role: agent.RoleUser, Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatalf("encode checkpoint residency prompt: %v", err)
+	}
+	if len(encoded.TokenIDs) != 1 || encoded.TokenIDs[0] != 0 {
+		t.Fatalf("checkpoint residency prompt tokens = %v, want [0]", encoded.TokenIDs)
+	}
+	srv.SetPlanner(planner)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"native","messages":[{"role":"user","content":"hi"}],"max_tokens":2,"temperature":0}`))
 	req.RemoteAddr = "127.0.0.1:50201"
