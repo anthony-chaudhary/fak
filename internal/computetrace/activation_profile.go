@@ -69,7 +69,7 @@ type ActivationStageProfile struct {
 //
 // Verdict is DIVERGENT when any comparable row mismatched (a measured
 // divergence stands even beside incomparable rows), INCOMPARABLE when nothing
-// diverged but agreement is unproven (a dropped sample, a missing identity, a
+// diverged but agreement is unproven (a dropped event or sample, a missing or extra identity, a
 // refused row, or no compared sample), and EQUAL otherwise.
 type ActivationProfile struct {
 	Verdict           Verdict                  `json:"verdict"`
@@ -91,10 +91,13 @@ type ActivationProfile struct {
 // disagreement refuses that token for its row (Comparable=false) rather than
 // being measured.
 func ActivationErrorProfile(ref, got Artifact, tol ActivationTolerance) ActivationProfile {
+	if reason := validateActivationTolerance(tol); reason != "" {
+		return ActivationProfile{Verdict: TraceIncomparable, Reason: reason}
+	}
 	var out ActivationProfile
-	if ref.DroppedSampleValues != 0 || got.DroppedSampleValues != 0 {
+	if ref.Dropped != 0 || got.Dropped != 0 || ref.DroppedSampleValues != 0 || got.DroppedSampleValues != 0 {
 		out.Incomplete = true
-		out.Reason = "a trace dropped activation samples; rows cover only retained samples"
+		out.Reason = "a trace dropped events or activation samples; rows cover only retained samples"
 	}
 	refIdx, reason := sampleIndex(ref)
 	if reason != "" {
@@ -149,7 +152,7 @@ func ActivationErrorProfile(ref, got Artifact, tol ActivationTolerance) Activati
 		return stageRank[a.Stage] < stageRank[b.Stage]
 	})
 
-	unproven := out.Incomplete || out.MissingIdentities > 0 || out.ComparedSamples == 0
+	unproven := out.Incomplete || out.MissingIdentities > 0 || out.ExtraIdentities > 0 || out.ComparedSamples == 0
 	for i := range out.Rows {
 		row := &out.Rows[i]
 		if row.ComparedSamples > 0 && (row.Mismatches > 0 || row.NonFinite > 0) && out.FirstDivergent == nil {
@@ -165,7 +168,7 @@ func ActivationErrorProfile(ref, got Artifact, tol ActivationTolerance) Activati
 	case unproven:
 		out.Verdict = TraceIncomparable
 		if out.Reason == "" {
-			out.Reason = "agreement unproven: a missing identity, refused row, or uncompared row"
+			out.Reason = "agreement unproven: a missing or extra identity, refused row, or uncompared row"
 		}
 	default:
 		out.Verdict = TraceEqual
@@ -180,6 +183,10 @@ func profilePair(row *ActivationStageProfile, re, ge Event, tol ActivationTolera
 		if row.Reason == "" {
 			row.Reason = reason
 		}
+	}
+	if re.Status == NonFiniteClampedStatus || ge.Status == NonFiniteClampedStatus {
+		refuse("activation samples were non-finite before serialization")
+		return
 	}
 	if re.InputDigest != ge.InputDigest || re.WeightDigest != ge.WeightDigest {
 		refuse("provenance mismatch (input or weight digest)")

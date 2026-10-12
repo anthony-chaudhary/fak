@@ -54,6 +54,16 @@ type ActivationComparison struct {
 	Reason          string             `json:"reason,omitempty"`
 }
 
+// validateActivationTolerance keeps the two public activation comparisons on
+// the same finite, non-negative parameter contract. Negative zero is valid.
+func validateActivationTolerance(tol ActivationTolerance) string {
+	if math.IsNaN(tol.Atol) || math.IsInf(tol.Atol, 0) || tol.Atol < 0 ||
+		math.IsNaN(tol.Rtol) || math.IsInf(tol.Rtol, 0) || tol.Rtol < 0 {
+		return "activation tolerances must be finite and non-negative"
+	}
+	return ""
+}
+
 func incomparable(reason string) ActivationComparison {
 	return ActivationComparison{Verdict: TraceIncomparable, Reason: reason}
 }
@@ -66,12 +76,11 @@ func incomparable(reason string) ActivationComparison {
 // identity. A trace with no sampled events at all is INCOMPARABLE -- a
 // sampleless trace is not evidence of agreement.
 func CompareActivationTraces(ref, got Artifact, tol ActivationTolerance) ActivationComparison {
-	if math.IsNaN(tol.Atol) || math.IsInf(tol.Atol, 0) || tol.Atol < 0 ||
-		math.IsNaN(tol.Rtol) || math.IsInf(tol.Rtol, 0) || tol.Rtol < 0 {
-		return incomparable("activation tolerances must be finite and non-negative")
+	if reason := validateActivationTolerance(tol); reason != "" {
+		return incomparable(reason)
 	}
-	if ref.DroppedSampleValues != 0 || got.DroppedSampleValues != 0 {
-		return incomparable("a trace dropped activation samples; agreement cannot be proven")
+	if ref.Dropped != 0 || got.Dropped != 0 || ref.DroppedSampleValues != 0 || got.DroppedSampleValues != 0 {
+		return incomparable("a trace dropped events or activation samples; agreement cannot be proven")
 	}
 
 	refIndex, reason := sampleIndex(ref)
@@ -97,6 +106,9 @@ func CompareActivationTraces(ref, got Artifact, tol ActivationTolerance) Activat
 		ge, ok := gotIndex[key]
 		if !ok {
 			return incomparable("actual trace is missing activation identity " + key.String())
+		}
+		if re.Status == NonFiniteClampedStatus || ge.Status == NonFiniteClampedStatus {
+			return incomparable("activation samples were non-finite before serialization at " + key.String())
 		}
 		if re.InputDigest != ge.InputDigest || re.WeightDigest != ge.WeightDigest {
 			return incomparable("provenance mismatch at " + key.String())
