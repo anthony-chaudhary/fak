@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -687,19 +688,26 @@ func TestGuardChildResourceHeadroomDebounceAndRecovery(t *testing.T) {
 				guardYieldMemory, guardSuspendProcess, guardResumeProcess = oldYield, oldSuspend, oldResume
 			}()
 
+			var observationsMu sync.Mutex
 			var suspendedPIDs, resumedPIDs []int
 			yields := 0
 			guardYieldMemory = func(pids ...int) {
+				observationsMu.Lock()
+				defer observationsMu.Unlock()
 				if !slices.Equal(pids, []int{42}) {
 					t.Errorf("yield PIDs = %v, want [42]", pids)
 				}
 				yields++
 			}
 			guardSuspendProcess = func(pid int) error {
+				observationsMu.Lock()
+				defer observationsMu.Unlock()
 				suspendedPIDs = append(suspendedPIDs, pid)
 				return nil
 			}
 			guardResumeProcess = func(pid int) error {
+				observationsMu.Lock()
+				defer observationsMu.Unlock()
 				resumedPIDs = append(resumedPIDs, pid)
 				return nil
 			}
@@ -715,6 +723,8 @@ func TestGuardChildResourceHeadroomDebounceAndRecovery(t *testing.T) {
 
 			tickCount := 0
 			ch := startGuardChildResourceMonitorWithCollector(42, "trace-recovery", "test-agent", policy, func(pid int) (procguard.MemorySnapshot, bool, string) {
+				observationsMu.Lock()
+				defer observationsMu.Unlock()
 				tickCount++
 				systemBytes := uint64(950)
 				if tickCount == 4 {
@@ -731,6 +741,12 @@ func TestGuardChildResourceHeadroomDebounceAndRecovery(t *testing.T) {
 				}, true, ""
 			})
 
+			observe := func() (ticks, yieldCount int, suspended, resumed []int) {
+				observationsMu.Lock()
+				defer observationsMu.Unlock()
+				return tickCount, yields, slices.Clone(suspendedPIDs), slices.Clone(resumedPIDs)
+			}
+
 			advance := func(d time.Duration) {
 				t.Helper()
 				time.Sleep(d)
@@ -745,21 +761,23 @@ func TestGuardChildResourceHeadroomDebounceAndRecovery(t *testing.T) {
 				}
 			}
 
-			// Install the ticker before advancing virtual time. Wait also makes
-			// collector and hook observations safe to inspect without a race.
+			// Install the ticker before advancing virtual time. Wait joins prior
+			// callbacks; the mutex orders observations before later timer callbacks.
 			synctest.Wait()
 			advance(40 * time.Millisecond)
 			assertNoEvent("after recovery")
-			if tickCount != 4 || yields != 3 || !slices.Equal(suspendedPIDs, []int{42}) || !slices.Equal(resumedPIDs, []int{42}) {
-				t.Fatalf("recovery not observed: ticks=%d yields=%d suspended=%v resumed=%v", tickCount, yields, suspendedPIDs, resumedPIDs)
+			ticks, yieldCount, suspended, resumed := observe()
+			if ticks != 4 || yieldCount != 3 || !slices.Equal(suspended, []int{42}) || !slices.Equal(resumed, []int{42}) {
+				t.Fatalf("recovery not observed: ticks=%d yields=%d suspended=%v resumed=%v", ticks, yieldCount, suspended, resumed)
 			}
 
 			// The old deadline is 70ms; the renewed deficit must get its own
 			// full 60ms grace, ending at 110ms rather than inheriting that deadline.
 			advance(60 * time.Millisecond)
 			assertNoEvent("before renewed grace expires")
-			if tickCount != 10 || !slices.Equal(suspendedPIDs, []int{42, 42}) || !slices.Equal(resumedPIDs, []int{42}) {
-				t.Fatalf("renewed deficit not observed: ticks=%d suspended=%v resumed=%v", tickCount, suspendedPIDs, resumedPIDs)
+			ticks, _, suspended, resumed = observe()
+			if ticks != 10 || !slices.Equal(suspended, []int{42, 42}) || !slices.Equal(resumed, []int{42}) {
+				t.Fatalf("renewed deficit not observed: ticks=%d suspended=%v resumed=%v", ticks, suspended, resumed)
 			}
 
 			advance(10 * time.Millisecond)
@@ -771,8 +789,9 @@ func TestGuardChildResourceHeadroomDebounceAndRecovery(t *testing.T) {
 			default:
 				t.Fatal("expected resource event when renewed 60ms grace expires")
 			}
-			if !slices.Equal(resumedPIDs, []int{42, 42}) {
-				t.Fatalf("monitor did not resume on exit: %v", resumedPIDs)
+			_, _, _, resumed = observe()
+			if !slices.Equal(resumed, []int{42, 42}) {
+				t.Fatalf("monitor did not resume on exit: %v", resumed)
 			}
 		})
 	})
