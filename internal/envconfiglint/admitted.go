@@ -711,6 +711,12 @@ var admittedPostFreeze = []string{
 	// Relocates to: decode execution config.
 	"FAK_QWEN35_PERSISTENT_DECODE_DKV",
 
+	// internal/model/metal_prefill_hybrid_devicekv.go — existing Metal Qwen3.5 decode
+	// device-KV attention toggle (=0 forces the host-prefix attention). An A-B / rollback
+	// lever, not a credential; pending relocation to the config surface.
+	// Relocates to: decode execution config.
+	"FAK_QWEN35_DECODE_DKV",
+
 	// cmd/fak/claude_router.go — router URL and model selection for `fak claude` on the router.
 	// Relocates to: claude router launcher config.
 	"FAK_ROUTER_MODEL",
