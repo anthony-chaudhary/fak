@@ -142,19 +142,26 @@ type deepSeekV41TextMetadata struct {
 	MoEIntermediateSize int `json:"moe_intermediate_size"`
 }
 
-// MarshalJSON reconstructs the V4.1 wrapper from current Config fields. Other
-// families keep the existing flat Config encoding.
+// MarshalJSON retains canonical GGUF identity and effective V4.1 metadata, or
+// reconstructs the official V4.1 wrapper. Other families keep the flat encoding.
 func (c Config) MarshalJSON() ([]byte, error) {
 	if c.DeepSeekV41 == nil {
 		return json.Marshal(configAlias(c))
 	}
 	m := c.DeepSeekV41
+	gguf := c.ModelType == "deepseek41"
+	if gguf && (m.WrapperModelType != "" || m.TextModelType != "") {
+		return nil, fmt.Errorf("%w: GGUF config carries official wrapper/text identity", ErrV41ConfigAdmission)
+	}
 	root := c
 	root.ModelType = m.WrapperModelType
 	root.DeepSeekV41 = nil
 	text := c
 	text.ModelType = m.TextModelType
 	text.DeepSeekV41 = nil
+	if gguf {
+		text.ModelType = c.ModelType
+	}
 	type textEnvelope struct {
 		configAlias
 		KVSourceLayerIDs          []int   `json:"kv_source_layer_ids"`
@@ -249,13 +256,25 @@ func (c Config) MarshalJSON() ([]byte, error) {
 			MaxImageTokens:    v.MaxImageTokens,
 		}
 	}
+	if gguf {
+		// These are effective execution axes, not an official checkpoint claim.
+		// Keep the raw quantization declaration embedded in Config unchanged.
+		if m.DSpark == nil {
+			nested.NumNextNPredictLayers = c.NumNextNPredictLayers
+		}
+		return json.Marshal(struct {
+			textEnvelope
+			VisionConfig *visionEnvelope `json:"vision_config,omitempty"`
+		}{nested, vision})
+	}
 	return json.Marshal(wrapperEnvelope{configAlias(root), m.Quantization, nested, vision})
 }
 
 func parseDeepSeekV41Metadata(root, text []byte, c Config) (*DeepSeekV41Config, error) {
 	var envelope struct {
-		ModelType    string                 `json:"model_type"`
-		Quantization DeepSeekV41QuantConfig `json:"quantization_config"`
+		TextConfig   json.RawMessage `json:"text_config"`
+		ModelType    string          `json:"model_type"`
+		Quantization json.RawMessage `json:"quantization_config"`
 		VisionConfig *struct {
 			ModelType      string `json:"model_type"`
 			NumHiddenLayer int    `json:"num_hidden_layers"`
@@ -272,13 +291,43 @@ func parseDeepSeekV41Metadata(root, text []byte, c Config) (*DeepSeekV41Config, 
 	if err := json.Unmarshal(text, &nested); err != nil {
 		return nil, err
 	}
-	if envelope.ModelType != "deepseek_v41" && nested.ModelType != "deepseek_v41_text" {
+	gguf := envelope.ModelType == "deepseek41"
+	if gguf {
+		if len(envelope.TextConfig) != 0 {
+			return nil, fmt.Errorf("%w: canonical GGUF JSON must be flat", ErrV41ConfigAdmission)
+		}
+		// A legacy flat config without effective topology keeps its nil envelope.
+		// Once any topology axis is present, require the full serialized set so
+		// an omitted candidate source cannot silently become layer zero.
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(root, &fields); err != nil {
+			return nil, err
+		}
+		keys := []string{"kv_source_layer_ids", "index_source_layer_ids", "candidate_source_layer_id", "candidate_topk_blocks", "candidate_block_size"}
+		present := false
+		for _, key := range keys {
+			present = present || len(fields[key]) > 0
+		}
+		if !present {
+			return nil, nil
+		}
+		for i, key := range keys {
+			if len(fields[key]) == 0 {
+				return nil, fmt.Errorf("%w: GGUF effective topology lacks %s", ErrV41ConfigAdmission, key)
+			}
+			if i >= 2 {
+				var value *int
+				if err := json.Unmarshal(fields[key], &value); err != nil || value == nil {
+					return nil, fmt.Errorf("%w: GGUF effective topology requires integer %s", ErrV41ConfigAdmission, key)
+				}
+			}
+		}
+	} else if envelope.ModelType != "deepseek_v41" && nested.ModelType != "deepseek_v41_text" {
 		return nil, nil
 	}
 	m := &DeepSeekV41Config{
 		WrapperModelType:          envelope.ModelType,
 		TextModelType:             nested.ModelType,
-		Quantization:              envelope.Quantization,
 		KVSourceLayerIDs:          append([]int(nil), nested.KVSourceLayerIDs...),
 		IndexSourceLayerIDs:       append([]int(nil), nested.IndexSourceLayerIDs...),
 		CandidateSourceLayerID:    nested.CandidateSourceLayerID,
@@ -334,6 +383,30 @@ func parseDeepSeekV41Metadata(root, text []byte, c Config) (*DeepSeekV41Config, 
 			MarkovRank:         nested.DSparkMarkovRank,
 			NumRoutedExperts:   nested.DSparkNumRoutedExperts,
 			NumExpertsPerTok:   nested.DSparkNumExpertsPerTok,
+		}
+	}
+	if gguf {
+		// Cross-check against the GGUF constructor without replacing the decoded
+		// values. In particular, a published schedule cannot acquire different
+		// sources or candidate geometry merely by passing through JSON.
+		want, err := NewDeepSeekV41GGUFConfig(c, V41GGUFTopology{
+			KVSourceLayerIDs: m.KVSourceLayerIDs, IndexSourceLayerIDs: m.IndexSourceLayerIDs,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if !v41EqualInts(m.KVSourceLayerIDs, want.KVSourceLayerIDs) ||
+			!v41EqualInts(m.IndexSourceLayerIDs, want.IndexSourceLayerIDs) ||
+			m.CandidateSourceLayerID != want.CandidateSourceLayerID ||
+			m.CandidateTopKBlocks != want.CandidateTopKBlocks || m.CandidateBlockSize != want.CandidateBlockSize {
+			return nil, fmt.Errorf("%w: GGUF effective topology disagrees with its schedule", ErrV41ConfigAdmission)
+		}
+		m.WrapperModelType, m.TextModelType = "", ""
+		return m, nil
+	}
+	if len(envelope.Quantization) != 0 {
+		if err := json.Unmarshal(envelope.Quantization, &m.Quantization); err != nil {
+			return nil, err
 		}
 	}
 	if err := admitDeepSeekV41Published(c, m); err != nil {
