@@ -6,10 +6,10 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1300<br>
-rows: 1268<br>
-unverified rows: 0 / 1268<br>
-source-only rows absent from help: 1032
+parsed files: 1303<br>
+rows: 1269<br>
+unverified rows: 0 / 1269<br>
+source-only rows absent from help: 1033
 
 ## Surface table
 
@@ -1146,6 +1146,7 @@ source-only rows absent from help: 1032
 | `fak tree-doctor` | the worktree doctor: detect and prune stray / dead git worktrees | cmdTreeDoctor / internal/treedoctor, internal/windowgate | `case` arm of the dispatch switch in dispatchPrimaryVerb() | RUNTIME | — | **SOURCE ONLY** |
 | `fak trunk-build-probe` | read-only diagnosis of whether the release gate's red trunk is a forgotten `git add` vs a real break | cmdTrunkBuildProbe / internal/trunkbuildprobe | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak trunk-red` | fold the trunk-red witness ledger into distinct shared build breaks, worst (most clones stuck) first | cmdTrunkRed / internal/jsonlledger, internal/procguard, internal/safecommit, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbB() | RUNTIME | — | **SOURCE ONLY** |
+| `fak trunk-red claim` | `fak trunk-red claim\\|release <pkg>...`. | runTrunkRedClaim / internal/committedtree, internal/leaseref | `if` arm of the dispatch in runTrunkRed() | NONE | — | **SOURCE ONLY** |
 | `fak turnavoid` | replay whole-model-turn avoidance traces with strict JSONL input and net-true attribution | cmdTurnavoid | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak turnavoid help` |  |  | `case` arm of the dispatch switch in runTurnavoid() | N/A | — | **SOURCE ONLY** |
 | `fak turnavoid replay` |  | runTurnavoidReplay / internal/turnavoid | `case` arm of the dispatch switch in runTurnavoid() | NONE | — | **SOURCE ONLY** |
