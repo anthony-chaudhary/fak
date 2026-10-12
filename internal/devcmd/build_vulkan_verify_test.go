@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	vulkanVerifyRegistrySHA = "dd7028349a8865b897849f319e9ebc06601d5dc3e5b820b12478c15c1e9a182b"
+	vulkanVerifyRegistrySHA = "ddffbd3c5d28bbd69452ccbd2710df68bcc52cd4da0c9192e8661cec3b724151"
 	vulkanVerifyPolicyID    = "fak.v41-indexer-score-f32-structure.v1"
 )
 
