@@ -34,18 +34,19 @@ func TestV41DeviceOnlyNamesHostEngramRowDecode(t *testing.T) {
 		t.Fatalf("model without Engram layers names the row decode: %v", got)
 	}
 
+	const width = 256
 	row := make([]byte, V41EngramPackedRowBytes)
-	for i := range 256 {
+	for i := range width {
 		row[i] = 0x38
 	}
-	for i := 256; i < V41EngramPackedRowBytes; i++ {
+	for i := width; i < V41EngramPackedRowBytes; i++ {
 		row[i] = 127
 	}
 	var decoded []float32
 	var err error
-	rounds := v41BF16PublishHostRounds(t, func() { decoded, err = decodeV41EngramRow(row, 256, V41EngramPackedRowBytes) })
-	if err != nil || len(decoded) != 256 || decoded[0] != 1 || rounds != 256 {
-		t.Fatalf("packed decode err=%v len=%d first=%v host_rounds=%d, want 256 witnessed rounds", err, len(decoded), decoded, rounds)
+	rounds := v41BF16PublishHostRounds(t, func() { decoded, err = decodeV41EngramRow(row, width, V41EngramPackedRowBytes) })
+	if err != nil || len(decoded) != width || decoded[0] != 1 || rounds != int64(len(decoded)) {
+		t.Fatalf("packed decode err=%v len=%d first=%v host_rounds=%d, want one witnessed round per decoded value (%d)", err, len(decoded), decoded, rounds, width)
 	}
 }
 
