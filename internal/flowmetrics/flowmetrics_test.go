@@ -32,6 +32,10 @@ func TestParseIssueRefsFencesForeignAndKeepsSingleDigits(t *testing.T) {
 	if got := ParseIssueRefs("perf: port llama.cpp #14762 and vLLM #35021"); len(got) != 0 {
 		t.Fatalf("foreign refs leaked: %v", got)
 	}
+	// fak's own numbering now overlaps the upstream citations' range.
+	if got := ParseIssueRefs("fix(x): thing (#13827) after llama.cpp #14762 (fak x)"); len(got) != 1 || got[0] != 13827 {
+		t.Fatalf("refs = %v, want [13827]", got)
+	}
 	// A sha-like token is not a reference.
 	if got := ParseIssueRefs("chore: bump abc#123"); len(got) != 0 {
 		t.Fatalf("in-word ref matched: %v", got)
