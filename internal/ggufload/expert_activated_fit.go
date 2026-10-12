@@ -113,7 +113,11 @@ func activatedExpertFit(as RoutedExpertActiveSet, deviceBudgetBytes int64) (Acti
 		HostGatheredBytes:   max(as.HostGatheredResident, 0),
 	}
 	if k > 0 {
-		perExpertLayer := ceilDivInt64(as.RoutedResident, int64(as.NumExperts)*int64(as.MoELayers))
+		experts, layers := int64(as.NumExperts), int64(as.MoELayers)
+		if experts > math.MaxInt64/layers {
+			return ActivatedExpertFit{}, false, fmt.Errorf("gguf: activated expert count times MoE layers overflow int64")
+		}
+		perExpertLayer := ceilDivInt64(as.RoutedResident, experts*layers)
 		if perExpertLayer != 0 && int64(k) > math.MaxInt64/perExpertLayer {
 			return ActivatedExpertFit{}, false, fmt.Errorf("gguf: activated expert layer bytes overflow int64")
 		}
@@ -260,6 +264,13 @@ func (s *WeightSource) FitActivatedExpertsOnDevice(be compute.Backend, headroom 
 func ceilDivInt64(n, d int64) int64 {
 	if d <= 0 {
 		return 0
+	}
+	if n > 0 {
+		q := n / d
+		if n%d != 0 {
+			q++
+		}
+		return q
 	}
 	return (n + d - 1) / d
 }
