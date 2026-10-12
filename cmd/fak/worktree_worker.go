@@ -580,6 +580,21 @@ func workerLandSymptomUnwitnessed(detail string) workerworktree.Result {
 	}
 }
 
+// workerLandSymptomPreflight refuses a fix(*) land whose explicit paths carry no
+// changed test before any candidate is materialized or built: the witness would
+// refute it as SYMPTOM_NO_TEST anyway, only after the full prepare. An unscoped
+// land (no --paths) is left to the witness, which reads the candidate commit.
+func workerLandSymptomPreflight(paths []string) (workerworktree.Result, bool) {
+	if len(paths) == 0 || len(witness.SymptomTestFiles(paths)) > 0 {
+		return workerworktree.Result{}, false
+	}
+	res := workerLandSymptomUnwitnessed(symptomRefusalDetail("refuted", "no changed test file in the land paths (preflight, nothing built); "+symptomNoTestCure))
+	res.SymptomVerdict = symptomSubtype("no changed test file")
+	return res, true
+}
+
+const symptomNoTestCure = "cure: add a *_test.go (or test_*.py) to the land paths that fails on the parent and passes on the fix, driving the bug through API the parent already has; if there is no pre-existing symptom, retype the subject as feat/refactor/chore"
+
 // splitTagList parses the comma-separated --symptom-tags value into a tag slice: trim each
 // entry, drop empties. An unset flag yields nil, preserving today's untagged default.
 func splitTagList(s string) []string {
@@ -612,7 +627,11 @@ func verifyWorkerLandSymptomSelected(wtPath, ref string, extraTags, testSelector
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	outcome, detail := resolver.ResolveSymptomWithDetail(ctx, ref, true)
-	return workerLandSymptomVerdict(outcome, detail, timeout)
+	res := workerLandSymptomVerdict(outcome, detail, timeout)
+	if excerpt := resolver.SymptomFailureExcerpt(); !res.OK && excerpt != "" {
+		res.Detail += " | " + excerpt
+	}
+	return res
 }
 
 // Closed symptom_verdict tokens. Only a refutation refuses the land; an abstention
@@ -672,6 +691,8 @@ func symptomRefusalDetail(outcome, detail string) string {
 // zero match or a parent failure, and neither is evidence once the budget expired.
 func symptomSubtype(detail string) string {
 	switch {
+	case strings.Contains(detail, "candidate") && strings.Contains(detail, "did not build"):
+		return "SYMPTOM_CANDIDATE_BUILD"
 	case strings.Contains(detail, "timed out"):
 		return "SYMPTOM_TIMEOUT"
 	case strings.Contains(detail, "matched no"):
@@ -1126,6 +1147,12 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	// Mandatory fail-to-pass symptom witness for fix(*) commits (#10926)
 	subj := worktreeCommitSubject(worktreeDir, strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile))
 	requireSymptomWitness := isFixSubject(subj) && !*unsafeSkipSymptomWitness
+	if requireSymptomWitness && (mode == "legacy" || mode == "prepare") {
+		if res, refused := workerLandSymptomPreflight([]string(paths)); refused {
+			fmt.Fprintln(stderr, "fak worktree worker land: "+res.Detail)
+			return returnEarly(res, 1)
+		}
+	}
 
 	var hook workerworktree.VerifyHook
 	switch strings.ToLower(strings.TrimSpace(*verify)) {

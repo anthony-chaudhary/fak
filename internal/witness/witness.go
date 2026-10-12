@@ -186,6 +186,7 @@ type Resolver struct {
 	// realCommandExecution excludes injected command evidence from durable proof reuse.
 	realCommandExecution bool
 	dir                  string
+	symptomExcerpt       string
 
 	// symptomTags are EXTRA build tags a caller supplies explicitly (#13243), unioned
 	// with the tags derived from the changed test files' //go:build constraints by
