@@ -32,6 +32,7 @@ type v41PublicationRoPERecorder struct {
 	// rounds its rotated tails while resident.
 	publishes    bool
 	publishSites []uint32
+	*v41DeferredLedger
 }
 
 func (b *v41PublicationRoPERecorder) SupportsV41BF16Publish(n int) bool { return b.publishes && n > 0 }

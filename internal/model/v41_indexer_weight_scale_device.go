@@ -167,23 +167,42 @@ func (s *Session) v41IndexWeightScaleFunc() v41IndexWeightScaleFunc {
 			// The scaled weight publishes while still resident, so the F32
 			// product never reaches the host unrounded.
 			stage = "scaled weight publication"
-			published, selected, err := s.v41PublishResidentBF16(product, compute.V41BF16PublishIndexerScaledWeight)
+			published, status, deferred, err := s.v41PublishResidentBF16Deferred(product, compute.V41BF16PublishIndexerScaledWeight)
 			if err != nil {
 				return nil, err
 			}
-			if !selected {
-				return nil, errV41IndexWeightScaleResult
+			var read []float32
+			if deferred {
+				owned = append(owned, published)
+				stage = "scaled weight readback"
+				row, verdict, err := s.v41ReadResidentBF16(published, status)
+				if err != nil {
+					return nil, err
+				}
+				if verdict != nil {
+					stage = "scaled weight publication"
+					return nil, verdict
+				}
+				read = row
+			} else {
+				published, selected, err := s.v41PublishResidentBF16(product, compute.V41BF16PublishIndexerScaledWeight)
+				if err != nil {
+					return nil, err
+				}
+				if !selected {
+					return nil, errV41IndexWeightScaleResult
+				}
+				owned = append(owned, published)
+				stage = "scaled weight readback"
+				read = append([]float32(nil), backend.Read(published)...)
 			}
-			owned = append(owned, published)
-			stage = "scaled weight readback"
-			read := backend.Read(published)
 			if len(read) != heads || !v41BF16Widened(read) {
 				return nil, errV41IndexWeightScaleResult
 			}
 			if v41HostBF16Witness.Load() {
 				v41IndexWeightScaleCalls.Add(1)
 			}
-			return append([]float32(nil), read...), nil
+			return read, nil
 		}
 		result, cause = run()
 		if cause != nil {

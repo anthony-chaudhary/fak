@@ -21,6 +21,8 @@ type v41BF16PublishRecorder struct {
 	// self names the outermost recorder when another recorder embeds this
 	// one, so fresh tensors carry the session backend's identity.
 	self compute.Backend
+	// A bound ledger adds the deferred-status publication.
+	*v41DeferredLedger
 }
 
 func (b *v41BF16PublishRecorder) owner() compute.Backend {

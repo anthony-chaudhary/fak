@@ -89,11 +89,17 @@ type v41GroupedPublishGapBackend struct {
 	*v41GroupedBackend
 	rank      int
 	publishes int
+	faultAt   int
+	fault     error
+	*v41DeferredLedger
 }
 
 func (b *v41GroupedPublishGapBackend) SupportsV41BF16Publish(n int) bool { return n > 0 && n != b.rank }
 func (b *v41GroupedPublishGapBackend) V41BF16Publish(x compute.Tensor, site uint32) (compute.Tensor, error) {
 	b.publishes++
+	if b.publishes == b.faultAt {
+		return compute.Tensor{}, b.fault
+	}
 	values := append([]float32(nil), b.v41DenseTestBackend.Backend.Read(x)...)
 	for i, v := range values {
 		values[i] = math.Float32frombits(v41BF16BoundaryOracle(math.Float32bits(v)))

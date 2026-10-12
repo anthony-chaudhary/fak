@@ -194,6 +194,59 @@ func TestVulkanV41BF16Publish(t *testing.T) {
 		}
 		v.Free(out)
 	})
+	// The deferred form issues the same kernel and leaves its status on the
+	// device: the status and row then arrive behind one fence, bit-exact, and
+	// a fault decodes to the synchronous verdict with the row withheld.
+	t.Run("deferred", func(t *testing.T) {
+		if !v.SupportsV41DeferredStatus(len(values)) {
+			t.Fatal("registered ordinary Vulkan build lacks the deferred status record")
+		}
+		for _, site := range sites {
+			start, _ := v.BackendExecutionSnapshot()
+			out, status, err := v.V41BF16PublishDeferred(dx, site)
+			if err != nil {
+				t.Fatalf("site %d: %v", site, err)
+			}
+			issued, _ := v.BackendExecutionSnapshot()
+			verdicts, rows, err := v.V41ReadDeferred([]V41DeferredStatus{status}, []Tensor{out})
+			end, _ := v.BackendExecutionSnapshot()
+			v.Free(out)
+			if err != nil || len(verdicts) != 1 || verdicts[0] != nil || len(rows) != 1 || len(rows[0]) != len(words) {
+				t.Fatalf("site %d deferred read: verdicts=%v err=%v", site, verdicts, err)
+			}
+			publish, _ := BackendExecutionDelta(start, issued)
+			read, _ := BackendExecutionDelta(issued, end)
+			if publish.Counters.ComputeDispatches != 1 || publish.Counters.D2HCount != 0 ||
+				read.Counters.ComputeDispatches != 0 || read.Counters.D2HCount != 2 || read.Counters.D2HBytes != uint64(16+4*len(words)) {
+				t.Fatalf("site %d deferred contract: publish %+v read %+v", site, publish.Counters, read.Counters)
+			}
+			for i, w := range words {
+				if math.Float32bits(rows[0][i]) != v41BF16PublishOracle(w) {
+					t.Fatalf("site %d deferred lane %d word %08x got %08x want %08x", site, i, w, math.Float32bits(rows[0][i]), v41BF16PublishOracle(w))
+				}
+			}
+		}
+		row := make([]float32, 10)
+		for i, b := range []uint32{0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000, 0xffc00001, 0, 0, 0, 0xff7f8000} {
+			row[i] = math.Float32frombits(b)
+		}
+		in := upload(row)
+		defer v.Free(in)
+		_, syncErr := v.V41BF16Publish(in, V41BF16PublishRoutedDown)
+		out, status, err := v.V41BF16PublishDeferred(in, V41BF16PublishRoutedDown)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verdicts, _, err := v.V41ReadDeferred([]V41DeferredStatus{status}, []Tensor{out})
+		v.Free(out)
+		var syncBackend, deferredBackend *BackendError
+		var syncNumeric, deferredNumeric *V41BF16CheckedArithmeticError
+		if err != nil || len(verdicts) != 1 || !errors.As(syncErr, &syncBackend) || !errors.As(verdicts[0], &deferredBackend) ||
+			syncBackend.Site != deferredBackend.Site || syncBackend.Class != deferredBackend.Class ||
+			!errors.As(syncErr, &syncNumeric) || !errors.As(verdicts[0], &deferredNumeric) || *syncNumeric != *deferredNumeric || deferredNumeric.Index != 5 {
+			t.Fatalf("deferred verdict %v (err %v) differs from the synchronous %v", verdicts, err, syncErr)
+		}
+	})
 	if after := snapshot(); after.DeviceAllocationLiveBytes != before.DeviceAllocationLiveBytes {
 		t.Fatalf("refusals leaked device bytes: before=%d after=%d", before.DeviceAllocationLiveBytes, after.DeviceAllocationLiveBytes)
 	}

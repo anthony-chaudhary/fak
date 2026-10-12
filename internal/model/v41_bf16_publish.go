@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -16,7 +17,13 @@ var (
 	v41HostBF16Rounds    atomic.Int64
 	v41BF16PublishCalls  atomic.Int64
 	v41BF16ResidentCalls atomic.Int64
+	v41BF16DeferredCalls atomic.Int64
 )
+
+// v41DeferredBF16PublishEnv keeps every ordinary publication on its synchronous
+// status readback when set to "0", so the deferred read stays one switch away
+// for A/B and bisection.
+const v41DeferredBF16PublishEnv = "FAK_V41_DEFERRED_BF16_PUBLISH"
 
 // enableV41BF16Witness zeroes the host-round and device-publication counters and
 // turns them on until the returned stop runs.
@@ -24,6 +31,7 @@ func enableV41BF16Witness() (stop func()) {
 	v41HostBF16Rounds.Store(0)
 	v41BF16PublishCalls.Store(0)
 	v41BF16ResidentCalls.Store(0)
+	v41BF16DeferredCalls.Store(0)
 	v41IndexWeightScaleCalls.Store(0)
 	v41HostBF16Witness.Store(true)
 	return func() { v41HostBF16Witness.Store(false) }
@@ -251,6 +259,38 @@ func (s *Session) v41BF16PublishFunc() v41BF16BoundaryFunc {
 			// The device validates every word; a nonfinite input or rounded overflow
 			// is attributed to its lowest index and the output is withheld.
 			stage = "checked publication"
+			if deferred, ok := v41DeferredBF16Publisher(backend, len(values)); ok {
+				out, status, err := deferred.V41BF16PublishDeferred(input, siteID)
+				fresh := out.Buf() != nil && out.Backend() == backend && out.Buf() != input.Buf()
+				if fresh {
+					owned = append(owned, out)
+				}
+				if err != nil {
+					return nil, err
+				}
+				if !fresh || out.Dtype != compute.F32 || out.Layout != compute.RowMajor || out.Quant != nil ||
+					len(out.Shape) != 1 || out.Shape[0] != len(values) {
+					backend.Free(status.Record)
+					return nil, errV41BF16BoundaryResult
+				}
+				if v41HostBF16Witness.Load() {
+					v41BF16PublishCalls.Add(1)
+					v41BF16DeferredCalls.Add(1)
+				}
+				stage = "checked publication readback"
+				read, verdict, err := v41ReadDeferredBF16(deferred, out, status)
+				if err != nil {
+					return nil, err
+				}
+				if verdict != nil {
+					stage = "checked publication"
+					return nil, verdict
+				}
+				if len(read) != len(values) || !v41BF16Widened(read) {
+					return nil, errV41BF16BoundaryResult
+				}
+				return read, nil
+			}
 			out, err := operation.V41BF16Publish(input, siteID)
 			fresh := out.Buf() != nil && out.Backend() == backend && out.Buf() != input.Buf()
 			if fresh {
@@ -281,20 +321,102 @@ func (s *Session) v41BF16PublishFunc() v41BF16BoundaryFunc {
 	}
 }
 
+// v41DeferredBF16Publisher returns the backend's deferred-status publication
+// for a count-element row, unless FAK_V41_DEFERRED_BF16_PUBLISH=0.
+func v41DeferredBF16Publisher(backend compute.Backend, count int) (compute.V41DeferredStatusBackend, bool) {
+	deferred, ok := backend.(compute.V41DeferredStatusBackend)
+	if !ok || os.Getenv(v41DeferredBF16PublishEnv) == "0" || !deferred.SupportsV41DeferredStatus(count) {
+		return nil, false
+	}
+	return deferred, true
+}
+
+// v41ReadDeferredBF16 reads one deferred publication's status record and row
+// behind one host fence; the record is freed either way. verdict is exactly the
+// error the synchronous publication returns for the same record, and the row
+// is withheld unless it is nil. err is a transport or protocol failure that
+// leaves the verdict unknown.
+func v41ReadDeferredBF16(deferred compute.V41DeferredStatusBackend, out compute.Tensor, status compute.V41DeferredStatus) (row []float32, verdict, err error) {
+	verdicts, rows, err := deferred.V41ReadDeferred([]compute.V41DeferredStatus{status}, []compute.Tensor{out})
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(verdicts) != 1 || len(rows) != 1 {
+		return nil, nil, errV41BF16BoundaryResult
+	}
+	if verdicts[0] != nil {
+		return nil, verdicts[0], nil
+	}
+	return rows[0], nil, nil
+}
+
+func v41ResidentBF16Count(t compute.Tensor) (int, bool) {
+	count := 1
+	for _, d := range t.Shape {
+		if d <= 0 || count > math.MaxInt32/d {
+			return 0, false
+		}
+		count *= d
+	}
+	return count, len(t.Shape) > 0
+}
+
+// v41PublishResidentBF16Deferred is v41PublishResidentBF16 without its status
+// readback (#13820): the record stays on the device until v41ReadResidentBF16
+// reads it beside the published row behind one fence. It is selected only
+// where v41PublishResidentBF16 would publish; ok=false leaves the caller on
+// that synchronous form. On success the caller owns the tensor and reads it
+// only through v41ReadResidentBF16, which consumes the status.
+func (s *Session) v41PublishResidentBF16Deferred(t compute.Tensor, site uint32) (compute.Tensor, compute.V41DeferredStatus, bool, error) {
+	operation, ok := s.Backend.(compute.V41BF16PublishBackend)
+	count, valid := v41ResidentBF16Count(t)
+	if !ok || !valid || !operation.SupportsV41BF16Publish(count) {
+		return compute.Tensor{}, compute.V41DeferredStatus{}, false, nil
+	}
+	deferred, ok := v41DeferredBF16Publisher(s.Backend, count)
+	if !ok {
+		return compute.Tensor{}, compute.V41DeferredStatus{}, false, nil
+	}
+	flat := t
+	flat.Shape = []int{count}
+	out, status, err := deferred.V41BF16PublishDeferred(flat, site)
+	if err != nil {
+		if out.Buf() != nil && out.Buf() != t.Buf() {
+			s.Backend.Free(out)
+		}
+		return compute.Tensor{}, compute.V41DeferredStatus{}, true, err
+	}
+	if out.Buf() == nil || out.Buf() == t.Buf() || out.Dtype != compute.F32 || len(out.Shape) != 1 || out.Shape[0] != count {
+		if out.Buf() != nil && out.Buf() != t.Buf() {
+			s.Backend.Free(out)
+		}
+		s.Backend.Free(status.Record)
+		return compute.Tensor{}, compute.V41DeferredStatus{}, true, errV41BF16BoundaryResult
+	}
+	if v41HostBF16Witness.Load() {
+		v41BF16ResidentCalls.Add(1)
+		v41BF16DeferredCalls.Add(1)
+	}
+	return out, status, true, nil
+}
+
+// v41ReadResidentBF16 is v41ReadDeferredBF16 for a resident publication.
+func (s *Session) v41ReadResidentBF16(out compute.Tensor, status compute.V41DeferredStatus) (row []float32, verdict, err error) {
+	deferred, ok := s.Backend.(compute.V41DeferredStatusBackend)
+	if !ok {
+		s.Backend.Free(status.Record)
+		return nil, nil, errV41BF16BoundaryResult
+	}
+	return v41ReadDeferredBF16(deferred, out, status)
+}
+
 // v41PublishResidentBF16 publishes a device-resident F32 [N] result before its
 // one readback, so a selected seam never rounds on the host. ok=false means the
 // backend lacks the ordinary operation and the caller keeps its host rounding.
 // The returned tensor is fresh and owned by the caller.
 func (s *Session) v41PublishResidentBF16(t compute.Tensor, site uint32) (compute.Tensor, bool, error) {
 	operation, ok := s.Backend.(compute.V41BF16PublishBackend)
-	count, valid := 1, len(t.Shape) > 0
-	for _, d := range t.Shape {
-		if d <= 0 || count > math.MaxInt32/d {
-			valid = false
-			break
-		}
-		count *= d
-	}
+	count, valid := v41ResidentBF16Count(t)
 	if !ok || !valid || !operation.SupportsV41BF16Publish(count) {
 		return compute.Tensor{}, false, nil
 	}

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"sort"
 	"testing"
 
@@ -208,6 +209,56 @@ func TestV41BF16PublishVulkan(t *testing.T) {
 		alt := v41DeviceParitySession(t, hostArm, prompt, v41DeviceParitySteps)
 		v41BF16PublishBitIdentical(t, "engram", got, alt)
 		t.Logf("V41_BF16_PUBLISH_ENGRAM_SESSION tokens=%v host_arm=%v ab_bit_identical=true publications=%d resident=%d host_rounds_default_policy=%d", got.tokens, alt.tokens, publishes, resident, rounds)
+	})
+	t.Run("deferred-ab", func(t *testing.T) {
+		// The deferred status read is the synchronous session bit for bit: the
+		// same rows and status records cross to the host, behind fewer fences.
+		prompt := []int{1, 2, 3}
+		type arm struct {
+			run                   v41DeviceParityRun
+			publications, defers  int64
+			d2h, d2hBytes, submit uint64
+		}
+		measure := func(env string) arm {
+			t.Setenv(v41DeferredBF16PublishEnv, env)
+			m := fixture()
+			defer func() {
+				if err := m.CloseWeights(); err != nil {
+					t.Error(err)
+				}
+			}()
+			s, err := m.NewBackendSessionChecked(be)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			before := v41BF16PublishVulkanSnapshot(t, be)
+			stop := enableV41BF16Witness()
+			got := v41DeviceParitySession(t, s, prompt, v41DeviceParitySteps)
+			publications, defers := v41BF16PublishCalls.Load()+v41BF16ResidentCalls.Load(), v41BF16DeferredCalls.Load()
+			stop()
+			d, err := compute.BackendExecutionDelta(before, v41BF16PublishVulkanSnapshot(t, be))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if s.BackendSessionClosed() {
+				t.Fatalf("%s=%s session retired", v41DeferredBF16PublishEnv, env)
+			}
+			return arm{got, publications, defers, d.Counters.D2HCount, d.Counters.D2HBytes, d.Counters.DispatchSubmits}
+		}
+		sync, deferred := measure("0"), measure("1")
+		v41BF16PublishBitIdentical(t, "deferred status", deferred.run, sync.run)
+		if sync.defers != 0 || deferred.defers == 0 || deferred.defers != deferred.publications || deferred.publications != sync.publications {
+			t.Fatalf("publications sync=%d deferred=%d (deferred-status %d/%d)", sync.publications, deferred.publications, sync.defers, deferred.defers)
+		}
+		if deferred.d2h != sync.d2h || deferred.d2hBytes != sync.d2hBytes {
+			t.Fatalf("D2H regions %d/%d bytes %d/%d, want the same reads", deferred.d2h, sync.d2h, deferred.d2hBytes, sync.d2hBytes)
+		}
+		if os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") == "1" && deferred.submit >= sync.submit {
+			t.Fatalf("dispatch submits deferred=%d synchronous=%d, want fewer", deferred.submit, sync.submit)
+		}
+		t.Logf("V41_BF16_PUBLISH_DEFERRED_AB tokens=%v ab_bit_identical=true publications=%d deferred_status=%d d2h=%d submits_sync=%d submits_deferred=%d",
+			deferred.run.tokens, deferred.publications, deferred.defers, deferred.d2h, sync.submit, deferred.submit)
 	})
 	t.Run("default-session", func(t *testing.T) {
 		prompt := []int{1, 2, 3}

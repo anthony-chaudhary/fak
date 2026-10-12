@@ -158,16 +158,41 @@ func (s *Session) v41CompressedPublicationRoPEFunc() v41CompressedPublicationRoP
 			// numeric verdict keeps each row's host error; a backend without the
 			// publication keeps the host copybacks below, except under device-only.
 			stage = "rotary BF16 publication"
-			published, selected, err := s.v41PublishResidentBF16(rotated, compute.V41BF16PublishTailRoPEOutput)
-			var numeric *compute.V41BF16CheckedArithmeticError
-			if selected && errors.As(err, &numeric) {
+			publicationErr := func(err error) error {
+				var numeric *compute.V41BF16CheckedArithmeticError
+				if !errors.As(err, &numeric) {
+					return err
+				}
 				if rows == 2 && numeric.Index < rotaryDim {
-					return nil, &V41ProjectionOperationError{
+					return &V41ProjectionOperationError{
 						Layer: layer, Leaf: "indexer.k_norm.weight", Stage: string(v41StageIndexer),
 						Cause: v41StageErr(v41StageIndexer, layer, fmt.Errorf("%w: indexer.k_norm.weight BF16 rotary value[%d] is non-finite or overflows", ErrV41ForwardStage, numeric.Index)),
 					}
 				}
-				return nil, v41StageErr(v41StageCompress, layer, fmt.Errorf("%w: rotary latent BF16 value[%d] is non-finite or overflows", ErrV41ForwardStage, numeric.Index-(rows-1)*rotaryDim))
+				return v41StageErr(v41StageCompress, layer, fmt.Errorf("%w: rotary latent BF16 value[%d] is non-finite or overflows", ErrV41ForwardStage, numeric.Index-(rows-1)*rotaryDim))
+			}
+			if published, status, deferred, err := s.v41PublishResidentBF16Deferred(rotated, compute.V41BF16PublishTailRoPEOutput); deferred {
+				if err != nil {
+					return nil, publicationErr(err)
+				}
+				retain(published)
+				stage = "tail readback"
+				values, verdict, err := s.v41ReadResidentBF16(published, status)
+				if err != nil {
+					return nil, err
+				}
+				if verdict != nil {
+					stage = "rotary BF16 publication"
+					return nil, publicationErr(verdict)
+				}
+				if len(values) != width || !v41BF16Widened(values) {
+					return nil, errV41TailRoPEResult
+				}
+				return values, nil
+			}
+			published, selected, err := s.v41PublishResidentBF16(rotated, compute.V41BF16PublishTailRoPEOutput)
+			if selected && err != nil {
+				return nil, publicationErr(err)
 			}
 			if err != nil {
 				return nil, err

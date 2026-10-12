@@ -424,24 +424,46 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 			calls++
 			y := s.Backend.MatMul(weight, x)
 			defer s.Backend.Free(y)
-			published := false
+			published, fenced := false, false
+			var values []float32
 			if full {
 				// Full V4.1 publishes each projection as BF16 on the device before its
 				// one readback; a backend without the ordinary publication rounds below.
 				stage = "BF16 publication"
-				p, ok, err := s.v41PublishResidentBF16(y, compute.V41BF16PublishGroupedOutputProjection)
+				p, status, deferred, err := s.v41PublishResidentBF16Deferred(y, compute.V41BF16PublishGroupedOutputProjection)
 				if err != nil {
 					return nil, err
 				}
-				if ok {
+				if deferred {
+					// The publication's status shares this projection's one fence.
 					defer s.Backend.Free(p)
-					y, published = p, true
-				} else if s.v41DeviceOnlyPolicy() {
-					return nil, s.v41DeviceOnlyMissingOp(l, "bf16-boundary")
+					stage = "readback"
+					row, verdict, err := s.v41ReadResidentBF16(p, status)
+					if err != nil {
+						return nil, err
+					}
+					if verdict != nil {
+						stage = "BF16 publication"
+						return nil, verdict
+					}
+					values, published, fenced = row, true, true
+				} else {
+					p, ok, err := s.v41PublishResidentBF16(y, compute.V41BF16PublishGroupedOutputProjection)
+					if err != nil {
+						return nil, err
+					}
+					if ok {
+						defer s.Backend.Free(p)
+						y, published = p, true
+					} else if s.v41DeviceOnlyPolicy() {
+						return nil, s.v41DeviceOnlyMissingOp(l, "bf16-boundary")
+					}
 				}
 			}
-			stage = "readback"
-			values := s.Backend.Read(y)
+			if !fenced {
+				stage = "readback"
+				values = s.Backend.Read(y)
+			}
 			readback += int64(len(values)) * 4
 			if len(values) != out {
 				return nil, errV41ProjectionResult
@@ -462,6 +484,9 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 					}
 				}
 				return owned, nil
+			}
+			if fenced {
+				return values, nil
 			}
 			return append([]float32(nil), values...), nil
 		}
