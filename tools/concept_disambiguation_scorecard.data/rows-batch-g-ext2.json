@@ -557,7 +557,8 @@
         "Pool (polymodel residency)",
         "PoolProfile",
         "x2-pool-workerworktreepoolcapenv",
-        "x2-pool-workerworktreepoolcap"
+        "x2-pool-workerworktreepoolcap",
+        "pool-expert-ring-host-memory-fraction"
       ],
       "aliases": [
         "newpagedkvpool",

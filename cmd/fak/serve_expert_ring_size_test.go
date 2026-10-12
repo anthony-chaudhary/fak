@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -129,8 +131,6 @@ func TestSizeServeExpertRingTable(t *testing.T) {
 	const token = 3 * ringGiB
 	nonRing := ringSizingNonRing(f, 2*ringGiB) // device 5 GiB, host page reserve 4 GiB
 	roomyHost := serveExpertRingHost{Total: 125 * ringGiB, Avail: 118 * ringGiB, Known: true, RSSAnonPeak: 2 * ringGiB, SharedPool: true}
-	// host bound = 118 - 2 - 6.25 (5% of 125) - 4 (page reserve) - 5 (device rows, shared pool) = 100.75 GiB
-	hostBound := 118*ringGiB - 2*ringGiB - int64(float64(125*ringGiB)*0.05) - ggufload.HostGatheredPageReserveCap - 5*ringGiB
 
 	t.Run("token_is_unchanged", func(t *testing.T) {
 		tiny := serveExpertRingHost{Total: 8 * ringGiB, Avail: 1, Known: true, SharedPool: true}
@@ -140,14 +140,18 @@ func TestSizeServeExpertRingTable(t *testing.T) {
 		}
 	})
 	t.Run("auto_takes_smaller_bound", func(t *testing.T) {
-		deviceAvail := 102 * ringGiB // device bound 97 GiB < host bound
-		s, err := sizeServeExpertRing(serveExpertRingSize{Mode: serveExpertRingAuto}, f, token, nonRing, deviceAvail, roomyHost)
+		// A 250 GiB host at the 0.5 ceiling fraction keeps the pool cap (125 GiB) out of the way.
+		wide := serveExpertRingHost{Total: 250 * ringGiB, Avail: 118 * ringGiB, Known: true, RSSAnonPeak: 2 * ringGiB, SharedPool: true}
+		wideBound := 118*ringGiB - 2*ringGiB - int64(float64(250*ringGiB)*0.05) - ggufload.HostGatheredPageReserveCap - 5*ringGiB
+		auto := serveExpertRingSize{Mode: serveExpertRingAuto, PoolFraction: 0.5}
+		deviceAvail := 90 * ringGiB
+		s, err := sizeServeExpertRing(auto, f, token, nonRing, deviceAvail, wide)
 		if err != nil || s.RingBytes != deviceAvail-5*ringGiB {
 			t.Fatalf("auto ring=%d err=%v, want device bound %d", s.RingBytes, err, deviceAvail-5*ringGiB)
 		}
-		s, err = sizeServeExpertRing(serveExpertRingSize{Mode: serveExpertRingAuto}, f, token, nonRing, 200*ringGiB, roomyHost)
-		if err != nil || s.RingBytes != hostBound || !s.HostBoundKnown {
-			t.Fatalf("auto ring=%d err=%v, want host bound %d", s.RingBytes, err, hostBound)
+		s, err = sizeServeExpertRing(auto, f, token, nonRing, 200*ringGiB, wide)
+		if err != nil || s.RingBytes != wideBound || !s.HostBoundKnown {
+			t.Fatalf("auto ring=%d err=%v, want host bound %d", s.RingBytes, err, wideBound)
 		}
 	})
 	t.Run("auto_clamps_to_band", func(t *testing.T) {
@@ -196,11 +200,72 @@ func TestSizeServeExpertRingTable(t *testing.T) {
 			t.Fatalf("auto with no host room err=%v, want ErrServeExpertRingTooBig", err)
 		}
 	})
+	t.Run("auto_pool_fraction_default", func(t *testing.T) {
+		total := 1249 * ringGiB / 10 // strix3 MemTotal, 124.9 GiB
+		strix := serveExpertRingHost{Total: total, Avail: 118 * ringGiB, Known: true, RSSAnonPeak: 2 * ringGiB, SharedPool: true}
+		s, err := sizeServeExpertRing(serveExpertRingSize{Mode: serveExpertRingAuto}, f, token, nonRing, 200*ringGiB, strix)
+		want := int64(0.10 * float64(total))
+		if err != nil || s.RingBytes != want || s.PoolCapBytes != want || s.PoolFraction != 0.10 {
+			t.Fatalf("auto ring=%d cap=%d fraction=%v err=%v, want %d at 0.10", s.RingBytes, s.PoolCapBytes, s.PoolFraction, err, want)
+		}
+		if frag := fmt.Sprintf("pool_cap=%d (fraction=0.10)", want); !strings.Contains(s.Text(), frag) {
+			t.Fatalf("log line lacks %q", frag)
+		}
+		size, err := resolveServeExpertRingSize("", ringEnv("auto", "0.20"))
+		if err != nil || size.PoolFraction != 0.20 {
+			t.Fatalf("env fraction %+v err=%v", size, err)
+		}
+		s, err = sizeServeExpertRing(size, f, token, nonRing, 200*ringGiB, strix)
+		if want := int64(0.20 * float64(total)); err != nil || s.RingBytes != want {
+			t.Fatalf("auto ring=%d err=%v, want %d at 0.20", s.RingBytes, err, want)
+		}
+		s, err = sizeServeExpertRing(serveExpertRingSize{Mode: serveExpertRingExplicit, Bytes: 20 * ringGiB}, f, token, nonRing, 200*ringGiB, strix)
+		if err != nil || s.RingBytes != 20*ringGiB || s.PoolCapBytes != 0 {
+			t.Fatalf("explicit ring=%d cap=%d err=%v, want 20 GiB uncapped", s.RingBytes, s.PoolCapBytes, err)
+		}
+	})
+	t.Run("auto_pool_cap_below_floor_takes_floor", func(t *testing.T) {
+		small := serveExpertRingHost{Total: 512 << 20, Avail: 100 * ringGiB, Known: true}
+		s, err := sizeServeExpertRing(serveExpertRingSize{Mode: serveExpertRingAuto}, f, token, nonRing, 200*ringGiB, small)
+		if err != nil || s.PoolCapBytes >= f.ActivatedLayerBytes || s.RingBytes != f.ActivatedLayerBytes {
+			t.Fatalf("auto ring=%d cap=%d err=%v, want floor %d", s.RingBytes, s.PoolCapBytes, err, f.ActivatedLayerBytes)
+		}
+	})
 	t.Run("explicit_below_floor", func(t *testing.T) {
 		if _, err := sizeServeExpertRing(serveExpertRingSize{Mode: serveExpertRingExplicit, Bytes: 1 << 20}, f, token, nonRing, 102*ringGiB, roomyHost); !errors.Is(err, ErrServeExpertRingSize) {
 			t.Fatalf("explicit below one layer err=%v, want ErrServeExpertRingSize", err)
 		}
 	})
+}
+
+func ringEnv(ring, fraction string) func(string) string {
+	return func(k string) string {
+		switch k {
+		case FakExpertRingBytesEnv:
+			return ring
+		case FakExpertRingPoolFractionEnv:
+			return fraction
+		}
+		return ""
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestResolveServeExpertRingPoolFraction(t *testing.T) {
+	if size, err := resolveServeExpertRingSize("", ringEnv("auto", "")); err != nil || size.PoolFraction != 0.10 {
+		t.Fatalf("unset fraction %+v err=%v, want default 0.10", size, err)
+	}
+	if size, err := resolveServeExpertRingSize("", ringEnv("auto", "0.5")); err != nil || size.PoolFraction != 0.5 {
+		t.Fatalf("ceiling fraction %+v err=%v", size, err)
+	}
+	for _, bad := range []string{"0", "-0.1", "0.51", "1", "abc", "NaN"} {
+		if _, err := resolveServeExpertRingSize("", ringEnv("auto", bad)); !errors.Is(err, ErrServeExpertRingSize) {
+			t.Errorf("fraction %q err=%v, want ErrServeExpertRingSize", bad, err)
+		}
+	}
+	if size, err := resolveServeExpertRingSize("", ringEnv("token", "abc")); err != nil || size.Mode != serveExpertRingToken {
+		t.Fatalf("non-auto mode must not read the fraction: %+v err=%v", size, err)
+	}
 }
 
 // fak-test:runtime fast est=20ms lane=default

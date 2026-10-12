@@ -979,3 +979,10 @@ The V4.1 source-selection operation that consumes already computed per-query com
 Renders the implemented DeepSeek V4.1 GGUF-style chat grammar: role boundaries, tool definitions and DSML tool-call history, merged tool results, and response-format instructions in the in-kernel prompt path.
 
 **Distinct from:** Uses DeepSeek V4.1 message and DSML tool grammar rather than the ChatML role framing and Qwen thinking-prefix seeding of renderInKernelChatMLTools. This implementation record does not establish official-profile selection, checkpoint parity, or output-schema enforcement.
+
+
+### FakExpertRingPoolFractionEnv (auto expert-ring host-memory fraction)
+
+FakExpertRingPoolFractionEnv names FAK_EXPERT_RING_POOL_FRACTION. For auto activated-expert ring sizing with known host MemTotal, the fraction contributes a sizing bound before the activated-layer minimum is applied. The default is 0.10, accepted values satisfy 0 < f <= 0.5, and invalid values are refused. Explicit byte sizes are unaffected; the activated-layer minimum can exceed the fraction-derived bound.
+
+**Distinct from:** This is a host-memory sizing parameter for the activated-expert ring, distinct from the worker-worktree disk-pool capacity setting and from the PagedKVPool block allocator. It does not create a separate allocator or guarantee a hard memory ceiling.

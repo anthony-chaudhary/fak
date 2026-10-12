@@ -16271,6 +16271,41 @@
           "category": "incidental",
           "reason": "Arithmetic coverage and row-count helpers for the already-positioned V4.1 candidate publication/source contract. They add neither a work-plan abstraction nor an independently owned resource pool.",
           "token": "v41CandidatePoolRows"
+        },
+        {
+          "category": "incidental",
+          "reason": "Default numeric value for the positioned expert-ring host-memory fraction knob FakExpertRingPoolFractionEnv; it defines no separate pool or allocation policy.",
+          "token": "serveExpertRingPoolFractionDef"
+        },
+        {
+          "category": "incidental",
+          "reason": "Maximum accepted numeric value for the positioned expert-ring host-memory fraction knob FakExpertRingPoolFractionEnv; it is validation data, not a separate pool.",
+          "token": "serveExpertRingPoolFractionMax"
+        },
+        {
+          "category": "incidental",
+          "reason": "Configuration/result field carrying the positioned expert-ring host-memory fraction FakExpertRingPoolFractionEnv through sizing and diagnostics; it is not an allocator or independent pool.",
+          "token": "PoolFraction"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private parser validating the positioned expert-ring host-memory fraction knob FakExpertRingPoolFractionEnv; it introduces no separate allocation lifetime or pool.",
+          "token": "parseServeExpertRingPoolFraction"
+        },
+        {
+          "category": "incidental",
+          "reason": "Derived byte count used by the positioned expert-ring host-memory fraction knob FakExpertRingPoolFractionEnv; the activated-layer floor can exceed it, and it is not a separate memory pool.",
+          "token": "PoolCapBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private diagnostic formatter for the positioned expert-ring host-memory fraction knob FakExpertRingPoolFractionEnv and derived byte count; it owns no memory or pool lifecycle.",
+          "token": "poolCapText"
+        },
+        {
+          "category": "incidental",
+          "reason": "Literal environment-variable spelling for the positioned FakExpertRingPoolFractionEnv host-memory sizing knob (pool-expert-ring-host-memory-fraction); it is an alias of that one configuration concept, not a second pool.",
+          "token": "FAK_EXPERT_RING_POOL_FRACTION"
         }
       ],
       "exclude": [
@@ -16279,12 +16314,15 @@
       "id": "pool",
       "ignore": [
         "ErrNotPoolable",
+        "FAK_EXPERT_RING_POOL_FRACTION",
         "FLEET_WORKER_WORKTREE_POOL",
         "MultiTensorSlotPool",
         "NewMultiTensorSlotPool",
         "NewPagePool",
         "NewSeatPool",
         "PagePool",
+        "PoolCapBytes",
+        "PoolFraction",
         "PoolID",
         "PoolSpec",
         "PoolState",
@@ -16297,6 +16335,8 @@
         "kvpoolbytes",
         "leasePooled",
         "leaseSpecificPooled",
+        "parseServeExpertRingPoolFraction",
+        "poolCapText",
         "poolIdleExt",
         "poolIdleMembers",
         "poolLaneLockPath",
@@ -16331,6 +16371,8 @@
         "removePoolMemberState",
         "resetPooled",
         "returnPooled",
+        "serveExpertRingPoolFractionDef",
+        "serveExpertRingPoolFractionMax",
         "serveExpertRingSharedPool",
         "spoolsv",
         "unpoolable",

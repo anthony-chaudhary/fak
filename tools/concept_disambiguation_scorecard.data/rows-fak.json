@@ -182,5 +182,27 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "pool-expert-ring-host-memory-fraction",
+      "canonical": "FakExpertRingPoolFractionEnv (auto expert-ring host-memory fraction)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "FakExpertRingPoolFractionEnv names FAK_EXPERT_RING_POOL_FRACTION. For auto activated-expert ring sizing with known host MemTotal, the fraction contributes a sizing bound before the activated-layer minimum is applied. The default is 0.10, accepted values satisfy 0 \u003c f \u003c= 0.5, and invalid values are refused. Explicit byte sizes are unaffected; the activated-layer minimum can exceed the fraction-derived bound.",
+      "distinction": "This is a host-memory sizing parameter for the activated-expert ring, distinct from the worker-worktree disk-pool capacity setting and from the PagedKVPool block allocator. It does not create a separate allocator or guarantee a hard memory ceiling.",
+      "distinct_from": [
+        "x2-pool-workerworktreepoolcapenv",
+        "x2-pool-pagedkvpool"
+      ],
+      "aliases": [
+        "FAK_EXPERT_RING_POOL_FRACTION"
+      ],
+      "grounding": "FakExpertRingPoolFractionEnv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

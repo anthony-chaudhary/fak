@@ -10,7 +10,8 @@
       "distinct_from": [
         "x2-pool-pagedkvpool",
         "x2-pool-buildseatpool",
-        "x2-pool-workerworktreepoolcap"
+        "x2-pool-workerworktreepoolcap",
+        "pool-expert-ring-host-memory-fraction"
       ],
       "aliases": [],
       "grounding": "PoolCapEnv",
