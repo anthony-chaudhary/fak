@@ -12,6 +12,10 @@ package model
 // replacing the previous forward's trace. A session Step recomputes its whole
 // history, so the last write covers every position so far.
 //
+// The recorder retains only v41.activation events: the backends' per-kernel
+// matmul events reach the same process recorder and would otherwise spend the
+// event budget before the deeper layers emit.
+//
 // Unset, the cost is one cached string check per forward. Env-traced forwards
 // are serialized because the recorder is process-global, and the variable never
 // clobbers a recorder some other caller already enabled. Tokens beyond the cap
@@ -59,7 +63,10 @@ func (m *Model) v41ActivationTraceFromEnv(seq []int) func(error) error {
 		return nil
 	}
 	events := max(1, m.Cfg.NumLayers) * v41ActivationTraceEnvStageSlots * max(1, min(len(seq), v41ActivationTraceEnvMaxTokens))
-	rec, disable := computetrace.EnableWithSampleBudget(events, events*v41ActivationTraceMaxSamples, "v41-forward", v41ActivationTraceEnvVar)
+	rec, disable := computetrace.EnableWithOptions(events, computetrace.RecorderOptions{
+		MaxSamples: events * v41ActivationTraceMaxSamples,
+		Operations: []string{v41ActivationTraceOperation},
+	}, "v41-forward", v41ActivationTraceEnvVar)
 	tokens := append([]int(nil), seq...)
 	return func(err error) error {
 		disable()

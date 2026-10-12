@@ -189,3 +189,34 @@ func TestActivationAdoptDigests(t *testing.T) {
 		t.Fatalf("mixed digests err=%v", err)
 	}
 }
+
+func TestActivationRecorderOperationAllowlist(t *testing.T) {
+	const layers, tokens = 41, 7
+	r, disable := EnableWithOptions(layers*tokens, RecorderOptions{MaxSamples: layers * tokens * 8, Operations: []string{"v41.activation"}}, "run", "req")
+	for l := 0; l < layers; l++ {
+		for tok := 0; tok < tokens; tok++ {
+			for k := 0; k < 10; k++ {
+				Record(Event{Operation: "matmul", Phase: "kernel"})
+			}
+			e := indexedSample(l, tok, "residual_streams", make([]float32, 8))
+			e.Operation = "v41.activation"
+			Record(e)
+		}
+	}
+	disable()
+	a := r.Artifact()
+	if len(a.Events) != layers*tokens || a.Dropped != 0 || a.DroppedSampleValues != 0 {
+		t.Fatalf("events=%d dropped=%d dropped_samples=%d, want %d/0/0", len(a.Events), a.Dropped, a.DroppedSampleValues, layers*tokens)
+	}
+	for _, e := range a.Events {
+		if e.Operation != "v41.activation" {
+			t.Fatalf("allowlisted recorder retained %q", e.Operation)
+		}
+	}
+	if last := a.Events[len(a.Events)-1]; last.Layer != layers-1 || last.Token != tokens-1 {
+		t.Fatalf("last event layer=%d token=%d, want %d/%d", last.Layer, last.Token, layers-1, tokens-1)
+	}
+	if plain := New(1); func() bool { plain.Record(Event{Operation: "matmul"}); return len(plain.Artifact().Events) != 1 }() {
+		t.Fatal("a recorder without an allowlist must keep every operation")
+	}
+}

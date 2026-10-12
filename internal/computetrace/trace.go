@@ -65,7 +65,9 @@ type Event struct {
 	// sample a stable identity within a forward; InputDigest and WeightDigest
 	// carry the provenance a comparator uses to refuse an apples-to-oranges
 	// comparison. SampleIndices are logical indices into the stage's output;
-	// SampleValues are the matching values.
+	// SampleValues are the matching values. Layer and Token are omitempty, so a
+	// zero layer or token is ABSENT from the JSON: a reader outside Go must
+	// default a missing layer/token to 0 rather than treat it as null.
 	Layer         int       `json:"layer,omitempty"`
 	Token         int       `json:"token,omitempty"`
 	InputDigest   string    `json:"input_digest,omitempty"`
@@ -107,6 +109,7 @@ type Recorder struct {
 	retained    uint64
 	droppedSamp uint64
 	sampleTotal int
+	operations  map[string]bool
 }
 
 // New returns a disabled recorder when limit is zero. Enabled recorders retain at most limit events.
@@ -119,6 +122,28 @@ func NewWithSampleBudget(limit, maxSamples int) *Recorder {
 	return &Recorder{limit: limit, sampleTotal: maxSamples}
 }
 
+// RecorderOptions configures a recorder beyond its event limit.
+type RecorderOptions struct {
+	// MaxSamples replaces MaxActivationSamplesTotal when > 0.
+	MaxSamples int
+	// Operations, when non-empty, is an allowlist: an event whose Operation is
+	// not listed is ignored (neither retained nor counted as dropped), so other
+	// producers sharing the process recorder cannot spend its event budget.
+	Operations []string
+}
+
+// NewWithOptions is New configured by opts.
+func NewWithOptions(limit int, opts RecorderOptions) *Recorder {
+	r := &Recorder{limit: limit, sampleTotal: opts.MaxSamples}
+	if len(opts.Operations) > 0 {
+		r.operations = make(map[string]bool, len(opts.Operations))
+		for _, op := range opts.Operations {
+			r.operations[op] = true
+		}
+	}
+	return r
+}
+
 func (r *Recorder) sampleBudget() int {
 	if r.sampleTotal > 0 {
 		return r.sampleTotal
@@ -129,6 +154,9 @@ func (r *Recorder) sampleBudget() int {
 func (r *Recorder) Enabled() bool { return r != nil && r.limit > 0 }
 func (r *Recorder) Record(e Event) {
 	if !r.Enabled() {
+		return
+	}
+	if r.operations != nil && !r.operations[e.Operation] {
 		return
 	}
 	began := time.Now()
@@ -248,6 +276,11 @@ func Enable(limit int, run, request string) (*Recorder, func()) {
 // needs more than the MaxActivationSamplesTotal default.
 func EnableWithSampleBudget(limit, maxSamples int, run, request string) (*Recorder, func()) {
 	return install(NewWithSampleBudget(limit, maxSamples), run, request)
+}
+
+// EnableWithOptions is Enable configured by opts (see RecorderOptions).
+func EnableWithOptions(limit int, opts RecorderOptions, run, request string) (*Recorder, func()) {
+	return install(NewWithOptions(limit, opts), run, request)
 }
 
 func install(r *Recorder, run, request string) (*Recorder, func()) {

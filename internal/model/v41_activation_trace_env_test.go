@@ -104,3 +104,65 @@ func TestV41ActivationTraceEnv(t *testing.T) {
 		}
 	})
 }
+
+// TestV41ActivationTraceEnvKernelEvents is the strix3 regression: per-kernel
+// matmul events share the process recorder and used to spend the env budget,
+// so only layers 0-6 of a 41-layer, 7-token prefill survived.
+func TestV41ActivationTraceEnvKernelEvents(t *testing.T) {
+	const layers, tokens = 41, 7
+	m := v41ReducedModel(t)
+	m.Cfg.NumLayers = layers
+	ids := make([]int, tokens)
+	path := filepath.Join(t.TempDir(), "v41-trace.json")
+	withV41ActivationTraceEnv(t, path)
+
+	finish := m.v41ActivationTraceFromEnv(ids)
+	if finish == nil {
+		t.Fatal("env recorder not enabled")
+	}
+	tracer := m.v41ActivationTracer(ids)
+	stages := []string{v41TraceStageQLatent, v41TraceStageKVLatent, v41TraceStageAttnOut, v41TraceStageMoESum}
+	row := make([]float32, 64)
+	for l := 0; l < layers; l++ {
+		for _, stage := range stages {
+			for tok := 0; tok < tokens; tok++ {
+				for k := 0; k < 8; k++ {
+					computetrace.Record(computetrace.Event{Operation: "matmul", Phase: "kernel"})
+				}
+				tracer.record(l, tok, stage, row)
+			}
+		}
+		for tok := 0; tok < tokens; tok++ {
+			tracer.recordStreams(l, tok, [][]float32{row, row, row, row})
+		}
+	}
+	if err := finish(nil); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	a, err := computetrace.Read(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := layers * 5 * tokens; len(a.Events) != want || a.Dropped != 0 || a.DroppedSampleValues != 0 {
+		t.Fatalf("events=%d dropped=%d dropped_samples=%d, want %d/0/0", len(a.Events), a.Dropped, a.DroppedSampleValues, want)
+	}
+	seen := map[[2]int]int{}
+	for _, e := range a.Events {
+		if e.Operation != v41ActivationTraceOperation {
+			t.Fatalf("env trace retained a %q event", e.Operation)
+		}
+		seen[[2]int{e.Layer, e.Token}]++
+	}
+	for l := 0; l < layers; l++ {
+		for tok := 0; tok < tokens; tok++ {
+			if seen[[2]int{l, tok}] != 5 {
+				t.Fatalf("layer=%d token=%d has %d stages, want 5", l, tok, seen[[2]int{l, tok}])
+			}
+		}
+	}
+}
