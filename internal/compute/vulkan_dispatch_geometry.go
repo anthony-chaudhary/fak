@@ -84,3 +84,20 @@ func (v *vulkanBackend) q8CooperativeMatrixActive(tokens int) bool {
 func VulkanQ8DispatchGrid(outDim, tokens int, coopMatActive bool) (gridX, gridY, gridZ int) {
 	return vulkanQ8DispatchGrid(outDim, tokens, coopMatActive)
 }
+
+// selectQ2KFusionLocked keeps the new packed-Q2_K gate/up kernel behind an
+// explicit candidate arm until its repeated gfx1151 A/B receipt is accepted.
+// The fallback remains the established native Vulkan composition; it never
+// redirects execution through an external engine.
+func (v *vulkanBackend) selectQ2KFusionLocked(P int) bool {
+	if P != 1 {
+		return false
+	}
+	optIn := strings.TrimSpace(strings.ToLower(os.Getenv("FAK_VULKAN_Q2K_FUSION")))
+	switch optIn {
+	case "candidate", "fusion", "fused", "1", "true", "on", "yes":
+		return true
+	default:
+		return false
+	}
+}
