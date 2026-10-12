@@ -13,8 +13,9 @@ import (
 )
 
 func TestDebtLanesCLIJSON(t *testing.T) {
+	tmp := setupDebtLaneWorkspace(t, "gateway", "mock")
 	var stdout, stderr bytes.Buffer
-	code := runDebtLanes(&stdout, &stderr, []string{"--workspace", repoRoot(), "--json", "--top", "5"})
+	code := runDebtLanes(&stdout, &stderr, []string{"--workspace", tmp, "--json", "--top", "5"})
 	// By default, report command must exit 0 so defaults "just work" in scripts/CLI
 	if code != 0 {
 		t.Fatalf("runDebtLanes default failed with exit code %d; stderr: %s", code, stderr.String())
@@ -36,15 +37,16 @@ func TestDebtLanesCLIJSON(t *testing.T) {
 
 	// Verify --check exits 1 when active debt exists
 	var checkStdout, checkStderr bytes.Buffer
-	checkCode := runDebtLanes(&checkStdout, &checkStderr, []string{"--workspace", repoRoot(), "--check"})
+	checkCode := runDebtLanes(&checkStdout, &checkStderr, []string{"--workspace", tmp, "--check"})
 	if checkCode != 1 {
 		t.Fatalf("runDebtLanes with --check should exit 1 on active debt, got %d", checkCode)
 	}
 }
 
 func TestDebtLanesCLIFilterLane(t *testing.T) {
+	tmp := setupDebtLaneWorkspace(t, "gateway", "mock")
 	var stdout, stderr bytes.Buffer
-	code := runDebtLanes(&stdout, &stderr, []string{"--workspace", repoRoot(), "--lane", "gateway", "--json"})
+	code := runDebtLanes(&stdout, &stderr, []string{"--workspace", tmp, "--lane", "gateway", "--json"})
 	if code == 2 {
 		t.Fatalf("runDebtLanes failed with exit code 2; stderr: %s", stderr.String())
 	}
@@ -62,8 +64,9 @@ func TestDebtLanesCLIFilterLane(t *testing.T) {
 }
 
 func TestMaturitySubcommandDebtLanes(t *testing.T) {
+	tmp := setupDebtLaneWorkspace(t, "gateway", "mock")
 	var stdout, stderr bytes.Buffer
-	code := runMaturity(&stdout, &stderr, []string{"debt-lanes", "--workspace", repoRoot(), "--json"})
+	code := runMaturity(&stdout, &stderr, []string{"debt-lanes", "--workspace", tmp, "--json"})
 	if code == 2 {
 		t.Fatalf("runMaturity debt-lanes failed with exit code 2; stderr: %s", stderr.String())
 	}
@@ -78,8 +81,9 @@ func TestMaturitySubcommandDebtLanes(t *testing.T) {
 }
 
 func TestDebtLanesCLIMarkdown(t *testing.T) {
+	tmp := setupDebtLaneWorkspace(t, "gateway", "mock")
 	var stdout, stderr bytes.Buffer
-	code := runDebtLanes(&stdout, &stderr, []string{"--workspace", repoRoot(), "--markdown", "--top", "3"})
+	code := runDebtLanes(&stdout, &stderr, []string{"--workspace", tmp, "--markdown", "--top", "3"})
 	if code == 2 {
 		t.Fatalf("runDebtLanes markdown failed with exit code 2; stderr: %s", stderr.String())
 	}
@@ -95,9 +99,13 @@ func TestDebtLanesCLIMarkdown(t *testing.T) {
 
 func setupDebtLaneWaveWorkspace(t *testing.T) string {
 	t.Helper()
+	return setupDebtLaneWorkspace(t, "mocka", "mockb", "mockc", "mockd", "mocke", "mockf", "mockg", "mockh")
+}
+
+func setupDebtLaneWorkspace(t *testing.T, lanes ...string) string {
+	t.Helper()
 	tmp := t.TempDir()
 
-	lanes := []string{"mocka", "mockb", "mockc", "mockd", "mocke", "mockf", "mockg", "mockh"}
 	var dosContent strings.Builder
 	dosContent.WriteString("workspace = \".\"\n\n[lanes]\nconcurrent = [\n")
 	for _, l := range lanes {
