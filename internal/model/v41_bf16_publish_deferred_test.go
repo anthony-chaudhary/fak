@@ -23,6 +23,7 @@ type v41DeferredLedger struct {
 	deferredSites     []uint32
 	deferredFaultAt   int
 	deferredFault     error
+	deferredReadErr   error
 	deferredPending   map[compute.Buffer]error
 }
 
@@ -70,14 +71,28 @@ func (l *v41DeferredLedger) V41BF16PublishDeferred(x compute.Tensor, site uint32
 
 func (l *v41DeferredLedger) V41ReadDeferred(statuses []compute.V41DeferredStatus, rows []compute.Tensor) ([]error, [][]float32, error) {
 	l.deferredFences++
+	// The backend consumes status storage even when transport fails; row
+	// tensors remain owned by the caller.
+	defer func() {
+		for _, st := range statuses {
+			if _, ok := l.deferredPending[st.Record.Buf()]; ok {
+				l.owner().Free(st.Record)
+				delete(l.deferredPending, st.Record.Buf())
+			}
+		}
+	}()
 	verdicts := make([]error, len(statuses))
+	seen := make(map[compute.Buffer]bool, len(statuses))
 	for i, st := range statuses {
 		verdict, ok := l.deferredPending[st.Record.Buf()]
-		if !ok {
+		if !ok || seen[st.Record.Buf()] {
 			return nil, nil, errors.New("deferred status read twice or never issued")
 		}
-		delete(l.deferredPending, st.Record.Buf())
+		seen[st.Record.Buf()] = true
 		verdicts[i] = verdict
+	}
+	if l.deferredReadErr != nil {
+		return nil, nil, l.deferredReadErr
 	}
 	values := make([][]float32, len(rows))
 	for i, row := range rows {
@@ -90,6 +105,34 @@ func newV41DeferredPublishRecorder() *v41BF16PublishRecorder {
 	b := newV41BF16PublishRecorder()
 	b.v41DeferredLedger = newV41DeferredLedger(b.owner)
 	return b
+}
+
+// Count actual releases of just the publication's input, output and status,
+// independently of the ledger's pending-verdict bookkeeping.
+type v41DeferredOwnershipRecorder struct {
+	*v41BF16PublishRecorder
+	frees map[compute.Buffer]int
+}
+
+func (b *v41DeferredOwnershipRecorder) UploadClass(x compute.Tensor, dt compute.Dtype, class compute.MemoryClass, site string) compute.Tensor {
+	out := b.v41BF16PublishRecorder.UploadClass(x, dt, class, site)
+	if site == "V4.1 BF16 publication input" {
+		b.frees[out.Buf()] = 0
+	}
+	return out
+}
+
+func (b *v41DeferredOwnershipRecorder) V41BF16PublishDeferred(x compute.Tensor, site uint32) (compute.Tensor, compute.V41DeferredStatus, error) {
+	out, status, err := b.v41BF16PublishRecorder.V41BF16PublishDeferred(x, site)
+	b.frees[out.Buf()], b.frees[status.Record.Buf()] = 0, 0
+	return out, status, err
+}
+
+func (b *v41DeferredOwnershipRecorder) Free(x compute.Tensor) {
+	if _, owned := b.frees[x.Buf()]; owned {
+		b.frees[x.Buf()]++
+	}
+	b.v41BF16PublishRecorder.Free(x)
 }
 
 func v41DeferredBitsEqual(t *testing.T, label string, got, want []float32) {
@@ -259,6 +302,54 @@ func TestV41BF16PublishDeferredFaultAttribution(t *testing.T) {
 		if panicked := recoverError(func() { _, retry = publish(layer, site, row) }); (retry == nil && panicked == nil) || ledger.deferredPublishes != 1 {
 			t.Fatalf("k=%d: retired deferred publication replayed", k)
 		}
+	}
+}
+
+// A transport failure leaves the verdict unknown, publishes no row and
+// releases each seam-owned allocation before retiring without replay.
+// fak-test:justify why=contract when=changed:internal/model/v41_bf16_publish*
+// fak-test:runtime fast est=100ms lane=default
+func TestV41BF16PublishDeferredReadFailure(t *testing.T) {
+	t.Setenv(v41DeferredBF16PublishEnv, "1")
+	m := v41FullStepPatchedNorms(t)
+	b := &v41DeferredOwnershipRecorder{v41BF16PublishRecorder: newV41DeferredPublishRecorder(), frees: map[compute.Buffer]int{}}
+	b.self = b
+	cause := errors.New("deferred publication transport read failed")
+	b.deferredReadErr = cause
+	s := v41DenseTestSession(t, m, b)
+	publish := s.v41BF16PublishFunc()
+	if publish == nil {
+		t.Fatal("ordinary publication not bound")
+	}
+	layer, site := m.Cfg.NumLayers-1, "ffn_norm.weight collapse"
+	row := v41BF16PublishRow(m.Cfg.HiddenSize)
+	var out []float32
+	var err error
+	rounds := v41BF16PublishHostRounds(t, func() { out, err = publish(layer, site, row) })
+	var boundary *V41BF16BoundaryOperationError
+	var closed *BackendForwardOperationError
+	if !errors.Is(err, cause) || !errors.As(err, &boundary) || boundary.Layer != layer || boundary.Site != site ||
+		!errors.As(err, &closed) || closed.Path != "v41-bf16-publish" || closed.Stage != "checked publication readback" || closed.Layer != layer {
+		t.Fatalf("read failure: %v, want original transport error at layer %d site %q readback", err, layer, site)
+	}
+	if out != nil || rounds != 0 || !s.BackendSessionClosed() || b.calls != 0 || b.deferredPublishes != 1 || b.deferredFences != 1 || len(b.deferredPending) != 0 {
+		t.Fatalf("read failure: row=%t host rounds=%d closed=%t synchronous=%d deferred=%d fences=%d pending=%d",
+			out != nil, rounds, s.BackendSessionClosed(), b.calls, b.deferredPublishes, b.deferredFences, len(b.deferredPending))
+	}
+	if len(b.frees) != 3 {
+		t.Fatalf("tracked %d buffers, want input, output and status", len(b.frees))
+	}
+	for buffer, frees := range b.frees {
+		if frees != 1 {
+			t.Fatalf("publication buffer %v freed %d times, want once with no owned storage left", buffer, frees)
+		}
+	}
+	var retry, panicked error
+	rounds = v41BF16PublishHostRounds(t, func() {
+		panicked = recoverError(func() { _, retry = publish(layer, site, row) })
+	})
+	if (retry == nil && panicked == nil) || rounds != 0 || b.calls != 0 || b.deferredPublishes != 1 || b.deferredFences != 1 {
+		t.Fatal("retired deferred publication replayed after transport failure")
 	}
 }
 
