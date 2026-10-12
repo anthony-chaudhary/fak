@@ -8,9 +8,10 @@ package compute
 import "C"
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
-	"unsafe"
+	"math"
 )
 
 var _ V41RouterTopKBackend = (*vulkanBackend)(nil)
@@ -85,24 +86,20 @@ func (v *vulkanBackend) V41RouterTopK(logits, bias Tensor, rows, experts, topK i
 	if status != 0 {
 		return V41RouterPicks{}, vulkanV41RouterStatusError(status)
 	}
+	// Status, experts and weights share one host fence (#13820).
+	image, readErr := vulkanV41ReadMany("V41RouterTopK", []*vulkanBuf{statusBuf, expertBuf, weightBuf}, []int{statusBytes, pickBytes, pickBytes})
+	if readErr != nil {
+		return V41RouterPicks{}, readErr
+	}
 	words := make([]uint32, statusBytes/4)
 	expertWords := make([]uint32, pickBytes/4)
 	weights := make([]float32, pickBytes/4)
-	for _, read := range []struct {
-		site  string
-		dst   unsafe.Pointer
-		src   *vulkanBuf
-		bytes int
-	}{
-		{"status", unsafe.Pointer(&words[0]), statusBuf, statusBytes},
-		{"experts", unsafe.Pointer(&expertWords[0]), expertBuf, pickBytes},
-		{"weights", unsafe.Pointer(&weights[0]), weightBuf, pickBytes},
-	} {
-		if status := int(C.fvk_v41_d2h(read.dst, read.src.ptr, C.size_t(read.bytes))); status != 0 {
-			readErr := vulkanReadError(status)
-			readErr.Site = "V41RouterTopK " + read.site + " readback"
-			return V41RouterPicks{}, readErr
-		}
+	for i := range words {
+		words[i] = binary.LittleEndian.Uint32(image[0][4*i:])
+	}
+	for i := range expertWords {
+		expertWords[i] = binary.LittleEndian.Uint32(image[1][4*i:])
+		weights[i] = math.Float32frombits(binary.LittleEndian.Uint32(image[2][4*i:]))
 	}
 	picks, decodeErr := decodeV41RouterTopK(words, expertWords, weights, rows, experts, topK)
 	var fault *V41RouterTopKFault

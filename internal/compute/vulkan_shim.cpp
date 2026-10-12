@@ -4133,6 +4133,64 @@ int fvk_v41_d2h(void* h, const void* d, size_t bytes) {
     return VK_SUCCESS;
 }
 
+// fvk_v41_d2h for several regions behind one host fence (#13820): each copy
+// lands at its caller-chosen staging offset, so k status records and rows cost
+// one submit instead of k. Regions are ordered and disjoint in the host image.
+int fvk_v41_d2h_many(void* host, size_t hostBytes, int count, void* const* srcs,
+                     const size_t* offsets, const size_t* bytes) {
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (!g_ready || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!host || hostBytes == 0 || count <= 0 || !srcs || !offsets || !bytes) return VK_ERROR_INITIALIZATION_FAILED;
+    size_t end = 0;
+    for (int i = 0; i < count; ++i) {
+        Buffer* src = B(srcs[i]);
+        if (!src || src->buf == VK_NULL_HANDLE || src->mem == VK_NULL_HANDLE || bytes[i] == 0 ||
+            bytes[i] > src->bytes || offsets[i] < end || offsets[i] > hostBytes ||
+            bytes[i] > hostBytes - offsets[i]) return VK_ERROR_INITIALIZATION_FAILED;
+        end = offsets[i] + bytes[i];
+    }
+    const bool recording = stepBatchRecording();
+    if (!recording && g_batching) {
+        g_batchHasV41 = true;
+        batchFlush();
+    }
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    int stagingStatus = VK_SUCCESS;
+    Buffer* stage = stagingBuffer(hostBytes, &stagingStatus);
+    if (!stage) {
+        if (stagingStatus == VK_ERROR_DEVICE_LOST) {
+            g_submissionStatus = VK_ERROR_DEVICE_LOST;
+            g_v41SubmissionPendingFailure = true;
+        }
+        return stagingStatus == VK_SUCCESS ? FVK_D2H_STAGING_ALLOCATION_FAILED : stagingStatus;
+    }
+    VkCommandBuffer cmd = recording ? g_batchCmd : v41BeginCmdChecked();
+    if (cmd == VK_NULL_HANDLE) return (int)g_submissionStatus;
+    recordComputeBarrier(cmd); // shader writes must be visible to transfer reads
+    for (int i = 0; i < count; ++i) {
+        VkBufferCopy region{0, offsets[i], bytes[i]};
+        vkCmdCopyBuffer(cmd, B(srcs[i])->buf, stage->buf, 1, &region);
+    }
+    if (recording) {
+        g_batchOps += count;
+        batchFlush();
+        if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS || g_batching) {
+            return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : (int)VK_ERROR_UNKNOWN;
+        }
+    } else {
+        dpOneShot(g_dp.oneShotD2H);
+        if (!v41EndSubmitWaitChecked(cmd, true)) return (int)g_submissionStatus;
+    }
+    memcpy(host, g_stageMapped, hostBytes);
+    for (int i = 0; i < count; ++i) {
+        if (!checkedCounterAdd(g_d2hCount, 1) || !checkedCounterAdd(g_d2hBytes, bytes[i])) {
+            g_transferCountersValid = false;
+        }
+    }
+    if (recording) batchBegin();
+    return VK_SUCCESS;
+}
+
 void fvk_debug_d2h_staging_failure_once(int enabled) {
     g_debugD2HStagingFailureOnce = enabled != 0;
 }

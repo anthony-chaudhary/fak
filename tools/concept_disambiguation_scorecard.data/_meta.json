@@ -12990,6 +12990,11 @@
           "category": "incidental",
           "reason": "Plumbing of the fak#13695 PrefillAttention device route (cgo entry, lock, capability probe, timing receipt, admission threshold, fallback route, or execution operation label); the concept itself is the positioned PrefillAttention row.",
           "token": "PrefillAttentionSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Runtime backend predicate for the existing checked routed SwiGLU and BF16 publication modules and supported count domain; this is not a support-maturity label or device qualification claim.",
+          "token": "SupportsV41DeferredStatus"
         }
       ],
       "exclude": [
@@ -13111,6 +13116,7 @@
         "SupportPartial",
         "SupportedFeatures",
         "SupportsRoutedExpertKQuant",
+        "SupportsV41DeferredStatus",
         "TestMaturityBaselinePromotionIsWitnessGatedAndImmediatelyEnforced",
         "TierStatusSupported",
         "TierStatusUnsupported",
@@ -16468,6 +16474,11 @@
           "category": "incidental",
           "reason": "DeepSeek V4 MoE storage layout constructor alias",
           "token": "NewExpertStorageLayout"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper calculating 16-byte-aligned offsets for status and row byte regions in one host staging image; it introduces no tensor-layout or dtype convention.",
+          "token": "v41DeferredLayout"
         }
       ],
       "id": "layout",
@@ -16485,7 +16496,8 @@
         "gitDailyDayLayout",
         "imageLayoutVersion",
         "layouts",
-        "usesmlamoelayout"
+        "usesmlamoelayout",
+        "v41DeferredLayout"
       ],
       "known_tokens": [],
       "min_files": 2,

@@ -97,7 +97,7 @@ var DefaultThresholds = []int{25, 50, 75, 100}
 // The counts come from ParseChecklist (dod.go) rather than a second regex pair,
 // and the child scan walks the same fence-stripped lines, so the two can never
 // disagree about what is in scope. Child-ref extraction stays here since it is
-// specific to the witnessed-progress question, and is fenced by ForeignRefFloor
+// specific to the witnessed-progress question, and is fenced by foreignRef
 // for the same reason commit refs are — a task line citing an upstream project's
 // #14762 is not a child of this repo.
 func ParseTaskList(body string) (checked, unchecked int, children []int) {
@@ -105,12 +105,12 @@ func ParseTaskList(body string) (checked, unchecked int, children []int) {
 	checked, unchecked = list.Checked, list.Unchecked
 	seen := map[int]bool{}
 	for _, line := range unfencedLines(body) {
-		m := childRefRE.FindStringSubmatch(line)
+		m := childRefRE.FindStringSubmatchIndex(line)
 		if m == nil {
 			continue
 		}
-		n, err := strconv.Atoi(m[1])
-		if err != nil || n <= 0 || n >= ForeignRefFloor || seen[n] {
+		n, err := strconv.Atoi(line[m[2]:m[3]])
+		if err != nil || foreignRef(line, m[2]-1, n) || seen[n] {
 			continue
 		}
 		seen[n] = true

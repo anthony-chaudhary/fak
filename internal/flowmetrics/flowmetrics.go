@@ -88,14 +88,26 @@ type Commit struct {
 // wrong in both directions on this repo: it drops the real single-digit issues
 // (#3, #26, #40, #80 all exist) and it admits five-digit foreign-repo citations
 // (llama.cpp #14762, vLLM #35021, claude-code #53063) that would otherwise be
-// minted as phantom fak issues. Filter on ForeignRefFloor instead.
+// minted as phantom fak issues. A numeric floor alone stopped working once fak's
+// own numbering passed 10000 and overlapped those citations, so a ref is foreign
+// when an upstream project name directly precedes it (foreignCiteRE), and
+// ForeignRefFloor only fences implausibly large numbers.
 var issueRefRE = regexp.MustCompile(`(^|[^0-9A-Za-z_])#([0-9]+)\b`)
 
-// ForeignRefFloor is the first issue number treated as belonging to another
-// repository. fak's own numbering is in the 8000s, so 10000 leaves headroom
-// while fencing out the upstream-project citations that appear in commit prose.
-// Raise it when fak's numbering approaches it.
-const ForeignRefFloor = 10000
+// foreignCiteRE matches an upstream project name ending the text before a `#N`.
+var foreignCiteRE = regexp.MustCompile(`(?i)(?:^|[^0-9a-z_.-])(?:llama\.cpp|vllm|sglang|claude-code|ollama|pytorch|transformers|tensorrt-llm|mlx|ds4)\s*$`)
+
+// ForeignRefFloor is the first issue number treated as implausible for this
+// repository. fak's own numbering is in the 13000s; upstream citations are
+// fenced by foreignCiteRE, not by this bound. Raise it when fak's numbering
+// approaches it.
+const ForeignRefFloor = 100000
+
+// foreignRef reports whether the `#N` whose '#' sits at hash in s belongs to
+// another repository: out of range, or cited right after an upstream name.
+func foreignRef(s string, hash, n int) bool {
+	return n <= 0 || n >= ForeignRefFloor || foreignCiteRE.MatchString(s[:hash])
+}
 
 // fixesTrailerRE matches the anchored close trailers, which are the only body
 // references precise enough to attribute work.
@@ -137,9 +149,10 @@ func ParseCommitRefs(subject, body string) []int {
 // collectRefs appends the distinct in-range issue numbers found by re in s,
 // reading capture group grp, skipping any already in seen.
 func collectRefs(re *regexp.Regexp, s string, grp int, seen map[int]bool, out *[]int) {
-	for _, m := range re.FindAllStringSubmatch(s, -1) {
-		n, err := strconv.Atoi(m[grp])
-		if err != nil || n <= 0 || n >= ForeignRefFloor || seen[n] {
+	for _, m := range re.FindAllStringSubmatchIndex(s, -1) {
+		start, end := m[2*grp], m[2*grp+1]
+		n, err := strconv.Atoi(s[start:end])
+		if err != nil || foreignRef(s, start-1, n) || seen[n] {
 			continue
 		}
 		seen[n] = true

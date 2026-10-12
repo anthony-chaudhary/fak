@@ -420,29 +420,39 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 		return v41StageErr(v41StageMoE, l, err)
 	}
 	m.emitExpertRouteAt(l, pos, picks)
-	routed := make([]float32, H)
-	var fullOutputs [][]float32
+	var routed []float32
+	batched := false
 	if full {
-		fullOutputs = make([][]float32, len(picks))
-	}
-	for slot, pick := range picks {
-		stem := "ffn.experts." + itoa(pick.expert)
-		y, err := m.v41IncrementalExpert(l, stem, ffnX, pick.weight, scratch)
+		routed, batched, err = m.v41RoutedLayerStep(l, picks, ffnX, scratch)
 		if err != nil {
 			return err
+		}
+	}
+	if !batched {
+		routed = make([]float32, H)
+		var fullOutputs [][]float32
+		if full {
+			fullOutputs = make([][]float32, len(picks))
+		}
+		for slot, pick := range picks {
+			stem := "ffn.experts." + itoa(pick.expert)
+			y, err := m.v41IncrementalExpert(l, stem, ffnX, pick.weight, scratch)
+			if err != nil {
+				return err
+			}
+			if full {
+				fullOutputs[slot] = y
+				continue
+			}
+			for i := range routed {
+				routed[i] += pick.weight * y[i]
+			}
 		}
 		if full {
-			fullOutputs[slot] = y
-			continue
-		}
-		for i := range routed {
-			routed[i] += pick.weight * y[i]
-		}
-	}
-	if full {
-		routed, err = v41FullRoutedSumWith(l, picks, fullOutputs, H, scratch.routedSum)
-		if err != nil {
-			return err
+			routed, err = v41FullRoutedSumWith(l, picks, fullOutputs, H, scratch.routedSum)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	shared, err := m.v41SharedExpertSwiGLUWithPublish(l, ffnX, cfg, scratch.denseProjection, scratch.sharedActivation, scratch.gatherOps.bf16PublishFunc())
@@ -894,19 +904,24 @@ func (m *Model) v41LayerStepRoleFinish(l, pos int, x []float32, streams [][]floa
 		return v41StageErr(v41StageMoE, l, err)
 	}
 	m.emitExpertRouteAt(l, pos, picks)
-	routed := make([]float32, H)
-	fullOutputs := make([][]float32, len(picks))
-	for slot, pick := range picks {
-		stem := "ffn.experts." + itoa(pick.expert)
-		y, err := m.v41IncrementalExpert(l, stem, ffnX, pick.weight, scratch)
+	routed, batched, err := m.v41RoutedLayerStep(l, picks, ffnX, scratch)
+	if err != nil {
+		return err
+	}
+	if !batched {
+		fullOutputs := make([][]float32, len(picks))
+		for slot, pick := range picks {
+			stem := "ffn.experts." + itoa(pick.expert)
+			y, err := m.v41IncrementalExpert(l, stem, ffnX, pick.weight, scratch)
+			if err != nil {
+				return err
+			}
+			fullOutputs[slot] = y
+		}
+		routed, err = v41FullRoutedSumWith(l, picks, fullOutputs, H, scratch.routedSum)
 		if err != nil {
 			return err
 		}
-		fullOutputs[slot] = y
-	}
-	routed, err = v41FullRoutedSumWith(l, picks, fullOutputs, H, scratch.routedSum)
-	if err != nil {
-		return err
 	}
 	shared, err := m.v41SharedExpertSwiGLUWithPublish(l, ffnX, cfg, scratch.denseProjection, scratch.sharedActivation, scratch.gatherOps.bf16PublishFunc())
 	if err != nil {

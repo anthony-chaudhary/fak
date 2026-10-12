@@ -28,7 +28,7 @@ func TestFastReleaseGateConvergesAndKeepsFullTestObservable(t *testing.T) {
 		// The go test step stays observable (#6982): tee'd log, the real exit
 		// status, and a heartbeat while it runs.
 		"- name: go test ./... (no -race)",
-		`go test -timeout=20m "${shard_pkgs[@]}" 2>&1 | tee`,
+		`go test -timeout=20m -skip "$CI_FAST_ADVISORY_TESTS" "${shard_pkgs[@]}" 2>&1 | tee`,
 		`status_file="$RUNNER_TEMP/ci-fast-go-test.status"`,
 		`"$RUNNER_TEMP/ci-fast-go-test.log"`,
 		"${PIPESTATUS[0]}",
@@ -153,16 +153,16 @@ func TestFastReleaseGateRequiresCompleteSourceBoundProvenance(t *testing.T) {
 			for _, receipt := range f.receipts[1:] {
 				coverage := receipt["coverage"].(map[string]any)
 				coverage["all_packages"], coverage["packages"] = []string{}, []string{}
-				receipt["commands"] = [][]string{{"go", "test", "-timeout=20m"}}
+				receipt["commands"] = [][]string{fastShardCommand()}
 			}
 		}},
 		{name: "partial package coverage with matching argv", mutate: func(f *fastProvenanceFixture) {
 			f.receipts[1]["coverage"].(map[string]any)["packages"] = []string{"example.invalid/project/a"}
-			f.receipts[1]["commands"] = [][]string{{"go", "test", "-timeout=20m", "example.invalid/project/a"}}
+			f.receipts[1]["commands"] = [][]string{fastShardCommand("example.invalid/project/a")}
 		}},
 		{name: "overlapping packages with matching argv", mutate: func(f *fastProvenanceFixture) {
 			f.receipts[2]["coverage"].(map[string]any)["packages"] = []string{"example.invalid/project/a", "example.invalid/project/f"}
-			f.receipts[2]["commands"] = [][]string{{"go", "test", "-timeout=20m", "example.invalid/project/a", "example.invalid/project/f"}}
+			f.receipts[2]["commands"] = [][]string{fastShardCommand("example.invalid/project/a", "example.invalid/project/f")}
 		}},
 		{name: "different resolved package universe", mutate: func(f *fastProvenanceFixture) {
 			f.receipts[3]["coverage"].(map[string]any)["all_packages"] = []string{"example.invalid/project/other"}
@@ -178,6 +178,9 @@ func TestFastReleaseGateRequiresCompleteSourceBoundProvenance(t *testing.T) {
 		}},
 		{name: "build command narrowed", mutate: func(f *fastProvenanceFixture) {
 			f.receipts[0]["commands"].([][]string)[1] = []string{"go", "build", "./cmd/fak"}
+		}},
+		{name: "widened advisory skip", mutate: func(f *fastProvenanceFixture) {
+			f.receipts[3]["commands"].([][]string)[0][4] = "^(TestLiveTreeUnderCeiling|TestCheckpointResidencyHTTP.*)$"
 		}},
 		{name: "unapproved test flag", mutate: func(f *fastProvenanceFixture) {
 			f.receipts[1]["commands"].([][]string)[0] = append(f.receipts[1]["commands"].([][]string)[0], "-short")
@@ -447,6 +450,72 @@ func TestCIProvenanceFullGateRejectsMixedAttempts(t *testing.T) {
 	}
 }
 
+// fastAdvisoryRatchets are the only tests the decisive ci-fast shards may skip,
+// keyed to the package that defines them. Each grades the live repository's
+// shape or history rather than shipped behavior; ci.yml still runs them all.
+var fastAdvisoryRatchets = map[string]string{
+	"TestLiveTreeUnderCeiling":                             "internal/godfileceiling",
+	"TestTreeEnumExhaustivenessNotGrowing":                 "internal/enumlint",
+	"TestLiveInternalGoPackagesResolveToExplicitLaneTrees": "internal/devindex",
+	"TestCheckedInPageIsFresh":                             "cmd/verbsdoc",
+	"TestLiveGitGatherIsWellFormed":                        "internal/flowmetrics",
+}
+
+const fastAdvisorySkip = "^(TestLiveTreeUnderCeiling|TestTreeEnumExhaustivenessNotGrowing|TestLiveInternalGoPackagesResolveToExplicitLaneTrees|TestCheckedInPageIsFresh|TestLiveGitGatherIsWellFormed)$"
+
+func fastShardCommand(packages ...string) []string {
+	return append([]string{"go", "test", "-timeout=20m", "-skip", fastAdvisorySkip}, packages...)
+}
+
+// TestFastReleaseGateSkipsOnlyPinnedLiveTreeRatchets keeps the decisive gate's
+// -skip list from widening silently: the workflow value must name exactly the
+// pinned ratchets, each must still exist where pinned, and the full ci.yml test
+// step must not skip anything.
+// fak-test:runtime fast est=1s lane=default
+func TestFastReleaseGateSkipsOnlyPinnedLiveTreeRatchets(t *testing.T) {
+	workflow := readFastReleaseWorkflow(t)
+	if !strings.Contains(workflow, "\n  CI_FAST_ADVISORY_TESTS: \""+fastAdvisorySkip+"\"\n") {
+		t.Fatalf("ci-fast CI_FAST_ADVISORY_TESTS is not the pinned value %q", fastAdvisorySkip)
+	}
+	inner := strings.TrimSuffix(strings.TrimPrefix(fastAdvisorySkip, "^("), ")$")
+	names := strings.Split(inner, "|")
+	if len(names) != len(fastAdvisoryRatchets) {
+		t.Fatalf("skip names %v do not match pinned ratchets %v", names, fastAdvisoryRatchets)
+	}
+	root := filepath.Join("..", "..")
+	for _, name := range names {
+		dir, ok := fastAdvisoryRatchets[name]
+		if !ok {
+			t.Fatalf("ci-fast skips unpinned test %s", name)
+		}
+		files, err := filepath.Glob(filepath.Join(root, filepath.FromSlash(dir), "*_test.go"))
+		if err != nil || len(files) == 0 {
+			t.Fatalf("pinned ratchet package %s has no tests: %v", dir, err)
+		}
+		found := false
+		for _, file := range files {
+			data, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(data), "\nfunc "+name+"(t *testing.T)") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("pinned ratchet %s no longer exists in %s", name, dir)
+		}
+	}
+	full, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(full), "-skip") || !strings.Contains(string(full), "run: go test -coverprofile=coverage.out ./...") {
+		t.Fatal("ci.yml must keep running the full go test ./... with no -skip, so the ratchets still run on every push")
+	}
+}
+
 type fastProvenanceFixture struct {
 	env       map[string]string
 	receipts  []map[string]any
@@ -465,6 +534,7 @@ func newFastProvenanceFixture() fastProvenanceFixture {
 		"EXPECTED_SHA": strings.Repeat("a", 40), "EXPECTED_TREE": strings.Repeat("b", 40), "GITHUB_SHA": strings.Repeat("a", 40),
 		"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main", "GITHUB_RUN_ID": "100", "GITHUB_RUN_ATTEMPT": "1",
 		"CI_CLASS": "fast", "REQUESTED_INTENT": "", "CANDIDATE_RESULT": "success", "BUILD_VET_RESULT": "success", "GO_TEST_SHARDS_RESULT": "success",
+		"CI_FAST_ADVISORY_TESTS": fastAdvisorySkip,
 	}}
 	all := []string{
 		"example.invalid/project/a", "example.invalid/project/b", "example.invalid/project/c", "example.invalid/project/d",
@@ -485,7 +555,7 @@ func newFastProvenanceFixture() fastProvenanceFixture {
 		if job != "build-vet-fast" {
 			index := len(f.receipts) - 1
 			coverage = map[string]any{"kind": "go-test-shard", "shard_index": index, "shard_total": 4, "all_packages": all, "packages": partitions[index]}
-			commands = [][]string{append([]string{"go", "test", "-timeout=20m"}, partitions[index]...)}
+			commands = [][]string{fastShardCommand(partitions[index]...)}
 			environment["FAK_REQUIRE_OPENAPI_VALIDATOR"] = "1"
 			stepNames = []string{"tests"}
 		}

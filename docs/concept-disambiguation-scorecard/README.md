@@ -17,7 +17,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **639** (clarity 0 + coverage 639) |
 | **Crystal-clear concepts (and climbing)** | **1191** crystal of 2981 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3074 / 3713** (82.8% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **3078 / 3717** (82.8% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 225 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **86** of 4226 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
@@ -69,9 +69,9 @@ coverage by family (positioned / discovered):
   guard-gate       ##########################.. 511/556
   context-ctx      ########################.... 263/307
   pool             ##############.............. 41/83
-  attention        ####################........ 110/151
+  attention        #####################....... 114/155
   policy-capability ########################.... 221/261
-  support-maturity ###################......... 79/115
+  support-maturity ###################......... 80/116
   render-materialize ########################.... 217/251
   witness-proof    ########################.... 173/202
   evict            ####################........ 56/79
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 82.8%  (3074/3713 confusable tokens positioned)
+namespace coverage  [###########################.....] 82.8%  (3078/3717 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 225
@@ -3283,9 +3283,9 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | guard-gate | 511 | 556 | 45 |
 | context-ctx | 263 | 307 | 44 |
 | pool | 41 | 83 | 42 |
-| attention | 110 | 151 | 41 |
+| attention | 114 | 155 | 41 |
 | policy-capability | 221 | 261 | 40 |
-| support-maturity | 79 | 115 | 36 |
+| support-maturity | 80 | 116 | 36 |
 | render-materialize | 217 | 251 | 34 |
 | witness-proof | 173 | 202 | 29 |
 | evict | 56 | 79 | 23 |

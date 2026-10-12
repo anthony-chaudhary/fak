@@ -90,7 +90,8 @@ func v41DeviceParitySeams(st *v41ForwardState) (bound, host []string) {
 		{"tail_rope", st.tailRoPE != nil}, {"shared_attention", st.sharedAttention != nil},
 		{"router_topk", st.routerTopK != nil}, {"routed_sum", st.routedSum != nil},
 		{"shared_add", st.sharedAdd != nil}, {"gather_ops", st.gatherOps != nil},
-		{"mhc_device", st.mhcDevice != nil},
+		{"mhc_device", st.mhcDevice != nil}, {"routed_expert", st.routedExpert != nil},
+		{"routed_layer", st.routedLayer != nil},
 	} {
 		if seam.on {
 			bound = append(bound, seam.name)
@@ -220,48 +221,6 @@ func v41DeviceParityEngramFixture(t *testing.T, compressed bool) *Model {
 	m, _ := v41FullEngramModelConfig(t, cfg, true)
 	m, _ = v41IncrementalEngramFixtureFromModel(t, m, compressed)
 	return m
-}
-
-// v41DeviceParityBlockAligned widens the hidden and expert widths to one k-quant
-// super-block (256), the narrowest geometry that carries real Q2_K/Q3_K experts.
-func v41DeviceParityBlockAligned(cfg *Config) {
-	cfg.HiddenSize = qkK
-	cfg.MoEIntermediateSize = qkK
-}
-
-// v41DeviceParityPinnedExperts replaces every routed expert with the pinned
-// DeepSeek-V4.1-Flash Q2_K slate's dtypes: Q2_K gate/up and Q3_K down. The checkpoint has
-// no F32 experts, and the device-only routed seam stages only the quantized kinds a
-// device kernel serves, so an F32 slate would test a route the real model never takes.
-//
-// Quantized GEMMs and BF16 publications drift by about one BF16 ulp between host and
-// device, and the random router had near-ties at its top-k boundary: one flipped
-// selection (layer 2, expert 287 vs 321) moved later logits by 5%. That is tie-breaking,
-// not device arithmetic, so the selection-only correction bias spaces experts a unit
-// apart, which no score drift can cross; routing weights still come from the scores.
-func v41DeviceParityPinnedExperts(t *testing.T, m *Model) {
-	t.Helper()
-	H, I := m.Cfg.HiddenSize, m.Cfg.MoEIntermediateSize
-	bias := make([]float32, m.Cfg.NumExperts)
-	for e := range bias {
-		bias[e] = -float32(e)
-	}
-	if m.kqw == nil {
-		m.kqw = map[string]*kQuantTensor{}
-	}
-	for l := 0; l < m.Cfg.NumLayers; l++ {
-		v41WriteTensorF32(t, m, layerName(l, "ffn.gate.e_score_correction_bias"), bias)
-		for e := 0; e < m.Cfg.NumExperts; e++ {
-			stem := "ffn.experts." + itoa(e)
-			w1, w3, w2 := layerName(l, stem+".w1.weight"), layerName(l, stem+".w3.weight"), layerName(l, stem+".w2.weight")
-			m.kqw[w1] = q2kFixtureTensor(I, H, uint64(0x13827+3*e))
-			m.kqw[w3] = q2kFixtureTensor(I, H, uint64(0x13827+3*e+1))
-			m.kqw[w2] = q3kFixtureTensor(H, I)
-			delete(m.manifest, w1)
-			delete(m.manifest, w3)
-			delete(m.manifest, w2)
-		}
-	}
 }
 
 // fak-test:justify why=integration when=changed:internal/model/**
