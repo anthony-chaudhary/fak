@@ -21,6 +21,11 @@ type v41SharedAttentionRequest struct {
 	plain       V41SparseAttentionSinkOptions
 	values      [][]float32
 	compressed  V41AttentionSharedKVOptions
+	// resident names the decode step's flat KV rows in the session mirror; nil
+	// keeps the per-call KV upload. sinkKey names the checkpoint tensor the sink
+	// was read from; residency is never inferred from a layer index.
+	resident *v41ResidentKVView
+	sinkKey  string
 }
 
 // V41SharedAttentionOperationError identifies a selected contraction failure.
@@ -41,12 +46,18 @@ func (e *V41SharedAttentionOperationError) Unwrap() error { return e.Cause }
 var errV41SharedAttentionResult = errors.New("model: invalid selected V4.1 shared attention result")
 
 func v41SparseAttentionSinkWithDevice(layer int, q, kv, sink []float32, idx []int32, opt V41SparseAttentionSinkOptions, attend v41SharedAttentionFunc) ([]float32, error) {
+	return v41SparseAttentionSinkResident(layer, q, kv, sink, idx, opt, nil, attend)
+}
+
+func v41SparseAttentionSinkResident(layer int, q, kv, sink []float32, idx []int32, opt V41SparseAttentionSinkOptions, resident *v41ResidentKVView, attend v41SharedAttentionFunc) ([]float32, error) {
 	if attend == nil {
 		return V41SparseAttentionSink(q, kv, sink, idx, opt)
 	}
-	return v41SelectedSharedAttention(layer, v41SharedAttentionRequest{
-		mode: compute.V41SharedAttentionPlain, q: q, kv: kv, sink: sink, idx: idx, plain: opt,
-	}, attend)
+	request := v41SharedAttentionRequest{mode: compute.V41SharedAttentionPlain, q: q, kv: kv, sink: sink, idx: idx, plain: opt}
+	if resident != nil && !v41ResidentKVDisabled {
+		request.resident, request.sinkKey = resident, resident.sinkKey
+	}
+	return v41SelectedSharedAttention(layer, request, attend)
 }
 
 func v41AttentionCompressedForwardWithDevice(q []float32, values [][]float32, opt V41AttentionSharedKVOptions, attend v41SharedAttentionFunc) ([]float32, error) {
@@ -202,6 +213,9 @@ func v41PrepareSharedAttention(request v41SharedAttentionRequest) (v41SharedAtte
 	if request.sink != nil {
 		p.sink = append([]float32(nil), request.sink...)
 	}
+	if request.resident != nil {
+		return p, nil // the device mirror gathers the selected rows
+	}
 	p.kv = make([]float32, 0, selectedSize)
 	for _, row := range p.sourceRows {
 		if request.mode == compute.V41SharedAttentionPlain {
@@ -271,8 +285,10 @@ func v41SharedAttentionCause(layer int, p v41SharedAttentionPayload, cause error
 
 // One nonempty call uploads Q, selected shared KV, and a transient sink. Upload
 // bytes are 4*(H*D+R*D+H) with a sink, or 4*(H*D+R*D+1) without one; result
-// readback is 4*H*D, plus the primitive's 16*H status readback. Sink residency is
-// deliberately not inferred from a layer/cache key. No speedup is claimed.
+// readback is 4*H*D, plus the primitive's 16*H status readback. A decode step
+// that names its rows in the session KV mirror (#13821) instead uploads Q plus
+// only the rows the mirror lacks, and reads its sink from the tensor named by
+// sinkKey; sink residency is never inferred from a layer/cache key.
 func (s *Session) v41SharedAttentionFunc() v41SharedAttentionFunc {
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
 		!compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.F32) {
@@ -282,8 +298,12 @@ func (s *Session) v41SharedAttentionFunc() v41SharedAttentionFunc {
 	if !ok || !operation.SupportsV41SharedAttention() {
 		return nil
 	}
+	resident := s.newV41ResidentKV()
 	return func(layer int, request v41SharedAttentionRequest) (result []float32, cause error) {
 		s.ensureOpenBackendSession()
+		if resident == nil {
+			request.resident, request.sinkKey = nil, ""
+		}
 		stage := "payload"
 		closeFailure := func(err error) error {
 			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-shared-attention", Layer: layer, Stage: stage, Cause: err}
@@ -387,17 +407,34 @@ func (s *Session) v41SharedAttentionFunc() v41SharedAttentionFunc {
 			if err != nil {
 				return nil, err
 			}
-			kt, err := upload("KV", []int{len(p.sourceRows), p.headDim}, p.kv)
-			if err != nil {
+			var kt compute.Tensor
+			if request.resident != nil {
+				stage = "resident KV"
+				kt, err = resident.panel(layer, request.resident, request.kv, p.headDim, p.sourceRows)
+				if err != nil {
+					return nil, err
+				}
+				if !fresh(kt) || !shapeOK(kt, []int{len(p.sourceRows), p.headDim}) {
+					return nil, errV41SharedAttentionResult
+				}
+			} else if kt, err = upload("KV", []int{len(p.sourceRows), p.headDim}, p.kv); err != nil {
 				return nil, err
 			}
-			sink := p.sink
-			if sink == nil {
-				sink = []float32{0}
-			}
-			st, err := upload("sink", []int{len(sink)}, sink)
-			if err != nil {
-				return nil, err
+			var st compute.Tensor
+			if request.sinkKey != "" && p.sink != nil {
+				stage = "resident sink"
+				st = resident.sink(request.sinkKey, p.sink)
+				if st.Backend() != s.Backend || !shapeOK(st, []int{len(p.sink)}) {
+					return nil, errV41SharedAttentionResult
+				}
+			} else {
+				sink := p.sink
+				if sink == nil {
+					sink = []float32{0}
+				}
+				if st, err = upload("sink", []int{len(sink)}, sink); err != nil {
+					return nil, err
+				}
 			}
 			stage = "shared attention"
 			out, err := operation.V41SharedAttention(qt, kt, st, len(p.sourceRows), p.heads, p.headDim, p.scale, p.mode, p.sink != nil)

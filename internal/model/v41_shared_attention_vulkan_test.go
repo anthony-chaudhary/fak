@@ -85,6 +85,9 @@ func TestV41SharedAttentionVulkan(t *testing.T) {
 		}
 		return
 	}
+	// This witness pins the per-call upload contract; the KV mirror has its own.
+	v41ResidentKVDisabled = true
+	defer func() { v41ResidentKVDisabled = false }()
 	backend, ok := compute.Lookup("vulkan")
 	if !ok || backend == nil || backend.Name() != "vulkan" || !backend.Caps().DeviceMemory {
 		t.Fatal("required actual Vulkan backend unavailable")

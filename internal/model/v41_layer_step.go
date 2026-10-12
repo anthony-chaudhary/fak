@@ -366,8 +366,11 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	idx := v41PlainWindowIndexList(visibleKeys)
 	scale := cfg.attnScale()
 	attentionOpened := m.v41NowNanos()
-	o, err := v41SparseAttentionSinkWithDevice(l, q, flatKV, sink, idx, V41SparseAttentionSinkOptions{
+	o, err := v41SparseAttentionSinkResident(l, q, flatKV, sink, idx, V41SparseAttentionSinkOptions{
 		B: 1, M: 1, Heads: nH, HeadDim: hd, TopK: len(visibleKeys) + 1, N: len(visibleKeys), Softmax: scale,
+	}, &v41ResidentKVView{
+		owner: layerState, pos: pos, ringRows: layerState.windowSize, firstKey: int(visibleKeys[0]),
+		windowRows: len(visibleKeys), sinkKey: layerName(l, "attn.sink"),
 	}, scratch.sharedAttention)
 	m.v41NoteAttentionContraction(attentionOpened)
 	if err != nil {
@@ -816,7 +819,10 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 		}
 	}
 	attentionOpened := m.v41NowNanos()
-	o, err := v41CombinedAttention(l, pos, plan.kvGroupSize(cfg), nH, hd, q, m.tensor(layerName(l, "attn.sink")), window, sharedKV, ids, cfg.attnScale(), scratch.sharedAttention)
+	o, err := v41CombinedAttentionResident(l, pos, plan.kvGroupSize(cfg), nH, hd, q, m.tensor(layerName(l, "attn.sink")), window, sharedKV, ids, cfg.attnScale(), &v41ResidentKVView{
+		owner: layerState, pos: pos, ringRows: layerState.windowSize, firstKey: windowStart,
+		windowRows: len(window), compressedRows: len(sharedKV), sinkKey: layerName(l, "attn.sink"),
+	}, scratch.sharedAttention)
 	m.v41NoteAttentionContraction(attentionOpened)
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)

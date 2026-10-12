@@ -17,6 +17,10 @@ import (
 // already normalized/rotated; the caller applies inverse output RoPE once after
 // this combined result, never separately to two attention streams.
 func v41CombinedAttention(layer, pos, sourceRatio, heads, headDim int, q, sink []float32, window, compressed [][]float32, compressedIDs []int32, scale float32, attend v41SharedAttentionFunc) ([]float32, error) {
+	return v41CombinedAttentionResident(layer, pos, sourceRatio, heads, headDim, q, sink, window, compressed, compressedIDs, scale, nil, attend)
+}
+
+func v41CombinedAttentionResident(layer, pos, sourceRatio, heads, headDim int, q, sink []float32, window, compressed [][]float32, compressedIDs []int32, scale float32, resident *v41ResidentKVView, attend v41SharedAttentionFunc) ([]float32, error) {
 	fail := func(message string) ([]float32, error) {
 		return nil, v41StageErr(v41StageAttention, layer, fmt.Errorf("%w: combined attention %s", ErrV41ForwardStage, message))
 	}
@@ -80,9 +84,9 @@ func v41CombinedAttention(layer, pos, sourceRatio, heads, headDim int, q, sink [
 			idx = append(idx, int32(len(window)+int(id)))
 		}
 	}
-	out, err := v41SparseAttentionSinkWithDevice(layer, q, flat, sink, idx, V41SparseAttentionSinkOptions{
+	out, err := v41SparseAttentionSinkResident(layer, q, flat, sink, idx, V41SparseAttentionSinkOptions{
 		B: 1, M: 1, Heads: heads, HeadDim: headDim, N: rows, TopK: len(idx), Softmax: scale,
-	}, attend)
+	}, resident, attend)
 	if err != nil {
 		return nil, err
 	}
