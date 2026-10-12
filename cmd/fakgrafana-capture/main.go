@@ -415,7 +415,7 @@ func safeJoin(root, rel string) (string, error) {
 	if rel == "" {
 		return "", errors.New("path is empty")
 	}
-	if filepath.IsAbs(filepath.FromSlash(rel)) {
+	if strings.HasPrefix(rel, "/") || strings.HasPrefix(rel, `\`) || filepath.VolumeName(rel) != "" || filepath.IsAbs(filepath.FromSlash(rel)) {
 		return "", fmt.Errorf("path %q is absolute; must be repo-relative", rel)
 	}
 	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {

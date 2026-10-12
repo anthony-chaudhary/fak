@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -287,13 +288,13 @@ func ProjectLaunchd(spec *servicespec.Spec, in LaunchdInput) (*LaunchdProjection
 			if domain == "system" {
 				plistDir = "/Library/LaunchAgents"
 			} else if home := os.Getenv("HOME"); home != "" && in.User == "" {
-				plistDir = filepath.Join(home, "Library", "LaunchAgents")
+				plistDir = path.Join(filepath.ToSlash(home), "Library", "LaunchAgents")
 			} else {
 				plistDir = "~/Library/LaunchAgents"
 			}
 		}
 	}
-	plistPath := filepath.Join(plistDir, label+".plist")
+	plistPath := path.Join(filepath.ToSlash(plistDir), label+".plist")
 
 	commands := LaunchdCommands{
 		Bootstrap: fmt.Sprintf("launchctl bootstrap %s %s", domain, plistPath),
