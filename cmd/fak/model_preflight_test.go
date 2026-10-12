@@ -20,7 +20,7 @@ func writeV41HeaderShards(t *testing.T, dir string) string {
 	t.Helper()
 	src := filepath.Join("..", "..", "internal", "ggufload", "testdata", "deepseek41_q2k_header")
 	paths, err := filepath.Glob(filepath.Join(src, "*.gguf.gz"))
-	if err != nil || len(paths) != 7 {
+	if err != nil || len(paths) != 7 { //boundarylint:ignore CHANGE_DETECTOR_TEST pinned deepseek41_q2k_header/provenance.json artifact contains exactly seven shards
 		t.Fatalf("fixture shards: %d, err %v", len(paths), err)
 	}
 	for _, p := range paths {

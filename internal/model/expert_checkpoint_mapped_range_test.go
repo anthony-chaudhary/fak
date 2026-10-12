@@ -112,7 +112,7 @@ func TestExpertCheckpointMappedRangeConstructorsPreserveSource(t *testing.T) {
 		}
 		// The odd Q3_K block remains 110 bytes here. Vulkan owns its separate
 		// 112-byte padded upload allocation; it must never pad this mapped source.
-		if quant == ExpertCheckpointQ3K && len(hb.I8()) != 110 {
+		if quant == ExpertCheckpointQ3K && len(hb.I8()) != 110 { //boundarylint:ignore CHANGE_DETECTOR_TEST Q3_K packed ABI is 110 bytes per block; Vulkan upload padding must not alter mapped input
 			t.Fatal("Q3_K host source lost exact payload length")
 		}
 	}

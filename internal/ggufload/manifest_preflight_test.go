@@ -86,7 +86,7 @@ func TestManifestPreflightLeavesCallerFileUntraced(t *testing.T) {
 func loadV41HeaderFixture(t *testing.T) *File {
 	t.Helper()
 	paths, err := filepath.Glob(filepath.Join("testdata", "deepseek41_q2k_header", "*.gguf.gz"))
-	if err != nil || len(paths) != 7 {
+	if err != nil || len(paths) != 7 { //boundarylint:ignore CHANGE_DETECTOR_TEST pinned deepseek41_q2k_header/provenance.json artifact contains exactly seven shards
 		t.Fatalf("V4.1 header fixture: %d shards, err %v", len(paths), err)
 	}
 	sort.Strings(paths)

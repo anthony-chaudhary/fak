@@ -245,13 +245,14 @@ func TestLlamaCppQwen4ExpSkipsEmptyGatheredUbatch(t *testing.T) {
 	for _, e := range a.Events {
 		got[key{e.Layer, e.Phase, e.Token}] = true
 	}
-	for _, k := range []key{{0, "attention_projected", 0}, {0, "attention_projected", 2}, {0, "moe_sum", 2}, {1, "logits", 2}} {
+	want := []key{{0, "attention_projected", 0}, {0, "attention_projected", 1}, {0, "attention_projected", 2}, {0, "moe_sum", 2}, {1, "logits", 2}}
+	for _, k := range want {
 		if !got[k] {
 			t.Fatalf("missing %+v in %v", k, got)
 		}
 	}
-	if len(a.Events) != 5 {
-		t.Fatalf("events=%d, want 5", len(a.Events))
+	if len(a.Events) != len(want) {
+		t.Fatalf("events=%d, want %d", len(a.Events), len(want))
 	}
 	// A zero-row tensor on a stage that is not tail aligned is still malformed.
 	bad := writeDump(t, []int{1}, []dumpTensor{{name: "linear_attn_out-0", ne: [4]int64{H, 0, 1, 1}, dumped: true}})
