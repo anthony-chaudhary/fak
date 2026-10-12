@@ -4162,6 +4162,26 @@
           "category": "incidental",
           "reason": "Existing GGUF tensor-name spelling used in Qwen4Exp shape validation for neural feed-forward gating weights; it is not an admission gate or security guard framework.",
           "token": "ffn_gate_inp_shexp"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate helper of the existing observe-only filing sensor that classifies and counts supported visible command argv; it introduces no separate enforcement gate.",
+          "token": "guardIssueCreatesInArgv"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate helper of the existing observe-only filing sensor that classifies and counts supported visible command syntax while preserving unknown for opaque execution; it introduces no separate enforcement gate.",
+          "token": "guardIssueCreatesInCommand"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local tokenizer for the bounded command syntax recognized by the existing observe-only filing sensor; it introduces no separate enforcement gate.",
+          "token": "guardCommandWord"
+        },
+        {
+          "category": "incidental",
+          "reason": "Record encoding and schema check subordinate to the existing observe-only filing sensor; it introduces no separate enforcement gate.",
+          "token": "guardClaudeRecordSupported"
         }
       ],
       "exclude": [
@@ -4363,6 +4383,7 @@
         "guardBootStartupPhases",
         "guardCheckRemoteServe",
         "guardClaudeCommandIndex",
+        "guardClaudeRecordSupported",
         "guardCodexPowerShellCommand",
         "guardCodexSessionStartBinding",
         "guardCodexSessionStartCommand",
@@ -4372,6 +4393,7 @@
         "guardCodexSessionStartTimeoutSeconds",
         "guardCodexSessionStartTrustedHash",
         "guardCodexShellQuote",
+        "guardCommandWord",
         "guardCompactionAnchorFirst",
         "guardCompactionAnchorHead",
         "guardCompactionAnchorMode",
@@ -4464,6 +4486,8 @@
         "guardInfoWorkHistoryRows",
         "guardInfoWorkHistorySchema",
         "guardInfoWorkWindow",
+        "guardIssueCreatesInArgv",
+        "guardIssueCreatesInCommand",
         "guardKeychainAPIKey",
         "guardKeychainAccessToken",
         "guardKeychainCred",
@@ -13361,6 +13385,11 @@
           "category": "incidental",
           "reason": "Explicit per-consumer runtime interface contract for synchronous consumption of immutable Q2_K/Q3_K source bytes and independent uploaded-buffer ownership, controlling whether borrowing is permitted; it is not a product maturity level, device qualification result, or performance claim.",
           "token": "SupportsBorrowedExpertUploads"
+        },
+        {
+          "category": "incidental",
+          "reason": "Recognizes record encoding and schema handled by the existing observe-only filing sensor; supported here is a parsing contract, not a product-maturity or qualification claim.",
+          "token": "guardClaudeRecordSupported"
         }
       ],
       "exclude": [
@@ -13551,6 +13580,7 @@
         "gitDailyCoverageKPI",
         "gitDailyCoverageKey",
         "goalCoverageThreshold",
+        "guardClaudeRecordSupported",
         "guardKeychainSupported",
         "immaturity",
         "joinCoverageScores",

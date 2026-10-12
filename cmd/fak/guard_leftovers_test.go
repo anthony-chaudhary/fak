@@ -84,11 +84,11 @@ func TestApplyLeftoversSignalCountsEvidenceNotProse(t *testing.T) {
 	const claimed = "Done. I filed both follow-ups as gh issues.\n" +
 		"There are two more things worth doing: a docs pass and a soak."
 
-	// (a) the claim with no filing behind it — a tool turn that ran tests, then the
+	// (a) the claim with no filing behind it — a tool turn that checked status, then the
 	// prose-only end_turn. The sensor records the breach.
 	bare := filepath.Join(dir, "claim-only.jsonl")
 	writeStopTranscriptFixture(t, bare,
-		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./internal/headlesslint/"}}]}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"git status"}}]}}`,
 		`{"type":"assistant","message":{"role":"assistant","content":`+guardLeftoversJSONString(t, claimed)+`}}`,
 	)
 	sig := readGuardStopTranscript(bare)
@@ -166,8 +166,78 @@ func TestGuardIssuesFiledCountsShellAndNestedNativeCallsNotProse(t *testing.T) {
 		}}},
 		{Name: "functions.shell_command", Input: map[string]any{"justification": "Please run fak issue create later", "command": "Write-Output clean"}},
 	})
-	if got := guardIssuesFiled(loadGuardLeftoversFixture(t, path)); got != 4 {
-		t.Fatalf("issues filed = %d, want 4", got)
+	if got := guardIssuesFiledEvidenceFromRecords(loadGuardLeftoversFixture(t, path), false); !got.Known || got.Count != 4 {
+		t.Fatalf("issues filed = %+v, want witnessed 4", got)
+	}
+}
+
+// fak-test:runtime fast est=20ms
+func TestGuardIssuesFiledCodexNativeCoverage(t *testing.T) {
+	t.Parallel()
+	function := func(name, arguments string) string {
+		return `{"type":"response_item","payload":{"type":"function_call","name":` + guardLeftoversJSONString(t, name) + `,"arguments":` + guardLeftoversJSONString(t, arguments) + `}}`
+	}
+	shell := func(command string) string {
+		return function("functions.exec_command", `{"cmd":`+guardLeftoversJSONString(t, command)+`}`)
+	}
+	const opaque = `{"type":"response_item","payload":{"type":"custom_tool_call","name":"functions.exec","input":"text(await tools.exec_command({cmd: opaqueCommand}));"}}`
+	const claude = `{"type":"assistant","message":{"role":"assistant","content":[]}}`
+	for _, tc := range []struct {
+		name, input string
+		known       bool
+		count       int
+	}{
+		{name: "opaque custom execution", input: opaque},
+		{name: "structured native invocation", input: shell(`fak-dev issue create --title "one"`), known: true, count: 1},
+		{name: "explicit Go native target", input: shell(`go run ./cmd/fak-dev issue create --title two`), known: true, count: 1},
+		{name: "executable path", input: shell(`C:\tools\fak-dev.exe issue create --title three`), known: true, count: 1},
+		{name: "direct issue tool", input: function("github.create_issue", `{"title":"four"}`), known: true, count: 1},
+		{name: "local shell array", input: `{"type":"response_item","payload":{"type":"local_shell_call","action":{"command":["bash","-lc","gh issue create --title five"]}}}`, known: true, count: 1},
+		{name: "known status zero", input: shell("git status"), known: true},
+		{name: "non-create command", input: shell("fak-dev issue list"), known: true},
+		{name: "quoted prose", input: shell(`echo "fak-dev issue create --title fake"`), known: true},
+		{name: "output only", input: `{"type":"response_item","payload":{"type":"function_call_output","output":"gh issue create: created #123"}}`, known: true},
+		{name: "dynamic script", input: shell(`$command = "fak-dev issue create"; & $command`)},
+		{name: "nested interpreter", input: shell(`python -c "print('gh issue create')"`)},
+		{name: "unhandled execution wrapper", input: function("functions.exec", `{"code":"run(command)"}`)},
+		{name: "unsupported row", input: shell("git status") + "\n" + `{"type":"future","payload":{"type":"future"}}`},
+		{name: "truncated row", input: shell("git status") + "\n" + `{"type":`},
+		{name: "malformed arguments", input: function("functions.exec_command", "{")},
+		{name: "positive with opaque coverage", input: shell("fak issue create") + "\n" + opaque},
+		{name: "native fanout is opaque", input: shell("fak-dev issue fanout --title followups")},
+		{name: "shell alias is opaque", input: shell(`git -c "alias.file=!gh issue create --title x" file`)},
+		{name: "Go execution wrapper", input: shell("go test -exec ./file-issue ./internal/headlesslint")},
+		{name: "Claude metadata", input: claude + "\n" + `{"type":"summary"}` + "\n" + `{"type":"system"}`, known: true},
+		{name: "foreign loaded record", input: claude + "\n" + `{"type":"foreign"}`},
+		{name: "nonrecord JSON", input: claude + "\n1"},
+		{name: "unsupported Claude block", input: `{"type":"assistant","message":{"content":[{"type":"future_tool_call"}]}}`},
+		{name: "malformed Claude message", input: claude + "\n" + `{"type":"assistant","message":[]}`},
+		{name: "malformed text beside tool use", input: `{"type":"assistant","message":{"content":[{"type":"text","text":17},{"type":"tool_use","name":"Bash","input":{"command":"fak issue create"}}]}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "session.jsonl")
+			if err := os.WriteFile(path, []byte(tc.input+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got := guardIssuesFiledEvidence(path)
+			if got.Known != tc.known || got.Count != tc.count {
+				t.Fatalf("evidence = %+v, want known=%v count=%d", got, tc.known, tc.count)
+			}
+			if !tc.known && foldGuardLeftovers(got, guardLeftoversSummary).LeftoversUnfiled {
+				t.Fatal("unknown coverage must not report a witnessed zero")
+			}
+		})
+	}
+	if got := guardIssuesFiledEvidenceFromRecords([]transcript.Record{{Type: "response_item"}}, false); got.Known {
+		t.Fatalf("discarded Codex payload must remain unknown: %+v", got)
+	}
+	if got := guardIssuesFiledEvidenceFromRecords([]transcript.Record{{Type: "summary"}}, false); !got.Known || got.Count != 0 {
+		t.Fatalf("ordinary Claude metadata must retain known zero: %+v", got)
+	}
+	path := filepath.Join(t.TempDir(), "claude-tail.jsonl")
+	writeGuardLeftoversTranscript(t, path, []toolUseFixture{{Name: "Bash", Input: map[string]any{"command": "fak-dev issue create"}}})
+	if got := guardIssuesFiledEvidenceFromRecords(loadGuardLeftoversFixture(t, path), true); !got.Known || got.Count != 1 || got.Source != headlesslint.IssuesFiledFromTranscriptTail {
+		t.Fatalf("Claude tail must preserve a positive lower bound: %+v", got)
 	}
 }
 
