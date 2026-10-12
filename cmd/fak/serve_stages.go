@@ -421,12 +421,11 @@ func (rt *serveRuntime) proxyOnlyCompute(sf *serveFlags, getenv func(string) str
 }
 
 func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
-	policy, err := resolveServeExecutionPolicy(derefString(sf.executionPolicy), derefString(sf.model), os.Getenv(ServeBringupDedicatedEnv), os.Stderr)
-	if err != nil {
+	if err := rt.resolveExecutionPolicy(sf); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	rt.executionPolicy = policy
+	policy := rt.executionPolicy
 	proxyOnly, err := rt.proxyOnlyCompute(sf, os.Getenv)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fak serve:", err)

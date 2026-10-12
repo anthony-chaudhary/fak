@@ -4027,6 +4027,16 @@
           "category": "incidental",
           "reason": "Predicate selecting the already-declared model gated-compressor operation. Gated describes neural compression arithmetic, not an independent policy guard.",
           "token": "v41UsesGatedCompressor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed refusal code subordinate to serve execution-policy dry-admit admission; it reports rejection of nonnative runtime modes and introduces no separate guard framework.",
+          "token": "DryAdmitDelegatedRuntime"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private serve execution-policy dry-admit adapter rejecting nonnative runtime modes before compute selection or delegation; it implements the existing admission refusal rather than a separate guard framework.",
+          "token": "refuseServeDryAdmitDelegated"
         }
       ],
       "exclude": [
@@ -4071,6 +4081,7 @@
         "ConversionGate",
         "CorrectnessGate",
         "DELEGATE",
+        "DryAdmitDelegatedRuntime",
         "EmptyUsageGuard",
         "EnvGated",
         "ExitGate",
@@ -4462,6 +4473,7 @@
         "recordGuardProviderSessionClose",
         "recordGuardSessionStartIdentityFor",
         "recordGuardSessionStartJournalFor",
+        "refuseServeDryAdmitDelegated",
         "registerGuardAdmissionFlag",
         "renderguardstartupreport",
         "reservedGuardBanner",
@@ -10425,6 +10437,11 @@
           "category": "incidental",
           "reason": "Builder function for positioned gguf-manifest-header-preflight, also an alias of its aggregate report; it does not introduce a second admission or runtime-readiness concept.",
           "token": "BuildManifestPreflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "serveRuntime method that resolves the serve execution policy once before delegation and compute; the concept is serveexecutionpolicy, this is its resolver.",
+          "token": "resolveExecutionPolicy"
         }
       ],
       "exclude": [
@@ -10644,6 +10661,7 @@
         "referencePolicyForCorpusCell",
         "renderIncumbentPreflightText",
         "renderLaunchPosture",
+        "resolveExecutionPolicy",
         "resolveGuardReasoningPosture",
         "resolveServeChatBackendForHostPolicy",
         "resolveServeChatBackendForPolicy",
