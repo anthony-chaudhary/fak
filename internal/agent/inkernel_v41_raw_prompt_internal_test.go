@@ -28,3 +28,26 @@ func TestV41RawPromptOnlyForRawDeepSeekV41(t *testing.T) {
 		}
 	}
 }
+
+// The V4.1 template closes each assistant reply with EOS and opens the next
+// generation as a non-thinking assistant turn.
+// fak-test:runtime fast est=1ms
+func TestRenderDeepSeekV41ChatMultiTurn(t *testing.T) {
+	got := renderDeepSeekV41Chat([]Message{
+		{Role: RoleSystem, Content: "S"},
+		{Role: RoleUser, Content: "U1"},
+		{Role: RoleAssistant, Content: "A1"},
+		{Role: RoleUser, Content: "U2"},
+	})
+	want := deepSeekV41BOS + "S" + deepSeekV41User + "U1" + deepSeekV41Assistant + "</think>A1" + deepSeekV41EOS +
+		deepSeekV41User + "U2" + deepSeekV41Assistant + "</think>"
+	if got != want {
+		t.Fatalf("render = %q, want %q", got, want)
+	}
+	if id := inKernelPromptRendererID(model.Config{ModelType: "deepseek41"}, SampleParams{}); id != deepSeekV41ChatRendererID {
+		t.Fatalf("V4.1 chat renderer = %q", id)
+	}
+	if id := inKernelPromptRendererID(model.Config{ModelType: "qwen3"}, SampleParams{}); id == deepSeekV41ChatRendererID {
+		t.Fatal("non-V4.1 config took the V4.1 chat renderer")
+	}
+}

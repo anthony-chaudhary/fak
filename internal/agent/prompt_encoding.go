@@ -82,14 +82,7 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 	}
 	messages, tools, shrink := p.ApplyPromptShrink(ctx, messages, tools, opts...)
 	raw := inKernelRawV41Prompt(p.m.Cfg, sp)
-	var rendered string
-	if raw {
-		for _, m := range messages {
-			rendered += m.Content
-		}
-	} else {
-		rendered = renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice, sp)
-	}
+	rendered := inKernelRenderPrompt(messages, tools, p.m.Cfg, sp)
 	ids, err := p.tok.Encode(rendered)
 	if err != nil {
 		return preparedPrompt{}, err
@@ -118,6 +111,9 @@ func inKernelRawV41Prompt(cfg model.Config, sp SampleParams) bool {
 func inKernelPromptRendererID(cfg model.Config, sp SampleParams) string {
 	if inKernelRawV41Prompt(cfg, sp) {
 		return "deepseek41-raw-bos-v1"
+	}
+	if cfg.IsDeepSeekV41() {
+		return deepSeekV41ChatRendererID
 	}
 	thinking := "thinking"
 	if inKernelSuppressQwenThinking(cfg, sp) {

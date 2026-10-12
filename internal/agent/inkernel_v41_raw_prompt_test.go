@@ -18,7 +18,7 @@ import (
 // v41OracleSubsetTokenizer rebuilds the committed slice of the
 // vcruz305/DeepSeek-V4.1-Flash-GGUF vocab (internal/tokenizer testdata), which
 // tokenizes the reference-oracle prompts exactly as the full vocab does.
-func v41OracleSubsetTokenizer(t *testing.T) *tokenizer.Tokenizer {
+func v41OracleSubsetTokenizer(t *testing.T, control map[int]string) *tokenizer.Tokenizer {
 	t.Helper()
 	f, err := os.Open(filepath.Join("..", "tokenizer", "testdata", "deepseek_v41_vocab_subset.tsv"))
 	if err != nil {
@@ -66,6 +66,9 @@ func v41OracleSubsetTokenizer(t *testing.T) *tokenizer.Tokenizer {
 	if err := sc.Err(); err != nil {
 		t.Fatal(err)
 	}
+	for id, text := range control {
+		tokens[id], types[id] = text, 3
+	}
 	tok, err := tokenizer.FromGGML(tokens, merges, types, pre)
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +85,7 @@ func TestV41RawCompletionPromptIsBOSPlusPromptTokens(t *testing.T) {
 	m := v41CompressorHTTPModel(t)
 	bos := 0
 	m.Cfg.BOSTokenID = &bos
-	planner := agent.NewInKernelPlanner(m, v41OracleSubsetTokenizer(t), "native", false, nil, false)
+	planner := agent.NewInKernelPlanner(m, v41OracleSubsetTokenizer(t, nil), "native", false, nil, false)
 	msgs := []agent.Message{{Role: agent.RoleUser, Content: "The chemical symbol for gold is"}}
 
 	raw, err := planner.EncodePrompt(context.Background(), msgs, nil, agent.WithRawPrompt())
@@ -94,5 +97,24 @@ func TestV41RawCompletionPromptIsBOSPlusPromptTokens(t *testing.T) {
 	}
 	if raw.RendererID != "deepseek41-raw-bos-v1" {
 		t.Fatalf("raw V4.1 renderer = %q", raw.RendererID)
+	}
+}
+
+// A V4.1 chat turn renders the GGUF's non-thinking template, so the user text
+// sits between the role control tokens the vocab declares (<｜User｜> 128803,
+// <｜Assistant｜> 128804, </think> 128822 in the pinned GGUF header).
+// fak-test:justify why=regression when=changed:internal/agent/**
+// fak-test:runtime medium est=2s lane=default
+func TestV41ChatPromptUsesDeepSeekTemplateIDs(t *testing.T) {
+	m := v41CompressorHTTPModel(t)
+	tok := v41OracleSubsetTokenizer(t, map[int]string{128803: "<｜User｜>", 128804: "<｜Assistant｜>", 128822: "</think>"})
+	planner := agent.NewInKernelPlanner(m, tok, "native", false, nil, false)
+	chat, err := planner.EncodePrompt(context.Background(), []agent.Message{{Role: agent.RoleUser, Content: "The chemical symbol for gold is"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []int{0, 128803, 671, 7658, 7380, 362, 8495, 344, 128804, 128822}
+	if !reflect.DeepEqual(chat.TokenIDs, want) || chat.RendererID != "deepseek41-chat-nothink-v1" {
+		t.Fatalf("V4.1 chat prompt = %s %v, want deepseek41-chat-nothink-v1 %v", chat.RendererID, chat.TokenIDs, want)
 	}
 }

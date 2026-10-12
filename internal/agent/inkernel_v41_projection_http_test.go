@@ -96,7 +96,7 @@ func TestV41PhaseAttributionProjectionOrdinaryHTTP(t *testing.T) {
 	t.Setenv("FAK_INKERNEL_MAX_TOKENS", "2")
 	t.Setenv("FAK_SESSION_LEDGER_DIR", t.TempDir())
 	m := v41ProjectionHTTPModel(t)
-	const prompt = "<|im_start|>user\nhi<|im_end|>\n<|im_start|>assistant\n"
+	const prompt = "<\uff5cbegin\u2581of\u2581sentence\uff5c><\uff5cUser\uff5c>hi<\uff5cAssistant\uff5c></think>"
 	tok, err := tokenizer.FromGGML([]string{prompt, "a", "b", "c", "d", "e", "f", "g"}, []string{"a b"}, []int32{3, 1, 1, 1, 1, 1, 1, 1}, "gpt2")
 	if err != nil {
 		t.Fatal(err)

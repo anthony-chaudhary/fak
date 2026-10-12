@@ -23,7 +23,7 @@ func TestV41StageAdmissionRefusalFailsRequestNotProcess(t *testing.T) {
 	d41 := *m.Cfg.DeepSeekV41
 	d41.CompressRopeTheta = 0
 	m.Cfg.DeepSeekV41 = &d41
-	const prompt = "<|im_start|>user\nhi<|im_end|>\n<|im_start|>assistant\n"
+	const prompt = "<\uff5cbegin\u2581of\u2581sentence\uff5c><\uff5cUser\uff5c>hi<\uff5cAssistant\uff5c></think>"
 	tok, err := tokenizer.FromGGML([]string{prompt, "a", "b", "c", "d", "e", "f", "g"}, []string{"a b"}, []int32{3, 1, 1, 1, 1, 1, 1, 1}, "gpt2")
 	if err != nil {
 		t.Fatal(err)
