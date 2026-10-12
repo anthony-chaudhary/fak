@@ -1320,6 +1320,17 @@ uint64_t                      g_batchD2DCount = 0;
 uint64_t                      g_batchD2DBytes = 0;
 bool                          g_batchD2DValid = true;
 
+// V4.1 step batch (#13820). While open, uploads record into the batch through a
+// per-batch host-visible arena and readbacks record their copy, submit once on
+// the checked path and resume recording, so a decode step submits only where the
+// host must observe a result. Status-owning kernels record their fill and
+// dispatch into it; their status readback submits.
+bool                          g_stepBatch = false;
+Buffer*                       g_upArena = nullptr;
+void*                         g_upArenaMapped = nullptr;
+size_t                        g_upArenaCap = 0;
+size_t                        g_upArenaUsed = 0;
+
 // A full compute->compute barrier: every recorded op may read the previous op's output
 // buffer, so each dispatch is fenced against the prior by a global shader-write->shader-read
 // barrier. Coarse but correct; per-buffer barriers are a later refinement.
@@ -1498,7 +1509,7 @@ void batchBegin() {
 	tsBatchBegin(g_batchCmd);
 	g_batching = true;
 	g_batchOps = 0;
-	g_batchHasV41 = false;
+	g_batchHasV41 = g_stepBatch;
 	g_batchD2DCount = 0;
 	g_batchD2DBytes = 0;
 	g_batchD2DValid = true;
@@ -1550,9 +1561,133 @@ void batchFlush() {
 	g_batchD2DCount = 0;
 	g_batchD2DBytes = 0;
 	g_batchD2DValid = true;
+	g_upArenaUsed = 0;
 	std::vector<Buffer*> freed;   freed.swap(g_batchFreed);
 	for (Buffer* b : freed)   fvk_free(b);
 }
+
+// A copy into a buffer an earlier recorded op read or wrote: order it after
+// every prior shader and transfer access.
+void recordTransferBarrier(VkCommandBuffer cmd) {
+    VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+    mb.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT |
+        VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+    mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT |
+        VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+    dp_inc(g_dp.barriers);
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 1, &mb, 0, nullptr, 0, nullptr);
+}
+
+bool stepBatchRecording() {
+    return g_stepBatch && g_batching && g_batchCmd != VK_NULL_HANDLE && !g_v41SubmissionPendingFailure;
+}
+
+// Reserve bytes in the upload arena. A full arena is reused only after the
+// recorded copies that read it have completed; it grows only when empty.
+bool stepUploadReserve(size_t bytes, size_t* offset) {
+    const size_t aligned = (g_upArenaUsed + 15) & ~(size_t)15;
+    if (g_upArena && aligned >= g_upArenaUsed && aligned <= g_upArenaCap && bytes <= g_upArenaCap - aligned) {
+        *offset = aligned;
+        return true;
+    }
+    if (g_upArenaUsed > 0) {
+        batchFlush();
+        if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS || g_batching) return false;
+        batchBegin();
+        if (!stepBatchRecording()) return false;
+    }
+    if (!g_upArena || bytes > g_upArenaCap) {
+        size_t cap = g_upArenaCap ? g_upArenaCap : ((size_t)1 << 20);
+        while (cap < bytes) {
+            if (cap > std::numeric_limits<size_t>::max() / 2) { cap = bytes; break; }
+            cap *= 2;
+        }
+        if (g_maxBufferBytes > 0 && cap > g_maxBufferBytes) cap = bytes;
+        if (g_upArena) {
+            if (g_upArenaMapped) vkUnmapMemory(g_dev, g_upArena->mem);
+            destroyBuffer(g_upArena);
+            g_upArena = nullptr;
+            g_upArenaMapped = nullptr;
+            g_upArenaCap = 0;
+        }
+        Buffer* arena = allocBuffer(cap,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+        if (!arena) return false;
+        void* mapped = nullptr;
+        if (vkMapMemory(g_dev, arena->mem, 0, cap, 0, &mapped) != VK_SUCCESS || !mapped) {
+            destroyBuffer(arena);
+            return false;
+        }
+        g_upArena = arena;
+        g_upArenaMapped = mapped;
+        g_upArenaCap = cap;
+    }
+    *offset = 0;
+    return true;
+}
+
+// Record one staged host->device copy into the open step batch. False leaves
+// nothing recorded, so the caller keeps the synchronous upload.
+bool stepRecordUpload(Buffer* dst, const void* host, size_t bytes) {
+    if (!stepBatchRecording() || !dst || dst->mapped || !host || bytes == 0 || bytes > dst->bytes) return false;
+    size_t offset = 0;
+    if (!stepUploadReserve(bytes, &offset)) return false;
+    memcpy((unsigned char*)g_upArenaMapped + offset, host, bytes);
+    if (g_batchOps > 0) recordTransferBarrier(g_batchCmd);
+    VkBufferCopy region{offset, 0, bytes};
+    vkCmdCopyBuffer(g_batchCmd, g_upArena->buf, dst->buf, 1, &region);
+    tsAfterDispatch(g_batchCmd, (uint32_t)K_COUNT, 0, 0);
+    ++g_batchOps;
+    g_upArenaUsed = offset + bytes;
+    if (!checkedCounterAdd(g_h2dCount, 1) || !checkedCounterAdd(g_h2dBytes, bytes)) {
+        g_transferCountersValid = false;
+    }
+    return true;
+}
+
+// Record the readback copy behind every prior recorded op, submit the step's
+// recorded chain once on the checked path, then resume recording.
+int stepRecordReadback(void* host, Buffer* src, size_t bytes) {
+    int stagingStatus = VK_SUCCESS;
+    Buffer* stage = stagingBuffer(bytes, &stagingStatus);
+    if (!stage) {
+        if (stagingStatus == VK_ERROR_DEVICE_LOST) {
+            g_submissionStatus = VK_ERROR_DEVICE_LOST;
+            g_v41SubmissionPendingFailure = true;
+        }
+        return stagingStatus == VK_SUCCESS ? FVK_D2H_STAGING_ALLOCATION_FAILED : stagingStatus;
+    }
+    recordComputeBarrier(g_batchCmd);
+    VkBufferCopy region{0, 0, bytes};
+    vkCmdCopyBuffer(g_batchCmd, src->buf, stage->buf, 1, &region);
+    ++g_batchOps;
+    batchFlush();
+    if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS || g_batching) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : (int)VK_ERROR_UNKNOWN;
+    }
+    memcpy(host, g_stageMapped, bytes);
+    if (!checkedCounterAdd(g_d2hCount, 1) || !checkedCounterAdd(g_d2hBytes, bytes)) {
+        g_transferCountersValid = false;
+    }
+    batchBegin();
+    return VK_SUCCESS;
+}
+
+// An operation that owns its own command buffer never joins a batch. Inside a
+// step batch it fences the recorded chain first and resumes recording after.
+struct V41StepSuspend {
+    bool resume = false;
+    V41StepSuspend() {
+        if (!g_stepBatch || !g_batching) return;
+        batchFlush();
+        resume = !g_batching && !g_v41SubmissionPendingFailure && g_submissionStatus == VK_SUCCESS;
+    }
+    ~V41StepSuspend() { if (resume && g_stepBatch) batchBegin(); }
+};
 
 // UMA direct upload: the destination is coherent device-local memory the CPU maps, so the source
 // (often file-backed checkpoint pages) is copied once, with no staging buffer or transfer submit.
@@ -2788,13 +2923,13 @@ void recycleDescriptorSet(DescriptorSetRecord rec) {
 bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1, bool forceChecked = false, Buffer* initializedStatus = nullptr) {
     if (g_v41SubmissionPendingFailure) return false;
     // Only these concrete synchronous kernels may request the bounded status
-    // initialization. They cannot record into or implicitly flush an active batch.
+    // initialization. They never flush a batch; they record only into a V4.1 step batch.
     if ((&k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_ROUTED_SWIGLU]) && initializedStatus == nullptr) return false;
     if (initializedStatus != nullptr) {
         // The status binding is the last one of each status-owning kernel.
         const bool checkedBF16 = &k == &g_kern[K_V41_BF16_CHECKED] && k.nbuf == 3;
         const bool routedSwiGLU = &k == &g_kern[K_V41_ROUTED_SWIGLU] && k.nbuf == 4;
-        if ((!checkedBF16 && !routedSwiGLU) || !forceChecked || g_batching ||
+        if ((!checkedBF16 && !routedSwiGLU) || !forceChecked || (g_batching && !g_stepBatch) ||
             !bufs || bufs[k.nbuf - 1] != initializedStatus || initializedStatus->buf == VK_NULL_HANDLE ||
             initializedStatus->bytes < 16) return false;
     }
@@ -2848,7 +2983,15 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
         // The descriptor set must outlive recording, so park it for post-submit free.
         // When the Go ledger armed exact hazards, it also queued this dispatch's sync
         // verdict by ordinal; an elided verdict (proven disjoint) records no device fence.
-        if (g_batchOps > 0) recordDispatchBarrier(g_batchCmd, g_batchOps);
+        if (initializedStatus != nullptr) {
+            // Step batch only: the same fill-then-conservative-dependency contract
+            // as the one-shot path, recorded; the status readback submits it.
+            if (g_batchOps > 0) recordTransferBarrier(g_batchCmd);
+            vkCmdFillBuffer(g_batchCmd, initializedStatus->buf, 0, 16, UINT32_MAX);
+            recordComputeBarrier(g_batchCmd);
+        } else if (g_batchOps > 0) {
+            recordDispatchBarrier(g_batchCmd, g_batchOps);
+        }
         vkCmdBindPipeline(g_batchCmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.pipe);
         vkCmdBindDescriptorSets(g_batchCmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.layout, 0, 1, &rec.set, 0, nullptr);
         if (pcsize > 0) vkCmdPushConstants(g_batchCmd, k.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pcsize, pc);
@@ -3815,6 +3958,7 @@ void fvk_free(void* d) {
 // In practice weights upload BEFORE the per-token batch begins (cached), so this rarely flushes.
 void fvk_h2d(void* d, const void* h, size_t bytes) {
     if (g_v41SubmissionPendingFailure) return;
+    if (stepRecordUpload(B(d), h, bytes)) return;
     bool resumeBatch = g_batching;
     if (resumeBatch) batchFlush();
     copyHostToDevice(B(d), h, bytes);
@@ -3913,6 +4057,10 @@ void fvk_debug_restore_fail_after_submits(int successful_submits) {
 // d2h is a true host fence (the final logits Read): flush the recorded batch so the compute
 // has actually executed, then copy device->host.
 int fvk_d2h(void* h, const void* d, size_t bytes) {
+    if (stepBatchRecording() && h && d && bytes > 0 && bytes <= B((void*)d)->bytes &&
+        g_submissionStatus == VK_SUCCESS) {
+        return stepRecordReadback(h, B((void*)d), bytes);
+    }
     if (g_batching) batchFlush();
     if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
     return copyDeviceToHost(h, B((void*)d), bytes);
@@ -3926,6 +4074,7 @@ int fvk_v41_d2h(void* h, const void* d, size_t bytes) {
     Buffer* src = B(d);
     if (!h || !src || src->buf == VK_NULL_HANDLE || src->mem == VK_NULL_HANDLE ||
         bytes == 0 || bytes > src->bytes) return VK_ERROR_INITIALIZATION_FAILED;
+    if (stepBatchRecording()) return stepRecordReadback(h, src, bytes);
     if (g_batching) {
         // A marked result may be read while another batch is open. Its host
         // fence must still use the checked path, even if no V4.1 op was added.
@@ -4047,7 +4196,31 @@ void fvk_submission_reset(void) {
     // A Vulkan failure is a context failure, not a per-request diagnostic.
     // Callers must retire the context instead of clearing an unconfirmed fence.
 }
-int fvk_batch_flush_status(void) { fvk_batch_flush(); return (int)g_submissionStatus; }
+int fvk_batch_flush_status(void) {
+    fvk_batch_flush();
+    const int status = (int)g_submissionStatus;
+    if (status == VK_SUCCESS && g_stepBatch) batchBegin();
+    return status;
+}
+bool fvk_batch_foreign_active(void) { return g_batching && !g_stepBatch; }
+int fvk_v41_step_batch_begin(void) {
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (!g_ready || g_v41SubmissionPendingFailure || g_batching || g_stepBatch ||
+        g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 1;
+    g_stepBatch = true;
+    g_batchHazardsArmed = 0;
+    batchBegin();
+    if (!g_batching) { g_stepBatch = false; return 1; }
+    return 0;
+}
+int fvk_v41_step_batch_end(void) {
+    if (!g_stepBatch) return (int)g_submissionStatus;
+    batchFlush();
+    g_stepBatch = false;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    return g_batching ? (int)VK_ERROR_UNKNOWN : 0;
+}
+int fvk_v41_step_batch_active(void) { return g_stepBatch ? 1 : 0; }
 uint64_t fvk_h2d_bytes(void) { return g_h2dBytes.load(std::memory_order_relaxed); }
 uint64_t fvk_direct_h2d_bytes(void) { return g_directH2DBytes.load(std::memory_order_relaxed); }
 uint64_t fvk_d2h_bytes(void) { return g_d2hBytes.load(std::memory_order_relaxed); }
@@ -5229,7 +5402,7 @@ int fvk_v41_routed_swiglu_f32(const void* dGate, const void* dUp, void* dOut, vo
     if (!fvk_have_v41_routed_swiglu()) return 3;
     if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
     if (g_v41SubmissionPendingFailure || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
-    if (g_batching || count <= 0 || !std::isfinite(limit) || !std::isfinite(weight) ||
+    if ((g_batching && !g_stepBatch) || count <= 0 || !std::isfinite(limit) || !std::isfinite(weight) ||
         g_maxComputeWorkGroupCountX == 0) return 2;
     const uint64_t bytes = uint64_t(count) * 4u;
     if (bytes > std::numeric_limits<size_t>::max() || bytes > std::numeric_limits<VkDeviceSize>::max()) return 2;
@@ -5321,7 +5494,7 @@ static int v41BF16CheckedDispatch(const void* dInput, void* dOut, void* dStatus,
     if (!v41HaveBF16Checked()) return 3;
     if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
     if (g_v41SubmissionPendingFailure || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
-    if (g_batching || !validSite || !v41BF16CheckedCountSupported(count)) return 2;
+    if ((g_batching && !g_stepBatch) || !validSite || !v41BF16CheckedCountSupported(count)) return 2;
     const uint64_t bytes = uint64_t(count) * 4u;
     Buffer* bufs[3] = {B(dInput), B(dOut), B(dStatus)};
     const uint64_t required[3] = {bytes, bytes, 16};
@@ -5356,7 +5529,7 @@ int fvk_have_v41_attention_bf16(void) { return v41HaveBF16Checked(); }
 int fvk_v41_attention_bf16_state(void) {
     if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
     if (g_v41SubmissionPendingFailure) return 4;
-    if (g_batching || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 2;
+    if ((g_batching && !g_stepBatch) || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 2;
     return 0;
 }
 int fvk_v41_attention_bf16_count_supported(int count) { return v41BF16CheckedCountSupported(count); }
@@ -5391,7 +5564,7 @@ int fvk_have_v41_query_prefix(void) {
 int fvk_v41_query_prefix_state(void) {
     if (g_submissionStatus != VK_SUCCESS) return int(g_submissionStatus);
     if (g_v41SubmissionPendingFailure) return int(VK_ERROR_UNKNOWN);
-    if (g_batching) return FVK_V41_QUERY_PREFIX_BUSY_BATCH;
+    if (g_batching && !g_stepBatch) return FVK_V41_QUERY_PREFIX_BUSY_BATCH;
     if (g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return FVK_V41_QUERY_PREFIX_BUSY_RESTORE;
     return 0;
 }
@@ -5408,6 +5581,7 @@ int fvk_v41_query_prefix_geometry_supported(int hidden, int rank) {
 
 int fvk_v41_query_prefix_f32(const float* hostCollapse, const fvk_v41_query_prefix_buffers* a,
                             int hidden, int rank, float eps, uint32_t* failedStage) {
+    V41StepSuspend suspend;
     if (failedStage) *failedStage = 0;
     const int state = fvk_v41_query_prefix_state();
     if (state != 0) return state;

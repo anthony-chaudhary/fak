@@ -68,7 +68,7 @@ func (v *vulkanBackend) V41RoutedSwiGLU(gate, up Tensor, limit, weight float32) 
 	if status := int(C.fvk_submission_status()); status != 0 {
 		return Tensor{}, vulkanV41RoutedSwiGLUStatusError(status, "sticky submission fault")
 	}
-	if C.fvk_batch_active() {
+	if C.fvk_batch_foreign_active() {
 		return Tensor{}, vulkanV41RoutedSwiGLUStatusError(2, "the synchronous routed activation does not join an active batch")
 	}
 	output = v.dallocForClass(bytes, MemoryActivation, "V4.1 routed SwiGLU output")

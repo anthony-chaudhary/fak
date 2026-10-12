@@ -68,7 +68,7 @@ func (v *vulkanBackend) V41BF16Checked(input Tensor, site uint32) (out Tensor, e
 	}
 	// This prerequisite does not acquire or complete another operation's batch.
 	// A model selected-error Close retains the existing teardown contract.
-	if C.fvk_batch_active() || C.fvk_v41_bf16_checked_count_supported(C.int(input.Shape[0])) == 0 {
+	if C.fvk_batch_foreign_active() || C.fvk_v41_bf16_checked_count_supported(C.int(input.Shape[0])) == 0 {
 		return Tensor{}, vulkanV41BF16CheckedStatusError(2, "active batch or unsupported checked geometry")
 	}
 	output = v.dallocForClass(bytes, MemoryActivation, "V4.1 checked BF16 output")

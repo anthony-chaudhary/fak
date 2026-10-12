@@ -588,6 +588,17 @@ void fvk_retire_request(void);
 int fvk_submission_status(void);
 void fvk_submission_reset(void);
 int fvk_batch_flush_status(void);
+/* V4.1 step batch (#13820): begin returns 0 when it opened the step's recording
+ * window, nonzero when another batch or a sticky fault refuses it. While open,
+ * fvk_h2d records staged uploads, fvk_d2h/fvk_v41_d2h submit the recorded chain
+ * once on the checked path and resume, status-owning kernels record into it,
+ * and an operation owning its own command buffer fences it first.
+ * End submits any remaining recorded work and returns the sticky status. */
+int fvk_v41_step_batch_begin(void);
+int fvk_v41_step_batch_end(void);
+int fvk_v41_step_batch_active(void);
+/* True only for a batch the V4.1 step window does not own. */
+bool fvk_batch_foreign_active(void);
 /* Cumulative host transfer bytes, independent of optional profiling. */
 uint64_t fvk_h2d_bytes(void);
 /* Subset of fvk_h2d_bytes written directly into mapped device-local weight memory (UMA). */

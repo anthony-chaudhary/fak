@@ -1741,7 +1741,17 @@ func (s *Session) stepV41(id int) []float32 {
 	s.M.v41SetExpertFaultPhase(V41PhaseDecode)
 	defer s.M.v41SetExpertFaultPhase(V41PhaseUnknown)
 	if s.v41IncrementalEligible() {
-		logits, _, err := s.M.forwardV41Step(id, s.v41State(), &v41ProjScratch{})
+		var logits []float32
+		var err error
+		func() {
+			endBatch := s.v41BeginStepBatch()
+			defer func() {
+				if endErr := endBatch(); endErr != nil && err == nil {
+					logits, err = nil, endErr
+				}
+			}()
+			logits, _, err = s.M.forwardV41Step(id, s.v41State(), &v41ProjScratch{})
+		}()
 		if err == nil {
 			s.M.v41NoteExpertFaultToken(1)
 			if v41IncrementalStepProbe != nil {
