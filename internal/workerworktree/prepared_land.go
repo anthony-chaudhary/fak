@@ -332,7 +332,7 @@ func validatePreparedLandDisambiguation(root, wtPath string, receipt PreparedLan
 	}
 	applicable, err := preparedDisambiguationApplicable(root, binding)
 	if err != nil {
-		return preparedReprepare("could not recheck prepared disambiguation applicability", err.Error())
+		return withPreparedDisambiguationTimeout(preparedReprepare("could not recheck prepared disambiguation applicability", err.Error()), err)
 	}
 	if applicable != binding.Applicable {
 		return preparedMismatch("prepared disambiguation applicability mismatch", "")
@@ -392,12 +392,47 @@ func validatePreparedDisambiguationCacheIdentities(binding PreparedLandDisambigu
 	return nil
 }
 
+// preparedDisambiguationTimeoutError retains the command cause through receipt
+// binding wrappers without changing the durable prepared-receipt contract.
+type preparedDisambiguationTimeoutError struct {
+	cause     error
+	witnesses *DisambiguationWitnesses
+}
+
+func (e *preparedDisambiguationTimeoutError) Error() string { return e.witnesses.Before.Detail }
+func (e *preparedDisambiguationTimeoutError) Unwrap() error { return e.cause }
+
+func withPreparedDisambiguationTimeout(result Result, err error) Result {
+	var timeout *preparedDisambiguationTimeoutError
+	if errors.As(err, &timeout) {
+		result.Disambiguation = timeout.witnesses
+		result.RecoveryAction = timeout.witnesses.Before.Diagnostic.Recovery
+	}
+	return result
+}
+
 func preparedDisambiguationApplicable(root string, binding PreparedLandDisambiguation) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultDisambiguationTimeout)
+	timeoutReceipt, timeout, configErr := resolveDisambiguationTimeout(os.LookupEnv)
+	if configErr != nil {
+		// This recheck does not rerun the oracle. Preserve its existing default
+		// probe when an invalid oracle-only override accompanies a bound verdict.
+		timeoutReceipt, timeout, _ = resolveDisambiguationTimeout(func(string) (string, bool) { return "", false })
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	for _, tree := range []string{binding.RootTreeSHA, binding.WorktreeTreeSHA, binding.CandidateTreeSHA} {
 		present, err := hasDisambiguationContract(ctx, root, tree)
+		// CommandContext may report the killed Git process rather than the
+		// deadline. Keep both identities, even if the probe returned a result.
+		if ctx.Err() != nil {
+			err = errors.Join(err, ctx.Err())
+		}
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				witnesses := newDisambiguationWitnesses(binding.CandidateTreeSHA, timeoutReceipt)
+				witnesses.Before = timeoutResult(tree, "prepared-applicability", "contract-probe", timeout, err)
+				return false, &preparedDisambiguationTimeoutError{cause: err, witnesses: witnesses}
+			}
 			return false, err
 		}
 		if present {
