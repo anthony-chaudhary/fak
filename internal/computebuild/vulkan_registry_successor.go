@@ -164,3 +164,13 @@ func CurrentVulkanShaderRegistryV14() []string { return vulkanRegistryV14.stems(
 // CurrentVulkanShaderRegistryLatest returns an owned copy of the set the
 // builder compiles and stamps today.
 func CurrentVulkanShaderRegistryLatest() []string { return vulkanCurrentRegistry.stems() }
+
+// CurrentVulkanBuildIdentity returns the receipt schema and registry identity
+// the builder stamps today.
+func CurrentVulkanBuildIdentity() (string, VulkanShaderRegistryIdentity, error) {
+	identity, err := vulkanCurrentRegistry.identity()
+	if err != nil {
+		return "", VulkanShaderRegistryIdentity{}, err
+	}
+	return vulkanCurrentRegistry.schema, identity, nil
+}
