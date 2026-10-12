@@ -99,7 +99,11 @@ import (
 // dsv41_bf16 in metal/dsv41.metal: a finite value is rounded by adding
 // 0x7fff + the low sign-adjacent bit, then truncating the low 16 bits. NaN and
 // Inf bit patterns are left untouched (the caller has already rejected them).
+// It counts toward the host BF16 witness like v41RoundBF16.
 func v41BF16(x float32) float32 {
+	if v41HostBF16Witness.Load() {
+		v41HostBF16Rounds.Add(1)
+	}
 	bits := math.Float32bits(x)
 	if bits&0x7f800000 != 0x7f800000 {
 		bits += 0x7fff + ((bits >> 16) & 1)

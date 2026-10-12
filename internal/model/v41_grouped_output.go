@@ -435,6 +435,8 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 				if ok {
 					defer s.Backend.Free(p)
 					y, published = p, true
+				} else if s.v41DeviceOnlyPolicy() {
+					return nil, s.v41DeviceOnlyMissingOp(l, "bf16-boundary")
 				}
 			}
 			stage = "readback"
