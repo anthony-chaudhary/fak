@@ -61,7 +61,9 @@ func isTypedBackendRefusal(err error) bool {
 	var projection *model.V41ProjectionOperationError
 	var expert *model.V41ExpertOperationError
 	var stage *model.V41ForwardError
-	return errors.As(err, &forward) ||
+	_, v41 := model.V41RefusalSiteOf(err)
+	return v41 ||
+		errors.As(err, &forward) ||
 		errors.As(err, &projection) ||
 		errors.As(err, &expert) ||
 		errors.As(err, &stage) ||
@@ -78,7 +80,31 @@ func (s *Server) failWarmup(err error, fallback string) error {
 		return nil
 	}
 	s.warmup.markFailed(classifyWarmupFailure(err, fallback), scrubForbiddenDetail(err.Error()))
+	if site, ok := model.V41RefusalSiteOf(err); ok {
+		s.warmup.markFailedSite(site)
+	}
 	return err
+}
+
+// markFailedSite records where a typed forward refusal stopped, so /healthz names
+// the stage and layer without a goroutine dump.
+func (g *warmupGate) markFailedSite(site model.V41RefusalSite) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.armed || g.complete || !g.failed {
+		return
+	}
+	g.failSite = &site
+}
+
+// failureSite reports the recorded forward-refusal site of a held failed gate.
+func (g *warmupGate) failureSite() (model.V41RefusalSite, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.armed || g.complete || !g.failed || g.failSite == nil {
+		return model.V41RefusalSite{}, false
+	}
+	return *g.failSite, true
 }
 
 // markFailed records a terminal failure on an armed, incomplete gate. An unarmed
@@ -90,7 +116,7 @@ func (g *warmupGate) markFailed(reason, message string) {
 	if !g.armed || g.complete {
 		return
 	}
-	g.failed, g.failReason, g.failMessage = true, reason, message
+	g.failed, g.failReason, g.failMessage, g.failSite = true, reason, message, nil
 }
 
 // failure reports the recorded terminal failure while the gate is still held.

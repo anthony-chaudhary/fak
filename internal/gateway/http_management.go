@@ -520,6 +520,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		if msg != "" {
 			failure["message"] = msg
 		}
+		if site, ok := s.warmup.failureSite(); ok {
+			failure["forward_site"] = site
+		}
 		health["warmup_failure"] = failure
 	} else if s.warmup.pending() {
 		health["ok"] = false

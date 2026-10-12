@@ -12,6 +12,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/kvbudget"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // readiness_warmup.go is the #3051 warmup-TIMING gate on the local-model
@@ -99,6 +100,7 @@ type warmupGate struct {
 	failed      bool
 	failReason  string
 	failMessage string
+	failSite    *model.V41RefusalSite
 }
 
 // arm declares that this serve expects a warmup inference before it is ready.
@@ -129,7 +131,7 @@ func (g *warmupGate) markComplete(d time.Duration) {
 		return
 	}
 	g.armed, g.complete, g.timeToReady = true, true, d
-	g.failed, g.failReason, g.failMessage = false, "", ""
+	g.failed, g.failReason, g.failMessage, g.failSite = false, "", "", nil
 }
 
 // pending reports whether readiness is being HELD for an incomplete warmup — true
