@@ -130,6 +130,7 @@ func TestPublicLeak_homePathPlaceholdersCorporaAndScrubberSelfTests(t *testing.T
 		{name: "generic POSIX placeholder", file: "docs/a.md", line: "cd " + operatorHomePathFixture("home", "u", "a"), reason: operatorHomePathLabel},
 		{name: "default cloud account", file: "docs/a.md", line: "cd " + operatorHomePathFixture("home", "ubuntu", "a"), reason: operatorHomePathLabel},
 		{name: "Windows placeholder", file: "docs/a.md", line: "cd " + operatorHomePathFixture("windows", "devuser", "a"), reason: operatorHomePathLabel},
+		{name: "appliance service account", file: "docs/benchmarks/a.md", line: "| `" + operatorHomePathFixture("home", "fak", "repo/fak") + "` |", reason: operatorHomePathLabel},
 		{name: "unknown user outside a corpus", file: "docs/a.md", line: "cd " + operatorHomePathFixture("home", "alice", "a"), reason: operatorHomePathLabel, leak: true},
 		{name: "real path beside a placeholder", file: "docs/a.md", line: operatorHomePathFixture("home", "u", "a") + " " + operatorHomePathFixture("home", "alice", "a"), reason: operatorHomePathLabel, leak: true},
 		{name: "upstream contributor in research corpus", file: "docs/research/inventory/x-corpus.jsonl", line: `{"t":"` + operatorHomePathFixture("home", "alice", "a") + `"}`, reason: operatorHomePathLabel},

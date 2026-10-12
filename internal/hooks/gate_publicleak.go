@@ -74,7 +74,7 @@ var placeholderHomeUsers = map[string]bool{
 	"developer": true, "agent": true, "worker": true, "admin": true, "root": true,
 	"ubuntu": true, "jovyan": true, "yourname": true, "operator": true, "private": true,
 	"bench": true, "run": true, "git": true, "bin": true, "go": true, "test-user": true,
-	"test.user": true,
+	"test.user": true, "fak": true,
 }
 
 // operatorUserPrefix is the operator's own username family; no exemption ever covers it.
