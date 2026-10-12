@@ -219,16 +219,19 @@ func RoutedExpertEncodingRefusal(cfg model.Config, tensors []TensorInfo) error {
 	return fmt.Errorf("%w: tensor %s type %s", ErrRoutedExpertEncodingUnqualified, name, typ)
 }
 
-// AdmittedUDQ2KXLConstituents defines the 14 admitted constituent tensor types
-// comprising the canonical Unsloth Dynamic Q2_K Extra Large (UD-Q2_K_XL) mixture.
+// AdmittedUDQ2KXLConstituents defines supported encodings for model-dependent
+// Unsloth Dynamic Q2_K Extra Large (UD-Q2_K_XL) mixtures. Artifact-family
+// admission does not establish resident or device-backend support.
 var AdmittedUDQ2KXLConstituents = map[TensorType]bool{
 	TensorQ2_K:    true,
+	TensorQ3_K:    true,
 	TensorIQ2_XXS: true,
 	TensorIQ2_XS:  true,
 	TensorIQ2_S:   true,
 	TensorIQ1_S:   true,
 	TensorIQ1_M:   true,
 	TensorIQ3_XXS: true,
+	TensorIQ3_S:   true,
 	TensorIQ4_XS:  true,
 	TensorQ4_K:    true,
 	TensorQ5_K:    true,
@@ -240,7 +243,8 @@ var AdmittedUDQ2KXLConstituents = map[TensorType]bool{
 	TensorBF16:    true,
 }
 
-// IsUDQ2KXL reports whether tensors conform to the UD-Q2_K_XL recipe specification:
+// IsUDQ2KXL recognizes the supported UD-Q2_K_XL mixture shape; exact constituent
+// choices vary by model:
 //  1. Must contain TensorQ2_K.
 //  2. Must contain standard attention/norm/boundary high-precision tensors (Q4_K, Q6_K, Q8_0, or F32/F16/BF16).
 //  3. Must contain low-bit IQ tensors (IQ2_XXS, IQ2_XS, IQ1_S, etc.) or have predominantly Q2_K in MLP layers
@@ -307,7 +311,7 @@ func IsQ2KXL(tensors []TensorInfo) bool {
 
 // ValidateUDQ2KXL verifies that all constituent tensors in a claimed UD-Q2_K_XL
 // GGUF artifact are valid, non-empty, fall within the admitted constituent
-// quantization types, and satisfy the authoritative recipe specification.
+// quantization types, and satisfy the supported model-dependent mixture shape.
 func ValidateUDQ2KXL(tensors []TensorInfo) error {
 	if len(tensors) == 0 {
 		return fmt.Errorf("empty tensor inventory")

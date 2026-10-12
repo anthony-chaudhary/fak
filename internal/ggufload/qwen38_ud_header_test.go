@@ -54,6 +54,9 @@ func TestQwen38UDQ2KXLPinnedHeader(t *testing.T) {
 	if len(gg.Tensors) != wantTotal || !reflect.DeepEqual(counts, wantCounts) {
 		t.Fatalf("real tensor inventory = %v (%d tensors), want %v (%d tensors)", counts, len(gg.Tensors), wantCounts, wantTotal)
 	}
+	if err := ValidateUDQ2KXL(gg.Tensors); err != nil {
+		t.Fatalf("real artifact admission: %v", err)
+	}
 	quant := ClassifyTensorQuant(gg.Tensors)
 	const wantName = "mixed(IQ1_M+IQ1_S+IQ2_S+IQ2_XS+IQ2_XXS+IQ3_S+IQ3_XXS+IQ4_XS+Q2_K+Q3_K+Q4_K+Q5_K+Q6_K+Q8_0)"
 	if !quant.Q4KResident || quant.Name != wantName || quant.Inventory != "mixed(F32+"+wantName[len("mixed("):] {

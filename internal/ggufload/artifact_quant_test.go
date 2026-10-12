@@ -237,9 +237,9 @@ func TestUDQ2KXLValidationFailures(t *testing.T) {
 			errContains: "zero dim",
 		},
 		{
-			name: "unadmitted constituent type Q3_K",
+			name: "unadmitted unknown constituent type",
 			tensors: append(canonicalUDQ2KXLTensors(), TensorInfo{
-				Name: "extra.q3k", Dims: []uint64{256}, Type: TensorQ3_K,
+				Name: "extra.unknown", Dims: []uint64{256}, Type: TensorType(0xffff),
 			}),
 			errContains: "unadmitted",
 		},
