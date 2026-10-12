@@ -97,6 +97,10 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	if err := fs.Parse(argv); err != nil {
 		return syncExitUsage
 	}
+	if command == "push" && *dryRun {
+		fmt.Fprintln(stderr, "fak sync push: --dry-run is not supported; no push was attempted")
+		return syncExitUsage
+	}
 	if command != "check" && (*resumeToken != "" || len(recheckPaths) > 0) {
 		fmt.Fprintf(stderr, "fak sync: --resume-token and --recheck-path are check-only options\n")
 		return syncExitUsage

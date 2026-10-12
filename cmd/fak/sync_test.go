@@ -195,6 +195,40 @@ func TestRunSyncPushJSONSurfacesDirtyWorktree(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=10ms
+func TestRunSyncPushRejectsDryRunBeforeGit(t *testing.T) {
+	oldCapture, oldPush := syncCaptureSource, syncSafePush
+	t.Cleanup(func() {
+		syncCaptureSource, syncSafePush = oldCapture, oldPush
+	})
+
+	captureCalls, pushCalls := 0, 0
+	syncCaptureSource = func(string) (string, error) {
+		captureCalls++
+		// Fail closed so a regression cannot reach advisory Git calls or publish.
+		return "", errors.New("unexpected source capture during dry-run")
+	}
+	syncSafePush = func(context.Context, safesync.PushOptions) (safesync.PushResult, error) {
+		pushCalls++
+		return safesync.PushResult{}, errors.New("unexpected push during dry-run")
+	}
+
+	var out, errb bytes.Buffer
+	code := runSync(&out, &errb, []string{"push", "--dry-run", "--repo", t.TempDir()})
+	if code != syncExitUsage {
+		t.Errorf("exit=%d stderr=%q, want usage refusal", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "--dry-run is not supported") {
+		t.Errorf("stderr=%q, want explicit unsupported dry-run refusal", errb.String())
+	}
+	if captureCalls != 0 || pushCalls != 0 {
+		t.Errorf("source capture calls=%d push calls=%d, want zero Git operations", captureCalls, pushCalls)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q, want no push result", out.String())
+	}
+}
+
 func TestRunSyncPushRejectsSubMillisecondVelocityBudget(t *testing.T) {
 	var out, errb bytes.Buffer
 	code := runSync(&out, &errb, []string{"push", "--budget", "500us", "--repo", t.TempDir()})
