@@ -15547,6 +15547,11 @@
           "category": "false-positive",
           "reason": "Detects textual tool-call candidates in existing planner output; the substring candidate is not a planning abstraction.",
           "token": "hasTextToolCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Provenance-only reference to the external DeepSeek-V4.1-Flash Python function in inference/model.py at dba1be0a40aa45a94ad051997016db3960a90277; this spelling is not a declared fak symbol. The native producer identity, mask publication, and selection operation are separately positioned.",
+          "token": "select_candidate_blocks"
         }
       ],
       "exclude": [
@@ -15773,6 +15778,7 @@
         "scanCodexMarketplaceCandidates",
         "seedCandidate",
         "seen_candidates",
+        "select_candidate_blocks",
         "selfUpdateCandidateCacheDisabled",
         "selfUpdateCandidateCacheDisposition",
         "selfUpdateCandidateCacheDispositionSnapshot",

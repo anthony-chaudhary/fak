@@ -27,7 +27,8 @@
       "distinction": "A speculative-decode BRANCH STRUCTURE of candidate continuations, verified against the target - NOT the ctxplanner Candidate (a scored context span) and NOT CandidateBlockedBy (the dispatch ready-set prereq ordering).",
       "distinct_from": [
         "candidate-planner",
-        "covg-plan-candidateblockedby"
+        "covg-plan-candidateblockedby",
+        "v41candidatesource"
       ],
       "aliases": [
         "CandidateTree (speculative)"

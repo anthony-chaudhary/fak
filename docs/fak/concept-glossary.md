@@ -951,3 +951,24 @@ forwardCoverage is the internal request-local observation emitted only after a l
 NativeForwardCoverage is the versioned receipt row attached one-for-one to generated output tokens, projecting the native model type, configured and executed layer counts, head dimension, full-depth/completeness flags, and full or incremental logits source.
 
 **Distinct from:** This is the serialized receipt projection consumed by evidence validators; internal forwardCoverage is captured at decode time, while generic coverage does not prove one token traversed the configured native depth.
+
+
+### v41CandidateSource
+
+The identity of one V4.1 sparse-attention candidate-mask producer: producer layer, compressed-key source layer, compression ratio, and absolute query interval.
+
+**Distinct from:** It identifies a compressed-key mask publication for one query interval; CandidateTree holds speculative continuation-token branches for target-model verification. This identity contains neither masks nor continuation tokens.
+
+
+### v41CandidatePublication
+
+An immutable session-local V4.1 sparse-attention publication retaining one owned compressed-key candidate mask and causal visible extent per absolute query, together with source identity and key width.
+
+**Distinct from:** v41CandidateSource is the producer and query-range identity; this publication owns the per-query masks bound to that identity. Its masks restrict later query-owning indexers, while ordinary attention readers reuse final selected IDs. It is not yet stored in V41AttentionState or wired into serving.
+
+
+### v41SelectCandidateSource
+
+The V4.1 source-selection operation that consumes already computed per-query compressed-key scores and atomically returns a candidate-mask publication plus unmasked source top-k ID rows, or neither output on error.
+
+**Distinct from:** v41CandidateSource supplies identity and geometry, and v41CandidatePublication retains immutable masks. This operation constructs that publication without projections or rescoring; later query-owning indexers apply its masks to their own scores, while source top-k remains unmasked.
