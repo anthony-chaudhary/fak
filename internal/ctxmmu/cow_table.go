@@ -78,11 +78,10 @@ func NewCOWPageTable(opts ...COWOption) *COWPageTable {
 	t.blockPool.New = func() any {
 		id := t.nextBlockID.Add(1)
 		blk := &PageBlock{
-			ID:        id,
-			Capacity:  t.blockCapacity,
-			Buffer:    make([]byte, t.blockSize),
-			Tokens:    make([]int, 0, t.blockCapacity),
-			immutable: false,
+			ID:       id,
+			Capacity: t.blockCapacity,
+			Buffer:   make([]byte, t.blockSize),
+			Tokens:   make([]int, 0, t.blockCapacity),
 		}
 		blk.refCount.Store(1)
 		return blk
@@ -96,7 +95,7 @@ func (t *COWPageTable) allocBlockLocked() *PageBlock {
 		t.freeBlocks = t.freeBlocks[:len(t.freeBlocks)-1]
 		blk.Tokens = blk.Tokens[:0]
 		blk.TokenCount = 0
-		blk.immutable = false
+		blk.immutable.Store(false)
 		blk.refCount.Store(1)
 		for i := range blk.Buffer {
 			blk.Buffer[i] = 0
@@ -111,7 +110,7 @@ func (t *COWPageTable) allocBlockLocked() *PageBlock {
 		blk := obj.(*PageBlock)
 		blk.Tokens = blk.Tokens[:0]
 		blk.TokenCount = 0
-		blk.immutable = false
+		blk.immutable.Store(false)
 		blk.refCount.Store(1)
 		for i := range blk.Buffer {
 			blk.Buffer[i] = 0
@@ -128,7 +127,6 @@ func (t *COWPageTable) allocBlockLocked() *PageBlock {
 		Capacity:   t.blockCapacity,
 		Buffer:     make([]byte, t.blockSize),
 		Tokens:     make([]int, 0, t.blockCapacity),
-		immutable:  false,
 	}
 	blk.refCount.Store(1)
 	t.physicalBlocks[id] = blk
@@ -143,7 +141,7 @@ func (t *COWPageTable) allocBlockLockFree() *PageBlock {
 		blk.refCount.Store(1)
 		blk.TokenCount = 0
 		blk.Tokens = blk.Tokens[:0]
-		blk.immutable = false
+		blk.immutable.Store(false)
 		// Keep full-buffer clearing a bulk operation under coverage instrumentation.
 		clear(blk.Buffer)
 		return blk
@@ -164,7 +162,6 @@ func (t *COWPageTable) allocBlockLockFree() *PageBlock {
 		Capacity:   cap,
 		Buffer:     make([]byte, bSize),
 		Tokens:     make([]int, 0, cap),
-		immutable:  false,
 	}
 	blk.refCount.Store(1)
 	return blk
@@ -179,7 +176,7 @@ func (t *COWPageTable) releaseBlockLockFree(blk *PageBlock) int32 {
 		blk.refCount.Store(0)
 		blk.Tokens = blk.Tokens[:0]
 		blk.TokenCount = 0
-		blk.immutable = false
+		blk.immutable.Store(false)
 		t.blockPool.Put(blk)
 	}
 	return newRef
@@ -196,7 +193,7 @@ func (t *COWPageTable) releaseBlockLocked(blk *PageBlock) {
 		t.totalAllocatedBytes -= t.blockSize
 		blk.Tokens = blk.Tokens[:0]
 		blk.TokenCount = 0
-		blk.immutable = false
+		blk.immutable.Store(false)
 		for i := range blk.Buffer {
 			blk.Buffer[i] = 0
 		}
@@ -297,7 +294,7 @@ func (t *COWPageTable) ForkSession(parentSessionID string, childSessionID string
 	// Shallow copy page block pointers and retain refcount
 	for i, blk := range parent.Blocks {
 		blk.Retain()
-		blk.immutable = true
+		blk.markImmutable()
 		childBlocks[i] = blk
 	}
 
@@ -367,7 +364,7 @@ func (t *COWPageTable) AppendTokens(sessionID string, tokens []int) error {
 
 		if !isFull {
 			// Check if shared: RefCount > 1 or immutable
-			if lastBlock.RefCount() > 1 || lastBlock.immutable {
+			if lastBlock.RefCount() > 1 || lastBlock.immutable.Load() {
 				// Copy-On-Write:
 				// Allocate a new private physical block, copy data, decrement parent block refcount,
 				// and assign new block to this session.
@@ -378,7 +375,7 @@ func (t *COWPageTable) AppendTokens(sessionID string, tokens []int) error {
 				newBlock.TokenCount = len(newBlock.Tokens)
 				copy(newBlock.Buffer, lastBlock.Buffer)
 				lastBlock.mu.RUnlock()
-				newBlock.immutable = false
+				newBlock.immutable.Store(false)
 
 				// Decrement refcount on parent/shared block
 				t.releaseBlockLocked(lastBlock)
@@ -430,7 +427,7 @@ func (t *COWPageTable) AppendTokens(sessionID string, tokens []int) error {
 				binary.LittleEndian.PutUint64(newBlock.Buffer[off:], uint64(rem[j]))
 			}
 		}
-		newBlock.immutable = false
+		newBlock.immutable.Store(false)
 		newBlock.mu.Unlock()
 
 		sess.Blocks = append(sess.Blocks, newBlock)
@@ -474,7 +471,7 @@ func (t *COWPageTable) MutateToken(sessionID string, tokenIndex int, newToken in
 			offset := tokenIndex - currIdx
 
 			// If block is shared, trigger Copy-On-Write
-			if blk.RefCount() > 1 || blk.immutable {
+			if blk.RefCount() > 1 || blk.immutable.Load() {
 				newBlock := t.allocBlockLocked()
 
 				blk.mu.RLock()
@@ -482,7 +479,7 @@ func (t *COWPageTable) MutateToken(sessionID string, tokenIndex int, newToken in
 				newBlock.TokenCount = len(newBlock.Tokens)
 				copy(newBlock.Buffer, blk.Buffer)
 				blk.mu.RUnlock()
-				newBlock.immutable = false
+				newBlock.immutable.Store(false)
 
 				t.releaseBlockLocked(blk)
 				sess.Blocks[i] = newBlock

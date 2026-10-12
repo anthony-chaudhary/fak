@@ -16,7 +16,7 @@ type PageBlock struct {
 	Capacity   int
 	Buffer     []byte // read-only physical buffer when shared
 	Tokens     []int  // token sequence stored in this block
-	immutable  bool
+	immutable  atomic.Bool
 }
 
 // RefCount returns the active reference count of this physical block across sessions.
@@ -85,7 +85,6 @@ func (b *PageBlock) Clone(newID int64) *PageBlock {
 		Capacity:   b.Capacity,
 		Buffer:     newBuf,
 		Tokens:     newTokens,
-		immutable:  false,
 	}
 	clone.refCount.Store(1)
 	return clone
@@ -260,5 +259,13 @@ func (s *SessionBranch) Telemetry() COWBranchTelemetry {
 		TokenCount:            s.TokenCount,
 		PhysicalBytesSaved:    bytesSaved,
 		SavedMemorySummary:    FormatSavedMemory(bytesSaved),
+	}
+}
+
+// markImmutable freezes a block shared by a fork; the load-first check keeps
+// concurrent forks of one parent from contending on the cache line.
+func (b *PageBlock) markImmutable() {
+	if !b.immutable.Load() {
+		b.immutable.Store(true)
 	}
 }
