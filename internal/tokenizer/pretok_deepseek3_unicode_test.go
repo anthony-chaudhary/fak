@@ -12,7 +12,7 @@ import (
 // MIT; Copyright (c) 2023-2026 The ggml authors.
 // These tests do not claim execution of the C++ reference binary.
 func TestDeepSeek3UnicodeVersion(t *testing.T) {
-	if unicode.Version != "15.0.0" {
+	if unicode.Version != "15.0.0" { //boundarylint:ignore CHANGE_DETECTOR_TEST pinned llama.cpp 5210c7c Unicode 15.1 supplement requires audited Go 15.0 tables
 		t.Fatalf("Go Unicode tables changed to %s; re-audit the pinned llama.cpp categories before changing this guard", unicode.Version)
 	}
 	t.Logf("runtime=%s unicode=%s", runtime.Version(), unicode.Version)
