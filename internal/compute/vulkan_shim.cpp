@@ -299,7 +299,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -307,7 +307,7 @@ Kernel g_kern[K_COUNT];
 std::atomic<uint64_t>& dpOtherFamily(KId id) {
     switch (id) {
     case K_MATMUL: case K_MATMUL_ADD: case K_MATMUL_ARGMAX: case K_MATMUL_ARGMAX_BLOCKS:
-    case K_MATMUL2: case K_MATMUL3: case K_Q8_MATMUL: case K_Q8_MATMUL_DECODE: case K_Q8_MATMUL2: case K_Q8_MATMUL3: case K_Q6K_MATMUL: case K_Q5K_MATMUL: case K_Q3K_MATMUL:
+    case K_MATMUL2: case K_MATMUL3: case K_Q8_MATMUL: case K_Q8_MATMUL_DECODE: case K_Q8_MATMUL2: case K_Q8_MATMUL3: case K_Q6K_MATMUL: case K_Q5K_MATMUL: case K_Q3K_MATMUL: case K_V41_Q3K_MATVEC_ID:
     case K_IQ4XS_MATVEC: case K_IQ1S_MATVEC: case K_IQ2XS_MATVEC: case K_IQ2XXS_MATVEC: case K_IQ3S_MATVEC: case K_IQ2S_MATVEC: case K_IQ3XXS_MATVEC:
         return g_dp.otherMatmul;
     case K_RMSNORM: case K_RMSNORM_MATMUL: case K_RMSNORM_MATMUL2: case K_RMSNORM_MATMUL3:
@@ -317,7 +317,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_ROPE: case K_QWEN35_PARTIAL_ROPE_PANEL: case K_V41_TAIL_ROPE_QK: case K_V41_TAIL_ROPE_EXACT:
         return g_dp.otherRope;
     case K_SWIGLU: case K_SWIGLU_MATMUL_ADD: case K_SWIGLU_Q8_MATMUL_ADD: case K_SIGMOID_MUL:
-    case K_SWIGLU_Q4K_MATMUL_ADD: case K_V41_ROUTED_SWIGLU:
+    case K_SWIGLU_Q4K_MATMUL_ADD: case K_V41_ROUTED_SWIGLU: case K_V41_ROUTED_SWIGLU_ID:
         return g_dp.otherSwiGLU;
     case K_ADD: case K_ADD_BIAS:
         return g_dp.otherAdd;
@@ -331,8 +331,8 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_GLM_KDA_REREAD: case K_GLM_KDA_WAVE32:
         return g_dp.otherGDN;
     case K_V41_MHC: case K_V41_Q2K_EMBED_GATHER: case K_V41_BF16_BOUNDARY: case K_V41_LOGIT_SCALE: case K_V41_BF16_CHECKED:
-    case K_V41_ENGRAM_GATE: case K_V41_COMPRESSOR_POOL: case K_V41_SCALE_EXACT: case K_V41_ENGRAM_ROW_DECODE:
-    case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q4K_MATMUL_COOPMAT: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_Q2K_MATVEC: case K_COUNT:
+    case K_V41_ENGRAM_GATE: case K_V41_COMPRESSOR_POOL: case K_V41_SCALE_EXACT: case K_V41_ENGRAM_ROW_DECODE: case K_V41_ROUTED_PUBLISH_SUM:
+    case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q4K_MATMUL_COOPMAT: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_Q2K_MATVEC: case K_V41_Q2K_MATVEC_ID: case K_COUNT:
         return g_dp.otherUnclassified;
     }
     return g_dp.otherUnclassified;
@@ -343,7 +343,7 @@ static inline void dpDispatch(const Kernel& k) {
     const KId id = static_cast<KId>(&k - g_kern);
     if (id == K_Q4K_MATMUL || id == K_Q4K_MATMUL_WAVE32 || id == K_Q4K_MATMUL_COOPMAT) {
         g_dp.q4k.fetch_add(1, std::memory_order_relaxed);
-    } else if (id == K_Q2K_MATMUL || id == K_RMSNORM_Q2K_MATMUL2 || id == K_Q2K_MATVEC) {
+    } else if (id == K_Q2K_MATMUL || id == K_RMSNORM_Q2K_MATMUL2 || id == K_Q2K_MATVEC || id == K_V41_Q2K_MATVEC_ID) {
         g_dp.q2k.fetch_add(1, std::memory_order_relaxed);
     } else {
         g_dp.other.fetch_add(1, std::memory_order_relaxed);
@@ -409,6 +409,9 @@ int g_have_v41_compressor_pool = 0;
 int g_have_v41_scale_exact = 0;
 // Optional: registry V14 Engram table-row decode; same binary32 float controls.
 int g_have_v41_engram_row_decode = 0;
+// Optional: registry V15 routed-expert id modules (one dispatch per stage over
+// every pick); the checked pair needs the same binary32 float controls.
+int g_have_v41_routed_id = 0;
 bool g_v41IndexerFloatControls = false;
 std::string g_v41IndexerScoreReason = "Vulkan has not initialized";
 // Fixed-size GLM KDA kernels require an explicitly requested 32-lane subgroup.
@@ -1408,7 +1411,7 @@ const char* const kKernelNames[] = {
     "q6k_matmul", "q5k_matmul", "q3k_matmul", "rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add", "q2k_matmul",
     "rmsnorm_q2k_matmul2", "qwen35_split_qg_panel", "qwen35_partial_rope_panel",
     "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
-    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool", "v41_tail_rope_exact", "v41_scale_exact", "v41_engram_row_decode",
+    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool", "v41_tail_rope_exact", "v41_scale_exact", "v41_engram_row_decode", "v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -2932,18 +2935,23 @@ void recycleDescriptorSet(DescriptorSetRecord rec) {
 }
 
 // dispatch: bind `bufs` (nbuf of them) + push constants, run groupsX*groupsY workgroups.
-bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1, bool forceChecked = false, Buffer* initializedStatus = nullptr) {
+bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1, bool forceChecked = false, Buffer* initializedStatus = nullptr, uint32_t statusBytes = 16) {
     if (g_v41SubmissionPendingFailure) return false;
     // Only these concrete synchronous kernels may request the bounded status
     // initialization. They never flush a batch; they record only into a V4.1 step batch.
-    if ((&k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_ROUTED_SWIGLU]) && initializedStatus == nullptr) return false;
+    const bool routedID = &k == &g_kern[K_V41_ROUTED_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_PUBLISH_SUM];
+    if ((&k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_ROUTED_SWIGLU] || routedID) && initializedStatus == nullptr) return false;
     if (initializedStatus != nullptr) {
-        // The status binding is the last one of each status-owning kernel.
+        // The status binding is the last one of each status-owning kernel. Only
+        // the routed id pair owns more than one 16-byte record (one per pick).
         const bool checkedBF16 = &k == &g_kern[K_V41_BF16_CHECKED] && k.nbuf == 3;
         const bool routedSwiGLU = &k == &g_kern[K_V41_ROUTED_SWIGLU] && k.nbuf == 4;
-        if ((!checkedBF16 && !routedSwiGLU) || !forceChecked || (g_batching && !g_stepBatch) ||
+        const bool routedSwiGLUID = &k == &g_kern[K_V41_ROUTED_SWIGLU_ID] && k.nbuf == 5;
+        const bool routedPublishSum = &k == &g_kern[K_V41_ROUTED_PUBLISH_SUM] && k.nbuf == 4;
+        if ((!checkedBF16 && !routedSwiGLU && !routedSwiGLUID && !routedPublishSum) || !forceChecked || (g_batching && !g_stepBatch) ||
             !bufs || bufs[k.nbuf - 1] != initializedStatus || initializedStatus->buf == VK_NULL_HANDLE ||
-            initializedStatus->bytes < 16) return false;
+            statusBytes < 16 || statusBytes % 16 != 0 || (statusBytes != 16 && !routedID) ||
+            initializedStatus->bytes < statusBytes) return false;
     }
     const bool checkedV41 = forceChecked || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER] || &k == &g_kern[K_V41_EXACT_RMSNORM] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_ENGRAM_GATE] || &k == &g_kern[K_V41_COMPRESSOR_POOL] || &k == &g_kern[K_V41_SCALE_EXACT] || &k == &g_kern[K_V41_ENGRAM_ROW_DECODE];
     if (k.nbuf > MAX_DISPATCH_BUFS) {
@@ -2999,7 +3007,7 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
             // Step batch only: the same fill-then-conservative-dependency contract
             // as the one-shot path, recorded; the status readback submits it.
             if (g_batchOps > 0) recordTransferBarrier(g_batchCmd);
-            vkCmdFillBuffer(g_batchCmd, initializedStatus->buf, 0, 16, UINT32_MAX);
+            vkCmdFillBuffer(g_batchCmd, initializedStatus->buf, 0, statusBytes, UINT32_MAX);
             recordComputeBarrier(g_batchCmd);
         } else if (g_batchOps > 0) {
             recordDispatchBarrier(g_batchCmd, g_batchOps);
@@ -3021,7 +3029,7 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     if (initializedStatus != nullptr) {
         // Completion alone is not memory visibility. This same-command fill
         // and conservative dependency cover status atomics AND prior input writes.
-        vkCmdFillBuffer(cmd, initializedStatus->buf, 0, 16, UINT32_MAX);
+        vkCmdFillBuffer(cmd, initializedStatus->buf, 0, statusBytes, UINT32_MAX);
         recordComputeBarrier(cmd);
     }
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.pipe);
@@ -3380,6 +3388,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_v41_compressor_pool = 0;
     g_have_v41_scale_exact = 0;
     g_have_v41_engram_row_decode = 0;
+    g_have_v41_routed_id = 0;
     bool v41IndexerPipelineBuilt = false;
     bool v41MHCPipelineBuilt = false;
     g_v41IndexerFloatControls = false;
@@ -3738,6 +3747,14 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // controls its execution modes declare.
     const bool v41EngramRowDecodeBuilt = g_v41IndexerFloatControls &&
         buildKernel(g_kern[K_V41_ENGRAM_ROW_DECODE], P("v41_engram_row_decode.spv"), 3, 16);
+    // V4.1 routed-expert id modules (llama.cpp mul_mat_vec_id port), trusted
+    // since registry V15/complete78. Optional at init: all four or none, and the
+    // checked pair only with the F32 controls their execution modes declare.
+    const bool v41RoutedIDBuilt = g_v41IndexerFloatControls &&
+        buildKernel(g_kern[K_V41_Q2K_MATVEC_ID], P("v41_q2k_matvec_id.spv"), 11, 16) &&
+        buildKernel(g_kern[K_V41_Q3K_MATVEC_ID], P("v41_q3k_matvec_id.spv"), 11, 16) &&
+        buildKernel(g_kern[K_V41_ROUTED_SWIGLU_ID], P("v41_routed_swiglu_id.spv"), 5, 12) &&
+        buildKernel(g_kern[K_V41_ROUTED_PUBLISH_SUM], P("v41_routed_publish_sum.spv"), 4, 12);
     // Registry V9/current68 promotes only the unchanged finite checked module.
     // A current archive and its complete bundle cut over together. Keep the
     // capability false unless mandatory initialization completes below.
@@ -3875,6 +3892,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_v41_tail_rope_exact = v41TailRoPEExactBuilt ? 1 : 0;
     g_have_v41_scale_exact = v41ScaleExactBuilt ? 1 : 0;
     g_have_v41_engram_row_decode = v41EngramRowDecodeBuilt ? 1 : 0;
+    g_have_v41_routed_id = v41RoutedIDBuilt ? 1 : 0;
     // One per-geometry device self-check, before the first forward and never
     // inside one. Its verdict is cached and read by the verify-width route.
     gdnVerifySelfCheck();
@@ -5602,6 +5620,134 @@ int fvk_v41_routed_swiglu_f32(const void* dGate, const void* dUp, void* dOut, vo
     }
     return (int)g_submissionStatus;
 }
+// V4.1 routed-expert id dispatch (fak#13820): one dispatch per stage over every
+// routed pick of a layer. ADAPT (MIT, Copyright (c) 2023-2026 The ggml authors):
+// llama.cpp ggml-vulkan mul_mat_vec_id @ccdbe290533f68154ede46e0618622eebcb6c070
+// (ggml-vulkan.cpp:7876-7908, one dispatch, grid Y = selected expert) with ids
+// remapped through a per-layer slot map as llama.cpp PR #29887's llama_moe_cache
+// does. The slot table is the layer's bound ring pages (up to kV41RoutedIDSlots).
+static constexpr int kV41RoutedIDSlots = 8;
+static int v41BF16CheckedCountSupported(int count);
+
+int fvk_have_v41_routed_id(void) {
+    return g_ready && g_v41IndexerFloatControls && g_have_v41_routed_id &&
+        g_kern[K_V41_Q2K_MATVEC_ID].pipe != VK_NULL_HANDLE && g_kern[K_V41_Q2K_MATVEC_ID].nbuf == 11 &&
+        g_kern[K_V41_Q3K_MATVEC_ID].pipe != VK_NULL_HANDLE && g_kern[K_V41_Q3K_MATVEC_ID].nbuf == 11 &&
+        g_kern[K_V41_ROUTED_SWIGLU_ID].pipe != VK_NULL_HANDLE && g_kern[K_V41_ROUTED_SWIGLU_ID].nbuf == 5 &&
+        g_kern[K_V41_ROUTED_PUBLISH_SUM].pipe != VK_NULL_HANDLE && g_kern[K_V41_ROUTED_PUBLISH_SUM].nbuf == 4;
+}
+
+int fvk_v41_routed_id_max_picks(void) { return kV41RoutedIDSlots; }
+
+static int v41RoutedIDState(void) {
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_routed_id()) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_v41SubmissionPendingFailure || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (g_batching && !g_stepBatch) return 2;
+    return 0;
+}
+
+static bool v41RoutedIDBytesOK(const Buffer* b, uint64_t bytes) {
+    return b && b->buf != VK_NULL_HANDLE && b->mem != VK_NULL_HANDLE && bytes > 0 && bytes <= b->bytes &&
+        b->bytes <= std::numeric_limits<VkDeviceSize>::max() - b->memoryOffset;
+}
+
+// dtype 0 is Q2_K (84-byte blocks), 1 is Q3_K (110-byte blocks). xStride is the
+// per-pick activation stride in floats: 0 shares one row, in gives each pick its own.
+int fvk_v41_matvec_id_f32(int dtype, void* const* dW, int slots, const void* dX, void* dY, const void* dIds,
+                          int out, int in, int picks, int xStride) {
+    const int state = v41RoutedIDState();
+    if (state != 0) return state;
+    if ((dtype != 0 && dtype != 1) || !dW || slots <= 0 || slots > kV41RoutedIDSlots || picks <= 0 ||
+        picks > kV41RoutedIDSlots || out <= 0 || in <= 0 || in % 256 != 0 || (xStride != 0 && xStride != in) ||
+        g_maxComputeWorkGroupCountX == 0) return 2;
+    const uint64_t blockBytes = dtype == 0 ? 84u : 110u;
+    const uint64_t wBytes = uint64_t(out) * uint64_t(in / 256) * blockBytes;
+    const uint64_t xFloats = uint64_t(in) * (xStride == 0 ? 1u : uint64_t(picks));
+    const uint64_t yFloats = uint64_t(out) * uint64_t(picks);
+    if (wBytes > UINT32_MAX || xFloats > INT32_MAX || yFloats > INT32_MAX) return 2;
+    Buffer* bufs[11];
+    for (int i = 0; i < kV41RoutedIDSlots; ++i) {
+        Buffer* w = B(dW[i < slots ? i : 0]);
+        if (!v41RoutedIDBytesOK(w, wBytes)) return 2;
+        bufs[i] = w;
+    }
+    bufs[8] = B((void*)dX);
+    bufs[9] = B(dY);
+    bufs[10] = B((void*)dIds);
+    if (!v41RoutedIDBytesOK(bufs[8], xFloats * 4u) || !v41RoutedIDBytesOK(bufs[9], yFloats * 4u) ||
+        !v41RoutedIDBytesOK(bufs[10], uint64_t(picks) * 4u)) return 2;
+    for (int i = 0; i < 11; ++i) {
+        if (i != 9 && v41BuffersAlias(bufs[9], bufs[i])) return 2;
+    }
+    struct Push { int32_t outDim, inDim, picks, xStride; } pc{out, in, picks, xStride};
+    static_assert(sizeof(Push) == 16, "V4.1 routed id GEMV push ABI must be four int32 values");
+    Kernel& k = dtype == 0 ? g_kern[K_V41_Q2K_MATVEC_ID] : g_kern[K_V41_Q3K_MATVEC_ID];
+    const uint64_t groups = dtype == 0 ? (uint64_t(out) + 1u) / 2u : (uint64_t(out) + 63u) / 64u;
+    if (groups > g_maxComputeWorkGroupCountX) return 2;
+    if (!dispatch(k, bufs, &pc, sizeof(pc), uint32_t(groups), uint32_t(picks))) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
+static bool v41RoutedIDDistinct(Buffer* const* bufs, int n) {
+    for (int i = 0; i < n; ++i) for (int j = i + 1; j < n; ++j) {
+        if (v41BuffersAlias(bufs[i], bufs[j])) return false;
+    }
+    return true;
+}
+
+// The per-pick v41_routed_swiglu over every pick: status holds one 16-byte record
+// per pick, filled with UINT32_MAX in the same command before the dispatch.
+int fvk_v41_routed_swiglu_id_f32(const void* dGate, const void* dUp, void* dOut, const void* dIds, void* dStatus,
+                                 int count, int picks, float limit) {
+    const int state = v41RoutedIDState();
+    if (state != 0) return state;
+    if (count <= 0 || picks <= 0 || picks > kV41RoutedIDSlots || !std::isfinite(limit)) return 2;
+    const uint64_t total = uint64_t(count) * uint64_t(picks);
+    if (total > INT32_MAX) return 2;
+    Buffer* bufs[5] = {B((void*)dGate), B((void*)dUp), B(dOut), B((void*)dIds), B(dStatus)};
+    const uint64_t required[5] = {total * 4u, total * 4u, total * 4u, uint64_t(picks) * 8u, uint64_t(picks) * 16u};
+    for (int i = 0; i < 5; ++i) if (!v41RoutedIDBytesOK(bufs[i], required[i])) return 2;
+    if (!v41RoutedIDDistinct(bufs, 5)) return 2;
+    struct Push { uint32_t count; float limit; uint32_t picks; } pc{uint32_t(count), limit, uint32_t(picks)};
+    static_assert(sizeof(Push) == 12 && offsetof(Push, limit) == 4 && offsetof(Push, picks) == 8,
+                  "V4.1 routed SwiGLU id push ABI must be uint32 count, float32 limit, uint32 picks");
+    const uint32_t groups = uint32_t(std::min<uint64_t>((uint64_t(count) + 63u) / 64u, g_maxComputeWorkGroupCountX));
+    if (!dispatch(g_kern[K_V41_ROUTED_SWIGLU_ID], bufs, &pc, sizeof(pc), groups, uint32_t(picks), true, bufs[4],
+                  uint32_t(picks) * 16u)) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
+// The checked BF16 publication of every pick's down row plus their routed sum
+// in ids order. Site policy mirrors fvk_v41_bf16_publish_f32.
+int fvk_v41_routed_publish_sum_f32(const void* dDown, void* dSum, const void* dIds, void* dStatus,
+                                   int count, int picks, uint32_t site) {
+    const int state = v41RoutedIDState();
+    if (state != 0) return state;
+    const bool validSite = site == 1 || site == 2 || (site >= 5 && site <= 27);
+    if (!validSite || count <= 0 || picks <= 0 || picks > kV41RoutedIDSlots ||
+        !v41BF16CheckedCountSupported(count)) return 2;
+    const uint64_t total = uint64_t(count) * uint64_t(picks);
+    if (total > INT32_MAX) return 2;
+    Buffer* bufs[4] = {B((void*)dDown), B(dSum), B((void*)dIds), B(dStatus)};
+    const uint64_t required[4] = {total * 4u, uint64_t(count) * 4u, uint64_t(picks) * 12u, uint64_t(picks) * 16u};
+    for (int i = 0; i < 4; ++i) if (!v41RoutedIDBytesOK(bufs[i], required[i])) return 2;
+    if (!v41RoutedIDDistinct(bufs, 4)) return 2;
+    struct Push { uint32_t count, site, picks; } pc{uint32_t(count), site, uint32_t(picks)};
+    static_assert(sizeof(Push) == 12, "V4.1 routed publish-sum push ABI must be three uint32 values");
+    const uint32_t groups = uint32_t(std::min<uint64_t>((uint64_t(count) + 63u) / 64u, g_maxComputeWorkGroupCountX));
+    if (!dispatch(g_kern[K_V41_ROUTED_PUBLISH_SUM], bufs, &pc, sizeof(pc), groups, 1, true, bufs[3],
+                  uint32_t(picks) * 16u)) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
 int fvk_have_v41_q2k_embed_gather(void) {
     return g_ready && g_have_v41_q2k_embed_gather && g_kern[K_V41_Q2K_EMBED_GATHER].pipe != VK_NULL_HANDLE;
 }

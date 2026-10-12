@@ -162,11 +162,14 @@ func (v *vulkanBackend) V41ReadDeferred(statuses []V41DeferredStatus, rows []Ten
 	}
 	srcs := make([]*vulkanBuf, 0, len(statuses)+len(rows))
 	sizes := make([]int, 0, cap(srcs))
-	for _, b := range records {
-		if b.n < 16 {
-			return nil, nil, invalid("status record is shorter than 16 bytes")
+	verdictCount := 0
+	for i, b := range records {
+		n := V41DeferredRecords(statuses[i])
+		if n > V41RoutedIDMaxPicks || b.n < 16*n {
+			return nil, nil, invalid("status record is shorter than its 16-byte records")
 		}
-		srcs, sizes = append(srcs, b), append(sizes, 16)
+		srcs, sizes = append(srcs, b), append(sizes, 16*n)
+		verdictCount += n
 	}
 	for _, row := range rows {
 		b, ok := row.buf.(*vulkanBuf)
@@ -180,9 +183,11 @@ func (v *vulkanBackend) V41ReadDeferred(statuses []V41DeferredStatus, rows []Ten
 	if readErr != nil {
 		return nil, nil, readErr
 	}
-	verdicts = make([]error, len(statuses))
+	verdicts = make([]error, 0, verdictCount)
 	for i, st := range statuses {
-		verdicts[i] = v41DeferredVerdict("vulkan", st, image[i])
+		for r := 0; r < V41DeferredRecords(st); r++ {
+			verdicts = append(verdicts, v41DeferredVerdict("vulkan", st, image[i][16*r:16*r+16]))
+		}
 	}
 	values = make([][]float32, len(rows))
 	for i := range rows {

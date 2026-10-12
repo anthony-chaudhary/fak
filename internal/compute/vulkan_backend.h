@@ -460,6 +460,14 @@ int fvk_v41_compressor_pool_f32(const void *dKV, const void *dScores, void *dOut
  * same checked command, and an active batch is refused. Push ABI is uint32
  * count, float32 limit, weight. Returns the tail RoPE status codes. Optional
  * module (registry V10): absence or missing binary32 float controls leave have=0. */
+int fvk_have_v41_routed_id(void);
+int fvk_v41_routed_id_max_picks(void);
+int fvk_v41_matvec_id_f32(int dtype, void *const *dW, int slots, const void *dX, void *dY, const void *dIds,
+                          int out, int in, int picks, int xStride);
+int fvk_v41_routed_swiglu_id_f32(const void *dGate, const void *dUp, void *dOut, const void *dIds, void *dStatus,
+                                 int count, int picks, float limit);
+int fvk_v41_routed_publish_sum_f32(const void *dDown, void *dSum, const void *dIds, void *dStatus,
+                                   int count, int picks, uint32_t site);
 int fvk_have_v41_routed_swiglu(void);
 int fvk_v41_routed_swiglu_f32(const void *dGate, const void *dUp, void *dOut, void *dStatus,
                               int count, float limit, float weight);

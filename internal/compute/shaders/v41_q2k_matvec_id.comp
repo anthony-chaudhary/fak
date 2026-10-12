@@ -1,0 +1,127 @@
+#version 450
+
+// v41_q2k_matvec_id.comp - one decode GEMV dispatch over every routed pick of a
+// layer (DeepSeek V4.1, fak#13820). Grid Y is the pick; each workgroup reads its
+// pick's slot from the ids buffer and its Q2_K weights from that slot's binding,
+// so one dispatch replaces one q2k_matvec per pick.
+//
+// ADAPT (MIT, Copyright (c) 2023-2026 The ggml authors): llama.cpp mul_mat_vec_id,
+// https://github.com/ggml-org/llama.cpp/blob/ccdbe290533f68154ede46e0618622eebcb6c070/ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_base.glsl#L47-L87
+// (expert_i0 = gl_WorkGroupID.y, expert_id = data_ids[expert_i0], b/d offsets per
+// expert). The ids carry ring slots, not expert numbers, as llama.cpp PR #29887's
+// llama_moe_cache remaps ids through its per-layer slot map before mul_mat_id. The
+// slot table is the layer's bound ring pages instead of one 3-D expert bank.
+//
+// Per row the arithmetic is q2k_matvec.comp mode 0 term for term, so each pick's
+// output is bitwise the per-pick dispatch's.
+layout(local_size_x = 64) in;
+
+const uint ROWS = 2u;
+const uint LANES = 64u;
+
+layout(std430, set = 0, binding = 0) readonly buffer W0 { uint raw0[]; };
+layout(std430, set = 0, binding = 1) readonly buffer W1 { uint raw1[]; };
+layout(std430, set = 0, binding = 2) readonly buffer W2 { uint raw2[]; };
+layout(std430, set = 0, binding = 3) readonly buffer W3 { uint raw3[]; };
+layout(std430, set = 0, binding = 4) readonly buffer W4 { uint raw4[]; };
+layout(std430, set = 0, binding = 5) readonly buffer W5 { uint raw5[]; };
+layout(std430, set = 0, binding = 6) readonly buffer W6 { uint raw6[]; };
+layout(std430, set = 0, binding = 7) readonly buffer W7 { uint raw7[]; };
+layout(std430, set = 0, binding = 8) readonly buffer X { vec4 x4[]; };
+layout(std430, set = 0, binding = 9) writeonly buffer Y { float y[]; };
+layout(std430, set = 0, binding = 10) readonly buffer Ids { uint ids[]; };
+
+// xStride is the per-pick activation stride in floats: 0 shares one row.
+layout(push_constant) uniform PC {
+    int outDim;
+    int inDim;
+    int picks;
+    int xStride;
+} pc;
+
+shared float red[ROWS * LANES];
+
+// slot is uniform across the workgroup, so the switch never diverges.
+uint wload(uint slot, uint i) {
+    switch (slot) {
+    case 0u: return raw0[i];
+    case 1u: return raw1[i];
+    case 2u: return raw2[i];
+    case 3u: return raw3[i];
+    case 4u: return raw4[i];
+    case 5u: return raw5[i];
+    case 6u: return raw6[i];
+    default: return raw7[i];
+    }
+}
+
+vec4 bytesOf(uint w) {
+    return vec4(float(w & 255u), float((w >> 8u) & 255u), float((w >> 16u) & 255u), float(w >> 24u));
+}
+
+void main() {
+    uint tid = gl_LocalInvocationID.x;
+    uint pick = gl_WorkGroupID.y;
+    uint slot = ids[pick];
+    uint rowBase = gl_WorkGroupID.x * ROWS;
+    uint rowsOut = uint(pc.outDim);
+    uint inDim = uint(pc.inDim);
+    uint nsb = inDim / 256u;
+    uint wordsPerRow = nsb * 21u;
+    uint xBase = (pick * uint(pc.xStride)) >> 2u;
+
+    uint t16 = tid & 15u;
+    uint h = t16 >> 3u;
+    uint s = (t16 >> 2u) & 1u;
+    uint lq = (t16 & 3u) * 4u;
+
+    float acc[ROWS];
+    for (uint r = 0u; r < ROWS; ++r) acc[r] = 0.0;
+
+    for (uint sb = tid >> 4u; sb < nsb; sb += LANES / 16u) {
+        vec4 xv[4];
+        float xsum[4];
+        for (uint j = 0u; j < 4u; ++j) {
+            uint idx = (sb * 256u + h * 128u + j * 32u + s * 16u + lq) >> 2u;
+            vec4 v = x4[xBase + idx];
+            xv[j] = v;
+            xsum[j] = v.x + v.y + v.z + v.w;
+        }
+        for (uint r = 0u; r < ROWS; ++r) {
+            uint row = rowBase + r;
+            if (row >= rowsOut) break;
+            uint base = row * wordsPerRow + sb * 21u;
+            uint q = wload(slot, base + 4u + t16);
+            uint sc0 = wload(slot, base + h * 2u);
+            uint sc1 = wload(slot, base + h * 2u + 1u);
+            uint dm = wload(slot, base + 20u);
+            vec2 dd = unpackHalf2x16(dm);
+            uint scj[4];
+            scj[0] = (sc0 >> (s * 8u)) & 255u;
+            scj[1] = (sc0 >> ((2u + s) * 8u)) & 255u;
+            scj[2] = (sc1 >> (s * 8u)) & 255u;
+            scj[3] = (sc1 >> ((2u + s) * 8u)) & 255u;
+            float sum = 0.0;
+            for (uint j = 0u; j < 4u; ++j) {
+                vec4 qv = bytesOf((q >> (2u * j)) & 0x03030303u);
+                float dl = dd.x * float(scj[j] & 15u);
+                float ml = dd.y * float(scj[j] >> 4u);
+                sum += dl * dot(qv, xv[j]) - ml * xsum[j];
+            }
+            acc[r] += sum;
+        }
+    }
+
+    for (uint r = 0u; r < ROWS; ++r) red[r * LANES + tid] = acc[r];
+    barrier();
+    for (uint stride = LANES / 2u; stride > 0u; stride >>= 1u) {
+        if (tid < stride) {
+            for (uint r = 0u; r < ROWS; ++r) red[r * LANES + tid] += red[r * LANES + tid + stride];
+        }
+        barrier();
+    }
+    if (tid < ROWS) {
+        uint row = rowBase + tid;
+        if (row < rowsOut) y[pick * rowsOut + row] = red[tid * LANES];
+    }
+}

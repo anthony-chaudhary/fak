@@ -14,8 +14,8 @@ import (
 // executable SPIR-V, source correspondence, or hardware qualification.
 func TestVulkanReceiptV14Current74Boundary(t *testing.T) {
 	want := append(CurrentVulkanShaderRegistryV13(), "v41_engram_row_decode")
-	if len(want) != 74 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV14(), want) || !reflect.DeepEqual(VulkanShaders, want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest(), want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
-		t.Fatal("current builder does not use V13 plus the Engram row-decode module exactly once")
+	if len(want) != 74 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV14(), want) || !reflect.DeepEqual(VulkanShaders[:74], want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest()[:74], want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
+		t.Fatal("V14 is not V13 plus the Engram row-decode module as the current builder prefix")
 	}
 	registry, err := vulkanRegistryV14.identity()
 	if err != nil {

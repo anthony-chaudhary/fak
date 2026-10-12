@@ -377,3 +377,39 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## llama.cpp mul_mat_vec_id and llama_moe_cache slot map
+
+The V4.1 routed-expert id kernels `internal/compute/shaders/v41_q2k_matvec_id.comp`
+and `internal/compute/shaders/v41_q3k_matvec_id.comp`, and the id dispatch in
+`internal/compute/vulkan_shim.cpp` (`fvk_v41_matvec_id_f32`), adapt the
+ggml-vulkan `mul_mat_vec_id` dispatch shape (grid Y is the selected expert, read
+from an ids buffer) from `ggml/src/ggml-vulkan/ggml-vulkan.cpp` and
+`ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_base.glsl` at llama.cpp revision
+`ccdbe290533f68154ede46e0618622eebcb6c070`:
+https://github.com/ggml-org/llama.cpp/blob/ccdbe290533f68154ede46e0618622eebcb6c070/ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_base.glsl
+The ids carry ring slots remapped through a per-layer slot map, after
+`src/llama-moe-cache.h` from llama.cpp PR #29887 (merge
+`d6cf9acb25e6c657d6c6a4645ab7b69fce119995`).
+
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

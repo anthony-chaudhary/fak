@@ -18,11 +18,15 @@ const (
 // V41DeferredStatus is one checked kernel's 16-byte status record, left on the
 // device so several kernels can be verified behind one host fence (#13820).
 // Record is backend-owned storage; V41ReadDeferred consumes and frees it.
+//
+// Records > 1 marks a routed id status (V41RoutedIDBackend): Record holds that
+// many consecutive 16-byte records, one per pick, each of Count lanes.
 type V41DeferredStatus struct {
-	Kind   V41DeferredStatusKind
-	Count  int
-	Site   uint32
-	Record Tensor
+	Kind    V41DeferredStatusKind
+	Count   int
+	Site    uint32
+	Records int
+	Record  Tensor
 }
 
 // V41DeferredStatusBackend records the routed SwiGLU and the ordinary BF16
@@ -31,7 +35,8 @@ type V41DeferredStatus struct {
 // tensor; the output is valid only once its status verdict is nil.
 //
 // V41ReadDeferred reads every status record and every row behind one host
-// fence, frees every record, and returns one verdict per status in order: nil,
+// fence, frees every record, and returns one verdict per record in order (a
+// status with Records n contributes n consecutive verdicts): nil,
 // or exactly the error the synchronous operation returns after its own
 // readback (*V41RoutedSwiGLUFault, or a *BackendError wrapping the checked
 // BF16 arithmetic or protocol error). A non-nil err is a transport or

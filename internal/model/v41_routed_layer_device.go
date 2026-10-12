@@ -13,6 +13,10 @@ import (
 // "0", so the per-pick fused seam stays one switch away for A/B and bisection.
 const v41LayerExpertBatchEnv = "FAK_V41_LAYER_EXPERT_BATCH"
 
+// v41RoutedIDEnv set to "0" keeps the batched layer on its per-pick dispatches
+// instead of the one-dispatch-per-stage id kernels, for A/B and bisection.
+const v41RoutedIDEnv = "FAK_V41_ROUTED_ID"
+
 // v41RoutedLayerFunc runs every routed pick of one full-profile decode layer on
 // the device and returns their routed sum (#13820). Each pick issues the
 // kernels v41RoutedExpertFunc issues, in the same order, and the sum adds the
@@ -39,6 +43,10 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 	deferred, ok := s.Backend.(compute.V41DeferredStatusBackend)
 	if !ok || H <= 0 || I <= 0 || !deferred.SupportsV41DeferredStatus(H) {
 		return nil
+	}
+	idBackend, _ := s.Backend.(compute.V41RoutedIDBackend)
+	if idBackend != nil && (os.Getenv(v41RoutedIDEnv) == "0" || !idBackend.V41RoutedIDAvailable()) {
+		idBackend = nil
 	}
 	return func(layer int, picks []routePick, x []float32) (result []float32, outcome v41RoutedExpertOutcome, cause error) {
 		if len(picks) == 0 || len(x) != H {
@@ -113,8 +121,7 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 				releases[i]()
 			}
 		}()
-		type expertWeights struct{ gate, up, down compute.Tensor }
-		weights := make([]expertWeights, len(picks))
+		weights := make([]v41RoutedLayerWeights, len(picks))
 		admitted := func() bool {
 			if r := s.routedExpertRing(names[0][0]); r != nil {
 				done := s.ringEnter(r)
@@ -134,7 +141,7 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 					return false
 				}
 				releases = append(releases, releaseDown)
-				weights[slot] = expertWeights{gateW, upW, downW}
+				weights[slot] = v41RoutedLayerWeights{gateW, upW, downW}
 			}
 			return true
 		}
@@ -161,8 +168,70 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 		opened = s.M.v41NowNanos()
 		xd := s.uploadHostF32([]int{H}, x, compute.MemoryActivation, "moe expert gate/up activation")
 		owned = append(owned, xd)
+		useID := idBackend != nil && v41RoutedIDAdmits(idBackend, weights, len(picks))
+		// Verdicts decode per pick: the per-pick arm interleaves each pick's
+		// SwiGLU and publication records, the id arm returns all SwiGLU records
+		// and then all publication records.
+		swigluVerdict := func(slot int) int { return 2 * slot }
+		publishVerdict := func(slot int) int { return 2*slot + 1 }
+		var sumRow compute.Tensor
+		if useID {
+			swigluVerdict = func(slot int) int { return slot }
+			publishVerdict = func(slot int) int { return len(picks) + slot }
+			gates, ups, downs := make([]compute.Tensor, len(picks)), make([]compute.Tensor, len(picks)), make([]compute.Tensor, len(picks))
+			slots, routeWeights := make([]int, len(picks)), make([]float32, len(picks))
+			for slot, pick := range picks {
+				gates[slot], ups[slot], downs[slot] = weights[slot].gate, weights[slot].up, weights[slot].down
+				slots[slot], routeWeights[slot] = slot, pick.weight
+			}
+			stage = "gate/up"
+			dispatched = len(picks)
+			ids, err := idBackend.V41RoutedIDs(slots, routeWeights, v41RoutedSumOrder(picks))
+			if err != nil {
+				return nil, v41RoutedExpertError, closeFailure(err)
+			}
+			owned = append(owned, ids)
+			g, err := idBackend.V41MatVecID(gates, ids, len(picks), xd)
+			if err != nil {
+				return nil, v41RoutedExpertError, closeFailure(err)
+			}
+			owned = append(owned, g)
+			u, err := idBackend.V41MatVecID(ups, ids, len(picks), xd)
+			if err != nil {
+				return nil, v41RoutedExpertError, closeFailure(err)
+			}
+			owned = append(owned, u)
+			stage = "activation"
+			activation, activationStatus, err := idBackend.V41RoutedSwiGLUIDDeferred(g, u, ids, len(picks), limit)
+			if err != nil {
+				return nil, v41RoutedExpertError, closeFailure(err)
+			}
+			owned = append(owned, activation)
+			statuses = append(statuses, activationStatus)
+			stage = "down"
+			out, err := idBackend.V41MatVecID(downs, ids, len(picks), activation)
+			if err != nil {
+				return nil, v41RoutedExpertError, closeFailure(err)
+			}
+			owned = append(owned, out)
+			path, stage = "v41-routed-sum", "routed-sum"
+			sum, publishStatus, err := idBackend.V41RoutedPublishSumDeferred(out, ids, len(picks), compute.V41BF16PublishRoutedDown)
+			if err != nil {
+				return nil, v41RoutedExpertError, closeFailure(err)
+			}
+			owned = append(owned, sum)
+			statuses = append(statuses, publishStatus)
+			if sum.Buf() == nil || sum.Dtype != compute.F32 || len(sum.Shape) != 1 || sum.Shape[0] != H {
+				return nil, v41RoutedExpertError, closeFailure(errV41BF16BoundaryResult)
+			}
+			sumRow = sum
+			s.M.v41NoteRoutedLayerDispatches(true, v41RoutedIDLayerDispatches)
+		}
 		published := make([]compute.Tensor, len(picks))
 		for slot, pick := range picks {
+			if useID {
+				break
+			}
 			stage = "gate/up"
 			dispatched = slot + 1
 			g := s.Backend.MatMul(weights[slot].gate, xd)
@@ -190,18 +259,22 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 			}
 			published[slot] = row
 		}
-		path, stage = "v41-routed-sum", "accumulator upload"
-		acc := s.uploadHostF32([]int{H}, make([]float32, H), compute.MemoryActivation, "V4.1 routed-sum accumulator")
-		owned = append(owned, acc)
-		stage = "routed-sum"
-		v41DeviceAccumulate(s.Backend, acc, published, v41RoutedSumOrder(picks))
+		if !useID {
+			path, stage = "v41-routed-sum", "accumulator upload"
+			acc := s.uploadHostF32([]int{H}, make([]float32, H), compute.MemoryActivation, "V4.1 routed-sum accumulator")
+			owned = append(owned, acc)
+			stage = "routed-sum"
+			v41DeviceAccumulate(s.Backend, acc, published, v41RoutedSumOrder(picks))
+			sumRow = acc
+			s.M.v41NoteRoutedLayerDispatches(false, v41RoutedPerPickDispatches*len(picks)+len(picks))
+		}
 		path, stage = "v41-routed-expert", "readback"
 		consumed = true
-		verdicts, rows, err := deferred.V41ReadDeferred(statuses, []compute.Tensor{acc})
+		verdicts, rows, err := deferred.V41ReadDeferred(statuses, []compute.Tensor{sumRow})
 		if err != nil {
 			return nil, v41RoutedExpertError, closeFailure(err)
 		}
-		if len(verdicts) != len(statuses) || len(rows) != 1 {
+		if len(verdicts) != 2*len(picks) || len(rows) != 1 {
 			return nil, v41RoutedExpertError, closeFailure(errV41ExpertResult)
 		}
 		// Verdicts decode in slot order, so the lowest faulting pick reports
@@ -211,7 +284,7 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 			s.M.v41NoteIncrementalDeviceDispatch(false, 0)
 			noted = slot + 1
 			stage = "activation"
-			if err := verdicts[2*slot]; err != nil {
+			if err := verdicts[swigluVerdict(slot)]; err != nil {
 				dispatched = noted
 				var fault *compute.V41RoutedSwiGLUFault
 				if errors.As(err, &fault) {
@@ -225,7 +298,7 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 			}
 			s.M.v41NoteExpertActivation(1, 0, 16, v41FirstOpened(slot, opened))
 			stage = "down"
-			if err := verdicts[2*slot+1]; err != nil {
+			if err := verdicts[publishVerdict(slot)]; err != nil {
 				dispatched = noted
 				var numeric *compute.V41BF16CheckedArithmeticError
 				if errors.As(err, &numeric) {
@@ -247,6 +320,42 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 		}
 		return sum, v41RoutedExpertHandled, nil
 	}
+}
+
+// v41RoutedLayerWeights is one pick's staged and held device projections.
+type v41RoutedLayerWeights struct{ gate, up, down compute.Tensor }
+
+// Routed dispatches one batched layer records: the per-pick arm issues gate,
+// up, SwiGLU, down and publication per pick plus one sum add per pick; the id
+// arm issues gate, up, SwiGLU, down and publication+sum once for every pick.
+const (
+	v41RoutedPerPickDispatches = 5
+	v41RoutedIDLayerDispatches = 5
+)
+
+// v41RoutedIDAdmits reports whether one id dispatch per projection can serve
+// every pick: within the slot bound, and each projection's slot table one
+// dtype and shape the backend's id GEMV serves. Otherwise the layer keeps its
+// per-pick dispatches.
+func v41RoutedIDAdmits(be compute.V41RoutedIDBackend, weights []v41RoutedLayerWeights, picks int) bool {
+	if picks <= 0 || picks > compute.V41RoutedIDMaxPicks || len(weights) != picks {
+		return false
+	}
+	same := func(a, b compute.Tensor) bool {
+		return a.Dtype == b.Dtype && len(a.Shape) == 2 && len(b.Shape) == 2 && a.Shape[0] == b.Shape[0] && a.Shape[1] == b.Shape[1]
+	}
+	first := weights[0]
+	for _, w := range []compute.Tensor{first.gate, first.up, first.down} {
+		if !be.SupportsV41RoutedIDWeight(w.Dtype) || len(w.Shape) != 2 || w.Shape[1]%256 != 0 {
+			return false
+		}
+	}
+	for _, w := range weights[1:] {
+		if !same(w.gate, first.gate) || !same(w.up, first.up) || !same(w.down, first.down) {
+			return false
+		}
+	}
+	return true
 }
 
 func v41FirstOpened(slot int, opened int64) int64 {

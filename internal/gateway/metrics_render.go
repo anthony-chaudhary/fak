@@ -608,6 +608,38 @@ func (s *Server) writeDeviceWeightMemoryMetrics(b *strings.Builder) {
 // this process happened to accumulate. Budget and peak cannot be derived, and the placement/shape
 // gauges describe the most recent request only — the same last-request framing the request-memory
 // plan above uses, because drift against a pin set does not sum across requests.
+// writeV41RoutedDispatchMetrics emits the V4.1 batched routed-layer dispatch
+// counters per forward phase (fak#13820). Divided by the phase token counter
+// this is the routed dispatches each token cost: 5 per layer on the id arm, 6
+// per pick on the per-pick arm. Model-lifetime counters, replaced per fold.
+func writeV41RoutedDispatchMetrics(b *strings.Builder, phases *agent.V41PhaseLifetimeSnapshot) {
+	if phases == nil || phases.Routed.Prefill.RoutedLayers+phases.Routed.Decode.RoutedLayers == 0 {
+		return
+	}
+	writeHelpType(b, "fak_gateway_v41_routed_dispatches_total", "Compute dispatches the V4.1 batched routed-expert layer recorded, by forward phase. Divide by fak_gateway_v41_phase_tokens_total for routed dispatches per token.", "counter")
+	for _, ph := range v41RoutedDispatchPhases(phases) {
+		fmt.Fprintf(b, "fak_gateway_v41_routed_dispatches_total{phase=\"%s\"} %d\n", ph.name, ph.snap.RoutedLayerDispatches)
+	}
+	writeHelpType(b, "fak_gateway_v41_routed_layers_total", "V4.1 layers the batched routed-expert path handled, by forward phase and arm: id is one dispatch per stage over every pick, per_pick one dispatch per pick.", "counter")
+	for _, ph := range v41RoutedDispatchPhases(phases) {
+		fmt.Fprintf(b, "fak_gateway_v41_routed_layers_total{phase=\"%s\",arm=\"id\"} %d\n", ph.name, ph.snap.RoutedIDLayers)
+		fmt.Fprintf(b, "fak_gateway_v41_routed_layers_total{phase=\"%s\",arm=\"per_pick\"} %d\n", ph.name, ph.snap.RoutedLayers-ph.snap.RoutedIDLayers)
+	}
+	writeHelpType(b, "fak_gateway_v41_phase_tokens_total", "Tokens the V4.1 forward attributed to each phase over the model lifetime.", "counter")
+	for _, ph := range v41RoutedDispatchPhases(phases) {
+		fmt.Fprintf(b, "fak_gateway_v41_phase_tokens_total{phase=\"%s\"} %d\n", ph.name, ph.snap.Tokens)
+	}
+}
+
+type v41RoutedDispatchPhase struct {
+	name string
+	snap agent.V41RoutedPhaseSnapshot
+}
+
+func v41RoutedDispatchPhases(phases *agent.V41PhaseLifetimeSnapshot) []v41RoutedDispatchPhase {
+	return []v41RoutedDispatchPhase{{"prefill", phases.Routed.Prefill}, {"decode", phases.Routed.Decode}}
+}
+
 func (s *Server) writeMoEResidencyMetrics(b *strings.Builder) {
 	if s == nil || s.planner == nil {
 		return
@@ -641,6 +673,7 @@ func (s *Server) writeMoEResidencyMetrics(b *strings.Builder) {
 	writeHelpType(b, "fak_gateway_moe_expert_ring_bytes", "Activated-expert device ring bytes: kind=budget is the declared ceiling, kind=resident the routed-expert bytes still resident after the most recent request (non-zero only for a model-scoped ring that persists across requests).", "gauge")
 	fmt.Fprintf(b, "fak_gateway_moe_expert_ring_bytes{kind=\"budget\"} %d\n", l.BudgetBytes)
 	fmt.Fprintf(b, "fak_gateway_moe_expert_ring_bytes{kind=\"resident\"} %d\n", l.ResidentBytes)
+	writeV41RoutedDispatchMetrics(b, l.V41Phases)
 
 	last := l.Last
 	if last.Shape.Experts > 0 {

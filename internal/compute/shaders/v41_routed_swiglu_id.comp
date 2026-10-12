@@ -1,0 +1,75 @@
+#version 450
+#extension GL_EXT_spirv_intrinsics : require
+
+// v41_routed_swiglu_id.comp - v41_routed_swiglu.comp over every routed pick of a
+// layer in one dispatch (fak#13820). Grid Y is the pick: its lanes read
+// gate/up/out at pick*count, take the route weight from the ids buffer
+// (ids[picks + pick], binary32 bits), and own their own 16-byte status record at
+// status[4*pick], so each record is exactly the one the per-pick dispatch writes.
+// Per lane the arithmetic, float controls and NoContraction are those of
+// v41_routed_swiglu.comp.
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4464], 4459, 32);
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4466], 4461, 32);
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4467], 4462, 32);
+layout(local_size_x = 64) in;
+
+layout(std430, binding = 0) readonly  buffer Gbuf { uint gateBits[]; };
+layout(std430, binding = 1) readonly  buffer Ubuf { uint upBits[]; };
+layout(std430, binding = 2) writeonly buffer Ybuf { uint outBits[]; };
+layout(std430, binding = 3) readonly  buffer Ids { uint ids[]; };
+// Native ownership fills 4*picks words with UINT32_MAX in the same command
+// before this dispatch. Per pick: magic, count, lowest activation-stage fault
+// lane, lowest down-operand-stage fault lane (UINT32_MAX = none).
+layout(std430, binding = 4) buffer Status { uint status[]; };
+layout(push_constant) uniform Push { uint count; float limit; uint picks; } pc;
+
+const uint kExponent = 0x7f800000u;
+
+uint roundBF16(uint bits) { return (bits + 0x7fffu + ((bits >> 16u) & 1u)) & 0xffff0000u; }
+bool nonfinite(uint bits) { return (bits & kExponent) == kExponent; }
+
+void main() {
+    uint pick = gl_WorkGroupID.y;
+    uint first = gl_GlobalInvocationID.x;
+    uint rec = 4u * pick;
+    if (first == 0u) {
+        status[rec] = 0x52535731u;
+        status[rec + 1u] = pc.count;
+    }
+    float weight = uintBitsToFloat(ids[pc.picks + pick]);
+    uint base = pick * pc.count;
+    uint stride = gl_NumWorkGroups.x * 64u;
+    for (uint i = first; i < pc.count; i += stride) {
+        uint gb = gateBits[base + i];
+        uint ub = upBits[base + i];
+        uint gr = roundBF16(gb);
+        uint ur = roundBF16(ub);
+        if (nonfinite(gb) || nonfinite(ub) || nonfinite(gr) || nonfinite(ur)) {
+            atomicMin(status[rec + 2u], i);
+            outBits[base + i] = 0x7fc00000u;
+            continue;
+        }
+        precise float g = uintBitsToFloat(gr);
+        precise float u = uintBitsToFloat(ur);
+        if (pc.limit > 0.0) {
+            g = min(g, pc.limit);
+            u = max(-pc.limit, min(u, pc.limit));
+        }
+        precise float t = 1.0 + exp(-g);
+        precise float f = (g / t) * u;
+        uint fb = floatBitsToUint(f);
+        if (nonfinite(fb)) {
+            atomicMin(status[rec + 2u], i);
+            outBits[base + i] = 0x7fc00000u;
+            continue;
+        }
+        precise float w = f * weight;
+        uint wb = floatBitsToUint(w);
+        uint wr = roundBF16(wb);
+        if (nonfinite(wb) || nonfinite(wr)) {
+            atomicMin(status[rec + 3u], i);
+            wr = 0x7fc00000u;
+        }
+        outBits[base + i] = wr;
+    }
+}

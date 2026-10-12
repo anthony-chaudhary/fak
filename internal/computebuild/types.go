@@ -108,6 +108,8 @@ const (
 	VulkanBuildReceiptSchemaV13 = "fak.vulkan-build-receipt.v13"
 	// VulkanBuildReceiptSchemaV14 binds exact74 (V13/73 plus the V4.1 Engram table-row decode module).
 	VulkanBuildReceiptSchemaV14 = "fak.vulkan-build-receipt.v14"
+	// VulkanBuildReceiptSchemaV15 binds exact78 (V14/74 plus the four V4.1 routed-expert id modules).
+	VulkanBuildReceiptSchemaV15 = "fak.vulkan-build-receipt.v15"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"

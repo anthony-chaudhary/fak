@@ -139,7 +139,7 @@ type vulkanVerifyConfig struct {
 
 var (
 	verifyVulkanBinaryReceiptIdentityForSchema = computebuild.VerifyVulkanBinaryReceiptIdentityForSchema
-	currentVulkanShaderRegistryV14             = computebuild.CurrentVulkanShaderRegistryV14
+	currentVulkanShaderRegistryV15             = computebuild.CurrentVulkanShaderRegistryV15
 	observeVulkanVerificationBinary            = hashVulkanVerificationBinary
 )
 
@@ -174,9 +174,9 @@ func RunBuildVulkan(stdout, stderr io.Writer, argv []string) int {
 	fs.StringVar(outBin, "o", "", "output binary path (shorthand)")
 	fs.StringVar(outBin, "out", "", "output binary path (alias)")
 	receiptFlag := fs.String("receipt", defaultReceipt, "build receipt path (matched receipt for verify)")
-	fs.StringVar(receiptFlag, "matched-receipt", defaultReceipt, "matched V14 receipt path for verify")
+	fs.StringVar(receiptFlag, "matched-receipt", defaultReceipt, "matched V15 receipt path for verify")
 	compareReceipt := fs.String("compare-receipt", "", "prior successful Vulkan receipt whose stable build identity must match")
-	fs.StringVar(compareReceipt, "baseline-receipt", "", "baseline V14 receipt path for verify")
+	fs.StringVar(compareReceipt, "baseline-receipt", "", "baseline V15 receipt path for verify")
 	verifyBinary := fs.String("binary", "", "matched Vulkan binary path for verify")
 	fs.StringVar(verifyBinary, "matched-binary", "", "matched Vulkan binary path for verify")
 	baselineBinary := fs.String("baseline-binary", "", "baseline Vulkan binary path for verify")
@@ -199,7 +199,7 @@ func RunBuildVulkan(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "  build      compile shaders, shim, and build compute package")
 		fmt.Fprintln(stderr, "  binary     build full binary with Vulkan backend enabled")
 		fmt.Fprintln(stderr, "  test       run Vulkan HAL device integration tests")
-		fmt.Fprintln(stderr, "  verify     verify an existing V14 receipt pair without executing either binary")
+		fmt.Fprintln(stderr, "  verify     verify an existing V15 receipt pair without executing either binary")
 		fmt.Fprintln(stderr, "flags:")
 		fs.PrintDefaults()
 	}
@@ -416,7 +416,7 @@ func runBuildVulkanVerify(stdout, stderr io.Writer, cfg vulkanVerifyConfig) int 
 		}, 1)
 	}
 
-	modules := currentVulkanShaderRegistryV14()
+	modules := currentVulkanShaderRegistryV15()
 	tools := computebuild.VulkanReceiptToolInputs{
 		Go: cfg.Go, CC: cfg.CC, CXX: cfg.CXX, AR: cfg.AR, GLSLC: cfg.GLSLC,
 		CxxRuntime: cfg.CXXRuntime, IsWindows: false,
@@ -456,7 +456,7 @@ func runBuildVulkanVerify(stdout, stderr io.Writer, cfg vulkanVerifyConfig) int 
 		Comparison:           baseline,
 	}
 
-	verified, err := verifyVulkanBinaryReceiptIdentityForSchema(context.Background(), computebuild.VulkanBuildReceiptSchemaV14, evidence)
+	verified, err := verifyVulkanBinaryReceiptIdentityForSchema(context.Background(), computebuild.VulkanBuildReceiptSchemaV15, evidence)
 	if err != nil {
 		return writeVulkanVerificationResult(stdout, stderr, VulkanVerificationResult{
 			Schema: vulkanVerificationResultSchema, Command: "verify", Verdict: "refused",
@@ -512,8 +512,8 @@ func validateVulkanVerificationSuccess(verified *computebuild.VulkanBinaryReceip
 		return incomplete("receipt digest")
 	}
 	receipt := &verified.Receipt
-	if receipt.Schema != computebuild.VulkanBuildReceiptSchemaV14 || receipt.Backend != "vulkan" || receipt.Command != "binary" || receipt.Outcome != "success" || receipt.ExitCode != 0 || receipt.Error != "" {
-		return incomplete("V14 success envelope")
+	if receipt.Schema != computebuild.VulkanBuildReceiptSchemaV15 || receipt.Backend != "vulkan" || receipt.Command != "binary" || receipt.Outcome != "success" || receipt.ExitCode != 0 || receipt.Error != "" {
+		return incomplete("V15 success envelope")
 	}
 	if receipt.Vulkan == nil || receipt.Artifact == nil || receipt.VulkanRegistry == nil || receipt.VulkanNativeArchive == nil || receipt.VulkanIndexerScore == nil || receipt.Reproducibility == nil {
 		return incomplete("required receipt sections")
@@ -526,16 +526,16 @@ func validateVulkanVerificationSuccess(verified *computebuild.VulkanBinaryReceip
 	if matchedSize <= 0 || !validVulkanVerificationHex(matchedSHA, sha256.Size) || receipt.Artifact.SHA256 != matchedSHA || receipt.Artifact.SizeBytes != matchedSize || strings.TrimSpace(receipt.Artifact.Path) == "" || receipt.Artifact.Signed {
 		return incomplete("matched binary identity")
 	}
-	if len(modules) != 74 || provenance.SPIRVModuleCount != 74 || !validVulkanVerificationHex(provenance.SPIRVBundleSHA256, sha256.Size) {
-		return incomplete("exact74 SPIR-V identity")
+	if len(modules) != 78 || provenance.SPIRVModuleCount != 78 || !validVulkanVerificationHex(provenance.SPIRVBundleSHA256, sha256.Size) {
+		return incomplete("exact78 SPIR-V identity")
 	}
 	registrySHA, err := vulkanVerificationRegistrySHA(modules)
 	if err != nil {
-		return incomplete("exact74 registry digest")
+		return incomplete("exact78 registry digest")
 	}
 	registry := receipt.VulkanRegistry
-	if registry.ID != computebuild.VulkanShaderRegistryV14ID || registry.ModuleCount != 74 || registry.SHA256 != registrySHA || !validVulkanVerificationHex(registry.SHA256, sha256.Size) {
-		return incomplete("exact74 registry identity")
+	if registry.ID != computebuild.VulkanShaderRegistryV15ID || registry.ModuleCount != 78 || registry.SHA256 != registrySHA || !validVulkanVerificationHex(registry.SHA256, sha256.Size) {
+		return incomplete("exact78 registry identity")
 	}
 	archive := receipt.VulkanNativeArchive
 	if filepath.ToSlash(archive.Path) != "internal/compute/libfakvulkan.a" || archive.SizeBytes <= 0 || archive.Signed || !validVulkanVerificationHex(archive.SHA256, sha256.Size) {
@@ -585,7 +585,7 @@ func vulkanVerificationRegistrySHA(modules []string) (string, error) {
 	sort.Strings(canonical)
 	for i, module := range canonical {
 		if strings.TrimSpace(module) == "" || filepath.Base(module) != module || filepath.Ext(module) != "" || (i > 0 && canonical[i-1] == module) {
-			return "", fmt.Errorf("invalid exact74 module registry")
+			return "", fmt.Errorf("invalid exact78 module registry")
 		}
 	}
 	raw, err := json.Marshal(canonical)
@@ -657,14 +657,14 @@ func (cfg vulkanVerifyConfig) validate() error {
 	}
 	for _, field := range paths {
 		if strings.TrimSpace(field.value) == "" {
-			return fmt.Errorf("--%s is required for read-only V14 verification", field.name)
+			return fmt.Errorf("--%s is required for read-only V15 verification", field.name)
 		}
 		if !filepath.IsAbs(field.value) {
 			return fmt.Errorf("--%s must be an absolute path", field.name)
 		}
 	}
 	if strings.TrimSpace(cfg.Commit) == "" {
-		return fmt.Errorf("--commit is required for read-only V14 verification")
+		return fmt.Errorf("--commit is required for read-only V15 verification")
 	}
 	if strings.TrimSpace(cfg.GitSHA256) == "" {
 		return fmt.Errorf("--git-sha256 is required for pinned Git execution")

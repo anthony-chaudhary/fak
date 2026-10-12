@@ -117,6 +117,23 @@ type V41PhaseLifetimeSnapshot struct {
 	Projections V41ProjectionPhaseLifetimeSnapshot `json:"projections"`
 	Compressor  V41CompressorPhaseLifetimeSnapshot `json:"compressor"`
 	Indexer     V41IndexerPhaseLifetimeSnapshot    `json:"indexer"`
+	Routed      V41RoutedPhaseLifetimeSnapshot     `json:"routed"`
+}
+
+// V41RoutedPhaseLifetimeSnapshot attributes batched routed-expert layers and
+// the compute dispatches they recorded by forward phase (fak#13820).
+type V41RoutedPhaseLifetimeSnapshot struct {
+	Prefill V41RoutedPhaseSnapshot `json:"prefill"`
+	Decode  V41RoutedPhaseSnapshot `json:"decode"`
+}
+
+// V41RoutedPhaseSnapshot: RoutedIDLayers took one dispatch per stage over
+// every pick, the rest one dispatch per pick. Tokens is the phase's tokens.
+type V41RoutedPhaseSnapshot struct {
+	Tokens                int `json:"tokens"`
+	RoutedLayerDispatches int `json:"routed_layer_dispatches"`
+	RoutedLayers          int `json:"routed_layers"`
+	RoutedIDLayers        int `json:"routed_id_layers"`
 }
 
 // V41PhaseSnapshot deliberately contains only fixed-shape numeric counters.
@@ -300,11 +317,12 @@ func (p *InKernelPlanner) foldV41PhasesLocked(at model.V41ExpertFaultAttribution
 		Decode:  v41CompressorPhaseSnapshot(at.Decode),
 	}
 	indexer := V41IndexerPhaseLifetimeSnapshot{Prefill: v41IndexerPhaseSnapshot(at.Prefill), Decode: v41IndexerPhaseSnapshot(at.Decode)}
-	if prefill == (V41PhaseSnapshot{}) && decode == (V41PhaseSnapshot{}) && projections == (V41ProjectionPhaseLifetimeSnapshot{}) && compressor == (V41CompressorPhaseLifetimeSnapshot{}) && indexer == (V41IndexerPhaseLifetimeSnapshot{}) {
+	routed := V41RoutedPhaseLifetimeSnapshot{Prefill: v41RoutedPhaseSnapshot(at.Prefill), Decode: v41RoutedPhaseSnapshot(at.Decode)}
+	if prefill == (V41PhaseSnapshot{}) && decode == (V41PhaseSnapshot{}) && projections == (V41ProjectionPhaseLifetimeSnapshot{}) && compressor == (V41CompressorPhaseLifetimeSnapshot{}) && indexer == (V41IndexerPhaseLifetimeSnapshot{}) && routed == (V41RoutedPhaseLifetimeSnapshot{}) {
 		return
 	}
 	p.moeResidency.V41Phases = &V41PhaseLifetimeSnapshot{
-		Scope: "model_lifetime", Prefill: prefill, Decode: decode, Projections: projections, Compressor: compressor, Indexer: indexer,
+		Scope: "model_lifetime", Prefill: prefill, Decode: decode, Projections: projections, Compressor: compressor, Indexer: indexer, Routed: routed,
 	}
 }
 
@@ -337,6 +355,15 @@ func v41PhaseSnapshot(in model.V41ExpertFaultAttributionPhase) V41PhaseSnapshot 
 		MHCProjectionNanos:                   in.MHCProjectionNanos,
 		MHCProjectionActivationUploadBytes:   in.MHCProjectionActivationUploadBytes,
 		MHCProjectionReadbackBytes:           in.MHCProjectionReadbackBytes,
+	}
+}
+
+func v41RoutedPhaseSnapshot(in model.V41ExpertFaultAttributionPhase) V41RoutedPhaseSnapshot {
+	return V41RoutedPhaseSnapshot{
+		Tokens:                in.Tokens,
+		RoutedLayerDispatches: in.RoutedLayerDispatches,
+		RoutedLayers:          in.RoutedLayers,
+		RoutedIDLayers:        in.RoutedIDLayers,
 	}
 }
 

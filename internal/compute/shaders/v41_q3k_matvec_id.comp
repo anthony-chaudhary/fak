@@ -1,0 +1,129 @@
+#version 450
+
+// v41_q3k_matvec_id.comp - one decode Q3_K GEMV dispatch over every routed pick
+// of a layer (DeepSeek V4.1 ffn_down_exps, fak#13820). Grid Y is the pick; each
+// workgroup reads its pick's ring slot from the ids buffer and that slot's
+// binding. Same bindings and push constants as v41_q2k_matvec_id.comp.
+//
+// ADAPT (MIT, Copyright (c) 2023-2026 The ggml authors): llama.cpp mul_mat_vec_id,
+// https://github.com/ggml-org/llama.cpp/blob/ccdbe290533f68154ede46e0618622eebcb6c070/ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_base.glsl#L47-L87
+// with ids remapped through a per-layer slot map as in llama.cpp PR #29887.
+//
+// Per row the arithmetic is q3k_matmul.comp at one token term for term, so each
+// pick's output is bitwise the per-pick dispatch's.
+layout(local_size_x = 64) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer W0 { uint raw0[]; };
+layout(std430, set = 0, binding = 1) readonly buffer W1 { uint raw1[]; };
+layout(std430, set = 0, binding = 2) readonly buffer W2 { uint raw2[]; };
+layout(std430, set = 0, binding = 3) readonly buffer W3 { uint raw3[]; };
+layout(std430, set = 0, binding = 4) readonly buffer W4 { uint raw4[]; };
+layout(std430, set = 0, binding = 5) readonly buffer W5 { uint raw5[]; };
+layout(std430, set = 0, binding = 6) readonly buffer W6 { uint raw6[]; };
+layout(std430, set = 0, binding = 7) readonly buffer W7 { uint raw7[]; };
+layout(std430, set = 0, binding = 8) readonly buffer X { float x[]; };
+layout(std430, set = 0, binding = 9) writeonly buffer Y { float y[]; };
+layout(std430, set = 0, binding = 10) readonly buffer Ids { uint ids[]; };
+
+layout(push_constant) uniform PC {
+    int outDim;
+    int inDim;
+    int picks;
+    int xStride;
+} pc;
+
+uint slot;
+
+uint wload(uint i) {
+    switch (slot) {
+    case 0u: return raw0[i];
+    case 1u: return raw1[i];
+    case 2u: return raw2[i];
+    case 3u: return raw3[i];
+    case 4u: return raw4[i];
+    case 5u: return raw5[i];
+    case 6u: return raw6[i];
+    default: return raw7[i];
+    }
+}
+
+uint byteAt(uint offset) {
+    uint word = wload(offset >> 2u);
+    return (word >> ((offset & 3u) * 8u)) & 255u;
+}
+
+uint leU32(uint offset) {
+    return byteAt(offset) | (byteAt(offset + 1u) << 8u) |
+           (byteAt(offset + 2u) << 16u) | (byteAt(offset + 3u) << 24u);
+}
+
+float halfAt(uint offset) {
+    uint bits = byteAt(offset) | (byteAt(offset + 1u) << 8u);
+    return unpackHalf2x16(bits).x;
+}
+
+void unpackQ3KScales(uint sc, out int scales[16]) {
+    uint aux0 = leU32(sc);
+    uint aux1 = leU32(sc + 4u);
+    uint aux2 = leU32(sc + 8u);
+    uint tmp = aux2;
+    uint words[4];
+    words[0] = (aux0 & 0x0f0f0f0fu) | (((tmp)        & 0x03030303u) << 4u);
+    words[1] = (aux1 & 0x0f0f0f0fu) | (((tmp >> 2u)  & 0x03030303u) << 4u);
+    words[2] = ((aux0 >> 4u) & 0x0f0f0f0fu) | (((tmp >> 4u) & 0x03030303u) << 4u);
+    words[3] = ((aux1 >> 4u) & 0x0f0f0f0fu) | (((tmp >> 6u) & 0x03030303u) << 4u);
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
+            uint b = (words[i] >> uint(8 * j)) & 0xffu;
+            scales[i * 4 + j] = (b >= 128u) ? int(b) - 256 : int(b);
+        }
+    }
+}
+
+void main() {
+    uint pick = gl_WorkGroupID.y;
+    slot = ids[pick];
+    uint outDim = uint(pc.outDim);
+    uint row = gl_GlobalInvocationID.x;
+    if (row >= outDim) return;
+
+    uint blocks = uint(pc.inDim) / 256u;
+    uint xPick = pick * uint(pc.xStride);
+    float sum = 0.0;
+    for (uint sb = 0u; sb < blocks; ++sb) {
+        uint base = (row * blocks + sb) * 110u;
+        float d = halfAt(base + 108u);
+        uint hmBase = base;
+        uint qBase  = base + 32u;
+        uint scBase = base + 96u;
+        uint xBlock = xPick + sb * 256u;
+
+        int scales[16];
+        unpackQ3KScales(scBase, scales);
+
+        uint qi = 0u;
+        int si = 0;
+        uint m = 1u;
+        for (uint n = 0u; n < 256u; n += 128u) {
+            uint shift = 0u;
+            for (uint j = 0u; j < 4u; ++j) {
+                float dl0 = d * float(scales[si] - 32); si++;
+                for (uint l = 0u; l < 16u; ++l) {
+                    int code = int((byteAt(qBase + qi + l) >> shift) & 3u);
+                    if ((byteAt(hmBase + l) & m) == 0u) code -= 4;
+                    sum += dl0 * float(code) * x[xBlock + n + j * 32u + l];
+                }
+                float dl1 = d * float(scales[si] - 32); si++;
+                for (uint l = 0u; l < 16u; ++l) {
+                    int code = int((byteAt(qBase + qi + 16u + l) >> shift) & 3u);
+                    if ((byteAt(hmBase + 16u + l) & m) == 0u) code -= 4;
+                    sum += dl1 * float(code) * x[xBlock + n + j * 32u + 16u + l];
+                }
+                shift += 2u;
+                m <<= 1u;
+            }
+            qi += 32u;
+        }
+    }
+    y[pick * outDim + row] = sum;
+}

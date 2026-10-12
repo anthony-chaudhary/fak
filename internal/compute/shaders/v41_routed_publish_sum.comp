@@ -1,0 +1,53 @@
+#version 450
+#extension GL_EXT_spirv_intrinsics : require
+// SignedZeroInfNanPreserve keeps the constant +0 start from folding away, so a
+// -0 first row still sums to +0 as add.comp's loaded accumulator does.
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4466], 4461, 32);
+layout(local_size_x = 64) in;
+
+// v41_routed_publish_sum.comp - the checked BF16 publication of every routed
+// pick's down output plus their routed sum, in one dispatch (fak#13820).
+//
+// Publication: per pick, lane i rounds down[pick*count+i] exactly as
+// v41_bf16_checked.comp does and faults into the pick's own 16-byte record at
+// status[4*pick] (magic, site, lowest fault lane, count), so each record is the
+// one the per-pick publication writes.
+//
+// Sum: acc starts at +0 and adds each published row in ids[2*picks + j] order,
+// one binary32 add per row like add.comp over a zeroed accumulator. The sum is
+// unpublished unless every record is clean.
+layout(std430, binding = 0) readonly buffer Down { uint downBits[]; };
+layout(std430, binding = 1) writeonly buffer Sum { float sumOut[]; };
+layout(std430, binding = 2) readonly buffer Ids { uint ids[]; };
+layout(std430, binding = 3) buffer CheckedStatus { uint status[]; };
+layout(push_constant) uniform Push { uint count; uint site; uint picks; } pc;
+
+uint roundBF16(uint bits) { return (bits + 0x7fffu + ((bits >> 16u) & 1u)) & 0xffff0000u; }
+
+void main() {
+    uint first = gl_GlobalInvocationID.x;
+    if (first == 0u) {
+        for (uint p = 0u; p < pc.picks; ++p) {
+            status[4u * p] = 0x42463143u;
+            status[4u * p + 1u] = pc.site;
+            status[4u * p + 3u] = pc.count;
+        }
+    }
+    uint stride = gl_NumWorkGroups.x * 64u;
+    for (uint i = first; i < pc.count; i += stride) {
+        for (uint p = 0u; p < pc.picks; ++p) {
+            uint bits = downBits[p * pc.count + i];
+            uint rounded = roundBF16(bits);
+            if ((bits & 0x7f800000u) == 0x7f800000u ||
+                (rounded & 0x7f800000u) == 0x7f800000u) {
+                atomicMin(status[4u * p + 2u], i);
+            }
+        }
+        precise float acc = 0.0;
+        for (uint j = 0u; j < pc.picks; ++j) {
+            uint p = ids[2u * pc.picks + j];
+            acc = acc + uintBitsToFloat(roundBF16(downBits[p * pc.count + i]));
+        }
+        sumOut[i] = acc;
+    }
+}

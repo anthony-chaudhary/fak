@@ -18,15 +18,18 @@ import (
 )
 
 type v41RoutedLayerVulkanRun struct {
-	bound   bool
-	logits  [][]float32
-	submits []uint64
-	wallMS  []float64
+	bound      bool
+	logits     [][]float32
+	submits    []uint64
+	dispatches []uint64
+	wallMS     []float64
 }
 
 // TestV41RoutedLayerBatchVulkan decodes the pinned slate on the device with
-// the batched routed layer off and on (#13820). Every prefill and decode
-// logit is bitwise equal, and each batched decode step submits fewer times.
+// the batched routed layer off, on with per-pick dispatches, and on with the
+// id dispatches (#13820). Every prefill and decode logit is bitwise equal,
+// each batched decode step submits fewer times, and the id arm records fewer
+// compute dispatches than the per-pick batched arm.
 // fak-test:justify why=integration when=changed:internal/model/**
 // fak-test:runtime slow est=60s lane=optin
 func TestV41RoutedLayerBatchVulkan(t *testing.T) {
@@ -49,11 +52,15 @@ func TestV41RoutedLayerBatchVulkan(t *testing.T) {
 	prompt := []int{1, 2, 3}
 	for _, compressed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("compressed_%t", compressed), func(t *testing.T) {
-			runs := map[bool]*v41RoutedLayerVulkanRun{}
-			for _, batch := range []bool{false, true} {
-				t.Run(fmt.Sprintf("batch_%t", batch), func(t *testing.T) {
+			runs := map[string]*v41RoutedLayerVulkanRun{}
+			for _, arm := range []string{"per_pick_seam", "batch_per_pick", "batch_id"} {
+				batch := arm != "per_pick_seam"
+				t.Run(arm, func(t *testing.T) {
 					if !batch {
 						t.Setenv(v41LayerExpertBatchEnv, "0")
+					}
+					if arm == "batch_per_pick" {
+						t.Setenv(v41RoutedIDEnv, "0")
 					}
 					m := v41PinnedSlateFixture(t, compressed)
 					defer func() {
@@ -81,23 +88,41 @@ func TestV41RoutedLayerBatchVulkan(t *testing.T) {
 						}
 						run.logits = append(run.logits, last)
 						run.submits = append(run.submits, delta.Counters.DispatchSubmits)
+						run.dispatches = append(run.dispatches, delta.Counters.ComputeDispatches)
 						run.wallMS = append(run.wallMS, wall)
-						t.Logf("v41_routed_layer compressed=%t batch=%t step=%d submits=%d dispatches=%d d2h_count=%d wall_ms=%.3f token=%d",
-							compressed, batch, i, delta.Counters.DispatchSubmits, delta.Counters.ComputeDispatches, delta.Counters.D2HCount, wall, argmaxF32(last))
+						t.Logf("v41_routed_layer compressed=%t arm=%s step=%d submits=%d dispatches=%d d2h_count=%d wall_ms=%.3f token=%d",
+							compressed, arm, i, delta.Counters.DispatchSubmits, delta.Counters.ComputeDispatches, delta.Counters.D2HCount, wall, argmaxF32(last))
 					}
 					if s.HostFallbackObserved() {
 						t.Error("device decode observed a host fallback")
 					}
-					runs[batch] = run
+					runs[arm] = run
 				})
 			}
-			off, on := runs[false], runs[true]
-			if off == nil || on == nil {
+			off, on, perPick := runs["per_pick_seam"], runs["batch_id"], runs["batch_per_pick"]
+			if off == nil || on == nil || perPick == nil {
 				t.Fatal("an arm did not complete")
 			}
-			if off.bound || !on.bound {
-				t.Fatalf("batched routed layer bound off=%t on=%t, want false/true", off.bound, on.bound)
+			if off.bound || !on.bound || !perPick.bound {
+				t.Fatalf("batched routed layer bound off=%t id=%t per-pick=%t, want false/true/true", off.bound, on.bound, perPick.bound)
 			}
+			for i := range off.logits {
+				for j := range off.logits[i] {
+					if math.Float32bits(perPick.logits[i][j]) != math.Float32bits(off.logits[i][j]) {
+						t.Fatalf("window %d logit %d batched per-pick=%g seam=%g: not bitwise equal", i, j, perPick.logits[i][j], off.logits[i][j])
+					}
+				}
+			}
+			var perPickDispatches, idDispatches uint64
+			for i := range perPick.dispatches {
+				perPickDispatches += perPick.dispatches[i]
+				idDispatches += on.dispatches[i]
+			}
+			if perPickDispatches > 0 && idDispatches >= perPickDispatches {
+				t.Errorf("id arm compute dispatches=%d not below the per-pick batched arm's %d", idDispatches, perPickDispatches)
+			}
+			t.Logf("v41_routed_layer_dispatches compressed=%t steps=%d compute_dispatches_per_step batch_per_pick=%.1f batch_id=%.1f",
+				compressed, steps, float64(perPickDispatches)/steps, float64(idDispatches)/steps)
 			for i := range off.logits {
 				if len(on.logits[i]) != len(off.logits[i]) {
 					t.Fatalf("window %d logits width %d vs %d", i, len(on.logits[i]), len(off.logits[i]))
