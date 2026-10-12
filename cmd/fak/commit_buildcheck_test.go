@@ -322,8 +322,9 @@ func TestCommitBuildCheckGate_preexistingHeadRedFailsOpen(t *testing.T) {
 	}
 	// The advisory must not stay a silent shrug: it names the shared break (the undefined symbol)
 	// and frames it as needing a fix at its source, aligned with the pre-push gate's TRUNK_ALREADY_RED
-	// render. Keeps the "ALREADY red" phrase the pre-existing case is recognized by.
-	for _, want := range []string{"ALREADY red", "neverDefined", "fix at its source"} {
+	// render. Keeps the "ALREADY red" phrase the pre-existing case is recognized by. It also
+	// carries the shared repair-claim hint so a second session does not land a duplicate fix.
+	for _, want := range []string{"ALREADY red", "neverDefined", "fix at its source", "fak trunk-red claim"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("advisory missing %q; got %q", want, stderr.String())
 		}

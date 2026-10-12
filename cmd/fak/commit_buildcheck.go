@@ -198,8 +198,12 @@ func runCommitBuildCheck(stderr io.Writer, root string, paths []string, timeout 
 			// Best-effort fleet witness: fold this per-clone shrug onto a shared class so the
 			// fleet converges on ONE break instead of each clone re-discovering it. Fail-open —
 			// the commit is already admitted; recording never changes that.
-			w := emitTrunkRedWitness(stderr, root, "commit", headSHA, failingPackagesFromBuild(headDetail), extractUndefinedSymbol(headDetail))
+			headRedPkgs := failingPackagesFromBuild(headDetail)
+			w := emitTrunkRedWitness(stderr, root, "commit", headSHA, headRedPkgs, extractUndefinedSymbol(headDetail))
 			fmt.Fprint(stderr, trunkRedWitnessNote(w))
+			// Shared repair claim + already-landed peer fix, so a second session does not
+			// land a duplicate repair (2026-10-10 ctxmmu incident).
+			fmt.Fprint(stderr, formatRedRepairAdvisory(root, headSHA, headRedPkgs))
 			return safecommit.BuildCheckHeadRed, headDetail
 		}
 	}
