@@ -84,9 +84,10 @@ func TestActivationLlamaCppDump(t *testing.T) {
 	for _, e := range a.Events {
 		got[key{e.Phase, e.Token}] = e
 	}
-	// qr x2 + kv x2 + ffn_out x2 + l_last x3; attn_norm unknown, attn_out not dumped.
-	if len(a.Events) != 9 || a.RetainedSampleValues != 72 {
-		t.Fatalf("events=%d retained=%d, want 9/72", len(a.Events), a.RetainedSampleValues)
+	// attn_norm is unknown and attn_out is not dumped, so only these stages emit events.
+	wantEvents := 2 + 2 + 2 + 3 // qr, kv, ffn_out per token; l_last x3
+	if len(a.Events) != wantEvents || a.RetainedSampleValues != 72 {
+		t.Fatalf("events=%d retained=%d, want %d/72", len(a.Events), a.RetainedSampleValues, wantEvents)
 	}
 	if _, ok := got[key{"attention_projected", 0}]; ok {
 		t.Fatal("an undumped tensor produced an event")
