@@ -127,9 +127,15 @@ func qwen35BatchPreparedSession(t *testing.T, m *Model, prompt []int) *Session {
 	s.Q4K, s.MetalQ4K = true, true
 	// Build independent host state first, then seed an equally independent device owner.
 	_ = s.Prefill(prompt)
-	if err := s.EnableQwen35MetalGDNPreprojectedSequence(); err == nil {
-		t.Fatal("non-fresh session unexpectedly admitted")
+	// Enable admits a restored prefix by seeding its own owners, so probe that
+	// contract on a twin and keep s for the hand-seeded decode owners below.
+	probe := m.NewSession()
+	probe.Q4K, probe.MetalQ4K = true, true
+	_ = probe.Prefill(prompt)
+	if err := probe.EnableQwen35MetalGDNPreprojectedSequence(); err != nil {
+		t.Fatalf("restored prefix refused resident admission: %v", err)
 	}
+	probe.Close()
 	backend := newQwen35MetalGDNSequenceBackend()
 	accepted, err := s.initQwen35GDNPreprojectedSequence(backend)
 	if err != nil || !accepted {

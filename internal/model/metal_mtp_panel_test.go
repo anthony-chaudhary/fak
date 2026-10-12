@@ -77,8 +77,10 @@ func TestMetalMTPCoordinatorDispatchesProductionP4Panel(t *testing.T) {
 			} else {
 				assertRetainedMetalMTPStateEquivalent(t, want, target)
 				panelBase := target.Cache.Len() - qwen35MetalMTPVerifyPanelTokens - 1
-				if len(target.targetHidden) != panelBase+qwen35MetalMTPVerifyPanelTokens ||
-					!slices.Equal(target.targetHiddenTokens[panelBase:], draft) {
+				// The quantized bonus step publishes its committed row too (#12859).
+				if len(target.targetHidden) != target.Cache.Len() ||
+					!slices.Equal(target.targetHiddenTokens[panelBase:], append(append([]int(nil), draft...), bonus)) ||
+					!slices.Equal(target.targetHiddenTokens, want.targetHiddenTokens) {
 					t.Fatalf("full acceptance did not retain P4 target-hidden panel: hidden=%d tokens=%v", len(target.targetHidden), target.targetHiddenTokens)
 				}
 			}
