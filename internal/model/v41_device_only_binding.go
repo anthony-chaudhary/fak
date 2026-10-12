@@ -15,6 +15,10 @@ type v41DeviceOnlyBinding struct {
 var v41DeviceOnlyBindings = []v41DeviceOnlyBinding{
 	{op: v41HostOp{name: "embedding-panel", site: "V41EmbeddingGatherAvailable"}, bound: func(s *Session) bool { return s.v41EmbeddingGatherFunc() != nil }},
 	{op: v41HostOp{name: "mhc-streams", site: "SupportsV41MHC"}, bound: v41DeviceOnlyMHCBound},
+	// Retrieved Engram rows are dequantized on the host before the device gate:
+	// the packed dialect's E4M3 x E8M0 BF16 decode and the Q2_K dialect's
+	// super-block dequant in its row source. No device decode seam exists yet.
+	{op: v41HostOp{name: "engram-row-decode", site: "decodeV41EngramRow"}, uses: v41UsesEngram, bound: v41DeviceOnlyNoSeam},
 	{op: v41HostOp{name: "engram-stream-injection", site: "SupportsV41EngramGate"}, uses: v41UsesEngram, bound: func(s *Session) bool { return s.v41EngramGateFunc() != nil }},
 	{op: v41HostOp{name: "rms-norm", site: "v41RMSNormFunc"}, bound: func(s *Session) bool { return s.v41RMSNormFunc() != nil }},
 	// A reduced geometry leaves this seam nil and normalizes on the host.

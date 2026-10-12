@@ -112,8 +112,8 @@ func (d *v41MHCDevice) newResident(x [][]float32) (*v41MHCResident, error) {
 	if !ok {
 		for _, row := range x {
 			// The host refuses the same input before any selection.
-			if _, err := v41FullInitialStreams(row); err != nil {
-				return nil, err
+			if _, bad := v41BF16PublishFault(row); bad {
+				return nil, v41MHCBF16Refusal(-1, row)
 			}
 		}
 		return nil, d.fail(-1, "initial-streams", "admission", errV41MHCResult)
