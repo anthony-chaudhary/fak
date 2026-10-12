@@ -1,0 +1,24 @@
+{
+  "rows": [
+    {
+      "id": "gguf-manifest-header-preflight",
+      "canonical": "ManifestPreflight",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Header-only aggregate validation report from GGUF metadata and tensor descriptors, optional HF-config parity, loader key/tensor census and host-kernel availability; it reads no tensor payload.",
+      "distinction": "Unlike serveexecutionpolicy, this diagnoses header configuration and coverage gaps; it neither authorizes execution nor proves runtime, device or model readiness.",
+      "distinct_from": [
+        "serveexecutionpolicy"
+      ],
+      "aliases": [
+        "BuildManifestPreflight"
+      ],
+      "grounding": "ManifestPreflight",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

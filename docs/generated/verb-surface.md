@@ -6,10 +6,10 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1305<br>
-rows: 1271<br>
-unverified rows: 0 / 1271<br>
-source-only rows absent from help: 1035
+parsed files: 1307<br>
+rows: 1272<br>
+unverified rows: 0 / 1272<br>
+source-only rows absent from help: 1036
 
 ## Surface table
 
@@ -725,6 +725,7 @@ source-only rows absent from help: 1035
 | `fak model load` | downloads (or cache-hits) the file a model ref names and prints its local path | cmdModelLoad / internal/hfhub, internal/modelreg | `case` arm of the dispatch switch in cmdModel() | NONE | — | yes |
 | `fak model ls` | `fak ls` / `fak model ls`: list the merged alias registry (embedded catalog + the user's registry.json) with each alias's target and whether it is already downloaded locally | cmdModelLs / internal/modelreg | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model plan` |  | runModelPlan / internal/compute, internal/modelloadplan | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
+| `fak model preflight` | checks a GGUF header (every shard, no tensor bytes) for unread keys, HF-config mismatches, missing/orphan tensors and dtypes without a host kernel, all in one pass | runModelPreflight / internal/ggufload | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model provider-contracts` |  | runModelProviderContracts / internal/modelroute | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model pull` | `fak pull <ref>` / `fak model pull <ref>`: resolve an alias to its target (a bare hf:// URI or path passes through), download it into the local cache (cache-hit if already present), and print the loca… | cmdModelPull / internal/hfhub, internal/modelreg | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model qwen38-ladder` |  | runModelQwen38Ladder / internal/qwen38ladder | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
@@ -748,7 +749,7 @@ source-only rows absent from help: 1035
 | `fak negate reframe` | flips unambiguous negative idioms to their positive inverse in token space and prints the rewritten text (the substitution half of the operator, L0) | runNegateReframe / internal/negframe | `case` arm of the dispatch switch in cmdNegate() | NONE | — | **SOURCE ONLY** |
 | `fak negate resolve` | resolves the positive complement of "not X" over the L2 registry | runNegateResolve / internal/negframe | `case` arm of the dispatch switch in cmdNegate() | NONE | — | **SOURCE ONLY** |
 | `fak new-leaf` | scaffold a new leaf package at a layering tier, optionally registering its defconfig blank-import | cmdNewLeaf / internal/newleaf | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
-| `fak new-model` | scaffold a new model adapter/leaf | cmdNewModel / internal/newmodel | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
+| `fak new-model` | scaffold a new model adapter/leaf | cmdNewModel / internal/ggufload, internal/newmodel | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak news` | the news Slack surface for source-linked external industry/SOTA/OSS research updates | cmdNews | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | yes |
 | `fak nightrun` | run it all night: the local-capability-aware data-collection door (next/plan/run/ledger/caps) | cmdNightrun | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
 | `fak nightrun caps` |  | nightrunCaps / internal/nightrun | `case` arm of the dispatch switch in runNightrun() | NONE | — | yes |
@@ -909,7 +910,7 @@ source-only rows absent from help: 1035
 | `fak roofline` | run micro-roofline probes measuring compute and memory bandwidth ceilings on accelerator hardware | cmdRoofline / internal/roofline | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak route` | the model-routing oracle: per-aspect + ensemble model routing for one classified subject | cmdRoute / internal/maputil, internal/modelroute | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
 | `fak routebench` | the offline routing benchmark: a per-aspect+ensemble policy vs a single-model baseline | cmdRoutebench / internal/modelroute | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
-| `fak run` | run an agent turn (or a recorded trace via --trace) through the kernel | cmdRun / internal/abi, internal/agent, internal/bench, internal/cacheobs, internal/cachevalueledger, internal/compute/strix, internal/gateway, internal/gpulease, internal/hfhub, internal/kernel, internal/localadmission, internal/memgate, internal/model, internal/modelengine, internal/modelreg, internal/pathutil, internal/policy, internal/tokenizer | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | yes |
+| `fak run` | run an agent turn (or a recorded trace via --trace) through the kernel | cmdRun / internal/abi, internal/agent, internal/bench, internal/cacheobs, internal/cachevalueledger, internal/gateway, internal/gpulease, internal/hfhub, internal/kernel, internal/localadmission, internal/memgate, internal/model, internal/modelengine, internal/modelreg, internal/pathutil, internal/policy, internal/tokenizer | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | yes |
 | `fak rungstats` | stats over the verification-ladder rungs | cmdRungStats / internal/abi, internal/adjudicator, internal/kernel, internal/rungobs | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak runtime-capabilities` | report the capabilities exposed by the current runtime build | runRuntimeCapabilities / internal/runtimecap | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak savings` | audit, gate, and lint the Track-2 OBSERVED-$ cache-savings ledger | cmdSavings | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
@@ -1160,7 +1161,7 @@ source-only rows absent from help: 1035
 | `fak ultracode status` |  | runUltracodeStatus / internal/orchestration, internal/processalive, internal/trajectory, internal/ultracodebench | `if` arm of the dispatch in runUltracode() | NONE | — | yes |
 | `fak unwired-debt-dispatch` | unwired-scorecard -> backlog: file one deduped issue per orphaned internal package | cmdUnwiredDebtDispatch / internal/dogfoodissues, internal/unwiredscore | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak unwired-scorecard` | score which code-complete internal packages are not wired into a runnable CLI surface | cmdUnwiredScorecard / internal/unwiredscore | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
-| `fak up` | start the local fak application surface and report readiness | cmdUp / internal/agent, internal/allinone, internal/appversion, internal/compute, internal/compute/strix, internal/gateway, internal/gpulease, internal/hfhub, internal/macfit, internal/metalgemm, internal/model, internal/modelengine, internal/modelreg, internal/pathutil, internal/processalive, internal/tokenizer | `case` arm of the dispatch switch in dispatchCoreVerbB() | STRUCTURAL | `NOT_SUPPORTED` | **SOURCE ONLY** |
+| `fak up` | start the local fak application surface and report readiness | cmdUp / internal/agent, internal/allinone, internal/appversion, internal/compute, internal/gateway, internal/gpulease, internal/hfhub, internal/macfit, internal/metalgemm, internal/model, internal/modelengine, internal/modelreg, internal/pathutil, internal/processalive, internal/tokenizer | `case` arm of the dispatch switch in dispatchCoreVerbB() | STRUCTURAL | `NOT_SUPPORTED` | **SOURCE ONLY** |
 | `fak up off` |  | runUpServiceOff / internal/gpulease, internal/servicespec, internal/systemservice | `case` arm of the dispatch switch in runUpService() | STRUCTURAL | `NOT_SUPPORTED` | **SOURCE ONLY** |
 | `fak up on` |  | runUpServiceOn / internal/gpulease, internal/servicespec, internal/systemservice | `case` arm of the dispatch switch in runUpService() | STRUCTURAL | `NOT_SUPPORTED` | **SOURCE ONLY** |
 | `fak up status` |  | runUpServiceStatus / internal/gpulease, internal/servicespec, internal/systemservice | `case` arm of the dispatch switch in runUpService() | STRUCTURAL | `NOT_SUPPORTED` | **SOURCE ONLY** |

@@ -15,11 +15,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **639** (clarity 0 + coverage 639) |
-| **Crystal-clear concepts (and climbing)** | **1191** crystal of 2981 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3078 / 3717** (82.8% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **640** (clarity 0 + coverage 640) |
+| **Crystal-clear concepts (and climbing)** | **1194** crystal of 2984 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3080 / 3720** (82.8% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 225 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **86** of 4226 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **86** of 4230 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.8/100 (grade B) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2981 concepts - score 88.8/100 (grade B) - disambiguation-debt 639
+concept-disambiguation chart - 2984 concepts - score 88.8/100 (grade B) - disambiguation-debt 640
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ###################......... 1191
+  * crystal       ###################......... 1194
   o defined       ############################ 1790
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -51,7 +51,7 @@ clarity mix by family (each cell = one concept):
   layout           **********ooooooooo (19 concept(s); 10 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
   plan             *****************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (405 concept(s); 161 crystal)
-  policy-capability **************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (203 concept(s); 98 crystal)
+  policy-capability *****************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (206 concept(s); 101 crystal)
   pool             *******oooooooooooooooooooooooooooooooo (39 concept(s); 7 crystal)
   render-materialize ********************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (200 concept(s); 44 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
@@ -68,9 +68,9 @@ coverage by family (positioned / discovered):
   gateway-engine   #######################..... 226/281
   guard-gate       ##########################.. 511/556
   context-ctx      ########################.... 263/307
+  attention        ####################........ 113/155
   pool             ##############.............. 41/83
-  attention        #####################....... 114/155
-  policy-capability ########################.... 221/261
+  policy-capability ########################.... 224/264
   support-maturity ###################......... 80/116
   render-materialize ########################.... 217/251
   witness-proof    ########################.... 173/202
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 82.8%  (3078/3717 confusable tokens positioned)
+namespace coverage  [###########################.....] 82.8%  (3080/3720 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 225
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 225/225
 
-name index: 4226 lookup name(s) -> 2981 concept(s), 86 ambiguous
+name index: 4230 lookup name(s) -> 2984 concept(s), 86 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **225 / 225** (225 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2180 / 5386 |
+| Boundaries drawn (mutual / total) | 2182 / 5390 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4226 over 2981 concepts |
+| Lookup names indexed | 4230 over 2984 concepts |
 | Lookup names landing on several concepts | 86 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2981 |
+| Concepts carrying a contrast set | 2984 |
 
 ## The concepts (best verdict first)
 
@@ -950,6 +950,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | config | policy-capability | **FLEET_POLICY_PATH** - The env var (FLEET_POLICY_PATH) naming a SINGLE fleet dispatch-policy file loaded at tick preflight. |
 | * | crystal | symbol | policy-capability | **checkPolicyFile** - The fak policy --check entry point that reads the named policy file once and routes it by payload shape: a plain runtime manifest goes to the manifest validator, a fak-org-policy/v1 envelope goes to the signed-envelope verifier. |
 | * | crystal | symbol | policy-capability | **policyExclusion** - The operator-configured exclude / include_only gate that drops a discovered account row from the fleet registry, extracted from the inline discovery checks so the discovery path and the seat-stamping path share one decision. |
+| * | crystal | symbol | policy-capability | **ManifestPreflight** - Header-only aggregate validation report from GGUF metadata and tensor descriptors, optional HF-config parity, loader key/tensor census and host-kernel availability; it reads no tensor payload. |
 | * | crystal | symbol | policy-capability | **ExecutionPolicyDeviceOnly (model-session compute residency)** - The internal/model session policy that admits inference only when the active compute backend has device memory and every architecture-specific operation needed by that session remains on the device; an attempted host-compute fallback records the observation, retires the session, and returns the typed backend-operation refusal. |
 | * | crystal | symbol | policy-capability | **SetExecutionPolicy (model Session mutator)** - The internal/model Session mutator that pins the compute-residency policy before inference and propagates that choice through prefix snapshots, cloned sessions, restored sessions, and retained MTP draft sessions. |
 | * | crystal | config | policy-capability | **runtimecap fallback policy (pin/refuse or local CPU degrade)** - runtimecap fallback policy selects whether an unavailable requested backend stays pinned and refuses or may degrade into a declared local CPU envelope; Probe records the selected posture in the runtime-capabilities receipt. |
@@ -1000,6 +1001,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | policy-capability | **PolicyKnob** - A registry ROW in PolicyKnobRegistry naming one amendable policy surface together with its amendment class (FROZEN / RATCHET / GATED_WIDEN / SELF_AMENDABLE) and permitted direction. It is metadata ABOUT a policy field, not a field itself, and carries no runtime value. |
 | * | crystal | symbol | policy-capability | **MultiplicityPolicy (statistical policy for a comparison family)** - The declaration one family of quality comparisons is held to: the alpha error budget, the multiplicity correction that spends it (holm-bonferroni, benjamini-hochberg, or none), and which metrics are PRIMARY so the secondary family has a gate to open behind. |
 | * | crystal | symbol | policy-capability | **quantpolicy** - Structural policy constraints over quantization capability metadata, including precision bounds, exact approved artifact formats, provenance requirements, and conversion permission. |
+| * | crystal | symbol | policy-capability | **serve execution policy** - The resolved `fak serve --execution-policy` (production or bringup): whether the GFX1151 device-only refusals apply to this serve, and which of them a bring-up-dedicated node lifted. |
+| * | crystal | symbol | policy-capability | **execution policy report** - The /healthz execution_policy block a serve publishes under a non-production execution policy: the dedicated model and every device-only refusal token the policy bypassed. |
 | * | crystal | symbol | policy-capability | **sessionQuarantineRetentionPolicy** - The cmd/fak accessor that reads FAK_SESSION_QUARANTINE_RETENTION and returns the bounded retention policy governing how many, how old and how large the quarantined copies of a corrupt session registry may grow before the recovery path reaps them; an unparseable value returns the conservative default plus an error the caller warns about rather than failing on. |
 | * | crystal | symbol | policy-capability | **DenialPolicy** - Store policy field selecting how the shared-task fold reports a policy-refused patch: deny outright or hold as quarantined. |
 | * | crystal | symbol | policy-capability | **ViewPolicy** - Reader-scope redaction policy for shared-task views: MaxScope plus IncludeQuarantined decide what View and EventsView reveal to a caller. |
@@ -3123,7 +3126,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 Most readers cannot hold every concept at once. The optional `parent` forest lets the catalog roll concepts up to the abstraction that HEADS them - and the roll-up is **weakest-link**: an abstraction reads as crystal only when *every* concept beneath it is. A single `defined` leaf keeps the whole head from rolling up to crystal, so the collapsed view can never hide fog it contains. `!` marks a head whose declared verdict reads clearer than its subtree supports.
 
 ```text
-concept-disambiguation roll-up: 48 top-level abstraction(s), 58 head(s) total, max depth 3 (173 concepts in the forest)
+concept-disambiguation roll-up: 49 top-level abstraction(s), 59 head(s) total, max depth 3 (175 concepts in the forest)
 
 Each abstraction rolls up WEAKEST-LINK: only as crystal-clear as its foggiest
 descendant. '!' = the head verdict reads clearer than the subtree supports.
@@ -3176,6 +3179,7 @@ descendant. '!' = the head verdict reads clearer than the subtree supports.
    * crystal     crystal         2    0  **                   guard-gate / gitgate (adjudicator)
    * crystal     crystal         2    0  **                   cache / Hardware-aware cache
    * crystal     crystal         2    0  **                   context-ctx / ProofContext (pending-admission execution identity)
+   * crystal     crystal         2    0  **                   policy-capability / serve execution policy
    * crystal     crystal         2    0  **                   plan / landCandidateCapture (prepared-candidate receipt variant)
 
 abstraction overclaims (19) - head reads clearer than its subtree supports:
@@ -3251,6 +3255,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | * | **gitgate (adjudicator)** (`gitgate`) | crystal | crystal | 2 | 0 | gitgate = crystal |
 | * | **Hardware-aware cache** (`hardware-aware-cache`) | crystal | crystal | 2 | 0 | hardware-aware-cache = crystal |
 | * | **ProofContext (pending-admission execution identity)** (`pendingadmission-proofcontext`) | crystal | crystal | 2 | 0 | pendingadmission-contextdigest = crystal |
+| * | **serve execution policy** (`serveexecutionpolicy`) | crystal | crystal | 2 | 0 | executionpolicyreport = crystal |
 | * | **landCandidateCapture (prepared-candidate receipt variant)** (`workerworktree-landcandidatecapture`) | crystal | crystal | 2 | 0 | workerworktree-landcandidatecapture = crystal |
 
 ## Per-KPI (disambiguation-debt = clarity of the rows that exist)
@@ -3259,8 +3264,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3206/5386 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2981 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3208/5390 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2984 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3269,7 +3274,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4226 lookup name(s) resolves - 86 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4230 lookup name(s) resolves - 86 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3282,9 +3287,9 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | gateway-engine | 226 | 281 | 55 |
 | guard-gate | 511 | 556 | 45 |
 | context-ctx | 263 | 307 | 44 |
+| attention | 113 | 155 | 42 |
 | pool | 41 | 83 | 42 |
-| attention | 114 | 155 | 41 |
-| policy-capability | 221 | 261 | 40 |
+| policy-capability | 224 | 264 | 40 |
 | support-maturity | 80 | 116 | 36 |
 | render-materialize | 217 | 251 | 34 |
 | witness-proof | 173 | 202 | 29 |

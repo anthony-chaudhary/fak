@@ -118,6 +118,7 @@ type serveFlags struct {
 	armLeaseStore                *string
 	replicaBaseURLs              repeatedStringFlag
 	model                        *string
+	executionPolicy              *string
 	mock                         *bool
 	apiKeyEnv                    *string
 	streamProgressTimeout        *time.Duration
@@ -146,6 +147,7 @@ type serveFlags struct {
 	policyCanaryTurns            *int
 	policyCheck                  *bool
 	sizingJSON                   *bool
+	dryAdmit                     *bool
 	expose                       repeatedStringFlag
 	vdso                         *bool
 	invalidation                 *string
@@ -313,6 +315,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.profile = fs.String("profile", "", "permission profile: dev|prod|audit (env: FAK_PROFILE)")
 	sf.policyCanaryTurns = fs.Int("policy-canary-turns", 0, "after a policy reload, roll back when this many consecutive requests are denied; 0 disables the canary")
 	sf.policyCheck = fs.Bool("policy-check", false, "validate --policy and exit without binding a listener")
+	sf.dryAdmit = fs.Bool(serveDryAdmitFlag, false, "run admission only and exit: execution policy, backend selection, the GFX1151 device-only guards, expert placement, native context and the header-only forward preflight, exactly as a launch would run them, then print a "+serveDryAdmitSchema+" ADMIT verdict on stdout. A refusal exits non-zero with the same typed stderr line a launch prints. No tensor payload loads, no listener binds and no llama.cpp delegate starts.")
 	sf.sizingJSON = fs.Bool("plan-json", false, "with --gguf: print the versioned header-derived memory sizing artifact (classed demands, disk/ram/vram tier rollup, per-pool usable bytes after headroom, warnings incl. would-be fit refusals) as JSON on stdout and exit BEFORE any load — nothing is allocated, no listener binds (#4361). The numbers are the same ones the selected serve arm's fit check admits against; a demand set a live boot would refuse still emits, with the refusal in warnings[].")
 	fs.Var(&sf.expose, "expose", "ALLOWLIST of MCP tool-name glob patterns to advertise AND allow — everything else is neither listed by tools/list nor callable (an attempt answers \"unknown tool\", so hiding a tool never leaks that it exists). Patterns are path.Match globs over the bare tool name; one value may be comma-separated (--expose 'fak_memory_*,fak_capabilities') and the flag may repeat. Empty (default) exposes the full surface. A malformed glob or a pattern matching NO known tool fails startup loud (a typo must not silently shrink the surface). Cuts prompt-prefix token cost by advertising only the tools a given harness uses; for the leanest surface expose just the discovery tools (--expose 'fak_tools_search,fak_capabilities') and let the agent page the rest in on demand.")
 	sf.vdso = fs.Bool("vdso", true, "enable the vDSO dedup fast path")
@@ -344,6 +347,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.nativeContextTokens = fs.Int("native-context-tokens", 0, "with --gguf: native model context window in prompt plus reserved output tokens (0 = auto-size from model metadata and memory headroom)")
 	sf.nativeCompactHistoryBudget = fs.Int("native-compact-history-budget", 0, "on the NATIVE (in-kernel) wire: compact old conversation turns down to this resident-token budget before tokenization, so a transcript that outgrows the resolved window is SHRUNK and served instead of refused with HTTP 400 context_length_exceeded. 0 = derive from the resolved --native-context-tokens window as (window - 32000 output reserve) * 60%, so a 1M-declared model is neither flattened to the 48k passthrough default nor allowed to treat the raw cap as a target (docs/long-context-defaults.md). Distinct from --compact-history-budget, which is Anthropic-passthrough-only.")
 	sf.resetOnBudget = fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
+	sf.executionPolicy = fs.String(serveExecutionPolicyFlag, serveExecutionPolicyProduction, "production (default) keeps every GFX1151 device-only refusal. bringup admits host and offload execution on a Strix Halo only when "+ServeBringupDedicatedEnv+" names the served --model (a bring-up-dedicated node); each refusal it lifts is logged on stderr and listed under /healthz execution_policy.bypassed. bringup without that dedication refuses with "+ExecutionPolicyNotDedicated+".")
 	sf.cpuOffloadExperts = fs.Bool("cpu-offload-experts", false, "with --gguf --backend: keep the MoE expert GEMMs on host RAM while dense projections + router + attention run on the device — the `--n-cpu-moe` hybrid that lets a model whose experts dwarf VRAM (e.g. GLM-5.2 Q4 ~424GB experts) serve at all on a smaller VRAM pool. The device load uses the memory-lean Q8 quantize-at-load path when the backend advertises quantized upload; otherwise it falls back to F32 weights until that backend implements UploadDtype.")
 	sf.expertRingBytes = fs.String(serveExpertRingBytesFlag, "", "with --gguf on a device-only serve whose full plan does not fit: size the activated-expert device ring. `token` (the default) keeps one token's activated experts, byte-for-byte the historical ring; `auto` takes the smaller of 0.85 x device heap - dense base - KV - transient and MemAvailable - anon peak - Engram page reserve - max(6 GiB, 5%), clamped to [one layer's experts, the routed band]; a byte count (suffix K/M/G/T allowed) asks for that ring. On a UMA box the plan is judged against MemAvailable as one pool, and a size that does not fit refuses at load. Equivalent to "+FakExpertRingBytesEnv+"; the flag wins.")
 	sf.nCPUMoE = fs.String(serveNCPUMoEFlag, "", "with --gguf --backend: GRADE the expert spill instead of taking --cpu-offload-experts' all-or-nothing split (#5628, epic #5606). `auto` sizes the number of host-spilled MoE layers against the device budget compute.DeviceMemoryInfo measures, keeping the rest device-resident behind a bounded expert ring; `N` spills exactly N MoE layers; `off` (the default) is the ungraded placement --cpu-offload-experts alone makes, byte-for-byte. Spelled as llama.cpp spells it, so a working --n-cpu-moe number carries over. A grade that is not auto/off/a count >= 0 REFUSES the launch here, before the multi-minute load — a misspelled grade must never fall back to a placement the operator did not choose. Equivalent to "+agent.ExpertSpillEnv+"; passing the flag WINS over that env var, including an explicit `off`.")
@@ -715,17 +719,26 @@ func cmdServe(argv []string) {
 
 	// Start the measured child only after every validation step that can terminate
 	// startup, and immediately before compute selection consumes the model source.
-	if err := rt.maybeStartQwen38Delegation(sf); err != nil {
-		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
-		os.Exit(2)
+	if !*sf.dryAdmit {
+		if err := rt.maybeStartQwen38Delegation(sf); err != nil {
+			fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+			os.Exit(2)
+		}
+		defer rt.stopQwen38Delegation()
 	}
-	defer rt.stopQwen38Delegation()
 
 	// Boot stages (serve_stages.go). The order is load-bearing: compute before the
 	// weight load, the session plane before the gateway, the observer seams resolved
 	// before the gateway exists but installed only after it does.
 	rt.resolveCompute(sf)
 	defer rt.closeEPGroup()
+	if *sf.dryAdmit {
+		if err := rt.runServeDryAdmit(sf, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "fak serve: --dry-admit:", err)
+			os.Exit(2)
+		}
+		return
+	}
 	if isRemoteKVConfigured(sf) {
 		if receipt, err := checkServeRemoteKV(context.Background(), sf, nil); err != nil {
 			fmt.Fprintf(os.Stderr, "fak serve: remote kv preflight: %v\n", err)
@@ -1124,6 +1137,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 		srv.AddStartupMessages(serveStartupMessage("lm-head", "info", line))
 	}
 	srv.SetModelLoadProfile(rt.loadProfile)
+	srv.SetExecutionPolicy(rt.executionPolicy.report())
 	if err := rt.configureServeArmLeases(sf, srv); err != nil {
 		if controlIngress != nil {
 			_ = controlIngress.Close()

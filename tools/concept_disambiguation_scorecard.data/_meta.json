@@ -1822,7 +1822,15 @@
           "category": "incidental",
           "reason": "Unexported recorder for the existing V4.1 attention phase counters; it introduces no separate attention algorithm or placement contract.",
           "token": "v41NoteAttentionContraction"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Scanner artifact from the percent-s formatting prefix in an architecture-specific attention metadata key; no sattention identifier or new attention mechanism is introduced.",
+          "token": "sattention"
         }
+      ],
+      "exclude": [
+        "sattention"
       ],
       "id": "attention",
       "ignore": [
@@ -6591,6 +6599,11 @@
           "category": "incidental",
           "reason": "Fixed capacity multiplier for existing per-layer activation-trace stages. Slot counting is not a new session-runtime abstraction.",
           "token": "v41ActivationTraceEnvStageSlots"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate constant, predicate, refusal or routing helper of positioned serveexecutionpolicy; it implements launch policy resolution or reporting rather than a separate policy or session-lifetime concept.",
+          "token": "executionPolicyBypassDeviceOnlySession"
         }
       ],
       "exclude": [
@@ -6775,6 +6788,7 @@
         "epFollowerSessionFactory",
         "episodes",
         "exact-filter",
+        "executionPolicyBypassDeviceOnlySession",
         "fak_fleet_canonical_goal_sessions",
         "fak_fleet_goal_sessions",
         "fak_gateway_compaction_thrash_sessions_total",
@@ -10311,6 +10325,106 @@
           "category": "incidental",
           "reason": "Private helper reading timing configuration and deriving the two existing WSL command-availability probe durations; it does not grant security capabilities, select fallback, alter required commands, or authorize validation. It is not a separate policy-capability mechanism.",
           "token": "validateWSLPreflightBounds"
+        },
+        {
+          "category": "incidental",
+          "reason": "existing header-only forward preflight that --dry-admit now also calls; a helper name, not a policy concept.",
+          "token": "preflightServeBackendForward"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate input, schema/verdict spelling, usage text or CLI/compiler adapter of positioned gguf-manifest-header-preflight; it adds no independent execution authorization or runtime-readiness concept.",
+          "token": "modelPreflightUsage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate input, schema/verdict spelling, usage text or CLI/compiler adapter of positioned gguf-manifest-header-preflight; it adds no independent execution authorization or runtime-readiness concept.",
+          "token": "runModelPreflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate input, schema/verdict spelling, usage text or CLI/compiler adapter of positioned gguf-manifest-header-preflight; it adds no independent execution authorization or runtime-readiness concept.",
+          "token": "ManifestPreflightInput"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate input, schema/verdict spelling, usage text or CLI/compiler adapter of positioned gguf-manifest-header-preflight; it adds no independent execution authorization or runtime-readiness concept.",
+          "token": "newModelHeaderPreflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate constant, predicate, refusal or routing helper of positioned serveexecutionpolicy; it implements launch policy resolution or reporting rather than a separate policy or session-lifetime concept.",
+          "token": "ExecutionPolicyNotDedicated"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate constant, predicate, refusal or routing helper of positioned serveexecutionpolicy; it implements launch policy resolution or reporting rather than a separate policy or session-lifetime concept.",
+          "token": "serveExecutionPolicyProduction"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate constant, predicate, refusal or routing helper of positioned serveexecutionpolicy; it implements launch policy resolution or reporting rather than a separate policy or session-lifetime concept.",
+          "token": "serveExecutionPolicyFlag"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate constant, predicate, refusal or routing helper of positioned serveexecutionpolicy; it implements launch policy resolution or reporting rather than a separate policy or session-lifetime concept.",
+          "token": "serveExecutionPolicyBringup"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate constant, predicate, refusal or routing helper of positioned serveexecutionpolicy; it implements launch policy resolution or reporting rather than a separate policy or session-lifetime concept.",
+          "token": "ExecutionPolicyUnknown"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate constant, predicate, refusal or routing helper of positioned serveexecutionpolicy; it implements launch policy resolution or reporting rather than a separate policy or session-lifetime concept.",
+          "token": "executionPolicyBypassDeviceOnlySession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate constant, predicate, refusal or routing helper of positioned serveexecutionpolicy; it implements launch policy resolution or reporting rather than a separate policy or session-lifetime concept.",
+          "token": "executionPolicyError"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate constant, predicate, refusal or routing helper of positioned serveexecutionpolicy; it implements launch policy resolution or reporting rather than a separate policy or session-lifetime concept.",
+          "token": "resolveServeChatBackendForHostPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate constant, predicate, refusal or routing helper of positioned serveexecutionpolicy; it implements launch policy resolution or reporting rather than a separate policy or session-lifetime concept.",
+          "token": "resolveServeExecutionPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate constant, predicate, refusal or routing helper of positioned serveexecutionpolicy; it implements launch policy resolution or reporting rather than a separate policy or session-lifetime concept.",
+          "token": "resolveServeChatBackendForPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate input, schema/verdict spelling, usage text or CLI/compiler adapter of positioned gguf-manifest-header-preflight; it adds no independent execution authorization or runtime-readiness concept.",
+          "token": "ManifestPreflightSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate input, schema/verdict spelling, usage text or CLI/compiler adapter of positioned gguf-manifest-header-preflight; it adds no independent execution authorization or runtime-readiness concept.",
+          "token": "ManifestPreflightReady"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate input, schema/verdict spelling, usage text or CLI/compiler adapter of positioned gguf-manifest-header-preflight; it adds no independent execution authorization or runtime-readiness concept.",
+          "token": "ManifestPreflightRefused"
+        },
+        {
+          "category": "incidental",
+          "reason": "Subordinate input, schema/verdict spelling, usage text or CLI/compiler adapter of positioned gguf-manifest-header-preflight; it adds no independent execution authorization or runtime-readiness concept.",
+          "token": "PhaseHeaderPreflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "Builder function for positioned gguf-manifest-header-preflight, also an alias of its aggregate report; it does not introduce a second admission or runtime-readiness concept.",
+          "token": "BuildManifestPreflight"
         }
       ],
       "exclude": [
@@ -10327,6 +10441,7 @@
         "AdmitPolicyWidening",
         "ArmFakCapability",
         "AssistancePolicy",
+        "BuildManifestPreflight",
         "CAPABILITY_NOT_ADVERTISED",
         "CPUFallbackPolicy",
         "CapabilityAdded",
@@ -10350,6 +10465,8 @@
         "EvictionPolicyLRU",
         "EvidenceAdjudication",
         "EvidencePolicy",
+        "ExecutionPolicyNotDedicated",
+        "ExecutionPolicyUnknown",
         "FAK_ADMISSION_POLICY",
         "FAK_APP_CAPABILITY",
         "FAK_GUARD_REASONING_POSTURE",
@@ -10365,6 +10482,10 @@
         "HostSpillPolicy",
         "IgnoredByPolicyRecords",
         "LocalPolicy",
+        "ManifestPreflightInput",
+        "ManifestPreflightReady",
+        "ManifestPreflightRefused",
+        "ManifestPreflightSchema",
         "MaxPostures",
         "MisfirePolicy",
         "NewWithTierBudgetsAndEvictionPolicy",
@@ -10376,6 +10497,7 @@
         "POLICY_FLOOR_WIDENING",
         "ParsePolicy",
         "PayloadPolicy",
+        "PhaseHeaderPreflight",
         "PolicyHash",
         "PolicyMediaType",
         "PolicyOriginEvidencePath",
@@ -10443,6 +10565,8 @@
         "eviction_policy",
         "executeLivePipeline",
         "executeTailPolicy",
+        "executionPolicyBypassDeviceOnlySession",
+        "executionPolicyError",
         "fak_capability",
         "fak_fleet_goal_adjudications_total",
         "foldSemanticAdjudicators",
@@ -10468,12 +10592,14 @@
         "loadAndApplyPolicyWithProfileLocked",
         "manageParityPosture",
         "mergePolicy",
+        "modelPreflightUsage",
         "multi_capability",
         "nativeAdmissionPolicyForBudget",
         "naturalAdjudicator",
         "naturalPolicySummary",
         "naturalTrafficAdjudicator",
         "naturalTrafficPolicyRow",
+        "newModelHeaderPreflight",
         "normalizeDecodePolicyLabel",
         "normalizeFallbackPolicy",
         "normalizeGuardReasoningPosture",
@@ -10509,6 +10635,7 @@
         "postureVCacheSignals",
         "postureWorkProfile",
         "postures",
+        "preflightServeBackendForward",
         "preflightWithProbe",
         "printGuardLaunchPostures",
         "qwenEmptyUsageGuardFromEnv",
@@ -10518,6 +10645,9 @@
         "renderIncumbentPreflightText",
         "renderLaunchPosture",
         "resolveGuardReasoningPosture",
+        "resolveServeChatBackendForHostPolicy",
+        "resolveServeChatBackendForPolicy",
+        "resolveServeExecutionPolicy",
         "resolveUltracodePosture",
         "routingPolicyStat",
         "runCounterfactualAdjudicator",
@@ -10525,6 +10655,7 @@
         "runDoctorLaunchPosture",
         "runLiveSemanticMatrix",
         "runModelIncumbentPreflight",
+        "runModelPreflight",
         "runRoutingPolicy",
         "runSemanticAdjudicator",
         "runTailPolicyMatrix",
@@ -10541,6 +10672,9 @@
         "semanticSubmission",
         "serveBackendForwardPreflightMessage",
         "serveDurabilityPosture",
+        "serveExecutionPolicyBringup",
+        "serveExecutionPolicyFlag",
+        "serveExecutionPolicyProduction",
         "sessionCapabilityCorpus",
         "sessionCapabilityDefinition",
         "stackpreflight",
@@ -11344,6 +11478,11 @@
           "category": "incidental",
           "reason": "Private serving helper selecting the existing activated-expert ring weight plan for context-window memory sizing; it introduces no separate context lifetime or ownership model.",
           "token": "serveExpertRingContextWeights"
+        },
+        {
+          "category": "incidental",
+          "reason": "serveRuntime field holding the resolved native context window; --dry-admit reads it for its verdict, not a new context concept.",
+          "token": "nativeContext"
         }
       ],
       "exclude": [
@@ -11512,7 +11651,8 @@
         "traceContext",
         "wctx",
         "writeCtx",
-        "writeValidateTestContext"
+        "writeValidateTestContext",
+        "nativeContext"
       ],
       "known_tokens": [],
       "min_files": 3,
@@ -12995,6 +13135,66 @@
           "category": "incidental",
           "reason": "Runtime backend predicate for the existing checked routed SwiGLU and BF16 publication modules and supported count domain; this is not a support-maturity label or device qualification claim.",
           "token": "SupportsV41DeferredStatus"
+        },
+        {
+          "category": "incidental",
+          "reason": "Header-census mode, counter or comparison helper subordinate to gguf-manifest-header-preflight; coverage denotes key, optional HF-config or tensor-descriptor accounting rather than product support maturity.",
+          "token": "TensorCoverageArchSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Header-census mode, counter or comparison helper subordinate to gguf-manifest-header-preflight; coverage denotes key, optional HF-config or tensor-descriptor accounting rather than product support maturity.",
+          "token": "TensorCoverageCanonicalMap"
+        },
+        {
+          "category": "incidental",
+          "reason": "Header-census mode, counter or comparison helper subordinate to gguf-manifest-header-preflight; coverage denotes key, optional HF-config or tensor-descriptor accounting rather than product support maturity.",
+          "token": "ManifestKeyCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Header-census mode, counter or comparison helper subordinate to gguf-manifest-header-preflight; coverage denotes key, optional HF-config or tensor-descriptor accounting rather than product support maturity.",
+          "token": "ManifestHFCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Header-census mode, counter or comparison helper subordinate to gguf-manifest-header-preflight; coverage denotes key, optional HF-config or tensor-descriptor accounting rather than product support maturity.",
+          "token": "ManifestTensorCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Header-census mode, counter or comparison helper subordinate to gguf-manifest-header-preflight; coverage denotes key, optional HF-config or tensor-descriptor accounting rather than product support maturity.",
+          "token": "checkKeyCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Header-census mode, counter or comparison helper subordinate to gguf-manifest-header-preflight; coverage denotes key, optional HF-config or tensor-descriptor accounting rather than product support maturity.",
+          "token": "checkHFParity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Header-census mode, counter or comparison helper subordinate to gguf-manifest-header-preflight; coverage denotes key, optional HF-config or tensor-descriptor accounting rather than product support maturity.",
+          "token": "checkTensorCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Host-kernel availability query or dtype refusal within header preflight; it reports the existing host implementation coverage and does not assert product maturity or device qualification.",
+          "token": "HostDequantSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Host-kernel availability query or dtype refusal within header preflight; it reports the existing host implementation coverage and does not assert product maturity or device qualification.",
+          "token": "expertResidentSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Host-kernel availability query or dtype refusal within header preflight; it reports the existing host implementation coverage and does not assert product maturity or device qualification.",
+          "token": "UNSUPPORTED_DTYPE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Host-kernel availability query or dtype refusal within header preflight; it reports the existing host implementation coverage and does not assert product maturity or device qualification.",
+          "token": "RefusalUnsupportedDtype"
         }
       ],
       "exclude": [
@@ -13039,6 +13239,7 @@
         "HOLD_CANCELLATION_UNSUPPORTED",
         "HOLD_UNSUPPORTED_CANCELLATION",
         "HoldUnsupported",
+        "HostDequantSupported",
         "INVALID_EVIDENCE",
         "IngestResult",
         "KVQUANT_SUPPORTED",
@@ -13047,6 +13248,9 @@
         "LadderMaturity",
         "LimitSupport",
         "MISSING_ACHIEVED_MATURITY",
+        "ManifestHFCoverage",
+        "ManifestKeyCoverage",
+        "ManifestTensorCoverage",
         "MaturityLabel",
         "MinSupport",
         "NATIVE_MESSAGE_ROLE_UNSUPPORTED",
@@ -13096,6 +13300,7 @@
         "ReasonUnsupportedScale",
         "ReasonUnsupportedTransition",
         "ReasonUnsupportedVersion",
+        "RefusalUnsupportedDtype",
         "RequireCoverage",
         "ResultUnsupported",
         "RunCommitSubjectCoverage",
@@ -13117,6 +13322,8 @@
         "SupportedFeatures",
         "SupportsRoutedExpertKQuant",
         "SupportsV41DeferredStatus",
+        "TensorCoverageArchSchema",
+        "TensorCoverageCanonicalMap",
         "TestMaturityBaselinePromotionIsWitnessGatedAndImmediatelyEnforced",
         "TierStatusSupported",
         "TierStatusUnsupported",
@@ -13126,6 +13333,7 @@
         "UNKNOWN_FORMAT",
         "UNKNOWN_RUNTIME",
         "UNSUPPORTED_COMBINATION",
+        "UNSUPPORTED_DTYPE",
         "UNSUPPORTED_FORMAT",
         "UNSUPPORTED_MEDIA_TYPE",
         "UNSUPPORTED_PROOF_FEATURE",
@@ -13142,6 +13350,9 @@
         "calendar_coverage",
         "cgroupFaultDomain",
         "chatDecodeTraceSupported",
+        "checkHFParity",
+        "checkKeyCoverage",
+        "checkTensorCoverage",
         "cmdLaunchParityCheck",
         "cmdManageParity",
         "compareParity",
@@ -13164,6 +13375,7 @@
         "errMaturity",
         "errmmapunsupported",
         "errstreamingunsupported",
+        "expertResidentSupported",
         "fak_fleet_goal_efficiency_coverage_threshold",
         "fak_fleet_goal_efficiency_ready",
         "fak_parity_ratio",
@@ -14464,6 +14676,16 @@
           "category": "incidental",
           "reason": "Subordinate tool-call formatting helper or cache-identity constant for positioned render-materialize-deepseek-v41-chat. Its meaning follows that renderer, rather than a separate rendering abstraction.",
           "token": "deepSeekV41ChatRendererID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private diagnostic formatting of a metadata or optional HF-config value in header mismatch reports; this is not model/token materialization or prompt rendering.",
+          "token": "renderMetaValue"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private diagnostic formatting of a metadata or optional HF-config value in header mismatch reports; this is not model/token materialization or prompt rendering.",
+          "token": "renderHF"
         }
       ],
       "id": "render-materialize",
@@ -14538,10 +14760,12 @@
         "renderGhostReport",
         "renderGitSpawnDelta",
         "renderGitSpawnReport",
+        "renderHF",
         "renderIncumbentPlist",
         "renderIncumbentPreflightText",
         "renderIssueContractReviews",
         "renderLaunchPosture",
+        "renderMetaValue",
         "renderNextNativePerformance",
         "renderPlistXML",
         "renderProviders",

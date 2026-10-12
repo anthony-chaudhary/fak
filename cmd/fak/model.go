@@ -12,7 +12,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 )
 
-const modelUsage = "usage: fak model <plan|load|pull|ls|provider-contracts|qwen38-ladder|canary-gate|canary-run|acceptance-gate|acceptance-run|acceptance-refold|readiness-inventory> ...\n" +
+const modelUsage = "usage: fak model <plan|load|pull|ls|provider-contracts|qwen38-ladder|canary-gate|canary-run|acceptance-gate|acceptance-run|acceptance-refold|readiness-inventory|preflight> ...\n" +
 	"  fak model plan         choose a Qwen3.8-27B load from goals and declared capacity without downloading\n" +
 	"  fak model load <ref>   resolve a model ref (alias | hf://… | path) to a cached file path\n" +
 	"  fak model pull <ref>   download a model ref into the local cache (alias-aware)\n" +
@@ -25,7 +25,8 @@ const modelUsage = "usage: fak model <plan|load|pull|ls|provider-contracts|qwen3
 	"  fak model acceptance-gate evaluate a versioned exact-model capability report\n" +
 	"  fak model acceptance-run execute a latest-generation exact-model campaign (older generations require a named exception)\n" +
 	"  fak model acceptance-refold replay immutable raw streams with the current parser\n" +
-	"  fak model readiness-inventory join exact-ID acceptance provenance into readiness rows\n"
+	"  fak model readiness-inventory join exact-ID acceptance provenance into readiness rows\n" +
+	"  fak model preflight    list every unread GGUF key, HF-config mismatch, missing/orphan tensor and unsupported dtype off the header\n"
 
 // cmdModel handles `fak model <subcommand>`: load (resolve a ref to a cached path),
 // pull (download by alias/hf:// into the cache), ls (list the alias registry +
@@ -67,6 +68,8 @@ func cmdModel(args []string) {
 		os.Exit(runModelAcceptanceFixture(os.Stdin, os.Stdout, os.Stderr))
 	case "readiness-inventory":
 		os.Exit(runModelReadinessInventory(os.Stdout, os.Stderr, args[1:]))
+	case "preflight":
+		os.Exit(runModelPreflight(os.Stdout, os.Stderr, args[1:]))
 	case "-h", "--help", "help":
 		fmt.Fprint(os.Stderr, modelUsage)
 	default:

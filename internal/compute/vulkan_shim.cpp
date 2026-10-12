@@ -197,6 +197,8 @@ struct Buffer {
     bool           allocationDeviceLocal = false;
     void*          mapped = nullptr; // host view of a direct-upload weight arena binding
     bool           ownsMapping = false; // mapped is this buffer's own map of mem, unmapped on destroy
+    bool           offloadPage = false; // mapped host-visible expert-ring page, recycled via g_hvOffloadPool
+    bool           offloadPristine = false; // handed out by fvk_malloc_offload_weight, not written since
 };
 
 // Immutable model weights keep their descriptor-visible VkBuffer identity while sharing a
@@ -243,6 +245,12 @@ void releaseWeightArena() {
 // silently downgrade residency.
 std::unordered_map<size_t, std::vector<Buffer*>> g_pool;
 size_t g_poolCount = 0;
+// UMA with a small VRAM carve-out: expert-ring pages live in mapped host-visible (GTT) memory.
+// DEVICE_LOCAL pages there fill the carve-out first, and once it is full the kernel cannot place
+// GPU page tables, so a large ring dies in amdgpu_gem_va_update_vm with -ENOMEM.
+bool g_offloadHostVisible = false;
+std::unordered_map<size_t, std::vector<Buffer*>> g_hvOffloadPool;
+uint64_t g_offloadHostVisiblePages = 0;
 
 // Reusable HOST_VISIBLE transfer staging. H2D/D2H are serialized by the Go-side mutex and
 // submit synchronously here, so one persistently mapped buffer is enough; grow it on demand.
@@ -700,6 +708,10 @@ Buffer* stagingBuffer(size_t bytes, int* failureStatus = nullptr) {
 size_t drainPool() {
     size_t freed = 0;
     for (auto& kv : g_pool) {
+        for (Buffer* b : kv.second) { destroyBuffer(b); ++freed; }
+        kv.second.clear();
+    }
+    for (auto& kv : g_hvOffloadPool) {
         for (Buffer* b : kv.second) { destroyBuffer(b); ++freed; }
         kv.second.clear();
     }
@@ -3889,9 +3901,48 @@ void* fvk_malloc(size_t bytes) {
 uint64_t g_offloadWeightReused = 0;
 uint64_t g_offloadWeightFresh = 0;
 
+// A host-visible page is recycled only through fvk_free, which parks mid-batch frees until the
+// batch fences, so a page handed out here is never read by a recorded op: its first write needs
+// no batch flush.
+static Buffer* mallocHostVisibleOffloadPage(size_t bytes) {
+    auto it = g_hvOffloadPool.find(bytes);
+    if (it != g_hvOffloadPool.end() && !it->second.empty()) {
+        Buffer* b = it->second.back();
+        it->second.pop_back();
+        ++g_offloadWeightReused;
+        b->offloadPristine = true;
+        return b;
+    }
+    Buffer* b = allocBuffer(bytes,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, STORAGE_USAGE);
+    if (!b) return nullptr;
+    mapHostVisibleWeight(b);
+    if (!b->mapped) {
+        destroyBuffer(b);
+        return nullptr;
+    }
+    b->offloadPage = true;
+    b->offloadPristine = true;
+    ++g_offloadWeightFresh;
+    ++g_offloadHostVisiblePages;
+    return b;
+}
+
+int fvk_set_offload_host_visible(int on) {
+    g_offloadHostVisible = on != 0 && g_umaDirectWeights;
+    return g_offloadHostVisible ? 1 : 0;
+}
+
+int fvk_offload_host_visible(void) { return g_offloadHostVisible ? 1 : 0; }
+
+uint64_t fvk_offload_host_visible_pages(void) { return g_offloadHostVisiblePages; }
+
 void* fvk_malloc_offload_weight(size_t bytes) {
     if (g_v41SubmissionPendingFailure) return nullptr;
     if (bytes == 0) bytes = 4;
+    if (g_offloadHostVisible) {
+        if (Buffer* b = mallocHostVisibleOffloadPage(bytes)) return b;
+    }
     auto it = g_pool.find(bytes);
     if (it != g_pool.end() && !it->second.empty()) {
         Buffer* b = it->second.back();
@@ -3966,6 +4017,17 @@ void fvk_free(void* d) {
         clearDescriptorBindingCache();
         return;
     }
+    if (b->offloadPage) {
+        b->offloadPristine = false;
+        auto& bucket = g_hvOffloadPool[b->bytes];
+        if (bucket.size() < POOL_BUCKET_CAP) {
+            bucket.push_back(b);
+        } else {
+            destroyBuffer(b);
+            clearDescriptorBindingCache();
+        }
+        return;
+    }
     if (b->props & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
         destroyBuffer(b);
         clearDescriptorBindingCache();
@@ -3986,6 +4048,12 @@ void fvk_free(void* d) {
 // In practice weights upload BEFORE the per-token batch begins (cached), so this rarely flushes.
 void fvk_h2d(void* d, const void* h, size_t bytes) {
     if (g_v41SubmissionPendingFailure) return;
+    Buffer* page = B(d);
+    if (page && page->offloadPristine && page->mapped && h && bytes <= page->bytes) {
+        page->offloadPristine = false;
+        copyHostToMappedWeight(page, h, bytes);
+        return;
+    }
     if (stepRecordUpload(B(d), h, bytes)) return;
     bool resumeBatch = g_batching;
     if (resumeBatch) batchFlush();

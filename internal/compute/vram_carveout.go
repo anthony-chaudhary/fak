@@ -84,3 +84,15 @@ func dedicatedVRAMCarveoutFromSysfs(backend Backend, deps hostEnvironmentDeps) (
 	}
 	return bytes, true
 }
+
+// vulkanOffloadHostVisibleCarveoutMax is the largest VRAM carve-out whose expert-ring pages go
+// to mapped host-visible memory instead of DEVICE_LOCAL. It matches the serve shared-pool bound.
+const vulkanOffloadHostVisibleCarveoutMax int64 = 4 << 30
+
+// vulkanOffloadPagesHostVisible reports whether expert-ring pages should skip DEVICE_LOCAL. On
+// an integrated GPU with a small carve-out, DEVICE_LOCAL pages fill it, and the kernel then
+// cannot place GPU page tables (a 64 GiB ring on a 512 MiB strix3 carve-out died that way).
+// Host-visible pages draw on the same RAM and are written through their mapping.
+func vulkanOffloadPagesHostVisible(integrated bool, carveout int64, carveoutKnown bool) bool {
+	return integrated && carveoutKnown && carveout > 0 && carveout <= vulkanOffloadHostVisibleCarveoutMax
+}

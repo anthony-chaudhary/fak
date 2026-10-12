@@ -3,11 +3,56 @@ package ggufload
 import (
 	"fmt"
 	"math"
+	"sort"
+	"sync"
 )
+
+type keyReadTrace struct {
+	mu   sync.Mutex
+	keys map[string]struct{}
+}
+
+// TraceKeyReads starts recording the metadata keys every reader on f looks up.
+// ReadKeys returns the recorded set.
+func (f *File) TraceKeyReads() {
+	f.keyReads = &keyReadTrace{keys: map[string]struct{}{}}
+}
+
+// ReadKeys returns the sorted metadata keys looked up since TraceKeyReads, or nil
+// when tracing is off.
+func (f *File) ReadKeys() []string {
+	if f.keyReads == nil {
+		return nil
+	}
+	f.keyReads.mu.Lock()
+	defer f.keyReads.mu.Unlock()
+	out := make([]string, 0, len(f.keyReads.keys))
+	for k := range f.keyReads.keys {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// lookup is the single metadata read chokepoint: presence probes count as reads.
+func (f *File) lookup(key string) (Value, bool) {
+	if t := f.keyReads; t != nil {
+		t.mu.Lock()
+		t.keys[key] = struct{}{}
+		t.mu.Unlock()
+	}
+	v, ok := f.Metadata[key]
+	return v, ok
+}
+
+func (f *File) hasKey(key string) bool {
+	_, ok := f.lookup(key)
+	return ok
+}
 
 // String reads a scalar GGUF string metadata value, returning ("",false) when the key is absent or not a TypeString.
 func (f *File) String(key string) (string, bool) {
-	v, ok := f.Metadata[key]
+	v, ok := f.lookup(key)
 	if !ok || v.Type != TypeString {
 		return "", false
 	}
@@ -17,7 +62,7 @@ func (f *File) String(key string) (string, bool) {
 
 // Uint64 reads any scalar GGUF integer metadata value as a uint64, returning (0,false) when the key is absent or negative.
 func (f *File) Uint64(key string) (uint64, bool) {
-	v, ok := f.Metadata[key]
+	v, ok := f.lookup(key)
 	if !ok {
 		return 0, false
 	}
@@ -26,7 +71,7 @@ func (f *File) Uint64(key string) (uint64, bool) {
 
 // Float64 reads a scalar GGUF float metadata value (TypeFloat32 widened, or TypeFloat64), returning (0,false) otherwise.
 func (f *File) Float64(key string) (float64, bool) {
-	v, ok := f.Metadata[key]
+	v, ok := f.lookup(key)
 	if !ok {
 		return 0, false
 	}
@@ -45,7 +90,7 @@ func (f *File) Float64(key string) (float64, bool) {
 // norm_topk_prob) this way. Returns (false,false) when the key is absent or not
 // a scalar bool.
 func (f *File) Bool(key string) (bool, bool) {
-	v, ok := f.Metadata[key]
+	v, ok := f.lookup(key)
 	if !ok || v.Type != TypeBool {
 		return false, false
 	}
@@ -61,7 +106,7 @@ func (f *File) Bool(key string) (bool, bool) {
 // whole read with (nil,false), preserving each reader's original all-or-nothing
 // behavior.
 func metadataArray[T any](f *File, key string, conv func(Value) (T, bool)) ([]T, bool) {
-	v, ok := f.Metadata[key]
+	v, ok := f.lookup(key)
 	if !ok || v.Type != TypeArray {
 		return nil, false
 	}

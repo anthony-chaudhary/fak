@@ -30,6 +30,9 @@ void fvk_rmsnorm_q2k_matmul2_f32(const void* dW0, const void* dW1,
 void *fvk_malloc_weight(size_t bytes, uint64_t max_arena_bytes);
 void *fvk_malloc_offload_weight(size_t bytes);
 void fvk_offload_weight_stats(uint64_t *reused, uint64_t *fresh);
+int fvk_set_offload_host_visible(int on);
+int fvk_offload_host_visible(void);
+uint64_t fvk_offload_host_visible_pages(void);
 void fvk_weight_arena_stats(uint64_t *memory_allocations, uint64_t *buffer_bindings,
                             uint64_t *reserved_bytes, uint64_t *live_bytes,
                             uint64_t *peak_reserved_bytes);
@@ -192,6 +195,30 @@ func init() {
 	vulkanDev.haveQ4KFusedRMSNormMatMul2 = errR == nil
 	vulkanDev.haveQ4KFusedSwiGLUMatMulAdd = errS == nil
 	Register(vulkanDev)
+	carveout, known := vulkanDev.DedicatedVRAMCarveout()
+	if vulkanOffloadPagesHostVisible(discrete == 0, carveout, known) {
+		C.fvk_set_offload_host_visible(1)
+	}
+}
+
+// VulkanDebugSetOffloadHostVisible forces the expert-ring page placement for a test and returns
+// the prior setting and whether the forced one took effect (it needs a mapped UMA device).
+func (v *vulkanBackend) VulkanDebugSetOffloadHostVisible(on bool) (prev, applied bool) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	prev = C.fvk_offload_host_visible() != 0
+	flag := C.int(0)
+	if on {
+		flag = 1
+	}
+	return prev, C.fvk_set_offload_host_visible(flag) != 0
+}
+
+// VulkanOffloadHostVisiblePages counts expert-ring pages allocated in mapped host-visible memory.
+func (v *vulkanBackend) VulkanOffloadHostVisiblePages() uint64 {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return uint64(C.fvk_offload_host_visible_pages())
 }
 
 func (v *vulkanBackend) configureVulkanQ4K(profile, stage bool) {

@@ -986,3 +986,10 @@ Renders the implemented DeepSeek V4.1 GGUF-style chat grammar: role boundaries, 
 FakExpertRingPoolFractionEnv names FAK_EXPERT_RING_POOL_FRACTION. For auto activated-expert ring sizing with known host MemTotal, the fraction contributes a sizing bound before the activated-layer minimum is applied. The default is 0.10, accepted values satisfy 0 < f <= 0.5, and invalid values are refused. Explicit byte sizes are unaffected; the activated-layer minimum can exceed the fraction-derived bound.
 
 **Distinct from:** This is a host-memory sizing parameter for the activated-expert ring, distinct from the worker-worktree disk-pool capacity setting and from the PagedKVPool block allocator. It does not create a separate allocator or guarantee a hard memory ceiling.
+
+
+### ManifestPreflight
+
+Header-only aggregate validation report from GGUF metadata and tensor descriptors, optional HF-config parity, loader key/tensor census and host-kernel availability; it reads no tensor payload.
+
+**Distinct from:** Unlike serveexecutionpolicy, this diagnoses header configuration and coverage gaps; it neither authorizes execution nor proves runtime, device or model readiness.

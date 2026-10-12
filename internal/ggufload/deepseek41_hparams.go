@@ -21,6 +21,12 @@ const (
 	ds41KeyRopeYarnBetaSlow    = "rope.scaling.yarn_beta_slow"
 	ds41KeySwigluClampExpert   = "swiglu_clamp_exp"
 	ds41KeySwigluClampShexpert = "swiglu_clamp_shexp"
+	ds41KeyExpertGatingFunc    = "expert_gating_func"
+	ds41KeyHashLayerCount      = "hash_layer_count"
+
+	// ds41GatingSqrtSoftplus is llama.cpp's gating enum for sqrt(softplus), the only
+	// router score the native V4.1 forward implements (v41SqrtSoftplus).
+	ds41GatingSqrtSoftplus = 4
 )
 
 func ds41HParamErr(key, format string, args ...any) error {
@@ -33,7 +39,7 @@ func finitePositive(v float64) bool { return v > 0 && !math.IsInf(v, 0) && !math
 // carries (compress_rope_theta, sliding_window, rope_scaling yarn,
 // swiglu_limit) so a GGUF load matches the HF-derived Config on these axes.
 func applyDeepSeek41HParams(f *File, p string, cfg *model.Config) error {
-	if _, ok := f.Metadata[p+ds41KeyCompressRopeBase]; ok {
+	if f.hasKey(p + ds41KeyCompressRopeBase) {
 		v, ok := f.Float64(p + ds41KeyCompressRopeBase)
 		if !ok || !finitePositive(v) {
 			return ds41HParamErr(p+ds41KeyCompressRopeBase, "must be a finite positive float, got %v", f.Metadata[p+ds41KeyCompressRopeBase].Value)
@@ -41,7 +47,7 @@ func applyDeepSeek41HParams(f *File, p string, cfg *model.Config) error {
 		cfg.CompressRopeTheta = v
 	}
 
-	if _, ok := f.Metadata[p+ds41KeySlidingWindow]; ok {
+	if f.hasKey(p + ds41KeySlidingWindow) {
 		w, ok := f.Uint64(p + ds41KeySlidingWindow)
 		if !ok || w == 0 || w > math.MaxInt32 {
 			return ds41HParamErr(p+ds41KeySlidingWindow, "must be a positive integer, got %v", f.Metadata[p+ds41KeySlidingWindow].Value)
@@ -71,7 +77,7 @@ func applyDeepSeek41HParams(f *File, p string, cfg *model.Config) error {
 			key string
 			dst *float64
 		}{{ds41KeyRopeYarnBetaFast, &rs.BetaFast}, {ds41KeyRopeYarnBetaSlow, &rs.BetaSlow}} {
-			if _, present := f.Metadata[p+b.key]; !present {
+			if !f.hasKey(p + b.key) {
 				continue
 			}
 			v, ok := f.Float64(p + b.key)
@@ -111,11 +117,25 @@ func applyDeepSeek41HParams(f *File, p string, cfg *model.Config) error {
 	if have && cfg.SwigluLimit == 0 {
 		cfg.SwigluLimit = limit
 	}
+
+	if f.hasKey(p + ds41KeyExpertGatingFunc) {
+		g, ok := f.Uint64(p + ds41KeyExpertGatingFunc)
+		if !ok || g != ds41GatingSqrtSoftplus {
+			return ds41HParamErr(p+ds41KeyExpertGatingFunc, "is %v; the native V4.1 router implements only sqrtsoftplus (%d)", f.Metadata[p+ds41KeyExpertGatingFunc].Value, ds41GatingSqrtSoftplus)
+		}
+		cfg.ScoringFunc = "sqrtsoftplus"
+	}
+	if f.hasKey(p + ds41KeyHashLayerCount) {
+		n, ok := f.Uint64(p + ds41KeyHashLayerCount)
+		if !ok || n != 0 {
+			return ds41HParamErr(p+ds41KeyHashLayerCount, "is %v; the native V4.1 forward has no token-hash routed layers", f.Metadata[p+ds41KeyHashLayerCount].Value)
+		}
+	}
 	return nil
 }
 
 func ds41FloatArray(f *File, key string) ([]float64, bool, error) {
-	if _, ok := f.Metadata[key]; !ok {
+	if !f.hasKey(key) {
 		return nil, false, nil
 	}
 	vals, ok := metadataArray(f, key, func(item Value) (float64, bool) {

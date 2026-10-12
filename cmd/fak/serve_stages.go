@@ -64,6 +64,7 @@ type serveRuntime struct {
 	// SafeTensors directory) and the load re-probes as before.
 	fitBudget              *serveFitBudget
 	requireDeviceExecution bool
+	executionPolicy        *serveExecutionPolicy
 
 	inKernelModel         *fakmodel.Model
 	inKernelQ4K           bool
@@ -420,6 +421,12 @@ func (rt *serveRuntime) proxyOnlyCompute(sf *serveFlags, getenv func(string) str
 }
 
 func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
+	policy, err := resolveServeExecutionPolicy(derefString(sf.executionPolicy), derefString(sf.model), os.Getenv(ServeBringupDedicatedEnv), os.Stderr)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	rt.executionPolicy = policy
 	proxyOnly, err := rt.proxyOnlyCompute(sf, os.Getenv)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fak serve:", err)
@@ -432,7 +439,7 @@ func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
 	// Resolve the optional in-kernel chat decode backend BEFORE eager model loading, so
 	// a known device can refuse an oversize GGUF from its header instead of OOMing during
 	// the load. Lookup (not Pick) keeps typos fail-loud rather than silently degrading to CPU.
-	chatBackend, err := resolveServeChatBackend(*sf.backendName)
+	chatBackend, err := resolveServeChatBackendForPolicy(*sf.backendName, policy)
 	if err != nil {
 		var haloErr *haloGPURequiredError
 		var detectErr *haloHardwareDetectionError
@@ -450,11 +457,11 @@ func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
 		fmt.Fprintln(os.Stderr, "fak serve: detect GFX1151 hardware:", err)
 		os.Exit(2)
 	}
-	if err := validateServeHaloCPUOffload(halo, *sf.cpuOffloadExperts, *sf.nCPUMoE, os.Getenv(agent.ExpertSpillEnv)); err != nil {
+	if err := policy.admit(validateServeHaloCPUOffload(halo, *sf.cpuOffloadExperts, *sf.nCPUMoE, os.Getenv(agent.ExpertSpillEnv))); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	rt.requireDeviceExecution = halo
+	rt.requireDeviceExecution = policy.requireDeviceExecution(halo)
 	// A PQ2-only Bonsai artifact has a resident CPU ternary kernel but no
 	// model-wired Metal or compute-HAL PQ2 kernel yet. Select its CPU forward
 	// before publishing a backend receipt or reserving the Metal device.
