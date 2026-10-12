@@ -18,6 +18,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,7 +38,7 @@ const (
 	defaultValidateTimeout      = 4 * time.Minute
 	validateWSLPreflightTimeout = 14500 * time.Millisecond
 	// validateWSLPreflightTimeoutEnv overrides the first probe bound; the retry
-	// bound is always validateWSLPreflightRetryFactor times it.
+	// bound is validateWSLPreflightRetryFactor times it, saturated at the largest duration.
 	validateWSLPreflightTimeoutEnv  = "FAK_VALIDATE_WSL_PREFLIGHT_TIMEOUT"
 	validateWSLPreflightRetryFactor = 3
 )
@@ -845,7 +846,11 @@ func validateWSLPreflightBounds() []time.Duration {
 			first = d
 		}
 	}
-	return []time.Duration{first, validateWSLPreflightRetryFactor * first}
+	retry := time.Duration(math.MaxInt64)
+	if first <= retry/validateWSLPreflightRetryFactor {
+		retry = validateWSLPreflightRetryFactor * first
+	}
+	return []time.Duration{first, retry}
 }
 
 func preflightValidateWSLCapabilitiesWithin(ctx context.Context) validateWSLCapabilityVerdict {

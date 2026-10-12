@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -207,6 +208,38 @@ func TestReadWSLWorktreeGitDirTranslatesWindowsPaths(t *testing.T) {
 			}
 			if gotWSL != tc.wantWSL {
 				t.Fatalf("got=%q want %q", gotWSL, tc.wantWSL)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestValidateWSLPreflightBoundsSaturatesRetry(t *testing.T) {
+	const maxDuration = time.Duration(math.MaxInt64)
+	const maxFirst = maxDuration / validateWSLPreflightRetryFactor
+	cases := []struct {
+		name  string
+		raw   string
+		first time.Duration
+		retry time.Duration
+	}{
+		{"default", "", validateWSLPreflightTimeout, 3 * validateWSLPreflightTimeout},
+		{"invalid", "invalid", validateWSLPreflightTimeout, 3 * validateWSLPreflightTimeout},
+		{"zero", "0s", validateWSLPreflightTimeout, 3 * validateWSLPreflightTimeout},
+		{"negative", "-1s", validateWSLPreflightTimeout, 3 * validateWSLPreflightTimeout},
+		{"parse overflow", "9223372036854775808ns", validateWSLPreflightTimeout, 3 * validateWSLPreflightTimeout},
+		{"small positive", " 1ns ", time.Nanosecond, 3 * time.Nanosecond},
+		{"below multiplication limit", (maxFirst - 1).String(), maxFirst - 1, 3 * (maxFirst - 1)},
+		{"multiplication limit", maxFirst.String(), maxFirst, 3 * maxFirst},
+		{"above multiplication limit", (maxFirst + 1).String(), maxFirst + 1, maxDuration},
+		{"largest duration", maxDuration.String(), maxDuration, maxDuration},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(validateWSLPreflightTimeoutEnv, tc.raw)
+			got := validateWSLPreflightBounds()
+			if len(got) != 2 || got[0] != tc.first || got[1] != tc.retry {
+				t.Fatalf("probe bounds = %v, want [%s %s]", got, tc.first, tc.retry)
 			}
 		})
 	}
