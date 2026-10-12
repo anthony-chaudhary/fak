@@ -13,6 +13,7 @@ import (
 type v41IndexRoPERecorder struct {
 	*v41InverseRowsTestBackend
 	failure      string
+	exact        bool
 	cleanupStage string
 	cleanupCalls int
 	cleanupArmed bool
@@ -28,7 +29,75 @@ type v41IndexRoPEResource struct {
 }
 
 func newV41IndexRoPERecorder() *v41IndexRoPERecorder {
-	return &v41IndexRoPERecorder{v41InverseRowsTestBackend: newV41InverseRowsTestBackend(), resources: map[compute.Buffer]*v41IndexRoPEResource{}}
+	return &v41IndexRoPERecorder{v41InverseRowsTestBackend: newV41InverseRowsTestBackend(), exact: true, resources: map[compute.Buffer]*v41IndexRoPEResource{}}
+}
+
+// The recorder uses the exact host oracle; this marker proves software wiring
+// only. It does not qualify any physical backend.
+func (b *v41IndexRoPERecorder) V41TailRoPEExactAvailable() bool { return b.exact }
+
+func v41IndexRoPEOnly(s *Session) {
+	v41ScoreOnly(s)
+	// The exact marker also binds compressed publication. Keep these existing
+	// query/inverse ownership witnesses isolated from that third row consumer.
+	s.v41State().gatherOps.compressedPublicationRoPE = nil
+}
+
+// fak-test:runtime fast est=20ms lane=default
+// fak-test:justify Pins exact capability selection and the BF16 subnormal boundary.
+func TestV41IndexRoPEExactSelection(t *testing.T) {
+	m := &Model{Cfg: Config{IndexHeadDim: 4, IndexNHeads: 1, QKRopeHeadDim: 2, RopeTheta: 256}}
+	input := []float32{1, math.Float32frombits(0x80000000), math.Float32frombits(0x00400000), 0}
+	for _, mode := range []string{"raw-only", "exact-unavailable", "exact"} {
+		t.Run(mode, func(t *testing.T) {
+			raw := newV41InverseRowsTestBackend()
+			exact := newV41IndexRoPERecorder()
+			exact.exact = mode == "exact"
+			var backend compute.Backend = exact
+			if mode == "raw-only" {
+				backend = raw
+			}
+			s := &Session{M: m, Backend: backend}
+			defer s.Close()
+			rotate := s.v41IndexRoPEFunc()
+			selected := mode == "exact"
+			if (rotate != nil) != selected {
+				t.Fatalf("query selection=%t, want exact capability=%t", rotate != nil, selected)
+			}
+			if s.BackendSessionClosed() || s.halFailure != nil {
+				t.Fatal("capability absence retired a healthy session")
+			}
+			ops := &v41DeviceGatherOps{owner: s, indexRoPE: rotate}
+			got := append([]float32(nil), input...)
+			if err := m.v41IndexRoPEWithDevice(0, 0, got, 1, ops.indexRoPEFunc()); err != nil {
+				t.Fatal(err)
+			}
+			// At position zero, [0x00400000, +0] remains [0x00400000, +0]
+			// through separate products/additions and BF16 publication. Flushing
+			// the first operand to zero loses 64 BF16 ulps, not a rounding tie.
+			v41TailRoPECheckBits(t, "positive BF16 subnormal", got, input)
+			if selected {
+				if len(exact.calls) != 1 {
+					t.Fatal("qualified subnormal query did not dispatch exactly once")
+				}
+				v41IndexRoPECheckResources(t, exact, false)
+				return
+			}
+			if len(raw.calls) != 0 || len(exact.calls) != 0 || len(exact.resources) != 0 {
+				t.Fatal("unqualified query dispatched or allocated device operands")
+			}
+			s.SetExecutionPolicy(ExecutionPolicyDeviceOnly)
+			got = append([]float32(nil), input...)
+			err := m.v41IndexRoPEWithDevice(0, 0, got, 1, ops.indexRoPEFunc())
+			if !errors.Is(err, errV41DeviceOnlyHostOp) || !s.BackendSessionClosed() {
+				t.Fatalf("device-only unqualified query did not refuse typed: %v", err)
+			}
+			v41TailRoPECheckBits(t, "unqualified atomic refusal", got, input)
+			if len(raw.calls) != 0 || len(exact.calls) != 0 || len(exact.resources) != 0 {
+				t.Fatal("device-only refusal dispatched the unqualified primitive")
+			}
+		})
+	}
 }
 
 func (b *v41IndexRoPERecorder) BeginBatch() {}
@@ -221,13 +290,13 @@ func TestV41IndexRoPEDeviceReachability(t *testing.T) {
 		m := v41IndexerTestFixture(t)
 		b := newV41IndexRoPERecorder()
 		s := v41DenseTestSession(t, m, b)
-		v41ScoreOnly(s)
+		v41IndexRoPEOnly(s)
 		s.v41State().gatherOps.inverseOutput = nil
 		if s.v41State().gatherOps.indexRoPEFunc() == nil {
 			t.Fatal("available query rows primitive was not bound")
 		}
 		host := v41DenseTestSession(t, m, newV41DenseTestBackend())
-		v41ScoreOnly(host)
+		v41IndexRoPEOnly(host)
 		v41ScoreTestBits(t, s.Prefill([]int{1, 2, 3}), host.Prefill([]int{1, 2, 3}))
 		prefill := len(b.calls)
 		if prefill == 0 {
@@ -259,7 +328,7 @@ func TestV41IndexRoPEDeviceReachability(t *testing.T) {
 			m := v41IndexerTestFixture(t)
 			b := newV41IndexRoPERecorder()
 			s := v41DenseTestSession(t, m, b)
-			v41ScoreOnly(s)
+			v41IndexRoPEOnly(s)
 			s.v41State().gatherOps.inverseOutput = nil
 			s.Prefill([]int{1, 2, 3})
 			before := captureV41ForwardSnapshot(s.v41Forward)
@@ -290,7 +359,7 @@ func TestV41IndexRoPEDeviceReachability(t *testing.T) {
 		m := v41IndexerTestFixture(t)
 		b := newV41IndexRoPERecorder()
 		s := v41DenseTestSession(t, m, b)
-		v41ScoreOnly(s)
+		v41IndexRoPEOnly(s)
 		s.v41State().gatherOps.inverseOutput = nil
 		s.Prefill([]int{1, 2, 3})
 		before := captureV41ForwardSnapshot(s.v41Forward)
@@ -312,7 +381,7 @@ func TestV41IndexRoPEDeviceReachability(t *testing.T) {
 			m := v41IndexerTestFixture(t)
 			b := newV41IndexRoPERecorder()
 			s := v41DenseTestSession(t, m, b)
-			v41ScoreOnly(s)
+			v41IndexRoPEOnly(s)
 			s.v41State().gatherOps.inverseOutput = nil
 			s.Prefill([]int{1, 2, 3})
 			before := captureV41ForwardSnapshot(s.v41Forward)
@@ -334,7 +403,7 @@ func TestV41IndexRoPEDeviceReachability(t *testing.T) {
 		m := v41IndexerTestFixture(t)
 		b := newV41IndexRoPERecorder()
 		s := v41DenseTestSession(t, m, b)
-		v41ScoreOnly(s)
+		v41IndexRoPEOnly(s)
 		s.v41State().gatherOps.inverseOutput = nil
 		s.Prefill([]int{1, 2, 3})
 		before := captureV41ForwardSnapshot(s.v41Forward)
@@ -391,14 +460,14 @@ func TestV41IndexRoPERestoredGatherOwnership(t *testing.T) {
 	m := v41IndexerTestFixture(t)
 	b := newV41IndexRoPERecorder()
 	source := v41DenseTestSession(t, m, b)
-	v41ScoreOnly(source)
+	v41IndexRoPEOnly(source)
 	// Leave both row-RoPE consumers enabled: the shared carrier must rebind
 	// query rotation and inverse attention output to the destination session.
 	if ops := source.v41State().gatherOps; ops.indexRoPEFunc() == nil || ops.inverseOutputFunc() == nil {
 		t.Fatal("both row-RoPE callbacks must be selected")
 	}
 	host := v41DenseTestSession(t, m, newV41DenseTestBackend())
-	v41ScoreOnly(host)
+	v41IndexRoPEOnly(host)
 	v41ScoreTestBits(t, source.Prefill([]int{1, 2, 3}), host.Prefill([]int{1, 2, 3}))
 	snap, err := source.PrefixSnapshot()
 	if err != nil {
@@ -409,7 +478,7 @@ func TestV41IndexRoPERestoredGatherOwnership(t *testing.T) {
 	if err := snap.Restore(target); err != nil {
 		t.Fatal(err)
 	}
-	v41ScoreOnly(target)
+	v41IndexRoPEOnly(target)
 	source.Close()
 	ops := target.v41State().gatherOps
 	if target.v41Forward.callbackOwner != target || ops == nil || ops.owner != target ||
@@ -455,7 +524,7 @@ func TestV41IndexRoPEWrappedPrimary(t *testing.T) {
 				m := v41IndexerTestFixture(t)
 				b := newV41IndexRoPERecorder()
 				source := v41DenseTestSession(t, m, b)
-				v41ScoreOnly(source)
+				v41IndexRoPEOnly(source)
 				source.v41State().gatherOps.inverseOutput = nil
 				source.Prefill([]int{1, 2, 3})
 				if len(b.calls) == 0 {
@@ -472,7 +541,7 @@ func TestV41IndexRoPEWrappedPrimary(t *testing.T) {
 					if err := snap.Restore(target); err != nil {
 						t.Fatal(err)
 					}
-					v41ScoreOnly(target)
+					v41IndexRoPEOnly(target)
 					target.v41State().gatherOps.inverseOutput = nil
 					source.Close()
 				}

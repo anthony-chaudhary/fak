@@ -15,8 +15,10 @@ func (s *Session) v41IndexRoPEFunc() v41IndexRoPEFunc {
 		!compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.F32) {
 		return nil
 	}
-	operation, ok := s.Backend.(v41TailRoPERowsBackend)
-	if !ok || !operation.V41TailRoPERowsAvailable() {
+	// The query is published as BF16. Raw Rows availability does not prove
+	// that subnormals and separately rounded binary32 products are preserved.
+	operation, ok := s.Backend.(compute.V41TailRoPEExactBackend)
+	if !ok || !operation.V41TailRoPEExactAvailable() || !operation.V41TailRoPERowsAvailable() {
 		return nil
 	}
 	return func(layer int, out, cos, sin []float32, heads, headDim, rotaryDim int) (result []float32, cause error) {
