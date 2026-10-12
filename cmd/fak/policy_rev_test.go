@@ -43,6 +43,16 @@ func TestPolicyCheckSurfacesManifestRev(t *testing.T) {
 	if !policyRevPattern.MatchString(rev) {
 		t.Fatalf("resolved rev %q does not match the derived r<rev>+g<sha> shape", rev)
 	}
+	// Reuse the real revision: a second advisory history walk can independently time
+	// out, which must not turn graceful degradation into a formatter failure.
+	restore := policyManifestRevFn
+	policyManifestRevFn = func(gotPath string) string {
+		if gotPath != path {
+			t.Fatalf("revision lookup path = %q, want %q", gotPath, path)
+		}
+		return rev
+	}
+	t.Cleanup(func() { policyManifestRevFn = restore })
 
 	report, err := checkPolicyFile(path, orgCheckOptions{})
 	if err != nil {
