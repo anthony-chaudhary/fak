@@ -143,11 +143,17 @@ func ConvertLlamaCppDump(dir string) (Artifact, error) {
 		if len(e.Ne) != 4 {
 			return Artifact{}, dumpErr("%s: ne has %d dims, want 4", e.Name, len(e.Ne))
 		}
-		width, tokens := int64(1), int64(1)
+		width, tokens, byteSize := int64(1), int64(1), int64(4)
+		maxBytes := int64(^uint(0) >> 1)
 		for d, n := range e.Ne {
 			if n <= 0 {
 				return Artifact{}, dumpErr("%s: ne[%d]=%d", e.Name, d, n)
 			}
+			// A representable byte size also bounds width, tokens and sample offsets.
+			if n > maxBytes/byteSize {
+				return Artifact{}, dumpErr("%s: f32 byte size exceeds int for ne=%v", e.Name, e.Ne)
+			}
+			byteSize *= n
 			if d < spec.widthDims {
 				width *= n
 			} else {
@@ -161,8 +167,8 @@ func ConvertLlamaCppDump(dir string) (Artifact, error) {
 		if err != nil {
 			return Artifact{}, err
 		}
-		if int64(len(data)) != 4*width*tokens {
-			return Artifact{}, dumpErr("%s: %d bytes, want %d for ne=%v", e.Name, len(data), 4*width*tokens, e.Ne)
+		if int64(len(data)) != byteSize {
+			return Artifact{}, dumpErr("%s: %d bytes, want %d for ne=%v", e.Name, len(data), byteSize, e.Ne)
 		}
 		w := int(width)
 		idx := ActivationSampleIndices(w, LlamaCppActivationSamples)
