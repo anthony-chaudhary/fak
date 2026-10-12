@@ -9,9 +9,9 @@ package model
 //	  model: V4.1 grouped output non-finite value element 0
 //
 // The historical assembly treated ratio-one source 20 as producing no shared
-// KV and sent layer 36 through the per-position sink. Current admission refuses
-// that incomplete ratio-one assembly; the plan witness below proves topology
-// only. At the time of the failure, both
+// KV and sent layer 36 through the per-position sink. The ratio-one assembly now
+// contracts source 20's compressed rows with the layer's window; the plan
+// witness below proves topology only. At the time of the failure, both
 // V41SparseAttentionSink and V41AttentionCompressedForward validated every
 // INPUT was finite but never guarded their OUTPUT: with HeadDim=512 a finite
 // per-element magnitude above ~8.15e17 overflows the 512-term `dot += q*kv`
@@ -43,8 +43,7 @@ func v41NonFiniteTestScale(headDim int) float32 {
 
 // TestV41Layer36RealScheduleBranch witnesses the published layer-36 topology:
 // a ratio-one reader of KV source 20, with its own index selection. This is a
-// pure plan witness; forward admission refuses the unimplemented ratio-one
-// assembly before either attention contraction can execute.
+// pure plan witness of the topology the ratio-one forward assembly executes.
 func TestV41Layer36RealScheduleBranch(t *testing.T) {
 	_, cfg := readDeepSeekV41Config(t)
 	roles := v41AttentionRoles(cfg)
@@ -65,13 +64,12 @@ func TestV41Layer36RealScheduleBranch(t *testing.T) {
 	if !indexSourceAt(cfg.DeepSeekV41, 36) {
 		t.Fatal("layer 36 must itself be an index source")
 	}
-	// The source also declares ratio one. Its standalone projection helper does
-	// not establish the shared publication and window-composition assembly.
+	// The source also declares ratio one: one compressed row per token.
 	if srcRatio := v41CompressRatioAt(cfg, plan.KVSourceLayer); srcRatio != 1 {
 		t.Fatalf("layer %d ratio = %d, want the published ratio-one source",
 			plan.KVSourceLayer, srcRatio)
 	}
-	t.Log("layer 36 resolves ratio-one source/reader topology; full forward assembly remains refused")
+	t.Log("layer 36 resolves ratio-one source/reader topology")
 }
 
 // TestV41AttentionCompressedNonFiniteGuard is the symmetric RED->GREEN witness

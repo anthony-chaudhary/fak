@@ -541,10 +541,18 @@ func TestV41ForwardCompressRatioMalformedFailsClosed(t *testing.T) {
 	}
 }
 
-// The ratio-one helper is independently usable, but cannot enable an assembly
-// that still omits the reference's compressed cache/window composition.
+// Ratio one is admitted only when correctly sourced: a producer without its
+// compressor tensors, or a flat schedule with no V4.1 metadata to resolve its
+// sources, still refuses before any arithmetic.
 // fak-test:runtime fast est=100ms lane=default
-func TestV41ForwardRatioOneAssemblyFailsClosed(t *testing.T) {
+func TestV41ForwardRatioOneUnsourcedFailsClosed(t *testing.T) {
+	check := func(label string, err error) {
+		t.Helper()
+		var stage *V41ForwardError
+		if !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &stage) || stage.Stage != v41StageCompress || stage.Layer != 0 {
+			t.Fatalf("%s: error = %v, want a layer-zero compress-stage refusal", label, err)
+		}
+	}
 	for _, source := range []bool{false, true} {
 		m := v41ReducedModel(t)
 		m.Cfg.DeepSeekV41.CompressRatios = []int{1}
@@ -553,20 +561,14 @@ func TestV41ForwardRatioOneAssemblyFailsClosed(t *testing.T) {
 		if source {
 			m.Cfg.DeepSeekV41.KVSourceLayerIDs = []int{0}
 		}
-		check := func(err error) {
-			t.Helper()
-			var stage *V41ForwardError
-			if !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &stage) || stage.Stage != v41StageCompress || stage.Layer != 0 || !strings.Contains(err.Error(), "ratio-one forward assembly is not implemented") {
-				t.Fatalf("source=%v: error = %v, want layer-zero ratio-one assembly refusal", source, err)
-			}
-		}
-		check(m.v41ForwardAdmitted())
+		label := "producer without compressor tensors source=" + itoa(boolToIntV41Expert(source))
+		check(label, m.v41ForwardAdmitted())
 		act, err := m.forwardV41([]int{1, 2}, nil)
-		check(err)
+		check(label, err)
 		if act != nil {
 			t.Fatal("refused ratio-one forward returned activations")
 		}
-		check(panicAsError(func() { _ = m.Forward([]int{1, 2}) }))
+		check(label, panicAsError(func() { _ = m.Forward([]int{1, 2}) }))
 	}
 	// The canonical GGUF identity can carry only the flat schedule before typed
 	// metadata is attached. Its active ratio-one declaration must also refuse.
@@ -574,10 +576,7 @@ func TestV41ForwardRatioOneAssemblyFailsClosed(t *testing.T) {
 	flat.Cfg.ModelType = "deepseek41"
 	flat.Cfg.DeepSeekV41 = nil
 	flat.Cfg.CompressRatios = []int{1}
-	var stage *V41ForwardError
-	if err := flat.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &stage) || stage.Stage != v41StageCompress || stage.Layer != 0 || !strings.Contains(err.Error(), "ratio-one forward assembly is not implemented") {
-		t.Fatalf("flat-only admission = %v, want layer-zero ratio-one assembly refusal", err)
-	}
+	check("flat-only admission", flat.v41ForwardAdmitted())
 	if act, err := flat.forwardV41([]int{1, 2}, nil); act != nil || !errors.Is(err, ErrV41ForwardStage) {
 		t.Fatalf("flat-only ratio-one forward returned act=%v err=%v", act, err)
 	}

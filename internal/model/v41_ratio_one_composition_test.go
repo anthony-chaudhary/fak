@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// This projected-input witness leaves public admission closed. It exercises
-// composition and transaction semantics, not FP8/FP4 or device qualification.
+// This projected-input witness exercises composition and transaction
+// semantics, not FP8/FP4 or device qualification.
 // fak-test:justify why=contract when=changed:internal/model/**
 // fak-test:runtime fast est=30ms lane=default
 func TestV41RatioOneComposition(t *testing.T) {
@@ -272,9 +272,10 @@ func TestV41RatioOneComposition(t *testing.T) {
 	})
 
 	t.Run("public-fence", func(t *testing.T) {
+		// A weightless ratio-one producer has no compressor tensors to source it.
 		m := &Model{Cfg: Config{NumLayers: 1, DeepSeekV41: &DeepSeekV41Config{CompressRatios: []int{1}, KVSourceLayerIDs: []int{0}}}}
 		if !errors.Is(m.v41CompressIndexForwardAdmitted(), ErrV41ForwardStage) || !errors.Is(m.v41KVSourceForwardAdmitted(), ErrV41ForwardStage) {
-			t.Fatal("internal composition widened ratio-one public admission")
+			t.Fatal("unsourced ratio-one producer was admitted")
 		}
 		m.Cfg.DeepSeekV41.CandidateSourceLayerID = 0
 		if !errors.Is(v41CandidateSourceForwardAdmitted(m.Cfg), ErrV41ForwardStage) {

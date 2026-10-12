@@ -163,8 +163,9 @@ func (m *Model) v41EngramForwardAdmitted() error {
 // v41CompressIndexForwardAdmitted checks only tensors a layer owns: compressed
 // producers need compressor weights, every index-query source needs its query
 // and head-weight projections, and only index-key producers need wk/k_norm.
-// Shared readers resolve already-published source rows. Ratio-one assembly stays
-// closed even though its standalone compressor helper is implemented.
+// Shared readers resolve already-published source rows. A ratio-one producer
+// projects one compressed row per token through wkv and the learned norm, with
+// no gate, so it owns no wgate tensor.
 //
 // Two malformed-schedule arms are also refused here: a negative ratio (invalid
 // geometry, never a compressed layer) and a schedule shorter than the decoder
@@ -174,15 +175,16 @@ func (m *Model) v41CompressIndexForwardAdmitted() error {
 	d41 := m.Cfg.DeepSeekV41
 	if d41 == nil {
 		// The canonical GGUF identity may retain only the flat schedule before
-		// optional metadata attachment. That absence cannot turn active ratio one
-		// into window-only execution. Preserve all other nil-metadata behavior.
+		// optional metadata attachment. The forward reads its schedule and KV
+		// sources from that metadata, so without it an active ratio-one layer
+		// would run window-only. Preserve all other nil-metadata behavior.
 		for layer, ratio := range m.Cfg.CompressRatios {
 			if layer >= m.Cfg.NumLayers {
 				break
 			}
 			if ratio == 1 {
 				return v41StageErr(v41StageCompress, layer,
-					fmt.Errorf("%w: layer %d declares ratio-one compression but the ratio-one forward assembly is not implemented", ErrV41ForwardStage, layer))
+					fmt.Errorf("%w: layer %d declares ratio-one compression but carries no V4.1 schedule metadata to source it", ErrV41ForwardStage, layer))
 			}
 		}
 		return nil
@@ -199,33 +201,25 @@ func (m *Model) v41CompressIndexForwardAdmitted() error {
 	H := cfg.HiddenSize
 	roles := v41AttentionRoles(cfg)
 	for layer := 0; layer < cfg.NumLayers; layer++ {
-		// Only ratio 0 is window-only. Ratio 1 requires the reference's separate
-		// compressed projection/cache plus window contraction; its standalone
-		// helper does not yet implement that forward assembly. Refuse it regardless
-		// of source declarations or weight presence instead of executing plain KV.
+		// Only ratio 0 is window-only. Every nonzero ratio contracts its window
+		// together with a compressed stream that a producer projects and a reader
+		// resolves from its declared source.
 		ratio := d41.CompressRatios[layer]
 		switch {
 		case ratio < 0:
 			return v41StageErr(v41StageCompress, layer,
 				fmt.Errorf("%w: layer %d declares malformed compressor ratio %d", ErrV41ForwardStage, layer, ratio))
-		case ratio == 1:
-			return v41StageErr(v41StageCompress, layer,
-				fmt.Errorf("%w: layer %d declares ratio-one compression but the ratio-one forward assembly is not implemented", ErrV41ForwardStage, layer))
-		case ratio > 1:
+		case ratio > 0:
 			if roles[layer] == V41AttentionRoleReader {
 				continue // readers consume the source cache and own no compressor tensors
 			}
-			width := v41CompressorWidth(cfg)
-			if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wkv.weight"), v41StageCompress, layer, width, H); err != nil {
-				return err
-			}
-			if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wgate.weight"), v41StageCompress, layer, width, H); err != nil {
-				return err
-			}
-			if err := m.v41AdmitShape(layerName(layer, "attn.compressor.norm.weight"), v41StageCompress, layer, width); err != nil {
+			if err := m.v41AdmitCompressorProducer(layer, ratio); err != nil {
 				return err
 			}
 		}
+	}
+	if err := v41ReaderSourceRatioAdmitted(cfg); err != nil {
+		return err
 	}
 	indexHeads := cfg.IndexNHeads
 	indexDim := cfg.IndexHeadDim
@@ -281,9 +275,7 @@ func v41CompressorWidth(cfg Config) int { return cfg.HeadDim }
 // v41CompressedRows pools the per-position projected KV rows of one layer
 // through the CED/CSA2 compressor. Ratio one projects each carrier through wkv
 // and the existing BF16/learned-RMSNorm tail, with no gate or pooling. Ratio zero
-// returns the ordinary KV rows unchanged. This helper does not admit a shared
-// ratio-one source to the forward assembly; its ownership and cache integration
-// remain fenced by v41KVSourceForwardAdmitted.
+// returns the ordinary KV rows unchanged.
 func (m *Model) v41CompressedRows(l int, ratio int, kvRows [][]float32, inputs [][]float32) ([][]float32, error) {
 	return m.v41CompressedRowsWithProjection(l, ratio, kvRows, inputs, nil)
 }
@@ -373,10 +365,10 @@ func (m *Model) v41IndexRows(l, pos int, qLat []float32, hidden []float32, keys 
 // execute the shared KV/index schedule (v41_attention.go): a declared source
 // pools its projected KV input through the CED/CSA2 compressor and publishes the
 // rows, and a later reader resolves them. A source is therefore admitted only
-// when it declares a compressed regime (ratio > 1, so the compressor runs) and
-// carries the compressor tensors its pooling reads; a source at ratio <= 1 has
-// no pooled stream to publish, so it is refused rather than silently running a
-// per-layer KV cache where the official model reuses a source layer's state.
+// when it declares a compressed regime (ratio >= 1, so the compressor runs) and
+// carries the compressor tensors it reads; a ratio-zero source has no compressed
+// stream to publish, so it is refused rather than silently running a per-layer
+// KV cache where the official model reuses a source layer's state.
 // Declarations that only touch out-of-range layers stay admitted, which keeps the
 // reduced oracle fixture runnable: it derives from the published 40-layer config
 // but narrows NumLayers to 1, so every kv source ({2,8,14,20}) is unreachable.
@@ -394,23 +386,52 @@ func (m *Model) v41KVSourceForwardAdmitted() error {
 			return v41StageErr(v41StageCompress, layer,
 				fmt.Errorf("%w: layer %d declares a shared-KV source but its compress ratio %d is not an implemented variant", ErrV41ForwardStage, layer, v41CompressRatioAt(cfg, layer)))
 		}
-		if v41CompressRatioAt(cfg, layer) <= 1 {
+		if v41CompressRatioAt(cfg, layer) <= 0 {
 			return v41StageErr(v41StageAttention, layer,
 				fmt.Errorf("%w: layer %d declares a shared-KV source but has no compressed regime to publish", ErrV41ForwardStage, layer))
 		}
-		H := cfg.HiddenSize
-		width := v41CompressorWidth(cfg)
-		if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wkv.weight"), v41StageCompress, layer, width, H); err != nil {
-			return err
-		}
-		if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wgate.weight"), v41StageCompress, layer, width, H); err != nil {
-			return err
-		}
-		if err := m.v41AdmitShape(layerName(layer, "attn.compressor.norm.weight"), v41StageCompress, layer, width); err != nil {
+		if err := m.v41AdmitCompressorProducer(layer, v41CompressRatioAt(cfg, layer)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// v41ReaderSourceRatioAdmitted refuses a reader whose ratio differs from its KV
+// source's: a stream's row layout follows the ratio it was compressed at, so the
+// reader would index rows standing for other positions
+// (src/models/deepseek41.cpp:236-243@5210c7c, vcruz305/llama.cpp, MIT).
+func v41ReaderSourceRatioAdmitted(cfg Config) error {
+	roles := v41AttentionRoles(cfg)
+	for layer := 0; layer < cfg.NumLayers; layer++ {
+		if roles[layer] != V41AttentionRoleReader {
+			continue
+		}
+		plan, err := v41AttentionPlanFor(cfg, layer, roles)
+		if err != nil {
+			return err
+		}
+		if source := v41CompressRatioAt(cfg, plan.KVSourceLayer); source != plan.Ratio {
+			return v41StageErr(v41StageCompress, layer,
+				fmt.Errorf("%w: layer %d compresses at ratio %d but reads KV source %d compressed at %d", ErrV41ForwardStage, layer, plan.Ratio, plan.KVSourceLayer, source))
+		}
+	}
+	return nil
+}
+
+// v41AdmitCompressorProducer admits the tensors a compressed producer reads:
+// wkv and the learned norm always, and wgate only when ratio > 1 pools a group.
+func (m *Model) v41AdmitCompressorProducer(layer, ratio int) error {
+	H, width := m.Cfg.HiddenSize, v41CompressorWidth(m.Cfg)
+	if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wkv.weight"), v41StageCompress, layer, width, H); err != nil {
+		return err
+	}
+	if ratio > 1 {
+		if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wgate.weight"), v41StageCompress, layer, width, H); err != nil {
+			return err
+		}
+	}
+	return m.v41AdmitShape(layerName(layer, "attn.compressor.norm.weight"), v41StageCompress, layer, width)
 }
 
 // v41CandidateSourceForwardAdmitted fails closed when the config declares a
@@ -795,7 +816,7 @@ func (m *Model) v41AdmitShape(name string, stage v41ForwardStage, layer int, wan
 // while excluding shared readers. Only declared KV sources are producers in the
 // pinned full-model topology; the no-source fallback is not reference parity.
 func v41OwnsCompressedRows(plan V41AttentionPlan) bool {
-	return plan.Ratio > 1 && plan.Role != V41AttentionRoleReader
+	return plan.Ratio > 0 && plan.Role != V41AttentionRoleReader
 }
 
 // v41CompressedReaderRows resolves publications by KV ownership, independently

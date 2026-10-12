@@ -549,7 +549,7 @@ func (m *Model) v41RoleSchedule() bool {
 	cfg := m.Cfg
 	roles := m.v41AttentionRolesCached()
 	for l := 0; l < cfg.NumLayers; l++ {
-		if v41CompressRatioAt(cfg, l) > 1 {
+		if v41CompressRatioAt(cfg, l) > 0 {
 			return true
 		}
 		if role, ok := roles[l]; ok && role != V41AttentionRolePerLayer {
@@ -1006,7 +1006,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		st.indexKeyMemo[l] = keyMemo
 	}
 	var indexList []int32
-	if plan.Ratio > 1 && indexSourceAt(cfg.DeepSeekV41, l) {
+	if plan.Ratio > 0 && indexSourceAt(cfg.DeepSeekV41, l) {
 		for t := 0; t < seq; t++ {
 			groups := min((t+1)/plan.kvGroupSize(cfg), len(indexKeys))
 			localIdx, err := m.v41IndexRowsWithDeviceOps(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps)
@@ -1105,7 +1105,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	for t := 0; t < seq; t++ {
 		// The reference concatenates this layer's window with selected source
 		// groups before ONE sink contraction, even before a group completes.
-		if plan.Ratio > 1 || plan.Role == V41AttentionRoleReader {
+		if plan.Ratio > 0 || plan.Role == V41AttentionRoleReader {
 			keys := v41PlainWindowKeys(t, cfg.windowForLayer(l))
 			window := make([][]float32, len(keys))
 			for i, key := range keys {

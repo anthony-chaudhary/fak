@@ -108,7 +108,7 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	// Role layers combine their own window with shared compressed rows. Their
 	// source append already advances the compressor cursor, so the role path
 	// commits the window itself without calling State.Step a second time.
-	if plan.Role != V41AttentionRolePerLayer || plan.Ratio > 1 {
+	if plan.Role != V41AttentionRolePerLayer || plan.Ratio > 0 {
 		return m.v41LayerStepRole(l, plan, x, streams, pos, layerState, registry, scratch)
 	}
 	// Append-only: the step position must be the next retained position. This
