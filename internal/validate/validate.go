@@ -1031,7 +1031,7 @@ func runValidateTestsWithin(ctx context.Context, repo, dir, tip string, args []s
 			command += " " + posixQuote(arg)
 		}
 		command += " && printf '\n__FAK_VALIDATE_TEST_OK__\n'"
-		cmd = windowgate.CommandContext(ctx, "wsl.exe", "--cd", dir, "bash", "-lc", command)
+		cmd = windowgate.CommandContext(ctx, "wsl.exe", "--cd", dir, "-e", "bash", "-lc", command)
 	} else {
 		cmd = windowgate.CommandContext(ctx, "go", args...)
 		cmd.Dir = dir
@@ -1266,7 +1266,7 @@ func extractCommittedTipWSLWithin(ctx context.Context, repo, tip string) (string
 	const attempts = 4
 	wait := 250 * time.Millisecond
 	for attempt := 1; ; attempt++ {
-		out, err := validateWSLCommand(ctx, "--cd", repo, "bash", "-lc", script)
+		out, err := validateWSLCommand(ctx, "--cd", repo, "-e", "bash", "-lc", script)
 		if err == nil {
 			return wslDir, nil
 		}
@@ -1315,7 +1315,7 @@ func cleanupValidateWSLDir(dir string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	_, _ = validateWSLCommand(ctx, "bash", "-lc", "rm -rf -- "+posixQuote(dir))
+	_, _ = validateWSLCommand(ctx, "-e", "bash", "-lc", "rm -rf -- "+posixQuote(dir))
 }
 
 func runValidateWSLCommandWithin(ctx context.Context, root string, args ...string) ([]byte, error) {
@@ -1323,7 +1323,7 @@ func runValidateWSLCommandWithin(ctx context.Context, root string, args ...strin
 	for _, arg := range args {
 		command += " " + posixQuote(arg)
 	}
-	cmd := windowgate.CommandContext(ctx, "wsl.exe", "bash", "-lc", command)
+	cmd := windowgate.CommandContext(ctx, "wsl.exe", "-e", "bash", "-lc", command)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	return cmd.CombinedOutput()
 }

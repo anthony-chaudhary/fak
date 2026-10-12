@@ -196,11 +196,11 @@ func stubValidateWSLCapabilityCommands(t *testing.T, identity, missing string) *
 	checkRuns := 0
 	validateWSLLookPath = func(string) (string, error) { return `C:\Windows\System32\wsl.exe`, nil }
 	validateWSLCommand = func(_ context.Context, args ...string) ([]byte, error) {
-		if len(args) < 3 || args[0] != "bash" || args[1] != "-lc" {
+		if len(args) < 4 || args[0] != "-e" || args[1] != "bash" || args[2] != "-lc" {
 			return nil, fmt.Errorf("unexpected WSL capability command: %v", args)
 		}
-		if !strings.Contains(args[2], validateWSLDistroPrefix) || !strings.Contains(args[2], validateWSLPathPrefix) {
-			return nil, fmt.Errorf("capability script omits identity protocol: %s", args[2])
+		if !strings.Contains(args[3], validateWSLDistroPrefix) || !strings.Contains(args[3], validateWSLPathPrefix) {
+			return nil, fmt.Errorf("capability script omits identity protocol: %s", args[3])
 		}
 		checkRuns++
 		parts := strings.SplitN(identity, "\n", 2)

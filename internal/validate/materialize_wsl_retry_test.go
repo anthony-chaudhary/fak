@@ -47,7 +47,7 @@ func installWSLRetryTestFake(t *testing.T, onMaterialize func(n int) ([]byte, er
 			n := len(fake.materialize)
 			fake.mu.Unlock()
 			return onMaterialize(n)
-		case len(args) > 0 && args[0] == "bash" && strings.Contains(args[len(args)-1], "rm -rf"):
+		case len(args) > 1 && args[0] == "-e" && args[1] == "bash" && strings.Contains(args[len(args)-1], "rm -rf"):
 			fake.cleanup = append(fake.cleanup, args)
 			fake.mu.Unlock()
 			return nil, nil
@@ -68,10 +68,10 @@ func wslRetryTestScripts(t *testing.T, fake *wslRetryTestFake, repo string) []st
 	defer fake.mu.Unlock()
 	scripts := make([]string, 0, len(fake.materialize))
 	for i, args := range fake.materialize {
-		if len(args) != 5 || args[1] != repo || args[2] != "bash" || args[3] != "-lc" { //boundarylint:ignore CHANGE_DETECTOR_TEST WSL argv contract shape [--cd repo bash -lc script]
-			t.Fatalf("materialize call %d args = %q, want [--cd %s bash -lc <script>]", i+1, args, repo)
+		if len(args) != 6 || args[1] != repo || args[2] != "-e" || args[3] != "bash" || args[4] != "-lc" { //boundarylint:ignore CHANGE_DETECTOR_TEST WSL argv contract shape [--cd repo -e bash -lc script]
+			t.Fatalf("materialize call %d args = %q, want [--cd %s -e bash -lc <script>]", i+1, args, repo)
 		}
-		scripts = append(scripts, args[4])
+		scripts = append(scripts, args[5])
 	}
 	return scripts
 }

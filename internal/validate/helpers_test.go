@@ -53,7 +53,7 @@ func TestValidateTestRunnerSelectsWSLOnWindows(t *testing.T) {
 	if defaultValidateWSLTests("linux") {
 		t.Fatal("non-Windows hosts must retain native tests")
 	}
-	if got := validateTestRunner("windows", true); got != "wsl.exe bash -lc go test" {
+	if got := validateTestRunner("windows", true); got != "wsl.exe -e bash -lc go test" {
 		t.Fatalf("Windows runner = %q, want WSL", got)
 	}
 	if got := validateTestRunner("linux", true); got != "go test" {
@@ -84,14 +84,14 @@ func TestRenderValidateReportsRunnerOnFailure(t *testing.T) {
 	var out bytes.Buffer
 	renderValidate(&out, validateResult{
 		Tip:    "0123456789abcdef",
-		Runner: "wsl.exe bash -lc go test",
+		Runner: "wsl.exe -e bash -lc go test",
 		Failures: []ciPreflightFailure{{
 			Step:   "test",
 			Detail: "deliberate fixture failure",
 		}},
 	})
 	got := out.String()
-	for _, want := range []string{"runner: wsl.exe bash -lc go test", "test: deliberate fixture failure"} {
+	for _, want := range []string{"runner: wsl.exe -e bash -lc go test", "test: deliberate fixture failure"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("render = %q; want %q", got, want)
 		}

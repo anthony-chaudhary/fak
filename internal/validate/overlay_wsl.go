@@ -23,7 +23,7 @@ const (
 // overlayMinePathsWSLWithin copies the owned paths into the WSL workspace.
 //
 // The copy/delete commands grow with the owned path set, so they travel in a
-// script file run from the stage directory (`wsl.exe --cd <stage> bash
+// script file run from the stage directory (`wsl.exe --cd <stage> -e bash
 // ./overlay.sh`) rather than as one `bash -lc` argument. The wsl.exe command
 // line therefore stays the same size however many paths are owned: a 524-path
 // stale-base land delta once composed a ~145K-char argument, which Windows
@@ -46,7 +46,7 @@ func overlayMinePathsWSLWithin(ctx context.Context, srcRoot, wslRoot string, pat
 	if err := os.WriteFile(filepath.Join(stage, validateWSLOverlayScriptName), []byte(script), 0o600); err != nil {
 		return err
 	}
-	cmd := windowgate.CommandContext(ctx, "wsl.exe", "--cd", stage, "bash", "./"+validateWSLOverlayScriptName)
+	cmd := windowgate.CommandContext(ctx, "wsl.exe", "--cd", stage, "-e", "bash", "./"+validateWSLOverlayScriptName)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

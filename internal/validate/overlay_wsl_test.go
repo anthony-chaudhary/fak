@@ -45,13 +45,13 @@ func overlayWSLTestRequire(t *testing.T) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		out, err := exec.CommandContext(ctx, "wsl.exe", "bash", "-lc", "echo ok").Output()
+		out, err := exec.CommandContext(ctx, "wsl.exe", "-e", "bash", "-lc", "echo ok").Output()
 		if err != nil {
-			overlayWSLTestGateReason = fmt.Sprintf("wsl.exe bash -lc \"echo ok\" failed: %v", err)
+			overlayWSLTestGateReason = fmt.Sprintf("wsl.exe -e bash -lc \"echo ok\" failed: %v", err)
 			return
 		}
 		if overlayWSLTestLastLine(out) != "ok" {
-			overlayWSLTestGateReason = fmt.Sprintf("wsl.exe bash -lc \"echo ok\" printed %q", out)
+			overlayWSLTestGateReason = fmt.Sprintf("wsl.exe -e bash -lc \"echo ok\" printed %q", out)
 		}
 	})
 	if overlayWSLTestGateReason != "" {
@@ -70,15 +70,15 @@ func overlayWSLTestLastLine(out []byte) string {
 	return ""
 }
 
-// overlayWSLTestBash runs script inside WSL via `wsl.exe bash -lc` and returns stdout.
+// overlayWSLTestBash runs script inside WSL via `wsl.exe -e bash -lc` and returns stdout.
 func overlayWSLTestBash(ctx context.Context, t *testing.T, script string) []byte {
 	t.Helper()
-	cmd := exec.CommandContext(ctx, "wsl.exe", "bash", "-lc", script)
+	cmd := exec.CommandContext(ctx, "wsl.exe", "-e", "bash", "-lc", script)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("wsl.exe bash -lc %q: %v (stdout=%q stderr=%q)", script, err, out, stderr.String())
+		t.Fatalf("wsl.exe -e bash -lc %q: %v (stdout=%q stderr=%q)", script, err, out, stderr.String())
 	}
 	return out
 }
@@ -241,7 +241,7 @@ func TestOverlayMinePathsWSLLargeOwnedSet(t *testing.T) {
 		}
 		cctx, ccancel := context.WithTimeout(context.Background(), time.Minute)
 		defer ccancel()
-		if out, err := exec.CommandContext(cctx, "wsl.exe", "bash", "-lc", "rm -rf -- "+overlayWSLTestQuote(wslRoot)).CombinedOutput(); err != nil {
+		if out, err := exec.CommandContext(cctx, "wsl.exe", "-e", "bash", "-lc", "rm -rf -- "+overlayWSLTestQuote(wslRoot)).CombinedOutput(); err != nil {
 			t.Logf("cleanup of %s failed: %v: %s", wslRoot, err, out)
 		}
 	})

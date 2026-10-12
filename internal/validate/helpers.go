@@ -78,7 +78,7 @@ func defaultValidateWSLTests(goos string) bool { return goos == "windows" }
 
 func validateTestRunner(goos string, wsl bool) string {
 	if goos == "windows" && wsl {
-		return "wsl.exe bash -lc go test"
+		return "wsl.exe -e bash -lc go test"
 	}
 	return "go test"
 }
