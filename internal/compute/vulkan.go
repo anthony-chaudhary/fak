@@ -1928,22 +1928,25 @@ func (v *vulkanBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
 // no per-dispatch performance-query counter read, so on today's devices the
 // honest verdict is the typed-unavailable marker — never a host-monotonic
 // number wearing a device timer domain.
+//
+// The probe runs before vulkanMu is taken and the event is recorded after it is
+// released: the probe locks vulkanMu itself (sync.Mutex is not reentrant), and the
+// process observer must never run while the device lock is held.
 func (v *vulkanBackend) MatMul(w, x Tensor) Tensor {
-	vulkanMu.Lock()
-	defer vulkanMu.Unlock()
 	emitKernel := computetrace.Emitting()
 	var kernelStarted time.Time
 	var kernelTiming vulkanKernelTiming
 	if emitKernel {
-		kernelStarted = time.Now()
 		kernelTiming = vulkanKernelTimingFrom(ObservePhasePerformanceQuery(v), vulkanKernelPhase, nil)
+		defer func() {
+			recordVulkanMatMulKernel(v.Name(), w, x, kernelStarted, kernelTiming)
+		}()
 	}
-	defer func() {
-		if !emitKernel {
-			return
-		}
-		recordVulkanMatMulKernel(v.Name(), w, x, kernelStarted, kernelTiming)
-	}()
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	if emitKernel {
+		kernelStarted = time.Now()
+	}
 	if w.Dtype == Q6_K {
 		v.validateQ6KMatMulInputs(w, x, 1)
 	}
