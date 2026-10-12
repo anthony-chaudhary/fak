@@ -28,6 +28,28 @@ type v41PublicationRoPERecorder struct {
 	outputs                    map[compute.Buffer][]float32
 	foreign                    compute.Buffer
 	foreignReads, foreignFrees int
+	// publishes adds the ordinary BF16 publication, so the selected owner
+	// rounds its rotated tails while resident.
+	publishes    bool
+	publishSites []uint32
+}
+
+func (b *v41PublicationRoPERecorder) SupportsV41BF16Publish(n int) bool { return b.publishes && n > 0 }
+func (b *v41PublicationRoPERecorder) V41BF16Publish(x compute.Tensor, site uint32) (compute.Tensor, error) {
+	if !b.publishes || x.Backend() != b || len(x.Shape) != 1 || !compute.V41BF16PublishSite(site) {
+		return compute.Tensor{}, errors.New("publication recorder BF16 operand contract")
+	}
+	b.publishSites = append(b.publishSites, site)
+	values := append([]float32(nil), b.Backend.Read(x)...)
+	for i, v := range values {
+		bits := math.Float32bits(v)
+		rounded := v41BF16BoundaryOracle(bits)
+		if bits&0x7f800000 == 0x7f800000 || rounded&0x7f800000 == 0x7f800000 {
+			return compute.Tensor{}, &compute.V41BF16CheckedArithmeticError{Site: site, Index: i}
+		}
+		values[i] = math.Float32frombits(rounded)
+	}
+	return compute.NewF32(b, []int{len(values)}, values), nil
 }
 
 func v41PublicationRoPERequireCPU(t *testing.T) {
@@ -672,4 +694,112 @@ func TestV41CompressedPublicationRoPEReducedCold(t *testing.T) {
 		v41TailRoPECheckBits(t, "reduced group-first table", call.table, []float32{float32(math.Sin(float64(2 * group))), float32(math.Cos(float64(2 * group)))})
 	}
 	v41PublicationRoPECensus(t, b, false)
+}
+
+// With the ordinary publication bound, the rotated tails round on the device
+// while resident: bit-identical to the host copybacks, zero host BF16 rounds,
+// one publication per call, the host numeric verdict per row, and under
+// device-only a missing publication refuses typed instead of rounding on the
+// host (Ref #13668).
+// fak-test:runtime fast est=50ms lane=default
+func TestV41CompressedPublicationRoPEPublishesOnDevice(t *testing.T) {
+	v41PublicationRoPERequireCPU(t)
+	for _, v := range []struct {
+		name string
+		pos  int
+		a, b uint32
+	}{
+		{"both-negative-zero", 0, 0x80000000, 0x80000000},
+		{"odd-subnormal-tie", 0, 0x00018000, 0},
+		{"tie-odd-negative", 0, 0xbf818000, 0},
+		{"cancellation-rounding", 2, 0x41820000, 0xc0ee0000},
+	} {
+		t.Run(v.name, func(t *testing.T) {
+			run := func(publishes bool) ([]float32, []float32, *v41PublicationRoPERecorder, int64) {
+				m := &Model{Cfg: Config{HeadDim: 8, IndexHeadDim: 6, QKRopeHeadDim: 2, RopeTheta: 10000}}
+				b := newV41PublicationRoPERecorder()
+				b.publishes = publishes
+				s := &Session{M: m, Backend: b}
+				t.Cleanup(s.Close)
+				prefix := []float32{math.Float32frombits(0x80000000), 1.001, -2.003, 3, 4, 5}
+				latent := append(append([]float32(nil), prefix...), math.Float32frombits(v.a), math.Float32frombits(v.b))
+				key := append(append([]float32(nil), prefix[:4]...), math.Float32frombits(v.b), math.Float32frombits(v.a))
+				var err error
+				rounds := v41BF16PublishHostRounds(t, func() {
+					err = m.v41CompressedPublicationRoPEWithDevice(0, v.pos, latent, key, s.v41CompressedPublicationRoPEFunc())
+				})
+				if err != nil || s.BackendSessionClosed() {
+					t.Fatalf("publishes=%t: %v", publishes, err)
+				}
+				v41PublicationRoPECensus(t, b, false)
+				return latent, key, b, rounds
+			}
+			hostL, hostK, _, hostRounds := run(false)
+			gotL, gotK, b, rounds := run(true)
+			if hostRounds == 0 {
+				t.Fatal("control arm rounded nothing on the host; the witness would be vacuous")
+			}
+			if rounds != 0 {
+				t.Fatalf("bound publication left %d host BF16 rounds", rounds)
+			}
+			if !slices.Equal(b.publishSites, []uint32{compute.V41BF16PublishTailRoPEOutput}) {
+				t.Fatalf("publications %v, want one tail-RoPE output publication", b.publishSites)
+			}
+			v41TailRoPECheckBits(t, "latent device publication", gotL, hostL)
+			v41TailRoPECheckBits(t, "index device publication", gotK, hostK)
+		})
+	}
+	for _, fault := range []string{"index-nonfinite", "latent-nonfinite", "index-overflow", "latent-overflow"} {
+		t.Run(fault, func(t *testing.T) {
+			outcome := func(publishes bool) (error, int64) {
+				m := &Model{Cfg: Config{HeadDim: 8, IndexHeadDim: 6, QKRopeHeadDim: 2, RopeTheta: 10000}}
+				b := newV41PublicationRoPERecorder()
+				b.publishes = publishes
+				b.fault, b.failCall = fault, 1
+				s := &Session{M: m, Backend: b}
+				t.Cleanup(s.Close)
+				t.Cleanup(func() { b.armed = false })
+				latent, key := []float32{1, 2, 3, 4, 5, 6, .5, -.25}, []float32{2, 3, 4, 5, 1.5, -.75}
+				var err error
+				rounds := v41BF16PublishHostRounds(t, func() {
+					err = m.v41CompressedPublicationRoPEWithDevice(0, 2, latent, key, s.v41CompressedPublicationRoPEFunc())
+				})
+				var closed *BackendForwardOperationError
+				var named *V41TailRoPEOperationError
+				if !errors.As(err, &closed) || closed.Path != "v41-compressed-publication-rope" || !errors.As(err, &named) || !s.BackendSessionClosed() {
+					t.Fatalf("publishes=%t: selected numeric verdict lost owner/type: %v", publishes, err)
+				}
+				return err, rounds
+			}
+			hostErr, _ := outcome(false)
+			deviceErr, rounds := outcome(true)
+			var hostIndex, deviceIndex *V41ProjectionOperationError
+			if errors.As(hostErr, &hostIndex) != errors.As(deviceErr, &deviceIndex) || !errors.Is(deviceErr, ErrV41ForwardStage) {
+				t.Fatalf("device verdict %v does not match the host row verdict %v", deviceErr, hostErr)
+			}
+			if strings.HasPrefix(fault, "index") != (deviceIndex != nil) {
+				t.Fatalf("verdict %v attributed to the wrong row", deviceErr)
+			}
+			if rounds != 0 {
+				t.Fatalf("device verdict rounded %d values on the host", rounds)
+			}
+		})
+	}
+	t.Run("device-only-without-publication", func(t *testing.T) {
+		m := &Model{Cfg: Config{HeadDim: 4, QKRopeHeadDim: 2, RopeTheta: 10000}}
+		b := newV41PublicationRoPERecorder()
+		s := &Session{M: m, Backend: b}
+		t.Cleanup(s.Close)
+		s.SetExecutionPolicy(ExecutionPolicyDeviceOnly)
+		x := []float32{1.003, -2.007, .25, -.75}
+		before := append([]float32(nil), x...)
+		var err error
+		rounds := v41BF16PublishHostRounds(t, func() {
+			err = m.v41CompressedPublicationRoPEWithDevice(0, 2, x, nil, s.v41CompressedPublicationRoPEFunc())
+		})
+		if !errors.Is(err, errV41DeviceOnlyHostOp) || !strings.Contains(err.Error(), "bf16-boundary") || !s.BackendSessionClosed() || rounds != 0 {
+			t.Fatalf("device-only without the publication = %v (closed=%t rounds=%d), want a typed bf16-boundary refusal", err, s.BackendSessionClosed(), rounds)
+		}
+		v41TailRoPECheckBits(t, "refused tail unchanged", x, before)
+	})
 }

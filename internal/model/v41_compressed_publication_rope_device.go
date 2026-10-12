@@ -153,6 +153,37 @@ func (s *Session) v41CompressedPublicationRoPEFunc() v41CompressedPublicationRoP
 				len(rotated.Shape) != 2 || rotated.Shape[0] != rows || rotated.Shape[1] != rotaryDim {
 				return nil, errV41TailRoPEResult
 			}
+			// The ordinary publication rounds both rotated rows while resident, so
+			// under the bf16-boundary binding no tail is rounded on the host. Its
+			// numeric verdict keeps each row's host error; a backend without the
+			// publication keeps the host copybacks below, except under device-only.
+			stage = "rotary BF16 publication"
+			published, selected, err := s.v41PublishResidentBF16(rotated, compute.V41BF16PublishTailRoPEOutput)
+			var numeric *compute.V41BF16CheckedArithmeticError
+			if selected && errors.As(err, &numeric) {
+				if rows == 2 && numeric.Index < rotaryDim {
+					return nil, &V41ProjectionOperationError{
+						Layer: layer, Leaf: "indexer.k_norm.weight", Stage: string(v41StageIndexer),
+						Cause: v41StageErr(v41StageIndexer, layer, fmt.Errorf("%w: indexer.k_norm.weight BF16 rotary value[%d] is non-finite or overflows", ErrV41ForwardStage, numeric.Index)),
+					}
+				}
+				return nil, v41StageErr(v41StageCompress, layer, fmt.Errorf("%w: rotary latent BF16 value[%d] is non-finite or overflows", ErrV41ForwardStage, numeric.Index-(rows-1)*rotaryDim))
+			}
+			if err != nil {
+				return nil, err
+			}
+			if selected {
+				retain(published)
+				stage = "tail readback"
+				values := backend.Read(published)
+				if len(values) != width || !v41BF16Widened(values) {
+					return nil, errV41TailRoPEResult
+				}
+				return append([]float32(nil), values...), nil
+			}
+			if s.v41DeviceOnlyPolicy() {
+				return nil, s.v41DeviceOnlyMissingOp(layer, "bf16-boundary")
+			}
 			stage = "tail readback"
 			values := backend.Read(rotated)
 			if len(values) != width {

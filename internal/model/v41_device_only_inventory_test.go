@@ -14,6 +14,11 @@ func TestV41DeviceOnlyHostOpInventoryIsClosedAndAdmitsWhenEmpty(t *testing.T) {
 		}
 		seen[op.name] = true
 	}
+	saved := v41DeviceOnlyHostOps
+	t.Cleanup(func() { v41DeviceOnlyHostOps = saved })
+	// The shipped inventory is drained, so the typed refusal and its copy
+	// semantics are exercised on an injected two-op inventory.
+	v41DeviceOnlyHostOps = []v41HostOp{{name: "first", site: "F"}, {name: "second", site: "S"}}
 	err := v41DeviceOnlyRefusal()
 	var typed *v41DeviceOnlyHostOpError
 	if !errors.Is(err, errV41DeviceOnlyHostOp) || !errors.As(err, &typed) || len(typed.ops) != len(v41DeviceOnlyHostOps) {
@@ -24,8 +29,6 @@ func TestV41DeviceOnlyHostOpInventoryIsClosedAndAdmitsWhenEmpty(t *testing.T) {
 		t.Fatal("refusal aliases the inventory")
 	}
 
-	saved := v41DeviceOnlyHostOps
-	t.Cleanup(func() { v41DeviceOnlyHostOps = saved })
 	v41DeviceOnlyHostOps = nil
 	if err := v41DeviceOnlyRefusal(); err != nil {
 		t.Fatalf("empty inventory refusal = %v, want admission", err)

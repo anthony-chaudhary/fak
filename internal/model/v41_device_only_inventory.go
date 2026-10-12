@@ -37,9 +37,7 @@ func (e *v41DeviceOnlyHostOpError) Is(target error) bool { return target == errV
 // v41DeviceOnlyHostOps is the closed inventory the device-only gate refuses on.
 // Remove an entry only in the change that moves that op onto the device seam;
 // an empty inventory is the V4.1 admission condition.
-var v41DeviceOnlyHostOps = []v41HostOp{
-	{name: "indexer-weight-scale", site: "v41IndexWeightsBF16"},
-}
+var v41DeviceOnlyHostOps = []v41HostOp{}
 
 func v41DeviceOnlyRefusal() error {
 	if len(v41DeviceOnlyHostOps) == 0 {

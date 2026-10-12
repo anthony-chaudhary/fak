@@ -37,7 +37,9 @@ func TestV41GatherOpsVulkanSeams(t *testing.T) {
 	}
 
 	t.Run("inverse-output", func(t *testing.T) {
-		s := &Session{M: &Model{}, Backend: be}
+		// Layer 3 must be a configured decoder layer: the ordinary BF16
+		// publication's closed site table refuses layers outside the model.
+		s := &Session{M: &Model{Cfg: Config{NumLayers: 4}}, Backend: be}
 		t.Cleanup(s.Close)
 		ops := s.v41DeviceGatherOpsFunc()
 		if ops.inverseOutput == nil {

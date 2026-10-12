@@ -11,9 +11,7 @@ import (
 // Each stays pinned in the inventory until
 // the change that moves it onto a device seam removes both the entry and its pin,
 // so an empty inventory can never admit host compute.
-var v41DeviceOnlyPinnedHostOps = []v41HostOp{
-	{name: "indexer-weight-scale", site: "v41IndexWeightsBF16"},
-}
+var v41DeviceOnlyPinnedHostOps = []v41HostOp{}
 
 // fak-test:runtime fast est=1s lane=default
 func TestV41DeviceOnlyInventoryPinsUninventoriedHostOps(t *testing.T) {
@@ -52,7 +50,7 @@ func TestV41DeviceOnlyInventoryPinsUninventoriedHostOps(t *testing.T) {
 			t.Fatalf("pinned host site %s no longer exists; re-point the inventory entry", pin.site)
 		}
 	}
-	if err := v41DeviceOnlyRefusal(); err == nil {
+	if err := v41DeviceOnlyRefusal(); err == nil && len(v41DeviceOnlyPinnedHostOps) > 0 {
 		t.Fatal("device-only gate admits V4.1 while pinned host ops remain")
 	}
 }

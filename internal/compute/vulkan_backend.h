@@ -514,6 +514,17 @@ int fvk_v41_logit_scale_f32(const void *dInput, void *dOut, int count, float sca
 int fvk_v41_logit_scale_module_abi(const void *data, size_t bytes);
 #endif
 
+/* Ordinary strict twin of that scalar multiply (registry V13/complete73 module
+ * v41_scale_exact.spv): same contract, arguments and return codes. Optional at
+ * init: loaded only when the selected device reports binary32 DenormPreserve,
+ * SignedZeroInfNanPreserve and RoundingModeRTE and the exact scalar proof
+ * admits the module bytes; otherwise it stays unavailable (return 3).
+ * fvk_v41_scale_exact_module_abi runs that proof on caller bytes, no device. */
+int fvk_have_v41_scale_exact(void);
+int fvk_v41_scale_exact_count_supported(int count);
+int fvk_v41_scale_exact_f32(const void *dInput, void *dOut, int count, float scale);
+int fvk_v41_scale_exact_module_abi(const void *data, size_t bytes);
+
 /* SwiGLU: y = silu(g) * u, elementwise, length n. */
 void fvk_swiglu_f32(const void *dG, const void *dU, void *dY, int n);
 void fvk_swiglu_limit_f32(const void *dG, const void *dU, void *dY, int n, float limit);

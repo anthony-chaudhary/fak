@@ -101,7 +101,7 @@ func (m *Model) v41IndexRowsWithDeviceOps(l, pos int, qLat, hidden []float32, ke
 	if err != nil {
 		return nil, err
 	}
-	weights, err = v41IndexWeightsBF16Published(l, weights, dim, nHeads, publish)
+	weights, err = v41IndexWeightsBF16Device(l, weights, dim, nHeads, publish, ops.indexWeightScaleFunc())
 	if err != nil {
 		return nil, err
 	}

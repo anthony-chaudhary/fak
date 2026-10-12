@@ -100,16 +100,10 @@ func TestV41DeviceOnlyHostInventoryAndLoRAAdmission(t *testing.T) {
 		t.Fatal("admission witness requires the cpu-ref recorder; no physical device is qualified")
 	}
 	t.Run("static-inventory", func(t *testing.T) {
-		want := []v41HostOp{
-			{name: "indexer-weight-scale", site: "v41IndexWeightsBF16"},
-		}
-		last := -1
-		for _, op := range want {
-			at := slices.Index(v41DeviceOnlyHostOps, op)
-			if at <= last {
-				t.Fatalf("host operation %+v missing or out of forward order", op)
-			}
-			last = at
+		// Every V4.1 forward op now has a device seam; admission rests on the
+		// binding table alone.
+		if len(v41DeviceOnlyHostOps) != 0 {
+			t.Fatalf("static host inventory = %v, want drained", v41HostOpNames(v41DeviceOnlyHostOps))
 		}
 	})
 	savedOps, savedBindings := v41DeviceOnlyHostOps, v41DeviceOnlyBindings
