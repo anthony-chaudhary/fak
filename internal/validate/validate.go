@@ -36,6 +36,10 @@ import (
 const (
 	defaultValidateTimeout      = 4 * time.Minute
 	validateWSLPreflightTimeout = 14500 * time.Millisecond
+	// validateWSLPreflightTimeoutEnv overrides the first probe bound; the retry
+	// bound is always validateWSLPreflightRetryFactor times it.
+	validateWSLPreflightTimeoutEnv  = "FAK_VALIDATE_WSL_PREFLIGHT_TIMEOUT"
+	validateWSLPreflightRetryFactor = 3
 )
 
 var (
@@ -831,6 +835,19 @@ func runValidateWSLCapabilityCommand(ctx context.Context, args ...string) ([]byt
 	return out, err
 }
 
+// validateWSLPreflightBounds is the per-attempt probe deadline: a bare wsl.exe
+// launch takes about a second idle but can exceed the first bound under host
+// load, so one longer retry precedes the typed unavailable verdict.
+func validateWSLPreflightBounds() []time.Duration {
+	first := validateWSLPreflightTimeout
+	if raw := strings.TrimSpace(os.Getenv(validateWSLPreflightTimeoutEnv)); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			first = d
+		}
+	}
+	return []time.Duration{first, validateWSLPreflightRetryFactor * first}
+}
+
 func preflightValidateWSLCapabilitiesWithin(ctx context.Context) validateWSLCapabilityVerdict {
 	required := validateWSLRequiredCommandNames()
 	verdict := validateWSLCapabilityVerdict{Status: "ready", Required: required, Missing: []string{}}
@@ -853,13 +870,22 @@ func preflightValidateWSLCapabilitiesWithin(ctx context.Context) validateWSLCapa
 	}
 	validateWSLCapabilities.Unlock()
 
-	probeCtx, cancel := context.WithTimeout(ctx, validateWSLPreflightTimeout)
-	defer cancel()
-	out, err := validateWSLCommand(probeCtx, "bash", "-lc", validateWSLCapabilityScript(required))
+	bounds := validateWSLPreflightBounds()
+	var out []byte
+	timedOut := false
+	for _, bound := range bounds {
+		probeCtx, cancel := context.WithTimeout(ctx, bound)
+		out, err = validateWSLCommand(probeCtx, "bash", "-lc", validateWSLCapabilityScript(required))
+		timedOut = err != nil && errors.Is(probeCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
+		cancel()
+		if !timedOut {
+			break
+		}
+	}
 	if err != nil {
-		if errors.Is(probeCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+		if timedOut {
 			verdict.Status = "unavailable"
-			verdict.Detail = fmt.Sprintf("WSL capability preflight exceeded %s before workspace allocation; repair WSL and rerun; no fallback selected", validateWSLPreflightTimeout)
+			verdict.Detail = fmt.Sprintf("WSL capability preflight exceeded %s across %d attempts before workspace allocation (raise %s under host load); repair WSL and rerun; no fallback selected", bounds, len(bounds), validateWSLPreflightTimeoutEnv)
 		} else {
 			verdict.Status = "missing"
 			verdict.Missing = []string{"bash"}
