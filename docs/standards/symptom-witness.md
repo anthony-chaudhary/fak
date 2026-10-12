@@ -113,11 +113,14 @@ someone eyeballing stderr once.
 
 ## Honest fences
 
-- **This is the documented rule plus a runnable check, not yet an automated gate.** The
-  red-then-green recipe above is a procedure an agent or operator runs by hand today; there
-  is no `dos`/`fak` verb that auto-applies a fix's new test to its parent commit and refuses
-  the commit on a missing-or-tautological witness. That automated gate (the strongest form of
-  the issue's proposal) is the named follow-on, not shipped here.
+- **The automated gate refuses only refutations.** `fak worktree worker land` runs the
+  red-then-green check for every `fix(*)` commit and refuses with `SYMPTOM_UNWITNESSED` only
+  when the witness is refuted (the test fails on the fix, passes at the parent, or is
+  missing). An abstention - the budget expired, or the regression names fix-introduced API
+  so the parent cannot build it - is not evidence of a bad fix: the land proceeds with a
+  `SYMPTOM_ABSTAIN_*` token in `symptom_verdict` and one advisory line. Prefer a regression
+  that drives the bug through API the parent already has, so the land reads
+  `SYMPTOM_CONFIRMED`.
 - **It applies to a *reproducible* symptom, not every `fix(...)`.** A fix for a non-observable
   invariant, a build break, or a typo may have no reproducible runtime symptom to witness; the
   rule binds when there is a failure condition a test can reproduce. Honesty over a forced

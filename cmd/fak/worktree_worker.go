@@ -612,39 +612,98 @@ func verifyWorkerLandSymptomSelected(wtPath, ref string, extraTags, testSelector
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	outcome, detail := resolver.ResolveSymptomWithDetail(ctx, ref, true)
+	return workerLandSymptomVerdict(outcome, detail, timeout)
+}
+
+// Closed symptom_verdict tokens. Only a refutation refuses the land; an abstention
+// is not evidence against the fix (timeouts on a loaded host, a regression that
+// names fix-introduced API), so it lands with a SYMPTOM_ABSTAIN_* advisory.
+const (
+	symptomVerdictConfirmed          = "SYMPTOM_CONFIRMED"
+	symptomVerdictAbstainTimeout     = "SYMPTOM_ABSTAIN_TIMEOUT"
+	symptomVerdictAbstainParentBuild = "SYMPTOM_ABSTAIN_PARENT_BUILD"
+	symptomVerdictAbstainSelection   = "SYMPTOM_ABSTAIN_SELECTION"
+	symptomVerdictAbstainOther       = "SYMPTOM_ABSTAIN_OTHER"
+)
+
+func workerLandSymptomVerdict(outcome abi.WitnessOutcome, detail string, timeout time.Duration) workerworktree.Result {
 	switch outcome {
 	case abi.WitnessConfirmed:
-		return workerworktree.Result{OK: true}
+		return workerworktree.Result{OK: true, SymptomVerdict: symptomVerdictConfirmed}
 	case abi.WitnessRefuted:
-		return workerLandSymptomUnwitnessed(symptomRefusalDetail("refuted", detail))
-	default:
-		res := workerLandSymptomUnwitnessed(symptomRefusalDetail("abstained", detail))
-		if strings.HasPrefix(res.Detail, "SYMPTOM_TIMEOUT") {
-			res.Detail += fmt.Sprintf(" [symptom budget %s; raise with --symptom-timeout]", timeout)
-		}
+		res := workerLandSymptomUnwitnessed(symptomRefusalDetail("refuted", detail))
+		res.SymptomVerdict = symptomSubtype(detail)
 		return res
+	default:
+		token := symptomAbstainToken(detail)
+		advisory := token + ": symptom witness abstained, landing without red-then-green proof: " + detail
+		if token == symptomVerdictAbstainTimeout {
+			advisory += fmt.Sprintf(" [symptom budget %s; raise with --symptom-timeout]", timeout)
+		}
+		return workerworktree.Result{OK: true, SymptomVerdict: token, SymptomAdvisory: advisory}
 	}
 }
 
+// symptomAbstainToken classifies an abstention. A timeout is classified first: a run
+// the budget killed can leave a detail that also names a parent failure.
+func symptomAbstainToken(detail string) string {
+	switch symptomSubtype(detail) {
+	case "SYMPTOM_TIMEOUT":
+		return symptomVerdictAbstainTimeout
+	case "SYMPTOM_PARENT_BUILD":
+		return symptomVerdictAbstainParentBuild
+	case "SYMPTOM_SELECTION_AMBIGUOUS":
+		return symptomVerdictAbstainSelection
+	}
+	if strings.Contains(detail, "selector") || strings.Contains(detail, "no executable package") {
+		return symptomVerdictAbstainSelection
+	}
+	return symptomVerdictAbstainOther
+}
+
 // symptomRefusalDetail keeps the established top-level SYMPTOM_UNWITNESSED code
-// while exposing a stable subtype for automation and operator remediation. A timeout
-// is classified first: a run the budget killed can leave a detail that also names a
-// zero match or a parent failure, and neither is evidence once the budget expired.
+// while exposing a stable subtype for automation and operator remediation.
 func symptomRefusalDetail(outcome, detail string) string {
-	subtype := "SYMPTOM_OTHER"
+	return symptomSubtype(detail) + ": symptom witness was " + outcome + ": " + detail
+}
+
+// symptomSubtype maps a witness detail onto its closed subtype. A timeout is
+// classified first: a run the budget killed can leave a detail that also names a
+// zero match or a parent failure, and neither is evidence once the budget expired.
+func symptomSubtype(detail string) string {
 	switch {
 	case strings.Contains(detail, "timed out"):
-		subtype = "SYMPTOM_TIMEOUT"
+		return "SYMPTOM_TIMEOUT"
 	case strings.Contains(detail, "matched no"):
-		subtype = "SYMPTOM_NO_MATCH"
+		return "SYMPTOM_NO_MATCH"
 	case strings.Contains(detail, "parent") && (strings.Contains(detail, "did not build") || strings.Contains(detail, "did not parse")):
-		subtype = "SYMPTOM_PARENT_BUILD"
+		return "SYMPTOM_PARENT_BUILD"
+	case strings.Contains(detail, "passed at parent"):
+		return "SYMPTOM_PARENT_PASSED"
 	case strings.Contains(detail, "candidate") && strings.Contains(detail, "failed"):
-		subtype = "SYMPTOM_CANDIDATE_FAILED"
+		return "SYMPTOM_CANDIDATE_FAILED"
 	case strings.Contains(detail, "ambiguous"):
-		subtype = "SYMPTOM_SELECTION_AMBIGUOUS"
+		return "SYMPTOM_SELECTION_AMBIGUOUS"
+	case strings.Contains(detail, "no changed test file"):
+		return "SYMPTOM_NO_TEST"
 	}
-	return subtype + ": symptom witness was " + outcome + ": " + detail
+	return "SYMPTOM_OTHER"
+}
+
+// withSymptomVerdict stamps the witness verdict onto the land result and prints a
+// successful land's abstention as one stable `advisory: SYMPTOM_ABSTAIN_*` line.
+func withSymptomVerdict(res, symptom workerworktree.Result, stderr io.Writer) workerworktree.Result {
+	if symptom.SymptomVerdict == "" {
+		return res
+	}
+	if res.SymptomVerdict == "" {
+		res.SymptomVerdict = symptom.SymptomVerdict
+	}
+	if res.OK && symptom.SymptomAdvisory != "" {
+		res.SymptomAdvisory = symptom.SymptomAdvisory
+		fmt.Fprintln(stderr, "advisory: "+symptom.SymptomAdvisory)
+	}
+	return res
 }
 
 var (
@@ -1166,7 +1225,7 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 			return returnEarly(workerworktree.Result{OK: false, Reason: bindingErr.Error()}, 2)
 		}
 		var preparedReceipt *workerworktree.PreparedLandReceipt
-		var res workerworktree.Result
+		var res, symptomRes workerworktree.Result
 		if mode == "prepare" {
 			prospectiveVerify := func(dir string, materializationErr error) workerworktree.Result {
 				if materializationErr != nil {
@@ -1179,9 +1238,11 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 				}
 				if requireSymptomWitness {
 					if len(selectedSymptomTests) > 0 {
-						return verifyWorkerLandSymptomSelected(dir, "HEAD", splitTagList(*symptomTags), selectedSymptomTests, *symptomTimeout)
+						symptomRes = verifyWorkerLandSymptomSelected(dir, "HEAD", splitTagList(*symptomTags), selectedSymptomTests, *symptomTimeout)
+					} else {
+						symptomRes = worktreeWorkerPreparedSymptomVerify(dir, "HEAD", splitTagList(*symptomTags), *symptomTimeout)
 					}
-					return worktreeWorkerPreparedSymptomVerify(dir, "HEAD", splitTagList(*symptomTags), *symptomTimeout)
+					return symptomRes
 				}
 				return workerworktree.Result{OK: true}
 			}
@@ -1208,6 +1269,7 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 				ReceiptID: strings.TrimSpace(*receiptID), Paths: []string(paths), Verification: binding,
 			}, nil, opts...)
 		}
+		res = withSymptomVerdict(res, symptomRes, stderr)
 		emitWorktreeWorkerPreparedLand(stdout, worktreeWorkerPreparedLandOut{Result: res, PreparedReceipt: preparedReceipt})
 		if !res.OK {
 			return res, 1
@@ -1215,13 +1277,15 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 		return res, 0
 	}
 	timeoutSet := flagWasSet(fs, "disambiguation-timeout-ms")
+	var symptomRes workerworktree.Result
 	res, err := withWorkerLandDisambiguationTimeout(*disambiguationTimeoutMS, timeoutSet, func() workerworktree.Result {
 		if requireSymptomWitness {
 			prospectiveVerify := func(dir string, materializationErr error) workerworktree.Result {
 				if materializationErr != nil {
 					return workerLandSymptomUnwitnessed(materializationErr.Error())
 				}
-				return verifyWorkerLandSymptomSelected(dir, "HEAD", splitTagList(*symptomTags), selectedSymptomTests, *symptomTimeout)
+				symptomRes = verifyWorkerLandSymptomSelected(dir, "HEAD", splitTagList(*symptomTags), selectedSymptomTests, *symptomTimeout)
+				return symptomRes
 			}
 			return workerworktree.LandProspectiveVerified(
 				repoRoot, worktreeDir, strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile),
@@ -1236,6 +1300,7 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 			Reason: "configure worker land disambiguation timeout: " + err.Error(),
 		}
 	}
+	res = withSymptomVerdict(res, symptomRes, stderr)
 	if !res.OK && res.Code == "SYMPTOM_UNWITNESSED" {
 		return res, 1
 	}

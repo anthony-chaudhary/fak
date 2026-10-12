@@ -1915,7 +1915,19 @@ func TestWorktreeWorkerPublishRequiresExplicitMode(t *testing.T) {
 	}
 }
 
+const symptomFixtureFixedCalc = "package pkg\n\nfunc Calc(n int) int {\n\tif n > 0 { return n }\n\tif n < 0 { return -n }\n\treturn 0\n}\n"
+
 func newSymptomWorkerFixture(t *testing.T, isRedThenGreen bool) (repo, worktree, base string) {
+	t.Helper()
+	if isRedThenGreen {
+		return newSymptomWorkerFixtureSources(t, symptomFixtureFixedCalc, "package pkg\n\nimport \"testing\"\n\nfunc TestCalcNegative(t *testing.T) {\n\tif Calc(-5) != 5 {\n\t\tt.Fatalf(\"Calc(-5)=%d, want 5\", Calc(-5))\n\t}\n}\n")
+	}
+	return newSymptomWorkerFixtureSources(t, symptomFixtureFixedCalc, "package pkg\n\nimport \"testing\"\n\nfunc TestCalcPositive(t *testing.T) {\n\tif Calc(5) != 5 {\n\t\tt.Fatalf(\"Calc(5)=%d, want 5\", Calc(5))\n\t}\n}\n")
+}
+
+// newSymptomWorkerFixtureSources commits a fix(*) candidate carrying calcSrc and
+// testSrc over a parent whose Calc returns 0 for negatives.
+func newSymptomWorkerFixtureSources(t *testing.T, calcSrc, testSrc string) (repo, worktree, base string) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git unavailable")
@@ -1957,19 +1969,15 @@ func newSymptomWorkerFixture(t *testing.T, isRedThenGreen bool) (repo, worktree,
 
 	git(repo, "worktree", "add", "--detach", worktree, base)
 
-	if isRedThenGreen {
-		_ = os.WriteFile(filepath.Join(worktree, "pkg", "calc.go"), []byte("package pkg\n\nfunc Calc(n int) int {\n\tif n > 0 { return n }\n\tif n < 0 { return -n }\n\treturn 0\n}\n"), 0o644)
-		_ = os.WriteFile(filepath.Join(worktree, "pkg", "calc_test.go"), []byte("package pkg\n\nimport \"testing\"\n\nfunc TestCalcNegative(t *testing.T) {\n\tif Calc(-5) != 5 {\n\t\tt.Fatalf(\"Calc(-5)=%d, want 5\", Calc(-5))\n\t}\n}\n"), 0o644)
-	} else {
-		_ = os.WriteFile(filepath.Join(worktree, "pkg", "calc.go"), []byte("package pkg\n\nfunc Calc(n int) int {\n\tif n > 0 { return n }\n\tif n < 0 { return -n }\n\treturn 0\n}\n"), 0o644)
-		_ = os.WriteFile(filepath.Join(worktree, "pkg", "calc_test.go"), []byte("package pkg\n\nimport \"testing\"\n\nfunc TestCalcPositive(t *testing.T) {\n\tif Calc(5) != 5 {\n\t\tt.Fatalf(\"Calc(5)=%d, want 5\", Calc(5))\n\t}\n}\n"), 0o644)
-	}
+	_ = os.WriteFile(filepath.Join(worktree, "pkg", "calc.go"), []byte(calcSrc), 0o644)
+	_ = os.WriteFile(filepath.Join(worktree, "pkg", "calc_test.go"), []byte(testSrc), 0o644)
 
 	git(worktree, "add", ".")
 	git(worktree, "commit", "-qm", "fix(calc): fix negative calculation (fak calc)")
 	return repo, worktree, base
 }
 
+// fak-test:runtime slow est=240s lane=default
 func TestWorkerLandSymptom(t *testing.T) {
 	t.Run("tautological fix is rejected with SYMPTOM_UNWITNESSED", func(t *testing.T) {
 		repo, worktree, base := newSymptomWorkerFixture(t, false)
@@ -1984,8 +1992,21 @@ func TestWorkerLandSymptom(t *testing.T) {
 		if res.OK || res.Code != "SYMPTOM_UNWITNESSED" || code == 0 {
 			t.Fatalf("expected rejection with SYMPTOM_UNWITNESSED, got res=%+v code=%d err=%s", res, code, errb.String())
 		}
-		if res.Detail != "SYMPTOM_OTHER: symptom witness was refuted: selected symptom test passed at parent" {
-			t.Fatalf("expected parent-pass symptom refutation, got detail=%q", res.Detail)
+		if res.SymptomVerdict != "SYMPTOM_PARENT_PASSED" {
+			t.Fatalf("symptom_verdict=%q, want SYMPTOM_PARENT_PASSED", res.SymptomVerdict)
+		}
+	})
+
+	t.Run("candidate failure is still refused as SYMPTOM_CANDIDATE_FAILED", func(t *testing.T) {
+		repo, worktree, base := newSymptomWorkerFixtureSources(t, symptomFixtureFixedCalc,
+			"package pkg\n\nimport \"testing\"\n\nfunc TestCalcNegative(t *testing.T) {\n\tif Calc(-5) != 6 {\n\t\tt.Fatalf(\"Calc(-5)=%d\", Calc(-5))\n\t}\n}\n")
+		var out, errb bytes.Buffer
+		res, code := runWorktreeWorkerLand(&out, &errb, []string{
+			"--root", repo, "--worktree", worktree, "--base-sha", base,
+			"--paths", "pkg/calc.go", "--paths", "pkg/calc_test.go",
+		})
+		if res.OK || code == 0 || res.Code != "SYMPTOM_UNWITNESSED" || res.SymptomVerdict != "SYMPTOM_CANDIDATE_FAILED" {
+			t.Fatalf("want SYMPTOM_UNWITNESSED/SYMPTOM_CANDIDATE_FAILED refusal, got res=%+v code=%d err=%s", res, code, errb.String())
 		}
 	})
 
@@ -2001,6 +2022,9 @@ func TestWorkerLandSymptom(t *testing.T) {
 		})
 		if !res.OK || code != 0 {
 			t.Fatalf("expected successful landing, got res=%+v code=%d err=%s", res, code, errb.String())
+		}
+		if res.SymptomVerdict != symptomVerdictConfirmed || res.SymptomAdvisory != "" {
+			t.Fatalf("symptom_verdict=%q advisory=%q, want SYMPTOM_CONFIRMED without advisory", res.SymptomVerdict, res.SymptomAdvisory)
 		}
 	})
 

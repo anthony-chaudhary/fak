@@ -186,6 +186,11 @@ type Result struct {
 	// landed paths; a non-synced status comes with LandResultLandedSyncIncomplete.
 	SharedSync *SharedSyncReceipt `json:"shared_sync,omitempty"`
 	Cost       *LandCostReceipt   `json:"cost,omitempty"`
+	// SymptomVerdict is the closed fix(*) symptom-witness token: SYMPTOM_CONFIRMED,
+	// a SYMPTOM_ABSTAIN_* advisory (the land proceeds), or the refusal subtype
+	// under Code SYMPTOM_UNWITNESSED. Empty when no symptom witness ran.
+	SymptomVerdict  string `json:"symptom_verdict,omitempty"`
+	SymptomAdvisory string `json:"symptom_advisory,omitempty"`
 	// pooled is internal lifecycle evidence: unlike generic same-key reuse, this
 	// Prepare exclusively reserved an idle member and may safely destroy it if the
 	// post-materialization owner/state write fails.
