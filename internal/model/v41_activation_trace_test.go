@@ -29,12 +29,13 @@ func TestV41ActivationTrace(t *testing.T) {
 	ids := []int{1, 3, 5}
 	cfg := m.Cfg
 
-	wantStages := []string{"q_latent", "kv_latent", "attention_projected", "moe_sum"}
+	wantStages := []string{"q_latent", "kv_latent", "attention_projected", "moe_sum", "residual_streams"}
 	wantWidth := map[string]int{
 		"q_latent":            cfg.QLoraRank,
 		"kv_latent":           cfg.HeadDim,
 		"attention_projected": cfg.HiddenSize,
 		"moe_sum":             cfg.HiddenSize,
+		"residual_streams":    4 * cfg.HiddenSize,
 	}
 	tol := computetrace.ActivationTolerance{Atol: 1e-6, Rtol: 1e-6}
 

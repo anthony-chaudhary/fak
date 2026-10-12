@@ -72,6 +72,12 @@ type Event struct {
 	WeightDigest  string    `json:"weight_digest,omitempty"`
 	SampleIndices []int     `json:"sample_indices,omitempty"`
 	SampleValues  []float32 `json:"sample_values,omitempty"`
+
+	// ExcludedSampleIndices names sample indices a producer declares not
+	// comparable (for example a reference captured after a transform the other
+	// side samples before). ActivationErrorProfile skips them and counts them;
+	// CompareActivationTraces ignores the field and stays strict.
+	ExcludedSampleIndices []int `json:"excluded_sample_indices,omitempty"`
 }
 
 type Artifact struct {
@@ -85,6 +91,11 @@ type Artifact struct {
 	// comparator must report INCOMPARABLE rather than agreement.
 	RetainedSampleValues uint64 `json:"retained_sample_values,omitempty"`
 	DroppedSampleValues  uint64 `json:"dropped_sample_values,omitempty"`
+
+	// InputTokens optionally records the token ids the traced forward consumed,
+	// so AdoptActivationDigests can prove two traces saw the same input before a
+	// reference adopts the other trace's provenance digests.
+	InputTokens []int `json:"input_tokens,omitempty"`
 }
 
 type Recorder struct {
@@ -95,10 +106,26 @@ type Recorder struct {
 	overhead    int64
 	retained    uint64
 	droppedSamp uint64
+	sampleTotal int
 }
 
 // New returns a disabled recorder when limit is zero. Enabled recorders retain at most limit events.
-func New(limit int) *Recorder     { return &Recorder{limit: limit} }
+func New(limit int) *Recorder { return &Recorder{limit: limit} }
+
+// NewWithSampleBudget is New with a recorder-total activation-sample budget in
+// place of MaxActivationSamplesTotal. A budget <= 0 keeps the default; the
+// per-event cap MaxActivationSamplesPerEvent is unchanged.
+func NewWithSampleBudget(limit, maxSamples int) *Recorder {
+	return &Recorder{limit: limit, sampleTotal: maxSamples}
+}
+
+func (r *Recorder) sampleBudget() int {
+	if r.sampleTotal > 0 {
+		return r.sampleTotal
+	}
+	return MaxActivationSamplesTotal
+}
+
 func (r *Recorder) Enabled() bool { return r != nil && r.limit > 0 }
 func (r *Recorder) Record(e Event) {
 	if !r.Enabled() {
@@ -118,6 +145,7 @@ func (r *Recorder) Record(e Event) {
 	}
 	e.Shapes = cloneShapes(e.Shapes)
 	e.SampleIndices, e.SampleValues = r.boundSamples(e.SampleIndices, e.SampleValues)
+	e.ExcludedSampleIndices = append([]int(nil), e.ExcludedSampleIndices...)
 	r.events = append(r.events, e)
 	r.overhead += time.Since(began).Nanoseconds()
 }
@@ -134,7 +162,7 @@ func (r *Recorder) boundSamples(idx []int, vals []float32) ([]int, []float32) {
 	if keep > MaxActivationSamplesPerEvent {
 		keep = MaxActivationSamplesPerEvent
 	}
-	if room := MaxActivationSamplesTotal - int(r.retained); keep > room {
+	if room := r.sampleBudget() - int(r.retained); keep > room {
 		keep = room
 	}
 	if dropped := len(vals) - keep; dropped > 0 {
@@ -165,6 +193,7 @@ func (r *Recorder) Artifact() Artifact {
 		events[i] = r.events[i]
 		events[i].SampleIndices = append([]int(nil), r.events[i].SampleIndices...)
 		events[i].SampleValues = append([]float32(nil), r.events[i].SampleValues...)
+		events[i].ExcludedSampleIndices = append([]int(nil), r.events[i].ExcludedSampleIndices...)
 	}
 	return Artifact{
 		Schema:               Schema,
@@ -211,7 +240,17 @@ var active struct {
 
 // Enable installs the process recorder. Calling the returned function disables it.
 func Enable(limit int, run, request string) (*Recorder, func()) {
-	r := New(limit)
+	return install(New(limit), run, request)
+}
+
+// EnableWithSampleBudget is Enable with a recorder-total activation-sample
+// budget (see NewWithSampleBudget), for a producer whose full-depth forward
+// needs more than the MaxActivationSamplesTotal default.
+func EnableWithSampleBudget(limit, maxSamples int, run, request string) (*Recorder, func()) {
+	return install(NewWithSampleBudget(limit, maxSamples), run, request)
+}
+
+func install(r *Recorder, run, request string) (*Recorder, func()) {
 	active.Lock()
 	active.recorder, active.run, active.request = r, run, request
 	active.Unlock()

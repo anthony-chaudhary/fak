@@ -455,6 +455,9 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		scratch.mhcCarry.device = mhcDevice
 		scratch.mhcCarry.resident = resident
 	}
+	if finish := m.v41ActivationTraceFromEnv(seq); finish != nil {
+		defer func() { err = finish(err) }()
+	}
 	// #13325: resolve the optional activation-checkpoint producer ONCE per
 	// forward. Disabled (the default) it is nil and every emit is skipped, so the
 	// forward is byte-for-byte unchanged and adds no allocations.
@@ -465,6 +468,9 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 			return nil, err
 		}
 		executedLayers++
+		if err := trace.recordLayerStreams(l, streams, resident); err != nil {
+			return nil, err
+		}
 		hidden := flatten(x)
 		if resident != nil {
 			rows, err := resident.hiddenRows(l)
