@@ -714,6 +714,8 @@ func TestRunWarmupBoundedTimeoutOnNonReturningBackend(t *testing.T) {
 	}
 	if code, body := warmupHealthz(t, srv); code != http.StatusServiceUnavailable || body["ok"] != false {
 		t.Fatalf("post-timeout serve: /healthz = %d ok=%v, want 503 ok=false", code, body["ok"])
+	} else if body["warmup_failed"] != "warmup_timeout" {
+		t.Fatalf("post-timeout reason = %v, want warmup_timeout", body["warmup_failed"])
 	}
 }
 
@@ -749,5 +751,143 @@ func TestAgentWarmProfileUnconfiguredWhenPlannerNotWarmer(t *testing.T) {
 	}
 	if _, err := srv.RunAgentWarmup(context.Background()); !errors.Is(err, ErrAgentWarmUnconfigured) {
 		t.Fatalf("RunAgentWarmup on non-warmer err = %v, want ErrAgentWarmUnconfigured", err)
+	}
+}
+
+// bootFailurePlanner isolates boot-probe failures while using the normal mock
+// planner for a successful retry and for served inference.
+type bootFailurePlanner struct {
+	*agent.MockPlanner
+	boot func(context.Context, []agent.Message) (*agent.Completion, error)
+}
+
+func (p *bootFailurePlanner) Complete(ctx context.Context, msgs []agent.Message, defs []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	if agent.IsBootProbe(ctx) {
+		return p.boot(ctx, msgs)
+	}
+	return p.MockPlanner.Complete(ctx, msgs, defs, opts...)
+}
+
+// Both planner goroutines must contain Go panics before reporting readiness.
+// fak-test:runtime fast est=100ms lane=default
+func TestRunWarmupPanicIsTypedRefusal(t *testing.T) {
+	payloadErr := errors.New("private boot panic detail")
+	for _, stage := range []string{"warmup", "coherence"} {
+		for _, payload := range []struct {
+			name  string
+			value any
+		}{
+			{"string", "private boot panic detail"},
+			{"error", payloadErr},
+			{"nil", nil},
+		} {
+			t.Run(stage+"/"+payload.name, func(t *testing.T) {
+				srv := newTestServer(t)
+				srv.MarkReady()
+				panicked := false
+				srv.planner = &bootFailurePlanner{
+					MockPlanner: agent.NewMockPlanner("test-model"),
+					boot: func(_ context.Context, msgs []agent.Message) (*agent.Completion, error) {
+						warmup := len(msgs) == 1 && msgs[0].Content == "warmup"
+						if !panicked && (stage == "warmup") == warmup {
+							panicked = true
+							panic(payload.value)
+						}
+						return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "1 2 3"}}, nil
+					},
+				}
+				srv.ArmWarmupGate()
+				if stage == "coherence" {
+					srv.ArmCoherenceProbe(3)
+				}
+				if _, err := srv.RunWarmup(context.Background()); !errors.Is(err, ErrWarmupPanic) {
+					t.Fatalf("RunWarmup error = %v, want ErrWarmupPanic", err)
+				} else if payload.name == "error" && !errors.Is(err, payloadErr) {
+					t.Fatalf("panic cause lost: %v", err)
+				}
+				assertBootFailureResponse(t, srv, "warmup_panic")
+				if _, err := srv.RunWarmup(context.Background()); err != nil {
+					t.Fatalf("successful retry: %v", err)
+				}
+				body := warmupHealthzBody(t, srv)
+				for _, key := range []string{"warmup_pending", "warmup_failed"} {
+					if _, present := body[key]; present {
+						t.Fatalf("successful retry retained %s: %v", key, body)
+					}
+				}
+				if _, ok := srv.warmup.ready(); !ok {
+					t.Fatal("successful retry did not complete warmup")
+				}
+			})
+		}
+	}
+}
+
+// Returned failures share the same closed vocabulary. Context deadlines are
+// caller cancellation; ErrWarmupTimeout identifies the independent boot ceiling.
+// fak-test:runtime fast est=100ms lane=default
+func TestWarmupFailureReasonClosedSet(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		cancel bool
+		want   string
+	}{
+		{"backend_error", errors.New("private boot panic detail"), false, "warmup_error"},
+		{"wrapped_timeout", errors.Join(errors.New("wrapper"), ErrWarmupTimeout), false, "warmup_timeout"},
+		{"wrapped_cancel", errors.Join(errors.New("wrapper"), context.Canceled), false, "warmup_canceled"},
+		{"wrapped_deadline", errors.Join(errors.New("wrapper"), context.DeadlineExceeded), false, "warmup_canceled"},
+		{"canceled_context_ignored_by_planner", nil, true, "warmup_canceled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServer(t)
+			srv.MarkReady()
+			srv.ArmWarmupGate()
+			srv.planner = &bootFailurePlanner{
+				MockPlanner: agent.NewMockPlanner("test-model"),
+				boot: func(context.Context, []agent.Message) (*agent.Completion, error) {
+					return nil, tc.err
+				},
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.cancel {
+				cancel()
+			}
+			_, err := srv.RunWarmup(ctx)
+			wantErr := tc.err
+			if tc.cancel {
+				wantErr = context.Canceled
+			}
+			if !errors.Is(err, wantErr) {
+				t.Fatalf("RunWarmup error = %v, want %v", err, wantErr)
+			}
+			assertBootFailureResponse(t, srv, tc.want)
+		})
+	}
+}
+
+func assertBootFailureResponse(t *testing.T, srv *Server, reason string) {
+	t.Helper()
+	if code, body := warmupHealthz(t, srv); code != http.StatusServiceUnavailable ||
+		body["ok"] != false || body["warmup_pending"] != true || body["warmup_failed"] != reason {
+		t.Fatalf("failed warmup /healthz = %d %v, want 503 pending with %q", code, body, reason)
+	} else if _, present := body["time_to_ready_ms"]; present {
+		t.Fatalf("failed warmup advertised time_to_ready_ms: %v", body)
+	}
+	for _, path := range []string{"/v1/chat/completions", "/v1/messages"} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, path,
+			strings.NewReader(`{"model":"test-model","messages":[{"role":"user","content":"hello"}],"max_tokens":1}`))
+		req.Header.Set("Content-Type", "application/json")
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "1" ||
+			!strings.Contains(rec.Body.String(), `"code":"warmup_failed"`) ||
+			!strings.Contains(rec.Body.String(), reason) {
+			t.Fatalf("%s = %d %s, want 503 warmup_failed with %q", path, rec.Code, rec.Body.String(), reason)
+		}
+		if strings.Contains(rec.Body.String(), "private boot panic detail") {
+			t.Fatalf("%s exposed a raw backend failure: %s", path, rec.Body.String())
+		}
 	}
 }
