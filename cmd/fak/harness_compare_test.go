@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 )
 
 func TestHarnessCompareCLIAll(t *testing.T) {
@@ -117,6 +119,10 @@ func TestHarnessSubcommandDispatch(t *testing.T) {
 }
 
 func TestHarnessCompareBench(t *testing.T) {
+	// The benchmark installs its tool policy on the shared monitor. Restore the
+	// caller's exact floor so later tests still reach workspace lease admission.
+	priorPolicy := adjudicator.Default.PolicySnapshot()
+	t.Cleanup(func() { adjudicator.Default.SetPolicy(priorPolicy) })
 	var stdout, stderr bytes.Buffer
 	rc := runHarnessCompare(&stdout, &stderr, []string{"--baseline", "opencode", "--bench", "--view", "json"})
 	if rc != 0 {
