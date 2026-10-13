@@ -413,3 +413,50 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## DeepSeek V4.1 DSpark residency port study
+
+`internal/model/v41_dspark_residency.go` records a revision-anchored port STUDY of the DSpark
+draft-resident / target-streamed speculative-decoding shape. It adapts the shape (and only the
+shape) of `python/sglang/srt/models/deepseek_v4_dspark.py` from sgl-project/sglang at revision
+`45418d7dc648d0d71501b8b905a2499a40e9b971` (Apache-2.0):
+https://github.com/sgl-project/sglang/blob/45418d7dc648d0d71501b8b905a2499a40e9b971/python/sglang/srt/models/deepseek_v4_dspark.py
+
+It also records the draft-resident/target-streamed split and the UPSTREAM-REPORTED code-vs-prose
+acceptance figures from evolvemarketingitalia/ds4 at revision
+`5c3fde8e2cbcb7e1a4e81e1bca2db528e9b56c75` (MIT):
+https://github.com/evolvemarketingitalia/ds4/blob/5c3fde8e2cbcb7e1a4e81e1bca2db528e9b56c75/docs/STRIX_HALO_DSPARK.md
+https://github.com/evolvemarketingitalia/ds4/blob/5c3fde8e2cbcb7e1a4e81e1bca2db528e9b56c75/docs/SPECULATIVE_DECODING.md
+
+Changed for Fak: no upstream code is copied. Only the residency split, the census byte shape and
+the reported acceptance figures are recorded as typed, fail-closed Go metadata, and the study
+refuses a single-node resident claim that does not fit the host budget. No decoder, drafter,
+kernel, or verify loop is ported. SGLang is Apache-2.0 and is used as an ADAPT reference only;
+its NOTICE obligations are satisfied by the citation above. The evolve ds4 MIT copyright and
+permission notice follows:
+
+```text
+MIT License
+
+Copyright (c) 2026 The ds4.c authors
+Copyright (c) 2023-2026 The ggml authors
+Copyright (c) 2023 DeepSeek
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
