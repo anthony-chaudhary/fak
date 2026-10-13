@@ -41,13 +41,20 @@ func TestV41DecodeSharedResidentOwned(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+	cold, _, fourFence := newLane()
+	owned(cold, func() {
+		got, selected, err := cold.v41ColdSharedExpertChain(0)(input)
+		if err != nil || !selected || !v41ColdSharedEqualWords(got, want) || fourFence.dataReads != 1 || fourFence.deferredFences != 4 {
+			t.Fatalf("cold resident control changed: reads=%d fences=%d error=%v", fourFence.dataReads, fourFence.deferredFences, err)
+		}
+	})
 	s, scratch, next := newLane()
 	owned(s, func() {
 		got, err := m.v41SharedExpertForStep(0, input, m.Cfg, scratch)
 		if err != nil || !v41ColdSharedEqualWords(got, want) || !v41ColdSharedEqualMath(next.math, old.math) {
 			t.Fatalf("owned resident shared scalar arithmetic differs: %v", err)
 		}
-		if old.dataReads != 8 || next.dataReads != 1 || next.activationUploads != 1 || next.deferredFences != 4 {
+		if old.dataReads != 8 || next.dataReads != 1 || next.activationUploads != 1 || next.deferredFences != 1 {
 			t.Fatalf("payload reads %d→%d, uploads=%d publication fences=%d", old.dataReads, next.dataReads, next.activationUploads, next.deferredFences)
 		}
 		if next.activationBytes != 4*len(input) || next.dataBytes != 4*len(input) || !reflect.DeepEqual(next.deferredSites, old.deferredSites) {
@@ -62,7 +69,7 @@ func TestV41DecodeSharedResidentOwned(t *testing.T) {
 			t.Fatalf("unbound decode selected resident work: reads=%d error=%v", b.dataReads, err)
 		}
 	})
-	t.Run("checked_fault_precedes_later_projection_and_cleanup", func(t *testing.T) {
+	t.Run("issued_checked_fault_survives_later_recording_and_cleanup", func(t *testing.T) {
 		s, scratch, b := newLane()
 		primary := errors.New("first shared checked publication")
 		b.deferredFaultAt, b.deferredFault = 1, primary
@@ -70,8 +77,33 @@ func TestV41DecodeSharedResidentOwned(t *testing.T) {
 		defer func() { b.cleanupPanic = false }()
 		owned(s, func() {
 			out, err := m.v41SharedExpertForStep(0, input, m.Cfg, scratch)
-			if out != nil || !errors.Is(err, primary) || b.matmuls != 1 || b.deferredFences != 1 || !s.BackendSessionClosed() || len(b.deferredPending) != 0 {
+			var boundary *V41BF16BoundaryOperationError
+			if out != nil || !errors.Is(err, primary) || !errors.As(err, &boundary) || boundary.Site != "ffn.shared_experts.w1.weight projection" || b.matmuls != 2 || b.deferredFences != 1 || !s.BackendSessionClosed() || len(b.deferredPending) != 0 {
 				t.Fatalf("shared primary/order/retirement changed: matmuls=%d fences=%d error=%v", b.matmuls, b.deferredFences, err)
+			}
+		})
+	})
+	t.Run("winning_publication_site_is_restored", func(t *testing.T) {
+		s, scratch, b := newLane()
+		primary := errors.New("up publication verdict")
+		b.deferredFaultAt, b.deferredFault = 2, primary
+		b.failMatMul, b.fault = 3, &compute.BackendError{Backend: "test", Site: "down projection", Err: errors.New("later down recording")}
+		owned(s, func() {
+			out, err := m.v41SharedExpertForStep(0, input, m.Cfg, scratch)
+			var boundary *V41BF16BoundaryOperationError
+			if out != nil || !errors.Is(err, primary) || !errors.As(err, &boundary) || boundary.Site != "ffn.shared_experts.w3.weight projection" || b.matmuls != 3 || b.deferredPublishes != 3 || b.deferredFences != 1 || !s.BackendSessionClosed() || len(b.deferredPending) != 0 {
+				t.Fatalf("earlier site's verdict replaced or recording replayed: %v", err)
+			}
+		})
+	})
+	t.Run("transport_failure_keeps_numeric_verdict_unknown", func(t *testing.T) {
+		s, scratch, b := newLane()
+		unobserved, transport := errors.New("unobserved gate numeric fault"), errors.New("packed read transport failure")
+		b.deferredFaultAt, b.deferredFault, b.deferredReadErr = 1, unobserved, transport
+		owned(s, func() {
+			out, err := m.v41SharedExpertForStep(0, input, m.Cfg, scratch)
+			if out != nil || !errors.Is(err, transport) || errors.Is(err, unobserved) || b.matmuls != 3 || b.deferredPublishes != 4 || b.deferredFences != 1 || !s.BackendSessionClosed() || len(b.deferredPending) != 0 {
+				t.Fatalf("transport exposed unknown numeric verdict or replayed: %v", err)
 			}
 		})
 	})

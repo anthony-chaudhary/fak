@@ -2,7 +2,7 @@ package model
 
 // v41SharedExpertForStep reuses the qualified resident scalar shared expert
 // inside one lane's already-owned continuation. It retains all four checked
-// publication boundaries; only the intermediate payload read/upload pairs go.
+// publication kernels and observes their ordered records at one final read.
 // No state or tensor survives the call. A decline uses the original callbacks,
 // and a selected error is returned without replay or another lane's retirement.
 func (m *Model) v41SharedExpertForStep(layer int, input []float32, cfg Config, scratch *v41ProjScratch) ([]float32, error) {
@@ -17,7 +17,7 @@ func (m *Model) v41SharedExpertForStep(layer int, input []float32, cfg Config, s
 			if err == nil && full && scope != nil && scope.live && scope.owner != nil {
 				owner := backendExecutionOwner(s.Backend)
 				if owner == nil || owner == scope.owner {
-					output, selected, cause := s.v41ColdSharedExpertChain(layer)(input)
+					output, selected, cause := s.v41DeferredSharedExpertChain(layer)(input)
 					if selected || cause != nil {
 						return output, cause
 					}

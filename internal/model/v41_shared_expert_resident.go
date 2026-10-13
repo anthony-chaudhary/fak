@@ -48,6 +48,16 @@ type v41ColdSharedResidentFunc func([]float32) ([]float32, bool, error)
 // Appending its lazy resolutions protects future tokens without rescanning the
 // whole model cache for every row or temporary tensor.
 func (s *Session) v41ColdSharedExpertChain(layer int) v41ColdSharedResidentFunc {
+	return s.v41SharedExpertChain(layer, false)
+}
+
+// The owner-bound decode tail selects one packed read for the four existing
+// status records. Cold prefill retains its original four-fence control.
+func (s *Session) v41DeferredSharedExpertChain(layer int) v41ColdSharedResidentFunc {
+	return s.v41SharedExpertChain(layer, true)
+}
+
+func (s *Session) v41SharedExpertChain(layer int, deferredChecks bool) v41ColdSharedResidentFunc {
 	protected := map[compute.Buffer]bool{}
 	if s != nil {
 		for _, weight := range s.halW {
@@ -57,7 +67,7 @@ func (s *Session) v41ColdSharedExpertChain(layer int) v41ColdSharedResidentFunc 
 		}
 	}
 	return func(input []float32) ([]float32, bool, error) {
-		return s.v41ColdSharedExpertResident(layer, input, protected)
+		return s.v41SharedExpertResident(layer, input, protected, deferredChecks)
 	}
 }
 
@@ -67,6 +77,10 @@ func (s *Session) v41ColdSharedExpertChain(layer int) v41ColdSharedResidentFunc 
 // asymmetric clamp, BF16 sites and reduction order are unchanged. The cold layer
 // owns selection; no callback binding or persistent activation is added here.
 func (s *Session) v41ColdSharedExpertResident(layer int, input []float32, protected map[compute.Buffer]bool) (result []float32, selected bool, cause error) {
+	return s.v41SharedExpertResident(layer, input, protected, false)
+}
+
+func (s *Session) v41SharedExpertResident(layer int, input []float32, protected map[compute.Buffer]bool, deferredChecks bool) (result []float32, selected bool, cause error) {
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
 		!backendHasComparableIdentity(s.Backend) || s.M.lora != nil || s.M.prism != nil {
 		return nil, false, nil
@@ -198,6 +212,76 @@ func (s *Session) v41ColdSharedExpertResident(layer int, input []float32, protec
 			t.Quant == nil && len(t.Shape) == 1 && t.Shape[0] == n
 	}
 	var finalReadBytes int64
+	type publicationRecord struct {
+		status     compute.V41DeferredStatus
+		leaf, site string
+	}
+	var pending []publicationRecord
+	drained := false
+	drain := func(final compute.Tensor) error {
+		drained = true // V41ReadDeferred consumes records on errors as well.
+		statuses := make([]compute.V41DeferredStatus, len(pending))
+		for i, entry := range pending {
+			statuses[i] = entry.status
+			consumed[entry.status.Record.Buf()] = true
+		}
+		var rows []compute.Tensor
+		if final.Buf() != nil {
+			rows = []compute.Tensor{final}
+		}
+		stage = "checked publication readback"
+		verdicts, values, err := deferred.V41ReadDeferred(statuses, rows)
+		if err != nil {
+			return err
+		} // Every numeric verdict is unknown.
+		for _, row := range values {
+			finalReadBytes += int64(len(row)) * 4
+		}
+		if len(verdicts) != len(statuses) || len(values) != len(rows) {
+			return errV41BF16BoundaryResult
+		}
+		for i, verdict := range verdicts {
+			if verdict != nil {
+				leaf, site, stage = pending[i].leaf, pending[i].site, "checked publication"
+				return verdict
+			}
+		}
+		if len(rows) != 0 {
+			if len(values[0]) != H || !v41BF16Widened(values[0]) {
+				return errV41BF16BoundaryResult
+			}
+			result = append([]float32(nil), values[0]...)
+		}
+		return nil
+	}
+	if deferredChecks {
+		// A later recording failure still drains earlier issued statuses.
+		// Successful drainage may restore an earlier numeric primary/site;
+		// transport failure exposes no invented numeric verdict. This runs
+		// before owned cleanup and the existing unconditional retirement arm.
+		defer func() {
+			primary := recover()
+			if len(pending) != 0 && !drained {
+				oldLeaf, oldSite, oldStage := leaf, site, stage
+				var readErr error
+				var readPanic any
+				func() {
+					defer func() { readPanic = recover() }()
+					readErr = drain(compute.Tensor{})
+				}()
+				if readPanic != nil {
+					cause, primary = nil, readPanic
+				} else if readErr != nil {
+					cause, primary = readErr, nil
+				} else {
+					leaf, site, stage = oldLeaf, oldSite, oldStage
+				}
+			}
+			if primary != nil {
+				panic(primary)
+			}
+		}()
+	}
 	publish := func(x compute.Tensor, n int, name string, siteID uint32, final bool) (compute.Tensor, error) {
 		site, stage = name, "checked publication"
 		p, status, err := deferred.V41BF16PublishDeferred(x, siteID)
@@ -208,6 +292,15 @@ func (s *Session) v41ColdSharedExpertResident(layer int, input []float32, protec
 		if !fresh || !valid(p, n) || !recordFresh || !valid(status.Record, 4) || status.Kind != compute.V41DeferredBF16Publish ||
 			status.Count != n || status.Site != siteID || status.Records > 1 || status.Records < 0 {
 			return compute.Tensor{}, errV41BF16BoundaryResult
+		}
+		if deferredChecks {
+			pending = append(pending, publicationRecord{status: status, leaf: leaf, site: name})
+			if final {
+				if err := drain(p); err != nil {
+					return compute.Tensor{}, err
+				}
+			}
+			return p, nil
 		}
 		var rows []compute.Tensor
 		if final {
