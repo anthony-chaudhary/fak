@@ -299,6 +299,7 @@ var maintainerDevCommands = []string{
 	"rollup",
 	"route",
 	"routebench",
+	"router",
 	"rungstats",
 	"savings",
 	"savings-vector",
