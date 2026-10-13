@@ -58,11 +58,11 @@ class BuildEntrypointExistsTest(unittest.TestCase):
     def test_cgo_agnostic(self) -> None:
         # The script must NOT pin CGO_ENABLED: the static builds set 0 and the cuda
         # build sets 1, each via its own env. Pinning it here would break one path.
-        # Check code only — the header comment legitimately names both values.
-        code = "\n".join(
-            ln for ln in self.text.splitlines() if not ln.lstrip().startswith("#")
-        )
-        self.assertNotIn("CGO_ENABLED=", code)
+        # READING it is allowed (the darwin/arm64 Metal guard refuses cgo-less
+        # builds, #12771); only an assignment or export would pin it.
+        pinned = re.compile(r"^\s*(?:export\s+)?CGO_ENABLED=", re.MULTILINE)
+        self.assertIsNone(pinned.search(self.text))
+        self.assertIn('"${CGO_ENABLED:-}" != "1"', self.text)
 
 
 class ProfileSelectorTest(unittest.TestCase):

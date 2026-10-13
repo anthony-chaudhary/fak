@@ -25,6 +25,7 @@ DOCKERFILE = ROOT / "Dockerfile"
 # entrypoint (#3709); the workflow and Dockerfile route through it rather than
 # carrying the recipe inline, so those assertions follow it here.
 BUILD_SH = ROOT / "scripts" / "build.sh"
+UPLOAD_ACTION = ROOT / ".github" / "actions" / "release-upload" / "action.yml"
 
 # The exact target and asset sets published by the release workflow, plus the
 # macOS artifacts uploaded by the separate release-macos workflow.
@@ -75,6 +76,27 @@ def yaml_matrix_targets(text: str) -> list[tuple[str, str]]:
     if matrix_indent >= include_indent:
         raise AssertionError("matrix include indentation is invalid")
     return targets
+
+
+def matrix_legs(text: str) -> list[dict[str, str]]:
+    """Read every `- goos:` map beneath the matrix include as key -> raw value."""
+    lines = text.splitlines()
+    include_index = next(i for i, line in enumerate(lines) if line.strip() == "include:")
+    include_indent = len(lines[include_index]) - len(lines[include_index].lstrip())
+    legs: list[dict[str, str]] = []
+    for line in lines[include_index + 1 :]:
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        if stripped and indent <= include_indent:
+            break
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("- "):
+            legs.append({})
+            stripped = stripped[2:]
+        key, _, value = stripped.partition(":")
+        legs[-1][key.strip()] = value.strip()
+    return legs
 
 
 def bash_array_values(text: str, name: str) -> list[str]:
@@ -144,12 +166,31 @@ class ReleaseArtifactsWorkflowTest(unittest.TestCase):
 
     def test_static_no_cgo_build(self) -> None:
         # Static, reproducible, no cgo — the property that lets the binary run
-        # anywhere and the distroless image stay tiny. CGO_ENABLED stays in the job
-        # env; the -trimpath flag now lives in the shared recipe this workflow routes
-        # through (scripts/build.sh, #3709).
-        self.assertIn('CGO_ENABLED: "0"', self.text)
+        # anywhere and the distroless image stay tiny — on every leg EXCEPT
+        # darwin/arm64, which scripts/build.sh refuses without cgo (Metal stub,
+        # #12771/#12784) and which therefore builds natively on a macOS runner
+        # (v0.56.0 release blocker). The -trimpath flag lives in the shared recipe.
+        self.assertIn("CGO_ENABLED: ${{ matrix.cgo }}", self.text)
+        self.assertIn("runs-on: ${{ matrix.runner }}", self.text)
+        legs = matrix_legs(self.text)
+        self.assertEqual(sorted((leg["goos"], leg["goarch"]) for leg in legs), sorted(TARGETS))
+        for leg in legs:
+            if (leg["goos"], leg["goarch"]) == ("darwin", "arm64"):
+                self.assertEqual(leg["cgo"], '"1"')
+                self.assertTrue(leg["runner"].startswith("macos-"), leg)
+            else:
+                self.assertEqual(leg["cgo"], '"0"', leg)
         self.assertIn("scripts/build.sh", self.text)
         self.assertIn("-trimpath", BUILD_SH.read_text(encoding="utf-8"))
+        self.assertIn("REFUSED -- darwin/arm64 without cgo", BUILD_SH.read_text(encoding="utf-8"))
+
+    def test_macos_release_never_builds_cgoless_arm64(self) -> None:
+        # release-macos runs with job CGO_ENABLED=0 for the amd64 slice; any
+        # darwin/arm64 build there must override it to 1 or build.sh refuses.
+        text = MACOS_WORKFLOW.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if "GOARCH=arm64" in line and "scripts/build.sh" in line:
+                self.assertIn("CGO_ENABLED=1", line)
 
     def test_stamps_version_ldflag(self) -> None:
         # A shipped binary with no VERSION file alongside resolves its version from
@@ -160,6 +201,22 @@ class ReleaseArtifactsWorkflowTest(unittest.TestCase):
         self.assertIn(LDFLAG, BUILD_SH.read_text(encoding="utf-8"))
 
     def test_uploads_idempotently_with_checksums(self) -> None:
+        # v0.56.0: gh's internal retry re-POSTed an asset whose first attempt had
+        # already landed, so GitHub answered HTTP 422 despite --clobber. Every
+        # per-build upload goes through the release-upload action, which accepts a
+        # same-size published asset or deletes and retries; tooling is taken from
+        # the workflow revision so a dispatch backfill of an older tag still works.
+        action = UPLOAD_ACTION.read_text(encoding="utf-8")
+        self.assertIn("gh release upload", action)
+        self.assertIn("--clobber", action)
+        self.assertIn("gh release delete-asset", action)
+        self.assertIn('.state == \\"uploaded\\"', action)
+        self.assertIn("not visible yet", action)
+        for text in (self.text, MACOS_WORKFLOW.read_text(encoding="utf-8")):
+            self.assertIn("uses: ./.release-tooling/.github/actions/release-upload", text)
+            self.assertIn("ref: ${{ github.workflow_sha }}", text)
+            self.assertNotIn('gh release upload "$TAG" "$ARCHIVE"', text)
+            self.assertNotIn('gh release upload "$TAG" "$UNIVERSAL_ARCHIVE"', text)
         self.assertIn("gh release upload", self.text)
         self.assertIn("--clobber", self.text)
         self.assertIn("sha256sum", self.text)
@@ -172,6 +229,7 @@ class ReleaseArtifactsWorkflowTest(unittest.TestCase):
         # must poll `gh release view` until the page appears before touching it.
         self.assertIn("gh release view", self.text)
         self.assertIn("not visible yet", self.text)
+        self.assertIn("gh release view", UPLOAD_ACTION.read_text(encoding="utf-8"))
 
     def test_verify_settles_asset_propagation_before_judging(self) -> None:
         # Regression (v0.37.0): the verify job downloaded assets once, immediately

@@ -41,11 +41,12 @@ jobs:
           set -euo pipefail
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VERSION="${TAG#v}"
-          mkdir -p dist/arm64 dist/amd64 dist/universal
+          mkdir -p dist/amd64 dist/universal
 
-          # Build arm64
-          GOOS=darwin GOARCH=arm64 OUT="dist/arm64/fak" VERSION="${VERSION}" sh scripts/build.sh
-
+          # No cgo-less darwin/arm64 build: scripts/build.sh refuses one (it would
+          # link the Metal STUB and silently serve CPU, #12771/#12784). The Metal
+          # arm64 build below is the only arm64 slice. amd64 stays CPU-only (job
+          # CGO_ENABLED=0), the guard keys on arm64 only.
           # Build amd64
           GOOS=darwin GOARCH=amd64 OUT="dist/amd64/fak" VERSION="${VERSION}" sh scripts/build.sh
 
@@ -164,17 +165,20 @@ jobs:
           otool -L ./dist/arm64-metal/fak | grep -q '/Metal.framework/'
           otool -L ./dist/arm64-metal/fak | grep -q '/MetalPerformanceShaders.framework/'
 
+      - name: Check out release tooling from the workflow revision
+        # A dispatch backfill checks out an OLDER tag above, which may predate the
+        # release-upload action; take the tooling from the workflow's own commit.
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-tooling
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
       - name: Upload validated macOS binaries to GitHub Release
+        uses: ./.release-tooling/.github/actions/release-upload
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          # Wait up to 2 min for release page if running concurrently
-          for i in $(seq 1 24); do
-            gh release view "$TAG" >/dev/null 2>&1 && break
-            echo "release $TAG not visible yet (attempt $i/24); waiting 5s..."
-            sleep 5
-          done
-          gh release upload "$TAG" "$UNIVERSAL_ARCHIVE" "$UNIVERSAL_SUM" --clobber
-          gh release upload "$TAG" "$METAL_ARCHIVE" "$METAL_SUM" --clobber
+        with:
+          tag: ${{ github.event.inputs.tag || github.ref_name }}
+          files: ${{ env.UNIVERSAL_ARCHIVE }} ${{ env.UNIVERSAL_SUM }} ${{ env.METAL_ARCHIVE }} ${{ env.METAL_SUM }}

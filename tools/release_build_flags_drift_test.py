@@ -60,11 +60,13 @@ class ReleaseBuildFlagsDriftTest(unittest.TestCase):
             verify_consumer_routes_through_entrypoint(name, text)
 
         # Profile-specific flags: static profiles (release archive + distroless)
-        # build CGO_ENABLED=0; cuda profile builds CGO_ENABLED=1 -tags cuda.
+        # build CGO_ENABLED=0 (darwin/arm64 alone takes cgo for Metal); cuda profile
+        # builds CGO_ENABLED=1 -tags cuda.
         rel = CONSUMERS["release-artifacts.yml"].read_text(encoding="utf-8")
         docker = CONSUMERS["Dockerfile"].read_text(encoding="utf-8")
         cuda = CONSUMERS["Dockerfile.cuda"].read_text(encoding="utf-8")
-        self.assertRegex(rel, r'CGO_ENABLED:\s*"?0"?')
+        self.assertIn("CGO_ENABLED: ${{ matrix.cgo }}", rel)
+        self.assertRegex(rel, r'cgo:\s*"0"')
         self.assertRegex(docker, r"CGO_ENABLED=0")
         self.assertRegex(cuda, r"CGO_ENABLED=1")
         self.assertIn("-tags cuda", cuda)
