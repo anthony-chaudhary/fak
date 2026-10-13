@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -26,6 +27,9 @@ type ExpertRouteEvent struct {
 	Token   int    `json:"token"`
 	Phase   string `json:"phase"`
 	Experts []int  `json:"experts"`
+	// Weights contains the signed gate weights aligned with Experts. An absent
+	// or null array means unavailable; explicit zero weights remain valid.
+	Weights []float32 `json:"weights,omitempty"`
 }
 
 // ExpertRouteTraceHeader is the optional first JSONL line.
@@ -36,8 +40,8 @@ type ExpertRouteTraceHeader struct {
 	TopK    int    `json:"top_k,omitempty"`
 }
 
-// ExpertRouteEventObserver receives a router decision. ev.Experts is a fresh
-// copy owned by the observer.
+// ExpertRouteEventObserver receives a router decision. ev.Experts and ev.Weights
+// are fresh copies owned by the observer.
 type ExpertRouteEventObserver func(ev ExpertRouteEvent)
 
 // SetExpertRouteEventObserver installs or clears the positional route seam. Like
@@ -121,10 +125,21 @@ func (m *Model) emitExpertRouteAt(layer, token int, picks []routePick) {
 		return
 	}
 	experts := make([]int, len(picks))
+	weights := make([]float32, len(picks))
+	finite := true
 	for i, pick := range picks {
 		experts[i] = pick.expert
+		weights[i] = pick.weight
+		if math.IsNaN(float64(pick.weight)) || math.IsInf(float64(pick.weight), 0) {
+			finite = false
+		}
 	}
-	ev := ExpertRouteEvent{Layer: layer, Token: token, Phase: m.v41ExpertFaultPhase().String(), Experts: experts}
+	// JSON cannot encode non-finite numbers. Preserve the complete ID trace
+	// while marking the whole weight array unavailable rather than inventing zeros.
+	if !finite {
+		weights = nil
+	}
+	ev := ExpertRouteEvent{Layer: layer, Token: token, Phase: m.v41ExpertFaultPhase().String(), Experts: experts, Weights: weights}
 	if sink != nil {
 		sink.write(m, ev)
 	}
