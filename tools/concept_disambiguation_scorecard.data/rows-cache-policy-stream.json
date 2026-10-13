@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "cache-policy-stream",
+      "canonical": "CachePolicyStream (offline expert access replay input)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "A flat deterministic sequence of unit-sized expert groups consumed by offline cache-policy replay.",
+      "distinction": "Offline replay input data; it neither selects serving eviction policy nor owns a runtime cache or route-trace emitter.",
+      "distinct_from": [
+        "expert-tier-cache-tier"
+      ],
+      "aliases": [],
+      "grounding": "CachePolicyStream",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

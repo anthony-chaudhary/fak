@@ -1028,3 +1028,10 @@ Private Session cache-pool rebuild body invoked after its public boundary acquir
 Private Session store-aware KV-span eviction body used inside an already-owned backend operation; coordinates host or HAL eviction and token-lineage indices without reacquiring the recording-domain mutex.
 
 **Distinct from:** This performs an index span eviction under an existing operation scope; EvictKV speculative rollback is the rejected-position count supplied to eviction, not the operation or ownership boundary.
+
+
+### CachePolicyStream (offline expert access replay input)
+
+A flat deterministic sequence of unit-sized expert groups consumed by offline cache-policy replay.
+
+**Distinct from:** Offline replay input data; it neither selects serving eviction policy nor owns a runtime cache or route-trace emitter.

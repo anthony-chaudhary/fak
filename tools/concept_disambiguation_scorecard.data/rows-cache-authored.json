@@ -28,7 +28,8 @@
       "distinction": "Names the TIER a routed expert resides on, not a residency plan (ExpertCachePlan) or a batch-admission result: it is the enum a policy transitions between, not a plan or a trace.",
       "distinct_from": [
         "cov5304-expert-cache-plan",
-        "expertcachebatchadmission"
+        "expertcachebatchadmission",
+        "cache-policy-stream"
       ],
       "aliases": [],
       "grounding": "ExpertCacheTier",
