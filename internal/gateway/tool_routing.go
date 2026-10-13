@@ -15,6 +15,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/codetools"
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
 	"github.com/anthony-chaudhary/fak/internal/fusedturn"
 	"github.com/anthony-chaudhary/fak/internal/journal"
@@ -692,6 +693,39 @@ func (s *Server) prepareWorkspaceExecution(ctx context.Context, call *abi.ToolCa
 // workspaceKernelSyscall checks the very submission that Reap will dispatch.
 func (s *Server) workspaceKernelSyscall(ctx context.Context, call *abi.ToolCall, readOnly bool) (*abi.Result, abi.Verdict, map[string]string, *WireVerdict) {
 	handle, verdict := s.k.Submit(ctx, call)
+	if isExecCommandRequest(call) {
+		if verdict.Kind != abi.VerdictAllow {
+			s.k.DiscardSubmission(handle)
+			if verdict.Kind == abi.VerdictDeny || verdict.Kind == abi.VerdictRequireWitness {
+				refusal := renderVerdict(verdict, nil)
+				return nil, verdict, nil, &refusal
+			}
+			refusal := execCommandRefusal("exec-command-policy", "the command request was not explicitly allowed")
+			return nil, verdict, nil, &refusal
+		}
+		s.k.DiscardSubmission(handle)
+		adapted, err := adaptedExecCommandCall(ctx, call)
+		if err != nil {
+			refusal := execCommandRefusal("exec-command-arguments", "the command arguments do not match the supported contract")
+			return nil, verdict, nil, &refusal
+		}
+		call = adapted
+		handle, verdict = s.k.Submit(ctx, call)
+		if verdict.Kind != abi.VerdictAllow {
+			s.k.DiscardSubmission(handle)
+			if verdict.Kind == abi.VerdictDeny || verdict.Kind == abi.VerdictRequireWitness {
+				refusal := renderVerdict(verdict, nil)
+				return nil, verdict, nil, &refusal
+			}
+			refusal := execCommandRefusal("exec-command-policy", "the fenced command request was not explicitly allowed")
+			return nil, verdict, nil, &refusal
+		}
+		if call.Engine != codetools.EngineBash {
+			s.k.DiscardSubmission(handle)
+			refusal := execCommandRefusal("exec-command-route", "the fenced command engine did not claim the request")
+			return nil, verdict, nil, &refusal
+		}
+	}
 	var details map[string]string
 	if verdict.Kind == abi.VerdictAllow || verdict.Kind == abi.VerdictTransform || verdict.Kind == abi.VerdictDefer {
 		var refusal WireVerdict
@@ -706,7 +740,107 @@ func (s *Server) workspaceKernelSyscall(ctx context.Context, call *abi.ToolCall,
 	if err != nil {
 		result = &abi.Result{Call: call, Status: abi.StatusError, Meta: map[string]string{"error": err.Error()}}
 	}
+	if isAdaptedExecCommand(call) && result != nil && result.Status == abi.StatusOK {
+		if !validExecCommandResult(ctx, result) {
+			refusal := execCommandRefusal("exec-command-result", "the command engine returned a mismatched result contract")
+			return nil, verdict, details, &refusal
+		}
+		meta := make(map[string]string, len(result.Meta)+3)
+		for key, value := range result.Meta {
+			meta[key] = value
+		}
+		meta["requested_tool"] = call.Meta["requested_tool"]
+		meta["requested_route"] = call.Meta["requested_tool"]
+		meta["executed_route"] = codetools.EngineBash
+		meta["admitted_result_type"] = execCommandResultType
+		result.Meta = meta
+		s.recordExecCommandRoute(call)
+	}
 	return result, verdict, details, nil
+}
+
+const execCommandResultType = "codetools.bash-result/1"
+
+func execCommandRefusal(by, claim string) WireVerdict {
+	return renderVerdict(abi.Verdict{
+		Kind:    abi.VerdictDeny,
+		Reason:  abi.ReasonPolicyBlock,
+		By:      by,
+		Payload: abi.WitnessPayload{Claim: claim},
+	}, nil)
+}
+
+func isAdaptedExecCommand(call *abi.ToolCall) bool {
+	return call != nil && call.Tool == codetools.ToolBash && call.Meta != nil && call.Meta["exec_command_contract"] == execCommandResultType
+}
+
+func isExecCommandRequest(call *abi.ToolCall) bool {
+	return call != nil && call.Tool == "exec_command" && call.Meta != nil && call.Meta["exec_command_contract"] == execCommandResultType
+}
+
+func validExecCommandResult(ctx context.Context, result *abi.Result) bool {
+	if result == nil || result.Meta["engine"] != codetools.EngineBash {
+		return false
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(resolveBytes(ctx, result.Payload), &fields); err != nil {
+		return false
+	}
+	for key := range fields {
+		switch key {
+		case "stdout", "stderr", "exit_code", "timed_out", "stdout_truncated", "stderr_truncated":
+		default:
+			return false
+		}
+	}
+	var stdout, stderr string
+	var exitCode int
+	if !decodeExecCommandScalar(fields, "stdout", &stdout) ||
+		!decodeExecCommandScalar(fields, "stderr", &stderr) ||
+		!decodeExecCommandScalar(fields, "exit_code", &exitCode) {
+		return false
+	}
+	for _, key := range []string{"timed_out", "stdout_truncated", "stderr_truncated"} {
+		if raw, ok := fields[key]; ok {
+			var value bool
+			if !decodeExecCommandRawScalar(raw, &value) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func decodeExecCommandScalar(fields map[string]json.RawMessage, key string, dst any) bool {
+	raw, ok := fields[key]
+	return ok && decodeExecCommandRawScalar(raw, dst)
+}
+
+func decodeExecCommandRawScalar(raw json.RawMessage, dst any) bool {
+	return len(raw) != 0 && string(raw) != "null" && json.Unmarshal(raw, dst) == nil
+}
+
+func (s *Server) recordExecCommandRoute(call *abi.ToolCall) {
+	if s == nil || s.logf == nil || call == nil {
+		return
+	}
+	event := struct {
+		Event              string `json:"event"`
+		TraceID            string `json:"trace_id"`
+		RequestedRoute     string `json:"requested_route"`
+		ExecutedRoute      string `json:"executed_route"`
+		AdmittedResultType string `json:"admitted_result_type"`
+	}{
+		Event:              "gateway_syscall_route",
+		TraceID:            strings.TrimSpace(call.TraceID),
+		RequestedRoute:     call.Meta["requested_tool"],
+		ExecutedRoute:      codetools.EngineBash,
+		AdmittedResultType: execCommandResultType,
+	}
+	encoded, err := json.Marshal(event)
+	if err == nil {
+		s.logf("%s", encoded)
+	}
 }
 
 func annotateWorkspaceExecution(verdict *WireVerdict, details map[string]string) {
@@ -1021,6 +1155,9 @@ func (s *Server) buildCall(ctx context.Context, tool, rawArgs string, readOnly b
 	if strings.TrimSpace(tool) == "" {
 		return nil, errors.New("missing tool name")
 	}
+	requestedTool := strings.TrimSpace(tool)
+	canonical := canonicalToolName(requestedTool, s.policyRuntime)
+	execRequest := canonical == "exec_command"
 	args := []byte(rawArgs)
 	if len(args) == 0 {
 		args = []byte("{}")
@@ -1029,10 +1166,13 @@ func (s *Server) buildCall(ctx context.Context, tool, rawArgs string, readOnly b
 	if err != nil {
 		return nil, fmt.Errorf("resolver: %w", err)
 	}
-	canonical := canonicalToolName(tool, s.policyRuntime)
 	meta := metaFor(canonical, readOnly)
-	if canonical != tool {
-		meta["wire_tool"] = tool
+	if execRequest {
+		meta["requested_tool"] = requestedTool
+		meta["canonical_tool"] = "exec_command"
+		meta["exec_command_contract"] = execCommandResultType
+	} else if canonical != requestedTool {
+		meta["wire_tool"] = requestedTool
 		meta["canonical_tool"] = canonical
 	}
 	if label := journal.ArgsLabelForBytes(args); label != "" {
@@ -1059,6 +1199,12 @@ func (s *Server) buildCall(ctx context.Context, tool, rawArgs string, readOnly b
 	// back to the empty shared-default trace (which would pool every served session
 	// onto one taint high-water mark).
 	tc := fusedturn.Tag(&abi.ToolCall{Tool: canonical, Args: ref, TraceID: s.traceFor(traceID), Meta: meta}, fusedturn.ClassClassical)
+	if execRequest {
+		// The external exec_command policy sees the original tool and arguments
+		// first. workspaceKernelSyscall discards that admitted submission without
+		// dispatch, then submits the adapted Bash call through the codetools rung.
+		return tc, nil
+	}
 	if nativeToolName(canonical) != "" {
 		// Local gateway operations retain the same policy/principal metadata but
 		// do not borrow a model account's route or remote residency constraints.
@@ -1081,6 +1227,97 @@ func (s *Server) buildCall(ctx context.Context, tool, rawArgs string, readOnly b
 	}
 	tc.Engine = route
 	return tc, nil
+}
+
+func adaptedExecCommandCall(ctx context.Context, original *abi.ToolCall) (*abi.ToolCall, error) {
+	args, err := adaptExecCommandArgs(string(resolveBytes(ctx, original.Args)))
+	if err != nil {
+		return nil, err
+	}
+	ref, err := abi.ActiveResolver().Put(ctx, []byte(args))
+	if err != nil {
+		return nil, fmt.Errorf("resolver: %w", err)
+	}
+	meta := codetools.CallMeta(codetools.ToolBash, "")
+	for key, value := range original.Meta {
+		switch key {
+		case "readOnlyHint", "idempotentHint", "destructive":
+		default:
+			meta[key] = value
+		}
+	}
+	return fusedturn.Tag(&abi.ToolCall{
+		Tool:    codetools.ToolBash,
+		Args:    ref,
+		TraceID: original.TraceID,
+		SeqNo:   original.SeqNo,
+		Meta:    meta,
+	}, fusedturn.ClassClassical), nil
+}
+
+func adaptExecCommandArgs(raw string) (string, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+		return "", fmt.Errorf("exec_command arguments: %w", err)
+	}
+	if fields == nil {
+		return "", errors.New("exec_command arguments must be an object")
+	}
+	for key := range fields {
+		switch key {
+		case "cmd", "workdir", "command", "cwd", "timeout_ms":
+		default:
+			return "", fmt.Errorf("exec_command arguments: unsupported field %q", key)
+		}
+	}
+	decodeString := func(primary, alias string) (string, error) {
+		var first, second string
+		if value := fields[primary]; len(value) > 0 {
+			if string(value) == "null" {
+				return "", fmt.Errorf("exec_command arguments: %s must be a string", primary)
+			}
+			if err := json.Unmarshal(value, &first); err != nil {
+				return "", fmt.Errorf("exec_command arguments: %s must be a string", primary)
+			}
+		}
+		if value := fields[alias]; len(value) > 0 {
+			if string(value) == "null" {
+				return "", fmt.Errorf("exec_command arguments: %s must be a string", alias)
+			}
+			if err := json.Unmarshal(value, &second); err != nil {
+				return "", fmt.Errorf("exec_command arguments: %s must be a string", alias)
+			}
+		}
+		if first != "" && second != "" && first != second {
+			return "", fmt.Errorf("exec_command arguments: conflicting %s and %s", primary, alias)
+		}
+		if first != "" {
+			return first, nil
+		}
+		return second, nil
+	}
+	command, err := decodeString("cmd", "command")
+	if err != nil {
+		return "", err
+	}
+	cwd, err := decodeString("workdir", "cwd")
+	if err != nil {
+		return "", err
+	}
+	args := codetools.BashArgs{Command: command, Cwd: cwd}
+	if value := fields["timeout_ms"]; len(value) > 0 {
+		if string(value) == "null" {
+			return "", errors.New("exec_command arguments: timeout_ms must be an integer")
+		}
+		if err := json.Unmarshal(value, &args.TimeoutMS); err != nil {
+			return "", fmt.Errorf("exec_command arguments: timeout_ms must be an integer")
+		}
+	}
+	encoded, err := json.Marshal(args)
+	if err != nil {
+		return "", fmt.Errorf("exec_command arguments: %w", err)
+	}
+	return string(encoded), nil
 }
 
 // traceFor returns the caller's TraceID, or mints a fresh, process-unique non-empty
