@@ -2,12 +2,18 @@ package client
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"sync/atomic"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/l3server/transport/protocol"
+	"github.com/anthony-chaudhary/fak/internal/l3server/version"
 )
+
+// ErrHandshake identifies a peer that did not complete the native L3 handshake.
+var ErrHandshake = errors.New("L3 handshake failed")
 
 // Client is an L3 TCP client.
 type Client struct {
@@ -15,20 +21,97 @@ type Client struct {
 	reqID atomic.Uint32
 }
 
-// New creates a new client connected to the given address.
+// New creates a client after validating the peer's native L3 handshake.
 func New(addr string) (*Client, error) {
-	conn, err := net.Dial("tcp", addr)
+	return newWithTimeout(addr, 5*time.Second)
+}
+
+// ADAPT: ggml-org/llama.cpp ggml/src/ggml-rpc/ggml-rpc.cpp, start/get_dispatcher
+// at bc180757161f9f7d56e0efac44257e9029951a3b: admit only after successful HELLO.
+// MIT License
+// Copyright (c) 2023-2026 The ggml authors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+func newWithTimeout(addr string, timeout time.Duration) (*Client, error) {
+	deadline := time.Now().Add(timeout)
+	conn, err := (&net.Dialer{Deadline: deadline}).Dial("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s: %w", addr, err)
 	}
+	admitted := false
+	defer func() {
+		if !admitted {
+			_ = conn.Close()
+		}
+	}()
 	if tc, ok := conn.(*net.TCPConn); ok {
 		tc.SetNoDelay(true)
 		tc.SetReadBuffer(65536)
 		tc.SetWriteBuffer(65536)
 	}
-	return &Client{
+	c := &Client{
 		codec: protocol.NewCodec(conn),
-	}, nil
+	}
+	if err := conn.SetDeadline(deadline); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrHandshake, err)
+	}
+	if err := c.handshake(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrHandshake, err)
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrHandshake, err)
+	}
+	admitted = true
+	return c, nil
+}
+
+func (c *Client) handshake() error {
+	body, err := json.Marshal(struct {
+		ClientVersion string `json:"client_version"`
+	}{ClientVersion: version.ServerVersion})
+	if err != nil {
+		return err
+	}
+	id := c.nextReqID()
+	if err := c.codec.WriteMessage(protocol.Message{Header: protocol.Header{OpCode: protocol.OpHandshake, RequestID: id}, Body: body}); err != nil {
+		return err
+	}
+	response, err := c.codec.ReadMessage()
+	if err != nil {
+		return err
+	}
+	defer protocol.PutBodyBuf(response.Body, response.BodyPoolIdx)
+	if response.Header.OpCode != protocol.RespOK || response.Header.RequestID != id {
+		return errors.New("unexpected handshake response")
+	}
+	var hello struct {
+		Status          string `json:"status"`
+		APIVersion      int    `json:"api_version"`
+		ProtocolVersion int    `json:"protocol_version"`
+	}
+	if err := json.Unmarshal(response.Body, &hello); err != nil {
+		return err
+	}
+	if hello.Status != "ok" || hello.APIVersion != version.APIVersion || hello.ProtocolVersion != version.ProtocolVersion {
+		return errors.New("incompatible handshake response")
+	}
+	return nil
 }
 
 // Close closes the connection.
