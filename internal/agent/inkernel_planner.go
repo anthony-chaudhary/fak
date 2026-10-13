@@ -1749,6 +1749,16 @@ func (p *InKernelPlanner) trimBackendIdlePools() bool {
 	if p == nil || p.backend == nil {
 		return false
 	}
+	// This maintenance boundary is outside acquiring model entrypoints. A
+	// planner-local gate cannot exclude another client of the same device domain.
+	// Optional cleanup declines a busy or invalid owner without touching pools.
+	if provider, ok := p.backend.(compute.ForwardExecutionOwnerBackend); ok {
+		owner := provider.ForwardExecutionOwner()
+		if owner == nil || !owner.TryLock() {
+			return false
+		}
+		defer owner.Unlock()
+	}
 	released := false
 	if r, ok := p.backend.(interface{ Recycle() }); ok {
 		r.Recycle()
