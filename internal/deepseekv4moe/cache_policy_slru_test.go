@@ -15,6 +15,7 @@ func slruFixture(ids ...int) []ExpertGroup {
 	return groups
 }
 
+// fak-test:runtime fast est=100ms lane=default
 func TestAdaptiveSLRUScanResistance(t *testing.T) {
 	stream := CachePolicyStream{Name: "scan", Groups: slruFixture(0, 1, 0, 2, 3, 4, 5, 0)}
 	receipt, err := CachePolicyReplayWith(stream, 3, []CachePolicy{ReplayArmAdaptiveSLRU, CachePolicyLRU, CachePolicyOPT})
@@ -32,6 +33,7 @@ func TestAdaptiveSLRUScanResistance(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=100ms lane=default
 func TestAdaptiveSLRUWarmupTransition(t *testing.T) {
 	for _, tc := range []struct{ capacity, requests, want int }{
 		{10, 40, 1}, {10, 41, 8}, {3, 12, 1}, {3, 13, 2}, {1, 4, 1}, {1, 5, 1},
@@ -54,12 +56,31 @@ func TestAdaptiveSLRUWarmupTransition(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=100ms lane=default
 func TestAdaptiveSLRUBoundsAndDeterminism(t *testing.T) {
 	groups := slruFixture(0, 1, 0, 2, 0, 3, 1, 2, 0)
 	for capacity := 1; capacity <= 3; capacity++ {
 		state := adaptiveSLRUState{capacity: capacity, resident: make(map[ExpertGroup]*list.Element)}
 		for _, group := range groups {
 			state.access(group)
+			seen := make(map[ExpertGroup]bool)
+			for _, segment := range []struct {
+				entries   *list.List
+				protected bool
+			}{{&state.probation, false}, {&state.protected, true}} {
+				for element := segment.entries.Front(); element != nil; element = element.Next() {
+					entry := element.Value.(adaptiveSLRUEntry)
+					if seen[entry.group] || entry.protected != segment.protected || state.resident[entry.group] != element {
+						t.Fatalf("invalid residency group=%v protected=%v", entry.group, entry.protected)
+					}
+					seen[entry.group] = true
+				}
+			}
+			for resident := range state.resident {
+				if !seen[resident] {
+					t.Fatalf("unaccounted resident %v", resident)
+				}
+			}
 			if len(state.resident) > capacity || len(state.resident) != state.probation.Len()+state.protected.Len() || state.protected.Len() > adaptiveSLRUProtectedLimit(capacity, state.requests) {
 				t.Fatalf("capacity=%d resident=%d probation=%d protected=%d", capacity, len(state.resident), state.probation.Len(), state.protected.Len())
 			}
@@ -85,6 +106,7 @@ func TestAdaptiveSLRUBoundsAndDeterminism(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=100ms lane=default
 func TestAdaptiveSLRULargeCapacityTinyTrace(t *testing.T) {
 	capacity := int(^uint(0) >> 1)
 	if adaptiveSLRUProtectedLimit(capacity, capacity) != capacity/10 {
@@ -106,6 +128,7 @@ func TestAdaptiveSLRULargeCapacityTinyTrace(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=100ms lane=default
 func TestAdaptiveSLRUExplicitSelectionPreservesInventories(t *testing.T) {
 	want := []CachePolicy{CachePolicyLRU, CachePolicyLFU, CachePolicyHeat, CachePolicyRandom, CachePolicyOPT}
 	if !reflect.DeepEqual(CachePolicyArms(), want) || !reflect.DeepEqual(CachePolicyScoredArms(), []CachePolicy{CachePolicyLFRU, CachePolicyScoreEMA}) {
