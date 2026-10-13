@@ -48,11 +48,12 @@ func (w *v41LayerStepWork) complete(routed []float32) (err error) {
 	return w.finish(routed)
 }
 
-// The existing explicit ID route and disabled layer batching retain precedence.
+// The existing explicit decode ID route and disabled layer batching retain precedence.
+// The independent cold-prefill panel opt-in does not select a decode route.
 // The new schedule is confined to the already-selected multi-session caller;
 // single-lane wrappers execute their unchanged scalar/fused continuation.
 func (m *Model) v41LayerCohortEnabled(lanes []v41StepCohortLane, txs []*v41StepTransaction) bool {
-	if v41RoutedIDOptedIn() || v41PrefillExpertPanelOptedIn() || os.Getenv(v41LayerExpertBatchEnv) == "0" {
+	if v41RoutedIDOptedIn() || os.Getenv(v41LayerExpertBatchEnv) == "0" {
 		return false
 	}
 	full, err := v41ForwardGeometry(m.Cfg)

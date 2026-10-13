@@ -72,7 +72,7 @@ func (b *v41LayerCohortBackend) V41ReadDeferred(statuses []compute.V41DeferredSt
 }
 func (b *v41LayerCohortBackend) resetCohort() { b.expertFences = nil; b.outputsPerFence = nil }
 
-// fak-test:runtime medium est=5s lane=default
+// fak-test:runtime medium est=6s lane=default
 func TestV41LayerCohortTransactions(t *testing.T) {
 	t.Setenv(v41DeferredBF16PublishEnv, "1")
 	t.Setenv(v41RoutedIDEnv, "0")
@@ -140,6 +140,32 @@ func TestV41LayerCohortTransactions(t *testing.T) {
 			}
 			if next, ref := lanes[i].Session.Step(6), refs[i].Step(6); !reflect.DeepEqual(next, ref) {
 				t.Fatalf("lane%d continuation diverged", i)
+			}
+		}
+	})
+	t.Run("prefill-only panel selection preserves decode cohort", func(t *testing.T) {
+		t.Setenv(v41PrefillExpertPanelEnv, "1")
+		b, lanes, refs := newFixture(t)
+		want := make([][]float32, len(refs))
+		for i, r := range refs {
+			want[i] = append([]float32(nil), r.Step(lanes[i].Token)...)
+		}
+		b.resetCohort()
+		got, err := m.StepV41Batch(lanes)
+		if err != nil || !got.Selected || len(b.expertFences) != m.Cfg.NumLayers {
+			t.Fatalf("prefill-only flag disabled decode cohort: selected=%v fences=%v err=%v", got.Selected, b.expertFences, err)
+		}
+		for i, n := range b.expertFences {
+			if n != 24 || b.outputsPerFence[i] != 2 {
+				t.Fatalf("prefill-only layer fence rows=%v outputs=%v", b.expertFences, b.outputsPerFence)
+			}
+		}
+		for i, result := range got.Lanes {
+			if result.ID != lanes[i].ID || !result.Committed || result.Err != nil || !reflect.DeepEqual(result.Logits, want[i]) {
+				t.Fatalf("prefill-only lane%d id=%d commit=%v err=%v", i, result.ID, result.Committed, result.Err)
+			}
+			if next, ref := lanes[i].Session.Step(6), refs[i].Step(6); !reflect.DeepEqual(next, ref) {
+				t.Fatalf("prefill-only lane%d continuation diverged", i)
 			}
 		}
 	})
