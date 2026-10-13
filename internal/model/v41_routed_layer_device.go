@@ -14,7 +14,8 @@ import (
 const v41LayerExpertBatchEnv = "FAK_V41_LAYER_EXPERT_BATCH"
 
 // v41RoutedIDEnv set to "1" opts the batched layer into the one-dispatch-per-
-// stage id kernels; unset or any other value keeps its per-pick dispatches,
+// stage id kernels; unset or any other value keeps its per-pick dispatches
+// when the fused path is unavailable or disabled,
 // because the id arm decoded about 3x slower warm on a Strix Halo gfx1151.
 const v41RoutedIDEnv = "FAK_V41_ROUTED_ID"
 
@@ -52,7 +53,8 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 		return nil
 	}
 	idBackend, _ := s.Backend.(compute.V41RoutedIDBackend)
-	if idBackend != nil && (!v41RoutedIDOptedIn() || !idBackend.V41RoutedIDAvailable()) {
+	idOptedIn := v41RoutedIDOptedIn()
+	if idBackend != nil && !idBackend.V41RoutedIDAvailable() {
 		idBackend = nil
 	}
 	fusedBackend, _ := s.Backend.(compute.V41RoutedFusedBackend)
@@ -179,7 +181,7 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 		opened = s.M.v41NowNanos()
 		xd := s.uploadHostF32([]int{H}, x, compute.MemoryActivation, "moe expert gate/up activation")
 		owned = append(owned, xd)
-		useID := idBackend != nil && v41RoutedIDAdmits(idBackend, weights, len(picks))
+		useID := idOptedIn && idBackend != nil && v41RoutedIDAdmits(idBackend, weights, len(picks))
 		// The fused path needs the id image builder (ids/slot map) even when the
 		// id path itself is not opted in, so it keys off idBackend, not useID.
 		useFused := fusedBackend != nil && idBackend != nil && v41RoutedFusedAdmits(fusedBackend, weights, len(picks))
