@@ -590,6 +590,21 @@ func TestReapStaleCommittedTrees(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The preview must select the same stale directory without removing it.
+	preview, err := SweepStale(parent, 2*time.Hour, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Root != parent || preview.Apply || preview.MinAgeSeconds != 7200 || preview.Reaped != 0 || preview.ReapedBytes != 0 {
+		t.Fatalf("preview metadata = %+v", preview)
+	}
+	if len(preview.Candidates) != 1 || preview.Candidates[0].Path != staleDir || preview.Candidates[0].Bytes != int64(len(content)) {
+		t.Fatalf("preview candidates = %+v", preview.Candidates)
+	}
+	if got, err := os.ReadFile(staleFile); err != nil || !bytes.Equal(got, content) {
+		t.Fatalf("preview changed stale tree: %q, %v", got, err)
+	}
+
 	// 4. Run ReapStale with a 2-hour threshold
 	count, bytesReaped, err := ReapStale(parent, 2*time.Hour)
 	if err != nil {
@@ -613,5 +628,59 @@ func TestReapStaleCommittedTrees(t *testing.T) {
 	// Unrelated directory must be preserved
 	if _, err := os.Stat(otherDir); err != nil {
 		t.Errorf("other directory %s was unexpectedly removed: %v", otherDir, err)
+	}
+}
+
+func TestSweepStalePreviewKeepsNestedFreshContent(t *testing.T) {
+	parent := t.TempDir()
+	old := time.Now().Add(-3 * time.Hour)
+	dir := filepath.Join(parent, "fak-committed-tree-nested")
+	nested := filepath.Join(dir, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fresh := filepath.Join(nested, "fresh.txt")
+	if err := os.WriteFile(fresh, []byte("live"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{nested, dir} {
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	empty := filepath.Join(parent, "fak-committed-tree-empty")
+	if err := os.Mkdir(empty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(empty, old, old); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := SweepStale(parent, 2*time.Hour, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Candidates) != 1 || preview.Candidates[0].Path != empty || preview.Candidates[0].Bytes != 0 {
+		t.Fatalf("preview = %+v, want only the old empty tree", preview)
+	}
+	if _, err := os.Stat(empty); err != nil {
+		t.Fatalf("preview removed empty tree: %v", err)
+	}
+	applied, err := SweepStale(parent, 2*time.Hour, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applied.Reaped != 1 || len(applied.Candidates) != 1 || !applied.Candidates[0].Reaped || applied.Candidates[0].Path != empty {
+		t.Fatalf("applied = %+v, want matching empty-tree reap", applied)
+	}
+	if got, err := os.ReadFile(fresh); err != nil || string(got) != "live" {
+		t.Fatalf("fresh content changed: %q, %v", got, err)
+	}
+}
+
+func TestSweepStalePreviewReportsUnreadableParent(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing")
+	got, err := SweepStale(root, 0, false)
+	if !errors.Is(err, os.ErrNotExist) || got.Err == "" || got.Root != root || got.MinAgeSeconds != int64(DefaultStaleTreeAge/time.Second) {
+		t.Fatalf("missing-parent preview = %+v, %v", got, err)
 	}
 }

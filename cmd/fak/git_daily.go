@@ -213,10 +213,11 @@ func runGitDaily(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 
-	if opts.Apply {
-		_, _, _ = committedtree.ReapStale("", committedtree.DefaultStaleTreeAge)
-	}
+	// This sweep already precedes the tick's lock/dedupe decision. Preview it in
+	// that same position so even a skipped tick exposes its apply-time side effect.
+	committedTrees, _ := committedtree.SweepStale("", committedtree.DefaultStaleTreeAge, opts.Apply)
 	res := gitDailyRun(context.Background(), gitdaily.Runner(gitRunner), opts)
+	res.CommittedTrees = &committedTrees
 
 	if *asJSON {
 		if code := encodeJSONOrFail(stdout, stderr, res, "fak git-daily"); code != 0 {
@@ -304,6 +305,23 @@ func writeGitDailyText(w io.Writer, res gitdaily.Result) {
 		mode = "dry-run"
 	}
 	fmt.Fprintf(w, "git-daily (%s) day=%s\n", mode, res.Day)
+
+	if trees := res.CommittedTrees; trees != nil {
+		fmt.Fprintf(w, "committed trees (before tick dedupe): root=%s min-age=%ds\n", trees.Root, trees.MinAgeSeconds)
+		if trees.Err != "" {
+			fmt.Fprintf(w, "  scan error: %s\n", trees.Err)
+		} else if !trees.Apply {
+			fmt.Fprintf(w, "  would reap %d stale committed trees\n", len(trees.Candidates))
+		} else {
+			fmt.Fprintf(w, "  reaped %d stale committed trees (%d bytes)\n", trees.Reaped, trees.ReapedBytes)
+		}
+		for _, candidate := range trees.Candidates {
+			fmt.Fprintf(w, "    - %s (%d bytes)\n", candidate.Path, candidate.Bytes)
+			if candidate.RemoveErr != "" {
+				fmt.Fprintf(w, "      FAILED to remove: %s\n", candidate.RemoveErr)
+			}
+		}
+	}
 
 	if res.Skipped != "" {
 		switch res.Skipped {

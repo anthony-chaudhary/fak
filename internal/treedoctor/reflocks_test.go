@@ -352,3 +352,76 @@ func TestLooseRefPressurePacksRefsUnderApply(t *testing.T) {
 		t.Fatalf("actions missing expected packed count; got:\n%s", joined)
 	}
 }
+
+func TestLooseRefPressurePreviewMatchesApply(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		lockAge   time.Duration
+		advancing bool
+		pressure  bool
+		wantPack  bool
+	}{
+		{name: "pressure without lock", pressure: true, wantPack: true},
+		{name: "pressure with stale lock", lockAge: 2 * time.Hour, pressure: true, wantPack: true},
+		{name: "pressure with live lock", lockAge: time.Minute, pressure: true},
+		{name: "pressure with advancing lock", lockAge: 2 * time.Hour, advancing: true, pressure: true},
+		{name: "below pressure threshold"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			root, gitDir := residueGitDir(t)
+			refDir := filepath.Join(gitDir, "refs", "heads")
+			if err := os.MkdirAll(refDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < 3; i++ {
+				if err := os.WriteFile(filepath.Join(refDir, "r"+strconv.Itoa(i)), []byte("deadbeef\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			sleep := func(time.Duration) {}
+			if tc.lockAge > 0 {
+				lock := seedRefLock(t, gitDir, "packed-refs.lock", now.Add(-tc.lockAge), 0)
+				if tc.advancing {
+					sleep = advancingWriter(t, lock)
+				}
+			}
+			threshold := 10
+			if tc.pressure {
+				threshold = 2
+			}
+			opts := Options{RepoRoot: root, Now: now, LocksOnly: true, RefLock: RefLockOptions{Sleep: sleep, LoosePressure: threshold}}
+			previewGit := &fakeGit{}
+			_, preview := Sweep(context.Background(), previewGit.run, opts, false)
+			planned := strings.Contains(strings.Join(preview, "\n"), "would run git pack-refs --all --prune")
+			if planned != tc.wantPack {
+				t.Fatalf("preview = %v, want packing %v", preview, tc.wantPack)
+			}
+			if len(previewGit.calls) != 0 {
+				t.Fatalf("locks-only preview executed git: %v", previewGit.calls)
+			}
+			for i := 0; i < 3; i++ {
+				got, err := os.ReadFile(filepath.Join(refDir, "r"+strconv.Itoa(i)))
+				if err != nil || string(got) != "deadbeef\n" {
+					t.Fatalf("preview changed loose ref: %q, %v", got, err)
+				}
+			}
+			if tc.lockAge > 0 {
+				if _, err := os.Stat(filepath.Join(gitDir, "packed-refs.lock")); err != nil {
+					t.Fatalf("preview reaped lock: %v", err)
+				}
+			}
+			applyGit := &fakeGit{}
+			Sweep(context.Background(), applyGit.run, opts, true)
+			packed := false
+			for _, call := range applyGit.calls {
+				if strings.Join(call[1:], " ") == "pack-refs --all --prune" {
+					packed = true
+				}
+			}
+			if packed != planned {
+				t.Fatalf("apply calls = %v disagree with preview = %v", applyGit.calls, preview)
+			}
+		})
+	}
+}

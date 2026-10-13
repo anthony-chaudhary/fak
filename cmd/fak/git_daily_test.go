@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -550,5 +551,148 @@ func TestRunGitDailyDefaultsGoTmpToRepoScratch(t *testing.T) {
 	code := runGitDaily(&stdout, &stderr, []string{"--root", repoRoot})
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+	}
+}
+
+// This runs the real CLI preview over fixture-owned Git and temp directories. It
+// captures both hidden apply-time effects while proving their files survive.
+func TestRunGitDailyDryRunReportsMaintenanceSideEffects(t *testing.T) {
+	tempParent := t.TempDir()
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(key, tempParent)
+	}
+	t.Setenv("GIT_OPTIONAL_LOCKS", "0")
+	repo := t.TempDir()
+	initGitDailyTestRepo(t, repo)
+	gitDir := filepath.Join(repo, ".git")
+	refs := filepath.Join(gitDir, "refs", "heads")
+	refContent := strings.Repeat("1", 40) + "\n"
+	for i := 0; i <= treedoctor.DefaultLooseRefPressure; i++ {
+		if err := os.WriteFile(filepath.Join(refs, "preview-"+strconv.Itoa(i)), []byte(refContent), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	packed := filepath.Join(gitDir, "packed-refs")
+	packedContent := []byte("# pack-refs with: peeled fully-peeled sorted\n")
+	if err := os.WriteFile(packed, packedContent, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tree := filepath.Join(tempParent, "fak-committed-tree-preview")
+	if err := os.Mkdir(tree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payload := filepath.Join(tree, "payload")
+	if err := os.WriteFile(payload, []byte("preserve"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-3 * time.Hour)
+	for _, path := range []string{payload, tree} {
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, err := os.Stat(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, asJSON := range []bool{true, false} {
+		args := []string{"--root", repo, "--dry-run", "--force", "--go-cache=false"}
+		if asJSON {
+			args = append(args, "--json")
+		}
+		var stdout, stderr bytes.Buffer
+		if code := runGitDaily(&stdout, &stderr, args); code > 1 {
+			t.Fatalf("exit %d: %s", code, stderr.String())
+		}
+		if asJSON {
+			var got struct {
+				Apply bool `json:"apply"`
+				Locks struct {
+					Actions []string `json:"actions"`
+				} `json:"locks"`
+				CommittedTrees *struct {
+					Root       string `json:"root"`
+					Apply      bool   `json:"apply"`
+					Reaped     int    `json:"reaped"`
+					Candidates []struct {
+						Path  string `json:"path"`
+						Bytes int64  `json:"bytes"`
+					} `json:"candidates"`
+				} `json:"committed_trees"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Apply || !strings.Contains(strings.Join(got.Locks.Actions, "\n"), "would run git pack-refs --all --prune") {
+				t.Fatalf("missing ref-packing preview: %s", stdout.String())
+			}
+			trees := got.CommittedTrees
+			if trees == nil || trees.Root != tempParent || trees.Apply || trees.Reaped != 0 || len(trees.Candidates) != 1 || trees.Candidates[0].Path != tree || trees.Candidates[0].Bytes != 8 {
+				t.Fatalf("missing committed-tree preview: %s", stdout.String())
+			}
+		} else {
+			for _, want := range []string{"would run git pack-refs --all --prune", "writes packed-refs and prunes packed loose ref files", "would reap 1 stale committed trees", tree} {
+				if !strings.Contains(stdout.String(), want) {
+					t.Fatalf("text preview missing %q: %s", want, stdout.String())
+				}
+			}
+		}
+	}
+	for i := 0; i <= treedoctor.DefaultLooseRefPressure; i++ {
+		got, err := os.ReadFile(filepath.Join(refs, "preview-"+strconv.Itoa(i)))
+		if err != nil || string(got) != refContent {
+			t.Fatalf("preview changed loose ref: %q, %v", got, err)
+		}
+	}
+	if got, err := os.ReadFile(packed); err != nil || !bytes.Equal(got, packedContent) {
+		t.Fatalf("preview changed packed-refs: %q, %v", got, err)
+	}
+	if got, err := os.ReadFile(payload); err != nil || string(got) != "preserve" {
+		t.Fatalf("preview reaped committed tree: %q, %v", got, err)
+	}
+	if after, err := os.Stat(payload); err != nil || !after.ModTime().Equal(before.ModTime()) {
+		t.Fatalf("preview changed candidate metadata: %v, %v", after, err)
+	}
+	for _, name := range []string{gitdaily.TickLockName, gitdaily.LedgerName, "packed-refs.lock"} {
+		if _, err := os.Stat(filepath.Join(gitDir, name)); !os.IsNotExist(err) {
+			t.Fatalf("preview created %s: %v", name, err)
+		}
+	}
+}
+
+func TestRunGitDailyDryRunReportsCommittedTreesBeforeSkippedTick(t *testing.T) {
+	tempParent := t.TempDir()
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(key, tempParent)
+	}
+	repo := t.TempDir()
+	initGitDailyTestRepo(t, repo)
+	tree := filepath.Join(tempParent, "fak-committed-tree-skipped")
+	if err := os.Mkdir(tree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-3 * time.Hour)
+	if err := os.Chtimes(tree, old, old); err != nil {
+		t.Fatal(err)
+	}
+	oldRun := gitDailyRun
+	defer func() { gitDailyRun = oldRun }()
+	gitDailyRun = func(_ context.Context, _ gitdaily.Runner, opts gitdaily.Options) gitdaily.Result {
+		if opts.Apply {
+			t.Fatal("expected dry-run")
+		}
+		return gitdaily.Result{Skipped: gitdaily.SkipAlreadyRanToday}
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runGitDaily(&stdout, &stderr, []string{"--root", repo, "--dry-run", "--go-cache=false"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	text := stdout.String()
+	previewAt, skipAt := strings.Index(text, "would reap 1 stale committed trees"), strings.Index(text, "SKIPPED (ALREADY_RAN_TODAY)")
+	if previewAt < 0 || skipAt < previewAt || !strings.Contains(text, tree) {
+		t.Fatalf("hidden pre-tick side effect on skip: %s", text)
+	}
+	if _, err := os.Stat(tree); err != nil {
+		t.Fatalf("preview reaped tree before skip: %v", err)
 	}
 }

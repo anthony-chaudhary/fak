@@ -75,25 +75,51 @@ var (
 	lastReapAt time.Time
 )
 
-// ReapStale sweeps temporary directories matching "fak-committed-tree-*" under tempParent
-// whose newest file (or directory modtime if empty) is older than maxAge.
-// If tempParent is "", os.TempDir() is used.
-// It returns the count of directories removed and the total bytes reclaimed.
+// StaleTree is one directory selected by the existing stale committed-tree reap.
+type StaleTree struct {
+	Path      string `json:"path"`
+	Bytes     int64  `json:"bytes"`
+	Reaped    bool   `json:"reaped,omitempty"`
+	RemoveErr string `json:"remove_err,omitempty"`
+}
+
+// StaleReport separates candidates from successful removals, including in previews.
+type StaleReport struct {
+	Root          string      `json:"root"`
+	MinAgeSeconds int64       `json:"min_age_seconds"`
+	Apply         bool        `json:"apply"`
+	Candidates    []StaleTree `json:"candidates,omitempty"`
+	Reaped        int         `json:"reaped"`
+	ReapedBytes   int64       `json:"reaped_bytes"`
+	Err           string      `json:"err,omitempty"`
+}
+
+// ReapStale removes stale committed trees and returns successful removal counts.
+// It retains the same selection and error behavior as SweepStale under apply.
 func ReapStale(tempParent string, maxAge time.Duration) (int, int64, error) {
+	rep, err := SweepStale(tempParent, maxAge, true)
+	return rep.Reaped, rep.ReapedBytes, err
+}
+
+// SweepStale reports temporary directories matching "fak-committed-tree-*" under
+// tempParent whose newest entry is older than maxAge. Only apply removes them.
+// Empty tempParent uses os.TempDir(); non-positive maxAge uses DefaultStaleTreeAge.
+// Preview and apply use the same selection loop; reported bytes are logical sizes.
+func SweepStale(tempParent string, maxAge time.Duration, apply bool) (StaleReport, error) {
 	if tempParent == "" {
 		tempParent = os.TempDir()
 	}
 	if maxAge <= 0 {
 		maxAge = DefaultStaleTreeAge
 	}
+	rep := StaleReport{Root: tempParent, MinAgeSeconds: int64(maxAge / time.Second), Apply: apply}
 	entries, err := os.ReadDir(tempParent)
 	if err != nil {
-		return 0, 0, err
+		rep.Err = err.Error()
+		return rep, err
 	}
 
 	now := time.Now()
-	reapedCount := 0
-	var reapedBytes int64
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -129,13 +155,20 @@ func ReapStale(tempParent string, maxAge time.Duration) (int, int64, error) {
 		})
 
 		if now.Sub(newest) >= maxAge {
-			if removeErr := os.RemoveAll(dirPath); removeErr == nil {
-				reapedCount++
-				reapedBytes += dirBytes
+			candidate := StaleTree{Path: dirPath, Bytes: dirBytes}
+			if apply {
+				if removeErr := os.RemoveAll(dirPath); removeErr == nil {
+					candidate.Reaped = true
+					rep.Reaped++
+					rep.ReapedBytes += dirBytes
+				} else {
+					candidate.RemoveErr = removeErr.Error()
+				}
 			}
+			rep.Candidates = append(rep.Candidates, candidate)
 		}
 	}
-	return reapedCount, reapedBytes, nil
+	return rep, nil
 }
 
 func maybeOpportunisticReap(tempParent string) {

@@ -76,6 +76,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/committedtree"
 	"github.com/anthony-chaudhary/fak/internal/flock"
 	"github.com/anthony-chaudhary/fak/internal/gitgate"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
@@ -231,8 +232,12 @@ type Result struct {
 	// Apply is false for a dry run.
 	Apply bool `json:"apply"`
 	// Skipped is non-empty when the tick deliberately did nothing; Locks and Maint are
-	// then zero-valued and NOTHING was mutated.
+	// then zero-valued and Run mutated nothing. A CLI pre-tick committed-tree sweep
+	// is reported separately in CommittedTrees.
 	Skipped SkipReason `json:"skipped,omitempty"`
+	// CommittedTrees is the CLI's pre-tick sweep, outside Run's dedupe/lock boundary.
+	// Nil for callers of Run alone; a CLI dry run reports candidates without reaping.
+	CommittedTrees *committedtree.StaleReport `json:"committed_trees,omitempty"`
 	// TickLockErr is set when the serializer itself could not be opened or locked. This
 	// is an incident, not TICK_BUSY: proceeding would violate the one-mutator contract,
 	// while reporting a healthy contender would hide a persistent permissions failure.

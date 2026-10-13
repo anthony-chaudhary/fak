@@ -283,8 +283,9 @@ func Sweep(ctx context.Context, run Runner, opts Options, apply bool) (Report, [
 
 	// Under apply, if loose-ref pressure was detected and no ref lock is currently
 	// holding, automatically pack loose refs with `git pack-refs --all --prune` to
-	// prevent thousands of loose ref files from accumulating.
-	if apply && rep.RefLocks.LooseRefs.Pressure {
+	// prevent thousands of loose ref files from accumulating. Preview the same
+	// decision without running Git or mistaking the pressure advisory for the plan.
+	if rep.RefLocks.LooseRefs.Pressure {
 		packedRefsLockHeld := false
 		for _, l := range rep.RefLocks.Locks {
 			if l.Name == "packed-refs.lock" && l.Present && !l.Stale {
@@ -293,7 +294,9 @@ func Sweep(ctx context.Context, run Runner, opts Options, apply bool) (Report, [
 			}
 		}
 		if !packedRefsLockHeld {
-			if _, code, err := run(ctx, opts.RepoRoot, "pack-refs", "--all", "--prune"); err == nil && code == 0 {
+			if !apply {
+				actions = append(actions, fmt.Sprintf("would run git pack-refs --all --prune for %d loose refs (writes packed-refs and prunes packed loose ref files)", rep.RefLocks.LooseRefs.Total))
+			} else if _, code, err := run(ctx, opts.RepoRoot, "pack-refs", "--all", "--prune"); err == nil && code == 0 {
 				actions = append(actions, fmt.Sprintf("packed %d loose refs into packed-refs", rep.RefLocks.LooseRefs.Total))
 			}
 		}
