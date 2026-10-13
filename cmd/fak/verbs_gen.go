@@ -295,6 +295,7 @@ var generatedVerbIndex = []generatedVerb{
 	{Name: "roofline", Synopsis: "run micro-roofline probes measuring compute and memory bandwidth ceilings on accelerator hardware", Tier: "dev"},
 	{Name: "route", Synopsis: "the model-routing oracle: per-aspect + ensemble model routing for one classified subject", Tier: "dev"},
 	{Name: "routebench", Synopsis: "the offline routing benchmark: a per-aspect+ensemble policy vs a single-model baseline", Tier: "dev"},
+	{Name: "router", Synopsis: "one verb that starts the always-on routing gateway from the ~/.fak/router layout", Tier: "dev"},
 	{Name: "run", Synopsis: "run an agent turn (or a recorded trace via --trace) through the kernel", Tier: "frontdoor"},
 	{Name: "rungstats", Synopsis: "stats over the verification-ladder rungs", Tier: "dev"},
 	{Name: "runtime-capabilities", Synopsis: "report the capabilities exposed by the current runtime build", Tier: "dev"},

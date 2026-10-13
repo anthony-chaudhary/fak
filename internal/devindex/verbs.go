@@ -390,6 +390,7 @@ var verbManifest = []Verb{
 	{Name: "roofline", Synopsis: "run micro-roofline probes measuring compute and memory bandwidth ceilings on accelerator hardware", Lane: "cmd"},
 	{Name: "route", Synopsis: "the model-routing oracle: per-aspect + ensemble model routing for one classified subject", Lane: "cmd"},
 	{Name: "routebench", Synopsis: "the offline routing benchmark: a per-aspect+ensemble policy vs a single-model baseline", Lane: "cmd"},
+	{Name: "router", Synopsis: "one verb that starts the always-on routing gateway from the ~/.fak/router layout", Lane: "cmd"},
 	{Name: "run", Synopsis: "run an agent turn (or a recorded trace via --trace) through the kernel", Lane: "cmd"},
 	{Name: "runtime-capabilities", Synopsis: "report the capabilities exposed by the current runtime build", Lane: "cmd"},
 	{Name: "rungstats", Synopsis: "stats over the verification-ladder rungs", Lane: "cmd"},

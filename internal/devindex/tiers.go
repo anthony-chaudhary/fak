@@ -407,6 +407,7 @@ var verbTiers = map[string]VerbTier{
 	"rollup":                        TierDev,
 	"route":                         TierDev,
 	"routebench":                    TierDev,
+	"router":                        TierDev,
 	"rungstats":                     TierDev,
 	"savings":                       TierDev,
 	"savings-vector":                TierDev,
