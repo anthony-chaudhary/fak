@@ -70,7 +70,10 @@ type PreflightInput struct {
 	// VulkanMixedQ4K selects the backed Vulkan -q4k loader's actual storage policy:
 	// eligible Q4_K/Q2_K matrices remain packed while unsupported dense formats make
 	// the bounded f32 -> Q8 round trip.
-	VulkanMixedQ4K bool
+	VulkanMixedQ4K                bool
+	StreamedExperts               bool
+	StreamedExpertDeviceRingBytes int64
+	StreamedDenseWorkingSetBytes  int64
 	// StreamedDenseQ4K mirrors WithStreamedDenseQ4K: eligible Q4_K matrices stay as
 	// lazy file ranges until HAL upload, so they have no persistent host packed copy
 	// and contribute one tensor-sized session staging window rather than load-worker
@@ -250,6 +253,9 @@ type preflightEstimate struct {
 func estimateLoadFor(in PreflightInput) (preflightEstimate, error) {
 	var plan compute.MemoryPlan
 	var err error
+	if in.StreamedExperts || in.StreamedExpertDeviceRingBytes != 0 || in.StreamedDenseWorkingSetBytes != 0 {
+		return estimateVulkanStreamedExperts(in)
+	}
 	switch {
 	case in.VulkanMixedQ4K:
 		return estimateVulkanMixedQ4K(in.Source, in.ResidentQ2KEmbedding, in.StreamedDenseQ4K, in.SingleResidencyQ4K)
