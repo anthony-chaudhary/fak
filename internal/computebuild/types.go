@@ -116,6 +116,8 @@ const (
 	VulkanBuildReceiptSchemaV17 = "fak.vulkan-build-receipt.v17"
 	// VulkanBuildReceiptSchemaV18 binds exact82 (V17/81 plus the experimental Q2_K token panel).
 	VulkanBuildReceiptSchemaV18 = "fak.vulkan-build-receipt.v18"
+	// VulkanBuildReceiptSchemaV19 binds V18/82 plus the Q3_K token panel.
+	VulkanBuildReceiptSchemaV19 = "fak.vulkan-build-receipt.v19"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"

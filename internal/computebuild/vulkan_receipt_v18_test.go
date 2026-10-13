@@ -9,8 +9,8 @@ import (
 // Pins only the source/receipt census. No shader or native archive is compiled.
 func TestVulkanReceiptV18TokenPanelBoundary(t *testing.T) {
 	want := append(CurrentVulkanShaderRegistryV17(), "v41_q2k_token_panel")
-	if len(want) != 82 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV18(), want) || !reflect.DeepEqual(VulkanShaders, want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest(), want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
-		t.Fatal("current builder must add exactly the Q2_K token-panel module to historical V17")
+	if len(want) != 82 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV18(), want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
+		t.Fatal("historical V18 must add exactly the Q2_K token-panel module to V17")
 	}
 	identity, err := vulkanRegistryV18.identity()
 	if err != nil {
@@ -21,9 +21,5 @@ func TestVulkanReceiptV18TokenPanelBoundary(t *testing.T) {
 	}
 	if vulkanRegistryV17.validateStems(want) == nil || vulkanRegistryV18.validateStems(CurrentVulkanShaderRegistryV17()) == nil {
 		t.Fatal("historical V17 and token-panel V18 must not be interchangeable")
-	}
-	schema, current, err := CurrentVulkanBuildIdentity()
-	if err != nil || schema != VulkanBuildReceiptSchemaV18 || !reflect.DeepEqual(current, identity) || vulkanSuccessorForSchema(schema) != vulkanRegistryV18 {
-		t.Fatalf("current receipt does not select V18: %q %+v %v", schema, current, err)
 	}
 }

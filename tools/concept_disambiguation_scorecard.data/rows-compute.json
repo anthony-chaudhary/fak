@@ -28,7 +28,8 @@
       "distinction": "An immutable launch geometry result, not a recorded Vulkan command buffer or a device qualification claim.",
       "distinct_from": [
         "x2-plan-vulkanplan",
-        "planv41q2ktokenpanel"
+        "planv41q2ktokenpanel",
+        "v41q3ktokenpanelplan"
       ],
       "aliases": [],
       "grounding": "V41Q2KTokenPanelPlan",
@@ -48,10 +49,52 @@
       "distinction": "Performs host arithmetic admission only; the returned plan holds geometry while provider capability and opt-in decide whether native execution is available.",
       "distinct_from": [
         "v41q2ktokenpanelplan",
-        "x2-plan-vulkanplan"
+        "x2-plan-vulkanplan",
+        "planv41q3ktokenpanel"
       ],
       "aliases": [],
       "grounding": "PlanV41Q2KTokenPanel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41q3ktokenpanelplan",
+      "canonical": "V41Q3KTokenPanelPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Pure bounded Q3_K token-panel geometry carrying output/input widths, exactly 2/4/8 rows, 110-byte quantized block extents padded to four bytes, and workgroup count for the three-int32 shader push ABI.",
+      "distinction": "An immutable launch geometry result for Q3_K storage rather than Q2_K geometry or a recorded Vulkan command buffer; does not qualify native device execution.",
+      "distinct_from": [
+        "v41q2ktokenpanelplan",
+        "x2-plan-vulkanplan",
+        "planv41q3ktokenpanel"
+      ],
+      "aliases": [],
+      "grounding": "V41Q3KTokenPanelPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "planv41q3ktokenpanel",
+      "canonical": "PlanV41Q3KTokenPanel",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Pure planner validating Q3_K matrix geometry, block divisibility, padded 110-byte block storage, signed 32-bit byte bounds and exactly 2/4/8 token rows before returning V41Q3KTokenPanelPlan.",
+      "distinction": "Host arithmetic admission for Q3_K storage; the result contains geometry while provider capability and opt-in independently control execution. Distinct from the Q2_K planner.",
+      "distinct_from": [
+        "v41q3ktokenpanelplan",
+        "planv41q2ktokenpanel"
+      ],
+      "aliases": [],
+      "grounding": "PlanV41Q3KTokenPanel",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

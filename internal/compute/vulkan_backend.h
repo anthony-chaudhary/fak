@@ -475,6 +475,12 @@ int fvk_have_v41_routed_id(void);
 int fvk_have_v41_q2k_token_panel(void);
 int fvk_v41_q2k_token_panel_shape(int out, int in, int tokens);
 int fvk_v41_q2k_token_panel_f32(const void *dW, const void *dX, void *dY, int out, int in, int tokens);
+
+/* V19 Q3_K token panel shares the opt-in/push ABI; weight storage is padded
+ * to four bytes, matching Q3_K upload and the final uint shader load. */
+int fvk_have_v41_q3k_token_panel(void);
+int fvk_v41_q3k_token_panel_shape(int out, int in, int tokens);
+int fvk_v41_q3k_token_panel_f32(const void *dW, const void *dX, void *dY, int out, int in, int tokens);
 int fvk_v41_routed_id_max_picks(void);
 int fvk_v41_matvec_id_f32(int dtype, void *const *dW, int slots, const void *dX, void *dY, const void *dIds,
                           int out, int in, int picks, int xStride);

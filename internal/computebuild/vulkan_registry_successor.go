@@ -52,6 +52,8 @@ const (
 	VulkanShaderRegistryV17ID = "fak.vulkan-shader-registry.v17.current81"
 	// VulkanShaderRegistryV18ID adds the opt-in same-weight Q2_K token tile.
 	VulkanShaderRegistryV18ID = "fak.vulkan-shader-registry.v18.current82"
+	// VulkanShaderRegistryV19ID adds same-weight Q3_K token sharing.
+	VulkanShaderRegistryV19ID = "fak.vulkan-shader-registry.v19.current83"
 )
 
 type vulkanSuccessorRegistry struct {
@@ -88,10 +90,12 @@ var (
 
 	vulkanRegistryV18 = &vulkanSuccessorRegistry{version: "V18", schema: VulkanBuildReceiptSchemaV18, id: VulkanShaderRegistryV18ID, count: 82, parent: vulkanRegistryV17, added: []string{"v41_q2k_token_panel"}}
 
+	vulkanRegistryV19 = &vulkanSuccessorRegistry{version: "V19", schema: VulkanBuildReceiptSchemaV19, id: VulkanShaderRegistryV19ID, count: 83, parent: vulkanRegistryV18, added: []string{"v41_q3k_token_panel"}}
+
 	// vulkanSuccessorRegistries is every successor schema a receipt may name.
-	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18}
+	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18, vulkanRegistryV19}
 	// vulkanCurrentRegistry is the registry the builder compiles and stamps.
-	vulkanCurrentRegistry = vulkanRegistryV18
+	vulkanCurrentRegistry = vulkanRegistryV19
 )
 
 func vulkanSuccessorForSchema(schema string) *vulkanSuccessorRegistry {
@@ -191,6 +195,9 @@ func CurrentVulkanShaderRegistryV17() []string { return vulkanRegistryV17.stems(
 
 // CurrentVulkanShaderRegistryV18 returns the exact experimental tile bundle.
 func CurrentVulkanShaderRegistryV18() []string { return vulkanRegistryV18.stems() }
+
+// CurrentVulkanShaderRegistryV19 returns the exact Q3_K token-tile bundle.
+func CurrentVulkanShaderRegistryV19() []string { return vulkanRegistryV19.stems() }
 
 // CurrentVulkanShaderRegistryLatest returns an owned copy of the set the
 // builder compiles and stamps today.

@@ -13442,10 +13442,16 @@
           "category": "false-positive",
           "reason": "Runtime capability/admission predicate for owned storage, exact opt-in, pipeline and recording-window state; not a product-support maturity or native qualification assertion.",
           "token": "SupportsV41Q2KTokenPanel"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Runtime capability and admission predicate for owned Q3 token-panel storage, opt-in, pipeline and recording state; not a support maturity or product qualification claim.",
+          "token": "SupportsV41Q3KTokenPanel"
         }
       ],
       "exclude": [
         "SupportsV41Q2KTokenPanel",
+        "SupportsV41Q3KTokenPanel",
         "broadefficiencysupported",
         "factual_correctness"
       ],
