@@ -14,8 +14,8 @@ import (
 // executable SPIR-V, source correspondence, or hardware qualification.
 func TestVulkanReceiptV15Current78Boundary(t *testing.T) {
 	want := append(CurrentVulkanShaderRegistryV14(), "v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum")
-	if len(want) != 78 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV15(), want) || !reflect.DeepEqual(VulkanShaders, want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest(), want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
-		t.Fatal("current builder does not use V14 plus the four routed-expert id modules exactly once")
+	if len(want) != 78 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV15(), want) || !reflect.DeepEqual(VulkanShaders[:78], want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest()[:78], want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
+		t.Fatal("V15 is not V14 plus the four routed-expert id modules as the current builder prefix")
 	}
 	registry, err := vulkanRegistryV15.identity()
 	if err != nil {

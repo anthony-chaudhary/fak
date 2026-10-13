@@ -14,7 +14,8 @@ import (
 // Decode-shaped shared attention (64 heads x 512) logs output digests that are
 // compared across shader builds: a relayout that only moves where each serial
 // sum runs must leave every bit equal. Rows above 2048 cover the chunked path.
-// FAK_V41_SHARED_ATTENTION_BENCH=<n> repeats each shape n times for timestamps.
+// FAK_V41_SHARED_ATTENTION_BENCH=<n> repeats each shape n times for timestamps;
+// FAK_V41_SHARED_ATTENTION_BENCH_ROWS=<n> keeps one shape.
 // fak-test:runtime fast est=6s lane=default
 func TestVulkanV41SharedAttentionDecodeShapeDigest(t *testing.T) {
 	v := vk(t)
@@ -27,6 +28,9 @@ func TestVulkanV41SharedAttentionDecodeShapeDigest(t *testing.T) {
 	}
 	const heads, dim = 64, 512
 	for _, rows := range []int{1, 130, 640, 2049, 3000} {
+		if !v41SharedAttentionBenchRows(rows) {
+			continue
+		}
 		for _, mode := range []V41SharedAttentionMode{V41SharedAttentionPlain, V41SharedAttentionCompressed} {
 			hasSink := rows%2 == 0
 			q := make([]float32, heads*dim)

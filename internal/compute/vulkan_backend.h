@@ -326,6 +326,14 @@ int fvk_v41_shared_attention_f32(const void *dQ, const void *dSharedKV,
                                  const void *dSink, void *dOut, void *dStatus,
                                  int heads, int headDim, int selectedRows,
                                  int mode, int hasSink, float scale);
+/* Optional determinism class for the same entrypoint (registry V16/79):
+ * class 0 (default) is the serial bit-exact kernel above; class 1 is the
+ * run-to-run Wave32 subgroup-tree module, used only for headDim <= 512.
+ * set_class returns 0, 1 not ready, 2 invalid class, 3 module unavailable.
+ * FAK_V41_SHARED_ATTENTION_DETERMINISM=run-to-run selects class 1 at init. */
+int fvk_have_v41_shared_attention_fast(void);
+int fvk_v41_shared_attention_class(void);
+int fvk_v41_shared_attention_set_class(int cls);
 
 /* Optional V4.1 MoE router top-k, outside the trusted shader registry. Five
  * exact storage bindings: logits[rows,experts] F32, bias[experts] F32 (a [1]

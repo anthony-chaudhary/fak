@@ -8,6 +8,7 @@ package compute
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"unsafe"
 )
@@ -28,6 +29,52 @@ func (v *vulkanBackend) SupportsV41SharedAttention() bool {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	return C.fvk_have_v41_shared_attention() != 0
+}
+
+// V41SharedAttentionClass is the determinism class V41SharedAttention runs in.
+// BitExact is the serial kernel and the parity oracle. RunToRun is the pinned
+// Wave32 subgroup-tree module: stable bits run to run on one device and
+// driver, never bit-identical to BitExact. Heads wider than 512 stay BitExact.
+type V41SharedAttentionClass int
+
+const (
+	V41SharedAttentionBitExact V41SharedAttentionClass = 0
+	V41SharedAttentionRunToRun V41SharedAttentionClass = 1
+)
+
+// ErrV41SharedAttentionClassUnavailable reports a class this device cannot run.
+var ErrV41SharedAttentionClassUnavailable = errors.New("vulkan: V4.1 shared attention determinism class unavailable")
+
+func (v *vulkanBackend) V41SharedAttentionFastAvailable() bool {
+	if v == nil {
+		return false
+	}
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return C.fvk_have_v41_shared_attention_fast() != 0
+}
+
+func (v *vulkanBackend) V41SharedAttentionClass() V41SharedAttentionClass {
+	if v == nil {
+		return V41SharedAttentionBitExact
+	}
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return V41SharedAttentionClass(C.fvk_v41_shared_attention_class())
+}
+
+// SetV41SharedAttentionClass selects the class for later dispatches; the
+// FAK_V41_SHARED_ATTENTION_DETERMINISM=run-to-run startup env sets the default.
+func (v *vulkanBackend) SetV41SharedAttentionClass(class V41SharedAttentionClass) error {
+	if v == nil {
+		return ErrV41SharedAttentionClassUnavailable
+	}
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	if status := int(C.fvk_v41_shared_attention_set_class(C.int(class))); status != 0 {
+		return fmt.Errorf("%w: class %d (code %d)", ErrV41SharedAttentionClassUnavailable, class, status)
+	}
+	return nil
 }
 
 // V41SharedAttention fences and validates every head's status before publishing

@@ -299,7 +299,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -321,7 +321,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
         return g_dp.otherSwiGLU;
     case K_ADD: case K_ADD_BIAS:
         return g_dp.otherAdd;
-    case K_ATTENTION: case K_QWEN35_CAUSAL_ATTENTION_PANEL: case K_V41_SHARED_ATTENTION: case K_V41_INDEXER_SCORE:
+    case K_ATTENTION: case K_QWEN35_CAUSAL_ATTENTION_PANEL: case K_V41_SHARED_ATTENTION: case K_V41_SHARED_ATTENTION_FAST: case K_V41_INDEXER_SCORE:
         return g_dp.otherAttention;
     case K_ARGMAX: case K_ARGMAX_PAIRS: case K_V41_ROUTER_TOPK: case K_V41_INDEX_SELECT:
         return g_dp.otherArgmax;
@@ -386,6 +386,12 @@ bool g_v41TailRoPEExactModule = false;
 // complete initialization, the selected device's F32 controls and strict ABI proof.
 int g_have_v41_tail_rope_exact = 0;
 int g_have_v41_shared_attention = 0;
+// Optional run-to-run determinism class (V41C-12): pinned Wave32 subgroup
+// trees, published only with subgroup size control and the oracle's ABI proof.
+// Class 0 keeps the serial bit-exact kernel; class 1 selects the fast module.
+int g_have_v41_shared_attention_fast = 0;
+bool g_v41SharedAttentionFastSubgroups = false;
+int g_v41SharedAttentionClass = 0;
 // Optional: the router module is not in the trusted shader registry yet, so it
 // is published only when its module is present and its ABI matches.
 int g_have_v41_router_topk = 0;
@@ -1411,7 +1417,7 @@ const char* const kKernelNames[] = {
     "q6k_matmul", "q5k_matmul", "q3k_matmul", "rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add", "q2k_matmul",
     "rmsnorm_q2k_matmul2", "qwen35_split_qg_panel", "qwen35_partial_rope_panel",
     "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
-    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool", "v41_tail_rope_exact", "v41_scale_exact", "v41_engram_row_decode", "v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum",
+    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool", "v41_tail_rope_exact", "v41_scale_exact", "v41_engram_row_decode", "v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum", "v41_shared_attention_fast",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -2794,7 +2800,7 @@ static bool spirvModuleFraming(const std::vector<char>& code) {
 }
 
 bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsize, uint32_t subgroupSize = 0) {
-    const bool fixedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_SCALE_EXACT];
+    const bool fixedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_SHARED_ATTENTION_FAST] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_SCALE_EXACT];
     std::vector<char> code = fixedV41 ? readV41TailRoPEModule(spvPath) : readFile(spvPath);
     if (!spirvModuleFraming(code)) return false;
     if (&k == &g_kern[K_V41_BF16_BOUNDARY] &&
@@ -2842,7 +2848,7 @@ bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsiz
         fprintf(stderr, "fak-vulkan: strict V4.1 tail RoPE module lacks admitted modes or selected-device controls in %s\n", spvPath.c_str());
         return false;
     }
-    if (&k == &g_kern[K_V41_SHARED_ATTENTION] &&
+    if ((&k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_SHARED_ATTENTION_FAST]) &&
         (nbuf != 5 || pcsize != 24 || !v41SharedAttentionABI(code))) {
         fprintf(stderr, "fak-vulkan: incompatible V4.1 shared attention module in %s\n", spvPath.c_str());
         return false;
@@ -2953,7 +2959,7 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
             statusBytes < 16 || statusBytes % 16 != 0 || (statusBytes != 16 && !routedID) ||
             initializedStatus->bytes < statusBytes) return false;
     }
-    const bool checkedV41 = forceChecked || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER] || &k == &g_kern[K_V41_EXACT_RMSNORM] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_ENGRAM_GATE] || &k == &g_kern[K_V41_COMPRESSOR_POOL] || &k == &g_kern[K_V41_SCALE_EXACT] || &k == &g_kern[K_V41_ENGRAM_ROW_DECODE];
+    const bool checkedV41 = forceChecked || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_SHARED_ATTENTION_FAST] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER] || &k == &g_kern[K_V41_EXACT_RMSNORM] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_ENGRAM_GATE] || &k == &g_kern[K_V41_COMPRESSOR_POOL] || &k == &g_kern[K_V41_SCALE_EXACT] || &k == &g_kern[K_V41_ENGRAM_ROW_DECODE];
     if (k.nbuf > MAX_DISPATCH_BUFS) {
         fprintf(stderr, "fak-vulkan: dispatch skipped; kernel has %d buffers, max %d\n",
                 k.nbuf, MAX_DISPATCH_BUFS);
@@ -3374,6 +3380,8 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
 #endif
     g_have_v41_tail_rope_exact = 0;
     g_have_v41_shared_attention = 0;
+    g_have_v41_shared_attention_fast = 0;
+    g_v41SharedAttentionClass = 0;
     g_have_v41_router_topk = 0;
     g_have_v41_indexer_score = 0;
     g_have_v41_mhc = 0;
@@ -3559,6 +3567,10 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         (subgroupBasicProps.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0 &&
         (subgroupBasicProps.supportedOperations & VK_SUBGROUP_FEATURE_SHUFFLE_BIT) != 0;
     const auto& limits = props2.properties.limits;
+    g_v41SharedAttentionFastSubgroups =
+        g_have_glm_kda_wave32 && haveSubgroupBasic && haveSubgroupArithmetic && haveSubgroupShuffle &&
+        (subgroupBasicProps.supportedOperations & VK_SUBGROUP_FEATURE_BALLOT_BIT) != 0 &&
+        limits.maxComputeSharedMemorySize >= 8192 * 4 + 64;
     g_gdn_prefill_max_groups_y = limits.maxComputeWorkGroupCount[1];
     g_have_gdn_prefill_tiled =
         (haveSubgroupBasic && haveSubgroupShuffle && (effectiveSubgroup32 || requiredSubgroup32) &&
@@ -3688,6 +3700,8 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // Archive and complete61 shader bundle cut over and roll back together.
     // Never silently substitute legacy59/60 when this required module fails.
     ok &= buildKernel(g_kern[K_V41_SHARED_ATTENTION], P("v41_shared_attention.spv"), 5, 24);
+    const bool v41SharedAttentionFastBuilt = g_v41SharedAttentionFastSubgroups &&
+        buildKernel(g_kern[K_V41_SHARED_ATTENTION_FAST], P("v41_shared_attention_fast.spv"), 5, 24, 32);
     // Trusted since registry V7/complete66, but still optional at init: an
     // absent module leaves the capability false and device-only V4.1 refuses.
     const std::string v41RouterModule = P("v41_router_topk.spv");
@@ -3877,6 +3891,10 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_ready = true;
     g_have_v41_tail_rope_qk = 1;
     g_have_v41_shared_attention = 1;
+    g_have_v41_shared_attention_fast = v41SharedAttentionFastBuilt ? 1 : 0;
+    if (const char* cls = std::getenv("FAK_V41_SHARED_ATTENTION_DETERMINISM")) {
+        g_v41SharedAttentionClass = (std::strcmp(cls, "run-to-run") == 0 && g_have_v41_shared_attention_fast) ? 1 : 0;
+    }
     g_have_v41_router_topk = v41RouterPipelineBuilt ? 1 : 0;
     g_have_v41_indexer_score = v41IndexerPipelineBuilt ? 1 : 0;
     g_have_v41_mhc = v41MHCPipelineBuilt ? 1 : 0;
@@ -5150,6 +5168,20 @@ int fvk_have_v41_shared_attention(void) {
     return g_ready && g_have_v41_shared_attention && g_kern[K_V41_SHARED_ATTENTION].pipe != VK_NULL_HANDLE;
 }
 
+int fvk_have_v41_shared_attention_fast(void) {
+    return g_ready && g_have_v41_shared_attention_fast && g_kern[K_V41_SHARED_ATTENTION_FAST].pipe != VK_NULL_HANDLE;
+}
+
+int fvk_v41_shared_attention_class(void) { return g_v41SharedAttentionClass; }
+
+int fvk_v41_shared_attention_set_class(int cls) {
+    if (!g_ready) return 1;
+    if (cls != 0 && cls != 1) return 2;
+    if (cls == 1 && !fvk_have_v41_shared_attention_fast()) return 3;
+    g_v41SharedAttentionClass = cls;
+    return 0;
+}
+
 int fvk_v41_shared_attention_f32(const void* dQ, const void* dSharedKV,
                                  const void* dSink, void* dOut, void* dStatus,
                                  int heads, int headDim, int selectedRows,
@@ -5194,7 +5226,9 @@ int fvk_v41_shared_attention_f32(const void* dQ, const void* dSharedKV,
                   "V4.1 attention push ABI member offsets must be fixed");
     // One 128-lane workgroup per head; its lane 0 initializes the four status
     // words and publishes the ordered first fault. There is no atomic winner race.
-    if (!dispatch(g_kern[K_V41_SHARED_ATTENTION], bufs, &pc, sizeof(pc), uint32_t(heads))) {
+    // The run-to-run class holds Q in 16 lane registers, so wider heads stay serial.
+    const bool fast = g_v41SharedAttentionClass == 1 && fvk_have_v41_shared_attention_fast() && headDim <= 512;
+    if (!dispatch(g_kern[fast ? K_V41_SHARED_ATTENTION_FAST : K_V41_SHARED_ATTENTION], bufs, &pc, sizeof(pc), uint32_t(heads))) {
         return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
     }
     return (int)g_submissionStatus;

@@ -44,6 +44,9 @@ const (
 	// VulkanShaderRegistryV15ID identifies the exact 78-module bundle that adds the
 	// four V4.1 routed-expert id modules (Q2_K/Q3_K id matvec, id SwiGLU, publish sum) to V14/74.
 	VulkanShaderRegistryV15ID = "fak.vulkan-shader-registry.v15.current78"
+	// VulkanShaderRegistryV16ID identifies the exact 79-module bundle that adds the
+	// run-to-run V4.1 shared attention module to V15/78.
+	VulkanShaderRegistryV16ID = "fak.vulkan-shader-registry.v16.current79"
 )
 
 type vulkanSuccessorRegistry struct {
@@ -74,10 +77,12 @@ var (
 
 	vulkanRegistryV15 = &vulkanSuccessorRegistry{version: "V15", schema: VulkanBuildReceiptSchemaV15, id: VulkanShaderRegistryV15ID, count: 78, parent: vulkanRegistryV14, added: []string{"v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum"}}
 
+	vulkanRegistryV16 = &vulkanSuccessorRegistry{version: "V16", schema: VulkanBuildReceiptSchemaV16, id: VulkanShaderRegistryV16ID, count: 79, parent: vulkanRegistryV15, added: []string{"v41_shared_attention_fast"}}
+
 	// vulkanSuccessorRegistries is every successor schema a receipt may name.
-	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15}
+	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16}
 	// vulkanCurrentRegistry is the registry the builder compiles and stamps.
-	vulkanCurrentRegistry = vulkanRegistryV15
+	vulkanCurrentRegistry = vulkanRegistryV16
 )
 
 func vulkanSuccessorForSchema(schema string) *vulkanSuccessorRegistry {
@@ -168,6 +173,9 @@ func CurrentVulkanShaderRegistryV14() []string { return vulkanRegistryV14.stems(
 
 // CurrentVulkanShaderRegistryV15 returns an owned copy of the trusted V15 set.
 func CurrentVulkanShaderRegistryV15() []string { return vulkanRegistryV15.stems() }
+
+// CurrentVulkanShaderRegistryV16 returns an owned copy of the trusted V16 set.
+func CurrentVulkanShaderRegistryV16() []string { return vulkanRegistryV16.stems() }
 
 // CurrentVulkanShaderRegistryLatest returns an owned copy of the set the
 // builder compiles and stamps today.
