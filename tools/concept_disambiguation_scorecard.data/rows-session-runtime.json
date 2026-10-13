@@ -39,7 +39,7 @@
       "kind": "symbol",
       "definition": "The immutable free/busy signal emitted when a session leaves the eligible set (budget exhaustion, pause, drain, stop), freeing scheduling capacity.",
       "distinction": "The free/busy SIGNAL at turn boundaries - NOT the Session (persistent state) and NOT the Budget (the allotment whose exhaustion fires it).",
-      "distinct_from": ["session", "turn", "budget"],
+      "distinct_from": ["session", "turn", "budget", "fused-vulkan-slot-bytes-ok-locked"],
       "aliases": ["slotevent"],
       "grounding": "slotevent",
       "grounding_kind": "symbol",

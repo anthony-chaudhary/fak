@@ -55,7 +55,7 @@ func validateV41RoutedFusedWeights(name string, weights []Tensor, picks int, sup
 		return 0, 0, fmt.Errorf("compute: V4.1 routed fused %s dtype %v is not served by this device", name, first.Dtype)
 	}
 	out, in = first.Shape[0], first.Shape[1]
-	if out <= 0 || in <= 0 || in%256 != 0 || out > maxInt32/picks {
+	if out <= 0 || in <= 0 || in > maxInt32 || in%256 != 0 || out > maxInt32/picks {
 		return 0, 0, fmt.Errorf("compute: V4.1 routed fused %s geometry [%d,%d] is not a k-quant row set", name, out, in)
 	}
 	for _, w := range weights[1:] {
@@ -72,14 +72,116 @@ func validateV41RoutedFusedActivation(x Tensor, picks, in int) (int, error) {
 	if x.Dtype != F32 || x.Quant != nil || len(x.Shape) != 1 {
 		return 0, fmt.Errorf("compute: V4.1 routed fused activation must be an unquantized F32 vector")
 	}
-	switch x.Shape[0] {
-	case in:
+	if picks <= 0 || picks > V41RoutedIDMaxPicks || in <= 0 || in > maxInt32 {
+		return 0, fmt.Errorf("compute: V4.1 routed fused activation geometry exceeds the device count domain")
+	}
+	// A shared row remains valid even when repeating it would exceed the
+	// device domain. Do not multiply the per-pick width in a host int.
+	perPick := uint64(picks) * uint64(in)
+	switch {
+	case x.Shape[0] == in:
 		return 0, nil
-	case picks * in:
+	case uint64(x.Shape[0]) == perPick:
+		if perPick > maxInt32 {
+			return 0, fmt.Errorf("compute: V4.1 routed fused activation exceeds the device count domain")
+		}
 		return in, nil
 	default:
-		return 0, fmt.Errorf("compute: V4.1 routed fused activation width %d is neither %d nor %d", x.Shape[0], in, picks*in)
+		return 0, fmt.Errorf("compute: V4.1 routed fused activation width %d is neither %d nor %d", x.Shape[0], in, perPick)
 	}
+}
+
+// v41RoutedFusedGeometry carries checked byte extents, not allocation sizes
+// inferred from tensor shapes after narrowing to C.int. Weight bindings may
+// be larger ring pages; these are the minimum bytes each dispatch reads.
+type v41RoutedFusedGeometry struct {
+	weightBytes, inputBytes, idsBytes int
+	outputBytes, statusBytes          int
+}
+
+// checkedV41RoutedFusedGeometry mirrors the native count/address domains before
+// any native call or output allocation. Q2_K is gate/up; Q3_K is down/sum.
+func checkedV41RoutedFusedGeometry(rows, in, picks, xStride int, dtype Dtype) (v41RoutedFusedGeometry, error) {
+	bad := func() (v41RoutedFusedGeometry, error) {
+		return v41RoutedFusedGeometry{}, fmt.Errorf("compute: V4.1 routed fused geometry exceeds the native count or byte domain")
+	}
+	if picks <= 0 || picks > V41RoutedIDMaxPicks || rows <= 0 || rows > maxInt32/picks ||
+		in <= 0 || in > maxInt32 || in%256 != 0 || (xStride != 0 && xStride != in) {
+		return bad()
+	}
+	blockBytes, outputCount, statusBytes := 84, rows*picks, v41RoutedSwiGLUStatusBytes
+	inputCount := in
+	switch dtype {
+	case Q2_K:
+		if xStride != 0 {
+			if in > maxInt32/picks {
+				return bad()
+			}
+			inputCount = picks * in
+		}
+	case Q3_K:
+		if xStride != in || in > maxInt32/picks {
+			return bad()
+		}
+		blockBytes, outputCount, statusBytes = 110, rows, v41BF16CheckedStatusBytes
+		inputCount = picks * in
+	default:
+		return bad()
+	}
+	// All byte counts must also fit the host allocation/size_t domain. The
+	// shader addresses quantized weights in uint32 bytes, even on 64-bit hosts.
+	const quantizedByteLimit = uint64(1<<32 - 1)
+	rowBytes, ok := checkedV41RoutedFusedBytes(in/256, blockBytes, quantizedByteLimit)
+	if !ok {
+		return bad()
+	}
+	var g v41RoutedFusedGeometry
+	if g.weightBytes, ok = checkedV41RoutedFusedWeightBytes(rows, rowBytes); !ok {
+		return bad()
+	}
+	hostLimit := uint64(^uint(0) >> 1)
+	if g.inputBytes, ok = checkedV41RoutedFusedBytes(inputCount, 4, hostLimit); !ok {
+		return bad()
+	}
+	if g.outputBytes, ok = checkedV41RoutedFusedBytes(outputCount, 4, hostLimit); !ok {
+		return bad()
+	}
+	if g.idsBytes, ok = checkedV41RoutedFusedBytes(picks, 12, hostLimit); !ok {
+		return bad()
+	}
+	if g.statusBytes, ok = checkedV41RoutedFusedBytes(picks, statusBytes, hostLimit); !ok {
+		return bad()
+	}
+	return g, nil
+}
+
+// The shaders read quantized bytes through uint32 words. An odd number of
+// 110-byte Q3_K blocks therefore needs two resident tail bytes, matching upload.
+func checkedV41RoutedFusedWeightBytes(rows, rowBytes int) (int, bool) {
+	const limit = uint64(1<<32 - 1)
+	payload, ok := checkedV41RoutedFusedBytes(rows, rowBytes, limit)
+	if !ok {
+		return 0, false
+	}
+	resident := (uint64(payload) + 3) &^ uint64(3)
+	if resident > limit || resident > uint64(^uint(0)>>1) {
+		return 0, false
+	}
+	return int(resident), true
+}
+
+func v41RoutedFusedExtentOK(available uint64, required int) bool {
+	return required > 0 && available >= uint64(required)
+}
+
+func checkedV41RoutedFusedBytes(count, width int, limit uint64) (int, bool) {
+	if hostLimit := uint64(^uint(0) >> 1); limit > hostLimit {
+		limit = hostLimit
+	}
+	if count <= 0 || width <= 0 || uint64(count) > limit/uint64(width) {
+		return 0, false
+	}
+	return count * width, true
 }
 
 // maxInt32 is the device count domain the fused GEMV checks against, matching
