@@ -6790,6 +6790,11 @@
           "category": "incidental",
           "reason": "Subordinate constant, predicate, refusal or routing helper of positioned serveexecutionpolicy; it implements launch policy resolution or reporting rather than a separate policy or session-lifetime concept.",
           "token": "executionPolicyBypassDeviceOnlySession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Outcome value reporting replacement of an existing llama soft-slot owner; extends the existing soft-slot decision vocabulary without introducing a separate session-runtime concept.",
+          "token": "SoftSlotStolen"
         }
       ],
       "exclude": [
@@ -6925,6 +6930,7 @@
         "SessionTerminalView",
         "SetSessionAffinity",
         "SlotStatus",
+        "SoftSlotStolen",
         "StoreVerifiedSlot",
         "UNSUPPORTED_SESSION_KIND",
         "VerifySessionMoveDestinationReceipt",
@@ -16215,6 +16221,11 @@
           "category": "incidental",
           "reason": "Arithmetic coverage and row-count helpers for the already-positioned V4.1 candidate publication/source contract. They add neither a work-plan abstraction nor an independently owned resource pool.",
           "token": "v41CandidatePoolRows"
+        },
+        {
+          "category": "incidental",
+          "reason": "Function-local boolean from the existing soft-slot owner map used to prefer unowned eligible slots; not a planning abstraction.",
+          "token": "candidateOwned"
         }
       ],
       "exclude": [
@@ -16356,6 +16367,7 @@
         "candidateFingerprint",
         "candidateID",
         "candidateNote",
+        "candidateOwned",
         "candidatePaths",
         "candidateRate",
         "candidateReport",

@@ -264,6 +264,78 @@ func TestLlamaSoftSlotWaitPolicyNeverMovesAConversation(t *testing.T) {
 	}
 }
 
+// An unused slot may have a newer timestamp than an owned one. Only wait gives
+// ownership priority over recency; the default LRU choice stays unchanged.
+//
+// fak-test:runtime fast est=100ms lane=default
+func TestLlamaSoftSlotPrefersUnownedOnlyUnderWait(t *testing.T) {
+	for _, tc := range []struct {
+		policy string
+		fourth int
+	}{{SoftSlotPolicyWait, 3}, {SoftSlotPolicyLRU, 0}} {
+		t.Run(tc.policy, func(t *testing.T) {
+			p := newSoftSlotPlanner(t, &fakeLlamaSlots{})
+			p.LlamaSoftSlotPolicy = tc.policy
+			st := llamaSoftSlotsFor(p.BaseURL)
+			st.mu.Lock()
+			st.slotUsed[3] = time.Now().Add(time.Hour)
+			st.mu.Unlock()
+			for i, want := range []int{0, 1, 2, tc.fourth} {
+				got, call := softSlotTurn(t, p, conv(fmt.Sprintf("agent %d", i)))
+				call.releaseSlot()
+				if got != want {
+					t.Fatalf("conversation %d got slot %d, want %d", i, got, want)
+				}
+			}
+		})
+	}
+}
+
+// More conversations than slots can displace a recorded owner under either
+// policy. Count that assignment explicitly, including the displaced owner's
+// next turn, but never count a request that could not name a slot.
+//
+// fak-test:runtime fast est=100ms lane=default
+func TestLlamaSoftSlotReportsOwnershipSteals(t *testing.T) {
+	for _, policy := range []string{SoftSlotPolicyWait, SoftSlotPolicyLRU} {
+		t.Run(policy, func(t *testing.T) {
+			p := newSoftSlotPlanner(t, &fakeLlamaSlots{})
+			p.LlamaSoftSlotPolicy = policy
+			before := LlamaSoftSlotCounts()["stolen"]
+			for i, name := range []string{"A", "B", "C", "D"} {
+				got, call := softSlotTurn(t, p, conv(name))
+				call.releaseSlot()
+				if got != i {
+					t.Fatalf("conversation %s got slot %d, want unowned slot %d", name, got, i)
+				}
+			}
+			if got := LlamaSoftSlotCounts()["stolen"] - before; got != 0 {
+				t.Fatalf("assigning unowned slots counted %d steals", got)
+			}
+			for i, name := range []string{"E", "A"} {
+				got, call := softSlotTurn(t, p, conv(name, "next turn"))
+				call.releaseSlot()
+				if got != i {
+					t.Fatalf("conversation %s got slot %d, want oldest owned slot %d", name, got, i)
+				}
+				if stolen := LlamaSoftSlotCounts()["stolen"] - before; stolen != uint64(i+1) {
+					t.Fatalf("conversation %s replaced an owner: stolen=%d, want %d", name, stolen, i+1)
+				}
+			}
+			for _, name := range []string{"C", "D", "E", "A"} {
+				_, call := softSlotTurn(t, p, conv(name, "held turn"))
+				t.Cleanup(call.releaseSlot)
+			}
+			before = LlamaSoftSlotCounts()["stolen"]
+			got, call := softSlotTurn(t, p, conv("overflow"))
+			call.releaseSlot()
+			if got != -1 || LlamaSoftSlotCounts()["stolen"] != before {
+				t.Fatalf("all slots in flight: slot=%d, stolen changed=%v", got, LlamaSoftSlotCounts()["stolen"] != before)
+			}
+		})
+	}
+}
+
 // After an idle spell the poller has exited and the last snapshot is older than
 // llamaSlotsSnapshotMaxAge. The next turn must re-read /slots and pin, not go unpinned
 // as unavailable forever.
@@ -381,22 +453,27 @@ func TestLlamaSoftSlotBacksOffAfterSlots404(t *testing.T) {
 
 // A slot id the latest snapshot no longer lists is gone, not idle (#13788).
 //
-// fak-test:runtime fast est=300ms lane=default
+// fak-test:runtime fast est=600ms lane=default
 func TestLlamaSoftSlotNeverNamesAVanishedSlot(t *testing.T) {
-	f := &fakeLlamaSlots{}
-	p := newSoftSlotPlanner(t, f)
-	a1, c := softSlotTurn(t, p, conv("agent A"))
-	c.releaseSlot()
-	if a1 < 0 {
-		t.Fatalf("first turn not pinned")
-	}
-	f.mu.Lock()
-	f.gone = map[int]bool{a1: true}
-	f.mu.Unlock()
-	waitFreshSnapshot(t, p, time.Now())
-	a2, c := softSlotTurn(t, p, conv("agent A", "turn 2"))
-	c.releaseSlot()
-	if a2 == a1 || a2 < 0 {
-		t.Fatalf("slot %d vanished from /slots; got id_slot %d, want another listed idle slot", a1, a2)
+	for _, policy := range []string{SoftSlotPolicyLRU, SoftSlotPolicyWait} {
+		t.Run(policy, func(t *testing.T) {
+			f := &fakeLlamaSlots{}
+			p := newSoftSlotPlanner(t, f)
+			p.LlamaSoftSlotPolicy = policy
+			a1, c := softSlotTurn(t, p, conv("agent A"))
+			c.releaseSlot()
+			if a1 < 0 {
+				t.Fatalf("first turn not pinned")
+			}
+			f.mu.Lock()
+			f.gone = map[int]bool{a1: true}
+			f.mu.Unlock()
+			waitFreshSnapshot(t, p, time.Now())
+			a2, c := softSlotTurn(t, p, conv("agent A", "turn 2"))
+			c.releaseSlot()
+			if a2 == a1 || a2 < 0 {
+				t.Fatalf("slot %d vanished from /slots; got id_slot %d, want another listed idle slot", a1, a2)
+			}
+		})
 	}
 }
