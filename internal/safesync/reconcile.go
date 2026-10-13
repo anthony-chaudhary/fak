@@ -341,9 +341,10 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 		}, nil
 	}
 
-	// 5. Active lock/quiescence contention check (flags ROUTE_DRAIN).
+	// 5. Actual writers block both goals. A drain queue delays publication, but
+	// integration may be needed before queued commits can be published.
 	contention := r.opts.Contention || isContentionActive(repo, r.opts.Now, r.opts.WriterLeaseTTL)
-	if contention {
+	if contention || (goalInfo.Kind == "publish" && hasQueuedPublication(repo)) {
 		return ReconcileAssessment{
 			Schema:     ReconcileSchema,
 			Route:      RouteDrain,
@@ -871,7 +872,7 @@ func isMergeActive(ctx context.Context, run Runner, repo string) bool {
 	return false
 }
 
-// isContentionActive checks for active lock or quiescence contention.
+// isContentionActive checks for an active writer lease or index lock.
 func isContentionActive(repo string, now func() time.Time, ttl time.Duration) bool {
 	if _, held := ActiveWriterLease(repo, now, ttl); held {
 		return true
@@ -888,6 +889,11 @@ func isContentionActive(repo string, now func() time.Time, ttl time.Duration) bo
 			}
 		}
 	}
+	return false
+}
+
+// hasQueuedPublication reports pending push work, not an active writer.
+func hasQueuedPublication(repo string) bool {
 	qp := filepath.Join(repo, ".fak", "sync-drain-queue.json")
 	if b, readErr := os.ReadFile(qp); readErr == nil {
 		var q struct {
