@@ -170,7 +170,7 @@ func (m *Model) forwardV41StepCohortOwned(scope *backendExecutionScope, lanes []
 		if cancelled(lane) {
 			continue
 		}
-		txs[lane], err = m.beginV41Step(input.id, input.session.v41State(), &scratch[lane])
+		txs[lane], err = m.beginV41StepAdmitted(input.id, input.session.v41State(), &scratch[lane])
 		if err != nil {
 			results[lane].err = err
 			return err

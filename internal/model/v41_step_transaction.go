@@ -24,7 +24,19 @@ type v41StepTransaction struct {
 
 // beginV41Step performs admission, embedding and journal setup in serial order.
 // Even on failure it returns a closed transaction carrying the rollback stats.
-func (m *Model) beginV41Step(id int, st *v41ForwardState, scratch *v41ProjScratch) (tx *v41StepTransaction, err error) {
+func (m *Model) beginV41Step(id int, st *v41ForwardState, scratch *v41ProjScratch) (*v41StepTransaction, error) {
+	return m.beginV41StepCore(id, st, scratch, false)
+}
+
+// beginV41StepAdmitted reuses full-model admission only within one owned cohort
+// dispatch. The cohort already validated this exact immutable model; the token,
+// retained state, cursor, and transaction checks still run for every lane.
+// It must not be used as a successful-admission cache across calls.
+func (m *Model) beginV41StepAdmitted(id int, st *v41ForwardState, scratch *v41ProjScratch) (*v41StepTransaction, error) {
+	return m.beginV41StepCore(id, st, scratch, true)
+}
+
+func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjScratch, admitted bool) (tx *v41StepTransaction, err error) {
 	tx = &v41StepTransaction{}
 	stats := &tx.stats
 	var resident *v41MHCResident
@@ -108,8 +120,10 @@ func (m *Model) beginV41Step(id int, st *v41ForwardState, scratch *v41ProjScratc
 			resident.free()
 		}
 	}
-	if err := m.v41ForwardAdmitted(); err != nil {
-		return tx, err
+	if !admitted {
+		if err := m.v41ForwardAdmitted(); err != nil {
+			return tx, err
+		}
 	}
 	cfg := m.Cfg
 	tx.layers = cfg.NumLayers
