@@ -179,12 +179,18 @@ func ConvertLlamaCppDumpArch(dir, arch string) (Artifact, error) {
 		if !filepath.IsLocal(e.File) {
 			return Artifact{}, dumpErr("%s: file %q is not local to the dump", e.Name, e.File)
 		}
-		data, err := os.ReadFile(filepath.Join(dir, e.File))
+		data, err := os.Open(filepath.Join(dir, e.File))
 		if err != nil {
 			return Artifact{}, err
 		}
-		if int64(len(data)) != byteSize {
-			return Artifact{}, dumpErr("%s: %d bytes, want %d for ne=%v", e.Name, len(data), byteSize, e.Ne)
+		info, err := data.Stat()
+		if err != nil {
+			data.Close()
+			return Artifact{}, err
+		}
+		if info.Size() != byteSize {
+			data.Close()
+			return Artifact{}, dumpErr("%s: %d bytes, want %d for ne=%v", e.Name, info.Size(), byteSize, e.Ne)
 		}
 		w := int(width)
 		idx := ActivationSampleIndices(w, LlamaCppActivationSamples)
@@ -198,9 +204,14 @@ func ConvertLlamaCppDumpArch(dir, arch string) (Artifact, error) {
 		}
 		for t := 0; t < int(tokens); t++ {
 			vals := make([]float32, len(idx))
+			var raw [4]byte
 			for i, j := range idx {
-				off := 4 * (t*w + j)
-				vals[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[off : off+4]))
+				off := int64(4) * (int64(t)*width + int64(j))
+				if _, err := data.ReadAt(raw[:], off); err != nil {
+					data.Close()
+					return Artifact{}, dumpErr("%s: sample offset %d: %v", e.Name, off, err)
+				}
+				vals[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[:]))
 			}
 			art.Events = append(art.Events, Event{
 				Sequence:              int64(len(art.Events) + 1),
@@ -219,6 +230,9 @@ func ConvertLlamaCppDumpArch(dir, arch string) (Artifact, error) {
 				Status:                "ok",
 			})
 			art.RetainedSampleValues += uint64(len(vals))
+		}
+		if err := data.Close(); err != nil {
+			return Artifact{}, err
 		}
 		nextToken[key] += int(tokens)
 	}

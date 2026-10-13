@@ -156,3 +156,84 @@ func TestActivationLlamaCppDump(t *testing.T) {
 		}
 	})
 }
+
+func sparseLlamaCppDump(t testing.TB, width int64) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "tokens.json"), []byte(`{"tokens":[7,8]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := json.Marshal(llamaCppIndexEntry{Seq: 1, Name: "qr-0", Type: "f32", Ne: []int64{width, 1, 2, 1}, Dumped: true, File: "tensor.bin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.jsonl"), entry, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(filepath.Join(dir, "tensor.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := f.Truncate(width * 8); err != nil {
+		t.Fatal(err)
+	}
+	for token := int64(0); token < 2; token++ {
+		for i := int64(0); i < 8; i++ {
+			var raw [4]byte
+			binary.LittleEndian.PutUint32(raw[:], math.Float32bits(float32(token*8+i)+0.125))
+			if _, err := f.WriteAt(raw[:], 4*(token*width+i*(width/8))); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	return dir
+}
+
+// fak-test:runtime fast est=50ms
+func TestLlamaCppSparseTensorSampling(t *testing.T) {
+	dir := sparseLlamaCppDump(t, 1<<27) // 1 GiB logical size, only 16 sampled writes.
+	a, err := ConvertLlamaCppDump(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Events) != 2 || a.RetainedSampleValues != 16 {
+		t.Fatalf("events=%d retained=%d", len(a.Events), a.RetainedSampleValues)
+	}
+	for token, e := range a.Events {
+		for i, v := range e.SampleValues {
+			if v != float32(token*8+i)+0.125 {
+				t.Fatalf("token=%d sample=%d value=%v", token, i, v)
+			}
+		}
+	}
+	for _, delta := range []int64{-1, 1} {
+		if err := os.Truncate(filepath.Join(dir, "tensor.bin"), (1<<30)+delta); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ConvertLlamaCppDump(dir); !errors.Is(err, ErrLlamaCppDump) {
+			t.Fatalf("size delta=%d err=%v", delta, err)
+		}
+	}
+	entry, err := json.Marshal(llamaCppIndexEntry{Seq: 1, Name: "qr-0", Type: "f32", Ne: []int64{math.MaxInt64, 1, 2, 1}, Dumped: true, File: "tensor.bin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.jsonl"), entry, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ConvertLlamaCppDump(dir); !errors.Is(err, ErrLlamaCppDump) {
+		t.Fatalf("overflow err=%v", err)
+	}
+}
+
+func BenchmarkLlamaCppSparseTensorSampling(b *testing.B) {
+	dir := sparseLlamaCppDump(b, 1<<21) // 16 MiB logical size.
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if _, err := ConvertLlamaCppDump(dir); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

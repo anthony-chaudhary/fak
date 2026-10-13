@@ -345,8 +345,19 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if err != nil {
 		return err
 	}
+	kvRank := hd
+	if full {
+		if hd > v41KVLoraRank {
+			return v41StageErr(v41StageAttention, l,
+				fmt.Errorf("%w: attention head_dim %d exceeds full KV latent rank %d", ErrV41ForwardStage, hd, v41KVLoraRank))
+		}
+		kvRank = v41KVLoraRank
+	}
+	kvPanel, err := m.v41ProjPanelWithProjection(l, "attn.wkv.weight", preFlat, kvRank, H, seq, scratch.denseProjection)
+	if err != nil {
+		return err
+	}
 	for t := 0; t < seq; t++ {
-		c := preByPos[t]
 		q := qPanel[t*nH*hd : (t+1)*nH*hd]
 		qLat := qLatPanel[t*cfg.QLoraRank : (t+1)*cfg.QLoraRank]
 		// KV latent seam. The full path admits and projects attn.wkv at the
@@ -357,23 +368,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// hd == v41KVLoraRank == 512, so the slice is a no-op; an hd wider than the
 		// latent rank is refused rather than silently mis-read. The reduced fixture
 		// keeps its HeadDim-wide projection byte-for-byte.
-		var kv []float32
-		if full {
-			if hd > v41KVLoraRank {
-				return v41StageErr(v41StageAttention, l,
-					fmt.Errorf("%w: attention head_dim %d exceeds full KV latent rank %d", ErrV41ForwardStage, hd, v41KVLoraRank))
-			}
-			kvFull, err := m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", c, v41KVLoraRank, H, scratch.denseProjection)
-			if err != nil {
-				return err
-			}
-			kv = kvFull[:hd]
-		} else {
-			kv, err = m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", c, hd, H, scratch.denseProjection)
-			if err != nil {
-				return err
-			}
-		}
+		kv := kvPanel[t*kvRank : t*kvRank+hd]
 		// Reference: kv = self.kv_norm(self.wkv(x)) then RoPE on the rope tail
 		// (_window_kv). The RMSNorm over the KV vector keeps its magnitude O(1);
 		// omitting it lets an unbounded projection reach the 512-term attention
@@ -644,10 +639,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 
 	// ---- MoE: router + shared expert + routed experts ----
 	//
-	// The router runs once per position and its picks are retained for the
-	// contraction loop below (byte-identical to the per-token router it replaces:
-	// the same v41ProjMatRows over the same rmsnormCfg(x[t]) and the same
-	// v41Route). The layer-scoped expert cache is reset here so its working set is
+	// The router projects the normalized panel and routes each position in order;
+	// its picks are retained for the contraction loop below. The layer-scoped
+	// expert cache is reset here so its working set is
 	// exactly this layer's routed experts (#13296).
 	scratch.v41LayerCacheReset()
 	if scratch.expertLayerCacheBytes == 0 {
@@ -692,11 +686,30 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return err
 		}
-		ffnInputs[t] = xn
-		routerLogits, err := m.v41ProjMatRowsWithProjection(l, "ffn.gate.weight", xn, cfg.NumExperts, H, scratch.denseProjection)
-		if err != nil {
-			return err
+		if len(xn) != H {
+			return v41StageErr(v41StageMoE, l, fmt.Errorf("%w: invalid normalized FFN row width", ErrV41ForwardStage))
 		}
+		ffnInputs[t] = xn
+	}
+	ffnElements, ok := checkedMulInt(seq, H)
+	if !ok {
+		return v41StageErr(v41StageMoE, l, fmt.Errorf("%w: FFN panel dimensions overflow", ErrV41ForwardStage))
+	}
+	var ffnFlat []float32
+	if seq == 1 {
+		ffnFlat = ffnInputs[0]
+	} else {
+		ffnFlat = make([]float32, ffnElements)
+		for t, xn := range ffnInputs {
+			copy(ffnFlat[t*H:(t+1)*H], xn)
+		}
+	}
+	routerPanel, err := m.v41ProjPanelWithProjection(l, "ffn.gate.weight", ffnFlat, cfg.NumExperts, H, seq, scratch.denseProjection)
+	if err != nil {
+		return err
+	}
+	for t := 0; t < seq; t++ {
+		routerLogits := routerPanel[t*cfg.NumExperts : (t+1)*cfg.NumExperts]
 		picks, err := v41RouteForGeometryWith(l, routerLogits, gateBias, routeCfg, full, scratch.routerTopK)
 		if err != nil {
 			return v41StageErr(v41StageMoE, l, err)
