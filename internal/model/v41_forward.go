@@ -721,7 +721,18 @@ func (s *Session) prefillV41(ids []int) []float32 {
 	if s.v41IncrementalEligible() && len(s.v41Forward.history) > 0 {
 		return s.prefillV41Suffix(ids)
 	}
-	act, err := s.M.forwardV41(ids, s.v41State())
+	var act *Activations
+	var err error
+	func() {
+		endBatch := s.v41BeginStepBatch()
+		defer func() {
+			v41FinishStepBatch(endBatch, &err)
+			if err != nil {
+				act = nil
+			}
+		}()
+		act, err = s.M.forwardV41(ids, s.v41State())
+	}()
 	if err != nil {
 		panic(err)
 	}
@@ -752,20 +763,43 @@ func (s *Session) prefillV41Suffix(ids []int) []float32 {
 	startLen := len(st.history)
 	var logits []float32
 	for i, id := range ids {
-		got, _, err := s.M.forwardV41Step(id, st, &v41ProjScratch{})
+		var got []float32
+		var err error
+		func() {
+			endBatch := s.v41BeginStepBatch()
+			defer func() {
+				v41FinishStepBatch(endBatch, &err)
+				if err != nil {
+					got = nil
+				}
+			}()
+			got, _, err = s.M.forwardV41Step(id, st, &v41ProjScratch{})
+		}()
 		if err != nil {
+			var batchErr *v41StepBatchError
 			var selectedRoPE *V41TailRoPEOperationError
 			var selectedAttention *V41SharedAttentionOperationError
 			var selectedScore *V41IndexerScoreOperationError
 			var selectedMHC *V41MHCOperationError
-			if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || errors.Is(err, ErrV41LogitScaleOperation) || errors.Is(err, ErrV41IndexWeightScaleOperation) || errors.Is(err, ErrV41QueryPrefixOperation) || !errors.Is(err, ErrV41ForwardStage) {
+			if errors.As(err, &batchErr) || errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || errors.Is(err, ErrV41LogitScaleOperation) || errors.Is(err, ErrV41IndexWeightScaleOperation) || errors.Is(err, ErrV41QueryPrefixOperation) || !errors.Is(err, ErrV41ForwardStage) {
 				panic(err)
 			}
 			// Roll the suffix back to the pre-call boundary and re-fold the
 			// whole suffix on the reference path so the session state and the
 			// returned logits are exactly what a cold prefill would produce.
 			st.history = st.history[:startLen]
-			act, ferr := s.M.forwardV41(ids, st)
+			var act *Activations
+			var ferr error
+			func() {
+				endBatch := s.v41BeginStepBatch()
+				defer func() {
+					v41FinishStepBatch(endBatch, &ferr)
+					if ferr != nil {
+						act = nil
+					}
+				}()
+				act, ferr = s.M.forwardV41(ids, st)
+			}()
 			if ferr != nil {
 				panic(ferr)
 			}
@@ -860,8 +894,9 @@ func (s *Session) stepV41(id int) []float32 {
 		func() {
 			endBatch := s.v41BeginStepBatch()
 			defer func() {
-				if endErr := endBatch(); endErr != nil && err == nil {
-					logits, err = nil, endErr
+				v41FinishStepBatch(endBatch, &err)
+				if err != nil {
+					logits = nil
 				}
 			}()
 			logits, _, err = s.M.forwardV41Step(id, s.v41State(), &v41ProjScratch{})
@@ -873,11 +908,12 @@ func (s *Session) stepV41(id int) []float32 {
 			}
 			return logits
 		}
+		var batchErr *v41StepBatchError
 		var selectedRoPE *V41TailRoPEOperationError
 		var selectedAttention *V41SharedAttentionOperationError
 		var selectedScore *V41IndexerScoreOperationError
 		var selectedMHC *V41MHCOperationError
-		if errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || errors.Is(err, ErrV41LogitScaleOperation) || errors.Is(err, ErrV41IndexWeightScaleOperation) || errors.Is(err, ErrV41QueryPrefixOperation) || !errors.Is(err, ErrV41ForwardStage) {
+		if errors.As(err, &batchErr) || errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || errors.Is(err, ErrV41LogitScaleOperation) || errors.Is(err, ErrV41IndexWeightScaleOperation) || errors.Is(err, ErrV41QueryPrefixOperation) || !errors.Is(err, ErrV41ForwardStage) {
 			panic(err)
 		}
 		// A typed stage refusal the eligibility check could not foresee (e.g. the
