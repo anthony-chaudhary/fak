@@ -492,16 +492,17 @@ func (n *v41ForwardSnapshot) clone() *v41ForwardSnapshot {
 }
 
 // restore builds a fresh v41ForwardState that takes ownership of the snapshot's
-// deep-owned rows. It never aliases the snapshot: the history is copied and the
-// layer slice is handed over, then the snapshot's references are cleared by the
-// caller. Session callbacks are left nil for the destination session to bind
+// deep-owned rows. Capture and clone already isolate the history from other
+// owners, so transfer it with the attention state rather than copying the full
+// prefix again. Clear all transferred references before returning. Session
+// callbacks are left nil for the destination session to bind
 // through Session.v41State, eagerly in PrefixSnapshot.Restore or on first use.
 func (n *v41ForwardSnapshot) restore() *v41ForwardState {
 	if n == nil {
 		return nil
 	}
 	out := &v41ForwardState{
-		history: append([]int(nil), n.history...),
+		history: n.history,
 		attn:    n.attn,
 		layers:  n.layers,
 	}

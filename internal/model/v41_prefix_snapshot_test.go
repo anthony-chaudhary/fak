@@ -195,7 +195,26 @@ func TestV41CompletePrefixSnapshot(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Clone after sibling Close: %v", err)
 		}
+		// A lookup clone already owns its history. Restore must transfer that
+		// allocation, just like its attention rows, without copying the prefix.
+		owned := third.v41
+		history := owned.history
+		branch := m2Session(t, s)
+		if err := third.Restore(branch); err != nil {
+			t.Fatalf("Restore clone: %v", err)
+		}
+		if &branch.v41Forward.history[0] != &history[0] {
+			t.Fatal("Restore copied the clone's already-owned history")
+		}
+		if third.v41 != nil || owned.history != nil || owned.attn != nil || owned.layers != nil {
+			t.Fatal("Restore retained transferred continuation ownership")
+		}
 		third.Close()
+		assertV41LogitsClose(t, branch.Step(6), s.Step(6), "restored clone after Close")
+		branch.v41Forward.history[0] = 999
+		if !reflect.DeepEqual(snap.v41.history, base) || s.v41Forward.history[0] != base[0] {
+			t.Fatal("restored history aliases the cached snapshot or original session")
+		}
 	})
 
 	t.Run("failed restore is atomic and mismatched geometry refused", func(t *testing.T) {
