@@ -289,23 +289,64 @@ func ModulateOpenAIJSON(raw []byte, decision agentopt.TurnEffortDecision) ([]byt
 	return json.Marshal(root)
 }
 
-// ModulateAnthropicJSON updates the thinking configuration in a raw Anthropic Messages JSON payload.
-// If AllocatedBudget == 0, thinking is disabled; otherwise type is enabled with budget_tokens set.
+// ModulateAnthropicJSON modulates conventional manual thinking on models that support it.
+// Positive budgets are raised to Anthropic's 1024-token minimum, but max_tokens is
+// never increased. Requests needing the interleaved-thinking exception cannot be
+// validated here because this JSON-only API has no beta-header context.
+// Zero disables manual thinking; adaptive and unknown modes pass through unchanged.
+// Errors return the original bytes. Changing budgets can invalidate provider caches.
 func ModulateAnthropicJSON(raw []byte, decision agentopt.TurnEffortDecision) ([]byte, error) {
+	modulated, _, err := modulateAnthropicJSON(raw, decision)
+	return modulated, err
+}
+
+func modulateAnthropicJSON(raw []byte, decision agentopt.TurnEffortDecision) ([]byte, *agentopt.TurnEffortDecision, error) {
 	if len(raw) == 0 {
-		return raw, nil
+		return raw, nil, nil
 	}
 	var root map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &root); err != nil {
-		return nil, fmt.Errorf("modulate anthropic json: %w", err)
+		return raw, nil, fmt.Errorf("modulate anthropic json: %w", err)
+	}
+	if root == nil {
+		return raw, nil, fmt.Errorf("modulate anthropic json: expected an object")
+	}
+	if rawThinking, ok := root["thinking"]; ok {
+		var thinking struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(rawThinking, &thinking); err != nil || strings.TrimSpace(thinking.Type) == "" {
+			return raw, nil, fmt.Errorf("modulate anthropic json: thinking requires a nonempty string type")
+		}
+		if thinking.Type != "enabled" && thinking.Type != "disabled" {
+			return raw, nil, nil
+		}
 	}
 
-	if decision.AllocatedBudget == 0 {
+	budget := decision.AllocatedBudget
+	if budget < 0 {
+		return raw, nil, fmt.Errorf("modulate anthropic json: thinking budget must be nonnegative")
+	}
+	if budget == 0 {
 		root["thinking"] = json.RawMessage(`{"type":"disabled"}`)
 	} else {
-		root["thinking"] = json.RawMessage(fmt.Sprintf(`{"type":"enabled","budget_tokens":%d}`, decision.AllocatedBudget))
+		budget = max(1024, budget)
+		var maxTokens int
+		if err := json.Unmarshal(root["max_tokens"], &maxTokens); err != nil || maxTokens <= 0 {
+			return raw, nil, fmt.Errorf("modulate anthropic json: conventional manual thinking requires positive integer max_tokens")
+		}
+		if budget >= maxTokens {
+			return raw, nil, fmt.Errorf("modulate anthropic json: conventional manual thinking requires max_tokens greater than normalized budget %d; interleaved beta-header context is unavailable", budget)
+		}
+		root["thinking"] = json.RawMessage(fmt.Sprintf(`{"type":"enabled","budget_tokens":%d}`, budget))
 	}
-	return json.Marshal(root)
+	modulated, err := json.Marshal(root)
+	if err != nil {
+		return raw, nil, fmt.Errorf("modulate anthropic json: %w", err)
+	}
+	decision.AllocatedBudget = budget
+	decision.ThinkingBudget = budget
+	return modulated, &decision, nil
 }
 
 // ModulateChatRequest sets ReasoningEffort and ThinkingConfig on ChatRequest.
@@ -404,8 +445,9 @@ func ExtractPromptPrefixFromJSON(raw []byte) ([]byte, error) {
 	return json.Marshal(p)
 }
 
-// ValidatePrefixCachePreservation verifies that previousPrefix is an exact bit-identical
-// leading slice of currentPrefix, guaranteeing 100% prefix cache hits on provider KV caches.
+// ValidatePrefixCachePreservation verifies the exact leading byte relationship.
+// This alone does not establish provider cache reuse, which also depends on
+// thinking configuration and provider rules.
 func ValidatePrefixCachePreservation(previousPrefix, currentPrefix []byte) bool {
 	if len(previousPrefix) == 0 {
 		return true
@@ -531,7 +573,10 @@ func ApplyDynamicEffortToOpenAIJSON(raw []byte, model string) ([]byte, *agentopt
 	return modulated, &decision, nil
 }
 
-// ApplyDynamicEffortToAnthropicJSON classifies and modulates a raw Anthropic JSON payload.
+// ApplyDynamicEffortToAnthropicJSON decodes, classifies and modulates conventional
+// manual thinking. A returned decision's budget fields reflect the applied wire
+// budget. Unsupported modes pass through with no decision; request decoding still
+// precedes mode inspection. Model support and interleaved headers are not inferred.
 func ApplyDynamicEffortToAnthropicJSON(raw []byte, model string) ([]byte, *agentopt.TurnEffortDecision, error) {
 	req, err := agent.DecodeAnthropicMessagesRequest(raw)
 	if err != nil {
@@ -539,9 +584,5 @@ func ApplyDynamicEffortToAnthropicJSON(raw []byte, model string) ([]byte, *agent
 	}
 	turnCtx := BuildTurnContext(req.Messages, req.System)
 	decision := ClassifyTurnEffort(turnCtx)
-	modulated, err := ModulateAnthropicJSON(raw, decision)
-	if err != nil {
-		return raw, nil, err
-	}
-	return modulated, &decision, nil
+	return modulateAnthropicJSON(raw, decision)
 }
