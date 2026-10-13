@@ -117,6 +117,23 @@
    next dispatch cut is a single grid over all picks with the slot map as a grid
    dimension, targeting the remaining routed dispatch term.
 
+## Landed-trunk re-verification
+
+Re-run at the published trunk revision `a7c9114fb` (the land result of this lane), same
+strix3 device and same synthetic pinned-slate fixture, to confirm the witness survives
+integration with the concurrent `v41_shared_attention_fast` lane rather than only on the
+pre-land rebase base:
+
+| Witness | Invocation | Result |
+| --- | --- | --- |
+| Parity | `FAK_VULKAN_SPIRV=... FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_DISPATCH_PROFILE=1 go test -tags vulkan ./internal/compute -run '^TestVulkanV41RoutedFusedMatchesID$' -count=1 -v` | PASS, 11/11 cases; `v41_flash_geometry maxRelMid=2.7778e-02 maxMidULP=5`, `small_tail_three_picks` and `single_pick` bitwise |
+| Model logits | same env, `./internal/model -run '^TestV41RoutedLayerBatchVulkan' -count=1 -v` | PASS, `bitwise_equal_windows=7` in both `compressed=false` and `compressed=true` |
+| Dispatch economy | same env + `./internal/model -run '^TestV41RoutedLayerBatchVulkan/compressed_false$'`, `FAK_V41_ROUTED_FUSED` unset vs `0` | PASS; `batch_id` fused on **152.0** vs fused off **161.0** compute dispatches/step, 138.5 submits/step both |
+
+- Note: `FAK_V41_ROUTED_ID` is driven per-arm by the model witness, so an out-of-band
+global `FAK_V41_ROUTED_ID=1` collapses the id and per-pick arms and trips the
+`id < per-pick` dispatch assertion; leave it unset when running that witness.
+
 ## Climb points
 
 <!-- fak-climb: metric=v41_routed_layer_compute_dispatches_per_step value=161 host=strix3 build=02beb0159 arm=batch_id_p3 workload=pinned-slate-6steps class=HW-WITNESSED at=2026-10-13T05:40:00Z -->

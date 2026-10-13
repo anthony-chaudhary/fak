@@ -521,6 +521,53 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## antirez/ds4 fused routed-FFN kernels
+
+The V4.1 fused routed-FFN kernels `internal/compute/shaders/v41_routed_gate_up_swiglu_id.comp`
+and `internal/compute/shaders/v41_routed_down_sum.comp`, the dispatch entrypoints in
+`internal/compute/vulkan_shim.cpp` (`fvk_v41_routed_gate_up_swiglu_id_f32`,
+`fvk_v41_routed_down_sum_f32`), and the Go shape in `internal/compute/v41_routed_fused.go`
+adapt the fused MoE expert kernel shape from `ds4_cuda.cu` at revision
+`fc80bd695da76ee14bcb86820bf900a5cdfda806` (MIT):
+- `moe_gate_up_mid_decode_lut_qwarp32_kernel:22143` does gate + up + SwiGLU + route weight
+  into one `mid` buffer.
+- `moe_down_sum_qwarp32_kernel:23869` and `moe_down_q4K_sum6_qwarp32_kernel:24099` do the
+  down projection plus the routed expert sum.
+- Launch sequence: `:27230-27360`.
+https://github.com/antirez/ds4/blob/fc80bd695da76ee14bcb86820bf900a5cdfda806/ds4_cuda.cu
+
+Changed for Fak: no upstream code is copied. The kernels are GLSL reimplementations over the
+P3 ids/slot-map binding, one workgroup owns one output row, and the quantization body plus
+per-row accumulation order are the project's own `v41_q2k_matvec_id.comp` / `v41_q3k_matvec_id.comp`
+term for term so the fused path is ULP- or bit-parity with the unfused id path rather than a
+new arithmetic contract. The fused gate/up kernel keeps the id kernel's per-superblock FMA
+association; the down/sum epilogue reproduces the id down + BF16 publication + sum chain
+bitwise. The ds4 MIT copyright and permission notice follows:
+
+```text
+MIT License
+
+Copyright (c) 2025-2026 antirez
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## DeepSeek V4.1 DSpark residency port study
 
 `internal/model/v41_dspark_residency.go` records a revision-anchored port STUDY of the DSpark
