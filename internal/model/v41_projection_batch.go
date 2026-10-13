@@ -19,11 +19,10 @@ package model
 //     falls back to the per-token residentMatRows call, which is exactly
 //     v41ProjMatRows's own read.
 //
-// The adapter is deliberately narrow, per the leaf's gold-plating boundary: the
-// query projections ONLY. The per-token norm/RoPE glue stays scalar at the call
-// site, the KV projection and the router/shared-expert projections are not
-// batched here. A single-row (decode) panel and an unsupported layout take the
-// scalar path so decode is never charged a panel primitive.
+// Query, KV and router projections use this adapter. The per-token norm/RoPE
+// and routing glue stays scalar at the call site; shared-expert projections
+// remain scalar. A single-row (decode) panel and an unsupported layout take
+// the scalar path so decode is never charged a panel primitive.
 //
 // The panel result is produced into a fresh caller-owned [seq,out] buffer; it
 // does not alias any resident store, so no lifetime escapes the call.
@@ -34,8 +33,9 @@ import (
 )
 
 // v41ProjPanelRowChunk bounds the scratch a single panel primitive holds. A
-// panel larger than this is projected in row chunks so the transient input panel
-// and output panel stay bounded regardless of prompt length. It is a multiple
+// panel larger than this is projected in row chunks so each primitive is bounded;
+// the caller-owned input and assembled output still scale with prompt length.
+// It is a multiple
 // that keeps the projection arithmetic identical (each row is independent).
 const v41ProjPanelRowChunk = 64
 
