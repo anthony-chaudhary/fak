@@ -11,6 +11,7 @@ type v41ExpertDownTile struct {
 	backend compute.V41Q3KTokenPanelBackend
 	copies  compute.V41RowLogBackend
 	weight  compute.Tensor
+	note    func()
 }
 
 func newV41ExpertDownTile(be compute.Backend, weight compute.Tensor, count int) *v41ExpertDownTile {
@@ -52,6 +53,9 @@ func (p *v41ExpertDownTile) project(activations []compute.Tensor, inter, hidden 
 	x.Shape = []int{len(activations) * inter}
 	if !valid(x, x.Shape[0]) {
 		return compute.Tensor{}, errV41ExpertResult
+	}
+	if p.note != nil {
+		p.note()
 	}
 	y, err := p.backend.V41Q3KTokenPanel(p.weight, x, len(activations))
 	fresh = own(y)

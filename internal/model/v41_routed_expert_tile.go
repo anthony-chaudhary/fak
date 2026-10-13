@@ -15,6 +15,7 @@ type v41ExpertTile struct {
 	up      compute.Tensor
 	start   int
 	end     int
+	note    func()
 }
 
 func v41ExpertTileSize(remaining int) int {
@@ -77,6 +78,9 @@ func (p *v41ExpertTile) project(s *Session, inputs [][]float32, row, hidden, int
 			}
 			out.Shape = []int{rows, inter}
 			return out, nil
+		}
+		if p.note != nil {
+			p.note()
 		}
 		if p.gate, err = project(p.gateW); err != nil {
 			return gate, up, true, err

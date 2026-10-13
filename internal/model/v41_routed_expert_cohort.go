@@ -158,7 +158,7 @@ func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusB
 	var statusRows []int
 	var published []compute.Tensor
 	var sums []compute.Tensor
-	var downTile *v41ExpertDownTile
+	usedDownTile := false
 	uploads := map[int]compute.Tensor{}
 	faultRow, current := count, 0
 	var primary any
@@ -240,19 +240,31 @@ func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusB
 			}
 		}()
 		var tile *v41ExpertTile
-		if options == nil {
-			// Only this caller promises one common expert triple. Cross-lane
-			// prepared rows may carry distinct experts and stay unchanged.
-			tile = newV41ExpertTile(s.Backend, gateW, upW, count)
-			downTile = newV41ExpertDownTile(s.Backend, downW, count)
-		}
+		var downTile *v41ExpertDownTile
 		var activations []compute.Tensor
-		chunkStart := 0
+		groupStart, groupEnd, chunkStart := 0, 0, 0
 	recordRows:
 		for current = 0; current < count; current++ {
 			*stage = "gate/up"
-			down := downW
-			g, u, tiled, err := tile.project(s, inputs, current, H, I, own, valid)
+			gate, up, down := gateW, upW, downW
+			if options != nil {
+				gate, up, down = options.triples[current][0], options.triples[current][1], options.triples[current][2]
+			}
+			if current == groupEnd {
+				groupStart, groupEnd, chunkStart = current, options.tileEnd(current, count), current
+				tile = newV41ExpertTile(s.Backend, gate, up, groupEnd-groupStart)
+				downTile = newV41ExpertDownTile(s.Backend, down, groupEnd-groupStart)
+				usedDownTile = usedDownTile || downTile != nil
+				if options != nil && options.note != nil {
+					if tile != nil {
+						tile.note = func() { options.note(current, true) }
+					}
+					if downTile != nil {
+						downTile.note = func() { options.note(current, false) }
+					}
+				}
+			}
+			g, u, tiled, err := tile.project(s, inputs[groupStart:groupEnd], current-groupStart, H, I, own, valid)
 			if cause = err; cause != nil {
 				break
 			}
@@ -271,12 +283,8 @@ func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusB
 						uploads[options.inputKeys[current]] = x
 					}
 				}
-				gate, up := gateW, upW
-				if options != nil {
-					gate, up, down = options.triples[current][0], options.triples[current][1], options.triples[current][2]
-					if options.note != nil {
-						options.note(current, true)
-					}
+				if options != nil && options.note != nil {
+					options.note(current, true)
 				}
 				g = s.Backend.MatMul(gate, x)
 				if !own(g) || !valid(g, I) {
@@ -295,9 +303,9 @@ func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusB
 				break
 			}
 			*stage = "down"
-			if downTile != nil && count-chunkStart > 1 {
+			if downTile != nil && groupEnd-chunkStart > 1 {
 				activations = append(activations, a)
-				if len(activations) < v41ExpertTileSize(count-chunkStart) {
+				if len(activations) < v41ExpertTileSize(groupEnd-chunkStart) {
 					continue
 				}
 				last := current
@@ -350,7 +358,7 @@ func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusB
 	if len(statuses) == 0 {
 		return nil, cause
 	}
-	if downTile != nil {
+	if usedDownTile {
 		// Tile scheduling records all activation statuses before its down
 		// statuses. Decode the actually issued records in stable row/stage
 		// order; never create a record for a down that was not issued.
@@ -393,7 +401,7 @@ func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusB
 		return nil, cause
 	}
 	for i, verdict := range verdicts {
-		if verdict == nil || downTile == nil && statusRows[i] > faultRow {
+		if verdict == nil || !usedDownTile && statusRows[i] > faultRow {
 			continue
 		}
 		// Under tiled scheduling every retained status was issued before a
