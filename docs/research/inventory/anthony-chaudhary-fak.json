@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:06f98ae31fe4d326639c2385cbc30491f9364d3babb046d22347e6608d896735",
-  "tracked_files": 25165,
-  "tracked_bytes": 508610812,
+  "content_root": "sha256:ff7fd4602e64cd54006c10e1972314b6cae4b59dcc8da69e17939e53807ca54c",
+  "tracked_files": 25166,
+  "tracked_bytes": 508623738,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -163811,6 +163811,15 @@
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
+      ]
+    },
+    {
+      "path": "internal/model/v41_step_head_panel_cardinality_test.go",
+      "content_sha256": "sha256:cf9ef08d06209b2d110562578bfbd030854cc837b7ea51813de07c167022b763",
+      "bytes": 12926,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
       ]
     },
     {
