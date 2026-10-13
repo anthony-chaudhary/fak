@@ -52,6 +52,9 @@ type NativeScheduler struct {
 	m       *model.Model
 	prepare schedPrepareFunc
 	now     func() time.Time
+	// modelName is fixed by the owning Engine before the scheduler is published.
+	// Empty preserves the Default identity fallback for standalone schedulers.
+	modelName string
 
 	cachePhaseLatency modelperfobs.CachePhaseLatencyRecorder
 
@@ -906,7 +909,11 @@ func (ln *schedLane) emitToken(iteration uint64) (next int, ok bool) {
 	done := eos || ln.emitted >= genTokens
 	var res *abi.Result
 	if done {
-		res = assembleResult(ln.putCtx, ln.tool, ln.promptLen, append([]int(nil), ln.gen...), ln.tok)
+		modelName := s.modelName
+		if modelName == "" {
+			modelName = Default.ModelName()
+		}
+		res = assembleSyscallResult(ln.putCtx, ln.tool, EngineID, modelName, ln.promptLen, append([]int(nil), ln.gen...), ln.tok)
 	}
 	state := ln.state
 	s.mu.Unlock()
