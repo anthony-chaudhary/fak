@@ -45,7 +45,8 @@ func ReadExpertRouteTrace(r io.Reader) (ExpertRouteTrace, error) {
 			continue
 		}
 		var probe struct {
-			Schema string `json:"schema"`
+			Schema  string     `json:"schema"`
+			Weights []*float32 `json:"weights"`
 		}
 		if err := json.Unmarshal([]byte(raw), &probe); err != nil {
 			return out, fmt.Errorf("%w: line %d: %v", ErrExpertRouteTrace, line, err)
@@ -67,6 +68,16 @@ func ReadExpertRouteTrace(r io.Reader) (ExpertRouteTrace, error) {
 		}
 		if ev.Layer < 0 || len(ev.Experts) == 0 {
 			return out, fmt.Errorf("%w: line %d: layer=%d experts=%d", ErrExpertRouteTrace, line, ev.Layer, len(ev.Experts))
+		}
+		if probe.Weights != nil {
+			if len(probe.Weights) != len(ev.Experts) {
+				return out, fmt.Errorf("%w: line %d: weights=%d experts=%d", ErrExpertRouteTrace, line, len(probe.Weights), len(ev.Experts))
+			}
+			for _, weight := range probe.Weights {
+				if weight == nil {
+					return out, fmt.Errorf("%w: line %d: null gate weight", ErrExpertRouteTrace, line)
+				}
+			}
 		}
 		for _, e := range ev.Experts {
 			if e < 0 {

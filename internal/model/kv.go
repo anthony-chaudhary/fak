@@ -1106,6 +1106,12 @@ func (s *Session) PrefillNoLogits(ids []int) {
 		panic(err)
 	}
 	s.validateDeviceOnlyExecution("prefill-no-logits")
+	if s.M.Cfg.IsDeepSeekV41() {
+		// V4.1 owns its continuation state outside the generic KV cache. Its
+		// forward still computes the head; only the returned logits are discarded.
+		s.prefillV41(ids)
+		return
+	}
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
 	s.validateDenseGPULayers()
