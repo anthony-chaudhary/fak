@@ -122,14 +122,14 @@ func (p *PrefixSnapshot) v41BackendSnapshotSupported() bool {
 // witnessed on its own.
 const v41QualifiedBackendName = "cpu-ref"
 
-// v41ForwardSnapshot is the deep-owned copy of a session's V4.1 continuation
-// state. It mirrors exactly the mutable continuation fields the arithmetic
+// v41ForwardSnapshot owns a session's writable V4.1 continuation state. It
+// mirrors exactly the mutable continuation fields the arithmetic
 // reads -- token history, the per-layer temporal attention states, and the
 // shared source-publication registry -- and NEVER the expertGateUp callback,
 // which is a per-session device binding rather than continuation data, and
-// never any weight table. Capture and ordinary Clone deep-copy every row.
-// Cache-restore forks may retain sealed immutable publications; every writable
-// continuation field remains branch-owned (fak#13342).
+// never any weight table. Capture and cache-restore forks may retain already
+// sealed immutable publications; every writable continuation field remains
+// branch-owned. Ordinary Clone still deep-copies every row (fak#13342).
 type v41ForwardSnapshot struct {
 	history []int
 	attn    *V41AttentionState
@@ -141,8 +141,9 @@ type v41ForwardSnapshot struct {
 	hadState bool
 }
 
-// PrefixSnapshot captures an independently owned prefix. Qwen recurrent layers
-// share immutable device pairs until a branch first mutates that layer. On a
+// PrefixSnapshot captures an independently owned prefix. V4.1 captures retain
+// already sealed immutable publications and copy every writable row. Qwen recurrent
+// layers share immutable device pairs until a branch first mutates that layer. On a
 // backend-nil Qwen session whose resident GDN owners hold the live recurrent
 // state, the owners are read back into the snapshot's host cache.
 func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
@@ -192,7 +193,7 @@ func (s *Session) prefixSnapshotOwned(scope *backendExecutionScope, readResident
 	// prefix (#13342, same failure family as #5548). Capture it whenever the
 	// session has one; a session that never ran a V4.1 forward keeps the absent
 	// contract.
-	out.v41 = captureV41ForwardSnapshot(s.v41Forward)
+	out.v41 = captureV41ForwardSnapshotWithPublications(s.v41Forward, true)
 	// A V4.1 prefix is not portable across backends and its position authority is
 	// the committed history, not the generic cache. Record both at capture so
 	// Restore can fail closed on a mismatched backend or token count instead of
@@ -503,18 +504,25 @@ func snapshotResidentPositions(s *Session) int {
 // deliberately NOT captured (it is a per-session device binding, not
 // continuation data), matching the step-local run state the assembly builds.
 func captureV41ForwardSnapshot(st *v41ForwardState) *v41ForwardSnapshot {
+	return captureV41ForwardSnapshotWithPublications(st, false)
+}
+
+// captureV41ForwardSnapshotWithPublications keeps an existing sealed base when
+// requested, without sealing or changing the live session. Mutable publication
+// overlays and all other continuation state remain independently owned.
+func captureV41ForwardSnapshotWithPublications(st *v41ForwardState, shareSealed bool) *v41ForwardSnapshot {
 	if st == nil {
 		return nil
 	}
 	out := &v41ForwardSnapshot{
 		history:  append([]int(nil), st.history...),
-		attn:     st.attn.clone(),
+		attn:     st.attn.cloneWithPublications(shareSealed),
 		hadState: true,
 	}
 	if len(st.layers) > 0 {
 		out.layers = make([]*V41AttentionState, len(st.layers))
 		for i, layer := range st.layers {
-			out.layers[i] = layer.clone()
+			out.layers[i] = layer.cloneWithPublications(shareSealed)
 		}
 	}
 	return out
@@ -545,7 +553,7 @@ func (n *v41ForwardSnapshot) cloneWithPublications(shareSealed bool) *v41Forward
 }
 
 // restore builds a fresh v41ForwardState that takes ownership of the snapshot's
-// deep-owned rows. Capture and clone already isolate the history from other
+// writable rows and any sealed base. Capture and clone isolate history from other
 // owners, so transfer it with the attention state rather than copying the full
 // prefix again. Clear all transferred references before returning. Session
 // callbacks are left nil for the destination session to bind
