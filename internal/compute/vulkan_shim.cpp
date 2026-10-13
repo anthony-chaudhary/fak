@@ -299,7 +299,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -477,11 +477,11 @@ int g_have_q3k_matmul = 0;
 
 VkDescriptorPool g_descpool = VK_NULL_HANDLE;
 
-// 13 covers the widest fused kernel: Qwen GDN Q8 input projection binds four
-// code+scale pairs, X, and four outputs. Sizes the per-dispatch descriptor/buffer
-// stack arrays; well under the device's storage-buffer binding limit and the
-// 32768-descriptor pool's headroom.
-static constexpr int MAX_DISPATCH_BUFS = 13;
+// 20 covers the widest fused kernel: the fused routed gate/up binds eight gate
+// slot weights, eight up slot weights, X, ids, mid and status. Sizes the
+// per-dispatch descriptor/buffer stack arrays; well under the device's
+// storage-buffer binding limit and the 32768-descriptor pool's headroom.
+static constexpr int MAX_DISPATCH_BUFS = 20;
 
 struct DescriptorSetRecord {
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
@@ -1417,7 +1417,7 @@ const char* const kKernelNames[] = {
     "q6k_matmul", "q5k_matmul", "q3k_matmul", "rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add", "q2k_matmul",
     "rmsnorm_q2k_matmul2", "qwen35_split_qg_panel", "qwen35_partial_rope_panel",
     "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
-    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool", "v41_tail_rope_exact", "v41_scale_exact", "v41_engram_row_decode", "v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum", "v41_shared_attention_fast",
+    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool", "v41_tail_rope_exact", "v41_scale_exact", "v41_engram_row_decode", "v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum", "v41_shared_attention_fast", "v41_routed_gate_up_swiglu_id", "v41_routed_down_sum",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -2800,7 +2800,7 @@ static bool spirvModuleFraming(const std::vector<char>& code) {
 }
 
 bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsize, uint32_t subgroupSize = 0) {
-    const bool fixedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_SHARED_ATTENTION_FAST] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_SCALE_EXACT];
+    const bool fixedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_SHARED_ATTENTION_FAST] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_SCALE_EXACT] || &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_DOWN_SUM];
     std::vector<char> code = fixedV41 ? readV41TailRoPEModule(spvPath) : readFile(spvPath);
     if (!spirvModuleFraming(code)) return false;
     if (&k == &g_kern[K_V41_BF16_BOUNDARY] &&
@@ -2945,7 +2945,8 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     if (g_v41SubmissionPendingFailure) return false;
     // Only these concrete synchronous kernels may request the bounded status
     // initialization. They never flush a batch; they record only into a V4.1 step batch.
-    const bool routedID = &k == &g_kern[K_V41_ROUTED_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_PUBLISH_SUM];
+    const bool routedID = &k == &g_kern[K_V41_ROUTED_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_PUBLISH_SUM] ||
+        &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_DOWN_SUM];
     if ((&k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_ROUTED_SWIGLU] || routedID) && initializedStatus == nullptr) return false;
     if (initializedStatus != nullptr) {
         // The status binding is the last one of each status-owning kernel. Only
@@ -2954,12 +2955,14 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
         const bool routedSwiGLU = &k == &g_kern[K_V41_ROUTED_SWIGLU] && k.nbuf == 4;
         const bool routedSwiGLUID = &k == &g_kern[K_V41_ROUTED_SWIGLU_ID] && k.nbuf == 5;
         const bool routedPublishSum = &k == &g_kern[K_V41_ROUTED_PUBLISH_SUM] && k.nbuf == 4;
-        if ((!checkedBF16 && !routedSwiGLU && !routedSwiGLUID && !routedPublishSum) || !forceChecked || (g_batching && !g_stepBatch) ||
+        const bool routedFusedGateUp = &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] && k.nbuf == 20;
+        const bool routedFusedDownSum = &k == &g_kern[K_V41_ROUTED_DOWN_SUM] && k.nbuf == 12;
+        if ((!checkedBF16 && !routedSwiGLU && !routedSwiGLUID && !routedPublishSum && !routedFusedGateUp && !routedFusedDownSum) || !forceChecked || (g_batching && !g_stepBatch) ||
             !bufs || bufs[k.nbuf - 1] != initializedStatus || initializedStatus->buf == VK_NULL_HANDLE ||
             statusBytes < 16 || statusBytes % 16 != 0 || (statusBytes != 16 && !routedID) ||
             initializedStatus->bytes < statusBytes) return false;
     }
-    const bool checkedV41 = forceChecked || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_SHARED_ATTENTION_FAST] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER] || &k == &g_kern[K_V41_EXACT_RMSNORM] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_ENGRAM_GATE] || &k == &g_kern[K_V41_COMPRESSOR_POOL] || &k == &g_kern[K_V41_SCALE_EXACT] || &k == &g_kern[K_V41_ENGRAM_ROW_DECODE];
+    const bool checkedV41 = forceChecked || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_SHARED_ATTENTION_FAST] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER] || &k == &g_kern[K_V41_EXACT_RMSNORM] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_ENGRAM_GATE] || &k == &g_kern[K_V41_COMPRESSOR_POOL] || &k == &g_kern[K_V41_SCALE_EXACT] || &k == &g_kern[K_V41_ENGRAM_ROW_DECODE] || &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_DOWN_SUM];
     if (k.nbuf > MAX_DISPATCH_BUFS) {
         fprintf(stderr, "fak-vulkan: dispatch skipped; kernel has %d buffers, max %d\n",
                 k.nbuf, MAX_DISPATCH_BUFS);
@@ -3768,7 +3771,9 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         buildKernel(g_kern[K_V41_Q2K_MATVEC_ID], P("v41_q2k_matvec_id.spv"), 11, 16) &&
         buildKernel(g_kern[K_V41_Q3K_MATVEC_ID], P("v41_q3k_matvec_id.spv"), 11, 16) &&
         buildKernel(g_kern[K_V41_ROUTED_SWIGLU_ID], P("v41_routed_swiglu_id.spv"), 5, 12) &&
-        buildKernel(g_kern[K_V41_ROUTED_PUBLISH_SUM], P("v41_routed_publish_sum.spv"), 4, 12);
+        buildKernel(g_kern[K_V41_ROUTED_PUBLISH_SUM], P("v41_routed_publish_sum.spv"), 4, 12) &&
+        buildKernel(g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID], P("v41_routed_gate_up_swiglu_id.spv"), 20, 20) &&
+        buildKernel(g_kern[K_V41_ROUTED_DOWN_SUM], P("v41_routed_down_sum.spv"), 12, 16);
     // Registry V9/current68 promotes only the unchanged finite checked module.
     // A current archive and its complete bundle cut over together. Keep the
     // capability false unless mandatory initialization completes below.
@@ -5777,6 +5782,112 @@ int fvk_v41_routed_publish_sum_f32(const void* dDown, void* dSum, const void* dI
     const uint32_t groups = uint32_t(std::min<uint64_t>((uint64_t(count) + 63u) / 64u, g_maxComputeWorkGroupCountX));
     if (!dispatch(g_kern[K_V41_ROUTED_PUBLISH_SUM], bufs, &pc, sizeof(pc), groups, 1, true, bufs[3],
                   uint32_t(picks) * 16u)) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
+// V4.1 fused routed-FFN dispatch (fak-private#3341): two dispatches per routed
+// layer instead of the id path's five. ADAPT (MIT, Copyright (c) 2025-2026
+// antirez): antirez/ds4 ds4_cuda.cu moe_gate_up_mid_decode_lut_qwarp32_kernel
+// @fc80bd695da76ee14bcb86820bf900a5cdfda806:22143 (gate + up + SwiGLU + route
+// weight into one mid buffer) and moe_down_sum_qwarp32_kernel:23869 /
+// moe_down_q4K_sum6_qwarp32_kernel:24099 (down projection plus the six-expert
+// sum). The id/slot-map binding is the routed id path's (llama.cpp
+// mul_mat_vec_id + llama_moe_cache). Each stage is the routed id stage term for
+// term, so every pick's output and status record track the id path.
+int fvk_have_v41_routed_fused(void) {
+    return g_ready && g_v41IndexerFloatControls &&
+        g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID].pipe != VK_NULL_HANDLE && g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID].nbuf == 20 &&
+        g_kern[K_V41_ROUTED_DOWN_SUM].pipe != VK_NULL_HANDLE && g_kern[K_V41_ROUTED_DOWN_SUM].nbuf == 12;
+}
+
+// One Q2_K gate+up GEMV with the BF16 clamp-SwiGLU route-weight publication in
+// its epilogue. Grid Y is the pick (its slot read from dIds), grid X tiles the
+// inter rows in pairs. Returns the tail status codes.
+int fvk_v41_routed_gate_up_swiglu_id_f32(void* const* dGate, void* const* dUp, int slots,
+                                          const void* dX, const void* dIds, void* dMid, void* dStatus,
+                                          int out, int in, int picks, int xStride, float limit) {
+    const int state = v41RoutedIDState();
+    if (state != 0) return state;
+    if (!dGate || !dUp || !std::isfinite(limit) || slots <= 0 || slots > kV41RoutedIDSlots || picks <= 0 ||
+        picks > kV41RoutedIDSlots || out <= 0 || in <= 0 || in % 256 != 0 || (xStride != 0 && xStride != in) ||
+        g_maxComputeWorkGroupCountX == 0) return 2;
+    const uint64_t wBytes = uint64_t(out) * uint64_t(in / 256) * 84u;
+    const uint64_t xFloats = uint64_t(in) * (xStride == 0 ? 1u : uint64_t(picks));
+    const uint64_t midFloats = uint64_t(out) * uint64_t(picks);
+    if (wBytes > UINT32_MAX || xFloats > INT32_MAX || midFloats > INT32_MAX) return 2;
+    Buffer* bufs[20];
+    for (int i = 0; i < kV41RoutedIDSlots; ++i) {
+        Buffer* g = B(dGate[i < slots ? i : 0]);
+        Buffer* u = B(dUp[i < slots ? i : 0]);
+        if (!v41RoutedIDBytesOK(g, wBytes) || !v41RoutedIDBytesOK(u, wBytes)) return 2;
+        bufs[i] = g;
+        bufs[8 + i] = u;
+    }
+    bufs[16] = B((void*)dX);
+    bufs[17] = B((void*)dIds);
+    bufs[18] = B(dMid);
+    bufs[19] = B(dStatus);
+    if (!v41RoutedIDBytesOK(bufs[16], xFloats * 4u) || !v41RoutedIDBytesOK(bufs[17], uint64_t(picks) * 12u) ||
+        !v41RoutedIDBytesOK(bufs[18], midFloats * 4u) || !v41RoutedIDBytesOK(bufs[19], uint64_t(picks) * 16u)) return 2;
+    for (int i = 0; i < 20; ++i) {
+        if (i != 18) { if (v41BuffersAlias(bufs[18], bufs[i])) return 2; }
+        if (i != 19) { if (v41BuffersAlias(bufs[19], bufs[i])) return 2; }
+    }
+    struct Push { int32_t outDim, inDim, picks, xStride; float limit; } pc{out, in, picks, xStride, limit};
+    static_assert(sizeof(Push) == 20, "V4.1 routed fused gate/up push ABI must be four int32 values and one float32");
+    const uint64_t groups = (uint64_t(out) + 1u) / 2u;
+    if (groups > g_maxComputeWorkGroupCountX) return 2;
+    if (!dispatch(g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID], bufs, &pc, sizeof(pc), uint32_t(groups), uint32_t(picks), true,
+                  bufs[19], uint32_t(picks) * 16u)) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
+// One Q3_K down GEMV with the checked BF16 publication of every pick's down row
+// and their routed sum in its epilogue. One thread per output row, so the
+// reduction order is the q3k id kernel's exactly. Returns the tail status codes.
+int fvk_v41_routed_down_sum_f32(void* const* dDown, int slots, const void* dMid, void* dSum,
+                                const void* dIds, void* dStatus, int out, int midDim, int picks, uint32_t site) {
+    const int state = v41RoutedIDState();
+    if (state != 0) return state;
+    const bool validSite = site == 1 || site == 2 || (site >= 5 && site <= 27);
+    if (!dDown || !validSite || slots <= 0 || slots > kV41RoutedIDSlots || picks <= 0 ||
+        picks > kV41RoutedIDSlots || out <= 0 || midDim <= 0 || midDim % 256 != 0 ||
+        !v41BF16CheckedCountSupported(out) || g_maxComputeWorkGroupCountX == 0) return 2;
+    const uint64_t wBytes = uint64_t(out) * uint64_t(midDim / 256) * 110u;
+    const uint64_t midFloats = uint64_t(midDim) * uint64_t(picks);
+    const uint64_t sumFloats = uint64_t(out);
+    if (wBytes > UINT32_MAX || midFloats > INT32_MAX || sumFloats > INT32_MAX) return 2;
+    Buffer* bufs[12];
+    for (int i = 0; i < kV41RoutedIDSlots; ++i) {
+        Buffer* d = B(dDown[i < slots ? i : 0]);
+        if (!v41RoutedIDBytesOK(d, wBytes)) return 2;
+        bufs[i] = d;
+    }
+    bufs[8] = B((void*)dMid);
+    bufs[9] = B((void*)dIds);
+    bufs[10] = B(dSum);
+    bufs[11] = B(dStatus);
+    if (!v41RoutedIDBytesOK(bufs[8], midFloats * 4u) || !v41RoutedIDBytesOK(bufs[9], uint64_t(picks) * 12u) ||
+        !v41RoutedIDBytesOK(bufs[10], sumFloats * 4u) || !v41RoutedIDBytesOK(bufs[11], uint64_t(picks) * 16u)) return 2;
+    // Only the first `slots` weight bindings are live; the rest repeat slot 0,
+    // so the distinctness check covers the live weights plus mid/ids/sum/status.
+    for (int i = 0; i < slots; ++i) {
+        for (int j = i + 1; j < slots; ++j) if (v41BuffersAlias(bufs[i], bufs[j])) return 2;
+        for (int j = 8; j < 12; ++j) if (v41BuffersAlias(bufs[i], bufs[j])) return 2;
+    }
+    for (int i = 8; i < 12; ++i) {
+        for (int j = i + 1; j < 12; ++j) if (v41BuffersAlias(bufs[i], bufs[j])) return 2;
+    }
+    struct Push { int32_t outDim, midDim; uint32_t site, picks; } pc{out, midDim, site, uint32_t(picks)};
+    static_assert(sizeof(Push) == 16, "V4.1 routed fused down/sum push ABI must be two int32 values and two uint32 values");
+    const uint64_t groups = (uint64_t(out) + 63u) / 64u;
+    if (groups > g_maxComputeWorkGroupCountX) return 2;
+    if (!dispatch(g_kern[K_V41_ROUTED_DOWN_SUM], bufs, &pc, sizeof(pc), uint32_t(groups), 1, true,
+                  bufs[11], uint32_t(picks) * 16u)) {
         return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
     }
     return (int)g_submissionStatus;

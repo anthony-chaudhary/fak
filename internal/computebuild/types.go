@@ -112,6 +112,8 @@ const (
 	VulkanBuildReceiptSchemaV15 = "fak.vulkan-build-receipt.v15"
 	// VulkanBuildReceiptSchemaV16 binds exact79 (V15/78 plus the run-to-run V4.1 shared attention module).
 	VulkanBuildReceiptSchemaV16 = "fak.vulkan-build-receipt.v16"
+	// VulkanBuildReceiptSchemaV17 binds exact81 (V16/79 plus the two V4.1 fused routed-FFN modules).
+	VulkanBuildReceiptSchemaV17 = "fak.vulkan-build-receipt.v17"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"

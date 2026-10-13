@@ -183,6 +183,9 @@ function Build-Shaders {
     $shaders += "v41_routed_publish_sum"
     # Coupled V16/complete79 migration; V15/78 remains a historical artifact identity.
     $shaders += "v41_shared_attention_fast"
+    # Coupled V17/complete81 migration; V16/79 remains a historical artifact identity.
+    $shaders += "v41_routed_gate_up_swiglu_id"
+    $shaders += "v41_routed_down_sum"
     foreach ($s in $shaders) {
         $src = Join-Path $shaderSrc "$s.comp"
         $dst = Join-Path $spvOut "$s.spv"

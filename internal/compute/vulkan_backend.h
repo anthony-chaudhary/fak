@@ -476,6 +476,20 @@ int fvk_v41_routed_swiglu_id_f32(const void *dGate, const void *dUp, void *dOut,
                                  int count, int picks, float limit);
 int fvk_v41_routed_publish_sum_f32(const void *dDown, void *dSum, const void *dIds, void *dStatus,
                                    int count, int picks, uint32_t site);
+/* V4.1 fused routed FFN (fak-private#3341, registry V17): two dispatches per routed
+ * layer instead of the id path's five. gate/up binds eight gate slot weights, eight
+ * up slot weights, X, ids, mid and status (20 bindings, 20-byte push); down/sum binds
+ * eight down slot weights, mid, ids, sum and status (12 bindings, 16-byte push). Each
+ * stage is the id stage term for term, so every pick's output and status record track
+ * the id path's. Push ABIs are (outDim,inDim,picks,xStride,limit) and
+ * (outDim,midDim,site,picks). Returns the tail RoPE status codes. Optional module:
+ * absence or missing binary32 float controls leave have=0. */
+int fvk_have_v41_routed_fused(void);
+int fvk_v41_routed_gate_up_swiglu_id_f32(void *const *dGate, void *const *dUp, int slots,
+                                         const void *dX, const void *dIds, void *dMid, void *dStatus,
+                                         int out, int in, int picks, int xStride, float limit);
+int fvk_v41_routed_down_sum_f32(void *const *dDown, int slots, const void *dMid, void *dSum,
+                                const void *dIds, void *dStatus, int out, int midDim, int picks, uint32_t site);
 int fvk_have_v41_routed_swiglu(void);
 int fvk_v41_routed_swiglu_f32(const void *dGate, const void *dUp, void *dOut, void *dStatus,
                               int count, float limit, float weight);

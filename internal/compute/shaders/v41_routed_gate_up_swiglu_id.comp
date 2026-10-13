@@ -1,0 +1,214 @@
+#version 450
+
+// v41_routed_gate_up_swiglu_id.comp - one dispatch per routed layer that folds the
+// gate and up GEMV, the BF16 clamp-SwiGLU route-weight publication and the BF16
+// down-operand publication into a single `mid` output (DeepSeek V4.1, fak-private#3341).
+//
+// ADAPT (MIT, Copyright (c) 2025-2026 antirez): antirez/ds4 ds4_cuda.cu
+// moe_gate_up_mid_decode_lut_qwarp32_kernel @fc80bd695da76ee14bcb86820bf900a5cdfda806:22143
+// does gate + up + SwiGLU + route weight into one mid buffer.
+//
+// Each projection's GEMV is v41_q2k_matvec_id.comp's main body textually, one
+// pass per row bank, so each pick's gate and up rows reduce in that kernel's
+// order; the published lane is v41_routed_swiglu_id.comp's body term for term.
+// Parity against the id path is therefore ULP (the two-id-dispatch association
+// is reproduced here), and the witness bounds it by ULP rather than by bit.
+//
+// Grid Y is the pick: its workgroup reads its pick's slot from the ids buffer and
+// both its gate and up weights through that slot's binding. Grid X tiles the inter
+// rows in blocks of ROWS. Only threads tid < ROWS publish, because the published
+// lane is per row, not per k-quant lane.
+layout(local_size_x = 64) in;
+
+const uint ROWS = 2u;
+const uint LANES = 64u;
+
+layout(std430, set = 0, binding = 0) readonly buffer G0 { uint g0[]; };
+layout(std430, set = 0, binding = 1) readonly buffer G1 { uint g1[]; };
+layout(std430, set = 0, binding = 2) readonly buffer G2 { uint g2[]; };
+layout(std430, set = 0, binding = 3) readonly buffer G3 { uint g3[]; };
+layout(std430, set = 0, binding = 4) readonly buffer G4 { uint g4[]; };
+layout(std430, set = 0, binding = 5) readonly buffer G5 { uint g5[]; };
+layout(std430, set = 0, binding = 6) readonly buffer G6 { uint g6[]; };
+layout(std430, set = 0, binding = 7) readonly buffer G7 { uint g7[]; };
+layout(std430, set = 0, binding = 8) readonly buffer U0 { uint u0[]; };
+layout(std430, set = 0, binding = 9) readonly buffer U1 { uint u1[]; };
+layout(std430, set = 0, binding = 10) readonly buffer U2 { uint u2[]; };
+layout(std430, set = 0, binding = 11) readonly buffer U3 { uint u3[]; };
+layout(std430, set = 0, binding = 12) readonly buffer U4 { uint u4[]; };
+layout(std430, set = 0, binding = 13) readonly buffer U5 { uint u5[]; };
+layout(std430, set = 0, binding = 14) readonly buffer U6 { uint u6[]; };
+layout(std430, set = 0, binding = 15) readonly buffer U7 { uint u7[]; };
+layout(std430, set = 0, binding = 16) readonly buffer X { vec4 x4[]; };
+layout(std430, set = 0, binding = 17) readonly buffer Ids { uint ids[]; };
+layout(std430, set = 0, binding = 18) writeonly buffer Mid { float mid[]; };
+// Native ownership fills 4*picks words with UINT32_MAX in the same command
+// before this dispatch. Per pick: magic, inter count, lowest activation-stage
+// fault lane, lowest down-operand-stage fault lane (UINT32_MAX = none).
+layout(std430, set = 0, binding = 19) buffer Status { uint status[]; };
+
+layout(push_constant) uniform PC {
+    int outDim;
+    int inDim;
+    int picks;
+    int xStride;
+    float limit;
+} pc;
+
+shared float red[2u * ROWS * LANES];
+
+const uint kExponent = 0x7f800000u;
+
+uint roundBF16(uint bits) { return (bits + 0x7fffu + ((bits >> 16u) & 1u)) & 0xffff0000u; }
+bool nonfinite(uint bits) { return (bits & kExponent) == kExponent; }
+
+// slot is uniform across the workgroup, so neither switch diverges. The two
+// loaders are the only difference between the gate and up row reads.
+uint gload(uint slot, uint i) {
+    switch (slot) {
+    case 0u: return g0[i];
+    case 1u: return g1[i];
+    case 2u: return g2[i];
+    case 3u: return g3[i];
+    case 4u: return g4[i];
+    case 5u: return g5[i];
+    case 6u: return g6[i];
+    default: return g7[i];
+    }
+}
+
+uint uload(uint slot, uint i) {
+    switch (slot) {
+    case 0u: return u0[i];
+    case 1u: return u1[i];
+    case 2u: return u2[i];
+    case 3u: return u3[i];
+    case 4u: return u4[i];
+    case 5u: return u5[i];
+    case 6u: return u6[i];
+    default: return u7[i];
+    }
+}
+
+vec4 bytesOf(uint w) {
+    return vec4(float(w & 255u), float((w >> 8u) & 255u), float((w >> 16u) & 255u), float(w >> 24u));
+}
+
+// One row bank of the Q2_K GEMV, written exactly as v41_q2k_matvec_id.comp's
+// per-row body: `acc[r]` accumulates one per-superblock `sum`. ACC names the
+// row accumulator array and WLOAD the projection's loader, so the gate and up
+// passes are the same program text.
+#define Q2K_BANK(WLOAD, ACC)                                                                    \
+    for (uint r = 0u; r < ROWS; ++r) ACC[r] = 0.0;                                              \
+    for (uint sb = tid >> 4u; sb < nsb; sb += LANES / 16u) {                                    \
+        vec4 xv[4];                                                                             \
+        float xsum[4];                                                                          \
+        for (uint j = 0u; j < 4u; ++j) {                                                        \
+            uint idx = (sb * 256u + h * 128u + j * 32u + s * 16u + lq) >> 2u;                   \
+            vec4 v = x4[xBase + idx];                                                           \
+            xv[j] = v;                                                                          \
+            xsum[j] = v.x + v.y + v.z + v.w;                                                    \
+        }                                                                                       \
+        for (uint r = 0u; r < ROWS; ++r) {                                                      \
+            uint row = rowBase + r;                                                             \
+            if (row >= outDim) break;                                                           \
+            uint base = row * wordsPerRow + sb * 21u;                                           \
+            uint q = WLOAD(slot, base + 4u + t16);                                              \
+            uint sc0 = WLOAD(slot, base + h * 2u);                                              \
+            uint sc1 = WLOAD(slot, base + h * 2u + 1u);                                         \
+            uint dm = WLOAD(slot, base + 20u);                                                  \
+            vec2 dd = unpackHalf2x16(dm);                                                       \
+            uint scj[4];                                                                        \
+            scj[0] = (sc0 >> (s * 8u)) & 255u;                                                  \
+            scj[1] = (sc0 >> ((2u + s) * 8u)) & 255u;                                           \
+            scj[2] = (sc1 >> (s * 8u)) & 255u;                                                  \
+            scj[3] = (sc1 >> ((2u + s) * 8u)) & 255u;                                           \
+            float sum = 0.0;                                                                    \
+            for (uint j = 0u; j < 4u; ++j) {                                                    \
+                vec4 qv = bytesOf((q >> (2u * j)) & 0x03030303u);                               \
+                float dl = dd.x * float(scj[j] & 15u);                                          \
+                float ml = dd.y * float(scj[j] >> 4u);                                          \
+                sum += dl * dot(qv, xv[j]) - ml * xsum[j];                                      \
+            }                                                                                   \
+            ACC[r] += sum;                                                                      \
+        }                                                                                       \
+    }
+
+void main() {
+    uint tid = gl_LocalInvocationID.x;
+    uint pick = gl_WorkGroupID.y;
+    uint slot = ids[pick];
+    uint rowBase = gl_WorkGroupID.x * ROWS;
+    uint outDim = uint(pc.outDim);
+    uint inDim = uint(pc.inDim);
+    uint nsb = inDim / 256u;
+    uint wordsPerRow = nsb * 21u;
+    uint xBase = (pick * uint(pc.xStride)) >> 2u;
+
+    uint t16 = tid & 15u;
+    uint h = t16 >> 3u;
+    uint s = (t16 >> 2u) & 1u;
+    uint lq = (t16 & 3u) * 4u;
+
+    float accG[ROWS];
+    float accU[ROWS];
+    Q2K_BANK(gload, accG)
+    Q2K_BANK(uload, accU)
+
+    for (uint r = 0u; r < ROWS; ++r) {
+        red[r * LANES + tid] = accG[r];
+        red[(ROWS + r) * LANES + tid] = accU[r];
+    }
+    barrier();
+    for (uint stride = LANES / 2u; stride > 0u; stride >>= 1u) {
+        if (tid < stride) {
+            for (uint r = 0u; r < ROWS; ++r) {
+                red[r * LANES + tid] += red[r * LANES + tid + stride];
+                red[(ROWS + r) * LANES + tid] += red[(ROWS + r) * LANES + tid + stride];
+            }
+        }
+        barrier();
+    }
+
+    uint rec = 4u * pick;
+    if (gl_GlobalInvocationID.x == 0u) {
+        status[rec] = 0x52535731u;
+        status[rec + 1u] = outDim;
+    }
+    if (tid >= ROWS) return;
+    uint row = rowBase + tid;
+    if (row >= outDim) return;
+    float weight = uintBitsToFloat(ids[pc.picks + int(pick)]);
+    uint gb = floatBitsToUint(red[tid * LANES]);
+    uint ub = floatBitsToUint(red[(ROWS + tid) * LANES]);
+    uint gr = roundBF16(gb);
+    uint ur = roundBF16(ub);
+    uint base = pick * outDim + row;
+    if (nonfinite(gb) || nonfinite(ub) || nonfinite(gr) || nonfinite(ur)) {
+        atomicMin(status[rec + 2u], row);
+        mid[base] = uintBitsToFloat(0x7fc00000u);
+        return;
+    }
+    precise float g = uintBitsToFloat(gr);
+    precise float u = uintBitsToFloat(ur);
+    if (pc.limit > 0.0) {
+        g = min(g, pc.limit);
+        u = max(-pc.limit, min(u, pc.limit));
+    }
+    precise float t = 1.0 + exp(-g);
+    precise float f = (g / t) * u;
+    uint fb = floatBitsToUint(f);
+    if (nonfinite(fb)) {
+        atomicMin(status[rec + 2u], row);
+        mid[base] = uintBitsToFloat(0x7fc00000u);
+        return;
+    }
+    precise float w = f * weight;
+    uint wb = floatBitsToUint(w);
+    uint wr = roundBF16(wb);
+    if (nonfinite(wb) || nonfinite(wr)) {
+        atomicMin(status[rec + 3u], row);
+        wr = 0x7fc00000u;
+    }
+    mid[base] = uintBitsToFloat(wr);
+}

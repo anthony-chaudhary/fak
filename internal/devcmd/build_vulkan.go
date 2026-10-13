@@ -139,7 +139,8 @@ type vulkanVerifyConfig struct {
 
 var (
 	verifyVulkanBinaryReceiptIdentityForSchema = computebuild.VerifyVulkanBinaryReceiptIdentityForSchema
-	currentVulkanShaderRegistryV16             = computebuild.CurrentVulkanShaderRegistryV16
+	currentVulkanShaderRegistryLatest          = computebuild.CurrentVulkanShaderRegistryLatest
+	currentVulkanBuildSchema                   = computebuild.CurrentVulkanBuildSchema
 	observeVulkanVerificationBinary            = hashVulkanVerificationBinary
 )
 
@@ -174,9 +175,9 @@ func RunBuildVulkan(stdout, stderr io.Writer, argv []string) int {
 	fs.StringVar(outBin, "o", "", "output binary path (shorthand)")
 	fs.StringVar(outBin, "out", "", "output binary path (alias)")
 	receiptFlag := fs.String("receipt", defaultReceipt, "build receipt path (matched receipt for verify)")
-	fs.StringVar(receiptFlag, "matched-receipt", defaultReceipt, "matched V16 receipt path for verify")
+	fs.StringVar(receiptFlag, "matched-receipt", defaultReceipt, "matched current receipt path for verify")
 	compareReceipt := fs.String("compare-receipt", "", "prior successful Vulkan receipt whose stable build identity must match")
-	fs.StringVar(compareReceipt, "baseline-receipt", "", "baseline V16 receipt path for verify")
+	fs.StringVar(compareReceipt, "baseline-receipt", "", "baseline current receipt path for verify")
 	verifyBinary := fs.String("binary", "", "matched Vulkan binary path for verify")
 	fs.StringVar(verifyBinary, "matched-binary", "", "matched Vulkan binary path for verify")
 	baselineBinary := fs.String("baseline-binary", "", "baseline Vulkan binary path for verify")
@@ -199,7 +200,7 @@ func RunBuildVulkan(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "  build      compile shaders, shim, and build compute package")
 		fmt.Fprintln(stderr, "  binary     build full binary with Vulkan backend enabled")
 		fmt.Fprintln(stderr, "  test       run Vulkan HAL device integration tests")
-		fmt.Fprintln(stderr, "  verify     verify an existing V16 receipt pair without executing either binary")
+		fmt.Fprintln(stderr, "  verify     verify an existing current receipt pair without executing either binary")
 		fmt.Fprintln(stderr, "flags:")
 		fs.PrintDefaults()
 	}
@@ -416,7 +417,7 @@ func runBuildVulkanVerify(stdout, stderr io.Writer, cfg vulkanVerifyConfig) int 
 		}, 1)
 	}
 
-	modules := currentVulkanShaderRegistryV16()
+	modules := currentVulkanShaderRegistryLatest()
 	tools := computebuild.VulkanReceiptToolInputs{
 		Go: cfg.Go, CC: cfg.CC, CXX: cfg.CXX, AR: cfg.AR, GLSLC: cfg.GLSLC,
 		CxxRuntime: cfg.CXXRuntime, IsWindows: false,
@@ -456,7 +457,7 @@ func runBuildVulkanVerify(stdout, stderr io.Writer, cfg vulkanVerifyConfig) int 
 		Comparison:           baseline,
 	}
 
-	verified, err := verifyVulkanBinaryReceiptIdentityForSchema(context.Background(), computebuild.VulkanBuildReceiptSchemaV16, evidence)
+	verified, err := verifyVulkanBinaryReceiptIdentityForSchema(context.Background(), currentVulkanBuildSchema(), evidence)
 	if err != nil {
 		return writeVulkanVerificationResult(stdout, stderr, VulkanVerificationResult{
 			Schema: vulkanVerificationResultSchema, Command: "verify", Verdict: "refused",
@@ -511,9 +512,13 @@ func validateVulkanVerificationSuccess(verified *computebuild.VulkanBinaryReceip
 	if !validVulkanVerificationHex(matchedReceiptSHA, sha256.Size) || verified.ReceiptSHA256 != matchedReceiptSHA {
 		return incomplete("receipt digest")
 	}
+	schema, identity, err := computebuild.CurrentVulkanBuildIdentity()
+	if err != nil {
+		return incomplete("current build identity")
+	}
 	receipt := &verified.Receipt
-	if receipt.Schema != computebuild.VulkanBuildReceiptSchemaV16 || receipt.Backend != "vulkan" || receipt.Command != "binary" || receipt.Outcome != "success" || receipt.ExitCode != 0 || receipt.Error != "" {
-		return incomplete("V16 success envelope")
+	if receipt.Schema != schema || receipt.Backend != "vulkan" || receipt.Command != "binary" || receipt.Outcome != "success" || receipt.ExitCode != 0 || receipt.Error != "" {
+		return incomplete("current success envelope")
 	}
 	if receipt.Vulkan == nil || receipt.Artifact == nil || receipt.VulkanRegistry == nil || receipt.VulkanNativeArchive == nil || receipt.VulkanIndexerScore == nil || receipt.Reproducibility == nil {
 		return incomplete("required receipt sections")
@@ -526,16 +531,16 @@ func validateVulkanVerificationSuccess(verified *computebuild.VulkanBinaryReceip
 	if matchedSize <= 0 || !validVulkanVerificationHex(matchedSHA, sha256.Size) || receipt.Artifact.SHA256 != matchedSHA || receipt.Artifact.SizeBytes != matchedSize || strings.TrimSpace(receipt.Artifact.Path) == "" || receipt.Artifact.Signed {
 		return incomplete("matched binary identity")
 	}
-	if len(modules) != 79 || provenance.SPIRVModuleCount != 79 || !validVulkanVerificationHex(provenance.SPIRVBundleSHA256, sha256.Size) {
-		return incomplete("exact79 SPIR-V identity")
+	if len(modules) != identity.ModuleCount || provenance.SPIRVModuleCount != identity.ModuleCount || !validVulkanVerificationHex(provenance.SPIRVBundleSHA256, sha256.Size) {
+		return incomplete(identity.ID + " SPIR-V identity")
 	}
 	registrySHA, err := vulkanVerificationRegistrySHA(modules)
 	if err != nil {
-		return incomplete("exact79 registry digest")
+		return incomplete(identity.ID + " registry digest")
 	}
 	registry := receipt.VulkanRegistry
-	if registry.ID != computebuild.VulkanShaderRegistryV16ID || registry.ModuleCount != 79 || registry.SHA256 != registrySHA || !validVulkanVerificationHex(registry.SHA256, sha256.Size) {
-		return incomplete("exact79 registry identity")
+	if registry.ID != identity.ID || registry.ModuleCount != identity.ModuleCount || registry.SHA256 != registrySHA || !validVulkanVerificationHex(registry.SHA256, sha256.Size) {
+		return incomplete(identity.ID + " registry identity")
 	}
 	archive := receipt.VulkanNativeArchive
 	if filepath.ToSlash(archive.Path) != "internal/compute/libfakvulkan.a" || archive.SizeBytes <= 0 || archive.Signed || !validVulkanVerificationHex(archive.SHA256, sha256.Size) {
@@ -657,14 +662,14 @@ func (cfg vulkanVerifyConfig) validate() error {
 	}
 	for _, field := range paths {
 		if strings.TrimSpace(field.value) == "" {
-			return fmt.Errorf("--%s is required for read-only V16 verification", field.name)
+			return fmt.Errorf("--%s is required for read-only current verification", field.name)
 		}
 		if !filepath.IsAbs(field.value) {
 			return fmt.Errorf("--%s must be an absolute path", field.name)
 		}
 	}
 	if strings.TrimSpace(cfg.Commit) == "" {
-		return fmt.Errorf("--commit is required for read-only V16 verification")
+		return fmt.Errorf("--commit is required for read-only current verification")
 	}
 	if strings.TrimSpace(cfg.GitSHA256) == "" {
 		return fmt.Errorf("--git-sha256 is required for pinned Git execution")
