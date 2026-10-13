@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -126,7 +127,7 @@ func TestValidateCandidateFingerprintRefusesLocalReplacementAndSymlink(t *testin
 	t.Run("symlink", func(t *testing.T) {
 		root := eventFixtureRoot(t)
 		if err := os.Symlink(filepath.Join(t.TempDir(), "absent"), filepath.Join(root, "escape")); err != nil {
-			t.Fatal(err)
+			t.Skipf("symlink unavailable: %v", err)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -268,6 +269,9 @@ func eventFixtureGit(t *testing.T, root, template string, args ...string) {
 	}
 }
 func TestValidateEventsIsolatedRunHidesPeerAndBindsRuntimeRead(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Run refuses --test-events on Windows")
+	}
 	eventFixtureEnvironment(t)
 	root := eventFixtureRoot(t)
 	template := t.TempDir()
