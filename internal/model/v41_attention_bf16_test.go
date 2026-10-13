@@ -167,8 +167,8 @@ func TestV41AttentionBF16SessionDispatch(t *testing.T) {
 				b := newV41AttentionBF16Recorder()
 				s := v41AttentionBF16Session(t, m, b)
 				v41AttentionBF16Parity(t, s.Prefill([]int{1, 2}), lastLogits(m.Forward([]int{1, 2})))
-				if s.v41State().attentionBF16 == nil || b.calls != 4*m.Cfg.NumLayers {
-					t.Fatalf("prefill missing both boundaries: calls=%d", b.calls)
+				if s.v41State().attentionBF16 == nil || b.calls != 2*m.Cfg.NumLayers {
+					t.Fatalf("prefill missing output boundaries or republished BF16 inputs: calls=%d", b.calls)
 				}
 				v41AttentionBF16Parity(t, s.Step(3), lastLogits(m.Forward([]int{1, 2, 3})))
 				snap, err := s.PrefixSnapshot()
@@ -186,14 +186,14 @@ func TestV41AttentionBF16SessionDispatch(t *testing.T) {
 				}
 				s.Close()
 				v41AttentionBF16Parity(t, target.Prefill([]int{4}), lastLogits(m.Forward([]int{1, 2, 3, 4})))
-				if b.calls != 8*m.Cfg.NumLayers || target.v41State().callbackOwner != target || target.BackendSessionClosed() {
+				if b.calls != 4*m.Cfg.NumLayers || target.v41State().callbackOwner != target || target.BackendSessionClosed() {
 					t.Fatal("restored suffix lost boundary owner")
 				}
 				if b.uploads != b.calls || b.reads != b.calls || b.frees != 2*b.calls || len(b.live) != 0 {
 					t.Fatal("publication leaked or changed transfer count")
 				}
 				for i, site := range b.sites {
-					if site != uint32(3+i%2) {
+					if site != compute.V41BF16CheckedAttentionNormOutput {
 						t.Fatalf("site order %d=%d", i, site)
 					}
 				}
@@ -217,10 +217,7 @@ func TestV41AttentionBF16SessionDispatch(t *testing.T) {
 			}
 			calls := 0
 			st.attentionBF16 = func(layer int, site string, values []float32) ([]float32, error) {
-				want := "attn_norm.weight input"
-				if calls%2 != 0 {
-					want = "attn_norm.weight output"
-				}
+				want := "attn_norm.weight output"
 				if site != want || layer != 0 || len(values) != m.Cfg.HiddenSize {
 					t.Fatal("resident publication site/order")
 				}
@@ -236,7 +233,7 @@ func TestV41AttentionBF16SessionDispatch(t *testing.T) {
 			}
 			v41AttentionBF16Parity(t, s.Prefill([]int{1, 2}), lastLogits(m.Forward([]int{1, 2})))
 			v41AttentionBF16Parity(t, s.Step(3), lastLogits(m.Forward([]int{1, 2, 3})))
-			if calls != 6*m.Cfg.NumLayers || b.calls["rms-split"] == 0 || len(b.outputs) != 0 {
+			if calls != 3*m.Cfg.NumLayers || b.calls["rms-split"] == 0 || len(b.outputs) != 0 {
 				t.Fatal("resident attention publication path missing or leaked", calls, b.calls)
 			}
 		})
@@ -318,7 +315,7 @@ func TestV41AttentionBF16SelectedFailure(t *testing.T) {
 					reads := b.reads
 					status := &compute.V41BF16CheckedArithmeticError{Site: uint32(stage + 2), Index: 1}
 					var primary error = &compute.BackendError{Backend: "test-device", Class: compute.VulkanClassExecutionFailed, Err: ErrV41ForwardStage, Recovered: status}
-					b.faultAt = b.calls + stage
+					b.faultAt = b.calls + 1
 					b.mode = "partial"
 					b.fault = primary
 					if panicMode {
@@ -329,6 +326,24 @@ func TestV41AttentionBF16SelectedFailure(t *testing.T) {
 					b.cleanup = errors.New("secondary attention Free")
 					b.closeFault = errors.New("secondary attention Close")
 					err := recoverError(func() {
+						if stage == 1 {
+							// Real session collapses are widened BF16 here, so
+							// exercise the still-required input publication with
+							// a non-BF16 row through the same graph helper.
+							input := make([]float32, m.Cfg.HiddenSize)
+							input[0] = math.Float32frombits(0x3f800001)
+							out, err := m.v41AttentionInputNormWithPublications(0, input, float32(m.Cfg.RMSNormEps), func(int, []float32) ([]float32, error) {
+								t.Fatal("failed input publication reached normalization")
+								return nil, nil
+							}, s.v41State().attentionBF16)
+							if out != nil {
+								t.Fatal("failed input publication returned a row")
+							}
+							if err != nil {
+								panic(err)
+							}
+							return
+						}
 						if suffix {
 							s.Prefill([]int{3})
 						} else {
@@ -345,7 +360,7 @@ func TestV41AttentionBF16SelectedFailure(t *testing.T) {
 					if b.cleanupHits != wantCleanup || b.closeCalls != 1 {
 						t.Fatal("secondary cleanup/Close controls did not execute", b.cleanupHits, b.closeCalls)
 					}
-					if b.reads != reads+stage-1 {
+					if b.reads != reads {
 						t.Fatal("failed publication was read")
 					}
 					if panicMode && (err != primary || s.halFailure != primary) {
@@ -397,6 +412,95 @@ func TestV41AttentionBF16PayloadOwnership(t *testing.T) {
 			}
 			if mode == "foreign" && (b.frees != 1 || b.foreignReads != 0 || b.foreignFrees != 0 || compute.Default().Read(b.foreign)[0] != 1) {
 				t.Fatal("foreign tensor was consumed or freed")
+			}
+		})
+	}
+}
+
+// The input identity path copies finite widened BF16 without a publication;
+// normalization and its output boundary still run, in order. This witnesses
+// model routing and owned host bytes, not physical submit counts or a speedup.
+// fak-test:runtime medium est=1s lane=default
+func TestV41AttentionBF16InputIdentity(t *testing.T) {
+	v41AttentionBF16RequireCPU(t)
+	for _, alreadyBF16 := range []bool{true, false} {
+		t.Run(fmt.Sprintf("already-bf16=%t", alreadyBF16), func(t *testing.T) {
+			m := v41FullStepPatchedNorms(t)
+			b := newV41AttentionBF16Recorder()
+			s := v41AttentionBF16Session(t, m, b)
+			input := make([]float32, m.Cfg.HiddenSize)
+			words := []uint32{0x80000000, 0x00010000, 0x3f810000, 0xbf810000, 0x7f7f0000}
+			for i := range input {
+				input[i] = math.Float32frombits(words[i%len(words)])
+			}
+			if !alreadyBF16 {
+				input[2] = math.Float32frombits(0x3f818001)
+			}
+			before := append([]float32(nil), input...)
+			normalized := make([]float32, len(input))
+			for i := range normalized {
+				normalized[i] = math.Float32frombits(0x3f818001)
+			}
+			wantInputs := 0
+			if !alreadyBF16 {
+				wantInputs = 1
+			}
+			normCalls := 0
+			normalize := func(layer int, row []float32) ([]float32, error) {
+				normCalls++
+				if layer != 0 || len(row) != len(input) || b.calls != wantInputs {
+					t.Fatal("input publication count/order changed")
+				}
+				for i, value := range row {
+					if math.Float32bits(value) != v41BF16BoundaryOracle(math.Float32bits(before[i])) {
+						t.Fatal("normalization did not receive exact widened BF16")
+					}
+				}
+				// The callback owns its input copy even when publication is the
+				// identity; mutation must not escape to the mHC collapse row.
+				row[0] = 7
+				return normalized, nil
+			}
+			var got []float32
+			var err error
+			hostRounds := v41BF16PublishHostRounds(t, func() {
+				got, err = m.v41AttentionInputNormWithPublications(0, input, float32(m.Cfg.RMSNormEps), normalize, s.v41AttentionBF16Func())
+			})
+			if hostRounds != 0 {
+				t.Fatal("identity optimization replayed BF16 arithmetic on the host", hostRounds)
+			}
+			wantCalls := 2
+			if alreadyBF16 {
+				wantCalls = 1
+			}
+			if err != nil || normCalls != 1 || b.calls != wantCalls || b.uploads != wantCalls || b.reads != wantCalls || b.frees != 2*wantCalls || len(b.live) != 0 || s.BackendSessionClosed() {
+				t.Fatalf("publication identity routing: calls=%d uploads=%d reads=%d frees=%d norm=%d err=%v", b.calls, b.uploads, b.reads, b.frees, normCalls, err)
+			}
+			if len(got) != len(input) || b.sites[len(b.sites)-1] != compute.V41BF16CheckedAttentionNormOutput {
+				t.Fatal("normalization output publication was skipped")
+			}
+			for i := range input {
+				if math.Float32bits(input[i]) != math.Float32bits(before[i]) || math.Float32bits(got[i]) != v41BF16BoundaryOracle(0x3f818001) {
+					t.Fatal("input ownership or output BF16 bits changed")
+				}
+			}
+		})
+	}
+	for _, word := range []uint32{0x7fc00000, 0x7f800000, 0x7f7f8000} {
+		t.Run(fmt.Sprintf("invalid=%08x", word), func(t *testing.T) {
+			m := v41FullStepPatchedNorms(t)
+			b := newV41AttentionBF16Recorder()
+			s := v41AttentionBF16Session(t, m, b)
+			input := make([]float32, m.Cfg.HiddenSize)
+			input[0] = math.Float32frombits(word)
+			normCalls := 0
+			out, err := m.v41AttentionInputNormWithPublications(0, input, float32(m.Cfg.RMSNormEps), func(int, []float32) ([]float32, error) {
+				normCalls++
+				return nil, nil
+			}, s.v41AttentionBF16Func())
+			var boundary *V41BF16BoundaryOperationError
+			if out != nil || normCalls != 0 || !errors.As(err, &boundary) || boundary.Site != "attn_norm.weight input" || !s.BackendSessionClosed() || len(b.live) != 0 || math.Float32bits(input[0]) != word {
+				t.Fatal("invalid input bypassed its selected boundary or changed ownership", err)
 			}
 		})
 	}

@@ -39,8 +39,16 @@ func (m *Model) v41AttentionInputNormWithPublications(layer int, collapsed []flo
 	var err error
 	if publish == nil {
 		input, err = v41LatentNormBF16Copy(layer, leaf, "collapse", collapsed)
-	} else {
+	} else if layer < 0 || layer >= m.Cfg.NumLayers {
+		// Keep payload refusal and session retirement on the selected owner.
 		input, err = v41BF16BoundaryCopy(layer, leaf+" input", collapsed, publish)
+	} else {
+		// Device mHC already published a finite BF16 collapse. Reuse the
+		// ordinary identity-copy path instead of uploading and reading it
+		// back again; non-BF16 and invalid rows keep the selected boundary.
+		input, err = v41PublishBF16(layer, leaf+" input", collapsed, publish, func(values []float32) ([]float32, error) {
+			return v41LatentNormBF16Copy(layer, leaf, "collapse", values)
+		})
 	}
 	if err != nil {
 		return nil, err
