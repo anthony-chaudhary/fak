@@ -43,6 +43,8 @@ func TestV41RoutedLayerBatchVulkan(t *testing.T) {
 	if deferred, ok := be.(compute.V41DeferredStatusBackend); !ok || !deferred.SupportsV41DeferredStatus(qkK) {
 		t.Fatal("required Vulkan build lacks the deferred V4.1 status records")
 	}
+	// Keep the grouped-ID arm distinct from the newer fused routed kernels.
+	t.Setenv(v41RoutedFusedEnv, "0")
 	snap, profiled, err := compute.CaptureBackendExecutionSnapshot(be)
 	if err != nil {
 		t.Fatal(err)
@@ -56,11 +58,15 @@ func TestV41RoutedLayerBatchVulkan(t *testing.T) {
 			for _, arm := range []string{"per_pick_seam", "batch_per_pick", "batch_id"} {
 				batch := arm != "per_pick_seam"
 				t.Run(arm, func(t *testing.T) {
-					if !batch {
+					if batch {
+						t.Setenv(v41LayerExpertBatchEnv, "1")
+					} else {
 						t.Setenv(v41LayerExpertBatchEnv, "0")
 					}
 					if arm == "batch_id" {
 						t.Setenv(v41RoutedIDEnv, "1")
+					} else {
+						t.Setenv(v41RoutedIDEnv, "0")
 					}
 					m := v41PinnedSlateFixture(t, compressed)
 					defer func() {
@@ -95,6 +101,17 @@ func TestV41RoutedLayerBatchVulkan(t *testing.T) {
 					}
 					if s.HostFallbackObserved() {
 						t.Error("device decode observed a host fallback")
+					}
+					decode := m.V41ExpertFaultAttribution().Decode
+					wantLayers, wantIDLayers := 0, 0
+					if batch {
+						wantLayers = steps * m.Cfg.NumLayers
+					}
+					if arm == "batch_id" {
+						wantIDLayers = wantLayers
+					}
+					if decode.RoutedLayers != wantLayers || decode.RoutedIDLayers != wantIDLayers {
+						t.Fatalf("arm=%s decode routed layers=%d id layers=%d, want %d/%d", arm, decode.RoutedLayers, decode.RoutedIDLayers, wantLayers, wantIDLayers)
 					}
 					runs[arm] = run
 				})
