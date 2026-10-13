@@ -2,12 +2,19 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
@@ -151,9 +158,10 @@ func TestModelbenchMixedQuantBackendLoadAndForward(t *testing.T) {
 
 // A one-layer routing fixture, not a model-quality or hardware witness. It
 // includes Q3_K/IQ3_S, unsupported resident IQ2_XXS, Q4_K and Q6_K projections.
-func benchMixedQuantGGUF(t *testing.T) string {
+func benchMixedQuantGGUF(t *testing.T, moe ...bool) string {
 	t.Helper()
 	const dim, vocab = 256, 4
+	streamedMoE := len(moe) > 0 && moe[0]
 	type tensor struct {
 		name   string
 		dims   []uint64
@@ -208,9 +216,16 @@ func benchMixedQuantGGUF(t *testing.T) string {
 	}
 	add("blk.0.attn_v.weight", []uint64{dim, dim}, ggufload.TensorQ3_K, 110)
 	add("blk.0.attn_output.weight", []uint64{dim, dim}, ggufload.TensorIQ3_S, 110)
-	add("blk.0.ffn_gate.weight", []uint64{dim, dim}, ggufload.TensorIQ2_XXS, 66)
-	add("blk.0.ffn_up.weight", []uint64{dim, dim}, ggufload.TensorQ4_K, 144)
-	add("blk.0.ffn_down.weight", []uint64{dim, dim}, ggufload.TensorQ6_K, 210)
+	if streamedMoE {
+		add("blk.0.ffn_gate_inp.weight", []uint64{dim, 3}, ggufload.TensorF32, 0)
+		add("blk.0.ffn_gate_exps.weight", []uint64{dim, dim, 3}, ggufload.TensorQ2_K, 84)
+		add("blk.0.ffn_up_exps.weight", []uint64{dim, dim, 3}, ggufload.TensorQ2_K, 84)
+		add("blk.0.ffn_down_exps.weight", []uint64{dim, dim, 3}, ggufload.TensorQ3_K, 110)
+	} else {
+		add("blk.0.ffn_gate.weight", []uint64{dim, dim}, ggufload.TensorIQ2_XXS, 66)
+		add("blk.0.ffn_up.weight", []uint64{dim, dim}, ggufload.TensorQ4_K, 144)
+		add("blk.0.ffn_down.weight", []uint64{dim, dim}, ggufload.TensorQ6_K, 210)
+	}
 	var b bytes.Buffer
 	write := func(v any) {
 		if err := binary.Write(&b, binary.LittleEndian, v); err != nil {
@@ -221,10 +236,16 @@ func benchMixedQuantGGUF(t *testing.T) string {
 	write(uint32(0x46554747))
 	write(uint32(3))
 	write(uint64(len(tensors)))
-	write(uint64(12))
+	metadataCount := uint64(12)
+	arch := "llama"
+	if streamedMoE {
+		arch = "qwen3moe"
+		metadataCount += 3
+	}
+	write(metadataCount)
 	str("general.architecture")
 	write(uint32(8))
-	str("llama")
+	str(arch)
 	for _, kv := range []struct {
 		key string
 		val uint32
@@ -233,14 +254,21 @@ func benchMixedQuantGGUF(t *testing.T) string {
 		{"llama.block_count", 1}, {"llama.feed_forward_length", dim}, {"llama.attention.head_count", 1},
 		{"llama.attention.head_count_kv", 1}, {"llama.rope.dimension_count", dim},
 	} {
-		str(kv.key)
+		str(strings.Replace(kv.key, "llama.", arch+".", 1))
 		write(uint32(4))
 		write(kv.val)
 	}
-	str("llama.attention.layer_norm_rms_epsilon")
+	if streamedMoE {
+		for key, value := range map[string]uint32{"expert_count": 3, "expert_used_count": 1, "expert_feed_forward_length": dim} {
+			str(arch + "." + key)
+			write(uint32(4))
+			write(value)
+		}
+	}
+	str(arch + ".attention.layer_norm_rms_epsilon")
 	write(uint32(6))
 	write(float32(1e-5))
-	str("llama.rope.freq_base")
+	str(arch + ".rope.freq_base")
 	write(uint32(6))
 	write(float32(10000))
 	str("tokenizer.ggml.tokens")
@@ -288,6 +316,220 @@ func (b *benchObservedBackend) MatMul(w, x compute.Tensor) compute.Tensor {
 func (b *benchObservedBackend) BatchedMatMul(w, x compute.Tensor, p int) compute.Tensor {
 	b.matmuls++
 	return b.Backend.BatchedMatMul(w, x, p)
+}
+
+func benchStreamedTuple(f *benchFlags, ring, dense int64) {
+	for key, value := range map[string]int64{"expertRingBytes": ring, "streamedDenseBytes": dense} {
+		field := reflect.ValueOf(f).Elem().FieldByName(key)
+		if field.IsValid() {
+			copyValue := value
+			reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Set(reflect.ValueOf(&copyValue))
+		}
+	}
+}
+
+type benchColdKVBackend struct {
+	benchObservedBackend
+	newKV int
+	mode  string
+}
+
+func (b *benchColdKVBackend) Name() string {
+	if b.mode == "vulkan_identity" {
+		return "vulkan"
+	}
+	return b.Backend.Name()
+}
+
+func (b *benchColdKVBackend) NewKV(cfg compute.KVConfig) compute.KVStore {
+	b.newKV++
+	store := b.Backend.NewKV(cfg)
+	if b.mode == "warm_kv" {
+		return benchWarmKV{KVStore: store}
+	}
+	return store
+}
+
+func (b *benchColdKVBackend) Read(t compute.Tensor) []float32 {
+	if b.mode == "empty" {
+		return nil
+	}
+	if b.mode == "nonfinite" {
+		return []float32{float32(math.NaN())}
+	}
+	if b.mode == "refused_read" {
+		panic(errors.New("test read refusal"))
+	}
+	return b.Backend.Read(t)
+}
+
+type benchWarmKV struct{ compute.KVStore }
+
+func (b benchWarmKV) Pos() []int { return []int{0} }
+func (b benchWarmKV) Len() int   { return 1 }
+
+// fak-test:runtime fast est=2s lane=default
+func TestModelbenchStreamedColdPrefill(t *testing.T) {
+	t.Setenv("FAK_PAGED_KV", "0")
+	t.Run("flags_and_fingerprint", func(t *testing.T) {
+		f := testCompleteBenchFlags()
+		*f.gguf, *f.q4k, *f.backendName = "fixture.gguf", true, "vulkan"
+		before := modelbenchFingerprint(f, "fixture")
+		benchStreamedTuple(f, 0, 0)
+		if !reflect.DeepEqual(before, modelbenchFingerprint(f, "fixture")) {
+			t.Fatal("inactive defaults changed legacy checkpoint identity")
+		}
+		for _, pair := range [][2]int64{{1 << 20, 0}, {0, 1 << 20}, {-1, 1 << 20}, {1 << 20, -1}} {
+			benchStreamedTuple(f, pair[0], pair[1])
+			if validateFlagCombinations(f) == nil {
+				t.Fatalf("incomplete/invalid streamed bounds admitted: %v", pair)
+			}
+			_, _, err := loadModelContext(context.Background(), f, nil)
+			var pathError *os.PathError
+			if err == nil || errors.As(err, &pathError) {
+				t.Fatalf("invalid tuple reached checkpoint IO: bounds=%v error=%v", pair, err)
+			}
+		}
+		benchStreamedTuple(f, 1<<20, 1<<20)
+		if err := validateFlagCombinations(f); err != nil {
+			t.Fatal(err)
+		}
+		active := modelbenchFingerprint(f, "fixture")
+		benchStreamedTuple(f, 2<<20, 1<<20)
+		if reflect.DeepEqual(active, modelbenchFingerprint(f, "fixture")) {
+			t.Fatal("active ring bound is absent from checkpoint identity")
+		}
+		benchStreamedTuple(f, 1<<20, 2<<20)
+		if reflect.DeepEqual(active, modelbenchFingerprint(f, "fixture")) {
+			t.Fatal("active dense bound is absent from checkpoint identity")
+		}
+		*f.backendName = "cpu-ref"
+		if validateFlagCombinations(f) == nil {
+			t.Fatal("streamed Vulkan tuple admitted on CPU flag")
+		}
+	})
+	t.Run("mapped_loader_and_lifetime", func(t *testing.T) {
+		f := testCompleteBenchFlags()
+		*f.gguf, *f.q4k, *f.backendName = benchMixedQuantGGUF(t, true), true, "vulkan"
+		benchStreamedTuple(f, 1<<20, 1<<20)
+		in := preflightInputFor(f, &benchColdKVBackend{benchObservedBackend: benchObservedBackend{Backend: compute.Default()}, mode: "vulkan_identity"})
+		if in.Source != nil {
+			defer in.Source.Close()
+		}
+		if !in.StreamedExperts || in.StreamedExpertDeviceRingBytes != 1<<20 || in.StreamedDenseWorkingSetBytes != 1<<20 || !in.VulkanMixedQ4K || !in.StreamedDenseQ4K || in.Headroom != 0.15 {
+			t.Fatal("benchmark preflight omitted the bounded streamed tuple or standard headroom")
+		}
+		if pf := ggufload.BuildModelPreflight(in); pf.Verdict != ggufload.PreflightReady || pf.EstHostResidentBytes <= 0 || pf.EstDeviceResidentBytes <= 0 {
+			t.Fatalf("benchmark did not select admitted streamed preflight: verdict=%s reason=%s", pf.Verdict, pf.Reason)
+		}
+		m, _, err := loadModelContext(context.Background(), f, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer m.CloseWeights()
+		stats := m.ExpertCheckpointStats()
+		if !stats.Enabled || stats.BudgetBytes != 0 || stats.ResidentBytes != 0 || stats.Tensors != 9 {
+			t.Fatalf("loader did not stream every expert with zero host retention: %+v", stats)
+		}
+		s := newBenchSession(m, f, compute.Default())
+		if s.ExpertRingBytes != 1<<20 {
+			t.Fatalf("session ring=%d want explicit bound", s.ExpertRingBytes)
+		}
+		if _, err := s.VerifyTokenLineage(nil); err != nil {
+			t.Fatalf("new streamed session has prefix state: %v", err)
+		}
+		s.Close()
+		if err := m.CloseWeights(); err != nil {
+			t.Fatal(err)
+		}
+		panicked := false
+		func() { defer func() { panicked = recover() != nil }(); _ = newBenchSession(m, f, compute.Default()) }()
+		if !panicked {
+			t.Fatal("closed model accepted another benchmark session")
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		cancelled, _, err := loadModelContext(ctx, f, nil)
+		if cancelled != nil || !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled load returned model=%v error=%v", cancelled != nil, err)
+		}
+	})
+	t.Run("first_smoke_prefill", func(t *testing.T) {
+		ref, ok := compute.Lookup("cpu-ref")
+		if !ok {
+			t.Fatal("cpu-ref missing")
+		}
+		m := model.NewSynthetic(model.Config{HiddenSize: 16, NumLayers: 1, NumHeads: 4, NumKVHeads: 2, HeadDim: 4, IntermediateSize: 32, VocabSize: 64, RMSNormEps: 1e-5, RopeTheta: 10000, TieWordEmbeddings: true, EOSTokenID: -1})
+		defer m.CloseWeights()
+		f := testCompleteBenchFlags()
+		*f.backendName, *f.decodePrompt, *f.smokeDecodeSteps = "cpu-ref", 3, 1
+		oracle := newBenchSession(m, f, ref)
+		logits := oracle.Prefill(lcgIDs(3, m.Cfg.VocabSize))
+		buf := make([]byte, 4*len(logits))
+		for i, v := range logits {
+			binary.LittleEndian.PutUint32(buf[4*i:], math.Float32bits(v))
+		}
+		digest := sha256.Sum256(buf)
+		expected := hex.EncodeToString(digest[:])
+		oracle.Close()
+		for _, mode := range []string{"", "warm_kv", "empty", "nonfinite", "refused_read", "closed_weights"} {
+			t.Run("mode_"+mode, func(t *testing.T) {
+				be := &benchColdKVBackend{benchObservedBackend: benchObservedBackend{Backend: ref}, mode: mode}
+				compute.Register(be)
+				t.Cleanup(func() { compute.Register(ref) })
+				f := testCompleteBenchFlags()
+				*f.backendName, *f.decodePrompt, *f.smokeDecodeSteps = "cpu-ref", 3, 1
+				*f.out = filepath.Join(t.TempDir(), "smoke.json")
+				exitCode := 0
+				f.processExit = func(code int) { exitCode = code }
+				target := m
+				if mode == "closed_weights" {
+					target = model.NewSynthetic(m.Cfg)
+					if err := target.CloseWeights(); err != nil {
+						t.Fatal(err)
+					}
+				}
+				runSmoke(f, target, "fixture", 0, target.Cfg.VocabSize)
+				var receipt map[string]any
+				raw, err := os.ReadFile(*f.out)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = json.Unmarshal(raw, &receipt); err != nil {
+					t.Fatal(err)
+				}
+				if mode != "" {
+					if receipt["smoke_status"] == smokeStatusOK || exitCode != 1 {
+						t.Fatalf("invalid %s produced success: %v", mode, receipt)
+					}
+					if _, present := receipt["smoke_prefill_kv_reused_tokens"]; present {
+						t.Fatal("failed cold proof emitted measured zero reuse")
+					}
+					return
+				}
+				if receipt["smoke_status"] != smokeStatusOK || exitCode != 0 || be.newKV != 1 {
+					t.Fatalf("smoke execution status=%v exit=%d session constructions=%d", receipt["smoke_status"], exitCode, be.newKV)
+				}
+				if receipt["smoke_prefill_tokens"] != float64(3) || receipt["smoke_prefill_kv_reused_tokens"] != float64(0) || receipt["smoke_prefill_pass"] != "first_after_load" {
+					t.Fatalf("fresh prefill evidence: %v", receipt)
+				}
+				if receipt["smoke_prefill_logits_sha256"] != expected {
+					t.Fatal("receipt did not hash initial Float32LE logits before decode")
+				}
+				ms, ok := receipt["smoke_prefill_ms"].(float64)
+				if !ok || ms <= 0 {
+					t.Fatal("prefill wall absent/nonpositive")
+				}
+				rate, ok := receipt["smoke_prefill_tok_per_sec"].(float64)
+				if !ok || rate <= 0 || math.Abs(rate-3000/ms) > 1e-9*rate {
+					t.Fatal("prefill count/time/rate disagree")
+				}
+				if receipt["smoke_prefill_os_cache"] != "inherited_uncontrolled" {
+					t.Fatal("OS cache regime undisclosed")
+				}
+			})
+		}
+	})
 }
 
 func TestModelbenchSelectedBackendExecutesSmoke(t *testing.T) {

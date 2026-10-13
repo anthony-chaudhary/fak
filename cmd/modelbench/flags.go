@@ -24,6 +24,8 @@ type benchFlags struct {
 	lean                  *bool
 	q4k                   *bool
 	streamQ4K             *bool
+	expertRingBytes       *int64
+	streamedDenseBytes    *int64
 	singleResidencyQ4K    *bool
 	name                  *string
 	out                   *string
@@ -83,6 +85,8 @@ func parseFlags() *benchFlags {
 		lean:                  flag.Bool("lean", false, "memory-lean load: quantize big matmul weights at load and drop their f32 (with -hf or -gguf; implies -quant; fits much bigger models)"),
 		q4k:                   flag.Bool("q4k", false, "with -gguf, load eligible Q4_K tensors as resident raw Q4_K and run the Q4_K session path"),
 		streamQ4K:             flag.Bool("stream-q4k", false, "benchmark-only: with -gguf -q4k, stream eligible dense Q4_K tensors from the checkpoint instead of keeping their raw bytes resident"),
+		expertRingBytes:       flag.Int64("expert-ring-bytes", 0, "bounded streamed-expert device ring bytes; requires positive -streamed-dense-bytes and -gguf -q4k -backend vulkan -fit-check"),
+		streamedDenseBytes:    flag.Int64("streamed-dense-bytes", 0, "bounded dense host working-set bytes; requires positive -expert-ring-bytes"),
 		singleResidencyQ4K:    flag.Bool("single-residency-q4k", singleResidencyQ4KEnvDefault(), "with -gguf -q4k on a Vulkan unified-memory (integrated:) backend, release each resident Q4_K host packed copy after its device upload (single residency). Defaults to FAK_Q4K_FREE_CPU=1; ineffective on a discrete device."),
 		name:                  flag.String("name", "", "model name for the report (default: derived from the source dir)"),
 		out:                   flag.String("out", "", "write JSON result here (default stdout)"),
@@ -165,7 +169,11 @@ func (f *benchFlags) exit(code int) {
 }
 
 func streamQ4KEnabled(f *benchFlags) bool {
-	return f.streamQ4K != nil && *f.streamQ4K
+	return f != nil && ((f.streamQ4K != nil && *f.streamQ4K) || streamedExpertsEnabled(f))
+}
+
+func streamedExpertsEnabled(f *benchFlags) bool {
+	return f != nil && f.expertRingBytes != nil && f.streamedDenseBytes != nil && *f.expertRingBytes > 0 && *f.streamedDenseBytes > 0
 }
 
 // singleResidencyQ4KEnvDefault mirrors the runtime release knob (compute.Q4KSingleResidencyEnv,
@@ -227,8 +235,27 @@ func applyBudget(budget float64) {
 	}
 }
 
+func validateStreamedExpertFlags(f *benchFlags) error {
+	ringBytes, denseBytes := int64(0), int64(0)
+	if f.expertRingBytes != nil {
+		ringBytes = *f.expertRingBytes
+	}
+	if f.streamedDenseBytes != nil {
+		denseBytes = *f.streamedDenseBytes
+	}
+	if ringBytes != 0 || denseBytes != 0 {
+		if ringBytes <= 0 || denseBytes <= 0 || f.gguf == nil || *f.gguf == "" || f.q4k == nil || !*f.q4k || f.backendName == nil || *f.backendName != "vulkan" || f.fitCheck == nil || !*f.fitCheck || singleResidencyQ4KEnabled(f) {
+			return fmt.Errorf("streamed experts require positive -expert-ring-bytes and -streamed-dense-bytes, -gguf -q4k -backend vulkan -fit-check, and no single-residency-q4k")
+		}
+	}
+	return nil
+}
+
 // validateFlags enforces the flag combinations that must hold before any load.
 func validateFlagCombinations(f *benchFlags) error {
+	if err := validateStreamedExpertFlags(f); err != nil {
+		return err
+	}
 	if *f.backendName != "legacy" && *f.metal {
 		return fmt.Errorf("-metal selects the legacy Metal path; omit it when naming -backend")
 	}

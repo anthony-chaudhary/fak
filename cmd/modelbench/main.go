@@ -23,6 +23,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -50,6 +52,9 @@ func loadModel(f *benchFlags, lp *ggufload.LoadProfiler) (*model.Model, string, 
 }
 
 func loadModelContext(ctx context.Context, f *benchFlags, lp *ggufload.LoadProfiler) (*model.Model, string, error) {
+	if err := validateStreamedExpertFlags(f); err != nil {
+		return nil, "", err
+	}
 	if *f.q4k {
 		if *f.backendName != "legacy" {
 			// Dense formats without a HAL path must remain reachable through Q8.
@@ -62,6 +67,20 @@ func loadModelContext(ctx context.Context, f *benchFlags, lp *ggufload.LoadProfi
 				}
 			}
 			loader := ggufload.LoadModelQ4KProfileOptionsContext
+			if streamedExpertsEnabled(f) {
+				ws, err := ggufload.OpenWeightsMapped(*f.gguf)
+				if err != nil {
+					return nil, "", err
+				}
+				opts = append(opts, ggufload.WithStreamedExperts(0), ggufload.WithStreamedExpertDeviceRing(*f.expertRingBytes), ggufload.WithStreamedDenseQ4KWorkingSet(*f.streamedDenseBytes))
+				m, err := ws.QuantModelQ4KProfileOptionsContext(ctx, lp, opts...)
+				if err != nil {
+					_ = ws.Close()
+					return nil, "", err
+				}
+				m.SetWeightCloser(ws)
+				return m, filepath.Base(*f.gguf) + " [gguf-q4k-streamed-experts]", nil
+			}
 			label := " [gguf-q4k]"
 			if streamQ4KEnabled(f) {
 				loader = ggufload.LoadModelQ4KStreamedDenseContext
@@ -411,6 +430,11 @@ func newBenchSession(m *model.Model, f *benchFlags, be compute.Backend) *model.S
 		applyLegacySessionFlags(s, f)
 		return s
 	}
+	if streamedExpertsEnabled(f) {
+		if _, err := m.EnableSharedExpertRing(be); err != nil {
+			panic(err)
+		}
+	}
 	s := m.NewBackendSession(be)
 	if f != nil {
 		quant := f.quant != nil && *f.quant
@@ -717,7 +741,7 @@ func checkpointCell[T any](ck *benchckpt.Ledger, key string, measure func() T, t
 // the same (or a superset) grid reuse recorded cells. A resume whose model/precision/counts differ
 // refuses with benchckpt.ErrFingerprintMismatch rather than blending incompatible cells.
 func modelbenchFingerprint(f *benchFlags, modelName string) benchckpt.Fingerprint {
-	return benchckpt.Fingerprint{
+	fp := benchckpt.Fingerprint{
 		"schema":              "modelbench-grid/1",
 		"source":              loadSource(*f.hf, *f.gguf, *f.dir, *f.lean, *f.q4k, streamQ4KEnabled(f)),
 		"name":                modelName,
@@ -736,6 +760,11 @@ func modelbenchFingerprint(f *benchFlags, modelName string) benchckpt.Fingerprin
 		"workers":             model.NumWorkers(),
 		"load_worker_control": currentLoadWorkerControl(),
 	}
+	if streamedExpertsEnabled(f) {
+		fp["expert_ring_bytes"] = *f.expertRingBytes
+		fp["streamed_dense_bytes"] = *f.streamedDenseBytes
+	}
+	return fp
 }
 
 // openCheckpoint opens the write-ahead checkpoint for a full grid run when -checkpoint or
@@ -903,6 +932,11 @@ func assembleBenchReport(f *benchFlags, be compute.Backend, registeredBackends [
 		"load_worker_control": currentLoadWorkerControl(),
 	}
 	report["source"] = loadSource(*f.hf, *f.gguf, *f.dir, *f.lean, *f.q4k, streamQ4KEnabled(f))
+	if streamedExpertsEnabled(f) {
+		report["streamed_experts"] = true
+		report["expert_ring_bytes"] = *f.expertRingBytes
+		report["streamed_dense_bytes"] = *f.streamedDenseBytes
+	}
 	if ggufLoadProfile != nil {
 		report["load_profile"] = ggufLoadProfile
 	}
@@ -1116,18 +1150,25 @@ func preflightInputFor(f *benchFlags, be compute.Backend) ggufload.PreflightInpu
 	// FAK_Q4K_FREE_CPU env knob) AND actually effective only on a Vulkan backend whose tier is a
 	// unified-memory ("integrated:") device — the same predicate weightHALQ4K applies at runtime.
 	singleResidencyQ4K := vulkanMixed && singleResidencyQ4KEnabled(f) && be != nil && strings.HasPrefix(be.Tier(), "integrated:")
+	ringBytes, denseBytes := int64(0), int64(0)
+	if streamedExpertsEnabled(f) {
+		ringBytes, denseBytes = *f.expertRingBytes, *f.streamedDenseBytes
+	}
 	return ggufload.PreflightInput{
-		Path:                 *f.gguf,
-		OpenErr:              err,
-		Source:               ws,
-		Backend:              be,
-		Headroom:             modelbenchDeviceHeadroom,
-		Lean:                 *f.lean && !convertedDense,
-		Q4K:                  *f.q4k && !convertedDense,
-		VulkanMixedQ4K:       vulkanMixed,
-		StreamedDenseQ4K:     streamedDenseQ4K,
-		ResidentQ2KEmbedding: residentQ2KEmbedding,
-		SingleResidencyQ4K:   singleResidencyQ4K,
+		Path:                          *f.gguf,
+		OpenErr:                       err,
+		Source:                        ws,
+		Backend:                       be,
+		Headroom:                      modelbenchDeviceHeadroom,
+		Lean:                          *f.lean && !convertedDense,
+		Q4K:                           *f.q4k && !convertedDense,
+		VulkanMixedQ4K:                vulkanMixed,
+		StreamedExperts:               streamedExpertsEnabled(f),
+		StreamedExpertDeviceRingBytes: ringBytes,
+		StreamedDenseWorkingSetBytes:  denseBytes,
+		StreamedDenseQ4K:              streamedDenseQ4K,
+		ResidentQ2KEmbedding:          residentQ2KEmbedding,
+		SingleResidencyQ4K:            singleResidencyQ4K,
 	}
 }
 
@@ -1185,6 +1226,7 @@ func runSmoke(f *benchFlags, m *model.Model, modelName string, loadMS float64, v
 	}
 	var decodeMS float64
 	var decodeTokS float64
+	prefillProof := map[string]any{}
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -1194,16 +1236,38 @@ func runSmoke(f *benchFlags, m *model.Model, modelName string, loadMS float64, v
 		}()
 		s := newBenchSession(m, f, be)
 		defer s.Close()
-		logits := s.Prefill(lcgIDs(*f.decodePrompt, vocab))
-		if !allFinite(logits) {
+		if _, err := s.VerifyTokenLineage(nil); err != nil || s.BackendSessionClosed() {
 			status = smokeStatusForwardFailed
-			detail = "prefill produced non-finite logits (NaN/Inf)"
+			detail = "prefill session is not fresh and open"
 			return
 		}
+		ids := lcgIDs(*f.decodePrompt, vocab)
+		tPrefillStart := time.Now()
+		logits := s.Prefill(ids)
+		prefillElapsed := time.Since(tPrefillStart)
+		if !allFinite(logits) || s.BackendSessionClosed() {
+			status = smokeStatusForwardFailed
+			detail = "prefill produced empty or non-finite logits, or closed its session"
+			return
+		}
+		hash := sha256.New()
+		var word [4]byte
+		for _, logit := range logits {
+			binary.LittleEndian.PutUint32(word[:], math.Float32bits(logit))
+			_, _ = hash.Write(word[:])
+		}
+		prefillProof["smoke_prefill_tokens"] = len(ids)
+		prefillProof["smoke_prefill_ms"] = float64(prefillElapsed.Nanoseconds()) / 1e6
+		if prefillElapsed > 0 {
+			prefillProof["smoke_prefill_tok_per_sec"] = float64(len(ids)) / prefillElapsed.Seconds()
+		}
+		prefillProof["smoke_prefill_kv_reused_tokens"] = 0
+		prefillProof["smoke_prefill_pass"] = "first_after_load"
+		prefillProof["smoke_prefill_logits_sha256"] = fmt.Sprintf("%x", hash.Sum(nil))
 		tDecodeStart := time.Now()
 		for step := 0; step < smokeSteps; step++ {
 			logits = s.Step(mathx.ArgmaxF32(logits))
-			if !allFinite(logits) {
+			if !allFinite(logits) || s.BackendSessionClosed() {
 				status = smokeStatusForwardFailed
 				detail = fmt.Sprintf("decode step %d produced non-finite logits (NaN/Inf)", step+1)
 				return
@@ -1224,7 +1288,7 @@ func runSmoke(f *benchFlags, m *model.Model, modelName string, loadMS float64, v
 	if detail != "" {
 		fmt.Fprintf(os.Stderr, "  detail: %s\n", detail)
 	}
-	writeReport(f, map[string]any{
+	report := map[string]any{
 		"app_version":              appversion.Current(),
 		"engine":                   engine,
 		"precision":                precision,
@@ -1240,7 +1304,17 @@ func runSmoke(f *benchFlags, m *model.Model, modelName string, loadMS float64, v
 		"smoke_decode_tok_per_sec": decodeTokS,
 		"load_ms":                  loadMS,
 		"smoke_detail":             detail,
-	})
+		"smoke_prefill_os_cache":   "inherited_uncontrolled",
+	}
+	for key, value := range prefillProof {
+		report[key] = value
+	}
+	if streamedExpertsEnabled(f) {
+		report["streamed_experts"] = true
+		report["expert_ring_bytes"] = *f.expertRingBytes
+		report["streamed_dense_bytes"] = *f.streamedDenseBytes
+	}
+	writeReport(f, report)
 	if status != smokeStatusOK {
 		f.exit(1)
 	}
