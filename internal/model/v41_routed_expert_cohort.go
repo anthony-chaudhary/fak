@@ -79,6 +79,8 @@ func (s *Session) v41RoutedExpertCohort(layer int, stem string, inputs [][]float
 			panic(p)
 		}
 	}()
+	releaseResident := s.v41HoldResidentExpertTriple(gateName, upName, downName)
+	defer releaseResident()
 	gate, releaseGate, up, releaseUp, _, admitted := expertInputDeviceAdmitted(s, gateName, upName, inputs[0], H)
 	if !admitted {
 		return nil, v41RoutedExpertDeclined, nil
