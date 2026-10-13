@@ -269,6 +269,76 @@ The full upstream LICENSE at the pinned revision follows:
 ```
 
 
+## Score-aware expert-cache eviction policies
+
+`internal/deepseekv4moe/cache_policy_bench.go` `CachePolicyLFRU` (`replayOnlineLFRU`,
+`pickLFRUVictim`) reimplements the LFRU victim rule (`score = freq / age`, lower score
+evicted) from `tinyserve/cache_policy.py` `LFRUPolicy` at revision
+`e1n00r/tinyserve@9277e683` (branch `master`):
+https://github.com/e1n00r/tinyserve/blob/master/tinyserve/cache_policy.py
+
+`CachePolicyScoreEMA` (`replayOnlineScoreEMA`, `pickScoreEMAVictim`) ports the
+`S = alpha * TopP(s) + (1 - alpha) * S` score-EMA update and lowest-score eviction from
+`KScoreAwareCache` in `ktransformers/operators/experts.py:662-712` at revision
+`PKU-SEC-Lab/HybriMoE@508a85b9a43dff37124370d8816e411e74827803`:
+https://github.com/PKU-SEC-Lab/HybriMoE/blob/508a85b9a43dff37124370d8816e411e74827803/ktransformers/operators/experts.py
+
+Changed for Fak: the policies are reimplemented over the package's offline
+unit-group access stream and its deterministic tie-break (`groupLess`), not over
+a torch tensor store or the upstream ring. HybriMoE's `TopP(s)` routing score is
+not carried by a routed-expert trace, so the offline arm substitutes an access
+indicator (1.0); `alpha` defaults to 0.5. No upstream storage, scheduler,
+kernel or test fixture is copied.
+
+The HybriMoE Apache-2.0 license follows:
+
+```text
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+Licensed to the Apache Software Foundation (ASF) under one or more
+contributor license agreements.  See the NOTICE file distributed with
+this work for additional information regarding copyright ownership.
+The ASF licenses this file to you under the Apache License, Version 2.0
+(the "License"); you may not use this file except in compliance with
+the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+```
+
+The tinyserve MIT license follows:
+
+```text
+MIT License
+
+Copyright (c) 2026 tinyserve contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Expert route identity normalization
 
 `internal/model/expert_route_trace_analyze.go` adapts the grouped distinct-expert

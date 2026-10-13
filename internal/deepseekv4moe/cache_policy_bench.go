@@ -8,6 +8,12 @@ import (
 )
 
 // CachePolicyBenchSchema is the receipt schema id for the expert-cache policy bench.
+//
+// The v1 enum was additively extended: CachePolicyLFRU and CachePolicyScoreEMA are
+// appended AFTER CachePolicyOPT, so the five original values (lru/lfu/heat/random/opt)
+// and every persisted v1 receipt stay valid and byte-identical. Consumers that treat the
+// `policy` field as the closed original five-arm set must treat the two appended values
+// as an additive extension rather than an unknown-arm parse error.
 const CachePolicyBenchSchema = "fak.moe-expert-cache-policy/v1"
 
 // CachePolicyMeasurementSimulated marks every receipt as synthetic evidence. The bench
@@ -37,7 +43,23 @@ const (
 	// CachePolicyOPT is the offline Belady upper bound — a non-implementable oracle, not an
 	// online policy, included only to normalize the other four.
 	CachePolicyOPT
+	// CachePolicyLFRU evicts the resident group with the smallest freq/age ratio
+	// (tinyserve cache_policy.py LFRU, MIT). freq counts every access, resident or not;
+	// age = clock - lastUse + 1. Lower score loses. It is a scored arm: it is deliberately
+	// appended after CachePolicyOPT and is NOT part of CachePolicyArms(), so every
+	// pre-existing constant value and every existing replay output is unchanged.
+	CachePolicyLFRU
+	// CachePolicyScoreEMA evicts the resident group with the smallest exponentially
+	// decayed routing score (HybriMoE KScoreAwareCache, Apache-2.0). On each access the
+	// touched group gains alpha*1.0 while every other score decays by (1-alpha).
+	CachePolicyScoreEMA
 )
+
+// cachePolicyScoreEMAAlpha is the Score-EMA blending factor. HybriMoE drives this from
+// torch.topk top-p routing probabilities, which the offline sim does not receive; an
+// access indicator (1.0) stands in for the routed score. The substitution is owned
+// honestly by the witness, not hidden here.
+const cachePolicyScoreEMAAlpha = 0.5
 
 // String renders the arm name. Unknown values render "unknown".
 func (p CachePolicy) String() string {
@@ -52,8 +74,22 @@ func (p CachePolicy) String() string {
 		return "random"
 	case CachePolicyOPT:
 		return "opt"
+	case CachePolicyLFRU:
+		return "lfru"
+	case CachePolicyScoreEMA:
+		return "scoreema"
 	default:
 		return "unknown"
+	}
+}
+
+// CachePolicyScoredArms returns the scored eviction arms in a fixed deterministic order.
+// They are appended after CachePolicyOPT and are intentionally excluded from
+// CachePolicyArms(), so existing replay callers observe exactly the same rows.
+func CachePolicyScoredArms() []CachePolicy {
+	return []CachePolicy{
+		CachePolicyLFRU,
+		CachePolicyScoreEMA,
 	}
 }
 
@@ -166,6 +202,46 @@ func CachePolicyReplayOnline(stream CachePolicyStream, capacity int) ([]CachePol
 	return rows, nil
 }
 
+// CachePolicyReplayWith replays one stream at matched capacity across exactly the
+// requested policies, in the given slice order, and returns the per-arm receipt. It is the
+// caller-selected generalization of CachePolicyReplay: the receipt header (schema,
+// measurement, stream, capacity, access_count, OPTExact, OPTHits) is computed identically,
+// including the Belady oracle via cachePolicyEvents + replayoracle.Belady, regardless of
+// whether CachePolicyOPT is among the requested policies.
+//
+// Every row is produced by cachePolicyReplayArm, so non-OPT numeric behavior matches
+// CachePolicyReplay bit-for-bit. When CachePolicyOPT is requested, its row is the oracle
+// row (Hits=OPTHits, Evictions=0) with VersusOPT set by mathx.AgainstOracle; every row's
+// VersusOPT is normalized against OPTHits just as in CachePolicyReplay.
+//
+// A non-positive capacity fails closed with ErrInvalidTraceCapacity.
+func CachePolicyReplayWith(stream CachePolicyStream, capacity int, policies []CachePolicy) (CachePolicyBenchReceipt, error) {
+	if capacity <= 0 {
+		return CachePolicyBenchReceipt{}, ErrInvalidTraceCapacity
+	}
+
+	events := cachePolicyEvents(stream)
+	oracle := replayoracle.Belady(events, capacity)
+
+	receipt := CachePolicyBenchReceipt{
+		Schema:      CachePolicyBenchSchema,
+		Measurement: CachePolicyMeasurementSimulated,
+		Stream:      stream.Name,
+		Capacity:    capacity,
+		AccessCount: len(stream.Groups),
+		OPTExact:    oracle.Exact,
+		OPTHits:     oracle.HitTokens,
+		Rows:        make([]CachePolicyRow, 0, len(policies)),
+	}
+
+	for _, policy := range policies {
+		row := cachePolicyReplayArm(policy, stream.Groups, capacity, events, oracle)
+		row.VersusOPT = mathx.AgainstOracle(row.Hits, receipt.OPTHits)
+		receipt.Rows = append(receipt.Rows, row)
+	}
+	return receipt, nil
+}
+
 // cachePolicyEvents maps a stream to unit-sized replayoracle.Event rows, assigning a
 // stable int SpanID per distinct ExpertGroup in first-touch order (so the OPT oracle and
 // the LRU cross-check key on the same identity).
@@ -212,7 +288,24 @@ func cachePolicyReplayArm(policy CachePolicy, groups []ExpertGroup, capacity int
 	case CachePolicyRandom:
 		hits, miss, evictions := replayOnlineRandom(groups, capacity)
 		row.Hits, row.Misses, row.Evictions = hits, miss, evictions
+	case CachePolicyLFRU:
+		hits, miss, evictions := replayOnlineLFRU(groups, capacity)
+		row.Hits, row.Misses, row.Evictions = hits, miss, evictions
+	case CachePolicyScoreEMA:
+		hits, miss, evictions := replayOnlineScoreEMA(groups, capacity)
+		row.Hits, row.Misses, row.Evictions = hits, miss, evictions
 	}
+	// Every shipped arm already satisfies these bounds (OPT early-returns above), so this
+	// is a no-op for existing output. It exists so a future arm that over-counts hits
+	// cannot publish a receipt with Hits+Misses != Accesses; prefer fixing the arm, not
+	// relying on the clamp.
+	if row.Hits < 0 {
+		row.Hits = 0
+	}
+	if row.Hits > row.Accesses {
+		row.Hits = row.Accesses
+	}
+	row.Misses = row.Accesses - row.Hits
 	row.HitRate, row.HitRateKnown = cachePolicyHitRate(row.Hits, row.Accesses)
 	return row
 }
@@ -350,6 +443,120 @@ func replayOnlineRandom(groups []ExpertGroup, capacity int) (hits, misses, evict
 		resident[group] = residentEntry{group: group, lastUse: clock}
 	}
 	return hits, misses, evictions
+}
+
+// replayOnlineLFRU evicts the resident group with the smallest freq/age score. freq is a
+// lifetime access count over the whole stream (resident or evicted); age is
+// clock - lastUse + 1. A group never seen has freq 0 and lastUse 0, hence score 0. The
+// victim is the minimum score; ties break on oldest lastUse, then groupLess. The score is
+// compared as an exact rational (cross-multiplied) rather than a lossy float.
+//
+// Cross-multiplied products are bounded by accesses^2, which stays exact for any stream
+// that fits in memory on a 64-bit host; a stream of more than 2^32 accesses would
+// overflow uint64 and is not a supported input.
+func replayOnlineLFRU(groups []ExpertGroup, capacity int) (hits, misses, evictions int) {
+	resident := make(map[ExpertGroup]residentEntry, capacity)
+	freq := make(map[ExpertGroup]uint64)
+	var clock uint64
+	for _, group := range groups {
+		clock++
+		freq[group]++
+		if entry, ok := resident[group]; ok {
+			hits++
+			entry.lastUse = clock
+			resident[group] = entry
+			continue
+		}
+		misses++
+		if len(resident) == capacity {
+			victim := pickLFRUVictim(resident, freq, clock)
+			delete(resident, victim)
+			evictions++
+		}
+		resident[group] = residentEntry{group: group, lastUse: clock}
+	}
+	return hits, misses, evictions
+}
+
+// pickLFRUVictim returns the resident group minimizing freq/age (lower score loses),
+// breaking ties on the older lastUse then groupLess. It is an explicit deterministic scan,
+// never Go map order.
+func pickLFRUVictim(resident map[ExpertGroup]residentEntry, freq map[ExpertGroup]uint64, clock uint64) ExpertGroup {
+	var victim ExpertGroup
+	var bestFreq, bestAge, bestLast uint64
+	first := true
+	for group, entry := range resident {
+		f := freq[group]
+		age := clock - entry.lastUse + 1
+		if first {
+			victim, bestFreq, bestAge, bestLast, first = group, f, age, entry.lastUse, false
+			continue
+		}
+		lhs := f * bestAge
+		rhs := bestFreq * age
+		if lhs < rhs ||
+			(lhs == rhs && (entry.lastUse < bestLast ||
+				(entry.lastUse == bestLast && groupLess(group, victim)))) {
+			victim, bestFreq, bestAge, bestLast = group, f, age, entry.lastUse
+		}
+	}
+	return victim
+}
+
+// replayOnlineScoreEMA evicts the resident group with the smallest exponentially decayed
+// routing score. On every access the touched group's score is set to
+// alpha*1.0 + (1-alpha)*score and every other tracked score is multiplied by (1-alpha);
+// equivalently all scores decay then the touched group gains alpha. Victims are the
+// minimum score, ties broken on oldest lastUse then groupLess. The access indicator (1.0)
+// stands in for HybriMoE's top-p routing score, which the offline stream does not carry.
+func replayOnlineScoreEMA(groups []ExpertGroup, capacity int) (hits, misses, evictions int) {
+	resident := make(map[ExpertGroup]residentEntry, capacity)
+	score := make(map[ExpertGroup]float64)
+	var clock uint64
+	for _, group := range groups {
+		clock++
+		for other := range score {
+			score[other] *= 1 - cachePolicyScoreEMAAlpha
+		}
+		score[group] = cachePolicyScoreEMAAlpha + score[group]
+		if entry, ok := resident[group]; ok {
+			hits++
+			entry.lastUse = clock
+			resident[group] = entry
+			continue
+		}
+		misses++
+		if len(resident) == capacity {
+			victim := pickScoreEMAVictim(resident, score)
+			delete(resident, victim)
+			evictions++
+		}
+		resident[group] = residentEntry{group: group, lastUse: clock}
+	}
+	return hits, misses, evictions
+}
+
+// pickScoreEMAVictim returns the resident group minimizing its decayed score, breaking
+// ties on the older lastUse then groupLess. It is an explicit deterministic scan, never Go
+// map order. Ghost scores for evicted groups are retained (like Heat's ghost heat) so a
+// re-admitted group resumes its prior signal; the score map therefore tracks distinct
+// groups touched, not current residency. alpha = 0.5 keeps scores dyadic and ties
+// meaningful for witness-scale streams.
+func pickScoreEMAVictim(resident map[ExpertGroup]residentEntry, score map[ExpertGroup]float64) ExpertGroup {
+	var victim ExpertGroup
+	var bestScore float64
+	var bestLast uint64
+	first := true
+	for group, entry := range resident {
+		s := score[group]
+		if first ||
+			s < bestScore ||
+			(s == bestScore && (entry.lastUse < bestLast ||
+				(entry.lastUse == bestLast && groupLess(group, victim)))) {
+			victim, bestScore, bestLast, first = group, s, entry.lastUse, false
+		}
+	}
+	return victim
 }
 
 // cachePolicyRandomSeed is the fixed splitmix64 seed for the random arm, so a replay is
