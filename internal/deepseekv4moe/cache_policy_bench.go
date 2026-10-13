@@ -1,6 +1,8 @@
 package deepseekv4moe
 
 import (
+	"errors"
+	"math"
 	"sort"
 
 	"github.com/anthony-chaudhary/fak/internal/mathx"
@@ -51,14 +53,13 @@ const (
 	CachePolicyLFRU
 	// CachePolicyScoreEMA evicts the resident group with the smallest exponentially
 	// decayed routing score (HybriMoE KScoreAwareCache, Apache-2.0). On each access the
-	// touched group gains alpha*1.0 while every other score decays by (1-alpha).
+	// touched group gains alpha times its selected weight (or 1.0 for legacy streams).
 	CachePolicyScoreEMA
 )
 
 // cachePolicyScoreEMAAlpha is the Score-EMA blending factor. HybriMoE drives this from
-// torch.topk top-p routing probabilities, which the offline sim does not receive; an
-// access indicator (1.0) stands in for the routed score. The substitution is owned
-// honestly by the witness, not hidden here.
+// torch.topk top-p routing probabilities; this offline adaptation consumes selected
+// route weights when supplied, and uses an access indicator (1.0) for legacy streams.
 const cachePolicyScoreEMAAlpha = 0.5
 
 // String renders the arm name. Unknown values render "unknown".
@@ -104,11 +105,28 @@ func CachePolicyArms() []CachePolicy {
 	}
 }
 
+var ErrInvalidTraceScores = errors.New("moe: invalid expert trace scores")
+
+func validateReplayScores(stream CachePolicyStream) error {
+	if stream.Scores != nil {
+		if len(stream.Scores) != len(stream.Groups) {
+			return ErrInvalidTraceScores
+		}
+		for _, score := range stream.Scores {
+			if score < 0 || math.IsNaN(score) || math.IsInf(score, 0) {
+				return ErrInvalidTraceScores
+			}
+		}
+	}
+	return nil
+}
+
 // CachePolicyStream is a flat, deterministic access stream of unit-sized expert groups.
 // Groups is processed left to right; each entry is one access.
 type CachePolicyStream struct {
 	Name   string
 	Groups []ExpertGroup
+	Scores []float64 // Optional selected route weights, aligned with Groups; nil uses unit access scores.
 }
 
 // CachePolicyRow is one arm's result on one stream at one capacity.
@@ -151,6 +169,9 @@ type CachePolicyBenchReceipt struct {
 // margin against that heuristic, not the exact offline optimum. Callers that require an
 // exact bound must check OPTExact (or size the stream to <=63 distinct groups).
 func CachePolicyReplay(stream CachePolicyStream, capacity int) (CachePolicyBenchReceipt, error) {
+	if err := validateReplayScores(stream); err != nil {
+		return CachePolicyBenchReceipt{}, err
+	}
 	if capacity <= 0 {
 		return CachePolicyBenchReceipt{}, ErrInvalidTraceCapacity
 	}
@@ -189,6 +210,9 @@ func CachePolicyReplay(stream CachePolicyStream, capacity int) (CachePolicyBench
 // AgainstOracle ratio CachePolicyReplay would report. Callers needing VersusOPT must use
 // CachePolicyReplay. A non-positive capacity fails closed with ErrInvalidTraceCapacity.
 func CachePolicyReplayOnline(stream CachePolicyStream, capacity int) ([]CachePolicyRow, error) {
+	if err := validateReplayScores(stream); err != nil {
+		return nil, err
+	}
 	if capacity <= 0 {
 		return nil, ErrInvalidTraceCapacity
 	}
@@ -216,6 +240,9 @@ func CachePolicyReplayOnline(stream CachePolicyStream, capacity int) ([]CachePol
 //
 // A non-positive capacity fails closed with ErrInvalidTraceCapacity.
 func CachePolicyReplayWith(stream CachePolicyStream, capacity int, policies []CachePolicy) (CachePolicyBenchReceipt, error) {
+	if err := validateReplayScores(stream); err != nil {
+		return CachePolicyBenchReceipt{}, err
+	}
 	if capacity <= 0 {
 		return CachePolicyBenchReceipt{}, ErrInvalidTraceCapacity
 	}
@@ -235,7 +262,13 @@ func CachePolicyReplayWith(stream CachePolicyStream, capacity int, policies []Ca
 	}
 
 	for _, policy := range policies {
-		row := cachePolicyReplayArm(policy, stream.Groups, capacity, events, oracle)
+		row := CachePolicyRow{Policy: policy, Accesses: len(stream.Groups)}
+		if policy == CachePolicyScoreEMA && stream.Scores != nil {
+			row.Hits, row.Misses, row.Evictions = replayOnlineWeightedScoreEMA(stream.Groups, stream.Scores, capacity)
+			row.HitRate, row.HitRateKnown = cachePolicyHitRate(row.Hits, row.Accesses)
+		} else {
+			row = cachePolicyReplayArm(policy, stream.Groups, capacity, events, oracle)
+		}
 		row.VersusOPT = mathx.AgainstOracle(row.Hits, receipt.OPTHits)
 		receipt.Rows = append(receipt.Rows, row)
 	}
@@ -508,17 +541,25 @@ func pickLFRUVictim(resident map[ExpertGroup]residentEntry, freq map[ExpertGroup
 // alpha*1.0 + (1-alpha)*score and every other tracked score is multiplied by (1-alpha);
 // equivalently all scores decay then the touched group gains alpha. Victims are the
 // minimum score, ties broken on oldest lastUse then groupLess. The access indicator (1.0)
-// stands in for HybriMoE's top-p routing score, which the offline stream does not carry.
+// is the legacy nil-score input; weighted replay consumes selected routing weights.
 func replayOnlineScoreEMA(groups []ExpertGroup, capacity int) (hits, misses, evictions int) {
+	return replayOnlineWeightedScoreEMA(groups, nil, capacity)
+}
+
+func replayOnlineWeightedScoreEMA(groups []ExpertGroup, scores []float64, capacity int) (hits, misses, evictions int) {
 	resident := make(map[ExpertGroup]residentEntry, capacity)
 	score := make(map[ExpertGroup]float64)
 	var clock uint64
-	for _, group := range groups {
+	for index, group := range groups {
 		clock++
 		for other := range score {
 			score[other] *= 1 - cachePolicyScoreEMAAlpha
 		}
-		score[group] = cachePolicyScoreEMAAlpha + score[group]
+		observed := 1.0
+		if scores != nil {
+			observed = scores[index]
+		}
+		score[group] = cachePolicyScoreEMAAlpha*observed + score[group]
 		if entry, ok := resident[group]; ok {
 			hits++
 			entry.lastUse = clock
@@ -674,4 +715,13 @@ func zipfRank(cumulative []float64, u float64) int {
 		return len(cumulative) - 1
 	}
 	return idx
+}
+
+func ParseReplayArm(name string) (CachePolicy, bool) {
+	for _, policy := range append(CachePolicyArms(), CachePolicyScoredArms()...) {
+		if policy.String() == name {
+			return policy, true
+		}
+	}
+	return CachePolicyLRU, false
 }

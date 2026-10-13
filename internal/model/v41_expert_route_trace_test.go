@@ -31,6 +31,9 @@ func TestV41ForwardEmitsExpertRoutePerTokenLayer(t *testing.T) {
 			if ev.Phase != phase {
 				t.Fatalf("event phase = %q, want %q", ev.Phase, phase)
 			}
+			if len(ev.Weights) != topK {
+				t.Fatalf("event selected weights = %d, want top-k %d", len(ev.Weights), topK)
+			}
 			if len(ev.Experts) != topK {
 				t.Fatalf("event experts = %d, want top-k %d", len(ev.Experts), topK)
 			}
@@ -86,5 +89,18 @@ func TestV41FaultLatencyBucketsLog2(t *testing.T) {
 	}
 	if p := m.V41ExpertFaultAttribution().Prefill; p.FaultNanosLog2Buckets != ([v41FaultLatencyBuckets]int{}) {
 		t.Fatal("decode fault latency leaked into the prefill histogram")
+	}
+}
+
+// fak-test:runtime fast est=10ms
+func TestV41ExpertRouteSelectedWeights(t *testing.T) {
+	m := &Model{}
+	picks := []routePick{{expert: 3, weight: 0.75}, {expert: 1, weight: 0.25}}
+	var event ExpertRouteEvent
+	m.SetExpertRouteEventObserver(func(ev ExpertRouteEvent) { event = ev })
+	m.emitExpertRouteAt(2, 7, picks)
+	picks[0].weight = 0
+	if len(event.Weights) != 2 || event.Experts[0] != 3 || event.Weights[0] != 0.75 || event.Weights[1] != 0.25 {
+		t.Fatalf("selected weights lost or aliased: ids=%v scores=%v", event.Experts, event.Weights)
 	}
 }

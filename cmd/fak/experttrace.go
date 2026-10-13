@@ -9,12 +9,16 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/deepseekv4moe"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
-const expertTraceUsage = "usage: fak expert-trace analyze <trace.jsonl> [--json] [--phase prefill|decode] [--keep-repeats] [--coverage 0.8] [--windows 1,8,32,128] [--top-n 8,16,32,64] [--capacities 1,2,...] [--usage-out <hist.json>] [--strix-out <trace.json> --expert-bytes N]\n  record: " + model.ExpertRouteTraceEnv + "=<trace.jsonl> fak serve ..."
+const expertTraceUsage = "usage: fak expert-trace analyze <trace.jsonl> [--json] [--phase prefill|decode] [--keep-repeats] [--coverage 0.8] [--windows 1,8,32,128] [--top-n 8,16,32,64] [--capacities 1,2,...] [--usage-out <hist.json>] [--strix-out <trace.json> --expert-bytes N]\n  policy: fak expert-trace policy <trace.jsonl> --capacity N [--json] (selected route weights; global uniform slots)\n  record: " + model.ExpertRouteTraceEnv + "=<trace.jsonl> fak serve ..."
 
 func runExpertTrace(stdout, stderr io.Writer, args []string) int {
+	if len(args) > 0 && args[0] == "policy" {
+		return runExpertTraceReplay(stdout, stderr, args[1:])
+	}
 	if len(args) == 0 || args[0] != "analyze" {
 		fmt.Fprintln(stderr, expertTraceUsage)
 		return 2
@@ -133,4 +137,93 @@ func parseExpertTraceInts(s string) ([]int, error) {
 		out = append(out, n)
 	}
 	return out, nil
+}
+
+func runExpertTraceReplay(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("expert-trace policy", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	capacity := fs.Int("capacity", 0, "global cache capacity in uniform expert slots")
+	asJSON := fs.Bool("json", false, "emit simulated policy receipt")
+	armNames := fs.String("policies", "lru,lfru,scoreema,opt", "comma-separated eviction policy arms")
+	path := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		path, args = args[0], args[1:]
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if path == "" && fs.NArg() == 1 {
+		path = fs.Arg(0)
+	} else if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, expertTraceUsage)
+		return 2
+	}
+	if path == "" || *capacity <= 0 {
+		fmt.Fprintln(stderr, expertTraceUsage)
+		return 2
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	trace, err := model.ReadExpertRouteTrace(f)
+	f.Close()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	stream := deepseekv4moe.CachePolicyStream{Name: path, Scores: []float64{}}
+	for _, event := range trace.Events {
+		if len(event.Weights) != len(event.Experts) {
+			fmt.Fprintln(stderr, "policy replay requires one selected routing weight per expert")
+			return 1
+		}
+		seen := make(map[int]bool, len(event.Experts))
+		for i, expert := range event.Experts {
+			if seen[expert] {
+				fmt.Fprintln(stderr, "duplicate expert in router event")
+				return 1
+			}
+			seen[expert] = true
+			stream.Groups = append(stream.Groups, deepseekv4moe.ExpertGroup{Layer: event.Layer, Expert: expert})
+			if event.Weights[i] < 0 {
+				fmt.Fprintln(stderr, "policy replay supports nonnegative selected weights; signed negative weights are unsupported")
+				return 1
+			}
+			stream.Scores = append(stream.Scores, float64(event.Weights[i]))
+		}
+	}
+	var policies []deepseekv4moe.CachePolicy
+	for _, name := range strings.Split(*armNames, ",") {
+		policy, ok := deepseekv4moe.ParseReplayArm(strings.TrimSpace(name))
+		if !ok {
+			fmt.Fprintf(stderr, "unknown cache policy %q\n", name)
+			return 2
+		}
+		policies = append(policies, policy)
+	}
+	receipt, err := deepseekv4moe.CachePolicyReplayWith(stream, *capacity, policies)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if *asJSON {
+		report := struct {
+			deepseekv4moe.CachePolicyBenchReceipt
+			ScoreInput     string `json:"score_input"`
+			CapacityScope  string `json:"capacity_scope"`
+			RepeatHandling string `json:"repeat_handling"`
+		}{receipt, "selected-route-weights", "global-uniform-expert-slots", "all-recorded-events"}
+		if err := json.NewEncoder(stdout).Encode(report); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	} else {
+		fmt.Fprintf(stdout, "simulated selected-route-weights capacity=%d global uniform expert slots; all recorded events\n", *capacity)
+		for _, row := range receipt.Rows {
+			fmt.Fprintf(stdout, "%s hits=%d misses=%d hit_rate=%.4f\n", row.Policy, row.Hits, row.Misses, row.HitRate)
+		}
+	}
+	return 0
 }

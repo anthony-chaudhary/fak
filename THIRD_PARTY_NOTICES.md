@@ -285,9 +285,13 @@ https://github.com/PKU-SEC-Lab/HybriMoE/blob/508a85b9a43dff37124370d8816e411e748
 
 Changed for Fak: the policies are reimplemented over the package's offline
 unit-group access stream and its deterministic tie-break (`groupLess`), not over
-a torch tensor store or the upstream ring. HybriMoE's `TopP(s)` routing score is
-not carried by a routed-expert trace, so the offline arm substitutes an access
-indicator (1.0); `alpha` defaults to 0.5. No upstream storage, scheduler,
+a torch tensor store or the upstream ring. The optional `CachePolicyStream.Scores` and `fak expert-trace policy` use selected
+route weights emitted by Fak's router. These are selected expert weights, not
+HybriMoE's full-distribution top-p scores. Fak decays all tracked scores once per flattened
+expert access, whereas upstream updates one layer's selected scores together.
+An omitted score array preserves the prior access-indicator (1.0) experiment;
+`alpha` remains 0.5. The CLI requires scores and labels its capacity as global
+uniform expert slots. No serving eviction policy is changed. No upstream storage, scheduler,
 kernel or test fixture is copied.
 
 The HybriMoE Apache-2.0 license follows:
