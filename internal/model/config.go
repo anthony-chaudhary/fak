@@ -1,10 +1,12 @@
 package model
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -996,29 +998,77 @@ func (c Config) activationName() string {
 }
 
 func (c Config) archFamilyKey() string {
+	var buf [128]byte
+	if key, ok := c.appendArchFamilyKey(buf[:0]); ok {
+		return string(key)
+	}
+	return c.archFamilyKeyUnicode()
+}
+
+// archFamilyHas reports strings.Contains(c.archFamilyKey(), sub) without allocating:
+// the family predicates run several times per decode step.
+func (c Config) archFamilyHas(sub string) bool {
+	var buf [128]byte
+	key, ok := c.appendArchFamilyKey(buf[:0])
+	if !ok {
+		return strings.Contains(c.archFamilyKeyUnicode(), sub)
+	}
+	return bytes.Contains(key, []byte(sub))
+}
+
+// appendArchFamilyKey is the ASCII fast path of archFamilyKey; ok=false defers
+// non-ASCII input to the Unicode-aware lowercasing.
+func (c Config) appendArchFamilyKey(dst []byte) ([]byte, bool) {
+	add := func(s string) bool {
+		for i := 0; i < len(s); i++ {
+			ch := s[i]
+			switch {
+			case ch >= utf8.RuneSelf:
+				return false
+			case ch == '_' || ch == '-' || ch == ' ':
+			case 'A' <= ch && ch <= 'Z':
+				dst = append(dst, ch+('a'-'A'))
+			default:
+				dst = append(dst, ch)
+			}
+		}
+		return true
+	}
+	if !add(c.ModelType) {
+		return nil, false
+	}
+	for _, arch := range c.Architectures {
+		if !add(arch) {
+			return nil, false
+		}
+	}
+	return dst, true
+}
+
+var archFamilyKeyStrip = strings.NewReplacer("_", "", "-", "", " ", "")
+
+func (c Config) archFamilyKeyUnicode() string {
 	var b strings.Builder
 	b.WriteString(c.ModelType)
 	for _, arch := range c.Architectures {
 		b.WriteByte(' ')
 		b.WriteString(arch)
 	}
-	key := strings.ToLower(b.String())
-	r := strings.NewReplacer("_", "", "-", "", " ", "")
-	return r.Replace(key)
+	return archFamilyKeyStrip.Replace(strings.ToLower(b.String()))
 }
 
 func (c Config) isGPTNeoX() bool {
-	return strings.Contains(c.archFamilyKey(), "gptneox")
+	return c.archFamilyHas("gptneox")
 }
 
 func (c Config) isGPTOSS() bool {
-	return strings.Contains(c.archFamilyKey(), "gptoss")
+	return c.archFamilyHas("gptoss")
 }
 
 // IsNanbeige reports whether this config declares a Nanbeige-family architecture
 // (model_type "nanbeige" or architecture contains "nanbeige").
 func (c Config) IsNanbeige() bool {
-	return strings.EqualFold(c.ModelType, "nanbeige") || strings.Contains(c.archFamilyKey(), "nanbeige")
+	return strings.EqualFold(c.ModelType, "nanbeige") || c.archFamilyHas("nanbeige")
 }
 
 func (c Config) isNanbeige() bool {
@@ -1052,7 +1102,7 @@ func (e *UnsupportedNanbeigeVariantError) Error() string {
 // GLM MoE FFN. The GLM-MoE-DSA cacheless path is handled by the DSA-specific
 // MLA/indexer branch; reusable KV/index cache support remains a separate gate.
 func (c Config) isGLM() bool {
-	return strings.Contains(c.archFamilyKey(), "glm")
+	return c.archFamilyHas("glm")
 }
 
 // isGLMMoeDsa reports the GLM-5.2 architecture specifically: model_type
@@ -1064,7 +1114,7 @@ func (c Config) isGLM() bool {
 // witnesses for the GLM DSA path; eviction/invalidation for reusable DSA index
 // cache entries remains a separate gate.
 func (c Config) isGLMMoeDsa() bool {
-	return c.isGLM() && strings.Contains(c.archFamilyKey(), "dsa")
+	return c.isGLM() && c.archFamilyHas("dsa")
 }
 
 // NumMTPLayers returns the declared depth of this checkpoint's Multi-Token-Prediction
@@ -1227,7 +1277,7 @@ func (c Config) HostCompletePrefixSnapshotSupported() bool {
 // substring is unambiguous. Used to gate MiniMax-specific load behavior (the
 // multimodal vision tower + MTP head tensor skip) and the MSA sparse-attention axis.
 func (c Config) isMiniMax() bool {
-	return strings.Contains(c.archFamilyKey(), "minimax")
+	return c.archFamilyHas("minimax")
 }
 
 // isMiniMaxSparseAttn reports the MiniMax-M3 architecture specifically: a MiniMax
@@ -1241,7 +1291,7 @@ func (c Config) isMiniMaxSparseAttn() bool {
 	if !c.isMiniMax() {
 		return false
 	}
-	if strings.Contains(c.archFamilyKey(), "m3") {
+	if c.archFamilyHas("m3") {
 		return true
 	}
 	for _, t := range c.LayerTypes {

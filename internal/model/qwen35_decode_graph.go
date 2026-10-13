@@ -122,6 +122,9 @@ func (s *Session) observeQwen35MetalExecutionSnapshot(snapshot metalgemm.Executi
 }
 
 func (s *Session) recordQwen35LayerGraph(l int, linear bool) {
+	if s.qwen35DecodeGraph == nil {
+		return
+	}
 	kind := "full-attention"
 	if linear {
 		kind = "linear-attention"
