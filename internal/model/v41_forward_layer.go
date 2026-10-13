@@ -733,7 +733,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	// When the union fits the layer cache the two paths are equivalent (the cache
 	// served the repeats either way); the single-token path keeps the historical
 	// token-major stream byte-for-byte.
-	routedByToken := make([][]float32, seq)
+	var routedByToken [][]float32
 	if seq > 1 && !v41ForceTokenMajor {
 		// #13511: thread the session's optional device gate/up callback into the
 		// grouped (expert-major) contraction too, so a multi-token prefill offers
@@ -741,10 +741,12 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// (#13358) instead of unconditionally running the host SwiGLU. A nil
 		// callback (Model.Forward, or no device backend) keeps the grouped path
 		// byte-for-byte.
-		if err := m.v41ContractRoutedGrouped(l, ffnInputs, perTokenPicks, scratch, cfg, routedByToken, st); err != nil {
+		routedByToken, err = m.v41ContractRoutedGroupedFresh(l, ffnInputs, perTokenPicks, scratch, cfg, st)
+		if err != nil {
 			return err
 		}
 	} else {
+		routedByToken = make([][]float32, seq)
 		// The multi-token token-major arm (test-forced, or a panel that the
 		// grouped path did not take) contracts each pick through the row-parallel
 		// twin; the seq == 1 decode fallback through this same arm keeps the

@@ -157,6 +157,24 @@ var v41TestLayerCacheBudgetOverride int64
 // attribution is unchanged in bucket counts. Any materialization error aborts
 // before the weighted replay, so a partial panel never reaches `out`.
 func (m *Model) v41ContractRoutedGrouped(l int, xnByToken [][]float32, perTokenPicks [][]routePick, scratch *v41ProjScratch, cfg Config, out [][]float32, st *v41ForwardState) error {
+	// Preserve direct callers' eager output initialization, including partial
+	// output and short-table panic behavior on errors.
+	return m.v41ContractRoutedGroupedInto(l, xnByToken, perTokenPicks, scratch, cfg, out, st, false)
+}
+
+// v41ContractRoutedGroupedFresh owns its exact-length output table and exposes
+// it only on success. No callback or observer receives this table. Full-mode
+// replay replaces each row with the existing sum result, so an eager H-wide
+// zero row would be dead storage. Reduced mode still needs its zero accumulator.
+func (m *Model) v41ContractRoutedGroupedFresh(l int, xnByToken [][]float32, perTokenPicks [][]routePick, scratch *v41ProjScratch, cfg Config, st *v41ForwardState) ([][]float32, error) {
+	out := make([][]float32, len(perTokenPicks))
+	if err := m.v41ContractRoutedGroupedInto(l, xnByToken, perTokenPicks, scratch, cfg, out, st, true); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (m *Model) v41ContractRoutedGroupedInto(l int, xnByToken [][]float32, perTokenPicks [][]routePick, scratch *v41ProjScratch, cfg Config, out [][]float32, st *v41ForwardState, freshOutput bool) error {
 	H, I := cfg.HiddenSize, cfg.MoEIntermediateSize
 	full, err := v41ForwardGeometry(cfg)
 	if err != nil {
@@ -165,8 +183,12 @@ func (m *Model) v41ContractRoutedGrouped(l int, xnByToken [][]float32, perTokenP
 	groups := v41PlanExpertGroups(perTokenPicks)
 	// The caller's normalized rows are shared with routing and the shared
 	// expert; neither host nor selected device normalization is repeated here.
-	for t := range perTokenPicks {
-		out[t] = make([]float32, H)
+	// Nonpositive widths retain their original allocation/error precedence;
+	// full attention geometry alone does not validate the hidden width.
+	if !freshOutput || !full || H <= 0 {
+		for t := range perTokenPicks {
+			out[t] = make([]float32, H)
+		}
 	}
 	// For full V4.1 these rows already include their pick weight and are replayed
 	// by ascending expert ID. The legacy reduced path retains unweighted rows.
