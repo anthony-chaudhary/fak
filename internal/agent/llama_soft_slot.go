@@ -18,11 +18,11 @@ import (
 //
 // The hard pin (id_slot = crc32(shared prefix) % slots) restored prefix reuse but serialized
 // every same-prefix turn onto one slot and cost 3x throughput (llama_slot_affinity.go). The
-// soft choice pins only to an IDLE slot: a conversation's next turn goes back to the slot
-// that holds its KV when that slot is free, a new conversation takes the least recently used
-// idle slot (so it does not evict a live conversation's KV), and when every slot is busy no
-// id_slot is sent and llama-server's own choice applies. A busy slot is never named, so no
-// turn queues behind another.
+// default soft choice pins only to an IDLE slot: a conversation's next turn goes back to
+// the slot that holds its KV when that slot is free, and a new conversation takes the least
+// recently used idle slot. When every slot is busy no id_slot is sent and llama-server's
+// own choice applies. The opt-in wait policy can name
+// a busy owned slot; both policies report replacing another slot owner as stolen.
 //
 // Idle is read from a background snapshot of llama-server's GET /slots (is_processing) plus
 // this process's own in-flight pins, which cover the window before llama-server marks a
@@ -41,9 +41,10 @@ const (
 )
 
 // Soft slot policies. LRU moves a conversation whose own slot is busy to the least recently
-// used idle slot. Wait never moves a known conversation: it pins its own slot even when busy,
-// and llama-server hands a freed slot to a task pinned to it first. On strix2 (6 agents, 4
-// slots, private llama-server) LRU's moves cut warm-turn reuse from 99.3% to 82.8%.
+// used idle slot. Wait pins a known conversation's listed, unreserved slot even when busy;
+// a new conversation prefers an unowned idle slot, then steals the least recently used
+// owned idle slot. llama-server hands a freed slot to a task pinned to it first. On strix2
+// (6 agents, 4 slots, private llama-server) LRU's moves cut warm-turn reuse from 99.3% to 82.8%.
 const (
 	SoftSlotPolicyLRU  = "lru"
 	SoftSlotPolicyWait = "wait"
@@ -62,20 +63,22 @@ func ValidateSoftSlotPolicy(policy string) error {
 const (
 	SoftSlotSticky      = "sticky"      // the conversation's own slot was idle and was pinned
 	SoftSlotWaited      = "waited"      // policy wait: the conversation's own slot was busy and was pinned anyway
-	SoftSlotAssigned    = "assigned"    // new (or displaced) conversation pinned to the LRU idle slot
+	SoftSlotAssigned    = "assigned"    // pinned without replacing another recorded slot owner
+	SoftSlotStolen      = "stolen"      // pinned to an idle slot previously owned by another conversation
 	SoftSlotBusy        = "busy"        // no idle slot; id_slot omitted, upstream chooses
 	SoftSlotUnavailable = "unavailable" // no fresh /slots snapshot; id_slot omitted
 )
 
 // LlamaSoftSlotOutcomes lists the outcome vocabulary in render order.
 func LlamaSoftSlotOutcomes() []string {
-	return []string{SoftSlotSticky, SoftSlotWaited, SoftSlotAssigned, SoftSlotBusy, SoftSlotUnavailable}
+	return []string{SoftSlotSticky, SoftSlotWaited, SoftSlotAssigned, SoftSlotStolen, SoftSlotBusy, SoftSlotUnavailable}
 }
 
 var llamaSoftSlotCounts = map[string]*atomic.Uint64{
 	SoftSlotSticky:      {},
 	SoftSlotWaited:      {},
 	SoftSlotAssigned:    {},
+	SoftSlotStolen:      {},
 	SoftSlotBusy:        {},
 	SoftSlotUnavailable: {},
 }
@@ -279,15 +282,26 @@ func (st *llamaSoftSlots) pick(base, apiKey, policy string, messages []Message, 
 	slot := -1
 	c, had := st.convs[key]
 	owned := had && st.slotOwner[c.slot] == key
+	_, present := busy[c.slot]
 	switch {
 	case owned && idle(c.slot):
 		slot, outcome = c.slot, SoftSlotSticky
-	case owned && policy == SoftSlotPolicyWait && st.reserved[c.slot] == nil:
+	case owned && present && policy == SoftSlotPolicyWait && st.reserved[c.slot] == nil:
 		slot, outcome = c.slot, SoftSlotWaited
 	default:
 		for _, id := range ids {
 			if !idle(id) {
 				continue
+			}
+			if slot >= 0 && policy == SoftSlotPolicyWait {
+				_, candidateOwned := st.slotOwner[id]
+				_, selectedOwned := st.slotOwner[slot]
+				if candidateOwned != selectedOwned {
+					if !candidateOwned {
+						slot = id
+					}
+					continue
+				}
 			}
 			if slot < 0 || st.slotUsed[id].Before(st.slotUsed[slot]) {
 				slot = id
@@ -300,6 +314,7 @@ func (st *llamaSoftSlots) pick(base, apiKey, policy string, messages []Message, 
 	}
 	if prev, owned := st.slotOwner[slot]; owned && prev != key {
 		delete(st.convs, prev)
+		outcome = SoftSlotStolen
 	}
 	st.slotOwner[slot] = key
 	st.slotUsed[slot] = now
@@ -365,7 +380,7 @@ func (st *llamaSoftSlots) trimLocked() {
 	delete(st.convs, oldest)
 }
 
-// withLlamaSoftSlot adds id_slot for an opted-in planner when soft choice picks an idle
+// withLlamaSoftSlot adds id_slot for an opted-in planner when soft choice picks a
 // slot. It returns extra unchanged (and a nil release) otherwise, and never overrides an
 // id_slot the operator set through ExtraBody.
 func (p *HTTPPlanner) withLlamaSoftSlot(extra json.RawMessage, messages []Message) (json.RawMessage, *llamaSoftSlotLease) {
