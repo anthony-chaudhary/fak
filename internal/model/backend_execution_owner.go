@@ -7,8 +7,9 @@ import (
 )
 
 // backendExecutionScope is one already-acquired recording-domain lease. Only
-// private owned bodies consult it. Public entrypoints ALWAYS acquire the owner,
-// including Close; a concurrent caller can never borrow another call's scope.
+// private owned bodies consult it. Public entrypoints acquire the owner before
+// backend work; an already-detached PrefixSnapshot.Close is a terminal no-op.
+// A concurrent caller can never borrow another call's scope.
 // A Session remains exclusive to its executing caller, as before this seam.
 type backendExecutionScope struct {
 	owner    *sync.Mutex

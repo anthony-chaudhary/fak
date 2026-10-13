@@ -316,29 +316,92 @@ func (r *ReplicaDispatch) Complete(ctx context.Context, messages []agent.Message
 }
 
 func (r *ReplicaDispatch) completeReserved(ctx context.Context, route reservedPlannerReplica, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (comp *agent.Completion, err error) {
+	if len(r.replicas) > 1 {
+		var cancel context.CancelFunc
+		ctx, cancel = agent.WithSerialRetryBudget(ctx)
+		defer cancel()
+	}
 	defer func() { route.finish(ctx, comp, err, false) }()
 	tried := make(map[string]struct{}, len(r.replicas))
+	var previous error
 	for {
-		comp, err = route.replica.Planner.Complete(ctx, messages, tools, opts...)
+		callCtx := agent.WithReplicaFailover(ctx, r.hasUntriedReplica(route, tried))
+		comp, err = route.replica.Planner.Complete(callCtx, messages, tools, opts...)
+		if err == agent.ErrSerialRetryBudgetExhausted && previous != nil {
+			err = errors.Join(err, previous)
+		}
+		agent.RecordSerialReplicaError(ctx, err)
 		if err == nil {
 			return comp, nil
 		}
-		if route.reservation == nil || !replicaFallbackAllowed(ctx, err) {
+		if !replicaFallbackAllowed(ctx, err) || (route.reservation == nil && !agent.SerialReplicaFallbackAllowed(err)) {
 			return nil, err
 		}
 		tried[route.replica.Name] = struct{}{}
-		next, retargetErr := r.retargetReserved(route.reservation, route.decode, route.prefix, tried)
+		retargetErr := r.retargetRoute(&route, tried, opts)
 		if retargetErr != nil {
+			if errors.Is(retargetErr, ErrReplicaDispatchEmpty) {
+				return nil, err
+			}
 			if errors.Is(retargetErr, ErrNoWorkerForModel) {
 				return nil, retargetErr
 			}
 			return nil, fmt.Errorf("%w: every admissible worker failed: %w", ErrNoHealthyWorker, err)
 		}
+		previous = err
+	}
+}
+
+func (r *ReplicaDispatch) hasUntriedReplica(route reservedPlannerReplica, tried map[string]struct{}) bool {
+	var admissible map[string]struct{}
+	if membership := r.liveMembership(); membership != nil {
+		candidates, err := membership.CandidatesForModel(r.model)
+		if err != nil {
+			return false
+		}
+		admissible = make(map[string]struct{}, len(candidates))
+		for _, candidate := range candidates {
+			if route.reservation == nil || candidate.Engine == route.reservation.Engine() {
+				admissible[candidate.ID] = struct{}{}
+			}
+		}
+	}
+	for _, replica := range r.replicas {
+		if replica.Name == route.replica.Name {
+			continue
+		}
+		if _, excluded := tried[replica.Name]; excluded {
+			continue
+		}
+		if admissible != nil {
+			if _, allowed := admissible[replica.Name]; !allowed {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func (r *ReplicaDispatch) retargetRoute(route *reservedPlannerReplica, tried map[string]struct{}, opts []agent.SampleOpt) error {
+	if route.reservation == nil {
+		// Static decode bookings must leave the failed replica before a fresh
+		// booking is made. The caller's deferred finish sees the replacement.
+		route.Release()
+		next, err := r.reserveWithDecode(route.prefix, tried, decodeFootprintRouteRequest{ExpectedOutputTokens: sampleMaxTokens(opts)})
+		if err == nil {
+			*route = next
+		}
+		return err
+	}
+	next, err := r.retargetReserved(route.reservation, route.decode, route.prefix, tried)
+	if err == nil {
 		route.replica = next
 		if decision, ok := route.currentDecodeDecision(); ok {
 			route.decodeDecision = decision
 		}
 	}
+	return err
 }
 
 func replicaFallbackAllowed(ctx context.Context, err error) bool {
@@ -351,7 +414,13 @@ func replicaFallbackAllowed(ctx context.Context, err error) bool {
 	if IsHaltException(err) {
 		return false
 	}
-	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
+	var ceiling *agent.RetryCeilingError
+	var interrupted *agent.RetryInterruptedError
+	if errors.As(err, &ceiling) || errors.As(err, &interrupted) {
+		return false
+	}
+	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) &&
+		!errors.Is(err, agent.ErrSerialRetryBudgetExhausted)
 }
 
 func (r *ReplicaDispatch) StreamingSupported() bool {
@@ -372,8 +441,14 @@ func (r *ReplicaDispatch) CompleteStream(ctx context.Context, sink agent.StreamS
 	if err != nil {
 		return nil, err
 	}
+	if len(r.replicas) > 1 {
+		var cancel context.CancelFunc
+		ctx, cancel = agent.WithSerialRetryBudget(ctx)
+		defer cancel()
+	}
 	defer func() { route.finish(ctx, comp, err, true) }()
 	tried := make(map[string]struct{}, len(r.replicas))
+	var previous error
 	// emitted counts content fragments already handed to the caller's sink. Once a
 	// single fragment has crossed it, the client holds part of an answer and the
 	// turn can NOT be retargeted — a replay against another replica would duplicate
@@ -381,10 +456,11 @@ func (r *ReplicaDispatch) CompleteStream(ctx context.Context, sink agent.StreamS
 	// is still clean, exactly as the buffered path can retry a turn that wrote
 	// nothing. A backend 4xx (405/404/408/429) is returned by the upstream BEFORE
 	// any body fragment, so the common failure shape stays retargetable.
-	emitted := false
+	var emitted atomic.Bool
+	ctx = agent.WithSerialStreamBoundary(ctx, func() { emitted.Store(true) })
 	guarded := func(delta string) error {
 		if delta != "" {
-			emitted = true
+			emitted.Store(true)
 		}
 		if sink == nil {
 			return nil
@@ -397,29 +473,31 @@ func (r *ReplicaDispatch) CompleteStream(ctx context.Context, sink agent.StreamS
 		if !ok || !sp.StreamingSupported() {
 			return nil, agent.ErrStreamingUnsupported
 		}
-		comp, err = sp.CompleteStream(ctx, guarded, messages, tools, opts...)
+		callCtx := agent.WithReplicaFailover(ctx, r.hasUntriedReplica(route, tried))
+		comp, err = sp.CompleteStream(callCtx, guarded, messages, tools, opts...)
+		if err == agent.ErrSerialRetryBudgetExhausted && previous != nil {
+			err = errors.Join(err, previous)
+		}
+		agent.RecordSerialReplicaError(ctx, err)
 		if err == nil {
 			return comp, nil
 		}
-		// A retarget is legal only when nothing was emitted (no partial answer to
-		// duplicate) and the reservation can select a fresh replica. This mirrors
-		// completeReserved's `route.reservation == nil || !replicaFallbackAllowed`
-		// guard; the emitted check is the streaming-only addition.
-		if emitted || route.reservation == nil || !replicaFallbackAllowed(ctx, err) {
+		// Static and reserved routes share the irreversible emission boundary.
+		if emitted.Load() || !replicaFallbackAllowed(ctx, err) || (route.reservation == nil && !agent.SerialReplicaFallbackAllowed(err)) {
 			return comp, err
 		}
 		tried[route.replica.Name] = struct{}{}
-		next, retargetErr := r.retargetReserved(route.reservation, route.decode, route.prefix, tried)
+		retargetErr := r.retargetRoute(&route, tried, opts)
 		if retargetErr != nil {
+			if errors.Is(retargetErr, ErrReplicaDispatchEmpty) {
+				return nil, err
+			}
 			if errors.Is(retargetErr, ErrNoWorkerForModel) {
 				return nil, retargetErr
 			}
 			return nil, fmt.Errorf("%w: every admissible worker failed: %w", ErrNoHealthyWorker, err)
 		}
-		route.replica = next
-		if decision, ok := route.currentDecodeDecision(); ok {
-			route.decodeDecision = decision
-		}
+		previous = err
 	}
 }
 
@@ -471,7 +549,26 @@ func (r *ReplicaDispatch) reserveOnEngineWithDecode(prefix []string, skip map[st
 			}
 		}
 		if len(skip) > 0 {
-			return reservedPlannerReplica{replica: candidates[0], prefix: prefix}, nil
+			if r.policy != nil {
+				if chosen, ok := r.policy.Pick(candidates, prefix, nil); ok {
+					for _, candidate := range candidates {
+						if candidate.Name == chosen.Name {
+							return reservedPlannerReplica{replica: candidate, prefix: prefix}, nil
+						}
+					}
+				}
+			}
+			eligible := make(map[string]int, len(candidates))
+			for _, candidate := range candidates {
+				eligible[candidate.Name] = 0
+			}
+			winner, _ := r.keyedCandidate(eligible, prefix)
+			for _, candidate := range candidates {
+				if candidate.Name == winner {
+					return reservedPlannerReplica{replica: candidate, prefix: prefix}, nil
+				}
+			}
+			return reservedPlannerReplica{}, ErrReplicaDispatchEmpty
 		}
 		repl, err := r.pick(prefix)
 		return reservedPlannerReplica{replica: repl, prefix: prefix}, err
