@@ -636,6 +636,72 @@ func TestV41ExpertGroupsRoutedIDPanels(t *testing.T) {
 	}
 }
 
+// TestV41ExpertGroupsRoutedIDPanelSingletonTail keeps a trailing row inside a
+// legal panel rather than declining after earlier rows have been dispatched.
+// Explicit picks make the per-expert group size deterministic; this is a
+// cpu-ref software witness, not hardware or performance qualification.
+// fak-test:runtime medium est=5s lane=default
+func TestV41ExpertGroupsRoutedIDPanelSingletonTail(t *testing.T) {
+	t.Setenv(v41RoutedIDEnv, "1")
+	for _, tc := range []struct {
+		name  string
+		rows  int
+		picks []int
+	}{
+		{"one_full_panel_plus_one", 9, []int{7, 2}},
+		{"two_full_panels_plus_one", 17, []int{8, 7, 2}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := v41PinnedSlateFixture(t, false)
+			b := newV41ExpertPanelRecorder()
+			b.poisonReadback = true
+			s, err := m.NewBackendSessionChecked(b)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			rowSession, err := m.NewBackendSessionChecked(newV41RoutedLayerTestBackend())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rowSession.Close()
+
+			inputs := make([][]float32, tc.rows)
+			picks := make([][]routePick, tc.rows)
+			for token := range inputs {
+				inputs[token] = make([]float32, m.Cfg.HiddenSize)
+				for lane := range inputs[token] {
+					inputs[token][lane] = float32((token+lane)%13-6) / 16
+				}
+				picks[token] = []routePick{{expert: 0, weight: float32(token+1) / 32}}
+			}
+			got, want := make([][]float32, tc.rows), make([][]float32, tc.rows)
+			if err := m.v41ContractRoutedGrouped(0, inputs, picks, &v41ProjScratch{}, m.Cfg, got, s.v41State()); err != nil {
+				t.Fatalf("panel contraction with %d rows: %v", tc.rows, err)
+			}
+			if err := m.v41ContractRoutedGrouped(0, inputs, picks, &v41ProjScratch{}, m.Cfg, want, rowSession.v41State()); err != nil {
+				t.Fatalf("per-row contraction: %v", err)
+			}
+			if len(b.panelPicks) != len(tc.picks) || b.panels != len(tc.picks) {
+				t.Fatalf("panel sizes=%v completed=%d, want %v", b.panelPicks, b.panels, tc.picks)
+			}
+			for i, size := range tc.picks {
+				if b.panelPicks[i] != size {
+					t.Fatalf("panel sizes=%v, want %v", b.panelPicks, tc.picks)
+				}
+			}
+			if s.BackendSessionClosed() || b.poisons != len(tc.picks)-1 {
+				t.Fatalf("closed=%v readback reuses=%d, want open session and %d reuses", s.BackendSessionClosed(), b.poisons, len(tc.picks)-1)
+			}
+			for token := range want {
+				if !v41SameBits(got[token], want[token]) {
+					t.Fatalf("token %d: panel repartition changed the weighted BF16 result", token)
+				}
+			}
+		})
+	}
+}
+
 // TestV41ExpertGroupsRoutedIDPanelFailureDoesNotReplay pins the selected-work
 // boundary: once the panel has dispatched, a deferred numeric verdict closes
 // the session and returns the typed failure. It must never retry rows through

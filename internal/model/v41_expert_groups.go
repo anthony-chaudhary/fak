@@ -190,8 +190,13 @@ func (m *Model) v41ContractRoutedGrouped(l int, xnByToken [][]float32, perTokenP
 		)
 		if full && st != nil && st.callbackOwner != nil {
 			panelHandled := false
-			for first := 0; first < len(g.Rows); first += compute.V41RoutedIDMaxPicks {
+			for first := 0; first < len(g.Rows); {
 				last := min(first+compute.V41RoutedIDMaxPicks, len(g.Rows))
+				// Panels require at least two rows. Leave a pair for the tail
+				// rather than dispatching a full panel followed by a singleton.
+				if len(g.Rows)-last == 1 {
+					last--
+				}
 				inputs := make([][]float32, last-first)
 				weights := make([]float32, last-first)
 				for p, row := range g.Rows[first:last] {
@@ -212,6 +217,7 @@ func (m *Model) v41ContractRoutedGrouped(l int, xnByToken [][]float32, perTokenP
 						unweighted[row.Token][row.Slot] = rows[p]
 						m.v41NoteExpertContraction()
 					}
+					first = last
 				case v41RoutedExpertError:
 					if cause == nil {
 						cause = v41ExpertOperationErr(l, "gate/up", errV41ExpertResult)
