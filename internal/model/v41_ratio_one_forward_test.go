@@ -82,6 +82,7 @@ func TestV41RatioOneForwardParity(t *testing.T) {
 					return nil, v41ProjectionDeclined, nil
 				}
 				st.sharedAttention = func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
+					r.kv, r.rowKV = v41TestAttentionFlatKV(r), nil
 					at := pos[layer]
 					pos[layer]++
 					width := min(at+1, cfg.Window[layer])

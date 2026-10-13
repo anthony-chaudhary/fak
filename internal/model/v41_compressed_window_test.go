@@ -75,6 +75,7 @@ func TestV41CompressedWindowComposition(t *testing.T) {
 			return make([]float32, len(q)), windowRow(layer, pos), nil
 		}
 		st.sharedAttention = func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
+			r.kv, r.rowKV = v41TestAttentionFlatKV(r), nil
 			pos := attendPos[layer]
 			attendPos[layer]++
 			contractions++

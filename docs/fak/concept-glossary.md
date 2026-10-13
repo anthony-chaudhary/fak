@@ -993,3 +993,17 @@ FakExpertRingPoolFractionEnv names FAK_EXPERT_RING_POOL_FRACTION. For auto activ
 Header-only aggregate validation report from GGUF metadata and tensor descriptors, optional HF-config parity, loader key/tensor census and host-kernel availability; it reads no tensor payload.
 
 **Distinct from:** Unlike serveexecutionpolicy, this diagnoses header configuration and coverage gaps; it neither authorizes execution nor proves runtime, device or model readiness.
+
+
+### V41SharedAttentionPlain (V4.1 softmax mode)
+
+V41SharedAttentionPlain is the V4.1 shared-attention native/shader ABI mode value 0. It selects a negative-infinity softmax maximum seed.
+
+**Distinct from:** V41SharedAttentionCompressed selects negative MaxFloat32 and skips when that sentinel survives. Plain can consume selected compressed-history rows; it does not mean uncompressed storage. Unlike softmaxAttentionScores, this is a numerical mode selector, not the score-normalization function. Unlike v41SharedAttentionRows, the mode does not describe borrowed row storage.
+
+
+### v41SharedAttentionRows (borrowed combined KV descriptor)
+
+v41SharedAttentionRows is an internal model request descriptor containing borrowed window and compressed row slices, logically concatenated in that order, valid only during the synchronous attention callback. It does not own or cache the float data.
+
+**Distinct from:** Unlike V41SharedAttentionPlain, a numerical softmax mode selector, this type describes input row storage. Admission validates every original row before selection; resident staging materializes only missing upload runs and no-row-log fallback packs selected rows.

@@ -102,7 +102,7 @@ func TestV41SharedAttentionSession(t *testing.T) {
 				if layer != wantLayer {
 					t.Fatalf("request layer=%d want=%d", layer, wantLayer)
 				}
-				q, kv, sink := append([]float32(nil), request.q...), append([]float32(nil), request.kv...), append([]float32(nil), request.sink...)
+				q, kv, sink := append([]float32(nil), request.q...), v41TestAttentionFlatKV(request), append([]float32(nil), request.sink...)
 				idx := append([]int32(nil), request.idx...)
 				values := make([][]float32, len(request.values))
 				for i := range values {
@@ -130,7 +130,7 @@ func TestV41SharedAttentionSession(t *testing.T) {
 					if !reflect.DeepEqual(request.idx, wantIdx) {
 						t.Fatalf("combined positional list=%v want=%v", request.idx, wantIdx)
 					}
-					for _, value := range request.kv[window*m.Cfg.HeadDim:] {
+					for _, value := range kv[window*m.Cfg.HeadDim:] {
 						if math.Float32bits(value)&0xffff != 0 {
 							t.Fatal("published compressed row lost its BF16 boundary")
 						}
@@ -155,7 +155,7 @@ func TestV41SharedAttentionSession(t *testing.T) {
 					return nil, err
 				}
 				v41SharedAttentionSessionBits(t, "Q input", request.q, q)
-				v41SharedAttentionSessionBits(t, "KV input", request.kv, kv)
+				v41SharedAttentionSessionBits(t, "KV input", v41TestAttentionFlatKV(request), kv)
 				v41SharedAttentionSessionBits(t, "sink input", request.sink, sink)
 				if !reflect.DeepEqual(request.idx, idx) {
 					t.Fatal("selected contraction mutated caller indices")
