@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/strictjson"
 )
 
 // hermesToolCallRe matches a Hermes/Qwen-style tool call emitted as plain TEXT
@@ -406,11 +407,34 @@ func extractDelimited(re *regexp.Regexp) func(string) []liftedBlock {
 // on success, appends a liftedBlock covering the whole match span [start,end); a non-liftable
 // payload is left untouched. Shared by the delimited and fenced single-object extractors.
 func appendLiftedSpan(blocks []liftedBlock, payload string, start, end int) []liftedBlock {
-	call, ok := liftPayload(payload)
+	call, ok := liftClosedPayload(payload)
 	if !ok {
 		return blocks
 	}
 	return append(blocks, liftedBlock{start: start, end: end, call: call})
+}
+
+func liftClosedPayload(payload string) (ToolCall, bool) {
+	if call, ok := liftPayload(payload); ok {
+		return call, true
+	}
+	repaired, ok := strictjson.RepairClosedJSON([]byte(payload))
+	if !ok {
+		return ToolCall{}, false
+	}
+	return liftPayload(string(repaired))
+}
+
+func decodeClosedPayloadArray(payload string) ([]json.RawMessage, bool) {
+	var raws []json.RawMessage
+	if err := json.Unmarshal([]byte(payload), &raws); err == nil {
+		return raws, true
+	}
+	repaired, ok := strictjson.RepairClosedJSON([]byte(payload))
+	if !ok || json.Unmarshal(repaired, &raws) != nil {
+		return nil, false
+	}
+	return raws, true
 }
 
 // extractArrayDelimited builds an extractor for a dialect whose regex captures a
@@ -427,8 +451,8 @@ func extractArrayDelimited(re *regexp.Regexp) func(string) []liftedBlock {
 		if isPrecededByExampleProse(content[:loc[0]]) {
 			return nil
 		}
-		var raws []json.RawMessage
-		if err := json.Unmarshal([]byte(content[loc[2]:loc[3]]), &raws); err != nil {
+		raws, ok := decodeClosedPayloadArray(content[loc[2]:loc[3]])
+		if !ok {
 			return nil
 		}
 		return arrayLiftedBlocks(raws, loc[0], loc[1])
@@ -505,8 +529,8 @@ func extractFenced(content string) []liftedBlock {
 		}
 		body := strings.TrimSpace(content[loc[4]:loc[5]])
 		if strings.HasPrefix(body, "[") {
-			var raws []json.RawMessage
-			if err := json.Unmarshal([]byte(body), &raws); err != nil {
+			raws, ok := decodeClosedPayloadArray(body)
+			if !ok {
 				continue
 			}
 			blocks = append(blocks, arrayLiftedBlocks(raws, loc[0], loc[1])...)

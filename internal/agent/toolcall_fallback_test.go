@@ -816,6 +816,75 @@ func TestLiftTextToolCallsOfferedBoundary(t *testing.T) {
 }
 
 // fak-test:runtime fast est=100ms lane=default
+func TestLiftTextToolCallsRepairsOnlySafeSlips(t *testing.T) {
+	read := offeredTestNames("Read")
+
+	for _, tc := range []struct {
+		name    string
+		content string
+		args    string
+	}{
+		{
+			name:    "closed hermes object",
+			content: `<tool_call>{"name":"Read","arguments":{"path":"go.mod",},}</tool_call>`,
+			args:    `{"path":"go.mod"}`,
+		},
+		{
+			name:    "closed fenced object",
+			content: "```tool_call\n{\"name\":\"Read\",\"arguments\":{\"path\":\"go.mod\",},}\n```",
+			args:    `{"path":"go.mod"}`,
+		},
+		{
+			name:    "closed fenced array",
+			content: "```json\n[{\"name\":\"Read\",\"arguments\":{\"path\":\"go.mod\",},},]\n```",
+			args:    `{"path":"go.mod"}`,
+		},
+		{
+			name:    "closed mistral array",
+			content: `[TOOL_CALLS][{"name":"Read","arguments":{"path":"go.mod",},},]`,
+			args:    `{"path":"go.mod"}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := LiftTextToolCalls(Message{Content: tc.content}, read)
+			if len(got.ToolCalls) != 1 || got.ToolCalls[0].Function.Name != "Read" || got.ToolCalls[0].Function.Arguments != tc.args || got.Content != "" {
+				t.Fatalf("safe slip not lifted exactly: %+v", got)
+			}
+		})
+	}
+
+	valid := `<tool_call>{"name":"Read","arguments": { "path": "a,} \"quoted\"" }}</tool_call>`
+	got := LiftTextToolCalls(Message{Content: valid}, read)
+	if len(got.ToolCalls) != 1 || got.ToolCalls[0].Function.Arguments != `{ "path": "a,} \"quoted\"" }` {
+		t.Fatalf("valid arguments changed: %+v", got)
+	}
+
+	for _, content := range []string{
+		`<tool_call>{"name":"Bash","arguments":{"command":"echo ok",},}</tool_call>`,
+		"```json\n[{\"name\":\"Read\",\"arguments\":{},},{\"name\":\"Bash\",\"arguments\":{},},]\n```",
+	} {
+		got := LiftTextToolCalls(Message{Content: content}, read)
+		if len(got.ToolCalls) != 0 || got.Content != content {
+			t.Fatalf("unoffered repaired block changed: %+v", got)
+		}
+	}
+
+	for _, content := range []string{
+		`<tool_call>{"name":"Read","arguments":{"path":"cut`,
+		`<tool_call>{"name":"Read","arguments":{"path":"cut},}</tool_call>`,
+		`<tool_call>{"name":"Read","arguments":{,}}</tool_call>`,
+		"```json\n{\"name\":\"Read\",\"arguments\":{\"path\":\"go.mod\",},}",
+		`<tool_call>{"name":"Read","arguments":{"path":[1,2},},}</tool_call>`,
+		`{"name":"Read","arguments":{"path":"go.mod",},}`,
+	} {
+		got := LiftTextToolCalls(Message{Content: content}, read)
+		if len(got.ToolCalls) != 0 || got.Content != content {
+			t.Fatalf("truncated or ambiguous block lifted: %+v", got)
+		}
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
 func TestOfferedToolsSnapshotAndEmptyExtension(t *testing.T) {
 	tools := []ToolDef{{Function: ToolDefFunction{Name: "Read"}}}
 	ctx := WithTextToolExtension(context.Background(), func(name string) bool { return name == "restore" })
