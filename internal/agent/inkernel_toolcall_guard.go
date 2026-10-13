@@ -50,6 +50,7 @@ func normalizeInKernelToolCalls(comp *Completion, offered OfferedTools, choice j
 	if comp.ToolCallsDroppedReason != abi.ReasonUnknownTool && inKernelEffectiveToolName(choice, tools) != "" {
 		comp = enforceForcedToolChoice(comp, choice, tools, messages)
 	}
+	normalizeIntegerSchemaArguments(comp, tools)
 	markInKernelDroppedToolCalls(comp, offered)
 	return comp
 }
