@@ -462,13 +462,9 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 		return routed, nil
 	}
 	work.finish = func(routed []float32) error {
-		shared, err := m.v41SharedExpertForStep(l, ffnX, cfg, scratch)
+		moe, err := m.v41SharedExpertAddForStep(l, ffnX, routed, cfg, routeCfg, scratch)
 		if err != nil {
 			return err
-		}
-		moe, err := v41SharedExpertAddWith(l, routed, shared, routeCfg, scratch.sharedAdd)
-		if err != nil {
-			return v41StageErr(v41StageMoE, l, err)
 		}
 		var next [][]float32
 		if resident != nil {
@@ -972,13 +968,9 @@ func (m *Model) prepareV41LayerStepRoleFinish(l, pos int, x []float32, streams [
 		return routed, nil
 	}
 	work.finish = func(routed []float32) error {
-		shared, err := m.v41SharedExpertForStep(l, ffnX, cfg, scratch)
+		moe, err := m.v41SharedExpertAddForStep(l, ffnX, routed, cfg, routeCfg, scratch)
 		if err != nil {
 			return err
-		}
-		moe, err := v41SharedExpertAddWith(l, routed, shared, routeCfg, scratch.sharedAdd)
-		if err != nil {
-			return v41StageErr(v41StageMoE, l, err)
 		}
 		if resident != nil {
 			if err := resident.finishLayer(l, [][]float32{moe}); err != nil {

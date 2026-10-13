@@ -1,11 +1,15 @@
 package model
 
-// v41SharedExpertForStep reuses the qualified resident scalar shared expert
-// inside one lane's already-owned continuation. It retains all four checked
-// publication kernels and observes their ordered records at one final read.
-// No state or tensor survives the call. A decline uses the original callbacks,
-// and a selected error is returned without replay or another lane's retirement.
-func (m *Model) v41SharedExpertForStep(layer int, input []float32, cfg Config, scratch *v41ProjScratch) ([]float32, error) {
+import (
+	"errors"
+	"fmt"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
+)
+
+// Only the lane's already-owned, matching callback binding may retain shared
+// intermediates. A decline happens before any resident work is selected.
+func (m *Model) v41SharedExpertStepOwner(cfg Config, scratch *v41ProjScratch) *Session {
 	publish := scratch.gatherOps.bf16PublishFunc()
 	if scratch.gatherOps != nil && scratch.denseProjection != nil && scratch.sharedActivation != nil && publish != nil {
 		s := scratch.gatherOps.owner
@@ -17,13 +21,71 @@ func (m *Model) v41SharedExpertForStep(layer int, input []float32, cfg Config, s
 			if err == nil && full && scope != nil && scope.live && scope.owner != nil {
 				owner := backendExecutionOwner(s.Backend)
 				if owner == nil || owner == scope.owner {
-					output, selected, cause := s.v41DeferredSharedExpertChain(layer)(input)
-					if selected || cause != nil {
-						return output, cause
-					}
+					return s
 				}
 			}
 		}
 	}
-	return m.v41SharedExpertSwiGLUWithPublish(layer, input, cfg, scratch.denseProjection, scratch.sharedActivation, publish)
+	return nil
+}
+
+// v41SharedExpertForStep retains the shared-only control: four existing
+// publication kernels and their ordered records at one final row read.
+func (m *Model) v41SharedExpertForStep(layer int, input []float32, cfg Config, scratch *v41ProjScratch) ([]float32, error) {
+	if s := m.v41SharedExpertStepOwner(cfg, scratch); s != nil {
+		output, selected, cause := s.v41DeferredSharedExpertChain(layer)(input)
+		if selected || cause != nil {
+			return output, cause
+		}
+	}
+	return m.v41SharedExpertSwiGLUWithPublish(layer, input, cfg, scratch.denseProjection, scratch.sharedActivation, scratch.gatherOps.bf16PublishFunc())
+}
+
+// v41SharedExpertAddForStep consumes the live shared output before its cleanup,
+// retaining the original routed-then-shared F32 addition. Only the sum crosses
+// the host boundary. Neither a tensor nor an owner scope escapes this call.
+func (m *Model) v41SharedExpertAddForStep(layer int, input, routed []float32, cfg Config, routeCfg v41RouterConfig, scratch *v41ProjScratch) ([]float32, error) {
+	if s := m.v41SharedExpertStepOwner(cfg, scratch); s != nil && scratch.sharedAdd != nil {
+		consume := func(shared compute.Tensor, own func(compute.Tensor) bool, stage *string) (compute.Tensor, error) {
+			if routeCfg.SharedCount < 1 {
+				return compute.Tensor{}, &v4RouteError{Field: "v41_shared", Reason: fmt.Sprintf("want >=1, got %d", routeCfg.SharedCount)}
+			}
+			if len(routed) == 0 {
+				return compute.Tensor{}, &v4RouteError{Field: "shared_add", Reason: "empty operand"}
+			}
+			if len(routed) != cfg.HiddenSize {
+				return compute.Tensor{}, &v4RouteError{Field: "shared_add", Reason: fmt.Sprintf("width %d does not match %d", len(routed), cfg.HiddenSize)}
+			}
+			for i, v := range routed {
+				if !finite32(v) {
+					return compute.Tensor{}, &v4RouteError{Field: "routed", Reason: fmt.Sprintf("non-finite value at %d", i)}
+				}
+			}
+			*stage = "routed upload"
+			acc := s.uploadHostF32([]int{len(routed)}, append([]float32(nil), routed...), compute.MemoryActivation, "V4.1 shared-add accumulator")
+			if !own(acc) || acc.Dtype != compute.F32 || acc.Layout != compute.RowMajor || acc.Quant != nil || len(acc.Shape) != 1 || acc.Shape[0] != len(routed) {
+				return compute.Tensor{}, errV41DeviceSumResult
+			}
+			*stage = "shared-add"
+			s.Backend.AddInPlace(acc, shared)
+			return acc, nil
+		}
+		output, selected, cause := s.v41SharedExpertChain(layer, true, consume)(input)
+		if selected || cause != nil {
+			var operation *BackendForwardOperationError
+			if errors.As(cause, &operation) && operation.Path == "v41-shared-add" {
+				cause = v41StageErr(v41StageMoE, layer, cause)
+			}
+			return output, cause
+		}
+	}
+	shared, err := m.v41SharedExpertForStep(layer, input, cfg, scratch)
+	if err != nil {
+		return nil, err
+	}
+	output, err := v41SharedExpertAddWith(layer, routed, shared, routeCfg, scratch.sharedAdd)
+	if err != nil {
+		return nil, v41StageErr(v41StageMoE, layer, err)
+	}
+	return output, nil
 }

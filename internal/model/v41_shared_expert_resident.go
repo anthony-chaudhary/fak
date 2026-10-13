@@ -43,21 +43,26 @@ func (s *Session) v41ColdSharedWeight(name string, out, in int) (v41ColdSharedWe
 
 type v41ColdSharedResidentFunc func([]float32) ([]float32, bool, error)
 
+// A decode-only consumer borrows the final published row before cleanup. It
+// registers every new temporary with own before issuing dependent work. The
+// consumer returns an unrounded F32 sum; the chain owns its checked readback.
+type v41SharedResidentConsumer func(shared compute.Tensor, own func(compute.Tensor) bool, stage *string) (compute.Tensor, error)
+
 // The layer takes this read-only snapshot once, after its other projections.
 // Only this chain stages weights inside the subsequent shared-expert loop.
 // Appending its lazy resolutions protects future tokens without rescanning the
 // whole model cache for every row or temporary tensor.
 func (s *Session) v41ColdSharedExpertChain(layer int) v41ColdSharedResidentFunc {
-	return s.v41SharedExpertChain(layer, false)
+	return s.v41SharedExpertChain(layer, false, nil)
 }
 
 // The owner-bound decode tail selects one packed read for the four existing
 // status records. Cold prefill retains its original four-fence control.
 func (s *Session) v41DeferredSharedExpertChain(layer int) v41ColdSharedResidentFunc {
-	return s.v41SharedExpertChain(layer, true)
+	return s.v41SharedExpertChain(layer, true, nil)
 }
 
-func (s *Session) v41SharedExpertChain(layer int, deferredChecks bool) v41ColdSharedResidentFunc {
+func (s *Session) v41SharedExpertChain(layer int, deferredChecks bool, consume v41SharedResidentConsumer) v41ColdSharedResidentFunc {
 	protected := map[compute.Buffer]bool{}
 	if s != nil {
 		for _, weight := range s.halW {
@@ -67,7 +72,7 @@ func (s *Session) v41SharedExpertChain(layer int, deferredChecks bool) v41ColdSh
 		}
 	}
 	return func(input []float32) ([]float32, bool, error) {
-		return s.v41SharedExpertResident(layer, input, protected, deferredChecks)
+		return s.v41SharedExpertResident(layer, input, protected, deferredChecks, consume)
 	}
 }
 
@@ -77,10 +82,10 @@ func (s *Session) v41SharedExpertChain(layer int, deferredChecks bool) v41ColdSh
 // asymmetric clamp, BF16 sites and reduction order are unchanged. The cold layer
 // owns selection; no callback binding or persistent activation is added here.
 func (s *Session) v41ColdSharedExpertResident(layer int, input []float32, protected map[compute.Buffer]bool) (result []float32, selected bool, cause error) {
-	return s.v41SharedExpertResident(layer, input, protected, false)
+	return s.v41SharedExpertResident(layer, input, protected, false, nil)
 }
 
-func (s *Session) v41SharedExpertResident(layer int, input []float32, protected map[compute.Buffer]bool, deferredChecks bool) (result []float32, selected bool, cause error) {
+func (s *Session) v41SharedExpertResident(layer int, input []float32, protected map[compute.Buffer]bool, deferredChecks bool, consume v41SharedResidentConsumer) (result []float32, selected bool, cause error) {
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
 		!backendHasComparableIdentity(s.Backend) || s.M.lora != nil || s.M.prism != nil {
 		return nil, false, nil
@@ -119,9 +124,13 @@ func (s *Session) v41SharedExpertResident(layer int, input []float32, protected 
 	s.ensureOpenBackendSession()
 	selected = true
 	stage, leaf, site := "weight upload", leaves[0], ""
+	sharedAdd := false
 	retire := func(err error) error {
 		if s.halFailure == nil {
 			path := "v41-shared-expert-resident"
+			if sharedAdd {
+				path = "v41-shared-add"
+			}
 			if site != "" {
 				path = "v41-bf16-publish"
 				err = &V41BF16BoundaryOperationError{Layer: layer, Site: site, Cause: err}
@@ -134,7 +143,7 @@ func (s *Session) v41SharedExpertResident(layer int, input []float32, protected 
 				s.closeBackendOwned()
 			}()
 		}
-		if site != "" {
+		if site != "" || sharedAdd {
 			return s.halFailure
 		}
 		return v41ProjectionOperationErr(layer, leaf, s.halFailure)
@@ -144,6 +153,15 @@ func (s *Session) v41SharedExpertResident(layer int, input []float32, protected 
 			if err, ok := r.(error); ok {
 				var backend *compute.BackendError
 				var closed *BackendForwardOperationError
+				if sharedAdd && errors.As(err, &closed) {
+					// Match the selected add callback's typed-panic contract.
+					// An earlier drained publication already replaced this panic.
+					if s.halFailure == nil {
+						s.halFailure = err
+					}
+					retire(err)
+					panic(r)
+				}
 				if errors.As(err, &backend) || errors.As(err, &closed) {
 					result, cause = nil, retire(err)
 					return
@@ -230,6 +248,9 @@ func (s *Session) v41SharedExpertResident(layer int, input []float32, protected 
 			rows = []compute.Tensor{final}
 		}
 		stage = "checked publication readback"
+		if sharedAdd {
+			stage = "readback"
+		}
 		verdicts, values, err := deferred.V41ReadDeferred(statuses, rows)
 		if err != nil {
 			return err
@@ -243,11 +264,22 @@ func (s *Session) v41SharedExpertResident(layer int, input []float32, protected 
 		for i, verdict := range verdicts {
 			if verdict != nil {
 				leaf, site, stage = pending[i].leaf, pending[i].site, "checked publication"
+				sharedAdd = false
 				return verdict
 			}
 		}
 		if len(rows) != 0 {
-			if len(values[0]) != H || !v41BF16Widened(values[0]) {
+			if sharedAdd {
+				invalid := &v4RouteError{Field: "shared_add", Reason: "non-finite or malformed device result"}
+				if len(values[0]) != H {
+					return invalid
+				}
+				for _, v := range values[0] {
+					if !finite32(v) {
+						return invalid
+					}
+				}
+			} else if len(values[0]) != H || !v41BF16Widened(values[0]) {
 				return errV41BF16BoundaryResult
 			}
 			result = append([]float32(nil), values[0]...)
@@ -295,7 +327,7 @@ func (s *Session) v41SharedExpertResident(layer int, input []float32, protected 
 		}
 		if deferredChecks {
 			pending = append(pending, publicationRecord{status: status, leaf: leaf, site: name})
-			if final {
+			if final && consume == nil {
 				if err := drain(p); err != nil {
 					return compute.Tensor{}, err
 				}
@@ -393,8 +425,24 @@ func (s *Session) v41SharedExpertResident(layer int, input []float32, protected 
 	if err != nil {
 		return nil, true, err
 	}
-	if _, err = project(2, intermediate); err != nil {
+	shared, err := project(2, intermediate)
+	if err != nil {
 		return nil, true, err
+	}
+	if consume != nil {
+		// Keep the four publication records pending while the borrowed shared
+		// row is consumed. Failed consumers use the same pre-cleanup drain.
+		sharedAdd, leaf, site, stage = true, "", "", "payload"
+		sum, err := consume(shared, own, &stage)
+		if err != nil {
+			return nil, true, err
+		}
+		if !valid(sum, H) {
+			return nil, true, errV41DeviceSumResult
+		}
+		if err := drain(sum); err != nil {
+			return nil, true, err
+		}
 	}
 	return result, true, nil
 }
