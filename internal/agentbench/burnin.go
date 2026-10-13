@@ -113,10 +113,15 @@ func runBurnInController(ctx context.Context, cfg burnInControllerConfig) (burnI
 	r.NormalAdmission = admission
 	started := cfg.Now()
 	cutoff := started.Add(cfg.Plan.Deadline)
+	// Map the injected observation clock to one real execution deadline. Epochs
+	// and cleanup share this bound; cleanup cannot renew grace already consumed.
+	executionDeadline := time.Now().Add(cfg.Plan.Deadline + cfg.Plan.DrainGrace)
+	epochCtx, cancelEpochs := context.WithDeadline(ctx, executionDeadline)
+	defer cancelEpochs()
 	for ordinal := 1; cfg.Now().Before(cutoff); ordinal++ {
 		epochStarted := cfg.Now()
 		spec := burnInSpec(cfg.Plan, ordinal)
-		epoch := cfg.RunEpoch(ctx, spec, cutoff)
+		epoch := cfg.RunEpoch(epochCtx, spec, cutoff)
 		r.Epochs = append(r.Epochs, epoch)
 		r.SteadyRequests += epoch.SteadyRequests
 		r.ControlRequests += epoch.ControlRequests
@@ -145,14 +150,22 @@ func runBurnInController(ctx context.Context, cfg burnInControllerConfig) (burnI
 			r.Errors = append(r.Errors, fmt.Sprintf("epoch %d made no clock progress", ordinal))
 			break
 		}
-		if err := ctx.Err(); err != nil {
+		if err := epochCtx.Err(); err != nil {
 			r.Errors = append(r.Errors, err.Error())
 			break
 		}
 	}
 	r.FullDurationObserved = !cfg.Now().Before(cutoff)
-	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.Plan.DrainGrace)
-	drainErr := cfg.Drain(drainCtx, cfg.Plan.DrainGrace)
+	remaining := min(cfg.Plan.DrainGrace, max(time.Duration(0), cutoff.Add(cfg.Plan.DrainGrace).Sub(cfg.Now())))
+	drainDeadline := time.Now().Add(remaining)
+	if executionDeadline.Before(drainDeadline) {
+		drainDeadline = executionDeadline
+	}
+	drainCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), drainDeadline)
+	drainErr := cfg.Drain(drainCtx, remaining)
+	if drainErr == nil {
+		drainErr = drainCtx.Err()
+	}
 	cancel()
 	r.DrainSucceeded = drainErr == nil
 	if drainErr != nil {

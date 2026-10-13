@@ -145,6 +145,7 @@ func TestServeKeyProofRefusalBranches(t *testing.T) {
 		"head":                       {http.MethodHead, KeyProofPath, valid, testKey, http.StatusMethodNotAllowed, http.MethodGet},
 		"method beats missing key":   {http.MethodPut, KeyProofPath, valid, "", http.StatusMethodNotAllowed, http.MethodGet},
 		"empty key":                  {http.MethodGet, KeyProofPath, valid, "", http.StatusServiceUnavailable, ""},
+		"key beats no challenge":     {http.MethodGet, KeyProofPath, "", "", http.StatusServiceUnavailable, ""},
 		"missing challenge":          {http.MethodGet, KeyProofPath, "", testKey, http.StatusBadRequest, ""},
 		"invalid challenge encoding": {http.MethodGet, KeyProofPath, "%%%", testKey, http.StatusBadRequest, ""},
 		"short challenge":            {http.MethodGet, KeyProofPath, base64.StdEncoding.EncodeToString(testNonce(0x44, 16)), testKey, http.StatusBadRequest, ""},
